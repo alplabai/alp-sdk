@@ -1,0 +1,12 @@
+{
+    "configurations": [
+        {
+            "name": "",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "configurationProvider": "cmsis-csolution"
+        }
+    ],
+    "version": 4
+}
