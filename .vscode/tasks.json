@@ -17,16 +17,26 @@
             "type": "shell",
             "command": [
                 "cbuild ${command:cmsis-csolution.getSolutionPath} --clean;",
-                "rm -f ./blinky/*.cbuild.yml;",
-                "rm -f ./hello/*.cbuild.yml;",
-                "rm -f ./hello_rtt/*.cbuild.yml;"
+                "rm -f ./examples/blinky/*.cbuild.yml;",
+                "rm -f ./examples/hello/*.cbuild.yml;",
+                "rm -f ./examples/hello_rtt/*.cbuild.yml;",
+                "rm -f ./examples/alp_adc_example/*.cbuild.yml;",
+                "rm -f ./examples/alp_adc24_example/*.cbuild.yml;",
+                "rm -f ./examples/alp_gpio_example/*.cbuild.yml;",
+                "rm -f ./examples/alp_pwm_example/*.cbuild.yml;",
+                "rm -f ./examples/alp_spi_example/*.cbuild.yml;"
             ],
             "windows": {
                 "command": [
                     "cbuild ${command:cmsis-csolution.getSolutionPath} --clean;",
-                    "rm -Force ./blinky/*.cbuild.yml;",
-                    "rm -Force ./hello/*.cbuild.yml;",
-                    "rm -Force ./hello_rtt/*.cbuild.yml;"
+                    "rm -Force ./examples/blinky/*.cbuild.yml;",
+                    "rm -Force ./examples/hello/*.cbuild.yml;",
+                    "rm -Force ./examples/hello_rtt/*.cbuild.yml;",
+                    "rm -f ./examples/alp_adc_example/*.cbuild.yml;",
+                    "rm -f ./examples/alp_adc24_example/*.cbuild.yml;",
+                    "rm -f ./examples/alp_gpio_example/*.cbuild.yml;",
+                    "rm -f ./examples/alp_pwm_example/*.cbuild.yml;",
+                    "rm -f ./examples/alp_spi_example/*.cbuild.yml;"
                 ]
             },
             "problemMatcher": []
@@ -49,14 +59,14 @@
             "command": [
                     "outputElfFilename='${command:cmsis-csolution.getBinaryFile}';",
                     "cp \"${outputElfFilename/%???/bin}\" '${config:alif.setools.root}/build/images/alif-img.bin';",
-                    "cp './.alif/${command:cmsis-csolution.getProcessorName}_cfg.json' '${config:alif.setools.root}/alif-img.json';"
+                    "cp './vendor/alif/config/${command:cmsis-csolution.getProcessorName}_cfg.json' '${config:alif.setools.root}/alif-img.json';"
                 ],
             "windows": {
                 "command": [
                     "$outputElfFilename='${command:cmsis-csolution.getBinaryFile}';",
                     "$outputBinFilename=${outputElfFilename}.Substring(0, $outputElfFilename.Length -3) + 'bin';",
                     "cp \"$outputBinFilename\" '${config:alif.setools.root}/build/images/alif-img.bin';",
-                    "cp './.alif/${command:cmsis-csolution.getProcessorName}_cfg.json' '${config:alif.setools.root}/alif-img.json';"
+                    "cp './vendor/alif/config/${command:cmsis-csolution.getProcessorName}_cfg.json' '${config:alif.setools.root}/alif-img.json';"
                 ]
             },
             "problemMatcher": []

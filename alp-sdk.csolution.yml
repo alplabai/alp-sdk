@@ -39,6 +39,6 @@ solution:
     - _UNICODE
 
   projects:
-    - project: examples/blinky/blinky.cproject.yml
-    - project: examples/hello/hello.cproject.yml
-    - project: examples/hello_rtt/hello_rtt.cproject.yml
+    - project: examples/alp_adc_example/alp_adc_example.cproject.yaml
+    - project: examples/alp_adc24_example/alp_adc24_example.cproject.yaml
+    - project: examples/alp_spi_example/alp_spi_example.cproject.yaml

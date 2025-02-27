@@ -6,4 +6,26 @@
     "cmake.configureOnOpen": false,
 
     "cortex-debug.variableUseNaturalFormat": false,
+    "cmsis-csolution.actions": [
+        {
+            "path": "alp-sdk.csolution.yml",
+            "target": "HE",
+            "projects": [
+                {
+                    "path": "examples/blinky/blinky.cproject.yml",
+                    "config": {
+                        "run": "Program with Security Toolkit",
+                        "debug": "Alif Ensemble Debug (Cortex-Debug)"
+                    }
+                },
+                {
+                    "path": "examples/alp_adc_example/alp_adc_example.cproject.yml",
+                    "config": {
+                        "run": "Program with Security Toolkit",
+                        "debug": "Alif Ensemble Debug (Cortex-Debug)"
+                    }
+                }
+            ]
+        }
+    ],
 }
