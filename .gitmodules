@@ -1,6 +1,6 @@
-[submodule "libs/board"]
-	path = libs/board
+[submodule "vendor/alif/libs/board"]
+	path = vendor/alif/libs/board
 	url = https://github.com/alifsemi/alif_boardlib.git
-[submodule "libs/common_app_utils"]
-	path = libs/common_app_utils
+[submodule "vendor/alif/libs/common_app_utils"]
+	path = vendor/alif/libs/common_app_utils
 	url = https://github.com/alifsemi/alif_common-app-utils.git
