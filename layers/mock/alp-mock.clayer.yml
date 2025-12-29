@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Open-CMSIS-Pack/devtools/tools/projmgr/2.6.0/tools/projmgr/schemas/clayer.schema.json
+
+# ALP SDK - Platform-Independent HAL Layer
+# This layer provides unified HAL API with VFT pattern for multi-platform support
+
+layer:
+  description: ALP SDK Hardware Abstraction Layer with Mock Driver
+  
+  # ALP SDK Core + Mock Driver (always included)
+  groups:
+    - group: ALP Core
+      files:
+        - file: ../../alp/src/core/alp_spi_core.c
+    
+    - group: ALP Mock Driver
+      files:
+        - file: ../../alp/src/drivers/mock/alp_spi_mock.c
+  
+  # Include paths
+  add-paths:
+    - ../../alp/include
+  
+  # Preprocessor defines
+  define:
+    - ALP_SDK_VERSION_MAJOR=0
+    - ALP_SDK_VERSION_MINOR=1
+    - ALP_SDK_VERSION_PATCH=0
+    - ALP_PLATFORM_MOCK=1

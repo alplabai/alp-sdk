@@ -1,0 +1,16 @@
+build-idx:
+  generated-by: csolution version 2.12.0
+  csolution: alp_spi_demo.csolution.yml
+  cbuild-run: out/alp_spi_demo+Alif-E7-DevKit.cbuild-run.yml
+  tmpdir: tmp
+  cprojects:
+    - cproject: alp_spi_demo.cproject.yml
+  cbuilds:
+    - cbuild: out/alp_spi_demo/Alif-E7-DevKit/Debug/alp_spi_demo.Debug+Alif-E7-DevKit.cbuild.yml
+      project: alp_spi_demo
+      configuration: .Debug+Alif-E7-DevKit
+      messages:
+        info:
+          - alp_spi_demo.cbuild-pack.yml - file is already up-to-date
+          - alp_spi_demo+Alif-E7-DevKit.cbuild-run.yml - file is already up-to-date
+          - alp_spi_demo.Debug+Alif-E7-DevKit.cbuild.yml - file is already up-to-date

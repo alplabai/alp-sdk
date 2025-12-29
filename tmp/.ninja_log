@@ -1,0 +1,26 @@
+# ninja log v6
+30	140	7884857174488489	alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-mkdir	efc421674e63ef8d
+30	140	7884857174488489	C:/repos/test/alp-sdk/tmp/alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-mkdir	efc421674e63ef8d
+141	238	7884857175383900	alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-download	3fd1c0225e54caba
+141	238	7884857175383900	C:/repos/test/alp-sdk/tmp/alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-download	3fd1c0225e54caba
+246	338	7884857176455962	alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-update	9afeb3e1db57ec47
+246	338	7884857176455962	C:/repos/test/alp-sdk/tmp/alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-update	9afeb3e1db57ec47
+338	430	7884857177296873	alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-patch	3a1b2bbdc8ed7fac
+338	430	7884857177296873	C:/repos/test/alp-sdk/tmp/alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-patch	3a1b2bbdc8ed7fac
+430	4404	7884857217078480	alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-configure	7432f9e6a749b628
+430	4404	7884857217078480	C:/repos/test/alp-sdk/tmp/alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-configure	7432f9e6a749b628
+4404	7535	7884857217182096	alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-build	d937baff469e7b90
+4404	7535	7884857217182096	C:/repos/test/alp-sdk/out/alp_spi_demo/Alif-E7-DevKit/Debug/alp_spi_demo.axf	d937baff469e7b90
+4404	7535	7884857217182096	C:/repos/test/alp-sdk/tmp/alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-build	d937baff469e7b90
+7546	7633	7884857249395363	alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-executes	6c9c5fa6517a1936
+7546	7633	7884857249395363	C:/repos/test/alp-sdk/tmp/alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-executes	6c9c5fa6517a1936
+7535	7777	7884857248525690	alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-database	b0f2162e125c581f
+7535	7777	7884857248525690	C:/repos/test/alp-sdk/tmp/alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-database	b0f2162e125c581f
+7777	7822	7884857250945739	alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-install	4e0e27c57cf87ffa
+7777	7822	7884857250945739	C:/repos/test/alp-sdk/tmp/alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-install	4e0e27c57cf87ffa
+7822	7894	7884857251977450	alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-test	895b890292192e9d
+7822	7894	7884857251977450	C:/repos/test/alp-sdk/tmp/alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-test	895b890292192e9d
+7894	7987	7884857252940872	CMakeFiles/alp_spi_demo.Debug+Alif-E7-DevKit-complete	7697c43e3e80829f
+7894	7987	7884857252940872	alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-done	7697c43e3e80829f
+7894	7987	7884857252940872	C:/repos/test/alp-sdk/tmp/CMakeFiles/alp_spi_demo.Debug+Alif-E7-DevKit-complete	7697c43e3e80829f
+7894	7987	7884857252940872	C:/repos/test/alp-sdk/tmp/alp_spi_demo.Debug+Alif-E7-DevKit/src/alp_spi_demo.Debug+Alif-E7-DevKit-stamp/alp_spi_demo.Debug+Alif-E7-DevKit-done	7697c43e3e80829f

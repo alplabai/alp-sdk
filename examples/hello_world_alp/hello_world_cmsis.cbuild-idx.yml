@@ -1,0 +1,15 @@
+build-idx:
+  generated-by: csolution version 2.12.0
+  cdefault: ${CMSIS_COMPILER_ROOT}/cdefault.yml
+  csolution: hello_world_cmsis.csolution.yml
+  tmpdir: tmp
+  cprojects:
+    - cproject: hello_world_cmsis.cproject.yml
+  cbuilds:
+    - cbuild: out/hello_world_cmsis/Alif-E8-DevKit/Debug/hello_world_cmsis.Debug+Alif-E8-DevKit.cbuild.yml
+      project: hello_world_cmsis
+      configuration: .Debug+Alif-E8-DevKit
+      messages:
+        info:
+          - hello_world_cmsis.cbuild-pack.yml - file is already up-to-date
+          - hello_world_cmsis.Debug+Alif-E8-DevKit.cbuild.yml - file generated successfully

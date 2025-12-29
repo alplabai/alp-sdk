@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Open-CMSIS-Pack/devtools/tools/projmgr/2.6.0/tools/projmgr/schemas/cdefault.schema.json
+
+default:
+  misc:
+    - C:
+        - -I$SolutionDir()$../../alp/include
+        - -I$SolutionDir()$../../alp/board
+        - -DBUILD_ALIF=1

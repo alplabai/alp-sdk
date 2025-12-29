@@ -1,0 +1,10 @@
+{
+    "recommendations": [
+        "ms-vscode.cpptools-extension-pack",
+        "ms-vscode.cmake-tools",
+        "twxs.cmake",
+        "arm.cmsis-csolution",
+        "arm.environment-manager",
+        "marus25.cortex-debug"
+    ]
+}

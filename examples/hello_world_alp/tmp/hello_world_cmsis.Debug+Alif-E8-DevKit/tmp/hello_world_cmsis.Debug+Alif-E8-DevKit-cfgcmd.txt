@@ -1,0 +1,1 @@
+cmd='C:/Users/ssa/.vcpkg/artifacts/2139c4c6/tools.kitware.cmake/3.31.5/bin/cmake.exe;-G;Ninja;-S;<SOURCE_DIR>;-B;<BINARY_DIR>;-DSOLUTION_ROOT=C:/repos/test/alp-sdk/examples/hello_world_cmsis;-DCMSIS_PACK_ROOT=C:/Users/ssa/AppData/Local/Arm/Packs;-DCMSIS_COMPILER_ROOT=C:/Users/ssa/.vcpkg/artifacts/2139c4c6/tools.open.cmsis.pack.cmsis.toolbox/2.12.0/etc'

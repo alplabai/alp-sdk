@@ -1,0 +1,73 @@
+# Build directories
+build/
+build_*/
+out/
+cmake-build-*/
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+.vs/
+.idea/
+*.code-workspace
+
+# Vendor SDKs (not stored in git - use scripts to download)
+# License restrictions prevent distribution of vendor files
+vendor/alif/sdk/
+vendor/renesas/fsp/
+vendor/stm32/cube/
+
+# Keep vendor README files
+!vendor/README.md
+!vendor/*/README.md
+
+# Compiled binaries
+*.exe
+*.out
+*.app
+*.elf
+*.bin
+*.hex
+
+# Libraries
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+
+# Object files
+*.o
+*.obj
+*.lo
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# Test results
+Testing/
+test_results/
+
+# Temporary files
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Python (if using test scripts)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
