@@ -1,6 +1,6 @@
 # 🚀 ALP SDK - Unified SDK for E1M
 
-**Platform-independent Hardware Abstraction Layer - Works without vendor SDK!**
+**Platform-independent Hardware Abstraction Layer**
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
@@ -10,7 +10,7 @@
 
 ## ✨ Features
 
-- ✅ **Mock Driver** - Compiles and runs without vendor SDK
+- ✅ **Mock Driver** - Unit tests run without vendor SDK
 - ✅ **VFT Pattern** - Platform switching at runtime
 - ✅ **CI/CD Ready** - Automatic testing with GitHub Actions
 - ✅ **Multi-Platform** - Alif, Mock (Renesas upcoming)
@@ -27,11 +27,11 @@ git clone https://github.com/alplabai/alp-sdk.git
 cd alp-sdk
 ```
 
-### 2️⃣ Download Vendor SDK (optional - only needed for Alif hardware)
+### 2️⃣ Download Vendor SDK (required for hardware deployment)
 
-**⚠️ Note:** This step is **optional**. The Mock driver works without any vendor SDK!
+**⚠️ Note:** For deploying to **E1M board** or **Alif hardware**, the vendor SDK is required.
 
-For **Alif hardware support**, we recommend installing the official CMSIS Pack instead of using the download scripts:
+We recommend installing the official CMSIS Pack instead of using the download scripts:
 
 **Option A: Install CMSIS Pack (Recommended)**
 ```bash
@@ -74,12 +74,12 @@ Click **"Install All"** when prompted.
 
 **Option B: Use Terminal**
 ```bash
-# Mock Driver (no vendor SDK needed)
+# Mock Driver (for unit tests and development)
 cmake -B build -DBUILD_MOCK=ON -DBUILD_EXAMPLES=ON
 cmake --build build
 ./build/bin/getting_started
 
-# Alif Driver (requires downloaded SDK)
+# Alif Driver (for hardware deployment)
 cmake -B build -DBUILD_ALIF=ON -DALIF_SDK_PATH=vendor/alif/sdk -DBUILD_EXAMPLES=ON
 cmake --build build
 # Flash to Alif E7 hardware and run
@@ -89,7 +89,7 @@ cmake --build build
 
 ## 🎯 Quick Start (Mock Driver - 30 seconds!)
 
-**No vendor SDK required - try it now!**
+**Test the API without hardware - unit tests run without vendor SDK!**
 
 ```bash
 # 1. Clone
@@ -116,10 +116,10 @@ cmake --build build
 ║         ALP SDK - Getting Started Example                 ║
 ║         Architecture: VFT Pattern + Mock Driver            ║
 ║                                                            ║
-║  🎯 This example runs WITHOUT any vendor SDK!             ║
+║  🎯 This example uses Mock driver for testing!            ║
 ╚════════════════════════════════════════════════════════════╝
 
-[MOCK SPI0] 🎉 Created (NO VENDOR SDK REQUIRED!)
+[MOCK SPI0] 🎉 Created (Mock Driver for Testing)
   - Platform: mock
   - Hardware: Simulated
 
@@ -138,7 +138,7 @@ cmake --build build
 ╔════════════════════════════════════════════════════════════╗
 ║                      ✅ SUCCESS!                           ║
 ║                                                            ║
-║  The ALP SDK API works perfectly WITHOUT vendor SDK!      ║
+║  The ALP SDK API works with Mock driver for testing!      ║
 ╚════════════════════════════════════════════════════════════╝
 ```
 
@@ -153,14 +153,14 @@ cmake --build build
 
 ### Board Switching Architecture
 
-All examples compile for **E7 hardware** but can deploy to either:
-- **Alif E7 DevKit Gen2** (default, `BOARD_ALIF_DEVKIT_VARIANT=4`)
-- **E1M Custom Board** (`BOARD_ALIF_DEVKIT_VARIANT=6`)
+All examples are configured for **E1M Custom Board** by default but can also deploy to:
+- **E1M Custom Board** (default, `BOARD_ALIF_DEVKIT_VARIANT=6`)
+- **Alif E7 DevKit Gen2** (`BOARD_ALIF_DEVKIT_VARIANT=4`)
 
-To switch board targets, edit [alp-sdk.csolution.yml](alp-sdk.csolution.yml#L13):
+To switch to E7 DevKit, edit [alp-sdk.csolution.yml](alp-sdk.csolution.yml#L13):
 ```yaml
 define:
-  - BOARD_ALIF_DEVKIT_VARIANT: 6  # Change from 4 to 6 for E1M
+  - BOARD_ALIF_DEVKIT_VARIANT: 4  # Change from 6 to 4 for E7 DevKit Gen2
 ```
 
 ### Available Examples
@@ -218,13 +218,13 @@ J-Link> g  # Go (run)
 
 ## 📚 API Example
 
-### Mock Driver Example (No Vendor SDK)
+### Mock Driver Example (For Unit Testing)
 
 ```c
 #include "alp_spi_vft.h"
 
 int main(void) {
-    // 1. Create Mock SPI handle (NO VENDOR SDK!)
+    // 1. Create Mock SPI handle (for testing)
     alp_spi_handle_t *spi = alp_spi_create_mock(0);
     
     // 2. Configure
@@ -247,33 +247,6 @@ int main(void) {
     return 0;
 }
 ```
-
-### CMSIS Examples (Alif E8 Hardware)
-
-All examples below use **ALP SDK abstraction layer** for platform portability.
-
-#### Blinky Example
-```bash
-cbuild alp-sdk.csolution.yml --context blinky_alp.Debug+Alif-E7-DevKit
-```
-
-Toggles Blue LED using ALP GPIO API (`alp_gpio_toggle()`). Supports both E7 DevKit and E1M boards via `BOARD_ALIF_DEVKIT_VARIANT`.
-
-#### Hello World Example  
-```bash
-cd examples/hello_world_alp
-cbuild ../../alp-sdk.csolution.yml --context hello_world_alp.Debug+Alif-E8-DevKit --packs --update-rte
-```
-
-Alternates Red/Green LEDs using ALP GPIO API.
-
-#### SPI Demo Example
-```bash
-cd examples/alp_spi_demo
-cbuild alp_spi_demo.csolution.yml --context alp_spi_demo.Debug+Alif-E7-DevKit --packs --update-rte
-```
-
-Full demonstration of ALP SPI, GPIO, and USART abstraction on Alif E7 DevKit.
 
 ---
 
@@ -339,8 +312,8 @@ cmake --build build
     │              │              │
 ┌───▼────┐  ┌─────▼──────┐  ┌───▼──────┐
 │ mock   │  │ alif       │  │ renesas  │
-│ (NO    │  │ (CMSIS)    │  │ (FSP)    │
-│ VENDOR)│  │            │  │ (coming) │
+│ (Test) │  │ (CMSIS)    │  │ (FSP)    │
+│        │  │            │  │ (coming) │
 └────────┘  └────────────┘  └──────────┘
 ```
 
@@ -355,7 +328,7 @@ alp-sdk/
 │       ├── core/          # Platform-independent dispatcher
 │       │   └── alp_spi_core.c
 │       └── drivers/
-│           ├── mock/      # 🎉 NO VENDOR SDK!
+│           ├── mock/      # 🧪 For unit testing
 │           ├── alif/      # Alif Ensemble
 │           └── renesas/   # Renesas RA
 │
@@ -373,6 +346,8 @@ alp-sdk/
 ---
 
 ## 🧪 Testing
+
+**Unit tests can run without vendor SDK using the Mock driver:**
 
 ```bash
 # Build with tests
@@ -396,7 +371,7 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 - **GitHub:** [alplabai/alp-sdk](https://github.com/alplabai/alp-sdk)
 - **Issues:** [GitHub Issues](https://github.com/alplabai/alp-sdk/issues)
-- **Email:** [info@alplab.ai](mailto:info@alplab.ai)
+- **Email:** [contact@alplab.ai](mailto:contact@alplab.ai)
 
 ---
 

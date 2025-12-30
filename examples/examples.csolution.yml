@@ -15,7 +15,7 @@ solution:
       board: Alif Semiconductor::DevKit-E7
       define:
         - CORE_M55_HE
-        - BOARD_ALIF_DEVKIT_VARIANT: 4 # E1M Custom Board (6) / Alif DevKit Gen2 (4)
+        - BOARD_ALIF_DEVKIT_VARIANT: 6 # E1M Custom Board (6) / Alif DevKit Gen2 (4)
       target-set:
         - set:
           images:
