@@ -66,7 +66,7 @@ Loopback verification: PASSED
 | [E1M-X V2N-M1](https://docs.alplab.ai/e1m/e1m-x-v2n-m1) | RZ/V2N + DeepX M1 | 25 TOPS | $179 | Available |
 | [Industrial Camera](https://docs.alplab.ai/e1m/industrial-camera) | RZ/V2N + DeepX M1 | 25 TOPS | $599 | Available |
 
-All modules use the standard **SODIMM 200-pin** form factor. [Compare modules](https://docs.alplab.ai/hardware/specifications).
+All modules use the **E1M open standard** form factor. [Compare modules](https://docs.alplab.ai/hardware/specifications).
 
 ---
 
