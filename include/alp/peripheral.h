@@ -31,6 +31,14 @@
 extern "C" {
 #endif
 
+/** Pixel format shared by the display and camera APIs. */
+typedef enum {
+    ALP_PIXFMT_MONO_VLSB = 0,   /**< 1 bpp, vertical bytes (SSD1306 native). */
+    ALP_PIXFMT_RGB565    = 1,
+    ALP_PIXFMT_RGB888    = 2,
+    ALP_PIXFMT_ARGB8888  = 3
+} alp_pixfmt_t;
+
 /** Status codes returned by ALP peripheral functions. */
 typedef enum {
     ALP_OK              = 0,

@@ -29,12 +29,8 @@ extern "C" {
 
 typedef struct alp_display alp_display_t;
 
-typedef enum {
-    ALP_PIXFMT_MONO_VLSB = 0,   /**< 1bpp, vertical bytes (SSD1306 native). */
-    ALP_PIXFMT_RGB565    = 1,
-    ALP_PIXFMT_RGB888    = 2,
-    ALP_PIXFMT_ARGB8888  = 3
-} alp_pixfmt_t;
+/* alp_pixfmt_t is defined in <alp/peripheral.h> so it can be
+ * shared with the camera surface without a forward dependency. */
 
 typedef struct {
     uint32_t display_id;    /**< Studio-resolved display instance. */

@@ -1,0 +1,53 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Overlay for the alp-sdk chips ztest under native_sim_64.
+ *
+ * Wires one emulated I2C bus (alp_i2c0) for the lsm6dso / ssd1306
+ * smoke tests, and an emulated GPIO controller backing two pins
+ * for the button_led helper.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/ {
+    aliases {
+        alp-i2c0  = &i2c0_emul;
+    };
+
+    /* native_sim's /soc has #address-cells=2, #size-cells=1. */
+    soc {
+        i2c0_emul: i2c@100 {
+            compatible = "zephyr,i2c-emul-controller";
+            status = "okay";
+            reg = <0 0x100 4>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+            clock-frequency = <I2C_BITRATE_STANDARD>;
+
+            /* Emul targets for the chip drivers under test.  These
+             * register no real behaviour — the smoke tests only exercise
+             * lifecycle, NULL handling, and parameter validation, which
+             * don't need the controller to actually transfer data. */
+        };
+    };
+
+    gpio_emul0: gpio_emul0 {
+        compatible = "zephyr,gpio-emul";
+        status = "okay";
+        gpio-controller;
+        rising-edge;
+        falling-edge;
+        #gpio-cells = <2>;
+        ngpios = <8>;
+    };
+
+    /* Two pins: index 0 = button (with pull-up), index 1 = LED. */
+    alp_pins: alp-pins {
+        compatible = "alp,pin-array";
+        gpios = <&gpio_emul0 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+                <&gpio_emul0 1 GPIO_ACTIVE_HIGH>;
+    };
+};
