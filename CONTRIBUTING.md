@@ -1,54 +1,62 @@
 # Contributing to ALP SDK
 
-Thank you for your interest in contributing to the ALP SDK! This document provides guidelines for contributing.
+Thanks for considering a contribution.  The ALP SDK is the unification
+software layer for ALP Lab's E1M edge AI modules; keeping it small,
+predictable, and OS-pivoted is the whole point.
 
-## How to Contribute
+## How to contribute
 
-### Reporting Bugs
+### Reporting bugs
 
-1. Check if the issue already exists in [GitHub Issues](https://github.com/alplabai/alp-sdk/issues)
-2. If not, [create a new issue](https://github.com/alplabai/alp-sdk/issues/new?template=bug_report.md) using the bug report template
-3. Include: steps to reproduce, expected vs actual behavior, module type, SDK version
+1. Check existing [issues](https://github.com/alpCaner/alp-sdk/issues).
+2. If new, file using the
+   [bug report template](https://github.com/alpCaner/alp-sdk/issues/new?template=bug_report.md).
+3. Include: target SoM, OS backend (`zephyr` / `baremetal` / `yocto`),
+   exact `west`/CMake invocation, expected vs. actual behaviour.
 
-### Requesting Features
+### Requesting features
 
-1. Check the [Feature Requests](https://community.alplab.ai/c/feature-requests/10) on the community forum
-2. [Create a GitHub issue](https://github.com/alplabai/alp-sdk/issues/new?template=feature_request.md) or post on the forum
-3. Describe the feature, your use case, and why it matters
+File a [feature request](https://github.com/alpCaner/alp-sdk/issues/new?template=feature_request.md)
+with the use case and the proposed public-API shape (header
+signatures), if you have one in mind.
 
-### Submitting Code
+### Submitting code
 
-1. Fork the repository
-2. Create a feature branch from `main`: `git checkout -b feature/my-feature`
-3. Make your changes following the code style below
-4. Add or update tests for your changes
-5. Ensure all tests pass: `cmake -B build -DBUILD_MOCK=ON -DBUILD_TESTS=ON && cmake --build build && cd build && ctest`
-6. Commit with a descriptive message
-7. Push to your fork and open a Pull Request
+1. Fork the repo and branch from `main`: `git checkout -b feature/my-feature`.
+2. Keep changes scoped to one library or one SoM at a time.
+3. Add or update tests under `tests/`.  Every public function must
+   have at least one Unity / ztest test.
+4. Run the build matrix locally before opening a PR:
+   ```bash
+   # Host smoke
+   cmake -B build -DALP_BUILD_TESTS=ON
+   cmake --build build
+   ctest --test-dir build --output-on-failure
+   ```
+   For Zephyr targets, `west build -b <board>` against your test app.
+5. Open a PR; CI runs the AEN-Zephyr, AEN-baremetal, and V2N-Yocto
+   matrices.
 
-### Code Style
+### Code style
 
-- Follow existing code conventions in the project
-- Use `alp_` prefix for all public API functions
-- Keep functions focused and well-documented
-- Add unit tests for new functionality using the Mock driver
+- Public headers are **C99-compatible** with Doxygen comments.
+- All public symbols use the `alp_` prefix.
+- Keep functions short.  When `src/<os>/<peripheral>.c` exceeds a few
+  hundred lines, split by peripheral, not by helper.
+- Vendor-specific code lives only in `vendors/<som>/`.  No `#ifdef
+  ALIF_*` in `include/alp/` or `src/common/`.
 
-## Development Setup
+### Adding a new SoM
 
-```bash
-git clone https://github.com/alplabai/alp-sdk.git
-cd alp-sdk
-cmake -B build -DBUILD_MOCK=ON -DBUILD_TESTS=ON -DBUILD_EXAMPLES=ON
-cmake --build build
-cd build && ctest --output-on-failure
-```
-
-## Getting Help
-
-- [Documentation](https://docs.alplab.ai)
-- [Community Forum](https://community.alplab.ai)
-- [GitHub Issues](https://github.com/alplabai/alp-sdk/issues)
+See [`docs/porting-new-som.md`](docs/porting-new-som.md).
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree your contributions are licensed under
+[Apache License 2.0](LICENSE), the SDK's license.
+
+## Getting help
+
+- [Documentation](https://docs.alplab.ai)
+- [Community forum](https://community.alplab.ai)
+- [GitHub Issues](https://github.com/alpCaner/alp-sdk/issues)

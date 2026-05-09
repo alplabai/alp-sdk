@@ -1,0 +1,85 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @file iot.h
+ * @brief ALP SDK IoT abstraction (Wi-Fi-station + MQTT in v0.1).
+ *
+ * Backends:
+ *   - Zephyr   : wraps net_*, MQTT client API.
+ *   - Yocto    : wraps the Linux network stack + Mosquitto/Paho.
+ *   - Baremetal: ALP_ERR_NOSUPPORT (no networking on E1M-AEN bare-metal v0.1).
+ */
+
+#ifndef ALP_IOT_H
+#define ALP_IOT_H
+
+#include <stdint.h>
+#include <stddef.h>
+#include "alp/peripheral.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ------------------------------------------------------------------ */
+/* Wi-Fi station                                                       */
+/* ------------------------------------------------------------------ */
+
+typedef struct alp_wifi alp_wifi_t;
+
+typedef struct {
+    const char *ssid;
+    const char *psk;        /**< NULL for open networks. */
+} alp_wifi_credentials_t;
+
+alp_wifi_t   *alp_wifi_open(void);
+alp_status_t  alp_wifi_connect(alp_wifi_t *w,
+                               const alp_wifi_credentials_t *creds,
+                               uint32_t timeout_ms);
+alp_status_t  alp_wifi_disconnect(alp_wifi_t *w);
+void          alp_wifi_close(alp_wifi_t *w);
+
+/* ------------------------------------------------------------------ */
+/* MQTT client                                                         */
+/* ------------------------------------------------------------------ */
+
+typedef struct alp_mqtt alp_mqtt_t;
+
+typedef struct {
+    const char *broker_uri;     /**< e.g. "mqtt://broker.local:1883" */
+    const char *client_id;
+    const char *username;       /**< NULL if unauth */
+    const char *password;
+    uint16_t    keepalive_s;
+    bool        clean_session;
+} alp_mqtt_config_t;
+
+typedef enum {
+    ALP_MQTT_QOS_0 = 0,
+    ALP_MQTT_QOS_1 = 1,
+    ALP_MQTT_QOS_2 = 2
+} alp_mqtt_qos_t;
+
+typedef void (*alp_mqtt_msg_cb_t)(const char *topic,
+                                  const uint8_t *payload, size_t len,
+                                  void *user);
+
+alp_mqtt_t   *alp_mqtt_open(const alp_mqtt_config_t *cfg);
+alp_status_t  alp_mqtt_connect(alp_mqtt_t *m, uint32_t timeout_ms);
+alp_status_t  alp_mqtt_publish(alp_mqtt_t *m, const char *topic,
+                               const uint8_t *payload, size_t len,
+                               alp_mqtt_qos_t qos, bool retain);
+alp_status_t  alp_mqtt_subscribe(alp_mqtt_t *m, const char *topic_filter,
+                                 alp_mqtt_qos_t qos,
+                                 alp_mqtt_msg_cb_t cb, void *user);
+alp_status_t  alp_mqtt_loop(alp_mqtt_t *m, uint32_t timeout_ms);
+void          alp_mqtt_close(alp_mqtt_t *m);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif  /* ALP_IOT_H */

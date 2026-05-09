@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+# ALP SDK Kconfig fragment exposed to Zephyr applications.
+
+config ALP_SDK
+	bool "ALP SDK"
+	help
+	  Enable the ALP SDK on Zephyr.  When set, the SDK's Zephyr
+	  backend is compiled and <alp/...> headers are added to the
+	  application include path.
+
+if ALP_SDK
+
+config ALP_SDK_MAX_I2C_HANDLES
+	int "Maximum concurrent alp_i2c_t handles"
+	default 4
+
+config ALP_SDK_MAX_SPI_HANDLES
+	int "Maximum concurrent alp_spi_t handles"
+	default 4
+
+config ALP_SDK_MAX_UART_HANDLES
+	int "Maximum concurrent alp_uart_t handles"
+	default 4
+
+config ALP_SDK_MAX_GPIO_HANDLES
+	int "Maximum concurrent alp_gpio_t handles"
+	default 16
+
+config ALP_SDK_HAS_LVGL
+	bool "Build <alp/gui.h> against LVGL"
+	default y if LVGL
+	default n
+	help
+	  Pulls upstream LVGL into the alp_gui_lvgl_attach() path.
+	  Requires CONFIG_LVGL=y.
+
+config ALP_SDK_HAS_CMSIS_DSP
+	bool "Build <alp/math.h> against CMSIS-DSP"
+	default y if CMSIS_DSP
+	default n
+	help
+	  Re-export arm_math.h via <alp/math.h>.  Requires the
+	  CMSIS-DSP module to be present in the Zephyr west manifest.
+
+endif # ALP_SDK

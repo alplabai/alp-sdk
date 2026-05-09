@@ -13,15 +13,22 @@ cmake-build-*/
 .idea/
 *.code-workspace
 
-# Vendor SDKs (not stored in git - use scripts to download)
-# License restrictions prevent distribution of vendor files
-vendor/alif/sdk/
-vendor/renesas/fsp/
-vendor/stm32/cube/
+# Vendor SDKs are pulled by west / cpackget — not stored in git.
+# Keep vendor README files; ignore everything else inside each wrapper.
+vendors/*/sdk/
+vendors/*/fsp/
+vendors/*/cube/
+!vendors/*/README.md
+!vendors/*/CMakeLists.txt
+!vendors/*/*.c
+!vendors/*/*.h
 
-# Keep vendor README files
-!vendor/README.md
-!vendor/*/README.md
+# Zephyr / west workspace artefacts when this repo is the topdir.
+.west/
+twister-out/
+twister-out.*/
+modules/
+zephyr/.cache/
 
 # Compiled binaries
 *.exe

@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# alp-sdk west manifest.
+#
+# This is the manifest a Zephyr workspace uses when alp-sdk itself is
+# the topdir.  Most application repos will instead add alp-sdk as a
+# project in their own west.yml and let *that* manifest drive Zephyr.
+#
+# v0.1 pins:
+#   - zephyr: latest stable release that supports Alif Ensemble in mainline
+#   - hal_alif: tracked via the Zephyr modules/hal/alif submodule (do not
+#     re-pin here — let Zephyr's own west.yml win)
+#
+# When upgrading: bump zephyr.revision and rerun `west update`; verify
+# the modules/hal/alif rev that ships with that Zephyr tag still
+# satisfies the SoMs we target (see docs/os-support-matrix.md).
+
+manifest:
+  defaults:
+    remote: zephyrproject
+
+  remotes:
+    - name: zephyrproject
+      url-base: https://github.com/zephyrproject-rtos
+
+  projects:
+    - name: zephyr
+      revision: main          # TODO: pin to a release tag once v0.1 CI is green.
+      west-commands: scripts/west-commands.yml
+      import:
+        # Pull in only the modules we actually need.  Filtering keeps
+        # CI fast; expand as new libraries land in the SDK.
+        name-allowlist:
+          - hal_alif
+          - cmsis
+          - cmsis-dsp
+          - lvgl
+          - mbedtls
+          - mcuboot
+
+  self:
+    path: alp-sdk

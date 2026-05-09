@@ -1,0 +1,31 @@
+# Copyright 2026 ALP Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# alp,pin-array — single devicetree node listing every GPIO the
+# alp-studio pin allocator can hand to alp_gpio_open(pin_id).
+#
+# pin_id is the index into the `gpios` property: pin_id=0 is the
+# first phandle, pin_id=1 the second, etc.  This keeps the studio's
+# allocation logic decoupled from per-SoC GPIO controller numbering.
+
+description: |
+  ALP-SDK pin array.  Used internally by src/zephyr/peripheral_gpio.c
+  to translate a studio-resolved pin_id into a Zephyr gpio_dt_spec.
+
+  Example:
+    alp_pins: alp-pins {
+        compatible = "alp,pin-array";
+        gpios = <&gpio0 1 GPIO_ACTIVE_HIGH>,
+                <&gpio0 2 GPIO_ACTIVE_HIGH>,
+                <&gpio1 5 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    };
+
+compatible: "alp,pin-array"
+
+properties:
+  gpios:
+    type: phandle-array
+    required: true
+    description: |
+      Ordered list of GPIO specifiers.  Index N is bound to
+      alp_gpio_open(N) at runtime.
