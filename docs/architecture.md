@@ -18,6 +18,8 @@ SDK on top of ARM CMSIS.
 │    Libraries:  GUI/LVGL · Display · Camera · Math ·         │
 │                Signal Processing · IoT · Peripherals        │
 │    Vendor wrappers:  Alif HAL · Renesas RZ · ...            │
+│    Chip drivers:  lsm6dso · ssd1306 · ov5640 · bme280 · ... │
+│    Chip metadata: metadata/socs/<vendor>/<family>/<part>    │
 ├─────────────────────────────────────────────────────────────┤
 │  ARM CMSIS                                                  │
 ├─────────────────────────────────────────────────────────────┤
@@ -34,7 +36,7 @@ talk only to `<alp/...>` headers; everything below is replaceable.
 ## OS targets
 
 The SDK explicitly supports three operating-system targets — and only
-these three.  FreeRTOS is **not** a target.
+these three.
 
 | OS         | When used                                                                  | Backend dir          |
 |------------|----------------------------------------------------------------------------|----------------------|
@@ -70,14 +72,24 @@ alp-sdk/
 │   ├── zephyr/                      # Zephyr-backed implementation
 │   ├── baremetal/                   # bare-metal implementation
 │   └── yocto/                       # Linux/userspace implementation
+├── chips/                           # CHIP DRIVER IMPLEMENTATIONS — one dir per IC
+│   ├── lsm6dso/                     # symbols are lsm6dso_* (no alp_ prefix on chip drivers)
+│   ├── ssd1306/
+│   └── ...
 ├── vendors/
 │   ├── alif/                        # Alif HAL bindings (start here for v0.1)
 │   └── renesas-rzv2n/               # stub for v0.2
+├── metadata/                        # CHIP METADATA — alp-studio's soc_ref resolves here
+│   ├── schemas/soc-spec-v1.schema.json
+│   └── socs/alif/ensemble/{e3,e4,e5,e6,e7,e8}.json
 ├── cmake/                           # find_package + Zephyr module helpers
 │   └── AlpSdkConfig.cmake.in
 ├── west.yml                         # Zephyr-side manifest
 ├── zephyr/
-│   └── module.yml                   # makes the repo importable as a Zephyr module
+│   ├── module.yml                   # makes the repo importable as a Zephyr module
+│   └── Kconfig                      # ALP_SDK_* options exposed to Zephyr apps
+├── ci/                              # GitHub Actions workflows (mirrored into .github/workflows/)
+├── yocto/meta-alp/                  # Yocto BSP layer (v0.4+; placeholder before then)
 └── tests/                           # Unity / ztest smoke tests, QEMU + real silicon
 ```
 
@@ -145,7 +157,10 @@ stays small.
 
 ## Sources of truth (do not duplicate)
 
-- HW pinout — `alpCaner/e1m-spec`.
+- HW pinout — [`alpCaner/e1m-spec`](https://github.com/alpCaner/e1m-spec)
+  (v1.0).  See [`docs/e1m-pinout.md`](e1m-pinout.md) for how the
+  spec, the per-SoM manifests, and the SDK's opaque `bus_id` /
+  `pin_id` integers all relate.
 - Per-SoM peripheral exposure — `alpCaner/alp-studio` →
   `library/_soms/<id>/manifest.json`.
 - AI accelerator runtimes (Ethos-U `vela`, Renesas DRP-AI translator) —

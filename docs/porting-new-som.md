@@ -1,5 +1,10 @@
 # Porting a new E1M SoM to the ALP SDK
 
+> **Read first:** [`docs/e1m-pinout.md`](e1m-pinout.md) explains
+> the pinout chain (e1m-spec → per-SoM manifest → studio →
+> SDK).  This guide assumes that chain is understood and only
+> covers the SDK-side steps.
+
 This guide walks through the steps to add HAL/HW support for a new
 E1M-* variant.  It assumes you already have:
 

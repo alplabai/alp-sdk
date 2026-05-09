@@ -9,7 +9,6 @@ E1M-* SoM variant — present and future — by wrapping each vendor's
 SDK on top of ARM CMSIS.
 
 Supported OS targets: **Bare-metal · Zephyr RTOS · Yocto Linux**.
-FreeRTOS is intentionally not a target.
 
 ## Status
 
@@ -61,11 +60,27 @@ whole family.
 | **E1M-AEN**        | E1M (35×35 mm)    | `E1M-AEN301`, `E1M-AEN401`, `E1M-AEN501`, `E1M-AEN601`, `E1M-AEN701`, `E1M-AEN801`    | Alif Semiconductor *Ensemble* E3–E8 (Cortex-M55 + optional Cortex-A32 + Ethos-U55) | up to ~1024 GOPS | Zephyr · bare-metal |
 | **E1M-X V2N**      | E1M-X (45×65 mm)  | `E1M-V2N101`, `E1M-V2N102`                                                            | Renesas RZ/V2N (4× Cortex-A55 + Cortex-M33 + DRP-AI3)        | 4 TOPS        | Yocto              |
 | **E1M-X V2N-M1**   | E1M-X (45×65 mm)  | `E1M-V2M101`, `E1M-V2M102`                                                            | Renesas RZ/V2N + DeepX DX-M1                                 | 4 + 25 TOPS   | Yocto              |
+| **E1M-i.MX93**     | E1M (35×35 mm)    | TBD                                                                                   | NXP i.MX 93 (2× Cortex-A55 + Cortex-M33 + Ethos-U65)         | ~0.5 TOPS     | Yocto              |
 
 All modules use the **E1M open-standard form factor**.  HW pinout and
 mechanical specification live in
 [`alpCaner/e1m-spec`](https://github.com/alpCaner/e1m-spec) — pinned
 to **v1.1** for this revision of the SDK.
+
+### Evaluation kits
+
+ALP Lab ships two carrier boards:
+
+- **E1M EVK** (UG-E1M-001) — for the 35 × 35 mm E1M form factor.
+  Hosts the E1M-AEN family and the E1M-i.MX93 family.  USB, dual
+  Ethernet, CAN, MIPI DSI, three camera options, audio, on-board
+  sensors (ICM-42670-P, BMI323, BMP581), M.2 (Key M + Key E),
+  Arduino + mikroBUS.  See [`docs/boards/e1m-evk.md`](docs/boards/e1m-evk.md).
+- **E1M-X EVK** — for the 45 × 65 mm E1M-X form factor.  Hosts the
+  E1M-X V2N and V2N-M1 families.  Two CSI camera connectors, two
+  DSI display outputs, dual GbE, expanded M.2 sizing for the
+  V2N+M1 PCIe layout, mikroBUS expansion.  See
+  [`docs/boards/e1m-x-evk.md`](docs/boards/e1m-x-evk.md).
 
 ### Platform invariants
 

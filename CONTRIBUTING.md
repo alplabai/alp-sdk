@@ -1,5 +1,8 @@
 # Contributing to ALP SDK
 
+Canonical contributor guide: [`docs/contribution.md`](docs/contribution.md).
+This file is the GitHub-auto-discovered short version.
+
 Thanks for considering a contribution.  The ALP SDK is the unification
 software layer for ALP Lab's E1M edge AI modules; keeping it small,
 predictable, and OS-pivoted is the whole point.
