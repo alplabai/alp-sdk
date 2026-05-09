@@ -1,0 +1,114 @@
+{
+  "soc_spec_version": 1,
+  "ref": "alif:ensemble:e6",
+  "vendor": "Alif Semiconductor",
+  "family": "Ensemble",
+  "part": "E6",
+  "status": "preliminary",
+  "pending_alif_datasheet": true,
+  "datasheet": {
+    "extracted_at": "2026-05-09",
+    "source": "Alp Lab E1M-AEN - Datasheet Draft.pdf (Table 1, Table 11) — Alif primary datasheet not yet on file"
+  },
+  "cores": [
+    {
+      "type": "cortex-a32",
+      "count": 1,
+      "freq_mhz": 800,
+      "isa": "Armv8-A",
+      "trustzone": true,
+      "vector_extension": "Neon",
+      "fpu": "double-precision",
+      "l1_kb": 32,
+      "l2_kb": 512,
+      "shared_l2": true,
+      "mmu": true
+    },
+    {
+      "type": "cortex-m55",
+      "subtype": "high-perf",
+      "count": 1,
+      "freq_mhz": 400,
+      "tcm_kb": 1280,
+      "isa": "Armv8.1-M",
+      "trustzone": true,
+      "vector_extension": "Helium",
+      "fpu": "double-precision"
+    },
+    {
+      "type": "cortex-m55",
+      "subtype": "high-efficiency",
+      "count": 1,
+      "freq_mhz": 160,
+      "tcm_kb": 512,
+      "isa": "Armv8.1-M",
+      "trustzone": true,
+      "vector_extension": "Helium",
+      "fpu": "double-precision"
+    }
+  ],
+  "npus": [
+    {
+      "type": "ethos-u85",
+      "subtype": "generative",
+      "mac_per_cycle": 256,
+      "freq_mhz": 400,
+      "gops": 204,
+      "supports": ["RNN", "CNN", "Transformer"]
+    },
+    {
+      "type": "ethos-u55",
+      "subtype": "high-perf",
+      "mac_per_cycle": 256,
+      "freq_mhz": 400,
+      "gops": 204,
+      "supports": ["RNN", "CNN"]
+    },
+    {
+      "type": "ethos-u55",
+      "subtype": "high-efficiency",
+      "mac_per_cycle": 128,
+      "freq_mhz": 160,
+      "gops": 46,
+      "supports": ["RNN", "CNN"]
+    }
+  ],
+  "soc_ram_kb": 9984,
+  "soc_flash_mb": 5.5,
+  "always_on_sram_kb": 4,
+  "peripherals": {},
+  "external_memory_interfaces": [
+    {
+      "kind": "OctalSPI",
+      "count": 2,
+      "supports": ["XIP", "AES inline", "HyperBus"]
+    },
+    {
+      "kind": "SD/eMMC",
+      "count": 1,
+      "spec": "SD v4.2 / eMMC v5.1",
+      "dma": true
+    }
+  ],
+  "packages": ["FBGA194 0.5mm"],
+  "variants": [
+    {
+      "order_code": "AE612FA0E5597LS0",
+      "package": "FBGA194",
+      "temperature_grade": "standard",
+      "mram_mb": 5.5,
+      "sram_kb": 9984,
+      "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
+      "shipment_suffixes": ["-T", "-Y"],
+      "alp_module_skus": ["E1M-AEN601"]
+    }
+  ],
+  "notes": [
+    "STUB — derived from ALP Lab E1M-AEN datasheet draft (Table 1: '2× M55, 1× A32 800 MHz, 2× U55 + 1× U85, ISP/JPEG, 5.5MB MRAM, up to 9.75MB SRAM, 2× OSPI'; Table 11: AEN601 → AE612FA0E5597LS0).",
+    "E6 silicon datasheet from Alif is not yet on file; replace this stub when ADTS00xx for E6 is published.",
+    "Topology assumed identical to E8 with one of the two Cortex-A32 cores depopulated.",
+    "External-memory interface set per ALP module table (OctalSPI ×2). Note this differs from E8 which uses HexSPI — confirm with Alif datasheet when available.",
+    "Peripheral counts left empty until the Alif datasheet confirms.",
+    "Order code AE612FA0E5597LS0 backs the E1M-AEN601 module SKU."
+  ]
+}

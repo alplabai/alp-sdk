@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alplab.ai/schemas/soc-spec-v1.json",
+  "title": "ALP SoC Specification v1",
+  "description": "Machine-readable per-SoC specification consumed by alp-studio. Studio's per-SKU `soc_ref` (e.g. \"alif:ensemble:e3\") resolves into one of these files under metadata/socs/<vendor>/<family>/<part>.json.",
+  "type": "object",
+  "required": [
+    "soc_spec_version",
+    "ref",
+    "vendor",
+    "family",
+    "part",
+    "cores",
+    "npus",
+    "peripherals"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "soc_spec_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. Bumped on breaking changes."
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]+$",
+      "description": "Canonical reference like \"alif:ensemble:e3\" — what alp-studio uses to look this file up."
+    },
+    "vendor": { "type": "string" },
+    "family": { "type": "string" },
+    "part":   { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["released", "preliminary", "deprecated"],
+      "default": "released"
+    },
+    "pending_alif_datasheet": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, this file was populated from secondary sources (ALP module datasheet, family pattern). Replace with primary datasheet data before locking metadata for production."
+    },
+    "datasheet": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version":       { "type": "string" },
+        "extracted_at":  { "type": "string", "format": "date" },
+        "source":        { "type": "string", "description": "Filename of the PDF the data was extracted from." },
+        "doc_id":        { "type": "string", "description": "Vendor doc id, e.g. ADTS0007." }
+      }
+    },
+
+    "cores": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/core" },
+      "minItems": 1
+    },
+    "npus": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/npu" }
+    },
+
+    "soc_ram_kb":  {
+      "type": "integer",
+      "description": "Maximum on-die SRAM in KB across all variants. Per-variant overrides go into variants[].sram_kb."
+    },
+    "tcm_kb": {
+      "type": "integer",
+      "description": "Maximum tightly-coupled memory in KB (informative; per-core TCM lives in cores[].tcm_kb)."
+    },
+    "soc_flash_mb": {
+      "type": "number",
+      "description": "Maximum on-die non-volatile memory in MB (MRAM on Alif). Per-variant overrides go into variants[].mram_mb."
+    },
+    "always_on_sram_kb": {
+      "type": "integer",
+      "description": "Always-on / utility SRAM that survives STOP mode."
+    },
+
+    "peripherals": {
+      "type": "object",
+      "description": "Counts per peripheral kind. Studio uses these to validate which blocks fit on the SoC. Use the SAME keys across vendors so the studio can do generic matching.",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+
+    "external_memory_interfaces": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/external_memory_interface" }
+    },
+
+    "power": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "vin_v":              { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+        "vio_18_v":           { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+        "vio_33_v":           { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+        "stop_ua":            { "type": "number" },
+        "active_ua_per_mhz":  { "type": "number" }
+      }
+    },
+
+    "operating_temp_c": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ambient":  { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+        "junction": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }
+      }
+    },
+
+    "packages": {
+      "type": "array",
+      "description": "All packages in which this SoC is offered, regardless of variant. Per-variant package selection lives in variants[].package.",
+      "items": { "type": "string" }
+    },
+
+    "variants": {
+      "type": "array",
+      "description": "Orderable SKUs. Each entry corresponds to one row of the datasheet's Ordering Information table. alp-studio presents these as user-selectable choices when the SKU is configurable.",
+      "items": { "$ref": "#/$defs/variant" }
+    },
+
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Freeform extraction notes worth preserving (caveats, page references, ambiguities)."
+    }
+  },
+
+  "$defs": {
+    "core": {
+      "type": "object",
+      "required": ["type", "count"],
+      "additionalProperties": false,
+      "properties": {
+        "type":     { "type": "string", "description": "e.g. cortex-m55, cortex-a32, cortex-m33." },
+        "subtype":  { "type": "string", "description": "e.g. high-perf, high-efficiency, supervisor." },
+        "count":    { "type": "integer", "minimum": 1 },
+        "freq_mhz": { "type": "integer" },
+        "tcm_kb":   { "type": "integer" },
+        "isa":      { "type": "string", "description": "e.g. Armv8.1-M, Armv8-A." },
+        "trustzone":         { "type": "boolean" },
+        "vector_extension":  { "type": "string", "description": "e.g. Helium, Neon, none." },
+        "fpu":               { "type": "string", "description": "e.g. double-precision, single-precision, none." },
+        "l1_kb":             { "type": "integer" },
+        "l2_kb":             { "type": "integer" },
+        "shared_l2":         { "type": "boolean" },
+        "mmu":               { "type": "boolean" }
+      }
+    },
+
+    "npu": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["gops"] },
+        { "required": ["tops"] }
+      ],
+      "properties": {
+        "type":            { "type": "string", "description": "e.g. ethos-u55, ethos-u85, drp-ai3, dx-m1." },
+        "subtype":         { "type": "string", "description": "e.g. high-perf (NPU-HP), high-efficiency (NPU-HE), generative (NPU-HG)." },
+        "mac_per_cycle":   { "type": "integer" },
+        "freq_mhz":        { "type": "integer" },
+        "gops":            { "type": "number", "description": "Giga ops per second.  Provide either gops or tops (= gops × 1000)." },
+        "tops":            { "type": "number", "description": "Tera ops per second.  Provide either gops or tops." },
+        "supports":        { "type": "array", "items": { "type": "string" } },
+        "external":        { "type": "boolean", "description": "true when the accelerator is a separate IC (e.g. DeepX DX-M1)." }
+      }
+    },
+
+    "external_memory_interface": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind":          { "type": "string", "description": "e.g. OctalSPI, HexSPI, SD/eMMC, LPDDR4X." },
+        "count":         { "type": "integer" },
+        "max_mhz":       { "type": "integer" },
+        "max_mbps_sdr":  { "type": "integer" },
+        "max_mbps_ddr":  { "type": "integer" },
+        "spec":          { "type": "string" },
+        "supports":      { "type": "array", "items": { "type": "string" } },
+        "dma":           { "type": "boolean" }
+      }
+    },
+
+    "variant": {
+      "type": "object",
+      "required": ["order_code", "package"],
+      "additionalProperties": false,
+      "properties": {
+        "order_code": {
+          "type": "string",
+          "description": "Vendor part number. For Alif Ensemble this is the 16-character base PN (without -T / -Y shipment suffix)."
+        },
+        "package": {
+          "type": "string",
+          "description": "Package identifier, e.g. WLCSP208, FBGA194."
+        },
+        "temperature_grade": {
+          "type": "string",
+          "enum": ["standard", "extended", "industrial", "automotive"],
+          "description": "Vendor temperature grade. Maps loosely to operating_temp_c; the canonical numeric range still lives at the SoC level."
+        },
+        "mram_mb":  { "type": "number" },
+        "sram_kb":  { "type": "integer" },
+        "sram_banks_kb": {
+          "type": "object",
+          "description": "Per-bank SRAM sizes in KB. Studio uses this for memory-map planning. Bank labels match datasheet (SRAM0, SRAM2 (M55-HP ITCM), etc.)."
+        },
+        "gpio_18v": { "type": "integer" },
+        "gpio_18v_or_33v": { "type": "integer" },
+        "optional_features": {
+          "type": "object",
+          "additionalProperties": { "type": "boolean" },
+          "description": "Per-variant on/off feature toggles. Common keys: npu_hp, npu_hg, can_fd, isp, jpeg_encoder."
+        },
+        "shipment_suffixes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Shipment packaging suffixes appended to order_code, e.g. [\"-T\" (Tape and Reel), \"-Y\" (Tray)]."
+        },
+        "alp_module_skus": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "ALP Lab module SKUs (e.g. E1M-AEN701) that ship this Alif variant. Lets the studio resolve E1M SKU → SoC variant in one hop."
+        }
+      }
+    }
+  }
+}

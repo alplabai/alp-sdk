@@ -1,0 +1,80 @@
+{
+  "soc_spec_version": 1,
+  "ref": "nxp:imx9:imx93",
+  "vendor": "NXP Semiconductors",
+  "family": "i.MX 9",
+  "part": "i.MX 93",
+  "status": "preliminary",
+  "datasheet": {
+    "version": "RM rev 6 / HDG rev 2.1",
+    "extracted_at": "2026-05-09",
+    "source": "IMX93RM.pdf (5593p, Rev. 6, 2025-07-01) + IMX93HDG.pdf (Rev. 2.1, 2024-06-12) + AN14413.pdf",
+    "doc_id": "IMX93RM"
+  },
+  "cores": [
+    {
+      "type": "cortex-a55",
+      "count": 2,
+      "freq_mhz": 1700,
+      "isa": "Armv8-A",
+      "trustzone": true,
+      "vector_extension": "Neon",
+      "fpu": "double-precision",
+      "l1_kb": 32,
+      "shared_l2": true,
+      "mmu": true
+    },
+    {
+      "type": "cortex-m33",
+      "subtype": "real-time",
+      "count": 1,
+      "freq_mhz": 250,
+      "isa": "Armv8-M",
+      "trustzone": true,
+      "fpu": "single-precision"
+    }
+  ],
+  "npus": [
+    {
+      "type": "ethos-u65",
+      "mac_per_cycle": 256,
+      "freq_mhz": 1000,
+      "tops": 0.5,
+      "supports": ["CNN", "RNN"]
+    }
+  ],
+  "soc_ram_kb": 256,
+  "always_on_sram_kb": 0,
+  "peripherals": {},
+  "external_memory_interfaces": [
+    {
+      "kind": "LPDDR4/4X",
+      "count": 1,
+      "spec": "LPDDR4-3733 / LPDDR4X-3733, 16-bit",
+      "supports": ["ECC"]
+    },
+    {
+      "kind": "FlexSPI",
+      "count": 2
+    },
+    {
+      "kind": "SD/eMMC",
+      "count": 1,
+      "spec": "eMMC 5.1, SD 3.0",
+      "dma": true
+    }
+  ],
+  "operating_temp_c": {
+    "junction": [-40, 105]
+  },
+  "packages": ["FCBGA 11 mm × 11 mm 0.5 mm pitch", "FCBGA 13 mm × 13 mm 0.5 mm pitch"],
+  "variants": [],
+  "notes": [
+    "STUB — values committed are those well-published on NXP's i.MX 93 product page and in the IMX93HDG; per-variant peripheral counts and the orderable SKU list are pending the user-supplied exact hardware configuration.",
+    "i.MX 93 has *no GPU* — that's a deliberate split with i.MX 95.  Display path is LCDIF + MIPI DSI (no 2D GPU acceleration).",
+    "Companion silicon on the ALP Lab E1M-i.MX93 SoM (per the OneDrive datasheet folder): NXP PCA9451A PMIC; Murata Type 2DL / 2EL / 2KL / 2LL Wi-Fi 6 + BLE 5.x combo (variant TBD); IW610 Wi-Fi 6 module — confirm which combo ships on which SKU when the user writes the exact HW config.",
+    "Reference docs available locally: IMX93HDG.pdf (Hardware Design Guide, 42 p), IMX93RM.pdf (Reference Manual Rev. 6, 5593 p), AN14413.pdf (PCA9451A PMIC application note).",
+    "Peripheral counts (`peripherals: {}`) intentionally empty — the v1 schema accepts that.  Fill in once the user confirms which i.MX 93 SKU the E1M-i.MX93 SoM is built around (i.MX 9301 / 9302 / 9311 / 9312 / 9352).",
+    "Orderable variants list (`variants: []`) intentionally empty — same reason."
+  ]
+}

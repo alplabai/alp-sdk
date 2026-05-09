@@ -1,0 +1,175 @@
+{
+  "soc_spec_version": 1,
+  "ref": "alif:ensemble:e7",
+  "vendor": "Alif Semiconductor",
+  "family": "Ensemble",
+  "part": "E7",
+  "status": "released",
+  "datasheet": {
+    "version": "2.9",
+    "extracted_at": "2026-05-09",
+    "source": "Alif_E7_Datasheet_v2.9.pdf",
+    "doc_id": "ADTS0005"
+  },
+  "cores": [
+    {
+      "type": "cortex-a32",
+      "count": 2,
+      "freq_mhz": 800,
+      "isa": "Armv8-A",
+      "trustzone": true,
+      "vector_extension": "Neon",
+      "fpu": "double-precision",
+      "l1_kb": 32,
+      "l2_kb": 512,
+      "shared_l2": true,
+      "mmu": true
+    },
+    {
+      "type": "cortex-m55",
+      "subtype": "high-perf",
+      "count": 1,
+      "freq_mhz": 400,
+      "tcm_kb": 1280,
+      "isa": "Armv8.1-M",
+      "trustzone": true,
+      "vector_extension": "Helium",
+      "fpu": "double-precision"
+    },
+    {
+      "type": "cortex-m55",
+      "subtype": "high-efficiency",
+      "count": 1,
+      "freq_mhz": 160,
+      "tcm_kb": 512,
+      "isa": "Armv8.1-M",
+      "trustzone": true,
+      "vector_extension": "Helium",
+      "fpu": "double-precision"
+    }
+  ],
+  "npus": [
+    {
+      "type": "ethos-u55",
+      "subtype": "high-perf",
+      "mac_per_cycle": 256,
+      "freq_mhz": 400,
+      "gops": 204,
+      "supports": ["RNN", "CNN"]
+    },
+    {
+      "type": "ethos-u55",
+      "subtype": "high-efficiency",
+      "mac_per_cycle": 128,
+      "freq_mhz": 160,
+      "gops": 46,
+      "supports": ["RNN", "CNN"]
+    }
+  ],
+  "soc_ram_kb": 13824,
+  "soc_flash_mb": 5.5,
+  "always_on_sram_kb": 4,
+  "peripherals": {
+    "i2c": 4,
+    "i2c_lp": 1,
+    "spi": 4,
+    "spi_lp": 1,
+    "uart": 8,
+    "uart_lp": 1,
+    "i2s": 4,
+    "i2s_lp": 1,
+    "pdm": 4,
+    "pdm_lp": 4,
+    "ethernet": 1,
+    "usb_2": 1,
+    "sdio": 1,
+    "can_fd": 1,
+    "i3c": 1,
+    "mipi_csi2": 1,
+    "mipi_dsi": 1,
+    "cpi_parallel": 1,
+    "cpi_lp": 1,
+    "dpi_parallel": 1,
+    "adc_12bit": 3,
+    "adc_24bit": 1,
+    "dac_12bit": 2,
+    "comparator_hs": 4,
+    "comparator_lp": 1,
+    "gpio_18v": 120,
+    "gpio_18v_or_33v": 8,
+    "timer_32bit": 12,
+    "watchdog": 4,
+    "timer_lp": 4,
+    "rtc": 1,
+    "encoder_quadrature": 4,
+    "dma_general_32ch": 3
+  },
+  "external_memory_interfaces": [
+    {
+      "kind": "OctalSPI",
+      "count": 2,
+      "max_mhz": 100,
+      "max_mbps_sdr": 100,
+      "max_mbps_ddr": 200,
+      "supports": ["XIP", "AES inline", "HyperBus"]
+    },
+    {
+      "kind": "SD/eMMC",
+      "count": 1,
+      "spec": "SD v4.2 / eMMC v5.1",
+      "dma": true
+    }
+  ],
+  "power": {
+    "vin_v": [1.75, 4.2],
+    "vio_18_v": [1.08, 1.98],
+    "vio_33_v": [3.0, 4.2],
+    "stop_ua": 1.7,
+    "active_ua_per_mhz": 29
+  },
+  "operating_temp_c": {
+    "ambient": [-40, 75],
+    "junction": [-40, 105]
+  },
+  "packages": ["WLCSP208 0.5mm", "FBGA194 0.5mm"],
+  "variants": [
+    {
+      "order_code": "AE722F80F55D5AS",
+      "package": "WLCSP208",
+      "temperature_grade": "standard",
+      "mram_mb": 5.5,
+      "sram_kb": 13824,
+      "sram_banks_kb": {
+        "SRAM0": 4096, "SRAM1": 2560,
+        "SRAM2_M55_HP_ITCM": 256, "SRAM3_M55_HP_DTCM": 1024,
+        "SRAM4_M55_HE_ITCM": 256, "SRAM5_M55_HE_DTCM": 256,
+        "SRAM6": 2048, "SRAM7": 512, "SRAM8": 2048, "SRAM9": 768
+      },
+      "gpio_18v": 120,
+      "shipment_suffixes": ["-T", "-Y"]
+    },
+    {
+      "order_code": "AE722F80F55D5LS",
+      "package": "FBGA194",
+      "temperature_grade": "standard",
+      "mram_mb": 5.5,
+      "sram_kb": 13824,
+      "sram_banks_kb": {
+        "SRAM0": 4096, "SRAM1": 2560,
+        "SRAM2_M55_HP_ITCM": 256, "SRAM3_M55_HP_DTCM": 1024,
+        "SRAM4_M55_HE_ITCM": 256, "SRAM5_M55_HE_DTCM": 256,
+        "SRAM6": 2048, "SRAM7": 512, "SRAM8": 2048, "SRAM9": 768
+      },
+      "gpio_18v": 120,
+      "shipment_suffixes": ["-T", "-Y"],
+      "alp_module_skus": ["E1M-AEN701"]
+    }
+  ],
+  "notes": [
+    "Datasheet: 187 pages, ADTS0005 v2.9 July 2024.",
+    "E7 adds 2× Cortex-A32 Application Processor cores vs E3 (otherwise same RT/NPU topology).",
+    "Watchdog count is 4 on E7 (vs 2 on E3); active dynamic consumption is 29 µA/MHz (vs 27 on E3).",
+    "Operating temperature is 'Standard' grade (-40 / +75 ambient) vs E3 'Extended' (-40 / +85).",
+    "AE722F80F55D5LS is the variant ALP Lab uses on the E1M-AEN701 module SKU."
+  ]
+}

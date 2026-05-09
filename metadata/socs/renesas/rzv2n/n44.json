@@ -1,0 +1,177 @@
+{
+  "soc_spec_version": 1,
+  "ref": "renesas:rzv2n:n44",
+  "vendor": "Renesas Electronics",
+  "family": "RZ/V2N",
+  "part": "R9A09G056N44GBG",
+  "status": "released",
+  "datasheet": {
+    "version": "1.20",
+    "extracted_at": "2026-05-09",
+    "source": "r01ds0466ej0120-rzv2n.pdf",
+    "doc_id": "R01DS0466EJ0120"
+  },
+  "cores": [
+    {
+      "type": "cortex-a55",
+      "count": 4,
+      "freq_mhz": 1800,
+      "isa": "Armv8-A",
+      "trustzone": true,
+      "vector_extension": "Neon",
+      "fpu": "double-precision",
+      "l1_kb": 32,
+      "l2_kb": 0,
+      "shared_l2": false,
+      "mmu": true
+    },
+    {
+      "type": "cortex-m33",
+      "subtype": "system-manager",
+      "count": 1,
+      "freq_mhz": 200,
+      "isa": "Armv8-M",
+      "trustzone": true,
+      "fpu": "single-precision"
+    }
+  ],
+  "npus": [
+    {
+      "type": "drp-ai",
+      "subtype": "ai-mac+drp",
+      "freq_mhz": 1000,
+      "tops": 4,
+      "supports": ["CNN", "RNN", "Transformer"]
+    }
+  ],
+  "soc_ram_kb": 1536,
+  "always_on_sram_kb": 0,
+  "peripherals": {
+    "i2c": 9,
+    "i3c": 1,
+    "spi": 3,
+    "uart": 10,
+    "scif": 1,
+    "i2s": 10,
+    "spdif": 3,
+    "pdm": 6,
+    "ethernet_1g": 2,
+    "usb_2": 1,
+    "usb_3_2_gen2": 1,
+    "sdio_emmc": 1,
+    "sdio": 2,
+    "can_fd": 6,
+    "mipi_csi2": 2,
+    "mipi_dsi": 1,
+    "pcie_gen3": 1,
+    "adc_12bit": 24,
+    "temp_sensor": 2,
+    "timer_32bit_gpt": 16,
+    "timer_32bit_cmtw": 8,
+    "timer_32bit_gtm": 8,
+    "watchdog": 4,
+    "rtc": 1,
+    "gpio": 86,
+    "irq_external": 16,
+    "dmac_channels": 80
+  },
+  "external_memory_interfaces": [
+    {
+      "kind": "LPDDR4/4X",
+      "count": 1,
+      "spec": "LPDDR4-3200 / LPDDR4X-3200",
+      "max_mbps_ddr": 12800,
+      "supports": ["ECC", "32-bit"]
+    },
+    {
+      "kind": "xSPI",
+      "count": 1,
+      "supports": ["4-bit DTR", "8-bit DTR"]
+    },
+    {
+      "kind": "SD/eMMC",
+      "count": 1,
+      "spec": "1/4/8-bit bus width",
+      "dma": true
+    }
+  ],
+  "power": {
+    "vio_18_v": [1.71, 1.89],
+    "vio_33_v": [3.0, 3.6]
+  },
+  "operating_temp_c": {
+    "junction": [-40, 125]
+  },
+  "packages": ["840-pin FCBGA, 15 mm × 15 mm, 0.50 mm pitch"],
+  "variants": [
+    {
+      "order_code": "R9A09G056N41GBG",
+      "package": "FCBGA840",
+      "temperature_grade": "industrial",
+      "optional_features": { "gpu_mali_g31": false, "isp_mali_c55": false, "security_crypto": false },
+      "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
+    },
+    {
+      "order_code": "R9A09G056N42GBG",
+      "package": "FCBGA840",
+      "temperature_grade": "industrial",
+      "optional_features": { "gpu_mali_g31": true,  "isp_mali_c55": false, "security_crypto": false },
+      "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
+    },
+    {
+      "order_code": "R9A09G056N43GBG",
+      "package": "FCBGA840",
+      "temperature_grade": "industrial",
+      "optional_features": { "gpu_mali_g31": false, "isp_mali_c55": true,  "security_crypto": false },
+      "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
+    },
+    {
+      "order_code": "R9A09G056N44GBG",
+      "package": "FCBGA840",
+      "temperature_grade": "industrial",
+      "optional_features": { "gpu_mali_g31": true,  "isp_mali_c55": true,  "security_crypto": false },
+      "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"],
+      "alp_module_skus": ["E1M-V2N101", "E1M-V2N102", "E1M-V2M101", "E1M-V2M102"]
+    },
+    {
+      "order_code": "R9A09G056N45GBG",
+      "package": "FCBGA840",
+      "temperature_grade": "industrial",
+      "optional_features": { "gpu_mali_g31": false, "isp_mali_c55": false, "security_crypto": true },
+      "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
+    },
+    {
+      "order_code": "R9A09G056N46GBG",
+      "package": "FCBGA840",
+      "temperature_grade": "industrial",
+      "optional_features": { "gpu_mali_g31": true,  "isp_mali_c55": false, "security_crypto": true },
+      "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
+    },
+    {
+      "order_code": "R9A09G056N47GBG",
+      "package": "FCBGA840",
+      "temperature_grade": "industrial",
+      "optional_features": { "gpu_mali_g31": false, "isp_mali_c55": true,  "security_crypto": true },
+      "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
+    },
+    {
+      "order_code": "R9A09G056N48GBG",
+      "package": "FCBGA840",
+      "temperature_grade": "industrial",
+      "optional_features": { "gpu_mali_g31": true,  "isp_mali_c55": true,  "security_crypto": true },
+      "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
+    }
+  ],
+  "notes": [
+    "Datasheet: 137 pages, R01DS0466EJ0120 v1.20, Sep 2025.",
+    "Single die with 8 orderable SKUs that toggle Mali-G31 GPU, Mali-C55 ISP (RZ/V2NP suffix), and security-crypto extensions on/off.  N41/N42/N45/N46 are RZ/V2N (no ISP); N43/N44/N47/N48 are RZ/V2NP (with ISP).",
+    "DRP-AI: 4 dense TOPS, up to 15 sparse TOPS @ 1.0 GHz.  Vendor toolchain: DRP-AI translator + DRP-AI TVM.",
+    "Quad Cortex-A55 @ 1.8 GHz @ 0.9 V (1.1 GHz @ 0.8 V low-power).  L3 cache max frequency is 1.26 GHz, not 1.8 GHz.",
+    "VCD: H.264 1080p60 / H.265 4K30 encode + decode in hardware.",
+    "Shipment suffix '#ACx' = individual tray, '#BCx' = full carton.  Variants with '#AC0' or '#BC0' do not support MIPI-DSI Display Command Set control.",
+    "AC0 default per ALP Lab vendors/renesas-rzv2n/README.md — R9A09G056N44GBG#AC0 backs the E1M-V2N* and E1M-V2M* SoM SKUs.",
+    "MIPI CSI-2 has 2 instances; MIPI DSI has 1.  PCIe Gen3 supports 1 or 2 lanes (no 4-lane on RZ/V2N — that's RZ/V2H).",
+    "GPU and ISP are optional silicon and require software to detect them at runtime via the Renesas FSP.",
+    "On the V2N-M1 SoM, the DeepX DX-M1 sits behind PCIe internally — see metadata/socs/deepx/dx/m1.json."
+  ]
+}

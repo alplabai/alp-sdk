@@ -1,0 +1,75 @@
+{
+  "soc_spec_version": 1,
+  "ref": "deepx:dx:m1",
+  "vendor": "DEEPX",
+  "family": "DX",
+  "part": "M1",
+  "status": "released",
+  "datasheet": {
+    "version": "1.0",
+    "extracted_at": "2026-05-09",
+    "source": "DEEPX_DX-M1_Commercial_Datasheet_v1.0_250625.pdf"
+  },
+  "cores": [
+    {
+      "type": "cortex-m55",
+      "subtype": "internal-companion",
+      "count": 1,
+      "isa": "Armv8.1-M",
+      "vector_extension": "Helium",
+      "fpu": "double-precision"
+    }
+  ],
+  "npus": [
+    {
+      "type": "deepx-dx-m1",
+      "subtype": "cnn-accelerator",
+      "freq_mhz": 1000,
+      "tops": 25,
+      "supports": ["CNN"]
+    }
+  ],
+  "peripherals": {
+    "pcie_gen3": 1,
+    "usb_2_otg": 1,
+    "i2c": 1,
+    "qspi": 1,
+    "spi": 1,
+    "uart": 1,
+    "gpio": 1,
+    "timer_general": 3,
+    "watchdog": 1,
+    "pwm": 1
+  },
+  "external_memory_interfaces": [
+    {
+      "kind": "LPDDR4X / LPDDR5",
+      "count": 4,
+      "spec": "16-bit × 4-channel data bus, up to 8 GB total",
+      "max_mbps_ddr": 5600,
+      "supports": ["LPDDR4X up to 4266 MT/s", "LPDDR5 up to 5600 MT/s"]
+    }
+  ],
+  "operating_temp_c": {
+    "junction": [-40, 105]
+  },
+  "packages": ["FC-BGA, 17 mm × 17 mm × 2.452 mm, 0.65 mm pitch, 625 balls (25 × 25)"],
+  "variants": [
+    {
+      "order_code": "DX-M1",
+      "package": "FCBGA625",
+      "temperature_grade": "industrial",
+      "alp_module_skus": ["E1M-V2M101", "E1M-V2M102"]
+    }
+  ],
+  "notes": [
+    "Datasheet: 45 pages, DEEPX commercial datasheet v1.0, June 2025 (DEEPX Confidential).",
+    "DX-M1 is a *companion accelerator*, not a host SoC — it sits behind a PCIe Gen3 ×4 interface attached to a host CPU/MPU.  On ALP Lab's V2N-M1 SoMs the host is the Renesas RZ/V2N (R9A09G056N44GBG) and PCIe is wired internally on the SoM.",
+    "Optimised for INT8 CNN inference (ResNet, MobileNet, YOLO and similar topologies).  25 TOPS dense throughput @ 1.0 GHz.",
+    "Internal Cortex-M55 runs DEEPX firmware that handles model load, scheduling, and PCIe doorbell.  Application code does not address it directly.",
+    "Per-channel LPDDR capacity is 2 GB; up to 4 channels = 8 GB max model + activation memory on the accelerator side.",
+    "PVT sensor exposes integrated temperature + voltage monitoring via on-chip registers.",
+    "Security: TRNG, cryptographic accelerator, and chip-lifecycle management on-die — see datasheet §8.5.",
+    "Toolchain: DEEPX SDK (model compiler + runtime).  The ALP SDK exposes `<alp/iot.h>` / `<alp/peripheral.h>` for host-side interaction; DX-M1-specific APIs land in v0.3 alongside the DEEPX SDK integration."
+  ]
+}
