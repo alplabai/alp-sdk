@@ -51,14 +51,45 @@ All consumer-facing headers live under `include/alp/`:
 
 ## Supported hardware
 
-| Module       | Processor                  | AI throughput | OS targets        |
-|--------------|----------------------------|---------------|-------------------|
-| E1M-AEN      | Alif Ensemble (Cortex-M55 + Ethos-U55) | 1024 GOPS | Zephyr · bare-metal |
-| E1M-X-V2N    | Renesas RZ/V2N             | 4 TOPS        | Yocto             |
-| E1M-X-V2N-M1 | RZ/V2N + DeepX M1          | 25 TOPS       | Yocto             |
+The SDK targets three SoM **families**.  Within each family every SKU
+shares the same E1M routing and the same vendor HAL — they differ
+only in SoC variant and memory tier — so a single backend covers the
+whole family.
 
-All modules use the **E1M open-standard form factor**.  HW pinout
-lives in [`alpCaner/e1m-spec`](https://github.com/alpCaner/e1m-spec).
+| Family             | Form factor       | SKUs                                                                                  | Primary silicon                                              | AI throughput | OS targets         |
+|--------------------|-------------------|---------------------------------------------------------------------------------------|--------------------------------------------------------------|---------------|--------------------|
+| **E1M-AEN**        | E1M (35×35 mm)    | `E1M-AEN301`, `E1M-AEN401`, `E1M-AEN501`, `E1M-AEN601`, `E1M-AEN701`, `E1M-AEN801`    | Alif Semiconductor *Ensemble* E3–E8 (Cortex-M55 + optional Cortex-A32 + Ethos-U55) | up to ~1024 GOPS | Zephyr · bare-metal |
+| **E1M-X V2N**      | E1M-X (45×65 mm)  | `E1M-V2N101`, `E1M-V2N102`                                                            | Renesas RZ/V2N (4× Cortex-A55 + Cortex-M33 + DRP-AI3)        | 4 TOPS        | Yocto              |
+| **E1M-X V2N-M1**   | E1M-X (45×65 mm)  | `E1M-V2M101`, `E1M-V2M102`                                                            | Renesas RZ/V2N + DeepX DX-M1                                 | 4 + 25 TOPS   | Yocto              |
+
+All modules use the **E1M open-standard form factor**.  HW pinout and
+mechanical specification live in
+[`alpCaner/e1m-spec`](https://github.com/alpCaner/e1m-spec) — pinned
+to **v1.1** for this revision of the SDK.
+
+### Platform invariants
+
+The SDK relies on the following hardware invariants that
+[`e1m-spec` §6.5](https://github.com/alpCaner/e1m-spec/blob/main/STANDARD.md#65-mandatory-on-module-components)
+makes normative for every conformant E1M / E1M-X SoM:
+
+- **On-module Ethernet PHY(s).**  At least one PHY is on the module;
+  E1M-X SoMs with two MAC controllers populate two.  E1M-X `ETH*_*`
+  pads are therefore post-PHY differential MDI — the SDK's IoT
+  library targets these pads directly without configuring an external
+  PHY.
+- **On-module Wi-Fi 6 + BLE 5.4 combo.**  2.4 GHz and 5 GHz are
+  always available; 6 GHz is optional per SoM.  The `alp/iot.h`
+  Wi-Fi-station + MQTT path assumes the combo radio is present.
+- **On-module CAN transceiver(s).**  When any CAN group is exposed,
+  the carrier-side pads are bus-level (`CANxH` / `CANxL`).  The SDK's
+  CAN APIs therefore drive a bus, not a TX/RX controller pair.
+- **Supervisory MCU on V2N family.**  The `E1M-X V2N` and
+  `E1M-X V2N-M1` SoMs include a separate **GigaDevice GD32G553**
+  Cortex-M33 supervisor (216 MHz) alongside the Renesas internal
+  Cortex-M33 (200 MHz).  See
+  [`vendors/renesas-rzv2n/README.md`](vendors/renesas-rzv2n/README.md)
+  for what the supervisor handles vs. the application core.
 
 ## Consuming the SDK
 
