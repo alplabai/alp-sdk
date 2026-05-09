@@ -1,0 +1,46 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Host-build overlay for the EdgeAI vision skeleton — exercises
+ * the v0.1 SDK init flow under native_sim.  No actual silicon, no
+ * actual model; the skeleton's stages either find their devices
+ * or print a "skip" line and continue.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/ {
+    aliases {
+        alp-i2c0 = &i2c0_emul;
+    };
+
+    soc {
+        i2c0_emul: i2c@100 {
+            compatible = "zephyr,i2c-emul-controller";
+            status = "okay";
+            reg = <0 0x100 4>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+            clock-frequency = <I2C_BITRATE_FAST>;
+        };
+    };
+
+    gpio_emul0: gpio_emul0 {
+        compatible = "zephyr,gpio-emul";
+        status = "okay";
+        gpio-controller;
+        rising-edge;
+        falling-edge;
+        #gpio-cells = <2>;
+        ngpios = <8>;
+    };
+
+    /* Two pins: index 0 = trigger button, index 1 = capture LED. */
+    alp_pins: alp-pins {
+        compatible = "alp,pin-array";
+        gpios = <&gpio_emul0 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+                <&gpio_emul0 1 GPIO_ACTIVE_HIGH>;
+    };
+};

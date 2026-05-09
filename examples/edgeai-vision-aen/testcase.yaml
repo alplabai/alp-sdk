@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: edgeai-vision-aen
+  description: |
+    EdgeAI vision reference application for the E1M-AEN family.
+    v0.1: skeleton — compiles under native_sim and prints the
+    pipeline stages with v0.2 stubs.
+
+tests:
+  alp_sdk.example.edgeai_vision_aen.skeleton:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - edgeai
+    build_only: false
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[edgeai\\] done"
+
+  # alp_sdk.example.edgeai_vision_aen.evk_aen — HW-in-loop variant
+  # for the E1M EVK populated with an E1M-AEN family SoM. Currently
+  # parked because the alp_e1m_evk_aen Zephyr board file lives in
+  # alpCaner/alp-zephyr-modules (not yet published); twister rejects
+  # unknown platforms in platform_allow. Re-enable when that board
+  # file lands. The overlay at boards/alp_e1m_evk_aen.overlay is
+  # already in place.

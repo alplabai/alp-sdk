@@ -1,0 +1,41 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * IoT connected-camera — overlay for the E1M EVK populated with an
+ * E1M-V2N101 / E1M-V2N102 SoM.  Wires the SDK's `alp_i2c0` /
+ * `alp_uart0` aliases and the standard `alp,pin-array` to V2N pins.
+ *
+ * The authoritative `alp_e1m_evk_v2n` board file lives in
+ * `alpCaner/alp-zephyr-modules` (TBD).  This overlay assumes that
+ * board file's pinctrl group exists; until it ships, twister
+ * excludes the V2N target from the example.
+ *
+ * The pin numbers below are PLACEHOLDERS that match the EVK
+ * schematic's user-interface section but use generic GPIO bank
+ * indices.  Replace with the real bank/index pairs once the
+ * board file lands.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+    aliases {
+        alp-i2c0  = &i2c0;
+        alp-uart0 = &uart0;
+    };
+
+    /* Same canonical IO0..IO5 ordering as
+     * include/alp/boards/alp_e1m_evk_aen.h — the EVK is shared
+     * between AEN and V2N families; only the silicon behind each
+     * pad changes. */
+    alp_pins: alp-pins {
+        compatible = "alp,pin-array";
+        gpios = <&gpio0  0 GPIO_ACTIVE_HIGH>,                            /* RGB LED red       */
+                <&gpio0  1 GPIO_ACTIVE_HIGH>,                            /* RGB LED green     */
+                <&gpio0  2 GPIO_ACTIVE_HIGH>,                            /* RGB LED blue      */
+                <&gpio1  0 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>,           /* Encoder switch    */
+                <&gpio1  1 GPIO_ACTIVE_HIGH>,                            /* IO_EXP.INT        */
+                <&gpio1  2 GPIO_ACTIVE_HIGH>;                            /* IO_EXP.RST        */
+    };
+};

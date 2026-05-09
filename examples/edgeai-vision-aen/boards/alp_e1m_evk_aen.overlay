@@ -1,0 +1,46 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * EdgeAI vision-AEN — overlay for the E1M EVK populated with an
+ * E1M-AEN701 SoM.  Wires:
+ *
+ *   alp_i2c0  → on-EVK shared sensor bus (ICM-42670-P / SSD1306
+ *               on the display side via the level shifter).
+ *   alp_pins  → six entries matching include/alp/boards/alp_e1m_evk_aen.h:
+ *                 0  RGB LED red    (capture-LED proxy)
+ *                 1  RGB LED green
+ *                 2  RGB LED blue
+ *                 3  Encoder switch (capture trigger)
+ *                 4  IO_EXP.INT
+ *                 5  IO_EXP.RST
+ *
+ * The authoritative `alp_e1m_evk_aen` board file lives in
+ * `alpCaner/alp-zephyr-modules` (TBD).  This overlay assumes that
+ * board file's pinctrl group is named `&pinctrl` and exposes
+ * `alp_i2c0_default` plus `alp_uart0_default`.  Until the board
+ * file ships, this overlay won't compile against any real Zephyr
+ * board — twister excludes the EVK target from the example.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+    aliases {
+        alp-i2c0 = &i2c0;
+        alp-uart0 = &uart0;
+    };
+
+    /* Same pin layout the SDK ships in
+     * include/alp/boards/alp_e1m_evk_aen.h — keep these arrays in
+     * lockstep when adding pads. */
+    alp_pins: alp-pins {
+        compatible = "alp,pin-array";
+        gpios = <&gpio0  0 GPIO_ACTIVE_HIGH>,                            /* EVK_AEN_PIN_LED_RED      */
+                <&gpio0  1 GPIO_ACTIVE_HIGH>,                            /* EVK_AEN_PIN_LED_GREEN    */
+                <&gpio0  2 GPIO_ACTIVE_HIGH>,                            /* EVK_AEN_PIN_LED_BLUE     */
+                <&gpio1  0 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>,           /* EVK_AEN_PIN_ENCODER_SW   */
+                <&gpio1  1 GPIO_ACTIVE_HIGH>,                            /* EVK_AEN_PIN_IO_EXP_INT   */
+                <&gpio1  2 GPIO_ACTIVE_HIGH>;                            /* EVK_AEN_PIN_IO_EXP_RST   */
+    };
+};
