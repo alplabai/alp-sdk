@@ -155,6 +155,92 @@ stays small.
   (stub OK at v0.1), V2N-Yocto (stub OK at v0.1).
 - No GPL dependencies.  Apache-2.0 / MIT / BSD only.
 
+## Consumers of this SDK
+
+The SDK is the bottom of a small dependency stack.  Three repositories
+link against it directly; everything else reaches it transitively
+through them.
+
+```
++-----------------------------------------------------------+
+|  End-user application                                     |
+|  Hand-written firmware OR an alp-studio export            |
++-----------------------------------------------------------+
+                |                       |
+                v                       v
++-----------------------------+  +-------------------------+
+|  alpCaner/alp-studio        |  |  Hand-written user code |
+|  (block library + visual    |  |  (Zephyr application,   |
+|  programmer + codegen)      |  |  Yocto application)     |
++-----------------------------+  +-------------------------+
+                |                       |
+                |   #include <alp/...>  |
+                v                       v
++-----------------------------------------------------------+
+|  alpCaner/alp-sdk    THIS REPO                            |
++-----------------------------------------------------------+
+                |
+                v
++-----------------------------------------------------------+
+|  Vendor HALs / Zephyr / Yocto                             |
++-----------------------------------------------------------+
+```
+
+### alp-studio integration contract
+
+`alpCaner/alp-studio` is the visual programmer that reads block
+manifests and generates Zephyr-app source code that calls into this
+SDK.  The integration contract is:
+
+- The studio's pin allocator produces opaque `bus_id` / `pin_id`
+  integers per the chain in [`e1m-pinout.md`](e1m-pinout.md).
+- The codegen emits calls into `<alp/peripheral.h>`,
+  `<alp/chips/...>.h`, and (for camera / IoT / GUI blocks) the
+  per-library `<alp/...>` headers.
+- The studio reads `metadata/socs/<vendor>/<family>/<part>.json` to
+  resolve a project's `soc_ref` and tailor codegen to the active
+  chip's peripheral inventory.
+- The studio does **not** read `src/` or `chips/<part>/`.  Those are
+  implementation; the studio only sees the public headers and the
+  metadata directory.
+
+When a v0.x release ships, the studio's `library/` directory pins to
+the matching SDK tag in `west.yml`.
+
+### Zephyr-application consumption
+
+A hand-written Zephyr application uses the SDK as a Zephyr module:
+
+```yaml
+# west.yml
+manifest:
+  projects:
+    - name: alp-sdk
+      url: https://github.com/alpCaner/alp-sdk
+      revision: v0.1.0
+      path: modules/alp-sdk
+```
+
+```kconfig
+# prj.conf
+CONFIG_ALP_SDK=y
+CONFIG_ALP_SDK_CHIP_LSM6DSO=y
+```
+
+```c
+// src/main.c
+#include <alp/peripheral.h>
+#include <alp/chips/lsm6dso.h>
+```
+
+### Yocto consumption (v0.4+)
+
+The Yocto path is symmetric: `meta-alp` ships a recipe that builds
+the SDK's `src/yocto/` backend as a shared library, exposes the
+public headers under `/usr/include/alp/`, and wires `pkg-config`
+data so application recipes can `inherit pkgconfig` and depend on
+`alp-sdk`.
+
 ## Sources of truth (do not duplicate)
 
 - HW pinout — [`alpCaner/e1m-spec`](https://github.com/alpCaner/e1m-spec)

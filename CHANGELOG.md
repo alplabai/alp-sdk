@@ -240,6 +240,22 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 - `test_public_headers_co_compile` extended to include
   `<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`,
   `<alp/mproc.h>`, and the five new chip headers.
+- **ABI snapshot tooling**: `scripts/abi_snapshot.py` walks
+  `include/alp/**.h`, extracts function decls, typedefs, and
+  `#define`s, and emits a stable JSON fingerprint per public
+  symbol.  Supports `--diff <prior.json>` for per-symbol change
+  reporting.  Pre-1.0 the diff is informational; v1.0 promotes
+  it to a CI gate (`pr-abi-snapshot.yml`) where `REMOVED` /
+  `CHANGED` entries require a major-version bump.
+- `docs/abi/v0.1-snapshot.json` ships the v0.1 ABI fingerprint —
+  21 headers, 123 functions, 80 typedefs, 114 macros.  See
+  `docs/abi/README.md` for the workflow.
+- `docs/architecture.md` gains a "Consumers of this SDK"
+  section: alp-studio integration contract, Zephyr-application
+  consumption recipe, and the v0.4 Yocto / `meta-alp` shape.
+- `examples/README.md` per-example status descriptions tightened
+  with the concrete pipeline stages each skeleton scaffolds and
+  which version fills in each stage.
 
 ### Notes
 

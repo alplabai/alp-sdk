@@ -1,0 +1,1421 @@
+{
+  "generated": "2026-05-10",
+  "headers": {
+    "alp/audio.h": {
+      "functions": {
+        "alp_audio_in_close": {
+          "hash": "dac60281393e8fc5",
+          "signature": "void alp_audio_in_close(alp_audio_in_t *in);"
+        },
+        "alp_audio_in_read": {
+          "hash": "a43903a928fdde75",
+          "signature": "alp_status_t alp_audio_in_read(alp_audio_in_t *in, void *buf, size_t frames, size_t *out_frames, uint32_t timeout_ms);"
+        },
+        "alp_audio_in_start": {
+          "hash": "3bbf7134c761ffdf",
+          "signature": "alp_status_t alp_audio_in_start(alp_audio_in_t *in);"
+        },
+        "alp_audio_in_stop": {
+          "hash": "8c939589c1ba114d",
+          "signature": "alp_status_t alp_audio_in_stop(alp_audio_in_t *in);"
+        },
+        "alp_audio_out_close": {
+          "hash": "9bf8d3aa01bec9b9",
+          "signature": "void alp_audio_out_close(alp_audio_out_t *out);"
+        },
+        "alp_audio_out_set_volume": {
+          "hash": "be605d5a604b6efb",
+          "signature": "alp_status_t alp_audio_out_set_volume(alp_audio_out_t *out, uint8_t vol);"
+        },
+        "alp_audio_out_start": {
+          "hash": "0fc4bc47f2a08d66",
+          "signature": "alp_status_t alp_audio_out_start(alp_audio_out_t *out);"
+        },
+        "alp_audio_out_stop": {
+          "hash": "12e538ab389f8af1",
+          "signature": "alp_status_t alp_audio_out_stop(alp_audio_out_t *out);"
+        },
+        "alp_audio_out_write": {
+          "hash": "14aa5753872d20a5",
+          "signature": "alp_status_t alp_audio_out_write(alp_audio_out_t *out, const void *buf, size_t frames, size_t *out_frames, uint32_t timeout_ms);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_audio_format_t": {
+          "definition": "typedef enum { ALP_AUDIO_FMT_S16_LE = 0, ALP_AUDIO_FMT_S24_LE = 1, ALP_AUDIO_FMT_S32_LE = 2 } alp_audio_format_t;",
+          "hash": "d5ed1eebce141a11"
+        },
+        "alp_audio_in_t": {
+          "definition": "typedef struct alp_audio_in alp_audio_in_t;",
+          "hash": "3754a87b3cb51f01"
+        },
+        "alp_audio_out_t": {
+          "definition": "typedef struct alp_audio_out alp_audio_out_t;",
+          "hash": "274aceeceb862b0d"
+        },
+        "peripheral_id": {
+          "definition": "typedef struct { uint32_t peripheral_id;",
+          "hash": "c6d34a422215091d"
+        }
+      }
+    },
+    "alp/ble.h": {
+      "functions": {
+        "alp_ble_advertise_start": {
+          "hash": "5ec8aecf10c98ad8",
+          "signature": "alp_status_t alp_ble_advertise_start(alp_ble_t *ble, const alp_ble_adv_config_t *cfg);"
+        },
+        "alp_ble_advertise_stop": {
+          "hash": "6311564f47855586",
+          "signature": "alp_status_t alp_ble_advertise_stop(alp_ble_t *ble);"
+        },
+        "alp_ble_close": {
+          "hash": "5f8be9db14a7abbd",
+          "signature": "void alp_ble_close(alp_ble_t *ble);"
+        },
+        "alp_ble_connect": {
+          "hash": "fcddd9d126c75391",
+          "signature": "alp_status_t alp_ble_connect(alp_ble_t *ble, const alp_ble_addr_t *peer, uint32_t timeout_ms, alp_ble_conn_t **conn_out);"
+        },
+        "alp_ble_disconnect": {
+          "hash": "390ed3bfc30c2ee2",
+          "signature": "alp_status_t alp_ble_disconnect(alp_ble_conn_t *conn);"
+        },
+        "alp_ble_gatt_notify": {
+          "hash": "9e6fb5cf7970b801",
+          "signature": "alp_status_t alp_ble_gatt_notify(alp_ble_t *ble, alp_ble_conn_t *conn, alp_ble_attr_handle_t handle, const uint8_t *payload, size_t len);"
+        },
+        "alp_ble_gatt_read": {
+          "hash": "efb97f2be9403ed8",
+          "signature": "alp_status_t alp_ble_gatt_read(alp_ble_conn_t *conn, alp_ble_attr_handle_t handle, uint8_t *out, size_t out_cap, size_t *out_len, uint32_t timeout_ms);"
+        },
+        "alp_ble_gatt_register_service": {
+          "hash": "5ad57177c9523338",
+          "signature": "alp_status_t alp_ble_gatt_register_service(alp_ble_t *ble, const alp_ble_service_def_t *def, alp_ble_attr_handle_t *handles_out);"
+        },
+        "alp_ble_gatt_write": {
+          "hash": "cd09890f6549b4e0",
+          "signature": "alp_status_t alp_ble_gatt_write(alp_ble_conn_t *conn, alp_ble_attr_handle_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms);"
+        },
+        "alp_ble_scan_start": {
+          "hash": "e1c40e7e32fe4673",
+          "signature": "alp_status_t alp_ble_scan_start(alp_ble_t *ble, bool active, alp_ble_scan_cb_t cb, void *user);"
+        },
+        "alp_ble_scan_stop": {
+          "hash": "769e54b9b07e66b4",
+          "signature": "alp_status_t alp_ble_scan_stop(alp_ble_t *ble);"
+        }
+      },
+      "macros": {
+        "ALP_BLE_GATT_PROP_INDICATE": {
+          "hash": "017f9dd2c2e72250",
+          "value": "0x20"
+        },
+        "ALP_BLE_GATT_PROP_NOTIFY": {
+          "hash": "c31d74fd44ddcb49",
+          "value": "0x10"
+        },
+        "ALP_BLE_GATT_PROP_READ": {
+          "hash": "9cff492699fab418",
+          "value": "0x02"
+        },
+        "ALP_BLE_GATT_PROP_WRITE": {
+          "hash": "9e44da04229cab7b",
+          "value": "0x08"
+        }
+      },
+      "typedefs": {
+        "addr": {
+          "definition": "typedef struct { alp_ble_addr_t addr;",
+          "hash": "ab7238051724d28a"
+        },
+        "alp_ble_attr_handle_t": {
+          "definition": "typedef uint16_t alp_ble_attr_handle_t;",
+          "hash": "d22e3575c0f99c41"
+        },
+        "alp_ble_conn_t": {
+          "definition": "typedef struct alp_ble_conn alp_ble_conn_t;",
+          "hash": "56644d201fa50747"
+        },
+        "alp_ble_scan_cb_t": {
+          "definition": "typedef void (*alp_ble_scan_cb_t)(const alp_ble_scan_result_t *r, void *user);",
+          "hash": "47cd0d704d010cbd"
+        },
+        "alp_ble_t": {
+          "definition": "typedef struct alp_ble alp_ble_t;",
+          "hash": "fc8c220c44c7ea6e"
+        },
+        "alp_ble_uuid_t": {
+          "definition": "typedef struct { uint8_t b[16]; } alp_ble_uuid_t;",
+          "hash": "a1e777f6324cf7e1"
+        },
+        "num_services": {
+          "definition": "typedef struct { const char *name; const alp_ble_uuid_t *services; size_t num_services;",
+          "hash": "0dac8a0ce01a5e2c"
+        },
+        "service_uuid": {
+          "definition": "typedef struct { alp_ble_uuid_t service_uuid;",
+          "hash": "4a2afa5b35bdfdd1"
+        },
+        "type": {
+          "definition": "typedef struct { uint8_t type;",
+          "hash": "e13c651ab571e736"
+        },
+        "uuid": {
+          "definition": "typedef struct { alp_ble_uuid_t uuid;",
+          "hash": "e0745400e7dae06b"
+        }
+      }
+    },
+    "alp/boards/alp_e1m_evk_aen.h": {
+      "functions": {},
+      "macros": {
+        "EVK_AEN_I2C_ADDR_BMI323": {
+          "hash": "adbd3e283e31a8fb",
+          "value": "0x68u"
+        },
+        "EVK_AEN_I2C_ADDR_BMP581": {
+          "hash": "d57f6fa1deeff70d",
+          "value": "0x47u"
+        },
+        "EVK_AEN_I2C_ADDR_ICM42670": {
+          "hash": "c1866f51b79829e6",
+          "value": "0x2Cu"
+        },
+        "EVK_AEN_I2C_ADDR_TCAL9538": {
+          "hash": "c9fa61ae097446b7",
+          "value": "0x70u"
+        },
+        "EVK_AEN_I2C_BUS_SENSORS": {
+          "hash": "f7093f1473ba7a85",
+          "value": "ALP_E1M_I2C0"
+        },
+        "EVK_AEN_PIN_ENCODER_SW": {
+          "hash": "1bc79b9e5293d732",
+          "value": "ALP_E1M_GPIO_IO3"
+        },
+        "EVK_AEN_PIN_IO_EXP_INT": {
+          "hash": "8272a9ec25cd75aa",
+          "value": "ALP_E1M_GPIO_IO4"
+        },
+        "EVK_AEN_PIN_IO_EXP_RST": {
+          "hash": "13ddba44af3367cf",
+          "value": "ALP_E1M_GPIO_IO5"
+        },
+        "EVK_AEN_PIN_LED_BLUE": {
+          "hash": "0028ffede0846cb4",
+          "value": "ALP_E1M_GPIO_IO2"
+        },
+        "EVK_AEN_PIN_LED_GREEN": {
+          "hash": "4b3883bb43bedd41",
+          "value": "ALP_E1M_GPIO_IO1"
+        },
+        "EVK_AEN_PIN_LED_RED": {
+          "hash": "bb79eaf600140df8",
+          "value": "ALP_E1M_GPIO_IO0"
+        },
+        "EVK_AEN_SPI_BUS_M2_KEYM": {
+          "hash": "57e1a8d59b20101f",
+          "value": "ALP_E1M_SPI0"
+        },
+        "EVK_AEN_UART_PORT_DEBUG": {
+          "hash": "d11b300d771f8bc2",
+          "value": "ALP_E1M_UART0"
+        }
+      },
+      "typedefs": {}
+    },
+    "alp/camera.h": {
+      "functions": {
+        "alp_camera_capture": {
+          "hash": "f658f9abdc48ba2e",
+          "signature": "alp_status_t alp_camera_capture(alp_camera_t *c, alp_camera_frame_t *out, uint32_t timeout_ms);"
+        },
+        "alp_camera_close": {
+          "hash": "7f3bd22a2231118d",
+          "signature": "void alp_camera_close(alp_camera_t *c);"
+        },
+        "alp_camera_release": {
+          "hash": "9c155c4bf49789d5",
+          "signature": "alp_status_t alp_camera_release(alp_camera_t *c, alp_camera_frame_t *frame);"
+        },
+        "alp_camera_start": {
+          "hash": "253f9607e6c4b0e0",
+          "signature": "alp_status_t alp_camera_start(alp_camera_t *c);"
+        },
+        "alp_camera_stop": {
+          "hash": "7567a242e463a18c",
+          "signature": "alp_status_t alp_camera_stop(alp_camera_t *c);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_camera_t": {
+          "definition": "typedef struct alp_camera alp_camera_t;",
+          "hash": "fe9acbb85337fbe2"
+        },
+        "camera_id": {
+          "definition": "typedef struct { uint32_t camera_id;",
+          "hash": "6dcf01f9db6a9013"
+        },
+        "size": {
+          "definition": "typedef struct { void *data; size_t size;",
+          "hash": "05827994ea27b0b9"
+        }
+      }
+    },
+    "alp/chips/bme280.h": {
+      "functions": {
+        "bme280_compensate": {
+          "hash": "7627c186c449455e",
+          "signature": "alp_status_t bme280_compensate(bme280_t *dev, const bme280_raw_t *raw, bme280_compensated_t *out);"
+        },
+        "bme280_deinit": {
+          "hash": "a14dabfea898bb46",
+          "signature": "void bme280_deinit(bme280_t *dev);"
+        },
+        "bme280_init": {
+          "hash": "47d291f00d5277ba",
+          "signature": "alp_status_t bme280_init(bme280_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);"
+        },
+        "bme280_read_id": {
+          "hash": "9a4e65ae0b992354",
+          "signature": "alp_status_t bme280_read_id(bme280_t *dev, uint8_t *id_out);"
+        },
+        "bme280_read_raw": {
+          "hash": "08f2bb0304e0e0de",
+          "signature": "alp_status_t bme280_read_raw(bme280_t *dev, bme280_raw_t *out);"
+        },
+        "bme280_set_sampling": {
+          "hash": "0449f82eab562f6d",
+          "signature": "alp_status_t bme280_set_sampling(bme280_t *dev, bme280_oversampling_t t_os, bme280_oversampling_t p_os, bme280_oversampling_t h_os, bme280_mode_t mode, bme280_standby_t standby, bme280_filter_t filter);"
+        },
+        "bme280_soft_reset": {
+          "hash": "4029f57480f52fc1",
+          "signature": "alp_status_t bme280_soft_reset(bme280_t *dev);"
+        }
+      },
+      "macros": {
+        "BME280_CHIP_ID": {
+          "hash": "886583158ea83a61",
+          "value": "0x60"
+        },
+        "BME280_I2C_ADDR_HIGH": {
+          "hash": "e6511a9e4c4aca9f",
+          "value": "0x77"
+        },
+        "BME280_I2C_ADDR_LOW": {
+          "hash": "6a1d177f1a303dd4",
+          "value": "0x76"
+        }
+      },
+      "typedefs": {
+        "T1": {
+          "definition": "typedef struct { uint16_t T1;",
+          "hash": "a4ebc42cd045fa40"
+        },
+        "addr": {
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
+          "hash": "4e6cc227fae8a2d7"
+        },
+        "bme280_filter_t": {
+          "definition": "typedef enum { BME280_FILTER_OFF = 0x0, BME280_FILTER_2 = 0x1, BME280_FILTER_4 = 0x2, BME280_FILTER_8 = 0x3, BME280_FILTER_16 = 0x4 } bme280_filter_t;",
+          "hash": "d280f0000e30e49d"
+        },
+        "bme280_mode_t": {
+          "definition": "typedef enum { BME280_MODE_SLEEP = 0x0, BME280_MODE_FORCED = 0x1, BME280_MODE_NORMAL = 0x3 } bme280_mode_t;",
+          "hash": "31702adc991c43a7"
+        },
+        "bme280_oversampling_t": {
+          "definition": "typedef enum { BME280_OVERSAMPLING_SKIPPED = 0x0, BME280_OVERSAMPLING_X1 = 0x1, BME280_OVERSAMPLING_X2 = 0x2, BME280_OVERSAMPLING_X4 = 0x3, BME280_OVERSAMPLING_X8 = 0x4, BME280_OVERSAMPLING_X16 = 0x5 } bme280_oversampling_t;",
+          "hash": "52fcd0b1bb01d300"
+        },
+        "bme280_standby_t": {
+          "definition": "typedef enum { BME280_STANDBY_0_5_MS = 0x0, BME280_STANDBY_62_5_MS = 0x1, BME280_STANDBY_125_MS = 0x2, BME280_STANDBY_250_MS = 0x3, BME280_STANDBY_500_MS = 0x4, BME280_STANDBY_1000_MS = 0x5, BME280_STANDBY_10_MS = 0x6, BME280_STANDBY_20_MS = 0x7 } bme280_standby_t;",
+          "hash": "4fe5663b92d438b0"
+        },
+        "pressure_raw": {
+          "definition": "typedef struct { int32_t pressure_raw;",
+          "hash": "ee926a6c072cda58"
+        },
+        "temperature_c100": {
+          "definition": "typedef struct { int32_t temperature_c100;",
+          "hash": "95417db67614f268"
+        }
+      }
+    },
+    "alp/chips/button_led.h": {
+      "functions": {
+        "alp_button_led_deinit": {
+          "hash": "38c1b5d92e7c2432",
+          "signature": "void alp_button_led_deinit(alp_button_led_t *bl);"
+        },
+        "alp_button_led_init": {
+          "hash": "368fdb17d1d2bfad",
+          "signature": "alp_status_t alp_button_led_init(alp_button_led_t *bl, const alp_button_led_config_t *cfg);"
+        },
+        "alp_button_led_is_pressed": {
+          "hash": "16aa058e09f06d0e",
+          "signature": "alp_status_t alp_button_led_is_pressed(alp_button_led_t *bl, bool *pressed);"
+        },
+        "alp_button_led_set": {
+          "hash": "eb118ea141cdae67",
+          "signature": "alp_status_t alp_button_led_set(alp_button_led_t *bl, bool on);"
+        },
+        "alp_button_led_set_press_callback": {
+          "hash": "c10c4045e6046de0",
+          "signature": "alp_status_t alp_button_led_set_press_callback(alp_button_led_t *bl, alp_button_led_press_cb_t cb, void *user);"
+        },
+        "alp_button_led_toggle": {
+          "hash": "e2bab4117006cb00",
+          "signature": "alp_status_t alp_button_led_toggle(alp_button_led_t *bl);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_button_led_press_cb_t": {
+          "definition": "typedef void (*alp_button_led_press_cb_t)(void *user);",
+          "hash": "dbefd5fdce770101"
+        },
+        "button_pin_id": {
+          "definition": "typedef struct { uint32_t button_pin_id;",
+          "hash": "7ffb02ca201f45f3"
+        },
+        "press_cb": {
+          "definition": "typedef void (*alp_button_led_press_cb_t)(void *user); typedef struct { alp_gpio_t *button; alp_gpio_t *led; alp_button_led_press_cb_t press_cb;",
+          "hash": "328f56822d212db6"
+        }
+      }
+    },
+    "alp/chips/lis2dw12.h": {
+      "functions": {
+        "lis2dw12_deinit": {
+          "hash": "2ada32bb7d4b679c",
+          "signature": "void lis2dw12_deinit(lis2dw12_t *dev);"
+        },
+        "lis2dw12_init": {
+          "hash": "5d5207b28373d3d8",
+          "signature": "alp_status_t lis2dw12_init(lis2dw12_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);"
+        },
+        "lis2dw12_read_accel": {
+          "hash": "07014d5dbf531f9b",
+          "signature": "alp_status_t lis2dw12_read_accel(lis2dw12_t *dev, lis2dw12_axes_t *out);"
+        },
+        "lis2dw12_read_id": {
+          "hash": "ae19d567ca48c18e",
+          "signature": "alp_status_t lis2dw12_read_id(lis2dw12_t *dev, uint8_t *id_out);"
+        },
+        "lis2dw12_read_temp": {
+          "hash": "803ee55cd84495ec",
+          "signature": "alp_status_t lis2dw12_read_temp(lis2dw12_t *dev, int16_t *temp_raw);"
+        },
+        "lis2dw12_set_accel": {
+          "hash": "e733de5a039013b4",
+          "signature": "alp_status_t lis2dw12_set_accel(lis2dw12_t *dev, lis2dw12_odr_t odr, lis2dw12_fs_t fs, lis2dw12_mode_t mode);"
+        }
+      },
+      "macros": {
+        "LIS2DW12_I2C_ADDR_HIGH": {
+          "hash": "0df946ec2dacb7d7",
+          "value": "0x19"
+        },
+        "LIS2DW12_I2C_ADDR_LOW": {
+          "hash": "6917cfe1d4cb6419",
+          "value": "0x18"
+        },
+        "LIS2DW12_WHO_AM_I_VAL": {
+          "hash": "5d3988c79b14820e",
+          "value": "0x44"
+        }
+      },
+      "typedefs": {
+        "addr": {
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
+          "hash": "4e6cc227fae8a2d7"
+        },
+        "lis2dw12_fs_t": {
+          "definition": "typedef enum { LIS2DW12_FS_2G = 0x0, LIS2DW12_FS_4G = 0x1, LIS2DW12_FS_8G = 0x2, LIS2DW12_FS_16G = 0x3 } lis2dw12_fs_t;",
+          "hash": "664b97542455cb05"
+        },
+        "lis2dw12_mode_t": {
+          "definition": "typedef enum { LIS2DW12_MODE_LOW_POWER_12BIT = 0x0, LIS2DW12_MODE_LOW_POWER_14BIT = 0x1, LIS2DW12_MODE_HIGH_PERF_14BIT = 0x2, LIS2DW12_MODE_SINGLE_SHOT = 0x3 } lis2dw12_mode_t;",
+          "hash": "f98e9b9ad75fc2fc"
+        },
+        "lis2dw12_odr_t": {
+          "definition": "typedef enum { LIS2DW12_ODR_OFF = 0x0, LIS2DW12_ODR_1_6_HZ = 0x1, LIS2DW12_ODR_12_5_HZ = 0x2, LIS2DW12_ODR_25_HZ = 0x3, LIS2DW12_ODR_50_HZ = 0x4, LIS2DW12_ODR_100_HZ = 0x5, LIS2DW12_ODR_200_HZ = 0x6, LIS2DW12_ODR_400_HZ = 0x7, LIS2DW12_ODR_800_HZ = 0x8, LIS2DW12_ODR_1600_HZ = 0x9 } lis2dw12_odr_t;",
+          "hash": "3e163d307cab62c1"
+        },
+        "x": {
+          "definition": "typedef struct { int16_t x;",
+          "hash": "6a108468d82a3348"
+        }
+      }
+    },
+    "alp/chips/lsm6dso.h": {
+      "functions": {
+        "lsm6dso_deinit": {
+          "hash": "4ee7dca3d796db17",
+          "signature": "void lsm6dso_deinit(lsm6dso_t *dev);"
+        },
+        "lsm6dso_init": {
+          "hash": "e511137f89ccbc62",
+          "signature": "alp_status_t lsm6dso_init(lsm6dso_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);"
+        },
+        "lsm6dso_read_accel": {
+          "hash": "e0c709f8486efcfe",
+          "signature": "alp_status_t lsm6dso_read_accel(lsm6dso_t *dev, lsm6dso_axes_t *out);"
+        },
+        "lsm6dso_read_gyro": {
+          "hash": "c78bde2369dc69b0",
+          "signature": "alp_status_t lsm6dso_read_gyro(lsm6dso_t *dev, lsm6dso_axes_t *out);"
+        },
+        "lsm6dso_read_id": {
+          "hash": "8ae55af50df95662",
+          "signature": "alp_status_t lsm6dso_read_id(lsm6dso_t *dev, uint8_t *id_out);"
+        },
+        "lsm6dso_read_temp": {
+          "hash": "04bfd2a4df2dac90",
+          "signature": "alp_status_t lsm6dso_read_temp(lsm6dso_t *dev, int16_t *temp_raw);"
+        },
+        "lsm6dso_set_accel": {
+          "hash": "99cd4a09a8f0a61b",
+          "signature": "alp_status_t lsm6dso_set_accel(lsm6dso_t *dev, lsm6dso_odr_t odr, lsm6dso_accel_fs_t fs);"
+        },
+        "lsm6dso_set_gyro": {
+          "hash": "deea0d3c3c03437e",
+          "signature": "alp_status_t lsm6dso_set_gyro(lsm6dso_t *dev, lsm6dso_odr_t odr, lsm6dso_gyro_fs_t fs);"
+        }
+      },
+      "macros": {
+        "LSM6DSO_I2C_ADDR_HIGH": {
+          "hash": "5b951922fc468d51",
+          "value": "0x6B"
+        },
+        "LSM6DSO_I2C_ADDR_LOW": {
+          "hash": "79f0c469631116b1",
+          "value": "0x6A"
+        },
+        "LSM6DSO_WHO_AM_I_VAL": {
+          "hash": "2f90126304e4f31e",
+          "value": "0x6C"
+        }
+      },
+      "typedefs": {
+        "addr": {
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
+          "hash": "4e6cc227fae8a2d7"
+        },
+        "lsm6dso_accel_fs_t": {
+          "definition": "typedef enum { LSM6DSO_ACCEL_FS_2G = 0x0, LSM6DSO_ACCEL_FS_16G = 0x1, LSM6DSO_ACCEL_FS_4G = 0x2, LSM6DSO_ACCEL_FS_8G = 0x3 } lsm6dso_accel_fs_t;",
+          "hash": "40405ee1fc9b6e23"
+        },
+        "lsm6dso_gyro_fs_t": {
+          "definition": "typedef enum { LSM6DSO_GYRO_FS_250_DPS = 0x0, LSM6DSO_GYRO_FS_500_DPS = 0x1, LSM6DSO_GYRO_FS_1000_DPS = 0x2, LSM6DSO_GYRO_FS_2000_DPS = 0x3 } lsm6dso_gyro_fs_t;",
+          "hash": "bab225e2ee30dc7f"
+        },
+        "lsm6dso_odr_t": {
+          "definition": "typedef enum { LSM6DSO_ODR_OFF = 0x0, LSM6DSO_ODR_12_5_HZ = 0x1, LSM6DSO_ODR_26_HZ = 0x2, LSM6DSO_ODR_52_HZ = 0x3, LSM6DSO_ODR_104_HZ = 0x4, LSM6DSO_ODR_208_HZ = 0x5, LSM6DSO_ODR_416_HZ = 0x6, LSM6DSO_ODR_833_HZ = 0x7, LSM6DSO_ODR_1660_HZ = 0x8, LSM6DSO_ODR_3330_HZ = 0x9, LSM6DSO_ODR_6660_HZ = 0xA } lsm6dso_odr_t;",
+          "hash": "4b5b6be76ce3d90f"
+        },
+        "x": {
+          "definition": "typedef struct { int16_t x;",
+          "hash": "6a108468d82a3348"
+        }
+      }
+    },
+    "alp/chips/ov5640.h": {
+      "functions": {
+        "ov5640_deinit": {
+          "hash": "2397fdd0ab0f7830",
+          "signature": "void ov5640_deinit(ov5640_t *dev);"
+        },
+        "ov5640_init": {
+          "hash": "62e26e1ac5f12c78",
+          "signature": "alp_status_t ov5640_init(ov5640_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);"
+        },
+        "ov5640_read_id": {
+          "hash": "e130d39354dc7f68",
+          "signature": "alp_status_t ov5640_read_id(ov5640_t *dev, uint16_t *id_out);"
+        },
+        "ov5640_set_format": {
+          "hash": "21e8518da398bb09",
+          "signature": "alp_status_t ov5640_set_format(ov5640_t *dev, ov5640_format_t fmt);"
+        },
+        "ov5640_set_resolution": {
+          "hash": "a46cc59710cfac60",
+          "signature": "alp_status_t ov5640_set_resolution(ov5640_t *dev, ov5640_resolution_t res);"
+        },
+        "ov5640_set_test_pattern": {
+          "hash": "892144321d49f9b2",
+          "signature": "alp_status_t ov5640_set_test_pattern(ov5640_t *dev, bool enabled);"
+        },
+        "ov5640_soft_reset": {
+          "hash": "e6d4ad5443210316",
+          "signature": "alp_status_t ov5640_soft_reset(ov5640_t *dev);"
+        }
+      },
+      "macros": {
+        "OV5640_CHIP_ID": {
+          "hash": "d648e8440bb8c92f",
+          "value": "0x5640"
+        },
+        "OV5640_I2C_ADDR": {
+          "hash": "63787235705ef944",
+          "value": "0x3C"
+        },
+        "OV5640_REG_CHIP_ID_HI": {
+          "hash": "ce9219f447610a1a",
+          "value": "0x300A"
+        },
+        "OV5640_REG_CHIP_ID_LO": {
+          "hash": "b6c3f4e5d8ca6efc",
+          "value": "0x300B"
+        }
+      },
+      "typedefs": {
+        "addr": {
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
+          "hash": "4e6cc227fae8a2d7"
+        },
+        "ov5640_format_t": {
+          "definition": "typedef enum { OV5640_FMT_RGB565 = 0, OV5640_FMT_YUV422 = 1, OV5640_FMT_JPEG = 2, OV5640_FMT_RAW8 = 3 } ov5640_format_t;",
+          "hash": "21e5eab782deea70"
+        },
+        "ov5640_resolution_t": {
+          "definition": "typedef enum { OV5640_RES_QVGA = 0, OV5640_RES_VGA = 1, OV5640_RES_720P = 2, OV5640_RES_1080P = 3, OV5640_RES_5MP = 4 } ov5640_resolution_t;",
+          "hash": "18e6ebf1568accb4"
+        }
+      }
+    },
+    "alp/chips/pdm_mic.h": {
+      "functions": {
+        "alp_pdm_mic_close": {
+          "hash": "17b93427b2127618",
+          "signature": "void alp_pdm_mic_close(alp_pdm_mic_t *mic);"
+        },
+        "alp_pdm_mic_read": {
+          "hash": "643148cb708da6ab",
+          "signature": "alp_status_t alp_pdm_mic_read(alp_pdm_mic_t *mic, int16_t *out, size_t frames, size_t *out_frames, uint32_t timeout_ms);"
+        },
+        "alp_pdm_mic_set_gain": {
+          "hash": "81e674724d2466de",
+          "signature": "alp_status_t alp_pdm_mic_set_gain(alp_pdm_mic_t *mic, int32_t left_gain_db, int32_t right_gain_db);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_pdm_mic_channels_t": {
+          "definition": "typedef enum { ALP_PDM_MIC_MONO = 1, ALP_PDM_MIC_STEREO = 2 } alp_pdm_mic_channels_t;",
+          "hash": "6b3f20479ada08cf"
+        },
+        "alp_pdm_mic_t": {
+          "definition": "typedef struct alp_pdm_mic alp_pdm_mic_t;",
+          "hash": "e6a282768a365cdc"
+        },
+        "peripheral_id": {
+          "definition": "typedef struct { uint32_t peripheral_id;",
+          "hash": "c6d34a422215091d"
+        }
+      }
+    },
+    "alp/chips/ssd1306.h": {
+      "functions": {
+        "ssd1306_clear": {
+          "hash": "1f7c89053d7e0fdb",
+          "signature": "void ssd1306_clear(ssd1306_t *dev);"
+        },
+        "ssd1306_deinit": {
+          "hash": "a764e2d20711ff44",
+          "signature": "void ssd1306_deinit(ssd1306_t *dev);"
+        },
+        "ssd1306_display": {
+          "hash": "b728486b7052a158",
+          "signature": "alp_status_t ssd1306_display(ssd1306_t *dev);"
+        },
+        "ssd1306_draw_pixel": {
+          "hash": "0c66098296b307f0",
+          "signature": "void ssd1306_draw_pixel(ssd1306_t *dev, uint16_t x, uint16_t y, bool on);"
+        },
+        "ssd1306_init": {
+          "hash": "981ee1c625c59271",
+          "signature": "alp_status_t ssd1306_init(ssd1306_t *dev, alp_i2c_t *bus, uint8_t i2c_addr, uint16_t width, uint16_t height);"
+        },
+        "ssd1306_set_contrast": {
+          "hash": "89222f5a07cb67a8",
+          "signature": "alp_status_t ssd1306_set_contrast(ssd1306_t *dev, uint8_t contrast);"
+        },
+        "ssd1306_set_display_on": {
+          "hash": "aba4c567998b3db8",
+          "signature": "alp_status_t ssd1306_set_display_on(ssd1306_t *dev, bool on);"
+        },
+        "ssd1306_set_inverted": {
+          "hash": "c8b0c80974985d49",
+          "signature": "alp_status_t ssd1306_set_inverted(ssd1306_t *dev, bool inverted);"
+        }
+      },
+      "macros": {
+        "SSD1306_I2C_ADDR_HIGH": {
+          "hash": "f54d56605b374ffc",
+          "value": "0x3D"
+        },
+        "SSD1306_I2C_ADDR_LOW": {
+          "hash": "732f67694017409f",
+          "value": "0x3C"
+        },
+        "SSD1306_MAX_FB_BYTES": {
+          "hash": "2181fa746b84cdaa",
+          "value": "(SSD1306_MAX_WIDTH * SSD1306_MAX_HEIGHT / 8)"
+        },
+        "SSD1306_MAX_HEIGHT": {
+          "hash": "1cd9e9b71e7b7711",
+          "value": "64"
+        },
+        "SSD1306_MAX_WIDTH": {
+          "hash": "003b0903730b1727",
+          "value": "128"
+        }
+      },
+      "typedefs": {
+        "addr": {
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
+          "hash": "4e6cc227fae8a2d7"
+        }
+      }
+    },
+    "alp/chips/ssd1331.h": {
+      "functions": {
+        "ssd1331_clear": {
+          "hash": "c18dc8c53238dd60",
+          "signature": "void ssd1331_clear(ssd1331_t *dev);"
+        },
+        "ssd1331_deinit": {
+          "hash": "a51885655c3f67ed",
+          "signature": "void ssd1331_deinit(ssd1331_t *dev);"
+        },
+        "ssd1331_display": {
+          "hash": "137dc26f0a1c2535",
+          "signature": "alp_status_t ssd1331_display(ssd1331_t *dev);"
+        },
+        "ssd1331_draw_pixel": {
+          "hash": "93cad0fdbd746eb3",
+          "signature": "void ssd1331_draw_pixel(ssd1331_t *dev, uint16_t x, uint16_t y, uint16_t colour);"
+        },
+        "ssd1331_init": {
+          "hash": "2a9bc201d86fe0aa",
+          "signature": "alp_status_t ssd1331_init(ssd1331_t *dev, alp_spi_t *spi, alp_gpio_t *dc, uint8_t *fb, size_t fb_len);"
+        },
+        "ssd1331_set_display_on": {
+          "hash": "4f6f5f12782920e0",
+          "signature": "alp_status_t ssd1331_set_display_on(ssd1331_t *dev, bool on);"
+        },
+        "ssd1331_set_master_current": {
+          "hash": "28187233221f2fd8",
+          "signature": "alp_status_t ssd1331_set_master_current(ssd1331_t *dev, uint8_t current);"
+        }
+      },
+      "macros": {
+        "SSD1331_BPP": {
+          "hash": "d3cd54597c646e4c",
+          "value": "2"
+        },
+        "SSD1331_FB_BYTES": {
+          "hash": "2b5d43abd8f81173",
+          "value": "(SSD1331_WIDTH * SSD1331_HEIGHT * SSD1331_BPP)"
+        },
+        "SSD1331_HEIGHT": {
+          "hash": "5561e5cbcd96b8b1",
+          "value": "64"
+        },
+        "SSD1331_WIDTH": {
+          "hash": "7ebfe71ccea613df",
+          "value": "96"
+        }
+      },
+      "typedefs": {
+        "fb_len": {
+          "definition": "typedef struct { alp_spi_t *bus; alp_gpio_t *dc; uint8_t *fb; size_t fb_len;",
+          "hash": "68009f16bb56d1b9"
+        }
+      }
+    },
+    "alp/display.h": {
+      "functions": {
+        "alp_display_blit": {
+          "hash": "8f4cb6197d53cea3",
+          "signature": "alp_status_t alp_display_blit(alp_display_t *d, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *pixels);"
+        },
+        "alp_display_clear": {
+          "hash": "78a602221f830803",
+          "signature": "alp_status_t alp_display_clear(alp_display_t *d);"
+        },
+        "alp_display_close": {
+          "hash": "1c4fa94f624e55dc",
+          "signature": "void alp_display_close(alp_display_t *d);"
+        },
+        "alp_display_get_caps": {
+          "hash": "201dcea1acc1b993",
+          "signature": "alp_status_t alp_display_get_caps(alp_display_t *d, alp_display_caps_t *out);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_display_t": {
+          "definition": "typedef struct alp_display alp_display_t;",
+          "hash": "b491dfcacfd97666"
+        },
+        "display_id": {
+          "definition": "typedef struct { uint32_t display_id;",
+          "hash": "269c70732974b8d2"
+        },
+        "width": {
+          "definition": "typedef struct { uint16_t width;",
+          "hash": "e6df9b65e164d8a9"
+        }
+      }
+    },
+    "alp/e1m_pinout.h": {
+      "functions": {},
+      "macros": {
+        "ALP_E1M_ADC0": {
+          "hash": "6cda6d12c10877b7",
+          "value": "0u"
+        },
+        "ALP_E1M_ADC1": {
+          "hash": "b3297fe2e1f5e5a4",
+          "value": "1u"
+        },
+        "ALP_E1M_ADC2": {
+          "hash": "5cb98f124152f2f1",
+          "value": "2u"
+        },
+        "ALP_E1M_ADC3": {
+          "hash": "61a71f30510bc787",
+          "value": "3u"
+        },
+        "ALP_E1M_ADC4": {
+          "hash": "ae0fa6772646eebe",
+          "value": "4u"
+        },
+        "ALP_E1M_ADC5": {
+          "hash": "c8eff169afd69275",
+          "value": "5u"
+        },
+        "ALP_E1M_ADC6": {
+          "hash": "cf4be74aaeb7f556",
+          "value": "6u"
+        },
+        "ALP_E1M_ADC7": {
+          "hash": "1e6bcb479fcc9a98",
+          "value": "7u"
+        },
+        "ALP_E1M_CAM0": {
+          "hash": "464727c41987d309",
+          "value": "0u"
+        },
+        "ALP_E1M_CAM1": {
+          "hash": "3ea1ad2bed46aca1",
+          "value": "1u"
+        },
+        "ALP_E1M_CAN0": {
+          "hash": "e7db6a98243eda94",
+          "value": "0u"
+        },
+        "ALP_E1M_CSI0": {
+          "hash": "05b29585251e3916",
+          "value": "0u"
+        },
+        "ALP_E1M_DAC0": {
+          "hash": "f599967026c9cddf",
+          "value": "0u"
+        },
+        "ALP_E1M_DAC1": {
+          "hash": "bfb5f2201f9f6858",
+          "value": "1u"
+        },
+        "ALP_E1M_DSI0": {
+          "hash": "c989b3905d531c23",
+          "value": "0u"
+        },
+        "ALP_E1M_ETH0": {
+          "hash": "9049cd2cfe8a13bf",
+          "value": "0u"
+        },
+        "ALP_E1M_GPIO_COUNT": {
+          "hash": "ee3c6631d0097965",
+          "value": "42u"
+        },
+        "ALP_E1M_GPIO_ENC0_X": {
+          "hash": "a12c70c5437664b1",
+          "value": "34u"
+        },
+        "ALP_E1M_GPIO_ENC0_Y": {
+          "hash": "3a3d9869a4cd81ae",
+          "value": "35u"
+        },
+        "ALP_E1M_GPIO_ENC1_X": {
+          "hash": "a542e8e2635e811d",
+          "value": "36u"
+        },
+        "ALP_E1M_GPIO_ENC1_Y": {
+          "hash": "1c8328489725f6a8",
+          "value": "37u"
+        },
+        "ALP_E1M_GPIO_ENC2_X": {
+          "hash": "25be373d4622ba91",
+          "value": "38u"
+        },
+        "ALP_E1M_GPIO_ENC2_Y": {
+          "hash": "2d803a02b5e9d067",
+          "value": "39u"
+        },
+        "ALP_E1M_GPIO_ENC3_X": {
+          "hash": "97611822c6990acc",
+          "value": "40u"
+        },
+        "ALP_E1M_GPIO_ENC3_Y": {
+          "hash": "2b320b3f5f813dc2",
+          "value": "41u"
+        },
+        "ALP_E1M_GPIO_IO0": {
+          "hash": "54450082a875f059",
+          "value": "0u"
+        },
+        "ALP_E1M_GPIO_IO1": {
+          "hash": "91fedf45956f1497",
+          "value": "1u"
+        },
+        "ALP_E1M_GPIO_IO10": {
+          "hash": "f50384f57420260a",
+          "value": "10u"
+        },
+        "ALP_E1M_GPIO_IO11": {
+          "hash": "9fd42a0eaba42c76",
+          "value": "11u"
+        },
+        "ALP_E1M_GPIO_IO12": {
+          "hash": "ef4278b17a6bfb2e",
+          "value": "12u"
+        },
+        "ALP_E1M_GPIO_IO13": {
+          "hash": "bf757407b7a201e2",
+          "value": "13u"
+        },
+        "ALP_E1M_GPIO_IO14": {
+          "hash": "63f6ad51f76c3697",
+          "value": "14u"
+        },
+        "ALP_E1M_GPIO_IO15": {
+          "hash": "c2734daa7c02d7e6",
+          "value": "15u"
+        },
+        "ALP_E1M_GPIO_IO16": {
+          "hash": "f72b27e33d34d6ff",
+          "value": "16u"
+        },
+        "ALP_E1M_GPIO_IO17": {
+          "hash": "aeb64c3885b9d06c",
+          "value": "17u"
+        },
+        "ALP_E1M_GPIO_IO18": {
+          "hash": "a954b13693e52a2f",
+          "value": "18u"
+        },
+        "ALP_E1M_GPIO_IO19": {
+          "hash": "21e5a23ce17ed04d",
+          "value": "19u"
+        },
+        "ALP_E1M_GPIO_IO2": {
+          "hash": "ad736319ab7f6e43",
+          "value": "2u"
+        },
+        "ALP_E1M_GPIO_IO20": {
+          "hash": "d1d823da664ce739",
+          "value": "20u"
+        },
+        "ALP_E1M_GPIO_IO21": {
+          "hash": "52f2877d89303600",
+          "value": "21u"
+        },
+        "ALP_E1M_GPIO_IO22": {
+          "hash": "fcdf500c8094ff28",
+          "value": "22u"
+        },
+        "ALP_E1M_GPIO_IO23": {
+          "hash": "b48ef147b5fde19a",
+          "value": "23u"
+        },
+        "ALP_E1M_GPIO_IO24": {
+          "hash": "f20aa68b97072dd9",
+          "value": "24u"
+        },
+        "ALP_E1M_GPIO_IO25": {
+          "hash": "5119bbe647bacb9a",
+          "value": "25u"
+        },
+        "ALP_E1M_GPIO_IO3": {
+          "hash": "bac8b6e01de085ee",
+          "value": "3u"
+        },
+        "ALP_E1M_GPIO_IO4": {
+          "hash": "d78e0794f08559b3",
+          "value": "4u"
+        },
+        "ALP_E1M_GPIO_IO5": {
+          "hash": "b5c0b04d9aaeb8a9",
+          "value": "5u"
+        },
+        "ALP_E1M_GPIO_IO6": {
+          "hash": "1e5d070b935f729e",
+          "value": "6u"
+        },
+        "ALP_E1M_GPIO_IO7": {
+          "hash": "cac244214f2772ee",
+          "value": "7u"
+        },
+        "ALP_E1M_GPIO_IO8": {
+          "hash": "505948fb62e53a30",
+          "value": "8u"
+        },
+        "ALP_E1M_GPIO_IO9": {
+          "hash": "1f6a8187801df139",
+          "value": "9u"
+        },
+        "ALP_E1M_GPIO_PWM0": {
+          "hash": "d2a08716c93cdd36",
+          "value": "26u"
+        },
+        "ALP_E1M_GPIO_PWM1": {
+          "hash": "976caba65d581eed",
+          "value": "27u"
+        },
+        "ALP_E1M_GPIO_PWM2": {
+          "hash": "b99d4612702340e1",
+          "value": "28u"
+        },
+        "ALP_E1M_GPIO_PWM3": {
+          "hash": "41ba7aa4e6f554f3",
+          "value": "29u"
+        },
+        "ALP_E1M_GPIO_PWM4": {
+          "hash": "bc7fcefd02489fe5",
+          "value": "30u"
+        },
+        "ALP_E1M_GPIO_PWM5": {
+          "hash": "807d450eed6554f9",
+          "value": "31u"
+        },
+        "ALP_E1M_GPIO_PWM6": {
+          "hash": "ae2cacd87f37d801",
+          "value": "32u"
+        },
+        "ALP_E1M_GPIO_PWM7": {
+          "hash": "db40f627123897b4",
+          "value": "33u"
+        },
+        "ALP_E1M_I2C0": {
+          "hash": "7a7659a2edf7f9ff",
+          "value": "0u"
+        },
+        "ALP_E1M_I2C1": {
+          "hash": "34165c0e638a494b",
+          "value": "1u"
+        },
+        "ALP_E1M_I2S0": {
+          "hash": "c03ef9a4af3ba886",
+          "value": "0u"
+        },
+        "ALP_E1M_I2S1": {
+          "hash": "df23df819d6b97f0",
+          "value": "1u"
+        },
+        "ALP_E1M_I3C0": {
+          "hash": "d5fc76e52ffb8650",
+          "value": "0u"
+        },
+        "ALP_E1M_JTAG0": {
+          "hash": "c610567b2d2d5858",
+          "value": "0u"
+        },
+        "ALP_E1M_PARCAM0": {
+          "hash": "2194e217decb11a3",
+          "value": "0u"
+        },
+        "ALP_E1M_PDM0": {
+          "hash": "4c9390333a3c2ea1",
+          "value": "0u"
+        },
+        "ALP_E1M_PDM1": {
+          "hash": "05a98fef3e638cac",
+          "value": "1u"
+        },
+        "ALP_E1M_SDIO0": {
+          "hash": "b68a377be3fc78c9",
+          "value": "0u"
+        },
+        "ALP_E1M_SPI0": {
+          "hash": "b77e6324aef8a9ce",
+          "value": "0u"
+        },
+        "ALP_E1M_SPI1": {
+          "hash": "bdfa7bc19766c75e",
+          "value": "1u"
+        },
+        "ALP_E1M_UART0": {
+          "hash": "d5f6cea542fae606",
+          "value": "0u"
+        },
+        "ALP_E1M_UART1": {
+          "hash": "475e00c29b4cc709",
+          "value": "1u"
+        },
+        "ALP_E1M_USB0": {
+          "hash": "a83a85c36a083b41",
+          "value": "0u"
+        },
+        "ALP_E1M_USB2": {
+          "hash": "23c8ec9056357f3f",
+          "value": "0u"
+        }
+      },
+      "typedefs": {}
+    },
+    "alp/gui.h": {
+      "functions": {
+        "alp_gui_lvgl_attach": {
+          "hash": "c74b7b39031c8879",
+          "signature": "endif alp_status_t alp_gui_lvgl_attach(alp_display_t *display);"
+        }
+      },
+      "macros": {},
+      "typedefs": {}
+    },
+    "alp/iot.h": {
+      "functions": {
+        "alp_mqtt_close": {
+          "hash": "0ac8ff8b3605fe22",
+          "signature": "void alp_mqtt_close(alp_mqtt_t *m);"
+        },
+        "alp_mqtt_connect": {
+          "hash": "baba6f47cbe37a9d",
+          "signature": "alp_status_t alp_mqtt_connect(alp_mqtt_t *m, uint32_t timeout_ms);"
+        },
+        "alp_mqtt_loop": {
+          "hash": "c1b2a52fb8ced50e",
+          "signature": "alp_status_t alp_mqtt_loop(alp_mqtt_t *m, uint32_t timeout_ms);"
+        },
+        "alp_mqtt_publish": {
+          "hash": "4c1fd4c8e907da33",
+          "signature": "alp_status_t alp_mqtt_publish(alp_mqtt_t *m, const char *topic, const uint8_t *payload, size_t len, alp_mqtt_qos_t qos, bool retain);"
+        },
+        "alp_mqtt_subscribe": {
+          "hash": "b8479a63c6a41f12",
+          "signature": "alp_status_t alp_mqtt_subscribe(alp_mqtt_t *m, const char *topic_filter, alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user);"
+        },
+        "alp_wifi_close": {
+          "hash": "54a8c1b1f5700c8d",
+          "signature": "void alp_wifi_close(alp_wifi_t *w);"
+        },
+        "alp_wifi_connect": {
+          "hash": "f9f9c025cc4f7327",
+          "signature": "alp_status_t alp_wifi_connect(alp_wifi_t *w, const alp_wifi_credentials_t *creds, uint32_t timeout_ms);"
+        },
+        "alp_wifi_disconnect": {
+          "hash": "9b6a44ba61887635",
+          "signature": "alp_status_t alp_wifi_disconnect(alp_wifi_t *w);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_mqtt_msg_cb_t": {
+          "definition": "typedef void (*alp_mqtt_msg_cb_t)(const char *topic, const uint8_t *payload, size_t len, void *user);",
+          "hash": "21de4b6765b57e60"
+        },
+        "alp_mqtt_qos_t": {
+          "definition": "typedef enum { ALP_MQTT_QOS_0 = 0, ALP_MQTT_QOS_1 = 1, ALP_MQTT_QOS_2 = 2 } alp_mqtt_qos_t;",
+          "hash": "854deb8cf29d137a"
+        },
+        "alp_mqtt_t": {
+          "definition": "typedef struct alp_mqtt alp_mqtt_t;",
+          "hash": "d3e42ae992ae9088"
+        },
+        "alp_wifi_credentials_t": {
+          "definition": "typedef struct { const char *ssid; const char *psk; } alp_wifi_credentials_t;",
+          "hash": "2f1f03f9b723df79"
+        },
+        "alp_wifi_t": {
+          "definition": "typedef struct alp_wifi alp_wifi_t;",
+          "hash": "600afdff064fac2f"
+        },
+        "keepalive_s": {
+          "definition": "typedef struct { const char *broker_uri; const char *client_id; const char *username; const char *password; uint16_t keepalive_s;",
+          "hash": "a7e99fc7d2affff5"
+        }
+      }
+    },
+    "alp/math.h": {
+      "functions": {},
+      "macros": {},
+      "typedefs": {}
+    },
+    "alp/mproc.h": {
+      "functions": {
+        "alp_hwsem_close": {
+          "hash": "47518fc58aae0b5f",
+          "signature": "void alp_hwsem_close(alp_hwsem_t *sem);"
+        },
+        "alp_hwsem_lock": {
+          "hash": "76755b7a89b05432",
+          "signature": "alp_status_t alp_hwsem_lock(alp_hwsem_t *sem, uint32_t timeout_ms);"
+        },
+        "alp_hwsem_try_lock": {
+          "hash": "573390058e39a10c",
+          "signature": "alp_status_t alp_hwsem_try_lock(alp_hwsem_t *sem);"
+        },
+        "alp_hwsem_unlock": {
+          "hash": "487aa9bd01cd2ae9",
+          "signature": "alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem);"
+        },
+        "alp_mbox_close": {
+          "hash": "6d1bbc72889a6ca9",
+          "signature": "void alp_mbox_close(alp_mbox_t *mb);"
+        },
+        "alp_mbox_send": {
+          "hash": "9c9d37adaa84a0f4",
+          "signature": "alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len, uint32_t timeout_ms);"
+        },
+        "alp_mbox_set_callback": {
+          "hash": "47b4010791d6990b",
+          "signature": "alp_status_t alp_mbox_set_callback(alp_mbox_t *mb, alp_mbox_msg_cb_t cb, void *user);"
+        },
+        "alp_shmem_close": {
+          "hash": "8c6ab0d499f113be",
+          "signature": "void alp_shmem_close(alp_shmem_t *s);"
+        },
+        "alp_shmem_view": {
+          "hash": "f4af38b75a515761",
+          "signature": "alp_status_t alp_shmem_view(alp_shmem_t *s, void **base_out, size_t *size_out);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_core_id_t": {
+          "definition": "typedef enum { ALP_CORE_SELF = 0, ALP_CORE_M55_HP = 1, ALP_CORE_M55_HE = 2, ALP_CORE_A32_0 = 3, ALP_CORE_A32_1 = 4 } alp_core_id_t;",
+          "hash": "71c1c3ef46bf4221"
+        },
+        "alp_hwsem_t": {
+          "definition": "typedef struct alp_hwsem alp_hwsem_t;",
+          "hash": "84a550abc04c0231"
+        },
+        "alp_mbox_msg_cb_t": {
+          "definition": "typedef void (*alp_mbox_msg_cb_t)(uint32_t channel, const void *data, size_t len, void *user);",
+          "hash": "5e32332d223b543d"
+        },
+        "alp_mbox_t": {
+          "definition": "typedef struct alp_mbox alp_mbox_t;",
+          "hash": "bdd04c9d678a4867"
+        },
+        "alp_shmem_t": {
+          "definition": "typedef struct alp_shmem alp_shmem_t;",
+          "hash": "e88dd2b1759ae191"
+        },
+        "channel": {
+          "definition": "typedef void (*alp_mbox_msg_cb_t)(uint32_t channel, const void *data, size_t len, void *user); typedef struct { uint32_t channel;",
+          "hash": "5b57aa1b040fb0bc"
+        },
+        "size": {
+          "definition": "typedef struct { const char *name; size_t size;",
+          "hash": "e78ae32333e52fce"
+        }
+      }
+    },
+    "alp/peripheral.h": {
+      "functions": {
+        "alp_gpio_close": {
+          "hash": "bff6723b4416ce0b",
+          "signature": "void alp_gpio_close(alp_gpio_t *pin);"
+        },
+        "alp_gpio_configure": {
+          "hash": "582fc0d6c532e01f",
+          "signature": "alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pull_t pull);"
+        },
+        "alp_gpio_irq_disable": {
+          "hash": "1cb4cff83e5aa422",
+          "signature": "alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin);"
+        },
+        "alp_gpio_irq_enable": {
+          "hash": "0d39b8224a038585",
+          "signature": "alp_status_t alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, void *user);"
+        },
+        "alp_gpio_read": {
+          "hash": "e6150f59872b3bcb",
+          "signature": "alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level);"
+        },
+        "alp_gpio_write": {
+          "hash": "1ed2c1a2170d6399",
+          "signature": "alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level);"
+        },
+        "alp_i2c_close": {
+          "hash": "37c43c93fb338484",
+          "signature": "void alp_i2c_close(alp_i2c_t *bus);"
+        },
+        "alp_i2c_read": {
+          "hash": "936f06f7f4414abc",
+          "signature": "alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t len);"
+        },
+        "alp_i2c_write": {
+          "hash": "b98371be78869b4c",
+          "signature": "alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, size_t len);"
+        },
+        "alp_i2c_write_read": {
+          "hash": "0b7fa85a2c3849aa",
+          "signature": "alp_status_t alp_i2c_write_read(alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen, uint8_t *rdata, size_t rlen);"
+        },
+        "alp_spi_close": {
+          "hash": "7dbfaa8be9435a4a",
+          "signature": "void alp_spi_close(alp_spi_t *bus);"
+        },
+        "alp_spi_read": {
+          "hash": "71e5873d83ffd4ff",
+          "signature": "alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len);"
+        },
+        "alp_spi_transceive": {
+          "hash": "2491d90648c989f6",
+          "signature": "alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len);"
+        },
+        "alp_spi_write": {
+          "hash": "add1df22e2fbb139",
+          "signature": "alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len);"
+        },
+        "alp_uart_close": {
+          "hash": "d1aa431d5117c45d",
+          "signature": "void alp_uart_close(alp_uart_t *port);"
+        },
+        "alp_uart_read": {
+          "hash": "0bc64d97998fef72",
+          "signature": "alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms);"
+        },
+        "alp_uart_write": {
+          "hash": "1dcbaf1cb5aefaf2",
+          "signature": "alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_gpio_cb_t": {
+          "definition": "typedef void (*alp_gpio_cb_t)(alp_gpio_t *pin, void *user);",
+          "hash": "95bbc577a65a875e"
+        },
+        "alp_gpio_dir_t": {
+          "definition": "typedef enum { ALP_GPIO_INPUT = 0, ALP_GPIO_OUTPUT = 1 } alp_gpio_dir_t;",
+          "hash": "61ac284c6c956f73"
+        },
+        "alp_gpio_edge_t": {
+          "definition": "typedef enum { ALP_GPIO_EDGE_NONE = 0, ALP_GPIO_EDGE_RISING = 1, ALP_GPIO_EDGE_FALLING = 2, ALP_GPIO_EDGE_BOTH = 3 } alp_gpio_edge_t;",
+          "hash": "929d778de42ab3c4"
+        },
+        "alp_gpio_pull_t": {
+          "definition": "typedef enum { ALP_GPIO_PULL_NONE = 0, ALP_GPIO_PULL_UP = 1, ALP_GPIO_PULL_DOWN = 2 } alp_gpio_pull_t;",
+          "hash": "7568ee6666fe5109"
+        },
+        "alp_gpio_t": {
+          "definition": "typedef struct alp_gpio alp_gpio_t;",
+          "hash": "4b0eef4bafd8cdd5"
+        },
+        "alp_i2c_t": {
+          "definition": "typedef struct alp_i2c alp_i2c_t;",
+          "hash": "db2417083edaab94"
+        },
+        "alp_pixfmt_t": {
+          "definition": "typedef enum { ALP_PIXFMT_MONO_VLSB = 0, ALP_PIXFMT_RGB565 = 1, ALP_PIXFMT_RGB888 = 2, ALP_PIXFMT_ARGB8888 = 3 } alp_pixfmt_t;",
+          "hash": "b7b2fa99edecde8b"
+        },
+        "alp_spi_mode_t": {
+          "definition": "typedef enum { ALP_SPI_MODE_0 = 0, ALP_SPI_MODE_1 = 1, ALP_SPI_MODE_2 = 2, ALP_SPI_MODE_3 = 3 } alp_spi_mode_t;",
+          "hash": "26cadc9ef85082c9"
+        },
+        "alp_spi_t": {
+          "definition": "typedef struct alp_spi alp_spi_t;",
+          "hash": "3d4c6b8b6611f2e7"
+        },
+        "alp_status_t": {
+          "definition": "typedef enum { ALP_OK = 0, ALP_ERR_INVAL = -1, ALP_ERR_NOT_READY = -2, ALP_ERR_BUSY = -3, ALP_ERR_TIMEOUT = -4, ALP_ERR_IO = -5, ALP_ERR_NOSUPPORT = -6, ALP_ERR_NOMEM = -7 } alp_status_t;",
+          "hash": "af4e93a494d67939"
+        },
+        "alp_uart_parity_t": {
+          "definition": "typedef enum { ALP_UART_PARITY_NONE = 0, ALP_UART_PARITY_EVEN = 1, ALP_UART_PARITY_ODD = 2 } alp_uart_parity_t;",
+          "hash": "741bcee3c02d827a"
+        },
+        "alp_uart_t": {
+          "definition": "typedef struct alp_uart alp_uart_t;",
+          "hash": "a007b6c5f0b34fe9"
+        },
+        "bus_id": {
+          "definition": "typedef struct { uint32_t bus_id;",
+          "hash": "40f01c286ffd3ad9"
+        },
+        "port_id": {
+          "definition": "typedef struct { uint32_t port_id;",
+          "hash": "da443c984bed1c7c"
+        }
+      }
+    },
+    "alp/security.h": {
+      "functions": {
+        "alp_aead_close": {
+          "hash": "fd9bf2aab3dfc5e0",
+          "signature": "void alp_aead_close(alp_aead_t *a);"
+        },
+        "alp_aead_decrypt": {
+          "hash": "7c62ac4aa553ef52",
+          "signature": "alp_status_t alp_aead_decrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, const uint8_t *aad, size_t aad_len, const uint8_t *cipher, size_t cipher_len, const uint8_t *tag, size_t tag_len, uint8_t *plain_out);"
+        },
+        "alp_aead_encrypt": {
+          "hash": "db1ba2a691af1f65",
+          "signature": "alp_status_t alp_aead_encrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, const uint8_t *aad, size_t aad_len, const uint8_t *plain, size_t plain_len, uint8_t *cipher_out, uint8_t *tag_out, size_t tag_len);"
+        },
+        "alp_hash_close": {
+          "hash": "3038e7f80bc7c87e",
+          "signature": "void alp_hash_close(alp_hash_t *h);"
+        },
+        "alp_hash_finish": {
+          "hash": "7152a82c966179f1",
+          "signature": "alp_status_t alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_cap, size_t *digest_len);"
+        },
+        "alp_hash_update": {
+          "hash": "c7396515496760ab",
+          "signature": "alp_status_t alp_hash_update(alp_hash_t *h, const uint8_t *data, size_t len);"
+        },
+        "alp_random_bytes": {
+          "hash": "86d82a5bb6a51aab",
+          "signature": "alp_status_t alp_random_bytes(uint8_t *out, size_t len);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_aead_alg_t": {
+          "definition": "typedef enum { ALP_AEAD_AES_128_GCM = 0, ALP_AEAD_AES_256_GCM = 1, ALP_AEAD_CHACHA20_POLY1305 = 2 } alp_aead_alg_t;",
+          "hash": "284ea0c79aab1501"
+        },
+        "alp_aead_t": {
+          "definition": "typedef struct alp_aead alp_aead_t;",
+          "hash": "a30454ab7d4632f0"
+        },
+        "alp_hash_alg_t": {
+          "definition": "typedef enum { ALP_HASH_SHA256 = 0, ALP_HASH_SHA384 = 1, ALP_HASH_SHA512 = 2 } alp_hash_alg_t;",
+          "hash": "8a6ed65101374e5e"
+        },
+        "alp_hash_t": {
+          "definition": "typedef struct alp_hash alp_hash_t;",
+          "hash": "945069cdbb4e6f59"
+        }
+      }
+    },
+    "alp/signal.h": {
+      "functions": {},
+      "macros": {},
+      "typedefs": {}
+    }
+  },
+  "version": "v0.1"
+}
