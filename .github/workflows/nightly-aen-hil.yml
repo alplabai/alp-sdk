@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Nightly hardware-in-loop on a real E1M-AEN dev kit.
+#
+# **Status: skeleton.**  Runs only when a self-hosted runner with
+# the `hil-aen` label is online (none yet).  When the runner comes
+# up, this workflow flashes the v0.1 ztest firmware to the EVK,
+# runs `tests/zephyr/peripheral` against real silicon, and uploads
+# the captured serial output.
+#
+# Runner setup is documented in ci/HW-IN-LOOP.md.
+
+name: nightly-aen-hil
+
+on:
+  schedule:
+    # 02:30 UTC every weekday — quiet hours for the lab.
+    - cron: '30 2 * * 1-5'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  hil:
+    name: HIL · E1M-AEN701 dev kit
+    # The runner must self-identify with these labels.  Until a
+    # physical runner registers with `hil-aen` GitHub queues the
+    # job indefinitely; manual `workflow_dispatch` triggers a no-op
+    # while the workflow waits.
+    runs-on: [self-hosted, linux, hil-aen]
+    timeout-minutes: 30
+
+    env:
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: alp-sdk
+
+      - name: Verify runner reports a board attached
+        run: |
+          # The runner ships a tiny shell helper that exits non-zero
+          # if no Alif dev kit is enumerated on USB.  Fail fast
+          # rather than waste a flash cycle.
+          /opt/alp-hil/check-aen-attached.sh
+
+      - name: Set up Zephyr workspace (cached)
+        run: |
+          if [ ! -d $HOME/zephyrproject ]; then
+            mkdir -p $HOME/zephyrproject
+            cd $HOME/zephyrproject
+            west init -m https://github.com/zephyrproject-rtos/zephyr --mr v3.7.0 .
+            west update --narrow -o=--depth=1
+            west zephyr-export
+          fi
+
+      - name: Build peripheral test for E1M-AEN701
+        env:
+          ZEPHYR_BASE: ${{ env.HOME }}/zephyrproject/zephyr
+          EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
+        run: |
+          # alp_e1m_evk_aen lives in alpCaner/alp-zephyr-modules.
+          # Until that lands the build target is parked — the
+          # workflow logs and exits 0 instead of failing the
+          # nightly run on an absent dependency.
+          if ! ls $HOME/zephyrproject/modules 2>/dev/null | grep -q alp-zephyr-modules; then
+            echo "::warning::alp_e1m_evk_aen board file not yet published; skipping HIL flash"
+            exit 0
+          fi
+          cd $HOME/zephyrproject
+          west build -p always -b alp_e1m_evk_aen \
+              ${{ github.workspace }}/alp-sdk/tests/zephyr/peripheral
+
+      - name: Flash + capture serial
+        run: |
+          if [ ! -f $HOME/zephyrproject/build/zephyr/zephyr.elf ]; then
+            echo "no firmware to flash; HIL skipped"
+            exit 0
+          fi
+          west flash -d $HOME/zephyrproject/build
+          /opt/alp-hil/capture-serial.sh --port /dev/ttyACM0 --duration 30 \
+              --output ${{ github.workspace }}/hil-output.log
+
+      - name: Assert ztests pass
+        run: |
+          if [ -f hil-output.log ]; then
+            grep -q "PROJECT EXECUTION SUCCESSFUL" hil-output.log
+          fi
+
+      - name: Upload HIL artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hil-aen-${{ github.run_number }}
+          path: |
+            hil-output.log
+            ${{ env.HOME }}/zephyrproject/build/twister-out/
+          retention-days: 30
+          if-no-files-found: ignore

@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Validates every metadata/socs/**/*.json against
+# metadata/schemas/soc-spec-v1.schema.json on every PR.
+#
+# Catches schema drift the moment someone edits an SoC file —
+# missing required fields, typo'd refs, invalid `ref` patterns,
+# undeclared additionalProperties, etc.
+
+name: pr-metadata-validate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'metadata/**'
+      - '.github/workflows/pr-metadata-validate.yml'
+      - 'scripts/validate_metadata.py'
+  push:
+    branches: [main]
+    paths:
+      - 'metadata/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: validate · soc-spec-v1
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install jsonschema
+        run: pip install jsonschema
+
+      - name: Validate every SoC file against the v1 schema
+        run: python3 scripts/validate_metadata.py

@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Pull-request twister gate for the ALP SDK.
+#
+# Runs the full ztest + example suite under native_sim/native/64
+# on every PR.  The Zephyr workspace is set up via the
+# zephyrprojectrtos/ci Docker image, which ships Zephyr + west +
+# toolchains pre-installed — saves ~5 minutes per run vs a clean
+# `west init`.
+
+name: pr-twister
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-flight runs on the same branch when a new commit lands.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  twister:
+    name: twister · native_sim/native/64
+    runs-on: ubuntu-latest
+
+    # Pre-baked Zephyr CI image.  Pin a tag (not :latest) so the
+    # CI is reproducible.  Bump intentionally when upgrading Zephyr.
+    container:
+      image: ghcr.io/zephyrproject-rtos/ci:v0.27.4
+      options: --user root
+
+    env:
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-0.16.5
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v4
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      # Zephyr workspace lives next to alp-sdk.  We use west init
+      # from a temporary topdir so alp-sdk itself isn't relocated.
+      - name: west init zephyr workspace
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir -p zephyrproject
+          cd zephyrproject
+          # Pin to the Zephyr release the v0.1 dependency matrix
+          # documents (VERSIONS.md).  Bump intentionally with the
+          # SDK; do not track main.
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v3.7.0 .
+          west update --narrow -o=--depth=1
+          west zephyr-export
+
+      - name: Cache Zephyr modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/zephyrproject/modules
+            ${{ github.workspace }}/zephyrproject/zephyr
+          key: zephyr-v3.7.0-${{ runner.os }}
+
+      - name: pip install Zephyr requirements
+        working-directory: ${{ github.workspace }}/zephyrproject
+        run: |
+          pip3 install --break-system-packages -r zephyr/scripts/requirements.txt
+
+      - name: twister · run tests + examples on native_sim/native/64
+        working-directory: ${{ github.workspace }}/zephyrproject
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
+        run: |
+          python3 zephyr/scripts/twister \
+            --testsuite-root ${{ github.workspace }}/alp-sdk/tests/zephyr \
+            --testsuite-root ${{ github.workspace }}/alp-sdk/examples \
+            -p native_sim/native/64 \
+            --inline-logs \
+            --no-detailed-test-id
+
+      # Persist the twister output regardless of pass/fail so the
+      # PR comment can link to per-test logs.
+      - name: Upload twister-out artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: twister-out
+          path: zephyrproject/twister-out/
+          retention-days: 14
+          if-no-files-found: ignore

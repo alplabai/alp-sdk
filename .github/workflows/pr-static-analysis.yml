@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Static analysis on every PR.  v0.1 scope:
+#   1. clang-format-diff — checks only the lines changed by the PR
+#      against `.clang-format`.  Avoids forcing a repo-wide
+#      reformat; CI tightens incrementally.
+#   2. cppcheck — full tree under src/ + chips/, treats warnings as
+#      informational (not fatal) until v0.2.
+#
+# Build-context-aware tools (clang-tidy + ABI snapshot) need a
+# proper compile_commands.json — they land in v0.2 once we have a
+# host CMake build wired with -DCMAKE_EXPORT_COMPILE_COMMANDS=ON.
+
+name: pr-static-analysis
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clang-format-diff:
+    name: clang-format · diff-only
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need history so HEAD~ resolves
+
+      - name: Install clang-format-diff
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Determine diff base
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=HEAD~1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run clang-format-diff on changed lines
+        run: |
+          # GitHub-hosted runners ship clang-format-diff at this path.
+          DIFF_TOOL=$(ls /usr/share/clang/clang-format*/clang-format-diff.py 2>/dev/null | head -1 \
+                       || which clang-format-diff)
+          if [ -z "$DIFF_TOOL" ]; then
+              echo "::warning::clang-format-diff not found; skipping diff check"
+              exit 0
+          fi
+          git diff -U0 ${{ steps.base.outputs.ref }} -- '*.c' '*.h' \
+              | python3 "$DIFF_TOOL" -p1 \
+              | tee clang-format-diff.txt
+          if [ -s clang-format-diff.txt ]; then
+              echo "::error::clang-format would change the diff above.  Run clang-format on your changes before pushing."
+              exit 1
+          fi
+          echo "clang-format clean on the diff."
+
+  cppcheck:
+    name: cppcheck · src + chips
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        # cppcheck without a build context misses some symbols
+        # (it doesn't know which Zephyr / vendor headers are
+        # available).  We pass --suppress=missingIncludeSystem to
+        # skip those rather than report them.  Real type-checking
+        # arrives with the v0.2 clang-tidy job.
+        run: |
+          cppcheck \
+              --enable=warning,style,performance,portability \
+              --inline-suppr \
+              --suppress=missingInclude \
+              --suppress=missingIncludeSystem \
+              --suppress=unusedFunction \
+              --suppress=unmatchedSuppression \
+              --error-exitcode=0 \
+              --quiet \
+              --xml \
+              --output-file=cppcheck.xml \
+              -I include \
+              src/ chips/ || true
+          if [ -s cppcheck.xml ]; then
+              n_errors=$(grep -c '<error ' cppcheck.xml || true)
+              echo "::notice::cppcheck reported $n_errors finding(s) (informational; v0.2 will gate)"
+          fi
+
+      - name: Upload cppcheck.xml
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cppcheck
+          path: cppcheck.xml
+          retention-days: 14
+          if-no-files-found: ignore

@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builds the public-API Doxygen reference on every PR.
+#
+# v0.1: best-effort.  No Doxyfile committed yet — the workflow
+# generates one inline targeting include/alp/.  Treats Doxygen
+# warnings as informational, not fatal, until a Doxyfile lands.
+# v1.0 acceptance bar (per VERSIONS.md) tightens this to
+# "fail on any Doxygen warning."
+
+name: pr-doxygen
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'include/**'
+      - 'docs/doxygen/**'
+      - '.github/workflows/pr-doxygen.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'include/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  doxygen:
+    name: doxygen · public headers
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
+      - name: Generate Doxyfile (v0.1 inline; v0.2+ uses docs/doxygen/Doxyfile)
+        run: |
+          if [ -f docs/doxygen/Doxyfile ]; then
+            cp docs/doxygen/Doxyfile Doxyfile
+          else
+            doxygen -g Doxyfile.default
+            cat > Doxyfile <<'EOF'
+          PROJECT_NAME           = "ALP SDK"
+          PROJECT_NUMBER         = $(git describe --tags --always 2>/dev/null || echo "0.1.0-pre")
+          OUTPUT_DIRECTORY       = doxygen-out
+          INPUT                  = include/alp
+          RECURSIVE              = YES
+          EXTRACT_ALL            = YES
+          EXTRACT_STATIC         = NO
+          GENERATE_HTML          = YES
+          GENERATE_LATEX         = NO
+          QUIET                  = NO
+          WARN_AS_ERROR          = NO
+          WARN_LOGFILE           = doxygen-warnings.log
+          OPTIMIZE_OUTPUT_FOR_C  = YES
+          JAVADOC_AUTOBRIEF      = YES
+          USE_MDFILE_AS_MAINPAGE = README.md
+          INPUT                 += README.md
+          EOF
+          fi
+
+      - name: Build HTML
+        run: doxygen Doxyfile
+
+      - name: Summarise warnings
+        run: |
+          if [ -s doxygen-warnings.log ]; then
+            echo "::group::Doxygen warnings"
+            cat doxygen-warnings.log
+            echo "::endgroup::"
+            echo "::warning::Doxygen reported $(wc -l < doxygen-warnings.log) warning(s).  v1.0 will gate on this — fix incrementally."
+          else
+            echo "Doxygen produced zero warnings."
+          fi
+
+      - name: Upload HTML artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: doxygen-html
+          path: doxygen-out/html/
+          retention-days: 14
+          if-no-files-found: ignore

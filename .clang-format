@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# clang-format style for the ALP SDK.
+# Conservative LLVM/Zephyr-leaning baseline; refine in follow-ups.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+AlignConsecutiveAssignments: AcrossEmptyLines
+AlignConsecutiveDeclarations: AcrossEmptyLines
+AlignTrailingComments: true
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: WithoutElse
+BreakBeforeBraces: Linux
+KeepEmptyLinesAtTheStartOfBlocks: false
+PointerAlignment: Right
+SortIncludes: Never
+SpaceAfterCStyleCast: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+IncludeBlocks: Preserve
+ReflowComments: false
