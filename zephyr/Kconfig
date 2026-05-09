@@ -42,10 +42,11 @@ config ALP_SDK_HAS_CMSIS_DSP
 	  Re-export arm_math.h via <alp/math.h>.  Requires the
 	  CMSIS-DSP module to be present in the Zephyr west manifest.
 
-# v0.1 chip drivers.  Each is opt-in so projects only pay for the
+# Chip drivers.  Each is opt-in so projects only pay for the
 # silicon they actually use.  Symbols use the chip's natural prefix
-# (lsm6dso_*, ssd1306_*) — no alp_ prefix on chip drivers.  The
-# button_led helper is the exception (block utility, alp_-prefixed).
+# (lsm6dso_*, ssd1306_*, bme280_*, …) — no alp_ prefix on chip
+# drivers.  The button_led / pdm_mic helpers are the exception
+# (generic block utilities, alp_-prefixed).
 
 menu "ALP SDK chip drivers"
 
@@ -72,6 +73,48 @@ config ALP_SDK_CHIP_BUTTON_LED
 	  Compile chips/button_led/button_led.c.  Wraps alp_gpio_*
 	  to provide alp_button_led_* lifecycle helpers used by the
 	  alp-studio block blk_button_led.
+
+config ALP_SDK_CHIP_BME280
+	bool "Bosch BME280 environment sensor driver (T/H/P)"
+	depends on I2C
+	help
+	  Compile chips/bme280/bme280.c.  Provides bme280_init,
+	  bme280_set_sampling, bme280_read_raw + bme280_compensate
+	  with the canonical Bosch integer-form compensation.  Used
+	  by the alp-studio block blk_env_bme280.
+
+config ALP_SDK_CHIP_LIS2DW12
+	bool "STMicroelectronics LIS2DW12 3-axis accelerometer driver"
+	depends on I2C
+	help
+	  Compile chips/lis2dw12/lis2dw12.c.  Provides lis2dw12_init,
+	  lis2dw12_set_accel, lis2dw12_read_accel/temp.  Used by the
+	  alp-studio block blk_accel_lis2dw12.
+
+config ALP_SDK_CHIP_SSD1331
+	bool "Solomon Systech SSD1331 96x64 colour OLED driver (SPI)"
+	depends on SPI && GPIO
+	help
+	  Compile chips/ssd1331/ssd1331.c.  Provides ssd1331_init,
+	  ssd1331_draw_pixel (RGB565), ssd1331_display.  Used by the
+	  alp-studio block blk_oled_ssd1331.
+
+config ALP_SDK_CHIP_OV5640
+	bool "OmniVision OV5640 5MP image sensor SCCB driver"
+	depends on I2C
+	help
+	  Compile chips/ov5640/ov5640.c.  Config-side only — chip-ID
+	  verify, soft-reset, resolution / format presets, test
+	  pattern.  The actual capture path lands in v0.2 alp_camera
+	  on V2N.  Used by the alp-studio block blk_camera_ov5640.
+
+config ALP_SDK_CHIP_PDM_MIC
+	bool "Generic PDM microphone block helper"
+	help
+	  Compile chips/pdm_mic/pdm_mic.c.  Surface declared for
+	  v0.2; underlying alp_i2s_* peripheral abstraction lands
+	  alongside <alp/audio.h>.  Used by the alp-studio block
+	  blk_pdm_mic.
 
 endmenu # "ALP SDK chip drivers"
 

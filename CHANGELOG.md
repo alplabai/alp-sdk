@@ -178,6 +178,68 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   an `alp_sdk.peripheral.evk_aen` build-only scenario tagged
   `alp-evk` for nightly HW-in-loop CI.
 - `VERSIONS.md` tracking the v0.1 → v1.0 roadmap.
+- **v0.2 chip-driver scaffolding** — public surface, opt-in build
+  wiring, and lifecycle / NULL-arg ztests for five new drivers:
+  - `chips/bme280/` + `<alp/chips/bme280.h>` — Bosch BME280
+    combined T/H/P sensor.  I²C-only in v0.2.  Loads the
+    per-die calibration coefficients on init and exposes
+    `bme280_compensate` with the canonical Bosch integer-form
+    arithmetic transcribed from BST-BME280-DS002 v1.6 §4.2.3.
+  - `chips/lis2dw12/` + `<alp/chips/lis2dw12.h>` — STMicro
+    LIS2DW12 3-axis ultra-low-power accelerometer.  WHO_AM_I
+    check, ODR + full-scale + power-mode config in one call,
+    raw 14-bit accel + on-die temp reads.
+  - `chips/ssd1331/` + `<alp/chips/ssd1331.h>` — Solomon Systech
+    SSD1331 96×64 colour OLED.  SPI 4-wire (D/C# pin),
+    caller-supplied 12 KiB framebuffer (RGB565), pixel/clear/
+    display API, full datasheet init sequence on `ssd1331_init`.
+  - `chips/ov5640/` + `<alp/chips/ov5640.h>` — OmniVision OV5640
+    5 MP image sensor SCCB-side configuration driver.  Chip-ID
+    verify, soft-reset, resolution / format / test-pattern
+    presets.  Capture-side (MIPI CSI-2) lives in v0.2's
+    `<alp/camera.h>`; per-resolution register tables ship in
+    v0.3 alongside the V2N alp_camera integration.
+  - `chips/pdm_mic/` + `<alp/chips/pdm_mic.h>` — generic PDM
+    microphone block helper.  `alp_`-prefixed (block utility,
+    documented exception per the chip-driver naming rule).
+    Surface declared; impl returns `ALP_ERR_NOSUPPORT` until
+    v0.2's `<alp/audio.h>` lands the underlying I²S
+    abstraction.
+- **v0.2 / v0.3 public-header surface declared** so application
+  code can compile against it now and the implementations slot
+  in without ABI churn (same pattern `<alp/iot.h>` followed in
+  v0.1):
+  - `<alp/audio.h>` (v0.2) — PDM input + I²S output API,
+    `alp_audio_in_*` / `alp_audio_out_*`, three sample formats
+    (S16/S24/S32), per-block read/write with timeout.
+  - `<alp/ble.h>` (v0.3) — peripheral + central, GATT server +
+    client.  Zephyr `bt` host stack per the locked decision.
+    Mesh / audio / DF explicitly out of scope for v1.0.
+  - `<alp/security.h>` (v0.3) — MbedTLS re-export shape: hash
+    (SHA-256/384/512), AEAD (AES-128/256-GCM, ChaCha20-Poly1305),
+    TRNG.  Per-SoC hardware-accelerator routing happens at the
+    backend layer.
+  - `<alp/mproc.h>` (v0.3) — multi-processor IPC primitives:
+    shared memory regions (`alp_shmem_*`), mailbox channels
+    (`alp_mbox_*`, MHU on Alif), hardware semaphores
+    (`alp_hwsem_*`).  Wraps the M55-HE core bring-up the
+    "Multi-Processor Support Completion" milestone delivers.
+  - Stub implementations at `src/zephyr/{audio,ble,security,
+    mproc}_stub.c` returning `ALP_ERR_NOSUPPORT` and `*_open()
+    → NULL`, matching the v0.1 stub contract.
+- **Chip ztest suite extended** to the eight chip drivers.  Each
+  new chip gets lifecycle + NULL-arg cases plus a "post-init
+  calls reject uninitialised" pattern for the I²C drivers (the
+  emul controller has no real device behind it, so `*_init` fails
+  WHO_AM_I and downstream calls must report `NOT_READY`).  Also
+  includes a pure-math test for `ssd1331_rgb565` and a runtime
+  check that the v0.2 / v0.3 stubbed surfaces honour the
+  documented `NULL` / `NOSUPPORT` contract.  Total tests across
+  twister `native_sim/native/64` climb **27 → 43 cases** (chips
+  suite alone: 13 → 29).
+- `test_public_headers_co_compile` extended to include
+  `<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`,
+  `<alp/mproc.h>`, and the five new chip headers.
 
 ### Notes
 

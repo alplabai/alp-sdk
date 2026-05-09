@@ -1,0 +1,118 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @file ssd1331.h
+ * @brief Solomon Systech SSD1331 96 × 64 colour OLED driver (SPI).
+ *
+ * Public surface consumed by alp-studio block `blk_oled_ssd1331`.
+ * Symbols carry the chip's natural prefix `ssd1331_*` — no `alp_`.
+ *
+ * v0.2 scope: SPI 4-wire (D/C# pin), 96 × 64 fixed geometry, RGB565
+ * pixel format, caller-supplied framebuffer (12 KiB at full size — too
+ * large to embed in the driver context safely on M-class targets).
+ *
+ * Datasheet: Solomon Systech SSD1331 v1.2 (2008).
+ */
+
+#ifndef ALP_CHIPS_SSD1331_H
+#define ALP_CHIPS_SSD1331_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+
+#include "alp/peripheral.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/** Fixed panel geometry.  SSD1331 is exclusively 96 × 64. */
+#define SSD1331_WIDTH    96
+#define SSD1331_HEIGHT   64
+
+/** Bytes per pixel in the framebuffer (RGB565 native). */
+#define SSD1331_BPP      2
+
+/** Required framebuffer size in bytes. */
+#define SSD1331_FB_BYTES (SSD1331_WIDTH * SSD1331_HEIGHT * SSD1331_BPP)
+
+/**
+ * Pack 5/6/5-bit RGB into a 16-bit native RGB565 word.
+ *
+ * The SSD1331 expects MSB-first when streamed over SPI; the impl handles
+ * the byte order before pushing to the bus.
+ */
+static inline uint16_t ssd1331_rgb565(uint8_t r, uint8_t g, uint8_t b) {
+    return (uint16_t)(((r & 0xF8u) << 8) | ((g & 0xFCu) << 3) | (b >> 3));
+}
+
+/** Driver context.  Treat as opaque. */
+typedef struct {
+    alp_spi_t  *bus;
+    alp_gpio_t *dc;             /**< D/C# command-vs-data line. */
+    uint8_t    *fb;             /**< Caller-supplied framebuffer of size @ref SSD1331_FB_BYTES. */
+    size_t      fb_len;
+    bool        initialised;
+} ssd1331_t;
+
+/**
+ * @brief Initialise an SSD1331 over SPI.
+ *
+ * Drives the panel init sequence (display-off, remap+colour-depth,
+ * mux ratio, contrast, master-current, …).  The caller supplies the
+ * framebuffer (must be at least @ref SSD1331_FB_BYTES bytes); the
+ * driver retains the pointer and writes into it via
+ * @ref ssd1331_draw_pixel.
+ *
+ * @param spi    Open SPI bus configured for the panel (MODE_0 typical,
+ *               up to 6.25 MHz per the datasheet).
+ * @param dc     GPIO open & configured as output for the D/C# line.
+ * @param fb     Pointer to the caller's framebuffer storage.
+ * @param fb_len Length of @p fb in bytes.  Must be ≥ @ref SSD1331_FB_BYTES.
+ */
+alp_status_t ssd1331_init(ssd1331_t *dev,
+                          alp_spi_t *spi,
+                          alp_gpio_t *dc,
+                          uint8_t *fb,
+                          size_t fb_len);
+
+/** Set the panel display ON or OFF. */
+alp_status_t ssd1331_set_display_on(ssd1331_t *dev, bool on);
+
+/**
+ * @brief Set master contrast attenuation.
+ *
+ * @p current is in the range 0..15 (datasheet command 0x87, 4-bit field).
+ */
+alp_status_t ssd1331_set_master_current(ssd1331_t *dev, uint8_t current);
+
+/** Wipe the in-memory framebuffer to black.  Does not push to the panel. */
+void         ssd1331_clear(ssd1331_t *dev);
+
+/**
+ * @brief Set a single pixel in the framebuffer.
+ *
+ * Out-of-range coordinates are silently ignored (standard graphics-lib
+ * contract — keeps callers from having to clip every primitive).
+ *
+ * @param colour RGB565 pixel value.  See @ref ssd1331_rgb565.
+ */
+void         ssd1331_draw_pixel(ssd1331_t *dev,
+                                uint16_t x, uint16_t y,
+                                uint16_t colour);
+
+/** Push the entire in-memory framebuffer to the panel. */
+alp_status_t ssd1331_display(ssd1331_t *dev);
+
+/** Release the driver context.  Does not turn off the panel. */
+void         ssd1331_deinit(ssd1331_t *dev);
+
+#ifdef __cplusplus
+}  /* extern "C" */
+#endif
+
+#endif  /* ALP_CHIPS_SSD1331_H */
