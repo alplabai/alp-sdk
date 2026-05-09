@@ -1,0 +1,15 @@
+# Copyright 2026 ALP Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake BME280 emul target.  Lives in this test only.
+
+description: |
+  Fake Bosch BME280 i2c-emul target used by the alp-sdk chips
+  ztest.  Pre-populates CHIP_ID = 0x60, a synthetic calibration
+  block, and a fixed raw conversion result so the test can
+  exercise bme280_read_raw and bme280_compensate without a real
+  chip.
+
+compatible: "alp,fake-bme280"
+
+include: i2c-device.yaml

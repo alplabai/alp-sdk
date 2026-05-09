@@ -1,0 +1,14 @@
+# Copyright 2026 ALP Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake SSD1306 emul target.  Lives in this test only.
+
+description: |
+  Fake Solomon Systech SSD1306 i2c-emul target used by the alp-sdk
+  chips ztest.  Records each I2C write into separate command and
+  data byte logs (split by the SSD1306 control byte 0x00 / 0x40)
+  so the test can verify the driver's init opcode sequence.
+
+compatible: "alp,fake-ssd1306"
+
+include: i2c-device.yaml

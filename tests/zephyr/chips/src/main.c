@@ -26,6 +26,8 @@
 #include "alp/chips/ov5640.h"
 #include "alp/chips/pdm_mic.h"
 
+#include "fakes.h"
+
 ZTEST_SUITE(alp_chips, NULL, NULL, NULL, NULL, NULL);
 
 /* ------------------------------------------------------------------ */
@@ -512,4 +514,290 @@ ZTEST(alp_chips, test_mproc_surface_v01_nosupport) {
     alp_shmem_close(NULL);
     alp_mbox_close(NULL);
     alp_hwsem_close(NULL);
+}
+
+/* ==================================================================== */
+/* Register-protocol tests (fake i2c-emul targets)                       */
+/* ==================================================================== */
+/* These tests exercise actual register paths through the chip drivers, */
+/* not just lifecycle / NULL handling.  Each fake target lives in       */
+/* src/fake_<chip>.c, attaches to i2c0_emul at the chip's default I2C   */
+/* address, and exposes inspection helpers via fakes.h.                  */
+/* ==================================================================== */
+
+/* ------------------------------------------------------------------ */
+/* lsm6dso (fake-backed)                                               */
+/* ------------------------------------------------------------------ */
+
+#define REG_LSM6DSO_CTRL1_XL  0x10
+#define REG_LSM6DSO_CTRL2_G   0x11
+#define REG_LSM6DSO_OUTX_L_A  0x28
+#define REG_LSM6DSO_OUTX_L_G  0x22
+
+ZTEST(alp_chips, test_fake_lsm6dso_init_succeeds_against_fake) {
+    fake_lsm6dso_reset();
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    lsm6dso_t dev;
+    zassert_equal(lsm6dso_init(&dev, bus, LSM6DSO_I2C_ADDR_LOW), ALP_OK,
+                  "fake responds to WHO_AM_I with 0x6C — init must succeed");
+
+    uint8_t id = 0;
+    zassert_equal(lsm6dso_read_id(&dev, &id), ALP_OK);
+    zassert_equal(id, LSM6DSO_WHO_AM_I_VAL);
+
+    lsm6dso_deinit(&dev);
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_lsm6dso_set_accel_writes_ctrl1_xl) {
+    fake_lsm6dso_reset();
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    lsm6dso_t dev;
+    zassert_equal(lsm6dso_init(&dev, bus, LSM6DSO_I2C_ADDR_LOW), ALP_OK);
+
+    /* CTRL1_XL: ODR_XL[7:4] | FS_XL[3:2] | LPF2_XL_EN[1] | reserved[0].
+     * ODR=104Hz (0x4), FS=4G (0x2) → byte = (0x4<<4) | (0x2<<2) = 0x48. */
+    zassert_equal(lsm6dso_set_accel(&dev,
+                                    LSM6DSO_ODR_104_HZ,
+                                    LSM6DSO_ACCEL_FS_4G),
+                  ALP_OK);
+    zassert_equal(fake_lsm6dso_get_reg(REG_LSM6DSO_CTRL1_XL), 0x48u,
+                  "CTRL1_XL should encode ODR=104Hz | FS=4G");
+
+    /* Switch to ODR=833Hz (0x7), FS=16G (0x1) → (0x7<<4) | (0x1<<2) = 0x74. */
+    zassert_equal(lsm6dso_set_accel(&dev,
+                                    LSM6DSO_ODR_833_HZ,
+                                    LSM6DSO_ACCEL_FS_16G),
+                  ALP_OK);
+    zassert_equal(fake_lsm6dso_get_reg(REG_LSM6DSO_CTRL1_XL), 0x74u);
+
+    lsm6dso_deinit(&dev);
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_lsm6dso_set_gyro_writes_ctrl2_g) {
+    fake_lsm6dso_reset();
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    lsm6dso_t dev;
+    zassert_equal(lsm6dso_init(&dev, bus, LSM6DSO_I2C_ADDR_LOW), ALP_OK);
+
+    /* ODR=208Hz (0x5), FS=1000dps (0x2) → (0x5<<4) | (0x2<<2) = 0x58. */
+    zassert_equal(lsm6dso_set_gyro(&dev,
+                                   LSM6DSO_ODR_208_HZ,
+                                   LSM6DSO_GYRO_FS_1000_DPS),
+                  ALP_OK);
+    zassert_equal(fake_lsm6dso_get_reg(REG_LSM6DSO_CTRL2_G), 0x58u);
+
+    lsm6dso_deinit(&dev);
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_lsm6dso_read_accel_decodes_le16) {
+    fake_lsm6dso_reset();
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    lsm6dso_t dev;
+    zassert_equal(lsm6dso_init(&dev, bus, LSM6DSO_I2C_ADDR_LOW), ALP_OK);
+
+    /* Seed the accel output registers: X = 0x1234, Y = -0x100 = 0xFF00,
+     * Z = 0x7FFF (positive max).  LSM6DSO returns little-endian. */
+    fake_lsm6dso_set_reg(REG_LSM6DSO_OUTX_L_A + 0, 0x34);  /* X low */
+    fake_lsm6dso_set_reg(REG_LSM6DSO_OUTX_L_A + 1, 0x12);  /* X high */
+    fake_lsm6dso_set_reg(REG_LSM6DSO_OUTX_L_A + 2, 0x00);  /* Y low */
+    fake_lsm6dso_set_reg(REG_LSM6DSO_OUTX_L_A + 3, 0xFF);  /* Y high */
+    fake_lsm6dso_set_reg(REG_LSM6DSO_OUTX_L_A + 4, 0xFF);  /* Z low */
+    fake_lsm6dso_set_reg(REG_LSM6DSO_OUTX_L_A + 5, 0x7F);  /* Z high */
+
+    lsm6dso_axes_t a;
+    zassert_equal(lsm6dso_read_accel(&dev, &a), ALP_OK);
+    zassert_equal(a.x, (int16_t)0x1234);
+    zassert_equal(a.y, (int16_t)0xFF00);  /* -256 */
+    zassert_equal(a.z, (int16_t)0x7FFF);
+
+    lsm6dso_deinit(&dev);
+    alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* ssd1306 (fake-backed)                                               */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_fake_ssd1306_init_streams_documented_opcodes) {
+    fake_ssd1306_reset_logs();
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    ssd1306_t dev;
+    zassert_equal(ssd1306_init(&dev, bus, SSD1306_I2C_ADDR_LOW, 128, 64),
+                  ALP_OK,
+                  "fake records command bytes — init must succeed");
+
+    /* The init sequence MUST contain DISPLAY_OFF (0xAE), CHARGE_PUMP
+     * enable (0x8D, 0x14), MEMORY_MODE horizontal (0x20, 0x00), and
+     * DISPLAY_ON (0xAF) in order.  The fake's command log captures
+     * every byte after the 0x00 control byte, so we scan it for the
+     * documented anchors. */
+    const uint8_t *log = fake_ssd1306_cmd_log();
+    const size_t   len = fake_ssd1306_cmd_log_len();
+    zassert_true(len > 0, "init must stream at least one command");
+
+    /* DISPLAY_OFF must come first per the datasheet's recommended
+     * power-up sequence. */
+    zassert_equal(log[0], 0xAEu, "first opcode must be DISPLAY_OFF");
+
+    /* DISPLAY_ON must come last. */
+    zassert_equal(log[len - 1], 0xAFu, "last opcode must be DISPLAY_ON");
+
+    /* Charge pump enable must appear: 0x8D followed by 0x14. */
+    bool found_charge_pump = false;
+    for (size_t i = 0; i + 1 < len; i++) {
+        if (log[i] == 0x8Du && log[i + 1] == 0x14u) {
+            found_charge_pump = true;
+            break;
+        }
+    }
+    zassert_true(found_charge_pump, "init must enable the charge pump (0x8D 0x14)");
+
+    /* No data bytes streamed during init (no fb push). */
+    zassert_equal(fake_ssd1306_data_log_len(), 0u,
+                  "init must not push any framebuffer bytes");
+
+    ssd1306_deinit(&dev);
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_ssd1306_display_pushes_full_framebuffer) {
+    fake_ssd1306_reset_logs();
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    ssd1306_t dev;
+    zassert_equal(ssd1306_init(&dev, bus, SSD1306_I2C_ADDR_LOW, 128, 64),
+                  ALP_OK);
+
+    fake_ssd1306_reset_logs();   /* drop the init bytes from the logs. */
+
+    /* Write a single test pixel and flush. */
+    ssd1306_clear(&dev);
+    ssd1306_draw_pixel(&dev, 0, 0, true);
+    zassert_equal(ssd1306_display(&dev), ALP_OK);
+
+    /* display() pushes width*height/8 = 1024 framebuffer bytes. */
+    zassert_equal(fake_ssd1306_data_log_len(), 1024u,
+                  "expected 1024 fb bytes, got %zu",
+                  fake_ssd1306_data_log_len());
+
+    /* The first byte (page=0, col=0) should hold our pixel. */
+    zassert_equal(fake_ssd1306_data_log()[0], 0x01u,
+                  "page=0, col=0, bit 0 should be set");
+
+    /* The address-window command must precede the data — confirm
+     * the column/page-range opcodes appear in the cmd_log. */
+    const uint8_t *cmd = fake_ssd1306_cmd_log();
+    const size_t   clen = fake_ssd1306_cmd_log_len();
+    bool found_col_addr = false;
+    bool found_page_addr = false;
+    for (size_t i = 0; i < clen; i++) {
+        if (cmd[i] == 0x21u) found_col_addr  = true;
+        if (cmd[i] == 0x22u) found_page_addr = true;
+    }
+    zassert_true(found_col_addr,  "display must set column address (0x21)");
+    zassert_true(found_page_addr, "display must set page address (0x22)");
+
+    ssd1306_deinit(&dev);
+    alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* bme280 (fake-backed)                                                */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_fake_bme280_init_loads_calibration) {
+    fake_bme280_reset();
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    bme280_t dev;
+    zassert_equal(bme280_init(&dev, bus, BME280_I2C_ADDR_LOW), ALP_OK,
+                  "fake responds to CHIP_ID with 0x60 — init must succeed");
+
+    /* Canonical Bosch datasheet example values seeded by the fake. */
+    zassert_equal(dev.calib.T1, 27504u);
+    zassert_equal(dev.calib.T2, (int16_t)26435);
+    zassert_equal(dev.calib.T3, (int16_t)-1000);
+    zassert_equal(dev.calib.P1, 36477u);
+    zassert_equal(dev.calib.P2, (int16_t)-10685);
+    zassert_equal(dev.calib.P9, (int16_t)6000);
+    zassert_equal(dev.calib.H1, 75);
+    zassert_equal(dev.calib.H6, (int8_t)30);
+
+    bme280_deinit(&dev);
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_bme280_read_raw_decodes_msb_first) {
+    fake_bme280_reset();
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    bme280_t dev;
+    zassert_equal(bme280_init(&dev, bus, BME280_I2C_ADDR_LOW), ALP_OK);
+
+    bme280_raw_t raw;
+    zassert_equal(bme280_read_raw(&dev, &raw), ALP_OK);
+
+    /* Pressure raw block 0x65 0x5A 0xC0 → (0x65<<12)|(0x5A<<4)|(0xC0>>4)
+     * = 0x655AC = 415148 (canonical Bosch example). */
+    zassert_equal(raw.pressure_raw, 415148);
+    /* Temperature raw block 0x7E 0xF5 0x00 → 0x7EF50 = 519888. */
+    zassert_equal(raw.temperature_raw, 519888);
+    /* Humidity 0x6F 0xF0 → 0x6FF0 (synthetic). */
+    zassert_equal(raw.humidity_raw, 0x6FF0u);
+
+    bme280_deinit(&dev);
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_bme280_compensate_matches_datasheet_example) {
+    fake_bme280_reset();
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    bme280_t dev;
+    zassert_equal(bme280_init(&dev, bus, BME280_I2C_ADDR_LOW), ALP_OK);
+
+    bme280_raw_t raw;
+    zassert_equal(bme280_read_raw(&dev, &raw), ALP_OK);
+
+    bme280_compensated_t comp;
+    zassert_equal(bme280_compensate(&dev, &raw, &comp), ALP_OK);
+
+    /* BST-BME280-DS002 §4.2.3 Table 2 documents the worked example:
+     * T = 25.08 °C → c100 = 2508,  P ≈ 100653 Pa.  Allow ±2 c100 to
+     * absorb the documented ±2-LSB rounding noise across compilers. */
+    zassert_within(comp.temperature_c100, 2508, 2,
+                   "compensated T x100 = %d, expected 2508 ± 2",
+                   (int)comp.temperature_c100);
+    zassert_within(comp.pressure_pa, 100653u, 50u,
+                   "compensated P (Pa) = %u, expected 100653 ± 50",
+                   comp.pressure_pa);
+
+    bme280_deinit(&dev);
+    alp_i2c_close(bus);
 }

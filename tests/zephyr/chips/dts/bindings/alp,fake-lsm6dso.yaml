@@ -1,0 +1,14 @@
+# Copyright 2026 ALP Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake LSM6DSO emul target.  Lives in this test only.
+
+description: |
+  Fake STMicro LSM6DSO i2c-emul target used by the alp-sdk chips
+  ztest to verify register-protocol behaviour without a real chip.
+  Pre-populates WHO_AM_I = 0x6C and echoes register writes back on
+  subsequent reads.
+
+compatible: "alp,fake-lsm6dso"
+
+include: i2c-device.yaml

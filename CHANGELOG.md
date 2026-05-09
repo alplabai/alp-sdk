@@ -256,6 +256,35 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 - `examples/README.md` per-example status descriptions tightened
   with the concrete pipeline stages each skeleton scaffolds and
   which version fills in each stage.
+- **Register-protocol ztests** via test-only i2c-emul fixtures.
+  Three fake targets (`tests/zephyr/chips/src/fake_{lsm6dso,
+  ssd1306,bme280}.c`) attach to the test's `i2c0_emul`
+  controller at the chip drivers' default I2C addresses,
+  pre-populate `WHO_AM_I` / `CHIP_ID` plus calibration data,
+  and either echo register writes back or capture the byte
+  stream for the test to inspect via `fakes.h` helpers.
+  - **fake LSM6DSO**: register-store with WHO_AM_I=0x6C seed.
+    Tests verify `lsm6dso_init` succeeds, `set_accel`/`set_gyro`
+    encode the documented byte into CTRL1_XL / CTRL2_G, and
+    `read_accel` decodes the seeded LE register pairs.
+  - **fake SSD1306**: command/data byte logger split by the
+    SSD1306 control byte (0x00 vs 0x40).  Tests verify
+    `ssd1306_init` streams DISPLAY_OFF first, charge-pump
+    enable (0x8D 0x14), DISPLAY_ON last; `ssd1306_display`
+    sets the full address window then pushes 1024 framebuffer
+    bytes with the seeded pixel landing at offset 0.
+  - **fake BME280**: register store seeded with the canonical
+    BST-BME280-DS002 §4.2.2 example calibration coefficients
+    and §4.2.3 example raw conversion (T_raw=519888,
+    P_raw=415148).  Tests verify init loads every coefficient
+    correctly, `read_raw` decodes the 20/20/16-bit values, and
+    `compensate` reproduces the documented worked example
+    (T = 25.08 °C, P = 100653 Pa) within ±2 LSB and ±50 Pa.
+  - DT bindings live at `tests/zephyr/chips/dts/bindings/
+    alp,fake-*.yaml`; the chip-test overlay attaches each
+    fake at the canonical I2C address.
+  - Chips suite tests grow **29 → 38 cases**; total twister
+    cases on `native_sim/native/64` climb **43 → 52**.
 
 ### Notes
 

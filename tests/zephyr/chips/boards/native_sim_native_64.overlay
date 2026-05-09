@@ -27,10 +27,22 @@
             #size-cells = <0>;
             clock-frequency = <I2C_BITRATE_STANDARD>;
 
-            /* Emul targets for the chip drivers under test.  These
-             * register no real behaviour — the smoke tests only exercise
-             * lifecycle, NULL handling, and parameter validation, which
-             * don't need the controller to actually transfer data. */
+            /* Test-only fake emul targets that respond at the chip
+             * drivers' default I2C addresses.  Each implementation
+             * lives in src/fake_<chip>.c and exposes inspection
+             * helpers to the ztest via fakes.h. */
+            fake_lsm6dso: fake_lsm6dso@6a {
+                compatible = "alp,fake-lsm6dso";
+                reg = <0x6a>;
+            };
+            fake_ssd1306: fake_ssd1306@3c {
+                compatible = "alp,fake-ssd1306";
+                reg = <0x3c>;
+            };
+            fake_bme280: fake_bme280@76 {
+                compatible = "alp,fake-bme280";
+                reg = <0x76>;
+            };
         };
     };
 
