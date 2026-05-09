@@ -1,0 +1,58 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Devicetree overlay for the alp-sdk peripheral ztest under
+ * native_sim.  Wires three emulated GPIOs, one emulated I2C bus,
+ * one emulated SPI bus, and the existing native_sim UART (uart0)
+ * to the alias names alp_sdk's Zephyr backend looks up.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/ {
+    aliases {
+        alp-i2c0  = &i2c0_emul;
+        alp-spi0  = &spi0_emul;
+        alp-uart0 = &uart0;
+    };
+
+    /* native_sim's /soc has #address-cells=2, #size-cells=1, so
+     * `reg` needs three cells: <addr_hi addr_lo size>. */
+    soc {
+        i2c0_emul: i2c@100 {
+            compatible = "zephyr,i2c-emul-controller";
+            status = "okay";
+            reg = <0 0x100 4>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+            clock-frequency = <I2C_BITRATE_STANDARD>;
+        };
+
+        spi0_emul: spi@200 {
+            compatible = "zephyr,spi-emul-controller";
+            status = "okay";
+            reg = <0 0x200 4>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+        };
+    };
+
+    gpio_emul0: gpio_emul0 {
+        compatible = "zephyr,gpio-emul";
+        status = "okay";
+        gpio-controller;
+        rising-edge;
+        falling-edge;
+        #gpio-cells = <2>;
+        ngpios = <8>;
+    };
+
+    alp_pins: alp-pins {
+        compatible = "alp,pin-array";
+        gpios = <&gpio_emul0 0 GPIO_ACTIVE_HIGH>,
+                <&gpio_emul0 1 GPIO_ACTIVE_HIGH>,
+                <&gpio_emul0 2 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+    };
+};

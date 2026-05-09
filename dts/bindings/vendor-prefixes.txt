@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+# Vendor prefixes registered by the alp-sdk Zephyr module.
+# Picked up by Zephyr via this module's `settings.dts_root: .`.
+alp	ALP Lab AB

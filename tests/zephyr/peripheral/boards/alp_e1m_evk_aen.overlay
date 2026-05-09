@@ -1,0 +1,49 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Overlay for running the ALP SDK peripheral ztest on the
+ * E1M EVK (UG-E1M-001) populated with an E1M-AEN family SoM.
+ *
+ * Wires the studio-resolved peripheral aliases to the EVK
+ * connectors: I2C0 to the on-board sensor bus, SPI0 to the M.2
+ * Key M slot, UART0 to the JTAG/SWD header's serial side, and
+ * three pins of alp,pin-array to the rotary encoder + RGB LED.
+ *
+ * The alp_e1m_evk_aen board file itself lives in
+ * alpCaner/alp-zephyr-modules; this overlay only re-aliases what
+ * that board exposes.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+    aliases {
+        alp-i2c0  = &i2c0;       /* sensor bus on the EVK (ICM-42670-P, BMI323, BMP581, TCAL9538) */
+        alp-spi0  = &spi0;       /* routed to the M.2 Key M slot for off-board flash */
+        alp-uart0 = &uart0;      /* console / JTAG-side debug uart */
+    };
+
+    /* The order below MUST match the EVK_AEN_PIN_* macros in
+     * include/alp/boards/alp_e1m_evk_aen.h.  Adding a new pad
+     * means appending here AND adding the matching macro there.  */
+    alp_pins: alp-pins {
+        compatible = "alp,pin-array";
+        gpios = <&gpio0  0 GPIO_ACTIVE_HIGH>,                            /* EVK_AEN_PIN_LED_RED      */
+                <&gpio0  1 GPIO_ACTIVE_HIGH>,                            /* EVK_AEN_PIN_LED_GREEN    */
+                <&gpio0  2 GPIO_ACTIVE_HIGH>,                            /* EVK_AEN_PIN_LED_BLUE     */
+                <&gpio1  0 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>,           /* EVK_AEN_PIN_ENCODER_SW   */
+                <&gpio1  1 GPIO_ACTIVE_HIGH>,                            /* EVK_AEN_PIN_IO_EXP_INT   */
+                <&gpio1  2 GPIO_ACTIVE_HIGH>;                            /* EVK_AEN_PIN_IO_EXP_RST   */
+    };
+};
+
+/*
+ * NOTE — pin numbers in the gpios property above are PLACEHOLDERS.
+ * The authoritative mapping lands when alpCaner/alp-zephyr-modules
+ * publishes the alp_e1m_evk_aen board file with a pinctrl group
+ * naming the exact gpio bank/index for each EVK net (RGB LED,
+ * encoder switch, IO_EXP.INT, IO_EXP.RST).  Until then this overlay
+ * compiles but the higher-numbered pins won't actually drive
+ * the right physical signals on a real board.
+ */

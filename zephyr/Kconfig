@@ -42,4 +42,37 @@ config ALP_SDK_HAS_CMSIS_DSP
 	  Re-export arm_math.h via <alp/math.h>.  Requires the
 	  CMSIS-DSP module to be present in the Zephyr west manifest.
 
+# v0.1 chip drivers.  Each is opt-in so projects only pay for the
+# silicon they actually use.  Symbols use the chip's natural prefix
+# (lsm6dso_*, ssd1306_*) — no alp_ prefix on chip drivers.  The
+# button_led helper is the exception (block utility, alp_-prefixed).
+
+menu "ALP SDK chip drivers"
+
+config ALP_SDK_CHIP_LSM6DSO
+	bool "STMicroelectronics LSM6DSO 6-axis IMU driver"
+	depends on I2C
+	help
+	  Compile chips/lsm6dso/lsm6dso.c.  Provides lsm6dso_init,
+	  lsm6dso_read_accel/gyro/temp.  Used by the alp-studio
+	  block blk_imu_lsm6dso.
+
+config ALP_SDK_CHIP_SSD1306
+	bool "Solomon Systech SSD1306 monochrome OLED driver"
+	depends on I2C
+	help
+	  Compile chips/ssd1306/ssd1306.c.  Provides ssd1306_init,
+	  ssd1306_clear, ssd1306_draw_pixel, ssd1306_display.  Used
+	  by the alp-studio block blk_oled_ssd1306.
+
+config ALP_SDK_CHIP_BUTTON_LED
+	bool "Generic button + LED block helper"
+	depends on GPIO
+	help
+	  Compile chips/button_led/button_led.c.  Wraps alp_gpio_*
+	  to provide alp_button_led_* lifecycle helpers used by the
+	  alp-studio block blk_button_led.
+
+endmenu # "ALP SDK chip drivers"
+
 endif # ALP_SDK

@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Zephyr module manifest — makes alp-sdk importable as a Zephyr module
-# when added to a project's west.yml.
+# when added to a project's west.yml or via EXTRA_ZEPHYR_MODULES.
 #
 # See: https://docs.zephyrproject.org/latest/develop/modules.html
 name: alp-sdk
 build:
-  cmake: .
+  cmake: zephyr
   kconfig: zephyr/Kconfig
-settings:
-  # Expose dts/bindings/ to Zephyr's devicetree binding scanner so
-  # boards / overlays can use compatible = "alp,pin-array".
-  dts_root: .
-  board_root: .
+  settings:
+    # Expose dts/bindings/ to Zephyr's devicetree binding scanner so
+    # boards / overlays can use compatible = "alp,pin-array".
+    dts_root: .
