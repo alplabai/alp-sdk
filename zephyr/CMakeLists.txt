@@ -27,6 +27,7 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/ble_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/security_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/mproc_stub.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_stub.c
 )
 
 # v0.2 peripheral wrappers — opt-in per-class so apps that don't use

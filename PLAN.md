@@ -263,9 +263,17 @@ Items the slides imply.  Items the v0.2 SDK *did* close are kept in
 the list with strikethrough so the audit trail stays clear; items
 that remain open take priority for the upcoming releases.
 
-1. **`<alp/inference.h>`** — unified ML inference API.  Held until
-   v0.2 exercises Vela + TFLM end-to-end so the API isn't designed
-   in a vacuum.
+1. ~~**`<alp/inference.h>`** — unified ML inference API.~~
+   **Surface closed:** declared with backend selector
+   (AUTO/CPU/Ethos-U/DRP-AI/DEEPX), model-format selector
+   (TFLite/Vela/DRP-AI/DXNN/ExecuTorch), tensor descriptor with
+   shape + dtype + quant params, and arena-handle config.  Real
+   impls arrive per the per-backend roadmap (Ethos-U + CPU
+   v0.2 on AEN-Zephyr; DRP-AI v0.3; DEEPX v0.4; i.MX 93 Ethos-U
+   v0.4).  The "wait for v0.2 to exercise the API" reasoning
+   was overtaken by enough cross-backend reading to confirm the
+   shape converges -- vendor-specific escape hatches at
+   `<alp/vendors/.../>` remain available where it doesn't.
 2. ~~**`<alp/audio.h>`** — declared in `VERSIONS.md` for v0.2 but no
    header file yet.~~  **Closed v0.2:** header surface lands with
    PDM input + I²S output + per-block read/write API; impl arrives

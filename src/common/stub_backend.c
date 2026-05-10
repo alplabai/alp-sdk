@@ -37,6 +37,7 @@
 #include "alp/ble.h"
 #include "alp/security.h"
 #include "alp/mproc.h"
+#include "alp/inference.h"
 
 /* ------------------------------------------------------------------ */
 /* alp_last_error — single-global fallback (no TLS on baremetal).      */
@@ -206,3 +207,11 @@ alp_status_t alp_hwsem_try_lock(alp_hwsem_t *s)                  { (void)s; retu
 alp_status_t alp_hwsem_lock(alp_hwsem_t *s, uint32_t t)          { (void)s; (void)t; return ALP_ERR_NOSUPPORT; }
 alp_status_t alp_hwsem_unlock(alp_hwsem_t *s)                    { (void)s; return ALP_ERR_NOSUPPORT; }
 void         alp_hwsem_close(alp_hwsem_t *s)                     { (void)s; }
+
+alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg) { (void)cfg; return NULL; }
+size_t           alp_inference_num_inputs(alp_inference_t *i)    { (void)i; return 0u; }
+size_t           alp_inference_num_outputs(alp_inference_t *i)   { (void)i; return 0u; }
+alp_status_t     alp_inference_get_input(alp_inference_t *i, size_t idx, alp_inference_tensor_t *o) { (void)i; (void)idx; if (o) *o = (alp_inference_tensor_t){0}; return ALP_ERR_NOSUPPORT; }
+alp_status_t     alp_inference_get_output(alp_inference_t *i, size_t idx, alp_inference_tensor_t *o) { (void)i; (void)idx; if (o) *o = (alp_inference_tensor_t){0}; return ALP_ERR_NOSUPPORT; }
+alp_status_t     alp_inference_invoke(alp_inference_t *i)        { (void)i; return ALP_ERR_NOSUPPORT; }
+void             alp_inference_close(alp_inference_t *i)         { (void)i; }

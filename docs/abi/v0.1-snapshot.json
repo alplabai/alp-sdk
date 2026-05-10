@@ -1667,6 +1667,61 @@
         }
       }
     },
+    "alp/inference.h": {
+      "functions": {
+        "alp_inference_close": {
+          "hash": "476fc2ef13a362ad",
+          "signature": "void alp_inference_close(alp_inference_t *inf);"
+        },
+        "alp_inference_get_input": {
+          "hash": "b7803d27466fa756",
+          "signature": "alp_status_t alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out);"
+        },
+        "alp_inference_get_output": {
+          "hash": "90fb46ddec3f8d36",
+          "signature": "alp_status_t alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out);"
+        },
+        "alp_inference_invoke": {
+          "hash": "0b6339a7f4abdaf2",
+          "signature": "alp_status_t alp_inference_invoke(alp_inference_t *inf);"
+        },
+        "alp_inference_num_inputs": {
+          "hash": "ad7996e460522416",
+          "signature": "size_t alp_inference_num_inputs(alp_inference_t *inf);"
+        },
+        "alp_inference_num_outputs": {
+          "hash": "6b961d3c54c3ebbf",
+          "signature": "size_t alp_inference_num_outputs(alp_inference_t *inf);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_inference_backend_t": {
+          "definition": "typedef enum { ALP_INFERENCE_BACKEND_AUTO = 0, ALP_INFERENCE_BACKEND_CPU = 1, ALP_INFERENCE_BACKEND_ETHOS_U = 2, ALP_INFERENCE_BACKEND_DRPAI = 3, ALP_INFERENCE_BACKEND_DEEPX_DX = 4 } alp_inference_backend_t;",
+          "hash": "04fb75226b383e41"
+        },
+        "alp_inference_dtype_t": {
+          "definition": "typedef enum { ALP_INFERENCE_DTYPE_F32 = 0, ALP_INFERENCE_DTYPE_F16 = 1, ALP_INFERENCE_DTYPE_INT8 = 2, ALP_INFERENCE_DTYPE_UINT8 = 3, ALP_INFERENCE_DTYPE_INT16 = 4, ALP_INFERENCE_DTYPE_INT32 = 5 } alp_inference_dtype_t;",
+          "hash": "07ee1d37c00d8a0e"
+        },
+        "alp_inference_model_format_t": {
+          "definition": "typedef enum { ALP_INFERENCE_MODEL_TFLITE = 0, ALP_INFERENCE_MODEL_VELA = 1, ALP_INFERENCE_MODEL_DRPAI = 2, ALP_INFERENCE_MODEL_DXNN = 3, ALP_INFERENCE_MODEL_EXECUTORCH = 4 } alp_inference_model_format_t;",
+          "hash": "770aa51a15e02706"
+        },
+        "alp_inference_t": {
+          "definition": "typedef struct alp_inference alp_inference_t;",
+          "hash": "b7fa5b7e4ab71e38"
+        },
+        "model_size": {
+          "definition": "typedef struct { const void *model_data; size_t model_size;",
+          "hash": "51b78f8e3d9ba0d1"
+        },
+        "size_bytes": {
+          "definition": "typedef struct { void *data; size_t size_bytes;",
+          "hash": "bc2b44bffc3ef2c5"
+        }
+      }
+    },
     "alp/iot.h": {
       "functions": {
         "alp_mqtt_close": {
