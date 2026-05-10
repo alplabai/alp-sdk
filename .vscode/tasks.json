@@ -1,203 +1,142 @@
 {
+    "//": [
+        "VS Code tasks for the ALP SDK.  Two flavours:",
+        "  1. Zephyr-module flow (`west build`) for ztests + examples.",
+        "     Requires a Zephyr workspace with this repo loaded as a",
+        "     module via `EXTRA_ZEPHYR_MODULES` or west.yml.",
+        "  2. Plain-CMake flow (`cmake`/`ctest`) for OS-independent",
+        "     metadata + ABI tooling.",
+        "Both flows assume PowerShell on Windows / bash on Linux/macOS."
+    ],
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Configure CMake (Mock Driver)",
+            "label": "validate · metadata (soc-spec v1)",
             "type": "shell",
-            "command": "cmake",
-            "args": [
-                "-B",
-                "build",
-                "-DBUILD_MOCK=ON",
-                "-DBUILD_EXAMPLES=ON"
-            ],
-            "group": "build",
-            "problemMatcher": []
-        },
-        {
-            "label": "Configure CMake (Alif Driver)",
-            "type": "shell",
-            "command": "cmake",
-            "args": [
-                "-B",
-                "build",
-                "-DBUILD_ALIF=ON",
-                "-DBUILD_EXAMPLES=ON"
-            ],
-            "group": "build",
-            "problemMatcher": []
-        },
-        {
-            "label": "Build (CMake)",
-            "type": "shell",
-            "command": "cmake",
-            "args": [
-                "--build",
-                "build"
-            ],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "problemMatcher": [
-                "$gcc"
-            ],
-            "dependsOn": []
-        },
-        {
-            "label": "Clean Build",
-            "type": "shell",
-            "command": "cmake",
-            "args": [
-                "--build",
-                "build",
-                "--target",
-                "clean"
-            ],
-            "group": "build",
-            "problemMatcher": []
-        },
-        {
-            "label": "Run Getting Started Example",
-            "type": "shell",
-            "command": "${workspaceFolder}/build/bin/getting_started",
-            "windows": {
-                "command": "${workspaceFolder}\\build\\bin\\getting_started.exe"
-            },
-            "group": "test",
+            "command": "python3",
+            "args": ["scripts/validate_metadata.py"],
             "problemMatcher": [],
-            "dependsOn": [
-                "Build (CMake)"
-            ]
+            "group": "test"
         },
         {
-            "label": "Download Alif SDK",
+            "label": "regen · soc_caps.h",
             "type": "shell",
-            "command": "powershell",
+            "command": "python3",
+            "args": ["scripts/gen_soc_caps.py"],
+            "problemMatcher": []
+        },
+        {
+            "label": "regen · ABI snapshot (v0.1)",
+            "type": "shell",
+            "command": "python3",
             "args": [
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}/scripts/download_alif_sdk.ps1"
+                "scripts/abi_snapshot.py",
+                "--version", "v0.1",
+                "--output", "docs/abi/v0.1-snapshot.json"
             ],
-            "group": "none",
             "problemMatcher": []
         },
         {
-            "label": "Full Build and Run (Mock)",
-            "dependsOrder": "sequence",
-            "dependsOn": [
-                "Configure CMake (Mock Driver)",
-                "Build (CMake)",
-                "Run Getting Started Example"
-            ],
-            "group": "test",
-            "problemMatcher": []
-        },
-        {
-            "label": "CMSIS Erase",
+            "label": "diff · ABI vs v0.1 snapshot",
             "type": "shell",
-            "command": "pyocd",
+            "command": "python3",
+            "args": [
+                "scripts/abi_snapshot.py",
+                "--diff", "docs/abi/v0.1-snapshot.json"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "twister · all (native_sim/native/64)",
+            "type": "shell",
+            "command": "python3",
+            "args": [
+                "${env:ZEPHYR_BASE}/scripts/twister",
+                "--testsuite-root", "${workspaceFolder}/tests/zephyr",
+                "--testsuite-root", "${workspaceFolder}/examples",
+                "-p", "native_sim/native/64",
+                "--inline-logs"
+            ],
             "options": {
-                "cwd": "${workspaceFolder}/examples",
-                "shell": {
-                    "executable": "cmd.exe",
-                    "args": [
-                        "/d",
-                        "/c"
-                    ]
+                "env": {
+                    "EXTRA_ZEPHYR_MODULES": "${workspaceFolder}"
                 }
             },
-            "args": [
-                "erase",
-                "--probe",
-                "cmsisdap:",
-                "--chip",
-                "--cbuild-run",
-                "${command:cmsis-csolution.getCbuildRunFile}"
-            ],
-            "problemMatcher": []
+            "problemMatcher": ["$gcc"],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
         },
         {
-            "label": "CMSIS Load",
+            "label": "twister · peripheral suite",
             "type": "shell",
-            "command": "pyocd",
+            "command": "python3",
+            "args": [
+                "${env:ZEPHYR_BASE}/scripts/twister",
+                "--testsuite-root", "${workspaceFolder}/tests/zephyr/peripheral",
+                "-p", "native_sim/native/64",
+                "--inline-logs"
+            ],
             "options": {
-                "cwd": "${workspaceFolder}/examples",
-                "shell": {
-                    "executable": "cmd.exe",
-                    "args": [
-                        "/d",
-                        "/c"
-                    ]
+                "env": {
+                    "EXTRA_ZEPHYR_MODULES": "${workspaceFolder}"
                 }
             },
-            "args": [
-                "load",
-                "--probe",
-                "cmsisdap:",
-                "--cbuild-run",
-                "${command:cmsis-csolution.getCbuildRunFile}"
-            ],
-            "problemMatcher": []
+            "problemMatcher": ["$gcc"]
         },
         {
-            "label": "CMSIS Run",
+            "label": "twister · chips suite",
             "type": "shell",
-            "command": "pyocd",
+            "command": "python3",
+            "args": [
+                "${env:ZEPHYR_BASE}/scripts/twister",
+                "--testsuite-root", "${workspaceFolder}/tests/zephyr/chips",
+                "-p", "native_sim/native/64",
+                "--inline-logs"
+            ],
             "options": {
-                "cwd": "${workspaceFolder}/examples",
-                "shell": {
-                    "executable": "cmd.exe",
-                    "args": [
-                        "/d",
-                        "/c"
-                    ]
+                "env": {
+                    "EXTRA_ZEPHYR_MODULES": "${workspaceFolder}"
                 }
             },
-            "args": [
-                "gdbserver",
-                "--probe",
-                "cmsisdap:",
-                "--connect",
-                "attach",
-                "--persist",
-                "--reset-run",
-                "--cbuild-run",
-                "${command:cmsis-csolution.getCbuildRunFile}",
-                "--quiet",
-                "--log",
-                "*.cbuild_run,*server=info"
-            ],
-            "problemMatcher": []
+            "problemMatcher": ["$gcc"]
         },
         {
-            "label": "CMSIS Load+Run",
-            "dependsOn": [
-                "CMSIS Load",
-                "CMSIS Run"
-            ],
-            "dependsOrder": "sequence",
-            "problemMatcher": []
-        },
-        {
-            "label": "CMSIS TargetInfo",
+            "label": "west build · edgeai-vision-aen (native_sim)",
             "type": "shell",
-            "command": "pyocd",
-            "options": {
-                "cwd": "${workspaceFolder}/examples",
-                "shell": {
-                    "executable": "cmd.exe",
-                    "args": [
-                        "/d",
-                        "/c"
-                    ]
-                }
-            },
+            "command": "west",
             "args": [
-                "list",
-                "--cbuild-run",
-                "${command:cmsis-csolution.getCbuildRunFile}"
+                "build", "-b", "native_sim/native/64",
+                "${workspaceFolder}/examples/edgeai-vision-aen",
+                "-d", "${workspaceFolder}/build/edgeai-vision-aen",
+                "--", "-DEXTRA_ZEPHYR_MODULES=${workspaceFolder}"
+            ],
+            "problemMatcher": ["$gcc"],
+            "group": "build"
+        },
+        {
+            "label": "west build · iot-connected-camera (native_sim)",
+            "type": "shell",
+            "command": "west",
+            "args": [
+                "build", "-b", "native_sim/native/64",
+                "${workspaceFolder}/examples/iot-connected-camera",
+                "-d", "${workspaceFolder}/build/iot-connected-camera",
+                "--", "-DEXTRA_ZEPHYR_MODULES=${workspaceFolder}"
+            ],
+            "problemMatcher": ["$gcc"],
+            "group": "build"
+        },
+        {
+            "label": "configure · plain CMake (baremetal stubs)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-B", "build/baremetal",
+                "-S", ".",
+                "-DALP_OS=baremetal",
+                "-DALP_BUILD_TESTS=ON"
             ],
             "problemMatcher": []
         }

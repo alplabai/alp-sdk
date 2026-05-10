@@ -1,46 +1,57 @@
 {
-    // File associations
+    "//": "Per-project VS Code settings.  Match what the SDK's build system expects.",
+
     "files.associations": {
         "*.h": "c",
         "*.c": "c",
         "*.hpp": "cpp",
-        "*.cpp": "cpp"
+        "*.cpp": "cpp",
+        "*.overlay": "dts",
+        "*.dts": "dts",
+        "*.dtsi": "dts",
+        "Kconfig*": "kconfig"
     },
 
-    // C/C++ extension settings
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-    "C_Cpp.default.cStandard": "c11",
+    "C_Cpp.default.cStandard": "c99",
     "C_Cpp.default.cppStandard": "c++17",
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/include"
+    ],
 
-    // CMake settings
     "cmake.configureOnOpen": false,
     "cmake.buildDirectory": "${workspaceFolder}/build",
 
-    // Editor settings
     "editor.formatOnSave": false,
     "editor.tabSize": 4,
     "editor.insertSpaces": true,
     "editor.rulers": [80, 100],
+    "editor.renderWhitespace": "boundary",
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
 
-    // Cortex-Debug settings (for Alif hardware debugging)
-    "cortex-debug.variableUseNaturalFormat": false,
-    "debug.hideSlowPreLaunchWarning": true,
-    "debug.showInStatusBar": "never",
-
-    // Terminal settings
-    "terminal.integrated.defaultProfile.windows": "PowerShell",
-
-    // Search exclusions
     "search.exclude": {
         "**/build": true,
-        "**/vendor": true,
-        "**/.git": true
+        "**/twister-out": true,
+        "**/.git": true,
+        "**/.west": true,
+        "**/zephyrproject": true,
+        "docs/abi/v0.1-snapshot.json": true
     },
 
-    // File exclusions
     "files.exclude": {
         "**/.git": true,
         "**/build": false,
-        "**/vendor/alif/sdk": true
-    }
+        "**/__pycache__": true,
+        "**/.pytest_cache": true,
+        "**/twister-out": true
+    },
+
+    "[c]":     {"editor.tabSize": 4, "editor.insertSpaces": true},
+    "[cpp]":   {"editor.tabSize": 4, "editor.insertSpaces": true},
+    "[python]":{"editor.tabSize": 4, "editor.insertSpaces": true},
+    "[yaml]":  {"editor.tabSize": 2, "editor.insertSpaces": true},
+    "[markdown]":{"editor.wordWrap": "on", "editor.rulers": [72, 80]},
+
+    "terminal.integrated.defaultProfile.windows": "PowerShell"
 }

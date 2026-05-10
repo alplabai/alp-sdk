@@ -1,0 +1,25 @@
+{
+    "//": [
+        "Fallback IntelliSense config for VS Code's C/C++ extension.",
+        "When the CMake Tools extension is active and a build directory is",
+        "configured, the cmake-tools configuration provider takes over and",
+        "this file is mostly cosmetic.  Keeping it so reviewers who haven't",
+        "configured a build can still get useful header navigation."
+    ],
+    "version": 4,
+    "configurations": [
+        {
+            "name": "alp-sdk · default",
+            "includePath": [
+                "${workspaceFolder}/include",
+                "${workspaceFolder}/src/zephyr",
+                "${workspaceFolder}/chips/**"
+            ],
+            "defines": [],
+            "cStandard": "c99",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "${default}",
+            "configurationProvider": "ms-vscode.cmake-tools"
+        }
+    ]
+}

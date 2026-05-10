@@ -9,6 +9,7 @@ cmake-build-*/
 !.vscode/extensions.json
 !.vscode/settings.json
 !.vscode/tasks.json
+!.vscode/c_cpp_properties.json
 .vs/
 .idea/
 *.code-workspace

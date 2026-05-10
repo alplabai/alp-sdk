@@ -10,12 +10,90 @@ SDK on top of ARM CMSIS.
 
 Supported OS targets: **Bare-metal · Zephyr RTOS · Yocto Linux**.
 
+## Two consumer paths
+
+The SDK supports both flows equally — pick whichever fits.
+
+- **Standalone / hand-written firmware.**  Write a Zephyr (or Yocto,
+  or bare-metal) app against `<alp/...>` headers directly.  Pick
+  instance IDs by hand from `<alp/e1m_pinout.h>` — `ALP_E1M_I2C0`,
+  `ALP_E1M_PWM3`, etc. — and your app is portable across every
+  E1M-conformant SoM.  Capability validation runs at runtime in
+  `*_open`; `alp_last_error()` tells you why an open failed.
+- **alp-studio codegen.**  The
+  [studio](https://github.com/alplabai/alp-studio) reads block
+  manifests, runs the pin allocator over the active SoM's
+  manifest, and emits C that calls the same `<alp/...>` API the
+  hand-written path uses.  Pin allocation correctness comes for
+  free.
+
+The standalone path is **not** a studio escape hatch — it's a
+first-class consumer.  Anything the studio can emit, a developer
+should be able to write by hand.
+
+## Using with VS Code
+
+The repo ships a `.vscode/` config that gets the standard Zephyr +
+CMake + Cortex-Debug extensions working out of the box:
+
+1. Open the repo in VS Code.  Accept the recommended-extensions
+   prompt (`extensions.json` lists what to install).
+2. Set `ZEPHYR_BASE` in your environment (one-time per workstation):
+   ```powershell
+   # Windows / PowerShell
+   $env:ZEPHYR_BASE = "C:\path\to\zephyrproject\zephyr"
+   ```
+3. From the Command Palette → **Tasks: Run Task**, pick:
+   - `validate · metadata` / `regen · soc_caps.h` / `regen · ABI snapshot` —
+     no Zephyr workspace required, runs the SDK's Python tooling.
+   - `twister · all (native_sim/native/64)` — runs the full ztest
+     suite under Zephyr's host emulator.
+   - `west build · edgeai-vision-aen` / `iot-connected-camera` —
+     builds the example apps standalone.
+4. C/C++ IntelliSense is wired through the CMake Tools extension.
+   Run a `west build` task once and IntelliSense picks up the
+   compile commands automatically.
+
+The SDK consumes `<alp/...>` headers via the `include/` path; if
+you're writing firmware against the SDK in a separate project,
+add this repo as a Zephyr module (via `west.yml` or
+`EXTRA_ZEPHYR_MODULES`) and your IntelliSense + build resolve the
+headers transparently.
+
 ## Status
 
-v0.1.0 — **scaffolding**.  Public-header surface is in place; backend
-implementations land per peripheral after sign-off.  See
-[`docs/os-support-matrix.md`](docs/os-support-matrix.md) for what's GA,
-stub, or planned per (library × OS × SoM).
+v0.1.0 → v0.2.0 — **scaffolding plus expanded peripheral coverage**.
+Public-header surface is in place; the v0.2 work doubled wrapped
+peripheral classes from 4 to 12 and added the diagnostic /
+capability-validation infrastructure that future implementations rely
+on.  See [`docs/os-support-matrix.md`](docs/os-support-matrix.md) for
+what's GA, stub, or planned per (library × OS × SoM).
+
+### What's new in v0.2
+
+- **12 wrapped peripheral classes** (was 4): I2C, SPI, GPIO, UART,
+  PWM, ADC, Counter + Quadrature decoder, I²S, CAN/CAN-FD, RTC,
+  Watchdog.  See [ADR 0003](docs/adr/0003-peripheral-coverage.md).
+- **`alp_last_error()`** thread-local diagnostic — apps that get NULL
+  from `alp_*_open` can ask why (`ALP_ERR_INVAL` /
+  `ALP_ERR_OUT_OF_RANGE` / `ALP_ERR_NOT_READY` / `ALP_ERR_NOMEM` / …).
+- **SoC capability validation** — `<alp/soc_caps.h>` is generated
+  from `metadata/socs/**.json` and rejects configs that exceed the
+  active SoC's documented hardware caps.  Canonical case: a 16-bit
+  ADC request on a 12-bit SoC fails at `alp_adc_open` with
+  `ALP_ERR_OUT_OF_RANGE`, before any I/O.  See
+  [ADR 0002](docs/adr/0002-error-mechanism.md).
+- **`ALP_E1M_<CLASS>_COUNT`** macros document the cross-SoM-portable
+  instance count per class — apps that stay below the bound work on
+  every E1M-conformant SoM.  See
+  [ADR 0004](docs/adr/0004-e1m-portability-bound.md).
+- **v0.2/v0.3 surfaces declared** — `<alp/audio.h>`, `<alp/ble.h>`,
+  `<alp/security.h>`, `<alp/mproc.h>` ship as compile-clean stubs
+  returning `ALP_ERR_NOSUPPORT`; real impls land in their target
+  versions.
+- **Architecture Decision Records** at [`docs/adr/`](docs/adr/) —
+  four records covering the wrapper-vs-Zephyr boundary, the error
+  mechanism, peripheral coverage, and the E1M portability bound.
 
 ## The stack
 
@@ -38,15 +116,28 @@ diagram and per-library design.
 
 All consumer-facing headers live under `include/alp/`:
 
-| Header               | Library         | v0.1 status                 |
-|----------------------|-----------------|-----------------------------|
-| `alp/peripheral.h`   | I2C, SPI, GPIO, UART | Surface declared        |
-| `alp/display.h`      | Display         | Surface declared (SSD1306 first) |
-| `alp/camera.h`       | Camera          | Stub — v0.2 ships MIPI CSI-2  |
-| `alp/gui.h`          | GUI / LVGL      | LVGL re-export                |
-| `alp/math.h`         | Math            | CMSIS-DSP re-export           |
-| `alp/signal.h`       | Signal          | Forward marker — v0.2 audio   |
-| `alp/iot.h`          | IoT             | Wi-Fi-station + MQTT          |
+| Header               | Library         | Status                                |
+|----------------------|-----------------|---------------------------------------|
+| `alp/peripheral.h`   | I2C, SPI, GPIO, UART | v0.1 GA on Zephyr-AEN            |
+| `alp/pwm.h`          | PWM             | **v0.2** GA on Zephyr-AEN             |
+| `alp/adc.h`          | ADC             | **v0.2** GA on Zephyr-AEN             |
+| `alp/counter.h`      | Counter + Quadrature decoder | **v0.2** GA on Zephyr-AEN |
+| `alp/i2s.h`          | I²S / SAI       | **v0.2** GA on Zephyr-AEN             |
+| `alp/can.h`          | CAN / CAN-FD    | **v0.2** GA on Zephyr-AEN             |
+| `alp/rtc.h`          | RTC             | **v0.2** GA on Zephyr-AEN             |
+| `alp/wdt.h`          | Watchdog        | **v0.2** GA on Zephyr-AEN             |
+| `alp/display.h`      | Display         | Surface declared (SSD1306 first)      |
+| `alp/camera.h`       | Camera          | Stub — v0.2 ships MIPI CSI-2          |
+| `alp/gui.h`          | GUI / LVGL      | LVGL re-export                        |
+| `alp/math.h`         | Math            | CMSIS-DSP re-export                   |
+| `alp/signal.h`       | Signal          | Forward marker — v0.2 audio           |
+| `alp/iot.h`          | IoT             | Stub; real Wi-Fi+MQTT in v0.2         |
+| `alp/audio.h`        | Audio (PDM in / I²S out) | Surface declared, impl v0.2  |
+| `alp/ble.h`          | BLE peripheral + central | Surface declared, impl v0.3  |
+| `alp/security.h`     | Hash / AEAD / TRNG       | Surface declared, impl v0.3  |
+| `alp/mproc.h`        | Multi-proc IPC  | Surface declared, impl v0.3           |
+| `alp/soc_caps.h`     | (generated) Active-SoC capability constants | Generated from metadata |
+| `alp/e1m_pinout.h`   | E1M-spec instance IDs + portability bounds | Pinned to e1m-spec v1.0 |
 
 ## Supported hardware
 

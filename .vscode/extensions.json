@@ -1,10 +1,15 @@
 {
+    "//": "Recommended VS Code extensions for working on (or with) the ALP SDK.",
     "recommendations": [
         "ms-vscode.cpptools-extension-pack",
         "ms-vscode.cmake-tools",
         "twxs.cmake",
-        "arm.cmsis-csolution",
-        "arm.environment-manager",
-        "marus25.cortex-debug"
+        "marus25.cortex-debug",
+        "nordic-semiconductor.nrf-connect",
+        "nordic-semiconductor.nrf-devicetree",
+        "nordic-semiconductor.nrf-kconfig",
+        "trond-snekvik.kconfig-lang",
+        "redhat.vscode-yaml",
+        "ms-python.python"
     ]
 }
