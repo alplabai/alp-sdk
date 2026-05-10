@@ -623,6 +623,49 @@
         }
       }
     },
+    "alp/chips/cc3501e.h": {
+      "functions": {
+        "cc3501e_deinit": {
+          "hash": "8fc892d1d03fcca7",
+          "signature": "void cc3501e_deinit(cc3501e_t *ctx);"
+        },
+        "cc3501e_get_version": {
+          "hash": "c358ccfe7990379b",
+          "signature": "alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);"
+        },
+        "cc3501e_init": {
+          "hash": "19d86d4f31421379",
+          "signature": "alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus);"
+        },
+        "cc3501e_request": {
+          "hash": "4394de213fad8378",
+          "signature": "alp_status_t cc3501e_request(cc3501e_t *ctx, alp_cc3501e_cmd_t cmd, const uint8_t *tx_payload, size_t tx_len, uint8_t *rx_buf, size_t rx_cap, size_t *rx_len, uint32_t timeout_ms);"
+        },
+        "cc3501e_reset": {
+          "hash": "2cea140e9f0dc78e",
+          "signature": "alp_status_t cc3501e_reset(cc3501e_t *ctx);"
+        },
+        "cc3501e_set_event_callback": {
+          "hash": "518c5cd8722d69fc",
+          "signature": "alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "cc3501e_event_cb_t": {
+          "definition": "typedef void (*cc3501e_event_cb_t)(uint8_t cmd, const uint8_t *payload, size_t len, void *user);",
+          "hash": "b89208474f7bc2be"
+        },
+        "cc3501e_t": {
+          "definition": "typedef struct cc3501e cc3501e_t;",
+          "hash": "7dec90f1a26a3e52"
+        },
+        "initialised": {
+          "definition": "typedef void (*cc3501e_event_cb_t)(uint8_t cmd, const uint8_t *payload, size_t len, void *user); struct cc3501e { bool initialised;",
+          "hash": "1cb60073ac062bd6"
+        }
+      }
+    },
     "alp/chips/icm42670.h": {
       "functions": {
         "icm42670_deinit": {

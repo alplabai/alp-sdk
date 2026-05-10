@@ -473,6 +473,20 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **CC3501E Alif-side host driver** -- new chip driver at
+  `chips/cc3501e/cc3501e.c` + public header
+  `include/alp/chips/cc3501e.h`.  Alif-side of the inter-chip
+  bridge: `cc3501e_init` / `_reset` / `_get_version` /
+  `_request` / `_set_event_callback` / `_deinit`.  Synchronous
+  `cc3501e_request` frames a header + payload, drives SPI1 via
+  `alp_spi_transceive`, copies the response back out.  Reset
+  pulses `WIFI.EN` (P15_5) + `E_WIFI.NRST` (P15_1_FLEX) via
+  `alp_gpio_*` when those pins are populated.  New
+  `CONFIG_ALP_SDK_CHIP_CC3501E` Kconfig (depends on `SPI && GPIO`).
+  SDK's chip count climbs to **12**.  ABI snapshot now 37
+  headers.  Followed in a later commit by the
+  `<alp/iot.h>` / `<alp/ble.h>` dispatcher branches that route
+  through this driver on E1M-AEN.
 - **CC3501E wire protocol + bridge architecture** -- the E1M-AEN
   family carries a separate TI CC3501E Wi-Fi 6 + BLE 5.4 combo
   MCU, and certain E1M pads (SPI1 + IO11 / IO13 / IO15..21 + the

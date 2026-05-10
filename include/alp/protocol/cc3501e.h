@@ -64,7 +64,7 @@ extern "C" {
 
 /** Flags bitfield. */
 #define ALP_CC3501E_FLAG_RESP_REQUIRED 0x01
-#define ALP_CC3501E_FLAG_ASYNC_EVENT   0x02
+#define ALP_CC3501E_FLAG_ASYNC_EVENT 0x02
 
 /**
  * @brief Command opcodes.
@@ -83,66 +83,66 @@ extern "C" {
  */
 typedef enum {
     /* Meta */
-    ALP_CC3501E_CMD_PING                = 0x00,
-    ALP_CC3501E_CMD_GET_VERSION         = 0x01,
-    ALP_CC3501E_CMD_RESET               = 0x02,
-    ALP_CC3501E_CMD_GET_MAC             = 0x03,
+    ALP_CC3501E_CMD_PING        = 0x00,
+    ALP_CC3501E_CMD_GET_VERSION = 0x01,
+    ALP_CC3501E_CMD_RESET       = 0x02,
+    ALP_CC3501E_CMD_GET_MAC     = 0x03,
 
     /* Wi-Fi */
-    ALP_CC3501E_CMD_WIFI_SCAN_START     = 0x10,
-    ALP_CC3501E_CMD_WIFI_SCAN_STOP      = 0x11,
-    ALP_CC3501E_CMD_WIFI_CONNECT_STA    = 0x12,
-    ALP_CC3501E_CMD_WIFI_DISCONNECT     = 0x13,
-    ALP_CC3501E_CMD_WIFI_AP_START       = 0x14,
-    ALP_CC3501E_CMD_WIFI_AP_STOP        = 0x15,
-    ALP_CC3501E_CMD_WIFI_GET_RSSI       = 0x16,
-    ALP_CC3501E_CMD_WIFI_GET_IP         = 0x17,
-    ALP_CC3501E_EVT_WIFI_SCAN_RESULT    = 0x18,  /* async, slave -> master */
-    ALP_CC3501E_EVT_WIFI_CONNECTED      = 0x19,  /* async */
-    ALP_CC3501E_EVT_WIFI_DISCONNECTED   = 0x1A,  /* async */
+    ALP_CC3501E_CMD_WIFI_SCAN_START   = 0x10,
+    ALP_CC3501E_CMD_WIFI_SCAN_STOP    = 0x11,
+    ALP_CC3501E_CMD_WIFI_CONNECT_STA  = 0x12,
+    ALP_CC3501E_CMD_WIFI_DISCONNECT   = 0x13,
+    ALP_CC3501E_CMD_WIFI_AP_START     = 0x14,
+    ALP_CC3501E_CMD_WIFI_AP_STOP      = 0x15,
+    ALP_CC3501E_CMD_WIFI_GET_RSSI     = 0x16,
+    ALP_CC3501E_CMD_WIFI_GET_IP       = 0x17,
+    ALP_CC3501E_EVT_WIFI_SCAN_RESULT  = 0x18, /* async, slave -> master */
+    ALP_CC3501E_EVT_WIFI_CONNECTED    = 0x19, /* async */
+    ALP_CC3501E_EVT_WIFI_DISCONNECTED = 0x1A, /* async */
 
     /* TCP/UDP sockets (host-managed; offload to firmware). */
-    ALP_CC3501E_CMD_SOCK_OPEN           = 0x20,
-    ALP_CC3501E_CMD_SOCK_CONNECT        = 0x21,
-    ALP_CC3501E_CMD_SOCK_SEND           = 0x22,
-    ALP_CC3501E_CMD_SOCK_RECV           = 0x23,
-    ALP_CC3501E_CMD_SOCK_CLOSE          = 0x24,
+    ALP_CC3501E_CMD_SOCK_OPEN    = 0x20,
+    ALP_CC3501E_CMD_SOCK_CONNECT = 0x21,
+    ALP_CC3501E_CMD_SOCK_SEND    = 0x22,
+    ALP_CC3501E_CMD_SOCK_RECV    = 0x23,
+    ALP_CC3501E_CMD_SOCK_CLOSE   = 0x24,
 
     /* BLE */
-    ALP_CC3501E_CMD_BLE_ENABLE          = 0x30,
-    ALP_CC3501E_CMD_BLE_DISABLE         = 0x31,
-    ALP_CC3501E_CMD_BLE_ADV_START       = 0x32,
-    ALP_CC3501E_CMD_BLE_ADV_STOP        = 0x33,
-    ALP_CC3501E_CMD_BLE_SCAN_START      = 0x34,
-    ALP_CC3501E_CMD_BLE_SCAN_STOP       = 0x35,
-    ALP_CC3501E_CMD_BLE_CONNECT         = 0x36,
-    ALP_CC3501E_CMD_BLE_DISCONNECT      = 0x37,
-    ALP_CC3501E_CMD_BLE_GATT_REGISTER   = 0x38,
-    ALP_CC3501E_CMD_BLE_GATT_NOTIFY     = 0x39,
-    ALP_CC3501E_CMD_BLE_GATT_READ       = 0x3A,
-    ALP_CC3501E_CMD_BLE_GATT_WRITE      = 0x3B,
-    ALP_CC3501E_EVT_BLE_ADV_REPORT      = 0x3C,  /* async */
-    ALP_CC3501E_EVT_BLE_CONNECTED       = 0x3D,  /* async */
-    ALP_CC3501E_EVT_BLE_DISCONNECTED    = 0x3E,  /* async */
-    ALP_CC3501E_EVT_BLE_GATT_WRITE_REQ  = 0x3F,  /* async */
+    ALP_CC3501E_CMD_BLE_ENABLE         = 0x30,
+    ALP_CC3501E_CMD_BLE_DISABLE        = 0x31,
+    ALP_CC3501E_CMD_BLE_ADV_START      = 0x32,
+    ALP_CC3501E_CMD_BLE_ADV_STOP       = 0x33,
+    ALP_CC3501E_CMD_BLE_SCAN_START     = 0x34,
+    ALP_CC3501E_CMD_BLE_SCAN_STOP      = 0x35,
+    ALP_CC3501E_CMD_BLE_CONNECT        = 0x36,
+    ALP_CC3501E_CMD_BLE_DISCONNECT     = 0x37,
+    ALP_CC3501E_CMD_BLE_GATT_REGISTER  = 0x38,
+    ALP_CC3501E_CMD_BLE_GATT_NOTIFY    = 0x39,
+    ALP_CC3501E_CMD_BLE_GATT_READ      = 0x3A,
+    ALP_CC3501E_CMD_BLE_GATT_WRITE     = 0x3B,
+    ALP_CC3501E_EVT_BLE_ADV_REPORT     = 0x3C, /* async */
+    ALP_CC3501E_EVT_BLE_CONNECTED      = 0x3D, /* async */
+    ALP_CC3501E_EVT_BLE_DISCONNECTED   = 0x3E, /* async */
+    ALP_CC3501E_EVT_BLE_GATT_WRITE_REQ = 0x3F, /* async */
 
     /* GPIO proxy.  IO11 / IO13 / IO15..IO21 hang off CC3501E
      * GPIOs; these commands let the Alif read/write them via the
      * inter-chip bus. */
-    ALP_CC3501E_CMD_GPIO_CONFIGURE      = 0x50,
-    ALP_CC3501E_CMD_GPIO_WRITE          = 0x51,
-    ALP_CC3501E_CMD_GPIO_READ           = 0x52,
-    ALP_CC3501E_CMD_GPIO_SET_INTERRUPT  = 0x53,
-    ALP_CC3501E_EVT_GPIO_INTERRUPT      = 0x54,  /* async */
+    ALP_CC3501E_CMD_GPIO_CONFIGURE     = 0x50,
+    ALP_CC3501E_CMD_GPIO_WRITE         = 0x51,
+    ALP_CC3501E_CMD_GPIO_READ          = 0x52,
+    ALP_CC3501E_CMD_GPIO_SET_INTERRUPT = 0x53,
+    ALP_CC3501E_EVT_GPIO_INTERRUPT     = 0x54, /* async */
 
     /* Power / camera enables.  CC3501E drives the camera-LDO
      * enable pins (CAM_EN_LDO0/1) per the inter-chip TSV. */
-    ALP_CC3501E_CMD_CAM_ENABLE          = 0x60,
-    ALP_CC3501E_CMD_CAM_DISABLE         = 0x61,
+    ALP_CC3501E_CMD_CAM_ENABLE  = 0x60,
+    ALP_CC3501E_CMD_CAM_DISABLE = 0x61,
 
     /* Diagnostics */
-    ALP_CC3501E_CMD_DIAG_GET_STATS      = 0x70,
-    ALP_CC3501E_CMD_DIAG_LOG_LEVEL      = 0x71,
+    ALP_CC3501E_CMD_DIAG_GET_STATS = 0x70,
+    ALP_CC3501E_CMD_DIAG_LOG_LEVEL = 0x71,
 } alp_cc3501e_cmd_t;
 
 /**
@@ -151,16 +151,16 @@ typedef enum {
  *        when the host adapts the value.
  */
 typedef enum {
-    ALP_CC3501E_RESP_OK              = 0x00,
-    ALP_CC3501E_RESP_ERR_INVALID     = 0x01,  /**< Bad cmd / bad payload. */
-    ALP_CC3501E_RESP_ERR_BUSY        = 0x02,  /**< Subsystem in use. */
-    ALP_CC3501E_RESP_ERR_TIMEOUT     = 0x03,
-    ALP_CC3501E_RESP_ERR_NO_MEM      = 0x04,
-    ALP_CC3501E_RESP_ERR_NOT_READY   = 0x05,  /**< Wi-Fi/BLE not enabled. */
-    ALP_CC3501E_RESP_ERR_RADIO       = 0x06,  /**< RF / antenna failure. */
-    ALP_CC3501E_RESP_ERR_PROTOCOL    = 0x07,  /**< Frame mis-parse. */
-    ALP_CC3501E_RESP_ERR_VERSION     = 0x08,  /**< Firmware ↔ host version mismatch. */
-    ALP_CC3501E_RESP_ERR_INTERNAL    = 0xFF
+    ALP_CC3501E_RESP_OK            = 0x00,
+    ALP_CC3501E_RESP_ERR_INVALID   = 0x01, /**< Bad cmd / bad payload. */
+    ALP_CC3501E_RESP_ERR_BUSY      = 0x02, /**< Subsystem in use. */
+    ALP_CC3501E_RESP_ERR_TIMEOUT   = 0x03,
+    ALP_CC3501E_RESP_ERR_NO_MEM    = 0x04,
+    ALP_CC3501E_RESP_ERR_NOT_READY = 0x05, /**< Wi-Fi/BLE not enabled. */
+    ALP_CC3501E_RESP_ERR_RADIO     = 0x06, /**< RF / antenna failure. */
+    ALP_CC3501E_RESP_ERR_PROTOCOL  = 0x07, /**< Frame mis-parse. */
+    ALP_CC3501E_RESP_ERR_VERSION   = 0x08, /**< Firmware ↔ host version mismatch. */
+    ALP_CC3501E_RESP_ERR_INTERNAL  = 0xFF
 } alp_cc3501e_resp_t;
 
 /* ------------------------------------------------------------------ */
@@ -172,7 +172,7 @@ typedef enum {
 typedef struct {
     uint8_t ssid_len;
     uint8_t psk_len;
-    uint8_t security;       /**< 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE */
+    uint8_t security; /**< 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE */
     uint8_t reserved;
     /* uint8_t ssid[ssid_len];   -- packed inline, no padding */
     /* uint8_t psk[psk_len];     -- packed inline, no padding */
@@ -180,11 +180,11 @@ typedef struct {
 
 /** Async event for CMD_WIFI_SCAN_START and friends. */
 typedef struct {
-    uint8_t  bssid[6];
-    int8_t   rssi_dbm;
-    uint8_t  channel;
-    uint8_t  security;
-    uint8_t  ssid_len;
+    uint8_t bssid[6];
+    int8_t  rssi_dbm;
+    uint8_t channel;
+    uint8_t security;
+    uint8_t ssid_len;
     /* uint8_t ssid[ssid_len]; */
 } alp_cc3501e_scan_result_t;
 
@@ -202,11 +202,11 @@ typedef struct {
 } alp_cc3501e_ble_adv_start_t;
 
 typedef struct {
-    uint8_t  addr_type;
-    uint8_t  addr[6];
-    int8_t   rssi_dbm;
-    uint8_t  adv_type;
-    uint8_t  adv_data_len;
+    uint8_t addr_type;
+    uint8_t addr[6];
+    int8_t  rssi_dbm;
+    uint8_t adv_type;
+    uint8_t adv_data_len;
     /* uint8_t adv_data[adv_data_len]; */
 } alp_cc3501e_ble_adv_report_t;
 
@@ -215,20 +215,20 @@ typedef struct {
 /* ------------------------------------------------------------------ */
 
 typedef struct {
-    uint8_t cc3501e_gpio;   /**< CC3501E pad index (e.g. 13 for GPIO13). */
-    uint8_t direction;      /**< 0 = input, 1 = output */
-    uint8_t pull;           /**< 0 = none, 1 = up, 2 = down */
+    uint8_t cc3501e_gpio; /**< CC3501E pad index (e.g. 13 for GPIO13). */
+    uint8_t direction;    /**< 0 = input, 1 = output */
+    uint8_t pull;         /**< 0 = none, 1 = up, 2 = down */
     uint8_t reserved;
 } alp_cc3501e_gpio_configure_t;
 
 typedef struct {
     uint8_t cc3501e_gpio;
-    uint8_t level;          /**< 0 or 1 */
+    uint8_t level; /**< 0 or 1 */
     uint8_t reserved[2];
 } alp_cc3501e_gpio_write_t;
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_PROTOCOL_CC3501E_H */
+#endif /* ALP_PROTOCOL_CC3501E_H */

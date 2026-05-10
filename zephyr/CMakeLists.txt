@@ -97,6 +97,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_BMI323
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/bmi323/bmi323.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_BMP581
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/bmp581/bmp581.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CC3501E
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e.c)
 
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include)
 zephyr_library_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr)
