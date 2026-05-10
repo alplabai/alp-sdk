@@ -102,8 +102,8 @@ struct alp_mqtt {
 #endif
 };
 
+#if defined(CONFIG_ALP_SDK_IOT_WIFI)
 static struct alp_wifi  g_wifi_pool[CONFIG_ALP_SDK_MAX_WIFI_HANDLES];
-static struct alp_mqtt  g_mqtt_pool[CONFIG_ALP_SDK_MAX_MQTT_HANDLES];
 
 static struct alp_wifi *wifi_pool_acquire(void)
 {
@@ -121,6 +121,10 @@ static void wifi_pool_release(struct alp_wifi *h)
 {
     if (h != NULL) h->in_use = false;
 }
+#endif /* CONFIG_ALP_SDK_IOT_WIFI */
+
+#if defined(CONFIG_ALP_SDK_IOT_MQTT)
+static struct alp_mqtt  g_mqtt_pool[CONFIG_ALP_SDK_MAX_MQTT_HANDLES];
 
 static struct alp_mqtt *mqtt_pool_acquire(void)
 {
@@ -138,6 +142,7 @@ static void mqtt_pool_release(struct alp_mqtt *h)
 {
     if (h != NULL) h->in_use = false;
 }
+#endif /* CONFIG_ALP_SDK_IOT_MQTT */
 
 #if defined(CONFIG_ALP_SDK_IOT_WIFI) || defined(CONFIG_ALP_SDK_IOT_MQTT)
 static alp_status_t errno_to_alp(int err)
@@ -281,8 +286,8 @@ void alp_wifi_close(alp_wifi_t *w)
 
 #if defined(CONFIG_ALP_SDK_IOT_WIFI)
     net_mgmt_del_event_callback(&w->wifi_cb);
-#endif
     wifi_pool_release(w);
+#endif
 }
 
 /* ================================================================== */
@@ -644,6 +649,6 @@ void alp_mqtt_close(alp_mqtt_t *m)
         (void)mqtt_disconnect(&m->client);
         m->connected = false;
     }
-#endif
     mqtt_pool_release(m);
+#endif
 }
