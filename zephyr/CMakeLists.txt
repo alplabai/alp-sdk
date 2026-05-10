@@ -36,7 +36,7 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_zephyr.c
     # Remaining v0.3 surfaces still on the stub contract -- swap in
     # their *_zephyr.c counterparts as they ship.
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/ble_stub.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/ble_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/security_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/mproc_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/storage_stub.c

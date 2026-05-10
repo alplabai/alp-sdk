@@ -473,6 +473,21 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **`<alp/ble.h>` real Zephyr `bt`-host wrapper (v0.3 milestone)** --
+  `src/zephyr/ble_zephyr.c` replaces the v0.1 NOSUPPORT stub.
+  Wraps Zephyr's `bt` host stack: `bt_enable` for the singleton
+  controller, `bt_le_adv_start` / `bt_le_adv_stop` for the
+  peripheral role, `bt_le_scan_start` / `bt_le_scan_stop` with a
+  per-packet `recv` callback for the central role, and
+  `bt_conn_le_create` / `bt_conn_disconnect` for connections.
+  Gated on new `CONFIG_ALP_SDK_BLE` (depends on `BT`, default y).
+  GATT runtime registration + sync read/write helpers stay
+  NOSUPPORT until v0.3.x lands a callback-with-semaphore shim
+  (Zephyr's GATT API is async-only; the public surface is
+  synchronous).  New `CONFIG_ALP_SDK_BLE_MAX_CONNS` (default 2)
+  sizes the connection-handle pool.  `tests/zephyr/ble/` smoke
+  suite (6 cases) verifies the NOSUPPORT-fall-back contract +
+  every NULL-arg branch under native_sim.
 - **Bare-metal AEN backend scaffolding (v0.2 milestone, item 4)** --
   v0.2's "stub-to-real" baseline for the bare-metal Alif Ensemble
   path.  New `vendors/alif/{i2c,spi,gpio,uart}.c` source files

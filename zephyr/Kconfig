@@ -311,6 +311,27 @@ config ALP_SDK_INFERENCE_ETHOS_U
 	  files can dispatch their custom ETHOS-U operator to the NPU.
 	  Off-target builds (CPU-only) must turn this off.
 
+# BLE (<alp/ble.h>) -- v0.3 deliverable.  Same NOSUPPORT contract
+# when CONFIG_BT is off so apps can link cleanly under native_sim.
+
+config ALP_SDK_BLE
+	bool "Real Bluetooth host stack via Zephyr bt"
+	default y if BT
+	depends on BT
+	help
+	  Enables the wifi_mgmt + GATT-server peripheral path and the
+	  scan + connect central path on top of Zephyr's `bt` host
+	  stack.  Requires CONFIG_BT=y plus CONFIG_BT_PERIPHERAL=y
+	  and/or CONFIG_BT_CENTRAL=y for the matching role.  When OFF
+	  alp_ble_open() returns NULL with ALP_ERR_NOSUPPORT.
+
+config ALP_SDK_BLE_MAX_CONNS
+	int "Maximum concurrent alp_ble_conn_t handles"
+	default 2
+	help
+	  Mirrors CONFIG_BT_MAX_CONN; raise both together if your app
+	  holds more than two simultaneous connections.
+
 config ALP_SDK_MAX_INFERENCE_HANDLES
 	int "Maximum concurrent alp_inference_t handles"
 	default 2
