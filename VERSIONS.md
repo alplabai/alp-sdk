@@ -27,10 +27,20 @@ the old plan to this one:
 | Version | Status      | Target           |
 |---------|-------------|------------------|
 | v0.1.0  | in-progress | AEN bring-up (Zephyr peripherals + multi-proc BSP foundation) |
-| v0.2.0  | planned     | bare-metal AEN real, V2N intro, EdgeAI reference app |
-| v0.3.0  | planned     | IoT reference app, multi-proc completion, display polish, V2N+M1 intro |
+| v0.2.0  | **surface complete; impl in progress** | 12 wrapped peripheral classes + capability validation + E1M portability bound + per-peripheral examples + v0.2/v0.3 stub headers + ADRs all shipped early.  Bare-metal AEN real, V2N intro, EdgeAI app real are the remaining v0.2 deliverables. |
+| v0.3.0  | planned     | Real impl behind v0.2-declared surfaces (`<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`, `<alp/mproc.h>`).  IoT reference app, multi-proc completion, display polish, V2N+M1 intro. |
 | v0.4.0  | planned     | Yocto first-class (V2N + V2N+M1 full)  |
 | v1.0.0  | planned     | unified repo, docs, ABI freeze, production-ready  |
+
+> **Note on v0.2 sequencing.**  The original v0.2 plan in this file
+> assumed only ~5 chip drivers + a couple of new libraries.  In
+> practice the v0.2 milestone landed a much larger architectural
+> shift early — full peripheral coverage (12 classes), the
+> diagnostic / capability-validation infrastructure, the
+> standalone-usage hardening with VS Code support and per-peripheral
+> reference apps, and the four new ADRs at `docs/adr/`.  Each of
+> those is documented in `CHANGELOG.md` under [Unreleased] and in
+> the per-section deliverables below.
 
 ---
 
@@ -55,6 +65,24 @@ versions cleanly.
 | IoT         | header    | `<alp/iot.h>` API frozen; impl stubbed                                   |
 | Audio       | —         | not in v0.1                                                              |
 | BLE         | —         | not in v0.1                                                              |
+
+### Pulled forward from v0.2 / v0.3 (shipped during the v0.1 cycle)
+
+The architectural shifts below were originally scheduled later but
+landed during the v0.1 cycle so apps can compile against the full
+v1.0-shape surface from day one:
+
+| Item                                                  | Originally planned for | Notes |
+|-------------------------------------------------------|------------------------|-------|
+| Peripheral coverage at 12 wrapped classes             | gradual through v0.4   | PWM, ADC, Counter+QEnc, I²S, CAN-FD, RTC, Watchdog all wrapped on Zephyr-AEN.  See [ADR 0003](docs/adr/0003-peripheral-coverage.md). |
+| `alp_last_error()` thread-local diagnostic            | v0.3 retrofit          | Stamped by every `*_open` failure; lets standalone firmware diagnose `NULL` returns precisely.  See [ADR 0002](docs/adr/0002-error-mechanism.md). |
+| `<alp/soc_caps.h>` capability tables                  | v0.3                   | Generated from `metadata/socs/**.json`; rejects 16-bit-ADC-on-12-bit-SoC at `*_open` time. |
+| `ALP_E1M_<CLASS>_COUNT` portability bounds            | undocumented           | Made the cross-SoM-portable instance count per class explicit.  See [ADR 0004](docs/adr/0004-e1m-portability-bound.md). |
+| `<alp/audio.h>` / `<alp/ble.h>` / `<alp/security.h>` / `<alp/mproc.h>` surface declarations | v0.2 / v0.3       | Compile-clean stubs that return `ALP_ERR_NOSUPPORT`; apps can `#include` them today, real impl in their target version. |
+| Per-peripheral hand-written reference apps            | v0.4                   | 11 examples under `examples/<peripheral>-<demo>/` covering every wrapped peripheral.  Hand-written firmware authors can crib these as starting templates. |
+| ABI snapshot tooling                                  | v1.0                   | `scripts/abi_snapshot.py` + `docs/abi/v0.1-snapshot.json` shipped.  CI gate via `pr-generated-files.yml` post-1.0. |
+| Architecture Decision Records                         | undocumented           | Four ADRs under `docs/adr/` covering the wrapper-vs-Zephyr boundary, error mechanism, peripheral coverage, and E1M portability bound. |
+| VS Code first-class support                           | undocumented           | `.vscode/` config (extensions, settings, tasks, c_cpp_properties) aligned with the Zephyr-module + plain-CMake layout.  Vendor-neutral extension list. |
 
 ### E1M EVK support
 
@@ -142,6 +170,17 @@ Preliminary stubs (`pending_alif_datasheet: true`):
 
 **Goal:** unblock the studio's next wave of blocks (camera, audio,
 more sensors) and add a second SoM family.
+
+> **Status note (2026-05-10).**  The bulk of v0.2's *surface* (the
+> 12 wrapped peripheral classes, the diagnostic / capability
+> infrastructure, the v0.2/v0.3 stub headers, the per-peripheral
+> example apps, the four ADRs at `docs/adr/`) shipped early during
+> the v0.1 cycle.  v0.2's remaining deliverables are the
+> *implementations* behind that surface: real Wi-Fi station + MQTT
+> on AEN-Zephyr, the EdgeAI reference app's full pipeline, the
+> bare-metal AEN backend going from stub to real, and the V2N
+> intro.  The surface that landed early is documented above
+> under "Pulled forward from v0.2 / v0.3".
 
 ### New libraries / surface
 

@@ -57,8 +57,30 @@ Key shape points the slide makes explicit:
 3. **Three application classes.**  Generic Application, Edge-AI
    Application, IoT Application — the example tree mirrors this
    split: `examples/edgeai-vision-aen/` (edge AI),
-   `examples/iot-connected-camera/` (IoT), and the v0.2/v0.3
-   simpler app templates (generic).
+   `examples/iot-connected-camera/` (IoT), and the per-peripheral
+   reference apps under `examples/<peripheral>-<demo>/`
+   (generic).
+
+### 1.1 Two consumer paths (codified during v0.2)
+
+The SDK is **dual-consumer** by design — both paths are
+first-class:
+
+- **alp-studio codegen.**  The visual programmer reads block
+  manifests, runs the pin allocator, and emits C that calls
+  `<alp/...>` headers.  Pin-allocation correctness comes for
+  free.
+- **Standalone / hand-written firmware.**  A developer writes a
+  Zephyr/Yocto/baremetal app directly against the headers,
+  picking instance IDs by hand from `<alp/e1m_pinout.h>`
+  (`ALP_E1M_I2C0`, `ALP_E1M_PWM3`, …).  No studio in the loop.
+
+The standalone path is **not** a studio escape hatch.  Anything
+the studio can emit, a developer should be able to write by
+hand.  See [`docs/adr/0001-wrapper-on-top-of-zephyr.md`](docs/adr/0001-wrapper-on-top-of-zephyr.md)
+for the rationale and [`examples/<peripheral>-<demo>/`](examples/)
+for hand-written reference apps covering every wrapped
+peripheral class.
 
 ---
 
@@ -80,8 +102,14 @@ switching to the Yocto path.
 | Deliverable                                       | Status      |
 |---------------------------------------------------|-------------|
 | Public surface frozen for v0.1                    | ✅ shipped — `include/alp/{peripheral,display,camera,gui,math,signal,iot}.h` |
+| **v0.2 peripheral expansion (12 wrapped classes)** | ✅ shipped — `pwm.h`, `adc.h`, `counter.h`, `i2s.h`, `can.h`, `rtc.h`, `wdt.h` added on top of v0.1.  See [ADR 0003](docs/adr/0003-peripheral-coverage.md). |
+| **v0.2 capability validation**                    | ✅ shipped — `alp_last_error()` thread-local + generated `<alp/soc_caps.h>` reject configs that exceed the active SoC's documented hardware caps.  See [ADR 0002](docs/adr/0002-error-mechanism.md). |
+| **E1M portability bound**                         | ✅ shipped — `ALP_E1M_<CLASS>_COUNT` macros document the cross-SoM portable instance count per class.  See [ADR 0004](docs/adr/0004-e1m-portability-bound.md). |
+| **v0.2/v0.3 surface declared early**              | ✅ shipped — `audio.h`, `ble.h`, `security.h`, `mproc.h` ship as compile-clean stubs returning `ALP_ERR_NOSUPPORT`.  Apps can compile against the full v1.0-shape surface today. |
+| **Per-peripheral hand-written examples**          | ✅ shipped — 11 reference apps under `examples/<peripheral>-<demo>/`, one per wrapped peripheral. |
 | OS pivot: `src/{zephyr,baremetal,yocto}/`         | 🟡 Zephyr full; baremetal stubs; yocto stubs (v0.4) |
 | Cross-SoM portability proof                       | 🟡 single-OS proof per SoM; cross-OS proof v0.2+ |
+| ABI snapshot tooling                              | ✅ shipped — `scripts/abi_snapshot.py` + `docs/abi/v0.1-snapshot.json`.  CI gate via `pr-generated-files.yml` post-1.0. |
 | ABI freeze + deprecation policy                   | 🔮 v1.0 |
 
 ### 2.2 CMSIS Integration
@@ -215,15 +243,17 @@ These are escape hatches, not the recommended path.
 ## 5. Versioned roadmap → pillar mapping
 
 A quick cross-reference so each pillar's progress is visible per
-release:
+release.  Bold = landed during this revision pass; the v0.2
+column captures the larger-than-originally-planned surface that
+shipped early in 2026-Q2.
 
 | Version | Unified Stack | CMSIS | Edge AI | IoT |
 |---------|---------------|-------|---------|-----|
 | **v0.1** | Public surface frozen, AEN-Zephyr full | DSP re-export | Skeleton + chip metadata for all NPUs | Skeleton + header surface |
-| **v0.2** | AEN-baremetal + V2N intro | CMSIS-Driver alignment | Vela + TFLM on AEN, EdgeAI app real | Real Wi-Fi-station + MQTT on AEN-Zephyr |
-| **v0.3** | V2N-Zephyr + AEN-Yocto stubs, M1 intro | (held) | `<alp/inference.h>` unified, ExecuTorch on AEN | TLS + BLE + provisioning |
+| **v0.2** | **12 peripheral classes wrapped (was 4) + capability validation + E1M portability bound + per-peripheral hand-written examples + ADRs**.  AEN-baremetal + V2N intro. | CMSIS-Driver alignment | Vela + TFLM on AEN, EdgeAI app real | Real Wi-Fi-station + MQTT on AEN-Zephyr |
+| **v0.3** | V2N-Zephyr + AEN-Yocto stubs, M1 intro.  Real impl behind v0.2-declared `<alp/audio.h>` / `<alp/ble.h>` / `<alp/security.h>` / `<alp/mproc.h>` surfaces. | (held) | `<alp/inference.h>` unified, ExecuTorch on AEN | TLS + BLE + provisioning |
 | **v0.4** | Yocto first-class on V2N + i.MX93 | (held) | DRP-AI + Ethos-U65 backends | Mosquitto + Paho + OTA |
-| **v1.0** | ABI freeze across the matrix | LTS-aligned | Full multi-vendor inference unification | Production IoT stack |
+| **v1.0** | ABI freeze across the matrix (snapshot tooling shipped v0.1) | LTS-aligned | Full multi-vendor inference unification | Production IoT stack |
 
 ---
 
