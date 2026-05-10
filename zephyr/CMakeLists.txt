@@ -38,7 +38,7 @@ zephyr_library_sources(
     # their *_zephyr.c counterparts as they ship.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/ble_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/security_zephyr.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/mproc_stub.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/mproc_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/storage_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/usb_stub.c
 )

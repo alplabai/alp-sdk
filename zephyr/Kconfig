@@ -337,6 +337,30 @@ config ALP_SDK_SECURITY
 	  subsystem, Renesas RZ/V2N RSIP).  When OFF the wrapper
 	  falls back to NULL / NOSUPPORT.
 
+config ALP_SDK_MPROC
+	bool "Real multi-processor IPC for <alp/mproc.h>"
+	default y if MBOX
+	depends on MBOX
+	help
+	  Wires the alp_mbox_* / alp_shmem_* / alp_hwsem_*
+	  primitives onto Zephyr's MBOX driver class (Alif's MHU is
+	  registered as a Zephyr mbox device on AEN).  Per-SoC hwsem
+	  + DT-anchored shared-memory bindings finalise in v0.3.x;
+	  the wrapper falls back to NOSUPPORT for those paths until
+	  the EVK overlay declares the regions.
+
+config ALP_SDK_MAX_SHMEM_HANDLES
+	int "Maximum concurrent alp_shmem_t handles"
+	default 2
+
+config ALP_SDK_MAX_MBOX_HANDLES
+	int "Maximum concurrent alp_mbox_t handles"
+	default 4
+
+config ALP_SDK_MAX_HWSEM_HANDLES
+	int "Maximum concurrent alp_hwsem_t handles"
+	default 4
+
 config ALP_SDK_MAX_HASH_HANDLES
 	int "Maximum concurrent alp_hash_t handles"
 	default 4

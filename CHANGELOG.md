@@ -473,6 +473,18 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **`<alp/mproc.h>` real Zephyr MBOX wrapper (v0.3 milestone)** --
+  `src/zephyr/mproc_zephyr.c` replaces the v0.1 NOSUPPORT stub.
+  Wraps Zephyr's MBOX driver class (Alif's MHU is registered as
+  a Zephyr mbox device on AEN) for the mailbox path:
+  `mbox_init_channel` + `mbox_send` + `mbox_register_callback`.
+  DT-anchored shared-memory regions (`alp-shmemN` aliases) and
+  per-SoC HWSEM register access return NOSUPPORT until v0.3.x
+  finishes the EVK overlay and the Alif HWSEM driver.  New
+  Kconfig: `CONFIG_ALP_SDK_MPROC` (depends on MBOX, default y),
+  pool-size knobs (`MAX_SHMEM_HANDLES`, `MAX_MBOX_HANDLES`,
+  `MAX_HWSEM_HANDLES`).  `tests/zephyr/mproc/` smoke suite
+  (7 cases).
 - **`<alp/security.h>` real MbedTLS PSA Crypto wrapper (v0.3 milestone)** --
   `src/zephyr/security_zephyr.c` replaces the v0.1 NOSUPPORT stub.
   Wraps PSA Crypto (`psa_crypto_init`, `psa_hash_*`, `psa_aead_*`,

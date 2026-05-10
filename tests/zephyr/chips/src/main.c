@@ -657,11 +657,15 @@ ZTEST(alp_chips, test_security_surface_v01_nosupport) {
 }
 
 ZTEST(alp_chips, test_mproc_surface_v01_nosupport) {
+    /* mproc.h went stub -> real on AEN-Zephyr in v0.3.  NULL-handle
+     * operations move from NOSUPPORT to NOT_READY (the standard
+     * wrapper convention); open() still falls through to NULL when
+     * the underlying mbox/hwsem device isn't present. */
     zassert_is_null(alp_shmem_open(NULL));
     zassert_is_null(alp_mbox_open(NULL));
     zassert_is_null(alp_hwsem_open(0));
-    zassert_equal(alp_hwsem_try_lock(NULL), ALP_ERR_NOSUPPORT);
-    zassert_equal(alp_mbox_send(NULL, NULL, 0, 0), ALP_ERR_NOSUPPORT);
+    zassert_equal(alp_hwsem_try_lock(NULL), ALP_ERR_NOT_READY);
+    zassert_equal(alp_mbox_send(NULL, NULL, 0, 0), ALP_ERR_NOT_READY);
     alp_shmem_close(NULL);
     alp_mbox_close(NULL);
     alp_hwsem_close(NULL);
