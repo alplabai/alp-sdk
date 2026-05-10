@@ -2200,6 +2200,108 @@
       },
       "typedefs": {}
     },
+    "alp/storage.h": {
+      "functions": {
+        "alp_storage_close": {
+          "hash": "5d5e8e7dbc5bedfd",
+          "signature": "void alp_storage_close(alp_storage_t *s);"
+        },
+        "alp_storage_erase": {
+          "hash": "857f95912d78027f",
+          "signature": "alp_status_t alp_storage_erase(alp_storage_t *s, uint64_t offset, uint64_t len);"
+        },
+        "alp_storage_get_info": {
+          "hash": "79f4f2bdc334cf92",
+          "signature": "alp_status_t alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info);"
+        },
+        "alp_storage_read": {
+          "hash": "34b9475c84273d35",
+          "signature": "alp_status_t alp_storage_read(alp_storage_t *s, uint64_t offset, void *data, size_t len);"
+        },
+        "alp_storage_sync": {
+          "hash": "6a368d559d6ce424",
+          "signature": "alp_status_t alp_storage_sync(alp_storage_t *s);"
+        },
+        "alp_storage_write": {
+          "hash": "ec81e8d2ad921e19",
+          "signature": "alp_status_t alp_storage_write(alp_storage_t *s, uint64_t offset, const void *data, size_t len);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_storage_kind_t": {
+          "definition": "typedef enum { ALP_STORAGE_KIND_INTERNAL_FLASH = 0, ALP_STORAGE_KIND_QSPI_FLASH = 1, ALP_STORAGE_KIND_OSPI_FLASH = 2, ALP_STORAGE_KIND_SD_MMC = 3 } alp_storage_kind_t;",
+          "hash": "c76a6ca3ab1f39b6"
+        },
+        "alp_storage_t": {
+          "definition": "typedef struct alp_storage alp_storage_t;",
+          "hash": "60661296d95f68e4"
+        },
+        "kind": {
+          "definition": "typedef struct { alp_storage_kind_t kind;",
+          "hash": "48352e206c3708ac"
+        },
+        "total_bytes": {
+          "definition": "typedef struct { uint64_t total_bytes;",
+          "hash": "b7cd30143611e587"
+        }
+      }
+    },
+    "alp/usb.h": {
+      "functions": {
+        "alp_usb_device_close": {
+          "hash": "a0d61c2498d34493",
+          "signature": "void alp_usb_device_close(alp_usb_dev_t *dev);"
+        },
+        "alp_usb_device_disable": {
+          "hash": "cf3253c66d846f76",
+          "signature": "alp_status_t alp_usb_device_disable(alp_usb_dev_t *dev);"
+        },
+        "alp_usb_device_enable": {
+          "hash": "1e54586c5a30a0b0",
+          "signature": "alp_status_t alp_usb_device_enable(alp_usb_dev_t *dev);"
+        },
+        "alp_usb_device_read": {
+          "hash": "8953f7d180fe9d75",
+          "signature": "alp_status_t alp_usb_device_read(alp_usb_dev_t *dev, uint8_t *data, size_t len, size_t *out_len, uint32_t timeout_ms);"
+        },
+        "alp_usb_device_write": {
+          "hash": "af50fc686dc4b20a",
+          "signature": "alp_status_t alp_usb_device_write(alp_usb_dev_t *dev, const uint8_t *data, size_t len, uint32_t timeout_ms);"
+        },
+        "alp_usb_host_close": {
+          "hash": "e094d6387e0d10e2",
+          "signature": "void alp_usb_host_close(alp_usb_host_t *host);"
+        },
+        "alp_usb_host_disable": {
+          "hash": "a8de0dafae7c8f9b",
+          "signature": "alp_status_t alp_usb_host_disable(alp_usb_host_t *host);"
+        },
+        "alp_usb_host_enable": {
+          "hash": "a51f06f2026201a6",
+          "signature": "alp_status_t alp_usb_host_enable(alp_usb_host_t *host);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_usb_dev_t": {
+          "definition": "typedef struct alp_usb_dev alp_usb_dev_t;",
+          "hash": "9f4cb61909ea9300"
+        },
+        "alp_usb_device_class_t": {
+          "definition": "typedef enum { ALP_USB_DEVICE_CDC_ACM = 0, ALP_USB_DEVICE_MSC = 1, ALP_USB_DEVICE_HID = 2 } alp_usb_device_class_t;",
+          "hash": "b7de1ef3d69ac990"
+        },
+        "alp_usb_host_t": {
+          "definition": "typedef struct alp_usb_host alp_usb_host_t;",
+          "hash": "a6bce72263be57f6"
+        },
+        "device_class": {
+          "definition": "typedef struct { alp_usb_device_class_t device_class;",
+          "hash": "dd31b651e17a00d7"
+        }
+      }
+    },
     "alp/wdt.h": {
       "functions": {
         "alp_wdt_close": {

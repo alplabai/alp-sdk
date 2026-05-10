@@ -38,6 +38,8 @@
 #include "alp/security.h"
 #include "alp/mproc.h"
 #include "alp/inference.h"
+#include "alp/storage.h"
+#include "alp/usb.h"
 
 /* ------------------------------------------------------------------ */
 /* alp_last_error — single-global fallback (no TLS on baremetal).      */
@@ -215,3 +217,22 @@ alp_status_t     alp_inference_get_input(alp_inference_t *i, size_t idx, alp_inf
 alp_status_t     alp_inference_get_output(alp_inference_t *i, size_t idx, alp_inference_tensor_t *o) { (void)i; (void)idx; if (o) *o = (alp_inference_tensor_t){0}; return ALP_ERR_NOSUPPORT; }
 alp_status_t     alp_inference_invoke(alp_inference_t *i)        { (void)i; return ALP_ERR_NOSUPPORT; }
 void             alp_inference_close(alp_inference_t *i)         { (void)i; }
+
+alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg) { (void)cfg; return NULL; }
+alp_status_t   alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info) { (void)s; if (info) *info = (alp_storage_info_t){0}; return ALP_ERR_NOSUPPORT; }
+alp_status_t   alp_storage_read(alp_storage_t *s, uint64_t o, void *d, size_t l)        { (void)s; (void)o; (void)d; (void)l; return ALP_ERR_NOSUPPORT; }
+alp_status_t   alp_storage_write(alp_storage_t *s, uint64_t o, const void *d, size_t l) { (void)s; (void)o; (void)d; (void)l; return ALP_ERR_NOSUPPORT; }
+alp_status_t   alp_storage_erase(alp_storage_t *s, uint64_t o, uint64_t l)              { (void)s; (void)o; (void)l; return ALP_ERR_NOSUPPORT; }
+alp_status_t   alp_storage_sync(alp_storage_t *s)                { (void)s; return ALP_ERR_NOSUPPORT; }
+void           alp_storage_close(alp_storage_t *s)               { (void)s; }
+
+alp_usb_dev_t *alp_usb_device_open(const alp_usb_device_config_t *cfg) { (void)cfg; return NULL; }
+alp_status_t   alp_usb_device_enable(alp_usb_dev_t *d)           { (void)d; return ALP_ERR_NOSUPPORT; }
+alp_status_t   alp_usb_device_disable(alp_usb_dev_t *d)          { (void)d; return ALP_ERR_NOSUPPORT; }
+alp_status_t   alp_usb_device_write(alp_usb_dev_t *d, const uint8_t *b, size_t l, uint32_t t) { (void)d; (void)b; (void)l; (void)t; return ALP_ERR_NOSUPPORT; }
+alp_status_t   alp_usb_device_read(alp_usb_dev_t *d, uint8_t *b, size_t l, size_t *o, uint32_t t) { (void)d; (void)b; (void)l; (void)t; if (o) *o = 0; return ALP_ERR_NOSUPPORT; }
+void           alp_usb_device_close(alp_usb_dev_t *d)            { (void)d; }
+alp_usb_host_t *alp_usb_host_open(void)                          { return NULL; }
+alp_status_t   alp_usb_host_enable(alp_usb_host_t *h)            { (void)h; return ALP_ERR_NOSUPPORT; }
+alp_status_t   alp_usb_host_disable(alp_usb_host_t *h)           { (void)h; return ALP_ERR_NOSUPPORT; }
+void           alp_usb_host_close(alp_usb_host_t *h)             { (void)h; }
