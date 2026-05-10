@@ -473,6 +473,21 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **`<alp/security.h>` real MbedTLS PSA Crypto wrapper (v0.3 milestone)** --
+  `src/zephyr/security_zephyr.c` replaces the v0.1 NOSUPPORT stub.
+  Wraps PSA Crypto (`psa_crypto_init`, `psa_hash_*`, `psa_aead_*`,
+  `psa_generate_random`) -- when MbedTLS is built with the
+  vendor's HW-accelerator driver registered, PSA routes to the
+  Alif Ensemble crypto subsystem (E7/E8) or the Renesas RZ/V2N
+  RSIP automatically without code changes here.  Hash covers
+  SHA-256/384/512; AEAD covers AES-128/256-GCM and
+  ChaCha20-Poly1305; TRNG via `psa_generate_random`.  New
+  Kconfig: `CONFIG_ALP_SDK_SECURITY` (depends on
+  `MBEDTLS_PSA_CRYPTO_C`, default y),
+  `CONFIG_ALP_SDK_MAX_HASH_HANDLES` / `_AEAD_HANDLES` (default 4
+  each).  AEAD encrypt/decrypt path uses a 4 KiB stack scratch
+  buffer (heap fall-back lands in v0.3.x for larger blobs).
+  `tests/zephyr/security/` smoke suite (7 cases).
 - **`<alp/ble.h>` real Zephyr `bt`-host wrapper (v0.3 milestone)** --
   `src/zephyr/ble_zephyr.c` replaces the v0.1 NOSUPPORT stub.
   Wraps Zephyr's `bt` host stack: `bt_enable` for the singleton

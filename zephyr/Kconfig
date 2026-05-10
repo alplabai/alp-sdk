@@ -325,6 +325,26 @@ config ALP_SDK_BLE
 	  and/or CONFIG_BT_CENTRAL=y for the matching role.  When OFF
 	  alp_ble_open() returns NULL with ALP_ERR_NOSUPPORT.
 
+config ALP_SDK_SECURITY
+	bool "Real MbedTLS PSA Crypto for <alp/security.h>"
+	default y if MBEDTLS_PSA_CRYPTO_C
+	depends on MBEDTLS && MBEDTLS_PSA_CRYPTO_C
+	help
+	  Wires the alp_hash_* / alp_aead_* / alp_random_bytes
+	  surface onto MbedTLS's PSA Crypto API.  PSA picks the
+	  active SoC's hardware accelerator transparently when the
+	  vendor's driver layer registers it (Alif Ensemble crypto
+	  subsystem, Renesas RZ/V2N RSIP).  When OFF the wrapper
+	  falls back to NULL / NOSUPPORT.
+
+config ALP_SDK_MAX_HASH_HANDLES
+	int "Maximum concurrent alp_hash_t handles"
+	default 4
+
+config ALP_SDK_MAX_AEAD_HANDLES
+	int "Maximum concurrent alp_aead_t handles"
+	default 4
+
 config ALP_SDK_BLE_MAX_CONNS
 	int "Maximum concurrent alp_ble_conn_t handles"
 	default 2
