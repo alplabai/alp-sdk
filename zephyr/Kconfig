@@ -181,6 +181,55 @@ config ALP_SDK_PERIPH_WDT
 	  Compile src/zephyr/peripheral_wdt.c.  Provides alp_wdt_*
 	  on top of Zephyr's wdt_* API.
 
+# IoT (Wi-Fi station + MQTT) — v0.2 deliverable.  When OFF the
+# wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT
+# contract so apps can link cleanly against <alp/iot.h>.
+
+config ALP_SDK_IOT_WIFI
+	bool "Real Wi-Fi station via Zephyr wifi_mgmt"
+	default y if WIFI && NET_MGMT
+	depends on WIFI && NET_MGMT
+	help
+	  Enable the real wifi_mgmt-backed alp_wifi_* implementation.
+	  Requires CONFIG_WIFI=y and a wifi-management subsystem (e.g.
+	  CONFIG_WIFI_NM_WPA_SUPPLICANT=y on AEN-Zephyr).  When OFF
+	  alp_wifi_open() returns NULL with alp_last_error() =
+	  ALP_ERR_NOSUPPORT.
+
+config ALP_SDK_IOT_MQTT
+	bool "Real MQTT client via Zephyr mqtt_client"
+	default y if MQTT_LIB
+	depends on MQTT_LIB && NET_TCP
+	help
+	  Enable the real mqtt_client-backed alp_mqtt_* implementation.
+	  Requires CONFIG_MQTT_LIB=y + CONFIG_NET_TCP=y.  When OFF
+	  alp_mqtt_open() returns NULL with alp_last_error() =
+	  ALP_ERR_NOSUPPORT.
+
+config ALP_SDK_MAX_WIFI_HANDLES
+	int "Maximum concurrent alp_wifi_t handles"
+	default 1
+	help
+	  Wi-Fi station is single-instance on every E1M-conformant SoM
+	  (one radio per module).  Override only if you intentionally
+	  hold multiple handles in flight (e.g. open + cleanup overlap).
+
+config ALP_SDK_MAX_MQTT_HANDLES
+	int "Maximum concurrent alp_mqtt_t handles"
+	default 2
+	help
+	  Number of concurrent MQTT clients the wrapper can keep open.
+	  Each handle reserves CONFIG_ALP_SDK_MQTT_BUF_SIZE * 3 bytes
+	  for its rx / tx / topic scratch.
+
+config ALP_SDK_MQTT_BUF_SIZE
+	int "Per-client MQTT rx / tx scratch buffer size"
+	default 256
+	help
+	  Allocated three times per alp_mqtt_t (rx, tx, topic).  Sized
+	  for v0.2's JSON-payload reference apps; raise for larger
+	  publish bodies or longer topic strings.
+
 config ALP_SDK_HAS_LVGL
 	bool "Build <alp/gui.h> against LVGL"
 	default y if LVGL

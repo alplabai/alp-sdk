@@ -19,7 +19,12 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_gpio.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_uart.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/camera_stub.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/iot_stub.c
+    # iot_zephyr.c replaces the v0.2 NOSUPPORT stub. The wrapper is
+    # always compiled; the real wifi_mgmt + mqtt_client glue inside
+    # is gated on CONFIG_ALP_SDK_IOT_WIFI / CONFIG_ALP_SDK_IOT_MQTT
+    # so host / native_sim builds without those subsystems still get
+    # the documented v0.1 NULL-with-NOSUPPORT contract.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/iot_zephyr.c
     # v0.2 / v0.3 surfaces declared in v0.1 against ALP_ERR_NOSUPPORT
     # so application code can compile against them now and the real
     # implementations slot in later (see iot_stub.c for the pattern).

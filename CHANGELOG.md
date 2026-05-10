@@ -480,6 +480,30 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   in which repo.  `docs/architecture.md` gains a "Repository
   boundary" subsection so reviewers can resolve where a new
   addition belongs without opening the ADR.
+- **`<alp/iot.h>` real Wi-Fi station + MQTT on AEN-Zephyr** —
+  v0.2's first "stub-to-real" milestone.  `src/zephyr/iot_zephyr.c`
+  replaces the v0.1 `iot_stub.c` and wraps Zephyr's `wifi_mgmt`
+  (`net_mgmt(NET_REQUEST_WIFI_CONNECT, …)`) plus `mqtt_client`
+  (`mqtt_connect`, `mqtt_publish`, `mqtt_subscribe`, `mqtt_input`,
+  `mqtt_live`).  Two new Kconfig toggles --
+  `CONFIG_ALP_SDK_IOT_WIFI` (depends on `WIFI && NET_MGMT`,
+  default y) and `CONFIG_ALP_SDK_IOT_MQTT` (depends on
+  `MQTT_LIB && NET_TCP`, default y) -- gate the real glue.  When
+  neither is on (host build, native_sim, any target without a
+  Wi-Fi/TCP stack) the wrapper honours the v0.1 contract:
+  `*_open()` returns NULL with `alp_last_error()` =
+  `ALP_ERR_NOSUPPORT`.  Static handle pools sized via
+  `CONFIG_ALP_SDK_MAX_WIFI_HANDLES` (default 1, single-radio per
+  E1M SoM) and `CONFIG_ALP_SDK_MAX_MQTT_HANDLES` (default 2),
+  with `CONFIG_ALP_SDK_MQTT_BUF_SIZE` (default 256 B) controlling
+  the per-client rx / tx / topic scratch.  `examples/iot-connected-camera/`
+  ships a new `overlay-aen.conf` that pulls in `CONFIG_NET_*`,
+  `CONFIG_WIFI`, `CONFIG_WIFI_NM_WPA_SUPPLICANT`, `CONFIG_MQTT_LIB`
+  for AEN builds; the base `prj.conf` remains native_sim-friendly
+  and the example continues to print `[iotcam] done` end-to-end.
+  New `tests/zephyr/iot/` ztest suite (12 cases) verifies the
+  NOSUPPORT-fall-back contract + every NULL-arg branch, bringing
+  twister's `native_sim/native/64` total to **64 cases** (52 + 12).
 
 ### Notes
 
