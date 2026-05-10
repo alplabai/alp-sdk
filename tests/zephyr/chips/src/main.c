@@ -952,4 +952,4 @@ ZTEST(alp_chips, test_fake_bme280_compensate_matches_datasheet_example) {
     alp_i2c_close(bus);
 }
 
-#endif  /* DT_NODE_EXISTS(DT_NODELABEL(fake_lsm6dso)) — fake-emul block */
+#endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_lsm6dso)) — fake-emul block */
