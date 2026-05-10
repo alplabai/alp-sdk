@@ -62,10 +62,9 @@ struct alp_ble_conn {
 #endif
 };
 
-static struct alp_ble      g_ble_singleton;
-static struct alp_ble_conn g_ble_conn_pool[CONFIG_ALP_SDK_BLE_MAX_CONNS];
-
 #if defined(CONFIG_ALP_SDK_BLE)
+static struct alp_ble       g_ble_singleton;
+static struct alp_ble_conn  g_ble_conn_pool[CONFIG_ALP_SDK_BLE_MAX_CONNS];
 
 static struct alp_ble_conn *conn_pool_acquire(void)
 {
