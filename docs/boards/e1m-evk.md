@@ -126,8 +126,6 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 - **CAN bus:** TCAN1044A transceiver, jumpers JP1–JP4, header J9.
 - **microSD:** standard slot multiplexed via 74LVC157 with the M.2
   Key E SDIO interface — software must pick which one is active.
-- **Display:** 40-pin MIPI DSI connector for the RK055HDMIPI4MA0 720p
-  panel (with backlight LED rails and capacitive-touch I²C).
 - **Camera:** three options — Raspberry-Pi-compatible 15-pin CSI,
   standard MIPI B2B 34-pin, parallel DVP 24-pin — multiplexed via
   the **PI3WVR626XEBEX** 2:1 MIPI CSI mux.  Camera rails
@@ -152,14 +150,26 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   > actual blue-LED pin is TBD until the user confirms the LED
   > matrix wiring.
 - **Audio:** two PDM microphones (MP34DT05TR-A) and two TAS2563
-  Class-D amps with JST speaker headers; I²S source selectable
-  via 74LVC157.
+  Class-D amps (U27 + U28; each drives a mono speaker) with JST
+  speaker headers; I²S source selectable via 74LVC157.  The shared
+  `I²S0` link carries both channels in a stereo frame -- U27 picks
+  the left slot, U28 picks the right slot via TAS2563 time-slot
+  configuration.  The amps' diagnostic feedback returns on
+  `I²S0_SDI`.
 - **Expansion:** Arduino headers + mikroBUS click headers, level-shifted
   through LSF0108 / LSF0102 to the IO-voltage select rail.
 - **PCIe / M.2:** Key M and Key E with PI3DBS12212A lane mux,
-  SY75602 refclk buffer, TMUX121 passive I²C mux (pin-controlled,
-  no I²C address), and a second TCAL9538 (`0x71`) for the PCIe-side
-  resets/WAKE/CLKREQ signals.
+  SY75602 refclk buffer, **TMUX121NKGR** passive I²C mux
+  (pin-controlled, no I²C address), and a second TCAL9538 (`0x71`)
+  for the PCIe-side resets/WAKE/CLKREQ signals.
+- **Display:** 40-pin MIPI DSI connector for the **RK055HDMIPI4MA0**
+  720p panel (NXP-supplied reference panel; drivers are available
+  from NXP's MIPI-DSI panel collection).  Backlight rails + the
+  capacitive-touch controller sit on `EVK_AEN_I2C_BUS_DSI_CSI`
+  (`E1M_I2C1`).
+- **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
+  the PEC12R-4222F-S0024 quadrature signals.  The push-switch
+  (SW) is on E1M `IO4` -- `EVK_PIN_ENCODER_SW`.
 
 ## Bring-up checklist (firmware perspective)
 
