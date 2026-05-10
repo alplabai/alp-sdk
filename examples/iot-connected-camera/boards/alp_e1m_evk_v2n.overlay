@@ -7,7 +7,7 @@
  * `alp_uart0` aliases and the standard `alp,pin-array` to V2N pins.
  *
  * The authoritative `alp_e1m_evk_v2n` board file lives in
- * `alpCaner/alp-zephyr-modules` (TBD).  This overlay assumes that
+ * `alplabai/alp-zephyr-modules` (TBD).  This overlay assumes that
  * board file's pinctrl group exists; until it ships, twister
  * excludes the V2N target from the example.
  *

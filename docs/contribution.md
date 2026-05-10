@@ -8,9 +8,9 @@ GitHub-auto-discovered entry point and points back here.
 
 ### Reporting bugs
 
-1. Check existing [issues](https://github.com/alpCaner/alp-sdk/issues).
+1. Check existing [issues](https://github.com/alplabai/alp-sdk/issues).
 2. File via the
-   [bug report template](https://github.com/alpCaner/alp-sdk/issues/new?template=bug_report.md).
+   [bug report template](https://github.com/alplabai/alp-sdk/issues/new?template=bug_report.md).
 3. Include: target SoM and SKU, OS backend (`zephyr`/`baremetal`/`yocto`),
    exact `west` / CMake invocation, expected vs. actual behaviour,
    relevant logs.
@@ -18,7 +18,7 @@ GitHub-auto-discovered entry point and points back here.
 ### Requesting features
 
 File via the
-[feature request template](https://github.com/alpCaner/alp-sdk/issues/new?template=feature_request.md).
+[feature request template](https://github.com/alplabai/alp-sdk/issues/new?template=feature_request.md).
 Include the use case and the proposed public-API shape (header
 signatures), if you have one.
 
@@ -125,4 +125,4 @@ By contributing, you agree your contributions are licensed under
 
 - [Documentation](https://docs.alplab.ai)
 - [Community forum](https://community.alplab.ai)
-- [GitHub Issues](https://github.com/alpCaner/alp-sdk/issues)
+- [GitHub Issues](https://github.com/alplabai/alp-sdk/issues)

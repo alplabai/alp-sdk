@@ -5,7 +5,7 @@ Date: 2026-05-10
 
 ## Context
 
-The E1M open standard (`alpCaner/e1m-spec`) fixes which peripheral
+The E1M open standard (`alplabai/e1m-spec`) fixes which peripheral
 instances every conformant SoM SHALL route, and pins each instance's
 primary function to specific physical pads.  For example:
 
@@ -102,5 +102,5 @@ escape hatch.
 - `docs/architecture.md` — "E1M as the portability bound" section.
 - `docs/e1m-pinout.md` — how the studio threads pin assignments
   through the e1m-spec → SoM manifest → SDK chain.
-- `alpCaner/e1m-spec` — the canonical pinout standard (currently
+- `alplabai/e1m-spec` — the canonical pinout standard (currently
   v1.1; SDK pinned to v1.0).

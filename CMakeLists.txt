@@ -21,7 +21,7 @@ project(alp-sdk
     VERSION 0.1.0
     LANGUAGES C CXX
     DESCRIPTION "Unification SDK for ALP Lab E1M edge AI modules"
-    HOMEPAGE_URL "https://github.com/alpCaner/alp-sdk"
+    HOMEPAGE_URL "https://github.com/alplabai/alp-sdk"
 )
 
 # ---------------------------------------------------------------------

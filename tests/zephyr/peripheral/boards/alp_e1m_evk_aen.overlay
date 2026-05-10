@@ -11,7 +11,7 @@
  * three pins of alp,pin-array to the rotary encoder + RGB LED.
  *
  * The alp_e1m_evk_aen board file itself lives in
- * alpCaner/alp-zephyr-modules; this overlay only re-aliases what
+ * alplabai/alp-zephyr-modules; this overlay only re-aliases what
  * that board exposes.
  */
 
@@ -40,7 +40,7 @@
 
 /*
  * NOTE — pin numbers in the gpios property above are PLACEHOLDERS.
- * The authoritative mapping lands when alpCaner/alp-zephyr-modules
+ * The authoritative mapping lands when alplabai/alp-zephyr-modules
  * publishes the alp_e1m_evk_aen board file with a pinctrl group
  * naming the exact gpio bank/index for each EVK net (RGB LED,
  * encoder switch, IO_EXP.INT, IO_EXP.RST).  Until then this overlay

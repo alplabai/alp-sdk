@@ -1,7 +1,7 @@
 # E1M pinout — and how the SDK consumes it
 
 The ALP SDK **does not duplicate** the E1M pinout.  The standard
-lives in [`alpCaner/e1m-spec`](https://github.com/alpCaner/e1m-spec)
+lives in [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
 and the SDK only sees opaque integers (`bus_id`, `pin_id`,
 `port_id`) that have already been resolved through a chain of
 external repositories.  This file explains the chain and how each
@@ -12,7 +12,7 @@ into this repo.
 
 ```
 +----------------------------------------------------------------+
-|  alpCaner/e1m-spec — the open standard                         |
+|  alplabai/e1m-spec — the open standard                         |
 |    pinout/v1.json     E1M (35×35), pads A1..AH34, default      |
 |    pinout/x-v1.json   E1M-X (45×65), pads A1..AH50             |
 |    STANDARD.md        normative prose, signal classes           |
@@ -132,7 +132,7 @@ If you're adding support for a new SoM or carrier board:
 
 1. The pad-level routing of your SoM goes into a new manifest in
    `alp-studio`'s `library/_soms/<id>/`.  See
-   [`e1m-spec/examples/alp-aen.som-manifest.json`](https://github.com/alpCaner/e1m-spec/blob/main/examples/alp-aen.som-manifest.json)
+   [`e1m-spec/examples/alp-aen.som-manifest.json`](https://github.com/alplabai/e1m-spec/blob/main/examples/alp-aen.som-manifest.json)
    for the shape.
 2. The chip-level metadata (cores, peripherals, NPUs, packages,
    variants) goes into [`metadata/socs/<vendor>/<family>/<part>.json`](../metadata/socs/)
@@ -140,7 +140,7 @@ If you're adding support for a new SoM or carrier board:
 3. The vendor wrapper (HAL bindings) goes into
    [`vendors/<som-slug>/`](../vendors/) here.
 4. The Zephyr board file goes into
-   [`alpCaner/alp-zephyr-modules`](https://github.com/alpCaner/alp-zephyr-modules) — not here.
+   [`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules) — not here.
 
 The SDK code never reads pad IDs.  If you find yourself wanting to
 write `if (pad == "AF2")` somewhere in `src/`, stop — that
@@ -155,5 +155,5 @@ allocator.
 - [`vendors/alif/README.md`](../vendors/alif/README.md) — concrete
   example of E1M-AEN routing caveats (only `ETH0_*` routed, no
   PCIe, etc.).
-- [`alpCaner/e1m-spec`](https://github.com/alpCaner/e1m-spec) —
+- [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec) —
   the canonical pinout standard.

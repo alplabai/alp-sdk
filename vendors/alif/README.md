@@ -21,12 +21,12 @@ without per-SKU branches.
 
 Authoritative per-SKU detail (Alif part numbers, ISP / JPEG-encoder
 options) lives in
-[`e1m-spec` Annex A.1](https://github.com/alpCaner/e1m-spec/blob/main/STANDARD.md#a1-e1m-aen-family-six-skus-shared-e1m-routing).
+[`e1m-spec` Annex A.1](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#a1-e1m-aen-family-six-skus-shared-e1m-routing).
 
 ## Routing caveats
 
 E1M-AEN exposes a **strict subset** of the E1M pinout (per
-[`e1m-spec` §A.1](https://github.com/alpCaner/e1m-spec/blob/main/STANDARD.md#a1-e1m-aen-family-six-skus-shared-e1m-routing)):
+[`e1m-spec` §A.1](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#a1-e1m-aen-family-six-skus-shared-e1m-routing)):
 
 - Only `ETH0_*` is routed (Ensemble has one MAC).  `ETH1_*` is NC.
 - Only `CSI0_*` is routed (one camera, 2 lanes).

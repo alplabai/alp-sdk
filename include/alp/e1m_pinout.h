@@ -8,7 +8,7 @@
  * @brief Global, fixed pin/instance map derived from the E1M
  *        standard.
  *
- * The E1M open standard (`alpCaner/e1m-spec`) fixes the carrier-side
+ * The E1M open standard (`alplabai/e1m-spec`) fixes the carrier-side
  * pinout: which peripheral instances exist (`I2C0`, `SPI0`, …) and
  * which physical pads carry their default function plus the
  * GPIO-secondary IO numbers (`IO0`, `IO1`, …, `PWM0`–`PWM7`,
@@ -17,7 +17,7 @@
  * here as portable C macros — every E1M-conformant carrier
  * resolves them identically.
  *
- * Derived from `alpCaner/e1m-spec/pinout/v1.json` (E1M v1.0,
+ * Derived from `alplabai/e1m-spec/pinout/v1.json` (E1M v1.0,
  * 35 × 35 mm, 312 pads).  Pinned to `e1m-spec` v1.0.
  *
  * ## Per-carrier feature names
@@ -127,7 +127,7 @@ extern "C" {
  * accepts up to 6 channels because the V2N has 6, but only CAN0 is
  * portable).
  *
- * These constants come from the `alpCaner/e1m-spec` v1.0 pinout —
+ * These constants come from the `alplabai/e1m-spec` v1.0 pinout —
  * see `docs/e1m-pinout.md` for how they thread through the studio's
  * pin allocator.
  */

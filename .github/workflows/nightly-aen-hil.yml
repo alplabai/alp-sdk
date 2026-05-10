@@ -63,7 +63,7 @@ jobs:
           ZEPHYR_BASE: ${{ env.HOME }}/zephyrproject/zephyr
           EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
         run: |
-          # alp_e1m_evk_aen lives in alpCaner/alp-zephyr-modules.
+          # alp_e1m_evk_aen lives in alplabai/alp-zephyr-modules.
           # Until that lands the build target is parked — the
           # workflow logs and exits 0 instead of failing the
           # nightly run on an absent dependency.

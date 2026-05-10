@@ -28,5 +28,5 @@ tests:
   # alp_sdk.example.iot_connected_camera.evk_v2n — HW-in-loop
   # variant for the E1M EVK populated with an E1M-V2N family SoM.
   # Currently parked because the alp_e1m_evk_v2n Zephyr board file
-  # lives in alpCaner/alp-zephyr-modules (not yet published).
+  # lives in alplabai/alp-zephyr-modules (not yet published).
   # Re-enable when that board file lands.

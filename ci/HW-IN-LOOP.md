@@ -20,7 +20,7 @@ with it.
 ## Runner host
 
 - Linux (Ubuntu 22.04 LTS or newer).
-- GitHub Actions runner registered with the `alpCaner/alp-sdk`
+- GitHub Actions runner registered with the `alplabai/alp-sdk`
   repo, labelled `self-hosted`, `linux`, and `hil-aen`.
 - Zephyr toolchain at `~/zephyrproject/` (cached across runs).
 - `west`, `pyocd`, `J-Link Software Pack` installed.

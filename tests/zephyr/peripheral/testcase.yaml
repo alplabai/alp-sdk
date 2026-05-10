@@ -14,7 +14,7 @@ tests:
   # alp_sdk.peripheral.evk_aen — HW-in-loop variant for the E1M EVK
   # populated with an E1M-AEN family SoM. Currently parked because
   # the alp_e1m_evk_aen Zephyr board file lives in
-  # alpCaner/alp-zephyr-modules (not yet published); twister rejects
+  # alplabai/alp-zephyr-modules (not yet published); twister rejects
   # unknown platforms in platform_allow. Re-enable when that board
   # file lands. The overlay at boards/alp_e1m_evk_aen.overlay is
   # already in place and compiles against the released board file

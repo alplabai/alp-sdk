@@ -41,7 +41,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 - `docs/e1m-pinout.md` documents the pinout chain (e1m-spec →
   per-SoM manifest → studio pin allocator → SDK opaque integer).
   Confirms the SDK does not duplicate pad data; pinned to
-  `alpCaner/e1m-spec` v1.0.
+  `alplabai/e1m-spec` v1.0.
 - **Global pin/instance map** at `include/alp/e1m_pinout.h` — the
   E1M-standard peripheral instance IDs (`ALP_E1M_I2C0`,
   `ALP_E1M_SPI0`, `ALP_E1M_UART0`, …) and pad-level GPIO indices
@@ -120,7 +120,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   v0.3 IoT).  Compiles + runs cleanly under
   `native_sim/native/64` (twister console-harness asserts the
   `[iotcam] done` line); EVK-V2N target parked behind a comment
-  until `alpCaner/alp-zephyr-modules` publishes the V2N board file.
+  until `alplabai/alp-zephyr-modules` publishes the V2N board file.
   Ships the full scaffold (`README.md`, `CMakeLists.txt`,
   `prj.conf`, `boards/{native_sim_native_64,alp_e1m_evk_v2n}.overlay`,
   `src/main.c`, `certs/README.md`, `docs/pipeline.md`,

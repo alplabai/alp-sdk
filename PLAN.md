@@ -251,7 +251,7 @@ Items the slides imply but the v0.1 SDK doesn't yet have:
    Alif publishes those datasheets.
 8. **Authoritative Zephyr board files** — `alp_e1m_evk_aen` and
    `alp_e1m_evk_v2n` board files live in
-   [`alpCaner/alp-zephyr-modules`](https://github.com/alpCaner/alp-zephyr-modules)
+   [`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
    (TBD).  Three twister entries are parked behind comments until
    those land.
 9. **HW-in-loop CI** — `.github/workflows/nightly-aen-hil.yml` is a

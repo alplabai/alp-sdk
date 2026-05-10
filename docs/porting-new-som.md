@@ -8,7 +8,7 @@
 This guide walks through the steps to add HAL/HW support for a new
 E1M-* variant.  It assumes you already have:
 
-- A board file in `alpCaner/alp-zephyr-modules` (for Zephyr targets) or
+- A board file in `alplabai/alp-zephyr-modules` (for Zephyr targets) or
   a Yocto BSP layer (for Linux targets).
 - A vendor HAL/SDK that exposes I2C/SPI/GPIO/UART (and any extras the
   variant offers, e.g. MIPI CSI-2).
@@ -97,5 +97,5 @@ Drop a `vendors/<som-slug>/README.md` covering:
 - Known limitations (e.g. only DMA on SPI0).
 
 This is what the alp-studio pin allocator reads (indirectly, via the
-SoM manifest in `alpCaner/alp-studio/library/_soms/<id>/manifest.json`)
+SoM manifest in `alplabai/alp-studio/library/_soms/<id>/manifest.json`)
 to decide which peripheral instance to assign each block.

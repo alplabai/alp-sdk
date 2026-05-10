@@ -136,7 +136,7 @@ not others.
 
 ### Peripherals: how a block resolves to a backend
 
-Each block in `alpCaner/alp-studio` declares the SDK API it needs in
+Each block in `alplabai/alp-studio` declares the SDK API it needs in
 its manifest (`interfaces.provides`).  The studio's deterministic pin
 allocator picks peripheral instances per block and emits codegen that
 calls into `<alp/peripheral.h>`.  Block-side driver C files include
@@ -222,7 +222,7 @@ ABI-stable*, not *vendor-diversity over Zephyr*.
 
 ## E1M as the portability bound
 
-Per the `alpCaner/e1m-spec` standard, every E1M-conformant SoM **SHALL
+Per the `alplabai/e1m-spec` standard, every E1M-conformant SoM **SHALL
 route a fixed minimum set of peripheral instances** with their primary
 functions pinned to specific pads:
 
@@ -309,7 +309,7 @@ through them.
                 |                       |
                 v                       v
 +-----------------------------+  +-------------------------+
-|  alpCaner/alp-studio        |  |  Hand-written user code |
+|  alplabai/alp-studio        |  |  Hand-written user code |
 |  (block library + visual    |  |  (Zephyr application,   |
 |  programmer + codegen)      |  |  Yocto application)     |
 +-----------------------------+  +-------------------------+
@@ -317,7 +317,7 @@ through them.
                 |   #include <alp/...>  |
                 v                       v
 +-----------------------------------------------------------+
-|  alpCaner/alp-sdk    THIS REPO                            |
+|  alplabai/alp-sdk    THIS REPO                            |
 +-----------------------------------------------------------+
                 |
                 v
@@ -328,7 +328,7 @@ through them.
 
 ### alp-studio integration contract
 
-`alpCaner/alp-studio` is the visual programmer that reads block
+`alplabai/alp-studio` is the visual programmer that reads block
 manifests and generates Zephyr-app source code that calls into this
 SDK.  The integration contract is:
 
@@ -356,7 +356,7 @@ A hand-written Zephyr application uses the SDK as a Zephyr module:
 manifest:
   projects:
     - name: alp-sdk
-      url: https://github.com/alpCaner/alp-sdk
+      url: https://github.com/alplabai/alp-sdk
       revision: v0.1.0
       path: modules/alp-sdk
 ```
@@ -383,15 +383,15 @@ data so application recipes can `inherit pkgconfig` and depend on
 
 ## Sources of truth (do not duplicate)
 
-- HW pinout — [`alpCaner/e1m-spec`](https://github.com/alpCaner/e1m-spec)
+- HW pinout — [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
   (v1.0).  See [`docs/e1m-pinout.md`](e1m-pinout.md) for how the
   spec, the per-SoM manifests, and the SDK's opaque `bus_id` /
   `pin_id` integers all relate.
-- Per-SoM peripheral exposure — `alpCaner/alp-studio` →
+- Per-SoM peripheral exposure — `alplabai/alp-studio` →
   `library/_soms/<id>/manifest.json`.
 - AI accelerator runtimes (Ethos-U `vela`, Renesas DRP-AI translator) —
   separate vendor repos.
-- Zephyr board files for ALP modules — `alpCaner/alp-zephyr-modules`
+- Zephyr board files for ALP modules — `alplabai/alp-zephyr-modules`
   (TBD).
 
 ## Non-goals

@@ -76,7 +76,7 @@ deltas (verify when the HW config writeup lands):
   `include/alp/boards/alp_e1m_evk_v2n.h` (lands with v0.2).
 - v0.3 extends to V2M101 / V2M102 with DX-M1 detection on PCIe.
 - The Zephyr board file for `alp_e1m_evk_v2n` lives in
-  `alpCaner/alp-zephyr-modules` (TBD), same split as the AEN EVK.
+  `alplabai/alp-zephyr-modules` (TBD), same split as the AEN EVK.
 
 ## Pending from the user
 

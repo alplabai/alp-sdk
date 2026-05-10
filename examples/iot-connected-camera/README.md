@@ -65,7 +65,7 @@ real backends land).
 ## Build (v0.3, on the V2N EVK)
 
 Pending publication of the `alp_e1m_evk_v2n` board file in
-[`alpCaner/alp-zephyr-modules`](https://github.com/alpCaner/alp-zephyr-modules).
+[`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules).
 Once that lands, plus v0.3 of the SDK:
 
 ```bash

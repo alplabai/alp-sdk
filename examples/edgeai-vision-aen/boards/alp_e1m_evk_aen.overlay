@@ -16,7 +16,7 @@
  *                 5  IO_EXP.RST
  *
  * The authoritative `alp_e1m_evk_aen` board file lives in
- * `alpCaner/alp-zephyr-modules` (TBD).  This overlay assumes that
+ * `alplabai/alp-zephyr-modules` (TBD).  This overlay assumes that
  * board file's pinctrl group is named `&pinctrl` and exposes
  * `alp_i2c0_default` plus `alp_uart0_default`.  Until the board
  * file ships, this overlay won't compile against any real Zephyr

@@ -15,7 +15,7 @@ This file is the **SDK-side cheat sheet** for the EVK: bus map,
 sensor I²C addresses, button/LED assignments, IO-expander, and the
 bring-up checklist most relevant to firmware writers.  The Zephyr
 board file (`boards/<vendor>/alp_e1m_evk*`) lives in
-[`alpCaner/alp-zephyr-modules`](https://github.com/alpCaner/alp-zephyr-modules)
+[`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
 (per [`docs/architecture.md`](../architecture.md), board files are
 not in this repo).
 

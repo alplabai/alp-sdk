@@ -12,7 +12,7 @@ Camera variant).
 | **E1M-X V2N-M1**   | `E1M-V2M101`, `E1M-V2M102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit    | DeepX DX-M1 (25 TOPS)    |
 
 Authoritative per-SKU detail and the silicon stack live in
-[`e1m-spec` Annex A.2 / A.3](https://github.com/alpCaner/e1m-spec/blob/main/STANDARD.md#a2-e1m-x-v2n-family-renesas-rzv2n).
+[`e1m-spec` Annex A.2 / A.3](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#a2-e1m-x-v2n-family-renesas-rzv2n).
 
 ## On-module supervisory MCU (important for porting)
 
@@ -56,7 +56,7 @@ versus the standard's max are:
 - **Boot strap** — E1M-X `BOOT3` (pad Y1) maps to Renesas
   `MD_BOOT4`, *not* `MD_BOOT3` (the chip has `MD_BOOT0/1/2/4`,
   no `MD_BOOT3`).  See
-  [`examples/alp-x-v2n-m1.som-manifest.json`](https://github.com/alpCaner/e1m-spec/blob/main/examples/alp-x-v2n-m1.som-manifest.json)
+  [`examples/alp-x-v2n-m1.som-manifest.json`](https://github.com/alplabai/e1m-spec/blob/main/examples/alp-x-v2n-m1.som-manifest.json)
   in `e1m-spec`.
 
 ## On-module support silicon (informative)

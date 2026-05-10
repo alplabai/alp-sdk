@@ -74,7 +74,7 @@ v0.1 ships first-class support for the **E1M Development Board**
 
 The Zephyr **board file** for `alp_e1m_evk_aen` itself does not live
 in this repo — it lands in
-[`alpCaner/alp-zephyr-modules`](https://github.com/alpCaner/alp-zephyr-modules)
+[`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
 per the architectural split.  The overlay above re-aliases what
 that board file exposes.
 

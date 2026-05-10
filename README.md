@@ -64,7 +64,7 @@ whole family.
 
 All modules use the **E1M open-standard form factor**.  HW pinout and
 mechanical specification live in
-[`alpCaner/e1m-spec`](https://github.com/alpCaner/e1m-spec) — pinned
+[`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec) — pinned
 to **v1.1** for this revision of the SDK.
 
 ### Evaluation kits
@@ -85,7 +85,7 @@ ALP Lab ships two carrier boards:
 ### Platform invariants
 
 The SDK relies on the following hardware invariants that
-[`e1m-spec` §6.5](https://github.com/alpCaner/e1m-spec/blob/main/STANDARD.md#65-mandatory-on-module-components)
+[`e1m-spec` §6.5](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#65-mandatory-on-module-components)
 makes normative for every conformant E1M / E1M-X SoM:
 
 - **On-module Ethernet PHY(s).**  At least one PHY is on the module;
@@ -118,7 +118,7 @@ Add to your application's `west.yml`:
 manifest:
   projects:
     - name: alp-sdk
-      url: https://github.com/alpCaner/alp-sdk
+      url: https://github.com/alplabai/alp-sdk
       revision: v0.1.0
       path: modules/lib/alp-sdk
 ```
@@ -151,7 +151,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 
 # Zephyr (E1M-AEN, after the v0.1 implementation lands)
-west init -m https://github.com/alpCaner/alp-sdk --mr v0.1.0 alp-ws
+west init -m https://github.com/alplabai/alp-sdk --mr v0.1.0 alp-ws
 cd alp-ws && west update
 west build -b alif_e7_dk_rtss_he tests/zephyr/peripheral
 ```

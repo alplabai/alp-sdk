@@ -62,7 +62,7 @@ and which v0.2 stubs it skipped.
 ## Build (v0.1+, on the EVK)
 
 Pending publication of the `alp_e1m_evk_aen` board file in
-[`alpCaner/alp-zephyr-modules`](https://github.com/alpCaner/alp-zephyr-modules).
+[`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules).
 Once that lands:
 
 ```bash
