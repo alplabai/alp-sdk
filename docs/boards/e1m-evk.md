@@ -56,21 +56,34 @@ not in this repo).
 ## I²C bus map (`alp_i2c0`)
 
 The EVK shares **one I²C bus** (`I2C0.SCL` / `I2C0.SDA`, pulled up
-4.7 kΩ to `+VIO`) across all on-board sensors, the IO expander, and
-the INA236 current monitors.
+4.7 kΩ to `+VIO`) across the on-board sensors, two TCAL9538 I/O
+expanders, the INA236 current monitors, and the two TAS2563 smart
+amplifiers.  All addresses below are confirmed against the EVK
+schematic (UG-E1M-001) and exposed as `EVK_I2C_ADDR_*` macros in
+[`<alp/boards/alp_e1m_evk.h>`](../../include/alp/boards/alp_e1m_evk.h).
 
-| Address (7-bit) | Device           | Role                                  |
-|-----------------|------------------|---------------------------------------|
-| `0x2C`          | ICM-42670-P (U12)| 6-axis IMU                            |
-| TBD             | BMI323 (U13)     | Secondary 6-axis IMU                  |
-| TBD             | BMP581 (U14)     | Barometric pressure                   |
-| TBD             | TCAL9538 (U35)   | I/O expander (display power, camera enable, sensor IRQs) |
-| TBD             | INA236 ×N         | Current monitors (per-rail profiling) |
-| TBD             | TMUX121          | I²C mux for PCIe / M.2                |
+| Address (7-bit) | Device                  | Macro                              | Role                                                |
+|-----------------|-------------------------|------------------------------------|-----------------------------------------------------|
+| `0x40`          | INA236A (U21)            | `EVK_I2C_ADDR_INA236_3V3`          | `+3V3` rail current monitor                         |
+| `0x41`          | INA236A (U31)            | `EVK_I2C_ADDR_INA236_1V8`          | `+1V8` rail current monitor                         |
+| `0x42`          | INA236A (U33)            | `EVK_I2C_ADDR_INA236_VIO`          | `+VIO` rail current monitor                         |
+| `0x44`          | INA236B (U32)            | `EVK_I2C_ADDR_INA236_VCAM0`        | `+V_CAM0` rail current monitor                      |
+| `0x45`          | INA236B (U34)            | `EVK_I2C_ADDR_INA236_VCAM1`        | `+V_CAM1` rail current monitor                      |
+| `0x46`          | INA236B (U30)            | `EVK_I2C_ADDR_INA236_5V`           | `+5V` rail current monitor                          |
+| `0x47`          | BMP581 (U14)             | `EVK_I2C_ADDR_BMP581`              | Barometric pressure (SDO=1)                         |
+| `0x48`          | TAS2563 broadcast        | `EVK_I2C_ADDR_TAS2563_BCAST`       | Write-only synchronised setup of both amps          |
+| `0x4D`          | TAS2563 (U?? amp #1)     | `EVK_I2C_ADDR_TAS2563_LOW`         | Smart-amp #1 (AD0 = 10 kΩ to GND)                   |
+| `0x4E`          | TAS2563 (U?? amp #2)     | `EVK_I2C_ADDR_TAS2563_HIGH`        | Smart-amp #2 (AD0 = 10 kΩ to VDD)                   |
+| `0x68`          | BMI323 (U13)             | `EVK_I2C_ADDR_BMI323`              | Secondary 6-axis IMU (SDO=0; no collision with ICM) |
+| `0x69`          | ICM-42670-P (U12)        | `EVK_I2C_ADDR_ICM42670`            | Primary 6-axis IMU (AD0=1)                          |
+| `0x71`          | TCAL9538 PCIe (U37)      | `EVK_I2C_ADDR_TCAL9538_PCIE`       | PCIe-side I/O expander (PCIe slot RST/WAKE/CLKREQ)  |
+| `0x72`          | TCAL9538 main (U35)      | `EVK_I2C_ADDR_TCAL9538_MAIN`       | Main I/O expander (LCD/cam/CTP control + IMU IRQs)  |
 
-(BMI323 / BMP581 / TCAL9538 / INA236 / TMUX121 addresses TBD until
-the released schematic locks in resistor straps; the SDK's first
-EVK example reads ICM-42670-P @ `0x2C` only.)
+> **TMUX121 is not in this table.**  It's a passive analog/digital
+> I²C bus switch — addressless, controlled via dedicated pins
+> (`PCIE0_I2C.EN` from E1M `IO10`, `PCIE0_I2C.SEL` from the PCIe
+> TCAL9538).  When the mux is disabled, the downstream PCIe-side
+> I²C bus is isolated from `alp_i2c0` entirely.
 
 The I²C bus is shared between **sensors and current monitors** — when
 profiling power, code that reads ICM-42670-P at high rate will
@@ -145,7 +158,9 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 - **Expansion:** Arduino headers + mikroBUS click headers, level-shifted
   through LSF0108 / LSF0102 to the IO-voltage select rail.
 - **PCIe / M.2:** Key M and Key E with PI3DBS12212A lane mux,
-  SY75602 refclk buffer, TMUX121 I²C mux, TCAL9538 for resets/IRQs.
+  SY75602 refclk buffer, TMUX121 passive I²C mux (pin-controlled,
+  no I²C address), and a second TCAL9538 (`0x71`) for the PCIe-side
+  resets/WAKE/CLKREQ signals.
 
 ## Bring-up checklist (firmware perspective)
 
