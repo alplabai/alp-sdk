@@ -9,6 +9,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- `yocto/meta-alp/` is now a v0.3-scaffolded BSP layer (vs the
+  v0.2 placeholder).  Three machine configs land:
+  `e1m-x-v2n.conf` (RZ/V2N), `e1m-x-v2n-m1.conf` (V2N + DEEPX),
+  `e1m-n93.conf` (i.MX 93 + Ethos-U65).  Three new recipes land:
+  `alp-sdk-runtime` (libalp_sdk.so + headers, per-machine
+  inference-backend cmake defines), `alp-chips` (libalp_chips.a +
+  per-chip PACKAGECONFIG knobs for all 19 drivers), and
+  `alp-studio-codegen` (CLI helper; opt-in via DISTRO_FEATURES,
+  guarded with bb.parse.SkipPackage until alplabai/alp-studio is
+  public).  layer.conf advertises `LAYERRECOMMENDS_alp` for
+  meta-renesas-rz + meta-imx.  Recipes parse but don't build --
+  real `do_compile` against the Yocto cross-toolchain lands in
+  v0.4 with `src/yocto/` going from stub to real.
 - [ADR 0006](docs/adr/0006-secure-boot-secure-ota.md) lands the
   v0.4 secure boot + secure OTA design.  Per-SoM vendor-native
   secure boot (Alif Secure Enclave + MCUboot on AEN; NXP AHAB on
