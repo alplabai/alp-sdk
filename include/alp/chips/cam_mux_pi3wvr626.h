@@ -15,7 +15,7 @@
  *
  * On the E1M EVK the SEL pin is driven by E1M IO2 (Alif P12.5);
  * /OE is hardwired to GND so the output is always live.  See
- * `<alp/boards/alp_e1m_evk_aen.h>` for the EVK-side macro.
+ * `<alp/boards/alp_e1m_evk.h>` for the EVK-side macro.
  *
  * Per the datasheet truth table:
  *   SEL = 0  -> A inputs route to outputs (A_MIPI_CSI_*)

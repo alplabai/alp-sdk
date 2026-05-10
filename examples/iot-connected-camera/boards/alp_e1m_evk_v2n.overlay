@@ -26,7 +26,7 @@
     };
 
     /* Same canonical IO0..IO5 ordering as
-     * include/alp/boards/alp_e1m_evk_aen.h — the EVK is shared
+     * include/alp/boards/alp_e1m_evk.h — the EVK is shared
      * between AEN and V2N families; only the silicon behind each
      * pad changes. */
     alp_pins: alp-pins {

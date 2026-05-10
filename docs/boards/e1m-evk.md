@@ -128,8 +128,8 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
       SEL = 0  -> input A (`A_MIPI_CSI_*`) routes to the SoM
       SEL = 1  -> input B (`B_MIPI_CSI_*`) routes to the SoM
 
-  Use `EVK_AEN_PIN_CAM_MUX_SEL` from
-  `<alp/boards/alp_e1m_evk_aen.h>` plus the
+  Use `EVK_PIN_CAM_MUX_SEL` from
+  `<alp/boards/alp_e1m_evk.h>` plus the
   `cam_mux_pi3wvr626_*` helper in `<alp/chips/cam_mux_pi3wvr626.h>`
   to switch inputs at runtime.  The `/OE` pin is hardwired to GND
   on this board, so the output is always live.

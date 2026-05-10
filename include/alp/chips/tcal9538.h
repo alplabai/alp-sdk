@@ -17,7 +17,7 @@
  * On the E1M EVK the chip sits on E1M_I2C0 at 0x72 (A1=1, A0=0)
  * and fans out LCD / camera / capacitive-touch control lines plus
  * four sensor interrupt inputs.  See
- * `<alp/boards/alp_e1m_evk_aen.h>`'s `evk_aen_ioexp_pin_t` enum
+ * `<alp/boards/alp_e1m_evk.h>`'s `evk_ioexp_pin_t` enum
  * for the EVK-side pin layout.
  *
  * Register map per TI TCA9538 datasheet (SCPS220):

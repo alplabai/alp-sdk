@@ -20,7 +20,7 @@
  *     register.
  *   - Hardware enable via SD_N (an external GPIO; the caller
  *     supplies an alp_gpio_t handle bound to the EVK's
- *     `EVK_AEN_PIN_AMP_ENABLE`).
+ *     `EVK_PIN_AMP_ENABLE`).
  *
  * v0.3.x adds:
  *   - tuning-blob loader (PPC3 export -> register bursts)
@@ -28,7 +28,7 @@
  *     I2S TX feeds the amp's SDIN; the amp's SDOUT feeds back
  *     IV-sense data on the host's I2S RX)
  *   - fault-pin handling (open-drain IRQ_N on the EVK's
- *     `EVK_AEN_PIN_AMP_FAULT` -- routed through Alif GPIO with
+ *     `EVK_PIN_AMP_FAULT` -- routed through Alif GPIO with
  *     internal pull-up).
  *
  * I2C addresses (TAS2563 Table 7-3):

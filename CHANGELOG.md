@@ -49,11 +49,25 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   baked as C macros.  Carrier `alp,pin-array` overlays MUST follow
   the canonical ordering so the macros stay portable across every
   E1M-conformant carrier.  42 GPIO indices total.
-- Carrier-specific feature names at
-  `include/alp/boards/alp_e1m_evk_aen.h` — readable EVK-side
-  aliases (`EVK_AEN_PIN_LED_RED`, `EVK_AEN_PIN_ENCODER_SW`,
-  `EVK_AEN_I2C_BUS_SENSORS`, on-board sensor I2C addresses)
-  layered on top of the global E1M map.
+- Carrier-feature names at
+  `include/alp/boards/alp_e1m_evk.h` — readable EVK-side aliases
+  (`EVK_PIN_LED_RED`, `EVK_PIN_ENCODER_SW`,
+  `EVK_I2C_BUS_SENSORS`, on-board sensor I2C addresses) layered on
+  top of the global E1M map.  The header is SoM-agnostic: the E1M
+  EVK accepts 35x35 mm SoMs (currently AEN, soon N93).  Per-SoM
+  dispatch differences (e.g. AEN-side CC3501E proxying for IO11 /
+  IO13 / IO15..IO21) are called out per-pad in the doc-comments.
+  The 45x65 E1M-X carrier gets its own future header
+  `<alp/boards/alp_e1m_x_evk.h>`.
+- M.2 E-key wake + radio-disable wiring on the EVK header:
+  `EVK_PIN_M2E_UART_WAKE` (IO19), `EVK_PIN_M2E_SDIO_WAKE` (IO18),
+  `EVK_PIN_W_DISABLE1` (IO17, Wi-Fi disable, open-drain),
+  `EVK_PIN_W_DISABLE2` (IO16, BT disable, open-drain).  All four
+  proxy through the on-module CC3501E.
+- BMI323 INT1 macro: `EVK_PIN_BMI323_INT1` (IO15, CC3501E-side).
+  The IMU's data-ready / motion / FIFO interrupt does not pass
+  through the main TCAL9538 expander -- those bits hold the
+  ICM-42670 + BMP581 interrupt lines.
 - **Chips library v0.1**:
   - `chips/lsm6dso/` + `<alp/chips/lsm6dso.h>` — STMicro
     LSM6DSO 6-axis IMU driver.  WHO_AM_I check, ODR/full-scale
@@ -489,13 +503,13 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
     the part.
   - **I2S0 74LVC157 mux** swaps the I2S0 bus between TAS2563 and
     M.2 E-key.  Control pins split across chips:
-    `EVK_AEN_PIN_I2S_MUX_EN = IO8` (Alif P7.1) +
-    `EVK_AEN_PIN_I2S_MUX_SEL = IO13` (CC3501E GPIO13).
+    `EVK_PIN_I2S_MUX_EN = IO8` (Alif P7.1) +
+    `EVK_PIN_I2S_MUX_SEL = IO13` (CC3501E GPIO13).
   - **USB2 TMUXHS221 mux** swaps USB2 between the external USB-A
     jack and M.2 E-key USB.  Single control:
-    `EVK_AEN_PIN_USB2_MUX_SEL = IO11` (CC3501E GPIO2).  /OEN
+    `EVK_PIN_USB2_MUX_SEL = IO11` (CC3501E GPIO2).  /OEN
     tied to GND so the mux is always live.
-  - **M.2 E-key UART wake** -- `EVK_AEN_PIN_M2E_UART_WAKE = IO19`
+  - **M.2 E-key UART wake** -- `EVK_PIN_M2E_UART_WAKE = IO19`
     (CC3501E GPIO19).
   - **Six INA236 current shunt monitors** -- one per power rail
     on I2C0 (3V3, 1V8, VIO, +V_CAM0, +V_CAM1, 5V).  INA236A
@@ -510,16 +524,16 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 - **EVK Arduino + mikroBUS headers + wiring corrections** --
   user-supplied EVK wiring continues.  Arduino UNO header full
-  pin map: `EVK_AEN_ARD_PWM1..PWM4` (= E1M PWM1/PWM4/PWM5/PWM2),
-  `EVK_AEN_ARD_DIO1..DIO4` (= I2S1_SDO / I2S1_WS / SPI0_SCLK /
-  SPI0_MOSI), `EVK_AEN_ARD_RST` (= I2S1_SCLK), and
-  `EVK_AEN_ARD_A0..A5` (= ALP_E1M_ADC0..5).  Bus aliases:
-  `EVK_AEN_SPI_BUS_ARDUINO` (= SPI1, CC3501E-mediated),
-  `EVK_AEN_I2C_BUS_ARDUINO` (= I3C0), `EVK_AEN_UART_PORT_ARDUINO`
+  pin map: `EVK_ARD_PWM1..PWM4` (= E1M PWM1/PWM4/PWM5/PWM2),
+  `EVK_ARD_DIO1..DIO4` (= I2S1_SDO / I2S1_WS / SPI0_SCLK /
+  SPI0_MOSI), `EVK_ARD_RST` (= I2S1_SCLK), and
+  `EVK_ARD_A0..A5` (= ALP_E1M_ADC0..5).  Bus aliases:
+  `EVK_SPI_BUS_ARDUINO` (= SPI1, CC3501E-mediated),
+  `EVK_I2C_BUS_ARDUINO` (= I3C0), `EVK_UART_PORT_ARDUINO`
   (= UART1).  mikroBUS click header reuses the Arduino macros for
   the shared lines (SPI / I2C / UART / RST) and adds
-  `EVK_AEN_MB_PWM` (= PWM6), `EVK_AEN_PIN_MB_INT` (= I2S1_SDI),
-  `EVK_AEN_MB_ANA` (TBD-confirm).  In-flight wiring corrections
+  `EVK_MB_PWM` (= PWM6), `EVK_PIN_MB_INT` (= I2S1_SDI),
+  `EVK_MB_ANA` (TBD-confirm).  In-flight wiring corrections
   bundled into the same commit:
   - **LED_GREEN -> PWM0** (was PWM2 inferred-and-wrong).
   - **CTP_INT -> SPI1_CS1** (was I2S1_SDI; the I2S1_SDI pad now
@@ -532,7 +546,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   - **BMI323 address -> 0x68** (with SDO=low; user confirmed the
     strap is low, not high).  Resolves the apparent 0x69
     collision with ICM-42670-P.
-  - **`EVK_AEN_SPI_BUS_M2_KEYM` removed** -- M.2 on this EVK
+  - **`EVK_SPI_BUS_M2_KEYM` removed** -- M.2 on this EVK
     uses PCIe + SDIO, not SPI; the previous macro was a guess.
   - **SPI0 fully repurposed** -- all five SPI0 pads
     (MISO/CS0/CS1/MOSI/SCLK) are GPIOs on this carrier
@@ -550,26 +564,26 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   large user-supplied EVK schematic update lands in
   `<alp/boards/alp_e1m_evk_aen.h>` + `chips/tcal9538/`:
   - I2C0 stays the sensor / IO-expander / current-monitor bus;
-    new `EVK_AEN_I2C_BUS_DSI_CSI = ALP_E1M_I2C1` is the
+    new `EVK_I2C_BUS_DSI_CSI = ALP_E1M_I2C1` is the
     display-and-camera-control bus per the EVK's `DSI_CSI_I2C` net.
   - `IO5` is `CAM_RST` (the camera reset line), correcting an
     earlier placeholder that had `IO5 = IO_EXP_RST`.
   - RGB LED now drives via PWM rather than GPIO:
-    `EVK_AEN_PWM_LED_RED = ALP_E1M_PWM3`,
+    `EVK_PWM_LED_RED = ALP_E1M_PWM3`,
     `_GREEN = ALP_E1M_PWM2` (TBD-confirm; user stated PWM3=R + PWM1=B
     but didn't name the green PWM, PWM2 is inferred), and
     `_BLUE = ALP_E1M_PWM1`.
   - Off-GPIO_IO repurposed pads (`AUDIO_CLK`, `SPI0_MISO`,
     `SPI0_CS0`, `SPI0_CS1`, `I2S1_SDI`, `SPI1_CS0`) are exposed
-    via `EVK_AEN_PIN_OVERLAY_BASE + N` indices that the carrier
+    via `EVK_PIN_OVERLAY_BASE + N` indices that the carrier
     `alp,pin-array` overlay extends past the standard 42-entry
-    range.  Names: `EVK_AEN_PIN_IO_EXP_INT` (AUDIO_CLK),
+    range.  Names: `EVK_PIN_IO_EXP_INT` (AUDIO_CLK),
     `_IO_EXP_RST` (SPI0_CS1), `_AMP_FAULT` (SPI0_MISO),
     `_AMP_ENABLE` (SPI0_CS0), `_CTP_INT` (I2S1_SDI),
     `_CTP_RST` (SPI1_CS0, routed through CC3501E).
   - SDIO mux for SD-card vs M.2 E-key: 74LVC157 controlled by
-    `EVK_AEN_PIN_SDIO_MUX_EN = ALP_E1M_GPIO_IO20` (active-low
-    enable) and `EVK_AEN_PIN_SDIO_MUX_SEL = ALP_E1M_GPIO_IO21`
+    `EVK_PIN_SDIO_MUX_EN = ALP_E1M_GPIO_IO20` (active-low
+    enable) and `EVK_PIN_SDIO_MUX_SEL = ALP_E1M_GPIO_IO21`
     (0 = M.2 E SDIO, 1 = SD card).  Both pins route through the
     on-module CC3501E (per from-cc3501e.tsv), so firmware drives
     the mux via `ALP_CC3501E_CMD_GPIO_WRITE` on the inter-chip
@@ -586,7 +600,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
     actually different.
   - **TCAL9538 I/O expander pin map** (8 channels of LCD / camera /
     capacitive-touch control + sensor interrupts) materialised as
-    a typed enum `evk_aen_ioexp_pin_t` so apps don't pass raw
+    a typed enum `evk_ioexp_pin_t` so apps don't pass raw
     indices.  Note: P3 was earlier listed as `CTP_RST` but the
     user has since separately said `CTP_RST = SPI1_CS0`; both
     routes are preserved in the header with a TBD-confirm note
@@ -604,8 +618,8 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   `SEL` pin lands on E1M `IO2` (`W2` / Alif `P12.5`).  New thin
   driver at `chips/cam_mux_pi3wvr626/` + matching public header
   wraps SEL as a GPIO with a typed `INPUT_A` / `INPUT_B` enum.
-  `<alp/boards/alp_e1m_evk_aen.h>` gains `EVK_AEN_PIN_CAM_MUX_SEL`
-  and **drops the previous placeholder `EVK_AEN_PIN_LED_BLUE = IO2`
+  `<alp/boards/alp_e1m_evk_aen.h>` gains `EVK_PIN_CAM_MUX_SEL`
+  and **drops the previous placeholder `EVK_PIN_LED_BLUE = IO2`
   mapping** -- the schematic confirms `IO2` is the mux line, not
   an LED.  `LED_BLUE` is now TBD; `LED_RED` / `LED_GREEN` carry
   an explicit "TBD-confirm" caveat.  `docs/boards/e1m-evk.md`

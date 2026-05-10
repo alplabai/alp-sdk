@@ -24,17 +24,17 @@
         alp-uart0 = &uart0;      /* console / JTAG-side debug uart */
     };
 
-    /* The order below MUST match the EVK_AEN_PIN_* macros in
-     * include/alp/boards/alp_e1m_evk_aen.h.  Adding a new pad
+    /* The order below MUST match the EVK_PIN_* macros in
+     * include/alp/boards/alp_e1m_evk.h.  Adding a new pad
      * means appending here AND adding the matching macro there.  */
     alp_pins: alp-pins {
         compatible = "alp,pin-array";
-        gpios = <&gpio0  0 GPIO_ACTIVE_HIGH>,                            /* EVK_AEN_PIN_LED_RED      */
-                <&gpio0  1 GPIO_ACTIVE_HIGH>,                            /* EVK_AEN_PIN_LED_GREEN    */
-                <&gpio0  2 GPIO_ACTIVE_HIGH>,                            /* EVK_AEN_PIN_LED_BLUE     */
-                <&gpio1  0 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>,           /* EVK_AEN_PIN_ENCODER_SW   */
-                <&gpio1  1 GPIO_ACTIVE_HIGH>,                            /* EVK_AEN_PIN_IO_EXP_INT   */
-                <&gpio1  2 GPIO_ACTIVE_HIGH>;                            /* EVK_AEN_PIN_IO_EXP_RST   */
+        gpios = <&gpio0  0 GPIO_ACTIVE_HIGH>,                            /* EVK_PIN_LED_RED      */
+                <&gpio0  1 GPIO_ACTIVE_HIGH>,                            /* EVK_PIN_LED_GREEN    */
+                <&gpio0  2 GPIO_ACTIVE_HIGH>,                            /* EVK_PIN_LED_BLUE     */
+                <&gpio1  0 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>,           /* EVK_PIN_ENCODER_SW   */
+                <&gpio1  1 GPIO_ACTIVE_HIGH>,                            /* EVK_PIN_IO_EXP_INT   */
+                <&gpio1  2 GPIO_ACTIVE_HIGH>;                            /* EVK_PIN_IO_EXP_RST   */
     };
 };
 

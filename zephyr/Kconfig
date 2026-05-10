@@ -603,7 +603,7 @@ config ALP_SDK_CHIP_TCAL9538
 	  TCAL9538 sits on E1M_I2C0 at 0x72 (A1=1, A0=0); its eight
 	  GPIOs fan out LCD / camera / capacitive-touch control
 	  lines plus four sensor interrupt inputs (see
-	  evk_aen_ioexp_pin_t in <alp/boards/alp_e1m_evk_aen.h>).
+	  evk_ioexp_pin_t in <alp/boards/alp_e1m_evk_aen.h>).
 
 config ALP_SDK_CHIP_TAS2563
 	bool "TI TAS2563 smart Class-D speaker amplifier"

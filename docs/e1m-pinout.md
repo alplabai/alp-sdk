@@ -83,9 +83,9 @@ standard — they're carrier-specific.  Those live in
 re-exports of the underlying `ALP_E1M_GPIO_*` indices:
 
 ```c
-#include <alp/boards/alp_e1m_evk_aen.h>
+#include <alp/boards/alp_e1m_evk.h>
 
-alp_gpio_t *led = alp_gpio_open(EVK_AEN_PIN_LED_RED);
+alp_gpio_t *led = alp_gpio_open(EVK_PIN_LED_RED);
 /* expands to alp_gpio_open(ALP_E1M_GPIO_IO0) — the standard
  * GPIO index, the readable name, both true at once. */
 ```
