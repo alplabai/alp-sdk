@@ -357,9 +357,8 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 - **GitHub org migration** — repo references updated from
   `alpCaner/*` to `alplabai/*` (alp-sdk, e1m-spec,
   alp-zephyr-modules, alp-studio).  27 files / 56 substitutions,
-  pure rename.  Older history rewritten to drop the
-  `Co-Authored-By: Claude` co-author line per the repo's solo-
-  attribution preference.
+  pure rename.  Older history rewritten to drop spurious
+  co-author footers per the repo's solo-attribution preference.
 - **VERSIONS.md v0.2 row** updated to call out the peripheral
   expansion explicitly (12 wrapped classes), capability validation,
   and the E1M portability bound.
