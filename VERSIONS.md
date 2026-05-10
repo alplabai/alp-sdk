@@ -29,7 +29,7 @@ the old plan to this one:
 | v0.1.0  | in-progress | AEN bring-up (Zephyr peripherals + multi-proc BSP foundation) |
 | v0.2.0  | **surface complete; impl in progress** | 12 wrapped peripheral classes + capability validation + E1M portability bound + per-peripheral examples + v0.2/v0.3 stub headers + ADRs all shipped early.  Bare-metal AEN real, V2N intro, EdgeAI app real are the remaining v0.2 deliverables. |
 | v0.3.0  | planned     | Real impl behind v0.2-declared surfaces (`<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`, `<alp/mproc.h>`).  IoT reference app, multi-proc completion, display polish, V2N+M1 intro. |
-| v0.4.0  | planned     | Yocto first-class (V2N + V2N+M1 full)  |
+| v0.4.0  | planned     | Yocto first-class (V2N + V2N+M1 full); secure boot + secure OTA on AEN-Zephyr  |
 | v1.0.0  | planned     | unified repo, docs, ABI freeze, production-ready  |
 
 > **Note on v0.2 sequencing.**  The original v0.2 plan in this file
@@ -328,6 +328,21 @@ every library.
 - **Audio:** ALSA-backed `alp_audio_*`.
 - **Signal:** ARM Compute Library bindings.
 - **IoT:** OTA helpers (Mender / SWUpdate integration).
+- **Secure boot:** MCUboot pulls in for AEN-Zephyr; signed images
+  with rollback protection.  Signing keys provisioned into the
+  on-module **OPTIGA Trust M** secure element's NVM during
+  factory programming; MCUboot's signature verification routes
+  through MbedTLS PSA -> OPTIGA hardware-accelerator path.
+- **Secure OTA:** signed update payloads delivered over
+  `<alp/iot.h>` MQTT/HTTP, image swap via MCUboot's
+  `swap-using-scratch` mode at next reboot.  On Yocto-on-V2N /
+  i.MX 93 the equivalent is `meta-mender` integration.
+- **Device identity:** OPTIGA Trust M's pre-provisioned ECC key
+  pair becomes the immutable device identity; TLS client
+  certificates derive from it for cloud authentication.
+
+See [`PLAN.md` §2.4.1](PLAN.md) for the full secure boot / OTA
+chain-of-trust design.
 
 ### Build matrix
 

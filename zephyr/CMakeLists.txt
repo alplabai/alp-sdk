@@ -99,6 +99,14 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_BMP581
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/bmp581/bmp581.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CC3501E
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TMP112
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tmp112/tmp112.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_RV3028C7
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/rv3028c7/rv3028c7.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/optiga_trust_m/optiga_trust_m.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_EEPROM_24C128
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/eeprom_24c128/eeprom_24c128.c)
 
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include)
 zephyr_library_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr)

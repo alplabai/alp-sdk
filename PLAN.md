@@ -173,6 +173,39 @@ implementations (Murata + Infineon on V2N; TI CC3501E on AEN).
 | BLE peripheral + central                           | 🔮 v0.3 (`<alp/ble.h>`, Zephyr `bt` host stack) |
 | Provisioning helpers (`alp_iot_wifi_provision`)    | 🔮 v0.3.x |
 | Yocto IoT stack (Mosquitto, Paho, OTA)             | 🔮 v0.4 |
+| **Secure boot** (MCUboot + signed images on AEN)   | 🔮 v0.4 |
+| **Secure OTA** (signed update channel + rollback)  | 🔮 v0.4 |
+| OPTIGA Trust M-rooted device identity              | 🔮 v0.4 (paired with secure boot) |
+
+### 2.4.1 Secure boot + secure OTA
+
+Production E1M deployments require chain-of-trust from immutable
+ROM through to the application.  The SDK lands this in v0.4 on
+two prongs:
+
+1. **Secure boot.**  MCUboot (already pulled in via `west.yml`)
+   verifies the application image's signature at every boot.
+   Signing keys live in OPTIGA Trust M's secure NVM (per the
+   chip metadata in `metadata/e1m_modules/aen/`); MCUboot's
+   verification path goes through MbedTLS PSA, which routes to
+   the OPTIGA HW accelerator transparently once the v0.3.x PSA
+   driver lands.  Failed verification triggers a rollback to
+   the prior known-good image.
+
+2. **Secure OTA.**  The same key pair signs OTA payloads.  The
+   delivery channel is platform-specific:
+   - **Zephyr-on-AEN:** Mender / SWUpdate via the v0.3-shipped
+     `<alp/iot.h>` MQTT/HTTP client; image swap at next reboot
+     via MCUboot's `swap-using-scratch` mode.
+   - **Yocto-on-V2N / i.MX 93 (v0.4 first-class):** Mender as
+     the reference OTA agent; the meta-alp recipes integrate
+     `meta-mender`.
+
+The OPTIGA Trust M's TRNG and ECC primitives are surfaced via
+`<alp/security.h>` -- apps that opt in to secure boot get the
+same crypto surface they use for TLS, no separate API.  See
+[`docs/cc3501e-bridge.md`](cc3501e-bridge.md) for the Wi-Fi
+bridge's role in OTA delivery on AEN.
 
 ---
 

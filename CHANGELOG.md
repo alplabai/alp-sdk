@@ -473,6 +473,45 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **On-module I2C device drivers (E1M-AEN)** -- four new chip
+  drivers covering the SoM-internal I2C devices the user
+  documented:
+  - `chips/tmp112/` + `<alp/chips/tmp112.h>` -- TI TMP112 digital
+    temperature sensor (LPI2C, +/-0.5 C, 12/13-bit, 0.0625 C/LSB).
+    Init / set_rate / set_extended_mode /
+    read_temp_milli_c (avoids float on M-class).
+  - `chips/rv3028c7/` + `<alp/chips/rv3028c7.h>` -- Micro Crystal
+    RV-3028-C7 32.768 kHz 1 PPM RTC (LPI2C, addr 0x52 fixed).
+    BCD time get/set, alarm with match-mask, INT-pin enable,
+    alarm flag check+clear.  Routes the alarm into Alif
+    `P15_0_FLEX` per the inter-chip wiring TSV.
+  - `chips/optiga_trust_m/` + `<alp/chips/optiga_trust_m.h>` --
+    Infineon OPTIGA Trust M secure element
+    (SLS32AIA010MLUSON10XTMA2; LPI2C, addr 0x30).  v0.3 ships
+    init + I2C connectivity-probe; full APDU command set lands
+    via Infineon's host library + MbedTLS PSA registration in
+    v0.3.x so `<alp/security.h>` picks up HW acceleration
+    transparently.
+  - `chips/eeprom_24c128/` + `<alp/chips/eeprom_24c128.h>` --
+    Generic 24Cxx-class 128-Kbit (16 KB) EEPROM driver covering
+    Onsemi N24S128C4DYT3G (E1M-AEN default) and the
+    footprint-compatible STMicro M24128-BFMH6TG (DNP alt).
+    Page-aware writes (64-byte page, ACK-poll wait), arbitrary-
+    range reads.  On I2C2.
+  Brings the SDK's chip count to **16** (was 12).  ABI snapshot
+  now 41 public headers.
+- **Secure boot + secure OTA roadmap entries (v0.4)** -- production
+  E1M deployments need chain-of-trust from immutable ROM up.
+  Plan: MCUboot already pulled in via west.yml verifies
+  application image signatures at every boot; signing keys live
+  in OPTIGA Trust M's secure NVM (provisioned during factory
+  programming); the verification path goes through MbedTLS PSA,
+  routing to the OPTIGA hardware accelerator transparently once
+  the v0.3.x PSA driver lands.  Secure OTA delivers signed
+  payloads over `<alp/iot.h>` MQTT/HTTP and swaps via MCUboot's
+  `swap-using-scratch` mode.  Yocto-on-V2N / i.MX 93 uses
+  `meta-mender` for the equivalent.  Documented in `PLAN.md` §2.4.1
+  and `VERSIONS.md` v0.4 section.
 - **CC3501E Alif-side host driver** -- new chip driver at
   `chips/cc3501e/cc3501e.c` + public header
   `include/alp/chips/cc3501e.h`.  Alif-side of the inter-chip
