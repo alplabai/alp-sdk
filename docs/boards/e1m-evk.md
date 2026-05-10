@@ -72,8 +72,8 @@ schematic (UG-E1M-001) and exposed as `EVK_I2C_ADDR_*` macros in
 | `0x46`          | INA236B (U30)            | `EVK_I2C_ADDR_INA236_5V`           | `+5V` rail current monitor                          |
 | `0x47`          | BMP581 (U14)             | `EVK_I2C_ADDR_BMP581`              | Barometric pressure (SDO=1)                         |
 | `0x48`          | TAS2563 broadcast        | `EVK_I2C_ADDR_TAS2563_BCAST`       | Write-only synchronised setup of both amps          |
-| `0x4D`          | TAS2563 (U?? amp #1)     | `EVK_I2C_ADDR_TAS2563_LOW`         | Smart-amp #1 (AD0 = 10 kΩ to GND)                   |
-| `0x4E`          | TAS2563 (U?? amp #2)     | `EVK_I2C_ADDR_TAS2563_HIGH`        | Smart-amp #2 (AD0 = 10 kΩ to VDD)                   |
+| `0x4D`          | TAS2563 (U27)            | `EVK_I2C_ADDR_TAS2563_LOW`         | Smart-amp #1 (AD0 = 10 kΩ to GND)                   |
+| `0x4E`          | TAS2563 (U28)            | `EVK_I2C_ADDR_TAS2563_HIGH`        | Smart-amp #2 (AD0 = 10 kΩ to VDD)                   |
 | `0x68`          | BMI323 (U13)             | `EVK_I2C_ADDR_BMI323`              | Secondary 6-axis IMU (SDO=0; no collision with ICM) |
 | `0x69`          | ICM-42670-P (U12)        | `EVK_I2C_ADDR_ICM42670`            | Primary 6-axis IMU (AD0=1)                          |
 | `0x71`          | TCAL9538 PCIe (U37)      | `EVK_I2C_ADDR_TCAL9538_PCIE`       | PCIe-side I/O expander (PCIe slot RST/WAKE/CLKREQ)  |

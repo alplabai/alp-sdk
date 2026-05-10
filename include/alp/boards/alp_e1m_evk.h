@@ -567,13 +567,13 @@ typedef enum {
 
 /* Two TAS2563RPP smart-amp ICs share the same I2C0 bus.  AD0
  * strap selects address per TAS2563 datasheet table 7-3:
- *   AD0 = 10k to GND  -> 0x4D  (one channel)
- *   AD0 = 10k to VDD  -> 0x4E  (the other)
+ *   AD0 = 10k to GND  -> 0x4D  -- U27 on the EVK
+ *   AD0 = 10k to VDD  -> 0x4E  -- U28 on the EVK
  * Both also respond to the global broadcast 0x48 (write-only;
  * useful for synchronised setup, never for register reads). */
-#define EVK_I2C_ADDR_TAS2563_LOW 0x4Du
-#define EVK_I2C_ADDR_TAS2563_HIGH 0x4Eu
-#define EVK_I2C_ADDR_TAS2563_BCAST 0x48u
+#define EVK_I2C_ADDR_TAS2563_LOW 0x4Du   /**< U27 (AD0 = LOW). */
+#define EVK_I2C_ADDR_TAS2563_HIGH 0x4Eu  /**< U28 (AD0 = HIGH). */
+#define EVK_I2C_ADDR_TAS2563_BCAST 0x48u /**< Write-only broadcast. */
 
 /* Six INA236 high-side current-shunt monitors -- one per power
  * rail -- on I2C0.  TI's INA236A variant occupies 0x40..0x43 and
