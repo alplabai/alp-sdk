@@ -202,6 +202,66 @@
     "alp/boards/alp_e1m_evk_aen.h": {
       "functions": {},
       "macros": {
+        "EVK_AEN_ARD_A0": {
+          "hash": "8c66bda03a457e05",
+          "value": "ALP_E1M_ADC0"
+        },
+        "EVK_AEN_ARD_A1": {
+          "hash": "4120fdbe951f392b",
+          "value": "ALP_E1M_ADC1"
+        },
+        "EVK_AEN_ARD_A2": {
+          "hash": "2aeaf75cbffaf626",
+          "value": "ALP_E1M_ADC2"
+        },
+        "EVK_AEN_ARD_A3": {
+          "hash": "886c39cccd04cb40",
+          "value": "ALP_E1M_ADC3"
+        },
+        "EVK_AEN_ARD_A4": {
+          "hash": "3b8e48468fe622a1",
+          "value": "ALP_E1M_ADC4"
+        },
+        "EVK_AEN_ARD_A5": {
+          "hash": "670768bc1cf03ce5",
+          "value": "ALP_E1M_ADC5"
+        },
+        "EVK_AEN_ARD_DIO1": {
+          "hash": "405a18af0b6460ad",
+          "value": "EVK_AEN_PIN_CK_DIO1"
+        },
+        "EVK_AEN_ARD_DIO2": {
+          "hash": "35df4fce230e1072",
+          "value": "EVK_AEN_PIN_CK_DIO2"
+        },
+        "EVK_AEN_ARD_DIO3": {
+          "hash": "f83f07877e4b89ff",
+          "value": "EVK_AEN_PIN_CK_DIO3"
+        },
+        "EVK_AEN_ARD_DIO4": {
+          "hash": "0ae1f4b625bceb0d",
+          "value": "EVK_AEN_PIN_CK_DIO4"
+        },
+        "EVK_AEN_ARD_PWM1": {
+          "hash": "1f7a68925b7f843c",
+          "value": "ALP_E1M_PWM1"
+        },
+        "EVK_AEN_ARD_PWM2": {
+          "hash": "cd2e368537d2dd3a",
+          "value": "ALP_E1M_PWM4"
+        },
+        "EVK_AEN_ARD_PWM3": {
+          "hash": "5cd1e6e38d7398ea",
+          "value": "ALP_E1M_PWM5"
+        },
+        "EVK_AEN_ARD_PWM4": {
+          "hash": "e74e494f9a3ab0df",
+          "value": "ALP_E1M_PWM2"
+        },
+        "EVK_AEN_ARD_RST": {
+          "hash": "e37a9f640c07acb8",
+          "value": "EVK_AEN_PIN_CK_RST"
+        },
         "EVK_AEN_I2C_ADDR_BMI323": {
           "hash": "16c19ef26073a21e",
           "value": "0x69u"
@@ -218,6 +278,10 @@
           "hash": "7dfc06055ae03081",
           "value": "0x72u"
         },
+        "EVK_AEN_I2C_BUS_ARDUINO": {
+          "hash": "387b94b364590f8c",
+          "value": "ALP_E1M_I3C0"
+        },
         "EVK_AEN_I2C_BUS_DSI_CSI": {
           "hash": "caf43fc992892c0b",
           "value": "ALP_E1M_I2C1"
@@ -225,6 +289,18 @@
         "EVK_AEN_I2C_BUS_SENSORS": {
           "hash": "f7093f1473ba7a85",
           "value": "ALP_E1M_I2C0"
+        },
+        "EVK_AEN_MB_ANA": {
+          "hash": "a1f8acc02b40d2ff",
+          "value": "((uint32_t)(-1))"
+        },
+        "EVK_AEN_MB_INT": {
+          "hash": "1c30a5b8d4ee161a",
+          "value": "EVK_AEN_PIN_MB_INT"
+        },
+        "EVK_AEN_MB_PWM": {
+          "hash": "53f51c202b0b2409",
+          "value": "ALP_E1M_PWM6"
         },
         "EVK_AEN_PIN_AMP_ENABLE": {
           "hash": "851fffea93d6034a",
@@ -242,13 +318,29 @@
           "hash": "d7dee20e7ff9662f",
           "value": ""
         },
-        "EVK_AEN_PIN_CTP_INT": {
-          "hash": "084c948ab733ce9c",
-          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 4u)"
+        "EVK_AEN_PIN_CK_DIO1": {
+          "hash": "aae29b112303f297",
+          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 8u)"
         },
-        "EVK_AEN_PIN_CTP_RST": {
-          "hash": "d5541ae6d000af1e",
+        "EVK_AEN_PIN_CK_DIO2": {
+          "hash": "b484b6daf2ed9b50",
+          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 7u)"
+        },
+        "EVK_AEN_PIN_CK_DIO3": {
+          "hash": "5fda397a831a41fb",
+          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 6u)"
+        },
+        "EVK_AEN_PIN_CK_DIO4": {
+          "hash": "b0648a5c9d8f2c07",
           "value": "(EVK_AEN_PIN_OVERLAY_BASE + 5u)"
+        },
+        "EVK_AEN_PIN_CK_RST": {
+          "hash": "b2ecfdefb8b69f14",
+          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 9u)"
+        },
+        "EVK_AEN_PIN_CTP_INT": {
+          "hash": "69ab7afca5ebd59f",
+          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 10u)"
         },
         "EVK_AEN_PIN_ENCODER_SW": {
           "hash": "59ef4cdf6640a13e",
@@ -261,6 +353,10 @@
         "EVK_AEN_PIN_IO_EXP_RST": {
           "hash": "7c23ad7f03005e3c",
           "value": "(EVK_AEN_PIN_OVERLAY_BASE + 1u)"
+        },
+        "EVK_AEN_PIN_MB_INT": {
+          "hash": "0546b393bf99e23b",
+          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 4u)"
         },
         "EVK_AEN_PIN_OVERLAY_BASE": {
           "hash": "63e19cb882bbe10b",
@@ -286,9 +382,13 @@
           "hash": "5da331150993dfc3",
           "value": "ALP_E1M_PWM3"
         },
-        "EVK_AEN_SPI_BUS_M2_KEYM": {
-          "hash": "57e1a8d59b20101f",
-          "value": "ALP_E1M_SPI0"
+        "EVK_AEN_SPI_BUS_ARDUINO": {
+          "hash": "e00b18df7d0b49ff",
+          "value": "ALP_E1M_SPI1"
+        },
+        "EVK_AEN_UART_PORT_ARDUINO": {
+          "hash": "9e4dfe3111bda41c",
+          "value": "ALP_E1M_UART1"
         },
         "EVK_AEN_UART_PORT_DEBUG": {
           "hash": "d11b300d771f8bc2",

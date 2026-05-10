@@ -473,6 +473,42 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **EVK Arduino + mikroBUS headers + wiring corrections** --
+  user-supplied EVK wiring continues.  Arduino UNO header full
+  pin map: `EVK_AEN_ARD_PWM1..PWM4` (= E1M PWM1/PWM4/PWM5/PWM2),
+  `EVK_AEN_ARD_DIO1..DIO4` (= I2S1_SDO / I2S1_WS / SPI0_SCLK /
+  SPI0_MOSI), `EVK_AEN_ARD_RST` (= I2S1_SCLK), and
+  `EVK_AEN_ARD_A0..A5` (= ALP_E1M_ADC0..5).  Bus aliases:
+  `EVK_AEN_SPI_BUS_ARDUINO` (= SPI1, CC3501E-mediated),
+  `EVK_AEN_I2C_BUS_ARDUINO` (= I3C0), `EVK_AEN_UART_PORT_ARDUINO`
+  (= UART1).  mikroBUS click header reuses the Arduino macros for
+  the shared lines (SPI / I2C / UART / RST) and adds
+  `EVK_AEN_MB_PWM` (= PWM6), `EVK_AEN_PIN_MB_INT` (= I2S1_SDI),
+  `EVK_AEN_MB_ANA` (TBD-confirm).  In-flight wiring corrections
+  bundled into the same commit:
+  - **LED_GREEN -> PWM0** (was PWM2 inferred-and-wrong).
+  - **CTP_INT -> SPI1_CS1** (was I2S1_SDI; the I2S1_SDI pad now
+    correctly serves only as mikroBUS INT).  CTP_INT routes
+    through the on-module CC3501E like the other CC3501E-side
+    pins.
+  - **CTP_RST is the TCAL9538 P3 only.**  An earlier draft also
+    listed SPI1_CS0 as CTP_RST; the user clarified that's a
+    mis-label -- SPI1_CS0 is the Arduino CK_CS (chip select).
+  - **BMI323 address -> 0x68** (with SDO=low; user confirmed the
+    strap is low, not high).  Resolves the apparent 0x69
+    collision with ICM-42670-P.
+  - **`EVK_AEN_SPI_BUS_M2_KEYM` removed** -- M.2 on this EVK
+    uses PCIe + SDIO, not SPI; the previous macro was a guess.
+  - **SPI0 fully repurposed** -- all five SPI0 pads
+    (MISO/CS0/CS1/MOSI/SCLK) are GPIOs on this carrier
+    (AMP_FAULT/AMP_ENABLE/IO_EXP_RST/CK_DIO4/CK_DIO3).  No
+    peripheral SPI0 bus available on the EVK; documented in the
+    header.
+  - **I2S1 fully repurposed** -- all four I2S1 pads
+    (SDO/WS/SDI/SCLK) are GPIOs (CK_DIO1/CK_DIO2/MB_INT/CK_RST).
+    No peripheral I2S1 bus on the EVK; the I2S0 path remains
+    available for audio.
+  ABI snapshot still 43 public headers (no shape change).
 - **EVK wiring batch: I2C1 = DSI/CSI control, IO5 = CAM_RST,
   PWM-driven RGB LED, repurposed SPI0 + I2S1 + AUDIO_CLK pads,
   TCAL9538 I/O expander, SDIO mux, touch-screen control** --

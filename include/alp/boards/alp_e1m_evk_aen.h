@@ -39,7 +39,7 @@ extern "C" {
 
 #define EVK_AEN_PWM_LED_RED ALP_E1M_PWM3 /**< RGB LED red  channel. */
 #define EVK_AEN_PWM_LED_GREEN                                                                      \
-    ALP_E1M_PWM2 /**< RGB LED green channel (TBD-confirm; user-supplied wiring named PWM3 = R, PWM1 = B but the green-channel PWM index was not stated explicitly -- PWM2 is inferred from the natural R/G/B order). */
+    ALP_E1M_PWM0 /**< RGB LED green channel.  Note: not contiguous with R/B -- the EVK schematic wires green via PWM0, not PWM2. */
 #define EVK_AEN_PWM_LED_BLUE ALP_E1M_PWM1 /**< RGB LED blue channel. */
 
 /* ================================================================== */
@@ -131,32 +131,66 @@ typedef enum {
 #define EVK_AEN_PIN_AMP_ENABLE (EVK_AEN_PIN_OVERLAY_BASE + 3u)
 
 /** I2S1_SDI pad (E1M AH6 / Alif P13_4) repurposed as the
- *  capacitive touch panel interrupt input.  When the audio I2S1
- *  RX path is in use the touch INT is unavailable; firmware
- *  should poll the touch IC instead. */
-#define EVK_AEN_PIN_CTP_INT (EVK_AEN_PIN_OVERLAY_BASE + 4u)
+ *  mikroBUS click INT pin.  Was earlier (mis)documented as
+ *  CTP_INT; the user has since clarified that CTP_INT is on
+ *  SPI1_CS1 (see EVK_AEN_PIN_CTP_INT below) and I2S1_SDI is
+ *  the mikroBUS INT line. */
+#define EVK_AEN_PIN_MB_INT (EVK_AEN_PIN_OVERLAY_BASE + 4u)
 
-/** SPI1_CS0 pad (E1M AH9 -- CC3501E side, GPIO_31) repurposed as
- *  the capacitive touch panel reset.  Routed through the CC3501E
- *  -- firmware drives this via ALP_CC3501E_CMD_GPIO_WRITE on the
- *  inter-chip SPI1, NOT via Alif's GPIO peripheral.
- *
- *  WARNING: the IO expander's P3 was earlier documented as
- *  CTP_RST too.  Two possible interpretations -- the user must
- *  confirm:
- *    (a) Only this pad is the real CTP_RST; expander P3 was a
- *        mis-label and is actually a different signal (e.g.
- *        CTP power-enable).
- *    (b) Both routes exist (e.g. one resets the touch IC, the
- *        other resets a level shifter).
- *  Until clarified, firmware should drive both to be safe. */
-#define EVK_AEN_PIN_CTP_RST (EVK_AEN_PIN_OVERLAY_BASE + 5u)
+/* CTP_RST: capacitive touch panel reset rides ONLY the TCAL9538
+ * I/O expander on this EVK (pin P3 -- see EVK_AEN_IOEXP_CTP_RST
+ * below).  An earlier draft of these notes had CTP_RST = SPI1_CS0
+ * too; that was a mis-label.  SPI1_CS0 is the Arduino UNO
+ * header's CK_CS (chip select); see "Arduino UNO header" below. */
 
-/* SPI0_MOSI / SPI0_SCLK remain available as either SPI or GPIO
- * depending on the carrier-overlay's declaration -- the EVK
- * doesn't pin them down to a specific repurpose, so apps that
- * want to use SPI0 for actual SPI traffic CANNOT also drive the
- * AMP / IO_EXP signals above (they alias on the same SPI0 bus). */
+/** SPI0_MOSI pad (E1M M2 / Alif P5_1) repurposed as Arduino
+ *  CK_DIO4 (digital I/O 4 on the Arduino UNO header). */
+#define EVK_AEN_PIN_CK_DIO4 (EVK_AEN_PIN_OVERLAY_BASE + 5u)
+
+/** SPI0_SCLK pad (E1M N2) repurposed as Arduino CK_DIO3.
+ *  NB: the Alif-side pad mapping for SPI0_SCLK is left blank in
+ *  metadata/e1m_modules/aen/from-alif.tsv (user-supplied) and
+ *  needs filling once the EVK schematic is cross-checked. */
+#define EVK_AEN_PIN_CK_DIO3 (EVK_AEN_PIN_OVERLAY_BASE + 6u)
+
+/** I2S1_WS pad (E1M AG7 / Alif P2_7) repurposed as Arduino CK_DIO2. */
+#define EVK_AEN_PIN_CK_DIO2 (EVK_AEN_PIN_OVERLAY_BASE + 7u)
+
+/** I2S1_SDO pad (E1M AG6 / Alif P13_5) repurposed as Arduino CK_DIO1. */
+#define EVK_AEN_PIN_CK_DIO1 (EVK_AEN_PIN_OVERLAY_BASE + 8u)
+
+/** I2S1_SCLK pad (E1M AH7 / Alif P2_6) repurposed as Arduino
+ *  CK_RST (the Arduino UNO header's RESET signal -- shields can
+ *  pulse it low to force a reboot). */
+#define EVK_AEN_PIN_CK_RST (EVK_AEN_PIN_OVERLAY_BASE + 9u)
+
+/** SPI1_CS1 pad (E1M AH8 -- CC3501E side, GPIO_15) repurposed as
+ *  the capacitive touch panel interrupt input.  Routed through
+ *  the on-module CC3501E -- firmware reads CTP touches by
+ *  registering an interrupt callback on the CC3501E's GPIO_15
+ *  via ALP_CC3501E_CMD_GPIO_SET_INTERRUPT. */
+#define EVK_AEN_PIN_CTP_INT (EVK_AEN_PIN_OVERLAY_BASE + 10u)
+
+/* I2S1 is fully consumed by the EVK -- all four I2S1 pads are
+ * repurposed as GPIOs:
+ *     I2S1_SDO  -> CK_DIO1
+ *     I2S1_WS   -> CK_DIO2
+ *     I2S1_SDI  -> CTP_INT
+ *     I2S1_SCLK -> CK_RST
+ * There is no peripheral I2S1 bus on this carrier; do not call
+ * `alp_i2s_open(ALP_E1M_I2S1)` on the EVK -- it'll conflict with
+ * the GPIO repurposes above.  The I2S0 path remains available
+ * for audio. */
+
+/* SPI0 is fully consumed by the EVK -- all five SPI0 pads
+ * (MISO=AMP_FAULT, CS0=AMP_ENABLE, CS1=IO_EXP_RST, MOSI=CK_DIO4,
+ * SCLK=CK_DIO3) are repurposed as GPIOs.  There is no peripheral
+ * SPI0 bus available on this carrier; do NOT call
+ * `alp_spi_open(ALP_E1M_SPI0)` on the EVK -- it'll work at the
+ * wrapper level but conflict with the AMP / IOEXP / CK_DIO
+ * routing above.  Use the CC3501E-mediated SPI surface for any
+ * SPI device on the Arduino headers (see "Arduino UNO header"
+ * section below). */
 
 /* ================================================================== */
 /* MIPI CSI camera multiplexer (PI3WVR626XEBEX)                       */
@@ -209,40 +243,116 @@ typedef enum {
  *  DSI_CSI_I2C net. */
 #define EVK_AEN_I2C_BUS_DSI_CSI ALP_E1M_I2C1
 
-/** SPI for the M.2 Key M slot.  Maps to E1M's `SPI0` -- but note
- *  that some SPI0 pads (CS0/CS1/MISO) are repurposed as GPIOs on
- *  this carrier (see "Pads repurposed by the EVK" above).  Apps
- *  that want to drive M.2 over real SPI must coordinate with the
- *  amp + I/O-expander control logic. */
-#define EVK_AEN_SPI_BUS_M2_KEYM ALP_E1M_SPI0
+/** Arduino UNO header SPI bus.  Maps to E1M's `SPI1`, which on
+ *  this EVK terminates on the on-module CC3501E (per
+ *  metadata/e1m_modules/aen/from-cc3501e.tsv).  The Alif does NOT
+ *  drive SPI1 directly here -- apps wanting to talk to an Arduino
+ *  shield's SPI device dispatch through the CC3501E firmware.
+ *  CK_CS = E1M_SPI1_CS0 is the chip-select line.
+ *
+ *  M.2 (Key M and Key E) on the EVK carrier uses PCIe + SDIO,
+ *  not SPI; the previous `EVK_AEN_SPI_BUS_M2_KEYM` macro was a
+ *  guess and has been removed. */
+#define EVK_AEN_SPI_BUS_ARDUINO ALP_E1M_SPI1
+
+/** Arduino UNO header I2C bus.  Maps to E1M's `I3C0` -- the
+ *  Arduino's SCL/SDA on this EVK ride the I3C bus (which is
+ *  backwards-compatible with classic I2C).  Apps that only need
+ *  I2C semantics use it as such; I3C-aware apps get the
+ *  higher-rate path. */
+#define EVK_AEN_I2C_BUS_ARDUINO ALP_E1M_I3C0
 
 /** Console UART exposed on the JTAG/SWD-side debug header.  Maps to `UART0`. */
 #define EVK_AEN_UART_PORT_DEBUG ALP_E1M_UART0
+
+/** Arduino UNO header UART (D0/D1).  Maps to E1M's `UART1`.
+ *  Net-naming note: CK_RXD = E1M_UART1_TX, CK_TXD = E1M_UART1_RX
+ *  (the Arduino-shield "RX" pin reads the host's TX, and vice
+ *  versa). */
+#define EVK_AEN_UART_PORT_ARDUINO ALP_E1M_UART1
+
+/* ================================================================== */
+/* Arduino UNO header pin mappings (full)                             */
+/*                                                                    */
+/* The EVK exposes a standard Arduino UNO-form-factor header.  Each   */
+/* CK_<name> / ARD_<name> macro below maps a header pin to the        */
+/* underlying E1M-standard ID -- channel ID for PWM / ADC / bus       */
+/* instances; OVERLAY_BASE + N for the digital I/Os that ride         */
+/* repurposed peripheral pads.                                        */
+/* ================================================================== */
+
+/* PWM (header pins driven by a PWM channel). */
+#define EVK_AEN_ARD_PWM1 ALP_E1M_PWM1 /**< CK_PWM1 = E1M PWM1. */
+#define EVK_AEN_ARD_PWM2 ALP_E1M_PWM4 /**< CK_PWM2 = E1M PWM4. */
+#define EVK_AEN_ARD_PWM3 ALP_E1M_PWM5 /**< CK_PWM3 = E1M PWM5. */
+#define EVK_AEN_ARD_PWM4 ALP_E1M_PWM2 /**< CK_PWM4 = E1M PWM2. */
+
+/* Digital I/O (header pins riding repurposed peripheral pads --
+ * the OVERLAY_BASE + N indices defined above). */
+#define EVK_AEN_ARD_DIO1 EVK_AEN_PIN_CK_DIO1 /**< CK_DIO1 = I2S1_SDO. */
+#define EVK_AEN_ARD_DIO2 EVK_AEN_PIN_CK_DIO2 /**< CK_DIO2 = I2S1_WS. */
+#define EVK_AEN_ARD_DIO3 EVK_AEN_PIN_CK_DIO3 /**< CK_DIO3 = SPI0_SCLK. */
+#define EVK_AEN_ARD_DIO4 EVK_AEN_PIN_CK_DIO4 /**< CK_DIO4 = SPI0_MOSI. */
+#define EVK_AEN_ARD_RST EVK_AEN_PIN_CK_RST   /**< CK_RST  = I2S1_SCLK. */
+
+/* Analog (header pins on E1M ADC channels). */
+#define EVK_AEN_ARD_A0 ALP_E1M_ADC0 /**< ARD.A0 = E1M ANA_S0. */
+#define EVK_AEN_ARD_A1 ALP_E1M_ADC1 /**< ARD.A1 = E1M ANA_S1. */
+#define EVK_AEN_ARD_A2 ALP_E1M_ADC2 /**< ARD.A2 = E1M ANA_S2. */
+#define EVK_AEN_ARD_A3 ALP_E1M_ADC3 /**< ARD.A3 = E1M ANA_S3. */
+#define EVK_AEN_ARD_A4 ALP_E1M_ADC4 /**< ARD.A4 = E1M ANA_S4. */
+#define EVK_AEN_ARD_A5 ALP_E1M_ADC5 /**< ARD.A5 = E1M ANA_S5. */
+
+/* ================================================================== */
+/* mikroBUS click header                                              */
+/*                                                                    */
+/* The EVK exposes a standard mikroBUS click header next to the       */
+/* Arduino UNO header.  Most pins are SHARED with the Arduino         */
+/* header -- only the mikroBUS-only signals (CK_PWM0, CK_INT,         */
+/* CK_ANA) get fresh macros here.  See the inline note below for      */
+/* the shared-pin map.                                                */
+/* ================================================================== */
+
+/** mikroBUS PWM pin.  Maps to E1M_PWM6. */
+#define EVK_AEN_MB_PWM ALP_E1M_PWM6
+
+/** mikroBUS INT pin.  Maps to E1M I2S1_SDI -- the dedicated
+ *  mikroBUS interrupt line on this EVK.  No longer shared with
+ *  CTP_INT (the user clarified CTP_INT lives on SPI1_CS1
+ *  instead -- see EVK_AEN_PIN_CTP_INT above). */
+#define EVK_AEN_MB_INT EVK_AEN_PIN_MB_INT
+
+/** mikroBUS ANA pin.  Routes to one of the E1M ADC channels;
+ *  exact channel TBD-confirm (the user-supplied wiring named
+ *  CK_PWM0 and CK_INT explicitly but did not specify CK_ANA's
+ *  underlying ADC channel).  Typically resolves to one of
+ *  EVK_AEN_ARD_A0..ARD_A5 once confirmed. */
+#define EVK_AEN_MB_ANA ((uint32_t)(-1)) /**< TBD-confirm. */
+
+/* mikroBUS shared with Arduino -- use the ARD_* / EVK_AEN_* macros:
+ *   CK_RST  -> EVK_AEN_ARD_RST              (I2S1_SCLK)
+ *   CK_CS   -> EVK_AEN_SPI_BUS_ARDUINO + cs (SPI1_CS0)
+ *   CK_SCK  -> EVK_AEN_SPI_BUS_ARDUINO clock (SPI1_SCLK)
+ *   CK_MISO -> EVK_AEN_SPI_BUS_ARDUINO MISO (SPI1_MISO)
+ *   CK_MOSI -> EVK_AEN_SPI_BUS_ARDUINO MOSI (SPI1_MOSI)
+ *   CK_TXD  -> EVK_AEN_UART_PORT_ARDUINO TX
+ *   CK_RXD  -> EVK_AEN_UART_PORT_ARDUINO RX
+ *   CK_SCL  -> EVK_AEN_I2C_BUS_ARDUINO  SCL (I3C_SCL)
+ *   CK_SDA  -> EVK_AEN_I2C_BUS_ARDUINO  SDA (I3C_SDA)
+ *
+ * Sharing means a mikroBUS click + Arduino shield cannot both
+ * drive any of the shared lines simultaneously -- the EVK trusts
+ * the user to mount only one of the two physical headers. */
 
 /* ================================================================== */
 /* On-board sensor 7-bit I2C addresses                                */
 /*                                                                    */
 /* All on E1M_I2C0 (the sensor bus).  Strap values per the EVK        */
 /* schematic UG-E1M-001 + user-supplied confirmation:                 */
-/*   - ICM-42670-P  AD0/SD0 = high  -> 0x69                           */
-/*   - BMI323       SDO_MISO_ADR = high -> 0x69                       */
-/*   - BMP581       SDO = high      -> 0x47                           */
-/*   - TCAL9538     A1=1, A0=0       -> 0x72                          */
-/*                                                                    */
-/* WARNING: ICM-42670-P and BMI323 both compute to 0x69 with the      */
-/* straps documented in the EVK schematic.  This is an apparent       */
-/* address collision on E1M_I2C0.  Two possible explanations -- the   */
-/* user should confirm:                                               */
-/*                                                                    */
-/*   (a) Only ONE of {U12 ICM-42670-P, U13 BMI323} is populated at a  */
-/*       time (the two parts share a footprint family), and the      */
-/*       collision never materialises in practice.                   */
-/*   (b) One strap is actually different than documented and we have */
-/*       two distinct addresses (e.g. BMI323 at 0x68).                */
-/*                                                                    */
-/* Until the user confirms, firmware that opens both at 0x69 will not */
-/* work; pick the populated IMU at runtime via lsm6dso_init's         */
-/* WHO_AM_I check (different magic byte per chip).                    */
+/*   - ICM-42670-P  AD0/SD0 = high     -> 0x69                        */
+/*   - BMI323       SDO_MISO_ADR = low -> 0x68 (no collision)         */
+/*   - BMP581       SDO = high         -> 0x47                        */
+/*   - TCAL9538     A1=1, A0=0         -> 0x72                        */
 /* ================================================================== */
 
 #define EVK_AEN_I2C_ADDR_ICM42670 0x69u /**< U12 IMU (AD0=1).  See collision warning above. */
