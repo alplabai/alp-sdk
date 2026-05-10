@@ -144,7 +144,11 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len,
                 return ALP_ERR_TIMEOUT;
             }
             if (err == -1) {
-                k_yield();
+                /* k_msleep(1) instead of k_yield() so the system
+                 * tick actually advances on native_sim (k_yield
+                 * with no other ready thread is a no-op there,
+                 * making the timeout deadline unreachable). */
+                k_msleep(1);
             }
         } while (err == -1);
 
