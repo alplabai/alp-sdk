@@ -73,6 +73,65 @@ When that repo is created, it should:
    utility if one is available) on USB or via a JTAG probe
    wired to the CC3501E's debug pads.
 
+## Firmware-side GPIO behaviour contract
+
+The EVK schematic walkthrough surfaced specific behaviours the
+CC3501E firmware MUST implement on its proxied pads.  These are
+contractual: the Alif-side `alp_gpio_*` calls expect these
+modes to "just work" through `ALP_CC3501E_CMD_GPIO_CONFIGURE` +
+`ALP_CC3501E_CMD_GPIO_WRITE` + `ALP_CC3501E_CMD_GPIO_SET_INTERRUPT`.
+
+### Open-drain output
+
+Required for M.2 E-key `W_DISABLE1` (CC3501E `GPIO_17` ↔ E1M
+`IO17`, Wi-Fi disable) and `W_DISABLE2` (CC3501E `GPIO_16` ↔
+E1M `IO16`, Bluetooth disable).  Per the M.2 spec these are
+open-drain active-low: write 0 to assert, write 1 (or
+Hi-Z / release) to deassert.  Firmware must:
+
+- Accept `ALP_CC3501E_GPIO_DIR_OPEN_DRAIN` in the configure
+  command's direction field.
+- On write 0, drive the pad LOW.
+- On write 1, release the pad to Hi-Z (do NOT drive it HIGH --
+  the M.2 card has its own pull-up to its rail).
+- On read, return the actual pad level (so the host can see
+  whether another open-drain source on the bus is asserting).
+
+### Edge-triggered interrupt forwarding
+
+Three event sources need rising / falling / either-edge
+interrupt forwarding back to Alif via the protocol's GPIO
+event packets:
+
+- **`M2E_UART_WAKE`** (CC3501E `GPIO_19` ↔ E1M `IO19`):
+  falling edge (M.2 module asserts to wake host).
+- **`M2E_SDIO_WAKE`** (CC3501E `GPIO_18` ↔ E1M `IO18`):
+  falling edge, same semantics.
+- **`BMI323_INT1`** (CC3501E `GPIO_14` ↔ E1M `IO15`):
+  configurable edge (BMI323 INT1 can be either polarity via
+  its `INT_CONF` register; the firmware just forwards whichever
+  edge the Alif-side requested).
+
+Latency budget: the wake signals should propagate to the Alif
+within 10 ms of edge.  BMI323 INT1 should propagate within 5 ms
+when the FIFO threshold is the interrupt source (so motion
+events don't sit in a queue).
+
+### Safe-default mux state
+
+On boot, before the Alif-side has connected over SPI1, the
+firmware should drive its proxied mux-control pins to states
+that ISOLATE all the downstream buses:
+
+- `SDIO_MUX_EN` (`GPIO_26`): HIGH (74LVC157 /E = 1 → Hi-Z).
+- `SDIO_MUX_SEL` (`GPIO_30`): don't-care while /E is high.
+- `I2S_MUX_SEL` (`GPIO_13`): don't-care (the /E pin is on the
+  Alif side and defaults to disable).
+- `USB2_MUX_SEL` (`GPIO_2`): default to 0 (USB-A connector
+  routed; M.2 E-key USB isolated).
+
+The Alif's bring-up code then sequences enables once it's ready.
+
 ## v0.x roadmap
 
 | Step                                             | Where it lands                          |
