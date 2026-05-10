@@ -203,48 +203,88 @@
       "functions": {},
       "macros": {
         "EVK_AEN_I2C_ADDR_BMI323": {
-          "hash": "adbd3e283e31a8fb",
-          "value": "0x68u"
+          "hash": "16c19ef26073a21e",
+          "value": "0x69u"
         },
         "EVK_AEN_I2C_ADDR_BMP581": {
           "hash": "d57f6fa1deeff70d",
           "value": "0x47u"
         },
         "EVK_AEN_I2C_ADDR_ICM42670": {
-          "hash": "c1866f51b79829e6",
-          "value": "0x2Cu"
+          "hash": "a5c66f49033c1f31",
+          "value": "0x69u"
         },
         "EVK_AEN_I2C_ADDR_TCAL9538": {
-          "hash": "c9fa61ae097446b7",
-          "value": "0x70u"
+          "hash": "7dfc06055ae03081",
+          "value": "0x72u"
+        },
+        "EVK_AEN_I2C_BUS_DSI_CSI": {
+          "hash": "caf43fc992892c0b",
+          "value": "ALP_E1M_I2C1"
         },
         "EVK_AEN_I2C_BUS_SENSORS": {
           "hash": "f7093f1473ba7a85",
           "value": "ALP_E1M_I2C0"
         },
+        "EVK_AEN_PIN_AMP_ENABLE": {
+          "hash": "851fffea93d6034a",
+          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 3u)"
+        },
+        "EVK_AEN_PIN_AMP_FAULT": {
+          "hash": "3047834b9042358a",
+          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 2u)"
+        },
         "EVK_AEN_PIN_CAM_MUX_SEL": {
-          "hash": "ccff115788b2e3c9",
-          "value": "ALP_E1M_GPIO_IO2"
+          "hash": "9c3a3a7d52a719b7",
+          "value": ""
+        },
+        "EVK_AEN_PIN_CAM_RST": {
+          "hash": "d7dee20e7ff9662f",
+          "value": ""
+        },
+        "EVK_AEN_PIN_CTP_INT": {
+          "hash": "084c948ab733ce9c",
+          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 4u)"
+        },
+        "EVK_AEN_PIN_CTP_RST": {
+          "hash": "d5541ae6d000af1e",
+          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 5u)"
         },
         "EVK_AEN_PIN_ENCODER_SW": {
-          "hash": "1bc79b9e5293d732",
-          "value": "ALP_E1M_GPIO_IO3"
+          "hash": "59ef4cdf6640a13e",
+          "value": ""
         },
         "EVK_AEN_PIN_IO_EXP_INT": {
-          "hash": "8272a9ec25cd75aa",
-          "value": "ALP_E1M_GPIO_IO4"
+          "hash": "7a2a949f2fa93fdb",
+          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 0u)"
         },
         "EVK_AEN_PIN_IO_EXP_RST": {
-          "hash": "13ddba44af3367cf",
-          "value": "ALP_E1M_GPIO_IO5"
+          "hash": "7c23ad7f03005e3c",
+          "value": "(EVK_AEN_PIN_OVERLAY_BASE + 1u)"
         },
-        "EVK_AEN_PIN_LED_GREEN": {
-          "hash": "4b3883bb43bedd41",
-          "value": "ALP_E1M_GPIO_IO1"
+        "EVK_AEN_PIN_OVERLAY_BASE": {
+          "hash": "63e19cb882bbe10b",
+          "value": "ALP_E1M_GPIO_COUNT"
         },
-        "EVK_AEN_PIN_LED_RED": {
-          "hash": "bb79eaf600140df8",
-          "value": "ALP_E1M_GPIO_IO0"
+        "EVK_AEN_PIN_SDIO_MUX_EN": {
+          "hash": "06b0b5e9af719787",
+          "value": ""
+        },
+        "EVK_AEN_PIN_SDIO_MUX_SEL": {
+          "hash": "36ff158aa03f8c38",
+          "value": ""
+        },
+        "EVK_AEN_PWM_LED_BLUE": {
+          "hash": "b780ed71b7c4b306",
+          "value": "ALP_E1M_PWM1"
+        },
+        "EVK_AEN_PWM_LED_GREEN": {
+          "hash": "3be20c155ab6fe98",
+          "value": ""
+        },
+        "EVK_AEN_PWM_LED_RED": {
+          "hash": "5da331150993dfc3",
+          "value": "ALP_E1M_PWM3"
         },
         "EVK_AEN_SPI_BUS_M2_KEYM": {
           "hash": "57e1a8d59b20101f",
@@ -259,6 +299,14 @@
         "evk_aen_cam_select_t": {
           "definition": "typedef enum { EVK_AEN_CAM_A = 0, EVK_AEN_CAM_B = 1, } evk_aen_cam_select_t;",
           "hash": "67283eec45118726"
+        },
+        "evk_aen_ioexp_pin_t": {
+          "definition": "typedef enum { EVK_AEN_IOEXP_LCD_PWR_EN = 0, EVK_AEN_IOEXP_LCD_RST = 1, EVK_AEN_IOEXP_CAM_EN = 2, EVK_AEN_IOEXP_CTP_RST = 3, EVK_AEN_IOEXP_ICM42670_INT1 = 4, EVK_AEN_IOEXP_ICM42670_INT2 = 5, EVK_AEN_IOEXP_ICM42670_FSYNC = 6, EVK_AEN_IOEXP_BMP581_INT1 = 7, } evk_aen_ioexp_pin_t;",
+          "hash": "51d5aeff5f5c27b2"
+        },
+        "evk_aen_sdio_select_t": {
+          "definition": "typedef enum { EVK_AEN_SDIO_M2E_KEY = 0, EVK_AEN_SDIO_SDCARD = 1, } evk_aen_sdio_select_t;",
+          "hash": "99cc62e0489170a2"
         }
       }
     },
@@ -1250,6 +1298,58 @@
         "fb_len": {
           "definition": "typedef struct { alp_spi_t *bus; alp_gpio_t *dc; uint8_t *fb; size_t fb_len;",
           "hash": "68009f16bb56d1b9"
+        }
+      }
+    },
+    "alp/chips/tcal9538.h": {
+      "functions": {
+        "tcal9538_deinit": {
+          "hash": "87036349ea25eaa7",
+          "signature": "void tcal9538_deinit(tcal9538_t *ctx);"
+        },
+        "tcal9538_get": {
+          "hash": "6ca6bc37d3b5fb6e",
+          "signature": "alp_status_t tcal9538_get(tcal9538_t *ctx, uint8_t pin, bool *level_out);"
+        },
+        "tcal9538_init": {
+          "hash": "e9e0fb5e12998f2b",
+          "signature": "alp_status_t tcal9538_init(tcal9538_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);"
+        },
+        "tcal9538_read_all": {
+          "hash": "19019b6bf04486df",
+          "signature": "alp_status_t tcal9538_read_all(tcal9538_t *ctx, uint8_t *port_out);"
+        },
+        "tcal9538_set": {
+          "hash": "8406b1c278a928d1",
+          "signature": "alp_status_t tcal9538_set(tcal9538_t *ctx, uint8_t pin, bool level);"
+        },
+        "tcal9538_set_direction": {
+          "hash": "601d041e0db93370",
+          "signature": "alp_status_t tcal9538_set_direction(tcal9538_t *ctx, uint8_t pin, tcal9538_direction_t dir);"
+        },
+        "tcal9538_set_directions": {
+          "hash": "5bb8ed02d8bbbeb3",
+          "signature": "alp_status_t tcal9538_set_directions(tcal9538_t *ctx, uint8_t mask, uint8_t value);"
+        },
+        "tcal9538_write_all": {
+          "hash": "f29c77f487f65612",
+          "signature": "alp_status_t tcal9538_write_all(tcal9538_t *ctx, uint8_t port);"
+        }
+      },
+      "macros": {
+        "TCAL9538_I2C_ADDR_BASE": {
+          "hash": "cd4562ddb3e3ff28",
+          "value": "0x70u"
+        }
+      },
+      "typedefs": {
+        "initialised": {
+          "definition": "typedef struct { bool initialised;",
+          "hash": "98b22257593e61d9"
+        },
+        "tcal9538_direction_t": {
+          "definition": "typedef enum { TCAL9538_DIR_OUTPUT = 0, TCAL9538_DIR_INPUT = 1, } tcal9538_direction_t;",
+          "hash": "8afc0894ea2cf926"
         }
       }
     },

@@ -473,6 +473,60 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **EVK wiring batch: I2C1 = DSI/CSI control, IO5 = CAM_RST,
+  PWM-driven RGB LED, repurposed SPI0 + I2S1 + AUDIO_CLK pads,
+  TCAL9538 I/O expander, SDIO mux, touch-screen control** --
+  large user-supplied EVK schematic update lands in
+  `<alp/boards/alp_e1m_evk_aen.h>` + `chips/tcal9538/`:
+  - I2C0 stays the sensor / IO-expander / current-monitor bus;
+    new `EVK_AEN_I2C_BUS_DSI_CSI = ALP_E1M_I2C1` is the
+    display-and-camera-control bus per the EVK's `DSI_CSI_I2C` net.
+  - `IO5` is `CAM_RST` (the camera reset line), correcting an
+    earlier placeholder that had `IO5 = IO_EXP_RST`.
+  - RGB LED now drives via PWM rather than GPIO:
+    `EVK_AEN_PWM_LED_RED = ALP_E1M_PWM3`,
+    `_GREEN = ALP_E1M_PWM2` (TBD-confirm; user stated PWM3=R + PWM1=B
+    but didn't name the green PWM, PWM2 is inferred), and
+    `_BLUE = ALP_E1M_PWM1`.
+  - Off-GPIO_IO repurposed pads (`AUDIO_CLK`, `SPI0_MISO`,
+    `SPI0_CS0`, `SPI0_CS1`, `I2S1_SDI`, `SPI1_CS0`) are exposed
+    via `EVK_AEN_PIN_OVERLAY_BASE + N` indices that the carrier
+    `alp,pin-array` overlay extends past the standard 42-entry
+    range.  Names: `EVK_AEN_PIN_IO_EXP_INT` (AUDIO_CLK),
+    `_IO_EXP_RST` (SPI0_CS1), `_AMP_FAULT` (SPI0_MISO),
+    `_AMP_ENABLE` (SPI0_CS0), `_CTP_INT` (I2S1_SDI),
+    `_CTP_RST` (SPI1_CS0, routed through CC3501E).
+  - SDIO mux for SD-card vs M.2 E-key: 74LVC157 controlled by
+    `EVK_AEN_PIN_SDIO_MUX_EN = ALP_E1M_GPIO_IO20` (active-low
+    enable) and `EVK_AEN_PIN_SDIO_MUX_SEL = ALP_E1M_GPIO_IO21`
+    (0 = M.2 E SDIO, 1 = SD card).  Both pins route through the
+    on-module CC3501E (per from-cc3501e.tsv), so firmware drives
+    the mux via `ALP_CC3501E_CMD_GPIO_WRITE` on the inter-chip
+    SPI1, NOT through Alif's GPIO peripheral.  Noted in the
+    header.
+  - On-board sensor I2C addresses corrected per user-supplied
+    strap values: ICM-42670-P AD0=high -> 0x69 (was 0x2C
+    placeholder), BMI323 SDO=high -> 0x69 (was 0x68 placeholder),
+    BMP581 SDO=high -> 0x47, TCAL9538 A1=1/A0=0 -> 0x72 (was 0x70).
+    **Address collision warning**: ICM-42670-P and BMI323 both
+    compute to 0x69 with the documented straps -- header carries
+    a TODO comment asking the user to confirm whether only one
+    IMU is populated at a time or whether the schematic strap is
+    actually different.
+  - **TCAL9538 I/O expander pin map** (8 channels of LCD / camera /
+    capacitive-touch control + sensor interrupts) materialised as
+    a typed enum `evk_aen_ioexp_pin_t` so apps don't pass raw
+    indices.  Note: P3 was earlier listed as `CTP_RST` but the
+    user has since separately said `CTP_RST = SPI1_CS0`; both
+    routes are preserved in the header with a TBD-confirm note
+    flagging the conflict.
+  - New `chips/tcal9538/` driver -- TI TCA9538 / TCAL9538
+    8-channel I/O expander.  Per-pin and bulk
+    direction / write / read APIs with cached register state
+    (avoids read-modify-write round-trips on every set call).
+    `CONFIG_ALP_SDK_CHIP_TCAL9538` opt-in.
+  ABI snapshot now 43 public headers; SDK chip count climbs to
+  **18**.
 - **EVK MIPI CSI camera-mux helper + IO2 wiring correction** --
   the EVK routes a single MIPI CSI lane pair from the SoM through
   a **PI3WVR626XEBEX** 2:1 mux (camera A vs camera B); its
