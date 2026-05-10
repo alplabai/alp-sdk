@@ -352,8 +352,8 @@ alp_status_t alp_aead_decrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, c
     memcpy(scratch + cipher_len, tag, tag_len);
 
     size_t       produced = 0;
-    psa_status_t st = psa_aead_decrypt(a->key_id, psa_alg, iv, iv_len, aad, aad_len, scratch,
-                                       cipher_len + tag_len, plain_out, cipher_len, &produced);
+    psa_status_t st       = psa_aead_decrypt(a->key_id, psa_alg, iv, iv_len, aad, aad_len, scratch,
+                                             cipher_len + tag_len, plain_out, cipher_len, &produced);
     return psa_to_alp(st);
 #else
     (void)iv;

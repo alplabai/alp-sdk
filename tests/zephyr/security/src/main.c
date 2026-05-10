@@ -23,7 +23,7 @@ ZTEST(alp_security, test_hash_open_no_backend_returns_null)
 
 ZTEST(alp_security, test_hash_lifecycle_null_handle_safe)
 {
-    uint8_t buf[32];
+    uint8_t buf[32] = {0};
     zassert_equal(alp_hash_update(NULL, buf, 4), ALP_ERR_NOT_READY);
     zassert_equal(alp_hash_finish(NULL, buf, sizeof(buf), NULL), ALP_ERR_NOT_READY);
     alp_hash_close(NULL);
@@ -46,9 +46,9 @@ ZTEST(alp_security, test_aead_open_no_backend_returns_null)
 
 ZTEST(alp_security, test_aead_lifecycle_null_handle_safe)
 {
-    uint8_t iv[12] = {0};
-    uint8_t out[16];
-    uint8_t tag[16];
+    uint8_t iv[12]  = {0};
+    uint8_t out[16] = {0};
+    uint8_t tag[16] = {0};
     zassert_equal(alp_aead_encrypt(NULL, iv, sizeof(iv), NULL, 0, NULL, 0, out, tag, sizeof(tag)),
                   ALP_ERR_NOT_READY);
     zassert_equal(alp_aead_decrypt(NULL, iv, sizeof(iv), NULL, 0, NULL, 0, tag, sizeof(tag), out),
@@ -58,7 +58,7 @@ ZTEST(alp_security, test_aead_lifecycle_null_handle_safe)
 
 ZTEST(alp_security, test_random_bytes_no_backend_errors)
 {
-    uint8_t buf[16];
+    uint8_t buf[16] = {0};
     zassert_equal(alp_random_bytes(buf, sizeof(buf)), ALP_ERR_NOSUPPORT);
 }
 
