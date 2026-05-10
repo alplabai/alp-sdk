@@ -43,6 +43,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The ABI freeze gate below needs tags + the v0.1 commit
+          # reachable so `git show v0.1:docs/abi/v0.1-snapshot.json`
+          # works.  Default fetch-depth=1 strips tags.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -72,5 +78,36 @@ jobs:
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/abi_snapshot.py --version v0.1 --output docs/abi/v0.1-snapshot.json"
             echo "::error::and commit the result."
+            exit 1
+          fi
+
+      # ABI freeze gate -- compares the PR's current ABI against the
+      # snapshot stored on the tagged v0.1 release.  Once v0.1 ships
+      # the snapshot is *frozen* -- additions land in
+      # docs/abi/v0.<N>-snapshot.json, removals require a major bump
+      # (per the deprecation policy in VERSIONS.md).  Until the v0.1
+      # tag exists the step is a no-op (we're still pre-v0.1 today).
+      #
+      # scripts/abi_snapshot.py --diff exits 1 only on REMOVED or
+      # CHANGED symbols.  ADDED symbols pass (we accept additive
+      # extensions silently within a major version).
+      - name: ABI freeze gate vs tagged v0.1
+        run: |
+          # Need the full repo + tags for `git show v0.1:...` to work.
+          # actions/checkout@v4 already fetched tags so this is cheap.
+          if ! git rev-parse --verify --quiet refs/tags/v0.1 >/dev/null; then
+            echo "::notice::No v0.1 tag yet -- ABI freeze gate is a no-op until v0.1 ships."
+            exit 0
+          fi
+          mkdir -p .abi-baseline
+          git show v0.1:docs/abi/v0.1-snapshot.json \
+              > .abi-baseline/v0.1-snapshot.json
+          if ! python3 scripts/abi_snapshot.py \
+                  --version v0.1 \
+                  --diff .abi-baseline/v0.1-snapshot.json; then
+            echo "::error::Public ABI changed vs the frozen v0.1 baseline."
+            echo "::error::Removals + signature changes require a major bump after v1.0."
+            echo "::error::Pre-1.0 lands the breaking change with a CHANGELOG entry + "
+            echo "::error::a new snapshot at docs/abi/v0.<N>-snapshot.json."
             exit 1
           fi

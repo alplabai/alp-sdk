@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Coverity Scan workflow -- v1.0 hardening prep (task #15).
+#
+# Why a separate workflow?  Coverity Scan is rate-limited per project
+# (one submission every ~24 h) and the analysis itself takes ~20 min,
+# so it doesn't fit the per-PR CI envelope.  This job runs on a
+# weekly cron + on-demand via workflow_dispatch, and never blocks PR
+# merges -- it just publishes findings to the Coverity dashboard.
+#
+# OFF by default.  The job's first step checks for the COVERITY_TOKEN
+# secret; if it's missing (the typical case on forks and on the
+# upstream repo until the project owner uploads the token), the job
+# logs a notice and exits 0.  See:
+#
+#   https://scan.coverity.com/projects/alplabai-alp-sdk
+#
+# for the project page once it's registered.  Two secrets are needed:
+#
+#   COVERITY_TOKEN -- the project token (Settings -> Project Token).
+#   COVERITY_EMAIL -- the account email Coverity sends results to.
+#
+# Both live in the repo settings (Settings -> Secrets and variables
+# -> Actions).  Until the project owner provisions them this job is
+# a no-op anchor.
+
+name: coverity
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'   # 06:17 UTC every Monday -- off-peak.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: scan · coverity build + submit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check for Coverity token
+        id: token_check
+        run: |
+          if [ -z "${{ secrets.COVERITY_TOKEN }}" ]; then
+            echo "::notice::COVERITY_TOKEN secret is not configured. Skipping scan."
+            echo "::notice::Provision the secret at Settings -> Secrets and variables -> Actions."
+            echo "configured=false" >> $GITHUB_OUTPUT
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout
+        if: steps.token_check.outputs.configured == 'true'
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        if: steps.token_check.outputs.configured == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              build-essential cmake python3 wget
+
+      - name: Download Coverity Build Tool
+        if: steps.token_check.outputs.configured == 'true'
+        run: |
+          wget -q -O cov-analysis.tar.gz \
+              "https://scan.coverity.com/download/cxx/linux64?token=${{ secrets.COVERITY_TOKEN }}&project=alplabai%2Falp-sdk"
+          mkdir -p cov-analysis
+          tar -xzf cov-analysis.tar.gz -C cov-analysis --strip-components=1
+          echo "$PWD/cov-analysis/bin" >> $GITHUB_PATH
+
+      - name: Configure SDK (plain-CMake, baremetal stub)
+        if: steps.token_check.outputs.configured == 'true'
+        run: |
+          cmake -B build -S . -DALP_OS=baremetal
+
+      - name: Capture build with Coverity
+        if: steps.token_check.outputs.configured == 'true'
+        run: |
+          cov-build --dir cov-int cmake --build build --parallel
+
+      - name: Tar results
+        if: steps.token_check.outputs.configured == 'true'
+        run: tar czf alp-sdk-cov.tgz cov-int
+
+      - name: Submit to Coverity Scan
+        if: steps.token_check.outputs.configured == 'true'
+        run: |
+          curl --silent --show-error --fail \
+              --form token=${{ secrets.COVERITY_TOKEN }} \
+              --form email=${{ secrets.COVERITY_EMAIL }} \
+              --form file=@alp-sdk-cov.tgz \
+              --form version=${{ github.sha }} \
+              --form description="alp-sdk scheduled scan ${{ github.run_id }}" \
+              "https://scan.coverity.com/builds?project=alplabai%2Falp-sdk"
