@@ -79,7 +79,7 @@ west flash
 | `<alp/chips/lsm6dso.h>`                    | full            | Tilt-aware viewport (v0.2).           |
 | `<alp/chips/button_led.h>`                 | full            | Capture trigger / inference toggle.   |
 | `<alp/camera.h>`                           | header (stub)   | Frame capture — v0.2 wraps Zephyr `video_*`. |
-| `<alp/math.h>` / `<alp/signal.h>`          | re-export       | Pre/post-processing (normalisation).  |
+| `arm_math.h` (CMSIS-DSP, direct include)   | external        | Pre/post-processing (normalisation).  Use CMSIS-DSP directly -- ALP does not re-export it. |
 | `<alp/gui.h>` (LVGL)                       | re-export       | Optional richer overlay in v0.3.      |
 
 ## Why this lives in alp-sdk

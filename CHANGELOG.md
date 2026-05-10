@@ -7,11 +7,22 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.1.0 candidate
 
+### Removed (pre-1.0)
+
+- `<alp/math.h>` and `<alp/signal.h>` deleted.  They were thin
+  re-exports of CMSIS-DSP that added zero value over a direct
+  `#include "arm_math.h"`.  Application code now includes
+  CMSIS-DSP directly; ALP SDK internals (e.g. inside
+  `<alp/audio.h>`) may still pull CMSIS-DSP in via the
+  build-time `ALP_HAS_CMSIS_DSP` option.  Documented stance
+  in `docs/architecture.md` + `VERSIONS.md` +
+  `docs/os-support-matrix.md`.
+
 ### Added
 
 - Public headers under `include/alp/` for the v0.1 surface:
-  `peripheral.h`, `display.h`, `camera.h`, `gui.h`, `math.h`,
-  `signal.h`, `iot.h`.  C99-compatible, Doxygen-commented.
+  `peripheral.h`, `display.h`, `camera.h`, `gui.h`, `iot.h`.
+  C99-compatible, Doxygen-commented.
 - Zephyr backend implementations for `alp_i2c_*`, `alp_spi_*`,
   `alp_gpio_*`, `alp_uart_*` under `src/zephyr/`, with a custom
   `alp,pin-array` devicetree binding for studio-resolved pin lookup.

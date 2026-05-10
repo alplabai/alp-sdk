@@ -58,9 +58,8 @@ versions cleanly.
 | Peripherals | full      | `alp_i2c_*`, `alp_spi_*`, `alp_gpio_*`, `alp_uart_*` (Zephyr backend, AEN) |
 | Chips       | full      | `lsm6dso_*`, `ssd1306_*`, `button_led_*` (no `alp_` prefix on chip drivers) |
 | Display     | minimal   | `alp_display_init/clear/print` routes through Zephyr `display_*`         |
-| Math        | re-export | `<alp/math.h>` re-exports CMSIS-DSP                                      |
+| Math / DSP  | _(removed)_ | App code includes `arm_math.h` directly; ALP does not re-export CMSIS-DSP. SDK internals may use it via `ALP_HAS_CMSIS_DSP`. |
 | Camera      | header    | `<alp/camera.h>` API frozen; impl returns `ALP_ERR_NOSUPPORT`            |
-| Signal      | header    | `<alp/signal.h>` re-exports CMSIS-DSP filters                            |
 | GUI/LVGL    | header    | `<alp/gui.h>` includes upstream LVGL with ALP defaults; no widgets       |
 | IoT         | header    | `<alp/iot.h>` API frozen; impl stubbed                                   |
 | Audio       | —         | not in v0.1                                                              |

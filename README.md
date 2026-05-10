@@ -159,8 +159,6 @@ All consumer-facing headers live under `include/alp/`:
 | `alp/display.h`      | Display         | Surface declared (SSD1306 first)      |
 | `alp/camera.h`       | Camera          | Stub — v0.2 ships MIPI CSI-2          |
 | `alp/gui.h`          | GUI / LVGL      | LVGL re-export                        |
-| `alp/math.h`         | Math            | CMSIS-DSP re-export                   |
-| `alp/signal.h`       | Signal          | Forward marker — v0.2 audio           |
 | `alp/iot.h`          | IoT             | Stub; real Wi-Fi+MQTT in v0.2         |
 | `alp/audio.h`        | Audio (PDM in / I²S out) | Surface declared, impl v0.2  |
 | `alp/ble.h`          | BLE peripheral + central | Surface declared, impl v0.3  |

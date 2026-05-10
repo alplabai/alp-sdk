@@ -590,8 +590,6 @@ ZTEST(alp_chips, test_bmp581_post_init_calls_reject_uninitialised)
 #include "alp/display.h"
 #include "alp/camera.h"
 #include "alp/gui.h"
-#include "alp/math.h"
-#include "alp/signal.h"
 #include "alp/iot.h"
 #include "alp/audio.h"
 #include "alp/ble.h"

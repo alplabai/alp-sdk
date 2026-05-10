@@ -156,7 +156,7 @@ static int stage_inference_loop(void)
      *       alp_camera_frame_t frame;
      *       alp_camera_capture(g_camera, &frame, 100);
      *
-     *       // Pre-processing (normalise + crop) via <alp/math.h>
+     *       // Pre-processing (normalise + crop) via CMSIS-DSP (`arm_math.h`)
      *       preprocess_to_tensor(frame.data, &input_tensor);
      *       alp_camera_release(g_camera, &frame);
      *

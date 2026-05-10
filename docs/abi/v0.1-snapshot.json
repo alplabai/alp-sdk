@@ -2516,11 +2516,6 @@
         }
       }
     },
-    "alp/math.h": {
-      "functions": {},
-      "macros": {},
-      "typedefs": {}
-    },
     "alp/mproc.h": {
       "functions": {
         "alp_hwsem_close": {
@@ -2890,11 +2885,6 @@
           "hash": "945069cdbb4e6f59"
         }
       }
-    },
-    "alp/signal.h": {
-      "functions": {},
-      "macros": {},
-      "typedefs": {}
     },
     "alp/soc_caps.h": {
       "functions": {},

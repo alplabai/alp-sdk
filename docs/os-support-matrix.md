@@ -50,7 +50,6 @@ plan in `VERSIONS.md`.
 | **Audio** (`<alp/audio.h>`) | n/a                | surface declared (impl v0.2) | planned | planned         |
 | **Camera** (`<alp/camera.h>`) | n/a              | planned          | **GA** (MIPI CSI-2) | **GA**             |
 | **IoT** (`<alp/iot.h>`)   | n/a                  | **GA** (Wi-Fi+MQTT) | **GA**         | **GA**               |
-| **Signal** (`<alp/signal.h>`) | **GA** (audio)   | **GA**           | **GA**            | **GA**               |
 
 ### Cross-cutting v0.2 capability infrastructure
 
@@ -72,8 +71,12 @@ plan in `VERSIONS.md`.
 
 ## CMSIS-DSP per-SoM validation
 
-`alp/math.h` re-exports CMSIS-DSP unchanged; the validated **feature
-groups** depend on each SoC's instruction set extensions:
+ALP SDK does not re-export CMSIS-DSP -- application code includes
+`arm_math.h` directly when DSP/math primitives are needed.  ALP's
+own internals (e.g. filtering inside `<alp/audio.h>` ) optionally
+pull in CMSIS-DSP when the build sets `ALP_HAS_CMSIS_DSP`.  Either
+way the validated **feature groups** depend on each SoC's
+instruction set extensions:
 
 | Family         | Core(s)                  | DSP-ext | Helium (MVE) | Validated CMSIS-DSP groups (v0.1)               |
 |----------------|--------------------------|---------|--------------|-------------------------------------------------|

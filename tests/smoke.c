@@ -13,8 +13,6 @@
 #include "alp/display.h"
 #include "alp/camera.h"
 #include "alp/gui.h"
-#include "alp/math.h"
-#include "alp/signal.h"
 #include "alp/iot.h"
 
 int main(void) {

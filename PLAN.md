@@ -123,8 +123,8 @@ it, and trusts CMSIS-Core for atomics / barriers / cache ops.
 
 | Deliverable                                       | Status      |
 |---------------------------------------------------|-------------|
-| `<alp/math.h>` re-exports CMSIS-DSP               | ✅ shipped (re-export header + Kconfig toggle) |
-| `<alp/signal.h>` forward marker for filter wrappers | ✅ shipped (header) |
+| Direct CMSIS-DSP usage from app code (no ALP wrapper) | ✅ doc-stance — `<alp/math.h>` / `<alp/signal.h>` removed; users `#include "arm_math.h"` directly. |
+| ALP-internal CMSIS-DSP option (`ALP_HAS_CMSIS_DSP`) | ✅ shipped — SDK internals (audio etc.) opt in. |
 | Per-SoC validated CMSIS-DSP feature groups         | ✅ shipped — see `docs/os-support-matrix.md` |
 | CMSIS-Driver alignment for plain-CMake bare-metal | 🔮 v0.2 |
 
