@@ -398,6 +398,42 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   closed are kept on the list with strikethrough plus a "closed"
   reference to the matching ADR or implementation, so the audit
   trail of what was promised vs. what shipped stays explicit.
+- **Per-peripheral example apps** — nine standalone hand-written
+  reference apps under `examples/<peripheral>-<demo>/`, one per
+  wrapped peripheral class.  Each is a minimal Zephyr app that
+  shows the canonical open / call / close pattern + reads
+  `alp_last_error()` on failure.  Twister gates on
+  `[<class>] done` console output.  Examples shipped:
+  `gpio-button-led`, `i2c-scanner`, `spi-loopback`, `uart-echo`,
+  `pwm-led-fade`, `adc-voltmeter` (incl. capability-validation
+  rejection demo), `counter-alarm`, `rtc-clock`, `wdt-feed`,
+  `can-loopback`.  ADR 0001's "standalone usage is first-class"
+  principle made tangible.
+- **Standalone usage callouts** — README's "Two consumer paths"
+  section explicitly lists hand-written firmware as first-class
+  alongside studio-codegen apps.  ADR 0001 expanded with the
+  reasoning.  Saved as a persistent project memory so future
+  sessions don't accidentally treat hand-written usage as a
+  workaround.
+- **VS Code support** — README "Using with VS Code" section,
+  fresh `.vscode/{extensions,settings,tasks,c_cpp_properties}.json`
+  config aligned with the current Zephyr-module + plain-CMake
+  layout.  Tasks for `validate metadata`, `regen soc_caps`,
+  `regen ABI snapshot`, twister, and `west build` for each
+  example.  Extension recommendations are vendor-neutral —
+  no Nordic-branded tooling (the SDK targets Alif / Renesas /
+  NXP, not Nordic).
+- **GitHub org migration** — repo references updated from
+  `alpCaner/*` to `alplabai/*` (alp-sdk, e1m-spec,
+  alp-zephyr-modules, alp-studio).  27 files / 56 substitutions.
+- **CI infrastructure fixes** — bumped
+  `ZEPHYR_SDK_INSTALL_DIR` to 0.17.0 to match the
+  `ci:v0.27.4` Docker image; switched `--testsuite-root` paths
+  from `${{ github.workspace }}` (host path) to
+  `$GITHUB_WORKSPACE` (container path); fixed a `/**` sequence
+  in the generated `soc_caps.h` comment that triggered
+  `-Werror=comment`.  Twister CI was failing on the same three
+  seams since the workflow was authored.
 
 ### Notes
 
