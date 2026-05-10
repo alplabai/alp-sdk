@@ -25,6 +25,11 @@ so you can adapt it to your own project.
 
 ## 1. Prerequisites
 
+The SDK is supported equally on **macOS**, **Windows**, and
+**Linux** -- pick whichever you already have.  Tooling versions
+are identical across hosts; the only platform-specific bit is how
+you install them.
+
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|
 | Zephyr      | v3.7.0           | Pinned by `west.yml`; v0.1 SDK matrix (see VERSIONS.md). |
@@ -33,10 +38,36 @@ so you can adapt it to your own project.
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |
 | west        | 1.2+             | `pip install west` if your distro doesn't ship it.       |
 
+Per-platform install one-liners:
+
+```bash
+# macOS (Homebrew)
+brew install cmake ninja python git
+pip3 install west
+
+# Linux (Debian / Ubuntu)
+sudo apt install -y cmake ninja-build python3 python3-pip git
+pip3 install west
+
+# Windows -- PowerShell + Python from Microsoft Store
+winget install -e --id Kitware.CMake
+winget install -e --id Ninja-build.Ninja
+winget install -e --id Python.Python.3.12
+pip install west
+
+# Windows -- WSL2 path (use the Linux instructions inside Ubuntu)
+wsl --install -d Ubuntu
+```
+
 For real-silicon builds you'll also need the Zephyr SDK
 (`zephyr-sdk-0.17.0` is the v0.1 SDK matrix's pin) and a JTAG /
 SWD probe matching your board.  See
 [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) for the EVK's wiring.
+
+> **Note for Windows users.**  The repo's `.gitattributes` pins
+> LF on every source file -- a fresh clone gets identical bytes
+> on PowerShell, WSL, and macOS / Linux, so clang-format-diff CI
+> doesn't trip on a Windows checkout.
 
 ## 2. Two consumer paths
 
@@ -94,7 +125,9 @@ What the flags mean:
 
 - `-b native_sim/native/64` — Zephyr's POSIX simulator on a 64-bit
   host.  No silicon needed; runs as a native process on Linux /
-  macOS / WSL.
+  macOS / WSL.  (Native Windows: use `west build -b native_sim/native/32`
+  with the MSVC-compatible toolchain, or run the 64-bit variant
+  through WSL.)
 - `examples/gpio-button-led` — the application directory.  Each
   example under `examples/` is self-contained (CMakeLists,
   prj.conf, board overlay, src/main.c).

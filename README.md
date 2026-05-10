@@ -31,6 +31,36 @@ The standalone path is **not** a studio escape hatch — it's a
 first-class consumer.  Anything the studio can emit, a developer
 should be able to write by hand.
 
+## Cross-platform development
+
+The SDK is a first-class developer experience on **macOS**,
+**Windows**, and **Linux**.  No platform-specific lock-in: the
+toolchain (Zephyr / west / CMake / Python / GCC) ships for all
+three, the public headers compile under every standard C99
+toolchain, and CI artefacts are reproducible across hosts.
+
+| Platform               | Status      | Setup notes                                              |
+|------------------------|-------------|----------------------------------------------------------|
+| **Linux** (Ubuntu/Fedora/Arch) | first-class | Zephyr's preferred host.  Native_sim runs at full speed. |
+| **macOS** (Apple Silicon / Intel) | first-class | Native build; native_sim works.  Use `brew` for prerequisites. |
+| **Windows 11 / 10**    | first-class — two paths | (a) **Native PowerShell** with Zephyr SDK + Python (Microsoft Store); (b) **WSL2 + Ubuntu** for Linux-identical workflows. |
+
+Path detail for Windows users:
+
+- *Native PowerShell* is the recommended path for hand-written
+  firmware development.  Zephyr's installer + Python venv work
+  out of the box; the repo's `.vscode/tasks.json` uses
+  platform-neutral `${command:cmake.buildDirectory}` paths so
+  the build / debug experience is identical to macOS / Linux.
+- *WSL2 (Ubuntu)* is the recommended path when you need full
+  Linux toolchain behaviour for HIL automation, Yocto recipes,
+  or exact CI parity.
+
+Line endings are pinned to **LF** by `.gitattributes` so a
+Windows checkout, a macOS clone, and a Linux pull see and commit
+identical bytes -- avoids spurious clang-format-diff failures
+when crossing hosts.
+
 ## Using with VS Code
 
 The repo ships a `.vscode/` config that gets the standard Zephyr +

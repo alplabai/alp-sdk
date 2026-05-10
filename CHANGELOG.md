@@ -473,6 +473,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **Cross-platform development support made explicit** -- README
+  gains a "Cross-platform development" table calling out
+  first-class macOS / Windows / Linux support; `docs/getting-started.md`
+  prerequisite section adds per-OS install one-liners (Homebrew,
+  apt, winget, WSL).  No code changes -- the toolchain (Zephyr +
+  west + CMake + Python + GCC) was already cross-platform; the
+  documentation just admits it now.  New `.gitattributes` pins
+  LF endings on every source file so a Windows checkout, a macOS
+  clone, and a Linux pull see and commit identical bytes --
+  avoids clang-format-diff CI failures when a developer crosses
+  hosts.
 - **[ADR 0005](docs/adr/0005-alp-sdk-vs-alp-studio-boundary.md)** —
   alp-sdk vs alp-studio repo boundary.  Codifies the dual-use
   acid test ("would a hand-written-firmware author ever directly
