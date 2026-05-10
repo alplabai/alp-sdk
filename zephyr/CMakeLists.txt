@@ -67,6 +67,12 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_OV5640
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ov5640/ov5640.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PDM_MIC
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/pdm_mic/pdm_mic.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ICM42670
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/icm42670/icm42670.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_BMI323
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/bmi323/bmi323.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_BMP581
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/bmp581/bmp581.c)
 
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include)
 zephyr_library_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr)

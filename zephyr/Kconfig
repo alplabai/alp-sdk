@@ -271,6 +271,34 @@ config ALP_SDK_CHIP_PDM_MIC
 	  alongside <alp/audio.h>.  Used by the alp-studio block
 	  blk_pdm_mic.
 
+config ALP_SDK_CHIP_ICM42670
+	bool "TDK InvenSense ICM-42670-P 6-axis IMU driver"
+	depends on I2C
+	help
+	  Compile chips/icm42670/icm42670.c.  Provides icm42670_init,
+	  icm42670_set_accel/gyro, icm42670_read_accel/gyro/temp.
+	  Used by the alp-studio block blk_imu_icm42670 and one of
+	  the on-board IMUs on the E1M EVK.
+
+config ALP_SDK_CHIP_BMI323
+	bool "Bosch BMI323 6-axis IMU driver"
+	depends on I2C
+	help
+	  Compile chips/bmi323/bmi323.c.  Provides bmi323_init,
+	  bmi323_set_accel/gyro, bmi323_read_accel/gyro/temp.
+	  Used by the alp-studio block blk_imu_bmi323 and the
+	  second on-board IMU on the E1M EVK.
+
+config ALP_SDK_CHIP_BMP581
+	bool "Bosch BMP581 barometric pressure sensor"
+	depends on I2C
+	help
+	  Compile chips/bmp581/bmp581.c.  Provides bmp581_init,
+	  bmp581_set_sampling, bmp581_read_raw + bmp581_compensate
+	  for the BMP581's already-compensated 24-bit P + T outputs.
+	  Used by the alp-studio block blk_baro_bmp581 and the
+	  on-board barometer on the E1M EVK.
+
 endmenu # "ALP SDK chip drivers"
 
 endif # ALP_SDK

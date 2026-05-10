@@ -436,6 +436,150 @@
         }
       }
     },
+    "alp/chips/bmi323.h": {
+      "functions": {
+        "bmi323_deinit": {
+          "hash": "f847424a6ccc6523",
+          "signature": "void bmi323_deinit(bmi323_t *dev);"
+        },
+        "bmi323_init": {
+          "hash": "2e2a80b31f9ca39b",
+          "signature": "alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);"
+        },
+        "bmi323_read_accel": {
+          "hash": "bb5b218ba464c61d",
+          "signature": "alp_status_t bmi323_read_accel(bmi323_t *dev, bmi323_axes_t *out);"
+        },
+        "bmi323_read_gyro": {
+          "hash": "032439d07620a111",
+          "signature": "alp_status_t bmi323_read_gyro(bmi323_t *dev, bmi323_axes_t *out);"
+        },
+        "bmi323_read_id": {
+          "hash": "92674cb5597b0245",
+          "signature": "alp_status_t bmi323_read_id(bmi323_t *dev, uint8_t *id_out);"
+        },
+        "bmi323_read_temp": {
+          "hash": "a22c9c7ec2a0e184",
+          "signature": "alp_status_t bmi323_read_temp(bmi323_t *dev, int16_t *temp_raw);"
+        },
+        "bmi323_set_accel": {
+          "hash": "680dedb877dff022",
+          "signature": "alp_status_t bmi323_set_accel(bmi323_t *dev, bmi323_odr_t odr, bmi323_accel_fs_t fs);"
+        },
+        "bmi323_set_gyro": {
+          "hash": "4f306713dabbe8f7",
+          "signature": "alp_status_t bmi323_set_gyro(bmi323_t *dev, bmi323_odr_t odr, bmi323_gyro_fs_t fs);"
+        }
+      },
+      "macros": {
+        "BMI323_CHIP_ID": {
+          "hash": "2d01188931a9b15f",
+          "value": "0x43"
+        },
+        "BMI323_I2C_ADDR_HIGH": {
+          "hash": "2cabafeecec4bb89",
+          "value": "0x69"
+        },
+        "BMI323_I2C_ADDR_LOW": {
+          "hash": "58456cde2d655c6f",
+          "value": "0x68"
+        }
+      },
+      "typedefs": {
+        "addr": {
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
+          "hash": "4e6cc227fae8a2d7"
+        },
+        "bmi323_accel_fs_t": {
+          "definition": "typedef enum { BMI323_ACCEL_FS_2G = 0x0, BMI323_ACCEL_FS_4G = 0x1, BMI323_ACCEL_FS_8G = 0x2, BMI323_ACCEL_FS_16G = 0x3 } bmi323_accel_fs_t;",
+          "hash": "4eefe74e30d7d7c8"
+        },
+        "bmi323_gyro_fs_t": {
+          "definition": "typedef enum { BMI323_GYRO_FS_125_DPS = 0x0, BMI323_GYRO_FS_250_DPS = 0x1, BMI323_GYRO_FS_500_DPS = 0x2, BMI323_GYRO_FS_1000_DPS = 0x3, BMI323_GYRO_FS_2000_DPS = 0x4 } bmi323_gyro_fs_t;",
+          "hash": "b8415dc8294230af"
+        },
+        "bmi323_odr_t": {
+          "definition": "typedef enum { BMI323_ODR_0_78125_HZ = 0x1, BMI323_ODR_1_5625_HZ = 0x2, BMI323_ODR_3_125_HZ = 0x3, BMI323_ODR_6_25_HZ = 0x4, BMI323_ODR_12_5_HZ = 0x5, BMI323_ODR_25_HZ = 0x6, BMI323_ODR_50_HZ = 0x7, BMI323_ODR_100_HZ = 0x8, BMI323_ODR_200_HZ = 0x9, BMI323_ODR_400_HZ = 0xA, BMI323_ODR_800_HZ = 0xB, BMI323_ODR_1600_HZ = 0xC, BMI323_ODR_3200_HZ = 0xD, BMI323_ODR_6400_HZ = 0xE } bmi323_odr_t;",
+          "hash": "67b5f08d1ee07546"
+        },
+        "x": {
+          "definition": "typedef struct { int16_t x;",
+          "hash": "6a108468d82a3348"
+        }
+      }
+    },
+    "alp/chips/bmp581.h": {
+      "functions": {
+        "bmp581_compensate": {
+          "hash": "e0479df9386046eb",
+          "signature": "alp_status_t bmp581_compensate(const bmp581_raw_t *raw, bmp581_compensated_t *out);"
+        },
+        "bmp581_deinit": {
+          "hash": "16a459462d245e59",
+          "signature": "void bmp581_deinit(bmp581_t *dev);"
+        },
+        "bmp581_init": {
+          "hash": "acd19e5987547be7",
+          "signature": "alp_status_t bmp581_init(bmp581_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);"
+        },
+        "bmp581_read_id": {
+          "hash": "c49e0476a963842a",
+          "signature": "alp_status_t bmp581_read_id(bmp581_t *dev, uint8_t *id_out);"
+        },
+        "bmp581_read_raw": {
+          "hash": "6a8a7715cfceb859",
+          "signature": "alp_status_t bmp581_read_raw(bmp581_t *dev, bmp581_raw_t *out);"
+        },
+        "bmp581_set_sampling": {
+          "hash": "caab90f19ee2303a",
+          "signature": "alp_status_t bmp581_set_sampling(bmp581_t *dev, bmp581_osr_t press_osr, bmp581_osr_t temp_osr, bmp581_odr_t odr, bmp581_mode_t mode);"
+        },
+        "bmp581_soft_reset": {
+          "hash": "efb583dc992580a9",
+          "signature": "alp_status_t bmp581_soft_reset(bmp581_t *dev);"
+        }
+      },
+      "macros": {
+        "BMP581_CHIP_ID": {
+          "hash": "7650112972b431c2",
+          "value": "0x50"
+        },
+        "BMP581_I2C_ADDR_HIGH": {
+          "hash": "0aa4209e8aed46b2",
+          "value": "0x47"
+        },
+        "BMP581_I2C_ADDR_LOW": {
+          "hash": "1a6f08e1d9b59ae6",
+          "value": "0x46"
+        }
+      },
+      "typedefs": {
+        "addr": {
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
+          "hash": "4e6cc227fae8a2d7"
+        },
+        "bmp581_mode_t": {
+          "definition": "typedef enum { BMP581_MODE_STANDBY = 0x0, BMP581_MODE_NORMAL = 0x1, BMP581_MODE_FORCED = 0x2, BMP581_MODE_CONTINUOUS = 0x3 } bmp581_mode_t;",
+          "hash": "baaeded096f4ccde"
+        },
+        "bmp581_odr_t": {
+          "definition": "typedef enum { BMP581_ODR_240_HZ = 0x00, BMP581_ODR_120_HZ = 0x01, BMP581_ODR_50_HZ = 0x07, BMP581_ODR_25_HZ = 0x0E, BMP581_ODR_10_HZ = 0x14, BMP581_ODR_5_HZ = 0x17, BMP581_ODR_1_HZ = 0x1C } bmp581_odr_t;",
+          "hash": "52aa4bcbc99a8d06"
+        },
+        "bmp581_osr_t": {
+          "definition": "typedef enum { BMP581_OSR_X1 = 0x0, BMP581_OSR_X2 = 0x1, BMP581_OSR_X4 = 0x2, BMP581_OSR_X8 = 0x3, BMP581_OSR_X16 = 0x4, BMP581_OSR_X32 = 0x5, BMP581_OSR_X64 = 0x6, BMP581_OSR_X128 = 0x7 } bmp581_osr_t;",
+          "hash": "fa531baf39926a6a"
+        },
+        "pressure_pa": {
+          "definition": "typedef struct { int32_t pressure_pa;",
+          "hash": "c5ac25e8f386a338"
+        },
+        "pressure_raw": {
+          "definition": "typedef struct { int32_t pressure_raw;",
+          "hash": "ee926a6c072cda58"
+        }
+      }
+    },
     "alp/chips/button_led.h": {
       "functions": {
         "alp_button_led_deinit": {
@@ -476,6 +620,78 @@
         "press_cb": {
           "definition": "typedef void (*alp_button_led_press_cb_t)(void *user); typedef struct { alp_gpio_t *button; alp_gpio_t *led; alp_button_led_press_cb_t press_cb;",
           "hash": "328f56822d212db6"
+        }
+      }
+    },
+    "alp/chips/icm42670.h": {
+      "functions": {
+        "icm42670_deinit": {
+          "hash": "3b7526348f1b63e6",
+          "signature": "void icm42670_deinit(icm42670_t *dev);"
+        },
+        "icm42670_init": {
+          "hash": "ba88c747ba614d4c",
+          "signature": "alp_status_t icm42670_init(icm42670_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);"
+        },
+        "icm42670_read_accel": {
+          "hash": "30a7e67b7445c3c8",
+          "signature": "alp_status_t icm42670_read_accel(icm42670_t *dev, icm42670_axes_t *out);"
+        },
+        "icm42670_read_gyro": {
+          "hash": "95f05cf25de75025",
+          "signature": "alp_status_t icm42670_read_gyro(icm42670_t *dev, icm42670_axes_t *out);"
+        },
+        "icm42670_read_id": {
+          "hash": "4c7e3a0c58db3bc2",
+          "signature": "alp_status_t icm42670_read_id(icm42670_t *dev, uint8_t *id_out);"
+        },
+        "icm42670_read_temp": {
+          "hash": "cf1c3bea7bb63c4b",
+          "signature": "alp_status_t icm42670_read_temp(icm42670_t *dev, int16_t *temp_raw);"
+        },
+        "icm42670_set_accel": {
+          "hash": "7bf97f9ee364674e",
+          "signature": "alp_status_t icm42670_set_accel(icm42670_t *dev, icm42670_odr_t odr, icm42670_accel_fs_t fs);"
+        },
+        "icm42670_set_gyro": {
+          "hash": "efe7dd364e8524a6",
+          "signature": "alp_status_t icm42670_set_gyro(icm42670_t *dev, icm42670_odr_t odr, icm42670_gyro_fs_t fs);"
+        }
+      },
+      "macros": {
+        "ICM42670_I2C_ADDR_HIGH": {
+          "hash": "9dfb7f4f7d1643c4",
+          "value": "0x69"
+        },
+        "ICM42670_I2C_ADDR_LOW": {
+          "hash": "7ee2bf8f802c7e96",
+          "value": "0x68"
+        },
+        "ICM42670_WHO_AM_I_VAL": {
+          "hash": "0a3590662f68ec24",
+          "value": "0x67"
+        }
+      },
+      "typedefs": {
+        "addr": {
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
+          "hash": "4e6cc227fae8a2d7"
+        },
+        "icm42670_accel_fs_t": {
+          "definition": "typedef enum { ICM42670_ACCEL_FS_16G = 0x0, ICM42670_ACCEL_FS_8G = 0x1, ICM42670_ACCEL_FS_4G = 0x2, ICM42670_ACCEL_FS_2G = 0x3 } icm42670_accel_fs_t;",
+          "hash": "e40db1708338617c"
+        },
+        "icm42670_gyro_fs_t": {
+          "definition": "typedef enum { ICM42670_GYRO_FS_2000_DPS = 0x0, ICM42670_GYRO_FS_1000_DPS = 0x1, ICM42670_GYRO_FS_500_DPS = 0x2, ICM42670_GYRO_FS_250_DPS = 0x3 } icm42670_gyro_fs_t;",
+          "hash": "77f36aac45970aa8"
+        },
+        "icm42670_odr_t": {
+          "definition": "typedef enum { ICM42670_ODR_OFF = 0x0, ICM42670_ODR_1_5625_HZ = 0xF, ICM42670_ODR_3_125_HZ = 0xE, ICM42670_ODR_6_25_HZ = 0xD, ICM42670_ODR_12_5_HZ = 0xC, ICM42670_ODR_25_HZ = 0xB, ICM42670_ODR_50_HZ = 0xA, ICM42670_ODR_100_HZ = 0x8, ICM42670_ODR_200_HZ = 0x7, ICM42670_ODR_400_HZ = 0x6, ICM42670_ODR_800_HZ = 0x5, ICM42670_ODR_1600_HZ = 0x4 } icm42670_odr_t;",
+          "hash": "6327802ed331266f"
+        },
+        "x": {
+          "definition": "typedef struct { int16_t x;",
+          "hash": "6a108468d82a3348"
         }
       }
     },
