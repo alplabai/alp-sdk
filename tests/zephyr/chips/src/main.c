@@ -25,6 +25,9 @@
 #include "alp/chips/ssd1331.h"
 #include "alp/chips/ov5640.h"
 #include "alp/chips/pdm_mic.h"
+#include "alp/chips/icm42670.h"
+#include "alp/chips/bmi323.h"
+#include "alp/chips/bmp581.h"
 
 #include "fakes.h"
 
@@ -437,6 +440,144 @@ ZTEST(alp_chips, test_pdm_mic_calls_return_nosupport) {
     zassert_equal(n, 0u, "out_frames must be zeroed by the stub");
     zassert_equal(alp_pdm_mic_set_gain(NULL, 0, 0), ALP_ERR_NOSUPPORT);
     alp_pdm_mic_close(NULL);    /* must not crash. */
+}
+
+/* ------------------------------------------------------------------ */
+/* icm42670 (TDK 6-axis IMU, on-board EVK chip)                        */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_icm42670_init_null_args) {
+    icm42670_t dev;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    zassert_equal(icm42670_init(NULL, bus, ICM42670_I2C_ADDR_LOW),
+                  ALP_ERR_INVAL);
+    zassert_equal(icm42670_init(&dev, NULL, ICM42670_I2C_ADDR_LOW),
+                  ALP_ERR_INVAL);
+    zassert_equal(icm42670_init(&dev, bus, 0), ALP_ERR_INVAL);
+
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_icm42670_post_init_calls_reject_uninitialised) {
+    /* Without a real ICM-42670 on the emul controller, init's
+     * WHO_AM_I check returns wrong/no value -- we expect failure
+     * and that subsequent reads report NOT_READY. */
+    icm42670_t dev;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    alp_status_t s = icm42670_init(&dev, bus, ICM42670_I2C_ADDR_LOW);
+    if (s != ALP_OK) {
+        icm42670_axes_t a;
+        zassert_equal(icm42670_read_accel(&dev, &a), ALP_ERR_NOT_READY);
+        zassert_equal(icm42670_set_accel(&dev,
+                          ICM42670_ODR_100_HZ, ICM42670_ACCEL_FS_4G),
+                      ALP_ERR_NOT_READY);
+    }
+
+    icm42670_deinit(&dev);
+    alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* bmi323 (Bosch 6-axis IMU, second on-board EVK IMU)                  */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_bmi323_init_null_args) {
+    bmi323_t dev;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    zassert_equal(bmi323_init(NULL, bus, BMI323_I2C_ADDR_LOW),
+                  ALP_ERR_INVAL);
+    zassert_equal(bmi323_init(&dev, NULL, BMI323_I2C_ADDR_LOW),
+                  ALP_ERR_INVAL);
+    zassert_equal(bmi323_init(&dev, bus, 0), ALP_ERR_INVAL);
+
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_bmi323_post_init_calls_reject_uninitialised) {
+    bmi323_t dev;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    alp_status_t s = bmi323_init(&dev, bus, BMI323_I2C_ADDR_LOW);
+    if (s != ALP_OK) {
+        bmi323_axes_t a;
+        zassert_equal(bmi323_read_accel(&dev, &a), ALP_ERR_NOT_READY);
+        zassert_equal(bmi323_set_gyro(&dev,
+                          BMI323_ODR_100_HZ, BMI323_GYRO_FS_2000_DPS),
+                      ALP_ERR_NOT_READY);
+    }
+
+    bmi323_deinit(&dev);
+    alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* bmp581 (Bosch barometer, on-board EVK pressure sensor)              */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_bmp581_init_null_args) {
+    bmp581_t dev;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    zassert_equal(bmp581_init(NULL, bus, BMP581_I2C_ADDR_LOW),
+                  ALP_ERR_INVAL);
+    zassert_equal(bmp581_init(&dev, NULL, BMP581_I2C_ADDR_LOW),
+                  ALP_ERR_INVAL);
+    zassert_equal(bmp581_init(&dev, bus, 0), ALP_ERR_INVAL);
+
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_bmp581_compensate_pure_arithmetic) {
+    /* bmp581_compensate is a pure scale conversion -- it doesn't
+     * touch the bus and doesn't need an initialised device.  Test
+     * the conversion math directly. */
+
+    /* 1/64 Pa LSB.  raw = 64 * 101325 + 32 (rounding) = 6484832 */
+    bmp581_raw_t raw = {
+        .pressure_raw    = 6484800,    /* exactly 101325 Pa */
+        .temperature_raw = 25 * 65536, /* exactly 25 °C */
+    };
+    bmp581_compensated_t comp;
+    zassert_equal(bmp581_compensate(&raw, &comp), ALP_OK);
+    zassert_equal(comp.pressure_pa, 101325);
+    zassert_equal(comp.temperature_c1000, 25000);
+
+    /* NULL-arg pair must reject. */
+    zassert_equal(bmp581_compensate(NULL, &comp), ALP_ERR_INVAL);
+    zassert_equal(bmp581_compensate(&raw, NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_bmp581_post_init_calls_reject_uninitialised) {
+    bmp581_t dev;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000});
+    zassert_not_null(bus);
+
+    alp_status_t s = bmp581_init(&dev, bus, BMP581_I2C_ADDR_LOW);
+    if (s != ALP_OK) {
+        bmp581_raw_t raw;
+        zassert_equal(bmp581_read_raw(&dev, &raw), ALP_ERR_NOT_READY);
+        zassert_equal(bmp581_set_sampling(&dev,
+                          BMP581_OSR_X4, BMP581_OSR_X1,
+                          BMP581_ODR_25_HZ, BMP581_MODE_NORMAL),
+                      ALP_ERR_NOT_READY);
+    }
+
+    bmp581_deinit(&dev);
+    alp_i2c_close(bus);
 }
 
 /* ------------------------------------------------------------------ */
