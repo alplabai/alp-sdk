@@ -26,6 +26,12 @@
  * than the SoC supports returns NULL with last_error =
  * ALP_ERR_OUT_OF_RANGE — for example, a 16-bit request on an Alif E3
  * (12-bit hardware) is rejected before any I/O.
+ *
+ * Conditional spec construction.  ADC_DT_SPEC_GET fails to expand
+ * when given DT_INVALID_NODE (it interrogates the node's properties
+ * unconditionally), so we can't just COND_CODE_1 on alias existence.
+ * Per-index #if blocks emit either ADC_DT_SPEC_GET or a NULL spec,
+ * and the array is built from those.
  */
 
 #include <errno.h>
@@ -38,24 +44,56 @@
 #include "alp/soc_caps.h"
 #include "handles.h"
 
-/* DT_NODE_HAS_PROP refuses to expand when the node id is
- * DT_INVALID_NODE (alias unset), so gate on DT_NODE_EXISTS first.
- * If the alias is set but the target node lacks `io-channels`, the
- * build fails with a more informative ADC_DT_SPEC_GET error. */
-#define ALP_ADC_SPEC_OR_NULL(idx)                                              \
-    COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_adc, idx))),               \
-                (ADC_DT_SPEC_GET(DT_ALIAS(_CONCAT(alp_adc, idx)))),            \
-                ((struct adc_dt_spec){.dev = NULL}))
+#if DT_NODE_EXISTS(DT_ALIAS(alp_adc0))
+#define ALP_ADC_SPEC_0_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc0))
+#else
+#define ALP_ADC_SPEC_0_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_adc1))
+#define ALP_ADC_SPEC_1_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc1))
+#else
+#define ALP_ADC_SPEC_1_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_adc2))
+#define ALP_ADC_SPEC_2_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc2))
+#else
+#define ALP_ADC_SPEC_2_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_adc3))
+#define ALP_ADC_SPEC_3_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc3))
+#else
+#define ALP_ADC_SPEC_3_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_adc4))
+#define ALP_ADC_SPEC_4_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc4))
+#else
+#define ALP_ADC_SPEC_4_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_adc5))
+#define ALP_ADC_SPEC_5_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc5))
+#else
+#define ALP_ADC_SPEC_5_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_adc6))
+#define ALP_ADC_SPEC_6_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc6))
+#else
+#define ALP_ADC_SPEC_6_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_adc7))
+#define ALP_ADC_SPEC_7_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc7))
+#else
+#define ALP_ADC_SPEC_7_INIT  {.dev = NULL}
+#endif
 
 static const struct adc_dt_spec alp_adcs[] = {
-    ALP_ADC_SPEC_OR_NULL(0),
-    ALP_ADC_SPEC_OR_NULL(1),
-    ALP_ADC_SPEC_OR_NULL(2),
-    ALP_ADC_SPEC_OR_NULL(3),
-    ALP_ADC_SPEC_OR_NULL(4),
-    ALP_ADC_SPEC_OR_NULL(5),
-    ALP_ADC_SPEC_OR_NULL(6),
-    ALP_ADC_SPEC_OR_NULL(7),
+    ALP_ADC_SPEC_0_INIT,
+    ALP_ADC_SPEC_1_INIT,
+    ALP_ADC_SPEC_2_INIT,
+    ALP_ADC_SPEC_3_INIT,
+    ALP_ADC_SPEC_4_INIT,
+    ALP_ADC_SPEC_5_INIT,
+    ALP_ADC_SPEC_6_INIT,
+    ALP_ADC_SPEC_7_INIT,
 };
 
 static alp_status_t errno_to_alp(int err) {

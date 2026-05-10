@@ -110,6 +110,50 @@ extern "C" {
 #define ALP_E1M_ADC6          6u
 #define ALP_E1M_ADC7          7u
 
+/* PWM channel IDs — passed as `channel_id` to alp_pwm_open().
+ * E1M reserves eight PWM channels at fixed pads
+ * (PWM0=A6, PWM1=B6, PWM2=A5, …, PWM7=B3). */
+#define ALP_E1M_PWM0          0u
+#define ALP_E1M_PWM1          1u
+#define ALP_E1M_PWM2          2u
+#define ALP_E1M_PWM3          3u
+#define ALP_E1M_PWM4          4u
+#define ALP_E1M_PWM5          5u
+#define ALP_E1M_PWM6          6u
+#define ALP_E1M_PWM7          7u
+
+/* Quadrature-encoder IDs — passed as `encoder_id` to alp_qenc_open().
+ * E1M reserves four encoders (ENC0..ENC3), each routed as a
+ * complementary pad pair (ENCn_X / ENCn_Y). */
+#define ALP_E1M_ENC0          0u
+#define ALP_E1M_ENC1          1u
+#define ALP_E1M_ENC2          2u
+#define ALP_E1M_ENC3          3u
+
+/* DAC channel IDs — passed as channel_id where the DAC API lands
+ * (v0.3 deliverable; reserved here for ABI stability). */
+#define ALP_E1M_DAC_CH0       0u
+#define ALP_E1M_DAC_CH1       1u
+
+/* Counter / generic-timer instance IDs — passed as `counter_id` to
+ * alp_counter_open(). */
+#define ALP_E1M_COUNTER0      0u
+#define ALP_E1M_COUNTER1      1u
+#define ALP_E1M_COUNTER2      2u
+#define ALP_E1M_COUNTER3      3u
+
+/* Watchdog instance IDs — passed as `wdt_id` to alp_wdt_open(). */
+#define ALP_E1M_WDT0          0u
+#define ALP_E1M_WDT1          1u
+
+/* RTC instance IDs — passed as `rtc_id` to alp_rtc_open(). */
+#define ALP_E1M_RTC0          0u
+
+/* CAN bus IDs — passed as `bus_id` to alp_can_open().
+ * E1M reserves a single CAN-FD pad pair (CAN0); higher indices map
+ * to vendor-specific extensions where the SoC provides them. */
+/* (ALP_E1M_CAN0 is defined above in the peripheral instance section.) */
+
 /* JTAG (single instance) */
 #define ALP_E1M_JTAG0         0u
 

@@ -987,6 +987,22 @@
           "hash": "2bef9f92f922d19a",
           "value": "1u"
         },
+        "ALP_E1M_COUNTER0": {
+          "hash": "cf1360c64b0ea13e",
+          "value": "0u"
+        },
+        "ALP_E1M_COUNTER1": {
+          "hash": "956d3751f75b1058",
+          "value": "1u"
+        },
+        "ALP_E1M_COUNTER2": {
+          "hash": "21f0ebf9c84a5440",
+          "value": "2u"
+        },
+        "ALP_E1M_COUNTER3": {
+          "hash": "7c0134a16d8a3fc7",
+          "value": "3u"
+        },
         "ALP_E1M_CSI0": {
           "hash": "05b29585251e3916",
           "value": "0u"
@@ -1003,6 +1019,14 @@
           "hash": "bfb5f2201f9f6858",
           "value": "1u"
         },
+        "ALP_E1M_DAC_CH0": {
+          "hash": "d551feb3679e3e1c",
+          "value": "0u"
+        },
+        "ALP_E1M_DAC_CH1": {
+          "hash": "4657852d85f71875",
+          "value": "1u"
+        },
         "ALP_E1M_DAC_COUNT": {
           "hash": "79c5e841ccb37221",
           "value": "2u"
@@ -1014,6 +1038,22 @@
         "ALP_E1M_DSI_COUNT": {
           "hash": "6b5a97f251ba3be6",
           "value": "1u"
+        },
+        "ALP_E1M_ENC0": {
+          "hash": "1970618b40010d78",
+          "value": "0u"
+        },
+        "ALP_E1M_ENC1": {
+          "hash": "578976ee9fe7b165",
+          "value": "1u"
+        },
+        "ALP_E1M_ENC2": {
+          "hash": "fad24fbc25ee17a1",
+          "value": "2u"
+        },
+        "ALP_E1M_ENC3": {
+          "hash": "6a47e6219a2bc2a5",
+          "value": "3u"
         },
         "ALP_E1M_ENC_COUNT": {
           "hash": "7b5e766940583adc",
@@ -1259,9 +1299,45 @@
           "hash": "b269f0e6f6b5880d",
           "value": "2u"
         },
+        "ALP_E1M_PWM0": {
+          "hash": "9871862a2f7406a2",
+          "value": "0u"
+        },
+        "ALP_E1M_PWM1": {
+          "hash": "34ca27d7887904d3",
+          "value": "1u"
+        },
+        "ALP_E1M_PWM2": {
+          "hash": "2a10c0d9f4eac679",
+          "value": "2u"
+        },
+        "ALP_E1M_PWM3": {
+          "hash": "3af7430ff99b21ec",
+          "value": "3u"
+        },
+        "ALP_E1M_PWM4": {
+          "hash": "4aecf9ebf9e3b8fd",
+          "value": "4u"
+        },
+        "ALP_E1M_PWM5": {
+          "hash": "36eaf9c87784659c",
+          "value": "5u"
+        },
+        "ALP_E1M_PWM6": {
+          "hash": "7671bdf1144df1d9",
+          "value": "6u"
+        },
+        "ALP_E1M_PWM7": {
+          "hash": "83fa2599f25fbf1d",
+          "value": "7u"
+        },
         "ALP_E1M_PWM_COUNT": {
           "hash": "b52706724412421e",
           "value": "8u"
+        },
+        "ALP_E1M_RTC0": {
+          "hash": "73e38f876ea7ff76",
+          "value": "0u"
         },
         "ALP_E1M_SDIO0": {
           "hash": "b68a377be3fc78c9",
@@ -1309,6 +1385,14 @@
         },
         "ALP_E1M_USB_COUNT": {
           "hash": "47b82d0c189bd7f3",
+          "value": "1u"
+        },
+        "ALP_E1M_WDT0": {
+          "hash": "9a521fd19a6d4240",
+          "value": "0u"
+        },
+        "ALP_E1M_WDT1": {
+          "hash": "a08e03f3ff78584e",
           "value": "1u"
         }
       },

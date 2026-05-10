@@ -12,6 +12,12 @@
  *         pwms = <&pwm0 0 PWM_USEC(1000) PWM_POLARITY_NORMAL>;
  *     };
  *     aliases { alp-pwm0 = &pwm_user0; };
+ *
+ * Conditional spec construction.  PWM_DT_SPEC_GET fails to expand
+ * when given DT_INVALID_NODE (it pulls in the `pwms` property
+ * unconditionally), so we can't COND_CODE_1 on alias existence.
+ * Per-index #if blocks emit either PWM_DT_SPEC_GET or a NULL spec,
+ * and the array is built from those.
  */
 
 #include <errno.h>
@@ -24,24 +30,56 @@
 #include "alp/soc_caps.h"
 #include "handles.h"
 
-/* DT_NODE_HAS_PROP refuses to expand when the node id is
- * DT_INVALID_NODE (alias unset), so gate on DT_NODE_EXISTS first.
- * If the alias is set but the target node lacks `pwms`, the build
- * fails with a more informative PWM_DT_SPEC_GET error. */
-#define ALP_PWM_SPEC_OR_NULL(idx)                                              \
-    COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_pwm, idx))),               \
-                (PWM_DT_SPEC_GET(DT_ALIAS(_CONCAT(alp_pwm, idx)))),            \
-                ((struct pwm_dt_spec){.dev = NULL}))
+#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm0))
+#define ALP_PWM_SPEC_0_INIT  PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm0))
+#else
+#define ALP_PWM_SPEC_0_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm1))
+#define ALP_PWM_SPEC_1_INIT  PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm1))
+#else
+#define ALP_PWM_SPEC_1_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm2))
+#define ALP_PWM_SPEC_2_INIT  PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm2))
+#else
+#define ALP_PWM_SPEC_2_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm3))
+#define ALP_PWM_SPEC_3_INIT  PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm3))
+#else
+#define ALP_PWM_SPEC_3_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm4))
+#define ALP_PWM_SPEC_4_INIT  PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm4))
+#else
+#define ALP_PWM_SPEC_4_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm5))
+#define ALP_PWM_SPEC_5_INIT  PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm5))
+#else
+#define ALP_PWM_SPEC_5_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm6))
+#define ALP_PWM_SPEC_6_INIT  PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm6))
+#else
+#define ALP_PWM_SPEC_6_INIT  {.dev = NULL}
+#endif
+#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm7))
+#define ALP_PWM_SPEC_7_INIT  PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm7))
+#else
+#define ALP_PWM_SPEC_7_INIT  {.dev = NULL}
+#endif
 
 static const struct pwm_dt_spec alp_pwms[] = {
-    ALP_PWM_SPEC_OR_NULL(0),
-    ALP_PWM_SPEC_OR_NULL(1),
-    ALP_PWM_SPEC_OR_NULL(2),
-    ALP_PWM_SPEC_OR_NULL(3),
-    ALP_PWM_SPEC_OR_NULL(4),
-    ALP_PWM_SPEC_OR_NULL(5),
-    ALP_PWM_SPEC_OR_NULL(6),
-    ALP_PWM_SPEC_OR_NULL(7),
+    ALP_PWM_SPEC_0_INIT,
+    ALP_PWM_SPEC_1_INIT,
+    ALP_PWM_SPEC_2_INIT,
+    ALP_PWM_SPEC_3_INIT,
+    ALP_PWM_SPEC_4_INIT,
+    ALP_PWM_SPEC_5_INIT,
+    ALP_PWM_SPEC_6_INIT,
+    ALP_PWM_SPEC_7_INIT,
 };
 
 static alp_status_t errno_to_alp(int err) {
