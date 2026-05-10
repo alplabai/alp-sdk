@@ -117,9 +117,28 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 - **Display:** 40-pin MIPI DSI connector for the RK055HDMIPI4MA0 720p
   panel (with backlight LED rails and capacitive-touch I²C).
 - **Camera:** three options — Raspberry-Pi-compatible 15-pin CSI,
-  standard MIPI B2B 34-pin, parallel DVP 24-pin — selected via
-  PI3WVR626 mux.  Camera rails `+1V2_CAM`, `+2V6_CAM` are
-  feedback-resistor-tunable.
+  standard MIPI B2B 34-pin, parallel DVP 24-pin — multiplexed via
+  the **PI3WVR626XEBEX** 2:1 MIPI CSI mux.  Camera rails
+  `+1V2_CAM`, `+2V6_CAM` are feedback-resistor-tunable.
+
+  The mux's `SEL` pin is driven by **`CAM_MUX.SEL`**, which the
+  EVK schematic ties to **E1M `IO2` (`W2`, Alif `P12.5`)**.  Per
+  the PI3WVR626 truth table:
+
+      SEL = 0  -> input A (`A_MIPI_CSI_*`) routes to the SoM
+      SEL = 1  -> input B (`B_MIPI_CSI_*`) routes to the SoM
+
+  Use `EVK_AEN_PIN_CAM_MUX_SEL` from
+  `<alp/boards/alp_e1m_evk_aen.h>` plus the
+  `cam_mux_pi3wvr626_*` helper in `<alp/chips/cam_mux_pi3wvr626.h>`
+  to switch inputs at runtime.  The `/OE` pin is hardwired to GND
+  on this board, so the output is always live.
+
+  > **Important.**  E1M `IO2` was previously documented as the RGB
+  > LED-blue channel.  That was a placeholder guess; the EVK
+  > schematic confirms `IO2` is the camera mux SEL line.  The
+  > actual blue-LED pin is TBD until the user confirms the LED
+  > matrix wiring.
 - **Audio:** two PDM microphones (MP34DT05TR-A) and two TAS2563
   Class-D amps with JST speaker headers; I²S source selectable
   via 74LVC157.

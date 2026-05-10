@@ -222,6 +222,10 @@
           "hash": "f7093f1473ba7a85",
           "value": "ALP_E1M_I2C0"
         },
+        "EVK_AEN_PIN_CAM_MUX_SEL": {
+          "hash": "ccff115788b2e3c9",
+          "value": "ALP_E1M_GPIO_IO2"
+        },
         "EVK_AEN_PIN_ENCODER_SW": {
           "hash": "1bc79b9e5293d732",
           "value": "ALP_E1M_GPIO_IO3"
@@ -233,10 +237,6 @@
         "EVK_AEN_PIN_IO_EXP_RST": {
           "hash": "13ddba44af3367cf",
           "value": "ALP_E1M_GPIO_IO5"
-        },
-        "EVK_AEN_PIN_LED_BLUE": {
-          "hash": "0028ffede0846cb4",
-          "value": "ALP_E1M_GPIO_IO2"
         },
         "EVK_AEN_PIN_LED_GREEN": {
           "hash": "4b3883bb43bedd41",
@@ -255,7 +255,12 @@
           "value": "ALP_E1M_UART0"
         }
       },
-      "typedefs": {}
+      "typedefs": {
+        "evk_aen_cam_select_t": {
+          "definition": "typedef enum { EVK_AEN_CAM_A = 0, EVK_AEN_CAM_B = 1, } evk_aen_cam_select_t;",
+          "hash": "67283eec45118726"
+        }
+      }
     },
     "alp/camera.h": {
       "functions": {
@@ -620,6 +625,37 @@
         "press_cb": {
           "definition": "typedef void (*alp_button_led_press_cb_t)(void *user); typedef struct { alp_gpio_t *button; alp_gpio_t *led; alp_button_led_press_cb_t press_cb;",
           "hash": "328f56822d212db6"
+        }
+      }
+    },
+    "alp/chips/cam_mux_pi3wvr626.h": {
+      "functions": {
+        "cam_mux_pi3wvr626_deinit": {
+          "hash": "7fef729a79059a87",
+          "signature": "void cam_mux_pi3wvr626_deinit(cam_mux_pi3wvr626_t *ctx);"
+        },
+        "cam_mux_pi3wvr626_get": {
+          "hash": "8a4b9a1c4ccda24e",
+          "signature": "alp_status_t cam_mux_pi3wvr626_get(cam_mux_pi3wvr626_t *ctx, cam_mux_pi3wvr626_input_t *input_out);"
+        },
+        "cam_mux_pi3wvr626_init": {
+          "hash": "a1c3d9929d07b0a5",
+          "signature": "alp_status_t cam_mux_pi3wvr626_init(cam_mux_pi3wvr626_t *ctx, alp_gpio_t *sel_pin);"
+        },
+        "cam_mux_pi3wvr626_select": {
+          "hash": "4b2614e8314694b2",
+          "signature": "alp_status_t cam_mux_pi3wvr626_select(cam_mux_pi3wvr626_t *ctx, cam_mux_pi3wvr626_input_t input);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "cam_mux_pi3wvr626_input_t": {
+          "definition": "typedef enum { CAM_MUX_PI3WVR626_INPUT_A = 0, CAM_MUX_PI3WVR626_INPUT_B = 1, } cam_mux_pi3wvr626_input_t;",
+          "hash": "53ac04dce5f101c4"
+        },
+        "initialised": {
+          "definition": "typedef struct { bool initialised;",
+          "hash": "98b22257593e61d9"
         }
       }
     },

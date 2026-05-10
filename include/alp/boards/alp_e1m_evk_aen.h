@@ -35,12 +35,35 @@ extern "C" {
 /* an `ALP_E1M_GPIO_*` constant for readability.                       */
 /* ------------------------------------------------------------------ */
 
-#define EVK_AEN_PIN_LED_RED        ALP_E1M_GPIO_IO0       /**< RGB LED red  channel control. */
-#define EVK_AEN_PIN_LED_GREEN      ALP_E1M_GPIO_IO1       /**< RGB LED green channel.        */
-#define EVK_AEN_PIN_LED_BLUE       ALP_E1M_GPIO_IO2       /**< RGB LED blue  channel.        */
+/* RGB LED -- E1M IO0 / IO1 / TBD pin assignments are still
+ * placeholders awaiting confirmation from the EVK schematic.
+ * Treat these as guesses until UG-E1M-001 §<LED-section> is
+ * cross-checked.  See `project_pending_hw_configs` memory note. */
+#define EVK_AEN_PIN_LED_RED        ALP_E1M_GPIO_IO0       /**< RGB LED red  channel (TBD-confirm). */
+#define EVK_AEN_PIN_LED_GREEN      ALP_E1M_GPIO_IO1       /**< RGB LED green channel (TBD-confirm). */
+/* IO2 is the MIPI CSI camera-mux SEL line (PI3WVR626 SEL pin),
+ * not an LED.  The blue LED's actual pin is TBD until the user
+ * confirms; do not assume IO2 here. */
+#define EVK_AEN_PIN_CAM_MUX_SEL    ALP_E1M_GPIO_IO2       /**< PI3WVR626 SEL pin -- selects between camera A and camera B. See `evk_aen_cam_select_*` helpers below. */
 #define EVK_AEN_PIN_ENCODER_SW     ALP_E1M_GPIO_IO3       /**< Rotary encoder push switch (active-low, internal pull-up). */
 #define EVK_AEN_PIN_IO_EXP_INT     ALP_E1M_GPIO_IO4       /**< TCAL9538 I/O expander INT line. */
 #define EVK_AEN_PIN_IO_EXP_RST     ALP_E1M_GPIO_IO5       /**< TCAL9538 I/O expander RST line. */
+
+/* ------------------------------------------------------------------ */
+/* MIPI CSI camera multiplexer (PI3WVR626XEBEX)                        */
+/*                                                                     */
+/* The EVK routes a single MIPI CSI lane pair from the SoM through a   */
+/* 2:1 mux that picks between two camera inputs (A and B).  The mux's  */
+/* SEL pin is driven by `EVK_AEN_PIN_CAM_MUX_SEL` (E1M IO2 / Alif      */
+/* P12.5).  Per the PI3WVR626 datasheet convention SEL=0 -> A path,    */
+/* SEL=1 -> B path.  Confirm against the device's TG (Truth Table)     */
+/* if a respin changes the polarity.                                   */
+/* ------------------------------------------------------------------ */
+
+typedef enum {
+    EVK_AEN_CAM_A = 0,    /**< MIPI_CSI_<lane>_<P/N> -> A_MIPI_CSI_<lane>_<P/N> */
+    EVK_AEN_CAM_B = 1,    /**< MIPI_CSI_<lane>_<P/N> -> B_MIPI_CSI_<lane>_<P/N> */
+} evk_aen_cam_select_t;
 
 /* The rotary encoder's quadrature signals run through the SoC's
  * hardware quadrature counter on E1M's `ENC0_X` / `ENC0_Y` pads.

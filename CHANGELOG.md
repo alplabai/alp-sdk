@@ -473,6 +473,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **EVK MIPI CSI camera-mux helper + IO2 wiring correction** --
+  the EVK routes a single MIPI CSI lane pair from the SoM through
+  a **PI3WVR626XEBEX** 2:1 mux (camera A vs camera B); its
+  `SEL` pin lands on E1M `IO2` (`W2` / Alif `P12.5`).  New thin
+  driver at `chips/cam_mux_pi3wvr626/` + matching public header
+  wraps SEL as a GPIO with a typed `INPUT_A` / `INPUT_B` enum.
+  `<alp/boards/alp_e1m_evk_aen.h>` gains `EVK_AEN_PIN_CAM_MUX_SEL`
+  and **drops the previous placeholder `EVK_AEN_PIN_LED_BLUE = IO2`
+  mapping** -- the schematic confirms `IO2` is the mux line, not
+  an LED.  `LED_BLUE` is now TBD; `LED_RED` / `LED_GREEN` carry
+  an explicit "TBD-confirm" caveat.  `docs/boards/e1m-evk.md`
+  picks up the camera-mux details + truth table.  SDK chip count
+  climbs to **17**; ABI snapshot to 42 headers.
 - **On-module I2C device drivers (E1M-AEN)** -- four new chip
   drivers covering the SoM-internal I2C devices the user
   documented:

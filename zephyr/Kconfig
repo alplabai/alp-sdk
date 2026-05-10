@@ -585,6 +585,16 @@ config ALP_SDK_CHIP_EEPROM_24C128
 	  M24128-BFMH6TG (footprint-compatible alternate).  16 KB,
 	  64-byte page write, 5 ms typical write cycle.
 
+config ALP_SDK_CHIP_CAM_MUX_PI3WVR626
+	bool "Diodes/Pericom PI3WVR626 MIPI CSI 2:1 mux helper"
+	depends on GPIO
+	help
+	  Compile chips/cam_mux_pi3wvr626/cam_mux_pi3wvr626.c.
+	  Thin GPIO wrapper around the PI3WVR626 SEL pin -- routes
+	  one of two MIPI CSI camera inputs to the SoM's MIPI CSI
+	  port.  On the E1M EVK the SEL line is driven by E1M IO2
+	  (Alif P12.5) per the carrier's CAM_MUX.SEL net.
+
 endmenu # "ALP SDK chip drivers"
 
 endif # ALP_SDK
