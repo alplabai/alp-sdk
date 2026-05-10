@@ -381,6 +381,32 @@ public headers under `/usr/include/alp/`, and wires `pkg-config`
 data so application recipes can `inherit pkgconfig` and depend on
 `alp-sdk`.
 
+## Repository boundary (alp-sdk vs alp-studio)
+
+The visual programmer (`alplabai/alp-studio`) and this SDK are
+**separate repositories on purpose**.  The single rule that
+decides where any new artefact lands is the *dual-use acid test*:
+
+> Would a hand-written-firmware author ever directly use this?
+> If no → alp-studio.  If yes (or "both audiences want it") →
+> alp-sdk.
+
+| Belongs in alp-sdk                       | Belongs in alp-studio                   |
+|------------------------------------------|-----------------------------------------|
+| `<alp/...>` public headers               | Block manifests (`library/blocks/*`)    |
+| Chip metadata (`metadata/socs/*.json`)   | Pin allocator                           |
+| Generated capability tables              | Codegen templates                       |
+| ABI snapshot tooling                     | Studio-only Kconfig helpers             |
+| Per-peripheral examples (hand-written)   | Block-level examples (studio-exported)  |
+| ADRs about API design                    | ADRs about studio architecture          |
+| `scripts/abi_snapshot.py`,               | `scripts/gen_block_manifest.py`,        |
+| `scripts/gen_soc_caps.py` (dual-use)     | `scripts/studio_codegen_*` (studio-only)|
+
+The shared infrastructure (chip metadata, ABI tooling) lives in
+alp-sdk because that is where it is *generated from*; alp-studio
+*consumes* it.  See [ADR 0005](adr/0005-alp-sdk-vs-alp-studio-boundary.md)
+for the full rationale and edge-case guidance.
+
 ## Sources of truth (do not duplicate)
 
 - HW pinout — [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)

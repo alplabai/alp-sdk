@@ -473,6 +473,13 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **[ADR 0005](docs/adr/0005-alp-sdk-vs-alp-studio-boundary.md)** —
+  alp-sdk vs alp-studio repo boundary.  Codifies the dual-use
+  acid test ("would a hand-written-firmware author ever directly
+  use this?") and the canonical table of which artefacts belong
+  in which repo.  `docs/architecture.md` gains a "Repository
+  boundary" subsection so reviewers can resolve where a new
+  addition belongs without opening the ADR.
 
 ### Notes
 

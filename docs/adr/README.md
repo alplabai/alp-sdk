@@ -39,6 +39,7 @@ Bad / costs: ...
 | [0002](0002-error-mechanism.md)          | `alp_last_error()` + compile-time SoC capability validation | Accepted |
 | [0003](0003-peripheral-coverage.md)      | Wrap 12 peripheral classes at v0.2, not just I2C/SPI/GPIO/UART | Accepted |
 | [0004](0004-e1m-portability-bound.md)    | E1M-spec instance counts as the portability bound | Accepted |
+| [0005](0005-alp-sdk-vs-alp-studio-boundary.md) | alp-sdk vs alp-studio repo boundary (dual-use acid test) | Accepted |
 
 ## When to write an ADR
 
