@@ -628,9 +628,9 @@ ZTEST(alp_chips, test_audio_surface_v01_nosupport) {
      * (the standard wrapper convention) rather than NOSUPPORT.
      * The "v0.1 stubbed" naming is kept for the suite history; the
      * assertions match the v0.2 reality.  */
-    zassert_is_null(alp_audio_in_open(NULL),  "open(NULL cfg) -> NULL");
+    zassert_is_null(alp_audio_in_open(NULL), "open(NULL cfg) -> NULL");
     zassert_is_null(alp_audio_out_open(NULL), "open(NULL cfg) -> NULL");
-    zassert_equal(alp_audio_in_start(NULL),  ALP_ERR_NOT_READY);
+    zassert_equal(alp_audio_in_start(NULL), ALP_ERR_NOT_READY);
     zassert_equal(alp_audio_out_start(NULL), ALP_ERR_NOT_READY);
     alp_audio_in_close(NULL);
     alp_audio_out_close(NULL);
