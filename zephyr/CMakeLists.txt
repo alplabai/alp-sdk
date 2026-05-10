@@ -40,7 +40,7 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/security_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/mproc_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/storage_stub.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/usb_stub.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/usb_zephyr.c
 )
 
 # Per-backend inference executors -- compile only when the matching

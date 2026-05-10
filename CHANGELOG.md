@@ -473,6 +473,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **`<alp/usb.h>` real device-stack lifecycle wrapper (v0.3 milestone)** --
+  `src/zephyr/usb_zephyr.c` replaces the v0.1 NOSUPPORT stub.  Wraps
+  Zephyr's `usb_enable` / `usb_disable` for the device-role
+  lifecycle.  Per-class endpoint read/write (CDC-ACM, MSC, HID)
+  and host-role bring-up land in v0.3.x.  New
+  `CONFIG_ALP_SDK_USB` (depends on `USB_DEVICE_STACK`, default y),
+  `CONFIG_ALP_SDK_MAX_USB_DEV_HANDLES` (default 1).
+  `tests/zephyr/usb/` smoke suite (5 cases).
 - **`<alp/mproc.h>` real Zephyr MBOX wrapper (v0.3 milestone)** --
   `src/zephyr/mproc_zephyr.c` replaces the v0.1 NOSUPPORT stub.
   Wraps Zephyr's MBOX driver class (Alif's MHU is registered as
