@@ -161,6 +161,44 @@ typedef enum {
 #define EVK_AEN_PIN_PCIE_IOEXP_INT ALP_E1M_GPIO_IO7 /**< INT input from the PCIe IO expander. */
 #define EVK_AEN_PIN_PCIE_IOEXP_RST ALP_E1M_GPIO_IO9 /**< Reset output to the PCIe IO expander. */
 
+/* PCIe LANE 2:1 multiplexer cluster (PI3DBS12212AXUAEX x4 +
+ * SY75602BTWL-TR refclk buffer).
+ *
+ * Four PI3DBS12212 muxes split the SoM's PCIe lanes between the
+ * M.2 M-key (x4) and E-key (x1) slots, plus a refclk buffer
+ * forks the single PCIE0_REFCLK to both keys:
+ *
+ *   U42  TX0/TX1 mux  (E-key gets TX0 only; M-key gets TX0/TX1)
+ *   U43  RX0/RX1 mux  (mirror for RX)
+ *   U50  TX2/TX3 mux  (M-key only -- E-key has no lane 2/3)
+ *   U51  RX2/RX3 mux  (M-key only)
+ *   U44  SY75602      (REFCLK fork to both keys)
+ *
+ * The four lane muxes share two control pins:
+ *   PCIe.MUX_PD   = E1M IO22  (1 = power-down, all outputs Hi-Z)
+ *   PCIe.MUX_SEL  = E1M IO23  (selects between M-key and E-key)
+ *
+ * Apps that switch slots should:
+ *   1. Power-down the active link first (PD = 1).
+ *   2. Flip SEL.
+ *   3. Wait the PCIe spec's PERST# de-assertion margin.
+ *   4. Bring the muxes back up (PD = 0).
+ *   5. Trigger PCIe re-enumeration on the host.
+ *
+ * U50/U51 take level-shifted versions (`PCIe.MUX_PD_L` and
+ * `_SEL_L`) of the same signals -- U49 (a TXS0102) sits between
+ * the SoM's IO22/IO23 and the PD_L/SEL_L nets.  Apps don't need
+ * to think about that; the level shifter is transparent. */
+#define EVK_AEN_PIN_PCIE_MUX_PD                                                                    \
+    ALP_E1M_GPIO_IO22 /**< Drive HIGH to power down all four lane muxes.        */
+#define EVK_AEN_PIN_PCIE_MUX_SEL                                                                   \
+    ALP_E1M_GPIO_IO23 /**< Selects M-key vs E-key routing on the lane muxes. */
+
+typedef enum {
+    EVK_AEN_PCIE_E_KEY = 0, /**< Lanes 0 routed to PCIe E-key (Wi-Fi/BT modules). */
+    EVK_AEN_PCIE_M_KEY = 1, /**< Lanes 0..3 routed to PCIe M-key (NVMe SSD).      */
+} evk_aen_pcie_select_t;
+
 /** PCIe IO expander pin layout (TCAL9538 #2 on I2C0 at 0x71). */
 typedef enum {
     EVK_AEN_PCIE_IOEXP_I2C_SEL =
