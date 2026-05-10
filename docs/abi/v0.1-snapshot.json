@@ -311,8 +311,16 @@
           "value": "0x4Du"
         },
         "EVK_AEN_I2C_ADDR_TCAL9538": {
-          "hash": "7dfc06055ae03081",
+          "hash": "6b44c7c0966e1453",
+          "value": "EVK_AEN_I2C_ADDR_TCAL9538_MAIN"
+        },
+        "EVK_AEN_I2C_ADDR_TCAL9538_MAIN": {
+          "hash": "3d1981ada381f8d7",
           "value": "0x72u"
+        },
+        "EVK_AEN_I2C_ADDR_TCAL9538_PCIE": {
+          "hash": "276e4bd6d9c0ac3c",
+          "value": "0x71u"
         },
         "EVK_AEN_I2C_BUS_ARDUINO": {
           "hash": "387b94b364590f8c",
@@ -327,8 +335,8 @@
           "value": "ALP_E1M_I2C0"
         },
         "EVK_AEN_MB_ANA": {
-          "hash": "a1f8acc02b40d2ff",
-          "value": "((uint32_t)(-1))"
+          "hash": "bc47526029f3efe6",
+          "value": "ALP_E1M_ADC0"
         },
         "EVK_AEN_MB_INT": {
           "hash": "1c30a5b8d4ee161a",
@@ -410,6 +418,18 @@
           "hash": "63e19cb882bbe10b",
           "value": "ALP_E1M_GPIO_COUNT"
         },
+        "EVK_AEN_PIN_PCIE0_I2C_EN": {
+          "hash": "222ee04df75d15b4",
+          "value": ""
+        },
+        "EVK_AEN_PIN_PCIE_IOEXP_INT": {
+          "hash": "fd0f734b3df15359",
+          "value": "ALP_E1M_GPIO_IO7"
+        },
+        "EVK_AEN_PIN_PCIE_IOEXP_RST": {
+          "hash": "822976ae5b633e88",
+          "value": "ALP_E1M_GPIO_IO9"
+        },
         "EVK_AEN_PIN_SDIO_MUX_EN": {
           "hash": "06b0b5e9af719787",
           "value": ""
@@ -459,6 +479,10 @@
         "evk_aen_ioexp_pin_t": {
           "definition": "typedef enum { EVK_AEN_IOEXP_LCD_PWR_EN = 0, EVK_AEN_IOEXP_LCD_RST = 1, EVK_AEN_IOEXP_CAM_EN = 2, EVK_AEN_IOEXP_CTP_RST = 3, EVK_AEN_IOEXP_ICM42670_INT1 = 4, EVK_AEN_IOEXP_ICM42670_INT2 = 5, EVK_AEN_IOEXP_ICM42670_FSYNC = 6, EVK_AEN_IOEXP_BMP581_INT1 = 7, } evk_aen_ioexp_pin_t;",
           "hash": "51d5aeff5f5c27b2"
+        },
+        "evk_aen_pcie_ioexp_pin_t": {
+          "definition": "typedef enum { EVK_AEN_PCIE_IOEXP_I2C_SEL = 0, EVK_AEN_PCIE_IOEXP_M2E_ALERT = 1, EVK_AEN_PCIE_IOEXP_E_PCIE0_RST = 2, EVK_AEN_PCIE_IOEXP_E_PCIE0_WAKE = 3, EVK_AEN_PCIE_IOEXP_E_PCIE0_CLKREQ = 4, EVK_AEN_PCIE_IOEXP_M_PCIE0_RST = 5, EVK_AEN_PCIE_IOEXP_M_PCIE0_WAKE = 6, EVK_AEN_PCIE_IOEXP_M_PCIE0_CLKREQ = 7, } evk_aen_pcie_ioexp_pin_t;",
+          "hash": "93aef81f9fd39d57"
         },
         "evk_aen_sdio_select_t": {
           "definition": "typedef enum { EVK_AEN_SDIO_M2E_KEY = 0, EVK_AEN_SDIO_SDCARD = 1, } evk_aen_sdio_select_t;",

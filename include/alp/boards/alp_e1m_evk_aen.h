@@ -138,6 +138,42 @@ typedef enum {
  *  event up to Alif. */
 #define EVK_AEN_PIN_M2E_UART_WAKE ALP_E1M_GPIO_IO19
 
+/* PCIe I2C mux + control-IO-expander cluster.
+ *
+ * The EVK splits E1M_I2C0 between the PCIe M-key and E-key slots
+ * via a downstream mux gated by PCIE0_I2C.EN.  The select line
+ * is driven from a SECOND TCAL9538 I/O expander (also on I2C0,
+ * sitting BEFORE the mux so it stays addressable independent of
+ * which PCIe slot the mux is currently routed to).  That second
+ * expander also fans out the PCIe-side discrete control signals
+ * (RST / WAKE / CLKREQ for both slots, plus M2E_ALERT).
+ *
+ * Three E1M-side signals control / observe the cluster:
+ *   PCIE0_I2C.EN     -> E1M IO10  (drives I2C-mux enable)
+ *   PCIE_IO_EXP.INT  -> E1M IO7   (interrupt from the PCIe expander)
+ *   PCIE_IO_EXP.RST  -> E1M IO9   (reset for the PCIe expander)
+ *
+ * The PCIe expander is at I2C address 0x71 (A0=1, A1=0 per the
+ * schematic strap).  Its alternate part TCA6408ARSVR uses
+ * R112-only / R145-DNP per the schematic note. */
+#define EVK_AEN_PIN_PCIE0_I2C_EN                                                                   \
+    ALP_E1M_GPIO_IO10 /**< Drive high to enable I2C mux to PCIe slot. */
+#define EVK_AEN_PIN_PCIE_IOEXP_INT ALP_E1M_GPIO_IO7 /**< INT input from the PCIe IO expander. */
+#define EVK_AEN_PIN_PCIE_IOEXP_RST ALP_E1M_GPIO_IO9 /**< Reset output to the PCIe IO expander. */
+
+/** PCIe IO expander pin layout (TCAL9538 #2 on I2C0 at 0x71). */
+typedef enum {
+    EVK_AEN_PCIE_IOEXP_I2C_SEL =
+        0, /**< P0: PCIE0_I2C.SEL -- selects which slot the I2C mux routes to. */
+    EVK_AEN_PCIE_IOEXP_M2E_ALERT      = 1, /**< P1: M.2 E-key alert input.        */
+    EVK_AEN_PCIE_IOEXP_E_PCIE0_RST    = 2, /**< P2: E-key PCIe reset output.       */
+    EVK_AEN_PCIE_IOEXP_E_PCIE0_WAKE   = 3, /**< P3: E-key PCIe wake input.         */
+    EVK_AEN_PCIE_IOEXP_E_PCIE0_CLKREQ = 4, /**< P4: E-key PCIe clock-request input.*/
+    EVK_AEN_PCIE_IOEXP_M_PCIE0_RST    = 5, /**< P5: M-key PCIe reset output.       */
+    EVK_AEN_PCIE_IOEXP_M_PCIE0_WAKE   = 6, /**< P6: M-key PCIe wake input.         */
+    EVK_AEN_PCIE_IOEXP_M_PCIE0_CLKREQ = 7, /**< P7: M-key PCIe clock-request input.*/
+} evk_aen_pcie_ioexp_pin_t;
+
 /* The rotary encoder's quadrature signals run through the SoC's
  * hardware quadrature counter on E1M's `ENC0_X` / `ENC0_Y` pads.
  * Use the E1M-standard `ALP_E1M_GPIO_ENC0_X` / `_Y` indices when
@@ -377,12 +413,11 @@ typedef enum {
  *  instead -- see EVK_AEN_PIN_CTP_INT above). */
 #define EVK_AEN_MB_INT EVK_AEN_PIN_MB_INT
 
-/** mikroBUS ANA pin.  Routes to one of the E1M ADC channels;
- *  exact channel TBD-confirm (the user-supplied wiring named
- *  CK_PWM0 and CK_INT explicitly but did not specify CK_ANA's
- *  underlying ADC channel).  Typically resolves to one of
- *  EVK_AEN_ARD_A0..ARD_A5 once confirmed. */
-#define EVK_AEN_MB_ANA ((uint32_t)(-1)) /**< TBD-confirm. */
+/** mikroBUS ANA pin.  Shared with Arduino's ARD.A0 -- both pins
+ *  route to E1M ANA_S0 (ALP_E1M_ADC0).  Apps that mount only one
+ *  of {Arduino shield, mikroBUS click} get unambiguous use of
+ *  ADC0; mounting both forces a contention. */
+#define EVK_AEN_MB_ANA ALP_E1M_ADC0
 
 /* mikroBUS shared with Arduino -- use the ARD_* / EVK_AEN_* macros:
  *   CK_RST  -> EVK_AEN_ARD_RST              (I2S1_SCLK)
@@ -413,7 +448,18 @@ typedef enum {
 #define EVK_AEN_I2C_ADDR_ICM42670 0x69u /**< U12 IMU (AD0=1). */
 #define EVK_AEN_I2C_ADDR_BMI323 0x68u   /**< U13 IMU (SDO=0).  No collision with ICM. */
 #define EVK_AEN_I2C_ADDR_BMP581 0x47u   /**< U14 barometer (SDO=1). */
-#define EVK_AEN_I2C_ADDR_TCAL9538 0x72u /**< U35 I/O expander (A1=1, A0=0). */
+/* The EVK populates TWO TCAL9538 I/O expanders, both on E1M_I2C0
+ * but at different strap-selected addresses:
+ *   - The "main" expander handles LCD / camera / capacitive-touch
+ *     control + four sensor interrupt inputs (see
+ *     evk_aen_ioexp_pin_t).  Strap A1=1, A0=0 -> 0x72.
+ *   - The "PCIe" expander handles the I2C-mux SEL + PCIe slot
+ *     RST/WAKE/CLKREQ signals + M2E_ALERT (see
+ *     evk_aen_pcie_ioexp_pin_t above).  Strap A0=1, A1=0 -> 0x71. */
+#define EVK_AEN_I2C_ADDR_TCAL9538_MAIN 0x72u /**< U35 main I/O expander. */
+#define EVK_AEN_I2C_ADDR_TCAL9538_PCIE 0x71u /**< U37 PCIe I/O expander. */
+/** Backward-compat alias -- legacy name for the main expander. */
+#define EVK_AEN_I2C_ADDR_TCAL9538 EVK_AEN_I2C_ADDR_TCAL9538_MAIN
 
 /* Two TAS2563RPP smart-amp ICs share the same I2C0 bus.  AD0
  * strap selects address per TAS2563 datasheet table 7-3:
@@ -430,24 +476,19 @@ typedef enum {
  * the INA236B variant occupies 0x44..0x47, so all six fit on one
  * bus despite each variant only having 2 strap bits.
  *
- * EVK ref-des labels per the user-supplied schematic notes:
+ * EVK ref-des per the user-confirmed schematic:
  *   U21  INA236A  3V3 rail     A0 = GND  -> 0x40
  *   U31  INA236A  1V8 rail     A0 = V+   -> 0x41
  *   U33  INA236A  VIO rail     A0 = SDA  -> 0x42
- *   U??  INA236B  +V_CAM0      A0 = GND  -> 0x44
- *   U??  INA236B  +V_CAM1      A0 = V+   -> 0x45
+ *   U32  INA236B  +V_CAM0      A0 = GND  -> 0x44
+ *   U34  INA236B  +V_CAM1      A0 = V+   -> 0x45
  *   U30  INA236B  5V  rail     A0 = SDA  -> 0x46
- *
- * NB: the user's notes labelled three of the six ICs as "U30",
- * which appears to be a typo (only one IC can carry that ref-des
- * on a schematic).  The rail / address pairings above are
- * unambiguous so the macros key on the rail name; cross-check
- * the actual ref-des once the schematic table is final. */
+ */
 #define EVK_AEN_I2C_ADDR_INA236_3V3 0x40u   /**< U21 INA236A. */
 #define EVK_AEN_I2C_ADDR_INA236_1V8 0x41u   /**< U31 INA236A. */
 #define EVK_AEN_I2C_ADDR_INA236_VIO 0x42u   /**< U33 INA236A. */
-#define EVK_AEN_I2C_ADDR_INA236_VCAM0 0x44u /**< INA236B (ref-des TBD). */
-#define EVK_AEN_I2C_ADDR_INA236_VCAM1 0x45u /**< INA236B (ref-des TBD). */
+#define EVK_AEN_I2C_ADDR_INA236_VCAM0 0x44u /**< U32 INA236B. */
+#define EVK_AEN_I2C_ADDR_INA236_VCAM1 0x45u /**< U34 INA236B. */
 #define EVK_AEN_I2C_ADDR_INA236_5V 0x46u    /**< U30 INA236B. */
 
 /* ================================================================== */
