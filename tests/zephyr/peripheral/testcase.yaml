@@ -21,7 +21,8 @@ tests:
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
-    extra_args: CONF_FILE="prj.conf;prj_caps_e3.conf"
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_caps_e3.conf"
     tags:
       - alp-sdk
       - peripheral
