@@ -138,6 +138,23 @@ typedef enum {
  *  event up to Alif. */
 #define EVK_AEN_PIN_M2E_UART_WAKE ALP_E1M_GPIO_IO19
 
+/* M.2 E-key W_DISABLE control lines (per the M.2 spec).
+ *
+ * Two open-drain signals the host uses to disable the radios on
+ * a populated M.2 E-key card:
+ *   W_DISABLE1#  -- asserted low, disables Wi-Fi.
+ *   W_DISABLE2#  -- asserted low, disables Bluetooth.
+ *
+ * Both pads route through the on-module CC3501E (GPIO16 and
+ * GPIO17 per from-cc3501e.tsv).  Apps drive them via
+ * ALP_CC3501E_CMD_GPIO_CONFIGURE (with open-drain direction =
+ * input pull-up + write 0 to assert / write 1 / Hi-Z to release)
+ * + ALP_CC3501E_CMD_GPIO_WRITE.  The CC3501E firmware needs the
+ * open-drain mode wired into its GPIO_CONFIGURE handler -- noted
+ * for the alplabai/cc3501e-firmware project. */
+#define EVK_AEN_PIN_W_DISABLE1 ALP_E1M_GPIO_IO17 /**< Wi-Fi disable (open-drain, active-low). */
+#define EVK_AEN_PIN_W_DISABLE2 ALP_E1M_GPIO_IO16 /**< Bluetooth disable (open-drain, active-low). */
+
 /* PCIe I2C mux + control-IO-expander cluster.
  *
  * The EVK splits E1M_I2C0 between the PCIe M-key and E-key slots
