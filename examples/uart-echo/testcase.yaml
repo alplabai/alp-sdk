@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: uart-echo
+  description: |
+    Per-peripheral example for UART.  Demonstrates open / read /
+    write / close on ALP_E1M_UART0.
+
+tests:
+  alp_sdk.example.uart_echo:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - uart
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[uart\\] done"

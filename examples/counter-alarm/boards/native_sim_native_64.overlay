@@ -1,0 +1,8 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * native_sim has no counter device by default.  alp_counter_open
+ * returns NULL with last_error = ALP_ERR_NOT_READY; example exits
+ * after printing the diagnostic.
+ */

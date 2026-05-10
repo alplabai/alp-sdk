@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: pwm-led-fade
+  description: |
+    Per-peripheral example for <alp/pwm.h>.  Fades an LED on
+    ALP_E1M_PWM0.  On native_sim there's no PWM emul controller
+    so the example prints the alp_last_error() diagnostic and
+    exits — proves the open / last_error / close path works.
+
+tests:
+  alp_sdk.example.pwm_led_fade:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - pwm
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[pwm\\] done"

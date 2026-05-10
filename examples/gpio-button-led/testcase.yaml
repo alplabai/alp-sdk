@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: gpio-button-led
+  description: |
+    Per-peripheral example for the GPIO surface (via the
+    <alp/chips/button_led.h> block helper).  Toggles the LED and
+    reads the button state.
+
+tests:
+  alp_sdk.example.gpio_button_led:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - gpio
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[gpio\\] done"

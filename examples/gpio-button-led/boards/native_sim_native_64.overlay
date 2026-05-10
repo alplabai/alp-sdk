@@ -1,0 +1,28 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Two emulated GPIOs: index 0 = button (active low, pull-up),
+ * index 1 = LED (active high).  Matches the ALP_E1M_GPIO_IO0
+ * and ALP_E1M_GPIO_IO1 conventions the example uses.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+    gpio_emul0: gpio_emul0 {
+        compatible = "zephyr,gpio-emul";
+        status = "okay";
+        gpio-controller;
+        rising-edge;
+        falling-edge;
+        #gpio-cells = <2>;
+        ngpios = <8>;
+    };
+
+    alp_pins: alp-pins {
+        compatible = "alp,pin-array";
+        gpios = <&gpio_emul0 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+                <&gpio_emul0 1 GPIO_ACTIVE_HIGH>;
+    };
+};

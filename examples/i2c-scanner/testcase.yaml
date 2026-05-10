@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: i2c-scanner
+  description: |
+    Per-peripheral example for I²C.  Walks 7-bit addresses on
+    ALP_E1M_I2C0 and reports responders.
+
+tests:
+  alp_sdk.example.i2c_scanner:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - i2c
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[i2c\\] done"

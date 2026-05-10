@@ -1,0 +1,10 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On native_sim there's no ADC controller wired by default; the
+ * alp-adc0 alias resolves to a NULL spec and alp_adc_open returns
+ * NULL with last_error = ALP_ERR_NOT_READY.  The example exits
+ * after printing the diagnostic so the console harness can assert
+ * the path runs.
+ */

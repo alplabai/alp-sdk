@@ -1,0 +1,17 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * native_sim has no PWM emul controller, so the alp-pwm0 alias
+ * resolves to a NULL spec at build time.  alp_pwm_open returns
+ * NULL with last_error = ALP_ERR_NOT_READY — exactly the path
+ * the example's main() exercises to demonstrate the diagnostic.
+ *
+ * On real silicon the alp-pwm0 alias must point at a pwm-leds
+ * style child node:
+ *
+ *     pwm_user0: pwm_user_0 {
+ *         pwms = <&pwm0 0 PWM_USEC(1000) PWM_POLARITY_NORMAL>;
+ *     };
+ *     aliases { alp-pwm0 = &pwm_user0; };
+ */

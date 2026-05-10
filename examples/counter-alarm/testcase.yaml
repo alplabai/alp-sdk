@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: counter-alarm
+  description: |
+    Per-peripheral example for <alp/counter.h>.  Schedules a
+    one-shot alarm 100 ms in the future.
+
+tests:
+  alp_sdk.example.counter_alarm:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - counter
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[counter\\] done"

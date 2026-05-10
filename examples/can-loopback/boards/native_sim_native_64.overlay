@@ -1,0 +1,9 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * native_sim has no CAN controller.  alp_can_open returns NULL
+ * with last_error = ALP_ERR_NOT_READY; the example prints the
+ * diagnostic and exits.  On real silicon the alp-can0 alias must
+ * point at the SoC's CAN node.
+ */

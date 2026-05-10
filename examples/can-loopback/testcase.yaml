@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: can-loopback
+  description: |
+    Per-peripheral example for <alp/can.h>.  Brings up CAN0 in
+    loopback mode, sends a frame, demonstrates the rx callback.
+
+tests:
+  alp_sdk.example.can_loopback:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - can
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[can\\] done"

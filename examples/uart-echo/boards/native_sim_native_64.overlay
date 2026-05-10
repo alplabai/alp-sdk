@@ -1,0 +1,14 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Wire native_sim's host-stdin/stdout UART to alp-uart0 so the
+ * example exercises a real (host-mediated) byte path.  On real
+ * silicon the alias points at a SoC USART node.
+ */
+
+/ {
+    aliases {
+        alp-uart0 = &uart0;
+    };
+};

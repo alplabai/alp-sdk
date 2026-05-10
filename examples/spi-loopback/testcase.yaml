@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: spi-loopback
+  description: |
+    Per-peripheral example for SPI.  Open / transceive / close
+    on ALP_E1M_SPI0 with no CS GPIO.
+
+tests:
+  alp_sdk.example.spi_loopback:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - spi
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[spi\\] done"

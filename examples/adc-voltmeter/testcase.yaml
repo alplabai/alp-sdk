@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: adc-voltmeter
+  description: |
+    Per-peripheral example for <alp/adc.h>.  Demonstrates open /
+    capability-validation / read_uv / close on ALP_E1M_ADC0.
+
+tests:
+  alp_sdk.example.adc_voltmeter:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - adc
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[adc\\] done"
