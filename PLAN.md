@@ -1,6 +1,6 @@
 # ALP SDK — Product + Engineering Plan
 
-Last revised: 2026-05-09.
+Last revised: 2026-05-10.
 
 This plan is the bridge between the canonical product slides
 (`ALP Lab — E1M™ Software Stack`, `Product Overview: Software`)
@@ -229,20 +229,26 @@ release:
 
 ## 6. Open work / explicit gaps
 
-Items the slides imply but the v0.1 SDK doesn't yet have:
+Items the slides imply.  Items the v0.2 SDK *did* close are kept in
+the list with strikethrough so the audit trail stays clear; items
+that remain open take priority for the upcoming releases.
 
 1. **`<alp/inference.h>`** — unified ML inference API.  Held until
    v0.2 exercises Vela + TFLM end-to-end so the API isn't designed
    in a vacuum.
-2. **`<alp/audio.h>`** — declared in `VERSIONS.md` for v0.2 but no
-   header file yet.  PDM input + I²S output + ALP-default DSP chain.
-3. **`<alp/ble.h>`** — declared for v0.3.  Zephyr `bt` host stack
-   per the brainstorming-locked decision.
-4. **`<alp/security.h>`** — declared for v0.3.  MbedTLS re-export +
-   Alif/Renesas hardware crypto bindings.
-5. **`<alp/mproc.h>`** — declared in `VERSIONS.md` for v0.3 (Multi-
-   Processor Support Completion).  Needs IPC primitives (MHU,
-   HWSEM) wrapped, OpenAMP RPC, dual-core build orchestration.
+2. ~~**`<alp/audio.h>`** — declared in `VERSIONS.md` for v0.2 but no
+   header file yet.~~  **Closed v0.2:** header surface lands with
+   PDM input + I²S output + per-block read/write API; impl arrives
+   alongside the `<alp/i2s.h>` real path.
+3. ~~**`<alp/ble.h>`** — declared for v0.3.~~  **Surface closed:**
+   peripheral + central + GATT shape declared; Zephyr `bt` host
+   impl pending v0.3.
+4. ~~**`<alp/security.h>`** — declared for v0.3.~~  **Surface closed:**
+   hash + AEAD + TRNG surface declared; MbedTLS impl + per-SoC HW
+   accelerator routing pending v0.3.
+5. ~~**`<alp/mproc.h>`** — declared in `VERSIONS.md` for v0.3.~~
+   **Surface closed:** shared-memory + mailbox + hwsem primitives
+   declared; OpenAMP RPC + dual-core orchestration pending v0.3.
 6. **i.MX 93 datasheet ingest** — peripheral counts and orderable
    variants are TBD.  Lands when the user supplies the exact HW
    config (per the project memory note).
@@ -257,6 +263,22 @@ Items the slides imply but the v0.1 SDK doesn't yet have:
 9. **HW-in-loop CI** — `.github/workflows/nightly-aen-hil.yml` is a
    skeleton; needs a self-hosted runner with the `hil-aen` label.
    Setup contract documented at `ci/HW-IN-LOOP.md`.
+
+### Closed in v0.2 (additional gaps the slides didn't anticipate)
+
+10. ~~**Peripheral coverage at 4 of 12.**~~  v0.2 wrappers PWM,
+    ADC, Counter, QEnc, I²S, CAN-FD, RTC, Watchdog brought the
+    SDK to 12 wrapped peripheral classes.  See
+    [ADR 0003](docs/adr/0003-peripheral-coverage.md).
+11. ~~**No error mechanism for SoC-capability mismatches.**~~
+    `alp_last_error()` thread-local + `<alp/soc_caps.h>` generated
+    from `metadata/socs/**.json` reject configs that exceed the
+    active SoC's documented hardware caps.  See
+    [ADR 0002](docs/adr/0002-error-mechanism.md).
+12. ~~**No documented portability bound.**~~ `ALP_E1M_<CLASS>_COUNT`
+    macros in `<alp/e1m_pinout.h>` enumerate the e1m-spec's
+    minimum routed instance counts.  See
+    [ADR 0004](docs/adr/0004-e1m-portability-bound.md).
 
 ---
 

@@ -387,6 +387,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   (ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOT_READY /
   ALP_ERR_NOMEM / ALP_ERR_IO) before returning NULL.  ADR 0002's
   v0.3 "retrofit" follow-up landed early.
+- **CI: pr-generated-files.yml** verifies generated artefacts stay
+  in sync with their inputs — re-runs `gen_soc_caps.py` and
+  `abi_snapshot.py` then fails the PR if `include/alp/soc_caps.h`
+  or `docs/abi/v0.1-snapshot.json` differ from the committed
+  copies (ignoring the snapshot's `generated` date stamp).
+  Catches "metadata edited but soc_caps.h not regenerated" and
+  "header added/removed but ABI snapshot not bumped" PR mistakes.
+- **PLAN.md §6 Open work** updated — gaps the v0.2 expansion
+  closed are kept on the list with strikethrough plus a "closed"
+  reference to the matching ADR or implementation, so the audit
+  trail of what was promised vs. what shipped stays explicit.
 
 ### Notes
 

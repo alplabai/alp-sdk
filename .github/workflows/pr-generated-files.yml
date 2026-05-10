@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Verifies generated files stay in sync with their inputs.  Catches:
+#
+#   - Metadata edits that didn't trigger a soc_caps.h regeneration.
+#     scripts/gen_soc_caps.py reads metadata/socs/**.json and emits
+#     include/alp/soc_caps.h; if the committed header doesn't match
+#     what the script would produce, the PR is asking reviewers to
+#     accept stale capability tables.
+#
+#   - Public-header additions/removals that didn't bump the ABI
+#     snapshot at docs/abi/v<N>-snapshot.json.  The snapshot's
+#     fingerprint diff is the cheapest way to spot accidental
+#     ABI changes.
+
+name: pr-generated-files
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'metadata/**'
+      - 'include/alp/**'
+      - 'scripts/gen_soc_caps.py'
+      - 'scripts/abi_snapshot.py'
+      - '.github/workflows/pr-generated-files.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'metadata/**'
+      - 'include/alp/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check · generated files in sync
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Regenerate soc_caps.h from metadata
+        run: python3 scripts/gen_soc_caps.py
+
+      - name: Regenerate ABI snapshot
+        # The snapshot's `generated` field is a date stamp; re-running
+        # on the same headers always changes that one line, so we
+        # diff with --ignore-matching-lines to mask it.
+        run: |
+          python3 scripts/abi_snapshot.py \
+              --version v0.1 \
+              --output docs/abi/v0.1-snapshot.json
+
+      - name: Fail if generated files differ from committed copies
+        run: |
+          # Allow the snapshot's "generated" date to differ; everything
+          # else must match.
+          if ! git diff --exit-code \
+                  --ignore-matching-lines='"generated":' \
+                  -- include/alp/soc_caps.h docs/abi/v0.1-snapshot.json; then
+            echo "::error::Generated files are stale.  Run:"
+            echo "::error::  python3 scripts/gen_soc_caps.py"
+            echo "::error::  python3 scripts/abi_snapshot.py --version v0.1 --output docs/abi/v0.1-snapshot.json"
+            echo "::error::and commit the result."
+            exit 1
+          fi
