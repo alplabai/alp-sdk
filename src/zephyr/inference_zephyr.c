@@ -101,29 +101,19 @@ void         alp_inference_tflm_close(struct alp_inference *h);
 #endif
 
 /* ------------------------------------------------------------------ */
-/* Backend availability flags                                          */
-/* ------------------------------------------------------------------ */
-
-#define ALP_BE_HAS_TFLM defined(CONFIG_ALP_SDK_INFERENCE_TFLM)
-#define ALP_BE_HAS_ETHOS_U defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U)
-#define ALP_BE_HAS_DRPAI 0    /* v0.3 */
-#define ALP_BE_HAS_DEEPX_DX 0 /* v0.4 */
-
-#if ALP_BE_HAS_TFLM || ALP_BE_HAS_ETHOS_U
-#define ALP_INFERENCE_HAS_REAL_BACKEND 1
-#else
-#define ALP_INFERENCE_HAS_REAL_BACKEND 0
-#endif
-
-/* ------------------------------------------------------------------ */
 /* Auto-select policy                                                  */
+/*                                                                     */
+/* Pick the first available real backend in this order: ETHOS_U,      */
+/* CPU.  When nothing compiles in we return AUTO again as a sentinel  */
+/* and the caller stamps NOSUPPORT.  Direct #if defined(...) ladder   */
+/* keeps -Wexpansion-to-defined happy across compilers.               */
 /* ------------------------------------------------------------------ */
 
 static alp_inference_backend_t resolve_auto(void)
 {
-#if ALP_BE_HAS_ETHOS_U
+#if defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U)
     return ALP_INFERENCE_BACKEND_ETHOS_U;
-#elif ALP_BE_HAS_TFLM
+#elif defined(CONFIG_ALP_SDK_INFERENCE_TFLM)
     return ALP_INFERENCE_BACKEND_CPU;
 #else
     return ALP_INFERENCE_BACKEND_AUTO; /* signals "nothing available" */
