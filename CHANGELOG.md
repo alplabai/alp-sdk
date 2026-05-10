@@ -7,6 +7,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.1.0 candidate
 
+### Added
+
+- `firmware/cc3501e/` scaffolding -- the alp-sdk side of the
+  two-repo boundary with the future `alplabai/cc3501e-firmware`:
+  bootstrap README that mirrors the contract from
+  `docs/cc3501e-bridge.md`, a `flash.py` stub (dry-run + SHA-256
+  + signature presence checks today; real bootloader sequence
+  lands with the first signed binary), `protocol-version.txt`
+  pinned to wire-protocol v1, and an empty `prebuilt/` with its
+  own CHANGELOG ready to receive `cc3501e-vX.Y.Z.bin` releases.
+
 ### Removed (pre-1.0)
 
 - `<alp/math.h>` and `<alp/signal.h>` deleted.  They were thin
