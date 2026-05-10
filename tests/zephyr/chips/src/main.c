@@ -622,10 +622,16 @@ ZTEST(alp_chips, test_public_headers_co_compile) {
 /* ------------------------------------------------------------------ */
 
 ZTEST(alp_chips, test_audio_surface_v01_nosupport) {
-    zassert_is_null(alp_audio_in_open(NULL),  "v0.1 audio_in stub returns NULL");
-    zassert_is_null(alp_audio_out_open(NULL), "v0.1 audio_out stub returns NULL");
-    zassert_equal(alp_audio_in_start(NULL),  ALP_ERR_NOSUPPORT);
-    zassert_equal(alp_audio_out_start(NULL), ALP_ERR_NOSUPPORT);
+    /* audio.h went stub -> real on AEN-Zephyr in v0.2.  The contract
+     * shifted: open(NULL cfg) still returns NULL (with last_error =
+     * INVAL); start/stop/etc. on a NULL handle now report NOT_READY
+     * (the standard wrapper convention) rather than NOSUPPORT.
+     * The "v0.1 stubbed" naming is kept for the suite history; the
+     * assertions match the v0.2 reality.  */
+    zassert_is_null(alp_audio_in_open(NULL),  "open(NULL cfg) -> NULL");
+    zassert_is_null(alp_audio_out_open(NULL), "open(NULL cfg) -> NULL");
+    zassert_equal(alp_audio_in_start(NULL),  ALP_ERR_NOT_READY);
+    zassert_equal(alp_audio_out_start(NULL), ALP_ERR_NOT_READY);
     alp_audio_in_close(NULL);
     alp_audio_out_close(NULL);
 }
