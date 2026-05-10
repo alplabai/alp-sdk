@@ -25,6 +25,14 @@
  * wrapper honours the v0.1 NULL-with-NOSUPPORT contract so apps that
  * link against <alp/audio.h> still compile under native_sim or any
  * other "no audio path" target.
+ *
+ * Optional buffering layer (v0.3 scaffolding, v0.4 first real use):
+ * when CONFIG_ALP_SDK_USE_LWRB=y the wrapper may stage DMIC reads
+ * through a MaJerle/lwrb ring buffer for byte-granular drain by the
+ * caller, in addition to the k_mem_slab DMA scratch.  See
+ * vendors/lwrb/README.md for the integration plan + Kconfig anchor.
+ * No LwRB types leak through <alp/audio.h>; the ring stays an
+ * implementation detail of this file.
  */
 
 #include <errno.h>

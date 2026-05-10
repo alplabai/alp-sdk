@@ -16,6 +16,16 @@
  * alp-hwsemN.
  *
  * Gated on CONFIG_ALP_SDK_MPROC.  When OFF, NULL/NOSUPPORT.
+ *
+ * Optional frame serialisation (v0.3 scaffolding, v0.4 first real
+ * use): when CONFIG_ALP_SDK_USE_NANOPB=y the wrapper frames each
+ * outbound mbox payload through nanopb against the schema at
+ * metadata/protos/alp_mproc.proto.  Self-describing payloads survive
+ * independent firmware upgrades of the two M55 cores; see
+ * vendors/nanopb/README.md for the integration plan + Kconfig
+ * anchor.  The proto types are internal; <alp/mproc.h>'s public
+ * surface still accepts plain (data, len) so apps that don't opt
+ * into nanopb send raw bytes unchanged.
  */
 
 #include <errno.h>

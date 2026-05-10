@@ -33,17 +33,19 @@ defaults / type-shim value.
 | [doctest](https://github.com/doctest/doctest) | Single-header C++ test framework | recommended | Lighter than gtest / Catch2 for chip-driver unit tests run on host (not on target). |
 | [LittleFS](https://github.com/littlefs-project/littlefs) | Fail-safe filesystem for microcontrollers | recommended (Zephyr ships it) | For the microSD slot + on-flash storage.  Already in the Zephyr tree.             |
 
-## Tier 2 — under evaluation for SDK integration
+## Tier 2 — deferred to v0.5+
 
-| Library      | Scope                                                | Proposed integration                                                                         |
-|--------------|------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| [LwRB](https://github.com/MaJerle/lwrb) | Lock-free ring buffer | Internal use in `<alp/audio.h>` for DMA-staged capture + `<alp/peripheral.h>` UART RX.  Lock-free, MIT, ~300 LoC. |
-| [nanoPB](https://github.com/nanopb/nanopb) | Protobuf for embedded (C) | Drive `<alp/mproc.h>` IPC framing + studio's wire format for over-the-wire config blobs.   |
-| [TinyFrame](https://github.com/MightyPork/TinyFrame) | UART framing protocol | Available behind `CONFIG_ALP_SDK_TINYFRAME` for users building custom UART protocols.       |
-| [heatshrink](https://github.com/atomicobject/heatshrink) | LZSS-style data compression for embedded/RT | For OTA delta updates (v1.x per ADR 0006's "deferred to v1.x" list).                        |
-| [trice](https://github.com/rokath/trice) | Fast trace-ID logging with PC-side decoding | Diagnostic surface adjacent to `alp_last_error()`.  Real-time, ISR-safe.                    |
-| [nanoMODBUS](https://github.com/debevv/nanoMODBUS) | Modbus RTU/TCP for embedded | Industrial users on V2N/N93 Yocto + AEN Zephyr.  Drop-in for ICS gateways.                  |
-| [o1heap](https://github.com/pavel-kirienko/o1heap) | O(1) deterministic heap allocator | Optional drop-in for `<alp/peripheral.h>` handle pools when callers want hard-RT bounds.    |
+The libraries below cleared the evaluation but didn't land in v0.3's
+library-integration pass.  Each carries a one-liner explaining why
+it's parked.  v0.5 cycle revisits.
+
+| Library      | Scope                                                | Why deferred                                                                                |
+|--------------|------------------------------------------------------|---------------------------------------------------------------------------------------------|
+| [TinyFrame](https://github.com/MightyPork/TinyFrame) | UART framing protocol | Overlaps with the cc3501e protocol once that ships as a public framing helper -- revisit when there's a second framed UART use case in the SDK. |
+| [heatshrink](https://github.com/atomicobject/heatshrink) | LZSS-style compression for embedded/RT | OTA delta updates are post-v1.x per ADR 0006; until OTA actually ships there's no caller. |
+| [trice](https://github.com/rokath/trice) | Fast trace-ID logging with PC-side decoding | Zephyr's LOG subsystem covers the v0.3 / v0.4 needs; trice's win is post-v1.0 production tracing. |
+| [nanoMODBUS](https://github.com/debevv/nanoMODBUS) | Modbus RTU/TCP for embedded | Industrial-customer-driven; no committed v0.4 caller yet.  Adding it now means maintaining unused code. |
+| [o1heap](https://github.com/pavel-kirienko/o1heap) | O(1) deterministic heap allocator | The SDK's handle pools are statically sized (no heap on the hot path); o1heap's value lands when caller code starts allocating, which is post-1.0. |
 
 ## Tier 3 — already integrated / Zephyr-native
 
@@ -56,6 +58,8 @@ defaults / type-shim value.
 | lwIP / Mongoose | Zephyr's net stack + `<alp/iot.h>` MQTT path.  Mongoose available for users wanting an embedded HTTP server. |
 | u8g2        | Monochrome OLED graphics — pairs with the `chips/ssd1306` driver.                            |
 | SSD1306 / SSD1331 | Already in `chips/` library.                                                          |
+| [LwRB](https://github.com/MaJerle/lwrb) | v0.3 scaffolding shipped at `vendors/lwrb/` (stub `<lwrb/lwrb.h>` + Kconfig `CONFIG_ALP_SDK_USE_LWRB`).  First real consumer (audio + UART byte-granular staging) lands v0.4; west.yml pin then. |
+| [nanoPB](https://github.com/nanopb/nanopb) | v0.3 scaffolding shipped at `vendors/nanopb/` (stub `<pb.h>` + `<pb_encode.h>` + `<pb_decode.h>` + Kconfig `CONFIG_ALP_SDK_USE_NANOPB`).  Schema at `metadata/protos/alp_mproc.proto`; first real consumer (`<alp/mproc.h>` IPC framing) lands v0.4 alongside the multi-proc completion. |
 
 ## Tier 4 — alternative inference backends (considered, deferred)
 

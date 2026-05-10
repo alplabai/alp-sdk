@@ -9,6 +9,28 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- Library integration pass for v0.4 prep -- two Tier-2 libraries from
+  docs/recommended-libraries.md land as scaffolding anchors:
+  - **LwRB** (MaJerle, MIT) under `vendors/lwrb/` with a stub
+    `<lwrb/lwrb.h>` mirroring the upstream API + `CONFIG_ALP_SDK_USE_LWRB`
+    Kconfig flag (default OFF).  audio_zephyr.c gets a docstring
+    anchor; first real use (byte-granular DMA staging) lands v0.4
+    once the west.yml pin lands.
+  - **nanopb** (zlib) under `vendors/nanopb/` with stub `<pb.h>` +
+    `<pb_encode.h>` + `<pb_decode.h>` + `CONFIG_ALP_SDK_USE_NANOPB`
+    Kconfig flag (default OFF).  mproc_zephyr.c gets a docstring
+    anchor; first real use (IPC frame serialisation) lands v0.4
+    alongside the multi-proc completion.
+  - New `metadata/protos/alp_mproc.proto` -- the v1 IPC schema
+    (Envelope / Heartbeat / RpcRequest / RpcResponse / Notification)
+    that the nanopb-backed mproc framing will code-gen against.
+  - `docs/recommended-libraries.md` updated: LwRB + nanoPB move from
+    Tier 2 "under evaluation" to Tier 3 "already integrated";
+    TinyFrame / heatshrink / trice / nanoMODBUS / o1heap noted as
+    deferred to v0.5+ with one-liner rationales.
+  - `docs/getting-started.md` "Where to go next" now points at
+    `docs/recommended-libraries.md` so hand-written-firmware authors
+    discover the curated companion library list.
 - Ethos-U65 (i.MX 93) wired alongside Ethos-U55 (AEN) on the Zephyr
   TFLM inference path.  The `inference_tflm.cpp` source path was
   already portable across U55 and U65 (both register through

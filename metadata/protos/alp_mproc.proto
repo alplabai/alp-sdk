@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// alp_mproc.proto -- the wire schema for messages passed through
+// <alp/mproc.h>'s alp_mbox_send + shared-memory pipeline between
+// the two M55 cores on E1M-AEN (M55-HP application core <-> M55-HE
+// real-time core), and between the M33 + A55 cores on E1M-N93.
+//
+// Why protobuf?  Self-describing payloads + forward/backward
+// compatibility on a wire that survives independent firmware
+// upgrades of the two cores.  nanopb (vendors/nanopb/) is the
+// embedded-friendly codec; ~3 KB ROM per message type, no heap.
+//
+// Versioning:
+//   - This file is the v1 wire format.
+//   - Field tag numbers must NEVER be re-used; renaming a field is
+//     fine but moving a tag breaks backward compatibility.
+//   - New messages get new top-level types; new enum values append
+//     to the end of an existing enum.
+//
+// Code generation lands in v0.4:
+//   python -m nanopb.generator metadata/protos/alp_mproc.proto \
+//       --output-dir build/generated/alp_mproc
+//   -> emits alp_mproc.pb.h + alp_mproc.pb.c
+
+syntax = "proto3";
+
+package alp.mproc.v1;
+
+option java_package      = "ai.alplab.mproc.v1";
+option java_outer_classname = "AlpMprocProto";
+
+// Top-level envelope sent over alp_mbox_send.  One Envelope per send
+// transaction; the receiver decodes the oneof to dispatch.
+message Envelope {
+    // Per-channel monotonic counter.  Receiver may use it to detect
+    // dropped frames (gap in sequence) or duplicate delivery (same
+    // sequence twice).  Wraps at uint32 max -- about 49 days at
+    // 1 kHz, longer in practice.
+    uint32 sequence = 1;
+
+    // Sender's monotonic-clock timestamp, microseconds.  Reference
+    // is the sender core's local clock; the receiver should not
+    // assume a shared epoch.  Useful for latency profiling, not for
+    // wall-clock correlation.
+    uint64 timestamp_us = 2;
+
+    oneof payload {
+        Heartbeat    heartbeat    = 10;
+        RpcRequest   rpc_request  = 11;
+        RpcResponse  rpc_response = 12;
+        Notification notification = 13;
+    }
+}
+
+// Liveness probe.  Sent at the slow heartbeat interval (default
+// 1 Hz, override via CONFIG_ALP_SDK_MPROC_HEARTBEAT_HZ) so each
+// core knows the peer is alive without consuming a real RPC slot.
+message Heartbeat {
+    // Sender's uptime in seconds.  Resetting to zero implies the
+    // peer rebooted -- receivers reset their RPC state machine
+    // when this happens.
+    uint32 uptime_seconds = 1;
+}
+
+// Bidirectional RPC request.  The receiver dispatches `method`
+// against its method table, decodes `args` per the method's input
+// proto, and sends back an RpcResponse with matching `sequence`.
+message RpcRequest {
+    // Dotted method name; e.g. "alp.signal.fir", "alp.audio.gain".
+    // The "alp." prefix is reserved for SDK-shipped methods;
+    // application-defined methods use a different top-level
+    // namespace (e.g. "app.audio.gain").
+    string method = 1;
+
+    // Method-specific argument blob.  Format is determined by the
+    // method's documented input proto -- both sides must agree.
+    // Empty for parameterless methods.
+    bytes args = 2;
+}
+
+// Response to a prior RpcRequest.  The `sequence` field MUST match
+// the request's Envelope.sequence so the caller can correlate.
+message RpcResponse {
+    // Echoes the request's Envelope.sequence.  Receivers ignore
+    // responses whose sequence doesn't match a pending request.
+    uint32 sequence = 1;
+
+    // alp_status_t value encoded as int32.  ALP_OK = 0; negative
+    // values are error codes per <alp/peripheral.h>.
+    int32 status = 2;
+
+    // Method-specific result blob.  Format determined by the
+    // method's documented output proto.  Empty on error.
+    bytes result = 3;
+}
+
+// Async, unsolicited notification.  No response expected.  Used
+// for one-way events like "audio buffer overrun" or "OTA progress
+// 30%".
+message Notification {
+    // Dotted topic name; e.g. "alp.audio.overrun", "alp.ota.progress".
+    string topic = 1;
+
+    // Topic-specific payload blob.
+    bytes payload = 2;
+}

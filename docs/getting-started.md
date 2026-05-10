@@ -262,6 +262,11 @@ Key tasks (Command Palette → **Tasks: Run Task**):
 - End-to-end reference apps:
   [`examples/edgeai-vision-aen/`](../examples/edgeai-vision-aen/)
   and [`examples/iot-connected-camera/`](../examples/iot-connected-camera/)
+- **Recommended third-party libraries** to pair with the SDK
+  (CMSIS-DSP, ETLCPP, fmt, nlohmann/json, doctest, LittleFS, and
+  more): [`docs/recommended-libraries.md`](recommended-libraries.md).
+  The SDK deliberately stays small; that doc is the curated list
+  of battle-tested libraries that fill the gaps for app code.
 - Architecture overview: [`docs/architecture.md`](architecture.md)
 - Architecture decision records: [`docs/adr/`](adr/)
 - Hardware specs: [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
