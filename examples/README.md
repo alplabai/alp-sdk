@@ -35,6 +35,8 @@ for why the standalone path is first-class.
 | [`rtc-clock/`](rtc-clock/)               | `rtc.h`       | Set + get round-trip with the human-readable `alp_rtc_time_t`.          |
 | [`wdt-feed/`](wdt-feed/)                 | `wdt.h`       | Install a 5 s timeout, feed it three times, demonstrate close.          |
 | [`can-loopback/`](can-loopback/)         | `can.h`       | Loopback-mode TX + RX-callback dispatch.                                |
+| [`i2s-tone/`](i2s-tone/)                 | `i2s.h`       | Stream a 1 kHz triangle wave (16-bit stereo) to ALP_E1M_I2S0.           |
+| [`qenc-readout/`](qenc-readout/)         | `counter.h` (qenc side) | Poll ALP_E1M_ENC0's accumulated position.                       |
 
 Every per-peripheral example asserts a `[<class>] done` line via
 the twister console harness so the standalone-build path is gated
