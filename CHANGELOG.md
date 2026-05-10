@@ -9,6 +9,18 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- Ethos-U65 (i.MX 93) wired alongside Ethos-U55 (AEN) on the Zephyr
+  TFLM inference path.  The `inference_tflm.cpp` source path was
+  already portable across U55 and U65 (both register through
+  `AddEthosU()`); v0.3 lays down the Kconfig + per-variant anchor.
+  New `ALP_SDK_INFERENCE_ETHOS_U_N93` Kconfig defaults on when the
+  SoC choice is i.MX 93 and compiles `src/zephyr/inference_ethosu_n93.c`
+  -- a thin anchor that exposes `alp_ethosu_n93_register` (no-op until
+  v0.4 wires the NPU attach) + `alp_ethosu_variant_name` (literal
+  `"ethos-u65"`).  `ALP_SDK_INFERENCE_ETHOS_U` now defaults on for
+  both AEN-E7 and i.MX 93.  vendors/nxp-imx93/README.md documents the
+  Vela invocation (`ethos-u65-256`) + the A55-side proxy plan via
+  OpenAMP/M33 firmware (v0.4 first-class).  PLAN.md row updated.
 - DEEPX DX-M1 inference backend on the Yocto / Linux user-space path.
   New `src/yocto/inference_yocto.c` is the first real Yocto-side
   surface in the SDK -- it owns the `alp_inference_*` public symbols

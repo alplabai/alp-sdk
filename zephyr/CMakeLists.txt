@@ -52,6 +52,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_TFLM
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_tflm.cpp)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_DRPAI
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_drpai.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_ethosu_n93.c)
 
 # v0.2 peripheral wrappers — opt-in per-class so apps that don't use
 # a given Zephyr subsystem don't link the wrapper.  Each defaults on

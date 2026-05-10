@@ -315,12 +315,30 @@ config ALP_SDK_INFERENCE_DRPAI
 
 config ALP_SDK_INFERENCE_ETHOS_U
 	bool "Wire Arm Ethos-U op resolver (Vela-compiled models)"
-	default y if ALP_SDK_INFERENCE_TFLM && SOC_SERIES_ENSEMBLE_E7
+	default y if ALP_SDK_INFERENCE_TFLM && (SOC_SERIES_ENSEMBLE_E7 || ALP_SOC_NXP_IMX9_IMX93)
 	depends on ALP_SDK_INFERENCE_TFLM
 	help
 	  Adds the AddEthosU() registration so Vela-compiled .tflite
 	  files can dispatch their custom ETHOS-U operator to the NPU.
-	  Off-target builds (CPU-only) must turn this off.
+	  Covers Ethos-U55 on Alif Ensemble (AEN family) and Ethos-U65 on
+	  NXP i.MX 93's Cortex-M33.  Variant selection happens via
+	  ALP_SDK_INFERENCE_ETHOS_U_N93 (i.MX 93) -- the SDK source path
+	  is identical between U55 and U65; only the Vela compilation
+	  target + Arm driver build differ.  Off-target builds (CPU-only)
+	  must turn this off.
+
+config ALP_SDK_INFERENCE_ETHOS_U_N93
+	bool "Target the i.MX 93 Ethos-U65 (vs the AEN family's Ethos-U55)"
+	default y if ALP_SOC_NXP_IMX9_IMX93
+	depends on ALP_SDK_INFERENCE_ETHOS_U
+	help
+	  Compile the i.MX 93 + Ethos-U65 per-variant config layer
+	  (src/zephyr/inference_ethosu_n93.c).  Anchors the v0.4 NPU
+	  attach hook + variant-name helper that downstream code uses
+	  to keep Vela target consistency.  Models compiled for U55
+	  do not run on U65 and vice versa; this flag plus the SoC
+	  choice above tells the build which Vela target the app
+	  expects.
 
 # BLE (<alp/ble.h>) -- v0.3 deliverable.  Same NOSUPPORT contract
 # when CONFIG_BT is off so apps can link cleanly under native_sim.

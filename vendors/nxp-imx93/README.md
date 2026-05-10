@@ -69,3 +69,46 @@ for the workflow.  The `<alp/inference.h>` unification layer
 (v0.3 deliverable) dispatches to Ethos-U65 on i.MX 93 using the
 same calling convention as on AEN, so EdgeAI applications port
 unchanged.
+
+### SDK-side Kconfig
+
+The Zephyr-side `<alp/inference.h>` glue covers U55 and U65 with
+the same `inference_tflm.cpp` source.  Variant selection happens
+through two Kconfigs:
+
+| Kconfig                                | Meaning                                                                       |
+|----------------------------------------|-------------------------------------------------------------------------------|
+| `ALP_SDK_INFERENCE_ETHOS_U`            | Enable Ethos-U dispatch path at all.  Auto-on for AEN-E7 and i.MX 93.         |
+| `ALP_SDK_INFERENCE_ETHOS_U_N93`        | Compile the i.MX 93 per-variant config layer (`src/zephyr/inference_ethosu_n93.c`). Auto-on when the SoC choice is i.MX 93. |
+
+The per-variant file is a thin anchor today: it exposes
+`alp_ethosu_n93_register` (no-op until v0.4 wires the NPU attach
+sequence) and `alp_ethosu_variant_name` (literal `"ethos-u65"`)
+for downstream code that wants to sanity-check the Vela target.
+
+### Vela invocation (i.MX 93)
+
+```bash
+vela --accelerator-config ethos-u65-256 \
+     --output-dir build/vela-imx93 \
+     --memory-mode Shared_Sram \
+     mobilenet_v2_quantised.tflite
+```
+
+`ethos-u65-256` is the i.MX 93's bonded MAC count (vs `ethos-u55-256`
+on AEN-E7 and `ethos-u55-128` on AEN-E3).  A model compiled for one
+variant **does not** run on the other -- the Ethos-U custom op
+embedded in the Vela output is variant-specific.  Mismatch surfaces
+as a runtime ALP_ERR_IO from `alp_inference_invoke` once the v0.4
+i.MX 93 bring-up wires the NPU.
+
+### A55-side path (Linux / Yocto)
+
+On the i.MX 93 Yocto build (v0.4 first-class target), the Cortex-A55
+Linux side reaches the Ethos-U65 through OpenAMP / remoteproc to a
+small M33 firmware that owns the NPU.  The A55-side `<alp/inference.h>`
+backend at `src/yocto/` proxies into the M33 service via shared
+memory + mailbox -- planned alongside the v0.4 multi-proc completion
+(see `<alp/mproc.h>` and ADR 0001).  Direct A55-only inference (without
+the M33 firmware) is not supported by NXP's stack; the NPU is gated
+through the M33's address space.

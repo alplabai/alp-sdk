@@ -14,7 +14,14 @@
  * + `tflite::MicroMutableOpResolver` only via its C++ surface; the
  * C wrapper in TFL is for the full runtime, not the micro variant.
  * Wrapping it in C++ keeps the binding simple and lets us reuse Arm's
- * Ethos-U op resolver (`AddEthosU()`) verbatim for the AEN path.
+ * Ethos-U op resolver (`AddEthosU()`) verbatim for both the
+ * Alif AEN path (Ethos-U55) and the NXP i.MX 93 path (Ethos-U65) --
+ * the SDK source code is identical between U55 and U65; only the
+ * upstream Vela `--accelerator-config` + Arm Ethos-U driver build
+ * config differ.  Per-variant hooks live in src/zephyr/inference_ethosu_n93.c
+ * (gated by CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93); a future
+ * inference_ethosu_aen.c would do the AEN-side equivalent if Alif's
+ * driver layer needs distinct attach helpers.
  *
  * Native-sim does NOT enable CONFIG_TENSORFLOW_LITE_MICRO so this
  * file is excluded from the native_sim build entirely; the wrapper
@@ -49,12 +56,12 @@ struct TflmState {
      * room for a couple of custom Ethos-U ops.  Bigger models can
      * raise the bound via CONFIG_ALP_SDK_INFERENCE_TFLM_MAX_OPS. */
     tflite::MicroMutableOpResolver<32> resolver;
-    tflite::MicroInterpreter          *interp     = nullptr;
+    tflite::MicroInterpreter          *interp = nullptr;
     /* Tensor arena -- caller-supplied via cfg.arena, or a built-in
      * static fall-back when cfg.arena is NULL. */
-    uint8_t *arena_buf                            = nullptr;
-    size_t   arena_size                           = 0;
-    bool     own_arena                            = false;
+    uint8_t *arena_buf  = nullptr;
+    size_t   arena_size = 0;
+    bool     own_arena  = false;
 };
 
 constexpr size_t kDefaultArenaBytes = 128 * 1024;
@@ -74,13 +81,20 @@ struct AlpInferenceHandle {
 alp_inference_dtype_t tfl_dtype_to_alp(TfLiteType t)
 {
     switch (t) {
-    case kTfLiteFloat32: return ALP_INFERENCE_DTYPE_F32;
-    case kTfLiteFloat16: return ALP_INFERENCE_DTYPE_F16;
-    case kTfLiteInt8:    return ALP_INFERENCE_DTYPE_INT8;
-    case kTfLiteUInt8:   return ALP_INFERENCE_DTYPE_UINT8;
-    case kTfLiteInt16:   return ALP_INFERENCE_DTYPE_INT16;
-    case kTfLiteInt32:   return ALP_INFERENCE_DTYPE_INT32;
-    default:             return ALP_INFERENCE_DTYPE_F32;
+    case kTfLiteFloat32:
+        return ALP_INFERENCE_DTYPE_F32;
+    case kTfLiteFloat16:
+        return ALP_INFERENCE_DTYPE_F16;
+    case kTfLiteInt8:
+        return ALP_INFERENCE_DTYPE_INT8;
+    case kTfLiteUInt8:
+        return ALP_INFERENCE_DTYPE_UINT8;
+    case kTfLiteInt16:
+        return ALP_INFERENCE_DTYPE_INT16;
+    case kTfLiteInt32:
+        return ALP_INFERENCE_DTYPE_INT32;
+    default:
+        return ALP_INFERENCE_DTYPE_F32;
     }
 }
 
@@ -120,23 +134,23 @@ void fill_tensor_descriptor(const TfLiteTensor *t, alp_inference_tensor_t *out)
     for (int i = 0; i < out->rank; ++i) {
         out->shape[i] = (uint16_t)t->dims->data[i];
     }
-    out->scale      = (t->quantization.type == kTfLiteAffineQuantization)
-                          ? static_cast<TfLiteAffineQuantization *>(t->quantization.params)
-                                ->scale->data[0]
-                          : 1.0f;
-    out->zero_point = (t->quantization.type == kTfLiteAffineQuantization)
-                          ? static_cast<TfLiteAffineQuantization *>(t->quantization.params)
-                                ->zero_point->data[0]
-                          : 0;
+    out->scale =
+        (t->quantization.type == kTfLiteAffineQuantization)
+            ? static_cast<TfLiteAffineQuantization *>(t->quantization.params)->scale->data[0]
+            : 1.0f;
+    out->zero_point =
+        (t->quantization.type == kTfLiteAffineQuantization)
+            ? static_cast<TfLiteAffineQuantization *>(t->quantization.params)->zero_point->data[0]
+            : 0;
 }
 
-}  // namespace
+} // namespace
 
 /* ------------------------------------------------------------------ */
 /* Backend hooks (called from inference_zephyr.c's dispatcher).        */
 /* ------------------------------------------------------------------ */
 
-extern "C" alp_status_t alp_inference_tflm_open(struct alp_inference *h_,
+extern "C" alp_status_t alp_inference_tflm_open(struct alp_inference         *h_,
                                                 const alp_inference_config_t *cfg)
 {
     auto *h     = reinterpret_cast<AlpInferenceHandle *>(h_);
@@ -144,9 +158,9 @@ extern "C" alp_status_t alp_inference_tflm_open(struct alp_inference *h_,
     if (state == nullptr) return ALP_ERR_NOMEM;
 
     if (cfg->arena != nullptr && cfg->arena_bytes > 0) {
-        state->arena_buf = static_cast<uint8_t *>(cfg->arena);
+        state->arena_buf  = static_cast<uint8_t *>(cfg->arena);
         state->arena_size = cfg->arena_bytes;
-        state->own_arena = false;
+        state->own_arena  = false;
     } else {
         if (g_default_arena_in_use) {
             delete state;
@@ -200,8 +214,7 @@ extern "C" size_t alp_inference_tflm_num_outputs(struct alp_inference *h_)
     return (state != nullptr && state->interp != nullptr) ? state->interp->outputs_size() : 0;
 }
 
-extern "C" alp_status_t alp_inference_tflm_get_input(struct alp_inference   *h_,
-                                                     size_t                  index,
+extern "C" alp_status_t alp_inference_tflm_get_input(struct alp_inference *h_, size_t index,
                                                      alp_inference_tensor_t *out)
 {
     auto *h     = reinterpret_cast<AlpInferenceHandle *>(h_);
@@ -212,8 +225,7 @@ extern "C" alp_status_t alp_inference_tflm_get_input(struct alp_inference   *h_,
     return ALP_OK;
 }
 
-extern "C" alp_status_t alp_inference_tflm_get_output(struct alp_inference   *h_,
-                                                      size_t                  index,
+extern "C" alp_status_t alp_inference_tflm_get_output(struct alp_inference *h_, size_t index,
                                                       alp_inference_tensor_t *out)
 {
     auto *h     = reinterpret_cast<AlpInferenceHandle *>(h_);
