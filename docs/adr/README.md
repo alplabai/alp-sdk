@@ -38,6 +38,7 @@ Bad / costs: ...
 | [0001](0001-wrapper-on-top-of-zephyr.md) | Why ALP SDK wraps Zephyr (and why the wrapper stays thin) | Accepted |
 | [0002](0002-error-mechanism.md)          | `alp_last_error()` + compile-time SoC capability validation | Accepted |
 | [0003](0003-peripheral-coverage.md)      | Wrap 12 peripheral classes at v0.2, not just I2C/SPI/GPIO/UART | Accepted |
+| [0004](0004-e1m-portability-bound.md)    | E1M-spec instance counts as the portability bound | Accepted |
 
 ## When to write an ADR
 

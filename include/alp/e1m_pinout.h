@@ -116,6 +116,42 @@ extern "C" {
 /* PCIe — not routed on E1M (35 × 35); present on E1M-X. */
 
 /* ================================================================== */
+/* E1M-spec instance counts (the portability bound)                   */
+/* ================================================================== */
+/*
+ * Every E1M-conformant SoM SHALL route at least these many instances
+ * of each peripheral class.  An app that uses only `ALP_E1M_<CLASS><N>`
+ * for `N < ALP_E1M_<CLASS>_COUNT` stays cross-SoM portable; apps that
+ * use higher indices are tapping vendor-specific extensions exposed
+ * through the SDK's loose upper bound (e.g. `peripheral_can.c`
+ * accepts up to 6 channels because the V2N has 6, but only CAN0 is
+ * portable).
+ *
+ * These constants come from the `alpCaner/e1m-spec` v1.0 pinout —
+ * see `docs/e1m-pinout.md` for how they thread through the studio's
+ * pin allocator.
+ */
+#define ALP_E1M_I2C_COUNT        2u
+#define ALP_E1M_SPI_COUNT        2u
+#define ALP_E1M_UART_COUNT       2u
+#define ALP_E1M_I2S_COUNT        2u
+#define ALP_E1M_I3C_COUNT        1u
+#define ALP_E1M_PDM_COUNT        2u
+#define ALP_E1M_CAN_COUNT        1u
+#define ALP_E1M_ETH_COUNT        1u
+#define ALP_E1M_CSI_COUNT        1u
+#define ALP_E1M_DSI_COUNT        1u
+#define ALP_E1M_PARCAM_COUNT     1u
+#define ALP_E1M_SDIO_COUNT       1u
+#define ALP_E1M_USB_COUNT        1u
+#define ALP_E1M_USB2_COUNT       1u
+#define ALP_E1M_DAC_COUNT        2u
+#define ALP_E1M_ADC_COUNT        8u
+#define ALP_E1M_PWM_COUNT        8u
+#define ALP_E1M_ENC_COUNT        4u
+#define ALP_E1M_GPIO_IO_COUNT    26u   /**< IO0..IO25; some "Reserved — not present on v1.0". */
+
+/* ================================================================== */
 /* GPIO indices (`pin_id` passed to alp_gpio_open)                    */
 /* ================================================================== */
 

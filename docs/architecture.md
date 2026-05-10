@@ -220,6 +220,42 @@ schedulers, custom driver classes) adds bug surface without
 portability gain.  The ALP value is *studio-friendly + OS-portable +
 ABI-stable*, not *vendor-diversity over Zephyr*.
 
+## E1M as the portability bound
+
+Per the `alpCaner/e1m-spec` standard, every E1M-conformant SoM **SHALL
+route a fixed minimum set of peripheral instances** with their primary
+functions pinned to specific pads:
+
+- 2 × I²C, 2 × SPI, 2 × UART, 2 × I²S, 2 × PDM, 1 × I³C
+- 1 × CAN-FD, 1 × Ethernet, 1 × MIPI CSI, 1 × MIPI DSI
+- 8 × PWM (`PWM0..PWM7`), 4 × quadrature decoder (`ENC0..ENC3`)
+- 8 × single-ended ADC (`ADC0..ADC7`), 2 × DAC
+
+These minimums are the **portability contract**: an app that uses
+`ALP_E1M_<CLASS><N>` for `N < ALP_E1M_<CLASS>_COUNT` is guaranteed to
+work on every conformant SoM.  Higher indices are vendor-specific
+extensions — the wrapper accepts them up to the SoC's documented count
+(e.g. RZ/V2N's six CAN channels), but apps that use them lose the
+"swap the SoM, no software changes" property.
+
+The constants live in [`<alp/e1m_pinout.h>`](../include/alp/e1m_pinout.h)
+as `ALP_E1M_*_COUNT` macros.  alp-studio's pin allocator enforces the
+E1M bound for portable blocks; the SDK's runtime layer enforces only
+the SoC-specific bound (so vendor-extension blocks work too).  Three
+tiers of validation:
+
+```
+              tightest                                          loosest
+              ────────                                          ───────
+  E1M reservation  <  Studio block declaration  <  SoC count  <  driver array
+       (8 PWMs)       (block uses PWM0..PWM3)    (12 timers)    (8 entries)
+```
+
+Studio codegen catches block-vs-E1M-vs-SoC mismatches up front; the
+SDK's `*_open` catches everything that slipped through (config out of
+range against the SoC, DT alias unset, etc.) via the
+`alp_last_error()` machinery.
+
 ## Capability validation
 
 Every E1M-conformant SoM ships with a different peripheral inventory

@@ -967,6 +967,10 @@
           "hash": "1e6bcb479fcc9a98",
           "value": "7u"
         },
+        "ALP_E1M_ADC_COUNT": {
+          "hash": "d01aeb3b9639127b",
+          "value": "8u"
+        },
         "ALP_E1M_CAM0": {
           "hash": "464727c41987d309",
           "value": "0u"
@@ -979,9 +983,17 @@
           "hash": "e7db6a98243eda94",
           "value": "0u"
         },
+        "ALP_E1M_CAN_COUNT": {
+          "hash": "2bef9f92f922d19a",
+          "value": "1u"
+        },
         "ALP_E1M_CSI0": {
           "hash": "05b29585251e3916",
           "value": "0u"
+        },
+        "ALP_E1M_CSI_COUNT": {
+          "hash": "357ccdbdf26f3713",
+          "value": "1u"
         },
         "ALP_E1M_DAC0": {
           "hash": "f599967026c9cddf",
@@ -991,13 +1003,29 @@
           "hash": "bfb5f2201f9f6858",
           "value": "1u"
         },
+        "ALP_E1M_DAC_COUNT": {
+          "hash": "79c5e841ccb37221",
+          "value": "2u"
+        },
         "ALP_E1M_DSI0": {
           "hash": "c989b3905d531c23",
           "value": "0u"
         },
+        "ALP_E1M_DSI_COUNT": {
+          "hash": "6b5a97f251ba3be6",
+          "value": "1u"
+        },
+        "ALP_E1M_ENC_COUNT": {
+          "hash": "7b5e766940583adc",
+          "value": "4u"
+        },
         "ALP_E1M_ETH0": {
           "hash": "9049cd2cfe8a13bf",
           "value": "0u"
+        },
+        "ALP_E1M_ETH_COUNT": {
+          "hash": "fbf97bb0e8bf1d38",
+          "value": "1u"
         },
         "ALP_E1M_GPIO_COUNT": {
           "hash": "ee3c6631d0097965",
@@ -1139,6 +1167,10 @@
           "hash": "1f6a8187801df139",
           "value": "9u"
         },
+        "ALP_E1M_GPIO_IO_COUNT": {
+          "hash": "aba696ad1f052913",
+          "value": "26u"
+        },
         "ALP_E1M_GPIO_PWM0": {
           "hash": "d2a08716c93cdd36",
           "value": "26u"
@@ -1179,6 +1211,10 @@
           "hash": "34165c0e638a494b",
           "value": "1u"
         },
+        "ALP_E1M_I2C_COUNT": {
+          "hash": "204af48348e9066f",
+          "value": "2u"
+        },
         "ALP_E1M_I2S0": {
           "hash": "c03ef9a4af3ba886",
           "value": "0u"
@@ -1187,9 +1223,17 @@
           "hash": "df23df819d6b97f0",
           "value": "1u"
         },
+        "ALP_E1M_I2S_COUNT": {
+          "hash": "4c35e3f580760b3f",
+          "value": "2u"
+        },
         "ALP_E1M_I3C0": {
           "hash": "d5fc76e52ffb8650",
           "value": "0u"
+        },
+        "ALP_E1M_I3C_COUNT": {
+          "hash": "076164670db607b5",
+          "value": "1u"
         },
         "ALP_E1M_JTAG0": {
           "hash": "c610567b2d2d5858",
@@ -1199,6 +1243,10 @@
           "hash": "2194e217decb11a3",
           "value": "0u"
         },
+        "ALP_E1M_PARCAM_COUNT": {
+          "hash": "157f3c916861a86e",
+          "value": "1u"
+        },
         "ALP_E1M_PDM0": {
           "hash": "4c9390333a3c2ea1",
           "value": "0u"
@@ -1207,9 +1255,21 @@
           "hash": "05a98fef3e638cac",
           "value": "1u"
         },
+        "ALP_E1M_PDM_COUNT": {
+          "hash": "b269f0e6f6b5880d",
+          "value": "2u"
+        },
+        "ALP_E1M_PWM_COUNT": {
+          "hash": "b52706724412421e",
+          "value": "8u"
+        },
         "ALP_E1M_SDIO0": {
           "hash": "b68a377be3fc78c9",
           "value": "0u"
+        },
+        "ALP_E1M_SDIO_COUNT": {
+          "hash": "3cd7702613f964a0",
+          "value": "1u"
         },
         "ALP_E1M_SPI0": {
           "hash": "b77e6324aef8a9ce",
@@ -1219,6 +1279,10 @@
           "hash": "bdfa7bc19766c75e",
           "value": "1u"
         },
+        "ALP_E1M_SPI_COUNT": {
+          "hash": "7b12765c65c4a00d",
+          "value": "2u"
+        },
         "ALP_E1M_UART0": {
           "hash": "d5f6cea542fae606",
           "value": "0u"
@@ -1227,6 +1291,10 @@
           "hash": "475e00c29b4cc709",
           "value": "1u"
         },
+        "ALP_E1M_UART_COUNT": {
+          "hash": "e7d77c41e46e3c3e",
+          "value": "2u"
+        },
         "ALP_E1M_USB0": {
           "hash": "a83a85c36a083b41",
           "value": "0u"
@@ -1234,6 +1302,14 @@
         "ALP_E1M_USB2": {
           "hash": "23c8ec9056357f3f",
           "value": "0u"
+        },
+        "ALP_E1M_USB2_COUNT": {
+          "hash": "25d2ef6db475053c",
+          "value": "1u"
+        },
+        "ALP_E1M_USB_COUNT": {
+          "hash": "47b82d0c189bd7f3",
+          "value": "1u"
         }
       },
       "typedefs": {}

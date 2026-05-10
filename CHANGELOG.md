@@ -339,6 +339,21 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
     peripheral classes at v0.2, not just I2C/SPI/GPIO/UART.
 - **ABI snapshot bumped** to reflect the new headers — 29 headers,
   ~165 functions, ~110 typedefs, ~135 macros (was 21/123/80/114).
+- **E1M portability-bound macros** at `<alp/e1m_pinout.h>` —
+  `ALP_E1M_<CLASS>_COUNT` constants for each peripheral class
+  (I2C=2, SPI=2, UART=2, I2S=2, PDM=2, I3C=1, CAN=1, ETH=1,
+  CSI=1, DSI=1, ADC=8, DAC=2, PWM=8, ENC=4, GPIO_IO=26).  These
+  are the **portability contract** — apps that use only
+  `ALP_E1M_<CLASS><N>` for `N < ALP_E1M_<CLASS>_COUNT` are
+  guaranteed cross-SoM compatibility.  Higher indices fall into
+  the SoC-specific gap (e.g. RZ/V2N's six CAN channels) which the
+  SDK still accepts but apps lose the "swap the SoM" property.
+- **[ADR 0004](docs/adr/0004-e1m-portability-bound.md)** — E1M-spec
+  instance counts as the portability bound.  Documents the three
+  concentric capability tiers: E1M reservation < studio block
+  declaration < SoC count < driver array.
+- `docs/architecture.md` gains an "E1M as the portability bound"
+  section explaining the three-tier validation model.
 
 ### Notes
 
