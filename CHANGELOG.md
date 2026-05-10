@@ -480,6 +480,36 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   in which repo.  `docs/architecture.md` gains a "Repository
   boundary" subsection so reviewers can resolve where a new
   addition belongs without opening the ADR.
+- **`<alp/inference.h>` real wrapper + TFLM/Ethos-U C++ executor**
+  — v0.2's third "stub-to-real" milestone.  `src/zephyr/inference_zephyr.c`
+  replaces the v0.1 NOSUPPORT stub with the public-API glue: handle
+  pool (default 2), capability validation, backend selector
+  (AUTO / CPU / ETHOS_U / DRPAI / DEEPX_DX), and dispatch into a
+  per-backend executor.  `src/zephyr/inference_tflm.cpp` -- new C++
+  source compiled only when `CONFIG_ALP_SDK_INFERENCE_TFLM=y` (depends
+  on `TENSORFLOW_LITE_MICRO`) -- wraps `tflite::MicroInterpreter`
+  and `tflite::MicroMutableOpResolver<32>` with the canonical
+  MobileNetV2 op set + the Arm `AddEthosU()` registration so
+  Vela-compiled `.tflite` files dispatch their ETHOS-U custom op
+  to the NPU.  Default 128 KiB tensor arena (caller-supplied via
+  `cfg.arena` overrides).  The CPU backend uses TFLM's reference
+  kernels for any layer Vela leaves on-host plus pure CPU models;
+  ETHOS_U routes through the same MicroInterpreter with the op
+  resolver picking the NPU op when available.  `west.yml`
+  name-allowlist gains `tflite-micro` so `west update` pulls the
+  module on every refresh; CI's native_sim builds keep
+  `CONFIG_ALP_SDK_INFERENCE_TFLM=n` and the wrapper falls back to
+  ALP_ERR_NOSUPPORT cleanly.  New Kconfig options:
+  `CONFIG_ALP_SDK_INFERENCE_TFLM` (default n; enables the C++
+  executor), `CONFIG_ALP_SDK_INFERENCE_ETHOS_U` (default y if
+  TFLM and SOC_SERIES_ENSEMBLE_E7), `CONFIG_ALP_SDK_MAX_INFERENCE_HANDLES`
+  (default 2).  The `examples/edgeai-vision-aen/` example now
+  wires `alp_inference_open` into stage 3 (model load) using
+  `ALP_INFERENCE_BACKEND_AUTO` -- skips on native_sim with the
+  precise NOSUPPORT diagnostic, runs the real Vela model on AEN HW
+  once the toolchain output lands under `models/`.  New
+  `tests/zephyr/inference/` ztest suite (7 cases) verifies the
+  cfg-validation + NOSUPPORT-fall-back contract under native_sim.
 - **`<alp/audio.h>` real PDM input + I²S output on AEN-Zephyr** —
   v0.2's second "stub-to-real" milestone.  `src/zephyr/audio_zephyr.c`
   replaces the v0.1 `audio_stub.c` and splits in two halves: a

@@ -29,15 +29,27 @@ zephyr_library_sources(
     # delegation behind CONFIG_ALP_SDK_AUDIO_IN / _OUT, NOSUPPORT
     # contract elsewhere.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/audio_zephyr.c
+    # inference_zephyr.c carries the public-API glue + handle pool;
+    # per-backend executors (TFLM C++ wrapper, DRP-AI, DEEPX) compile
+    # in only when their CONFIG_ flag is on so the wrapper itself
+    # links cleanly under native_sim with no neural runtime present.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_zephyr.c
     # Remaining v0.3 surfaces still on the stub contract -- swap in
     # their *_zephyr.c counterparts as they ship.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/ble_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/security_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/mproc_stub.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/storage_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/usb_stub.c
 )
+
+# Per-backend inference executors -- compile only when the matching
+# Kconfig opt-in is set.  Each backend's .cpp / .c source file
+# defines the alp_inference_<backend>_* hooks that inference_zephyr.c
+# dispatches to; absent the CONFIG_, the dispatcher's switch returns
+# ALP_ERR_NOSUPPORT.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_TFLM
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_tflm.cpp)
 
 # v0.2 peripheral wrappers — opt-in per-class so apps that don't use
 # a given Zephyr subsystem don't link the wrapper.  Each defaults on

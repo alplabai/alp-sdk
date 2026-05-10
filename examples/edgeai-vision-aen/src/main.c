@@ -28,17 +28,19 @@
 #include "alp/chips/ssd1306.h"
 #include "alp/chips/button_led.h"
 #include "alp/camera.h"
+#include "alp/inference.h"
 
 /* ------------------------------------------------------------------ */
 /* Pipeline stage 1 — peripherals                                      */
 /* ------------------------------------------------------------------ */
 
-static alp_i2c_t  *g_sensor_bus;
-static lsm6dso_t   g_imu;
-static ssd1306_t   g_oled;
+static alp_i2c_t       *g_sensor_bus;
+static lsm6dso_t        g_imu;
+static ssd1306_t        g_oled;
 static alp_button_led_t g_trigger;
 
-static int stage_peripherals_init(void) {
+static int              stage_peripherals_init(void)
+{
     printf("[edgeai] stage 1: peripherals\n");
 
     g_sensor_bus = alp_i2c_open(&(alp_i2c_config_t){
@@ -55,20 +57,18 @@ static int stage_peripherals_init(void) {
      * level shifters on a separate I²C bus (DSI_I2C), wired through
      * the IO expander; v0.1 skeleton uses the sensor bus to keep
      * the host build single-bus. */
-    alp_status_t s = ssd1306_init(&g_oled, g_sensor_bus,
-                                  SSD1306_I2C_ADDR_LOW, 128, 64);
+    alp_status_t s = ssd1306_init(&g_oled, g_sensor_bus, SSD1306_I2C_ADDR_LOW, 128, 64);
     printf("[edgeai]   ssd1306_init                  %s\n",
            (s == ALP_OK) ? "ok" : "skip (no panel)");
 
     s = lsm6dso_init(&g_imu, g_sensor_bus, LSM6DSO_I2C_ADDR_LOW);
-    printf("[edgeai]   lsm6dso_init                  %s\n",
-           (s == ALP_OK) ? "ok" : "skip (no IMU)");
+    printf("[edgeai]   lsm6dso_init                  %s\n", (s == ALP_OK) ? "ok" : "skip (no IMU)");
 
     s = alp_button_led_init(&g_trigger, &(alp_button_led_config_t){
-        .button_pin_id     = ALP_E1M_GPIO_IO0,
-        .led_pin_id        = ALP_E1M_GPIO_IO1,
-        .active_low_button = true,
-    });
+                                            .button_pin_id     = ALP_E1M_GPIO_IO0,
+                                            .led_pin_id        = ALP_E1M_GPIO_IO1,
+                                            .active_low_button = true,
+                                        });
     printf("[edgeai]   alp_button_led_init           %s\n",
            (s == ALP_OK) ? "ok" : "skip (no GPIOs)");
 
@@ -81,7 +81,8 @@ static int stage_peripherals_init(void) {
 
 static alp_camera_t *g_camera;
 
-static int stage_camera_init(void) {
+static int           stage_camera_init(void)
+{
     printf("[edgeai] stage 2: camera\n");
 
     /* TODO(v0.2): open MIPI CSI-2 camera (e.g. OV5640) on the EVK
@@ -90,10 +91,10 @@ static int stage_camera_init(void) {
      * Zephyr-video integration lands in v0.2. */
     g_camera = alp_camera_open(&(alp_camera_config_t){
         .camera_id = 0,
-        .width  = 224,        /* MobileNetV2 input size */
-        .height = 224,
-        .fps    = 15,
-        .format = ALP_PIXFMT_RGB888,
+        .width     = 224, /* MobileNetV2 input size */
+        .height    = 224,
+        .fps       = 15,
+        .format    = ALP_PIXFMT_RGB888,
     });
     if (g_camera == NULL) {
         printf("[edgeai]   alp_camera_open               skip (v0.2 deliverable)\n");
@@ -107,15 +108,37 @@ static int stage_camera_init(void) {
 /* Pipeline stage 3 — model load                                       */
 /* ------------------------------------------------------------------ */
 
-static int stage_model_load(void) {
+static alp_inference_t *g_model;
+
+static int              stage_model_load(void)
+{
     printf("[edgeai] stage 3: model load\n");
-    /* TODO(v0.2): mmap a Vela-compiled MobileNetV2 .tflite from
-     * `models/mobilenet_v2_224.vela.tflite`, validate the magic +
-     * version + Ethos-U command-stream metadata, and prime the
-     * Ethos-U55 driver.
+    /* The SDK exposes a unified inference surface via <alp/inference.h>.
+     * On AEN-Zephyr (CONFIG_ALP_SDK_INFERENCE_TFLM=y +
+     * CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y) this opens a Vela-compiled
+     * MobileNetV2 with the Ethos-U op resolver wired in; on native_sim
+     * (no TFLM) the wrapper falls back to NOSUPPORT and the example
+     * keeps running with the model load skipped.
      *
-     * For native_sim builds the model load is a no-op stub. */
-    printf("[edgeai]   model load                    skip (v0.2 deliverable)\n");
+     * The model bytes ship under models/ -- empty in the v0.2
+     * scaffold, populated when the Vela toolchain run lands.  The
+     * 16-byte placeholder below lets the open() call validate
+     * input parameters today. */
+    static const uint8_t s_placeholder[16] = {0xDE, 0xAD, 0xBE, 0xEF};
+    g_model                                = alp_inference_open(&(alp_inference_config_t){
+        .model_data = s_placeholder,
+        .model_size = sizeof(s_placeholder),
+        .format     = ALP_INFERENCE_MODEL_VELA,
+        .backend    = ALP_INFERENCE_BACKEND_AUTO,
+        /* arena: NULL -> backend's built-in default. */
+    });
+    if (g_model == NULL) {
+        printf("[edgeai]   alp_inference_open            skip (last_err=%d)\n",
+               (int)alp_last_error());
+    } else {
+        printf("[edgeai]   alp_inference_open(AUTO)      ok (%zu inputs / %zu outputs)\n",
+               alp_inference_num_inputs(g_model), alp_inference_num_outputs(g_model));
+    }
     return 0;
 }
 
@@ -123,7 +146,8 @@ static int stage_model_load(void) {
 /* Pipeline stage 4 — inference loop                                   */
 /* ------------------------------------------------------------------ */
 
-static int stage_inference_loop(void) {
+static int stage_inference_loop(void)
+{
     printf("[edgeai] stage 4: inference loop\n");
 
     /* TODO(v0.2): the real loop —
@@ -169,11 +193,13 @@ static int stage_inference_loop(void) {
 /* Pipeline stage 5 — teardown                                         */
 /* ------------------------------------------------------------------ */
 
-static void stage_teardown(void) {
+static void stage_teardown(void)
+{
     printf("[edgeai] stage 5: teardown\n");
+    alp_inference_close(g_model);
     if (g_camera != NULL) alp_camera_close(g_camera);
     if (g_oled.initialised) ssd1306_deinit(&g_oled);
-    if (g_imu.initialised)  lsm6dso_deinit(&g_imu);
+    if (g_imu.initialised) lsm6dso_deinit(&g_imu);
     alp_button_led_deinit(&g_trigger);
     if (g_sensor_bus != NULL) alp_i2c_close(g_sensor_bus);
 }
@@ -182,13 +208,14 @@ static void stage_teardown(void) {
 /* Entry                                                               */
 /* ------------------------------------------------------------------ */
 
-int main(void) {
+int main(void)
+{
     printf("[edgeai] vision-aen reference — v0.1 skeleton\n");
 
     if (stage_peripherals_init() != 0) goto done;
-    if (stage_camera_init()      != 0) goto done;
-    if (stage_model_load()       != 0) goto done;
-    if (stage_inference_loop()   != 0) goto done;
+    if (stage_camera_init() != 0) goto done;
+    if (stage_model_load() != 0) goto done;
+    if (stage_inference_loop() != 0) goto done;
 
 done:
     stage_teardown();

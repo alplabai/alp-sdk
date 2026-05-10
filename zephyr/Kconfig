@@ -285,6 +285,41 @@ config ALP_SDK_AUDIO_IN_SLAB_BLOCKS
 	  by the caller).  Four is a comfortable default; raise for
 	  apps that take longer than the block period to drain.
 
+# Inference (<alp/inference.h>) -- v0.2 deliverable, the wrapper
+# always compiles and falls back to ALP_ERR_NOSUPPORT when no
+# backend is enabled.
+
+config ALP_SDK_INFERENCE_TFLM
+	bool "TensorFlow Lite Micro backend for <alp/inference.h>"
+	default n
+	depends on TENSORFLOW_LITE_MICRO && CPP
+	help
+	  Enable the TFLM-backed executor (src/zephyr/inference_tflm.cpp).
+	  Wraps tflite::MicroInterpreter + tflite::MicroMutableOpResolver
+	  for both CPU (reference kernels) and Ethos-U
+	  (CONFIG_ALP_SDK_INFERENCE_ETHOS_U) backends.  Pulls in TFLM via
+	  the upstream tflite-micro Zephyr module (see west.yml's
+	  name-allowlist).  When OFF, alp_inference_open() returns NULL
+	  with ALP_ERR_NOSUPPORT regardless of the backend selector.
+
+config ALP_SDK_INFERENCE_ETHOS_U
+	bool "Wire Arm Ethos-U op resolver (Vela-compiled models)"
+	default y if ALP_SDK_INFERENCE_TFLM && SOC_SERIES_ENSEMBLE_E7
+	depends on ALP_SDK_INFERENCE_TFLM
+	help
+	  Adds the AddEthosU() registration so Vela-compiled .tflite
+	  files can dispatch their custom ETHOS-U operator to the NPU.
+	  Off-target builds (CPU-only) must turn this off.
+
+config ALP_SDK_MAX_INFERENCE_HANDLES
+	int "Maximum concurrent alp_inference_t handles"
+	default 2
+	help
+	  Each handle reserves one tensor arena (default 128 KiB
+	  static; caller-supplied via cfg.arena overrides) so the
+	  default 2 is intentionally low.  Raise only if the app
+	  genuinely runs multiple models at once.
+
 config ALP_SDK_HAS_LVGL
 	bool "Build <alp/gui.h> against LVGL"
 	default y if LVGL

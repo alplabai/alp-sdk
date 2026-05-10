@@ -37,6 +37,11 @@ manifest:
           - lvgl
           - mbedtls
           - mcuboot
+          # tflite-micro powers <alp/inference.h>'s TFLM backend.
+          # Pulled in unconditionally so apps that flip
+          # CONFIG_ALP_SDK_INFERENCE_TFLM=y just work; the module
+          # is small enough that the cost-of-presence is negligible.
+          - tflite-micro
 
   self:
     path: alp-sdk
