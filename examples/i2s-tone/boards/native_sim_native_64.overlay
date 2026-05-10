@@ -1,0 +1,9 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * native_sim has no I²S controller.  alp_i2s_open returns NULL
+ * with last_error = ALP_ERR_NOT_READY; the example exits.  On
+ * real silicon the alp-i2s0 alias must point at the SoC's I²S
+ * node (e.g. Alif's I2S0 or Renesas's SAI/SSI).
+ */
