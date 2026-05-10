@@ -11,6 +11,22 @@ tests:
       - alp-sdk
       - peripheral
 
+  # v0.2 capability-validation scenario: pin the SoC choice to Alif
+  # Ensemble E3 (24-bit max ADC, 12 PWMs, etc.) and verify that the
+  # SoC-capability checks in alp_*_open reject configs that exceed
+  # the documented hardware caps.
+  alp_sdk.peripheral.caps_e3:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_args: CONF_FILE="prj.conf;prj_caps_e3.conf"
+    tags:
+      - alp-sdk
+      - peripheral
+      - caps
+
   # alp_sdk.peripheral.evk_aen — HW-in-loop variant for the E1M EVK
   # populated with an E1M-AEN family SoM. Currently parked because
   # the alp_e1m_evk_aen Zephyr board file lives in

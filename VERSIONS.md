@@ -145,10 +145,31 @@ more sensors) and add a second SoM family.
 
 ### New libraries / surface
 
-- **Peripherals:** `alp_spi_*` lands on bare-metal too.
-- **Chips:** `ov5640` (MIPI CSI camera), `bme280` (env), `lis2dw12`
-  (3-axis accel), `ssd1331` (small color OLED), plus `camera_parallel`
-  (CPI fallback) and `pdm_mic` (PDM microphone) helper drivers.
+- **Peripherals — coverage doubled to 12 classes** (was 4 in v0.1):
+  PWM (`<alp/pwm.h>`), ADC (`<alp/adc.h>`), Counter + quadrature
+  decoder (`<alp/counter.h>`), I²S/SAI (`<alp/i2s.h>`), CAN/CAN-FD
+  (`<alp/can.h>`), RTC (`<alp/rtc.h>`), Watchdog (`<alp/wdt.h>`).
+  Each follows the v0.1 wrapper pattern: thin Zephyr forward,
+  per-class Kconfig opt-in, static handle pool.  See
+  [ADR 0003](docs/adr/0003-peripheral-coverage.md).
+- **Capability validation** — `alp_last_error()` thread-local +
+  `<alp/soc_caps.h>` generated from `metadata/socs/**.json` reject
+  configs that exceed the active SoC's documented hardware caps.
+  Canonical case: 16-bit ADC on a 12-bit SoC fails at
+  `alp_adc_open` with `ALP_ERR_OUT_OF_RANGE`.  See
+  [ADR 0002](docs/adr/0002-error-mechanism.md).
+- **E1M portability bound** — `ALP_E1M_<CLASS>_COUNT` macros in
+  `<alp/e1m_pinout.h>` document the cross-SoM-portable instance
+  count per peripheral class.  See
+  [ADR 0004](docs/adr/0004-e1m-portability-bound.md).
+- **Peripherals (v0.1 retrofit):** `alp_spi_*` lands on bare-metal
+  too; v0.1 wrappers (I2C/SPI/UART/GPIO) gain `alp_last_error()`
+  diagnostics.
+- **Chips:** `ov5640` (MIPI CSI camera) + `bme280` (env) +
+  `lis2dw12` (3-axis accel) + `ssd1331` (small colour OLED) +
+  `pdm_mic` (PDM microphone) helper landed v0.1-tail.  Real impl
+  for `ov5640` resolution presets + `pdm_mic` underlying I²S
+  finishes in v0.2.  Plus `camera_parallel` (CPI fallback).
 - **Audio:** `alp_audio_*` PDM input + I²S output, ALP-default DSP chain.
 - **Signal:** real FIR/IIR helpers using CMSIS-DSP, FFT wrappers.
 - **Math:** BLAS-style helpers for tensor pre/post processing.

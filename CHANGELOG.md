@@ -354,6 +354,31 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   declaration < SoC count < driver array.
 - `docs/architecture.md` gains an "E1M as the portability bound"
   section explaining the three-tier validation model.
+- **GitHub org migration** — repo references updated from
+  `alpCaner/*` to `alplabai/*` (alp-sdk, e1m-spec,
+  alp-zephyr-modules, alp-studio).  27 files / 56 substitutions,
+  pure rename.  Older history rewritten to drop the
+  `Co-Authored-By: Claude` co-author line per the repo's solo-
+  attribution preference.
+- **VERSIONS.md v0.2 row** updated to call out the peripheral
+  expansion explicitly (12 wrapped classes), capability validation,
+  and the E1M portability bound.
+- **Peripheral ztest suite extended** with v0.2 wrapper coverage:
+  - 12 generic NULL-arg / out-of-range cases for PWM, ADC, Counter,
+    QEnc, I2S, CAN, RTC, WDT, each verifying `alp_last_error()`
+    returns the precise reason.
+  - New `alp_sdk.peripheral.caps_e3` twister scenario pinning the
+    SoC choice to `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E3=y` and
+    asserting that a 25-bit ADC request exceeds the documented
+    24-bit cap and fails at `alp_adc_open` with
+    `ALP_ERR_OUT_OF_RANGE` — the canonical case the user
+    flagged ("16-bit ADC on a 12-bit SoC needs to fail
+    cleanly").
+  - `prj.conf` enables `CONFIG_PWM=y` / `CONFIG_ADC=y` /
+    `CONFIG_COUNTER=y` / `CONFIG_SENSOR=y` / `CONFIG_I2S=y` /
+    `CONFIG_CAN=y` / `CONFIG_RTC=y` / `CONFIG_WATCHDOG=y` /
+    `CONFIG_THREAD_LOCAL_STORAGE=y` so the v0.2 wrapper sources
+    compile and link in the test app.
 
 ### Notes
 

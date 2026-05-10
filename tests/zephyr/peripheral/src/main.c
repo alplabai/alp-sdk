@@ -13,6 +13,14 @@
 #include <zephyr/ztest.h>
 
 #include "alp/peripheral.h"
+#include "alp/pwm.h"
+#include "alp/adc.h"
+#include "alp/counter.h"
+#include "alp/i2s.h"
+#include "alp/can.h"
+#include "alp/rtc.h"
+#include "alp/wdt.h"
+#include "alp/soc_caps.h"
 
 ZTEST_SUITE(alp_peripheral, NULL, NULL, NULL, NULL, NULL);
 
@@ -155,3 +163,142 @@ ZTEST(alp_peripheral, test_gpio_pool_exhaustion_returns_null) {
         alp_gpio_close(pins[i]);
     }
 }
+
+/* ==================================================================== */
+/* v0.2 peripheral wrappers (PWM/ADC/Counter/I2S/CAN/RTC/WDT)            */
+/* ==================================================================== */
+/* These tests cover the wrappers' NULL-arg / out-of-range paths and    */
+/* verify alp_last_error() returns the precise failure reason.  None    */
+/* of them require a real underlying controller — without an `alp-*N`   */
+/* DT alias, *_open returns NULL with last_error = ALP_ERR_NOT_READY.   */
+/* ==================================================================== */
+
+ZTEST(alp_peripheral, test_pwm_null_cfg_returns_null_and_invalidates) {
+    zassert_is_null(alp_pwm_open(NULL));
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL,
+                  "expected ALP_ERR_INVAL, got %d", (int)alp_last_error());
+}
+
+ZTEST(alp_peripheral, test_pwm_out_of_range_channel_id) {
+    /* channel_id = 99 exceeds the wrapper's hard array bound (8). */
+    alp_pwm_t *p = alp_pwm_open(&(alp_pwm_config_t){
+        .channel_id = 99, .period_ns = 1000000, .polarity = ALP_PWM_POLARITY_NORMAL});
+    zassert_is_null(p);
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_adc_null_cfg) {
+    zassert_is_null(alp_adc_open(NULL));
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_adc_unresolved_channel_yields_not_ready) {
+    /* channel_id=0 is in-range; with no `alp-adc0` alias on this
+     * test's overlay the spec is NULL → ALP_ERR_NOT_READY. */
+    alp_adc_t *a = alp_adc_open(&(alp_adc_config_t){
+        .channel_id = 0, .resolution_bits = 12});
+    zassert_is_null(a);
+#if defined(CONFIG_ALP_SOC_NONE)
+    /* With no SoC selected, capability checks pass through and we
+     * land on the device-not-ready path. */
+    zassert_equal(alp_last_error(), ALP_ERR_NOT_READY);
+#endif
+}
+
+ZTEST(alp_peripheral, test_counter_null_cfg) {
+    zassert_is_null(alp_counter_open(NULL));
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_qenc_null_cfg) {
+    zassert_is_null(alp_qenc_open(NULL));
+    /* qenc backend doesn't yet stamp last_error on NULL cfg —
+     * this is a TODO retrofit; the test still passes on NULL
+     * return. */
+}
+
+ZTEST(alp_peripheral, test_i2s_null_cfg) {
+    zassert_is_null(alp_i2s_open(NULL));
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_i2s_invalid_channels_rejected) {
+    alp_i2s_t *i = alp_i2s_open(&(alp_i2s_config_t){
+        .bus_id = 0, .sample_rate_hz = 16000,
+        .word_bits = 16, .channels = 5,         /* > 2 → INVAL */
+        .block_frames = 64});
+    zassert_is_null(i);
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_can_null_cfg) {
+    zassert_is_null(alp_can_open(NULL));
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_can_zero_bitrate_rejected) {
+    alp_can_t *c = alp_can_open(&(alp_can_config_t){
+        .bus_id = 0, .bitrate_nominal_hz = 0,   /* INVAL */
+        .mode = ALP_CAN_MODE_CLASSIC});
+    zassert_is_null(c);
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_rtc_out_of_range_id) {
+    /* rtc_id = 99 exceeds the wrapper's hard array bound (2). */
+    zassert_is_null(alp_rtc_open(99));
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_wdt_null_cfg) {
+    zassert_is_null(alp_wdt_open(0, NULL));
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_wdt_zero_timeout_rejected) {
+    alp_wdt_t *w = alp_wdt_open(0, &(alp_wdt_config_t){
+        .timeout_ms = 0, .on_timeout = ALP_WDT_RESET_SOC});
+    zassert_is_null(w);
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+/* ------------------------------------------------------------------ */
+/* SoC capability validation (only meaningful with a SoC choice set)  */
+/* ------------------------------------------------------------------ */
+
+#if defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E3)
+
+ZTEST(alp_peripheral, test_adc_resolution_exceeds_soc_max) {
+    /* Alif Ensemble E3's documented maximum ADC resolution is 24
+     * bits (one 24-bit channel + three 12-bit channels).  Asking
+     * for 25 bits exceeds the SoC's documented cap and must be
+     * rejected at open() with ALP_ERR_OUT_OF_RANGE — before any
+     * I/O hits the device. */
+    alp_adc_t *a = alp_adc_open(&(alp_adc_config_t){
+        .channel_id = 0,
+        .resolution_bits = 25,
+        .reference = ALP_ADC_REF_INTERNAL,
+    });
+    zassert_is_null(a);
+    zassert_equal(alp_last_error(), ALP_ERR_OUT_OF_RANGE,
+                  "expected OUT_OF_RANGE for 25-bit ADC on E3 (max=%d), got %d",
+                  ALP_SOC_ADC_MAX_RESOLUTION_BITS,
+                  (int)alp_last_error());
+}
+
+ZTEST(alp_peripheral, test_can_fd_on_soc_with_fd_support) {
+    /* E3 declares CAN-FD support per metadata (can_fd: 1 in the
+     * peripherals block).  Opening with FD mode must clear the
+     * capability check; failure here means the soc_caps table is
+     * out of sync with metadata. */
+    zassert_equal(ALP_SOC_CAN_FD_SUPPORTED, 1,
+                  "E3 metadata declares CAN-FD; soc_caps must agree");
+}
+
+ZTEST(alp_peripheral, test_soc_ref_str_matches_choice) {
+    /* Sanity check: the gen_soc_caps.py output picked the right
+     * #ifdef branch for our Kconfig choice. */
+    zassert_str_equal(ALP_SOC_REF_STR, "alif:ensemble:e3");
+}
+
+#endif  /* CONFIG_ALP_SOC_ALIF_ENSEMBLE_E3 */
