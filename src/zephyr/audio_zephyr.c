@@ -137,7 +137,10 @@ static void audio_out_pool_release(struct alp_audio_out *h)
 }
 #endif /* CONFIG_ALP_SDK_AUDIO_OUT */
 
-#if defined(CONFIG_ALP_SDK_AUDIO_IN) || defined(CONFIG_ALP_SDK_AUDIO_OUT)
+#if defined(CONFIG_ALP_SDK_AUDIO_IN)
+/* Only the DMIC path goes through Zephyr's errno surface; the
+ * I2S delegation already returns alp_status_t.  Gate on _IN so
+ * we don't trip -Werror=unused-function when only _OUT is on. */
 static alp_status_t errno_to_alp(int err)
 {
     switch (err) {
