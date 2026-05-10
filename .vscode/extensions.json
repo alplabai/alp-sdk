@@ -1,13 +1,16 @@
 {
-    "//": "Recommended VS Code extensions for working on (or with) the ALP SDK.",
+    "//": [
+        "Recommended VS Code extensions for working on (or with) the ALP SDK.",
+        "Vendor-neutral by design — the SDK targets Alif / Renesas / NXP",
+        "silicon, so we don't ship recommendations for any specific vendor's",
+        "branded tooling (no Nordic nRF-Connect, no STM32 plugins, etc.)."
+    ],
     "recommendations": [
         "ms-vscode.cpptools-extension-pack",
         "ms-vscode.cmake-tools",
         "twxs.cmake",
         "marus25.cortex-debug",
-        "nordic-semiconductor.nrf-connect",
-        "nordic-semiconductor.nrf-devicetree",
-        "nordic-semiconductor.nrf-kconfig",
+        "plorefice.devicetree",
         "trond-snekvik.kconfig-lang",
         "redhat.vscode-yaml",
         "ms-python.python"
