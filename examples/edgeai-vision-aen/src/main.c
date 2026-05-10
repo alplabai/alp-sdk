@@ -125,13 +125,12 @@ static int              stage_model_load(void)
      * 16-byte placeholder below lets the open() call validate
      * input parameters today. */
     static const uint8_t   s_placeholder[16] = {0xDE, 0xAD, 0xBE, 0xEF};
-    alp_inference_config_t cfg               = {
-        .model_data = s_placeholder,
-        .model_size = sizeof(s_placeholder),
-        .format     = ALP_INFERENCE_MODEL_VELA,
-        .backend    = ALP_INFERENCE_BACKEND_AUTO,
-        /* arena: NULL -> backend's built-in default. */
-    };
+    alp_inference_config_t cfg               = {0};
+    cfg.model_data                           = s_placeholder;
+    cfg.model_size                           = sizeof(s_placeholder);
+    cfg.format                               = ALP_INFERENCE_MODEL_VELA;
+    cfg.backend                              = ALP_INFERENCE_BACKEND_AUTO;
+    /* arena: NULL -> backend's built-in default. */
     g_model = alp_inference_open(&cfg);
     if (g_model == NULL) {
         printf("[edgeai]   alp_inference_open            skip (last_err=%d)\n",
