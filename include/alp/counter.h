@@ -1,0 +1,181 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @file counter.h
+ * @brief ALP SDK counter / timer + quadrature-encoder abstraction.
+ *
+ * Two related concepts share this header because they map to the same
+ * underlying SoC timer hardware on most E1M targets:
+ *
+ *   1. **Free-running counter** with an optional alarm callback —
+ *      the building block for "wake me up in N microseconds" patterns.
+ *   2. **Quadrature decoder** for incremental rotary encoders, mapped
+ *      to `ENC0..ENC3` in `<alp/e1m_pinout.h>`.
+ *
+ * Backends:
+ *   - Zephyr   : `counter_*` driver class for timers; `sensor_*`
+ *                with `SENSOR_CHAN_ROTATION` for quadrature decode
+ *                (Zephyr's QDEC subsystem).
+ *   - Yocto    : `/dev/rtc*` for absolute alarms; input subsystem
+ *                events for incremental encoders.
+ *   - Baremetal: vendor HAL timer + qdec channels.
+ */
+
+#ifndef ALP_COUNTER_H
+#define ALP_COUNTER_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#include "alp/peripheral.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ------------------------------------------------------------------ */
+/* Free-running counter                                                */
+/* ------------------------------------------------------------------ */
+
+/** Opaque counter handle.  Allocate via @ref alp_counter_open. */
+typedef struct alp_counter alp_counter_t;
+
+/** Configuration passed to @ref alp_counter_open. */
+typedef struct {
+    uint32_t counter_id;        /**< Studio-resolved counter instance (0..3). */
+} alp_counter_config_t;
+
+/**
+ * @brief Alarm callback fired when a previously-scheduled deadline
+ *        ticks elapse.
+ *
+ * The callback runs in interrupt context on M-class targets — keep
+ * the body short and avoid blocking calls.
+ *
+ * @param[in] counter  Counter that fired.
+ * @param[in] ticks    Counter value at the moment the alarm fired.
+ * @param[in] user     Opaque pointer the caller passed into
+ *                     @ref alp_counter_set_alarm.
+ */
+typedef void (*alp_counter_alarm_cb_t)(alp_counter_t *counter,
+                                       uint32_t ticks,
+                                       void *user);
+
+/**
+ * @brief Acquire a counter handle.
+ *
+ * Resolves @p cfg->counter_id via the `alp-counter<N>` devicetree
+ * alias.  Does not start counting — call @ref alp_counter_start.
+ *
+ * @param[in] cfg  Configuration.  Must be non-NULL.
+ * @return Open handle on success, or NULL if unresolved / pool empty.
+ */
+alp_counter_t *alp_counter_open(const alp_counter_config_t *cfg);
+
+/** @brief Start the free-running counter. */
+alp_status_t alp_counter_start(alp_counter_t *counter);
+
+/** @brief Stop the counter.  The current value is preserved. */
+alp_status_t alp_counter_stop(alp_counter_t *counter);
+
+/**
+ * @brief Read the current free-running tick count.
+ *
+ * @param[in]  counter    Handle from @ref alp_counter_open.
+ * @param[out] ticks_out  Receives the current value.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ */
+alp_status_t alp_counter_get_value(alp_counter_t *counter, uint32_t *ticks_out);
+
+/**
+ * @brief Convert microseconds to native counter ticks (rounded down).
+ *
+ * @param[in]  counter    Handle from @ref alp_counter_open.
+ * @param[in]  us         Microseconds to convert.
+ * @param[out] ticks_out  Receives the equivalent tick count.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
+ */
+alp_status_t alp_counter_us_to_ticks(alp_counter_t *counter,
+                                     uint32_t us,
+                                     uint32_t *ticks_out);
+
+/**
+ * @brief Schedule a one-shot callback @p ticks_from_now ticks ahead.
+ *
+ * Replaces any previously-scheduled alarm.  At most one alarm per
+ * handle.
+ *
+ * @param[in] counter         Handle from @ref alp_counter_open.
+ * @param[in] ticks_from_now  Delay in counter ticks.
+ * @param[in] cb              Callback to invoke.  Must not be NULL.
+ * @param[in] user            Opaque pointer forwarded to @p cb.
+ * @return ALP_OK on success;
+ *         ALP_ERR_NOT_READY if @p counter is closed;
+ *         ALP_ERR_INVAL if @p cb is NULL;
+ *         ALP_ERR_BUSY if another alarm is already armed and the
+ *           backend doesn't support replacement;
+ *         ALP_ERR_IO on a backend failure.
+ */
+alp_status_t alp_counter_set_alarm(alp_counter_t *counter,
+                                   uint32_t ticks_from_now,
+                                   alp_counter_alarm_cb_t cb,
+                                   void *user);
+
+/** @brief Cancel a pending alarm.  No-op if no alarm is armed. */
+alp_status_t alp_counter_cancel_alarm(alp_counter_t *counter);
+
+/** @brief Stop the counter and release the handle.  NULL is a no-op. */
+void         alp_counter_close(alp_counter_t *counter);
+
+/* ------------------------------------------------------------------ */
+/* Quadrature decoder (incremental rotary encoder)                     */
+/* ------------------------------------------------------------------ */
+
+/** Opaque quadrature-encoder handle.  Allocate via @ref alp_qenc_open. */
+typedef struct alp_qenc alp_qenc_t;
+
+/** Configuration passed to @ref alp_qenc_open. */
+typedef struct {
+    uint32_t encoder_id;        /**< ENC0..ENC3 per `<alp/e1m_pinout.h>` (0..3). */
+    uint16_t pulses_per_rev;    /**< Mechanical resolution (informational). */
+} alp_qenc_config_t;
+
+/**
+ * @brief Acquire a quadrature-decoder handle.
+ *
+ * Resolves @p cfg->encoder_id via the `alp-qenc<N>` devicetree alias.
+ * Hardware decoders run continuously; the handle just gives you a way
+ * to query the accumulated count.
+ *
+ * @param[in] cfg  Configuration.  Must be non-NULL.
+ * @return Open handle on success, or NULL on resolution failure.
+ */
+alp_qenc_t  *alp_qenc_open(const alp_qenc_config_t *cfg);
+
+/**
+ * @brief Read the current accumulated position in counts.
+ *
+ * Sign indicates direction since the last reset; magnitude is
+ * unbounded by hardware (the SDK accumulates in a 32-bit counter and
+ * wraps modulo 2³²).
+ *
+ * @param[in]  enc      Handle from @ref alp_qenc_open.
+ * @param[out] pos_out  Receives the signed accumulated count.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ */
+alp_status_t alp_qenc_get_position(alp_qenc_t *enc, int32_t *pos_out);
+
+/** @brief Reset the accumulated count to zero. */
+alp_status_t alp_qenc_reset_position(alp_qenc_t *enc);
+
+/** @brief Release the handle.  NULL is a no-op. */
+void         alp_qenc_close(alp_qenc_t *enc);
+
+#ifdef __cplusplus
+}  /* extern "C" */
+#endif
+
+#endif  /* ALP_COUNTER_H */

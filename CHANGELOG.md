@@ -286,6 +286,60 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   - Chips suite tests grow **29 → 38 cases**; total twister
     cases on `native_sim/native/64` climb **43 → 52**.
 
+- **v0.2 peripheral HAL expansion** — eight new peripheral classes
+  wrapped, doubling the SDK's coverage of what an MCU actually
+  exposes (was 4 classes, now 12).  Each new class follows the v0.1
+  pattern: a public header with full Doxygen, a Zephyr backend that
+  resolves studio-supplied IDs via the `alp-<class>N` DT alias and
+  forwards to the matching Zephyr driver class, a Kconfig opt-in
+  gated on the underlying subsystem, a static handle pool with a
+  per-class quota, and runtime validation against the active SoC's
+  documented caps:
+  - `<alp/pwm.h>` + `src/zephyr/peripheral_pwm.c` — Zephyr `pwm_*`.
+  - `<alp/adc.h>` + `src/zephyr/peripheral_adc.c` — Zephyr `adc_*`.
+  - `<alp/counter.h>` + `src/zephyr/peripheral_counter.c` /
+    `peripheral_qenc.c` — free-running counter via `counter_*`,
+    quadrature-decoder via `sensor_*`.
+  - `<alp/i2s.h>` + `src/zephyr/peripheral_i2s.c` — Zephyr `i2s_*`
+    with a 2-block ping-pong memory slab.
+  - `<alp/can.h>` + `src/zephyr/peripheral_can.c` — Zephyr `can_*`,
+    classic + CAN-FD.
+  - `<alp/rtc.h>` + `src/zephyr/peripheral_rtc.c` — Zephyr `rtc_*`.
+  - `<alp/wdt.h>` + `src/zephyr/peripheral_wdt.c` — Zephyr `wdt_*`.
+- **Last-error mechanism for `*_open` failure diagnosis.**  New
+  status code `ALP_ERR_OUT_OF_RANGE` (= -8); new public accessor
+  `alp_last_error()` (thread-local) lets callers learn *why* a
+  failed `*_open` returned NULL — distinguishing
+  config-out-of-range, NULL-arg, pool-exhausted, device-not-ready,
+  and underlying driver error.  Internal helpers
+  `alp_z_set_last_error` / `alp_z_clear_last_error` live in
+  `src/zephyr/last_error.c`.
+- **SoC capability validation** — `scripts/gen_soc_caps.py` reads
+  `metadata/socs/**.json` and emits `include/alp/soc_caps.h` with
+  per-SoC `ALP_SOC_*_COUNT` / `ALP_SOC_*_MAX_*` macros gated by
+  `CONFIG_ALP_SOC_<TOKEN>`.  v0.2 wrappers consult the matching
+  macros to reject configs that exceed the active SoC's documented
+  caps before any I/O.  Canonical case: a 16-bit ADC request on
+  Alif E3 (12-bit max) fails at `alp_adc_open` with
+  `alp_last_error()` = `ALP_ERR_OUT_OF_RANGE`.
+- **Kconfig SoC choice** at `zephyr/Kconfig` for the active
+  capability profile.  Default `ALP_SOC_NONE` keeps validation
+  permissive; alp-studio's generated build picks the matching
+  `CONFIG_ALP_SOC_<VENDOR>_<FAMILY>_<PART>=y` automatically.
+- **Architecture documentation** — `docs/architecture.md` gains a
+  "Why this wrapper exists (despite Zephyr already abstracting
+  vendors)" section and a "Capability validation" section.  New
+  `docs/adr/` directory with the ADR template plus three accepted
+  records:
+  - [ADR 0001](docs/adr/0001-wrapper-on-top-of-zephyr.md) — why
+    ALP SDK wraps Zephyr (and why the wrapper stays thin).
+  - [ADR 0002](docs/adr/0002-error-mechanism.md) —
+    `alp_last_error()` + compile-time SoC capability validation.
+  - [ADR 0003](docs/adr/0003-peripheral-coverage.md) — wrap 12
+    peripheral classes at v0.2, not just I2C/SPI/GPIO/UART.
+- **ABI snapshot bumped** to reflect the new headers — 29 headers,
+  ~165 functions, ~110 typedefs, ~135 macros (was 21/123/80/114).
+
 ### Notes
 
 - Repo migrated from a CMSIS-Toolbox csolution / VFT mock-driver

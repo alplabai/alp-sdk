@@ -1,6 +1,37 @@
 {
   "generated": "2026-05-10",
   "headers": {
+    "alp/adc.h": {
+      "functions": {
+        "alp_adc_close": {
+          "hash": "ac53dbc20ca22519",
+          "signature": "void alp_adc_close(alp_adc_t *adc);"
+        },
+        "alp_adc_read_raw": {
+          "hash": "46239a90badd99fe",
+          "signature": "alp_status_t alp_adc_read_raw(alp_adc_t *adc, int32_t *raw_out);"
+        },
+        "alp_adc_read_uv": {
+          "hash": "213e09e41ba37d00",
+          "signature": "alp_status_t alp_adc_read_uv(alp_adc_t *adc, int32_t *uv_out);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_adc_ref_t": {
+          "definition": "typedef enum { ALP_ADC_REF_INTERNAL = 0, ALP_ADC_REF_EXTERNAL_0 = 1, ALP_ADC_REF_EXTERNAL_1 = 2, ALP_ADC_REF_VDD = 3 } alp_adc_ref_t;",
+          "hash": "c4c3371412c61f09"
+        },
+        "alp_adc_t": {
+          "definition": "typedef struct alp_adc alp_adc_t;",
+          "hash": "4f8bac696c999352"
+        },
+        "channel_id": {
+          "definition": "typedef struct { uint32_t channel_id;",
+          "hash": "b9a759f74c683398"
+        }
+      }
+    },
     "alp/audio.h": {
       "functions": {
         "alp_audio_in_close": {
@@ -262,6 +293,66 @@
         "size": {
           "definition": "typedef struct { void *data; size_t size;",
           "hash": "05827994ea27b0b9"
+        }
+      }
+    },
+    "alp/can.h": {
+      "functions": {
+        "alp_can_add_filter": {
+          "hash": "8c22c431a6676e12",
+          "signature": "alp_status_t alp_can_add_filter(alp_can_t *can, const alp_can_filter_t *filter, alp_can_rx_cb_t cb, void *user, int32_t *filter_id_out);"
+        },
+        "alp_can_close": {
+          "hash": "b8c8447bc94fa110",
+          "signature": "void alp_can_close(alp_can_t *can);"
+        },
+        "alp_can_remove_filter": {
+          "hash": "cb572459d356a5d3",
+          "signature": "alp_status_t alp_can_remove_filter(alp_can_t *can, int32_t filter_id);"
+        },
+        "alp_can_send": {
+          "hash": "8de57380986d9e35",
+          "signature": "alp_status_t alp_can_send(alp_can_t *can, const alp_can_frame_t *frame, uint32_t timeout_ms);"
+        },
+        "alp_can_start": {
+          "hash": "45b38b7cd5fc4123",
+          "signature": "alp_status_t alp_can_start(alp_can_t *can);"
+        },
+        "alp_can_stop": {
+          "hash": "f3cba316b51f83cf",
+          "signature": "alp_status_t alp_can_stop(alp_can_t *can);"
+        }
+      },
+      "macros": {
+        "ALP_CAN_MAX_DLC_CLASSIC": {
+          "hash": "0bcbd63b336d2595",
+          "value": "8"
+        },
+        "ALP_CAN_MAX_DLC_FD": {
+          "hash": "4c148452abc24a14",
+          "value": "64"
+        }
+      },
+      "typedefs": {
+        "alp_can_mode_t": {
+          "definition": "typedef enum { ALP_CAN_MODE_CLASSIC = 0, ALP_CAN_MODE_FD = 1 } alp_can_mode_t;",
+          "hash": "9a0c57fa02a37af5"
+        },
+        "alp_can_rx_cb_t": {
+          "definition": "typedef void (*alp_can_rx_cb_t)(const alp_can_frame_t *frame, void *user);",
+          "hash": "e04a5ff03fb96f4f"
+        },
+        "alp_can_t": {
+          "definition": "typedef struct alp_can alp_can_t;",
+          "hash": "b5dc5fc7f9a66726"
+        },
+        "bus_id": {
+          "definition": "typedef struct { uint32_t bus_id;",
+          "hash": "40f01c286ffd3ad9"
+        },
+        "id": {
+          "definition": "typedef struct { uint32_t id;",
+          "hash": "87ed538825078832"
         }
       }
     },
@@ -739,6 +830,73 @@
         }
       }
     },
+    "alp/counter.h": {
+      "functions": {
+        "alp_counter_cancel_alarm": {
+          "hash": "432318c7c8b84354",
+          "signature": "alp_status_t alp_counter_cancel_alarm(alp_counter_t *counter);"
+        },
+        "alp_counter_close": {
+          "hash": "90a56336db669504",
+          "signature": "void alp_counter_close(alp_counter_t *counter);"
+        },
+        "alp_counter_get_value": {
+          "hash": "b5220300fde3902a",
+          "signature": "alp_status_t alp_counter_get_value(alp_counter_t *counter, uint32_t *ticks_out);"
+        },
+        "alp_counter_set_alarm": {
+          "hash": "619a01028cea584e",
+          "signature": "alp_status_t alp_counter_set_alarm(alp_counter_t *counter, uint32_t ticks_from_now, alp_counter_alarm_cb_t cb, void *user);"
+        },
+        "alp_counter_start": {
+          "hash": "ce0d33125bae18ba",
+          "signature": "alp_status_t alp_counter_start(alp_counter_t *counter);"
+        },
+        "alp_counter_stop": {
+          "hash": "f86e851418275fa8",
+          "signature": "alp_status_t alp_counter_stop(alp_counter_t *counter);"
+        },
+        "alp_counter_us_to_ticks": {
+          "hash": "5c3a090883be43f4",
+          "signature": "alp_status_t alp_counter_us_to_ticks(alp_counter_t *counter, uint32_t us, uint32_t *ticks_out);"
+        },
+        "alp_qenc_close": {
+          "hash": "a06b2ff8ad940293",
+          "signature": "void alp_qenc_close(alp_qenc_t *enc);"
+        },
+        "alp_qenc_get_position": {
+          "hash": "cd78301e754f3f2c",
+          "signature": "alp_status_t alp_qenc_get_position(alp_qenc_t *enc, int32_t *pos_out);"
+        },
+        "alp_qenc_reset_position": {
+          "hash": "107f90806e3c93a2",
+          "signature": "alp_status_t alp_qenc_reset_position(alp_qenc_t *enc);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_counter_alarm_cb_t": {
+          "definition": "typedef void (*alp_counter_alarm_cb_t)(alp_counter_t *counter, uint32_t ticks, void *user);",
+          "hash": "a411200ea4d2bf18"
+        },
+        "alp_counter_t": {
+          "definition": "typedef struct alp_counter alp_counter_t;",
+          "hash": "87ae197677a3d791"
+        },
+        "alp_qenc_t": {
+          "definition": "typedef struct alp_qenc alp_qenc_t;",
+          "hash": "c9d54c3c99b65909"
+        },
+        "counter_id": {
+          "definition": "typedef struct { uint32_t counter_id;",
+          "hash": "b3ec9f02f118b240"
+        },
+        "encoder_id": {
+          "definition": "typedef struct { uint32_t encoder_id;",
+          "hash": "aa953d3f641d87ed"
+        }
+      }
+    },
     "alp/display.h": {
       "functions": {
         "alp_display_blit": {
@@ -1090,6 +1248,49 @@
       "macros": {},
       "typedefs": {}
     },
+    "alp/i2s.h": {
+      "functions": {
+        "alp_i2s_close": {
+          "hash": "95e26939ec2f8b35",
+          "signature": "void alp_i2s_close(alp_i2s_t *i2s);"
+        },
+        "alp_i2s_read": {
+          "hash": "00df1aed7da0a0d7",
+          "signature": "alp_status_t alp_i2s_read(alp_i2s_t *i2s, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms);"
+        },
+        "alp_i2s_start": {
+          "hash": "89bf3196d9f5b99e",
+          "signature": "alp_status_t alp_i2s_start(alp_i2s_t *i2s);"
+        },
+        "alp_i2s_stop": {
+          "hash": "4f170cb6793835c4",
+          "signature": "alp_status_t alp_i2s_stop(alp_i2s_t *i2s);"
+        },
+        "alp_i2s_write": {
+          "hash": "276ad67edb65b980",
+          "signature": "alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint32_t timeout_ms);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_i2s_dir_t": {
+          "definition": "typedef enum { ALP_I2S_DIR_RX = 0, ALP_I2S_DIR_TX = 1, ALP_I2S_DIR_BOTH = 2 } alp_i2s_dir_t;",
+          "hash": "3e64d1c264ceed07"
+        },
+        "alp_i2s_format_t": {
+          "definition": "typedef enum { ALP_I2S_FMT_I2S = 0, ALP_I2S_FMT_LEFT_JUSTIFIED = 1, ALP_I2S_FMT_RIGHT_JUSTIFIED = 2, ALP_I2S_FMT_PCM_SHORT = 3, ALP_I2S_FMT_PCM_LONG = 4 } alp_i2s_format_t;",
+          "hash": "6b13f13725718207"
+        },
+        "alp_i2s_t": {
+          "definition": "typedef struct alp_i2s alp_i2s_t;",
+          "hash": "f9be65da876001f3"
+        },
+        "bus_id": {
+          "definition": "typedef struct { uint32_t bus_id;",
+          "hash": "40f01c286ffd3ad9"
+        }
+      }
+    },
     "alp/iot.h": {
       "functions": {
         "alp_mqtt_close": {
@@ -1271,6 +1472,10 @@
           "hash": "0b7fa85a2c3849aa",
           "signature": "alp_status_t alp_i2c_write_read(alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen, uint8_t *rdata, size_t rlen);"
         },
+        "alp_last_error": {
+          "hash": "a15ddf9d11450877",
+          "signature": "alp_status_t alp_last_error(void);"
+        },
         "alp_spi_close": {
           "hash": "7dbfaa8be9435a4a",
           "signature": "void alp_spi_close(alp_spi_t *bus);"
@@ -1339,8 +1544,8 @@
           "hash": "3d4c6b8b6611f2e7"
         },
         "alp_status_t": {
-          "definition": "typedef enum { ALP_OK = 0, ALP_ERR_INVAL = -1, ALP_ERR_NOT_READY = -2, ALP_ERR_BUSY = -3, ALP_ERR_TIMEOUT = -4, ALP_ERR_IO = -5, ALP_ERR_NOSUPPORT = -6, ALP_ERR_NOMEM = -7 } alp_status_t;",
-          "hash": "af4e93a494d67939"
+          "definition": "typedef enum { ALP_OK = 0, ALP_ERR_INVAL = -1, ALP_ERR_NOT_READY = -2, ALP_ERR_BUSY = -3, ALP_ERR_TIMEOUT = -4, ALP_ERR_IO = -5, ALP_ERR_NOSUPPORT = -6, ALP_ERR_NOMEM = -7, ALP_ERR_OUT_OF_RANGE = -8 } alp_status_t;",
+          "hash": "c0fcd8155acd85e0"
         },
         "alp_uart_parity_t": {
           "definition": "typedef enum { ALP_UART_PARITY_NONE = 0, ALP_UART_PARITY_EVEN = 1, ALP_UART_PARITY_ODD = 2 } alp_uart_parity_t;",
@@ -1357,6 +1562,64 @@
         "port_id": {
           "definition": "typedef struct { uint32_t port_id;",
           "hash": "da443c984bed1c7c"
+        }
+      }
+    },
+    "alp/pwm.h": {
+      "functions": {
+        "alp_pwm_close": {
+          "hash": "1765efaea8944eaf",
+          "signature": "void alp_pwm_close(alp_pwm_t *pwm);"
+        },
+        "alp_pwm_set_duty": {
+          "hash": "d7a2dc20068fdea1",
+          "signature": "alp_status_t alp_pwm_set_duty(alp_pwm_t *pwm, uint32_t pulse_ns);"
+        },
+        "alp_pwm_set_period": {
+          "hash": "a8fd6ee6e25144f7",
+          "signature": "alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_pwm_polarity_t": {
+          "definition": "typedef enum { ALP_PWM_POLARITY_NORMAL = 0, ALP_PWM_POLARITY_INVERTED = 1 } alp_pwm_polarity_t;",
+          "hash": "5a18e17d38f0eb03"
+        },
+        "alp_pwm_t": {
+          "definition": "typedef struct alp_pwm alp_pwm_t;",
+          "hash": "26978ae6ccd357db"
+        },
+        "channel_id": {
+          "definition": "typedef struct { uint32_t channel_id;",
+          "hash": "b9a759f74c683398"
+        }
+      }
+    },
+    "alp/rtc.h": {
+      "functions": {
+        "alp_rtc_close": {
+          "hash": "3b53bd2693381efa",
+          "signature": "void alp_rtc_close(alp_rtc_t *rtc);"
+        },
+        "alp_rtc_get_time": {
+          "hash": "9558aa6199ab2b51",
+          "signature": "alp_status_t alp_rtc_get_time(alp_rtc_t *rtc, alp_rtc_time_t *time);"
+        },
+        "alp_rtc_set_time": {
+          "hash": "6605d83c9c82e365",
+          "signature": "alp_status_t alp_rtc_set_time(alp_rtc_t *rtc, const alp_rtc_time_t *time);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_rtc_t": {
+          "definition": "typedef struct alp_rtc alp_rtc_t;",
+          "hash": "2148fc3ea76908f0"
+        },
+        "year": {
+          "definition": "typedef struct { uint16_t year;",
+          "hash": "ffad309da43dc39d"
         }
       }
     },
@@ -1415,6 +1678,127 @@
       "functions": {},
       "macros": {},
       "typedefs": {}
+    },
+    "alp/soc_caps.h": {
+      "functions": {},
+      "macros": {
+        "ALP_SOC_ADC_COUNT": {
+          "hash": "6a0b6d0b6de57454",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_ADC_MAX_RESOLUTION_BITS": {
+          "hash": "7b6973ad99cc1b45",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_CAN_COUNT": {
+          "hash": "0a366abdcae54060",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_CAN_FD_SUPPORTED": {
+          "hash": "dfab3a827faac9b8",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_DAC_COUNT": {
+          "hash": "55f29e3992c5332a",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_DAC_MAX_RESOLUTION_BITS": {
+          "hash": "c5012639a0f528e5",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_ETHERNET_COUNT": {
+          "hash": "3a483c6524d58f60",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_I2C_COUNT": {
+          "hash": "f71094455194d211",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_I2S_COUNT": {
+          "hash": "3ef1cad74a105ea5",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_MIPI_CSI_COUNT": {
+          "hash": "5bcbb1de0e8c0485",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_MIPI_DSI_COUNT": {
+          "hash": "5bf89a91acccb2a1",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_PDM_COUNT": {
+          "hash": "f37e7b4699d15452",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_PWM_COUNT": {
+          "hash": "49c99afc1a4166eb",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_QENC_COUNT": {
+          "hash": "a5fe0f841be27fa8",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_REF_STR": {
+          "hash": "8d98e4302052f6f8",
+          "value": "\"unknown\""
+        },
+        "ALP_SOC_RTC_COUNT": {
+          "hash": "66db93aa50b5f305",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_SPI_COUNT": {
+          "hash": "582f7a413d36b789",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_TIMER_COUNT": {
+          "hash": "03f0612e8c191c3f",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_UART_COUNT": {
+          "hash": "95f69a55a2bd2846",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_USB_COUNT": {
+          "hash": "98dd3d1528a84e07",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_WDT_COUNT": {
+          "hash": "7cd22f61358d0958",
+          "value": "UINT16_MAX"
+        }
+      },
+      "typedefs": {}
+    },
+    "alp/wdt.h": {
+      "functions": {
+        "alp_wdt_close": {
+          "hash": "40af7d03567c0c9a",
+          "signature": "void alp_wdt_close(alp_wdt_t *wdt);"
+        },
+        "alp_wdt_disable": {
+          "hash": "3963bbda3b3057d0",
+          "signature": "alp_status_t alp_wdt_disable(alp_wdt_t *wdt);"
+        },
+        "alp_wdt_feed": {
+          "hash": "444a982055668a0b",
+          "signature": "alp_status_t alp_wdt_feed(alp_wdt_t *wdt);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_wdt_action_t": {
+          "definition": "typedef enum { ALP_WDT_RESET_SOC = 0, ALP_WDT_RESET_CPU = 1, ALP_WDT_INTERRUPT_ONLY = 2 } alp_wdt_action_t;",
+          "hash": "bc311fb0b77353f2"
+        },
+        "alp_wdt_t": {
+          "definition": "typedef struct alp_wdt alp_wdt_t;",
+          "hash": "e6254d4093592cd4"
+        },
+        "timeout_ms": {
+          "definition": "typedef struct { uint32_t timeout_ms;",
+          "hash": "e1b36fb474845888"
+        }
+      }
     }
   },
   "version": "v0.1"

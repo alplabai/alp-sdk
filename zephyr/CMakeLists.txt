@@ -13,6 +13,7 @@ zephyr_library_named(alp_sdk)
 
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/handles.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/last_error.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_i2c.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_spi.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_gpio.c
@@ -27,6 +28,26 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/security_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/mproc_stub.c
 )
+
+# v0.2 peripheral wrappers — opt-in per-class so apps that don't use
+# a given Zephyr subsystem don't link the wrapper.  Each defaults on
+# when its underlying Zephyr driver class is enabled.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_PWM
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_pwm.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_ADC
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_adc.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_COUNTER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_counter.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_QENC
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_qenc.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_I2S
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_i2s.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_CAN
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_can.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_RTC
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_rtc.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_WDT
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_wdt.c)
 
 # Chip drivers — gated on per-chip Kconfig so blocks that don't use a
 # given chip don't pay its code size.

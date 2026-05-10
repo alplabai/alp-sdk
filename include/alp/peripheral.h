@@ -48,8 +48,33 @@ typedef enum {
     ALP_ERR_TIMEOUT     = -4,   /**< Transfer timed out. */
     ALP_ERR_IO          = -5,   /**< Bus / line error. */
     ALP_ERR_NOSUPPORT   = -6,   /**< Backend lacks this feature. */
-    ALP_ERR_NOMEM       = -7    /**< Allocation failure. */
+    ALP_ERR_NOMEM       = -7,   /**< Allocation failure. */
+    ALP_ERR_OUT_OF_RANGE = -8   /**< Config exceeds the SoC's documented hardware caps. */
 } alp_status_t;
+
+/**
+ * @brief Read the most recent error encountered on this thread.
+ *
+ * `alp_*_open` functions return NULL on failure for the v0.1 ABI
+ * stability reason; this helper lets callers learn *why*.  Common
+ * cases:
+ *
+ *   - @ref ALP_ERR_INVAL        — NULL config, bus_id out of range
+ *   - @ref ALP_ERR_NOT_READY    — DT alias unset or device not ready
+ *   - @ref ALP_ERR_NOMEM        — handle pool exhausted
+ *   - @ref ALP_ERR_OUT_OF_RANGE — config exceeds the active SoC's caps
+ *                                  (e.g. 16-bit ADC requested on a SoC
+ *                                  whose ADC tops out at 12 bits)
+ *   - @ref ALP_ERR_NOSUPPORT    — Zephyr driver returned -ENOTSUP
+ *
+ * The value is **thread-local** — concurrent open() calls on
+ * different threads don't clobber each other's diagnostic.  A
+ * successful open() on a thread clears its slot.
+ *
+ * @return The thread's last error code, or @ref ALP_OK if no error
+ *         has been recorded since the last successful open().
+ */
+alp_status_t alp_last_error(void);
 
 /* ------------------------------------------------------------------ */
 /* GPIO                                                                */

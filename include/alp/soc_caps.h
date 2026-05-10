@@ -1,0 +1,261 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Auto-generated from metadata/socs/**.json by
+ * scripts/gen_soc_caps.py.  DO NOT EDIT BY HAND — regenerate.
+ *
+ * Each SoC's capability macros are gated by CONFIG_ALP_SOC_<TOKEN>.
+ * Apps select the active SoC via Kconfig.  When no SoC is
+ * selected the macros default to a permissive UINT16_MAX so
+ * capability checks accept any config — apps that want runtime
+ * validation must select a specific SoC.
+ */
+
+#ifndef ALP_SOC_CAPS_H
+#define ALP_SOC_CAPS_H
+
+#include <stdint.h>
+
+#if defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E3)
+/* alif:ensemble:e3 */
+#define ALP_SOC_REF_STR "alif:ensemble:e3"
+#define ALP_SOC_I2C_COUNT 5
+#define ALP_SOC_SPI_COUNT 5
+#define ALP_SOC_UART_COUNT 9
+#define ALP_SOC_I2S_COUNT 5
+#define ALP_SOC_PDM_COUNT 8
+#define ALP_SOC_ADC_COUNT 4
+#define ALP_SOC_ADC_MAX_RESOLUTION_BITS 24
+#define ALP_SOC_DAC_COUNT 2
+#define ALP_SOC_DAC_MAX_RESOLUTION_BITS 12
+#define ALP_SOC_CAN_COUNT 1
+#define ALP_SOC_CAN_FD_SUPPORTED 1
+#define ALP_SOC_RTC_COUNT 1
+#define ALP_SOC_WDT_COUNT 2
+#define ALP_SOC_QENC_COUNT 4
+#define ALP_SOC_TIMER_COUNT 16
+#define ALP_SOC_PWM_COUNT 12
+#define ALP_SOC_ETHERNET_COUNT 1
+#define ALP_SOC_USB_COUNT 1
+#define ALP_SOC_MIPI_CSI_COUNT 1
+#define ALP_SOC_MIPI_DSI_COUNT 1
+
+#elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E4)
+/* alif:ensemble:e4 */
+#define ALP_SOC_REF_STR "alif:ensemble:e4"
+#define ALP_SOC_I2C_COUNT 0
+#define ALP_SOC_SPI_COUNT 0
+#define ALP_SOC_UART_COUNT 0
+#define ALP_SOC_I2S_COUNT 0
+#define ALP_SOC_PDM_COUNT 0
+#define ALP_SOC_ADC_COUNT 0
+#define ALP_SOC_ADC_MAX_RESOLUTION_BITS 0
+#define ALP_SOC_DAC_COUNT 0
+#define ALP_SOC_DAC_MAX_RESOLUTION_BITS 0
+#define ALP_SOC_CAN_COUNT 0
+#define ALP_SOC_CAN_FD_SUPPORTED 0
+#define ALP_SOC_RTC_COUNT 0
+#define ALP_SOC_WDT_COUNT 0
+#define ALP_SOC_QENC_COUNT 0
+#define ALP_SOC_TIMER_COUNT 0
+#define ALP_SOC_PWM_COUNT 0
+#define ALP_SOC_ETHERNET_COUNT 0
+#define ALP_SOC_USB_COUNT 0
+#define ALP_SOC_MIPI_CSI_COUNT 0
+#define ALP_SOC_MIPI_DSI_COUNT 0
+
+#elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E5)
+/* alif:ensemble:e5 */
+#define ALP_SOC_REF_STR "alif:ensemble:e5"
+#define ALP_SOC_I2C_COUNT 0
+#define ALP_SOC_SPI_COUNT 0
+#define ALP_SOC_UART_COUNT 0
+#define ALP_SOC_I2S_COUNT 0
+#define ALP_SOC_PDM_COUNT 0
+#define ALP_SOC_ADC_COUNT 0
+#define ALP_SOC_ADC_MAX_RESOLUTION_BITS 0
+#define ALP_SOC_DAC_COUNT 0
+#define ALP_SOC_DAC_MAX_RESOLUTION_BITS 0
+#define ALP_SOC_CAN_COUNT 0
+#define ALP_SOC_CAN_FD_SUPPORTED 0
+#define ALP_SOC_RTC_COUNT 0
+#define ALP_SOC_WDT_COUNT 0
+#define ALP_SOC_QENC_COUNT 0
+#define ALP_SOC_TIMER_COUNT 0
+#define ALP_SOC_PWM_COUNT 0
+#define ALP_SOC_ETHERNET_COUNT 0
+#define ALP_SOC_USB_COUNT 0
+#define ALP_SOC_MIPI_CSI_COUNT 0
+#define ALP_SOC_MIPI_DSI_COUNT 0
+
+#elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E6)
+/* alif:ensemble:e6 */
+#define ALP_SOC_REF_STR "alif:ensemble:e6"
+#define ALP_SOC_I2C_COUNT 0
+#define ALP_SOC_SPI_COUNT 0
+#define ALP_SOC_UART_COUNT 0
+#define ALP_SOC_I2S_COUNT 0
+#define ALP_SOC_PDM_COUNT 0
+#define ALP_SOC_ADC_COUNT 0
+#define ALP_SOC_ADC_MAX_RESOLUTION_BITS 0
+#define ALP_SOC_DAC_COUNT 0
+#define ALP_SOC_DAC_MAX_RESOLUTION_BITS 0
+#define ALP_SOC_CAN_COUNT 0
+#define ALP_SOC_CAN_FD_SUPPORTED 0
+#define ALP_SOC_RTC_COUNT 0
+#define ALP_SOC_WDT_COUNT 0
+#define ALP_SOC_QENC_COUNT 0
+#define ALP_SOC_TIMER_COUNT 0
+#define ALP_SOC_PWM_COUNT 0
+#define ALP_SOC_ETHERNET_COUNT 0
+#define ALP_SOC_USB_COUNT 0
+#define ALP_SOC_MIPI_CSI_COUNT 0
+#define ALP_SOC_MIPI_DSI_COUNT 0
+
+#elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7)
+/* alif:ensemble:e7 */
+#define ALP_SOC_REF_STR "alif:ensemble:e7"
+#define ALP_SOC_I2C_COUNT 5
+#define ALP_SOC_SPI_COUNT 5
+#define ALP_SOC_UART_COUNT 9
+#define ALP_SOC_I2S_COUNT 5
+#define ALP_SOC_PDM_COUNT 8
+#define ALP_SOC_ADC_COUNT 4
+#define ALP_SOC_ADC_MAX_RESOLUTION_BITS 24
+#define ALP_SOC_DAC_COUNT 2
+#define ALP_SOC_DAC_MAX_RESOLUTION_BITS 12
+#define ALP_SOC_CAN_COUNT 1
+#define ALP_SOC_CAN_FD_SUPPORTED 1
+#define ALP_SOC_RTC_COUNT 1
+#define ALP_SOC_WDT_COUNT 4
+#define ALP_SOC_QENC_COUNT 4
+#define ALP_SOC_TIMER_COUNT 16
+#define ALP_SOC_PWM_COUNT 12
+#define ALP_SOC_ETHERNET_COUNT 1
+#define ALP_SOC_USB_COUNT 1
+#define ALP_SOC_MIPI_CSI_COUNT 1
+#define ALP_SOC_MIPI_DSI_COUNT 1
+
+#elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8)
+/* alif:ensemble:e8 */
+#define ALP_SOC_REF_STR "alif:ensemble:e8"
+#define ALP_SOC_I2C_COUNT 6
+#define ALP_SOC_SPI_COUNT 5
+#define ALP_SOC_UART_COUNT 9
+#define ALP_SOC_I2S_COUNT 5
+#define ALP_SOC_PDM_COUNT 8
+#define ALP_SOC_ADC_COUNT 4
+#define ALP_SOC_ADC_MAX_RESOLUTION_BITS 24
+#define ALP_SOC_DAC_COUNT 2
+#define ALP_SOC_DAC_MAX_RESOLUTION_BITS 12
+#define ALP_SOC_CAN_COUNT 1
+#define ALP_SOC_CAN_FD_SUPPORTED 1
+#define ALP_SOC_RTC_COUNT 1
+#define ALP_SOC_WDT_COUNT 4
+#define ALP_SOC_QENC_COUNT 4
+#define ALP_SOC_TIMER_COUNT 16
+#define ALP_SOC_PWM_COUNT 12
+#define ALP_SOC_ETHERNET_COUNT 1
+#define ALP_SOC_USB_COUNT 1
+#define ALP_SOC_MIPI_CSI_COUNT 1
+#define ALP_SOC_MIPI_DSI_COUNT 1
+
+#elif defined(CONFIG_ALP_SOC_DEEPX_DX_M1)
+/* deepx:dx:m1 */
+#define ALP_SOC_REF_STR "deepx:dx:m1"
+#define ALP_SOC_I2C_COUNT 1
+#define ALP_SOC_SPI_COUNT 1
+#define ALP_SOC_UART_COUNT 1
+#define ALP_SOC_I2S_COUNT 0
+#define ALP_SOC_PDM_COUNT 0
+#define ALP_SOC_ADC_COUNT 0
+#define ALP_SOC_ADC_MAX_RESOLUTION_BITS 0
+#define ALP_SOC_DAC_COUNT 0
+#define ALP_SOC_DAC_MAX_RESOLUTION_BITS 0
+#define ALP_SOC_CAN_COUNT 0
+#define ALP_SOC_CAN_FD_SUPPORTED 0
+#define ALP_SOC_RTC_COUNT 0
+#define ALP_SOC_WDT_COUNT 1
+#define ALP_SOC_QENC_COUNT 0
+#define ALP_SOC_TIMER_COUNT 0
+#define ALP_SOC_PWM_COUNT 1
+#define ALP_SOC_ETHERNET_COUNT 0
+#define ALP_SOC_USB_COUNT 0
+#define ALP_SOC_MIPI_CSI_COUNT 0
+#define ALP_SOC_MIPI_DSI_COUNT 0
+
+#elif defined(CONFIG_ALP_SOC_NXP_IMX9_IMX93)
+/* nxp:imx9:imx93 */
+#define ALP_SOC_REF_STR "nxp:imx9:imx93"
+#define ALP_SOC_I2C_COUNT 0
+#define ALP_SOC_SPI_COUNT 0
+#define ALP_SOC_UART_COUNT 0
+#define ALP_SOC_I2S_COUNT 0
+#define ALP_SOC_PDM_COUNT 0
+#define ALP_SOC_ADC_COUNT 0
+#define ALP_SOC_ADC_MAX_RESOLUTION_BITS 0
+#define ALP_SOC_DAC_COUNT 0
+#define ALP_SOC_DAC_MAX_RESOLUTION_BITS 0
+#define ALP_SOC_CAN_COUNT 0
+#define ALP_SOC_CAN_FD_SUPPORTED 0
+#define ALP_SOC_RTC_COUNT 0
+#define ALP_SOC_WDT_COUNT 0
+#define ALP_SOC_QENC_COUNT 0
+#define ALP_SOC_TIMER_COUNT 0
+#define ALP_SOC_PWM_COUNT 0
+#define ALP_SOC_ETHERNET_COUNT 0
+#define ALP_SOC_USB_COUNT 0
+#define ALP_SOC_MIPI_CSI_COUNT 0
+#define ALP_SOC_MIPI_DSI_COUNT 0
+
+#elif defined(CONFIG_ALP_SOC_RENESAS_RZV2N_N44)
+/* renesas:rzv2n:n44 */
+#define ALP_SOC_REF_STR "renesas:rzv2n:n44"
+#define ALP_SOC_I2C_COUNT 9
+#define ALP_SOC_SPI_COUNT 3
+#define ALP_SOC_UART_COUNT 10
+#define ALP_SOC_I2S_COUNT 10
+#define ALP_SOC_PDM_COUNT 6
+#define ALP_SOC_ADC_COUNT 24
+#define ALP_SOC_ADC_MAX_RESOLUTION_BITS 12
+#define ALP_SOC_DAC_COUNT 0
+#define ALP_SOC_DAC_MAX_RESOLUTION_BITS 0
+#define ALP_SOC_CAN_COUNT 6
+#define ALP_SOC_CAN_FD_SUPPORTED 1
+#define ALP_SOC_RTC_COUNT 1
+#define ALP_SOC_WDT_COUNT 4
+#define ALP_SOC_QENC_COUNT 0
+#define ALP_SOC_TIMER_COUNT 0
+#define ALP_SOC_PWM_COUNT 0
+#define ALP_SOC_ETHERNET_COUNT 0
+#define ALP_SOC_USB_COUNT 1
+#define ALP_SOC_MIPI_CSI_COUNT 2
+#define ALP_SOC_MIPI_DSI_COUNT 1
+
+#else  /* No SoC selected — accept any config. */
+#define ALP_SOC_REF_STR "unknown"
+#define ALP_SOC_I2C_COUNT UINT16_MAX
+#define ALP_SOC_SPI_COUNT UINT16_MAX
+#define ALP_SOC_UART_COUNT UINT16_MAX
+#define ALP_SOC_I2S_COUNT UINT16_MAX
+#define ALP_SOC_PDM_COUNT UINT16_MAX
+#define ALP_SOC_ADC_COUNT UINT16_MAX
+#define ALP_SOC_ADC_MAX_RESOLUTION_BITS UINT16_MAX
+#define ALP_SOC_DAC_COUNT UINT16_MAX
+#define ALP_SOC_DAC_MAX_RESOLUTION_BITS UINT16_MAX
+#define ALP_SOC_CAN_COUNT UINT16_MAX
+#define ALP_SOC_CAN_FD_SUPPORTED UINT16_MAX
+#define ALP_SOC_RTC_COUNT UINT16_MAX
+#define ALP_SOC_WDT_COUNT UINT16_MAX
+#define ALP_SOC_QENC_COUNT UINT16_MAX
+#define ALP_SOC_TIMER_COUNT UINT16_MAX
+#define ALP_SOC_PWM_COUNT UINT16_MAX
+#define ALP_SOC_ETHERNET_COUNT UINT16_MAX
+#define ALP_SOC_USB_COUNT UINT16_MAX
+#define ALP_SOC_MIPI_CSI_COUNT UINT16_MAX
+#define ALP_SOC_MIPI_DSI_COUNT UINT16_MAX
+
+#endif
+
+#endif  /* ALP_SOC_CAPS_H */

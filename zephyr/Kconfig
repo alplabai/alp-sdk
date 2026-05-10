@@ -10,6 +10,53 @@ config ALP_SDK
 
 if ALP_SDK
 
+# Active SoC selection — drives <alp/soc_caps.h> capability checks.
+# When no choice is selected the SDK's runtime validation is permissive
+# (default macros = UINT16_MAX); selecting a SoC enables strict
+# rejection of configs that exceed its documented hardware caps.
+# See docs/adr/0002-error-mechanism.md.
+
+choice
+	prompt "Active SoC capability profile (for runtime config validation)"
+	default ALP_SOC_NONE
+	help
+	  Select the SoM's SoC so the SDK can reject runtime configs
+	  that exceed its documented caps (e.g. a 16-bit ADC config
+	  on a 12-bit SoC).  alp-studio's generated build sets this
+	  automatically; hand-written firmware can pick manually.
+
+config ALP_SOC_NONE
+	bool "None — capability checks pass through"
+
+config ALP_SOC_ALIF_ENSEMBLE_E3
+	bool "Alif Ensemble E3 (alif:ensemble:e3)"
+
+config ALP_SOC_ALIF_ENSEMBLE_E4
+	bool "Alif Ensemble E4 (alif:ensemble:e4 — preliminary)"
+
+config ALP_SOC_ALIF_ENSEMBLE_E5
+	bool "Alif Ensemble E5 (alif:ensemble:e5 — preliminary)"
+
+config ALP_SOC_ALIF_ENSEMBLE_E6
+	bool "Alif Ensemble E6 (alif:ensemble:e6 — preliminary)"
+
+config ALP_SOC_ALIF_ENSEMBLE_E7
+	bool "Alif Ensemble E7 (alif:ensemble:e7)"
+
+config ALP_SOC_ALIF_ENSEMBLE_E8
+	bool "Alif Ensemble E8 (alif:ensemble:e8 — preliminary)"
+
+config ALP_SOC_RENESAS_RZV2N_N44
+	bool "Renesas RZ/V2N R9A09G056N44 (renesas:rzv2n:n44)"
+
+config ALP_SOC_DEEPX_DX_M1
+	bool "DEEPX DX-M1 NPU (deepx:dx:m1)"
+
+config ALP_SOC_NXP_IMX9_IMX93
+	bool "NXP i.MX 93 (nxp:imx9:imx93 — preliminary)"
+
+endchoice
+
 config ALP_SDK_MAX_I2C_HANDLES
 	int "Maximum concurrent alp_i2c_t handles"
 	default 4
@@ -25,6 +72,114 @@ config ALP_SDK_MAX_UART_HANDLES
 config ALP_SDK_MAX_GPIO_HANDLES
 	int "Maximum concurrent alp_gpio_t handles"
 	default 16
+
+config ALP_SDK_MAX_PWM_HANDLES
+	int "Maximum concurrent alp_pwm_t handles"
+	default 8
+
+config ALP_SDK_MAX_ADC_HANDLES
+	int "Maximum concurrent alp_adc_t handles"
+	default 8
+
+config ALP_SDK_MAX_COUNTER_HANDLES
+	int "Maximum concurrent alp_counter_t handles"
+	default 4
+
+config ALP_SDK_MAX_QENC_HANDLES
+	int "Maximum concurrent alp_qenc_t handles"
+	default 4
+
+config ALP_SDK_MAX_I2S_HANDLES
+	int "Maximum concurrent alp_i2s_t handles"
+	default 2
+
+config ALP_SDK_MAX_CAN_HANDLES
+	int "Maximum concurrent alp_can_t handles"
+	default 4
+
+config ALP_SDK_MAX_RTC_HANDLES
+	int "Maximum concurrent alp_rtc_t handles"
+	default 2
+
+config ALP_SDK_MAX_WDT_HANDLES
+	int "Maximum concurrent alp_wdt_t handles"
+	default 2
+
+# Per-class peripheral wrappers — opt-in so apps that don't use a
+# given Zephyr subsystem don't link the wrapper.  Each defaults on
+# when its underlying Zephyr driver class is enabled.
+
+config ALP_SDK_PERIPH_PWM
+	bool "Enable <alp/pwm.h> wrapper"
+	default y if PWM
+	depends on PWM
+	help
+	  Compile src/zephyr/peripheral_pwm.c.  Provides alp_pwm_*
+	  on top of Zephyr's pwm_* API.  Resolves channel_id via the
+	  alp-pwm0..alp-pwm7 DT aliases.
+
+config ALP_SDK_PERIPH_ADC
+	bool "Enable <alp/adc.h> wrapper"
+	default y if ADC
+	depends on ADC
+	help
+	  Compile src/zephyr/peripheral_adc.c.  Provides alp_adc_*
+	  on top of Zephyr's adc_* API.  Resolves channel_id via the
+	  alp-adc0..alp-adc7 DT aliases (each pointing at a node with
+	  an io-channels phandle and the standard ADC channel-config
+	  properties).
+
+config ALP_SDK_PERIPH_COUNTER
+	bool "Enable <alp/counter.h> free-running counter wrapper"
+	default y if COUNTER
+	depends on COUNTER
+	help
+	  Compile src/zephyr/peripheral_counter.c.  Provides
+	  alp_counter_* on top of Zephyr's counter_* API.  Resolves
+	  counter_id via the alp-counter0..alp-counter3 DT aliases.
+
+config ALP_SDK_PERIPH_QENC
+	bool "Enable <alp/counter.h> quadrature-decoder wrapper"
+	default y if SENSOR
+	depends on SENSOR
+	help
+	  Compile src/zephyr/peripheral_qenc.c.  Provides alp_qenc_*
+	  on top of Zephyr's sensor_* API (SENSOR_CHAN_ROTATION).
+	  Resolves encoder_id via alp-qenc0..alp-qenc3 DT aliases.
+
+config ALP_SDK_PERIPH_I2S
+	bool "Enable <alp/i2s.h> wrapper"
+	default y if I2S
+	depends on I2S
+	help
+	  Compile src/zephyr/peripheral_i2s.c.  Provides alp_i2s_*
+	  on top of Zephyr's i2s_* API with a 2-block ping-pong
+	  memory slab.
+
+config ALP_SDK_PERIPH_CAN
+	bool "Enable <alp/can.h> wrapper (classic CAN + CAN-FD)"
+	default y if CAN
+	depends on CAN
+	help
+	  Compile src/zephyr/peripheral_can.c.  Provides alp_can_*
+	  on top of Zephyr's can_* API.  CAN-FD only when
+	  CONFIG_CAN_FD_MODE=y.
+
+config ALP_SDK_PERIPH_RTC
+	bool "Enable <alp/rtc.h> wrapper"
+	default y if RTC
+	depends on RTC
+	help
+	  Compile src/zephyr/peripheral_rtc.c.  Provides alp_rtc_*
+	  on top of Zephyr's rtc_* API.
+
+config ALP_SDK_PERIPH_WDT
+	bool "Enable <alp/wdt.h> wrapper"
+	default y if WATCHDOG
+	depends on WATCHDOG
+	help
+	  Compile src/zephyr/peripheral_wdt.c.  Provides alp_wdt_*
+	  on top of Zephyr's wdt_* API.
 
 config ALP_SDK_HAS_LVGL
 	bool "Build <alp/gui.h> against LVGL"
