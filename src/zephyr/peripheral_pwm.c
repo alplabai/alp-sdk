@@ -24,8 +24,12 @@
 #include "alp/soc_caps.h"
 #include "handles.h"
 
+/* DT_NODE_HAS_PROP refuses to expand when the node id is
+ * DT_INVALID_NODE (alias unset), so gate on DT_NODE_EXISTS first.
+ * If the alias is set but the target node lacks `pwms`, the build
+ * fails with a more informative PWM_DT_SPEC_GET error. */
 #define ALP_PWM_SPEC_OR_NULL(idx)                                              \
-    COND_CODE_1(DT_NODE_HAS_PROP(DT_ALIAS(_CONCAT(alp_pwm, idx)), pwms),       \
+    COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_pwm, idx))),               \
                 (PWM_DT_SPEC_GET(DT_ALIAS(_CONCAT(alp_pwm, idx)))),            \
                 ((struct pwm_dt_spec){.dev = NULL}))
 

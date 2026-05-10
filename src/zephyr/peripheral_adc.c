@@ -38,8 +38,12 @@
 #include "alp/soc_caps.h"
 #include "handles.h"
 
+/* DT_NODE_HAS_PROP refuses to expand when the node id is
+ * DT_INVALID_NODE (alias unset), so gate on DT_NODE_EXISTS first.
+ * If the alias is set but the target node lacks `io-channels`, the
+ * build fails with a more informative ADC_DT_SPEC_GET error. */
 #define ALP_ADC_SPEC_OR_NULL(idx)                                              \
-    COND_CODE_1(DT_NODE_HAS_PROP(DT_ALIAS(_CONCAT(alp_adc, idx)), io_channels),\
+    COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_adc, idx))),               \
                 (ADC_DT_SPEC_GET(DT_ALIAS(_CONCAT(alp_adc, idx)))),            \
                 ((struct adc_dt_spec){.dev = NULL}))
 
