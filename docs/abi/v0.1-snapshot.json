@@ -263,8 +263,8 @@
           "value": "EVK_AEN_PIN_CK_RST"
         },
         "EVK_AEN_I2C_ADDR_BMI323": {
-          "hash": "16c19ef26073a21e",
-          "value": "0x69u"
+          "hash": "adbd3e283e31a8fb",
+          "value": "0x68u"
         },
         "EVK_AEN_I2C_ADDR_BMP581": {
           "hash": "d57f6fa1deeff70d",
@@ -273,6 +273,42 @@
         "EVK_AEN_I2C_ADDR_ICM42670": {
           "hash": "a5c66f49033c1f31",
           "value": "0x69u"
+        },
+        "EVK_AEN_I2C_ADDR_INA236_1V8": {
+          "hash": "221ec306fc92635f",
+          "value": "0x41u"
+        },
+        "EVK_AEN_I2C_ADDR_INA236_3V3": {
+          "hash": "f171cd164ab160d9",
+          "value": "0x40u"
+        },
+        "EVK_AEN_I2C_ADDR_INA236_5V": {
+          "hash": "871be2d68442df0d",
+          "value": "0x46u"
+        },
+        "EVK_AEN_I2C_ADDR_INA236_VCAM0": {
+          "hash": "d47872f641da640b",
+          "value": "0x44u"
+        },
+        "EVK_AEN_I2C_ADDR_INA236_VCAM1": {
+          "hash": "18268c9502eb5e05",
+          "value": "0x45u"
+        },
+        "EVK_AEN_I2C_ADDR_INA236_VIO": {
+          "hash": "35068d8c86802d37",
+          "value": "0x42u"
+        },
+        "EVK_AEN_I2C_ADDR_TAS2563_BCAST": {
+          "hash": "8daa2a8058e5622c",
+          "value": "0x48u"
+        },
+        "EVK_AEN_I2C_ADDR_TAS2563_HIGH": {
+          "hash": "e41334cdad0c0122",
+          "value": "0x4Eu"
+        },
+        "EVK_AEN_I2C_ADDR_TAS2563_LOW": {
+          "hash": "9b9691ac958c40a6",
+          "value": "0x4Du"
         },
         "EVK_AEN_I2C_ADDR_TCAL9538": {
           "hash": "7dfc06055ae03081",
@@ -343,7 +379,15 @@
           "value": "(EVK_AEN_PIN_OVERLAY_BASE + 10u)"
         },
         "EVK_AEN_PIN_ENCODER_SW": {
-          "hash": "59ef4cdf6640a13e",
+          "hash": "fee9c5b6a0d18496",
+          "value": "ALP_E1M_GPIO_IO4"
+        },
+        "EVK_AEN_PIN_I2S_MUX_EN": {
+          "hash": "e2726b9303975851",
+          "value": ""
+        },
+        "EVK_AEN_PIN_I2S_MUX_SEL": {
+          "hash": "066a1161e5ec873c",
           "value": ""
         },
         "EVK_AEN_PIN_IO_EXP_INT": {
@@ -353,6 +397,10 @@
         "EVK_AEN_PIN_IO_EXP_RST": {
           "hash": "7c23ad7f03005e3c",
           "value": "(EVK_AEN_PIN_OVERLAY_BASE + 1u)"
+        },
+        "EVK_AEN_PIN_M2E_UART_WAKE": {
+          "hash": "0d74d2db17f89544",
+          "value": "ALP_E1M_GPIO_IO19"
         },
         "EVK_AEN_PIN_MB_INT": {
           "hash": "0546b393bf99e23b",
@@ -368,6 +416,10 @@
         },
         "EVK_AEN_PIN_SDIO_MUX_SEL": {
           "hash": "36ff158aa03f8c38",
+          "value": ""
+        },
+        "EVK_AEN_PIN_USB2_MUX_SEL": {
+          "hash": "0056a56ebdd392dc",
           "value": ""
         },
         "EVK_AEN_PWM_LED_BLUE": {
@@ -400,6 +452,10 @@
           "definition": "typedef enum { EVK_AEN_CAM_A = 0, EVK_AEN_CAM_B = 1, } evk_aen_cam_select_t;",
           "hash": "67283eec45118726"
         },
+        "evk_aen_i2s_select_t": {
+          "definition": "typedef enum { EVK_AEN_I2S_AMP = 0, EVK_AEN_I2S_M2E_KEY = 1, } evk_aen_i2s_select_t;",
+          "hash": "218b47b0f606bd7f"
+        },
         "evk_aen_ioexp_pin_t": {
           "definition": "typedef enum { EVK_AEN_IOEXP_LCD_PWR_EN = 0, EVK_AEN_IOEXP_LCD_RST = 1, EVK_AEN_IOEXP_CAM_EN = 2, EVK_AEN_IOEXP_CTP_RST = 3, EVK_AEN_IOEXP_ICM42670_INT1 = 4, EVK_AEN_IOEXP_ICM42670_INT2 = 5, EVK_AEN_IOEXP_ICM42670_FSYNC = 6, EVK_AEN_IOEXP_BMP581_INT1 = 7, } evk_aen_ioexp_pin_t;",
           "hash": "51d5aeff5f5c27b2"
@@ -407,6 +463,10 @@
         "evk_aen_sdio_select_t": {
           "definition": "typedef enum { EVK_AEN_SDIO_M2E_KEY = 0, EVK_AEN_SDIO_SDCARD = 1, } evk_aen_sdio_select_t;",
           "hash": "99cc62e0489170a2"
+        },
+        "evk_aen_usb2_select_t": {
+          "definition": "typedef enum { EVK_AEN_USB2_CONNECTOR = 0, EVK_AEN_USB2_M2E_KEY = 1, } evk_aen_usb2_select_t;",
+          "hash": "5d339313b70a2653"
         }
       }
     },
@@ -1398,6 +1458,62 @@
         "fb_len": {
           "definition": "typedef struct { alp_spi_t *bus; alp_gpio_t *dc; uint8_t *fb; size_t fb_len;",
           "hash": "68009f16bb56d1b9"
+        }
+      }
+    },
+    "alp/chips/tas2563.h": {
+      "functions": {
+        "tas2563_deinit": {
+          "hash": "253d74a9f5743f51",
+          "signature": "void tas2563_deinit(tas2563_t *ctx);"
+        },
+        "tas2563_init": {
+          "hash": "cb3ab5964e8c2026",
+          "signature": "alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp_gpio_t *sd_n);"
+        },
+        "tas2563_read_revision": {
+          "hash": "42548fad01644ebf",
+          "signature": "alp_status_t tas2563_read_revision(tas2563_t *ctx, uint8_t *rev_out);"
+        },
+        "tas2563_set_hw_enable": {
+          "hash": "fa19bbf771113c0a",
+          "signature": "alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);"
+        },
+        "tas2563_set_mode": {
+          "hash": "7185044019a5c6cc",
+          "signature": "alp_status_t tas2563_set_mode(tas2563_t *ctx, tas2563_mode_t mode);"
+        }
+      },
+      "macros": {
+        "TAS2563_I2C_ADDR_BROADCAST": {
+          "hash": "d8b3307d25146bc9",
+          "value": "0x48u"
+        },
+        "TAS2563_I2C_ADDR_GND_DIRECT": {
+          "hash": "a4b617ec6f0f8bd2",
+          "value": "0x4Cu"
+        },
+        "TAS2563_I2C_ADDR_GND_PULL": {
+          "hash": "fe0d459b25fcd013",
+          "value": "0x4Du"
+        },
+        "TAS2563_I2C_ADDR_VDD_DIRECT": {
+          "hash": "45cb3faf927a38d6",
+          "value": "0x4Fu"
+        },
+        "TAS2563_I2C_ADDR_VDD_PULL": {
+          "hash": "a456a298adafb48b",
+          "value": "0x4Eu"
+        }
+      },
+      "typedefs": {
+        "initialised": {
+          "definition": "typedef struct { bool initialised;",
+          "hash": "98b22257593e61d9"
+        },
+        "tas2563_mode_t": {
+          "definition": "typedef enum { TAS2563_MODE_ACTIVE = 0x00, TAS2563_MODE_MUTE = 0x01, TAS2563_MODE_SHUTDOWN = 0x02, } tas2563_mode_t;",
+          "hash": "d8683e4a9903ac6b"
         }
       }
     },

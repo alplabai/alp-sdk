@@ -473,6 +473,41 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **EVK on-module audio + mux + current-sense + wake batch** --
+  more user-supplied EVK schematic detail:
+  - **TAS2563RPP smart-amp pair** -- two amps on I2C0 + I2S0
+    (addresses 0x4D and 0x4E, plus broadcast 0x48).  New
+    `chips/tas2563/` driver: init / probe / mode_ctrl /
+    hw_enable.  Tuning-blob loader + I2S binding land in v0.3.x.
+    AMP_ENABLE drives the chip's SD_N (active-high enable);
+    AMP_FAULT reads IRQ_N (open-drain, internal pull-up).
+    `CONFIG_ALP_SDK_CHIP_TAS2563` opt-in.
+  - **Four MP34DT05TR-A PDM mics** -- two pairs on PDM0 and PDM1
+    respectively, each pair sharing a PDM data line via the LR
+    convention (LR=high samples on rising edge, LR=low on
+    falling).  Documented inline; chips/pdm_mic helper covers
+    the part.
+  - **I2S0 74LVC157 mux** swaps the I2S0 bus between TAS2563 and
+    M.2 E-key.  Control pins split across chips:
+    `EVK_AEN_PIN_I2S_MUX_EN = IO8` (Alif P7.1) +
+    `EVK_AEN_PIN_I2S_MUX_SEL = IO13` (CC3501E GPIO13).
+  - **USB2 TMUXHS221 mux** swaps USB2 between the external USB-A
+    jack and M.2 E-key USB.  Single control:
+    `EVK_AEN_PIN_USB2_MUX_SEL = IO11` (CC3501E GPIO2).  /OEN
+    tied to GND so the mux is always live.
+  - **M.2 E-key UART wake** -- `EVK_AEN_PIN_M2E_UART_WAKE = IO19`
+    (CC3501E GPIO19).
+  - **Six INA236 current shunt monitors** -- one per power rail
+    on I2C0 (3V3, 1V8, VIO, +V_CAM0, +V_CAM1, 5V).  INA236A
+    occupies 0x40..0x43 and INA236B occupies 0x44..0x47, so all
+    six fit on one bus.  Macros key on rail name; the user's
+    notes had a ref-des typo (three "U30"s) -- cross-check
+    pending.
+  - **ENCODER_SW correction** -- moves from IO3 to IO4 per the
+    schematic.  PEC12R-4222F-S0024 encoder + push switch.
+  ABI: ADDED public header `alp/chips/tas2563.h` (snapshot now
+  44 public headers).  SDK chip count climbs to **19**.
+
 - **EVK Arduino + mikroBUS headers + wiring corrections** --
   user-supplied EVK wiring continues.  Arduino UNO header full
   pin map: `EVK_AEN_ARD_PWM1..PWM4` (= E1M PWM1/PWM4/PWM5/PWM2),

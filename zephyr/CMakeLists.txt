@@ -111,6 +111,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CAM_MUX_PI3WVR626
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cam_mux_pi3wvr626/cam_mux_pi3wvr626.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TCAL9538
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tcal9538/tcal9538.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TAS2563
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tas2563/tas2563.c)
 
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include)
 zephyr_library_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr)

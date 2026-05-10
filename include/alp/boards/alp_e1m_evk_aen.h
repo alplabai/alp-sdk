@@ -48,8 +48,10 @@ extern "C" {
 
 #define EVK_AEN_PIN_CAM_MUX_SEL                                                                    \
     ALP_E1M_GPIO_IO2 /**< PI3WVR626 SEL pin. See `evk_aen_cam_select_*` enum below + chips/cam_mux_pi3wvr626. */
-#define EVK_AEN_PIN_ENCODER_SW                                                                     \
-    ALP_E1M_GPIO_IO3 /**< Rotary encoder push switch (active-low, internal pull-up). */
+/** Rotary encoder push switch (PEC12R-4222F-S0024 SW pin, R92 10k
+ *  pull-up to VIO, 0.1uF debounce cap to GND, active-low when
+ *  pressed).  Maps to E1M IO4. */
+#define EVK_AEN_PIN_ENCODER_SW ALP_E1M_GPIO_IO4
 #define EVK_AEN_PIN_CAM_RST                                                                        \
     ALP_E1M_GPIO_IO5 /**< Camera reset (was previously misdocumented as IO_EXP_RST -- the schematic confirms IO5 -> CAM_RST and the I/O expander reset is on a different pad; see below). */
 
@@ -82,6 +84,59 @@ typedef enum {
     EVK_AEN_SDIO_M2E_KEY = 0, /**< MUX_SEL.SDIO low. */
     EVK_AEN_SDIO_SDCARD  = 1, /**< MUX_SEL.SDIO high. */
 } evk_aen_sdio_select_t;
+
+/* I2S0 74LVC157 multiplexer (TAS2563 amplifier vs M.2 E-key I2S).
+ *
+ * Same shape as the SDIO mux: a 74LVC157 quad 2:1 picks which
+ * device drives the SoM's single I2S0 bus.  Control pins:
+ *
+ *   /E (active-low enable) = E1M IO8   -- Alif side (P7.1)
+ *   S  (select)            = E1M IO13  -- CC3501E side (GPIO13)
+ *
+ * IMPORTANT: the two control pins live on DIFFERENT chips on
+ * this EVK -- I2S_EN is driven from Alif via alp_gpio_*, but
+ * I2S_SELECT is on the CC3501E side and must be driven via
+ * ALP_CC3501E_CMD_GPIO_WRITE on the inter-chip SPI1.  Apps that
+ * switch the I2S routing need both code paths. */
+#define EVK_AEN_PIN_I2S_MUX_EN                                                                     \
+    ALP_E1M_GPIO_IO8 /**< /E -- Alif GPIO P7.1.  Drive low to enable mux. */
+#define EVK_AEN_PIN_I2S_MUX_SEL                                                                    \
+    ALP_E1M_GPIO_IO13 /**< S  -- CC3501E GPIO13.  Routed via CC3501E firmware. */
+
+typedef enum {
+    EVK_AEN_I2S_AMP     = 0, /**< I2S0 routed to the TAS2563 amplifiers. */
+    EVK_AEN_I2S_M2E_KEY = 1, /**< I2S0 routed to the M.2 E-key slot. */
+} evk_aen_i2s_select_t;
+
+/* USB2 TMUXHS221 multiplexer (USB-A connector vs M.2 E-key USB).
+ *
+ * One TMUXHS221NKGR high-speed differential mux picks which USB
+ * device drives the SoM's single USB2 port.  /OEN is hardwired
+ * to GND on this EVK so the output is always enabled; only the
+ * A/B select line is software-controlled:
+ *
+ *   USB2_SELECT = 0  ->  external USB-A connector (DA inputs)
+ *   USB2_SELECT = 1  ->  M.2 E-key USB           (DB inputs)
+ *
+ * Drive the line via E1M IO11 -- which routes through the
+ * on-module CC3501E (GPIO2 per from-cc3501e.tsv).  Firmware
+ * drives the mux via ALP_CC3501E_CMD_GPIO_WRITE on the inter-chip
+ * SPI1, NOT via Alif's GPIO peripheral. */
+#define EVK_AEN_PIN_USB2_MUX_SEL                                                                   \
+    ALP_E1M_GPIO_IO11 /**< 0 = USB connector, 1 = M.2 E-key USB.  Routed through CC3501E. */
+
+typedef enum {
+    EVK_AEN_USB2_CONNECTOR = 0, /**< External USB-A jack. */
+    EVK_AEN_USB2_M2E_KEY   = 1, /**< M.2 E-key USB.        */
+} evk_aen_usb2_select_t;
+
+/** M.2 E-key UART wake signal.  Asserted by the M.2 module to
+ *  request the host come out of low-power state.  Routes to E1M
+ *  IO19, which lives on the CC3501E side (GPIO19 per
+ *  from-cc3501e.tsv) -- firmware monitors it via
+ *  ALP_CC3501E_CMD_GPIO_SET_INTERRUPT and propagates the wake
+ *  event up to Alif. */
+#define EVK_AEN_PIN_M2E_UART_WAKE ALP_E1M_GPIO_IO19
 
 /* The rotary encoder's quadrature signals run through the SoC's
  * hardware quadrature counter on E1M's `ENC0_X` / `ENC0_Y` pads.
@@ -355,10 +410,70 @@ typedef enum {
 /*   - TCAL9538     A1=1, A0=0         -> 0x72                        */
 /* ================================================================== */
 
-#define EVK_AEN_I2C_ADDR_ICM42670 0x69u /**< U12 IMU (AD0=1).  See collision warning above. */
-#define EVK_AEN_I2C_ADDR_BMI323 0x69u   /**< U13 IMU (SDO=1). See collision warning above. */
+#define EVK_AEN_I2C_ADDR_ICM42670 0x69u /**< U12 IMU (AD0=1). */
+#define EVK_AEN_I2C_ADDR_BMI323 0x68u   /**< U13 IMU (SDO=0).  No collision with ICM. */
 #define EVK_AEN_I2C_ADDR_BMP581 0x47u   /**< U14 barometer (SDO=1). */
 #define EVK_AEN_I2C_ADDR_TCAL9538 0x72u /**< U35 I/O expander (A1=1, A0=0). */
+
+/* Two TAS2563RPP smart-amp ICs share the same I2C0 bus.  AD0
+ * strap selects address per TAS2563 datasheet table 7-3:
+ *   AD0 = 10k to GND  -> 0x4D  (one channel)
+ *   AD0 = 10k to VDD  -> 0x4E  (the other)
+ * Both also respond to the global broadcast 0x48 (write-only;
+ * useful for synchronised setup, never for register reads). */
+#define EVK_AEN_I2C_ADDR_TAS2563_LOW 0x4Du
+#define EVK_AEN_I2C_ADDR_TAS2563_HIGH 0x4Eu
+#define EVK_AEN_I2C_ADDR_TAS2563_BCAST 0x48u
+
+/* Six INA236 high-side current-shunt monitors -- one per power
+ * rail -- on I2C0.  TI's INA236A variant occupies 0x40..0x43 and
+ * the INA236B variant occupies 0x44..0x47, so all six fit on one
+ * bus despite each variant only having 2 strap bits.
+ *
+ * EVK ref-des labels per the user-supplied schematic notes:
+ *   U21  INA236A  3V3 rail     A0 = GND  -> 0x40
+ *   U31  INA236A  1V8 rail     A0 = V+   -> 0x41
+ *   U33  INA236A  VIO rail     A0 = SDA  -> 0x42
+ *   U??  INA236B  +V_CAM0      A0 = GND  -> 0x44
+ *   U??  INA236B  +V_CAM1      A0 = V+   -> 0x45
+ *   U30  INA236B  5V  rail     A0 = SDA  -> 0x46
+ *
+ * NB: the user's notes labelled three of the six ICs as "U30",
+ * which appears to be a typo (only one IC can carry that ref-des
+ * on a schematic).  The rail / address pairings above are
+ * unambiguous so the macros key on the rail name; cross-check
+ * the actual ref-des once the schematic table is final. */
+#define EVK_AEN_I2C_ADDR_INA236_3V3 0x40u   /**< U21 INA236A. */
+#define EVK_AEN_I2C_ADDR_INA236_1V8 0x41u   /**< U31 INA236A. */
+#define EVK_AEN_I2C_ADDR_INA236_VIO 0x42u   /**< U33 INA236A. */
+#define EVK_AEN_I2C_ADDR_INA236_VCAM0 0x44u /**< INA236B (ref-des TBD). */
+#define EVK_AEN_I2C_ADDR_INA236_VCAM1 0x45u /**< INA236B (ref-des TBD). */
+#define EVK_AEN_I2C_ADDR_INA236_5V 0x46u    /**< U30 INA236B. */
+
+/* ================================================================== */
+/* On-board audio I/O                                                 */
+/*                                                                    */
+/* Audio in (PDM):                                                    */
+/*   Four STMicro MP34DT05TR-A digital MEMS microphones, two pairs:   */
+/*     U19 LEFT  + U20 RIGHT  on E1M PDM0  (CK = PDM_C0, D = PDM_D0)  */
+/*     U25 LEFT  + U26 RIGHT  on E1M PDM1  (CK = PDM_C1, D = PDM_D1)  */
+/*   Each LEFT/RIGHT pair shares one PDM data line -- LEFT mics tie  */
+/*   their LR pin high (data on rising clock edge), RIGHT mics tie   */
+/*   LR low (data on falling edge), and the single data line carries */
+/*   both interleaved.  Apps open the streams via alp_audio_in_open  */
+/*   with peripheral_id = 0 (PDM0) or 1 (PDM1), channels = 2 (stereo). */
+/*                                                                    */
+/* Audio out (I2S):                                                   */
+/*   Two TAS2563RPP smart-amp ICs (one channel each, addresses 0x4D  */
+/*   and 0x4E) sit on E1M I2S0.  Audio flows host -> amp on          */
+/*   I2S0_SDO; the amp reports IV-sense data back on I2S0_SDI.       */
+/*   Use chips/tas2563 to bring them up; AMP.ENABLE / AMP.FAULT are  */
+/*   on EVK_AEN_PIN_AMP_ENABLE / EVK_AEN_PIN_AMP_FAULT respectively. */
+/*                                                                    */
+/*   I2S0 itself can be re-routed away from the amps to the M.2      */
+/*   E-key slot via the I2S 74LVC157 mux -- see                      */
+/*   EVK_AEN_PIN_I2S_MUX_EN + EVK_AEN_PIN_I2S_MUX_SEL above.         */
+/* ================================================================== */
 
 #ifdef __cplusplus
 } /* extern "C" */

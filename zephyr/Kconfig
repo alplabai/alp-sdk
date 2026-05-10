@@ -605,6 +605,16 @@ config ALP_SDK_CHIP_TCAL9538
 	  lines plus four sensor interrupt inputs (see
 	  evk_aen_ioexp_pin_t in <alp/boards/alp_e1m_evk_aen.h>).
 
+config ALP_SDK_CHIP_TAS2563
+	bool "TI TAS2563 smart Class-D speaker amplifier"
+	depends on I2C && GPIO
+	help
+	  Compile chips/tas2563/tas2563.c.  v0.3 driver scope:
+	  init / probe / mode / hw_enable.  Tuning-blob loader +
+	  I2S binding land in v0.3.x.  The E1M EVK populates two
+	  TAS2563RPP amps on I2C0 + I2S0 (0x4D and 0x4E); see
+	  <alp/boards/alp_e1m_evk_aen.h>.
+
 endmenu # "ALP SDK chip drivers"
 
 endif # ALP_SDK
