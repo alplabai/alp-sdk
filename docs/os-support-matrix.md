@@ -22,20 +22,53 @@ for the SKU breakdown:
 
 | Library     | E1M-AEN / Bare-metal | E1M-AEN / Zephyr | E1M-X V2N / Yocto | E1M-X V2N-M1 / Yocto |
 |-------------|----------------------|------------------|-------------------|----------------------|
-| Peripherals | stub                 | **GA**           | stub              | stub                 |
+| Peripherals (I2C/SPI/GPIO/UART) | stub | **GA**         | stub              | stub                 |
 | Display     | n/a                  | **GA** (SSD1306) | stub              | stub                 |
 | Camera      | n/a                  | stub             | stub (planned v0.2 MIPI CSI-2) | stub (planned v0.2) |
 | GUI/LVGL    | n/a                  | **GA** (re-export) | planned         | planned              |
 | Math        | **GA** (re-export)   | **GA** (re-export) | **GA**          | **GA**               |
 | Signal      | stub                 | stub             | stub              | stub                 |
-| IoT         | n/a                  | **GA** (Wi-Fi+MQTT) | **GA** (Wi-Fi+MQTT) | **GA**          |
+| IoT         | n/a                  | stub (real Wi-Fi+MQTT in v0.2) | stub | stub                |
 
-## v0.2.0 (target)
+## v0.2.0 — landed (peripheral expansion + capability validation)
 
-| Library     | E1M-AEN / Bare-metal | E1M-AEN / Zephyr | E1M-X V2N / Yocto | E1M-X V2N-M1 / Yocto |
-|-------------|----------------------|------------------|-------------------|----------------------|
-| Camera      | n/a                  | planned          | **GA** (MIPI CSI-2) | **GA**             |
-| Signal      | **GA** (audio)       | **GA**           | **GA**            | **GA**               |
+The v0.2 SDK doubles peripheral coverage from 4 to 12 wrapped
+classes plus the diagnostic / validation infrastructure that
+underpins them.  Surface-only deliverables ship the public header
++ a stub backend; full implementations land per the per-class
+plan in `VERSIONS.md`.
+
+| Library                   | E1M-AEN / Bare-metal | E1M-AEN / Zephyr | E1M-X V2N / Yocto | E1M-X V2N-M1 / Yocto |
+|---------------------------|----------------------|------------------|-------------------|----------------------|
+| **PWM** (`<alp/pwm.h>`)   | planned              | **GA** (Zephyr `pwm_*`) | planned    | planned              |
+| **ADC** (`<alp/adc.h>`)   | planned              | **GA** (Zephyr `adc_*`) | planned    | planned              |
+| **Counter / QEnc** (`<alp/counter.h>`) | planned | **GA** (Zephyr `counter_*` + `sensor_*`) | planned | planned |
+| **I²S / SAI** (`<alp/i2s.h>`) | planned          | **GA** (Zephyr `i2s_*`) | planned    | planned              |
+| **CAN / CAN-FD** (`<alp/can.h>`) | planned       | **GA** (Zephyr `can_*`) | planned    | planned              |
+| **RTC** (`<alp/rtc.h>`)   | planned              | **GA** (Zephyr `rtc_*`) | planned    | planned              |
+| **Watchdog** (`<alp/wdt.h>`) | planned           | **GA** (Zephyr `wdt_*`) | planned    | planned              |
+| **Audio** (`<alp/audio.h>`) | n/a                | surface declared (impl v0.2) | planned | planned         |
+| **Camera** (`<alp/camera.h>`) | n/a              | planned          | **GA** (MIPI CSI-2) | **GA**             |
+| **IoT** (`<alp/iot.h>`)   | n/a                  | **GA** (Wi-Fi+MQTT) | **GA**         | **GA**               |
+| **Signal** (`<alp/signal.h>`) | **GA** (audio)   | **GA**           | **GA**            | **GA**               |
+
+### Cross-cutting v0.2 capability infrastructure
+
+| Capability                                      | Status | Notes |
+|-------------------------------------------------|--------|-------|
+| `alp_last_error()` thread-local                 | **GA** (Zephyr) | Stamped by every `*_open` failure path.  See ADR 0002. |
+| `<alp/soc_caps.h>` generated capability tables  | **GA** | From `metadata/socs/**.json` via `gen_soc_caps.py`.  Selected by `CONFIG_ALP_SOC_<TOKEN>`. |
+| `ALP_E1M_<CLASS>_COUNT` portability bounds      | **GA** | Cross-SoM-portable instance count per class.  See ADR 0004. |
+| ABI snapshot diff tool                          | **GA** | `scripts/abi_snapshot.py --diff prior.json`. |
+| `pr-generated-files.yml` CI workflow            | **GA** | Catches stale `soc_caps.h` / ABI snapshot. |
+
+## v0.3.0 — declared (surfaces ship in v0.1, impl arrives in v0.3)
+
+| Library              | Surface | Backed-by plan |
+|----------------------|---------|----------------|
+| BLE (`<alp/ble.h>`)  | declared| Zephyr `bt` host stack |
+| Security (`<alp/security.h>`) | declared | MbedTLS PSA + per-SoC HW accelerator routing |
+| MProc (`<alp/mproc.h>`) | declared | Zephyr `mbox_*` (MHU on Alif) + `hwsem_*` + shared-memory regions |
 
 ## CMSIS-DSP per-SoM validation
 
