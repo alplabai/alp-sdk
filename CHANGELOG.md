@@ -473,6 +473,37 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **CC3501E wire protocol + bridge architecture** -- the E1M-AEN
+  family carries a separate TI CC3501E Wi-Fi 6 + BLE 5.4 combo
+  MCU, and certain E1M pads (SPI1 + IO11 / IO13 / IO15..21 + the
+  camera-enable LDOs) terminate on it rather than on the Alif
+  silicon.  Communication runs over an inter-chip SPI1 bus
+  (Alif master, CC3501E slave) carrying a custom binary wire
+  protocol.  New `include/alp/protocol/cc3501e.h` freezes that
+  protocol at v1: 4-byte header + <=512 B payload, opcodes grouped
+  by subsystem (meta / Wi-Fi / sockets / BLE / GPIO proxy /
+  camera enable / diagnostics), per-subsystem payload structs
+  (Wi-Fi connect, BLE adv start, GPIO configure, ...).
+  `docs/cc3501e-bridge.md` documents the architecture, the
+  two-repo split per ADR 0005 (alp-sdk owns the protocol +
+  Alif-side client; the firmware that runs on the CC3501E lives
+  in `alplabai/cc3501e-firmware`), and the firmware bootstrap
+  recipe.  Alif-side `chips/cc3501e/` driver +
+  `<alp/iot.h>` / `<alp/ble.h>` route-through-CC3501E follow.
+- **Authoritative E1M-AEN pinout data** (item: pending HW configs) --
+  five user-supplied TSVs land at `metadata/e1m_modules/aen/`:
+  `from-alif.tsv` (E1M pad -> Alif silicon, 91 routed entries),
+  `from-cc3501e.tsv` (E1M pad -> CC3501E, 14 entries),
+  `inter-chip.tsv` (Alif <-> CC3501E SPI1 + SDIO + control
+  signals + camera-enable wiring), `alif-ospi.tsv` (Alif's OSPI
+  controller pad reservation for optional on-module memories),
+  `alif-ethernet-phy.tsv` (DP83825IRMQR PHY <-> Alif RMII MAC
+  pad map).  Resolves the AEN-side TBDs in
+  `project_pending_hw_configs` memory note; downstream artefacts
+  (`include/alp/boards/alp_e1m_evk_aen.h`, the per-SoC metadata
+  in `metadata/socs/alif/ensemble/`, alp-studio's pin allocator)
+  can now regenerate against this single source of truth.  V2N +
+  i.MX 93 family pinouts remain pending until the user supplies them.
 - **DRP-AI inference dispatcher hook (item 11 / v0.3 milestone)** --
   `<alp/inference.h>` dispatcher in `src/zephyr/inference_zephyr.c`
   now routes `ALP_INFERENCE_BACKEND_DRPAI` into a per-backend
