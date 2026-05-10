@@ -27,4 +27,6 @@ target_sources(alp_sdk PRIVATE
 
 if(ALP_SOM STREQUAL "aen")
     add_subdirectory(${CMAKE_SOURCE_DIR}/vendors/alif vendors_alif)
+elseif(ALP_SOM STREQUAL "v2n")
+    add_subdirectory(${CMAKE_SOURCE_DIR}/vendors/renesas-rzv2n vendors_renesas_rzv2n)
 endif()

@@ -473,6 +473,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **V2N vendor scaffolding (item 10 / v0.3 milestone)** --
+  `vendors/renesas-rzv2n/` gains `i2c.c` / `spi.c` / `gpio.c` /
+  `uart.c` source skeletons mirroring the Alif vendor layout.
+  i2c.c carries the full FSP `r_riic_master` binding shape; the
+  other three are starter shells with the FSP includes wired in
+  for v0.4 to fill bodies.  `vendors/renesas-rzv2n/CMakeLists.txt`
+  follows the same `ALP_HAS_RENESAS_FSP` gate as Alif, so the
+  files compile to empty translation units when the FSP pack
+  isn't present.  `src/baremetal/CMakeLists.txt` extends the
+  ALP_SOM dispatch with a v2n branch; `pr-plain-cmake.yml` gains
+  a `baremetal-v2n` scenario verifying the dispatch + scaffolding
+  build green without the proprietary FSP pack.  Real FSP link
+  follows in v0.4 alongside the V2N HIL bring-up.
 - **`<alp/usb.h>` real device-stack lifecycle wrapper (v0.3 milestone)** --
   `src/zephyr/usb_zephyr.c` replaces the v0.1 NOSUPPORT stub.  Wraps
   Zephyr's `usb_enable` / `usb_disable` for the device-role

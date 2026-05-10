@@ -66,6 +66,22 @@ jobs:
       - name: Build
         run: cmake --build build/baremetal-aen --parallel
 
+  baremetal-v2n:
+    # ALP_OS=baremetal + ALP_SOM=v2n activates the
+    # vendors/renesas-rzv2n/ wrapper directory.  Same pattern as
+    # baremetal-aen above -- without ALP_HAS_RENESAS_FSP=ON the
+    # wrapper sources compile to empty TUs and stub_backend.c
+    # provides the NOSUPPORT defaults.  Real FSP link arrives in
+    # v0.4 alongside the V2N HIL bring-up.
+    name: plain-cmake · baremetal V2N (vendor scaffolding)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build/baremetal-v2n -S . -DALP_OS=baremetal -DALP_SOM=v2n
+      - name: Build
+        run: cmake --build build/baremetal-v2n --parallel
+
   yocto:
     name: plain-cmake · yocto stub backend
     runs-on: ubuntu-latest
