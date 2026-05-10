@@ -2,8 +2,8 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Auto-generated from metadata/socs/**.json by
- * scripts/gen_soc_caps.py.  DO NOT EDIT BY HAND — regenerate.
+ * Auto-generated from metadata/socs/<vendor>/<family>/<part>.json
+ * by scripts/gen_soc_caps.py.  DO NOT EDIT BY HAND — regenerate.
  *
  * Each SoC's capability macros are gated by CONFIG_ALP_SOC_<TOKEN>.
  * Apps select the active SoC via Kconfig.  When no SoC is
