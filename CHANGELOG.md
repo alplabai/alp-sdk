@@ -9,6 +9,13 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- [ADR 0006](docs/adr/0006-secure-boot-secure-ota.md) lands the
+  v0.4 secure boot + secure OTA design.  Per-SoM vendor-native
+  secure boot (Alif Secure Enclave + MCUboot on AEN; NXP AHAB on
+  N93; Renesas SBM on V2N), unified `alp_ota_*` surface in
+  `<alp/iot.h>` routed through MCUboot (Zephyr) or RAUC (Linux),
+  trust-anchor pinning + min-version anti-rollback baked into the
+  config.  No code yet -- v0.4 cycle implements it.
 - `firmware/cc3501e/` scaffolding -- the alp-sdk side of the
   two-repo boundary with the future `alplabai/cc3501e-firmware`:
   bootstrap README that mirrors the contract from
