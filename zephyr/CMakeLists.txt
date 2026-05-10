@@ -25,10 +25,12 @@ zephyr_library_sources(
     # so host / native_sim builds without those subsystems still get
     # the documented v0.1 NULL-with-NOSUPPORT contract.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/iot_zephyr.c
-    # v0.2 / v0.3 surfaces declared in v0.1 against ALP_ERR_NOSUPPORT
-    # so application code can compile against them now and the real
-    # implementations slot in later (see iot_stub.c for the pattern).
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/audio_stub.c
+    # audio_zephyr.c follows the same split: real DMIC + alp_i2s_*
+    # delegation behind CONFIG_ALP_SDK_AUDIO_IN / _OUT, NOSUPPORT
+    # contract elsewhere.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/audio_zephyr.c
+    # Remaining v0.3 surfaces still on the stub contract -- swap in
+    # their *_zephyr.c counterparts as they ship.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/ble_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/security_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/mproc_stub.c

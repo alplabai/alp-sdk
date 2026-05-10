@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: audio-loopback
+  description: |
+    Per-peripheral example for <alp/audio.h>.  Reads PDM mic
+    blocks, runs them through the ALP DSP chain (DC-block in v0.2),
+    and pushes them straight back out over I2S.  Demonstrates the
+    full audio_in / audio_out lifecycle on AEN-Zephyr.  Under
+    native_sim the example skips the open() calls (no audio
+    devices) and prints "[audio] done".
+
+tests:
+  alp_sdk.example.audio_loopback:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - audio
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[audio\\] done"

@@ -480,6 +480,38 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   in which repo.  `docs/architecture.md` gains a "Repository
   boundary" subsection so reviewers can resolve where a new
   addition belongs without opening the ADR.
+- **`<alp/audio.h>` real PDM input + I²S output on AEN-Zephyr** —
+  v0.2's second "stub-to-real" milestone.  `src/zephyr/audio_zephyr.c`
+  replaces the v0.1 `audio_stub.c` and splits in two halves: a
+  `audio_in` path wrapping Zephyr's `audio_dmic` API
+  (`dmic_configure` / `dmic_trigger` / `dmic_read`), and a
+  `audio_out` path that delegates straight to the existing
+  `alp_i2s_*` wrapper (TX direction, frame translation in the
+  config).  Two Kconfig toggles -- `CONFIG_ALP_SDK_AUDIO_IN`
+  (depends on `AUDIO_DMIC`, default y) and `CONFIG_ALP_SDK_AUDIO_OUT`
+  (depends on `I2S`, default y) -- gate the real glue behind the
+  v0.1 NULL-with-NOSUPPORT contract for native_sim and any other
+  no-audio target.  The PDM path runs the ALP DSP chain on every
+  block: a 1st-order DC-block (alpha = 0.995 in Q15, ~10 Hz
+  cut-off at 16 kHz) silences the DC bias every PDM mic carries.
+  AGC and resample land in v0.3 alongside `<alp/security.h>`; the
+  hook stays in `dmic_read`'s post-pass so v0.3 only adds passes.
+  The output path adds a Q8.8 software volume scale (default
+  unity, `alp_audio_out_set_volume(out, vol)` from 0..255) that
+  applies before `alp_i2s_write` -- usable on codecs without a
+  separate gain pin.  Pool sizes
+  (`CONFIG_ALP_SDK_MAX_AUDIO_IN_HANDLES` / `_OUT_HANDLES`, both
+  default 1) and the per-handle slab (4 KiB *
+  `CONFIG_ALP_SDK_AUDIO_IN_SLAB_BLOCKS`, default 4 blocks) are
+  statically allocated -- no `k_malloc` in the audio path.  New
+  `examples/audio-loopback/` hand-written reference: opens
+  `ALP_E1M_PDM0` + `ALP_E1M_I2S0`, streams 50 blocks of 256
+  S16-mono frames from mic to speaker at 16 kHz, prints
+  `[audio] done`.  Skips gracefully on native_sim (no audio
+  devices) so the existing twister scenario continues to pass.
+  New `tests/zephyr/audio/` ztest suite (9 cases) verifies the
+  NOSUPPORT-fall-back contract under native_sim plus every
+  NULL-arg / invalid-config branch.
 - **`<alp/iot.h>` real Wi-Fi station + MQTT on AEN-Zephyr** —
   v0.2's first "stub-to-real" milestone.  `src/zephyr/iot_zephyr.c`
   replaces the v0.1 `iot_stub.c` and wraps Zephyr's `wifi_mgmt`

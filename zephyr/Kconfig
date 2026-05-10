@@ -230,6 +230,61 @@ config ALP_SDK_MQTT_BUF_SIZE
 	  for v0.2's JSON-payload reference apps; raise for larger
 	  publish bodies or longer topic strings.
 
+# Audio (PDM input + I2S output) -- v0.2 deliverable.  When OFF the
+# wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT
+# contract.
+
+config ALP_SDK_AUDIO_IN
+	bool "Real PDM input via Zephyr audio_dmic"
+	default y if AUDIO_DMIC
+	depends on AUDIO_DMIC
+	help
+	  Enable the real audio_dmic-backed alp_audio_in_* implementation.
+	  Resolves the studio-supplied peripheral_id via the alp-pdm0 /
+	  alp-pdm1 DT aliases.  Includes the ALP DSP chain (DC-block in
+	  v0.2; AGC + resample in v0.3).  When OFF alp_audio_in_open()
+	  returns NULL with alp_last_error() = ALP_ERR_NOSUPPORT.
+
+config ALP_SDK_AUDIO_OUT
+	bool "Real I2S output via alp_i2s_*"
+	default y if I2S
+	depends on I2S
+	help
+	  Enable the real alp_i2s_*-backed alp_audio_out_* implementation.
+	  Delegates straight to the v0.2 <alp/i2s.h> wrapper plus a
+	  software volume scale.  Reuses the alp_i2s_t handle pool.
+	  When OFF alp_audio_out_open() returns NULL with NOSUPPORT.
+
+config ALP_SDK_MAX_AUDIO_IN_HANDLES
+	int "Maximum concurrent alp_audio_in_t handles"
+	default 1
+	help
+	  PDM input is single-stream on most E1M-conformant SoMs;
+	  override only if the SoC genuinely exposes multiple PDM
+	  controllers and the app holds them concurrently.
+
+config ALP_SDK_MAX_AUDIO_OUT_HANDLES
+	int "Maximum concurrent alp_audio_out_t handles"
+	default 1
+
+config ALP_SDK_AUDIO_BLOCK_BYTES
+	int "Maximum block size for an alp_audio_in_t (bytes)"
+	default 4096
+	help
+	  Per-handle slab buffer is sized at this * the slab block
+	  count, statically, so the wrapper avoids k_malloc.  4096 B
+	  fits 1024 mono S16 frames or 512 stereo S16 frames -- ~64
+	  ms at 16 kHz mono, comfortably above the typical 5-10 ms
+	  block latency.
+
+config ALP_SDK_AUDIO_IN_SLAB_BLOCKS
+	int "DMA blocks per audio_in slab (>= 2)"
+	default 4
+	help
+	  Two is the minimum (one in-flight to the driver, one drained
+	  by the caller).  Four is a comfortable default; raise for
+	  apps that take longer than the block period to drain.
+
 config ALP_SDK_HAS_LVGL
 	bool "Build <alp/gui.h> against LVGL"
 	default y if LVGL
