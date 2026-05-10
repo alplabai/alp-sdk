@@ -871,6 +871,11 @@ void alp_hwsem_close(alp_hwsem_t *s)
     (void)s;
 }
 
+/* The Yocto backend overrides these via inference_yocto.c so the
+ * dispatcher can route ALP_INFERENCE_BACKEND_DEEPX_DX (etc.) to a
+ * real NPU adapter -- in that case ALP_VENDOR_OVERRIDES_INFERENCE
+ * is set and the stub bodies below are excluded from the link. */
+#if !defined(ALP_VENDOR_OVERRIDES_INFERENCE)
 alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 {
     (void)cfg;
@@ -909,6 +914,7 @@ void alp_inference_close(alp_inference_t *i)
 {
     (void)i;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_INFERENCE */
 
 alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
 {

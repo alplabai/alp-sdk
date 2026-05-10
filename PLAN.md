@@ -145,7 +145,7 @@ NPU the active SoM exposes — Ethos-U55 (E1M-AEN) / Ethos-U65
 | Vela (Ethos-U) toolchain integration               | 🔮 v0.2 |
 | DRP-AI translator integration (Renesas)            | 🔮 v0.2 |
 | ExecuTorch / TFLite-Micro back-ends                | 🔮 v0.3 |
-| DEEPX SDK integration (DX-M1)                      | 🔮 v0.3 |
+| DEEPX SDK integration (DX-M1)                      | 🟡 Yocto-side dispatcher + vendor stub shipped — real `dxnn_*` link lands v0.4 |
 
 The `<alp/inference.h>` API has not been declared yet because
 the four NPU vendor toolchains have meaningfully different

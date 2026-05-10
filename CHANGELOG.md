@@ -9,6 +9,20 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- DEEPX DX-M1 inference backend on the Yocto / Linux user-space path.
+  New `src/yocto/inference_yocto.c` is the first real Yocto-side
+  surface in the SDK -- it owns the `alp_inference_*` public symbols
+  (overriding `src/common/stub_backend.c` via the
+  `ALP_VENDOR_OVERRIDES_INFERENCE` guard) and routes
+  `ALP_INFERENCE_BACKEND_DEEPX_DX` through `inference_deepx.cpp`.
+  `vendors/deepx-dxm1/` ships a stub `<dxnn/dxnn.h>` so the dispatcher
+  compiles on hosts that don't have the proprietary DEEPX runtime
+  installed -- the real `dxnn_*` link arrives v0.4 alongside the
+  `deepx-dxm1-host-sdk` Yocto recipe.  Gated via the CMake option
+  `ALP_SDK_USE_DEEPX_DXM1`; meta-alp's `e1m-x-v2n-m1.conf` MACHINE
+  drives that ON.  `resolve_auto()` for Yocto prefers DEEPX_DX first
+  on V2N-M1, falling back to NOSUPPORT when no backend is compiled
+  in.  PLAN.md §2.3 + docs/recommended-libraries.md updated.
 - `yocto/meta-alp/` is now a v0.3-scaffolded BSP layer (vs the
   v0.2 placeholder).  Three machine configs land:
   `e1m-x-v2n.conf` (RZ/V2N), `e1m-x-v2n-m1.conf` (V2N + DEEPX),

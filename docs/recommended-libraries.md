@@ -59,8 +59,9 @@ defaults / type-shim value.
 
 ## Tier 4 — alternative inference backends (considered, deferred)
 
-Already shipped: TFLM (Cortex-M), Ethos-U (AEN, future N93), DRP-AI (V2N),
-and DEEPX DX-M1 backend lands in #13.  The libraries below are smaller / different in scope:
+Already wired: TFLM (Cortex-M, Zephyr), Ethos-U (AEN), DRP-AI (V2N, Zephyr
+dispatch stub), and DEEPX DX-M1 (V2N-M1, Yocto dispatch stub).  The
+libraries below are smaller / different in scope:
 
 | Library     | Niche                                                                  | Why we haven't integrated                                          |
 |-------------|------------------------------------------------------------------------|--------------------------------------------------------------------|
