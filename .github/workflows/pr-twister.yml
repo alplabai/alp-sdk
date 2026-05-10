@@ -74,15 +74,27 @@ jobs:
         run: |
           pip3 install --break-system-packages -r zephyr/scripts/requirements.txt
 
+      - name: debug · verify checkout paths are reachable inside container
+        run: |
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+          echo "PWD=$(pwd)"
+          ls "$GITHUB_WORKSPACE/alp-sdk" | head -20 || true
+          echo "--- testcase.yaml files ---"
+          find "$GITHUB_WORKSPACE/alp-sdk/tests" "$GITHUB_WORKSPACE/alp-sdk/examples" \
+              -name "testcase.yaml" -o -name "sample.yaml" || true
+
       - name: twister · run tests + examples on native_sim/native/64
         working-directory: ${{ github.workspace }}/zephyrproject
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
           EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
         run: |
+          # Use $GITHUB_WORKSPACE (container-mapped at run time) instead
+          # of the ${{ github.workspace }} expansion which the runner
+          # may render as a host path on container jobs.
           python3 zephyr/scripts/twister \
-            --testsuite-root ${{ github.workspace }}/alp-sdk/tests/zephyr \
-            --testsuite-root ${{ github.workspace }}/alp-sdk/examples \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples" \
             -p native_sim/native/64 \
             --inline-logs \
             --no-detailed-test-id
