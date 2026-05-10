@@ -615,7 +615,7 @@ ZTEST(alp_chips, test_public_headers_co_compile)
      * here at runtime is the success signal. */
     zassert_equal((int)ALP_OK, 0, "ALP_OK must remain 0 across header-set evolution");
     zassert_equal((unsigned)ALP_E1M_GPIO_IO0, 0u);
-    zassert_equal((unsigned)EVK_PIN_LED_RED, ALP_E1M_GPIO_IO0,
+    zassert_equal((unsigned)EVK_PWM_LED_RED, ALP_E1M_PWM3,
                   "EVK feature names must layer atop the global e1m_pinout map");
 }
 

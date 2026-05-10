@@ -51,7 +51,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   E1M-conformant carrier.  42 GPIO indices total.
 - Carrier-feature names at
   `include/alp/boards/alp_e1m_evk.h` — readable EVK-side aliases
-  (`EVK_PIN_LED_RED`, `EVK_PIN_ENCODER_SW`,
+  (`EVK_PWM_LED_RED`, `EVK_PIN_ENCODER_SW`,
   `EVK_I2C_BUS_SENSORS`, on-board sensor I2C addresses) layered on
   top of the global E1M map.  The header is SoM-agnostic: the E1M
   EVK accepts 35x35 mm SoMs (currently AEN, soon N93).  Per-SoM
@@ -562,7 +562,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   PWM-driven RGB LED, repurposed SPI0 + I2S1 + AUDIO_CLK pads,
   TCAL9538 I/O expander, SDIO mux, touch-screen control** --
   large user-supplied EVK schematic update lands in
-  `<alp/boards/alp_e1m_evk_aen.h>` + `chips/tcal9538/`:
+  `<alp/boards/alp_e1m_evk.h>` + `chips/tcal9538/`:
   - I2C0 stays the sensor / IO-expander / current-monitor bus;
     new `EVK_I2C_BUS_DSI_CSI = ALP_E1M_I2C1` is the
     display-and-camera-control bus per the EVK's `DSI_CSI_I2C` net.
@@ -618,7 +618,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   `SEL` pin lands on E1M `IO2` (`W2` / Alif `P12.5`).  New thin
   driver at `chips/cam_mux_pi3wvr626/` + matching public header
   wraps SEL as a GPIO with a typed `INPUT_A` / `INPUT_B` enum.
-  `<alp/boards/alp_e1m_evk_aen.h>` gains `EVK_PIN_CAM_MUX_SEL`
+  `<alp/boards/alp_e1m_evk.h>` gains `EVK_PIN_CAM_MUX_SEL`
   and **drops the previous placeholder `EVK_PIN_LED_BLUE = IO2`
   mapping** -- the schematic confirms `IO2` is the mux line, not
   an LED.  `LED_BLUE` is now TBD; `LED_RED` / `LED_GREEN` carry
@@ -705,7 +705,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   `alif-ethernet-phy.tsv` (DP83825IRMQR PHY <-> Alif RMII MAC
   pad map).  Resolves the AEN-side TBDs in
   `project_pending_hw_configs` memory note; downstream artefacts
-  (`include/alp/boards/alp_e1m_evk_aen.h`, the per-SoC metadata
+  (`include/alp/boards/alp_e1m_evk.h`, the per-SoC metadata
   in `metadata/socs/alif/ensemble/`, alp-studio's pin allocator)
   can now regenerate against this single source of truth.  V2N +
   i.MX 93 family pinouts remain pending until the user supplies them.

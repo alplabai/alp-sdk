@@ -275,32 +275,28 @@
           "value": "0x69u"
         },
         "EVK_I2C_ADDR_INA236_1V8": {
-          "hash": "92cb12a4574fabb8",
-          "value": "0x41u"
+          "hash": "e6b1e66392071f8a",
+          "value": ""
         },
         "EVK_I2C_ADDR_INA236_3V3": {
-          "hash": "fdc63ffd002c7611",
-          "value": "0x40u"
+          "hash": "7e6ff493568cc3f9",
+          "value": ""
         },
         "EVK_I2C_ADDR_INA236_5V": {
-          "hash": "5097f29e977253a4",
-          "value": "0x46u"
+          "hash": "53d8aa3ca4c7e6e8",
+          "value": "0x4Au"
         },
         "EVK_I2C_ADDR_INA236_VCAM0": {
-          "hash": "39b5b5d698c83f1e",
-          "value": "0x44u"
+          "hash": "3c5df8a6394ff06d",
+          "value": ""
         },
         "EVK_I2C_ADDR_INA236_VCAM1": {
-          "hash": "007c2e5e6e47517d",
-          "value": "0x45u"
+          "hash": "ed5d88596e2a024a",
+          "value": ""
         },
         "EVK_I2C_ADDR_INA236_VIO": {
-          "hash": "8c6392591910038c",
-          "value": "0x42u"
-        },
-        "EVK_I2C_ADDR_TAS2563_BCAST": {
-          "hash": "8df96d6e8da4e793",
-          "value": "0x48u"
+          "hash": "d493e064923f9a3d",
+          "value": ""
         },
         "EVK_I2C_ADDR_TAS2563_HIGH": {
           "hash": "d6467eb35abd8dec",
@@ -333,6 +329,54 @@
         "EVK_I2C_BUS_SENSORS": {
           "hash": "91103953069c3ab7",
           "value": "ALP_E1M_I2C0"
+        },
+        "EVK_INA236_MAX_1V8_A": {
+          "hash": "73e60439b3300cff",
+          "value": "4.0f"
+        },
+        "EVK_INA236_MAX_3V3_A": {
+          "hash": "38e2786b7083f250",
+          "value": "4.0f"
+        },
+        "EVK_INA236_MAX_5V_A": {
+          "hash": "52b1be9e71e29f5f",
+          "value": "4.0f"
+        },
+        "EVK_INA236_MAX_VCAM0_A": {
+          "hash": "20c10fe4992ddfbd",
+          "value": "1.6f"
+        },
+        "EVK_INA236_MAX_VCAM1_A": {
+          "hash": "75fcdd0cd58bf0fa",
+          "value": "1.6f"
+        },
+        "EVK_INA236_MAX_VIO_A": {
+          "hash": "7f39ea596ce4fba0",
+          "value": "1.6f"
+        },
+        "EVK_INA236_SHUNT_1V8_OHMS": {
+          "hash": "3c3b977322879abf",
+          "value": "0.020f"
+        },
+        "EVK_INA236_SHUNT_3V3_OHMS": {
+          "hash": "d0a934d7f3b2ac03",
+          "value": "0.020f"
+        },
+        "EVK_INA236_SHUNT_5V_OHMS": {
+          "hash": "e1d9924afe7954d2",
+          "value": "0.020f"
+        },
+        "EVK_INA236_SHUNT_VCAM0_OHMS": {
+          "hash": "124d9f456842e238",
+          "value": "0.050f"
+        },
+        "EVK_INA236_SHUNT_VCAM1_OHMS": {
+          "hash": "8157a9e246326c01",
+          "value": "0.050f"
+        },
+        "EVK_INA236_SHUNT_VIO_OHMS": {
+          "hash": "5056760875a9897f",
+          "value": "0.050f"
         },
         "EVK_MB_ANA": {
           "hash": "45f1ade8d681bd64",
@@ -1071,6 +1115,66 @@
         "x": {
           "definition": "typedef struct { int16_t x;",
           "hash": "6a108468d82a3348"
+        }
+      }
+    },
+    "alp/chips/ina236.h": {
+      "functions": {
+        "ina236_deinit": {
+          "hash": "071e9b37aebdc9d8",
+          "signature": "void ina236_deinit(ina236_t *ctx);"
+        },
+        "ina236_init": {
+          "hash": "39ab4f0b150f2cf0",
+          "signature": "alp_status_t ina236_init(ina236_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, float shunt_ohms, float max_current_a, ina236_adcrange_t adcrange);"
+        },
+        "ina236_read_all": {
+          "hash": "26285b54d3f25d6b",
+          "signature": "alp_status_t ina236_read_all(ina236_t *ctx, ina236_sample_t *sample_out);"
+        },
+        "ina236_read_bus_mv": {
+          "hash": "331da271875c41b0",
+          "signature": "alp_status_t ina236_read_bus_mv(ina236_t *ctx, int32_t *mv_out);"
+        },
+        "ina236_read_current_ua": {
+          "hash": "458aaf18b29943a0",
+          "signature": "alp_status_t ina236_read_current_ua(ina236_t *ctx, int32_t *ua_out);"
+        },
+        "ina236_read_power_uw": {
+          "hash": "124e67f5694d7db5",
+          "signature": "alp_status_t ina236_read_power_uw(ina236_t *ctx, uint32_t *uw_out);"
+        },
+        "ina236_read_shunt_uv": {
+          "hash": "a9879f7f649e1f58",
+          "signature": "alp_status_t ina236_read_shunt_uv(ina236_t *ctx, int32_t *uv_out);"
+        },
+        "ina236_reset": {
+          "hash": "14228d745f381138",
+          "signature": "alp_status_t ina236_reset(ina236_t *ctx);"
+        }
+      },
+      "macros": {
+        "INA236_DEVICE_ID": {
+          "hash": "f6ead01e002c5632",
+          "value": "0xA080u"
+        },
+        "INA236_MFG_ID": {
+          "hash": "203d0574be6c2569",
+          "value": "0x5449u"
+        }
+      },
+      "typedefs": {
+        "bus_mv": {
+          "definition": "typedef struct { int32_t bus_mv;",
+          "hash": "6eb95bc236ff2438"
+        },
+        "ina236_adcrange_t": {
+          "definition": "typedef enum { INA236_ADCRANGE_81MV = 0, INA236_ADCRANGE_20MV = 1, } ina236_adcrange_t;",
+          "hash": "6b51003a1bfdc80e"
+        },
+        "initialised": {
+          "definition": "typedef struct { bool initialised;",
+          "hash": "98b22257593e61d9"
         }
       }
     },

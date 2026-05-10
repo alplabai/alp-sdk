@@ -603,7 +603,7 @@ config ALP_SDK_CHIP_TCAL9538
 	  TCAL9538 sits on E1M_I2C0 at 0x72 (A1=1, A0=0); its eight
 	  GPIOs fan out LCD / camera / capacitive-touch control
 	  lines plus four sensor interrupt inputs (see
-	  evk_ioexp_pin_t in <alp/boards/alp_e1m_evk_aen.h>).
+	  evk_ioexp_pin_t in <alp/boards/alp_e1m_evk.h>).
 
 config ALP_SDK_CHIP_TAS2563
 	bool "TI TAS2563 smart Class-D speaker amplifier"
@@ -613,7 +613,22 @@ config ALP_SDK_CHIP_TAS2563
 	  init / probe / mode / hw_enable.  Tuning-blob loader +
 	  I2S binding land in v0.3.x.  The E1M EVK populates two
 	  TAS2563RPP amps on I2C0 + I2S0 (0x4D and 0x4E); see
-	  <alp/boards/alp_e1m_evk_aen.h>.
+	  <alp/boards/alp_e1m_evk.h>.
+
+config ALP_SDK_CHIP_INA236
+	bool "TI INA236 16-bit current / bus voltage / power monitor"
+	depends on I2C
+	help
+	  Compile chips/ina236/ina236.c.  Per-rail current and
+	  power monitoring for instrumented PCBs; the E1M EVK
+	  populates six instances at 0x40..0x46 covering +3V3,
+	  +1V8, +VIO, +V_CAM0, +V_CAM1, and +5V (see
+	  EVK_I2C_ADDR_INA236_* in <alp/boards/alp_e1m_evk.h>).
+	  The driver verifies the manufacturer + device ID at
+	  init, programs the calibration register from a
+	  caller-supplied shunt resistance and max-current pair,
+	  and reports bus voltage in mV, shunt voltage in uV,
+	  current in uA, and power in uW.
 
 endmenu # "ALP SDK chip drivers"
 

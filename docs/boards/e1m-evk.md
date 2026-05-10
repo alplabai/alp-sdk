@@ -64,14 +64,13 @@ schematic (UG-E1M-001) and exposed as `EVK_I2C_ADDR_*` macros in
 
 | Address (7-bit) | Device                  | Macro                              | Role                                                |
 |-----------------|-------------------------|------------------------------------|-----------------------------------------------------|
-| `0x40`          | INA236A (U21)            | `EVK_I2C_ADDR_INA236_3V3`          | `+3V3` rail current monitor                         |
-| `0x41`          | INA236A (U31)            | `EVK_I2C_ADDR_INA236_1V8`          | `+1V8` rail current monitor                         |
-| `0x42`          | INA236A (U33)            | `EVK_I2C_ADDR_INA236_VIO`          | `+VIO` rail current monitor                         |
-| `0x44`          | INA236B (U32)            | `EVK_I2C_ADDR_INA236_VCAM0`        | `+V_CAM0` rail current monitor                      |
-| `0x45`          | INA236B (U34)            | `EVK_I2C_ADDR_INA236_VCAM1`        | `+V_CAM1` rail current monitor                      |
-| `0x46`          | INA236B (U30)            | `EVK_I2C_ADDR_INA236_5V`           | `+5V` rail current monitor                          |
+| `0x40`          | INA236A (U21)            | `EVK_I2C_ADDR_INA236_3V3`          | `+3V3` rail current monitor (20 mΩ shunt, 4.0 A max) |
+| `0x41`          | INA236A (U31)            | `EVK_I2C_ADDR_INA236_1V8`          | `+1V8` rail current monitor (20 mΩ shunt, 4.0 A max) |
+| `0x42`          | INA236A (U33)            | `EVK_I2C_ADDR_INA236_VIO`          | `+VIO` rail current monitor (50 mΩ shunt, 1.6 A max) |
 | `0x47`          | BMP581 (U14)             | `EVK_I2C_ADDR_BMP581`              | Barometric pressure (SDO=1)                         |
-| `0x48`          | TAS2563 broadcast        | `EVK_I2C_ADDR_TAS2563_BCAST`       | Write-only synchronised setup of both amps          |
+| `0x48`          | INA236B (U32)            | `EVK_I2C_ADDR_INA236_VCAM0`        | `+V_CAM0` rail current monitor (50 mΩ shunt, 1.6 A max) |
+| `0x49`          | INA236B (U34)            | `EVK_I2C_ADDR_INA236_VCAM1`        | `+V_CAM1` rail current monitor (50 mΩ shunt, 1.6 A max) |
+| `0x4A`          | INA236B (U30)            | `EVK_I2C_ADDR_INA236_5V`           | `+5V` rail current monitor (20 mΩ shunt, 4.0 A max)  |
 | `0x4D`          | TAS2563 (U27)            | `EVK_I2C_ADDR_TAS2563_LOW`         | Smart-amp #1 (AD0 = 10 kΩ to GND)                   |
 | `0x4E`          | TAS2563 (U28)            | `EVK_I2C_ADDR_TAS2563_HIGH`        | Smart-amp #2 (AD0 = 10 kΩ to VDD)                   |
 | `0x68`          | BMI323 (U13)             | `EVK_I2C_ADDR_BMI323`              | Secondary 6-axis IMU (SDO=0; no collision with ICM) |
@@ -99,7 +98,7 @@ The TCAL9538 IO expander (U35) drives:
 | `LCD_PWR_EN`  | output        | Display 1V8 / 3V3 enable                            |
 | `LCD_RST`     | output        | Display panel reset                                 |
 | `CTP_RST`     | output        | Capacitive touch reset                              |
-| `CAM_EN`      | output        | Camera rail enable (`+1V2_CAM`, `+2V6_CAM`)         |
+| `CAM_EN`      | output        | Camera-module enable (drives the camera sensor's EN/STBY pin, NOT the camera power rails) |
 | `S_42670.INT1`| input         | ICM-42670-P interrupt 1                             |
 | `S_42670.INT2`| input         | ICM-42670-P interrupt 2                             |
 | `S_42670.FSYNC`| input        | ICM-42670-P FSYNC                                   |

@@ -385,6 +385,46 @@ typedef enum {
 } evk_cam_select_t;
 
 /* ================================================================== */
+/* LCPI 8-bit parallel camera (J22, F32R-1A7H1-11024)                 */
+/*                                                                    */
+/* The third camera path on this EVK is a "Low-Power Parallel Camera  */
+/* Interface" -- an 8-bit DVP bus on connector J22.  Used for         */
+/* low-resolution sensors (e.g. Himax HM01B0, OmniVision OV7670)      */
+/* that don't support MIPI CSI.  The data bus is wired to E1M's       */
+/* parallel-camera "D[1:8]" pads -- BIT-REVERSED relative to the      */
+/* camera's natural CAM_D[7:0] ordering:                              */
+/*                                                                    */
+/*    Camera bit  E1M pad   Camera bit  E1M pad                       */
+/*    ----------  -------   ----------  -------                       */
+/*    CAM_D7 MSB  D1        CAM_D3      D5                            */
+/*    CAM_D6      D2        CAM_D2      D6                            */
+/*    CAM_D5      D3        CAM_D1      D7                            */
+/*    CAM_D4      D4        CAM_D0 LSB  D8                            */
+/*                                                                    */
+/* Sync / clock lines are NOT bit-reversed:                           */
+/*    CAM_VSYNC   -> ALP_E1M_CAM_VSYNC                                */
+/*    CAM_HSYNC   -> ALP_E1M_CAM_HSYNC                                */
+/*    CAM_XCLK    -> ALP_E1M_CAM_XCLK   (host-driven sensor clock)    */
+/*    CAM_PCLK    -> ALP_E1M_CAM_PCLK   (sensor pixel clock)          */
+/*                                                                    */
+/* I2C (sensor configuration) is on E1M_I2C1 (DSI_CSI_I2C, shared     */
+/* with the MIPI camera + display panel).                             */
+/*                                                                    */
+/* Power: +V_CAM0 (+1V2 nominal) on the connector for analog rails,   */
+/* +2V6_CAM for 2.8 V sensor supply.  Both are gated by the on-board  */
+/* camera LDOs and instrumented by INA236 channels VCAM0 / VCAM1.     */
+/*                                                                    */
+/* Reset / enable signals:                                            */
+/*    CAM_RST  active-low, on E1M IO5  (alp_gpio_*).                  */
+/*    CAM_EN   active-low, on TCAL9538 main P2 (drive LOW to enable). */
+/*                                                                    */
+/* Apps configure the parallel camera path via the studio's camera    */
+/* peripheral binding or by opening alp_camera with the LCPI mode;    */
+/* the bit-reversed data wiring is handled inside the SDK's pinmux    */
+/* overlay so user code never has to swap bits manually.              */
+/* ================================================================== */
+
+/* ================================================================== */
 /* TCAL9538 I/O expander pin layout                                   */
 /*                                                                    */
 /* The TCAL9538 sits on E1M_I2C0 at 7-bit address 0x72 (A1=1, A0=0    */
@@ -404,9 +444,10 @@ typedef enum {
 /* ================================================================== */
 
 typedef enum {
-    EVK_IOEXP_LCD_PWR_EN     = 0, /**< P0: LCD power enable.            */
-    EVK_IOEXP_LCD_RST        = 1, /**< P1: LCD reset.                    */
-    EVK_IOEXP_CAM_EN         = 2, /**< P2: Camera enable LDO.            */
+    EVK_IOEXP_LCD_PWR_EN = 0, /**< P0: LCD power enable.            */
+    EVK_IOEXP_LCD_RST    = 1, /**< P1: LCD reset.                    */
+    EVK_IOEXP_CAM_EN =
+        2, /**< P2: Camera-module enable (drives the camera sensor's EN/STBY pin -- NOT the +V_CAM0/+V_CAM1 power rails, which are gated separately). */
     EVK_IOEXP_CTP_RST        = 3, /**< P3: Capacitive touch panel reset. */
     EVK_IOEXP_ICM42670_INT1  = 4, /**< P4: ICM-42670 INT1 input.         */
     EVK_IOEXP_ICM42670_INT2  = 5, /**< P5: ICM-42670 INT2 input.         */
@@ -569,11 +610,13 @@ typedef enum {
  * strap selects address per TAS2563 datasheet table 7-3:
  *   AD0 = 10k to GND  -> 0x4D  -- U27 on the EVK
  *   AD0 = 10k to VDD  -> 0x4E  -- U28 on the EVK
- * Both also respond to the global broadcast 0x48 (write-only;
- * useful for synchronised setup, never for register reads). */
-#define EVK_I2C_ADDR_TAS2563_LOW 0x4Du   /**< U27 (AD0 = LOW). */
-#define EVK_I2C_ADDR_TAS2563_HIGH 0x4Eu  /**< U28 (AD0 = HIGH). */
-#define EVK_I2C_ADDR_TAS2563_BCAST 0x48u /**< Write-only broadcast. */
+ * The TAS2563 also has a hardware broadcast page-write convention,
+ * but the address it would normally use (0x48) is occupied on this
+ * EVK by U32 INA236B (+V_CAM0 rail).  Firmware that wants to write
+ * both amps simultaneously must issue two targeted unit-address
+ * writes back-to-back rather than relying on a 0x48 broadcast. */
+#define EVK_I2C_ADDR_TAS2563_LOW 0x4Du  /**< U27 (AD0 = LOW). */
+#define EVK_I2C_ADDR_TAS2563_HIGH 0x4Eu /**< U28 (AD0 = HIGH). */
 
 /* Six INA236 high-side current-shunt monitors -- one per power
  * rail -- on I2C0.  TI's INA236A variant occupies 0x40..0x43 and
@@ -588,12 +631,48 @@ typedef enum {
  *   U34  INA236B  +V_CAM1      A0 = V+   -> 0x45
  *   U30  INA236B  5V  rail     A0 = SDA  -> 0x46
  */
-#define EVK_I2C_ADDR_INA236_3V3 0x40u   /**< U21 INA236A. */
-#define EVK_I2C_ADDR_INA236_1V8 0x41u   /**< U31 INA236A. */
-#define EVK_I2C_ADDR_INA236_VIO 0x42u   /**< U33 INA236A. */
-#define EVK_I2C_ADDR_INA236_VCAM0 0x44u /**< U32 INA236B. */
-#define EVK_I2C_ADDR_INA236_VCAM1 0x45u /**< U34 INA236B. */
-#define EVK_I2C_ADDR_INA236_5V 0x46u    /**< U30 INA236B. */
+/* INA236A variants occupy 0x40..0x43 (A0 strap = GND/VS/SDA/SCL);
+ * INA236B variants occupy 0x48..0x4B with the same A0 encoding.
+ * Confirmed against the EVK schematic strap labels.  The B-bank
+ * addresses 0x48..0x4A do NOT collide with TAS2563 unit addresses
+ * (0x4D / 0x4E) -- they would collide with TAS2563's broadcast
+ * address if and only if the TAS2563s are programmed for a
+ * broadcast write at 0x48; firmware writers must avoid that
+ * sequence on this EVK or use targeted unit-address writes. */
+#define EVK_I2C_ADDR_INA236_3V3                                                                    \
+    0x40u /**< U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max).      */
+#define EVK_I2C_ADDR_INA236_1V8                                                                    \
+    0x41u /**< U31 INA236A, +1V8 rail (20 mOhm shunt, 4.0 A max).      */
+#define EVK_I2C_ADDR_INA236_VIO                                                                    \
+    0x42u /**< U33 INA236A, +VIO rail (50 mOhm shunt, 1.6 A max).      */
+#define EVK_I2C_ADDR_INA236_VCAM0                                                                  \
+    0x48u /**< U32 INA236B, +V_CAM0 rail (50 mOhm shunt, 1.6 A max).   */
+#define EVK_I2C_ADDR_INA236_VCAM1                                                                  \
+    0x49u                            /**< U34 INA236B, +V_CAM1 rail (50 mOhm shunt, 1.6 A max).   */
+#define EVK_I2C_ADDR_INA236_5V 0x4Au /**< U30 INA236B, +5V rail  (20 mOhm shunt, 4.0 A max).      */
+
+/* Per-rail shunt + max-current values for ina236_init().  All six
+ * EVK rails picked their shunt to put the rail's nominal max
+ * current near the INA236's 81.92 mV full-scale shunt voltage:
+ *   shunt_ohms * max_current_a ~= 0.080 V.
+ * Apps can pass these directly:
+ *   ina236_init(&ctx, bus,
+ *               EVK_I2C_ADDR_INA236_3V3,
+ *               EVK_INA236_SHUNT_3V3_OHMS,
+ *               EVK_INA236_MAX_3V3_A,
+ *               INA236_ADCRANGE_81MV); */
+#define EVK_INA236_SHUNT_3V3_OHMS 0.020f
+#define EVK_INA236_MAX_3V3_A 4.0f
+#define EVK_INA236_SHUNT_1V8_OHMS 0.020f
+#define EVK_INA236_MAX_1V8_A 4.0f
+#define EVK_INA236_SHUNT_VIO_OHMS 0.050f
+#define EVK_INA236_MAX_VIO_A 1.6f
+#define EVK_INA236_SHUNT_VCAM0_OHMS 0.050f
+#define EVK_INA236_MAX_VCAM0_A 1.6f
+#define EVK_INA236_SHUNT_VCAM1_OHMS 0.050f
+#define EVK_INA236_MAX_VCAM1_A 1.6f
+#define EVK_INA236_SHUNT_5V_OHMS 0.020f
+#define EVK_INA236_MAX_5V_A 4.0f
 
 /* ================================================================== */
 /* On-board audio I/O                                                 */
