@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Verifies the plain-CMake (non-Zephyr) build paths.  Compiles the
+# baremetal and yocto backends as host libraries with the host
+# toolchain so the stub backend at src/common/stub_backend.c stays
+# link-complete every PR.
+#
+# This catches:
+#   - New public functions added to <alp/...>.h without a matching
+#     stub in src/common/stub_backend.c (linker error on
+#     undefined-reference).
+#   - Header self-containment issues (missing forward declarations,
+#     stale typedefs).
+#   - Compile errors that only surface outside Zephyr's environment
+#     (e.g. assumptions about ZEPHYR_BASE-defined macros).
+
+name: pr-plain-cmake
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'include/**'
+      - 'src/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - '.github/workflows/pr-plain-cmake.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'include/**'
+      - 'src/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baremetal:
+    name: plain-cmake · baremetal stub backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build/baremetal -S . -DALP_OS=baremetal
+      - name: Build
+        run: cmake --build build/baremetal --parallel
+
+  yocto:
+    name: plain-cmake · yocto stub backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build/yocto -S . -DALP_OS=yocto
+      - name: Build
+        run: cmake --build build/yocto --parallel
