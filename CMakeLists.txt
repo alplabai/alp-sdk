@@ -45,6 +45,19 @@ if(NOT ALP_OS IN_LIST ALP_SUPPORTED_OS)
         "ALP_OS='${ALP_OS}' is not one of ${ALP_SUPPORTED_OS}")
 endif()
 
+# SoM family selector -- picks which vendor wrapper layer the
+# bare-metal backend pulls in.  none = peripheral stubs only;
+# aen = vendors/alif/ wrappers (Alif Ensemble); v2n / imx93
+# slot in once their respective vendor packs land.
+set(ALP_SUPPORTED_SOM "none;aen;v2n;imx93" CACHE INTERNAL "")
+set(ALP_SOM "none" CACHE STRING
+    "Target SoM family for bare-metal: none, aen, v2n, imx93")
+set_property(CACHE ALP_SOM PROPERTY STRINGS ${ALP_SUPPORTED_SOM})
+if(NOT ALP_SOM IN_LIST ALP_SUPPORTED_SOM)
+    message(FATAL_ERROR
+        "ALP_SOM='${ALP_SOM}' is not one of ${ALP_SUPPORTED_SOM}")
+endif()
+
 option(ALP_BUILD_TESTS    "Build ALP SDK tests"    OFF)
 option(ALP_HAS_LVGL       "Compile <alp/gui.h> against LVGL"  OFF)
 option(ALP_HAS_CMSIS_DSP  "Compile <alp/math.h> against CMSIS-DSP" OFF)

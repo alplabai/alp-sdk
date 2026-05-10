@@ -49,6 +49,23 @@ jobs:
       - name: Build
         run: cmake --build build/baremetal --parallel
 
+  baremetal-aen:
+    # ALP_OS=baremetal + ALP_SOM=aen activates the vendors/alif/
+    # wrapper directory.  Without ALP_HAS_ALIF_HAL=ON the four
+    # wrapper sources (i2c.c, spi.c, gpio.c, uart.c) compile to
+    # empty translation units; stub_backend.c keeps providing the
+    # NOSUPPORT defaults.  Verifies the dispatch + CMake wiring
+    # without depending on the proprietary CMSIS pack -- the real
+    # HAL link arrives in v0.2.x via cpackget AlifSemiconductor::Ensemble.
+    name: plain-cmake · baremetal AEN (vendor scaffolding)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build/baremetal-aen -S . -DALP_OS=baremetal -DALP_SOM=aen
+      - name: Build
+        run: cmake --build build/baremetal-aen --parallel
+
   yocto:
     name: plain-cmake · yocto stub backend
     runs-on: ubuntu-latest

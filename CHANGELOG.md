@@ -473,6 +473,26 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **Bare-metal AEN backend scaffolding (v0.2 milestone, item 4)** --
+  v0.2's "stub-to-real" baseline for the bare-metal Alif Ensemble
+  path.  New `vendors/alif/{i2c,spi,gpio,uart}.c` source files
+  wrap the four core peripherals on Alif's CMSIS-Driver layer
+  (`Driver_I2C0..3`, `Driver_SPI0..3`, `Driver_GPIO0..7`,
+  `Driver_USART0..3`).  Each wrapper's body is gated on
+  `ALP_HAS_ALIF_HAL` so the files compile cleanly even without
+  the proprietary Ensemble CMSIS pack present.  When the option
+  flips ON the wrapper sets `ALP_VENDOR_OVERRIDES_PERIPHERAL`,
+  which excludes the matching stubs from `src/common/stub_backend.c`
+  -- no duplicate symbols.  CMake wiring: new top-level
+  `ALP_SOM` variable (`none|aen|v2n|imx93`) layered on top of
+  `ALP_OS`; `src/baremetal/CMakeLists.txt` pulls
+  `vendors/alif/CMakeLists.txt` only when `ALP_OS=baremetal`
+  AND `ALP_SOM=aen`, leaving non-AEN bare-metal builds on the
+  pure stub path.  `pr-plain-cmake.yml` gains a `baremetal-aen`
+  job that exercises the new dispatch.  Real HAL link follows in
+  v0.2.x via `cpackget add AlifSemiconductor::Ensemble` -- the
+  scaffolding here lets that change be a body-of-function-only
+  follow-up.
 - **Cross-platform development support made explicit** -- README
   gains a "Cross-platform development" table calling out
   first-class macOS / Windows / Linux support; `docs/getting-started.md`
