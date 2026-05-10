@@ -12,6 +12,7 @@
 #include <zephyr/sys/util.h>
 
 #include "alp/peripheral.h"
+#include "alp/soc_caps.h"
 #include "handles.h"
 
 /* Resolve the studio-side bus_id to a Zephyr device pointer via the
@@ -52,18 +53,37 @@ static alp_status_t errno_to_alp(int err) {
 }
 
 alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg) {
-    if (cfg == NULL) return NULL;
-    if (cfg->bus_id >= ARRAY_SIZE(alp_i2c_devs)) return NULL;
+    alp_z_clear_last_error();
+
+    if (cfg == NULL) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    if (cfg->bus_id >= ARRAY_SIZE(alp_i2c_devs)) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    if (cfg->bus_id >= ALP_SOC_I2C_COUNT) {
+        alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
+        return NULL;
+    }
 
     const struct device *dev = alp_i2c_devs[cfg->bus_id];
-    if (dev == NULL || !device_is_ready(dev)) return NULL;
+    if (dev == NULL || !device_is_ready(dev)) {
+        alp_z_set_last_error(ALP_ERR_NOT_READY);
+        return NULL;
+    }
 
     struct alp_i2c *h = alp_z_i2c_pool_acquire();
-    if (h == NULL) return NULL;
+    if (h == NULL) {
+        alp_z_set_last_error(ALP_ERR_NOMEM);
+        return NULL;
+    }
 
     uint32_t flags = I2C_MODE_CONTROLLER | alp_to_zephyr_bitrate_flags(cfg->bitrate_hz);
     int err = i2c_configure(dev, flags);
     if (err != 0) {
+        alp_z_set_last_error(errno_to_alp(err));
         alp_z_i2c_pool_release(h);
         return NULL;
     }

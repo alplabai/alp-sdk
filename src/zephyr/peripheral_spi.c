@@ -13,6 +13,7 @@
 #include <zephyr/sys/util.h>
 
 #include "alp/peripheral.h"
+#include "alp/soc_caps.h"
 #include "handles.h"
 
 #define ALP_SPI_DEV_OR_NULL(idx)                                                \
@@ -59,14 +60,32 @@ static alp_status_t errno_to_alp(int err) {
 #define ALP_SPI_NO_CS  0xFFFFFFFFu
 
 alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg) {
-    if (cfg == NULL) return NULL;
-    if (cfg->bus_id >= ARRAY_SIZE(alp_spi_devs)) return NULL;
+    alp_z_clear_last_error();
+
+    if (cfg == NULL) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    if (cfg->bus_id >= ARRAY_SIZE(alp_spi_devs)) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    if (cfg->bus_id >= ALP_SOC_SPI_COUNT) {
+        alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
+        return NULL;
+    }
 
     const struct device *dev = alp_spi_devs[cfg->bus_id];
-    if (dev == NULL || !device_is_ready(dev)) return NULL;
+    if (dev == NULL || !device_is_ready(dev)) {
+        alp_z_set_last_error(ALP_ERR_NOT_READY);
+        return NULL;
+    }
 
     struct alp_spi *h = alp_z_spi_pool_acquire();
-    if (h == NULL) return NULL;
+    if (h == NULL) {
+        alp_z_set_last_error(ALP_ERR_NOMEM);
+        return NULL;
+    }
 
     h->bus_id = cfg->bus_id;
     h->dev    = dev;
@@ -79,6 +98,7 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg) {
     if (cfg->cs_pin_id != ALP_SPI_NO_CS &&
         alp_z_gpio_resolve(cfg->cs_pin_id, &h->cs_spec)) {
         if (!device_is_ready(h->cs_spec.port)) {
+            alp_z_set_last_error(ALP_ERR_NOT_READY);
             alp_z_spi_pool_release(h);
             return NULL;
         }

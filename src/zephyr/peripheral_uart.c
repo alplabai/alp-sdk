@@ -12,6 +12,7 @@
 #include <zephyr/sys/util.h>
 
 #include "alp/peripheral.h"
+#include "alp/soc_caps.h"
 #include "handles.h"
 
 #define ALP_UART_DEV_OR_NULL(idx)                                              \
@@ -66,11 +67,26 @@ static alp_status_t errno_to_alp(int err) {
 }
 
 alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg) {
-    if (cfg == NULL) return NULL;
-    if (cfg->port_id >= ARRAY_SIZE(alp_uart_devs)) return NULL;
+    alp_z_clear_last_error();
+
+    if (cfg == NULL) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    if (cfg->port_id >= ARRAY_SIZE(alp_uart_devs)) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    if (cfg->port_id >= ALP_SOC_UART_COUNT) {
+        alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
+        return NULL;
+    }
 
     const struct device *dev = alp_uart_devs[cfg->port_id];
-    if (dev == NULL || !device_is_ready(dev)) return NULL;
+    if (dev == NULL || !device_is_ready(dev)) {
+        alp_z_set_last_error(ALP_ERR_NOT_READY);
+        return NULL;
+    }
 
     struct uart_config zcfg = {
         .baudrate  = cfg->baudrate,
@@ -83,11 +99,15 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg) {
     /* Some controllers / shims don't expose runtime configuration —
      * accept ENOSYS / ENOTSUP and trust the devicetree-provided params. */
     if (err != 0 && err != -ENOSYS && err != -ENOTSUP) {
+        alp_z_set_last_error(errno_to_alp(err));
         return NULL;
     }
 
     struct alp_uart *h = alp_z_uart_pool_acquire();
-    if (h == NULL) return NULL;
+    if (h == NULL) {
+        alp_z_set_last_error(ALP_ERR_NOMEM);
+        return NULL;
+    }
     h->port_id = cfg->port_id;
     h->dev     = dev;
     h->cfg     = *cfg;

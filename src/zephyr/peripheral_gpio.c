@@ -80,12 +80,23 @@ static alp_status_t errno_to_alp(int err) {
 }
 
 alp_gpio_t *alp_gpio_open(uint32_t pin_id) {
+    alp_z_clear_last_error();
+
     struct gpio_dt_spec spec;
-    if (!alp_z_gpio_resolve(pin_id, &spec)) return NULL;
-    if (!device_is_ready(spec.port)) return NULL;
+    if (!alp_z_gpio_resolve(pin_id, &spec)) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    if (!device_is_ready(spec.port)) {
+        alp_z_set_last_error(ALP_ERR_NOT_READY);
+        return NULL;
+    }
 
     struct alp_gpio *h = alp_z_gpio_pool_acquire();
-    if (h == NULL) return NULL;
+    if (h == NULL) {
+        alp_z_set_last_error(ALP_ERR_NOMEM);
+        return NULL;
+    }
     h->pin_id = pin_id;
     h->spec   = spec;
     h->dir    = ALP_GPIO_INPUT;

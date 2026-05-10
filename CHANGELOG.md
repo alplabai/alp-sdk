@@ -379,6 +379,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
     `CONFIG_CAN=y` / `CONFIG_RTC=y` / `CONFIG_WATCHDOG=y` /
     `CONFIG_THREAD_LOCAL_STORAGE=y` so the v0.2 wrapper sources
     compile and link in the test app.
+- **v0.1 peripherals retrofitted** with `alp_last_error()` +
+  SoC-capability validation so the diagnostic story is uniform
+  across all 12 wrapped classes:
+  `peripheral_i2c.c` / `peripheral_spi.c` / `peripheral_uart.c` /
+  `peripheral_gpio.c` now stamp a precise reason
+  (ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOT_READY /
+  ALP_ERR_NOMEM / ALP_ERR_IO) before returning NULL.  ADR 0002's
+  v0.3 "retrofit" follow-up landed early.
 
 ### Notes
 
