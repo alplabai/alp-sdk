@@ -434,6 +434,46 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   `-Werror=comment`.  Twister CI was failing on the same three
   seams since the workflow was authored.
 
+- **3 additional chip drivers (E1M EVK on-board sensors)** —
+  `chips/icm42670/` (TDK 6-axis IMU), `chips/bmi323/` (Bosch 6-axis
+  IMU), `chips/bmp581/` (Bosch barometer with already-compensated
+  24-bit P + T outputs).  Each follows the existing chip-driver
+  pattern with WHO_AM_I / CHIP_ID verify, ODR + FS / OSR config,
+  burst register reads.  Brings the SDK's chip count to **11**.
+- **Shared stub backend** at `src/common/stub_backend.c` — every
+  public `alp_*` function defined as a NOSUPPORT stub, wired into
+  both `src/baremetal/` and `src/yocto/` via `target_sources`.
+  Plain-CMake builds with `-DALP_OS=baremetal` or `-DALP_OS=yocto`
+  now produce link-complete `libalp_sdk.a`.
+- **CI: pr-plain-cmake.yml** — runs `cmake -DALP_OS=baremetal` and
+  `cmake -DALP_OS=yocto` against host gcc on every PR; catches
+  "new public function added without a stub entry"
+  undefined-reference errors that the Zephyr CI doesn't see.
+- **`<alp/inference.h>` declared early (was held to v0.2)** —
+  unified ML inference surface with backend selector
+  (AUTO/CPU/Ethos-U/DRP-AI/DEEPX), model-format selector
+  (TFLite/Vela/DRP-AI/DXNN/ExecuTorch), tensor descriptor with
+  shape + dtype + quant params.  Stub returns NOSUPPORT; real
+  impls land per backend (Ethos-U + CPU v0.2 on AEN-Zephyr,
+  DRP-AI v0.3, DEEPX v0.4).  PLAN.md §6 entry strikethrough'd.
+- **`<alp/storage.h>` declared early (v0.4 surface)** — block-
+  oriented persistent storage: internal flash, QSPI / OSPI NOR,
+  SD / eMMC.  open / get_info / read / write / erase / sync /
+  close.  Real impls v0.4 (Yocto first-class).
+- **`<alp/usb.h>` declared early (v0.3 surface)** — device + host
+  roles in one header.  Three stock device classes wrapped
+  (CDC-ACM, MSC, HID); other classes via vendor escape hatches.
+- **`yocto/meta-alp/` skeleton** — Yocto BSP layer with
+  `conf/layer.conf` + recipe shells (`alp-sdk_git.bb`,
+  `alp-edgeai_git.bb`).  External Yocto integrators can
+  `bitbake-layers add-layer` today; do_compile / do_install /
+  FILES wiring lands v0.4.
+- **`docs/getting-started.md`** — standalone-first walkthrough
+  from `git clone` through `west build -b native_sim` and onto
+  real silicon.  Reinforces ADR 0001's
+  "standalone is first-class" stance with a concrete recipe
+  every hand-written firmware author can follow.
+
 ### Notes
 
 - Repo migrated from a CMSIS-Toolbox csolution / VFT mock-driver
