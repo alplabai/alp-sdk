@@ -637,9 +637,13 @@ ZTEST(alp_chips, test_audio_surface_v01_nosupport) {
 }
 
 ZTEST(alp_chips, test_ble_surface_v01_nosupport) {
-    zassert_is_null(alp_ble_open(), "v0.1 BLE stub returns NULL");
-    zassert_equal(alp_ble_advertise_start(NULL, NULL), ALP_ERR_NOSUPPORT);
-    zassert_equal(alp_ble_scan_stop(NULL),             ALP_ERR_NOSUPPORT);
+    /* ble.h went stub -> real on AEN-Zephyr in v0.3.  Same contract
+     * shift as audio: open() with no controller still returns NULL
+     * (NOSUPPORT), but operations on NULL handles now report
+     * NOT_READY (the standard wrapper convention). */
+    zassert_is_null(alp_ble_open(), "no BT controller -> NULL");
+    zassert_equal(alp_ble_advertise_start(NULL, NULL), ALP_ERR_NOT_READY);
+    zassert_equal(alp_ble_scan_stop(NULL), ALP_ERR_NOT_READY);
     alp_ble_close(NULL);
 }
 
