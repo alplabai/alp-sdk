@@ -20,6 +20,17 @@
  * The shape is deliberately small — hash, AEAD, signed PK, and TRNG are
  * the primitives `<alp/iot.h>` (TLS) and `<alp/ble.h>` (LE Secure
  * Connections) need; full asym-key generation lands in v0.4.
+ *
+ * Typical AEAD usage:
+ * @code
+ *     uint8_t key[16] = {...};
+ *     alp_aead_t *a = alp_aead_open(ALP_AEAD_AES_128_GCM, key, sizeof key);
+ *     uint8_t iv[12], cipher[64], tag[16];
+ *     alp_random_bytes(iv, sizeof iv);
+ *     alp_aead_encrypt(a, iv, sizeof iv, NULL, 0,
+ *                      plaintext, sizeof plaintext,
+ *                      cipher, tag, sizeof tag);
+ * @endcode
  */
 
 #ifndef ALP_SECURITY_H
@@ -38,36 +49,98 @@ extern "C" {
 /* Hash                                                                */
 /* ------------------------------------------------------------------ */
 
+/** Supported hash algorithms.  Routes to HW where the SoC supports it. */
 typedef enum {
     ALP_HASH_SHA256 = 0,
     ALP_HASH_SHA384 = 1,
     ALP_HASH_SHA512 = 2
 } alp_hash_alg_t;
 
+/** Opaque hash context.  Allocate via @ref alp_hash_open. */
 typedef struct alp_hash alp_hash_t;
 
+/**
+ * @brief Begin a hash computation.
+ *
+ * @param[in] alg  Algorithm choice.
+ * @return Open context on success; NULL if the backend doesn't
+ *         support the requested algorithm.
+ */
 alp_hash_t  *alp_hash_open(alp_hash_alg_t alg);
+
+/**
+ * @brief Feed @p len bytes of data into the running digest.
+ *
+ * Idempotent across multiple calls; the final digest is computed
+ * by @ref alp_hash_finish.
+ *
+ * @param[in] h     Open context.
+ * @param[in] data  Source bytes.
+ * @param[in] len   Source length.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
+ */
 alp_status_t alp_hash_update(alp_hash_t *h, const uint8_t *data, size_t len);
+
+/**
+ * @brief Finalise the digest and write it to @p digest_out.
+ *
+ * Implicitly closes @p h on success.  Output length depends on alg:
+ * SHA-256 = 32 B, SHA-384 = 48 B, SHA-512 = 64 B.
+ *
+ * @param[in]  h           Open context.
+ * @param[out] digest_out  Destination buffer.
+ * @param[in]  digest_cap  Capacity of @p digest_out.
+ * @param[out] digest_len  Receives the bytes written.  May be NULL.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
+ */
 alp_status_t alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_cap,
                              size_t *digest_len);
+
+/** @brief Release without finalising.  Use after a partial computation. */
 void         alp_hash_close(alp_hash_t *h);
 
 /* ------------------------------------------------------------------ */
 /* AEAD                                                                */
 /* ------------------------------------------------------------------ */
 
+/** Supported authenticated-encryption algorithms. */
 typedef enum {
-    ALP_AEAD_AES_128_GCM      = 0,
-    ALP_AEAD_AES_256_GCM      = 1,
+    ALP_AEAD_AES_128_GCM       = 0,
+    ALP_AEAD_AES_256_GCM       = 1,
     ALP_AEAD_CHACHA20_POLY1305 = 2
 } alp_aead_alg_t;
 
+/** Opaque AEAD context.  Allocate via @ref alp_aead_open. */
 typedef struct alp_aead alp_aead_t;
 
+/**
+ * @brief Acquire an AEAD context with the given key.
+ *
+ * @param[in] alg      Algorithm choice.
+ * @param[in] key      Key material.  Length must match the algorithm
+ *                     (16 B for AES-128, 32 B for AES-256 / ChaCha20).
+ * @param[in] key_len  Key length.
+ * @return Open context, or NULL on bad key length / unsupported alg.
+ */
 alp_aead_t  *alp_aead_open(alp_aead_alg_t alg,
                            const uint8_t *key, size_t key_len);
 
-/** Authenticated encrypt.  @p tag_out must be ≥ 16 bytes. */
+/**
+ * @brief Authenticated encrypt.
+ *
+ * @param[in]  a           AEAD context.
+ * @param[in]  iv          Initialisation vector.  AES-GCM: 12 B; ChaCha20: 12 B.
+ * @param[in]  iv_len      IV length.
+ * @param[in]  aad         Associated data (authenticated, not encrypted).
+ *                         May be NULL with @p aad_len = 0.
+ * @param[in]  aad_len     AAD length.
+ * @param[in]  plain       Plaintext input.
+ * @param[in]  plain_len   Plaintext length.
+ * @param[out] cipher_out  Ciphertext destination.  Same size as plaintext.
+ * @param[out] tag_out     Authentication tag destination.
+ * @param[in]  tag_len     Tag length, typically 16 B.  Must be ≥ 16.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
+ */
 alp_status_t alp_aead_encrypt(alp_aead_t *a,
                               const uint8_t *iv, size_t iv_len,
                               const uint8_t *aad, size_t aad_len,
@@ -75,7 +148,24 @@ alp_status_t alp_aead_encrypt(alp_aead_t *a,
                               uint8_t *cipher_out,
                               uint8_t *tag_out, size_t tag_len);
 
-/** Authenticated decrypt.  Returns ALP_ERR_IO on tag-mismatch. */
+/**
+ * @brief Authenticated decrypt.
+ *
+ * @param[in]  a           AEAD context.
+ * @param[in]  iv          IV used for encryption.
+ * @param[in]  iv_len      IV length.
+ * @param[in]  aad         Associated data.
+ * @param[in]  aad_len     AAD length.
+ * @param[in]  cipher      Ciphertext input.
+ * @param[in]  cipher_len  Ciphertext length.
+ * @param[in]  tag         Authentication tag from encryption.
+ * @param[in]  tag_len     Tag length.
+ * @param[out] plain_out   Plaintext destination.  Same size as ciphertext.
+ * @return ALP_OK on success;
+ *         ALP_ERR_IO on tag-mismatch (the message has been tampered
+ *         with — @p plain_out content is undefined and MUST be discarded);
+ *         ALP_ERR_NOT_READY / ALP_ERR_INVAL otherwise.
+ */
 alp_status_t alp_aead_decrypt(alp_aead_t *a,
                               const uint8_t *iv, size_t iv_len,
                               const uint8_t *aad, size_t aad_len,
@@ -83,15 +173,26 @@ alp_status_t alp_aead_decrypt(alp_aead_t *a,
                               const uint8_t *tag, size_t tag_len,
                               uint8_t *plain_out);
 
+/** @brief Release the AEAD context.  Wipes key material. */
 void         alp_aead_close(alp_aead_t *a);
 
 /* ------------------------------------------------------------------ */
 /* TRNG                                                                */
 /* ------------------------------------------------------------------ */
 
-/** Fill @p out with @p len cryptographically random bytes.  Routes to
- *  the SoC's TRNG when present, otherwise to MbedTLS's CTR_DRBG seeded
- *  from a platform entropy source. */
+/**
+ * @brief Fill @p out with @p len cryptographically random bytes.
+ *
+ * Routes to the SoC's TRNG when present, otherwise to MbedTLS's
+ * CTR_DRBG seeded from a platform entropy source.  Suitable for
+ * key generation, IVs, and nonces.  **Not** for non-cryptographic
+ * randomness — use the system PRNG for that.
+ *
+ * @param[out] out  Destination buffer.
+ * @param[in]  len  Bytes to generate.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO
+ *         (entropy source failed).
+ */
 alp_status_t alp_random_bytes(uint8_t *out, size_t len);
 
 #ifdef __cplusplus
