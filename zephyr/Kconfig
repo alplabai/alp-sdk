@@ -302,6 +302,17 @@ config ALP_SDK_INFERENCE_TFLM
 	  name-allowlist).  When OFF, alp_inference_open() returns NULL
 	  with ALP_ERR_NOSUPPORT regardless of the backend selector.
 
+config ALP_SDK_INFERENCE_DRPAI
+	bool "Renesas DRP-AI3 backend for <alp/inference.h>"
+	default n
+	depends on SOC_SERIES_RZV2N || SOC_FAMILY_RENESAS_RZ
+	help
+	  Wires the alp_inference_drpai_* hooks (src/zephyr/inference_drpai.c)
+	  into the dispatcher.  Real impl bridges Renesas's DRP-AI
+	  translator runtime; v0.3 ships the dispatch routing only,
+	  v0.4 fills the bodies once the vendor pack lands in CI.
+	  When the v0.4 work completes this defaults y on V2N targets.
+
 config ALP_SDK_INFERENCE_ETHOS_U
 	bool "Wire Arm Ethos-U op resolver (Vela-compiled models)"
 	default y if ALP_SDK_INFERENCE_TFLM && SOC_SERIES_ENSEMBLE_E7

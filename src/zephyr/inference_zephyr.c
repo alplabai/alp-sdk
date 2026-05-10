@@ -100,6 +100,18 @@ alp_status_t alp_inference_tflm_invoke(struct alp_inference *h);
 void         alp_inference_tflm_close(struct alp_inference *h);
 #endif
 
+#if defined(CONFIG_ALP_SDK_INFERENCE_DRPAI)
+alp_status_t alp_inference_drpai_open(struct alp_inference *h, const alp_inference_config_t *cfg);
+size_t       alp_inference_drpai_num_inputs(struct alp_inference *h);
+size_t       alp_inference_drpai_num_outputs(struct alp_inference *h);
+alp_status_t alp_inference_drpai_get_input(struct alp_inference *h, size_t index,
+                                           alp_inference_tensor_t *out);
+alp_status_t alp_inference_drpai_get_output(struct alp_inference *h, size_t index,
+                                            alp_inference_tensor_t *out);
+alp_status_t alp_inference_drpai_invoke(struct alp_inference *h);
+void         alp_inference_drpai_close(struct alp_inference *h);
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Auto-select policy                                                  */
 /*                                                                     */
@@ -113,6 +125,8 @@ static alp_inference_backend_t resolve_auto(void)
 {
 #if defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U)
     return ALP_INFERENCE_BACKEND_ETHOS_U;
+#elif defined(CONFIG_ALP_SDK_INFERENCE_DRPAI)
+    return ALP_INFERENCE_BACKEND_DRPAI;
 #elif defined(CONFIG_ALP_SDK_INFERENCE_TFLM)
     return ALP_INFERENCE_BACKEND_CPU;
 #else
@@ -160,6 +174,11 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
         rc = alp_inference_tflm_open(h, cfg);
         break;
 #endif
+#if defined(CONFIG_ALP_SDK_INFERENCE_DRPAI)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        rc = alp_inference_drpai_open(h, cfg);
+        break;
+#endif
     default:
         rc = ALP_ERR_NOSUPPORT;
         break;
@@ -182,6 +201,10 @@ size_t alp_inference_num_inputs(alp_inference_t *inf)
     case ALP_INFERENCE_BACKEND_ETHOS_U:
         return alp_inference_tflm_num_inputs(inf);
 #endif
+#if defined(CONFIG_ALP_SDK_INFERENCE_DRPAI)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        return alp_inference_drpai_num_inputs(inf);
+#endif
     default:
         return 0u;
     }
@@ -195,6 +218,10 @@ size_t alp_inference_num_outputs(alp_inference_t *inf)
     case ALP_INFERENCE_BACKEND_CPU:
     case ALP_INFERENCE_BACKEND_ETHOS_U:
         return alp_inference_tflm_num_outputs(inf);
+#endif
+#if defined(CONFIG_ALP_SDK_INFERENCE_DRPAI)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        return alp_inference_drpai_num_outputs(inf);
 #endif
     default:
         return 0u;
@@ -213,6 +240,10 @@ alp_status_t alp_inference_get_input(alp_inference_t *inf, size_t index,
     case ALP_INFERENCE_BACKEND_ETHOS_U:
         return alp_inference_tflm_get_input(inf, index, out);
 #endif
+#if defined(CONFIG_ALP_SDK_INFERENCE_DRPAI)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        return alp_inference_drpai_get_input(inf, index, out);
+#endif
     default:
         return ALP_ERR_NOSUPPORT;
     }
@@ -230,6 +261,10 @@ alp_status_t alp_inference_get_output(alp_inference_t *inf, size_t index,
     case ALP_INFERENCE_BACKEND_ETHOS_U:
         return alp_inference_tflm_get_output(inf, index, out);
 #endif
+#if defined(CONFIG_ALP_SDK_INFERENCE_DRPAI)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        return alp_inference_drpai_get_output(inf, index, out);
+#endif
     default:
         return ALP_ERR_NOSUPPORT;
     }
@@ -244,6 +279,10 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
     case ALP_INFERENCE_BACKEND_ETHOS_U:
         return alp_inference_tflm_invoke(inf);
 #endif
+#if defined(CONFIG_ALP_SDK_INFERENCE_DRPAI)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        return alp_inference_drpai_invoke(inf);
+#endif
     default:
         return ALP_ERR_NOSUPPORT;
     }
@@ -257,6 +296,11 @@ void alp_inference_close(alp_inference_t *inf)
     case ALP_INFERENCE_BACKEND_CPU:
     case ALP_INFERENCE_BACKEND_ETHOS_U:
         alp_inference_tflm_close(inf);
+        break;
+#endif
+#if defined(CONFIG_ALP_SDK_INFERENCE_DRPAI)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        alp_inference_drpai_close(inf);
         break;
 #endif
     default:

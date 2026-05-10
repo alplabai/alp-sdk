@@ -473,6 +473,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   real silicon.  Reinforces ADR 0001's
   "standalone is first-class" stance with a concrete recipe
   every hand-written firmware author can follow.
+- **DRP-AI inference dispatcher hook (item 11 / v0.3 milestone)** --
+  `<alp/inference.h>` dispatcher in `src/zephyr/inference_zephyr.c`
+  now routes `ALP_INFERENCE_BACKEND_DRPAI` into a per-backend
+  `inference_drpai.c` source compiled when
+  `CONFIG_ALP_SDK_INFERENCE_DRPAI=y`.  The AUTO resolver prefers
+  DRPAI before falling through to TFLM-CPU.  v0.3 ships the
+  dispatch routing + a 16-byte placeholder open() so apps verify
+  routing today; v0.4 fills the body via Renesas's DRP-AI
+  translator runtime once the vendor pack is in CI.
 - **V2N vendor scaffolding (item 10 / v0.3 milestone)** --
   `vendors/renesas-rzv2n/` gains `i2c.c` / `spi.c` / `gpio.c` /
   `uart.c` source skeletons mirroring the Alif vendor layout.
