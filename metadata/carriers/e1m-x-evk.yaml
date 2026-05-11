@@ -1,0 +1,31 @@
+# Stock preset for the E1M-X Development Board (45x65 SoM carrier).
+#
+# Reference carrier for E1M-X V2N and E1M-X V2N-M1 SoM families.
+# Authoritative wiring lives in the carrier-specific board header
+# (planned: include/alp/boards/alp_e1m_x_evk.h, lands alongside the
+# v0.4 Yocto first-class work).
+#
+# Per the project memory note, the populated chip list below stays
+# minimal until the user supplies the authoritative HW config for
+# the E1M-X-EVK.  Until then this file's role is to give
+# `carrier.name: E1M-X-EVK` a known schema landing point.
+
+schema_version: 1
+
+name: E1M-X-EVK
+display_name: "E1M-X Development Board (45x65 carrier)"
+hosts_som_families: [renesas-rzv2n]
+
+# TBD pending user HW config.  The E1M-X carrier is richer than
+# the 35x35 EVK (Arduino UNO + mikroBUS click + M.2 E-key + PCIe
+# x4 slot) but the exact chip-driver enable list depends on the
+# user-supplied schematic.
+populated: {}
+
+defaults:
+  display:                  null
+  primary_imu:              null
+
+status:
+  preliminary:              true                # populated list incomplete
+  partial_hw_config:        true                # awaiting user HW writeup

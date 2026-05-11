@@ -16,51 +16,42 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["sku"],
-      "description": "SoM identity + per-component assembly overrides.",
+      "description": "SoM identity -- the *module* the carrier mounts.  Distinct from `carrier` (below): the SoM is fixed at SoM-fab time and its on-module components (silicon, on-module radio, secure element, on-module sensors) cannot be DNI'd after order.  The `overrides` block here covers the rare cases where the SoM ships in variants (e.g. a custom AEN with the OPTIGA Trust M omitted).",
       "properties": {
         "sku": {
           "type": "string",
           "pattern": "^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$",
-          "description": "Stock SKU name.  Resolves to a preset under metadata/e1m_modules/<family>/sku-<sku>.yaml.  Currently recognised: E1M-AEN301/401/501/601/701/801 (Alif Ensemble family), E1M-V2N101/V2N102 (Renesas RZ/V2N), E1M-V2M101/V2M102 (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93, exact SKU TBD)."
+          "description": "Stock SoM SKU.  Resolves to a preset under metadata/e1m_modules/<family>/sku-<sku>.yaml.  Recognised: E1M-AEN301/401/501/601/701/801 (Alif Ensemble), E1M-V2N101/V2N102 (Renesas RZ/V2N), E1M-V2M101/V2M102 (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93, exact SKU TBD)."
         },
         "overrides": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Per-component assembly deltas vs the stock SKU preset.  Use for custom variants (e.g. a derivative that DNI'd the IMU to cut BOM cost).",
+          "description": "Per-on-module-component deltas vs the stock SKU preset.  Only covers components actually populated on the SoM PCB -- carrier-side sensors (IMU, barometer, OLED, camera) go in `carrier.populated` instead.",
           "properties": {
             "wifi_ble": {
               "$ref": "#/$defs/component_state",
-              "description": "Wi-Fi 6 + BLE 5.4 radio.  E1M-AEN uses on-module TI CC3501E; E1M-X V2N family uses on-module Murata LBEE5HY2FY (Infineon CYW55513)."
-            },
-            "imu": {
-              "type": "string",
-              "enum": ["lsm6dso", "icm42670", "bmi323", "none"],
-              "description": "Inertial measurement unit on the SoM (or carrier).  Multiple IMUs may be populated on dev kits -- choose the one the application uses."
-            },
-            "barometer": {
-              "type": "string",
-              "enum": ["bmp581", "bme280", "none"]
+              "description": "On-module Wi-Fi 6 + BLE 5.4 radio.  AEN: TI CC3501E.  V2N family: Murata LBEE5HY2FY (Infineon CYW55513)."
             },
             "secure_element": {
               "type": "string",
               "enum": ["optiga_trust_m", "none"],
-              "description": "Hardware secure element backing <alp/security.h>'s ECC + AES + TRNG path."
+              "description": "On-module hardware secure element backing <alp/security.h>'s ECC + AES + TRNG path.  Only the AEN family ships one by default."
             },
             "rtc_external": {
               "type": "string",
               "enum": ["rv3028c7", "none"],
-              "description": "External RTC.  If 'none', the SoC-internal RTC is used."
+              "description": "On-module external RTC.  AEN has RV-3028-C7; V2N relies on the SoC-internal RTC."
             },
             "ethernet": {
               "$ref": "#/$defs/component_state",
-              "description": "Wired Ethernet PHY population (RTL8211FDI-VD-CG on V2N).  Set to 'absent' on SoMs that don't route the GMAC pins."
+              "description": "On-module Ethernet PHY (RTL8211FDI-VD-CG on V2N family; AEN has the MAC routed but no on-module PHY -- the carrier provides one when present)."
             }
           }
         },
         "memory": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Memory subsystem capacities -- per-SKU presets fill these from the released parts list; overrides cover custom assemblies.",
+          "description": "Memory subsystem capacities -- per-SKU presets fill these from the released parts list; overrides cover custom-DRAM-population variants of the same SoM SKU.",
           "properties": {
             "dram_mbit": {
               "type": "integer",
@@ -68,13 +59,30 @@
             },
             "flash_mbit": {
               "type": "integer",
-              "description": "Boot flash capacity in megabits.  eMMC on V2N family, SPI-NAND on AEN.  E1M-AEN MRAM goes in mram_kbit instead."
+              "description": "Boot flash capacity in megabits.  eMMC on V2N family, SPI-NAND on AEN."
             },
             "mram_kbit": {
               "type": "integer",
               "description": "On-die MRAM capacity (Alif Ensemble only; ignored on V2N/N93)."
             }
           }
+        }
+      }
+    },
+
+    "carrier": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Carrier board the SoM is soldered onto.  Distinct from the SoM (above): the carrier defines which sensors, OLEDs, cameras, mic/speaker amps, current monitors, and other parts are populated -- and on custom carriers, which ones are intentionally DNI'd.  Omit this block entirely if the application doesn't reach beyond the SoM (e.g. a headless inference-only firmware running on a custom carrier that just exposes power + serial).",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Carrier board name.  Stock values resolve to a preset under metadata/carriers/<name>.yaml: 'E1M-EVK' (35x35 EVK for AEN / N93 SoMs), 'E1M-X-EVK' (45x65 EVK for V2N / V2N-M1 SoMs).  Custom carriers use any unique name + skip the preset; declare all populated components in `populated`."
+        },
+        "populated": {
+          "type": "object",
+          "additionalProperties": {"type": "boolean"},
+          "description": "Per-component populated flags.  Keys match the chip-driver names (lsm6dso, bmi323, icm42670, bmp581, bme280, lis2dw12, ssd1306, ssd1331, ov5640, pdm_mic, tas2563, ina236, cam_mux_pi3wvr626, tcal9538, ...).  When `carrier.name` references a preset, this block applies as a delta -- only list keys you're overriding (e.g. `lsm6dso: false` to DNI on a custom variant).  Each `true` enables the corresponding CONFIG_ALP_SDK_CHIP_<name> in the resulting build."
         }
       }
     },

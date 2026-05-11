@@ -60,51 +60,79 @@ Top-level fields:
 | `iot`            | no       | Wi-Fi / MQTT / BLE / TLS feature toggles.                     |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
 
-### `som` block
+### SoM vs carrier
 
-The SoM SKU resolves to a **stock preset** that fills the
-default assembly options.  Customers customize via the
-`overrides` and `memory` blocks.
+The schema deliberately separates two concerns that get conflated:
+
+| Block      | What it describes                                                                | When it changes                                                       |
+|------------|----------------------------------------------------------------------------------|-----------------------------------------------------------------------|
+| `som`      | The **module** that mounts on the carrier -- silicon, on-module radio, on-module secure element / RTC / temperature sensor / EEPROM. | Fixed at SoM-fab time.  You can't DNI on-module parts after order; only SoM-variant SKUs differ. |
+| `carrier`  | The **carrier board** -- IMUs, barometers, OLEDs, cameras, microphones, speaker amps, current monitors, I/O expanders, etc. | Different per carrier design.  Custom carriers DNI any component; the EVK ships with a default population. |
+
+On E1M-AEN, the on-module parts are: Alif Ensemble silicon, TI
+CC3501E (Wi-Fi/BLE), Infineon OPTIGA Trust M, Micro Crystal
+RV-3028-C7 RTC, TI TMP112, Onsemi 24C128 EEPROM.  Everything else
+on the dev kit (LSM6DSO, BMI323, ICM-42670, BMP581, OLEDs, OV5640,
+TAS2563, INA236, ...) is on the **E1M-EVK carrier**, not on the
+module.
+
+### `som` block
 
 ```yaml
 som:
   sku: E1M-AEN701          # required
 
-  overrides:                # optional -- only the keys you override
-    imu: none               # DNI'd the LSM6DSO on this custom assembly
-    barometer: none
+  overrides:                # rare -- only for custom SoM variants
+    secure_element: none    # custom AEN without the OPTIGA Trust M
 
-  memory:                   # optional
-    flash_mbit: 65536       # 64 Gbit boot flash vs the SKU default
+  memory:                   # custom DRAM / flash populations
+    flash_mbit: 65536       # vs the SKU default
 ```
 
-### Stock SKU presets (SDK-shipped)
+### `carrier` block
 
-```
-metadata/e1m_modules/
-├── aen/
-│   ├── sku-aen301.yaml
-│   ├── sku-aen401.yaml
-│   ├── sku-aen501.yaml
-│   ├── sku-aen601.yaml
-│   ├── sku-aen701.yaml    # E7-based, the v0.3 worked example
-│   └── sku-aen801.yaml
-├── v2n/
-│   ├── sku-v2n101.yaml
-│   └── sku-v2n102.yaml
-├── v2n-m1/
-│   ├── sku-v2m101.yaml
-│   └── sku-v2m102.yaml
-└── imx93/
-    └── sku-tbd.yaml        # SKU TBD per user HW config
+```yaml
+carrier:
+  name: E1M-EVK             # stock preset, or any unique name for a custom carrier
+
+  populated:                # delta vs the carrier preset's defaults
+    lsm6dso: false          # DNI'd on this custom assembly
+    tas2563: false          # no speaker amps populated
 ```
 
-v0.3 ships the schema + two worked examples (`sku-aen701.yaml`
-+ `sku-v2n101.yaml`); the remaining SKU presets fill in
-alongside the user-supplied hardware configuration writeup.
-Per the project memory note, values not in the silicon
-datasheet stay `TBD` until the user supplies them
-authoritatively.
+When the loader resolves the file, each `populated.<name>: true`
+becomes `CONFIG_ALP_SDK_CHIP_<NAME>=y` in the generated Kconfig
+fragment -- enabling the corresponding chip driver in
+`chips/<name>/` without you having to touch a separate config
+file.
+
+### Stock presets (SDK-shipped)
+
+```
+metadata/
+├── e1m_modules/
+│   ├── aen/
+│   │   ├── sku-aen301.yaml      # TBD pending user HW config
+│   │   ├── sku-aen401.yaml      # TBD
+│   │   ├── sku-aen501.yaml      # TBD
+│   │   ├── sku-aen601.yaml      # TBD
+│   │   ├── sku-aen701.yaml      # v0.3 worked example
+│   │   └── sku-aen801.yaml      # TBD
+│   ├── v2n/
+│   │   ├── sku-v2n101.yaml      # v0.3 worked example
+│   │   └── sku-v2n102.yaml      # TBD
+│   ├── v2n-m1/                  # to land alongside V2N-M1 v0.4 bring-up
+│   └── imx93/                   # SKU TBD per user HW config
+└── carriers/
+    ├── e1m-evk.yaml             # 35x35 EVK (AEN / N93)
+    └── e1m-x-evk.yaml           # 45x65 EVK (V2N / V2N-M1)
+```
+
+v0.3 ships the schema + two worked SKU examples (`sku-aen701.yaml`
++ `sku-v2n101.yaml`) + the two stock carriers.  Remaining SKU
+presets fill in alongside the user-supplied hardware configuration
+writeup.  Per the project memory note, values not in the silicon
+datasheet stay `TBD` until the user supplies them authoritatively.
 
 ### `libraries` block (user-facing, no wrapper)
 

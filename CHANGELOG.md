@@ -21,6 +21,31 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   shim, or (b) vendor a tagged release under `vendors/lwrb/src/`.
   Plan-A picked for v0.4 default.
 
+### Changed
+
+- `alp.yaml` schema split into SoM-vs-carrier blocks.  The first
+  pass conflated on-module components (silicon + CC3501E + OPTIGA
+  + RV3028 + TMP112 + 24C128, fixed at SoM-fab time) with carrier-
+  board components (LSM6DSO + BMI323 + ICM-42670 + BMP581 + OLEDs
+  + OV5640 + TAS2563 + INA236, variable per board design).  The
+  corrected schema:
+  - `som` block carries on-module concerns only (silicon SKU,
+    on-module radio / secure element / RTC overrides for SoM-
+    variant SKUs, memory capacities).
+  - New `carrier` block carries the per-board chip population --
+    each `populated.<name>: true` enables the corresponding
+    `CONFIG_ALP_SDK_CHIP_<NAME>=y` at build time.
+  - New stock carrier presets at `metadata/carriers/e1m-evk.yaml`
+    (35x35 EVK -- IMU x3, BMP581, SSD1306, PDM mics, TAS2563 x2,
+    INA236 x6, TCAL9538, PI3WVR626) and
+    `metadata/carriers/e1m-x-evk.yaml` (45x65 EVK -- populated
+    list TBD pending user HW config writeup).
+  - `metadata/e1m_modules/<family>/sku-*.yaml` files updated:
+    removed the misclassified carrier-side components; kept only
+    on-module parts.
+  - `metadata/templates/alp.yaml` + `docs/project-config.md`
+    updated with the SoM-vs-carrier distinction explained.
+
 ### Added
 
 - **Project configuration (`alp.yaml`)** -- one declarative YAML

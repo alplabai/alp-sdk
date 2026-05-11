@@ -11,8 +11,14 @@
 schema_version: 1
 
 # -------------------------------------------------------------------
-# SoM identity -- which module does this firmware target?
+# SoM identity -- which MODULE does this firmware target?
 # -------------------------------------------------------------------
+# Distinct from `carrier` below: the SoM is the small (35x35 or
+# 45x65) module that mounts on a carrier.  On-module components
+# (silicon, on-module radio, on-module secure element + RTC + EEPROM)
+# are fixed at SoM-fab time -- you can't DNI them after order.  The
+# `overrides` block here covers SoM variants only (e.g. a custom
+# AEN that omits the OPTIGA Trust M).
 som:
   # Stock SKU.  Recognised values:
   #   E1M-AEN301 / AEN401 / AEN501 / AEN601 / AEN701 / AEN801   (Alif Ensemble)
@@ -22,28 +28,53 @@ som:
   #
   # The SDK ships per-SKU presets at:
   #   metadata/e1m_modules/<family>/sku-<sku>.yaml
-  # which fill in the assembly options below; you only need to set
-  # `overrides` and `memory` blocks for custom-populated variants.
   sku: E1M-AEN701
 
-  # Per-component overrides for custom assemblies.  Anything not
-  # listed here inherits from the SKU preset.  Uncomment + edit as
-  # needed.
+  # SoM-variant overrides (uncomment for custom modules only).
+  # IMUs / barometers / OLEDs / cameras live on the CARRIER, not the
+  # SoM -- see the carrier block below.
   #
   # overrides:
-  #   wifi_ble:       absent          # DNI'd the radio
-  #   imu:            none            # DNI'd the IMU
-  #   barometer:      none
-  #   secure_element: none
-  #   rtc_external:   none
+  #   wifi_ble:       absent          # DNI'd the on-module CC3501E / Murata radio
+  #   secure_element: none            # custom AEN without the OPTIGA Trust M
+  #   rtc_external:   none            # custom AEN without the RV-3028-C7
 
-  # Memory overrides (custom DRAM / flash population).  Defaults
-  # come from the SKU preset.
+  # Memory overrides (custom DRAM / flash population of the same SKU).
   #
   # memory:
-  #   dram_mbit:   65536              # 64 Gbit LPDDR4X
+  #   dram_mbit:   65536              # 64 Gbit LPDDR4X (V2N102 default)
   #   flash_mbit:  131072             # 128 Gbit eMMC
   #   mram_kbit:   13312              # 13 Mbit (Alif Ensemble only)
+
+# -------------------------------------------------------------------
+# Carrier board -- where the on-board sensors, OLEDs, cameras live
+# -------------------------------------------------------------------
+# Distinct from `som` above: the carrier is the user-or-EVK PCB the
+# SoM mounts on.  This is where IMUs, barometers, OLEDs, cameras,
+# mic/speaker amps, current monitors, I/O expanders, and similar
+# carrier-side parts get declared.
+#
+# Stock carrier names:
+#   E1M-EVK     -- 35x35 EVK for AEN / N93 SoMs
+#   E1M-X-EVK   -- 45x65 EVK for V2N / V2N-M1 SoMs
+#
+# For a custom carrier, pick any unique name and list every
+# populated chip-driver in `populated` -- each `true` enables the
+# corresponding CONFIG_ALP_SDK_CHIP_<NAME>=y in the build.
+#
+# Omit the `carrier:` block entirely if your firmware doesn't
+# reach beyond the SoM (e.g. headless inference-only build).
+carrier:
+  name: E1M-EVK
+
+  # Stock-carrier overrides.  Only list keys that differ from the
+  # carrier preset's `populated` defaults -- e.g. set lsm6dso:
+  # false on a custom variant that DNI'd it for cost.
+  #
+  # populated:
+  #   lsm6dso:    false   # DNI'd on this custom assembly
+  #   bmi323:     false
+  #   tas2563:    false   # no speaker amps populated
 
 # -------------------------------------------------------------------
 # Target OS backend
