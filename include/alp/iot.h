@@ -48,13 +48,36 @@ void          alp_wifi_close(alp_wifi_t *w);
 
 typedef struct alp_mqtt alp_mqtt_t;
 
+/**
+ * @brief TLS parameters for an `mqtts://` broker connection.
+ *
+ * All fields are optional.  A NULL @p tls pointer on
+ * `alp_mqtt_config_t` is equivalent to `tls = &(alp_mqtt_tls_config_t){0}` --
+ * the backend uses the host OS's default CA path
+ * (`/etc/ssl/certs` on Debian/Ubuntu/Yocto images) and no client
+ * certificate.  Production deployments should pin @p ca_file to a
+ * known-good CA bundle.
+ */
 typedef struct {
-    const char *broker_uri;     /**< e.g. "mqtt://broker.local:1883" */
+    const char *ca_file;        /**< PEM CA bundle path.  NULL = system store. */
+    const char *cert_file;      /**< Optional client certificate (PEM). */
+    const char *key_file;       /**< Optional client private key (PEM). */
+    bool        insecure;       /**< true skips peer cert verification (dev only). */
+} alp_mqtt_tls_config_t;
+
+typedef struct {
+    const char *broker_uri;     /**< e.g. `"mqtt://broker.local:1883"` or `"mqtts://broker.local:8883"` */
     const char *client_id;
     const char *username;       /**< NULL if unauth */
     const char *password;
     uint16_t    keepalive_s;
     bool        clean_session;
+    /**
+     * TLS parameters.  Required scheme is `mqtts://`; ignored for
+     * `mqtt://`.  NULL is equivalent to a zero-initialised struct
+     * (use OS default CA path, no client cert, verify peer).
+     */
+    const alp_mqtt_tls_config_t *tls;
 } alp_mqtt_config_t;
 
 typedef enum {

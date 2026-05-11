@@ -37,9 +37,16 @@
  *
  * TLS
  * ---
- * v0.4 unencrypted only (`mqtt://`).  `mqtts://` URIs fail with
- * ALP_ERR_NOSUPPORT until the MbedTLS / <alp/security.h> work lands
- * a shared TLS context that mosquitto_tls_set can consume.
+ * `mqtts://` URIs route through libmosquitto's `mosquitto_tls_set`
+ * (OpenSSL underneath on a stock Yocto image).  CA / client cert /
+ * client key paths come from `alp_mqtt_config_t.tls`; a NULL tls
+ * pointer falls back to the host OS's default CA path
+ * (`/etc/ssl/certs` on Debian/Ubuntu/Yocto) and no client cert.
+ * Production deployments pin `tls->ca_file` to a known-good CA
+ * bundle so the broker's identity isn't trustable to any root the
+ * host happens to know about.  The `tls->insecure` flag skips peer
+ * verification entirely -- development-only; production builds
+ * should refuse to ship with it on.
  *
  * Compiled only on Linux hosts/targets, only when libmosquitto is
  * present on the sysroot.
@@ -92,10 +99,19 @@ struct alp_mqtt {
     char              host[ALP_SDK_YOCTO_MQTT_HOST_MAX];
     int               port;
     uint16_t          keepalive_s;
+    bool              use_tls;
     bool              connected;
     struct mqtt_sub   subs[ALP_SDK_YOCTO_MAX_MQTT_SUBS];
     size_t            nsubs;
 };
+
+/* Default system CA path on Yocto / Debian / Ubuntu.  Overridden by
+ * tls->ca_file when the caller supplies it.  Picked at compile time
+ * rather than runtime-discovered: every E1M Yocto image uses
+ * openssl-misc's default layout. */
+#ifndef ALP_SDK_YOCTO_DEFAULT_CA_PATH
+#define ALP_SDK_YOCTO_DEFAULT_CA_PATH "/etc/ssl/certs"
+#endif
 
 static struct alp_mqtt g_mqtt_pool[ALP_SDK_YOCTO_MAX_MQTT_HANDLES];
 
@@ -160,29 +176,35 @@ static alp_status_t mosq_to_alp(int rc)
     }
 }
 
-/* Parse "mqtt://host:port" or "mqtt://host" (default port 1883)
- * into the handle's host[] / port fields.  Returns ALP_OK on
- * success; ALP_ERR_NOSUPPORT for the deferred mqtts:// scheme. */
+/* Parse the broker URI into the handle's host / port / use_tls
+ * fields.  Accepts:
+ *   - "mqtt://host[:port]"   (default port 1883)
+ *   - "mqtts://host[:port]"  (default port 8883)
+ * Returns ALP_OK on success; ALP_ERR_INVAL on malformed input. */
 static alp_status_t parse_broker_uri(struct alp_mqtt *h, const char *uri)
 {
     if (uri == NULL) {
         return ALP_ERR_INVAL;
     }
-    const char *scheme = "mqtt://";
-    size_t      slen   = strlen(scheme);
-    if (strncmp(uri, scheme, slen) != 0) {
-        if (strncmp(uri, "mqtts://", 8) == 0) {
-            return ALP_ERR_NOSUPPORT;
-        }
+    const char *rest        = NULL;
+    int         default_port;
+    if (strncmp(uri, "mqtts://", 8) == 0) {
+        rest         = uri + 8;
+        default_port = 8883;
+        h->use_tls   = true;
+    } else if (strncmp(uri, "mqtt://", 7) == 0) {
+        rest         = uri + 7;
+        default_port = 1883;
+        h->use_tls   = false;
+    } else {
         return ALP_ERR_INVAL;
     }
-    const char *rest = uri + slen;
-    size_t      rlen = strlen(rest);
+    size_t rlen = strlen(rest);
     if (rlen == 0 || rlen >= sizeof(h->host)) {
         return ALP_ERR_INVAL;
     }
     memcpy(h->host, rest, rlen + 1);
-    h->port     = 1883;
+    h->port = default_port;
 
     char *colon = strchr(h->host, ':');
     if (colon != NULL) {
@@ -199,6 +221,37 @@ static alp_status_t parse_broker_uri(struct alp_mqtt *h, const char *uri)
     }
     if (h->host[0] == '\0') {
         return ALP_ERR_INVAL;
+    }
+    return ALP_OK;
+}
+
+/* Apply TLS parameters to the freshly-created mosquitto handle.
+ * Returns ALP_OK on success.  ALP_ERR_IO if mosquitto_tls_set fails
+ * (typically because the CA file doesn't exist or isn't a valid
+ * PEM).  Skipped when the URI scheme is "mqtt://". */
+static alp_status_t apply_tls(struct alp_mqtt *h, const alp_mqtt_tls_config_t *tls)
+{
+    if (!h->use_tls) {
+        return ALP_OK;
+    }
+    const char *cafile   = (tls != NULL) ? tls->ca_file   : NULL;
+    const char *certfile = (tls != NULL) ? tls->cert_file : NULL;
+    const char *keyfile  = (tls != NULL) ? tls->key_file  : NULL;
+    /* mosquitto_tls_set requires at least one of (cafile, capath)
+     * for peer verification.  Fall through to the system CA dir
+     * when the caller doesn't pin a specific bundle. */
+    const char *capath = (cafile == NULL) ? ALP_SDK_YOCTO_DEFAULT_CA_PATH : NULL;
+    int rc = mosquitto_tls_set(h->mosq, cafile, capath, certfile, keyfile, NULL);
+    if (rc != MOSQ_ERR_SUCCESS) {
+        return mosq_to_alp(rc);
+    }
+    if (tls != NULL && tls->insecure) {
+        /* mosquitto_tls_insecure_set must be called *after*
+         * mosquitto_tls_set; documented behavior. */
+        rc = mosquitto_tls_insecure_set(h->mosq, true);
+        if (rc != MOSQ_ERR_SUCCESS) {
+            return mosq_to_alp(rc);
+        }
     }
     return ALP_OK;
 }
@@ -297,6 +350,15 @@ alp_mqtt_t *alp_mqtt_open(const alp_mqtt_config_t *cfg)
             pool_release(h);
             return NULL;
         }
+    }
+    /* TLS hookup happens before the callback wiring so a TLS config
+     * error surfaces here rather than later at connect() time when
+     * it's harder to attribute to a misconfigured CA bundle. */
+    alp_status_t tls_rc = apply_tls(h, cfg->tls);
+    if (tls_rc != ALP_OK) {
+        alp_internal_set_last_error(tls_rc);
+        pool_release(h);
+        return NULL;
     }
     mosquitto_message_callback_set(h->mosq, on_message);
     mosquitto_connect_callback_set(h->mosq, on_connect);

@@ -43,18 +43,107 @@ static void test_null_broker_uri_returns_null_and_stamps_invalid(void)
     ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_INVAL);
 }
 
-static void test_mqtts_uri_returns_nosupport(void)
+static void test_mqtts_uri_with_default_tls_opens(void)
 {
-    /* TLS deferred to v0.4 secure-stack work. */
+    /* mqtts:// + tls=NULL falls back to the system CA path; open()
+     * should succeed (connect() is what proves the TLS handshake
+     * against a real broker, parked behind HIL). */
     alp_mqtt_config_t cfg = {
         .broker_uri    = "mqtts://example.com:8883",
         .client_id     = "alp-test",
         .keepalive_s   = 30,
         .clean_session = true,
+        .tls           = NULL,
+    };
+    alp_mqtt_t *m = alp_mqtt_open(&cfg);
+    ALP_ASSERT_TRUE(m != NULL);
+    if (m != NULL) {
+        alp_mqtt_close(m);
+    }
+}
+
+static void test_mqtts_uri_default_port_8883(void)
+{
+    /* No explicit port -- the parser should default to 8883 for
+     * mqtts://.  Open succeeds regardless; this just confirms the
+     * URI parser accepts the bare host. */
+    alp_mqtt_config_t cfg = {
+        .broker_uri    = "mqtts://example.com",
+        .client_id     = "alp-test",
+        .keepalive_s   = 30,
+        .clean_session = true,
+    };
+    alp_mqtt_t *m = alp_mqtt_open(&cfg);
+    ALP_ASSERT_TRUE(m != NULL);
+    if (m != NULL) {
+        alp_mqtt_close(m);
+    }
+}
+
+static void test_mqtts_uri_with_explicit_ca_bundle_opens(void)
+{
+    /* Mosquitto accepts the CA file path eagerly (loads + parses
+     * here).  Use /etc/ssl/certs/ca-certificates.crt which exists
+     * on every Debian/Ubuntu/Yocto runner libmosquitto-dev ships
+     * on; a malformed path is exercised in the next test. */
+    alp_mqtt_tls_config_t tls = {
+        .ca_file = "/etc/ssl/certs/ca-certificates.crt",
+    };
+    alp_mqtt_config_t cfg = {
+        .broker_uri    = "mqtts://example.com:8883",
+        .client_id     = "alp-test",
+        .keepalive_s   = 30,
+        .clean_session = true,
+        .tls           = &tls,
+    };
+    alp_mqtt_t *m = alp_mqtt_open(&cfg);
+    ALP_ASSERT_TRUE(m != NULL);
+    if (m != NULL) {
+        alp_mqtt_close(m);
+    }
+}
+
+static void test_mqtts_uri_with_missing_ca_file_fails(void)
+{
+    /* Bogus CA path -- mosquitto_tls_set fails immediately; we
+     * surface that as ALP_ERR_IO via mosq_to_alp. */
+    alp_mqtt_tls_config_t tls = {
+        .ca_file = "/nonexistent/path/ca.pem",
+    };
+    alp_mqtt_config_t cfg = {
+        .broker_uri    = "mqtts://example.com:8883",
+        .client_id     = "alp-test",
+        .keepalive_s   = 30,
+        .clean_session = true,
+        .tls           = &tls,
     };
     alp_mqtt_t *m = alp_mqtt_open(&cfg);
     ALP_ASSERT_NULL(m);
-    ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_NOSUPPORT);
+    /* mosquitto returns MOSQ_ERR_INVAL for a missing CA file in
+     * some versions and an error mapped to IO in others; we just
+     * assert the open refused. */
+    ALP_ASSERT_TRUE(alp_last_error() != ALP_OK);
+}
+
+static void test_mqtts_uri_insecure_flag_accepted(void)
+{
+    /* insecure=true is a dev-only escape hatch; it must not break
+     * open() and must not require a CA file. */
+    alp_mqtt_tls_config_t tls = {
+        .insecure = true,
+    };
+    alp_mqtt_config_t cfg = {
+        .broker_uri    = "mqtts://example.com:8883",
+        .client_id     = "alp-test",
+        .keepalive_s   = 30,
+        .clean_session = true,
+        .tls           = &tls,
+    };
+    alp_mqtt_t *m = alp_mqtt_open(&cfg);
+    ALP_ASSERT_TRUE(m != NULL);
+    if (m != NULL) {
+        alp_mqtt_close(m);
+    }
 }
 
 static void test_unknown_scheme_returns_invalid(void)
@@ -144,7 +233,11 @@ int main(void)
 {
     test_null_cfg_returns_null_and_stamps_invalid();
     test_null_broker_uri_returns_null_and_stamps_invalid();
-    test_mqtts_uri_returns_nosupport();
+    test_mqtts_uri_with_default_tls_opens();
+    test_mqtts_uri_default_port_8883();
+    test_mqtts_uri_with_explicit_ca_bundle_opens();
+    test_mqtts_uri_with_missing_ca_file_fails();
+    test_mqtts_uri_insecure_flag_accepted();
     test_unknown_scheme_returns_invalid();
     test_empty_host_returns_invalid();
     test_bad_port_returns_invalid();

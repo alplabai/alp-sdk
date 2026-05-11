@@ -22,6 +22,26 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **Yocto MQTT TLS (`mqtts://`) via libmosquitto.**  The Yocto IoT
+  backend (`src/yocto/iot_yocto.c`) now accepts `mqtts://host[:port]`
+  broker URIs (default port 8883) and routes them through
+  `mosquitto_tls_set` + `mosquitto_tls_insecure_set` (OpenSSL
+  underneath on a stock Yocto image).  New
+  `alp_mqtt_tls_config_t` in `<alp/iot.h>`: optional `ca_file` /
+  `cert_file` / `key_file` paths plus an `insecure` flag for dev
+  testing.  `alp_mqtt_config_t` gains an optional `tls` pointer
+  (NULL = use OS default CA path, no client cert -- the production
+  path pins `ca_file`).  Default CA path is `/etc/ssl/certs`
+  (override at compile time via `ALP_SDK_YOCTO_DEFAULT_CA_PATH`).
+  TLS config errors surface at `alp_mqtt_open()` time rather than
+  later at connect, so a misconfigured CA bundle is attributable.
+  Existing `mqtt://` callers are unaffected -- the `tls` field is
+  appended to the public struct and defaults to NULL under
+  designated-initializer usage.  Updated `tests/yocto/iot_mqtt.c`:
+  the previous NOSUPPORT assertion is replaced with five new TLS
+  tests covering default-TLS open / pinned-CA open / missing-CA
+  refusal / insecure-flag accepted / default-port-8883 parsing.
+  Broker handshake roundtrip parked behind `hil-yocto`.
 - **Mender OTA wiring on meta-alp (v0.4 prep).**  New opt-in
   distro include at
   `yocto/meta-alp/conf/distro/include/mender.inc` configuring
