@@ -44,9 +44,9 @@
 #define ETL_NO_EXCEPTIONS
 
 /* The SDK targets C++17 minimum (every supported toolchain has it). */
-#define ETL_CPP17_SUPPORTED        1
-#define ETL_CPP14_SUPPORTED        1
-#define ETL_CPP11_SUPPORTED        1
+#define ETL_CPP17_SUPPORTED 1
+#define ETL_CPP14_SUPPORTED 1
+#define ETL_CPP11_SUPPORTED 1
 
 /* No CPU-specific overrides here -- the loader emits
  * ETL_TARGET_DEVICE_ARM_CORTEX_<variant> through compile defines
@@ -61,11 +61,11 @@
  * containers are needed.  These are *maximum* compile-time sizes;
  * runtime usage is whatever the consumer requests up to this cap. */
 #ifndef ETL_MESSAGE_TIMER_MAX_TIMERS
-#define ETL_MESSAGE_TIMER_MAX_TIMERS    8
+#define ETL_MESSAGE_TIMER_MAX_TIMERS 8
 #endif
 
 #ifndef ETL_CALLBACK_TIMER_MAX_TIMERS
-#define ETL_CALLBACK_TIMER_MAX_TIMERS   8
+#define ETL_CALLBACK_TIMER_MAX_TIMERS 8
 #endif
 
 #endif /* ETL_PROFILE_H */

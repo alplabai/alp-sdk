@@ -38,14 +38,14 @@
 
 /* Header-only mode.  Apps that prefer the compiled library swap
  * this to 0 in their own config. */
-#define FMT_HEADER_ONLY            1
+#define FMT_HEADER_ONLY 1
 
 /* No iostream integration -- saves ~30 KB on M-class. */
-#define FMT_USE_IOSTREAM           0
+#define FMT_USE_IOSTREAM 0
 
 /* No exceptions on the hot path.  Format-string errors fault
  * loudly via fmt::detail::throw_format_error -> assert. */
-#define FMT_EXCEPTIONS             0
+#define FMT_EXCEPTIONS 0
 
 /* Floating-point formatting stays on by default; turn off in
  * your app's config if you need to save binary size and don't

@@ -37,11 +37,11 @@
 /* No exceptions on the hot path.  json's parse errors surface
  * via the discarded() sentinel or the parser-callback `false`
  * return when this is set. */
-#define JSON_NOEXCEPTION                  1
+#define JSON_NOEXCEPTION 1
 
 /* Disable implicit conversions to/from json values.  Makes
  * accidental serialisation/deserialisation surprises a compile
  * error instead of a runtime bug. */
-#define JSON_USE_IMPLICIT_CONVERSIONS     0
+#define JSON_USE_IMPLICIT_CONVERSIONS 0
 
 #endif /* ALP_NLOHMANN_JSON_CONFIG_H_ */
