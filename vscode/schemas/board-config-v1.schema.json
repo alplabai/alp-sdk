@@ -23,6 +23,11 @@
           "pattern": "^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$",
           "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>/som.yaml.  The SDK ships a preset for every released MPN -- customer's board.yaml just provides the MPN here and everything else (silicon, on-module radio, secure element, RTC, EEPROM, default inference backend) is inherited from the preset.  Recognised: E1M-AEN301/401/501/601/701/801 (Alif Ensemble), E1M-V2N101/V2N102 (Renesas RZ/V2N), E1M-V2M101/V2M102 (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93, exact SKU TBD)."
         },
+        "hw_rev": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+$",
+          "description": "Family-level hardware revision the firmware targets.  Optional; the SDK falls back to the SKU preset's `default_hw_rev` when omitted.  Validated against the family's `hw_revisions` table at metadata/e1m_modules/<family>/hw-revisions.yaml -- the SDK refuses to build when the SDK version (metadata/sdk_version.yaml) sits outside the chosen rev's [min_sdk_version, max_sdk_version] window.  At runtime the SDK reads the rev from the SoM's BOARD_ID ADC channel + resistor divider and aborts boot on mismatch."
+        },
         "overrides": {
           "type": "object",
           "additionalProperties": false,
@@ -78,6 +83,11 @@
         "name": {
           "type": "string",
           "description": "Carrier board name.  Stock values resolve to a preset under metadata/carriers/<name>.yaml: 'E1M-EVK' (35x35 EVK for AEN / N93 SoMs), 'E1M-X-EVK' (45x65 EVK for V2N / V2N-M1 SoMs).  Custom carriers use any unique name + skip the preset; declare all populated components in `populated`."
+        },
+        "hw_rev": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+$",
+          "description": "Carrier hardware revision.  Optional; falls back to the carrier preset's `default_hw_rev` when omitted.  Validated against the carrier preset's `hw_revisions` table at metadata/carriers/<name>/board.yaml in the same way the SoM `hw_rev` is.  Read at runtime from a carrier-side BOARD_ID ADC + resistor divider."
         },
         "populated": {
           "type": "object",

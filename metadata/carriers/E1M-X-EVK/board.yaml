@@ -26,6 +26,24 @@ defaults:
   display:                  null
   primary_imu:              null
 
+# Hardware revisions.  Same ADC + resistor-divider scheme as the
+# E1M-EVK (see metadata/carriers/E1M-EVK/board.yaml for the
+# rationale + math).  All concrete values TBD until the user-
+# supplied X-EVK schematic lands.
+default_hw_rev:             r1
+
+hw_revisions:
+  r1:
+    min_sdk_version: "0.3.0"
+    max_sdk_version: ~
+    status: tbd
+    board_id:
+      adc_channel:    TBD
+      v_top_ohm:      10000
+      v_bot_ohm:      10000
+      expected_mv:    900
+      bin_radius_mv:  100
+
 status:
   preliminary:              true                # populated list incomplete
   partial_hw_config:        true                # awaiting user HW writeup

@@ -29,6 +29,9 @@ Exit codes:
   1  YAML parse or schema violation
   2  missing SoM SKU preset or missing carrier preset without
      inline `populated`
+  3  hardware-revision / SDK-version incompatibility (the chosen
+     hw_rev's [min_sdk_version, max_sdk_version] window does not
+     cover metadata/sdk_version.yaml)
 """
 
 from __future__ import annotations
@@ -108,6 +111,114 @@ def _check_som_preset(project: dict[str, Any], metadata_root: Path) -> int:
     return 0
 
 
+def _parse_semver(s: str) -> tuple[int, ...]:
+    head = s.split("-", 1)[0].split("+", 1)[0]
+    parts: list[int] = []
+    for chunk in head.split("."):
+        try:
+            parts.append(int(chunk))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
+
+
+def _check_hw_rev(
+    label: str,
+    rev: str,
+    hw_revisions: dict[str, Any],
+    sdk_version: str,
+) -> int:
+    """Return 0 on OK, 3 on incompatibility, 2 on unknown rev."""
+    if rev not in hw_revisions:
+        print(f"FAIL {label} hw_rev '{rev}' not in revisions "
+              f"{sorted(hw_revisions.keys())}", file=sys.stderr)
+        return 2
+    entry = hw_revisions[rev] or {}
+    sdk_t = _parse_semver(sdk_version)
+    min_s = entry.get("min_sdk_version")
+    if min_s is not None and sdk_t < _parse_semver(str(min_s)):
+        print(f"FAIL {label} hw_rev '{rev}' requires SDK >= {min_s}; "
+              f"current SDK is {sdk_version}", file=sys.stderr)
+        return 3
+    max_s = entry.get("max_sdk_version")
+    if max_s is not None and str(max_s).strip() not in ("", "~"):
+        if sdk_t > _parse_semver(str(max_s)):
+            print(f"FAIL {label} hw_rev '{rev}' supports up to SDK "
+                  f"{max_s}; current SDK is {sdk_version}",
+                  file=sys.stderr)
+            return 3
+    print(f"OK   {label} hw_rev: {rev} (SDK {sdk_version} in range)")
+    return 0
+
+
+def _check_hw_compat(
+    project: dict[str, Any], metadata_root: Path,
+) -> int:
+    """Cross-check the chosen SoM + carrier hw_rev against the SDK
+    version recorded in metadata/sdk_version.yaml.  Returns the
+    highest exit code from the two sub-checks (0 / 2 / 3)."""
+    sdk_path = metadata_root / "sdk_version.yaml"
+    if not sdk_path.is_file():
+        print(f"WARN no metadata/sdk_version.yaml at {sdk_path} -- "
+              f"hw_rev check skipped")
+        return 0
+    sdk_doc = yaml.safe_load(sdk_path.read_text(encoding="utf-8"))
+    sdk_version = (sdk_doc or {}).get("version")
+    if not sdk_version:
+        print("WARN sdk_version.yaml has no `version` field -- "
+              "hw_rev check skipped")
+        return 0
+
+    rv = 0
+
+    # SoM side -- family-level hw_revisions table.
+    sku = project["som"]["sku"]
+    sku_preset_path = metadata_root / "e1m_modules" / sku / "som.yaml"
+    if sku_preset_path.is_file():
+        sku_doc = yaml.safe_load(sku_preset_path.read_text(encoding="utf-8")) or {}
+        family = sku_doc.get("family")
+        # Map the preset's `family:` value to the directory layout used
+        # under metadata/e1m_modules/<family>/.
+        family_dir = {
+            "alif-ensemble": "aen",
+            "renesas-rzv2n": "v2n",
+            "renesas-rzv2n-deepx": "v2n-m1",
+            "nxp-imx9":  "imx93",
+        }.get(family, family)
+        hw_revs_path = metadata_root / "e1m_modules" / str(family_dir) / "hw-revisions.yaml"
+        if family_dir and hw_revs_path.is_file():
+            hw_revs_doc = yaml.safe_load(hw_revs_path.read_text(encoding="utf-8")) or {}
+            hw_revs = hw_revs_doc.get("hw_revisions") or {}
+            rev = (project["som"].get("hw_rev")
+                   or sku_doc.get("default_hw_rev"))
+            if rev:
+                rv = max(rv, _check_hw_rev(
+                    f"som {sku}", rev, hw_revs, sdk_version))
+            else:
+                print(f"WARN som {sku}: no hw_rev declared, no "
+                      f"default_hw_rev in preset -- check skipped")
+
+    # Carrier side -- carrier-level hw_revisions block.
+    carrier_block = project.get("carrier")
+    if carrier_block:
+        name = carrier_block.get("name", "")
+        cp_path = metadata_root / "carriers" / name / "board.yaml"
+        if cp_path.is_file():
+            cp_doc = yaml.safe_load(cp_path.read_text(encoding="utf-8")) or {}
+            hw_revs = cp_doc.get("hw_revisions") or {}
+            if hw_revs:
+                rev = (carrier_block.get("hw_rev")
+                       or cp_doc.get("default_hw_rev"))
+                if rev:
+                    rv = max(rv, _check_hw_rev(
+                        f"carrier {name}", rev, hw_revs, sdk_version))
+                else:
+                    print(f"WARN carrier {name}: no hw_rev declared, "
+                          f"no default_hw_rev in preset -- check "
+                          f"skipped")
+    return rv
+
+
 def _check_carrier_preset(project: dict[str, Any], metadata_root: Path) -> int:
     """Return 0 on OK, 2 on missing-without-inline-populated."""
     carrier_block = project.get("carrier")
@@ -158,9 +269,13 @@ def main() -> int:
 
     som_rv = _check_som_preset(project, args.metadata_root)
     carrier_rv = _check_carrier_preset(project, args.metadata_root)
+    hw_rv = _check_hw_compat(project, args.metadata_root)
 
-    # Missing preset is exit 2; partial_hw_config is a warning (exit 0).
-    if som_rv == 2 or carrier_rv == 2:
+    if hw_rv == 3:
+        print(f"\n{args.input}: hardware-revision incompatibility",
+              file=sys.stderr)
+        return 3
+    if som_rv == 2 or carrier_rv == 2 or hw_rv == 2:
         print(f"\n{args.input}: missing-preset failures", file=sys.stderr)
         return 2
 

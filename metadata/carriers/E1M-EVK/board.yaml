@@ -87,6 +87,29 @@ defaults:
   display:                  ssd1306             # the always-populated OLED
   primary_imu:              lsm6dso             # canonical (other IMUs are alternates)
 
+# Hardware revisions.  Same ADC + resistor-divider scheme as the
+# SoM modules (see metadata/e1m_modules/aen/hw-revisions.yaml for
+# the full math) -- the carrier has no spare GPIO either, so the
+# rev is sampled on a dedicated ADC channel exposed at one of the
+# E1M-spec ADC pads.  Carrier-specific ADC channel is TBD pending
+# the EVK schematic's BOARD_ID net assignment.
+default_hw_rev:             r1
+
+hw_revisions:
+  r1:
+    min_sdk_version: "0.3.0"
+    max_sdk_version: ~
+    status: production
+    board_id:
+      adc_channel:    TBD
+      v_top_ohm:      10000           # 10 kΩ (E12)
+      v_bot_ohm:      10000           # 10 kΩ (E12)
+      expected_mv:    900             # V_out = 1.8 V * 10/(10+10)
+      bin_radius_mv:  100
+    notes: |
+      First production revision of the E1M EVK (35x35 carrier).
+      Wiring authoritative per include/alp/boards/alp_e1m_evk.h.
+
 status:
   preliminary:              false
   partial_hw_config:        false               # wiring authoritative via the C header

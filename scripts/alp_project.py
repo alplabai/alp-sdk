@@ -64,6 +64,7 @@ except ImportError:
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
 SCHEMA = METADATA_ROOT / "schemas" / "board-config-v1.schema.json"
+SDK_VERSION_FILE = METADATA_ROOT / "sdk_version.yaml"
 
 
 # ---------------------------------------------------------------------
@@ -146,6 +147,101 @@ def _resolve_carrier(name: str, metadata_root: Path) -> dict[str, Any]:
         # block is authoritative.  Return an empty preset.
         return {"name": name, "populated": {}}
     return _load_yaml(preset_path)
+
+
+# ---------------------------------------------------------------------
+# Hardware-revision compatibility (board.yaml hw_rev vs SDK version)
+# ---------------------------------------------------------------------
+
+
+def _read_sdk_version(metadata_root: Path) -> str | None:
+    """Read metadata/sdk_version.yaml.  Returns the version string,
+    or None if the file is absent (allows running the loader on
+    older checkouts that pre-date the hw_rev work)."""
+    p = metadata_root / "sdk_version.yaml"
+    if not p.is_file():
+        return None
+    data = yaml.safe_load(p.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        return None
+    v = data.get("version")
+    return str(v) if v else None
+
+
+def _parse_semver(s: str) -> tuple[int, ...]:
+    """Lenient '0.3.0' -> (0, 3, 0) split.  Non-numeric trailing
+    pre-release suffixes like '0.3.0-rc1' are dropped."""
+    head = s.split("-", 1)[0].split("+", 1)[0]
+    parts = []
+    for chunk in head.split("."):
+        try:
+            parts.append(int(chunk))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
+
+
+def _load_family_hw_revisions(
+    family: str, metadata_root: Path,
+) -> dict[str, Any] | None:
+    """metadata/e1m_modules/<family>/hw-revisions.yaml -- returns
+    the file's `hw_revisions` block (or None if the file is missing)."""
+    p = metadata_root / "e1m_modules" / family / "hw-revisions.yaml"
+    if not p.is_file():
+        return None
+    doc = yaml.safe_load(p.read_text(encoding="utf-8"))
+    if not isinstance(doc, dict):
+        return None
+    revs = doc.get("hw_revisions")
+    return revs if isinstance(revs, dict) else None
+
+
+def _resolve_hw_rev(
+    declared: str | None,
+    preset_default: str | None,
+    label: str,
+) -> str | None:
+    """Pick the effective hw_rev -- the explicit board.yaml field
+    wins; otherwise fall back to the preset's default_hw_rev.  Returns
+    None when both are absent (in which case the check is skipped
+    with a comment, not a hard error)."""
+    rev = declared or preset_default
+    if rev is None:
+        print(f"alp_project: no hw_rev declared for {label} -- check skipped",
+              file=sys.stderr)
+    return rev
+
+
+def _check_hw_rev_vs_sdk(
+    rev: str,
+    hw_revisions: dict[str, Any],
+    sdk_version: str,
+    label: str,
+) -> None:
+    """Fail-fast: validate that the chosen hw_rev's
+    [min_sdk_version, max_sdk_version] window covers the SDK
+    version.  Exits with the loader's standard error path on
+    mismatch."""
+    if rev not in hw_revisions:
+        sys.exit(
+            f"alp_project: {label} hw_rev '{rev}' is not declared in "
+            f"hw_revisions; known: {sorted(hw_revisions.keys())}")
+    entry = hw_revisions[rev] or {}
+    min_s = entry.get("min_sdk_version")
+    max_s = entry.get("max_sdk_version")
+    sdk_t = _parse_semver(sdk_version)
+    if min_s is not None and sdk_t < _parse_semver(str(min_s)):
+        sys.exit(
+            f"alp_project: SDK {sdk_version} is older than {label} hw_rev "
+            f"'{rev}' minimum {min_s}.  Upgrade the SDK or pick an "
+            f"older hw_rev.")
+    # max_sdk_version may be null/None -- treated as "unlimited".
+    if max_s is not None and str(max_s).strip() not in ("", "~"):
+        if sdk_t > _parse_semver(str(max_s)):
+            sys.exit(
+                f"alp_project: SDK {sdk_version} is newer than {label} "
+                f"hw_rev '{rev}' maximum {max_s}.  Downgrade the SDK or "
+                f"pick a newer hw_rev.")
 
 
 # ---------------------------------------------------------------------
@@ -584,6 +680,36 @@ def main() -> int:
     carrier_preset = None
     if "carrier" in project and project["carrier"]:
         carrier_preset = _resolve_carrier(project["carrier"]["name"], args.metadata_root)
+
+    # Hardware-rev / SDK-version compatibility.  Skipped silently
+    # when sdk_version.yaml is absent so the loader stays usable
+    # on pre-v0.3 checkouts.
+    sdk_version = _read_sdk_version(args.metadata_root)
+    if sdk_version is not None:
+        family = _sku_family(project["som"]["sku"])
+        family_revs = _load_family_hw_revisions(family, args.metadata_root)
+        if family_revs:
+            som_rev = _resolve_hw_rev(
+                project["som"].get("hw_rev"),
+                sku_preset.get("default_hw_rev"),
+                f"SoM {project['som']['sku']}",
+            )
+            if som_rev is not None:
+                _check_hw_rev_vs_sdk(
+                    som_rev, family_revs, sdk_version,
+                    f"SoM {project['som']['sku']}")
+        if carrier_preset is not None:
+            carrier_revs = carrier_preset.get("hw_revisions") or {}
+            if isinstance(carrier_revs, dict) and carrier_revs:
+                carrier_rev = _resolve_hw_rev(
+                    (project.get("carrier") or {}).get("hw_rev"),
+                    carrier_preset.get("default_hw_rev"),
+                    f"carrier {carrier_preset.get('name', '?')}",
+                )
+                if carrier_rev is not None:
+                    _check_hw_rev_vs_sdk(
+                        carrier_rev, carrier_revs, sdk_version,
+                        f"carrier {carrier_preset.get('name', '?')}")
 
     if args.emit == "zephyr-conf":
         out = _emit_zephyr(project, sku_preset, carrier_preset)

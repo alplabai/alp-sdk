@@ -203,6 +203,15 @@ module.
 som:
   sku: E1M-AEN701          # required
 
+  hw_rev: r1               # optional -- defaults to the SKU preset's
+                            # `default_hw_rev`.  Validated at build
+                            # time against the family hw_revisions
+                            # table (see "Hardware revision tracking"
+                            # below); at runtime the SDK reads the
+                            # rev from the on-module BOARD_ID ADC +
+                            # resistor divider and aborts boot on
+                            # mismatch.
+
   overrides:                # rare -- only for custom SoM variants
     secure_element: none    # custom AEN without the OPTIGA Trust M
 
@@ -215,6 +224,11 @@ som:
 ```yaml
 carrier:
   name: E1M-EVK             # stock preset, or any unique name for a custom carrier
+
+  hw_rev: r1                # optional -- defaults to the carrier preset's
+                             # `default_hw_rev`.  Same enforcement rules as
+                             # `som.hw_rev`; the runtime read happens on a
+                             # carrier-side BOARD_ID ADC + divider.
 
   populated:                # delta vs the carrier preset's defaults
     lsm6dso: false          # DNI'd on this custom assembly
@@ -470,6 +484,65 @@ files lock the gpio bank/index columns.
 - **First-class `west` integration** -- planned as a custom
   `west alp-build` command that wraps the configure + generate +
   build sequence.
+
+## Hardware revision tracking
+
+Every released SoM family and every released carrier carries a
+`hw_revisions:` table.  The SDK uses it to detect "wrong firmware
+for this hardware" two ways:
+
+- **Build-time** -- the loader + validator read
+  [`metadata/sdk_version.yaml`](../metadata/sdk_version.yaml) and
+  fail-fast if the chosen `hw_rev`'s
+  `[min_sdk_version, max_sdk_version]` window doesn't cover the
+  current SDK version.  Validator exit code `3`; loader aborts the
+  CMake configure with a clear error.
+- **Runtime** -- the SDK boots into a board-ID check that uses
+  a single ADC pin per board (SoM-side and carrier-side) fed by a
+  resistor divider from a 1.8 V rail.  Each `hw_rev` entry's
+  `board_id:` sub-block fixes the divider resistor values and the
+  nominal mV reading the SDK looks for.  A second, finer-grained
+  check reads the SoM's on-module 24C128 EEPROM (the AEN family
+  populates one by default) for an authoritative MPN string +
+  serial + mfg date -- the production-test flow writes the
+  manifest, the SDK matches it against `board.yaml`'s
+  `som.sku`.  Mismatch on either tier halts boot.
+
+### Why one ADC pin (instead of GPIO straps)
+
+The E1M form factor has no spare GPIO pads for board-ID resistor
+straps -- every pad is allocated by the spec.  A single ADC
+channel with a resistor divider distinguishes up to ~8 revisions
+at +/-100 mV bin radius (with 1 % resistors on a 1.8 V rail);
+that is enough for many family respins and leaves the rest of the
+GPIOs free for the application.  Per-rev resistor + voltage
+choices are documented in each family file's `board_id:` block;
+the canonical math lives at
+[`metadata/e1m_modules/aen/hw-revisions.yaml`](../metadata/e1m_modules/aen/hw-revisions.yaml).
+
+### How the data is laid out
+
+```
+metadata/
+├── sdk_version.yaml                            # single-line "version: 0.3.0"
+├── e1m_modules/
+│   ├── aen/hw-revisions.yaml                   # family-level revs (AEN family
+│   │                                            #  shares one PCB; SKUs differ
+│   │                                            #  by silicon only).
+│   ├── v2n/hw-revisions.yaml                   # V2N family TBD
+│   ├── v2n-m1/hw-revisions.yaml                # V2N + DEEPX TBD
+│   ├── imx93/hw-revisions.yaml                 # i.MX 93 TBD
+│   └── E1M-AEN701/som.yaml                     # MPN preset; `default_hw_rev: r1`
+│                                                #  points into the family table.
+└── carriers/
+    ├── E1M-EVK/board.yaml                      # carrier preset; carries its own
+    │                                            #  hw_revisions + default_hw_rev.
+    └── E1M-X-EVK/board.yaml                    # TBD
+```
+
+`board.yaml` overrides go in the `som.hw_rev` / `carrier.hw_rev`
+fields described above.  Omit them on stock builds -- the preset's
+`default_hw_rev` is picked up automatically.
 
 ## Versioning
 

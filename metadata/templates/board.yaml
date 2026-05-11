@@ -40,6 +40,14 @@ som:
   #   metadata/e1m_modules/<family>/sku-<sku>.yaml
   sku: E1M-AEN701
 
+  # Hardware revision the firmware is built for.  Optional --
+  # falls back to the SKU preset's `default_hw_rev`.  Validated
+  # against metadata/e1m_modules/<family>/hw-revisions.yaml at
+  # build time + against the on-module BOARD_ID ADC channel at
+  # runtime.  See docs/board-config.md "Hardware revision tracking".
+  #
+  # hw_rev: r1
+
   # SoM-variant overrides (uncomment for custom modules only).
   # IMUs / barometers / OLEDs / cameras live on the CARRIER, not the
   # SoM -- see the carrier block below.
@@ -76,6 +84,12 @@ som:
 # reach beyond the SoM (e.g. headless inference-only build).
 carrier:
   name: E1M-EVK
+
+  # Carrier hardware revision.  Same enforcement rules as
+  # `som.hw_rev` (optional, falls back to the carrier preset's
+  # `default_hw_rev`, validated build-time + runtime).
+  #
+  # hw_rev: r1
 
   # Stock-carrier overrides.  Only list keys that differ from the
   # carrier preset's `populated` defaults -- e.g. set lsm6dso:

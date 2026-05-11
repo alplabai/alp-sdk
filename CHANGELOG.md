@@ -9,6 +9,32 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- **Hardware-revision tracking (board.yaml `som.hw_rev` +
+  `carrier.hw_rev`).**  Every released family ships an
+  `hw-revisions.yaml` (one per family + per carrier) declaring
+  per-revision `[min_sdk_version, max_sdk_version]` windows.
+  `metadata/sdk_version.yaml` carries the SDK's own version.  The
+  loader + validator refuse to emit configs when the chosen
+  hw_rev doesn't cover the current SDK version (validator exit
+  code 3, loader aborts CMake configure).  Runtime detection
+  reads a per-board BOARD_ID ADC channel fed by a 1.8 V
+  resistor-divider (`10 kΩ / 10 kΩ → 900 mV` for r1) -- up to ~8
+  distinguishable revisions per board at ±100 mV bin radius with
+  1 % resistors.  The AEN family ships `r1` as production (all
+  AEN MPNs share one PCB per the user-supplied constraint "all
+  AENs have the same revision, only SoC changes"); V2N / V2M /
+  N93 ship `r1` as TBD-status stubs pending the user-supplied
+  HW writeups.  See `docs/board-config.md` "Hardware revision
+  tracking".
+- **In-tree VS Code extension (`vscode/`).**  TypeScript
+  extension that adds schema-aware `board.yaml` editing
+  (autocomplete + red squigglies via the Red Hat YAML
+  extension), five starter snippets, a configurator webview
+  panel with dropdowns/checkboxes driven from the live
+  preset library, one command per loader emit mode, a
+  customer-side validator command, per-OS dependency bootstrap
+  (Linux/macOS/Windows), and `west build/flash/run` wrappers.
+  CI gates compile + schema-sync + `.vsix` package on every PR.
 - **SoM presets shipped for every released MPN.**  Per the design
   directive "ship EVK configuration as board.yaml and prepare
   som.yaml file for every MPN, so customer just included MPN

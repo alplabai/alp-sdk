@@ -1,0 +1,19 @@
+# Single source of truth for the ALP SDK release version.
+#
+# Read by:
+#   - scripts/alp_project.py        -- compared against the family /
+#                                       carrier hw_revisions tables
+#                                       when emitting any backend
+#                                       config; refuses to emit when
+#                                       the requested hw_rev is
+#                                       outside [min_sdk_version,
+#                                       max_sdk_version].
+#   - scripts/validate_board_yaml.py -- same check, exit code 3 on
+#                                       mismatch.
+#   - vscode/ extension              -- surfaces an incompat warning
+#                                       in the configurator panel.
+#
+# Bump in the same PR that lands the matching CHANGELOG.md entry.
+
+version: "0.3.0"
+status:  development     # released | development | preview
