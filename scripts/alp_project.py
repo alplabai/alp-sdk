@@ -175,6 +175,29 @@ def _emit_zephyr(
     lines.append("# Regenerate after changes to board.yaml.")
     lines.append("")
 
+    # 0. ALP SDK + Zephyr baseline.  Always required when emitting
+    # zephyr-conf so the customer's prj.conf can be a single rsource
+    # of the generated fragment (board.yaml is the single source of
+    # truth -- prj.conf no longer carries CONFIG_ALP_SDK / CONFIG_LOG
+    # / CONFIG_PRINTK / TLS by hand).
+    diagnostics = project.get("diagnostics") or {}
+    lines.append("# ALP SDK + Zephyr baseline")
+    lines.append("CONFIG_ALP_SDK=y")
+    lines.append("CONFIG_LOG=y")
+    lines.append("CONFIG_PRINTK=y")
+    if diagnostics.get("last_error", True):
+        # Thread-local alp_last_error() slot requires TLS.
+        lines.append("CONFIG_THREAD_LOCAL_STORAGE=y")
+    log_level = diagnostics.get("log_level")
+    if log_level is not None:
+        # Zephyr's CONFIG_LOG_DEFAULT_LEVEL is 0..4 (off, err, wrn,
+        # inf, dbg).  Map our `trace` to dbg since Zephyr has no
+        # finer-grained slot.
+        log_level_kc = {"error": 1, "warn": 2, "info": 3, "debug": 4, "trace": 4}
+        if log_level in log_level_kc:
+            lines.append(f"CONFIG_LOG_DEFAULT_LEVEL={log_level_kc[log_level]}")
+    lines.append("")
+
     # 1. Silicon selection
     silicon = sku_preset.get("silicon")
     kconfig = _SILICON_TO_KCONFIG.get(silicon, None) if silicon else None
@@ -187,6 +210,7 @@ def _emit_zephyr(
         lines.append("")
 
     # 2. Carrier-populated chip drivers
+    final: dict[str, bool] = {}
     if carrier_preset is not None:
         base = carrier_preset.get("populated", {}) or {}
         user_overrides = (project.get("carrier", {}) or {}).get("populated", {}) or {}
@@ -196,6 +220,23 @@ def _emit_zephyr(
             for chip, on in sorted(final.items()):
                 lines.append(f"CONFIG_ALP_SDK_CHIP_{chip.upper()}={'y' if on else 'n'}")
             lines.append("")
+
+    # 2b. Zephyr subsystems required by the enabled chip drivers.
+    # Each chip driver's Kconfig has a `depends on <SUBSYS>` line;
+    # Kconfig won't auto-select GPIO / I2C / SPI / PWM when the
+    # chip is enabled, so we map populated chips to the subsystems
+    # they need and emit the matching CONFIG_<SUBSYS>=y.
+    subsystems: set[str] = set()
+    for chip, on in final.items():
+        if not on:
+            continue
+        for s in _CHIP_SUBSYSTEMS.get(chip, ()):
+            subsystems.add(s)
+    if subsystems:
+        lines.append("# Zephyr subsystems pulled in by the enabled chip drivers")
+        for s in sorted(subsystems):
+            lines.append(f"CONFIG_{s}=y")
+        lines.append("")
 
     # 3. Inference backend
     inference = project.get("inference") or {}
@@ -245,6 +286,40 @@ def _emit_zephyr(
         lines.append("")
 
     return "\n".join(lines) + "\n"
+
+
+# Chip name -> Zephyr subsystem CONFIG_* keys the chip driver
+# depends on.  Mirrors the `depends on ...` line in each
+# `config ALP_SDK_CHIP_<NAME>` entry in zephyr/Kconfig: enabling
+# a chip driver doesn't auto-select its subsystem, so the loader
+# emits the matching `CONFIG_<SUBSYS>=y` here.
+_CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
+    # GPIO-only
+    "button_led":         ("GPIO",),
+    "cam_mux_pi3wvr626":  ("GPIO",),
+    # SPI + GPIO
+    "ssd1331":            ("SPI", "GPIO"),
+    "cc3501e":            ("SPI", "GPIO"),
+    # I2C + GPIO
+    "tas2563":            ("I2C", "GPIO"),
+    # I2C-only
+    "lsm6dso":            ("I2C",),
+    "ssd1306":            ("I2C",),
+    "bme280":             ("I2C",),
+    "lis2dw12":           ("I2C",),
+    "ov5640":             ("I2C",),
+    "icm42670":           ("I2C",),
+    "bmi323":             ("I2C",),
+    "bmp581":             ("I2C",),
+    "tmp112":             ("I2C",),
+    "rv3028c7":           ("I2C",),
+    "optiga_trust_m":     ("I2C",),
+    "eeprom_24c128":      ("I2C",),
+    "tcal9538":           ("I2C",),
+    "ina236":             ("I2C",),
+    # pdm_mic helper has no subsystem dep declared in Kconfig
+    # (uses <alp/i2s.h> when enabled at v0.2+).
+}
 
 
 # Library-name -> Kconfig flag(s) to set when the library appears

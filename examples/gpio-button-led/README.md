@@ -4,6 +4,12 @@ Per-peripheral example wrapping `<alp/peripheral.h>` GPIO via the
 `<alp/chips/button_led.h>` block helper.  Polls a button and
 toggles an LED.
 
+This example is also the **canonical demonstration of the
+board.yaml + loader workflow**: every `CONFIG_*` knob the build
+needs comes from `board.yaml` -> `scripts/alp_project.py` ->
+`build/generated/alp.conf`, with `prj.conf` reduced to a single
+`rsource` line.
+
 ## What this shows
 
 - The portable button + LED block pattern: studio-resolved
@@ -12,6 +18,58 @@ toggles an LED.
 - Active-low button convention.
 - Press detection via polling (interrupt path is the helper's
   `alp_button_led_set_press_callback`).
+- The **single-source-of-truth** project config: `board.yaml`
+  drives Kconfig generation; `prj.conf` carries no hand-set
+  CONFIG_* knobs.
+
+## Generated config from board.yaml
+
+```bash
+# Run from the example directory.  The path to the SDK is resolved
+# via the ALP_SDK_ROOT env var (or, when running from the in-tree
+# checkout, by the example's CMakeLists.txt).
+python3 ../../scripts/alp_project.py \
+    --input  board.yaml \
+    --emit   zephyr-conf \
+    --output build/generated/alp.conf
+```
+
+The matching `prj.conf` contains exactly one non-comment line:
+
+```kconfig
+rsource "build/generated/alp.conf"
+```
+
+The example's `CMakeLists.txt` runs the loader for you at
+configure time (see `execute_process` near the top of the file),
+so a plain `west build` works without a separate generate step.
+
+What the generated `alp.conf` looks like for this example (subset
+-- the EVK preset enables the carrier's stock chip set in addition
+to `button_led`):
+
+```kconfig
+# ALP SDK + Zephyr baseline
+CONFIG_ALP_SDK=y
+CONFIG_LOG=y
+CONFIG_PRINTK=y
+CONFIG_THREAD_LOCAL_STORAGE=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+
+# SoM silicon (alif:ensemble:e7 via E1M-AEN701)
+CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y
+
+# Carrier chip drivers (E1M-EVK)
+CONFIG_ALP_SDK_CHIP_BUTTON_LED=y
+...
+
+# Zephyr subsystems pulled in by the enabled chip drivers
+CONFIG_GPIO=y
+CONFIG_I2C=y
+```
+
+Edit `board.yaml`, rebuild, and the regenerated `alp.conf` flows
+into the next build automatically.
 
 ## Build
 
@@ -21,7 +79,14 @@ west build -b native_sim/native/64 examples/gpio-button-led \
 west build -t run
 ```
 
+To target a different SoM / carrier, edit `board.yaml` -- nothing
+else needs to change.
+
 ## Reference
 
 - [`<alp/chips/button_led.h>`](../../include/alp/chips/button_led.h)
 - [`<alp/peripheral.h>`](../../include/alp/peripheral.h) GPIO surface
+- [`docs/board-config.md`](../../docs/board-config.md) -- the
+  authoritative reference for `board.yaml`.
+- [`scripts/alp_project.py`](../../scripts/alp_project.py) -- the
+  loader this example's `CMakeLists.txt` invokes.
