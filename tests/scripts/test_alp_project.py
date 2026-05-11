@@ -288,6 +288,40 @@ class TestHwInfoHEmit(unittest.TestCase):
             self.assertIn('ALP_HW_BUILD_SOM_HW_REV      "r1"', rv.stdout)
 
 
+class TestWestLibrariesEmit(unittest.TestCase):
+    """`--emit west-libraries` mode -- emits a west.yml
+    name-allowlist fragment from board.yaml's `libraries:` array."""
+
+    def test_template_emits_module_lines(self) -> None:
+        rv = _run_loader(input_path=TEMPLATE, emit="west-libraries")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        out = rv.stdout
+        self.assertIn("manifest:", out)
+        self.assertIn("name-allowlist:", out)
+        # Template has lvgl + mbedtls + cmsis_dsp + etl in libraries.
+        # First three are Zephyr modules; etl is a header-only library
+        # the loader's profile path covers, so it should land in the
+        # commented "not-a-Zephyr-module" tail, not the allowlist.
+        self.assertIn("- lvgl", out)
+        self.assertIn("- mbedtls", out)
+        self.assertIn("- cmsis-dsp", out)
+        tail = out.split("not Zephyr modules today")[-1]
+        self.assertIn("etl", tail)
+
+    def test_empty_libraries_emits_well_formed_empty_block(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), """
+                schema_version: 1
+                som:
+                  sku: E1M-AEN701
+                os: zephyr
+            """)
+            rv = _run_loader(input_path=path, emit="west-libraries")
+            self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+            self.assertIn("name-allowlist:", rv.stdout)
+            self.assertIn("[]", rv.stdout)
+
+
 class TestValidatorPeripheralCheck(unittest.TestCase):
     """validate_board_yaml.py's `peripherals:` vs SoC-spec check
     (added when `peripherals:` landed in the schema)."""

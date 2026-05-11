@@ -124,6 +124,24 @@ jobs:
           grep -q '#define ALP_HW_BUILD_CARRIER_NAME' /tmp/alp_hw_info_build.h
           grep -q '#define ALP_HW_BUILD_OS' /tmp/alp_hw_info_build.h
 
+      # The west-libraries path emits a paste-ready west.yml fragment
+      # listing the Zephyr modules the board.yaml `libraries:` array
+      # requires.  Sanity: the canonical template (which lists lvgl,
+      # mbedtls, cmsis_dsp, etl) lands the first three in the
+      # allowlist and the etl note in the trailing comment block.
+      - name: Smoke-test board.yaml loader (west-libraries)
+        run: |
+          python3 scripts/alp_project.py \
+              --input metadata/templates/board.yaml.example \
+              --emit west-libraries > /tmp/alp-west-libs.yml
+          test -s /tmp/alp-west-libs.yml
+          echo "--- generated west-libraries ---"
+          cat /tmp/alp-west-libs.yml
+          grep -q 'name-allowlist:' /tmp/alp-west-libs.yml
+          grep -q '- lvgl' /tmp/alp-west-libs.yml
+          grep -q '- mbedtls' /tmp/alp-west-libs.yml
+          grep -q '- cmsis-dsp' /tmp/alp-west-libs.yml
+
       # Customer-side linter -- exercises the same schema +
       # preset checks an app author would run before pushing.
       # Covers both the canonical template and every example

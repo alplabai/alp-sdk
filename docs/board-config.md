@@ -89,21 +89,19 @@ extend the schema, not to bypass it.
 ### Today's gaps (v0.3 -> v0.4)
 
 `board.yaml` covers the SoM + carrier + OS backend + inference + IoT
-features + optional libraries today.  Two remaining gaps where
-hand-written config still leaks in, both targeted for v0.4:
+features + optional libraries + Zephyr peripherals today.  One
+remaining gap where hand-written config still leaks in, targeted
+for v0.4:
 
-1. **`west.yml` module list.**  Optional libraries declared in
-   `board.yaml`'s `libraries:` list don't yet auto-pin into the
-   workspace's `west.yml`.  v0.4 lands either a generator or a
-   `west alp-update` extension command.
-2. **Per-test `prj.conf` in `tests/zephyr/<area>/`.**  The
+1. **Per-test `prj.conf` in `tests/zephyr/<area>/`.**  The
    in-repo test infrastructure still uses hand-written
    `prj.conf` files.  These are SDK-internal (not consumer-
    facing) and stay as-is until the loader handles test-style
    configs in v0.4.
 
-DTS overlays for carrier wiring -- previously gap #1 in this
-list -- ship in v0.3.  The loader's `--emit dts-overlay` mode
+DTS overlays for carrier wiring (`--emit dts-overlay`) and
+`west.yml` libraries auto-pinning (`--emit west-libraries`) were
+previously v0.4 gaps; both ship in v0.3.  The loader's `--emit dts-overlay` mode
 parses `include/alp/boards/<carrier>.h` and generates the bus
 aliases (`alp-i2c<N>`, `alp-spi<N>`, `alp-uart<N>`, `alp-pwm<N>`)
 plus a stub `alp,pin-array` with one entry per `EVK_PIN_*`
@@ -443,6 +441,37 @@ python3 $ALP_SDK/scripts/alp_project.py \
     --output build/conf/alp-generated.conf
 echo 'require alp-generated.conf' >> build/conf/local.conf
 ```
+
+### west.yml libraries auto-pin (`--emit west-libraries`)
+
+`--emit west-libraries` produces a `west.yml` fragment listing the
+Zephyr modules the board.yaml's `libraries:` array requires
+(`lvgl`, `mbedtls`, `cmsis-dsp`, `fs/littlefs`).  Header-only C++
+libraries (`etl`, `fmt`, `nlohmann_json`, `doctest`) aren't Zephyr
+modules -- they ride the loader's compile-time profile hook
+instead -- so the emitter lists them in a trailing comment rather
+than the allowlist.
+
+```bash
+python3 $ALP_SDK/scripts/alp_project.py \
+    --input board.yaml \
+    --emit west-libraries \
+    --output build/generated/alp-west-libs.yml
+```
+
+Import the fragment from your application's `west.yml`:
+
+```yaml
+manifest:
+  projects:
+    - name: alp-app-libs
+      path: alp-app-libs
+      import: build/generated/alp-west-libs.yml
+```
+
+Run `west update` and only the modules board.yaml actually
+references land in the workspace.  Closes the second v0.4 gap
+this doc previously flagged.
 
 ### Build-time identifier header (`--emit hw-info-h`)
 
