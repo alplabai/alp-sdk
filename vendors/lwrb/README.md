@@ -41,26 +41,40 @@ License + maintenance + footprint all pass the
 
 ## Wiring (v0.4)
 
-Add to the top-level `west.yml` projects list:
+LwRB does **not** ship a `zephyr/module.yml` at its repo root, so
+a bare `west.yml` import won't auto-register it as a Zephyr module.
+Two viable paths:
+
+**(a) west import + `EXTRA_ZEPHYR_MODULES`** (preferred, no fork):
 
 ```yaml
-- name: lwrb
-  remote: majerle
-  revision: v3.2.0       # pin -- bump intentionally on each upgrade.
-  path: modules/lib/lwrb
+# In the top-level west.yml:
+remotes:
+  - name: majerle
+    url-base: https://github.com/MaJerle
+projects:
+  - name: lwrb
+    remote: majerle
+    revision: v3.2.0       # pin -- bump intentionally on each upgrade.
+    path: modules/lib/lwrb
 ```
 
-And add the matching `majerle` remote:
+then add a tiny `modules/lib/lwrb/zephyr/module.yml` + `CMakeLists.txt`
+wrapper in `alp-sdk`'s own `west.yml` self-import (or via a build-side
+`EXTRA_ZEPHYR_MODULES` argument).  ~10 lines.
 
-```yaml
-- name: majerle
-  url-base: https://github.com/MaJerle
-```
+**(b) vendor a tagged release into `vendors/lwrb/src/`**:
 
-When that's in place, flipping `CONFIG_ALP_SDK_USE_LWRB=y` makes
-the upstream `lwrb/lwrb.h` win the include search ahead of this
-directory's stub.  No source-code change in the SDK is needed for
-the swap -- both headers share the same ABI.
+If we'd rather not depend on west fetching a third party at all,
+drop a tagged tarball under `vendors/lwrb/src/` and compile it
+directly from our CMakeLists.  Higher carrying cost on upgrade
+(manual re-vendor) but zero supply-chain surface.
+
+v0.4 picks (a) unless we hit a reason not to.  Either way: flipping
+`CONFIG_ALP_SDK_USE_LWRB=y` makes the upstream `lwrb/lwrb.h` win
+the include search ahead of this directory's stub.  No source-code
+change in the SDK is needed for the swap -- both headers share the
+same ABI.
 
 ## License
 

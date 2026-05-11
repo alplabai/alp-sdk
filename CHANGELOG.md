@@ -7,6 +7,20 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.1.0 candidate
 
+### Changed
+
+- `vendors/nanopb/README.md`: corrected the west.yml revision pin
+  to use nanopb's actual GitHub tag format (`nanopb-0.4.9`, with
+  the `nanopb-` prefix; I had previously documented bare `0.4.9`).
+  Verified the upstream repo ships a `zephyr/module.yml` so the
+  west import picks it up without extra plumbing.
+- `vendors/lwrb/README.md`: corrected the integration plan --
+  LwRB does **not** ship a `zephyr/module.yml`, so a plain
+  west.yml import alone won't register it.  Two options now
+  documented: (a) west import + tiny in-repo `zephyr/module.yml`
+  shim, or (b) vendor a tagged release under `vendors/lwrb/src/`.
+  Plan-A picked for v0.4 default.
+
 ### Added
 
 - `bench/` extended from 3 -> 6 cases.  New files cover the

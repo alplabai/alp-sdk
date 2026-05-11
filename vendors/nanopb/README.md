@@ -48,7 +48,7 @@ Add to the top-level `west.yml` projects list:
 ```yaml
 - name: nanopb
   remote: nanopb
-  revision: 0.4.9          # pin -- bump intentionally on each upgrade.
+  revision: nanopb-0.4.9   # GitHub tag format (note prefix); bump intentionally on each upgrade.
   path: modules/lib/nanopb
 ```
 
@@ -58,6 +58,10 @@ And add the matching `nanopb` remote:
 - name: nanopb
   url-base: https://github.com/nanopb
 ```
+
+(nanopb ships a `zephyr/module.yml` at the repo root, so Zephyr's
+west import picks it up automatically once the pin lands -- no
+extra `EXTRA_ZEPHYR_MODULES` plumbing required.)
 
 The upstream module also ships `extra/nanopb.cmake` which integrates
 the generator step -- v0.4 wires that against `metadata/protos/*.proto`
