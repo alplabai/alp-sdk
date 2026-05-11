@@ -1,6 +1,6 @@
 # ALP SDK — Product + Engineering Plan
 
-Last revised: 2026-05-11.
+Last revised: 2026-05-11 (afternoon refresh).
 
 This plan is the bridge between the canonical product slides
 (`ALP Lab — E1M™ Software Stack`, `Product Overview: Software`)
@@ -286,7 +286,7 @@ shipped early in 2026-Q2.
 | **v0.1** | Public surface frozen, AEN-Zephyr full | DSP re-export | Skeleton + chip metadata for all NPUs | Skeleton + header surface |
 | **v0.2** | **12 peripheral classes wrapped (was 4) + capability validation + E1M portability bound + per-peripheral hand-written examples + ADRs**.  AEN-baremetal + V2N intro. | CMSIS-Driver alignment | Vela + TFLM on AEN, EdgeAI app real | Real Wi-Fi-station + MQTT on AEN-Zephyr |
 | **v0.3** | V2N-Zephyr + AEN-Yocto stubs, M1 intro.  Real impl behind v0.2-declared `<alp/audio.h>` / `<alp/ble.h>` / `<alp/security.h>` / `<alp/mproc.h>` surfaces.  **+ `board.yaml` project config** (one YAML per project; SoM SKU + carrier + libraries + features), with loader emitting Kconfig / CMake / Yocto natives. | (held) | `<alp/inference.h>` unified, ExecuTorch on AEN.  DEEPX DX-M1 + Ethos-U65/i.MX 93 dispatchers wired (real link v0.4). | TLS + BLE + provisioning |
-| **v0.4** | **Yocto core-4 peripheral wrappers code complete, untested (I²C / SPI / UART / GPIO + GPIO IRQ dispatcher)**; full V2N + i.MX93 Yocto BSP bring-up still ahead.  HIL verification gates the v0.4 tag — see [`docs/test-plan.md`](docs/test-plan.md). | (held) | DRP-AI + Ethos-U65 backends | **MQTT via libmosquitto code complete, untested**; OTA (Mender) ahead. |
+| **v0.4** | **Yocto core-4 peripheral wrappers + GPIO IRQ + ALSA audio + OpenSSL security all code-complete; failure-path CI green, real-target HIL pending**.  AEN-Zephyr LwRB UART RX + nanopb mproc framing both compile-verified.  Full V2N + i.MX 93 Yocto BSP bring-up still ahead.  HIL verification gates the v0.4 tag — see [`docs/test-plan.md`](docs/test-plan.md). | (held) | DRP-AI + Ethos-U65 backends | **MQTT (cleartext + TLS) via libmosquitto, OpenSSL crypto, ALSA audio all code-complete**; MCUboot AEN scaffolding + meta-alp Mender opt-in landed; OTA-server side is a separate-repo product owned outside alp-sdk. |
 | **v1.0** | ABI freeze across the matrix (snapshot tooling shipped v0.1) | LTS-aligned | Full multi-vendor inference unification | Production IoT stack |
 
 ---
@@ -482,6 +482,71 @@ that remain open take priority for the upcoming releases.
     (`COVERITY_TOKEN`, `COVERITY_EMAIL`) provisioned; first
     submission to <https://scan.coverity.com/projects/alplabai-alp-sdk>
     completed successfully on 2026-05-11.
+24. ~~**LwRB pinned but never consumed.**~~  First in-tree LwRB
+    consumer landed: opt-in `alp_uart_rx_ringbuf_*` helper in
+    `src/zephyr/peripheral_uart.c` gated on
+    `CONFIG_ALP_SDK_UART_RX_RINGBUF`.  Interrupt-driven RX path
+    drains the UART FIFO into a caller-supplied ring; consumer
+    pops batched bytes without polling.  Backed by an in-tree
+    LwRB stub impl at `vendors/lwrb/src/lwrb_stub_impl.c` (~140
+    LoC, canonical empty/full disambiguation) until the
+    `extras-v04` west group flips upstream `MaJerle/lwrb` in.
+    Reference app at `examples/uart-rx-ringbuf/`.
+25. ~~**nanopb pinned but never consumed.**~~  First in-tree
+    nanopb consumer landed: optional 12-byte placeholder IPC
+    envelope wrapping `alp_mbox_send` payloads under
+    `CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING`.  Replaced wholesale
+    by the nanopb-generated codec against
+    `metadata/protos/alp_mproc.proto` once the `extras-v04`
+    group lands upstream nanopb.  Encode/decode helpers at
+    `src/common/proto/alp_mproc_frame.{h,c}` cover the same
+    call sites the generator will own in v0.4-final.
+26. ~~**MCUboot for AEN was a `west.yml` import with no
+    sysbuild integration.**~~  `sysbuild/aen/sysbuild.conf`
+    configures MCUboot + ECDSA-P256 + `swap-using-scratch`;
+    `keys/generate_dev_key.sh` wraps `imgtool` for local dev-key
+    generation; `keys/.gitignore` keeps private keys out of git;
+    `docs/secure-boot.md` documents the full chain of trust
+    (Alif Secure Enclave ROM -> first-stage -> MCUboot ->
+    application), the production OPTIGA Trust M lifecycle, the
+    `swap-using-scratch` failure-mode matrix, and the multi-key
+    rotation playbook.  Live compile-verification gates on the
+    authoritative `alp_e1m_evk_aen` board file (gap #8).
+27. ~~**Mender OTA was undeclared on the Yocto side.**~~
+    Opt-in distro include at
+    `yocto/meta-alp/conf/distro/include/mender.inc` configures
+    `mender-full` with A/B rootfs + 256 MiB-per-slot default
+    layout + storage / server / tenant placeholders.  V2N /
+    V2N-M1 / i.MX 93 machine configs gain commented opt-in hook
+    blocks (consumers uncomment `require` to enable).
+    `meta-mender-core` added to `LAYERRECOMMENDS_alp`.
+    Cross-cutting `docs/ota.md` covers the trust model + Yocto
+    Mender flow + the AEN-Zephyr Mender vs Hawkbit decision
+    pending v0.4-final.  OTA-server side is owned by a separate
+    repo, per the alp-ota-server product split.
+28. ~~**Yocto MQTT was cleartext-only.**~~  `apply_tls` hook
+    routes `mqtts://` URIs through `mosquitto_tls_set` (OpenSSL
+    underneath).  New `alp_mqtt_tls_config_t` in `<alp/iot.h>`
+    carries optional CA / cert / key paths + insecure flag;
+    default port 8883; default CA path `/etc/ssl/certs`.  TLS
+    config errors surface at `alp_mqtt_open()` time rather than
+    later at connect.
+29. ~~**`<alp/audio.h>` had no Yocto backend.**~~
+    `src/yocto/audio_yocto.c` binds the full
+    `alp_audio_in_*` + `alp_audio_out_*` surface against
+    ALSA's `snd_pcm_*`.  Device naming maps `peripheral_id` to
+    `"default"` / `"hw:N-1,0"`; software linear volume scale on
+    S16_LE output; pkg_check_modules-gated.  Eleven failure-path
+    tests at `tests/yocto/audio_alsa.c`.
+30. ~~**`<alp/security.h>` had no Yocto backend.**~~
+    `src/yocto/security_yocto.c` implements `alp_hash_*`
+    (SHA-256/384/512), `alp_aead_*` (AES-128/256-GCM + ChaCha20-
+    Poly1305), `alp_random_bytes` on OpenSSL's `EVP_*`.
+    Tag-mismatch on decrypt maps to `ALP_ERR_IO` per the header
+    contract; key material wiped on close via `OPENSSL_cleanse`.
+    Sixteen tests at `tests/yocto/security_openssl.c` including
+    a SHA-256 NIST KAT against the `"abc"` vector and full
+    AEAD round-trip with tag-mismatch detection.
 
 ---
 

@@ -319,14 +319,16 @@ roadmap's "IoT Application Example" deliverable.
 first-class with full Yocto support and Linux-native versions of
 every library.
 
-### v0.4 prep merged on `main` (2026-05-11) — **untested**
+### v0.4 prep merged on `main` (through 2026-05-11) — **mostly untested**
 
 The structural pieces below landed ahead of the v0.4 tag during the
 v0.3 cycle.  Each is gated so a workspace that doesn't need the
 v0.4 deliverable falls back cleanly to the v0.3 stubs.  Each also
 has a corresponding row in [`docs/test-plan.md`](docs/test-plan.md);
-none of those rows have flipped to ✅ verified yet -- they all
-require the `hil-yocto` runner to land first.
+most rows are 🟡 partial -- failure paths covered by CI ctest, real
+target verification still parked behind the `hil-yocto` runner.
+
+**Peripherals + IoT (Yocto):**
 
 - **Yocto core-4 peripherals — real on Linux.**
   `alp_i2c_*` via i2c-dev, `alp_spi_*` via spidev, `alp_uart_*` via
@@ -337,36 +339,97 @@ require the `hil-yocto` runner to land first.
 - **MQTT via libmosquitto.**  Caller-driven `alp_mqtt_loop`;
   subscription dispatch through libmosquitto's wildcard matcher.
   Gated on `pkg_check_modules(libmosquitto)`.
+- **MQTT TLS (`mqtts://`).**  `apply_tls` hook routes through
+  `mosquitto_tls_set` (OpenSSL underneath).  Optional
+  `alp_mqtt_tls_config_t` for CA / cert / key paths + insecure
+  flag; default port 8883.  Default CA path `/etc/ssl/certs`.
+
+**Audio (Yocto):**
+
+- **ALSA-backed `<alp/audio.h>`.**  `src/yocto/audio_yocto.c`
+  binds `alp_audio_in_*` + `alp_audio_out_*` against ALSA's
+  `snd_pcm_*`.  Device naming: `peripheral_id == 0` -> ALSA
+  `"default"`; `peripheral_id == N` -> `"hw:N-1,0"`.  Software
+  linear volume scale on S16_LE output.  Gated on
+  `pkg_check_modules(alsa)`.
+
+**Security (Yocto):**
+
+- **OpenSSL-backed `<alp/security.h>`.**  `src/yocto/security_yocto.c`
+  implements `alp_hash_*` (SHA-256 / 384 / 512), `alp_aead_*`
+  (AES-128-GCM / AES-256-GCM / ChaCha20-Poly1305), and
+  `alp_random_bytes`.  Tag-mismatch on decrypt mapped to
+  `ALP_ERR_IO` per the header contract.  Key material wiped on
+  close via `OPENSSL_cleanse`.  Gated on
+  `pkg_check_modules(libssl libcrypto)`.
+
+**Peripherals + IPC (Zephyr):**
+
+- **LwRB UART RX ring buffer.**  `alp_uart_rx_ringbuf_*` API:
+  interrupt-driven RX path stages bytes into a caller-supplied
+  ring; consumer drains via `_pop()` without polling.  Gated on
+  `CONFIG_ALP_SDK_UART_RX_RINGBUF`.  First in-tree LwRB consumer;
+  backed by an in-tree stub impl until upstream
+  `MaJerle/lwrb` flips on via the `extras-v04` group.
+- **nanopb mproc IPC framing.**  Placeholder 12-byte envelope
+  (magic / sequence / length) wrapping `alp_mbox_send` payloads
+  under `CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING`.  Replaced by the
+  nanopb-generated codec against `metadata/protos/alp_mproc.proto`
+  when the `extras-v04` group lands upstream nanopb.
+
+**Build-system + override scaffolding:**
+
 - **Per-class `ALP_VENDOR_OVERRIDES_<CLASS>` macros** in
-  `src/common/stub_backend.c` (I2C / SPI / GPIO / UART / MQTT),
-  so each backend can roll out one class at a time.
+  `src/common/stub_backend.c` (I2C / SPI / GPIO / UART / MQTT /
+  AUDIO_IN / AUDIO_OUT / SECURITY / UART_RX_RINGBUF), so each
+  backend rolls out one class at a time.  Default stubs stamp
+  `z_last_error = ALP_ERR_NOSUPPORT` for `alp_last_error()`
+  diagnostics.
 - **west.yml pins for v0.4 SDK-internal libs** (`MaJerle/lwrb@v3.2.0`
   + `nanopb/nanopb@nanopb-0.4.9`) behind a default-disabled
   `extras-v04` group, recorded for audit ahead of the real
   consumers.
 
+**Secure boot + OTA scaffolding:**
+
+- **MCUboot sysbuild profile for AEN-Zephyr.**
+  `sysbuild/aen/sysbuild.conf` configures MCUboot + ECDSA-P256 +
+  `swap-using-scratch`.  Dev-key generator at
+  `keys/generate_dev_key.sh` (idempotent; `chmod 600`).  Full
+  chain-of-trust + key lifecycle in `docs/secure-boot.md`.
+  Live compile-verification gates on the authoritative
+  `alp_e1m_evk_aen` board file landing at
+  `alplabai/alp-zephyr-modules`.
+- **Mender OTA opt-in on meta-alp.**
+  `yocto/meta-alp/conf/distro/include/mender.inc` configures
+  Mender's `mender-full` class with A/B rootfs + storage layout +
+  server/tenant placeholders.  V2N / V2N-M1 / i.MX 93 machine
+  configs gain `require` opt-in hook blocks.  Mender server
+  ownership: see project memory + `docs/ota.md` -- the server
+  itself is a separate-repo product owned outside alp-sdk.
+- **Cross-cutting `docs/ota.md`** covering trust model + Yocto
+  Mender flow + the AEN-Zephyr Mender vs Hawkbit client
+  decision (pending v0.4-final).
+
 ### Still ahead for v0.4
 
-- **Yocto:** `meta-alp` layer, BSPs for V2N + V2N+M1, recipes per ALP
-  module, image templates for vision/audio/IoT product classes.
-- **IoT:** full TCP/UDP/HTTP over Linux network stack, time-series
-  buffering helpers, TLS path (`mqtts://`).
+- **Yocto:** `meta-alp` recipes actually building (currently
+  parse-clean shells); image templates for vision/audio/IoT
+  product classes; full V2N / V2N-M1 / i.MX 93 BSP fleshout.
+- **IoT:** Wi-Fi station on Yocto (NetworkManager / wpa_supplicant
+  glue); HTTP/HTTPS client; time-series buffering helpers.
 - **Camera:** `alp_camera_v4l2` wrapper, GStreamer pipeline helpers.
-- **Audio:** ALSA-backed `alp_audio_*`.
 - **Signal:** ARM Compute Library bindings.
-- **IoT:** OTA helpers (Mender / SWUpdate integration).
-- **Secure boot:** MCUboot pulls in for AEN-Zephyr; signed images
-  with rollback protection.  Signing keys provisioned into the
-  on-module **OPTIGA Trust M** secure element's NVM during
-  factory programming; MCUboot's signature verification routes
-  through MbedTLS PSA -> OPTIGA hardware-accelerator path.
-- **Secure OTA:** signed update payloads delivered over
-  `<alp/iot.h>` MQTT/HTTP, image swap via MCUboot's
-  `swap-using-scratch` mode at next reboot.  On Yocto-on-V2N /
-  i.MX 93 the equivalent is `meta-mender` integration.
-- **Device identity:** OPTIGA Trust M's pre-provisioned ECC key
-  pair becomes the immutable device identity; TLS client
-  certificates derive from it for cloud authentication.
+- **Secure boot:** authoritative `alp_e1m_evk_aen` board file
+  (separate repo) + production OPTIGA Trust M provisioning flow.
+- **Secure OTA on AEN-Zephyr:** Mender Zephyr client vs Hawkbit
+  decision; image-write hook onto MCUboot secondary slot.
+- **Device identity:** OPTIGA Trust M pre-provisioned ECC key pair
+  surfaced via `<alp/security.h>` for TLS client certs.
+- **DEEPX DX-M1 real link:** `dxnn_*` link in
+  `src/yocto/inference_deepx.cpp` (pending DEEPX SDK provenance
+  decision).
+- **Ethos-U65 real attach on i.MX 93:** Vela toolchain integration.
 
 See [`PLAN.md` §2.4.1](PLAN.md) for the full secure boot / OTA
 chain-of-trust design.
