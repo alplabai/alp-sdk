@@ -69,6 +69,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ALP_VENDOR_OVERRIDES_UART=1
         ALP_VENDOR_OVERRIDES_GPIO=1
     )
+    # The GPIO wrapper's IRQ dispatcher runs on a shared pthread; the
+    # other wrappers don't touch pthread today but linking the whole
+    # alp_sdk target keeps consumer link lines simple.
+    find_package(Threads REQUIRED)
+    target_link_libraries(alp_sdk PUBLIC Threads::Threads)
 endif()
 
 if(ALP_SDK_USE_DEEPX_DXM1)

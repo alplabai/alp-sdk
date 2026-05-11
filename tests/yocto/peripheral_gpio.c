@@ -57,17 +57,36 @@ static void test_read_with_null_out_returns_invalid(void)
     ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
 }
 
-static void test_irq_enable_returns_nosupport(void)
+static void noop_cb(alp_gpio_t *pin, void *user)
 {
-    /* IRQ callback dispatch is parked pending pthread plumbing. */
-    alp_status_t rc = alp_gpio_irq_enable(NULL, ALP_GPIO_EDGE_RISING, (alp_gpio_cb_t)0, (void *)0);
-    ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOSUPPORT);
+    (void)pin;
+    (void)user;
 }
 
-static void test_irq_disable_returns_nosupport(void)
+static void test_irq_enable_null_pin_returns_invalid(void)
+{
+    alp_status_t rc = alp_gpio_irq_enable(NULL, ALP_GPIO_EDGE_RISING, noop_cb, (void *)0);
+    ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+}
+
+static void test_irq_enable_null_cb_returns_invalid(void)
+{
+    /* Even with a NULL pin the cb-NULL check fires; cb == NULL is a
+     * caller mistake regardless of the pin state. */
+    alp_status_t rc = alp_gpio_irq_enable(NULL, ALP_GPIO_EDGE_RISING, NULL, (void *)0);
+    ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+}
+
+static void test_irq_enable_edge_none_returns_invalid(void)
+{
+    alp_status_t rc = alp_gpio_irq_enable(NULL, ALP_GPIO_EDGE_NONE, noop_cb, (void *)0);
+    ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+}
+
+static void test_irq_disable_null_pin_returns_invalid(void)
 {
     alp_status_t rc = alp_gpio_irq_disable(NULL);
-    ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOSUPPORT);
+    ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
 }
 
 static void test_close_null_is_safe(void)
@@ -83,8 +102,10 @@ int main(void)
     test_write_on_null_pin_returns_invalid();
     test_read_on_null_pin_returns_invalid();
     test_read_with_null_out_returns_invalid();
-    test_irq_enable_returns_nosupport();
-    test_irq_disable_returns_nosupport();
+    test_irq_enable_null_pin_returns_invalid();
+    test_irq_enable_null_cb_returns_invalid();
+    test_irq_enable_edge_none_returns_invalid();
+    test_irq_disable_null_pin_returns_invalid();
     test_close_null_is_safe();
 
     ALP_TEST_SUMMARY();

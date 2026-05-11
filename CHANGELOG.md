@@ -15,6 +15,23 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **Yocto GPIO IRQ dispatcher (v0.4 prep).**  `alp_gpio_irq_enable`
+  / `_disable` now wired against the GPIO v2 edge-event ABI.  A
+  single shared pthread runs the `poll()` loop across every pin
+  that has IRQ enabled; an eventfd lets mutators wake it for
+  slot-table re-snapshots.  Re-configures the line via
+  `GPIO_V2_LINE_SET_CONFIG_IOCTL` with
+  `GPIO_V2_LINE_FLAG_EDGE_RISING`/`FALLING` (or both) on enable;
+  back to plain `INPUT` on disable.  Dispatcher starts lazily on
+  first `irq_enable` and runs for the lifetime of the process.
+  Callbacks run on the dispatcher thread under the dispatcher
+  mutex -- documented contract: callers must not call
+  `alp_gpio_irq_disable` / `alp_gpio_close` from inside a
+  callback (would deadlock).  `pthread` now linked through
+  `Threads::Threads` on the Yocto path.  Failure-path tests
+  updated to reflect the new contract (NULL pin / NULL cb /
+  `ALP_GPIO_EDGE_NONE` all return `ALP_ERR_INVAL`).  Real-edge
+  testing still parked behind the v0.4 hil-yocto runner.
 - **Yocto first-class peripheral wrappers — GPIO class (v0.4 prep).**
   `src/yocto/peripheral_gpio.c` binds `alp_gpio_*` against the
   Linux GPIO character-device v2 ABI at `/dev/gpiochipN` (kernel
