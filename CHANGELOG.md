@@ -22,6 +22,27 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **Mender OTA wiring on meta-alp (v0.4 prep).**  New opt-in
+  distro include at
+  `yocto/meta-alp/conf/distro/include/mender.inc` configuring
+  Mender's `mender-full` class with the v0.4 reference storage
+  layout (block-device A/B rootfs, 256 MiB per slot by default,
+  32 MiB boot + 256 MiB data).  Machine .conf for `e1m-x-v2n`
+  and `e1m-n93` gain commented opt-in hook blocks; consumers
+  uncomment the `require conf/distro/include/mender.inc` line
+  in their target machine to enable.  `e1m-x-v2n-m1` inherits
+  via `require conf/machine/e1m-x-v2n.conf`.  `meta-mender-core`
+  added to `LAYERRECOMMENDS_alp` -- builds that don't ship OTA
+  drop it cleanly from `bblayers.conf`.  README gains a "OTA
+  via Mender (v0.4 prep)" section with the full enablement
+  walk-through (server / tenant override, artefact paths).
+  New cross-cutting `docs/ota.md` covers the trust model + the
+  Yocto Mender flow + the AEN-Zephyr Mender vs Hawkbit decision
+  pending v0.4-final.  Three `docs/test-plan.md` rows flip from
+  TBD to ⏳ untested with concrete artefact pointers (AEN-Zephyr,
+  V2N-Yocto, i.MX 93-Yocto).  No code changes; scaffolding +
+  documentation only.  HIL roundtrip parked behind `hil-yocto` +
+  the Zephyr-client decision.
 - **MCUboot secure-boot scaffolding for AEN-Zephyr (v0.4 prep).**
   New sysbuild profile at `sysbuild/aen/sysbuild.conf` (MCUboot +
   ECDSA-P256 + swap-using-scratch).  New `keys/` directory with

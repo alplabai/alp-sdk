@@ -145,6 +145,60 @@ MACHINE = "e1m-n93"            # i.MX 93
 # meta-imx + meta-freescale wiring details land alongside the v0.4 N93 bring-up.
 ```
 
+## OTA via Mender (v0.4 prep)
+
+`meta-alp` ships an opt-in Mender integration at
+[`conf/distro/include/mender.inc`](conf/distro/include/mender.inc).
+When enabled, every reference image gains:
+
+- A `.mender` artefact next to the standard `.wic` / `.tar.bz2`
+  outputs.
+- An A/B rootfs partition layout (256 MiB per slot by default).
+- The on-target Mender client + `mender-connect` daemon.
+- Atomic image swap with bootloader-assisted rollback on failed
+  health check.
+
+The integration is **opt-in** -- builds that don't ship OTA can
+ignore it entirely, and `bitbake-layers parse-recipes` stays
+clean without `meta-mender-core` on `bblayers.conf`.
+
+### Enabling Mender on a build
+
+```bash
+# 1. Add meta-mender-core to bblayers.conf:
+git clone -b scarthgap https://github.com/mendersoftware/meta-mender \
+    ../meta-mender
+bitbake-layers add-layer ../meta-mender/meta-mender-core
+
+# 2. Uncomment the `require conf/distro/include/mender.inc` line
+#    in the machine .conf for your target (e1m-x-v2n.conf,
+#    e1m-x-v2n-m1.conf, or e1m-n93.conf), OR add it to local.conf.
+
+# 3. Production fleets: override the server + tenant token in
+#    local.conf BEFORE the first image build:
+echo 'MENDER_SERVER_URL = "https://your-mender-instance"'     >> conf/local.conf
+echo 'MENDER_TENANT_TOKEN = "your-tenant-token"'              >> conf/local.conf
+
+# 4. Build the artefact:
+bitbake core-image-weston
+# Produces:
+#   tmp/deploy/images/${MACHINE}/core-image-weston-${MACHINE}.mender
+#   tmp/deploy/images/${MACHINE}/core-image-weston-${MACHINE}.wic.gz
+```
+
+`flash` the `.wic.gz` for first-boot provisioning; subsequent
+updates ride the `.mender` artefact through the Mender server.
+
+### Status + verification
+
+- Recipe wiring lands in v0.4 prep (this revision).
+- Real artefact generation + on-device install + rollback test
+  parked behind the `hil-yocto` HIL runner per [`ci/HW-IN-LOOP.md`](../../ci/HW-IN-LOOP.md).
+- The Mender-server side (deployment orchestration, fleet
+  monitoring) is out of scope for `meta-alp`; consumers stand
+  up a hosted or self-hosted Mender server independently.
+- Reference rollout: [`docs/ota.md`](../../docs/ota.md).
+
 ## Per-machine inference backend
 
 | Machine          | Default backend | Why                                                 |
