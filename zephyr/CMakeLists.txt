@@ -126,6 +126,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ACT8760
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/act8760/act8760.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_DA9292
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/da9292/da9292.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TPS628640
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tps628640/tps628640.c)
 
 # LwRB: publish the vendor stub headers on the include path so SDK
 # code compiles against <lwrb/lwrb.h> regardless of whether the

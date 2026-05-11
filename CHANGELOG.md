@@ -22,6 +22,24 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **`chips/tps628640/` TI TPS628640 multi-instance buck stub (2026-05-12).**
+  Multi-instance scaffold for the four populated TPS628640 buck
+  regulators on V2N-M1's BRD_I2C bus (`0x48` = 0.85 V VDD0V85_LPDDR
+  DEEPX, `0x44` = 1.05 V DDR5_VDD DEEPX, `0x4F` = 0.5 V DDR5_VDDQ_0V5
+  DEEPX, `0x4D` = 0.6 V LPD4x_0V6 Renesas LPDDR4X V2N-common optional).
+  Driver lands as **stub** because the TI datasheet isn't in the
+  OneDrive datasheet tree yet -- only probe + raw register R/W
+  works; `tps628640_set_voltage_mv` / `_get_voltage_mv` /
+  `_get_status` all return `ALP_ERR_NOSUPPORT`.  Each instance
+  carries its design-target voltage in `ctx->default_voltage_mv`
+  as metadata for higher-level code that wants to enforce safe-
+  operating-window guards once the register map is filled in.
+  Carriers can rely on the chip's factory OTP voltage in the
+  meantime -- the rails self-regulate without host intervention.
+  New Kconfig: `CONFIG_ALP_SDK_CHIP_TPS628640`.  Header:
+  `<alp/chips/tps628640.h>`.  Manifest:
+  `metadata/chips/tps628640.yaml`.
+
 - **`chips/da9292/` Renesas DA9292 secondary PMIC driver (2026-05-12).**
   Full I2C surface for the **Renesas DA9292-AROVx** multi-phase buck
   PMIC populated on V2N + V2N-M1 at 7-bit address `0x1C`.  Strapped

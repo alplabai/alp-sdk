@@ -1,0 +1,35 @@
+# ALP SDK chip manifest: TI TPS628640 single-channel buck (multi-instance).
+schema_version:   1
+chip_id:          tps628640
+driver_status:    stub                # awaiting TI datasheet for VSET reg map
+display_name:     "TI TPS628640 single-channel buck regulator"
+vendor:           texas-instruments
+mpn_population:
+  - "TPS628640BYCGR"                  # WSON package suffix on V2N schematic
+datasheet:
+  primary:        TBD                 # not in OneDrive yet -- maintainer to add
+notes: |
+  The TPS628640 silicon also ships as TPS628641 / TPS628642 with
+  the only difference being the default OTP voltage; the I2C
+  register map is shared across the family.  When the maintainer
+  adds the datasheet, both should be cross-referenced here.
+
+bus:              i2c
+i2c:
+  # Four populated instances on V2N-M1's BRD_I2C; same chip family,
+  # different address straps and different design-target voltages.
+  addresses:
+    - { addr_7bit: 0x48, voltage_mv: 850, rail: "VDD0V85_LPDDR",  scope: "v2n-m1 only (DEEPX LPDDR + DDR core)" }
+    - { addr_7bit: 0x44, voltage_mv: 1050, rail: "DDR5_VDD",       scope: "v2n-m1 only (DEEPX DDR5 VDD L+H)" }
+    - { addr_7bit: 0x4F, voltage_mv: 500, rail: "DDR5_VDDQ_0V5",   scope: "v2n-m1 only (DEEPX DDR5 IO termination)" }
+    - { addr_7bit: 0x4D, voltage_mv: 600, rail: "LPD4x_0V6",       scope: "v2n-common, assembled: optional (Renesas LPDDR4X)" }
+  max_clock_hz:   400000              # FM speed -- TBD, conservative default
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_TPS628640
+  baremetal:      ALP_SDK_CHIP_TPS628640
+  yocto:          n/a                  # Linux uses kernel regulator framework
+
+families:
+  - v2n           # only the 0x4D Renesas-rail instance, when assembled
+  - v2n-m1        # all four instances
