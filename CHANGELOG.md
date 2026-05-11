@@ -22,6 +22,29 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **`chips/rv3028c7/`: multi-source event dispatcher + CLKOUT routing (2026-05-12).**
+  Extends the existing RV-3028-C7 driver from single-alarm-only to
+  the full latched-event surface in the chip's STATUS register
+  (PORF, EVF, AF, TF, UF, BSF, CLKF -- all 7 sources).  New API:
+    - `rv3028c7_register_handler(src, cb, user)` per-source dispatch.
+    - `rv3028c7_dispatch_irq(status_seen)` reads STATUS, invokes
+      registered handlers, write-0-to-clears every fired flag.
+    - `rv3028c7_set_int_enable(src, enable)` masks individual sources
+      in CONTROL_2 (EIE/AIE/TIE/UIE/CLKIE) and EEPROM_BACKUP (BSIE
+      for the backup-switchover source), guarded by the EERD
+      auto-refresh pause + restore protocol.
+    - `rv3028c7_route_clkout(src)` reprograms the CLKOUT pin via
+      EEPROM_CLKOUT (0x35[2:0]) so carriers that wire CLKOUT as a
+      **second physical interrupt line** can route a specific event
+      independent of INT.  Eight CLKOUT sources: 32.768 kHz, 8192 Hz,
+      1024 Hz, 64 Hz, 32 Hz, 1 Hz, periodic-update, low.
+  Reference: Micro Crystal "Multiple Interrupt Lines with
+  RV-3028-C7" application note.  Existing alarm helpers
+  (`rv3028c7_set_alarm`, `rv3028c7_alarm_int_enable`,
+  `rv3028c7_alarm_check_and_clear`) continue to work unchanged --
+  they bypass the dispatcher and operate on the AF status bit
+  directly.  Header: `<alp/chips/rv3028c7.h>`.
+
 - **`chips/tps628640/` TI TPS628640 multi-instance buck stub (2026-05-12).**
   Multi-instance scaffold for the four populated TPS628640 buck
   regulators on V2N-M1's BRD_I2C bus (`0x48` = 0.85 V VDD0V85_LPDDR
