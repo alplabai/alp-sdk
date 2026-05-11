@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-10",
+  "generated": "2026-05-11",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2354,6 +2354,54 @@
       },
       "macros": {},
       "typedefs": {}
+    },
+    "alp/hw_info.h": {
+      "functions": {
+        "alp_hw_info_assert_matches_build": {
+          "hash": "2625963f1210a7d0",
+          "signature": "alp_status_t alp_hw_info_assert_matches_build(const alp_hw_info_t *info, const char *expected_sku, const char *expected_hw_rev);"
+        },
+        "alp_hw_info_read": {
+          "hash": "d02a9525f7e742f6",
+          "signature": "alp_status_t alp_hw_info_read(alp_hw_info_t *out);"
+        }
+      },
+      "macros": {
+        "ALP_HW_INFO_FAMILY_LEN": {
+          "hash": "a8df3a5fed9edd08",
+          "value": "16u"
+        },
+        "ALP_HW_INFO_HW_REV_LEN": {
+          "hash": "c4284e39e7ec6658",
+          "value": "8u"
+        },
+        "ALP_HW_INFO_MAGIC": {
+          "hash": "b3f9e33659dc4575",
+          "value": "0x414C5048u"
+        },
+        "ALP_HW_INFO_SCHEMA_VERSION": {
+          "hash": "23bf5b66e0d20b12",
+          "value": "1u"
+        },
+        "ALP_HW_INFO_SERIAL_LEN": {
+          "hash": "64e93f69d1b757b3",
+          "value": "24u"
+        },
+        "ALP_HW_INFO_SKU_LEN": {
+          "hash": "560d8201b0ff6dc7",
+          "value": "24u"
+        }
+      },
+      "typedefs": {
+        "magic": {
+          "definition": "typedef struct alp_hw_info_eeprom_t { uint32_t magic;",
+          "hash": "eec13f781c17ea74"
+        },
+        "som_mfg_year": {
+          "definition": "typedef struct alp_hw_info_t { char som_family[ALP_HW_INFO_FAMILY_LEN]; char som_sku[ALP_HW_INFO_SKU_LEN]; char som_hw_rev[ALP_HW_INFO_HW_REV_LEN]; char som_serial[ALP_HW_INFO_SERIAL_LEN]; uint16_t som_mfg_year;",
+          "hash": "54dd349bd534f7cf"
+        }
+      }
     },
     "alp/i2s.h": {
       "functions": {
