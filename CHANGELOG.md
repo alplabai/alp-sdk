@@ -20,7 +20,80 @@ that lands before the v0.3.0 tag.)
 > tracked separately in [`docs/test-plan.md`](docs/test-plan.md)
 > -- a release does not tag until every row gating it flips to ✅.
 
+### Added
+
+- **Renesas Ethernet + eMMC + uSD + xSPI NOR-flash pin assignments (2026-05-11).**
+  Maintainer supplied four additional schematic excerpts.  63 new
+  rows added to `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`:
+  - **30 Ethernet rows** — RGMII to two on-module
+    `RTL8211FDI-VD-CG` PHYs (ET0 + ET1).  Each PHY: 15 pins
+    (TX_CTL/CLK + 4× TXD, RX_CTL/CLK + 4× RXD, MDIO/MDC,
+    PHY_INTR).  22 Ω series resistors documented per data line;
+    MDIO/MDC pull-ups to VDD_1V8 via 1 kΩ 1%; layout constraints
+    (single 50 Ω ±10%, GND guard trace on TX/RX clocks; 5 mm
+    length matching on RX_CTL relative to RX_CLK) preserved in
+    the notes column.
+  - **11 eMMC rows** — `SD0CLK` / `SD0CMD` / `SD0DAT0..7` /
+    `SD0RSTN` for the on-module eMMC.  22 Ω series on each line,
+    1 MΩ pull-up to `VDD_eMMC_3V3_1V8`, ±1.27 mm length matching
+    on `eMMC_CLK`.
+  - **6 uSD-card rows** — `SD1CLK` / `SD1CMD` / `SD1DAT0..3` for
+    the on-module microSD card slot.  22 Ω series, 10 kΩ pull-ups
+    to `µSD1_1833V` (1.8 V), ESD protection via `PUSB3FR6Z` (D28).
+  - **16 xSPI rows** — `XSPI0_*` to the on-module xSPI NOR flash
+    (CK ± / CS / 8× IO / DS / ECS / INT / RSTO / RESET).  22 Ω
+    series on CK + IO0..IO3 (x4 data path), 10 kΩ pull-downs on
+    IO4..IO7 + DS, 10 kΩ pull-ups on ECS / INT / RSTO to 0V.
+    Series resistor IDs (R143..R376) preserved in notes for
+    board-engineering cross-reference.
+
+  These pads use **BGA designators** (J26, AC27, AJ18, etc.)
+  rather than port-pin names because they're dedicated-function
+  pads outside the GPIO bank.  The `renesas_pad` column carries
+  either convention depending on the pin -- header comment block
+  documents the dual-convention explicitly.  Three of the new
+  pads happen to start with `P` followed by digits (P24, P25, P29
+  on ET1) -- those are BGA pads, not port pins; the peripheral
+  column makes the distinction unambiguous.
+
+  Renesas peripheral map now totals **146 data rows** (was 83);
+  CSV regenerated.
+
+  Pad-uniqueness check after the additions: **all 146 Renesas pads
+  are unique**.  No collisions introduced by the new rows.
+
 ### Changed
+
+- **Renesas PWM pinout corrected; PWM6/PWM7 added; BRD_I2C master/slave roles clarified (2026-05-11).**
+  Maintainer supplied the authoritative Renesas-side PWM pin list:
+  - E1M PWM0: P36 -> **P64** (peripheral unchanged: GPT13_GTIOC13A)
+  - E1M PWM1: P37 -> **P65** (peripheral unchanged: GPT13_GTIOC13B)
+  - E1M PWM2..PWM5: unchanged (GPT0/GPT4 channels on P70/P71/P74/P75)
+  - E1M PWM6: NEW row, GPT15_GTIOC15A on P36
+  - E1M PWM7: NEW row, GPT15_GTIOC15B on P37
+
+  P36 and P37 stay in use but switch role (was PWM0/PWM1 via
+  GPT13; now PWM6/PWM7 via GPT15).  GPT15 was not previously
+  mapped to a Renesas pad in the saved metadata.
+
+  PWM4's Renesas-side pad (P74) preserved from the prior pinout
+  because the maintainer's correction msg listed
+  `PWM4 = GPT4_GTIOC4A` without an explicit pin.  P74 is adjacent
+  to PWM5's confirmed P75; flagged inline pending re-confirmation.
+
+  v2n/README.md "Cross-chip PWM" section reworked into a
+  per-PWM table showing GD32 + Renesas pad for each of the eight
+  channels.  Design intent recorded: pick **either GD32 or
+  Renesas for all eight PWMs**, not per-channel -- the resistor
+  mod is a SoM-wide source selection.
+
+  Separately: BRD_I2C master/slave roles on the bus clarified.
+  Renesas (RIIC8 on P06/P07) is the **master**; GD32 (PB9/PA15)
+  is a **slave** on the shared bus alongside the RTC, OPTIGA,
+  EEPROM, clock generator, and TMP112.  Captured in both files'
+  notes columns.
+
+  Renesas CSV regenerated (83 data rows, was 81).
 
 - **GD32 pinout — schematic labels dropped; E1M signal names canonical (2026-05-11).**
   Maintainer reviewed the row-numbered CSV and pushed back on
