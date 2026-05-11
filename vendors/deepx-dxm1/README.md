@@ -57,14 +57,29 @@ Two additional repos are useful but not on the runtime path:
 
 ### Yocto integration (V2N-M1)
 
-`meta-alp`'s `e1m-x-v2n-m1.conf` MACHINE config `LAYERRECOMMENDS`
-the Renesas V2N base BSP plus `meta-deepx-m1`.  The
-`meta-deepx-m1` layer ships a kernel-module recipe that compiles
-`dx_rt_npu_linux_driver` against the Renesas V2N kernel and a
-userspace recipe that drops `libdxrt` under `/usr/lib/` and
-headers under `/usr/include/dxnn/`.  Without the kernel module
-the userspace runtime has nothing to talk to -- both halves are
-required for inference to work.
+`meta-alp`'s `conf/layer.conf` `LAYERRECOMMENDS` the Renesas V2N
+base BSP plus `meta-deepx-m1`, and `conf/machine/e1m-x-v2n-m1.conf`
+appends `dx-driver dx-rt` to `IMAGE_INSTALL` so V2N-M1 images
+ship the DEEPX stack by default.
+
+Upstream `meta-deepx-m1` (per its README, scarthgap branch) ships
+two recipes:
+
+| Recipe       | Provides                                                            |
+|--------------|---------------------------------------------------------------------|
+| `dx-driver`  | M1 PCIe kernel module (`dx_rt_npu_linux_driver` source).            |
+| `dx-rt`      | Userspace DXRT inference runtime (`dx_rt` source).                  |
+
+Both must be installed; userspace has no path to the silicon
+without the kernel module.
+
+Adding the layer to a Yocto workspace:
+
+```bash
+git clone -b scarthgap https://github.com/DEEPX-AI/meta-deepx-m1.git \
+    ../meta-deepx-m1
+bitbake-layers add-layer ../meta-deepx-m1
+```
 
 The SDK's CMake locates the installed runtime via the standard
 sysroot search path; no extra `pkg-config` plumbing is needed

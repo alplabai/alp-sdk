@@ -8,10 +8,11 @@
  * path compiles on hosts that do not have the proprietary DEEPX
  * runtime installed.
  *
- * When the real DEEPX runtime is on the include path (typically
- * /usr/include/dxnn/dxnn.h installed by the deepx-dxm1-host-sdk
- * Yocto recipe), that header is picked up instead of this stub --
- * CMake places /usr/include before vendors/deepx-dxm1/include.
+ * When the real DEEPX runtime is on the include path (installed
+ * by the upstream `dx-rt` Yocto recipe from
+ * `https://github.com/DEEPX-AI/meta-deepx-m1`, scarthgap branch),
+ * that header is picked up instead of this stub -- CMake places
+ * the sysroot include path before vendors/deepx-dxm1/include.
  *
  * The names + signatures below mirror the DEEPX public ABI as
  * advertised in the developer portal documentation (DX-M1 host SDK
