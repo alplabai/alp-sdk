@@ -7,8 +7,8 @@
  * one or more BENCH_RUN cases; this file just chains them so the
  * suite runs as a single binary that prints all cases in one pass.
  *
- * v0.3: three suites (peripheral, inference, status).  v1.0
- * extends per-API as implementations land.
+ * v0.3: six suites (status, peripheral, inference, iot, audio,
+ * storage).  v1.0 extends per-API as implementations land.
  */
 
 #include <stdio.h>
@@ -16,6 +16,9 @@
 void bench_peripheral_main(void);
 void bench_inference_main(void);
 void bench_status_main(void);
+void bench_iot_main(void);
+void bench_audio_main(void);
+void bench_storage_main(void);
 
 int  main(void)
 {
@@ -25,6 +28,9 @@ int  main(void)
     bench_status_main();
     bench_peripheral_main();
     bench_inference_main();
+    bench_iot_main();
+    bench_audio_main();
+    bench_storage_main();
 
     return 0;
 }
