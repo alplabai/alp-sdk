@@ -87,15 +87,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # libmosquitto-dev unlocks the iot_yocto.c MQTT wrapper via
-      # pkg_check_modules; libasound2-dev unlocks the audio_yocto.c
-      # ALSA wrapper.  Without these the CMakeLists falls back to
-      # the NOSUPPORT stubs and we'd lose coverage in CI.
+      # libmosquitto-dev unlocks the iot_yocto.c MQTT wrapper;
+      # libasound2-dev unlocks the audio_yocto.c ALSA wrapper;
+      # libssl-dev unlocks the security_yocto.c OpenSSL wrapper.
+      # Without these the CMakeLists falls back to the NOSUPPORT
+      # stubs and we'd lose coverage in CI.
       - name: Install Yocto-side runtime deps
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-              libmosquitto-dev libasound2-dev pkg-config
+              libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure
         run: cmake -B build/yocto -S . -DALP_OS=yocto -DALP_BUILD_TESTS=ON
       - name: Build

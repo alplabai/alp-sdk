@@ -113,4 +113,24 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME alp_test_audio_alsa
                  COMMAND alp_test_audio_alsa)
     endif()
+
+    # Security test compiles only when OpenSSL is on the sysroot;
+    # without it the stubs return NULL and the hash KAT path would
+    # fail.
+    if(PkgConfig_FOUND)
+        pkg_check_modules(OPENSSL_TEST QUIET libssl libcrypto)
+    endif()
+    if(OPENSSL_TEST_FOUND)
+        add_executable(alp_test_security_openssl
+            ${CMAKE_CURRENT_SOURCE_DIR}/security_openssl.c
+        )
+        target_link_libraries(alp_test_security_openssl PRIVATE alp::sdk)
+        target_include_directories(alp_test_security_openssl PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        target_compile_features(alp_test_security_openssl PRIVATE c_std_99)
+
+        add_test(NAME alp_test_security_openssl
+                 COMMAND alp_test_security_openssl)
+    endif()
 endif()

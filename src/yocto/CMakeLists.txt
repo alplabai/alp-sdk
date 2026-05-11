@@ -98,6 +98,28 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 "(Debian/Ubuntu) or the matching Yocto recipe to enable.")
         endif()
 
+        # OpenSSL backs the Yocto-side <alp/security.h> impl.
+        # libmosquitto already links against OpenSSL on a stock Yocto
+        # image so re-using it here keeps the trust runtime + CA
+        # bundle + entropy source shared between TLS and app-side
+        # crypto.  Absent libssl/libcrypto on the sysroot we fall
+        # through to the NOSUPPORT stubs.
+        pkg_check_modules(OPENSSL IMPORTED_TARGET libssl libcrypto)
+        if(OPENSSL_FOUND)
+            target_sources(alp_sdk PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/security_yocto.c
+            )
+            target_compile_definitions(alp_sdk PRIVATE
+                ALP_VENDOR_OVERRIDES_SECURITY=1
+            )
+            target_link_libraries(alp_sdk PUBLIC PkgConfig::OPENSSL)
+        else()
+            message(STATUS
+                "alp-sdk yocto: OpenSSL (libssl + libcrypto) not found via pkg-config; "
+                "alp_hash_* / alp_aead_* / alp_random_bytes stay NOSUPPORT.  Install "
+                "libssl-dev (Debian/Ubuntu) or the matching Yocto recipe to enable.")
+        endif()
+
         # Audio via ALSA libasound -- same opt-in pattern as MQTT.  The
         # canonical Debian/Ubuntu package is libasound2-dev; Yocto
         # sysroots get it via the alsa-lib recipe in meta-openembedded.

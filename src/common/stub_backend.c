@@ -800,9 +800,11 @@ alp_status_t alp_ble_gatt_write(alp_ble_conn_t *c, alp_ble_attr_handle_t h, cons
     return ALP_ERR_NOSUPPORT;
 }
 
+#if !defined(ALP_VENDOR_OVERRIDES_SECURITY)
 alp_hash_t *alp_hash_open(alp_hash_alg_t a)
 {
     (void)a;
+    z_last_error = ALP_ERR_NOSUPPORT;
     return NULL;
 }
 alp_status_t alp_hash_update(alp_hash_t *h, const uint8_t *d, size_t l)
@@ -817,7 +819,7 @@ alp_status_t alp_hash_finish(alp_hash_t *h, uint8_t *o, size_t cap, size_t *ol)
     (void)h;
     (void)o;
     (void)cap;
-    (void)ol;
+    if (ol != NULL) *ol = 0;
     return ALP_ERR_NOSUPPORT;
 }
 void alp_hash_close(alp_hash_t *h)
@@ -829,6 +831,7 @@ alp_aead_t *alp_aead_open(alp_aead_alg_t a, const uint8_t *k, size_t kl)
     (void)a;
     (void)k;
     (void)kl;
+    z_last_error = ALP_ERR_NOSUPPORT;
     return NULL;
 }
 alp_status_t alp_aead_encrypt(alp_aead_t *a, const uint8_t *iv, size_t il, const uint8_t *aad,
@@ -873,6 +876,7 @@ alp_status_t alp_random_bytes(uint8_t *o, size_t l)
     (void)l;
     return ALP_ERR_NOSUPPORT;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_SECURITY */
 
 alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg)
 {

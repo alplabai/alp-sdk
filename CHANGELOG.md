@@ -22,6 +22,27 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **Yocto `<alp/security.h>` backend via OpenSSL.**  New
+  `src/yocto/security_yocto.c` binds the full `<alp/security.h>`
+  surface (`alp_hash_*` for SHA-256/384/512, `alp_aead_*` for
+  AES-128-GCM / AES-256-GCM / ChaCha20-Poly1305, `alp_random_bytes`)
+  against OpenSSL's `EVP_*` API.  OpenSSL is the same TLS runtime
+  libmosquitto links against on a stock Yocto image, so the two
+  paths share entropy + CA bundle + algorithm implementation.
+  Pulled in via `pkg_check_modules(libssl libcrypto)`; absent
+  OpenSSL on the sysroot the backend falls through to the
+  NOSUPPORT stubs in `src/common/stub_backend.c` (now gated by a
+  new `ALP_VENDOR_OVERRIDES_SECURITY` macro alongside
+  `_AUDIO_IN` / `_AUDIO_OUT`).  Tag-mismatch on decrypt is mapped
+  to `ALP_ERR_IO` per the header contract.  AEAD key material
+  cleared via `OPENSSL_cleanse` on close.  Coverage at
+  `tests/yocto/security_openssl.c` (16 tests including a
+  SHA-256 KAT against the NIST `"abc"` vector, full AEAD
+  round-trip on AES-128-GCM + ChaCha20-Poly1305, tag-mismatch
+  detection, key-length / NULL-key / unsupported-alg refusals,
+  TRNG fill + null-arg).  `pr-plain-cmake` runner gains
+  `libssl-dev` in the install step.  Marked 🟡 partial pending
+  meta-alp's real Yocto image build.
 - **Yocto audio backend via ALSA libasound.**  New
   `src/yocto/audio_yocto.c` binds the full `<alp/audio.h>` surface
   (`alp_audio_in_*` + `alp_audio_out_*`) against ALSA's `snd_pcm_*`
