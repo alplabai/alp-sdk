@@ -14,13 +14,17 @@ on:
     branches: [main]
     paths:
       - 'metadata/**'
+      - 'examples/**/board.yaml'
       - '.github/workflows/pr-metadata-validate.yml'
       - 'scripts/validate_metadata.py'
+      - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
   push:
     branches: [main]
     paths:
       - 'metadata/**'
+      - 'examples/**/board.yaml'
+      - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
   workflow_dispatch:
 
@@ -77,3 +81,21 @@ jobs:
           test -s /tmp/alp-yocto.conf
           echo "--- generated yocto-conf ---"
           cat /tmp/alp-yocto.conf
+
+      # Customer-side linter -- exercises the same schema +
+      # preset checks an app author would run before pushing.
+      # Covers both the canonical template and every example
+      # board.yaml in tree, so a broken example fails CI here
+      # rather than at twister time.
+      - name: Validate canonical template board.yaml
+        run: |
+          python3 scripts/validate_board_yaml.py \
+              --input metadata/templates/board.yaml.example
+
+      - name: Validate every examples/*/board.yaml
+        run: |
+          set -e
+          for f in $(find examples -name board.yaml); do
+              echo "--- $f ---"
+              python3 scripts/validate_board_yaml.py --input "$f"
+          done
