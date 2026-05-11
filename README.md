@@ -91,6 +91,22 @@ until its gating rows flip to ✅.
 - Per-(library × OS × SoM) status: [`docs/os-support-matrix.md`](docs/os-support-matrix.md).
 - Architecture decisions: [`docs/adr/`](docs/adr/).
 
+## Test it from scratch
+
+```bash
+git clone https://github.com/alplabai/alp-sdk
+cd alp-sdk
+bash scripts/bootstrap.sh                    # west workspace + Python + apt hints
+export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
+bash scripts/test-all.sh                     # Yocto ctest + twister + format + Doxygen
+```
+
+A green run proves every `<alp/...>` surface compiles + links + passes
+its failure-path tests across both Yocto and Zephyr backends.  Full
+coverage map: [`docs/testing.md`](docs/testing.md).  Real-hardware
+verification (`⏳`/`🟡`/`✅` rows) lives in
+[`docs/test-plan.md`](docs/test-plan.md).
+
 ## The stack
 
 ### AI framework (on-device)

@@ -22,6 +22,19 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **From-scratch verifiability surface.**  Three artefacts answer
+  "how do I prove everything works from a fresh clone":
+  `scripts/bootstrap.sh` (one-time setup -- creates the Zephyr
+  workspace, installs Python deps, prints apt/brew commands for
+  the optional native libs), `scripts/test-all.sh` (single-command
+  local verifier covering Yocto ctest + baremetal build + Zephyr
+  twister + clang-format diff + metadata validate + Doxygen
+  zero-warnings; with `--quick`, `--yocto-only`, `--zephyr-only`,
+  `--no-clean` flags), and `docs/testing.md` (full coverage map
+  per `<alp/...>` header, CI ↔ local correspondence table,
+  per-feature verification policy).  README gains a "Test it from
+  scratch" section pointing at the new flow.  No SDK code touched;
+  documentation + tooling only.
 - **Yocto `<alp/security.h>` backend via OpenSSL.**  New
   `src/yocto/security_yocto.c` binds the full `<alp/security.h>`
   surface (`alp_hash_*` for SHA-256/384/512, `alp_aead_*` for
