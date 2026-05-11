@@ -68,13 +68,19 @@
     "junction": [-40, 105]
   },
   "packages": ["FCBGA 11 mm × 11 mm 0.5 mm pitch", "FCBGA 13 mm × 13 mm 0.5 mm pitch"],
-  "variants": [],
+  "variants": [
+    {
+      "order_code": "MIMX9352xxxxM",
+      "part_number_root": "i.MX 9352",
+      "notes": "Confirmed 2026-05-11 from the design-files inventory (`MIMX9352xxxxM.mex` in the i.MX 93 OneDrive design-doc folder).  Full order-code suffix (package + temperature + qualification) still pending the user-supplied exact HW config writeup -- the `xxxx` placeholder reflects that.",
+      "alp_module_skus": ["E1M-NX9101"]
+    }
+  ],
   "notes": [
-    "STUB — values committed are those well-published on NXP's i.MX 93 product page and in the IMX93HDG; per-variant peripheral counts and the orderable SKU list are pending the user-supplied exact hardware configuration.",
-    "i.MX 93 has *no GPU* — that's a deliberate split with i.MX 95.  Display path is LCDIF + MIPI DSI (no 2D GPU acceleration).",
-    "Companion silicon on the ALP Lab E1M-i.MX93 SoM (per the OneDrive datasheet folder): NXP PCA9451A PMIC; Murata Type 2DL / 2EL / 2KL / 2LL Wi-Fi 6 + BLE 5.x combo (variant TBD); IW610 Wi-Fi 6 module — confirm which combo ships on which SKU when the user writes the exact HW config.",
-    "Reference docs available locally: IMX93HDG.pdf (Hardware Design Guide, 42 p), IMX93RM.pdf (Reference Manual Rev. 6, 5593 p), AN14413.pdf (PCA9451A PMIC application note).",
-    "Peripheral counts (`peripherals: {}`) intentionally empty — the v1 schema accepts that.  Fill in once the user confirms which i.MX 93 SKU the E1M-i.MX93 SoM is built around (i.MX 9301 / 9302 / 9311 / 9312 / 9352).",
-    "Orderable variants list (`variants: []`) intentionally empty — same reason."
+    "Orderable variant resolved to **i.MX 9352** (2026-05-11) per the design-doc inventory; the full order-code suffix (package code + temperature grade + qualification) is still pending the HW-config writeup.  i.MX 9352 is the top-of-line i.MX 93 SKU: dual A55 @ 1.7 GHz + M33 @ 250 MHz + Ethos-U65, no GPU.",
+    "Per-peripheral counts (`peripherals: {}`) intentionally still empty -- ingestion against IMX93RM.pdf has not yet run.  The RM is 5593 pages so this is a separate dedicated pass.",
+    "i.MX 93 has *no GPU* -- that's a deliberate split with i.MX 95.  Display path is LCDIF + MIPI DSI (no 2D GPU acceleration).",
+    "Companion silicon on the ALP Lab E1M-i.MX93 SoM (per the OneDrive datasheet folder): NXP PCA9451A PMIC; Murata Type 2DL / 2EL / 2KL / 2LL Wi-Fi 6 + BLE 5.x combo (variant TBD); IW610 Wi-Fi 6 module -- confirm which combo ships on which SKU when the user writes the exact HW config.",
+    "Reference docs available locally: IMX93HDG.pdf (Hardware Design Guide, 42 p), IMX93RM.pdf (Reference Manual Rev. 6, 5593 p), AN14413.pdf (PCA9451A PMIC application note).  All cross-referenced in the `datasheet.source` field above."
   ]
 }

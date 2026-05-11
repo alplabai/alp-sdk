@@ -22,6 +22,49 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **GD32G553 companion IO MCU pinout for V2N + V2N-M1.**
+  `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv` — authoritative
+  pinout for the GigaDevice GD32G553MEY7TR that sits next to the
+  RZ/V2N as a companion.  Covers encoder capture (ENC0..3 X/Y on
+  TIMERs 1-4), extra PWM fan-out (PWM3..7 on TIMER7), the bulk of
+  the ADC bank (ADC0..7), DAC0/1, the four camera-enable LDOs,
+  the Murata LBEE5HY2FY-922 BT_REG_ON / WL_REG_ON, the OPTIGA
+  Trust M reset, the SPI1 slave interface to Renesas, BRD_I2C
+  (shared with Renesas), GD_I2C2 to V2N, plus 17 general-purpose
+  GPIO routes to the E1M edge IO bank (IO8..IO35).  v2n/README.md
+  gets a new "The two-chip pin story" section explaining the
+  Renesas-vs-GD32 split.  V2N-M1 inherits this file unchanged
+  (GD32's role doesn't depend on whether DEEPX is populated).
+- **Alif Ensemble metadata refresh against new datasheets + HWRMs.**
+  Datasheet inventory landed in the OneDrive design folder for
+  the AEN family on 2026-05-11 (E3 v2.8 already on file; E4 v1.0
+  new; E6 v1.0 new; E7 v2.9 already; E8 v1.0 supersedes v0.51
+  preliminary; confidential HWRMs v0.3 for E4/E6/E8; public HWRMs
+  for E3 v2.5 + E7 v2.6; errata AERR0012 v2.0 covering E4/E6/E8
+  jointly).  Metadata updates:
+  - **`e4.json`, `e6.json`, `e8.json`** flip from
+    `status: "preliminary"` to `"released"`.  E4 and E6 drop the
+    `pending_alif_datasheet: true` flag; E8 supersedes the v0.51
+    `datasheet` block with v1.0.  Per-peripheral counts intentionally
+    NOT re-ingested in this pass -- re-ingestion against v1.0 is
+    tracked as a separate v0.4 task.
+  - **All five files with HWRMs** (E3, E4, E6, E7, E8) gain a new
+    `hwrm` block alongside `datasheet`, with `confidential: true`
+    on E4/E6/E8 so the HWRM files stay out of git.
+  - **E4 / E6 / E8** gain a new `errata` block pointing at
+    AERR0012 v2.0 with an empty `items: []` list pending
+    per-item ingest.
+  - **`e5.json`** stays preliminary -- E5 alone has no Alif
+    datasheet yet.  Notes refreshed to clarify that the
+    other five E-class parts are now released.
+- **i.MX 93 orderable variant resolved to i.MX 9352** in
+  `metadata/socs/nxp/imx9/imx93.json`.  The empty `variants: []`
+  list gains a single entry `MIMX9352xxxxM` (the four-character
+  placeholder reflects that the full order-code suffix -- package
+  + temperature + qualification -- is still pending the HW-config
+  writeup).  Per-peripheral counts still empty pending a dedicated
+  ingest pass against IMX93RM.pdf (5593 pages).  `PLAN.md §6`
+  items 6 and 7 updated to reflect partial closure.
 - **Authoritative V2N + V2N-M1 Renesas-side peripheral pinout.**
   The alp-sdk maintainer provided the canonical RZ/V2N pin
   assignments for the E1M-X V2N family on 2026-05-11.  Saved as:

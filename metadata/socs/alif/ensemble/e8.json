@@ -4,13 +4,26 @@
   "vendor": "Alif Semiconductor",
   "family": "Ensemble",
   "part": "E8",
-  "status": "preliminary",
+  "status": "released",
   "datasheet": {
-    "version": "0.51",
-    "extracted_at": "2026-05-09",
-    "source": "Alif E8 Datasheet 0.51.pdf",
+    "version": "1.0",
+    "extracted_at": "2026-05-11",
+    "source": "Alif_E8_Datasheet_v1.0.pdf",
     "doc_id": "ADTS0013"
   },
+  "hwrm": {
+    "version": "0.3",
+    "source": "Confidential-Alif_E8_HWRM_v0.3.pdf",
+    "confidential": true
+  },
+  "errata": [
+    {
+      "version": "2.0",
+      "source": "AERR0012-Ensemble-E4-E6-E8-Errata-v2.0.pdf",
+      "doc_id": "AERR0012",
+      "items": []
+    }
+  ],
   "cores": [
     {
       "type": "cortex-a32",
@@ -172,10 +185,11 @@
     }
   ],
   "notes": [
-    "Datasheet: 196 pages, ADTS0013 v0.51 June 2025 — marked 'Preliminary Information, Subject to Change' / 'Alif Semiconductor Confidential, Do Not Distribute'.",
-    "v0.51 is a pre-release datasheet; reconcile against the eventual v1.0 release before production.",
+    "Datasheet v1.0 released (Alif_E8_Datasheet_v1.0.pdf, ADTS0013, 2026-05-11) -- supersedes the prior v0.51 pre-release reference.  Peripheral counts above were ingested against v0.51 and remain provisional; reconcile against v1.0 in the next dedicated re-ingest pass.",
+    "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git.",
+    "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
     "E8 adds 1× Ethos-U85 NPU (Generative AI, supports Transformers) on top of the E7 NPU pair.",
-    "E8 swaps OctalSPI for HexSPI (16-bit, 400 MB/s SDR / 800 MB/s DDR) — a different external-memory protocol than E3/E7.",
+    "E8 swaps OctalSPI for HexSPI (16-bit, 400 MB/s SDR / 800 MB/s DDR) -- a different external-memory protocol than E3/E7.",
     "E8 ships an ISP and JPEG encoder (E3/E7 do not).",
     "WLCSP216 package exposes 136× 1.8-V GPIOs; FBGA194 exposes 120 (note: 'GPIO[0-14]' subset on FBGA per datasheet table 7-1).",
     "AE822FA0E5597LS0 is the variant ALP Lab uses on the E1M-AEN801 module SKU."

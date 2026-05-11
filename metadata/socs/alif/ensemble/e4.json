@@ -4,12 +4,25 @@
   "vendor": "Alif Semiconductor",
   "family": "Ensemble",
   "part": "E4",
-  "status": "preliminary",
-  "pending_alif_datasheet": true,
+  "status": "released",
   "datasheet": {
-    "extracted_at": "2026-05-09",
-    "source": "Alp Lab E1M-AEN - Datasheet Draft.pdf (Table 1, Table 11) — Alif primary datasheet not yet on file"
+    "version": "1.0",
+    "extracted_at": "2026-05-11",
+    "source": "Alif_E4_Datasheet_v1.0.pdf"
   },
+  "hwrm": {
+    "version": "0.3",
+    "source": "Confidential-Alif_E4_HWRM_v0.3.pdf",
+    "confidential": true
+  },
+  "errata": [
+    {
+      "version": "2.0",
+      "source": "AERR0012-Ensemble-E4-E6-E8-Errata-v2.0.pdf",
+      "doc_id": "AERR0012",
+      "items": []
+    }
+  ],
   "cores": [
     {
       "type": "cortex-m55",
@@ -91,9 +104,10 @@
     }
   ],
   "notes": [
-    "STUB — derived from ALP Lab E1M-AEN datasheet draft (Table 1: '2× M55, no A32, 2× U55 + 1× U85, ISP/JPEG, 5.5MB MRAM, up to 9.75MB SRAM, 2× OSPI'; Table 11: AEN401 → AE402FA0E5597LE0).",
-    "E4 silicon datasheet from Alif is not yet on file; replace this stub when ADTS00xx for E4 is published.",
-    "Topology assumed identical to E8 minus the 2× Cortex-A32 cores. Peripheral counts left empty until the Alif datasheet confirms — do not fall back to E8's counts blindly: E8 ships HexSPI, E4 ships OctalSPI per ALP module table, so the IO mix differs.",
+    "Datasheet v1.0 released (Alif_E4_Datasheet_v1.0.pdf, 2026-05-11).  Peripheral counts (`peripherals: {}`) intentionally still empty -- the v1.0 datasheet ships but the SDK's per-peripheral count ingest hasn't run against it yet; do NOT fall back to E8's counts blindly because E8 ships HexSPI while E4 ships OctalSPI per the ALP module table, so the IO mix differs.  Re-ingest tracked separately.",
+    "Topology: 2× M55 (no A32), 2× U55 + 1× U85, ISP/JPEG, 5.5 MB MRAM, up to 9.75 MB SRAM, 2× OSPI.  Confirmed by the v1.0 datasheet.",
+    "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git (the `confidential: true` flag on the hwrm block makes that explicit).",
+    "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
     "Order code AE402FA0E5597LE0 backs the E1M-AEN401 module SKU."
   ]
 }

@@ -321,12 +321,21 @@ that remain open take priority for the upcoming releases.
 5. ~~**`<alp/mproc.h>`** — declared in `VERSIONS.md` for v0.3.~~
    **Surface closed:** shared-memory + mailbox + hwsem primitives
    declared; OpenAMP RPC + dual-core orchestration pending v0.3.
-6. **i.MX 93 datasheet ingest** — peripheral counts and orderable
-   variants are TBD.  Lands when the user supplies the exact HW
-   config (per the project memory note).
-7. **Alif E4 / E5 / E6 datasheets** — the three preliminary stubs
-   in `metadata/socs/alif/ensemble/` get upgraded to released when
-   Alif publishes those datasheets.
+6. **i.MX 93 datasheet ingest** — partially resolved 2026-05-11:
+   the orderable variant is now pinned to **i.MX 9352** (per the
+   design-files inventory in
+   `metadata/socs/nxp/imx9/imx93.json::variants`).  Per-peripheral
+   counts (`peripherals: {}`) still pending a dedicated re-ingest
+   pass against IMX93RM.pdf (5593 pages, separate session).
+7. ~~**Alif E4 / E5 / E6 datasheets**~~ — partially closed
+   2026-05-11.  E4, E6, **and E8** (the latter was already a
+   preliminary v0.51 stub) all flipped to `status: released` against
+   their v1.0 datasheets; HWRM references added for E3 (v2.5), E7
+   (v2.6), E4 / E6 / E8 (confidential v0.3); errata block added for
+   E4 / E6 / E8 (AERR0012 v2.0; per-item ingest pending).  **E5
+   alone remains pending** — its datasheet has not been published.
+   Re-ingest of per-peripheral counts against the now-authoritative
+   v1.0 datasheets + the HWRMs is tracked as a separate v0.4 task.
 8. **Authoritative Zephyr board files** — `alp_e1m_evk_aen` and
    `alp_e1m_evk_v2n` board files live in
    [`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)

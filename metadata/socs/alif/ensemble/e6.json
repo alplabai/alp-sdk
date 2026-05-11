@@ -4,12 +4,25 @@
   "vendor": "Alif Semiconductor",
   "family": "Ensemble",
   "part": "E6",
-  "status": "preliminary",
-  "pending_alif_datasheet": true,
+  "status": "released",
   "datasheet": {
-    "extracted_at": "2026-05-09",
-    "source": "Alp Lab E1M-AEN - Datasheet Draft.pdf (Table 1, Table 11) — Alif primary datasheet not yet on file"
+    "version": "1.0",
+    "extracted_at": "2026-05-11",
+    "source": "Alif_E6_Datasheet_v1.0.pdf"
   },
+  "hwrm": {
+    "version": "0.3",
+    "source": "Confidential-Alif_E6_HWRM_v0.3.pdf",
+    "confidential": true
+  },
+  "errata": [
+    {
+      "version": "2.0",
+      "source": "AERR0012-Ensemble-E4-E6-E8-Errata-v2.0.pdf",
+      "doc_id": "AERR0012",
+      "items": []
+    }
+  ],
   "cores": [
     {
       "type": "cortex-a32",
@@ -104,11 +117,10 @@
     }
   ],
   "notes": [
-    "STUB — derived from ALP Lab E1M-AEN datasheet draft (Table 1: '2× M55, 1× A32 800 MHz, 2× U55 + 1× U85, ISP/JPEG, 5.5MB MRAM, up to 9.75MB SRAM, 2× OSPI'; Table 11: AEN601 → AE612FA0E5597LS0).",
-    "E6 silicon datasheet from Alif is not yet on file; replace this stub when ADTS00xx for E6 is published.",
-    "Topology assumed identical to E8 with one of the two Cortex-A32 cores depopulated.",
-    "External-memory interface set per ALP module table (OctalSPI ×2). Note this differs from E8 which uses HexSPI — confirm with Alif datasheet when available.",
-    "Peripheral counts left empty until the Alif datasheet confirms.",
+    "Datasheet v1.0 released (Alif_E6_Datasheet_v1.0.pdf, 2026-05-11).  Peripheral counts (`peripherals: {}`) intentionally still empty -- per-peripheral count ingest against the v1.0 datasheet hasn't run yet; re-ingest tracked separately.",
+    "Topology: 1× A32 (800 MHz) + 2× M55 (HP+HE) + 2× U55 + 1× U85, ISP/JPEG, 5.5 MB MRAM, up to 9.75 MB SRAM, 2× OctalSPI.  Confirmed by the v1.0 datasheet.  External-memory interface stays OctalSPI ×2 (E8 uses HexSPI instead -- the IO mix legitimately differs).",
+    "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git.",
+    "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
     "Order code AE612FA0E5597LS0 backs the E1M-AEN601 module SKU."
   ]
 }

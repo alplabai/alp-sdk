@@ -11,6 +11,11 @@
     "source": "Alif_E3_Datasheet_v2.8.pdf",
     "doc_id": "ADTS0007"
   },
+  "hwrm": {
+    "version": "2.5",
+    "source": "Alif_E3_HWRM_v2.5.pdf",
+    "confidential": false
+  },
   "cores": [
     {
       "type": "cortex-m55",
