@@ -9,6 +9,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- `src/common/alp_internal.h` -- cross-backend internal header
+  declaring `alp_internal_set_last_error(s)`.  Lets non-Zephyr
+  backend source files (the yocto inference dispatcher today,
+  more sites in v0.4) stamp the same process-wide last-error
+  slot that `alp_last_error()` reads, instead of carrying
+  per-file shadow statics.  Closes the TODO(v0.4) comment in
+  `src/yocto/inference_yocto.c`.  Zephyr keeps its own
+  thread-local last-error in `src/zephyr/last_error.c`; the new
+  header is irrelevant there.
 - `vendors/renesas-rzv2n/rzv_drp-ai_tvm/README.md` -- integration
   anchor for **RUHMI** (formerly "DRP-AI TVM"), Renesas's
   Apache-2.0 host-side model compiler at

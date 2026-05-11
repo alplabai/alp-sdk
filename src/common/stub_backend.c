@@ -41,24 +41,34 @@
 #include "alp/storage.h"
 #include "alp/usb.h"
 
+#include "alp_internal.h"
+
 /* ------------------------------------------------------------------ */
 /* alp_last_error — single-global fallback (no TLS on baremetal).      */
+/*                                                                      */
+/* Owns the process-wide last-error slot.  Cross-TU writers go through  */
+/* alp_internal_set_last_error (declared in alp_internal.h); local      */
+/* writers in this file write z_last_error directly for brevity.       */
 /* ------------------------------------------------------------------ */
 
-#if !defined(ALP_VENDOR_OVERRIDES_PERIPHERAL)
 static alp_status_t z_last_error;
 
-alp_status_t        alp_last_error(void)
+#if !defined(ALP_VENDOR_OVERRIDES_PERIPHERAL)
+alp_status_t alp_last_error(void)
 {
     return z_last_error;
 }
-#else
-/* Vendor wrapper provides its own alp_last_error -- we still need a
- * `z_last_error` symbol for the non-peripheral stubs in this file
- * (camera, audio, ble, ...) to write into.  Make ours static so it
- * doesn't collide with the vendor's. */
-static alp_status_t z_last_error;
 #endif
+/* When ALP_VENDOR_OVERRIDES_PERIPHERAL=1 the vendor wrapper provides
+ * its own alp_last_error reader against a vendor-side static; we
+ * keep z_last_error around for the non-peripheral stubs in this
+ * file to write into, but reads from it aren't reachable through
+ * the public API in that configuration. */
+
+void alp_internal_set_last_error(alp_status_t s)
+{
+    z_last_error = s;
+}
 
 /* ------------------------------------------------------------------ */
 /* I2C / SPI / GPIO / UART (peripheral.h)                              */

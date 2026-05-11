@@ -46,6 +46,8 @@
 
 #include "alp/inference.h"
 
+#include "alp_internal.h"
+
 #ifndef ALP_SDK_MAX_INFERENCE_HANDLES
 #define ALP_SDK_MAX_INFERENCE_HANDLES 2
 #endif
@@ -128,14 +130,12 @@ static alp_inference_backend_t resolve_auto(void)
 /* ------------------------------------------------------------------ */
 /* Last-error stamping                                                 */
 /*                                                                     */
-/* TODO(v0.4): unify with stub_backend.c's static so alp_last_error() */
-/* reads the same slot whether the failure came from a peripheral     */
-/* stub or the inference dispatcher.  v0.3 keeps these separate to    */
-/* avoid churning ~20 stub_backend.c writers in the dispatcher commit; */
-/* the v0.4 last-error refactor will introduce src/common/last_error.c. */
-/* In the meantime alp_last_error() returns whatever the most-recent   */
-/* peripheral stub wrote, which is still useful in practice (a typical */
-/* failure cascade goes through the peripheral layer first).           */
+/* The dispatcher calls alp_internal_set_last_error (declared in       */
+/* src/common/alp_internal.h) so failures here are visible through the */
+/* public alp_last_error() reader -- the same slot the peripheral      */
+/* stubs in stub_backend.c write to.  Cross-TU correlation works in    */
+/* non-vendor-override builds (the yocto path doesn't set              */
+/* ALP_VENDOR_OVERRIDES_PERIPHERAL, so this just works).               */
 /* ------------------------------------------------------------------ */
 
 /* ================================================================== */
@@ -145,6 +145,7 @@ static alp_inference_backend_t resolve_auto(void)
 alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 {
     if (cfg == NULL || cfg->model_data == NULL || cfg->model_size == 0) {
+        alp_internal_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
 
@@ -155,12 +156,14 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
             /* Nothing compiled in.  Honour the v0.1 contract: surface
              * is shipped so apps link cleanly; the runtime answer is
              * NOSUPPORT until a backend lands. */
+            alp_internal_set_last_error(ALP_ERR_NOSUPPORT);
             return NULL;
         }
     }
 
     struct alp_inference *h = pool_acquire();
     if (h == NULL) {
+        alp_internal_set_last_error(ALP_ERR_NOMEM);
         return NULL;
     }
     h->backend      = backend;
@@ -178,6 +181,7 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
     }
 
     if (rc != ALP_OK) {
+        alp_internal_set_last_error(rc);
         pool_release(h);
         return NULL;
     }
