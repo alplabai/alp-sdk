@@ -10,6 +10,55 @@ This document is the design + reference; if you just want to copy
 a template and start, see
 [`metadata/templates/alp.yaml`](../metadata/templates/alp.yaml).
 
+## Single source of truth
+
+`alp.yaml` is the **only** place to configure the firmware.  Every
+other config artefact -- `prj.conf` (Zephyr), CMake `-D` args (plain
+CMake), `local.conf` + `MACHINE` (Yocto) -- is **derived** from it
+by `scripts/alp_project.py`.
+
+Concretely:
+
+- **Don't edit `prj.conf` directly.**  The minimum-correct
+  `prj.conf` in a v0.3 alp-sdk app contains exactly one non-empty
+  line: `rsource "build/generated/alp.conf"`.  Everything else
+  flows from `alp.yaml` -> `alp.conf` via the loader.
+- **Don't pass extra `-D` flags to `cmake` for SDK options.**  The
+  loader emits the right set; passing extra flags risks divergence
+  from the declared config.
+- **Don't hand-edit `local.conf`'s `MACHINE` / `IMAGE_INSTALL`.**
+  Generate them via `--emit yocto-conf` and require the result.
+
+If you find yourself reaching for a hand-edit because `alp.yaml`
+can't express what you want, file an issue -- the right fix is to
+extend the schema, not to bypass it.
+
+### Today's gaps (v0.3 -> v0.4)
+
+`alp.yaml` covers the SoM + carrier + OS backend + inference + IoT
+features + optional libraries today.  Three remaining gaps where
+hand-written config still leaks in, all targeted for v0.4:
+
+1. **DTS overlays for carrier wiring.**  Per-pad GPIO / pin-array
+   assignments still live in a hand-written `.overlay` file
+   alongside `prj.conf`.  v0.4 lands a loader DTS-emission path
+   that resolves carrier wiring from
+   `include/alp/boards/<carrier>.h` automatically.
+2. **`west.yml` module list.**  Optional libraries declared in
+   `alp.yaml`'s `libraries:` list don't yet auto-pin into the
+   workspace's `west.yml`.  v0.4 lands either a generator or a
+   `west alp-update` extension command.
+3. **Per-test `prj.conf` in `tests/zephyr/<area>/`.**  The
+   in-repo test infrastructure still uses hand-written
+   `prj.conf` files.  These are SDK-internal (not consumer-
+   facing) and stay as-is until the loader handles test-style
+   configs in v0.4.
+
+For v0.3, consumers writing apps from scratch should still use
+`alp.yaml` as the canonical config and treat the three gaps as
+short-term hand-overrides.  The migration path to the v0.4 single-
+source-of-truth model is purely additive on top of v0.3's schema.
+
 ## Why one file
 
 Pre-`alp.yaml` the user had to track configuration across:

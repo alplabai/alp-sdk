@@ -258,15 +258,15 @@ Key tasks (Command Palette → **Tasks: Run Task**):
 
 ## 10. Where to go next
 
-- **Project configuration** (one file, all knobs):
-  [`docs/project-config.md`](project-config.md) -- defines the
-  `alp.yaml` model that declares which SoM SKU your firmware
-  targets, per-component assembly overrides (DNI'd sensors,
-  custom DRAM populations), which optional libraries to enable,
-  and the OS backend.  The SDK loader compiles it down to
-  Zephyr Kconfig fragments / CMake `-D` flags / Yocto
-  `local.conf` snippets so you don't have to track three
-  config formats by hand.  Copy
+- **Project configuration** -- `alp.yaml` is the **single source
+  of truth** for your firmware's target.  One YAML file at your
+  app root declares which SoM SKU, which carrier, which OS
+  backend, which inference backend, which optional libraries,
+  which connectivity features.  Every other config artefact
+  (Zephyr `prj.conf`, CMake `-D` args, Yocto `local.conf`) is
+  derived output -- don't hand-edit them.  Read
+  [`docs/project-config.md`](project-config.md) for the model,
+  then copy
   [`metadata/templates/alp.yaml`](../metadata/templates/alp.yaml)
   to your app root and edit.
 - Per-peripheral examples: [`examples/`](../examples/README.md)

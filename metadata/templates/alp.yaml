@@ -1,12 +1,22 @@
 # alp.yaml -- ALP SDK project configuration
 #
 # Copy this template to your application root and edit the values
-# for your project.  The SDK's loader (planned for v0.4) reads
-# this file and emits the equivalent Kconfig fragments (Zephyr),
-# CMake -D flags (plain CMake), or local.conf snippets (Yocto).
+# for your project.  scripts/alp_project.py reads this file and
+# emits the equivalent Kconfig fragments (Zephyr), CMake -D flags
+# (plain CMake), or local.conf snippets (Yocto).
+#
+# === This is the ONLY place to configure the firmware. ===
+#
+# Don't edit prj.conf, don't pass extra -D flags, don't hand-edit
+# local.conf's MACHINE.  Every other config artefact is DERIVED
+# from this file.  If you can't express what you need here, the
+# right fix is to extend the schema -- file an issue.
+#
+# See docs/project-config.md ("Single source of truth" section)
+# for the rationale + the v0.4 follow-ups (DTS overlays + west.yml
+# pinning + per-test configs) that close the remaining gaps.
 #
 # Validated against metadata/schemas/alp-project-v1.schema.json.
-# See docs/project-config.md for the full reference.
 
 schema_version: 1
 

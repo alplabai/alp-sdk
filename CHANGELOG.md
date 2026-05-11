@@ -23,6 +23,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- `docs/project-config.md` "Single source of truth" section
+  codifying the design principle: **`alp.yaml` is the only place
+  to configure the firmware**.  `prj.conf`, CMake `-D` args,
+  `local.conf` are all derived from it.  Honest "Today's gaps"
+  subsection calls out the three remaining places where hand-
+  written config still leaks (DTS overlays for carrier wiring,
+  `west.yml` module list, per-test `prj.conf` in
+  `tests/zephyr/<area>/`) -- all v0.4 targets.  Template
+  (`metadata/templates/alp.yaml`) + getting-started.md updated
+  with the same principle so new consumers absorb it from page
+  one.
 - **Library profile headers** at
   [`metadata/library-profiles/<lib>/`](metadata/library-profiles/)
   -- the "compatible without wrapping" model.  Each Tier-1
