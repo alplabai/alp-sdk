@@ -23,6 +23,28 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- **Library profile headers** at
+  [`metadata/library-profiles/<lib>/`](metadata/library-profiles/)
+  -- the "compatible without wrapping" model.  Each Tier-1
+  library that consumers enable in `alp.yaml`'s `libraries:`
+  array has a pre-tuned compile-time profile so the upstream
+  library works correctly under the SDK's no-exceptions /
+  no-iostream / no-STL-on-M-class invariants.  v0.3 ships:
+  - `etl/alp-embedded.h` (sets `ETL_NO_STL`, `ETL_NO_EXCEPTIONS`,
+    `ETL_CPP17_SUPPORTED`).
+  - `fmt/alp-embedded.h` (sets `FMT_HEADER_ONLY=1`,
+    `FMT_USE_IOSTREAM=0`, `FMT_EXCEPTIONS=0`).
+  - `nlohmann_json/alp-embedded.h` (sets `JSON_NOEXCEPTION=1`,
+    `JSON_USE_IMPLICIT_CONVERSIONS=0`).
+  v0.4 wires the loader to add the profile's include directory
+  ahead of the upstream library's defaults so the profile wins.
+  Apps that want different settings supply their own profile
+  header at their include root -- the loader prefers the app's
+  profile over the SDK's.  Apps still use the upstream API
+  directly; no `<alp/...>` wrapper.  Design + per-library notes
+  in [`metadata/library-profiles/README.md`](metadata/library-profiles/README.md).
+  `docs/project-config.md` "libraries block" section now
+  documents the model.
 - `docs/project-config.md` "How the loader compiles the file"
   section rewritten from "lands in v0.4" to working invocation
   recipes.  Three concrete worked examples land:

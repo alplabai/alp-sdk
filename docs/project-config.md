@@ -197,6 +197,39 @@ This is the "available without a wrapper" model: the SDK helps
 you *enable* the upstream library; the library's own
 documentation governs how to use it.
 
+#### Compatible without wrapping: library profile headers
+
+"No wrapper" does not mean "no integration."  Every Tier-1
+library has compile-time configuration knobs that govern its
+behaviour in our environment (exceptions on/off, STL availability,
+iostream integration, dynamic allocation policy).  Defaults are
+written for desktop builds and aren't always right for embedded
+firmware on Cortex-M.
+
+The SDK ships **profile headers** under
+[`metadata/library-profiles/<lib>/`](../metadata/library-profiles/)
+that pre-tune the upstream library for the SDK's invariants
+(no exceptions, no `<iostream>`, no STL on M-class).  When the
+loader detects a library in `libraries:`, it adds the matching
+profile directory to the include path BEFORE the upstream
+library's defaults, so the profile wins.
+
+What this gets you:
+
+| Library         | Profile sets                                                    |
+|-----------------|-----------------------------------------------------------------|
+| `etl`           | `ETL_NO_STL`, `ETL_NO_EXCEPTIONS`, C++17 target.                |
+| `fmt`           | `FMT_HEADER_ONLY=1`, `FMT_USE_IOSTREAM=0`, `FMT_EXCEPTIONS=0`.  |
+| `nlohmann_json` | `JSON_NOEXCEPTION=1`, `JSON_USE_IMPLICIT_CONVERSIONS=0`.        |
+
+Consumers who need different settings drop their own profile
+header at the app's include root; the loader prefers the app's
+profile over the SDK's when both exist.
+
+See
+[`metadata/library-profiles/README.md`](../metadata/library-profiles/README.md)
+for the full design + per-library notes.
+
 ## How the loader compiles the file
 
 `scripts/alp_project.py` reads `alp.yaml`, validates against the
