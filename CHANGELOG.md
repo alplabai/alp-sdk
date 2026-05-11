@@ -15,6 +15,20 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **Yocto first-class peripheral wrappers — SPI class (v0.4 prep).**
+  `src/yocto/peripheral_spi.c` binds `alp_spi_*` against Linux
+  spidev (`/dev/spidev<bus_id>.<cs_pin_id>`).  Direct two-axis
+  mapping: `bus_id` -> SPI controller index, `cs_pin_id` -> CS
+  line index (the kernel owns the CS toggle; no userspace
+  bit-banging).  Configures mode + bits-per-word + max speed via
+  the `SPI_IOC_WR_*` ioctls before the first transfer; full-duplex
+  uses `SPI_IOC_MESSAGE(1)` with both `tx_buf` and `rx_buf` set,
+  half-duplex uses plain `write()` / `read()` against the same
+  fd.  Same errno -> `alp_status_t` mapping as the I2C wrapper;
+  same `ALP_VENDOR_OVERRIDES_SPI` per-class gate.  Failure-path
+  coverage at `tests/yocto/peripheral_spi.c` (NULL cfg, invalid
+  mode / bits-per-word, `/dev/spidev999.0` -> ENOENT, NULL handle
+  on every entry point, close-NULL safety).
 - **Yocto first-class peripheral wrappers — I2C class (v0.4 prep).**
   `src/yocto/peripheral_i2c.c` binds `alp_i2c_*` against Linux
   i2c-dev (`/dev/i2c-N`).  Maps `alp_i2c_config_t.bus_id` to the

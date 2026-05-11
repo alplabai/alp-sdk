@@ -48,16 +48,22 @@ target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_INFERENCE=1
 )
 
-# v0.4: first real peripheral wrapper.  The I2C class binds against
-# Linux i2c-dev (/dev/i2c-N) via peripheral_i2c.c; gated on Linux
-# hosts so cross-compilers building plain-CMake on macOS/Windows
-# still produce a link-clean library against the stub I2C surface.
+# v0.4: real Yocto peripheral wrappers binding against Linux
+# userspace ABIs.  Each class is independently gated via the
+# ALP_VENDOR_OVERRIDES_<CLASS> macros split out in
+# src/common/stub_backend.c, so a SoM/carrier that only needs I2C
+# can ship without the SPI wrapper hitting an undefined symbol
+# at link time.  All are gated on Linux hosts so cross-compilers
+# building plain-CMake on macOS/Windows still produce a link-clean
+# library against the stub peripheral surface.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2c.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi.c
     )
     target_compile_definitions(alp_sdk PRIVATE
         ALP_VENDOR_OVERRIDES_I2C=1
+        ALP_VENDOR_OVERRIDES_SPI=1
     )
 endif()
 
