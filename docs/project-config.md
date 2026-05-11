@@ -197,23 +197,92 @@ This is the "available without a wrapper" model: the SDK helps
 you *enable* the upstream library; the library's own
 documentation governs how to use it.
 
-## How the loader compiles the file (v0.4)
+## How the loader compiles the file
 
-The loader (`scripts/alp_project.py`, lands in v0.4) reads
-`alp.yaml`, resolves the SKU preset, applies overrides, and
-emits:
+`scripts/alp_project.py` reads `alp.yaml`, validates against the
+schema, resolves the SoM SKU + carrier presets, applies overrides,
+and emits one of three formats.  Common workflows below.
 
-- **Zephyr**: a `build/generated/alp.conf` Kconfig fragment that
-  the build appends to `prj.conf`, plus a DTS overlay setting
-  the carrier-specific properties.
-- **Plain CMake**: a set of `-D` flags injected into the configure
-  step (or written to a `CMakeUserPresets.json`).
-- **Yocto**: a `local.conf` snippet + `MACHINE` line.
+### Zephyr -- generated `alp.conf` appended to `prj.conf`
 
-v0.3 ships the schema + templates + first two SKU presets.  The
-loader script + per-backend emission lands v0.4.  Until then,
-consumers hand-translate `alp.yaml` to the per-backend formats
-using this document as the mapping reference.
+The canonical pattern is to run the loader at configure time and
+include the generated fragment from `prj.conf`:
+
+```bash
+# At your app root, alongside alp.yaml + prj.conf:
+python3 $ALP_SDK/scripts/alp_project.py \
+    --input alp.yaml \
+    --emit zephyr-conf \
+    --output build/generated/alp.conf
+```
+
+```kconfig
+# prj.conf -- include the generated fragment.  The build picks
+# up CONFIG_* settings from any path on KCONFIG_OVERLAY_CONFIGS,
+# or you can rsource the file inline:
+rsource "build/generated/alp.conf"
+```
+
+For an automated wire-up, drop this into your app's `CMakeLists.txt`:
+
+```cmake
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(ALP_PROJECT_CONF ${CMAKE_BINARY_DIR}/generated/alp.conf)
+add_custom_command(
+    OUTPUT ${ALP_PROJECT_CONF}
+    COMMAND ${Python3_EXECUTABLE}
+            ${ALP_SDK_PATH}/scripts/alp_project.py
+            --input ${CMAKE_CURRENT_SOURCE_DIR}/alp.yaml
+            --emit zephyr-conf
+            --output ${ALP_PROJECT_CONF}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/alp.yaml
+)
+add_custom_target(alp_project_conf DEPENDS ${ALP_PROJECT_CONF})
+list(APPEND OVERLAY_CONFIG ${ALP_PROJECT_CONF})
+```
+
+Auto-regenerates whenever `alp.yaml` changes; Zephyr's overlay
+mechanism then merges the generated Kconfig over `prj.conf`.
+
+### Plain CMake (baremetal / yocto) -- generated `-D` args
+
+```bash
+# Pipe the generated args straight into your configure step:
+ARGS=$(python3 $ALP_SDK/scripts/alp_project.py \
+    --input alp.yaml \
+    --emit cmake-args)
+cmake -B build $ARGS .
+```
+
+Or wire the loader into a `CMakeUserPresets.json` writer if your
+build system already drives presets.
+
+### Yocto -- generated `local.conf` snippet
+
+```bash
+python3 $ALP_SDK/scripts/alp_project.py \
+    --input alp.yaml \
+    --emit yocto-conf \
+    --output build/conf/alp-generated.conf
+echo 'require alp-generated.conf' >> build/conf/local.conf
+```
+
+### What the loader does NOT yet do (v0.4 follow-ups)
+
+- **DTS overlays for carrier wiring** -- the loader emits Kconfig
+  + library enables but doesn't yet emit DTS overlays mapping
+  carrier-specific GPIO assignments to the SDK's `alp,pin-array`
+  binding.  Until that lands, app authors hand-write the overlay
+  (the EVK overlay at `tests/zephyr/peripheral/boards/alp_e1m_evk_aen.overlay`
+  is a worked example).
+- **Cross-validation against `metadata/socs/*.json`** -- the loader
+  trusts the SKU preset's `silicon:` field; it doesn't yet
+  validate that requested features (e.g. 16-bit ADC) match the
+  SoC's documented caps.  The `<alp/soc_caps.h>` runtime check
+  catches mismatches at `_open` time today.
+- **First-class `west` integration** -- planned as a custom
+  `west alp-build` command that wraps the configure + generate +
+  build sequence.
 
 ## Versioning
 

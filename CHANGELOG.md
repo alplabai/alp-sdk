@@ -23,6 +23,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- `docs/project-config.md` "How the loader compiles the file"
+  section rewritten from "lands in v0.4" to working invocation
+  recipes.  Three concrete worked examples land:
+  - Zephyr: how to call the loader at configure time + include
+    the generated `alp.conf` from `prj.conf` via `rsource`, plus
+    a `CMakeLists.txt` snippet that auto-regenerates on
+    `alp.yaml` changes via `add_custom_command`.
+  - Plain CMake: piping `--emit cmake-args` straight into the
+    configure step.
+  - Yocto: generating a `local.conf` snippet + requiring it.
+  Also documents the three loader follow-ups deferred to v0.4
+  (DTS overlay generation, soc_caps cross-validation, `west
+  alp-build` extension command).
 - `metadata/carriers/custom-example.yaml` -- worked example of a
   customer fork of the E1M-EVK carrier preset.  Shows a slim
   production-board derivative that keeps the IMU + barometer
