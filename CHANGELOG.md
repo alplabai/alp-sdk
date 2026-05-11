@@ -5,7 +5,13 @@ All notable changes to the ALP SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] — v0.1.0 candidate
+## [Unreleased] — v0.3.0 candidate
+
+(Tracks `metadata/sdk_version.yaml`'s declared version.  Per
+`VERSIONS.md`, v0.1 / v0.2 / v0.3 each ship the *surface* first
+and accumulate runtime implementations in subsequent point
+releases -- entries below collect every Added / Changed item
+that lands before the v0.3.0 tag.)
 
 ### Added
 
