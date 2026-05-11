@@ -1,0 +1,238 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @file da9292.h
+ * @brief Renesas DA9292 high-current multi-phase buck PMIC driver.
+ *
+ * The DA9292 is a multi-phase DC-DC buck PMIC that can be configured
+ * (via the silicon's `CONF` strap pin) as either:
+ *
+ *   - **1x quad-phase converter** (up to 52 A peak), or
+ *   - **2x dual-phase converters** (10 A each, 26 A peak per
+ *     channel).
+ *
+ * On the V2N / V2N-M1 SoMs the chip is strapped for **2-channel
+ * dual-phase mode** (CONF strap value selected for that config) and
+ * sits on the BRD_I2C bus at 7-bit address `0x1C` (8-bit `0x38` for
+ * write, `0x39` for read).
+ *
+ * @par Channel-to-rail mapping on V2N
+ *
+ * Two channels, each backed by two phases:
+ *
+ *   - **CH1** (phases 1 + 2) -> 0.8 V Renesas rail.  Enabled at
+ *     boot by the carrier-driven `EN1` strap; firmware doesn't have
+ *     to touch it.
+ *   - **CH2** (phases 3 + 4) -> 0.75 V DEEPX DDR / NPU rail.
+ *     **Disabled at boot on every variant**; only V2N-M1 firmware
+ *     programs CH2's `CH2_VOUT_VSEL_LO` to 0.75 V and then writes
+ *     `CH2_EN = 1` (in register `PMC_CTRL_01` bit 1) before
+ *     deasserting `M1_RESET`.  On V2N base CH2 stays disabled
+ *     because DEEPX isn't populated.
+ *
+ * The phase pairs themselves don't surface as separate channels at
+ * the I2C register level -- callers see only CH1 and CH2.  The
+ * `metadata/e1m_modules/v2n*/som.yaml` files' "ch1+ch2 / ch3+ch4"
+ * notation refers to the underlying phase pairs that make up each
+ * channel (phases 1+2 = CH1, phases 3+4 = CH2).
+ *
+ * @par Output voltage encoding
+ *
+ * Two voltage ranges per channel, selected by `CHx_VSTEP`:
+ *
+ *   - **VSTEP = 0 (default)**: 0.3..1.275 V in 5 mV steps.  Register
+ *     byte = `0x3C + (mV - 300) / 5`.  Codes `0x00..0x3B` reserved.
+ *   - **VSTEP = 1**: 0.6..1.9 V in 10 mV steps (full doubled range).
+ *
+ * Both V2N targets (0.8 V, 0.75 V) fit comfortably in VSTEP=0 so
+ * the driver hard-codes that range and rejects `_set_voltage_mv`
+ * requests outside `[300, 1275]`.  Higher-range work requires a
+ * `_set_vstep` extension that disables the channel first (per
+ * datasheet: "The buck converter needs to be disabled (CHx_EN = 0)
+ * before CHx_VSTEP setting can be changed by I2C write").
+ *
+ * @par Power-good and event handling
+ *
+ * Both channels assert a per-channel power-good (`CHx_PG`) status
+ * bit when their output rises above `VTHR_UV_RISE` and lose it when
+ * the output drops below `VTHR_UV_FALL`.  Event flags (`E_CHx_UV` /
+ * `E_CHx_OV` / `E_TEMP_WARN` / `E_TEMP_CRIT` / `E_VIN_UVLO`) latch
+ * in `PMC_EVENT_00` / `PMC_EVENT_01` and assert the `INT_N` line;
+ * clear them by writing `1` to the corresponding bit.  This driver
+ * surfaces both the live status (via `da9292_get_status`) and the
+ * latched events (via `da9292_read_and_clear_events`).
+ *
+ * @par Carrier-side IRQ wiring
+ *
+ * On V2N the two IO outputs from DA9292 are routed to the Renesas
+ * RZ/V2N (after the 2026-05-11 schematic revision that reassigned
+ * `P36` / `P37` away from `GPT15_GTIOC15A/B`):
+ *
+ *   - `TW_N` -> Renesas `P36` (`DA9292_TW`) -- thermal-warning low.
+ *   - `INT_N` -> Renesas `P37` (`DA9292_INT`) -- generic interrupt
+ *     output that goes low on any unmasked event.
+ *
+ * The driver itself doesn't grab those GPIOs -- carrier-board code
+ * wires the `alp_gpio_*` ISR to call `da9292_read_and_clear_events`
+ * when the line falls.
+ *
+ * @par Datasheet provenance
+ * - **REN_DA9292_Datasheet_2v2_DST_20250323.pdf** (Renesas) -- full
+ *   register map (Tables 12-41), I2C protocol, voltage encoding.
+ * - **DA9292-AROVx Variant Overview_01v00.pdf** -- variant matrix.
+ * - **REN_AN-PM-189_DA9292_PCB_Layout_Recommendations_Rev2.pdf** --
+ *   layout guidance (not register-relevant; archived for board work).
+ */
+
+#ifndef ALP_CHIPS_DA9292_H
+#define ALP_CHIPS_DA9292_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#include "alp/peripheral.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/** 7-bit I2C slave address used on V2N / V2N-M1 (CONF strap value
+ *  selects this address out of the chip's address table; the V2N
+ *  schematic strapped to 0x1C). */
+#define DA9292_I2C_ADDR_V2N 0x1Cu
+
+/** Channel identifier (the two dual-phase output channels in V2N's
+ *  CONF configuration). */
+typedef enum {
+    DA9292_CH1 = 0, /**< Phases 1 + 2 -- 0.8 V Renesas rail on V2N. */
+    DA9292_CH2 = 1, /**< Phases 3 + 4 -- 0.75 V DEEPX rail on V2N-M1. */
+} da9292_channel_t;
+
+/** Decoded `PMC_STATUS_00` + `PMC_STATUS_01` snapshot. */
+typedef struct {
+    bool ch1_pg;       /**< CH1 power-good (output in regulation). */
+    bool ch2_pg;       /**< CH2 power-good. */
+    bool ch1_uv;       /**< CH1 under-voltage (live). */
+    bool ch2_uv;       /**< CH2 under-voltage. */
+    bool ch1_ov;       /**< CH1 over-voltage. */
+    bool ch2_ov;       /**< CH2 over-voltage. */
+    bool ch1_oc;       /**< CH1 over-current (live). */
+    bool ch2_oc;       /**< CH2 over-current. */
+    bool temp_warn;    /**< Thermal warning threshold crossed. */
+    bool temp_crit;    /**< Thermal critical threshold (shutdown imminent). */
+    bool vin_uvlo;     /**< Input UVLO -- supply below operating range. */
+    uint8_t raw_00;    /**< Untouched PMC_STATUS_00 byte for diagnostics. */
+    uint8_t raw_01;    /**< Untouched PMC_STATUS_01 byte. */
+} da9292_status_t;
+
+/** Latched-event snapshot (read-and-clear from `PMC_EVENT_00/01`). */
+typedef struct {
+    bool e_ch1_pg;
+    bool e_ch2_pg;
+    bool e_ch1_uv;
+    bool e_ch2_uv;
+    bool e_ch1_ov;
+    bool e_ch2_ov;
+    bool e_ch1_oc;
+    bool e_ch2_oc;
+    bool e_temp_warn;
+    bool e_temp_crit;
+    bool e_vin_uvlo;
+} da9292_events_t;
+
+/** Driver context. */
+typedef struct {
+    bool       initialised;
+    alp_i2c_t *bus;
+    uint8_t    addr;
+    uint8_t    dev_id;        /**< Cached PMC_DEV_ID (read at init). */
+    uint8_t    rev_id;        /**< Cached PMC_REV_ID. */
+} da9292_t;
+
+/** @brief Probe + cache device + revision identifiers.
+ *
+ *  @note  Does not change the volatile register state -- the chip's
+ *         OTP carries the V2N power-on defaults, and per V2N
+ *         schematic the EN1 pin is strapped so CH1 enables itself
+ *         at VSYS rise.  Touching CH1 from firmware would risk
+ *         glitching the 0.8 V Renesas rail. */
+alp_status_t da9292_init(da9292_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);
+
+/** @brief Read both status bytes and decode the bit fields. */
+alp_status_t da9292_get_status(da9292_t *ctx, da9292_status_t *out);
+
+/** @brief Read + clear `PMC_EVENT_00/01` (write-1-to-clear semantics). */
+alp_status_t da9292_read_and_clear_events(da9292_t *ctx, da9292_events_t *out);
+
+/** @brief Enable (or disable) a channel via `CHx_EN` in `PMC_CTRL_01`.
+ *
+ *  @note  This sets/clears the **register-side** enable.  When the
+ *         CONF strap routes EN1/EN2 to host GPIOs the channel is
+ *         the AND of pin and register; when the carrier ties EN1/EN2
+ *         to AVDD (always-on), only the register matters.  The V2N
+ *         schematic ties EN1 always-on and routes EN2 to a host
+ *         signal -- check the V2N peripheral map for the exact
+ *         carrier wiring. */
+alp_status_t da9292_set_enable(da9292_t *ctx, da9292_channel_t ch, bool enable);
+
+/** @brief Set channel output voltage in millivolts (VSTEP = 0, 5 mV step).
+ *
+ *  Writes the channel's `CHx_VOUT_VSEL_LO` register (`0x0A` for CH1,
+ *  `0x0C` for CH2).  Pre-conditions:
+ *    - `mv` in `[300, 1275]`; outside that returns `ALP_ERR_INVAL`.
+ *    - `mv` must be a multiple of 5; rounded down otherwise.
+ *
+ *  @warning  Don't ramp by big steps -- DA9292 detects instantaneous
+ *            over/under-voltage if the target jumps by more than ~50 mV
+ *            in one write.  Step in 50 mV increments for big swings. */
+alp_status_t da9292_set_voltage_mv(da9292_t *ctx, da9292_channel_t ch, uint16_t mv);
+
+/** @brief Read back the channel's `CHx_VOUT_VSEL_LO` setpoint in mV. */
+alp_status_t da9292_get_voltage_mv(da9292_t *ctx, da9292_channel_t ch, uint16_t *mv);
+
+/**
+ * @brief V2N base boot-time init.  Confirms CH2 is disabled (the
+ *        chip's reset default already does this; the call is a
+ *        belt-and-braces sanity check + a clear logging surface
+ *        for production-test).
+ *
+ *  Safe to call on V2N-M1 -- it leaves CH2 untouched if `ctx->dev_id`
+ *  was probed successfully and CH2 was already enabled by the
+ *  M1-specific init path.
+ */
+alp_status_t da9292_v2n_base_init(da9292_t *ctx);
+
+/**
+ * @brief V2N-M1 DEEPX rail bring-up sequence.
+ *
+ *  Procedure (per the 2026-05-11 maintainer memo and the V2N power-
+ *  sequence PDF):
+ *
+ *    1. Verify `ctx` initialised + DEV_ID matches.
+ *    2. Write `CH2_VOUT_VSEL_LO = 0.75 V` (= 0x96 at VSTEP=0).
+ *    3. Read back, confirm the write took.
+ *    4. Write `CH2_EN = 1` in `PMC_CTRL_01`.
+ *    5. Poll `da9292_get_status` for `ch2_pg = true` up to a
+ *       caller-supplied timeout (typically <= 5 ms per datasheet
+ *       soft-start figures).
+ *
+ *  @return ALP_OK if CH2 reaches PG within `timeout_us`,
+ *          ALP_ERR_TIMEOUT otherwise.
+ */
+alp_status_t da9292_v2n_m1_enable_deepx_rail(da9292_t *ctx, uint32_t timeout_us);
+
+/** Raw register R/W (for diagnostics / advanced use). */
+alp_status_t da9292_read_reg(da9292_t *ctx, uint8_t reg, uint8_t *val);
+alp_status_t da9292_write_reg(da9292_t *ctx, uint8_t reg, uint8_t val);
+
+/** @brief Release resources.  Idempotent. */
+void         da9292_deinit(da9292_t *ctx);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
+
+#endif /* ALP_CHIPS_DA9292_H */

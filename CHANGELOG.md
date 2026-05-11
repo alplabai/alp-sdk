@@ -22,6 +22,27 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **`chips/da9292/` Renesas DA9292 secondary PMIC driver (2026-05-12).**
+  Full I2C surface for the **Renesas DA9292-AROVx** multi-phase buck
+  PMIC populated on V2N + V2N-M1 at 7-bit address `0x1C`.  Strapped
+  for 2-channel dual-phase mode by the CONF pin: **CH1** (phases
+  1+2) is the 0.8 V Renesas rail (enabled at boot via the EN1 hard-
+  strap), **CH2** (phases 3+4) is the 0.75 V DEEPX rail (disabled on
+  V2N base, brought up by V2N-M1 firmware before DEEPX boot).
+  Public API: probe + cached DEV_ID/REV_ID; live status decode
+  (PG / UV / OV / OC / TEMP_WARN / TEMP_CRIT / VIN_UVLO); event
+  read-and-clear over `PMC_EVENT_00/01` (write-1-to-clear); 5 mV-
+  step voltage set/get in the `0.3..1.275 V` (VSTEP=0) range;
+  per-channel enable in `PMC_CTRL_01`; and the variant-specific
+  init helpers `da9292_v2n_base_init` + `da9292_v2n_m1_enable_deepx_rail`
+  (the latter programs 0.75 V, reads back, enables CH2, polls
+  CH2_PG with a caller-supplied timeout).  PMC_STATUS bit layout
+  is assumed to mirror PMC_MASK_00 (which IS documented in the
+  datasheet); flagged TODO in `chips/da9292/da9292.c` for verify
+  against datasheet Table 14 before relying in production.
+  New Kconfig: `CONFIG_ALP_SDK_CHIP_DA9292`.  Header:
+  `<alp/chips/da9292.h>`.  Manifest: `metadata/chips/da9292.yaml`.
+
 - **`chips/act8760/` ACT88760 primary PMIC driver scaffolding (2026-05-12).**
   Stub-status driver for the **Qorvo ACT88760-120.E1** primary PMIC
   populated on the V2N + V2N-M1 SoMs.  Dual-page I2C interface

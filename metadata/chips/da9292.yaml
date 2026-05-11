@@ -1,0 +1,54 @@
+# ALP SDK chip manifest: Renesas DA9292 multi-phase buck PMIC.
+schema_version:   1
+chip_id:          da9292
+driver_status:    partial       # full register map; PMC_STATUS bit
+                                # layout TODO-flagged for verify
+display_name:     "Renesas DA9292 multi-phase buck PMIC"
+vendor:           renesas
+mpn_population:
+  - "DA9292-AROVx"              # specific variant per V2N CONF strap
+datasheet:
+  primary:        "REN_DA9292_Datasheet_2v2_DST_20250323.pdf"  # Rev 2.2
+  variant:        "DA9292-AROVx Variant Overview_01v00.pdf"
+  pcb_layout:     "REN_AN-PM-189_DA9292_PCB_Layout_Recommendations_Rev2_APN_20250402.pdf"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x1C, addr_8bit_write: 0x38, addr_8bit_read: 0x39 }
+  max_clock_hz:   1000000       # FM+ per datasheet section 5.3
+
+# V2N strap (CONF input) selects 2-channel dual-phase mode + 0x1C
+# slave ID.  Channel-to-rail mapping is documented on the per-SoM
+# som.yaml; this manifest only records the chip's capabilities.
+operation_mode:   "2ch_dual_phase"   # set by carrier CONF strap
+
+channels:
+  - id: ch1
+    phases:        [phase1, phase2]
+    role_v2n:      "0.8 V Renesas rail; enabled at boot via EN1 strap"
+    voltage_range: "0.3..1.275 V (VSTEP=0) or 0.6..1.9 V (VSTEP=1)"
+  - id: ch2
+    phases:        [phase3, phase4]
+    role_v2n:      "DISABLED on V2N base"
+    role_v2n_m1:   "0.75 V DEEPX rail; firmware sets + enables via da9292_v2n_m1_enable_deepx_rail"
+
+# Signals exiting the chip that the carrier must route.
+signals:
+  - { name: TW_N,  type: open_drain_output, v2n_route: "Renesas P36 (DA9292_TW)",  notes: "active-low thermal-warning" }
+  - { name: INT_N, type: open_drain_output, v2n_route: "Renesas P37 (DA9292_INT)", notes: "active-low generic interrupt; cleared by read+write-1 on PMC_EVENT_00/01" }
+  - { name: PB_N,  type: open_drain_output, v2n_route: TBD, notes: "active-low power-bad" }
+  - { name: EN1,   type: input,             v2n_route: TBD, notes: "CH1 enable -- strapped on V2N for boot-up" }
+  - { name: EN2,   type: input,             v2n_route: TBD, notes: "CH2 enable -- routed to host on V2N-M1" }
+  - { name: CE,    type: input,             v2n_route: TBD, notes: "chip enable" }
+  - { name: VSEL1, type: input,             v2n_route: TBD, notes: "selects between CHx_VOUT_VSEL_LO/_HI" }
+  - { name: VSEL2, type: input,             v2n_route: TBD, notes: "selects between CHx_VOUT_VSEL_LO/_HI" }
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_DA9292
+  baremetal:      ALP_SDK_CHIP_DA9292
+  yocto:          n/a            # Linux uses kernel regulator framework
+
+families:
+  - v2n
+  - v2n-m1

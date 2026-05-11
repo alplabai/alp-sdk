@@ -738,6 +738,22 @@ config ALP_SDK_CHIP_ACT8760
 	  R/W on either page, and rail-by-rail VSET access (the
 	  VSET register offsets are still TODO; see act8760.c).
 
+config ALP_SDK_CHIP_DA9292
+	bool "Renesas DA9292 multi-phase buck PMIC (secondary on V2N)"
+	depends on I2C
+	help
+	  Compile chips/da9292/da9292.c.  DA9292 is the secondary
+	  PMIC on V2N + V2N-M1, populated at 7-bit I2C address 0x1C
+	  on BRD_I2C in 2-channel dual-phase mode.  CH1 (phases 1+2)
+	  drives the 0.8 V Renesas rail and is enabled by hardware
+	  strap at boot; CH2 (phases 3+4) drives the 0.75 V DEEPX
+	  rail and starts disabled.  V2N-M1 firmware brings CH2 up
+	  with da9292_v2n_m1_enable_deepx_rail before deasserting
+	  M1_RESET; V2N base firmware leaves CH2 alone.  Surfaces
+	  status (PG / UV / OV / OC / TEMP / VIN-UVLO), event read-
+	  and-clear, voltage set / get (5 mV step, 0.3..1.275 V),
+	  per-channel enable, and raw register R/W.
+
 endmenu # "ALP SDK chip drivers"
 
 endif # ALP_SDK
