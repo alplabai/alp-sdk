@@ -34,15 +34,18 @@ python3 ../../scripts/alp_project.py \
     --output build/generated/alp.conf
 ```
 
-The matching `prj.conf` contains exactly one non-comment line:
+The matching `prj.conf` is **empty** -- every `CONFIG_*` knob comes
+from the generated `alp.conf` via Zephyr's `OVERLAY_CONFIG`
+mechanism, wired up at CMake-configure time by the example's
+`CMakeLists.txt` (see the `execute_process` + `list(APPEND
+OVERLAY_CONFIG ...)` near the top of the file).  A plain
+`west build` works without a separate generate step.
 
-```kconfig
-rsource "build/generated/alp.conf"
-```
-
-The example's `CMakeLists.txt` runs the loader for you at
-configure time (see `execute_process` near the top of the file),
-so a plain `west build` works without a separate generate step.
+(An earlier iteration of this example used `rsource
+"build/generated/alp.conf"` in `prj.conf`; that's invalid -- `rsource`
+is a Kconfig-source directive, not a `.conf` directive, and Zephyr
+rejects it with a malformed-line warning.  The `OVERLAY_CONFIG`
+path is the right one and the example uses it now.)
 
 What the generated `alp.conf` looks like for this example (subset
 -- the EVK preset enables the carrier's stock chip set in addition

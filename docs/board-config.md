@@ -67,9 +67,15 @@ by `scripts/alp_project.py`.
 Concretely:
 
 - **Don't edit `prj.conf` directly.**  The minimum-correct
-  `prj.conf` in a v0.3 alp-sdk app contains exactly one non-empty
-  line: `rsource "build/generated/alp.conf"`.  Everything else
-  flows from `board.yaml` -> `alp.conf` via the loader.
+  `prj.conf` in a v0.3 alp-sdk app is empty (or carries only a
+  comment).  The application's `CMakeLists.txt` invokes
+  `scripts/alp_project.py` at configure time and layers the
+  generated `alp.conf` over `prj.conf` via Zephyr's
+  `OVERLAY_CONFIG` cmake variable.  `rsource` is NOT valid in a
+  `.conf` file (it is a Kconfig-source directive only) -- the
+  earlier "single `rsource` line" pattern in this doc was wrong;
+  see the worked example at `examples/gpio-button-led/CMakeLists.txt`
+  for the correct wiring.
 - **Don't pass extra `-D` flags to `cmake` for SDK options.**  The
   loader emits the right set; passing extra flags risks divergence
   from the declared config.
@@ -371,33 +377,35 @@ python3 $ALP_SDK/scripts/alp_project.py \
     --output build/generated/alp.conf
 ```
 
-```kconfig
-# prj.conf -- include the generated fragment.  The build picks
-# up CONFIG_* settings from any path on KCONFIG_OVERLAY_CONFIGS,
-# or you can rsource the file inline:
-rsource "build/generated/alp.conf"
-```
-
-For an automated wire-up, drop this into your app's `CMakeLists.txt`:
+The application's `CMakeLists.txt` wires the loader as a
+configure-time step and layers the result over `prj.conf` with
+`OVERLAY_CONFIG`.  `prj.conf` itself stays empty -- everything
+flows from `board.yaml`:
 
 ```cmake
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-set(ALP_PROJECT_CONF ${CMAKE_BINARY_DIR}/generated/alp.conf)
-add_custom_command(
-    OUTPUT ${ALP_PROJECT_CONF}
-    COMMAND ${Python3_EXECUTABLE}
-            ${ALP_SDK_PATH}/scripts/alp_project.py
+
+set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_PATH}/scripts/alp_project.py
             --input ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
             --emit zephyr-conf
-            --output ${ALP_PROJECT_CONF}
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
+            --output ${_alp_generated}
+    RESULT_VARIABLE _alp_rv
 )
-add_custom_target(alp_project_conf DEPENDS ${ALP_PROJECT_CONF})
-list(APPEND OVERLAY_CONFIG ${ALP_PROJECT_CONF})
+if(NOT _alp_rv EQUAL 0)
+    message(FATAL_ERROR "alp_project.py failed (rv=${_alp_rv})")
+endif()
+list(APPEND OVERLAY_CONFIG ${_alp_generated})
+
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(my_app LANGUAGES C)
+target_sources(app PRIVATE src/main.c)
 ```
 
-Auto-regenerates whenever `board.yaml` changes; Zephyr's overlay
-mechanism then merges the generated Kconfig over `prj.conf`.
+Zephyr's `OVERLAY_CONFIG` machinery merges the generated `alp.conf`
+on top of `prj.conf` at Kconfig time -- the app picks up every
+`CONFIG_*` line the loader emitted.
 
 ### Plain CMake (baremetal / yocto) -- generated `-D` args
 
