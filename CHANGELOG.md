@@ -15,6 +15,27 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **Yocto first-class peripheral wrappers — GPIO class (v0.4 prep).**
+  `src/yocto/peripheral_gpio.c` binds `alp_gpio_*` against the
+  Linux GPIO character-device v2 ABI at `/dev/gpiochipN` (kernel
+  >= 5.10).  No libgpiod dependency -- ioctls invoked directly
+  against the kernel UAPI in `<linux/gpio.h>`, same pattern as
+  the other Yocto wrappers.  Pin-id is packed as `(chip << 16) |
+  line_offset` so the studio pin allocator can stay one-axis on
+  the wire.  `alp_gpio_configure` switches direction + bias via
+  `GPIO_V2_LINE_SET_CONFIG_IOCTL`; `alp_gpio_write` /
+  `alp_gpio_read` use the values-get/set ioctls.  Bias support
+  passes through to the kernel driver: chips that don't implement
+  pull-up/pull-down configuration surface `ALP_ERR_NOSUPPORT`
+  from configure.  IRQ paths
+  (`alp_gpio_irq_enable` / `_disable`) return `ALP_ERR_NOSUPPORT`
+  for now -- callback dispatch needs a `poll()`/pthread loop
+  that's parked until a Yocto caller actually needs it.  Per-class
+  `ALP_VENDOR_OVERRIDES_GPIO` gate.  Failure-path coverage at
+  `tests/yocto/peripheral_gpio.c` (`/dev/gpiochip999` -> ENOENT,
+  NULL handle on every entry point, IRQ NOSUPPORT contract,
+  close-NULL safety).  Closes the Yocto core-4 peripheral
+  wrapper set (I2C / SPI / UART / GPIO all real on Linux).
 - **Yocto first-class peripheral wrappers — UART class (v0.4 prep).**
   `src/yocto/peripheral_uart.c` binds `alp_uart_*` against the
   Linux tty layer via termios.  Port-id resolution is a small
