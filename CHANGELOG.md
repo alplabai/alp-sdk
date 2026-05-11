@@ -7,6 +7,20 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.1.0 candidate
 
+### Added
+
+- `vendors/renesas-rzv2n/rzv_drp-ai_tvm/README.md` -- integration
+  anchor for **RUHMI** (formerly "DRP-AI TVM"), Renesas's
+  Apache-2.0 host-side model compiler at
+  <https://github.com/renesas-rz/rzv_drp-ai_tvm>.  Distinct from
+  the target-side `libdrpai` runtime (which ships via
+  `meta-rz-drpai` in the Renesas BSP).  The SDK's
+  `<alp/inference.h>` Yocto backend links against the runtime;
+  model authors run RUHMI on their workstation and ship compiled
+  output as a model asset.  `vendors/renesas-rzv2n/README.md`
+  cross-links to the new subdirectory and documents the BSP
+  setup pointer.
+
 ### Changed
 
 - `yocto/meta-alp/` rebased on the **Renesas RZ/V2N AI SDK 7.10**

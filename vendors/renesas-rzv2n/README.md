@@ -84,3 +84,32 @@ v0.1: **stub only**.  Surface lands in v0.2 along with the MIPI CSI-2
 camera implementation.  The directory exists now so the porting guide
 (`docs/porting-new-som.md`) has a concrete worked example, and so the
 SoM column in `docs/os-support-matrix.md` has somewhere to point.
+
+## Yocto BSP integration
+
+The V2N + V2N-M1 Yocto build is rooted on the **Renesas RZ/V2N AI
+SDK 7.10** -- a free download from My Renesas, no NDA for the
+standard build path.  Setup recipe (extract tarball, add the four
+`meta-rz-features/*` sublayers, build `core-image-weston` against
+`MACHINE=rzv2n-evk`) lives in
+[`yocto/meta-alp/README.md`](../../yocto/meta-alp/README.md).
+`meta-alp`'s `e1m-x-v2n.conf` inherits from Renesas's stock
+`rzv2n-evk` MACHINE; carrier deltas are TBD per the user-supplied
+HW config writeup.
+
+## DRP-AI inference toolchain
+
+The DRP-AI3 accelerator on V2N has a host-side compiler and a
+target-side runtime; they're distributed separately under
+different licenses.
+
+- **Compiler (RUHMI / DRP-AI TVM)** -- runs on the build host,
+  lowers `.tflite` / `.onnx` / `.pt` models into DRP-AI-executable
+  binaries.  Apache-2.0.  Anchor at
+  [`vendors/renesas-rzv2n/rzv_drp-ai_tvm/`](rzv_drp-ai_tvm/);
+  upstream <https://github.com/renesas-rz/rzv_drp-ai_tvm>.
+- **Runtime (`libdrpai`)** -- runs on the V2N, shipped by the
+  `meta-rz-drpai` sublayer in the Renesas AI SDK 7.10 BSP.  The
+  alp-sdk's `<alp/inference.h>` Yocto backend (planned for v0.4)
+  links against this via the target sysroot; no separate
+  per-app pkg-config plumbing.
