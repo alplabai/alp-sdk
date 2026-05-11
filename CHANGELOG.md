@@ -23,6 +23,38 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- **Library profile set extended 3 -> 7.**  Per the design directive
+  "make many libraries compatible for user's application, they enable
+  in the config file when they want to use":
+  - `metadata/library-profiles/lvgl/alp-embedded.h` -- a working
+    `lv_conf.h` tuned for E1M displays (RGB565 baseline, 48 KiB
+    LV_MEM_SIZE, k_uptime_get-driven LV_TICK_CUSTOM, demos off
+    to save flash, image decoders off, filesystem integration off).
+  - `metadata/library-profiles/mbedtls/alp-embedded.h` -- a
+    minimal-but-modern MbedTLS config: SHA-256/384/512, AES-GCM/CCM,
+    HMAC, HKDF, ECDH/ECDSA P-256+P-384, RSA verify, TLS 1.3 client
+    only, X.509 parse.  Deliberately omits MD5/SHA-1, DES/3DES/RC4,
+    plain CBC, TLS server role, x509 cert generation.
+  - `metadata/library-profiles/doctest/alp-embedded.h` -- disables
+    POSIX signal handlers + multithreading so doctest builds clean
+    on the SDK's test runner.
+  - `metadata/library-profiles/cmsis-dsp/README.md` -- intentionally-
+    empty profile placeholder; CMSIS-DSP config comes from the SoM's
+    target architecture via the SoC metadata, not from a header.
+  Plus schema + loader updates so each new entry is enableable
+  via `alp.yaml`'s `libraries:` array:
+  - Schema enum extended: `lvgl`, `mbedtls`, `cmsis_dsp`, `littlefs`
+    added alongside the existing `etl`, `fmt`, `nlohmann_json`,
+    `doctest`, `lwrb`, `nanopb`.
+  - `scripts/alp_project.py` gains a `_LIBRARY_KCONFIG` map -- each
+    enabled library maps to the right CONFIG_* flags (e.g.
+    `lvgl` -> `CONFIG_LVGL=y`, `mbedtls` -> `CONFIG_MBEDTLS=y` +
+    `CONFIG_MBEDTLS_BUILTIN=y`, `littlefs` ->
+    `CONFIG_FILE_SYSTEM_LITTLEFS=y` + `CONFIG_FILE_SYSTEM=y`).
+    User-facing C++ libs (etl/fmt/nlohmann_json/doctest) emit
+    a TODO marker for the v0.4 CMake-include-path hook.
+  - `metadata/templates/alp.yaml` commented-libraries section now
+    showcases all ten enableable libs with one-liner notes.
 - **"Using enabled libraries" section** in
   `docs/recommended-libraries.md` -- short usage snippets for
   every Tier-1 library a consumer can enable in `alp.yaml`:

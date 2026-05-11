@@ -65,15 +65,30 @@ metadata/library-profiles/
 │   └── alp-embedded.h                 (ETL profile for E1M SoMs)
 ├── fmt/
 │   └── alp-embedded.h                 (fmt config for E1M SoMs)
-└── nlohmann_json/
-    └── alp-embedded.h                 (json config for E1M SoMs)
+├── nlohmann_json/
+│   └── alp-embedded.h                 (json config for E1M SoMs)
+├── lvgl/
+│   └── alp-embedded.h                 (lv_conf.h for E1M displays)
+├── doctest/
+│   └── alp-embedded.h                 (doctest config for embedded test runs)
+├── mbedtls/
+│   └── alp-embedded.h                 (minimal-modern TLS 1.3 client + AEAD subset)
+└── cmsis-dsp/
+    └── README.md                      (intentionally empty -- see file)
 ```
 
 Profile headers stay **small and conservative** -- they encode
 the SDK's hard invariants (no exceptions on M-class, no heap on
-hot path) and leave everything else at the upstream default.
-The point is compatibility-by-default; opinionated tuning is the
-consumer's job.
+hot path, no MD5/SHA-1/CBC etc.) and leave everything else at the
+upstream default.  The point is compatibility-by-default;
+opinionated tuning is the consumer's job.
+
+Adding a new library: drop a directory + an `alp-embedded.h` (or
+a `README.md` if no compile-time config is needed), then extend
+the `libraries:` enum in
+`metadata/schemas/alp-project-v1.schema.json` and the
+`_LIBRARY_KCONFIG` map in `scripts/alp_project.py` so consumers
+can enable it via `alp.yaml`.
 
 ## v0.3 scaffolding vs v0.4 wire-up
 

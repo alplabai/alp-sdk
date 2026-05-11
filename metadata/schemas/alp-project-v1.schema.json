@@ -112,7 +112,7 @@
     "libraries": {
       "type": "array",
       "uniqueItems": true,
-      "description": "Optional libraries to make available to app code.  When listed, the SDK adds the library's include path + sources to the build; apps use the library through its native API (e.g. `#include \"etl/vector.h\"`), no <alp/...> wrapper.",
+      "description": "Optional libraries to make available to app code.  When listed, the SDK adds the library's include path + the matching compile-time profile (under metadata/library-profiles/<lib>/) so the library is set up correctly for the SDK's embedded invariants -- no exceptions, no <iostream>, no STL on M-class, no broken ciphers in MbedTLS, etc.  Apps use the library through its native API (e.g. `#include \"etl/vector.h\"`, `lv_label_create(...)`, `nlohmann::json::parse(...)`), NOT through any <alp/...> wrapper.",
       "items": {
         "type": "string",
         "enum": [
@@ -120,6 +120,10 @@
           "fmt",
           "nlohmann_json",
           "doctest",
+          "lvgl",
+          "mbedtls",
+          "cmsis_dsp",
+          "littlefs",
           "lwrb",
           "nanopb"
         ]

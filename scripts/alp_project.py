@@ -233,17 +233,44 @@ def _emit_zephyr(
     # 5. Optional libraries
     libs = project.get("libraries") or []
     if libs:
-        lines.append("# Optional libraries")
+        lines.append("# Optional libraries (apps use the upstream native API; the SDK")
+        lines.append("# adds the matching compile-time profile from metadata/library-profiles/)")
         for lib in libs:
-            if lib == "lwrb":
-                lines.append("CONFIG_ALP_SDK_USE_LWRB=y")
-            elif lib == "nanopb":
-                lines.append("CONFIG_ALP_SDK_USE_NANOPB=y")
+            if lib in _LIBRARY_KCONFIG:
+                for kc in _LIBRARY_KCONFIG[lib]:
+                    lines.append(f"{kc}")
             else:
-                lines.append(f"# TODO: wire CONFIG_ALP_USE_{lib.upper()} once the v0.4 enable lands")
+                lines.append(f"# TODO: wire library '{lib}' once the v0.4 enable lands")
         lines.append("")
 
     return "\n".join(lines) + "\n"
+
+
+# Library-name -> Kconfig flag(s) to set when the library appears
+# in alp.yaml's `libraries:` array.  Some libraries map to multiple
+# CONFIG_* settings (e.g. lvgl needs both CONFIG_LVGL and a font
+# pack).  Entries are tuples so the loader emits them in order.
+_LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
+    # SDK-internal libs (Tier 3) -- gated by ALP-side flags
+    "lwrb":          ("CONFIG_ALP_SDK_USE_LWRB=y",),
+    "nanopb":        ("CONFIG_ALP_SDK_USE_NANOPB=y",),
+    # User-facing C++ libs (Tier 1) -- header-only, no Kconfig
+    # in Zephyr; the loader just adds the profile dir to the
+    # include path via a v0.4 CMake hook.  The TODO comment
+    # surfaces in the emitted alp.conf so consumers can see
+    # what's pending.
+    "etl":           ("# etl: include path + ETL_NO_STL via the v0.4 loader hook",),
+    "fmt":           ("# fmt: include path + FMT_HEADER_ONLY via the v0.4 loader hook",),
+    "nlohmann_json": ("# nlohmann_json: include path + JSON_NOEXCEPTION via the v0.4 loader hook",),
+    "doctest":       ("# doctest: include path + DOCTEST_CONFIG_NO_POSIX_SIGNALS via the v0.4 loader hook",),
+    # Zephyr-native libs (Tier 3) -- the SDK just forwards the
+    # consumer's intent to Zephyr's own Kconfig + adds the profile
+    # header to the include path.
+    "lvgl":          ("CONFIG_LVGL=y",),
+    "mbedtls":       ("CONFIG_MBEDTLS=y", "CONFIG_MBEDTLS_BUILTIN=y"),
+    "cmsis_dsp":     ("CONFIG_CMSIS_DSP=y",),
+    "littlefs":      ("CONFIG_FILE_SYSTEM_LITTLEFS=y", "CONFIG_FILE_SYSTEM=y"),
+}
 
 
 def _emit_cmake(
