@@ -9,6 +9,24 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Changed
 
+- `yocto/meta-alp/` rebased on the **Renesas RZ/V2N AI SDK 7.10**
+  BSP.  Earlier README + layer.conf referenced `meta-renesas-rz`
+  (no such repo); the canonical layer is `meta-renesas` at
+  <https://github.com/renesas-rz/meta-renesas>, distributed via
+  the AI SDK 7.10 tarball (`RTK0EF0045Z94001AZJ-v1.0.3.zip` on
+  My Renesas -- free signup, no NDA for the standard build).
+  meta-alp now `LAYERRECOMMENDS` `meta-renesas` plus the four
+  `meta-rz-features/*` sublayers (`meta-rz-graphics`,
+  `meta-rz-drpai`, `meta-rz-opencva`, `meta-rz-codecs`) +
+  `meta-econsys` for the camera path + `meta-deepx-m1` for
+  V2N-M1.  `e1m-x-v2n.conf` now inherits from Renesas's stock
+  `rzv2n-evk` MACHINE (vs the earlier guess at a `rzv2n-common.inc`
+  include path).  Carrier-specific DTB stays TBD per the
+  user-supplied HW config writeup; build falls back to Renesas's
+  stock V2N-EVK DTB until then.  Yocto Scarthgap (5.0.11)
+  is the recommended series; Kirkstone still listed as
+  compatible.  Full step-by-step recipe in
+  `yocto/meta-alp/README.md`.
 - `vendors/deepx-dxm1/README.md` rebased on the actual DEEPX
   software distribution.  Earlier copy described the runtime as
   "proprietary, sign in at developer portal"; the source is in
