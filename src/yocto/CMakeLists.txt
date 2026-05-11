@@ -60,10 +60,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2c.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart.c
     )
     target_compile_definitions(alp_sdk PRIVATE
         ALP_VENDOR_OVERRIDES_I2C=1
         ALP_VENDOR_OVERRIDES_SPI=1
+        ALP_VENDOR_OVERRIDES_UART=1
     )
 endif()
 

@@ -15,6 +15,21 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **Yocto first-class peripheral wrappers — UART class (v0.4 prep).**
+  `src/yocto/peripheral_uart.c` binds `alp_uart_*` against the
+  Linux tty layer via termios.  Port-id resolution is a small
+  table: 0..99 -> `/dev/ttyS<id>`, 100..199 -> `/dev/ttyAMA<id-100>`,
+  200+ -> `/dev/ttyUSB<id-200>`.  Configures data/stop/parity via
+  `c_cflag` and baud via `cfsetispeed` + `cfsetospeed`; supported
+  baud rates are the standard termios constants (9600 through
+  3 Mbps), unknown values return `ALP_ERR_INVAL`.  Reads honour
+  `timeout_ms` via `VMIN=1` + `VTIME = ceil(timeout_ms / 100)`,
+  returning `ALP_ERR_TIMEOUT` on a clean timeout-with-no-bytes
+  and `ALP_OK` on a partial read that beat the timeout.  Writes
+  loop on `EINTR`.  Same per-class gate (`ALP_VENDOR_OVERRIDES_UART`).
+  Failure-path coverage at `tests/yocto/peripheral_uart.c` (NULL
+  cfg, invalid data/stop bits, unsupported baud, /dev/ttyS999 ->
+  ENOENT, NULL handle on read/write, close-NULL safety).
 - **Yocto first-class peripheral wrappers — SPI class (v0.4 prep).**
   `src/yocto/peripheral_spi.c` binds `alp_spi_*` against Linux
   spidev (`/dev/spidev<bus_id>.<cs_pin_id>`).  Direct two-axis

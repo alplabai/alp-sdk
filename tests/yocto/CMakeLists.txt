@@ -52,4 +52,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_test(NAME alp_test_peripheral_spi
              COMMAND alp_test_peripheral_spi)
+
+    add_executable(alp_test_peripheral_uart
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart.c
+    )
+    target_link_libraries(alp_test_peripheral_uart PRIVATE alp::sdk)
+    target_include_directories(alp_test_peripheral_uart PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_peripheral_uart PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_uart
+             COMMAND alp_test_peripheral_uart)
 endif()
