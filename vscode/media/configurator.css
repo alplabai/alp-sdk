@@ -1,0 +1,111 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+body {
+    font-family: var(--vscode-font-family);
+    color: var(--vscode-foreground);
+    background-color: var(--vscode-editor-background);
+    padding: 1.5rem 2rem;
+    max-width: 720px;
+    line-height: 1.5;
+}
+
+h1 {
+    font-size: 1.5rem;
+    margin: 0 0 0.25rem;
+}
+
+.subtitle {
+    margin: 0 0 1.5rem;
+    color: var(--vscode-descriptionForeground);
+}
+
+section {
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+}
+
+section h2 {
+    font-size: 1rem;
+    margin: 0 0 0.5rem;
+    color: var(--vscode-textLink-foreground);
+}
+
+label {
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+label > code {
+    background-color: var(--vscode-textBlockQuote-background);
+    padding: 0 0.25rem;
+}
+
+select,
+input[type="number"] {
+    width: 100%;
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 0.25rem 0.5rem;
+    border-radius: 2px;
+}
+
+input[type="checkbox"] {
+    margin-right: 0.5rem;
+}
+
+details {
+    margin-top: 0.5rem;
+}
+
+summary {
+    cursor: pointer;
+    color: var(--vscode-textLink-foreground);
+}
+
+.populated-row,
+.library-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.25rem;
+}
+
+.populated-row label,
+.library-row label {
+    margin: 0;
+    flex: 1;
+}
+
+.populated-row .source,
+.library-row .source {
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.85em;
+    margin-left: 0.5rem;
+}
+
+.actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+button {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: 1px solid var(--vscode-button-border, transparent);
+    padding: 0.4rem 1rem;
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+#status {
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.9em;
+}
