@@ -724,6 +724,20 @@ config ALP_SDK_CHIP_INA236
 	  and reports bus voltage in mV, shunt voltage in uV,
 	  current in uA, and power in uW.
 
+config ALP_SDK_CHIP_ACT8760
+	bool "Qorvo / Active-Semi ACT88760 primary PMIC (CMI 120.E1)"
+	depends on I2C
+	help
+	  Compile chips/act8760/act8760.c.  The V2N / V2N-M1 SoMs
+	  populate the ACT88760-120.E1 variant: 7x bucks, 6x LDOs,
+	  11x GPIOs, dual-page I2C interface at 0x25 + 0x26 on
+	  BRD_I2C (Renesas RIIC8).  Power-tree config is burned in
+	  the chip's CMI via Qorvo's ActiveCiPS dongle; runtime I2C
+	  is volatile-only and used here for telemetry + DVS.
+	  Provides act8760_init, act8760_get_status, raw register
+	  R/W on either page, and rail-by-rail VSET access (the
+	  VSET register offsets are still TODO; see act8760.c).
+
 endmenu # "ALP SDK chip drivers"
 
 endif # ALP_SDK

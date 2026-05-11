@@ -22,6 +22,28 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **`chips/act8760/` ACT88760 primary PMIC driver scaffolding (2026-05-12).**
+  Stub-status driver for the **Qorvo ACT88760-120.E1** primary PMIC
+  populated on the V2N + V2N-M1 SoMs.  Dual-page I2C interface
+  (`0x25` system / Buck1..Buck6 / GPIOs; `0x26` Buck7 / LDO1..LDO6)
+  on BRD_I2C.  `act8760_init` probes both pages, `act8760_get_status`
+  decodes the TWARN / SYSWARN / SYSDAT / ILIM bits from the
+  system-status register (read-to-clear nIRQ semantics), and raw
+  register R/W is exposed on both pages.  Per-rail VSET access
+  is wired but returns `ALP_ERR_NOSUPPORT` until the VSET register
+  offsets are confirmed against the Users Guide Rev 3.0 table -- a
+  follow-up will replace the TODO offsets in `chips/act8760/act8760.c`.
+  CMI 120.E1 burns the production power-tree (rail voltages, GPIO
+  assignments, power-on sequence) into the chip's non-volatile
+  memory via Qorvo's ActiveCiPS dongle from the `.iact` profile
+  archived in OneDrive (`Alp CMI/ACT88760_120.E1.26072083.iact`);
+  runtime I2C is volatile-only and used here for telemetry + DVS.
+  New Kconfig: `CONFIG_ALP_SDK_CHIP_ACT8760` (off by default).
+  Header: `<alp/chips/act8760.h>`.  Manifest:
+  `metadata/chips/act8760.yaml` (introduces the `metadata/chips/`
+  directory; per-chip manifests for the other V2N populated parts
+  land alongside their drivers).
+
 - **Renesas Ethernet + eMMC + uSD + xSPI NOR-flash pin assignments (2026-05-11).**
   Maintainer supplied four additional schematic excerpts.  63 new
   rows added to `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`:

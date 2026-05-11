@@ -1,0 +1,73 @@
+# ALP SDK chip manifest: ACT88760 primary PMIC (CMI 120.E1).
+#
+# Read by scripts/alp_project.py and alp-studio's pin allocator to
+# resolve a populated `on_module.<role>: act8760` reference in a
+# SoM's som.yaml into the driver's I2C address + the Kconfig symbol
+# that has to flip on for the chip code to compile in.
+#
+# Driver status table:
+#   stub      -- header + probe + raw register R/W; no decoded
+#                rail accessors yet.
+#   partial   -- some rail accessors land; others remain TODO.
+#   complete  -- full register map exercised, all rails decoded.
+schema_version:   1
+chip_id:          act8760
+driver_status:    stub          # init+probe+raw R/W; VSET decode TODO
+display_name:     "Qorvo ACT88760-120.E1 primary PMIC"
+vendor:           qorvo         # formerly Active-Semi; brand-merged 2023
+mpn_population:
+  - "ACT88760-120.E1.xxT"       # CMI 120.E1 in WLCSP 81-ball
+  - "ACT88760-120.E1.xxT.zzz"   # any production-test suffix
+datasheet:
+  primary:        "ACT88760 Datasheet Rev C.pdf"  # 2025-08-05, Qorvo
+  users_guide:    "ACT88760 Users Guide-Rev3.0 20210101.pdf"
+  cmi_profile:    "ACT88760_120.E1.26072083.iact"  # Alp CMI snapshot
+  power_sequence: "ACT88760_CMI120 Power Sequence_250916.pdf"
+  v2n_seq_diagram: "e1m-x_v2n-m1_power_sequence-power-on.pdf"
+
+bus:              i2c
+i2c:
+  addresses:                    # both pages live on the same bus
+    - { page: 0, addr_7bit: 0x25, scope: "system + Buck1..Buck6 + GPIOs" }
+    - { page: 1, addr_7bit: 0x26, scope: "Buck7 + LDO1..LDO6" }
+  max_clock_hz:   1000000       # datasheet: 1 MHz I2C
+
+# Per-rail manifest -- the rail names + intended target voltages live
+# in the V2N power-sequence PDF.  Filling them in fully requires
+# decoding the .iact CMI profile (XML) or reading the Users Guide
+# VSET-to-mV table for each Buck/LDO range setting.  Until then this
+# block lists the rails the V2N CMI populates with TBD voltages.
+rails:
+  - { id: buck1, page: 0, role: "TBD per CMI 120.E1 power-on diagram" }
+  - { id: buck2, page: 0, role: "TBD" }
+  - { id: buck3, page: 0, role: "TBD" }
+  - { id: buck4, page: 0, role: "TBD" }
+  - { id: buck5, page: 0, role: "TBD" }
+  - { id: buck6, page: 0, role: "TBD" }
+  - { id: buck7, page: 1, role: "TBD" }
+  - { id: ldo1,  page: 1, role: "TBD" }
+  - { id: ldo2,  page: 1, role: "TBD" }
+  - { id: ldo3,  page: 1, role: "TBD" }
+  - { id: ldo4,  page: 1, role: "TBD" }
+  - { id: ldo5,  page: 1, role: "TBD; may be configured as load switch" }
+  - { id: ldo6,  page: 1, role: "TBD; may be configured as load switch" }
+
+# Pin-level signals the driver expects the carrier to route.  TWARN
+# is exposed inside the IC's status register (no dedicated pin); the
+# real-world status signals that DO exit the WLCSP are nIRQ + nRESET
+# + nPB + PWREN/PWRON.
+signals:
+  - { name: nIRQ,    type: input,  notes: "interrupt to host on unmasked fault" }
+  - { name: nRESET,  type: input,  notes: "reset output to system processor" }
+  - { name: PWREN,   type: output, notes: "primary power-enable input from host" }
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_ACT8760
+  baremetal:      ALP_SDK_CHIP_ACT8760    # same symbol; build glue picks the impl
+  yocto:          n/a                      # Linux uses Active-Semi's regulator
+                                           # framework provider, not this driver
+
+# Populated on:
+families:
+  - v2n           # E1M-X V2N base (E1M-V2N101, E1M-V2N102)
+  - v2n-m1        # E1M-X V2N-M1 (E1M-V2M101, E1M-V2M102) -- inherited V2N-common
