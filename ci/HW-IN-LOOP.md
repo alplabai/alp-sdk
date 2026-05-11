@@ -93,7 +93,28 @@ Flaky HIL tests have to be quarantined explicitly — there is no
 
 ## Future runners
 
-- `hil-v2n` — E1M EVK + E1M-V2N101 SoM.  Targets v0.2.
+- `hil-yocto` — E1M-X EVK + E1M-V2N101 OR E1M EVK + E1M-N93 SoM
+  running a `meta-alp`-built Yocto image.  Gates every 🟡 row in
+  `docs/test-plan.md`'s Yocto section -- the Yocto core-4
+  peripherals, MQTT cleartext + TLS, ALSA audio, OpenSSL security
+  backend, GPIO IRQ dispatcher, and Mender OTA wiring all flip
+  from 🟡 to ✅ on a green `hil-yocto` run.  Runner-host setup
+  mirrors the `hil-aen` contract above, plus:
+  - **Hardware:** a representative Yocto SoM (V2N or i.MX 93) on
+    the matching EVK, networked to the runner host over Ethernet.
+  - **Image:** built from `meta-alp`'s `core-image-weston` recipe
+    with the Mender opt-in enabled (`require conf/distro/include/mender.inc`)
+    for OTA roundtrip tests.
+  - **Probes:** Saleae Logic Pro / equivalent for signal capture
+    (I²S tone FFT, GPIO edge timing).
+  - **Audio:** USB sound card on the runner host loops back the
+    SoM's I²S DAC output for the ALSA audio capture test.
+  - **Broker:** the runner host runs a local Mosquitto broker
+    (cleartext on 1883, TLS on 8883 with a per-runner self-signed
+    cert) for the MQTT roundtrip rows.
+  Targets v0.4.  Workflow: `nightly-yocto-hil.yml` (TBD).
+- `hil-v2n` — alias to be deprecated; `hil-yocto` with the V2N
+  population covers this.
 - `hil-v2n-m1` — E1M EVK + E1M-V2N-M1 SoM (DRP-AI3 + DEEPX DX-M1).
   Targets v0.3.
 - `hil-aen-e3` and `hil-aen-e8` — coverage of the cheaper / pricier

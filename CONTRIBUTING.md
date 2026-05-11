@@ -39,14 +39,14 @@ signatures), if you have one in mind.
    A feature that doesn't appear in the test plan does **not**
    ship -- code that nobody has committed to verifying isn't a
    release deliverable.
-5. Run the build matrix locally before opening a PR:
+5. Run the full local matrix before opening a PR:
    ```bash
-   # Host smoke
-   cmake -B build -DALP_BUILD_TESTS=ON
-   cmake --build build
-   ctest --test-dir build --output-on-failure
+   bash scripts/bootstrap.sh                    # one-time
+   export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
+   bash scripts/test-all.sh                     # ctest + twister + format + Doxygen
    ```
-   For Zephyr targets, `west build -b <board>` against your test app.
+   See [`docs/testing.md`](docs/testing.md) for the per-stage
+   breakdown + how to run individual layers.
 6. Open a PR; CI runs the AEN-Zephyr, AEN-baremetal, and V2N-Yocto
    matrices.  CI green is necessary but not sufficient for tagging
    a release -- the test-plan row also has to flip to `✅`.

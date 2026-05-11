@@ -40,7 +40,7 @@ Bad / costs: ...
 | [0003](0003-peripheral-coverage.md)      | Wrap 12 peripheral classes at v0.2, not just I2C/SPI/GPIO/UART | Accepted |
 | [0004](0004-e1m-portability-bound.md)    | E1M-spec instance counts as the portability bound | Accepted |
 | [0005](0005-alp-sdk-vs-alp-studio-boundary.md) | alp-sdk vs alp-studio repo boundary (dual-use acid test) | Accepted |
-| [0006](0006-secure-boot-secure-ota.md)   | Secure boot (vendor-native) + secure OTA (MCUboot / RAUC) | Accepted (v0.4 delivery) |
+| [0006](0006-secure-boot-secure-ota.md)   | Secure boot (vendor-native) + secure OTA (MCUboot + Mender) | Accepted, partially superseded (2026-05-11 amendment: Mender replaces RAUC on Linux side; AEN-Zephyr OTA client choice pending) |
 
 ## When to write an ADR
 

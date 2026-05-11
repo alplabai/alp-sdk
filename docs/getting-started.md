@@ -10,8 +10,8 @@ If you'd rather skim, the fastest path is:
 ```bash
 git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
-west init -l .                                       # one-time
-west update                                          # one-time, ~10 min
+bash scripts/bootstrap.sh                            # one-time: west + Python + apt hints
+export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
 west alp-build -b native_sim/native/64 examples/gpio-button-led
 west build -d build -t run
 # expect: [gpio] init button=ALP_E1M_GPIO_IO0, led=ALP_E1M_GPIO_IO1
@@ -19,10 +19,24 @@ west build -d build -t run
 #          [gpio] done
 ```
 
+`scripts/bootstrap.sh` is the canonical fresh-clone setup -- it
+creates the Zephyr workspace one level up from `alp-sdk/`, runs
+`west update --narrow`, installs the Zephyr Python deps + the
+SDK's extras (`jsonschema`, `imgtool`), and prints OS-specific
+`apt` / `brew` commands for the optional native libraries the
+Yocto-side backends need.
+
 `west alp-build` validates the example's `board.yaml`, generates
 the build-time config from it, and delegates to `west build`.
 The rest of this document explains *why* each step is what it is
 so you can adapt it to your own project.
+
+For a full local verification pass (everything CI runs short of
+real-hardware HIL), see [`docs/testing.md`](testing.md):
+
+```bash
+bash scripts/test-all.sh
+```
 
 ## 1. Prerequisites
 
@@ -35,7 +49,7 @@ you install them.
 |-------------|------------------|----------------------------------------------------------|
 | Zephyr      | v3.7.0 LTS       | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
 | Python      | 3.10+            | For `west`, the v0.3 loader (`alp_project.py`), validators. |
-| Python deps | `pyyaml`, `jsonschema` | `pip install pyyaml jsonschema` -- needed by the loader. |
+| Python deps | `pyyaml`, `jsonschema`, `imgtool` | All installed by `scripts/bootstrap.sh`; manual install: `pip install pyyaml jsonschema imgtool`. |
 | CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |
 | west        | 1.2+             | `pip install west` if your distro doesn't ship it.       |
@@ -205,8 +219,8 @@ Every wrapped peripheral has a corresponding example:
 
 ```bash
 for ex in pwm-led-fade adc-voltmeter i2c-scanner spi-loopback \
-          uart-echo counter-alarm rtc-clock wdt-feed can-loopback \
-          i2s-tone qenc-readout; do
+          uart-echo uart-rx-ringbuf counter-alarm rtc-clock wdt-feed \
+          can-loopback i2s-tone qenc-readout; do
     west build -b native_sim/native/64 alp-sdk/examples/$ex \
         -d build/$ex
     west build -d build/$ex -t run
@@ -329,3 +343,7 @@ Key tasks (Command Palette → **Tasks: Run Task**):
 - **Hardware specs**: [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
 - **Per-version roadmap**: [`VERSIONS.md`](../VERSIONS.md)
 - **Contributor guide**: [`CONTRIBUTING.md`](../CONTRIBUTING.md)
+- **Testing coverage map**: [`docs/testing.md`](testing.md)
+- **Verification ledger** (⏳/🟡/✅): [`docs/test-plan.md`](test-plan.md)
+- **Secure boot chain + key lifecycle**: [`docs/secure-boot.md`](secure-boot.md)
+- **OTA strategy** (Yocto Mender + AEN-Zephyr pending decision): [`docs/ota.md`](ota.md)

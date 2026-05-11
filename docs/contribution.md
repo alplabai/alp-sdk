@@ -28,24 +28,22 @@ signatures), if you have one.
 2. Keep changes scoped to one library or one SoM at a time.
 3. Add or update tests under `tests/`.  Every public function must
    have at least one Unity / ztest test (the v0.1 quality bar).
-4. Run the local test matrix before opening a PR:
+4. Run the full local matrix before opening a PR:
    ```bash
-   # Host smoke
-   cmake -B build -DALP_BUILD_TESTS=ON
-   cmake --build build
-   ctest --test-dir build --output-on-failure
+   bash scripts/bootstrap.sh                    # one-time fresh-clone setup
+   export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
+   bash scripts/test-all.sh                     # ctest + twister + format + Doxygen
    ```
-   For Zephyr targets, point twister at the suite:
-   ```bash
-   ZEPHYR_BASE=~/zephyrproject/zephyr \
-   python3 ~/zephyrproject/zephyr/scripts/twister \
-     --testsuite-root tests/zephyr \
-     -p native_sim/native/64 \
-     --extra-args=-DEXTRA_ZEPHYR_MODULES=$(pwd)
-   ```
+   `test-all.sh` accepts `--quick` (skip twister + Doxygen),
+   `--yocto-only`, `--zephyr-only`, and `--no-clean` for tighter
+   inner loops.  See [`docs/testing.md`](testing.md) for the
+   per-stage breakdown.
 5. Open a PR.  CI runs the AEN-Zephyr, AEN-baremetal, and V2N-Yocto
    matrices (whichever exist for the version you're branching from —
-   see [`VERSIONS.md`](../VERSIONS.md)).
+   see [`VERSIONS.md`](../VERSIONS.md)).  Append a row to
+   [`docs/test-plan.md`](test-plan.md) for any new feature, default
+   `⏳ untested`; CI green is necessary but not sufficient to flip
+   the row to `✅` -- real-hardware HIL evidence does.
 
 ## Code style
 

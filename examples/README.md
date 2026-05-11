@@ -29,6 +29,7 @@ for why the standalone path is first-class.
 | [`i2c-scanner/`](i2c-scanner/)           | `peripheral.h` (I²C) | 7-bit address scan via zero-length writes.                              |
 | [`spi-loopback/`](spi-loopback/)         | `peripheral.h` (SPI) | Full-duplex transceive without a CS GPIO.                               |
 | [`uart-echo/`](uart-echo/)               | `peripheral.h` (UART) | Read with timeout, mirror-write back.                                  |
+| [`uart-rx-ringbuf/`](uart-rx-ringbuf/)   | `peripheral.h` (UART RX ringbuf) | Interrupt-driven RX path staging bytes into an LwRB-backed ring; consumer pops batched bytes without polling. Demonstrates the v0.4-prep `alp_uart_rx_ringbuf_*` API. |
 | [`pwm-led-fade/`](pwm-led-fade/)         | `pwm.h`       | Linear duty sweep on PWM0 demonstrating `set_duty`.                     |
 | [`adc-voltmeter/`](adc-voltmeter/)       | `adc.h`       | One-shot read in µV + capability-validation rejection of an oversized resolution. |
 | [`counter-alarm/`](counter-alarm/)       | `counter.h`   | One-shot alarm at 100 ms via the counter API.                           |

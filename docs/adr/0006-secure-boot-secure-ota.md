@@ -1,7 +1,8 @@
 # 0006. Secure boot + secure OTA
 
-Status: Accepted (v0.4 delivery)
+Status: Accepted, partially superseded (v0.4 delivery)
 Date: 2026-05-10
+Amended: 2026-05-11 (see "Amendment" section at the bottom)
 
 ## Context
 
@@ -172,6 +173,59 @@ Internally:
 | Provisioning walkthrough                   | `docs/secure-boot-provisioning.md` -- v0.4             |
 | OTA bring-up example                       | `examples/iot-ota-aen/` -- v0.4                        |
 
+## Amendment (2026-05-11)
+
+The v0.4-prep work has diverged from the original ADR on two
+points.  This section is the authoritative current direction; the
+sections above remain for the audit trail.
+
+**1. Linux OTA agent: Mender, not RAUC.**
+
+The original decision picked RAUC for the Linux side.  v0.4-prep
+landed Mender wiring instead, via
+[`yocto/meta-alp/conf/distro/include/mender.inc`](../../yocto/meta-alp/conf/distro/include/mender.inc).
+Rationale for the switch:
+
+- Mender's hosted server + on-target client are mature and
+  well-documented; RAUC's reference server (Hawkbit-via-RAUC) is
+  thinner.
+- A separate ALP-owned OTA-server project (in another repo) is
+  planned -- starting Mender-protocol-compatible keeps the device
+  side unchanged when that server replaces the hosted Mender
+  instance.
+- Mender's swap semantics (A/B rootfs + U-Boot integration +
+  commit health-check) are essentially identical to RAUC's; no
+  feature loss on the switch.
+
+**2. AEN-Zephyr OTA client: decision pending.**
+
+The original ADR commits AEN-Zephyr to MCUboot's swap-with-revert
+flow.  MCUboot scaffolding has landed
+([`sysbuild/aen/sysbuild.conf`](../../sysbuild/aen/sysbuild.conf) +
+[`docs/secure-boot.md`](../secure-boot.md)).  The OTA-delivery
+half (Mender Zephyr client vs Hawkbit-on-Zephyr) is **decision
+pending** for v0.4-final -- see
+[`docs/ota.md`](../ota.md) for the two-option analysis.
+
+**3. `alp_ota_*` API not declared yet.**
+
+The ADR specified a new sub-surface in `<alp/iot.h>`
+(`alp_ota_open` / `_check` / `_apply` / `_rollback`).  This
+**hasn't shipped** as of 2026-05-11.  The current Yocto-side
+delivery vehicle is plain Mender (operators interact with
+`mender-client` / `mender-connect` directly on the device); the
+v0.4-final cycle decides whether to add the `alp_ota_*` wrapper
+on top, or treat Mender's client API as the public surface
+directly.
+
+**4. Cross-cutting OTA doc.**
+
+The original ADR didn't anticipate
+[`docs/ota.md`](../ota.md), which now carries the trust-model +
+flow + decision-pending notes for both backends.  That doc is the
+operator-facing reference; this ADR is the historical decision
+record.
+
 ## See also
 
 - [ADR 0001](0001-wrapper-on-top-of-zephyr.md) -- the layering
@@ -183,7 +237,11 @@ Internally:
   manufacturing flow (out of scope for both).
 - [`VERSIONS.md`](../../VERSIONS.md) -- the v0.4 milestone
   carries the actual delivery.
+- [`docs/secure-boot.md`](../secure-boot.md) -- current MCUboot
+  chain-of-trust + key lifecycle for AEN-Zephyr.
+- [`docs/ota.md`](../ota.md) -- current OTA story (Yocto Mender
+  flow + AEN-Zephyr decision pending).
 - [MCUboot project](https://docs.mcuboot.com/) -- upstream
   reference for the Zephyr-side flow.
-- [RAUC project](https://rauc.io/) -- upstream reference for
-  the Linux-side flow.
+- [Mender project](https://mender.io/) -- upstream reference for
+  the Linux-side flow (substituted for RAUC per the Amendment).

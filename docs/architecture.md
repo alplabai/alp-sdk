@@ -127,11 +127,11 @@ not others.
 | Camera           | `alp/camera.h`       | Zephyr `video_*` API.  V2N MIPI CSI-2 wrapper in v0.2.          | v0.1 stub (NOSUPPORT) |
 | GUI/LVGL         | `alp/gui.h`          | Upstream LVGL with an ALP `lv_conf.h`.                         | Header re-export only — no custom widgets |
 | Math / DSP       | _(no ALP wrapper)_   | Use CMSIS-DSP (`arm_math.h`) directly from app code; ALP SDK does not re-export it.  SDK internals may pull CMSIS-DSP in for filtering / FFT inside `<alp/audio.h>` etc. when `ALP_HAS_CMSIS_DSP` is set. | Removed in pre-v0.1; `<alp/math.h>` and `<alp/signal.h>` were thin re-exports that added no value. |
-| IoT              | `alp/iot.h`          | Zephyr `net_*` + MQTT client (AEN); Linux net + libmosquitto (Yocto). | v0.1 stub; Yocto MQTT code complete via libmosquitto (v0.4 prep, `pkg_check_modules`-gated), **broker roundtrip untested** -- see [test-plan.md](test-plan.md); Zephyr Wi-Fi+MQTT v0.4 |
-| Audio            | `alp/audio.h`        | Zephyr `audio_dmic` + `i2s_*` chains; ALSA on Yocto.            | v0.1 surface; impl v0.2 |
+| IoT              | `alp/iot.h`          | Zephyr `net_*` + MQTT client (AEN); Linux net + libmosquitto (Yocto). | v0.1 surface; Yocto MQTT cleartext + TLS (`mqtts://` via `mosquitto_tls_set`) code complete via libmosquitto (v0.4 prep, `pkg_check_modules`-gated), **broker roundtrip untested** -- see [test-plan.md](test-plan.md); Zephyr Wi-Fi+MQTT v0.4 |
+| Audio            | `alp/audio.h`        | Zephyr `audio_dmic` + `i2s_*` chains; ALSA `snd_pcm_*` on Yocto.| v0.1 surface; Zephyr backend v0.2; Yocto ALSA backend code complete v0.4-prep (`pkg_check_modules(alsa)`-gated), real capture/playback gates on `hil-yocto` |
 | BLE              | `alp/ble.h`          | Zephyr `bt` host stack (peripheral + central + GATT).           | v0.1 surface; impl v0.3 |
-| Security         | `alp/security.h`     | MbedTLS PSA Crypto API + per-SoC HW accelerators.              | v0.1 surface; impl v0.3 |
-| Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions. | v0.1 surface; impl v0.3 |
+| Security         | `alp/security.h`     | MbedTLS PSA Crypto API (Zephyr) + OpenSSL `EVP_*` (Yocto).      | v0.1 surface; Yocto OpenSSL backend (SHA-256/384/512, AES-128/256-GCM, ChaCha20-Poly1305, `alp_random_bytes`) code complete v0.4-prep with KATs green at `tests/yocto/security_openssl.c`; Zephyr MbedTLS impl v0.3 |
+| Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions; placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` (replaced by nanopb-generated codec in v0.4-final). | v0.1 surface; framing scaffolding v0.4-prep; full impl v0.3+ |
 
 ### Peripherals: how a block resolves to a backend
 
@@ -177,9 +177,13 @@ stays small.
 - Every public function has at least one Unity / ztest test under `tests/`.
 - CI builds three matrices: AEN-Zephyr (code complete; HIL pending),
   AEN-baremetal (stub OK at v0.1), V2N-Yocto (peripheral stubs
-  through v0.3; v0.4 prep merged I²C / SPI / UART / GPIO + MQTT on
-  `main` -- failure-path ctest green, real-hardware verification
+  through v0.3; v0.4 prep on `main` covers core-4 peripherals +
+  MQTT cleartext+TLS + ALSA audio + OpenSSL security + Mender
+  opt-in -- failure-path ctest green, real-hardware verification
   tracked in [test-plan.md](test-plan.md)).
+- Full local verification: [`scripts/test-all.sh`](../scripts/test-all.sh)
+  (wraps ctest + twister + clang-format + metadata-validate + Doxygen).
+  Coverage map: [`docs/testing.md`](testing.md).
 - No GPL dependencies.  Apache-2.0 / MIT / BSD only.
 
 ## Why this wrapper exists (despite Zephyr already abstracting vendors)

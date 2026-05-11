@@ -13,16 +13,21 @@ reference.
 | Workflow                                                                       | Trigger          | Status     | What it gates                                                                                  |
 |--------------------------------------------------------------------------------|------------------|------------|------------------------------------------------------------------------------------------------|
 | [`pr-twister.yml`](../.github/workflows/pr-twister.yml)                        | every PR + push  | active     | west init + west update (cached), twister against `tests/zephyr/**` + `examples/**` on `native_sim/native/64`.  PR fails if any ztest fails. |
-| [`pr-metadata-validate.yml`](../.github/workflows/pr-metadata-validate.yml)    | PR + push (paths)| active     | Validates every `metadata/socs/**/*.json` against `metadata/schemas/soc-spec-v1.schema.json` via `scripts/validate_metadata.py`.                |
+| [`pr-plain-cmake.yml`](../.github/workflows/pr-plain-cmake.yml)                | PR + push (paths)| active     | Plain-CMake builds for `ALP_OS=baremetal`, `ALP_OS=baremetal -DALP_SOM={aen,v2n}`, and `ALP_OS=yocto` with `ALP_BUILD_TESTS=ON`.  Installs `libmosquitto-dev` + `libasound2-dev` + `libssl-dev` + `pkg-config` so the Yocto-side wrappers (MQTT, ALSA audio, OpenSSL security) compile + their ctest binaries run. |
+| [`pr-static-analysis.yml`](../.github/workflows/pr-static-analysis.yml)        | PR + push        | active     | `clang-format-diff` on changed lines + `cppcheck` informational pass over `src/` + `chips/`.  Diff-only format check; v0.2 will gate on full tree. |
+| [`pr-generated-files.yml`](../.github/workflows/pr-generated-files.yml)        | PR + push (paths)| active     | Catches drift in `<alp/soc_caps.h>` (re-runs `scripts/gen_soc_caps.py`) and `docs/abi/*.json` (re-runs `scripts/abi_snapshot.py`).             |
+| [`pr-metadata-validate.yml`](../.github/workflows/pr-metadata-validate.yml)    | PR + push (paths)| active     | Validates every `metadata/socs/**/*.json` against the schema via `scripts/validate_metadata.py` + smoke-tests `scripts/alp_project.py` against `metadata/templates/board.yaml.example`. |
 | [`pr-doxygen.yml`](../.github/workflows/pr-doxygen.yml)                        | PR + push (paths)| active     | Generates Doxygen HTML from `include/alp/**`.  v0.1: warnings are informational; v1.0 will gate on zero warnings (per the quality bar in `VERSIONS.md`). |
+| [`pr-vscode-extension.yml`](../.github/workflows/pr-vscode-extension.yml)      | PR + push (paths)| active     | Compiles the in-tree `vscode/` extension and packages the `.vsix`.  Keeps the schema-aware `board.yaml` editor on a green baseline.            |
+| [`coverity.yml`](../.github/workflows/coverity.yml)                            | weekly + manual  | active     | Coverity Scan submission against <https://scan.coverity.com/projects/alplabai-alp-sdk>.  Secrets (`COVERITY_TOKEN`, `COVERITY_EMAIL`) provisioned; project name in the `COVERITY_PROJECT` Actions variable.       |
 | [`nightly-aen-hil.yml`](../.github/workflows/nightly-aen-hil.yml)              | nightly + manual | **skeleton**| HW-in-loop on a real E1M-AEN dev kit.  Runs only when a self-hosted runner with the `hil-aen` label is online — see [`HW-IN-LOOP.md`](HW-IN-LOOP.md).             |
 
 ## Workflows planned
 
 | Workflow                                                                       | Target version | Notes                                                                                              |
 |--------------------------------------------------------------------------------|----------------|----------------------------------------------------------------------------------------------------|
-| `pr-static-analysis.yml`                                                       | v0.2           | clang-tidy + cppcheck on `src/`, `chips/`, and `vendors/`.  Needs a `compile_commands.json` build first. |
-| `nightly-v2n-hil.yml`                                                          | v0.2           | HW-in-loop on a real E1M-V2N dev kit.  Runner label `hil-v2n`.                                     |
+| `nightly-yocto-hil.yml`                                                        | v0.4           | HW-in-loop on a real V2N or i.MX 93 EVK running a meta-alp Yocto image.  Runner label `hil-yocto`.  Flips every 🟡 Yocto row in `docs/test-plan.md` to ✅ on a green run. |
+| `nightly-v2n-m1-hil.yml`                                                       | v0.4           | HW-in-loop on a real V2N + DEEPX DX-M1 dev kit.  Runner label `hil-v2n-m1`.                        |
 | `release-abi-snapshot.yml`                                                     | v1.0           | Diffs `include/alp/**` ABI against the previous tag's snapshot; fails on breaking changes after v1.0. |
 | `release-publish-doxygen.yml`                                                  | v1.0           | Pushes Doxygen HTML to `gh-pages` on every release tag.                                            |
 
@@ -36,8 +41,17 @@ reference.
   ```
 - [`scripts/extract_pdf.py`](../scripts/extract_pdf.py) — pypdf
   text extraction used during datasheet ingestion (not in CI; dev tool).
-- (planned) `scripts/abi_snapshot.py` — generates a stable ABI
-  fingerprint from `include/alp/**` for the v1.0 release gate.
+- [`scripts/abi_snapshot.py`](../scripts/abi_snapshot.py) — generates a
+  stable ABI fingerprint from `include/alp/**`.  Re-run by
+  `pr-generated-files.yml` to catch drift; gates `include/alp/**`
+  diffs against `docs/abi/v0.1-snapshot.json` after v1.0.
+- [`scripts/bootstrap.sh`](../scripts/bootstrap.sh) — fresh-clone
+  developer setup (west workspace + Python deps + apt hints).
+  Not in CI; the CI workflows install equivalents inline.
+- [`scripts/test-all.sh`](../scripts/test-all.sh) — single-command
+  local verifier (ctest + twister + clang-format + metadata-validate +
+  Doxygen).  Mirrors every PR-time workflow except `coverity` and
+  `pr-vscode-extension`.  See [`docs/testing.md`](../docs/testing.md).
 
 ## Runner topology
 

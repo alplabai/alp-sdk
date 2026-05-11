@@ -94,14 +94,25 @@ need v0.4 fall back cleanly to the v0.3 state above.
 | **Peripherals (SPI)** (`<alp/peripheral.h>`) | planned   | **GA**           | code complete (untested) — spidev | code complete (untested) — spidev |
 | **Peripherals (UART)** (`<alp/peripheral.h>`)| planned   | **GA**           | code complete (untested) — termios | code complete (untested) — termios |
 | **Peripherals (GPIO + IRQ)** (`<alp/peripheral.h>`) | planned | **GA**    | code complete (untested) — chardev v2 + pthread `poll()` | code complete (untested) |
-| **IoT — MQTT** (`<alp/iot.h>`)       | n/a                  | planned (Zephyr `mqtt_*`) | code complete (untested) — libmosquitto | code complete (untested) — libmosquitto |
+| **Peripherals (UART RX ringbuf)** (`<alp/peripheral.h>`) | n/a | code complete (untested) — LwRB-backed IRQ drain | n/a (Linux kernel already buffers) | n/a |
+| **IoT — MQTT cleartext** (`<alp/iot.h>`) | n/a              | planned (Zephyr `mqtt_*`) | code complete (untested) — libmosquitto | code complete (untested) — libmosquitto |
+| **IoT — MQTT TLS** (`mqtts://`)      | n/a                  | planned          | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) |
 | **IoT — Wi-Fi station** (`<alp/iot.h>`) | n/a               | planned          | stub (system-config via wpa_supplicant/NM) | stub |
+| **Audio** (`<alp/audio.h>`)          | n/a                  | surface declared (impl v0.2) | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) |
+| **Security** (`<alp/security.h>`)    | planned              | surface declared (impl v0.3) | code complete (KATs green; meta-alp image build pending) — OpenSSL `EVP_*` | code complete (KATs green) |
+| **mproc IPC framing** (`<alp/mproc.h>`) | n/a               | code complete (untested) — placeholder 12-byte envelope; replaced by nanopb-generated codec in v0.4-final | n/a | n/a |
+| **MCUboot secure-boot scaffolding**  | n/a                  | sysbuild profile + dev-key generator + `docs/secure-boot.md` (compile-verification gates on `alp_e1m_evk_aen` board file) | n/a | n/a |
+| **Mender OTA (meta-alp opt-in)**     | n/a                  | doc-only (`mender-mcu-client` vs Hawkbit decision pending) | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) |
 
-The Yocto MQTT build is conditional on `pkg_check_modules(libmosquitto)`;
-workspaces without libmosquitto-dev on the sysroot keep the
-NOSUPPORT stubs.  Per-class `ALP_VENDOR_OVERRIDES_<CLASS>` macros
-in `src/common/stub_backend.c` let each peripheral class roll out
-independently across backends.
+The Yocto MQTT / audio / security backends are each conditional on
+their own `pkg_check_modules` check (`libmosquitto`, `alsa`,
+`libssl libcrypto`); workspaces without the matching `-dev` package
+on the sysroot keep the NOSUPPORT stubs.  Per-class
+`ALP_VENDOR_OVERRIDES_<CLASS>` macros in
+`src/common/stub_backend.c` let each surface roll out independently
+across backends -- the currently-defined gates are `I2C`, `SPI`,
+`UART`, `GPIO`, `MQTT`, `AUDIO_IN`, `AUDIO_OUT`, `SECURITY`, and
+`UART_RX_RINGBUF`.
 
 ## CMSIS-DSP per-SoM validation
 

@@ -20,3 +20,6 @@ west build -t run
 ## Reference
 
 - [`<alp/peripheral.h>`](../../include/alp/peripheral.h) UART surface
+- [`examples/uart-rx-ringbuf/`](../uart-rx-ringbuf/) — companion example for
+  the opt-in IRQ-driven `alp_uart_rx_ringbuf_*` API.  Reach for that when
+  the app needs to do other work while bytes trickle in.
