@@ -74,6 +74,14 @@ jobs:
         run: |
           pip3 install --break-system-packages -r zephyr/scripts/requirements.txt
 
+      # alp-sdk's CMake-time loader (scripts/alp_project.py) needs
+      # jsonschema in addition to PyYAML (already pulled in by
+      # Zephyr's requirements-base.txt).  Install it after the
+      # Zephyr deps so version pins don't override.
+      - name: pip install ALP SDK Python deps
+        run: |
+          pip3 install --break-system-packages jsonschema
+
       - name: debug · verify checkout paths are reachable inside container
         run: |
           echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
