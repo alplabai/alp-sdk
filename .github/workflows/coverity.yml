@@ -68,9 +68,42 @@ jobs:
 
       - name: Download Coverity Build Tool
         if: steps.token_check.outputs.configured == 'true'
+        env:
+          COV_TOKEN: ${{ secrets.COVERITY_TOKEN }}
+          # The Coverity API expects the project's *registered name*
+          # (GitHub-namespaced as "org/repo" for imported projects),
+          # not the URL slug shown in the badge link.  Override
+          # COVERITY_PROJECT in repo Actions vars if your project
+          # was registered under a different name.
+          COV_PROJECT: ${{ vars.COVERITY_PROJECT || 'alplabai/alp-sdk' }}
         run: |
-          wget -q -O cov-analysis.tar.gz \
-              "https://scan.coverity.com/download/cxx/linux64?token=${{ secrets.COVERITY_TOKEN }}&project=alplabai-alp-sdk"
+          # Coverity's documented form is POST with form-encoded body;
+          # GET with query string fails auth.  -f makes curl exit
+          # non-zero on >=400 responses; -S prints the error body so
+          # CI logs surface "invalid project" / "invalid token" /
+          # "rate-limited" instead of a silent exit-6.
+          HTTP_STATUS=$(curl --silent --show-error --output cov-analysis.tar.gz \
+              --write-out "%{http_code}" \
+              --data-urlencode "token=${COV_TOKEN}" \
+              --data-urlencode "project=${COV_PROJECT}" \
+              "https://scan.coverity.com/download/cxx/linux64")
+          echo "::notice::Coverity download HTTP ${HTTP_STATUS} for project ${COV_PROJECT}"
+          if [ "${HTTP_STATUS}" != "200" ]; then
+              echo "::error::Coverity download failed with HTTP ${HTTP_STATUS}"
+              echo "::group::Response body"
+              head -c 2000 cov-analysis.tar.gz || true
+              echo
+              echo "::endgroup::"
+              exit 1
+          fi
+          # Sanity-check: a real Coverity tarball starts with the gzip
+          # magic bytes (1F 8B).  HTML error pages with HTTP 200 do
+          # exist on this endpoint, so the byte check catches them.
+          if ! file cov-analysis.tar.gz | grep -q gzip; then
+              echo "::error::Coverity returned 200 but the payload is not a gzip archive"
+              head -c 500 cov-analysis.tar.gz
+              exit 1
+          fi
           mkdir -p cov-analysis
           tar -xzf cov-analysis.tar.gz -C cov-analysis --strip-components=1
           echo "$PWD/cov-analysis/bin" >> $GITHUB_PATH
@@ -91,11 +124,29 @@ jobs:
 
       - name: Submit to Coverity Scan
         if: steps.token_check.outputs.configured == 'true'
+        env:
+          COV_TOKEN: ${{ secrets.COVERITY_TOKEN }}
+          COV_EMAIL: ${{ secrets.COVERITY_EMAIL }}
+          COV_PROJECT: ${{ vars.COVERITY_PROJECT || 'alplabai/alp-sdk' }}
         run: |
-          curl --silent --show-error --fail \
-              --form token=${{ secrets.COVERITY_TOKEN }} \
-              --form email=${{ secrets.COVERITY_EMAIL }} \
-              --form file=@alp-sdk-cov.tgz \
-              --form version=${{ github.sha }} \
-              --form description="alp-sdk scheduled scan ${{ github.run_id }}" \
-              "https://scan.coverity.com/builds?project=alplabai-alp-sdk"
+          # Same project-name source-of-truth as the download step.
+          # The submit endpoint URL-encodes the project parameter
+          # itself when curl --data-urlencode is used.
+          HTTP_STATUS=$(curl --silent --show-error \
+              --write-out "%{http_code}" \
+              --output /tmp/cov-submit.log \
+              --form "token=${COV_TOKEN}" \
+              --form "email=${COV_EMAIL}" \
+              --form "file=@alp-sdk-cov.tgz" \
+              --form "version=${{ github.sha }}" \
+              --form "description=alp-sdk scheduled scan ${{ github.run_id }}" \
+              --form "project=${COV_PROJECT}" \
+              "https://scan.coverity.com/builds")
+          echo "::notice::Coverity submit HTTP ${HTTP_STATUS} for project ${COV_PROJECT}"
+          if [ "${HTTP_STATUS}" != "200" ] && [ "${HTTP_STATUS}" != "201" ]; then
+              echo "::error::Coverity submit failed with HTTP ${HTTP_STATUS}"
+              echo "::group::Response body"
+              cat /tmp/cov-submit.log || true
+              echo "::endgroup::"
+              exit 1
+          fi
