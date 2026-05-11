@@ -16,10 +16,12 @@ on:
       - 'metadata/**'
       - '.github/workflows/pr-metadata-validate.yml'
       - 'scripts/validate_metadata.py'
+      - 'scripts/alp_project.py'
   push:
     branches: [main]
     paths:
       - 'metadata/**'
+      - 'scripts/alp_project.py'
   workflow_dispatch:
 
 concurrency:
@@ -40,8 +42,38 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install jsonschema
-        run: pip install jsonschema
+      - name: Install Python deps
+        run: pip install jsonschema pyyaml
 
       - name: Validate every SoC file against the v1 schema
         run: python3 scripts/validate_metadata.py
+
+      # Smoke-test the alp.yaml loader on the canonical example so
+      # any schema / loader regression is caught at PR time rather
+      # than v0.4-load-test time.  Exercises every emit format.
+      - name: Smoke-test alp.yaml loader (zephyr-conf)
+        run: |
+          python3 scripts/alp_project.py \
+              --input metadata/templates/alp.yaml.example \
+              --emit zephyr-conf > /tmp/alp.conf
+          test -s /tmp/alp.conf
+          echo "--- generated zephyr-conf ---"
+          cat /tmp/alp.conf
+
+      - name: Smoke-test alp.yaml loader (cmake-args)
+        run: |
+          python3 scripts/alp_project.py \
+              --input metadata/templates/alp.yaml.example \
+              --emit cmake-args > /tmp/alp-cmake.txt
+          test -s /tmp/alp-cmake.txt
+          echo "--- generated cmake-args ---"
+          cat /tmp/alp-cmake.txt
+
+      - name: Smoke-test alp.yaml loader (yocto-conf)
+        run: |
+          python3 scripts/alp_project.py \
+              --input metadata/templates/alp.yaml.example \
+              --emit yocto-conf > /tmp/alp-yocto.conf
+          test -s /tmp/alp-yocto.conf
+          echo "--- generated yocto-conf ---"
+          cat /tmp/alp-yocto.conf

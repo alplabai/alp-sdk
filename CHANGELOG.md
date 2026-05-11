@@ -21,6 +21,32 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   shim, or (b) vendor a tagged release under `vendors/lwrb/src/`.
   Plan-A picked for v0.4 default.
 
+### Added
+
+- `scripts/alp_project.py` -- the `alp.yaml` **loader** that compiles
+  a project config into per-backend native output.  Validates against
+  the v1 schema, resolves the SoM SKU + carrier presets, merges
+  overrides, and emits one of three formats:
+    - `--emit zephyr-conf` (default): a Kconfig fragment for `prj.conf`
+      to append.  Picks the silicon `CONFIG_ALP_SOC_*=y`, the carrier
+      chip-driver `CONFIG_ALP_SDK_CHIP_*` flags, the inference
+      backend Kconfigs (`CONFIG_ALP_SDK_INFERENCE_TFLM` /
+      `_ETHOS_U` / `_DRPAI` / `_ETHOS_U_N93`), IoT features
+      (`CONFIG_ALP_SDK_IOT_WIFI` etc.), and library enables
+      (`CONFIG_ALP_SDK_USE_LWRB` / `_USE_NANOPB`).
+    - `--emit cmake-args`: plain-CMake configure args (`-DALP_SOM=...`,
+      `-DALP_OS=...`, `-DALP_SDK_USE_DEEPX_DXM1=ON` on V2N-M1).
+    - `--emit yocto-conf`: `local.conf` snippet (`MACHINE = "..."`,
+      `IMAGE_INSTALL:append`).
+  Python 3.10+; depends on `PyYAML` + `jsonschema` (the latter
+  already on the CI path).  CI smoke-tests all three emit formats
+  on `metadata/templates/alp.yaml.example` via the extended
+  `pr-metadata-validate` workflow -- catches schema / loader
+  regressions at PR time.
+- `metadata/templates/alp.yaml.example` -- a fully-uncommented
+  config the loader exercises end-to-end.  Distinct from
+  `alp.yaml` (the heavily-commented user template).
+
 ### Changed
 
 - `alp.yaml` schema split into SoM-vs-carrier blocks.  The first

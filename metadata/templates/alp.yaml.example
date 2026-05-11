@@ -1,0 +1,34 @@
+# Minimal alp.yaml example for testing scripts/alp_project.py.
+# This is a fully-uncommented config the loader can exercise
+# end-to-end; the rich commented template at alp.yaml is for
+# consumers.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701
+
+carrier:
+  name: E1M-EVK
+  populated:
+    bme280: false       # demonstrate an override
+
+os: zephyr
+
+inference:
+  backend: ethos_u
+  default_arena_kib: 128
+
+libraries:
+  - lwrb
+  - nanopb
+
+iot:
+  wifi: true
+  mqtt: true
+  ble: false
+  tls: true
+
+diagnostics:
+  last_error: true
+  log_level: info
