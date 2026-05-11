@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Registers alp-sdk's west-extension commands with any Zephyr
+# workspace that imports this repo as a module.  See
+# zephyr/module.yml's `west-commands:` field for how it's surfaced.
+
+west-commands:
+  - file: scripts/west_commands/alp.py
+    commands:
+      - name: alp-build
+        class: AlpBuild
+        help: Validate board.yaml + generate config + build an alp-sdk app

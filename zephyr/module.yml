@@ -11,3 +11,9 @@ build:
     # Expose dts/bindings/ to Zephyr's devicetree binding scanner so
     # boards / overlays can use compatible = "alp,pin-array".
     dts_root: .
+
+# Surface the `west alp-build` extension command (and any future
+# alp-sdk west commands) to workspaces that import this repo as a
+# Zephyr module.  Implementation lives at
+# scripts/west_commands/alp.py.
+west-commands: scripts/west-commands.yml
