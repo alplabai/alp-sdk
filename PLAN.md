@@ -359,7 +359,7 @@ that remain open take priority for the upcoming releases.
     `-D` flags (plain CMake), and `local.conf` (Yocto MACHINE +
     image install) separately to declare a single firmware
     target.  v0.3 introduces **`board.yaml`** -- one declarative
-    per-project file that picks the SoM SKU, per-component
+    per-project file that picks the SoM SKU (MPN), per-component
     carrier population, OS backend, inference backend, optional
     libraries, and connectivity features.  The
     `scripts/alp_project.py` loader compiles it down to the
@@ -374,15 +374,40 @@ that remain open take priority for the upcoming releases.
     The `board.yaml` schema's `som` block now covers SoM-fab-time
     fixed parts; the new `carrier` block covers per-board
     population.  Two stock carrier presets ship at
-    `metadata/carriers/e1m-evk.yaml` and `e1m-x-evk.yaml`,
-    explicitly positioned as **reference designs** that customer
-    carriers fork.  Worked customer-fork example at
-    `metadata/carriers/custom-example.yaml`.
+    `metadata/carriers/E1M-EVK/board.yaml` and
+    `metadata/carriers/E1M-X-EVK/board.yaml`, explicitly
+    positioned as **reference designs** that customer carriers
+    fork.  Worked customer-fork example at
+    `metadata/carriers/custom-example/board.yaml`.
 15. ~~**No CI gate on the project-config schema.**~~ The
     `pr-metadata-validate` workflow now smoke-tests
     `scripts/alp_project.py` against `metadata/templates/board.yaml.example`
     on every PR -- catches schema / loader regressions before
     they ship.
+16. ~~**Only two SKU presets shipped.**~~ The SDK now ships a
+    `som.yaml` preset for **every released MPN**:
+    `metadata/e1m_modules/<MPN>/som.yaml` exists for
+    AEN301/401/501/601/701/801, V2N101/V2N102, V2M101/V2M102,
+    and the NXP NX9101 placeholder.  Customer `board.yaml` is
+    typically three lines: `som.sku: <MPN>`, `carrier.name:
+    E1M-EVK`, `os: zephyr` -- the rest flows from the preset.
+    Per the project memory note "pending exact hardware
+    configurations", memory capacities + datasheet-specific
+    fields stay TBD in each preset until the user supplies
+    authoritative HW config writeups.
+17. ~~**Library wrappers were a chaos risk.**~~ Settled the
+    design: SDK does NOT ship `<alp/...>` wrappers around
+    upstream libraries (LVGL, ETLCPP, fmt, nlohmann/json,
+    MbedTLS, CMSIS-DSP, LittleFS, doctest).  Apps use the
+    upstream native API; the SDK ships compile-time profile
+    headers under `metadata/library-profiles/<lib>/` (named to
+    match each library's expected config filename:
+    `lv_conf.h`, `etl_profile.h`, `mbedtls_config.h`, ...)
+    so the library works under the SDK's invariants
+    (no exceptions, no `<iostream>`, no STL on M-class).
+    SDK-internal libraries (LwRB, nanopb) don't appear in the
+    user-facing `libraries:` enum -- they're pulled in
+    unconditionally when their consumer SDK code is built.
 
 ---
 

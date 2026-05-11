@@ -7,6 +7,36 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.1.0 candidate
 
+### Added
+
+- **SoM presets shipped for every released MPN.**  Per the design
+  directive "ship EVK configuration as board.yaml and prepare
+  som.yaml file for every MPN, so customer just included MPN
+  number in the board.yaml" -- the SDK now ships
+  `metadata/e1m_modules/<MPN>/som.yaml` for every released SoM:
+    - Alif Ensemble: `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`,
+      `AEN701`, `AEN801` (six MPNs; E3/E7 released silicon, the
+      rest preliminary).
+    - Renesas RZ/V2N: `E1M-V2N101`, `V2N102` (two MPNs differing
+      in DRAM + eMMC capacity).
+    - RZ/V2N + DEEPX DX-M1: `E1M-V2M101`, `V2M102` (two MPNs
+      mirroring the V2N split, plus the on-module DX-M1).
+    - NXP i.MX 93: `E1M-NX9101` placeholder (production MPN TBD).
+  Each preset fills in the on-module support silicon (CC3501E,
+  OPTIGA Trust M, RV-3028-C7, TMP112, 24C128 for AEN family;
+  Murata LBEE5HY2FY + GD32G553 + DA9292 + RTL8211FDI for V2N
+  family) from the existing module datasheet docs.  Per the
+  project memory note, memory capacities + per-MPN datasheet
+  specifics stay TBD until the user-supplied HW config writeup
+  fills them in.
+- **`docs/board-config.md` "Quick start" section** -- the
+  minimum-viable three-line `board.yaml`, a table of every
+  MPN the SDK ships a preset for, and a table of stock
+  carriers.  Customers paste their MPN and they're done.
+- **`docs/getting-started.md` "Project configuration" bullet**
+  rewritten around the "three lines: MPN + carrier + OS"
+  workflow.
+
 ### Changed
 
 - **`alp.yaml` renamed to `board.yaml`** -- the file describes

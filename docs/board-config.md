@@ -1,13 +1,60 @@
 # Project configuration (`board.yaml`)
 
 `board.yaml` is the **single file** that declares what a firmware
-project targets: which SoM SKU, which OS backend, which inference
-backend, which optional libraries, which connectivity features.
-Consumers place one at their app root, fill in the SoM SKU and any
-overrides, and the SDK's loader handles the rest.
+project targets: which SoM SKU (MPN), which carrier (daughter
+board), which OS backend, which inference backend, which optional
+libraries, which connectivity features.  Consumers place one at
+their app root, fill in their MPN, and the SDK's loader handles
+the rest.
 
-This document is the design + reference; if you just want to copy
-a template and start, see
+## Quick start: minimum-viable `board.yaml`
+
+Paste this into `board.yaml` at your app root, change the `sku`
+to your MPN, and you're done -- everything else is inherited from
+the SDK's per-MPN preset:
+
+```yaml
+schema_version: 1
+
+som:
+  sku: E1M-AEN701        # your MPN -- the SDK ships a preset
+                          # at metadata/e1m_modules/<MPN>/som.yaml
+
+carrier:
+  name: E1M-EVK          # or your own custom carrier name
+
+os: zephyr               # zephyr | yocto | baremetal
+```
+
+That's the whole config for a vanilla "E1M-AEN701 on the EVK
+running Zephyr" build.  Optional blocks (`inference`, `libraries`,
+`iot`, `diagnostics`) add capability on top -- omit them to get
+the defaults from the MPN's SoM preset.
+
+Released MPNs the SDK ships SoM presets for (look under
+`metadata/e1m_modules/<MPN>/som.yaml`):
+
+| Family            | MPNs (paste any into `som.sku`)                                              |
+|-------------------|------------------------------------------------------------------------------|
+| Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`               |
+| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`                                                       |
+| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                       |
+| NXP i.MX 93       | `E1M-NX9101` (production MPN TBD pending HW config)                          |
+
+Stock carriers (paste into `carrier.name`):
+
+| Carrier name  | Form factor   | Hosts                                  |
+|---------------|---------------|----------------------------------------|
+| `E1M-EVK`     | 35×35 carrier | E1M-AEN family, future E1M-N93 family  |
+| `E1M-X-EVK`   | 45×65 carrier | E1M-X V2N family, V2N-M1 family        |
+
+For custom carrier boards, the EVK preset works as the reference
+design customers fork -- see "Carrier" section below.
+
+---
+
+This document is the design + reference; if you want a deeper
+commented template see
 [`metadata/templates/board.yaml`](../metadata/templates/board.yaml).
 
 ## Single source of truth

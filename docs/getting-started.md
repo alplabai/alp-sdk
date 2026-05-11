@@ -259,14 +259,16 @@ Key tasks (Command Palette → **Tasks: Run Task**):
 ## 10. Where to go next
 
 - **Project configuration** -- `board.yaml` is the **single source
-  of truth** for your firmware's target.  One YAML file at your
-  app root declares which SoM SKU, which carrier, which OS
-  backend, which inference backend, which optional libraries,
-  which connectivity features.  Every other config artefact
-  (Zephyr `prj.conf`, CMake `-D` args, Yocto `local.conf`) is
-  derived output -- don't hand-edit them.  Read
-  [`docs/board-config.md`](board-config.md) for the model,
-  then copy
+  of truth** for your firmware's target.  The minimum-viable
+  config is three lines: pick your **MPN** (e.g. `E1M-AEN701`),
+  pick your **carrier** (e.g. `E1M-EVK`), pick your **OS**
+  (`zephyr` / `yocto` / `baremetal`).  Everything else flows from
+  the SDK-shipped per-MPN preset at
+  `metadata/e1m_modules/<MPN>/som.yaml`.  Every other config
+  artefact (Zephyr `prj.conf`, CMake `-D` args, Yocto
+  `local.conf`) is derived output -- don't hand-edit them.  Read
+  [`docs/board-config.md`](board-config.md) for the model + the
+  list of every MPN the SDK ships a preset for, then copy
   [`metadata/templates/board.yaml`](../metadata/templates/board.yaml)
   to your app root and edit.
 - Per-peripheral examples: [`examples/`](../examples/README.md)
