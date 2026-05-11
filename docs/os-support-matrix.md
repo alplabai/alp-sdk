@@ -1,10 +1,22 @@
 # OS Support Matrix
 
 Status keys:
-- **GA** — implemented, tested on real silicon, in CI.
+- **GA** — implemented **and verified end-to-end** on real silicon, in CI.
+  Verification evidence is captured in [`test-plan.md`](test-plan.md).
+- **code complete (untested)** — implementation merged + CI-linted;
+  no behavioural proof against real hardware yet.  See
+  [`test-plan.md`](test-plan.md) for what "verified" means per row.
 - **stub** — header surface compiles; functions return `ALP_ERR_NOSUPPORT`.
 - **planned** — declared roadmap, no code yet.
 - **n/a** — combination not targeted.
+
+> **Calibration note (2026-05-11).** Many rows tagged **GA** below
+> reference work the original v0.1 / v0.2 cycles completed *to the
+> code-merged bar*, but the SDK's first canonical HIL run is still
+> pending (the `nightly-aen-hil.yml` skeleton needs a self-hosted
+> runner per [`ci/HW-IN-LOOP.md`](../ci/HW-IN-LOOP.md)).  Treat
+> every **GA** entry as "code complete, awaiting HIL" until the
+> matching `test-plan.md` row flips to ✅.
 
 Each column targets a SoM **family** rather than a single SKU.  Within
 a family every SKU shares the same E1M routing and the same vendor
@@ -78,11 +90,11 @@ need v0.4 fall back cleanly to the v0.3 state above.
 
 | Library                              | E1M-AEN / Bare-metal | E1M-AEN / Zephyr | E1M-X V2N / Yocto | E1M-X V2N-M1 / Yocto |
 |--------------------------------------|----------------------|------------------|-------------------|----------------------|
-| **Peripherals (I2C)** (`<alp/peripheral.h>`) | planned   | **GA**           | **GA** (i2c-dev) | **GA** (i2c-dev)     |
-| **Peripherals (SPI)** (`<alp/peripheral.h>`) | planned   | **GA**           | **GA** (spidev)  | **GA** (spidev)      |
-| **Peripherals (UART)** (`<alp/peripheral.h>`)| planned   | **GA**           | **GA** (termios) | **GA** (termios)     |
-| **Peripherals (GPIO + IRQ)** (`<alp/peripheral.h>`) | planned | **GA**    | **GA** (chardev v2 + pthread `poll()`) | **GA** |
-| **IoT — MQTT** (`<alp/iot.h>`)       | n/a                  | planned (Zephyr `mqtt_*`) | **GA** (libmosquitto) | **GA** (libmosquitto) |
+| **Peripherals (I2C)** (`<alp/peripheral.h>`) | planned   | **GA**           | code complete (untested) — i2c-dev | code complete (untested) — i2c-dev |
+| **Peripherals (SPI)** (`<alp/peripheral.h>`) | planned   | **GA**           | code complete (untested) — spidev | code complete (untested) — spidev |
+| **Peripherals (UART)** (`<alp/peripheral.h>`)| planned   | **GA**           | code complete (untested) — termios | code complete (untested) — termios |
+| **Peripherals (GPIO + IRQ)** (`<alp/peripheral.h>`) | planned | **GA**    | code complete (untested) — chardev v2 + pthread `poll()` | code complete (untested) |
+| **IoT — MQTT** (`<alp/iot.h>`)       | n/a                  | planned (Zephyr `mqtt_*`) | code complete (untested) — libmosquitto | code complete (untested) — libmosquitto |
 | **IoT — Wi-Fi station** (`<alp/iot.h>`) | n/a               | planned          | stub (system-config via wpa_supplicant/NM) | stub |
 
 The Yocto MQTT build is conditional on `pkg_check_modules(libmosquitto)`;

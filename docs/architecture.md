@@ -127,7 +127,7 @@ not others.
 | Camera           | `alp/camera.h`       | Zephyr `video_*` API.  V2N MIPI CSI-2 wrapper in v0.2.          | v0.1 stub (NOSUPPORT) |
 | GUI/LVGL         | `alp/gui.h`          | Upstream LVGL with an ALP `lv_conf.h`.                         | Header re-export only — no custom widgets |
 | Math / DSP       | _(no ALP wrapper)_   | Use CMSIS-DSP (`arm_math.h`) directly from app code; ALP SDK does not re-export it.  SDK internals may pull CMSIS-DSP in for filtering / FFT inside `<alp/audio.h>` etc. when `ALP_HAS_CMSIS_DSP` is set. | Removed in pre-v0.1; `<alp/math.h>` and `<alp/signal.h>` were thin re-exports that added no value. |
-| IoT              | `alp/iot.h`          | Zephyr `net_*` + MQTT client (AEN); Linux net + libmosquitto (Yocto). | v0.1 stub; Yocto MQTT real (v0.4 prep, `pkg_check_modules(libmosquitto)`-gated); Zephyr Wi-Fi+MQTT v0.4 |
+| IoT              | `alp/iot.h`          | Zephyr `net_*` + MQTT client (AEN); Linux net + libmosquitto (Yocto). | v0.1 stub; Yocto MQTT code complete via libmosquitto (v0.4 prep, `pkg_check_modules`-gated), **broker roundtrip untested** -- see [test-plan.md](test-plan.md); Zephyr Wi-Fi+MQTT v0.4 |
 | Audio            | `alp/audio.h`        | Zephyr `audio_dmic` + `i2s_*` chains; ALSA on Yocto.            | v0.1 surface; impl v0.2 |
 | BLE              | `alp/ble.h`          | Zephyr `bt` host stack (peripheral + central + GATT).           | v0.1 surface; impl v0.3 |
 | Security         | `alp/security.h`     | MbedTLS PSA Crypto API + per-SoC HW accelerators.              | v0.1 surface; impl v0.3 |
@@ -175,9 +175,11 @@ stays small.
 
 - Public headers are C99-compatible with Doxygen comments.
 - Every public function has at least one Unity / ztest test under `tests/`.
-- CI builds three matrices: AEN-Zephyr (real), AEN-baremetal
-  (stub OK at v0.1), V2N-Yocto (peripheral stubs through v0.3; v0.4
-  prep landed I²C / SPI / UART / GPIO + MQTT real on `main`).
+- CI builds three matrices: AEN-Zephyr (code complete; HIL pending),
+  AEN-baremetal (stub OK at v0.1), V2N-Yocto (peripheral stubs
+  through v0.3; v0.4 prep merged I²C / SPI / UART / GPIO + MQTT on
+  `main` -- failure-path ctest green, real-hardware verification
+  tracked in [test-plan.md](test-plan.md)).
 - No GPL dependencies.  Apache-2.0 / MIT / BSD only.
 
 ## Why this wrapper exists (despite Zephyr already abstracting vendors)

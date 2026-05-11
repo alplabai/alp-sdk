@@ -107,7 +107,7 @@ switching to the Yocto path.
 | **E1M portability bound**                         | ✅ shipped — `ALP_E1M_<CLASS>_COUNT` macros document the cross-SoM portable instance count per class.  See [ADR 0004](docs/adr/0004-e1m-portability-bound.md). |
 | **v0.2/v0.3 surface declared early**              | ✅ shipped — `audio.h`, `ble.h`, `security.h`, `mproc.h` ship as compile-clean stubs returning `ALP_ERR_NOSUPPORT`.  Apps can compile against the full v1.0-shape surface today. |
 | **Per-peripheral hand-written examples**          | ✅ shipped — 11 reference apps under `examples/<peripheral>-<demo>/`, one per wrapped peripheral. |
-| OS pivot: `src/{zephyr,baremetal,yocto}/`         | 🟡 Zephyr full; baremetal stubs; **yocto core-4 peripherals real** (I²C / SPI / UART / GPIO via i2c-dev / spidev / termios / gpiochip v2 — see [§6 entries 18-21](#6-open-work--explicit-gaps)).  Audio / camera / display still stubs (v0.4.x). |
+| OS pivot: `src/{zephyr,baremetal,yocto}/`         | 🟡 Zephyr code complete (HIL pending); baremetal stubs; **yocto core-4 peripherals code complete, untested** (I²C / SPI / UART / GPIO via i2c-dev / spidev / termios / gpiochip v2 — see [§6 entries 18-21](#6-open-work--explicit-gaps)).  Failure-path ctest in `pr-plain-cmake`; real-hardware roundtrip parked behind the `hil-yocto` runner per [`docs/test-plan.md`](docs/test-plan.md).  Audio / camera / display still stubs (v0.4.x). |
 | Cross-SoM portability proof                       | 🟡 single-OS proof per SoM; cross-OS proof v0.2+ |
 | ABI snapshot tooling                              | ✅ shipped — `scripts/abi_snapshot.py` + `docs/abi/v0.1-snapshot.json`.  CI gate via `pr-generated-files.yml` post-1.0. |
 | ABI freeze + deprecation policy                   | 🔮 v1.0 |
@@ -173,7 +173,7 @@ implementations (Murata + Infineon on V2N; TI CC3501E on AEN).
 | TLS via MbedTLS                                    | 🔮 v0.3 (`<alp/security.h>`) |
 | BLE peripheral + central                           | 🔮 v0.3 (`<alp/ble.h>`, Zephyr `bt` host stack) |
 | Provisioning helpers (`alp_iot_wifi_provision`)    | 🔮 v0.3.x |
-| Yocto IoT stack (Mosquitto, Paho, OTA)             | 🟡 **MQTT via libmosquitto shipped** (`src/yocto/iot_yocto.c`, gated on `pkg_check_modules(libmosquitto)`); Paho not pursued -- libmosquitto covers the same surface.  OTA (Mender) still v0.4.x. |
+| Yocto IoT stack (Mosquitto, Paho, OTA)             | 🟡 **MQTT via libmosquitto code complete, untested** (`src/yocto/iot_yocto.c`, gated on `pkg_check_modules(libmosquitto)`); broker roundtrip parked behind the `hil-yocto` runner -- see [`docs/test-plan.md`](docs/test-plan.md).  Paho not pursued -- libmosquitto covers the same surface.  OTA (Mender) still v0.4.x. |
 | **Secure boot** (MCUboot + signed images on AEN)   | 🔮 v0.4 |
 | **Secure OTA** (signed update channel + rollback)  | 🔮 v0.4 |
 | OPTIGA Trust M-rooted device identity              | 🔮 v0.4 (paired with secure boot) |
@@ -286,7 +286,7 @@ shipped early in 2026-Q2.
 | **v0.1** | Public surface frozen, AEN-Zephyr full | DSP re-export | Skeleton + chip metadata for all NPUs | Skeleton + header surface |
 | **v0.2** | **12 peripheral classes wrapped (was 4) + capability validation + E1M portability bound + per-peripheral hand-written examples + ADRs**.  AEN-baremetal + V2N intro. | CMSIS-Driver alignment | Vela + TFLM on AEN, EdgeAI app real | Real Wi-Fi-station + MQTT on AEN-Zephyr |
 | **v0.3** | V2N-Zephyr + AEN-Yocto stubs, M1 intro.  Real impl behind v0.2-declared `<alp/audio.h>` / `<alp/ble.h>` / `<alp/security.h>` / `<alp/mproc.h>` surfaces.  **+ `board.yaml` project config** (one YAML per project; SoM SKU + carrier + libraries + features), with loader emitting Kconfig / CMake / Yocto natives. | (held) | `<alp/inference.h>` unified, ExecuTorch on AEN.  DEEPX DX-M1 + Ethos-U65/i.MX 93 dispatchers wired (real link v0.4). | TLS + BLE + provisioning |
-| **v0.4** | **Yocto core-4 peripheral wrappers shipped (I²C / SPI / UART / GPIO + GPIO IRQ dispatcher)**; full V2N + i.MX93 Yocto BSP bring-up still ahead. | (held) | DRP-AI + Ethos-U65 backends | **MQTT via libmosquitto shipped**; OTA (Mender) ahead. |
+| **v0.4** | **Yocto core-4 peripheral wrappers code complete, untested (I²C / SPI / UART / GPIO + GPIO IRQ dispatcher)**; full V2N + i.MX93 Yocto BSP bring-up still ahead.  HIL verification gates the v0.4 tag — see [`docs/test-plan.md`](docs/test-plan.md). | (held) | DRP-AI + Ethos-U65 backends | **MQTT via libmosquitto code complete, untested**; OTA (Mender) ahead. |
 | **v1.0** | ABI freeze across the matrix (snapshot tooling shipped v0.1) | LTS-aligned | Full multi-vendor inference unification | Production IoT stack |
 
 ---
@@ -409,10 +409,17 @@ that remain open take priority for the upcoming releases.
     user-facing `libraries:` enum -- they're pulled in
     unconditionally when their consumer SDK code is built.
 
-### Closed in v0.4 (incremental — full v0.4 tag still ahead)
+### Code-complete in v0.4-prep (untested — full v0.4 tag still ahead)
+
+> These items are merged on `main` and pass `pr-plain-cmake`'s
+> failure-path ctest, but no row in [`docs/test-plan.md`](docs/test-plan.md)
+> has flipped to ✅ verified yet -- they all gate on the
+> `hil-yocto` self-hosted runner (parked per
+> [`ci/HW-IN-LOOP.md`](../ci/HW-IN-LOOP.md)).
 
 18. ~~**Yocto peripheral surface was 100 % stubs.**~~  The four
-    core peripheral classes are now real on Linux:
+    core peripheral classes are now coded against the Linux UAPI
+    (verification still pending):
     - **I²C** (`src/yocto/peripheral_i2c.c`) binds `alp_i2c_*` to
       i2c-dev (`/dev/i2c-N`), using `I2C_RDWR` ioctl for
       repeated-start write-then-read.

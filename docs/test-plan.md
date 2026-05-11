@@ -1,0 +1,167 @@
+# Test Plan & Release Criteria
+
+Living document.  **Every claimed feature lands here as soon as it's
+coded.**  The row stays `untested` until verification evidence is
+captured -- a green CI run on real silicon, an annotated screenshot,
+a captured log, a HIL job ID, a recorded broker roundtrip, etc.
+
+A release does **not** tag until every row gating it is `verified`.
+
+---
+
+## Verification key
+
+- `❌ untested` — code compiled + CI-linted; failure paths may be
+  covered by unit tests but the **behavioural contract** has not
+  been proven against real hardware / a real broker / a real device.
+  Code in this state is documented as "claimed" rather than "GA".
+- `🟡 partial` — failure paths covered (NULL / INVAL / ENOENT /
+  close-NULL / parse errors).  Happy path still untested against the
+  real target.  Most newly-coded backends sit here until HIL fires.
+- `✅ verified` — exercised against real silicon, a representative
+  broker, or an integration target.  Notes column carries the
+  evidence pointer (HIL run, log capture, dashboard screenshot, PR
+  comment with reproduction).
+- `n/a` — feature is by design not directly testable (e.g. a doc-only
+  stance, a removed surface).  Marked here for the audit trail.
+
+## How to use this document
+
+- **Adding a feature.**  Append a row in the right section before
+  you push the commit.  Default status is `❌ untested`.  Bump the
+  status the moment evidence lands -- do not let it drift.
+- **Reviewing a release.**  Filter for "Gates" matching the version
+  about to tag.  If any row is not `✅`, the release does not ship.
+- **Linking evidence.**  Use inline links to CI runs, gist
+  captures, or HIL artefacts.  Prefer artefacts that are persistent
+  (GitHub Actions runs persist; ephemeral local shells do not).
+
+## How this interacts with CI
+
+- `pr-plain-cmake.yml` exercises the **failure paths** of every
+  Yocto-side wrapper (NULL / INVAL / ENOENT / close-NULL) on a
+  GitHub-hosted Ubuntu runner.  Passing this is necessary but not
+  sufficient to flip a row from 🟡 to ✅.
+- `nightly-aen-hil.yml` is the canonical AEN-Zephyr verifier --
+  every AEN row whose Notes column references "nightly-aen-hil"
+  flips to ✅ on a green run against a real E1M EVK.
+- The `hil-yocto` self-hosted runner (parked in `ci/HW-IN-LOOP.md`)
+  is the canonical Yocto-side verifier; every 🟡 Yocto row gates on
+  it before flipping to ✅.
+
+---
+
+## v0.1.0 — AEN-Zephyr foundation
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| AEN-Zephyr I²C real backend | `src/zephyr/peripheral_i2c.c` | ❌ untested | LSM6DSO WHOAMI = 0x6C read back on real E1M EVK via nightly HIL | `nightly-aen-hil` first green run | v0.1 |
+| AEN-Zephyr SPI real backend | `src/zephyr/peripheral_spi.c` | ❌ untested | SPI flash JEDEC-ID (0x9F READID) returns expected bytes on real EVK | `nightly-aen-hil` | v0.1 |
+| AEN-Zephyr UART real backend | `src/zephyr/peripheral_uart.c` | ❌ untested | Loopback 1 KiB at 115200 8N1, zero byte loss | `nightly-aen-hil` | v0.1 |
+| AEN-Zephyr GPIO real backend | `src/zephyr/peripheral_gpio.c` | ❌ untested | Button press observed via IRQ; LED toggle visible on EVK | `nightly-aen-hil` | v0.1 |
+| `<alp/soc_caps.h>` generation pipeline | `scripts/gen_soc_caps.py` | ❌ untested | Generated header round-trips against tracked-in-repo reference snapshot | `pr-generated-files.yml` | v0.1 |
+| ABI snapshot diff tool | `scripts/abi_snapshot.py` | ❌ untested | Catches a deliberately injected breaking signature change | Manual diff test, recorded | v0.1 |
+
+## v0.2.0 — peripheral expansion + capability validation
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| `<alp/pwm.h>` AEN-Zephyr | `src/zephyr/peripheral_pwm.c` | ❌ untested | LED dimmed to 25% / 50% / 75% observed via scope on EVK | HIL | v0.2 |
+| `<alp/adc.h>` AEN-Zephyr | `src/zephyr/peripheral_adc.c` | ❌ untested | Reference voltage divider reads within ±2% of expected µV | HIL | v0.2 |
+| `<alp/counter.h>` + QEnc AEN-Zephyr | `src/zephyr/peripheral_counter.c` | ❌ untested | Encoder ticks count up/down matching shaft direction | HIL | v0.2 |
+| `<alp/i2s.h>` AEN-Zephyr | `src/zephyr/peripheral_i2s.c` | ❌ untested | 16 kHz 16-bit PDM-in captures known tone with FFT peak ±5 Hz | HIL | v0.2 |
+| `<alp/can.h>` AEN-Zephyr | `src/zephyr/peripheral_can.c` | ❌ untested | CAN-FD frame sent + acknowledged against a second node | HIL | v0.2 |
+| `<alp/rtc.h>` AEN-Zephyr | `src/zephyr/peripheral_rtc.c` | ❌ untested | Wall-clock advances 1 s ± kernel jitter over 60 s | HIL | v0.2 |
+| `<alp/wdt.h>` AEN-Zephyr | `src/zephyr/peripheral_wdt.c` | ❌ untested | Watchdog reset observed when feed thread is starved | HIL | v0.2 |
+| Real Wi-Fi station + MQTT on AEN-Zephyr | `src/zephyr/iot_zephyr.c` | ❌ untested | Publish + subscribe roundtrip against a known broker | HIL | v0.2 |
+| EdgeAI vision reference app | `examples/edgeai-vision-aen/` | ❌ untested | ≥10 fps inference on real E1M EVK | HIL | v0.2 |
+
+## v0.3.0 — IoT app, multi-proc, board.yaml
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| `<alp/inference.h>` Ethos-U on AEN | `src/zephyr/inference_zephyr.c` | ❌ untested | Vela-compiled MobileNetV2 outputs logits matching CPU reference within tolerance | HIL | v0.3 |
+| `<alp/inference.h>` DEEPX dispatcher routing | `src/yocto/inference_yocto.c` + `inference_deepx.cpp` | 🟡 partial | Dispatcher selects DEEPX backend when configured; real `dxnn_*` link still pending | Yocto plain-CMake build green; `tests/yocto/inference_dispatcher.c` covers NULL/INVAL paths; **real link gates v0.4** | v0.3 |
+| `<alp/audio.h>` real impl | `src/zephyr/audio_zephyr.c` | ❌ untested | PDM mic captures audio playable through I²S DAC, no buffer underruns | HIL | v0.3 |
+| `<alp/ble.h>` real impl | `src/zephyr/ble_zephyr.c` | ❌ untested | Advertise + connect + GATT read from a second BLE device | HIL | v0.3 |
+| `<alp/security.h>` real impl | `src/zephyr/security_zephyr.c` | ❌ untested | SHA-256 + AES-128-GCM round-trip against MbedTLS reference vectors | unit test or HIL | v0.3 |
+| `<alp/mproc.h>` real impl | `src/zephyr/mproc_zephyr.c` | ❌ untested | M55-HP <-> M55-HE shared-memory mailbox echoes a payload | HIL | v0.3 |
+| `board.yaml` loader (`scripts/alp_project.py`) | `scripts/alp_project.py` | 🟡 partial | Schema-level + capability-level checks unit-tested; cross-OS round-trips not exercised on hardware | `tests/scripts/test_alp_project.py`; **HIL exercise gates v0.3** | v0.3 |
+| `validate_board_yaml.py` v0.3 capability cross-check | `scripts/validate_board_yaml.py` | 🟡 partial | Returns exit 3 on the deliberately-broken sample boards | `pr-metadata-validate.yml` | v0.3 |
+| VS Code extension `Generate all` + inline diagnostics | `vscode/src/extension.ts` | ❌ untested | Loaded into VS Code; commands run; problems panel surfaces validator errors | Manual capture (screencast/gist) | v0.3 |
+| `<alp/hw_info.h>` EEPROM + BOARD_ID ADC read | `src/zephyr/hw_info_zephyr.c` | ❌ untested | Real production-test fixture writes 128-byte manifest; firmware reads back identical | HIL + production-test bench | v0.3.x |
+| `tools/program_eeprom.py` packer | `tools/program_eeprom.py` | 🟡 partial | Layout round-trips against the C reader's `static_assert` block | `tests/scripts/test_program_eeprom.py` | v0.3 |
+
+## v0.4.0 — Yocto first-class, secure boot, OTA
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| Yocto I²C wrapper (i2c-dev) | `src/yocto/peripheral_i2c.c` | 🟡 partial | LSM6DSO WHOAMI = 0x6C reads back over real `/dev/i2c-N` on a Yocto target | `tests/yocto/peripheral_i2c.c` (failure paths only); **HIL via `hil-yocto`** | v0.4 |
+| Yocto SPI wrapper (spidev) | `src/yocto/peripheral_spi.c` | 🟡 partial | SPI flash JEDEC-ID via `/dev/spidev<bus>.<cs>` returns expected bytes | `tests/yocto/peripheral_spi.c`; **HIL via `hil-yocto`** | v0.4 |
+| Yocto UART wrapper (termios) | `src/yocto/peripheral_uart.c` | 🟡 partial | TX/RX loopback at 115200 8N1, zero byte loss over 1 KiB | `tests/yocto/peripheral_uart.c`; **HIL via `hil-yocto`** | v0.4 |
+| Yocto GPIO wrapper (chardev v2) | `src/yocto/peripheral_gpio.c` | 🟡 partial | Output toggle observable on scope; input level reads back through `/dev/gpiochipN` | `tests/yocto/peripheral_gpio.c`; **HIL via `hil-yocto`** | v0.4 |
+| Yocto GPIO IRQ dispatcher (pthread `poll()`) | `src/yocto/peripheral_gpio.c` (IRQ section) | ❌ untested | Real edge event on real `/dev/gpiochipN` fires the registered callback within 5 ms | **HIL via `hil-yocto`** | v0.4 |
+| Yocto MQTT (libmosquitto) | `src/yocto/iot_yocto.c` | 🟡 partial | Connect + publish + subscribe + wildcard match roundtrip against a Mosquitto broker (local or cloud) | `tests/yocto/iot_mqtt.c` (URI parse + NULL-arg only); **broker roundtrip via `hil-yocto`** | v0.4 |
+| Yocto MQTT TLS (`mqtts://`) | `src/yocto/iot_yocto.c` | n/a (returns NOSUPPORT) | When implemented, validates a known CA chain + delivers payload over TLS to a real broker | TBD | v0.4.x |
+| `meta-alp` BSP for V2N / V2N-M1 / i.MX 93 | `yocto/meta-alp/` | ❌ untested | `bitbake core-image-minimal` succeeds for each MACHINE; produced image boots on the matching SoM | HIL | v0.4 |
+| Authoritative Zephyr board files | external (`alplabai/alp-zephyr-modules`) | ❌ untested | `alp_e1m_evk_aen` board boots and binds the same DT aliases the SDK overlays expect | HIL | v0.4 |
+| MCUboot secure-boot on AEN-Zephyr | TBD | ❌ untested | Signed image boots; tampered image triggers rollback to previous slot | HIL + tamper test | v0.4 |
+| Secure OTA on AEN-Zephyr (MCUboot + Mender) | TBD | ❌ untested | Signed update delivered, swap-using-scratch completes, next boot validates | HIL + OTA bench | v0.4 |
+| Secure OTA on V2N-Yocto (`meta-mender`) | TBD | ❌ untested | A/B partition swap survives an interrupted-update simulation | HIL | v0.4 |
+| OPTIGA Trust M-rooted device identity | TBD | ❌ untested | TLS handshake succeeds using OPTIGA-stored ECC key; tampered key rejects | HIL | v0.4 |
+| DEEPX DX-M1 real `dxnn_*` link | `src/yocto/inference_deepx.cpp` | ❌ untested | DX-M1 SDK on sysroot; sample model run completes; outputs match host-CPU reference | HIL | v0.4 |
+| Ethos-U65 real attach on i.MX 93 | `src/zephyr/inference_ethosu_n93.c` | ❌ untested | Vela-compiled model run on i.MX 93 NPU; outputs match Ethos-U55 reference | HIL | v0.4 |
+| DRP-AI3 real attach on V2N | TBD | ❌ untested | DRP-AI-translator output runs on V2N silicon | HIL | v0.4 |
+
+## v0.4 prep — landed on `main` (2026-05-11)
+
+These rows are duplicated from v0.4 above so the "what's on `main`
+right now" status is one scroll away from the v0.4 gate list:
+
+| Feature | Status | Evidence |
+|---|---|---|
+| Yocto core-4 peripherals (I²C / SPI / UART / GPIO) | 🟡 partial — failure-path ctest green in `pr-plain-cmake`; real-hardware untested | `pr-plain-cmake.yml` run on commit a0dadb8+ |
+| Yocto GPIO IRQ dispatcher | ❌ untested | (No real-edge test exists yet) |
+| Yocto MQTT via libmosquitto | 🟡 partial — URI parser + NULL-arg paths covered by `tests/yocto/iot_mqtt.c`; broker roundtrip untested | `pr-plain-cmake.yml` run on commit 1965c4f+ |
+| Coverity workflow wiring | ✅ verified | <https://github.com/alplabai/alp-sdk/actions/runs/25673163492> + first scan at <https://scan.coverity.com/projects/alplabai-alp-sdk> |
+| `west.yml` `extras-v04` group with lwrb + nanopb pins | 🟡 partial — pins resolve via `west update --group-filter +extras-v04` on a fresh workspace; never exercised by a real consumer | (No real-consumer build exists yet) |
+
+## CI-only / tooling rows (no HIL gate)
+
+These never need HIL.  They tag `✅` once the matching workflow has
+been green on `main` for at least two consecutive PRs.
+
+| Feature | Workflow | Status |
+|---|---|---|
+| `pr-plain-cmake.yml` builds + tests | `pr-plain-cmake.yml` | ✅ verified |
+| `pr-twister.yml` ztest matrix | `pr-twister.yml` | ✅ verified |
+| `pr-static-analysis.yml` clang-format diff | `pr-static-analysis.yml` | ✅ verified |
+| `pr-generated-files.yml` (`soc_caps.h` + ABI snapshot drift) | `pr-generated-files.yml` | ✅ verified |
+| `pr-metadata-validate.yml` (`board.yaml` schema + loader smoke) | `pr-metadata-validate.yml` | ✅ verified |
+| `pr-doxygen.yml` zero-warnings | `pr-doxygen.yml` | ✅ verified |
+| `pr-vscode-extension.yml` compile + `.vsix` package | `pr-vscode-extension.yml` | ✅ verified |
+| `coverity.yml` weekly scan | `coverity.yml` | ✅ verified |
+
+---
+
+## Anti-checklist (things NOT verified by this doc)
+
+- **Performance numbers** -- this doc is correctness only.  Throughput,
+  jitter, and RAM/flash footprints live in `bench/` and produce their
+  own captures.
+- **Security audit** -- "no obvious vulnerabilities" is not on the
+  list.  Coverity + the v1.0 prep cycle's external audit handle that.
+- **Studio-side integration** -- whether alp-studio generates correct
+  calls into the SDK is verified by the studio repo's own CI; we
+  trust its reports.
+- **End-customer apps** -- a green row here proves the SDK contract
+  holds, not that every customer app built on top works.
+
+## See also
+
+- [`PLAN.md`](../PLAN.md) — product / engineering shape.
+- [`VERSIONS.md`](../VERSIONS.md) — versioned roadmap; this doc is
+  the verification ledger that gates each version's tag.
+- [`ci/HW-IN-LOOP.md`](../ci/HW-IN-LOOP.md) — HIL runner contract.
+- [`CONTRIBUTING.md`](../CONTRIBUTING.md) — every new feature must
+  append a row here in the same PR.

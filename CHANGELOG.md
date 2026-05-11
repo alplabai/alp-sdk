@@ -13,6 +13,13 @@ and accumulate runtime implementations in subsequent point
 releases -- entries below collect every Added / Changed item
 that lands before the v0.3.0 tag.)
 
+> **Verification status.**  Entries below describe what's been
+> *coded and merged* on `main`; passing `pr-plain-cmake` /
+> `pr-twister` / `pr-static-analysis` is necessary but not
+> sufficient to call an item "GA".  Real-hardware verification is
+> tracked separately in [`docs/test-plan.md`](docs/test-plan.md)
+> -- a release does not tag until every row gating it flips to ✅.
+
 ### Added
 
 - **Yocto MQTT backend via libmosquitto (v0.4 prep).**

@@ -300,7 +300,7 @@ All consumer-facing headers live under `include/alp/`:
 
 | Header               | Library                                    | Status                                |
 |----------------------|--------------------------------------------|---------------------------------------|
-| `alp/peripheral.h`   | I2C, SPI, GPIO, UART                       | GA on Zephyr (AEN + native_sim); **GA on Yocto / Linux** (v0.4 prep: i2c-dev / spidev / termios / gpiochip-v2 + shared pthread GPIO IRQ dispatcher) |
+| `alp/peripheral.h`   | I2C, SPI, GPIO, UART                       | Code complete on Zephyr (AEN + native_sim) -- **HW verification pending** ([test-plan.md](docs/test-plan.md)).  Yocto/Linux code complete (i2c-dev / spidev / termios / gpiochip-v2 + shared pthread GPIO IRQ dispatcher); failure-path ctest in `pr-plain-cmake`; **real-hardware roundtrip untested** until the `hil-yocto` runner lands. |
 | `alp/pwm.h`          | PWM                                        | GA on Zephyr                          |
 | `alp/adc.h`          | ADC                                        | GA on Zephyr                          |
 | `alp/counter.h`      | Counter + Quadrature decoder               | GA on Zephyr                          |
@@ -311,7 +311,7 @@ All consumer-facing headers live under `include/alp/`:
 | `alp/usb.h`          | USB device                                 | Surface declared (v0.3); host role v0.4 |
 | `alp/camera.h`       | Camera                                     | Surface declared, impl rolling per-SoM |
 | `alp/gui.h`          | GUI / LVGL                                 | LVGL re-export                        |
-| `alp/iot.h`          | Wi-Fi station + MQTT                       | Real Zephyr impl wired (v0.3); **MQTT real on Yocto via libmosquitto** (v0.4 prep, `pkg_check_modules(libmosquitto)`-gated; Wi-Fi on Linux stays system-managed via wpa_supplicant/NM) |
+| `alp/iot.h`          | Wi-Fi station + MQTT                       | Zephyr impl wired (v0.3) -- **broker roundtrip untested** ([test-plan.md](docs/test-plan.md)).  Yocto MQTT via libmosquitto code complete (v0.4 prep, `pkg_check_modules(libmosquitto)`-gated); failure-path ctest in `pr-plain-cmake`; **broker roundtrip untested**.  Wi-Fi on Linux stays system-managed (wpa_supplicant / NetworkManager). |
 | `alp/audio.h`        | Audio (PDM in / I²S out)                   | Real impl wired (v0.3)                |
 | `alp/ble.h`          | BLE peripheral + central                   | Real impl wired (v0.3)                |
 | `alp/security.h`     | MbedTLS PSA Crypto (hash / AEAD / TRNG)    | Real impl wired (v0.3)                |

@@ -29,7 +29,15 @@ signatures), if you have one in mind.
 2. Keep changes scoped to one library or one SoM at a time.
 3. Add or update tests under `tests/`.  Every public function must
    have at least one Unity / ztest test.
-4. Run the build matrix locally before opening a PR:
+4. **Append a row to [`docs/test-plan.md`](docs/test-plan.md).**
+   New feature lands as `❌ untested` by default; if the PR also
+   captures verification evidence (HIL log, broker roundtrip,
+   scope capture, …), flip the row to `🟡 partial` or `✅
+   verified` and link the evidence in the Notes column.  A
+   feature that doesn't appear in the test plan does **not**
+   ship -- code that nobody has committed to verifying isn't a
+   release deliverable.
+5. Run the build matrix locally before opening a PR:
    ```bash
    # Host smoke
    cmake -B build -DALP_BUILD_TESTS=ON
@@ -37,8 +45,9 @@ signatures), if you have one in mind.
    ctest --test-dir build --output-on-failure
    ```
    For Zephyr targets, `west build -b <board>` against your test app.
-5. Open a PR; CI runs the AEN-Zephyr, AEN-baremetal, and V2N-Yocto
-   matrices.
+6. Open a PR; CI runs the AEN-Zephyr, AEN-baremetal, and V2N-Yocto
+   matrices.  CI green is necessary but not sufficient for tagging
+   a release -- the test-plan row also has to flip to `✅`.
 
 ### Code style
 
