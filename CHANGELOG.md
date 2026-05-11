@@ -20,8 +20,42 @@ that lands before the v0.3.0 tag.)
 > tracked separately in [`docs/test-plan.md`](docs/test-plan.md)
 > -- a release does not tag until every row gating it flips to ✅.
 
+### Changed
+
+- **Restored verbatim user-source notes in `gd32-io-mcu-map.tsv`.**
+  Earlier ingest had paraphrased the source spreadsheet's
+  annotations (e.g. "connected to Camera enable pin LDO 0" →
+  "Camera enable — LDO 0"; "reset pin of SLS32AIA010MLUSON10XTMA2"
+  → "Reset for SLS32AIA010MLUSON10XTMA2 (OPTIGA Trust M secure
+  element)").  Following the convention used for the Renesas
+  peripheral map, the TSV now carries the user's exact wording as
+  the third column; SDK-added context is bracketed
+  `[SDK note: ...]` so it's distinguishable from source data.
+  Same intent, more faithful preservation.
+
 ### Added
 
+- **Errata items ingested from `AERR0012` v2.0.**
+  `metadata/socs/alif/ensemble/{e4,e6,e8}.json` `errata.items[]`
+  arrays now carry the four documented entries (ER001 — RTC
+  pre-scaler reset bug on A0, fixed in A1; ER002 — RTC drift
+  during POR_N on A1, no fix planned; ER003 — STOP-mode current
+  ~2 µA over spec on A0, fixed in A1; ER004 — external reset
+  supervisor required on all revisions when the cold-boot supply
+  ramp can't meet the monotonic-rise-above-1.65 V invariant).
+  Each item records affected revisions, resolution status,
+  consequence, and workaround.  `title_quirk` field documents the
+  source-PDF title typo (says "E2, E4, E8" but scope is
+  "E4, E6, E8" — E2 is not an Ensemble part).
+- **V2N-M1 README now explicit about GD32 inheritance.**  The
+  v2n-m1 directory's "Inheritance" section previously named only
+  the Renesas-side base map; now it explicitly notes that the
+  GD32 IO MCU map (`v2n/gd32-io-mcu-map.tsv`) is also inherited
+  verbatim and lists the GD32's role unchanged on V2N-M1 builds
+  (encoder capture, extra PWM/ADC/DAC, camera-LDO enables,
+  Wi-Fi/BT REG_ON, OPTIGA reset, E1M-edge GPIO routes).  The
+  three-file concatenation recipe to build the full V2N-M1 map
+  is now spelled out in the README.
 - **GD32G553 companion IO MCU pinout for V2N + V2N-M1.**
   `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv` — authoritative
   pinout for the GigaDevice GD32G553MEY7TR that sits next to the

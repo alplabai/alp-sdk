@@ -20,7 +20,42 @@
       "version": "2.0",
       "source": "AERR0012-Ensemble-E4-E6-E8-Errata-v2.0.pdf",
       "doc_id": "AERR0012",
-      "items": []
+      "published": "2026-04",
+      "title_quirk": "PDF title says 'Ensemble E2, E4, E8 Errata' but the scope section names E4, E6, E8 -- 'E2' is a transcription error in the source PDF title.",
+      "items": [
+        {
+          "id": "ER001",
+          "title": "Clock pre-scale divider for RTC is incorrectly reset",
+          "affected_revisions": ["A0"],
+          "resolution": "Fixed in silicon revision A1",
+          "consequence": "POR_N assertion or STOP-mode wake resets the RTC clock pre-scaler divider while VDD_VBATT is sufficient.  RTC reverts to its default 32 kHz rate; the firmware-configured rate (typically 1 Hz) is lost.  Firmware can re-write the divider but the elapsed-time accuracy is gone.",
+          "workaround": "Use silicon revision A1"
+        },
+        {
+          "id": "ER002",
+          "title": "RTC time drifts while POR_N reset signal is asserted",
+          "affected_revisions": ["A1"],
+          "resolution": "No fix planned for future silicon revision",
+          "consequence": "While POR_N is asserted, the RTC clock source switches from the high-accuracy 32 kHz LFXO to the lower-accuracy LFRC (~5 % offset).  After de-assertion the source switches back to LFXO.  RTC accuracy drifts proportional to total POR_N hold time -- a 20 s POR_N assertion incurs ~1 s of RTC error.",
+          "workaround": "Use an external real-time clock source if high accuracy is required"
+        },
+        {
+          "id": "ER003",
+          "title": "STOP mode current is higher than specification",
+          "affected_revisions": ["A0"],
+          "resolution": "Fixed in silicon revision A1",
+          "consequence": "Current entering VDD_BATT at 3.3 V in STOP mode is approximately 2 uA higher than the value specified in Table 5-5 of the E4 / E6 / E8 datasheets.  Reduces VDD_BATT battery life.",
+          "workaround": "Use silicon revision A1, STOP mode current is as specified in the datasheet"
+        },
+        {
+          "id": "ER004",
+          "title": "External reset supervisor is required in some situations",
+          "affected_revisions": ["All"],
+          "resolution": "No fix planned for future silicon revision",
+          "consequence": "During the initial 10 ms cold-boot ramp at VDD_MAIN + VDD_BUCK, the supply voltage must rise monotonically and must never dip below 1.65 V once 1.65 V is reached.  Violations can permanently damage the SoC.",
+          "workaround": "Use an external reset supervisor that drives POR_N active (low) while the supply is below 1.65 V.  See Alif Application Note AAPN0036 (PCB Layout Guidelines for Ensemble E4 / E6 / E8) for the reference circuit."
+        }
+      ]
     }
   ],
   "cores": [
