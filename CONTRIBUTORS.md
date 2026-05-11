@@ -7,6 +7,7 @@ The ALP SDK is built and maintained by [Alp Lab](https://alplab.ai).
 | Contributor          | GitHub                                                   | Role                          |
 |----------------------|----------------------------------------------------------|-------------------------------|
 | Caner Alp            | [@alpCaner](https://github.com/alpCaner)                 | Founder · SDK architect       |
+| Hakan Gülen          | [@hkngln](https://github.com/hkngln)                     | Maintainer                    |
 
 Additional Alp Lab team members extend this table from their own
 commits as their work lands.
