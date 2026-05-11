@@ -10,16 +10,17 @@ If you'd rather skim, the fastest path is:
 ```bash
 git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
-west init -l .                                  # one-time
-west update                                     # one-time, ~10 min
-west build -b native_sim/native/64 examples/gpio-button-led \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
-west build -t run
+west init -l .                                       # one-time
+west update                                          # one-time, ~10 min
+west alp-build -b native_sim/native/64 examples/gpio-button-led
+west build -d build -t run
 # expect: [gpio] init button=ALP_E1M_GPIO_IO0, led=ALP_E1M_GPIO_IO1
 #          ...
 #          [gpio] done
 ```
 
+`west alp-build` validates the example's `board.yaml`, generates
+the build-time config from it, and delegates to `west build`.
 The rest of this document explains *why* each step is what it is
 so you can adapt it to your own project.
 
@@ -32,8 +33,9 @@ you install them.
 
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|
-| Zephyr      | v3.7.0           | Pinned by `west.yml`; v0.1 SDK matrix (see VERSIONS.md). |
-| Python      | 3.10+            | For `west`, `gen_soc_caps.py`, `validate_metadata.py`.   |
+| Zephyr      | v3.7.0 LTS       | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
+| Python      | 3.10+            | For `west`, the v0.3 loader (`alp_project.py`), validators. |
+| Python deps | `pyyaml`, `jsonschema` | `pip install pyyaml jsonschema` -- needed by the loader. |
 | CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |
 | west        | 1.2+             | `pip install west` if your distro doesn't ship it.       |
@@ -98,46 +100,68 @@ modules, and the SDK in one go via `west`.
 
 ```bash
 mkdir alp-workspace && cd alp-workspace
-west init -m https://github.com/alplabai/alp-sdk --mr main
+west init -m https://github.com/alplabai/alp-sdk
 west update --narrow -o=--depth=1
 west zephyr-export
 ```
 
 After this:
 
-- `alp-workspace/zephyr/`    Zephyr v3.7.0 (pinned).
+- `alp-workspace/zephyr/`    Zephyr v3.7.0 LTS (pinned via the SDK's `west.yml`).
 - `alp-workspace/modules/`   Zephyr's standard modules (HAL, libs).
 - `alp-workspace/alp-sdk/`   This repo, mounted as a Zephyr module.
 
 `west update --narrow -o=--depth=1` keeps the clone shallow —
 saves ~30 GB of unrelated git history.
 
+Importing alp-sdk via `west init -m` also surfaces the
+`west alp-build` extension command (see `scripts/west_commands/alp.py`)
+that the rest of this walkthrough uses.
+
 ## 4. First build: the GPIO example
+
+Every example in `examples/` carries a **`board.yaml`** — the
+single declarative file the loader compiles into Kconfig
+fragments, DTS overlays, and the build-time hw_info header.  The
+`west alp-build` wrapper does the pre-flight + delegates to
+`west build`:
 
 ```bash
 cd alp-workspace
-west build -b native_sim/native/64 \
-    alp-sdk/examples/gpio-button-led \
-    -d build/gpio-button-led
+west alp-build -b native_sim/native/64 alp-sdk/examples/gpio-button-led
 ```
 
 What the flags mean:
 
 - `-b native_sim/native/64` — Zephyr's POSIX simulator on a 64-bit
   host.  No silicon needed; runs as a native process on Linux /
-  macOS / WSL.  (Native Windows: use `west build -b native_sim/native/32`
+  macOS / WSL.  (Native Windows: use `west alp-build -b native_sim/native/32`
   with the MSVC-compatible toolchain, or run the 64-bit variant
   through WSL.)
-- `examples/gpio-button-led` — the application directory.  Each
-  example under `examples/` is self-contained (CMakeLists,
-  prj.conf, board overlay, src/main.c).
-- `-d build/gpio-button-led` — separate build dir per example.
-  Avoids stale-build confusion when you switch examples.
+- `alp-sdk/examples/gpio-button-led` — the application directory.
+  Each example under `examples/` ships a `board.yaml` + an empty
+  `prj.conf` + a CMakeLists.txt that invokes the loader at
+  configure time.  See [`docs/board-config.md`](board-config.md)
+  for the schema.
+
+`west alp-build` walks four steps under the hood:
+
+1. **Validates** the app's `board.yaml` via `validate_board_yaml.py`
+   (schema + SoM SKU preset + carrier preset + `hw_rev` /
+   SDK-version compatibility window + `peripherals:` vs SoC caps).
+2. **Pre-generates** the build-time hw_info header at
+   `<build>/generated/alp_hw_info_build.h` so apps that include
+   it pick up the `ALP_HW_BUILD_*` macros.
+3. **Sets** `EXTRA_ZEPHYR_MODULES` + `ALP_SDK_ROOT` so the
+   application's CMakeLists.txt resolves the SDK without
+   per-customer overrides.
+4. **Delegates** to `west build`.  Any flags after the recognised
+   ones pass through verbatim (e.g. `-d <build-dir>`).
 
 Run it:
 
 ```bash
-west build -d build/gpio-button-led -t run
+west build -d build -t run
 ```
 
 Expected output:
@@ -222,29 +246,46 @@ For SoMs without an EVK board file yet, write your own:
 
 `docs/porting-new-som.md` covers the full porting checklist.
 
-## 8. SoC capability validation (optional)
+## 8. SoC capability validation
 
-The SDK validates `*_open` configs against the active SoC's
-documented hardware caps.  Without telling the build which SoC
-you're on, the validation passes through (default macros are
-`UINT16_MAX`).  To opt in:
+In v0.3 the SoC choice flows from `board.yaml`'s `som.sku` field
+automatically -- the loader resolves the MPN to the silicon ref
+(`alif:ensemble:e7` for `E1M-AEN701`) and emits the matching
+`CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y` line, so you never set it by
+hand.  The validator also cross-checks every entry in
+`peripherals:` against the SoC's `metadata/socs/<vendor>/<family>/<part>.json`
+caps -- a board.yaml asking for `i2s` on a SoC that doesn't route
+I²S fails at `west alp-build` time with exit code 3, before any
+compile work.
 
-```kconfig
-# In your prj.conf
-CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y    # or RENESAS_RZV2N_N44, etc.
-```
-
-After this, `alp_adc_open` with `resolution_bits = 16` on E3
-(12-bit max) returns NULL with `alp_last_error()` =
-`ALP_ERR_OUT_OF_RANGE`.  See ADR
-[0002](adr/0002-error-mechanism.md) for the diagnostic
-contract.
+At runtime, the documented caps drive the per-`*_open` validation:
+e.g. `alp_adc_open` with `resolution_bits = 16` on a 12-bit SoC
+returns NULL with `alp_last_error() == ALP_ERR_OUT_OF_RANGE`.  See
+ADR [0002](adr/0002-error-mechanism.md) for the diagnostic contract.
 
 ## 9. Editing in VS Code
 
-The repo ships `.vscode/{extensions,settings,tasks,c_cpp_properties}.json`
-configured for Zephyr-module + plain-CMake development.  See the
-"Using with VS Code" section in [`README.md`](../README.md).
+Two complementary surfaces:
+
+**The SDK's `.vscode/` config** (`extensions`, `settings`, `tasks`,
+`c_cpp_properties`) is set up for Zephyr-module + plain-CMake
+development.  See the "Using with VS Code" section in
+[`README.md`](../README.md).
+
+**The `alplabai.alp-sdk` extension** under [`vscode/`](../vscode/)
+adds schema-aware `board.yaml` editing (autocomplete on SKUs,
+carriers, libraries; inline diagnostics from `validate_board_yaml.py`
+in the Problems panel), a GUI configurator panel with dropdowns
+for every released MPN + carrier, west wrappers (build / flash /
+run native_sim), per-OS dependency bootstrap, and a one-keypress
+*Alp: Generate all* command for the six loader emit modes.  Build
++ install locally:
+
+```bash
+cd vscode
+npm install && npm run package
+code --install-extension alp-sdk-*.vsix
+```
 
 Key tasks (Command Palette → **Tasks: Run Task**):
 
@@ -258,30 +299,33 @@ Key tasks (Command Palette → **Tasks: Run Task**):
 
 ## 10. Where to go next
 
-- **Project configuration** -- `board.yaml` is the **single source
-  of truth** for your firmware's target.  The minimum-viable
-  config is three lines: pick your **MPN** (e.g. `E1M-AEN701`),
-  pick your **carrier** (e.g. `E1M-EVK`), pick your **OS**
-  (`zephyr` / `yocto` / `baremetal`).  Everything else flows from
-  the SDK-shipped per-MPN preset at
-  `metadata/e1m_modules/<MPN>/som.yaml`.  Every other config
-  artefact (Zephyr `prj.conf`, CMake `-D` args, Yocto
-  `local.conf`) is derived output -- don't hand-edit them.  Read
-  [`docs/board-config.md`](board-config.md) for the model + the
-  list of every MPN the SDK ships a preset for, then copy
-  [`metadata/templates/board.yaml`](../metadata/templates/board.yaml)
-  to your app root and edit.
-- Per-peripheral examples: [`examples/`](../examples/README.md)
-- End-to-end reference apps:
+- **[`docs/board-config.md`](board-config.md)** -- the authoritative
+  `board.yaml` schema reference + recipe table for every loader
+  emit mode (`zephyr-conf`, `cmake-args`, `yocto-conf`,
+  `dts-overlay`, `hw-info-h`, `west-libraries`).  Start here when
+  you're ready to write your own app's `board.yaml`.
+- **Per-peripheral examples**: [`examples/`](../examples/README.md)
+  -- 11 minimal apps, one per `<alp/*.h>` class, each driven by a
+  matching `board.yaml`.
+- **End-to-end reference apps**:
   [`examples/edgeai-vision-aen/`](../examples/edgeai-vision-aen/)
-  and [`examples/iot-connected-camera/`](../examples/iot-connected-camera/)
-- **Recommended third-party libraries** to pair with the SDK
-  (CMSIS-DSP, ETLCPP, fmt, nlohmann/json, doctest, LittleFS, and
-  more): [`docs/recommended-libraries.md`](recommended-libraries.md).
-  The SDK deliberately stays small; that doc is the curated list
-  of battle-tested libraries that fill the gaps for app code.
-- Architecture overview: [`docs/architecture.md`](architecture.md)
-- Architecture decision records: [`docs/adr/`](adr/)
-- Hardware specs: [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
-- Per-version roadmap: [`VERSIONS.md`](../VERSIONS.md)
-- Contributor guide: [`CONTRIBUTING.md`](../CONTRIBUTING.md)
+  (camera → Ethos-U inference → display) and
+  [`examples/iot-connected-camera/`](../examples/iot-connected-camera/)
+  (camera → DRP-AI → MQTT publish).  Both use the same board.yaml
+  workflow at a larger scale.
+- **Hardware identification + production-test**:
+  [`<alp/hw_info.h>`](../include/alp/hw_info.h) for the runtime
+  EEPROM-manifest + BOARD_ID-ADC API; `tools/program_eeprom.py`
+  for the factory programmer.
+- **Recommended third-party libraries** that pair with the SDK
+  (CMSIS-DSP, ETL, fmt, nlohmann_json, doctest, LittleFS, LVGL,
+  MbedTLS): [`docs/recommended-libraries.md`](recommended-libraries.md).
+- **CC3501E Wi-Fi/BLE coprocessor bridge** (E1M-AEN family):
+  [`docs/cc3501e-bridge.md`](cc3501e-bridge.md).
+- **Zephyr-version policy** -- when LTS bumps drive new alp-sdk
+  releases: [`docs/zephyr-version-policy.md`](zephyr-version-policy.md).
+- **Architecture overview**: [`docs/architecture.md`](architecture.md)
+- **Architecture decision records**: [`docs/adr/`](adr/)
+- **Hardware specs**: [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
+- **Per-version roadmap**: [`VERSIONS.md`](../VERSIONS.md)
+- **Contributor guide**: [`CONTRIBUTING.md`](../CONTRIBUTING.md)
