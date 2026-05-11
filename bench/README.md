@@ -36,9 +36,12 @@ half of the surface.
 
 | File                  | What it measures                                                              |
 |-----------------------|-------------------------------------------------------------------------------|
-| `bench_peripheral.c`  | `alp_i2c_open(NULL)` rejection cost.  No HW dependency.                       |
-| `bench_inference.c`   | `alp_inference_open` with bad cfg; round-trip of `num_inputs`/`num_outputs`.  |
+| `bench_peripheral.c`  | `alp_{i2c,spi,uart,gpio}_open` NULL/bad-arg rejection.  No HW dependency.     |
+| `bench_inference.c`   | `alp_inference_open` with bad cfg; NULL-handle accessor cost.                 |
 | `bench_status.c`      | `alp_last_error()` read.                                                      |
+| `bench_iot.c`         | `alp_wifi_open()` + `alp_mqtt_open` NULL/empty-cfg rejection.                 |
+| `bench_audio.c`       | `alp_audio_in_open` + `alp_audio_out_open` NULL/empty-cfg rejection.          |
+| `bench_storage.c`     | `alp_storage_*` NULL-handle / empty-info round-trip.                          |
 
 ## Build
 

@@ -9,6 +9,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- `bench/` extended from 3 -> 6 cases.  New files cover the
+  rejection / fast-path costs for `<alp/iot.h>` (`bench_iot.c`),
+  `<alp/audio.h>` (`bench_audio.c`), and `<alp/storage.h>`
+  (`bench_storage.c`).  Same NULL/empty-cfg shape as the
+  peripheral bench.  `bench_main.c` updated to invoke them;
+  `bench/README.md` table refreshed.  Total bench coverage at
+  ~6 of ~15 public API classes; v1.0 fills the rest as the
+  implementations land.
 - `tests/yocto/` -- plain-CMake test suite for the Linux user-space
   backend.  First entry: `alp_test_inference_dispatcher` exercises
   the seven branches of `src/yocto/inference_yocto.c` --

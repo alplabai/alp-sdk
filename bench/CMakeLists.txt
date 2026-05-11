@@ -20,6 +20,9 @@ add_executable(alp_bench
     ${CMAKE_CURRENT_SOURCE_DIR}/bench_peripheral.c
     ${CMAKE_CURRENT_SOURCE_DIR}/bench_inference.c
     ${CMAKE_CURRENT_SOURCE_DIR}/bench_status.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/bench_iot.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/bench_audio.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/bench_storage.c
 )
 
 target_include_directories(alp_bench PRIVATE
