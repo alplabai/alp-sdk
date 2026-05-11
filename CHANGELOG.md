@@ -22,6 +22,37 @@ that lands before the v0.3.0 tag.)
 
 ### Changed
 
+- **GD32 pinout pad corrections (user-supplied, 2026-05-11).**
+  Six fixes to `gd32-io-mcu-map.tsv` after the user audit:
+  - `PWM0` channel: `TIMER0_MCH2` → **`TIMER0_MCH0`** on PA11.
+    The source-spreadsheet had PWM0 + PWM1 both on MCH2 which
+    is impossible (one channel = one output); user confirms PWM0
+    is on MCH0.
+  - `GD32_PB3_R` actual pad: PB3 → **PB7**.  Function-A label
+    retained ("PB3"); function-B alternate pad PB7 is where the
+    schematic actually routes.
+  - `GD32_PC3_R` actual pad: PC3 → **PC14**.
+  - `GD32_PA15_R` actual pad: PA15 → **PC1**.
+  - `GD32_PB9_R` actual pad: PB9 → **PC0**.
+  - `GD32_PE13_R` actual pad: PE13 → **PE12**.
+  Resolves the five same-pad function-A vs function-B conflicts
+  flagged in the previous audit (PB3 / PC3 / PA15 / PB9 / PE13
+  now cleanly owned by ENC0_Y / CAM_EN_LDO0 / BRD_I2C.SCL /
+  BRD_I2C.SDA / E1M ADC2 respectively).  The TSV header now
+  documents the function-A-label-on-function-B-pad convention so
+  consumers don't mistake the schematic name for the silicon pad.
+  v2n/README.md gains a new "Function-A vs function-B pin
+  labelling" section.
+- **Cross-chip PWM mux documented as design intent.**  The earlier
+  audit flagged E1M PWM3..5 as a Renesas-vs-GD32 conflict.  User
+  confirmed (2026-05-11) that PWM0..PWM5 are **dual-sourced by
+  design** with carrier-side resistor selection; **GD32 is the
+  default source**; PWM6/PWM7 are GD32-only.  v2n/README.md
+  gains a "Cross-chip PWM (PWM0..PWM5)" subsection capturing
+  this.  Same section notes the source-spreadsheet's inconsistent
+  use of the `E1M ` prefix on PWM0/1/2 (and ADC1/5/6/7) — all are
+  presumed E1M-edge; ADC prefix-inconsistency flagged as pending
+  user confirmation.
 - **Restored verbatim user-source notes in `gd32-io-mcu-map.tsv`.**
   Earlier ingest had paraphrased the source spreadsheet's
   annotations (e.g. "connected to Camera enable pin LDO 0" →
