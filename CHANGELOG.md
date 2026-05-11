@@ -23,6 +23,22 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- **"Using enabled libraries" section** in
+  `docs/recommended-libraries.md` -- short usage snippets for
+  every Tier-1 library a consumer can enable in `alp.yaml`:
+  CMSIS-DSP (FIR/FFT), ETLCPP (`etl::vector`, `etl::map`), fmt
+  (`fmt::format_to_n`), nlohmann/json (no-exception parse path),
+  LVGL (label on the resolved display), LittleFS (mount), and
+  doctest (test case).  Wrapping these libraries would be chaos
+  per the design principle -- apps use the upstream native API,
+  the SDK ships the compile-time profile that makes them
+  compatible with our embedded environment.
+  `docs/project-config.md` `libraries:` block section cross-links
+  to the new "Using enabled libraries" section; also adds an
+  explicit "no-wrapper rationale" callout, plus an "SoM vs
+  carrier (kept deliberately separate)" subsection codifying that
+  the SoM SKU presets live in their own directory hierarchy
+  separate from carriers + customer config.
 - `docs/project-config.md` "Single source of truth" section
   codifying the design principle: **`alp.yaml` is the only place
   to configure the firmware**.  `prj.conf`, CMake `-D` args,

@@ -33,6 +33,158 @@ defaults / type-shim value.
 | [doctest](https://github.com/doctest/doctest) | Single-header C++ test framework | recommended | Lighter than gtest / Catch2 for chip-driver unit tests run on host (not on target). |
 | [LittleFS](https://github.com/littlefs-project/littlefs) | Fail-safe filesystem for microcontrollers | recommended (Zephyr ships it) | For the microSD slot + on-flash storage.  Already in the Zephyr tree.             |
 
+## Using enabled libraries (no wrapper, just use them)
+
+When an app lists a Tier-1 library in `alp.yaml`'s `libraries:`
+array (or the lib is Tier-3 Zephyr-native, like LVGL), the SDK
+adds the library to the build with its native API on the include
+path.  There's **no `<alp/...>` wrapper**.  You include the
+upstream header and call the upstream functions.  The SDK ships
+the right compile-time profile under
+[`metadata/library-profiles/<lib>/`](../metadata/library-profiles/)
+so the library is set up correctly for the SDK's invariants
+(no exceptions, no `<iostream>`, no STL on M-class).
+
+Below: a short "what does using this look like in app code"
+snippet per library.  Apps are expected to read the upstream
+documentation for the full surface -- these snippets just show
+the shape so you know what to expect.
+
+### CMSIS-DSP
+
+```c
+#include <arm_math.h>
+
+float32_t in[256];
+float32_t out[256];
+arm_fir_instance_f32 fir;
+float32_t state[256 + 32 - 1];
+float32_t coeffs[32] = { /* taps */ };
+
+arm_fir_init_f32(&fir, 32, coeffs, state, 256);
+arm_fir_f32(&fir, in, out, 256);
+```
+
+Enable: `CONFIG_CMSIS_DSP=y` in alp.yaml-generated alp.conf
+(triggered when an `inference.backend` that needs CMSIS-DSP is
+selected, or when you explicitly want the math primitives).
+
+### ETLCPP
+
+```cpp
+#include <etl/vector.h>
+#include <etl/map.h>
+
+etl::vector<int, 64> samples;   // capacity 64, no heap
+samples.push_back(42);
+
+etl::map<int, const char*, 8> table;
+table.insert({1, "one"});
+```
+
+Enable: `libraries: [etl]` in alp.yaml.  The SDK's profile turns
+on `ETL_NO_STL` + `ETL_NO_EXCEPTIONS` automatically.
+
+### fmt
+
+```cpp
+#include <fmt/format.h>
+
+char buf[64];
+auto result = fmt::format_to_n(buf, sizeof(buf), "x={} y={:.2f}", x, y);
+*result.out = '\0';
+puts(buf);
+```
+
+Enable: `libraries: [fmt]`.  The SDK's profile turns on
+`FMT_HEADER_ONLY=1`, `FMT_USE_IOSTREAM=0`, `FMT_EXCEPTIONS=0`.
+
+### nlohmann/json
+
+```cpp
+#include <nlohmann/json.hpp>
+using json = nlohmann::json;
+
+json doc = json::parse(payload, /*cb=*/nullptr, /*allow_exceptions=*/false);
+if (!doc.is_discarded()) {
+    int temp_c = doc["temperature_c"];
+    /* ... */
+}
+```
+
+Enable: `libraries: [nlohmann_json]`.  Profile sets
+`JSON_NOEXCEPTION=1` so `parse(...)` returns a discarded sentinel
+on malformed input instead of throwing.
+
+### LVGL (Zephyr-native)
+
+```c
+#include <lvgl.h>
+
+lv_obj_t *screen = lv_scr_act();
+lv_obj_t *label = lv_label_create(screen);
+lv_label_set_text(label, "Hello E1M");
+lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+```
+
+Enable: set `iot:` and `display:` features in your alp.yaml; the
+loader translates them to `CONFIG_LVGL=y` + `CONFIG_DISPLAY=y` in
+the generated alp.conf.  Or for finer control, drop a Zephyr
+`prj.conf` override (see "Today's gaps" in `docs/project-config.md`).
+
+Driver-side wiring (which display, which framebuffer) comes from
+the carrier preset -- e.g. `metadata/carriers/e1m-evk.yaml`
+populates the SSD1306 OLED, and `<alp/boards/alp_e1m_evk.h>` maps
+the I²C bus + reset pin.  Your app code just calls `lv_*` against
+the resolved display.
+
+### LittleFS
+
+```c
+#include <zephyr/fs/fs.h>
+#include <zephyr/fs/littlefs.h>
+
+FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(lfs);
+static struct fs_mount_t mp = {
+    .type = FS_LITTLEFS, .fs_data = &lfs,
+    .storage_dev = (void *)FLASH_AREA_ID(storage),
+    .mnt_point = "/lfs",
+};
+
+fs_mount(&mp);
+```
+
+Enable: `CONFIG_FILE_SYSTEM_LITTLEFS=y` (Zephyr-native; the SDK
+doesn't gate this).  Set partition / mount point per Zephyr's
+fs subsystem documentation.
+
+### doctest (test-only)
+
+```cpp
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include <doctest/doctest.h>
+
+#include "chips/lsm6dso/lsm6dso.h"
+
+TEST_CASE("lsm6dso_init validates whoami") {
+    fake_i2c_t bus;
+    fake_i2c_set_response(&bus, 0x0F, 0x6C);
+    CHECK(lsm6dso_init(&bus) == 0);
+}
+```
+
+Enable: `libraries: [doctest]`.  Test-only -- doctest doesn't
+ship in production builds.
+
+---
+
+If a library you want isn't in the Tier-1 list above, see the
+deferred / considered tiers below or open an issue.  Adding a
+library is a matter of writing a profile header at
+`metadata/library-profiles/<lib>/` + a `libraries:` enum entry
+in `metadata/schemas/alp-project-v1.schema.json` -- low friction
+once the case is made.
+
 ## Tier 2 — deferred to v0.5+
 
 The libraries below cleared the evaluation but didn't land in v0.3's

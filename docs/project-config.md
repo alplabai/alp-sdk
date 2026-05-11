@@ -109,7 +109,22 @@ Top-level fields:
 | `iot`            | no       | Wi-Fi / MQTT / BLE / TLS feature toggles.                     |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
 
-### SoM vs carrier
+### SoM vs carrier (kept deliberately separate)
+
+The schema **separates SoM SKU + carrier into distinct blocks**
+and keeps the stock SoM presets under their own directory tree
+(`metadata/e1m_modules/<family>/sku-*.yaml`).  This is on purpose:
+
+- The SoM is a tightly-controlled, Alp-released hardware item;
+  the SKU preset is authoritative + shared across every customer
+  using that part.
+- The carrier varies per customer board design; the carrier
+  preset is either the stock Alp EVK reference or a customer-
+  authored fork.
+
+Keeping them in separate file hierarchies means consumer-authored
+carrier presets never accidentally override SoM data, and SoM
+preset updates from Alp don't drag carrier opinions with them.
 
 The schema deliberately separates two concerns that get conflated:
 
@@ -233,7 +248,14 @@ datasheet stay `TBD` until the user supplies them authoritatively.
 
 Listed libraries become available on the include path + link
 line.  Apps use them through their **native API** -- no
-`<alp/...>` wrapping:
+`<alp/...>` wrapping.  This is intentional: wrapping every
+upstream library would be chaos -- different idioms, different
+error models, different lifecycles -- and most consumers want
+the upstream library as it ships, not Alp's opinion of how it
+should look.  For "how do I actually use this in app code" see
+the [Using enabled libraries](recommended-libraries.md#using-enabled-libraries-no-wrapper-just-use-them)
+section in `recommended-libraries.md` -- one short usage snippet
+per Tier-1 library.
 
 ```yaml
 libraries:
