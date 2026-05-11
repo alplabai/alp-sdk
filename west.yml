@@ -6,14 +6,21 @@
 # the topdir.  Most application repos will instead add alp-sdk as a
 # project in their own west.yml and let *that* manifest drive Zephyr.
 #
-# v0.1 pins:
-#   - zephyr: latest stable release that supports Alif Ensemble in mainline
-#   - hal_alif: tracked via the Zephyr modules/hal/alif submodule (do not
-#     re-pin here — let Zephyr's own west.yml win)
+# Pin policy:
+#   - zephyr: the LTS release the SDK is verified against.  Currently
+#     v3.7.0 (the same revision pr-twister.yml + the nightly AEN HIL
+#     workflow exercise).  Bumps are deliberate, not automatic --
+#     each LTS-to-LTS upgrade ships as a minor alp-sdk release after
+#     re-verifying every wrapped peripheral on the target SoMs.  See
+#     docs/zephyr-version-policy.md for the full policy.
+#   - hal_alif: tracked via Zephyr's modules/hal/alif submodule -- do
+#     not re-pin here; let Zephyr's own west.yml win.
 #
-# When upgrading: bump zephyr.revision and rerun `west update`; verify
-# the modules/hal/alif rev that ships with that Zephyr tag still
-# satisfies the SoMs we target (see docs/os-support-matrix.md).
+# When upgrading the Zephyr pin: change `revision:` below, rerun
+# `west update`, verify the modules/hal/alif rev that ships with the
+# new Zephyr tag still satisfies the SoMs we target (see
+# docs/os-support-matrix.md), bump pr-twister.yml +
+# nightly-aen-hil.yml's `--mr` to match, and add a CHANGELOG entry.
 
 manifest:
   defaults:
@@ -25,7 +32,7 @@ manifest:
 
   projects:
     - name: zephyr
-      revision: main          # TODO: pin to a release tag once v0.1 CI is green.
+      revision: v3.7.0        # LTS pin; see docs/zephyr-version-policy.md
       west-commands: scripts/west-commands.yml
       import:
         # Pull in only the modules we actually need.  Filtering keeps

@@ -245,8 +245,10 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for the per-library
-design and [`docs/board-config.md`](docs/board-config.md) for the
-`board.yaml` schema reference.
+design, [`docs/board-config.md`](docs/board-config.md) for the
+`board.yaml` schema reference, and
+[`docs/zephyr-version-policy.md`](docs/zephyr-version-policy.md) for
+how we pin Zephyr LTS + when bumps drive new alp-sdk releases.
 
 ## Public API
 
