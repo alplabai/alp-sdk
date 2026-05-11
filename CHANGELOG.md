@@ -9,6 +9,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- `tests/yocto/` -- plain-CMake test suite for the Linux user-space
+  backend.  First entry: `alp_test_inference_dispatcher` exercises
+  the seven branches of `src/yocto/inference_yocto.c` --
+  NULL-cfg / NULL-model / zero-size cfg rejection, AUTO-with-no-
+  backend NOSUPPORT, explicit unsupported backend NOSUPPORT, NULL-
+  handle safety on every accessor, and that `alp_last_error()`
+  correctly stamps `ALP_ERR_INVAL` / `ALP_ERR_NOSUPPORT` per the
+  new unified setter.  Mirrors the contract in the Zephyr ztest
+  suite at `tests/zephyr/inference/`; uses a tiny local
+  assert harness (`test_assert.h`) since plain-CMake builds don't
+  pull in ztest.  Opts in via `ALP_OS=yocto` + `ALP_BUILD_TESTS=ON`.
 - `src/common/alp_internal.h` -- cross-backend internal header
   declaring `alp_internal_set_last_error(s)`.  Lets non-Zephyr
   backend source files (the yocto inference dispatcher today,

@@ -16,3 +16,9 @@ add_executable(alp_sdk_smoke
 target_link_libraries(alp_sdk_smoke PRIVATE alp::sdk)
 
 add_test(NAME alp_sdk_smoke COMMAND alp_sdk_smoke)
+
+# Per-backend test directories.  Each opts in based on ALP_OS so
+# unrelated tests don't try to compile under the wrong backend.
+if(ALP_OS STREQUAL "yocto")
+    add_subdirectory(yocto)
+endif()
