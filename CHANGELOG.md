@@ -21,6 +21,23 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   shim, or (b) vendor a tagged release under `vendors/lwrb/src/`.
   Plan-A picked for v0.4 default.
 
+### Changed
+
+- **Profile-header filenames now match each upstream library's
+  expected name** -- no more six different `alp-embedded.h` files
+  scattered across the tree.  Renames:
+    - `etl/alp-embedded.h` -> `etl/etl_profile.h` (ETL's expected name)
+    - `fmt/alp-embedded.h` -> `fmt/fmt_config.h`
+    - `nlohmann_json/alp-embedded.h` -> `nlohmann_json/json_config.h`
+    - `lvgl/alp-embedded.h` -> `lvgl/lv_conf.h` (LVGL's expected name)
+    - `doctest/alp-embedded.h` -> `doctest/doctest_config.h`
+    - `mbedtls/alp-embedded.h` -> `mbedtls/mbedtls_config.h`
+      (set `MBEDTLS_CONFIG_FILE` to this path when including).
+  Drop-in semantics for libraries that demand a specific config
+  filename; self-documenting otherwise.  Done via `git mv` so
+  per-file history is preserved.  `metadata/library-profiles/README.md`
+  layout table refreshed.
+
 ### Added
 
 - **Library profile set extended 3 -> 7.**  Per the design directive

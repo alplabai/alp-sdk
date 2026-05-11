@@ -58,21 +58,28 @@ though our default-embedded profile turns them off.
 
 ## Layout
 
+Each profile header is named to match the **upstream library's
+expected config filename** so it drops in as the file the
+library actually looks for (e.g. ETL's `#include "etl_profile.h"`,
+LVGL's `#include "lv_conf.h"`, MbedTLS's `MBEDTLS_CONFIG_FILE`).
+The directory disambiguates which library each file is for.
+
 ```
 metadata/library-profiles/
 ├── README.md                          (this file)
 ├── etl/
-│   └── alp-embedded.h                 (ETL profile for E1M SoMs)
+│   └── etl_profile.h                  (ETL.  Upstream looks for this name.)
 ├── fmt/
-│   └── alp-embedded.h                 (fmt config for E1M SoMs)
+│   └── fmt_config.h                   (fmt config defines)
 ├── nlohmann_json/
-│   └── alp-embedded.h                 (json config for E1M SoMs)
+│   └── json_config.h                  (nlohmann/json config defines)
 ├── lvgl/
-│   └── alp-embedded.h                 (lv_conf.h for E1M displays)
+│   └── lv_conf.h                      (LVGL.  Upstream looks for this name.)
 ├── doctest/
-│   └── alp-embedded.h                 (doctest config for embedded test runs)
+│   └── doctest_config.h               (doctest config defines)
 ├── mbedtls/
-│   └── alp-embedded.h                 (minimal-modern TLS 1.3 client + AEAD subset)
+│   └── mbedtls_config.h               (MbedTLS.  Set MBEDTLS_CONFIG_FILE
+│                                       to this when including.)
 └── cmsis-dsp/
     └── README.md                      (intentionally empty -- see file)
 ```
@@ -83,10 +90,10 @@ hot path, no MD5/SHA-1/CBC etc.) and leave everything else at the
 upstream default.  The point is compatibility-by-default;
 opinionated tuning is the consumer's job.
 
-Adding a new library: drop a directory + an `alp-embedded.h` (or
-a `README.md` if no compile-time config is needed), then extend
-the `libraries:` enum in
-`metadata/schemas/alp-project-v1.schema.json` and the
+Adding a new library: drop a directory + a config header named
+to match the upstream's expected filename (or a `README.md` if
+no compile-time config is needed), then extend the `libraries:`
+enum in `metadata/schemas/alp-project-v1.schema.json` and the
 `_LIBRARY_KCONFIG` map in `scripts/alp_project.py` so consumers
 can enable it via `alp.yaml`.
 
