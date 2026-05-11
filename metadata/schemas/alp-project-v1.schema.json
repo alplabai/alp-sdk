@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/alp-project-v1.schema.json",
+  "title": "ALP project configuration (alp.yaml) v1",
+  "description": "Schema for the per-project alp.yaml file that consumers place at their app root.  Declares the target SoM SKU, per-component assembly overrides, OS backend, inference backend, and optional library / feature enables.  The SDK's loader script (planned for v0.4) reads this file and emits Kconfig fragments (Zephyr), -D flags (plain CMake), or local.conf snippets (Yocto).  See docs/project-config.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "som", "os"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema revision.  Bumped only on breaking format changes."
+    },
+    "som": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sku"],
+      "description": "SoM identity + per-component assembly overrides.",
+      "properties": {
+        "sku": {
+          "type": "string",
+          "pattern": "^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$",
+          "description": "Stock SKU name.  Resolves to a preset under metadata/e1m_modules/<family>/sku-<sku>.yaml.  Currently recognised: E1M-AEN301/401/501/601/701/801 (Alif Ensemble family), E1M-V2N101/V2N102 (Renesas RZ/V2N), E1M-V2M101/V2M102 (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93, exact SKU TBD)."
+        },
+        "overrides": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-component assembly deltas vs the stock SKU preset.  Use for custom variants (e.g. a derivative that DNI'd the IMU to cut BOM cost).",
+          "properties": {
+            "wifi_ble": {
+              "$ref": "#/$defs/component_state",
+              "description": "Wi-Fi 6 + BLE 5.4 radio.  E1M-AEN uses on-module TI CC3501E; E1M-X V2N family uses on-module Murata LBEE5HY2FY (Infineon CYW55513)."
+            },
+            "imu": {
+              "type": "string",
+              "enum": ["lsm6dso", "icm42670", "bmi323", "none"],
+              "description": "Inertial measurement unit on the SoM (or carrier).  Multiple IMUs may be populated on dev kits -- choose the one the application uses."
+            },
+            "barometer": {
+              "type": "string",
+              "enum": ["bmp581", "bme280", "none"]
+            },
+            "secure_element": {
+              "type": "string",
+              "enum": ["optiga_trust_m", "none"],
+              "description": "Hardware secure element backing <alp/security.h>'s ECC + AES + TRNG path."
+            },
+            "rtc_external": {
+              "type": "string",
+              "enum": ["rv3028c7", "none"],
+              "description": "External RTC.  If 'none', the SoC-internal RTC is used."
+            },
+            "ethernet": {
+              "$ref": "#/$defs/component_state",
+              "description": "Wired Ethernet PHY population (RTL8211FDI-VD-CG on V2N).  Set to 'absent' on SoMs that don't route the GMAC pins."
+            }
+          }
+        },
+        "memory": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Memory subsystem capacities -- per-SKU presets fill these from the released parts list; overrides cover custom assemblies.",
+          "properties": {
+            "dram_mbit": {
+              "type": "integer",
+              "description": "LPDDR4X / LPDDR5X capacity in megabits (e.g. 32 Gbit = 32768)."
+            },
+            "flash_mbit": {
+              "type": "integer",
+              "description": "Boot flash capacity in megabits.  eMMC on V2N family, SPI-NAND on AEN.  E1M-AEN MRAM goes in mram_kbit instead."
+            },
+            "mram_kbit": {
+              "type": "integer",
+              "description": "On-die MRAM capacity (Alif Ensemble only; ignored on V2N/N93)."
+            }
+          }
+        }
+      }
+    },
+    "os": {
+      "type": "string",
+      "enum": ["zephyr", "yocto", "baremetal"],
+      "description": "Target OS backend.  Maps to ALP_OS in plain-CMake, to the prj.conf in Zephyr, to the MACHINE in Yocto."
+    },
+    "inference": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Inference backend selection.  Defaults pick the best available NPU on the SoM; explicit values override.",
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["auto", "cpu", "ethos_u", "drpai", "deepx_dx"],
+          "default": "auto"
+        },
+        "default_arena_kib": {
+          "type": "integer",
+          "minimum": 16,
+          "default": 128,
+          "description": "TFLM tensor arena size in KiB.  Apps override per-call via alp_inference_config_t.arena_bytes."
+        }
+      }
+    },
+    "libraries": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Optional libraries to make available to app code.  When listed, the SDK adds the library's include path + sources to the build; apps use the library through its native API (e.g. `#include \"etl/vector.h\"`), no <alp/...> wrapper.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "etl",
+          "fmt",
+          "nlohmann_json",
+          "doctest",
+          "lwrb",
+          "nanopb"
+        ]
+      }
+    },
+    "iot": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Connectivity feature toggles.  Enabling iot.wifi pulls in the Wi-Fi station path; iot.mqtt the MQTT client; iot.ble the Bluetooth host stack; iot.tls the MbedTLS-backed <alp/security.h> path.",
+      "properties": {
+        "wifi": {"type": "boolean", "default": false},
+        "mqtt": {"type": "boolean", "default": false},
+        "ble":  {"type": "boolean", "default": false},
+        "tls":  {"type": "boolean", "default": false}
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "last_error": {
+          "type": "boolean",
+          "default": true,
+          "description": "Thread-local alp_last_error() slot.  Disable to save a few bytes of TLS on extremely-tight builds."
+        },
+        "log_level": {
+          "type": "string",
+          "enum": ["error", "warn", "info", "debug", "trace"],
+          "default": "info"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "component_state": {
+      "oneOf": [
+        {"type": "string", "enum": ["present", "absent"]},
+        {"type": "string", "pattern": "^[a-z0-9_-]+$", "description": "Specific part number for a custom-populated variant."}
+      ]
+    }
+  }
+}

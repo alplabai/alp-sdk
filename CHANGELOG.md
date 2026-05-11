@@ -23,6 +23,36 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- **Project configuration (`alp.yaml`)** -- one declarative YAML
+  file per consumer project that picks the SoM SKU + per-component
+  assembly overrides + OS backend + inference backend + optional
+  libraries + connectivity features.  Collapses what was previously
+  three separate config formats (`prj.conf` for Zephyr, cmake `-D`
+  flags for plain CMake, `local.conf` for Yocto) into one source
+  of truth.
+  - Schema: `metadata/schemas/alp-project-v1.schema.json` (JSON
+    Schema draft-2020-12).
+  - Canonical template: `metadata/templates/alp.yaml` (fully
+    commented).
+  - Stock SKU presets: `metadata/e1m_modules/<family>/sku-<sku>.yaml`.
+    v0.3 ships two worked examples (`sku-aen701.yaml`,
+    `sku-v2n101.yaml`); remaining SKUs (aen301/401/501/601/801,
+    v2n102, v2m101/102, NX9xxx) land as the user-supplied hardware
+    configuration writeup fills them in.  Values not in the
+    silicon datasheet stay `TBD` until then per the project
+    memory note.
+  - Design + reference: `docs/project-config.md`.
+  - `docs/getting-started.md` "Where to go next" updated to point
+    at project-config.md as the first item.
+  - The loader script that emits per-backend native configs from
+    `alp.yaml` (Zephyr fragments / cmake `-D` / Yocto local.conf)
+    lands in v0.4.  v0.3 documents the mapping so consumers can
+    hand-translate until then.
+  - **Optional libraries (ETLCPP, fmt, nlohmann/json, doctest,
+    LwRB, nanopb) are declared in the same file** -- the v0.4
+    loader wires their include paths into the build when listed,
+    no `<alp/...>` wrapper.  Apps use the libraries through their
+    native APIs.
 - `bench/` extended from 3 -> 6 cases.  New files cover the
   rejection / fast-path costs for `<alp/iot.h>` (`bench_iot.c`),
   `<alp/audio.h>` (`bench_audio.c`), and `<alp/storage.h>`

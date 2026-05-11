@@ -1,0 +1,99 @@
+# alp.yaml -- ALP SDK project configuration
+#
+# Copy this template to your application root and edit the values
+# for your project.  The SDK's loader (planned for v0.4) reads
+# this file and emits the equivalent Kconfig fragments (Zephyr),
+# CMake -D flags (plain CMake), or local.conf snippets (Yocto).
+#
+# Validated against metadata/schemas/alp-project-v1.schema.json.
+# See docs/project-config.md for the full reference.
+
+schema_version: 1
+
+# -------------------------------------------------------------------
+# SoM identity -- which module does this firmware target?
+# -------------------------------------------------------------------
+som:
+  # Stock SKU.  Recognised values:
+  #   E1M-AEN301 / AEN401 / AEN501 / AEN601 / AEN701 / AEN801   (Alif Ensemble)
+  #   E1M-V2N101 / V2N102                                       (Renesas RZ/V2N)
+  #   E1M-V2M101 / V2M102                                       (V2N + DEEPX DX-M1)
+  #   E1M-NX9xxx                                                (NXP i.MX 93, SKU TBD)
+  #
+  # The SDK ships per-SKU presets at:
+  #   metadata/e1m_modules/<family>/sku-<sku>.yaml
+  # which fill in the assembly options below; you only need to set
+  # `overrides` and `memory` blocks for custom-populated variants.
+  sku: E1M-AEN701
+
+  # Per-component overrides for custom assemblies.  Anything not
+  # listed here inherits from the SKU preset.  Uncomment + edit as
+  # needed.
+  #
+  # overrides:
+  #   wifi_ble:       absent          # DNI'd the radio
+  #   imu:            none            # DNI'd the IMU
+  #   barometer:      none
+  #   secure_element: none
+  #   rtc_external:   none
+
+  # Memory overrides (custom DRAM / flash population).  Defaults
+  # come from the SKU preset.
+  #
+  # memory:
+  #   dram_mbit:   65536              # 64 Gbit LPDDR4X
+  #   flash_mbit:  131072             # 128 Gbit eMMC
+  #   mram_kbit:   13312              # 13 Mbit (Alif Ensemble only)
+
+# -------------------------------------------------------------------
+# Target OS backend
+# -------------------------------------------------------------------
+# zephyr     -- RTOS path, lands on E1M-AEN (full v0.1+) and
+#               V2N-Zephyr (v0.3+).  Uses prj.conf for fine-tuning.
+# yocto      -- Linux user-space, V2N/V2N-M1 family (v0.4
+#               first-class).  See yocto/meta-alp/README.md.
+# baremetal  -- No OS; CMSIS-Driver layer directly on Alif/Renesas
+#               HALs.  v0.2+ for AEN.
+os: zephyr
+
+# -------------------------------------------------------------------
+# Inference backend (omit for default "auto")
+# -------------------------------------------------------------------
+# inference:
+#   backend: auto         # auto picks the best NPU for the SoM
+#                         # (Ethos-U on AEN, DRP-AI on V2N, DEEPX
+#                         # on V2N-M1, Ethos-U65 on N93)
+#                         # Explicit alternatives: cpu | ethos_u |
+#                         # drpai | deepx_dx
+#   default_arena_kib: 128
+
+# -------------------------------------------------------------------
+# Optional libraries (no SDK wrapper -- apps use native API)
+# -------------------------------------------------------------------
+# Uncomment any you want.  When listed, the SDK adds the upstream
+# include path + sources to your build; you use the library through
+# its native API (e.g. `#include "etl/vector.h"`, `fmt::format(...)`).
+#
+# libraries:
+#   - etl                 # ETL CPP container library (Apache-2.0-ish)
+#   - fmt                 # libfmt (formatting)
+#   - nlohmann_json       # nlohmann/json (header-only)
+#   - doctest             # single-header C++ test framework
+#   - lwrb                # MaJerle LwRB lock-free ring buffer
+#   - nanopb              # protobuf for embedded
+
+# -------------------------------------------------------------------
+# Connectivity feature toggles
+# -------------------------------------------------------------------
+# iot:
+#   wifi: true            # Pull in <alp/iot.h>'s Wi-Fi station path
+#   mqtt: true            # MQTT client (requires wifi or wired net)
+#   ble:  false           # BLE host stack (requires CONFIG_BT on Zephyr)
+#   tls:  true            # MbedTLS for <alp/security.h>
+
+# -------------------------------------------------------------------
+# Diagnostic surface
+# -------------------------------------------------------------------
+# diagnostics:
+#   last_error: true      # alp_last_error() thread-local slot
+#   log_level:  info      # error | warn | info | debug | trace
