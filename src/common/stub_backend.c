@@ -81,10 +81,10 @@ void alp_internal_set_last_error(alp_status_t s)
 /* ------------------------------------------------------------------ */
 
 #if defined(ALP_VENDOR_OVERRIDES_PERIPHERAL)
-#  define ALP_VENDOR_OVERRIDES_I2C  1
-#  define ALP_VENDOR_OVERRIDES_SPI  1
-#  define ALP_VENDOR_OVERRIDES_GPIO 1
-#  define ALP_VENDOR_OVERRIDES_UART 1
+#define ALP_VENDOR_OVERRIDES_I2C 1
+#define ALP_VENDOR_OVERRIDES_SPI 1
+#define ALP_VENDOR_OVERRIDES_GPIO 1
+#define ALP_VENDOR_OVERRIDES_UART 1
 #endif
 
 #if !defined(ALP_VENDOR_OVERRIDES_I2C)

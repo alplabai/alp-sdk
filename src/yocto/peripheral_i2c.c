@@ -65,13 +65,13 @@
 
 struct alp_i2c {
     bool     in_use;
-    int      fd;          /* /dev/i2c-N file descriptor */
+    int      fd; /* /dev/i2c-N file descriptor */
     uint32_t bus_id;
     uint8_t  cached_addr; /* last addr passed to I2C_SLAVE ioctl */
     bool     addr_cached;
 };
 
-static struct alp_i2c g_i2c_pool[ALP_SDK_YOCTO_MAX_I2C_HANDLES];
+static struct alp_i2c  g_i2c_pool[ALP_SDK_YOCTO_MAX_I2C_HANDLES];
 
 static struct alp_i2c *pool_acquire(void)
 {
