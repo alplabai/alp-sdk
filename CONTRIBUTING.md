@@ -30,11 +30,13 @@ signatures), if you have one in mind.
 3. Add or update tests under `tests/`.  Every public function must
    have at least one Unity / ztest test.
 4. **Append a row to [`docs/test-plan.md`](docs/test-plan.md).**
-   New feature lands as `❌ untested` by default; if the PR also
+   New feature lands as `⏳ untested` by default; if the PR also
    captures verification evidence (HIL log, broker roundtrip,
    scope capture, …), flip the row to `🟡 partial` or `✅
-   verified` and link the evidence in the Notes column.  A
-   feature that doesn't appear in the test plan does **not**
+   verified` and link the evidence in the Notes column.  Reserve
+   `❌` for **failing** verification (the contract was tested
+   and didn't hold) -- that's a blocker, not a default state.
+   A feature that doesn't appear in the test plan does **not**
    ship -- code that nobody has committed to verifying isn't a
    release deliverable.
 5. Run the build matrix locally before opening a PR:
