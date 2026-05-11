@@ -59,6 +59,7 @@
 
 #include "alp/peripheral.h"
 #include "alp_internal.h"
+#include "yocto_errno.h"
 
 #ifndef ALP_SDK_YOCTO_MAX_UART_HANDLES
 #define ALP_SDK_YOCTO_MAX_UART_HANDLES 4
@@ -98,32 +99,6 @@ static void pool_release(struct alp_uart *h)
         h->fd = -1;
     }
     h->in_use = false;
-}
-
-static alp_status_t errno_to_alp(int err)
-{
-    switch (err) {
-    case 0:
-        return ALP_OK;
-    case EINVAL:
-        return ALP_ERR_INVAL;
-    case EBUSY:
-    case EAGAIN:
-        return ALP_ERR_BUSY;
-    case ETIMEDOUT:
-        return ALP_ERR_TIMEOUT;
-    case ENOMEM:
-        return ALP_ERR_NOMEM;
-    case ENOTSUP:
-    case ENOSYS:
-        return ALP_ERR_NOSUPPORT;
-    case ENOENT:
-    case ENODEV:
-    case ENXIO:
-        return ALP_ERR_NOT_READY;
-    default:
-        return ALP_ERR_IO;
-    }
 }
 
 static int resolve_path(uint32_t port_id, char *out, size_t cap)
@@ -196,13 +171,13 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 
     int fd = open(path, O_RDWR | O_NOCTTY | O_CLOEXEC);
     if (fd < 0) {
-        alp_internal_set_last_error(errno_to_alp(errno));
+        alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
         return NULL;
     }
 
     struct termios tio;
     if (tcgetattr(fd, &tio) < 0) {
-        alp_internal_set_last_error(errno_to_alp(errno));
+        alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
         (void)close(fd);
         return NULL;
     }
@@ -264,12 +239,12 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
     tio.c_cc[VTIME] = 0;
 
     if (cfsetispeed(&tio, speed) < 0 || cfsetospeed(&tio, speed) < 0) {
-        alp_internal_set_last_error(errno_to_alp(errno));
+        alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
         (void)close(fd);
         return NULL;
     }
     if (tcsetattr(fd, TCSANOW, &tio) < 0) {
-        alp_internal_set_last_error(errno_to_alp(errno));
+        alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
         (void)close(fd);
         return NULL;
     }
@@ -299,7 +274,7 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len)
             if (errno == EINTR) {
                 continue;
             }
-            return errno_to_alp(errno);
+            return alp_yocto_errno_to_alp(errno);
         }
         written += (size_t)n;
     }
@@ -321,7 +296,7 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t
      * available OR t deciseconds elapse since the last byte". */
     struct termios tio;
     if (tcgetattr(port->fd, &tio) < 0) {
-        return errno_to_alp(errno);
+        return alp_yocto_errno_to_alp(errno);
     }
     cc_t vtime;
     if (timeout_ms == 0) {
@@ -333,7 +308,7 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t
     tio.c_cc[VMIN]  = 1;
     tio.c_cc[VTIME] = vtime;
     if (tcsetattr(port->fd, TCSANOW, &tio) < 0) {
-        return errno_to_alp(errno);
+        return alp_yocto_errno_to_alp(errno);
     }
 
     size_t got = 0;
@@ -343,7 +318,7 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t
             if (errno == EINTR) {
                 continue;
             }
-            return errno_to_alp(errno);
+            return alp_yocto_errno_to_alp(errno);
         }
         if (n == 0) {
             /* VTIME elapsed with no data -- return what we have so

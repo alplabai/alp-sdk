@@ -58,6 +58,7 @@
 
 #include "alp/peripheral.h"
 #include "alp_internal.h"
+#include "yocto_errno.h"
 
 #ifndef ALP_SDK_YOCTO_MAX_GPIO_HANDLES
 #define ALP_SDK_YOCTO_MAX_GPIO_HANDLES 16
@@ -68,7 +69,7 @@
 #endif
 
 #define ALP_GPIO_PIN_CHIP(pin_id) (((pin_id) >> 16) & 0xFFFFu)
-#define ALP_GPIO_PIN_LINE(pin_id) ((pin_id) & 0xFFFFu)
+#define ALP_GPIO_PIN_LINE(pin_id) ((pin_id)&0xFFFFu)
 
 struct alp_gpio {
     bool     in_use;
@@ -104,32 +105,6 @@ static void pool_release(struct alp_gpio *h)
     h->in_use = false;
 }
 
-static alp_status_t errno_to_alp(int err)
-{
-    switch (err) {
-    case 0:
-        return ALP_OK;
-    case EINVAL:
-        return ALP_ERR_INVAL;
-    case EBUSY:
-    case EAGAIN:
-        return ALP_ERR_BUSY;
-    case ETIMEDOUT:
-        return ALP_ERR_TIMEOUT;
-    case ENOMEM:
-        return ALP_ERR_NOMEM;
-    case ENOTSUP:
-    case ENOSYS:
-        return ALP_ERR_NOSUPPORT;
-    case ENOENT:
-    case ENODEV:
-    case ENXIO:
-        return ALP_ERR_NOT_READY;
-    default:
-        return ALP_ERR_IO;
-    }
-}
-
 static uint64_t pull_to_flags(alp_gpio_pull_t pull)
 {
     switch (pull) {
@@ -156,7 +131,7 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
     }
     int chip_fd = open(chip_path, O_RDWR | O_CLOEXEC);
     if (chip_fd < 0) {
-        alp_internal_set_last_error(errno_to_alp(errno));
+        alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
         return NULL;
     }
 
@@ -169,7 +144,7 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
     (void)snprintf(req.consumer, sizeof(req.consumer), "alp-sdk");
 
     if (ioctl(chip_fd, GPIO_V2_GET_LINE_IOCTL, &req) < 0) {
-        alp_internal_set_last_error(errno_to_alp(errno));
+        alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
         (void)close(chip_fd);
         return NULL;
     }
@@ -202,7 +177,7 @@ alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pu
         cfg.flags |= GPIO_V2_LINE_FLAG_INPUT;
     }
     if (ioctl(pin->line_fd, GPIO_V2_LINE_SET_CONFIG_IOCTL, &cfg) < 0) {
-        return errno_to_alp(errno);
+        return alp_yocto_errno_to_alp(errno);
     }
     pin->is_output = (dir == ALP_GPIO_OUTPUT);
     return ALP_OK;
@@ -219,11 +194,10 @@ alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
         return ALP_ERR_INVAL;
     }
     struct gpio_v2_line_values vals = {
-        .bits = level ? 1ULL : 0ULL,
-        .mask = 1ULL, /* line 0 in this request */
+        .bits = level ? 1ULL : 0ULL, .mask = 1ULL, /* line 0 in this request */
     };
     if (ioctl(pin->line_fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &vals) < 0) {
-        return errno_to_alp(errno);
+        return alp_yocto_errno_to_alp(errno);
     }
     return ALP_OK;
 }
@@ -238,7 +212,7 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
         .mask = 1ULL,
     };
     if (ioctl(pin->line_fd, GPIO_V2_LINE_GET_VALUES_IOCTL, &vals) < 0) {
-        return errno_to_alp(errno);
+        return alp_yocto_errno_to_alp(errno);
     }
     *level = (vals.bits & 1ULL) != 0;
     return ALP_OK;
