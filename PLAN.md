@@ -285,7 +285,7 @@ shipped early in 2026-Q2.
 |---------|---------------|-------|---------|-----|
 | **v0.1** | Public surface frozen, AEN-Zephyr full | DSP re-export | Skeleton + chip metadata for all NPUs | Skeleton + header surface |
 | **v0.2** | **12 peripheral classes wrapped (was 4) + capability validation + E1M portability bound + per-peripheral hand-written examples + ADRs**.  AEN-baremetal + V2N intro. | CMSIS-Driver alignment | Vela + TFLM on AEN, EdgeAI app real | Real Wi-Fi-station + MQTT on AEN-Zephyr |
-| **v0.3** | V2N-Zephyr + AEN-Yocto stubs, M1 intro.  Real impl behind v0.2-declared `<alp/audio.h>` / `<alp/ble.h>` / `<alp/security.h>` / `<alp/mproc.h>` surfaces. | (held) | `<alp/inference.h>` unified, ExecuTorch on AEN | TLS + BLE + provisioning |
+| **v0.3** | V2N-Zephyr + AEN-Yocto stubs, M1 intro.  Real impl behind v0.2-declared `<alp/audio.h>` / `<alp/ble.h>` / `<alp/security.h>` / `<alp/mproc.h>` surfaces.  **+ `alp.yaml` project config** (one YAML per project; SoM SKU + carrier + libraries + features), with loader emitting Kconfig / CMake / Yocto natives. | (held) | `<alp/inference.h>` unified, ExecuTorch on AEN.  DEEPX DX-M1 + Ethos-U65/i.MX 93 dispatchers wired (real link v0.4). | TLS + BLE + provisioning |
 | **v0.4** | Yocto first-class on V2N + i.MX93 | (held) | DRP-AI + Ethos-U65 backends | Mosquitto + Paho + OTA |
 | **v1.0** | ABI freeze across the matrix (snapshot tooling shipped v0.1) | LTS-aligned | Full multi-vendor inference unification | Production IoT stack |
 
@@ -351,6 +351,38 @@ that remain open take priority for the upcoming releases.
     macros in `<alp/e1m_pinout.h>` enumerate the e1m-spec's
     minimum routed instance counts.  See
     [ADR 0004](docs/adr/0004-e1m-portability-bound.md).
+
+### Closed in v0.3 (additional gaps the slides didn't anticipate)
+
+13. ~~**Configuration sprawl across three formats.**~~  Pre-v0.3
+    a consumer had to track `prj.conf` (Zephyr Kconfig), cmake
+    `-D` flags (plain CMake), and `local.conf` (Yocto MACHINE +
+    image install) separately to declare a single firmware
+    target.  v0.3 introduces **`alp.yaml`** -- one declarative
+    per-project file that picks the SoM SKU, per-component
+    carrier population, OS backend, inference backend, optional
+    libraries, and connectivity features.  The
+    `scripts/alp_project.py` loader compiles it down to the
+    per-backend native config (Kconfig fragment / -D args /
+    local.conf snippet).  Schema:
+    [`metadata/schemas/alp-project-v1.schema.json`](metadata/schemas/alp-project-v1.schema.json).
+    Design + reference: [`docs/project-config.md`](docs/project-config.md).
+14. ~~**SoM vs carrier conflation.**~~ Initial scaffolding mixed
+    on-module components (Alif silicon + CC3501E + OPTIGA +
+    RV-3028 + TMP112 + 24C128) with carrier-board components
+    (LSM6DSO + BMI323 + BMP581 + OLEDs + cameras + speaker amps).
+    The `alp.yaml` schema's `som` block now covers SoM-fab-time
+    fixed parts; the new `carrier` block covers per-board
+    population.  Two stock carrier presets ship at
+    `metadata/carriers/e1m-evk.yaml` and `e1m-x-evk.yaml`,
+    explicitly positioned as **reference designs** that customer
+    carriers fork.  Worked customer-fork example at
+    `metadata/carriers/custom-example.yaml`.
+15. ~~**No CI gate on the project-config schema.**~~ The
+    `pr-metadata-validate` workflow now smoke-tests
+    `scripts/alp_project.py` against `metadata/templates/alp.yaml.example`
+    on every PR -- catches schema / loader regressions before
+    they ship.
 
 ---
 

@@ -28,7 +28,7 @@ the old plan to this one:
 |---------|-------------|------------------|
 | v0.1.0  | in-progress | AEN bring-up (Zephyr peripherals + multi-proc BSP foundation) |
 | v0.2.0  | **surface complete; impl in progress** | 12 wrapped peripheral classes + capability validation + E1M portability bound + per-peripheral examples + v0.2/v0.3 stub headers + ADRs all shipped early.  Bare-metal AEN real, V2N intro, EdgeAI app real are the remaining v0.2 deliverables. |
-| v0.3.0  | planned     | Real impl behind v0.2-declared surfaces (`<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`, `<alp/mproc.h>`).  IoT reference app, multi-proc completion, display polish, V2N+M1 intro. |
+| v0.3.0  | **surface complete; impl in progress** | Real impl behind v0.2-declared surfaces (`<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`, `<alp/mproc.h>`).  IoT reference app, multi-proc completion, display polish, V2N+M1 intro.  **Plus: `alp.yaml` project config + loader (`scripts/alp_project.py`), DEEPX DX-M1 + Ethos-U65/i.MX 93 inference-backend dispatchers, bench + fuzz scaffolding, Coverity workflow stub, Renesas V2N AI SDK 7.10 BSP wire-up in meta-alp.** |
 | v0.4.0  | planned     | Yocto first-class (V2N + V2N+M1 full); secure boot + secure OTA on AEN-Zephyr  |
 | v1.0.0  | planned     | unified repo, docs, ABI freeze, production-ready  |
 
