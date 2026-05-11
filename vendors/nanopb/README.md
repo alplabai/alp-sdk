@@ -52,25 +52,27 @@ built.
 
 ## Wiring (v0.4)
 
-Add to the top-level `west.yml` projects list:
+The west.yml pin is **shipped** as of v0.3:
 
 ```yaml
 - name: nanopb
   remote: nanopb
-  revision: nanopb-0.4.9   # GitHub tag format (note prefix); bump intentionally on each upgrade.
+  revision: nanopb-0.4.9    # GitHub tag format (note prefix); bump intentionally on each upgrade.
   path: modules/lib/nanopb
+  groups:
+    - extras-v04             # disabled by default -- see top-level group-filter
 ```
 
-And add the matching `nanopb` remote:
+Behind the `extras-v04` group (disabled by default in the
+manifest's `group-filter:`), so `west update` on a v0.3 workspace
+does not fetch the upstream source -- the stub headers in this
+directory keep SDK builds link-clean.  Flip the group on with
+`west update --group-filter +extras-v04` (or edit the manifest)
+when the v0.4 mproc path lands.
 
-```yaml
-- name: nanopb
-  url-base: https://github.com/nanopb
-```
-
-(nanopb ships a `zephyr/module.yml` at the repo root, so Zephyr's
-west import picks it up automatically once the pin lands -- no
-extra `EXTRA_ZEPHYR_MODULES` plumbing required.)
+nanopb ships a `zephyr/module.yml` at the repo root, so Zephyr's
+west import picks it up automatically once the group is enabled
+-- no extra `EXTRA_ZEPHYR_MODULES` plumbing required.
 
 The upstream module also ships `extra/nanopb.cmake` which integrates
 the generator step -- v0.4 wires that against `metadata/protos/*.proto`

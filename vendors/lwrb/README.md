@@ -48,27 +48,34 @@ visible enables -- the audio path just uses LwRB when it's built.
 
 ## Wiring (v0.4)
 
+The west.yml pin is **shipped** as of v0.3:
+
+```yaml
+- name: lwrb
+  remote: majerle
+  revision: v3.2.0
+  path: modules/lib/lwrb
+  groups:
+    - extras-v04        # disabled by default -- see top-level group-filter
+```
+
+Behind the `extras-v04` group (disabled by default in the
+manifest's `group-filter:`), so `west update` on a v0.3 workspace
+does not fetch the upstream source -- the stub header in this
+directory keeps SDK builds link-clean.  Flip the group on with
+`west update --group-filter +extras-v04` (or edit the manifest)
+when the v0.4 consumer lands.
+
 LwRB does **not** ship a `zephyr/module.yml` at its repo root, so
-a bare `west.yml` import won't auto-register it as a Zephyr module.
-Two viable paths:
+a bare `west.yml` import won't auto-register it as a Zephyr module
+even with the group on.  Two viable paths once the group is
+enabled:
 
 **(a) west import + `EXTRA_ZEPHYR_MODULES`** (preferred, no fork):
 
-```yaml
-# In the top-level west.yml:
-remotes:
-  - name: majerle
-    url-base: https://github.com/MaJerle
-projects:
-  - name: lwrb
-    remote: majerle
-    revision: v3.2.0       # pin -- bump intentionally on each upgrade.
-    path: modules/lib/lwrb
-```
-
-then add a tiny `modules/lib/lwrb/zephyr/module.yml` + `CMakeLists.txt`
-wrapper in `alp-sdk`'s own `west.yml` self-import (or via a build-side
-`EXTRA_ZEPHYR_MODULES` argument).  ~10 lines.
+Add a tiny `modules/lib/lwrb/zephyr/module.yml` + `CMakeLists.txt`
+wrapper in `alp-sdk`'s own `west.yml` self-import (or via a
+build-side `EXTRA_ZEPHYR_MODULES` argument).  ~10 lines.
 
 **(b) vendor a tagged release into `vendors/lwrb/src/`**:
 
@@ -77,11 +84,11 @@ drop a tagged tarball under `vendors/lwrb/src/` and compile it
 directly from our CMakeLists.  Higher carrying cost on upgrade
 (manual re-vendor) but zero supply-chain surface.
 
-v0.4 picks (a) unless we hit a reason not to.  Either way: flipping
-`CONFIG_ALP_SDK_USE_LWRB=y` makes the upstream `lwrb/lwrb.h` win
-the include search ahead of this directory's stub.  No source-code
-change in the SDK is needed for the swap -- both headers share the
-same ABI.
+v0.4 picks (a) unless we hit a reason not to.  Either way: once
+the upstream sources are on the include path the real
+`lwrb/lwrb.h` wins ahead of this directory's stub.  No
+source-code change in the SDK is needed for the swap -- both
+headers share the same ABI.
 
 ## License
 

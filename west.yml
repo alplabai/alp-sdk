@@ -29,6 +29,20 @@ manifest:
   remotes:
     - name: zephyrproject
       url-base: https://github.com/zephyrproject-rtos
+    - name: majerle
+      url-base: https://github.com/MaJerle
+    - name: nanopb
+      url-base: https://github.com/nanopb
+
+  # Groups disabled by default.  Entries pinned below for audit
+  # in source control, but `west update` on a v0.3 workspace does
+  # not fetch them and the Zephyr build does not auto-import them.
+  # Flip via `west update --group-filter +extras-v04` (or by
+  # editing this filter line) when v0.4 lands the real consumers.
+  # See vendors/lwrb/README.md + vendors/nanopb/README.md for the
+  # per-library wiring story.
+  group-filter:
+    - -extras-v04
 
   projects:
     - name: zephyr
@@ -49,6 +63,24 @@ manifest:
           # CONFIG_ALP_SDK_INFERENCE_TFLM=y just work; the module
           # is small enough that the cost-of-presence is negligible.
           - tflite-micro
+
+    # SDK-internal dependencies pinned ahead of their v0.4 consumers.
+    # Behind the `extras-v04` group (disabled above) so v0.3
+    # workspaces never see them on `west update`.  The vendor stub
+    # headers under `vendors/{lwrb,nanopb}/include/` keep SDK source
+    # link-clean until v0.4 swaps the real upstream in.
+    - name: lwrb
+      remote: majerle
+      revision: v3.2.0
+      path: modules/lib/lwrb
+      groups:
+        - extras-v04
+    - name: nanopb
+      remote: nanopb
+      revision: nanopb-0.4.9
+      path: modules/lib/nanopb
+      groups:
+        - extras-v04
 
   self:
     path: alp-sdk

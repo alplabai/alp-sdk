@@ -15,6 +15,21 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **west.yml pins for v0.4 SDK-internal dependencies.**  LwRB
+  pinned at `MaJerle/lwrb@v3.2.0` and nanopb at
+  `nanopb/nanopb@nanopb-0.4.9`, both behind the `extras-v04`
+  group (disabled by default via the manifest's `group-filter:
+  [-extras-v04]`).  `west update` on a v0.3 workspace does not
+  fetch them and the Zephyr build does not auto-import them --
+  the vendor stub headers under `vendors/{lwrb,nanopb}/include/`
+  keep SDK source link-clean.  Flipping the group on with `west
+  update --group-filter +extras-v04` makes the upstream sources
+  win the include search ahead of the stubs; nanopb's
+  `zephyr/module.yml` then auto-registers it as a Zephyr module,
+  while LwRB still needs the ~10-line wrapper documented in
+  `vendors/lwrb/README.md` "Wiring (v0.4)" once a real consumer
+  lands.  Per-library context in `vendors/lwrb/README.md` and
+  `vendors/nanopb/README.md`.
 - **`<alp/hw_info.h>` runtime hardware-info API.**  Public header
   declaring `alp_hw_info_t`, `alp_hw_info_eeprom_t` (128-byte
   manifest layout that lives at offset 0x0000 of the SoM's

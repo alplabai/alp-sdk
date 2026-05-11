@@ -70,7 +70,7 @@ jobs:
         if: steps.token_check.outputs.configured == 'true'
         run: |
           wget -q -O cov-analysis.tar.gz \
-              "https://scan.coverity.com/download/cxx/linux64?token=${{ secrets.COVERITY_TOKEN }}&project=alplabai%2Falp-sdk"
+              "https://scan.coverity.com/download/cxx/linux64?token=${{ secrets.COVERITY_TOKEN }}&project=alplabai-alp-sdk"
           mkdir -p cov-analysis
           tar -xzf cov-analysis.tar.gz -C cov-analysis --strip-components=1
           echo "$PWD/cov-analysis/bin" >> $GITHUB_PATH
@@ -98,4 +98,4 @@ jobs:
               --form file=@alp-sdk-cov.tgz \
               --form version=${{ github.sha }} \
               --form description="alp-sdk scheduled scan ${{ github.run_id }}" \
-              "https://scan.coverity.com/builds?project=alplabai%2Falp-sdk"
+              "https://scan.coverity.com/builds?project=alplabai-alp-sdk"

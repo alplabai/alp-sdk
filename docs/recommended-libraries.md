@@ -210,8 +210,8 @@ it's parked.  v0.5 cycle revisits.
 | lwIP / Mongoose | Zephyr's net stack + `<alp/iot.h>` MQTT path.  Mongoose available for users wanting an embedded HTTP server. |
 | u8g2        | Monochrome OLED graphics — pairs with the `chips/ssd1306` driver.                            |
 | SSD1306 / SSD1331 | Already in `chips/` library.                                                          |
-| [LwRB](https://github.com/MaJerle/lwrb) | v0.3 scaffolding shipped at `vendors/lwrb/` (stub `<lwrb/lwrb.h>` + Kconfig `CONFIG_ALP_SDK_USE_LWRB`).  First real consumer (audio + UART byte-granular staging) lands v0.4; west.yml pin then. |
-| [nanoPB](https://github.com/nanopb/nanopb) | v0.3 scaffolding shipped at `vendors/nanopb/` (stub `<pb.h>` + `<pb_encode.h>` + `<pb_decode.h>` + Kconfig `CONFIG_ALP_SDK_USE_NANOPB`).  Schema at `metadata/protos/alp_mproc.proto`; first real consumer (`<alp/mproc.h>` IPC framing) lands v0.4 alongside the multi-proc completion. |
+| [LwRB](https://github.com/MaJerle/lwrb) | v0.3 scaffolding shipped at `vendors/lwrb/` (stub `<lwrb/lwrb.h>`).  west.yml pin landed at `v3.2.0` behind the `extras-v04` group (disabled by default).  First real consumer (audio + UART byte-granular staging) lands v0.4 -- flipping the group on makes upstream win the include search. |
+| [nanoPB](https://github.com/nanopb/nanopb) | v0.3 scaffolding shipped at `vendors/nanopb/` (stub `<pb.h>` + `<pb_encode.h>` + `<pb_decode.h>`).  west.yml pin landed at `nanopb-0.4.9` behind the `extras-v04` group (disabled by default).  Schema at `metadata/protos/alp_mproc.proto`; first real consumer (`<alp/mproc.h>` IPC framing) lands v0.4 alongside the multi-proc completion. |
 
 ## Tier 4 — alternative inference backends (considered, deferred)
 
