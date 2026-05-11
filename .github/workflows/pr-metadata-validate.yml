@@ -82,6 +82,27 @@ jobs:
           echo "--- generated yocto-conf ---"
           cat /tmp/alp-yocto.conf
 
+      # The dts-overlay path reads include/alp/boards/<carrier>.h.
+      # Smoke-test against the only released carrier (E1M-EVK).
+      # Validates the alias block contains the expected bus alphabet
+      # and that the alp,pin-array block is well-formed.
+      - name: Smoke-test board.yaml loader (dts-overlay)
+        run: |
+          python3 scripts/alp_project.py \
+              --input metadata/templates/board.yaml.example \
+              --emit dts-overlay > /tmp/alp.overlay
+          test -s /tmp/alp.overlay
+          echo "--- generated dts-overlay ---"
+          cat /tmp/alp.overlay
+          # Sanity: every v0.3-scoped class produces at least one
+          # alias (E1M-EVK wires all five) and the pin-array block
+          # is present.
+          grep -q 'alp-i2c0' /tmp/alp.overlay
+          grep -q 'alp-spi1' /tmp/alp.overlay
+          grep -q 'alp-uart0' /tmp/alp.overlay
+          grep -q 'alp-pwm0' /tmp/alp.overlay
+          grep -q 'alp,pin-array' /tmp/alp.overlay
+
       # Customer-side linter -- exercises the same schema +
       # preset checks an app author would run before pushing.
       # Covers both the canonical template and every example

@@ -83,23 +83,27 @@ extend the schema, not to bypass it.
 ### Today's gaps (v0.3 -> v0.4)
 
 `board.yaml` covers the SoM + carrier + OS backend + inference + IoT
-features + optional libraries today.  Three remaining gaps where
-hand-written config still leaks in, all targeted for v0.4:
+features + optional libraries today.  Two remaining gaps where
+hand-written config still leaks in, both targeted for v0.4:
 
-1. **DTS overlays for carrier wiring.**  Per-pad GPIO / pin-array
-   assignments still live in a hand-written `.overlay` file
-   alongside `prj.conf`.  v0.4 lands a loader DTS-emission path
-   that resolves carrier wiring from
-   `include/alp/boards/<carrier>.h` automatically.
-2. **`west.yml` module list.**  Optional libraries declared in
+1. **`west.yml` module list.**  Optional libraries declared in
    `board.yaml`'s `libraries:` list don't yet auto-pin into the
    workspace's `west.yml`.  v0.4 lands either a generator or a
    `west alp-update` extension command.
-3. **Per-test `prj.conf` in `tests/zephyr/<area>/`.**  The
+2. **Per-test `prj.conf` in `tests/zephyr/<area>/`.**  The
    in-repo test infrastructure still uses hand-written
    `prj.conf` files.  These are SDK-internal (not consumer-
    facing) and stay as-is until the loader handles test-style
    configs in v0.4.
+
+DTS overlays for carrier wiring -- previously gap #1 in this
+list -- ship in v0.3.  The loader's `--emit dts-overlay` mode
+parses `include/alp/boards/<carrier>.h` and generates the bus
+aliases (`alp-i2c<N>`, `alp-spi<N>`, `alp-uart<N>`, `alp-pwm<N>`)
+plus a stub `alp,pin-array` with one entry per `EVK_PIN_*`
+macro.  Per-pad GPIO bank/index columns remain TBD until the
+upstream SoM board files land in `alplabai/alp-zephyr-modules`;
+the customer fills those in place without renumbering.
 
 For v0.3, consumers writing apps from scratch should still use
 `board.yaml` as the canonical config and treat the three gaps as
@@ -418,14 +422,38 @@ python3 $ALP_SDK/scripts/alp_project.py \
 echo 'require alp-generated.conf' >> build/conf/local.conf
 ```
 
+### DTS overlay for carrier wiring (v0.3)
+
+`--emit dts-overlay` reads the carrier header at
+`include/alp/boards/<carrier>.h`, finds every `#define X
+ALP_E1M_<class><N>` macro for the v0.3-scoped classes (I2C, SPI,
+UART, PWM, GPIO_IO), and emits a Zephyr `.overlay` declaring:
+
+- One alias per bus channel the carrier wires (`alp-i2c<N> =
+  &i2c<N>;`, `alp-spi<N> = &spi<N>;`, `alp-uart<N> = &uart<N>;`,
+  `alp-pwm<N> = &pwm<N>;`).  The trailing comment on each alias
+  lists every macro in the carrier header that references that
+  channel.
+- An `alp_pins` node with `compatible = "alp,pin-array"` and one
+  `gpios` entry per `EVK_PIN_*` macro that resolves to an
+  `ALP_E1M_GPIO_IO<N>`.  Each entry's `<&gpioX Y FLAGS>` triplet
+  is a TBD placeholder; the trailing comment carries the macro
+  name and the E1M IO index so the customer can fill the columns
+  in place without renumbering.
+
+```bash
+python3 $ALP_SDK/scripts/alp_project.py \
+    --input board.yaml \
+    --emit dts-overlay \
+    --output build/generated/alp.overlay
+```
+
+Encoders, cameras, displays, and other non-bus device classes land
+in the dts-overlay emitter in v0.4 once the upstream SoM board
+files lock the gpio bank/index columns.
+
 ### What the loader does NOT yet do (v0.4 follow-ups)
 
-- **DTS overlays for carrier wiring** -- the loader emits Kconfig
-  + library enables but doesn't yet emit DTS overlays mapping
-  carrier-specific GPIO assignments to the SDK's `alp,pin-array`
-  binding.  Until that lands, app authors hand-write the overlay
-  (the EVK overlay at `tests/zephyr/peripheral/boards/alp_e1m_evk_aen.overlay`
-  is a worked example).
 - **Cross-validation against `metadata/socs/*.json`** -- the loader
   trusts the SKU preset's `silicon:` field; it doesn't yet
   validate that requested features (e.g. 16-bit ADC) match the
