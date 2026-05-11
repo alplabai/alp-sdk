@@ -1,0 +1,39 @@
+# board.yaml -- per-app project configuration for the
+# iot-connected-camera reference application.
+#
+# Customer workflow: copy this directory, change `som.sku` to
+# your V2N MPN, edit `carrier.name` if you fork the X-EVK, and
+# `west build`.  CMakeLists.txt invokes scripts/alp_project.py
+# at configure time and layers the generated alp.conf over
+# prj.conf via OVERLAY_CONFIG.
+
+schema_version: 1
+
+som:
+  sku: E1M-V2N101          # Renesas RZ/V2N -- DRP-AI3 on-die NPU
+                            # plus Murata Wi-Fi 6 / BLE radio.
+
+carrier:
+  name: E1M-X-EVK
+  populated:
+    # The X-EVK preset's `populated` block is still TBD pending
+    # the user-supplied schematic; the local UI + button this
+    # example uses are declared inline.
+    ssd1306: true          # Mono OLED for the local status pane.
+    button_led: true       # GPIO button + LED helper.
+
+os: zephyr
+
+# IoT block stays OFF in the base config so the native_sim CI
+# build picks up the v0.1 NULL-with-NOSUPPORT contract.  Opt in to
+# the real Wi-Fi/MQTT path by enabling these here AND building
+# with --extra-conf-file overlay-aen.conf (which pulls in the
+# Zephyr networking stack).  v0.3 finalizes the on-target path.
+#
+# iot:
+#   wifi: true
+#   mqtt: true
+#   tls:  true
+
+diagnostics:
+  log_level: info

@@ -1,0 +1,34 @@
+# board.yaml -- per-app project configuration for the
+# edgeai-vision-aen reference application.
+#
+# Customer workflow: copy this directory, change `som.sku` to
+# your AEN MPN, edit `carrier.name` if you fork the EVK, and
+# `west build`.  CMakeLists.txt invokes scripts/alp_project.py
+# at configure time and layers the generated alp.conf over
+# prj.conf via OVERLAY_CONFIG.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701          # Alif Ensemble E7 -- has the Ethos-U55 NPU
+                            # this example dispatches inference to.
+
+carrier:
+  name: E1M-EVK
+  populated:
+    button_led: true       # GPIO button + LED helper used by stage 1.
+                            # lsm6dso + ssd1306 already true in the
+                            # EVK preset's defaults.
+
+os: zephyr
+
+inference:
+  backend: ethos_u         # Vela-compiled TFLM model dispatches to
+                            # the on-die NPU.  In v0.1 the
+                            # alp_inference_open path falls back to
+                            # NOSUPPORT under native_sim; v0.2 fills
+                            # in the real Ethos-U dispatcher.
+  default_arena_kib: 256
+
+diagnostics:
+  log_level: info
