@@ -560,6 +560,7 @@ void alp_wifi_close(alp_wifi_t *w)
     (void)w;
 }
 
+#if !defined(ALP_VENDOR_OVERRIDES_MQTT)
 alp_mqtt_t *alp_mqtt_open(const alp_mqtt_config_t *cfg)
 {
     (void)cfg;
@@ -602,6 +603,7 @@ void alp_mqtt_close(alp_mqtt_t *m)
 {
     (void)m;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_MQTT */
 
 alp_audio_in_t *alp_audio_in_open(const alp_audio_config_t *cfg)
 {

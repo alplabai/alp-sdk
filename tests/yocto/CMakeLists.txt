@@ -76,4 +76,27 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_test(NAME alp_test_peripheral_gpio
              COMMAND alp_test_peripheral_gpio)
+
+    # MQTT test compiles only when libmosquitto is wired into
+    # alp_sdk.  Re-check here because pkg_check_modules's results
+    # don't propagate across add_subdirectory boundaries.  Without
+    # libmosquitto the stubs return NULL for open() and the test
+    # would mis-fire on the happy-path case.
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(MOSQUITTO_TEST QUIET libmosquitto)
+    endif()
+    if(MOSQUITTO_TEST_FOUND)
+        add_executable(alp_test_iot_mqtt
+            ${CMAKE_CURRENT_SOURCE_DIR}/iot_mqtt.c
+        )
+        target_link_libraries(alp_test_iot_mqtt PRIVATE alp::sdk)
+        target_include_directories(alp_test_iot_mqtt PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        target_compile_features(alp_test_iot_mqtt PRIVATE c_std_99)
+
+        add_test(NAME alp_test_iot_mqtt
+                 COMMAND alp_test_iot_mqtt)
+    endif()
 endif()

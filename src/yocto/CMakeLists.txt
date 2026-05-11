@@ -74,6 +74,30 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # alp_sdk target keeps consumer link lines simple.
     find_package(Threads REQUIRED)
     target_link_libraries(alp_sdk PUBLIC Threads::Threads)
+
+    # MQTT via libmosquitto -- gated on presence so plain-CMake builds
+    # without a Mosquitto sysroot fall back to the NOSUPPORT stubs
+    # in src/common/stub_backend.c.  pkg-config is the canonical way
+    # Mosquitto ships its consumer metadata (no upstream CMake config
+    # file as of Mosquitto 2.0.x).
+    find_package(PkgConfig)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(MOSQUITTO IMPORTED_TARGET libmosquitto)
+        if(MOSQUITTO_FOUND)
+            target_sources(alp_sdk PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/iot_yocto.c
+            )
+            target_compile_definitions(alp_sdk PRIVATE
+                ALP_VENDOR_OVERRIDES_MQTT=1
+            )
+            target_link_libraries(alp_sdk PUBLIC PkgConfig::MOSQUITTO)
+        else()
+            message(STATUS
+                "alp-sdk yocto: libmosquitto not found via pkg-config; "
+                "alp_mqtt_* stays NOSUPPORT.  Install libmosquitto-dev "
+                "(Debian/Ubuntu) or the matching Yocto recipe to enable.")
+        endif()
+    endif()
 endif()
 
 if(ALP_SDK_USE_DEEPX_DXM1)

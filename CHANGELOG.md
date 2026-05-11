@@ -15,6 +15,30 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **Yocto MQTT backend via libmosquitto (v0.4 prep).**
+  `src/yocto/iot_yocto.c` implements `alp_mqtt_*` against the
+  Eclipse Mosquitto C client library.  Caller-driven loop model:
+  `alp_mqtt_loop(handle, timeout_ms)` pumps the network event
+  machine and dispatches inbound messages to every subscription
+  whose filter matches via `mosquitto_topic_matches_sub` (so MQTT
+  wildcards `+` and `#` work).  URI parser supports `mqtt://host`
+  and `mqtt://host:port` (default 1883); `mqtts://` returns
+  `ALP_ERR_NOSUPPORT` until the v0.4 secure-stack work lands a
+  shared TLS context.  Optional username/password via
+  `mosquitto_username_pw_set`.  New per-class
+  `ALP_VENDOR_OVERRIDES_MQTT` gate in `src/common/stub_backend.c`
+  -- the `alp_wifi_*` half of `<alp/iot.h>` stays stubbed on the
+  Yocto path (Wi-Fi bring-up on real Yocto images is a
+  wpa_supplicant / NetworkManager concern, not SDK-side).  Build
+  is gated on `pkg_check_modules(libmosquitto)`: workspaces
+  without libmosquitto-dev on the sysroot fall back cleanly to
+  the NOSUPPORT stubs.  CI runner now installs
+  `libmosquitto-dev` + `pkg-config`.  Failure-path coverage at
+  `tests/yocto/iot_mqtt.c` (NULL cfg / null URI / mqtts NOSUPPORT
+  / unknown scheme / empty host / bad port / NULL handle on
+  publish/subscribe/loop / close-NULL safety / happy-path
+  open-then-close).  Broker-roundtrip coverage parked behind
+  ci/HW-IN-LOOP.md.
 - **Yocto GPIO IRQ dispatcher (v0.4 prep).**  `alp_gpio_irq_enable`
   / `_disable` now wired against the GPIO v2 edge-event ABI.  A
   single shared pthread runs the `poll()` loop across every pin
