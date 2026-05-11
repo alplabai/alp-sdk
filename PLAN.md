@@ -1,6 +1,6 @@
 # ALP SDK — Product + Engineering Plan
 
-Last revised: 2026-05-10.
+Last revised: 2026-05-11.
 
 This plan is the bridge between the canonical product slides
 (`ALP Lab — E1M™ Software Stack`, `Product Overview: Software`)
@@ -107,7 +107,7 @@ switching to the Yocto path.
 | **E1M portability bound**                         | ✅ shipped — `ALP_E1M_<CLASS>_COUNT` macros document the cross-SoM portable instance count per class.  See [ADR 0004](docs/adr/0004-e1m-portability-bound.md). |
 | **v0.2/v0.3 surface declared early**              | ✅ shipped — `audio.h`, `ble.h`, `security.h`, `mproc.h` ship as compile-clean stubs returning `ALP_ERR_NOSUPPORT`.  Apps can compile against the full v1.0-shape surface today. |
 | **Per-peripheral hand-written examples**          | ✅ shipped — 11 reference apps under `examples/<peripheral>-<demo>/`, one per wrapped peripheral. |
-| OS pivot: `src/{zephyr,baremetal,yocto}/`         | 🟡 Zephyr full; baremetal stubs; yocto stubs (v0.4) |
+| OS pivot: `src/{zephyr,baremetal,yocto}/`         | 🟡 Zephyr full; baremetal stubs; **yocto core-4 peripherals real** (I²C / SPI / UART / GPIO via i2c-dev / spidev / termios / gpiochip v2 — see [§6 entries 18-21](#6-open-work--explicit-gaps)).  Audio / camera / display still stubs (v0.4.x). |
 | Cross-SoM portability proof                       | 🟡 single-OS proof per SoM; cross-OS proof v0.2+ |
 | ABI snapshot tooling                              | ✅ shipped — `scripts/abi_snapshot.py` + `docs/abi/v0.1-snapshot.json`.  CI gate via `pr-generated-files.yml` post-1.0. |
 | ABI freeze + deprecation policy                   | 🔮 v1.0 |
@@ -173,7 +173,7 @@ implementations (Murata + Infineon on V2N; TI CC3501E on AEN).
 | TLS via MbedTLS                                    | 🔮 v0.3 (`<alp/security.h>`) |
 | BLE peripheral + central                           | 🔮 v0.3 (`<alp/ble.h>`, Zephyr `bt` host stack) |
 | Provisioning helpers (`alp_iot_wifi_provision`)    | 🔮 v0.3.x |
-| Yocto IoT stack (Mosquitto, Paho, OTA)             | 🔮 v0.4 |
+| Yocto IoT stack (Mosquitto, Paho, OTA)             | 🟡 **MQTT via libmosquitto shipped** (`src/yocto/iot_yocto.c`, gated on `pkg_check_modules(libmosquitto)`); Paho not pursued -- libmosquitto covers the same surface.  OTA (Mender) still v0.4.x. |
 | **Secure boot** (MCUboot + signed images on AEN)   | 🔮 v0.4 |
 | **Secure OTA** (signed update channel + rollback)  | 🔮 v0.4 |
 | OPTIGA Trust M-rooted device identity              | 🔮 v0.4 (paired with secure boot) |
@@ -286,7 +286,7 @@ shipped early in 2026-Q2.
 | **v0.1** | Public surface frozen, AEN-Zephyr full | DSP re-export | Skeleton + chip metadata for all NPUs | Skeleton + header surface |
 | **v0.2** | **12 peripheral classes wrapped (was 4) + capability validation + E1M portability bound + per-peripheral hand-written examples + ADRs**.  AEN-baremetal + V2N intro. | CMSIS-Driver alignment | Vela + TFLM on AEN, EdgeAI app real | Real Wi-Fi-station + MQTT on AEN-Zephyr |
 | **v0.3** | V2N-Zephyr + AEN-Yocto stubs, M1 intro.  Real impl behind v0.2-declared `<alp/audio.h>` / `<alp/ble.h>` / `<alp/security.h>` / `<alp/mproc.h>` surfaces.  **+ `board.yaml` project config** (one YAML per project; SoM SKU + carrier + libraries + features), with loader emitting Kconfig / CMake / Yocto natives. | (held) | `<alp/inference.h>` unified, ExecuTorch on AEN.  DEEPX DX-M1 + Ethos-U65/i.MX 93 dispatchers wired (real link v0.4). | TLS + BLE + provisioning |
-| **v0.4** | Yocto first-class on V2N + i.MX93 | (held) | DRP-AI + Ethos-U65 backends | Mosquitto + Paho + OTA |
+| **v0.4** | **Yocto core-4 peripheral wrappers shipped (I²C / SPI / UART / GPIO + GPIO IRQ dispatcher)**; full V2N + i.MX93 Yocto BSP bring-up still ahead. | (held) | DRP-AI + Ethos-U65 backends | **MQTT via libmosquitto shipped**; OTA (Mender) ahead. |
 | **v1.0** | ABI freeze across the matrix (snapshot tooling shipped v0.1) | LTS-aligned | Full multi-vendor inference unification | Production IoT stack |
 
 ---
@@ -408,6 +408,73 @@ that remain open take priority for the upcoming releases.
     SDK-internal libraries (LwRB, nanopb) don't appear in the
     user-facing `libraries:` enum -- they're pulled in
     unconditionally when their consumer SDK code is built.
+
+### Closed in v0.4 (incremental — full v0.4 tag still ahead)
+
+18. ~~**Yocto peripheral surface was 100 % stubs.**~~  The four
+    core peripheral classes are now real on Linux:
+    - **I²C** (`src/yocto/peripheral_i2c.c`) binds `alp_i2c_*` to
+      i2c-dev (`/dev/i2c-N`), using `I2C_RDWR` ioctl for
+      repeated-start write-then-read.
+    - **SPI** (`src/yocto/peripheral_spi.c`) binds `alp_spi_*` to
+      spidev (`/dev/spidev<bus>.<cs>`), with `SPI_IOC_MESSAGE`
+      for full-duplex transceive.
+    - **UART** (`src/yocto/peripheral_uart.c`) binds `alp_uart_*`
+      to termios (`/dev/ttyS|AMA|USB`), with per-call `VTIME`
+      timeouts.
+    - **GPIO** (`src/yocto/peripheral_gpio.c`) binds `alp_gpio_*`
+      to the GPIO character-device v2 ABI at `/dev/gpiochipN`
+      (no libgpiod dependency), with pin-id packed as
+      `(chip << 16) | line`.
+    Per-class `ALP_VENDOR_OVERRIDES_<CLASS>` macros in
+    `src/common/stub_backend.c` let each class roll out
+    independently.  Failure-path ctest coverage gated in
+    `pr-plain-cmake.yml`; real-adapter HIL coverage parked
+    behind `ci/HW-IN-LOOP.md`.
+19. ~~**No GPIO interrupt support on Linux.**~~  A shared pthread
+    dispatcher runs a `poll()` loop across every pin with IRQ
+    enabled; an eventfd wakes it on mutator events
+    (irq_enable / irq_disable / close).  Reconfigures the line
+    via `GPIO_V2_LINE_SET_CONFIG_IOCTL` with rising / falling /
+    both edge flags.  Dispatcher starts lazily on the first
+    `alp_gpio_irq_enable`.  Callback contract documented at the
+    function header (no nested SDK calls, deadlock otherwise).
+20. ~~**No real MQTT on Linux.**~~  `src/yocto/iot_yocto.c` binds
+    `alp_mqtt_*` against libmosquitto.  Caller-driven
+    `alp_mqtt_loop`; subscription dispatch through `on_message`
+    + `mosquitto_topic_matches_sub` so MQTT `+` / `#` wildcards
+    work without us re-implementing the matcher.  URI parser
+    supports `mqtt://host[:port]`; `mqtts://` returns
+    `ALP_ERR_NOSUPPORT` until the secure-stack work lands.
+    Build gated on `pkg_check_modules(libmosquitto)`;
+    workspaces without libmosquitto-dev fall back cleanly to
+    the NOSUPPORT stubs.  Per-class `ALP_VENDOR_OVERRIDES_MQTT`
+    gate.  `alp_wifi_*` stays stubbed on Linux (Wi-Fi bring-up
+    is a wpa_supplicant / NetworkManager concern, not SDK-side).
+21. ~~**Per-peripheral override granularity.**~~  The earlier
+    `ALP_VENDOR_OVERRIDES_PERIPHERAL` umbrella forced a backend
+    to provide all four peripheral classes (I²C, SPI, GPIO,
+    UART) at once or none.  Split into per-class
+    `ALP_VENDOR_OVERRIDES_{I2C,SPI,GPIO,UART,MQTT}` macros with
+    the umbrella preserved -- existing `vendors/alif/` builds
+    unchanged, but Yocto-style incremental rollout now works.
+22. ~~**west.yml carried no pins for v0.4 SDK-internal libs.**~~
+    `MaJerle/lwrb@v3.2.0` + `nanopb/nanopb@nanopb-0.4.9` now
+    pinned behind a `extras-v04` group disabled by default in
+    the manifest's `group-filter`, so v0.3 workspaces stay
+    untouched.  Flipping the group on (`west update
+    --group-filter +extras-v04`) makes the upstream sources
+    win the include search ahead of the stubs at
+    `vendors/{lwrb,nanopb}/include/`.
+23. ~~**Coverity workflow was a stub.**~~ `.github/workflows/coverity.yml`
+    now switches to POST-with-form-encoded body (the GET
+    variant Coverity rejected with exit-6 auth-failure),
+    sources the project name from a `COVERITY_PROJECT` Actions
+    variable, checks the downloaded tarball's gzip magic
+    bytes, and echoes the response body on non-2xx.  Secrets
+    (`COVERITY_TOKEN`, `COVERITY_EMAIL`) provisioned; first
+    submission to <https://scan.coverity.com/projects/alplabai-alp-sdk>
+    completed successfully on 2026-05-11.
 
 ---
 

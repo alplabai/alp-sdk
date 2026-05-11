@@ -110,9 +110,10 @@ upstream SoM board files land in `alplabai/alp-zephyr-modules`;
 the customer fills those in place without renumbering.
 
 For v0.3, consumers writing apps from scratch should still use
-`board.yaml` as the canonical config and treat the three gaps as
-short-term hand-overrides.  The migration path to the v0.4 single-
-source-of-truth model is purely additive on top of v0.3's schema.
+`board.yaml` as the canonical config and treat the per-test
+`prj.conf` gap as a short-term hand-override.  The migration path
+to the v0.4 single-source-of-truth model is purely additive on
+top of v0.3's schema.
 
 ## Why one file
 

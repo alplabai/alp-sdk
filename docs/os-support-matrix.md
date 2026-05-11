@@ -69,6 +69,28 @@ plan in `VERSIONS.md`.
 | Security (`<alp/security.h>`) | declared | MbedTLS PSA + per-SoC HW accelerator routing |
 | MProc (`<alp/mproc.h>`) | declared | Zephyr `mbox_*` (MHU on Alif) + `hwsem_*` + shared-memory regions |
 
+## v0.4.0 prep — landed on `main` (2026-05-11)
+
+Yocto-side surface advances ahead of the v0.4 tag.  Each item is
+gated by either a CMake `find_package` / `pkg_check_modules` check
+or a default-disabled `west.yml` group, so workspaces that don't
+need v0.4 fall back cleanly to the v0.3 state above.
+
+| Library                              | E1M-AEN / Bare-metal | E1M-AEN / Zephyr | E1M-X V2N / Yocto | E1M-X V2N-M1 / Yocto |
+|--------------------------------------|----------------------|------------------|-------------------|----------------------|
+| **Peripherals (I2C)** (`<alp/peripheral.h>`) | planned   | **GA**           | **GA** (i2c-dev) | **GA** (i2c-dev)     |
+| **Peripherals (SPI)** (`<alp/peripheral.h>`) | planned   | **GA**           | **GA** (spidev)  | **GA** (spidev)      |
+| **Peripherals (UART)** (`<alp/peripheral.h>`)| planned   | **GA**           | **GA** (termios) | **GA** (termios)     |
+| **Peripherals (GPIO + IRQ)** (`<alp/peripheral.h>`) | planned | **GA**    | **GA** (chardev v2 + pthread `poll()`) | **GA** |
+| **IoT — MQTT** (`<alp/iot.h>`)       | n/a                  | planned (Zephyr `mqtt_*`) | **GA** (libmosquitto) | **GA** (libmosquitto) |
+| **IoT — Wi-Fi station** (`<alp/iot.h>`) | n/a               | planned          | stub (system-config via wpa_supplicant/NM) | stub |
+
+The Yocto MQTT build is conditional on `pkg_check_modules(libmosquitto)`;
+workspaces without libmosquitto-dev on the sysroot keep the
+NOSUPPORT stubs.  Per-class `ALP_VENDOR_OVERRIDES_<CLASS>` macros
+in `src/common/stub_backend.c` let each peripheral class roll out
+independently across backends.
+
 ## CMSIS-DSP per-SoM validation
 
 ALP SDK does not re-export CMSIS-DSP -- application code includes

@@ -29,7 +29,7 @@ the old plan to this one:
 | v0.1.0  | in-progress | AEN bring-up (Zephyr peripherals + multi-proc BSP foundation) |
 | v0.2.0  | **surface complete; impl in progress** | 12 wrapped peripheral classes + capability validation + E1M portability bound + per-peripheral examples + v0.2/v0.3 stub headers + ADRs all shipped early.  Bare-metal AEN real, V2N intro, EdgeAI app real are the remaining v0.2 deliverables. |
 | v0.3.0  | **surface complete; impl in progress** | Real impl behind v0.2-declared surfaces (`<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`, `<alp/mproc.h>`).  IoT reference app, multi-proc completion, display polish, V2N+M1 intro.  **Plus: `board.yaml` project config + loader (`scripts/alp_project.py`), DEEPX DX-M1 + Ethos-U65/i.MX 93 inference-backend dispatchers, bench + fuzz scaffolding, Coverity workflow stub, Renesas V2N AI SDK 7.10 BSP wire-up in meta-alp.** |
-| v0.4.0  | planned     | Yocto first-class (V2N + V2N+M1 full); secure boot + secure OTA on AEN-Zephyr  |
+| v0.4.0  | **in-progress (prep)** | Yocto first-class (V2N + V2N+M1 full); secure boot + secure OTA on AEN-Zephyr.  **Prep landed:** Yocto core-4 peripheral wrappers (I²C / SPI / UART / GPIO + IRQ dispatcher), MQTT via libmosquitto, per-class override gates, `lwrb` + `nanopb` pinned behind `extras-v04` group.  See PLAN.md §6 entries 18-23. |
 | v1.0.0  | planned     | unified repo, docs, ABI freeze, production-ready  |
 
 > **Note on v0.2 sequencing.**  The original v0.2 plan in this file
@@ -319,10 +319,35 @@ roadmap's "IoT Application Example" deliverable.
 first-class with full Yocto support and Linux-native versions of
 every library.
 
+### v0.4 prep shipped on `main` (2026-05-11)
+
+The structural pieces below landed ahead of the v0.4 tag during the
+v0.3 cycle.  Each is gated so a workspace that doesn't need the
+v0.4 deliverable falls back cleanly to the v0.3 stubs.
+
+- **Yocto core-4 peripherals — real on Linux.**
+  `alp_i2c_*` via i2c-dev, `alp_spi_*` via spidev, `alp_uart_*` via
+  termios, `alp_gpio_*` via the GPIO chardev v2 ABI -- direct
+  ioctls against the kernel UAPI, no libgpiod dependency.
+- **GPIO IRQ dispatcher.**  Shared pthread `poll()` loop with an
+  eventfd wake; supports rising / falling / both edges.
+- **MQTT via libmosquitto.**  Caller-driven `alp_mqtt_loop`;
+  subscription dispatch through libmosquitto's wildcard matcher.
+  Gated on `pkg_check_modules(libmosquitto)`.
+- **Per-class `ALP_VENDOR_OVERRIDES_<CLASS>` macros** in
+  `src/common/stub_backend.c` (I2C / SPI / GPIO / UART / MQTT),
+  so each backend can roll out one class at a time.
+- **west.yml pins for v0.4 SDK-internal libs** (`MaJerle/lwrb@v3.2.0`
+  + `nanopb/nanopb@nanopb-0.4.9`) behind a default-disabled
+  `extras-v04` group, recorded for audit ahead of the real
+  consumers.
+
+### Still ahead for v0.4
+
 - **Yocto:** `meta-alp` layer, BSPs for V2N + V2N+M1, recipes per ALP
   module, image templates for vision/audio/IoT product classes.
-- **IoT:** full TCP/UDP/HTTP/MQTT over Linux network stack, MQTT
-  broker optional, time-series buffering helpers.
+- **IoT:** full TCP/UDP/HTTP over Linux network stack, time-series
+  buffering helpers, TLS path (`mqtts://`).
 - **Camera:** `alp_camera_v4l2` wrapper, GStreamer pipeline helpers.
 - **Audio:** ALSA-backed `alp_audio_*`.
 - **Signal:** ARM Compute Library bindings.
