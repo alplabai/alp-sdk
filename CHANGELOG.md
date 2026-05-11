@@ -22,6 +22,18 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **`chips/pi3dbs12212/` Diodes PI3DBS12212A PCIe mux driver (2026-05-12).**
+  GPIO-only control surface for the two passive 12 Gbps
+  differential muxes that switch the V2N-M1 PCIe lane between
+  the on-module DEEPX DX-M1 NPU and the E1M edge connector.  PD
+  pin on Renesas `P80`, SEL pin on `P95`.  Three-state driver
+  model (OFF / PATH_0 / PATH_1) with glitch-free PD pulse on
+  path-to-path transitions.  Takes two `alp_gpio_t` handles --
+  carrier code opens + configures the GPIOs and hands them in.
+  New Kconfig: `CONFIG_ALP_SDK_CHIP_PI3DBS12212`.  Header:
+  `<alp/chips/pi3dbs12212.h>`.  Manifest:
+  `metadata/chips/pi3dbs12212.yaml`.
+
 - **`chips/rv3028c7/`: multi-source event dispatcher + CLKOUT routing (2026-05-12).**
   Extends the existing RV-3028-C7 driver from single-alarm-only to
   the full latched-event surface in the chip's STATUS register

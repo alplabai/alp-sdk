@@ -1,0 +1,38 @@
+# ALP SDK chip manifest: Diodes Inc PI3DBS12212A 2:1 differential mux.
+schema_version:   1
+chip_id:          pi3dbs12212
+driver_status:    complete
+display_name:     "Diodes PI3DBS12212A 2:1 high-speed differential mux"
+vendor:           diodes-incorporated
+mpn_population:
+  - "PI3DBS12212AXUAEX"          # X2QFN 18-contact package on V2N-M1
+datasheet:
+  primary:        "PI3DBS12212A.pdf"   # DS40393 Rev 3-2, Sep 2020
+
+bus:              none                  # GPIO-only control surface
+gpios:
+  pd:
+    direction:    output
+    v2n_m1_route: "Renesas P80 (PCIe.MUX_PD)"
+    active_level: high                  # high = mux enabled
+    notes: "drive low at boot until PCIe rails are up"
+  sel:
+    direction:    output
+    v2n_m1_route: "Renesas P95 (PCIe.MUX_SEL)"
+    notes: "selects which of two input pairs feeds the output"
+
+# V2N-M1 deploys two PI3DBS12212A instances (one for the PCIe lane's
+# TX+/- pair, another for RX+/- pair).  Both share the same PD + SEL
+# lines; a single driver context drives the pair.
+instances_per_lane: 2
+v2n_m1_path_mapping:
+  path_0: "DEEPX DX-M1 NPU (on-module)"
+  path_1: "E1M edge connector"
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_PI3DBS12212
+  baremetal:      ALP_SDK_CHIP_PI3DBS12212
+  yocto:          n/a                    # Linux carrier code drives GPIOs directly
+
+families:
+  - v2n-m1

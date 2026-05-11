@@ -753,6 +753,19 @@ config ALP_SDK_CHIP_TPS628640
 	  rely on the chip's factory OTP voltage and don't write to
 	  it from firmware.
 
+config ALP_SDK_CHIP_PI3DBS12212
+	bool "Diodes PI3DBS12212A 2:1 differential mux (GPIO-only)"
+	depends on GPIO
+	help
+	  Compile chips/pi3dbs12212/pi3dbs12212.c.  Drives the
+	  passive 12 Gbps differential mux on V2N-M1 that switches
+	  PCIe routing between DEEPX (on-module) and the E1M edge
+	  connector.  GPIO-only -- no I2C surface.  Driver takes
+	  two alp_gpio_t handles (PD on Renesas P80, SEL on P95
+	  per V2N-M1 wiring) and exposes a 3-state model:
+	  OFF / PATH_0 / PATH_1, with glitch-free PD pulse on
+	  path-to-path transitions.
+
 config ALP_SDK_CHIP_DA9292
 	bool "Renesas DA9292 multi-phase buck PMIC (secondary on V2N)"
 	depends on I2C
