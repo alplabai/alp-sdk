@@ -48,6 +48,19 @@ target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_INFERENCE=1
 )
 
+# v0.4: first real peripheral wrapper.  The I2C class binds against
+# Linux i2c-dev (/dev/i2c-N) via peripheral_i2c.c; gated on Linux
+# hosts so cross-compilers building plain-CMake on macOS/Windows
+# still produce a link-clean library against the stub I2C surface.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(alp_sdk PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2c.c
+    )
+    target_compile_definitions(alp_sdk PRIVATE
+        ALP_VENDOR_OVERRIDES_I2C=1
+    )
+endif()
+
 if(ALP_SDK_USE_DEEPX_DXM1)
     target_sources(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/inference_deepx.cpp

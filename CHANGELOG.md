@@ -15,6 +15,40 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **Yocto first-class peripheral wrappers — I2C class (v0.4 prep).**
+  `src/yocto/peripheral_i2c.c` binds `alp_i2c_*` against Linux
+  i2c-dev (`/dev/i2c-N`).  Maps `alp_i2c_config_t.bus_id` to the
+  kernel adapter index; uses `I2C_RDWR` ioctl for write-then-read
+  so the device sees a repeated-start between the register pointer
+  write and the data read.  Probes `I2C_FUNCS` on open so callers
+  fail fast on SMBus-only adapters.  errno → `alp_status_t`
+  mapping is shared with the inference path via `errno_to_alp` in
+  the same TU (ENOENT → NOT_READY, EBUSY → BUSY, ETIMEDOUT →
+  TIMEOUT, default → IO).  Stamps `alp_last_error()` through the
+  shared common slot.  Linux-only (gated by `__linux__` +
+  `CMAKE_SYSTEM_NAME STREQUAL "Linux"`); non-Linux builds keep
+  using the stub I2C symbols.  First Yocto peripheral wrapper out
+  of the four-class core set (SPI / GPIO / UART follow in
+  subsequent v0.4 increments).
+- **Per-class `ALP_VENDOR_OVERRIDES_<CLASS>` gates in
+  `src/common/stub_backend.c` (v0.4 prep).**  The previous
+  monolithic `ALP_VENDOR_OVERRIDES_PERIPHERAL=1` umbrella forced
+  a backend to provide all four peripheral classes (I2C, SPI,
+  GPIO, UART) at once or none.  Split into per-class macros so
+  the Yocto path can land I2C first and let SPI / GPIO / UART
+  keep the NOSUPPORT stubs until their wrappers ship.  Umbrella
+  macro is preserved -- defining `ALP_VENDOR_OVERRIDES_PERIPHERAL`
+  implies all four per-class macros, so existing vendor wrappers
+  at `vendors/alif/` are untouched.
+- **`tests/yocto/peripheral_i2c.c` failure-path coverage.**  New
+  ctest binary exercising NULL config rejection, non-existent
+  bus index (errno → `ALP_ERR_NOT_READY`), NULL handle on
+  read/write/write_read paths, and the close-NULL safety
+  contract.  Wired into the `pr-plain-cmake.yml` yocto job which
+  now configures with `-DALP_BUILD_TESTS=ON` and runs `ctest`.
+  Real-adapter HIL coverage stays parked behind
+  `ci/HW-IN-LOOP.md` until the `hil-yocto` self-hosted runner
+  lands.
 - **west.yml pins for v0.4 SDK-internal dependencies.**  LwRB
   pinned at `MaJerle/lwrb@v3.2.0` and nanopb at
   `nanopb/nanopb@nanopb-0.4.9`, both behind the `extras-v04`

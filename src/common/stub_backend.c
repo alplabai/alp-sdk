@@ -73,13 +73,21 @@ void alp_internal_set_last_error(alp_status_t s)
 /* ------------------------------------------------------------------ */
 /* I2C / SPI / GPIO / UART (peripheral.h)                              */
 /*                                                                     */
-/* When a vendor wrapper at vendors/<som>/ provides the real bodies   */
-/* it sets ALP_VENDOR_OVERRIDES_PERIPHERAL (via vendors/<som>/CMakeLists), */
-/* and this block stays out of the link to avoid duplicate symbols.   */
+/* Each class is independently gateable so a backend can override one  */
+/* class (e.g. Yocto I2C against /dev/i2c-N) while the others fall     */
+/* back to NOSUPPORT.  The umbrella `ALP_VENDOR_OVERRIDES_PERIPHERAL`  */
+/* macro is preserved for backends that provide all four at once      */
+/* (vendors/alif/ etc.); it implies every per-class macro below.       */
 /* ------------------------------------------------------------------ */
 
-#if !defined(ALP_VENDOR_OVERRIDES_PERIPHERAL)
+#if defined(ALP_VENDOR_OVERRIDES_PERIPHERAL)
+#  define ALP_VENDOR_OVERRIDES_I2C  1
+#  define ALP_VENDOR_OVERRIDES_SPI  1
+#  define ALP_VENDOR_OVERRIDES_GPIO 1
+#  define ALP_VENDOR_OVERRIDES_UART 1
+#endif
 
+#if !defined(ALP_VENDOR_OVERRIDES_I2C)
 alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg)
 {
     (void)cfg;
@@ -117,7 +125,9 @@ void alp_i2c_close(alp_i2c_t *b)
 {
     (void)b;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_I2C */
 
+#if !defined(ALP_VENDOR_OVERRIDES_SPI)
 alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 {
     (void)cfg;
@@ -150,7 +160,9 @@ void alp_spi_close(alp_spi_t *b)
 {
     (void)b;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_SPI */
 
+#if !defined(ALP_VENDOR_OVERRIDES_GPIO)
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {
     (void)pin_id;
@@ -193,7 +205,9 @@ void alp_gpio_close(alp_gpio_t *p)
 {
     (void)p;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_GPIO */
 
+#if !defined(ALP_VENDOR_OVERRIDES_UART)
 alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 {
     (void)cfg;
@@ -219,8 +233,7 @@ void alp_uart_close(alp_uart_t *p)
 {
     (void)p;
 }
-
-#endif /* !ALP_VENDOR_OVERRIDES_PERIPHERAL */
+#endif /* !ALP_VENDOR_OVERRIDES_UART */
 
 /* ------------------------------------------------------------------ */
 /* PWM / ADC / Counter / QEnc / I2S / CAN / RTC / WDT (v0.2)           */

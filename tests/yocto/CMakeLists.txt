@@ -21,3 +21,23 @@ target_compile_features(alp_test_inference_dispatcher PRIVATE c_std_99)
 
 add_test(NAME alp_test_inference_dispatcher
          COMMAND alp_test_inference_dispatcher)
+
+# v0.4: Yocto I2C wrapper failure-path coverage.  Real-adapter HIL
+# coverage is parked under ci/HW-IN-LOOP.md until the self-hosted
+# `hil-yocto` runner lands.  Linux-only -- the underlying source
+# `src/yocto/peripheral_i2c.c` is excluded from non-Linux builds
+# by the parent CMakeLists, so the test would link against the
+# stub I2C symbols there and exercise different errno mappings.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(alp_test_peripheral_i2c
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2c.c
+    )
+    target_link_libraries(alp_test_peripheral_i2c PRIVATE alp::sdk)
+    target_include_directories(alp_test_peripheral_i2c PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_peripheral_i2c PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_i2c
+             COMMAND alp_test_peripheral_i2c)
+endif()

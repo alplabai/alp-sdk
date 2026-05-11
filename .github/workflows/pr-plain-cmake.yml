@@ -83,11 +83,17 @@ jobs:
         run: cmake --build build/baremetal-v2n --parallel
 
   yocto:
-    name: plain-cmake · yocto stub backend
+    name: plain-cmake · yocto backend + tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -B build/yocto -S . -DALP_OS=yocto
+        run: cmake -B build/yocto -S . -DALP_OS=yocto -DALP_BUILD_TESTS=ON
       - name: Build
         run: cmake --build build/yocto --parallel
+      # ctest exercises the inference dispatcher's NULL/INVAL paths
+      # and the I2C wrapper's failure-path coverage (NULL cfg,
+      # non-existent /dev/i2c-9999 → ENOENT mapping, etc.).
+      # Real-adapter HIL coverage is parked behind ci/HW-IN-LOOP.md.
+      - name: Test
+        run: ctest --test-dir build/yocto --output-on-failure
