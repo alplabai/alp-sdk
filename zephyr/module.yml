@@ -12,8 +12,11 @@ build:
     # boards / overlays can use compatible = "alp,pin-array".
     dts_root: .
 
-# Surface the `west alp-build` extension command (and any future
-# alp-sdk west commands) to workspaces that import this repo as a
-# Zephyr module.  Implementation lives at
-# scripts/west_commands/alp.py.
-west-commands: scripts/west-commands.yml
+# NOTE on `west alp-build`:
+#   Zephyr v3.7's module.yml schema does NOT accept `west-commands:`
+#   at the top level (that key was added to module.yml in a later
+#   Zephyr release).  The command lives in `scripts/west-commands.yml`
+#   and is surfaced via the manifest's `self.west-commands` (when
+#   alp-sdk is the workspace topdir) or via the consuming project's
+#   `projects.alp-sdk.west-commands` field in their own west.yml.
+#   See west.yml + scripts/west-commands.yml for the wiring.
