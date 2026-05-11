@@ -5,7 +5,7 @@ buffer library by MaJerle.  Upstream:
 <https://github.com/MaJerle/lwrb>.
 
 **Status: SDK-internal dependency.**  Consumers do NOT enable
-LwRB via `alp.yaml`; it doesn't appear in the `libraries:` enum.
+LwRB via `board.yaml`; it doesn't appear in the `libraries:` enum.
 The SDK uses it internally where it makes sense and pulls it in
 unconditionally when the relevant subsystem is compiled.
 

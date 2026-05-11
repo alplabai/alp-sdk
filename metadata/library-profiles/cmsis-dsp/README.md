@@ -2,7 +2,7 @@
 
 CMSIS-DSP (https://github.com/ARM-software/CMSIS-DSP) is already
 opt-in via `CONFIG_CMSIS_DSP=y` in Zephyr and the loader emits
-that flag when `cmsis_dsp` appears in `alp.yaml`'s `libraries:`
+that flag when `cmsis_dsp` appears in `board.yaml`'s `libraries:`
 list.
 
 **No profile header needed.**  CMSIS-DSP's compile-time options

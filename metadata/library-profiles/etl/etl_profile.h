@@ -7,7 +7,7 @@
  * ETL (https://github.com/ETLCPP/etl) reads etl_profile.h from
  * the include path BEFORE its own defaults.  This file is what
  * the loader puts in front of the upstream copy when the
- * consumer's alp.yaml lists `etl` under `libraries:`.
+ * consumer's board.yaml lists `etl` under `libraries:`.
  *
  * Invariants we enforce, matching the SDK's no-exceptions /
  * no-heap-on-hot-path / Cortex-M-or-A class targets:
@@ -19,7 +19,7 @@
  *                            triggers a fault).
  *   - ETL_TARGET_DEVICE_*  : set per target -- handled by the
  *                            loader's emit_zephyr / emit_cmake
- *                            paths based on the alp.yaml som.sku.
+ *                            paths based on the board.yaml som.sku.
  *   - ETL_CPP17_SUPPORTED  : on by default; the SDK builds with
  *                            -std=c++17 on every supported toolchain.
  *

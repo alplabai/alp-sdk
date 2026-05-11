@@ -5,7 +5,7 @@ encoder/decoder for embedded targets.  Upstream:
 <https://github.com/nanopb/nanopb>.
 
 **Status: SDK-internal dependency.**  Consumers do NOT enable
-nanopb via `alp.yaml`; it doesn't appear in the `libraries:` enum.
+nanopb via `board.yaml`; it doesn't appear in the `libraries:` enum.
 The SDK uses it internally for `<alp/mproc.h>` IPC frame
 serialisation, and the proto schema at
 `metadata/protos/alp_mproc.proto` is internal-only.  When the v0.4

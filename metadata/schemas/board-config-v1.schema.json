@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/alp-project-v1.schema.json",
-  "title": "ALP project configuration (alp.yaml) v1",
-  "description": "Schema for the per-project alp.yaml file that consumers place at their app root.  Declares the target SoM SKU, per-component assembly overrides, OS backend, inference backend, and optional library / feature enables.  The SDK's loader script (planned for v0.4) reads this file and emits Kconfig fragments (Zephyr), -D flags (plain CMake), or local.conf snippets (Yocto).  See docs/project-config.md.",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/board-config-v1.schema.json",
+  "title": "ALP board configuration (board.yaml) v1",
+  "description": "Schema for the per-project board.yaml file that consumers place at their app root.  Declares the target SoM SKU, the carrier (daughter board) it mounts on, per-component assembly overrides, OS backend, inference backend, and optional library / feature enables.  The SDK's loader script (scripts/alp_project.py) reads this file and emits Kconfig fragments (Zephyr), -D flags (plain CMake), or local.conf snippets (Yocto).  See docs/board-config.md.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "som", "os"],

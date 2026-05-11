@@ -5,7 +5,7 @@
  * doctest configuration header for the ALP SDK's embedded targets.
  *
  * doctest (https://github.com/doctest/doctest) is a single-header
- * C++ test framework.  Apps using it under alp.yaml's
+ * C++ test framework.  Apps using it under board.yaml's
  * `libraries: [doctest]` declaration get this profile force-
  * included so the test runner doesn't pull in features that
  * don't exist on Cortex-M.

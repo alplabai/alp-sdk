@@ -9,6 +9,34 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Changed
 
+- **`alp.yaml` renamed to `board.yaml`** -- the file describes
+  what's on the board the firmware runs against, so the name
+  should say that.  Plus internal restructure of the metadata
+  preset layout to match the SoM-vs-carrier split with one
+  conventional file per directory:
+    - `metadata/templates/alp.yaml` -> `metadata/templates/board.yaml`
+    - `metadata/templates/alp.yaml.example` -> `metadata/templates/board.yaml.example`
+    - `metadata/schemas/alp-project-v1.schema.json` ->
+      `metadata/schemas/board-config-v1.schema.json`
+    - `metadata/e1m_modules/aen/sku-aen701.yaml` ->
+      `metadata/e1m_modules/E1M-AEN701/som.yaml`
+    - `metadata/e1m_modules/v2n/sku-v2n101.yaml` ->
+      `metadata/e1m_modules/E1M-V2N101/som.yaml`
+    - `metadata/carriers/e1m-evk.yaml` ->
+      `metadata/carriers/E1M-EVK/board.yaml`
+    - `metadata/carriers/e1m-x-evk.yaml` ->
+      `metadata/carriers/E1M-X-EVK/board.yaml`
+    - `metadata/carriers/custom-example.yaml` ->
+      `metadata/carriers/custom-example/board.yaml`
+    - `docs/project-config.md` -> `docs/board-config.md`
+  Loader (`scripts/alp_project.py`) updated: default `--input`
+  is now `./board.yaml`; SoM preset resolution looks at
+  `metadata/e1m_modules/<SKU>/som.yaml`; carrier preset
+  resolution at `metadata/carriers/<name>/board.yaml`.  Schema
+  $id + title + description updated to match.  All docs +
+  vendor READMEs + plan/versions files updated for the new
+  names + paths.  Per-file history preserved via `git mv`.
+  No code change in the SDK proper -- pure config-layer rename.
 - `vendors/nanopb/README.md`: corrected the west.yml revision pin
   to use nanopb's actual GitHub tag format (`nanopb-0.4.9`, with
   the `nanopb-` prefix; I had previously documented bare `0.4.9`).
@@ -32,16 +60,16 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
     `<alp/mproc.h>` IPC framing); consumers don't enable them.
     When the v0.4 audio + mproc paths land, the SDK code uses the
     libraries unconditionally and the west.yml pins land alongside.
-  - Removed `lwrb` + `nanopb` from `alp.yaml`'s `libraries:` enum
-    (`metadata/schemas/alp-project-v1.schema.json`) and from the
+  - Removed `lwrb` + `nanopb` from `board.yaml`'s `libraries:` enum
+    (`metadata/schemas/board-config-v1.schema.json`) and from the
     loader's `_LIBRARY_KCONFIG` map.  The enum now lists only
     user-facing libraries: etl, fmt, nlohmann_json, doctest, lvgl,
     mbedtls, cmsis_dsp, littlefs.
   - `src/zephyr/audio_zephyr.c` + `src/zephyr/mproc_zephyr.c`
     docstrings + `vendors/lwrb/README.md` + `vendors/nanopb/README.md`
-    + `metadata/templates/alp.yaml` updated to reflect the
+    + `metadata/templates/board.yaml` updated to reflect the
     "SDK-internal, no user-visible enable" status.
-  - `metadata/templates/alp.yaml.example` updated to exercise the
+  - `metadata/templates/board.yaml.example` updated to exercise the
     user-facing path (`libraries: [lvgl, mbedtls, cmsis_dsp, etl]`)
     -- CI's loader smoke test now covers the new Kconfig mappings.
 - **Profile-header filenames now match each upstream library's
@@ -80,7 +108,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
     empty profile placeholder; CMSIS-DSP config comes from the SoM's
     target architecture via the SoC metadata, not from a header.
   Plus schema + loader updates so each new entry is enableable
-  via `alp.yaml`'s `libraries:` array:
+  via `board.yaml`'s `libraries:` array:
   - Schema enum extended: `lvgl`, `mbedtls`, `cmsis_dsp`, `littlefs`
     added alongside the existing `etl`, `fmt`, `nlohmann_json`,
     `doctest`, `lwrb`, `nanopb`.
@@ -91,11 +119,11 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
     `CONFIG_FILE_SYSTEM_LITTLEFS=y` + `CONFIG_FILE_SYSTEM=y`).
     User-facing C++ libs (etl/fmt/nlohmann_json/doctest) emit
     a TODO marker for the v0.4 CMake-include-path hook.
-  - `metadata/templates/alp.yaml` commented-libraries section now
+  - `metadata/templates/board.yaml` commented-libraries section now
     showcases all ten enableable libs with one-liner notes.
 - **"Using enabled libraries" section** in
   `docs/recommended-libraries.md` -- short usage snippets for
-  every Tier-1 library a consumer can enable in `alp.yaml`:
+  every Tier-1 library a consumer can enable in `board.yaml`:
   CMSIS-DSP (FIR/FFT), ETLCPP (`etl::vector`, `etl::map`), fmt
   (`fmt::format_to_n`), nlohmann/json (no-exception parse path),
   LVGL (label on the resolved display), LittleFS (mount), and
@@ -103,27 +131,27 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   per the design principle -- apps use the upstream native API,
   the SDK ships the compile-time profile that makes them
   compatible with our embedded environment.
-  `docs/project-config.md` `libraries:` block section cross-links
+  `docs/board-config.md` `libraries:` block section cross-links
   to the new "Using enabled libraries" section; also adds an
   explicit "no-wrapper rationale" callout, plus an "SoM vs
   carrier (kept deliberately separate)" subsection codifying that
   the SoM SKU presets live in their own directory hierarchy
   separate from carriers + customer config.
-- `docs/project-config.md` "Single source of truth" section
-  codifying the design principle: **`alp.yaml` is the only place
+- `docs/board-config.md` "Single source of truth" section
+  codifying the design principle: **`board.yaml` is the only place
   to configure the firmware**.  `prj.conf`, CMake `-D` args,
   `local.conf` are all derived from it.  Honest "Today's gaps"
   subsection calls out the three remaining places where hand-
   written config still leaks (DTS overlays for carrier wiring,
   `west.yml` module list, per-test `prj.conf` in
   `tests/zephyr/<area>/`) -- all v0.4 targets.  Template
-  (`metadata/templates/alp.yaml`) + getting-started.md updated
+  (`metadata/templates/board.yaml`) + getting-started.md updated
   with the same principle so new consumers absorb it from page
   one.
 - **Library profile headers** at
   [`metadata/library-profiles/<lib>/`](metadata/library-profiles/)
   -- the "compatible without wrapping" model.  Each Tier-1
-  library that consumers enable in `alp.yaml`'s `libraries:`
+  library that consumers enable in `board.yaml`'s `libraries:`
   array has a pre-tuned compile-time profile so the upstream
   library works correctly under the SDK's no-exceptions /
   no-iostream / no-STL-on-M-class invariants.  v0.3 ships:
@@ -140,15 +168,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   profile over the SDK's.  Apps still use the upstream API
   directly; no `<alp/...>` wrapper.  Design + per-library notes
   in [`metadata/library-profiles/README.md`](metadata/library-profiles/README.md).
-  `docs/project-config.md` "libraries block" section now
+  `docs/board-config.md` "libraries block" section now
   documents the model.
-- `docs/project-config.md` "How the loader compiles the file"
+- `docs/board-config.md` "How the loader compiles the file"
   section rewritten from "lands in v0.4" to working invocation
   recipes.  Three concrete worked examples land:
   - Zephyr: how to call the loader at configure time + include
     the generated `alp.conf` from `prj.conf` via `rsource`, plus
     a `CMakeLists.txt` snippet that auto-regenerates on
-    `alp.yaml` changes via `add_custom_command`.
+    `board.yaml` changes via `add_custom_command`.
   - Plain CMake: piping `--emit cmake-args` straight into the
     configure step.
   - Yocto: generating a `local.conf` snippet + requiring it.
@@ -160,12 +188,12 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   production-board derivative that keeps the IMU + barometer
   and drops the multimedia / debug parts (OLEDs, camera, speaker
   amps, current monitors, I/O expander).  `e1m-evk.yaml`'s
-  docstring + `docs/project-config.md` both explicitly position
+  docstring + `docs/board-config.md` both explicitly position
   the EVK presets as **reference designs** customers fork for
   their own carriers, not just dev-kit-only configs.  Two
   consumption patterns documented: "reference + override" (small
   derivatives) and "fork the preset" (full custom boards).
-- `scripts/alp_project.py` -- the `alp.yaml` **loader** that compiles
+- `scripts/alp_project.py` -- the `board.yaml` **loader** that compiles
   a project config into per-backend native output.  Validates against
   the v1 schema, resolves the SoM SKU + carrier presets, merges
   overrides, and emits one of three formats:
@@ -182,16 +210,16 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
       `IMAGE_INSTALL:append`).
   Python 3.10+; depends on `PyYAML` + `jsonschema` (the latter
   already on the CI path).  CI smoke-tests all three emit formats
-  on `metadata/templates/alp.yaml.example` via the extended
+  on `metadata/templates/board.yaml.example` via the extended
   `pr-metadata-validate` workflow -- catches schema / loader
   regressions at PR time.
-- `metadata/templates/alp.yaml.example` -- a fully-uncommented
+- `metadata/templates/board.yaml.example` -- a fully-uncommented
   config the loader exercises end-to-end.  Distinct from
-  `alp.yaml` (the heavily-commented user template).
+  `board.yaml` (the heavily-commented user template).
 
 ### Changed
 
-- `alp.yaml` schema split into SoM-vs-carrier blocks.  The first
+- `board.yaml` schema split into SoM-vs-carrier blocks.  The first
   pass conflated on-module components (silicon + CC3501E + OPTIGA
   + RV3028 + TMP112 + 24C128, fixed at SoM-fab time) with carrier-
   board components (LSM6DSO + BMI323 + ICM-42670 + BMP581 + OLEDs
@@ -211,21 +239,21 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   - `metadata/e1m_modules/<family>/sku-*.yaml` files updated:
     removed the misclassified carrier-side components; kept only
     on-module parts.
-  - `metadata/templates/alp.yaml` + `docs/project-config.md`
+  - `metadata/templates/board.yaml` + `docs/board-config.md`
     updated with the SoM-vs-carrier distinction explained.
 
 ### Added
 
-- **Project configuration (`alp.yaml`)** -- one declarative YAML
+- **Project configuration (`board.yaml`)** -- one declarative YAML
   file per consumer project that picks the SoM SKU + per-component
   assembly overrides + OS backend + inference backend + optional
   libraries + connectivity features.  Collapses what was previously
   three separate config formats (`prj.conf` for Zephyr, cmake `-D`
   flags for plain CMake, `local.conf` for Yocto) into one source
   of truth.
-  - Schema: `metadata/schemas/alp-project-v1.schema.json` (JSON
+  - Schema: `metadata/schemas/board-config-v1.schema.json` (JSON
     Schema draft-2020-12).
-  - Canonical template: `metadata/templates/alp.yaml` (fully
+  - Canonical template: `metadata/templates/board.yaml` (fully
     commented).
   - Stock SKU presets: `metadata/e1m_modules/<family>/sku-<sku>.yaml`.
     v0.3 ships two worked examples (`sku-aen701.yaml`,
@@ -234,11 +262,11 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
     configuration writeup fills them in.  Values not in the
     silicon datasheet stay `TBD` until then per the project
     memory note.
-  - Design + reference: `docs/project-config.md`.
+  - Design + reference: `docs/board-config.md`.
   - `docs/getting-started.md` "Where to go next" updated to point
-    at project-config.md as the first item.
+    at board-config.md as the first item.
   - The loader script that emits per-backend native configs from
-    `alp.yaml` (Zephyr fragments / cmake `-D` / Yocto local.conf)
+    `board.yaml` (Zephyr fragments / cmake `-D` / Yocto local.conf)
     lands in v0.4.  v0.3 documents the mapping so consumers can
     hand-translate until then.
   - **Optional libraries (ETLCPP, fmt, nlohmann/json, doctest,

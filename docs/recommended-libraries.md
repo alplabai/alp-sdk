@@ -35,7 +35,7 @@ defaults / type-shim value.
 
 ## Using enabled libraries (no wrapper, just use them)
 
-When an app lists a Tier-1 library in `alp.yaml`'s `libraries:`
+When an app lists a Tier-1 library in `board.yaml`'s `libraries:`
 array (or the lib is Tier-3 Zephyr-native, like LVGL), the SDK
 adds the library to the build with its native API on the include
 path.  There's **no `<alp/...>` wrapper**.  You include the
@@ -65,7 +65,7 @@ arm_fir_init_f32(&fir, 32, coeffs, state, 256);
 arm_fir_f32(&fir, in, out, 256);
 ```
 
-Enable: `CONFIG_CMSIS_DSP=y` in alp.yaml-generated alp.conf
+Enable: `CONFIG_CMSIS_DSP=y` in board.yaml-generated alp.conf
 (triggered when an `inference.backend` that needs CMSIS-DSP is
 selected, or when you explicitly want the math primitives).
 
@@ -82,7 +82,7 @@ etl::map<int, const char*, 8> table;
 table.insert({1, "one"});
 ```
 
-Enable: `libraries: [etl]` in alp.yaml.  The SDK's profile turns
+Enable: `libraries: [etl]` in board.yaml.  The SDK's profile turns
 on `ETL_NO_STL` + `ETL_NO_EXCEPTIONS` automatically.
 
 ### fmt
@@ -127,10 +127,10 @@ lv_label_set_text(label, "Hello E1M");
 lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
 ```
 
-Enable: set `iot:` and `display:` features in your alp.yaml; the
+Enable: set `iot:` and `display:` features in your board.yaml; the
 loader translates them to `CONFIG_LVGL=y` + `CONFIG_DISPLAY=y` in
 the generated alp.conf.  Or for finer control, drop a Zephyr
-`prj.conf` override (see "Today's gaps" in `docs/project-config.md`).
+`prj.conf` override (see "Today's gaps" in `docs/board-config.md`).
 
 Driver-side wiring (which display, which framebuffer) comes from
 the carrier preset -- e.g. `metadata/carriers/e1m-evk.yaml`
@@ -182,7 +182,7 @@ If a library you want isn't in the Tier-1 list above, see the
 deferred / considered tiers below or open an issue.  Adding a
 library is a matter of writing a profile header at
 `metadata/library-profiles/<lib>/` + a `libraries:` enum entry
-in `metadata/schemas/alp-project-v1.schema.json` -- low friction
+in `metadata/schemas/board-config-v1.schema.json` -- low friction
 once the case is made.
 
 ## Tier 2 — deferred to v0.5+

@@ -7,7 +7,7 @@
 #
 # Two equivalent ways to express this:
 #
-#   (a) Reference E1M-EVK + override in alp.yaml (lightweight).
+#   (a) Reference E1M-EVK + override in board.yaml (lightweight).
 #       See the example block in metadata/carriers/e1m-evk.yaml
 #       header.
 #
@@ -15,7 +15,7 @@
 #       reusable across projects).  This file is the example fork.
 #
 # Copy this file to metadata/carriers/<your-board-name>.yaml,
-# edit the populated list, and point alp.yaml at it:
+# edit the populated list, and point board.yaml at it:
 #
 #     carrier:
 #       name: my-sensor-board

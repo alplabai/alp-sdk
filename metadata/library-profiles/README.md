@@ -1,7 +1,7 @@
 # metadata/library-profiles
 
 Per-library **compile-time profile headers** the SDK ships so that
-optional libraries enabled in `alp.yaml`'s `libraries:` array
+optional libraries enabled in `board.yaml`'s `libraries:` array
 work correctly in the SDK's environment -- without wrapping them.
 
 ## The distinction: compatible vs wrapped
@@ -93,9 +93,9 @@ opinionated tuning is the consumer's job.
 Adding a new library: drop a directory + a config header named
 to match the upstream's expected filename (or a `README.md` if
 no compile-time config is needed), then extend the `libraries:`
-enum in `metadata/schemas/alp-project-v1.schema.json` and the
+enum in `metadata/schemas/board-config-v1.schema.json` and the
 `_LIBRARY_KCONFIG` map in `scripts/alp_project.py` so consumers
-can enable it via `alp.yaml`.
+can enable it via `board.yaml`.
 
 ## v0.3 scaffolding vs v0.4 wire-up
 
@@ -117,7 +117,7 @@ manually in v0.3.
 
 - [`docs/recommended-libraries.md`](../../docs/recommended-libraries.md)
   -- the Tier 1 library list these profiles cover.
-- [`docs/project-config.md`](../../docs/project-config.md)
-  -- the `alp.yaml` `libraries:` section.
-- [`metadata/templates/alp.yaml`](../templates/alp.yaml) -- where
+- [`docs/board-config.md`](../../docs/board-config.md)
+  -- the `board.yaml` `libraries:` section.
+- [`metadata/templates/board.yaml`](../templates/board.yaml) -- where
   consumers list which libraries to enable.

@@ -258,16 +258,16 @@ Key tasks (Command Palette → **Tasks: Run Task**):
 
 ## 10. Where to go next
 
-- **Project configuration** -- `alp.yaml` is the **single source
+- **Project configuration** -- `board.yaml` is the **single source
   of truth** for your firmware's target.  One YAML file at your
   app root declares which SoM SKU, which carrier, which OS
   backend, which inference backend, which optional libraries,
   which connectivity features.  Every other config artefact
   (Zephyr `prj.conf`, CMake `-D` args, Yocto `local.conf`) is
   derived output -- don't hand-edit them.  Read
-  [`docs/project-config.md`](project-config.md) for the model,
+  [`docs/board-config.md`](board-config.md) for the model,
   then copy
-  [`metadata/templates/alp.yaml`](../metadata/templates/alp.yaml)
+  [`metadata/templates/board.yaml`](../metadata/templates/board.yaml)
   to your app root and edit.
 - Per-peripheral examples: [`examples/`](../examples/README.md)
 - End-to-end reference apps:

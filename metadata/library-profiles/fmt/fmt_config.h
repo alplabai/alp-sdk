@@ -5,7 +5,7 @@
  * fmt configuration header for the ALP SDK's embedded targets.
  *
  * fmt (https://github.com/fmtlib/fmt) reads compile-time defines
- * before its core headers.  Consumers using fmt under alp.yaml's
+ * before its core headers.  Consumers using fmt under board.yaml's
  * libraries: list get this header force-included via the loader,
  * so they don't have to remember which knobs to set for
  * Cortex-M / Cortex-A embedded builds.

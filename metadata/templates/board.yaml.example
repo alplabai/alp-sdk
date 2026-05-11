@@ -1,6 +1,6 @@
-# Minimal alp.yaml example for testing scripts/alp_project.py.
+# Minimal board.yaml example for testing scripts/alp_project.py.
 # This is a fully-uncommented config the loader can exercise
-# end-to-end; the rich commented template at alp.yaml is for
+# end-to-end; the rich commented template at board.yaml is for
 # consumers.
 
 schema_version: 1
