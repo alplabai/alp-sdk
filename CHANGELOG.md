@@ -7,6 +7,20 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.1.0 candidate
 
+### Changed
+
+- `vendors/deepx-dxm1/README.md` rebased on the actual DEEPX
+  software distribution.  Earlier copy described the runtime as
+  "proprietary, sign in at developer portal"; the source is in
+  fact **source-visible on GitHub at <https://github.com/DEEPX-AI>**
+  but under a proprietary "customer-only" license (per the
+  verbatim text of `dx_rt/LICENSE`).  Three concrete repos
+  documented for the V2N-M1 integration: `dx_rt` (userspace
+  runtime), `dx_rt_npu_linux_driver` (PCIe kernel driver -- previously
+  unmentioned), and `meta-deepx-m1` (Yocto recipes).  Clean-room
+  stub at `vendors/deepx-dxm1/include/dxnn/dxnn.h` stays unchanged
+  -- the rewrite is README-only.
+
 ### Added
 
 - Library integration pass for v0.4 prep -- two Tier-2 libraries from

@@ -14,56 +14,97 @@ runtime on Linux (Yocto first-class target — see `PLAN.md` §4.3).
 
 **v0.3 / Yocto-side scaffolding.**  This directory ships:
 
-- A vendor-runtime **stub header** at
-  `vendors/deepx-dxm1/include/dxnn/dxnn.h` that declares the
-  minimum types + entry points the SDK's backend hook
-  (`src/yocto/inference_deepx.cpp`) calls.  The stub lets the
-  SDK compile against the dispatcher path even when the real
-  DEEPX SDK is not installed on the build host -- per the same
-  pattern `vendors/alif/` follows for the Alif HAL.
-- A `CMakeLists.txt` that publishes the include path so the
-  backend hook can `#include <dxnn/dxnn.h>` portably.
+- A **clean-room stub header** at
+  `vendors/deepx-dxm1/include/dxnn/dxnn.h` that declares the minimum
+  types + entry points the SDK's backend hook
+  (`src/yocto/inference_deepx.cpp`) calls.  The stub is independent
+  of DEEPX's real headers -- it was written from the DEEPX runtime's
+  public API description, not by copying from
+  `github.com/DEEPX-AI/dx_rt/lib/include/`.  This is intentional and
+  necessary: dx_rt's LICENSE is proprietary (customer-only -- see
+  "Licensing" below), so the SDK cannot redistribute or derive from
+  those headers.
+- A `CMakeLists.txt` that publishes the include path so the backend
+  hook can `#include <dxnn/dxnn.h>` portably.
 
-Real `do_compile` against the proprietary DEEPX runtime arrives in
-the v0.4 cycle, gated behind the CMake option
-`ALP_SDK_USE_DEEPX_DXM1=ON`.  When ON the backend hook calls
-`dxnn_*` entry points for real; when OFF (the default) the SDK
-dispatcher's auto-resolve skips DEEPX_DX and the V2N-M1 host falls
-back to CPU.
+Real `do_compile` against the DEEPX runtime arrives in the v0.4
+cycle, gated behind the CMake option `ALP_SDK_USE_DEEPX_DXM1=ON`.
+When ON the backend hook calls `dxnn_*` entry points for real;
+when OFF (the default) the SDK dispatcher's auto-resolve skips
+DEEPX_DX and the V2N-M1 host falls back to CPU.
 
-## Where to get the SDK
+## Where to get the DEEPX software
 
-The DEEPX DX-M1 host runtime is **proprietary** and distributed
-under a separate license agreement with DEEPX.  Two delivery
-channels exist:
+DEEPX publishes the M1 software stack on GitHub at
+**<https://github.com/DEEPX-AI>**.  Three repos matter for
+integrating the DX-M1 into a V2N-M1 Yocto image:
 
-1. **DEEPX customer portal** — sign in at
-   <https://developer.deepx.ai> and download the *DX-M1 Host SDK*
-   package matching the kernel and glibc on the V2N-M1 Yocto image.
-2. **Yocto recipe** — once the SDK package lands in
-   `meta-deepx` (DEEPX's upstream Yocto layer, mirrored at
-   <https://github.com/deepx-ai/meta-deepx>), `meta-alp`'s
-   `e1m-x-v2n-m1.conf` machine config pulls in the
-   `deepx-dxm1-host-sdk` recipe automatically.  The recipe drops the
-   runtime libraries under `/usr/lib/deepx/` and headers under
-   `/usr/include/dxnn/`, both of which the ALP SDK's CMake locates
-   via `pkg-config --cflags --libs dxnn`.
+| Repo                                                                                          | Role                                                  |
+|-----------------------------------------------------------------------------------------------|-------------------------------------------------------|
+| [`dx_rt`](https://github.com/DEEPX-AI/dx_rt)                                                  | Userspace inference runtime (the source of `dxnn_*`). |
+| [`dx_rt_npu_linux_driver`](https://github.com/DEEPX-AI/dx_rt_npu_linux_driver)                | **PCIe kernel driver** for the host <-> DX-M1 link.   |
+| [`meta-deepx-m1`](https://github.com/DEEPX-AI/meta-deepx-m1)                                  | DEEPX M1 Yocto recipes (packages the two above).      |
 
-The header surface this directory provides is **compatible with the
-DEEPX-supplied `<dxnn/dxnn.h>`** -- when the real headers are on the
-include path before the stub (the case when the SDK is installed),
-they win the search and the SDK's backend hook links against the
-real runtime.
+Two additional repos are useful but not on the runtime path:
 
-## License
+- [`dx-compiler`](https://github.com/DEEPX-AI/dx-compiler) -- host-side
+  compiler that lowers a `.tflite` / `.onnx` / `.pt` model to the
+  DXNN binary the runtime consumes.  Build-time, not runtime.
+- [`dx_app`](https://github.com/DEEPX-AI/dx_app) -- reference apps;
+  good source-of-truth for actual `dx_rt` API usage examples.
 
-The stub header (`include/dxnn/dxnn.h`) is Apache-2.0 -- it
-declares only the public ABI of the DEEPX runtime, not its
-implementation.  See `LICENSE` at the repository root.
+`dx-all-suite` is DEEPX's umbrella meta-repo bundling the above.
 
-The DEEPX runtime itself is **not** redistributed in this
-repository.  Consumers obtain it from DEEPX directly under DEEPX's
-license terms.
+### Yocto integration (V2N-M1)
+
+`meta-alp`'s `e1m-x-v2n-m1.conf` MACHINE config `LAYERRECOMMENDS`
+the Renesas V2N base BSP plus `meta-deepx-m1`.  The
+`meta-deepx-m1` layer ships a kernel-module recipe that compiles
+`dx_rt_npu_linux_driver` against the Renesas V2N kernel and a
+userspace recipe that drops `libdxrt` under `/usr/lib/` and
+headers under `/usr/include/dxnn/`.  Without the kernel module
+the userspace runtime has nothing to talk to -- both halves are
+required for inference to work.
+
+The SDK's CMake locates the installed runtime via the standard
+sysroot search path; no extra `pkg-config` plumbing is needed
+when building inside the Yocto cross-toolchain.
+
+## Licensing
+
+**DEEPX's repos are source-visible on GitHub but NOT openly
+licensed.**  `dx_rt/LICENSE` carries the following terms (quoted
+verbatim, abridged):
+
+> Copyright (C) 2018- DEEPX Ltd.  All rights reserved.
+> This software is the property of DEEPX and is provided
+> exclusively to customers who are supplied with DEEPX NPU.
+> Unauthorized sharing or usage is strictly prohibited by law.
+> The license for this software is allocated to specific users or
+> organizations associated with DEEPX [...]
+
+`dx_rt_npu_linux_driver` carries similar terms (the GitHub auto-
+detect classifies both as "NOASSERTION").  In practical terms:
+
+- **Anyone with a DEEPX NPU** (including the DX-M1 on E1M-X V2N-M1)
+  is authorised to use the runtime + driver against that part.
+- **Source visibility is for transparency**, not for permissive
+  redistribution.  The alp-sdk repo **does not** include any DEEPX
+  source or header content; the stub at `include/dxnn/dxnn.h` is a
+  clean-room declaration written against the public API description.
+
+DEEPX may also distribute the runtime via direct customer channels
+(developer portal / support email) outside the GitHub mirror; if
+your DEEPX agreement makes a different distribution channel
+authoritative, follow that one.
+
+### License compatibility
+
+The alp-sdk stub header is **Apache-2.0** (it's our code,
+declaring only a public ABI signature -- not protected by DEEPX's
+copyright).  The DEEPX runtime is linked at runtime via the
+sysroot, never bundled.  The dual-licensing arrangement is safe
+as long as no DEEPX source is committed to this repo.
 
 ## See also
 
