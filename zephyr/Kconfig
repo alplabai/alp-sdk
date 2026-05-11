@@ -456,6 +456,19 @@ config ALP_SDK_HAS_CMSIS_DSP
 	  Re-export arm_math.h via <alp/math.h>.  Requires the
 	  CMSIS-DSP module to be present in the Zephyr west manifest.
 
+config ALP_SDK_HW_INFO
+	bool "Runtime hardware-info reader (EEPROM + BOARD_ID ADC)"
+	default y
+	help
+	  Compile src/zephyr/hw_info_zephyr.c.  Provides the
+	  alp_hw_info_read() + alp_hw_info_assert_matches_build()
+	  surface backed by the SoM on-module 24C128 EEPROM and the
+	  per-board BOARD_ID ADC + resistor divider.  v0.3 returns
+	  ALP_ERR_NOSUPPORT from both entry points -- the API contract
+	  is declared so apps can integrate it now; the runtime impl
+	  lands in v0.3.x once the per-family BOARD_ID channels are
+	  filled in.
+
 # Chip drivers.  Each is opt-in so projects only pay for the
 # silicon they actually use.  Symbols use the chip's natural prefix
 # (lsm6dso_*, ssd1306_*, bme280_*, …) — no alp_ prefix on chip

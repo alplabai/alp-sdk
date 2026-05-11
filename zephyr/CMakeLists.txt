@@ -75,6 +75,11 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_RTC
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_WDT
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_wdt.c)
 
+# Runtime hardware-info reader (EEPROM manifest + BOARD_ID ADC).
+# v0.3 stub returns NOSUPPORT; v0.3.x fills in the real impl.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/hw_info_zephyr.c)
+
 # Chip drivers — gated on per-chip Kconfig so blocks that don't use a
 # given chip don't pay its code size.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_LSM6DSO

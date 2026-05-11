@@ -9,6 +9,20 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- **`<alp/hw_info.h>` runtime hardware-info API.**  Public header
+  declaring `alp_hw_info_t`, `alp_hw_info_eeprom_t` (128-byte
+  manifest layout that lives at offset 0x0000 of the SoM's
+  on-module 24C128 EEPROM), `alp_hw_info_read()`, and
+  `alp_hw_info_assert_matches_build()`.  v0.3 ships the API
+  contract + a Zephyr-side stub returning `ALP_ERR_NOSUPPORT`;
+  the runtime EEPROM + BOARD_ID ADC reads land in v0.3.x once
+  the per-family BOARD_ID channels are filled in.  Companion
+  production-test programmer at `tools/program_eeprom.py` packs
+  a board.yaml + serial + mfg date into the 128-byte binary that
+  the production-test fixture writes to the EEPROM.  Unit tests
+  pin the manifest layout against drift between the Python writer
+  and the C reader; a ztest under `tests/zephyr/hw_info/` covers
+  the NOSUPPORT contract for both entry points.
 - **Hardware-revision tracking (board.yaml `som.hw_rev` +
   `carrier.hw_rev`).**  Every released family ships an
   `hw-revisions.yaml` (one per family + per carrier) declaring
