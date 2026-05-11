@@ -4,6 +4,13 @@ Vendor wrapper for **nanopb** -- the zlib-licensed C protobuf
 encoder/decoder for embedded targets.  Upstream:
 <https://github.com/nanopb/nanopb>.
 
+**Status: SDK-internal dependency.**  Consumers do NOT enable
+nanopb via `alp.yaml`; it doesn't appear in the `libraries:` enum.
+The SDK uses it internally for `<alp/mproc.h>` IPC frame
+serialisation, and the proto schema at
+`metadata/protos/alp_mproc.proto` is internal-only.  When the v0.4
+mproc path lands, nanopb is pulled in unconditionally.
+
 ## Why nanopb
 
 The Zephyr backend's mproc path (`src/zephyr/mproc_zephyr.c`) sends
@@ -27,19 +34,21 @@ source-of-truth.
 
 ## Status
 
-**v0.3 scaffolding.**  Three pieces ship:
+**v0.3 scaffolding.**  Two pieces ship:
 
 - A stub `<pb.h>` + `<pb_encode.h>` + `<pb_decode.h>` here that
-  mirrors the upstream public ABI; SDK source compiles against
-  `CONFIG_ALP_SDK_USE_NANOPB=y` even when the upstream library isn't
-  on the include path.
-- A `CONFIG_ALP_SDK_USE_NANOPB` Kconfig flag (default OFF).  When
-  ON, mproc + IoT backends are free to call `pb_encode` /
-  `pb_decode`; v0.3 doesn't switch any sites yet -- v0.4 lands the
-  first real consumer.
+  mirrors the upstream public ABI; SDK source compiles against the
+  nanopb API even when the upstream library isn't on the include
+  path.  When the v0.4 mproc path lands, the west.yml pin replaces
+  this stub.
 - The first protocol schema at `metadata/protos/alp_mproc.proto`
   documenting the M55-HP <-> M55-HE message envelope, RPC request /
   response, and async notifications.
+
+No Kconfig flag (the previous `CONFIG_ALP_SDK_USE_NANOPB` was
+removed in the v0.3 cleanup).  SDK-internal dependencies don't get
+user-visible enables -- the mproc path just uses nanopb when it's
+built.
 
 ## Wiring (v0.4)
 

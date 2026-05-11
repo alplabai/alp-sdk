@@ -440,35 +440,13 @@ config ALP_SDK_HAS_LVGL
 	  Pulls upstream LVGL into the alp_gui_lvgl_attach() path.
 	  Requires CONFIG_LVGL=y.
 
-# Optional library integrations -- see docs/recommended-libraries.md
-# for the design rationale + license / footprint evaluation.  Both
-# stay OFF by default so apps that don't want them don't pay any
-# code-size cost.
-
-config ALP_SDK_USE_LWRB
-	bool "Use LwRB (Lightweight Ring Buffer) internally"
-	default n
-	help
-	  When y, SDK internals (audio + UART backends) may use the
-	  MaJerle/lwrb lock-free ring buffer for byte-granular DMA
-	  staging.  Requires the lwrb module in west.yml -- see
-	  vendors/lwrb/README.md.  No LwRB type leaks through public
-	  <alp/...> headers; the integration stays a hidden detail of
-	  the wrapper.  v0.3 scaffolds the Kconfig + vendor stub;
-	  v0.4 lands the first real consumer.
-
-config ALP_SDK_USE_NANOPB
-	bool "Use nanopb for <alp/mproc.h> IPC frame serialisation"
-	default n
-	help
-	  When y, mproc_zephyr.c (and the iot path's optional binary
-	  publish helper) frame their payloads through nanopb, code-
-	  generated from metadata/protos/*.proto.  Requires the
-	  nanopb module in west.yml -- see vendors/nanopb/README.md.
-	  Forward + backward wire compatibility across independent
-	  firmware upgrades of the two M55 cores is the motivation.
-	  v0.3 scaffolds the Kconfig + schema; v0.4 lands the
-	  generator step + first real consumer.
+# Note: LwRB + nanopb were previously gated by CONFIG_ALP_SDK_USE_*
+# flags here.  Removed in the v0.3 cleanup -- both are SDK-internal
+# libraries (LwRB for audio DMA staging, nanopb for mproc IPC frame
+# serialisation) and consumers don't need to enable them.  When the
+# v0.4 audio + mproc paths land, the SDK code uses them
+# unconditionally; the west.yml pins go in alongside.  See
+# vendors/lwrb/ and vendors/nanopb/ for the runtime contract.
 
 config ALP_SDK_HAS_CMSIS_DSP
 	bool "Build <alp/math.h> against CMSIS-DSP"

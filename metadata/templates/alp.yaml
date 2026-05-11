@@ -133,9 +133,11 @@ os: zephyr
 #   - littlefs            # Fail-safe filesystem for microcontrollers
 #   # DSP / math
 #   - cmsis_dsp           # ARM CMSIS-DSP (Cortex-M / Cortex-A FFT, FIR, ...)
-#   # SDK-internal libs (apps rarely list these directly)
-#   - lwrb                # MaJerle LwRB lock-free ring buffer
-#   - nanopb              # protobuf for embedded
+#
+# Note: SDK-internal libraries (LwRB used for audio DMA staging,
+# nanopb used for <alp/mproc.h> IPC frame serialisation) don't
+# appear in this list.  The SDK uses them directly when the
+# relevant subsystem is compiled in; consumers never enable them.
 
 # -------------------------------------------------------------------
 # Connectivity feature toggles

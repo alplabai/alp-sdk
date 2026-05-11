@@ -17,15 +17,16 @@
  *
  * Gated on CONFIG_ALP_SDK_MPROC.  When OFF, NULL/NOSUPPORT.
  *
- * Optional frame serialisation (v0.3 scaffolding, v0.4 first real
- * use): when CONFIG_ALP_SDK_USE_NANOPB=y the wrapper frames each
- * outbound mbox payload through nanopb against the schema at
- * metadata/protos/alp_mproc.proto.  Self-describing payloads survive
- * independent firmware upgrades of the two M55 cores; see
- * vendors/nanopb/README.md for the integration plan + Kconfig
- * anchor.  The proto types are internal; <alp/mproc.h>'s public
- * surface still accepts plain (data, len) so apps that don't opt
- * into nanopb send raw bytes unchanged.
+ * Frame serialisation (v0.3 scaffolding, v0.4 first real use):
+ * the v0.4 path frames each outbound mbox payload through nanopb
+ * against the schema at metadata/protos/alp_mproc.proto.  Self-
+ * describing payloads survive independent firmware upgrades of the
+ * two M55 cores.  nanopb is an SDK-internal dependency -- consumers
+ * don't enable it; the wrapper just uses it when the v0.4 mproc
+ * path is built.  The proto types are internal; <alp/mproc.h>'s
+ * public surface still accepts plain (data, len) so callers send
+ * raw bytes unchanged from their POV.  See vendors/nanopb/README.md
+ * for the runtime contract.
  */
 
 #include <errno.h>

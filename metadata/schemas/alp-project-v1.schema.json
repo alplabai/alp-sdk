@@ -123,9 +123,7 @@
           "lvgl",
           "mbedtls",
           "cmsis_dsp",
-          "littlefs",
-          "lwrb",
-          "nanopb"
+          "littlefs"
         ]
       }
     },

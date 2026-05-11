@@ -23,6 +23,27 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Changed
 
+- **SDK-internal libraries no longer expose user-facing enable
+  flags.**  Per the design principle "for ourselves we don't need
+  any enable to use in our internal functions":
+  - Removed `CONFIG_ALP_SDK_USE_LWRB` + `CONFIG_ALP_SDK_USE_NANOPB`
+    from `zephyr/Kconfig`.  Both libraries are SDK-internal
+    dependencies (LwRB for audio DMA staging, nanopb for
+    `<alp/mproc.h>` IPC framing); consumers don't enable them.
+    When the v0.4 audio + mproc paths land, the SDK code uses the
+    libraries unconditionally and the west.yml pins land alongside.
+  - Removed `lwrb` + `nanopb` from `alp.yaml`'s `libraries:` enum
+    (`metadata/schemas/alp-project-v1.schema.json`) and from the
+    loader's `_LIBRARY_KCONFIG` map.  The enum now lists only
+    user-facing libraries: etl, fmt, nlohmann_json, doctest, lvgl,
+    mbedtls, cmsis_dsp, littlefs.
+  - `src/zephyr/audio_zephyr.c` + `src/zephyr/mproc_zephyr.c`
+    docstrings + `vendors/lwrb/README.md` + `vendors/nanopb/README.md`
+    + `metadata/templates/alp.yaml` updated to reflect the
+    "SDK-internal, no user-visible enable" status.
+  - `metadata/templates/alp.yaml.example` updated to exercise the
+    user-facing path (`libraries: [lvgl, mbedtls, cmsis_dsp, etl]`)
+    -- CI's loader smoke test now covers the new Kconfig mappings.
 - **Profile-header filenames now match each upstream library's
   expected name** -- no more six different `alp-embedded.h` files
   scattered across the tree.  Renames:

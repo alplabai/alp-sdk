@@ -27,12 +27,13 @@
  * other "no audio path" target.
  *
  * Optional buffering layer (v0.3 scaffolding, v0.4 first real use):
- * when CONFIG_ALP_SDK_USE_LWRB=y the wrapper may stage DMIC reads
- * through a MaJerle/lwrb ring buffer for byte-granular drain by the
- * caller, in addition to the k_mem_slab DMA scratch.  See
- * vendors/lwrb/README.md for the integration plan + Kconfig anchor.
- * No LwRB types leak through <alp/audio.h>; the ring stays an
- * implementation detail of this file.
+ * the v0.4 path stages DMIC reads through a MaJerle/lwrb ring
+ * buffer for byte-granular drain by the caller, in addition to
+ * the k_mem_slab DMA scratch.  LwRB is an SDK-internal dependency
+ * -- consumers don't enable it; the wrapper just uses it when the
+ * v0.4 audio path is built.  No LwRB types leak through
+ * <alp/audio.h>; the ring stays an implementation detail.  See
+ * vendors/lwrb/README.md for the runtime contract.
  */
 
 #include <errno.h>

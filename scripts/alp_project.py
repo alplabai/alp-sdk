@@ -247,23 +247,21 @@ def _emit_zephyr(
 
 
 # Library-name -> Kconfig flag(s) to set when the library appears
-# in alp.yaml's `libraries:` array.  Some libraries map to multiple
-# CONFIG_* settings (e.g. lvgl needs both CONFIG_LVGL and a font
-# pack).  Entries are tuples so the loader emits them in order.
+# in alp.yaml's `libraries:` array.  Only USER-facing libraries are
+# listed here -- SDK-internal libs (LwRB for audio DMA staging,
+# nanopb for mproc IPC framing) are pulled in unconditionally by
+# their consumer code, no enable flag needed.
 _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
-    # SDK-internal libs (Tier 3) -- gated by ALP-side flags
-    "lwrb":          ("CONFIG_ALP_SDK_USE_LWRB=y",),
-    "nanopb":        ("CONFIG_ALP_SDK_USE_NANOPB=y",),
     # User-facing C++ libs (Tier 1) -- header-only, no Kconfig
     # in Zephyr; the loader just adds the profile dir to the
     # include path via a v0.4 CMake hook.  The TODO comment
     # surfaces in the emitted alp.conf so consumers can see
     # what's pending.
-    "etl":           ("# etl: include path + ETL_NO_STL via the v0.4 loader hook",),
-    "fmt":           ("# fmt: include path + FMT_HEADER_ONLY via the v0.4 loader hook",),
-    "nlohmann_json": ("# nlohmann_json: include path + JSON_NOEXCEPTION via the v0.4 loader hook",),
-    "doctest":       ("# doctest: include path + DOCTEST_CONFIG_NO_POSIX_SIGNALS via the v0.4 loader hook",),
-    # Zephyr-native libs (Tier 3) -- the SDK just forwards the
+    "etl":           ("# etl: include path + etl_profile.h via the v0.4 loader hook",),
+    "fmt":           ("# fmt: include path + fmt_config.h via the v0.4 loader hook",),
+    "nlohmann_json": ("# nlohmann_json: include path + json_config.h via the v0.4 loader hook",),
+    "doctest":       ("# doctest: include path + doctest_config.h via the v0.4 loader hook",),
+    # Zephyr-native libs (Tier 3) -- the SDK forwards the
     # consumer's intent to Zephyr's own Kconfig + adds the profile
     # header to the include path.
     "lvgl":          ("CONFIG_LVGL=y",),

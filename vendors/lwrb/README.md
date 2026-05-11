@@ -4,6 +4,11 @@ Vendor wrapper for **LwRB** -- a lock-free, MIT-licensed C ring
 buffer library by MaJerle.  Upstream:
 <https://github.com/MaJerle/lwrb>.
 
+**Status: SDK-internal dependency.**  Consumers do NOT enable
+LwRB via `alp.yaml`; it doesn't appear in the `libraries:` enum.
+The SDK uses it internally where it makes sense and pulls it in
+unconditionally when the relevant subsystem is compiled.
+
 ## Why LwRB
 
 The Zephyr backend's audio path (`src/zephyr/audio_zephyr.c`) uses
@@ -31,13 +36,15 @@ License + maintenance + footprint all pass the
 **v0.3 scaffolding.**  Lands the integration anchor:
 
 - A stub `<lwrb/lwrb.h>` here that mirrors the upstream API surface
-  so SDK source compiles against `CONFIG_ALP_SDK_USE_LWRB=y` even
-  on hosts that haven't fetched the upstream module via west.
-- A `CONFIG_ALP_SDK_USE_LWRB` Kconfig flag at `zephyr/Kconfig`,
-  default OFF.  When ON, audio + UART backends are free to call
-  `lwrb_*` -- v0.3 doesn't switch any sites yet; v0.4 lands the
-  first real consumer.
+  so SDK source compiles against the LwRB API even on hosts that
+  haven't fetched the upstream module via west.  Once the v0.4
+  audio path lands the real consumer, the west.yml pin replaces
+  this stub on the include path.
 - A west-manifest TODO for the upstream pin.  See "Wiring" below.
+
+No Kconfig flag (the previous `CONFIG_ALP_SDK_USE_LWRB` was removed
+in the v0.3 cleanup).  SDK-internal dependencies don't get user-
+visible enables -- the audio path just uses LwRB when it's built.
 
 ## Wiring (v0.4)
 
