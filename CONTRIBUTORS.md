@@ -10,6 +10,7 @@ The ALP SDK is built and maintained by [Alp Lab](https://alplab.ai).
 | Hakan Gülen          | [@hkngln](https://github.com/hkngln)                     | Maintainer                    |
 | Şükrü Sinan Aydoğdu  | [@sukru-aydogdu](https://github.com/sukru-aydogdu)       | Maintainer                    |
 | globglob             | [@globglob3D](https://github.com/globglob3D)             | Contributor                   |
+| Sri (Alp Lab)        | [@Sri-AlpLab](https://github.com/Sri-AlpLab)             | Contributor                   |
 
 Additional Alp Lab team members extend this table from their own
 commits as their work lands.
