@@ -22,6 +22,30 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **`<alp/mproc.h>` IPC envelope framing on AEN-Zephyr (v0.4 prep).**
+  Wraps every `alp_mbox_send` payload in a 12-byte little-endian
+  header (`'AMPF'` magic / monotonic sequence / declared length)
+  before handing it to the Zephyr mbox driver, and unwraps inbound
+  frames before dispatching `alp_mbox_msg_cb_t`.  New Kconfig
+  `CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING` (off by default) plus
+  `CONFIG_ALP_SDK_MPROC_FRAME_MAX_BYTES` (default 512) sizing the
+  per-handle TX scratch.  Implemented in
+  `src/common/proto/alp_mproc_frame.{h,c}` -- a placeholder binary
+  framer that exercises the same call sites in
+  `src/zephyr/mproc_zephyr.c` that the nanopb-generated codec will
+  occupy in v0.4-final.  The placeholder wire is intentionally NOT
+  compatible with the v0.4-final protobuf wire generated against
+  `metadata/protos/alp_mproc.proto`; both ends of an IPC channel
+  must agree on the framing flag.  Coverage: nine ZTESTs in
+  `tests/zephyr/mproc/src/main.c` covering encode roundtrip, zero
+  payload, NULL outputs, capacity-short failure, decode of short /
+  bad-magic / length-overflow frames.  Existing "no backend" tests
+  scoped under `#if !CONFIG_ALP_SDK_MPROC` so the new
+  `alp_sdk.mproc.nanopb_framing` twister scenario (flips MPROC +
+  MBOX on alongside the framing flag) compile-verifies the framing
+  branch in `alp_mbox_send` + `mbox_rx_cb` without colliding with
+  the no-backend assertions.  Real peer-firmware roundtrip parked
+  behind `nightly-aen-hil`.
 - **LwRB UART RX ring buffer on AEN-Zephyr (v0.4 prep).**  First
   in-tree consumer of the LwRB anchor at `vendors/lwrb/`.  New
   opt-in API in `<alp/peripheral.h>`:

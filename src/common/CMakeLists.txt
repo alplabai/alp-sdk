@@ -5,6 +5,7 @@
 if(NOT DEFINED ZEPHYR_BASE)
     target_sources(alp_sdk PRIVATE
         # status_str.c   # populated in v0.1 implementation phase
+        ${CMAKE_CURRENT_SOURCE_DIR}/proto/alp_mproc_frame.c
     )
     target_include_directories(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}

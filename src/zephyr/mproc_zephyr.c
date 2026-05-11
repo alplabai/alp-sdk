@@ -44,6 +44,13 @@
 #include <zephyr/drivers/mbox.h>
 #endif
 
+#if defined(CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING)
+#include "proto/alp_mproc_frame.h"
+#ifndef CONFIG_ALP_SDK_MPROC_FRAME_MAX_BYTES
+#define CONFIG_ALP_SDK_MPROC_FRAME_MAX_BYTES 512
+#endif
+#endif
+
 #ifndef CONFIG_ALP_SDK_MAX_SHMEM_HANDLES
 #define CONFIG_ALP_SDK_MAX_SHMEM_HANDLES 2
 #endif
@@ -75,6 +82,10 @@ struct alp_mbox {
     void                *cb_user;
     struct mbox_channel  tx_chan;
     struct mbox_channel  rx_chan;
+#endif
+#if defined(CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING)
+    uint32_t             tx_sequence;  /* monotonic outbound counter */
+    uint8_t              tx_scratch[CONFIG_ALP_SDK_MPROC_FRAME_MAX_BYTES];
 #endif
 };
 
@@ -222,7 +233,31 @@ static void mbox_rx_cb(const struct device *dev, mbox_channel_id_t channel_id, v
     (void)dev;
     struct alp_mbox *mb = (struct alp_mbox *)user_data;
     if (mb == NULL || mb->cb == NULL) return;
-    mb->cb((uint32_t)channel_id, data ? data->data : NULL, data ? data->size : 0, mb->cb_user);
+
+    const void *cb_data = data ? data->data : NULL;
+    size_t      cb_len  = data ? data->size : 0;
+
+#if defined(CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING)
+    /* Unwrap the placeholder envelope.  Malformed frames (magic
+     * mismatch, declared length overflow) are dropped silently --
+     * the peer is expected to retry on Sequence-gap detection at
+     * the application layer.  Dropping silently here matches the
+     * v0.4-final nanopb behaviour: a decoder failure surfaces as
+     * "no message arrived" rather than a corrupted payload. */
+    const uint8_t *payload     = NULL;
+    size_t         payload_len = 0;
+    if (cb_data != NULL) {
+        alp_status_t s = alp_mproc_frame_decode((const uint8_t *)cb_data, cb_len,
+                                                NULL, &payload, &payload_len);
+        if (s != ALP_OK) {
+            return;
+        }
+        cb_data = payload;
+        cb_len  = payload_len;
+    }
+#endif
+
+    mb->cb((uint32_t)channel_id, cb_data, cb_len, mb->cb_user);
 }
 
 #endif /* CONFIG_ALP_SDK_MPROC */
@@ -266,11 +301,38 @@ alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len, uint32_
     if (mb == NULL || !mb->in_use) return ALP_ERR_NOT_READY;
     if (data == NULL && len > 0) return ALP_ERR_INVAL;
 #if defined(CONFIG_ALP_SDK_MPROC)
+#if defined(CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING)
+    /* Encode into the per-handle scratch buffer.  Sequence is bumped
+     * only on a successful encode + queue so failed sends don't leave
+     * gaps the peer interprets as packet loss.  First successful send
+     * carries sequence=1 (sequence==0 doubles as "no message yet" in
+     * peer-side debugging). */
+    uint32_t     next_seq   = mb->tx_sequence + 1u;
+    size_t       framed_len = 0;
+    alp_status_t s          = alp_mproc_frame_encode(next_seq,
+                                                     data, len,
+                                                     mb->tx_scratch,
+                                                     sizeof(mb->tx_scratch),
+                                                     &framed_len);
+    if (s != ALP_OK) {
+        return s;
+    }
+    struct mbox_msg msg = {
+        .data = mb->tx_scratch,
+        .size = framed_len,
+    };
+    int rc = mbox_send(&mb->tx_chan, &msg);
+    if (rc == 0) {
+        mb->tx_sequence = next_seq;
+    }
+    return errno_to_alp(rc);
+#else
     struct mbox_msg msg = {
         .data = data,
         .size = len,
     };
     return errno_to_alp(mbox_send(&mb->tx_chan, &msg));
+#endif
 #else
     return ALP_ERR_NOSUPPORT;
 #endif

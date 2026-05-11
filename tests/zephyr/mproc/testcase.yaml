@@ -10,3 +10,22 @@ tests:
     tags:
       - alp-sdk
       - mproc
+
+  # v0.4-prep: flips CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y to
+  # compile-verify the framing-on-send + unframing-on-receive paths
+  # in mproc_zephyr.c.  The IPC envelope encode/decode helpers are
+  # still exercised by the same ZTESTs (they don't need a real mbox
+  # device); this scenario adds the build assertion that the framing
+  # branch in alp_mbox_send compiles cleanly.
+  alp_sdk.mproc.nanopb_framing:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_nanopb_framing.conf"
+    tags:
+      - alp-sdk
+      - mproc
+      - nanopb

@@ -145,4 +145,21 @@ if(NOT DEFINED ZEPHYR_LWRB_MODULE_DIR)
 endif()
 
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include)
-zephyr_library_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr)
+# src/common holds the internal mproc framing helper that tests
+# include directly to cover encode/decode without a real mbox peer.
+# Header path is `proto/alp_mproc_frame.h` so apps that don't opt in
+# never see new symbols pollute the include namespace.
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/src/common)
+zephyr_library_include_directories(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common
+)
+
+# nanopb placeholder framing for <alp/mproc.h> (v0.4 prep).  Always
+# compiled so the failure-path tests link; only invoked at runtime
+# when CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y.  Replaced by the
+# nanopb-generated codec when the `extras-v04` west group lands.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/proto/alp_mproc_frame.c
+)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/nanopb/include)

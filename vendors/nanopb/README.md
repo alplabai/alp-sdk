@@ -34,21 +34,36 @@ source-of-truth.
 
 ## Status
 
-**v0.3 scaffolding.**  Two pieces ship:
+**v0.4-prep.**  First consumer landed: the Zephyr `<alp/mproc.h>`
+backend's IPC envelope wrapping (`CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING`).
+Three pieces ship today:
 
-- A stub `<pb.h>` + `<pb_encode.h>` + `<pb_decode.h>` here that
-  mirrors the upstream public ABI; SDK source compiles against the
-  nanopb API even when the upstream library isn't on the include
-  path.  When the v0.4 mproc path lands, the west.yml pin replaces
-  this stub.
-- The first protocol schema at `metadata/protos/alp_mproc.proto`
+- Stub `<pb.h>` + `<pb_encode.h>` + `<pb_decode.h>` here mirroring
+  the upstream public ABI as of v0.4.9.  These remain pure
+  scaffolding -- the placeholder framing below does NOT call into
+  pb_encode / pb_decode; it hand-rolls a 12-byte LE binary header
+  + payload.  The stubs let SDK source `#include <pb.h>` without
+  breaking the build, ready for the swap-in when the upstream
+  nanopb pack arrives.
+- Source-of-truth proto schema at `metadata/protos/alp_mproc.proto`
   documenting the M55-HP <-> M55-HE message envelope, RPC request /
   response, and async notifications.
+- Placeholder framing impl at `src/common/proto/alp_mproc_frame.{h,c}`
+  (~140 LoC) -- the v0.4-prep stand-in for the nanopb-generated
+  codec.  Same encode/decode call sites in `mproc_zephyr.c`;
+  drop-in swap when the generator lands.
 
-No Kconfig flag (the previous `CONFIG_ALP_SDK_USE_NANOPB` was
-removed in the v0.3 cleanup).  SDK-internal dependencies don't get
-user-visible enables -- the mproc path just uses nanopb when it's
-built.
+The placeholder's wire layout is intentionally **incompatible**
+with the v0.4-final nanopb wire (a placeholder, not a draft proto
+spec).  Both ends of an IPC channel must agree on the
+`CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING` flag value -- mixing framed +
+raw firmwares breaks the channel.
+
+No Kconfig flag for nanopb itself (the previous
+`CONFIG_ALP_SDK_USE_NANOPB` was removed in the v0.3 cleanup).
+SDK-internal dependencies don't get user-visible enables; the
+consumer's own Kconfig (`CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING` for
+the mproc path) gates whether the library is *used*.
 
 ## Wiring (v0.4)
 
