@@ -106,6 +106,52 @@ fragment -- enabling the corresponding chip driver in
 `chips/<name>/` without you having to touch a separate config
 file.
 
+### EVK as reference design (custom carriers)
+
+The two stock EVK presets aren't just for the dev kit -- they're
+the **canonical reference designs** for customer carrier boards
+based on Alp SoMs.  Most production carriers inherit ~80% of the
+EVK's chip population (it's the validated baseline Alp ships).
+Two ways to consume the reference:
+
+**(a) Reference + override** -- best for small derivatives:
+
+```yaml
+carrier:
+  name: E1M-EVK             # reference the EVK preset
+  populated:                # only list deltas
+    tas2563: false          # production board has no speaker amps
+    ina236:  false          # no current monitors
+    ssd1306: false          # no on-board display
+```
+
+The loader merges the deltas over the EVK preset's defaults.
+Minimal config, easy to read.
+
+**(b) Fork the carrier preset** -- best for full custom boards:
+
+```bash
+# Copy the EVK preset as a starting point.
+cp metadata/carriers/e1m-evk.yaml \
+   metadata/carriers/my-sensor-board.yaml
+
+# Edit the populated list to reflect your assembly.
+$EDITOR metadata/carriers/my-sensor-board.yaml
+```
+
+```yaml
+# In alp.yaml:
+carrier:
+  name: my-sensor-board
+```
+
+A worked example fork lives at
+[`metadata/carriers/custom-example.yaml`](../metadata/carriers/custom-example.yaml).
+Custom carrier presets can live in the alp-sdk repo (when the
+board design ships under Alp), or in the consumer's own repo
+(the loader's `--metadata-root` arg accepts an alternate search
+path).
+
 ### Stock presets (SDK-shipped)
 
 ```

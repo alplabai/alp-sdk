@@ -23,6 +23,16 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- `metadata/carriers/custom-example.yaml` -- worked example of a
+  customer fork of the E1M-EVK carrier preset.  Shows a slim
+  production-board derivative that keeps the IMU + barometer
+  and drops the multimedia / debug parts (OLEDs, camera, speaker
+  amps, current monitors, I/O expander).  `e1m-evk.yaml`'s
+  docstring + `docs/project-config.md` both explicitly position
+  the EVK presets as **reference designs** customers fork for
+  their own carriers, not just dev-kit-only configs.  Two
+  consumption patterns documented: "reference + override" (small
+  derivatives) and "fork the preset" (full custom boards).
 - `scripts/alp_project.py` -- the `alp.yaml` **loader** that compiles
   a project config into per-backend native output.  Validates against
   the v1 schema, resolves the SoM SKU + carrier presets, merges
