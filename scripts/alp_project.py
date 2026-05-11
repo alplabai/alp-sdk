@@ -328,8 +328,19 @@ def _emit_zephyr(
             continue
         for s in _CHIP_SUBSYSTEMS.get(chip, ()):
             subsystems.add(s)
+
+    # 2c. Subsystems the app declares directly via the `peripherals:`
+    # block.  Covers apps that hit <alp/<class>.h> without going
+    # through any chip driver -- the per-peripheral examples are the
+    # canonical case (adc-voltmeter / i2c-scanner / etc.).
+    for periph in project.get("peripherals") or []:
+        kc = _PERIPHERAL_KCONFIG.get(periph)
+        if kc:
+            subsystems.add(kc)
+        else:
+            lines.append(f"# TODO: peripheral '{periph}' has no Kconfig mapping yet")
     if subsystems:
-        lines.append("# Zephyr subsystems pulled in by the enabled chip drivers")
+        lines.append("# Zephyr subsystems pulled in by enabled chip drivers + peripherals")
         for s in sorted(subsystems):
             lines.append(f"CONFIG_{s}=y")
         lines.append("")
@@ -415,6 +426,27 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
     "ina236":             ("I2C",),
     # pdm_mic helper has no subsystem dep declared in Kconfig
     # (uses <alp/i2s.h> when enabled at v0.2+).
+}
+
+
+# Peripheral name (from board.yaml's `peripherals:` array) ->
+# Zephyr Kconfig symbol the loader sets.  Mirrors the per-class
+# wrapper enables in zephyr/Kconfig (ALP_SDK_PERIPH_*) which all
+# `default y if <SUBSYS>` -- so enabling the Zephyr subsystem
+# here lights up both the subsystem driver AND the alp wrapper.
+_PERIPHERAL_KCONFIG: dict[str, str] = {
+    "adc":      "ADC",
+    "can":      "CAN",
+    "counter":  "COUNTER",
+    "gpio":     "GPIO",
+    "i2c":      "I2C",
+    "i2s":      "I2S",
+    "pwm":      "PWM",
+    "rtc":      "RTC",
+    "sensor":   "SENSOR",    # underlying class for the qenc helper
+    "spi":      "SPI",
+    "uart":     "SERIAL",    # Zephyr's UART class symbol is SERIAL
+    "watchdog": "WATCHDOG",
 }
 
 

@@ -137,6 +137,28 @@
         ]
       }
     },
+    "peripherals": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Zephyr peripheral subsystems the application uses directly via the matching <alp/<class>.h> wrapper.  Each entry enables the corresponding Zephyr Kconfig at build time -- `adc` -> CONFIG_ADC=y, `can` -> CONFIG_CAN=y, `counter` -> CONFIG_COUNTER=y, `gpio` -> CONFIG_GPIO=y, `i2c` -> CONFIG_I2C=y, `i2s` -> CONFIG_I2S=y, `pwm` -> CONFIG_PWM=y, `rtc` -> CONFIG_RTC=y, `sensor` -> CONFIG_SENSOR=y, `spi` -> CONFIG_SPI=y, `uart` -> CONFIG_SERIAL=y, `watchdog` -> CONFIG_WATCHDOG=y.  Chip drivers under `carrier.populated` already pull in their subsystems automatically; this list covers apps that talk to a peripheral directly without going through a chip driver.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "adc",
+          "can",
+          "counter",
+          "gpio",
+          "i2c",
+          "i2s",
+          "pwm",
+          "rtc",
+          "sensor",
+          "spi",
+          "uart",
+          "watchdog"
+        ]
+      }
+    },
     "iot": {
       "type": "object",
       "additionalProperties": false,

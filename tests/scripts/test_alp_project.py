@@ -141,6 +141,41 @@ class TestZephyrEmit(unittest.TestCase):
             self.assertIn("CONFIG_LOG=y", rv.stdout)
             self.assertIn("CONFIG_PRINTK=y", rv.stdout)
 
+    def test_peripherals_emit_subsystem_kconfig(self) -> None:
+        """Each entry under `peripherals:` must produce the matching
+        Zephyr CONFIG_<SUBSYS>=y line.  Covers the per-peripheral
+        example migrations (adc-voltmeter, i2c-scanner, ...) so a
+        regression in the mapping table is caught at the metadata
+        gate, not at twister time."""
+        cases = {
+            "adc":      "CONFIG_ADC=y",
+            "can":      "CONFIG_CAN=y",
+            "counter":  "CONFIG_COUNTER=y",
+            "gpio":     "CONFIG_GPIO=y",
+            "i2c":      "CONFIG_I2C=y",
+            "i2s":      "CONFIG_I2S=y",
+            "pwm":      "CONFIG_PWM=y",
+            "rtc":      "CONFIG_RTC=y",
+            "sensor":   "CONFIG_SENSOR=y",
+            "spi":      "CONFIG_SPI=y",
+            "uart":     "CONFIG_SERIAL=y",
+            "watchdog": "CONFIG_WATCHDOG=y",
+        }
+        for periph, kconfig in cases.items():
+            with self.subTest(peripheral=periph):
+                with tempfile.TemporaryDirectory() as td:
+                    path = _write_board(Path(td), f"""
+                        schema_version: 1
+                        som:
+                          sku: E1M-AEN701
+                        os: zephyr
+                        peripherals:
+                          - {periph}
+                    """)
+                    rv = _run_loader(input_path=path)
+                    self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+                    self.assertIn(kconfig, rv.stdout)
+
     def test_log_level_maps_to_kconfig_default(self) -> None:
         cases = {"error": 1, "warn": 2, "info": 3, "debug": 4, "trace": 4}
         for log_level, kconfig_n in cases.items():
