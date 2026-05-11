@@ -229,19 +229,63 @@ Alif Ensemble · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1 · TI SimpleLink (
 E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference carriers · vendor HALs.
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│  AI framework (TFLite Micro → Ethos-U / DRP-AI / DEEPX)    │
-├─────────────────────────────────────────────────────────────┤
-│  Dev tooling (board.yaml + loader + VS Code extension)     │
-├─────────────────────────────────────────────────────────────┤
-│  Alp SDK (<alp/*.h> · 20+ chip drivers · 8 libraries)      │
-├─────────────────────────────────────────────────────────────┤
-│  OS backend (Bare-metal · Yocto · Zephyr)                  │
-├─────────────────────────────────────────────────────────────┤
-│  Vendor SDK (Alif · Renesas · NXP · DEEPX · TI SimpleLink) │
-├─────────────────────────────────────────────────────────────┤
-│  HW + HAL (E1M / E1M-X SoMs · EVK + X-EVK carriers)        │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  E1M™ — Scalable AI Smarter Edge                              ⚡ Alp Lab     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  ┌───────────────┐    ┌────────────────────────────────────────────────────┐
+  │ AI Framework  │ ─► │  TFLM   →  Ethos-U   (Alif AEN, NXP N93 / U55+U65) │
+  │  (on-device)  │    │         →  DRP-AI3   (Renesas V2N)                 │
+  │               │    │         →  DEEPX DX-M1  (V2M family)               │
+  │               │    │         →  CPU       (reference kernels)           │
+  │               │    │  · · · offline training only: TensorFlow, PyTorch  │
+  └───────────────┘    └────────────────────────────────────────────────────┘
+          │
+  ┌───────────────┐    ┌────────────────────────────────────────────────────┐
+  │ Dev Tooling   │ ─► │  VS Code extension  ·  board.yaml + loader         │
+  │   (v0.3 NEW)  │    │  validate_board_yaml.py  ·  GUI configurator       │
+  │               │    │  program_eeprom.py  ·  per-OS dependency bootstrap │
+  └───────────────┘    └────────────────────────────────────────────────────┘
+          │
+  ┌───────────────┐    ┌────────────────────────────────────────────────────┐
+  │   Alp SDK     │ ─► │  Peripherals          Audio           Camera       │
+  │  <alp/*.h>    │    │  ─ GPIO/I²C/SPI       ─ PDM in (mics) ─ OV5640     │
+  │               │    │  ─ UART/PWM/ADC       ─ I²S out + amp ─ CAM_MUX    │
+  │               │    │  ─ CAN/RTC/WDT/USB    ─ TAS2563                    │
+  │               │    │                                                    │
+  │               │    │  Inference            IoT / BLE       Security     │
+  │               │    │  ─ dispatcher         ─ Wi-Fi 6       ─ MbedTLS    │
+  │               │    │  ─ Ethos-U / DRP-AI   ─ MQTT          ─ PSA Crypto │
+  │               │    │  ─ DEEPX / CPU        ─ BLE 5.4       ─ OPTIGA TM  │
+  │               │    │                                                    │
+  │               │    │  Display / GUI        HW Info         Multi-proc   │
+  │               │    │  ─ SSD1306 / 1331     ─ EEPROM mfst   ─ Mailbox    │
+  │               │    │  ─ LVGL               ─ BOARD_ID ADC  ─ Shared mem │
+  │               │    │                       ─ <alp/hw_info> ─ HW sem     │
+  │               │    │                                                    │
+  │               │    │  ─── 20+ chip drivers (lsm6dso, bmi323, bmp581,    │
+  │               │    │       icm42670, ina236, tmp112, tcal9538,          │
+  │               │    │       rv3028c7, 24c128, cc3501e, ssd13xx, ...)     │
+  │               │    │                                                    │
+  │               │    │  ─── User libraries (board.yaml `libraries:`):     │
+  │               │    │       ETL · fmt · nlohmann_json · doctest          │
+  │               │    │       LVGL · MbedTLS · CMSIS-DSP · LittleFS        │
+  └───────────────┘    └────────────────────────────────────────────────────┘
+          │
+  ┌───────────────┐    ┌────────────────────────────────────────────────────┐
+  │      OS       │ ─► │   Bare-metal         Yocto            Zephyr       │
+  └───────────────┘    └────────────────────────────────────────────────────┘
+          │
+  ┌───────────────┐    ┌────────────────────────────────────────────────────┐
+  │  Vendor SDK   │ ─► │   Alif Ensemble (AEN)   Renesas RZ/V2N             │
+  │               │    │   NXP i.MX 93           DEEPX DX-M1                │
+  │               │    │   TI SimpleLink (CC3501E coprocessor)              │
+  └───────────────┘    └────────────────────────────────────────────────────┘
+          │
+  ┌───────────────┐    ┌────────────────────────────────────────────────────┐
+  │      HW       │ ─► │   E1M (35×35) + E1M-X (45×65) SoMs                 │
+  │   + HAL       │    │   E1M-EVK / E1M-X-EVK carriers + vendor HALs       │
+  └───────────────┘    └────────────────────────────────────────────────────┘
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for the per-library
