@@ -123,5 +123,26 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TAS2563
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_INA236
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ina236/ina236.c)
 
+# LwRB: publish the vendor stub headers on the include path so SDK
+# code compiles against <lwrb/lwrb.h> regardless of whether the
+# upstream MaJerle/lwrb module is on the workspace.  When the
+# `extras-v04` west group is enabled the upstream sources end up at
+# modules/lib/lwrb/src/include/ and (once registered as a Zephyr
+# module via EXTRA_ZEPHYR_MODULES) win the include search ahead of
+# our stub; the ABI is identical so the SDK source is unchanged
+# across the swap.
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/lwrb/include)
+
+# Compile our in-tree LwRB stub impl whenever the upstream module is
+# *not* present on the workspace.  ZEPHYR_LWRB_MODULE_DIR is set by
+# Zephyr's module-resolution pass when modules/lib/lwrb is picked up;
+# absent that, we provide the lwrb_write/read/peek/skip/advance/get_*
+# symbols ourselves.
+if(NOT DEFINED ZEPHYR_LWRB_MODULE_DIR)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/lwrb/src/lwrb_stub_impl.c
+    )
+endif()
+
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include)
 zephyr_library_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr)

@@ -33,18 +33,37 @@ License + maintenance + footprint all pass the
 
 ## Status
 
-**v0.3 scaffolding.**  Lands the integration anchor:
+**v0.4-prep.**  First consumer landed: the Zephyr UART backend's
+opt-in byte-granular RX ring buffer (`alp_uart_rx_ringbuf_*`,
+gated on `CONFIG_ALP_SDK_UART_RX_RINGBUF`).  The vendor anchor
+now ships:
 
-- A stub `<lwrb/lwrb.h>` here that mirrors the upstream API surface
-  so SDK source compiles against the LwRB API even on hosts that
-  haven't fetched the upstream module via west.  Once the v0.4
-  audio path lands the real consumer, the west.yml pin replaces
-  this stub on the include path.
-- A west-manifest TODO for the upstream pin.  See "Wiring" below.
+- The stub `<lwrb/lwrb.h>` (Apache-2.0) declaring the upstream
+  public ABI as of v3.2.0.
+- An in-tree stub impl at `vendors/lwrb/src/lwrb_stub_impl.c`
+  that fills in the non-inline `lwrb_write` / `lwrb_read` /
+  `lwrb_peek` / `lwrb_get_full` / `lwrb_get_free` / `lwrb_skip` /
+  `lwrb_advance` symbols.  Correct single-producer /
+  single-consumer semantics with the canonical empty/full
+  disambiguation; ~140 LoC.  Replaced wholesale by upstream
+  `MaJerle/lwrb` once the `extras-v04` west group is enabled.
+- The west-manifest pin (`MaJerle/lwrb@v3.2.0`) sitting behind
+  the `extras-v04` group filter, ready to flip on once the v0.4
+  Zephyr-module wiring lands.
 
-No Kconfig flag (the previous `CONFIG_ALP_SDK_USE_LWRB` was removed
-in the v0.3 cleanup).  SDK-internal dependencies don't get user-
-visible enables -- the audio path just uses LwRB when it's built.
+The Zephyr build picks up the vendor headers via
+`zephyr/CMakeLists.txt`'s `zephyr_include_directories(...lwrb/include)`
+and compiles the stub impl only when no upstream LwRB module is
+on the workspace (`if(NOT DEFINED ZEPHYR_LWRB_MODULE_DIR)`).  The
+plain-CMake / Yocto build always compiles the stub impl --
+upstream LwRB isn't on the Yocto sysroot.
+
+No Kconfig flag for LwRB itself (the previous
+`CONFIG_ALP_SDK_USE_LWRB` was removed in the v0.3 cleanup).
+SDK-internal dependencies don't get user-visible enables -- the
+consumer's own Kconfig flag (`CONFIG_ALP_SDK_UART_RX_RINGBUF` for
+the UART path) gates whether the library is *used*; the library
+itself is pulled in unconditionally.
 
 ## Wiring (v0.4)
 

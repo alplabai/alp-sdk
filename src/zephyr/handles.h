@@ -109,6 +109,20 @@ struct alp_uart {
     alp_uart_config_t   cfg;
 };
 
+/* RX ring buffer state -- only compiled when the feature is enabled
+ * so builds without CONFIG_ALP_SDK_UART_RX_RINGBUF don't pull in the
+ * LwRB header from this internal include. */
+#if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)
+#include <lwrb/lwrb.h>
+
+struct alp_uart_rx_ringbuf {
+    bool                 in_use;
+    const struct device *dev;     /* mirror of port->dev for ISR use */
+    struct alp_uart     *port;    /* back-ref for detach */
+    lwrb_t               rb;
+};
+#endif
+
 /* ------------------------------------------------------------------ */
 /* GPIO                                                                */
 /* ------------------------------------------------------------------ */
@@ -248,6 +262,11 @@ void                alp_z_spi_pool_release(struct alp_spi *h);
 
 struct alp_uart    *alp_z_uart_pool_acquire(void);
 void                alp_z_uart_pool_release(struct alp_uart *h);
+
+#if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)
+struct alp_uart_rx_ringbuf *alp_z_uart_rx_ringbuf_pool_acquire(void);
+void                        alp_z_uart_rx_ringbuf_pool_release(struct alp_uart_rx_ringbuf *h);
+#endif
 
 struct alp_gpio    *alp_z_gpio_pool_acquire(void);
 void                alp_z_gpio_pool_release(struct alp_gpio *h);

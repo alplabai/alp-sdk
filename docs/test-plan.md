@@ -105,6 +105,7 @@ A release does **not** tag until every row gating it is `verified`.
 
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
+| AEN-Zephyr UART RX ring buffer (LwRB) | `src/zephyr/peripheral_uart.c` (RX ringbuf section) | 🟡 partial | IRQ-driven attach delivers a known 1 KiB burst into the caller's ring with zero byte loss over 10 consecutive bursts | `tests/zephyr/peripheral/` (NULL/INVAL failure paths covered, including `alp_sdk.peripheral.uart_rx_ringbuf` compile scenario); **real-IRQ attach via `nightly-aen-hil`** | v0.4 |
 | Yocto I²C wrapper (i2c-dev) | `src/yocto/peripheral_i2c.c` | 🟡 partial | LSM6DSO WHOAMI = 0x6C reads back over real `/dev/i2c-N` on a Yocto target | `tests/yocto/peripheral_i2c.c` (failure paths only); **HIL via `hil-yocto`** | v0.4 |
 | Yocto SPI wrapper (spidev) | `src/yocto/peripheral_spi.c` | 🟡 partial | SPI flash JEDEC-ID via `/dev/spidev<bus>.<cs>` returns expected bytes | `tests/yocto/peripheral_spi.c`; **HIL via `hil-yocto`** | v0.4 |
 | Yocto UART wrapper (termios) | `src/yocto/peripheral_uart.c` | 🟡 partial | TX/RX loopback at 115200 8N1, zero byte loss over 1 KiB | `tests/yocto/peripheral_uart.c`; **HIL via `hil-yocto`** | v0.4 |
@@ -133,7 +134,8 @@ right now" status is one scroll away from the v0.4 gate list:
 | Yocto GPIO IRQ dispatcher | ⏳ untested | (No real-edge test exists yet) |
 | Yocto MQTT via libmosquitto | 🟡 partial — URI parser + NULL-arg paths covered by `tests/yocto/iot_mqtt.c`; broker roundtrip untested | `pr-plain-cmake.yml` run on commit 1965c4f+ |
 | Coverity workflow wiring | ✅ verified | <https://github.com/alplabai/alp-sdk/actions/runs/25673163492> + first scan at <https://scan.coverity.com/projects/alplabai-alp-sdk> |
-| `west.yml` `extras-v04` group with lwrb + nanopb pins | 🟡 partial — pins resolve via `west update --group-filter +extras-v04` on a fresh workspace; never exercised by a real consumer | (No real-consumer build exists yet) |
+| `west.yml` `extras-v04` group with lwrb + nanopb pins | 🟡 partial — pins resolve via `west update --group-filter +extras-v04` on a fresh workspace; first LwRB consumer (UART RX ringbuf) landed against the in-tree stub impl; upstream LwRB swap not yet exercised | (Stub-side coverage in `alp_sdk.peripheral.uart_rx_ringbuf` twister scenario; upstream-on-workspace build untested) |
+| AEN-Zephyr UART RX ring buffer (LwRB) | 🟡 partial — failure-path ZTESTs green in `pr-twister` (both the default and `prj_uart_ringbuf.conf` scenarios); real-IRQ attach untested | `pr-twister.yml` `alp_sdk.peripheral.uart_rx_ringbuf` scenario |
 
 ## CI-only / tooling rows (no HIL gate)
 

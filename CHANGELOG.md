@@ -22,6 +22,31 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **LwRB UART RX ring buffer on AEN-Zephyr (v0.4 prep).**  First
+  in-tree consumer of the LwRB anchor at `vendors/lwrb/`.  New
+  opt-in API in `<alp/peripheral.h>`:
+  `alp_uart_rx_ringbuf_attach()` / `_pop()` / `_count()` /
+  `_detach()`.  When `CONFIG_ALP_SDK_UART_RX_RINGBUF=y` (off by
+  default; depends on `CONFIG_UART_INTERRUPT_DRIVEN`), the Zephyr
+  backend registers an IRQ callback on the underlying UART that
+  drains the controller FIFO into a caller-supplied LwRB-backed
+  ring on every byte; consumer code pops bytes without polling.
+  Backed by the in-tree LwRB stub impl at
+  `vendors/lwrb/src/lwrb_stub_impl.c` (~140 LoC, correct
+  single-producer / single-consumer semantics with the canonical
+  empty/full disambiguation) until the `extras-v04` west group
+  flips upstream `MaJerle/lwrb` in.  Builds without the Kconfig
+  flag (or non-Zephyr backends) get NULL/NOSUPPORT stubs in
+  `src/common/stub_backend.c`, gated by a new
+  `ALP_VENDOR_OVERRIDES_UART_RX_RINGBUF` macro so backends can
+  adopt the ringbuf incrementally without re-implementing the
+  full UART surface.  Failure-path coverage in
+  `tests/zephyr/peripheral/src/main.c` (four ZTESTs covering
+  NULL-port attach, NULL-handle pop, NULL-handle count, NULL
+  detach safety); compile-verification for the feature-on path
+  via a new `alp_sdk.peripheral.uart_rx_ringbuf` twister
+  scenario with `EXTRA_CONF_FILE=prj_uart_ringbuf.conf`.
+  Real-IRQ attach gates on `nightly-aen-hil`.
 - **Yocto MQTT backend via libmosquitto (v0.4 prep).**
   `src/yocto/iot_yocto.c` implements `alp_mqtt_*` against the
   Eclipse Mosquitto C client library.  Caller-driven loop model:

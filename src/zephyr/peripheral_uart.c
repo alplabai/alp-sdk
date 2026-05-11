@@ -156,3 +156,118 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len,
     }
     return ALP_OK;
 }
+
+/* ================================================================== */
+/* RX ring buffer (CONFIG_ALP_SDK_UART_RX_RINGBUF)                     */
+/* ================================================================== */
+
+#if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)
+
+#include <lwrb/lwrb.h>
+
+/* IRQ-context drain: pull bytes out of the controller FIFO into the
+ * caller's LwRB.  Single-producer / single-consumer holds because
+ * Zephyr serialises the UART IRQ callback against itself and the
+ * consumer thread is the only reader (alp_uart_rx_ringbuf_pop).
+ * Bytes that overflow the ring are dropped on the floor -- the ring
+ * acts as a back-pressure indicator, not a guarantee of zero loss.
+ * Callers that need lossless capture should size the backing store
+ * to cover the worst-case drain latency. */
+static void alp_uart_rx_isr(const struct device *dev, void *user_data) {
+    struct alp_uart_rx_ringbuf *s = user_data;
+    if (s == NULL || !s->in_use) return;
+    while (uart_irq_update(dev) > 0 && uart_irq_rx_ready(dev) > 0) {
+        uint8_t scratch[32];
+        int n = uart_fifo_read(dev, scratch, sizeof(scratch));
+        if (n <= 0) break;
+        (void)lwrb_write(&s->rb, scratch, (size_t)n);
+    }
+}
+
+alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port,
+                                                  uint8_t    *backing,
+                                                  size_t      backing_size) {
+    alp_z_clear_last_error();
+    if (port == NULL || !port->in_use || backing == NULL || backing_size < 2u) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    struct alp_uart_rx_ringbuf *s = alp_z_uart_rx_ringbuf_pool_acquire();
+    if (s == NULL) {
+        alp_z_set_last_error(ALP_ERR_NOMEM);
+        return NULL;
+    }
+    if (lwrb_init(&s->rb, backing, backing_size) == 0u) {
+        alp_z_uart_rx_ringbuf_pool_release(s);
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    s->dev  = port->dev;
+    s->port = port;
+
+    int err = uart_irq_callback_user_data_set(port->dev, alp_uart_rx_isr, s);
+    if (err != 0) {
+        alp_z_uart_rx_ringbuf_pool_release(s);
+        alp_z_set_last_error(errno_to_alp(err));
+        return NULL;
+    }
+    uart_irq_rx_enable(port->dev);
+    return s;
+}
+
+alp_status_t alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb,
+                                     uint8_t *out, size_t max_len,
+                                     size_t *got) {
+    if (got != NULL) *got = 0;
+    if (rb == NULL || !rb->in_use) return ALP_ERR_NOT_READY;
+    if (out == NULL && max_len > 0) return ALP_ERR_INVAL;
+    if (max_len == 0) return ALP_OK;
+    size_t n = lwrb_read(&rb->rb, out, max_len);
+    if (got != NULL) *got = n;
+    return ALP_OK;
+}
+
+size_t alp_uart_rx_ringbuf_count(const alp_uart_rx_ringbuf_t *rb) {
+    if (rb == NULL || !rb->in_use) return 0;
+    return lwrb_get_full(&rb->rb);
+}
+
+void alp_uart_rx_ringbuf_detach(alp_uart_rx_ringbuf_t *rb) {
+    if (rb == NULL || !rb->in_use) return;
+    if (rb->dev != NULL) {
+        uart_irq_rx_disable(rb->dev);
+        (void)uart_irq_callback_user_data_set(rb->dev, NULL, NULL);
+    }
+    lwrb_free(&rb->rb);
+    alp_z_uart_rx_ringbuf_pool_release(rb);
+}
+
+#else /* !CONFIG_ALP_SDK_UART_RX_RINGBUF */
+
+alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port,
+                                                  uint8_t    *backing,
+                                                  size_t      backing_size) {
+    (void)port; (void)backing; (void)backing_size;
+    alp_z_clear_last_error();
+    alp_z_set_last_error(ALP_ERR_NOSUPPORT);
+    return NULL;
+}
+
+alp_status_t alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb,
+                                     uint8_t *out, size_t max_len,
+                                     size_t *got) {
+    (void)rb; (void)out; (void)max_len;
+    if (got != NULL) *got = 0;
+    return ALP_ERR_NOSUPPORT;
+}
+
+size_t alp_uart_rx_ringbuf_count(const alp_uart_rx_ringbuf_t *rb) {
+    (void)rb;
+    return 0;
+}
+
+void alp_uart_rx_ringbuf_detach(alp_uart_rx_ringbuf_t *rb) {
+    (void)rb;
+}
+
+#endif /* CONFIG_ALP_SDK_UART_RX_RINGBUF */

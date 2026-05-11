@@ -28,6 +28,27 @@ tests:
       - peripheral
       - caps
 
+  # v0.4-prep scenario: flips CONFIG_ALP_SDK_UART_RX_RINGBUF=y so the
+  # LwRB-backed RX ring buffer code path in peripheral_uart.c is
+  # compile-verified.  The failure-path tests in this suite run
+  # against both this overlay (feature on) and the default config
+  # (feature off) -- the assertions are scoped to "any refusal is
+  # acceptable" rather than a specific status code, so the same
+  # ZTESTs cover both builds.  Real-IRQ attach gates on HIL.
+  alp_sdk.peripheral.uart_rx_ringbuf:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_uart_ringbuf.conf"
+    tags:
+      - alp-sdk
+      - peripheral
+      - uart
+      - lwrb
+
   # alp_sdk.peripheral.evk_aen — HW-in-loop variant for the E1M EVK
   # populated with an E1M-AEN family SoM. Currently parked because
   # the alp_e1m_evk_aen Zephyr board file lives in

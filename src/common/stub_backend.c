@@ -235,6 +235,44 @@ void alp_uart_close(alp_uart_t *p)
 }
 #endif /* !ALP_VENDOR_OVERRIDES_UART */
 
+/* UART RX ring buffer -- Zephyr-only today (CONFIG_ALP_SDK_UART_RX_RINGBUF).
+ * No Yocto or baremetal backend overrides these yet, so the stubs
+ * here are the canonical NOSUPPORT path on every non-Zephyr build.
+ * Gated independently of ALP_VENDOR_OVERRIDES_UART so a backend can
+ * adopt the ringbuf later without re-implementing the entire UART
+ * surface. */
+#if !defined(ALP_VENDOR_OVERRIDES_UART_RX_RINGBUF)
+alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port,
+                                                  uint8_t    *backing,
+                                                  size_t      backing_size)
+{
+    (void)port;
+    (void)backing;
+    (void)backing_size;
+    z_last_error = ALP_ERR_NOSUPPORT;
+    return NULL;
+}
+alp_status_t alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb,
+                                     uint8_t *out, size_t max_len,
+                                     size_t *got)
+{
+    (void)rb;
+    (void)out;
+    (void)max_len;
+    if (got != NULL) *got = 0;
+    return ALP_ERR_NOSUPPORT;
+}
+size_t alp_uart_rx_ringbuf_count(const alp_uart_rx_ringbuf_t *rb)
+{
+    (void)rb;
+    return 0;
+}
+void alp_uart_rx_ringbuf_detach(alp_uart_rx_ringbuf_t *rb)
+{
+    (void)rb;
+}
+#endif /* !ALP_VENDOR_OVERRIDES_UART_RX_RINGBUF */
+
 /* ------------------------------------------------------------------ */
 /* PWM / ADC / Counter / QEnc / I2S / CAN / RTC / WDT (v0.2)           */
 /* ------------------------------------------------------------------ */

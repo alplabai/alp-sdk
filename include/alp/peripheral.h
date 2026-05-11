@@ -218,6 +218,86 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len,
 
 void alp_uart_close(alp_uart_t *port);
 
+/* ------------------------------------------------------------------ */
+/* UART -- byte-granular RX ring buffer (optional)                     */
+/*                                                                     */
+/* Opt-in helper layered on top of an open alp_uart_t.  Once attached, */
+/* the SDK's interrupt-driven RX path drains the controller FIFO into  */
+/* a caller-supplied backing store on every byte; the consumer thread  */
+/* pops bytes via alp_uart_rx_ringbuf_pop without polling the device.  */
+/*                                                                     */
+/* Availability:                                                       */
+/*   - Zephyr: requires CONFIG_ALP_SDK_UART_RX_RINGBUF=y plus           */
+/*     CONFIG_UART_INTERRUPT_DRIVEN=y.  Other backends return           */
+/*     NULL / ALP_ERR_NOSUPPORT today (Yocto-side termios already      */
+/*     buffers in-kernel; baremetal lands once UART IRQ wiring does).  */
+/*                                                                     */
+/* Concurrency: alp_uart_rx_ringbuf_pop / _count run from the          */
+/* consumer thread only; the producer side (UART IRQ) runs inside      */
+/* the SDK and uses LwRB's single-producer-single-consumer guarantees. */
+/* ------------------------------------------------------------------ */
+
+typedef struct alp_uart_rx_ringbuf alp_uart_rx_ringbuf_t;
+
+/**
+ * @brief Attach a byte-granular RX ring buffer to an open UART port.
+ *
+ * @param port           UART handle from alp_uart_open().
+ * @param backing        Caller-owned buffer; must outlive the returned
+ *                       handle.  Should be >= 64 bytes to absorb the
+ *                       worst-case FIFO drain latency.
+ * @param backing_size   Capacity in bytes (one byte is reserved for
+ *                       empty / full disambiguation, so usable
+ *                       capacity is @p backing_size - 1).
+ *
+ * @return Handle on success; NULL with alp_last_error() set on failure.
+ *         Returns NULL + ALP_ERR_NOSUPPORT on builds without
+ *         CONFIG_ALP_SDK_UART_RX_RINGBUF.
+ */
+alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port,
+                                                  uint8_t    *backing,
+                                                  size_t      backing_size);
+
+/**
+ * @brief Pop up to @p max_len bytes out of the ring.
+ *
+ * Non-blocking.  Writes the number of bytes actually copied into
+ * @p got (may be zero if the ring is empty).
+ *
+ * @param rb         Handle from alp_uart_rx_ringbuf_attach.
+ * @param out        Caller-supplied destination buffer.
+ * @param max_len    Maximum bytes to copy.
+ * @param got        [out] Bytes actually copied; may be NULL.
+ *
+ * @return ALP_OK on success.  ALP_ERR_NOT_READY if @p rb is NULL or
+ *         detached.  ALP_ERR_INVAL if @p out is NULL with @p max_len > 0.
+ */
+alp_status_t alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb,
+                                     uint8_t *out, size_t max_len,
+                                     size_t *got);
+
+/**
+ * @brief Number of bytes currently buffered.
+ *
+ * Safe to call from the consumer thread.  Returns zero on a NULL or
+ * detached handle.
+ *
+ * @param rb   Handle from alp_uart_rx_ringbuf_attach.
+ * @return Buffered byte count (range 0 .. backing_size - 1).
+ */
+size_t alp_uart_rx_ringbuf_count(const alp_uart_rx_ringbuf_t *rb);
+
+/**
+ * @brief Detach the ring buffer and release the handle.
+ *
+ * Disables the IRQ-driven RX path on the underlying port and returns
+ * the slot to the pool.  Idempotent on NULL.  The caller's backing
+ * store may be reused or freed once this returns.
+ *
+ * @param rb   Handle from alp_uart_rx_ringbuf_attach.
+ */
+void alp_uart_rx_ringbuf_detach(alp_uart_rx_ringbuf_t *rb);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

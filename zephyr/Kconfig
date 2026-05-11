@@ -69,6 +69,30 @@ config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4
 
+config ALP_SDK_UART_RX_RINGBUF
+	bool "Byte-granular RX ring buffer (LwRB) for <alp/peripheral.h> UART"
+	default n
+	depends on SERIAL && UART_INTERRUPT_DRIVEN
+	help
+	  Enable the alp_uart_rx_ringbuf_* helpers in src/zephyr/peripheral_uart.c.
+	  When attached to an open alp_uart_t, the SDK registers an
+	  interrupt-driven RX callback that drains the controller's FIFO
+	  into a caller-supplied LwRB-backed ring; consumer code drains
+	  bytes via alp_uart_rx_ringbuf_pop without polling.  Backed by
+	  the SDK-internal LwRB stub (vendors/lwrb/) until the v0.4
+	  extras-v04 west group flips upstream LwRB in.  When OFF the
+	  helpers return NULL / ALP_ERR_NOSUPPORT so apps can link
+	  cleanly.
+
+config ALP_SDK_MAX_UART_RX_RINGBUF_HANDLES
+	int "Maximum concurrent alp_uart_rx_ringbuf_t handles"
+	default 4
+	depends on ALP_SDK_UART_RX_RINGBUF
+	help
+	  Pool size for ring-buffer state structs.  One handle per
+	  attached UART port; raise if more than four ports stream RX
+	  through the helper concurrently.
+
 config ALP_SDK_MAX_GPIO_HANDLES
 	int "Maximum concurrent alp_gpio_t handles"
 	default 16
