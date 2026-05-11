@@ -67,122 +67,29 @@ editing, a configurator panel with dropdowns for every released MPN
 and carrier, one-keypress "Generate all" for the four emit modes,
 inline validator diagnostics in the Problems panel, west wrappers.
 
-## Cross-platform development
+## Development hosts
 
-The SDK is a first-class developer experience on **macOS**,
-**Windows**, and **Linux**.  No platform-specific lock-in: the
-toolchain (Zephyr / west / CMake / Python / GCC) ships for all
-three, the public headers compile under every standard C99
-toolchain, and CI artefacts are reproducible across hosts.
-
-| Platform               | Status      | Setup notes                                              |
-|------------------------|-------------|----------------------------------------------------------|
-| **Linux** (Ubuntu/Fedora/Arch) | first-class | Zephyr's preferred host.  Native_sim runs at full speed. |
-| **macOS** (Apple Silicon / Intel) | first-class | Native build; native_sim works.  Use `brew` for prerequisites. |
-| **Windows 11 / 10**    | first-class — two paths | (a) **Native PowerShell** with Zephyr SDK + Python (Microsoft Store); (b) **WSL2 + Ubuntu** for Linux-identical workflows. |
-
-Path detail for Windows users:
-
-- *Native PowerShell* is the recommended path for hand-written
-  firmware development.  Zephyr's installer + Python venv work
-  out of the box; the repo's `.vscode/tasks.json` uses
-  platform-neutral `${command:cmake.buildDirectory}` paths so
-  the build / debug experience is identical to macOS / Linux.
-- *WSL2 (Ubuntu)* is the recommended path when you need full
-  Linux toolchain behaviour for HIL automation, Yocto recipes,
-  or exact CI parity.
-
-Line endings are pinned to **LF** by `.gitattributes` so a
-Windows checkout, a macOS clone, and a Linux pull see and commit
-identical bytes -- avoids spurious clang-format-diff failures
-when crossing hosts.
-
-## Using with VS Code
-
-The repo ships a `.vscode/` config that gets the standard Zephyr +
-CMake + Cortex-Debug extensions working out of the box:
-
-1. Open the repo in VS Code.  Accept the recommended-extensions
-   prompt (`extensions.json` lists what to install).
-2. Set `ZEPHYR_BASE` in your environment (one-time per workstation):
-   ```powershell
-   # Windows / PowerShell
-   $env:ZEPHYR_BASE = "C:\path\to\zephyrproject\zephyr"
-   ```
-3. From the Command Palette → **Tasks: Run Task**, pick:
-   - `validate · metadata` / `regen · soc_caps.h` / `regen · ABI snapshot` —
-     no Zephyr workspace required, runs the SDK's Python tooling.
-   - `twister · all (native_sim/native/64)` — runs the full ztest
-     suite under Zephyr's host emulator.
-   - `west build · edgeai-vision-aen` / `iot-connected-camera` —
-     builds the example apps standalone.
-4. C/C++ IntelliSense is wired through the CMake Tools extension.
-   Run a `west build` task once and IntelliSense picks up the
-   compile commands automatically.
-
-The SDK consumes `<alp/...>` headers via the `include/` path; if
-you're writing firmware against the SDK in a separate project,
-add this repo as a Zephyr module (via `west.yml` or
-`EXTRA_ZEPHYR_MODULES`) and your IntelliSense + build resolve the
-headers transparently.
+First-class on **Linux**, **macOS**, and **Windows 11 / 10** (native
+PowerShell or WSL2).  Line endings pinned to LF via `.gitattributes`
+so a Windows checkout and a Linux pull see identical bytes.  VS Code
+config ships in `.vscode/` (recommended extensions, build tasks,
+debug profiles); install the in-tree extension under [`vscode/`](vscode/)
+for schema-aware `board.yaml` editing.  See [`docs/getting-started.md`](docs/getting-started.md)
+for per-host setup notes.
 
 ## Status
 
 **v0.3 candidate** — recorded in
 [`metadata/sdk_version.yaml`](metadata/sdk_version.yaml).  Surface
-landed; runtime implementations fill in across point releases.  See
-[`VERSIONS.md`](VERSIONS.md) for the version-by-version roadmap and
-[`docs/os-support-matrix.md`](docs/os-support-matrix.md) for what's
-GA / stub / planned per (library × OS × SoM).
+landed; runtime implementations fill in across point releases.  Code
+merged ≠ verified — every claim is tracked in
+[`docs/test-plan.md`](docs/test-plan.md), and a release does not tag
+until its gating rows flip to ✅.
 
-### What's new in v0.3
-
-- **`board.yaml` project config + loader** — single declarative file
-  drives Zephyr / Yocto / bare-metal builds across every released
-  MPN.  `scripts/alp_project.py` emits `alp.conf`, `alp.overlay`,
-  CMake `-D` flags, Yocto `local.conf` snippets, and the
-  `<alp_hw_info_build.h>` header from one input.  See
-  [`docs/board-config.md`](docs/board-config.md).
-- **SoM SKU presets shipped for every released MPN** — six AEN
-  variants, two V2N, two V2M, one N93 placeholder.  Customer's
-  board.yaml carries the MPN string; the SDK inherits silicon,
-  on-module radio, secure element, RTC, EEPROM, default inference
-  backend from the preset.
-- **Hardware revision tracking** — per-family `hw-revisions.yaml`
-  declares `[min_sdk_version, max_sdk_version]` windows; the
-  loader + validator refuse to emit configs when the chosen
-  `hw_rev` doesn't cover the SDK version.  Runtime check pairs an
-  ADC + resistor-divider BOARD_ID pin with an EEPROM manifest
-  carrying the exact MPN + serial + mfg date.
-- **Inference backend dispatch expanded** — TFLite Micro driving
-  Ethos-U (AEN + N93), DRP-AI3 (V2N), or DEEPX DX-M1 (V2M).
-  Backend selected by `inference.backend:` in board.yaml; falls
-  back to NOSUPPORT when the matching vendor SDK isn't installed.
-- **20+ chip drivers** under `chips/<part>/` — LSM6DSO, BMI323,
-  ICM-42670, BMP581, INA236, TMP112, RV-3028-C7, 24C128, CC3501E
-  Wi-Fi/BLE coprocessor, TCAL9538, TAS2563 smart amp, OPTIGA Trust M,
-  more.  Each opt-in via the EVK carrier preset's `populated:` list
-  or the customer's override.
-- **VS Code extension** (`vscode/`) — schema-aware `board.yaml`
-  editor, GUI configurator with dropdowns / checkboxes driven by
-  the live preset library, west wrappers, per-OS dependency
-  bootstrap, inline validator diagnostics.
-
-### What's new in v0.2
-
-- **12 wrapped peripheral classes** (was 4): I2C, SPI, GPIO, UART,
-  PWM, ADC, Counter + Quadrature decoder, I²S, CAN/CAN-FD, RTC,
-  Watchdog.  See [ADR 0003](docs/adr/0003-peripheral-coverage.md).
-- **`alp_last_error()`** thread-local diagnostic — apps that get NULL
-  from `alp_*_open` can ask why.
-- **SoC capability validation** — `<alp/soc_caps.h>` generated from
-  `metadata/socs/**.json`.  See
-  [ADR 0002](docs/adr/0002-error-mechanism.md).
-- **`ALP_E1M_<CLASS>_COUNT`** portability macros.  See
-  [ADR 0004](docs/adr/0004-e1m-portability-bound.md).
-- **v0.2/v0.3 stub surfaces declared** for audio, BLE, security,
-  multi-proc — real impl follows in target versions.
-- **Architecture Decision Records** at [`docs/adr/`](docs/adr/).
+- Roadmap: [`VERSIONS.md`](VERSIONS.md).
+- What changed when: [`CHANGELOG.md`](CHANGELOG.md).
+- Per-(library × OS × SoM) status: [`docs/os-support-matrix.md`](docs/os-support-matrix.md).
+- Architecture decisions: [`docs/adr/`](docs/adr/).
 
 ## The stack
 
@@ -298,30 +205,28 @@ how we pin Zephyr LTS + when bumps drive new alp-sdk releases.
 
 All consumer-facing headers live under `include/alp/`:
 
-| Header               | Library                                    | Status                                |
-|----------------------|--------------------------------------------|---------------------------------------|
-| `alp/peripheral.h`   | I2C, SPI, GPIO, UART                       | Code complete on Zephyr (AEN + native_sim) -- **HW verification pending** ([test-plan.md](docs/test-plan.md)).  Yocto/Linux code complete (i2c-dev / spidev / termios / gpiochip-v2 + shared pthread GPIO IRQ dispatcher); failure-path ctest in `pr-plain-cmake`; **real-hardware roundtrip untested** until the `hil-yocto` runner lands. |
-| `alp/pwm.h`          | PWM                                        | GA on Zephyr                          |
-| `alp/adc.h`          | ADC                                        | GA on Zephyr                          |
-| `alp/counter.h`      | Counter + Quadrature decoder               | GA on Zephyr                          |
-| `alp/i2s.h`          | I²S / SAI                                  | GA on Zephyr                          |
-| `alp/can.h`          | CAN / CAN-FD                               | GA on Zephyr                          |
-| `alp/rtc.h`          | RTC                                        | GA on Zephyr                          |
-| `alp/wdt.h`          | Watchdog                                   | GA on Zephyr                          |
-| `alp/usb.h`          | USB device                                 | Surface declared (v0.3); host role v0.4 |
-| `alp/camera.h`       | Camera                                     | Surface declared, impl rolling per-SoM |
-| `alp/gui.h`          | GUI / LVGL                                 | LVGL re-export                        |
-| `alp/iot.h`          | Wi-Fi station + MQTT                       | Zephyr impl wired (v0.3) -- **broker roundtrip untested** ([test-plan.md](docs/test-plan.md)).  Yocto MQTT via libmosquitto code complete (v0.4 prep, `pkg_check_modules(libmosquitto)`-gated); failure-path ctest in `pr-plain-cmake`; **broker roundtrip untested**.  Wi-Fi on Linux stays system-managed (wpa_supplicant / NetworkManager). |
-| `alp/audio.h`        | Audio (PDM in / I²S out)                   | Real impl wired (v0.3)                |
-| `alp/ble.h`          | BLE peripheral + central                   | Real impl wired (v0.3)                |
-| `alp/security.h`     | MbedTLS PSA Crypto (hash / AEAD / TRNG)    | Real impl wired (v0.3)                |
-| `alp/mproc.h`        | Multi-proc IPC (mailbox / shared mem / hwsem) | Real impl wired (v0.3)             |
-| `alp/inference.h`    | Inference dispatcher (TFLM / Ethos-U / DRP-AI / DEEPX) | Real impl wired (v0.3); per-vendor link arrives with the vendor SDK |
-| `alp/hw_info.h`      | Hardware identification (EEPROM manifest + BOARD_ID ADC) | Surface declared (v0.3); runtime read lands v0.3.x |
-| `alp/soc_caps.h`     | (generated) Active-SoC capability constants | Generated from `metadata/socs/**.json` |
-| `alp/e1m_pinout.h`   | E1M-spec instance IDs + portability bounds | Pinned to e1m-spec v1.0               |
-| `alp/boards/<carrier>.h` | Carrier-feature names (e.g. EVK pin map) | Pinned to EVK + X-EVK reference designs |
-| `chips/<part>/`      | 20+ chip drivers, opt-in via `board.yaml` `carrier.populated:` | Driver-side complete; runtime exercised per (chip × OS) combo |
+| Header               | Library                                    |
+|----------------------|--------------------------------------------|
+| `alp/peripheral.h`   | I²C, SPI, GPIO, UART                       |
+| `alp/pwm.h` / `adc.h` / `counter.h` / `i2s.h` / `can.h` / `rtc.h` / `wdt.h` / `usb.h` | one peripheral class per header |
+| `alp/camera.h` / `gui.h`             | camera + LVGL re-export      |
+| `alp/iot.h`          | Wi-Fi station + MQTT                       |
+| `alp/audio.h`        | PDM in / I²S out                           |
+| `alp/ble.h`          | BLE peripheral + central                   |
+| `alp/security.h`     | MbedTLS PSA Crypto (hash / AEAD / TRNG)    |
+| `alp/mproc.h`        | Multi-proc IPC (mailbox / shared mem / hwsem) |
+| `alp/inference.h`    | Inference dispatcher (TFLM / Ethos-U / DRP-AI / DEEPX) |
+| `alp/hw_info.h`      | EEPROM manifest + BOARD_ID ADC             |
+| `alp/soc_caps.h`     | (generated) active-SoC capability constants |
+| `alp/e1m_pinout.h`   | E1M-spec instance IDs + portability bounds |
+| `alp/boards/<carrier>.h` | Carrier-feature names (e.g. EVK pin map) |
+| `chips/<part>/`      | 20+ chip drivers, opt-in via `board.yaml` `carrier.populated:` |
+
+Per-row implementation status (which backend, which OS, HW-verified
+vs. code-merged-pending) lives in
+[`docs/os-support-matrix.md`](docs/os-support-matrix.md) and
+[`docs/test-plan.md`](docs/test-plan.md) -- single sources of truth,
+not duplicated here.
 
 ## Supported hardware
 
@@ -342,44 +247,13 @@ mechanical specification live in
 [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec) — pinned
 to **v1.1** for this revision of the SDK.
 
-### Evaluation kits
-
-ALP Lab ships two carrier boards:
-
-- **E1M EVK** (UG-E1M-001) — for the 35 × 35 mm E1M form factor.
-  Hosts the E1M-AEN family and the E1M-i.MX93 family.  USB, dual
-  Ethernet, CAN, MIPI DSI, three camera options, audio, on-board
-  sensors (ICM-42670-P, BMI323, BMP581), M.2 (Key M + Key E),
-  Arduino + mikroBUS.  See [`docs/boards/e1m-evk.md`](docs/boards/e1m-evk.md).
-- **E1M-X EVK** — for the 45 × 65 mm E1M-X form factor.  Hosts the
-  E1M-X V2N and V2N-M1 families.  Two CSI camera connectors, two
-  DSI display outputs, dual GbE, expanded M.2 sizing for the
-  V2N+M1 PCIe layout, mikroBUS expansion.  See
-  [`docs/boards/e1m-x-evk.md`](docs/boards/e1m-x-evk.md).
-
-### Platform invariants
-
-The SDK relies on the following hardware invariants that
-[`e1m-spec` §6.5](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#65-mandatory-on-module-components)
-makes normative for every conformant E1M / E1M-X SoM:
-
-- **On-module Ethernet PHY(s).**  At least one PHY is on the module;
-  E1M-X SoMs with two MAC controllers populate two.  E1M-X `ETH*_*`
-  pads are therefore post-PHY differential MDI — the SDK's IoT
-  library targets these pads directly without configuring an external
-  PHY.
-- **On-module Wi-Fi 6 + BLE 5.4 combo.**  2.4 GHz and 5 GHz are
-  always available; 6 GHz is optional per SoM.  The `alp/iot.h`
-  Wi-Fi-station + MQTT path assumes the combo radio is present.
-- **On-module CAN transceiver(s).**  When any CAN group is exposed,
-  the carrier-side pads are bus-level (`CANxH` / `CANxL`).  The SDK's
-  CAN APIs therefore drive a bus, not a TX/RX controller pair.
-- **Supervisory MCU on V2N family.**  The `E1M-X V2N` and
-  `E1M-X V2N-M1` SoMs include a separate **GigaDevice GD32G553**
-  Cortex-M33 supervisor (216 MHz) alongside the Renesas internal
-  Cortex-M33 (200 MHz).  See
-  [`vendors/renesas-rzv2n/README.md`](vendors/renesas-rzv2n/README.md)
-  for what the supervisor handles vs. the application core.
+Evaluation kits: **E1M EVK** (UG-E1M-001) for the 35 × 35 mm
+families, **E1M-X EVK** for the 45 × 65 mm families.  Per-EVK pinout
++ camera/display options + sensors in [`docs/boards/`](docs/boards/).
+Mandatory on-module components (Ethernet PHYs, Wi-Fi 6 + BLE 5.4
+combo, CAN transceivers, V2N supervisory MCU) are documented in
+[`docs/architecture.md`](docs/architecture.md) and normative in
+[`e1m-spec` §6.5](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#65-mandatory-on-module-components).
 
 ## Consuming the SDK
 
@@ -435,51 +309,20 @@ west build -b alif_e7_dk_rtss_he tests/zephyr/peripheral
 
 ```
 alp-sdk/
-├── include/alp/             # PUBLIC headers (the consumer surface)
-├── src/
-│   ├── common/              # OS-agnostic helpers
-│   ├── zephyr/              # Zephyr backend
-│   ├── baremetal/           # bare-metal backend
-│   └── yocto/               # Linux/userspace backend
-├── chips/                   # 20+ opt-in chip drivers (lsm6dso, ssd1306, ...)
-├── vendors/
-│   ├── alif/                # Alif Ensemble HAL bindings
-│   ├── renesas-rzv2n/       # RZ/V2N HAL bindings
-│   ├── nxp-imx93/           # NXP i.MX 93 HAL bindings
-│   └── deepx-dxm1/          # DEEPX DX-M1 host-side bindings
-├── metadata/
-│   ├── sdk_version.yaml     # SDK release version (declared)
-│   ├── schemas/             # JSON Schemas (board-config-v1, soc-spec-v1)
-│   ├── templates/           # canonical board.yaml template + example
-│   ├── e1m_modules/<MPN>/   # one som.yaml per released MPN
-│   ├── e1m_modules/<family>/hw-revisions.yaml  # ADC + SDK-version compat
-│   ├── carriers/<name>/     # EVK + X-EVK + custom carrier presets
-│   ├── library-profiles/    # compile-time profile headers per library
-│   └── socs/                # per-SoC capability JSONs (drives soc_caps.h)
-├── scripts/
-│   ├── alp_project.py       # board.yaml loader (5 emit modes)
-│   ├── validate_board_yaml.py  # customer-side linter (exit 0/1/2/3)
-│   ├── validate_metadata.py # CI schema gate for metadata/socs
-│   ├── gen_soc_caps.py      # generates include/alp/soc_caps.h
-│   └── abi_snapshot.py      # docs/abi/v*-snapshot.json generator
-├── tools/
-│   └── program_eeprom.py    # production-test EEPROM manifest writer
-├── vscode/                  # in-tree VS Code extension (TypeScript)
-├── examples/                # 13 reference apps (gpio-button-led, i2c-scanner, ...)
-├── docs/
-│   ├── architecture.md
-│   ├── board-config.md      # board.yaml schema reference
-│   ├── cc3501e-bridge.md    # CC3501E Wi-Fi/BLE coprocessor bridge
-│   ├── os-support-matrix.md
-│   ├── porting-new-som.md
-│   └── adr/                 # architecture decision records
-├── tests/
-│   ├── scripts/             # Python unit tests for the loader + validators
-│   └── zephyr/              # ztest suites under native_sim
-├── firmware/cc3501e/        # CC3501E prebuilt firmware blobs
-├── west.yml                 # Zephyr manifest
-├── zephyr/module.yml        # Zephyr-module discovery
-└── CMakeLists.txt           # plain-CMake entry point
+├── include/alp/     # PUBLIC headers (the consumer surface)
+├── src/             # common/ + zephyr/ + baremetal/ + yocto/ backends
+├── chips/           # 20+ opt-in chip drivers
+├── vendors/         # per-SoM HAL bindings (alif, renesas-rzv2n, nxp-imx93, deepx-dxm1)
+├── metadata/        # schemas, templates, e1m_modules/<MPN>/, carriers/, socs/
+├── scripts/         # board.yaml loader, validators, soc_caps + ABI generators
+├── tools/           # production-test EEPROM packer
+├── vscode/          # in-tree VS Code extension
+├── examples/        # reference apps (gpio-button-led, edgeai-vision-aen, ...)
+├── docs/            # architecture, board-config, ADRs, test-plan, …
+├── tests/           # Python script tests + ztest suites
+├── yocto/meta-alp/  # Yocto layer + machine confs
+├── firmware/        # CC3501E prebuilt firmware blobs
+└── west.yml         # Zephyr manifest
 ```
 
 See [`docs/porting-new-som.md`](docs/porting-new-som.md) for adding a
