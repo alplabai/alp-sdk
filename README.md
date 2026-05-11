@@ -31,6 +31,42 @@ The standalone path is **not** a studio escape hatch — it's a
 first-class consumer.  Anything the studio can emit, a developer
 should be able to write by hand.
 
+## 30-second quick start
+
+A v0.3 project is **one declarative file** plus an empty `prj.conf`.
+Drop a `board.yaml` at your app root:
+
+```yaml
+schema_version: 1
+
+som:
+  sku: E1M-AEN701      # your MPN -- the SDK ships a preset for every released MPN
+
+carrier:
+  name: E1M-EVK        # or your own custom carrier
+
+os: zephyr             # zephyr | yocto | baremetal
+
+peripherals:           # what your app actually uses
+  - i2c
+  - pwm
+
+diagnostics:
+  log_level: info
+```
+
+The build picks it up automatically — `scripts/alp_project.py`
+emits `build/generated/alp.conf` at CMake-configure time and Zephyr
+layers it on top of `prj.conf` via `OVERLAY_CONFIG`.  See the
+[`gpio-button-led` example](examples/gpio-button-led/) for the
+complete wiring and [`docs/board-config.md`](docs/board-config.md)
+for the full schema reference.
+
+Want a GUI?  Install the [VS Code extension](vscode/) — schema-aware
+editing, a configurator panel with dropdowns for every released MPN
+and carrier, one-keypress "Generate all" for the four emit modes,
+inline validator diagnostics in the Problems panel, west wrappers.
+
 ## Cross-platform development
 
 The SDK is a first-class developer experience on **macOS**,
@@ -92,12 +128,45 @@ headers transparently.
 
 ## Status
 
-v0.1.0 → v0.2.0 — **scaffolding plus expanded peripheral coverage**.
-Public-header surface is in place; the v0.2 work doubled wrapped
-peripheral classes from 4 to 12 and added the diagnostic /
-capability-validation infrastructure that future implementations rely
-on.  See [`docs/os-support-matrix.md`](docs/os-support-matrix.md) for
-what's GA, stub, or planned per (library × OS × SoM).
+**v0.3 candidate** — recorded in
+[`metadata/sdk_version.yaml`](metadata/sdk_version.yaml).  Surface
+landed; runtime implementations fill in across point releases.  See
+[`VERSIONS.md`](VERSIONS.md) for the version-by-version roadmap and
+[`docs/os-support-matrix.md`](docs/os-support-matrix.md) for what's
+GA / stub / planned per (library × OS × SoM).
+
+### What's new in v0.3
+
+- **`board.yaml` project config + loader** — single declarative file
+  drives Zephyr / Yocto / bare-metal builds across every released
+  MPN.  `scripts/alp_project.py` emits `alp.conf`, `alp.overlay`,
+  CMake `-D` flags, Yocto `local.conf` snippets, and the
+  `<alp_hw_info_build.h>` header from one input.  See
+  [`docs/board-config.md`](docs/board-config.md).
+- **SoM SKU presets shipped for every released MPN** — six AEN
+  variants, two V2N, two V2M, one N93 placeholder.  Customer's
+  board.yaml carries the MPN string; the SDK inherits silicon,
+  on-module radio, secure element, RTC, EEPROM, default inference
+  backend from the preset.
+- **Hardware revision tracking** — per-family `hw-revisions.yaml`
+  declares `[min_sdk_version, max_sdk_version]` windows; the
+  loader + validator refuse to emit configs when the chosen
+  `hw_rev` doesn't cover the SDK version.  Runtime check pairs an
+  ADC + resistor-divider BOARD_ID pin with an EEPROM manifest
+  carrying the exact MPN + serial + mfg date.
+- **Inference backend dispatch expanded** — TFLite Micro driving
+  Ethos-U (AEN + N93), DRP-AI3 (V2N), or DEEPX DX-M1 (V2M).
+  Backend selected by `inference.backend:` in board.yaml; falls
+  back to NOSUPPORT when the matching vendor SDK isn't installed.
+- **20+ chip drivers** under `chips/<part>/` — LSM6DSO, BMI323,
+  ICM-42670, BMP581, INA236, TMP112, RV-3028-C7, 24C128, CC3501E
+  Wi-Fi/BLE coprocessor, TCAL9538, TAS2563 smart amp, OPTIGA Trust M,
+  more.  Each opt-in via the EVK carrier preset's `populated:` list
+  or the customer's override.
+- **VS Code extension** (`vscode/`) — schema-aware `board.yaml`
+  editor, GUI configurator with dropdowns / checkboxes driven by
+  the live preset library, west wrappers, per-OS dependency
+  bootstrap, inline validator diagnostics.
 
 ### What's new in v0.2
 
@@ -105,67 +174,108 @@ what's GA, stub, or planned per (library × OS × SoM).
   PWM, ADC, Counter + Quadrature decoder, I²S, CAN/CAN-FD, RTC,
   Watchdog.  See [ADR 0003](docs/adr/0003-peripheral-coverage.md).
 - **`alp_last_error()`** thread-local diagnostic — apps that get NULL
-  from `alp_*_open` can ask why (`ALP_ERR_INVAL` /
-  `ALP_ERR_OUT_OF_RANGE` / `ALP_ERR_NOT_READY` / `ALP_ERR_NOMEM` / …).
-- **SoC capability validation** — `<alp/soc_caps.h>` is generated
-  from `metadata/socs/**.json` and rejects configs that exceed the
-  active SoC's documented hardware caps.  Canonical case: a 16-bit
-  ADC request on a 12-bit SoC fails at `alp_adc_open` with
-  `ALP_ERR_OUT_OF_RANGE`, before any I/O.  See
+  from `alp_*_open` can ask why.
+- **SoC capability validation** — `<alp/soc_caps.h>` generated from
+  `metadata/socs/**.json`.  See
   [ADR 0002](docs/adr/0002-error-mechanism.md).
-- **`ALP_E1M_<CLASS>_COUNT`** macros document the cross-SoM-portable
-  instance count per class — apps that stay below the bound work on
-  every E1M-conformant SoM.  See
+- **`ALP_E1M_<CLASS>_COUNT`** portability macros.  See
   [ADR 0004](docs/adr/0004-e1m-portability-bound.md).
-- **v0.2/v0.3 surfaces declared** — `<alp/audio.h>`, `<alp/ble.h>`,
-  `<alp/security.h>`, `<alp/mproc.h>` ship as compile-clean stubs
-  returning `ALP_ERR_NOSUPPORT`; real impls land in their target
-  versions.
-- **Architecture Decision Records** at [`docs/adr/`](docs/adr/) —
-  four records covering the wrapper-vs-Zephyr boundary, the error
-  mechanism, peripheral coverage, and the E1M portability bound.
+- **v0.2/v0.3 stub surfaces declared** for audio, BLE, security,
+  multi-proc — real impl follows in target versions.
+- **Architecture Decision Records** at [`docs/adr/`](docs/adr/).
 
 ## The stack
 
-```
-Application code
-       │
-       ▼
-+---------------------------------------------------------+
-|  ALP SDK  ─  <alp/peripheral.h>, <alp/display.h>, ...   |  ← this repo
-+---------------------------------------------------------+
-       │
-       ▼
-  Zephyr / Yocto / Bare-metal  →  Vendor HAL  →  CMSIS  →  Silicon
+### AI framework (on-device)
+
+- **TFLite Micro** dispatched to silicon-specific NPU back-ends:
+  - **Arm Ethos-U** — Alif Ensemble (AEN family) + NXP i.MX 93 (N93 family; U55 / U65 variants)
+  - **Renesas DRP-AI3** — RZ/V2N (V2N family)
+  - **DEEPX DX-M1** — V2N + DX-M1 (V2M family); ONNX → DXNN compiler, model-family agnostic
+  - **CPU** — reference-kernel fallback on any target
+- Offline training (off-device) lives in TensorFlow / PyTorch.
+
+### Dev tooling
+
+- **`board.yaml` project config** — single source of truth: SoM SKU, carrier, OS, inference backend, libraries, peripherals, IoT toggles, diagnostics, `hw_rev`
+- **`scripts/alp_project.py`** — emits Zephyr Kconfig fragments, plain-CMake `-D` flags, Yocto `local.conf` snippets, DTS overlays, or the `<alp_hw_info_build.h>` companion header
+- **`scripts/validate_board_yaml.py`** — customer-side linter (exit 0 / 1 schema / 2 missing-preset / 3 hw_rev incompatible)
+- **`tools/program_eeprom.py`** — packs board.yaml + serial + mfg date into the 128-byte EEPROM manifest for production-test programming
+- **VS Code extension** (`vscode/`) — schema-aware `board.yaml` editor, GUI configurator, west wrappers, per-OS bootstrap, inline validator diagnostics
+
+### Alp SDK (`<alp/...>`)
+
+| Group | Headers + chip drivers |
+|---|---|
+| Peripherals | `peripheral.h` (GPIO/I²C/SPI/UART), `pwm.h`, `adc.h`, `counter.h`, `i2s.h`, `can.h`, `rtc.h`, `wdt.h`, `usb.h` |
+| Audio / camera / display | `audio.h` (PDM in + I²S out), `camera.h`, `gui.h` (LVGL) — chip drivers: SSD1306, SSD1331, OV5640, CAM_MUX, TAS2563, PDM mic |
+| Connectivity & security | `iot.h` (Wi-Fi/MQTT), `ble.h` (BLE 5.4), `security.h` (MbedTLS PSA Crypto), OPTIGA Trust M chip driver |
+| Inference dispatcher | `inference.h` — backend selector (auto / cpu / ethos_u / drpai / deepx_dx) + tensor-arena management |
+| Multi-proc / IPC | `mproc.h` — mailbox + shared memory + hardware semaphore |
+| Hardware info | `hw_info.h` — 128-byte EEPROM manifest + BOARD_ID ADC + `assert_matches_build()` |
+| Chip drivers | 20+ under `chips/` — LSM6DSO, BMI323, ICM-42670, BMP581, INA236, TMP112, RV-3028-C7, 24C128, CC3501E, TCAL9538, button-LED helper, … |
+| User libraries (via `libraries:` in board.yaml) | ETL · fmt · nlohmann_json · doctest · LVGL · MbedTLS · CMSIS-DSP · LittleFS |
+
+### OS backend
+
+Bare-metal · Yocto · Zephyr.  Selected by `os:` in `board.yaml`.
+
+### Vendor SDK
+
+Alif Ensemble · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1 · TI SimpleLink (CC3501E coprocessor).
+
+### HW + HAL
+
+E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference carriers · vendor HALs.
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│  AI framework (TFLite Micro → Ethos-U / DRP-AI / DEEPX)    │
+├─────────────────────────────────────────────────────────────┤
+│  Dev tooling (board.yaml + loader + VS Code extension)     │
+├─────────────────────────────────────────────────────────────┤
+│  Alp SDK (<alp/*.h> · 20+ chip drivers · 8 libraries)      │
+├─────────────────────────────────────────────────────────────┤
+│  OS backend (Bare-metal · Yocto · Zephyr)                  │
+├─────────────────────────────────────────────────────────────┤
+│  Vendor SDK (Alif · Renesas · NXP · DEEPX · TI SimpleLink) │
+├─────────────────────────────────────────────────────────────┤
+│  HW + HAL (E1M / E1M-X SoMs · EVK + X-EVK carriers)        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for the full layered
-diagram and per-library design.
+See [`docs/architecture.md`](docs/architecture.md) for the per-library
+design and [`docs/board-config.md`](docs/board-config.md) for the
+`board.yaml` schema reference.
 
 ## Public API
 
 All consumer-facing headers live under `include/alp/`:
 
-| Header               | Library         | Status                                |
-|----------------------|-----------------|---------------------------------------|
-| `alp/peripheral.h`   | I2C, SPI, GPIO, UART | v0.1 GA on Zephyr-AEN            |
-| `alp/pwm.h`          | PWM             | **v0.2** GA on Zephyr-AEN             |
-| `alp/adc.h`          | ADC             | **v0.2** GA on Zephyr-AEN             |
-| `alp/counter.h`      | Counter + Quadrature decoder | **v0.2** GA on Zephyr-AEN |
-| `alp/i2s.h`          | I²S / SAI       | **v0.2** GA on Zephyr-AEN             |
-| `alp/can.h`          | CAN / CAN-FD    | **v0.2** GA on Zephyr-AEN             |
-| `alp/rtc.h`          | RTC             | **v0.2** GA on Zephyr-AEN             |
-| `alp/wdt.h`          | Watchdog        | **v0.2** GA on Zephyr-AEN             |
-| `alp/display.h`      | Display         | Surface declared (SSD1306 first)      |
-| `alp/camera.h`       | Camera          | Stub — v0.2 ships MIPI CSI-2          |
-| `alp/gui.h`          | GUI / LVGL      | LVGL re-export                        |
-| `alp/iot.h`          | IoT             | Stub; real Wi-Fi+MQTT in v0.2         |
-| `alp/audio.h`        | Audio (PDM in / I²S out) | Surface declared, impl v0.2  |
-| `alp/ble.h`          | BLE peripheral + central | Surface declared, impl v0.3  |
-| `alp/security.h`     | Hash / AEAD / TRNG       | Surface declared, impl v0.3  |
-| `alp/mproc.h`        | Multi-proc IPC  | Surface declared, impl v0.3           |
-| `alp/soc_caps.h`     | (generated) Active-SoC capability constants | Generated from metadata |
-| `alp/e1m_pinout.h`   | E1M-spec instance IDs + portability bounds | Pinned to e1m-spec v1.0 |
+| Header               | Library                                    | Status                                |
+|----------------------|--------------------------------------------|---------------------------------------|
+| `alp/peripheral.h`   | I2C, SPI, GPIO, UART                       | GA on Zephyr (AEN + native_sim)       |
+| `alp/pwm.h`          | PWM                                        | GA on Zephyr                          |
+| `alp/adc.h`          | ADC                                        | GA on Zephyr                          |
+| `alp/counter.h`      | Counter + Quadrature decoder               | GA on Zephyr                          |
+| `alp/i2s.h`          | I²S / SAI                                  | GA on Zephyr                          |
+| `alp/can.h`          | CAN / CAN-FD                               | GA on Zephyr                          |
+| `alp/rtc.h`          | RTC                                        | GA on Zephyr                          |
+| `alp/wdt.h`          | Watchdog                                   | GA on Zephyr                          |
+| `alp/usb.h`          | USB device                                 | Surface declared (v0.3); host role v0.4 |
+| `alp/camera.h`       | Camera                                     | Surface declared, impl rolling per-SoM |
+| `alp/gui.h`          | GUI / LVGL                                 | LVGL re-export                        |
+| `alp/iot.h`          | Wi-Fi station + MQTT                       | Real Zephyr impl wired (v0.3)         |
+| `alp/audio.h`        | Audio (PDM in / I²S out)                   | Real impl wired (v0.3)                |
+| `alp/ble.h`          | BLE peripheral + central                   | Real impl wired (v0.3)                |
+| `alp/security.h`     | MbedTLS PSA Crypto (hash / AEAD / TRNG)    | Real impl wired (v0.3)                |
+| `alp/mproc.h`        | Multi-proc IPC (mailbox / shared mem / hwsem) | Real impl wired (v0.3)             |
+| `alp/inference.h`    | Inference dispatcher (TFLM / Ethos-U / DRP-AI / DEEPX) | Real impl wired (v0.3); per-vendor link arrives with the vendor SDK |
+| `alp/hw_info.h`      | Hardware identification (EEPROM manifest + BOARD_ID ADC) | Surface declared (v0.3); runtime read lands v0.3.x |
+| `alp/soc_caps.h`     | (generated) Active-SoC capability constants | Generated from `metadata/socs/**.json` |
+| `alp/e1m_pinout.h`   | E1M-spec instance IDs + portability bounds | Pinned to e1m-spec v1.0               |
+| `alp/boards/<carrier>.h` | Carrier-feature names (e.g. EVK pin map) | Pinned to EVK + X-EVK reference designs |
+| `chips/<part>/`      | 20+ chip drivers, opt-in via `board.yaml` `carrier.populated:` | Driver-side complete; runtime exercised per (chip × OS) combo |
 
 ## Supported hardware
 
@@ -279,28 +389,56 @@ west build -b alif_e7_dk_rtss_he tests/zephyr/peripheral
 
 ```
 alp-sdk/
-├── include/alp/         # PUBLIC headers (the consumer surface)
+├── include/alp/             # PUBLIC headers (the consumer surface)
 ├── src/
-│   ├── common/          # OS-agnostic helpers
-│   ├── zephyr/          # Zephyr backend
-│   ├── baremetal/       # bare-metal backend
-│   └── yocto/           # Linux/userspace backend
+│   ├── common/              # OS-agnostic helpers
+│   ├── zephyr/              # Zephyr backend
+│   ├── baremetal/           # bare-metal backend
+│   └── yocto/               # Linux/userspace backend
+├── chips/                   # 20+ opt-in chip drivers (lsm6dso, ssd1306, ...)
 ├── vendors/
-│   ├── alif/            # Alif Ensemble HAL bindings
-│   └── renesas-rzv2n/   # RZ/V2N HAL bindings (v0.2)
-├── cmake/               # find_package + Zephyr module helpers
+│   ├── alif/                # Alif Ensemble HAL bindings
+│   ├── renesas-rzv2n/       # RZ/V2N HAL bindings
+│   ├── nxp-imx93/           # NXP i.MX 93 HAL bindings
+│   └── deepx-dxm1/          # DEEPX DX-M1 host-side bindings
+├── metadata/
+│   ├── sdk_version.yaml     # SDK release version (declared)
+│   ├── schemas/             # JSON Schemas (board-config-v1, soc-spec-v1)
+│   ├── templates/           # canonical board.yaml template + example
+│   ├── e1m_modules/<MPN>/   # one som.yaml per released MPN
+│   ├── e1m_modules/<family>/hw-revisions.yaml  # ADC + SDK-version compat
+│   ├── carriers/<name>/     # EVK + X-EVK + custom carrier presets
+│   ├── library-profiles/    # compile-time profile headers per library
+│   └── socs/                # per-SoC capability JSONs (drives soc_caps.h)
+├── scripts/
+│   ├── alp_project.py       # board.yaml loader (5 emit modes)
+│   ├── validate_board_yaml.py  # customer-side linter (exit 0/1/2/3)
+│   ├── validate_metadata.py # CI schema gate for metadata/socs
+│   ├── gen_soc_caps.py      # generates include/alp/soc_caps.h
+│   └── abi_snapshot.py      # docs/abi/v*-snapshot.json generator
+├── tools/
+│   └── program_eeprom.py    # production-test EEPROM manifest writer
+├── vscode/                  # in-tree VS Code extension (TypeScript)
+├── examples/                # 13 reference apps (gpio-button-led, i2c-scanner, ...)
 ├── docs/
 │   ├── architecture.md
+│   ├── board-config.md      # board.yaml schema reference
+│   ├── cc3501e-bridge.md    # CC3501E Wi-Fi/BLE coprocessor bridge
 │   ├── os-support-matrix.md
-│   └── porting-new-som.md
+│   ├── porting-new-som.md
+│   └── adr/                 # architecture decision records
 ├── tests/
-├── west.yml             # Zephyr manifest
-├── zephyr/module.yml    # Zephyr-module discovery
-└── CMakeLists.txt       # plain-CMake entry point
+│   ├── scripts/             # Python unit tests for the loader + validators
+│   └── zephyr/              # ztest suites under native_sim
+├── firmware/cc3501e/        # CC3501E prebuilt firmware blobs
+├── west.yml                 # Zephyr manifest
+├── zephyr/module.yml        # Zephyr-module discovery
+└── CMakeLists.txt           # plain-CMake entry point
 ```
 
 See [`docs/porting-new-som.md`](docs/porting-new-som.md) for adding a
-new E1M variant.
+new E1M variant and [`docs/board-config.md`](docs/board-config.md) for
+the `board.yaml` schema reference.
 
 ## License
 
