@@ -22,6 +22,68 @@ that lands before the v0.3.0 tag.)
 
 ### Changed
 
+- **GD32 pinout — final corrections + CSV companions (user-supplied, 2026-05-11).**
+  Three more user-supplied fixes after the format-consistency
+  pass:
+  - `E1M ENC0_X` notes: dropped the bogus `SPI1_MISO` alt-function
+    annotation (PA0 has no SPI1_MISO function on the GD32G5xx);
+    notes now just say `TIMER1_CH0` (the encoder timer alt).
+  - `E1M CAN_STBY` pad: filled in `PB13` (was `(unspecified)`).
+  - `ADC1` / `ADC5` / `ADC6` / `ADC7` confirmed E1M-edge and given
+    the `E1M ` prefix (alongside the already-prefixed
+    ADC0/2/3/4); same prefix normalisation applied to `DAC0` /
+    `DAC1` for consistency.
+
+  Plus a broader naming-format normalisation pass:
+  - **E1M-edge signals all carry `E1M ` on the left** of the
+    peripheral column (E1M PWM0..PWM7, E1M ADC0..ADC7, E1M DAC0/1,
+    E1M ENC0..3 X/Y, E1M CAN_STBY).  The source spreadsheet
+    inconsistently prefixed some and not others; now uniform.
+  - `BT_REG_ON` / `WL_REG_ON` peripheral names cleaned (the
+    `LBEE5HY2FY-922` chip context moved to the notes column where
+    it belongs).
+  - `GD_I2C2.*` renamed to `GD32_I2C2.*` for consistency with the
+    other `GD32_*`-prefixed signals.
+  - Sort order tidied: debug → SPI → I²C → encoders → PWMs →
+    ADCs → DACs → CAN → camera → wireless → secure-element →
+    GPIO routes.
+
+  All-eight-PWM dual-sourcing recorded:
+  - User confirmed 2026-05-11 that **all eight PWMs** (PWM0..PWM7)
+    are dual-sourced between Renesas and GD32 via carrier-side
+    resistor mod (was previously documented as just PWM0..PWM5).
+    Renesas-side pads for PWM6 and PWM7 aren't in the saved
+    Renesas peripheral map yet — flagged in `v2n/README.md` as
+    pending an updated Renesas pinout writeup.
+
+  Carrier-mux on PB7 / PC14 (ROW B interpretation) confirmed:
+  - User confirmed 2026-05-11 that the two pads each carry two
+    E1M IO destinations selected by passive carrier jumpers:
+    PB7 picks between E1M IO14 (via `GD32_PB3_R`) and E1M IO15
+    (via `GD32_PB7_R`); PC14 picks between E1M IO24 (via
+    `GD32_PC3_R`) and E1M IO25 (via `GD32_PC14_R`).  Documented
+    in the new `Jumper-selectable shared pads` section of
+    `v2n/README.md`; inline TSV notes updated from "pending user
+    confirmation" to "user-confirmed".
+
+### Added
+
+- **Row-numbered CSV companions for each pin map.**  Generated
+  via inline `awk` from the canonical TSVs so the user can
+  audit each row in a spreadsheet without losing the source
+  TSV semantics.  Three new files:
+  - `metadata/e1m_modules/v2n/renesas-peripheral-map.csv`
+    (81 data rows)
+  - `metadata/e1m_modules/v2n/gd32-io-mcu-map.csv` (64 data rows)
+  - `metadata/e1m_modules/v2n-m1/m1-additions.csv` (3 data rows)
+
+  Each carries `row, peripheral, <silicon_pad>, notes` columns
+  with the `row` value matching the user-facing row index for
+  cross-referencing during review.  Both READMEs note that the
+  CSVs are derived artefacts: edit the TSV, not the CSV.
+
+### Changed
+
 - **GD32 pinout pad corrections (user-supplied, 2026-05-11).**
   Six fixes to `gd32-io-mcu-map.tsv` after the user audit:
   - `PWM0` channel: `TIMER0_MCH2` → **`TIMER0_MCH0`** on PA11.
