@@ -219,6 +219,81 @@ def _check_hw_compat(
     return rv
 
 
+# Map board.yaml `peripherals:` enum values to the soc-spec
+# peripherals[] keys that satisfy them.  Multiple keys = OR (any of
+# them present at count >= 1 satisfies the requirement).  A value of
+# None marks an umbrella class that the validator skips (Zephyr's
+# SENSOR class covers too many drivers to map 1:1 to a single SoC
+# peripheral count).
+_PERIPHERAL_TO_SOC_KEYS: dict[str, tuple[str, ...] | None] = {
+    "adc":      ("adc_12bit", "adc_24bit"),
+    "can":      ("can_fd", "can"),
+    "counter":  ("timer_32bit", "timer_lp"),
+    "gpio":     ("gpio_18v", "gpio_18v_or_33v"),
+    "i2c":      ("i2c", "i2c_lp"),
+    "i2s":      ("i2s", "i2s_lp"),
+    "pwm":      ("timer_32bit",),  # PWM rides the 32-bit timer block
+    "rtc":      ("rtc",),
+    "sensor":   None,              # umbrella -- skip
+    "spi":      ("spi", "spi_lp"),
+    "uart":     ("uart", "uart_lp"),
+    "watchdog": ("watchdog",),
+}
+
+
+def _check_peripherals_vs_soc(
+    project: dict[str, Any], metadata_root: Path,
+) -> int:
+    """Cross-check `peripherals:` against the SoM SKU's SoC spec.
+
+    Returns 0 (clean), 2 (no SoC spec to check against -- warn),
+    or 3 (a peripheral the app asks for isn't routed by the SoC)."""
+    periphs = project.get("peripherals") or []
+    if not periphs:
+        return 0
+
+    # Resolve SoC ref via the SKU preset.
+    sku = project["som"]["sku"]
+    preset_path = metadata_root / "e1m_modules" / sku / "som.yaml"
+    if not preset_path.is_file():
+        # Already flagged by _check_som_preset; nothing more to do.
+        return 0
+    preset = yaml.safe_load(preset_path.read_text(encoding="utf-8")) or {}
+    silicon = preset.get("silicon")
+    if not silicon:
+        print(f"WARN peripherals: {sku} preset has no `silicon:` field -- check skipped")
+        return 0
+
+    # alif:ensemble:e7 -> metadata/socs/alif/ensemble/e7.json
+    soc_path = metadata_root / "socs" / Path(*silicon.split(":"))
+    soc_path = soc_path.with_suffix(".json")
+    if not soc_path.is_file():
+        print(f"WARN peripherals: no SoC spec at {soc_path.relative_to(REPO) if soc_path.is_relative_to(REPO) else soc_path} for ref '{silicon}' -- check skipped")
+        return 2
+    try:
+        soc = json.loads(soc_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        print(f"WARN peripherals: failed to parse {soc_path} ({e}) -- check skipped")
+        return 2
+    soc_periphs = soc.get("peripherals") or {}
+
+    rv = 0
+    for periph in periphs:
+        soc_keys = _PERIPHERAL_TO_SOC_KEYS.get(periph)
+        if soc_keys is None:
+            # Umbrella class (e.g. sensor) -- skipped.
+            continue
+        # Pass if any candidate key is present with count >= 1.
+        if any(int(soc_periphs.get(k, 0) or 0) > 0 for k in soc_keys):
+            print(f"OK   peripheral '{periph}' satisfied by {silicon}")
+        else:
+            print(f"FAIL peripheral '{periph}' not routed by SoC {silicon} "
+                  f"(no {' / '.join(soc_keys)} in metadata/socs/.../{soc_path.name})",
+                  file=sys.stderr)
+            rv = 3
+    return rv
+
+
 def _check_carrier_preset(project: dict[str, Any], metadata_root: Path) -> int:
     """Return 0 on OK, 2 on missing-without-inline-populated."""
     carrier_block = project.get("carrier")
@@ -270,12 +345,13 @@ def main() -> int:
     som_rv = _check_som_preset(project, args.metadata_root)
     carrier_rv = _check_carrier_preset(project, args.metadata_root)
     hw_rv = _check_hw_compat(project, args.metadata_root)
+    periph_rv = _check_peripherals_vs_soc(project, args.metadata_root)
 
-    if hw_rv == 3:
-        print(f"\n{args.input}: hardware-revision incompatibility",
+    if hw_rv == 3 or periph_rv == 3:
+        print(f"\n{args.input}: hardware / capability incompatibility",
               file=sys.stderr)
         return 3
-    if som_rv == 2 or carrier_rv == 2 or hw_rv == 2:
+    if som_rv == 2 or carrier_rv == 2 or hw_rv == 2 or periph_rv == 2:
         print(f"\n{args.input}: missing-preset failures", file=sys.stderr)
         return 2
 

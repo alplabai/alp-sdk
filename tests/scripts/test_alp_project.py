@@ -288,5 +288,24 @@ class TestHwInfoHEmit(unittest.TestCase):
             self.assertIn('ALP_HW_BUILD_SOM_HW_REV      "r1"', rv.stdout)
 
 
+class TestValidatorPeripheralCheck(unittest.TestCase):
+    """validate_board_yaml.py's `peripherals:` vs SoC-spec check
+    (added when `peripherals:` landed in the schema)."""
+
+    def test_real_example_passes(self) -> None:
+        """The shipped adc-voltmeter example declares peripherals:
+        [adc] against E1M-AEN701 (alif:ensemble:e7) which routes
+        adc_12bit and adc_24bit -- must pass without exit code."""
+        rv = subprocess.run(
+            [sys.executable,
+             str(REPO / "scripts" / "validate_board_yaml.py"),
+             "--input", str(REPO / "examples" / "adc-voltmeter" / "board.yaml")],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        self.assertIn("peripheral 'adc' satisfied by alif:ensemble:e7",
+                      rv.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
