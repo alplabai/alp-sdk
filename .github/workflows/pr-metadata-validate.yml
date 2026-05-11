@@ -107,6 +107,23 @@ jobs:
           grep -q 'alp-pwm0' /tmp/alp.overlay
           grep -q 'alp,pin-array' /tmp/alp.overlay
 
+      # The hw-info-h path bakes board.yaml identifiers into a C
+      # header apps include alongside <alp/hw_info.h> to call
+      # alp_hw_info_assert_matches_build() without hardcoded strings.
+      # Sanity: the canonical template populates every macro.
+      - name: Smoke-test board.yaml loader (hw-info-h)
+        run: |
+          python3 scripts/alp_project.py \
+              --input metadata/templates/board.yaml.example \
+              --emit hw-info-h > /tmp/alp_hw_info_build.h
+          test -s /tmp/alp_hw_info_build.h
+          echo "--- generated hw-info-h ---"
+          cat /tmp/alp_hw_info_build.h
+          grep -q '#define ALP_HW_BUILD_SOM_SKU' /tmp/alp_hw_info_build.h
+          grep -q '#define ALP_HW_BUILD_SOM_HW_REV' /tmp/alp_hw_info_build.h
+          grep -q '#define ALP_HW_BUILD_CARRIER_NAME' /tmp/alp_hw_info_build.h
+          grep -q '#define ALP_HW_BUILD_OS' /tmp/alp_hw_info_build.h
+
       # Customer-side linter -- exercises the same schema +
       # preset checks an app author would run before pushing.
       # Covers both the canonical template and every example

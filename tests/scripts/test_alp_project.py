@@ -236,5 +236,57 @@ class TestDtsOverlayEmit(unittest.TestCase):
         self.assertRegex(out, r">;\s*/\*")
 
 
+class TestHwInfoHEmit(unittest.TestCase):
+    """hw-info-h emission -- companion to the public <alp/hw_info.h>.
+    Bakes board.yaml identifiers into ALP_HW_BUILD_* macros so apps
+    can pass them to alp_hw_info_assert_matches_build() at runtime."""
+
+    def test_canonical_template_emits_expected_macros(self) -> None:
+        rv = _run_loader(input_path=TEMPLATE, emit="hw-info-h")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        out = rv.stdout
+        # Header guards + the always-emitted macros for the
+        # canonical template (which sets every field).
+        self.assertIn("#ifndef ALP_HW_INFO_BUILD_H", out)
+        self.assertIn("#define ALP_HW_INFO_BUILD_H", out)
+        self.assertIn('#define ALP_HW_BUILD_SOM_SKU         "E1M-AEN701"', out)
+        self.assertIn('#define ALP_HW_BUILD_SOM_FAMILY      "aen"', out)
+        self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "r1"', out)
+        self.assertIn('#define ALP_HW_BUILD_CARRIER_NAME    "E1M-EVK"', out)
+        self.assertIn('#define ALP_HW_BUILD_CARRIER_HW_REV  "r1"', out)
+        self.assertIn('#define ALP_HW_BUILD_OS              "zephyr"', out)
+
+    def test_no_carrier_skips_carrier_macros(self) -> None:
+        """When board.yaml omits the carrier block the loader must
+        emit a clean header that only carries the SoM identifiers --
+        no empty ALP_HW_BUILD_CARRIER_* macros."""
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), """
+                schema_version: 1
+                som:
+                  sku: E1M-AEN701
+                os: zephyr
+            """)
+            rv = _run_loader(input_path=path, emit="hw-info-h")
+            self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+            self.assertIn('ALP_HW_BUILD_SOM_SKU', rv.stdout)
+            self.assertNotIn('ALP_HW_BUILD_CARRIER_NAME', rv.stdout)
+
+    def test_explicit_hw_rev_overrides_default(self) -> None:
+        """Explicit som.hw_rev wins over the SKU preset's
+        default_hw_rev (matching the loader's wider behaviour)."""
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), """
+                schema_version: 1
+                som:
+                  sku: E1M-AEN701
+                  hw_rev: r1
+                os: zephyr
+            """)
+            rv = _run_loader(input_path=path, emit="hw-info-h")
+            self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+            self.assertIn('ALP_HW_BUILD_SOM_HW_REV      "r1"', rv.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

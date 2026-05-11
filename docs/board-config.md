@@ -444,6 +444,37 @@ python3 $ALP_SDK/scripts/alp_project.py \
 echo 'require alp-generated.conf' >> build/conf/local.conf
 ```
 
+### Build-time identifier header (`--emit hw-info-h`)
+
+`--emit hw-info-h` produces an auto-generated companion header to
+[`<alp/hw_info.h>`](../include/alp/hw_info.h) that bakes the
+customer's board.yaml identifiers into `ALP_HW_BUILD_*` string
+macros.  Apps include both headers and pass the compile-time
+constants to the runtime check:
+
+```c
+#include "alp/hw_info.h"
+#include "alp_hw_info_build.h"   /* generated */
+
+alp_hw_info_t info;
+alp_hw_info_read(&info);
+alp_hw_info_assert_matches_build(&info,
+                                 ALP_HW_BUILD_SOM_SKU,
+                                 ALP_HW_BUILD_SOM_HW_REV);
+```
+
+```bash
+python3 $ALP_SDK/scripts/alp_project.py \
+    --input board.yaml \
+    --emit hw-info-h \
+    --output build/generated/alp_hw_info_build.h
+```
+
+Macros emitted: `ALP_HW_BUILD_SOM_SKU`, `ALP_HW_BUILD_SOM_FAMILY`,
+`ALP_HW_BUILD_SOM_HW_REV`, `ALP_HW_BUILD_OS`, and (when a carrier
+is declared) `ALP_HW_BUILD_CARRIER_NAME` +
+`ALP_HW_BUILD_CARRIER_HW_REV`.
+
 ### DTS overlay for carrier wiring (v0.3)
 
 `--emit dts-overlay` reads the carrier header at
