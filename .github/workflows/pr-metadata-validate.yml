@@ -15,17 +15,21 @@ on:
     paths:
       - 'metadata/**'
       - 'examples/**/board.yaml'
+      - 'include/alp/boards/**'
       - '.github/workflows/pr-metadata-validate.yml'
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
+      - 'tests/scripts/**'
   push:
     branches: [main]
     paths:
       - 'metadata/**'
       - 'examples/**/board.yaml'
+      - 'include/alp/boards/**'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
+      - 'tests/scripts/**'
   workflow_dispatch:
 
 concurrency:
@@ -120,3 +124,11 @@ jobs:
               echo "--- $f ---"
               python3 scripts/validate_board_yaml.py --input "$f"
           done
+
+      # Unit-test the loader contract -- schema pass/fail, missing-
+      # preset error, override merge, all four emit modes produce
+      # non-empty output, dts-overlay structural shape.  Catches
+      # regressions the smoke tests above can't reach.
+      - name: Unit tests for the loader
+        run: |
+          python3 -m unittest tests.scripts.test_alp_project -v
