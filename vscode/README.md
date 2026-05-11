@@ -24,17 +24,24 @@ shipped alongside.
   EVK populates by default.  Reads + writes the workspace's
   `board.yaml` directly; the YAML editor remains available for
   power users.
-- **Loader commands** -- one per emit mode:
+- **Loader commands** -- one per emit mode, plus a one-keypress
+  bundle:
   - *Alp: Generate alp.conf (zephyr-conf)*
   - *Alp: Generate alp.overlay (dts-overlay)*
   - *Alp: Generate CMake -D args*
   - *Alp: Generate Yocto local.conf snippet*
+  - *Alp: Generate all* -- runs the four above in sequence and
+    drops a single status-bar summary of which formats landed.
   Each writes its output under `build/generated/` and opens the
   result in a tab so the diff is obvious.
 - **Validation** -- *Alp: Validate board.yaml* runs
   `scripts/validate_board_yaml.py` against the workspace file and
-  reports schema / preset failures via a notification + the
-  *ALP SDK* output channel.
+  reports schema / preset / hw_rev failures via a notification + the
+  *ALP SDK* output channel.  The same validator runs automatically
+  on every open / save of a `board.yaml` and its failures show up
+  as inline diagnostics in the Problems panel under the source
+  "alp-sdk" -- so a missing preset or an SDK / hw_rev mismatch
+  surfaces before the build kicks off.
 - **Dependency bootstrap** -- *Alp: Install dependencies (per-OS)*
   asks you whether you're targeting `zephyr`, `yocto`, or
   `baremetal`, then opens a terminal pre-populated with the right

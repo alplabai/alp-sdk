@@ -92,12 +92,52 @@ async function runValidator(): Promise<void> {
     }
 }
 
+async function runLoaderAll(): Promise<void> {
+    // One-keypress regeneration -- emit all four formats sequentially
+    // and report a single summary so the user doesn't need to remember
+    // four separate commands.  Yocto + DTS overlay are useful only on
+    // certain boards but emitting them is harmless: the YAML loader
+    // skips OS-specific paths internally when they don't apply.
+    const modes: EmitMode[] = ["zephyr-conf", "dts-overlay",
+                               "cmake-args", "yocto-conf"];
+    const written: string[] = [];
+    const failed:  string[] = [];
+
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!folder) {
+        await vscode.window.showErrorMessage("Alp: no workspace folder is open.");
+        return;
+    }
+
+    for (const emit of modes) {
+        await runLoader(emit);
+        // runLoader writes to DEFAULT_OUTPUT[emit] -- use that to
+        // tally pass/fail without re-invoking the script.
+        const out = path.join(folder, DEFAULT_OUTPUT[emit]);
+        if (fs.existsSync(out) && fs.statSync(out).size > 0) {
+            written.push(path.relative(folder, out));
+        } else {
+            failed.push(emit);
+        }
+    }
+
+    const summary = written.length === modes.length
+        ? `Alp: regenerated all ${modes.length} formats (${written.join(", ")})`
+        : `Alp: regenerated ${written.length}/${modes.length} -- failed: ${failed.join(", ")}`;
+    if (failed.length === 0) {
+        vscode.window.setStatusBarMessage(summary, 7000);
+    } else {
+        await vscode.window.showWarningMessage(summary);
+    }
+}
+
 export function registerLoaderCommands(): vscode.Disposable[] {
     return [
         vscode.commands.registerCommand("alp.generateZephyrConf", () => runLoader("zephyr-conf")),
         vscode.commands.registerCommand("alp.generateDtsOverlay", () => runLoader("dts-overlay")),
         vscode.commands.registerCommand("alp.generateCmakeArgs",  () => runLoader("cmake-args")),
         vscode.commands.registerCommand("alp.generateYoctoConf",  () => runLoader("yocto-conf")),
+        vscode.commands.registerCommand("alp.generateAll",        () => runLoaderAll()),
         vscode.commands.registerCommand("alp.validateBoardYaml",  () => runValidator()),
     ];
 }

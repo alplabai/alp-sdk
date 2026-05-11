@@ -62,6 +62,11 @@
         "category": "Alp"
       },
       {
+        "command": "alp.generateAll",
+        "title": "Alp: Generate all (zephyr-conf + dts-overlay + cmake-args + yocto-conf)",
+        "category": "Alp"
+      },
+      {
         "command": "alp.validateBoardYaml",
         "title": "Alp: Validate board.yaml",
         "category": "Alp"

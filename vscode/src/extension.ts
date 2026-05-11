@@ -6,6 +6,7 @@ import { registerWestCommands } from "./west";
 import { registerBootstrapCommand } from "./bootstrap";
 import { createStatusBar } from "./statusBar";
 import { registerConfiguratorCommand } from "./configuratorPanel";
+import { registerDiagnostics } from "./diagnostics";
 
 export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
@@ -14,6 +15,7 @@ export function activate(context: vscode.ExtensionContext): void {
         registerBootstrapCommand(),
         createStatusBar(context),
         registerConfiguratorCommand(context),
+        registerDiagnostics(context),
     );
 }
 

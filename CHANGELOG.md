@@ -40,6 +40,16 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   N93 ship `r1` as TBD-status stubs pending the user-supplied
   HW writeups.  See `docs/board-config.md` "Hardware revision
   tracking".
+- **VS Code extension polish.**  New *Alp: Generate all* command
+  runs every loader emit mode in one keystroke and reports a
+  single status-bar summary.  A new `DiagnosticCollection` runs
+  `validate_board_yaml.py` on every open / save of a `board.yaml`
+  and surfaces failures inline in the Problems panel -- the
+  schema-level checks the Red Hat YAML extension already covers
+  remain its job; this layer adds the SDK-specific checks (missing
+  SoM preset, missing carrier preset without inline `populated`,
+  v0.3 hw_rev / SDK-version compatibility).  Severity tracks the
+  validator's exit code: 1 -> Error, 2 -> Warning, 3 -> Error.
 - **In-tree VS Code extension (`vscode/`).**  TypeScript
   extension that adds schema-aware `board.yaml` editing
   (autocomplete + red squigglies via the Red Hat YAML
