@@ -85,6 +85,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
         pkg_check_modules(MOSQUITTO_TEST QUIET libmosquitto)
+        pkg_check_modules(ALSA_TEST QUIET alsa)
     endif()
     if(MOSQUITTO_TEST_FOUND)
         add_executable(alp_test_iot_mqtt
@@ -98,5 +99,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
         add_test(NAME alp_test_iot_mqtt
                  COMMAND alp_test_iot_mqtt)
+    endif()
+    if(ALSA_TEST_FOUND)
+        add_executable(alp_test_audio_alsa
+            ${CMAKE_CURRENT_SOURCE_DIR}/audio_alsa.c
+        )
+        target_link_libraries(alp_test_audio_alsa PRIVATE alp::sdk)
+        target_include_directories(alp_test_audio_alsa PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        target_compile_features(alp_test_audio_alsa PRIVATE c_std_99)
+
+        add_test(NAME alp_test_audio_alsa
+                 COMMAND alp_test_audio_alsa)
     endif()
 endif()

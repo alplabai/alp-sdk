@@ -643,9 +643,11 @@ void alp_mqtt_close(alp_mqtt_t *m)
 }
 #endif /* !ALP_VENDOR_OVERRIDES_MQTT */
 
+#if !defined(ALP_VENDOR_OVERRIDES_AUDIO_IN)
 alp_audio_in_t *alp_audio_in_open(const alp_audio_config_t *cfg)
 {
     (void)cfg;
+    z_last_error = ALP_ERR_NOSUPPORT;
     return NULL;
 }
 alp_status_t alp_audio_in_start(alp_audio_in_t *i)
@@ -663,18 +665,21 @@ alp_status_t alp_audio_in_read(alp_audio_in_t *i, void *b, size_t f, size_t *o, 
     (void)i;
     (void)b;
     (void)f;
-    (void)o;
     (void)t;
+    if (o != NULL) *o = 0;
     return ALP_ERR_NOSUPPORT;
 }
 void alp_audio_in_close(alp_audio_in_t *i)
 {
     (void)i;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_AUDIO_IN */
 
+#if !defined(ALP_VENDOR_OVERRIDES_AUDIO_OUT)
 alp_audio_out_t *alp_audio_out_open(const alp_audio_config_t *cfg)
 {
     (void)cfg;
+    z_last_error = ALP_ERR_NOSUPPORT;
     return NULL;
 }
 alp_status_t alp_audio_out_start(alp_audio_out_t *o)
@@ -693,8 +698,8 @@ alp_status_t alp_audio_out_write(alp_audio_out_t *o, const void *b, size_t f, si
     (void)o;
     (void)b;
     (void)f;
-    (void)of;
     (void)t;
+    if (of != NULL) *of = 0;
     return ALP_ERR_NOSUPPORT;
 }
 alp_status_t alp_audio_out_set_volume(alp_audio_out_t *o, uint8_t v)
@@ -707,6 +712,7 @@ void alp_audio_out_close(alp_audio_out_t *o)
 {
     (void)o;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_AUDIO_OUT */
 
 alp_ble_t *alp_ble_open(void)
 {

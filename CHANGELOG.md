@@ -22,6 +22,33 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **Yocto audio backend via ALSA libasound.**  New
+  `src/yocto/audio_yocto.c` binds the full `<alp/audio.h>` surface
+  (`alp_audio_in_*` + `alp_audio_out_*`) against ALSA's `snd_pcm_*`
+  API.  Device naming convention: `peripheral_id == 0` -> ALSA's
+  `"default"` PCM (honours `/etc/asound.conf` + `~/.asoundrc`);
+  `peripheral_id == N` -> `"hw:N-1,0"` (card N-1, device 0).
+  Format mapping: `ALP_AUDIO_FMT_S16_LE` / `S24_LE` / `S32_LE` map to
+  the matching ALSA constants (S24 is the 32-bit-container variant
+  per the alp/audio.h "packed in 32-bit slots" semantics).
+  `alp_audio_out_set_volume` applies a software linear scale during
+  `alp_audio_out_write` (S16_LE path only for v0.4 prep; S24/S32
+  pass through unmodified) so apps don't have to drive ALSA's
+  separate mixer API.  Two new pool sizes:
+  `ALP_SDK_YOCTO_MAX_AUDIO_IN_HANDLES` /
+  `ALP_SDK_YOCTO_MAX_AUDIO_OUT_HANDLES` (default 2 each).  Built
+  only when CMake's `pkg_check_modules` finds `alsa` (Debian/Ubuntu
+  `libasound2-dev`; Yocto `alsa-lib` recipe); absent, the Yocto
+  backend falls through to the NOSUPPORT stubs.  New
+  `ALP_VENDOR_OVERRIDES_AUDIO_IN` / `_OUT` gates in
+  `src/common/stub_backend.c` (the previous unconditional stubs got
+  `z_last_error` stamping added at the same time so the
+  `alp_last_error()` contract holds even on NOSUPPORT-only builds).
+  Coverage at `tests/yocto/audio_alsa.c` (11 failure-path tests
+  covering NULL cfg, invalid format, unreachable device, NULL-handle
+  start/stop/read/write/set_volume, close-NULL safety).
+  `pr-plain-cmake` runner gains `libasound2-dev` in the install
+  step.  Real capture/playback parked behind `hil-yocto`.
 - **`examples/uart-rx-ringbuf/` reference app.**  Hand-written
   example exercising the Phase 1 LwRB-backed RX ring buffer on
   ALP_E1M_UART0: attach with a caller-owned backing store, sleep

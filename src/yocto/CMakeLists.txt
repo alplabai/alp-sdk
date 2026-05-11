@@ -97,6 +97,28 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 "alp_mqtt_* stays NOSUPPORT.  Install libmosquitto-dev "
                 "(Debian/Ubuntu) or the matching Yocto recipe to enable.")
         endif()
+
+        # Audio via ALSA libasound -- same opt-in pattern as MQTT.  The
+        # canonical Debian/Ubuntu package is libasound2-dev; Yocto
+        # sysroots get it via the alsa-lib recipe in meta-openembedded.
+        # When absent the alp_audio_* surface stays NOSUPPORT through
+        # src/common/stub_backend.c's stubs.
+        pkg_check_modules(ALSA IMPORTED_TARGET alsa)
+        if(ALSA_FOUND)
+            target_sources(alp_sdk PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/audio_yocto.c
+            )
+            target_compile_definitions(alp_sdk PRIVATE
+                ALP_VENDOR_OVERRIDES_AUDIO_IN=1
+                ALP_VENDOR_OVERRIDES_AUDIO_OUT=1
+            )
+            target_link_libraries(alp_sdk PUBLIC PkgConfig::ALSA)
+        else()
+            message(STATUS
+                "alp-sdk yocto: ALSA libasound not found via pkg-config; "
+                "alp_audio_* stays NOSUPPORT.  Install libasound2-dev "
+                "(Debian/Ubuntu) or the matching Yocto recipe to enable.")
+        endif()
     endif()
 endif()
 
