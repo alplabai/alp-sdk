@@ -251,8 +251,8 @@ When a new library candidate shows up:
    config for anything touching the M-class build.
 5. **No empty re-export rule** — if the wrapper would just be
    `#include "upstream.h"`, point users at the upstream directly.
-   See [feedback memory](https://github.com/anthropics/claude-code)
-   on this principle.
+   `<alp/math.h>` and `<alp/signal.h>` were removed under this
+   rule (May 2026).
 
 ## See also
 
