@@ -22,6 +22,23 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **Authoritative V2N + V2N-M1 Renesas-side peripheral pinout.**
+  The alp-sdk maintainer provided the canonical RZ/V2N pin
+  assignments for the E1M-X V2N family on 2026-05-11.  Saved as:
+  `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv` — base V2N
+  map (84 routed pads covering E1M-edge peripherals + on-module
+  Wi-Fi/BT module + GD32 IO MCU + RTC + EEPROM + OPTIGA + clock
+  generator + BRD_I2C bus); `metadata/e1m_modules/v2n-m1/m1-additions.tsv`
+  — V2N-M1 overlay (DEEPX `M1_RESET` on `PA6`, `PCIe.MUX_PD` on
+  `P80`, `PCIe.MUX_SEL` on `P95`).  Both directories now carry
+  READMEs explaining the inheritance pattern (V2N-M1 = V2N base +
+  M1 overlay + DEEPX-rail PMICs on BRD_I2C).  `hw-revisions.yaml`
+  for both families walks back the "pinout TBD" framing and lists
+  the authoritative populated parts; revision label + board_id ADC
+  channel remain TBD pending a separate writeup.  Resolves the
+  project memory note "pending exact hardware configurations" for
+  the V2N + V2N-M1 families (AEN was already resolved on 2026-05-10;
+  i.MX 93 is still pending).
 - **From-scratch verifiability surface.**  Three artefacts answer
   "how do I prove everything works from a fresh clone":
   `scripts/bootstrap.sh` (one-time setup -- creates the Zephyr
