@@ -22,6 +22,44 @@ that lands before the v0.3.0 tag.)
 
 ### Changed
 
+- **GD32 pinout — schematic labels dropped; E1M signal names canonical (2026-05-11).**
+  Maintainer reviewed the row-numbered CSV and pushed back on
+  carrying the misleading `GD32_P<pad>_R` schematic labels as the
+  peripheral name: "we should just use the pin names with E1M
+  signal definitions, not the wrong signal names we mixed".
+  Applied:
+  - Every GPIO route's peripheral name flipped from
+    `GD32_P<pad>_R` to its E1M IO destination
+    (`GD32_PB3_R` → `E1M IO14`, `GD32_PC3_R` → `E1M IO24`, etc.).
+    18 GPIO routes now named uniformly by E1M IO number.
+  - The `GD32_I2C2.*` peripheral names flipped to `E1M I2C3.*`
+    -- they're E1M-edge signals, not internal-only.
+  - Maintainer's CSV correction pass merged into the canonical
+    TSV: PB7 collision removed (the `GD32_PB7_R` row was a
+    duplicate of `GD32_PB3_R`'s actual pad; the duplicate is
+    deleted); PC14 collision removed (`GD32_PC14_R` was actually
+    on PC15, not PC14); PB11 / PD1 / PD2 / PD8 / PD10 / PC15 /
+    PC2 GPIO-route pad assignments rotated to the correct
+    silicon pads per the maintainer's row-by-row audit.
+  - Inline `[SDK note: function-A-vs-function-B pad mismatch]`
+    workaround text removed everywhere -- with the schematic
+    labels dropped the workaround is moot.
+  - `v2n/README.md` "Function-A vs function-B pin labelling"
+    section deleted (no longer applies); "Jumper-selectable
+    shared pads (PB7, PC14)" section deleted (no longer applies,
+    every pad in the TSV is unique).  Replaced with a "Dropped
+    schematic labels" section explaining the design decision.
+  - Two E1M destinations from the original spreadsheet (`IO15`
+    and `IO26`) are no longer routed on V2N -- they were entries
+    on schematic nets that the audit pass found to be either
+    duplicates of other entries (PB7 case) or off-by-one labels
+    for rows that already covered different destinations (PC15
+    case).  Pre-2026-05-11 git history retains the original
+    labels for board-engineering cross-reference.
+  - CSV regenerated from the canonical TSV; row numbers are now
+    contiguous (62 data rows, was 64 with two now-deleted rows
+    consolidated by the maintainer's audit).
+  - All 62 GD32 silicon pads in the file are unique.
 - **GD32 pinout — final corrections + CSV companions (user-supplied, 2026-05-11).**
   Three more user-supplied fixes after the format-consistency
   pass:
