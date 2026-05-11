@@ -80,3 +80,7 @@ __pycache__/
 env/
 venv/
 .claude/
+
+# MCUboot signing keys -- per-directory .gitignore at keys/.gitignore
+# keeps the development key file out of git; production public keys
+# (*.pub.pem) are explicitly allowed back in.

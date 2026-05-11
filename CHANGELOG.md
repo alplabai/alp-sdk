@@ -22,6 +22,23 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **MCUboot secure-boot scaffolding for AEN-Zephyr (v0.4 prep).**
+  New sysbuild profile at `sysbuild/aen/sysbuild.conf` (MCUboot +
+  ECDSA-P256 + swap-using-scratch).  New `keys/` directory with
+  a `.gitignore`'d dev-key slot, a `generate_dev_key.sh` wrapper
+  around Zephyr's `imgtool`, and a `README.md` documenting the
+  dev / production / rotation lifecycle.  New `docs/secure-boot.md`
+  covering the full chain of trust (Alif Secure Enclave ROM ->
+  first-stage -> MCUboot -> application), the production key
+  lifecycle through OPTIGA Trust M, the failure-mode matrix for
+  `swap-using-scratch`, and the multi-key rotation playbook.
+  Live compile-verification gates on the authoritative
+  `alp_e1m_evk_aen` board file landing at `alplabai/alp-zephyr-modules`
+  (PLAN.md §6 item 8); the sysbuild profile is ready to drop into
+  a `pr-twister` scenario the moment that board file appears.
+  No code changes -- this is scaffolding + documentation only;
+  the v0.4 test-plan row flips from TBD to ⏳ untested with a
+  concrete artefact pointer.
 - **`<alp/mproc.h>` IPC envelope framing on AEN-Zephyr (v0.4 prep).**
   Wraps every `alp_mbox_send` payload in a 12-byte little-endian
   header (`'AMPF'` magic / monotonic sequence / declared length)

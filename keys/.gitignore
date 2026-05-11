@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Keep MCUboot signing private keys out of git.  README.md +
+# generate_dev_key.sh + the production public-key file (when it
+# lands) are the only tracked artefacts in this directory.
+
+# Private keys -- never commit.
+*.pem
+*.key
+*.priv
+
+# Allow public keys explicitly (production verification keys go
+# here once provisioning is in place).
+!*.pub.pem
+!*.pub.key

@@ -116,7 +116,7 @@ A release does **not** tag until every row gating it is `verified`.
 | Yocto MQTT TLS (`mqtts://`) | `src/yocto/iot_yocto.c` | n/a (returns NOSUPPORT) | When implemented, validates a known CA chain + delivers payload over TLS to a real broker | TBD | v0.4.x |
 | `meta-alp` BSP for V2N / V2N-M1 / i.MX 93 | `yocto/meta-alp/` | ⏳ untested | `bitbake core-image-minimal` succeeds for each MACHINE; produced image boots on the matching SoM | HIL | v0.4 |
 | Authoritative Zephyr board files | external (`alplabai/alp-zephyr-modules`) | ⏳ untested | `alp_e1m_evk_aen` board boots and binds the same DT aliases the SDK overlays expect | HIL | v0.4 |
-| MCUboot secure-boot on AEN-Zephyr | TBD | ⏳ untested | Signed image boots; tampered image triggers rollback to previous slot | HIL + tamper test | v0.4 |
+| MCUboot secure-boot on AEN-Zephyr | `sysbuild/aen/sysbuild.conf` + `keys/generate_dev_key.sh` + `docs/secure-boot.md` | ⏳ untested | Signed image boots; tampered image triggers rollback to previous slot; mid-swap power loss recovers atomically | HIL + tamper test (gates on `alp_e1m_evk_aen` board file in `alplabai/alp-zephyr-modules`) | v0.4 |
 | Secure OTA on AEN-Zephyr (MCUboot + Mender) | TBD | ⏳ untested | Signed update delivered, swap-using-scratch completes, next boot validates | HIL + OTA bench | v0.4 |
 | Secure OTA on V2N-Yocto (`meta-mender`) | TBD | ⏳ untested | A/B partition swap survives an interrupted-update simulation | HIL | v0.4 |
 | OPTIGA Trust M-rooted device identity | TBD | ⏳ untested | TLS handshake succeeds using OPTIGA-stored ECC key; tampered key rejects | HIL | v0.4 |
