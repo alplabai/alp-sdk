@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: uart-rx-ringbuf
+  description: |
+    Per-feature example for <alp/peripheral.h>'s opt-in
+    interrupt-driven RX ring buffer (CONFIG_ALP_SDK_UART_RX_RINGBUF).
+    Attaches an LwRB-backed ring to ALP_E1M_UART0, polls the
+    drain count + pops batched bytes, then detaches.
+
+tests:
+  alp_sdk.example.uart_rx_ringbuf:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - uart
+      - lwrb
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[ringbuf\\] done"

@@ -22,6 +22,19 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **`examples/uart-rx-ringbuf/` reference app.**  Hand-written
+  example exercising the Phase 1 LwRB-backed RX ring buffer on
+  ALP_E1M_UART0: attach with a caller-owned backing store, sleep
+  to emulate "doing real work", pop batched bytes, detach.
+  Heavily commented (~50% comment ratio per the examples-as-
+  documentation convention) -- explains the producer/consumer
+  split, when to reach for the ringbuf vs the classic
+  `alp_uart_read`, and the backing-store sizing formula
+  (`baud_rate / 10 * worst_case_drain_latency_s`).  New
+  `alp_sdk.example.uart_rx_ringbuf` twister scenario runs the
+  happy path under native_sim; the `test-plan.md` row for the
+  LwRB feature now references both the failure-path ZTESTs and
+  this example.
 - **Yocto MQTT TLS (`mqtts://`) via libmosquitto.**  The Yocto IoT
   backend (`src/yocto/iot_yocto.c`) now accepts `mqtts://host[:port]`
   broker URIs (default port 8883) and routes them through
