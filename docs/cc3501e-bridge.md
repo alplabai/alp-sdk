@@ -31,6 +31,102 @@ Per [`metadata/e1m_modules/aen/inter-chip.tsv`](../metadata/e1m_modules/aen/inte
 - **CAM_EN_LDO0 / LDO1** (CC3501E `GPIO_0` / `GPIO_1`): CC3501E
   enables the camera modules.
 
+## Boot model
+
+The CC3501E has **no host-strap boot pin**.  Boot-mode selection
+is internal to the chip -- driven by the *reset cause* + on-flash
+state, not by an externally-strappable signal.  This was verified
+against the datasheet (`cc3501e.pdf` pinout) and the user guide
+(`swru626.pdf` Section 7.1.5 "Boot Sequence" + Section 7.2 "Reset").
+The implication for the SDK: there is nothing additional for the
+Alif side to wire beyond the two control lines we already have.
+
+### What the host actually drives
+
+| Signal       | Alif pad         | CC3501E pin    | Role                                  |
+|--------------|------------------|----------------|---------------------------------------|
+| `WIFI_EN`    | `P15_5`          | (power enable) | Gates the CC3501E supply.             |
+| `E_WIFI.NRST`| `P15_1_FLEX`     | pin 49 `nRESET`| The only host-driven reset/boot signal. |
+| `SPI1`       | `P14_4/5/6`      | `GPIO_27/28/29`| Host-control protocol post-boot.      |
+
+That is the full host-visible boot surface.  No SOP0/SOP1/SOP2
+straps (the CC3120/CC3220 generation had them; the CC3501E
+dropped them), no boot-mode GPIO, no host-readable boot-config
+register the SDK needs to touch.
+
+### How the chip decides what to do at reset
+
+Per UG Table 7-4, the ROM's first-stage bootloader keys off the
+*reset cause source*:
+
+| Reset cause                       | What the ROM does next                      |
+|-----------------------------------|---------------------------------------------|
+| Reset pin OR POR                  | Cold-boot, full Chain-of-Trust auth         |
+| RVML / RVMH (rail voltage monitor)| Cold-boot                                   |
+| Brown-out (VDDMAIN ~1.3 V trip)   | Cold-boot                                   |
+| M33 WDT                           | Warm-boot (watchdog-recovery flow)          |
+| Self-reset by M33                 | Warm-boot                                   |
+| Debug-subsystem reset             | Boot into debug-aware path                  |
+
+UG sections 34681..34901 describe four sub-flows the ROM can
+take based on this + on-flash state:
+
+1. **Device activation** -- normal boot, two-stage Chain-of-Trust
+   off the application image in xSPI flash.
+2. **Initial programming** -- factory first-flash flow, multi-stage.
+3. **Reprogramming** -- field update flow.
+4. **Wireless connectivity test tool** -- TI's manufacturing
+   test mode.
+
+All four are selected by reset-cause + on-flash state +
+SimpleLink host commands -- never by an external strap.
+
+### GPIO37 ("sensed at boot")
+
+Datasheet footnote (3) on pin 52 says only:
+
+> *"GPIO37 and Logger are sensed by the device during boot,
+>  contact TI for more information."*
+
+That is the entire public documentation.  Treat GPIO37 as
+TI-internal -- do **not** reserve it for SDK use and do not
+expect to drive it for boot-mode control.  The on-module
+schematic should leave it tied per TI's default (PD, Hi-Z) or
+to whatever TI recommends directly.
+
+### Boot timing budget (UG Table 7-3)
+
+| Phase | Name                                         | Typical  |
+|-------|----------------------------------------------|----------|
+| T1    | Supply settling                              | board    |
+| T2    | Hardware init                                | ~20 ms   |
+| T3    | Boot FW (1st-stage BL) init + auth           | ~380 ms  |
+| T4    | Application image authentication             | ~500 ms  |
+| **Total** | nRESET-release -> application running   | **~900 ms** |
+
+The Alif-side bring-up code should hold off `ALP_CC3501E_CMD_PING`
+attempts for at least 1 s after `WIFI_EN`/`nRESET` release.  The
+inter-chip SPI handshake's first PING-reply also serves as the
+"boot is complete, firmware is alive" signal.
+
+### Where the firmware actually lives (4 MB xSPI flash)
+
+The CC3501E exposes an internal xSPI bus (datasheet pinout:
+`XSPI_D0..3`, `XSPI_CLK`, `XSPI_CS`).  The E1M-AEN module
+populates a **4 MB external xSPI flash** on that bus carrying:
+
+- BL2 (TI-signed 2nd-stage bootloader)
+- Application image (SimpleLink + Wi-Fi stack + BLE stack +
+  the `alplabai/cc3501e-firmware` SPI-slave parser)
+- Filesystem region (TI SimpleLink file system for certs,
+  service-pack, profile data)
+
+**This flash is invisible to the Alif host.**  Reflash happens
+exclusively via TI's `uniflash` / SimpleLink protocols on the
+inter-chip SPI1 -- not via direct xSPI access from Alif.  If the
+on-flash BL2 is ever corrupt, recovery goes through TI's tools,
+not through any strap-pin recovery mode (there isn't one).
+
 ## Two-repo split
 
 Per [ADR 0005](adr/0005-alp-sdk-vs-alp-studio-boundary.md)'s
