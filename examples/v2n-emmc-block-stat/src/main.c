@@ -93,16 +93,22 @@ int main(void) {
            (unsigned)sector_size, (unsigned)sector_count,
            (unsigned)(capacity_bytes >> 20));
 
-    /* Allocate the read buffer.  sector_size on every reasonable
-     * eMMC is 512 bytes; READ_BLOCKS = 16 gives 8 KiB which fits
-     * on the default ztest thread stack.  In a production app
-     * with a large sector_size (some industrial eMMC report 4096)
-     * the buffer would have to be sized dynamically. */
+    /* Allocate the read buffer in BSS.  sector_size on every
+     * reasonable eMMC is 512 bytes; READ_BLOCKS = 16 gives 8 KiB,
+     * which is larger than Zephyr's default CONFIG_MAIN_STACK_SIZE
+     * (1024 B / 2048 B on most targets).  Stack-allocating an 8 KiB
+     * buffer here used to silently corrupt the main thread on real
+     * targets even though native_sim's 4 KiB default tolerated it.
+     * Static storage is single-use here (no concurrent main()s) so
+     * sharing one BSS slot is fine.  In a production app with a
+     * larger sector_size (some industrial eMMC report 4096), or
+     * with concurrent reads, the buffer would have to grow + move
+     * to the heap. */
+    static uint8_t buf[READ_BLOCKS * 512u];
     if (sector_size != 512u) {
         printf("[emmc] unexpected sector_size %u (not 512) -- skipping read\n",
                (unsigned)sector_size);
     } else {
-        uint8_t buf[READ_BLOCKS * 512u];
         rv = disk_access_read(EMMC_DISK_NAME, buf, 0u, READ_BLOCKS);
         if (rv != 0) {
             printf("[emmc] disk_access_read(blocks=%u) -> %d\n",
