@@ -196,6 +196,23 @@ config ALP_SDK_V2N_SUPERVISOR_I2C_BITRATE_HZ
 	  Standard-mode 100 kHz, fast-mode 400 kHz, or fast-mode+ 1 MHz
 	  -- pick the highest the shared BRD_I2C devices all support.
 
+config ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS
+	int "Max wait for the supervisor mutex on each bridge op (ms)"
+	default 100
+	range 1 5000
+	help
+	  Bounded acquire timeout for the singleton's serialisation
+	  mutex.  Each portable alp_pwm_* / alp_adc_* / alp_dac_* /
+	  alp_qenc_* / alp_counter_* op on V2N takes this mutex for the
+	  duration of the underlying gd32g553_* call (~1 ms typical on
+	  SPI, ~5 ms typical on I2C).  When a thread is mid-init against
+	  a hung GD32 the bus call inside gd32g553_init() can block much
+	  longer; this timeout prevents subsequent acquirers from piling
+	  up behind it -- they get ALP_ERR_BUSY back at the portable
+	  surface and can retry.  Default 100 ms is well above any
+	  steady-state op; raise for builds where the GD32 firmware
+	  uses long clock-stretching cycles on I2C.
+
 endif # ALP_SDK_V2N_SUPERVISOR
 
 config ALP_SDK_MAX_I2S_HANDLES
