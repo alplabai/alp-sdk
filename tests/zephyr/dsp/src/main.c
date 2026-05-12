@@ -476,8 +476,117 @@ ZTEST(alp_adc_filter, test_read_null_got_returns_inval)
     zassert_equal(s, ALP_ERR_INVAL, NULL);
 }
 
+/* ============================================================== */
+/* alp_adc_spectrum_t (wave-2 §2B.1(c) FFT-terminated chain)        */
+/*                                                                  */
+/* On native_sim without a V2N supervisor the spectrum_open call    */
+/* returns NOSUPPORT for valid args -- same NOSUPPORT contract as   */
+/* the filter sibling.  Wrong-entry-point detection (filter chain   */
+/* passed to spectrum_open) still surfaces INVAL.                  */
+/* ============================================================== */
+
+ZTEST(alp_adc_spectrum, test_open_null_cfg_returns_inval)
+{
+    alp_adc_spectrum_t *spec = alp_adc_spectrum_open(NULL);
+    zassert_is_null(spec, NULL);
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL, NULL);
+}
+
+ZTEST(alp_adc_spectrum, test_open_null_stages_returns_inval)
+{
+    const alp_adc_spectrum_config_t cfg = {
+        .channel_id     = 0u,
+        .sample_rate_hz = 1000u,
+        .stages         = NULL,
+        .n_stages       = 1u,
+    };
+    alp_adc_spectrum_t *spec = alp_adc_spectrum_open(&cfg);
+    zassert_is_null(spec, NULL);
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL, NULL);
+}
+
+ZTEST(alp_adc_spectrum, test_open_zero_stages_returns_inval)
+{
+    alp_dsp_stage_t stage = { 0 };
+    stage.kind                = ALP_DSP_STAGE_FFT;
+    stage.u.fft.n_points      = 64u;
+    stage.u.fft.output_format = ALP_DSP_FFT_OUTPUT_MAGNITUDE;
+
+    const alp_adc_spectrum_config_t cfg = {
+        .channel_id     = 0u,
+        .sample_rate_hz = 1000u,
+        .stages         = &stage,
+        .n_stages       = 0u,
+    };
+    alp_adc_spectrum_t *spec = alp_adc_spectrum_open(&cfg);
+    zassert_is_null(spec, NULL);
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL, NULL);
+}
+
+ZTEST(alp_adc_spectrum, test_open_filter_terminated_chain_returns_inval)
+{
+    /* Wrong entry point: filter-terminated chain passed to spectrum_open. */
+    static const float taps[1] = { 1.0f };
+    alp_dsp_stage_t    stage   = { 0 };
+    stage.kind               = ALP_DSP_STAGE_FIR;
+    stage.u.fir.coeff_format = ALP_DSP_COEFF_FORMAT_F32;
+    stage.u.fir.n_taps       = 1u;
+    stage.u.fir.taps         = taps;
+
+    const alp_adc_spectrum_config_t cfg = {
+        .channel_id     = 0u,
+        .sample_rate_hz = 1000u,
+        .stages         = &stage,
+        .n_stages       = 1u,
+    };
+    alp_adc_spectrum_t *spec = alp_adc_spectrum_open(&cfg);
+    zassert_is_null(spec, NULL);
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL, NULL);
+}
+
+ZTEST(alp_adc_spectrum, test_open_fft_chain_no_bridge_returns_nosupport)
+{
+    alp_dsp_stage_t stage = { 0 };
+    stage.kind                = ALP_DSP_STAGE_FFT;
+    stage.u.fft.n_points      = 64u;
+    stage.u.fft.output_format = ALP_DSP_FFT_OUTPUT_MAGNITUDE;
+
+    const alp_adc_spectrum_config_t cfg = {
+        .channel_id     = 0u,
+        .sample_rate_hz = 1000u,
+        .stages         = &stage,
+        .n_stages       = 1u,
+    };
+    alp_adc_spectrum_t *spec = alp_adc_spectrum_open(&cfg);
+    zassert_is_null(spec, NULL);
+    zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, NULL);
+}
+
+ZTEST(alp_adc_spectrum, test_close_null_is_noop)
+{
+    alp_adc_spectrum_close(NULL); /* must not crash */
+}
+
+ZTEST(alp_adc_spectrum, test_read_null_handle_returns_not_ready)
+{
+    float        bins[128] = { 0 };
+    size_t       got       = 0u;
+    alp_status_t s         = alp_adc_spectrum_read_bins(NULL, bins, 128u, &got);
+    zassert_equal(s, ALP_ERR_NOT_READY, NULL);
+    zassert_equal(got, 0u, NULL);
+}
+
+ZTEST(alp_adc_spectrum, test_read_null_got_returns_inval)
+{
+    float        bins[128] = { 0 };
+    int          dummy     = 0;
+    alp_status_t s = alp_adc_spectrum_read_bins((alp_adc_spectrum_t *)&dummy, bins, 128u, NULL);
+    zassert_equal(s, ALP_ERR_INVAL, NULL);
+}
+
 /* Test suites are auto-collected via ztest_register macros below.   */
 ZTEST_SUITE(alp_dsp_chain_open, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(alp_dsp_chain_apply_samples, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(alp_dsp_chain_apply_bins, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(alp_adc_filter, NULL, NULL, NULL, NULL, NULL);
+ZTEST_SUITE(alp_adc_spectrum, NULL, NULL, NULL, NULL, NULL);

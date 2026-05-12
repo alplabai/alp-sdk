@@ -397,6 +397,32 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`<alp/adc.h>::alp_adc_spectrum_t` -- streaming ADC with
+  FFT-terminated DSP chain (wave-2 §2B.1(c), 2026-05-14).**
+  Replaces the v0.5.x(b) NOSUPPORT stub with a real composition:
+  spectrum_open validates that the caller's terminal stage is
+  @c ALP_DSP_STAGE_FFT, opens the underlying alp_dsp_chain_t and
+  alp_adc_stream_t, then internally accumulates N raw samples
+  (N = the chain's FFT n_points) before running
+  @c alp_dsp_chain_apply_bins for one non-overlapping block per
+  read.  Output format follows the configured FFT stage:
+  @c ALP_DSP_FFT_OUTPUT_COMPLEX (2N elements; re/im pairs) or
+  @c ALP_DSP_FFT_OUTPUT_MAGNITUDE (N elements; per-bin |bin|).
+  When the backend ring is empty mid-accumulation, the read
+  returns @c ALP_OK with @c got=0; partial accumulation persists
+  across calls.  Pool size: 2 spectrum handles.  Static cost
+  per slot: ~2 KB (N=1024 int16 accumulator) + the DSP chain's
+  own 30 KB footprint.
+
+  Off-V2N or without CONFIG_ALP_SDK_DSP: NOSUPPORT after the
+  INVAL pre-checks (including the wrong-entry-point check that
+  rejects filter-terminated chains).  Extended `tests/zephyr/dsp/`
+  ztest coverage with 8 spectrum-specific cases (NULL cfg, NULL
+  stages, zero n_stages, filter-terminated chain rejected,
+  valid-args-NOSUPPORT, close-NULL no-op, read-with-NULL-handle
+  returns NOT_READY, read-with-NULL-got returns INVAL).  Doxygen
+  coverage holds at 100%.
+
 - **`<alp/adc.h>::alp_adc_filter_t` / `alp_adc_spectrum_t` --
   streaming ADC with DSP pipeline (wave-2 §2B.1(b), 2026-05-14).**
   Introduces two sibling surfaces that compose `alp_adc_stream_t` +

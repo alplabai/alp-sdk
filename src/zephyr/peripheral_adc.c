@@ -679,16 +679,183 @@ void alp_adc_filter_close(alp_adc_filter_t *filter)
 #endif /* ALP_ADC_HAS_FILTER_PATH */
 
 /* ====================================================================== */
-/* alp_adc_spectrum_t -- FFT-terminated chain (v0.5.x (c) lands real impl) */
+/* alp_adc_spectrum_t -- FFT-terminated chain (wave-2 §2B.1(c))            */
 /*                                                                         */
-/* Symbols are exported as NOSUPPORT stubs so applications linking against */
-/* <alp/adc.h> stay link-clean across the (b) / (c) split.                 */
+/* Composes alp_adc_stream_t + alp_dsp_chain_t (FFT-terminated) under one  */
+/* handle.  Internally accumulates N samples (N = the chain's FFT          */
+/* n_points) before running chain.apply_bins for one non-overlapping       */
+/* block per read.  On V2N the chain runs on the host today; the GD32-    */
+/* side HW-FFT offload path (CMD_ADC_STREAM_CONFIGURE_DSP) lands once the */
+/* wire payload format finalises.  Off-V2N or without CONFIG_ALP_SDK_DSP: */
+/* surfaces NOSUPPORT after the INVAL pre-checks.                          */
 /* ====================================================================== */
+
+#if ALP_ADC_HAS_FILTER_PATH
+
+#define ALP_ADC_SPECTRUM_POOL_SIZE 2u
+
+struct alp_adc_spectrum {
+    bool                 in_use;
+    alp_adc_stream_t    *stream;
+    alp_dsp_chain_t     *chain;
+    uint16_t             fft_n_points;
+    alp_dsp_fft_output_t fft_output;
+    size_t               accumulated;
+    int16_t              samples[ALP_DSP_MAX_FFT_POINTS];
+};
+
+static struct alp_adc_spectrum  alp_adc_spectrum_pool[ALP_ADC_SPECTRUM_POOL_SIZE];
+
+static struct alp_adc_spectrum *alp_adc_spectrum_pool_acquire(void)
+{
+    for (size_t i = 0u; i < ALP_ADC_SPECTRUM_POOL_SIZE; i++) {
+        if (!alp_adc_spectrum_pool[i].in_use) {
+            return &alp_adc_spectrum_pool[i];
+        }
+    }
+    return NULL;
+}
+
+static void alp_adc_spectrum_pool_release(struct alp_adc_spectrum *s)
+{
+    if (s == NULL) return;
+    s->in_use      = false;
+    s->stream      = NULL;
+    s->chain       = NULL;
+    s->accumulated = 0u;
+}
+
+alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg)
+{
+    alp_z_clear_last_error();
+
+    if (cfg == NULL || cfg->stages == NULL || cfg->n_stages == 0u) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+
+    /* The terminal stage MUST be FFT for spectrum_open.  Chain
+     * validation itself rejects FFT-not-terminal and WINDOW-not-
+     * before-FFT, so probing the caller's last-stage kind here
+     * catches the wrong-entry-point case early (before allocating
+     * a chain slot). */
+    const alp_dsp_stage_t *last = &cfg->stages[cfg->n_stages - 1u];
+    if (last->kind != ALP_DSP_STAGE_FFT) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+
+    struct alp_adc_spectrum *s = alp_adc_spectrum_pool_acquire();
+    if (s == NULL) {
+        alp_z_set_last_error(ALP_ERR_NOMEM);
+        return NULL;
+    }
+
+    alp_dsp_chain_t *chain = alp_dsp_chain_open(cfg->stages, cfg->n_stages);
+    if (chain == NULL) {
+        /* alp_last_error stamped by alp_dsp_chain_open. */
+        alp_adc_spectrum_pool_release(s);
+        return NULL;
+    }
+
+    const alp_adc_stream_config_t scfg = {
+        .channel_id     = cfg->channel_id,
+        .sample_rate_hz = cfg->sample_rate_hz,
+    };
+    alp_adc_stream_t *stream = alp_adc_stream_open(&scfg);
+    if (stream == NULL) {
+        /* alp_last_error stamped by alp_adc_stream_open. */
+        alp_dsp_chain_close(chain);
+        alp_adc_spectrum_pool_release(s);
+        return NULL;
+    }
+
+    s->stream       = stream;
+    s->chain        = chain;
+    s->fft_n_points = last->u.fft.n_points;
+    s->fft_output   = last->u.fft.output_format;
+    s->accumulated  = 0u;
+    s->in_use       = true;
+    return s;
+}
+
+alp_status_t alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap,
+                                        size_t *got)
+{
+    if (got == NULL) return ALP_ERR_INVAL;
+    *got = 0u;
+    if (spec == NULL || !spec->in_use) return ALP_ERR_NOT_READY;
+    if (bins == NULL) return ALP_ERR_INVAL;
+
+    /* Required output element count per block.  Reject early if the
+     * caller's buffer can't hold one block. */
+    const size_t need = (spec->fft_output == ALP_DSP_FFT_OUTPUT_COMPLEX)
+                            ? (size_t)(2u * spec->fft_n_points)
+                            : (size_t)spec->fft_n_points;
+    if (cap < need) return ALP_ERR_OUT_OF_RANGE;
+
+    /* Drain raw mV samples into the accumulator until we have a
+     * full FFT block.  If the stream's backend ring is empty, this
+     * pass produces no bins (got = 0). */
+    while (spec->accumulated < spec->fft_n_points) {
+        const size_t want_total = spec->fft_n_points - spec->accumulated;
+        const size_t want = (want_total < GD32G553_BRIDGE_ADC_STREAM_READ_MAX)
+                                ? want_total
+                                : (size_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX;
+        uint16_t     raw[GD32G553_BRIDGE_ADC_STREAM_READ_MAX];
+        size_t       got_raw = 0u;
+        alp_status_t s       = alp_adc_stream_read(spec->stream, raw, want, &got_raw);
+        if (s != ALP_OK) return s;
+        if (got_raw == 0u) {
+            /* Backend ring was empty; caller should poll again
+             * later.  Not an error -- partial accumulation persists
+             * across calls. */
+            return ALP_OK;
+        }
+        for (size_t i = 0u; i < got_raw; i++) {
+            spec->samples[spec->accumulated + i] = (int16_t)raw[i];
+        }
+        spec->accumulated += got_raw;
+    }
+
+    /* Run the chain over the accumulated block. */
+    size_t       got_bins = 0u;
+    alp_status_t s        = alp_dsp_chain_apply_bins(spec->chain, spec->samples, spec->fft_n_points,
+                                                     bins, cap, &got_bins);
+    /* Reset the accumulator for the next non-overlapping block. */
+    spec->accumulated = 0u;
+    if (s != ALP_OK) return s;
+    *got = got_bins;
+    return ALP_OK;
+}
+
+void alp_adc_spectrum_close(alp_adc_spectrum_t *spec)
+{
+    if (spec == NULL) return;
+    if (spec->stream != NULL) {
+        alp_adc_stream_close(spec->stream);
+    }
+    if (spec->chain != NULL) {
+        alp_dsp_chain_close(spec->chain);
+    }
+    alp_adc_spectrum_pool_release(spec);
+}
+
+#else /* !ALP_ADC_HAS_FILTER_PATH */
 
 alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg)
 {
     alp_z_clear_last_error();
     if (cfg == NULL || cfg->stages == NULL || cfg->n_stages == 0u) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    /* Mirror the filter-side wrong-entry-point detection so callers
+     * get the same INVAL when they pass a filter-terminated chain to
+     * the spectrum surface, regardless of whether the bridge path is
+     * built. */
+    const alp_dsp_stage_t *last = &cfg->stages[cfg->n_stages - 1u];
+    if (last->kind != ALP_DSP_STAGE_FFT) {
         alp_z_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
@@ -710,3 +877,5 @@ void alp_adc_spectrum_close(alp_adc_spectrum_t *spec)
 {
     (void)spec;
 }
+
+#endif /* ALP_ADC_HAS_FILTER_PATH */
