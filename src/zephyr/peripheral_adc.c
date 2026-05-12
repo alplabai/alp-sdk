@@ -132,13 +132,15 @@ static alp_status_t errno_to_alp(int err) {
 static struct k_mutex bridge_stream_lock;
 static uint8_t        bridge_streams_used;
 
-static int bridge_stream_lock_init(void) {
+static int            bridge_stream_lock_init(void)
+{
     k_mutex_init(&bridge_stream_lock);
     return 0;
 }
 SYS_INIT(bridge_stream_lock_init, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
-static int bridge_stream_alloc_slot(void) {
+static int bridge_stream_alloc_slot(void)
+{
     k_mutex_lock(&bridge_stream_lock, K_FOREVER);
     int slot = -1;
     for (int i = 0; i < (int)GD32G553_BRIDGE_ADC_STREAM_COUNT; ++i) {
@@ -152,9 +154,10 @@ static int bridge_stream_alloc_slot(void) {
     return slot;
 }
 
-static void bridge_stream_free_slot(uint8_t slot) {
+static void bridge_stream_free_slot(uint8_t slot)
+{
     k_mutex_lock(&bridge_stream_lock, K_FOREVER);
-    bridge_streams_used &= (uint8_t)~(1u << slot);
+    bridge_streams_used &= (uint8_t) ~(1u << slot);
     k_mutex_unlock(&bridge_stream_lock);
 }
 
@@ -183,14 +186,9 @@ static alp_adc_t *bridge_open(const alp_adc_config_t *cfg) {
         alp_z_set_last_error(s);
         return NULL;
     }
-    if (cfg->oversampling_ratio != 0u ||
-        cfg->sample_cycles      != 0u ||
-        cfg->resolution_bits    != 0u) {
-        s = gd32g553_adc_configure(ctx,
-                                   (uint8_t)cfg->channel_id,
-                                   cfg->oversampling_ratio,
-                                   cfg->sample_cycles,
-                                   cfg->resolution_bits);
+    if (cfg->oversampling_ratio != 0u || cfg->sample_cycles != 0u || cfg->resolution_bits != 0u) {
+        s = gd32g553_adc_configure(ctx, (uint8_t)cfg->channel_id, cfg->oversampling_ratio,
+                                   cfg->sample_cycles, cfg->resolution_bits);
         if (s != ALP_OK) {
             alp_z_v2n_supervisor_release();
             alp_z_set_last_error(s);
@@ -384,7 +382,8 @@ void alp_adc_close(alp_adc_t *adc) {
 /* software fallback (timer + ring buffer) lives on the wave-2 roadmap.    */
 /* ====================================================================== */
 
-alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg) {
+alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
+{
     alp_z_clear_last_error();
 
     if (cfg == NULL) {
@@ -410,15 +409,14 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg) {
         return NULL;
     }
 
-    gd32g553_t *ctx = NULL;
-    alp_status_t s = alp_z_v2n_supervisor_acquire(&ctx);
+    gd32g553_t  *ctx = NULL;
+    alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
     if (s != ALP_OK) {
         bridge_stream_free_slot((uint8_t)slot);
         alp_z_set_last_error(s);
         return NULL;
     }
-    s = gd32g553_adc_stream_begin(ctx, (uint8_t)slot,
-                                  (uint8_t)cfg->channel_id,
+    s = gd32g553_adc_stream_begin(ctx, (uint8_t)slot, (uint8_t)cfg->channel_id,
                                   cfg->sample_rate_hz);
     alp_z_v2n_supervisor_release();
 
@@ -449,11 +447,11 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg) {
 #else
     alp_z_set_last_error(ALP_ERR_NOSUPPORT);
     return NULL;
-#endif  /* ALP_ADC_HAS_BRIDGE_PATH */
+#endif /* ALP_ADC_HAS_BRIDGE_PATH */
 }
 
-alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream,
-                                 uint16_t *mv, size_t cap, size_t *got) {
+alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got)
+{
     if (got == NULL) return ALP_ERR_INVAL;
     *got = 0u;
     if (stream == NULL || !stream->in_use) return ALP_ERR_NOT_READY;
@@ -464,16 +462,15 @@ alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream,
     if (stream->via_bridge) {
         /* Backend caps per-call at GD32G553_BRIDGE_ADC_STREAM_READ_MAX
          * (= 32); callers wanting more loop in their own thread. */
-        const uint8_t want = (cap > (size_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX)
-                               ? (uint8_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX
-                               : (uint8_t)cap;
+        const uint8_t want     = (cap > (size_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX)
+                                     ? (uint8_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX
+                                     : (uint8_t)cap;
         uint8_t       got_this = 0u;
 
-        gd32g553_t *ctx = NULL;
-        alp_status_t s = alp_z_v2n_supervisor_acquire(&ctx);
+        gd32g553_t   *ctx      = NULL;
+        alp_status_t  s        = alp_z_v2n_supervisor_acquire(&ctx);
         if (s != ALP_OK) return s;
-        s = gd32g553_adc_stream_read(ctx, stream->stream_id,
-                                     want, &got_this, mv);
+        s = gd32g553_adc_stream_read(ctx, stream->stream_id, want, &got_this, mv);
         alp_z_v2n_supervisor_release();
         if (s != ALP_OK) return s;
         *got = got_this;
@@ -483,7 +480,8 @@ alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream,
     return ALP_ERR_NOSUPPORT;
 }
 
-void alp_adc_stream_close(alp_adc_stream_t *stream) {
+void alp_adc_stream_close(alp_adc_stream_t *stream)
+{
     if (stream == NULL) return;
 #if ALP_ADC_HAS_BRIDGE_PATH
     if (stream->via_bridge) {

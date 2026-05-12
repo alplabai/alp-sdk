@@ -250,33 +250,37 @@ ZTEST(alp_peripheral, test_adc_unresolved_channel_yields_not_ready) {
 /* and the read/close NULL-arg paths must always be safe.              */
 /* ------------------------------------------------------------------ */
 
-ZTEST(alp_peripheral, test_adc_stream_null_cfg) {
+ZTEST(alp_peripheral, test_adc_stream_null_cfg)
+{
     zassert_is_null(alp_adc_stream_open(NULL));
     zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 }
 
-ZTEST(alp_peripheral, test_adc_stream_read_null_handle_yields_not_ready) {
-    uint16_t buf[4];
-    size_t got = 99u;
-    alp_status_t s = alp_adc_stream_read(NULL, buf, ARRAY_SIZE(buf), &got);
+ZTEST(alp_peripheral, test_adc_stream_read_null_handle_yields_not_ready)
+{
+    uint16_t     buf[4];
+    size_t       got = 99u;
+    alp_status_t s   = alp_adc_stream_read(NULL, buf, ARRAY_SIZE(buf), &got);
     zassert_equal(s, ALP_ERR_NOT_READY, "got %d", (int)s);
     zassert_equal(got, 0u, "got must be zeroed on failure");
 }
 
-ZTEST(alp_peripheral, test_adc_stream_read_null_got_is_inval) {
-    uint16_t buf[4];
+ZTEST(alp_peripheral, test_adc_stream_read_null_got_is_inval)
+{
+    uint16_t     buf[4];
     alp_status_t s = alp_adc_stream_read(NULL, buf, ARRAY_SIZE(buf), NULL);
-    zassert_equal(s, ALP_ERR_INVAL, "NULL got pointer must be INVAL, got %d",
-                  (int)s);
+    zassert_equal(s, ALP_ERR_INVAL, "NULL got pointer must be INVAL, got %d", (int)s);
 }
 
-ZTEST(alp_peripheral, test_adc_stream_close_null_safe) {
+ZTEST(alp_peripheral, test_adc_stream_close_null_safe)
+{
     /* Must not crash. */
     alp_adc_stream_close(NULL);
 }
 
 #if !defined(CONFIG_ALP_SDK_V2N_SUPERVISOR)
-ZTEST(alp_peripheral, test_adc_stream_open_no_backend_yields_nosupport) {
+ZTEST(alp_peripheral, test_adc_stream_open_no_backend_yields_nosupport)
+{
     /* Default build has no streaming backend.  Any well-formed cfg
      * lands on the NOSUPPORT sentinel; this catches accidental
      * regressions where a future backend silently links in. */
@@ -486,7 +490,8 @@ ZTEST(alp_peripheral, test_v2n_supervisor_counter_high_id_rejected) {
     zassert_is_null(c);
 }
 
-ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_not_ready_without_buses) {
+ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_not_ready_without_buses)
+{
     /* Same shape as the alp_adc_open test above: with both bus ids
      * left at -1, the supervisor surfaces ALP_ERR_NOT_READY and the
      * stream-slot bitmap MUST be rolled back so a later open can
@@ -496,11 +501,12 @@ ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_not_ready_without_buse
         .sample_rate_hz = 100000u,
     });
     zassert_is_null(s);
-    zassert_equal(alp_last_error(), ALP_ERR_NOT_READY,
-                  "expected NOT_READY, got %d", (int)alp_last_error());
+    zassert_equal(alp_last_error(), ALP_ERR_NOT_READY, "expected NOT_READY, got %d",
+                  (int)alp_last_error());
 }
 
-ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_channel_out_of_range) {
+ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_channel_out_of_range)
+{
     /* Channel range is checked before the supervisor acquire so the
      * test does not depend on bus configuration. */
     alp_adc_stream_t *s = alp_adc_stream_open(&(alp_adc_stream_config_t){
@@ -511,7 +517,8 @@ ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_channel_out_of_range) 
     zassert_equal(alp_last_error(), ALP_ERR_OUT_OF_RANGE);
 }
 
-ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_zero_rate_inval) {
+ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_zero_rate_inval)
+{
     alp_adc_stream_t *s = alp_adc_stream_open(&(alp_adc_stream_config_t){
         .channel_id     = 0u,
         .sample_rate_hz = 0u,

@@ -279,12 +279,12 @@ struct alp_dac {
 /* ------------------------------------------------------------------ */
 
 struct alp_adc_stream {
-    bool      in_use;
-    bool      via_bridge;
-    uint8_t   stream_id;       /* backend slot index (0..1 on the V2N family) */
-    uint8_t   channel;         /* hardware channel id */
-    uint32_t  channel_id;
-    uint32_t  sample_rate_hz;
+    bool     in_use;
+    bool     via_bridge;
+    uint8_t  stream_id; /* backend slot index (0..1 on the V2N family) */
+    uint8_t  channel;   /* hardware channel id */
+    uint32_t channel_id;
+    uint32_t sample_rate_hz;
 };
 
 /* ------------------------------------------------------------------ */
