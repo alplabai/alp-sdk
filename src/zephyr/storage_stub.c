@@ -49,12 +49,11 @@ void alp_storage_close(alp_storage_t *s) {
     (void)s;
 }
 
-alp_status_t alp_storage_configure_inline_aes(alp_storage_t *storage,
+alp_status_t alp_storage_configure_inline_aes(alp_storage_t                  *storage,
                                               const alp_storage_aes_config_t *cfg)
 {
     if (cfg == NULL) return ALP_ERR_INVAL;
-    if (cfg->mode != ALP_STORAGE_AES_OFF &&
-        cfg->mode != ALP_STORAGE_AES_CTR &&
+    if (cfg->mode != ALP_STORAGE_AES_OFF && cfg->mode != ALP_STORAGE_AES_CTR &&
         cfg->mode != ALP_STORAGE_AES_XTS) {
         return ALP_ERR_INVAL;
     }

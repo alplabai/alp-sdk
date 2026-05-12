@@ -1226,8 +1226,7 @@ alp_status_t alp_camera_configure_isp(alp_camera_t *c, const alp_camera_isp_conf
 /* Storage inline-AES (alp/storage.h v0.5 extension)                   */
 /* ------------------------------------------------------------------ */
 
-alp_status_t alp_storage_configure_inline_aes(alp_storage_t *s,
-                                              const alp_storage_aes_config_t *cfg)
+alp_status_t alp_storage_configure_inline_aes(alp_storage_t *s, const alp_storage_aes_config_t *cfg)
 {
     if (cfg == NULL) return ALP_ERR_INVAL;
     (void)s;

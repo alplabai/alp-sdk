@@ -195,7 +195,7 @@ alp_status_t alp_gpu2d_blend(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src
 void alp_gpu2d_close(alp_gpu2d_t *handle);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
 #endif /* ALP_GPU2D_H */

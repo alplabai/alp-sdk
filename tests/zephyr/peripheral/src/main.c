@@ -649,15 +649,15 @@ ZTEST(alp_peripheral, test_camera_configure_isp_null_returns_inval)
 {
     /* No camera handle needed for the INVAL pre-check: a NULL cfg
      * surfaces as INVAL before any handle access. */
-    int dummy = 0;
-    alp_status_t s = alp_camera_configure_isp((alp_camera_t *)&dummy, NULL);
+    int          dummy = 0;
+    alp_status_t s     = alp_camera_configure_isp((alp_camera_t *)&dummy, NULL);
     zassert_equal(s, ALP_ERR_INVAL, NULL);
 }
 
 ZTEST(alp_peripheral, test_storage_configure_inline_aes_null_returns_inval)
 {
-    int dummy = 0;
-    alp_status_t s = alp_storage_configure_inline_aes((alp_storage_t *)&dummy, NULL);
+    int          dummy = 0;
+    alp_status_t s     = alp_storage_configure_inline_aes((alp_storage_t *)&dummy, NULL);
     zassert_equal(s, ALP_ERR_INVAL, NULL);
 }
 
@@ -670,8 +670,8 @@ ZTEST(alp_peripheral, test_storage_configure_inline_aes_bad_mode_returns_inval)
         .iv        = (const uint8_t *)"0123456789abcdef",
         .iv_bytes  = 16u,
     };
-    int dummy = 0;
-    alp_status_t s = alp_storage_configure_inline_aes((alp_storage_t *)&dummy, &cfg);
+    int          dummy = 0;
+    alp_status_t s     = alp_storage_configure_inline_aes((alp_storage_t *)&dummy, &cfg);
     zassert_equal(s, ALP_ERR_INVAL, NULL);
 }
 
@@ -684,8 +684,8 @@ ZTEST(alp_peripheral, test_storage_configure_inline_aes_bad_key_bytes_returns_in
         .iv        = (const uint8_t *)"0123456789abcdef",
         .iv_bytes  = 16u,
     };
-    int dummy = 0;
-    alp_status_t s = alp_storage_configure_inline_aes((alp_storage_t *)&dummy, &cfg);
+    int          dummy = 0;
+    alp_status_t s     = alp_storage_configure_inline_aes((alp_storage_t *)&dummy, &cfg);
     zassert_equal(s, ALP_ERR_INVAL, NULL);
 }
 

@@ -102,9 +102,9 @@ typedef struct {
      *   - brightness: pre-gamma luma offset.
      *   - contrast: luma scale around mid-grey.
      *   - saturation: chroma scale around grey (0 = monochrome). */
-    int8_t brightness;
-    int8_t contrast;
-    int8_t saturation;
+    int8_t  brightness;
+    int8_t  contrast;
+    int8_t  saturation;
     uint8_t reserved;
 } alp_camera_isp_config_t;
 

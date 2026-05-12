@@ -34,7 +34,7 @@ struct alp_gpu2d {
 
 static struct alp_gpu2d g_alp_gpu2d;
 
-alp_gpu2d_t *alp_gpu2d_open(void)
+alp_gpu2d_t            *alp_gpu2d_open(void)
 {
     alp_z_clear_last_error();
     /* No vendor HAL wired yet on any active SoM. */
