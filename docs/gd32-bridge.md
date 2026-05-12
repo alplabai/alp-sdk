@@ -44,11 +44,12 @@ Output: `build/gd32-bridge.elf`, `.hex`, `.bin`.
 * `BRIDGE_HAL_BACKEND=gd32` -- builds against
   [`vendors/gd32_firmware_library/`](../vendors/gd32_firmware_library/).
   The wrapper expects the GigaDevice **GD32G5x3 Firmware Library**
-  (v1.5.0 or later) unpacked under `sdk/`; the vendor pack itself
-  isn't tracked in git, per the standard ALP convention.  The
-  wrapper's `CMakeLists.txt` fatal-errors with a clear "not found"
-  message if the SDK is missing, so configure failures are immediately
-  diagnosable.
+  v1.5.0 (download:
+  <https://www.gd32mcu.com/en/download/7?kw=GD32G5>) unpacked under
+  `sdk/`; the vendor pack itself isn't tracked in git, per the
+  standard ALP convention.  The wrapper's `CMakeLists.txt`
+  fatal-errors with a clear "not found" message if the SDK is
+  missing, so configure failures are immediately diagnosable.
 
 ## Source layout
 

@@ -9,10 +9,19 @@ TIMER, FMC, …) that the `gd32-bridge` firmware links against when
 
 ## Pinning + provenance
 
-* Canonical source: **GigaDevice MCU download portal** --
-  <https://www.gd32mcu.com/en/download> -- search for
-  "GD32G5x3 Firmware Library".  Pinned upstream version
-  is **v1.5.0** (December 2025).
+* Canonical source: **GigaDevice MCU download portal**,
+  G5-filtered listing -- <https://www.gd32mcu.com/en/download/7?kw=GD32G5>.
+  Two files cover the G5x3 family:
+
+  | Asset                       | Pinned version | Released    | Purpose                                                |
+  |-----------------------------|----------------|-------------|--------------------------------------------------------|
+  | **GD32G5x3 Firmware Library** | **v1.5.0**   | 2026-02-11  | CMSIS + standard peripheral library (what we link)     |
+  | **GD32G5x3 AddOn**           | **v1.3.0**    | 2026-04-15  | Keil CMSIS-Pack + IAR add-on (IDE integration only)    |
+
+  The bridge firmware builds against the **Firmware Library**
+  archive; the AddOn pack is an IDE-time convenience for
+  developers who want Keil / IAR auto-complete support and is
+  optional for the gd32-bridge build.
 * GitHub mirrors: as of 2026-05-13 neither
   [CommunityGD32Cores](https://github.com/CommunityGD32Cores/gigadevice-firmware-and-docs)
   nor [zephyrproject-rtos/hal_gigadevice](https://github.com/zephyrproject-rtos/hal_gigadevice)
@@ -58,8 +67,9 @@ directory are exactly: `README.md` and (once the wrapper lands)
 
 ## Drop procedure
 
-1. Download the GD32G5x3 Firmware Library v1.5.0 archive from the
-   GigaDevice MCU portal linked above.
+1. Go to <https://www.gd32mcu.com/en/download/7?kw=GD32G5> and
+   download the **GD32G5x3 Firmware Library v1.5.0** archive
+   (released 2026-02-11).
 2. Unzip into a scratch directory; locate the `Firmware/` and
    `Utilities/` subtrees.
 3. Copy them under `vendors/gd32_firmware_library/sdk/` matching
