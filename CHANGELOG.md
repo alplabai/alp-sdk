@@ -22,9 +22,21 @@ that lands before the v0.3.0 tag.)
 
 ### Decided (hardware-design decisions captured 2026-05-12)
 
-- **GD32_BOOT0 -> Renesas `P75`** (was E1M PWM5 / GPT4_GTIOC4B).  PWM5
-  becomes GD32-only.  Host drives `P75` high before issuing a reset
-  edge on `GD32_NRST` to enter the GigaDevice factory ISP bootloader.
+- **GD32 in-field reflash uses SWD-from-host, not factory-ISP / BOOT0.**
+  The earlier "BOOT0 -> Renesas `P75`" plan is dropped in favour of a
+  software SWD bit-bang from the Renesas host -- SWD works regardless
+  of GD32 firmware state, where factory-ISP depends on the GD32 boot
+  ROM staying intact and would have required a third pad (a USART
+  line) on the V2N side.  Net pad assignments (maintainer-confirmed):
+  - `GD32_SWDIO` -> Renesas `P70` (was `GPT0_GTIOC0A` / `E1M PWM2`).
+  - `GD32_SWCLK` -> Renesas `P71` (was `GPT0_GTIOC0B` / `E1M PWM3`).
+  - `P75` stays on `GPT4_GTIOC4B` / `E1M PWM5` Renesas-driven (BOOT0
+    line is no longer routed).
+  PWM2 and PWM3 lose their Renesas-side drive but remain available on
+  the GD32-driven path (GD32 `PB14` / `PC5`); the V2N SoM picks the
+  PWM source SoM-wide via the resistor-strap option, not per-channel.
+  See [memory `project_gd32_boot0_to_v2n_planned.md`] for the design
+  rationale.
 - **GD32_NRST -> Renesas `P74`** (was E1M PWM4 / GPT4_GTIOC4A).  PWM4
   becomes GD32-only.  **Line is shared with the primary PMIC reset
   out** -- host pad MUST be configured open-drain (drive low to

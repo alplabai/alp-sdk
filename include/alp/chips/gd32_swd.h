@@ -24,8 +24,8 @@
  *
  * | Signal       | Renesas pad | GD32 pad | Notes                                      |
  * |--------------|-------------|----------|--------------------------------------------|
- * | `GD32_SWDIO` | **TBD**     | `PA13`   | bidirectional; pad assignment pending HW   |
- * | `GD32_SWCLK` | **TBD**     | `PA14`   | host drives                                |
+ * | `GD32_SWDIO` | `P70`       | `PA13`   | bidirectional; was GPT0_GTIOC0A / PWM2     |
+ * | `GD32_SWCLK` | `P71`       | `PA14`   | host drives; was GPT0_GTIOC0B / PWM3       |
  * | `GD32_NRST`  | `P74`       | `NRST`   | open-drain; shared with PMIC reset out     |
  *
  * The caller opens three `alp_gpio_t` handles, hands them to

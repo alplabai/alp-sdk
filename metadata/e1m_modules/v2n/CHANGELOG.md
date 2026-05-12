@@ -24,12 +24,16 @@ rationale) are held outside this tree.
   * `GD32_NRST` → Renesas `P74`; open-drain (shared with primary
     PMIC reset-out); was `E1M PWM4 / GPT4_GTIOC4A`.  PWM4 stays
     Renesas-driven if the host doesn't actively drive NRST.
-  * `GD32_SWDIO` + `GD32_SWCLK` planned to route from V2N to two
-    TBD Renesas pads (SWD bit-bang from the host enables
-    universal GD32 reflash without needing factory-ISP /
-    BOOT0-strap).
-  * BOOT0 reassignment dropped (earlier plan to put BOOT0 on
-    P75 superseded by the SWD-from-host design).
+  * `GD32_SWDIO` → Renesas `P70` (was `GPT0_GTIOC0A` / `E1M PWM2`);
+    `GD32_SWCLK` → Renesas `P71` (was `GPT0_GTIOC0B` / `E1M PWM3`).
+    SWD bit-bang from the host enables universal GD32 reflash
+    without needing factory-ISP / BOOT0-strap.  PWM2 + PWM3 stay
+    available via the GD32-driven path (GD32 `PB14` / `PC5`); the
+    V2N SoM picks PWM source SoM-wide via the resistor-strap
+    option, not per-channel.
+  * BOOT0 reassignment dropped (earlier plan to put BOOT0 on P75
+    superseded by the SWD-from-host design).  `P75` returns to
+    `GPT4_GTIOC4B` / `E1M PWM5` on the Renesas side.
 
 ## r2..r8 -- reserved
 

@@ -27,8 +27,8 @@ notes: |
     - I2C management path (P07/P06 host ↔  PA15/PB9 GD32 slave; 7-bit
       address 0x70 by default, configurable on the firmware side).
     - GD32_NRST  (P74; shared with primary PMIC reset-out -- open-drain)
-    - GD32_SWDIO (V2N pad TBD; host drives SWD data)
-    - GD32_SWCLK (V2N pad TBD; host drives SWD clock)
+    - GD32_SWDIO (P70; host drives SWD data; displaces former GPT0_GTIOC0A / E1M PWM2 Renesas-side drive)
+    - GD32_SWCLK (P71; host drives SWD clock; displaces former GPT0_GTIOC0B / E1M PWM3 Renesas-side drive)
     - SWD header (PA13/PA14) -- still accessible for external probes
       during dev / factory.
 
@@ -58,10 +58,10 @@ i2c:
   default_address_7bit: 0x70
 
 signals:
-  - { name: GD32_SWDIO,  type: bidir,  v2n_route: TBD,
-      notes: "planned -- host-driven SWD data line for in-field reflash + recovery" }
-  - { name: GD32_SWCLK,  type: input,  v2n_route: TBD,
-      notes: "planned -- host-driven SWD clock line" }
+  - { name: GD32_SWDIO,  type: bidir,  v2n_route: "Renesas P70 (was GPT0_GTIOC0A / E1M PWM2)",
+      notes: "host-driven SWD data line for in-field reflash + recovery" }
+  - { name: GD32_SWCLK,  type: input,  v2n_route: "Renesas P71 (was GPT0_GTIOC0B / E1M PWM3)",
+      notes: "host-driven SWD clock line" }
   - { name: GD32_NRST,   type: input,  v2n_route: "Renesas P74 (open-drain, shared with primary PMIC reset-out)",
       notes: "host pad configured open-drain; drive low to assert reset, HiZ to release" }
   - { name: GD32_SWDIO_HDR, type: bidir, v2n_route: "(programming header, GD32 PA13)" }

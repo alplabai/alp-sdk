@@ -69,8 +69,8 @@ fastest route to first firmware:
 
 ### 2b. Host-driven SWD recovery (no external probe)
 
-Once `GD32_SWDIO` + `GD32_SWCLK` are routed back to V2N pads (per
-the 2026-05-12 hardware decision), the Renesas host itself can
+With `GD32_SWDIO` on Renesas `P70` and `GD32_SWCLK` on Renesas `P71`
+(per the 2026-05-12 hardware decision), the Renesas host itself can
 reflash the GD32 over three GPIOs.  This is the path the field-
 update flow uses when the application bootloader is unreachable
 (corrupt bridge image, factory first-flash, dev-board bring-up).

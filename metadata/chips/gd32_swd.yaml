@@ -2,7 +2,7 @@
 schema_version:   1
 chip_id:          gd32_swd
 driver_status:    partial          # Packet layer + DPIDR + halt + FMC erase/write/verify
-                                   # all coded.  Pad assignments TBD on V2N (see notes).
+                                   # all coded.  V2N pad assignments resolved (P70/P71/P74).
                                    # Flips to "complete" once exercised on real silicon.
 display_name:     "Bit-banged SWD controller (GD32G553 target, V2N host-driven)"
 vendor:           alplab           # Implementation owned by ALP Lab; the underlying SWD
@@ -26,16 +26,22 @@ notes: |
   doubleword PG write).  No vendor SDK pulled in; only public
   algorithms from the Arm spec + the GD32G553 user manual.
 
-  Pad assignments on V2N are still TBD pending the maintainer's
-  next schematic revision; the driver does not encode them -- the
-  caller hands in three pre-opened alp_gpio_t handles.
+  V2N pad assignments (maintainer-confirmed, see signals: below):
+  SWDIO on Renesas P70, SWCLK on Renesas P71, NRST on Renesas P74
+  (shared with the primary PMIC reset-out, open-drain).  P70 and
+  P71 displace what were E1M PWM2 and E1M PWM3 on the Renesas
+  side -- those PWMs remain available via the GD32-driven path
+  (GD32 PB14 / PC5) since the V2N SoM selects PWM source SoM-wide
+  via the resistor-strap option, not per-channel.  The driver
+  still doesn't encode the pad mapping -- the caller hands in
+  three pre-opened alp_gpio_t handles.
 
 bus:              gpio              # bit-bang SWD on three GPIOs
 
 signals:
-  - { name: SWDIO, type: bidir,        v2n_route: "TBD (Renesas)  <-> GD32 PA13",
+  - { name: SWDIO, type: bidir,        v2n_route: "Renesas P70 <-> GD32 PA13",
       notes: "host switches between input and output during data phase + ACK" }
-  - { name: SWCLK, type: output,       v2n_route: "TBD (Renesas)  <-> GD32 PA14",
+  - { name: SWCLK, type: output,       v2n_route: "Renesas P71 <-> GD32 PA14",
       notes: "host-driven; default ~1 MHz; configurable via gd32_swd_set_clock_delay" }
   - { name: NRST,  type: open_drain,   v2n_route: "P74 <-> GD32 NRST",
       notes: "shared with primary PMIC reset out; host pad MUST be open-drain" }
