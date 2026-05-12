@@ -54,6 +54,9 @@ the on-module PMIC fleet, the SoM EEPROM manifest).
 | `v2n-board-id-readout`          | Read the SoM EEPROM manifest + assert the SKU matches the firmware build. |
 | `v2n-pmic-rail-monitor`         | Poll ACT8760 + DA9292 + TPS628640 for fault state every second.          |
 | `v2n-ethernet-dual`             | Bring up both RTL8211FDI PHYs (ET0 + ET1) -- probe, reset, autoneg, link, WoL. |
+| `v2n-eeprom-manifest-dump`      | Hexdump + decode the 128-byte EEPROM manifest at offset 0x0000.          |
+| `v2n-rtc-multi-alarm`           | Register per-source callbacks on the rv3028c7 multi-source dispatcher.   |
+| `v2n-temp-sensor`               | Read the on-module TMP112 once per second; print degrees C.              |
 
 ## Anatomy of an example
 

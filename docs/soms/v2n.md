@@ -112,6 +112,9 @@ Both files are tab-delimited; consume directly or via
 | `v2n-board-id-readout`           | SoM EEPROM manifest read + SKU assertion.                   |
 | `v2n-pmic-rail-monitor`          | 10-second supervisor task polling all three PMIC families.  |
 | `v2n-ethernet-dual`              | Bring up both RTL8211FDI PHYs (ET0 + ET1); WoL configuration.|
+| `v2n-eeprom-manifest-dump`       | Hexdump + decode the 128-byte EEPROM manifest.              |
+| `v2n-rtc-multi-alarm`            | Multi-source callbacks on the rv3028c7 dispatcher.          |
+| `v2n-temp-sensor`                | TMP112 read loop -- classic starter app.                    |
 
 Plus every cross-family example
 (`gpio-button-led`, `i2c-scanner`, `pwm-led-fade`, `rtc-clock`, …).
