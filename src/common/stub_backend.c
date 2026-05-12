@@ -71,6 +71,41 @@ void alp_internal_set_last_error(alp_status_t s)
 }
 
 /* ------------------------------------------------------------------ */
+/* Delay primitives -- minimal calibrated busy-loop fallback.          */
+/*                                                                     */
+/* Yocto + baremetal don't (yet) ship a real impl, so the public       */
+/* alp_delay_us / alp_delay_ms surface lands here as a portable spin   */
+/* loop.  Iteration count is rough -- the function-call + bounds-check */
+/* overhead dominates at high us values; tuning is intentionally       */
+/* avoided to keep stub_backend.c portable across SoCs.  Apps that     */
+/* need cycle-accurate sub-microsecond timing should run on Zephyr     */
+/* (where the backend dispatches to k_busy_wait) or wait for the       */
+/* per-backend HAL bodies to land.                                     */
+/* ------------------------------------------------------------------ */
+
+void alp_delay_us(uint32_t us)
+{
+    if (us == 0u) return;
+    /* ~10 NOPs per us at ~1 GHz with -O0 is in the right ballpark for
+     * SoCs in the Apache-2.0 target list.  Volatile prevents the
+     * optimiser from collapsing the loop. */
+    volatile uint32_t spin = us * 10u;
+    while (spin != 0u) {
+        --spin;
+    }
+}
+
+void alp_delay_ms(uint32_t ms)
+{
+    if (ms == 0u) return;
+    /* Defer to the us path so a future calibration improvement
+     * benefits both surfaces simultaneously. */
+    for (uint32_t i = 0u; i < ms; i++) {
+        alp_delay_us(1000u);
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* I2C / SPI / GPIO / UART (peripheral.h)                              */
 /*                                                                     */
 /* Each class is independently gateable so a backend can override one  */

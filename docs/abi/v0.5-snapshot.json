@@ -3727,6 +3727,14 @@
     },
     "alp/peripheral.h": {
       "functions": {
+        "alp_delay_ms": {
+          "hash": "21c34368c9608371",
+          "signature": "void alp_delay_ms(uint32_t ms);"
+        },
+        "alp_delay_us": {
+          "hash": "2c48785b3707b468",
+          "signature": "void alp_delay_us(uint32_t us);"
+        },
         "alp_gpio_close": {
           "hash": "bff6723b4416ce0b",
           "signature": "void alp_gpio_close(alp_gpio_t *pin);"

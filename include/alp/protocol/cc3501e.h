@@ -189,42 +189,65 @@ typedef enum {
 /* Meta payload formats                                                */
 /* ------------------------------------------------------------------ */
 
-/** Reset-cause codes for @ref alp_cc3501e_diag_info_t::reset_cause. */
+/** Reset-cause codes for @ref alp_cc3501e_diag_info_t::reset_cause.
+ *  Field-level meanings:
+ *   - UNKNOWN: firmware lost track of the cause.
+ *   - POWER_ON: cold boot from PMIC ramp.
+ *   - NRST_PIN: host-driven nRESET edge.
+ *   - SOFT: host-issued CMD_RESET.
+ *   - WATCHDOG: firmware watchdog timeout.
+ *   - BROWNOUT: PMIC under-voltage event.
+ *   - BLE_STACK: BLE stack panic.
+ *   - WIFI_STACK: Wi-Fi stack panic. */
 typedef enum {
-    ALP_CC3501E_RESET_UNKNOWN     = 0u,
-    ALP_CC3501E_RESET_POWER_ON    = 1u,
-    ALP_CC3501E_RESET_NRST_PIN    = 2u,
-    ALP_CC3501E_RESET_SOFT        = 3u, /**< Host-issued CMD_RESET. */
-    ALP_CC3501E_RESET_WATCHDOG    = 4u,
-    ALP_CC3501E_RESET_BROWNOUT    = 5u,
-    ALP_CC3501E_RESET_BLE_STACK   = 6u, /**< BLE stack panic. */
-    ALP_CC3501E_RESET_WIFI_STACK  = 7u, /**< Wi-Fi stack panic. */
+    ALP_CC3501E_RESET_UNKNOWN    = 0u,
+    ALP_CC3501E_RESET_POWER_ON   = 1u,
+    ALP_CC3501E_RESET_NRST_PIN   = 2u,
+    ALP_CC3501E_RESET_SOFT       = 3u,
+    ALP_CC3501E_RESET_WATCHDOG   = 4u,
+    ALP_CC3501E_RESET_BROWNOUT   = 5u,
+    ALP_CC3501E_RESET_BLE_STACK  = 6u,
+    ALP_CC3501E_RESET_WIFI_STACK = 7u,
 } alp_cc3501e_reset_cause_t;
 
-/** Active-role codes for @ref alp_cc3501e_diag_info_t::role. */
+/** Active-role codes for @ref alp_cc3501e_diag_info_t::role.
+ *  Field-level meanings:
+ *   - OFF: radios disabled (deep idle).
+ *   - WIFI_STA: Wi-Fi station mode.
+ *   - WIFI_AP: Wi-Fi soft-AP mode.
+ *   - BLE_PERIPHERAL: BLE peripheral role.
+ *   - BLE_CENTRAL: BLE central role.
+ *   - DUAL_WIFI_BLE: Wi-Fi STA + BLE coexist. */
 typedef enum {
-    ALP_CC3501E_ROLE_OFF             = 0u, /**< Radios disabled. */
-    ALP_CC3501E_ROLE_WIFI_STA        = 1u,
-    ALP_CC3501E_ROLE_WIFI_AP         = 2u,
-    ALP_CC3501E_ROLE_BLE_PERIPHERAL  = 3u,
-    ALP_CC3501E_ROLE_BLE_CENTRAL     = 4u,
-    ALP_CC3501E_ROLE_DUAL_WIFI_BLE   = 5u, /**< Wi-Fi STA + BLE coexist. */
+    ALP_CC3501E_ROLE_OFF            = 0u,
+    ALP_CC3501E_ROLE_WIFI_STA       = 1u,
+    ALP_CC3501E_ROLE_WIFI_AP        = 2u,
+    ALP_CC3501E_ROLE_BLE_PERIPHERAL = 3u,
+    ALP_CC3501E_ROLE_BLE_CENTRAL    = 4u,
+    ALP_CC3501E_ROLE_DUAL_WIFI_BLE  = 5u,
 } alp_cc3501e_role_t;
 
 /** Reply payload for CMD_GET_DIAG_INFO (opcode 0x04).  Firmware
  *  populates these fields once per request from its in-RAM
  *  bookkeeping; reading is non-disturbing (no side effects on
  *  the radio state).  Sized at 16 bytes (one cache line on the
- *  M33) so the SPI reply fits in a single short envelope. */
+ *  M33) so the SPI reply fits in a single short envelope.
+ *  Field-level meanings:
+ *   - fw_version: same value as GET_VERSION returns.
+ *   - reset_cause: one of @ref alp_cc3501e_reset_cause_t.
+ *   - role: one of @ref alp_cc3501e_role_t.
+ *   - uptime_ms: time since power-on / last reset.
+ *   - free_heap_bytes: firmware-allocator free pool.
+ *   - last_error: last @ref alp_cc3501e_resp_t the firmware
+ *     emitted on the wire; @ref ALP_CC3501E_RESP_OK if no error
+ *     since last reset. */
 typedef struct {
-    uint16_t fw_version; /**< Same value as GET_VERSION returns. */
-    uint8_t  reset_cause; /**< One of @ref alp_cc3501e_reset_cause_t. */
-    uint8_t  role; /**< One of @ref alp_cc3501e_role_t. */
-    uint32_t uptime_ms; /**< Time since power-on / last reset. */
-    uint32_t free_heap_bytes; /**< Firmware-allocator free pool. */
-    uint8_t  last_error; /**< Last @ref alp_cc3501e_resp_t the firmware
-                              emitted on the wire; @ref ALP_CC3501E_RESP_OK
-                              if no error since last reset. */
+    uint16_t fw_version;
+    uint8_t  reset_cause;
+    uint8_t  role;
+    uint32_t uptime_ms;
+    uint32_t free_heap_bytes;
+    uint8_t  last_error;
     uint8_t  reserved[3];
 } alp_cc3501e_diag_info_t;
 
@@ -234,36 +257,52 @@ typedef struct {
 
 /** Coarse policy preset for @ref alp_cc3501e_power_policy_t::policy.
  *  Backends round to the closest firmware-supported policy; the
- *  realised policy is reported back via GET_DIAG_INFO if needed. */
+ *  realised policy is reported back via GET_DIAG_INFO if needed.
+ *  Field-level meanings:
+ *   - PERFORMANCE: no idle; lowest latency.
+ *   - BALANCED: default -- idle between events.
+ *   - LOW_POWER: aggressive idle; longer wake.
+ *   - DEEP_SLEEP: radios off; wake-on-host only. */
 typedef enum {
-    ALP_CC3501E_PP_PERFORMANCE = 0u, /**< No idle; lowest latency. */
-    ALP_CC3501E_PP_BALANCED    = 1u, /**< Default: idle between events. */
-    ALP_CC3501E_PP_LOW_POWER   = 2u, /**< Aggressive idle; longer wake. */
-    ALP_CC3501E_PP_DEEP_SLEEP  = 3u, /**< Radios off; wake-on-host only. */
+    ALP_CC3501E_PP_PERFORMANCE = 0u,
+    ALP_CC3501E_PP_BALANCED    = 1u,
+    ALP_CC3501E_PP_LOW_POWER   = 2u,
+    ALP_CC3501E_PP_DEEP_SLEEP  = 3u,
 } alp_cc3501e_pp_preset_t;
 
 /** Wake-event bitmap for @ref alp_cc3501e_power_policy_t::wake_events.
  *  Bits enabled here keep the CC3501E from idling its respective
  *  receive path; bits cleared let the firmware gate that path while
- *  idle.  All-zeros is valid only with PERFORMANCE / BALANCED policies. */
-#define ALP_CC3501E_WAKE_NONE                0x00u
-#define ALP_CC3501E_WAKE_HOST_SPI            0x01u /**< SPI CS edge from host. */
-#define ALP_CC3501E_WAKE_BLE_CONN            0x02u /**< Connected BLE traffic. */
-#define ALP_CC3501E_WAKE_BLE_ADV             0x04u /**< Advertising scanner / responder. */
-#define ALP_CC3501E_WAKE_WIFI_BEACON         0x08u /**< Wi-Fi STA beacon listen. */
-#define ALP_CC3501E_WAKE_WIFI_AP_CLIENT      0x10u /**< Wi-Fi AP client join / leave. */
-#define ALP_CC3501E_WAKE_GPIO_IRQ            0x20u /**< Configured GPIO IRQ from CMD_GPIO_SET_INTERRUPT. */
+ *  idle.  All-zeros is valid only with PERFORMANCE / BALANCED policies.
+ *  Bit-level meanings:
+ *   - HOST_SPI: SPI CS edge from host.
+ *   - BLE_CONN: connected BLE traffic.
+ *   - BLE_ADV: advertising scanner / responder.
+ *   - WIFI_BEACON: Wi-Fi STA beacon listen.
+ *   - WIFI_AP_CLIENT: Wi-Fi AP client join / leave.
+ *   - GPIO_IRQ: configured GPIO IRQ from CMD_GPIO_SET_INTERRUPT. */
+#define ALP_CC3501E_WAKE_NONE 0x00u
+#define ALP_CC3501E_WAKE_HOST_SPI 0x01u
+#define ALP_CC3501E_WAKE_BLE_CONN 0x02u
+#define ALP_CC3501E_WAKE_BLE_ADV 0x04u
+#define ALP_CC3501E_WAKE_WIFI_BEACON 0x08u
+#define ALP_CC3501E_WAKE_WIFI_AP_CLIENT 0x10u
+#define ALP_CC3501E_WAKE_GPIO_IRQ 0x20u
 
 /** Payload of CMD_POWER_POLICY (opcode 0x62).  Hint to the CC3501E
  *  firmware about how aggressively to idle between events.  Takes
- *  effect on the next idle-detection cycle (firmware-defined; ~ms). */
+ *  effect on the next idle-detection cycle (firmware-defined; ~ms).
+ *  Field-level meanings:
+ *   - policy: one of @ref alp_cc3501e_pp_preset_t.
+ *   - wake_events: bitmap of @ref ALP_CC3501E_WAKE_* values.
+ *   - idle_ms_before_sleep: minimum idle time before entering the
+ *     chosen policy's sleep mode.  0 = use firmware default for
+ *     the policy. */
 typedef struct {
-    uint8_t  policy;              /**< One of @ref alp_cc3501e_pp_preset_t. */
-    uint8_t  wake_events;         /**< Bitmap of @ref ALP_CC3501E_WAKE_* values. */
+    uint8_t  policy;
+    uint8_t  wake_events;
     uint16_t reserved;
-    uint32_t idle_ms_before_sleep;/**< Minimum idle time before entering the
-                                        chosen policy's sleep mode.  0 = use
-                                        firmware default for the policy. */
+    uint32_t idle_ms_before_sleep;
 } alp_cc3501e_power_policy_t;
 
 /* ------------------------------------------------------------------ */
@@ -353,9 +392,11 @@ typedef struct {
 
 /** Edge selector for @ref alp_cc3501e_gpio_set_interrupt_t::edge.
  *  Mirrors the firmware-side GPIO controller's edge-trigger mode
- *  registers; named here so callers don't ship magic constants. */
+ *  registers; named here so callers don't ship magic constants.
+ *  NONE doubles as "disable the IRQ" by entering the same code
+ *  path on the firmware side. */
 typedef enum {
-    ALP_CC3501E_GPIO_EDGE_NONE    = 0u, /**< No edge -- disable IRQ. */
+    ALP_CC3501E_GPIO_EDGE_NONE    = 0u,
     ALP_CC3501E_GPIO_EDGE_RISING  = 1u,
     ALP_CC3501E_GPIO_EDGE_FALLING = 2u,
     ALP_CC3501E_GPIO_EDGE_BOTH    = 3u,
@@ -365,11 +406,15 @@ typedef enum {
  *  edge-triggered interrupt on a CC3501E GPIO and dictate which
  *  edge polarity fires the event.  After setup, the firmware
  *  emits an async ALP_CC3501E_EVT_GPIO_INTERRUPT frame on each
- *  matching edge until the host disables (edge = NONE). */
+ *  matching edge until the host disables (edge = NONE).
+ *  Field-level meanings:
+ *   - cc3501e_gpio: CC3501E pad index.
+ *   - edge: one of @ref alp_cc3501e_gpio_edge_t.
+ *   - enabled: 0 = disable; 1 = enable. */
 typedef struct {
-    uint8_t cc3501e_gpio; /**< CC3501E pad index. */
-    uint8_t edge;         /**< One of @ref alp_cc3501e_gpio_edge_t. */
-    uint8_t enabled;      /**< 0 = disable; 1 = enable. */
+    uint8_t cc3501e_gpio;
+    uint8_t edge;
+    uint8_t enabled;
     uint8_t reserved;
 } alp_cc3501e_gpio_set_interrupt_t;
 
@@ -377,12 +422,16 @@ typedef struct {
  *  on every matching edge while the IRQ is enabled.  The timestamp
  *  is the CC3501E firmware's monotonic uptime counter in
  *  microseconds; host code uses it to dedupe / debounce across
- *  SPI poll cycles. */
+ *  SPI poll cycles.
+ *  Field-level meanings:
+ *   - cc3501e_gpio: pad that triggered.
+ *   - level: sampled level on the triggering edge.
+ *   - timestamp_us: CC3501E uptime at the edge. */
 typedef struct {
-    uint8_t  cc3501e_gpio; /**< Pad that triggered. */
-    uint8_t  level; /**< Sampled level on the triggering edge. */
+    uint8_t  cc3501e_gpio;
+    uint8_t  level;
     uint8_t  reserved[2];
-    uint32_t timestamp_us; /**< CC3501E uptime at the edge. */
+    uint32_t timestamp_us;
 } alp_cc3501e_gpio_event_t;
 
 #ifdef __cplusplus

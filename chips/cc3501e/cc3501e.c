@@ -55,15 +55,37 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
          * line to pulse. */
         return ALP_ERR_NOSUPPORT;
     }
-    /* Drive WIFI.EN low, hold reset asserted, release reset, then
-     * raise WIFI.EN.  TI's CC33xx datasheet specifies a >= 10 ms
-     * power-on sequence; we'll add a delay helper in v0.3.x once
-     * the alp_delay_* surface lands.  For now the GPIO sequence
-     * itself is the measurable step. */
-    (void)alp_gpio_write(ctx->enable_pin, false);
+    /* Reset sequence per TI SWRU626 §7.1.5 (CC3501E technical
+     * reference manual):
+     *
+     *   1. Assert nRESET low while bringing rails down so the
+     *      chip stays clamped through the supply transition.
+     *   2. Drop WIFI_EN low; wait briefly for the rails to
+     *      discharge (10us is comfortably above the rail RC).
+     *   3. Raise WIFI_EN; wait ~5 ms for the supply ramps to
+     *      stabilise (typical PMIC soft-start window).
+     *   4. Hold nRESET low for >= 10 us per §7.1.5 after the
+     *      supplies are valid.
+     *   5. Release nRESET; wait the T1+T2+T3+T4 boot budget
+     *      (~900 ms typical for BL1 + BL2 + Chain-of-Trust)
+     *      before the first PING is meaningful.
+     *
+     * Total blocking time: ~905 ms.  Callers that don't want
+     * the synchronous wait can call cc3501e_reset asynchronously
+     * (kicked off from a worker thread) and poll via PING; v0.3.x
+     * adds a non-blocking variant once the firmware's "boot done"
+     * GPIO is wired. */
     (void)alp_gpio_write(ctx->reset_pin, false);
+    (void)alp_gpio_write(ctx->enable_pin, false);
+    alp_delay_us(10u);
     (void)alp_gpio_write(ctx->enable_pin, true);
+    alp_delay_ms(5u);
+    /* nRESET stays low through the rail ramp; this assignment is
+     * idempotent but kept explicit for clarity. */
+    (void)alp_gpio_write(ctx->reset_pin, false);
+    alp_delay_us(10u);
     (void)alp_gpio_write(ctx->reset_pin, true);
+    alp_delay_ms(900u);
     return ALP_OK;
 }
 

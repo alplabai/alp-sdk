@@ -79,6 +79,40 @@ typedef enum {
 alp_status_t alp_last_error(void);
 
 /* ------------------------------------------------------------------ */
+/* Delay primitives                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Busy-wait for at least @p us microseconds.
+ *
+ * Backends use the platform's cycle-accurate spin primitive
+ * (Zephyr's @c k_busy_wait, Yocto's @c clock_nanosleep with a
+ * busy-loop fallback, vendor-HAL spin on baremetal).  Does not
+ * yield to other threads -- callers needing scheduler-friendly
+ * waits should use @ref alp_delay_ms for sub-thread-tick durations
+ * or k_msleep / equivalent directly.
+ *
+ * Useful for sub-millisecond hardware-timing sequences (chip
+ * power-on hold times, bus deassert intervals, post-write settle
+ * delays).  Precision is platform-defined; the contract is
+ * "at least @p us microseconds elapse before return".
+ *
+ * @param[in] us  Microseconds to spin.  0 = no-op.
+ */
+void alp_delay_us(uint32_t us);
+
+/**
+ * @brief Sleep the calling thread for at least @p ms milliseconds.
+ *
+ * Yields to the scheduler so other threads can run during the
+ * wait (unlike @ref alp_delay_us).  On baremetal this falls
+ * through to a calibrated busy-loop since there's no scheduler.
+ *
+ * @param[in] ms  Milliseconds to sleep.  0 = no-op.
+ */
+void alp_delay_ms(uint32_t ms);
+
+/* ------------------------------------------------------------------ */
 /* GPIO                                                                */
 /* ------------------------------------------------------------------ */
 

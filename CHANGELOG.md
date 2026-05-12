@@ -397,6 +397,43 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`<alp/peripheral.h>` -- portable busy-wait + sleep primitives
+  + CC3501E §5.5 reset-timing fix (2026-05-14).**  Adds two new
+  portable delay surfaces that the prior CC3501E integration plan
+  flagged as a missing primitive blocking §5.5:
+
+  * `alp_delay_us(us)` -- busy-wait for at least `us` microseconds.
+    Cycle-accurate spin, no scheduler yield.  Zephyr backend wraps
+    `k_busy_wait`; baremetal / yocto stub_backend.c provides a
+    calibrated portable-C busy-loop fallback (rough but link-clean
+    on every backend).
+  * `alp_delay_ms(ms)` -- yielding sleep for at least `ms`
+    milliseconds.  Zephyr wraps `k_msleep`; stub falls through to
+    the us path 1000x per iteration.
+
+  `chips/cc3501e/cc3501e.c::cc3501e_reset()` now follows the
+  SWRU626 §7.1.5 power-on / reset sequence:
+    1. Assert nRESET low + drop rails (10us settle).
+    2. Raise rails (WIFI_EN high), wait ~5 ms for supply
+       stabilisation.
+    3. Hold nRESET low for >= 10 us with valid supplies (§7.1.5).
+    4. Release nRESET, wait the T1+T2+T3+T4 ~900 ms boot budget
+       (BL1 + BL2 + Chain-of-Trust) before returning.
+
+  Total blocking time: ~905 ms (was: returns immediately, racing
+  the first PING against the boot chain).  Callers that don't
+  want the synchronous wait can fire cc3501e_reset from a worker
+  thread and poll via PING; a non-blocking variant lands once
+  the firmware-side "boot done" GPIO is wired (§5.6 dep).
+
+  Together this closes §5.5 of the CC3501E integration plan
+  (`docs/cc3501e-integration-plan.md`).
+
+  Doxygen coverage moves 288 -> 290 (= 100%) -- both new public
+  functions ship with full `@brief` / `@param` tags.  Wired
+  unconditionally on every build: alp_delay_* is foundational
+  enough to belong outside any opt-in Kconfig gate.
+
 - **`<alp/protocol/cc3501e.h>` -- extended diagnostics + power
   policy opcodes (§2A.2 plan §5.4 + §5.7, 2026-05-14).**  Two
   new opcodes + their wire payload structs:

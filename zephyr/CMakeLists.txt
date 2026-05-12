@@ -12,6 +12,7 @@ endif()
 zephyr_library_named(alp_sdk)
 
 zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/delay_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/handles.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/last_error.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_i2c.c
