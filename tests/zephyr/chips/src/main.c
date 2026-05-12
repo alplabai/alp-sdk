@@ -2018,3 +2018,50 @@ ZTEST(alp_chips, test_tas2563_calls_reject_uninitialised)
     zassert_equal(tas2563_set_mode(&ctx, (tas2563_mode_t)0), ALP_ERR_NOT_READY);
     zassert_equal(tas2563_set_hw_enable(&ctx, true), ALP_ERR_NOT_READY);
 }
+
+/* ------------------------------------------------------------------ */
+/* GD32G553 v0.5 host helpers (§2B.2 + §2B.3 + Task #10) -- NOT_READY  */
+/* + INVAL contracts against an uninitialised ctx.  Wire-side          */
+/* behaviour validates against the firmware HAL bodies in HW-in-loop. */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32g553_v05_calls_reject_uninitialised)
+{
+    gd32g553_t ctx       = {0};
+    uint32_t   period_ns = 0u;
+    uint32_t   pulse_ns  = 0u;
+
+    /* Every v0.5 host helper must reject an uninitialised ctx with
+     * NOT_READY -- the standard chip-driver lifecycle contract.
+     * Real wire dispatch only happens after gd32g553_init() flips
+     * ctx.initialised; until then the helpers short-circuit. */
+    zassert_equal(gd32g553_pwm_capture_begin(&ctx, 0u, 0u), ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_pwm_capture_read(&ctx, 0u, &period_ns, &pulse_ns), ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_pwm_capture_end(&ctx, 0u), ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_pwm_single_pulse(&ctx, 0u, 1000u), ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_timer_sync(&ctx, 0u, 1u, 0u), ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_power_mode_set(&ctx, 1u, 0u, 0u), ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
+{
+    gd32g553_t ctx = {.initialised = true};
+
+    /* pwm_capture_begin rejects edge > 2 (i.e. outside RISING /
+     * FALLING / BOTH). */
+    zassert_equal(gd32g553_pwm_capture_begin(&ctx, 0u, 3u), ALP_ERR_INVAL);
+    zassert_equal(gd32g553_pwm_capture_begin(&ctx, 0u, 99u), ALP_ERR_INVAL);
+
+    /* pwm_capture_read rejects both NULL out-params (caller wants
+     * something out of the call). */
+    zassert_equal(gd32g553_pwm_capture_read(&ctx, 0u, NULL, NULL), ALP_ERR_INVAL);
+
+    /* pwm_single_pulse rejects pulse_ns == 0 (zero-width pulse
+     * is meaningless and likely caller error). */
+    zassert_equal(gd32g553_pwm_single_pulse(&ctx, 0u, 0u), ALP_ERR_INVAL);
+
+    /* power_mode_set rejects mode > 3 (outside RUN / SLEEP /
+     * DEEP_SLEEP / STANDBY). */
+    zassert_equal(gd32g553_power_mode_set(&ctx, 4u, 0u, 0u), ALP_ERR_INVAL);
+    zassert_equal(gd32g553_power_mode_set(&ctx, 99u, 0u, 0u), ALP_ERR_INVAL);
+}
