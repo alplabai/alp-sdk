@@ -690,6 +690,46 @@ ZTEST(alp_peripheral, test_storage_configure_inline_aes_bad_key_bytes_returns_in
 }
 
 /* ------------------------------------------------------------------ */
+/* alp_delay_us / alp_delay_ms portable busy-wait + sleep primitives  */
+/*                                                                    */
+/* These are foundational helpers (CC3501E §5.5 reset-timing needs    */
+/* them; deepx_dxm1_bring_up also calls in).  Tests verify the 0=no-op */
+/* contract and that non-zero delays actually elapse at least the     */
+/* requested wall-clock time.                                         */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_peripheral, test_delay_us_zero_is_noop)
+{
+    /* 0 = no-op contract.  Must not crash; should return immediately. */
+    alp_delay_us(0u);
+}
+
+ZTEST(alp_peripheral, test_delay_ms_zero_is_noop)
+{
+    alp_delay_ms(0u);
+}
+
+ZTEST(alp_peripheral, test_delay_ms_elapses_at_least_requested)
+{
+    /* alp_delay_ms wraps k_msleep on Zephyr -- yields, so the
+     * wall-clock elapsed time may be slightly LONGER than the
+     * request (scheduler granularity) but must NEVER be less. */
+    const int64_t before = k_uptime_get();
+    alp_delay_ms(20u);
+    const int64_t elapsed = k_uptime_get() - before;
+    zassert_true(elapsed >= 20, "delay_ms(20) returned after only %lld ms", elapsed);
+}
+
+ZTEST(alp_peripheral, test_delay_us_short_spin_returns)
+{
+    /* alp_delay_us wraps k_busy_wait -- doesn't yield.  Verifying
+     * precise sub-millisecond timing under native_sim is unreliable
+     * (the simulator's busy-wait calibration varies), so this test
+     * only checks the call returns at all for a short spin. */
+    alp_delay_us(100u);
+}
+
+/* ------------------------------------------------------------------ */
 /* SoC capability validation (only meaningful with a SoC choice set)  */
 /* ------------------------------------------------------------------ */
 
