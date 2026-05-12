@@ -516,6 +516,27 @@ config ALP_SDK_SECURITY
 	  subsystem, Renesas RZ/V2N RSIP).  When OFF the wrapper
 	  falls back to NULL / NOSUPPORT.
 
+config ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
+	bool "Feed the GD32 supervisor's TRNG into MbedTLS entropy on V2N"
+	default y if ALP_SDK_V2N_SUPERVISOR && ALP_SDK_SECURITY
+	depends on ALP_SDK_V2N_SUPERVISOR && ALP_SDK_SECURITY
+	help
+	  Compile the mbedtls_hardware_poll() implementation in
+	  src/zephyr/security_zephyr.c that drains true-random bytes
+	  from the GD32G553 supervisor's NIST SP800-90B pre-certified
+	  TRNG.  The mbedtls profile (metadata/library-profiles/mbedtls/
+	  mbedtls_config.h) sets MBEDTLS_NO_PLATFORM_ENTROPY, so
+	  mbedtls's entropy module asks the SDK to supply the platform
+	  entropy poll callback; this option provides that symbol on
+	  V2N.  The portable alp_random_bytes() transparently benefits
+	  -- PSA Crypto's DRBG seeds from this source the first time
+	  it's drawn from.  No effect on alp_random_bytes's public
+	  contract (still ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_IO /
+	  ALP_ERR_INVAL); the GD32 dependency is invisible to apps.
+	  Off-V2N builds leave this OFF -- mbedtls picks whatever
+	  hardware_poll the active vendor's HAL registered, or falls
+	  back to ALP_ERR_IO on alp_random_bytes if nothing is wired.
+
 config ALP_SDK_MPROC
 	bool "Real multi-processor IPC for <alp/mproc.h>"
 	default y if MBOX

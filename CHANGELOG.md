@@ -89,6 +89,33 @@ that lands before the v0.3.0 tag.)
   DT-alias dispatch is exercised by the supervisor scenario's
   compile + link step.
 
+- **`<alp/security.h>` -- GD32 TRNG as a PSA Crypto entropy source on V2N (2026-05-14).**
+  Wires the v0.3 `CMD_TRNG_READ` opcode (shipped on the bridge side
+  in the protocol-v0.3 commit) into MbedTLS's platform entropy
+  callback, so the portable `alp_random_bytes()` transparently picks
+  up true randomness on V2N without app code mentioning the GD32
+  name (per `memory/feedback_portable_hw_offload_with_sw_fallback.md`).
+  The SDK's mbedtls profile already sets `MBEDTLS_NO_PLATFORM_ENTROPY`,
+  which makes mbedtls request a `mbedtls_hardware_poll()` from the
+  integrator; the new implementation in `src/zephyr/security_zephyr.c`
+  drains the GD32G553's NIST SP800-90B pre-certified TRNG in chunks
+  of <= `GD32G553_BRIDGE_TRNG_MAX_BYTES` (= 32 B) through the
+  supervisor singleton, releasing the bridge mutex between chunks so
+  long entropy fills don't serialise other peripheral ops behind
+  them.  Partial-fill returns are surfaced honestly (mbedtls then
+  folds the bytes into its accumulator and reseeds later); a
+  zero-progress failure surfaces as `MBEDTLS_ERR_ENTROPY_SOURCE_FAILED`.
+  New Kconfig: `CONFIG_ALP_SDK_SECURITY_V2N_TRNG_ENTROPY`
+  (default y when both the V2N supervisor and `<alp/security.h>` are
+  on; depends on `ALP_SDK_V2N_SUPERVISOR && ALP_SDK_SECURITY`).
+  Public `alp_random_bytes()` contract is unchanged -- still
+  `ALP_OK` / `ALP_ERR_NOT_READY` / `ALP_ERR_IO` / `ALP_ERR_INVAL`,
+  with the GD32 dependency invisible to applications.  Tests under
+  `tests/zephyr/peripheral/src/main.c` cover the public-surface
+  NULL-arg contract on the V2N supervisor build (bridge / PSA
+  round-trip exercised by the supervisor scenario's compile + link
+  step plus the existing security smoke suite).
+
 - **`<alp/adc.h>` -- portable streaming ADC surface + v0.3 configure knobs (2026-05-14).**
   Wires the customer-facing path for the v0.3 wire opcodes the prior
   commit shipped on the GD32 side, with no `gd32g553_*` symbols

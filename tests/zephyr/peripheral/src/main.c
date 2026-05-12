@@ -20,6 +20,7 @@
 #include "alp/can.h"
 #include "alp/rtc.h"
 #include "alp/wdt.h"
+#include "alp/security.h"
 #include "alp/soc_caps.h"
 
 ZTEST_SUITE(alp_peripheral, NULL, NULL, NULL, NULL, NULL);
@@ -535,6 +536,27 @@ ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_zero_rate_inval)
     });
     zassert_is_null(s);
     zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+/* ------------------------------------------------------------------ */
+/* §2A.3 -- GD32 TRNG as a PSA Crypto entropy source.                  */
+/*                                                                     */
+/* On V2N, src/zephyr/security_zephyr.c registers an                   */
+/* mbedtls_hardware_poll() that drains the supervisor's GD32G553 TRNG  */
+/* into mbedtls's platform entropy callback (gated on                  */
+/* CONFIG_ALP_SDK_SECURITY_V2N_TRNG_ENTROPY).  The full PSA round-trip */
+/* requires a running mbedtls stack which the peripheral scenario      */
+/* doesn't pull in; what we *can* check here is that the portable      */
+/* alp_random_bytes() surface itself stays well-behaved on the         */
+/* NULL-arg path under the V2N supervisor build -- i.e. the link       */
+/* of the new entropy code path didn't accidentally regress the        */
+/* public surface's contract.                                          */
+/* ------------------------------------------------------------------ */
+ZTEST(alp_peripheral, test_v2n_supervisor_random_bytes_null_invalid)
+{
+    /* Public surface contract: NULL out + non-zero len -> INVAL,
+     * regardless of whether the entropy source is the GD32 TRNG. */
+    zassert_equal(alp_random_bytes(NULL, 16), ALP_ERR_INVAL);
 }
 
 #endif  /* CONFIG_ALP_SDK_V2N_SUPERVISOR */

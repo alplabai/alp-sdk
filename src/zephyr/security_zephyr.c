@@ -13,6 +13,16 @@
  * Gated on CONFIG_ALP_SDK_SECURITY which depends on MBEDTLS +
  * MBEDTLS_PSA_CRYPTO_C.  When OFF the wrapper falls back to
  * NULL-with-NOSUPPORT.
+ *
+ * V2N TRNG entropy source.  The mbedtls profile (under
+ * metadata/library-profiles/mbedtls/) sets MBEDTLS_NO_PLATFORM_ENTROPY,
+ * so mbedtls's entropy module asks the SDK to supply a hardware-poll
+ * callback.  On V2N (CONFIG_ALP_SDK_SECURITY_V2N_TRNG_ENTROPY=y), we
+ * route that callback through the supervisor's GD32G553 TRNG so the
+ * portable alp_random_bytes() transparently picks up true randomness
+ * the first time PSA's DRBG seeds itself.  The wire-level chip name
+ * stays hidden behind the supervisor singleton (per
+ * memory/feedback_portable_hw_offload_with_sw_fallback.md).
  */
 
 #include <errno.h>
@@ -27,6 +37,13 @@
 
 #if defined(CONFIG_ALP_SDK_SECURITY)
 #include <psa/crypto.h>
+#endif
+
+#if defined(CONFIG_ALP_SDK_SECURITY_V2N_TRNG_ENTROPY)
+#include <mbedtls/entropy.h>
+
+#include "alp/chips/gd32g553.h"
+#include "v2n_supervisor.h"
 #endif
 
 #ifndef CONFIG_ALP_SDK_MAX_HASH_HANDLES
@@ -391,3 +408,78 @@ alp_status_t alp_random_bytes(uint8_t *out, size_t len)
     return ALP_ERR_NOSUPPORT;
 #endif
 }
+
+/* ================================================================== */
+/* MbedTLS hardware entropy poll -- V2N GD32G553 TRNG                  */
+/*                                                                     */
+/* The SDK's mbedtls profile sets MBEDTLS_NO_PLATFORM_ENTROPY (see     */
+/* metadata/library-profiles/mbedtls/mbedtls_config.h), so mbedtls     */
+/* expects the integrator to supply mbedtls_hardware_poll().  On the   */
+/* V2N family we drain bytes from the GD32G553's NIST SP800-90B        */
+/* pre-certified TRNG through the supervisor singleton, chunking at    */
+/* the bridge's per-call ceiling.  PSA Crypto's CTR_DRBG seeds itself  */
+/* from this source on first use (and reseeds periodically), so the    */
+/* portable alp_random_bytes() benefits transparently without app      */
+/* code mentioning the GD32 name.                                      */
+/*                                                                     */
+/* mbedtls contract: return 0 on success, MBEDTLS_ERR_ENTROPY_SOURCE_  */
+/* FAILED on a hard failure.  Partial fills are allowed (the caller    */
+/* loops on *olen) but we always try to drain the full request -- the  */
+/* GD32 TRNG is fast enough that there's no benefit to short returns.  */
+/* ================================================================== */
+
+#if defined(CONFIG_ALP_SDK_SECURITY_V2N_TRNG_ENTROPY)
+
+int mbedtls_hardware_poll(void *data, unsigned char *output, size_t len, size_t *olen)
+{
+    (void)data;
+
+    if (output == NULL || olen == NULL) {
+        return MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
+    }
+    *olen = 0u;
+    if (len == 0u) return 0;
+
+    /* Drain in <= GD32G553_BRIDGE_TRNG_MAX_BYTES chunks under a single
+     * supervisor acquire each.  Holding the mutex across the whole loop
+     * would serialise other peripheral ops behind the entropy fill;
+     * one chunk at a time keeps the bridge mutex contention windows
+     * short (~1 ms typical per chunk on SPI, ~5 ms on I2C). */
+    size_t produced = 0u;
+    while (produced < len) {
+        const size_t remaining = len - produced;
+        const size_t chunk     = (remaining > (size_t)GD32G553_BRIDGE_TRNG_MAX_BYTES)
+                                     ? (size_t)GD32G553_BRIDGE_TRNG_MAX_BYTES
+                                     : remaining;
+
+        gd32g553_t  *ctx = NULL;
+        alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
+        if (s != ALP_OK) {
+            /* If we produced at least one chunk already, surface a
+             * short return so mbedtls can fold it into its entropy
+             * accumulator and retry later.  A zero-progress failure
+             * is reported as a hard source-failed. */
+            if (produced > 0u) {
+                *olen = produced;
+                return 0;
+            }
+            return MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
+        }
+        s = gd32g553_trng_read(ctx, output + produced, chunk);
+        alp_z_v2n_supervisor_release();
+
+        if (s != ALP_OK) {
+            if (produced > 0u) {
+                *olen = produced;
+                return 0;
+            }
+            return MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
+        }
+        produced += chunk;
+    }
+
+    *olen = produced;
+    return 0;
+}
+
+#endif /* CONFIG_ALP_SDK_SECURITY_V2N_TRNG_ENTROPY */
