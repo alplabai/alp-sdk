@@ -397,6 +397,29 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`<alp/camera.h>::alp_camera_configure_isp` -- ISP
+  configuration surface for AEN-family Mali-C55 ISP (AEN audit
+  §4.3 top-five gap, 2026-05-14).**  Extends the existing
+  `<alp/camera.h>` stub with the missing in-line ISP path:
+
+  * `alp_camera_isp_config_t` with the coarse pipeline toggles
+    (auto_exposure / auto_white_balance / auto_focus /
+    lens_shading / dead_pixel_correction / noise_reduction)
+    plus picture-tuning offsets (brightness / contrast /
+    saturation, -128..+127).
+  * `alp_camera_configure_isp(camera, isp)` applies the config;
+    safe to call before or after `alp_camera_start`; backends
+    latch + apply on the next frame boundary.
+
+  v0.5 ships the surface with NOSUPPORT contract on every
+  backend (`src/zephyr/camera_stub.c` + `src/common/stub_backend.c`)
+  -- the AEN Mali-C55 HAL wiring lands once the Alif vendor pack
+  registers a Zephyr-side ISP-config callback on the camera
+  device.  V2N never gets a real impl (no on-die ISP).
+  Customers writing portable code that wants ISP tuning can
+  ship today; the call gracefully degrades to NOSUPPORT on
+  SoMs without an ISP.
+
 - **`<alp/gpu2d.h>` -- portable 2D graphics accelerator surface
   (AEN audit §4.3 top-five gap, 2026-05-14).**  Closes the
   headline gap from the Alif Ensemble feature audit

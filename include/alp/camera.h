@@ -58,6 +58,73 @@ alp_status_t alp_camera_release(alp_camera_t *c, alp_camera_frame_t *frame);
 /** @brief Close the handle and release backend resources.  Idempotent. */
 void alp_camera_close(alp_camera_t *c);
 
+/* ================================================================== */
+/* ISP (Image Signal Processor) configuration                          */
+/*                                                                     */
+/* Wave-2 audit (docs/aen-feature-audit-2026-05.md §4.3) NEEDS-       */
+/* PORTABLE-SURFACE: AEN-family E4 / E6 / E8 ship a dedicated ISP     */
+/* (Alif's hardened Mali-C55 path) that Zephyr's portable             */
+/* drivers/video/ class doesn't expose at the on-chip-ISP level --     */
+/* the existing class covers sensor bridges + format negotiation but   */
+/* not in-line image processing.  Customers migrating from V2N to     */
+/* AEN otherwise silently lose ISP acceleration.                       */
+/*                                                                     */
+/* The minimal v0.5 surface declared below covers the headline ISP    */
+/* primitives most cameras want enabled by default; finer-grained     */
+/* tuning (per-channel gain tables, lens-shading-correction LUTs,     */
+/* white-balance setpoints) can be added in follow-up commits as     */
+/* customer demand surfaces.                                          */
+/* ================================================================== */
+
+/** Coarse ISP feature toggles.  All-zeros = bypass / passthrough --
+ *  the sensor's raw frame reaches the application unchanged.  Each
+ *  bit enables one major ISP pipeline stage.  Field-level meanings:
+ *   - auto_exposure: AE convergence loop adjusts exposure +
+ *     analog/digital gain.
+ *   - auto_white_balance: AWB statistics drive the per-channel
+ *     gain block.
+ *   - auto_focus: drives the lens VCM (cameras with a focusable
+ *     lens module).
+ *   - lens_shading: applies the lens vignetting-correction LUT.
+ *   - dead_pixel_correction: replaces flagged stuck pixels with
+ *     neighbour-averaged values.
+ *   - noise_reduction: 2D / 3D temporal NR (backend-defined). */
+typedef struct {
+    bool auto_exposure;
+    bool auto_white_balance;
+    bool auto_focus;
+    bool lens_shading;
+    bool dead_pixel_correction;
+    bool noise_reduction;
+    /** Picture-tuning offsets, -128..+127.  Applied after the
+     *  auto-* feedback loops resolve to their setpoints.
+     *  Field-level meanings:
+     *   - brightness: pre-gamma luma offset.
+     *   - contrast: luma scale around mid-grey.
+     *   - saturation: chroma scale around grey (0 = monochrome). */
+    int8_t brightness;
+    int8_t contrast;
+    int8_t saturation;
+    uint8_t reserved;
+} alp_camera_isp_config_t;
+
+/**
+ * @brief Apply an ISP configuration to an open camera stream.
+ *
+ * Safe to call before or after @ref alp_camera_start; backends
+ * latch the config and apply on the next frame boundary.
+ * Backends without an on-die ISP return @ref ALP_ERR_NOSUPPORT.
+ *
+ * @param[in] camera  Handle from @ref alp_camera_open.
+ * @param[in] isp     Configuration.  Must be non-NULL.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
+ *         ALP_ERR_NOSUPPORT (backend lacks an ISP -- V2N today,
+ *         AEN-family E3 / E5 / E7 silicon without the
+ *         optional ISP fabric) / ALP_ERR_IO.
+ */
+alp_status_t alp_camera_configure_isp(alp_camera_t *camera, const alp_camera_isp_config_t *isp);
+
 #ifdef __cplusplus
 }
 #endif

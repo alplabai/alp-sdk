@@ -628,6 +628,10 @@
           "hash": "7f3bd22a2231118d",
           "signature": "void alp_camera_close(alp_camera_t *c);"
         },
+        "alp_camera_configure_isp": {
+          "hash": "d99ef9681316b5cd",
+          "signature": "alp_status_t alp_camera_configure_isp(alp_camera_t *camera, const alp_camera_isp_config_t *isp);"
+        },
         "alp_camera_release": {
           "hash": "9c155c4bf49789d5",
           "signature": "alp_status_t alp_camera_release(alp_camera_t *c, alp_camera_frame_t *frame);"
@@ -646,6 +650,10 @@
         "alp_camera_t": {
           "definition": "typedef struct alp_camera alp_camera_t;",
           "hash": "fe9acbb85337fbe2"
+        },
+        "auto_exposure": {
+          "definition": "typedef struct { bool auto_exposure;",
+          "hash": "34106721a3169d9b"
         },
         "camera_id": {
           "definition": "typedef struct { uint32_t camera_id;",

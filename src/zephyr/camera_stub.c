@@ -44,3 +44,13 @@ alp_status_t alp_camera_release(alp_camera_t *c, alp_camera_frame_t *frame) {
 void alp_camera_close(alp_camera_t *c) {
     (void)c;
 }
+
+alp_status_t alp_camera_configure_isp(alp_camera_t *camera, const alp_camera_isp_config_t *isp)
+{
+    if (isp == NULL) return ALP_ERR_INVAL;
+    (void)camera;
+    /* Backends without an on-die ISP return NOSUPPORT.  The AEN
+     * Mali-C55 HAL wiring lands once the vendor pack registers a
+     * Zephyr-side ISP-config callback on the camera device. */
+    return ALP_ERR_NOSUPPORT;
+}

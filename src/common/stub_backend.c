@@ -1210,3 +1210,14 @@ void alp_gpu2d_close(alp_gpu2d_t *g)
 {
     (void)g;
 }
+
+/* ------------------------------------------------------------------ */
+/* Camera ISP (alp/camera.h v0.5 extension)                            */
+/* ------------------------------------------------------------------ */
+
+alp_status_t alp_camera_configure_isp(alp_camera_t *c, const alp_camera_isp_config_t *isp)
+{
+    if (isp == NULL) return ALP_ERR_INVAL;
+    (void)c;
+    return ALP_ERR_NOSUPPORT;
+}
