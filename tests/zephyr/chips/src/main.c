@@ -2027,7 +2027,7 @@ ZTEST(alp_chips, test_tas2563_calls_reject_uninitialised)
 
 ZTEST(alp_chips, test_gd32g553_v05_calls_reject_uninitialised)
 {
-    gd32g553_t ctx       = {0};
+    gd32g553_t ctx       = { 0 };
     uint32_t   period_ns = 0u;
     uint32_t   pulse_ns  = 0u;
 
@@ -2045,7 +2045,7 @@ ZTEST(alp_chips, test_gd32g553_v05_calls_reject_uninitialised)
 
 ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
 {
-    gd32g553_t ctx = {.initialised = true};
+    gd32g553_t ctx = { .initialised = true };
 
     /* pwm_capture_begin rejects edge > 2 (i.e. outside RISING /
      * FALLING / BOTH). */
