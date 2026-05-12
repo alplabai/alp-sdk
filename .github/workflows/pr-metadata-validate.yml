@@ -56,6 +56,11 @@ jobs:
       - name: Validate every SoC file against the v1 schema
         run: python3 scripts/validate_metadata.py
 
+      # Catches pad-uniqueness regressions when two peripherals
+      # accidentally claim the same silicon pad on a SoM pinout.
+      - name: Check pin conflicts in every SoM peripheral map
+        run: python3 scripts/check_pin_conflicts.py
+
       # Smoke-test the board.yaml loader on the canonical example so
       # any schema / loader regression is caught at PR time rather
       # than v0.4-load-test time.  Exercises every emit format.

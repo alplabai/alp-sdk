@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/som-preset-v1.schema.json",
+  "title": "ALP SoM preset (metadata/e1m_modules/<SKU>/som.yaml) v1",
+  "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  This schema validates the structural shape of every released-MPN preset; per-section tightness varies (the i2c_devices block is strictly typed; populated-parts refs stay loose because chip names are an open set governed by metadata/chips/<name>.yaml).",
+  "type": "object",
+  "required": ["schema_version", "sku", "family", "silicon"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "sku": {
+      "type": "string",
+      "pattern": "^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$"
+    },
+    "family": {
+      "type": "string"
+    },
+    "silicon": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+:[a-z0-9_-]+:[a-z0-9_-]+$",
+      "description": "Triple-colon silicon ref, e.g. `renesas:rzv2n:n44`, `alif:ensemble:e7`, `nxp:imx9:imx93`."
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "on_module": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Populated on-module chips + I2C bus topology.  Most fields stay open since chip names + roles are an open set; the `i2c_devices` sub-block is strictly typed.",
+      "properties": {
+        "i2c_devices": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/i2c_bus"
+          },
+          "description": "Per-bus I2C device tables.  Keys are bus identifiers (e.g. `brd_i2c`, `e1m_i2c0`) consumed by the SDK loader."
+        }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "inference": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "default_hw_rev": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$"
+    },
+    "default_carrier": {
+      "type": "string"
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "i2c_bus": {
+      "type": "object",
+      "required": ["devices"],
+      "additionalProperties": false,
+      "properties": {
+        "bus_master": {
+          "type": "string",
+          "description": "Which silicon drives the bus (informational)."
+        },
+        "bus_pads": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Per-silicon bus pad assignments (informational)."
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/i2c_device"
+          },
+          "minItems": 0
+        }
+      }
+    },
+    "i2c_device": {
+      "type": "object",
+      "required": ["chip", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "chip": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$",
+          "description": "Chip-id slug matching a `metadata/chips/<chip>.yaml` manifest."
+        },
+        "role": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Role this chip plays on the bus, e.g. `pmic_main_page0`, `rtc`, `temp_sensor`."
+        },
+        "address_7bit": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^0x[0-9A-Fa-f]{1,2}$",
+              "description": "7-bit I2C address as a hex string, e.g. \"0x50\"."
+            },
+            {
+              "type": "string",
+              "const": "TBD",
+              "description": "Address pending the user-supplied HW-config writeup."
+            },
+            {
+              "type": "string",
+              "const": "configurable",
+              "description": "Address picked by the chip's firmware (e.g. GD32 supervisor MCU) -- not a hardware-fixed value."
+            }
+          ]
+        },
+        "assembled": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "string", "enum": ["optional"] }
+          ],
+          "description": "Population status: true (default), false (DNI), or \"optional\" (assembled per BOM variant)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-form note (rare in the public form -- design rationale belongs in the private metadata repo)."
+        }
+      }
+    }
+  }
+}

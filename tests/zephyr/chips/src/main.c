@@ -28,6 +28,8 @@
 #include "alp/chips/icm42670.h"
 #include "alp/chips/bmi323.h"
 #include "alp/chips/bmp581.h"
+#include "alp/chips/gd32g553.h"
+#include "alp/chips/rtl8211fdi.h"
 
 #include "fakes.h"
 
@@ -964,3 +966,119 @@ ZTEST(alp_chips, test_fake_bme280_compensate_matches_datasheet_example)
 }
 
 #endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_lsm6dso)) — fake-emul block */
+
+/* ------------------------------------------------------------------ */
+/* gd32g553 -- V2N supervisor MCU host driver, NULL-arg validation     */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32g553_init_null_ctx)
+{
+    zassert_equal(gd32g553_init(NULL, NULL, NULL, 0u), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_gd32g553_init_no_bus_handles)
+{
+    gd32g553_t ctx;
+    zassert_equal(gd32g553_init(&ctx, NULL, NULL, 0u), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_gd32g553_init_invalid_i2c_addr)
+{
+    gd32g553_t ctx;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 100000,
+    });
+    zassert_not_null(bus);
+    zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x80u), ALP_ERR_INVAL,
+                  "8-bit address through the 7-bit API must be rejected");
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_gd32g553_post_init_calls_reject_uninitialised)
+{
+    gd32g553_t ctx = {0};
+    zassert_equal(gd32g553_set_default_transport(&ctx, GD32G553_TRANSPORT_SPI),
+                  ALP_ERR_NOT_READY);
+
+    uint32_t levels;
+    zassert_equal(gd32g553_gpio_read(&ctx, 0u, &levels), ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_gpio_write(&ctx, 0u, 0u),     ALP_ERR_NOT_READY);
+
+    uint8_t pmic = 0u;
+    zassert_equal(gd32g553_da9292_status_forward(&ctx, &pmic), ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_chips, test_gd32g553_pwm_set_invalid_duty)
+{
+    gd32g553_t ctx = {.initialised = true};
+    zassert_equal(gd32g553_pwm_set(&ctx, 0u, 100000u, 200000u),
+                  ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_gd32g553_adc_read_invalid_samples)
+{
+    gd32g553_t ctx = {.initialised = true};
+    uint16_t   mv[16];
+
+    zassert_equal(gd32g553_adc_read(&ctx, 0u, 0u, mv), ALP_ERR_INVAL);
+    zassert_equal(gd32g553_adc_read(&ctx, 0u, GD32G553_BRIDGE_ADC_MAX_SAMPLES + 1u, mv),
+                  ALP_ERR_INVAL);
+    zassert_equal(gd32g553_adc_read(&ctx, 0u, 1u, NULL), ALP_ERR_INVAL);
+}
+
+/* ------------------------------------------------------------------ */
+/* rtl8211fdi -- Realtek PHY driver, NULL-arg validation              */
+/* ------------------------------------------------------------------ */
+
+static int test_dummy_mdio_read(uint8_t phy, uint8_t reg, uint16_t *val, void *user)
+{
+    (void)phy; (void)reg; (void)user;
+    *val = 0u;
+    return 0;
+}
+static int test_dummy_mdio_write(uint8_t phy, uint8_t reg, uint16_t val, void *user)
+{
+    (void)phy; (void)reg; (void)val; (void)user;
+    return 0;
+}
+
+ZTEST(alp_chips, test_rtl8211fdi_init_null_args)
+{
+    rtl8211fdi_t ctx;
+    zassert_equal(rtl8211fdi_init(NULL, 0u, test_dummy_mdio_read,
+                                  test_dummy_mdio_write, NULL),
+                  ALP_ERR_INVAL);
+    zassert_equal(rtl8211fdi_init(&ctx, 0u, NULL,
+                                  test_dummy_mdio_write, NULL),
+                  ALP_ERR_INVAL);
+    zassert_equal(rtl8211fdi_init(&ctx, 0u, test_dummy_mdio_read,
+                                  NULL, NULL),
+                  ALP_ERR_INVAL);
+    /* PHY address > 31 (5-bit address space) must be rejected. */
+    zassert_equal(rtl8211fdi_init(&ctx, 32u, test_dummy_mdio_read,
+                                  test_dummy_mdio_write, NULL),
+                  ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_rtl8211fdi_init_oui_check_rejects_zero)
+{
+    /* Dummy callbacks read 0x0000 for every register -- PHYID1
+     * OUI check should reject (Realtek OUI is 0x001C). */
+    rtl8211fdi_t ctx;
+    zassert_equal(rtl8211fdi_init(&ctx, 0u, test_dummy_mdio_read,
+                                  test_dummy_mdio_write, NULL),
+                  ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_chips, test_rtl8211fdi_post_init_rejects_uninitialised)
+{
+    rtl8211fdi_t ctx = {0};
+
+    bool up; rtl8211fdi_speed_t speed; bool fd;
+    zassert_equal(rtl8211fdi_get_link(&ctx, &up, &speed, &fd),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(rtl8211fdi_soft_reset(&ctx, 1000u),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(rtl8211fdi_restart_autoneg(&ctx),
+                  ALP_ERR_NOT_READY);
+}
