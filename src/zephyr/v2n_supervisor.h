@@ -14,9 +14,10 @@
  * lock.
  *
  * This header is SDK-internal.  Application code MUST reach the
- * GD32 supervisor through the portable <alp/*.h> surface, which the
- * V2N backends transparently dispatch via this singleton.  Direct
- * use of the gd32g553_t ctx from app code is the bridge-demo
+ * GD32 supervisor through the portable `<alp/pwm.h>` / `<alp/adc.h>`
+ * / `<alp/counter.h>` headers (the `<alp>` peripheral surface),
+ * which the V2N backends transparently dispatch via this singleton.
+ * Direct use of the gd32g553_t ctx from app code is the bridge-demo
  * pattern (examples/v2n-gd32-bridge-ping/) -- a different code
  * path that opens its own buses.
  */
