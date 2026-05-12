@@ -1023,6 +1023,16 @@ ZTEST(alp_chips, test_gd32g553_post_init_calls_reject_uninitialised)
 
     uint8_t pmic = 0u;
     zassert_equal(gd32g553_da9292_status_forward(&ctx, &pmic), ALP_ERR_NOT_READY);
+
+    /* v0.2 wrappers must obey the same NOT_READY contract. */
+    uint16_t mv = 0u;
+    int32_t  pos = 0;
+    uint32_t ticks = 0u;
+    zassert_equal(gd32g553_dac_set(&ctx, 0u, 0u), ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_dac_get(&ctx, 0u, &mv), ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_qenc_read(&ctx, 0u, &pos), ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_qenc_reset(&ctx, 0u), ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_counter_read(&ctx, 0u, &ticks), ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_chips, test_gd32g553_pwm_set_invalid_duty)
@@ -1040,6 +1050,37 @@ ZTEST(alp_chips, test_gd32g553_adc_read_invalid_samples)
     zassert_equal(gd32g553_adc_read(&ctx, 0u, GD32G553_BRIDGE_ADC_MAX_SAMPLES + 1u, mv),
                   ALP_ERR_INVAL);
     zassert_equal(gd32g553_adc_read(&ctx, 0u, 1u, NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_gd32g553_v02_invalid_args)
+{
+    /* Range + NULL-arg validation on the v0.2 wrappers happens before
+     * any transport call so it's safe to assert against an
+     * `initialised=true` stub context with no real bus handles. */
+    gd32g553_t ctx = {.initialised = true};
+    uint16_t   mv  = 0u;
+    int32_t    pos = 0;
+    uint32_t   ticks = 0u;
+
+    /* DAC: channel out of range rejects, NULL out-pointer on DAC_GET rejects. */
+    zassert_equal(gd32g553_dac_set(&ctx, GD32G553_BRIDGE_DAC_CHANNELS, 1650u),
+                  ALP_ERR_INVAL);
+    zassert_equal(gd32g553_dac_get(&ctx, 0u, NULL), ALP_ERR_INVAL);
+    zassert_equal(gd32g553_dac_get(&ctx, GD32G553_BRIDGE_DAC_CHANNELS, &mv),
+                  ALP_ERR_INVAL);
+
+    /* QENC: encoder out of range rejects, NULL out-pointer on QENC_READ rejects. */
+    zassert_equal(gd32g553_qenc_read(&ctx, 0u, NULL), ALP_ERR_INVAL);
+    zassert_equal(gd32g553_qenc_read(&ctx, GD32G553_BRIDGE_QENC_CHANNELS, &pos),
+                  ALP_ERR_INVAL);
+    zassert_equal(gd32g553_qenc_reset(&ctx, GD32G553_BRIDGE_QENC_CHANNELS),
+                  ALP_ERR_INVAL);
+
+    /* COUNTER: counter out of range rejects, NULL out-pointer rejects. */
+    zassert_equal(gd32g553_counter_read(&ctx, 0u, NULL), ALP_ERR_INVAL);
+    zassert_equal(gd32g553_counter_read(&ctx, GD32G553_BRIDGE_COUNTER_CHANNELS,
+                                        &ticks),
+                  ALP_ERR_INVAL);
 }
 
 /* ------------------------------------------------------------------ */

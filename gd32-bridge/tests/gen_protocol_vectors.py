@@ -73,13 +73,19 @@ def i2c_read(status: int, payload: bytes = b"") -> bytes:
 # ---------------------------------------------------------------------
 
 SOF = 0xA5
-CMD_PING = 0x00
-CMD_GET_VERSION = 0x01
-STATUS_OK = 0x00
+CMD_PING            = 0x00
+CMD_GET_VERSION     = 0x01
+CMD_DAC_SET         = 0x50
+CMD_DAC_GET         = 0x51
+CMD_QENC_READ       = 0x60
+CMD_QENC_RESET      = 0x61
+CMD_COUNTER_READ    = 0x70
+STATUS_OK           = 0x00
+STATUS_NOSUPPORT    = 0x06
 
 # Firmware-declared version triple; bump when protocol.h's
 # PROTOCOL_VERSION_{MAJOR,MINOR,PATCH} change.
-FW_VERSION = (0, 1, 0)
+FW_VERSION = (0, 2, 0)
 
 
 HEADER = """\
@@ -139,7 +145,7 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         "SOF | CMD=0x01 (GET_VERSION) | CRC -- empty payload",
     ))
     out.append((
-        "spi_get_version_reply_v0_1_0",
+        f"spi_get_version_reply_v{FW_VERSION[0]}_{FW_VERSION[1]}_{FW_VERSION[2]}",
         spi_frame(SOF, STATUS_OK, bytes(FW_VERSION)).hex().upper(),
         f"SOF | STATUS=0x00 | major={FW_VERSION[0]} | minor={FW_VERSION[1]}"
         f" | patch={FW_VERSION[2]} | CRC",
@@ -155,6 +161,46 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         "i2c_ping_read_ok",
         i2c_read(STATUS_OK).hex().upper(),
         "STATUS=0x00 | CRC -- empty payload",
+    ))
+
+    # ----- §4. v0.2 additions: DAC / QENC / COUNTER ------------------
+    # Request envelopes (host -> firmware).  Stub firmware replies
+    # NOSUPPORT (0x06) for every body until bridge_hw_*_set / *_read /
+    # *_reset are wired in hal/bridge_hw_gd32.c; the vectors below let
+    # both sides assert that the framing layer is byte-for-byte locked
+    # before the HAL bodies land.
+    out.append((
+        "spi_dac_set_ch0_1650mv_request",
+        spi_frame(SOF, CMD_DAC_SET,
+                  bytes([0x00, 0x00, 0x72, 0x06])).hex().upper(),
+        "SOF | CMD=0x50 | channel=0 | resv=0 | value_mv=1650 (LE 0x0672) | CRC",
+    ))
+    out.append((
+        "spi_dac_get_ch1_request",
+        spi_frame(SOF, CMD_DAC_GET, bytes([0x01])).hex().upper(),
+        "SOF | CMD=0x51 | channel=1 | CRC",
+    ))
+    out.append((
+        "spi_qenc_read_ch0_request",
+        spi_frame(SOF, CMD_QENC_READ, bytes([0x00])).hex().upper(),
+        "SOF | CMD=0x60 | encoder=0 | CRC",
+    ))
+    out.append((
+        "spi_qenc_reset_ch3_request",
+        spi_frame(SOF, CMD_QENC_RESET, bytes([0x03])).hex().upper(),
+        "SOF | CMD=0x61 | encoder=3 | CRC",
+    ))
+    out.append((
+        "spi_counter_read_ch0_request",
+        spi_frame(SOF, CMD_COUNTER_READ, bytes([0x00])).hex().upper(),
+        "SOF | CMD=0x70 | counter=0 | CRC",
+    ))
+    out.append((
+        "spi_reply_nosupport",
+        spi_frame(SOF, STATUS_NOSUPPORT).hex().upper(),
+        "SOF | STATUS=0x06 (NOSUPPORT) | empty payload | CRC --"
+        " stub-firmware reply for any v0.2 opcode whose HAL body is"
+        " not yet wired",
     ))
 
     return out
@@ -186,7 +232,16 @@ def emit(vectors: list[tuple[str, str, str | None]]) -> str:
     chunks.append("\n# ---------------------------------------------------------------------")
     chunks.append("# §3. I2C envelopes -- register-style framing")
     chunks.append("# ---------------------------------------------------------------------")
-    for name, value, comment in vectors[7:]:
+    for name, value, comment in vectors[7:9]:
+        if comment:
+            chunks.append(f"# {comment}")
+        chunks.append(f"{name:<30} = {value}")
+
+    # ----- §4 block --------------------------------------------------
+    chunks.append("\n# ---------------------------------------------------------------------")
+    chunks.append("# §4. v0.2 additions -- DAC, quadrature encoder, free-running counter")
+    chunks.append("# ---------------------------------------------------------------------")
+    for name, value, comment in vectors[9:]:
         if comment:
             chunks.append(f"# {comment}")
         chunks.append(f"{name:<30} = {value}")

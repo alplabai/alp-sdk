@@ -235,6 +235,87 @@ static gd32_bridge_status_t handle_da9292_forward(const uint8_t *req, size_t req
     return STATUS_OK;
 }
 
+static gd32_bridge_status_t handle_dac_set(const uint8_t *req, size_t req_len,
+                                           uint8_t *reply, size_t reply_cap,
+                                           size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 4u) return STATUS_INVAL;
+    const uint8_t  channel  = req[0];
+    /* req[1] reserved padding -- ignore */
+    const uint16_t value_mv = (uint16_t)req[2] | ((uint16_t)req[3] << 8);
+    const int rv = bridge_hw_dac_set(channel, value_mv);
+    if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
+    if (rv == BRIDGE_HW_ERR_RANGE) return STATUS_OUT_OF_RANGE;
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv < 0) return STATUS_IO;
+    *reply_len = 0u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_dac_get(const uint8_t *req, size_t req_len,
+                                           uint8_t *reply, size_t reply_cap,
+                                           size_t *reply_len)
+{
+    if (req_len != 1u) return STATUS_INVAL;
+    if (reply_cap < 2u) return STATUS_NOMEM;
+    uint16_t value_mv = 0u;
+    const int rv = bridge_hw_dac_get(req[0], &value_mv);
+    if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv < 0) return STATUS_IO;
+    reply[0] = (uint8_t)(value_mv & 0xFFu);
+    reply[1] = (uint8_t)((value_mv >> 8) & 0xFFu);
+    *reply_len = 2u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_qenc_read(const uint8_t *req, size_t req_len,
+                                             uint8_t *reply, size_t reply_cap,
+                                             size_t *reply_len)
+{
+    if (req_len != 1u) return STATUS_INVAL;
+    if (reply_cap < 4u) return STATUS_NOMEM;
+    int32_t position = 0;
+    const int rv = bridge_hw_qenc_read(req[0], &position);
+    if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv < 0) return STATUS_IO;
+    put_le32(reply, (uint32_t)position);
+    *reply_len = 4u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_qenc_reset(const uint8_t *req, size_t req_len,
+                                              uint8_t *reply, size_t reply_cap,
+                                              size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 1u) return STATUS_INVAL;
+    const int rv = bridge_hw_qenc_reset(req[0]);
+    if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv < 0) return STATUS_IO;
+    *reply_len = 0u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_counter_read(const uint8_t *req, size_t req_len,
+                                                uint8_t *reply, size_t reply_cap,
+                                                size_t *reply_len)
+{
+    if (req_len != 1u) return STATUS_INVAL;
+    if (reply_cap < 4u) return STATUS_NOMEM;
+    uint32_t ticks = 0u;
+    const int rv = bridge_hw_counter_read(req[0], &ticks);
+    if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv < 0) return STATUS_IO;
+    put_le32(reply, ticks);
+    *reply_len = 4u;
+    return STATUS_OK;
+}
+
 /* --------------------------------------------------------------- */
 /* Dispatch                                                          */
 /* --------------------------------------------------------------- */
@@ -264,6 +345,11 @@ gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
     case CMD_PWM_GET:               h = handle_pwm_get;        break;
     case CMD_ADC_READ:              h = handle_adc_read;       break;
     case CMD_DA9292_STATUS_FORWARD: h = handle_da9292_forward; break;
+    case CMD_DAC_SET:               h = handle_dac_set;        break;
+    case CMD_DAC_GET:               h = handle_dac_get;        break;
+    case CMD_QENC_READ:             h = handle_qenc_read;      break;
+    case CMD_QENC_RESET:            h = handle_qenc_reset;     break;
+    case CMD_COUNTER_READ:          h = handle_counter_read;   break;
     default:
         /* Route the reserved OTA opcode range (0xF0..0xFF) through
          * the application bootloader's dispatcher.  Bodies return

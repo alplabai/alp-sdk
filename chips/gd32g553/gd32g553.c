@@ -447,6 +447,75 @@ alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status)
                     NULL, 0u, status, 1u);
 }
 
+alp_status_t gd32g553_dac_set(gd32g553_t *ctx, uint8_t channel,
+                              uint16_t value_mv)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (channel >= GD32G553_BRIDGE_DAC_CHANNELS) return ALP_ERR_INVAL;
+    uint8_t req[4];
+    req[0] = channel;
+    req[1] = 0u;                                /* reserved */
+    req[2] = (uint8_t)(value_mv & 0xFFu);
+    req[3] = (uint8_t)((value_mv >> 8) & 0xFFu);
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                    GD32G553_CMD_DAC_SET,
+                    req, sizeof(req), NULL, 0u);
+}
+
+alp_status_t gd32g553_dac_get(gd32g553_t *ctx, uint8_t channel,
+                              uint16_t *value_mv)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (value_mv == NULL) return ALP_ERR_INVAL;
+    if (channel >= GD32G553_BRIDGE_DAC_CHANNELS) return ALP_ERR_INVAL;
+    uint8_t reply[2];
+    alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_DAC_GET,
+                              &channel, 1u, reply, sizeof(reply));
+    if (s != ALP_OK) return s;
+    *value_mv = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
+    return ALP_OK;
+}
+
+alp_status_t gd32g553_qenc_read(gd32g553_t *ctx, uint8_t encoder,
+                                int32_t *position_out)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (position_out == NULL) return ALP_ERR_INVAL;
+    if (encoder >= GD32G553_BRIDGE_QENC_CHANNELS) return ALP_ERR_INVAL;
+    uint8_t reply[4];
+    alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_QENC_READ,
+                              &encoder, 1u, reply, sizeof(reply));
+    if (s != ALP_OK) return s;
+    *position_out = (int32_t)get_le32(reply);
+    return ALP_OK;
+}
+
+alp_status_t gd32g553_qenc_reset(gd32g553_t *ctx, uint8_t encoder)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (encoder >= GD32G553_BRIDGE_QENC_CHANNELS) return ALP_ERR_INVAL;
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                    GD32G553_CMD_QENC_RESET,
+                    &encoder, 1u, NULL, 0u);
+}
+
+alp_status_t gd32g553_counter_read(gd32g553_t *ctx, uint8_t counter,
+                                   uint32_t *ticks_out)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (ticks_out == NULL) return ALP_ERR_INVAL;
+    if (counter >= GD32G553_BRIDGE_COUNTER_CHANNELS) return ALP_ERR_INVAL;
+    uint8_t reply[4];
+    alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_COUNTER_READ,
+                              &counter, 1u, reply, sizeof(reply));
+    if (s != ALP_OK) return s;
+    *ticks_out = get_le32(reply);
+    return ALP_OK;
+}
+
 /* ----------------------------------------------------------------- */
 /* OTA helpers -- the firmware-side opcodes return STATUS_NOSUPPORT  */
 /* against the scaffold today, which maps to ALP_ERR_NOSUPPORT here. */

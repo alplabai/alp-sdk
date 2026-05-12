@@ -64,6 +64,38 @@ int bridge_hw_pwm_get(uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns);
 int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv);
 
 /* --------------------------------------------------------------- */
+/* DAC                                                              */
+/* --------------------------------------------------------------- */
+
+/* Set the @p channel DAC output to @p value_mv (millivolts).  The
+ * firmware rounds to its hardware-achievable resolution. */
+int bridge_hw_dac_set(uint8_t channel, uint16_t value_mv);
+
+/* Read back the currently-programmed @p channel DAC output in mV. */
+int bridge_hw_dac_get(uint8_t channel, uint16_t *value_mv);
+
+/* --------------------------------------------------------------- */
+/* Quadrature encoder                                                */
+/* --------------------------------------------------------------- */
+
+/* Read the @p encoder's accumulated signed count since the last
+ * reset (or since boot, whichever is more recent). */
+int bridge_hw_qenc_read(uint8_t encoder, int32_t *position);
+
+/* Reset the @p encoder's accumulated count to zero. */
+int bridge_hw_qenc_reset(uint8_t encoder);
+
+/* --------------------------------------------------------------- */
+/* Free-running counter                                              */
+/* --------------------------------------------------------------- */
+
+/* Read the @p counter's current tick value.  Tick frequency is
+ * firmware-defined and currently fixed; a future GET_FREQ opcode
+ * will let the host convert ticks to microseconds without
+ * out-of-band knowledge. */
+int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks);
+
+/* --------------------------------------------------------------- */
 /* DA9292 forward                                                    */
 /* --------------------------------------------------------------- */
 

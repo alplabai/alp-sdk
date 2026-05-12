@@ -28,7 +28,7 @@
 #define GD32_BRIDGE_BUILD_ID_LEN         20u
 
 #define PROTOCOL_VERSION_MAJOR           0u
-#define PROTOCOL_VERSION_MINOR           1u
+#define PROTOCOL_VERSION_MINOR           2u
 #define PROTOCOL_VERSION_PATCH           0u
 
 /* Maximum wire payload either direction.  See host-side header for
@@ -46,6 +46,14 @@ typedef enum {
     CMD_PWM_GET               = 0x21,
     CMD_ADC_READ              = 0x30,
     CMD_DA9292_STATUS_FORWARD = 0x40,
+    /* v0.2 additions -- the GD32 carries every E1M-standard analog
+     * and counter peripheral on V2N (per gd32-io-mcu-map.tsv); the
+     * SDK's portable surface routes through these. */
+    CMD_DAC_SET               = 0x50,
+    CMD_DAC_GET               = 0x51,
+    CMD_QENC_READ             = 0x60,
+    CMD_QENC_RESET            = 0x61,
+    CMD_COUNTER_READ          = 0x70,
 } gd32_bridge_cmd_t;
 
 /* Wire-side status byte; mirrors the table in docs/gd32-bridge-protocol.md §6.

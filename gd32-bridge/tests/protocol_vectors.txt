@@ -33,8 +33,8 @@ spi_ping_request               = A500FF84
 spi_ping_reply_ok              = A500FF84
 # SOF | CMD=0x01 (GET_VERSION) | CRC -- empty payload
 spi_get_version_request        = A501EFA5
-# SOF | STATUS=0x00 | major=0 | minor=1 | patch=0 | CRC
-spi_get_version_reply_v0_1_0   = A5000001002B0E
+# SOF | STATUS=0x00 | major=0 | minor=2 | patch=0 | CRC
+spi_get_version_reply_v0_2_0   = A5000002007E5D
 
 # ---------------------------------------------------------------------
 # §3. I2C envelopes -- register-style framing
@@ -43,3 +43,19 @@ spi_get_version_reply_v0_1_0   = A5000001002B0E
 i2c_ping_write                 = 0000E1F0
 # STATUS=0x00 | CRC -- empty payload
 i2c_ping_read_ok               = 00E1F0
+
+# ---------------------------------------------------------------------
+# §4. v0.2 additions -- DAC, quadrature encoder, free-running counter
+# ---------------------------------------------------------------------
+# SOF | CMD=0x50 | channel=0 | resv=0 | value_mv=1650 (LE 0x0672) | CRC
+spi_dac_set_ch0_1650mv_request = A55000007206B7F6
+# SOF | CMD=0x51 | channel=1 | CRC
+spi_dac_get_ch1_request        = A55101B75F
+# SOF | CMD=0x60 | encoder=0 | CRC
+spi_qenc_read_ch0_request      = A5600091DA
+# SOF | CMD=0x61 | encoder=3 | CRC
+spi_qenc_reset_ch3_request     = A561039288
+# SOF | CMD=0x70 | counter=0 | CRC
+spi_counter_read_ch0_request   = A5700092A9
+# SOF | STATUS=0x06 (NOSUPPORT) | empty payload | CRC -- stub-firmware reply for any v0.2 opcode whose HAL body is not yet wired
+spi_reply_nosupport            = A5069F42

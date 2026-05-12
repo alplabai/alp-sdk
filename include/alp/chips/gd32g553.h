@@ -85,6 +85,21 @@ extern "C" {
 /** Maximum number of ADC samples the bridge accepts per `ADC_READ`. */
 #define GD32G553_BRIDGE_ADC_MAX_SAMPLES  8u
 
+/** Number of DAC output channels the bridge exposes (mirrors the
+ *  E1M v1.0 `DAC0..DAC1` allocation; GD32 pads `PA4` + `PA6` per
+ *  `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`). */
+#define GD32G553_BRIDGE_DAC_CHANNELS     2u
+
+/** Number of quadrature-encoder channels the bridge exposes
+ *  (E1M `ENC0..ENC3` on GD32 pads `PA0/PB3`, `PC6/PC7`, `PB6/PB5`,
+ *  `PB2/PA1`). */
+#define GD32G553_BRIDGE_QENC_CHANNELS    4u
+
+/** Number of free-running counters the bridge exposes.  v0.2 of
+ *  the protocol surfaces a single reader; carriers that need
+ *  multiple counters await the v0.3 opcode set. */
+#define GD32G553_BRIDGE_COUNTER_CHANNELS 1u
+
 /** Length of the truncated SHA-1 build-id (ASCII hex, NUL-terminated). */
 #define GD32G553_BUILD_ID_LEN            20u
 
@@ -105,6 +120,13 @@ typedef enum {
     GD32G553_CMD_PWM_GET               = 0x21,
     GD32G553_CMD_ADC_READ              = 0x30,
     GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40,
+    /* v0.2 additions -- analog + counter peripherals routed via the
+     * GD32 on V2N (see metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv). */
+    GD32G553_CMD_DAC_SET               = 0x50,
+    GD32G553_CMD_DAC_GET               = 0x51,
+    GD32G553_CMD_QENC_READ             = 0x60,
+    GD32G553_CMD_QENC_RESET            = 0x61,
+    GD32G553_CMD_COUNTER_READ          = 0x70,
     /* Reserved range 0xF0..0xFF -- application-bootloader OTA. */
     GD32G553_CMD_OTA_BEGIN             = 0xF0,
     GD32G553_CMD_OTA_WRITE_CHUNK       = 0xF1,
@@ -254,6 +276,52 @@ alp_status_t gd32g553_adc_read(gd32g553_t *ctx, uint8_t channel,
  *         byte.  Latency to the actual silicon state is firmware-
  *         implementation-defined (currently ≤ 20 ms). */
 alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status);
+
+/** @brief Program a DAC channel's output voltage in millivolts.
+ *
+ *  The firmware rounds to its hardware-achievable resolution
+ *  (12-bit on the GD32's built-in DAC); the host can read back via
+ *  @ref gd32g553_dac_get to see what actually got programmed.
+ *
+ *  @param channel   DAC channel (0..@ref GD32G553_BRIDGE_DAC_CHANNELS-1).
+ *  @param value_mv  Requested output in mV.  Saturates to the DAC's
+ *                   reference rail on the firmware side.
+ *
+ *  @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT (firmware
+ *          lacks the HAL body) / transport error.
+ */
+alp_status_t gd32g553_dac_set(gd32g553_t *ctx, uint8_t channel,
+                              uint16_t value_mv);
+
+/** @brief Read back a DAC channel's currently-programmed output (mV). */
+alp_status_t gd32g553_dac_get(gd32g553_t *ctx, uint8_t channel,
+                              uint16_t *value_mv);
+
+/** @brief Read the signed accumulated count of a quadrature encoder.
+ *
+ *  @param encoder      Encoder index (0..@ref GD32G553_BRIDGE_QENC_CHANNELS-1).
+ *  @param position_out Signed count since the last reset / boot.
+ *                      Wraps modulo 2^32 on overflow.
+ */
+alp_status_t gd32g553_qenc_read(gd32g553_t *ctx, uint8_t encoder,
+                                int32_t *position_out);
+
+/** @brief Reset a quadrature encoder's accumulated count to zero. */
+alp_status_t gd32g553_qenc_reset(gd32g553_t *ctx, uint8_t encoder);
+
+/** @brief Read a free-running counter's current tick value.
+ *
+ *  v0.2 of the protocol does not expose a counter-frequency opcode,
+ *  so the caller must know the bridge counter's tick rate out-of-
+ *  band (firmware-defined; see `gd32-bridge/README.md`).  A future
+ *  minor revision will add `CMD_COUNTER_GET_FREQ` so the host can
+ *  convert ticks ↔ microseconds without that out-of-band knowledge.
+ *
+ *  @param counter   Counter index (0..@ref GD32G553_BRIDGE_COUNTER_CHANNELS-1).
+ *  @param ticks_out Current tick value.
+ */
+alp_status_t gd32g553_counter_read(gd32g553_t *ctx, uint8_t counter,
+                                   uint32_t *ticks_out);
 
 /* ------------------------------------------------------------------ */
 /* OTA -- in-system upgrade of the bridge firmware                    */

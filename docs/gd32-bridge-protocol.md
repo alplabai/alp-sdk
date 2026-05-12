@@ -57,6 +57,11 @@ byte; their numeric encoding is:
 | `0x21` | `PWM_GET`             | `channel:u8`                                       | `period_ns:u32 duty_ns:u32`                        |
 | `0x30` | `ADC_READ`            | `channel:u8 samples:u8`                            | `mv[samples]:u16` (millivolt, raw averaged)        |
 | `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_status:u8` (latest cached PMC_STATUS_00)   |
+| `0x50` | `DAC_SET`             | `channel:u8 reserved:u8 value_mv:u16`              | _empty_                                            |
+| `0x51` | `DAC_GET`             | `channel:u8`                                       | `value_mv:u16`                                     |
+| `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
+| `0x61` | `QENC_RESET`          | `encoder:u8`                                       | _empty_                                            |
+| `0x70` | `COUNTER_READ`        | `counter:u8`                                       | `ticks:u32`                                        |
 
 Opcodes `0x80..0xFF` are **reserved** for vendor extensions.
 The GD32 firmware replies with **`ALP_ERR_NOSUPPORT`** (see §6) for
@@ -103,6 +108,50 @@ firmware-implementation-defined (currently ≤ 20 ms).
 
 The cached byte uses the same bit layout as the on-chip register
 (`DA9292_STATUS00_CH1_PG = bit 0`, …) — see `<alp/chips/da9292.h>`.
+
+### 3.5 DAC outputs (`v0.2+`)
+
+The V2N module routes both E1M DAC channels (`DAC0` → GD32 `PA4`,
+`DAC1` → GD32 `PA6`) through the bridge.  `DAC_SET` programs the
+output in millivolts; the firmware rounds to the GD32's 12-bit DAC
+resolution (~0.8 mV/LSB on a 3.3 V reference) and saturates above
+the reference rail.  `DAC_GET` reads back what was actually
+programmed — useful for verification + closed-loop telemetry.
+
+Until `hal/bridge_hw_gd32.c` wires the DAC channels (HAL stubs
+return `BRIDGE_HW_ERR_NOTIMPL` today), both opcodes return
+`STATUS_NOSUPPORT` and the SDK surfaces `ALP_ERR_NOSUPPORT` to the
+caller.  The wire framing is locked from `v0.2` so the firmware
+bodies are an independent landing.
+
+### 3.6 Quadrature encoders (`v0.2+`)
+
+The four E1M encoders (`ENC0..ENC3`) are all GD32-driven on V2N
+(GD32 pad pairs `PA0/PB3`, `PC6/PC7`, `PB6/PB5`, `PB2/PA1`).
+`QENC_READ` returns the signed accumulated count since the last
+reset; the firmware uses a 32-bit accumulator that wraps modulo
+2³² rather than saturating, so callers can subtract two snapshots
+to get velocity even across a wrap.  `QENC_RESET` zeroes the
+accumulator atomically (encoder pulses arriving during the reset
+window contribute to the post-reset count, not the pre-reset one).
+
+### 3.7 Free-running counter (`v0.2+`)
+
+`COUNTER_READ` exposes one GD32 hardware counter whose tick rate is
+firmware-defined.  The bridge does not yet advertise the tick
+frequency on the wire; callers needing wall-clock conversion must
+either (a) consult `gd32-bridge/README.md` for the firmware's
+current tick configuration, or (b) wait for the v0.3 protocol
+revision which will add `COUNTER_GET_FREQ`.  The SDK's portable
+`alp_counter_us_to_ticks` returns `ALP_ERR_NOSUPPORT` on V2N until
+the freq opcode lands.
+
+Counter **alarms** are not in scope for the bridge.  The GD32 has
+no interrupt line back to the Renesas host, so deadline callbacks
+fired in firmware ISR context cannot be relayed across the bridge
+in bounded time.  Apps that need alarms must either use a host-
+local timer or poll `COUNTER_READ` and synthesise the callback
+client-side.
 
 ## 4. SPI framing
 

@@ -59,6 +59,39 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
     return BRIDGE_HW_ERR_NOTIMPL;
 }
 
+int bridge_hw_dac_set(uint8_t channel, uint16_t value_mv)
+{
+    (void)channel; (void)value_mv;
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
+int bridge_hw_dac_get(uint8_t channel, uint16_t *value_mv)
+{
+    (void)channel;
+    if (value_mv != 0) *value_mv = 0u;
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
+int bridge_hw_qenc_read(uint8_t encoder, int32_t *position)
+{
+    (void)encoder;
+    if (position != 0) *position = 0;
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
+int bridge_hw_qenc_reset(uint8_t encoder)
+{
+    (void)encoder;
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
+int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks)
+{
+    (void)counter;
+    if (ticks != 0) *ticks = 0u;
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
 uint8_t bridge_hw_da9292_status_cached(void)
 {
     return 0xFFu; /* "no PMIC poll has populated the cache yet" sentinel */

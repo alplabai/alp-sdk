@@ -61,6 +61,47 @@ that lands before the v0.3.0 tag.)
 - **5L35023B I2C address -> 7-bit `0x68`** (8-bit write `0xD0`) per
   the Renesas 5L35023 public datasheet.
 
+### Added (2026-05-14)
+
+- **GD32 bridge protocol v0.2 -- DAC / QENC / COUNTER opcodes (2026-05-14).**
+  Bumps `PROTOCOL_VERSION_MINOR` 1 → 2 to add five wire opcodes that
+  cover the analog + counter peripherals the GD32 already routes per
+  `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`:
+  - `CMD_DAC_SET` (0x50) / `CMD_DAC_GET` (0x51) -- E1M `DAC0` (GD32
+    `PA4`) + `DAC1` (GD32 `PA6`).  mV setpoint, 12-bit hardware
+    resolution, read-back for verification.
+  - `CMD_QENC_READ` (0x60) / `CMD_QENC_RESET` (0x61) -- the four E1M
+    encoders on GD32 pad pairs `PA0/PB3` / `PC6/PC7` / `PB6/PB5` /
+    `PB2/PA1`.  Signed-int32 accumulated count wrapping modulo 2³²
+    so velocity is recoverable across overflow.
+  - `CMD_COUNTER_READ` (0x70) -- one free-running counter; tick
+    frequency is firmware-defined for v0.2 (a `COUNTER_GET_FREQ`
+    opcode follows in v0.3 for portable µs ↔ tick conversion).
+    Counter alarms are intentionally out of scope -- the GD32 has
+    no interrupt line back to the Renesas host so ISR-fired
+    callbacks can't cross the bridge in bounded time.
+  Firmware-side handlers in `gd32-bridge/src/protocol.c` route to
+  new `bridge_hw_dac_*` / `bridge_hw_qenc_*` / `bridge_hw_counter_*`
+  HAL hooks; the stub `hal/bridge_hw_stub.c` returns
+  `BRIDGE_HW_ERR_NOTIMPL` against the scaffold, so every body
+  replies `STATUS_NOSUPPORT` on the wire until
+  `hal/bridge_hw_gd32.c` is implemented alongside the vendor
+  firmware library pull.  Host driver wrappers under
+  `chips/gd32g553/gd32g553.c` carry the same range-check + NULL-arg
+  contract as the existing opcodes.  Wire vectors regenerated
+  through `gd32-bridge/tests/gen_protocol_vectors.py`; reference-CRC
+  helpers in `protocol_vectors.txt` now cover one request per new
+  opcode plus a `STATUS_NOSUPPORT` reply envelope.
+
+- **`<alp/adc.h>` -- portable DAC surface (2026-05-14).**
+  Per the portability memo (`memory/feedback_portable_peripheral_api.md`),
+  DAC sits alongside ADC in the same header.  Adds `alp_dac_t`,
+  `alp_dac_open(cfg)` (`channel_id` + `initial_mv`), `alp_dac_write_mv`,
+  `alp_dac_read_mv`, `alp_dac_close`.  Backend wiring lands in the
+  follow-up commit; the surface returns `ALP_ERR_NOT_READY` on every
+  SoM until the Zephyr backend declares an `alp-dac<N>` alias (or, on
+  V2N, the supervisor singleton lazy-inits).
+
 ### Added (2026-05-13 overnight run)
 
 - **`chips/gd32_swd/` -- bit-bang SWD controller for the GD32G553 (2026-05-13).**
