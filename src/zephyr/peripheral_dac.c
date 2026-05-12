@@ -69,7 +69,7 @@ static alp_status_t errno_to_alp(int err) {
     default:          return ALP_ERR_IO;
     }
 }
-#endif  /* CONFIG_DAC */
+#endif /* CONFIG_DAC */
 
 alp_dac_t *alp_dac_open(const alp_dac_config_t *cfg) {
     alp_z_clear_last_error();
