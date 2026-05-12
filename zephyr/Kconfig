@@ -518,11 +518,47 @@ config ALP_SDK_HW_INFO
 	  Compile src/zephyr/hw_info_zephyr.c.  Provides the
 	  alp_hw_info_read() + alp_hw_info_assert_matches_build()
 	  surface backed by the SoM on-module 24C128 EEPROM and the
-	  per-board BOARD_ID ADC + resistor divider.  v0.3 returns
-	  ALP_ERR_NOSUPPORT from both entry points -- the API contract
-	  is declared so apps can integrate it now; the runtime impl
-	  lands in v0.3.x once the per-family BOARD_ID channels are
-	  filled in.
+	  per-board BOARD_ID ADC + resistor divider.  The EEPROM-side
+	  half is wired when CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID
+	  is set to a non-negative bus id; the BOARD_ID ADC cross-check
+	  remains TODO pending the per-family generated header.
+
+config ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID
+	int "I2C bus id for the on-module EEPROM (< 0 = disabled)"
+	default -1
+	depends on ALP_SDK_HW_INFO && I2C && ALP_SDK_CHIP_EEPROM_24C128
+	help
+	  Per-board: the bus id (matches alp_i2c_open's bus_id field)
+	  carrying the SoM's on-module 24C128 EEPROM.  On V2N this is
+	  the E1M I2C0 bus (Renesas RIIC0 on P31/P30); on AEN it's the
+	  Alif LPI2C bus.  Set to -1 to disable the EEPROM read path --
+	  alp_hw_info_read() returns ALP_ERR_NOSUPPORT.
+
+config ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT
+	hex "7-bit I2C address of the on-module EEPROM"
+	default 0x50
+	range 0x50 0x57
+	depends on ALP_SDK_HW_INFO && ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID >= 0
+	help
+	  EEPROM I2C address strap (24C128 family supports 0x50..0x57).
+
+config ALP_SDK_HW_INFO_EEPROM_OFFSET
+	int "Manifest offset within the EEPROM (bytes)"
+	default 0
+	depends on ALP_SDK_HW_INFO && ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID >= 0
+	help
+	  Byte offset of the alp_hw_info_eeprom_t struct in EEPROM
+	  storage.  Default 0 -- production-test flow places the
+	  manifest at offset 0 per the design note in
+	  metadata/e1m_modules/<family>/hw-revisions.yaml.
+
+config ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ
+	int "I2C bitrate for the EEPROM read (Hz)"
+	default 400000
+	depends on ALP_SDK_HW_INFO && ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID >= 0
+	help
+	  Standard-mode 100 kHz, fast-mode 400 kHz, or fast-mode+ 1 MHz
+	  -- choose the highest the on-bus devices all support.
 
 # Chip drivers.  Each is opt-in so projects only pay for the
 # silicon they actually use.  Symbols use the chip's natural prefix

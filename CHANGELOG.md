@@ -22,6 +22,30 @@ that lands before the v0.3.0 tag.)
 
 ### Added
 
+- **`alp_hw_info_read` EEPROM-side implementation (2026-05-12).**
+  Replaces the NOSUPPORT stub in `src/zephyr/hw_info_zephyr.c` with
+  a working EEPROM-manifest reader.  Opens the configured I2C bus
+  (`CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID`), reads 128 bytes via
+  the 24C128 driver at `CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT` +
+  `CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET`, validates the magic byte
+  (`ALPH`), schema version, and CRC32 (ISO-3309 / `zlib.crc32`-
+  compatible, matching `tools/program_eeprom.py`), then copies the
+  SoM identifiers into `alp_hw_info_t`.  When the bus id Kconfig is
+  `-1` (default) the reader returns `ALP_ERR_NOSUPPORT` -- boards
+  that haven't wired the EEPROM yet aren't penalised.
+  `alp_hw_info_assert_matches_build` does strncmp checks against
+  `expected_sku` / `expected_hw_rev` (NULL = skip that field) with
+  the same NOSUPPORT graceful-fallback policy.
+  New Kconfig options under `CONFIG_ALP_SDK_HW_INFO`:
+    `ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` (int, default -1)
+    `ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT` (hex, range 0x50..0x57)
+    `ALP_SDK_HW_INFO_EEPROM_OFFSET` (int, default 0)
+    `ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ` (int, default 400000)
+  BOARD_ID ADC cross-check remains a no-op stub (`adc_cross_check`)
+  pending the per-family generated header that maps `hw_rev` strings
+  to expected mV bins (depends on `scripts/alp_project.py` emitting
+  a runtime-readable digest of `metadata/e1m_modules/<family>/hw-revisions.yaml`).
+
 - **`chips/pi3dbs12212/` Diodes PI3DBS12212A PCIe mux driver (2026-05-12).**
   GPIO-only control surface for the two passive 12 Gbps
   differential muxes that switch the V2N-M1 PCIe lane between
