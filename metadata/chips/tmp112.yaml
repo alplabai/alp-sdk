@@ -1,0 +1,37 @@
+# ALP SDK chip manifest: TI TMP112 digital temperature sensor.
+schema_version:   1
+chip_id:          tmp112
+driver_status:    complete         # init / set-rate / set-extended-mode / read milli-Celsius.
+display_name:     "TI TMP112 +/-0.5 C 12/13-bit I2C temperature sensor"
+vendor:           ti
+mpn_population:
+  - "TMP112"
+
+datasheet:
+  primary:        "TI TMP112 datasheet (SBOS473)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x48, scope: "ADD0 = GND (default on E1M-AEN + E1M-V2N)" }
+  address_strap_range: "0x48..0x4B (ADD0 strap)"
+  max_clock_hz:   400000          # Fast-mode
+
+signals:
+  - { name: SDA, type: bidir, scope: "I2C0 / BRD_I2C on the host" }
+  - { name: SCL, type: input, scope: "I2C0 / BRD_I2C on the host" }
+
+precision:
+  accuracy_c:     0.5
+  resolution_c:   0.0625
+  range_c:        [-25, 85]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_TMP112
+  baremetal:      ALP_SDK_CHIP_TMP112
+  yocto:          "kernel tmp102 driver (compatible)"
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

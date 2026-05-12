@@ -1,0 +1,38 @@
+# ALP SDK chip manifest: 24Cxx-class 128-Kbit I2C EEPROM.
+schema_version:   1
+chip_id:          eeprom_24c128
+driver_status:    complete         # init / read / write / page-aligned splitting.
+display_name:     "Generic 24Cxx-class 128-Kbit (16 KB) I2C EEPROM"
+vendor:           multi             # On-Semi N24S128C4DYT3G (default), STMicro M24128-BFMH6TG (alt)
+mpn_population:
+  - "N24S128C4DYT3G"               # On-Semi -- E1M-AEN / E1M-V2N default
+  - "M24128-BFMH6TG"               # STMicro -- footprint-compatible alternate / DNP
+
+datasheet:
+  primary:        "On-Semi N24S128 datasheet"
+  alternate:      "STMicro M24128 datasheet"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x50, scope: "A2:A1:A0 strap = 000 (default on E1M-AEN + E1M-V2N)" }
+  address_strap_range: "0x50..0x57 (A2:A1:A0)"
+  max_clock_hz:   400000          # Fast-mode
+
+signals:
+  - { name: SDA, type: bidir, scope: "I2C0 / E1M_I2C0 on the host" }
+  - { name: SCL, type: input, scope: "I2C0 / E1M_I2C0 on the host" }
+
+capacity:
+  bytes:          16384            # 128 Kbit
+  page_bytes:     64
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_EEPROM_24C128
+  baremetal:      ALP_SDK_CHIP_EEPROM_24C128
+  yocto:          "kernel at24 EEPROM driver"
+
+families:
+  - aen                            # on Alif LPI2C
+  - v2n                            # on E1M_I2C0 (Renesas RIIC0)
+  - v2n-m1                         # inherited from V2N base

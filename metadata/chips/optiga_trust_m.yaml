@@ -1,0 +1,44 @@
+# ALP SDK chip manifest: Infineon OPTIGA Trust M secure element.
+schema_version:   1
+chip_id:          optiga_trust_m
+driver_status:    partial          # OPEN_APPLICATION + product-info + raw APDU send.
+                                   # Full APDU command set (CalcSign, GenKeyPair, ECDH) lands
+                                   # when Infineon's host library is vendored.
+display_name:     "Infineon OPTIGA Trust M secure element (ECC / RSA / AES / SHA / TRNG)"
+vendor:           infineon
+mpn_population:
+  - "SLS32AIA010MLUSON10XTMA2"
+
+datasheet:
+  primary:        "Infineon OPTIGA Trust M datasheet"
+  reference:      "SRM_OPTIGA_Trust_M.pdf (Solution Reference Manual)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x30, scope: "fixed default; provisioning can change via the host library" }
+  max_clock_hz:   1000000         # Fast-mode+ supported on the chip
+
+signals:
+  - { name: SDA,   type: bidir,        scope: "I2C0 / BRD_I2C on the host" }
+  - { name: SCL,   type: input,        scope: "I2C0 / BRD_I2C on the host" }
+  - { name: RST,   type: input,        scope: "optional reset line; carrier ties high if not driven" }
+  - { name: VCC,   type: input,        scope: "1.62..5.5 V" }
+
+capabilities:
+  ecc_curves:     [NIST_P256, NIST_P384, NIST_P521]
+  rsa_bits:       [1024, 2048]
+  aes_modes:      [CBC, CMAC]
+  sha_variants:   [SHA-256]
+  trng:           true
+  nvm_kb:         10
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_OPTIGA_TRUST_M
+  baremetal:      ALP_SDK_CHIP_OPTIGA_TRUST_M
+  yocto:          "Infineon optiga-trust-m host library"
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

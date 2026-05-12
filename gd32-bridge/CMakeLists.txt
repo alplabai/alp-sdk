@@ -48,11 +48,19 @@ if(BRIDGE_HAL_BACKEND STREQUAL "stub")
     list(APPEND GD32_BRIDGE_SOURCES hal/bridge_hw_stub.c)
 elseif(BRIDGE_HAL_BACKEND STREQUAL "gd32")
     list(APPEND GD32_BRIDGE_SOURCES hal/bridge_hw_gd32.c)
-    # TODO: pull in the GigaDevice firmware library here once the
-    # vendor pack is on the workspace.
-    # add_subdirectory(${CMAKE_SOURCE_DIR}/vendors/gd32_firmware_library)
-    # target_link_libraries(gd32-bridge PRIVATE gd32_firmware_library)
-    message(WARNING "BRIDGE_HAL_BACKEND=gd32 selected but GigaDevice library is not yet vendored.")
+    # Pull in the GigaDevice firmware-library wrapper.  Its CMakeLists
+    # fatal-errors with a clear "drop the SDK into sdk/" instruction
+    # when the unpacked archive is missing, so an unconfigured
+    # workspace doesn't fall through to a confusing link error.
+    set(_GD32_VENDOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../vendors/gd32_firmware_library)
+    if(NOT EXISTS ${_GD32_VENDOR_DIR}/CMakeLists.txt)
+        message(FATAL_ERROR
+            "BRIDGE_HAL_BACKEND=gd32 selected but "
+            "${_GD32_VENDOR_DIR}/CMakeLists.txt is missing.\n"
+            "Check out the alp-sdk repo's vendors/gd32_firmware_library/ "
+            "tree (the wrapper README documents the manual SDK drop).")
+    endif()
+    add_subdirectory(${_GD32_VENDOR_DIR} ${CMAKE_BINARY_DIR}/vendors/gd32_firmware_library)
 else()
     message(FATAL_ERROR "Unknown BRIDGE_HAL_BACKEND='${BRIDGE_HAL_BACKEND}' (expected: stub | gd32).")
 endif()
@@ -63,6 +71,10 @@ target_include_directories(gd32-bridge PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/hal
 )
+
+if(BRIDGE_HAL_BACKEND STREQUAL "gd32")
+    target_link_libraries(gd32-bridge PRIVATE gd32_firmware_library)
+endif()
 
 # Cortex-M33 + thumb + soft-float (no FPU on GD32G5 baseline; revisit
 # if the part variant has the FPU enabled and the linker / runtime

@@ -1,18 +1,22 @@
 # ALP SDK chip manifest: Renesas / IDT 5L35023B audio clock generator.
 schema_version:   1
 chip_id:          clk_5l35023b
-driver_status:    partial          # lifecycle + register R/W + register dump.  PLL / divider
-                                   # high-level helpers omitted -- V2N relies on OTP defaults
-                                   # + the Audio_CLKB_OE GPIO for output gating.
+driver_status:    partial          # Lifecycle + raw R/W + register dump + typed Dash-Code-ID
+                                   # read + I2C-strap readback + soft power-down toggle.
+                                   # Full PLL / OUTDIV / spread-spectrum config left to a
+                                   # higher layer -- V2N's design intent is to rely on the
+                                   # OTP defaults + the Audio_CLKB_OE GPIO for output gating.
 display_name:     "Renesas (IDT) 5L35023B audio-rate clock generator"
 vendor:           renesas          # originally IDT; Renesas acquired 2019
 mpn_population:
-  - "5L35023B"                     # exact package + temp suffix TBD
+  - "5L35023B"                     # exact package + temp suffix TBD; orderable as
+                                   # 5L35023B-dddNLGI[8] (24-VFQFPN 4 x 4 mm, dash code per OTP)
 datasheet:
-  primary:        "Renesas 5L35023 datasheet (public)"
+  primary:        "Renesas 5L35023 datasheet (public, Dec 2025 rev)"
   url:            "https://www.renesas.com/en/document/dst/5l35023-datasheet"
-  # 8-bit default write-address is 0xD0 per the maintainer (2026-05-12),
+  # 8-bit default write-address is 0xD0 (per the V2N strap I2C_addr[1:0] = 00),
   # which is 7-bit 0x68 + R/W bit.
+
 notes: |
   Same part is used on the Renesas RZ/V2N EVK.  The chip carries
   an OTP-loaded configuration that applies at POR; for the V2N
@@ -20,11 +24,51 @@ notes: |
   `Audio_CLKB_OE` GPIO (Renesas P67) cover normal operation -- no
   runtime I2C writes are required.  Carriers needing runtime PLL
   reconfiguration consume the driver's raw register R/W against
-  the registers documented in the public Renesas 5L35023 datasheet
-  (notable: 0x1D[3:4] DIFF output enable, 0x22[0] LVCMOS output
-  enable, XTAL[7:0] tuning caps).
-  I2C 8-bit slave-address options: 0xD0 / 0xD2 / 0xD4 / 0xD6
-  (= 7-bit 0x68 / 0x69 / 0x6A / 0x6B); V2N straps 0x68.
+  the documented register table.
+
+  I2C slave-address options: 0xD0 / 0xD2 / 0xD4 / 0xD6 (8-bit) =
+  7-bit 0x68 / 0x69 / 0x6A / 0x6B per the `I2C_addr[1:0]` strap
+  in Byte 0x00 bits[6:5].  V2N straps `00` -> 7-bit 0x68.
+
+  Typed helpers cover:
+    * Byte 0x00 (General Control) -- cached at init; readback via
+      clk_5l35023b_get_strap_addr().
+    * Byte 0x01 (Dash Code ID) -- cached at init; production-test
+      reads via clk_5l35023b_read_dashcode_id().
+    * Byte 0x24 bit 7 (I2C_PDB) -- soft power-down via
+      clk_5l35023b_set_power_down().
+
+  Reach the rest of the register file (PLL1/2/3 M+N+CP, OUTDIV1..5
+  sources, spread-spectrum, DIFF1/2 mode + slew, SE1/2/3 enables,
+  Crystal cap trim) through clk_5l35023b_write_reg() against the
+  documented register table.
+
+register_table:
+  - { addr: 0x00, name: "General Control",      type: rw,
+      summary: "OTP burned/protect, I2C_addr[1:0] strap readback, PLL1 SSEN" }
+  - { addr: 0x01, name: "Dash Code ID",         type: r,
+      summary: "8-bit factory-stamped configuration identifier" }
+  - { addr: 0x02, name: "Crystal Cap Setting",  type: rw,
+      summary: "Xtal load-capacitance trim" }
+  - { addr: 0x03, name: "PLL3 M Divider",       type: rw }
+  - { addr: 0x04, name: "PLL3 N Divider",       type: rw }
+  - { addr: 0x05, name: "PLL3 Loop Filter / N[10:8]", type: rw }
+  - { addr: 0x06, name: "PLL3 Charge Pump",     type: rw }
+  - { addr: 0x07, name: "PLL1 Control + OUTDIV5", type: rw }
+  - { addr: 0x1D, name: "Output Control",       type: rw,
+      summary: "DIFF1/2 enable, OUTDIV4 source, SE1 slew, VDD1 sel" }
+  - { addr: 0x1E, name: "OE / DFC Control",     type: rw,
+      summary: "SE1/3 enable, OE1/OE3 pin function" }
+  - { addr: 0x1F, name: "Control",              type: rw,
+      summary: "SE2 freerun, VDD2 sel, PLL2 CH2 enable" }
+  - { addr: 0x20, name: "Control",              type: rw,
+      summary: "SE2 enable, OE2 pin function, DFC_EN, WD_EN" }
+  - { addr: 0x21, name: "SE3 + DIFF1 Control",  type: rw }
+  - { addr: 0x22, name: "DIFF1 Control",        type: rw,
+      summary: "DIFF1 LVCMOS / LP-HCSL mode + slew" }
+  - { addr: 0x23, name: "DIFF2 Control",        type: rw }
+  - { addr: 0x24, name: "SE1 + DIV4 + power-down", type: rw,
+      summary: "I2C_PDB (bit 7), Ref/DIV4 free-run + enable" }
 
 bus:              i2c
 i2c:

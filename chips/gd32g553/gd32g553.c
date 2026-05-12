@@ -447,6 +447,132 @@ alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status)
                     NULL, 0u, status, 1u);
 }
 
+/* ----------------------------------------------------------------- */
+/* OTA helpers -- the firmware-side opcodes return STATUS_NOSUPPORT  */
+/* against the scaffold today, which maps to ALP_ERR_NOSUPPORT here. */
+/* When the bridge ships real bodies the same call paths return the  */
+/* documented payloads.  GET_STATE answers concretely against the    */
+/* scaffold so customer telemetry already works.                      */
+/* ----------------------------------------------------------------- */
+
+alp_status_t gd32g553_ota_begin(gd32g553_t *ctx,
+                                uint32_t size_bytes,
+                                uint32_t expected_crc32,
+                                uint16_t *chunk_max_bytes,
+                                gd32g553_ota_slot_t *target_slot)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (chunk_max_bytes == NULL || target_slot == NULL) return ALP_ERR_INVAL;
+    if (size_bytes == 0u) return ALP_ERR_INVAL;
+
+    uint8_t req[8];
+    put_le32(&req[0], size_bytes);
+    put_le32(&req[4], expected_crc32);
+
+    /* Reply: chunk_max_bytes:u16 + target_slot:u8. */
+    uint8_t reply[3] = {0};
+    alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_OTA_BEGIN,
+                              req, sizeof(req),
+                              reply, sizeof(reply));
+    if (s != ALP_OK) return s;
+    *chunk_max_bytes = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
+    *target_slot     = (gd32g553_ota_slot_t)reply[2];
+    return ALP_OK;
+}
+
+alp_status_t gd32g553_ota_write_chunk(gd32g553_t *ctx,
+                                      uint32_t offset,
+                                      const uint8_t *data,
+                                      size_t data_len,
+                                      uint32_t *received_bytes)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (data == NULL || data_len == 0u) return ALP_ERR_INVAL;
+    if (received_bytes == NULL) return ALP_ERR_INVAL;
+
+    /* Chunk size is bounded by the wire payload ceiling.  Bridges
+     * that advertise a smaller chunk_max_bytes in BEGIN are honoured
+     * by the caller -- this helper only enforces the absolute limit. */
+    if (data_len > GD32G553_BRIDGE_MAX_PAYLOAD_BYTES - 4u) return ALP_ERR_INVAL;
+
+    uint8_t req[GD32G553_BRIDGE_MAX_PAYLOAD_BYTES] = {0};
+    put_le32(&req[0], offset);
+    memcpy(&req[4], data, data_len);
+
+    uint8_t reply[4] = {0};
+    alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_OTA_WRITE_CHUNK,
+                              req, 4u + data_len,
+                              reply, sizeof(reply));
+    if (s != ALP_OK) return s;
+    *received_bytes = get_le32(reply);
+    return ALP_OK;
+}
+
+alp_status_t gd32g553_ota_verify(gd32g553_t *ctx,
+                                 bool *verified,
+                                 uint32_t *computed_crc32)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (verified == NULL || computed_crc32 == NULL) return ALP_ERR_INVAL;
+
+    /* Reply: computed_crc32(u32) + verified(u8). */
+    uint8_t reply[5] = {0};
+    alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_OTA_VERIFY,
+                              NULL, 0u,
+                              reply, sizeof(reply));
+    if (s != ALP_OK) return s;
+    *computed_crc32 = get_le32(&reply[0]);
+    *verified       = (reply[4] != 0u);
+    return ALP_OK;
+}
+
+alp_status_t gd32g553_ota_commit(gd32g553_t *ctx)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                    GD32G553_CMD_OTA_COMMIT,
+                    NULL, 0u, NULL, 0u);
+}
+
+alp_status_t gd32g553_ota_rollback(gd32g553_t *ctx)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                    GD32G553_CMD_OTA_ROLLBACK,
+                    NULL, 0u, NULL, 0u);
+}
+
+alp_status_t gd32g553_ota_get_state(gd32g553_t *ctx,
+                                    gd32g553_ota_state_info_t *out)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (out == NULL) return ALP_ERR_INVAL;
+
+    /* Reply: state(u8) + active(u8) + pending(u8) + boot_count(u16 LE). */
+    uint8_t reply[5] = {0};
+    alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_OTA_GET_STATE,
+                              NULL, 0u,
+                              reply, sizeof(reply));
+    if (s != ALP_OK) return s;
+    out->state        = (gd32g553_ota_state_t)reply[0];
+    out->active_slot  = (gd32g553_ota_slot_t)reply[1];
+    out->pending_slot = (gd32g553_ota_slot_t)reply[2];
+    out->boot_count   = (uint16_t)reply[3] | ((uint16_t)reply[4] << 8);
+    return ALP_OK;
+}
+
+alp_status_t gd32g553_ota_abort(gd32g553_t *ctx)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                    GD32G553_CMD_OTA_ABORT,
+                    NULL, 0u, NULL, 0u);
+}
+
 void gd32g553_deinit(gd32g553_t *ctx)
 {
     if (ctx == NULL) return;

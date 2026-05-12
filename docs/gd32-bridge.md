@@ -19,7 +19,7 @@ build it, how to flash it, and what state the implementation is in.
 | Firmware tree       | [`gd32-bridge/`](../gd32-bridge/)                                                 |
 | Toolchain           | Arm GNU Toolchain (`arm-none-eabi-gcc`), Cortex-M33 + thumb                       |
 | Build system        | CMake (separate from the Zephyr-side `west build`)                                |
-| HAL                 | Stub (`hal/bridge_hw_stub.c`) -- GigaDevice firmware library hook-up TBD          |
+| HAL                 | Stub default; `BRIDGE_HAL_BACKEND=gd32` consumes the GigaDevice firmware library dropped under `vendors/gd32_firmware_library/sdk/` (see that directory's README) |
 | Protocol coverage   | `PING`, `GET_VERSION`, `GET_BUILD_ID` working end-to-end without HW dependency    |
 | Transport coverage  | SPI slave + I2C slave scaffolded; HAL hookups marked TODO                         |
 | Datasheet           | GD32G553 datasheet + user manual (held in the vendor datasheet) |
@@ -42,8 +42,13 @@ Output: `build/gd32-bridge.elf`, `.hex`, `.bin`.
   `STATUS_IO`.  Useful for smoke-testing the protocol round-trip in
   a hardware-less unit-test environment.
 * `BRIDGE_HAL_BACKEND=gd32` -- builds against
-  `vendors/gd32_firmware_library/` (NOT yet vendored; see TODO note
-  in [`gd32-bridge/CMakeLists.txt`](../gd32-bridge/CMakeLists.txt)).
+  [`vendors/gd32_firmware_library/`](../vendors/gd32_firmware_library/).
+  The wrapper expects the GigaDevice **GD32G5x3 Firmware Library**
+  (v1.5.0 or later) unpacked under `sdk/`; the vendor pack itself
+  isn't tracked in git, per the standard ALP convention.  The
+  wrapper's `CMakeLists.txt` fatal-errors with a clear "not found"
+  message if the SDK is missing, so configure failures are immediately
+  diagnosable.
 
 ## Source layout
 

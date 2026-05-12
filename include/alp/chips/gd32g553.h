@@ -105,6 +105,14 @@ typedef enum {
     GD32G553_CMD_PWM_GET               = 0x21,
     GD32G553_CMD_ADC_READ              = 0x30,
     GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40,
+    /* Reserved range 0xF0..0xFF -- application-bootloader OTA. */
+    GD32G553_CMD_OTA_BEGIN             = 0xF0,
+    GD32G553_CMD_OTA_WRITE_CHUNK       = 0xF1,
+    GD32G553_CMD_OTA_VERIFY            = 0xF2,
+    GD32G553_CMD_OTA_COMMIT            = 0xF3,
+    GD32G553_CMD_OTA_ROLLBACK          = 0xF4,
+    GD32G553_CMD_OTA_GET_STATE         = 0xF5,
+    GD32G553_CMD_OTA_ABORT             = 0xF6,
 } gd32g553_cmd_t;
 
 /** Transport-selection enum.  Use with @ref gd32g553_set_default_transport
@@ -246,6 +254,138 @@ alp_status_t gd32g553_adc_read(gd32g553_t *ctx, uint8_t channel,
  *         byte.  Latency to the actual silicon state is firmware-
  *         implementation-defined (currently ≤ 20 ms). */
 alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status);
+
+/* ------------------------------------------------------------------ */
+/* OTA -- in-system upgrade of the bridge firmware                    */
+/*                                                                    */
+/* Opcodes 0xF0..0xF6 are reserved by the bridge protocol             */
+/* (docs/gd32-bridge-protocol.md §10) for the application-bootloader  */
+/* upgrade path.  Scaffolds today: the firmware-side handler set      */
+/* compiles + dispatches but every body except CMD_OTA_GET_STATE      */
+/* replies with STATUS_NOSUPPORT until the FMC integration lands.     */
+/* The host helpers below match that contract: every call returns     */
+/* ALP_ERR_NOSUPPORT against current-firmware bridges, and ALP_OK     */
+/* once the firmware-side bodies ship.  GET_STATE is the exception -- */
+/* it answers concretely today so customer telemetry can already      */
+/* read the OTA state machine.                                        */
+/* ------------------------------------------------------------------ */
+
+/** OTA state-machine snapshot returned by @ref gd32g553_ota_get_state. */
+typedef enum {
+    GD32G553_OTA_STATE_IDLE           = 0, /**< No upgrade in progress. */
+    GD32G553_OTA_STATE_RECEIVING      = 1, /**< Between BEGIN and last chunk. */
+    GD32G553_OTA_STATE_VERIFIED       = 2, /**< VERIFY succeeded. */
+    GD32G553_OTA_STATE_PENDING_COMMIT = 3, /**< Metadata flip queued. */
+    GD32G553_OTA_STATE_FAULT          = 4, /**< Aborted; staging slot dirty. */
+} gd32g553_ota_state_t;
+
+/** Slot id mirrors the firmware's bl_slot_id_t. */
+typedef enum {
+    GD32G553_OTA_SLOT_INVALID = 0u,
+    GD32G553_OTA_SLOT_A       = 1u,
+    GD32G553_OTA_SLOT_B       = 2u,
+} gd32g553_ota_slot_t;
+
+/** Read-only telemetry of the OTA state machine. */
+typedef struct {
+    gd32g553_ota_state_t state;        /**< @ref gd32g553_ota_state_t. */
+    gd32g553_ota_slot_t  active_slot;  /**< Slot the bridge is currently running. */
+    gd32g553_ota_slot_t  pending_slot; /**< Slot queued for next-boot commit; INVALID if none. */
+    uint16_t             boot_count;   /**< Monotonic boot counter from the metadata page. */
+} gd32g553_ota_state_info_t;
+
+/**
+ * @brief Announce a payload size + expected CRC32 to the bridge.
+ *
+ * Erases the inactive slot in preparation for the chunk stream.
+ *
+ * @param ctx              Driver context.
+ * @param size_bytes       Total payload size.
+ * @param expected_crc32   CRC32 the bridge will verify after the
+ *                         last chunk lands.
+ * @param chunk_max_bytes  Out: chunk size the firmware accepts in
+ *                         a single @ref gd32g553_ota_write_chunk.
+ * @param target_slot      Out: slot the bridge will write into.
+ *
+ * @return ALP_OK / ALP_ERR_NOSUPPORT (firmware lacks the bodies) /
+ *         transport error.
+ */
+alp_status_t gd32g553_ota_begin(gd32g553_t *ctx,
+                                uint32_t size_bytes,
+                                uint32_t expected_crc32,
+                                uint16_t *chunk_max_bytes,
+                                gd32g553_ota_slot_t *target_slot);
+
+/**
+ * @brief Write one chunk of the payload at @p offset.
+ *
+ * Chunks may be re-sent (same offset, same data) safely -- the
+ * firmware re-writes the destination region without an erase.  Chunks
+ * arriving out of order are also safe because the offset is absolute.
+ *
+ * @param data            Chunk bytes.
+ * @param data_len        Chunk byte count.  Must be > 0 and
+ *                        <= the `chunk_max_bytes` returned by BEGIN.
+ * @param received_bytes  Out: running total the firmware has seen.
+ */
+alp_status_t gd32g553_ota_write_chunk(gd32g553_t *ctx,
+                                      uint32_t offset,
+                                      const uint8_t *data,
+                                      size_t data_len,
+                                      uint32_t *received_bytes);
+
+/**
+ * @brief Ask the bridge to re-compute the CRC32 over the staging
+ *        slot and compare against the value passed to BEGIN.
+ *
+ * @param verified        Out: true iff the recomputed CRC32 matched.
+ * @param computed_crc32  Out: the CRC32 the bridge actually saw.
+ */
+alp_status_t gd32g553_ota_verify(gd32g553_t *ctx,
+                                 bool *verified,
+                                 uint32_t *computed_crc32);
+
+/**
+ * @brief Stage a metadata-page flip and reset the bridge.
+ *
+ * On reboot the bootloader sees the pending flip, applies it
+ * atomically, and starts the new slot.  The SPI / I2C link drops
+ * during the reset; the host MUST re-issue @ref gd32g553_init after
+ * a short delay (typically a few hundred milliseconds for the
+ * bridge to come back online).
+ */
+alp_status_t gd32g553_ota_commit(gd32g553_t *ctx);
+
+/**
+ * @brief Roll back to the previously-active slot (used after a
+ *        committed upgrade bricks the application).
+ *
+ * Like @ref gd32g553_ota_commit, this resets the bridge and the host
+ * must re-init the driver.
+ */
+alp_status_t gd32g553_ota_rollback(gd32g553_t *ctx);
+
+/**
+ * @brief Read-only snapshot of the OTA state machine + active /
+ *        pending slot.
+ *
+ * Safe to call at any time -- doesn't perturb the chip state.
+ * Answers concretely today even on scaffold firmware: the firmware
+ * handler reads its own in-RAM session struct + the metadata page.
+ *
+ * @param out  Populated on @ref ALP_OK.  May not be NULL.
+ */
+alp_status_t gd32g553_ota_get_state(gd32g553_t *ctx,
+                                    gd32g553_ota_state_info_t *out);
+
+/**
+ * @brief Cancel an in-progress OTA session.  Idempotent.
+ *
+ * Resets the firmware's in-RAM state to IDLE.  The staging slot is
+ * left dirty -- the next BEGIN re-erases it before accepting the
+ * first chunk.
+ */
+alp_status_t gd32g553_ota_abort(gd32g553_t *ctx);
 
 /** @brief Release the context.  Idempotent.  Does **not** close the
  *         underlying SPI / I2C bus handles -- the caller owns those. */

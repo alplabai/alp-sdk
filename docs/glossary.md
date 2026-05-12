@@ -69,6 +69,12 @@ build time.
 `<alp/...>` directly without alp-studio's codegen.  First-class
 consumer path -- not a fallback.
 
+**IDCODE** -- The 32-bit Arm Coresight SW-DP identification value
+returned by the target on the first SWD read after a line reset.
+Documented as `0x6BA02477` for the GD32G553 (Cortex-M33 r0p1
+SW-DPv2); used by `gd32_swd_connect` to confirm the link reaches
+the right silicon.
+
 **HiL** -- Hardware-in-the-Loop testing.  See
 [`docs/hil-plan.md`](hil-plan.md).
 
@@ -103,6 +109,13 @@ integration.
 [`docs/ota-device-contract.md`](ota-device-contract.md).  Server
 side is a separate repo, owned by Hakan.
 
+**OTA opcodes (bridge)** -- The 0xF0..0xF6 opcode range reserved
+in [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10
+for the GD32 bridge's application-bootloader upgrade path.  Host
+helpers in `<alp/chips/gd32g553.h>` (`gd32g553_ota_begin`,
+`_write_chunk`, `_verify`, `_commit`, `_rollback`, `_get_state`,
+`_abort`).
+
 **PMIC** -- Power Management IC.  V2N + V2N-M1 carry two:
 ACT88760 (primary) + DA9292 (secondary).
 
@@ -125,6 +138,13 @@ Quad Cortex-A55 + Cortex-M33 + DRP-AI3.
 **Sample.yaml** -- Zephyr Twister test scenario metadata next to
 an application's source.  Optional; required to run as a Twister
 target.
+
+**SWD** -- Serial Wire Debug.  Arm's two-wire (SWDIO + SWCLK)
+debug protocol used to reflash + halt Cortex-M targets.  The SDK
+ships a bit-bang controller (`chips/gd32_swd/`) that lets the V2N
+host reflash the on-module GD32G553 over three GPIOs -- see
+[`docs/bring-up-v2n.md`](bring-up-v2n.md) §2b for the recovery
+flow.
 
 **Silicon ref** -- Triple-colon string identifying SoC silicon
 (e.g. `renesas:rzv2n:n44`, `alif:ensemble:e7`, `nxp:imx9:imx93`).
