@@ -35,9 +35,22 @@ jobs:
           fetch-depth: 0  # need history so HEAD~ resolves
 
       - name: Install clang-format-diff
+        # Pin to clang-format-14 (Ubuntu 22.04 LTS shipped this as
+        # `clang-format`; the project's existing committed code was
+        # formatted against it and our CI passed for months).
+        # Floating with `clang-format` lets Ubuntu's default flip
+        # with the runner image (24.04 ships v18) -- that flip is
+        # what just broke this workflow even though no source file
+        # actually changed its style.  Lock the version + lock the
+        # disputed Cpp11BracedListStyle option in /.clang-format
+        # together so the formatter's output is reproducible.
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-format
+          sudo apt-get install -y clang-format-14
+          sudo update-alternatives --install /usr/bin/clang-format \
+              clang-format /usr/bin/clang-format-14 100
+          sudo update-alternatives --install /usr/bin/clang-format-diff \
+              clang-format-diff /usr/bin/clang-format-diff-14 100
 
       - name: Determine diff base
         id: base
