@@ -23,16 +23,18 @@ quickstart -- this doc covers the hand-written path.
 
 ## 1. Pick a target
 
-| If your hardware is...                      | `som.sku` to declare | Carrier default     |
-|---------------------------------------------|----------------------|---------------------|
-| E1M-AEN3..801 SoM on E1M EVK                | `E1M-AEN701` (etc.)  | `E1M-EVK`           |
-| E1M-X V2N101 / V2N102 SoM on E1M-X-EVK      | `E1M-V2N101`         | `E1M-X-EVK`         |
-| E1M-X V2N-M1 (V2M101 / V2M102) SoM          | `E1M-V2M101`         | `E1M-X-EVK`         |
-| E1M-NX9101 (NXP i.MX 93)                    | `E1M-NX9101`         | `E1M-EVK`           |
+| If your hardware is...                      | `som.sku` to declare | Carrier default     | One-pager                                         |
+|---------------------------------------------|----------------------|---------------------|---------------------------------------------------|
+| E1M-AEN3..801 SoM on E1M EVK                | `E1M-AEN701` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 |
+| E1M-X V2N101 / V2N102 SoM on E1M-X-EVK      | `E1M-V2N101`         | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 |
+| E1M-X V2N-M1 (V2M101 / V2M102) SoM          | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           |
+| E1M-NX9101 (NXP i.MX 93)                    | `E1M-NX9101`         | `E1M-EVK`           | [`docs/soms/imx93.md`](soms/imx93.md)             |
 
-The full per-SKU populated-parts list lives in
-[`metadata/e1m_modules/<SKU>/som.yaml`](../metadata/e1m_modules/).
-The loader reads this file at `west alp-build` time to decide which
+The per-SoM one-pager covers what's populated, which examples
+target it, the bring-up flow, and common gotchas.  The full
+per-SKU populated-parts list lives in
+[`metadata/e1m_modules/<SKU>/som.yaml`](../metadata/e1m_modules/);
+the loader reads this file at `west alp-build` time to decide which
 chip drivers to compile in.
 
 ## 2. Workspace setup

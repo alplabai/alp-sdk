@@ -1,0 +1,19 @@
+# board.yaml -- per-app project configuration for v2n-ethernet-dual.
+
+schema_version: 1
+
+som:
+  sku: E1M-V2N101
+
+carrier:
+  name: E1M-X-EVK
+
+os: zephyr
+
+peripherals: []
+
+chips:
+  - rtl8211fdi
+
+diagnostics:
+  log_level: info
