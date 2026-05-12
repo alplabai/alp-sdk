@@ -34,6 +34,7 @@
 /*   runtime here cannot disagree on the manifest's checksum.        */
 /* ---------------------------------------------------------------- */
 
+__attribute__((unused))
 static uint32_t crc32_iso3309(const uint8_t *buf, size_t len)
 {
     uint32_t crc = 0xFFFFFFFFu;
@@ -52,6 +53,7 @@ static uint32_t crc32_iso3309(const uint8_t *buf, size_t len)
 /* The EEPROM manifest fields are spec'd as null-terminated but a     */
 /* corrupt or partially-programmed EEPROM might omit the terminator.  */
 /* ---------------------------------------------------------------- */
+__attribute__((unused))
 static void copy_field(char *dst, size_t dst_len, const char *src, size_t src_len)
 {
     size_t n = src_len;
@@ -109,6 +111,7 @@ static alp_status_t read_manifest(alp_hw_info_eeprom_t *manifest)
  * sample, look up the rev, and cross-check against
  * manifest->hw_rev.  Mismatch -> ALP_ERR_IO with manifest left as
  * read (caller can log for diagnostics). */
+__attribute__((unused))
 static alp_status_t adc_cross_check(const alp_hw_info_eeprom_t *manifest,
                                     alp_hw_info_t *out)
 {
