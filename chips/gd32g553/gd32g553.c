@@ -700,9 +700,8 @@ alp_status_t gd32g553_pwm_capture_read(gd32g553_t *ctx, uint8_t channel, uint32_
     if (period_ns == NULL && pulse_ns == NULL) return ALP_ERR_INVAL;
     uint8_t      req[1]   = { channel };
     uint8_t      reply[8] = { 0 };
-    alp_status_t s        = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
-                                     GD32G553_CMD_PWM_CAPTURE_READ, req, sizeof(req), reply,
-                                     sizeof(reply));
+    alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_CAPTURE_READ, req,
+                              sizeof(req), reply, sizeof(reply));
     if (s != ALP_OK) return s;
     if (period_ns != NULL) *period_ns = get_le32(&reply[0]);
     if (pulse_ns != NULL) *pulse_ns = get_le32(&reply[4]);
@@ -713,8 +712,8 @@ alp_status_t gd32g553_pwm_capture_end(gd32g553_t *ctx, uint8_t channel)
 {
     if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
     uint8_t req[1] = { channel };
-    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_CAPTURE_END, req,
-                    sizeof(req), NULL, 0u);
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_CAPTURE_END, req, sizeof(req),
+                    NULL, 0u);
 }
 
 alp_status_t gd32g553_pwm_single_pulse(gd32g553_t *ctx, uint8_t channel, uint32_t pulse_ns)
@@ -749,8 +748,8 @@ alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx, uint8_t mode, uint32_t wak
     req[1] = 0u; /* reserved */
     put_le32(&req[2], wake_bitmap);
     put_le32(&req[6], wake_after_ms);
-    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_POWER_MODE_SET, req,
-                    sizeof(req), NULL, 0u);
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_POWER_MODE_SET, req, sizeof(req),
+                    NULL, 0u);
 }
 
 /* ----------------------------------------------------------------- */
