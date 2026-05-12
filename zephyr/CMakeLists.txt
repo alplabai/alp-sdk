@@ -93,6 +93,13 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/power_zephyr.c)
 
+# 2D graphics accelerator surface (<alp/gpu2d.h>).  v0.5 stub
+# implementation; per-vendor HAL bodies (Alif D/AVE 2D, NXP
+# Vivante GC328) land via CONFIG_ALP_SOC_* selection once the
+# vendor packs stabilise as Zephyr modules.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/gpu2d_zephyr.c)
+
 # Runtime hardware-info reader (EEPROM manifest + BOARD_ID ADC).
 # v0.3 stub returns NOSUPPORT; v0.3.x fills in the real impl.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO

@@ -377,6 +377,26 @@ config ALP_SDK_POWER
 	  the GD32 firmware-side wake-handler + the supervisor
 	  re-init state machine) land in follow-up commits.
 
+config ALP_SDK_GPU2D
+	bool "Enable <alp/gpu2d.h> 2D graphics accelerator surface"
+	default y
+	help
+	  Compile src/zephyr/gpu2d_zephyr.c.  Provides the portable
+	  alp_gpu2d_open / fill_rect / blit / blend / close surface
+	  that maps to vendor 2D-accelerator HALs (Alif D/AVE 2D on
+	  Ensemble, planned Vivante GC328 on i.MX 93).
+
+	  v0.5 ships NOSUPPORT-with-INVAL-pre-checks stubs so
+	  customers can write portable 2D-graphics code today; the
+	  per-vendor HAL bodies land once their packs stabilise as
+	  Zephyr modules.
+
+	  Surfaces the headline gap the Alif Ensemble feature audit
+	  (docs/aen-feature-audit-2026-05.md) called out: customers
+	  migrating from V2N to AEN otherwise silently lose 2D
+	  acceleration because Zephyr has no portable `gpu` / `2d`
+	  driver class.
+
 # IoT (Wi-Fi station + MQTT) — v0.2 deliverable.  When OFF the
 # wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT
 # contract so apps can link cleanly against <alp/iot.h>.

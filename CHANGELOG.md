@@ -397,6 +397,40 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`<alp/gpu2d.h>` -- portable 2D graphics accelerator surface
+  (AEN audit §4.3 top-five gap, 2026-05-14).**  Closes the
+  headline gap from the Alif Ensemble feature audit
+  (docs/aen-feature-audit-2026-05.md): customers migrating from
+  V2N to AEN otherwise silently lose 2D acceleration because
+  Zephyr has no portable `gpu` / `2d` driver class.
+
+  Surface:
+    * `alp_gpu2d_t` opaque single-instance handle.
+    * `alp_gpu2d_surface_t` descriptor: base / width / height /
+      stride_bytes / format.  Pixel formats: ARGB8888, RGB565,
+      A8, RGB888, RGBA8888.
+    * `alp_gpu2d_open / close` lifecycle.
+    * `alp_gpu2d_fill_rect(handle, dst, x, y, w, h, argb_color)`
+      -- solid-colour rectangle fill.
+    * `alp_gpu2d_blit(handle, src, sx, sy, dst, dx, dy, w, h)`
+      -- format-converting rect copy.
+    * `alp_gpu2d_blend(handle, src, sx, sy, dst, dx, dy, w, h, mode)`
+      -- alpha blend with Porter-Duff modes: REPLACE / SRC_OVER /
+      ADDITIVE / MULTIPLY.
+
+  v0.5 ships NOSUPPORT-with-INVAL-pre-checks stubs on every
+  backend:
+    * Zephyr: `src/zephyr/gpu2d_zephyr.c` (validates surface
+      descriptors + mode enums; returns NOSUPPORT).  Wired
+      behind `CONFIG_ALP_SDK_GPU2D=y` (default on).
+    * stub_backend.c: NOSUPPORT for yocto / baremetal builds.
+
+  Per-vendor HAL bodies land via `CONFIG_ALP_SOC_*` selection
+  once the vendor packs stabilise as Zephyr modules:
+    * AEN-family : Alif `alif_dave2d-driver`.
+    * i.MX 93    : Vivante GC328 (NXP BSP, planned).
+    * V2N        : stays NOSUPPORT -- no on-die 2D block.
+
 - **`<alp/peripheral.h>` -- portable busy-wait + sleep primitives
   + CC3501E §5.5 reset-timing fix (2026-05-14).**  Adds two new
   portable delay surfaces that the prior CC3501E integration plan

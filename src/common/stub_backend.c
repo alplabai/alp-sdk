@@ -40,6 +40,8 @@
 #include "alp/inference.h"
 #include "alp/storage.h"
 #include "alp/usb.h"
+#include "alp/power.h"
+#include "alp/gpu2d.h"
 
 #include "alp_internal.h"
 
@@ -1121,4 +1123,90 @@ alp_status_t alp_usb_host_disable(alp_usb_host_t *h)
 void alp_usb_host_close(alp_usb_host_t *h)
 {
     (void)h;
+}
+
+/* ------------------------------------------------------------------ */
+/* power (alp/power.h)                                                 */
+/* ------------------------------------------------------------------ */
+
+alp_power_t *alp_power_open(void)
+{
+    z_last_error = ALP_ERR_NOSUPPORT;
+    return NULL;
+}
+alp_status_t alp_power_configure_wake_source(alp_power_t *p, uint32_t wake_bitmap)
+{
+    (void)p;
+    (void)wake_bitmap;
+    return ALP_ERR_NOSUPPORT;
+}
+alp_status_t alp_power_request_sleep(alp_power_t *p, alp_power_mode_t mode, uint32_t wake_after_ms,
+                                     alp_power_wake_info_t *info)
+{
+    (void)p;
+    (void)mode;
+    (void)wake_after_ms;
+    (void)info;
+    return ALP_ERR_NOSUPPORT;
+}
+void alp_power_close(alp_power_t *p)
+{
+    (void)p;
+}
+
+/* ------------------------------------------------------------------ */
+/* GPU2D (alp/gpu2d.h)                                                 */
+/* ------------------------------------------------------------------ */
+
+alp_gpu2d_t *alp_gpu2d_open(void)
+{
+    z_last_error = ALP_ERR_NOSUPPORT;
+    return NULL;
+}
+alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t *g, const alp_gpu2d_surface_t *dst, uint32_t x,
+                                 uint32_t y, uint32_t w, uint32_t h, uint32_t argb_color)
+{
+    (void)g;
+    (void)dst;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)argb_color;
+    return ALP_ERR_NOSUPPORT;
+}
+alp_status_t alp_gpu2d_blit(alp_gpu2d_t *g, const alp_gpu2d_surface_t *src, uint32_t sx,
+                            uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy,
+                            uint32_t w, uint32_t h)
+{
+    (void)g;
+    (void)src;
+    (void)sx;
+    (void)sy;
+    (void)dst;
+    (void)dx;
+    (void)dy;
+    (void)w;
+    (void)h;
+    return ALP_ERR_NOSUPPORT;
+}
+alp_status_t alp_gpu2d_blend(alp_gpu2d_t *g, const alp_gpu2d_surface_t *src, uint32_t sx,
+                             uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy,
+                             uint32_t w, uint32_t h, alp_gpu2d_blend_mode_t mode)
+{
+    (void)g;
+    (void)src;
+    (void)sx;
+    (void)sy;
+    (void)dst;
+    (void)dx;
+    (void)dy;
+    (void)w;
+    (void)h;
+    (void)mode;
+    return ALP_ERR_NOSUPPORT;
+}
+void alp_gpu2d_close(alp_gpu2d_t *g)
+{
+    (void)g;
 }

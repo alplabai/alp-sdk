@@ -3431,6 +3431,45 @@
       },
       "typedefs": {}
     },
+    "alp/gpu2d.h": {
+      "functions": {
+        "alp_gpu2d_blend": {
+          "hash": "c628644383eb53f6",
+          "signature": "alp_status_t alp_gpu2d_blend(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src, uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy, uint32_t w, uint32_t h, alp_gpu2d_blend_mode_t mode);"
+        },
+        "alp_gpu2d_blit": {
+          "hash": "c3ba97a61493478d",
+          "signature": "alp_status_t alp_gpu2d_blit(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src, uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy, uint32_t w, uint32_t h);"
+        },
+        "alp_gpu2d_close": {
+          "hash": "fc8dcedc5ac12eaf",
+          "signature": "void alp_gpu2d_close(alp_gpu2d_t *handle);"
+        },
+        "alp_gpu2d_fill_rect": {
+          "hash": "a8a4b826440370f3",
+          "signature": "alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *dst, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t argb_color);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_gpu2d_blend_mode_t": {
+          "definition": "typedef enum { ALP_GPU2D_BLEND_REPLACE = 0, ALP_GPU2D_BLEND_SRC_OVER = 1, ALP_GPU2D_BLEND_ADDITIVE = 2, ALP_GPU2D_BLEND_MULTIPLY = 3, } alp_gpu2d_blend_mode_t;",
+          "hash": "48e3ebad6898fc41"
+        },
+        "alp_gpu2d_format_t": {
+          "definition": "typedef enum { ALP_GPU2D_FMT_ARGB8888 = 0, ALP_GPU2D_FMT_RGB565 = 1, ALP_GPU2D_FMT_A8 = 2, ALP_GPU2D_FMT_RGB888 = 3, ALP_GPU2D_FMT_RGBA8888 = 4, } alp_gpu2d_format_t;",
+          "hash": "52e3d44a34b039d8"
+        },
+        "alp_gpu2d_t": {
+          "definition": "typedef struct alp_gpu2d alp_gpu2d_t;",
+          "hash": "c123a4cd22e474be"
+        },
+        "width": {
+          "definition": "typedef struct { void *base; uint32_t width;",
+          "hash": "027eabf017488884"
+        }
+      }
+    },
     "alp/gui.h": {
       "functions": {
         "alp_gui_lvgl_attach": {
