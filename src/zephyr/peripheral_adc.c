@@ -43,6 +43,19 @@
 #include "alp/adc.h"
 #include "alp/soc_caps.h"
 #include "handles.h"
+#include "v2n_supervisor.h"
+
+/* On V2N every E1M ADC channel is GD32-driven (Renesas SoC's
+ * ALP_SOC_ADC_COUNT = 24 but the carrier exposes the 8 E1M channels
+ * via the GD32 IO MCU per gd32-io-mcu-map.tsv).  The bridge already
+ * returns mV-corrected readings, so the V2N path uses mV as the
+ * "raw" value (16-bit unsigned, sign-extended into int32) and
+ * alp_adc_read_uv multiplies by 1000 to honour the public contract. */
+#if defined(CONFIG_ALP_SDK_V2N_SUPERVISOR)
+#define ALP_ADC_HAS_BRIDGE_PATH 1
+#else
+#define ALP_ADC_HAS_BRIDGE_PATH 0
+#endif
 
 #if DT_NODE_EXISTS(DT_ALIAS(alp_adc0))
 #define ALP_ADC_SPEC_0_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc0))
@@ -107,6 +120,47 @@ static alp_status_t errno_to_alp(int err) {
     }
 }
 
+#if ALP_ADC_HAS_BRIDGE_PATH
+static alp_adc_t *bridge_open(const alp_adc_config_t *cfg) {
+    /* The bridge advertises a fixed 12-bit / ~3.3 V reference DAC;
+     * its ADC_READ replies are already mV-corrected, so the host
+     * presents the channel to callers as a 16-bit-resolution
+     * mV-encoded ADC and skips the Zephyr adc_raw_to_millivolts
+     * conversion. */
+    if (cfg->channel_id >= 8u) {
+        /* The E1M spec reserves 8 ADC channels and the bridge
+         * advertises exactly that many in gd32-io-mcu-map.tsv. */
+        alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
+        return NULL;
+    }
+
+    /* Probe the supervisor up-front so the first read doesn't surface
+     * the bus-open failure as a runtime error. */
+    gd32g553_t *ctx = NULL;
+    alp_status_t s = alp_z_v2n_supervisor_acquire(&ctx);
+    if (s != ALP_OK) {
+        alp_z_set_last_error(s);
+        return NULL;
+    }
+    alp_z_v2n_supervisor_release();
+
+    struct alp_adc *h = alp_z_adc_pool_acquire();
+    if (h == NULL) {
+        alp_z_set_last_error(ALP_ERR_NOMEM);
+        return NULL;
+    }
+
+    h->channel_id = cfg->channel_id;
+    h->dev        = NULL;                      /* bridge sentinel */
+    h->channel    = (uint8_t)cfg->channel_id;  /* bridge-side index == E1M index */
+    h->resolution = 16u;                       /* mV fits in u16 across 3.3 V rails */
+    h->vref_mv    = 3300u;                     /* documentation only -- the
+                                                * mV value already encodes any
+                                                * reference / gain choice. */
+    return h;
+}
+#endif  /* ALP_ADC_HAS_BRIDGE_PATH */
+
 alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg) {
     alp_z_clear_last_error();
 
@@ -114,6 +168,10 @@ alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg) {
         alp_z_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
+
+#if ALP_ADC_HAS_BRIDGE_PATH
+    return bridge_open(cfg);
+#else
     if (cfg->channel_id >= ARRAY_SIZE(alp_adcs)) {
         alp_z_set_last_error(ALP_ERR_INVAL);
         return NULL;
@@ -169,6 +227,7 @@ alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg) {
         return NULL;
     }
     return h;
+#endif  /* ALP_ADC_HAS_BRIDGE_PATH */
 }
 
 static alp_status_t one_shot(struct alp_adc *h, int32_t *raw_out) {
@@ -184,15 +243,50 @@ static alp_status_t one_shot(struct alp_adc *h, int32_t *raw_out) {
     return ALP_OK;
 }
 
+#if ALP_ADC_HAS_BRIDGE_PATH
+static alp_status_t bridge_read_mv(struct alp_adc *h, uint16_t *mv_out) {
+    gd32g553_t *ctx = NULL;
+    alp_status_t s = alp_z_v2n_supervisor_acquire(&ctx);
+    if (s != ALP_OK) return s;
+    /* Ask for a single sample -- the firmware averages internally;
+     * callers that want N-sample averaging on the host side can
+     * issue a sequence of read_raw / read_uv calls. */
+    s = gd32g553_adc_read(ctx, h->channel, 1u, mv_out);
+    alp_z_v2n_supervisor_release();
+    return s;
+}
+#endif
+
 alp_status_t alp_adc_read_raw(alp_adc_t *adc, int32_t *raw_out) {
     if (adc == NULL || !adc->in_use) return ALP_ERR_NOT_READY;
     if (raw_out == NULL) return ALP_ERR_INVAL;
+#if ALP_ADC_HAS_BRIDGE_PATH
+    if (adc->dev == NULL) {
+        /* Bridge already reports mV; the V2N "raw" value is mV
+         * sign-extended into int32 -- there's no lower-level code
+         * the host can recover. */
+        uint16_t mv = 0u;
+        alp_status_t s = bridge_read_mv(adc, &mv);
+        if (s != ALP_OK) return s;
+        *raw_out = (int32_t)mv;
+        return ALP_OK;
+    }
+#endif
     return one_shot(adc, raw_out);
 }
 
 alp_status_t alp_adc_read_uv(alp_adc_t *adc, int32_t *uv_out) {
     if (adc == NULL || !adc->in_use) return ALP_ERR_NOT_READY;
     if (uv_out == NULL) return ALP_ERR_INVAL;
+#if ALP_ADC_HAS_BRIDGE_PATH
+    if (adc->dev == NULL) {
+        uint16_t mv = 0u;
+        alp_status_t s = bridge_read_mv(adc, &mv);
+        if (s != ALP_OK) return s;
+        *uv_out = (int32_t)mv * 1000;
+        return ALP_OK;
+    }
+#endif
 
     int32_t raw = 0;
     alp_status_t s = one_shot(adc, &raw);

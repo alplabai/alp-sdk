@@ -63,6 +63,57 @@ that lands before the v0.3.0 tag.)
 
 ### Added (2026-05-14)
 
+- **V2N supervisor singleton + portable PWM/ADC/DAC/QENC/COUNTER backends (2026-05-14).**
+  Closes the loop opened by the 2026-05-12 "all V2N PWMs are GD32-driven"
+  decision: the SDK's portable peripheral surface now actually reaches
+  the GD32 IO MCU on V2N instead of returning `ALP_ERR_NOT_READY` at
+  the SoC-cap check.  Two pieces:
+  - `src/zephyr/v2n_supervisor.{c,h}` -- lazy-initialised singleton
+    wrapping a `gd32g553_t` driver context plus the underlying
+    `alp_spi_t` / `alp_i2c_t` handles.  Acquire / release pair
+    serialises every bridge call under a shared mutex so the
+    `gd32g553_t` "caller must serialise" contract is honoured without
+    forcing each backend to maintain its own lock.  New Kconfig:
+    `CONFIG_ALP_SDK_V2N_SUPERVISOR` (default y on V2N + GD32G553),
+    bus-id selectors `..._SPI_BUS_ID` / `..._I2C_BUS_ID` (mirroring
+    the `CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` pattern), I2C
+    slave address `..._I2C_ADDR` (default `0x70`), plus bus-speed
+    knobs `..._SPI_FREQ_HZ` (10 MHz default) and
+    `..._I2C_BITRATE_HZ` (400 kHz default).
+  - V2N dispatcher branches in `src/zephyr/peripheral_pwm.c`,
+    `peripheral_adc.c`, `peripheral_qenc.c`, `peripheral_counter.c`,
+    and a new `peripheral_dac.c`.  Each backend's V2N branch is
+    `#if defined(CONFIG_ALP_SDK_V2N_SUPERVISOR)` and routes through
+    `alp_z_v2n_supervisor_acquire / release` + the v0.2 GD32
+    wrappers (`gd32g553_pwm_set` / `_adc_read` / `_qenc_read` /
+    `_qenc_reset` / `_counter_read` / `_dac_set` / `_dac_get`).
+    Bridge handles are tagged with `h->dev == NULL`; non-V2N builds
+    take the unchanged DT-alias path.
+  - `alp_dac_*` public surface from the prior commit is now wired:
+    on V2N via the bridge, on Zephyr's `dac_*` driver class
+    elsewhere (`alp-dacN` DT alias).  When `CONFIG_DAC=n` the wrapper
+    still compiles and returns `ALP_ERR_NOSUPPORT` so apps link
+    cleanly under `native_sim`.
+  - **Counter alarms on V2N return `ALP_ERR_NOSUPPORT`.** The GD32
+    has no interrupt line back to the Renesas host so deadline
+    callbacks fired in firmware ISR context can't be relayed across
+    the bridge in bounded time.  `alp_counter_us_to_ticks` also
+    returns `NOSUPPORT` on V2N until the v0.3 protocol revision
+    adds `CMD_COUNTER_GET_FREQ`.  Read-only `alp_counter_get_value`
+    works.
+  - New twister scenario `alp_sdk.peripheral.v2n_supervisor` flips
+    `CONFIG_ALP_SOC_RENESAS_RZV2N_N44=y` + the supervisor + DAC
+    Kconfigs on under `native_sim`.  With no bus IDs configured the
+    supervisor surfaces `ALP_ERR_NOT_READY`; the new ZTESTs assert
+    every portable `*_open` propagates that error code rather than
+    silently falling through to a misleading `ALP_ERR_OUT_OF_RANGE`
+    from the soc_caps check.  Real-silicon coverage lives in the
+    V2N HIL plan.
+  - Unblocks `examples/v2n-pwm-fan-control/` at runtime: customers
+    who set the two bus-id Kconfigs on a real V2N board get a live
+    fan-control loop with no application-side knowledge of the
+    GD32 bridge.
+
 - **GD32 bridge protocol v0.2 -- DAC / QENC / COUNTER opcodes (2026-05-14).**
   Bumps `PROTOCOL_VERSION_MINOR` 1 → 2 to add five wire opcodes that
   cover the analog + counter peripherals the GD32 already routes per

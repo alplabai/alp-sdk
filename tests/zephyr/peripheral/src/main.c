@@ -252,6 +252,34 @@ ZTEST(alp_peripheral, test_qenc_null_cfg) {
      * return. */
 }
 
+ZTEST(alp_peripheral, test_dac_null_cfg) {
+    zassert_is_null(alp_dac_open(NULL));
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_dac_out_of_range_channel) {
+    /* ALP_E1M_DAC_COUNT = 2; the wrapper's internal array sized to
+     * match.  Channel id 9 must reject. */
+    alp_dac_t *d = alp_dac_open(&(alp_dac_config_t){
+        .channel_id = 9u,
+        .initial_mv = 0u,
+    });
+    zassert_is_null(d);
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_peripheral, test_dac_unresolved_channel_yields_not_ready) {
+    /* Without a real DAC controller or V2N supervisor backing
+     * channel 0, open must fail with NOT_READY (DT-alias path) or
+     * NOSUPPORT (CONFIG_DAC=n).  Either is acceptable; both surface
+     * as a NULL return. */
+    alp_dac_t *d = alp_dac_open(&(alp_dac_config_t){
+        .channel_id = 0u,
+        .initial_mv = 0u,
+    });
+    zassert_is_null(d);
+}
+
 ZTEST(alp_peripheral, test_i2s_null_cfg) {
     zassert_is_null(alp_i2s_open(NULL));
     zassert_equal(alp_last_error(), ALP_ERR_INVAL);
@@ -337,3 +365,76 @@ ZTEST(alp_peripheral, test_soc_ref_str_matches_choice) {
 }
 
 #endif  /* CONFIG_ALP_SOC_ALIF_ENSEMBLE_E3 */
+
+/* ------------------------------------------------------------------ */
+/* V2N supervisor bridge dispatch (only meaningful when the supervisor */
+/* singleton is compiled in).  Asserts that the bridge branches in     */
+/* peripheral_pwm.c / _adc.c / _qenc.c / _counter.c / _dac.c reach the */
+/* supervisor and surface NOT_READY when no bus IDs are configured.    */
+/* ------------------------------------------------------------------ */
+
+#if defined(CONFIG_ALP_SDK_V2N_SUPERVISOR)
+
+ZTEST(alp_peripheral, test_v2n_supervisor_pwm_open_not_ready_without_buses) {
+    /* Default Kconfig: SPI_BUS_ID = -1, I2C_BUS_ID = -1.  The
+     * supervisor surfaces ALP_ERR_NOT_READY because neither bus is
+     * configured.  alp_pwm_open must propagate that to last_error. */
+    alp_pwm_t *p = alp_pwm_open(&(alp_pwm_config_t){
+        .channel_id = 0u,
+        .period_ns  = 1000000u,
+        .polarity   = ALP_PWM_POLARITY_NORMAL,
+    });
+    zassert_is_null(p);
+    zassert_equal(alp_last_error(), ALP_ERR_NOT_READY,
+                  "expected NOT_READY, got %d", (int)alp_last_error());
+}
+
+ZTEST(alp_peripheral, test_v2n_supervisor_adc_open_not_ready_without_buses) {
+    alp_adc_t *a = alp_adc_open(&(alp_adc_config_t){
+        .channel_id      = 0u,
+        .resolution_bits = 12u,
+        .reference       = ALP_ADC_REF_INTERNAL,
+    });
+    zassert_is_null(a);
+    zassert_equal(alp_last_error(), ALP_ERR_NOT_READY,
+                  "expected NOT_READY, got %d", (int)alp_last_error());
+}
+
+ZTEST(alp_peripheral, test_v2n_supervisor_dac_open_not_ready_without_buses) {
+    alp_dac_t *d = alp_dac_open(&(alp_dac_config_t){
+        .channel_id = 0u,
+        .initial_mv = 0u,
+    });
+    zassert_is_null(d);
+    zassert_equal(alp_last_error(), ALP_ERR_NOT_READY,
+                  "expected NOT_READY, got %d", (int)alp_last_error());
+}
+
+ZTEST(alp_peripheral, test_v2n_supervisor_qenc_open_not_ready_without_buses) {
+    alp_qenc_t *q = alp_qenc_open(&(alp_qenc_config_t){
+        .encoder_id     = 0u,
+        .pulses_per_rev = 24u,
+    });
+    zassert_is_null(q);
+    /* qenc doesn't stamp last_error today; NULL is enough to prove
+     * the bridge branch reached the supervisor and folded the
+     * NOT_READY back to NULL. */
+}
+
+ZTEST(alp_peripheral, test_v2n_supervisor_counter_open_not_ready_without_buses) {
+    alp_counter_t *c = alp_counter_open(&(alp_counter_config_t){
+        .counter_id = 0u,
+    });
+    zassert_is_null(c);
+}
+
+ZTEST(alp_peripheral, test_v2n_supervisor_counter_high_id_rejected) {
+    /* The bridge advertises only one counter; counter_id >= 1 must
+     * reject at open without touching the supervisor singleton. */
+    alp_counter_t *c = alp_counter_open(&(alp_counter_config_t){
+        .counter_id = 2u,
+    });
+    zassert_is_null(c);
+}
+
+#endif  /* CONFIG_ALP_SDK_V2N_SUPERVISOR */

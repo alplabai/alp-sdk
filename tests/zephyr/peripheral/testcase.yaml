@@ -49,6 +49,27 @@ tests:
       - uart
       - lwrb
 
+  # V2N-supervisor scenario: force CONFIG_ALP_SDK_V2N_SUPERVISOR=y
+  # so the GD32-bridge dispatch branches in peripheral_pwm.c /
+  # peripheral_adc.c / peripheral_qenc.c / peripheral_counter.c /
+  # peripheral_dac.c get compiled and tested under native_sim.  No
+  # bus IDs configured (Kconfig defaults to -1), so the supervisor
+  # surfaces ALP_ERR_NOT_READY for every open() and the V2N-only
+  # tests assert that propagates back through the portable surface.
+  alp_sdk.peripheral.v2n_supervisor:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_v2n_supervisor.conf"
+    tags:
+      - alp-sdk
+      - peripheral
+      - v2n
+      - bridge
+
   # alp_sdk.peripheral.evk_aen — HW-in-loop variant for the E1M EVK
   # populated with an E1M-AEN family SoM. Currently parked because
   # the alp_e1m_evk_aen Zephyr board file lives in

@@ -66,6 +66,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_COUNTER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_counter.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_QENC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_qenc.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_DAC
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_dac.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_I2S
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_i2s.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_CAN
@@ -142,6 +144,14 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_DEEPX_DXM1
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/deepx_dxm1/deepx_dxm1.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GD32_SWD
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gd32_swd/gd32_swd.c)
+
+# V2N supervisor singleton -- the lazy-init GD32G553 ctx the portable
+# PWM/ADC/DAC/QENC/COUNTER backends dispatch through on V2N.  The
+# .c file emits NOSUPPORT stubs when CONFIG_ALP_SDK_V2N_SUPERVISOR=n
+# so the backends compile unconditionally.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/v2n_supervisor.c
+)
 
 # LwRB: publish the vendor stub headers on the include path so SDK
 # code compiles against <lwrb/lwrb.h> regardless of whether the

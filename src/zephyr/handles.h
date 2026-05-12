@@ -27,6 +27,10 @@
 #include "alp/rtc.h"
 #include "alp/wdt.h"
 
+#if defined(CONFIG_ALP_SDK_V2N_SUPERVISOR)
+#include <zephyr/drivers/dac.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -70,6 +74,9 @@ extern "C" {
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_WDT_HANDLES
 #define CONFIG_ALP_SDK_MAX_WDT_HANDLES   2
+#endif
+#ifndef CONFIG_ALP_SDK_MAX_DAC_HANDLES
+#define CONFIG_ALP_SDK_MAX_DAC_HANDLES   2
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -243,6 +250,22 @@ struct alp_wdt {
 };
 
 /* ------------------------------------------------------------------ */
+/* DAC                                                                 */
+/*                                                                     */
+/* `dev == NULL` -> dispatch through the V2N supervisor singleton      */
+/* (CONFIG_ALP_SDK_V2N_SUPERVISOR).  Non-NULL `dev` -> resolve via the */
+/* alp-dacN DT alias path on the local SoC's Zephyr dac_* driver.      */
+/* ------------------------------------------------------------------ */
+
+struct alp_dac {
+    bool                  in_use;
+    uint32_t              channel_id;
+    const struct device  *dev;            /* NULL -> via_bridge */
+    uint8_t               channel;        /* hardware channel id when dev != NULL */
+    uint16_t              last_mv;        /* most recently programmed setpoint   */
+};
+
+/* ------------------------------------------------------------------ */
 /* Last-error helpers — internal use only.                              */
 /* Stamps a precise alp_status_t before alp_*_open returns NULL.        */
 /* ------------------------------------------------------------------ */
@@ -294,6 +317,9 @@ void                alp_z_rtc_pool_release(struct alp_rtc *h);
 
 struct alp_wdt     *alp_z_wdt_pool_acquire(void);
 void                alp_z_wdt_pool_release(struct alp_wdt *h);
+
+struct alp_dac     *alp_z_dac_pool_acquire(void);
+void                alp_z_dac_pool_release(struct alp_dac *h);
 
 #ifdef __cplusplus
 }
