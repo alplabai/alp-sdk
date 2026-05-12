@@ -28,7 +28,7 @@
 #define GD32_BRIDGE_BUILD_ID_LEN         20u
 
 #define PROTOCOL_VERSION_MAJOR           0u
-#define PROTOCOL_VERSION_MINOR           4u
+#define PROTOCOL_VERSION_MINOR           5u
 #define PROTOCOL_VERSION_PATCH           0u
 
 /* Number of concurrent DMA-backed ADC streams the firmware supports.
@@ -114,6 +114,20 @@ typedef enum {
      * reply `result:u32 status:u8` (5 B).  Format 0 = Q31 fixed-point;
      * format 1 = IEEE-754 single (the firmware's default plumbing). */
     CMD_TMU_COMPUTE           = 0x90,
+    /* v0.5: ADC-stream DSP pipeline configuration -- attaches a chain
+     * of FIR / IIR / WINDOW / FFT stages to a streaming ADC source so
+     * raw samples never leave the GD32 when the customer's intent is
+     * filtered or spectral data (the link bandwidth wins more from
+     * pushing the post-processing onto the bridge than from sending
+     * the raw samples).  The opcode is RESERVED at protocol v0.5;
+     * the wire payload format lands in the (b) / (c) sub-commits of
+     * the wave-2 DSP series alongside alp_adc_filter_t /
+     * alp_adc_spectrum_t in <alp/adc.h>.  Today the firmware-side
+     * dispatcher falls through to STATUS_NOSUPPORT for this opcode
+     * via the default case -- there is no handler stub.  The host-
+     * side standalone API in <alp/dsp.h> works without it.  See
+     * memory/project_wave2_dsp_pipeline_design.md for the design. */
+    CMD_ADC_STREAM_CONFIGURE_DSP = 0x36,
 } gd32_bridge_cmd_t;
 
 /* TMU function index sent in CMD_TMU_COMPUTE's request payload byte 0.

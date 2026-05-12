@@ -79,6 +79,13 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_WDT
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_TMU
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_tmu.c)
 
+# Standalone DSP-chain API (<alp/dsp.h>).  Source lives in src/common
+# because it is OS-agnostic -- the math kernels are libm + CMSIS-DSP
+# only.  The wave-2 bridge surfaces (alp_adc_filter_t / spectrum_t in
+# <alp/adc.h>) compose on top of this same machinery once they land.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/dsp_chain.c)
+
 # Runtime hardware-info reader (EEPROM manifest + BOARD_ID ADC).
 # v0.3 stub returns NOSUPPORT; v0.3.x fills in the real impl.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO

@@ -69,6 +69,7 @@ byte; their numeric encoding is:
 | `0x35` | `ADC_STREAM_END`      | `stream_id:u8`                                     | _empty_                                            |
 | `0x80` | `TRNG_READ`           | `len:u8` (1..32)                                   | `random_bytes[len]`                                |
 | `0x90` | `TMU_COMPUTE`         | `function:u8 format:u8 reserved:u16 in_a:u32 in_b:u32` | `result:u32`                                  |
+| `0x36` | `ADC_STREAM_CONFIGURE_DSP` | _(reserved -- payload format TBD)_                  | _(empty; returns STATUS_NOSUPPORT today)_         |
 
 Opcodes `0x81..0xEF` are **reserved** for future ALP-defined
 extensions (next slot: hardware AES via the CAU engine).  Carriers
@@ -76,6 +77,25 @@ SHOULD NOT define their own opcodes in this range -- the firmware
 replies with **`ALP_ERR_NOSUPPORT`** (see §6) for any opcode it
 does not implement at build time, so a host that speaks a newer
 command set than the firmware degrades gracefully.
+
+### 3.x ADC-stream DSP pipeline (v0.5+, reserved)
+
+`CMD_ADC_STREAM_CONFIGURE_DSP` (opcode `0x36`) is **reserved** at
+protocol v0.5.0 for the wave-2 bridge-wired DSP surface
+(`alp_adc_filter_t` / `alp_adc_spectrum_t` in
+[`<alp/adc.h>`](../include/alp/adc.h)).  The host-side standalone
+DSP-chain API in [`<alp/dsp.h>`](../include/alp/dsp.h) ships in
+v0.5.0 without this opcode -- it runs the chain locally over
+in-RAM sample buffers (CMSIS-DSP when available; portable C
+fallback otherwise).  The bridge-wired path lands in the v0.5.x
+follow-up commits ((b) wires `alp_adc_filter_t` for FIR/IIR
+chains; (c) wires `alp_adc_spectrum_t` for FFT chains) once the
+exact wire payload format -- stage list + per-stage params --
+finalises against the GD32G5 FFT / FAC block's input-shape
+constraints.  Today the firmware-side dispatcher falls through to
+`STATUS_NOSUPPORT` for this opcode via the default branch (no
+handler stub).  See `memory/project_wave2_dsp_pipeline_design.md`
+for the design intent.
 
 ### 3.1 GPIO masks
 

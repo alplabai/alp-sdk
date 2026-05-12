@@ -163,6 +163,15 @@ typedef enum {
      * request payload; reply carries `result:u32 status:u8`.  Format
      * 0 = Q31 fixed-point (signed); format 1 = IEEE-754 single. */
     GD32G553_CMD_TMU_COMPUTE           = 0x90,
+    /* v0.5: ADC-stream DSP pipeline configuration -- reserved opcode
+     * for the wave-2 bridge-wired surfaces alp_adc_filter_t /
+     * alp_adc_spectrum_t (see <alp/adc.h>; ship in v0.5.x sub-commits
+     * b / c).  The host-side standalone API in <alp/dsp.h> ships in
+     * v0.5.0 and does NOT use this opcode -- it runs the chain locally
+     * with CMSIS-DSP (or a portable C fallback) over in-RAM buffers.
+     * The firmware-side dispatcher returns STATUS_NOSUPPORT for this
+     * opcode until the wave-2 wire payload format is finalised. */
+    GD32G553_CMD_ADC_STREAM_CONFIGURE_DSP = 0x36,
     /* Reserved range 0xF0..0xFF -- application-bootloader OTA. */
     GD32G553_CMD_OTA_BEGIN             = 0xF0,
     GD32G553_CMD_OTA_WRITE_CHUNK       = 0xF1,

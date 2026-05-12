@@ -355,6 +355,48 @@ that lands before the v0.3.0 tag.)
   set-interrupt + open-drain support.  Plan-only -- no code, no API
   change.
 
+- **`<alp/dsp.h>` -- standalone DSP-chain API for in-RAM signal
+  processing (2026-05-14).**  Composable FIR / IIR / WINDOW / FFT
+  pipelines run against int16 mV-scale sample buffers.  Surface:
+  `alp_dsp_chain_open(stages, n)` validates the chain (FFT must be
+  terminal; WINDOW must immediately precede FFT; per-stage bounds),
+  copies coefficients in (caller-supplied storage may be freed on
+  return), and returns a pooled handle.
+  `alp_dsp_chain_apply_samples` runs filter-terminated chains and
+  writes filtered samples; the FFT-terminated sibling
+  `alp_dsp_chain_apply_bins` emits f32 bins in COMPLEX (re/im
+  pairs) or MAGNITUDE format.  Math kernels prefer CMSIS-DSP
+  (`arm_fir_*`, `arm_biquad_cascade_df1_*`, `arm_rfft_fast_f32`)
+  when `ALP_HAS_CMSIS_DSP=1`; otherwise a portable C fallback runs
+  (naive convolution + direct-form-1 biquad cascade + radix-2
+  Cooley-Tukey FFT).  Wired behind `CONFIG_ALP_SDK_DSP` (default
+  off) on Zephyr; built unconditionally for plain-CMake /
+  baremetal consumers.  Static cost: ~30 KB for the two-chain
+  pool sized to ALP_DSP_MAX_*.  Ships with native_sim ztest
+  coverage at `tests/zephyr/dsp/` (chain validation; identity FIR;
+  identity IIR; DC + sinusoid + impulse FFT verification).
+  Wave-2 bridge-wired counterparts (`alp_adc_filter_t` /
+  `alp_adc_spectrum_t` in `<alp/adc.h>`) land in the v0.5.x (b)
+  and (c) follow-ups -- see
+  `memory/project_wave2_dsp_pipeline_design.md` for the design
+  intent and bridge wire-format split.
+
+- **`gd32-bridge` protocol v0.5 -- reserves
+  `CMD_ADC_STREAM_CONFIGURE_DSP` (opcode `0x36`) for the wave-2
+  bridge-wired DSP surface (2026-05-14).**  Bumps
+  `PROTOCOL_VERSION_MINOR` 4 -> 5 (`gd32-bridge/src/protocol.h` +
+  `<alp/chips/gd32g553.h>` in lock-step).  The host-side
+  standalone API in `<alp/dsp.h>` does NOT use this opcode -- it
+  runs the chain locally over in-RAM buffers.  The firmware-side
+  dispatcher routes `0x36` through the default
+  `STATUS_NOSUPPORT` branch today; the wire payload format
+  (stage list + per-stage params, sized against the GD32G5 FFT /
+  FAC block's input-shape constraints) lands in the v0.5.x (b) and
+  (c) sub-commits alongside `alp_adc_filter_t` /
+  `alp_adc_spectrum_t`.  Wire vectors include a representative
+  probe request in §7 of
+  `gd32-bridge/tests/protocol_vectors.txt`.
+
 ### Added (2026-05-13 overnight run)
 
 - **`chips/gd32_swd/` -- bit-bang SWD controller for the GD32G553 (2026-05-13).**

@@ -1593,8 +1593,8 @@
       },
       "typedefs": {
         "gd32g553_cmd_t": {
-          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_TMU_COMPUTE = 0x90, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
-          "hash": "1dc6fb0c6ff1f8a3"
+          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_TMU_COMPUTE = 0x90, GD32G553_CMD_ADC_STREAM_CONFIGURE_DSP = 0x36, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
+          "hash": "c133ac425e46c2e1"
         },
         "gd32g553_ota_slot_t": {
           "definition": "typedef enum { GD32G553_OTA_SLOT_INVALID = 0u, GD32G553_OTA_SLOT_A = 1u, GD32G553_OTA_SLOT_B = 2u, } gd32g553_ota_slot_t;",
@@ -2862,6 +2862,82 @@
         "width": {
           "definition": "typedef struct { uint16_t width;",
           "hash": "e6df9b65e164d8a9"
+        }
+      }
+    },
+    "alp/dsp.h": {
+      "functions": {
+        "alp_dsp_chain_apply_bins": {
+          "hash": "87c32d7ab486511b",
+          "signature": "alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain, const int16_t *in_mv, size_t in_n, float *out_bins, size_t out_cap, size_t *got);"
+        },
+        "alp_dsp_chain_apply_samples": {
+          "hash": "0cf56ad70c03aad2",
+          "signature": "alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain, const int16_t *in_mv, size_t in_n, int16_t *out_mv, size_t out_cap, size_t *got);"
+        },
+        "alp_dsp_chain_close": {
+          "hash": "78d18aa7552747a3",
+          "signature": "void alp_dsp_chain_close(alp_dsp_chain_t *chain);"
+        }
+      },
+      "macros": {
+        "ALP_DSP_MAX_FFT_POINTS": {
+          "hash": "f756d4bbf4d578cd",
+          "value": "1024u"
+        },
+        "ALP_DSP_MAX_FIR_TAPS": {
+          "hash": "538c35bad1269889",
+          "value": "64u"
+        },
+        "ALP_DSP_MAX_IIR_SECTIONS": {
+          "hash": "10d6b7b568c7d30a",
+          "value": "8u"
+        },
+        "ALP_DSP_MAX_STAGES": {
+          "hash": "b8d32733b329eeb4",
+          "value": "4u"
+        },
+        "ALP_DSP_MIN_FFT_POINTS": {
+          "hash": "94ca30c0e34da7d7",
+          "value": "32u"
+        }
+      },
+      "typedefs": {
+        "alp_dsp_chain_t": {
+          "definition": "typedef struct alp_dsp_chain alp_dsp_chain_t;",
+          "hash": "ae05edcd36e139af"
+        },
+        "alp_dsp_coeff_format_t": {
+          "definition": "typedef enum { ALP_DSP_COEFF_FORMAT_F32 = 0, ALP_DSP_COEFF_FORMAT_Q31 = 1, } alp_dsp_coeff_format_t;",
+          "hash": "0ac24400ad0466c0"
+        },
+        "alp_dsp_fft_output_t": {
+          "definition": "typedef enum { ALP_DSP_FFT_OUTPUT_COMPLEX = 0, ALP_DSP_FFT_OUTPUT_MAGNITUDE = 1, } alp_dsp_fft_output_t;",
+          "hash": "331f2c3a66ca3bcf"
+        },
+        "alp_dsp_stage_kind_t": {
+          "definition": "typedef enum { ALP_DSP_STAGE_FIR = 0, ALP_DSP_STAGE_IIR = 1, ALP_DSP_STAGE_WINDOW = 2, ALP_DSP_STAGE_FFT = 3, } alp_dsp_stage_kind_t;",
+          "hash": "7e1c693513ef482e"
+        },
+        "alp_dsp_window_kind_t": {
+          "definition": "typedef enum { ALP_DSP_WINDOW_RECTANGULAR = 0, ALP_DSP_WINDOW_HANN = 1, ALP_DSP_WINDOW_HAMMING = 2, ALP_DSP_WINDOW_BLACKMAN = 3, } alp_dsp_window_kind_t;",
+          "hash": "cd6f02036c59415e"
+        },
+        "coeff_format": {
+          "definition": "typedef struct { alp_dsp_coeff_format_t coeff_format;",
+          "hash": "b6e98467839ba6cc"
+        },
+        "kind": {
+          "definition": "typedef struct { alp_dsp_stage_kind_t kind;",
+          "hash": "cd9a2007ebcd769b"
+        },
+        "n_points": {
+          "definition": "typedef struct { uint16_t n_points;",
+          "hash": "7191fda3949f3541"
+        },
+        "shape": {
+          "definition": "typedef struct { alp_dsp_window_kind_t shape;",
+          "hash": "cfb7f015ae1f50f5"
         }
       }
     },

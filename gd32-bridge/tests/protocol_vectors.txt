@@ -33,8 +33,8 @@ spi_ping_request               = A500FF84
 spi_ping_reply_ok              = A500FF84
 # SOF | CMD=0x01 (GET_VERSION) | CRC -- empty payload
 spi_get_version_request        = A501EFA5
-# SOF | STATUS=0x00 | major=0 | minor=4 | patch=0 | CRC
-spi_get_version_reply_v0_4_0   = A500000400D4FB
+# SOF | STATUS=0x00 | major=0 | minor=5 | patch=0 | CRC
+spi_get_version_reply_v0_5_0   = A500000500E7CA
 
 # ---------------------------------------------------------------------
 # §3. I2C envelopes -- register-style framing
@@ -82,3 +82,9 @@ spi_trng_read_16_request       = A580109359
 # ---------------------------------------------------------------------
 # SOF | CMD=0x90 | function=SQRT | format=F32 | in_a=4.0f (LE 0x40800000) | in_b=0 | CRC -- bridge replies 2.0f as 4 reply payload bytes + STATUS
 spi_tmu_compute_sqrt_f32_4p0_request = A59005010000000080400000000055AB
+
+# ---------------------------------------------------------------------
+# §7. v0.5 additions -- ADC-stream DSP pipeline (reserved opcode)
+# ---------------------------------------------------------------------
+# SOF | CMD=0x36 | (no payload yet) | CRC -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT via the default-case dispatch until the wave-2 wire payload format finalises in v0.5.x
+spi_adc_stream_configure_dsp_probe_request = A536A911

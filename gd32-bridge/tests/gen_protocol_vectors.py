@@ -73,26 +73,27 @@ def i2c_read(status: int, payload: bytes = b"") -> bytes:
 # ---------------------------------------------------------------------
 
 SOF = 0xA5
-CMD_PING                  = 0x00
-CMD_GET_VERSION           = 0x01
-CMD_PWM_CONFIGURE         = 0x22
-CMD_ADC_CONFIGURE         = 0x32
-CMD_ADC_STREAM_BEGIN      = 0x33
-CMD_ADC_STREAM_READ       = 0x34
-CMD_ADC_STREAM_END        = 0x35
-CMD_TRNG_READ             = 0x80
-CMD_TMU_COMPUTE           = 0x90
-CMD_DAC_SET               = 0x50
-CMD_DAC_GET               = 0x51
-CMD_QENC_READ             = 0x60
-CMD_QENC_RESET            = 0x61
-CMD_COUNTER_READ          = 0x70
-STATUS_OK                 = 0x00
-STATUS_NOSUPPORT          = 0x06
+CMD_PING                     = 0x00
+CMD_GET_VERSION              = 0x01
+CMD_PWM_CONFIGURE            = 0x22
+CMD_ADC_CONFIGURE            = 0x32
+CMD_ADC_STREAM_BEGIN         = 0x33
+CMD_ADC_STREAM_READ          = 0x34
+CMD_ADC_STREAM_END           = 0x35
+CMD_ADC_STREAM_CONFIGURE_DSP = 0x36
+CMD_TRNG_READ                = 0x80
+CMD_TMU_COMPUTE              = 0x90
+CMD_DAC_SET                  = 0x50
+CMD_DAC_GET                  = 0x51
+CMD_QENC_READ                = 0x60
+CMD_QENC_RESET               = 0x61
+CMD_COUNTER_READ             = 0x70
+STATUS_OK                    = 0x00
+STATUS_NOSUPPORT             = 0x06
 
 # Firmware-declared version triple; bump when protocol.h's
 # PROTOCOL_VERSION_{MAJOR,MINOR,PATCH} change.
-FW_VERSION = (0, 4, 0)
+FW_VERSION = (0, 5, 0)
 
 
 HEADER = """\
@@ -287,6 +288,25 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         " + STATUS",
     ))
 
+    # ----- §7. v0.5 additions: ADC-stream DSP pipeline (reserved) ---
+    # The CMD_ADC_STREAM_CONFIGURE_DSP opcode is RESERVED at v0.5.0
+    # for the wave-2 bridge-wired surfaces alp_adc_filter_t /
+    # alp_adc_spectrum_t (see <alp/adc.h>, ships in v0.5.x).  The
+    # firmware dispatcher returns STATUS_NOSUPPORT for this opcode
+    # today via the default branch.  The standalone <alp/dsp.h> API
+    # (chain.open / .apply_samples / .apply_bins) ships in v0.5.0
+    # without using this opcode -- it runs the chain locally.
+    # The wire vector below carries an empty payload (host probing
+    # the opcode); the eventual wave-2 wire format will land with
+    # the v0.5.x sub-commits.
+    out.append((
+        "spi_adc_stream_configure_dsp_probe_request",
+        spi_frame(SOF, CMD_ADC_STREAM_CONFIGURE_DSP).hex().upper(),
+        "SOF | CMD=0x36 | (no payload yet) | CRC -- v0.5 reserved opcode;"
+        " firmware replies STATUS_NOSUPPORT via the default-case dispatch"
+        " until the wave-2 wire payload format finalises in v0.5.x",
+    ))
+
     return out
 
 
@@ -344,7 +364,16 @@ def emit(vectors: list[tuple[str, str, str | None]]) -> str:
     chunks.append("\n# ---------------------------------------------------------------------")
     chunks.append("# §6. v0.4 additions -- GD32G5 TMU (CORDIC) math accelerator")
     chunks.append("# ---------------------------------------------------------------------")
-    for name, value, comment in vectors[21:]:
+    for name, value, comment in vectors[21:22]:
+        if comment:
+            chunks.append(f"# {comment}")
+        chunks.append(f"{name:<30} = {value}")
+
+    # ----- §7 block --------------------------------------------------
+    chunks.append("\n# ---------------------------------------------------------------------")
+    chunks.append("# §7. v0.5 additions -- ADC-stream DSP pipeline (reserved opcode)")
+    chunks.append("# ---------------------------------------------------------------------")
+    for name, value, comment in vectors[22:]:
         if comment:
             chunks.append(f"# {comment}")
         chunks.append(f"{name:<30} = {value}")
