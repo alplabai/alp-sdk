@@ -45,7 +45,13 @@ If the SoC console stays silent:
 ## 2. SWD attach + GD32 firmware flash
 
 The GD32 bridge firmware is **separate** from the Renesas-side
-firmware -- the GD32 ships blank from GigaDevice.
+firmware -- the GD32 ships blank from GigaDevice.  Two paths cover
+the lifecycle:
+
+### 2a. External probe (first power-on)
+
+For an unprogrammed module on the bench the external probe is the
+fastest route to first firmware:
 
 1. Attach SWD probe to the V2N programming header (pads
    `GD32_SWDIO` = GD32 `PA13`, `GD32_SWCLK` = GD32 `PA14`).
@@ -59,9 +65,43 @@ firmware -- the GD32 ships blank from GigaDevice.
 
 3. Flash `build/gd32-bridge.elf` via OpenOCD / Segger J-Link.
 4. Verify the bridge responds to `PING` from the host side -- either
-   over SPI or I2C (see step 3 below).  Until field-upgrade Path A
-   is on the bench, the SWD probe stays attached during early
-   integration.
+   over SPI or I2C (see step 3 below).
+
+### 2b. Host-driven SWD recovery (no external probe)
+
+Once `GD32_SWDIO` + `GD32_SWCLK` are routed back to V2N pads (per
+the 2026-05-12 hardware decision), the Renesas host itself can
+reflash the GD32 over three GPIOs.  This is the path the field-
+update flow uses when the application bootloader is unreachable
+(corrupt bridge image, factory first-flash, dev-board bring-up).
+
+The driver lives at [`chips/gd32_swd/`](../chips/gd32_swd/) with the
+header at [`<alp/chips/gd32_swd.h>`](../include/alp/chips/gd32_swd.h):
+
+```c
+gd32_swd_t swd;
+gd32_swd_init(&swd, /*swdio*/ pin_swdio, /*swclk*/ pin_swclk, /*nrst*/ pin_nrst);
+gd32_swd_connect(&swd);            /* line-reset + JTAG-to-SWD + IDCODE read */
+gd32_swd_halt(&swd);               /* halt Cortex-M33 cleanly */
+gd32_swd_flash_erase(&swd, GD32_SWD_FMC_FLASH_BASE, image_size);
+gd32_swd_flash_write (&swd, GD32_SWD_FMC_FLASH_BASE, image_bytes, image_size);
+gd32_swd_flash_verify(&swd, GD32_SWD_FMC_FLASH_BASE, image_bytes, image_size);
+gd32_swd_reset_and_run(&swd);
+```
+
+Driver status is `partial` until exercised on real silicon (see
+[`docs/test-plan.md`](test-plan.md)); pin assignments on V2N are
+TBD pending the next schematic revision.
+
+### 2c. In-system upgrade over the bridge
+
+Once a working bridge firmware is on the GD32, subsequent upgrades
+flow through the application-bootloader OTA opcodes
+(`CMD_OTA_*` in the reserved `0xF0..0xFF` range; see
+[`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10).
+The host driver helpers for these opcodes are not yet on
+`<alp/chips/gd32g553.h>` -- the firmware-side handlers reply
+`STATUS_NOSUPPORT` until the bodies land.
 
 ## 3. Confirm the host ↔ GD32 bridge link
 

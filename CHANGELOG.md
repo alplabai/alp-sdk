@@ -138,10 +138,9 @@ that lands before the v0.3.0 tag.)
   "Scaffolded" (was "Planned"); source-layout tree adds the
   `bootloader/` directory + `gen_protocol_vectors.py`.
 
-- **Customer-visible language** -- hw-rev CHANGELOGs +
-  `hw-revisions-v1.schema.json` lose the "private companion repo"
-  / "schematic-level annotations" phrasing in favour of the neutral
-  "held outside this tree" framing.
+- **Customer-visible language cleanup** -- hw-rev CHANGELOGs +
+  `hw-revisions-v1.schema.json` now point at "held outside this
+  tree" rather than naming internal repos.
 
 ### Added
 
