@@ -96,7 +96,13 @@ alp_status_t alp_counter_get_value(alp_counter_t *counter, uint32_t *ticks_out);
  * @param[in]  counter    Handle from @ref alp_counter_open.
  * @param[in]  us         Microseconds to convert.
  * @param[out] ticks_out  Receives the equivalent tick count.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
+ * @return ALP_OK on success;
+ *         ALP_ERR_NOT_READY if @p counter is closed;
+ *         ALP_ERR_INVAL if @p ticks_out is NULL;
+ *         ALP_ERR_NOSUPPORT on backends that don't advertise the
+ *           counter's tick frequency to the host -- the V2N supervisor
+ *           bridge returns this until protocol v0.3's
+ *           `CMD_COUNTER_GET_FREQ` opcode lands.
  */
 alp_status_t alp_counter_us_to_ticks(alp_counter_t *counter,
                                      uint32_t us,
@@ -117,6 +123,12 @@ alp_status_t alp_counter_us_to_ticks(alp_counter_t *counter,
  *         ALP_ERR_INVAL if @p cb is NULL;
  *         ALP_ERR_BUSY if another alarm is already armed and the
  *           backend doesn't support replacement;
+ *         ALP_ERR_NOSUPPORT on backends that have no path for ISR-
+ *           context callbacks to reach the host -- the V2N supervisor
+ *           bridge always returns this (the GD32 IO MCU has no
+ *           interrupt line back to the Renesas host, so alarms
+ *           fired in firmware ISR context cannot be relayed across
+ *           the bridge in bounded time);
  *         ALP_ERR_IO on a backend failure.
  */
 alp_status_t alp_counter_set_alarm(alp_counter_t *counter,

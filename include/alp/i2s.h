@@ -17,10 +17,12 @@
  *   - Baremetal: vendor HAL SAI / I²S peripheral.
  *
  * Memory model.  The Zephyr backend allocates a 2-block ping-pong
- * memory slab inside @ref alp_i2s_open.  Reads return a buffer the
- * driver owns until you @ref alp_i2s_close; writes copy your buffer
- * into the slab.  That trades a memcpy for not surfacing Zephyr's
- * `mem_slab` lifecycle in the public API.
+ * memory slab inside @ref alp_i2s_open.  Writes copy the caller's
+ * buffer into the slab; reads copy the slab block into the caller's
+ * buffer + free the slab block immediately.  That trades two
+ * memcpys for not surfacing Zephyr's `mem_slab` lifecycle in the
+ * public API.  Apps that need true zero-copy can drop to the
+ * underlying Zephyr `i2s_*` driver class directly.
  */
 
 #ifndef ALP_I2S_H
@@ -116,8 +118,14 @@ alp_status_t alp_i2s_write(alp_i2s_t *i2s,
  * @param[out] block       Destination buffer.
  * @param[in]  bytes       Destination capacity.
  * @param[out] bytes_out   Receives the byte count copied.  May be NULL.
- * @param[in]  timeout_ms  Max wait for an available frame.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
+ * @param[in]  timeout_ms  Caller's preferred wait budget.  The Zephyr
+ *                         backend currently ignores this and relies on
+ *                         the underlying `i2s_read` blocking until a
+ *                         frame is available (the upstream `i2s` API
+ *                         doesn't take a per-call timeout); a future
+ *                         revision may add config-time read-timeout
+ *                         plumbing through `alp_i2s_config_t`.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
  */
 alp_status_t alp_i2s_read(alp_i2s_t *i2s,
                           void *block, size_t bytes,
