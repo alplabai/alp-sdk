@@ -65,6 +65,17 @@ extern "C" {
 /** Flags bitfield. */
 #define ALP_CC3501E_FLAG_RESP_REQUIRED 0x01
 #define ALP_CC3501E_FLAG_ASYNC_EVENT 0x02
+/** Reserved frame-continuation flag for v2 long-write payloads.
+ *  Hosts MUST treat this bit as zero on v1; v2 firmware will set
+ *  it on intermediate frames of a multi-frame BLE-write transaction. */
+#define ALP_CC3501E_FLAG_CONTINUATION 0x04
+
+/** Marker for the first opcode in the vendor-extension reserved range.
+ *  Opcodes >= this value are NOT used by the v1 protocol and are
+ *  reserved for future vendor extensions; the firmware-side parser
+ *  rejects them with ALP_CC3501E_RESP_ERR_INVALID until a follow-up
+ *  protocol revision (v2+) consumes the range. */
+#define ALP_CC3501E_CMD_RESERVED_VENDOR_BASE 0x80u
 
 /**
  * @brief Command opcodes.
@@ -214,10 +225,31 @@ typedef struct {
 /* GPIO proxy payload formats                                          */
 /* ------------------------------------------------------------------ */
 
+/** Direction selector for @ref alp_cc3501e_gpio_configure_t::direction.
+ *  Stored on the wire as a single byte; the named values keep callers
+ *  from shipping magic numbers.  OPEN_DRAIN is required by the M.2
+ *  W_DISABLE1 / W_DISABLE2 contract (host drives low to disable; HiZ
+ *  releases via the carrier's external pull-up). */
+typedef enum {
+    ALP_CC3501E_GPIO_DIR_INPUT      = 0u,
+    ALP_CC3501E_GPIO_DIR_OUTPUT     = 1u,
+    ALP_CC3501E_GPIO_DIR_OPEN_DRAIN = 2u,
+} alp_cc3501e_gpio_direction_t;
+
+/** Internal-pull selector for @ref alp_cc3501e_gpio_configure_t::pull.
+ *  Stored on the wire as a single byte.  Carriers that need a stronger
+ *  pull MUST add an external resistor; the on-die pull strengths are
+ *  documented as weak. */
+typedef enum {
+    ALP_CC3501E_GPIO_PULL_NONE = 0u,
+    ALP_CC3501E_GPIO_PULL_UP   = 1u,
+    ALP_CC3501E_GPIO_PULL_DOWN = 2u,
+} alp_cc3501e_gpio_pull_t;
+
 typedef struct {
     uint8_t cc3501e_gpio; /**< CC3501E pad index (e.g. 13 for GPIO13). */
-    uint8_t direction;    /**< 0 = input, 1 = output */
-    uint8_t pull;         /**< 0 = none, 1 = up, 2 = down */
+    uint8_t direction;    /**< One of @ref alp_cc3501e_gpio_direction_t. */
+    uint8_t pull;         /**< One of @ref alp_cc3501e_gpio_pull_t. */
     uint8_t reserved;
 } alp_cc3501e_gpio_configure_t;
 

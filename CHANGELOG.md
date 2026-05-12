@@ -397,6 +397,31 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`<alp/protocol/cc3501e.h>` -- protocol docs hygiene + named
+  GPIO direction / pull enums (§2A.2 plan §5.1 + §5.2,
+  2026-05-14).**  Two purely-declarative cleanups extracted from
+  the CC3501E SWRU626 integration plan that customers can adopt
+  today without waiting for the first firmware drop:
+
+  * §5.1: documents the `ALP_CC3501E_FLAG_CONTINUATION` (bit 2,
+    reserved at v1, lit on intermediate frames of a multi-frame
+    BLE-write transaction in v2) and adds a
+    `ALP_CC3501E_CMD_RESERVED_VENDOR_BASE` (0x80) marker for the
+    vendor-extension reserved range.  Firmware-side parser rejects
+    opcodes in that range with `ALP_CC3501E_RESP_ERR_INVALID`
+    until a future protocol revision consumes them.
+  * §5.2: adds `alp_cc3501e_gpio_direction_t` (INPUT / OUTPUT /
+    **OPEN_DRAIN**) and `alp_cc3501e_gpio_pull_t` (NONE / UP /
+    DOWN) enums so the wire's `direction` + `pull` bytes get
+    named values instead of magic `0/1/2` constants.  The
+    OPEN_DRAIN direction is the M.2 W_DISABLE1 / W_DISABLE2
+    contract: host drives low to disable; HiZ releases via the
+    carrier's external pull-up.
+
+  Wire format unchanged (the enums share their byte-width with
+  the existing struct fields), so this is a source-only API
+  cleanup with no protocol bump.
+
 - **`<alp/power.h>` -- system-power-mode surface for sleep /
   deep-sleep / standby (wave-2 §2B.3, 2026-05-14).**  New
   customer-facing header declaring `alp_power_t` (opaque
