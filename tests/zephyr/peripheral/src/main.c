@@ -17,10 +17,13 @@
 #include "alp/peripheral.h"
 #include "alp/pwm.h"
 #include "alp/adc.h"
+#include "alp/camera.h"
 #include "alp/counter.h"
+#include "alp/gpu2d.h"
 #include "alp/i2s.h"
 #include "alp/can.h"
 #include "alp/rtc.h"
+#include "alp/storage.h"
 #include "alp/tmu.h"
 #include "alp/power.h"
 #include "alp/wdt.h"
@@ -612,6 +615,78 @@ ZTEST(alp_peripheral, test_power_request_sleep_valid_args_returns_nosupport)
 ZTEST(alp_peripheral, test_power_close_null_is_noop)
 {
     alp_power_close(NULL); /* must not crash */
+}
+
+/* ------------------------------------------------------------------ */
+/* AEN audit top-five gaps -- NOSUPPORT-contract tests for the new    */
+/* portable surfaces (gpu2d, camera ISP, storage inline-AES).         */
+/* All three return NOSUPPORT on the active V2N test build (no on-die */
+/* 2D / ISP / SecAES blocks) but honour INVAL pre-checks first.       */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_peripheral, test_gpu2d_open_returns_nosupport_no_vendor_hal)
+{
+    /* No vendor HAL wired -- open returns NULL with NOSUPPORT. */
+    alp_gpu2d_t *g = alp_gpu2d_open();
+    zassert_is_null(g, NULL);
+    zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, NULL);
+}
+
+ZTEST(alp_peripheral, test_gpu2d_fill_rect_null_handle_not_ready)
+{
+    const alp_gpu2d_surface_t dst = {
+        .base         = (void *)0x10000000,
+        .width        = 16,
+        .height       = 16,
+        .stride_bytes = 64,
+        .format       = ALP_GPU2D_FMT_ARGB8888,
+    };
+    alp_status_t s = alp_gpu2d_fill_rect(NULL, &dst, 0, 0, 16, 16, 0xFF0000FFu);
+    zassert_equal(s, ALP_ERR_NOT_READY, NULL);
+}
+
+ZTEST(alp_peripheral, test_camera_configure_isp_null_returns_inval)
+{
+    /* No camera handle needed for the INVAL pre-check: a NULL cfg
+     * surfaces as INVAL before any handle access. */
+    int dummy = 0;
+    alp_status_t s = alp_camera_configure_isp((alp_camera_t *)&dummy, NULL);
+    zassert_equal(s, ALP_ERR_INVAL, NULL);
+}
+
+ZTEST(alp_peripheral, test_storage_configure_inline_aes_null_returns_inval)
+{
+    int dummy = 0;
+    alp_status_t s = alp_storage_configure_inline_aes((alp_storage_t *)&dummy, NULL);
+    zassert_equal(s, ALP_ERR_INVAL, NULL);
+}
+
+ZTEST(alp_peripheral, test_storage_configure_inline_aes_bad_mode_returns_inval)
+{
+    const alp_storage_aes_config_t cfg = {
+        .mode      = (alp_storage_aes_mode_t)99, /* unknown mode */
+        .key       = (const uint8_t *)"0123456789abcdef",
+        .key_bytes = 16u,
+        .iv        = (const uint8_t *)"0123456789abcdef",
+        .iv_bytes  = 16u,
+    };
+    int dummy = 0;
+    alp_status_t s = alp_storage_configure_inline_aes((alp_storage_t *)&dummy, &cfg);
+    zassert_equal(s, ALP_ERR_INVAL, NULL);
+}
+
+ZTEST(alp_peripheral, test_storage_configure_inline_aes_bad_key_bytes_returns_inval)
+{
+    const alp_storage_aes_config_t cfg = {
+        .mode      = ALP_STORAGE_AES_XTS,
+        .key       = (const uint8_t *)"0123456789ab",
+        .key_bytes = 12u, /* not in {16, 24, 32} */
+        .iv        = (const uint8_t *)"0123456789abcdef",
+        .iv_bytes  = 16u,
+    };
+    int dummy = 0;
+    alp_status_t s = alp_storage_configure_inline_aes((alp_storage_t *)&dummy, &cfg);
+    zassert_equal(s, ALP_ERR_INVAL, NULL);
 }
 
 /* ------------------------------------------------------------------ */
