@@ -47,6 +47,11 @@ release.
 1. **Empty repo + license**: Apache-2.0 (matches alp-sdk).
 2. **Vendor SimpleLink CC33xx SDK** as a git submodule under
    `vendor/simplelink-cc33xx/`.  Pin to a specific TI release tag.
+   Canonical download: TI Resource Explorer →
+   [SimpleLink Wi-Fi SDK](https://dev.ti.com/tirex/explore/node?node=A__AEIJm0rwIeU.2P1OBWwlaA__com.ti.SIMPLELINK_WIFI_SDK__ZlChU-m__LATEST)
+   (the same SDK covers CC3300/CC3301/CC3501; pick the CC3501-targeted
+   build/sample set).  TI.com login + BSD-3 + restricted-use
+   click-through accept required before the archive downloads.
 3. **Toolchain**: `ticlang` (TI's LLVM fork) preferred over CCS
    Studio — works in CI without GUI.  Pin version in `.ti-cgt`.
 4. **Wire protocol mirror**: copy

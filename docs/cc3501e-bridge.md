@@ -151,7 +151,13 @@ compile-time expectation.
 
 When that repo is created, it should:
 
-1. Vendor TI's SimpleLink CC33xx SDK as a git submodule.
+1. Vendor TI's SimpleLink CC33xx SDK as a git submodule.  Canonical
+   download: TI Resource Explorer →
+   [SimpleLink Wi-Fi SDK](https://dev.ti.com/tirex/explore/node?node=A__AEIJm0rwIeU.2P1OBWwlaA__com.ti.SIMPLELINK_WIFI_SDK__ZlChU-m__LATEST)
+   (the SimpleLink Wi-Fi SDK bundle covers the CC33xx family; the
+   CC3501E ships in this SDK alongside the CC3300/CC3301 line).
+   The download requires a TI.com login and acceptance of TI's BSD-3
+   + restricted-use click-through.
 2. Build with TI Code Composer Studio or the open `ticlang`
    toolchain.
 3. Implement the SPI-slave parser against this repo's
