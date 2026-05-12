@@ -22,29 +22,26 @@
  * or DA9292 instead).  The other three are V2N-M1-only since they
  * power DEEPX-specific rails.
  *
- * @par Driver status: STUB
+ * @par Register layout (TPS62864 datasheet SLVSEI1C)
  *
- * The TPS628640 datasheet is **not** in the vendor
- * documentation archive that backs this repo's chip drivers;
- * this driver therefore lands as a stub.  It implements:
+ * | Addr | Name    | Access | Purpose                                       |
+ * |------|---------|--------|-----------------------------------------------|
+ * | 0x01 | VOUT1   | R/W    | Output-voltage setpoint, register 1           |
+ * | 0x02 | VOUT2   | R/W    | Output-voltage setpoint, register 2 (VID pin) |
+ * | 0x03 | CONTROL | W      | Operating-mode + ramp + reset                  |
+ * | 0x05 | STATUS  | R      | UVLO + HICCUP + thermal-warning latches        |
  *
- *   - `tps628640_init(ctx, bus, addr, default_voltage_mv)` -- ACK
- *     probe + caches the rail's design-target voltage as metadata.
- *   - Raw register read / write.
+ * VOUT byte encoding: `mv = byte * 5 + 400`.  Range
+ * `0x00` (400 mV) .. `0xFF` (1675 mV).  Set / get / status helpers
+ * implement this encoding directly.  CONTROL writes go through the
+ * raw register helper since the SDK's typical use-case doesn't
+ * require runtime CONTROL changes (FPWM forcing, HICCUP disable,
+ * etc.) -- carriers that need them write the bits directly.
  *
- * Everything voltage-related (`tps628640_set_voltage_mv`,
- * `tps628640_get_voltage_mv`, `tps628640_get_status`) returns
- * `ALP_ERR_NOSUPPORT` pending datasheet confirmation of the VSET
- * register layout.  When the maintainer adds the TI datasheet to
- * the vendor datasheet (TPS628640 / TPS628641 / TPS628642
- * -- the silicon variants differ in default voltage but share the
- * I2C surface), fill in the register map in
- * `chips/tps628640/tps628640.c` and switch the helper bodies from
- * NOSUPPORT to real implementations.
- *
- * Until then carriers should treat these rails as factory-default
- * outputs of the TI silicon -- the chip self-regulates to its OTP
- * voltage at power-up and the host shouldn't touch it.
+ * The VID pin selects between VOUT1 and VOUT2 at runtime; carriers
+ * that hold VID statically can use either register.  This driver
+ * writes VOUT1 by default; raw R/W is available for VOUT2 if
+ * needed.
  */
 
 #ifndef ALP_CHIPS_TPS628640_H
@@ -86,27 +83,43 @@ alp_status_t tps628640_init(tps628640_t *ctx, alp_i2c_t *bus,
                             uint8_t addr_7bit, uint16_t default_voltage_mv);
 
 /**
- * @brief Set the chip's output voltage (millivolts).
+ * @brief Set the chip's VOUT1 setpoint in millivolts.
  *
- * @note  Stub: returns `ALP_ERR_NOSUPPORT` pending datasheet
- *        confirmation of the VSET register layout.
+ * Range: 400..1675 mV (5 mV step).  Non-multiple-of-5 inputs round
+ * down; read back via @ref tps628640_get_voltage_mv to see what
+ * actually landed.
  *
- * @warning  When implemented, must enforce the rail's documented
- *           safe-operating window (e.g. DDR5_VDDQ is a 0.5 V rail
- *           and pushing it to 1 V would damage downstream silicon).
- *           The window comes from `metadata/chips/tps628640.yaml`
- *           plus the design-target voltage stored in `ctx`.
+ * @warning  Carrier-side firmware MUST enforce the rail's design-
+ *           safe operating window before calling this -- e.g. the
+ *           V2N-M1 `DDR5_VDDQ` instance at I²C `0x4F` targets
+ *           0.5 V and a write to 1 V would damage downstream
+ *           silicon.  The window lives in
+ *           `metadata/chips/tps628640.yaml` per instance plus the
+ *           design-target voltage cached in `ctx`.
+ *
+ * @return ALP_OK / ALP_ERR_OUT_OF_RANGE (mv outside 400..1675) /
+ *         ALP_ERR_NOT_READY (uninitialised) / ALP_ERR_IO.
  */
 alp_status_t tps628640_set_voltage_mv(tps628640_t *ctx, uint16_t mv);
 
 /**
- * @brief Read the live output voltage setpoint in millivolts.
- * @note  Stub: returns `ALP_ERR_NOSUPPORT`. */
+ * @brief Read the live VOUT1 setpoint in millivolts.
+ *
+ * Decodes the register byte through the same `mv = byte * 5 + 400`
+ * formula `_set_voltage_mv` uses.
+ */
 alp_status_t tps628640_get_voltage_mv(tps628640_t *ctx, uint16_t *mv);
 
 /**
- * @brief Read fault / status flags.
- * @note  Stub: returns `ALP_ERR_NOSUPPORT`. */
+ * @brief Read the latched STATUS register (read-and-clear).
+ *
+ * Bit layout (from TPS62864 datasheet §8.6.6):
+ *   - bit 4 = thermal-warning (junction > 130 °C).
+ *   - bit 3 = HICCUP entered at least once since last read.
+ *   - bit 0 = UVLO active (VIN below falling threshold).
+ *
+ * STATUS bits latch on event + reset to 0 after this read.
+ */
 alp_status_t tps628640_get_status(tps628640_t *ctx, uint8_t *status_byte);
 
 /** Raw register R/W (always available; no register-layout dependency). */

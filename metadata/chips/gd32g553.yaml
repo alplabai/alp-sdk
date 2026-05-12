@@ -22,18 +22,15 @@ notes: |
   separate flash binary, separate toolchain) -- see
   docs/gd32-bridge.md.
 
-  Hardware control surface from V2N today:
+  Hardware control surface from V2N (planned 2026-05-12; SWD-from-host design):
     - SPI fast path (P76/77/96/97 host  ↔  PA8/9/10/PB15 GD32 slave)
     - I2C management path (P07/P06 host ↔  PA15/PB9 GD32 slave; 7-bit
       address 0x70 by default, configurable on the firmware side).
-    - SWD header (PA13/PA14) for development + recovery.
-
-  NOT YET WIRED from V2N -> GD32:
-    - GD32_NRST  (no host-driven reset edge today).
-    - GD32_BOOT0 (planned -- maintainer to reassign one of the
-      Renesas-side PWM pads P64/P65/P70/P71/P74/P75 to BOOT0 in the
-      next schematic revision; exact pad TBD per project memory
-      `project_gd32_boot0_to_v2n_planned.md`).
+    - GD32_NRST  (P74; shared with primary PMIC reset-out -- open-drain)
+    - GD32_SWDIO (V2N pad TBD; host drives SWD data)
+    - GD32_SWCLK (V2N pad TBD; host drives SWD clock)
+    - SWD header (PA13/PA14) -- still accessible for external probes
+      during dev / factory.
 
 bus:              hybrid                 # SPI + I2C carry the same protocol
 spi:
@@ -61,10 +58,14 @@ i2c:
   default_address_7bit: 0x70
 
 signals:
-  - { name: GD32_SWDIO,  type: bidir,  v2n_route: "(programming header)" }
-  - { name: GD32_SWCLK,  type: input,  v2n_route: "(programming header)" }
-  - { name: GD32_BOOT0,  type: input,  v2n_route: TBD, notes: "planned to be reassigned from one of the Renesas-side PWM pads; enables host-driven factory ISP recovery" }
-  - { name: GD32_NRST,   type: input,  v2n_route: TBD, notes: "host-driven hard-reset edge -- maintainer decision pending" }
+  - { name: GD32_SWDIO,  type: bidir,  v2n_route: TBD,
+      notes: "planned -- host-driven SWD data line for in-field reflash + recovery" }
+  - { name: GD32_SWCLK,  type: input,  v2n_route: TBD,
+      notes: "planned -- host-driven SWD clock line" }
+  - { name: GD32_NRST,   type: input,  v2n_route: "Renesas P74 (open-drain, shared with primary PMIC reset-out)",
+      notes: "host pad configured open-drain; drive low to assert reset, HiZ to release" }
+  - { name: GD32_SWDIO_HDR, type: bidir, v2n_route: "(programming header, GD32 PA13)" }
+  - { name: GD32_SWCLK_HDR, type: input, v2n_route: "(programming header, GD32 PA14)" }
 
 protocol:
   doc:            "docs/gd32-bridge-protocol.md"

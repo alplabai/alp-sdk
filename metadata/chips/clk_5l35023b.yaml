@@ -1,7 +1,9 @@
 # ALP SDK chip manifest: Renesas / IDT 5L35023B audio clock generator.
 schema_version:   1
 chip_id:          clk_5l35023b
-driver_status:    stub             # probe + raw R/W + register dump only
+driver_status:    partial          # lifecycle + register R/W + register dump.  PLL / divider
+                                   # high-level helpers omitted -- V2N relies on OTP defaults
+                                   # + the Audio_CLKB_OE GPIO for output gating.
 display_name:     "Renesas (IDT) 5L35023B audio-rate clock generator"
 vendor:           renesas          # originally IDT; Renesas acquired 2019
 mpn_population:
@@ -12,18 +14,23 @@ datasheet:
   # 8-bit default write-address is 0xD0 per the maintainer (2026-05-12),
   # which is 7-bit 0x68 + R/W bit.
 notes: |
-  Same part is used on the **Renesas RZ/V2N EVK**; the EVK Linux BSP
-  carries a register-init sequence somewhere under
-  `meta-renesas/recipes-bsp/u-boot/` or in the device-tree binding
-  for the clock generator.  Maintainer follow-up: mirror that init
-  sequence into a `clk_5l35023b_apply_v2n_init()` helper; then
-  upgrade `driver_status` to `partial`.
+  Same part is used on the Renesas RZ/V2N EVK.  The chip carries
+  an OTP-loaded configuration that applies at POR; for the V2N
+  Audio_CLKB use-case the OTP defaults plus the carrier-driven
+  `Audio_CLKB_OE` GPIO (Renesas P67) cover normal operation -- no
+  runtime I2C writes are required.  Carriers needing runtime PLL
+  reconfiguration consume the driver's raw register R/W against
+  the registers documented in the public Renesas 5L35023 datasheet
+  (notable: 0x1D[3:4] DIFF output enable, 0x22[0] LVCMOS output
+  enable, XTAL[7:0] tuning caps).
+  I2C 8-bit slave-address options: 0xD0 / 0xD2 / 0xD4 / 0xD6
+  (= 7-bit 0x68 / 0x69 / 0x6A / 0x6B); V2N straps 0x68.
 
 bus:              i2c
 i2c:
   addresses:
-    - { addr_7bit: 0x68, scope: "BRD_I2C; default address (8-bit 0xD0)" }
-  max_clock_hz:   400000           # Fast-mode -- conservative default; datasheet may allow FM+
+    - { addr_7bit: 0x68, scope: "BRD_I2C; V2N strap (8-bit 0xD0); other strap options 0x69/0x6A/0x6B." }
+  max_clock_hz:   400000           # Fast-mode -- datasheet I2C bus AC chars table 13
 
 signals:
   - { name: Audio_CLKB,    type: output, v2n_route: "P10 (E1M AR9 AUDIO_CLK)" }

@@ -1,18 +1,22 @@
 # ALP SDK chip manifest: TI TPS628640 single-channel buck (multi-instance).
 schema_version:   1
 chip_id:          tps628640
-driver_status:    stub                # awaiting TI datasheet for VSET reg map
+driver_status:    complete            # VOUT1 r/w + STATUS read implemented
 display_name:     "TI TPS628640 single-channel buck regulator"
 vendor:           texas-instruments
 mpn_population:
   - "TPS628640BYCGR"                  # WSON package suffix on V2N schematic
 datasheet:
-  primary:        TBD                 # pending -- pending
+  primary:        "TPS62864/TPS62866 datasheet (TI SLVSEI1C, 2020-10)"
+  url:            "https://www.ti.com/lit/ds/symlink/tps62864.pdf"
 notes: |
-  The TPS628640 silicon also ships as TPS628641 / TPS628642 with
-  the only difference being the default OTP voltage; the I2C
-  register map is shared across the family.  When the maintainer
-  adds the datasheet, both should be cross-referenced here.
+  TPS628640 / TPS628641 / TPS628642 / TPS628660 / ... silicon
+  variants share the TPS62864/TPS62866 I2C register map; the
+  numeric suffix just selects the default OTP output voltage +
+  output-current rating (40 = 4 A, 60 = 6 A).  Register layout
+  (datasheet §8.6): VOUT1 0x01, VOUT2 0x02, CONTROL 0x03,
+  STATUS 0x05.  VOUT byte encoding: mv = byte * 5 + 400, range
+  400..1675 mV.
 
 bus:              i2c
 i2c:

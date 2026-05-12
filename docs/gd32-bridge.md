@@ -78,9 +78,9 @@ change.  See the project-memory note
 
 | Method                                | Status today      | Notes                                                                                                                                  |
 |---------------------------------------|-------------------|----------------------------------------------------------------------------------------------------------------------------------------|
-| External SWD probe (J-Link, ST-Link)  | **Supported.**    | SWDIO + SWCLK accessible on the V2N module's programming header (Renesas-side maps as `GD32_SWDIO=PA13`, `GD32_SWCLK=PA14`).            |
-| In-system upgrade over SPI / I2C      | **Planned.**      | Application-bootloader path; opcodes `0xF0..0xFF` reserved in the protocol.  Lands once the maintainer has the bootloader sequence finalised.  See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10. |
-| V2N-driven GigaDevice factory ISP     | **Pending HW.**   | Requires `GD32_BOOT0` routed back to V2N (maintainer agreed; pad selection TBD per [`memory/project_gd32_boot0_to_v2n_planned.md`](../memory/project_gd32_boot0_to_v2n_planned.md)).  Hard-reset via `NRST` is a separate hardware question. |
+| External SWD probe (J-Link, ST-Link)  | **Supported.**    | SWDIO + SWCLK accessible on the V2N module's programming header.                                                                       |
+| In-system upgrade over SPI / I2C      | **Planned.**      | Application-bootloader path; opcodes `0xF0..0xFF` reserved in the protocol.  Lands once the maintainer has the bootloader sequence finalised.  See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path A. |
+| Host-driven SWD bit-bang from V2N     | **Planned.**      | Renesas-side software SWD controller drives `GD32_SWDIO` + `GD32_SWCLK` (routed back to V2N pads per the 2026-05-12 HW decision); universal recovery + factory first-flash.  See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path B. |
 
 ## Cross-link
 

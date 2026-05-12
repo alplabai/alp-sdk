@@ -325,20 +325,18 @@ that file so the two implementations cannot diverge.
 
 ## 10. Field upgrades of the bridge firmware
 
-> **Status: design pending; not implemented at protocol major == 0.**
+> **Status: design committed; implementation pending.**
 
-The V2N module today wires only `GD32_SPI.*` and `BRD_I2C` lines
-from the Renesas RZ/V2N to the GD32 -- there is **no host-controllable
-`GD32_NRST` line** in the current schematic and `GD32_BOOT0` has
-not yet been routed back to a Renesas pad.  The maintainer has
-indicated that **`GD32_BOOT0` will be re-wired to a V2N-side pad**
-(repurposing one of the Renesas-side PWM rows `P64/P65/P70/P71/P74/P75`;
-exact pad TBD in the next schematic revision).  See
-[memory/project_gd32_boot0_to_v2n_planned.md](../memory/project_gd32_boot0_to_v2n_planned.md).
+Two upgrade paths.  Per the V2N hardware decision (2026-05-12),
+the carrier routes `GD32_SWDIO` + `GD32_SWCLK` + `GD32_NRST` from
+the Renesas host to the GD32; the BOOT0-strap / factory-ISP path
+was dropped after the GD32G553 boot ROM was confirmed
+USART-only (User Manual Rev1.2 §1.4).  See
+[memory/project_gd32_boot0_to_v2n_planned.md](../memory/project_gd32_boot0_to_v2n_planned.md)
+for the design rationale.
 
-Once `BOOT0` is host-controllable, two upgrade paths become viable:
-
-**Path A — Application bootloader (preferred normal path).**
+**Path A — Application bootloader over the bridge (preferred
+normal upgrade path).**
 
 * Lives in the first N KiB of GD32 flash, never overwritten by a
   field upgrade.
@@ -351,31 +349,31 @@ Once `BOOT0` is host-controllable, two upgrade paths become viable:
   metadata flip + reset.
 * Uses the same SPI / I2C transport as the rest of the protocol --
   no extra wiring beyond what is already in place.
-* Works even when `BOOT0` is left strapped low: the bootloader
-  decides whether to launch the app based on slot-validity metadata,
-  not the strap.
 
-**Path B — GigaDevice factory ISP (recovery / unbricking).**
+**Path B — Host-driven SWD bit-bang (universal recovery).**
 
-* Used only when Path A is unreachable (corrupt application
-  bootloader, dev-board bring-up, factory provisioning).
-* Host drives the (TBD) V2N pad mapped to `GD32_BOOT0` high and
-  asserts a reset edge.  Because `GD32_NRST` is not currently wired
-  back to the host, the reset edge comes from either:
-    * a soft-reset opcode (`RESET_REASON`-class extension) if the
-      bridge firmware is alive, **or**
-    * a board-level power cycle (degraded mode -- requires the
-      user to physically reboot).
-  Open hardware question: does V2N also need a dedicated `NRST`
-  line?  Tracked in [`notes/morning-handoff-2026-05-13.md`](../notes/morning-handoff-2026-05-13.md).
-* Once the GD32 boots into factory ISP, the V2N would need a
-  GigaDevice-compatible flasher implementation (USART is the
-  standard ISP transport; SPI / I2C are not universally supported
-  on the GD32G5 family -- maintainer to confirm from the
-  GD32G553 reference manual).  No alp-sdk code exists for this yet.
+* Used when Path A is unreachable (corrupt application bootloader,
+  factory first-flash, dev-board bring-up).
+* The Renesas host implements a software SWD controller, drives
+  `GD32_SWDIO` + `GD32_SWCLK` as GPIOs, optionally asserts
+  `GD32_NRST` to halt the GD32 cleanly, then issues SWD packets
+  to reflash the entire chip.
+* Works **regardless of GD32 firmware state** -- SWD is a hardware
+  debug bus and doesn't depend on the boot ROM or any firmware
+  layer being intact.
+* Strictly more capable than the GD32's factory-ISP route, which
+  would have required wiring a USART pair as well as BOOT0 +
+  NRST.  Routing SWD is the cleaner design.
+* Open-source reference implementations of bit-bang SWD: PyOCD,
+  OpenOCD, J-Link OB.  ~500-1000 LOC for the protocol layer +
+  GPIO HAL.
+* Security note: any V2N firmware with access to the SWD GPIOs
+  can reflash the GD32 unconstrained.  Same threat surface as
+  Path A's OTA opcodes.
 
-Until either path ships, **GD32 field upgrades go through the SWD
-debug header** (V2N module pads `GD32_SWDIO` / `GD32_SWCLK`).
+Until either path ships, **GD32 field upgrades go through an
+external SWD probe** attached to the V2N module's programming
+header.
 
 ## 11. Out-of-scope
 
