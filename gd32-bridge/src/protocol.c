@@ -205,12 +205,17 @@ static gd32_bridge_status_t handle_adc_read(const uint8_t *req, size_t req_len,
     uint8_t channel = req[0];
     uint8_t samples = req[1];
     if (samples == 0u) return STATUS_INVAL;
-    if (samples > GD32_BRIDGE_ADC_MAX_SAMPLES) samples = GD32_BRIDGE_ADC_MAX_SAMPLES;
+    /* Reject out-of-range sample counts outright rather than silently
+     * capping -- the host driver compares `reply[0]` against the
+     * originally-requested count and treats a mismatch as a wire
+     * error, so silent capping would turn a documented OUT_OF_RANGE
+     * caller error into a misleading ALP_ERR_IO. */
+    if (samples > GD32_BRIDGE_ADC_MAX_SAMPLES) return STATUS_OUT_OF_RANGE;
 
     const size_t need = 1u + (size_t)samples * 2u;
     if (reply_cap < need) return STATUS_NOMEM;
 
-    reply[0] = samples; /* echo back the (possibly capped) value */
+    reply[0] = samples; /* echoes back the (validated) value */
     uint16_t mv[GD32_BRIDGE_ADC_MAX_SAMPLES];
     const int rv = bridge_hw_adc_read(channel, samples, mv);
     if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;

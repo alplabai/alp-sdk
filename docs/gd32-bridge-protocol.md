@@ -94,9 +94,14 @@ authoritative one** for the V2N base SoM.
 
 `samples = 0` is invalid (reply: `ALP_ERR_INVAL`).  `samples >
 GD32G553_BRIDGE_ADC_MAX_SAMPLES` (firmware-defined, currently 8) is
-capped to the maximum.  Each `mv[i]` carries the firmware's
-internal-reference-corrected reading; the host treats the values as
-**ground truth** for telemetry purposes.
+rejected with `STATUS_OUT_OF_RANGE` -- the firmware does NOT silently
+cap, because the host driver compares the echoed `samples` byte
+against the originally-requested count and treats a mismatch as a
+wire error.  Callers that want N-sample averaging at higher fan-out
+should issue multiple `ADC_READ` opcodes and accumulate on the
+host side.  Each `mv[i]` carries the firmware's internal-reference-
+corrected reading; the host treats the values as **ground truth**
+for telemetry purposes.
 
 ### 3.4 DA9292 status forward
 
