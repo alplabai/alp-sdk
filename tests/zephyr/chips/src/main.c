@@ -34,6 +34,10 @@
 #include "alp/chips/murata_lbee5hy2fy.h"
 #include "alp/chips/deepx_dxm1.h"
 #include "alp/chips/pi3dbs12212.h"
+#include "alp/chips/gd32_swd.h"
+#include "alp/chips/act8760.h"
+#include "alp/chips/da9292.h"
+#include "alp/chips/tps628640.h"
 
 #include "fakes.h"
 
@@ -1295,5 +1299,307 @@ ZTEST(alp_chips, test_deepx_dxm1_set_reset_polarity_invalid_value)
      * and HIGH (1) are valid; 2 is not. */
     zassert_equal(deepx_dxm1_set_reset_polarity(&ctx,
                                                 (deepx_dxm1_reset_polarity_t)2),
+                  ALP_ERR_INVAL);
+}
+
+/* ------------------------------------------------------------------ */
+/* gd32_swd -- bit-bang SWD controller (host-side)                    */
+/*                                                                    */
+/* No real GPIO emul can drive the SWD protocol -- the bits hit the   */
+/* wire faster than gpio_emul can latch state.  These tests cover the */
+/* argument-validation surface + the uninitialised post-init paths.   */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32_swd_init_null_args)
+{
+    gd32_swd_t  ctx;
+    alp_gpio_t *bogus = (alp_gpio_t *)0xDEADBEEFu;
+
+    /* NULL ctx -> INVAL.  Even with non-NULL pin handles. */
+    zassert_equal(gd32_swd_init(NULL, bogus, bogus, NULL), ALP_ERR_INVAL);
+    /* NULL swdio -> INVAL. */
+    zassert_equal(gd32_swd_init(&ctx, NULL, bogus, NULL), ALP_ERR_INVAL);
+    /* NULL swclk -> INVAL. */
+    zassert_equal(gd32_swd_init(&ctx, bogus, NULL, NULL), ALP_ERR_INVAL);
+    /* NULL nrst is allowed (carriers that don't route it work via
+     * AIRCR.SYSRESETREQ).  Not asserted here -- the gpio_emul-backed
+     * init would still try alp_gpio_configure on the two bogus
+     * pointers, which is not a contract this layer tests. */
+}
+
+ZTEST(alp_chips, test_gd32_swd_calls_reject_uninitialised)
+{
+    gd32_swd_t ctx = {0};
+
+    /* Every post-init helper must report NOT_READY rather than
+     * dereferencing NULL swdio / swclk on a zeroed context. */
+    zassert_equal(gd32_swd_set_clock_delay(&ctx, 4u), ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_connect(&ctx),             ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_halt(&ctx),                ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_flash_erase(&ctx,
+                                       GD32_SWD_FMC_FLASH_BASE, 4096u),
+                  ALP_ERR_NOT_READY);
+    uint8_t buf[8] = {0};
+    zassert_equal(gd32_swd_flash_write(&ctx,
+                                       GD32_SWD_FMC_FLASH_BASE,
+                                       buf, sizeof buf),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_flash_verify(&ctx,
+                                        GD32_SWD_FMC_FLASH_BASE,
+                                        buf, sizeof buf),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_reset_and_run(&ctx),       ALP_ERR_NOT_READY);
+
+    /* deinit must be safe on a zero context + on NULL. */
+    gd32_swd_deinit(&ctx);
+    gd32_swd_deinit(NULL);
+}
+
+ZTEST(alp_chips, test_gd32_swd_flash_helpers_reject_unconnected)
+{
+    /* .initialised but not .connected -- erase / write / verify
+     * call gd32_swd_connect()'s outcome.  These should still report
+     * NOT_READY because the SW-DP hasn't been brought up. */
+    gd32_swd_t ctx = {.initialised = true};
+    uint8_t buf[8] = {0};
+
+    zassert_equal(gd32_swd_halt(&ctx), ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_flash_erase(&ctx,
+                                       GD32_SWD_FMC_FLASH_BASE, 4096u),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE,
+                                       buf, sizeof buf),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_flash_verify(&ctx, GD32_SWD_FMC_FLASH_BASE,
+                                        buf, sizeof buf),
+                  ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_chips, test_gd32_swd_flash_arg_validation)
+{
+    /* .connected = true so the function reaches the argument-check
+     * branch before bus access. */
+    gd32_swd_t ctx = {.initialised = true, .connected = true};
+    uint8_t buf[8] = {0};
+
+    /* size == 0 -> INVAL. */
+    zassert_equal(gd32_swd_flash_erase(&ctx,
+                                       GD32_SWD_FMC_FLASH_BASE, 0u),
+                  ALP_ERR_INVAL);
+    /* addr below flash base -> INVAL. */
+    zassert_equal(gd32_swd_flash_erase(&ctx, 0x00000000u, 4096u),
+                  ALP_ERR_INVAL);
+
+    /* NULL data / zero len -> INVAL on write + verify. */
+    zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE,
+                                       NULL, 8u),
+                  ALP_ERR_INVAL);
+    zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE,
+                                       buf, 0u),
+                  ALP_ERR_INVAL);
+    zassert_equal(gd32_swd_flash_verify(&ctx, GD32_SWD_FMC_FLASH_BASE,
+                                        NULL, 8u),
+                  ALP_ERR_INVAL);
+
+    /* Misaligned addr -> INVAL.  Write requires doubleword (8-byte)
+     * alignment; verify requires word (4-byte) alignment. */
+    zassert_equal(gd32_swd_flash_write(&ctx,
+                                       GD32_SWD_FMC_FLASH_BASE + 1u,
+                                       buf, sizeof buf),
+                  ALP_ERR_INVAL);
+    zassert_equal(gd32_swd_flash_verify(&ctx,
+                                        GD32_SWD_FMC_FLASH_BASE + 1u,
+                                        buf, sizeof buf),
+                  ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_gd32_swd_clock_delay_clamp)
+{
+    /* set_clock_delay clamps to [0, 2048].  We can't read the
+     * private field, but the contract is that the call accepts any
+     * value (no INVAL) and only NOT_READY when uninit -- exercise
+     * the latter only here. */
+    gd32_swd_t ctx = {0};
+    zassert_equal(gd32_swd_set_clock_delay(&ctx, 0u),     ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_set_clock_delay(&ctx, 100000u), ALP_ERR_NOT_READY);
+
+    /* Once initialised the call returns OK even for an out-of-range
+     * value (internally clamped). */
+    ctx.initialised = true;
+    zassert_equal(gd32_swd_set_clock_delay(&ctx, 100000u), ALP_OK,
+                  "delay 100000 must clamp + return OK, not INVAL");
+}
+
+/* ------------------------------------------------------------------ */
+/* act8760 -- ACT88760 primary PMIC on V2N BRD_I2C                    */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_act8760_init_null_args)
+{
+    act8760_t   ctx;
+    alp_i2c_t  *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+    });
+    zassert_not_null(bus);
+
+    zassert_equal(act8760_init(NULL, bus), ALP_ERR_INVAL);
+    zassert_equal(act8760_init(&ctx, NULL), ALP_ERR_INVAL);
+
+    /* _init_at takes the same constraints plus an explicit address. */
+    zassert_equal(act8760_init_at(NULL, bus, ACT8760_I2C_ADDR_PAGE0),
+                  ALP_ERR_INVAL);
+    zassert_equal(act8760_init_at(&ctx, NULL, ACT8760_I2C_ADDR_PAGE0),
+                  ALP_ERR_INVAL);
+
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_act8760_calls_reject_uninitialised)
+{
+    act8760_t ctx = {0};
+    act8760_status_t status;
+    uint8_t   v;
+
+    zassert_equal(act8760_get_status(&ctx, &status),                 ALP_ERR_NOT_READY);
+    zassert_equal(act8760_read_reg(&ctx, ACT8760_PAGE_SYSTEM, 0u, &v),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(act8760_write_reg(&ctx, ACT8760_PAGE_SYSTEM, 0u, 0u),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(act8760_rail_get_vset(&ctx, ACT8760_RAIL_BUCK1, &v),
+                  ALP_ERR_NOT_READY);
+}
+
+/* ------------------------------------------------------------------ */
+/* da9292 -- DA9292 secondary PMIC on V2N BRD_I2C                     */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_da9292_init_null_args)
+{
+    da9292_t   ctx;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+    });
+    zassert_not_null(bus);
+
+    zassert_equal(da9292_init(NULL, bus, DA9292_I2C_ADDR_V2N), ALP_ERR_INVAL);
+    zassert_equal(da9292_init(&ctx, NULL, DA9292_I2C_ADDR_V2N), ALP_ERR_INVAL);
+    /* 8-bit-encoded address through the 7-bit API must be rejected. */
+    zassert_equal(da9292_init(&ctx, bus, 0x80u), ALP_ERR_INVAL);
+
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_da9292_calls_reject_uninitialised)
+{
+    da9292_t        ctx = {0};
+    da9292_status_t status;
+    da9292_events_t events;
+    uint8_t         v;
+    uint16_t        mv;
+
+    zassert_equal(da9292_get_status(&ctx, &status),               ALP_ERR_NOT_READY);
+    zassert_equal(da9292_read_and_clear_events(&ctx, &events),    ALP_ERR_NOT_READY);
+    zassert_equal(da9292_set_enable(&ctx, DA9292_CH1, false),     ALP_ERR_NOT_READY);
+    zassert_equal(da9292_set_voltage_mv(&ctx, DA9292_CH1, 800u),  ALP_ERR_NOT_READY);
+    zassert_equal(da9292_get_voltage_mv(&ctx, DA9292_CH1, &mv),   ALP_ERR_NOT_READY);
+    zassert_equal(da9292_read_reg(&ctx, 0u, &v),                  ALP_ERR_NOT_READY);
+    zassert_equal(da9292_v2n_base_init(&ctx),                     ALP_ERR_NOT_READY);
+    zassert_equal(da9292_v2n_m1_enable_deepx_rail(&ctx, 5000u),   ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_chips, test_da9292_set_voltage_range_validation)
+{
+    /* Force .initialised so the function reaches the range-check
+     * before any bus access. */
+    da9292_t ctx = {.initialised = true};
+
+    /* Below the documented range (300..1275 mV). */
+    zassert_equal(da9292_set_voltage_mv(&ctx, DA9292_CH1, 100u), ALP_ERR_INVAL);
+    /* Above the documented range. */
+    zassert_equal(da9292_set_voltage_mv(&ctx, DA9292_CH1, 2000u), ALP_ERR_INVAL);
+}
+
+/* ------------------------------------------------------------------ */
+/* tps628640 -- single-channel buck (multi-instance)                  */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_tps628640_init_null_args)
+{
+    tps628640_t  ctx;
+    alp_i2c_t   *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+    });
+    zassert_not_null(bus);
+
+    zassert_equal(tps628640_init(NULL, bus, 0x44u, 1050u), ALP_ERR_INVAL);
+    zassert_equal(tps628640_init(&ctx, NULL, 0x44u, 1050u), ALP_ERR_INVAL);
+    /* 8-bit-encoded address through the 7-bit API. */
+    zassert_equal(tps628640_init(&ctx, bus, 0x80u, 1050u), ALP_ERR_INVAL);
+
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_tps628640_calls_reject_uninitialised)
+{
+    tps628640_t ctx = {0};
+    uint16_t    mv;
+    uint8_t     v;
+
+    zassert_equal(tps628640_set_voltage_mv(&ctx, 1050u),  ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_get_voltage_mv(&ctx, &mv),    ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_get_status(&ctx, &v),         ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_read_reg(&ctx, 0x01u, &v),    ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_write_reg(&ctx, 0x01u, 0xA0u), ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_chips, test_tps628640_set_voltage_out_of_range)
+{
+    /* Force .initialised so the function reaches the range-check
+     * before bus access.  Documented range 400..1675 mV. */
+    tps628640_t ctx = {.initialised = true};
+    zassert_equal(tps628640_set_voltage_mv(&ctx, 200u), ALP_ERR_OUT_OF_RANGE);
+    zassert_equal(tps628640_set_voltage_mv(&ctx, 2000u), ALP_ERR_OUT_OF_RANGE);
+}
+
+/* ------------------------------------------------------------------ */
+/* pi3dbs12212 -- passive 2:1 PCIe mux                                */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_pi3dbs12212_init_null_args)
+{
+    pi3dbs12212_t  ctx;
+    alp_gpio_t    *bogus = (alp_gpio_t *)0xDEADBEEFu;
+
+    zassert_equal(pi3dbs12212_init(NULL, bogus, bogus), ALP_ERR_INVAL);
+    zassert_equal(pi3dbs12212_init(&ctx, NULL, bogus),  ALP_ERR_INVAL);
+    zassert_equal(pi3dbs12212_init(&ctx, bogus, NULL),  ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_pi3dbs12212_calls_reject_uninitialised)
+{
+    pi3dbs12212_t ctx = {0};
+    pi3dbs12212_state_t state;
+
+    zassert_equal(pi3dbs12212_set_state(&ctx, PI3DBS_STATE_PATH_0),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(pi3dbs12212_get_state(&ctx, &state),
+                  ALP_ERR_NOT_READY);
+
+    /* deinit on a zero ctx is a no-op. */
+    pi3dbs12212_deinit(&ctx);
+    pi3dbs12212_deinit(NULL);
+}
+
+ZTEST(alp_chips, test_pi3dbs12212_set_state_invalid_value)
+{
+    /* Force .initialised so the function reaches the enum check.
+     * pd / sel are NULL here but the check rejects on the value
+     * first. */
+    pi3dbs12212_t ctx = {.initialised = true};
+
+    /* PI3DBS_STATE_OFF / PATH_0 / PATH_1 are 0 / 1 / 2; 3 isn't
+     * valid. */
+    zassert_equal(pi3dbs12212_set_state(&ctx,
+                                        (pi3dbs12212_state_t)3),
                   ALP_ERR_INVAL);
 }

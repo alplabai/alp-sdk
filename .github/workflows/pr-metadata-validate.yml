@@ -21,6 +21,8 @@ on:
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
       - 'tests/scripts/**'
+      - 'gd32-bridge/tests/gen_protocol_vectors.py'
+      - 'gd32-bridge/tests/protocol_vectors.txt'
   push:
     branches: [main]
     paths:
@@ -30,6 +32,8 @@ on:
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
       - 'tests/scripts/**'
+      - 'gd32-bridge/tests/gen_protocol_vectors.py'
+      - 'gd32-bridge/tests/protocol_vectors.txt'
   workflow_dispatch:
 
 concurrency:
@@ -174,3 +178,15 @@ jobs:
       - name: Unit tests for the loader
         run: |
           python3 -m unittest tests.scripts.test_alp_project -v
+
+      # The gd32-bridge protocol vectors must stay in lockstep with
+      # the generator.  The script's --check mode exits non-zero if
+      # the on-disk file has drifted from the generator output (e.g.
+      # someone edited the .txt by hand instead of re-running the
+      # generator, or bumped the firmware version triple in the
+      # script without committing the new CRC bytes).  Cheap to run;
+      # catches a class of host-firmware desync that would otherwise
+      # only surface in a HiL run.
+      - name: gd32-bridge protocol vectors are not drifted
+        run: |
+          python3 gd32-bridge/tests/gen_protocol_vectors.py --check
