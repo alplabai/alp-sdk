@@ -19,7 +19,7 @@ build it, how to flash it, and what state the implementation is in.
 | Firmware tree       | [`gd32-bridge/`](../gd32-bridge/)                                                 |
 | Toolchain           | Arm GNU Toolchain (`arm-none-eabi-gcc`), Cortex-M33 + thumb                       |
 | Build system        | CMake (separate from the Zephyr-side `west build`)                                |
-| HAL                 | Stub default; `BRIDGE_HAL_BACKEND=gd32` consumes the GigaDevice firmware library dropped under `vendors/gd32_firmware_library/sdk/` (see that directory's README) |
+| HAL                 | Stub default; `BRIDGE_HAL_BACKEND=gd32` consumes the GigaDevice firmware library via the [`alplabai/gd32g5x3-firmware-library`](https://github.com/alplabai/gd32g5x3-firmware-library) submodule at `vendors/gd32_firmware_library/upstream/` (run `git submodule update --init` once after cloning) |
 | Protocol coverage   | `PING`, `GET_VERSION`, `GET_BUILD_ID` working end-to-end without HW dependency    |
 | Transport coverage  | SPI slave + I2C slave scaffolded; HAL hookups marked TODO                         |
 | Datasheet           | GD32G553 datasheet + user manual (held in the vendor datasheet) |
@@ -43,13 +43,15 @@ Output: `build/gd32-bridge.elf`, `.hex`, `.bin`.
   a hardware-less unit-test environment.
 * `BRIDGE_HAL_BACKEND=gd32` -- builds against
   [`vendors/gd32_firmware_library/`](../vendors/gd32_firmware_library/).
-  The wrapper expects the GigaDevice **GD32G5x3 Firmware Library**
-  v1.5.0 (download:
-  <https://www.gd32mcu.com/en/download/7?kw=GD32G5>) unpacked under
-  `sdk/`; the vendor pack itself isn't tracked in git, per the
-  standard ALP convention.  The wrapper's `CMakeLists.txt`
-  fatal-errors with a clear "not found" message if the SDK is
-  missing, so configure failures are immediately diagnosable.
+  The wrapper consumes the GigaDevice **GD32G5x3 Firmware Library**
+  via a git submodule pointing at
+  [alplabai/gd32g5x3-firmware-library](https://github.com/alplabai/gd32g5x3-firmware-library)
+  (a verbatim mirror of v1.5.0 under SLA-GD0001 v1.1).  Run
+  `git submodule update --init --recursive vendors/gd32_firmware_library/upstream`
+  once after cloning, then the bridge build picks it up
+  automatically.  See
+  [`vendors/gd32_firmware_library/README.md`](../vendors/gd32_firmware_library/README.md)
+  for the licence-redistribution constraints + the version-bump procedure.
 
 ## Source layout
 

@@ -1,0 +1,4 @@
+[submodule "vendors/gd32_firmware_library/upstream"]
+	path = vendors/gd32_firmware_library/upstream
+	url = https://github.com/alplabai/gd32g5x3-firmware-library.git
+	branch = main
