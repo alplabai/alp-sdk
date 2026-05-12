@@ -70,11 +70,29 @@ directory are exactly: `README.md` and (once the wrapper lands)
 1. Go to <https://www.gd32mcu.com/en/download/7?kw=GD32G5> and
    download the **GD32G5x3 Firmware Library v1.5.0** archive
    (released 2026-02-11).
-2. Unzip into a scratch directory; locate the `Firmware/` and
-   `Utilities/` subtrees.
-3. Copy them under `vendors/gd32_firmware_library/sdk/` matching
-   the layout above.
-4. Confirm the headers compile against the bridge HAL by building
+
+2. Drop it into the canonical location.  Two equivalent paths:
+
+   **A.  VS Code (recommended).**  In the workspace, run
+   `Tasks: Run Task` -> `GD32 SDK · drop firmware library into vendors/`,
+   paste the downloaded archive's path when prompted.  The task
+   wraps the same script as path B.
+
+   **B.  Command line.**
+
+   ```bash
+   python3 scripts/drop_gd32_firmware_library.py \
+       /path/to/GD32G5x3_Firmware_Library_V1.5.0.zip
+   ```
+
+   The script searches the archive for
+   `Firmware/CMSIS/GD/GD32G5x3/Include/gd32g5x3.h` (its layout
+   anchor), copies `Firmware/` and (optional) `Utilities/` into
+   `vendors/gd32_firmware_library/sdk/`, and prints the resolved
+   library-version triple from the device header so you can
+   confirm what landed.
+
+3. Confirm the headers compile against the bridge HAL by building
    the bridge with `BRIDGE_HAL_BACKEND=gd32`:
 
    ```bash

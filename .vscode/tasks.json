@@ -139,6 +139,25 @@
                 "-DALP_BUILD_TESTS=ON"
             ],
             "problemMatcher": []
+        },
+        {
+            "label": "GD32 SDK · drop firmware library into vendors/",
+            "type": "shell",
+            "command": "python3",
+            "args": [
+                "${workspaceFolder}/scripts/drop_gd32_firmware_library.py",
+                "${input:gd32SdkArchive}",
+                "--force"
+            ],
+            "problemMatcher": [],
+            "detail": "Extract the downloaded GD32G5x3 Firmware Library archive into vendors/gd32_firmware_library/sdk/.  Unblocks BRIDGE_HAL_BACKEND=gd32 in gd32-bridge/CMakeLists.txt."
+        }
+    ],
+    "inputs": [
+        {
+            "id": "gd32SdkArchive",
+            "type": "promptString",
+            "description": "Path to the GD32G5x3 Firmware Library .zip downloaded from https://www.gd32mcu.com/en/download/7?kw=GD32G5"
         }
     ]
 }
