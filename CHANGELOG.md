@@ -326,6 +326,35 @@ that lands before the v0.3.0 tag.)
   SoM until the Zephyr backend declares an `alp-dac<N>` alias (or, on
   V2N, the supervisor singleton lazy-inits).
 
+- **`docs/aen-feature-audit-2026-05.md` -- Alif Ensemble peripheral
+  audit vs Zephyr driver-class coverage (2026-05-14).**  Block-level
+  research deliverable in preparation for promoting any E1M-AEN SoM
+  (E1M-AEN301..E1M-AEN801) to production-supported.  Walks every
+  Ensemble peripheral the AEN-family silicon documents (per-SoC JSON
+  in `metadata/socs/alif/ensemble/`) against the `drivers/<class>/`
+  tree in Zephyr v3.7 and categorises each block into one of four
+  buckets: COVERED, COVERED-AFTER-DRIVER-PACK, NEEDS-PORTABLE-SURFACE,
+  DEFERRED.  Flags GPU2D (D/AVE 2D), Ethos-U NPU dispatch, ISP
+  acceleration, aiPM autonomous power management, and inline-AES on
+  HexSPI/OSPI as the top-five "would silently disappear on V2N→AEN
+  migration" gaps.  Research only -- no code, no API change.
+
+- **`docs/cc3501e-integration-plan.md` -- SWRU626 deep-dive informing
+  the first `alplabai/cc3501e-firmware` drop (2026-05-14).**  Deep
+  read of TI SWRU626 (CC3501E technical reference manual) +
+  cross-reference against the existing host-side stub (`chips/cc3501e/`
+  + `<alp/protocol/cc3501e.h>`).  Builds a peripheral-by-peripheral
+  plan (SPI / SDIO / DMA / GPIO / UART / ADC / GPT / I2C / power /
+  boot) split into host-side responsibilities (stay in this repo,
+  Apache-2.0 clean) and firmware-side responsibilities (cc3501e-
+  firmware, per ADR 0005).  Surfaces two host-side issues the plan
+  resolves into v0.3.x commits: the current `cc3501e_reset()` violates
+  SWRU626 §7.1.5 timing (no 10 us nRESET hold; no boot budget wait
+  for BL1→BL2→Chain-of-Trust), and the wire protocol's magic
+  `direction` / `pull` bytes need named enums for the upcoming GPIO
+  set-interrupt + open-drain support.  Plan-only -- no code, no API
+  change.
+
 ### Added (2026-05-13 overnight run)
 
 - **`chips/gd32_swd/` -- bit-bang SWD controller for the GD32G553 (2026-05-13).**
