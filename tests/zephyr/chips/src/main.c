@@ -1625,6 +1625,33 @@ ZTEST(alp_chips, test_tps628640_set_voltage_out_of_range)
     tps628640_t ctx = {.initialised = true};
     zassert_equal(tps628640_set_voltage_mv(&ctx, 200u), ALP_ERR_OUT_OF_RANGE);
     zassert_equal(tps628640_set_voltage_mv(&ctx, 2000u), ALP_ERR_OUT_OF_RANGE);
+    /* Same range check applies to VOUT2 (the VID-pin-high register). */
+    zassert_equal(tps628640_set_voltage2_mv(&ctx, 200u), ALP_ERR_OUT_OF_RANGE);
+    zassert_equal(tps628640_set_voltage2_mv(&ctx, 2000u), ALP_ERR_OUT_OF_RANGE);
+}
+
+ZTEST(alp_chips, test_tps628640_control_helpers_reject_uninitialised)
+{
+    /* Datasheet-integration follow-up: typed CONTROL helpers must
+     * report NOT_READY on a zeroed context like every other call. */
+    tps628640_t ctx = {0};
+    zassert_equal(tps628640_software_enable(&ctx, true),  ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_set_fpwm_mode(&ctx, true),    ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_set_ramp_speed(&ctx, TPS628640_RAMP_1_MV_PER_US),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_reset_to_defaults(&ctx),      ALP_ERR_NOT_READY);
+    uint16_t mv;
+    zassert_equal(tps628640_get_voltage2_mv(&ctx, &mv),   ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_chips, test_tps628640_set_ramp_speed_invalid)
+{
+    /* Force .initialised so the function reaches the enum check.
+     * Documented range 0..3; 4 is invalid. */
+    tps628640_t ctx = {.initialised = true};
+    zassert_equal(tps628640_set_ramp_speed(&ctx,
+                                           (tps628640_ramp_speed_t)4u),
+                  ALP_ERR_INVAL);
 }
 
 /* ------------------------------------------------------------------ */

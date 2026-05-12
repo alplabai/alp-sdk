@@ -1,7 +1,9 @@
 # ALP SDK chip manifest: TI TPS628640 single-channel buck (multi-instance).
 schema_version:   1
 chip_id:          tps628640
-driver_status:    complete            # VOUT1 r/w + STATUS read implemented
+driver_status:    complete            # init + VOUT1/2 r/w + STATUS read +
+                                      # software-enable / FPWM / ramp-speed /
+                                      # reset CONTROL helpers + raw R/W.
 display_name:     "TI TPS628640 single-channel buck regulator"
 vendor:           texas-instruments
 mpn_population:
@@ -9,14 +11,34 @@ mpn_population:
 datasheet:
   primary:        "TPS62864/TPS62866 datasheet (TI SLVSEI1C, 2020-10)"
   url:            "https://www.ti.com/lit/ds/symlink/tps62864.pdf"
+
 notes: |
   TPS628640 / TPS628641 / TPS628642 / TPS628660 / ... silicon
   variants share the TPS62864/TPS62866 I2C register map; the
-  numeric suffix just selects the default OTP output voltage +
-  output-current rating (40 = 4 A, 60 = 6 A).  Register layout
-  (datasheet §8.6): VOUT1 0x01, VOUT2 0x02, CONTROL 0x03,
-  STATUS 0x05.  VOUT byte encoding: mv = byte * 5 + 400, range
-  400..1675 mV.
+  numeric suffix selects the default OTP output voltage +
+  output-current rating (40 = 4 A, 60 = 6 A).
+
+  VOUT byte encoding: mv = byte * 5 + 400, range 400..1675 mV
+  (5 mV step).  Codes 0x20 / 0x40 / 0x60 / 0x80 / 0xC4 / 0xE0
+  carry wider accuracy tolerance per the datasheet footnote --
+  avoid in production firmware that needs the tighter VOS bar.
+
+  CONTROL (0x03) is **write-only**; reading returns 0x00.  The
+  driver maintains a software shadow seeded with the datasheet
+  default (0x6E) so the typed helpers can do read-modify-write
+  semantics without an I2C round-trip.
+
+register_table:
+  - { addr: 0x01, name: "VOUT Register 1", type: rw, default: 0x64,
+      summary: "Output-voltage setpoint (selected when VID = low)" }
+  - { addr: 0x02, name: "VOUT Register 2", type: rw, default: 0x64,
+      summary: "Output-voltage setpoint (selected when VID = high)" }
+  - { addr: 0x03, name: "CONTROL",         type: w,  default: 0x6E,
+      summary: "Reset / SW-enable / FPWM / discharge / HICCUP / ramp speed" }
+  - { addr: 0x05, name: "STATUS",          type: r,  default: 0x00,
+      summary: "Thermal-warning (bit 4) / HICCUP (bit 3) / UVLO (bit 0) latches" }
+
+slave_address_range: "0x40..0x4F (resistor-strapped via VSET/VID per datasheet Table 8-1)"
 
 bus:              i2c
 i2c:
