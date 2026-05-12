@@ -32,10 +32,15 @@
 #define ALP_TMU_HAS_BRIDGE_PATH 0
 #endif
 
+#if ALP_TMU_HAS_BRIDGE_PATH
 /* ------------------------------------------------------------------ */
 /* float <-> wire-u32 reinterpret helpers.  Using `memcpy` (rather    */
 /* than a union or a `*(uint32_t*)&f` punning cast) is the standard   */
 /* C99 way to reinterpret bits without violating strict-aliasing.     */
+/* Only compiled on bridge-path builds -- every caller sits inside    */
+/* the same `#if ALP_TMU_HAS_BRIDGE_PATH` block, so leaving these at  */
+/* file scope trips -Werror=unused-function on non-V2N builds         */
+/* (CONFIG_ALP_SDK_V2N_SUPERVISOR=n, e.g. native_sim).                */
 /* ------------------------------------------------------------------ */
 
 static uint32_t f32_to_u32_bits(float f)
@@ -52,7 +57,6 @@ static float u32_to_f32_bits(uint32_t bits)
     return f;
 }
 
-#if ALP_TMU_HAS_BRIDGE_PATH
 /* Shared bridge path: acquire supervisor, send one CMD_TMU_COMPUTE,
  * release.  All twelve TMU functions share this body -- the
  * per-function alp_tmu_* wrappers just pick the function id and
