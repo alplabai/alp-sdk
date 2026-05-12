@@ -31,6 +31,21 @@ The standalone path is **not** a studio escape hatch — it's a
 first-class consumer.  Anything the studio can emit, a developer
 should be able to write by hand.
 
+## Firmware engineers start here
+
+Writing Zephyr / bare-metal C against an E1M-X module?
+[**docs/firmware-quickstart.md**](docs/firmware-quickstart.md) is
+the targeted walk-through: per-SoM choices, idiomatic patterns
+for the on-module chips (PMICs, RTC, Wi-Fi/BT, Ethernet PHYs, DEEPX),
+and pointers into the rest of the doc tree.  Per-SoM bring-up:
+
+| SoM family       | Bring-up doc                                                | Reference examples                              |
+|------------------|-------------------------------------------------------------|-------------------------------------------------|
+| E1M-AEN          | [`docs/getting-started.md`](docs/getting-started.md) §4..5  | `examples/gpio-button-led`, `i2c-scanner`, `rtc-clock` |
+| E1M-X V2N        | [`docs/bring-up-v2n.md`](docs/bring-up-v2n.md)              | `examples/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-pmic-rail-monitor` |
+| E1M-X V2N-M1     | [`docs/bring-up-v2n-m1.md`](docs/bring-up-v2n-m1.md)        | DEEPX bring-up delta on top of V2N             |
+| E1M-N93 (i.MX93) | [`docs/getting-started.md`](docs/getting-started.md) §4..5  | same cross-family examples as AEN              |
+
 ## 30-second quick start
 
 A v0.3 project is **one declarative file** plus an empty `prj.conf`.
