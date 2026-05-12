@@ -28,13 +28,13 @@
 #include "alp/peripheral.h"
 #include "handles.h"
 
-struct alp_gpu2d {
-    bool in_use;
-};
+/* No struct body or static pool yet -- alp_gpu2d_open returns
+ * NULL+NOSUPPORT today (no vendor HAL wired on any active SoM),
+ * so the opaque `alp_gpu2d_t` from <alp/gpu2d.h> stays forward-
+ * declared.  The vendor-specific backends (`gpu2d_alif.c` etc.)
+ * will define the struct body + handle pool when they land. */
 
-static struct alp_gpu2d g_alp_gpu2d;
-
-alp_gpu2d_t            *alp_gpu2d_open(void)
+alp_gpu2d_t *alp_gpu2d_open(void)
 {
     alp_z_clear_last_error();
     /* No vendor HAL wired yet on any active SoM. */
@@ -105,6 +105,8 @@ alp_status_t alp_gpu2d_blend(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src
 
 void alp_gpu2d_close(alp_gpu2d_t *handle)
 {
-    if (handle == NULL) return;
-    handle->in_use = false;
+    /* Opaque pointer; the stub never hands out a real handle so
+     * any non-NULL pointer was caller-fabricated.  Treat the call
+     * as a no-op rather than dereferencing into unknown memory. */
+    (void)handle;
 }
