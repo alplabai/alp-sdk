@@ -22,19 +22,26 @@ that lands before the v0.3.0 tag.)
 
 ### Decided (hardware-design decisions captured 2026-05-12)
 
+- **All E1M PWM channels are GD32-driven; Renesas drives no PWMs.**
+  The "either GD32 or Renesas, picked SoM-wide via resistor strap"
+  cross-source design is collapsed to a single GD32-only path.
+  Removed `GPT13_GTIOC13A` (P64) / `GPT13_GTIOC13B` (P65) /
+  `GPT4_GTIOC4B` (P75) rows from
+  `metadata/e1m_modules/v2n/renesas-peripheral-map.{tsv,csv}`.
+  GD32-side mapping unchanged: `E1M PWM0..PWM7` on GD32
+  `PA11 / PB1 / PB14 / PC5 / PC10 / PC11 / PC12 / PD0`.  The
+  resistor-strap selection is no longer applicable -- there's
+  nothing to switch between.
 - **GD32 in-field reflash uses SWD-from-host, not factory-ISP / BOOT0.**
   The earlier "BOOT0 -> Renesas `P75`" plan is dropped in favour of a
   software SWD bit-bang from the Renesas host -- SWD works regardless
   of GD32 firmware state, where factory-ISP depends on the GD32 boot
   ROM staying intact and would have required a third pad (a USART
   line) on the V2N side.  Net pad assignments (maintainer-confirmed):
-  - `GD32_SWDIO` -> Renesas `P70` (was `GPT0_GTIOC0A` / `E1M PWM2`).
-  - `GD32_SWCLK` -> Renesas `P71` (was `GPT0_GTIOC0B` / `E1M PWM3`).
-  - `P75` stays on `GPT4_GTIOC4B` / `E1M PWM5` Renesas-driven (BOOT0
-    line is no longer routed).
-  PWM2 and PWM3 lose their Renesas-side drive but remain available on
-  the GD32-driven path (GD32 `PB14` / `PC5`); the V2N SoM picks the
-  PWM source SoM-wide via the resistor-strap option, not per-channel.
+  - `GD32_SWDIO` -> Renesas `P70` (was `GPT0_GTIOC0A`).
+  - `GD32_SWCLK` -> Renesas `P71` (was `GPT0_GTIOC0B`).
+  - `P75` becomes unassigned on the Renesas side (BOOT0 dropped,
+    PWM5 moved entirely to GD32).
   See [memory `project_gd32_boot0_to_v2n_planned.md`] for the design
   rationale.
 - **GD32_NRST -> Renesas `P74`** (was E1M PWM4 / GPT4_GTIOC4A).  PWM4

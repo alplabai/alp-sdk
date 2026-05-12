@@ -7,13 +7,13 @@
  * driving a small-duty PWM signal at a fixed period, then walking
  * the duty cycle through a five-stop fan curve.
  *
- * Why GD32-side PWM on V2N?  After the 2026-05-11 schematic revision
- * two of the eight E1M PWM channels are wired to GD32 pads (PWM6
- * and PWM7) instead of the Renesas pinmux.  Driving them happens via
- * the bridge: the host calls gd32g553_pwm_set, the GD32 firmware
- * programs its own timer + GTIOC, and the carrier sees a clean PWM
- * waveform.  See docs/gd32-bridge-protocol.md §3.2 for the channel
- * mapping convention.
+ * Why GD32-side PWM on V2N?  Per the 2026-05-12 schematic decision,
+ * all eight E1M PWM channels (PWM0..PWM7) are wired to the GD32 IO
+ * MCU; the Renesas side drives no PWMs directly.  Driving any PWM
+ * happens via the bridge: the host calls gd32g553_pwm_set, the GD32
+ * firmware programs its own timer + GTIOC, and the carrier sees a
+ * clean PWM waveform.  See docs/gd32-bridge-protocol.md §3.2 for the
+ * channel mapping convention.
  *
  * The example treats PWM channel 0 as the fan-control output.  A
  * production firmware would read the carrier's thermistor /

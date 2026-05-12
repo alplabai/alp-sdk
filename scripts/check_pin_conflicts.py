@@ -40,14 +40,13 @@ REPO = Path(__file__).resolve().parent.parent
 MODULES = REPO / "metadata" / "e1m_modules"
 
 # Pads that are documented as legitimately dual-claimed by two
-# peripherals (typically GD32 + Renesas both routing PWM6/7 / E1M
-# PWM dual-source).  Keys are the family-relative TSV path; values
-# are sets of "pad" strings that may appear on more than one row.
+# peripherals.  Keys are the family-relative TSV path; values are
+# sets of "pad" strings that may appear on more than one row.
 ALLOWLIST: dict[str, set[str]] = {
-    # E1M PWM0..PWM5 are dual-sourced on V2N (both Renesas and GD32
-    # can drive them).  The dual-source convention lives in
-    # `v2n/README.md` -- update both this allowlist and that doc
-    # together if the dual-source set changes.
+    # V2N: all eight E1M PWM channels are GD32-driven; Renesas
+    # drives none.  No dual-source pads remain on V2N after the
+    # 2026-05-12 design decision; this allowlist stays empty for
+    # the family.  See metadata/e1m_modules/v2n/README.md.
 }
 
 # Pad-first maps: column[0] = peripheral, column[1] = silicon pad.

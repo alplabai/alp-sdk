@@ -20,12 +20,13 @@ The V2N module's E1M-edge peripherals split across two silicon
 sources:
 
 - **Renesas RZ/V2N** (the application SoC) -- owns I²C, SPI, UART,
-  I²S, classic RGMII Ethernet, CAN, SD/eMMC, xSPI NOR, PDM, the
-  DRP-AI3 accelerator, and a subset of the eight E1M PWM channels.
-- **GigaDevice GD32G553MEY7TR** (companion IO MCU) -- owns the
-  encoder-input bank, the dual ADC + DAC bank, the camera-LDO
-  enables, the Murata Wi-Fi/BT module's REG_ON pins, the OPTIGA
-  reset, and the rest of the PWM channels.  Reached from the
+  I²S, classic RGMII Ethernet, CAN, SD/eMMC, xSPI NOR, PDM, and the
+  DRP-AI3 accelerator.  Renesas drives **none** of the eight E1M
+  PWM channels directly; all PWMs are GD32-driven.
+- **GigaDevice GD32G553MEY7TR** (companion IO MCU) -- owns **all
+  eight E1M PWM channels**, the encoder-input bank, the dual
+  ADC + DAC bank, the camera-LDO enables, the Murata Wi-Fi/BT
+  module's REG_ON pins, and the OPTIGA reset.  Reached from the
   Renesas side via the **GD32 bridge** -- see
   [`../../../docs/gd32-bridge-protocol.md`](../../../docs/gd32-bridge-protocol.md).
 
