@@ -68,6 +68,7 @@ byte; their numeric encoding is:
 | `0x34` | `ADC_STREAM_READ`     | `stream_id:u8 max_samples:u8`                      | `got:u8 mv[max_samples]:u16` (zero-padded)         |
 | `0x35` | `ADC_STREAM_END`      | `stream_id:u8`                                     | _empty_                                            |
 | `0x80` | `TRNG_READ`           | `len:u8` (1..32)                                   | `random_bytes[len]`                                |
+| `0x90` | `TMU_COMPUTE`         | `function:u8 format:u8 reserved:u16 in_a:u32 in_b:u32` | `result:u32`                                  |
 
 Opcodes `0x81..0xEF` are **reserved** for future ALP-defined
 extensions (next slot: hardware AES via the CAU engine).  Carriers
@@ -232,6 +233,68 @@ path) until `len` is satisfied; latency at typical TRNG_CLK is
 ~40 cycles per pull (sub-microsecond).  Self-check failures
 (documented in the GD32 user manual TRNG_STAT register) cause
 the firmware to reply with `STATUS_IO`.
+
+### 3.12 TMU compute (`v0.4+`)
+
+`TMU_COMPUTE` issues one operation against the GD32G5's TMU
+(Trigonometric Math Unit -- the chip's CORDIC engine).  The TMU is a
+**general-purpose** math accelerator (sin / cos / tan / atan / atan2
+/ sqrt / log / exp / sinh / cosh / tanh / vector magnitude) -- it is
+NOT an ADC post-processor, and the opcode does not interact with the
+streaming ADC pipeline.  Request payload is 12 bytes:
+
+```
+   offset  size  field
+   ------  ----  -----------------------
+   0       u8    function    (see table)
+   1       u8    format      (0 = Q31, 1 = IEEE-754 single)
+   2..3    u16   reserved (MUST be 0)
+   4..7    u32   in_a        (first operand, format-dependent encoding)
+   8..11   u32   in_b        (second operand for two-input functions;
+                              ignored for one-input functions)
+```
+
+Reply payload is 4 bytes (`result:u32`) in the same format as the
+inputs.  The status byte carries the usual `STATUS_OK` /
+`STATUS_OUT_OF_RANGE` (operand outside the function's mathematical
+domain, e.g. `sqrt(-1)` in Q31) / `STATUS_INVAL` (bad function or
+format enum) / `STATUS_NOSUPPORT` (firmware HAL stub) /
+`STATUS_IO` (TMU fault).
+
+Function table (`function` field):
+
+| Code | Mnemonic | Inputs | Output                                       |
+|------|----------|--------|----------------------------------------------|
+| `0`  | `SIN`    | 1      | `sin(in_a)`                                  |
+| `1`  | `COS`    | 1      | `cos(in_a)`                                  |
+| `2`  | `TAN`    | 1      | `tan(in_a)`                                  |
+| `3`  | `ATAN`   | 1      | `atan(in_a)`                                 |
+| `4`  | `ATAN2`  | 2      | `atan2(in_a, in_b)` (y, x)                   |
+| `5`  | `SQRT`   | 1      | `sqrt(in_a)` (non-negative input)            |
+| `6`  | `LOG`    | 1      | `log(in_a)` (natural log; positive input)    |
+| `7`  | `EXP`    | 1      | `exp(in_a)`                                  |
+| `8`  | `SINH`   | 1      | `sinh(in_a)`                                 |
+| `9`  | `COSH`   | 1      | `cosh(in_a)`                                 |
+| `10` | `TANH`   | 1      | `tanh(in_a)`                                 |
+| `11` | `HYPOT`  | 2      | `sqrt(in_a*in_a + in_b*in_b)` (no overflow)  |
+
+Single-input functions MUST set `in_b = 0`; the firmware does not
+inspect it but a non-zero value MAY be rejected by future revisions.
+
+The format byte picks the number-encoding of both inputs and the
+output: `format = 0` is Q31 fixed-point (full-scale = ±1.0; for trig
+functions, angles are in units of pi); `format = 1` is IEEE-754
+single precision (binary32).  The SDK's portable `<alp/tmu.h>`
+surface always uses IEEE-754 single because its public API takes
+`float`; Q31 is available to applications that need to skip the
+boundary conversion when working directly with the chip wrapper
+`gd32g553_tmu_compute`.
+
+Latency: one CORDIC iteration is ~14 chip cycles on the GD32G5; the
+firmware blocks the bridge until the result is ready (typical
+end-to-end is < 50 us on the SPI fast path).  Higher-throughput
+designs that need to dispatch many TMU ops should batch them on the
+host side rather than spinning per-op round-trips.
 
 ### 3.7 Free-running counter (`v0.2+`)
 

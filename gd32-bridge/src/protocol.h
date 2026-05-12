@@ -28,7 +28,7 @@
 #define GD32_BRIDGE_BUILD_ID_LEN         20u
 
 #define PROTOCOL_VERSION_MAJOR           0u
-#define PROTOCOL_VERSION_MINOR           3u
+#define PROTOCOL_VERSION_MINOR           4u
 #define PROTOCOL_VERSION_PATCH           0u
 
 /* Number of concurrent DMA-backed ADC streams the firmware supports.
@@ -107,7 +107,40 @@ typedef enum {
      * (AES/DES hardware) is reserved for v0.4 once the PSA Crypto
      * entropy / cipher driver registration lands. */
     CMD_TRNG_READ             = 0x80,
+    /* v0.4: GD32G5 TMU (CORDIC) math accelerator.  General-purpose
+     * fixed-function trig / sqrt / log / exp / vector-magnitude block
+     * with a 12-input function table.  Request payload
+     * `function:u8 format:u8 reserved:u16 in_a:u32 in_b:u32` (12 B);
+     * reply `result:u32 status:u8` (5 B).  Format 0 = Q31 fixed-point;
+     * format 1 = IEEE-754 single (the firmware's default plumbing). */
+    CMD_TMU_COMPUTE           = 0x90,
 } gd32_bridge_cmd_t;
+
+/* TMU function index sent in CMD_TMU_COMPUTE's request payload byte 0.
+ * Mirrors @ref gd32g553_tmu_function_t on the host side. */
+typedef enum {
+    BRIDGE_TMU_FN_SIN     = 0u,
+    BRIDGE_TMU_FN_COS     = 1u,
+    BRIDGE_TMU_FN_TAN     = 2u,
+    BRIDGE_TMU_FN_ATAN    = 3u,
+    BRIDGE_TMU_FN_ATAN2   = 4u,
+    BRIDGE_TMU_FN_SQRT    = 5u,
+    BRIDGE_TMU_FN_LOG     = 6u,
+    BRIDGE_TMU_FN_EXP     = 7u,
+    BRIDGE_TMU_FN_SINH    = 8u,
+    BRIDGE_TMU_FN_COSH    = 9u,
+    BRIDGE_TMU_FN_TANH    = 10u,
+    BRIDGE_TMU_FN_HYPOT   = 11u,
+    BRIDGE_TMU_FN__COUNT  = 12u, /**< sentinel; not a valid function. */
+} gd32_bridge_tmu_function_t;
+
+/* TMU operand / result format byte 1 of CMD_TMU_COMPUTE.  Mirrors
+ * @ref gd32g553_tmu_format_t on the host side. */
+typedef enum {
+    BRIDGE_TMU_FMT_Q31    = 0u, /**< Q31 fixed-point (signed).  */
+    BRIDGE_TMU_FMT_F32    = 1u, /**< IEEE-754 single precision. */
+    BRIDGE_TMU_FMT__COUNT = 2u, /**< sentinel.                   */
+} gd32_bridge_tmu_format_t;
 
 /* Wire-side status byte; mirrors the table in docs/gd32-bridge-protocol.md §6.
  * Note the unsigned magnitude vs the host's negative alp_status_t -- the

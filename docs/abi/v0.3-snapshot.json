@@ -1528,6 +1528,10 @@
           "hash": "74a995a5d548ad83",
           "signature": "alp_status_t gd32g553_set_default_transport(gd32g553_t *ctx, gd32g553_transport_t t);"
         },
+        "gd32g553_tmu_compute": {
+          "hash": "9ec59752de609cb3",
+          "signature": "alp_status_t gd32g553_tmu_compute(gd32g553_t *ctx, gd32g553_tmu_function_t function, gd32g553_tmu_format_t format, uint32_t in_a, uint32_t in_b, uint32_t *result_out);"
+        },
         "gd32g553_trng_read": {
           "hash": "1b53462048959b50",
           "signature": "alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len);"
@@ -1589,8 +1593,8 @@
       },
       "typedefs": {
         "gd32g553_cmd_t": {
-          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
-          "hash": "0f05e4c699ed8326"
+          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_TMU_COMPUTE = 0x90, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
+          "hash": "1dc6fb0c6ff1f8a3"
         },
         "gd32g553_ota_slot_t": {
           "definition": "typedef enum { GD32G553_OTA_SLOT_INVALID = 0u, GD32G553_OTA_SLOT_A = 1u, GD32G553_OTA_SLOT_B = 2u, } gd32g553_ota_slot_t;",
@@ -1607,6 +1611,14 @@
         "gd32g553_reset_cause_t": {
           "definition": "typedef enum { GD32G553_RESET_UNKNOWN = 0, GD32G553_RESET_POWER_ON = 1, GD32G553_RESET_NRST_PIN = 2, GD32G553_RESET_SOFT = 3, GD32G553_RESET_WDT = 4, GD32G553_RESET_BROWNOUT = 5, GD32G553_RESET_LOWPOWER = 6, } gd32g553_reset_cause_t;",
           "hash": "4a644e11f15a749c"
+        },
+        "gd32g553_tmu_format_t": {
+          "definition": "typedef enum { GD32G553_TMU_FMT_Q31 = 0u, GD32G553_TMU_FMT_F32 = 1u, } gd32g553_tmu_format_t;",
+          "hash": "62f9fb2c5972e1fe"
+        },
+        "gd32g553_tmu_function_t": {
+          "definition": "typedef enum { GD32G553_TMU_FN_SIN = 0u, GD32G553_TMU_FN_COS = 1u, GD32G553_TMU_FN_TAN = 2u, GD32G553_TMU_FN_ATAN = 3u, GD32G553_TMU_FN_ATAN2 = 4u, GD32G553_TMU_FN_SQRT = 5u, GD32G553_TMU_FN_LOG = 6u, GD32G553_TMU_FN_EXP = 7u, GD32G553_TMU_FN_SINH = 8u, GD32G553_TMU_FN_COSH = 9u, GD32G553_TMU_FN_TANH = 10u, GD32G553_TMU_FN_HYPOT = 11u, } gd32g553_tmu_function_t;",
+          "hash": "eb49919941f9de89"
         },
         "gd32g553_transport_t": {
           "definition": "typedef enum { GD32G553_TRANSPORT_DEFAULT = 0, GD32G553_TRANSPORT_SPI = 1, GD32G553_TRANSPORT_I2C = 2, } gd32g553_transport_t;",
@@ -4081,6 +4093,60 @@
           "hash": "b7cd30143611e587"
         }
       }
+    },
+    "alp/tmu.h": {
+      "functions": {
+        "alp_tmu_atan": {
+          "hash": "a74ebc0adc0767b4",
+          "signature": "alp_status_t alp_tmu_atan(float in_a, float *out);"
+        },
+        "alp_tmu_atan2": {
+          "hash": "1aaa3889e01173b1",
+          "signature": "alp_status_t alp_tmu_atan2(float in_a, float in_b, float *out);"
+        },
+        "alp_tmu_cos": {
+          "hash": "5bc645b96cf5fd10",
+          "signature": "alp_status_t alp_tmu_cos(float in_a, float *out);"
+        },
+        "alp_tmu_cosh": {
+          "hash": "944d690bea123b55",
+          "signature": "alp_status_t alp_tmu_cosh(float in_a, float *out);"
+        },
+        "alp_tmu_exp": {
+          "hash": "13a3d8a9209b6786",
+          "signature": "alp_status_t alp_tmu_exp(float in_a, float *out);"
+        },
+        "alp_tmu_hypot": {
+          "hash": "b807952609bb7d41",
+          "signature": "alp_status_t alp_tmu_hypot(float in_a, float in_b, float *out);"
+        },
+        "alp_tmu_log": {
+          "hash": "db3245ace074173b",
+          "signature": "alp_status_t alp_tmu_log(float in_a, float *out);"
+        },
+        "alp_tmu_sin": {
+          "hash": "eb8b6685938a8637",
+          "signature": "endif alp_status_t alp_tmu_sin(float in_a, float *out);"
+        },
+        "alp_tmu_sinh": {
+          "hash": "b2c0c1b70bff23c9",
+          "signature": "alp_status_t alp_tmu_sinh(float in_a, float *out);"
+        },
+        "alp_tmu_sqrt": {
+          "hash": "d27dea326c39e2d0",
+          "signature": "alp_status_t alp_tmu_sqrt(float in_a, float *out);"
+        },
+        "alp_tmu_tan": {
+          "hash": "66664a3ef4c3cdf6",
+          "signature": "alp_status_t alp_tmu_tan(float in_a, float *out);"
+        },
+        "alp_tmu_tanh": {
+          "hash": "11e33ce25923e258",
+          "signature": "alp_status_t alp_tmu_tanh(float in_a, float *out);"
+        }
+      },
+      "macros": {},
+      "typedefs": {}
     },
     "alp/usb.h": {
       "functions": {

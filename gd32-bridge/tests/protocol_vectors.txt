@@ -33,8 +33,8 @@ spi_ping_request               = A500FF84
 spi_ping_reply_ok              = A500FF84
 # SOF | CMD=0x01 (GET_VERSION) | CRC -- empty payload
 spi_get_version_request        = A501EFA5
-# SOF | STATUS=0x00 | major=0 | minor=3 | patch=0 | CRC
-spi_get_version_reply_v0_3_0   = A5000003004D6C
+# SOF | STATUS=0x00 | major=0 | minor=4 | patch=0 | CRC
+spi_get_version_reply_v0_4_0   = A500000400D4FB
 
 # ---------------------------------------------------------------------
 # §3. I2C envelopes -- register-style framing
@@ -62,7 +62,7 @@ spi_reply_nosupport            = A5069F42
 
 # ---------------------------------------------------------------------
 # §5. v0.3 additions -- GD32G5 HW knobs (PWM_CONFIGURE, ADC_CONFIGURE,
-#                       ADC_STREAM_BEGIN / READ / END)
+#                       ADC_STREAM_BEGIN / READ / END, TRNG_READ)
 # ---------------------------------------------------------------------
 # SOF | CMD=0x22 | channel=0 | align=CENTER_UP | dead_time_ns=2000 | break_en | CRC
 spi_pwm_configure_ch0_request  = A5220001D007000001B070
@@ -76,3 +76,9 @@ spi_adc_stream_read_stream0_max32_request = A5340020EFF4
 spi_adc_stream_end_stream0_request = A535006090
 # SOF | CMD=0x80 | request 16 bytes of true random | CRC -- host receives 16 bytes of GD32G5 TRNG (NIST SP800-90B)
 spi_trng_read_16_request       = A580109359
+
+# ---------------------------------------------------------------------
+# §6. v0.4 additions -- GD32G5 TMU (CORDIC) math accelerator
+# ---------------------------------------------------------------------
+# SOF | CMD=0x90 | function=SQRT | format=F32 | in_a=4.0f (LE 0x40800000) | in_b=0 | CRC -- bridge replies 2.0f as 4 reply payload bytes + STATUS
+spi_tmu_compute_sqrt_f32_4p0_request = A59005010000000080400000000055AB

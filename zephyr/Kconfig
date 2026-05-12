@@ -331,6 +331,17 @@ config ALP_SDK_PERIPH_WDT
 	  Compile src/zephyr/peripheral_wdt.c.  Provides alp_wdt_*
 	  on top of Zephyr's wdt_* API.
 
+config ALP_SDK_PERIPH_TMU
+	bool "Enable <alp/tmu.h> wrapper (CORDIC math accelerator surface)"
+	default y
+	help
+	  Compile src/zephyr/peripheral_tmu.c.  Provides alp_tmu_sin /
+	  cos / tan / atan / atan2 / sqrt / log / exp / sinh / cosh /
+	  tanh / hypot on top of either the V2N supervisor's GD32G5
+	  TMU (CORDIC) accelerator (when CONFIG_ALP_SDK_V2N_SUPERVISOR=y)
+	  or libm directly (every other SoM).  The customer-facing
+	  header is SoM-agnostic; the V2N dispatch is internal.
+
 # IoT (Wi-Fi station + MQTT) — v0.2 deliverable.  When OFF the
 # wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT
 # contract so apps can link cleanly against <alp/iot.h>.

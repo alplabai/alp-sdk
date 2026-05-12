@@ -472,6 +472,35 @@ static gd32_bridge_status_t handle_trng_read(const uint8_t *req, size_t req_len,
     return STATUS_OK;
 }
 
+static gd32_bridge_status_t handle_tmu_compute(const uint8_t *req, size_t req_len,
+                                               uint8_t *reply, size_t reply_cap,
+                                               size_t *reply_len)
+{
+    if (req_len != 12u) return STATUS_INVAL;
+    if (reply_cap < 4u) return STATUS_NOMEM;
+    const uint8_t  function = req[0];
+    const uint8_t  format   = req[1];
+    /* req[2..3] are the reserved padding -- ignore. */
+    const uint32_t in_a     = get_le32(&req[4]);
+    const uint32_t in_b     = get_le32(&req[8]);
+    /* Range-check function + format on the firmware side so the host
+     * gets a precise STATUS_INVAL rather than a misleading STATUS_IO
+     * out of the HAL backend.  The host driver already pre-validates;
+     * this is the defence-in-depth pass. */
+    if (function >= (uint8_t)BRIDGE_TMU_FN__COUNT) return STATUS_INVAL;
+    if (format   >= (uint8_t)BRIDGE_TMU_FMT__COUNT) return STATUS_INVAL;
+
+    uint32_t  result = 0u;
+    const int rv     = bridge_hw_tmu_compute(function, format, in_a, in_b, &result);
+    if (rv == BRIDGE_HW_ERR_INVAL)   return STATUS_INVAL;
+    if (rv == BRIDGE_HW_ERR_RANGE)   return STATUS_OUT_OF_RANGE;
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv < 0)                       return STATUS_IO;
+    put_le32(reply, result);
+    *reply_len = 4u;
+    return STATUS_OK;
+}
+
 /* --------------------------------------------------------------- */
 /* Dispatch                                                          */
 /* --------------------------------------------------------------- */
@@ -506,6 +535,7 @@ gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
     case CMD_ADC_STREAM_READ:       h = handle_adc_stream_read;  break;
     case CMD_ADC_STREAM_END:        h = handle_adc_stream_end;   break;
     case CMD_TRNG_READ:             h = handle_trng_read;        break;
+    case CMD_TMU_COMPUTE:           h = handle_tmu_compute;      break;
     case CMD_DA9292_STATUS_FORWARD: h = handle_da9292_forward;   break;
     case CMD_DAC_SET:               h = handle_dac_set;          break;
     case CMD_DAC_GET:               h = handle_dac_get;          break;

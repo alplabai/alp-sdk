@@ -63,6 +63,50 @@ that lands before the v0.3.0 tag.)
 
 ### Added (2026-05-14)
 
+- **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
+  Wires a customer-facing math primitive set (sin / cos / tan / atan /
+  atan2 / sqrt / log / exp / sinh / cosh / tanh / hypot) without
+  exposing the GD32 name to application code (per
+  `memory/feedback_portable_hw_offload_with_sw_fallback.md`).  Three
+  pieces:
+  - New wire opcode `CMD_TMU_COMPUTE` (0x90) on the bridge protocol;
+    bumps `PROTOCOL_VERSION_MINOR` 3 -> 4.  Request payload is 12 B
+    (`function:u8 format:u8 reserved:u16 in_a:u32 in_b:u32`); reply
+    payload is 4 B (`result:u32`).  Function enum covers the twelve
+    TMU primitives; format byte picks Q31 fixed-point (0) or IEEE-754
+    single-precision (1) -- the SDK's portable surface always uses
+    IEEE-754 because its public API takes `float`, leaving Q31 for
+    direct `gd32g553_tmu_compute` callers.  Firmware handler dispatches
+    to a new `bridge_hw_tmu_compute` HAL hook stubbed in
+    `bridge_hw_stub.c` (returns `BRIDGE_HW_ERR_NOTIMPL` -- so the wire
+    reply is `STATUS_NOSUPPORT` until `bridge_hw_gd32.c` ships).
+  - Host driver wrapper `gd32g553_tmu_compute(ctx, function, format,
+    in_a, in_b, *result)` in `chips/gd32g553/gd32g553.c` carries the
+    range-check + NULL-pointer contract; declared in
+    `include/alp/chips/gd32g553.h`.
+  - Portable `alp_tmu_*` surface in a new `<alp/tmu.h>` -- twelve
+    primitives, each taking `float` inputs and writing a `float` out
+    parameter, returning `alp_status_t`.  On the V2N family
+    (CONFIG_ALP_SDK_V2N_SUPERVISOR=y) each call acquires the
+    supervisor singleton and dispatches through
+    `gd32g553_tmu_compute` with `GD32G553_TMU_FMT_F32`; on every
+    other SoM (and under `native_sim`) the wrapper falls back to
+    libm (`sinf`, `cosf`, `sqrtf`, ...) directly -- the libm path
+    never returns `ALP_ERR_NOSUPPORT`, so customer code can rely on
+    the surface working everywhere.  Wire format choice (IEEE-754
+    single) documented in `docs/gd32-bridge-protocol.md` §3.12.
+  New Kconfig `CONFIG_ALP_SDK_PERIPH_TMU` (default y) gates the new
+  source file `src/zephyr/peripheral_tmu.c`.  Tests under
+  `tests/zephyr/peripheral/src/main.c` cover the NULL-out INVAL
+  paths for each primitive, a libm-fallback correctness check on
+  non-supervisor builds (`sqrt(4) == 2.0`, `sin(0) == 0`,
+  `hypot(3, 4) == 5`), and a `NOT_READY without buses` assertion
+  under `CONFIG_ALP_SDK_V2N_SUPERVISOR=y` proving the supervisor
+  branch reaches dispatch.  Protocol vectors regenerated via
+  `gd32-bridge/tests/gen_protocol_vectors.py` (new §6 block for the
+  v0.4 additions, includes `spi_tmu_compute_sqrt_f32_4p0_request`).
+  ABI snapshots `docs/abi/v0.{1,3}-snapshot.json` regenerated.
+
 - **`<alp/pwm.h>` -- portable per-channel PWM tuning surface (2026-05-14).**
   Wires the customer-facing path for the v0.3 `CMD_PWM_CONFIGURE`
   opcode without exposing the GD32 name to application code (per

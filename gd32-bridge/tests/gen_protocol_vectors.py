@@ -81,6 +81,7 @@ CMD_ADC_STREAM_BEGIN      = 0x33
 CMD_ADC_STREAM_READ       = 0x34
 CMD_ADC_STREAM_END        = 0x35
 CMD_TRNG_READ             = 0x80
+CMD_TMU_COMPUTE           = 0x90
 CMD_DAC_SET               = 0x50
 CMD_DAC_GET               = 0x51
 CMD_QENC_READ             = 0x60
@@ -91,7 +92,7 @@ STATUS_NOSUPPORT          = 0x06
 
 # Firmware-declared version triple; bump when protocol.h's
 # PROTOCOL_VERSION_{MAJOR,MINOR,PATCH} change.
-FW_VERSION = (0, 3, 0)
+FW_VERSION = (0, 4, 0)
 
 
 HEADER = """\
@@ -266,6 +267,26 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         " host receives 16 bytes of GD32G5 TRNG (NIST SP800-90B)",
     ))
 
+    # ----- §6. v0.4 additions: TMU (CORDIC) math accelerator --------
+    # Single representative vector: alp_tmu_sqrt(4.0f) -> 2.0f as
+    # encoded on the wire.  Function = SQRT (5); format = IEEE-754
+    # single (1); in_a = 0x40800000 (float bits for 4.0f); in_b = 0.
+    # Firmware stub replies STATUS_NOSUPPORT until bridge_hw_gd32.c
+    # wires the TMU, mirroring the existing v0.3 pattern.
+    out.append((
+        "spi_tmu_compute_sqrt_f32_4p0_request",
+        spi_frame(SOF, CMD_TMU_COMPUTE,
+                  bytes([0x05,                           # function = SQRT
+                         0x01,                           # format = IEEE-754
+                         0x00, 0x00,                     # reserved
+                         0x00, 0x00, 0x80, 0x40,         # in_a = 4.0f (LE)
+                         0x00, 0x00, 0x00, 0x00,         # in_b = 0
+                  ])).hex().upper(),
+        "SOF | CMD=0x90 | function=SQRT | format=F32 | in_a=4.0f (LE 0x40800000) |"
+        " in_b=0 | CRC -- bridge replies 2.0f as 4 reply payload bytes"
+        " + STATUS",
+    ))
+
     return out
 
 
@@ -312,9 +333,18 @@ def emit(vectors: list[tuple[str, str, str | None]]) -> str:
     # ----- §5 block --------------------------------------------------
     chunks.append("\n# ---------------------------------------------------------------------")
     chunks.append("# §5. v0.3 additions -- GD32G5 HW knobs (PWM_CONFIGURE, ADC_CONFIGURE,")
-    chunks.append("#                       ADC_STREAM_BEGIN / READ / END)")
+    chunks.append("#                       ADC_STREAM_BEGIN / READ / END, TRNG_READ)")
     chunks.append("# ---------------------------------------------------------------------")
-    for name, value, comment in vectors[15:]:
+    for name, value, comment in vectors[15:21]:
+        if comment:
+            chunks.append(f"# {comment}")
+        chunks.append(f"{name:<30} = {value}")
+
+    # ----- §6 block --------------------------------------------------
+    chunks.append("\n# ---------------------------------------------------------------------")
+    chunks.append("# §6. v0.4 additions -- GD32G5 TMU (CORDIC) math accelerator")
+    chunks.append("# ---------------------------------------------------------------------")
+    for name, value, comment in vectors[21:]:
         if comment:
             chunks.append(f"# {comment}")
         chunks.append(f"{name:<30} = {value}")

@@ -132,6 +132,23 @@ int bridge_hw_adc_stream_end(uint8_t stream_id);
 int bridge_hw_trng_read(uint8_t *dest, size_t len);
 
 /* --------------------------------------------------------------- */
+/* TMU -- CORDIC math accelerator                                    */
+/* --------------------------------------------------------------- */
+
+/* Issue one TMU compute (`function` selects sin/cos/.../hypot per
+ * `gd32_bridge_tmu_function_t`; `format` is Q31 or IEEE-754-single
+ * per `gd32_bridge_tmu_format_t`).  `in_a` is the single operand for
+ * one-input functions; `in_b` is the second operand for atan2 /
+ * hypot and ignored otherwise.  The raw 32-bit `*result_out` is in
+ * the same format as the inputs -- the firmware does NOT cast or
+ * scale on the caller's behalf.  Returns BRIDGE_HW_ERR_RANGE for
+ * inputs outside the function's domain (e.g. sqrt(negative) in Q31)
+ * and BRIDGE_HW_ERR_IO if the TMU flags a hardware fault. */
+int bridge_hw_tmu_compute(uint8_t function, uint8_t format,
+                          uint32_t in_a, uint32_t in_b,
+                          uint32_t *result_out);
+
+/* --------------------------------------------------------------- */
 /* DAC                                                              */
 /* --------------------------------------------------------------- */
 

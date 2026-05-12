@@ -103,6 +103,15 @@ int bridge_hw_trng_read(uint8_t *dest, size_t len)
     return BRIDGE_HW_ERR_NOTIMPL;
 }
 
+int bridge_hw_tmu_compute(uint8_t function, uint8_t format,
+                          uint32_t in_a, uint32_t in_b,
+                          uint32_t *result_out)
+{
+    (void)function; (void)format; (void)in_a; (void)in_b;
+    if (result_out != 0) *result_out = 0u;
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
 int bridge_hw_dac_set(uint8_t channel, uint16_t value_mv)
 {
     (void)channel; (void)value_mv;

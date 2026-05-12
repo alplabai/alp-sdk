@@ -640,6 +640,41 @@ alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len)
                     &req, 1u, dest, len);
 }
 
+/* ------------------------------------------------------------------ */
+/* v0.4 -- GD32G5 TMU (CORDIC) math accelerator                        */
+/* ------------------------------------------------------------------ */
+
+alp_status_t gd32g553_tmu_compute(gd32g553_t *ctx,
+                                  gd32g553_tmu_function_t function,
+                                  gd32g553_tmu_format_t format,
+                                  uint32_t in_a, uint32_t in_b,
+                                  uint32_t *result_out)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (result_out == NULL) return ALP_ERR_INVAL;
+    /* Range-check the function + format enums host-side so callers
+     * find typos at the API boundary rather than after a wire trip. */
+    if ((unsigned)function > (unsigned)GD32G553_TMU_FN_HYPOT) return ALP_ERR_INVAL;
+    if ((unsigned)format   > (unsigned)GD32G553_TMU_FMT_F32)  return ALP_ERR_INVAL;
+
+    uint8_t req[12];
+    req[0] = (uint8_t)function;
+    req[1] = (uint8_t)format;
+    req[2] = 0u;                        /* reserved */
+    req[3] = 0u;                        /* reserved */
+    put_le32(&req[4], in_a);
+    put_le32(&req[8], in_b);
+
+    uint8_t      reply[4] = {0};
+    alp_status_t s        = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                                     GD32G553_CMD_TMU_COMPUTE,
+                                     req, sizeof(req),
+                                     reply, sizeof(reply));
+    if (s != ALP_OK) return s;
+    *result_out = get_le32(reply);
+    return ALP_OK;
+}
+
 /* ----------------------------------------------------------------- */
 /* OTA helpers -- the firmware-side opcodes return STATUS_NOSUPPORT  */
 /* against the scaffold today, which maps to ALP_ERR_NOSUPPORT here. */

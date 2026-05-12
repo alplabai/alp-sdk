@@ -157,6 +157,12 @@ typedef enum {
     /* v0.3 security/crypto block.  TRNG today; CAU (AES/DES) lands in
      * v0.4 with PSA Crypto driver registration. */
     GD32G553_CMD_TRNG_READ             = 0x80,
+    /* v0.4: GD32G5 TMU (CORDIC) math accelerator.  Standalone block
+     * (NOT an ADC postprocessor): sin/cos/tan, atan/atan2, sqrt, log,
+     * exp, sinh/cosh/tanh, hypot.  Function + format encoded in the
+     * request payload; reply carries `result:u32 status:u8`.  Format
+     * 0 = Q31 fixed-point (signed); format 1 = IEEE-754 single. */
+    GD32G553_CMD_TMU_COMPUTE           = 0x90,
     /* Reserved range 0xF0..0xFF -- application-bootloader OTA. */
     GD32G553_CMD_OTA_BEGIN             = 0xF0,
     GD32G553_CMD_OTA_WRITE_CHUNK       = 0xF1,
@@ -475,6 +481,76 @@ alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id);
  *          ALP_ERR_IO (TRNG startup or in-service self-check failed).
  */
 alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len);
+
+/* ------------------------------------------------------------------ */
+/* v0.4 protocol: GD32G5 TMU (CORDIC math accelerator)                */
+/* ------------------------------------------------------------------ */
+
+/** TMU function selector -- mirrors `gd32_bridge_tmu_function_t` on
+ *  the firmware side.  The chip's CORDIC unit supports 12 fixed
+ *  primitives; the enum value is sent verbatim on the wire. */
+typedef enum {
+    GD32G553_TMU_FN_SIN     = 0u,  /**< sin(x).             1 input.  */
+    GD32G553_TMU_FN_COS     = 1u,  /**< cos(x).             1 input.  */
+    GD32G553_TMU_FN_TAN     = 2u,  /**< tan(x).             1 input.  */
+    GD32G553_TMU_FN_ATAN    = 3u,  /**< atan(x).            1 input.  */
+    GD32G553_TMU_FN_ATAN2   = 4u,  /**< atan2(y, x).        2 inputs. */
+    GD32G553_TMU_FN_SQRT    = 5u,  /**< sqrt(x).            1 input.  */
+    GD32G553_TMU_FN_LOG     = 6u,  /**< natural log(x).     1 input.  */
+    GD32G553_TMU_FN_EXP     = 7u,  /**< exp(x).             1 input.  */
+    GD32G553_TMU_FN_SINH    = 8u,  /**< sinh(x).            1 input.  */
+    GD32G553_TMU_FN_COSH    = 9u,  /**< cosh(x).            1 input.  */
+    GD32G553_TMU_FN_TANH    = 10u, /**< tanh(x).            1 input.  */
+    GD32G553_TMU_FN_HYPOT   = 11u, /**< sqrt(x*x + y*y).    2 inputs. */
+} gd32g553_tmu_function_t;
+
+/** Operand / result format on the wire.  Reflects the two number
+ *  formats the GD32G5's TMU accepts natively.  IEEE-754 single is
+ *  the default the firmware wires; Q31 is reserved for callers that
+ *  already operate in fixed-point and want to skip a float<->int
+ *  conversion at the boundary.
+ *
+ *  Q31 encoding: 32-bit two's-complement, full-scale = ±1.0; bit 31
+ *  is the sign.  The trig functions interpret inputs in units of pi
+ *  (so x = 0x40000000 -> +0.5 -> +pi/2 rad).  Callers that prefer
+ *  IEEE-754 should use @ref GD32G553_TMU_FMT_F32 -- the firmware
+ *  performs the same internal conversion, just on the GD32 side. */
+typedef enum {
+    GD32G553_TMU_FMT_Q31 = 0u, /**< Q31 fixed-point (signed). */
+    GD32G553_TMU_FMT_F32 = 1u, /**< IEEE-754 single-precision (binary32). */
+} gd32g553_tmu_format_t;
+
+/**
+ * @brief Issue one TMU compute request and read the result back.
+ *
+ * The request payload is `function:u8 format:u8 reserved:u16
+ * in_a:u32 in_b:u32` (12 bytes).  Single-input functions (sin / cos /
+ * tan / atan / sqrt / log / exp / sinh / cosh / tanh) MUST set
+ * @p in_b = 0; two-input functions (atan2, hypot) use both.  The reply
+ * is `result:u32 status:u8` (5 bytes).  Both @p in_a / @p in_b and
+ * @p result_out are interpreted in the chosen @p format -- the host
+ * does NOT byte-swap or reinterpret on the caller's behalf.
+ *
+ * @param[in]  ctx         Initialised driver context.
+ * @param[in]  function    One of @ref gd32g553_tmu_function_t.
+ * @param[in]  format      One of @ref gd32g553_tmu_format_t.  Must
+ *                         match how @p in_a / @p in_b were encoded.
+ * @param[in]  in_a        First operand (Q31 or F32 raw bits).
+ * @param[in]  in_b        Second operand for two-input functions;
+ *                         ignored for one-input functions (caller
+ *                         SHOULD pass 0).
+ * @param[out] result_out  Result in the same @p format as the inputs.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL (bad function or
+ *         format) / ALP_ERR_NOSUPPORT (firmware HAL body not yet
+ *         wired) / ALP_ERR_OUT_OF_RANGE (input outside the function's
+ *         domain, e.g. sqrt(negative) in Q31) / ALP_ERR_IO.
+ */
+alp_status_t gd32g553_tmu_compute(gd32g553_t *ctx,
+                                  gd32g553_tmu_function_t function,
+                                  gd32g553_tmu_format_t format,
+                                  uint32_t in_a, uint32_t in_b,
+                                  uint32_t *result_out);
 
 /* ------------------------------------------------------------------ */
 /* OTA -- in-system upgrade of the bridge firmware                    */

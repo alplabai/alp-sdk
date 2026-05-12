@@ -76,6 +76,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_RTC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_rtc.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_WDT
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_wdt.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_TMU
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_tmu.c)
 
 # Runtime hardware-info reader (EEPROM manifest + BOARD_ID ADC).
 # v0.3 stub returns NOSUPPORT; v0.3.x fills in the real impl.
