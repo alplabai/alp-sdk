@@ -286,7 +286,7 @@ Two complementary surfaces:
 development.  See the "Using with VS Code" section in
 [`README.md`](../README.md).
 
-**The `alplabai.alp-sdk` extension** under [`vscode/`](../vscode/)
+**The `alplabai.alp-sdk` extension** ([source: `alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode))
 adds schema-aware `board.yaml` editing (autocomplete on SKUs,
 carriers, libraries; inline diagnostics from `validate_board_yaml.py`
 in the Problems panel), a GUI configurator panel with dropdowns

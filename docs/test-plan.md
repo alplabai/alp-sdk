@@ -97,7 +97,7 @@ A release does **not** tag until every row gating it is `verified`.
 | `<alp/mproc.h>` real impl | `src/zephyr/mproc_zephyr.c` | ⏳ untested | M55-HP <-> M55-HE shared-memory mailbox echoes a payload | HIL | v0.3 |
 | `board.yaml` loader (`scripts/alp_project.py`) | `scripts/alp_project.py` | 🟡 partial | Schema-level + capability-level checks unit-tested; cross-OS round-trips not exercised on hardware | `tests/scripts/test_alp_project.py`; **HIL exercise gates v0.3** | v0.3 |
 | `validate_board_yaml.py` v0.3 capability cross-check | `scripts/validate_board_yaml.py` | 🟡 partial | Returns exit 3 on the deliberately-broken sample boards | `pr-metadata-validate.yml` | v0.3 |
-| VS Code extension `Generate all` + inline diagnostics | `vscode/src/extension.ts` | ⏳ untested | Loaded into VS Code; commands run; problems panel surfaces validator errors | Manual capture (screencast/gist) | v0.3 |
+| VS Code extension `Generate all` + inline diagnostics | [`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode) (separate repo since 2026-05-12) | ⏳ untested | Loaded into VS Code; commands run; problems panel surfaces validator errors | Manual capture (screencast/gist) | v0.3 |
 | `<alp/hw_info.h>` EEPROM + BOARD_ID ADC read | `src/zephyr/hw_info_zephyr.c` | ⏳ untested | Real production-test fixture writes 128-byte manifest; firmware reads back identical | HIL + production-test bench | v0.3.x |
 | `tools/program_eeprom.py` packer | `tools/program_eeprom.py` | 🟡 partial | Layout round-trips against the C reader's `static_assert` block | `tests/scripts/test_program_eeprom.py` | v0.3 |
 | GD32G553 host-side bridge driver | `chips/gd32g553/` | ⏳ untested | `PING` + `GET_VERSION` round-trip on both SPI and I2C against the on-module bridge firmware on a real V2N SoM | HIL + `examples/v2n-gd32-bridge-ping` | v0.3.x |
@@ -165,7 +165,7 @@ been green on `main` for at least two consecutive PRs.
 | `pr-generated-files.yml` (`soc_caps.h` + ABI snapshot drift) | `pr-generated-files.yml` | ✅ verified |
 | `pr-metadata-validate.yml` (`board.yaml` schema + loader smoke) | `pr-metadata-validate.yml` | ✅ verified |
 | `pr-doxygen.yml` zero-warnings | `pr-doxygen.yml` | ✅ verified |
-| `pr-vscode-extension.yml` compile + `.vsix` package | `pr-vscode-extension.yml` | ✅ verified |
+| VS Code extension build (split repo) | [`alplabai/alp-sdk-vscode::ci`](https://github.com/alplabai/alp-sdk-vscode/actions/workflows/ci.yml) | ✅ verified |
 | `coverity.yml` weekly scan | `coverity.yml` | ✅ verified |
 
 ---

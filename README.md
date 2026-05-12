@@ -84,7 +84,7 @@ layers it on top of `prj.conf` via `OVERLAY_CONFIG`.  See the
 complete wiring and [`docs/board-config.md`](docs/board-config.md)
 for the full schema reference.
 
-Want a GUI?  Install the [VS Code extension](vscode/) — schema-aware
+Want a GUI?  Install the [VS Code extension](https://github.com/alplabai/alp-sdk-vscode) — schema-aware
 editing, a configurator panel with dropdowns for every released MPN
 and carrier, one-keypress "Generate all" for the four emit modes,
 inline validator diagnostics in the Problems panel, west wrappers.
@@ -146,7 +146,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 - **`scripts/alp_project.py`** — emits Zephyr Kconfig fragments, plain-CMake `-D` flags, Yocto `local.conf` snippets, DTS overlays, or the `<alp_hw_info_build.h>` companion header
 - **`scripts/validate_board_yaml.py`** — customer-side linter (exit 0 / 1 schema / 2 missing-preset / 3 hw_rev incompatible)
 - **`tools/program_eeprom.py`** — packs board.yaml + serial + mfg date into the 128-byte EEPROM manifest for production-test programming
-- **VS Code extension** (`vscode/`) — schema-aware `board.yaml` editor, GUI configurator, west wrappers, per-OS bootstrap, inline validator diagnostics
+- **VS Code extension** ([`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)) — schema-aware `board.yaml` editor, GUI configurator, west wrappers, per-OS bootstrap, inline validator diagnostics
 
 ### Alp SDK (`<alp/...>`)
 
@@ -354,7 +354,7 @@ alp-sdk/
 ├── metadata/        # schemas, templates, e1m_modules/<MPN>/, carriers/, socs/
 ├── scripts/         # board.yaml loader, validators, soc_caps + ABI generators
 ├── tools/           # production-test EEPROM packer
-├── vscode/          # in-tree VS Code extension
+├── (vscode/)        # split out to alplabai/alp-sdk-vscode
 ├── examples/        # reference apps (gpio-button-led, edgeai-vision-aen, ...)
 ├── docs/            # architecture, board-config, ADRs, test-plan, …
 ├── tests/           # Python script tests + ztest suites

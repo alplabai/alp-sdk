@@ -64,7 +64,8 @@ It does **not** prove:
 │ CI: GitHub-hosted runners, no hardware                         │
 │   pr-twister + pr-plain-cmake + pr-static-analysis +           │
 │   pr-generated-files + pr-metadata-validate + pr-doxygen +     │
-│   pr-vscode-extension + coverity (weekly)                      │
+│   coverity (weekly)                                            │
+│   VS Code extension CI runs in alplabai/alp-sdk-vscode.        │
 │   Necessary but not sufficient to tag a release.               │
 ├────────────────────────────────────────────────────────────────┤
 │ Local: developer workstation, no hardware                      │
@@ -181,11 +182,11 @@ Every CI workflow has a local counterpart that runs the same coverage:
 | `pr-generated-files.yml`       | `python3 scripts/gen_soc_caps.py --check`                 |
 | `pr-metadata-validate.yml`     | `python3 scripts/validate_metadata.py` + alp_project.py   |
 | `pr-doxygen.yml`               | `doxygen Doxyfile` (zero-warnings)                        |
-| `pr-vscode-extension.yml`      | `cd vscode && npm test`                                   |
+| (extension CI lives in `alplabai/alp-sdk-vscode`) | `cd ../alp-sdk-vscode && npm test`                     |
 | `coverity.yml`                 | none (Coverity Scan only)                                 |
 
 The plain run of `scripts/test-all.sh` covers everything except
-Coverity, vscode-extension, and pr-generated-files (those are
+Coverity and pr-generated-files (those are
 narrow drift checks and run automatically in CI).
 
 ---
