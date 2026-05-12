@@ -605,6 +605,84 @@ metadata/
 fields described above.  Omit them on stock builds -- the preset's
 `default_hw_rev` is picked up automatically.
 
+## Modular SoM: optional chip populations
+
+The SoM YAML carries a per-chip **`assembled:`** flag for every entry
+in its `i2c_devices:` topology so the SDK can express SoMs that ship
+in multiple BOM variants (same SKU, different chip populations).
+Three states:
+
+| `assembled:`  | Meaning                                                                |
+|---------------|------------------------------------------------------------------------|
+| `true` *(default)* | Chip is always populated on every BOM variant of this SKU.       |
+| `false`            | DNI (Do Not Install) -- the chip footprint exists but is empty.  |
+| `"optional"`       | Per-BOM-variant -- some units have it, some don't.               |
+
+Example (extract from `metadata/e1m_modules/E1M-V2N101/som.yaml`):
+
+```yaml
+i2c_devices:
+  brd_i2c:
+    devices:
+      - { chip: rv3028c7,  role: rtc,           address_7bit: "0x52" }
+      - { chip: act8760,   role: pmic_main_p0,  address_7bit: "0x25" }
+      - { chip: tps628640, role: lpddr4x_0v6,   address_7bit: "0x4D",
+          assembled: optional }      # only some BOM variants
+```
+
+The lint at `scripts/check_example_portability.py` reads this flag
+and prints `NOTE` lines whenever an example's `chips:` list reaches
+for a `assembled: optional` chip on its target SKU.  Customer code
+that uses an optional chip MUST handle `alp_*_init` returning
+`ALP_ERR_NOT_READY` gracefully (skip the demo, log a clear message,
+fall back to a different code path) instead of crashing -- see
+`examples/v2n-pmic-rail-monitor` for an example that already
+follows this pattern.
+
+### Runtime: detecting which chips are populated
+
+Two complementary mechanisms:
+
+1. **`<alp/hw_info.h>`**.  `alp_hw_info_read()` reads the SoM
+   manifest from the on-module 24C128 EEPROM (`metadata/templates/
+   eeprom_manifest.yaml` for the layout).  Production-test wrote
+   the manifest; firmware checks `hw_info.som_hw_rev` +
+   capability flags to know which chip set this unit shipped with.
+2. **Probe-and-fall-back**.  Every chip driver's `_init()`
+   ACK-probes the I2C bus.  If the chip isn't populated the
+   driver returns `ALP_ERR_NOT_READY`; firmware branches off
+   that.  This is the right mechanism for runtime discovery on
+   carriers that don't carry the SoM manifest.
+
+The two mechanisms cooperate: `<alp/hw_info.h>` answers "what was
+this unit *intended* to carry?", and the per-chip `_init()` probe
+answers "is the chip *actually* responding right now?".  When they
+agree, the firmware proceeds; when they disagree, that's a
+production-test follow-up signal (likely a mis-strap or assembly
+defect).
+
+### When you'd add a new optional flag
+
+If your carrier strips a chip the upstream preset declares populated,
+the right approach is **per-app override in `board.yaml`** rather
+than editing the preset:
+
+```yaml
+# my-app/board.yaml
+som:
+  sku: E1M-V2N101
+  overrides:
+    on_module:
+      i2c_devices:
+        brd_i2c:
+          devices:
+            - { chip: optiga_trust_m, assembled: false }
+            # other devices inherit from the preset
+```
+
+The loader merges your overrides onto the preset before generating
+the build config.  No SDK fork needed.
+
 ## Versioning
 
 `schema_version: 1` is the only valid value today.  Breaking

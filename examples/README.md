@@ -61,6 +61,7 @@ the on-module PMIC fleet, the SoM EEPROM manifest).
 | `v2n-secure-element-sign`       | OPTIGA Trust M init + product info + raw-APDU ECDSA-P256 sign.           |
 | `v2n-xspi-flash-readwrite`      | Erase + write + read-back one page on the on-module xSPI NOR.            |
 | `v2n-emmc-block-stat`           | Disk-access ioctls + first-block read on the on-module eMMC.             |
+| `v2n-gd32-swd-flash`            | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
 
 ## Anatomy of an example
 

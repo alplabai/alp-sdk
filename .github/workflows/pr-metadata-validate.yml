@@ -190,3 +190,13 @@ jobs:
       - name: gd32-bridge protocol vectors are not drifted
         run: |
           python3 gd32-bridge/tests/gen_protocol_vectors.py --check
+
+      # Cross-family portability lint -- catches an example that
+      # silently reaches for a chip that isn't populated on its own
+      # target SoM (the example would build but fail at runtime), and
+      # classifies every example into ring1 / ring2 / ring3 so the
+      # portability claim in examples/README.md stays honest as the
+      # example set grows.
+      - name: Example portability classification + hard-error lint
+        run: |
+          python3 scripts/check_example_portability.py

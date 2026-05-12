@@ -119,6 +119,7 @@ Both files are tab-delimited; consume directly or via
 | `v2n-secure-element-sign`        | OPTIGA Trust M init + ECDSA-P256 sign via raw APDU.         |
 | `v2n-xspi-flash-readwrite`       | Erase + write + verify one page on the on-module xSPI NOR.  |
 | `v2n-emmc-block-stat`            | Read on-module eMMC geometry + first block via disk-access. |
+| `v2n-gd32-swd-flash`             | Host-driven SWD bit-bang -- IDCODE read, halt, erase/write/verify, reset. |
 
 Plus every cross-family example
 (`gpio-button-led`, `i2c-scanner`, `pwm-led-fade`, `rtc-clock`, …).

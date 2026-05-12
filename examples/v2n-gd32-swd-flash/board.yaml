@@ -1,0 +1,18 @@
+schema_version: 1
+
+som:
+  sku: E1M-V2N101
+
+carrier:
+  name: E1M-X-EVK
+
+os: zephyr
+
+peripherals:
+  - gpio
+
+chips:
+  - gd32_swd
+
+diagnostics:
+  log_level: info

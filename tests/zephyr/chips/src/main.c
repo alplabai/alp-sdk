@@ -44,6 +44,9 @@
 #include "alp/chips/eeprom_24c128.h"
 #include "alp/chips/tcal9538.h"
 #include "alp/chips/optiga_trust_m.h"
+#include "alp/chips/cam_mux_pi3wvr626.h"
+#include "alp/chips/cc3501e.h"
+#include "alp/chips/tas2563.h"
 
 #include "fakes.h"
 
@@ -1158,6 +1161,63 @@ ZTEST(alp_chips, test_clk_5l35023b_register_dump_rejects_invalid)
                   ALP_ERR_INVAL);
 }
 
+ZTEST(alp_chips, test_clk_5l35023b_typed_helpers_reject_uninitialised)
+{
+    /* New typed surface added with the datasheet integration --
+     * Dash-Code-ID read, strap-address decode, soft power-down.
+     * Each must report NOT_READY on a zeroed context. */
+    clk_5l35023b_t ctx = {0};
+    uint8_t  dashcode;
+    clk_5l35023b_strap_addr_t strap;
+
+    zassert_equal(clk_5l35023b_read_dashcode_id(&ctx, &dashcode),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(clk_5l35023b_get_strap_addr(&ctx, &strap),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(clk_5l35023b_set_power_down(&ctx, true),
+                  ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_chips, test_clk_5l35023b_typed_helpers_validate_args)
+{
+    /* .initialised forced so the function reaches the NULL-out
+     * check before any bus access. */
+    clk_5l35023b_t ctx = {.initialised = true};
+
+    zassert_equal(clk_5l35023b_read_dashcode_id(&ctx, NULL),
+                  ALP_ERR_INVAL);
+    zassert_equal(clk_5l35023b_get_strap_addr(&ctx, NULL),
+                  ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_clk_5l35023b_get_strap_addr_decodes_general_ctrl)
+{
+    /* The strap address lives in Byte 0x00 bits[6:5].  Drive the
+     * cached general_ctrl byte through each of the four strap
+     * encodings and confirm the decoded enum value matches. */
+    clk_5l35023b_t ctx = {.initialised = true};
+
+    static const struct {
+        uint8_t                   gc_byte;
+        clk_5l35023b_strap_addr_t expected;
+    } cases[] = {
+        {.gc_byte = 0x00u, .expected = CLK_5L35023B_STRAP_ADDR_0X68},
+        {.gc_byte = 0x20u, .expected = CLK_5L35023B_STRAP_ADDR_0X69},
+        {.gc_byte = 0x40u, .expected = CLK_5L35023B_STRAP_ADDR_0X6A},
+        {.gc_byte = 0x60u, .expected = CLK_5L35023B_STRAP_ADDR_0X6B},
+    };
+
+    for (size_t i = 0u; i < ARRAY_SIZE(cases); ++i) {
+        ctx.general_ctrl = cases[i].gc_byte;
+        clk_5l35023b_strap_addr_t got = (clk_5l35023b_strap_addr_t)0xFFu;
+        zassert_equal(clk_5l35023b_get_strap_addr(&ctx, &got), ALP_OK);
+        zassert_equal((unsigned)got, (unsigned)cases[i].expected,
+                      "gc_byte=0x%02X: expected strap %u, got %u",
+                      cases[i].gc_byte,
+                      (unsigned)cases[i].expected, (unsigned)got);
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* murata_lbee5hy2fy -- Wi-Fi 6 + BLE 5.4 module GPIO surface         */
 /*                                                                    */
@@ -1890,4 +1950,95 @@ ZTEST(alp_chips, test_optiga_trust_m_calls_reject_uninitialised)
 
     optiga_trust_m_deinit(&ctx);
     optiga_trust_m_deinit(NULL);
+}
+
+/* ------------------------------------------------------------------ */
+/* cam_mux_pi3wvr626 -- MIPI CSI 2:1 mux (GPIO-only)                  */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_cam_mux_pi3wvr626_init_null_args)
+{
+    cam_mux_pi3wvr626_t ctx;
+    alp_gpio_t *bogus = (alp_gpio_t *)0xDEADBEEFu;
+
+    zassert_equal(cam_mux_pi3wvr626_init(NULL, bogus), ALP_ERR_INVAL);
+    zassert_equal(cam_mux_pi3wvr626_init(&ctx, NULL),  ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_cam_mux_pi3wvr626_calls_reject_uninitialised)
+{
+    cam_mux_pi3wvr626_t ctx = {0};
+    cam_mux_pi3wvr626_input_t got;
+
+    zassert_equal(cam_mux_pi3wvr626_select(&ctx,
+                                           (cam_mux_pi3wvr626_input_t)0),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(cam_mux_pi3wvr626_get(&ctx, &got),
+                  ALP_ERR_NOT_READY);
+}
+
+/* ------------------------------------------------------------------ */
+/* cc3501e -- TI Wi-Fi 6 + BLE 5.4 coprocessor (E1M-AEN)              */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_cc3501e_init_null_args)
+{
+    cc3501e_t  ctx;
+    alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
+        .bus_id = 0u, .freq_hz = 10000000u, .mode = ALP_SPI_MODE_0,
+        .bits_per_word = 8u, .cs_pin_id = 0u,
+    });
+    /* The test rig's SPI emul may or may not be available; either
+     * way the NULL-arg paths are testable. */
+    zassert_equal(cc3501e_init(NULL, bus),  ALP_ERR_INVAL);
+    zassert_equal(cc3501e_init(&ctx, NULL), ALP_ERR_INVAL);
+    if (bus != NULL) alp_spi_close(bus);
+}
+
+ZTEST(alp_chips, test_cc3501e_calls_reject_uninitialised)
+{
+    cc3501e_t ctx = {0};
+    uint16_t  version;
+    uint8_t   tx[4] = {0}, rx[4];
+    size_t    rx_len = sizeof rx;
+
+    zassert_equal(cc3501e_reset(&ctx),                ALP_ERR_NOT_READY);
+    zassert_equal(cc3501e_get_version(&ctx, &version), ALP_ERR_NOT_READY);
+    zassert_equal(cc3501e_request(&ctx,
+                                  (alp_cc3501e_cmd_t)0,
+                                  tx, sizeof tx,
+                                  rx, sizeof rx, &rx_len, 100u),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(cc3501e_set_event_callback(&ctx, NULL, NULL),
+                  ALP_ERR_NOT_READY);
+}
+
+/* ------------------------------------------------------------------ */
+/* tas2563 -- TI smart Class-D speaker amplifier                      */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_tas2563_init_null_args)
+{
+    tas2563_t  ctx;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+    });
+    zassert_not_null(bus);
+
+    /* sd_n is optional in the driver -- not required to be non-NULL. */
+    zassert_equal(tas2563_init(NULL, bus, 0x4Du, NULL), ALP_ERR_INVAL);
+    zassert_equal(tas2563_init(&ctx, NULL, 0x4Du, NULL), ALP_ERR_INVAL);
+
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_tas2563_calls_reject_uninitialised)
+{
+    tas2563_t ctx = {0};
+    uint8_t   rev;
+
+    zassert_equal(tas2563_read_revision(&ctx, &rev),  ALP_ERR_NOT_READY);
+    zassert_equal(tas2563_set_mode(&ctx, (tas2563_mode_t)0),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(tas2563_set_hw_enable(&ctx, true), ALP_ERR_NOT_READY);
 }
