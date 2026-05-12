@@ -6,11 +6,20 @@ GD32G553 supervisor MCU.
 
 ## Why a second MCU?
 
-The V2N SoM allocates some E1M-edge peripherals to a companion
-GD32G553 because they don't fit on the Renesas RZ/V2N pinmux.
-After the 2026-05-11 schematic revision, two of the eight E1M PWM
-channels are GD32-only (PWM6 + PWM7), as is the cached DA9292 PMIC
-status forwarder + several auxiliary GPIO routes.
+The V2N SoM allocates a number of E1M-edge peripherals to a
+companion GD32G553 because they don't fit on the Renesas RZ/V2N
+pinmux.  Per the 2026-05-12 schematic decision, **all eight E1M
+PWM channels are GD32-driven**, along with the encoder bank,
+the ADC + DAC bank, the camera-LDO enables, the Murata Wi-Fi/BT
+REG_ON pins, the OPTIGA reset, and the cached DA9292 PMIC status
+forwarder.
+
+For ordinary application code, none of that surfaces -- callers
+use `<alp/pwm.h>`, `<alp/adc.h>`, `<alp/counter.h>` etc. with the
+portable `ALP_E1M_*` instance IDs and the SDK routes the call
+through the bridge internally.  This tutorial is for advanced
+users who need to bypass the abstraction (carrier-specific OTA,
+direct bridge-protocol exercises, low-level diagnostics).
 
 ## The two transports
 
