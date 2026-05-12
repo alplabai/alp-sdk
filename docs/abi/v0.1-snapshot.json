@@ -1617,8 +1617,8 @@
       },
       "typedefs": {
         "gd32g553_cmd_t": {
-          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_TMU_COMPUTE = 0x90, GD32G553_CMD_ADC_STREAM_CONFIGURE_DSP = 0x36, GD32G553_CMD_PWM_CAPTURE_BEGIN = 0x23, GD32G553_CMD_PWM_CAPTURE_READ = 0x24, GD32G553_CMD_PWM_CAPTURE_END = 0x25, GD32G553_CMD_PWM_SINGLE_PULSE = 0x26, GD32G553_CMD_TIMER_SYNC = 0x27, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
-          "hash": "96f7cf82f8c5a6f4"
+          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_TMU_COMPUTE = 0x90, GD32G553_CMD_ADC_STREAM_CONFIGURE_DSP = 0x36, GD32G553_CMD_PWM_CAPTURE_BEGIN = 0x23, GD32G553_CMD_PWM_CAPTURE_READ = 0x24, GD32G553_CMD_PWM_CAPTURE_END = 0x25, GD32G553_CMD_PWM_SINGLE_PULSE = 0x26, GD32G553_CMD_TIMER_SYNC = 0x27, GD32G553_CMD_POWER_MODE_SET = 0x28, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
+          "hash": "b0ced39f188a0d17"
         },
         "gd32g553_ota_slot_t": {
           "definition": "typedef enum { GD32G553_OTA_SLOT_INVALID = 0u, GD32G553_OTA_SLOT_A = 1u, GD32G553_OTA_SLOT_B = 2u, } gd32g553_ota_slot_t;",
@@ -3873,6 +3873,66 @@
         "port_id": {
           "definition": "typedef struct { uint32_t port_id;",
           "hash": "da443c984bed1c7c"
+        }
+      }
+    },
+    "alp/power.h": {
+      "functions": {
+        "alp_power_close": {
+          "hash": "8f0eaa7bd51f8d72",
+          "signature": "void alp_power_close(alp_power_t *handle);"
+        },
+        "alp_power_configure_wake_source": {
+          "hash": "d42b698bee57d079",
+          "signature": "alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_bitmap);"
+        },
+        "alp_power_request_sleep": {
+          "hash": "6df7bca8e77d8254",
+          "signature": "alp_status_t alp_power_request_sleep(alp_power_t *handle, alp_power_mode_t mode, uint32_t wake_after_ms, alp_power_wake_info_t *info);"
+        }
+      },
+      "macros": {
+        "ALP_POWER_WAKE_ETH_LINK": {
+          "hash": "410c5a53de215113",
+          "value": "0x00000020u"
+        },
+        "ALP_POWER_WAKE_GPIO": {
+          "hash": "4344dd605d19bdc2",
+          "value": "0x00000002u"
+        },
+        "ALP_POWER_WAKE_NONE": {
+          "hash": "18c28c0f4dab36eb",
+          "value": "0x00000000u"
+        },
+        "ALP_POWER_WAKE_RTC": {
+          "hash": "9dac9d7896c79fb8",
+          "value": "0x00000001u"
+        },
+        "ALP_POWER_WAKE_TIMER": {
+          "hash": "777a72538874dcf9",
+          "value": "0x00000008u"
+        },
+        "ALP_POWER_WAKE_UART_RX": {
+          "hash": "626c0afb0da70f5e",
+          "value": "0x00000004u"
+        },
+        "ALP_POWER_WAKE_USB": {
+          "hash": "7f193e9415b31dcd",
+          "value": "0x00000010u"
+        }
+      },
+      "typedefs": {
+        "alp_power_mode_t": {
+          "definition": "typedef enum { ALP_POWER_MODE_RUN = 0, ALP_POWER_MODE_SLEEP = 1, ALP_POWER_MODE_DEEP_SLEEP = 2, ALP_POWER_MODE_STANDBY = 3, } alp_power_mode_t;",
+          "hash": "b043f8579fd9fb3b"
+        },
+        "alp_power_t": {
+          "definition": "typedef struct alp_power alp_power_t;",
+          "hash": "e1b187648292f85a"
+        },
+        "realised_mode": {
+          "definition": "typedef struct { alp_power_mode_t realised_mode;",
+          "hash": "54b0e2e5585dddec"
         }
       }
     },

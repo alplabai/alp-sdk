@@ -361,6 +361,22 @@ config ALP_SDK_DSP
 	  alp_adc_filter_t / alp_adc_spectrum_t (in <alp/adc.h>,
 	  landing v0.5.x) reuse the same chain machinery.
 
+config ALP_SDK_POWER
+	bool "Enable <alp/power.h> system-power-mode surface"
+	default y
+	help
+	  Compile src/zephyr/power_zephyr.c.  Provides the portable
+	  alp_power_open / configure_wake_source / request_sleep /
+	  close surface that backends route either through Zephyr's
+	  pm_policy_* primitives (off-V2N) or through the GD32G553
+	  supervisor's CMD_POWER_MODE_SET opcode (0x28) on V2N.
+
+	  v0.5 ships the surface with NOSUPPORT-with-INVAL-pre-checks
+	  stubs so customers can wire portable sleep code today; the
+	  per-backend HAL bodies (Zephyr pm_state tables on AEN +
+	  the GD32 firmware-side wake-handler + the supervisor
+	  re-init state machine) land in follow-up commits.
+
 # IoT (Wi-Fi station + MQTT) — v0.2 deliverable.  When OFF the
 # wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT
 # contract so apps can link cleanly against <alp/iot.h>.

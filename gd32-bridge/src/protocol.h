@@ -145,6 +145,14 @@ typedef enum {
     CMD_PWM_CAPTURE_END          = 0x25,
     CMD_PWM_SINGLE_PULSE         = 0x26,
     CMD_TIMER_SYNC               = 0x27,
+    /* v0.5 (§2B.3): system-wide power-mode transition.  Host requests
+     * SLEEP / DEEP_SLEEP / STANDBY via the supervisor, which prepares
+     * the GD32 + signals the Renesas SoC to enter the matching mode,
+     * then re-runs the bridge handshake on wakeup so the host can
+     * resume bridge calls.  RESERVED at protocol v0.5; firmware
+     * dispatcher returns STATUS_NOSUPPORT until the HAL body lands.
+     * Portable surface in <alp/power.h>. */
+    CMD_POWER_MODE_SET           = 0x28,
 } gd32_bridge_cmd_t;
 
 /* TMU function index sent in CMD_TMU_COMPUTE's request payload byte 0.

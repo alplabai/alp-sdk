@@ -86,6 +86,7 @@ CMD_PWM_CAPTURE_READ         = 0x24
 CMD_PWM_CAPTURE_END          = 0x25
 CMD_PWM_SINGLE_PULSE         = 0x26
 CMD_TIMER_SYNC               = 0x27
+CMD_POWER_MODE_SET           = 0x28
 CMD_TRNG_READ                = 0x80
 CMD_TMU_COMPUTE              = 0x90
 CMD_DAC_SET                  = 0x50
@@ -344,6 +345,28 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         " the GD32-side one-shot pulse HAL body is wired",
     ))
 
+    # ----- §9. v0.5 additions (§2B.3): system power-mode set ---------
+    # CMD_POWER_MODE_SET is RESERVED at v0.5 for the host->supervisor
+    # sleep-transition request.  Portable surface lives in
+    # <alp/power.h>; firmware HAL body lands in a follow-up drop.
+    # Representative probe payload encodes the four-field request
+    # shape that the eventual firmware-side handler will decode:
+    # mode (DEEP_SLEEP), reserved, wake_bitmap (RTC | GPIO), and a
+    # wake_after_ms ceiling.
+    out.append((
+        "spi_power_mode_set_probe_request",
+        spi_frame(SOF, CMD_POWER_MODE_SET,
+                  bytes([0x02,                            # mode = DEEP_SLEEP
+                         0x00,                            # reserved
+                         0x03, 0x00, 0x00, 0x00,          # wake_bitmap = RTC|GPIO (LE)
+                         0x10, 0x27, 0x00, 0x00,          # wake_after_ms = 10000 (LE)
+                  ])).hex().upper(),
+        "SOF | CMD=0x28 | mode=DEEP_SLEEP | wake_bitmap=RTC|GPIO |"
+        " wake_after_ms=10000 (LE 0x00002710) | CRC -- v0.5 reserved"
+        " opcode; firmware replies STATUS_NOSUPPORT until the wake"
+        " handler + supervisor re-init state machine land",
+    ))
+
     return out
 
 
@@ -419,7 +442,16 @@ def emit(vectors: list[tuple[str, str, str | None]]) -> str:
     chunks.append("\n# ---------------------------------------------------------------------")
     chunks.append("# §8. v0.5 additions (§2B.2) -- advanced timer extras (reserved opcodes)")
     chunks.append("# ---------------------------------------------------------------------")
-    for name, value, comment in vectors[23:]:
+    for name, value, comment in vectors[23:25]:
+        if comment:
+            chunks.append(f"# {comment}")
+        chunks.append(f"{name:<30} = {value}")
+
+    # ----- §9 block --------------------------------------------------
+    chunks.append("\n# ---------------------------------------------------------------------")
+    chunks.append("# §9. v0.5 additions (§2B.3) -- system power-mode set (reserved opcode)")
+    chunks.append("# ---------------------------------------------------------------------")
+    for name, value, comment in vectors[25:]:
         if comment:
             chunks.append(f"# {comment}")
         chunks.append(f"{name:<30} = {value}")

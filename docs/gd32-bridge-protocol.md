@@ -75,6 +75,7 @@ byte; their numeric encoding is:
 | `0x25` | `PWM_CAPTURE_END`     | `channel:u8`                                          | _(empty; returns STATUS_NOSUPPORT today)_         |
 | `0x26` | `PWM_SINGLE_PULSE`    | `channel:u8 reserved:u8 reserved:u16 pulse_ns:u32`    | _(empty; returns STATUS_NOSUPPORT today)_         |
 | `0x27` | `TIMER_SYNC`          | `master:u8 slave:u8 mode:u8`                          | _(empty; returns STATUS_NOSUPPORT today)_         |
+| `0x28` | `POWER_MODE_SET`      | `mode:u8 reserved:u8 wake_bitmap:u32 wake_after_ms:u32` | _(empty; returns STATUS_NOSUPPORT today)_       |
 
 Opcodes `0x81..0xEF` are **reserved** for future ALP-defined
 extensions (next slot: hardware AES via the CAU engine).  Carriers
@@ -82,6 +83,26 @@ SHOULD NOT define their own opcodes in this range -- the firmware
 replies with **`ALP_ERR_NOSUPPORT`** (see §6) for any opcode it
 does not implement at build time, so a host that speaks a newer
 command set than the firmware degrades gracefully.
+
+### 3.z System power-mode set (v0.5+, reserved)
+
+`CMD_POWER_MODE_SET` (opcode `0x28`) is the host-to-supervisor
+sleep-transition request.  The portable surface lives in
+[`<alp/power.h>`](../include/alp/power.h):
+`alp_power_open / alp_power_configure_wake_source /
+alp_power_request_sleep / alp_power_close`.  The supervisor wakes
+the Renesas SoC on the configured wake source(s), then re-runs
+its own GD32 handshake so the bridge stays usable across deep-
+sleep cycles.
+
+The firmware-side dispatcher returns `STATUS_NOSUPPORT` today;
+the HAL body lands once the GD32-side wake handler + the
+v2n_supervisor singleton's re-init state-machine extension
+both land.  The portable surface in `<alp/power.h>` honours
+INVAL pre-checks (e.g. RUN mode, no wake sources + zero
+wake_after_ms) before falling through to NOSUPPORT, so
+customers can write portable sleep code today that gracefully
+degrades on builds without the HAL.
 
 ### 3.y Advanced timer extras (v0.5+, reserved)
 

@@ -397,6 +397,44 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`<alp/power.h>` -- system-power-mode surface for sleep /
+  deep-sleep / standby (wave-2 §2B.3, 2026-05-14).**  New
+  customer-facing header declaring `alp_power_t` (opaque
+  handle), `alp_power_mode_t` (RUN / SLEEP / DEEP_SLEEP /
+  STANDBY enums), `ALP_POWER_WAKE_*` bitmap (RTC / GPIO /
+  UART_RX / TIMER / USB / ETH_LINK), and `alp_power_wake_info_t`
+  (realised_mode + wake_source + slept_ms).  Lifecycle:
+  `alp_power_open()` -> `alp_power_configure_wake_source(p,
+  bitmap)` -> `alp_power_request_sleep(p, mode, wake_after_ms,
+  &info)` (synchronous; blocks until wake) -> `alp_power_close`.
+
+  Adds one new reserved opcode `CMD_POWER_MODE_SET` (`0x28`)
+  to the bridge protocol (within v0.5's ABI surface;
+  PROTOCOL_VERSION_* unchanged at 0.5.0).  Wire payload:
+  `mode:u8 reserved:u8 wake_bitmap:u32 wake_after_ms:u32`.
+  Firmware-side dispatcher returns `STATUS_NOSUPPORT` today
+  via the default branch until the GD32 wake handler + the
+  `src/zephyr/v2n_supervisor.c` singleton's re-init state-
+  machine extension both land.
+
+  Off-V2N (Zephyr's portable `pm_policy_*` path on AEN / NXP
+  i.MX 93) is gated by a follow-up per-SoC pm_state-table
+  commit; the surface ships with NOSUPPORT-stub behaviour
+  today after the INVAL pre-checks (RUN mode rejection;
+  zero-bitmap + zero-wake_after_ms rejection so customers
+  catch "SoC would never wake" mistakes at request time).
+  Wired behind `CONFIG_ALP_SDK_POWER=y` (default on) so the
+  surface is link-resolvable on every build.
+
+  Ships with 6 new alp_peripheral ZTESTs (open returns handle,
+  configure_wake records bitmap, request_sleep with RUN mode
+  rejected, request_sleep with no-wake-no-timeout rejected,
+  valid-args path returns NOSUPPORT with realised_mode echo
+  populated, close-NULL no-op).  One new wire vector in §9 of
+  `gd32-bridge/tests/protocol_vectors.txt` (DEEP_SLEEP +
+  RTC|GPIO wake + 10s timeout probe).  Doxygen coverage holds
+  at 288/288 (= 100%).
+
 - **`<alp/pwm.h>` -- advanced timer extras: input capture +
   one-shot output (wave-2 §2B.2, 2026-05-14).**  Adds five new
   reserved opcodes to the bridge protocol within the existing PWM

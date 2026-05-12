@@ -86,6 +86,12 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_TMU
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/dsp_chain.c)
 
+# System-power-mode surface (<alp/power.h>).  Wired behind
+# CONFIG_ALP_SDK_POWER so customers can opt out on builds that
+# don't need sleep transitions.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/power_zephyr.c)
+
 # Runtime hardware-info reader (EEPROM manifest + BOARD_ID ADC).
 # v0.3 stub returns NOSUPPORT; v0.3.x fills in the real impl.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO

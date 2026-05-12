@@ -187,6 +187,10 @@ typedef enum {
     GD32G553_CMD_PWM_CAPTURE_END          = 0x25,
     GD32G553_CMD_PWM_SINGLE_PULSE         = 0x26,
     GD32G553_CMD_TIMER_SYNC               = 0x27,
+    /* v0.5 (§2B.3): system-wide power-mode transition request.
+     * Portable surface in <alp/power.h>.  Reserved opcode at v0.5;
+     * firmware dispatcher returns STATUS_NOSUPPORT today. */
+    GD32G553_CMD_POWER_MODE_SET           = 0x28,
     /* Reserved range 0xF0..0xFF -- application-bootloader OTA. */
     GD32G553_CMD_OTA_BEGIN             = 0xF0,
     GD32G553_CMD_OTA_WRITE_CHUNK       = 0xF1,

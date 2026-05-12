@@ -22,6 +22,7 @@
 #include "alp/can.h"
 #include "alp/rtc.h"
 #include "alp/tmu.h"
+#include "alp/power.h"
 #include "alp/wdt.h"
 #include "alp/security.h"
 #include "alp/soc_caps.h"
@@ -537,6 +538,80 @@ ZTEST(alp_peripheral, test_pwm_capture_read_both_out_null_returns_inval)
     alp_status_t s =
         alp_pwm_capture_read((alp_pwm_capture_t *)&dummy, NULL, NULL);
     zassert_equal(s, ALP_ERR_INVAL, NULL);
+}
+
+/* ------------------------------------------------------------------ */
+/* §2B.3 -- system-wide power-mode transition surface                 */
+/*                                                                    */
+/* alp_power_open / configure_wake_source / request_sleep / close are */
+/* the wave-2 sleep-mode surface in <alp/power.h>.  The wave-2 HAL    */
+/* body for CMD_POWER_MODE_SET (opcode 0x28) is the gating dep on the */
+/* GD32 firmware side; Zephyr's pm_policy_* hookup lands as a later   */
+/* per-SoC commit.  These NOSUPPORT-contract tests verify the public  */
+/* surface stays well-behaved on every native_sim build.              */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_peripheral, test_power_open_returns_handle)
+{
+    alp_power_t *p = alp_power_open();
+    zassert_not_null(p, NULL);
+    alp_power_close(p);
+}
+
+ZTEST(alp_peripheral, test_power_configure_wake_source_records_bitmap)
+{
+    alp_power_t *p = alp_power_open();
+    zassert_not_null(p, NULL);
+    /* The configure call itself returns OK on every backend -- bits
+     * are evaluated lazily at request_sleep time. */
+    alp_status_t s = alp_power_configure_wake_source(
+        p, ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_GPIO);
+    zassert_equal(s, ALP_OK, NULL);
+    alp_power_close(p);
+}
+
+ZTEST(alp_peripheral, test_power_request_sleep_run_mode_returns_inval)
+{
+    alp_power_t *p = alp_power_open();
+    zassert_not_null(p, NULL);
+    alp_power_configure_wake_source(p, ALP_POWER_WAKE_RTC);
+    alp_status_t s =
+        alp_power_request_sleep(p, ALP_POWER_MODE_RUN, 100u, NULL);
+    zassert_equal(s, ALP_ERR_INVAL, "got %d", (int)s);
+    alp_power_close(p);
+}
+
+ZTEST(alp_peripheral, test_power_request_sleep_no_wake_no_timeout_returns_inval)
+{
+    alp_power_t *p = alp_power_open();
+    zassert_not_null(p, NULL);
+    /* Zero wake bitmap + zero wake_after_ms -- SoC would never wake. */
+    alp_power_configure_wake_source(p, ALP_POWER_WAKE_NONE);
+    alp_status_t s =
+        alp_power_request_sleep(p, ALP_POWER_MODE_DEEP_SLEEP, 0u, NULL);
+    zassert_equal(s, ALP_ERR_INVAL, "got %d", (int)s);
+    alp_power_close(p);
+}
+
+ZTEST(alp_peripheral, test_power_request_sleep_valid_args_returns_nosupport)
+{
+    /* Backend HAL not wired yet -- valid args still NOSUPPORT, but
+     * the call must not crash and the optional info struct gets
+     * populated with the realised_mode echo. */
+    alp_power_t *p = alp_power_open();
+    zassert_not_null(p, NULL);
+    alp_power_configure_wake_source(p, ALP_POWER_WAKE_RTC);
+    alp_power_wake_info_t info = { 0 };
+    alp_status_t          s    =
+        alp_power_request_sleep(p, ALP_POWER_MODE_DEEP_SLEEP, 1000u, &info);
+    zassert_equal(s, ALP_ERR_NOSUPPORT, "got %d", (int)s);
+    zassert_equal(info.realised_mode, ALP_POWER_MODE_DEEP_SLEEP, NULL);
+    alp_power_close(p);
+}
+
+ZTEST(alp_peripheral, test_power_close_null_is_noop)
+{
+    alp_power_close(NULL); /* must not crash */
 }
 
 /* ------------------------------------------------------------------ */

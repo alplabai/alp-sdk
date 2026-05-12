@@ -96,3 +96,9 @@ spi_adc_stream_configure_dsp_probe_request = A536A911
 spi_pwm_capture_begin_probe_request = A52300022D27
 # SOF | CMD=0x26 | channel=0 | pulse_ns=1000 (LE 0x000003E8) | CRC -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT until the GD32-side one-shot pulse HAL body is wired
 spi_pwm_single_pulse_probe_request = A52600000000E80300005B7D
+
+# ---------------------------------------------------------------------
+# §9. v0.5 additions (§2B.3) -- system power-mode set (reserved opcode)
+# ---------------------------------------------------------------------
+# SOF | CMD=0x28 | mode=DEEP_SLEEP | wake_bitmap=RTC|GPIO | wake_after_ms=10000 (LE 0x00002710) | CRC -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT until the wake handler + supervisor re-init state machine land
+spi_power_mode_set_probe_request = A5280200030000001027000048A3
