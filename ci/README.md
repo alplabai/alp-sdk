@@ -18,7 +18,6 @@ reference.
 | [`pr-generated-files.yml`](../.github/workflows/pr-generated-files.yml)        | PR + push (paths)| active     | Catches drift in `<alp/soc_caps.h>` (re-runs `scripts/gen_soc_caps.py`) and `docs/abi/*.json` (re-runs `scripts/abi_snapshot.py`).             |
 | [`pr-metadata-validate.yml`](../.github/workflows/pr-metadata-validate.yml)    | PR + push (paths)| active     | Validates every `metadata/socs/**/*.json` against the schema via `scripts/validate_metadata.py` + smoke-tests `scripts/alp_project.py` against `metadata/templates/board.yaml.example`. |
 | [`pr-doxygen.yml`](../.github/workflows/pr-doxygen.yml)                        | PR + push (paths)| active     | Generates Doxygen HTML from `include/alp/**`.  v0.1: warnings are informational; v1.0 will gate on zero warnings (per the quality bar in `VERSIONS.md`). |
-| [`pr-vscode-extension.yml`](../.github/workflows/pr-vscode-extension.yml)      | PR + push (paths)| active     | Compiles the in-tree `vscode/` extension and packages the `.vsix`.  Keeps the schema-aware `board.yaml` editor on a green baseline.            |
 | [`coverity.yml`](../.github/workflows/coverity.yml)                            | weekly + manual  | active     | Coverity Scan submission against <https://scan.coverity.com/projects/alplabai-alp-sdk>.  Secrets (`COVERITY_TOKEN`, `COVERITY_EMAIL`) provisioned; project name in the `COVERITY_PROJECT` Actions variable.       |
 | [`nightly-aen-hil.yml`](../.github/workflows/nightly-aen-hil.yml)              | nightly + manual | **skeleton**| HW-in-loop on a real E1M-AEN dev kit.  Runs only when a self-hosted runner with the `hil-aen` label is online — see [`HW-IN-LOOP.md`](HW-IN-LOOP.md).             |
 
@@ -50,8 +49,10 @@ reference.
   Not in CI; the CI workflows install equivalents inline.
 - [`scripts/test-all.sh`](../scripts/test-all.sh) — single-command
   local verifier (ctest + twister + clang-format + metadata-validate +
-  Doxygen).  Mirrors every PR-time workflow except `coverity` and
-  `pr-vscode-extension`.  See [`docs/testing.md`](../docs/testing.md).
+  Doxygen).  Mirrors every PR-time workflow except `coverity`.  See
+  [`docs/testing.md`](../docs/testing.md).  (The VS Code extension's
+  build lives in [`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)
+  since the 2026-05-12 split; its own CI runs there.)
 
 ## Runner topology
 

@@ -95,9 +95,11 @@ First-class on **Linux**, **macOS**, and **Windows 11 / 10** (native
 PowerShell or WSL2).  Line endings pinned to LF via `.gitattributes`
 so a Windows checkout and a Linux pull see identical bytes.  VS Code
 config ships in `.vscode/` (recommended extensions, build tasks,
-debug profiles); install the in-tree extension under [`vscode/`](vscode/)
-for schema-aware `board.yaml` editing.  See [`docs/getting-started.md`](docs/getting-started.md)
-for per-host setup notes.
+debug profiles); install the
+[`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)
+extension for schema-aware `board.yaml` editing.  See
+[`docs/getting-started.md`](docs/getting-started.md) for per-host
+setup notes.
 
 ## Status
 

@@ -7,12 +7,14 @@
  * @file audio.h
  * @brief ALP SDK audio abstraction (PDM input + I²S output).
  *
- * v0.2 deliverable.  v0.1 ships only the public surface; every entry
- * point returns ALP_ERR_NOSUPPORT and `*_open()` returns NULL — see
- * `<alp/iot.h>` v0.1 for the same contract.  Real implementation
- * (PDM ingest via the SoC's PDM/SAI block, I²S egress, ALP-default
- * DSP chain: DC-block → AGC → resample) lands in v0.2 and sits on
- * top of the v0.2 `<alp/i2s.h>` wrapper.
+ * Real implementation lives in `src/zephyr/audio_zephyr.c` (input
+ * path via Zephyr `audio_dmic` behind `CONFIG_ALP_SDK_AUDIO_IN`,
+ * output path delegates to `<alp/i2s.h>` behind
+ * `CONFIG_ALP_SDK_AUDIO_OUT`).  When either Kconfig is off the
+ * matching `*_open` returns NULL with `alp_last_error() ==
+ * ALP_ERR_NOSUPPORT` so apps link cleanly under `native_sim`.  The
+ * default ALP DSP chain (DC-block in v0.2; AGC + resample in v0.3)
+ * sits in-line on the input path.
  *
  * Backends:
  *   - Zephyr   : `audio_dmic` API for PDM in, `i2s` driver class for I²S out.

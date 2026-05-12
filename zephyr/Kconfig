@@ -603,14 +603,6 @@ config ALP_SDK_HAS_LVGL
 # unconditionally; the west.yml pins go in alongside.  See
 # vendors/lwrb/ and vendors/nanopb/ for the runtime contract.
 
-config ALP_SDK_HAS_CMSIS_DSP
-	bool "Build <alp/math.h> against CMSIS-DSP"
-	default y if CMSIS_DSP
-	default n
-	help
-	  Re-export arm_math.h via <alp/math.h>.  Requires the
-	  CMSIS-DSP module to be present in the Zephyr west manifest.
-
 config ALP_SDK_HW_INFO
 	bool "Runtime hardware-info reader (EEPROM + BOARD_ID ADC)"
 	default y

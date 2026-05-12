@@ -10,8 +10,10 @@
 #                                       max_sdk_version].
 #   - scripts/validate_board_yaml.py -- same check, exit code 3 on
 #                                       mismatch.
-#   - vscode/ extension              -- surfaces an incompat warning
-#                                       in the configurator panel.
+#   - alplabai/alp-sdk-vscode        -- surfaces an incompat warning
+#                                       in the configurator panel
+#                                       (extension lives in its own
+#                                       repo since 2026-05-12).
 #
 # Bump in the same PR that lands the matching CHANGELOG.md entry.
 

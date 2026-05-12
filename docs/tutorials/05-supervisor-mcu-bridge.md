@@ -32,17 +32,26 @@ Both carry the same command set; the host picks per-call:
 
 ## The command set
 
-| Opcode | Helper                           | What it does                          |
-|--------|----------------------------------|---------------------------------------|
-| 0x00   | `gd32g553_ping`                  | Liveness probe                        |
-| 0x01   | `gd32g553_get_version`           | Firmware version triple               |
-| 0x02   | `gd32g553_get_build_id`          | 20-char SHA-1 truncation              |
-| 0x03   | `gd32g553_get_reset_reason`      | Why the GD32 last reset               |
-| 0x10/11 | `gd32g553_gpio_read/write`      | Masked GD32-side GPIO access          |
-| 0x20/21 | `gd32g553_pwm_set/get`          | GD32-side PWM channel control         |
-| 0x30   | `gd32g553_adc_read`              | GD32-side ADC samples                 |
-| 0x40   | `gd32g553_da9292_status_forward` | Cached DA9292 PMIC status byte       |
-| 0xF0..0xF6 | `gd32g553_ota_*`             | Application-bootloader OTA opcodes    |
+Protocol version (`PROTOCOL_VERSION_MAJOR.MINOR.PATCH`) at the time
+of writing: `0.2.0` -- minor revisions are additive (new opcodes,
+older firmware replies `STATUS_NOSUPPORT` for what it doesn't
+implement); the host driver refuses to operate on a mismatched
+major.
+
+| Opcode  | Helper                            | What it does                                  |
+|---------|-----------------------------------|-----------------------------------------------|
+| 0x00    | `gd32g553_ping`                   | Liveness probe                                |
+| 0x01    | `gd32g553_get_version`            | Firmware version triple                       |
+| 0x02    | `gd32g553_get_build_id`           | 20-char SHA-1 truncation                      |
+| 0x03    | `gd32g553_get_reset_reason`       | Why the GD32 last reset                       |
+| 0x10/11 | `gd32g553_gpio_read/write`        | Masked GD32-side GPIO access                  |
+| 0x20/21 | `gd32g553_pwm_set/get`            | E1M PWM0..PWM7 control (all GD32-routed)      |
+| 0x30    | `gd32g553_adc_read`               | E1M ADC0..ADC7 samples (mV, firmware-averaged)|
+| 0x40    | `gd32g553_da9292_status_forward`  | Cached DA9292 PMIC status byte                |
+| 0x50/51 | `gd32g553_dac_set/get`            | E1M DAC0..DAC1 setpoint (mV) -- protocol v0.2 |
+| 0x60/61 | `gd32g553_qenc_read/reset`        | E1M ENC0..ENC3 accumulated count -- v0.2      |
+| 0x70    | `gd32g553_counter_read`           | Free-running counter tick value -- v0.2       |
+| 0xF0..0xF6 | `gd32g553_ota_*`              | Application-bootloader OTA opcodes            |
 
 ## The example's code path
 

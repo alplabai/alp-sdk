@@ -16,8 +16,10 @@
  * (src/zephyr, src/baremetal, src/yocto) materialises the struct and
  * routes through the vendor wrapper (vendors/alif, vendors/renesas-rzv2n).
  *
- * v0.1 surface — the function bodies are not yet implemented.  The shape
- * is what blocks (blk_button_led, blk_oled_ssd1306, blk_imu_lsm6dso) need.
+ * Zephyr backends for all four classes (I2C, SPI, GPIO, UART) ship
+ * in `src/zephyr/peripheral_{i2c,spi,gpio,uart}.c`; the Yocto and
+ * baremetal backends fill in alongside their respective build
+ * trees.
  */
 
 #ifndef ALP_PERIPHERAL_H

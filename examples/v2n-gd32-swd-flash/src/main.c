@@ -15,12 +15,15 @@
  * stays available even when the application-bootloader OTA path is
  * unreachable (corrupt bridge image, factory first-flash).
  *
- * **Pin assignment is TBD** on V2N pending the maintainer's HW
- * writeup; this example uses studio-resolved pin ids and the
- * carrier preset's mapping.  If the carrier hasn't yet routed
- * SWDIO/SWCLK to host pads, the alp_gpio_open call below will
- * return NULL -- the example prints the failure and exits cleanly
- * rather than wedging the host.
+ * **Pin assignment (resolved 2026-05-12):** SWDIO -> Renesas `P70`,
+ * SWCLK -> Renesas `P71`, NRST -> Renesas `P74` (open-drain, shared
+ * with the primary PMIC reset-out).  Authoritative source:
+ * `metadata/chips/gd32_swd.yaml` + `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`.
+ * The studio's pin allocator resolves these to the integer pin ids
+ * below at build time from the carrier preset.  If the carrier
+ * preset hasn't propagated the routing yet, the alp_gpio_open call
+ * below will return NULL -- the example prints the failure and exits
+ * cleanly rather than wedging the host.
  *
  * **Safety:**
  *   * This example writes to the *last sector* of the GD32G553's
@@ -39,15 +42,16 @@
 #include "alp/peripheral.h"
 #include "alp/chips/gd32_swd.h"
 
-/* Studio-resolved pin ids the V2N carrier preset assigns to the
- * SWD lines.  These come from `alp_project.py` once the board.yaml
- * declares the routing; placeholders below match the canonical
- * preset for V2N's auxiliary-GPIO array.  Carriers that wire
- * SWDIO/SWCLK to a different pad override these in their own
- * `board.yaml`. */
-#define V2N_GD32_SWDIO_PIN_ID   0u
-#define V2N_GD32_SWCLK_PIN_ID   1u
-#define V2N_GD32_NRST_PIN_ID    2u
+/* Studio-resolved pin ids for the V2N gd32_swd routing.  The
+ * carrier preset (`metadata/carriers/E1M-X-EVK/board.yaml`) declares
+ * the gd32_swd block; `alp_project.py` emits these as part of the
+ * studio's generated build.  The integer values below are the
+ * canonical preset ordering (SWDIO first, SWCLK second, NRST third)
+ * resolved against the carrier's auxiliary-GPIO array -- if the
+ * carrier shuffles the array the example follows the carrier. */
+#define V2N_GD32_SWDIO_PIN_ID   0u   /* Renesas P70 on V2N */
+#define V2N_GD32_SWCLK_PIN_ID   1u   /* Renesas P71 on V2N */
+#define V2N_GD32_NRST_PIN_ID    2u   /* Renesas P74 (open-drain) on V2N */
 
 /* Write target: the top sector of the GD32G553's 512 KB flash.
  * 0x08080000 - 2048 = 0x0807F800 is the last sector start address. */
