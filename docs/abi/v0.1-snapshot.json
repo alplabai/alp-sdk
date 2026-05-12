@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-12",
+  "generated": "2026-05-13",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1617,8 +1617,8 @@
       },
       "typedefs": {
         "gd32g553_cmd_t": {
-          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_TMU_COMPUTE = 0x90, GD32G553_CMD_ADC_STREAM_CONFIGURE_DSP = 0x36, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
-          "hash": "c133ac425e46c2e1"
+          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_TMU_COMPUTE = 0x90, GD32G553_CMD_ADC_STREAM_CONFIGURE_DSP = 0x36, GD32G553_CMD_PWM_CAPTURE_BEGIN = 0x23, GD32G553_CMD_PWM_CAPTURE_READ = 0x24, GD32G553_CMD_PWM_CAPTURE_END = 0x25, GD32G553_CMD_PWM_SINGLE_PULSE = 0x26, GD32G553_CMD_TIMER_SYNC = 0x27, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
+          "hash": "96f7cf82f8c5a6f4"
         },
         "gd32g553_ota_slot_t": {
           "definition": "typedef enum { GD32G553_OTA_SLOT_INVALID = 0u, GD32G553_OTA_SLOT_A = 1u, GD32G553_OTA_SLOT_B = 2u, } gd32g553_ota_slot_t;",
@@ -3933,6 +3933,14 @@
     },
     "alp/pwm.h": {
       "functions": {
+        "alp_pwm_capture_close": {
+          "hash": "28a6ed8173d3a045",
+          "signature": "void alp_pwm_capture_close(alp_pwm_capture_t *cap);"
+        },
+        "alp_pwm_capture_read": {
+          "hash": "f2203eef222a472e",
+          "signature": "alp_status_t alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_out, uint32_t *pulse_ns_out);"
+        },
         "alp_pwm_close": {
           "hash": "1765efaea8944eaf",
           "signature": "void alp_pwm_close(alp_pwm_t *pwm);"
@@ -3948,6 +3956,10 @@
         "alp_pwm_set_period": {
           "hash": "a8fd6ee6e25144f7",
           "signature": "alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns);"
+        },
+        "alp_pwm_single_pulse": {
+          "hash": "757f2fa26ca52c4d",
+          "signature": "alp_status_t alp_pwm_single_pulse(alp_pwm_t *pwm, uint32_t pulse_ns);"
         }
       },
       "macros": {
@@ -3964,6 +3976,14 @@
         "alp_pwm_align_t": {
           "definition": "typedef enum { ALP_PWM_ALIGN_EDGE = 0, ALP_PWM_ALIGN_CENTER_UP = 1, ALP_PWM_ALIGN_CENTER_DOWN = 2, ALP_PWM_ALIGN_CENTER_BOTH = 3, } alp_pwm_align_t;",
           "hash": "5ddf5a2f268dc99c"
+        },
+        "alp_pwm_capture_edge_t": {
+          "definition": "typedef enum { ALP_PWM_CAPTURE_EDGE_RISING = 0, ALP_PWM_CAPTURE_EDGE_FALLING = 1, ALP_PWM_CAPTURE_EDGE_BOTH = 2, } alp_pwm_capture_edge_t;",
+          "hash": "5830e6d88e3589aa"
+        },
+        "alp_pwm_capture_t": {
+          "definition": "typedef struct alp_pwm_capture alp_pwm_capture_t;",
+          "hash": "cc8c1b87f8a2eba5"
         },
         "alp_pwm_polarity_t": {
           "definition": "typedef enum { ALP_PWM_POLARITY_NORMAL = 0, ALP_PWM_POLARITY_INVERTED = 1 } alp_pwm_polarity_t;",

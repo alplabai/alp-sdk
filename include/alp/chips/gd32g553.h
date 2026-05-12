@@ -172,6 +172,21 @@ typedef enum {
      * The firmware-side dispatcher returns STATUS_NOSUPPORT for this
      * opcode until the wave-2 wire payload format is finalised. */
     GD32G553_CMD_ADC_STREAM_CONFIGURE_DSP = 0x36,
+    /* v0.5 (§2B.2): advanced timer extras.  PWM_CAPTURE turns a PWM
+     * channel's pin into an input-capture source for frequency / pulse-
+     * width measurement; PWM_SINGLE_PULSE drives a one-shot pulse of
+     * caller-specified duration then stops; TIMER_SYNC links the
+     * GD32G5's TIMER0 / TIMER7 / TIMER19 in master-slave configuration.
+     * All five opcodes are RESERVED at protocol v0.5; the firmware
+     * default-case path returns STATUS_NOSUPPORT until the corresponding
+     * bridge_hw_* HAL bodies land.  Portable surfaces in <alp/pwm.h> +
+     * <alp/counter.h> mirror the same NOSUPPORT contract on builds
+     * without the HW backend. */
+    GD32G553_CMD_PWM_CAPTURE_BEGIN        = 0x23,
+    GD32G553_CMD_PWM_CAPTURE_READ         = 0x24,
+    GD32G553_CMD_PWM_CAPTURE_END          = 0x25,
+    GD32G553_CMD_PWM_SINGLE_PULSE         = 0x26,
+    GD32G553_CMD_TIMER_SYNC               = 0x27,
     /* Reserved range 0xF0..0xFF -- application-bootloader OTA. */
     GD32G553_CMD_OTA_BEGIN             = 0xF0,
     GD32G553_CMD_OTA_WRITE_CHUNK       = 0xF1,

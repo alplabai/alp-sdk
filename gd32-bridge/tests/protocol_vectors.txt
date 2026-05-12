@@ -88,3 +88,11 @@ spi_tmu_compute_sqrt_f32_4p0_request = A59005010000000080400000000055AB
 # ---------------------------------------------------------------------
 # SOF | CMD=0x36 | (no payload yet) | CRC -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT via the default-case dispatch until the wave-2 wire payload format finalises in v0.5.x
 spi_adc_stream_configure_dsp_probe_request = A536A911
+
+# ---------------------------------------------------------------------
+# §8. v0.5 additions (§2B.2) -- advanced timer extras (reserved opcodes)
+# ---------------------------------------------------------------------
+# SOF | CMD=0x23 | channel=0 | edge=BOTH | CRC -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT until the GD32-side input-capture HAL body is wired in a follow-up firmware drop
+spi_pwm_capture_begin_probe_request = A52300022D27
+# SOF | CMD=0x26 | channel=0 | pulse_ns=1000 (LE 0x000003E8) | CRC -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT until the GD32-side one-shot pulse HAL body is wired
+spi_pwm_single_pulse_probe_request = A52600000000E80300005B7D

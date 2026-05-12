@@ -70,6 +70,11 @@ byte; their numeric encoding is:
 | `0x80` | `TRNG_READ`           | `len:u8` (1..32)                                   | `random_bytes[len]`                                |
 | `0x90` | `TMU_COMPUTE`         | `function:u8 format:u8 reserved:u16 in_a:u32 in_b:u32` | `result:u32`                                  |
 | `0x36` | `ADC_STREAM_CONFIGURE_DSP` | _(reserved -- payload format TBD)_                  | _(empty; returns STATUS_NOSUPPORT today)_         |
+| `0x23` | `PWM_CAPTURE_BEGIN`   | `channel:u8 edge:u8`                                  | _(empty; returns STATUS_NOSUPPORT today)_         |
+| `0x24` | `PWM_CAPTURE_READ`    | `channel:u8`                                          | `period_ns:u32 pulse_ns:u32` (firmware-side TBD)  |
+| `0x25` | `PWM_CAPTURE_END`     | `channel:u8`                                          | _(empty; returns STATUS_NOSUPPORT today)_         |
+| `0x26` | `PWM_SINGLE_PULSE`    | `channel:u8 reserved:u8 reserved:u16 pulse_ns:u32`    | _(empty; returns STATUS_NOSUPPORT today)_         |
+| `0x27` | `TIMER_SYNC`          | `master:u8 slave:u8 mode:u8`                          | _(empty; returns STATUS_NOSUPPORT today)_         |
 
 Opcodes `0x81..0xEF` are **reserved** for future ALP-defined
 extensions (next slot: hardware AES via the CAU engine).  Carriers
@@ -77,6 +82,35 @@ SHOULD NOT define their own opcodes in this range -- the firmware
 replies with **`ALP_ERR_NOSUPPORT`** (see §6) for any opcode it
 does not implement at build time, so a host that speaks a newer
 command set than the firmware degrades gracefully.
+
+### 3.y Advanced timer extras (v0.5+, reserved)
+
+The wave-2 §2B.2 advanced-timer extras add five reserved opcodes
+within the existing PWM range (`0x23..0x27`) and the timer-sync
+group:
+
+* `CMD_PWM_CAPTURE_BEGIN / READ / END` (opcodes `0x23..0x25`)
+  reconfigure a PWM channel's pin as an input-capture source so
+  the firmware can latch the timer counter on each edge of the
+  caller's chosen polarity (`RISING / FALLING / BOTH`).  The
+  host-side surface is `alp_pwm_capture_open / read / close` in
+  [`<alp/pwm.h>`](../include/alp/pwm.h).
+* `CMD_PWM_SINGLE_PULSE` (opcode `0x26`) drives a one-shot pulse
+  of caller-specified width on a PWM channel then stops.  The
+  host-side surface is `alp_pwm_single_pulse(pwm, pulse_ns)` in
+  [`<alp/pwm.h>`](../include/alp/pwm.h).
+* `CMD_TIMER_SYNC` (opcode `0x27`) links the GD32G5's TIMER0 /
+  TIMER7 / TIMER19 in master-slave configuration for
+  synchronised multi-channel output.  The portable surface lands
+  in a follow-up commit once the firmware HAL exposes the
+  master-slave wiring.
+
+The firmware-side dispatcher returns `STATUS_NOSUPPORT` for all
+five opcodes today via the default-case branch; the corresponding
+`bridge_hw_*` HAL bodies land in a follow-up GD32 firmware drop.
+The portable surfaces in `<alp/pwm.h>` honour INVAL pre-checks
+even before the backend wires the real path, so misconfigured
+calls return precise diagnostics.
 
 ### 3.x ADC-stream DSP pipeline (v0.5+, reserved)
 

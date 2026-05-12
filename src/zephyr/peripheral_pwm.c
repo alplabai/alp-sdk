@@ -286,3 +286,60 @@ alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint3
     (void)break_cfg;
     return ALP_ERR_NOSUPPORT;
 }
+
+/* ====================================================================== */
+/* §2B.2 -- single-pulse output + input capture                            */
+/*                                                                         */
+/* Surfaces ship NOSUPPORT-with-INVAL-pre-checks today; HW backends land   */
+/* once the GD32 firmware grows the CMD_PWM_CAPTURE_* and                  */
+/* CMD_PWM_SINGLE_PULSE bridge_hw_* HAL bodies.  The portable surface      */
+/* honours INVAL pre-checks even when the backend path is absent so        */
+/* misconfigured calls get a precise diagnosis.                            */
+/* ====================================================================== */
+
+alp_status_t alp_pwm_single_pulse(alp_pwm_t *pwm, uint32_t pulse_ns)
+{
+    if (pwm == NULL || !pwm->in_use) return ALP_ERR_NOT_READY;
+    if (pulse_ns == 0u) return ALP_ERR_INVAL;
+    /* Portable single-pulse output is V2N-bridge-only and still
+     * NOSUPPORT until the firmware-side CMD_PWM_SINGLE_PULSE
+     * handler (opcode 0x26) is wired. */
+    (void)pulse_ns;
+    return ALP_ERR_NOSUPPORT;
+}
+
+alp_pwm_capture_t *alp_pwm_capture_open(const alp_pwm_capture_config_t *cfg)
+{
+    alp_z_clear_last_error();
+    if (cfg == NULL) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    if (cfg->channel_id >= 8u) {
+        alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
+        return NULL;
+    }
+    if ((unsigned)cfg->edge > (unsigned)ALP_PWM_CAPTURE_EDGE_BOTH) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    /* Input capture is V2N-bridge-only; firmware HAL body for
+     * CMD_PWM_CAPTURE_BEGIN (opcode 0x23) is the gating dep. */
+    alp_z_set_last_error(ALP_ERR_NOSUPPORT);
+    return NULL;
+}
+
+alp_status_t alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_out,
+                                  uint32_t *pulse_ns_out)
+{
+    (void)cap;
+    if (period_ns_out == NULL && pulse_ns_out == NULL) return ALP_ERR_INVAL;
+    if (period_ns_out != NULL) *period_ns_out = 0u;
+    if (pulse_ns_out != NULL) *pulse_ns_out = 0u;
+    return ALP_ERR_NOSUPPORT;
+}
+
+void alp_pwm_capture_close(alp_pwm_capture_t *cap)
+{
+    (void)cap;
+}

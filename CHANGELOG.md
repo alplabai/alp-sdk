@@ -397,6 +397,42 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`<alp/pwm.h>` -- advanced timer extras: input capture +
+  one-shot output (wave-2 §2B.2, 2026-05-14).**  Adds five new
+  reserved opcodes to the bridge protocol within the existing PWM
+  range:
+  * `CMD_PWM_CAPTURE_BEGIN / READ / END` (`0x23..0x25`) -- input
+    capture (frequency / pulse-width measurement) on a PWM
+    channel.  Portable surface: `alp_pwm_capture_open(cfg)` /
+    `alp_pwm_capture_read(cap, &period_ns, &pulse_ns)` /
+    `alp_pwm_capture_close`.  Edge polarity selectable via
+    `alp_pwm_capture_edge_t` (RISING / FALLING / BOTH).
+  * `CMD_PWM_SINGLE_PULSE` (`0x26`) -- one-shot pulse output of
+    caller-specified width then stop.  Portable surface:
+    `alp_pwm_single_pulse(pwm, pulse_ns)`.
+  * `CMD_TIMER_SYNC` (`0x27`) -- master-slave linkage across the
+    GD32G5's TIMER0 / TIMER7 / TIMER19 for synchronised
+    multi-channel output.  Reserved opcode only at v0.5; the
+    portable surface follows once the firmware HAL exposes the
+    master-slave wiring.
+
+  All five opcodes are RESERVED today: the firmware-side
+  dispatcher routes them through the default-case
+  `STATUS_NOSUPPORT` branch until the corresponding
+  `bridge_hw_*` HAL bodies land in a follow-up GD32 firmware
+  drop.  Portable surfaces in `<alp/pwm.h>` honour INVAL /
+  OUT_OF_RANGE pre-checks before falling through to NOSUPPORT
+  so misconfigured callers get precise diagnostics on every SoM.
+  Tests: 6 new ZTESTs in
+  `tests/zephyr/peripheral/src/main.c` covering the NULL-handle,
+  NULL-cfg, channel-out-of-range, valid-args-NOSUPPORT, NULL
+  close, and both-out-NULL contracts.  Wire vectors: 2 new
+  representative probe envelopes in §8 of
+  `gd32-bridge/tests/protocol_vectors.txt` (PWM_CAPTURE_BEGIN
+  with channel + edge; PWM_SINGLE_PULSE with pulse_ns).
+  PROTOCOL_VERSION_MAJOR / MINOR / PATCH unchanged (5.0); the
+  reservations live within the v0.5 ABI surface.
+
 - **`<alp/adc.h>::alp_adc_spectrum_t` -- streaming ADC with
   FFT-terminated DSP chain (wave-2 §2B.1(c), 2026-05-14).**
   Replaces the v0.5.x(b) NOSUPPORT stub with a real composition:

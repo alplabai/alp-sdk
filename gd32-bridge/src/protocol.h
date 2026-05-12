@@ -128,6 +128,23 @@ typedef enum {
      * side standalone API in <alp/dsp.h> works without it.  See
      * memory/project_wave2_dsp_pipeline_design.md for the design. */
     CMD_ADC_STREAM_CONFIGURE_DSP = 0x36,
+    /* v0.5 (§2B.2): advanced timer extras.  PWM_CAPTURE turns a
+     * PWM channel's pin into an input-capture source for frequency
+     * / pulse-width measurement; PWM_SINGLE_PULSE drives a one-shot
+     * pulse of caller-specified duration on a PWM channel then
+     * stops; TIMER_SYNC links TIMER0 / TIMER7 / TIMER19 in
+     * master-slave configuration for synchronised multi-channel
+     * output.  All five opcodes are RESERVED at protocol v0.5;
+     * the firmware default-case path returns STATUS_NOSUPPORT
+     * until the corresponding bridge_hw_* HAL bodies land in
+     * the GD32 firmware tree.  The portable surfaces are declared
+     * in <alp/pwm.h> / <alp/counter.h> with the same NOSUPPORT
+     * contract on builds that don't ship the bridge HAL yet. */
+    CMD_PWM_CAPTURE_BEGIN        = 0x23,
+    CMD_PWM_CAPTURE_READ         = 0x24,
+    CMD_PWM_CAPTURE_END          = 0x25,
+    CMD_PWM_SINGLE_PULSE         = 0x26,
+    CMD_TIMER_SYNC               = 0x27,
 } gd32_bridge_cmd_t;
 
 /* TMU function index sent in CMD_TMU_COMPUTE's request payload byte 0.

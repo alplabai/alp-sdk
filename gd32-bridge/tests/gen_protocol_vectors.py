@@ -81,6 +81,11 @@ CMD_ADC_STREAM_BEGIN         = 0x33
 CMD_ADC_STREAM_READ          = 0x34
 CMD_ADC_STREAM_END           = 0x35
 CMD_ADC_STREAM_CONFIGURE_DSP = 0x36
+CMD_PWM_CAPTURE_BEGIN        = 0x23
+CMD_PWM_CAPTURE_READ         = 0x24
+CMD_PWM_CAPTURE_END          = 0x25
+CMD_PWM_SINGLE_PULSE         = 0x26
+CMD_TIMER_SYNC               = 0x27
 CMD_TRNG_READ                = 0x80
 CMD_TMU_COMPUTE              = 0x90
 CMD_DAC_SET                  = 0x50
@@ -307,6 +312,38 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         " until the wave-2 wire payload format finalises in v0.5.x",
     ))
 
+    # ----- §8. v0.5 additions (§2B.2): advanced timer extras --------
+    # CMD_PWM_CAPTURE_{BEGIN, READ, END}, CMD_PWM_SINGLE_PULSE, and
+    # CMD_TIMER_SYNC are all RESERVED at v0.5.  Portable surfaces in
+    # <alp/pwm.h> (alp_pwm_capture_t + alp_pwm_single_pulse) declare
+    # the API today with NOSUPPORT-with-INVAL-pre-checks stubs; the
+    # GD32 bridge_hw_* HAL bodies land in a follow-up firmware drop.
+    # Representative probe vectors below: PWM_CAPTURE_BEGIN with a
+    # minimal payload (channel + edge) and PWM_SINGLE_PULSE with the
+    # caller's intended pulse width.  Firmware replies
+    # STATUS_NOSUPPORT today via the default branch.
+    out.append((
+        "spi_pwm_capture_begin_probe_request",
+        spi_frame(SOF, CMD_PWM_CAPTURE_BEGIN,
+                  bytes([0x00,                            # channel = 0
+                         0x02,                            # edge = BOTH
+                  ])).hex().upper(),
+        "SOF | CMD=0x23 | channel=0 | edge=BOTH | CRC -- v0.5 reserved"
+        " opcode; firmware replies STATUS_NOSUPPORT until the GD32-side"
+        " input-capture HAL body is wired in a follow-up firmware drop",
+    ))
+    out.append((
+        "spi_pwm_single_pulse_probe_request",
+        spi_frame(SOF, CMD_PWM_SINGLE_PULSE,
+                  bytes([0x00,                            # channel = 0
+                         0x00, 0x00, 0x00,                # reserved
+                         0xE8, 0x03, 0x00, 0x00,          # pulse_ns = 1000 (LE)
+                  ])).hex().upper(),
+        "SOF | CMD=0x26 | channel=0 | pulse_ns=1000 (LE 0x000003E8) | CRC"
+        " -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT until"
+        " the GD32-side one-shot pulse HAL body is wired",
+    ))
+
     return out
 
 
@@ -373,7 +410,16 @@ def emit(vectors: list[tuple[str, str, str | None]]) -> str:
     chunks.append("\n# ---------------------------------------------------------------------")
     chunks.append("# §7. v0.5 additions -- ADC-stream DSP pipeline (reserved opcode)")
     chunks.append("# ---------------------------------------------------------------------")
-    for name, value, comment in vectors[22:]:
+    for name, value, comment in vectors[22:23]:
+        if comment:
+            chunks.append(f"# {comment}")
+        chunks.append(f"{name:<30} = {value}")
+
+    # ----- §8 block --------------------------------------------------
+    chunks.append("\n# ---------------------------------------------------------------------")
+    chunks.append("# §8. v0.5 additions (§2B.2) -- advanced timer extras (reserved opcodes)")
+    chunks.append("# ---------------------------------------------------------------------")
+    for name, value, comment in vectors[23:]:
         if comment:
             chunks.append(f"# {comment}")
         chunks.append(f"{name:<30} = {value}")

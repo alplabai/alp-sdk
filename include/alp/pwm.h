@@ -169,6 +169,121 @@ alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint3
  */
 void         alp_pwm_close(alp_pwm_t *pwm);
 
+/* ================================================================== */
+/* Single-pulse output (v0.5, §2B.2)                                   */
+/* ================================================================== */
+
+/**
+ * @brief Drive a one-shot pulse of @p pulse_ns then stop the channel.
+ *
+ * The channel must already be open at a non-zero period via
+ * @ref alp_pwm_open.  After the pulse, the output returns to the
+ * inactive level and the channel stays open at 0 % duty until the
+ * caller fires another pulse or sets a steady duty via
+ * @ref alp_pwm_set_duty.
+ *
+ * Single-pulse is useful for trigger generation (camera flash, ADC
+ * external start) where the timing of one pulse matters but the
+ * application doesn't want to manage a steady-state PWM.
+ *
+ * @param[in] pwm       Handle from @ref alp_pwm_open.
+ * @param[in] pulse_ns  Pulse width in nanoseconds.  Must be > 0 and
+ *                      <= the channel's configured period.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
+ *         ALP_ERR_NOSUPPORT (backend lacks a one-shot timer
+ *         primitive -- portable single-pulse is V2N bridge-only
+ *         today; the wave-2 GD32 HAL body lands once the firmware
+ *         CMD_PWM_SINGLE_PULSE handler is implemented).
+ */
+alp_status_t alp_pwm_single_pulse(alp_pwm_t *pwm, uint32_t pulse_ns);
+
+/* ================================================================== */
+/* Input capture (v0.5, §2B.2)                                         */
+/* ================================================================== */
+
+/** Edge polarity selector for @ref alp_pwm_capture_open. */
+typedef enum {
+    ALP_PWM_CAPTURE_EDGE_RISING  = 0, /**< Capture on rising edges only. */
+    ALP_PWM_CAPTURE_EDGE_FALLING = 1, /**< Capture on falling edges only. */
+    ALP_PWM_CAPTURE_EDGE_BOTH    = 2, /**< Capture on both edges (pulse-width measurement). */
+} alp_pwm_capture_edge_t;
+
+/** Opaque input-capture handle.  Allocate via @ref alp_pwm_capture_open. */
+typedef struct alp_pwm_capture alp_pwm_capture_t;
+
+/** Configuration passed to @ref alp_pwm_capture_open. */
+typedef struct {
+    uint32_t               channel_id; /**< PWM channel index (0..7) used as input. */
+    alp_pwm_capture_edge_t edge;       /**< Edge polarity selector. */
+} alp_pwm_capture_config_t;
+
+/**
+ * @brief Reconfigure a PWM channel as an input-capture source.
+ *
+ * Switches the channel's pin from output mode to input-capture
+ * mode, arms the underlying timer to latch the counter on each
+ * edge of @p cfg->edge, and returns a handle.  Subsequent calls
+ * to @ref alp_pwm_capture_read drain the latest period + pulse-
+ * width measurements.  The channel cannot be used as a regular
+ * PWM output while capture is active -- close the capture handle
+ * (@ref alp_pwm_capture_close) before re-opening for output.
+ *
+ * Useful for: tachometer-style frequency measurement; fan-tach
+ * RPM; quad-encoder index pulse timing; servo PWM input
+ * decoding; LIDAR pulse-width return.
+ *
+ * @param[in] cfg  Configuration.  Must be non-NULL.
+ *
+ * @return Handle on success, or NULL with @ref alp_last_error set
+ *         to ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE (channel_id) /
+ *         ALP_ERR_NOSUPPORT (backend lacks an input-capture
+ *         primitive -- V2N bridge-only today; the wave-2 GD32
+ *         HAL body lands once the firmware
+ *         CMD_PWM_CAPTURE_BEGIN handler is implemented) /
+ *         ALP_ERR_BUSY (the channel is already open as an
+ *         output) / ALP_ERR_NOMEM.
+ */
+alp_pwm_capture_t *alp_pwm_capture_open(const alp_pwm_capture_config_t *cfg);
+
+/**
+ * @brief Read the latest captured period + pulse-width.
+ *
+ * Reports the period (rising-edge to rising-edge) and the
+ * active-level pulse width (rising-edge to next falling-edge) of
+ * the most recently sampled cycle on the input pin.  If no edge
+ * has been seen since the last call, returns ALP_ERR_NOT_READY.
+ *
+ * Values are in nanoseconds, capped at the timer's overflow
+ * value -- a static signal returns OUT_OF_RANGE on the firmware
+ * side once the counter wraps.
+ *
+ * @param[in]  cap            Handle from @ref alp_pwm_capture_open.
+ * @param[out] period_ns_out  Receives the period in ns.  May be NULL
+ *                            if the caller only wants the pulse width.
+ * @param[out] pulse_ns_out   Receives the active-level pulse width in
+ *                            ns.  May be NULL if the caller only wants
+ *                            the period.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY (no edge yet) / ALP_ERR_INVAL /
+ *         ALP_ERR_OUT_OF_RANGE (counter wrapped between edges --
+ *         signal too slow for the timer's tick rate) / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
+ */
+alp_status_t alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_out,
+                                  uint32_t *pulse_ns_out);
+
+/**
+ * @brief Close a capture handle and release the channel.
+ *
+ * Reverts the channel's pin direction (input -> tri-state) so the
+ * caller can re-open the channel as an output via
+ * @ref alp_pwm_open after this call.  NULL is a no-op.
+ *
+ * @param[in] cap  Handle from @ref alp_pwm_capture_open, or NULL.
+ */
+void alp_pwm_capture_close(alp_pwm_capture_t *cap);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif
