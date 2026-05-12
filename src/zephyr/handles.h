@@ -78,6 +78,9 @@ extern "C" {
 #ifndef CONFIG_ALP_SDK_MAX_DAC_HANDLES
 #define CONFIG_ALP_SDK_MAX_DAC_HANDLES   2
 #endif
+#ifndef CONFIG_ALP_SDK_MAX_ADC_STREAM_HANDLES
+#define CONFIG_ALP_SDK_MAX_ADC_STREAM_HANDLES 2
+#endif
 
 /* ------------------------------------------------------------------ */
 /* I2C                                                                 */
@@ -266,6 +269,25 @@ struct alp_dac {
 };
 
 /* ------------------------------------------------------------------ */
+/* Streaming ADC                                                       */
+/*                                                                     */
+/* `via_bridge` -> dispatch through the V2N supervisor singleton       */
+/* (CONFIG_ALP_SDK_V2N_SUPERVISOR; same singleton serves V2N + V2N-M1, */
+/* both of which carry the GD32G553).  Non-bridge SoMs surface         */
+/* ALP_ERR_NOSUPPORT at open time; the struct is still defined so the  */
+/* pool + handle plumbing compile cleanly without #if guards.          */
+/* ------------------------------------------------------------------ */
+
+struct alp_adc_stream {
+    bool      in_use;
+    bool      via_bridge;
+    uint8_t   stream_id;       /* backend slot index (0..1 on the V2N family) */
+    uint8_t   channel;         /* hardware channel id */
+    uint32_t  channel_id;
+    uint32_t  sample_rate_hz;
+};
+
+/* ------------------------------------------------------------------ */
 /* Last-error helpers — internal use only.                              */
 /* Stamps a precise alp_status_t before alp_*_open returns NULL.        */
 /* ------------------------------------------------------------------ */
@@ -320,6 +342,9 @@ void                alp_z_wdt_pool_release(struct alp_wdt *h);
 
 struct alp_dac     *alp_z_dac_pool_acquire(void);
 void                alp_z_dac_pool_release(struct alp_dac *h);
+
+struct alp_adc_stream *alp_z_adc_stream_pool_acquire(void);
+void                   alp_z_adc_stream_pool_release(struct alp_adc_stream *h);
 
 #ifdef __cplusplus
 }

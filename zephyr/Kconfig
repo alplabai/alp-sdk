@@ -117,6 +117,15 @@ config ALP_SDK_MAX_DAC_HANDLES
 	int "Maximum concurrent alp_dac_t handles"
 	default 2
 
+config ALP_SDK_MAX_ADC_STREAM_HANDLES
+	int "Maximum concurrent alp_adc_stream_t handles"
+	default 2
+	help
+	  Pool size for DMA-backed streaming-ADC handles.  On the V2N
+	  family (V2N + V2N-M1) the GD32G553 supervisor MCU exposes
+	  exactly two concurrent stream slots (one per DMA controller);
+	  raise only if a future backend grows additional slots.
+
 config ALP_SDK_V2N_SUPERVISOR
 	bool "V2N supervisor singleton (GD32G553 bridge auto-init)"
 	default y if ALP_SOC_RENESAS_RZV2N_N44 && ALP_SDK_CHIP_GD32G553

@@ -8,19 +8,22 @@
  * @brief ALP SDK analog-to-digital + digital-to-analog converter abstraction.
  *
  * One-shot ADC reads + DAC writes against studio-resolved channel
- * indices.  The channel-config side (resolution, gain, reference,
- * acquisition time) lives in devicetree on the Zephyr backend; this
- * header only exposes the runtime knobs apps actually tune.
+ * indices, plus DMA-backed continuous-acquisition streaming on SoMs
+ * whose backend supports it.  The channel-config side (resolution,
+ * gain, reference, acquisition time) lives in devicetree on the
+ * Zephyr backend; this header only exposes the runtime knobs apps
+ * actually tune.
  *
  * Backends:
- *   - Zephyr   : `adc_*` / `dac_*` driver classes.  On V2N the SDK
- *                routes both through the GD32 IO MCU bridge (per the
- *                2026-05-12 hardware decision — see
- *                `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`).
+ *   - Zephyr   : `adc_*` / `dac_*` driver classes.  On the V2N family
+ *                (V2N + V2N-M1, both of which carry the GD32G553
+ *                supervisor MCU) the SDK routes both through the GD32
+ *                IO MCU bridge (per the 2026-05-12 hardware decision
+ *                — see `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`).
  *   - Yocto    : Industrial I/O sysfs (`/sys/bus/iio/devices/`).
  *   - Baremetal: vendor HAL ADC sequencer + DAC channel registers.
  *
- * Typical usage:
+ * Typical usage (one-shot):
  * @code
  *     alp_adc_t *th = alp_adc_open(&(alp_adc_config_t){
  *         .channel_id = 0,
@@ -37,11 +40,25 @@
  *     alp_dac_write_mv(out, 1650u);   // mid-rail on a 3.3 V reference
  *     alp_dac_close(out);
  * @endcode
+ *
+ * Typical usage (streaming, V2N family only today):
+ * @code
+ *     alp_adc_stream_t *s = alp_adc_stream_open(&(alp_adc_stream_config_t){
+ *         .channel_id     = 0,
+ *         .sample_rate_hz = 100000,
+ *     });
+ *     uint16_t buf[32];
+ *     size_t got = 0;
+ *     alp_adc_stream_read(s, buf, ARRAY_SIZE(buf), &got);  // drain ring
+ *     ...
+ *     alp_adc_stream_close(s);
+ * @endcode
  */
 
 #ifndef ALP_ADC_H
 #define ALP_ADC_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "alp/peripheral.h"
@@ -63,12 +80,24 @@ typedef struct alp_adc alp_adc_t;
 
 /** Configuration passed to @ref alp_adc_open. */
 typedef struct {
-    uint32_t      channel_id;       /**< Studio-resolved ADC channel index (0..7). */
-    uint8_t       resolution_bits;  /**< 8 / 10 / 12 / 14 / 16 typical. 0 = use DT default. */
-    uint16_t      acquisition_us;   /**< Sample-and-hold time, microseconds. */
+    uint32_t      channel_id;          /**< Studio-resolved ADC channel index (0..7). */
+    uint8_t       resolution_bits;     /**< 8 / 10 / 12 / 14 / 16 typical. 0 = use DT default. */
+    uint16_t      acquisition_us;      /**< Sample-and-hold time, microseconds. */
     alp_adc_ref_t reference;
-    uint8_t       gain_num;         /**< Gain numerator (e.g. 1 for 1/1). */
-    uint8_t       gain_den;         /**< Gain denominator (e.g. 6 for 1/6). */
+    uint8_t       gain_num;            /**< Gain numerator (e.g. 1 for 1/1). */
+    uint8_t       gain_den;            /**< Gain denominator (e.g. 6 for 1/6). */
+    /** Hardware oversampling ratio (1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256).
+     *  Backend rounds down to the nearest power-of-two it supports.  0 means
+     *  "backend default".  Backends without HW oversampling ignore this
+     *  field; the SoC-cap layer documents which SoMs honour it. */
+    uint16_t      oversampling_ratio;
+    /** Extra sample-and-hold cycles at the ADC clock.  Backend rounds to
+     *  its nearest discrete tap (8 taps on the GD32 IO MCU; vendor-defined
+     *  elsewhere).  0 means "backend default".  Mutually independent from
+     *  @c acquisition_us -- @c acquisition_us is a portable time-domain
+     *  expression; @c sample_cycles is the backend-rounded discrete-tap
+     *  expression for callers that already know which tap they want. */
+    uint16_t      sample_cycles;
 } alp_adc_config_t;
 
 /**
@@ -76,8 +105,11 @@ typedef struct {
  *
  * Resolves @p cfg->channel_id via the `alp-adc<N>` devicetree alias,
  * applies the channel-config registers, and returns a handle ready
- * for one-shot reads.  Continuous-sampling and DMA streaming arrive
- * in v0.3 as a separate API.
+ * for one-shot reads.  When the backend supports the optional tuning
+ * fields (@c oversampling_ratio, @c sample_cycles, non-default
+ * @c resolution_bits) and any of them are non-zero, the SDK pushes
+ * them to the channel before returning the handle.  For DMA-backed
+ * continuous acquisition use @ref alp_adc_stream_open.
  *
  * @param[in] cfg  Configuration.  Must be non-NULL; @c channel_id < 8.
  * @return Open handle on success, or NULL if the channel can't be
@@ -122,6 +154,78 @@ alp_status_t alp_adc_read_uv(alp_adc_t *adc, int32_t *uv_out);
  * @param[in] adc  Handle from @ref alp_adc_open, or NULL.
  */
 void         alp_adc_close(alp_adc_t *adc);
+
+/* ================================================================== */
+/* Streaming ADC acquisition                                           */
+/* ================================================================== */
+
+/** Opaque streaming-ADC handle.  Allocate via @ref alp_adc_stream_open. */
+typedef struct alp_adc_stream alp_adc_stream_t;
+
+/** Configuration passed to @ref alp_adc_stream_open. */
+typedef struct {
+    uint32_t channel_id;          /**< Studio-resolved ADC channel index (0..7). */
+    uint32_t sample_rate_hz;      /**< Target sample rate (Hz).  Backend rounds
+                                    *  down to its nearest achievable value and
+                                    *  caps at the active SoM's hardware ceiling
+                                    *  (~1.5 MSps on V2N at 12-bit). */
+} alp_adc_stream_config_t;
+
+/**
+ * @brief Open a DMA-backed continuous-conversion stream on an ADC channel.
+ *
+ * The SDK reserves one of the backend's internal stream slots and
+ * binds it to @p cfg->channel_id at @p cfg->sample_rate_hz.  On the
+ * V2N family (V2N + V2N-M1) up to two slots are available concurrently
+ * (one per GD32 DMA controller); on SoMs without a comparable HW
+ * streaming backend the call returns NULL with last-error =
+ * @ref ALP_ERR_NOSUPPORT.
+ *
+ * @param[in] cfg  Configuration.  Must be non-NULL.
+ * @return Open handle on success, or NULL with @ref alp_last_error set to
+ *         one of:
+ *         - @ref ALP_ERR_INVAL on NULL cfg or zero sample-rate,
+ *         - @ref ALP_ERR_OUT_OF_RANGE on channel_id >= 8,
+ *         - @ref ALP_ERR_NOSUPPORT on SoMs without a streaming backend,
+ *         - @ref ALP_ERR_NOT_READY when the backend transport is not
+ *           configured (e.g. V2N supervisor with no bus ids set),
+ *         - @ref ALP_ERR_BUSY when all stream slots are already in use,
+ *         - @ref ALP_ERR_NOMEM when the handle pool is exhausted.
+ */
+alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg);
+
+/**
+ * @brief Drain pending samples from the stream's backend ring.
+ *
+ * The backend's per-call sample ceiling is hardware-defined (32 on
+ * the V2N family's GD32 IO MCU); callers wanting more than that per
+ * logical batch must loop.  A return value of @ref ALP_OK with
+ * @p *got == 0 means the backend ring was empty since the last read
+ * -- not an error.
+ *
+ * @param[in]  stream  Handle from @ref alp_adc_stream_open.
+ * @param[out] mv      Caller buffer for the sample values (mV, u16).
+ *                     Length >= @p cap.
+ * @param[in]  cap     Capacity of @p mv (samples, not bytes).
+ * @param[out] got     Number of samples actually copied; may be 0.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY (stream closed or backend not
+ *         reachable) / ALP_ERR_INVAL (NULL out pointers) /
+ *         ALP_ERR_BUSY (backend ring overran -- poll faster) /
+ *         ALP_ERR_IO.
+ */
+alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream,
+                                 uint16_t *mv, size_t cap, size_t *got);
+
+/**
+ * @brief Close the stream, releasing its backend slot + handle.
+ *
+ * Issues the backend's stream-end so the DMA channel + ring buffer
+ * are freed before the handle returns to the pool.  NULL is a no-op.
+ *
+ * @param[in] stream  Handle from @ref alp_adc_stream_open, or NULL.
+ */
+void alp_adc_stream_close(alp_adc_stream_t *stream);
 
 /* ================================================================== */
 /* DAC                                                                 */

@@ -63,6 +63,43 @@ that lands before the v0.3.0 tag.)
 
 ### Added (2026-05-14)
 
+- **`<alp/adc.h>` -- portable streaming ADC surface + v0.3 configure knobs (2026-05-14).**
+  Wires the customer-facing path for the v0.3 wire opcodes the prior
+  commit shipped on the GD32 side, with no `gd32g553_*` symbols
+  visible to application code (per
+  `memory/feedback_portable_hw_offload_with_sw_fallback.md`).  Two
+  additions:
+  - `alp_adc_config_t` grows `oversampling_ratio` (1..256, rounded
+    down to power-of-two) and `sample_cycles` (rounded down to the
+    backend's nearest discrete tap).  When either is non-zero --
+    or `resolution_bits` differs from the firmware default -- the
+    V2N-family backend pushes the values via
+    `gd32g553_adc_configure` between supervisor-acquire and
+    handle-return so the very first `alp_adc_read_*` already
+    honours the tuning.  Existing zero-initialised configs keep
+    today's behaviour.
+  - New opaque `alp_adc_stream_t` + `alp_adc_stream_config_t`
+    (channel + sample rate) with `alp_adc_stream_open` /
+    `_read` / `_close`.  On the V2N family (V2N + V2N-M1, both
+    of which carry the GD32G553) up to two streams run
+    concurrently against different channels / sample rates,
+    each one binding to one of the GD32's DMA controllers via
+    `gd32g553_adc_stream_*`; the portable surface tracks slot
+    allocation locally under a small mutex so probing
+    `STREAM_BEGIN` against a sibling caller's slot never
+    happens.  Non-bridge SoMs surface `ALP_ERR_NOSUPPORT` at
+    open time -- the Zephyr `adc_*` driver class has no
+    portable streaming primitive that matches, and a polling-
+    thread software fallback is reserved for the wave-2 DSP
+    pipeline so the contract stays honest until then.  New
+    Kconfig: `CONFIG_ALP_SDK_MAX_ADC_STREAM_HANDLES`
+    (default 2 to mirror the GD32 stream-slot count).
+  Tests under `tests/zephyr/peripheral/src/main.c` cover the
+  NULL-cfg / NULL-out / out-of-range / zero-rate / NOSUPPORT-on-no-
+  backend paths plus the V2N supervisor `NOT_READY without buses`
+  rollback (asserts the local slot bitmap unwinds so a later open
+  can still claim slot 0).
+
 - **GD32 bridge protocol v0.3 -- GD32G5 HW knobs (PWM/ADC config, two-DMA ADC streaming, TRNG) (2026-05-14).**
   Bumps `PROTOCOL_VERSION_MINOR` 2 -> 3 to surface a chunk of the
   GD32G5's hardware feature set the v0.1/v0.2 protocols left on

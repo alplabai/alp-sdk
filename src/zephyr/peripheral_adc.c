@@ -38,6 +38,8 @@
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/adc.h>
+#include <zephyr/init.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 
 #include "alp/adc.h"
@@ -121,6 +123,41 @@ static alp_status_t errno_to_alp(int err) {
 }
 
 #if ALP_ADC_HAS_BRIDGE_PATH
+/* Stream-slot bitmap.  The GD32G553 firmware exposes exactly
+ * GD32G553_BRIDGE_ADC_STREAM_COUNT (= 2) DMA-backed streams; the
+ * portable surface tracks allocation locally so alp_adc_stream_open
+ * doesn't have to probe the firmware with a speculative
+ * STREAM_BEGIN that could collide with another caller's existing
+ * slot.  Same bitmap covers V2N and V2N-M1 (shared supervisor). */
+static struct k_mutex bridge_stream_lock;
+static uint8_t        bridge_streams_used;
+
+static int bridge_stream_lock_init(void) {
+    k_mutex_init(&bridge_stream_lock);
+    return 0;
+}
+SYS_INIT(bridge_stream_lock_init, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+
+static int bridge_stream_alloc_slot(void) {
+    k_mutex_lock(&bridge_stream_lock, K_FOREVER);
+    int slot = -1;
+    for (int i = 0; i < (int)GD32G553_BRIDGE_ADC_STREAM_COUNT; ++i) {
+        if (!(bridge_streams_used & (1u << i))) {
+            bridge_streams_used |= (uint8_t)(1u << i);
+            slot = i;
+            break;
+        }
+    }
+    k_mutex_unlock(&bridge_stream_lock);
+    return slot;
+}
+
+static void bridge_stream_free_slot(uint8_t slot) {
+    k_mutex_lock(&bridge_stream_lock, K_FOREVER);
+    bridge_streams_used &= (uint8_t)~(1u << slot);
+    k_mutex_unlock(&bridge_stream_lock);
+}
+
 static alp_adc_t *bridge_open(const alp_adc_config_t *cfg) {
     /* The bridge advertises a fixed 12-bit / ~3.3 V reference DAC;
      * its ADC_READ replies are already mV-corrected, so the host
@@ -135,12 +172,30 @@ static alp_adc_t *bridge_open(const alp_adc_config_t *cfg) {
     }
 
     /* Probe the supervisor up-front so the first read doesn't surface
-     * the bus-open failure as a runtime error. */
+     * the bus-open failure as a runtime error, AND -- when the caller
+     * asked for any v0.3 tuning knob -- push the configuration in
+     * before returning the handle.  Holding the mutex for the whole
+     * window keeps the probe + configure atomic from the supervisor's
+     * point of view. */
     gd32g553_t *ctx = NULL;
     alp_status_t s = alp_z_v2n_supervisor_acquire(&ctx);
     if (s != ALP_OK) {
         alp_z_set_last_error(s);
         return NULL;
+    }
+    if (cfg->oversampling_ratio != 0u ||
+        cfg->sample_cycles      != 0u ||
+        cfg->resolution_bits    != 0u) {
+        s = gd32g553_adc_configure(ctx,
+                                   (uint8_t)cfg->channel_id,
+                                   cfg->oversampling_ratio,
+                                   cfg->sample_cycles,
+                                   cfg->resolution_bits);
+        if (s != ALP_OK) {
+            alp_z_v2n_supervisor_release();
+            alp_z_set_last_error(s);
+            return NULL;
+        }
     }
     alp_z_v2n_supervisor_release();
 
@@ -312,4 +367,133 @@ alp_status_t alp_adc_read_uv(alp_adc_t *adc, int32_t *uv_out) {
 
 void alp_adc_close(alp_adc_t *adc) {
     alp_z_adc_pool_release(adc);
+}
+
+/* ====================================================================== */
+/* Streaming ADC -- DMA-backed continuous acquisition.                     */
+/*                                                                         */
+/* V2N family (V2N + V2N-M1): both SoMs carry the GD32G553 supervisor MCU, */
+/* whose firmware exposes GD32G553_BRIDGE_ADC_STREAM_COUNT concurrent      */
+/* DMA-backed streams (one slot per DMA controller).  The portable        */
+/* surface wraps STREAM_BEGIN / STREAM_READ / STREAM_END via the shared    */
+/* supervisor singleton.                                                   */
+/*                                                                         */
+/* Other SoMs: the Zephyr `adc_*` driver class has no portable streaming   */
+/* primitive that matches this contract, so alp_adc_stream_open returns    */
+/* NULL with last-error = ALP_ERR_NOSUPPORT.  A future polling-thread      */
+/* software fallback (timer + ring buffer) lives on the wave-2 roadmap.    */
+/* ====================================================================== */
+
+alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg) {
+    alp_z_clear_last_error();
+
+    if (cfg == NULL) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+
+#if ALP_ADC_HAS_BRIDGE_PATH
+    if (cfg->channel_id >= 8u) {
+        alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
+        return NULL;
+    }
+    if (cfg->sample_rate_hz == 0u) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+
+    /* Reserve a backend slot before touching the supervisor.  Returns
+     * -1 when both DMA-backed streams are already in use. */
+    int slot = bridge_stream_alloc_slot();
+    if (slot < 0) {
+        alp_z_set_last_error(ALP_ERR_BUSY);
+        return NULL;
+    }
+
+    gd32g553_t *ctx = NULL;
+    alp_status_t s = alp_z_v2n_supervisor_acquire(&ctx);
+    if (s != ALP_OK) {
+        bridge_stream_free_slot((uint8_t)slot);
+        alp_z_set_last_error(s);
+        return NULL;
+    }
+    s = gd32g553_adc_stream_begin(ctx, (uint8_t)slot,
+                                  (uint8_t)cfg->channel_id,
+                                  cfg->sample_rate_hz);
+    alp_z_v2n_supervisor_release();
+
+    if (s != ALP_OK) {
+        bridge_stream_free_slot((uint8_t)slot);
+        alp_z_set_last_error(s);
+        return NULL;
+    }
+
+    struct alp_adc_stream *h = alp_z_adc_stream_pool_acquire();
+    if (h == NULL) {
+        /* Roll the bridge stream back so the slot is reusable. */
+        if (alp_z_v2n_supervisor_acquire(&ctx) == ALP_OK) {
+            (void)gd32g553_adc_stream_end(ctx, (uint8_t)slot);
+            alp_z_v2n_supervisor_release();
+        }
+        bridge_stream_free_slot((uint8_t)slot);
+        alp_z_set_last_error(ALP_ERR_NOMEM);
+        return NULL;
+    }
+
+    h->via_bridge     = true;
+    h->stream_id      = (uint8_t)slot;
+    h->channel        = (uint8_t)cfg->channel_id;
+    h->channel_id     = cfg->channel_id;
+    h->sample_rate_hz = cfg->sample_rate_hz;
+    return h;
+#else
+    alp_z_set_last_error(ALP_ERR_NOSUPPORT);
+    return NULL;
+#endif  /* ALP_ADC_HAS_BRIDGE_PATH */
+}
+
+alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream,
+                                 uint16_t *mv, size_t cap, size_t *got) {
+    if (got == NULL) return ALP_ERR_INVAL;
+    *got = 0u;
+    if (stream == NULL || !stream->in_use) return ALP_ERR_NOT_READY;
+    if (mv == NULL) return ALP_ERR_INVAL;
+    if (cap == 0u) return ALP_OK;
+
+#if ALP_ADC_HAS_BRIDGE_PATH
+    if (stream->via_bridge) {
+        /* Backend caps per-call at GD32G553_BRIDGE_ADC_STREAM_READ_MAX
+         * (= 32); callers wanting more loop in their own thread. */
+        const uint8_t want = (cap > (size_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX)
+                               ? (uint8_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX
+                               : (uint8_t)cap;
+        uint8_t       got_this = 0u;
+
+        gd32g553_t *ctx = NULL;
+        alp_status_t s = alp_z_v2n_supervisor_acquire(&ctx);
+        if (s != ALP_OK) return s;
+        s = gd32g553_adc_stream_read(ctx, stream->stream_id,
+                                     want, &got_this, mv);
+        alp_z_v2n_supervisor_release();
+        if (s != ALP_OK) return s;
+        *got = got_this;
+        return ALP_OK;
+    }
+#endif
+    return ALP_ERR_NOSUPPORT;
+}
+
+void alp_adc_stream_close(alp_adc_stream_t *stream) {
+    if (stream == NULL) return;
+#if ALP_ADC_HAS_BRIDGE_PATH
+    if (stream->via_bridge) {
+        gd32g553_t *ctx = NULL;
+        if (alp_z_v2n_supervisor_acquire(&ctx) == ALP_OK) {
+            (void)gd32g553_adc_stream_end(ctx, stream->stream_id);
+            alp_z_v2n_supervisor_release();
+        }
+        bridge_stream_free_slot(stream->stream_id);
+    }
+#endif
+    alp_z_adc_stream_pool_release(stream);
 }
