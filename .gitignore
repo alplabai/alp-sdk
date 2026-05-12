@@ -84,3 +84,8 @@ venv/
 # MCUboot signing keys -- per-directory .gitignore at keys/.gitignore
 # keeps the development key file out of git; production public keys
 # (*.pub.pem) are explicitly allowed back in.
+
+# Maintainer-local notes (morning handoffs, scratch capture).
+# These are deliberately uncommitted -- they capture run state for
+# the next day, not durable documentation.
+notes/

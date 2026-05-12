@@ -63,8 +63,10 @@ gd32-bridge/
 │   ├── protocol.c                   (shared command-handler table)
 │   ├── protocol.h
 │   ├── transport_spi.c              (SPI-slave receive + reply staging)
-│   └── transport_i2c.c              (I2C-slave receive + reply staging)
+│   ├── transport_i2c.c              (I2C-slave receive + reply staging)
+│   └── bootloader/                  (OTA-opcode scaffold; STATUS_NOSUPPORT)
 └── tests/
+    ├── gen_protocol_vectors.py      (CRC + wire-vector generator)
     └── protocol_vectors.txt         (CRC + wire vectors shared with host)
 ```
 
@@ -79,8 +81,8 @@ change.  See the project-memory note
 | Method                                | Status today      | Notes                                                                                                                                  |
 |---------------------------------------|-------------------|----------------------------------------------------------------------------------------------------------------------------------------|
 | External SWD probe (J-Link, ST-Link)  | **Supported.**    | SWDIO + SWCLK accessible on the V2N module's programming header.                                                                       |
-| In-system upgrade over SPI / I2C      | **Planned.**      | Application-bootloader path; opcodes `0xF0..0xFF` reserved in the protocol.  Lands once the maintainer has the bootloader sequence finalised.  See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path A. |
-| Host-driven SWD bit-bang from V2N     | **Planned.**      | Renesas-side software SWD controller drives `GD32_SWDIO` + `GD32_SWCLK` (routed back to V2N pads per the 2026-05-12 HW decision); universal recovery + factory first-flash.  See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path B. |
+| In-system upgrade over SPI / I2C      | **Scaffolded.**   | Application-bootloader path; opcodes `0xF0..0xFF` reserved in the protocol and routed through `src/bootloader/`.  Handlers reply `STATUS_NOSUPPORT` until the FMC integration lands.  See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path A. |
+| Host-driven SWD bit-bang from V2N     | **Scaffolded.**   | Renesas-side software SWD controller drives `GD32_SWDIO` + `GD32_SWCLK` (routed back to V2N pads per the 2026-05-12 HW decision); universal recovery + factory first-flash.  Driver lives at [`chips/gd32_swd/`](../chips/gd32_swd/) (`driver_status: partial` until exercised on real silicon).  See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path B. |
 
 ## Cross-link
 

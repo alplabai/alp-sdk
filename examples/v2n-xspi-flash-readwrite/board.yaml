@@ -1,0 +1,15 @@
+schema_version: 1
+
+som:
+  sku: E1M-V2N101
+
+carrier:
+  name: E1M-X-EVK
+
+os: zephyr
+
+peripherals:
+  - flash
+
+diagnostics:
+  log_level: info
