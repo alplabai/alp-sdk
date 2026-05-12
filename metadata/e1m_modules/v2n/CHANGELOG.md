@@ -6,8 +6,8 @@ revs so firmware engineers can keep compatibility across the
 `min_sdk_version` / `max_sdk_version` windows declared in
 [`hw-revisions.yaml`](hw-revisions.yaml).
 
-Detailed schematic-level rev notes (resistor IDs, layout deltas,
-design rationale) live in the private companion repo.
+Detailed internal rev notes (resistor IDs, layout deltas, design
+rationale) are held outside this tree.
 
 ## r1 -- production (initial release, 2026-05-12)
 

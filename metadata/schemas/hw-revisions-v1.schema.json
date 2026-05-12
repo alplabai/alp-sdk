@@ -54,7 +54,7 @@
         "changes": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Bullet list of changes from the previous rev (pin moves, chip swaps, RC bumps).  Customer-visible; schematic-level details live in the private companion repo."
+          "description": "Bullet list of changes from the previous rev (pin moves, chip swaps, RC bumps).  Customer-visible summary; deeper internal detail is held outside this tree."
         }
       }
     }

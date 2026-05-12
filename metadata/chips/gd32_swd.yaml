@@ -1,0 +1,52 @@
+# ALP SDK chip manifest: bit-bang SWD controller for the GD32G553.
+schema_version:   1
+chip_id:          gd32_swd
+driver_status:    partial          # Packet layer + DPIDR + halt + FMC erase/write/verify
+                                   # all coded.  Pad assignments TBD on V2N (see notes).
+                                   # Flips to "complete" once exercised on real silicon.
+display_name:     "Bit-banged SWD controller (GD32G553 target, V2N host-driven)"
+vendor:           alplab           # Implementation owned by ALP Lab; the underlying SWD
+                                   # protocol is Arm Coresight (Arm DDI 0316C).
+mpn_population:
+  - "N/A (host-side software; no on-module silicon)"
+datasheet:
+  primary:        "Arm DDI 0316C -- ADIv5 Architecture Specification"
+  reference:      "Arm DUI 0552A -- Coresight DAP Bit-bang Algorithms"
+  target:         "GigaDevice GD32G553 User Manual Rev. 1.2 (FMC §3)"
+
+notes: |
+  The companion GD32G553MEY7TR on V2N / V2N-M1 carries the standard
+  Arm Coresight SWD debug port.  Per the 2026-05-12 hardware
+  decision the V2N carrier routes GD32_SWDIO + GD32_SWCLK + GD32_NRST
+  back to the Renesas RZ/V2N host so the host can reflash the
+  supervisor MCU in the field without an external probe.
+
+  This chip module implements the SWD packet layer + the GD32G553
+  FMC flash sequence (KEY1 / KEY2 unlock, PER + PNB sector erase,
+  doubleword PG write).  No vendor SDK pulled in; only public
+  algorithms from the Arm spec + the GD32G553 user manual.
+
+  Pad assignments on V2N are still TBD pending the maintainer's
+  next schematic revision; the driver does not encode them -- the
+  caller hands in three pre-opened alp_gpio_t handles.
+
+bus:              gpio              # bit-bang SWD on three GPIOs
+
+signals:
+  - { name: SWDIO, type: bidir,        v2n_route: "TBD (Renesas)  <-> GD32 PA13",
+      notes: "host switches between input and output during data phase + ACK" }
+  - { name: SWCLK, type: output,       v2n_route: "TBD (Renesas)  <-> GD32 PA14",
+      notes: "host-driven; default ~1 MHz; configurable via gd32_swd_set_clock_delay" }
+  - { name: NRST,  type: open_drain,   v2n_route: "P74 <-> GD32 NRST",
+      notes: "shared with primary PMIC reset out; host pad MUST be open-drain" }
+
+target_expected_idcode:  "0x6BA02477"   # Cortex-M33 r0p1 SW-DPv2
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_GD32_SWD
+  baremetal:      ALP_SDK_CHIP_GD32_SWD
+  yocto:          n/a
+
+families:
+  - v2n
+  - v2n-m1

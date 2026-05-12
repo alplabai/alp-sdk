@@ -41,6 +41,7 @@ set(GD32_BRIDGE_SOURCES
     src/protocol.c
     src/transport_spi.c
     src/transport_i2c.c
+    src/bootloader/bootloader.c
 )
 
 if(BRIDGE_HAL_BACKEND STREQUAL "stub")

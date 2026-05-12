@@ -23,6 +23,7 @@
 
 #include "protocol.h"
 #include "../hal/bridge_hw.h"
+#include "bootloader/bootloader.h"
 
 /* --------------------------------------------------------------- */
 /* CRC-16 / CCITT-FALSE -- shared with transports.                   */
@@ -264,6 +265,15 @@ gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
     case CMD_ADC_READ:              h = handle_adc_read;       break;
     case CMD_DA9292_STATUS_FORWARD: h = handle_da9292_forward; break;
     default:
+        /* Route the reserved OTA opcode range (0xF0..0xFF) through
+         * the application bootloader's dispatcher.  Bodies return
+         * STATUS_NOSUPPORT until the FMC HAL lands -- see
+         * src/bootloader/. */
+        if (cmd >= CMD_OTA_BEGIN && cmd <= 0xFFu) {
+            return bl_dispatch_ota(cmd, req_payload, req_payload_len,
+                                   reply_payload, reply_payload_cap,
+                                   reply_payload_len);
+        }
         *reply_payload_len = 0u;
         return STATUS_NOSUPPORT;
     }

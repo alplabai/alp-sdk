@@ -4,7 +4,7 @@ Per-rev summary of pin / component / configuration changes on the
 V2N-M1 SoM family.  V2N-M1 inherits the V2N base ([`../v2n/CHANGELOG.md`](../v2n/CHANGELOG.md))
 plus the deltas listed here.
 
-Detailed schematic-level rev notes live in the private companion repo.
+Detailed internal rev notes are held outside this tree.
 
 ## r1 -- production (initial release, 2026-05-12)
 

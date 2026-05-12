@@ -6,7 +6,7 @@ revision, only SoC changes", the family ships one module PCB
 design today; SoC-tier deltas (E3..E8) are captured in the
 per-SKU `som.yaml` files, not as hw-revisions of the module.
 
-Detailed schematic-level rev notes live in the private companion repo.
+Detailed internal rev notes are held outside this tree.
 
 ## r1 -- production (initial release)
 

@@ -49,6 +49,49 @@
         "doc_id":        { "type": "string", "description": "Vendor doc id, e.g. ADTS0007." }
       }
     },
+    "hwrm": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional pointer to a Hardware Reference Manual that supplements the datasheet (Alif Ensemble family uses these heavily). The PDF itself does not live in the repo; this block carries provenance only.",
+      "properties": {
+        "version":      { "type": "string" },
+        "source":       { "type": "string", "description": "Filename of the PDF the data was extracted from." },
+        "doc_id":       { "type": "string" },
+        "confidential": { "type": "boolean", "default": false, "description": "When true, the PDF is NDA-bound and stays out of git. The block is kept here for traceability." }
+      }
+    },
+    "errata": {
+      "type": "array",
+      "description": "Optional vendor errata documents the SoC is subject to. Per-item ids + workarounds let the metadata pipeline surface affected silicon revisions to the studio.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "source"],
+        "properties": {
+          "version":      { "type": "string" },
+          "source":       { "type": "string", "description": "Filename of the errata PDF." },
+          "doc_id":       { "type": "string" },
+          "published":    { "type": "string", "description": "Year-month (YYYY-MM) of vendor publication." },
+          "title_quirk":  { "type": "string", "description": "Notes about discrepancies between the PDF title and its actual scope." },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "title"],
+              "properties": {
+                "id":                 { "type": "string", "description": "Vendor-issued errata id (e.g. ER001)." },
+                "title":              { "type": "string" },
+                "affected_revisions": { "type": "array", "items": { "type": "string" } },
+                "resolution":         { "type": "string" },
+                "consequence":        { "type": "string" },
+                "workaround":         { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
 
     "cores": {
       "type": "array",
@@ -188,16 +231,24 @@
 
     "variant": {
       "type": "object",
-      "required": ["order_code", "package"],
+      "required": ["order_code"],
       "additionalProperties": false,
       "properties": {
         "order_code": {
           "type": "string",
           "description": "Vendor part number. For Alif Ensemble this is the 16-character base PN (without -T / -Y shipment suffix)."
         },
+        "part_number_root": {
+          "type": "string",
+          "description": "Vendor short name without the package / temperature / qualification suffix (e.g. \"i.MX 9352\"). Provided when the full order code is awaiting the maintainer's HW-config writeup."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Per-variant freeform notes (provenance, pending fields, etc.)."
+        },
         "package": {
           "type": "string",
-          "description": "Package identifier, e.g. WLCSP208, FBGA194."
+          "description": "Package identifier, e.g. WLCSP208, FBGA194. Optional when only the short part-number root is known; promoted to required for production variants once the HW-config writeup lands."
         },
         "temperature_grade": {
           "type": "string",

@@ -30,6 +30,10 @@
 #include "alp/chips/bmp581.h"
 #include "alp/chips/gd32g553.h"
 #include "alp/chips/rtl8211fdi.h"
+#include "alp/chips/clk_5l35023b.h"
+#include "alp/chips/murata_lbee5hy2fy.h"
+#include "alp/chips/deepx_dxm1.h"
+#include "alp/chips/pi3dbs12212.h"
 
 #include "fakes.h"
 
@@ -1081,4 +1085,215 @@ ZTEST(alp_chips, test_rtl8211fdi_post_init_rejects_uninitialised)
                   ALP_ERR_NOT_READY);
     zassert_equal(rtl8211fdi_restart_autoneg(&ctx),
                   ALP_ERR_NOT_READY);
+}
+
+/* ------------------------------------------------------------------ */
+/* clk_5l35023b -- Renesas/IDT audio-rate clock generator stub        */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_clk_5l35023b_init_null_args)
+{
+    clk_5l35023b_t ctx;
+    alp_i2c_t     *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 100000,
+    });
+    zassert_not_null(bus);
+
+    zassert_equal(clk_5l35023b_init(NULL, bus, CLK_5L35023B_I2C_ADDR_DEFAULT),
+                  ALP_ERR_INVAL, "NULL ctx must be rejected");
+    zassert_equal(clk_5l35023b_init(&ctx, NULL, CLK_5L35023B_I2C_ADDR_DEFAULT),
+                  ALP_ERR_INVAL, "NULL bus must be rejected");
+    /* 0x80 is out of 7-bit range. */
+    zassert_equal(clk_5l35023b_init(&ctx, bus, 0x80u),
+                  ALP_ERR_INVAL, "addr > 0x7F must be rejected");
+
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_clk_5l35023b_raw_rw_rejects_uninitialised)
+{
+    /* Without a real chip behind the emul controller, the I2C ACK
+     * probe in clk_5l35023b_init will fail and the driver stays in
+     * its zero state.  All subsequent register accesses must report
+     * NOT_READY rather than IO. */
+    clk_5l35023b_t ctx = {0};
+
+    uint8_t v;
+    zassert_equal(clk_5l35023b_read_reg(&ctx, 0u, &v), ALP_ERR_NOT_READY);
+    zassert_equal(clk_5l35023b_write_reg(&ctx, 0u, 0xFFu), ALP_ERR_NOT_READY);
+
+    uint8_t dump[8];
+    zassert_equal(clk_5l35023b_register_dump(&ctx, 0u, dump, sizeof dump),
+                  ALP_ERR_NOT_READY);
+
+    /* deinit on a zero context is a no-op (idempotent). */
+    clk_5l35023b_deinit(&ctx);
+    clk_5l35023b_deinit(NULL);
+}
+
+ZTEST(alp_chips, test_clk_5l35023b_register_dump_rejects_invalid)
+{
+    /* Force the .initialised flag so the function passes the
+     * NOT_READY gate and reaches its INVAL argument-validation
+     * branch.  This is the same trick used by the gd32g553 tests. */
+    clk_5l35023b_t ctx = {.initialised = true};
+
+    /* count == 0 -> INVAL even with a non-NULL out. */
+    uint8_t out[4];
+    zassert_equal(clk_5l35023b_register_dump(&ctx, 0u, out, 0u),
+                  ALP_ERR_INVAL);
+
+    /* NULL out -> INVAL even with a positive count. */
+    zassert_equal(clk_5l35023b_register_dump(&ctx, 0u, NULL, 1u),
+                  ALP_ERR_INVAL);
+}
+
+/* ------------------------------------------------------------------ */
+/* murata_lbee5hy2fy -- Wi-Fi 6 + BLE 5.4 module GPIO surface         */
+/*                                                                    */
+/* The driver delegates the REG_ON outputs to caller-supplied         */
+/* callbacks (because on V2N those lines live on the GD32 supervisor  */
+/* MCU and aren't reachable through Zephyr's GPIO API).  The fake     */
+/* callbacks below capture every set / get into module-local arrays   */
+/* so the tests can observe what the driver wrote.                    */
+/* ------------------------------------------------------------------ */
+
+static bool fake_murata_reg_state[2];
+static int  fake_murata_set_calls;
+
+static int fake_murata_reg_set(murata_reg_t which, bool enable, void *user)
+{
+    (void)user;
+    fake_murata_reg_state[(int)which] = enable;
+    ++fake_murata_set_calls;
+    return 0;
+}
+
+ZTEST(alp_chips, test_murata_lbee5hy2fy_init_null_args)
+{
+    murata_lbee5hy2fy_t ctx;
+    /* NULL ctx -> INVAL. */
+    zassert_equal(murata_lbee5hy2fy_init(NULL, fake_murata_reg_set, NULL,
+                                         NULL, NULL, NULL, NULL),
+                  ALP_ERR_INVAL);
+    /* NULL reg_set callback -> INVAL.  reg_get is optional so it stays
+     * NULL here. */
+    zassert_equal(murata_lbee5hy2fy_init(&ctx, NULL, NULL,
+                                         NULL, NULL, NULL, NULL),
+                  ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_murata_lbee5hy2fy_power_calls_reject_uninitialised)
+{
+    /* Zero-init the ctx; driver sees .initialised == false and must
+     * report NOT_READY rather than IO from the power helpers. */
+    murata_lbee5hy2fy_t ctx = {0};
+
+    zassert_equal(murata_lbee5hy2fy_bt_power(&ctx, true), ALP_ERR_NOT_READY);
+    zassert_equal(murata_lbee5hy2fy_wl_power(&ctx, true), ALP_ERR_NOT_READY);
+
+    bool level;
+    zassert_equal(murata_lbee5hy2fy_bt_host_wake_level(&ctx, &level),
+                  ALP_ERR_NOT_READY);
+    zassert_equal(murata_lbee5hy2fy_wl_host_wake_level(&ctx, &level),
+                  ALP_ERR_NOT_READY);
+
+    /* deinit on uninitialised must be a safe no-op. */
+    murata_lbee5hy2fy_deinit(&ctx);
+    murata_lbee5hy2fy_deinit(NULL);
+}
+
+ZTEST(alp_chips, test_murata_lbee5hy2fy_bt_wake_returns_nosupport_when_pin_null)
+{
+    /* Init the ctx with a working reg_set callback and NULL
+     * bt_dev_wake (the V2N convention -- the line is not routed).
+     * bt_wake_device() must report NOSUPPORT (not NOT_READY). */
+    fake_murata_set_calls    = 0;
+    fake_murata_reg_state[0] = true;  /* seed non-zero to verify init drives low. */
+    fake_murata_reg_state[1] = true;
+
+    murata_lbee5hy2fy_t ctx;
+    alp_status_t s = murata_lbee5hy2fy_init(&ctx, fake_murata_reg_set, NULL,
+                                            NULL, NULL, NULL, NULL);
+    zassert_equal(s, ALP_OK, "init with NULL bt_dev_wake must succeed (V2N path)");
+    zassert_equal(fake_murata_set_calls, 2, "init must drive BOTH regulators low");
+    zassert_false(fake_murata_reg_state[(int)MURATA_REG_BT],
+                  "init must drive BT_REG_ON low");
+    zassert_false(fake_murata_reg_state[(int)MURATA_REG_WL],
+                  "init must drive WL_REG_ON low");
+
+    /* bt_dev_wake handle is NULL by construction. */
+    zassert_equal(murata_lbee5hy2fy_bt_wake_device(&ctx), ALP_ERR_NOSUPPORT);
+
+    murata_lbee5hy2fy_deinit(&ctx);
+}
+
+/* ------------------------------------------------------------------ */
+/* deepx_dxm1 -- DEEPX DX-M1 NPU host-side bring-up sequencer         */
+/*                                                                    */
+/* The driver consumes two opened handles:                            */
+/*   - alp_gpio_t for M1_RESET (Renesas PA6 on V2N-M1)                */
+/*   - pi3dbs12212_t mux context                                       */
+/* The mux context itself takes two alp_gpio_t pinned to PD + SEL.     */
+/* For the NULL-arg coverage we only need the validation rejections   */
+/* to fire; for the post-init-rejection tests we use a zeroed ctx.    */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_deepx_dxm1_init_null_args)
+{
+    deepx_dxm1_t   ctx;
+    /* All three pointer args must be non-NULL.  The validation order is
+     * (ctx, m1_reset, pcie_mux) — any single NULL is rejected.  We don't
+     * need to construct a real mux handle since the function returns
+     * INVAL before it dereferences any of them. */
+    pi3dbs12212_t  bogus_mux = {0};
+    alp_gpio_t    *bogus_pin = (alp_gpio_t *)0xDEADBEEFu;
+
+    zassert_equal(deepx_dxm1_init(NULL, bogus_pin, &bogus_mux,
+                                  PI3DBS_STATE_PATH_0),
+                  ALP_ERR_INVAL, "NULL ctx must be rejected");
+    zassert_equal(deepx_dxm1_init(&ctx, NULL, &bogus_mux,
+                                  PI3DBS_STATE_PATH_0),
+                  ALP_ERR_INVAL, "NULL m1_reset must be rejected");
+    zassert_equal(deepx_dxm1_init(&ctx, bogus_pin, NULL,
+                                  PI3DBS_STATE_PATH_0),
+                  ALP_ERR_INVAL, "NULL mux ctx must be rejected");
+
+    /* Out-of-range deepx_path enum value -- caller must hit one of
+     * PI3DBS_STATE_PATH_0 or PI3DBS_STATE_PATH_1.  PI3DBS_STATE_OFF
+     * isn't a valid "to DEEPX" destination. */
+    zassert_equal(deepx_dxm1_init(&ctx, bogus_pin, &bogus_mux,
+                                  PI3DBS_STATE_OFF),
+                  ALP_ERR_INVAL,
+                  "deepx_path = OFF is not a valid bring-up destination");
+}
+
+ZTEST(alp_chips, test_deepx_dxm1_bring_up_rejects_uninitialised)
+{
+    deepx_dxm1_t ctx = {0};
+    /* The sequencer must report NOT_READY rather than dereferencing
+     * NULL m1_reset_pin / pcie_mux when called on a zeroed context. */
+    zassert_equal(deepx_dxm1_bring_up(&ctx, 0u), ALP_ERR_NOT_READY);
+    zassert_equal(deepx_dxm1_shut_down(&ctx),    ALP_ERR_NOT_READY);
+    zassert_equal(deepx_dxm1_set_reset_polarity(&ctx,
+                                                DEEPX_DXM1_RESET_ACTIVE_HIGH),
+                  ALP_ERR_NOT_READY);
+
+    /* deinit on a zero context must be safe. */
+    deepx_dxm1_deinit(&ctx);
+    deepx_dxm1_deinit(NULL);
+}
+
+ZTEST(alp_chips, test_deepx_dxm1_set_reset_polarity_invalid_value)
+{
+    /* Force initialised so the function reaches the polarity-range
+     * check before the m1_reset_pin write -- m1_reset_pin is NULL
+     * here but the check rejects on the value first. */
+    deepx_dxm1_t ctx = {.initialised = true};
+
+    /* Pass a value outside the documented enum range -- both LOW (0)
+     * and HIGH (1) are valid; 2 is not. */
+    zassert_equal(deepx_dxm1_set_reset_polarity(&ctx,
+                                                (deepx_dxm1_reset_polarity_t)2),
+                  ALP_ERR_INVAL);
 }

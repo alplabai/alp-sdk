@@ -3,7 +3,7 @@
 Per-rev summary of pin / component / configuration changes on the
 i.MX 93 SoM family.
 
-Detailed schematic-level rev notes live in the private companion repo.
+Detailed internal rev notes are held outside this tree.
 
 ## r1 -- preliminary
 
