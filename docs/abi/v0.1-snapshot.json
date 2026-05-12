@@ -3825,6 +3825,10 @@
           "hash": "1765efaea8944eaf",
           "signature": "void alp_pwm_close(alp_pwm_t *pwm);"
         },
+        "alp_pwm_configure": {
+          "hash": "b4752c16814d2eca",
+          "signature": "alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint32_t dead_time_ns, uint8_t break_cfg);"
+        },
         "alp_pwm_set_duty": {
           "hash": "d7a2dc20068fdea1",
           "signature": "alp_status_t alp_pwm_set_duty(alp_pwm_t *pwm, uint32_t pulse_ns);"
@@ -3834,8 +3838,21 @@
           "signature": "alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_PWM_BREAK_EXTERNAL": {
+          "hash": "9d9e4e5836c21251",
+          "value": "0x01u"
+        },
+        "ALP_PWM_BREAK_NONE": {
+          "hash": "de2c9b51e7bb06a6",
+          "value": "0x00u"
+        }
+      },
       "typedefs": {
+        "alp_pwm_align_t": {
+          "definition": "typedef enum { ALP_PWM_ALIGN_EDGE = 0, ALP_PWM_ALIGN_CENTER_UP = 1, ALP_PWM_ALIGN_CENTER_DOWN = 2, ALP_PWM_ALIGN_CENTER_BOTH = 3, } alp_pwm_align_t;",
+          "hash": "5ddf5a2f268dc99c"
+        },
         "alp_pwm_polarity_t": {
           "definition": "typedef enum { ALP_PWM_POLARITY_NORMAL = 0, ALP_PWM_POLARITY_INVERTED = 1 } alp_pwm_polarity_t;",
           "hash": "5a18e17d38f0eb03"

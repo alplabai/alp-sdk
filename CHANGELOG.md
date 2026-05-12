@@ -63,6 +63,32 @@ that lands before the v0.3.0 tag.)
 
 ### Added (2026-05-14)
 
+- **`<alp/pwm.h>` -- portable per-channel PWM tuning surface (2026-05-14).**
+  Wires the customer-facing path for the v0.3 `CMD_PWM_CONFIGURE`
+  opcode without exposing the GD32 name to application code (per
+  `memory/feedback_portable_hw_offload_with_sw_fallback.md`).
+  Three additions:
+  - `alp_pwm_align_t` enum mirrors the four advanced-timer counter
+    shapes (edge, center-aligned-up, center-aligned-down,
+    center-aligned-both).  Wire values match `gd32g553_pwm_align_t`
+    by construction so the bridge dispatch is an enum-renaming cast.
+  - `ALP_PWM_BREAK_NONE` / `ALP_PWM_BREAK_EXTERNAL` bitmap macros
+    for the break-input opcode argument.  Bit 0 is the external
+    break input; remaining bits reserved for future fault sources.
+  - `alp_pwm_configure(pwm, align, dead_time_ns, break_cfg)`.  On
+    the V2N family (V2N + V2N-M1, shared GD32G553) the call
+    acquires the supervisor singleton and dispatches through
+    `gd32g553_pwm_configure`; the configuration is sticky across
+    subsequent `alp_pwm_set_duty` / `alp_pwm_set_period` calls.
+    On non-bridge SoMs the call returns `ALP_ERR_NOSUPPORT` --
+    Zephyr's portable `pwm_*` driver class exposes neither
+    dead-time nor center-aligned counters outside vendor-specific
+    extensions, so silently accepting the call would mislead
+    callers.
+  Tests cover the binding-layer NULL-handle path; bridge /
+  DT-alias dispatch is exercised by the supervisor scenario's
+  compile + link step.
+
 - **`<alp/adc.h>` -- portable streaming ADC surface + v0.3 configure knobs (2026-05-14).**
   Wires the customer-facing path for the v0.3 wire opcodes the prior
   commit shipped on the GD32 side, with no `gd32g553_*` symbols

@@ -47,6 +47,27 @@ typedef enum {
     ALP_PWM_POLARITY_INVERTED = 1     /**< Low during the active portion. */
 } alp_pwm_polarity_t;
 
+/** Per-channel alignment mode for @ref alp_pwm_configure.  Edge-aligned
+ *  is the conventional sawtooth-counter behaviour; center-aligned modes
+ *  use a triangle-counter so the rising and falling edges sit
+ *  symmetrically around either the count-up phase, count-down phase, or
+ *  both phases, which reduces high-frequency harmonic content in motor-
+ *  drive applications. */
+typedef enum {
+    ALP_PWM_ALIGN_EDGE        = 0, /**< Sawtooth counter (default). */
+    ALP_PWM_ALIGN_CENTER_UP   = 1, /**< Triangle, edges in count-up. */
+    ALP_PWM_ALIGN_CENTER_DOWN = 2, /**< Triangle, edges in count-down. */
+    ALP_PWM_ALIGN_CENTER_BOTH = 3, /**< Triangle, edges in both phases. */
+} alp_pwm_align_t;
+
+/** Bitmap of break-input / fault sources for @ref alp_pwm_configure.
+ *  Bit 0 enables an external break input that disables the channel's
+ *  output when asserted; remaining bits are reserved for future fault
+ *  sources (e.g. on-die comparator trip).  Backends that don't support
+ *  a particular bit silently ignore it. */
+#define ALP_PWM_BREAK_NONE 0x00u
+#define ALP_PWM_BREAK_EXTERNAL 0x01u
+
 /** Opaque PWM channel handle.  Allocate via @ref alp_pwm_open. */
 typedef struct alp_pwm alp_pwm_t;
 
@@ -102,6 +123,42 @@ alp_status_t alp_pwm_set_duty(alp_pwm_t *pwm, uint32_t pulse_ns);
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
  */
 alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns);
+
+/**
+ * @brief Sticky per-channel tuning: alignment mode + dead-time + break input.
+ *
+ * Applies tuning that the underlying hardware retains across subsequent
+ * @ref alp_pwm_set_duty / @ref alp_pwm_set_period calls.  On the V2N
+ * family (V2N + V2N-M1, both of which carry the GD32G553 supervisor
+ * MCU) the call hits the GD32's per-channel advanced-timer registers
+ * (CHCTL / CCHP / BKDT, see GD32G553 reference manual §17).  On SoMs
+ * whose backend has no comparable surface -- notably Zephyr's portable
+ * `pwm_*` driver class, which exposes neither dead-time nor center-
+ * alignment outside vendor-specific extensions -- the call returns
+ * @ref ALP_ERR_NOSUPPORT so callers don't silently get a no-op.
+ *
+ * Backends round @p dead_time_ns down to the nearest tick they can
+ * honour at the configured period; on the GD32 family that's
+ * ~4.16 ns at the 240 MHz core clock.  @p break_cfg is treated as an
+ * opaque bitmap of @ref ALP_PWM_BREAK_NONE / @ref ALP_PWM_BREAK_EXTERNAL
+ * flags.
+ *
+ * Safe to call before or after the first @ref alp_pwm_set_duty; the
+ * tuning takes effect immediately and persists until the next
+ * @ref alp_pwm_configure or until the channel is closed.
+ *
+ * @param[in] pwm           Handle from @ref alp_pwm_open.
+ * @param[in] align_mode    One of @ref alp_pwm_align_t.
+ * @param[in] dead_time_ns  Dead-time for complementary outputs (ns).
+ *                          0 = no dead time.
+ * @param[in] break_cfg     Bitmap of @ref ALP_PWM_BREAK_* flags.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL (bad align
+ *         enum) / ALP_ERR_NOSUPPORT (backend can't honour) /
+ *         ALP_ERR_OUT_OF_RANGE (dead_time_ns exceeds the timer's
+ *         maximum at the configured period) / ALP_ERR_IO.
+ */
+alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint32_t dead_time_ns,
+                               uint8_t break_cfg);
 
 /**
  * @brief Drive the output low and release the handle back to the pool.

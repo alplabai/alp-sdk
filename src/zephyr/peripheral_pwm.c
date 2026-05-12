@@ -254,3 +254,35 @@ void alp_pwm_close(alp_pwm_t *pwm) {
     (void)pwm_set(pwm->dev, pwm->channel, pwm->period_ns, 0u, pwm->flags);
     alp_z_pwm_pool_release(pwm);
 }
+
+alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint32_t dead_time_ns,
+                               uint8_t break_cfg)
+{
+    if (pwm == NULL || !pwm->in_use) return ALP_ERR_NOT_READY;
+    if ((unsigned)align_mode > (unsigned)ALP_PWM_ALIGN_CENTER_BOTH) {
+        return ALP_ERR_INVAL;
+    }
+
+#if ALP_PWM_HAS_BRIDGE_PATH
+    if (pwm->dev == NULL) {
+        gd32g553_t  *ctx = NULL;
+        alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
+        if (s != ALP_OK) return s;
+        /* alp_pwm_align_t and gd32g553_pwm_align_t share the same wire
+         * values (0..3) by construction; the cast is enum-renaming
+         * only.  See <alp/pwm.h>'s alp_pwm_align_t doc. */
+        s = gd32g553_pwm_configure(ctx, (uint8_t)pwm->channel, (gd32g553_pwm_align_t)align_mode,
+                                   dead_time_ns, break_cfg);
+        alp_z_v2n_supervisor_release();
+        return s;
+    }
+#endif
+    /* Zephyr's portable pwm_* driver class doesn't expose dead-time or
+     * center-aligned counters in a vendor-neutral way (the STM32 driver
+     * has the closest extension, but it isn't generic), so the portable
+     * surface refuses the call on non-bridge SoMs rather than silently
+     * accepting it. */
+    (void)dead_time_ns;
+    (void)break_cfg;
+    return ALP_ERR_NOSUPPORT;
+}

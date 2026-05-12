@@ -222,6 +222,16 @@ ZTEST(alp_peripheral, test_pwm_out_of_range_channel_id) {
     zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 }
 
+ZTEST(alp_peripheral, test_pwm_configure_null_handle_yields_not_ready)
+{
+    /* The bridge / DT-alias dispatch can't be exercised without real
+     * hardware, but the binding-layer NULL check is unconditional and
+     * makes sure the new public symbol links. */
+    alp_status_t s =
+        alp_pwm_configure(NULL, ALP_PWM_ALIGN_EDGE, /* dead_time_ns */ 0u, ALP_PWM_BREAK_NONE);
+    zassert_equal(s, ALP_ERR_NOT_READY, "got %d", (int)s);
+}
+
 ZTEST(alp_peripheral, test_adc_null_cfg) {
     zassert_is_null(alp_adc_open(NULL));
     zassert_equal(alp_last_error(), ALP_ERR_INVAL);
