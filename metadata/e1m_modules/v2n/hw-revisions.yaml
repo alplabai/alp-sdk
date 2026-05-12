@@ -11,6 +11,13 @@ hw_revisions:
   r1:
     min_sdk_version: "0.3.0"
     max_sdk_version: ~
+    status: production
+    released: "2026-05-12"
+    summary: |
+      First production V2N revision.  See CHANGELOG.md for the
+      full per-rev component / pin manifest.
+    changes:
+      - "Initial release."
   r2:
     min_sdk_version: ~
     max_sdk_version: ~

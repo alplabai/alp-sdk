@@ -8,6 +8,13 @@ hw_revisions:
     min_sdk_version: "0.3.0"
     max_sdk_version: ~
     status: production
+    summary: |
+      First production AEN revision.  Per the family invariant,
+      all AEN SKUs (E3..E8) share the same module PCB; SoC-tier
+      differences are captured in the per-SKU `som.yaml`, not as
+      hw-revisions of the module.
+    changes:
+      - "Initial release."
   r2:
     min_sdk_version: ~
     max_sdk_version: ~

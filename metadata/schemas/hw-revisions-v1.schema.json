@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/hw-revisions-v1.schema.json",
+  "title": "ALP SoM hardware-revisions manifest (metadata/e1m_modules/<family>/hw-revisions.yaml) v1",
+  "description": "Per-SoM-family hardware-revision compatibility table.  Each entry under `hw_revisions:` declares an rev label (e.g. r1, r2) with its SDK-version compatibility window + optional summary / changes bullets.  The customer-facing CHANGELOG.md alongside this file carries the full rev-by-rev narrative.",
+  "type": "object",
+  "required": ["family", "display_name", "hw_revisions"],
+  "additionalProperties": true,
+  "properties": {
+    "family": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "display_name": { "type": "string" },
+    "hw_revisions": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/hw_rev_entry"
+      },
+      "propertyNames": {
+        "pattern": "^r[0-9]+$"
+      }
+    }
+  },
+  "$defs": {
+    "hw_rev_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_sdk_version": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([.-].*)?$" },
+            { "type": "null" }
+          ],
+          "description": "Lowest SDK version that supports this rev.  null = unbounded."
+        },
+        "max_sdk_version": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([.-].*)?$" },
+            { "type": "null" }
+          ],
+          "description": "Highest SDK version that supports this rev.  null = unbounded (no deprecation yet)."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["production", "preview", "preliminary", "reserved", "tbd", "deprecated"]
+        },
+        "released": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "ISO date this rev started shipping.  Reserved-rev rows can omit."
+        },
+        "summary": {
+          "type": "string",
+          "description": "One-paragraph narrative of what defines this rev."
+        },
+        "changes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Bullet list of changes from the previous rev (pin moves, chip swaps, RC bumps).  Customer-visible; schematic-level details live in the private companion repo."
+        }
+      }
+    }
+  }
+}

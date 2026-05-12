@@ -29,6 +29,7 @@ except ImportError:
 REPO = Path(__file__).resolve().parent.parent
 SCHEMA = REPO / "metadata" / "schemas" / "soc-spec-v1.schema.json"
 SOM_SCHEMA = REPO / "metadata" / "schemas" / "som-preset-v1.schema.json"
+HWREV_SCHEMA = REPO / "metadata" / "schemas" / "hw-revisions-v1.schema.json"
 SOCS = REPO / "metadata" / "socs"
 SOM_PRESETS = REPO / "metadata" / "e1m_modules"
 
@@ -90,10 +91,26 @@ def main() -> int:
                 "sku",
             )
 
+    # Per-family hw-revisions files (YAML) against hw-revisions v1.
+    hwrev_failures: list = []
+    hwrev_files: list = []
+    if HWREV_SCHEMA.is_file():
+        hwrev_schema = json.loads(HWREV_SCHEMA.read_text(encoding="utf-8"))
+        hwrev_validator = jsonschema.Draft202012Validator(hwrev_schema)
+        hwrev_files = sorted(SOM_PRESETS.glob("*/hw-revisions.yaml"))
+        if hwrev_files:
+            print()
+            hwrev_failures = _check_files(
+                "YAML", hwrev_files, hwrev_validator,
+                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                "family",
+            )
+
     print()
-    total_files = len(soc_files) + len(som_files)
-    total_failures = len(soc_failures) + len(som_failures)
-    print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) checked, "
+    total_files = len(soc_files) + len(som_files) + len(hwrev_files)
+    total_failures = len(soc_failures) + len(som_failures) + len(hwrev_failures)
+    print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
+          f"{len(hwrev_files)} hw-revisions file(s) checked, "
           f"{total_failures} failure(s)")
     return 0 if total_failures == 0 else 1
 

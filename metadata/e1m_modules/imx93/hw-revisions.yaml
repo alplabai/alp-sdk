@@ -8,3 +8,8 @@ hw_revisions:
     min_sdk_version: "0.3.0"
     max_sdk_version: ~
     status: tbd
+    summary: |
+      Preliminary i.MX 93 revision pending the user-supplied
+      HW-config writeup.  See CHANGELOG.md.
+    changes:
+      - "Initial preliminary revision."
