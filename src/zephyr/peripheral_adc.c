@@ -43,6 +43,7 @@
 #include <zephyr/sys/util.h>
 
 #include "alp/adc.h"
+#include "alp/dsp.h"
 #include "alp/soc_caps.h"
 #include "handles.h"
 #include "v2n_supervisor.h"
@@ -494,4 +495,218 @@ void alp_adc_stream_close(alp_adc_stream_t *stream)
     }
 #endif
     alp_z_adc_stream_pool_release(stream);
+}
+
+/* ====================================================================== */
+/* Streaming ADC with DSP pipeline (wave-2)                                */
+/*                                                                         */
+/* alp_adc_filter_t composes alp_adc_stream_t + alp_dsp_chain_t under one  */
+/* caller-facing handle.  The chain runs on the host today; the GD32-side */
+/* bridge-offload path (CMD_ADC_STREAM_CONFIGURE_DSP, opcode 0x36 reserved */
+/* in v0.5.0) lands in v0.5.x once the wire payload format finalises.  On */
+/* SoMs without a streaming ADC backend the open returns NULL with        */
+/* last-error = ALP_ERR_NOSUPPORT, same as alp_adc_stream_open.            */
+/* ====================================================================== */
+
+/* The filter impl needs the DSP chain machinery + a streaming ADC
+ * backend.  When either is absent, fall back to NOSUPPORT stubs --
+ * the symbols are exported unconditionally so apps linking against
+ * <alp/adc.h> stay link-clean. */
+#if defined(CONFIG_ALP_SDK_DSP) && ALP_ADC_HAS_BRIDGE_PATH
+#define ALP_ADC_HAS_FILTER_PATH 1
+#else
+#define ALP_ADC_HAS_FILTER_PATH 0
+#endif
+
+#if ALP_ADC_HAS_FILTER_PATH
+
+#define ALP_ADC_FILTER_POOL_SIZE 2u
+
+struct alp_adc_filter {
+    bool              in_use;
+    alp_adc_stream_t *stream;
+    alp_dsp_chain_t  *chain;
+};
+
+static struct alp_adc_filter alp_adc_filter_pool[ALP_ADC_FILTER_POOL_SIZE];
+
+static struct alp_adc_filter *alp_adc_filter_pool_acquire(void)
+{
+    for (size_t i = 0u; i < ALP_ADC_FILTER_POOL_SIZE; i++) {
+        if (!alp_adc_filter_pool[i].in_use) {
+            return &alp_adc_filter_pool[i];
+        }
+    }
+    return NULL;
+}
+
+static void alp_adc_filter_pool_release(struct alp_adc_filter *f)
+{
+    if (f == NULL) return;
+    f->in_use = false;
+    f->stream = NULL;
+    f->chain  = NULL;
+}
+
+alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg)
+{
+    alp_z_clear_last_error();
+
+    if (cfg == NULL || cfg->stages == NULL || cfg->n_stages == 0u) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+
+    struct alp_adc_filter *f = alp_adc_filter_pool_acquire();
+    if (f == NULL) {
+        alp_z_set_last_error(ALP_ERR_NOMEM);
+        return NULL;
+    }
+
+    /* Open the DSP chain first.  Validation rejects FFT-terminated
+     * chains via the apply_samples probe below; an FFT chain returns
+     * ALP_ERR_NOSUPPORT and we surface that as ALP_ERR_INVAL because
+     * the caller used the wrong open() entry point. */
+    alp_dsp_chain_t *chain = alp_dsp_chain_open(cfg->stages, cfg->n_stages);
+    if (chain == NULL) {
+        /* alp_last_error already stamped by alp_dsp_chain_open. */
+        alp_adc_filter_pool_release(f);
+        return NULL;
+    }
+    int16_t      probe_in  = 0;
+    int16_t      probe_out = 0;
+    size_t       probe_got = 0u;
+    alp_status_t s = alp_dsp_chain_apply_samples(chain, &probe_in, 1u, &probe_out, 1u, &probe_got);
+    if (s == ALP_ERR_NOSUPPORT) {
+        /* Caller passed an FFT-terminated chain. */
+        alp_dsp_chain_close(chain);
+        alp_adc_filter_pool_release(f);
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+
+    /* Open the underlying stream. */
+    const alp_adc_stream_config_t scfg = {
+        .channel_id     = cfg->channel_id,
+        .sample_rate_hz = cfg->sample_rate_hz,
+    };
+    alp_adc_stream_t *stream = alp_adc_stream_open(&scfg);
+    if (stream == NULL) {
+        /* alp_last_error stamped by alp_adc_stream_open. */
+        alp_dsp_chain_close(chain);
+        alp_adc_filter_pool_release(f);
+        return NULL;
+    }
+
+    f->stream = stream;
+    f->chain  = chain;
+    f->in_use = true;
+    return f;
+}
+
+alp_status_t alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
+{
+    if (got == NULL) return ALP_ERR_INVAL;
+    *got = 0u;
+    if (filter == NULL || !filter->in_use) return ALP_ERR_NOT_READY;
+    if (out_mv == NULL && cap > 0u) return ALP_ERR_INVAL;
+    if (cap == 0u) return ALP_OK;
+
+    /* Drain raw samples in chunks bounded by the backend ceiling. */
+    uint16_t     raw[GD32G553_BRIDGE_ADC_STREAM_READ_MAX];
+    const size_t want =
+        (cap < GD32G553_BRIDGE_ADC_STREAM_READ_MAX) ? cap : GD32G553_BRIDGE_ADC_STREAM_READ_MAX;
+    size_t       got_raw = 0u;
+    alp_status_t s = alp_adc_stream_read(filter->stream, raw, want, &got_raw);
+    if (s != ALP_OK) return s;
+    if (got_raw == 0u) return ALP_OK;
+
+    /* Convert uint16 mV samples (0..3300 typical) to int16. */
+    int16_t in_buf[GD32G553_BRIDGE_ADC_STREAM_READ_MAX];
+    for (size_t i = 0u; i < got_raw; i++) {
+        in_buf[i] = (int16_t)raw[i];
+    }
+
+    /* Run the chain; chain.apply_samples writes int16 mV out. */
+    size_t got_filtered = 0u;
+    s = alp_dsp_chain_apply_samples(filter->chain, in_buf, got_raw, out_mv, cap, &got_filtered);
+    if (s != ALP_OK) return s;
+    *got = got_filtered;
+    return ALP_OK;
+}
+
+void alp_adc_filter_close(alp_adc_filter_t *filter)
+{
+    if (filter == NULL) return;
+    if (filter->stream != NULL) {
+        alp_adc_stream_close(filter->stream);
+    }
+    if (filter->chain != NULL) {
+        alp_dsp_chain_close(filter->chain);
+    }
+    alp_adc_filter_pool_release(filter);
+}
+
+#else /* !ALP_ADC_HAS_FILTER_PATH */
+
+alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg)
+{
+    alp_z_clear_last_error();
+    /* Argument validation first so callers passing bad cfg get a
+     * precise INVAL even on SoMs without a bridge backend. */
+    if (cfg == NULL || cfg->stages == NULL || cfg->n_stages == 0u) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    alp_z_set_last_error(ALP_ERR_NOSUPPORT);
+    return NULL;
+}
+
+alp_status_t alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
+{
+    (void)filter;
+    (void)out_mv;
+    (void)cap;
+    if (got != NULL) *got = 0u;
+    return ALP_ERR_NOSUPPORT;
+}
+
+void alp_adc_filter_close(alp_adc_filter_t *filter)
+{
+    (void)filter;
+}
+
+#endif /* ALP_ADC_HAS_FILTER_PATH */
+
+/* ====================================================================== */
+/* alp_adc_spectrum_t -- FFT-terminated chain (v0.5.x (c) lands real impl) */
+/*                                                                         */
+/* Symbols are exported as NOSUPPORT stubs so applications linking against */
+/* <alp/adc.h> stay link-clean across the (b) / (c) split.                 */
+/* ====================================================================== */
+
+alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg)
+{
+    alp_z_clear_last_error();
+    if (cfg == NULL || cfg->stages == NULL || cfg->n_stages == 0u) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
+    alp_z_set_last_error(ALP_ERR_NOSUPPORT);
+    return NULL;
+}
+
+alp_status_t alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap,
+                                        size_t *got)
+{
+    (void)spec;
+    (void)bins;
+    (void)cap;
+    if (got != NULL) *got = 0u;
+    return ALP_ERR_NOSUPPORT;
+}
+
+void alp_adc_spectrum_close(alp_adc_spectrum_t *spec)
+{
+    (void)spec;
 }

@@ -24,6 +24,7 @@
 
 #include <zephyr/ztest.h>
 
+#include "alp/adc.h"
 #include "alp/dsp.h"
 #include "alp/peripheral.h"
 
@@ -378,7 +379,105 @@ ZTEST(alp_dsp_chain_apply_bins, test_complex_output_yields_2n_elements)
     alp_dsp_chain_close(c);
 }
 
+/* ============================================================== */
+/* alp_adc_filter_t (wave-2 streaming ADC + DSP composition)        */
+/*                                                                  */
+/* Under native_sim there is no V2N supervisor bridge, so the       */
+/* filter implementation degrades to ALP_ERR_NOSUPPORT for valid    */
+/* args (and surfaces ALP_ERR_INVAL for bad ones via the early-     */
+/* validation pre-check).  These tests assert the documented API    */
+/* surface contract; HW-in-loop tests cover the real bridge path.   */
+/* ============================================================== */
+
+ZTEST(alp_adc_filter, test_open_null_cfg_returns_inval)
+{
+    alp_adc_filter_t *f = alp_adc_filter_open(NULL);
+    zassert_is_null(f, NULL);
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL, NULL);
+}
+
+ZTEST(alp_adc_filter, test_open_null_stages_returns_inval)
+{
+    alp_adc_filter_config_t cfg = { 0 };
+    cfg.channel_id = 0u;
+    cfg.sample_rate_hz = 1000u;
+    cfg.stages = NULL;
+    cfg.n_stages = 2u; /* non-zero but stages NULL */
+    alp_adc_filter_t *f = alp_adc_filter_open(&cfg);
+    zassert_is_null(f, NULL);
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL, NULL);
+}
+
+ZTEST(alp_adc_filter, test_open_zero_stages_returns_inval)
+{
+    static const float taps[1] = { 1.0f };
+    alp_dsp_stage_t stage = { 0 };
+    stage.kind = ALP_DSP_STAGE_FIR;
+    stage.u.fir.coeff_format = ALP_DSP_COEFF_FORMAT_F32;
+    stage.u.fir.n_taps = 1u;
+    stage.u.fir.taps = taps;
+
+    alp_adc_filter_config_t cfg = { 0 };
+    cfg.channel_id = 0u;
+    cfg.sample_rate_hz = 1000u;
+    cfg.stages = &stage;
+    cfg.n_stages = 0u;
+    alp_adc_filter_t *f = alp_adc_filter_open(&cfg);
+    zassert_is_null(f, NULL);
+    zassert_equal(alp_last_error(), ALP_ERR_INVAL, NULL);
+}
+
+ZTEST(alp_adc_filter, test_open_no_bridge_returns_nosupport)
+{
+    /* Valid args; native_sim has no V2N supervisor wired so the
+     * filter open returns NOSUPPORT after the arg validation passes. */
+    static const float taps[1] = { 1.0f };
+    alp_dsp_stage_t stage = { 0 };
+    stage.kind = ALP_DSP_STAGE_FIR;
+    stage.u.fir.coeff_format = ALP_DSP_COEFF_FORMAT_F32;
+    stage.u.fir.n_taps = 1u;
+    stage.u.fir.taps = taps;
+
+    alp_adc_filter_config_t cfg = { 0 };
+    cfg.channel_id = 0u;
+    cfg.sample_rate_hz = 1000u;
+    cfg.stages = &stage;
+    cfg.n_stages = 1u;
+    alp_adc_filter_t *f = alp_adc_filter_open(&cfg);
+    zassert_is_null(f, NULL);
+    zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, NULL);
+}
+
+ZTEST(alp_adc_filter, test_close_null_is_noop)
+{
+    alp_adc_filter_close(NULL); /* must not crash */
+}
+
+ZTEST(alp_adc_filter, test_read_null_handle_returns_not_ready)
+{
+    int16_t out[8] = { 0 };
+    size_t got = 0u;
+    alp_status_t s = alp_adc_filter_read(NULL, out, 8u, &got);
+    zassert_equal(s, ALP_ERR_NOT_READY, NULL);
+    zassert_equal(got, 0u, NULL);
+}
+
+ZTEST(alp_adc_filter, test_read_null_got_returns_inval)
+{
+    int16_t out[8] = { 0 };
+    /* Pass non-NULL handle so we reach the got-NULL check; on
+     * native_sim with no bridge we can't actually open a filter, so
+     * synthesize a non-NULL but unrelated pointer.  The function's
+     * first check is `got == NULL`, which is independent of handle
+     * validity. */
+    int dummy = 0;
+    alp_status_t s =
+        alp_adc_filter_read((alp_adc_filter_t *)&dummy, out, 8u, NULL);
+    zassert_equal(s, ALP_ERR_INVAL, NULL);
+}
+
 /* Test suites are auto-collected via ztest_register macros below.   */
 ZTEST_SUITE(alp_dsp_chain_open, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(alp_dsp_chain_apply_samples, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(alp_dsp_chain_apply_bins, NULL, NULL, NULL, NULL, NULL);
+ZTEST_SUITE(alp_adc_filter, NULL, NULL, NULL, NULL, NULL);

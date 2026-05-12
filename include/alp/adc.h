@@ -61,6 +61,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "alp/dsp.h"
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -225,6 +226,152 @@ alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream, uint16_t *mv, size_t 
  * @param[in] stream  Handle from @ref alp_adc_stream_open, or NULL.
  */
 void alp_adc_stream_close(alp_adc_stream_t *stream);
+
+/* ================================================================== */
+/* Streaming ADC with DSP pipeline (wave-2)                            */
+/*                                                                     */
+/* alp_adc_filter_t composes a streaming ADC source with a             */
+/* filter-terminated DSP chain (FIR / IIR, optionally cascaded) so     */
+/* the application receives FILTERED int16 mV samples without writing  */
+/* the DSP plumbing itself.  The FFT-terminated sibling                */
+/* alp_adc_spectrum_t lands in the v0.5.x (c) sub-commit alongside the */
+/* spectrum-side of the wave-2 pipeline.                               */
+/*                                                                     */
+/* On SoMs with a HW DSP block on the bridge (V2N family today; AEN    */
+/* via the wave-2 GD32-side wire-format extension landing v0.5.x), the */
+/* chain runs on the bridge so raw samples never traverse the wire.   */
+/* Today (v0.5.0): the host runs the chain over the existing          */
+/* alp_adc_stream_t source.  SoMs without a streaming ADC backend at  */
+/* all return NULL with last-error = ALP_ERR_NOSUPPORT, same as       */
+/* @ref alp_adc_stream_open.                                            */
+/* ================================================================== */
+
+/** Opaque filter-stream handle.  Allocate via @ref alp_adc_filter_open. */
+typedef struct alp_adc_filter alp_adc_filter_t;
+
+/** Configuration passed to @ref alp_adc_filter_open. */
+typedef struct {
+    uint32_t channel_id;     /**< ADC channel index (0..7). */
+    uint32_t sample_rate_hz; /**< Target acquisition rate (Hz). */
+    /** DSP stages, filter-terminated (no FFT).  Copied into the
+     *  internal chain at open time; caller may free immediately. */
+    const alp_dsp_stage_t *stages;
+    /** Stage count (1..@ref ALP_DSP_MAX_STAGES). */
+    size_t n_stages;
+} alp_adc_filter_config_t;
+
+/**
+ * @brief Open a streaming ADC source with a FIR/IIR DSP chain applied.
+ *
+ * Composes @ref alp_adc_stream_open + @ref alp_dsp_chain_open under
+ * one handle.  The chain MUST NOT contain an FFT stage; spectral
+ * output lands in @c alp_adc_spectrum_open (v0.5.x).
+ *
+ * @param[in] cfg  Configuration.  Must be non-NULL.
+ *
+ * @return Handle on success; NULL with @ref alp_last_error set to:
+ *         - @ref ALP_ERR_INVAL on NULL cfg, NULL stages, n_stages == 0,
+ *           or an FFT-terminated chain.
+ *         - @ref ALP_ERR_OUT_OF_RANGE on channel_id >= 8 or any
+ *           per-stage bound violation.
+ *         - @ref ALP_ERR_NOSUPPORT on SoMs without a streaming ADC.
+ *         - @ref ALP_ERR_NOT_READY when the backend transport is not
+ *           configured.
+ *         - @ref ALP_ERR_BUSY when all stream slots are in use.
+ *         - @ref ALP_ERR_NOMEM when the handle pool or chain pool is
+ *           exhausted.
+ */
+alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg);
+
+/**
+ * @brief Drain filtered samples from the stream.
+ *
+ * Polls the underlying @ref alp_adc_stream_t, converts the raw
+ * uint16 mV samples to int16, runs them through the DSP chain, and
+ * writes the result into the caller's buffer.  Per-call sample
+ * ceiling matches the backend stream
+ * (@c GD32G553_BRIDGE_ADC_STREAM_READ_MAX on V2N's GD32 bridge);
+ * callers wanting more than that per batch must loop.
+ *
+ * @param[in]  filter  Handle from @ref alp_adc_filter_open.
+ * @param[out] out_mv  Caller buffer for filtered samples (int16 mV).
+ * @param[in]  cap     Capacity of @p out_mv (samples).
+ * @param[out] got     Number of samples actually written; may be 0.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_BUSY /
+ *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
+alp_status_t alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap,
+                                 size_t *got);
+
+/**
+ * @brief Close a filter handle.  NULL is a no-op.
+ *
+ * Releases the internal stream slot + DSP chain.  After this call
+ * @p filter is invalid.
+ */
+void alp_adc_filter_close(alp_adc_filter_t *filter);
+
+/** Opaque spectrum-stream handle.  Allocate via @ref alp_adc_spectrum_open. */
+typedef struct alp_adc_spectrum alp_adc_spectrum_t;
+
+/** Configuration passed to @ref alp_adc_spectrum_open. */
+typedef struct {
+    uint32_t channel_id;     /**< ADC channel index (0..7). */
+    uint32_t sample_rate_hz; /**< Target acquisition rate (Hz). */
+    /** DSP stages, FFT-terminated (optional WINDOW immediately
+     *  before FFT).  Copied at open time. */
+    const alp_dsp_stage_t *stages;
+    /** Stage count (1..@ref ALP_DSP_MAX_STAGES). */
+    size_t n_stages;
+} alp_adc_spectrum_config_t;
+
+/**
+ * @brief Open a streaming ADC source with an FFT-terminated DSP chain.
+ *
+ * Composes @ref alp_adc_stream_open + @ref alp_dsp_chain_open under
+ * one handle for spectral analysis.  The chain MUST end with
+ * @ref ALP_DSP_STAGE_FFT; a @ref ALP_DSP_STAGE_WINDOW immediately
+ * preceding the FFT is optional but recommended for narrow-spectral
+ * analysis.
+ *
+ * @param[in] cfg  Configuration.  Must be non-NULL.
+ *
+ * @return Handle on success, or NULL with @ref alp_last_error set
+ *         to ALP_ERR_INVAL (NULL cfg, NULL stages, n_stages==0, or
+ *         a non-FFT-terminated chain) / ALP_ERR_OUT_OF_RANGE /
+ *         ALP_ERR_NOSUPPORT / ALP_ERR_NOT_READY / ALP_ERR_BUSY /
+ *         ALP_ERR_NOMEM (same gates as @ref alp_adc_filter_open).
+ */
+alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg);
+
+/**
+ * @brief Read one block of FFT bins from the spectrum stream.
+ *
+ * Internally buffers up to N raw samples (N = the chain's FFT
+ * n_points) before running the chain.  Until N samples have
+ * accumulated, returns @ref ALP_OK with @p *got = 0 -- not an
+ * error.  Each successful block resets the accumulator (no
+ * overlap; overlapping windows land in a later revision).
+ *
+ * Output element count when a block is emitted:
+ *  - @ref ALP_DSP_FFT_OUTPUT_COMPLEX:   2 * N (interleaved re,im pairs).
+ *  - @ref ALP_DSP_FFT_OUTPUT_MAGNITUDE: N.
+ *
+ * @param[in]  spec   Handle from @ref alp_adc_spectrum_open.
+ * @param[out] bins   Caller buffer for FFT bins (float).
+ * @param[in]  cap    Capacity of @p bins (elements).
+ * @param[out] got    Number of bin elements written (0 if buffering).
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
+ *         ALP_ERR_OUT_OF_RANGE (cap < required) / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
+ */
+alp_status_t alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap,
+                                        size_t *got);
+
+/** Close a spectrum handle.  NULL is a no-op. */
+void alp_adc_spectrum_close(alp_adc_spectrum_t *spec);
 
 /* ================================================================== */
 /* DAC                                                                 */

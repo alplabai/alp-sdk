@@ -7,6 +7,14 @@
           "hash": "ac53dbc20ca22519",
           "signature": "void alp_adc_close(alp_adc_t *adc);"
         },
+        "alp_adc_filter_close": {
+          "hash": "4a46d073d2406412",
+          "signature": "void alp_adc_filter_close(alp_adc_filter_t *filter);"
+        },
+        "alp_adc_filter_read": {
+          "hash": "6274d4a82cac55b3",
+          "signature": "alp_status_t alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got);"
+        },
         "alp_adc_read_raw": {
           "hash": "46239a90badd99fe",
           "signature": "alp_status_t alp_adc_read_raw(alp_adc_t *adc, int32_t *raw_out);"
@@ -38,6 +46,10 @@
       },
       "macros": {},
       "typedefs": {
+        "alp_adc_filter_t": {
+          "definition": "typedef struct alp_adc_filter alp_adc_filter_t;",
+          "hash": "84767e6da64d1995"
+        },
         "alp_adc_ref_t": {
           "definition": "typedef enum { ALP_ADC_REF_INTERNAL = 0, ALP_ADC_REF_EXTERNAL_0 = 1, ALP_ADC_REF_EXTERNAL_1 = 2, ALP_ADC_REF_VDD = 3 } alp_adc_ref_t;",
           "hash": "c4c3371412c61f09"

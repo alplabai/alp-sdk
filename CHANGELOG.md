@@ -397,6 +397,34 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`<alp/adc.h>::alp_adc_filter_t` / `alp_adc_spectrum_t` --
+  streaming ADC with DSP pipeline (wave-2 §2B.1(b), 2026-05-14).**
+  Introduces two sibling surfaces that compose `alp_adc_stream_t` +
+  `alp_dsp_chain_t` under a single caller-facing handle:
+
+  * `alp_adc_filter_t` drains *filtered* int16 mV samples from a
+    FIR / IIR / cascaded chain.  Surface:
+    `alp_adc_filter_open(cfg)` (chain validated via a one-sample
+    probe -- FFT-terminated chains return INVAL),
+    `alp_adc_filter_read(filter, mv, cap, &got)`,
+    `alp_adc_filter_close`.
+  * `alp_adc_spectrum_t` emits FFT bins (declared in this commit;
+    the real implementation lands in v0.5.x (c), so today the
+    open returns NOSUPPORT after the INVAL pre-checks).
+
+  Configuration takes a stage descriptor list (chain opened
+  internally; coefficients copied in).  On V2N the host runs the
+  chain off the existing GD32-streamed mV samples; the GD32-side
+  HW-DSP offload path (CMD_ADC_STREAM_CONFIGURE_DSP, opcode 0x36
+  reserved in v0.5.0) lands once the wire payload format
+  finalises.  Off-V2N or without CONFIG_ALP_SDK_DSP: both surfaces
+  return NULL with NOSUPPORT after the INVAL pre-checks pass.
+  Wired behind `CONFIG_ALP_SDK_DSP=y && CONFIG_ALP_SDK_V2N_SUPERVISOR=y`
+  for the real filter path.  Ships with extended `tests/zephyr/dsp/`
+  ztest coverage (7 new cases: NULL cfg, NULL stages, zero
+  n_stages, valid-args-NOSUPPORT, NULL handle close + read, NULL
+  got arg).
+
 ### Added (2026-05-13 overnight run)
 
 - **`chips/gd32_swd/` -- bit-bang SWD controller for the GD32G553 (2026-05-13).**
