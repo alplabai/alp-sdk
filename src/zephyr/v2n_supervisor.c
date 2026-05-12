@@ -174,6 +174,41 @@ void alp_z_v2n_supervisor_release(void)
     k_mutex_unlock(&g_v2n.lock);
 }
 
+void alp_z_v2n_supervisor_invalidate(void)
+{
+    /* Take the mutex for the duration of the bus teardown so a
+     * concurrent acquire() can't re-init mid-close.  Bounded wait
+     * matches the regular acquire timeout to avoid piling up
+     * behind a hung sleep handler. */
+    const int locked = k_mutex_lock(
+        &g_v2n.lock,
+        K_MSEC(CONFIG_ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS));
+    if (locked != 0) {
+        /* Couldn't take the lock; another thread is mid-bridge-op.
+         * The invalidate is best-effort -- the in-flight thread's
+         * call may fail naturally if the GD32 is unresponsive
+         * post-wake, and the failure path will leave tried_init
+         * clear so the next caller re-inits.  No useful action
+         * here besides giving up. */
+        return;
+    }
+    if (g_v2n.spi != NULL) {
+        alp_spi_close(g_v2n.spi);
+        g_v2n.spi = NULL;
+    }
+    if (g_v2n.i2c != NULL) {
+        alp_i2c_close(g_v2n.i2c);
+        g_v2n.i2c = NULL;
+    }
+    g_v2n.tried_init  = false;
+    g_v2n.init_status = ALP_ERR_NOT_READY;
+    /* Don't touch g_v2n.ctx -- gd32g553_init() will overwrite it
+     * on the next acquire.  Leaving the prior struct contents
+     * around is harmless because tried_init=false makes any read
+     * of it unreachable. */
+    k_mutex_unlock(&g_v2n.lock);
+}
+
 #else  /* !CONFIG_ALP_SDK_V2N_SUPERVISOR -- stubs let backends compile unconditionally. */
 
 alp_status_t alp_z_v2n_supervisor_acquire(gd32g553_t **ctx_out)
@@ -185,6 +220,11 @@ alp_status_t alp_z_v2n_supervisor_acquire(gd32g553_t **ctx_out)
 void alp_z_v2n_supervisor_release(void)
 {
     /* Nothing to release. */
+}
+
+void alp_z_v2n_supervisor_invalidate(void)
+{
+    /* Nothing to invalidate -- no supervisor compiled in. */
 }
 
 #endif  /* CONFIG_ALP_SDK_V2N_SUPERVISOR */

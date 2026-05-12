@@ -62,6 +62,29 @@ alp_status_t alp_z_v2n_supervisor_acquire(gd32g553_t **ctx_out);
  */
 void alp_z_v2n_supervisor_release(void);
 
+/**
+ * @brief Invalidate the cached supervisor state so the next
+ *        acquire re-runs the bus open + GD32 handshake.
+ *
+ * Used by the @c <alp/power.h> path after a deep-sleep -> wakeup
+ * cycle: the GD32 may have been reset or the SPI / I2C transport
+ * may have stalled during the sleep period, so the next bridge
+ * call MUST start from a clean slate rather than reusing the
+ * cached `gd32g553_t` context.  Closes any open bus handles and
+ * clears the latch so a subsequent `acquire()` does the work
+ * lazily on its first call.
+ *
+ * Safe to call any time; takes the supervisor mutex internally.
+ * No-op when the supervisor isn't compiled in (the
+ * `!CONFIG_ALP_SDK_V2N_SUPERVISOR` stub at the bottom of
+ * `v2n_supervisor.c`).
+ *
+ * This is an internal SDK API.  Application code MUST NOT call
+ * it directly -- the `<alp/power.h>` wake handler is the
+ * authoritative caller once the wake path lands.
+ */
+void alp_z_v2n_supervisor_invalidate(void);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

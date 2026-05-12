@@ -25,6 +25,7 @@
 #include "alp/peripheral.h"
 #include "alp/power.h"
 #include "handles.h"
+#include "v2n_supervisor.h"
 
 struct alp_power {
     bool     in_use;
@@ -72,7 +73,23 @@ alp_status_t alp_power_request_sleep(alp_power_t *handle, alp_power_mode_t mode,
      * CMD_POWER_MODE_SET (0x28) is the gating dep.  Zephyr-side
      * pm_policy_* wiring also defers to a follow-up commit so the
      * surface stays portable across SoMs.  Return NOSUPPORT after
-     * the INVAL pre-checks pass. */
+     * the INVAL pre-checks pass.
+     *
+     * Future bring-up (when the HAL body lands):
+     *
+     *   1. Push the configured wake_bitmap + wake_after_ms to the
+     *      GD32 supervisor via the CMD_POWER_MODE_SET wire.
+     *   2. Issue Zephyr's pm_state_force / pm_policy_state_lock_get
+     *      so the local CPU enters the matching pm_state.
+     *   3. On wakeup: clear the cached supervisor state via
+     *      `alp_z_v2n_supervisor_invalidate()` so the next bridge
+     *      call re-runs the GD32 handshake -- the chip may have
+     *      reset across the sleep cycle.
+     *
+     * Today's NOSUPPORT path doesn't call invalidate (no actual
+     * sleep happens, so no resume hook is needed), but the
+     * invalidate symbol is exported so the wake handler can call
+     * it without further plumbing once the HAL body lands. */
     if (info != NULL) {
         info->realised_mode = mode;
         info->wake_source   = 0u;

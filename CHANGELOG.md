@@ -397,6 +397,37 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`src/zephyr/v2n_supervisor.c` -- post-wake re-init hook for
+  the wave-2 §2B.3 power-saving path (2026-05-14).**  Adds the
+  internal SDK API `alp_z_v2n_supervisor_invalidate()` so the
+  GD32 supervisor singleton can be reset after a deep-sleep ->
+  wakeup cycle.  Mechanism:
+
+  * Takes the supervisor mutex (bounded by the same
+    `CONFIG_ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS` window as
+    a normal acquire to avoid piling up behind in-flight bridge
+    ops).
+  * Closes any open SPI / I2C bus handles (the GD32 may have
+    been reset across the sleep cycle, so reusing the cached
+    handles is unsafe).
+  * Clears the `tried_init` latch so the next `acquire()`
+    re-runs the bus open + GD32 handshake from scratch.
+  * Best-effort: if the mutex acquire times out (another
+    thread mid-bridge-op), gives up silently -- the in-flight
+    thread's call will fail naturally if the GD32 is
+    unresponsive post-wake, and its failure path leaves
+    tried_init clear anyway.
+
+  Mirrored NOSUPPORT stub for builds without
+  `CONFIG_ALP_SDK_V2N_SUPERVISOR`.  Documented in
+  `v2n_supervisor.h` as an internal-only API; the future
+  `alp_power_request_sleep` wake handler is the authoritative
+  caller once the firmware-side CMD_POWER_MODE_SET (0x28) HAL
+  body + the Zephyr `pm_state` wiring both land.
+  `power_zephyr.c` documents the planned wake-path call site
+  inline so the resume hook is discoverable when wiring the
+  real impl.
+
 - **`<alp/protocol/cc3501e.h>` -- protocol docs hygiene + named
   GPIO direction / pull enums (§2A.2 plan §5.1 + §5.2,
   2026-05-14).**  Two purely-declarative cleanups extracted from
