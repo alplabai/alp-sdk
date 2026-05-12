@@ -496,7 +496,7 @@ alp_status_t gd32g553_ota_write_chunk(gd32g553_t *ctx,
      * by the caller -- this helper only enforces the absolute limit. */
     if (data_len > GD32G553_MAX_PAYLOAD_BYTES - 4u) return ALP_ERR_INVAL;
 
-    uint8_t req[GD32G553_MAX_PAYLOAD_BYTES] = {0};
+    uint8_t req[GD32G553_MAX_PAYLOAD_BYTES] = { 0 };
     put_le32(&req[0], offset);
     memcpy(&req[4], data, data_len);
 
