@@ -11,6 +11,16 @@
  * gracefully rather than tripping a UBSan bit-shift overflow or
  * indexing past a fixed buffer.
  *
+ * Status: inline reference parser, not yet wired to production.
+ * The host driver in `chips/gd32_swd/gd32_swd.c` composes + checks
+ * parity inline inside `swd_xfer` (no separately-callable validator
+ * to link).  Extracting `swd_compute_header_parity` /
+ * `swd_compute_data_parity` as standalone non-static helpers is
+ * tracked as a follow-up; once that lands the harness will replace
+ * the impls below with calls to the production symbols + a CRC-style
+ * cross-check against a second reference impl, matching the pattern
+ * `gd32_bridge_frame_fuzz.c` already uses for the bridge CRC.
+ *
  * Driven input is interpreted as:
  *   byte[0]   = candidate request header
  *   byte[1..4] = candidate 32-bit data (little-endian)

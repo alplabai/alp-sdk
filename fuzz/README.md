@@ -27,16 +27,18 @@ exercises one parser surface with corpora-driven input.
 | `cc3501e_fuzz.c`           | The `<alp/protocol/cc3501e.h>` SPI wire-protocol frame parser (Alif <-> CC3501E).         |
 | `iot_mqtt_fuzz.c`          | MQTT v3.1.1 fixed + variable-length header decoder, as consumed by `<alp/iot.h>`'s MQTT path. |
 | `eeprom_manifest_fuzz.c`   | 24C128 EEPROM manifest decoder consumed by `<alp/hw_info.h>` (magic + schema_version + CRC32). |
-| `gd32_bridge_frame_fuzz.c` | GD32 bridge frame validator (SOF + opcode + payload + CRC-16/CCITT-FALSE); same algorithm host + firmware share. |
-| `swd_packet_fuzz.c`        | Arm SWD packet header + 32-bit data parity decoder used by `chips/gd32_swd/`.             |
+| `gd32_bridge_frame_fuzz.c` | Drives `protocol_dispatch` from `gd32-bridge/src/protocol.c` against arbitrary opcode + payload bytes, then cross-checks the firmware-side `crc16_ccitt_false` symbol against an in-harness reference impl on every iteration -- silent CRC drift between the two becomes a libFuzzer crash. |
+| `swd_packet_fuzz.c`        | Arm SWD packet header + 32-bit data parity decoder used by `chips/gd32_swd/`.  Still an inline reference parser pending the host driver factoring its parity helpers out as non-static functions; TODO tracked in the file header. |
 
-Both harnesses today carry an *inline* reference parser -- the SDK
-doesn't yet ship a public parser API for either surface, so the
-fuzz target uses a known-correct decoder that mirrors what the
-implementation would do.  v0.4 swaps the inline parsers for the
-real ones (`alp_cc3501e_parse_frame`, `alp_mqtt_decode_fixed_header`)
-once those land in the implementation pass.  Catching crashes on
-the inline decoder today still has value: it shadows the cc3501e
+The `cc3501e_fuzz.c`, `iot_mqtt_fuzz.c`, `eeprom_manifest_fuzz.c`
+harnesses still carry an *inline* reference parser -- the SDK
+doesn't yet ship a public parser API for any of those three
+surfaces, so the fuzz target uses a known-correct decoder that
+mirrors what the implementation would do.  v0.4 swaps the inline
+parsers for the real ones (`alp_cc3501e_parse_frame`,
+`alp_mqtt_decode_fixed_header`, `alp_hw_info_decode_eeprom`) once
+those land in the implementation pass.  Catching crashes on the
+inline decoder today still has value: it shadows the cc3501e
 firmware's parser (separate repo `alplabai/cc3501e-firmware`), so
 malformed-frame issues caught here are also reportable upstream.
 

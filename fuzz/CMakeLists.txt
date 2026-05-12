@@ -45,3 +45,20 @@ _alp_add_fuzz_target(iot_mqtt)
 _alp_add_fuzz_target(eeprom_manifest)
 _alp_add_fuzz_target(gd32_bridge_frame)
 _alp_add_fuzz_target(swd_packet)
+
+# gd32_bridge_frame additionally links the firmware-side
+# protocol.c + bridge_hw_stub.c so the harness exercises the
+# production opcode dispatcher (`protocol_dispatch`) instead of a
+# self-test reference, and can cross-check its own reference CRC
+# against the firmware-side `crc16_ccitt_false` symbol on every
+# iteration -- silent divergence between the two impls becomes a
+# fuzz failure.
+target_sources(alp_fuzz_gd32_bridge_frame PRIVATE
+    ${CMAKE_SOURCE_DIR}/gd32-bridge/src/protocol.c
+    ${CMAKE_SOURCE_DIR}/gd32-bridge/src/bootloader/bootloader.c
+    ${CMAKE_SOURCE_DIR}/gd32-bridge/hal/bridge_hw_stub.c
+)
+target_include_directories(alp_fuzz_gd32_bridge_frame PRIVATE
+    ${CMAKE_SOURCE_DIR}/gd32-bridge/src
+    ${CMAKE_SOURCE_DIR}/gd32-bridge/hal
+)
