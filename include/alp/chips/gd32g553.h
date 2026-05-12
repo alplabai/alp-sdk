@@ -581,6 +581,124 @@ alp_status_t gd32g553_tmu_compute(gd32g553_t *ctx,
                                   uint32_t *result_out);
 
 /* ------------------------------------------------------------------ */
+/* v0.5 (§2B.2 + §2B.3) -- advanced timer extras + power-mode set     */
+/*                                                                    */
+/* All six opcodes return STATUS_NOSUPPORT today against the current  */
+/* firmware (the bridge_hw_* HAL bodies are the gating dep -- see     */
+/* the firmware-side comment block at the top of                      */
+/* gd32-bridge/src/protocol.h).  The host helpers below match the     */
+/* contract: every call returns ALP_ERR_NOSUPPORT today and ALP_OK    */
+/* once the firmware-side HAL ships.  Portable surfaces in            */
+/* <alp/pwm.h> + <alp/counter.h> + <alp/power.h> dispatch through     */
+/* these on the V2N family.                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Reconfigure a PWM channel as an input-capture source.
+ *
+ * Mirrors @ref alp_pwm_capture_open in <alp/pwm.h>.  Request
+ * payload: `channel:u8 edge:u8`.  Reply: empty + STATUS.
+ *
+ * @param[in] ctx      Initialised driver context.
+ * @param[in] channel  PWM channel (0..7).
+ * @param[in] edge     Edge polarity: 0 = rising, 1 = falling,
+ *                     2 = both.  Mirrors @ref alp_pwm_capture_edge_t.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
+ */
+alp_status_t gd32g553_pwm_capture_begin(gd32g553_t *ctx, uint8_t channel, uint8_t edge);
+
+/**
+ * @brief Read the latest captured period + pulse-width.
+ *
+ * Request payload: `channel:u8`.  Reply payload: `period_ns:u32
+ * pulse_ns:u32`.
+ *
+ * @param[in]  ctx          Initialised driver context.
+ * @param[in]  channel      PWM channel (0..7) previously bound via
+ *                          @ref gd32g553_pwm_capture_begin.
+ * @param[out] period_ns    Receives the captured period (ns).
+ *                          May be NULL if only the pulse width is needed.
+ * @param[out] pulse_ns     Receives the active-level pulse width (ns).
+ *                          May be NULL if only the period is needed.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
+ */
+alp_status_t gd32g553_pwm_capture_read(gd32g553_t *ctx, uint8_t channel, uint32_t *period_ns,
+                                       uint32_t *pulse_ns);
+
+/**
+ * @brief Stop input-capture mode on a PWM channel.
+ *
+ * Request payload: `channel:u8`.  Reply: empty + STATUS.  After
+ * this call the channel can be re-opened as an output via
+ * @ref gd32g553_pwm_set.
+ *
+ * @param[in] ctx      Initialised driver context.
+ * @param[in] channel  PWM channel (0..7).
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
+ */
+alp_status_t gd32g553_pwm_capture_end(gd32g553_t *ctx, uint8_t channel);
+
+/**
+ * @brief Drive a one-shot pulse on a PWM channel.
+ *
+ * Request payload: `channel:u8 reserved:u8 reserved:u16
+ * pulse_ns:u32`.  Reply: empty + STATUS.  After the pulse the
+ * channel returns to inactive level at 0 % duty.
+ *
+ * @param[in] ctx       Initialised driver context.
+ * @param[in] channel   PWM channel (0..7).
+ * @param[in] pulse_ns  Pulse width (ns); must be > 0.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
+ */
+alp_status_t gd32g553_pwm_single_pulse(gd32g553_t *ctx, uint8_t channel, uint32_t pulse_ns);
+
+/**
+ * @brief Link two GD32G5 advanced timers in master-slave mode.
+ *
+ * Request payload: `master:u8 slave:u8 mode:u8`.  Reply: empty
+ * + STATUS.  Used to synchronise multi-channel PWM output across
+ * TIMER0 / TIMER7 / TIMER19.  Mode semantics are firmware-defined
+ * (see the GD32G553 reference manual §17 master-mode control bits).
+ *
+ * @param[in] ctx     Initialised driver context.
+ * @param[in] master  Master timer index (firmware-defined enum).
+ * @param[in] slave   Slave timer index.
+ * @param[in] mode    Sync mode (firmware-defined: reset / gated /
+ *                    trigger / external clock).
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
+ */
+alp_status_t gd32g553_timer_sync(gd32g553_t *ctx, uint8_t master, uint8_t slave, uint8_t mode);
+
+/**
+ * @brief Request the GD32 + the bridged Renesas SoC enter a sleep mode.
+ *
+ * Request payload: `mode:u8 reserved:u8 wake_bitmap:u32
+ * wake_after_ms:u32`.  Reply: empty + STATUS.  The supervisor
+ * configures the wake sources, signals the Renesas SoC to enter
+ * the matching mode, and re-runs the bridge handshake on wakeup
+ * (host-side reciprocal: call
+ * @c alp_z_v2n_supervisor_invalidate() before this returns so
+ * the next bridge acquire re-inits).
+ *
+ * Mirrors @ref alp_power_request_sleep in <alp/power.h>.
+ *
+ * @param[in] ctx            Initialised driver context.
+ * @param[in] mode           Sleep mode: 0 = run (no-op),
+ *                           1 = sleep, 2 = deep-sleep, 3 = standby.
+ * @param[in] wake_bitmap    @ref ALP_POWER_WAKE_* bitmap.
+ * @param[in] wake_after_ms  Max wall-clock wait, or 0 for "no timer".
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
+ */
+alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx, uint8_t mode, uint32_t wake_bitmap,
+                                     uint32_t wake_after_ms);
+
+/* ------------------------------------------------------------------ */
 /* OTA -- in-system upgrade of the bridge firmware                    */
 /*                                                                    */
 /* Opcodes 0xF0..0xF6 are reserved by the bridge protocol             */

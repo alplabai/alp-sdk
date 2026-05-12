@@ -676,6 +676,84 @@ alp_status_t gd32g553_tmu_compute(gd32g553_t *ctx,
 }
 
 /* ----------------------------------------------------------------- */
+/* v0.5 (§2B.2 + §2B.3) -- advanced timer extras + power-mode set    */
+/*                                                                    */
+/* Wire frames per docs/gd32-bridge-protocol.md.  Firmware returns   */
+/* STATUS_NOSUPPORT today via the default-case dispatch until the    */
+/* corresponding bridge_hw_* HAL bodies land; the host helpers below */
+/* return ALP_ERR_NOSUPPORT in lockstep.                              */
+/* ----------------------------------------------------------------- */
+
+alp_status_t gd32g553_pwm_capture_begin(gd32g553_t *ctx, uint8_t channel, uint8_t edge)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (edge > 2u) return ALP_ERR_INVAL;
+    uint8_t req[2] = { channel, edge };
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_CAPTURE_BEGIN, req,
+                    sizeof(req), NULL, 0u);
+}
+
+alp_status_t gd32g553_pwm_capture_read(gd32g553_t *ctx, uint8_t channel, uint32_t *period_ns,
+                                       uint32_t *pulse_ns)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (period_ns == NULL && pulse_ns == NULL) return ALP_ERR_INVAL;
+    uint8_t      req[1]   = { channel };
+    uint8_t      reply[8] = { 0 };
+    alp_status_t s        = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                                     GD32G553_CMD_PWM_CAPTURE_READ, req, sizeof(req), reply,
+                                     sizeof(reply));
+    if (s != ALP_OK) return s;
+    if (period_ns != NULL) *period_ns = get_le32(&reply[0]);
+    if (pulse_ns != NULL) *pulse_ns = get_le32(&reply[4]);
+    return ALP_OK;
+}
+
+alp_status_t gd32g553_pwm_capture_end(gd32g553_t *ctx, uint8_t channel)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    uint8_t req[1] = { channel };
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_CAPTURE_END, req,
+                    sizeof(req), NULL, 0u);
+}
+
+alp_status_t gd32g553_pwm_single_pulse(gd32g553_t *ctx, uint8_t channel, uint32_t pulse_ns)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (pulse_ns == 0u) return ALP_ERR_INVAL;
+    uint8_t req[8];
+    req[0] = channel;
+    req[1] = 0u; /* reserved */
+    req[2] = 0u;
+    req[3] = 0u;
+    put_le32(&req[4], pulse_ns);
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_SINGLE_PULSE, req,
+                    sizeof(req), NULL, 0u);
+}
+
+alp_status_t gd32g553_timer_sync(gd32g553_t *ctx, uint8_t master, uint8_t slave, uint8_t mode)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    uint8_t req[3] = { master, slave, mode };
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_TIMER_SYNC, req, sizeof(req),
+                    NULL, 0u);
+}
+
+alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx, uint8_t mode, uint32_t wake_bitmap,
+                                     uint32_t wake_after_ms)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (mode > 3u) return ALP_ERR_INVAL;
+    uint8_t req[10];
+    req[0] = mode;
+    req[1] = 0u; /* reserved */
+    put_le32(&req[2], wake_bitmap);
+    put_le32(&req[6], wake_after_ms);
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_POWER_MODE_SET, req,
+                    sizeof(req), NULL, 0u);
+}
+
+/* ----------------------------------------------------------------- */
 /* OTA helpers -- the firmware-side opcodes return STATUS_NOSUPPORT  */
 /* against the scaffold today, which maps to ALP_ERR_NOSUPPORT here. */
 /* When the bridge ships real bodies the same call paths return the  */

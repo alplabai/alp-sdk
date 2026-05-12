@@ -1536,6 +1536,22 @@
           "hash": "831d5d02a16faf26",
           "signature": "alp_status_t gd32g553_ping_via(gd32g553_t *ctx, gd32g553_transport_t t);"
         },
+        "gd32g553_power_mode_set": {
+          "hash": "c6525d03bb449d80",
+          "signature": "alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx, uint8_t mode, uint32_t wake_bitmap, uint32_t wake_after_ms);"
+        },
+        "gd32g553_pwm_capture_begin": {
+          "hash": "5ce078ebbd061253",
+          "signature": "alp_status_t gd32g553_pwm_capture_begin(gd32g553_t *ctx, uint8_t channel, uint8_t edge);"
+        },
+        "gd32g553_pwm_capture_end": {
+          "hash": "5c6f975730962007",
+          "signature": "alp_status_t gd32g553_pwm_capture_end(gd32g553_t *ctx, uint8_t channel);"
+        },
+        "gd32g553_pwm_capture_read": {
+          "hash": "15f459536fa2bd58",
+          "signature": "alp_status_t gd32g553_pwm_capture_read(gd32g553_t *ctx, uint8_t channel, uint32_t *period_ns, uint32_t *pulse_ns);"
+        },
         "gd32g553_pwm_configure": {
           "hash": "6e7c615772df1a07",
           "signature": "alp_status_t gd32g553_pwm_configure(gd32g553_t *ctx, uint8_t channel, gd32g553_pwm_align_t align_mode, uint32_t dead_time_ns, uint8_t break_cfg);"
@@ -1548,6 +1564,10 @@
           "hash": "c8ebbcf0e1fb8d4c",
           "signature": "alp_status_t gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t duty_ns);"
         },
+        "gd32g553_pwm_single_pulse": {
+          "hash": "c5bf159e47c4f802",
+          "signature": "alp_status_t gd32g553_pwm_single_pulse(gd32g553_t *ctx, uint8_t channel, uint32_t pulse_ns);"
+        },
         "gd32g553_qenc_read": {
           "hash": "2b348fc8e2610dce",
           "signature": "alp_status_t gd32g553_qenc_read(gd32g553_t *ctx, uint8_t encoder, int32_t *position_out);"
@@ -1559,6 +1579,10 @@
         "gd32g553_set_default_transport": {
           "hash": "74a995a5d548ad83",
           "signature": "alp_status_t gd32g553_set_default_transport(gd32g553_t *ctx, gd32g553_transport_t t);"
+        },
+        "gd32g553_timer_sync": {
+          "hash": "b41fb085f89d198a",
+          "signature": "alp_status_t gd32g553_timer_sync(gd32g553_t *ctx, uint8_t master, uint8_t slave, uint8_t mode);"
         },
         "gd32g553_tmu_compute": {
           "hash": "9ec59752de609cb3",

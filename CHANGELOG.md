@@ -397,6 +397,41 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`<alp/chips/gd32g553.h>` -- host helpers for v0.5 advanced-
+  timer + power-mode opcodes (2026-05-14).**  Adds six new
+  GD32G553 host driver functions that mirror the §2B.2 + §2B.3
+  wire opcodes added earlier in this wave:
+
+  * `gd32g553_pwm_capture_begin / read / end` -- input-capture
+    on a PWM channel.  Mirrors `alp_pwm_capture_*` in `<alp/pwm.h>`.
+  * `gd32g553_pwm_single_pulse(channel, pulse_ns)` -- one-shot
+    pulse output.  Mirrors `alp_pwm_single_pulse`.
+  * `gd32g553_timer_sync(master, slave, mode)` -- master-slave
+    advanced-timer linkage across TIMER0 / TIMER7 / TIMER19.
+  * `gd32g553_power_mode_set(mode, wake_bitmap, wake_after_ms)`
+    -- system-wide sleep-mode request.  Mirrors
+    `alp_power_request_sleep` in `<alp/power.h>`.
+
+  Each helper marshals the wire payload per the format documented
+  in `docs/gd32-bridge-protocol.md` §3.y / §3.z, calls `cmd_send`
+  with the matching opcode (0x23..0x28), and returns
+  `ALP_ERR_NOSUPPORT` against the current firmware (default-case
+  dispatch returns STATUS_NOSUPPORT until the corresponding
+  `bridge_hw_*` HAL bodies land).  Once the HAL ships, the same
+  call paths return ALP_OK with the documented payloads -- no
+  host-side changes needed.
+
+  Closes Task #10 from the audit task list: every v0.5 protocol
+  opcode now has a matching host-helper function so the portable
+  surfaces in `<alp/pwm.h>` + `<alp/power.h>` can dispatch through
+  the chip layer (instead of the current short-circuit NOSUPPORT
+  return) once the firmware-side HALs land.
+
+  ABI snapshots regen'd (still 58 headers).  Doxygen coverage
+  292 -> 296 (= 100%) -- six new public functions documented with
+  full @brief / @param / @return tags (the +4 vs +6 delta tracks
+  how the doxygen counter aggregates multi-out functions).
+
 - **`<alp/storage.h>::alp_storage_configure_inline_aes` -- on-the-
   fly XIP encryption / decryption surface for AEN OSPI / HexSPI
   (AEN audit §4.3 top-five gap, 2026-05-14).**  Extends the
