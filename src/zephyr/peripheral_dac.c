@@ -54,6 +54,11 @@ static const struct device *const alp_dac_devs[] = {
 static const struct device *const alp_dac_devs[] = { NULL, NULL };
 #endif  /* CONFIG_DAC */
 
+#if defined(CONFIG_DAC)
+/* Only compiled when the Zephyr dac_* path is active -- every caller
+ * sits inside a `#if defined(CONFIG_DAC)` block, so leaving this
+ * defined unconditionally trips -Werror=unused-function on
+ * bridge-only V2N builds (CONFIG_DAC=n, ALP_DAC_HAS_BRIDGE_PATH=1). */
 static alp_status_t errno_to_alp(int err) {
     switch (err) {
     case 0:           return ALP_OK;
@@ -64,6 +69,7 @@ static alp_status_t errno_to_alp(int err) {
     default:          return ALP_ERR_IO;
     }
 }
+#endif  /* CONFIG_DAC */
 
 alp_dac_t *alp_dac_open(const alp_dac_config_t *cfg) {
     alp_z_clear_last_error();

@@ -452,8 +452,8 @@ int mbedtls_hardware_poll(void *data, unsigned char *output, size_t len, size_t 
                                      ? (size_t)GD32G553_BRIDGE_TRNG_MAX_BYTES
                                      : remaining;
 
-        gd32g553_t  *ctx = NULL;
-        alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
+        gd32g553_t  *ctx       = NULL;
+        alp_status_t s         = alp_z_v2n_supervisor_acquire(&ctx);
         if (s != ALP_OK) {
             /* If we produced at least one chunk already, surface a
              * short return so mbedtls can fold it into its entropy
