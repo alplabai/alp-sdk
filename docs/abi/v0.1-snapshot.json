@@ -3981,6 +3981,10 @@
           "definition": "typedef enum { ALP_CC3501E_GPIO_DIR_INPUT = 0u, ALP_CC3501E_GPIO_DIR_OUTPUT = 1u, ALP_CC3501E_GPIO_DIR_OPEN_DRAIN = 2u, } alp_cc3501e_gpio_direction_t;",
           "hash": "b76e9181db26a3a1"
         },
+        "alp_cc3501e_gpio_edge_t": {
+          "definition": "typedef enum { ALP_CC3501E_GPIO_EDGE_NONE = 0u, ALP_CC3501E_GPIO_EDGE_RISING = 1u, ALP_CC3501E_GPIO_EDGE_FALLING = 2u, ALP_CC3501E_GPIO_EDGE_BOTH = 3u, } alp_cc3501e_gpio_edge_t;",
+          "hash": "e21c9a1aed71bb61"
+        },
         "alp_cc3501e_gpio_pull_t": {
           "definition": "typedef enum { ALP_CC3501E_GPIO_PULL_NONE = 0u, ALP_CC3501E_GPIO_PULL_UP = 1u, ALP_CC3501E_GPIO_PULL_DOWN = 2u, } alp_cc3501e_gpio_pull_t;",
           "hash": "43981a77665baaee"

@@ -397,6 +397,31 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`<alp/protocol/cc3501e.h>` -- GPIO set-interrupt + event
+  payload structs (§2A.2 plan §5.3, 2026-05-14).**  Lands the
+  payload typedefs for `CMD_GPIO_SET_INTERRUPT` (opcode 0x53)
+  and the async `EVT_GPIO_INTERRUPT` (opcode 0x54), both of
+  which had opcode numbering committed at the v1 protocol
+  header but no payload struct definitions yet:
+
+  * `alp_cc3501e_gpio_edge_t`: NONE / RISING / FALLING / BOTH
+    enum so callers can name the edge polarity instead of
+    shipping magic 0..3 constants.  NONE doubles as "disable
+    the IRQ" by entering the same code path on the firmware
+    side.
+  * `alp_cc3501e_gpio_set_interrupt_t`: 4-byte request payload
+    (cc3501e_gpio + edge + enabled + reserved).  Wire-compatible
+    with the v1 header's reserved alignment slot.
+  * `alp_cc3501e_gpio_event_t`: 8-byte async event payload
+    (cc3501e_gpio + level + 2-byte reserved + 32-bit
+    timestamp_us).  Timestamp is the CC3501E firmware's
+    monotonic uptime counter so host code can dedupe / debounce
+    across SPI poll cycles.
+
+  Builds on the §5.2 GPIO direction / pull enums shipped in
+  the prior commit.  No protocol bump -- the structs are purely
+  declarative additions to the existing v1 opcodes.
+
 - **`src/zephyr/v2n_supervisor.c` -- post-wake re-init hook for
   the wave-2 §2B.3 power-saving path (2026-05-14).**  Adds the
   internal SDK API `alp_z_v2n_supervisor_invalidate()` so the

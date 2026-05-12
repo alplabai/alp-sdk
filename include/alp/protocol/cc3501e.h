@@ -259,6 +259,40 @@ typedef struct {
     uint8_t reserved[2];
 } alp_cc3501e_gpio_write_t;
 
+/** Edge selector for @ref alp_cc3501e_gpio_set_interrupt_t::edge.
+ *  Mirrors the firmware-side GPIO controller's edge-trigger mode
+ *  registers; named here so callers don't ship magic constants. */
+typedef enum {
+    ALP_CC3501E_GPIO_EDGE_NONE    = 0u, /**< No edge -- disable IRQ. */
+    ALP_CC3501E_GPIO_EDGE_RISING  = 1u,
+    ALP_CC3501E_GPIO_EDGE_FALLING = 2u,
+    ALP_CC3501E_GPIO_EDGE_BOTH    = 3u,
+} alp_cc3501e_gpio_edge_t;
+
+/** Payload of CMD_GPIO_SET_INTERRUPT.  Enable / disable an
+ *  edge-triggered interrupt on a CC3501E GPIO and dictate which
+ *  edge polarity fires the event.  After setup, the firmware
+ *  emits an async ALP_CC3501E_EVT_GPIO_INTERRUPT frame on each
+ *  matching edge until the host disables (edge = NONE). */
+typedef struct {
+    uint8_t cc3501e_gpio; /**< CC3501E pad index. */
+    uint8_t edge;         /**< One of @ref alp_cc3501e_gpio_edge_t. */
+    uint8_t enabled;      /**< 0 = disable; 1 = enable. */
+    uint8_t reserved;
+} alp_cc3501e_gpio_set_interrupt_t;
+
+/** Async event payload for EVT_GPIO_INTERRUPT.  Slave -> master
+ *  on every matching edge while the IRQ is enabled.  The timestamp
+ *  is the CC3501E firmware's monotonic uptime counter in
+ *  microseconds; host code uses it to dedupe / debounce across
+ *  SPI poll cycles. */
+typedef struct {
+    uint8_t  cc3501e_gpio;  /**< Pad that triggered. */
+    uint8_t  level;         /**< Sampled level on the triggering edge. */
+    uint8_t  reserved[2];
+    uint32_t timestamp_us;  /**< CC3501E uptime at the edge. */
+} alp_cc3501e_gpio_event_t;
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
