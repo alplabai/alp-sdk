@@ -147,6 +147,8 @@
           "adc",
           "can",
           "counter",
+          "emmc",
+          "flash",
           "gpio",
           "i2c",
           "i2s",
@@ -185,6 +187,17 @@
           "default": "info"
         }
       }
+    },
+    "chips": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]+$"},
+      "description": "Chip drivers the application links directly via <alp/chips/<name>.h>.  Each entry enables the matching CONFIG_ALP_SDK_CHIP_<NAME>=y.  The portability lint (scripts/check_example_portability.py) cross-references each entry against metadata/chips/<name>.yaml's families[] to catch examples that reach for a chip the configured SoM can't populate.  Equivalent to a write to `carrier.populated` with `<chip>: true` for each entry; this top-level list exists so example board.yaml files don't have to know whether the carrier preset already declares the chip."
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "App-specific feature configuration that doesn't map cleanly onto the strict-typed blocks above.  Free-form map; the loader passes structured entries through to the right backend (e.g. `features.hw_info.eeprom.bus` -> CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=<n>).  Use sparingly -- prefer the typed surface when one exists."
     }
   },
   "$defs": {

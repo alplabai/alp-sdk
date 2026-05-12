@@ -1003,7 +1003,8 @@ ZTEST(alp_chips, test_gd32g553_init_invalid_i2c_addr)
 {
     gd32g553_t ctx;
     alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 100000,
+        .bus_id     = ALP_E1M_I2C0,
+        .bitrate_hz = 100000,
     });
     zassert_not_null(bus);
     zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x80u), ALP_ERR_INVAL,
@@ -1014,12 +1015,11 @@ ZTEST(alp_chips, test_gd32g553_init_invalid_i2c_addr)
 ZTEST(alp_chips, test_gd32g553_post_init_calls_reject_uninitialised)
 {
     gd32g553_t ctx = {0};
-    zassert_equal(gd32g553_set_default_transport(&ctx, GD32G553_TRANSPORT_SPI),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_set_default_transport(&ctx, GD32G553_TRANSPORT_SPI), ALP_ERR_NOT_READY);
 
     uint32_t levels;
     zassert_equal(gd32g553_gpio_read(&ctx, 0u, &levels), ALP_ERR_NOT_READY);
-    zassert_equal(gd32g553_gpio_write(&ctx, 0u, 0u),     ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_gpio_write(&ctx, 0u, 0u), ALP_ERR_NOT_READY);
 
     uint8_t pmic = 0u;
     zassert_equal(gd32g553_da9292_status_forward(&ctx, &pmic), ALP_ERR_NOT_READY);
@@ -1028,8 +1028,7 @@ ZTEST(alp_chips, test_gd32g553_post_init_calls_reject_uninitialised)
 ZTEST(alp_chips, test_gd32g553_pwm_set_invalid_duty)
 {
     gd32g553_t ctx = {.initialised = true};
-    zassert_equal(gd32g553_pwm_set(&ctx, 0u, 100000u, 200000u),
-                  ALP_ERR_INVAL);
+    zassert_equal(gd32g553_pwm_set(&ctx, 0u, 100000u, 200000u), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_chips, test_gd32g553_adc_read_invalid_samples)
@@ -1049,31 +1048,30 @@ ZTEST(alp_chips, test_gd32g553_adc_read_invalid_samples)
 
 static int test_dummy_mdio_read(uint8_t phy, uint8_t reg, uint16_t *val, void *user)
 {
-    (void)phy; (void)reg; (void)user;
+    (void)phy;
+    (void)reg;
+    (void)user;
     *val = 0u;
     return 0;
 }
 static int test_dummy_mdio_write(uint8_t phy, uint8_t reg, uint16_t val, void *user)
 {
-    (void)phy; (void)reg; (void)val; (void)user;
+    (void)phy;
+    (void)reg;
+    (void)val;
+    (void)user;
     return 0;
 }
 
 ZTEST(alp_chips, test_rtl8211fdi_init_null_args)
 {
     rtl8211fdi_t ctx;
-    zassert_equal(rtl8211fdi_init(NULL, 0u, test_dummy_mdio_read,
-                                  test_dummy_mdio_write, NULL),
+    zassert_equal(rtl8211fdi_init(NULL, 0u, test_dummy_mdio_read, test_dummy_mdio_write, NULL),
                   ALP_ERR_INVAL);
-    zassert_equal(rtl8211fdi_init(&ctx, 0u, NULL,
-                                  test_dummy_mdio_write, NULL),
-                  ALP_ERR_INVAL);
-    zassert_equal(rtl8211fdi_init(&ctx, 0u, test_dummy_mdio_read,
-                                  NULL, NULL),
-                  ALP_ERR_INVAL);
+    zassert_equal(rtl8211fdi_init(&ctx, 0u, NULL, test_dummy_mdio_write, NULL), ALP_ERR_INVAL);
+    zassert_equal(rtl8211fdi_init(&ctx, 0u, test_dummy_mdio_read, NULL, NULL), ALP_ERR_INVAL);
     /* PHY address > 31 (5-bit address space) must be rejected. */
-    zassert_equal(rtl8211fdi_init(&ctx, 32u, test_dummy_mdio_read,
-                                  test_dummy_mdio_write, NULL),
+    zassert_equal(rtl8211fdi_init(&ctx, 32u, test_dummy_mdio_read, test_dummy_mdio_write, NULL),
                   ALP_ERR_INVAL);
 }
 
@@ -1082,22 +1080,20 @@ ZTEST(alp_chips, test_rtl8211fdi_init_oui_check_rejects_zero)
     /* Dummy callbacks read 0x0000 for every register -- PHYID1
      * OUI check should reject (Realtek OUI is 0x001C). */
     rtl8211fdi_t ctx;
-    zassert_equal(rtl8211fdi_init(&ctx, 0u, test_dummy_mdio_read,
-                                  test_dummy_mdio_write, NULL),
+    zassert_equal(rtl8211fdi_init(&ctx, 0u, test_dummy_mdio_read, test_dummy_mdio_write, NULL),
                   ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_chips, test_rtl8211fdi_post_init_rejects_uninitialised)
 {
-    rtl8211fdi_t ctx = {0};
+    rtl8211fdi_t       ctx = {0};
 
-    bool up; rtl8211fdi_speed_t speed; bool fd;
-    zassert_equal(rtl8211fdi_get_link(&ctx, &up, &speed, &fd),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(rtl8211fdi_soft_reset(&ctx, 1000u),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(rtl8211fdi_restart_autoneg(&ctx),
-                  ALP_ERR_NOT_READY);
+    bool               up;
+    rtl8211fdi_speed_t speed;
+    bool               fd;
+    zassert_equal(rtl8211fdi_get_link(&ctx, &up, &speed, &fd), ALP_ERR_NOT_READY);
+    zassert_equal(rtl8211fdi_soft_reset(&ctx, 1000u), ALP_ERR_NOT_READY);
+    zassert_equal(rtl8211fdi_restart_autoneg(&ctx), ALP_ERR_NOT_READY);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1108,17 +1104,18 @@ ZTEST(alp_chips, test_clk_5l35023b_init_null_args)
 {
     clk_5l35023b_t ctx;
     alp_i2c_t     *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 100000,
+        .bus_id     = ALP_E1M_I2C0,
+        .bitrate_hz = 100000,
     });
     zassert_not_null(bus);
 
-    zassert_equal(clk_5l35023b_init(NULL, bus, CLK_5L35023B_I2C_ADDR_DEFAULT),
-                  ALP_ERR_INVAL, "NULL ctx must be rejected");
-    zassert_equal(clk_5l35023b_init(&ctx, NULL, CLK_5L35023B_I2C_ADDR_DEFAULT),
-                  ALP_ERR_INVAL, "NULL bus must be rejected");
+    zassert_equal(clk_5l35023b_init(NULL, bus, CLK_5L35023B_I2C_ADDR_DEFAULT), ALP_ERR_INVAL,
+                  "NULL ctx must be rejected");
+    zassert_equal(clk_5l35023b_init(&ctx, NULL, CLK_5L35023B_I2C_ADDR_DEFAULT), ALP_ERR_INVAL,
+                  "NULL bus must be rejected");
     /* 0x80 is out of 7-bit range. */
-    zassert_equal(clk_5l35023b_init(&ctx, bus, 0x80u),
-                  ALP_ERR_INVAL, "addr > 0x7F must be rejected");
+    zassert_equal(clk_5l35023b_init(&ctx, bus, 0x80u), ALP_ERR_INVAL,
+                  "addr > 0x7F must be rejected");
 
     alp_i2c_close(bus);
 }
@@ -1131,13 +1128,12 @@ ZTEST(alp_chips, test_clk_5l35023b_raw_rw_rejects_uninitialised)
      * NOT_READY rather than IO. */
     clk_5l35023b_t ctx = {0};
 
-    uint8_t v;
+    uint8_t        v;
     zassert_equal(clk_5l35023b_read_reg(&ctx, 0u, &v), ALP_ERR_NOT_READY);
     zassert_equal(clk_5l35023b_write_reg(&ctx, 0u, 0xFFu), ALP_ERR_NOT_READY);
 
     uint8_t dump[8];
-    zassert_equal(clk_5l35023b_register_dump(&ctx, 0u, dump, sizeof dump),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(clk_5l35023b_register_dump(&ctx, 0u, dump, sizeof dump), ALP_ERR_NOT_READY);
 
     /* deinit on a zero context is a no-op (idempotent). */
     clk_5l35023b_deinit(&ctx);
@@ -1153,12 +1149,10 @@ ZTEST(alp_chips, test_clk_5l35023b_register_dump_rejects_invalid)
 
     /* count == 0 -> INVAL even with a non-NULL out. */
     uint8_t out[4];
-    zassert_equal(clk_5l35023b_register_dump(&ctx, 0u, out, 0u),
-                  ALP_ERR_INVAL);
+    zassert_equal(clk_5l35023b_register_dump(&ctx, 0u, out, 0u), ALP_ERR_INVAL);
 
     /* NULL out -> INVAL even with a positive count. */
-    zassert_equal(clk_5l35023b_register_dump(&ctx, 0u, NULL, 1u),
-                  ALP_ERR_INVAL);
+    zassert_equal(clk_5l35023b_register_dump(&ctx, 0u, NULL, 1u), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_chips, test_clk_5l35023b_typed_helpers_reject_uninitialised)
@@ -1166,16 +1160,13 @@ ZTEST(alp_chips, test_clk_5l35023b_typed_helpers_reject_uninitialised)
     /* New typed surface added with the datasheet integration --
      * Dash-Code-ID read, strap-address decode, soft power-down.
      * Each must report NOT_READY on a zeroed context. */
-    clk_5l35023b_t ctx = {0};
-    uint8_t  dashcode;
+    clk_5l35023b_t            ctx = {0};
+    uint8_t                   dashcode;
     clk_5l35023b_strap_addr_t strap;
 
-    zassert_equal(clk_5l35023b_read_dashcode_id(&ctx, &dashcode),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(clk_5l35023b_get_strap_addr(&ctx, &strap),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(clk_5l35023b_set_power_down(&ctx, true),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(clk_5l35023b_read_dashcode_id(&ctx, &dashcode), ALP_ERR_NOT_READY);
+    zassert_equal(clk_5l35023b_get_strap_addr(&ctx, &strap), ALP_ERR_NOT_READY);
+    zassert_equal(clk_5l35023b_set_power_down(&ctx, true), ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_chips, test_clk_5l35023b_typed_helpers_validate_args)
@@ -1184,10 +1175,8 @@ ZTEST(alp_chips, test_clk_5l35023b_typed_helpers_validate_args)
      * check before any bus access. */
     clk_5l35023b_t ctx = {.initialised = true};
 
-    zassert_equal(clk_5l35023b_read_dashcode_id(&ctx, NULL),
-                  ALP_ERR_INVAL);
-    zassert_equal(clk_5l35023b_get_strap_addr(&ctx, NULL),
-                  ALP_ERR_INVAL);
+    zassert_equal(clk_5l35023b_read_dashcode_id(&ctx, NULL), ALP_ERR_INVAL);
+    zassert_equal(clk_5l35023b_get_strap_addr(&ctx, NULL), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_chips, test_clk_5l35023b_get_strap_addr_decodes_general_ctrl)
@@ -1208,12 +1197,11 @@ ZTEST(alp_chips, test_clk_5l35023b_get_strap_addr_decodes_general_ctrl)
     };
 
     for (size_t i = 0u; i < ARRAY_SIZE(cases); ++i) {
-        ctx.general_ctrl = cases[i].gc_byte;
+        ctx.general_ctrl              = cases[i].gc_byte;
         clk_5l35023b_strap_addr_t got = (clk_5l35023b_strap_addr_t)0xFFu;
         zassert_equal(clk_5l35023b_get_strap_addr(&ctx, &got), ALP_OK);
         zassert_equal((unsigned)got, (unsigned)cases[i].expected,
-                      "gc_byte=0x%02X: expected strap %u, got %u",
-                      cases[i].gc_byte,
+                      "gc_byte=0x%02X: expected strap %u, got %u", cases[i].gc_byte,
                       (unsigned)cases[i].expected, (unsigned)got);
     }
 }
@@ -1231,7 +1219,7 @@ ZTEST(alp_chips, test_clk_5l35023b_get_strap_addr_decodes_general_ctrl)
 static bool fake_murata_reg_state[2];
 static int  fake_murata_set_calls;
 
-static int fake_murata_reg_set(murata_reg_t which, bool enable, void *user)
+static int  fake_murata_reg_set(murata_reg_t which, bool enable, void *user)
 {
     (void)user;
     fake_murata_reg_state[(int)which] = enable;
@@ -1243,14 +1231,11 @@ ZTEST(alp_chips, test_murata_lbee5hy2fy_init_null_args)
 {
     murata_lbee5hy2fy_t ctx;
     /* NULL ctx -> INVAL. */
-    zassert_equal(murata_lbee5hy2fy_init(NULL, fake_murata_reg_set, NULL,
-                                         NULL, NULL, NULL, NULL),
+    zassert_equal(murata_lbee5hy2fy_init(NULL, fake_murata_reg_set, NULL, NULL, NULL, NULL, NULL),
                   ALP_ERR_INVAL);
     /* NULL reg_set callback -> INVAL.  reg_get is optional so it stays
      * NULL here. */
-    zassert_equal(murata_lbee5hy2fy_init(&ctx, NULL, NULL,
-                                         NULL, NULL, NULL, NULL),
-                  ALP_ERR_INVAL);
+    zassert_equal(murata_lbee5hy2fy_init(&ctx, NULL, NULL, NULL, NULL, NULL, NULL), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_chips, test_murata_lbee5hy2fy_power_calls_reject_uninitialised)
@@ -1263,10 +1248,8 @@ ZTEST(alp_chips, test_murata_lbee5hy2fy_power_calls_reject_uninitialised)
     zassert_equal(murata_lbee5hy2fy_wl_power(&ctx, true), ALP_ERR_NOT_READY);
 
     bool level;
-    zassert_equal(murata_lbee5hy2fy_bt_host_wake_level(&ctx, &level),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(murata_lbee5hy2fy_wl_host_wake_level(&ctx, &level),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(murata_lbee5hy2fy_bt_host_wake_level(&ctx, &level), ALP_ERR_NOT_READY);
+    zassert_equal(murata_lbee5hy2fy_wl_host_wake_level(&ctx, &level), ALP_ERR_NOT_READY);
 
     /* deinit on uninitialised must be a safe no-op. */
     murata_lbee5hy2fy_deinit(&ctx);
@@ -1279,18 +1262,16 @@ ZTEST(alp_chips, test_murata_lbee5hy2fy_bt_wake_returns_nosupport_when_pin_null)
      * bt_dev_wake (the V2N convention -- the line is not routed).
      * bt_wake_device() must report NOSUPPORT (not NOT_READY). */
     fake_murata_set_calls    = 0;
-    fake_murata_reg_state[0] = true;  /* seed non-zero to verify init drives low. */
+    fake_murata_reg_state[0] = true; /* seed non-zero to verify init drives low. */
     fake_murata_reg_state[1] = true;
 
     murata_lbee5hy2fy_t ctx;
-    alp_status_t s = murata_lbee5hy2fy_init(&ctx, fake_murata_reg_set, NULL,
-                                            NULL, NULL, NULL, NULL);
+    alp_status_t        s =
+        murata_lbee5hy2fy_init(&ctx, fake_murata_reg_set, NULL, NULL, NULL, NULL, NULL);
     zassert_equal(s, ALP_OK, "init with NULL bt_dev_wake must succeed (V2N path)");
     zassert_equal(fake_murata_set_calls, 2, "init must drive BOTH regulators low");
-    zassert_false(fake_murata_reg_state[(int)MURATA_REG_BT],
-                  "init must drive BT_REG_ON low");
-    zassert_false(fake_murata_reg_state[(int)MURATA_REG_WL],
-                  "init must drive WL_REG_ON low");
+    zassert_false(fake_murata_reg_state[(int)MURATA_REG_BT], "init must drive BT_REG_ON low");
+    zassert_false(fake_murata_reg_state[(int)MURATA_REG_WL], "init must drive WL_REG_ON low");
 
     /* bt_dev_wake handle is NULL by construction. */
     zassert_equal(murata_lbee5hy2fy_bt_wake_device(&ctx), ALP_ERR_NOSUPPORT);
@@ -1311,30 +1292,25 @@ ZTEST(alp_chips, test_murata_lbee5hy2fy_bt_wake_returns_nosupport_when_pin_null)
 
 ZTEST(alp_chips, test_deepx_dxm1_init_null_args)
 {
-    deepx_dxm1_t   ctx;
+    deepx_dxm1_t ctx;
     /* All three pointer args must be non-NULL.  The validation order is
      * (ctx, m1_reset, pcie_mux) — any single NULL is rejected.  We don't
      * need to construct a real mux handle since the function returns
      * INVAL before it dereferences any of them. */
-    pi3dbs12212_t  bogus_mux = {0};
-    alp_gpio_t    *bogus_pin = (alp_gpio_t *)0xDEADBEEFu;
+    pi3dbs12212_t bogus_mux = {0};
+    alp_gpio_t   *bogus_pin = (alp_gpio_t *)0xDEADBEEFu;
 
-    zassert_equal(deepx_dxm1_init(NULL, bogus_pin, &bogus_mux,
-                                  PI3DBS_STATE_PATH_0),
-                  ALP_ERR_INVAL, "NULL ctx must be rejected");
-    zassert_equal(deepx_dxm1_init(&ctx, NULL, &bogus_mux,
-                                  PI3DBS_STATE_PATH_0),
-                  ALP_ERR_INVAL, "NULL m1_reset must be rejected");
-    zassert_equal(deepx_dxm1_init(&ctx, bogus_pin, NULL,
-                                  PI3DBS_STATE_PATH_0),
-                  ALP_ERR_INVAL, "NULL mux ctx must be rejected");
+    zassert_equal(deepx_dxm1_init(NULL, bogus_pin, &bogus_mux, PI3DBS_STATE_PATH_0), ALP_ERR_INVAL,
+                  "NULL ctx must be rejected");
+    zassert_equal(deepx_dxm1_init(&ctx, NULL, &bogus_mux, PI3DBS_STATE_PATH_0), ALP_ERR_INVAL,
+                  "NULL m1_reset must be rejected");
+    zassert_equal(deepx_dxm1_init(&ctx, bogus_pin, NULL, PI3DBS_STATE_PATH_0), ALP_ERR_INVAL,
+                  "NULL mux ctx must be rejected");
 
     /* Out-of-range deepx_path enum value -- caller must hit one of
      * PI3DBS_STATE_PATH_0 or PI3DBS_STATE_PATH_1.  PI3DBS_STATE_OFF
      * isn't a valid "to DEEPX" destination. */
-    zassert_equal(deepx_dxm1_init(&ctx, bogus_pin, &bogus_mux,
-                                  PI3DBS_STATE_OFF),
-                  ALP_ERR_INVAL,
+    zassert_equal(deepx_dxm1_init(&ctx, bogus_pin, &bogus_mux, PI3DBS_STATE_OFF), ALP_ERR_INVAL,
                   "deepx_path = OFF is not a valid bring-up destination");
 }
 
@@ -1344,9 +1320,8 @@ ZTEST(alp_chips, test_deepx_dxm1_bring_up_rejects_uninitialised)
     /* The sequencer must report NOT_READY rather than dereferencing
      * NULL m1_reset_pin / pcie_mux when called on a zeroed context. */
     zassert_equal(deepx_dxm1_bring_up(&ctx, 0u), ALP_ERR_NOT_READY);
-    zassert_equal(deepx_dxm1_shut_down(&ctx),    ALP_ERR_NOT_READY);
-    zassert_equal(deepx_dxm1_set_reset_polarity(&ctx,
-                                                DEEPX_DXM1_RESET_ACTIVE_HIGH),
+    zassert_equal(deepx_dxm1_shut_down(&ctx), ALP_ERR_NOT_READY);
+    zassert_equal(deepx_dxm1_set_reset_polarity(&ctx, DEEPX_DXM1_RESET_ACTIVE_HIGH),
                   ALP_ERR_NOT_READY);
 
     /* deinit on a zero context must be safe. */
@@ -1363,8 +1338,7 @@ ZTEST(alp_chips, test_deepx_dxm1_set_reset_polarity_invalid_value)
 
     /* Pass a value outside the documented enum range -- both LOW (0)
      * and HIGH (1) are valid; 2 is not. */
-    zassert_equal(deepx_dxm1_set_reset_polarity(&ctx,
-                                                (deepx_dxm1_reset_polarity_t)2),
+    zassert_equal(deepx_dxm1_set_reset_polarity(&ctx, (deepx_dxm1_reset_polarity_t)2),
                   ALP_ERR_INVAL);
 }
 
@@ -1400,21 +1374,15 @@ ZTEST(alp_chips, test_gd32_swd_calls_reject_uninitialised)
     /* Every post-init helper must report NOT_READY rather than
      * dereferencing NULL swdio / swclk on a zeroed context. */
     zassert_equal(gd32_swd_set_clock_delay(&ctx, 4u), ALP_ERR_NOT_READY);
-    zassert_equal(gd32_swd_connect(&ctx),             ALP_ERR_NOT_READY);
-    zassert_equal(gd32_swd_halt(&ctx),                ALP_ERR_NOT_READY);
-    zassert_equal(gd32_swd_flash_erase(&ctx,
-                                       GD32_SWD_FMC_FLASH_BASE, 4096u),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_connect(&ctx), ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_halt(&ctx), ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_flash_erase(&ctx, GD32_SWD_FMC_FLASH_BASE, 4096u), ALP_ERR_NOT_READY);
     uint8_t buf[8] = {0};
-    zassert_equal(gd32_swd_flash_write(&ctx,
-                                       GD32_SWD_FMC_FLASH_BASE,
-                                       buf, sizeof buf),
+    zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE, buf, sizeof buf),
                   ALP_ERR_NOT_READY);
-    zassert_equal(gd32_swd_flash_verify(&ctx,
-                                        GD32_SWD_FMC_FLASH_BASE,
-                                        buf, sizeof buf),
+    zassert_equal(gd32_swd_flash_verify(&ctx, GD32_SWD_FMC_FLASH_BASE, buf, sizeof buf),
                   ALP_ERR_NOT_READY);
-    zassert_equal(gd32_swd_reset_and_run(&ctx),       ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_reset_and_run(&ctx), ALP_ERR_NOT_READY);
 
     /* deinit must be safe on a zero context + on NULL. */
     gd32_swd_deinit(&ctx);
@@ -1426,18 +1394,14 @@ ZTEST(alp_chips, test_gd32_swd_flash_helpers_reject_unconnected)
     /* .initialised but not .connected -- erase / write / verify
      * call gd32_swd_connect()'s outcome.  These should still report
      * NOT_READY because the SW-DP hasn't been brought up. */
-    gd32_swd_t ctx = {.initialised = true};
-    uint8_t buf[8] = {0};
+    gd32_swd_t ctx    = {.initialised = true};
+    uint8_t    buf[8] = {0};
 
     zassert_equal(gd32_swd_halt(&ctx), ALP_ERR_NOT_READY);
-    zassert_equal(gd32_swd_flash_erase(&ctx,
-                                       GD32_SWD_FMC_FLASH_BASE, 4096u),
+    zassert_equal(gd32_swd_flash_erase(&ctx, GD32_SWD_FMC_FLASH_BASE, 4096u), ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE, buf, sizeof buf),
                   ALP_ERR_NOT_READY);
-    zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE,
-                                       buf, sizeof buf),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(gd32_swd_flash_verify(&ctx, GD32_SWD_FMC_FLASH_BASE,
-                                        buf, sizeof buf),
+    zassert_equal(gd32_swd_flash_verify(&ctx, GD32_SWD_FMC_FLASH_BASE, buf, sizeof buf),
                   ALP_ERR_NOT_READY);
 }
 
@@ -1445,37 +1409,24 @@ ZTEST(alp_chips, test_gd32_swd_flash_arg_validation)
 {
     /* .connected = true so the function reaches the argument-check
      * branch before bus access. */
-    gd32_swd_t ctx = {.initialised = true, .connected = true};
-    uint8_t buf[8] = {0};
+    gd32_swd_t ctx    = {.initialised = true, .connected = true};
+    uint8_t    buf[8] = {0};
 
     /* size == 0 -> INVAL. */
-    zassert_equal(gd32_swd_flash_erase(&ctx,
-                                       GD32_SWD_FMC_FLASH_BASE, 0u),
-                  ALP_ERR_INVAL);
+    zassert_equal(gd32_swd_flash_erase(&ctx, GD32_SWD_FMC_FLASH_BASE, 0u), ALP_ERR_INVAL);
     /* addr below flash base -> INVAL. */
-    zassert_equal(gd32_swd_flash_erase(&ctx, 0x00000000u, 4096u),
-                  ALP_ERR_INVAL);
+    zassert_equal(gd32_swd_flash_erase(&ctx, 0x00000000u, 4096u), ALP_ERR_INVAL);
 
     /* NULL data / zero len -> INVAL on write + verify. */
-    zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE,
-                                       NULL, 8u),
-                  ALP_ERR_INVAL);
-    zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE,
-                                       buf, 0u),
-                  ALP_ERR_INVAL);
-    zassert_equal(gd32_swd_flash_verify(&ctx, GD32_SWD_FMC_FLASH_BASE,
-                                        NULL, 8u),
-                  ALP_ERR_INVAL);
+    zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE, NULL, 8u), ALP_ERR_INVAL);
+    zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE, buf, 0u), ALP_ERR_INVAL);
+    zassert_equal(gd32_swd_flash_verify(&ctx, GD32_SWD_FMC_FLASH_BASE, NULL, 8u), ALP_ERR_INVAL);
 
     /* Misaligned addr -> INVAL.  Write requires doubleword (8-byte)
      * alignment; verify requires word (4-byte) alignment. */
-    zassert_equal(gd32_swd_flash_write(&ctx,
-                                       GD32_SWD_FMC_FLASH_BASE + 1u,
-                                       buf, sizeof buf),
+    zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE + 1u, buf, sizeof buf),
                   ALP_ERR_INVAL);
-    zassert_equal(gd32_swd_flash_verify(&ctx,
-                                        GD32_SWD_FMC_FLASH_BASE + 1u,
-                                        buf, sizeof buf),
+    zassert_equal(gd32_swd_flash_verify(&ctx, GD32_SWD_FMC_FLASH_BASE + 1u, buf, sizeof buf),
                   ALP_ERR_INVAL);
 }
 
@@ -1486,7 +1437,7 @@ ZTEST(alp_chips, test_gd32_swd_clock_delay_clamp)
      * value (no INVAL) and only NOT_READY when uninit -- exercise
      * the latter only here. */
     gd32_swd_t ctx = {0};
-    zassert_equal(gd32_swd_set_clock_delay(&ctx, 0u),     ALP_ERR_NOT_READY);
+    zassert_equal(gd32_swd_set_clock_delay(&ctx, 0u), ALP_ERR_NOT_READY);
     zassert_equal(gd32_swd_set_clock_delay(&ctx, 100000u), ALP_ERR_NOT_READY);
 
     /* Once initialised the call returns OK even for an out-of-range
@@ -1502,9 +1453,10 @@ ZTEST(alp_chips, test_gd32_swd_clock_delay_clamp)
 
 ZTEST(alp_chips, test_act8760_init_null_args)
 {
-    act8760_t   ctx;
-    alp_i2c_t  *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+    act8760_t  ctx;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id     = ALP_E1M_I2C0,
+        .bitrate_hz = 400000,
     });
     zassert_not_null(bus);
 
@@ -1512,27 +1464,22 @@ ZTEST(alp_chips, test_act8760_init_null_args)
     zassert_equal(act8760_init(&ctx, NULL), ALP_ERR_INVAL);
 
     /* _init_at takes the same constraints plus an explicit address. */
-    zassert_equal(act8760_init_at(NULL, bus, ACT8760_I2C_ADDR_PAGE0),
-                  ALP_ERR_INVAL);
-    zassert_equal(act8760_init_at(&ctx, NULL, ACT8760_I2C_ADDR_PAGE0),
-                  ALP_ERR_INVAL);
+    zassert_equal(act8760_init_at(NULL, bus, ACT8760_I2C_ADDR_PAGE0), ALP_ERR_INVAL);
+    zassert_equal(act8760_init_at(&ctx, NULL, ACT8760_I2C_ADDR_PAGE0), ALP_ERR_INVAL);
 
     alp_i2c_close(bus);
 }
 
 ZTEST(alp_chips, test_act8760_calls_reject_uninitialised)
 {
-    act8760_t ctx = {0};
+    act8760_t        ctx = {0};
     act8760_status_t status;
-    uint8_t   v;
+    uint8_t          v;
 
-    zassert_equal(act8760_get_status(&ctx, &status),                 ALP_ERR_NOT_READY);
-    zassert_equal(act8760_read_reg(&ctx, ACT8760_PAGE_SYSTEM, 0u, &v),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(act8760_write_reg(&ctx, ACT8760_PAGE_SYSTEM, 0u, 0u),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(act8760_rail_get_vset(&ctx, ACT8760_RAIL_BUCK1, &v),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(act8760_get_status(&ctx, &status), ALP_ERR_NOT_READY);
+    zassert_equal(act8760_read_reg(&ctx, ACT8760_PAGE_SYSTEM, 0u, &v), ALP_ERR_NOT_READY);
+    zassert_equal(act8760_write_reg(&ctx, ACT8760_PAGE_SYSTEM, 0u, 0u), ALP_ERR_NOT_READY);
+    zassert_equal(act8760_rail_get_vset(&ctx, ACT8760_RAIL_BUCK1, &v), ALP_ERR_NOT_READY);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1543,7 +1490,8 @@ ZTEST(alp_chips, test_da9292_init_null_args)
 {
     da9292_t   ctx;
     alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+        .bus_id     = ALP_E1M_I2C0,
+        .bitrate_hz = 400000,
     });
     zassert_not_null(bus);
 
@@ -1563,14 +1511,14 @@ ZTEST(alp_chips, test_da9292_calls_reject_uninitialised)
     uint8_t         v;
     uint16_t        mv;
 
-    zassert_equal(da9292_get_status(&ctx, &status),               ALP_ERR_NOT_READY);
-    zassert_equal(da9292_read_and_clear_events(&ctx, &events),    ALP_ERR_NOT_READY);
-    zassert_equal(da9292_set_enable(&ctx, DA9292_CH1, false),     ALP_ERR_NOT_READY);
-    zassert_equal(da9292_set_voltage_mv(&ctx, DA9292_CH1, 800u),  ALP_ERR_NOT_READY);
-    zassert_equal(da9292_get_voltage_mv(&ctx, DA9292_CH1, &mv),   ALP_ERR_NOT_READY);
-    zassert_equal(da9292_read_reg(&ctx, 0u, &v),                  ALP_ERR_NOT_READY);
-    zassert_equal(da9292_v2n_base_init(&ctx),                     ALP_ERR_NOT_READY);
-    zassert_equal(da9292_v2n_m1_enable_deepx_rail(&ctx, 5000u),   ALP_ERR_NOT_READY);
+    zassert_equal(da9292_get_status(&ctx, &status), ALP_ERR_NOT_READY);
+    zassert_equal(da9292_read_and_clear_events(&ctx, &events), ALP_ERR_NOT_READY);
+    zassert_equal(da9292_set_enable(&ctx, DA9292_CH1, false), ALP_ERR_NOT_READY);
+    zassert_equal(da9292_set_voltage_mv(&ctx, DA9292_CH1, 800u), ALP_ERR_NOT_READY);
+    zassert_equal(da9292_get_voltage_mv(&ctx, DA9292_CH1, &mv), ALP_ERR_NOT_READY);
+    zassert_equal(da9292_read_reg(&ctx, 0u, &v), ALP_ERR_NOT_READY);
+    zassert_equal(da9292_v2n_base_init(&ctx), ALP_ERR_NOT_READY);
+    zassert_equal(da9292_v2n_m1_enable_deepx_rail(&ctx, 5000u), ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_chips, test_da9292_set_voltage_range_validation)
@@ -1591,9 +1539,10 @@ ZTEST(alp_chips, test_da9292_set_voltage_range_validation)
 
 ZTEST(alp_chips, test_tps628640_init_null_args)
 {
-    tps628640_t  ctx;
-    alp_i2c_t   *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+    tps628640_t ctx;
+    alp_i2c_t  *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id     = ALP_E1M_I2C0,
+        .bitrate_hz = 400000,
     });
     zassert_not_null(bus);
 
@@ -1611,10 +1560,10 @@ ZTEST(alp_chips, test_tps628640_calls_reject_uninitialised)
     uint16_t    mv;
     uint8_t     v;
 
-    zassert_equal(tps628640_set_voltage_mv(&ctx, 1050u),  ALP_ERR_NOT_READY);
-    zassert_equal(tps628640_get_voltage_mv(&ctx, &mv),    ALP_ERR_NOT_READY);
-    zassert_equal(tps628640_get_status(&ctx, &v),         ALP_ERR_NOT_READY);
-    zassert_equal(tps628640_read_reg(&ctx, 0x01u, &v),    ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_set_voltage_mv(&ctx, 1050u), ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_get_voltage_mv(&ctx, &mv), ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_get_status(&ctx, &v), ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_read_reg(&ctx, 0x01u, &v), ALP_ERR_NOT_READY);
     zassert_equal(tps628640_write_reg(&ctx, 0x01u, 0xA0u), ALP_ERR_NOT_READY);
 }
 
@@ -1635,13 +1584,12 @@ ZTEST(alp_chips, test_tps628640_control_helpers_reject_uninitialised)
     /* Datasheet-integration follow-up: typed CONTROL helpers must
      * report NOT_READY on a zeroed context like every other call. */
     tps628640_t ctx = {0};
-    zassert_equal(tps628640_software_enable(&ctx, true),  ALP_ERR_NOT_READY);
-    zassert_equal(tps628640_set_fpwm_mode(&ctx, true),    ALP_ERR_NOT_READY);
-    zassert_equal(tps628640_set_ramp_speed(&ctx, TPS628640_RAMP_1_MV_PER_US),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(tps628640_reset_to_defaults(&ctx),      ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_software_enable(&ctx, true), ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_set_fpwm_mode(&ctx, true), ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_set_ramp_speed(&ctx, TPS628640_RAMP_1_MV_PER_US), ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_reset_to_defaults(&ctx), ALP_ERR_NOT_READY);
     uint16_t mv;
-    zassert_equal(tps628640_get_voltage2_mv(&ctx, &mv),   ALP_ERR_NOT_READY);
+    zassert_equal(tps628640_get_voltage2_mv(&ctx, &mv), ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_chips, test_tps628640_set_ramp_speed_invalid)
@@ -1649,9 +1597,7 @@ ZTEST(alp_chips, test_tps628640_set_ramp_speed_invalid)
     /* Force .initialised so the function reaches the enum check.
      * Documented range 0..3; 4 is invalid. */
     tps628640_t ctx = {.initialised = true};
-    zassert_equal(tps628640_set_ramp_speed(&ctx,
-                                           (tps628640_ramp_speed_t)4u),
-                  ALP_ERR_INVAL);
+    zassert_equal(tps628640_set_ramp_speed(&ctx, (tps628640_ramp_speed_t)4u), ALP_ERR_INVAL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1660,23 +1606,21 @@ ZTEST(alp_chips, test_tps628640_set_ramp_speed_invalid)
 
 ZTEST(alp_chips, test_pi3dbs12212_init_null_args)
 {
-    pi3dbs12212_t  ctx;
-    alp_gpio_t    *bogus = (alp_gpio_t *)0xDEADBEEFu;
+    pi3dbs12212_t ctx;
+    alp_gpio_t   *bogus = (alp_gpio_t *)0xDEADBEEFu;
 
     zassert_equal(pi3dbs12212_init(NULL, bogus, bogus), ALP_ERR_INVAL);
-    zassert_equal(pi3dbs12212_init(&ctx, NULL, bogus),  ALP_ERR_INVAL);
-    zassert_equal(pi3dbs12212_init(&ctx, bogus, NULL),  ALP_ERR_INVAL);
+    zassert_equal(pi3dbs12212_init(&ctx, NULL, bogus), ALP_ERR_INVAL);
+    zassert_equal(pi3dbs12212_init(&ctx, bogus, NULL), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_chips, test_pi3dbs12212_calls_reject_uninitialised)
 {
-    pi3dbs12212_t ctx = {0};
+    pi3dbs12212_t       ctx = {0};
     pi3dbs12212_state_t state;
 
-    zassert_equal(pi3dbs12212_set_state(&ctx, PI3DBS_STATE_PATH_0),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(pi3dbs12212_get_state(&ctx, &state),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(pi3dbs12212_set_state(&ctx, PI3DBS_STATE_PATH_0), ALP_ERR_NOT_READY);
+    zassert_equal(pi3dbs12212_get_state(&ctx, &state), ALP_ERR_NOT_READY);
 
     /* deinit on a zero ctx is a no-op. */
     pi3dbs12212_deinit(&ctx);
@@ -1692,9 +1636,7 @@ ZTEST(alp_chips, test_pi3dbs12212_set_state_invalid_value)
 
     /* PI3DBS_STATE_OFF / PATH_0 / PATH_1 are 0 / 1 / 2; 3 isn't
      * valid. */
-    zassert_equal(pi3dbs12212_set_state(&ctx,
-                                        (pi3dbs12212_state_t)3),
-                  ALP_ERR_INVAL);
+    zassert_equal(pi3dbs12212_set_state(&ctx, (pi3dbs12212_state_t)3), ALP_ERR_INVAL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1703,13 +1645,14 @@ ZTEST(alp_chips, test_pi3dbs12212_set_state_invalid_value)
 
 ZTEST(alp_chips, test_rv3028c7_init_null_args)
 {
-    rv3028c7_t  ctx;
-    alp_i2c_t  *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+    rv3028c7_t ctx;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id     = ALP_E1M_I2C0,
+        .bitrate_hz = 400000,
     });
     zassert_not_null(bus);
 
-    zassert_equal(rv3028c7_init(NULL, bus),  ALP_ERR_INVAL);
+    zassert_equal(rv3028c7_init(NULL, bus), ALP_ERR_INVAL);
     zassert_equal(rv3028c7_init(&ctx, NULL), ALP_ERR_INVAL);
 
     alp_i2c_close(bus);
@@ -1717,22 +1660,18 @@ ZTEST(alp_chips, test_rv3028c7_init_null_args)
 
 ZTEST(alp_chips, test_rv3028c7_calls_reject_uninitialised)
 {
-    rv3028c7_t ctx = {0};
-    rv3028c7_time_t when = {.year = 2026, .month = 5, .day = 13};
+    rv3028c7_t             ctx   = {0};
+    rv3028c7_time_t        when  = {.year = 2026, .month = 5, .day = 13};
     rv3028c7_alarm_match_t match = {.match_minute = true};
-    bool fired;
-    uint8_t status_seen;
+    bool                   fired;
+    uint8_t                status_seen;
 
     zassert_equal(rv3028c7_get_time(&ctx, &when), ALP_ERR_NOT_READY);
     zassert_equal(rv3028c7_set_time(&ctx, &when), ALP_ERR_NOT_READY);
-    zassert_equal(rv3028c7_set_alarm(&ctx, &when, &match),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(rv3028c7_alarm_int_enable(&ctx, true),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(rv3028c7_alarm_check_and_clear(&ctx, &fired),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(rv3028c7_dispatch_irq(&ctx, &status_seen),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(rv3028c7_set_alarm(&ctx, &when, &match), ALP_ERR_NOT_READY);
+    zassert_equal(rv3028c7_alarm_int_enable(&ctx, true), ALP_ERR_NOT_READY);
+    zassert_equal(rv3028c7_alarm_check_and_clear(&ctx, &fired), ALP_ERR_NOT_READY);
+    zassert_equal(rv3028c7_dispatch_irq(&ctx, &status_seen), ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_chips, test_rv3028c7_register_handler_validates_src)
@@ -1743,16 +1682,12 @@ ZTEST(alp_chips, test_rv3028c7_register_handler_validates_src)
 
     /* Source value beyond the documented enum (RV3028C7_SRC_COUNT = 7)
      * must be rejected. */
-    zassert_equal(rv3028c7_register_handler(&ctx,
-                                            (rv3028c7_src_t)RV3028C7_SRC_COUNT,
-                                            NULL, NULL),
+    zassert_equal(rv3028c7_register_handler(&ctx, (rv3028c7_src_t)RV3028C7_SRC_COUNT, NULL, NULL),
                   ALP_ERR_INVAL);
 
     /* NULL handler is documented as "unregister" -- must NOT be an
      * INVAL.  A valid source + NULL handler should succeed. */
-    zassert_equal(rv3028c7_register_handler(&ctx, RV3028C7_SRC_ALARM,
-                                            NULL, NULL),
-                  ALP_OK);
+    zassert_equal(rv3028c7_register_handler(&ctx, RV3028C7_SRC_ALARM, NULL, NULL), ALP_OK);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1763,7 +1698,8 @@ ZTEST(alp_chips, test_tmp112_init_null_args)
 {
     tmp112_t   ctx;
     alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+        .bus_id     = ALP_E1M_I2C0,
+        .bitrate_hz = 400000,
     });
     zassert_not_null(bus);
 
@@ -1778,12 +1714,9 @@ ZTEST(alp_chips, test_tmp112_calls_reject_uninitialised)
     tmp112_t ctx = {0};
     int32_t  temp_mc;
 
-    zassert_equal(tmp112_set_rate(&ctx, TMP112_RATE_4_HZ),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(tmp112_set_extended_mode(&ctx, false),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(tmp112_read_temp_milli_c(&ctx, &temp_mc),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(tmp112_set_rate(&ctx, TMP112_RATE_4_HZ), ALP_ERR_NOT_READY);
+    zassert_equal(tmp112_set_extended_mode(&ctx, false), ALP_ERR_NOT_READY);
+    zassert_equal(tmp112_read_temp_milli_c(&ctx, &temp_mc), ALP_ERR_NOT_READY);
 
     tmp112_deinit(&ctx);
     tmp112_deinit(NULL);
@@ -1802,28 +1735,22 @@ ZTEST(alp_chips, test_ina236_init_null_args)
     /* Forward-declare the init signature locally so the test
      * compiles even if the header's extra args shift around;
      * this matches the real signature documented in ina236.h. */
-    extern alp_status_t ina236_init(ina236_t *ctx, alp_i2c_t *bus,
-                                    uint8_t addr_7bit,
-                                    float shunt_ohms,
-                                    float max_current_a,
+    extern alp_status_t ina236_init(ina236_t * ctx, alp_i2c_t * bus, uint8_t addr_7bit,
+                                    float shunt_ohms, float max_current_a,
                                     ina236_adcrange_t adcrange);
-    ina236_t   ctx;
-    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+    ina236_t            ctx;
+    alp_i2c_t          *bus = alp_i2c_open(&(alp_i2c_config_t){
+        .bus_id     = ALP_E1M_I2C0,
+        .bitrate_hz = 400000,
     });
     zassert_not_null(bus);
 
-    zassert_equal(ina236_init(NULL, bus, 0x40u, 0.010f, 1.0f,
-                              INA236_ADCRANGE_81MV),
-                  ALP_ERR_INVAL);
-    zassert_equal(ina236_init(&ctx, NULL, 0x40u, 0.010f, 1.0f,
-                              INA236_ADCRANGE_81MV),
+    zassert_equal(ina236_init(NULL, bus, 0x40u, 0.010f, 1.0f, INA236_ADCRANGE_81MV), ALP_ERR_INVAL);
+    zassert_equal(ina236_init(&ctx, NULL, 0x40u, 0.010f, 1.0f, INA236_ADCRANGE_81MV),
                   ALP_ERR_INVAL);
     /* shunt_ohms <= 0 must be rejected (datasheet's CURRENT_LSB
      * formula divides by it). */
-    zassert_equal(ina236_init(&ctx, bus, 0x40u, 0.0f, 1.0f,
-                              INA236_ADCRANGE_81MV),
-                  ALP_ERR_INVAL);
+    zassert_equal(ina236_init(&ctx, bus, 0x40u, 0.0f, 1.0f, INA236_ADCRANGE_81MV), ALP_ERR_INVAL);
 
     alp_i2c_close(bus);
 }
@@ -1836,27 +1763,24 @@ ZTEST(alp_chips, test_eeprom_24c128_init_null_args)
 {
     eeprom_24c128_t ctx;
     alp_i2c_t      *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+        .bus_id     = ALP_E1M_I2C0,
+        .bitrate_hz = 400000,
     });
     zassert_not_null(bus);
 
-    zassert_equal(eeprom_24c128_init(NULL, bus, EEPROM_24C128_I2C_ADDR_LOW),
-                  ALP_ERR_INVAL);
-    zassert_equal(eeprom_24c128_init(&ctx, NULL, EEPROM_24C128_I2C_ADDR_LOW),
-                  ALP_ERR_INVAL);
+    zassert_equal(eeprom_24c128_init(NULL, bus, EEPROM_24C128_I2C_ADDR_LOW), ALP_ERR_INVAL);
+    zassert_equal(eeprom_24c128_init(&ctx, NULL, EEPROM_24C128_I2C_ADDR_LOW), ALP_ERR_INVAL);
 
     alp_i2c_close(bus);
 }
 
 ZTEST(alp_chips, test_eeprom_24c128_io_rejects_uninitialised)
 {
-    eeprom_24c128_t ctx = {0};
-    uint8_t scratch[16] = {0};
+    eeprom_24c128_t ctx         = {0};
+    uint8_t         scratch[16] = {0};
 
-    zassert_equal(eeprom_24c128_read(&ctx, 0u, scratch, sizeof scratch),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(eeprom_24c128_write(&ctx, 0u, scratch, sizeof scratch),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(eeprom_24c128_read(&ctx, 0u, scratch, sizeof scratch), ALP_ERR_NOT_READY);
+    zassert_equal(eeprom_24c128_write(&ctx, 0u, scratch, sizeof scratch), ALP_ERR_NOT_READY);
 
     eeprom_24c128_deinit(&ctx);
     eeprom_24c128_deinit(NULL);
@@ -1865,27 +1789,21 @@ ZTEST(alp_chips, test_eeprom_24c128_io_rejects_uninitialised)
 ZTEST(alp_chips, test_eeprom_24c128_io_validates_range)
 {
     /* Force .initialised so the function reaches the bounds check. */
-    eeprom_24c128_t ctx = {.initialised = true};
-    uint8_t scratch[16] = {0};
+    eeprom_24c128_t ctx         = {.initialised = true};
+    uint8_t         scratch[16] = {0};
 
     /* Read past the end of the device (16 KB).  Driver reports
      * OUT_OF_RANGE because the offset+len addresses a region the
      * chip doesn't have. */
-    zassert_equal(eeprom_24c128_read(&ctx,
-                                     EEPROM_24C128_BYTES - 8u,
-                                     scratch, 16u),
+    zassert_equal(eeprom_24c128_read(&ctx, EEPROM_24C128_BYTES - 8u, scratch, 16u),
                   ALP_ERR_OUT_OF_RANGE);
     /* Write past the end. */
-    zassert_equal(eeprom_24c128_write(&ctx,
-                                      EEPROM_24C128_BYTES - 8u,
-                                      scratch, 16u),
+    zassert_equal(eeprom_24c128_write(&ctx, EEPROM_24C128_BYTES - 8u, scratch, 16u),
                   ALP_ERR_OUT_OF_RANGE);
     /* NULL data buffer with non-zero length -> INVAL.  (NULL +
      * zero-length is a documented no-op short-circuit). */
-    zassert_equal(eeprom_24c128_read(&ctx, 0u, NULL, 8u),
-                  ALP_ERR_INVAL);
-    zassert_equal(eeprom_24c128_write(&ctx, 0u, NULL, 8u),
-                  ALP_ERR_INVAL);
+    zassert_equal(eeprom_24c128_read(&ctx, 0u, NULL, 8u), ALP_ERR_INVAL);
+    zassert_equal(eeprom_24c128_write(&ctx, 0u, NULL, 8u), ALP_ERR_INVAL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1896,14 +1814,13 @@ ZTEST(alp_chips, test_tcal9538_init_null_args)
 {
     tcal9538_t ctx;
     alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+        .bus_id     = ALP_E1M_I2C0,
+        .bitrate_hz = 400000,
     });
     zassert_not_null(bus);
 
-    zassert_equal(tcal9538_init(NULL, bus, TCAL9538_I2C_ADDR_BASE),
-                  ALP_ERR_INVAL);
-    zassert_equal(tcal9538_init(&ctx, NULL, TCAL9538_I2C_ADDR_BASE),
-                  ALP_ERR_INVAL);
+    zassert_equal(tcal9538_init(NULL, bus, TCAL9538_I2C_ADDR_BASE), ALP_ERR_INVAL);
+    zassert_equal(tcal9538_init(&ctx, NULL, TCAL9538_I2C_ADDR_BASE), ALP_ERR_INVAL);
 
     alp_i2c_close(bus);
 }
@@ -1914,14 +1831,12 @@ ZTEST(alp_chips, test_tcal9538_calls_reject_uninitialised)
     bool       level;
     uint8_t    bits;
 
-    zassert_equal(tcal9538_set_direction(&ctx, 0u, TCAL9538_DIR_OUTPUT),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(tcal9538_set_directions(&ctx, 0xFFu, 0x00u),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(tcal9538_set_direction(&ctx, 0u, TCAL9538_DIR_OUTPUT), ALP_ERR_NOT_READY);
+    zassert_equal(tcal9538_set_directions(&ctx, 0xFFu, 0x00u), ALP_ERR_NOT_READY);
     zassert_equal(tcal9538_set(&ctx, 0u, true), ALP_ERR_NOT_READY);
     zassert_equal(tcal9538_get(&ctx, 0u, &level), ALP_ERR_NOT_READY);
     zassert_equal(tcal9538_read_all(&ctx, &bits), ALP_ERR_NOT_READY);
-    zassert_equal(tcal9538_write_all(&ctx, 0u),   ALP_ERR_NOT_READY);
+    zassert_equal(tcal9538_write_all(&ctx, 0u), ALP_ERR_NOT_READY);
 
     tcal9538_deinit(&ctx);
     tcal9538_deinit(NULL);
@@ -1933,8 +1848,7 @@ ZTEST(alp_chips, test_tcal9538_pin_index_validation)
      * check.  The chip has 8 pins (0..7); 8+ is invalid. */
     tcal9538_t ctx = {.initialised = true};
 
-    zassert_equal(tcal9538_set_direction(&ctx, 8u, TCAL9538_DIR_OUTPUT),
-                  ALP_ERR_INVAL);
+    zassert_equal(tcal9538_set_direction(&ctx, 8u, TCAL9538_DIR_OUTPUT), ALP_ERR_INVAL);
     zassert_equal(tcal9538_set(&ctx, 99u, true), ALP_ERR_INVAL);
     bool level;
     zassert_equal(tcal9538_get(&ctx, 99u, &level), ALP_ERR_INVAL);
@@ -1948,32 +1862,29 @@ ZTEST(alp_chips, test_optiga_trust_m_init_null_args)
 {
     optiga_trust_m_t ctx;
     alp_i2c_t       *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+        .bus_id     = ALP_E1M_I2C0,
+        .bitrate_hz = 400000,
     });
     zassert_not_null(bus);
 
-    zassert_equal(optiga_trust_m_init(NULL, bus, OPTIGA_TRUST_M_I2C_ADDR),
-                  ALP_ERR_INVAL);
-    zassert_equal(optiga_trust_m_init(&ctx, NULL, OPTIGA_TRUST_M_I2C_ADDR),
-                  ALP_ERR_INVAL);
+    zassert_equal(optiga_trust_m_init(NULL, bus, OPTIGA_TRUST_M_I2C_ADDR), ALP_ERR_INVAL);
+    zassert_equal(optiga_trust_m_init(&ctx, NULL, OPTIGA_TRUST_M_I2C_ADDR), ALP_ERR_INVAL);
 
     alp_i2c_close(bus);
 }
 
 ZTEST(alp_chips, test_optiga_trust_m_calls_reject_uninitialised)
 {
-    optiga_trust_m_t ctx = {0};
+    optiga_trust_m_t              ctx = {0};
     optiga_trust_m_product_info_t info;
-    uint8_t apdu[8] = {0};
-    uint8_t resp[16];
-    size_t  resp_len;
+    uint8_t                       apdu[8] = {0};
+    uint8_t                       resp[16];
+    size_t                        resp_len;
 
-    zassert_equal(optiga_trust_m_read_product_info(&ctx, &info),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(optiga_trust_m_send_apdu(&ctx, apdu, sizeof apdu,
-                                           resp, sizeof resp,
-                                           &resp_len, 100u),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_ERR_NOT_READY);
+    zassert_equal(
+        optiga_trust_m_send_apdu(&ctx, apdu, sizeof apdu, resp, sizeof resp, &resp_len, 100u),
+        ALP_ERR_NOT_READY);
 
     optiga_trust_m_deinit(&ctx);
     optiga_trust_m_deinit(NULL);
@@ -1986,22 +1897,19 @@ ZTEST(alp_chips, test_optiga_trust_m_calls_reject_uninitialised)
 ZTEST(alp_chips, test_cam_mux_pi3wvr626_init_null_args)
 {
     cam_mux_pi3wvr626_t ctx;
-    alp_gpio_t *bogus = (alp_gpio_t *)0xDEADBEEFu;
+    alp_gpio_t         *bogus = (alp_gpio_t *)0xDEADBEEFu;
 
     zassert_equal(cam_mux_pi3wvr626_init(NULL, bogus), ALP_ERR_INVAL);
-    zassert_equal(cam_mux_pi3wvr626_init(&ctx, NULL),  ALP_ERR_INVAL);
+    zassert_equal(cam_mux_pi3wvr626_init(&ctx, NULL), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_chips, test_cam_mux_pi3wvr626_calls_reject_uninitialised)
 {
-    cam_mux_pi3wvr626_t ctx = {0};
+    cam_mux_pi3wvr626_t       ctx = {0};
     cam_mux_pi3wvr626_input_t got;
 
-    zassert_equal(cam_mux_pi3wvr626_select(&ctx,
-                                           (cam_mux_pi3wvr626_input_t)0),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(cam_mux_pi3wvr626_get(&ctx, &got),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(cam_mux_pi3wvr626_select(&ctx, (cam_mux_pi3wvr626_input_t)0), ALP_ERR_NOT_READY);
+    zassert_equal(cam_mux_pi3wvr626_get(&ctx, &got), ALP_ERR_NOT_READY);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2012,12 +1920,15 @@ ZTEST(alp_chips, test_cc3501e_init_null_args)
 {
     cc3501e_t  ctx;
     alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
-        .bus_id = 0u, .freq_hz = 10000000u, .mode = ALP_SPI_MODE_0,
-        .bits_per_word = 8u, .cs_pin_id = 0u,
+        .bus_id        = 0u,
+        .freq_hz       = 10000000u,
+        .mode          = ALP_SPI_MODE_0,
+        .bits_per_word = 8u,
+        .cs_pin_id     = 0u,
     });
     /* The test rig's SPI emul may or may not be available; either
      * way the NULL-arg paths are testable. */
-    zassert_equal(cc3501e_init(NULL, bus),  ALP_ERR_INVAL);
+    zassert_equal(cc3501e_init(NULL, bus), ALP_ERR_INVAL);
     zassert_equal(cc3501e_init(&ctx, NULL), ALP_ERR_INVAL);
     if (bus != NULL) alp_spi_close(bus);
 }
@@ -2026,18 +1937,15 @@ ZTEST(alp_chips, test_cc3501e_calls_reject_uninitialised)
 {
     cc3501e_t ctx = {0};
     uint16_t  version;
-    uint8_t   tx[4] = {0}, rx[4];
+    uint8_t   tx[4]  = {0}, rx[4];
     size_t    rx_len = sizeof rx;
 
-    zassert_equal(cc3501e_reset(&ctx),                ALP_ERR_NOT_READY);
+    zassert_equal(cc3501e_reset(&ctx), ALP_ERR_NOT_READY);
     zassert_equal(cc3501e_get_version(&ctx, &version), ALP_ERR_NOT_READY);
-    zassert_equal(cc3501e_request(&ctx,
-                                  (alp_cc3501e_cmd_t)0,
-                                  tx, sizeof tx,
-                                  rx, sizeof rx, &rx_len, 100u),
-                  ALP_ERR_NOT_READY);
-    zassert_equal(cc3501e_set_event_callback(&ctx, NULL, NULL),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(
+        cc3501e_request(&ctx, (alp_cc3501e_cmd_t)0, tx, sizeof tx, rx, sizeof rx, &rx_len, 100u),
+        ALP_ERR_NOT_READY);
+    zassert_equal(cc3501e_set_event_callback(&ctx, NULL, NULL), ALP_ERR_NOT_READY);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2048,7 +1956,8 @@ ZTEST(alp_chips, test_tas2563_init_null_args)
 {
     tas2563_t  ctx;
     alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000,
+        .bus_id     = ALP_E1M_I2C0,
+        .bitrate_hz = 400000,
     });
     zassert_not_null(bus);
 
@@ -2064,8 +1973,7 @@ ZTEST(alp_chips, test_tas2563_calls_reject_uninitialised)
     tas2563_t ctx = {0};
     uint8_t   rev;
 
-    zassert_equal(tas2563_read_revision(&ctx, &rev),  ALP_ERR_NOT_READY);
-    zassert_equal(tas2563_set_mode(&ctx, (tas2563_mode_t)0),
-                  ALP_ERR_NOT_READY);
+    zassert_equal(tas2563_read_revision(&ctx, &rev), ALP_ERR_NOT_READY);
+    zassert_equal(tas2563_set_mode(&ctx, (tas2563_mode_t)0), ALP_ERR_NOT_READY);
     zassert_equal(tas2563_set_hw_enable(&ctx, true), ALP_ERR_NOT_READY);
 }

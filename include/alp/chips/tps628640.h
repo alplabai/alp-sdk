@@ -88,39 +88,36 @@ extern "C" {
 #endif
 
 /* Register addresses ----------------------------------------------- */
-#define TPS628640_REG_VOUT1    0x01u
-#define TPS628640_REG_VOUT2    0x02u
-#define TPS628640_REG_CONTROL  0x03u
-#define TPS628640_REG_STATUS   0x05u
+#define TPS628640_REG_VOUT1 0x01u
+#define TPS628640_REG_VOUT2 0x02u
+#define TPS628640_REG_CONTROL 0x03u
+#define TPS628640_REG_STATUS 0x05u
 
 /* CONTROL bits ----------------------------------------------------- */
-#define TPS628640_CTRL_RESET                  (1u << 7)
+#define TPS628640_CTRL_RESET (1u << 7)
 #define TPS628640_CTRL_FPWM_DURING_VID_CHANGE (1u << 6)
-#define TPS628640_CTRL_SOFTWARE_ENABLE        (1u << 5)
-#define TPS628640_CTRL_FPWM_MODE              (1u << 4)
-#define TPS628640_CTRL_OUTPUT_DISCHARGE       (1u << 3)
-#define TPS628640_CTRL_HICCUP                 (1u << 2)
-#define TPS628640_CTRL_RAMP_SPEED_MASK        (0x3u)
+#define TPS628640_CTRL_SOFTWARE_ENABLE (1u << 5)
+#define TPS628640_CTRL_FPWM_MODE (1u << 4)
+#define TPS628640_CTRL_OUTPUT_DISCHARGE (1u << 3)
+#define TPS628640_CTRL_HICCUP (1u << 2)
+#define TPS628640_CTRL_RAMP_SPEED_MASK (0x3u)
 
 /** Datasheet-defined CONTROL register default value (0b01101110).
  *  Driver initialises the shadow to this so the first call to a
  *  typed helper reflects the chip's actual reset state. */
-#define TPS628640_CTRL_DEFAULT \
-    (TPS628640_CTRL_FPWM_DURING_VID_CHANGE \
-     | TPS628640_CTRL_SOFTWARE_ENABLE      \
-     | TPS628640_CTRL_OUTPUT_DISCHARGE     \
-     | TPS628640_CTRL_HICCUP               \
-     | TPS628640_CTRL_RAMP_SPEED_MASK)
+#define TPS628640_CTRL_DEFAULT                                                                     \
+    (TPS628640_CTRL_FPWM_DURING_VID_CHANGE | TPS628640_CTRL_SOFTWARE_ENABLE |                      \
+     TPS628640_CTRL_OUTPUT_DISCHARGE | TPS628640_CTRL_HICCUP | TPS628640_CTRL_RAMP_SPEED_MASK)
 
 /* STATUS bits ------------------------------------------------------ */
 #define TPS628640_STATUS_THERMAL_WARNING (1u << 4)
-#define TPS628640_STATUS_HICCUP          (1u << 3)
-#define TPS628640_STATUS_UVLO            (1u << 0)
+#define TPS628640_STATUS_HICCUP (1u << 3)
+#define TPS628640_STATUS_UVLO (1u << 0)
 
 /** VOUT encoding constants (datasheet §8.6.3). */
-#define TPS628640_VOUT_BASE_MV  400u
-#define TPS628640_VOUT_MAX_MV   1675u
-#define TPS628640_VOUT_STEP_MV  5u
+#define TPS628640_VOUT_BASE_MV 400u
+#define TPS628640_VOUT_MAX_MV 1675u
+#define TPS628640_VOUT_STEP_MV 5u
 
 /** Voltage-ramp-speed enum -- CONTROL bits [1:0]. */
 typedef enum {
@@ -135,10 +132,10 @@ typedef enum {
 typedef struct {
     bool       initialised;
     alp_i2c_t *bus;
-    uint8_t    addr;                /**< 7-bit I2C slave address.   */
-    uint16_t   default_voltage_mv;  /**< Design target for this rail
+    uint8_t    addr;               /**< 7-bit I2C slave address.   */
+    uint16_t   default_voltage_mv; /**< Design target for this rail
                                          per `metadata/chips/tps628640.yaml`. */
-    uint8_t    control_shadow;      /**< Last CONTROL byte written.
+    uint8_t    control_shadow;     /**< Last CONTROL byte written.
                                          Maintained because the chip's
                                          CONTROL reg is write-only. */
 } tps628640_t;
@@ -162,8 +159,8 @@ typedef struct {
  *                            voltage at power-on.
  * @return ALP_OK / ALP_ERR_NOT_READY (no ACK) / ALP_ERR_INVAL.
  */
-alp_status_t tps628640_init(tps628640_t *ctx, alp_i2c_t *bus,
-                            uint8_t addr_7bit, uint16_t default_voltage_mv);
+alp_status_t tps628640_init(tps628640_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit,
+                            uint16_t default_voltage_mv);
 
 /**
  * @brief Set the chip's VOUT1 setpoint in millivolts.
@@ -245,8 +242,7 @@ alp_status_t tps628640_set_fpwm_mode(tps628640_t *ctx, bool fpwm);
  * transition but longer settling.  Datasheet default is 1 mV/us
  * (the slowest), which is also the driver's reset shadow.
  */
-alp_status_t tps628640_set_ramp_speed(tps628640_t *ctx,
-                                      tps628640_ramp_speed_t speed);
+alp_status_t tps628640_set_ramp_speed(tps628640_t *ctx, tps628640_ramp_speed_t speed);
 
 /**
  * @brief Reset every register to its datasheet default (CONTROL[7] = 1).
@@ -264,7 +260,7 @@ alp_status_t tps628640_read_reg(tps628640_t *ctx, uint8_t reg, uint8_t *val);
 alp_status_t tps628640_write_reg(tps628640_t *ctx, uint8_t reg, uint8_t val);
 
 /** @brief Release resources.  Idempotent. */
-void         tps628640_deinit(tps628640_t *ctx);
+void tps628640_deinit(tps628640_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -229,15 +229,17 @@ _PERIPHERAL_TO_SOC_KEYS: dict[str, tuple[str, ...] | None] = {
     "adc":      ("adc_12bit", "adc_24bit"),
     "can":      ("can_fd", "can"),
     "counter":  ("timer_32bit", "timer_lp"),
-    "gpio":     ("gpio_18v", "gpio_18v_or_33v"),
+    "gpio":     ("gpio_18v", "gpio_18v_or_33v", "gpio"),
     "i2c":      ("i2c", "i2c_lp"),
     "i2s":      ("i2s", "i2s_lp"),
-    "pwm":      ("timer_32bit",),  # PWM rides the 32-bit timer block
+    "pwm":      ("timer_32bit", "pwm"),  # PWM rides the 32-bit timer block
     "rtc":      ("rtc",),
-    "sensor":   None,              # umbrella -- skip
+    "sensor":   None,                    # umbrella -- skip
     "spi":      ("spi", "spi_lp"),
     "uart":     ("uart", "uart_lp"),
     "watchdog": ("watchdog",),
+    "flash":    None,                    # umbrella -- xSPI / OctalSPI / FlexSPI
+    "emmc":     ("sdio_emmc", "sdio"),
 }
 
 
