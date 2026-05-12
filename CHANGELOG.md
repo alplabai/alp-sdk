@@ -63,6 +63,45 @@ that lands before the v0.3.0 tag.)
 
 ### Added (2026-05-14)
 
+- **GD32 bridge protocol v0.3 -- GD32G5 HW knobs (PWM/ADC config, two-DMA ADC streaming, TRNG) (2026-05-14).**
+  Bumps `PROTOCOL_VERSION_MINOR` 2 -> 3 to surface a chunk of the
+  GD32G5's hardware feature set the v0.1/v0.2 protocols left on
+  the table.  Six new wire opcodes (firmware HAL stubs return
+  `STATUS_NOSUPPORT` until `bridge_hw_gd32.c` wires them):
+  - `CMD_PWM_CONFIGURE` (0x22) -- sticky per-channel alignment
+    mode (edge-aligned / center-aligned up/down/both), programmable
+    dead-time (ns) for complementary outputs, break-input enable.
+    On V2N every E1M PWM rides one of the GD32's two 16-bit
+    advanced timers (PWM0..3 -> TIMER0_MCH0..MCH3 on GD32 pads
+    PA11/PB1/PB14/PC5; PWM4..7 -> TIMER7_MCH0..MCH3 on
+    PC10/PC11/PC12/PD0); both timers run at 240 MHz so the
+    effective LSB is ~4.16 ns.  `metadata/chips/gd32g553.yaml`
+    gains a `pwm_routing:` table making that mapping
+    machine-readable.
+  - `CMD_ADC_CONFIGURE` (0x32) -- sticky per-channel oversampling
+    (1..256x, rounded down to power-of-two), sample-and-hold
+    cycles (2/6/12/24/47/92/247/640 per the datasheet), resolution
+    (6/8/10/12/14/16 bits; 14- and 16-bit modes require
+    oversample >= 4 / 16 respectively per the
+    effective-resolution table).
+  - `CMD_ADC_STREAM_BEGIN` (0x33) / `_READ` (0x34) / `_END` (0x35) --
+    DMA-backed continuous acquisition.  Two streams supported
+    concurrently (stream 0 binds to GD32 DMA0, stream 1 to DMA1
+    per the chip's dual-DMA-controller topology); different
+    channels at different sample rates.  Firmware ring buffer
+    decouples DMA cadence from host poll cadence; ring overrun
+    surfaces as `STATUS_BUSY` on the next `_READ`.
+  - `CMD_TRNG_READ` (0x80) -- pulls 1..32 bytes of true randomness
+    from the GD32G5's NIST SP800-90B pre-certified TRNG.
+    Future commit wires it to PSA Crypto via `<alp/security.h>`
+    so the portable `alp_random_bytes` benefits transparently on
+    V2N.
+  Host driver wrappers in `chips/gd32g553/gd32g553.c` carry the
+  matching range-check + NULL-pointer contract.  Wire envelope
+  for `ADC_STREAM_READ` is fixed-length (host pre-commits to
+  `1 + max_samples*2 + 2` reply bytes; firmware zero-pads slots
+  beyond the actual `got` count so framing stays deterministic).
+
 - **V2N supervisor singleton + portable PWM/ADC/DAC/QENC/COUNTER backends (2026-05-14).**
   Closes the loop opened by the 2026-05-12 "all V2N PWMs are GD32-driven"
   decision: the SDK's portable peripheral surface now actually reaches

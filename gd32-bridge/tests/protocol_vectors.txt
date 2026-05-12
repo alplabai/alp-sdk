@@ -33,8 +33,8 @@ spi_ping_request               = A500FF84
 spi_ping_reply_ok              = A500FF84
 # SOF | CMD=0x01 (GET_VERSION) | CRC -- empty payload
 spi_get_version_request        = A501EFA5
-# SOF | STATUS=0x00 | major=0 | minor=2 | patch=0 | CRC
-spi_get_version_reply_v0_2_0   = A5000002007E5D
+# SOF | STATUS=0x00 | major=0 | minor=3 | patch=0 | CRC
+spi_get_version_reply_v0_3_0   = A5000003004D6C
 
 # ---------------------------------------------------------------------
 # §3. I2C envelopes -- register-style framing
@@ -57,5 +57,22 @@ spi_qenc_read_ch0_request      = A5600091DA
 spi_qenc_reset_ch3_request     = A561039288
 # SOF | CMD=0x70 | counter=0 | CRC
 spi_counter_read_ch0_request   = A5700092A9
-# SOF | STATUS=0x06 (NOSUPPORT) | empty payload | CRC -- stub-firmware reply for any v0.2 opcode whose HAL body is not yet wired
+# SOF | STATUS=0x06 (NOSUPPORT) | empty payload | CRC -- stub-firmware reply for any v0.2+ opcode whose HAL body is not yet wired
 spi_reply_nosupport            = A5069F42
+
+# ---------------------------------------------------------------------
+# §5. v0.3 additions -- GD32G5 HW knobs (PWM_CONFIGURE, ADC_CONFIGURE,
+#                       ADC_STREAM_BEGIN / READ / END)
+# ---------------------------------------------------------------------
+# SOF | CMD=0x22 | channel=0 | align=CENTER_UP | dead_time_ns=2000 | break_en | CRC
+spi_pwm_configure_ch0_request  = A5220001D007000001B070
+# SOF | CMD=0x32 | channel=3 | oversample=16 | sample_cycles~92 | resolution=16 | CRC
+spi_adc_configure_ch3_request  = A532030010005F0010029C
+# SOF | CMD=0x33 | stream_id=0 | channel=0 | rate_hz=1000 | CRC
+spi_adc_stream_begin_stream0_ch0_1ksps_request = A533000000E8030000A120
+# SOF | CMD=0x34 | stream_id=0 | max_samples=32 | CRC -- reply length is 1 + max_samples*2 + 2 (CRC) bytes regardless of how many samples the firmware actually returns
+spi_adc_stream_read_stream0_max32_request = A5340020EFF4
+# SOF | CMD=0x35 | stream_id=0 | CRC
+spi_adc_stream_end_stream0_request = A535006090
+# SOF | CMD=0x80 | request 16 bytes of true random | CRC -- host receives 16 bytes of GD32G5 TRNG (NIST SP800-90B)
+spi_trng_read_16_request       = A580109359

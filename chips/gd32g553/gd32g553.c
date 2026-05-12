@@ -516,6 +516,130 @@ alp_status_t gd32g553_counter_read(gd32g553_t *ctx, uint8_t counter,
     return ALP_OK;
 }
 
+/* ------------------------------------------------------------------ */
+/* v0.3 -- GD32G5 HW knobs                                            */
+/* ------------------------------------------------------------------ */
+
+alp_status_t gd32g553_pwm_configure(gd32g553_t *ctx, uint8_t channel,
+                                    gd32g553_pwm_align_t align_mode,
+                                    uint32_t dead_time_ns,
+                                    uint8_t break_cfg)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if ((unsigned)align_mode > 3u) return ALP_ERR_INVAL;
+    uint8_t req[7];
+    req[0] = channel;
+    req[1] = (uint8_t)align_mode;
+    put_le32(&req[2], dead_time_ns);
+    req[6] = break_cfg;
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                    GD32G553_CMD_PWM_CONFIGURE,
+                    req, sizeof(req), NULL, 0u);
+}
+
+alp_status_t gd32g553_adc_configure(gd32g553_t *ctx, uint8_t channel,
+                                    uint16_t oversample_ratio,
+                                    uint16_t sample_cycles,
+                                    uint8_t resolution_bits)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    /* Resolution must be one of the supported widths (or 0 for
+     * "firmware default") -- catch early so a typo doesn't have
+     * to round-trip the wire. */
+    switch (resolution_bits) {
+    case 0u: case 6u: case 8u: case 10u: case 12u: case 14u: case 16u: break;
+    default: return ALP_ERR_INVAL;
+    }
+    uint8_t req[7];
+    req[0] = channel;
+    req[1] = 0u;                                    /* reserved */
+    req[2] = (uint8_t)(oversample_ratio & 0xFFu);
+    req[3] = (uint8_t)((oversample_ratio >> 8) & 0xFFu);
+    req[4] = (uint8_t)(sample_cycles & 0xFFu);
+    req[5] = (uint8_t)((sample_cycles >> 8) & 0xFFu);
+    req[6] = resolution_bits;
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                    GD32G553_CMD_ADC_CONFIGURE,
+                    req, sizeof(req), NULL, 0u);
+}
+
+alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx, uint8_t stream_id,
+                                       uint8_t channel,
+                                       uint32_t sample_rate_hz)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (stream_id >= GD32G553_BRIDGE_ADC_STREAM_COUNT) return ALP_ERR_INVAL;
+    if (sample_rate_hz == 0u) return ALP_ERR_INVAL;
+    uint8_t req[7];
+    req[0] = stream_id;
+    req[1] = channel;
+    req[2] = 0u;                          /* reserved */
+    put_le32(&req[3], sample_rate_hz);
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                    GD32G553_CMD_ADC_STREAM_BEGIN,
+                    req, sizeof(req), NULL, 0u);
+}
+
+alp_status_t gd32g553_adc_stream_read(gd32g553_t *ctx,
+                                      uint8_t stream_id,
+                                      uint8_t max_samples,
+                                      uint8_t *got_samples,
+                                      uint16_t *mv)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (got_samples == NULL || mv == NULL) return ALP_ERR_INVAL;
+    if (stream_id >= GD32G553_BRIDGE_ADC_STREAM_COUNT) return ALP_ERR_INVAL;
+    if (max_samples == 0u) return ALP_ERR_INVAL;
+    if (max_samples > GD32G553_BRIDGE_ADC_STREAM_READ_MAX) {
+        max_samples = GD32G553_BRIDGE_ADC_STREAM_READ_MAX;
+    }
+
+    /* cmd_send needs the reply length up-front; for streaming we
+     * pre-commit to `1 + max_samples * 2` reply bytes regardless of
+     * how many samples the firmware actually has ready -- byte 0
+     * carries the real count `got`, and slots past `got` are
+     * zero-padded by the firmware so the on-wire envelope length
+     * stays deterministic. */
+    uint8_t       reply[1u + (GD32G553_BRIDGE_ADC_STREAM_READ_MAX * 2u)];
+    const size_t  reply_len = 1u + ((size_t)max_samples * 2u);
+    const uint8_t req[2]    = {stream_id, max_samples};
+    alp_status_t  s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                               GD32G553_CMD_ADC_STREAM_READ,
+                               req, sizeof(req), reply, reply_len);
+    if (s != ALP_OK) {
+        *got_samples = 0u;
+        return s;
+    }
+    const uint8_t got = reply[0];
+    if (got > max_samples) return ALP_ERR_IO;  /* firmware contract violation */
+    *got_samples = got;
+    for (uint8_t i = 0u; i < got; ++i) {
+        mv[i] = (uint16_t)reply[1u + i * 2u]
+              | ((uint16_t)reply[1u + i * 2u + 1u] << 8);
+    }
+    return ALP_OK;
+}
+
+alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (stream_id >= GD32G553_BRIDGE_ADC_STREAM_COUNT) return ALP_ERR_INVAL;
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                    GD32G553_CMD_ADC_STREAM_END,
+                    &stream_id, 1u, NULL, 0u);
+}
+
+alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (dest == NULL) return ALP_ERR_INVAL;
+    if (len == 0u || len > GD32G553_BRIDGE_TRNG_MAX_BYTES) return ALP_ERR_INVAL;
+    const uint8_t req = (uint8_t)len;
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                    GD32G553_CMD_TRNG_READ,
+                    &req, 1u, dest, len);
+}
+
 /* ----------------------------------------------------------------- */
 /* OTA helpers -- the firmware-side opcodes return STATUS_NOSUPPORT  */
 /* against the scaffold today, which maps to ALP_ERR_NOSUPPORT here. */

@@ -1392,9 +1392,25 @@
     },
     "alp/chips/gd32g553.h": {
       "functions": {
+        "gd32g553_adc_configure": {
+          "hash": "28aa7eca9ad767a2",
+          "signature": "alp_status_t gd32g553_adc_configure(gd32g553_t *ctx, uint8_t channel, uint16_t oversample_ratio, uint16_t sample_cycles, uint8_t resolution_bits);"
+        },
         "gd32g553_adc_read": {
           "hash": "db99d8be500f6e89",
           "signature": "alp_status_t gd32g553_adc_read(gd32g553_t *ctx, uint8_t channel, uint8_t samples, uint16_t *mv);"
+        },
+        "gd32g553_adc_stream_begin": {
+          "hash": "a215af5298b1c8a5",
+          "signature": "alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx, uint8_t stream_id, uint8_t channel, uint32_t sample_rate_hz);"
+        },
+        "gd32g553_adc_stream_end": {
+          "hash": "0ff3024887969a15",
+          "signature": "alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id);"
+        },
+        "gd32g553_adc_stream_read": {
+          "hash": "9b9b58b960e36499",
+          "signature": "alp_status_t gd32g553_adc_stream_read(gd32g553_t *ctx, uint8_t stream_id, uint8_t max_samples, uint8_t *got_samples, uint16_t *mv);"
         },
         "gd32g553_counter_read": {
           "hash": "05d5eb9f21aa2610",
@@ -1476,6 +1492,10 @@
           "hash": "831d5d02a16faf26",
           "signature": "alp_status_t gd32g553_ping_via(gd32g553_t *ctx, gd32g553_transport_t t);"
         },
+        "gd32g553_pwm_configure": {
+          "hash": "6e7c615772df1a07",
+          "signature": "alp_status_t gd32g553_pwm_configure(gd32g553_t *ctx, uint8_t channel, gd32g553_pwm_align_t align_mode, uint32_t dead_time_ns, uint8_t break_cfg);"
+        },
         "gd32g553_pwm_get": {
           "hash": "8f9c333e60489bdd",
           "signature": "alp_status_t gd32g553_pwm_get(gd32g553_t *ctx, uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns);"
@@ -1495,12 +1515,24 @@
         "gd32g553_set_default_transport": {
           "hash": "74a995a5d548ad83",
           "signature": "alp_status_t gd32g553_set_default_transport(gd32g553_t *ctx, gd32g553_transport_t t);"
+        },
+        "gd32g553_trng_read": {
+          "hash": "1b53462048959b50",
+          "signature": "alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len);"
         }
       },
       "macros": {
         "GD32G553_BRIDGE_ADC_MAX_SAMPLES": {
           "hash": "ac398e81c6bc385f",
           "value": "8u"
+        },
+        "GD32G553_BRIDGE_ADC_STREAM_COUNT": {
+          "hash": "174fe58f6c5bcbca",
+          "value": "2u"
+        },
+        "GD32G553_BRIDGE_ADC_STREAM_READ_MAX": {
+          "hash": "39b14e829341c6af",
+          "value": "32u"
         },
         "GD32G553_BRIDGE_COUNTER_CHANNELS": {
           "hash": "2f1378d7c8a9b163",
@@ -1530,6 +1562,10 @@
           "hash": "b67553193bc2ece3",
           "value": "0xA5u"
         },
+        "GD32G553_BRIDGE_TRNG_MAX_BYTES": {
+          "hash": "39ce2ec12cbaa280",
+          "value": "32u"
+        },
         "GD32G553_BUILD_ID_LEN": {
           "hash": "07af629c5c4972e8",
           "value": "20u"
@@ -1541,8 +1577,8 @@
       },
       "typedefs": {
         "gd32g553_cmd_t": {
-          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
-          "hash": "6b7add1ac027f1ee"
+          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
+          "hash": "0f05e4c699ed8326"
         },
         "gd32g553_ota_slot_t": {
           "definition": "typedef enum { GD32G553_OTA_SLOT_INVALID = 0u, GD32G553_OTA_SLOT_A = 1u, GD32G553_OTA_SLOT_B = 2u, } gd32g553_ota_slot_t;",
@@ -1551,6 +1587,10 @@
         "gd32g553_ota_state_t": {
           "definition": "typedef enum { GD32G553_OTA_STATE_IDLE = 0, GD32G553_OTA_STATE_RECEIVING = 1, GD32G553_OTA_STATE_VERIFIED = 2, GD32G553_OTA_STATE_PENDING_COMMIT = 3, GD32G553_OTA_STATE_FAULT = 4, } gd32g553_ota_state_t;",
           "hash": "08d8fd1b4fb1d85a"
+        },
+        "gd32g553_pwm_align_t": {
+          "definition": "typedef enum { GD32G553_PWM_ALIGN_EDGE = 0, GD32G553_PWM_ALIGN_CENTER_UP = 1, GD32G553_PWM_ALIGN_CENTER_DOWN = 2, GD32G553_PWM_ALIGN_CENTER_BOTH = 3, } gd32g553_pwm_align_t;",
+          "hash": "561cddd4458181a3"
         },
         "gd32g553_reset_cause_t": {
           "definition": "typedef enum { GD32G553_RESET_UNKNOWN = 0, GD32G553_RESET_POWER_ON = 1, GD32G553_RESET_NRST_PIN = 2, GD32G553_RESET_SOFT = 3, GD32G553_RESET_WDT = 4, GD32G553_RESET_BROWNOUT = 5, GD32G553_RESET_LOWPOWER = 6, } gd32g553_reset_cause_t;",

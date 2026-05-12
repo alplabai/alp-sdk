@@ -73,19 +73,25 @@ def i2c_read(status: int, payload: bytes = b"") -> bytes:
 # ---------------------------------------------------------------------
 
 SOF = 0xA5
-CMD_PING            = 0x00
-CMD_GET_VERSION     = 0x01
-CMD_DAC_SET         = 0x50
-CMD_DAC_GET         = 0x51
-CMD_QENC_READ       = 0x60
-CMD_QENC_RESET      = 0x61
-CMD_COUNTER_READ    = 0x70
-STATUS_OK           = 0x00
-STATUS_NOSUPPORT    = 0x06
+CMD_PING                  = 0x00
+CMD_GET_VERSION           = 0x01
+CMD_PWM_CONFIGURE         = 0x22
+CMD_ADC_CONFIGURE         = 0x32
+CMD_ADC_STREAM_BEGIN      = 0x33
+CMD_ADC_STREAM_READ       = 0x34
+CMD_ADC_STREAM_END        = 0x35
+CMD_TRNG_READ             = 0x80
+CMD_DAC_SET               = 0x50
+CMD_DAC_GET               = 0x51
+CMD_QENC_READ             = 0x60
+CMD_QENC_RESET            = 0x61
+CMD_COUNTER_READ          = 0x70
+STATUS_OK                 = 0x00
+STATUS_NOSUPPORT          = 0x06
 
 # Firmware-declared version triple; bump when protocol.h's
 # PROTOCOL_VERSION_{MAJOR,MINOR,PATCH} change.
-FW_VERSION = (0, 2, 0)
+FW_VERSION = (0, 3, 0)
 
 
 HEADER = """\
@@ -199,8 +205,65 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         "spi_reply_nosupport",
         spi_frame(SOF, STATUS_NOSUPPORT).hex().upper(),
         "SOF | STATUS=0x06 (NOSUPPORT) | empty payload | CRC --"
-        " stub-firmware reply for any v0.2 opcode whose HAL body is"
+        " stub-firmware reply for any v0.2+ opcode whose HAL body is"
         " not yet wired",
+    ))
+
+    # ----- §5. v0.3 additions: GD32G5 HW knobs -----------------------
+    # Sticky-configure opcodes + DMA-backed ADC streaming.  Firmware
+    # auto-selects HRPWM when achievable, so no separate
+    # CMD_PWM_SET_HIGHRES -- the existing CMD_PWM_SET routes there
+    # when the period demands sub-4-ns precision.
+    out.append((
+        "spi_pwm_configure_ch0_request",
+        spi_frame(SOF, CMD_PWM_CONFIGURE,
+                  bytes([0x00,             # channel
+                         0x01,             # align_mode = CENTER_UP
+                         0xD0, 0x07,       # dead_time_ns = 2000 (LE 0x000007D0)
+                         0x00, 0x00,
+                         0x01,             # break_cfg bit 0 = enable
+                  ])).hex().upper(),
+        "SOF | CMD=0x22 | channel=0 | align=CENTER_UP | dead_time_ns=2000 | break_en | CRC",
+    ))
+    out.append((
+        "spi_adc_configure_ch3_request",
+        spi_frame(SOF, CMD_ADC_CONFIGURE,
+                  bytes([0x03,             # channel
+                         0x00,             # reserved
+                         0x10, 0x00,       # oversample_ratio = 16 (LE 0x0010)
+                         0x5F, 0x00,       # sample_cycles = 95 (~92.5 cycles, LE 0x005F)
+                         0x10,             # resolution = 16 bits
+                  ])).hex().upper(),
+        "SOF | CMD=0x32 | channel=3 | oversample=16 | sample_cycles~92 | resolution=16 | CRC",
+    ))
+    out.append((
+        "spi_adc_stream_begin_stream0_ch0_1ksps_request",
+        spi_frame(SOF, CMD_ADC_STREAM_BEGIN,
+                  bytes([0x00,             # stream_id
+                         0x00,             # channel
+                         0x00,             # reserved
+                         0xE8, 0x03, 0x00, 0x00,  # sample_rate_hz = 1000 (LE)
+                  ])).hex().upper(),
+        "SOF | CMD=0x33 | stream_id=0 | channel=0 | rate_hz=1000 | CRC",
+    ))
+    out.append((
+        "spi_adc_stream_read_stream0_max32_request",
+        spi_frame(SOF, CMD_ADC_STREAM_READ,
+                  bytes([0x00, 0x20])).hex().upper(),
+        "SOF | CMD=0x34 | stream_id=0 | max_samples=32 | CRC --"
+        " reply length is 1 + max_samples*2 + 2 (CRC) bytes regardless"
+        " of how many samples the firmware actually returns",
+    ))
+    out.append((
+        "spi_adc_stream_end_stream0_request",
+        spi_frame(SOF, CMD_ADC_STREAM_END, bytes([0x00])).hex().upper(),
+        "SOF | CMD=0x35 | stream_id=0 | CRC",
+    ))
+    out.append((
+        "spi_trng_read_16_request",
+        spi_frame(SOF, CMD_TRNG_READ, bytes([0x10])).hex().upper(),
+        "SOF | CMD=0x80 | request 16 bytes of true random | CRC --"
+        " host receives 16 bytes of GD32G5 TRNG (NIST SP800-90B)",
     ))
 
     return out
@@ -241,7 +304,17 @@ def emit(vectors: list[tuple[str, str, str | None]]) -> str:
     chunks.append("\n# ---------------------------------------------------------------------")
     chunks.append("# §4. v0.2 additions -- DAC, quadrature encoder, free-running counter")
     chunks.append("# ---------------------------------------------------------------------")
-    for name, value, comment in vectors[9:]:
+    for name, value, comment in vectors[9:15]:
+        if comment:
+            chunks.append(f"# {comment}")
+        chunks.append(f"{name:<30} = {value}")
+
+    # ----- §5 block --------------------------------------------------
+    chunks.append("\n# ---------------------------------------------------------------------")
+    chunks.append("# §5. v0.3 additions -- GD32G5 HW knobs (PWM_CONFIGURE, ADC_CONFIGURE,")
+    chunks.append("#                       ADC_STREAM_BEGIN / READ / END)")
+    chunks.append("# ---------------------------------------------------------------------")
+    for name, value, comment in vectors[15:]:
         if comment:
             chunks.append(f"# {comment}")
         chunks.append(f"{name:<30} = {value}")

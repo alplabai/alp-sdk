@@ -62,11 +62,19 @@ byte; their numeric encoding is:
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
 | `0x61` | `QENC_RESET`          | `encoder:u8`                                       | _empty_                                            |
 | `0x70` | `COUNTER_READ`        | `counter:u8`                                       | `ticks:u32`                                        |
+| `0x22` | `PWM_CONFIGURE`       | `channel:u8 align:u8 dead_time_ns:u32 break_cfg:u8` | _empty_                                           |
+| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_                       |
+| `0x33` | `ADC_STREAM_BEGIN`    | `stream_id:u8 channel:u8 reserved:u8 sample_rate_hz:u32` | _empty_                                      |
+| `0x34` | `ADC_STREAM_READ`     | `stream_id:u8 max_samples:u8`                      | `got:u8 mv[max_samples]:u16` (zero-padded)         |
+| `0x35` | `ADC_STREAM_END`      | `stream_id:u8`                                     | _empty_                                            |
+| `0x80` | `TRNG_READ`           | `len:u8` (1..32)                                   | `random_bytes[len]`                                |
 
-Opcodes `0x80..0xFF` are **reserved** for vendor extensions.
-The GD32 firmware replies with **`ALP_ERR_NOSUPPORT`** (see §6) for
-any opcode it does not implement at build time, so a host that
-speaks a newer command set than the firmware degrades gracefully.
+Opcodes `0x81..0xEF` are **reserved** for future ALP-defined
+extensions (next slot: hardware AES via the CAU engine).  Carriers
+SHOULD NOT define their own opcodes in this range -- the firmware
+replies with **`ALP_ERR_NOSUPPORT`** (see §6) for any opcode it
+does not implement at build time, so a host that speaks a newer
+command set than the firmware degrades gracefully.
 
 ### 3.1 GPIO masks
 
@@ -139,6 +147,91 @@ reset; the firmware uses a 32-bit accumulator that wraps modulo
 to get velocity even across a wrap.  `QENC_RESET` zeroes the
 accumulator atomically (encoder pulses arriving during the reset
 window contribute to the post-reset count, not the pre-reset one).
+
+### 3.8 PWM configure (`v0.3+`)
+
+`PWM_CONFIGURE` programs sticky per-channel knobs that subsequent
+`PWM_SET` calls honour: counter alignment mode (edge-aligned vs
+center-aligned-up / -down / -both), dead-time for complementary
+outputs (in ns; firmware rounds to the timer's achievable step), and
+break-input enable.  Request payload is 7 bytes:
+`channel:u8 align_mode:u8 dead_time_ns:u32 break_cfg:u8` -- reply
+is empty.
+
+On V2N every E1M PWM channel maps to a TIMER0 / TIMER7 channel
+(see `metadata/chips/gd32g553.yaml` `pwm_routing:` for the table).
+Both timers are 16-bit advanced timers running at the 240 MHz core
+clock, so the achievable resolution is ~4.16 ns LSB and the longest
+single-counter period is ~273 us.  `CMD_PWM_GET` always reports
+what the firmware actually programmed after rounding -- callers
+that need exact frequency confirmation should read back rather than
+recompute.
+
+### 3.9 ADC configure (`v0.3+`)
+
+`ADC_CONFIGURE` programs sticky per-channel oversampling +
+sample-and-hold cycle count + resolution.  Subsequent `ADC_READ`
+calls on that channel honour the configured tuning.  Request payload
+is 7 bytes:
+`channel:u8 reserved:u8 oversample_ratio:u16 sample_cycles:u16 resolution_bits:u8` --
+reply is empty.
+
+* `oversample_ratio` is one of 1/2/4/8/16/32/64/128/256.  0 means
+  "firmware default" (per-channel-configured at build time).  The
+  firmware rounds down to the nearest power-of-two.
+* `sample_cycles` is one of the eight datasheet-defined sample-time
+  steps (2/6/12/24/47/92/247/640 cycles per GD32G553 RM §16.4.6);
+  0 means "firmware default".  Rounds down.
+* `resolution_bits` is 0 (default) / 6 / 8 / 10 / 12 / 14 / 16.
+  14- and 16-bit modes require `oversample_ratio >= 4` and `>= 16`
+  respectively per the datasheet's effective-resolution table; the
+  firmware enforces.  Unsupported widths reply with `STATUS_INVAL`.
+
+The GD32 returns ADC readings as 16-bit millivolts (`ADC_READ` /
+`ADC_STREAM_READ` reply payload format unchanged); higher
+oversampling improves the effective-resolution / SNR of the
+returned values but doesn't widen the on-wire word.
+
+### 3.10 ADC streaming (`v0.3+`)
+
+`ADC_STREAM_BEGIN` starts a DMA-backed continuous acquisition into
+a firmware-side ring buffer at the requested `sample_rate_hz`.
+Two streams supported concurrently -- stream 0 binds to GD32 DMA0,
+stream 1 binds to DMA1, so they can run truly in parallel against
+different channels at different rates.  Calling `STREAM_BEGIN` on a
+stream slot that's already active replies with `STATUS_BUSY`.
+Request payload is 7 bytes:
+`stream_id:u8 channel:u8 reserved:u8 sample_rate_hz:u32`;
+reply empty.
+
+`ADC_STREAM_READ` drains up to `max_samples` samples from the
+named stream's ring.  The wire envelope is fixed-length (host
+pre-commits to clocking `1 + max_samples*2 + 2` reply bytes
+regardless of how many samples the firmware actually has ready);
+reply byte 0 is the real count `got` (0..max_samples) and slots
+beyond `got` are zero-padded.  Request payload is 2 bytes:
+`stream_id:u8 max_samples:u8` (firmware caps at
+`GD32_BRIDGE_ADC_STREAM_READ_MAX = 32`); reply payload is
+`got:u8 mv[max_samples]:u16` with trailing zero-padded slots.
+
+`ADC_STREAM_END` stops the named stream's DMA, flushes its ring,
+and releases the DMA controller for re-binding.  Request payload
+is 1 byte: `stream_id:u8`; reply empty.
+
+Ring overrun on the firmware side returns `STATUS_BUSY` on the next
+`STREAM_READ`, signalling "host should poll faster" -- the
+firmware does NOT silently drop samples.
+
+### 3.11 TRNG read (`v0.3+`)
+
+`TRNG_READ` pulls true-random bytes from the GD32G5's NIST
+SP800-90B pre-certified TRNG unit.  Request payload is 1 byte:
+`len:u8` (1..32); reply payload is the `len` random bytes.  The
+firmware accumulates 32-bit pulls (or 128-bit pulls on the NIST
+path) until `len` is satisfied; latency at typical TRNG_CLK is
+~40 cycles per pull (sub-microsecond).  Self-check failures
+(documented in the GD32 user manual TRNG_STAT register) cause
+the firmware to reply with `STATUS_IO`.
 
 ### 3.7 Free-running counter (`v0.2+`)
 

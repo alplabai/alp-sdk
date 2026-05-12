@@ -59,6 +59,50 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
     return BRIDGE_HW_ERR_NOTIMPL;
 }
 
+int bridge_hw_pwm_configure(uint8_t channel, uint8_t align_mode,
+                            uint32_t dead_time_ns, uint8_t break_cfg)
+{
+    (void)channel; (void)align_mode; (void)dead_time_ns; (void)break_cfg;
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
+int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio,
+                            uint16_t sample_cycles, uint8_t resolution_bits)
+{
+    (void)channel; (void)oversample_ratio; (void)sample_cycles;
+    (void)resolution_bits;
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
+int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel,
+                               uint32_t sample_rate_hz)
+{
+    (void)stream_id; (void)channel; (void)sample_rate_hz;
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
+int bridge_hw_adc_stream_read(uint8_t stream_id, uint8_t max_samples,
+                              uint8_t *got_samples, uint16_t *mv)
+{
+    (void)stream_id; (void)max_samples; (void)mv;
+    if (got_samples != 0) *got_samples = 0u;
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
+int bridge_hw_adc_stream_end(uint8_t stream_id)
+{
+    (void)stream_id;
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
+int bridge_hw_trng_read(uint8_t *dest, size_t len)
+{
+    if (dest != 0) {
+        for (size_t i = 0; i < len; ++i) dest[i] = 0u;
+    }
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
 int bridge_hw_dac_set(uint8_t channel, uint16_t value_mv)
 {
     (void)channel; (void)value_mv;

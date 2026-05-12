@@ -18,7 +18,28 @@
 #ifndef GD32_BRIDGE_HAL_BRIDGE_HW_H
 #define GD32_BRIDGE_HAL_BRIDGE_HW_H
 
+#include <stddef.h>
 #include <stdint.h>
+
+/* --------------------------------------------------------------- */
+/* Performance notes for the future bridge_hw_gd32.c implementer:    */
+/*                                                                  */
+/* * The GD32G5 carries a hardware CRC unit (datasheet §95) that    */
+/*   processes one byte per AHB clock vs the ~16 cycles the         */
+/*   software byte-XOR loop in protocol.c needs.  The bridge wire   */
+/*   protocol uses CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF,    */
+/*   non-reflected, xor-out 0x0000); the CRC unit's user-           */
+/*   configurable polynomial supports that pattern.  Plumb both     */
+/*   transports' framing layers through the HW unit and the         */
+/*   software fallback becomes a self-test reference only.          */
+/*                                                                  */
+/* * Both DMA controllers (DMA0 + DMA1, 7 channels each) are        */
+/*   available -- bind one ADC stream's DMA to DMA0 channel 1 and   */
+/*   the other to DMA1 channel 1 so they can run truly concurrently.*/
+/*   The bridge transports themselves (SPI / I2C) can also DMA-back */
+/*   their RX/TX FIFOs to free the CPU during bridge handler        */
+/*   bodies.                                                         */
+/* --------------------------------------------------------------- */
 
 /* Negative return values from any bridge_hw_* call.  Positive return
  * values are treated as "operation-specific success state" (currently
@@ -57,11 +78,58 @@ int bridge_hw_gpio_write(uint32_t mask, uint32_t levels);
 int bridge_hw_pwm_set(uint8_t channel, uint32_t period_ns, uint32_t duty_ns);
 int bridge_hw_pwm_get(uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns);
 
+/* v0.3: sticky PWM tuning.  align_mode is one of
+ *   0 = edge-aligned, 1 = center-aligned-up,
+ *   2 = center-aligned-down, 3 = center-aligned-both (datasheet
+ *   §17 CAM field).  dead_time_ns programs the GD32's break-and-
+ *   dead-time register for complementary outputs (0 = no dead
+ *   time).  break_cfg bit 0 enables the break input; remaining
+ *   bits reserved. */
+int bridge_hw_pwm_configure(uint8_t channel, uint8_t align_mode,
+                            uint32_t dead_time_ns, uint8_t break_cfg);
+
 /* --------------------------------------------------------------- */
 /* ADC                                                              */
 /* --------------------------------------------------------------- */
 
 int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv);
+
+/* v0.3: sticky ADC tuning.  oversample_ratio is one of
+ * 1/2/4/8/16/32/64/128/256 (rounded down to nearest power-of-two
+ * by the firmware).  sample_cycles is one of the eight datasheet
+ * values (2/6/12/24/47/92/247/640 cycles, GD32G553 §16.4.6) -- the
+ * firmware rounds down.  resolution is 6/8/10/12/14/16 bits (the
+ * latter two require oversampling >= 4 / 16 respectively per the
+ * datasheet's effective-resolution table). */
+int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio,
+                            uint16_t sample_cycles, uint8_t resolution_bits);
+
+/* v0.3: DMA-backed continuous acquisition.  Two streams supported
+ * concurrently (`stream_id` selects which one) -- the firmware
+ * binds stream 0 to DMA0 and stream 1 to DMA1 per the chip's two-DMA
+ * controller setup.  STREAM_BEGIN starts the firmware's ring buffer
+ * at the requested sample_rate_hz; STREAM_READ drains up to
+ * `max_samples` samples (firmware caps at
+ * GD32_BRIDGE_ADC_STREAM_READ_MAX); STREAM_END stops the DMA and
+ * flushes the ring.  Buffer overruns are returned as STATUS_BUSY on
+ * subsequent STREAM_READ. */
+int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel,
+                               uint32_t sample_rate_hz);
+int bridge_hw_adc_stream_read(uint8_t stream_id, uint8_t max_samples,
+                              uint8_t *got_samples, uint16_t *mv);
+int bridge_hw_adc_stream_end(uint8_t stream_id);
+
+/* --------------------------------------------------------------- */
+/* TRNG -- true random number generator (NIST SP800-90B)             */
+/* --------------------------------------------------------------- */
+
+/* Fill @p dest with @p len bytes of true randomness from the
+ * GD32G5's TRNG unit.  Caller chooses len in [1..32]; the firmware
+ * accumulates 32-bit pulls into the output until len is satisfied
+ * (a single pull = ~40 TRNG_CLK cycles per the datasheet).  Returns
+ * BRIDGE_HW_ERR_IO if the TRNG's startup or in-service self-check
+ * flags an error. */
+int bridge_hw_trng_read(uint8_t *dest, size_t len);
 
 /* --------------------------------------------------------------- */
 /* DAC                                                              */

@@ -67,6 +67,35 @@ signals:
   - { name: GD32_SWDIO_HDR, type: bidir, v2n_route: "(programming header, GD32 PA13)" }
   - { name: GD32_SWCLK_HDR, type: input, v2n_route: "(programming header, GD32 PA14)" }
 
+# --------------------------------------------------------------------
+# E1M PWM routing on the GD32 side.  All eight E1M PWM channels ride
+# the GD32's two 16-bit advanced timers (TIMER0 + TIMER7).  Counter
+# clock is the 240 MHz core clock; effective LSB ~4.16 ns; maximum
+# period ~273 us at full 16-bit count.  Firmware translates caller
+# `period_ns` / `duty_ns` from CMD_PWM_SET into the timer's CAR /
+# CHnCV register pair and reports the rounded actual via CMD_PWM_GET.
+pwm_routing:
+  counter_clock_hz: 240000000
+  channels:
+    - { e1m: PWM0, gd32_pad: PA11, timer: TIMER0, channel: MCH0 }
+    - { e1m: PWM1, gd32_pad: PB1,  timer: TIMER0, channel: MCH2 }
+    - { e1m: PWM2, gd32_pad: PB14, timer: TIMER0, channel: MCH1 }
+    - { e1m: PWM3, gd32_pad: PC5,  timer: TIMER0, channel: MCH3 }
+    - { e1m: PWM4, gd32_pad: PC10, timer: TIMER7, channel: MCH0 }
+    - { e1m: PWM5, gd32_pad: PC11, timer: TIMER7, channel: MCH1 }
+    - { e1m: PWM6, gd32_pad: PC12, timer: TIMER7, channel: MCH2 }
+    - { e1m: PWM7, gd32_pad: PD0,  timer: TIMER7, channel: MCH3 }
+  notes: |
+    Both TIMER0 and TIMER7 are 16-bit advanced-control timers with
+    dead-time generation, complementary output, and break-input
+    support.  The 16-bit counter at the 240 MHz core clock gives
+    ~4.16 ns LSB; periods longer than ~273 us require the firmware's
+    repetition-counter / prescaler logic (firmware-internal, not
+    surfaced via CMD_PWM_SET).  Channel ordering matches the
+    GD32G553 datasheet -- note that on TIMER0, MCH2 (not MCH1) maps
+    to E1M PWM1 on V2N pad PB1; firmware honours the datasheet
+    layout.
+
 protocol:
   doc:            "docs/gd32-bridge-protocol.md"
   major_version:  0                      # host insists on exact major match

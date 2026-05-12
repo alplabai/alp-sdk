@@ -321,6 +321,157 @@ static gd32_bridge_status_t handle_counter_read(const uint8_t *req, size_t req_l
     return STATUS_OK;
 }
 
+static gd32_bridge_status_t handle_pwm_configure(const uint8_t *req, size_t req_len,
+                                                 uint8_t *reply, size_t reply_cap,
+                                                 size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 7u) return STATUS_INVAL;
+    const uint8_t  channel       = req[0];
+    const uint8_t  align_mode    = req[1];
+    const uint32_t dead_time_ns  = get_le32(&req[2]);
+    const uint8_t  break_cfg     = req[6];
+    if (align_mode > 3u) return STATUS_INVAL;
+    const int rv = bridge_hw_pwm_configure(channel, align_mode,
+                                           dead_time_ns, break_cfg);
+    if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
+    if (rv == BRIDGE_HW_ERR_RANGE) return STATUS_OUT_OF_RANGE;
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv < 0) return STATUS_IO;
+    *reply_len = 0u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_adc_configure(const uint8_t *req, size_t req_len,
+                                                 uint8_t *reply, size_t reply_cap,
+                                                 size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 7u) return STATUS_INVAL;
+    const uint8_t  channel           = req[0];
+    /* req[1] reserved padding */
+    const uint16_t oversample_ratio  = (uint16_t)req[2] | ((uint16_t)req[3] << 8);
+    const uint16_t sample_cycles     = (uint16_t)req[4] | ((uint16_t)req[5] << 8);
+    const uint8_t  resolution_bits   = req[6];
+    /* Resolution is one of 6/8/10/12/14/16 per the GD32G5
+     * datasheet's effective-resolution table; the firmware rejects
+     * other values rather than silently rounding so callers find
+     * out at protocol time. */
+    switch (resolution_bits) {
+    case 0u:  /* "use the firmware default" */
+    case 6u: case 8u: case 10u: case 12u: case 14u: case 16u:
+        break;
+    default:
+        return STATUS_INVAL;
+    }
+    const int rv = bridge_hw_adc_configure(channel, oversample_ratio,
+                                           sample_cycles, resolution_bits);
+    if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
+    if (rv == BRIDGE_HW_ERR_RANGE) return STATUS_OUT_OF_RANGE;
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv < 0) return STATUS_IO;
+    *reply_len = 0u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_adc_stream_begin(const uint8_t *req, size_t req_len,
+                                                    uint8_t *reply, size_t reply_cap,
+                                                    size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 7u) return STATUS_INVAL;
+    const uint8_t  stream_id      = req[0];
+    const uint8_t  channel        = req[1];
+    /* req[2] reserved padding */
+    const uint32_t sample_rate_hz = get_le32(&req[3]);
+    if (stream_id >= GD32_BRIDGE_ADC_STREAM_COUNT) return STATUS_INVAL;
+    if (sample_rate_hz == 0u) return STATUS_INVAL;
+    const int rv = bridge_hw_adc_stream_begin(stream_id, channel, sample_rate_hz);
+    if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
+    if (rv == BRIDGE_HW_ERR_RANGE) return STATUS_OUT_OF_RANGE;
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv < 0) return STATUS_IO;
+    *reply_len = 0u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_adc_stream_read(const uint8_t *req, size_t req_len,
+                                                   uint8_t *reply, size_t reply_cap,
+                                                   size_t *reply_len)
+{
+    if (req_len != 2u) return STATUS_INVAL;
+    const uint8_t stream_id   = req[0];
+    uint8_t       max_samples = req[1];
+    if (stream_id >= GD32_BRIDGE_ADC_STREAM_COUNT) return STATUS_INVAL;
+    /* The wire-framing layer needs a fixed reply length so the host
+     * can clock the right number of bytes.  Reply is always
+     * `1 + max_samples*2` bytes: byte 0 = `got` (the valid sample
+     * count, 0..max_samples); subsequent bytes are the sample data,
+     * with trailing slots zero-padded when the firmware ring had
+     * fewer than `max_samples` samples ready. */
+    if (max_samples == 0u) return STATUS_INVAL;
+    if (max_samples > GD32_BRIDGE_ADC_STREAM_READ_MAX) {
+        return STATUS_OUT_OF_RANGE;
+    }
+
+    /* Reply scratch on the firmware stack -- avoid pulling in the
+     * full GD32_BRIDGE_MAX_PAYLOAD_BYTES buffer.  Sized to the
+     * stream-read ceiling. */
+    uint16_t mv[GD32_BRIDGE_ADC_STREAM_READ_MAX];
+    uint8_t  got = 0u;
+    const int rv = bridge_hw_adc_stream_read(stream_id, max_samples, &got, mv);
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv < 0) return STATUS_IO;
+    if (got > max_samples) return STATUS_IO;  /* HAL contract violation */
+
+    const size_t need = 1u + (size_t)max_samples * 2u;
+    if (reply_cap < need) return STATUS_NOMEM;
+    reply[0] = got;
+    for (uint8_t i = 0u; i < got; ++i) {
+        reply[1u + i * 2u]      = (uint8_t)(mv[i] & 0xFFu);
+        reply[1u + i * 2u + 1u] = (uint8_t)((mv[i] >> 8) & 0xFFu);
+    }
+    /* Pad with zeros so the on-wire envelope length is deterministic
+     * (host pre-committed to clocking 1 + max_samples*2 reply bytes
+     * + CRC).  Filler bytes are zero so the CRC is reproducible. */
+    for (uint8_t i = got; i < max_samples; ++i) {
+        reply[1u + i * 2u]      = 0u;
+        reply[1u + i * 2u + 1u] = 0u;
+    }
+    *reply_len = need;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_adc_stream_end(const uint8_t *req, size_t req_len,
+                                                  uint8_t *reply, size_t reply_cap,
+                                                  size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 1u) return STATUS_INVAL;
+    const uint8_t stream_id = req[0];
+    if (stream_id >= GD32_BRIDGE_ADC_STREAM_COUNT) return STATUS_INVAL;
+    const int rv = bridge_hw_adc_stream_end(stream_id);
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv < 0) return STATUS_IO;
+    *reply_len = 0u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_trng_read(const uint8_t *req, size_t req_len,
+                                             uint8_t *reply, size_t reply_cap,
+                                             size_t *reply_len)
+{
+    if (req_len != 1u) return STATUS_INVAL;
+    const uint8_t want = req[0];
+    if (want == 0u || want > 32u) return STATUS_INVAL;
+    if (reply_cap < want) return STATUS_NOMEM;
+    const int rv = bridge_hw_trng_read(reply, (size_t)want);
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv < 0) return STATUS_IO;
+    *reply_len = want;
+    return STATUS_OK;
+}
+
 /* --------------------------------------------------------------- */
 /* Dispatch                                                          */
 /* --------------------------------------------------------------- */
@@ -346,15 +497,21 @@ gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
     case CMD_RESET_REASON:          h = handle_reset_reason;   break;
     case CMD_GPIO_READ:             h = handle_gpio_read;      break;
     case CMD_GPIO_WRITE:            h = handle_gpio_write;     break;
-    case CMD_PWM_SET:               h = handle_pwm_set;        break;
-    case CMD_PWM_GET:               h = handle_pwm_get;        break;
-    case CMD_ADC_READ:              h = handle_adc_read;       break;
-    case CMD_DA9292_STATUS_FORWARD: h = handle_da9292_forward; break;
-    case CMD_DAC_SET:               h = handle_dac_set;        break;
-    case CMD_DAC_GET:               h = handle_dac_get;        break;
-    case CMD_QENC_READ:             h = handle_qenc_read;      break;
-    case CMD_QENC_RESET:            h = handle_qenc_reset;     break;
-    case CMD_COUNTER_READ:          h = handle_counter_read;   break;
+    case CMD_PWM_SET:               h = handle_pwm_set;          break;
+    case CMD_PWM_GET:               h = handle_pwm_get;          break;
+    case CMD_PWM_CONFIGURE:         h = handle_pwm_configure;    break;
+    case CMD_ADC_READ:              h = handle_adc_read;         break;
+    case CMD_ADC_CONFIGURE:         h = handle_adc_configure;    break;
+    case CMD_ADC_STREAM_BEGIN:      h = handle_adc_stream_begin; break;
+    case CMD_ADC_STREAM_READ:       h = handle_adc_stream_read;  break;
+    case CMD_ADC_STREAM_END:        h = handle_adc_stream_end;   break;
+    case CMD_TRNG_READ:             h = handle_trng_read;        break;
+    case CMD_DA9292_STATUS_FORWARD: h = handle_da9292_forward;   break;
+    case CMD_DAC_SET:               h = handle_dac_set;          break;
+    case CMD_DAC_GET:               h = handle_dac_get;          break;
+    case CMD_QENC_READ:             h = handle_qenc_read;        break;
+    case CMD_QENC_RESET:            h = handle_qenc_reset;       break;
+    case CMD_COUNTER_READ:          h = handle_counter_read;     break;
     default:
         /* Route the reserved OTA opcode range (0xF0..0xFF) through
          * the application bootloader's dispatcher.  Bodies return

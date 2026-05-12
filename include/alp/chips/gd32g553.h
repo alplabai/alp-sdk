@@ -85,6 +85,21 @@ extern "C" {
 /** Maximum number of ADC samples the bridge accepts per `ADC_READ`. */
 #define GD32G553_BRIDGE_ADC_MAX_SAMPLES  8u
 
+/** Maximum samples returned by a single `CMD_ADC_STREAM_READ` reply
+ *  (v0.3+).  Bounded so a stream-drain transaction fits in the wire's
+ *  reply envelope; the firmware's ring buffer is sized larger so
+ *  back-to-back reads don't lose samples. */
+#define GD32G553_BRIDGE_ADC_STREAM_READ_MAX  32u
+
+/** Number of concurrent DMA-backed ADC streams the firmware supports.
+ *  Bounded by the GD32G553's two DMA controllers (DMA0 + DMA1, 7
+ *  channels each per the datasheet); the firmware binds stream 0 to
+ *  DMA0 and stream 1 to DMA1 so they run truly concurrently. */
+#define GD32G553_BRIDGE_ADC_STREAM_COUNT     2u
+
+/** Maximum bytes returned by a single `CMD_TRNG_READ` reply (v0.3+). */
+#define GD32G553_BRIDGE_TRNG_MAX_BYTES       32u
+
 /** Number of DAC output channels the bridge exposes (mirrors the
  *  E1M v1.0 `DAC0..DAC1` allocation; GD32 pads `PA4` + `PA6` per
  *  `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`). */
@@ -127,6 +142,21 @@ typedef enum {
     GD32G553_CMD_QENC_READ             = 0x60,
     GD32G553_CMD_QENC_RESET            = 0x61,
     GD32G553_CMD_COUNTER_READ          = 0x70,
+    /* v0.3 additions -- expose GD32G5 ADC + PWM HW knobs
+     * (oversampling, sample-and-hold cycles, alignment / dead-time
+     * for PWM, DMA-backed continuous acquisition).  On V2N every
+     * E1M PWM channel rides one of the GD32's 16-bit advanced
+     * timers (TIMER0 MCH0..MCH3 on PWM0..3, TIMER7 MCH0..MCH3 on
+     * PWM4..7) -- ~4.16 ns LSB at the 240 MHz core clock, 273 us
+     * maximum period.  CMD_PWM_GET reports the rounded actual. */
+    GD32G553_CMD_PWM_CONFIGURE         = 0x22,
+    GD32G553_CMD_ADC_CONFIGURE         = 0x32,
+    GD32G553_CMD_ADC_STREAM_BEGIN      = 0x33,
+    GD32G553_CMD_ADC_STREAM_READ       = 0x34,
+    GD32G553_CMD_ADC_STREAM_END        = 0x35,
+    /* v0.3 security/crypto block.  TRNG today; CAU (AES/DES) lands in
+     * v0.4 with PSA Crypto driver registration. */
+    GD32G553_CMD_TRNG_READ             = 0x80,
     /* Reserved range 0xF0..0xFF -- application-bootloader OTA. */
     GD32G553_CMD_OTA_BEGIN             = 0xF0,
     GD32G553_CMD_OTA_WRITE_CHUNK       = 0xF1,
@@ -322,6 +352,129 @@ alp_status_t gd32g553_qenc_reset(gd32g553_t *ctx, uint8_t encoder);
  */
 alp_status_t gd32g553_counter_read(gd32g553_t *ctx, uint8_t counter,
                                    uint32_t *ticks_out);
+
+/* ------------------------------------------------------------------ */
+/* v0.3 protocol: GD32G5 HW knobs                                     */
+/* ------------------------------------------------------------------ */
+
+/** PWM channel alignment mode -- passes through to the GD32 timer's
+ *  CAM field (see GD32G553 reference manual §17). */
+typedef enum {
+    GD32G553_PWM_ALIGN_EDGE              = 0,
+    GD32G553_PWM_ALIGN_CENTER_UP         = 1,
+    GD32G553_PWM_ALIGN_CENTER_DOWN       = 2,
+    GD32G553_PWM_ALIGN_CENTER_BOTH       = 3,
+} gd32g553_pwm_align_t;
+
+/** Sticky per-channel PWM tuning.  Subsequent @ref gd32g553_pwm_set
+ *  honours the configured alignment + dead-time + fault inputs.
+ *
+ *  Resolution note: on V2N every E1M PWM channel maps to a TIMER0 /
+ *  TIMER7 channel (PWM0..3 -> TIMER0_MCH0..MCH3 on GD32 pads
+ *  PA11 / PB1 / PB14 / PC5; PWM4..7 -> TIMER7_MCH0..MCH3 on PC10 /
+ *  PC11 / PC12 / PD0).  Both are 16-bit advanced timers running at
+ *  the 240 MHz core clock, giving ~4.16 ns LSB and 273 us max
+ *  period; the firmware rounds caller `period_ns` / `duty_ns` down
+ *  to the closest achievable tick count, and @ref gd32g553_pwm_get
+ *  returns the rounded actual.
+ *
+ *  @param channel         PWM channel (0..7 per the E1M spec).
+ *  @param align_mode      One of @ref gd32g553_pwm_align_t.
+ *  @param dead_time_ns    Programmable dead-time for complementary
+ *                         outputs (0 = no dead time).  Firmware
+ *                         rounds to the next achievable value.
+ *  @param break_cfg       Bit 0: enable external break input.  Other
+ *                         bits reserved for future fault sources.
+ *
+ *  @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
+ *          ALP_ERR_NOSUPPORT (firmware HAL body not yet wired).
+ */
+alp_status_t gd32g553_pwm_configure(gd32g553_t *ctx, uint8_t channel,
+                                    gd32g553_pwm_align_t align_mode,
+                                    uint32_t dead_time_ns,
+                                    uint8_t break_cfg);
+
+/** Sticky per-channel ADC tuning.  @ref gd32g553_adc_read honours
+ *  the configured oversampling + sample-and-hold cycles + resolution
+ *  on its next call.
+ *
+ *  @param channel            ADC channel (0..7 per the E1M spec).
+ *  @param oversample_ratio   1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256.
+ *                            Firmware rounds down to the nearest
+ *                            power-of-two; 0 means "firmware default".
+ *  @param sample_cycles      Sample-and-hold time in ADC cycles --
+ *                            one of 2/6/12/24/47/92/247/640 (rounded
+ *                            down on the firmware side).  0 means
+ *                            "firmware default".
+ *  @param resolution_bits    6 / 8 / 10 / 12 / 14 / 16.  14- and
+ *                            16-bit modes require oversampling >= 4 /
+ *                            16 respectively per the datasheet's
+ *                            effective-resolution table.  0 means
+ *                            "firmware default" (12-bit).
+ *
+ *  @return ALP_OK / ALP_ERR_INVAL (bad resolution) / ALP_ERR_OUT_OF_RANGE /
+ *          ALP_ERR_NOSUPPORT (firmware HAL body not yet wired).
+ */
+alp_status_t gd32g553_adc_configure(gd32g553_t *ctx, uint8_t channel,
+                                    uint16_t oversample_ratio,
+                                    uint16_t sample_cycles,
+                                    uint8_t resolution_bits);
+
+/** Start DMA-backed continuous ADC acquisition into the firmware's
+ *  ring buffer.  Host drains samples via @ref gd32g553_adc_stream_read.
+ *
+ *  Two streams supported concurrently: stream 0 binds to GD32 DMA0,
+ *  stream 1 binds to DMA1 (per the chip's dual-DMA-controller
+ *  topology).  Different channels and different sample rates can run
+ *  simultaneously across the two streams.  Calling BEGIN on a
+ *  stream_id that's already active returns @ref ALP_ERR_BUSY.
+ *
+ *  @param stream_id      Stream slot (0 .. @ref GD32G553_BRIDGE_ADC_STREAM_COUNT - 1).
+ *  @param channel        ADC channel (0..7).
+ *  @param sample_rate_hz Target rate.  Firmware caps at the SoC's
+ *                        physical limit (~1.5 Msps on a 12-bit
+ *                        single-channel acquisition); exceeded
+ *                        requests return @ref ALP_ERR_OUT_OF_RANGE.
+ */
+alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx, uint8_t stream_id,
+                                       uint8_t channel,
+                                       uint32_t sample_rate_hz);
+
+/** Drain up to @p max_samples samples from the named stream's ring.
+ *  Caller buffer must be at least @p max_samples entries.
+ *
+ *  @param[in]  stream_id    Stream slot (must match a previous BEGIN).
+ *  @param[in]  max_samples  Caller's drain limit.  Firmware caps at
+ *                           @ref GD32G553_BRIDGE_ADC_STREAM_READ_MAX.
+ *  @param[out] got_samples  Number actually copied into @p mv.
+ *                           May be 0 if the ring was empty since the
+ *                           last poll.
+ *  @param[out] mv           Caller buffer.  Length >= @p max_samples.
+ *
+ *  @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
+ *          ALP_ERR_BUSY (firmware ring overran since last poll;
+ *          host should poll faster).
+ */
+alp_status_t gd32g553_adc_stream_read(gd32g553_t *ctx,
+                                      uint8_t stream_id,
+                                      uint8_t max_samples,
+                                      uint8_t *got_samples,
+                                      uint16_t *mv);
+
+/** Stop the named stream, free its DMA channel, flush the ring. */
+alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id);
+
+/** Pull true-random bytes from the GD32G5's NIST SP800-90B
+ *  pre-certified TRNG.
+ *
+ *  @param[out] dest  Caller buffer.  Length >= @p len.
+ *  @param[in]  len   Bytes requested (1 .. @ref GD32G553_BRIDGE_TRNG_MAX_BYTES).
+ *
+ *  @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
+ *          ALP_ERR_NOSUPPORT (firmware HAL body not yet wired) /
+ *          ALP_ERR_IO (TRNG startup or in-service self-check failed).
+ */
+alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len);
 
 /* ------------------------------------------------------------------ */
 /* OTA -- in-system upgrade of the bridge firmware                    */

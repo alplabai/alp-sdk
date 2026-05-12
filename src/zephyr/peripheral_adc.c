@@ -168,15 +168,19 @@ alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg) {
         alp_z_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
-
-#if ALP_ADC_HAS_BRIDGE_PATH
-    return bridge_open(cfg);
-#else
+    /* Top-level channel_id bound applies to both paths; keeping the
+     * ARRAY_SIZE reference here also stops -Werror=unused-const-variable
+     * from flagging alp_adcs[] when ALP_ADC_HAS_BRIDGE_PATH=1
+     * (`bridge_open` does its own < 8 check but doesn't touch the
+     * DT-spec array). */
     if (cfg->channel_id >= ARRAY_SIZE(alp_adcs)) {
         alp_z_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
 
+#if ALP_ADC_HAS_BRIDGE_PATH
+    return bridge_open(cfg);
+#else
     /* Capability check — reject configs the active SoC's documented
      * hardware can't honour.  This catches the canonical
      * "16-bit ADC requested on a 12-bit SoC" case before any
