@@ -1,0 +1,48 @@
+# ALP SDK chip manifest: Realtek RTL8211FDI(-VD)-CG Ethernet PHY.
+schema_version:   1
+chip_id:          rtl8211fdi
+driver_status:    partial          # init/probe/reset/link/WoL implemented;
+                                   # PHY-specific register layout (page 0xA43
+                                   # reg 0x1A) cross-checked against the
+                                   # public Linux driver but not yet HW-
+                                   # validated against silicon revision.
+display_name:     "Realtek RTL8211FDI-VD-CG 10/100/1000BASE-T Ethernet PHY"
+vendor:           realtek
+mpn_population:
+  - "RTL8211FDI-VD-CG"             # industrial-temp, V2N variant
+datasheet:
+  primary:        "RTL8211F(D)(I)-VD-CG_DataSheet_1.1(105141).pdf"
+  reference:      "Public Linux drivers/net/phy/realtek.c"
+
+bus:              mdio              # MDC + MDIO management bus (clause 22)
+mdio:
+  speed_hz_max:   2500000           # IEEE 802.3 default
+  pull_ups:       "1 kΩ to VDD_1V8 per PHY (V2N R39/40, R56/57)"
+  level:          1.8V
+
+oui:                0x001C          # Realtek -- carried in PHYID1
+phy_id_pattern:     0x001CC916      # PHYID1+PHYID2 typical for RTL8211F
+                                    # (last 4 bits encode silicon revision;
+                                    # check against silicon at bring-up)
+
+instances_per_v2n:  2               # ET0 + ET1
+instances:
+  - id: ET0
+    notes: "Renesas RGMII0; MDC=K27, MDIO=J29, INT=M27"
+  - id: ET1
+    notes: "Renesas RGMII1; MDC=N25, MDIO=P29 (BGA pad), INT=T29"
+
+signals:
+  - { name: MDC,      type: input,        v2n_route: "K27 / N25 (ET0 / ET1)" }
+  - { name: MDIO,     type: bidir,        v2n_route: "J29 / P29 (ET0 / ET1)" }
+  - { name: PHY_INTR, type: open_drain,   v2n_route: "M27 / T29 (ET0 / ET1)",
+      notes: "active-low; goes high-impedance when no event pending" }
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_RTL8211FDI
+  baremetal:      ALP_SDK_CHIP_RTL8211FDI
+  yocto:          n/a              # Linux uses upstream kernel phy_device
+
+families:
+  - v2n
+  - v2n-m1

@@ -785,9 +785,9 @@ config ALP_SDK_CHIP_TPS628640
 	  0x4D (0.6 V LPDDR4X, optional V2N-common), 0x4F (0.5 V
 	  DDR5_VDDQ).  The driver currently exposes only probe + raw
 	  register R/W -- VSET decode awaits the TI datasheet being
-	  added to the OneDrive datasheet tree.  Until then carriers
-	  rely on the chip's factory OTP voltage and don't write to
-	  it from firmware.
+	  added to the vendor datasheet.
+	  Until then carriers rely on the chip's factory OTP voltage
+	  and don't write to it from firmware.
 
 config ALP_SDK_CHIP_PI3DBS12212
 	bool "Diodes PI3DBS12212A 2:1 differential mux (GPIO-only)"
@@ -817,6 +817,74 @@ config ALP_SDK_CHIP_DA9292
 	  status (PG / UV / OV / OC / TEMP / VIN-UVLO), event read-
 	  and-clear, voltage set / get (5 mV step, 0.3..1.275 V),
 	  per-channel enable, and raw register R/W.
+
+config ALP_SDK_CHIP_GD32G553
+	bool "GigaDevice GD32G553 supervisor MCU host-side bridge driver"
+	depends on (SPI || I2C)
+	help
+	  Compile chips/gd32g553/gd32g553.c.  Host-side (Renesas RZ/V2N)
+	  driver that talks to the GD32G553MEY7TR companion supervisor
+	  over the hybrid SPI + I2C bridge documented in
+	  docs/gd32-bridge-protocol.md.  Exposes PING, GET_VERSION,
+	  GET_BUILD_ID, RESET_REASON, GPIO_READ/WRITE, PWM_SET/GET,
+	  ADC_READ, and DA9292_STATUS_FORWARD on top of either bus
+	  (or both at once with per-call routing).  The firmware
+	  counterpart lives in gd32-bridge/ as a separate compile
+	  artifact.
+
+config ALP_SDK_CHIP_RTL8211FDI
+	bool "Realtek RTL8211FDI-VD-CG 10/100/1000BASE-T Ethernet PHY"
+	help
+	  Compile chips/rtl8211fdi/rtl8211fdi.c.  Callback-driven MDIO
+	  driver for the two RTL8211FDI-VD-CG PHYs on the V2N module
+	  (ET0 + ET1 behind the Renesas RGMII MACs).  The chip driver
+	  itself does not pull in a vendor MDIO header -- the caller
+	  supplies mdio_read / mdio_write function pointers, which on
+	  Zephyr typically wrap the Renesas-side MDIO controller's
+	  zephyr,mdio device.  Surface covers probe (Realtek OUI verify),
+	  soft reset, autoneg restart, link / speed / duplex via the
+	  Realtek-extended page 0xA43 register 0x1A, and Wake-on-LAN
+	  magic-packet detection via the page 0xD8A register block.
+
+config ALP_SDK_CHIP_CLK_5L35023B
+	bool "Renesas / IDT 5L35023B audio clock generator (stub)"
+	depends on I2C
+	help
+	  Compile chips/clk_5l35023b/clk_5l35023b.c.  Stub-status driver
+	  for the 5L35023B clock generator that sources Audio_CLKB on
+	  the V2N module (output to Renesas P10; OE on P67).  Provides
+	  init / probe + raw register R/W + a register-dump path for
+	  production test.  No frequency-config helpers until the
+	  maintainer adds the chip datasheet to the internal design
+	  archive and mirrors the Renesas RZ/V2N EVK BSP init sequence
+	  into the driver.
+
+config ALP_SDK_CHIP_MURATA_LBEE5HY2FY
+	bool "Murata LBEE5HY2FY-922 Wi-Fi 6 + BLE 5.4 module GPIO surface"
+	depends on GPIO
+	help
+	  Compile chips/murata_lbee5hy2fy/murata_lbee5hy2fy.c.  Manages
+	  the five side-channel GPIO lines (BT_REG_ON, WL_REG_ON,
+	  BT_HOST_WAKE, WL_HOST_WAKE, BT_DEV_WAKE) of the Murata
+	  LBEE5HY2FY-922 module on the V2N SoM.  Air-side traffic
+	  (Wi-Fi SDIO, BT UART, BT I2S) lives in the host OS stack
+	  (brcmfmac + BlueZ + ALSA on Linux); this driver is the thin
+	  power-and-wake glue around it.  On V2N the REG_ON lines are
+	  GD32-side; the driver takes callbacks for them so the caller
+	  can route via gd32g553_gpio_write or a direct local-GPIO
+	  shim on carriers that wire REG_ON to the host.
+
+config ALP_SDK_CHIP_DEEPX_DXM1
+	bool "DEEPX DX-M1 NPU host-side bring-up sequencer (V2N-M1)"
+	depends on GPIO
+	select ALP_SDK_CHIP_PI3DBS12212
+	help
+	  Compile chips/deepx_dxm1/deepx_dxm1.c.  Host-side glue that
+	  sequences M1_RESET (Renesas PA6) + the passive PCIe muxes
+	  (chips/pi3dbs12212/) before the Linux DEEPX kernel driver
+	  (dx_rt_npu_linux_driver) takes over.  Only meaningful on
+	  V2N-M1; the underlying DEEPX silicon is NOT populated on
+	  V2N base.
 
 endmenu # "ALP SDK chip drivers"
 

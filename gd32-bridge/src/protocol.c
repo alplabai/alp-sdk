@@ -1,0 +1,272 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * gd32-bridge firmware: shared command-handler table.
+ *
+ * Per the project memory rule "don't fork the protocol -- one framing
+ * format, one command set, one set of reply codes; only the transport
+ * layer differs", both the SPI and I2C transports call into this
+ * file's protocol_dispatch().
+ *
+ * Handlers that need actual hardware (PWM channel programming, ADC
+ * sampling, GPIO output, DA9292 I2C poll) currently call into the
+ * `bridge_hw_*` HAL shims declared in hal/.  The HAL is a separate
+ * compile unit and will be implemented against the GigaDevice
+ * firmware library in a follow-up commit.  Today those shims return
+ * STATUS_NOSUPPORT so the protocol round-trip is exercisable
+ * end-to-end (PING + GET_VERSION + GET_BUILD_ID work without any
+ * peripheral I/O).
+ */
+
+#include <string.h>
+
+#include "protocol.h"
+#include "../hal/bridge_hw.h"
+
+/* --------------------------------------------------------------- */
+/* CRC-16 / CCITT-FALSE -- shared with transports.                   */
+/* --------------------------------------------------------------- */
+
+uint16_t crc16_ccitt_false(const uint8_t *buf, size_t len)
+{
+    uint16_t crc = 0xFFFFu;
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= (uint16_t)buf[i] << 8;
+        for (unsigned b = 0; b < 8; ++b) {
+            if (crc & 0x8000u) {
+                crc = (uint16_t)((crc << 1) ^ 0x1021u);
+            } else {
+                crc <<= 1;
+            }
+        }
+    }
+    return crc;
+}
+
+/* --------------------------------------------------------------- */
+/* Build identifier.  Linker-emitted, ASCII hex truncated SHA-1 of   */
+/* the elf.  Until the build pipeline lands, use a placeholder so    */
+/* GET_BUILD_ID has a well-formed reply.                              */
+/* --------------------------------------------------------------- */
+
+#ifndef GD32_BRIDGE_BUILD_ID
+#define GD32_BRIDGE_BUILD_ID "0000000000000000abcd"
+#endif
+
+_Static_assert(sizeof(GD32_BRIDGE_BUILD_ID) - 1u == GD32_BRIDGE_BUILD_ID_LEN,
+               "build id must be 20 ASCII bytes");
+
+/* --------------------------------------------------------------- */
+/* LE-int helpers (firmware side, parallel to the host driver).      */
+/* --------------------------------------------------------------- */
+
+static uint32_t get_le32(const uint8_t *p)
+{
+    return (uint32_t)p[0]
+         | ((uint32_t)p[1] << 8)
+         | ((uint32_t)p[2] << 16)
+         | ((uint32_t)p[3] << 24);
+}
+
+static void put_le32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v & 0xFFu);
+    p[1] = (uint8_t)((v >> 8) & 0xFFu);
+    p[2] = (uint8_t)((v >> 16) & 0xFFu);
+    p[3] = (uint8_t)((v >> 24) & 0xFFu);
+}
+
+/* --------------------------------------------------------------- */
+/* Per-opcode handlers                                                */
+/* --------------------------------------------------------------- */
+
+static gd32_bridge_status_t handle_ping(const uint8_t *req, size_t req_len,
+                                        uint8_t *reply, size_t reply_cap,
+                                        size_t *reply_len)
+{
+    (void)req; (void)reply; (void)reply_cap;
+    if (req_len != 0u) return STATUS_INVAL;
+    *reply_len = 0u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_get_version(const uint8_t *req, size_t req_len,
+                                               uint8_t *reply, size_t reply_cap,
+                                               size_t *reply_len)
+{
+    (void)req;
+    if (req_len != 0u) return STATUS_INVAL;
+    if (reply_cap < 3u) return STATUS_NOMEM;
+    reply[0]   = PROTOCOL_VERSION_MAJOR;
+    reply[1]   = PROTOCOL_VERSION_MINOR;
+    reply[2]   = PROTOCOL_VERSION_PATCH;
+    *reply_len = 3u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_get_build_id(const uint8_t *req, size_t req_len,
+                                                uint8_t *reply, size_t reply_cap,
+                                                size_t *reply_len)
+{
+    (void)req;
+    if (req_len != 0u) return STATUS_INVAL;
+    if (reply_cap < GD32_BRIDGE_BUILD_ID_LEN) return STATUS_NOMEM;
+    memcpy(reply, GD32_BRIDGE_BUILD_ID, GD32_BRIDGE_BUILD_ID_LEN);
+    *reply_len = GD32_BRIDGE_BUILD_ID_LEN;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_reset_reason(const uint8_t *req, size_t req_len,
+                                                uint8_t *reply, size_t reply_cap,
+                                                size_t *reply_len)
+{
+    (void)req;
+    if (req_len != 0u) return STATUS_INVAL;
+    if (reply_cap < 1u) return STATUS_NOMEM;
+    /* bridge_hw_reset_reason() also clears the cause on read so the
+     * next caller sees UNKNOWN if no further resets have happened. */
+    reply[0]   = bridge_hw_reset_reason();
+    *reply_len = 1u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_gpio_read(const uint8_t *req, size_t req_len,
+                                             uint8_t *reply, size_t reply_cap,
+                                             size_t *reply_len)
+{
+    if (req_len != 4u) return STATUS_INVAL;
+    if (reply_cap < 4u) return STATUS_NOMEM;
+    const uint32_t mask    = get_le32(req);
+    uint32_t       levels  = 0u;
+    const int      rv      = bridge_hw_gpio_read(mask, &levels);
+    if (rv < 0) return STATUS_IO;
+    put_le32(reply, levels);
+    *reply_len = 4u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_gpio_write(const uint8_t *req, size_t req_len,
+                                              uint8_t *reply, size_t reply_cap,
+                                              size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 8u) return STATUS_INVAL;
+    const uint32_t mask   = get_le32(&req[0]);
+    const uint32_t levels = get_le32(&req[4]);
+    const int      rv     = bridge_hw_gpio_write(mask, levels);
+    if (rv < 0) return STATUS_IO;
+    *reply_len = 0u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_pwm_set(const uint8_t *req, size_t req_len,
+                                           uint8_t *reply, size_t reply_cap,
+                                           size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 10u) return STATUS_INVAL;
+    const uint8_t  channel   = req[0];
+    /* req[1] is the reserved padding byte; ignore */
+    const uint32_t period_ns = get_le32(&req[2]);
+    const uint32_t duty_ns   = get_le32(&req[6]);
+    if (duty_ns > period_ns) return STATUS_INVAL;
+    const int rv = bridge_hw_pwm_set(channel, period_ns, duty_ns);
+    if (rv == BRIDGE_HW_ERR_RANGE) return STATUS_OUT_OF_RANGE;
+    if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
+    if (rv < 0) return STATUS_IO;
+    *reply_len = 0u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_pwm_get(const uint8_t *req, size_t req_len,
+                                           uint8_t *reply, size_t reply_cap,
+                                           size_t *reply_len)
+{
+    if (req_len != 1u) return STATUS_INVAL;
+    if (reply_cap < 8u) return STATUS_NOMEM;
+    uint32_t period_ns = 0u;
+    uint32_t duty_ns   = 0u;
+    const int rv = bridge_hw_pwm_get(req[0], &period_ns, &duty_ns);
+    if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
+    if (rv < 0) return STATUS_IO;
+    put_le32(&reply[0], period_ns);
+    put_le32(&reply[4], duty_ns);
+    *reply_len = 8u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_adc_read(const uint8_t *req, size_t req_len,
+                                            uint8_t *reply, size_t reply_cap,
+                                            size_t *reply_len)
+{
+    if (req_len != 2u) return STATUS_INVAL;
+    uint8_t channel = req[0];
+    uint8_t samples = req[1];
+    if (samples == 0u) return STATUS_INVAL;
+    if (samples > GD32_BRIDGE_ADC_MAX_SAMPLES) samples = GD32_BRIDGE_ADC_MAX_SAMPLES;
+
+    const size_t need = 1u + (size_t)samples * 2u;
+    if (reply_cap < need) return STATUS_NOMEM;
+
+    reply[0] = samples; /* echo back the (possibly capped) value */
+    uint16_t mv[GD32_BRIDGE_ADC_MAX_SAMPLES];
+    const int rv = bridge_hw_adc_read(channel, samples, mv);
+    if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
+    if (rv < 0) return STATUS_IO;
+    for (uint8_t i = 0u; i < samples; ++i) {
+        reply[1u + i * 2u]      = (uint8_t)(mv[i] & 0xFFu);
+        reply[1u + i * 2u + 1u] = (uint8_t)((mv[i] >> 8) & 0xFFu);
+    }
+    *reply_len = need;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_da9292_forward(const uint8_t *req, size_t req_len,
+                                                  uint8_t *reply, size_t reply_cap,
+                                                  size_t *reply_len)
+{
+    (void)req;
+    if (req_len != 0u) return STATUS_INVAL;
+    if (reply_cap < 1u) return STATUS_NOMEM;
+    reply[0]   = bridge_hw_da9292_status_cached();
+    *reply_len = 1u;
+    return STATUS_OK;
+}
+
+/* --------------------------------------------------------------- */
+/* Dispatch                                                          */
+/* --------------------------------------------------------------- */
+
+typedef gd32_bridge_status_t (*cmd_handler_t)(const uint8_t *, size_t,
+                                              uint8_t *, size_t, size_t *);
+
+/* Two-tier dispatch: a sparse switch on opcode keeps the table size
+ * small (vs a dense 256-entry array) without losing the "one handler
+ * table" property. */
+gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
+                                       const uint8_t *req_payload,
+                                       size_t req_payload_len,
+                                       uint8_t *reply_payload,
+                                       size_t reply_payload_cap,
+                                       size_t *reply_payload_len)
+{
+    cmd_handler_t h = NULL;
+    switch (cmd) {
+    case CMD_PING:                  h = handle_ping;           break;
+    case CMD_GET_VERSION:           h = handle_get_version;    break;
+    case CMD_GET_BUILD_ID:          h = handle_get_build_id;   break;
+    case CMD_RESET_REASON:          h = handle_reset_reason;   break;
+    case CMD_GPIO_READ:             h = handle_gpio_read;      break;
+    case CMD_GPIO_WRITE:            h = handle_gpio_write;     break;
+    case CMD_PWM_SET:               h = handle_pwm_set;        break;
+    case CMD_PWM_GET:               h = handle_pwm_get;        break;
+    case CMD_ADC_READ:              h = handle_adc_read;       break;
+    case CMD_DA9292_STATUS_FORWARD: h = handle_da9292_forward; break;
+    default:
+        *reply_payload_len = 0u;
+        return STATUS_NOSUPPORT;
+    }
+    return h(req_payload, req_payload_len,
+             reply_payload, reply_payload_cap, reply_payload_len);
+}

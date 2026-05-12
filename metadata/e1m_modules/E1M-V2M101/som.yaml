@@ -1,0 +1,68 @@
+# Stock preset for E1M-V2M101 (V2N-M1 with DEEPX DX-M1).
+#
+# Lists the chip drivers, I2C device addresses, memory capacity,
+# and default carrier for this SKU; `scripts/alp_project.py` and
+# the alp-studio pin allocator read it at build time.
+
+schema_version: 1
+
+sku: E1M-V2M101
+family: renesas-rzv2n
+silicon: renesas:rzv2n:n44
+
+display_name: "E1M-V2M101 (Renesas RZ/V2N + DEEPX DX-M1)"
+
+on_module:
+  silicon:              renesas:rzv2n:n44
+  pmic_main:            act8760
+  pmic_secondary:       da9292
+  clock_generator:      clk_5l35023b
+  rtc_external:         rv3028c7
+  temperature_sensor:   tmp112
+  eeprom:               eeprom_24c128
+  secure_element:       optiga_trust_m
+  wifi_ble:             murata_lbee5hy2fy
+  supervisor_mcu:       gd32g553
+  ethernet_phy:         rtl8211fdi
+  ethernet_phy_count:   2
+  nor_flash:            xspi
+  emmc:                 sd0
+  npu:                  deepx_dxm1                # V2N-M1 delta
+  pcie_mux:             pi3dbs12212                # V2N-M1 delta (two instances)
+
+  i2c_devices:
+    brd_i2c:
+      bus_master: renesas-rzv2n
+      devices:
+        - { chip: rv3028c7,         role: rtc,                       address_7bit: "0x52" }
+        - { chip: optiga_trust_m,   role: secure_element,            address_7bit: "0x30" }
+        - { chip: tmp112,           role: temp_sensor,               address_7bit: "0x40" }
+        - { chip: clk_5l35023b,     role: clock_generator,           address_7bit: "0x68" }
+        - { chip: gd32g553,         role: supervisor_mcu_i2c_slave,  address_7bit: "0x70" }
+        - { chip: act8760,          role: pmic_main_page0,           address_7bit: "0x25" }
+        - { chip: act8760,          role: pmic_main_page1,           address_7bit: "0x26" }
+        - { chip: da9292,           role: pmic_secondary,            address_7bit: "0x1C" }
+        - { chip: tps628640,        role: deepx_lpddr_0v85,          address_7bit: "0x48" }
+        - { chip: tps628640,        role: deepx_ddr5_vdd,            address_7bit: "0x44" }
+        - { chip: tps628640,        role: deepx_ddr5_vddq,           address_7bit: "0x4F" }
+        - { chip: tps628640,        role: lpddr4x_0v6,               address_7bit: "0x4D", assembled: optional }
+    e1m_i2c0:
+      bus_master: renesas-rzv2n
+      devices:
+        - { chip: eeprom_24c128,    role: eeprom,                    address_7bit: "0x50" }
+
+memory:
+  dram_mbit:            32768                  # 32 Gbit LPDDR4X
+  flash_mbit:           32768                  # 32 Gbit eMMC 5.1
+  mram_kbit:            null
+
+inference:
+  preferred_backend:    deepx_dxm1             # DX-M1 NPU on-module
+  ethos_u_variant:      null
+
+default_hw_rev:         r1
+default_carrier:        E1M-X-EVK
+
+status:
+  preliminary:          false
+  partial_hw_config:    false

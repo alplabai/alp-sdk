@@ -1,0 +1,81 @@
+# ALP SDK chip manifest: GigaDevice GD32G553MEY7TR supervisor MCU.
+#
+# Acts as the V2N module's companion / IO MCU.  Host-side driver
+# reaches it over the hybrid SPI + I2C bridge defined in
+# docs/gd32-bridge-protocol.md.
+schema_version:   1
+chip_id:          gd32g553
+driver_status:    partial               # host driver: full surface
+                                        # firmware: scaffold + PING + GET_VERSION
+display_name:     "GigaDevice GD32G553MEY7TR Cortex-M33 supervisor MCU"
+vendor:           gigadevice
+mpn_population:
+  - "GD32G553MEY7TR"                    # 216 MHz Cortex-M33, 512 KB flash, 128 KB SRAM
+datasheet:
+  primary:        "GD32G553xx datasheet"
+  user_manual:    "GD32G553 user manual"
+notes: |
+  The host-side driver (chips/gd32g553/) is a pure C99 module that
+  rides <alp/peripheral.h> -- it speaks SPI master and / or I2C
+  master against the GD32 from the Renesas side.  The matching
+  firmware tree lives in gd32-bridge/ (separate compile artifact,
+  separate flash binary, separate toolchain) -- see
+  docs/gd32-bridge.md.
+
+  Hardware control surface from V2N today:
+    - SPI fast path (P76/77/96/97 host  ↔  PA8/9/10/PB15 GD32 slave)
+    - I2C management path (P07/P06 host ↔  PA15/PB9 GD32 slave; 7-bit
+      address 0x70 by default, configurable on the firmware side).
+    - SWD header (PA13/PA14) for development + recovery.
+
+  NOT YET WIRED from V2N -> GD32:
+    - GD32_NRST  (no host-driven reset edge today).
+    - GD32_BOOT0 (planned -- maintainer to reassign one of the
+      Renesas-side PWM pads P64/P65/P70/P71/P74/P75 to BOOT0 in the
+      next schematic revision; exact pad TBD per project memory
+      `project_gd32_boot0_to_v2n_planned.md`).
+
+bus:              hybrid                 # SPI + I2C carry the same protocol
+spi:
+  role:           master_on_renesas      # GD32 is the slave
+  renesas_pads:
+    sclk:         P96
+    miso:         P77
+    mosi:         P76
+    cs:           P97
+  gd32_pads:
+    sclk:         PA9
+    miso:         PA10
+    mosi:         PB15
+    cs:           PA8
+  mode:           0                      # CPOL=0, CPHA=0, MSB-first
+  word_bits:      8
+i2c:
+  role:           master_on_renesas      # GD32 is the slave
+  renesas_pads:                          # BRD_I2C (RIIC8)
+    scl:          P07
+    sda:          P06
+  gd32_pads:                             # I2C0 on the GD32 side
+    scl:          PA15
+    sda:          PB9
+  default_address_7bit: 0x70
+
+signals:
+  - { name: GD32_SWDIO,  type: bidir,  v2n_route: "(programming header)" }
+  - { name: GD32_SWCLK,  type: input,  v2n_route: "(programming header)" }
+  - { name: GD32_BOOT0,  type: input,  v2n_route: TBD, notes: "planned to be reassigned from one of the Renesas-side PWM pads; enables host-driven factory ISP recovery" }
+  - { name: GD32_NRST,   type: input,  v2n_route: TBD, notes: "host-driven hard-reset edge -- maintainer decision pending" }
+
+protocol:
+  doc:            "docs/gd32-bridge-protocol.md"
+  major_version:  0                      # host insists on exact major match
+  shared_handler_table: true             # SPI + I2C share gd32-bridge/src/protocol.c
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_GD32G553
+  baremetal:      ALP_SDK_CHIP_GD32G553
+  yocto:          n/a                    # Linux side opens the bus via SPI char device + i2c-dev
+
+families:
+  - v2n                                  # always populated (companion MCU)
+  - v2n-m1

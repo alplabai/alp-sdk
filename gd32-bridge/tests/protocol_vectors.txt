@@ -1,0 +1,29 @@
+# gd32-bridge canonical wire-test vectors
+#
+# Both the host-side driver tests (tests/zephyr/chips/gd32g553/) and
+# the firmware-side unit tests (gd32-bridge/tests/) consume this file
+# so the two implementations cannot diverge.
+#
+# Format: one vector per non-comment line.
+#   <name> = <hex byte sequence with no separators>
+#
+# Foundational CRC-16/CCITT-FALSE vector -- the universally-cited
+# checksum over the ASCII string "123456789":
+crc16_ccitt_false_test_string = 31323334353637383930  # "1234567890" -- helper
+crc16_ccitt_false_ref_string  = 313233343536373839    # "123456789"
+crc16_ccitt_false_ref_result  = 29B1                   # expected output
+
+# Per-opcode wire vectors land here once both sides have a passing
+# unit test.  The vectors are GENERATED at build time from
+# gd32-bridge/tests/gen_vectors.c which runs both transports against
+# protocol.c's in-process dispatcher and dumps the byte streams.  The
+# host-side tests consume the same file via fopen() so any wire change
+# breaks both layers atomically.
+#
+# Vectors not yet generated:
+#   spi_ping_request
+#   spi_ping_reply_ok
+#   spi_get_version_request
+#   spi_get_version_reply_v0_1_0
+#   i2c_ping_write
+#   i2c_ping_read_ok

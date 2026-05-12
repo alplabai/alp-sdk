@@ -1,0 +1,4 @@
+row,peripheral,renesas_pad
+1,M1_RESET,PA6
+2,PCIe.MUX_PD,P80
+3,PCIe.MUX_SEL,P95

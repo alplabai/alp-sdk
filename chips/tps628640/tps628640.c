@@ -4,8 +4,9 @@
  *
  * TI TPS628640 single-channel buck driver -- STUB.  See
  * <alp/chips/tps628640.h> for status and rationale.  When the TI
- * datasheet lands in the OneDrive tree, the voltage / status helpers
- * here need their register-layout implementations.
+ * datasheet is added to the vendor datasheet, the
+ * voltage / status helpers here need their register-layout
+ * implementations.
  */
 
 #include <string.h>
@@ -42,7 +43,7 @@ alp_status_t tps628640_set_voltage_mv(tps628640_t *ctx, uint16_t mv)
     if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
     (void)mv;
     /* TODO: implement VSET register write once the TI datasheet for
-     * TPS628640 is added to the OneDrive datasheet tree.  Must reject
+     * TPS628640 is added to the vendor datasheet.  Must reject
      * voltages outside the rail's safe-operating window (see header). */
     return ALP_ERR_NOSUPPORT;
 }

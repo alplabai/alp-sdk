@@ -1,0 +1,48 @@
+# ALP SDK chip manifest: Murata LBEE5HY2FY-922 (Type 2FY) Wi-Fi 6 + BLE 5.4.
+schema_version:   1
+chip_id:          murata_lbee5hy2fy
+driver_status:    partial          # thin GPIO surface for REG_ON + HOST_WAKE
+                                   # lines; SDIO + BT-UART + I2S data paths
+                                   # live in the Yocto/Linux stack on V2N.
+display_name:     "Murata LBEE5HY2FY-922 Wi-Fi 6 + BLE 5.4 (Infineon CYW55513)"
+vendor:           murata
+mpn_population:
+  - "LBEE5HY2FY-922"
+silicon_under_lid:
+  - "Infineon CYW55513"
+datasheet:
+  primary:        TBD              # Murata + Infineon NDA docs
+notes: |
+  Murata module wraps the Infineon CYW55513 dual-band combo silicon.
+  Air-side traffic on V2N rides the kernel stack (brcmfmac for
+  Wi-Fi, BlueZ over HCI-UART for BT, ALSA via the I2S link for BT
+  audio).  The chip driver in alp-sdk owns only the side-channel
+  GPIO management lines documented below.
+
+bus:              gpio              # plus SDIO / UART / I2S not handled here
+
+side_channel_lines:
+  - { name: BT_REG_ON,    direction: output, role: "BT subsystem regulator enable",
+      v2n_route: "GD32 PE14 -- host reaches via gd32g553_gpio_write" }
+  - { name: WL_REG_ON,    direction: output, role: "Wi-Fi subsystem regulator enable",
+      v2n_route: "GD32 PE15 -- host reaches via gd32g553_gpio_write" }
+  - { name: BT_HOST_WAKE, direction: input,  role: "module wakes host on BT activity",
+      v2n_route: "Renesas P05" }
+  - { name: WL_HOST_WAKE, direction: input,  role: "module wakes host on Wi-Fi activity",
+      v2n_route: "Renesas P72" }
+  - { name: BT_DEV_WAKE,  direction: output, role: "host wakes module's BT subsystem",
+      v2n_route: "not routed", notes: "intentionally NOT routed on V2N (2026-05-12 maintainer confirmation); pass NULL to the driver init helper" }
+
+bulk_traffic_lines:
+  - { name: WIFI_SDIO,    routing: "PB0/PB5/PB1/PB2/PB3/PB4 on Renesas (CLK + CMD + 4× D)" }
+  - { name: BT_UART,      routing: "P40/P41/P42/P43 on Renesas (RX/TX/RTS/CTS)" }
+  - { name: BT_I2S,       routing: "P73/P83/P81/P82 on Renesas (CLK/DI/DO/WS)" }
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_MURATA_LBEE5HY2FY
+  baremetal:      ALP_SDK_CHIP_MURATA_LBEE5HY2FY
+  yocto:          n/a              # Linux uses the upstream brcmfmac + BlueZ
+
+families:
+  - v2n
+  - v2n-m1

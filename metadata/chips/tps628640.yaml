@@ -7,7 +7,7 @@ vendor:           texas-instruments
 mpn_population:
   - "TPS628640BYCGR"                  # WSON package suffix on V2N schematic
 datasheet:
-  primary:        TBD                 # not in OneDrive yet -- maintainer to add
+  primary:        TBD                 # pending -- pending
 notes: |
   The TPS628640 silicon also ships as TPS628641 / TPS628642 with
   the only difference being the default OTP voltage; the I2C

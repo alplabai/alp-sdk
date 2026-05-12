@@ -1,0 +1,48 @@
+# ALP SDK chip manifest: DEEPX DX-M1 NPU host-side bring-up sequencer.
+#
+# This entry covers the alp-sdk-side GLUE -- the host code in
+# chips/deepx_dxm1/ that sequences M1_RESET + the PCIe muxes before
+# the Linux kernel driver (`dx_rt_npu_linux_driver`) opens the PCIe
+# device.  The DEEPX silicon's actual runtime + kernel driver are
+# upstream at github.com/DeepX-AI/ and brought into Yocto via the
+# meta-deepx-m1 layer; see vendors/deepx-dxm1/README.md.
+schema_version:   1
+chip_id:          deepx_dxm1
+driver_status:    partial             # bring-up sequencer; rail bring-up + runtime not in scope
+display_name:     "DEEPX DX-M1 NPU (host-side bring-up sequencer)"
+vendor:           deepx
+mpn_population:
+  - "DX-M1 (board-down package; same silicon as the M.2-card variant)"
+datasheet:
+  primary:        "DEEPX_DX-M1_Commercial_Datasheet_v1.0_250625.docx.pdf"
+  form_factor:    "DEEPX_DX-M1_M.2_Datasheet_v1.3_251015.pdf"
+
+bus:              "pcie + i2c"        # control surface uses PCIe; host-side
+                                      # I2C is on BRD_I2C (address TBD per
+                                      # DEEPX SDK).
+control_lines:
+  - { name: M1_RESET,     direction: output, v2n_route: "Renesas PA6", notes: "polarity TBD per DEEPX datasheet" }
+  - { name: PCIe.MUX_PD,  direction: output, v2n_route: "Renesas P80 via pi3dbs12212", notes: "active-high; carrier sets via the chips/pi3dbs12212 driver" }
+  - { name: PCIe.MUX_SEL, direction: output, v2n_route: "Renesas P95 via pi3dbs12212", notes: "DEEPX_path mapped to PI3DBS_STATE_PATH_0 per metadata/chips/pi3dbs12212.yaml" }
+
+upstream:
+  runtime:        "github.com/DeepX-AI/dx_rt"
+  kernel_driver:  "github.com/DeepX-AI/dx_rt_npu_linux_driver"
+  yocto_layer:    "github.com/DeepX-AI/meta-deepx-m1"
+  reference_apps: "github.com/DeepX-AI/dx_app"
+
+dependencies:
+  - chip:  pi3dbs12212
+    note:  "PCIe mux driver -- needed for bring-up sequence"
+  - chip:  da9292
+    note:  "secondary PMIC -- needed to power the 0.75 V DEEPX rail before bring-up"
+  - chip:  tps628640
+    note:  "DEEPX-specific buck rails on BRD_I2C (0x44/0x48/0x4F)"
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_DEEPX_DXM1
+  baremetal:      ALP_SDK_CHIP_DEEPX_DXM1
+  yocto:          n/a                 # bring-up happens host-side; Linux runtime uses dx_rt directly
+
+families:
+  - v2n-m1                            # NOT populated on V2N base

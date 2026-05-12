@@ -20,7 +20,194 @@ that lands before the v0.3.0 tag.)
 > tracked separately in [`docs/test-plan.md`](docs/test-plan.md)
 > -- a release does not tag until every row gating it flips to ✅.
 
+### Decided (hardware-design decisions captured 2026-05-12)
+
+- **GD32_BOOT0 -> Renesas `P75`** (was E1M PWM5 / GPT4_GTIOC4B).  PWM5
+  becomes GD32-only.  Host drives `P75` high before issuing a reset
+  edge on `GD32_NRST` to enter the GigaDevice factory ISP bootloader.
+- **GD32_NRST -> Renesas `P74`** (was E1M PWM4 / GPT4_GTIOC4A).  PWM4
+  becomes GD32-only.  **Line is shared with the primary PMIC reset
+  out** -- host pad MUST be configured open-drain (drive low to
+  assert reset; HiZ to release).  An external pull-up returns the
+  line to its released state.
+- **DEEPX `M1_RESET` polarity -> active-LOW.** The
+  `chips/deepx_dxm1/` driver default flipped from `ACTIVE_HIGH`
+  (placeholder pending the schematic check) to `ACTIVE_LOW`
+  (confirmed).  `deepx_dxm1_set_reset_polarity()` still lets
+  carrier code override.
+- **Murata `BT_DEV_WAKE` intentionally not routed on V2N.**  The
+  `chips/murata_lbee5hy2fy/` driver already supported the NULL-
+  pin-handle case; metadata + header doc updated to make the
+  "not-routed" status explicit.
+- **5L35023B I2C address -> 7-bit `0x68`** (8-bit write `0xD0`) per
+  the Renesas 5L35023 public datasheet.
+
 ### Added
+
+- **`docs/gd32-bridge-protocol.md` — wire-protocol spec for the V2N supervisor MCU bridge (2026-05-12).**
+  Frames + opcodes + CRC + status codes for the hybrid SPI / I2C
+  bridge between the Renesas RZ/V2N and the on-module GigaDevice
+  GD32G553MEY7TR.  Single command set shared between both
+  transports (per memory rule `project_gd32_bridge_hybrid_spi_i2c`).
+  SPI uses a SOF + CMD + payload + CRC-16/CCITT-FALSE envelope with
+  two-transaction request/reply pattern; I2C reuses the same opcode
+  + payload + CRC inside the standard reg-addr=0x00 write/read
+  protocol so the bridge looks like a regular I2C slave to
+  discovery tools.  §10 reserves OTA opcodes `0xF0..0xFF` for the
+  planned application-bootloader path; §10 also documents the
+  V2N→GD32 BOOT0 reroute the maintainer has committed to (pad
+  selection TBD per `memory/project_gd32_boot0_to_v2n_planned.md`).
+
+- **`chips/gd32g553/` host-side bridge driver (2026-05-12).**
+  Renesas-side driver that speaks the bridge protocol over either
+  SPI fast path (`P76/77/96/97` host  ↔  GD32 `PA8/9/10/PB15`) or
+  I2C management path on BRD_I2C (Renesas `P07/P06` host ↔ GD32
+  `PA15/PB9` at 7-bit address `0x70` by default).  Pass either bus
+  (or both) to `gd32g553_init`; the driver picks the SPI fast path
+  by default when both are present, and per-call `*_via` helpers
+  override.  Full opcode coverage: `PING`, `GET_VERSION`,
+  `GET_BUILD_ID`, `RESET_REASON`, `GPIO_READ` / `GPIO_WRITE`,
+  `PWM_SET` / `PWM_GET`, `ADC_READ` (1..8 samples, little-endian
+  millivolt encoding), `DA9292_STATUS_FORWARD`.  Refuses to operate
+  on firmware whose `major` does not match
+  `GD32G553_HOST_PROTOCOL_MAJOR` (0 today, before-tag).  New Kconfig:
+  `CONFIG_ALP_SDK_CHIP_GD32G553`.  Header: `<alp/chips/gd32g553.h>`.
+  Manifest: `metadata/chips/gd32g553.yaml` (references the
+  GigaDevice datasheet + user manual archived project's
+  vendor datasheet ).
+
+- **`gd32-bridge/` firmware tree scaffold (2026-05-12).**
+  Separate compile artifact for the GD32G553 supervisor MCU.
+  Top-level CMake + Arm-GCC toolchain config + linker-script
+  placeholder + protocol layer + per-transport scaffolds
+  (`transport_spi.c` + `transport_i2c.c`).  Single shared
+  `protocol_dispatch()` in `src/protocol.c` handles both
+  transports.  HAL backend selectable: `stub` (compiles standalone,
+  every HW operation returns `BRIDGE_HW_ERR_NOTIMPL`) or `gd32`
+  (TODO -- GigaDevice firmware library not yet vendored).
+  `PING` / `GET_VERSION` / `GET_BUILD_ID` round-trip end-to-end
+  on the stub backend so the wire layer is unit-testable before
+  silicon-side firmware lands.  `tests/protocol_vectors.txt` is
+  the shared CRC + wire vector file that the host-side driver
+  tests and the firmware-side unit tests both consume.  See
+  `docs/gd32-bridge.md` for the overview + flashing options.
+
+- **`chips/rtl8211fdi/` Realtek Ethernet PHY driver (2026-05-12).**
+  Callback-driven MDIO surface for the two RTL8211FDI-VD-CG PHYs
+  populated on V2N (ET0 + ET1).  The driver takes
+  `mdio_read` / `mdio_write` function pointers so it stays portable
+  between Zephyr (callbacks wrap the Renesas-side
+  `<zephyr/drivers/mdio.h>` controller) and baremetal (callbacks
+  bit-bang or hit a vendor MAC's MMD register block).  Public API:
+  probe + Realtek-OUI verify (`PHYID1 == 0x001C`), `soft_reset`,
+  `restart_autoneg`, `get_link` (decodes the Realtek-extended
+  page-`0xA43` reg-`0x1A` PHY-specific status), Wake-on-LAN
+  magic-packet detection via the page-`0xD8A` register block, raw
+  + paged register R/W escape hatches.  New Kconfig:
+  `CONFIG_ALP_SDK_CHIP_RTL8211FDI`.  Header:
+  `<alp/chips/rtl8211fdi.h>`.  Manifest:
+  `metadata/chips/rtl8211fdi.yaml`.
+
+- **`chips/clk_5l35023b/` Renesas/IDT clock generator stub (2026-05-12).**
+  Stub-status driver for the 5L35023B audio clock generator that
+  sources `Audio_CLKB` on V2N (Renesas `P10` output, `P67` OE).
+  Surface: init / probe (register-0 read) + raw register R/W +
+  a `register_dump` path for production-test logging.  No
+  frequency-config helpers until the maintainer adds the chip
+  datasheet to the vendor datasheet and mirrors
+  the Renesas RZ/V2N EVK BSP init sequence into the driver.
+  New Kconfig:
+  `CONFIG_ALP_SDK_CHIP_CLK_5L35023B`.  Header:
+  `<alp/chips/clk_5l35023b.h>`.  Manifest:
+  `metadata/chips/clk_5l35023b.yaml`.
+
+- **`chips/murata_lbee5hy2fy/` Wi-Fi/BLE module GPIO surface (2026-05-12).**
+  Thin GPIO surface for the Murata LBEE5HY2FY-922 (Type 2FY,
+  Infineon CYW55513 inside).  Owns the five side-channel lines:
+  `BT_REG_ON` (GD32 `PE14`), `WL_REG_ON` (GD32 `PE15`),
+  `BT_HOST_WAKE` (Renesas `P05`), `WL_HOST_WAKE` (Renesas `P72`),
+  and `BT_DEV_WAKE` (TBD -- not currently routed on V2N).  The
+  REG_ON lines live on the GD32 supervisor so the driver takes
+  caller-supplied set / get callbacks for them (carriers route via
+  `gd32g553_gpio_write` or a direct local-GPIO shim);
+  HOST_WAKE / DEV_WAKE arrive as plain `alp_gpio_t` handles since
+  they are host-SoC GPIOs.  Air-side traffic (Wi-Fi SDIO, BT UART,
+  BT I2S) is the OS stack's responsibility (brcmfmac + BlueZ +
+  ALSA on Linux); this driver is the power-and-wake glue around
+  it.  New Kconfig: `CONFIG_ALP_SDK_CHIP_MURATA_LBEE5HY2FY`.
+  Header: `<alp/chips/murata_lbee5hy2fy.h>`.  Manifest:
+  `metadata/chips/murata_lbee5hy2fy.yaml`.
+
+- **`chips/deepx_dxm1/` + `vendors/deepx-dxm1/` DEEPX bring-up sequencer (2026-05-12).**
+  Host-side glue for the DEEPX DX-M1 NPU on V2N-M1 (NOT populated
+  on V2N base).  Sequences M1_RESET (Renesas `PA6`) + the two
+  passive PCIe muxes (via `chips/pi3dbs12212/`) before the Linux
+  kernel driver (`dx_rt_npu_linux_driver` from upstream
+  `github.com/DeepX-AI/`) opens the PCIe device.  `vendors/deepx-dxm1/README.md`
+  carries the upstream-repo + Yocto layer cross-link.
+  `deepx_dxm1_bring_up()` is the one-call API that runs the
+  three-step rail / mux / reset sequence; rail bring-up itself is
+  the caller's responsibility (composes `da9292_v2n_m1_enable_deepx_rail`
+  + `tps628640_init` ACK-probes).  Reset polarity is assumed
+  active-high by default with a `set_reset_polarity` flip for
+  active-low boards.  Boot wait is approximate -- production
+  callers pass `boot_us=0` and use their platform's busy-wait.
+  New Kconfig: `CONFIG_ALP_SDK_CHIP_DEEPX_DXM1` (selects
+  `ALP_SDK_CHIP_PI3DBS12212` automatically).  Header:
+  `<alp/chips/deepx_dxm1.h>`.  Manifest:
+  `metadata/chips/deepx_dxm1.yaml`.
+
+- **`docs/gd32-bridge.md` — firmware-tree overview (2026-05-12).**
+  Companion to the protocol doc: source-layout map, build
+  instructions (`cmake -B build -DCMAKE_TOOLCHAIN_FILE=...`), the
+  three flashing options (SWD probe = supported today; in-system
+  OTA = planned per protocol §10; V2N-driven factory ISP =
+  pending BOOT0 routing).
+
+- **`docs/pmic-rails.md` — rail map for V2N + V2N-M1 (2026-05-12).**
+  ASCII diagram of the power chain (ACT88760 → DA9292 + TPS628640
+  family).  Per-rail table with voltage / source / population
+  scope.  Cross-reference to the authoritative power-sequence PDFs
+  held in the vendor datasheet.
+  Sequencing rules: V2N base needs no host
+  intervention; V2N-M1 adds the DEEPX rail bring-up steps before
+  releasing `M1_RESET`.  Lists the rails firmware MUST NOT
+  modify in production (page-0 bucks on the primary PMIC,
+  DA9292 CH1 VSET, CH2 on V2N base).
+
+- **`docs/bring-up-v2n.md` + `docs/bring-up-v2n-m1.md` — bench bring-up guides (2026-05-12).**
+  Step-by-step procedures: first-power smoke test, SWD attach +
+  GD32 firmware flash, host ↔ bridge link confirmation, SoM
+  manifest read, dual Ethernet PHY bring-up, on-module fleet sanity
+  checks, and the most likely gotchas.  The V2N-M1 doc covers the
+  delta (DEEPX rails + M1_RESET sequencing + DEEPX kernel hand-off).
+
+- **`docs/board-id.md` — SoM identification flow (2026-05-12).**
+  Two-stage design: EEPROM manifest (working today via
+  `alp_hw_info_read()`) + BOARD_ID ADC cross-check (stubbed pending
+  the `scripts/alp_project.py` per-family generated header).  Walks
+  through the manifest layout in `<alp/hw_info.h>`, the
+  `tools/program_eeprom.py` programming flow, and the runtime
+  read path implemented in `src/zephyr/hw_info_zephyr.c`.
+
+- **`docs/hil-plan.md` — HiL rig requirements (2026-05-12).**
+  Document of the rig the maintainer will build (not built here).
+  Hardware inventory (SoM, probes, programmable supply, logic
+  analyser, link partners), test coverage map (power tree, GD32
+  bridge, Ethernet, Wi-Fi/BT, DEEPX), orchestrator design
+  (Python + sigrok + gdbserver), and a rough schedule (~2 months
+  of one engineer's time once hardware is on the bench).
+
+- **`docs/ota-device-contract.md` — device-side OTA contract (2026-05-12).**
+  Mender contract for the main system OTA (Renesas-side, Linux
+  rootfs A/B slots, OPTIGA-mediated signature verification).
+  Server-side stays Hakan's repo per the existing
+  `project_ota_server_owner` memory.  Planned design for the GD32
+  bridge firmware OTA (opcodes `0xF0..0xFF`, dual-slot flash
+  layout, ECDSA-P256 signature with key baked into the bootloader
+  until cross-bus OPTIGA access is wired).  Failure-recovery
+  matrix covering every "what if the upgrade fails halfway"
+  scenario across both layers.
 
 - **`alp_hw_info_read` EEPROM-side implementation (2026-05-12).**
   Replaces the NOSUPPORT stub in `src/zephyr/hw_info_zephyr.c` with
@@ -87,7 +274,7 @@ that lands before the v0.3.0 tag.)
   DEEPX, `0x44` = 1.05 V DDR5_VDD DEEPX, `0x4F` = 0.5 V DDR5_VDDQ_0V5
   DEEPX, `0x4D` = 0.6 V LPD4x_0V6 Renesas LPDDR4X V2N-common optional).
   Driver lands as **stub** because the TI datasheet isn't in the
-  OneDrive datasheet tree yet -- only probe + raw register R/W
+  vendor datasheet yet -- only probe + raw register R/W
   works; `tps628640_set_voltage_mv` / `_get_voltage_mv` /
   `_get_status` all return `ALP_ERR_NOSUPPORT`.  Each instance
   carries its design-target voltage in `ctx->default_voltage_mv`
@@ -134,7 +321,7 @@ that lands before the v0.3.0 tag.)
   CMI 120.E1 burns the production power-tree (rail voltages, GPIO
   assignments, power-on sequence) into the chip's non-volatile
   memory via Qorvo's ActiveCiPS dongle from the `.iact` profile
-  archived in OneDrive (`Alp CMI/ACT88760_120.E1.26072083.iact`);
+  archived vendor datasheet;
   runtime I2C is volatile-only and used here for telemetry + DVS.
   New Kconfig: `CONFIG_ALP_SDK_CHIP_ACT8760` (off by default).
   Header: `<alp/chips/act8760.h>`.  Manifest:
@@ -394,7 +581,7 @@ that lands before the v0.3.0 tag.)
   Renesas-vs-GD32 split.  V2N-M1 inherits this file unchanged
   (GD32's role doesn't depend on whether DEEPX is populated).
 - **Alif Ensemble metadata refresh against new datasheets + HWRMs.**
-  Datasheet inventory landed in the OneDrive design folder for
+  Datasheet inventory landed in the vendor datasheet for
   the AEN family on 2026-05-11 (E3 v2.8 already on file; E4 v1.0
   new; E6 v1.0 new; E7 v2.9 already; E8 v1.0 supersedes v0.51
   preliminary; confidential HWRMs v0.3 for E4/E6/E8; public HWRMs
@@ -1364,7 +1551,7 @@ that lands before the v0.3.0 tag.)
   LPDDR4X/LPDDR5 + internal Cortex-M55 firmware controller.
   FC-BGA 625-ball.  Linked to the E1M-V2M101 / E1M-V2M102 SoM
   SKUs.
-- OneDrive metadata mirror refreshed with the new files.
+- Internal design-archive metadata mirror refreshed with the new files.
 - **EdgeAI vision-AEN reference application skeleton** at
   `examples/edgeai-vision-aen/` — compiles under
   `native_sim/native/64` and prints the v0.1 init flow + v0.2

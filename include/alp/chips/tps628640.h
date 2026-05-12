@@ -24,9 +24,9 @@
  *
  * @par Driver status: STUB
  *
- * The TPS628640 datasheet is **not** in the OneDrive datasheet tree
- * that backs this repo's chip drivers; this driver therefore lands
- * as a stub.  It implements:
+ * The TPS628640 datasheet is **not** in the vendor
+ * documentation archive that backs this repo's chip drivers;
+ * this driver therefore lands as a stub.  It implements:
  *
  *   - `tps628640_init(ctx, bus, addr, default_voltage_mv)` -- ACK
  *     probe + caches the rail's design-target voltage as metadata.
@@ -36,10 +36,11 @@
  * `tps628640_get_voltage_mv`, `tps628640_get_status`) returns
  * `ALP_ERR_NOSUPPORT` pending datasheet confirmation of the VSET
  * register layout.  When the maintainer adds the TI datasheet to
- * OneDrive (TPS628640 / TPS628641 / TPS628642 -- the silicon variants
- * differ in default voltage but share the I2C surface), fill in the
- * register map in `chips/tps628640/tps628640.c` and switch the
- * helper bodies from NOSUPPORT to real implementations.
+ * the vendor datasheet (TPS628640 / TPS628641 / TPS628642
+ * -- the silicon variants differ in default voltage but share the
+ * I2C surface), fill in the register map in
+ * `chips/tps628640/tps628640.c` and switch the helper bodies from
+ * NOSUPPORT to real implementations.
  *
  * Until then carriers should treat these rails as factory-default
  * outputs of the TI silicon -- the chip self-regulates to its OTP

@@ -1,0 +1,27 @@
+# board.yaml -- per-app project configuration for v2n-board-id-readout.
+
+schema_version: 1
+
+som:
+  sku: E1M-V2N101
+
+carrier:
+  name: E1M-X-EVK
+
+os: zephyr
+
+peripherals:
+  - i2c
+
+chips:
+  - eeprom_24c128
+
+features:
+  hw_info:
+    eeprom:
+      bus: e1m_i2c0       # studio resolves to the right bus_id
+      addr_7bit: 0x50
+      offset: 0
+
+diagnostics:
+  log_level: info

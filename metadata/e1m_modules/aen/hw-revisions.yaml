@@ -1,0 +1,38 @@
+# E1M-AEN family hardware revisions.
+
+family: aen
+display_name: "E1M-AEN (Alif Ensemble)"
+
+hw_revisions:
+  r1:
+    min_sdk_version: "0.3.0"
+    max_sdk_version: ~
+    status: production
+  r2:
+    min_sdk_version: ~
+    max_sdk_version: ~
+    status: reserved
+  r3:
+    min_sdk_version: ~
+    max_sdk_version: ~
+    status: reserved
+  r4:
+    min_sdk_version: ~
+    max_sdk_version: ~
+    status: reserved
+  r5:
+    min_sdk_version: ~
+    max_sdk_version: ~
+    status: reserved
+  r6:
+    min_sdk_version: ~
+    max_sdk_version: ~
+    status: reserved
+  r7:
+    min_sdk_version: ~
+    max_sdk_version: ~
+    status: reserved
+  r8:
+    min_sdk_version: ~
+    max_sdk_version: ~
+    status: reserved

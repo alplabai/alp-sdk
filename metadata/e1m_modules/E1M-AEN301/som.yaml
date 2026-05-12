@@ -1,0 +1,48 @@
+# Stock preset for E1M-AEN301 (the SoM, NOT the EVK carrier).
+#
+# Customer's board.yaml references this preset by setting:
+#   som:
+#     sku: E1M-AEN301
+#
+# This file lists ONLY components physically populated on the
+# E1M-AEN module PCB.  Carrier-side parts live in
+# metadata/carriers/<name>/board.yaml.
+#
+# Per the project memory note, memory capacities + the per-SKU
+# silicon SKU-specific numbers stay TBD until the user supplies
+# the authoritative HW config.
+
+schema_version: 1
+
+sku: E1M-AEN301
+family: alif-ensemble
+silicon: alif:ensemble:e3
+
+display_name: "E1M-AEN301 (Alif Ensemble E3)"
+
+# On-module components (fixed at SoM-fab time; common across the
+# AEN family).
+on_module:
+  silicon:              alif:ensemble:e3       # 2x Cortex-M55, 2x Ethos-U55 (no A-core)
+  wifi_ble:             cc3501e                # TI Wi-Fi 6 + BLE 5.4 coprocessor
+  secure_element:       optiga_trust_m         # Infineon SLS32AIA010
+  rtc_external:         rv3028c7               # Micro Crystal ultra-low-power RTC
+  temperature_sensor:   tmp112                 # TI TMP112 on Alif's LPI2C
+  eeprom:               eeprom_24c128          # Onsemi N24S128C4DYT3G (128-Kbit I2C)
+
+memory:
+  dram_mbit:            TBD
+  flash_mbit:           TBD
+  mram_kbit:            TBD                    # on-die MRAM; E3 typical TBD
+
+inference:
+  preferred_backend:    ethos_u
+  ethos_u_variant:      u55
+
+default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
+
+default_carrier:        E1M-EVK
+
+status:
+  preliminary:          false                  # released silicon
+  partial_hw_config:    true                   # memory + per-SKU specifics TBD

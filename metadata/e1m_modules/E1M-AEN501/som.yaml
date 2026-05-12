@@ -1,0 +1,36 @@
+# Stock preset for E1M-AEN501 (the SoM, NOT the EVK carrier).
+# See E1M-AEN701/som.yaml header for the file's role + the
+# project memory note governing what stays TBD.
+
+schema_version: 1
+
+sku: E1M-AEN501
+family: alif-ensemble
+silicon: alif:ensemble:e5
+
+display_name: "E1M-AEN501 (Alif Ensemble E5 -- 1x A32 + 2x M55 + 2x Ethos-U55, preliminary)"
+
+on_module:
+  silicon:              alif:ensemble:e5       # 1x Cortex-A32 @ 800 + 2x M55 + Ethos-U55
+  wifi_ble:             cc3501e
+  secure_element:       optiga_trust_m
+  rtc_external:         rv3028c7
+  temperature_sensor:   tmp112
+  eeprom:               eeprom_24c128
+
+memory:
+  dram_mbit:            TBD
+  flash_mbit:           TBD
+  mram_kbit:            TBD
+
+inference:
+  preferred_backend:    ethos_u
+  ethos_u_variant:      u55
+
+default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
+
+default_carrier:        E1M-EVK
+
+status:
+  preliminary:          true                   # E5 datasheet not yet public
+  partial_hw_config:    true

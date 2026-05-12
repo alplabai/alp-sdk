@@ -1,0 +1,58 @@
+# Stock preset for E1M-AEN701 (the SoM, NOT the EVK carrier).
+#
+# This file lists ONLY components physically populated on the
+# E1M-AEN module PCB -- silicon, on-module radio, on-module
+# secure element + RTC + temperature sensor + EEPROM.  Carrier-
+# side parts (IMUs, barometers, OLEDs, cameras, current monitors,
+# speaker amps...) live in metadata/carriers/e1m-evk.yaml.
+#
+# Per the project memory note "pending exact hardware configurations
+# -- the user will hand-write authoritative pin assignments and
+# per-SoM HW config later; mark unknowns TBD, never invent values",
+# memory capacities below stay TBD until the user supplies them
+# authoritatively from the AEN module datasheet.
+
+schema_version: 1
+
+sku: E1M-AEN701
+family: alif-ensemble
+silicon: alif:ensemble:e7
+
+display_name: "E1M-AEN701 (Alif Ensemble E7)"
+
+# On-module components only.  These are fixed at SoM-fab time; you
+# cannot DNI them after ordering.  The component IDs match the
+# chip-driver names in chips/<part>/ so the loader can flip the
+# corresponding CONFIG_ALP_SDK_CHIP_<NAME>=y at build time.
+on_module:
+  silicon:              alif:ensemble:e7    # 2x Cortex-A32 + 2x Cortex-M55 + 1x Ethos-U55
+  wifi_ble:             cc3501e             # TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor
+  secure_element:       optiga_trust_m      # Infineon SLS32AIA010
+  rtc_external:         rv3028c7            # Micro Crystal ultra-low-power RTC
+  temperature_sensor:   tmp112              # TI TMP112 on Alif's LPI2C
+  eeprom:               eeprom_24c128       # Onsemi N24S128C4DYT3G (128-Kbit I2C)
+
+# Memory subsystem -- TBD pending user HW config.  When filled
+# in, these flow into the soc_caps + DTS overlays.
+memory:
+  dram_mbit:            TBD                 # Alif Ensemble: no external DRAM on the
+                                            # standard E7 reference; on-die only
+  flash_mbit:           TBD                 # SPI-NAND boot flash capacity
+  mram_kbit:            TBD                 # on-die MRAM (E7 has 5.5 MB typical)
+
+# Inference defaults -- the SoM's most-capable backend wins for
+# `inference.backend: auto`.
+inference:
+  preferred_backend:    ethos_u             # Ethos-U55 NPU on-die
+  ethos_u_variant:      u55                 # vs u65 on i.MX 93
+
+# Standard carrier the SoM mounts on for development.  Consumers
+# can pick any carrier or write their own in board.yaml.
+default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
+
+default_carrier:        E1M-EVK
+
+# Status flags for tooling
+status:
+  preliminary:          false               # released silicon
+  partial_hw_config:    true                # memory fields still TBD

@@ -1,0 +1,10 @@
+# E1M-N93 family hardware revisions.
+
+family: imx93
+display_name: "E1M-N93 (NXP i.MX 93)"
+
+hw_revisions:
+  r1:
+    min_sdk_version: "0.3.0"
+    max_sdk_version: ~
+    status: tbd

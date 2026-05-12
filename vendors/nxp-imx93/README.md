@@ -23,10 +23,11 @@ hardware configuration** — see
 [`metadata/socs/nxp/imx9/imx93.json`](../../metadata/socs/nxp/imx9/imx93.json)
 and the project memory note "pending exact hardware configurations."
 
-## On-module support silicon (per `OneDrive/E1M Project/E1M - i.MX93/...`)
+## On-module support silicon
 
-Confirmed from the OneDrive datasheets folder; specific assembly
-variant per SKU is pending the user's HW-config writeup:
+Confirmed from the vendor datasheet;
+specific assembly variant per SKU is pending the user's HW-config
+writeup:
 
 | Role                    | Part                                              | Datasheet on file                                    |
 |-------------------------|---------------------------------------------------|------------------------------------------------------|

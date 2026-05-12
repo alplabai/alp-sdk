@@ -100,6 +100,12 @@ A release does **not** tag until every row gating it is `verified`.
 | VS Code extension `Generate all` + inline diagnostics | `vscode/src/extension.ts` | ⏳ untested | Loaded into VS Code; commands run; problems panel surfaces validator errors | Manual capture (screencast/gist) | v0.3 |
 | `<alp/hw_info.h>` EEPROM + BOARD_ID ADC read | `src/zephyr/hw_info_zephyr.c` | ⏳ untested | Real production-test fixture writes 128-byte manifest; firmware reads back identical | HIL + production-test bench | v0.3.x |
 | `tools/program_eeprom.py` packer | `tools/program_eeprom.py` | 🟡 partial | Layout round-trips against the C reader's `static_assert` block | `tests/scripts/test_program_eeprom.py` | v0.3 |
+| GD32G553 host-side bridge driver | `chips/gd32g553/` | ⏳ untested | `PING` + `GET_VERSION` round-trip on both SPI and I2C against the on-module bridge firmware on a real V2N SoM | HIL + `examples/v2n-gd32-bridge-ping` | v0.3.x |
+| GD32 bridge firmware (`gd32-bridge/`) scaffold | `gd32-bridge/` | ⏳ untested | Build green with `BRIDGE_HAL_BACKEND=stub`; protocol round-trip via the host driver against the stub firmware on the GD32 silicon | HIL + smoke test | v0.3.x |
+| RTL8211FDI Ethernet PHY driver | `chips/rtl8211fdi/` | ⏳ untested | PHYID1=0x001C read back; autoneg completes; `iperf3 > 900 Mb/s` against 1 Gb link partner on each of ET0 + ET1 | HIL via the HiL rig in [`hil-plan.md`](hil-plan.md) | v0.3.x |
+| 5L35023B clock generator stub | `chips/clk_5l35023b/` | ⏳ untested | Register-0 ACK on V2N's BRD_I2C; address TBD pending the maintainer's hw-config writeup | HIL | v0.3.x |
+| Murata LBEE5HY2FY GPIO surface | `chips/murata_lbee5hy2fy/` | ⏳ untested | `WL_REG_ON` + `BT_REG_ON` toggles bring up the Wi-Fi / BT kernel devices on a Yocto image | HIL via `hil-yocto` | v0.3.x |
+| DEEPX DX-M1 bring-up sequencer | `chips/deepx_dxm1/` | ⏳ untested | M1_RESET release + PCIe mux to DEEPX path -> `lspci` lists DX-M1 + `dxrt_init()` succeeds (V2N-M1 only) | HIL via the HiL rig | v0.3.x |
 
 ## v0.4.0 — Yocto first-class, secure boot, OTA
 

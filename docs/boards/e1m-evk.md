@@ -8,8 +8,8 @@ E1M-conformant SoM (E1M-AEN family, E1M-X V2N, etc.) plugs into the
 same carrier and the same SDK build runs.
 
 > Source: *E1M Development Board User Guide* — UG-E1M-001 Rev. 0.1
-> (April 2026), shipped under
-> `OneDrive/E1M Project/E1M Development Board/80 - Released Documentation/EVK User Guide/`.
+> (April 2026), archived vendor documentation
+> tree.
 
 This file is the **SDK-side cheat sheet** for the EVK: bus map,
 sensor I²C addresses, button/LED assignments, IO-expander, and the

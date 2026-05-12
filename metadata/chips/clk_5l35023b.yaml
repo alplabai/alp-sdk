@@ -1,0 +1,41 @@
+# ALP SDK chip manifest: Renesas / IDT 5L35023B audio clock generator.
+schema_version:   1
+chip_id:          clk_5l35023b
+driver_status:    stub             # probe + raw R/W + register dump only
+display_name:     "Renesas (IDT) 5L35023B audio-rate clock generator"
+vendor:           renesas          # originally IDT; Renesas acquired 2019
+mpn_population:
+  - "5L35023B"                     # exact package + temp suffix TBD
+datasheet:
+  primary:        "Renesas 5L35023 datasheet (public)"
+  url:            "https://www.renesas.com/en/document/dst/5l35023-datasheet"
+  # 8-bit default write-address is 0xD0 per the maintainer (2026-05-12),
+  # which is 7-bit 0x68 + R/W bit.
+notes: |
+  Same part is used on the **Renesas RZ/V2N EVK**; the EVK Linux BSP
+  carries a register-init sequence somewhere under
+  `meta-renesas/recipes-bsp/u-boot/` or in the device-tree binding
+  for the clock generator.  Maintainer follow-up: mirror that init
+  sequence into a `clk_5l35023b_apply_v2n_init()` helper; then
+  upgrade `driver_status` to `partial`.
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x68, scope: "BRD_I2C; default address (8-bit 0xD0)" }
+  max_clock_hz:   400000           # Fast-mode -- conservative default; datasheet may allow FM+
+
+signals:
+  - { name: Audio_CLKB,    type: output, v2n_route: "P10 (E1M AR9 AUDIO_CLK)" }
+  - { name: Audio_CLKB_OE, type: input,  v2n_route: "P67 (host-driven enable)" }
+  - { name: SDA,           type: bidir,  v2n_route: "P06 (BRD_I2C.SDA)" }
+  - { name: SCL,           type: input,  v2n_route: "P07 (BRD_I2C.SCL)" }
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_CLK_5L35023B
+  baremetal:      ALP_SDK_CHIP_CLK_5L35023B
+  yocto:          n/a              # Linux side uses the kernel CCF binding
+
+families:
+  - v2n
+  - v2n-m1

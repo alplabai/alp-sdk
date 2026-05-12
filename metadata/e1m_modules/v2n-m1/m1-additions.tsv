@@ -1,0 +1,4 @@
+peripheral	renesas_pad
+M1_RESET	PA6
+PCIe.MUX_PD	P80
+PCIe.MUX_SEL	P95

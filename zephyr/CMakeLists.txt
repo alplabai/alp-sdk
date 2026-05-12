@@ -130,6 +130,16 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TPS628640
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tps628640/tps628640.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PI3DBS12212
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/pi3dbs12212/pi3dbs12212.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GD32G553
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gd32g553/gd32g553.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_RTL8211FDI
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/rtl8211fdi/rtl8211fdi.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CLK_5L35023B
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/clk_5l35023b/clk_5l35023b.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_MURATA_LBEE5HY2FY
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/murata_lbee5hy2fy/murata_lbee5hy2fy.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_DEEPX_DXM1
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/deepx_dxm1/deepx_dxm1.c)
 
 # LwRB: publish the vendor stub headers on the include path so SDK
 # code compiles against <lwrb/lwrb.h> regardless of whether the

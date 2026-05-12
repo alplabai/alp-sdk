@@ -4,7 +4,7 @@ Carrier board for the **E1M-X** form factor (45 × 65 mm) — hosts
 the Renesas RZ/V2N family (`E1M-V2N101`, `E1M-V2N102`,
 `E1M-V2M101`, `E1M-V2M102`) and any future E1M-X conformant SoM.
 
-> Source: `OneDrive/E1M Project/E1M-X Development Board/20 - Design Documentation/`
+> Source: vendor datasheet
 > — Altium project (multi-sheet schematic).  No standalone user
 > guide on file yet; this doc captures what's discoverable from
 > the schematic-sheet inventory until the user writes the

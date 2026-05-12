@@ -1,0 +1,30 @@
+# E1M-X V2N-M1 family hardware revisions.
+
+family: v2n-m1
+display_name: "E1M-X-V2N-M1 (Renesas RZ/V2N + DEEPX DX-M1)"
+
+hw_revisions:
+  r1:
+    min_sdk_version: "0.3.0"
+    max_sdk_version: ~
+  r2:
+    min_sdk_version: ~
+    max_sdk_version: ~
+  r3:
+    min_sdk_version: ~
+    max_sdk_version: ~
+  r4:
+    min_sdk_version: ~
+    max_sdk_version: ~
+  r5:
+    min_sdk_version: ~
+    max_sdk_version: ~
+  r6:
+    min_sdk_version: ~
+    max_sdk_version: ~
+  r7:
+    min_sdk_version: ~
+    max_sdk_version: ~
+  r8:
+    min_sdk_version: ~
+    max_sdk_version: ~

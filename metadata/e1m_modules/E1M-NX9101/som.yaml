@@ -1,0 +1,39 @@
+# Stock preset for E1M-NX9101 (NXP i.MX 93 SoM).
+#
+# Placeholder MPN -- the exact SKU number for the production
+# E1M-N93 SoM is TBD pending the user-supplied HW config writeup.
+# The schema's som.sku regex accepts E1M-NX9xxx for any 4-digit
+# tail, so when the real SKU lands (e.g. E1M-NX9301 for i.MX 9301-
+# based) drop a sibling preset under metadata/e1m_modules/<MPN>/
+# and update default board.yaml references.
+
+schema_version: 1
+
+sku: E1M-NX9101
+family: nxp-imx9
+silicon: nxp:imx9:imx93
+
+display_name: "E1M-NX9101 (NXP i.MX 93 -- exact SKU TBD)"
+
+on_module:
+  silicon:              nxp:imx9:imx93         # 2x Cortex-A55 + Cortex-M33 + Ethos-U65
+  wifi_ble:             TBD                    # one of Murata Type 2DL/2EL/2KL/2LL per BOM
+  pmic:                 pca9451a               # NXP PCA9451A
+  ethernet_phy:         TBD                    # variant of RTL or NXP PHY per BOM
+
+memory:
+  dram_mbit:            TBD
+  flash_mbit:           TBD
+  mram_kbit:            null                   # i.MX 93 has no on-die MRAM
+
+inference:
+  preferred_backend:    ethos_u
+  ethos_u_variant:      u65                    # i.MX 93 ships Ethos-U65
+
+default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
+
+default_carrier:        E1M-EVK                # 35x35 carrier same as AEN family
+
+status:
+  preliminary:          true                   # production SKU + BOM choices TBD
+  partial_hw_config:    true

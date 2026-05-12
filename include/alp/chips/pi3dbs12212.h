@@ -50,7 +50,8 @@
  *
  * @par Datasheet provenance
  * - **PI3DBS12212A datasheet DS40393 Rev 3-2 (Sep 2020)** from Diodes
- *   Inc -- archived as `PI3DBS12212A.pdf` in the V2N OneDrive tree.
+ *   Inc -- archived vendor documentation
+ *   tree.
  */
 
 #ifndef ALP_CHIPS_PI3DBS12212_H
