@@ -39,10 +39,9 @@ hw_revisions:
     status: tbd
     board_id:
       adc_channel:    TBD
-      v_top_ohm:      10000
-      v_bot_ohm:      10000
-      expected_mv:    900
-      bin_radius_mv:  100
+      # Resistor values + expected_mv + bin_radius_mv live in
+      # the private e1m-som-metadata repo (see E1M-EVK board.yaml
+      # for the same split rationale).
 
 status:
   preliminary:              true                # populated list incomplete

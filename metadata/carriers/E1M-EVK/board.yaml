@@ -102,10 +102,11 @@ hw_revisions:
     status: production
     board_id:
       adc_channel:    TBD
-      v_top_ohm:      10000           # 10 kΩ (E12)
-      v_bot_ohm:      10000           # 10 kΩ (E12)
-      expected_mv:    900             # V_out = 1.8 V * 10/(10+10)
-      bin_radius_mv:  100
+      # Divider resistor values + per-rev `expected_mv` + `bin_radius_mv`
+      # thresholds live in the private `e1m-som-metadata` repo per
+      # the public/private split policy.  hw_info_zephyr.c's ADC
+      # cross-check consumes them via a generated header (see
+      # docs/board-id.md for the divider math + the studio pipeline).
     notes: |
       First production revision of the E1M EVK (35x35 carrier).
       Wiring authoritative per include/alp/boards/alp_e1m_evk.h.
