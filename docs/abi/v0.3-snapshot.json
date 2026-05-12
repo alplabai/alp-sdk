@@ -4356,6 +4356,10 @@
           "hash": "5d5e8e7dbc5bedfd",
           "signature": "void alp_storage_close(alp_storage_t *s);"
         },
+        "alp_storage_configure_inline_aes": {
+          "hash": "9879e5e8057f3350",
+          "signature": "alp_status_t alp_storage_configure_inline_aes(alp_storage_t *storage, const alp_storage_aes_config_t *cfg);"
+        },
         "alp_storage_erase": {
           "hash": "857f95912d78027f",
           "signature": "alp_status_t alp_storage_erase(alp_storage_t *s, uint64_t offset, uint64_t len);"
@@ -4379,6 +4383,10 @@
       },
       "macros": {},
       "typedefs": {
+        "alp_storage_aes_mode_t": {
+          "definition": "typedef enum { ALP_STORAGE_AES_OFF = 0, ALP_STORAGE_AES_CTR = 1, ALP_STORAGE_AES_XTS = 2, } alp_storage_aes_mode_t;",
+          "hash": "06754833cc47f356"
+        },
         "alp_storage_kind_t": {
           "definition": "typedef enum { ALP_STORAGE_KIND_INTERNAL_FLASH = 0, ALP_STORAGE_KIND_QSPI_FLASH = 1, ALP_STORAGE_KIND_OSPI_FLASH = 2, ALP_STORAGE_KIND_SD_MMC = 3 } alp_storage_kind_t;",
           "hash": "c76a6ca3ab1f39b6"
@@ -4390,6 +4398,10 @@
         "kind": {
           "definition": "typedef struct { alp_storage_kind_t kind;",
           "hash": "48352e206c3708ac"
+        },
+        "mode": {
+          "definition": "typedef struct { alp_storage_aes_mode_t mode;",
+          "hash": "49f623718a4279d2"
         },
         "total_bytes": {
           "definition": "typedef struct { uint64_t total_bytes;",

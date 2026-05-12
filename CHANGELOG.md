@@ -397,6 +397,38 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`<alp/storage.h>::alp_storage_configure_inline_aes` -- on-the-
+  fly XIP encryption / decryption surface for AEN OSPI / HexSPI
+  (AEN audit §4.3 top-five gap, 2026-05-14).**  Extends the
+  storage surface with inline-AES configuration so customers can
+  protect XIP-resident code + data on external flash:
+
+  * `alp_storage_aes_mode_t`: OFF / CTR / XTS.  XTS is the
+    standard mode for storage encryption at flash-block
+    granularity; CTR for sequential streaming.
+  * `alp_storage_aes_config_t`: mode + key (16 / 24 / 32 bytes
+    for AES-128 / 192 / 256) + IV / tweak (typically 16 bytes).
+    Key material is read only at configure() time; backends
+    bind to a HW key slot if the controller supports it so the
+    key never traces back to RAM.
+  * `alp_storage_configure_inline_aes(storage, cfg)` programs
+    the controller; re-keying mid-session is supported by
+    calling again.  Passing `mode == OFF` disables the path.
+
+  ABI-safe extension: no fields added to existing
+  `alp_storage_config_t`; a new typedef + new function instead,
+  so callers using positional struct init keep compiling.
+  Both Zephyr (`src/zephyr/storage_stub.c`) and non-Zephyr
+  (`src/common/stub_backend.c`) backends ship NOSUPPORT with
+  full INVAL pre-checks (NULL cfg / bad mode / NULL key when
+  mode != OFF / invalid key_bytes).  Real impls land when:
+    * AEN E4 / E6 / E8 : Alif SecAES + the OSPI HAL grow the
+      key/iv programming path; Zephyr flash device exposes it
+      via a vendor-extension API.
+    * i.MX 93         : NXP FlexSPI OTFAD module + the
+      corresponding BSP extension lands.
+    * V2N             : stays NOSUPPORT (no on-die SecAES path).
+
 - **`<alp/camera.h>::alp_camera_configure_isp` -- ISP
   configuration surface for AEN-family Mali-C55 ISP (AEN audit
   §4.3 top-five gap, 2026-05-14).**  Extends the existing

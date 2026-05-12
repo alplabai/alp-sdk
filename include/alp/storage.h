@@ -107,6 +107,85 @@ alp_status_t   alp_storage_sync(alp_storage_t *s);
 /** Release the handle.  Implicitly syncs. */
 void           alp_storage_close(alp_storage_t *s);
 
+/* ================================================================== */
+/* Inline AES (on-the-fly XIP encryption / decryption)                 */
+/*                                                                     */
+/* Wave-2 audit (docs/aen-feature-audit-2026-05.md §4.3) flagged       */
+/* on-the-fly inline AES for external flash as a NEEDS-PORTABLE-       */
+/* SURFACE gap.  AEN-family OSPI / HexSPI controllers can transparently */
+/* encrypt + decrypt data between the host bus and the external chip   */
+/* (XIP code stays AES-protected; the host sees plaintext, the flash   */
+/* sees ciphertext).  Customers migrating from V2N to AEN otherwise    */
+/* lose the secure-XIP capability silently.                            */
+/*                                                                     */
+/* The minimal v0.5 surface declared below covers the cipher mode +    */
+/* key + IV needed to set up inline-AES on the open device.  Re-       */
+/* keying mid-session is supported by calling configure_inline_aes()  */
+/* again; passing mode == ALP_STORAGE_AES_OFF disables it.            */
+/* ================================================================== */
+
+/** Inline-AES cipher mode.  Backends honour the subset their HW
+ *  supports; unsupported modes return ALP_ERR_NOSUPPORT.
+ *  Field-level meanings:
+ *   - OFF: bypass (plaintext both ways).
+ *   - CTR: AES-CTR (sequential streaming; IV is the starting counter).
+ *   - XTS: AES-XTS (block-cipher mode; IV is the tweak.  Standard
+ *     for storage encryption at flash-block granularity). */
+typedef enum {
+    ALP_STORAGE_AES_OFF = 0,
+    ALP_STORAGE_AES_CTR = 1,
+    ALP_STORAGE_AES_XTS = 2,
+} alp_storage_aes_mode_t;
+
+/** Inline-AES configuration.  Caller-owned memory; backend reads
+ *  the key / IV at configure() time and may bind to a HW key slot
+ *  (the HW key never traces back to RAM after that point).
+ *  Field-level meanings:
+ *   - mode: one of @ref alp_storage_aes_mode_t.
+ *   - key: pointer to the key bytes (length per @c key_bytes).
+ *   - key_bytes: 16, 24, or 32 -- selects AES-128 / 192 / 256.
+ *   - iv: pointer to the IV / tweak bytes (length per @c iv_bytes).
+ *     16 bytes for both CTR + XTS in the standard modes.
+ *   - iv_bytes: typically 16. */
+typedef struct {
+    alp_storage_aes_mode_t mode;
+    const uint8_t         *key;
+    uint8_t                key_bytes;
+    const uint8_t         *iv;
+    uint8_t                iv_bytes;
+    uint16_t               reserved;
+} alp_storage_aes_config_t;
+
+/**
+ * @brief Configure on-the-fly inline AES for an open storage device.
+ *
+ * Backends with an inline-AES capable controller (AEN-family
+ * OSPI / HexSPI with the SecAES block; future i.MX 93 FlexSPI
+ * with the OTFAD module) program the controller's key / IV
+ * registers and enable the inline path before this function
+ * returns.  Subsequent @ref alp_storage_read / @ref alp_storage_write
+ * calls transparently encrypt + decrypt; XIP code execution
+ * benefits without additional API changes.
+ *
+ * Calling with @c cfg->mode == @ref ALP_STORAGE_AES_OFF disables
+ * inline AES.  Re-keying mid-session is supported by calling
+ * again with a new key / IV.  The key material is read only
+ * during the call -- the caller may free / zeroise immediately
+ * on return.
+ *
+ * @param[in] storage  Handle from @ref alp_storage_open.
+ * @param[in] cfg      Configuration.  Must be non-NULL.  When
+ *                     mode != OFF, key + iv MUST be non-NULL.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL (bad
+ *         mode / NULL key when mode != OFF / invalid key_bytes) /
+ *         ALP_ERR_NOSUPPORT (backend lacks an inline-AES path --
+ *         V2N today, AEN-family E3 / E5 / E7 silicon without the
+ *         optional SecAES fabric) / ALP_ERR_IO.
+ */
+alp_status_t alp_storage_configure_inline_aes(alp_storage_t                  *storage,
+                                              const alp_storage_aes_config_t *cfg);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

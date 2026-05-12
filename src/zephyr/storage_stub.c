@@ -48,3 +48,25 @@ alp_status_t alp_storage_sync(alp_storage_t *s) {
 void alp_storage_close(alp_storage_t *s) {
     (void)s;
 }
+
+alp_status_t alp_storage_configure_inline_aes(alp_storage_t *storage,
+                                              const alp_storage_aes_config_t *cfg)
+{
+    if (cfg == NULL) return ALP_ERR_INVAL;
+    if (cfg->mode != ALP_STORAGE_AES_OFF &&
+        cfg->mode != ALP_STORAGE_AES_CTR &&
+        cfg->mode != ALP_STORAGE_AES_XTS) {
+        return ALP_ERR_INVAL;
+    }
+    if (cfg->mode != ALP_STORAGE_AES_OFF) {
+        if (cfg->key == NULL || cfg->iv == NULL) return ALP_ERR_INVAL;
+        if (cfg->key_bytes != 16u && cfg->key_bytes != 24u && cfg->key_bytes != 32u) {
+            return ALP_ERR_INVAL;
+        }
+    }
+    (void)storage;
+    /* No SoM in scope ships the SecAES / OTFAD HAL body yet.
+     * AEN E4 / E6 / E8 + i.MX 93 wire when their vendor packs
+     * register the corresponding Zephyr flash-device extensions. */
+    return ALP_ERR_NOSUPPORT;
+}
