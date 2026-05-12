@@ -180,9 +180,8 @@ void alp_z_v2n_supervisor_invalidate(void)
      * concurrent acquire() can't re-init mid-close.  Bounded wait
      * matches the regular acquire timeout to avoid piling up
      * behind a hung sleep handler. */
-    const int locked = k_mutex_lock(
-        &g_v2n.lock,
-        K_MSEC(CONFIG_ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS));
+    const int locked =
+        k_mutex_lock(&g_v2n.lock, K_MSEC(CONFIG_ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS));
     if (locked != 0) {
         /* Couldn't take the lock; another thread is mid-bridge-op.
          * The invalidate is best-effort -- the in-flight thread's

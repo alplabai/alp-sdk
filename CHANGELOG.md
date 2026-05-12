@@ -397,6 +397,33 @@ that lands before the v0.3.0 tag.)
   probe request in §7 of
   `gd32-bridge/tests/protocol_vectors.txt`.
 
+- **`<alp/protocol/cc3501e.h>` -- extended diagnostics + power
+  policy opcodes (§2A.2 plan §5.4 + §5.7, 2026-05-14).**  Two
+  new opcodes + their wire payload structs:
+
+  * `CMD_GET_DIAG_INFO` (0x04, extends the meta opcode range)
+    -- reply payload `alp_cc3501e_diag_info_t` (16 bytes):
+    fw_version, reset_cause (POWER_ON / NRST_PIN / SOFT /
+    WATCHDOG / BROWNOUT / BLE_STACK / WIFI_STACK), role
+    (OFF / WIFI_STA / WIFI_AP / BLE_PERIPHERAL / BLE_CENTRAL /
+    DUAL_WIFI_BLE), uptime_ms, free_heap_bytes, last_error.
+    Replaces the audit's "extended PING reply" -- a separate
+    opcode avoids breaking the wire format of the existing PING
+    + GET_VERSION calls.
+  * `CMD_POWER_POLICY` (0x62, extends the power opcode range)
+    -- request payload `alp_cc3501e_power_policy_t` (8 bytes):
+    coarse policy preset (PERFORMANCE / BALANCED / LOW_POWER /
+    DEEP_SLEEP), wake-event bitmap (HOST_SPI / BLE_CONN /
+    BLE_ADV / WIFI_BEACON / WIFI_AP_CLIENT / GPIO_IRQ), and an
+    `idle_ms_before_sleep` minimum-idle hint.  Lets the host
+    tell the CC3501E firmware how aggressively to gate its
+    receive paths while idle.
+
+  Both opcodes are v2-firmware-only -- the v1 parser rejects
+  them with `ALP_CC3501E_RESP_ERR_INVALID`.  Header is purely
+  declarative; firmware-side handlers land in the first
+  `alplabai/cc3501e-firmware` drop.  No protocol bump.
+
 - **`<alp/protocol/cc3501e.h>` -- GPIO set-interrupt + event
   payload structs (§2A.2 plan §5.3, 2026-05-14).**  Lands the
   payload typedefs for `CMD_GPIO_SET_INTERRUPT` (opcode 0x53)
