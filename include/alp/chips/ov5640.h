@@ -93,10 +93,26 @@ alp_status_t ov5640_read_id(ov5640_t *dev, uint16_t *id_out);
 /** Issue a software reset (writes the system-reset bit at 0x3008). */
 alp_status_t ov5640_soft_reset(ov5640_t *dev);
 
-/** Apply a resolution preset (configures DVP / ISP / scaler regs). */
+/**
+ * @brief Remember a resolution preset for the v0.3 apply path.
+ *
+ * The DVP / ISP / scaler register table that backs the resolution
+ * change lives in OmniVision's vendor init script and lands in
+ * v0.3 alongside `alp_camera_v2n`.  Until then the driver returns
+ * `ALP_ERR_NOSUPPORT` after stashing the request -- callers can
+ * still discover their pinned preset via `dev->res`.  Out-of-range
+ * enum values return `ALP_ERR_INVAL` without storing.
+ */
 alp_status_t ov5640_set_resolution(ov5640_t *dev, ov5640_resolution_t res);
 
-/** Apply a pixel-format preset (configures format-control regs). */
+/**
+ * @brief Remember a pixel-format preset for the v0.3 apply path.
+ *
+ * Same contract as @ref ov5640_set_resolution: the chosen format is
+ * remembered in `dev->fmt` but the driver returns
+ * `ALP_ERR_NOSUPPORT` until v0.3's `FORMAT_CTRL` / `FORMAT_CTRL_MUX`
+ * write table lands.
+ */
 alp_status_t ov5640_set_format(ov5640_t *dev, ov5640_format_t fmt);
 
 /** Enable / disable test-pattern output (colour-bar) for bring-up. */

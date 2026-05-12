@@ -91,22 +91,26 @@ alp_status_t ov5640_soft_reset(ov5640_t *dev) {
 alp_status_t ov5640_set_resolution(ov5640_t *dev, ov5640_resolution_t res) {
     if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
     if (res > OV5640_RES_5MP) return ALP_ERR_INVAL;
-    /* TODO(v0.3): apply the resolution-specific register table from
-     * OmniVision's reference init script.  The bring-up path uses the
-     * default 2592×1944 pipe; alp_camera (v0.2) selects QVGA/VGA via
-     * crop+downscale rather than reconfiguring the sensor. */
+    /* The resolution-specific register table from OmniVision's reference
+     * init script lands in v0.3 alongside the alp_camera_v2n capture
+     * path.  Until then this returns NOSUPPORT explicitly -- silent OK
+     * would be a contract lie (the caller would believe the sensor was
+     * reconfigured when it's actually still at the 2592×1944 default).
+     * The chosen preset is remembered in `dev->res` so v0.3 can apply
+     * it without re-asking the caller. */
     dev->res = res;
-    return ALP_OK;
+    return ALP_ERR_NOSUPPORT;
 }
 
 alp_status_t ov5640_set_format(ov5640_t *dev, ov5640_format_t fmt) {
     if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
     if (fmt > OV5640_FMT_RAW8) return ALP_ERR_INVAL;
-    /* TODO(v0.3): write FORMAT_CTRL (0x4300) + FORMAT_CTRL_MUX (0x501F).
-     * The reference values are well-known and small; the table will
-     * land alongside the v0.3 alp_camera_v2n integration. */
+    /* FORMAT_CTRL (0x4300) + FORMAT_CTRL_MUX (0x501F) writes land in
+     * v0.3.  Same rationale as ov5640_set_resolution -- the chosen
+     * preset is remembered in `dev->fmt`, but the driver explicitly
+     * declines the write rather than masquerading as a silent OK. */
     dev->fmt = fmt;
-    return ALP_OK;
+    return ALP_ERR_NOSUPPORT;
 }
 
 alp_status_t ov5640_set_test_pattern(ov5640_t *dev, bool enabled) {
