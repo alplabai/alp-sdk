@@ -225,7 +225,9 @@ alp_status_t da9292_v2n_base_init(da9292_t *ctx);
 alp_status_t da9292_v2n_m1_enable_deepx_rail(da9292_t *ctx, uint32_t timeout_us);
 
 /** Raw register R/W (for diagnostics / advanced use). */
+/** @brief Raw register read for diagnostics / advanced use. */
 alp_status_t da9292_read_reg(da9292_t *ctx, uint8_t reg, uint8_t *val);
+/** @brief Raw register write for diagnostics / advanced use. */
 alp_status_t da9292_write_reg(da9292_t *ctx, uint8_t reg, uint8_t val);
 
 /** @brief Release resources.  Idempotent. */

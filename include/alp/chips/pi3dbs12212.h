@@ -97,6 +97,7 @@ alp_status_t pi3dbs12212_set_state(pi3dbs12212_t *ctx, pi3dbs12212_state_t state
  *         itself has no readback). */
 alp_status_t pi3dbs12212_get_state(pi3dbs12212_t *ctx, pi3dbs12212_state_t *state);
 
+/** @brief Release the driver context.  Drives the mux to OFF first. */
 void         pi3dbs12212_deinit(pi3dbs12212_t *ctx);
 
 #ifdef __cplusplus

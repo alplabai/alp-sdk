@@ -42,18 +42,22 @@ typedef struct {
     alp_pixfmt_t format;
 } alp_display_caps_t;
 
+/** @brief Open the display handle defined by @p cfg. */
 alp_display_t *alp_display_open(const alp_display_config_t *cfg);
 
+/** @brief Read the display's static capabilities (geometry + pixel format). */
 alp_status_t alp_display_get_caps(alp_display_t *d, alp_display_caps_t *out);
 
-/** Push a rectangular framebuffer region.  `pixels` size is implied by w*h*format. */
+/** @brief Push a rectangular framebuffer region.  `pixels` size is implied by w*h*format. */
 alp_status_t alp_display_blit(alp_display_t *d,
                               uint16_t x, uint16_t y,
                               uint16_t w, uint16_t h,
                               const void *pixels);
 
+/** @brief Clear the framebuffer to the background colour. */
 alp_status_t alp_display_clear(alp_display_t *d);
 
+/** @brief Release the display handle.  Idempotent on NULL. */
 void alp_display_close(alp_display_t *d);
 
 #ifdef __cplusplus

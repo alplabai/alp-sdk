@@ -72,6 +72,7 @@ alp_status_t eeprom_24c128_read(eeprom_24c128_t *ctx, uint16_t offset, uint8_t *
 alp_status_t eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data,
                                  size_t len);
 
+/** @brief Release the driver context.  Idempotent. */
 void         eeprom_24c128_deinit(eeprom_24c128_t *ctx);
 
 #ifdef __cplusplus

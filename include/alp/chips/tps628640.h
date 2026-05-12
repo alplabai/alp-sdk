@@ -123,7 +123,9 @@ alp_status_t tps628640_get_voltage_mv(tps628640_t *ctx, uint16_t *mv);
 alp_status_t tps628640_get_status(tps628640_t *ctx, uint8_t *status_byte);
 
 /** Raw register R/W (always available; no register-layout dependency). */
+/** @brief Raw register read.  Always available; no register-layout dependency. */
 alp_status_t tps628640_read_reg(tps628640_t *ctx, uint8_t reg, uint8_t *val);
+/** @brief Raw register write.  Always available; no register-layout dependency. */
 alp_status_t tps628640_write_reg(tps628640_t *ctx, uint8_t reg, uint8_t val);
 
 /** @brief Release resources. */

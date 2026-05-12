@@ -35,11 +35,15 @@ typedef struct {
     const char *psk;        /**< NULL for open networks. */
 } alp_wifi_credentials_t;
 
+/** @brief Acquire the Wi-Fi station singleton handle. */
 alp_wifi_t   *alp_wifi_open(void);
+/** @brief Associate + authenticate against the AP described by @p creds. */
 alp_status_t  alp_wifi_connect(alp_wifi_t *w,
                                const alp_wifi_credentials_t *creds,
                                uint32_t timeout_ms);
+/** @brief Drop the current association.  Safe to call when already disconnected. */
 alp_status_t  alp_wifi_disconnect(alp_wifi_t *w);
+/** @brief Release the Wi-Fi handle.  Idempotent on NULL. */
 void          alp_wifi_close(alp_wifi_t *w);
 
 /* ------------------------------------------------------------------ */
@@ -90,15 +94,21 @@ typedef void (*alp_mqtt_msg_cb_t)(const char *topic,
                                   const uint8_t *payload, size_t len,
                                   void *user);
 
+/** @brief Allocate an MQTT client against the broker URI in @p cfg. */
 alp_mqtt_t   *alp_mqtt_open(const alp_mqtt_config_t *cfg);
+/** @brief Establish the TCP / TLS connection to the broker. */
 alp_status_t  alp_mqtt_connect(alp_mqtt_t *m, uint32_t timeout_ms);
+/** @brief Publish a single MQTT message. */
 alp_status_t  alp_mqtt_publish(alp_mqtt_t *m, const char *topic,
                                const uint8_t *payload, size_t len,
                                alp_mqtt_qos_t qos, bool retain);
+/** @brief Subscribe to @p topic_filter and register a per-message callback. */
 alp_status_t  alp_mqtt_subscribe(alp_mqtt_t *m, const char *topic_filter,
                                  alp_mqtt_qos_t qos,
                                  alp_mqtt_msg_cb_t cb, void *user);
+/** @brief Drive the MQTT state machine for up to @p timeout_ms. */
 alp_status_t  alp_mqtt_loop(alp_mqtt_t *m, uint32_t timeout_ms);
+/** @brief Disconnect + release the MQTT client.  Idempotent on NULL. */
 void          alp_mqtt_close(alp_mqtt_t *m);
 
 #ifdef __cplusplus

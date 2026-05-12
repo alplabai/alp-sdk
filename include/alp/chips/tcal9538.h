@@ -95,6 +95,7 @@ alp_status_t tcal9538_read_all(tcal9538_t *ctx, uint8_t *port_out);
  *  input are ignored by the chip. */
 alp_status_t tcal9538_write_all(tcal9538_t *ctx, uint8_t port);
 
+/** @brief Release the driver context.  Idempotent. */
 void         tcal9538_deinit(tcal9538_t *ctx);
 
 #ifdef __cplusplus

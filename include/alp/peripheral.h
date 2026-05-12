@@ -115,19 +115,25 @@ typedef void (*alp_gpio_cb_t)(alp_gpio_t *pin, void *user);
  */
 alp_gpio_t *alp_gpio_open(uint32_t pin_id);
 
+/** @brief Configure a pin's direction + pull-up / pull-down resistors. */
 alp_status_t alp_gpio_configure(alp_gpio_t *pin,
                                 alp_gpio_dir_t dir,
                                 alp_gpio_pull_t pull);
 
+/** @brief Drive an output pin to @p level. */
 alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level);
+/** @brief Read the current level of an input pin. */
 alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level);
 
+/** @brief Register an edge-triggered callback for @p pin. */
 alp_status_t alp_gpio_irq_enable(alp_gpio_t *pin,
                                  alp_gpio_edge_t edge,
                                  alp_gpio_cb_t cb,
                                  void *user);
+/** @brief Tear down the IRQ registration from @ref alp_gpio_irq_enable. */
 alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin);
 
+/** @brief Release the GPIO handle.  Idempotent on NULL. */
 void alp_gpio_close(alp_gpio_t *pin);
 
 /* ------------------------------------------------------------------ */
@@ -156,6 +162,7 @@ alp_status_t alp_i2c_write_read(alp_i2c_t *bus, uint8_t addr,
                                 const uint8_t *wdata, size_t wlen,
                                 uint8_t *rdata, size_t rlen);
 
+/** @brief Release the I2C bus handle.  Idempotent on NULL. */
 void alp_i2c_close(alp_i2c_t *bus);
 
 /* ------------------------------------------------------------------ */
@@ -185,9 +192,12 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus,
                                 const uint8_t *tx, uint8_t *rx,
                                 size_t len);
 
+/** @brief Half-duplex SPI write (no MISO read). */
 alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len);
+/** @brief Half-duplex SPI read (no MOSI write). */
 alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len);
 
+/** @brief Release the SPI bus handle.  Idempotent on NULL. */
 void alp_spi_close(alp_spi_t *bus);
 
 /* ------------------------------------------------------------------ */
@@ -212,10 +222,13 @@ typedef struct {
 
 alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg);
 
+/** @brief Blocking UART write. */
 alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
+/** @brief Blocking UART read with millisecond timeout. */
 alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len,
                            uint32_t timeout_ms);
 
+/** @brief Release the UART port handle.  Idempotent on NULL. */
 void alp_uart_close(alp_uart_t *port);
 
 /* ------------------------------------------------------------------ */

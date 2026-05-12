@@ -136,12 +136,14 @@ typedef struct {
     uint32_t power_uw;
 } ina236_sample_t;
 
+/** @brief Read shunt voltage + bus voltage + current + power into one struct. */
 alp_status_t ina236_read_all(ina236_t *ctx, ina236_sample_t *sample_out);
 
 /** @brief Soft-reset the chip and rerun the calibration step.
  *  Useful after a brown-out or detected bus-voltage glitch. */
 alp_status_t ina236_reset(ina236_t *ctx);
 
+/** @brief Release the driver context.  Idempotent. */
 void         ina236_deinit(ina236_t *ctx);
 
 #ifdef __cplusplus

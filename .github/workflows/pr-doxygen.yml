@@ -41,6 +41,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y doxygen graphviz
 
+      # Fast pre-flight: catch a missing @brief before we spin up
+      # the full Doxygen build.  Currently at 100% coverage on main;
+      # the gate is hard so a regression fails CI immediately.
+      - name: Public-API @brief coverage audit (fail-on-gaps)
+        run: |
+          python3 scripts/check_doxygen_coverage.py --fail-on-gaps
+
       - name: Generate Doxyfile (v0.1 inline; v0.2+ uses docs/doxygen/Doxyfile)
         run: |
           if [ -f docs/doxygen/Doxyfile ]; then

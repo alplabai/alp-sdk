@@ -50,3 +50,4 @@ requires a major-version bump.  `ADDED` entries always pass.
 | Snapshot                                         | Tag   | Date       |
 |--------------------------------------------------|-------|------------|
 | [`v0.1-snapshot.json`](v0.1-snapshot.json)       | v0.1  | 2026-05-10 |
+| [`v0.3-snapshot.json`](v0.3-snapshot.json)       | v0.3  | 2026-05-13 |

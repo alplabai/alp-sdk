@@ -189,6 +189,7 @@ alp_status_t rv3028c7_route_clkout(rv3028c7_t *ctx, rv3028c7_clkout_src_t src);
  *         (clock-out sync). */
 alp_status_t rv3028c7_set_int_enable(rv3028c7_t *ctx, rv3028c7_src_t src, bool enable);
 
+/** @brief Release resources.  Idempotent. */
 void         rv3028c7_deinit(rv3028c7_t *ctx);
 
 #ifdef __cplusplus

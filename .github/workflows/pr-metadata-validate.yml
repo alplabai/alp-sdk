@@ -200,3 +200,12 @@ jobs:
       - name: Example portability classification + hard-error lint
         run: |
           python3 scripts/check_example_portability.py
+
+      # Public-API test-coverage audit -- per the VERSIONS.md
+      # "Quality bar" entry, every public function should have at
+      # least one ztest mention.  Runs informational today (no
+      # --fail-on-gaps) so backfilling can happen incrementally; the
+      # gate flips on for the v1.0 release branch.
+      - name: Public-API test-coverage audit (informational)
+        run: |
+          python3 scripts/check_test_coverage.py

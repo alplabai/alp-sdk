@@ -100,6 +100,7 @@ alp_status_t tas2563_set_mode(tas2563_t *ctx, tas2563_mode_t mode);
  */
 alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
 
+/** @brief Release the driver context.  Drops SD_N before returning. */
 void         tas2563_deinit(tas2563_t *ctx);
 
 #ifdef __cplusplus

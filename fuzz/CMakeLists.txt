@@ -42,3 +42,6 @@ endfunction()
 
 _alp_add_fuzz_target(cc3501e)
 _alp_add_fuzz_target(iot_mqtt)
+_alp_add_fuzz_target(eeprom_manifest)
+_alp_add_fuzz_target(gd32_bridge_frame)
+_alp_add_fuzz_target(swd_packet)

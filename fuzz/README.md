@@ -22,10 +22,13 @@ exercises one parser surface with corpora-driven input.
 
 ## Harnesses shipped (v0.3)
 
-| File                 | Target surface                                                                            |
-|----------------------|-------------------------------------------------------------------------------------------|
-| `cc3501e_fuzz.c`     | The `<alp/protocol/cc3501e.h>` SPI wire-protocol frame parser (Alif <-> CC3501E).         |
-| `iot_mqtt_fuzz.c`    | MQTT v3.1.1 fixed + variable-length header decoder, as consumed by `<alp/iot.h>`'s MQTT path. |
+| File                       | Target surface                                                                            |
+|----------------------------|-------------------------------------------------------------------------------------------|
+| `cc3501e_fuzz.c`           | The `<alp/protocol/cc3501e.h>` SPI wire-protocol frame parser (Alif <-> CC3501E).         |
+| `iot_mqtt_fuzz.c`          | MQTT v3.1.1 fixed + variable-length header decoder, as consumed by `<alp/iot.h>`'s MQTT path. |
+| `eeprom_manifest_fuzz.c`   | 24C128 EEPROM manifest decoder consumed by `<alp/hw_info.h>` (magic + schema_version + CRC32). |
+| `gd32_bridge_frame_fuzz.c` | GD32 bridge frame validator (SOF + opcode + payload + CRC-16/CCITT-FALSE); same algorithm host + firmware share. |
+| `swd_packet_fuzz.c`        | Arm SWD packet header + 32-bit data parity decoder used by `chips/gd32_swd/`.             |
 
 Both harnesses today carry an *inline* reference parser -- the SDK
 doesn't yet ship a public parser API for either surface, so the

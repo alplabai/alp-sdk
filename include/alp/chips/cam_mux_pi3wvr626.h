@@ -64,6 +64,7 @@ alp_status_t cam_mux_pi3wvr626_select(cam_mux_pi3wvr626_t *ctx, cam_mux_pi3wvr62
 /** @brief Read the currently-driven SEL state. */
 alp_status_t cam_mux_pi3wvr626_get(cam_mux_pi3wvr626_t *ctx, cam_mux_pi3wvr626_input_t *input_out);
 
+/** @brief Release the driver context.  Idempotent. */
 void         cam_mux_pi3wvr626_deinit(cam_mux_pi3wvr626_t *ctx);
 
 #ifdef __cplusplus
