@@ -23,6 +23,14 @@
           "hash": "213e09e41ba37d00",
           "signature": "alp_status_t alp_adc_read_uv(alp_adc_t *adc, int32_t *uv_out);"
         },
+        "alp_adc_spectrum_close": {
+          "hash": "4bf6b1f5d14c0a9a",
+          "signature": "void alp_adc_spectrum_close(alp_adc_spectrum_t *spec);"
+        },
+        "alp_adc_spectrum_read_bins": {
+          "hash": "90394e30f88e96d2",
+          "signature": "alp_status_t alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, size_t *got);"
+        },
         "alp_adc_stream_close": {
           "hash": "44e705b63f648978",
           "signature": "void alp_adc_stream_close(alp_adc_stream_t *stream);"
@@ -53,6 +61,10 @@
         "alp_adc_ref_t": {
           "definition": "typedef enum { ALP_ADC_REF_INTERNAL = 0, ALP_ADC_REF_EXTERNAL_0 = 1, ALP_ADC_REF_EXTERNAL_1 = 2, ALP_ADC_REF_VDD = 3 } alp_adc_ref_t;",
           "hash": "c4c3371412c61f09"
+        },
+        "alp_adc_spectrum_t": {
+          "definition": "typedef struct alp_adc_spectrum alp_adc_spectrum_t;",
+          "hash": "8a3d2e2cb0a8a561"
         },
         "alp_adc_stream_t": {
           "definition": "typedef struct alp_adc_stream alp_adc_stream_t;",
