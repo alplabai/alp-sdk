@@ -169,12 +169,13 @@ ZTEST(alp_dsp_chain_open, test_iir_zero_sections_returns_range)
 
 ZTEST(alp_dsp_chain_open, test_valid_single_fir_succeeds)
 {
-    static const float taps[1]   = { 1.0f };
-    alp_dsp_stage_t    stages[1] = {
-        { .kind  = ALP_DSP_STAGE_FIR,
-          .u.fir = { .coeff_format = ALP_DSP_COEFF_FORMAT_F32, .n_taps = 1u, .taps = taps } },
-    };
-    alp_dsp_chain_t *c = alp_dsp_chain_open(stages, 1u);
+    static const float taps[1] = { 1.0f };
+    alp_dsp_stage_t stage = { 0 };
+    stage.kind = ALP_DSP_STAGE_FIR;
+    stage.u.fir.coeff_format = ALP_DSP_COEFF_FORMAT_F32;
+    stage.u.fir.n_taps = 1u;
+    stage.u.fir.taps = taps;
+    alp_dsp_chain_t *c = alp_dsp_chain_open(&stage, 1u);
     zassert_not_null(c, NULL);
     alp_dsp_chain_close(c);
 }
@@ -215,18 +216,19 @@ ZTEST(alp_dsp_chain_apply_samples, test_rejects_fft_terminated_chain)
 
 ZTEST(alp_dsp_chain_apply_samples, test_identity_fir_passes_input_through)
 {
-    static const float taps[1]   = { 1.0f };
-    alp_dsp_stage_t    stages[1] = {
-        { .kind  = ALP_DSP_STAGE_FIR,
-          .u.fir = { .coeff_format = ALP_DSP_COEFF_FORMAT_F32, .n_taps = 1u, .taps = taps } },
-    };
-    alp_dsp_chain_t *c = alp_dsp_chain_open(stages, 1u);
+    static const float taps[1] = { 1.0f };
+    alp_dsp_stage_t stage = { 0 };
+    stage.kind = ALP_DSP_STAGE_FIR;
+    stage.u.fir.coeff_format = ALP_DSP_COEFF_FORMAT_F32;
+    stage.u.fir.n_taps = 1u;
+    stage.u.fir.taps = taps;
+    alp_dsp_chain_t *c = alp_dsp_chain_open(&stage, 1u);
     zassert_not_null(c, NULL);
 
-    static const int16_t in[8]  = { 100, -200, 300, -400, 500, -600, 700, -800 };
-    int16_t              out[8] = { 0 };
-    size_t               got    = 0u;
-    alp_status_t         s      = alp_dsp_chain_apply_samples(c, in, 8u, out, 8u, &got);
+    static const int16_t in[8] = { 100, -200, 300, -400, 500, -600, 700, -800 };
+    int16_t out[8] = { 0 };
+    size_t got = 0u;
+    alp_status_t s = alp_dsp_chain_apply_samples(c, in, 8u, out, 8u, &got);
     zassert_equal(s, ALP_OK, NULL);
     zassert_equal(got, 8u, NULL);
     for (size_t i = 0u; i < 8u; i++) {
@@ -240,19 +242,18 @@ ZTEST(alp_dsp_chain_apply_samples, test_iir_passthrough_section)
 {
     /* Single biquad section configured as identity: y[n] = x[n]. */
     static const float coeffs[5] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-    alp_dsp_stage_t    stages[1] = {
-        { .kind  = ALP_DSP_STAGE_IIR,
-          .u.iir = { .coeff_format = ALP_DSP_COEFF_FORMAT_F32,
-                     .n_sections   = 1u,
-                     .coeffs       = coeffs } },
-    };
-    alp_dsp_chain_t *c = alp_dsp_chain_open(stages, 1u);
+    alp_dsp_stage_t stage = { 0 };
+    stage.kind = ALP_DSP_STAGE_IIR;
+    stage.u.iir.coeff_format = ALP_DSP_COEFF_FORMAT_F32;
+    stage.u.iir.n_sections = 1u;
+    stage.u.iir.coeffs = coeffs;
+    alp_dsp_chain_t *c = alp_dsp_chain_open(&stage, 1u);
     zassert_not_null(c, NULL);
 
-    static const int16_t in[4]  = { 1234, -5678, 1111, -2222 };
-    int16_t              out[4] = { 0 };
-    size_t               got    = 0u;
-    alp_status_t         s      = alp_dsp_chain_apply_samples(c, in, 4u, out, 4u, &got);
+    static const int16_t in[4] = { 1234, -5678, 1111, -2222 };
+    int16_t out[4] = { 0 };
+    size_t got = 0u;
+    alp_status_t s = alp_dsp_chain_apply_samples(c, in, 4u, out, 4u, &got);
     zassert_equal(s, ALP_OK, NULL);
     zassert_equal(got, 4u, NULL);
     for (size_t i = 0u; i < 4u; i++) {
@@ -268,18 +269,19 @@ ZTEST(alp_dsp_chain_apply_samples, test_iir_passthrough_section)
 
 ZTEST(alp_dsp_chain_apply_bins, test_rejects_non_fft_chain)
 {
-    static const float taps[1]   = { 1.0f };
-    alp_dsp_stage_t    stages[1] = {
-        { .kind  = ALP_DSP_STAGE_FIR,
-          .u.fir = { .coeff_format = ALP_DSP_COEFF_FORMAT_F32, .n_taps = 1u, .taps = taps } },
-    };
-    alp_dsp_chain_t *c = alp_dsp_chain_open(stages, 1u);
+    static const float taps[1] = { 1.0f };
+    alp_dsp_stage_t stage = { 0 };
+    stage.kind = ALP_DSP_STAGE_FIR;
+    stage.u.fir.coeff_format = ALP_DSP_COEFF_FORMAT_F32;
+    stage.u.fir.n_taps = 1u;
+    stage.u.fir.taps = taps;
+    alp_dsp_chain_t *c = alp_dsp_chain_open(&stage, 1u);
     zassert_not_null(c, NULL);
 
-    int16_t      in[64]   = { 0 };
-    float        out[128] = { 0 };
-    size_t       got      = 0u;
-    alp_status_t s        = alp_dsp_chain_apply_bins(c, in, 64u, out, 128u, &got);
+    int16_t in[64] = { 0 };
+    float out[128] = { 0 };
+    size_t got = 0u;
+    alp_status_t s = alp_dsp_chain_apply_bins(c, in, 64u, out, 128u, &got);
     zassert_equal(s, ALP_ERR_NOSUPPORT, NULL);
 
     alp_dsp_chain_close(c);
