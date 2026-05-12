@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "alp/chips/deepx_dxm1.h"
+#include "alp/peripheral.h"
 
 /* Translate the polarity enum into the GPIO logic level that asserts
  * reset.  asserted = the silicon is HELD in reset.  V2N-M1 default
@@ -24,28 +25,6 @@ static bool asserted_level(deepx_dxm1_reset_polarity_t p)
 static bool released_level(deepx_dxm1_reset_polarity_t p)
 {
     return !asserted_level(p);
-}
-
-/* Portable busy-wait approximation.  We can't pull in a Zephyr or
- * libc sleep primitive into a chip driver (chips/ must remain
- * portable), so the sequencer takes a microsecond count + relies
- * on the chip's bus-call latency to provide natural pacing.  For
- * the precise sub-millisecond boot timing the DEEPX silicon may
- * require, the caller should use a real OS-level k_busy_wait
- * AROUND deepx_dxm1_bring_up(), passing boot_us=0 here so the
- * sequencer skips its internal wait. */
-static void approximate_busy_wait_us(uint32_t us)
-{
-    /* No-op loop body -- the function-call + bound-check overhead
-     * gives ~tens of nanoseconds per iteration on a Cortex-A55 +
-     * Zephyr at full clock, so we'd need ~30 iterations per us.
-     * Realistic delays are achieved by the caller using their
-     * platform's busy-wait; this helper exists so a hosted-unit-test
-     * build doesn't have an unresolved external dependency. */
-    volatile uint32_t spin = us * 8u;
-    while (spin != 0u) {
-        --spin;
-    }
 }
 
 alp_status_t deepx_dxm1_init(deepx_dxm1_t *ctx,
@@ -105,11 +84,11 @@ alp_status_t deepx_dxm1_bring_up(deepx_dxm1_t *ctx, uint32_t boot_us)
     if (s != ALP_OK) return s;
 
     /* 3. Wait for the firmware to come online if the caller asked
-     *    for it.  Real-world callers should pass boot_us=0 here and
-     *    use their platform's k_busy_wait/k_msleep around the call
-     *    -- the in-driver approximation is order-of-magnitude only. */
+     *    for it.  Uses the portable alp_delay_us primitive which
+     *    routes to k_busy_wait on Zephyr (cycle-accurate) and a
+     *    calibrated portable-C busy-loop on yocto / baremetal. */
     if (boot_us > 0u) {
-        approximate_busy_wait_us(boot_us);
+        alp_delay_us(boot_us);
     }
 
     return ALP_OK;
