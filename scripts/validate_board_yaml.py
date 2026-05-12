@@ -240,7 +240,20 @@ _PERIPHERAL_TO_SOC_KEYS: dict[str, tuple[str, ...] | None] = {
     "watchdog": ("watchdog",),
     "flash":    None,                    # umbrella -- xSPI / OctalSPI / FlexSPI
     "emmc":     ("sdio_emmc", "sdio"),
+    "dac":      ("dac",),
+    "qenc":     ("qenc", "timer_qdec"),
 }
+
+# Peripherals the GD32G553 supervisor MCU brings into the E1M
+# standard set on V2N modules.  When a SoM preset declares
+# `on_module.supervisor_mcu: gd32g553`, the validator accepts any of
+# these as satisfied even if the host SoC's peripherals[] count is 0
+# -- the SDK's V2N backend (src/zephyr/v2n_supervisor.c) routes the
+# portable alp_*_open calls through the GD32 bridge transparently.
+# See docs/gd32-bridge-protocol.md for the wire surface.
+_PERIPHERALS_PROVIDED_BY_GD32_BRIDGE: frozenset[str] = frozenset({
+    "pwm", "adc", "dac", "qenc", "counter",
+})
 
 
 def _check_peripherals_vs_soc(
@@ -279,6 +292,10 @@ def _check_peripherals_vs_soc(
         return 2
     soc_periphs = soc.get("peripherals") or {}
 
+    # On-module supervisor MCU (if any) widens the satisfied set --
+    # see _PERIPHERALS_PROVIDED_BY_GD32_BRIDGE.
+    supervisor_mcu = (preset.get("on_module") or {}).get("supervisor_mcu", "")
+
     rv = 0
     for periph in periphs:
         soc_keys = _PERIPHERAL_TO_SOC_KEYS.get(periph)
@@ -288,6 +305,10 @@ def _check_peripherals_vs_soc(
         # Pass if any candidate key is present with count >= 1.
         if any(int(soc_periphs.get(k, 0) or 0) > 0 for k in soc_keys):
             print(f"OK   peripheral '{periph}' satisfied by {silicon}")
+        elif (supervisor_mcu == "gd32g553" and
+              periph in _PERIPHERALS_PROVIDED_BY_GD32_BRIDGE):
+            print(f"OK   peripheral '{periph}' satisfied by {silicon} via "
+                  f"on-module supervisor MCU '{supervisor_mcu}' (bridge dispatch)")
         else:
             print(f"FAIL peripheral '{periph}' not routed by SoC {silicon} "
                   f"(no {' / '.join(soc_keys)} in metadata/socs/.../{soc_path.name})",

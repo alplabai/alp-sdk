@@ -14,6 +14,18 @@
         "alp_adc_read_uv": {
           "hash": "213e09e41ba37d00",
           "signature": "alp_status_t alp_adc_read_uv(alp_adc_t *adc, int32_t *uv_out);"
+        },
+        "alp_dac_close": {
+          "hash": "36ff8acebd09531e",
+          "signature": "void alp_dac_close(alp_dac_t *dac);"
+        },
+        "alp_dac_read_mv": {
+          "hash": "05d55c9c26cb2b19",
+          "signature": "alp_status_t alp_dac_read_mv(alp_dac_t *dac, uint16_t *mv_out);"
+        },
+        "alp_dac_write_mv": {
+          "hash": "34624e3c2a105340",
+          "signature": "alp_status_t alp_dac_write_mv(alp_dac_t *dac, uint16_t mv);"
         }
       },
       "macros": {},
@@ -25,6 +37,10 @@
         "alp_adc_t": {
           "definition": "typedef struct alp_adc alp_adc_t;",
           "hash": "4f8bac696c999352"
+        },
+        "alp_dac_t": {
+          "definition": "typedef struct alp_dac alp_dac_t;",
+          "hash": "3ff97013ba7cfc44"
         },
         "channel_id": {
           "definition": "typedef struct { uint32_t channel_id;",
@@ -1380,9 +1396,21 @@
           "hash": "db99d8be500f6e89",
           "signature": "alp_status_t gd32g553_adc_read(gd32g553_t *ctx, uint8_t channel, uint8_t samples, uint16_t *mv);"
         },
+        "gd32g553_counter_read": {
+          "hash": "05d5eb9f21aa2610",
+          "signature": "alp_status_t gd32g553_counter_read(gd32g553_t *ctx, uint8_t counter, uint32_t *ticks_out);"
+        },
         "gd32g553_da9292_status_forward": {
           "hash": "df8429063ebd6f61",
           "signature": "alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status);"
+        },
+        "gd32g553_dac_get": {
+          "hash": "6b1ca5b943c6cee8",
+          "signature": "alp_status_t gd32g553_dac_get(gd32g553_t *ctx, uint8_t channel, uint16_t *value_mv);"
+        },
+        "gd32g553_dac_set": {
+          "hash": "f6fbf58194a5db59",
+          "signature": "alp_status_t gd32g553_dac_set(gd32g553_t *ctx, uint8_t channel, uint16_t value_mv);"
         },
         "gd32g553_deinit": {
           "hash": "527699929179beaf",
@@ -1456,6 +1484,14 @@
           "hash": "c8ebbcf0e1fb8d4c",
           "signature": "alp_status_t gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t duty_ns);"
         },
+        "gd32g553_qenc_read": {
+          "hash": "2b348fc8e2610dce",
+          "signature": "alp_status_t gd32g553_qenc_read(gd32g553_t *ctx, uint8_t encoder, int32_t *position_out);"
+        },
+        "gd32g553_qenc_reset": {
+          "hash": "5648f3dad09fce82",
+          "signature": "alp_status_t gd32g553_qenc_reset(gd32g553_t *ctx, uint8_t encoder);"
+        },
         "gd32g553_set_default_transport": {
           "hash": "74a995a5d548ad83",
           "signature": "alp_status_t gd32g553_set_default_transport(gd32g553_t *ctx, gd32g553_transport_t t);"
@@ -1466,6 +1502,14 @@
           "hash": "ac398e81c6bc385f",
           "value": "8u"
         },
+        "GD32G553_BRIDGE_COUNTER_CHANNELS": {
+          "hash": "2f1378d7c8a9b163",
+          "value": "1u"
+        },
+        "GD32G553_BRIDGE_DAC_CHANNELS": {
+          "hash": "248170a9f3ab5e78",
+          "value": "2u"
+        },
         "GD32G553_BRIDGE_DEFAULT_I2C_ADDR": {
           "hash": "0a921f0dacaba4b7",
           "value": "0x70u"
@@ -1473,6 +1517,10 @@
         "GD32G553_BRIDGE_I2C_REG_CMD": {
           "hash": "5944a7cbecd0733d",
           "value": "0x00u"
+        },
+        "GD32G553_BRIDGE_QENC_CHANNELS": {
+          "hash": "c55dc0270f5feaaf",
+          "value": "4u"
         },
         "GD32G553_BRIDGE_REPLY_TIMEOUT_MS": {
           "hash": "238ecf3164e191d8",
@@ -1493,8 +1541,8 @@
       },
       "typedefs": {
         "gd32g553_cmd_t": {
-          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
-          "hash": "99f1e030d83a2ec9"
+          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
+          "hash": "6b7add1ac027f1ee"
         },
         "gd32g553_ota_slot_t": {
           "definition": "typedef enum { GD32G553_OTA_SLOT_INVALID = 0u, GD32G553_OTA_SLOT_A = 1u, GD32G553_OTA_SLOT_B = 2u, } gd32g553_ota_slot_t;",
@@ -2521,6 +2569,10 @@
           "hash": "6794091b072e23f9",
           "signature": "alp_status_t tps628640_get_status(tps628640_t *ctx, uint8_t *status_byte);"
         },
+        "tps628640_get_voltage2_mv": {
+          "hash": "e9e371b783c27ecd",
+          "signature": "alp_status_t tps628640_get_voltage2_mv(tps628640_t *ctx, uint16_t *mv);"
+        },
         "tps628640_get_voltage_mv": {
           "hash": "5666e4ab4e244097",
           "signature": "alp_status_t tps628640_get_voltage_mv(tps628640_t *ctx, uint16_t *mv);"
@@ -2533,20 +2585,117 @@
           "hash": "bd6df2b7b38d12a1",
           "signature": "alp_status_t tps628640_read_reg(tps628640_t *ctx, uint8_t reg, uint8_t *val);"
         },
+        "tps628640_reset_to_defaults": {
+          "hash": "14a968e07a8b1c42",
+          "signature": "alp_status_t tps628640_reset_to_defaults(tps628640_t *ctx);"
+        },
+        "tps628640_set_fpwm_mode": {
+          "hash": "806c0bb5a237bdff",
+          "signature": "alp_status_t tps628640_set_fpwm_mode(tps628640_t *ctx, bool fpwm);"
+        },
+        "tps628640_set_ramp_speed": {
+          "hash": "af61df614f92af56",
+          "signature": "alp_status_t tps628640_set_ramp_speed(tps628640_t *ctx, tps628640_ramp_speed_t speed);"
+        },
+        "tps628640_set_voltage2_mv": {
+          "hash": "ba984a356512237c",
+          "signature": "alp_status_t tps628640_set_voltage2_mv(tps628640_t *ctx, uint16_t mv);"
+        },
         "tps628640_set_voltage_mv": {
           "hash": "5231b82d12b42391",
           "signature": "alp_status_t tps628640_set_voltage_mv(tps628640_t *ctx, uint16_t mv);"
+        },
+        "tps628640_software_enable": {
+          "hash": "3ced24ee8bd4cfb7",
+          "signature": "alp_status_t tps628640_software_enable(tps628640_t *ctx, bool enable);"
         },
         "tps628640_write_reg": {
           "hash": "30151540f76eb2da",
           "signature": "alp_status_t tps628640_write_reg(tps628640_t *ctx, uint8_t reg, uint8_t val);"
         }
       },
-      "macros": {},
+      "macros": {
+        "TPS628640_CTRL_DEFAULT": {
+          "hash": "ced7963bb3b02c67",
+          "value": ""
+        },
+        "TPS628640_CTRL_FPWM_DURING_VID_CHANGE": {
+          "hash": "990283fab0594244",
+          "value": "(1u << 6)"
+        },
+        "TPS628640_CTRL_FPWM_MODE": {
+          "hash": "392dddd75d2964bb",
+          "value": "(1u << 4)"
+        },
+        "TPS628640_CTRL_HICCUP": {
+          "hash": "529773e39860ccea",
+          "value": "(1u << 2)"
+        },
+        "TPS628640_CTRL_OUTPUT_DISCHARGE": {
+          "hash": "c4f4d2b14a00d43a",
+          "value": "(1u << 3)"
+        },
+        "TPS628640_CTRL_RAMP_SPEED_MASK": {
+          "hash": "ed3a0025fd49dd3d",
+          "value": "(0x3u)"
+        },
+        "TPS628640_CTRL_RESET": {
+          "hash": "23642747215d7c65",
+          "value": "(1u << 7)"
+        },
+        "TPS628640_CTRL_SOFTWARE_ENABLE": {
+          "hash": "ceb2e72b4cf3ba4a",
+          "value": "(1u << 5)"
+        },
+        "TPS628640_REG_CONTROL": {
+          "hash": "76cddf54aa642425",
+          "value": "0x03u"
+        },
+        "TPS628640_REG_STATUS": {
+          "hash": "1e440a2c47d94a33",
+          "value": "0x05u"
+        },
+        "TPS628640_REG_VOUT1": {
+          "hash": "ca1a190901f8427f",
+          "value": "0x01u"
+        },
+        "TPS628640_REG_VOUT2": {
+          "hash": "f341e0a10e145e68",
+          "value": "0x02u"
+        },
+        "TPS628640_STATUS_HICCUP": {
+          "hash": "dca1664201269c1c",
+          "value": "(1u << 3)"
+        },
+        "TPS628640_STATUS_THERMAL_WARNING": {
+          "hash": "711f7be43e3f594f",
+          "value": "(1u << 4)"
+        },
+        "TPS628640_STATUS_UVLO": {
+          "hash": "05bc0c405bffcb52",
+          "value": "(1u << 0)"
+        },
+        "TPS628640_VOUT_BASE_MV": {
+          "hash": "4b7c8236ac5ebb4c",
+          "value": "400u"
+        },
+        "TPS628640_VOUT_MAX_MV": {
+          "hash": "9b714988577af0bc",
+          "value": "1675u"
+        },
+        "TPS628640_VOUT_STEP_MV": {
+          "hash": "86fc0b32898e5257",
+          "value": "5u"
+        }
+      },
       "typedefs": {
         "initialised": {
           "definition": "typedef struct { bool initialised;",
           "hash": "98b22257593e61d9"
+        },
+        "tps628640_ramp_speed_t": {
+          "definition": "typedef enum { TPS628640_RAMP_20_MV_PER_US = 0u, TPS628640_RAMP_10_MV_PER_US = 1u, TPS628640_RAMP_5_MV_PER_US = 2u, TPS628640_RAMP_1_MV_PER_US = 3u, } tps628640_ramp_speed_t;",
+          "hash": "cd9f690343fffe39"
         }
       }
     },
