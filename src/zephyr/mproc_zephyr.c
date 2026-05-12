@@ -80,8 +80,6 @@ struct alp_mbox {
     uint32_t             channel;
     alp_mbox_msg_cb_t    cb;
     void                *cb_user;
-    struct mbox_channel  tx_chan;
-    struct mbox_channel  rx_chan;
 #endif
 #if defined(CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING)
     uint32_t             tx_sequence;  /* monotonic outbound counter */
@@ -102,7 +100,7 @@ static struct alp_shmem  g_shmem_pool[CONFIG_ALP_SDK_MAX_SHMEM_HANDLES];
 static struct alp_mbox   g_mbox_pool[CONFIG_ALP_SDK_MAX_MBOX_HANDLES];
 static struct alp_hwsem  g_hwsem_pool[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
 
-static struct alp_shmem *shmem_pool_acquire(void)
+__attribute__((unused)) static struct alp_shmem *shmem_pool_acquire(void)
 {
     for (size_t i = 0; i < ARRAY_SIZE(g_shmem_pool); ++i) {
         if (!g_shmem_pool[i].in_use) {
@@ -286,8 +284,6 @@ alp_mbox_t *alp_mbox_open(const alp_mbox_config_t *cfg)
     }
     mb->dev     = dev;
     mb->channel = cfg->channel;
-    mbox_init_channel(&mb->tx_chan, dev, cfg->channel);
-    mbox_init_channel(&mb->rx_chan, dev, cfg->channel);
     return mb;
 #else
     alp_z_set_last_error(ALP_ERR_NOSUPPORT);
@@ -321,7 +317,7 @@ alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len, uint32_
         .data = mb->tx_scratch,
         .size = framed_len,
     };
-    int rc = mbox_send(&mb->tx_chan, &msg);
+    int rc = mbox_send(mb->dev, mb->channel, &msg);
     if (rc == 0) {
         mb->tx_sequence = next_seq;
     }
@@ -331,7 +327,7 @@ alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len, uint32_
         .data = data,
         .size = len,
     };
-    return errno_to_alp(mbox_send(&mb->tx_chan, &msg));
+    return errno_to_alp(mbox_send(mb->dev, mb->channel, &msg));
 #endif
 #else
     return ALP_ERR_NOSUPPORT;
@@ -344,9 +340,9 @@ alp_status_t alp_mbox_set_callback(alp_mbox_t *mb, alp_mbox_msg_cb_t cb, void *u
 #if defined(CONFIG_ALP_SDK_MPROC)
     mb->cb      = cb;
     mb->cb_user = user;
-    int err     = mbox_register_callback(&mb->rx_chan, cb ? mbox_rx_cb : NULL, mb);
+    int err     = mbox_register_callback(mb->dev, mb->channel, cb ? mbox_rx_cb : NULL, mb);
     if (err == 0) {
-        err = mbox_set_enabled(&mb->rx_chan, cb ? true : false);
+        err = mbox_set_enabled(mb->dev, mb->channel, cb ? true : false);
     }
     return errno_to_alp(err);
 #else
@@ -360,7 +356,7 @@ void alp_mbox_close(alp_mbox_t *mb)
 {
     if (mb == NULL || !mb->in_use) return;
 #if defined(CONFIG_ALP_SDK_MPROC)
-    (void)mbox_set_enabled(&mb->rx_chan, false);
+    (void)mbox_set_enabled(mb->dev, mb->channel, false);
     mb->in_use = false;
 #endif
 }
