@@ -31,7 +31,9 @@
  *                               (tan / exp / tanh NOSUPPORT -- host
  *                               wrapper can libm-fallback in a future
  *                               commit).  F32 + Q31 paths.
- *   5. DAC_SET / GET         -- vendor dac_*(); two channels (PA4, PA6).
+ *   5. DAC_SET / GET         -- DONE: channel 0 -> DAC0_OUT0 / PA4,
+ *                               channel 1 -> DAC1_OUT0 / PA6, mV<->12-bit
+ *                               code at VREF=3300mV.
  *   6. PWM_SET / GET         -- TIMER0 / TIMER7 advanced PWM.
  *   7. PWM_CONFIGURE         -- align mode, dead-time, break input.
  *   8. ADC_READ              -- single-channel polling.
@@ -249,6 +251,34 @@ static uint32_t f32_to_bits(float f)
 }
 
 /* ----------------------------------------------------------------- */
+/* DAC channels.                                                      */
+/* ----------------------------------------------------------------- */
+
+/* E1M DAC0/DAC1 -> physical DAC peripheral + output + pad.  Sourced
+ * from `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`; PA4 is the
+ * GD32G5x3's stock DAC0_OUT0 alt-function and PA6 is DAC1_OUT0 per
+ * the datasheet's pin alt-function table. */
+typedef struct {
+    uint32_t periph;    /* DAC0..DAC3 base address */
+    uint8_t  out;       /* DAC_OUT0 or DAC_OUT1    */
+    uint32_t gpio_port; /* GPIOA..GPIOG base addr  */
+    uint32_t gpio_pin;  /* GPIO_PIN_n bit mask     */
+} gd32_dac_ch_t;
+
+static const gd32_dac_ch_t dac_channels[] = {
+    [0] = { DAC0, DAC_OUT0, GPIOA, GPIO_PIN_4 }, /* E1M DAC0 -> PA4 */
+    [1] = { DAC1, DAC_OUT0, GPIOA, GPIO_PIN_6 }, /* E1M DAC1 -> PA6 */
+};
+#define DAC_CHANNEL_COUNT (sizeof(dac_channels) / sizeof(dac_channels[0]))
+
+/* DAC VREF assumption.  The V2N's analog supply is 3.3 V.  Revisit
+ * if a future hw-revision moves to a buffered VREFINT source or a
+ * different rail.  Full-scale code is 4095 for 12-bit alignment;
+ * code = (value_mv * 4095) / VREF_mV with overflow clamped. */
+#define DAC_VREF_MV    3300u
+#define DAC_FULL_SCALE 4095u
+
+/* ----------------------------------------------------------------- */
 /* Boot hooks (overrides of the weak defaults in src/main.c)         */
 /* ----------------------------------------------------------------- */
 
@@ -290,6 +320,24 @@ void bridge_hw_init(void)
      * bridge_hw_tmu_compute because the mode + I/O width vary per
      * call. */
     rcu_periph_clock_enable(RCU_TMU);
+
+    /* DAC bring-up.  Two channels per `dac_channels[]`:
+     *   ch0 -> DAC0_OUT0 -> PA4
+     *   ch1 -> DAC1_OUT0 -> PA6
+     * Configure both pads as analog (GPIOA clock was enabled
+     * above for the IO pad map), enable each DAC peripheral in
+     * NORMAL_PIN_BUFFON mode so the output drives the pad
+     * through the chip's built-in buffer. */
+    gpio_mode_set(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO_PIN_4 | GPIO_PIN_6);
+    rcu_periph_clock_enable(RCU_DAC0);
+    rcu_periph_clock_enable(RCU_DAC1);
+    for (size_t i = 0; i < DAC_CHANNEL_COUNT; ++i) {
+        dac_deinit(dac_channels[i].periph);
+        dac_trigger_disable(dac_channels[i].periph, dac_channels[i].out);
+        dac_wave_mode_config(dac_channels[i].periph, dac_channels[i].out, DAC_WAVE_DISABLE);
+        dac_mode_config(dac_channels[i].periph, dac_channels[i].out, NORMAL_PIN_BUFFON);
+        dac_enable(dac_channels[i].periph, dac_channels[i].out);
+    }
 }
 
 /* Called from the SysTick handler (or the main loop's idle path)
@@ -598,16 +646,32 @@ int bridge_hw_tmu_compute(uint8_t function, uint8_t format, uint32_t in_a, uint3
 
 int bridge_hw_dac_set(uint8_t channel, uint16_t value_mv)
 {
-    (void)channel;
-    (void)value_mv;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (channel >= DAC_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+    /* mV -> 12-bit code, clamp on over-range (the host doesn't see
+     * BRIDGE_HW_ERR_RANGE for this case -- saturating is friendlier
+     * than rejecting a request the user can recover from by reading
+     * back the actual programmed value). */
+    uint32_t code = ((uint32_t)value_mv * DAC_FULL_SCALE) / DAC_VREF_MV;
+    if (code > DAC_FULL_SCALE) code = DAC_FULL_SCALE;
+    dac_data_set(dac_channels[channel].periph, dac_channels[channel].out, DAC_ALIGN_12B_R,
+                 (uint16_t)code);
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_dac_get(uint8_t channel, uint16_t *value_mv)
 {
-    (void)channel;
-    if (value_mv != 0) *value_mv = 0u;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (value_mv == 0) return BRIDGE_HW_ERR_INVAL;
+    *value_mv = 0u;
+    if (channel >= DAC_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+    /* dac_output_value_get reads the DAC's hold register (the value
+     * currently driving the pad), not the input setpoint -- this is
+     * what we want for read-back: callers see the actual code in
+     * play, which may differ from the last `set` if the DAC was
+     * concurrent-paired or DMA-driven elsewhere. */
+    uint16_t code = dac_output_value_get(dac_channels[channel].periph, dac_channels[channel].out);
+    if (code > DAC_FULL_SCALE) code = DAC_FULL_SCALE;
+    *value_mv = (uint16_t)(((uint32_t)code * DAC_VREF_MV) / DAC_FULL_SCALE);
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_qenc_read(uint8_t encoder, int32_t *position)

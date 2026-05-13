@@ -173,6 +173,26 @@ that lands before the v0.3.0 tag.)
   functions; the other three remain `STATUS_NOSUPPORT`.  No
   protocol or ABI change.
 
+- **`bridge_hw_dac_set` / `bridge_hw_dac_get` now drive real DAC
+  channels (2026-05-13).**  Fifth of the 18 HAL bodies.  Two
+  channels per the `dac_channels[]` map in
+  `gd32-bridge/hal/bridge_hw_gd32.c`:
+    - channel 0 -> DAC0 / DAC_OUT0 / PA4
+    - channel 1 -> DAC1 / DAC_OUT0 / PA6 (per GD32G5x3 datasheet
+      pin alt-function table; maintainer-confirmed)
+  `bridge_hw_init()` configures PA4 + PA6 as analog, enables
+  `RCU_DAC0` + `RCU_DAC1`, and runs the vendor's standard
+  `dac_deinit -> dac_trigger_disable -> dac_wave_mode_config
+  (WAVE_DISABLE) -> dac_mode_config (NORMAL_PIN_BUFFON) ->
+  dac_enable` sequence for each channel.  `bridge_hw_dac_set`
+  converts mV to 12-bit right-aligned code at `DAC_VREF_MV =
+  3300` (the V2N's 3.3 V analog supply), clamping overflow to
+  full-scale.  `bridge_hw_dac_get` reads the hold register
+  (the value driving the pad) and converts back to mV.  Wire
+  opcodes `CMD_DAC_SET` (0x50) and `CMD_DAC_GET` (0x51) flip
+  from `STATUS_NOSUPPORT` to `STATUS_OK` on the gd32 backend.
+  No protocol or ABI change.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
