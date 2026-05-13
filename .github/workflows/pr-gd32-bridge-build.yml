@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builds the gd32-bridge firmware tree against the GD32G5x3 firmware
+# library in both BRIDGE_HAL_BACKEND modes:
+#
+#   * stub  -- protocol layer + transports compile against the
+#              hardware-less HAL stubs in `hal/bridge_hw_stub.c`.
+#              Exercises the dispatcher path end-to-end without
+#              needing the vendor library on the workspace.
+#   * gd32  -- bridge_hw_gd32.c + the GigaDevice standard-peripheral
+#              library link successfully.  Catches missing peripheral
+#              header includes, mismatched function signatures
+#              against the vendor library, and linker errors before
+#              they reach the maintainer's HIL bench.
+#
+# Both modes use the arm-none-eabi toolchain pinned by
+# `gd32-bridge/toolchain/arm-none-eabi.cmake`.  Ubuntu 22.04's
+# `gcc-arm-none-eabi` (v10.3) is older than the toolchain file's
+# "13.x or newer" hint -- accepted today because the vendor library
+# + bridge sources don't use any C17/C2x feature that 10.3 lacks.
+# Bump the runner image (or fetch the Arm GNU Toolchain tarball
+# directly) when a real-impl commit eventually does.
+
+name: pr-gd32-bridge-build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'gd32-bridge/**'
+      - 'vendors/gd32_firmware_library/**'
+      - '.github/workflows/pr-gd32-bridge-build.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'gd32-bridge/**'
+      - 'vendors/gd32_firmware_library/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stub:
+    name: gd32-bridge · BRIDGE_HAL_BACKEND=stub
+    runs-on: ubuntu-latest
+    steps:
+      # No submodule init -- the stub backend doesn't link the vendor
+      # tree, so cloning the ~hundred-MB upstream archive is wasted
+      # work in this job.
+      - uses: actions/checkout@v4
+
+      - name: Install arm-none-eabi toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi
+
+      - name: Configure (stub backend)
+        run: |
+          cmake -B gd32-bridge/build/stub -S gd32-bridge \
+            -DCMAKE_TOOLCHAIN_FILE=$PWD/gd32-bridge/toolchain/arm-none-eabi.cmake \
+            -DBRIDGE_HAL_BACKEND=stub
+
+      - name: Build (stub backend)
+        run: cmake --build gd32-bridge/build/stub --parallel
+
+      - name: Report binary size
+        run: arm-none-eabi-size gd32-bridge/build/stub/gd32-bridge
+
+  gd32:
+    name: gd32-bridge · BRIDGE_HAL_BACKEND=gd32
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Init only the gd32_firmware_library submodule; other
+          # submodules (if any are added later) stay un-initialised
+          # in this job to keep the checkout fast.
+          submodules: false
+
+      - name: Init GD32G5x3 firmware library submodule
+        run: |
+          git submodule update --init --depth 1 --recursive \
+              vendors/gd32_firmware_library/upstream
+
+      - name: Install arm-none-eabi toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi
+
+      - name: Configure (gd32 backend)
+        run: |
+          cmake -B gd32-bridge/build/gd32 -S gd32-bridge \
+            -DCMAKE_TOOLCHAIN_FILE=$PWD/gd32-bridge/toolchain/arm-none-eabi.cmake \
+            -DBRIDGE_HAL_BACKEND=gd32
+
+      - name: Build (gd32 backend)
+        run: cmake --build gd32-bridge/build/gd32 --parallel
+
+      - name: Report binary size
+        run: arm-none-eabi-size gd32-bridge/build/gd32/gd32-bridge
+
+      - name: Upload firmware artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gd32-bridge-gd32-backend
+          path: |
+            gd32-bridge/build/gd32/gd32-bridge
+            gd32-bridge/build/gd32/gd32-bridge.hex
+            gd32-bridge/build/gd32/gd32-bridge.bin
+          retention-days: 14
+          if-no-files-found: ignore
