@@ -198,7 +198,8 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
 int bridge_hw_trng_read(uint8_t *dest, size_t len)
 {
     if (dest != 0) {
-        for (size_t i = 0; i < len; ++i) dest[i] = 0u;
+        for (size_t i = 0; i < len; ++i)
+            dest[i] = 0u;
     }
     return BRIDGE_HW_ERR_NOTIMPL;
 }
