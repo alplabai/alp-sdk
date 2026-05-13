@@ -143,6 +143,36 @@ that lands before the v0.3.0 tag.)
   (0x80) flips from `STATUS_NOSUPPORT` to `STATUS_OK` on the
   gd32 backend.  No protocol or ABI change.
 
+- **`bridge_hw_tmu_compute` -> CORDIC math accelerator
+  (2026-05-13).**  Fourth of the 18 HAL bodies.  Wires nine of the
+  twelve host TMU functions through the GD32G5x3's CORDIC unit:
+  `sin`, `cos`, `atan`, `atan2`, `sqrt`, `log` (ln), `sinh`,
+  `cosh`, `hypot` (sqrt(x^2+y^2) via TMU_MODE_MODULUS).  Each
+  call reconfigures `tmu_parameter_struct` for the requested
+  function + Q31/F32 format, writes one or two inputs through
+  `tmu_one_*_write` / `tmu_two_*_write`, polls `TMU_FLAG_END`
+  with a bounded timeout, then reads one or two outputs through
+  the matching `_read` helper -- SIN / COS emit a (result,
+  scaling_factor) pair so the second word is drained and
+  discarded.  Returns `BRIDGE_HW_ERR_RANGE` on `TMU_FLAG_OVRF`
+  (input outside the function's domain) and `BRIDGE_HW_ERR_IO`
+  on the bounded timeout.
+
+  `tan` / `exp` / `tanh` aren't native TMU modes; this commit
+  returns `BRIDGE_HW_ERR_NOTIMPL` (-> wire `STATUS_NOSUPPORT`)
+  for them.  A future commit can either compose them on the
+  bridge side (`tan = sin/cos`, `exp = cosh + sinh`,
+  `tanh = sinh/cosh`) or have the V2N-side `<alp/tmu.h>`
+  wrapper fall back to libm when the bridge signals NOSUPPORT.
+
+  `bridge_hw_init()` adds an `rcu_periph_clock_enable(RCU_TMU)`
+  call; per-op configuration happens inside the compute body so
+  the dispatch is stateless across calls.  Wire opcode
+  `CMD_TMU_COMPUTE` (0x90) flips from `STATUS_NOSUPPORT` to
+  `STATUS_OK` on the gd32 backend for the nine supported
+  functions; the other three remain `STATUS_NOSUPPORT`.  No
+  protocol or ABI change.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
