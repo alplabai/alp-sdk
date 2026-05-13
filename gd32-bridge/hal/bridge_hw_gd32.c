@@ -20,7 +20,7 @@
  *
  * Implementation order (planned, in increasing risk):
  *
- *   1. RESET_REASON          -- read RCU_RSTSCK status flags.
+ *   1. RESET_REASON          -- DONE: RCU_RSTSCK decode + RSTFC clear.
  *   2. GPIO_READ / WRITE     -- pad map mirrors metadata/e1m_modules/
  *                               v2n/gd32-io-mcu-map.tsv.
  *   3. TRNG_READ             -- vendor trng_*(); init in bridge_hw_init().
@@ -107,9 +107,46 @@ void bridge_hw_tick(void)
 
 uint8_t bridge_hw_reset_reason(void)
 {
-    /* TODO #1: read RCU_RSTSCK; map PORRSTF / NRSTRSTF / SWRSTF /
-     * FWDGTRSTF / WWDGTRSTF / LPRSTF + clear via RSTFC. */
-    return 0u; /* UNKNOWN */
+    /* Read RCU_RSTSCK (reset/clock control status register, GD32G5xx
+     * Reference Manual §6.6.13) and decode the sticky reset-cause
+     * flags in the high byte: PORRSTF (bit 27), BORRSTF (25),
+     * EPRSTF (26, NRST pin), SWRSTF (28), FWDGTRSTF (29),
+     * WWDGTRSTF (30), LPRSTF (31).
+     *
+     * The hardware can latch multiple flags across nested resets, so
+     * we decode in coldest-first priority order: a power-on event
+     * dominates a brownout, which dominates an external-pin reset,
+     * which dominates a watchdog or software trigger.  Encoded byte
+     * matches the host's `gd32g553_reset_cause_t` in
+     * <alp/chips/gd32g553.h>:
+     *
+     *   0 = UNKNOWN, 1 = POWER_ON, 2 = NRST_PIN, 3 = SOFT,
+     *   4 = WDT, 5 = BROWNOUT, 6 = LOWPOWER.
+     *
+     * RSTFC (bit 24) clears every cause flag in one write; the vendor
+     * helper `rcu_all_reset_flag_clear()` is functionally identical
+     * but we keep the access inline to avoid pulling rcu.c stages we
+     * don't otherwise need.  After the write the next reader sees
+     * UNKNOWN unless something resets the chip again. */
+    const uint32_t rstsck = RCU_RSTSCK;
+    uint8_t        cause  = 0u; /* UNKNOWN */
+
+    if (rstsck & RCU_RSTSCK_PORRSTF) {
+        cause = 1u; /* POWER_ON */
+    } else if (rstsck & RCU_RSTSCK_BORRSTF) {
+        cause = 5u; /* BROWNOUT */
+    } else if (rstsck & RCU_RSTSCK_EPRSTF) {
+        cause = 2u; /* NRST_PIN */
+    } else if (rstsck & RCU_RSTSCK_LPRSTF) {
+        cause = 6u; /* LOWPOWER */
+    } else if (rstsck & (RCU_RSTSCK_FWDGTRSTF | RCU_RSTSCK_WWDGTRSTF)) {
+        cause = 4u; /* WDT */
+    } else if (rstsck & RCU_RSTSCK_SWRSTF) {
+        cause = 3u; /* SOFT */
+    }
+
+    RCU_RSTSCK |= RCU_RSTSCK_RSTFC;
+    return cause;
 }
 
 int bridge_hw_gpio_read(uint32_t mask, uint32_t *levels)

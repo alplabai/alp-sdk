@@ -90,6 +90,24 @@ that lands before the v0.3.0 tag.)
   comparison was always true and tripped GCC's `-Wtype-limits` under
   `-Wextra`).  No behavioural change.
 
+### Changed (2026-05-13 -- gd32-bridge HAL bodies)
+
+- **`bridge_hw_reset_reason()` now decodes RCU_RSTSCK (2026-05-13).**
+  Replaces the `return 0u; /* UNKNOWN */` stub in
+  `gd32-bridge/hal/bridge_hw_gd32.c` with a priority decode of the
+  GD32G5x3's reset-status register flags: `PORRSTF` -> `POWER_ON`,
+  `BORRSTF` -> `BROWNOUT`, `EPRSTF` -> `NRST_PIN`, `LPRSTF` ->
+  `LOWPOWER`, `FWDGTRSTF | WWDGTRSTF` -> `WDT`, `SWRSTF` -> `SOFT`.
+  Decoder picks coldest cause first because the GD32G5 latches all
+  flags across nested resets.  After decoding, the `RSTFC` bit
+  (`RCU_RSTSCK` bit 24) clears every cause so the next caller sees
+  `UNKNOWN` until a future reset fires.  Encoded byte matches the
+  host enum `gd32g553_reset_cause_t` in `<alp/chips/gd32g553.h>`.
+  Wire behaviour for `CMD_RESET_REASON` (0x03) on the gd32 backend
+  now reports the real cause instead of always-`UNKNOWN`; stub
+  backend unchanged (still returns 0).  First of the 18 HAL bodies
+  enumerated in `gd32-bridge/hal/bridge_hw_gd32.c`'s top comment.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
