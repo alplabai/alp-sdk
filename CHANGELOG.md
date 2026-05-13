@@ -61,6 +61,23 @@ that lands before the v0.3.0 tag.)
 - **5L35023B I2C address -> 7-bit `0x68`** (8-bit write `0xD0`) per
   the Renesas 5L35023 public datasheet.
 
+### Fixed (2026-05-13 -- examples-reorg CMakeLists path fix)
+
+- **Per-SoM example `CMakeLists.txt` files now resolve
+  `ALP_SDK_ROOT` correctly.**  The 2026-05-13 examples reorg
+  (commit `c8f4379`) moved `examples/edgeai-vision-aen/` to
+  `examples/aen/edgeai-vision-aen/` and the v2n-* examples to
+  `examples/v2n/v2n-*/`, but each example's CMakeLists.txt
+  still computed `${CMAKE_CURRENT_SOURCE_DIR}/../..` as the SDK
+  root -- which after the move points at `examples/aen/` /
+  `examples/v2n/`, not the repo root.  `alp_project.py` failed
+  to load from the non-existent `scripts/` location under those
+  intermediate dirs, breaking `pr-twister`'s
+  `alp_sdk.example.edgeai_vision_aen.skeleton` scenario.
+  Bumped to `../../..` on all 12 nested examples (1 under
+  `examples/aen/`, 11 under `examples/v2n/`).  Top-level
+  examples (e.g. `examples/adc-voltmeter/`) keep `../..`.
+
 ### Removed (2026-05-13 -- top-level UX simplification)
 
 - **`PLAN.md` deleted from the public repo.**  It was an

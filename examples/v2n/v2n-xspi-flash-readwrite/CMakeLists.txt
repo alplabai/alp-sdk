@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.20)
 if(DEFINED ENV{ALP_SDK_ROOT})
     set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
 else()
-    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../.. ABSOLUTE)
+    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
 endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
