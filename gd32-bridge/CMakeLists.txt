@@ -105,22 +105,23 @@ target_link_options(gd32-bridge PRIVATE
     -T${CMAKE_SOURCE_DIR}/toolchain/gd32g553_flash.ld
 )
 
-# Emit .hex + .bin for the maintainer's flasher of choice.  Guarded
-# behind `if(TARGET ...)` because the previous unconditional form
-# fatal-errored on CI with "No target gd32-bridge" -- whatever causes
-# the target to not register reliably in the CI runner's CMake
-# 3.31 + Generic-system toolchain combo, the build still finishes
-# (we just skip the .hex/.bin emission).  HIL turn-on can carry the
-# .elf without those; xPack OpenOCD + GDB accept .elf directly.
-if(TARGET gd32-bridge)
-    add_custom_command(TARGET gd32-bridge POST_BUILD
-        COMMAND ${CMAKE_OBJCOPY} -O ihex   $<TARGET_FILE:gd32-bridge> $<TARGET_FILE:gd32-bridge>.hex
-        COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:gd32-bridge> $<TARGET_FILE:gd32-bridge>.bin
-        BYPRODUCTS $<TARGET_FILE:gd32-bridge>.hex $<TARGET_FILE:gd32-bridge>.bin
-    )
-else()
-    message(WARNING "gd32-bridge target not registered -- skipping .hex/.bin POST_BUILD emission")
-endif()
+# Emit .hex + .bin for the maintainer's flasher of choice.
+#
+# Use literal paths rather than $<TARGET_FILE:gd32-bridge> generator
+# expressions -- on the CI runner's CMake 3.31 + arm-none-eabi-gcc
+# 13.2 + Generic-system toolchain combo, $<TARGET_FILE:gd32-bridge>
+# fails the GENERATE step with "No target gd32-bridge" even after
+# the configure-time get_target_property() above confirms the target
+# is registered as EXECUTABLE.  The target_file generator expression
+# evidently can't resolve for executables on CMAKE_SYSTEM_NAME=Generic
+# without a CMAKE_EXECUTABLE_SUFFIX hint; pre-computing the path
+# sidesteps it entirely.
+set(_GD32_BRIDGE_BIN ${CMAKE_BINARY_DIR}/gd32-bridge)
+add_custom_command(TARGET gd32-bridge POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O ihex   ${_GD32_BRIDGE_BIN} ${_GD32_BRIDGE_BIN}.hex
+    COMMAND ${CMAKE_OBJCOPY} -O binary ${_GD32_BRIDGE_BIN} ${_GD32_BRIDGE_BIN}.bin
+    BYPRODUCTS ${_GD32_BRIDGE_BIN}.hex ${_GD32_BRIDGE_BIN}.bin
+)
 
 # ----------------------------------------------------------------- #
 # Build-id stamping (truncated SHA-1 of the ELF).                    #
