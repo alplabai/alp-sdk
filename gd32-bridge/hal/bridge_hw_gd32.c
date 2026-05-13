@@ -261,21 +261,19 @@ static uint32_t f32_to_bits(float f)
  * pad column; AF + timer-channel from the GD32G553xx Datasheet Rev2.0
  * Tables 2-10..2-13 (pin alternate-function summary).
  *
- *   PWM0  PA11  TIMER0_CH3  (main)        AF10
- *   PWM1  PB1   TIMER0_CH2N (complement.) AF6
- *   PWM2  PB14  TIMER0_CH1N (complement.) AF6
- *   PWM3  PC5   TIMER0_CH3N (complement.) AF6
- *   PWM4  PC10  TIMER7_CH0N               AF5
- *   PWM5  PC11  TIMER7_CH1N               AF5
- *   PWM6  PC12  TIMER7_CH2N               AF5
- *   PWM7  PD0   TIMER7_CH3N               AF5
+ *   PWM0  PA11  TIMER0_MCH0 (complement.) AF6
+ *   PWM1  PB1   TIMER0_MCH2 (complement.) AF6
+ *   PWM2  PB14  TIMER0_MCH1 (complement.) AF6
+ *   PWM3  PC5   TIMER0_MCH3 (complement.) AF6
+ *   PWM4  PC10  TIMER7_MCH0               AF4
+ *   PWM5  PC11  TIMER7_MCH1               AF4
+ *   PWM6  PC12  TIMER7_MCH2               AF4
+ *   PWM7  PD0   TIMER7_MCH3               AF6
  *
- * Note that PWM0 and PWM3 sit on the two outputs of TIMER0 channel
- * 3 (main + complementary).  They share the channel's compare
- * register -- their duty cycles are mechanically inverse and cannot
- * be set independently.  Likely intentional on V2N (half-bridge
- * pair) but documented here so future host-side code doesn't expect
- * fully independent control.
+ * Every PWM rides a distinct TIMER channel's complementary output,
+ * so per-channel duty cycles are fully independent.  Each channel's
+ * main output (CHx) is unused on V2N -- only the complementary
+ * (CHxN) pad sits on the E1M PWM connector.
  *
  * Periods are SHARED across all PWMs of the same timer (TIMER0:
  * PWM0..3; TIMER7: PWM4..7) because each TIMER has one ARR.  The
@@ -293,14 +291,14 @@ typedef struct {
 } gd32_pwm_ch_t;
 
 static const gd32_pwm_ch_t pwm_channels[] = {
-    [0] = { TIMER0, TIMER_CH_3, false, GPIOA, GPIO_PIN_11, GPIO_AF_10 },
+    [0] = { TIMER0, TIMER_CH_0, true, GPIOA, GPIO_PIN_11, GPIO_AF_6 },
     [1] = { TIMER0, TIMER_CH_2, true, GPIOB, GPIO_PIN_1, GPIO_AF_6 },
     [2] = { TIMER0, TIMER_CH_1, true, GPIOB, GPIO_PIN_14, GPIO_AF_6 },
     [3] = { TIMER0, TIMER_CH_3, true, GPIOC, GPIO_PIN_5, GPIO_AF_6 },
-    [4] = { TIMER7, TIMER_CH_0, true, GPIOC, GPIO_PIN_10, GPIO_AF_5 },
-    [5] = { TIMER7, TIMER_CH_1, true, GPIOC, GPIO_PIN_11, GPIO_AF_5 },
-    [6] = { TIMER7, TIMER_CH_2, true, GPIOC, GPIO_PIN_12, GPIO_AF_5 },
-    [7] = { TIMER7, TIMER_CH_3, true, GPIOD, GPIO_PIN_0, GPIO_AF_5 },
+    [4] = { TIMER7, TIMER_CH_0, true, GPIOC, GPIO_PIN_10, GPIO_AF_4 },
+    [5] = { TIMER7, TIMER_CH_1, true, GPIOC, GPIO_PIN_11, GPIO_AF_4 },
+    [6] = { TIMER7, TIMER_CH_2, true, GPIOC, GPIO_PIN_12, GPIO_AF_4 },
+    [7] = { TIMER7, TIMER_CH_3, true, GPIOD, GPIO_PIN_0, GPIO_AF_6 },
 };
 #define PWM_CHANNEL_COUNT (sizeof(pwm_channels) / sizeof(pwm_channels[0]))
 
