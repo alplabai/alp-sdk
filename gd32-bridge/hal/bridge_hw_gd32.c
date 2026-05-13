@@ -387,7 +387,7 @@ static void qenc_channel_init(const gd32_qenc_t *e)
 
     timer_parameter_struct ip;
     timer_struct_para_init(&ip);
-    ip.prescaler         = 0u;          /* count every encoder edge   */
+    ip.prescaler         = 0u; /* count every encoder edge   */
     ip.alignedmode       = TIMER_COUNTER_EDGE;
     ip.counterdirection  = TIMER_COUNTER_UP;
     ip.period            = 0xFFFFFFFFu; /* 16-bit timers truncate     */
