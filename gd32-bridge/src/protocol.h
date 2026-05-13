@@ -119,15 +119,39 @@ typedef enum {
      * raw samples never leave the GD32 when the customer's intent is
      * filtered or spectral data (the link bandwidth wins more from
      * pushing the post-processing onto the bridge than from sending
-     * the raw samples).  The opcode is RESERVED at protocol v0.5;
-     * the wire payload format lands in the (b) / (c) sub-commits of
-     * the wave-2 DSP series alongside alp_adc_filter_t /
-     * alp_adc_spectrum_t in <alp/adc.h>.  Today the firmware-side
-     * dispatcher falls through to STATUS_NOSUPPORT for this opcode
-     * via the default case -- there is no handler stub.  The host-
-     * side standalone API in <alp/dsp.h> works without it.  See
-     * memory/project_wave2_dsp_pipeline_design.md for the design. */
+     * the raw samples).  RESERVED + tombstoned at v0.5: the original
+     * single-shot configure payload won't fit one FIR stage's 256-byte
+     * Q31-tap blob inside the 65-byte wire envelope, so the actual
+     * upload path is the three chunked sub-opcodes CMD_ADC_DSP_CHAIN_*
+     * (0x37/0x38/0x39) below.  The 0x36 opcode keeps its slot to
+     * avoid renumbering across the v0.5.x line; firmware default-case
+     * dispatch returns STATUS_NOSUPPORT for it. */
     CMD_ADC_STREAM_CONFIGURE_DSP = 0x36,
+    /* v0.5 (§2B): chunked DSP-chain upload path.  Three sub-opcodes:
+     *   CHAIN_OPEN   allocates a firmware-side chain handle, returns
+     *                its u8 id in the reply payload.
+     *   STAGE_PUSH   uploads one chunk of one stage's per-kind params
+     *                (FIR taps / IIR sections / WINDOW shape / FFT
+     *                size + output format) into the named chain at
+     *                the named stage_index + chunk_offset.  Variable
+     *                request payload up to GD32_BRIDGE_MAX_PAYLOAD_BYTES;
+     *                empty reply.  Repeated as many times as needed
+     *                to assemble the full per-kind blob.
+     *   CHAIN_BIND   attaches the chain to an existing streaming ADC
+     *                source by stream_id.  From then on the stream's
+     *                samples flow through the chain instead of straight
+     *                to the host -- the v0.5.x wire format flip from
+     *                "host-side DSP" to "GD32-side DSP" that's the real
+     *                wave-2 value.
+     * All three are RESERVED at protocol v0.5; firmware default-case
+     * dispatch returns STATUS_NOSUPPORT until the bridge_hw_adc_dsp_*
+     * HAL bodies land in the GD32 firmware tree.  Host helpers in
+     * chips/gd32g553/ honour the same NOSUPPORT contract by routing
+     * the wire dispatch through cmd_send unchanged.  See
+     * memory/project_wave2_dsp_pipeline_design.md for design context. */
+    CMD_ADC_DSP_CHAIN_OPEN       = 0x37,
+    CMD_ADC_DSP_STAGE_PUSH       = 0x38,
+    CMD_ADC_DSP_CHAIN_BIND       = 0x39,
     /* v0.5 (§2B.2): advanced timer extras.  PWM_CAPTURE turns a
      * PWM channel's pin into an input-capture source for frequency
      * / pulse-width measurement; PWM_SINGLE_PULSE drives a one-shot

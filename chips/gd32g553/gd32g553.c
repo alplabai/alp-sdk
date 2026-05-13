@@ -75,11 +75,17 @@ static alp_status_t status_from_wire(uint8_t s)
 /* Envelope sizes                                                     */
 /* ----------------------------------------------------------------- */
 
-/* Maximum wire-side payload either direction.  Driven by ADC_READ
- * which can return up to GD32G553_BRIDGE_ADC_MAX_SAMPLES * 2 bytes
- * plus the echoed `samples` byte.  GET_BUILD_ID returns 20 ASCII
- * bytes which is smaller. */
-#define GD32G553_MAX_PAYLOAD_BYTES (1u + (GD32G553_BRIDGE_ADC_MAX_SAMPLES * 2u))
+/* Maximum wire-side payload either direction.  Driven by the largest
+ * of (a) ADC_STREAM_READ which can reply up to
+ * `1 + GD32G553_BRIDGE_ADC_STREAM_READ_MAX * 2` = 65 bytes (count
+ * byte + u16 samples), and (b) ADC_DSP_STAGE_PUSH whose request
+ * envelope carries a 7-byte chunk header plus up to
+ * `GD32G553_BRIDGE_ADC_DSP_MAX_CHUNK_BYTES` = 58 bytes of stage
+ * payload = 65 bytes total.  Matches the firmware-side
+ * `GD32_BRIDGE_MAX_PAYLOAD_BYTES` so host + firmware serialise the
+ * same wire envelopes; legacy small opcodes (ADC_READ at 17 bytes,
+ * GET_BUILD_ID at 20 bytes, etc.) sit comfortably below. */
+#define GD32G553_MAX_PAYLOAD_BYTES (1u + (GD32G553_BRIDGE_ADC_STREAM_READ_MAX * 2u))
 
 /* SOF/CMD + payload + CRC for SPI; CMD + payload + CRC for I2C. */
 #define GD32G553_MAX_SPI_FRAME_BYTES \
@@ -750,6 +756,85 @@ alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx, uint8_t mode, uint32_t wak
     put_le32(&req[6], wake_after_ms);
     return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_POWER_MODE_SET, req, sizeof(req),
                     NULL, 0u);
+}
+
+/* ----------------------------------------------------------------- */
+/* v0.5 (§2B wave-2) -- chunked DSP-chain upload                     */
+/*                                                                    */
+/* Wire frames per docs/gd32-bridge-protocol.md §3.x.  Firmware       */
+/* returns STATUS_NOSUPPORT today via the default-case dispatch       */
+/* until the bridge_hw_adc_dsp_* HAL bodies land; the host helpers    */
+/* below short-circuit to ALP_ERR_NOSUPPORT in lockstep with that     */
+/* contract -- the wire request still serialises correctly so the    */
+/* firmware-side handler tree sees real envelopes when it ships.     */
+/* ----------------------------------------------------------------- */
+
+alp_status_t gd32g553_adc_dsp_chain_open(gd32g553_t *ctx, uint8_t *chain_id_out)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (chain_id_out == NULL) return ALP_ERR_INVAL;
+
+    uint8_t      reply[1] = { 0 };
+    alp_status_t s        = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                                     GD32G553_CMD_ADC_DSP_CHAIN_OPEN, NULL, 0u, reply,
+                                     sizeof(reply));
+    if (s != ALP_OK) return s;
+    *chain_id_out = reply[0];
+    return ALP_OK;
+}
+
+alp_status_t gd32g553_adc_dsp_stage_push(gd32g553_t *ctx, uint8_t chain_id, uint8_t stage_index,
+                                         uint8_t kind, const uint8_t *stage_params,
+                                         uint16_t stage_params_len)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (stage_index >= GD32G553_BRIDGE_ADC_DSP_MAX_STAGES) return ALP_ERR_INVAL;
+    if (kind > 3u) return ALP_ERR_INVAL;
+    if (stage_params == NULL && stage_params_len != 0u) return ALP_ERR_INVAL;
+    if (stage_params_len > GD32G553_BRIDGE_ADC_DSP_MAX_STAGE_BYTES) return ALP_ERR_OUT_OF_RANGE;
+
+    /* Chunk the per-kind blob into wire envelopes no larger than
+     * MAX_CHUNK_BYTES.  Empty blobs (stage_params_len == 0) still
+     * send a single zero-length STAGE_PUSH so the firmware sees the
+     * kind declaration arrive at the requested stage_index.  The
+     * 7-byte header is chain_id + stage_index + kind + chunk_offset:u16
+     * + chunk_total_size:u16; chunk_total_size carries the FULL
+     * per-kind blob length (not this chunk's length) so the firmware
+     * knows when assembly is complete. */
+    uint16_t offset = 0u;
+    do {
+        uint16_t this_chunk = (uint16_t)(stage_params_len - offset);
+        if (this_chunk > GD32G553_BRIDGE_ADC_DSP_MAX_CHUNK_BYTES) {
+            this_chunk = GD32G553_BRIDGE_ADC_DSP_MAX_CHUNK_BYTES;
+        }
+        uint8_t req[7u + GD32G553_BRIDGE_ADC_DSP_MAX_CHUNK_BYTES];
+        req[0] = chain_id;
+        req[1] = stage_index;
+        req[2] = kind;
+        req[3] = (uint8_t)(offset & 0xFFu);
+        req[4] = (uint8_t)((offset >> 8) & 0xFFu);
+        req[5] = (uint8_t)(stage_params_len & 0xFFu);
+        req[6] = (uint8_t)((stage_params_len >> 8) & 0xFFu);
+        if (this_chunk > 0u) {
+            memcpy(&req[7], stage_params + offset, this_chunk);
+        }
+        alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
+                                  GD32G553_CMD_ADC_DSP_STAGE_PUSH, req,
+                                  (size_t)(7u + this_chunk), NULL, 0u);
+        if (s != ALP_OK) return s;
+        offset = (uint16_t)(offset + this_chunk);
+    } while (offset < stage_params_len);
+
+    return ALP_OK;
+}
+
+alp_status_t gd32g553_adc_dsp_chain_bind(gd32g553_t *ctx, uint8_t chain_id, uint8_t stream_id)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    if (stream_id >= GD32G553_BRIDGE_ADC_STREAM_COUNT) return ALP_ERR_INVAL;
+    uint8_t req[2] = { chain_id, stream_id };
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_DSP_CHAIN_BIND, req,
+                    sizeof(req), NULL, 0u);
 }
 
 /* ----------------------------------------------------------------- */

@@ -102,3 +102,14 @@ spi_pwm_single_pulse_probe_request = A52600000000E80300005B7D
 # ---------------------------------------------------------------------
 # SOF | CMD=0x28 | mode=DEEP_SLEEP | wake_bitmap=RTC|GPIO | wake_after_ms=10000 (LE 0x00002710) | CRC -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT until the wake handler + supervisor re-init state machine land
 spi_power_mode_set_probe_request = A5280200030000001027000048A3
+
+# ---------------------------------------------------------------------
+# §10. v0.5 additions (§2B wave-2) -- chunked DSP-chain upload
+#       (CHAIN_OPEN / STAGE_PUSH / CHAIN_BIND; reserved opcodes)
+# ---------------------------------------------------------------------
+# SOF | CMD=0x37 | (no payload) | CRC -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT today via default-case dispatch.  Eventual reply payload is chain_id:u8.
+spi_adc_dsp_chain_open_probe_request = A537B930
+# SOF | CMD=0x38 | chain_id=0 | stage_index=0 | kind=WINDOW(2) | chunk_offset=0 | chunk_total_size=4 | shape=Hann | reserved[3] | CRC -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT until the wave-2 HAL body lands.
+spi_adc_dsp_stage_push_window_hann_request = A53800000200000400010000000420
+# SOF | CMD=0x39 | chain_id=0 | stream_id=0 | CRC -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT until the wave-2 HAL body lands.
+spi_adc_dsp_chain_bind_probe_request = A539000089C7

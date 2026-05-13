@@ -135,22 +135,128 @@ calls return precise diagnostics.
 
 ### 3.x ADC-stream DSP pipeline (v0.5+, reserved)
 
-`CMD_ADC_STREAM_CONFIGURE_DSP` (opcode `0x36`) is **reserved** at
-protocol v0.5.0 for the wave-2 bridge-wired DSP surface
-(`alp_adc_filter_t` / `alp_adc_spectrum_t` in
-[`<alp/adc.h>`](../include/alp/adc.h)).  The host-side standalone
-DSP-chain API in [`<alp/dsp.h>`](../include/alp/dsp.h) ships in
-v0.5.0 without this opcode -- it runs the chain locally over
-in-RAM sample buffers (CMSIS-DSP when available; portable C
-fallback otherwise).  The bridge-wired path lands in the v0.5.x
-follow-up commits ((b) wires `alp_adc_filter_t` for FIR/IIR
-chains; (c) wires `alp_adc_spectrum_t` for FFT chains) once the
-exact wire payload format -- stage list + per-stage params --
-finalises against the GD32G5 FFT / FAC block's input-shape
-constraints.  Today the firmware-side dispatcher falls through to
-`STATUS_NOSUPPORT` for this opcode via the default branch (no
-handler stub).  See `memory/project_wave2_dsp_pipeline_design.md`
-for the design intent.
+The wave-2 ADC-stream DSP pipeline attaches a chain of
+FIR / IIR / WINDOW / FFT stages to a streaming ADC source so raw
+samples never leave the GD32 when the customer wants filtered or
+spectral data -- the bandwidth win that makes the GD32G5's FFT
+and FAC blocks load-bearing rather than vestigial.  Portable
+surface lives in [`<alp/adc.h>`](../include/alp/adc.h)
+(`alp_adc_filter_t` / `alp_adc_spectrum_t`) plus the standalone
+in-RAM chain primitives in [`<alp/dsp.h>`](../include/alp/dsp.h).
+See `memory/project_wave2_dsp_pipeline_design.md` for the design
+rationale.
+
+Three opcodes own the upload path.  Each is **reserved** at v0.5
+-- firmware default-case dispatch returns `STATUS_NOSUPPORT` until
+the `bridge_hw_adc_dsp_*` HAL bodies land in the GD32 firmware
+tree.  The host-side standalone API in `<alp/dsp.h>` ships
+working in v0.5.0 (runs the chain locally with CMSIS-DSP or the
+portable C fallback over in-RAM buffers), so application code can
+test against the same chain primitives today and pick up the
+bridge-offloaded path once the HAL bodies ship.
+
+#### `CMD_ADC_DSP_CHAIN_OPEN` (`0x37`)
+
+| Direction | Layout              |
+|-----------|---------------------|
+| Request   | (empty)             |
+| Reply     | `chain_id:u8`       |
+
+Allocates a fresh chain handle from the firmware's pool (size
+`GD32G553_BRIDGE_ADC_DSP_MAX_CHAINS`, default 4 chains).  The
+opaque `chain_id` is what the host passes to the subsequent
+STAGE_PUSH and CHAIN_BIND calls.  Exhausting the pool returns
+`STATUS_NOMEM`.  Chains auto-release when the bound stream's
+`CMD_ADC_STREAM_END` runs; there is no explicit `CHAIN_CLOSE` at
+v0.5.
+
+#### `CMD_ADC_DSP_STAGE_PUSH` (`0x38`)
+
+| Direction | Layout                                                                                       |
+|-----------|----------------------------------------------------------------------------------------------|
+| Request   | `chain_id:u8 stage_index:u8 kind:u8 chunk_offset:u16 chunk_total_size:u16 chunk_data[0..58]` |
+| Reply     | (empty)                                                                                      |
+
+Uploads one chunk of one stage's per-kind parameter blob into the
+named chain at `stage_index`.  The 7-byte header carries:
+
+* `chain_id` -- handle from CHAIN_OPEN.
+* `stage_index` -- 0..`GD32G553_BRIDGE_ADC_DSP_MAX_STAGES-1` (default 0..3).
+* `kind` -- FIR (`0`), IIR (`1`), WINDOW (`2`), FFT (`3`).
+* `chunk_offset` -- byte offset of this chunk's payload within the
+  full per-kind blob.  Little-endian u16.
+* `chunk_total_size` -- total size of the full per-kind blob (not
+  this chunk's length).  Little-endian u16.  Lets the firmware
+  know when assembly is complete.
+
+The remaining 0..`GD32G553_BRIDGE_ADC_DSP_MAX_CHUNK_BYTES` (58)
+bytes of `chunk_data` are appended at `chunk_offset` into the
+firmware's per-stage scratch buffer.  The host helper
+`gd32g553_adc_dsp_stage_push` splits oversized blobs into
+back-to-back STAGE_PUSH calls automatically; firmware accepts
+chunks in any order as long as the full `[0, chunk_total_size)`
+range is eventually covered before the chain is bound.
+
+Reassembled per-kind blob layouts (what the firmware decodes
+once the chunks have all landed):
+
+| Kind     | Layout                                                            | Max size            |
+|----------|-------------------------------------------------------------------|---------------------|
+| FIR (0)  | `format:u8 n_taps:u8 reserved:u16 taps[n_taps * 4]`               | 4 + 4 * 64 = 260 B  |
+| IIR (1)  | `format:u8 n_sections:u8 reserved:u16 coeffs[n_sections * 5 * 4]` | 4 + 4 * 5 * 8 = 164 B |
+| WINDOW (2) | `shape:u8 reserved[3]`                                          | 4 B                 |
+| FFT (3)  | `n_points:u16 output_format:u8 reserved:u8`                       | 4 B                 |
+
+`format` is `0` for Q31 fixed-point coefficients, `1` for
+IEEE-754 single-precision (matches `alp_dsp_coeff_format_t` in
+`<alp/dsp.h>`).  `shape` is one of `0` (rectangular), `1` (Hann),
+`2` (Hamming), `3` (Blackman) (matches `alp_dsp_window_kind_t`).
+`output_format` is `0` (interleaved complex re/im pairs) or `1`
+(per-bin magnitude only) (matches `alp_dsp_fft_output_t`).
+
+Firmware-side validation runs at CHAIN_BIND time, not on each
+STAGE_PUSH -- so a half-uploaded chain is OK as long as the host
+eventually completes every staged kind before binding.
+
+#### `CMD_ADC_DSP_CHAIN_BIND` (`0x39`)
+
+| Direction | Layout                       |
+|-----------|------------------------------|
+| Request   | `chain_id:u8 stream_id:u8`   |
+| Reply     | (empty)                      |
+
+Attaches a fully-populated chain to a streaming ADC source that
+was previously opened with `CMD_ADC_STREAM_BEGIN` (opcode
+`0x33`).  From the bind onward, the stream's samples flow through
+the chain instead of being delivered raw to
+`CMD_ADC_STREAM_READ`; the read reply's payload format becomes
+mode-dependent on the chain's terminal stage:
+
+* No FFT terminal: filter samples (`i16` for Q31 coefficients,
+  `i16` shape-equivalent for F32 -- bridge-mapped to mV
+  semantics for compatibility with the legacy raw read path).
+* FFT terminal with `output_format == COMPLEX`:  interleaved
+  `(re, im)` f32 pairs.
+* FFT terminal with `output_format == MAGNITUDE`:  per-bin f32
+  magnitudes (half the wire bandwidth of COMPLEX).
+
+`CHAIN_BIND` fails (`STATUS_INVAL`) if:
+
+* `stream_id` is out of range (`>= GD32G553_BRIDGE_ADC_STREAM_COUNT`),
+* `chain_id` does not name an open chain,
+* the chain has unfinished stages (some `[0, chunk_total_size)`
+  range was not covered),
+* the chain violates the ordering rules from `<alp/dsp.h>` (FFT
+  must be terminal; WINDOW must immediately precede FFT).
+
+#### Tombstone: `CMD_ADC_STREAM_CONFIGURE_DSP` (`0x36`)
+
+The original single-shot configure opcode `0x36` is retained as a
+**reserved tombstone**.  The 65-byte wire envelope can't fit a
+single FIR stage's 256-byte Q31-tap blob in one shot, so the
+chunked upload via `0x37`..`0x39` is the actual mechanism.  The
+firmware default-case path returns `STATUS_NOSUPPORT` for `0x36`
+indefinitely; host code SHOULD NOT call it.
 
 ### 3.1 GPIO masks
 

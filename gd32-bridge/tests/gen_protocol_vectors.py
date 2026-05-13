@@ -81,6 +81,9 @@ CMD_ADC_STREAM_BEGIN         = 0x33
 CMD_ADC_STREAM_READ          = 0x34
 CMD_ADC_STREAM_END           = 0x35
 CMD_ADC_STREAM_CONFIGURE_DSP = 0x36
+CMD_ADC_DSP_CHAIN_OPEN       = 0x37
+CMD_ADC_DSP_STAGE_PUSH       = 0x38
+CMD_ADC_DSP_CHAIN_BIND       = 0x39
 CMD_PWM_CAPTURE_BEGIN        = 0x23
 CMD_PWM_CAPTURE_READ         = 0x24
 CMD_PWM_CAPTURE_END          = 0x25
@@ -367,6 +370,53 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         " handler + supervisor re-init state machine land",
     ))
 
+    # ----- §10. v0.5 additions (§2B wave-2): chunked DSP-chain upload -
+    # CMD_ADC_DSP_{CHAIN_OPEN, STAGE_PUSH, CHAIN_BIND} are RESERVED at
+    # v0.5 for the wave-2 bridge-wired DSP pipeline that lets raw ADC
+    # samples never traverse the wire when filtered or spectral data
+    # is what the customer wants.  Portable surfaces in <alp/adc.h>
+    # (alp_adc_filter_t / alp_adc_spectrum_t) and <alp/dsp.h>
+    # (alp_dsp_chain_t).  Wire format documented in
+    # docs/gd32-bridge-protocol.md §3.x.  Firmware default-case
+    # dispatch returns STATUS_NOSUPPORT for all three opcodes until
+    # the bridge_hw_adc_dsp_* HAL bodies land.  Representative probe
+    # vectors below: CHAIN_OPEN with no payload, STAGE_PUSH carrying
+    # one WINDOW stage (shape=Hann) in a single 4-byte chunk, and
+    # CHAIN_BIND attaching chain_id 0 to stream_id 0.
+    out.append((
+        "spi_adc_dsp_chain_open_probe_request",
+        spi_frame(SOF, CMD_ADC_DSP_CHAIN_OPEN).hex().upper(),
+        "SOF | CMD=0x37 | (no payload) | CRC -- v0.5 reserved opcode;"
+        " firmware replies STATUS_NOSUPPORT today via default-case"
+        " dispatch.  Eventual reply payload is chain_id:u8.",
+    ))
+    out.append((
+        "spi_adc_dsp_stage_push_window_hann_request",
+        spi_frame(SOF, CMD_ADC_DSP_STAGE_PUSH,
+                  bytes([0x00,                            # chain_id = 0
+                         0x00,                            # stage_index = 0
+                         0x02,                            # kind = WINDOW
+                         0x00, 0x00,                      # chunk_offset = 0 (LE)
+                         0x04, 0x00,                      # chunk_total_size = 4 (LE)
+                         0x01,                            # shape = Hann
+                         0x00, 0x00, 0x00,                # reserved[3]
+                  ])).hex().upper(),
+        "SOF | CMD=0x38 | chain_id=0 | stage_index=0 | kind=WINDOW(2) |"
+        " chunk_offset=0 | chunk_total_size=4 | shape=Hann |"
+        " reserved[3] | CRC -- v0.5 reserved opcode; firmware replies"
+        " STATUS_NOSUPPORT until the wave-2 HAL body lands.",
+    ))
+    out.append((
+        "spi_adc_dsp_chain_bind_probe_request",
+        spi_frame(SOF, CMD_ADC_DSP_CHAIN_BIND,
+                  bytes([0x00,                            # chain_id = 0
+                         0x00,                            # stream_id = 0
+                  ])).hex().upper(),
+        "SOF | CMD=0x39 | chain_id=0 | stream_id=0 | CRC -- v0.5"
+        " reserved opcode; firmware replies STATUS_NOSUPPORT until"
+        " the wave-2 HAL body lands.",
+    ))
+
     return out
 
 
@@ -451,7 +501,17 @@ def emit(vectors: list[tuple[str, str, str | None]]) -> str:
     chunks.append("\n# ---------------------------------------------------------------------")
     chunks.append("# §9. v0.5 additions (§2B.3) -- system power-mode set (reserved opcode)")
     chunks.append("# ---------------------------------------------------------------------")
-    for name, value, comment in vectors[25:]:
+    for name, value, comment in vectors[25:26]:
+        if comment:
+            chunks.append(f"# {comment}")
+        chunks.append(f"{name:<30} = {value}")
+
+    # ----- §10 block -------------------------------------------------
+    chunks.append("\n# ---------------------------------------------------------------------")
+    chunks.append("# §10. v0.5 additions (§2B wave-2) -- chunked DSP-chain upload")
+    chunks.append("#       (CHAIN_OPEN / STAGE_PUSH / CHAIN_BIND; reserved opcodes)")
+    chunks.append("# ---------------------------------------------------------------------")
+    for name, value, comment in vectors[26:]:
         if comment:
             chunks.append(f"# {comment}")
         chunks.append(f"{name:<30} = {value}")

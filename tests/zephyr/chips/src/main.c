@@ -2030,6 +2030,7 @@ ZTEST(alp_chips, test_gd32g553_v05_calls_reject_uninitialised)
     gd32g553_t ctx       = { 0 };
     uint32_t   period_ns = 0u;
     uint32_t   pulse_ns  = 0u;
+    uint8_t    chain_id  = 0u;
 
     /* Every v0.5 host helper must reject an uninitialised ctx with
      * NOT_READY -- the standard chip-driver lifecycle contract.
@@ -2041,6 +2042,12 @@ ZTEST(alp_chips, test_gd32g553_v05_calls_reject_uninitialised)
     zassert_equal(gd32g553_pwm_single_pulse(&ctx, 0u, 1000u), ALP_ERR_NOT_READY);
     zassert_equal(gd32g553_timer_sync(&ctx, 0u, 1u, 0u), ALP_ERR_NOT_READY);
     zassert_equal(gd32g553_power_mode_set(&ctx, 1u, 0u, 0u), ALP_ERR_NOT_READY);
+    /* §2B wave-2 chunked DSP-chain upload helpers honour the same
+     * NOT_READY contract -- chain_open, stage_push, chain_bind all
+     * short-circuit before serialising the wire envelope. */
+    zassert_equal(gd32g553_adc_dsp_chain_open(&ctx, &chain_id), ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, 0u, 0u, NULL, 0u), ALP_ERR_NOT_READY);
+    zassert_equal(gd32g553_adc_dsp_chain_bind(&ctx, 0u, 0u), ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
@@ -2064,4 +2071,37 @@ ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
      * DEEP_SLEEP / STANDBY). */
     zassert_equal(gd32g553_power_mode_set(&ctx, 4u, 0u, 0u), ALP_ERR_INVAL);
     zassert_equal(gd32g553_power_mode_set(&ctx, 99u, 0u, 0u), ALP_ERR_INVAL);
+
+    /* §2B wave-2 DSP-chain helpers reject malformed args before they
+     * hit cmd_send.  Each constraint mirrors the firmware-side
+     * decoder's expectations so callers don't waste a wire trip to
+     * surface obvious typos. */
+    /* chain_open rejects NULL out-param (caller can't observe the
+     * assigned chain_id without it). */
+    zassert_equal(gd32g553_adc_dsp_chain_open(&ctx, NULL), ALP_ERR_INVAL);
+
+    /* stage_push rejects stage_index outside [0, MAX_STAGES). */
+    zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, GD32G553_BRIDGE_ADC_DSP_MAX_STAGES, 0u,
+                                              NULL, 0u),
+                  ALP_ERR_INVAL);
+    zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, 99u, 0u, NULL, 0u), ALP_ERR_INVAL);
+    /* stage_push rejects kind > 3 (outside FIR/IIR/WINDOW/FFT). */
+    zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, 0u, 4u, NULL, 0u), ALP_ERR_INVAL);
+    zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, 0u, 99u, NULL, 0u), ALP_ERR_INVAL);
+    /* stage_push rejects NULL params when len > 0 (caller asked to
+     * upload bytes from a NULL pointer). */
+    zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, 0u, 0u, NULL, 4u), ALP_ERR_INVAL);
+    /* stage_push rejects oversized payload (would overrun the
+     * firmware's per-stage buffer). */
+    {
+        static const uint8_t oversized[GD32G553_BRIDGE_ADC_DSP_MAX_STAGE_BYTES + 4u] = { 0 };
+        zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, 0u, 0u, oversized,
+                                                  (uint16_t)sizeof(oversized)),
+                      ALP_ERR_OUT_OF_RANGE);
+    }
+
+    /* chain_bind rejects stream_id outside [0, ADC_STREAM_COUNT). */
+    zassert_equal(gd32g553_adc_dsp_chain_bind(&ctx, 0u, GD32G553_BRIDGE_ADC_STREAM_COUNT),
+                  ALP_ERR_INVAL);
+    zassert_equal(gd32g553_adc_dsp_chain_bind(&ctx, 0u, 99u), ALP_ERR_INVAL);
 }

@@ -97,6 +97,36 @@ extern "C" {
  *  DMA0 and stream 1 to DMA1 so they run truly concurrently. */
 #define GD32G553_BRIDGE_ADC_STREAM_COUNT     2u
 
+/** Maximum concurrent DSP chains the firmware's wave-2 pipeline can
+ *  hold open (v0.5 wire format).  Each chain binds 1..@ref
+ *  GD32G553_BRIDGE_ADC_DSP_MAX_STAGES stages onto one streaming source
+ *  via `CMD_ADC_DSP_CHAIN_BIND`.  Sized so every active ADC stream
+ *  plus a spare can carry a distinct chain configuration.  v0.5
+ *  reserves the opcodes but firmware HAL bodies land in a follow-up
+ *  drop -- today every CHAIN_OPEN reply rides the default-case
+ *  STATUS_NOSUPPORT path. */
+#define GD32G553_BRIDGE_ADC_DSP_MAX_CHAINS   4u
+
+/** Maximum stages per chain (mirrors @c ALP_DSP_MAX_STAGES in
+ *  `<alp/dsp.h>`). */
+#define GD32G553_BRIDGE_ADC_DSP_MAX_STAGES   4u
+
+/** Maximum reassembled per-kind stage payload the firmware accepts
+ *  for a single chain stage.  Sized for the largest legal blob: FIR
+ *  stage with @c ALP_DSP_MAX_FIR_TAPS taps (64) at 4 bytes each
+ *  (F32 or Q31) + 4 bytes of leading metadata = 260 bytes.  IIR
+ *  (160-byte max), WINDOW, and FFT (each 4-byte fixed) fit
+ *  comfortably below. */
+#define GD32G553_BRIDGE_ADC_DSP_MAX_STAGE_BYTES   260u
+
+/** Maximum `chunk_data` bytes per `CMD_ADC_DSP_STAGE_PUSH` call.  The
+ *  request payload header is 7 bytes (`chain_id:u8 stage_index:u8
+ *  kind:u8 chunk_offset:u16 chunk_total_size:u16`); the remaining
+ *  capacity inside the wire envelope is what's left here.  A 260-byte
+ *  FIR-tap blob lands in @code ceil(260 / 58) = 5 @endcode STAGE_PUSH
+ *  calls. */
+#define GD32G553_BRIDGE_ADC_DSP_MAX_CHUNK_BYTES  58u
+
 /** Maximum bytes returned by a single `CMD_TRNG_READ` reply (v0.3+). */
 #define GD32G553_BRIDGE_TRNG_MAX_BYTES       32u
 
@@ -163,15 +193,36 @@ typedef enum {
      * request payload; reply carries `result:u32 status:u8`.  Format
      * 0 = Q31 fixed-point (signed); format 1 = IEEE-754 single. */
     GD32G553_CMD_TMU_COMPUTE           = 0x90,
-    /* v0.5: ADC-stream DSP pipeline configuration -- reserved opcode
-     * for the wave-2 bridge-wired surfaces alp_adc_filter_t /
-     * alp_adc_spectrum_t (see <alp/adc.h>; ship in v0.5.x sub-commits
-     * b / c).  The host-side standalone API in <alp/dsp.h> ships in
-     * v0.5.0 and does NOT use this opcode -- it runs the chain locally
-     * with CMSIS-DSP (or a portable C fallback) over in-RAM buffers.
-     * The firmware-side dispatcher returns STATUS_NOSUPPORT for this
-     * opcode until the wave-2 wire payload format is finalised. */
+    /* v0.5: ADC-stream DSP pipeline configuration -- RESERVED +
+     * tombstoned.  Original single-shot configure can't fit a FIR
+     * stage's 256-byte Q31-tap blob in the 65-byte wire envelope, so
+     * the actual upload path is the three chunked sub-opcodes
+     * CMD_ADC_DSP_CHAIN_* (0x37/0x38/0x39) immediately below.  The
+     * 0x36 opcode keeps its slot to avoid renumbering across the
+     * v0.5.x line; firmware default-case dispatch returns
+     * STATUS_NOSUPPORT for it. */
     GD32G553_CMD_ADC_STREAM_CONFIGURE_DSP = 0x36,
+    /* v0.5 (§2B wave-2): chunked DSP-chain upload.  CHAIN_OPEN
+     * allocates a firmware-side chain handle and replies with the
+     * assigned `chain_id:u8`; STAGE_PUSH uploads one chunk of one
+     * stage's per-kind params (FIR taps / IIR sections / WINDOW shape
+     * / FFT size + output format) by `chain_id:u8 stage_index:u8
+     * kind:u8 chunk_offset:u16 chunk_total_size:u16 chunk_data[...]`,
+     * repeated until the per-kind blob is fully assembled; CHAIN_BIND
+     * attaches the completed chain to a streaming ADC source by
+     * `chain_id:u8 stream_id:u8` -- after which the stream's samples
+     * flow through the chain instead of straight to the host.  All
+     * three opcodes are RESERVED at protocol v0.5 -- firmware default-
+     * case dispatch returns STATUS_NOSUPPORT until the
+     * `bridge_hw_adc_dsp_*` HAL bodies land in the GD32 firmware
+     * tree.  Host helpers in `chips/gd32g553/` honour the same
+     * NOSUPPORT contract by routing through cmd_send unchanged.
+     * See `docs/gd32-bridge-protocol.md` §3.x for the wire layout and
+     * `memory/project_wave2_dsp_pipeline_design.md` for design
+     * context. */
+    GD32G553_CMD_ADC_DSP_CHAIN_OPEN       = 0x37,
+    GD32G553_CMD_ADC_DSP_STAGE_PUSH       = 0x38,
+    GD32G553_CMD_ADC_DSP_CHAIN_BIND       = 0x39,
     /* v0.5 (§2B.2): advanced timer extras.  PWM_CAPTURE turns a PWM
      * channel's pin into an input-capture source for frequency / pulse-
      * width measurement; PWM_SINGLE_PULSE drives a one-shot pulse of
@@ -697,6 +748,118 @@ alp_status_t gd32g553_timer_sync(gd32g553_t *ctx, uint8_t master, uint8_t slave,
  */
 alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx, uint8_t mode, uint32_t wake_bitmap,
                                      uint32_t wake_after_ms);
+
+/* ------------------------------------------------------------------ */
+/* v0.5 (§2B wave-2) -- chunked DSP-chain upload                       */
+/*                                                                    */
+/* Three opcodes assemble a firmware-side DSP chain that processes a  */
+/* streaming ADC source in place: CHAIN_OPEN allocates a handle,      */
+/* STAGE_PUSH (called once or more per stage) uploads the per-kind    */
+/* parameter blob in `<= GD32G553_BRIDGE_ADC_DSP_MAX_CHUNK_BYTES`     */
+/* chunks, and CHAIN_BIND attaches the completed chain to a stream    */
+/* opened with `CMD_ADC_STREAM_BEGIN`.  Wire format documented in     */
+/* `docs/gd32-bridge-protocol.md` §3.x.  All three opcodes are        */
+/* RESERVED at protocol v0.5; firmware default-case dispatch returns  */
+/* STATUS_NOSUPPORT until the `bridge_hw_adc_dsp_*` HAL bodies land   */
+/* in the GD32 firmware tree -- the host helpers below short-circuit  */
+/* to `ALP_ERR_NOSUPPORT` lockstep with the firmware contract.        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Allocate a fresh DSP chain handle on the bridge.
+ *
+ * The bridge keeps up to @ref GD32G553_BRIDGE_ADC_DSP_MAX_CHAINS chains
+ * open concurrently; exhausting the pool returns @ref ALP_ERR_NOMEM
+ * (firmware: `STATUS_NOMEM`).  The returned `chain_id` is opaque to
+ * the host -- pass it back via @ref gd32g553_adc_dsp_stage_push and
+ * @ref gd32g553_adc_dsp_chain_bind.  Chains auto-release when the
+ * bound stream's `CMD_ADC_STREAM_END` runs; there is no explicit
+ * `CHAIN_CLOSE` opcode at v0.5.
+ *
+ * @param[in]  ctx           Initialised driver context.
+ * @param[out] chain_id_out  Receives the assigned chain id on
+ *                           @ref ALP_OK.  May not be NULL.
+ *
+ * @return @ref ALP_OK on success, @ref ALP_ERR_NOT_READY (uninitialised
+ *         ctx), @ref ALP_ERR_INVAL (NULL out param),
+ *         @ref ALP_ERR_NOSUPPORT (firmware HAL absent today), or
+ *         a transport error.
+ */
+alp_status_t gd32g553_adc_dsp_chain_open(gd32g553_t *ctx, uint8_t *chain_id_out);
+
+/**
+ * @brief Upload one chunk of one stage's per-kind parameters.
+ *
+ * The firmware accumulates chunks at `chunk_offset` byte positions
+ * within an internal `[chain_id][stage_index]` buffer of size
+ * @ref GD32G553_BRIDGE_ADC_DSP_MAX_STAGE_BYTES.  A stage's payload is
+ * complete once the host has covered `[0, stage_params_len)` -- the
+ * firmware then validates the assembled blob against the declared
+ * `kind` and either marks the stage ready or rejects the chain at
+ * the eventual @ref gd32g553_adc_dsp_chain_bind call.
+ *
+ * Per-kind reassembled blob layout (what the firmware sees once all
+ * chunks for one stage have landed):
+ *
+ *   - **FIR (kind=0)**:    `format:u8 n_taps:u8 reserved:u16 taps[n_taps * 4]`
+ *   - **IIR (kind=1)**:    `format:u8 n_sections:u8 reserved:u16 coeffs[n_sections * 5 * 4]`
+ *   - **WINDOW (kind=2)**: `shape:u8 reserved[3]`  (4 bytes)
+ *   - **FFT (kind=3)**:    `n_points:u16 output_format:u8 reserved:u8`  (4 bytes)
+ *
+ * Host-side chunking is handled internally: the helper splits
+ * @p stage_params into chunks no larger than
+ * @ref GD32G553_BRIDGE_ADC_DSP_MAX_CHUNK_BYTES bytes and issues one
+ * STAGE_PUSH wire transaction per chunk in offset-order.  Any error
+ * mid-stream aborts the upload and returns; the chain remains in an
+ * undefined-staging state until the host either retries the failed
+ * chunk or releases the chain.
+ *
+ * @param[in] ctx               Initialised driver context.
+ * @param[in] chain_id          Chain id returned by
+ *                              @ref gd32g553_adc_dsp_chain_open.
+ * @param[in] stage_index       Position in the chain
+ *                              (`0..GD32G553_BRIDGE_ADC_DSP_MAX_STAGES-1`).
+ * @param[in] kind              Stage kind (FIR=0, IIR=1, WINDOW=2, FFT=3).
+ * @param[in] stage_params      Reassembled per-kind blob.  May be
+ *                              NULL only when @p stage_params_len is 0.
+ * @param[in] stage_params_len  Total bytes in @p stage_params.  Must
+ *                              be `<= GD32G553_BRIDGE_ADC_DSP_MAX_STAGE_BYTES`.
+ *
+ * @return @ref ALP_OK on success, @ref ALP_ERR_NOT_READY (uninitialised
+ *         ctx), @ref ALP_ERR_INVAL (bad stage_index / kind, NULL with
+ *         non-zero len), @ref ALP_ERR_OUT_OF_RANGE (`stage_params_len`
+ *         too large), @ref ALP_ERR_NOSUPPORT (firmware HAL absent),
+ *         or a transport error.
+ */
+alp_status_t gd32g553_adc_dsp_stage_push(gd32g553_t *ctx, uint8_t chain_id, uint8_t stage_index,
+                                         uint8_t kind, const uint8_t *stage_params,
+                                         uint16_t stage_params_len);
+
+/**
+ * @brief Attach a fully-populated chain to a streaming ADC source.
+ *
+ * The bound stream's samples thereafter flow through the chain
+ * instead of being delivered raw to `CMD_ADC_STREAM_READ`; the read
+ * reply format becomes mode-dependent on the chain's terminal stage
+ * (filter samples for FIR / IIR; complex or magnitude bins for FFT).
+ * Binding fails (`ALP_ERR_INVAL` / firmware `STATUS_INVAL`) if the
+ * chain has any unbound stage or violates the chain-ordering rules
+ * documented in `<alp/dsp.h>` (FFT must be terminal, WINDOW must
+ * immediately precede FFT).
+ *
+ * @param[in] ctx         Initialised driver context.
+ * @param[in] chain_id    Chain id returned by
+ *                        @ref gd32g553_adc_dsp_chain_open.
+ * @param[in] stream_id   Stream id previously opened with
+ *                        @c CMD_ADC_STREAM_BEGIN
+ *                        (`0..GD32G553_BRIDGE_ADC_STREAM_COUNT-1`).
+ *
+ * @return @ref ALP_OK on success, @ref ALP_ERR_NOT_READY (uninitialised
+ *         ctx), @ref ALP_ERR_INVAL (bad stream_id or unfinished chain),
+ *         @ref ALP_ERR_NOSUPPORT (firmware HAL absent), or a transport
+ *         error.
+ */
+alp_status_t gd32g553_adc_dsp_chain_bind(gd32g553_t *ctx, uint8_t chain_id, uint8_t stream_id);
 
 /* ------------------------------------------------------------------ */
 /* OTA -- in-system upgrade of the bridge firmware                    */

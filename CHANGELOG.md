@@ -796,6 +796,64 @@ that lands before the v0.3.0 tag.)
 
 ### Added (2026-05-13)
 
+- **§2B wave-2 chunked DSP-chain upload opcodes (`0x37`/`0x38`/`0x39`)
+  reserved on the bridge protocol (2026-05-13).**  Finalises the wire
+  format the wave-2 ADC-stream DSP pipeline uses to push FIR / IIR /
+  WINDOW / FFT chains onto a streaming ADC source so raw samples
+  never traverse the link when the customer wants filtered or
+  spectral data.  The earlier single-shot `CMD_ADC_STREAM_CONFIGURE_DSP`
+  (opcode `0x36`) reservation can't fit a single FIR stage's 256-byte
+  Q31-tap blob in the 65-byte wire envelope, so it's tombstoned in
+  favour of three chunked sub-opcodes:
+  - `CMD_ADC_DSP_CHAIN_OPEN` (`0x37`) -- empty request, reply
+    `chain_id:u8`.  Allocates a firmware-side chain handle (pool size
+    `GD32G553_BRIDGE_ADC_DSP_MAX_CHAINS`, default 4).
+  - `CMD_ADC_DSP_STAGE_PUSH` (`0x38`) -- 7-byte header (`chain_id:u8
+    stage_index:u8 kind:u8 chunk_offset:u16 chunk_total_size:u16`)
+    plus up to `GD32G553_BRIDGE_ADC_DSP_MAX_CHUNK_BYTES` (58 bytes)
+    of `chunk_data`.  Repeated until the per-stage blob is fully
+    covered; firmware reassembles in offset-order.
+  - `CMD_ADC_DSP_CHAIN_BIND` (`0x39`) -- request `chain_id:u8
+    stream_id:u8`.  Attaches a fully-staged chain to a stream
+    previously opened with `CMD_ADC_STREAM_BEGIN`.
+
+  Three matching host helpers in `chips/gd32g553/gd32g553.c` route
+  through `cmd_send`: `gd32g553_adc_dsp_chain_open`,
+  `gd32g553_adc_dsp_stage_push` (chunks larger blobs internally), and
+  `gd32g553_adc_dsp_chain_bind`.  Each enforces a NOT_READY pre-check
+  on an uninitialised context and a tight INVAL / OUT_OF_RANGE
+  gate on bad args; the wire request is constructed only once the
+  pre-checks pass.
+
+  Wire format documented in `docs/gd32-bridge-protocol.md` §3.x with
+  the reassembled per-kind blob layouts (FIR / IIR up to 260 /
+  164 bytes; WINDOW + FFT 4 bytes each).  Three reference vectors
+  added to `gd32-bridge/tests/protocol_vectors.txt` §10
+  (`spi_adc_dsp_chain_open_probe_request`,
+  `spi_adc_dsp_stage_push_window_hann_request`,
+  `spi_adc_dsp_chain_bind_probe_request`); generator regenerates
+  cleanly.  ABI snapshots v0.1 / v0.3 / v0.5 regenerated (still 58
+  headers; +3 function decls + 4 new constants).  Twister contract
+  coverage in `tests/zephyr/chips/src/main.c` extends the existing
+  v0.5 NOT_READY + INVAL test functions with 11 new assertions
+  covering NULL out-param (chain_open), `stage_index >= MAX_STAGES`,
+  `kind > 3`, NULL params with non-zero len, oversized payload
+  (`OUT_OF_RANGE`), and `stream_id >= ADC_STREAM_COUNT` (chain_bind).
+
+  All three opcodes remain RESERVED at protocol v0.5: the firmware
+  default-case dispatch returns `STATUS_NOSUPPORT` until the
+  `bridge_hw_adc_dsp_*` HAL bodies land in the GD32 firmware tree.
+  Host helpers honour the same NOSUPPORT contract by routing the
+  wire dispatch through `cmd_send` unchanged.  When this lands,
+  `peripheral_adc.c` flips the `alp_adc_filter_t` /
+  `alp_adc_spectrum_t` bridge dispatch from "host-side chain"
+  (current CMSIS-DSP fallback) to "GD32-side chain" -- the wave-2
+  bandwidth win.  Side change: bumped host-side
+  `GD32G553_MAX_PAYLOAD_BYTES` from 17 to 65 to match the firmware's
+  `GD32_BRIDGE_MAX_PAYLOAD_BYTES`, so `cmd_send` can serialise the
+  largest STAGE_PUSH request without re-using the stream-read special
+  case.
+
 - **`scripts/setup-clang-format.sh` -- pin local clang-format to v14
   (2026-05-13).**  CI installs `clang-format-14` from the Ubuntu 22.04
   apt repo and wires it via `update-alternatives`
