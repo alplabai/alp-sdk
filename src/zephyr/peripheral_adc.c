@@ -664,10 +664,14 @@ alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg)
 
 alp_status_t alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
 {
-    (void)filter;
+    /* Mirror the bridge-path contract's pre-checks even when the
+     * backend isn't wired -- callers passing a NULL got / NULL
+     * handle deserve the precise diagnosis, not a NOSUPPORT smear. */
+    if (got == NULL) return ALP_ERR_INVAL;
+    *got = 0u;
+    if (filter == NULL) return ALP_ERR_NOT_READY;
     (void)out_mv;
     (void)cap;
-    if (got != NULL) *got = 0u;
     return ALP_ERR_NOSUPPORT;
 }
 
@@ -866,10 +870,13 @@ alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg)
 alp_status_t alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap,
                                         size_t *got)
 {
-    (void)spec;
+    /* Mirror the bridge-path contract's pre-checks for diagnostic
+     * fidelity on backends without HW dispatch. */
+    if (got == NULL) return ALP_ERR_INVAL;
+    *got = 0u;
+    if (spec == NULL) return ALP_ERR_NOT_READY;
     (void)bins;
     (void)cap;
-    if (got != NULL) *got = 0u;
     return ALP_ERR_NOSUPPORT;
 }
 
