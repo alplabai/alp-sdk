@@ -193,6 +193,16 @@ that lands before the v0.3.0 tag.)
   from `STATUS_NOSUPPORT` to `STATUS_OK` on the gd32 backend.
   No protocol or ABI change.
 
+- **Correct DAC VREF to 1.8 V (2026-05-13).**  The §2B step 5
+  commit dcc708e shipped with `DAC_VREF_MV = 3300` based on an
+  incorrect assumption about the V2N analog supply rail.
+  Maintainer-confirmed against schematic: V2N feeds the GD32G553
+  analog domain from a 1.8 V rail, not 3.3 V.  Updates
+  `DAC_VREF_MV` to `1800u` in `gd32-bridge/hal/bridge_hw_gd32.c`
+  and the matching mention in the top-of-file implementation
+  log.  Both the `set` (mV -> code) and `get` (code -> mV)
+  paths use this constant so the scaling reverses cleanly.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**

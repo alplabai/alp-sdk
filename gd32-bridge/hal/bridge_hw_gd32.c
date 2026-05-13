@@ -33,7 +33,7 @@
  *                               commit).  F32 + Q31 paths.
  *   5. DAC_SET / GET         -- DONE: channel 0 -> DAC0_OUT0 / PA4,
  *                               channel 1 -> DAC1_OUT0 / PA6, mV<->12-bit
- *                               code at VREF=3300mV.
+ *                               code at VREF=1800mV (V2N analog supply).
  *   6. PWM_SET / GET         -- TIMER0 / TIMER7 advanced PWM.
  *   7. PWM_CONFIGURE         -- align mode, dead-time, break input.
  *   8. ADC_READ              -- single-channel polling.
@@ -271,11 +271,12 @@ static const gd32_dac_ch_t dac_channels[] = {
 };
 #define DAC_CHANNEL_COUNT (sizeof(dac_channels) / sizeof(dac_channels[0]))
 
-/* DAC VREF assumption.  The V2N's analog supply is 3.3 V.  Revisit
- * if a future hw-revision moves to a buffered VREFINT source or a
- * different rail.  Full-scale code is 4095 for 12-bit alignment;
- * code = (value_mv * 4095) / VREF_mV with overflow clamped. */
-#define DAC_VREF_MV    3300u
+/* DAC VREF.  The V2N's analog supply is 1.8 V (maintainer-confirmed
+ * 2026-05-13 against the schematic).  Revisit if a future hw-revision
+ * moves to a buffered VREFINT source or a different rail.  Full-scale
+ * code is 4095 for 12-bit alignment; code = (value_mv * 4095) /
+ * VREF_mV with overflow clamped. */
+#define DAC_VREF_MV    1800u
 #define DAC_FULL_SCALE 4095u
 
 /* ----------------------------------------------------------------- */
