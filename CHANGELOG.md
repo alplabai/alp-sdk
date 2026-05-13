@@ -108,6 +108,23 @@ that lands before the v0.3.0 tag.)
   backend unchanged (still returns 0).  First of the 18 HAL bodies
   enumerated in `gd32-bridge/hal/bridge_hw_gd32.c`'s top comment.
 
+- **`bridge_hw_gpio_read` / `bridge_hw_gpio_write` now drive real
+  GPIO pads (2026-05-13).**  Second of the 18 HAL bodies.  Adds an
+  18-entry `gpio_pad_map[]` in `gd32-bridge/hal/bridge_hw_gd32.c`
+  sourced from `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv` (the
+  free `E1M IO8..IO35` rows; gaps at IO15 / IO17..IO23 / IO26 /
+  IO33 collapse to a compact 0..17 bit numbering on the wire
+  mask).  `bridge_hw_init()` enables `RCU_GPIO{A,B,C,D,E,F}` and
+  configures every pad as `INPUT + PULL_UP` (safe default -- no
+  driven contention with carrier-side wiring).  Read calls return
+  the external pad level by default; the first write to a given
+  pad promotes it to `OUTPUT` push-pull at `GPIO_OSPEED_12MHZ`
+  (sticky until the chip resets), after which reads return the
+  driven level via `gpio_output_bit_get`.  No protocol or ABI
+  change -- the wire opcodes `CMD_GPIO_READ` (0x10) and
+  `CMD_GPIO_WRITE` (0x11) flip from `STATUS_NOSUPPORT` to
+  `STATUS_OK` on the gd32 backend.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
