@@ -576,8 +576,8 @@ int bridge_hw_tmu_compute(uint8_t function, uint8_t format, uint32_t in_a, uint3
      * only one read. */
     if (sin_or_cos) {
         if (format == 1u) {
-            float    fr;
-            float    faux;
+            float fr;
+            float faux;
             tmu_two_f32_read(&fr, &faux);
             *result_out = f32_to_bits(fr);
         } else {
