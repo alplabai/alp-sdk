@@ -109,7 +109,7 @@ extern "C" {
 
 /** Maximum stages per chain (mirrors @c ALP_DSP_MAX_STAGES in
  *  `<alp/dsp.h>`). */
-#define GD32G553_BRIDGE_ADC_DSP_MAX_STAGES   4u
+#define GD32G553_BRIDGE_ADC_DSP_MAX_STAGES 4u
 
 /** Maximum reassembled per-kind stage payload the firmware accepts
  *  for a single chain stage.  Sized for the largest legal blob: FIR
@@ -117,7 +117,7 @@ extern "C" {
  *  (F32 or Q31) + 4 bytes of leading metadata = 260 bytes.  IIR
  *  (160-byte max), WINDOW, and FFT (each 4-byte fixed) fit
  *  comfortably below. */
-#define GD32G553_BRIDGE_ADC_DSP_MAX_STAGE_BYTES   260u
+#define GD32G553_BRIDGE_ADC_DSP_MAX_STAGE_BYTES 260u
 
 /** Maximum `chunk_data` bytes per `CMD_ADC_DSP_STAGE_PUSH` call.  The
  *  request payload header is 7 bytes (`chain_id:u8 stage_index:u8
@@ -125,7 +125,7 @@ extern "C" {
  *  capacity inside the wire envelope is what's left here.  A 260-byte
  *  FIR-tap blob lands in @code ceil(260 / 58) = 5 @endcode STAGE_PUSH
  *  calls. */
-#define GD32G553_BRIDGE_ADC_DSP_MAX_CHUNK_BYTES  58u
+#define GD32G553_BRIDGE_ADC_DSP_MAX_CHUNK_BYTES 58u
 
 /** Maximum bytes returned by a single `CMD_TRNG_READ` reply (v0.3+). */
 #define GD32G553_BRIDGE_TRNG_MAX_BYTES       32u
@@ -167,11 +167,11 @@ typedef enum {
     GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40,
     /* v0.2 additions -- analog + counter peripherals routed via the
      * GD32 on V2N (see metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv). */
-    GD32G553_CMD_DAC_SET               = 0x50,
-    GD32G553_CMD_DAC_GET               = 0x51,
-    GD32G553_CMD_QENC_READ             = 0x60,
-    GD32G553_CMD_QENC_RESET            = 0x61,
-    GD32G553_CMD_COUNTER_READ          = 0x70,
+    GD32G553_CMD_DAC_SET      = 0x50,
+    GD32G553_CMD_DAC_GET      = 0x51,
+    GD32G553_CMD_QENC_READ    = 0x60,
+    GD32G553_CMD_QENC_RESET   = 0x61,
+    GD32G553_CMD_COUNTER_READ = 0x70,
     /* v0.3 additions -- expose GD32G5 ADC + PWM HW knobs
      * (oversampling, sample-and-hold cycles, alignment / dead-time
      * for PWM, DMA-backed continuous acquisition).  On V2N every
@@ -179,20 +179,20 @@ typedef enum {
      * timers (TIMER0 MCH0..MCH3 on PWM0..3, TIMER7 MCH0..MCH3 on
      * PWM4..7) -- ~4.16 ns LSB at the 240 MHz core clock, 273 us
      * maximum period.  CMD_PWM_GET reports the rounded actual. */
-    GD32G553_CMD_PWM_CONFIGURE         = 0x22,
-    GD32G553_CMD_ADC_CONFIGURE         = 0x32,
-    GD32G553_CMD_ADC_STREAM_BEGIN      = 0x33,
-    GD32G553_CMD_ADC_STREAM_READ       = 0x34,
-    GD32G553_CMD_ADC_STREAM_END        = 0x35,
+    GD32G553_CMD_PWM_CONFIGURE    = 0x22,
+    GD32G553_CMD_ADC_CONFIGURE    = 0x32,
+    GD32G553_CMD_ADC_STREAM_BEGIN = 0x33,
+    GD32G553_CMD_ADC_STREAM_READ  = 0x34,
+    GD32G553_CMD_ADC_STREAM_END   = 0x35,
     /* v0.3 security/crypto block.  TRNG today; CAU (AES/DES) lands in
      * v0.4 with PSA Crypto driver registration. */
-    GD32G553_CMD_TRNG_READ             = 0x80,
+    GD32G553_CMD_TRNG_READ = 0x80,
     /* v0.4: GD32G5 TMU (CORDIC) math accelerator.  Standalone block
      * (NOT an ADC postprocessor): sin/cos/tan, atan/atan2, sqrt, log,
      * exp, sinh/cosh/tanh, hypot.  Function + format encoded in the
      * request payload; reply carries `result:u32 status:u8`.  Format
      * 0 = Q31 fixed-point (signed); format 1 = IEEE-754 single. */
-    GD32G553_CMD_TMU_COMPUTE           = 0x90,
+    GD32G553_CMD_TMU_COMPUTE = 0x90,
     /* v0.5: ADC-stream DSP pipeline configuration -- RESERVED +
      * tombstoned.  Original single-shot configure can't fit a FIR
      * stage's 256-byte Q31-tap blob in the 65-byte wire envelope, so
@@ -220,9 +220,9 @@ typedef enum {
      * See `docs/gd32-bridge-protocol.md` §3.x for the wire layout and
      * `memory/project_wave2_dsp_pipeline_design.md` for design
      * context. */
-    GD32G553_CMD_ADC_DSP_CHAIN_OPEN       = 0x37,
-    GD32G553_CMD_ADC_DSP_STAGE_PUSH       = 0x38,
-    GD32G553_CMD_ADC_DSP_CHAIN_BIND       = 0x39,
+    GD32G553_CMD_ADC_DSP_CHAIN_OPEN = 0x37,
+    GD32G553_CMD_ADC_DSP_STAGE_PUSH = 0x38,
+    GD32G553_CMD_ADC_DSP_CHAIN_BIND = 0x39,
     /* v0.5 (§2B.2): advanced timer extras.  PWM_CAPTURE turns a PWM
      * channel's pin into an input-capture source for frequency / pulse-
      * width measurement; PWM_SINGLE_PULSE drives a one-shot pulse of
@@ -233,23 +233,23 @@ typedef enum {
      * bridge_hw_* HAL bodies land.  Portable surfaces in <alp/pwm.h> +
      * <alp/counter.h> mirror the same NOSUPPORT contract on builds
      * without the HW backend. */
-    GD32G553_CMD_PWM_CAPTURE_BEGIN        = 0x23,
-    GD32G553_CMD_PWM_CAPTURE_READ         = 0x24,
-    GD32G553_CMD_PWM_CAPTURE_END          = 0x25,
-    GD32G553_CMD_PWM_SINGLE_PULSE         = 0x26,
-    GD32G553_CMD_TIMER_SYNC               = 0x27,
+    GD32G553_CMD_PWM_CAPTURE_BEGIN = 0x23,
+    GD32G553_CMD_PWM_CAPTURE_READ  = 0x24,
+    GD32G553_CMD_PWM_CAPTURE_END   = 0x25,
+    GD32G553_CMD_PWM_SINGLE_PULSE  = 0x26,
+    GD32G553_CMD_TIMER_SYNC        = 0x27,
     /* v0.5 (§2B.3): system-wide power-mode transition request.
      * Portable surface in <alp/power.h>.  Reserved opcode at v0.5;
      * firmware dispatcher returns STATUS_NOSUPPORT today. */
-    GD32G553_CMD_POWER_MODE_SET           = 0x28,
+    GD32G553_CMD_POWER_MODE_SET = 0x28,
     /* Reserved range 0xF0..0xFF -- application-bootloader OTA. */
-    GD32G553_CMD_OTA_BEGIN             = 0xF0,
-    GD32G553_CMD_OTA_WRITE_CHUNK       = 0xF1,
-    GD32G553_CMD_OTA_VERIFY            = 0xF2,
-    GD32G553_CMD_OTA_COMMIT            = 0xF3,
-    GD32G553_CMD_OTA_ROLLBACK          = 0xF4,
-    GD32G553_CMD_OTA_GET_STATE         = 0xF5,
-    GD32G553_CMD_OTA_ABORT             = 0xF6,
+    GD32G553_CMD_OTA_BEGIN       = 0xF0,
+    GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1,
+    GD32G553_CMD_OTA_VERIFY      = 0xF2,
+    GD32G553_CMD_OTA_COMMIT      = 0xF3,
+    GD32G553_CMD_OTA_ROLLBACK    = 0xF4,
+    GD32G553_CMD_OTA_GET_STATE   = 0xF5,
+    GD32G553_CMD_OTA_ABORT       = 0xF6,
 } gd32g553_cmd_t;
 
 /** Transport-selection enum.  Use with @ref gd32g553_set_default_transport

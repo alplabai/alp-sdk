@@ -2081,9 +2081,9 @@ ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
     zassert_equal(gd32g553_adc_dsp_chain_open(&ctx, NULL), ALP_ERR_INVAL);
 
     /* stage_push rejects stage_index outside [0, MAX_STAGES). */
-    zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, GD32G553_BRIDGE_ADC_DSP_MAX_STAGES, 0u,
-                                              NULL, 0u),
-                  ALP_ERR_INVAL);
+    zassert_equal(
+        gd32g553_adc_dsp_stage_push(&ctx, 0u, GD32G553_BRIDGE_ADC_DSP_MAX_STAGES, 0u, NULL, 0u),
+        ALP_ERR_INVAL);
     zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, 99u, 0u, NULL, 0u), ALP_ERR_INVAL);
     /* stage_push rejects kind > 3 (outside FIR/IIR/WINDOW/FFT). */
     zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, 0u, 4u, NULL, 0u), ALP_ERR_INVAL);
@@ -2095,9 +2095,9 @@ ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
      * firmware's per-stage buffer). */
     {
         static const uint8_t oversized[GD32G553_BRIDGE_ADC_DSP_MAX_STAGE_BYTES + 4u] = { 0 };
-        zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, 0u, 0u, oversized,
-                                                  (uint16_t)sizeof(oversized)),
-                      ALP_ERR_OUT_OF_RANGE);
+        zassert_equal(
+            gd32g553_adc_dsp_stage_push(&ctx, 0u, 0u, 0u, oversized, (uint16_t)sizeof(oversized)),
+            ALP_ERR_OUT_OF_RANGE);
     }
 
     /* chain_bind rejects stream_id outside [0, ADC_STREAM_COUNT). */
