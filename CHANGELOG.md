@@ -368,6 +368,28 @@ that lands before the v0.3.0 tag.)
   apply path with last-write-wins across the timer's
   channels.
 
+- **`bridge_hw_qenc_read` / `bridge_hw_qenc_reset` -> 4
+  quadrature encoders (2026-05-13).**  Thirteenth body.
+  Maintainer-confirmed mapping:
+    - ENC0  X=PA0 / Y=PB3  TIMER1  CH0/CH1  AF1
+    - ENC1  X=PC6 / Y=PC7  TIMER2  CH0/CH1  AF2
+    - ENC2  X=PB6 / Y=PB7  TIMER3  CH0/CH1  AF2  (after PB5/PB7 swap)
+    - ENC3  X=PB2 / Y=PA1  TIMER4  CH0/CH1  AF2
+  `bridge_hw_init()` configures X / Y pads as alt-function
+  inputs with internal pull-up (so a disconnected encoder
+  doesn't float and falsely tick), enables `RCU_TIMER1..4`,
+  and runs each timer through `timer_quadrature_decoder_mode_config`
+  with `TIMER_QUAD_DECODER_MODE2` (X4 -- counts on both
+  edges of both inputs) at full-range ARR (16-bit timers
+  wrap at 0xFFFF; 32-bit wrap at 0xFFFFFFFF).
+  `bridge_hw_qenc_read` reads the timer counter and casts to
+  `int32_t` -- caller handles wrap via deltas.
+  `bridge_hw_qenc_reset` zeroes the counter via
+  `timer_counter_value_config`.  Wire opcodes
+  `CMD_QENC_READ` (0x60) and `CMD_QENC_RESET` (0x61) flip
+  from `STATUS_NOSUPPORT` to `STATUS_OK` on the gd32 backend.
+  No protocol or ABI change.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
