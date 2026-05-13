@@ -284,23 +284,23 @@ static uint32_t f32_to_bits(float f)
  * same period across each group so this doesn't surface. */
 
 typedef struct {
-    uint32_t periph;    /* TIMER0 or TIMER7 base                          */
-    uint16_t channel;   /* TIMER_CH_0..TIMER_CH_3                          */
+    uint32_t periph;     /* TIMER0 or TIMER7 base                          */
+    uint16_t channel;    /* TIMER_CH_0..TIMER_CH_3                          */
     bool     complement; /* true: drive complementary output, false: main */
-    uint32_t gpio_port; /* GPIOA..GPIOF                                    */
-    uint32_t gpio_pin;  /* GPIO_PIN_n                                     */
-    uint32_t gpio_af;   /* GPIO_AF_X                                      */
+    uint32_t gpio_port;  /* GPIOA..GPIOF                                    */
+    uint32_t gpio_pin;   /* GPIO_PIN_n                                     */
+    uint32_t gpio_af;    /* GPIO_AF_X                                      */
 } gd32_pwm_ch_t;
 
 static const gd32_pwm_ch_t pwm_channels[] = {
     [0] = { TIMER0, TIMER_CH_3, false, GPIOA, GPIO_PIN_11, GPIO_AF_10 },
-    [1] = { TIMER0, TIMER_CH_2, true,  GPIOB, GPIO_PIN_1,  GPIO_AF_6 },
-    [2] = { TIMER0, TIMER_CH_1, true,  GPIOB, GPIO_PIN_14, GPIO_AF_6 },
-    [3] = { TIMER0, TIMER_CH_3, true,  GPIOC, GPIO_PIN_5,  GPIO_AF_6 },
-    [4] = { TIMER7, TIMER_CH_0, true,  GPIOC, GPIO_PIN_10, GPIO_AF_5 },
-    [5] = { TIMER7, TIMER_CH_1, true,  GPIOC, GPIO_PIN_11, GPIO_AF_5 },
-    [6] = { TIMER7, TIMER_CH_2, true,  GPIOC, GPIO_PIN_12, GPIO_AF_5 },
-    [7] = { TIMER7, TIMER_CH_3, true,  GPIOD, GPIO_PIN_0,  GPIO_AF_5 },
+    [1] = { TIMER0, TIMER_CH_2, true, GPIOB, GPIO_PIN_1, GPIO_AF_6 },
+    [2] = { TIMER0, TIMER_CH_1, true, GPIOB, GPIO_PIN_14, GPIO_AF_6 },
+    [3] = { TIMER0, TIMER_CH_3, true, GPIOC, GPIO_PIN_5, GPIO_AF_6 },
+    [4] = { TIMER7, TIMER_CH_0, true, GPIOC, GPIO_PIN_10, GPIO_AF_5 },
+    [5] = { TIMER7, TIMER_CH_1, true, GPIOC, GPIO_PIN_11, GPIO_AF_5 },
+    [6] = { TIMER7, TIMER_CH_2, true, GPIOC, GPIO_PIN_12, GPIO_AF_5 },
+    [7] = { TIMER7, TIMER_CH_3, true, GPIOD, GPIO_PIN_0, GPIO_AF_5 },
 };
 #define PWM_CHANNEL_COUNT (sizeof(pwm_channels) / sizeof(pwm_channels[0]))
 
@@ -312,10 +312,10 @@ static const gd32_pwm_ch_t pwm_channels[] = {
  * prescaler at (240 - 1) so the counter ticks at 1 MHz.  ARR is
  * then `period_us - 1`, fitting in 16 bits for periods up to ~65 ms
  * which covers every realistic control PWM frequency (>=15 Hz). */
-#define PWM_TIMER_CLK_HZ      240000000u
-#define PWM_TIMER_PRESCALER   (240u - 1u)        /* 240 MHz -> 1 MHz tick    */
-#define PWM_TIMER_TICK_NS     1000u              /* 1 us per timer tick      */
-#define PWM_TIMER_ARR_MAX     0xFFFFu            /* 16-bit auto-reload limit */
+#define PWM_TIMER_CLK_HZ 240000000u
+#define PWM_TIMER_PRESCALER (240u - 1u) /* 240 MHz -> 1 MHz tick    */
+#define PWM_TIMER_TICK_NS 1000u         /* 1 us per timer tick      */
+#define PWM_TIMER_ARR_MAX 0xFFFFu       /* 16-bit auto-reload limit */
 
 /* Last-set cache for bridge_hw_pwm_get.  Reading back the timer's
  * compare register would also work but the caller is interested in
