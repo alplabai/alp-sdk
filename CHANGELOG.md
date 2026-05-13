@@ -203,6 +203,22 @@ that lands before the v0.3.0 tag.)
   log.  Both the `set` (mV -> code) and `get` (code -> mV)
   paths use this constant so the scaling reverses cleanly.
 
+- **`bridge_hw_counter_read` -> Cortex-M33 DWT cycle counter
+  (2026-05-13).**  Sixth step in the implementation order
+  (#12 of the original 18-step list; tackled out-of-order
+  because DWT needs no peripheral routing or pad config).
+  `bridge_hw_init()` arms the trace block (`CoreDebug->DEMCR
+  |= TRCENA`) and starts the 32-bit free-running counter
+  (`DWT->CYCCNT = 0; DWT->CTRL |= CYCCNTENA`).  The counter
+  ticks at the core clock (240 MHz on GD32G553 -> ~4.16 ns
+  LSB, ~17.9 s wrap).  `bridge_hw_counter_read(0, *ticks)`
+  returns the current `DWT->CYCCNT` value; other counter
+  ids return `BRIDGE_HW_ERR_RANGE` (future revisions can
+  carve out additional ids for derived slower tick bases).
+  Wire opcode `CMD_COUNTER_READ` (0x70) flips from
+  `STATUS_NOSUPPORT` to `STATUS_OK` on the gd32 backend.
+  No protocol or ABI change.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**

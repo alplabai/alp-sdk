@@ -40,7 +40,8 @@
  *   9. ADC_CONFIGURE         -- oversample / sample-cycles / resolution.
  *   10. ADC_STREAM_*         -- DMA0/1 backed continuous acquisition.
  *   11. QENC_READ / RESET    -- TIMER encoder mode.
- *   12. COUNTER_READ         -- SysTick or hi-res timer.
+ *   12. COUNTER_READ         -- DONE: Cortex-M33 DWT cycle counter
+ *                               (32-bit free-running at core clock).
  *   13. PWM_CAPTURE_*        -- TIMERx input-capture + ring buffer.
  *   14. PWM_SINGLE_PULSE     -- TIMERx one-pulse mode (OPM).
  *   15. TIMER_SYNC           -- master-slave SMC config.
@@ -339,6 +340,16 @@ void bridge_hw_init(void)
         dac_mode_config(dac_channels[i].periph, dac_channels[i].out, NORMAL_PIN_BUFFON);
         dac_enable(dac_channels[i].periph, dac_channels[i].out);
     }
+
+    /* Free-running counter: enable the Cortex-M33 DWT cycle counter.
+     * TRCENA in CoreDebug->DEMCR gates the entire DWT/ITM trace block;
+     * setting CYCCNTENA in DWT->CTRL starts the 32-bit free-running
+     * counter at the core clock rate (240 MHz on the GD32G553 in the
+     * stock clock config -> ~17.9 s wrap, ~4.16 ns LSB).  The counter
+     * is the source for bridge_hw_counter_read(). */
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0u;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 }
 
 /* Called from the SysTick handler (or the main loop's idle path)
@@ -690,9 +701,17 @@ int bridge_hw_qenc_reset(uint8_t encoder)
 
 int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks)
 {
-    (void)counter;
-    if (ticks != 0) *ticks = 0u;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (ticks == 0) return BRIDGE_HW_ERR_INVAL;
+    *ticks = 0u;
+    /* Single free-running counter exposed today; future revisions can
+     * carve out additional ids for derived (slower) tick bases.  The
+     * DWT counter ticks at the core clock (240 MHz on GD32G553),
+     * wraps every ~17.9 s, and is monotonically non-decreasing across
+     * reads -- the host can compute deltas without watching for
+     * mid-read consistency since the register is atomic. */
+    if (counter != 0u) return BRIDGE_HW_ERR_RANGE;
+    *ticks = DWT->CYCCNT;
+    return BRIDGE_HW_OK;
 }
 
 uint8_t bridge_hw_da9292_status_cached(void)
