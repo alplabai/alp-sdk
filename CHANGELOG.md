@@ -61,6 +61,26 @@ that lands before the v0.3.0 tag.)
 - **5L35023B I2C address -> 7-bit `0x68`** (8-bit write `0xD0`) per
   the Renesas 5L35023 public datasheet.
 
+### Removed (2026-05-13 -- top-level UX simplification)
+
+- **`PLAN.md` deleted from the public repo.**  It was an
+  internal product / engineering planning document
+  ("ALP SDK — Product + Engineering Plan", 583 lines, last
+  revised 2026-05-11) that duplicated forward-looking
+  positioning already captured in [`VERSIONS.md`](VERSIONS.md)
+  and pillar-level architecture text already in the customer
+  surfaces (`docs/architecture.md`, `docs/secure-boot.md`,
+  `docs/ota.md`, `docs/recommended-libraries.md`,
+  `include/alp/inference.h` headers).  Live cross-references
+  updated to point at those canonical surfaces instead of the
+  deleted planning doc; historical mentions in `CHANGELOG.md`
+  are kept untouched.  Files touched: `VERSIONS.md`,
+  `docs/test-plan.md`, `docs/secure-boot.md`, `docs/ota.md`,
+  `docs/recommended-libraries.md`, `sysbuild/aen/README.md`,
+  `vendors/deepx-dxm1/README.md`,
+  `vendors/renesas-rzv2n/rzv_drp-ai_tvm/README.md`,
+  `include/alp/inference.h`.
+
 ### Fixed (2026-05-13 -- gd32-bridge CI follow-ups)
 
 - **`gd32-bridge` GD32 backend now links against a real `gd32g553_xE`

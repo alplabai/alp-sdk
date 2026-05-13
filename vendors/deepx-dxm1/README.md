@@ -8,7 +8,7 @@ The DX-M1 is a 25-TOPS @ 1.0 GHz DXNN accelerator in an FC-BGA
 all on-module.  The host RZ/V2N's PCIe Root Complex enumerates the
 DX-M1 as a single device on `PCIE0`; the ALP SDK's
 `<alp/inference.h>` backend talks to it via the DEEPX user-space
-runtime on Linux (Yocto first-class target — see `PLAN.md` §4.3).
+runtime on Linux (Yocto first-class target).
 
 ## Status
 
@@ -123,8 +123,8 @@ as long as no DEEPX source is committed to this repo.
 
 ## See also
 
-- [`PLAN.md` §2.3](../../PLAN.md) -- Edge AI pillar deliverables,
-  including the unified `<alp/inference.h>` API.
+- [`include/alp/inference.h`](../../include/alp/inference.h)
+  -- the unified portable inference surface.
 - [`src/yocto/inference_deepx.cpp`](../../src/yocto/inference_deepx.cpp)
   -- the SDK backend that calls into this directory's headers.
 - [`docs/recommended-libraries.md`](../../docs/recommended-libraries.md)

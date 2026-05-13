@@ -256,7 +256,6 @@ When a new library candidate shows up:
 
 ## See also
 
-- [`PLAN.md`](../PLAN.md) — current roadmap.
 - [`VERSIONS.md`](../VERSIONS.md) — versioned surface table.
 - [Awesome Embedded Software](https://github.com/iDoka/awesome-embedded-software)
   and [Awesome C++](https://github.com/fffaraz/awesome-cpp) — the source

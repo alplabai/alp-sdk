@@ -30,8 +30,8 @@
  * Vendor-specific accelerator paths (`<alp/vendors/alif/ethosu.h>`,
  * `<alp/vendors/renesas/drpai.h>`, `<alp/vendors/deepx/dxm1.h>`)
  * remain available as escape hatches when the unified API can't
- * express what the vendor SDK offers.  See `PLAN.md` §4.3 for the
- * "best-effort, not absolute" unification stance.
+ * express what the vendor SDK offers.  The unification stance is
+ * "best-effort, not absolute".
  */
 
 #ifndef ALP_INFERENCE_H

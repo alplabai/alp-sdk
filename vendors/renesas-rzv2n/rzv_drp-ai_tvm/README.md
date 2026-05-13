@@ -83,6 +83,6 @@ work; RUHMI doesn't claim copyright on compiled artefacts.
   runtime side this compiler targets.
 - [`vendors/renesas-rzv2n/README.md`](../README.md) -- The
   parent vendor wrapper for RZ/V2N silicon.
-- [`PLAN.md` §4.3](../../../PLAN.md) -- Vendor-specific ML SDK
-  policy: vendor escape hatches are available where the unified
-  `<alp/inference.h>` surface can't express a vendor capability.
+- [`include/alp/inference.h`](../../../include/alp/inference.h)
+  -- the unified portable inference surface; vendor escape
+  hatches are available where it can't express a vendor capability.

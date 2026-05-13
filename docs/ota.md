@@ -141,5 +141,5 @@ brick the Alif side and vice versa.
 - [`docs/cc3501e-bridge.md`](cc3501e-bridge.md) — Wi-Fi/BLE
   bridge architecture; relevant for the network transport of
   OTA payloads on AEN.
-- [`PLAN.md` §2.4.1](../PLAN.md) — the product-level positioning
-  of secure boot + secure OTA.
+- [`VERSIONS.md`](../VERSIONS.md) — versioned roadmap; secure
+  boot / OTA shipped together in v0.4.

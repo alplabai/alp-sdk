@@ -10,8 +10,8 @@ intended v0.4 reference path (MCUboot + ECDSA-P256 +
 swap-using-scratch).  The authoritative `alp_e1m_evk_aen` Zephyr
 board file lives at
 [`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
-(TBD per [`PLAN.md` §6 item 8](../../PLAN.md)).  Once that lands,
-the `pr-twister` workflow gains a sysbuild scenario that
+(TBD; tracked in [`VERSIONS.md`](../../VERSIONS.md) v0.3 row).
+Once that lands, the `pr-twister` workflow gains a sysbuild scenario that
 compile-verifies this config against a smoke example.  Until
 then this directory documents the target so downstream consumers
 don't have to reverse-engineer it.

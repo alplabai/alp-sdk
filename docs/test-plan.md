@@ -185,7 +185,6 @@ been green on `main` for at least two consecutive PRs.
 
 ## See also
 
-- [`PLAN.md`](../PLAN.md) — product / engineering shape.
 - [`VERSIONS.md`](../VERSIONS.md) — versioned roadmap; this doc is
   the verification ledger that gates each version's tag.
 - [`ci/HW-IN-LOOP.md`](../ci/HW-IN-LOOP.md) — HIL runner contract.
