@@ -297,7 +297,7 @@ static const gd32_adc_ch_t adc_channels_map[] = {
 /* VREF for the ADC's 12-bit right-aligned code -> millivolt
  * conversion.  V2N's analog supply is 1.8 V (maintainer-confirmed
  * the same rail used by DAC_VREF_MV).  Full-scale is 4095 codes. */
-#define ADC_VREF_MV    1800u
+#define ADC_VREF_MV 1800u
 #define ADC_FULL_SCALE 4095u
 
 /* Default sample time used for single-shot reads.  240 cycles is
