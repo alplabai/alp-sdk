@@ -1,7 +1,7 @@
-# fuzz/ -- ALP SDK libFuzzer harnesses
+# tests/fuzz/ -- ALP SDK libFuzzer harnesses
 
 Scaffolding for the v1.0 fuzz testing deliverable in
-[`VERSIONS.md`](../VERSIONS.md) ("Fuzz testing on every parser
+[`VERSIONS.md`](../../VERSIONS.md) ("Fuzz testing on every parser
 surface (manifest readers, MQTT, BLE)").  Each harness is a
 single libFuzzer entry point (`LLVMFuzzerTestOneInput`) that
 exercises one parser surface with corpora-driven input.
@@ -53,7 +53,7 @@ CC=clang CXX=clang++ cmake -B build-fuzz \
 cmake --build build-fuzz --target alp_fuzz_cc3501e alp_fuzz_iot_mqtt
 
 # Run one harness for 30 seconds with the seed corpus.
-./build-fuzz/fuzz/alp_fuzz_cc3501e -max_total_time=30 fuzz/corpus/cc3501e
+./build-fuzz/tests/fuzz/alp_fuzz_cc3501e -max_total_time=30 tests/fuzz/corpus/cc3501e
 ```
 
 Clang ≥ 14 is recommended -- earlier versions miss some
@@ -61,7 +61,7 @@ Clang ≥ 14 is recommended -- earlier versions miss some
 
 ## Seed corpora
 
-Each harness ships its own `fuzz/corpus/<name>/` directory with
+Each harness ships its own `tests/fuzz/corpus/<name>/` directory with
 one-shot seed inputs that exercise the happy path.  libFuzzer
 mutates from these.  Corpus files are intentionally short (≤ 128 B)
 so the fuzzer reaches deep code paths quickly.
@@ -69,7 +69,7 @@ so the fuzzer reaches deep code paths quickly.
 The first round of seeds is hand-rolled (one valid frame per
 opcode family for cc3501e; one CONNECT + one PUBLISH for MQTT).
 v1.0 captures coverage-driven corpus minimisation under
-`fuzz/corpus/<name>/min/`.
+`tests/fuzz/corpus/<name>/min/`.
 
 ## CI integration (deferred)
 
@@ -83,13 +83,13 @@ target list.
 
 If we land continuous fuzzing via OSS-Fuzz, each `LLVMFuzzerTestOneInput`
 entry point integrates without changes -- that's the same ABI.
-The `fuzz/CMakeLists.txt` already emits binaries with the
+The `tests/fuzz/CMakeLists.txt` already emits binaries with the
 canonical `alp_fuzz_<name>` naming OSS-Fuzz scrapers expect.
 
 ## See also
 
-- [`tests/bench/`](../tests/bench/) -- the microbench suite, the other half
+- [`tests/bench/`](../bench/) -- the microbench suite, the other half
   of the v1.0 hardening prep (task #15).
-- [`VERSIONS.md`](../VERSIONS.md) -- v1.0 deliverables.
-- [`docs/cc3501e-bridge.md`](../docs/cc3501e-bridge.md) -- the
+- [`VERSIONS.md`](../../VERSIONS.md) -- v1.0 deliverables.
+- [`docs/cc3501e-bridge.md`](../../docs/cc3501e-bridge.md) -- the
   CC3501E wire protocol design (target of `cc3501e_fuzz.c`).

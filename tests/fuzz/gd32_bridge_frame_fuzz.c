@@ -35,7 +35,7 @@
  *     transports' parsers (`gd32-bridge/src/transport_spi.c` and
  *     `transport_i2c.c`) live inside ISR-driven byte buffers; a
  *     useful fuzz harness would need to model the CS / START
- *     transitions.  Tracked as future work in fuzz/README.md.
+ *     transitions.  Tracked as future work in tests/fuzz/README.md.
  *   - Host-side reply validation (chips/gd32g553/gd32g553.c's
  *     `spi_xfer` / `i2c_xfer` reply parsers).  Would require
  *     extracting them as standalone non-static functions; see the

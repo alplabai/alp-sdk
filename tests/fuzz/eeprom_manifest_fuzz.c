@@ -26,8 +26,8 @@
  *   cmake --build build-fuzz --target alp_fuzz_eeprom_manifest
  *
  * Run:
- *   ./build-fuzz/fuzz/alp_fuzz_eeprom_manifest -max_total_time=30 \
- *         fuzz/corpus/eeprom_manifest
+ *   ./build-fuzz/tests/fuzz/alp_fuzz_eeprom_manifest -max_total_time=30 \
+ *         tests/fuzz/corpus/eeprom_manifest
  */
 
 #include <stddef.h>

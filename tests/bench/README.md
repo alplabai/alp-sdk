@@ -82,7 +82,7 @@ runs it.
 
 ## See also
 
-- [`fuzz/`](../../fuzz/) -- the libFuzzer harness suite, the other
+- [`tests/fuzz/`](../fuzz/) -- the libFuzzer harness suite, the other
   half of the v1.0 hardening prep (task #15).
 - [`VERSIONS.md`](../../VERSIONS.md) -- v1.0 milestone deliverables,
   including "Performance baselines per chip in metadata."

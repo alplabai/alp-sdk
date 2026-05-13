@@ -73,6 +73,18 @@ that lands before the v0.3.0 tag.)
   + `README.md` + `baseline_runner.py` + `baselines/README.md`
   + `bench.h` self-refs, plus `docs/test-plan.md`,
   `docs/testing.md`, `fuzz/README.md` cross-references.
+- **`fuzz/` moved to `tests/fuzz/`.**  Same reasoning as the
+  bench move: the libFuzzer harnesses are test infrastructure
+  (opt-in via `ALP_BUILD_FUZZ=ON`, clang-only, no CI gate
+  today).  Top-level repo loses one more entry, and bench /
+  fuzz / smoke / yocto / zephyr live as siblings under
+  `tests/`.  Files updated: top-level `CMakeLists.txt`
+  (`add_subdirectory(tests/fuzz)`), `tests/fuzz/CMakeLists.txt`
+  + `README.md` self-refs, four harness-file header comments
+  (`cc3501e_fuzz.c`, `eeprom_manifest_fuzz.c`,
+  `gd32_bridge_frame_fuzz.c`, `iot_mqtt_fuzz.c`), plus the
+  `tests/bench/README.md` cross-ref bumped from `../../fuzz/`
+  to `../fuzz/`.
 
 ### Removed (2026-05-13 -- top-level UX simplification)
 

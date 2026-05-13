@@ -25,8 +25,8 @@
  *   cmake --build build-fuzz --target alp_fuzz_iot_mqtt
  *
  * Run:
- *   ./build-fuzz/fuzz/alp_fuzz_iot_mqtt -max_total_time=30 \
- *         fuzz/corpus/iot_mqtt
+ *   ./build-fuzz/tests/fuzz/alp_fuzz_iot_mqtt -max_total_time=30 \
+ *         tests/fuzz/corpus/iot_mqtt
  */
 
 #include <stddef.h>

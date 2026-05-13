@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# fuzz/ -- libFuzzer harnesses for the ALP SDK parser surfaces.
+# tests/fuzz/ -- libFuzzer harnesses for the ALP SDK parser surfaces.
 # Opt-in via ALP_BUILD_FUZZ=ON at the top-level cmake configure;
-# requires clang (GCC has no -fsanitize=fuzzer).  See fuzz/README.md
+# requires clang (GCC has no -fsanitize=fuzzer).  See tests/fuzz/README.md
 # for the design + how to add new harnesses.
 #
 # Each harness compiles to its own executable so libFuzzer's
@@ -12,14 +12,14 @@
 
 if(NOT TARGET alp_sdk)
     message(FATAL_ERROR
-        "fuzz/CMakeLists.txt expects the alp_sdk target to be defined "
+        "tests/fuzz/CMakeLists.txt expects the alp_sdk target to be defined "
         "by the top-level CMakeLists.txt (plain-CMake mode only).")
 endif()
 
 if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
     message(WARNING
         "ALP_BUILD_FUZZ=ON requires clang (got ${CMAKE_C_COMPILER_ID}). "
-        "libFuzzer is a clang-only sanitiser.  Skipping fuzz/ targets.")
+        "libFuzzer is a clang-only sanitiser.  Skipping tests/fuzz/ targets.")
     return()
 endif()
 

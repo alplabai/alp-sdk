@@ -60,7 +60,7 @@ endif()
 
 option(ALP_BUILD_TESTS    "Build ALP SDK tests"    OFF)
 option(ALP_BUILD_BENCH    "Build ALP SDK microbenchmarks (tests/bench/)"  OFF)
-option(ALP_BUILD_FUZZ     "Build ALP SDK libFuzzer harnesses (fuzz/, clang-only)"  OFF)
+option(ALP_BUILD_FUZZ     "Build ALP SDK libFuzzer harnesses (tests/fuzz/, clang-only)"  OFF)
 option(ALP_HAS_LVGL       "Compile <alp/gui.h> against LVGL"  OFF)
 option(ALP_HAS_CMSIS_DSP  "Allow ALP SDK internals (audio etc.) to call CMSIS-DSP.  Application code uses CMSIS-DSP directly; ALP no longer re-exports it." OFF)
 
@@ -121,7 +121,7 @@ if(ALP_BUILD_BENCH)
 endif()
 
 if(ALP_BUILD_FUZZ)
-    add_subdirectory(fuzz)
+    add_subdirectory(tests/fuzz)
 endif()
 
 # ---------------------------------------------------------------------

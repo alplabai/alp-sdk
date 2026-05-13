@@ -25,8 +25,8 @@
  *   cmake --build build-fuzz --target alp_fuzz_cc3501e
  *
  * Run:
- *   ./build-fuzz/fuzz/alp_fuzz_cc3501e -max_total_time=30 \
- *         fuzz/corpus/cc3501e
+ *   ./build-fuzz/tests/fuzz/alp_fuzz_cc3501e -max_total_time=30 \
+ *         tests/fuzz/corpus/cc3501e
  */
 
 #include <stddef.h>
