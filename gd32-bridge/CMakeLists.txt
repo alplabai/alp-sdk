@@ -86,15 +86,6 @@ endif()
 
 add_executable(gd32-bridge ${GD32_BRIDGE_SOURCES})
 
-# Sanity-print: if the target didn't register (CI hit "No target
-# gd32-bridge" during generation on 79b1ffc+127f18f), this prints
-# `bridge target type: <empty>` and any subsequent target_* call
-# below would also error.  Once the build is reliable on CI for a
-# few commits this can come out.
-get_target_property(_BRIDGE_TYPE gd32-bridge TYPE)
-message(STATUS "bridge target type: ${_BRIDGE_TYPE}")
-message(STATUS "bridge sources: ${GD32_BRIDGE_SOURCES}")
-
 target_include_directories(gd32-bridge PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/hal
