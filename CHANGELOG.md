@@ -85,6 +85,13 @@ that lands before the v0.3.0 tag.)
   `gd32_bridge_frame_fuzz.c`, `iot_mqtt_fuzz.c`), plus the
   `tests/bench/README.md` cross-ref bumped from `../../fuzz/`
   to `../fuzz/`.
+- **`CONTRIBUTORS.md` folded into `CONTRIBUTING.md`.**  Two
+  contributor-facing files at the top level was one too many --
+  the team-credit table + the Co-Authored-By trailer convention
+  now live as the "Team" and "Credit" sections at the bottom of
+  `CONTRIBUTING.md`.  Top-level file count drops by one.  No
+  callers referenced `CONTRIBUTORS.md` directly so no
+  cross-refs needed updating.
 - **`ci/` moved to `docs/ci/`.**  The directory only held two
   documentation files (`HW-IN-LOOP.md` runner contract +
   `README.md` workflow index) -- the actual CI lives at

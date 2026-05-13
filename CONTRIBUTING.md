@@ -90,6 +90,36 @@ See [`docs/porting-new-som.md`](docs/porting-new-som.md).
 By contributing, you agree your contributions are licensed under
 [Apache License 2.0](LICENSE), the SDK's license.
 
+## Credit
+
+We use the standard Git `Co-Authored-By:` trailer convention.  Every
+commit that takes meaningful work from someone other than the
+committer ends with:
+
+```
+Co-Authored-By: Name <email@example.com>
+```
+
+GitHub picks the trailer up and adds the named address to the commit's
+co-author list + the repository's Contributors graph.  See
+[GitHub Docs · Creating a commit with multiple authors](https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/creating-a-commit-with-multiple-authors)
+for the formatting rules.
+
+## Team
+
+The ALP SDK is built and maintained by [Alp Lab](https://alplab.ai).
+
+| Contributor          | GitHub                                                   | Role                          |
+|----------------------|----------------------------------------------------------|-------------------------------|
+| Caner Alp            | [@alpCaner](https://github.com/alpCaner)                 | Founder · SDK architect       |
+| Hakan Gülen          | [@hkngln](https://github.com/hkngln)                     | Maintainer                    |
+| Şükrü Sinan Aydoğdu  | [@sukru-aydogdu](https://github.com/sukru-aydogdu)       | Maintainer                    |
+| globglob             | [@globglob3D](https://github.com/globglob3D)             | Contributor                   |
+| Sri (Alp Lab)        | [@Sri-AlpLab](https://github.com/Sri-AlpLab)             | Contributor                   |
+
+Additional Alp Lab team members extend this table from their own
+commits as their work lands.
+
 ## Getting help
 
 - [Documentation](https://docs.alplab.ai)
