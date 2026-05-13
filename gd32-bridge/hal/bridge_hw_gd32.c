@@ -39,7 +39,10 @@
  *   7. PWM_CONFIGURE         -- align mode, dead-time, break input.
  *   8. ADC_READ              -- DONE: 8-pad map across ADC0..3, single-
  *                               shot polling, mV<->code at VREF=1800mV.
- *   9. ADC_CONFIGURE         -- oversample / sample-cycles / resolution.
+ *   9. ADC_CONFIGURE         -- PARTIAL: per-channel sample_cycles
+ *                               cached + applied; oversample_ratio +
+ *                               resolution_bits gated to defaults (1,
+ *                               12) until a follow-up commit.
  *   10. ADC_STREAM_*         -- DMA0/1 backed continuous acquisition.
  *   11. QENC_READ / RESET    -- TIMER encoder mode.
  *   12. COUNTER_READ         -- DONE: Cortex-M33 DWT cycle counter
@@ -308,6 +311,13 @@ static const gd32_adc_ch_t adc_channels_map[] = {
  * sample + 12.5 ADCCK conversion ~= 6.3 us). */
 #define ADC_DEFAULT_SAMPLE_CYCLES 240u
 
+/* Per-channel sticky sample-cycle override applied by
+ * bridge_hw_adc_configure.  Defaults to ADC_DEFAULT_SAMPLE_CYCLES;
+ * caller's tighter values (e.g. 24 cycles for low-impedance sources)
+ * override on the next bridge_hw_adc_read.  Resolution + oversample
+ * are still gated to defaults at v0.3 and live in a follow-up. */
+static uint16_t adc_sample_cycles_cache[8];
+
 static void adc_periph_init(uint32_t periph)
 {
     adc_deinit(periph);
@@ -569,6 +579,9 @@ void bridge_hw_init(void)
     adc_periph_init(ADC1);
     adc_periph_init(ADC2);
     adc_periph_init(ADC3);
+    for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
+        adc_sample_cycles_cache[i] = ADC_DEFAULT_SAMPLE_CYCLES;
+    }
 }
 
 /* Called from the SysTick handler (or the main loop's idle path)
@@ -728,8 +741,10 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
     /* Configure the routine channel for this op (each call re-applies
      * because multiple bridge channels can share an ADC peripheral -- a
      * prior bridge_hw_adc_read on a different bridge channel may have
-     * pointed the routine slot elsewhere). */
-    adc_routine_channel_config(ch->periph, 0u, ch->channel, ADC_DEFAULT_SAMPLE_CYCLES);
+     * pointed the routine slot elsewhere).  Sample-cycle count comes
+     * from the per-channel cache so bridge_hw_adc_configure's choice
+     * survives across reads. */
+    adc_routine_channel_config(ch->periph, 0u, ch->channel, adc_sample_cycles_cache[channel]);
 
     /* Take `samples` consecutive conversions, software-triggered per
      * sample.  Polled EOC.  No timeout -- if the ADC is wedged the
@@ -762,11 +777,28 @@ int bridge_hw_pwm_configure(uint8_t channel, uint8_t align_mode, uint32_t dead_t
 int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio, uint16_t sample_cycles,
                             uint8_t resolution_bits)
 {
-    (void)channel;
-    (void)oversample_ratio;
-    (void)sample_cycles;
-    (void)resolution_bits;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (channel >= ADC_CHANNEL_MAP_COUNT) return BRIDGE_HW_ERR_RANGE;
+
+    /* v0.3 partial: only sample_cycles is sticky.  The oversample +
+     * resolution paths are still gated to their defaults (1, 12).
+     * Non-default values return NOSUPPORT so the host gets a clear
+     * "this commit doesn't support that yet" rather than silently
+     * accepting and ignoring.  A follow-up commit will land the
+     * resolution + oversample apply path. */
+    if (oversample_ratio != 1u) return BRIDGE_HW_ERR_NOTIMPL;
+    if (resolution_bits != 12u) return BRIDGE_HW_ERR_NOTIMPL;
+
+    /* Sample cycles: clamp to the vendor's accepted 2..638 cycle
+     * range (per `adc_routine_channel_config`'s sample_time
+     * parameter).  Round caller-supplied values into this range
+     * rather than rejecting -- matches the contract's "firmware
+     * rounds down" wording. */
+    uint16_t sc = sample_cycles;
+    if (sc < 2u) sc = 2u;
+    if (sc > 638u) sc = 638u;
+
+    adc_sample_cycles_cache[channel] = sc;
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t sample_rate_hz)

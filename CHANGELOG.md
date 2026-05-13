@@ -286,6 +286,23 @@ that lands before the v0.3.0 tag.)
   to `STATUS_OK` on the gd32 backend.  No protocol or ABI
   change.
 
+- **`bridge_hw_adc_configure` -> per-channel sample_cycles
+  override (2026-05-13).**  Ninth body, partial.  Adds a
+  per-channel `adc_sample_cycles_cache[]` so callers can
+  tighten sample time from the default 240 cycles to e.g. 24
+  (~140 ns sample window at HCLK/6) for low-impedance sources
+  without burning ~6 us per conversion.
+  `bridge_hw_adc_read` now picks up the cached value
+  per-channel.  Resolution + oversample_ratio paths are still
+  gated to defaults (12-bit, OS=1); the configure body
+  returns `BRIDGE_HW_ERR_NOTIMPL` if the caller asks for
+  anything else, so the host sees a clear NOSUPPORT rather
+  than silently-ignored config.  A follow-up commit will land
+  the resolution + oversample apply path.  Wire opcode
+  `CMD_ADC_CONFIGURE` (0x32) flips from `STATUS_NOSUPPORT` to
+  `STATUS_OK` for default-resolution requests on the gd32
+  backend.  No protocol or ABI change.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
