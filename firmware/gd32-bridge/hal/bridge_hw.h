@@ -2,7 +2,7 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Hardware-abstraction shim consumed by gd32-bridge/src/protocol.c.
+ * Hardware-abstraction shim consumed by firmware/gd32-bridge/src/protocol.c.
  * Each function maps an opcode-level operation onto the GigaDevice
  * firmware library (timer / GPIO / ADC / I2C-master / etc.).
  *

@@ -54,11 +54,11 @@ _alp_add_fuzz_target(swd_packet)
 # iteration -- silent divergence between the two impls becomes a
 # fuzz failure.
 target_sources(alp_fuzz_gd32_bridge_frame PRIVATE
-    ${CMAKE_SOURCE_DIR}/gd32-bridge/src/protocol.c
-    ${CMAKE_SOURCE_DIR}/gd32-bridge/src/bootloader/bootloader.c
-    ${CMAKE_SOURCE_DIR}/gd32-bridge/hal/bridge_hw_stub.c
+    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/src/protocol.c
+    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/src/bootloader/bootloader.c
+    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/hal/bridge_hw_stub.c
 )
 target_include_directories(alp_fuzz_gd32_bridge_frame PRIVATE
-    ${CMAKE_SOURCE_DIR}/gd32-bridge/src
-    ${CMAKE_SOURCE_DIR}/gd32-bridge/hal
+    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/src
+    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/hal
 )

@@ -85,6 +85,28 @@ that lands before the v0.3.0 tag.)
   `gd32_bridge_frame_fuzz.c`, `iot_mqtt_fuzz.c`), plus the
   `tests/bench/README.md` cross-ref bumped from `../../fuzz/`
   to `../fuzz/`.
+- **`gd32-bridge/` moved to `firmware/gd32-bridge/`.**  Unifies
+  the firmware trees -- `firmware/cc3501e/` (already there) and
+  `firmware/gd32-bridge/` (new home) now sit side-by-side
+  instead of being scattered between the top level + `firmware/`.
+  Mechanical search-and-replace: 22 files updated with
+  `gd32-bridge/` -> `firmware/gd32-bridge/` (skipping
+  `CHANGELOG.md`'s historical entries).  Notable touch points:
+  `.github/workflows/pr-gd32-bridge-build.yml` paths filter
+  + build/source/toolchain paths (14 occurrences),
+  `.github/workflows/pr-metadata-validate.yml` (5 occurrences),
+  `.gitignore` (`!gd32-bridge/toolchain/*.cmake` allowlist),
+  `include/alp/chips/gd32g553.h` cross-refs (4 occurrences),
+  `tests/fuzz/CMakeLists.txt` `target_sources` paths
+  (5 occurrences for the gd32_bridge_frame fuzz harness),
+  `tests/fuzz/gd32_bridge_frame_fuzz.c` source-comment paths,
+  `chips/gd32g553/gd32g553.c`, `zephyr/Kconfig`,
+  `metadata/chips/gd32g553.yaml`, `docs/gd32-bridge.md`,
+  `docs/gd32-bridge-protocol.md`, `docs/test-plan.md`,
+  `VERSIONS.md`, `vendors/gd32_firmware_library/*`, plus the
+  bridge's internal self-refs (CMakeLists, README, HAL headers,
+  bootloader, tests).  No semantic changes -- pure path-prefix
+  update.
 - **`CONTRIBUTORS.md` folded into `CONTRIBUTING.md`.**  Two
   contributor-facing files at the top level was one too many --
   the team-credit table + the Co-Authored-By trailer convention

@@ -149,7 +149,7 @@
                 "vendors/gd32_firmware_library/upstream"
             ],
             "problemMatcher": [],
-            "detail": "Clone or refresh the alplabai/gd32g5x3-firmware-library submodule under vendors/gd32_firmware_library/upstream/.  Unblocks BRIDGE_HAL_BACKEND=gd32 in gd32-bridge/CMakeLists.txt."
+            "detail": "Clone or refresh the alplabai/gd32g5x3-firmware-library submodule under vendors/gd32_firmware_library/upstream/.  Unblocks BRIDGE_HAL_BACKEND=gd32 in firmware/gd32-bridge/CMakeLists.txt."
         }
     ]
 }

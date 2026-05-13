@@ -1,7 +1,7 @@
 # gd32-bridge canonical wire-test vectors
 #
 # Both the host-side driver tests (tests/zephyr/chips/gd32g553/) and
-# the firmware-side unit tests (gd32-bridge/tests/) consume this file
+# the firmware-side unit tests (firmware/gd32-bridge/tests/) consume this file
 # so the two implementations cannot diverge.
 #
 # Format: one vector per non-comment line, `<name> = <hex>` where

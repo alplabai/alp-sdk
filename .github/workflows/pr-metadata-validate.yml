@@ -21,8 +21,8 @@ on:
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
       - 'tests/scripts/**'
-      - 'gd32-bridge/tests/gen_protocol_vectors.py'
-      - 'gd32-bridge/tests/protocol_vectors.txt'
+      - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
+      - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
   push:
     branches: [main]
     paths:
@@ -32,8 +32,8 @@ on:
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
       - 'tests/scripts/**'
-      - 'gd32-bridge/tests/gen_protocol_vectors.py'
-      - 'gd32-bridge/tests/protocol_vectors.txt'
+      - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
+      - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
   workflow_dispatch:
 
 concurrency:
@@ -189,7 +189,7 @@ jobs:
       # only surface in a HiL run.
       - name: gd32-bridge protocol vectors are not drifted
         run: |
-          python3 gd32-bridge/tests/gen_protocol_vectors.py --check
+          python3 firmware/gd32-bridge/tests/gen_protocol_vectors.py --check
 
       # Cross-family portability lint -- catches an example that
       # silently reaches for a chip that isn't populated on its own

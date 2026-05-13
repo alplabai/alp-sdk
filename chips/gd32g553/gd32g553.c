@@ -6,7 +6,7 @@
  *
  * The wire protocol is in docs/gd32-bridge-protocol.md.  The firmware
  * counterpart that implements the same command-handler table lives
- * under gd32-bridge/.
+ * under firmware/gd32-bridge/.
  *
  * This file is deliberately Zephyr-agnostic: all bus access goes
  * through <alp/peripheral.h> so the same source compiles into either
@@ -28,7 +28,7 @@
 /* CRC-16 / CCITT-FALSE  (poly 0x1021, init 0xFFFF, non-reflected,    */
 /* xor-out 0x0000).  Reference vector: "123456789" -> 0x29B1.         */
 /* Matches Zephyr's `crc16_itu_t(0xFFFF, ...)` and the matching       */
-/* gd32-bridge/src/protocol.c implementation byte-for-byte.           */
+/* firmware/gd32-bridge/src/protocol.c implementation byte-for-byte.           */
 /* ----------------------------------------------------------------- */
 
 static uint16_t crc16_ccitt_false(const uint8_t *buf, size_t len)

@@ -1034,7 +1034,7 @@ config ALP_SDK_CHIP_GD32G553
 	  GET_BUILD_ID, RESET_REASON, GPIO_READ/WRITE, PWM_SET/GET,
 	  ADC_READ, and DA9292_STATUS_FORWARD on top of either bus
 	  (or both at once with per-call routing).  The firmware
-	  counterpart lives in gd32-bridge/ as a separate compile
+	  counterpart lives in firmware/gd32-bridge/ as a separate compile
 	  artifact.
 
 config ALP_SDK_CHIP_RTL8211FDI

@@ -3,7 +3,7 @@
 > **Scope.** This document is the **wire** specification for the
 > Renesas RZ/V2N ⇄ GD32G553MEY7TR bridge on the E1M-X V2N / V2N-M1
 > SoMs.  Both sides — the host driver under
-> `chips/gd32g553/` and the GD32-side firmware under `gd32-bridge/` —
+> `chips/gd32g553/` and the GD32-side firmware under `firmware/gd32-bridge/` —
 > implement what is described here.  Bit, byte and timing decisions
 > live in this file; the host-side public API is documented under
 > `<alp/chips/gd32g553.h>`.
@@ -262,7 +262,7 @@ indefinitely; host code SHOULD NOT call it.
 
 `mask` selects which GD32 pads the host wants to read or write.  The
 mask is a **logical** index space owned by the GD32 firmware — the
-bit-to-pad mapping is documented in `gd32-bridge/README.md` and
+bit-to-pad mapping is documented in `firmware/gd32-bridge/README.md` and
 mirrored in the host driver header.  The host MUST NOT assume that
 bit `n` corresponds to GD32 pad `Pxn`.
 
@@ -482,7 +482,7 @@ host side rather than spinning per-op round-trips.
 `COUNTER_READ` exposes one GD32 hardware counter whose tick rate is
 firmware-defined.  The bridge does not yet advertise the tick
 frequency on the wire; callers needing wall-clock conversion must
-either (a) consult `gd32-bridge/README.md` for the firmware's
+either (a) consult `firmware/gd32-bridge/README.md` for the firmware's
 current tick configuration, or (b) wait for the v0.3 protocol
 revision which will add `COUNTER_GET_FREQ`.  The SDK's portable
 `alp_counter_us_to_ticks` returns `ALP_ERR_NOSUPPORT` on V2N until
@@ -627,7 +627,7 @@ The CRC of an I2C transaction covers `CMD | PAYLOAD` on write and
 matching the convention used by most smart-battery / SMBus PEC
 protocols.  The polynomial and parameters are the same as SPI
 (CRC-16/CCITT-FALSE), so both transports share one
-verification routine in `gd32-bridge/src/protocol.c`.
+verification routine in `firmware/gd32-bridge/src/protocol.c`.
 
 ### 5.2 Slave-address overlap
 
@@ -709,9 +709,9 @@ universally-cited CRC-16/CCITT-FALSE result over the ASCII string
 The per-opcode wire vectors (SPI `PING` round-trip, I2C `PING`
 round-trip, `GET_VERSION` reply for the firmware's declared
 version) are generated at firmware build time and stored in
-`gd32-bridge/tests/protocol_vectors.txt`.  Both the host-side
+`firmware/gd32-bridge/tests/protocol_vectors.txt`.  Both the host-side
 driver tests under `tests/zephyr/chips/gd32g553/` and the
-firmware-side unit tests under `gd32-bridge/tests/` consume
+firmware-side unit tests under `firmware/gd32-bridge/tests/` consume
 that file so the two implementations cannot diverge.
 
 ## 10. Field upgrades of the bridge firmware
@@ -783,8 +783,8 @@ header.
 ## See also
 
 * `<alp/chips/gd32g553.h>` — host-side public API.
-* `gd32-bridge/README.md` — firmware-tree overview.
+* `firmware/gd32-bridge/README.md` — firmware-tree overview.
 * `chips/gd32g553/gd32g553.c` — Renesas-side driver.
-* `gd32-bridge/src/protocol.c` — shared command-handler table.
+* `firmware/gd32-bridge/src/protocol.c` — shared command-handler table.
 * `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv` — GD32 pad
   allocation.

@@ -63,7 +63,7 @@ extern "C" {
 
 /* --------------------------------------------------------------- */
 /* Wire constants — kept in sync with docs/gd32-bridge-protocol.md   */
-/* and gd32-bridge/src/protocol.c on the firmware side.              */
+/* and firmware/gd32-bridge/src/protocol.c on the firmware side.              */
 /* --------------------------------------------------------------- */
 
 /** Start-of-frame marker carried by every SPI frame. */
@@ -352,7 +352,7 @@ alp_status_t gd32g553_get_reset_reason(gd32g553_t *ctx,
 /** @brief Read a masked subset of the GD32's pad levels.
  *
  *  @param mask    Logical GD32 pad indices the caller cares about.
- *                 Mapping is documented in gd32-bridge/README.md;
+ *                 Mapping is documented in firmware/gd32-bridge/README.md;
  *                 the host MUST NOT assume bit `n` is `Pxn`.
  *  @param levels  Output: bit `i` set iff (mask bit i set) and
  *                 (the corresponding pad reads high). */
@@ -428,7 +428,7 @@ alp_status_t gd32g553_qenc_reset(gd32g553_t *ctx, uint8_t encoder);
  *
  *  v0.2 of the protocol does not expose a counter-frequency opcode,
  *  so the caller must know the bridge counter's tick rate out-of-
- *  band (firmware-defined; see `gd32-bridge/README.md`).  A future
+ *  band (firmware-defined; see `firmware/gd32-bridge/README.md`).  A future
  *  minor revision will add `CMD_COUNTER_GET_FREQ` so the host can
  *  convert ticks ↔ microseconds without that out-of-band knowledge.
  *
@@ -637,7 +637,7 @@ alp_status_t gd32g553_tmu_compute(gd32g553_t *ctx,
 /* All six opcodes return STATUS_NOSUPPORT today against the current  */
 /* firmware (the bridge_hw_* HAL bodies are the gating dep -- see     */
 /* the firmware-side comment block at the top of                      */
-/* gd32-bridge/src/protocol.h).  The host helpers below match the     */
+/* firmware/gd32-bridge/src/protocol.h).  The host helpers below match the     */
 /* contract: every call returns ALP_ERR_NOSUPPORT today and ALP_OK    */
 /* once the firmware-side HAL ships.  Portable surfaces in            */
 /* <alp/pwm.h> + <alp/counter.h> + <alp/power.h> dispatch through     */

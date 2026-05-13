@@ -4,7 +4,7 @@
  *
  * libFuzzer harness for the GD32 bridge frame parser shared between
  * the host-side driver (`<alp/chips/gd32g553.h>`) and the firmware
- * (`gd32-bridge/src/protocol.c`).  This file links against the
+ * (`firmware/gd32-bridge/src/protocol.c`).  This file links against the
  * firmware-side protocol implementation + the stub HAL backend so
  * the fuzzer drives the *real* `protocol_dispatch` instead of a
  * reference parser -- divergence between the dispatcher's payload-
@@ -32,7 +32,7 @@
  *
  * What this harness does NOT yet catch:
  *   - Transport-framing bugs (SPI / I2C SOF + CRC trim).  The
- *     transports' parsers (`gd32-bridge/src/transport_spi.c` and
+ *     transports' parsers (`firmware/gd32-bridge/src/transport_spi.c` and
  *     `transport_i2c.c`) live inside ISR-driven byte buffers; a
  *     useful fuzz harness would need to model the CS / START
  *     transitions.  Tracked as future work in tests/fuzz/README.md.

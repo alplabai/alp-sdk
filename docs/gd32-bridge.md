@@ -16,7 +16,7 @@ build it, how to flash it, and what state the implementation is in.
 
 | Aspect              | Today (2026-05-12)                                                                |
 |---------------------|-----------------------------------------------------------------------------------|
-| Firmware tree       | [`gd32-bridge/`](../gd32-bridge/)                                                 |
+| Firmware tree       | [`firmware/gd32-bridge/`](../firmware/gd32-bridge/)                                                 |
 | Toolchain           | Arm GNU Toolchain (`arm-none-eabi-gcc`), Cortex-M33 + thumb                       |
 | Build system        | CMake (separate from the Zephyr-side `west build`)                                |
 | HAL                 | Stub default; `BRIDGE_HAL_BACKEND=gd32` consumes the GigaDevice firmware library via the [`alplabai/gd32g5x3-firmware-library`](https://github.com/alplabai/gd32g5x3-firmware-library) submodule at `vendors/gd32_firmware_library/upstream/` (run `git submodule update --init` once after cloning) |
@@ -56,7 +56,7 @@ Output: `build/gd32-bridge.elf`, `.hex`, `.bin`.
 ## Source layout
 
 ```
-gd32-bridge/
+firmware/gd32-bridge/
 ├── CMakeLists.txt
 ├── README.md
 ├── toolchain/

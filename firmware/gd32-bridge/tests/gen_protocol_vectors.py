@@ -2,13 +2,13 @@
 # Copyright 2026 ALP Lab AB
 # SPDX-License-Identifier: Apache-2.0
 """
-Regenerate gd32-bridge/tests/protocol_vectors.txt.
+Regenerate firmware/gd32-bridge/tests/protocol_vectors.txt.
 
 This script is the authoritative source-of-truth for the canonical
 wire vectors consumed by:
 
   * the host-side driver tests under tests/zephyr/chips/gd32g553/
-  * the firmware-side unit tests under gd32-bridge/tests/
+  * the firmware-side unit tests under firmware/gd32-bridge/tests/
 
 It computes the CRC bytes natively (no external dependency) and
 emits exactly the format the consumers expect: one `<name> = <hex>`
@@ -16,7 +16,7 @@ vector per line, comment lines start with `#`.
 
 Run from the alp-sdk repo root:
 
-    python3 gd32-bridge/tests/gen_protocol_vectors.py
+    python3 firmware/gd32-bridge/tests/gen_protocol_vectors.py
 
 The output file is fully regenerated -- diff against git to spot
 unexpected wire changes.
@@ -69,7 +69,7 @@ def i2c_read(status: int, payload: bytes = b"") -> bytes:
 
 
 # ---------------------------------------------------------------------
-# Constants -- keep aligned with gd32-bridge/src/protocol.h.
+# Constants -- keep aligned with firmware/gd32-bridge/src/protocol.h.
 # ---------------------------------------------------------------------
 
 SOF = 0xA5
@@ -109,7 +109,7 @@ HEADER = """\
 # gd32-bridge canonical wire-test vectors
 #
 # Both the host-side driver tests (tests/zephyr/chips/gd32g553/) and
-# the firmware-side unit tests (gd32-bridge/tests/) consume this file
+# the firmware-side unit tests (firmware/gd32-bridge/tests/) consume this file
 # so the two implementations cannot diverge.
 #
 # Format: one vector per non-comment line, `<name> = <hex>` where

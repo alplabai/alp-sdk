@@ -13,7 +13,7 @@ host-side driver lives at [`chips/gd32g553/`](../chips/gd32g553/).
 ## Tree layout
 
 ```
-gd32-bridge/
+firmware/gd32-bridge/
 ├── CMakeLists.txt          ← top-level build entry (host-built, cross-compiled)
 ├── README.md               ← this file
 ├── toolchain/              ← ARM-GCC + linker script for GD32G553MEY7TR

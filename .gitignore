@@ -61,7 +61,7 @@ Makefile
 !CMakeLists.txt
 # Toolchain files MUST stay tracked -- the gd32-bridge build invokes
 # them via -DCMAKE_TOOLCHAIN_FILE in CI + locally.
-!gd32-bridge/toolchain/*.cmake
+!firmware/gd32-bridge/toolchain/*.cmake
 !cmake/**/*.cmake
 !toolchain/**/*.cmake
 

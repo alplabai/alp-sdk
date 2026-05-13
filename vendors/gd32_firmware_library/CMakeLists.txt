@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Thin CMake wrapper for the GD32G5x3 firmware library.
 #
-# Consumed by gd32-bridge/CMakeLists.txt when BRIDGE_HAL_BACKEND=gd32.
+# Consumed by firmware/gd32-bridge/CMakeLists.txt when BRIDGE_HAL_BACKEND=gd32.
 # The actual library sources live in this directory's `upstream/`
 # git-submodule pointing at https://github.com/alplabai/gd32g5x3-firmware-library
 # (a verbatim mirror of GigaDevice's v1.5.0 archive, redistributed
