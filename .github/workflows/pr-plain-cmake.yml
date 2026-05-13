@@ -104,6 +104,6 @@ jobs:
       # ctest exercises the inference dispatcher's NULL/INVAL paths,
       # the I2C/SPI/UART/GPIO wrappers' failure-path coverage, and
       # the MQTT wrapper's URI-parse + NULL-arg paths.  Real-adapter
-      # HIL coverage is parked behind ci/HW-IN-LOOP.md.
+      # HIL coverage is parked behind docs/ci/HW-IN-LOOP.md.
       - name: Test
         run: ctest --test-dir build/yocto --output-on-failure

@@ -8,7 +8,7 @@
 # runs `tests/zephyr/peripheral` against real silicon, and uploads
 # the captured serial output.
 #
-# Runner setup is documented in ci/HW-IN-LOOP.md.
+# Runner setup is documented in docs/ci/HW-IN-LOOP.md.
 
 name: nightly-aen-hil
 

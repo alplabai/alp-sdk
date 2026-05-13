@@ -1,7 +1,7 @@
 # docs/doxygen/ — generated API reference
 
 Doxygen configuration + per-library reference pages live here.  The
-generator runs on every PR via `ci/pr-doxygen.yml` and on every tag
+generator runs on every PR via `.github/workflows/pr-doxygen.yml` and on every tag
 to publish the public reference.
 
 ## v0.1 deliverable

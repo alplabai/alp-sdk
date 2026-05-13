@@ -17,7 +17,7 @@
 #     bitbake-layers add-layer ../meta-mender/meta-mender-core
 #
 # Status: v0.4 prep scaffolding.  HIL roundtrip (mock-update +
-# rollback simulation) parked behind ci/HW-IN-LOOP.md.
+# rollback simulation) parked behind docs/ci/HW-IN-LOOP.md.
 
 # Mender's core image-generation class.  Adds the .mender artefact
 # next to the standard image outputs and configures the rootfs for

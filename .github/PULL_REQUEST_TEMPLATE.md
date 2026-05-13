@@ -25,7 +25,7 @@ guidance comments before submitting.
 - [ ] Public API change (`include/alp/**`)
 - [ ] Internal-only change (`src/**`, `chips/**`, `vendors/**`)
 - [ ] Documentation only (`docs/**`, `README.md`, `VERSIONS.md`, etc.)
-- [ ] Build / CI (`CMakeLists.txt`, `west.yml`, `.github/**`, `ci/**`)
+- [ ] Build / CI (`CMakeLists.txt`, `west.yml`, `.github/**`, `docs/ci/**`)
 - [ ] Metadata (`metadata/**`)
 - [ ] Tests / examples (`tests/**`, `examples/**`)
 

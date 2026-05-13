@@ -23,7 +23,7 @@ add_test(NAME alp_test_inference_dispatcher
          COMMAND alp_test_inference_dispatcher)
 
 # v0.4: Yocto I2C wrapper failure-path coverage.  Real-adapter HIL
-# coverage is parked under ci/HW-IN-LOOP.md until the self-hosted
+# coverage is parked under docs/ci/HW-IN-LOOP.md until the self-hosted
 # `hil-yocto` runner lands.  Linux-only -- the underlying source
 # `src/yocto/peripheral_i2c.c` is excluded from non-Linux builds
 # by the parent CMakeLists, so the test would link against the

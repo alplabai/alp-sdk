@@ -31,7 +31,7 @@
 #
 # Reference: docs/testing.md.  HIL coverage (real-hardware
 # verification per docs/test-plan.md) is NOT part of this script;
-# see ci/HW-IN-LOOP.md for the runner contract.
+# see docs/ci/HW-IN-LOOP.md for the runner contract.
 
 set -uo pipefail
 

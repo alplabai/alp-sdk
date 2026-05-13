@@ -14,7 +14,7 @@ Status keys:
 > reference work the original v0.1 / v0.2 cycles completed *to the
 > code-merged bar*, but the SDK's first canonical HIL run is still
 > pending (the `nightly-aen-hil.yml` skeleton needs a self-hosted
-> runner per [`ci/HW-IN-LOOP.md`](../ci/HW-IN-LOOP.md)).  Treat
+> runner per [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md)).  Treat
 > every **GA** entry as "code complete, awaiting HIL" until the
 > matching `test-plan.md` row flips to ✅.
 

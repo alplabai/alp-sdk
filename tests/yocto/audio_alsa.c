@@ -7,7 +7,7 @@
  *
  * Failure-path coverage only -- happy paths require a working
  * ALSA configuration on the runner (real device or dummy driver),
- * which is parked behind ci/HW-IN-LOOP.md.  The tests below
+ * which is parked behind docs/ci/HW-IN-LOOP.md.  The tests below
  * exercise argument validation + the resolve_device_name +
  * configure_pcm error paths.
  *

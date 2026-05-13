@@ -85,6 +85,29 @@ that lands before the v0.3.0 tag.)
   `gd32_bridge_frame_fuzz.c`, `iot_mqtt_fuzz.c`), plus the
   `tests/bench/README.md` cross-ref bumped from `../../fuzz/`
   to `../fuzz/`.
+- **`ci/` moved to `docs/ci/`.**  The directory only held two
+  documentation files (`HW-IN-LOOP.md` runner contract +
+  `README.md` workflow index) -- the actual CI lives at
+  `.github/workflows/`.  Having a top-level `ci/` that was just
+  docs confused readers (was it the source of CI?  No: the
+  source is `.github/workflows/`, and `ci/` was the *prose*
+  about those workflows).  Move makes the relationship
+  explicit: `docs/ci/` is documentation *about* CI, not CI
+  itself.  Files updated: `docs/ci/README.md` self-heading +
+  relative-path bumps (`../.github/` -> `../../.github/`,
+  `../scripts/` -> `../../scripts/`, `../VERSIONS.md` ->
+  `../../VERSIONS.md`, `../docs/testing.md` -> `../testing.md`),
+  `docs/ci/HW-IN-LOOP.md` board-doc xref (`../docs/boards/` ->
+  `../boards/`), plus 13 cross-refs across `docs/testing.md`,
+  `docs/test-plan.md`, `docs/os-support-matrix.md`,
+  `docs/doxygen/README.md` (also fixed a pre-existing typo:
+  `ci/pr-doxygen.yml` -> `.github/workflows/pr-doxygen.yml`),
+  `yocto/meta-alp/README.md`, `yocto/meta-alp/conf/distro/include/mender.inc`,
+  `.github/workflows/pr-plain-cmake.yml`,
+  `.github/workflows/nightly-aen-hil.yml`,
+  `.github/PULL_REQUEST_TEMPLATE.md`, `scripts/test-all.sh`,
+  five test-source comment headers in `tests/yocto/*.c` +
+  `tests/yocto/CMakeLists.txt`.
 
 ### Removed (2026-05-13 -- top-level UX simplification)
 

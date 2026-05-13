@@ -7,7 +7,7 @@
  *
  * Failure-path coverage only -- broker-roundtrip happy paths need
  * a Mosquitto broker on the runner, which is parked behind
- * ci/HW-IN-LOOP.md alongside the on-device coverage.
+ * docs/ci/HW-IN-LOOP.md alongside the on-device coverage.
  *
  * Build with:
  *   cmake -B build -DALP_OS=yocto -DALP_BUILD_TESTS=ON

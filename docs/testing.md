@@ -9,7 +9,7 @@ hardware.  Coverage map per `<alp/...>` header below.
 > **What this doc is not.**  The verification ledger.  Per-feature
 > pass/fail status (⏳ untested / 🟡 partial / ✅ verified / ❌ failing)
 > lives in [`docs/test-plan.md`](test-plan.md).  Real-hardware HIL
-> contract lives in [`ci/HW-IN-LOOP.md`](../ci/HW-IN-LOOP.md).
+> contract lives in [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md).
 
 ---
 
@@ -58,7 +58,7 @@ It does **not** prove:
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │ HIL: real silicon, real broker, real sensor                    │
-│   nightly-aen-hil.yml + hil-yocto (parked, ci/HW-IN-LOOP.md)   │
+│   nightly-aen-hil.yml + hil-yocto (parked, docs/ci/HW-IN-LOOP.md)   │
 │   Flips test-plan.md rows from 🟡 → ✅.                         │
 ├────────────────────────────────────────────────────────────────┤
 │ CI: GitHub-hosted runners, no hardware                         │
@@ -235,7 +235,7 @@ The matching pull request template is at `.github/PULL_REQUEST_TEMPLATE.md`
 ## See also
 
 - [`docs/test-plan.md`](test-plan.md) — per-feature verification status.
-- [`ci/HW-IN-LOOP.md`](../ci/HW-IN-LOOP.md) — HIL runner contract.
+- [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md) — HIL runner contract.
 - [`CONTRIBUTING.md`](../CONTRIBUTING.md) — full contributor workflow.
 - [`docs/secure-boot.md`](secure-boot.md) — chain of trust + key
   lifecycle (the OTA + secure-boot half of the verification story).

@@ -10,7 +10,7 @@
  * lives in the on-device test plan -- HIL coverage exercises a
  * known sensor (LSM6DSO whoami read) and is gated behind the
  * `hil-yocto` runner label (parked behind the v0.4 self-hosted
- * runner provisioning per ci/HW-IN-LOOP.md).
+ * runner provisioning per docs/ci/HW-IN-LOOP.md).
  *
  * What this binary verifies:
  *   - NULL config rejection.

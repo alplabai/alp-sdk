@@ -8,7 +8,7 @@
  * Scope mirrors tests/yocto/peripheral_i2c.c: failure paths that
  * don't need a real SPI adapter or kernel-mode spidev test
  * fixture.  Real-adapter happy-path coverage is parked behind
- * ci/HW-IN-LOOP.md until the `hil-yocto` self-hosted runner
+ * docs/ci/HW-IN-LOOP.md until the `hil-yocto` self-hosted runner
  * lands -- the on-device plan reads the SPI flash's JEDEC ID
  * (0x9F READID) as the canonical first SPI transaction.
  *

@@ -9,7 +9,7 @@ with it.
 ## Hardware
 
 - E1M Development Board (UG-E1M-001) — see
-  [`docs/boards/e1m-evk.md`](../docs/boards/e1m-evk.md).
+  [`docs/boards/e1m-evk.md`](../boards/e1m-evk.md).
 - E1M-AEN701 SoM seated in the M.2 / E1M socket.
 - Power: 12 V via the barrel jack OR USB-C with the host.
 - Debug: SEGGER J-Link or Alif's recommended SWD adapter on J2

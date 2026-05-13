@@ -54,7 +54,7 @@ A release does **not** tag until every row gating it is `verified`.
 - `nightly-aen-hil.yml` is the canonical AEN-Zephyr verifier --
   every AEN row whose Notes column references "nightly-aen-hil"
   flips to ✅ on a green run against a real E1M EVK.
-- The `hil-yocto` self-hosted runner (parked in `ci/HW-IN-LOOP.md`)
+- The `hil-yocto` self-hosted runner (parked in `docs/ci/HW-IN-LOOP.md`)
   is the canonical Yocto-side verifier; every 🟡 Yocto row gates on
   it before flipping to ✅.
 
@@ -187,6 +187,6 @@ been green on `main` for at least two consecutive PRs.
 
 - [`VERSIONS.md`](../VERSIONS.md) — versioned roadmap; this doc is
   the verification ledger that gates each version's tag.
-- [`ci/HW-IN-LOOP.md`](../ci/HW-IN-LOOP.md) — HIL runner contract.
+- [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md) — HIL runner contract.
 - [`CONTRIBUTING.md`](../CONTRIBUTING.md) — every new feature must
   append a row here in the same PR.
