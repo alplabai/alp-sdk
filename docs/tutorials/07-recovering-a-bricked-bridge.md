@@ -65,6 +65,6 @@ silicon) or you need to slow it down for noisy boards.
 ## See also
 
 * [`<alp/chips/gd32_swd.h>`](../../include/alp/chips/gd32_swd.h)
-* [`examples/v2n-gd32-swd-flash/`](../../examples/v2n-gd32-swd-flash/)
+* [`examples/v2n/v2n-gd32-swd-flash/`](../../examples/v2n/v2n-gd32-swd-flash/)
 * [`docs/gd32-bridge-protocol.md`](../gd32-bridge-protocol.md) §10
   -- recovery / OTA path tree.

@@ -322,7 +322,7 @@ Key tasks (Command Palette → **Tasks: Run Task**):
   -- 11 minimal apps, one per `<alp/*.h>` class, each driven by a
   matching `board.yaml`.
 - **End-to-end reference apps**:
-  [`examples/edgeai-vision-aen/`](../examples/edgeai-vision-aen/)
+  [`examples/aen/edgeai-vision-aen/`](../examples/aen/edgeai-vision-aen/)
   (camera → Ethos-U inference → display) and
   [`examples/iot-connected-camera/`](../examples/iot-connected-camera/)
   (camera → DRP-AI → MQTT publish).  Both use the same board.yaml

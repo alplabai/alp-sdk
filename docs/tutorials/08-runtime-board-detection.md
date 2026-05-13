@@ -6,7 +6,7 @@
    hardware revision, manufacturing date, serial.)
 2. **Does that match what the build was for?**
 
-This tutorial walks `examples/v2n-board-id-readout/` and explains
+This tutorial walks `examples/v2n/v2n-board-id-readout/` and explains
 the underlying data flow.
 
 ## The two information sources
@@ -81,7 +81,7 @@ single-source-of-truth for "what was this firmware intended for?"
 
 ## See also
 
-* [`examples/v2n-board-id-readout/`](../../examples/v2n-board-id-readout/)
+* [`examples/v2n/v2n-board-id-readout/`](../../examples/v2n/v2n-board-id-readout/)
 * [`<alp/hw_info.h>`](../../include/alp/hw_info.h)
 * [`docs/board-id.md`](../board-id.md) -- the BOARD_ID ADC table
   design.

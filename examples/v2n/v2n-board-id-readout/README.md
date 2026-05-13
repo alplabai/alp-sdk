@@ -38,8 +38,8 @@ SKU on the module.
 
 ## See also
 
-* [`docs/board-id.md`](../../docs/board-id.md) -- full identification
+* [`docs/board-id.md`](../../../docs/board-id.md) -- full identification
   flow (EEPROM manifest + planned BOARD_ID ADC cross-check).
-* [`<alp/hw_info.h>`](../../include/alp/hw_info.h) -- public API.
-* [`tools/program_eeprom.py`](../../tools/program_eeprom.py) --
+* [`<alp/hw_info.h>`](../../../include/alp/hw_info.h) -- public API.
+* [`tools/program_eeprom.py`](../../../tools/program_eeprom.py) --
   production-test programmer.

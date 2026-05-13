@@ -611,7 +611,7 @@ that lands before the v0.3.0 tag.)
     silently falling through to a misleading `ALP_ERR_OUT_OF_RANGE`
     from the soc_caps check.  Real-silicon coverage lives in the
     V2N HIL plan.
-  - Unblocks `examples/v2n-pwm-fan-control/` at runtime: customers
+  - Unblocks `examples/v2n/v2n-pwm-fan-control/` at runtime: customers
     who set the two bus-id Kconfigs on a real V2N board get a live
     fan-control loop with no application-side knowledge of the
     GD32 bridge.
@@ -1310,27 +1310,27 @@ that lands before the v0.3.0 tag.)
   `docs/gd32-bridge.md` flashing table now lists both paths as
   "Scaffolded".
 
-- **`examples/v2n-pwm-fan-control/` -- GD32-side PWM fan curve (2026-05-13).**
+- **`examples/v2n/v2n-pwm-fan-control/` -- GD32-side PWM fan curve (2026-05-13).**
   Ramps a single GD32-driven PWM channel through five duty stops at
   a 25 kHz carrier (above audible) via `gd32g553_pwm_set`.
   Demonstrates the post-2026-05-11 schematic-rev convention that
   E1M PWM6 / PWM7 are GD32-only on V2N.
 
-- **`examples/v2n-secure-element-sign/` -- OPTIGA Trust M ECDSA sign (2026-05-13).**
+- **`examples/v2n/v2n-secure-element-sign/` -- OPTIGA Trust M ECDSA sign (2026-05-13).**
   Initialises the OPTIGA Trust M, reads its product-info object,
   then issues a hand-rolled `CalcSign` (0x31) APDU against key OID
   `0xE0F0` over a fixed SHA-256 digest.  Stops short of the PSA
   driver bridge -- that lands when Infineon's Host Library is
   vendored.
 
-- **`examples/v2n-xspi-flash-readwrite/` -- on-module xSPI NOR erase / write / verify (2026-05-13).**
+- **`examples/v2n/v2n-xspi-flash-readwrite/` -- on-module xSPI NOR erase / write / verify (2026-05-13).**
   Erases one 4 KiB sector at the last sector of the part, writes a
   0x00..0xFF ramp, reads it back via Zephyr's standard
   `flash_read`, and reports the comparison.  Resolves the part via
   the `xspi-flash` DT alias so it works on any V2N board file that
   exposes it.
 
-- **`examples/v2n-emmc-block-stat/` -- on-module eMMC geometry + first-block read (2026-05-13).**
+- **`examples/v2n/v2n-emmc-block-stat/` -- on-module eMMC geometry + first-block read (2026-05-13).**
   Calls `disk_access_init("SD")` + the standard
   `DISK_IOCTL_GET_SECTOR_{SIZE,COUNT}` to report capacity, reads
   blocks 0..15 and checks the MBR signature, then asks for the
@@ -2880,7 +2880,7 @@ that lands before the v0.3.0 tag.)
   SKUs.
 - Internal design-archive metadata mirror refreshed with the new files.
 - **EdgeAI vision-AEN reference application skeleton** at
-  `examples/edgeai-vision-aen/` — compiles under
+  `examples/aen/edgeai-vision-aen/` — compiles under
   `native_sim/native/64` and prints the v0.1 init flow + v0.2
   pipeline TODOs.  Ships the full Zephyr-app layout (`README.md`,
   `CMakeLists.txt`, `prj.conf`, `boards/{native_sim_native_64,alp_e1m_evk_aen}.overlay`,
@@ -3617,7 +3617,7 @@ that lands before the v0.3.0 tag.)
   `CONFIG_ALP_SDK_INFERENCE_TFLM` (default n; enables the C++
   executor), `CONFIG_ALP_SDK_INFERENCE_ETHOS_U` (default y if
   TFLM and SOC_SERIES_ENSEMBLE_E7), `CONFIG_ALP_SDK_MAX_INFERENCE_HANDLES`
-  (default 2).  The `examples/edgeai-vision-aen/` example now
+  (default 2).  The `examples/aen/edgeai-vision-aen/` example now
   wires `alp_inference_open` into stage 3 (model load) using
   `ALP_INFERENCE_BACKEND_AUTO` -- skips on native_sim with the
   precise NOSUPPORT diagnostic, runs the real Vela model on AEN HW

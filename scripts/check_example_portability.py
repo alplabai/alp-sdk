@@ -209,8 +209,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     som_optional  = load_som_optional_chips()
 
     examples_dir = ROOT / "examples"
-    examples = sorted(d for d in examples_dir.iterdir()
-                      if d.is_dir() and (d / "board.yaml").exists())
+    # Walk one OR two levels deep: cross-family examples live directly
+    # at examples/<name>/, SoM-specific examples live under
+    # examples/<family>/<name>/ (e.g. examples/v2n/v2n-gd32-bridge-ping).
+    examples: list = []
+    for d in examples_dir.iterdir():
+        if not d.is_dir():
+            continue
+        if (d / "board.yaml").exists():
+            examples.append(d)
+        else:
+            for sub in d.iterdir():
+                if sub.is_dir() and (sub / "board.yaml").exists():
+                    examples.append(sub)
+    examples.sort()
 
     if not examples:
         print(f"error: no examples found under {examples_dir}", file=sys.stderr)

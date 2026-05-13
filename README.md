@@ -44,7 +44,7 @@ Pick your SoM and start with its one-pager:
 | SoM family       | One-pager                                                   | Bring-up doc                                                | Reference examples                              |
 |------------------|-------------------------------------------------------------|-------------------------------------------------------------|-------------------------------------------------|
 | E1M-AEN          | [`docs/soms/aen.md`](docs/soms/aen.md)                      | [`docs/getting-started.md`](docs/getting-started.md) §4..5  | `examples/gpio-button-led`, `i2c-scanner`, `rtc-clock` |
-| E1M-X V2N        | [`docs/soms/v2n.md`](docs/soms/v2n.md)                      | [`docs/bring-up-v2n.md`](docs/bring-up-v2n.md)              | `examples/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual` |
+| E1M-X V2N        | [`docs/soms/v2n.md`](docs/soms/v2n.md)                      | [`docs/bring-up-v2n.md`](docs/bring-up-v2n.md)              | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual` |
 | E1M-X V2N-M1     | [`docs/soms/v2n-m1.md`](docs/soms/v2n-m1.md)                | [`docs/bring-up-v2n-m1.md`](docs/bring-up-v2n-m1.md)        | DEEPX bring-up delta on top of V2N             |
 | E1M-N93 (i.MX93) | [`docs/soms/imx93.md`](docs/soms/imx93.md)                  | [`docs/getting-started.md`](docs/getting-started.md) §4..5  | same cross-family examples as AEN              |
 

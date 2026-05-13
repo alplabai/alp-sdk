@@ -34,6 +34,6 @@ HAL backend lands) will return a real status snapshot.
 
 ## See also
 
-* [`docs/gd32-bridge-protocol.md`](../../docs/gd32-bridge-protocol.md) — wire spec.
-* [`docs/gd32-bridge.md`](../../docs/gd32-bridge.md) — firmware tree overview.
-* [`<alp/chips/gd32g553.h>`](../../include/alp/chips/gd32g553.h) — host driver API.
+* [`docs/gd32-bridge-protocol.md`](../../../docs/gd32-bridge-protocol.md) — wire spec.
+* [`docs/gd32-bridge.md`](../../../docs/gd32-bridge.md) — firmware tree overview.
+* [`<alp/chips/gd32g553.h>`](../../../include/alp/chips/gd32g553.h) — host driver API.

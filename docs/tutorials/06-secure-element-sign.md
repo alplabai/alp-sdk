@@ -1,6 +1,6 @@
 # 06 -- Secure-element ECDSA sign
 
-Walks `examples/v2n-secure-element-sign/` -- initialise the
+Walks `examples/v2n/v2n-secure-element-sign/` -- initialise the
 Infineon OPTIGA Trust M, read its product-info object, then issue
 a hand-rolled `CalcSign` APDU to ECDSA-sign a fixed SHA-256
 digest.
@@ -59,6 +59,6 @@ resp[4..]  = ASN.1 DER signature   (typically 70..72 bytes for P-256)
 
 ## See also
 
-* [`examples/v2n-secure-element-sign/`](../../examples/v2n-secure-element-sign/)
+* [`examples/v2n/v2n-secure-element-sign/`](../../examples/v2n/v2n-secure-element-sign/)
 * [`<alp/chips/optiga_trust_m.h>`](../../include/alp/chips/optiga_trust_m.h)
 * Infineon "Solution Reference Manual OPTIGA Trust M" (vendor doc).

@@ -29,7 +29,7 @@ flow without requiring you to wire the GPIO first.
 
 ## See also
 
-* [`<alp/chips/rv3028c7.h>`](../../include/alp/chips/rv3028c7.h)
+* [`<alp/chips/rv3028c7.h>`](../../../include/alp/chips/rv3028c7.h)
   -- driver API.
 * Micro Crystal application note "Multiple Interrupt Lines with
   RV-3028-C7" -- the design rationale behind the CLKOUT-as-second-

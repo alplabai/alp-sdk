@@ -244,7 +244,7 @@ more sensors) and add a second SoM family.
 
 ### EdgeAI reference application
 
-`examples/edgeai-vision-aen/` — end-to-end reference:
+`examples/aen/edgeai-vision-aen/` — end-to-end reference:
 camera capture → ISP / format-convert → Ethos-U inference (a
 Vela-compiled MobileNetV2 or similar) → results overlay on the
 on-board OLED.  This is the original roadmap's "EdgeAI Application

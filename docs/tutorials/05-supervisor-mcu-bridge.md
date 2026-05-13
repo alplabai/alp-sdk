@@ -1,6 +1,6 @@
 # 05 -- The supervisor MCU bridge (V2N)
 
-Walks `examples/v2n-gd32-bridge-ping/` and explains the hybrid
+Walks `examples/v2n/v2n-gd32-bridge-ping/` and explains the hybrid
 SPI + I²C bridge between the Renesas RZ/V2N host and the on-module
 GD32G553 supervisor MCU.
 

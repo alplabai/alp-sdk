@@ -7,7 +7,7 @@ against a fixed SHA-256 message digest.
 ## What it shows
 
 1. Opening BRD_I2C at 400 kHz and initialising
-   [`optiga_trust_m_t`](../../include/alp/chips/optiga_trust_m.h).
+   [`optiga_trust_m_t`](../../../include/alp/chips/optiga_trust_m.h).
    `optiga_trust_m_init` performs the data-link-layer
    `OPEN_APPLICATION` handshake; failing this means the chip
    isn't on the bus or isn't strapped to address 0x30.
@@ -58,7 +58,7 @@ near-term bridge.
 
 ## See also
 
-* [`<alp/chips/optiga_trust_m.h>`](../../include/alp/chips/optiga_trust_m.h)
+* [`<alp/chips/optiga_trust_m.h>`](../../../include/alp/chips/optiga_trust_m.h)
   -- driver header (init + product info + raw APDU send).
 * Infineon "Solution Reference Manual OPTIGA Trust M"
   (`SRM_OPTIGA_Trust_M.pdf`) -- APDU command set + status codes.

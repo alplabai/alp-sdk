@@ -139,7 +139,7 @@ printf("SoM: family=%s sku=%s hw_rev=%s serial=%s\n",
 ```
 
 Expect non-empty fields; the example
-[`v2n-board-id-readout`](../examples/v2n-board-id-readout/) shells
+[`v2n-board-id-readout`](../examples/v2n/v2n-board-id-readout/) shells
 this out as a standalone reference.  If the manifest is blank,
 factory programming has not run; flag for production-test follow-up.
 

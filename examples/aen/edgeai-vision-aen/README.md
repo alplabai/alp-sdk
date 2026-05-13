@@ -26,7 +26,7 @@ RPi CSI │  (e.g. OV5640    │ →  │  format     │ →  │  inference   
 | v0.1    | skeleton | Compiles under `native_sim/native/64` and on the EVK once the AEN board file lands.  Init flow is real (I²C, OLED, IMU init); camera + Ethos-U inference are stubbed. |
 | v0.2    | target   | Real OV5640 capture via `<alp/camera.h>`, Vela-compiled MobileNetV2 inference on Ethos-U55-HP, results overlay on OLED. **Acceptance ≥ 10 fps.** |
 
-The full pipeline is the v0.2 [EdgeAI Application Example](../../VERSIONS.md#v020--richer-blocks--v2n-intro--6-weeks-after-v01)
+The full pipeline is the v0.2 [EdgeAI Application Example](../../../VERSIONS.md#v020--richer-blocks--v2n-intro--6-weeks-after-v01)
 deliverable from the original quarterly roadmap.
 
 ## Layout

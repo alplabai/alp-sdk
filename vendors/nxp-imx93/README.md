@@ -65,7 +65,7 @@ builds.
 
 The on-die Ethos-U65 NPU is fed by the same Vela compiler used on
 Alif Ensemble's Ethos-U55-HP — see
-[`examples/edgeai-vision-aen/models/README.md`](../../examples/edgeai-vision-aen/models/README.md)
+[`examples/aen/edgeai-vision-aen/models/README.md`](../../examples/aen/edgeai-vision-aen/models/README.md)
 for the workflow.  The `<alp/inference.h>` unification layer
 (v0.3 deliverable) dispatches to Ethos-U65 on i.MX 93 using the
 same calling convention as on AEN, so EdgeAI applications port

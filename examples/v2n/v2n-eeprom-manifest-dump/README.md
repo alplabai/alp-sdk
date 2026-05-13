@@ -59,9 +59,9 @@ carrier wires the EEPROM elsewhere.
 
 ## See also
 
-* [`docs/board-id.md`](../../docs/board-id.md) -- customer-facing
+* [`docs/board-id.md`](../../../docs/board-id.md) -- customer-facing
   spec for the manifest.
-* [`<alp/hw_info.h>`](../../include/alp/hw_info.h) -- `struct
+* [`<alp/hw_info.h>`](../../../include/alp/hw_info.h) -- `struct
   alp_hw_info_eeprom_t`.
-* [`tools/program_eeprom.py`](../../tools/program_eeprom.py) --
+* [`tools/program_eeprom.py`](../../../tools/program_eeprom.py) --
   the production-test programmer that writes the manifest.

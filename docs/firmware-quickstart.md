@@ -249,7 +249,7 @@ SoM's `silicon:` field.  Common boards:
 
 ```bash
 # V2N (RZ/V2N)
-west alp-build -b <renesas_rzv2n_board> alp-sdk/examples/v2n-gd32-bridge-ping
+west alp-build -b <renesas_rzv2n_board> alp-sdk/examples/v2n/v2n-gd32-bridge-ping
 west build -d build -t flash
 
 # AEN (Alif Ensemble)

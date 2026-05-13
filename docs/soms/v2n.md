@@ -56,7 +56,7 @@ host driver speaks both transports:
 Wire spec: [`docs/gd32-bridge-protocol.md`](../gd32-bridge-protocol.md).
 Firmware tree: [`docs/gd32-bridge.md`](../gd32-bridge.md).
 Host driver: [`<alp/chips/gd32g553.h>`](../../include/alp/chips/gd32g553.h).
-Example: [`examples/v2n-gd32-bridge-ping/`](../../examples/v2n-gd32-bridge-ping/).
+Example: [`examples/v2n/v2n-gd32-bridge-ping/`](../../examples/v2n/v2n-gd32-bridge-ping/).
 
 ## Power tree
 
@@ -81,7 +81,7 @@ Two-stage SoM-ID flow:
    `scripts/alp_project.py`).
 
 Full procedure: [`docs/board-id.md`](../board-id.md).
-Example: [`examples/v2n-board-id-readout/`](../../examples/v2n-board-id-readout/).
+Example: [`examples/v2n/v2n-board-id-readout/`](../../examples/v2n/v2n-board-id-readout/).
 
 ## Bring-up
 

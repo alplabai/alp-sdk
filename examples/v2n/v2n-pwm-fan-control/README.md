@@ -11,7 +11,7 @@ a scope.
    usage pattern -- same call sequence as `examples/pwm-led-fade/`,
    just with a fan curve instead of a sinusoidal sweep.
 2. The portable `ALP_E1M_PWM0..PWM7` instance IDs from
-   [`<alp/e1m_pinout.h>`](../../include/alp/e1m_pinout.h) -- the
+   [`<alp/e1m_pinout.h>`](../../../include/alp/e1m_pinout.h) -- the
    application names the **E1M-standard** PWM channel, not the
    underlying SoC peripheral.  The SDK resolves which silicon
    block actually drives the pad.
@@ -56,8 +56,8 @@ across the full ramp is straightforward.
 
 ## See also
 
-* [`<alp/pwm.h>`](../../include/alp/pwm.h) -- portable PWM surface.
-* [`<alp/e1m_pinout.h>`](../../include/alp/e1m_pinout.h) -- the
+* [`<alp/pwm.h>`](../../../include/alp/pwm.h) -- portable PWM surface.
+* [`<alp/e1m_pinout.h>`](../../../include/alp/e1m_pinout.h) -- the
   E1M-standard `ALP_E1M_PWM*` instance IDs.
 * [`examples/pwm-led-fade/`](../pwm-led-fade/) -- companion
   example using the same API on a single LED.

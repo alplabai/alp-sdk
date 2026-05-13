@@ -1,15 +1,15 @@
 # v2n-gd32-swd-flash
 
 Demonstrate the host-driven SWD bit-bang controller
-([`chips/gd32_swd/`](../../chips/gd32_swd/)) by attaching from the
+([`chips/gd32_swd/`](../../../chips/gd32_swd/)) by attaching from the
 Renesas RZ/V2N to the on-module GD32G553 over three GPIOs
 (SWDIO + SWCLK + optional NRST), reading the SW-DP IDCODE, halting
 the Cortex-M33, erasing a flash sector, writing + verifying a
 scratch pattern, and resetting.
 
 This is the **recovery / first-flash path** documented in
-[`docs/gd32-bridge-protocol.md`](../../docs/gd32-bridge-protocol.md) §10
-Path B + [`docs/bring-up-v2n.md`](../../docs/bring-up-v2n.md) §2b.
+[`docs/gd32-bridge-protocol.md`](../../../docs/gd32-bridge-protocol.md) §10
+Path B + [`docs/bring-up-v2n.md`](../../../docs/bring-up-v2n.md) §2b.
 It does not depend on an external probe and stays available even
 when the application-bootloader OTA path is unreachable (corrupt
 bridge image, factory first-flash, dev-board bring-up).
@@ -74,9 +74,9 @@ sector; the driver rounds out to sector boundaries automatically.
 
 ## See also
 
-* [`<alp/chips/gd32_swd.h>`](../../include/alp/chips/gd32_swd.h)
+* [`<alp/chips/gd32_swd.h>`](../../../include/alp/chips/gd32_swd.h)
   — driver header.
-* [`docs/gd32-bridge-protocol.md`](../../docs/gd32-bridge-protocol.md) §10
+* [`docs/gd32-bridge-protocol.md`](../../../docs/gd32-bridge-protocol.md) §10
   — protocol-level reservation of the SWD recovery path.
-* [`docs/bring-up-v2n.md`](../../docs/bring-up-v2n.md) §2b
+* [`docs/bring-up-v2n.md`](../../../docs/bring-up-v2n.md) §2b
   — bench bring-up procedure for the recovery path.

@@ -26,7 +26,7 @@ ten-sample loop.
 
 ## See also
 
-* [`<alp/chips/tmp112.h>`](../../include/alp/chips/tmp112.h)
+* [`<alp/chips/tmp112.h>`](../../../include/alp/chips/tmp112.h)
   -- driver API.
 * TI TMP112 datasheet -- ±0.5 °C accuracy, 12/13-bit resolution,
   0.0625 °C/LSB.

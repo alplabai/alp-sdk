@@ -56,7 +56,7 @@ Key shape points the slide makes explicit:
    the SDK doesn't gatekeep.
 3. **Three application classes.**  Generic Application, Edge-AI
    Application, IoT Application — the example tree mirrors this
-   split: `examples/edgeai-vision-aen/` (edge AI),
+   split: `examples/aen/edgeai-vision-aen/` (edge AI),
    `examples/iot-connected-camera/` (IoT), and the per-peripheral
    reference apps under `examples/<peripheral>-<demo>/`
    (generic).
@@ -140,7 +140,7 @@ NPU the active SoM exposes — Ethos-U55 (E1M-AEN) / Ethos-U65
 | Deliverable                                       | Status      |
 |---------------------------------------------------|-------------|
 | Chip metadata for every supported NPU              | ✅ shipped (Ethos-U55 in e3/e7/e8, Ethos-U85 in e8, Ethos-U65 in imx93, DRP-AI in n44, DEEPX in m1) |
-| `examples/edgeai-vision-aen/` skeleton             | ✅ shipped |
+| `examples/aen/edgeai-vision-aen/` skeleton             | ✅ shipped |
 | `<alp/inference.h>` unified surface — model load + invoke + bind | 🔮 v0.3 (planned) |
 | Vela (Ethos-U) toolchain integration               | 🔮 v0.2 |
 | DRP-AI translator integration (Renesas)            | 🔮 v0.2 |
@@ -235,7 +235,7 @@ Here's the path to making that real.
 ### 4.1 TensorFlow Lite Micro (v0.2)
 
 Target: any model that fits in the SoM's memory budget compiles
-through Vela + lands in `examples/edgeai-vision-aen/models/`.
+through Vela + lands in `examples/aen/edgeai-vision-aen/models/`.
 
 - Bring TensorFlow Lite Micro into the Zephyr workspace as a
   module (already supported upstream).

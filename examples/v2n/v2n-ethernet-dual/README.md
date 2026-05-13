@@ -69,6 +69,6 @@ PHYAD strap.
 
 ## See also
 
-* [`<alp/chips/rtl8211fdi.h>`](../../include/alp/chips/rtl8211fdi.h) -- driver API.
-* [`docs/soms/v2n.md`](../../docs/soms/v2n.md) -- V2N module reference.
-* [`docs/bring-up-v2n.md`](../../docs/bring-up-v2n.md) §5 -- bring-up walk-through.
+* [`<alp/chips/rtl8211fdi.h>`](../../../include/alp/chips/rtl8211fdi.h) -- driver API.
+* [`docs/soms/v2n.md`](../../../docs/soms/v2n.md) -- V2N module reference.
+* [`docs/bring-up-v2n.md`](../../../docs/bring-up-v2n.md) §5 -- bring-up walk-through.
