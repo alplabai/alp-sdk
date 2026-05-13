@@ -156,15 +156,15 @@ uint8_t bridge_hw_da9292_status_cached(void)
 
 int bridge_hw_pwm_capture_begin(uint8_t channel, uint8_t edge)
 {
-    (void)channel; (void)edge;
+    (void)channel;
+    (void)edge;
     return BRIDGE_HW_ERR_NOTIMPL;
 }
 
-int bridge_hw_pwm_capture_read(uint8_t channel, uint32_t *period_ns,
-                               uint32_t *pulse_width_ns)
+int bridge_hw_pwm_capture_read(uint8_t channel, uint32_t *period_ns, uint32_t *pulse_width_ns)
 {
     (void)channel;
-    if (period_ns != 0)      *period_ns      = 0u;
+    if (period_ns != 0) *period_ns = 0u;
     if (pulse_width_ns != 0) *pulse_width_ns = 0u;
     return BRIDGE_HW_ERR_NOTIMPL;
 }
@@ -177,13 +177,16 @@ int bridge_hw_pwm_capture_end(uint8_t channel)
 
 int bridge_hw_pwm_single_pulse(uint8_t channel, uint32_t pulse_ns)
 {
-    (void)channel; (void)pulse_ns;
+    (void)channel;
+    (void)pulse_ns;
     return BRIDGE_HW_ERR_NOTIMPL;
 }
 
 int bridge_hw_timer_sync(uint8_t master, uint8_t slave, uint8_t mode)
 {
-    (void)master; (void)slave; (void)mode;
+    (void)master;
+    (void)slave;
+    (void)mode;
     return BRIDGE_HW_ERR_NOTIMPL;
 }
 
@@ -191,10 +194,11 @@ int bridge_hw_timer_sync(uint8_t master, uint8_t slave, uint8_t mode)
 /* v0.5 (§2B.3) -- system power-mode set                             */
 /* --------------------------------------------------------------- */
 
-int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap,
-                             uint32_t wake_after_ms)
+int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap, uint32_t wake_after_ms)
 {
-    (void)mode; (void)wake_bitmap; (void)wake_after_ms;
+    (void)mode;
+    (void)wake_bitmap;
+    (void)wake_after_ms;
     return BRIDGE_HW_ERR_NOTIMPL;
 }
 
@@ -208,20 +212,23 @@ int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id)
     return BRIDGE_HW_ERR_NOTIMPL;
 }
 
-int bridge_hw_adc_dsp_stage_push(uint8_t chain_id, uint8_t stage_index,
-                                 uint8_t kind, uint16_t chunk_offset,
-                                 uint16_t chunk_total_size,
-                                 const uint8_t *chunk_data,
-                                 size_t chunk_data_len)
+int bridge_hw_adc_dsp_stage_push(uint8_t chain_id, uint8_t stage_index, uint8_t kind,
+                                 uint16_t chunk_offset, uint16_t chunk_total_size,
+                                 const uint8_t *chunk_data, size_t chunk_data_len)
 {
-    (void)chain_id; (void)stage_index; (void)kind;
-    (void)chunk_offset; (void)chunk_total_size;
-    (void)chunk_data; (void)chunk_data_len;
+    (void)chain_id;
+    (void)stage_index;
+    (void)kind;
+    (void)chunk_offset;
+    (void)chunk_total_size;
+    (void)chunk_data;
+    (void)chunk_data_len;
     return BRIDGE_HW_ERR_NOTIMPL;
 }
 
 int bridge_hw_adc_dsp_chain_bind(uint8_t chain_id, uint8_t stream_id)
 {
-    (void)chain_id; (void)stream_id;
+    (void)chain_id;
+    (void)stream_id;
     return BRIDGE_HW_ERR_NOTIMPL;
 }

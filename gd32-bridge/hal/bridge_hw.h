@@ -209,8 +209,7 @@ int bridge_hw_pwm_capture_begin(uint8_t channel, uint8_t edge);
  * core clock (~4.16 ns LSB at 240 MHz).  BRIDGE_HW_ERR_NOTIMPL if the
  * ring is empty (host should poll); BRIDGE_HW_ERR_INVAL if the
  * channel is not currently in capture mode. */
-int bridge_hw_pwm_capture_read(uint8_t channel, uint32_t *period_ns,
-                               uint32_t *pulse_width_ns);
+int bridge_hw_pwm_capture_read(uint8_t channel, uint32_t *period_ns, uint32_t *pulse_width_ns);
 
 /* Stop the @p channel's input-capture session and return the pin
  * to high-impedance.  Idempotent. */
@@ -242,8 +241,7 @@ int bridge_hw_timer_sync(uint8_t master, uint8_t slave, uint8_t mode);
  * for "no timer wake".  The GD32 prepares the V2N supervisor handshake
  * + signals the Renesas SoC to enter the matching mode, then re-runs
  * the bridge handshake on wakeup so the host can resume bridge calls. */
-int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap,
-                             uint32_t wake_after_ms);
+int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap, uint32_t wake_after_ms);
 
 /* --------------------------------------------------------------- */
 /* v0.5 (§2B wave-2) -- chunked DSP-chain upload                     */
@@ -265,11 +263,9 @@ int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id);
  * is complete when the host has covered `[0, chunk_total_size)`.
  * The eventual per-kind layouts the firmware decodes are documented
  * in `docs/gd32-bridge-protocol.md` §3.x. */
-int bridge_hw_adc_dsp_stage_push(uint8_t chain_id, uint8_t stage_index,
-                                 uint8_t kind, uint16_t chunk_offset,
-                                 uint16_t chunk_total_size,
-                                 const uint8_t *chunk_data,
-                                 size_t chunk_data_len);
+int bridge_hw_adc_dsp_stage_push(uint8_t chain_id, uint8_t stage_index, uint8_t kind,
+                                 uint16_t chunk_offset, uint16_t chunk_total_size,
+                                 const uint8_t *chunk_data, size_t chunk_data_len);
 
 /* Attach a fully-populated chain to a streaming ADC source previously
  * opened with bridge_hw_adc_stream_begin.  After bind, the stream's
