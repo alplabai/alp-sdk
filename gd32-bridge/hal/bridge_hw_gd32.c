@@ -140,8 +140,8 @@ static bool trng_ready = false;
  * at the GD32G553's 240 MHz core clock when the TRNG is healthy
  * (DRDY trips in dozens of cycles, so the timeout is the abort
  * latch, not the typical-case bound). */
-#define TRNG_INIT_TIMEOUT  100000u
-#define TRNG_READY_TIMEOUT  65535u
+#define TRNG_INIT_TIMEOUT 100000u
+#define TRNG_READY_TIMEOUT 65535u
 
 /* One-time TRNG bring-up.  Configuration mirrors the vendor's
  * `TRNG_NIST_mode` example: PLL Q / 2 clock source, SHA-256
@@ -427,7 +427,7 @@ int bridge_hw_trng_read(uint8_t *dest, size_t len)
         if (SET == trng_flag_get(TRNG_FLAG_CECS)) return BRIDGE_HW_ERR_IO;
         if (SET == trng_flag_get(TRNG_FLAG_SECS)) return BRIDGE_HW_ERR_IO;
 
-        uint32_t word = trng_get_true_random_data();
+        uint32_t     word  = trng_get_true_random_data();
         const size_t chunk = (len - off >= 4u) ? 4u : (len - off);
         for (size_t i = 0; i < chunk; ++i) {
             dest[off++] = (uint8_t)(word & 0xFFu);
