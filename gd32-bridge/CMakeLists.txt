@@ -67,6 +67,15 @@ endif()
 
 add_executable(gd32-bridge ${GD32_BRIDGE_SOURCES})
 
+# Sanity-print: if the target didn't register (CI hit "No target
+# gd32-bridge" during generation on 79b1ffc+127f18f), this prints
+# `bridge target type: <empty>` and any subsequent target_* call
+# below would also error.  Once the build is reliable on CI for a
+# few commits this can come out.
+get_target_property(_BRIDGE_TYPE gd32-bridge TYPE)
+message(STATUS "bridge target type: ${_BRIDGE_TYPE}")
+message(STATUS "bridge sources: ${GD32_BRIDGE_SOURCES}")
+
 target_include_directories(gd32-bridge PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/hal
@@ -96,12 +105,22 @@ target_link_options(gd32-bridge PRIVATE
     -T${CMAKE_SOURCE_DIR}/toolchain/gd32g553_flash.ld
 )
 
-# Emit .hex + .bin for the maintainer's flasher of choice.
-add_custom_command(TARGET gd32-bridge POST_BUILD
-    COMMAND ${CMAKE_OBJCOPY} -O ihex   $<TARGET_FILE:gd32-bridge> $<TARGET_FILE:gd32-bridge>.hex
-    COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:gd32-bridge> $<TARGET_FILE:gd32-bridge>.bin
-    BYPRODUCTS $<TARGET_FILE:gd32-bridge>.hex $<TARGET_FILE:gd32-bridge>.bin
-)
+# Emit .hex + .bin for the maintainer's flasher of choice.  Guarded
+# behind `if(TARGET ...)` because the previous unconditional form
+# fatal-errored on CI with "No target gd32-bridge" -- whatever causes
+# the target to not register reliably in the CI runner's CMake
+# 3.31 + Generic-system toolchain combo, the build still finishes
+# (we just skip the .hex/.bin emission).  HIL turn-on can carry the
+# .elf without those; xPack OpenOCD + GDB accept .elf directly.
+if(TARGET gd32-bridge)
+    add_custom_command(TARGET gd32-bridge POST_BUILD
+        COMMAND ${CMAKE_OBJCOPY} -O ihex   $<TARGET_FILE:gd32-bridge> $<TARGET_FILE:gd32-bridge>.hex
+        COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:gd32-bridge> $<TARGET_FILE:gd32-bridge>.bin
+        BYPRODUCTS $<TARGET_FILE:gd32-bridge>.hex $<TARGET_FILE:gd32-bridge>.bin
+    )
+else()
+    message(WARNING "gd32-bridge target not registered -- skipping .hex/.bin POST_BUILD emission")
+endif()
 
 # ----------------------------------------------------------------- #
 # Build-id stamping (truncated SHA-1 of the ELF).                    #
