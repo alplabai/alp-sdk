@@ -61,6 +61,35 @@ that lands before the v0.3.0 tag.)
 - **5L35023B I2C address -> 7-bit `0x68`** (8-bit write `0xD0`) per
   the Renesas 5L35023 public datasheet.
 
+### Fixed (2026-05-13 -- gd32-bridge CI follow-ups)
+
+- **`gd32-bridge` GD32 backend now links against a real `gd32g553_xE`
+  memory map (2026-05-13).**  Replaces the placeholder
+  `toolchain/gd32g553_flash.ld` with a derivative of the vendor's
+  `gd32g553_xE_flash.ld` from `Firmware/CMSIS/GD/GD32G5x3/Source/GCC/Ld/`,
+  preserving the FLASH (512K @ `0x08000000`) + RAM (96K @ `0x20000000`)
+  + TCMSRAM (32K @ `0x10000000`) regions and the `_sidata` / `_sdata` /
+  `_edata` / `_sbss` / `_ebss` / `_sp` symbol set the vendor
+  `startup_gd32g5x3.S` Reset_Handler dereferences.  Also adds the
+  `.vectors` / `.init_array` / `.fini_array` / `.heap_stack` /
+  `.tcmsram` section recipes that the prior placeholder lacked.  Pairs
+  with `hal/gd32_libc_stubs.c`: weak `_init` / `_fini` symbols emitted
+  from a C translation unit because `-nostartfiles` drops the
+  toolchain's `crti.o` (which normally supplies them).  Stubs stay
+  empty -- the firmware does no C++ static init and the classic init /
+  fini sections aren't used.  Source file is only linked when
+  `BRIDGE_HAL_BACKEND=gd32` (the stub backend never references
+  `__libc_init_array`).  Unblocks the `pr-gd32-bridge-build · gd32`
+  job which had been failing at link with
+  `undefined reference to '_sidata'` ... `'_ebss'` plus
+  `undefined reference to '_init'`.
+
+- **`gd32-bridge/src/protocol.c` -- silence `-Wtype-limits` on the
+  OTA-range guard (2026-05-13).**  Dropped the `cmd <= 0xFFu` upper
+  bound from the OTA opcode dispatch (`cmd` is `uint8_t`, so the
+  comparison was always true and tripped GCC's `-Wtype-limits` under
+  `-Wextra`).  No behavioural change.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**

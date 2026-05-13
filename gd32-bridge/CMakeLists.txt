@@ -47,7 +47,15 @@ set(GD32_BRIDGE_SOURCES
 if(BRIDGE_HAL_BACKEND STREQUAL "stub")
     list(APPEND GD32_BRIDGE_SOURCES hal/bridge_hw_stub.c)
 elseif(BRIDGE_HAL_BACKEND STREQUAL "gd32")
-    list(APPEND GD32_BRIDGE_SOURCES hal/bridge_hw_gd32.c)
+    # bridge_hw_gd32.c: the real (currently stubbed) peripheral hooks.
+    # gd32_libc_stubs.c: weak `_init` / `_fini` newlib stubs needed
+    # because `-nostartfiles` drops crti.o.  Only relevant to this
+    # backend; the stub HAL backend never links the vendor Reset_Handler
+    # that pulls in `__libc_init_array`.
+    list(APPEND GD32_BRIDGE_SOURCES
+        hal/bridge_hw_gd32.c
+        hal/gd32_libc_stubs.c
+    )
     # Pull in the GigaDevice firmware-library wrapper.  Its CMakeLists
     # fatal-errors with a clear "drop the SDK into sdk/" instruction
     # when the unpacked archive is missing, so an unconfigured

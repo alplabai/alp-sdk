@@ -765,8 +765,9 @@ gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
         /* Route the reserved OTA opcode range (0xF0..0xFF) through
          * the application bootloader's dispatcher.  Bodies return
          * STATUS_NOSUPPORT until the FMC HAL lands -- see
-         * src/bootloader/. */
-        if (cmd >= CMD_OTA_BEGIN && cmd <= 0xFFu) {
+         * src/bootloader/.  `cmd` is uint8_t so the upper bound 0xFFu
+         * is implicit; explicit check would trip -Wtype-limits. */
+        if (cmd >= CMD_OTA_BEGIN) {
             return bl_dispatch_ota(cmd, req_payload, req_payload_len,
                                    reply_payload, reply_payload_cap,
                                    reply_payload_len);
