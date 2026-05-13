@@ -125,6 +125,24 @@ that lands before the v0.3.0 tag.)
   `CMD_GPIO_WRITE` (0x11) flip from `STATUS_NOSUPPORT` to
   `STATUS_OK` on the gd32 backend.
 
+- **`bridge_hw_trng_read` -> NIST SP800-90B TRNG with bounded
+  polling (2026-05-13).**  Third of the 18 HAL bodies.  Adds
+  one-time TRNG bring-up in `bridge_hw_init()` matching the
+  vendor's `TRNG_NIST_mode` example sequence (PLL Q / 2 clock
+  source, SHA-256 conditioning over 440-bit input -> 256-bit
+  output, post-processing enabled, clock-error detection armed)
+  with a bounded PLL-stable wait so a misconfigured clock tree
+  can't hang boot.  Bring-up failure (PLL never stable, analog
+  noise dead, `CECS` / `SECS` self-check tripped) leaves
+  `trng_ready = false` so subsequent reads return
+  `BRIDGE_HW_ERR_IO` rather than serving zero-filled bytes.
+  `bridge_hw_trng_read()` polls `DRDY` between 32-bit pulls with
+  a per-word timeout, packs the LSB bytes into the caller's
+  buffer, and re-checks `CECS` / `SECS` on every word so a
+  mid-read fault still surfaces.  Wire opcode `CMD_TRNG_READ`
+  (0x80) flips from `STATUS_NOSUPPORT` to `STATUS_OK` on the
+  gd32 backend.  No protocol or ABI change.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**

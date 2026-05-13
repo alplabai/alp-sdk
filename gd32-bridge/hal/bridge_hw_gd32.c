@@ -24,7 +24,9 @@
  *   2. GPIO_READ / WRITE     -- DONE: 18-pad map (E1M IO8..IO35),
  *                               boot configures all as INPUT + PULL_UP,
  *                               write auto-promotes to OUTPUT push-pull.
- *   3. TRNG_READ             -- vendor trng_*(); init in bridge_hw_init().
+ *   3. TRNG_READ             -- DONE: NIST SP800-90B mode init in
+ *                               bridge_hw_init, DRDY-polled byte read
+ *                               with bounded timeout.
  *   4. TMU_COMPUTE           -- vendor tmu_*(); CORDIC F32 / Q31 paths.
  *   5. DAC_SET / GET         -- vendor dac_*(); two channels (PA4, PA6).
  *   6. PWM_SET / GET         -- TIMER0 / TIMER7 advanced PWM.
@@ -123,13 +125,82 @@ static const gd32_gpio_pad_t gpio_pad_map[] = {
 static bool gpio_is_output[GPIO_PAD_MAP_COUNT];
 
 /* ----------------------------------------------------------------- */
+/* TRNG (NIST SP800-90B) state + bring-up.                            */
+/* ----------------------------------------------------------------- */
+
+/* Set true once bridge_hw_init() has confirmed the TRNG is producing
+ * data and its hardware self-checks are clean.  bridge_hw_trng_read()
+ * short-circuits to BRIDGE_HW_ERR_IO when this is false -- e.g. PLL
+ * never stabilised, or the TRNG's analog noise source self-check
+ * tripped CECS / SECS during bring-up. */
+static bool trng_ready = false;
+
+/* Coarse timeout for the PLL stable + TRNG DRDY polls.  Roughly
+ * 100k iterations of `trng_flag_get` -- about half a millisecond
+ * at the GD32G553's 240 MHz core clock when the TRNG is healthy
+ * (DRDY trips in dozens of cycles, so the timeout is the abort
+ * latch, not the typical-case bound). */
+#define TRNG_INIT_TIMEOUT  100000u
+#define TRNG_READY_TIMEOUT  65535u
+
+/* One-time TRNG bring-up.  Configuration mirrors the vendor's
+ * `TRNG_NIST_mode` example: PLL Q / 2 clock source, SHA-256
+ * conditioning over a 440-bit input window, 256-bit output stage.
+ * Returns true iff the TRNG produced its first DRDY without
+ * tripping the clock-error (CECS) / seed-error (SECS) flags --
+ * either of those fault states leaves the unit unable to deliver
+ * randomness, and we surface that via `trng_ready = false`. */
+static bool trng_bringup(void)
+{
+    uint32_t to;
+
+    /* Vendor's `SystemInit()` (called from Reset_Handler before
+     * main()) boots the PLL.  In normal operation PLLSTB is set by
+     * the time we get here; bound the wait so a misconfigured
+     * clock tree doesn't hang `bridge_hw_init`. */
+    for (to = TRNG_INIT_TIMEOUT; to != 0u; --to) {
+        if (SET == rcu_flag_get(RCU_FLAG_PLLSTB)) break;
+    }
+    if (to == 0u) return false;
+
+    rcu_trng_clock_config(RCU_TRNG_CKPLLQ_DIV2);
+    rcu_periph_clock_enable(RCU_TRNG);
+
+    /* Self-tests on the analog noise source.  trng_clockerror_detection
+     * arms the CECS flag so we'd see a clock outage during runtime. */
+    trng_clockerror_detection_enable();
+
+    trng_deinit();
+    trng_conditioning_reset_enable();
+    trng_mode_config(TRNG_MODSEL_NIST);
+    trng_nist_seed_config(TRNG_NIST_SEED_ANALOG);
+    trng_conditioning_input_bitwidth(TRNG_INMOD_440BIT);
+    trng_conditioning_output_bitwidth(TRNG_OUTMOD_256BIT);
+    trng_conditioning_algo_config(TRNG_ALGO_SHA256);
+    trng_conditioning_enable();
+    trng_postprocessing_enable();
+    trng_enable();
+
+    /* Wait for the first DRDY -- proves the noise source + post-
+     * processing pipeline are alive.  Bounded -- if the analog
+     * source is dead the unit will never trip DRDY. */
+    for (to = TRNG_READY_TIMEOUT; to != 0u; --to) {
+        if (SET == trng_flag_get(TRNG_FLAG_DRDY)) break;
+    }
+    if (to == 0u) return false;
+    if (SET == trng_flag_get(TRNG_FLAG_CECS)) return false;
+    if (SET == trng_flag_get(TRNG_FLAG_SECS)) return false;
+    return true;
+}
+
+/* ----------------------------------------------------------------- */
 /* Boot hooks (overrides of the weak defaults in src/main.c)         */
 /* ----------------------------------------------------------------- */
 
 /* Called once on entry to main() before the transport ISRs come
  * online.  Future commits also wire up the remaining peripherals
- * the bridge uses (TRNG, TMU, ADC0..ADC3, DAC, TIMER0/7/19, the
- * DA9292 I2C-master poll, SysTick, etc.). */
+ * the bridge uses (TMU, ADC0..ADC3, DAC, TIMER0/7/19, the DA9292
+ * I2C-master poll, SysTick, etc.). */
 void bridge_hw_init(void)
 {
     /* Enable AHB2 clocks for every GPIO port the pad map references.
@@ -153,6 +224,12 @@ void bridge_hw_init(void)
                       gpio_pad_map[i].pin);
         gpio_is_output[i] = false;
     }
+
+    /* TRNG bring-up.  Failure (PLL never stable, analog noise
+     * source bad, self-check tripped) leaves trng_ready = false;
+     * bridge_hw_trng_read returns BRIDGE_HW_ERR_IO in that case
+     * rather than serving zero-filled "randomness". */
+    trng_ready = trng_bringup();
 }
 
 /* Called from the SysTick handler (or the main loop's idle path)
@@ -331,11 +408,33 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
 
 int bridge_hw_trng_read(uint8_t *dest, size_t len)
 {
-    if (dest != 0) {
-        for (size_t i = 0; i < len; ++i)
-            dest[i] = 0u;
+    if (dest == 0) return BRIDGE_HW_ERR_INVAL;
+    if (len == 0u || len > 32u) return BRIDGE_HW_ERR_RANGE;
+    if (!trng_ready) return BRIDGE_HW_ERR_IO;
+
+    /* Pull 32-bit randoms and pack their LSB bytes into `dest`.  A
+     * single trng_get_true_random_data() call drains one entry from
+     * the TRNG's output FIFO and the unit refills autonomously; we
+     * poll DRDY between pulls so a starved-noise condition doesn't
+     * silently emit a stale word. */
+    size_t off = 0u;
+    while (off < len) {
+        uint32_t to;
+        for (to = TRNG_READY_TIMEOUT; to != 0u; --to) {
+            if (SET == trng_flag_get(TRNG_FLAG_DRDY)) break;
+        }
+        if (to == 0u) return BRIDGE_HW_ERR_IO;
+        if (SET == trng_flag_get(TRNG_FLAG_CECS)) return BRIDGE_HW_ERR_IO;
+        if (SET == trng_flag_get(TRNG_FLAG_SECS)) return BRIDGE_HW_ERR_IO;
+
+        uint32_t word = trng_get_true_random_data();
+        const size_t chunk = (len - off >= 4u) ? 4u : (len - off);
+        for (size_t i = 0; i < chunk; ++i) {
+            dest[off++] = (uint8_t)(word & 0xFFu);
+            word >>= 8;
+        }
     }
-    return BRIDGE_HW_ERR_NOTIMPL;
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_tmu_compute(uint8_t function, uint8_t format, uint32_t in_a, uint32_t in_b,
