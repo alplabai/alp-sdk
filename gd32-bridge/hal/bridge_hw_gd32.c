@@ -48,7 +48,11 @@
  *   12. COUNTER_READ         -- DONE: Cortex-M33 DWT cycle counter
  *                               (32-bit free-running at core clock).
  *   13. PWM_CAPTURE_*        -- TIMERx input-capture + ring buffer.
- *   14. PWM_SINGLE_PULSE     -- TIMERx one-pulse mode (OPM).
+ *   14. PWM_SINGLE_PULSE     -- DONE: TIMERx OPM (one-pulse mode).
+ *                               Switches the timer's whole SP-bit so
+ *                               other channels on the same timer also
+ *                               run as single-pulse until a PWM_SET
+ *                               flips back to repetitive.
  *   15. TIMER_SYNC           -- master-slave SMC config.
  *   16. POWER_MODE_SET       -- PMU sleep / deep-sleep / standby.
  *   17. DA9292 status poll   -- I2C-master periodic poll cached value.
@@ -694,6 +698,12 @@ int bridge_hw_pwm_set(uint8_t channel, uint32_t period_ns, uint32_t duty_ns)
     if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
     if (duty_ns > period_ns) return BRIDGE_HW_ERR_INVAL;
 
+    /* Clear OPM if a prior bridge_hw_pwm_single_pulse left the timer
+     * in one-pulse mode -- per the contract, a subsequent PWM_SET
+     * returns the channel (and any other channels on the same timer)
+     * to continuous output. */
+    timer_single_pulse_mode_config(pwm_channels[channel].periph, TIMER_SP_MODE_REPETITIVE);
+
     /* Round period + duty to whole microseconds (the timer tick).
      * `period_us` must fit in 16 bits (ARR) -- caller is responsible
      * for staying under ~65 ms; we clamp on over-range so the timer
@@ -1045,9 +1055,32 @@ int bridge_hw_pwm_capture_end(uint8_t channel)
 
 int bridge_hw_pwm_single_pulse(uint8_t channel, uint32_t pulse_ns)
 {
-    (void)channel;
-    (void)pulse_ns;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+
+    uint32_t pulse_us = pulse_ns / PWM_TIMER_TICK_NS;
+    if (pulse_us == 0u) return BRIDGE_HW_ERR_RANGE;
+    if (pulse_us > PWM_TIMER_ARR_MAX + 1u) pulse_us = PWM_TIMER_ARR_MAX + 1u;
+
+    const gd32_pwm_ch_t *ch = &pwm_channels[channel];
+
+    /* Reset the timer counter so the pulse starts from t=0 then
+     * program ARR = pulse_us (counts up; the channel output stays
+     * high until the counter reaches the compare value).  Setting
+     * compare = ARR + 1 keeps the output high through the entire
+     * period so the pulse width matches `pulse_us`.  After ARR the
+     * SP=SINGLE bit halts the timer until the next bridge_hw_pwm_set
+     * or another bridge_hw_pwm_single_pulse re-arms it. */
+    timer_counter_value_config(ch->periph, 0u);
+    timer_autoreload_value_config(ch->periph, (uint32_t)(pulse_us - 1u));
+    timer_channel_output_pulse_value_config(ch->periph, ch->channel, pulse_us);
+    timer_single_pulse_mode_config(ch->periph, TIMER_SP_MODE_SINGLE);
+    timer_enable(ch->periph);
+
+    /* Update the cache so a follow-up bridge_hw_pwm_get reports the
+     * one-pulse setpoint accurately.  Duty == period for a one-shot. */
+    pwm_period_ns_cache[channel] = pulse_us * PWM_TIMER_TICK_NS;
+    pwm_duty_ns_cache[channel]   = pulse_us * PWM_TIMER_TICK_NS;
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_timer_sync(uint8_t master, uint8_t slave, uint8_t mode)

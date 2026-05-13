@@ -303,6 +303,36 @@ that lands before the v0.3.0 tag.)
   `STATUS_OK` for default-resolution requests on the gd32
   backend.  No protocol or ABI change.
 
+- **`bridge_hw_pwm_single_pulse` -> TIMERx one-pulse mode
+  (2026-05-13).**  Tenth body.  Reuses the PWM channel map +
+  init from §2B step 6 -- the channel's pad is already
+  configured as alt-function PWM output; this body just
+  switches the underlying timer to OPM (one-pulse mode):
+    1. zero the timer counter
+    2. set ARR = pulse_us - 1 and channel compare = pulse_us
+    3. timer_single_pulse_mode_config(periph, SP_MODE_SINGLE)
+    4. timer_enable() (the SP bit halts the timer after one
+       wrap, so the channel pad drives high for `pulse_us`
+       microseconds then returns to its idle level)
+  The pulse-width cache is also updated so a follow-up
+  `bridge_hw_pwm_get` reports the one-shot setpoint.
+
+  Per contract, the channel stays in one-pulse mode until the
+  next `bridge_hw_pwm_set` on the same channel: that body now
+  flips the timer's SP bit back to `SP_MODE_REPETITIVE` before
+  writing the period/duty.
+
+  Caveat: the SP bit lives in the timer's CTL0 register
+  (timer-wide, not per-channel), so a single-pulse call on
+  any one channel of TIMER0 / TIMER7 puts the entire group
+  into one-pulse mode.  Mixed continuous + single-pulse use
+  across the same timer needs the host to coordinate.
+  Documented in the body comment.
+
+  Wire opcode `CMD_PWM_SINGLE_PULSE` (0x26) flips from
+  `STATUS_NOSUPPORT` to `STATUS_OK` on the gd32 backend.  No
+  protocol or ABI change.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
