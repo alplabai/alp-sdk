@@ -93,24 +93,24 @@ typedef struct {
 } gd32_gpio_pad_t;
 
 static const gd32_gpio_pad_t gpio_pad_map[] = {
-    {GPIOB, GPIO_PIN_10}, /* bit  0 = E1M IO8  */
-    {GPIOA, GPIO_PIN_7},  /* bit  1 = E1M IO9  */
-    {GPIOA, GPIO_PIN_12}, /* bit  2 = E1M IO10 */
-    {GPIOB, GPIO_PIN_0},  /* bit  3 = E1M IO11 */
-    {GPIOC, GPIO_PIN_1},  /* bit  4 = E1M IO12 */
-    {GPIOF, GPIO_PIN_1},  /* bit  5 = E1M IO13 */
-    {GPIOB, GPIO_PIN_7},  /* bit  6 = E1M IO14 */
-    {GPIOC, GPIO_PIN_0},  /* bit  7 = E1M IO16 */
-    {GPIOC, GPIO_PIN_14}, /* bit  8 = E1M IO24 */
-    {GPIOC, GPIO_PIN_15}, /* bit  9 = E1M IO25 */
-    {GPIOB, GPIO_PIN_11}, /* bit 10 = E1M IO27 */
-    {GPIOC, GPIO_PIN_2},  /* bit 11 = E1M IO28 */
-    {GPIOD, GPIO_PIN_11}, /* bit 12 = E1M IO29 */
-    {GPIOD, GPIO_PIN_10}, /* bit 13 = E1M IO30 */
-    {GPIOE, GPIO_PIN_12}, /* bit 14 = E1M IO31 */
-    {GPIOD, GPIO_PIN_2},  /* bit 15 = E1M IO32 */
-    {GPIOD, GPIO_PIN_8},  /* bit 16 = E1M IO34 */
-    {GPIOD, GPIO_PIN_1},  /* bit 17 = E1M IO35 */
+    { GPIOB, GPIO_PIN_10 }, /* bit  0 = E1M IO8  */
+    { GPIOA, GPIO_PIN_7 },  /* bit  1 = E1M IO9  */
+    { GPIOA, GPIO_PIN_12 }, /* bit  2 = E1M IO10 */
+    { GPIOB, GPIO_PIN_0 },  /* bit  3 = E1M IO11 */
+    { GPIOC, GPIO_PIN_1 },  /* bit  4 = E1M IO12 */
+    { GPIOF, GPIO_PIN_1 },  /* bit  5 = E1M IO13 */
+    { GPIOB, GPIO_PIN_7 },  /* bit  6 = E1M IO14 */
+    { GPIOC, GPIO_PIN_0 },  /* bit  7 = E1M IO16 */
+    { GPIOC, GPIO_PIN_14 }, /* bit  8 = E1M IO24 */
+    { GPIOC, GPIO_PIN_15 }, /* bit  9 = E1M IO25 */
+    { GPIOB, GPIO_PIN_11 }, /* bit 10 = E1M IO27 */
+    { GPIOC, GPIO_PIN_2 },  /* bit 11 = E1M IO28 */
+    { GPIOD, GPIO_PIN_11 }, /* bit 12 = E1M IO29 */
+    { GPIOD, GPIO_PIN_10 }, /* bit 13 = E1M IO30 */
+    { GPIOE, GPIO_PIN_12 }, /* bit 14 = E1M IO31 */
+    { GPIOD, GPIO_PIN_2 },  /* bit 15 = E1M IO32 */
+    { GPIOD, GPIO_PIN_8 },  /* bit 16 = E1M IO34 */
+    { GPIOD, GPIO_PIN_1 },  /* bit 17 = E1M IO35 */
 };
 #define GPIO_PAD_MAP_COUNT (sizeof(gpio_pad_map) / sizeof(gpio_pad_map[0]))
 
@@ -149,8 +149,8 @@ void bridge_hw_init(void)
      * those pads.  bridge_hw_gpio_write() promotes individual
      * pads to OUTPUT on demand. */
     for (size_t i = 0; i < GPIO_PAD_MAP_COUNT; ++i) {
-        gpio_mode_set(gpio_pad_map[i].periph, GPIO_MODE_INPUT,
-                      GPIO_PUPD_PULLUP, gpio_pad_map[i].pin);
+        gpio_mode_set(gpio_pad_map[i].periph, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP,
+                      gpio_pad_map[i].pin);
         gpio_is_output[i] = false;
     }
 }
@@ -222,12 +222,9 @@ int bridge_hw_gpio_read(uint32_t mask, uint32_t *levels)
      * bits are treated as "no pad selected" rather than an error. */
     for (size_t i = 0; i < GPIO_PAD_MAP_COUNT; ++i) {
         if ((mask & ((uint32_t)1u << i)) == 0u) continue;
-        const FlagStatus s =
-            gpio_is_output[i]
-                ? gpio_output_bit_get(gpio_pad_map[i].periph,
-                                      gpio_pad_map[i].pin)
-                : gpio_input_bit_get(gpio_pad_map[i].periph,
-                                     gpio_pad_map[i].pin);
+        const FlagStatus s = gpio_is_output[i]
+                                 ? gpio_output_bit_get(gpio_pad_map[i].periph, gpio_pad_map[i].pin)
+                                 : gpio_input_bit_get(gpio_pad_map[i].periph, gpio_pad_map[i].pin);
         if (s == SET) {
             *levels |= ((uint32_t)1u << i);
         }
@@ -248,12 +245,10 @@ int bridge_hw_gpio_write(uint32_t mask, uint32_t levels)
              * adequate for control lines, low EMI.  The bridge
              * dispatcher is single-threaded so no locking is
              * needed around the mode flip + the flag write. */
-            gpio_output_options_set(gpio_pad_map[i].periph,
-                                    GPIO_OTYPE_PP,
-                                    GPIO_OSPEED_12MHZ,
+            gpio_output_options_set(gpio_pad_map[i].periph, GPIO_OTYPE_PP, GPIO_OSPEED_12MHZ,
                                     gpio_pad_map[i].pin);
-            gpio_mode_set(gpio_pad_map[i].periph, GPIO_MODE_OUTPUT,
-                          GPIO_PUPD_NONE, gpio_pad_map[i].pin);
+            gpio_mode_set(gpio_pad_map[i].periph, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE,
+                          gpio_pad_map[i].pin);
             gpio_is_output[i] = true;
         }
         if (levels & ((uint32_t)1u << i)) {
