@@ -54,12 +54,8 @@ Integration cross-link: [`vendors/deepx-dxm1/README.md`](../../vendors/deepx-dxm
 
 ## Example apps targeting V2N-M1
 
-All V2N examples apply.  Plus DEEPX-specific examples (more to
-come):
-
-| Example                          | What you'll see                                             |
-|----------------------------------|-------------------------------------------------------------|
-| `v2n-pmic-rail-monitor`          | Shows the three DEEPX TPS628640 instances ACKing on BRD_I2C.|
+All V2N examples apply.  DEEPX-specific examples land separately
+as the NPU integration matures.
 
 ## Common gotchas
 
@@ -74,4 +70,3 @@ come):
 
 * [`v2n.md`](v2n.md) -- the base SoM.
 * [`../bring-up-v2n-m1.md`](../bring-up-v2n-m1.md) -- bench bring-up.
-* [`../pmic-rails.md`](../pmic-rails.md) -- DEEPX-specific rails covered in §"Per-rail table".

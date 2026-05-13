@@ -635,9 +635,7 @@ and prints `NOTE` lines whenever an example's `chips:` list reaches
 for a `assembled: optional` chip on its target SKU.  Customer code
 that uses an optional chip MUST handle `alp_*_init` returning
 `ALP_ERR_NOT_READY` gracefully (skip the demo, log a clear message,
-fall back to a different code path) instead of crashing -- see
-`examples/v2n-pmic-rail-monitor` for an example that already
-follows this pattern.
+fall back to a different code path) instead of crashing.
 
 ### Runtime: detecting which chips are populated
 

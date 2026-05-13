@@ -134,7 +134,6 @@ After every change in the bring-up flow, re-run these in order:
 
 ## See also
 
-* [`pmic-rails.md`](pmic-rails.md) -- full rail map (V2N + V2N-M1).
 * [`vendors/deepx-dxm1/README.md`](../vendors/deepx-dxm1/README.md) --
   upstream cross-link + Yocto integration.
 * [`metadata/e1m_modules/v2n-m1/README.md`](../metadata/e1m_modules/v2n-m1/README.md) --

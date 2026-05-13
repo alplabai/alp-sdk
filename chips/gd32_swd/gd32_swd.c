@@ -420,8 +420,9 @@ alp_status_t gd32_swd_init(gd32_swd_t *ctx,
     if (nrst != NULL) {
         /* Caller is responsible for the pin being configured open-
          * drain at the SoC level -- on the V2N this is a hard pad
-         * property (see docs/pmic-rails.md, the P74 line shares the
-         * primary PMIC's reset-out net). */
+         * property because the NRST line shares a net with the
+         * primary PMIC's reset-out (coordinate with the maintainer
+         * for rail-level details). */
         (void)alp_gpio_write(nrst, true);
     }
 

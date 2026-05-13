@@ -1502,17 +1502,6 @@ that lands before the v0.3.0 tag.)
   OTA = planned per protocol §10; V2N-driven factory ISP =
   pending BOOT0 routing).
 
-- **`docs/pmic-rails.md` — rail map for V2N + V2N-M1 (2026-05-12).**
-  ASCII diagram of the power chain (ACT88760 → DA9292 + TPS628640
-  family).  Per-rail table with voltage / source / population
-  scope.  Cross-reference to the authoritative power-sequence PDFs
-  held in the vendor datasheet.
-  Sequencing rules: V2N base needs no host
-  intervention; V2N-M1 adds the DEEPX rail bring-up steps before
-  releasing `M1_RESET`.  Lists the rails firmware MUST NOT
-  modify in production (page-0 bucks on the primary PMIC,
-  DA9292 CH1 VSET, CH2 on V2N base).
-
 - **`docs/bring-up-v2n.md` + `docs/bring-up-v2n-m1.md` — bench bring-up guides (2026-05-12).**
   Step-by-step procedures: first-power smoke test, SWD attach +
   GD32 firmware flash, host ↔ bridge link confirmation, SoM

@@ -69,10 +69,6 @@ Two PMICs cooperate to bring V2N up:
    (strap-enabled at boot).  CH2 is **disabled on V2N base**;
    only V2N-M1 firmware brings it up (DEEPX rail).
 
-Full rail map + sequencing: [`docs/pmic-rails.md`](../pmic-rails.md).
-Example supervisor task:
-[`examples/v2n-pmic-rail-monitor/`](../../examples/v2n-pmic-rail-monitor/).
-
 ## Boot + identification
 
 Two-stage SoM-ID flow:
@@ -110,7 +106,6 @@ Both files are tab-delimited; consume directly or via
 |----------------------------------|-------------------------------------------------------------|
 | `v2n-gd32-bridge-ping`           | Round-trip PING + GET_VERSION on both transports.           |
 | `v2n-board-id-readout`           | SoM EEPROM manifest read + SKU assertion.                   |
-| `v2n-pmic-rail-monitor`          | 10-second supervisor task polling all three PMIC families.  |
 | `v2n-ethernet-dual`              | Bring up both RTL8211FDI PHYs (ET0 + ET1); WoL configuration.|
 | `v2n-eeprom-manifest-dump`       | Hexdump + decode the 128-byte EEPROM manifest.              |
 | `v2n-rtc-multi-alarm`            | Multi-source callbacks on the rv3028c7 dispatcher.          |

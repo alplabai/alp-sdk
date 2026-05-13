@@ -103,7 +103,6 @@ itself.
 |----------------------------------|------------------------------------------------------------|
 | `v2n-gd32-bridge-ping`           | PING + GET_VERSION round-trip on both SPI + I2C transports |
 | `v2n-board-id-readout`           | Read the SoM EEPROM manifest + assert SKU                  |
-| `v2n-pmic-rail-monitor`          | Poll ACT8760 + DA9292 + TPS628640 for fault state          |
 
 Build any of them as:
 
@@ -192,8 +191,6 @@ while (1) {
 }
 ```
 
-Full rail map: [`docs/pmic-rails.md`](pmic-rails.md).
-
 ### Bring up the dual Ethernet on V2N
 
 The V2N module's two RTL8211FDI PHYs (ET0 + ET1) sit on separate
@@ -274,7 +271,6 @@ split.
 | Architecture (modules, wrappers, codegen split)  | [`docs/architecture.md`](architecture.md)         |
 | SoM bring-up procedures                          | [`docs/bring-up-v2n.md`](bring-up-v2n.md), [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) |
 | GD32 bridge wire protocol                        | [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) |
-| PMIC rail map + sequencing                       | [`docs/pmic-rails.md`](pmic-rails.md)             |
 | EEPROM manifest + hw-rev identification          | [`docs/board-id.md`](board-id.md)                 |
 | Secure boot                                      | [`docs/secure-boot.md`](secure-boot.md)           |
 | OTA (Mender device contract)                     | [`docs/ota.md`](ota.md), [`docs/ota-device-contract.md`](ota-device-contract.md) |
