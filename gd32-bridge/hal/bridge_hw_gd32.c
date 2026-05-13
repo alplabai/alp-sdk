@@ -54,7 +54,11 @@
  *                               run as single-pulse until a PWM_SET
  *                               flips back to repetitive.
  *   15. TIMER_SYNC           -- master-slave SMC config.
- *   16. POWER_MODE_SET       -- PMU sleep / deep-sleep / standby.
+ *   16. POWER_MODE_SET       -- PARTIAL: mode 0/1 (run/sleep) accepted
+ *                               (main-loop WFI already handles); deep-
+ *                               sleep / standby return NOSUPPORT
+ *                               pending a reply-then-sleep state
+ *                               machine + wake-source config.
  *   17. DA9292 status poll   -- I2C-master periodic poll cached value.
  *   18. ADC_DSP_*            -- ADC stream chained with FFT/FAC blocks
  *                               for the wave-2 DSP pipeline.
@@ -1097,10 +1101,30 @@ int bridge_hw_timer_sync(uint8_t master, uint8_t slave, uint8_t mode)
 
 int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap, uint32_t wake_after_ms)
 {
-    (void)mode;
-    (void)wake_bitmap;
-    (void)wake_after_ms;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    /* v0.3 partial: mode 0 (run) + mode 1 (sleep) are accepted no-ops
+     * -- main()'s `for (;;) { __WFI(); bridge_hw_tick(); }` already
+     * runs the CPU in WFI between transport interrupts, which IS
+     * "sleep" on the GD32G5.  Honouring mode 0/1 here lets the host
+     * stop calling this hook without breaking; modes 2 (deep-sleep)
+     * + 3 (standby) need a reply-then-sleep state machine + wake-
+     * source EXTI/RTC config that hasn't shipped yet.
+     *
+     * `wake_bitmap` + `wake_after_ms` are forwarded to that future
+     * state machine; for now any non-zero value rejects so the host
+     * sees a clean NOSUPPORT rather than silently-dropped wake
+     * config. */
+    if (wake_bitmap != 0u) return BRIDGE_HW_ERR_NOTIMPL;
+    if (wake_after_ms != 0u) return BRIDGE_HW_ERR_NOTIMPL;
+    switch (mode) {
+    case 0u: /* run -- no-op */
+    case 1u: /* sleep -- already in WFI between transport ISRs */
+        return BRIDGE_HW_OK;
+    case 2u: /* deep-sleep */
+    case 3u: /* standby */
+        return BRIDGE_HW_ERR_NOTIMPL;
+    default:
+        return BRIDGE_HW_ERR_INVAL;
+    }
 }
 
 /* ----------------------------------------------------------------- */

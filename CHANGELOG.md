@@ -333,6 +333,25 @@ that lands before the v0.3.0 tag.)
   `STATUS_NOSUPPORT` to `STATUS_OK` on the gd32 backend.  No
   protocol or ABI change.
 
+- **`bridge_hw_power_mode_set` partial (2026-05-13).**
+  Eleventh body, partial.  Accepts mode 0 (run) + mode 1
+  (sleep) as no-ops because `main()`'s `for (;;) { __WFI();
+  bridge_hw_tick(); }` already idles the CPU between
+  transport ISRs (which IS "sleep" on the GD32G5).  Modes 2
+  (deep-sleep) + 3 (standby) need a reply-then-sleep state
+  machine (so the transport TX FIFO drains before the
+  peripheral clocks gate) + wake-source EXTI/RTC config; they
+  return `BRIDGE_HW_ERR_NOTIMPL` for this commit.
+  `wake_bitmap` + `wake_after_ms` likewise return NOSUPPORT
+  for any non-zero value rather than silently dropping
+  caller-supplied wake config.
+
+  Wire opcode `CMD_POWER_MODE_SET` (0x28) flips from
+  `STATUS_NOSUPPORT` to `STATUS_OK` for mode 0 / 1 +
+  zero-wake-config requests.  Other combinations remain
+  `STATUS_NOSUPPORT` pending the follow-up state machine.
+  No protocol or ABI change.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
