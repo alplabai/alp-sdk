@@ -794,6 +794,31 @@ that lands before the v0.3.0 tag.)
   n_stages, valid-args-NOSUPPORT, NULL handle close + read, NULL
   got arg).
 
+### Added (2026-05-13)
+
+- **`scripts/setup-clang-format.sh` -- pin local clang-format to v14
+  (2026-05-13).**  CI installs `clang-format-14` from the Ubuntu 22.04
+  apt repo and wires it via `update-alternatives`
+  (`.github/workflows/pr-static-analysis.yml`).  Floating with whatever
+  the developer's distro ships (apt v18+, Homebrew's current LLVM,
+  Windows LLVM installer) drifts on five places we've been bitten by:
+  brace spacing for designated initialisers, trailing `/**<`
+  doc-comment column alignment, designated-init array indentation,
+  `AlignConsecutiveAssignments` columns across mixed-width
+  declarations, and multi-line call-argument packing.  The script
+  detects the local clang-format version, attempts a platform-aware
+  install if mismatched (apt on Debian / Ubuntu, `brew install
+  llvm@14` on macOS, printed manual-install instructions for other
+  Linux / Windows-bash), and verifies the post-install version
+  reports 14.x.  `--check` mode verifies without installing (useful
+  for pre-commit hooks).  `CONTRIBUTING.md` "Formatting" subsection
+  and `docs/contribution.md#formatting` cover the divergence list +
+  platform notes; `docs/testing.md` "Static analysis" now points
+  developers at the script as a one-time pin before their first
+  `clang-format-diff` run.  Net result: future contributors should
+  not spend commits chasing version-skew CI failures the way wave-2
+  did.
+
 ### Added (2026-05-13 overnight run)
 
 - **`chips/gd32_swd/` -- bit-bang SWD controller for the GD32G553 (2026-05-13).**

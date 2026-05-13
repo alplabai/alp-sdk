@@ -82,6 +82,55 @@ signatures), if you have one.
   `src/common/`.  Vendor-specific code lives only in `vendors/`.
 - No GPL dependencies.  Apache-2.0 / MIT / BSD only.
 
+### Formatting
+
+The tree is formatted with **clang-format v14**.  CI's
+[`pr-static-analysis`](../.github/workflows/pr-static-analysis.yml) job
+installs `clang-format-14` from the Ubuntu 22.04 apt repo and wires
+`/usr/bin/clang-format -> v14` via `update-alternatives`, then runs
+`clang-format-diff -p1` against the lines the PR touches.  Mismatched
+versions reflow code differently in five places we've actually been
+bitten by:
+
+1. **Brace spacing.**  v18+ flips `{ 0 }` <-> `{0}` for designated
+   initialisers unless `Cpp11BracedListStyle: false` is set; we pin
+   that in `.clang-format`.
+2. **Trailing `/**<` doc-comment columns.**  v14 aligns them differently
+   from v18+'s `AlignTrailingComments` heuristic.  Workaround when
+   writing new code: use **leading** `/** ... */` doc comments on the
+   line above the field, not trailing `/**< */` after.
+3. **Designated-initialiser indentation.**  v14 and v18+ pick different
+   indents for nested `{ .foo = ... }` array entries.
+4. **`AlignConsecutiveAssignments` columns.**  v14 aligns `=` across
+   adjacent variable declarations of mixed type widths
+   (`int x = 0; alp_status_t s = ...;`) at a column v18+ doesn't pick.
+5. **Multi-line call-argument packing.**  v14 keeps more args on a single
+   line than v18+ given the same `ColumnLimit: 100`.
+
+Pin your local install before pushing:
+
+```bash
+# Linux (apt) or macOS (brew): install v14 + verify.
+bash scripts/setup-clang-format.sh
+
+# Verify only (does not attempt install) -- useful in pre-commit hooks.
+bash scripts/setup-clang-format.sh --check
+```
+
+The script auto-detects platform:
+- **Debian / Ubuntu:** `apt-get install clang-format-14` and wires
+  `update-alternatives` so unversioned `clang-format` resolves to v14.
+- **macOS:** `brew install llvm@14` and prints a `PATH=` line to add to
+  your shell profile (Homebrew's `llvm@14` is keg-only and does not
+  symlink into `/usr/local/bin` by default).
+- **Other Linux (Fedora / Arch) / Windows-bash:** prints manual install
+  instructions and exits non-zero.  WSL2 + Ubuntu 22.04 is the
+  recommended Windows path.
+
+A repo-wide `clang-format -i $(git ls-files '*.c' '*.h')` after `apt-get
+install clang-format-14` should produce a no-op diff -- if it doesn't,
+your local `clang-format` is not v14.
+
 ## Adding a new SoM
 
 See [`docs/porting-new-som.md`](porting-new-som.md).  Summary:

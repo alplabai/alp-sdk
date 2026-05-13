@@ -60,6 +60,27 @@ signatures), if you have one in mind.
 - Vendor-specific code lives only in `vendors/<som>/`.  No `#ifdef
   ALIF_*` in `include/alp/` or `src/common/`.
 
+### Formatting
+
+The tree is formatted with **clang-format v14** (the Ubuntu 22.04 apt
+default that `pr-static-analysis` pins via `update-alternatives`).
+Mismatched versions reflow braces, trailing-comment columns, and
+`AlignConsecutive*` columns differently, which silently breaks the
+diff-only CI gate even when no source actually changed style.
+
+Pin your local installation before pushing:
+
+```bash
+bash scripts/setup-clang-format.sh           # install + verify (apt / brew)
+bash scripts/setup-clang-format.sh --check   # verify only (no install)
+```
+
+`.clang-format` at the repo root carries the style spec (LLVM base +
+`Cpp11BracedListStyle: false` to keep designated-initialiser brace
+spacing stable across v14 / v18+).  See
+[`docs/contribution.md`](docs/contribution.md#formatting) for platform
+notes and the manual-install fallback for non-Debian Linux / Windows.
+
 ### Adding a new SoM
 
 See [`docs/porting-new-som.md`](docs/porting-new-som.md).

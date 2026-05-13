@@ -164,9 +164,18 @@ twister --testsuite-root tests/zephyr -p native_sim/native/64 \
 ### Static analysis
 
 ```bash
-# Diff-only clang-format (matches CI's pr-static-analysis behaviour)
+# One-time: pin local clang-format to v14 (the version CI uses).
+bash scripts/setup-clang-format.sh
+
+# Diff-only clang-format (matches CI's pr-static-analysis behaviour).
 git diff -U0 HEAD~1 -- '*.c' '*.h' | clang-format-diff -p1
 ```
+
+Skipping the pin step is the single most common cause of green-locally /
+red-in-CI on the `pr-static-analysis` job -- clang-format v18+ reflows a
+handful of constructs that v14 doesn't.  See
+[`docs/contribution.md`](contribution.md#formatting) for the divergence
+list.
 
 ---
 
