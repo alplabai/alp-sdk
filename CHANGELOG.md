@@ -61,22 +61,18 @@ that lands before the v0.3.0 tag.)
 - **5L35023B I2C address -> 7-bit `0x68`** (8-bit write `0xD0`) per
   the Renesas 5L35023 public datasheet.
 
-### Fixed (2026-05-13 -- examples-reorg CMakeLists path fix)
+### Changed (2026-05-13 -- top-level UX simplification cont.)
 
-- **Per-SoM example `CMakeLists.txt` files now resolve
-  `ALP_SDK_ROOT` correctly.**  The 2026-05-13 examples reorg
-  (commit `c8f4379`) moved `examples/edgeai-vision-aen/` to
-  `examples/aen/edgeai-vision-aen/` and the v2n-* examples to
-  `examples/v2n/v2n-*/`, but each example's CMakeLists.txt
-  still computed `${CMAKE_CURRENT_SOURCE_DIR}/../..` as the SDK
-  root -- which after the move points at `examples/aen/` /
-  `examples/v2n/`, not the repo root.  `alp_project.py` failed
-  to load from the non-existent `scripts/` location under those
-  intermediate dirs, breaking `pr-twister`'s
-  `alp_sdk.example.edgeai_vision_aen.skeleton` scenario.
-  Bumped to `../../..` on all 12 nested examples (1 under
-  `examples/aen/`, 11 under `examples/v2n/`).  Top-level
-  examples (e.g. `examples/adc-voltmeter/`) keep `../..`.
+- **`bench/` moved to `tests/bench/`.**  The microbench harness
+  is a test-flavoured artefact (opt-in via `ALP_BUILD_BENCH=ON`,
+  no CI gate today) -- belongs under `tests/` alongside the rest
+  of the SDK's test infrastructure.  Top-level repo gets one
+  fewer item, and the relationship between bench + smoke + ztest
+  becomes visible.  Files updated: top-level `CMakeLists.txt`
+  (`add_subdirectory(tests/bench)`), `tests/bench/CMakeLists.txt`
+  + `README.md` + `baseline_runner.py` + `baselines/README.md`
+  + `bench.h` self-refs, plus `docs/test-plan.md`,
+  `docs/testing.md`, `fuzz/README.md` cross-references.
 
 ### Removed (2026-05-13 -- top-level UX simplification)
 

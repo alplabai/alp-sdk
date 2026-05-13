@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Tiny header-only microbench harness for the ALP SDK.  See
- * bench/README.md for the rationale.  No external dependencies --
+ * tests/bench/README.md for the rationale.  No external dependencies --
  * timing comes from clock_gettime on POSIX, k_uptime_ticks on Zephyr.
  *
  * Usage:

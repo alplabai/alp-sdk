@@ -6,7 +6,7 @@ Performance-baseline harness for the ALP SDK.
 
 Reads `alp_bench`'s stdout (one line per microbench case, `<name> <iters>
 iters <ns> ns/iter`), records the results into a per-target YAML file
-under `bench/baselines/<som>-<os>.yaml`, and -- when run with
+under `tests/bench/baselines/<som>-<os>.yaml`, and -- when run with
 `--diff` -- compares the current run against the on-disk baseline
 and flags every case whose ns/iter is more than the configured
 regression threshold worse.
@@ -20,11 +20,11 @@ Usage
 -----
 
     # Capture a fresh baseline on the current target.
-    ./build/bench/alp_bench | python3 bench/baseline_runner.py \
+    ./build/tests/bench/alp_bench | python3 tests/bench/baseline_runner.py \
         --record --som E1M-V2N101 --os yocto
 
     # Diff a current run against the recorded baseline.
-    ./build/bench/alp_bench | python3 bench/baseline_runner.py \
+    ./build/tests/bench/alp_bench | python3 tests/bench/baseline_runner.py \
         --diff --som E1M-V2N101 --os yocto
 
 The threshold defaults to 10 %; bump via `--threshold-pct 20` for
@@ -47,8 +47,9 @@ except ImportError:  # pragma: no cover
     sys.exit(1)
 
 
-ROOT          = pathlib.Path(__file__).resolve().parent.parent
-BASELINE_ROOT = ROOT / "bench" / "baselines"
+HERE          = pathlib.Path(__file__).resolve().parent
+ROOT          = HERE.parent.parent          # repo root (../.. from tests/bench/)
+BASELINE_ROOT = HERE / "baselines"
 
 # Output line from BENCH_RUN: <name> <iters> iters <ns> ns/iter
 # (whitespace-tolerant).

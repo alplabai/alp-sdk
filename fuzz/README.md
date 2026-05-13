@@ -88,7 +88,7 @@ canonical `alp_fuzz_<name>` naming OSS-Fuzz scrapers expect.
 
 ## See also
 
-- [`bench/`](../bench/) -- the microbench suite, the other half
+- [`tests/bench/`](../tests/bench/) -- the microbench suite, the other half
   of the v1.0 hardening prep (task #15).
 - [`VERSIONS.md`](../VERSIONS.md) -- v1.0 deliverables.
 - [`docs/cc3501e-bridge.md`](../docs/cc3501e-bridge.md) -- the

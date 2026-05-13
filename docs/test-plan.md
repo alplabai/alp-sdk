@@ -173,7 +173,7 @@ been green on `main` for at least two consecutive PRs.
 ## Anti-checklist (things NOT verified by this doc)
 
 - **Performance numbers** -- this doc is correctness only.  Throughput,
-  jitter, and RAM/flash footprints live in `bench/` and produce their
+  jitter, and RAM/flash footprints live in `tests/bench/` and produce their
   own captures.
 - **Security audit** -- "no obvious vulnerabilities" is not on the
   list.  Coverity + the v1.0 prep cycle's external audit handle that.

@@ -49,7 +49,7 @@ It does **not** prove:
 - Any peripheral works against real silicon.  That's HIL territory
   (see `docs/test-plan.md`; ⏳ / 🟡 rows gate on the `hil-yocto`
   + `nightly-aen-hil` runners).
-- Performance or memory budgets.  See `bench/` for those.
+- Performance or memory budgets.  See `tests/bench/` for those.
 
 ---
 

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# bench/ -- microbenchmark suite for the ALP SDK public surface.
+# tests/bench/ -- microbenchmark suite for the ALP SDK public surface.
 # Opt-in via ALP_BUILD_BENCH=ON at the top-level cmake configure.
-# See bench/README.md for the design + how to add new cases.
+# See tests/bench/README.md for the design + how to add new cases.
 #
 # v0.3 ships three suites (peripheral, inference, status); v1.0
 # fills the rest.  The suite is plain-CMake only today -- a
@@ -11,7 +11,7 @@
 
 if(NOT TARGET alp_sdk)
     message(FATAL_ERROR
-        "bench/CMakeLists.txt expects the alp_sdk target to be defined "
+        "tests/bench/CMakeLists.txt expects the alp_sdk target to be defined "
         "by the top-level CMakeLists.txt (plain-CMake mode only).")
 endif()
 

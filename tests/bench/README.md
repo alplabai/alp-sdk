@@ -1,4 +1,4 @@
-# bench/ -- ALP SDK microbenchmarks
+# tests/bench/ -- ALP SDK microbenchmarks
 
 Scaffolding for the v1.0 performance baseline.  Each public API
 class in `<alp/...>` gets a small microbenchmark suite that prints
@@ -50,7 +50,7 @@ Opt-in via the top-level CMake option `ALP_BUILD_BENCH=ON`:
 ```bash
 cmake -B build -DALP_OS=yocto -DALP_BUILD_BENCH=ON
 cmake --build build --target alp_bench
-./build/bench/alp_bench
+./build/tests/bench/alp_bench
 ```
 
 The binary prints one line per case:
@@ -63,9 +63,9 @@ alp_last_error                           1000000 iters        2 ns/iter
 
 ## Adding new bench cases
 
-1. Create `bench/bench_<api>.c` with one `void bench_<api>_main(void)`
+1. Create `tests/bench/bench_<api>.c` with one `void bench_<api>_main(void)`
    entry that runs a handful of `BENCH_RUN` invocations.
-2. Add the source to `bench/CMakeLists.txt`'s `target_sources`.
+2. Add the source to `tests/bench/CMakeLists.txt`'s `target_sources`.
 3. Forward-declare + call `bench_<api>_main()` from `bench_main.c`.
 
 Each case picks an iteration count that runs in ~50-500 ms wall
@@ -77,12 +77,12 @@ gate; nanosecond noise is fine.
 
 v1.0 wires a `pr-bench.yml` workflow that runs `alp_bench` against
 the PR's HEAD and `main`'s latest, then flags >10 % per-case
-regressions.  Today the bench/ directory is opt-in only -- no CI
+regressions.  Today the tests/bench/ directory is opt-in only -- no CI
 runs it.
 
 ## See also
 
-- [`fuzz/`](../fuzz/) -- the libFuzzer harness suite, the other
+- [`fuzz/`](../../fuzz/) -- the libFuzzer harness suite, the other
   half of the v1.0 hardening prep (task #15).
-- [`VERSIONS.md`](../VERSIONS.md) -- v1.0 milestone deliverables,
+- [`VERSIONS.md`](../../VERSIONS.md) -- v1.0 milestone deliverables,
   including "Performance baselines per chip in metadata."
