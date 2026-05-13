@@ -46,14 +46,19 @@ SECTIONS
 
     /* Cortex-M vector table.  First word is the initial stack-pointer
      * value, second word is the Reset_Handler address.  The vendor's
-     * `startup_gd32g5x3.S` emits the table into `.vectors`. */
+     * `startup_gd32g5x3.S` emits the table into `.vectors`.
+     *
+     * The vendor reference LD additionally emits `__Vectors_End` /
+     * `__Vectors_Size` symbols derived from the assembly-side
+     * `__gVectors` label.  We omit those here so the same LD links
+     * the stub backend (which never pulls in `startup_gd32g5x3.S`
+     * and therefore has no `__gVectors` to subtract from).  Nothing
+     * in the firmware tree consumes the diagnostic symbols. */
     .vectors :
     {
         . = ALIGN(4);
         KEEP(*(.vectors))
         . = ALIGN(4);
-        __Vectors_End  = .;
-        __Vectors_Size = __Vectors_End - __gVectors;
     } > FLASH
 
     .text :
