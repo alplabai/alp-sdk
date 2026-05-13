@@ -796,6 +796,33 @@ that lands before the v0.3.0 tag.)
 
 ### Added (2026-05-13)
 
+- **`gd32-bridge/hal/bridge_hw_gd32.c` -- GD32G5x3 backend skeleton
+  (2026-05-13).**  Selected by `BRIDGE_HAL_BACKEND=gd32` in
+  `gd32-bridge/CMakeLists.txt`.  Links against the existing
+  `vendors/gd32_firmware_library/upstream/` git submodule (verbatim
+  mirror of GD's v1.5.0 archive at
+  `https://github.com/alplabai/gd32g5x3-firmware-library`).  Every
+  hook is a `BRIDGE_HW_ERR_NOTIMPL` stub today -- functionally
+  identical to `bridge_hw_stub.c` -- so the `BRIDGE_HAL_BACKEND=gd32`
+  build path is exercisable end-to-end without changing anything
+  else.  The file's top comment enumerates the 18-step implementation
+  order subsequent commits will follow, in increasing complexity:
+  RESET_REASON / GPIO / TRNG / TMU / DAC first; PWM / ADC streaming /
+  DSP-chain / power-mode last.  Each follow-up replaces one hook's
+  stub body with a real implementation against the GigaDevice
+  library and updates the top comment + CHANGELOG.
+
+  Also adds `gd32-bridge/hal/gd32g5x3_libopt.h` -- gd32-bridge's
+  project-level standard-peripheral selector that `gd32g5x3.h`
+  transitively `#include`s (mirrors the per-example libopt.h
+  convention used throughout the vendor archive).  Today it pulls in
+  every peripheral header the eventual real-hook implementations will
+  reference (RCU / GPIO / TIMER / ADC / DAC / DMA / TMU / FFT / FAC /
+  TRNG / SPI / I2C / USART / FMC / RTC / watchdog).  `-ffunction-
+  sections -fdata-sections -Wl,--gc-sections` drop the unreferenced
+  symbols at link time so the today-NOTIMPL stub backend's binary
+  stays small.
+
 - **GD32 firmware-side dispatch + HAL hooks for every v0.5 opcode
   (2026-05-13).**  Closes the "remaining gating dep" flagged in the
   prior burst memory: every v0.5 opcode (`0x23`..`0x28` advanced
