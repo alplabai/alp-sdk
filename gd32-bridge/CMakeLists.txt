@@ -61,6 +61,17 @@ elseif(BRIDGE_HAL_BACKEND STREQUAL "gd32")
             "tree (the wrapper README documents the manual SDK drop).")
     endif()
     add_subdirectory(${_GD32_VENDOR_DIR} ${CMAKE_BINARY_DIR}/vendors/gd32_firmware_library)
+    # gd32g5x3.h #error-guards on the device-family macro; pick
+    # GD32G553 since the V2N's supervisor is the GD32G553MEY7TR.
+    # The vendor archive also accepts GD32G533 for the smaller
+    # part-family variant.  PUBLIC so consumers of the library
+    # (chiefly the gd32-bridge executable below) also see it.
+    target_compile_definitions(gd32_firmware_library PUBLIC GD32G553)
+    # Make the project's libopt.h selector visible to the vendor
+    # library's own .c sources -- gd32g5x3.h transitively includes
+    # gd32g5x3_libopt.h, and the vendor library's compile units
+    # don't have `hal/` on their include path otherwise.
+    target_include_directories(gd32_firmware_library PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/hal)
 else()
     message(FATAL_ERROR "Unknown BRIDGE_HAL_BACKEND='${BRIDGE_HAL_BACKEND}' (expected: stub | gd32).")
 endif()
@@ -116,12 +127,21 @@ target_link_options(gd32-bridge PRIVATE
 # evidently can't resolve for executables on CMAKE_SYSTEM_NAME=Generic
 # without a CMAKE_EXECUTABLE_SUFFIX hint; pre-computing the path
 # sidesteps it entirely.
-set(_GD32_BRIDGE_BIN ${CMAKE_BINARY_DIR}/gd32-bridge)
-add_custom_command(TARGET gd32-bridge POST_BUILD
-    COMMAND ${CMAKE_OBJCOPY} -O ihex   ${_GD32_BRIDGE_BIN} ${_GD32_BRIDGE_BIN}.hex
-    COMMAND ${CMAKE_OBJCOPY} -O binary ${_GD32_BRIDGE_BIN} ${_GD32_BRIDGE_BIN}.bin
-    BYPRODUCTS ${_GD32_BRIDGE_BIN}.hex ${_GD32_BRIDGE_BIN}.bin
-)
+#
+# Gate on BRIDGE_HAL_BACKEND=gd32 because the stub backend doesn't
+# ship a startup file (no Reset_Handler symbol), so the linker
+# emits an empty binary with no sections.  objcopy refuses to
+# process a sectionless file and the build fails.  The stub backend
+# is for protocol-layer compile validation only -- the .elf isn't
+# runnable, so .hex/.bin emission is a no-op for it.
+if(BRIDGE_HAL_BACKEND STREQUAL "gd32")
+    set(_GD32_BRIDGE_BIN ${CMAKE_BINARY_DIR}/gd32-bridge)
+    add_custom_command(TARGET gd32-bridge POST_BUILD
+        COMMAND ${CMAKE_OBJCOPY} -O ihex   ${_GD32_BRIDGE_BIN} ${_GD32_BRIDGE_BIN}.hex
+        COMMAND ${CMAKE_OBJCOPY} -O binary ${_GD32_BRIDGE_BIN} ${_GD32_BRIDGE_BIN}.bin
+        BYPRODUCTS ${_GD32_BRIDGE_BIN}.hex ${_GD32_BRIDGE_BIN}.bin
+    )
+endif()
 
 # ----------------------------------------------------------------- #
 # Build-id stamping (truncated SHA-1 of the ELF).                    #
