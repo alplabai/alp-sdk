@@ -34,7 +34,8 @@
  *   5. DAC_SET / GET         -- DONE: channel 0 -> DAC0_OUT0 / PA4,
  *                               channel 1 -> DAC1_OUT0 / PA6, mV<->12-bit
  *                               code at VREF=1800mV (V2N analog supply).
- *   6. PWM_SET / GET         -- TIMER0 / TIMER7 advanced PWM.
+ *   6. PWM_SET / GET         -- DONE: 8 channels across TIMER0 + TIMER7
+ *                               at 1 us LSB; pin AFs per datasheet Rev2.0.
  *   7. PWM_CONFIGURE         -- align mode, dead-time, break input.
  *   8. ADC_READ              -- single-channel polling.
  *   9. ADC_CONFIGURE         -- oversample / sample-cycles / resolution.
@@ -252,6 +253,122 @@ static uint32_t f32_to_bits(float f)
 }
 
 /* ----------------------------------------------------------------- */
+/* PWM channels (TIMER0 + TIMER7).                                    */
+/* ----------------------------------------------------------------- */
+
+/* E1M PWM channel -> GD32 (timer, channel, output kind, pad, AF).
+ * Sourced from `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv` for the
+ * pad column; AF + timer-channel from the GD32G553xx Datasheet Rev2.0
+ * Tables 2-10..2-13 (pin alternate-function summary).
+ *
+ *   PWM0  PA11  TIMER0_CH3  (main)        AF10
+ *   PWM1  PB1   TIMER0_CH2N (complement.) AF6
+ *   PWM2  PB14  TIMER0_CH1N (complement.) AF6
+ *   PWM3  PC5   TIMER0_CH3N (complement.) AF6
+ *   PWM4  PC10  TIMER7_CH0N               AF5
+ *   PWM5  PC11  TIMER7_CH1N               AF5
+ *   PWM6  PC12  TIMER7_CH2N               AF5
+ *   PWM7  PD0   TIMER7_CH3N               AF5
+ *
+ * Note that PWM0 and PWM3 sit on the two outputs of TIMER0 channel
+ * 3 (main + complementary).  They share the channel's compare
+ * register -- their duty cycles are mechanically inverse and cannot
+ * be set independently.  Likely intentional on V2N (half-bridge
+ * pair) but documented here so future host-side code doesn't expect
+ * fully independent control.
+ *
+ * Periods are SHARED across all PWMs of the same timer (TIMER0:
+ * PWM0..3; TIMER7: PWM4..7) because each TIMER has one ARR.  The
+ * per-channel `bridge_hw_pwm_set` body updates the timer's ARR every
+ * call -- last write wins.  In typical V2N use the host sets the
+ * same period across each group so this doesn't surface. */
+
+typedef struct {
+    uint32_t periph;    /* TIMER0 or TIMER7 base                          */
+    uint16_t channel;   /* TIMER_CH_0..TIMER_CH_3                          */
+    bool     complement; /* true: drive complementary output, false: main */
+    uint32_t gpio_port; /* GPIOA..GPIOF                                    */
+    uint32_t gpio_pin;  /* GPIO_PIN_n                                     */
+    uint32_t gpio_af;   /* GPIO_AF_X                                      */
+} gd32_pwm_ch_t;
+
+static const gd32_pwm_ch_t pwm_channels[] = {
+    [0] = { TIMER0, TIMER_CH_3, false, GPIOA, GPIO_PIN_11, GPIO_AF_10 },
+    [1] = { TIMER0, TIMER_CH_2, true,  GPIOB, GPIO_PIN_1,  GPIO_AF_6 },
+    [2] = { TIMER0, TIMER_CH_1, true,  GPIOB, GPIO_PIN_14, GPIO_AF_6 },
+    [3] = { TIMER0, TIMER_CH_3, true,  GPIOC, GPIO_PIN_5,  GPIO_AF_6 },
+    [4] = { TIMER7, TIMER_CH_0, true,  GPIOC, GPIO_PIN_10, GPIO_AF_5 },
+    [5] = { TIMER7, TIMER_CH_1, true,  GPIOC, GPIO_PIN_11, GPIO_AF_5 },
+    [6] = { TIMER7, TIMER_CH_2, true,  GPIOC, GPIO_PIN_12, GPIO_AF_5 },
+    [7] = { TIMER7, TIMER_CH_3, true,  GPIOD, GPIO_PIN_0,  GPIO_AF_5 },
+};
+#define PWM_CHANNEL_COUNT (sizeof(pwm_channels) / sizeof(pwm_channels[0]))
+
+/* TIMER core clock.  GD32G553's stock SystemInit() clocks the
+ * advanced timers from the APB-derived TIMER clock; on the chip's
+ * default 240 MHz config that's 240 MHz at the timer counter input.
+ * 1 ns LSB resolution would need a 240x faster counter; we instead
+ * round period_ns + duty_ns to the nearest 1 us cycle by fixing the
+ * prescaler at (240 - 1) so the counter ticks at 1 MHz.  ARR is
+ * then `period_us - 1`, fitting in 16 bits for periods up to ~65 ms
+ * which covers every realistic control PWM frequency (>=15 Hz). */
+#define PWM_TIMER_CLK_HZ      240000000u
+#define PWM_TIMER_PRESCALER   (240u - 1u)        /* 240 MHz -> 1 MHz tick    */
+#define PWM_TIMER_TICK_NS     1000u              /* 1 us per timer tick      */
+#define PWM_TIMER_ARR_MAX     0xFFFFu            /* 16-bit auto-reload limit */
+
+/* Last-set cache for bridge_hw_pwm_get.  Reading back the timer's
+ * compare register would also work but the caller is interested in
+ * "what did I ask for", not "what does the rounded-to-1us value
+ * round-trip to". */
+static uint32_t pwm_period_ns_cache[PWM_CHANNEL_COUNT];
+static uint32_t pwm_duty_ns_cache[PWM_CHANNEL_COUNT];
+
+/* Per-timer init.  Called once per peripheral from bridge_hw_init();
+ * Advanced timers need timer_primary_output_config(ENABLE) before any
+ * output pin actually drives (vs basic timers, where the channel
+ * enable is sufficient). */
+static void pwm_timer_init(uint32_t periph)
+{
+    timer_parameter_struct ip;
+    timer_struct_para_init(&ip);
+    ip.prescaler         = (uint16_t)PWM_TIMER_PRESCALER;
+    ip.alignedmode       = TIMER_COUNTER_EDGE;
+    ip.counterdirection  = TIMER_COUNTER_UP;
+    ip.period            = PWM_TIMER_ARR_MAX; /* 65.5 ms default; per-set */
+    ip.clockdivision     = TIMER_CKDIV_DIV1;
+    ip.repetitioncounter = 0u;
+    timer_deinit(periph);
+    timer_init(periph, &ip);
+    timer_primary_output_config(periph, ENABLE);
+    timer_enable(periph);
+}
+
+/* Per-channel init.  Sets PWM mode 0 (output high while counter <
+ * compare) and 0 duty -- HW pad sits low until the host issues a
+ * bridge_hw_pwm_set with a non-zero duty. */
+static void pwm_channel_init(const gd32_pwm_ch_t *ch)
+{
+    timer_oc_parameter_struct oc;
+    timer_channel_output_struct_para_init(&oc);
+    if (ch->complement) {
+        oc.outputstate  = TIMER_CCX_DISABLE;
+        oc.outputnstate = TIMER_CCXN_ENABLE;
+    } else {
+        oc.outputstate  = TIMER_CCX_ENABLE;
+        oc.outputnstate = TIMER_CCXN_DISABLE;
+    }
+    oc.ocpolarity   = TIMER_OC_POLARITY_HIGH;
+    oc.ocnpolarity  = TIMER_OCN_POLARITY_HIGH;
+    oc.ocidlestate  = TIMER_OC_IDLE_STATE_LOW;
+    oc.ocnidlestate = TIMER_OCN_IDLE_STATE_LOW;
+    timer_channel_output_config(ch->periph, ch->channel, &oc);
+    timer_channel_output_pulse_value_config(ch->periph, ch->channel, 0u);
+    timer_channel_output_mode_config(ch->periph, ch->channel, TIMER_OC_MODE_PWM0);
+    timer_channel_output_shadow_config(ch->periph, ch->channel, TIMER_OC_SHADOW_DISABLE);
+}
+
+/* ----------------------------------------------------------------- */
 /* DAC channels.                                                      */
 /* ----------------------------------------------------------------- */
 
@@ -350,6 +467,25 @@ void bridge_hw_init(void)
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CYCCNT = 0u;
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
+    /* PWM bring-up: configure the 8 PWM pads as alt-function outputs,
+     * enable TIMER0 + TIMER7 clocks, run the per-timer + per-channel
+     * init.  After this the timers are running at 1 us tick with 0%
+     * duty on every channel; bridge_hw_pwm_set programs both the
+     * channel compare register and the timer ARR per call. */
+    for (size_t i = 0; i < PWM_CHANNEL_COUNT; ++i) {
+        const gd32_pwm_ch_t *ch = &pwm_channels[i];
+        gpio_mode_set(ch->gpio_port, GPIO_MODE_AF, GPIO_PUPD_NONE, ch->gpio_pin);
+        gpio_output_options_set(ch->gpio_port, GPIO_OTYPE_PP, GPIO_OSPEED_12MHZ, ch->gpio_pin);
+        gpio_af_set(ch->gpio_port, ch->gpio_af, ch->gpio_pin);
+    }
+    rcu_periph_clock_enable(RCU_TIMER0);
+    rcu_periph_clock_enable(RCU_TIMER7);
+    pwm_timer_init(TIMER0);
+    pwm_timer_init(TIMER7);
+    for (size_t i = 0; i < PWM_CHANNEL_COUNT; ++i) {
+        pwm_channel_init(&pwm_channels[i]);
+    }
 }
 
 /* Called from the SysTick handler (or the main loop's idle path)
@@ -459,18 +595,43 @@ int bridge_hw_gpio_write(uint32_t mask, uint32_t levels)
 
 int bridge_hw_pwm_set(uint8_t channel, uint32_t period_ns, uint32_t duty_ns)
 {
-    (void)channel;
-    (void)period_ns;
-    (void)duty_ns;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+    if (duty_ns > period_ns) return BRIDGE_HW_ERR_INVAL;
+
+    /* Round period + duty to whole microseconds (the timer tick).
+     * `period_us` must fit in 16 bits (ARR) -- caller is responsible
+     * for staying under ~65 ms; we clamp on over-range so the timer
+     * doesn't get an invalid value. */
+    uint32_t period_us = period_ns / PWM_TIMER_TICK_NS;
+    uint32_t duty_us   = duty_ns / PWM_TIMER_TICK_NS;
+    if (period_us == 0u) return BRIDGE_HW_ERR_RANGE;
+    if (period_us > PWM_TIMER_ARR_MAX + 1u) period_us = PWM_TIMER_ARR_MAX + 1u;
+    if (duty_us > period_us) duty_us = period_us;
+
+    const gd32_pwm_ch_t *ch = &pwm_channels[channel];
+
+    /* ARR is "period_us - 1" because the up-counter counts 0..ARR
+     * inclusive (period_us ticks total).  Updates ALL channels of
+     * the same timer -- the contract documents this constraint. */
+    timer_autoreload_value_config(ch->periph, (uint32_t)(period_us - 1u));
+    timer_channel_output_pulse_value_config(ch->periph, ch->channel, duty_us);
+
+    /* Cache the host's request for read-back.  The HW reality is
+     * shared-period; the cache keeps per-channel intent. */
+    pwm_period_ns_cache[channel] = period_ns;
+    pwm_duty_ns_cache[channel]   = duty_ns;
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_pwm_get(uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns)
 {
-    (void)channel;
-    if (period_ns != 0) *period_ns = 0u;
-    if (duty_ns != 0) *duty_ns = 0u;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (period_ns == 0 || duty_ns == 0) return BRIDGE_HW_ERR_INVAL;
+    *period_ns = 0u;
+    *duty_ns   = 0u;
+    if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+    *period_ns = pwm_period_ns_cache[channel];
+    *duty_ns   = pwm_duty_ns_cache[channel];
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)

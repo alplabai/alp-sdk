@@ -219,6 +219,41 @@ that lands before the v0.3.0 tag.)
   `STATUS_NOSUPPORT` to `STATUS_OK` on the gd32 backend.
   No protocol or ABI change.
 
+- **`bridge_hw_pwm_set` / `bridge_hw_pwm_get` -> 8 PWM channels
+  on TIMER0 + TIMER7 (2026-05-13).**  Seventh of the 18 HAL
+  bodies.  Pin alt-functions sourced from GD32G553xx Datasheet
+  Rev2.0 (Tables 2-10..2-13, pin alternate-function summary):
+    - PWM0  PA11  TIMER0_CH3  (main)        AF10
+    - PWM1  PB1   TIMER0_CH2N (complement.) AF6
+    - PWM2  PB14  TIMER0_CH1N (complement.) AF6
+    - PWM3  PC5   TIMER0_CH3N (complement.) AF6
+    - PWM4  PC10  TIMER7_CH0N               AF5
+    - PWM5  PC11  TIMER7_CH1N               AF5
+    - PWM6  PC12  TIMER7_CH2N               AF5
+    - PWM7  PD0   TIMER7_CH3N               AF5
+  Timer prescaler fixed at 240-1 -> 1 us tick at the GD32G553's
+  240 MHz timer-input clock, giving a 1 us LSB and ~65 ms max
+  period (16-bit ARR).  Per-set body updates the timer's ARR
+  (period) and the channel's compare (duty), so the period is
+  rounded to whole microseconds.  Cache stores the host's exact
+  ns request so `bridge_hw_pwm_get` round-trips without rounding
+  loss on the read side.
+
+  Two known constraints documented in the source:
+    1. PWM0 and PWM3 share TIMER0 channel 3 (one main, one
+       complementary) -- their duties are mechanically inverse
+       and cannot be independently programmed.  Likely
+       intentional on V2N (half-bridge pair) but the host should
+       be aware.
+    2. PWM0..3 share TIMER0's single ARR; PWM4..7 share TIMER7's.
+       Setting a different period on two channels of the same
+       timer is last-write-wins.  In typical use the host sets a
+       uniform period per group so this doesn't surface.
+
+  Wire opcodes `CMD_PWM_SET` (0x20) and `CMD_PWM_GET` (0x21)
+  flip from `STATUS_NOSUPPORT` to `STATUS_OK` on the gd32
+  backend.  No protocol or ABI change.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
