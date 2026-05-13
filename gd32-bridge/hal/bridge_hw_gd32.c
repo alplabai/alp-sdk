@@ -37,7 +37,8 @@
  *   6. PWM_SET / GET         -- DONE: 8 channels across TIMER0 + TIMER7
  *                               at 1 us LSB; pin AFs per datasheet Rev2.0.
  *   7. PWM_CONFIGURE         -- align mode, dead-time, break input.
- *   8. ADC_READ              -- single-channel polling.
+ *   8. ADC_READ              -- DONE: 8-pad map across ADC0..3, single-
+ *                               shot polling, mV<->code at VREF=1800mV.
  *   9. ADC_CONFIGURE         -- oversample / sample-cycles / resolution.
  *   10. ADC_STREAM_*         -- DMA0/1 backed continuous acquisition.
  *   11. QENC_READ / RESET    -- TIMER encoder mode.
@@ -250,6 +251,71 @@ static uint32_t f32_to_bits(float f)
     uint32_t b;
     __builtin_memcpy(&b, &f, sizeof b);
     return b;
+}
+
+/* ----------------------------------------------------------------- */
+/* ADC channels.                                                      */
+/* ----------------------------------------------------------------- */
+
+/* E1M ADC0..7 -> (ADC peripheral, channel index, pad).  Sourced from
+ * maintainer-confirmed `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`
+ * with channel + peripheral assignments cross-checked against the
+ * GD32G553xx datasheet pin alt-function summary:
+ *
+ *   E1M ADC0  PD9   ADC3  CH12
+ *   E1M ADC1  PB12  ADC3  CH2
+ *   E1M ADC2  PE13  ADC2  CH2
+ *   E1M ADC3  PE11  ADC2  CH13
+ *   E1M ADC4  PC4   ADC1  CH4
+ *   E1M ADC5  PA5   ADC1  CH12
+ *   E1M ADC6  PA2   ADC0  CH2
+ *   E1M ADC7  PA3   ADC0  CH3
+ *
+ * All four ADC peripherals carry two of the eight channels; the
+ * init loop brings up each ADC once and the read body reconfigures
+ * the routine channel + triggers a single conversion on demand. */
+
+typedef struct {
+    uint32_t periph;    /* ADC0..ADC3 base                            */
+    uint8_t  channel;   /* ADC_CHANNEL_n                              */
+    uint32_t gpio_port; /* GPIOA..GPIOF                               */
+    uint32_t gpio_pin;  /* GPIO_PIN_n                                 */
+} gd32_adc_ch_t;
+
+static const gd32_adc_ch_t adc_channels_map[] = {
+    [0] = { ADC3, ADC_CHANNEL_12, GPIOD, GPIO_PIN_9 },
+    [1] = { ADC3, ADC_CHANNEL_2, GPIOB, GPIO_PIN_12 },
+    [2] = { ADC2, ADC_CHANNEL_2, GPIOE, GPIO_PIN_13 },
+    [3] = { ADC2, ADC_CHANNEL_13, GPIOE, GPIO_PIN_11 },
+    [4] = { ADC1, ADC_CHANNEL_4, GPIOC, GPIO_PIN_4 },
+    [5] = { ADC1, ADC_CHANNEL_12, GPIOA, GPIO_PIN_5 },
+    [6] = { ADC0, ADC_CHANNEL_2, GPIOA, GPIO_PIN_2 },
+    [7] = { ADC0, ADC_CHANNEL_3, GPIOA, GPIO_PIN_3 },
+};
+#define ADC_CHANNEL_MAP_COUNT (sizeof(adc_channels_map) / sizeof(adc_channels_map[0]))
+
+/* VREF for the ADC's 12-bit right-aligned code -> millivolt
+ * conversion.  V2N's analog supply is 1.8 V (maintainer-confirmed
+ * the same rail used by DAC_VREF_MV).  Full-scale is 4095 codes. */
+#define ADC_VREF_MV    1800u
+#define ADC_FULL_SCALE 4095u
+
+/* Default sample time used for single-shot reads.  240 cycles is
+ * the most conservative setting in the vendor's range -- gives the
+ * external source plenty of settling time for a high-impedance
+ * input divider, at the cost of slower conversion (~1 us per
+ * sample at ADC_CLK_SYNC_HCLK_DIV6 with HCLK=240 MHz: 240 ADCCK
+ * sample + 12.5 ADCCK conversion ~= 6.3 us). */
+#define ADC_DEFAULT_SAMPLE_CYCLES 240u
+
+static void adc_periph_init(uint32_t periph)
+{
+    adc_deinit(periph);
+    adc_clock_config(periph, ADC_CLK_SYNC_HCLK_DIV6);
+    adc_data_alignment_config(periph, ADC_DATAALIGN_RIGHT);
+    adc_channel_length_config(periph, ADC_ROUTINE_CHANNEL, 1u);
+    adc_external_trigger_config(periph, ADC_ROUTINE_CHANNEL, EXTERNAL_TRIGGER_DISABLE);
+    adc_enable(periph);
 }
 
 /* ----------------------------------------------------------------- */
@@ -484,6 +550,25 @@ void bridge_hw_init(void)
     for (size_t i = 0; i < PWM_CHANNEL_COUNT; ++i) {
         pwm_channel_init(&pwm_channels[i]);
     }
+
+    /* ADC bring-up: configure 8 pads as analog, enable all four ADC
+     * peripheral clocks, run the per-peripheral init.  No calibration
+     * pass here -- it needs a millisecond settling delay after
+     * adc_enable() and the bridge boot has no SysTick yet.  A
+     * follow-up commit can add calibration once a delay primitive
+     * lands. */
+    for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
+        gpio_mode_set(adc_channels_map[i].gpio_port, GPIO_MODE_ANALOG, GPIO_PUPD_NONE,
+                      adc_channels_map[i].gpio_pin);
+    }
+    rcu_periph_clock_enable(RCU_ADC0);
+    rcu_periph_clock_enable(RCU_ADC1);
+    rcu_periph_clock_enable(RCU_ADC2);
+    rcu_periph_clock_enable(RCU_ADC3);
+    adc_periph_init(ADC0);
+    adc_periph_init(ADC1);
+    adc_periph_init(ADC2);
+    adc_periph_init(ADC3);
 }
 
 /* Called from the SysTick handler (or the main loop's idle path)
@@ -634,11 +719,34 @@ int bridge_hw_pwm_get(uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns)
 
 int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
 {
-    (void)channel;
-    for (uint8_t i = 0; i < samples && mv != 0; ++i) {
-        mv[i] = 0u;
+    if (mv == 0) return BRIDGE_HW_ERR_INVAL;
+    if (samples == 0u) return BRIDGE_HW_ERR_INVAL;
+    if (channel >= ADC_CHANNEL_MAP_COUNT) return BRIDGE_HW_ERR_RANGE;
+
+    const gd32_adc_ch_t *ch = &adc_channels_map[channel];
+
+    /* Configure the routine channel for this op (each call re-applies
+     * because multiple bridge channels can share an ADC peripheral -- a
+     * prior bridge_hw_adc_read on a different bridge channel may have
+     * pointed the routine slot elsewhere). */
+    adc_routine_channel_config(ch->periph, 0u, ch->channel, ADC_DEFAULT_SAMPLE_CYCLES);
+
+    /* Take `samples` consecutive conversions, software-triggered per
+     * sample.  Polled EOC.  No timeout -- if the ADC is wedged the
+     * SysTick watchdog (when it ships) catches it; in the steady-state
+     * a 12-bit conversion at HCLK/6 finishes in ~6 us so the spin is
+     * brief. */
+    for (uint8_t i = 0; i < samples; ++i) {
+        adc_software_trigger_enable(ch->periph, ADC_ROUTINE_CHANNEL);
+        while (!adc_flag_get(ch->periph, ADC_FLAG_EOC)) {
+            /* spin */
+        }
+        adc_flag_clear(ch->periph, ADC_FLAG_EOC);
+        uint32_t code = adc_routine_data_read(ch->periph);
+        if (code > ADC_FULL_SCALE) code = ADC_FULL_SCALE;
+        mv[i] = (uint16_t)((code * ADC_VREF_MV) / ADC_FULL_SCALE);
     }
-    return BRIDGE_HW_ERR_NOTIMPL;
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_pwm_configure(uint8_t channel, uint8_t align_mode, uint32_t dead_time_ns,

@@ -252,6 +252,40 @@ that lands before the v0.3.0 tag.)
   flip from `STATUS_NOSUPPORT` to `STATUS_OK` on the gd32
   backend.  No protocol or ABI change.
 
+- **`bridge_hw_adc_read` -> single-shot polling read across
+  ADC0..3 (2026-05-13).**  Eighth of the 18 HAL bodies.  Maps
+  the 8 E1M ADC channels per maintainer-confirmed table:
+    - E1M ADC0  PD9   ADC3  CH12
+    - E1M ADC1  PB12  ADC3  CH2
+    - E1M ADC2  PE13  ADC2  CH2
+    - E1M ADC3  PE11  ADC2  CH13
+    - E1M ADC4  PC4   ADC1  CH4
+    - E1M ADC5  PA5   ADC1  CH12
+    - E1M ADC6  PA2   ADC0  CH2
+    - E1M ADC7  PA3   ADC0  CH3
+  `bridge_hw_init()` configures all 8 pads as analog, enables
+  `RCU_ADC0..3`, runs the per-peripheral init (deinit ->
+  HCLK/6 clock -> right-align -> length=1 -> external trigger
+  disable -> enable).  Calibration intentionally skipped --
+  it needs a millisecond settling delay after enable() and
+  the bridge boot has no SysTick yet; a follow-up commit can
+  add it once a delay primitive lands.
+
+  `bridge_hw_adc_read(channel, samples, mv)`: reconfigures
+  the ADC's routine slot for the requested channel + 240-cycle
+  sample time, then loops software-trigger + poll-EOC +
+  read-data per sample.  Raw 12-bit code converted to mV at
+  VREF=1800 (matches DAC_VREF_MV).  No timeout on the EOC
+  poll -- 12-bit conversion at HCLK/6 finishes in ~6 us so a
+  hung ADC would hang the bridge, which a future SysTick
+  watchdog can catch.
+
+  `bridge_hw_adc_configure` + the `bridge_hw_adc_stream_*`
+  family stay NOSUPPORT pending follow-up commits.  Wire
+  opcode `CMD_ADC_READ` (0x30) flips from `STATUS_NOSUPPORT`
+  to `STATUS_OK` on the gd32 backend.  No protocol or ABI
+  change.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
