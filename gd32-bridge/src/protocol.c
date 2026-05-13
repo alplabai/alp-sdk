@@ -501,6 +501,187 @@ static gd32_bridge_status_t handle_tmu_compute(const uint8_t *req, size_t req_le
     return STATUS_OK;
 }
 
+/* ----------------------------------------------------------------- */
+/* v0.5 (§2B.2) -- advanced timer extras                              */
+/*                                                                    */
+/* Wire frames per docs/gd32-bridge-protocol.md §3.y.  Every handler  */
+/* validates the request payload length, calls into the HAL hook,    */
+/* and maps the BRIDGE_HW_ERR_* return into the on-wire STATUS_*     */
+/* code.  Today bridge_hw_stub.c returns BRIDGE_HW_ERR_NOTIMPL for   */
+/* all of these -- which protocol_dispatch maps to STATUS_NOSUPPORT  */
+/* on the wire -- so host code sees a precise NOSUPPORT contract     */
+/* until the real bridge_hw_gd32.c bodies land alongside the         */
+/* GigaDevice firmware library pull.                                  */
+/* ----------------------------------------------------------------- */
+
+/* Translate a BRIDGE_HW_ERR_* return into a STATUS_*.  Centralised so
+ * the new handler set has identical mapping. */
+static gd32_bridge_status_t status_from_hw(int rv)
+{
+    if (rv == BRIDGE_HW_OK)          return STATUS_OK;
+    if (rv == BRIDGE_HW_ERR_INVAL)   return STATUS_INVAL;
+    if (rv == BRIDGE_HW_ERR_RANGE)   return STATUS_OUT_OF_RANGE;
+    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    return STATUS_IO;
+}
+
+static gd32_bridge_status_t handle_pwm_capture_begin(const uint8_t *req, size_t req_len,
+                                                     uint8_t *reply, size_t reply_cap,
+                                                     size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 2u) return STATUS_INVAL;
+    if (req[1] > 2u) return STATUS_INVAL; /* edge ∈ {RISING, FALLING, BOTH} */
+    const int rv = bridge_hw_pwm_capture_begin(req[0], req[1]);
+    *reply_len   = 0u;
+    return status_from_hw(rv);
+}
+
+static gd32_bridge_status_t handle_pwm_capture_read(const uint8_t *req, size_t req_len,
+                                                    uint8_t *reply, size_t reply_cap,
+                                                    size_t *reply_len)
+{
+    if (req_len != 1u) return STATUS_INVAL;
+    if (reply_cap < 8u) return STATUS_NOMEM;
+    uint32_t period_ns = 0u;
+    uint32_t pulse_ns  = 0u;
+    const int rv = bridge_hw_pwm_capture_read(req[0], &period_ns, &pulse_ns);
+    const gd32_bridge_status_t s = status_from_hw(rv);
+    if (s != STATUS_OK) {
+        *reply_len = 0u;
+        return s;
+    }
+    put_le32(&reply[0], period_ns);
+    put_le32(&reply[4], pulse_ns);
+    *reply_len = 8u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_pwm_capture_end(const uint8_t *req, size_t req_len,
+                                                   uint8_t *reply, size_t reply_cap,
+                                                   size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 1u) return STATUS_INVAL;
+    const int rv = bridge_hw_pwm_capture_end(req[0]);
+    *reply_len   = 0u;
+    return status_from_hw(rv);
+}
+
+static gd32_bridge_status_t handle_pwm_single_pulse(const uint8_t *req, size_t req_len,
+                                                    uint8_t *reply, size_t reply_cap,
+                                                    size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 8u) return STATUS_INVAL;
+    /* req[1..3] are reserved padding -- ignored by the firmware so
+     * future-rev hosts can repurpose without an opcode bump. */
+    const uint32_t pulse_ns = get_le32(&req[4]);
+    if (pulse_ns == 0u) return STATUS_INVAL; /* zero-width pulse is a caller bug */
+    const int rv = bridge_hw_pwm_single_pulse(req[0], pulse_ns);
+    *reply_len   = 0u;
+    return status_from_hw(rv);
+}
+
+static gd32_bridge_status_t handle_timer_sync(const uint8_t *req, size_t req_len,
+                                              uint8_t *reply, size_t reply_cap,
+                                              size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 3u) return STATUS_INVAL;
+    const int rv = bridge_hw_timer_sync(req[0], req[1], req[2]);
+    *reply_len   = 0u;
+    return status_from_hw(rv);
+}
+
+/* ----------------------------------------------------------------- */
+/* v0.5 (§2B.3) -- system power-mode set                              */
+/* ----------------------------------------------------------------- */
+
+static gd32_bridge_status_t handle_power_mode_set(const uint8_t *req, size_t req_len,
+                                                  uint8_t *reply, size_t reply_cap,
+                                                  size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 10u) return STATUS_INVAL;
+    if (req[0] > 3u) return STATUS_INVAL; /* mode ∈ {RUN, SLEEP, DEEP_SLEEP, STANDBY} */
+    /* req[1] is reserved padding. */
+    const uint32_t wake_bitmap   = get_le32(&req[2]);
+    const uint32_t wake_after_ms = get_le32(&req[6]);
+    const int      rv = bridge_hw_power_mode_set(req[0], wake_bitmap, wake_after_ms);
+    *reply_len = 0u;
+    return status_from_hw(rv);
+}
+
+/* ----------------------------------------------------------------- */
+/* v0.5 (§2B wave-2) -- chunked DSP-chain upload                      */
+/*                                                                    */
+/* Wire frames per docs/gd32-bridge-protocol.md §3.x.                 */
+/* ----------------------------------------------------------------- */
+
+static gd32_bridge_status_t handle_adc_dsp_chain_open(const uint8_t *req, size_t req_len,
+                                                      uint8_t *reply, size_t reply_cap,
+                                                      size_t *reply_len)
+{
+    (void)req;
+    if (req_len != 0u) return STATUS_INVAL;
+    if (reply_cap < 1u) return STATUS_NOMEM;
+    uint8_t   chain_id = 0u;
+    const int rv = bridge_hw_adc_dsp_chain_open(&chain_id);
+    const gd32_bridge_status_t s = status_from_hw(rv);
+    if (s != STATUS_OK) {
+        *reply_len = 0u;
+        return s;
+    }
+    reply[0]   = chain_id;
+    *reply_len = 1u;
+    return STATUS_OK;
+}
+
+static gd32_bridge_status_t handle_adc_dsp_stage_push(const uint8_t *req, size_t req_len,
+                                                      uint8_t *reply, size_t reply_cap,
+                                                      size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    /* Header is 7 bytes: chain_id, stage_index, kind, chunk_offset:u16,
+     * chunk_total_size:u16.  chunk_data follows at req[7..req_len). */
+    if (req_len < 7u) return STATUS_INVAL;
+    if (req[2] > 3u) return STATUS_INVAL; /* kind ∈ {FIR, IIR, WINDOW, FFT} */
+    const uint8_t  chain_id    = req[0];
+    const uint8_t  stage_index = req[1];
+    const uint8_t  kind        = req[2];
+    const uint16_t chunk_offset =
+        (uint16_t)req[3] | ((uint16_t)req[4] << 8);
+    const uint16_t chunk_total_size =
+        (uint16_t)req[5] | ((uint16_t)req[6] << 8);
+    const size_t  chunk_data_len = req_len - 7u;
+    const uint8_t *chunk_data    = (chunk_data_len > 0u) ? &req[7] : (const uint8_t *)0;
+    /* Defence-in-depth: chunk_data + chunk_offset must stay within the
+     * declared chunk_total_size.  The host helper already enforces
+     * this, but firmware re-checks so a malformed wire request can't
+     * walk past the per-stage scratch buffer. */
+    if ((uint32_t)chunk_offset + (uint32_t)chunk_data_len > (uint32_t)chunk_total_size) {
+        return STATUS_OUT_OF_RANGE;
+    }
+    const int rv = bridge_hw_adc_dsp_stage_push(chain_id, stage_index, kind,
+                                                chunk_offset, chunk_total_size,
+                                                chunk_data, chunk_data_len);
+    *reply_len = 0u;
+    return status_from_hw(rv);
+}
+
+static gd32_bridge_status_t handle_adc_dsp_chain_bind(const uint8_t *req, size_t req_len,
+                                                      uint8_t *reply, size_t reply_cap,
+                                                      size_t *reply_len)
+{
+    (void)reply; (void)reply_cap;
+    if (req_len != 2u) return STATUS_INVAL;
+    if (req[1] >= GD32_BRIDGE_ADC_STREAM_COUNT) return STATUS_INVAL;
+    const int rv = bridge_hw_adc_dsp_chain_bind(req[0], req[1]);
+    *reply_len   = 0u;
+    return status_from_hw(rv);
+}
+
 /* --------------------------------------------------------------- */
 /* Dispatch                                                          */
 /* --------------------------------------------------------------- */
@@ -542,6 +723,23 @@ gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
     case CMD_QENC_READ:             h = handle_qenc_read;        break;
     case CMD_QENC_RESET:            h = handle_qenc_reset;       break;
     case CMD_COUNTER_READ:          h = handle_counter_read;     break;
+    /* v0.5 (§2B.2) advanced timer extras + (§2B.3) power-mode set.
+     * All return STATUS_NOSUPPORT against bridge_hw_stub.c today; the
+     * real bodies in bridge_hw_gd32.c land alongside the GigaDevice
+     * firmware library pull. */
+    case CMD_PWM_CAPTURE_BEGIN: h = handle_pwm_capture_begin; break;
+    case CMD_PWM_CAPTURE_READ:  h = handle_pwm_capture_read; break;
+    case CMD_PWM_CAPTURE_END:   h = handle_pwm_capture_end; break;
+    case CMD_PWM_SINGLE_PULSE:  h = handle_pwm_single_pulse; break;
+    case CMD_TIMER_SYNC:        h = handle_timer_sync; break;
+    case CMD_POWER_MODE_SET:    h = handle_power_mode_set; break;
+    /* v0.5 (§2B wave-2) chunked DSP-chain upload (CHAIN_OPEN /
+     * STAGE_PUSH / CHAIN_BIND).  The 0x36 tombstone stays in the
+     * default branch -- host code SHOULD NOT call it, and any
+     * residual caller gets STATUS_NOSUPPORT from the fallthrough. */
+    case CMD_ADC_DSP_CHAIN_OPEN: h = handle_adc_dsp_chain_open; break;
+    case CMD_ADC_DSP_STAGE_PUSH: h = handle_adc_dsp_stage_push; break;
+    case CMD_ADC_DSP_CHAIN_BIND: h = handle_adc_dsp_chain_bind; break;
     default:
         /* Route the reserved OTA opcode range (0xF0..0xFF) through
          * the application bootloader's dispatcher.  Bodies return

@@ -796,6 +796,53 @@ that lands before the v0.3.0 tag.)
 
 ### Added (2026-05-13)
 
+- **GD32 firmware-side dispatch + HAL hooks for every v0.5 opcode
+  (2026-05-13).**  Closes the "remaining gating dep" flagged in the
+  prior burst memory: every v0.5 opcode (`0x23`..`0x28` advanced
+  timer extras + power-mode set, `0x37`/`0x38`/`0x39` chunked
+  DSP-chain upload) used to fall through to the protocol dispatcher's
+  default-case `STATUS_NOSUPPORT` branch -- which silently swallowed
+  payload-validation errors and made it impossible for the host to
+  distinguish "firmware doesn't know this opcode" from "firmware
+  knows it but the HAL backend isn't wired".  This commit:
+  - Adds 9 new `bridge_hw_*` HAL declarations to `gd32-bridge/hal/bridge_hw.h`:
+    `pwm_capture_begin / read / end`, `pwm_single_pulse`,
+    `timer_sync`, `power_mode_set`, `adc_dsp_chain_open`,
+    `adc_dsp_stage_push`, `adc_dsp_chain_bind`.  Each documents the
+    GD32G5 register-level expectations (timer SMC bits, OPM mode, DMA
+    binding) so the eventual `bridge_hw_gd32.c` implementer has the
+    contract spelt out.
+  - Adds 9 stub bodies in `gd32-bridge/hal/bridge_hw_stub.c` that
+    return `BRIDGE_HW_ERR_NOTIMPL`.  The stub backend remains the
+    default (`BRIDGE_HAL_BACKEND=stub` in `gd32-bridge/CMakeLists.txt`)
+    so the protocol round-trip is exercisable end-to-end even without
+    the GigaDevice firmware library on the workspace.
+  - Adds 9 handler functions in `gd32-bridge/src/protocol.c` plus a
+    new shared `status_from_hw()` helper that maps `BRIDGE_HW_ERR_*`
+    to wire `STATUS_*`.  Each handler validates request payload
+    length + range (matching the host-side helpers in
+    `chips/gd32g553/gd32g553.c`) before calling the HAL hook --
+    defence-in-depth so a malformed wire request can't reach the HAL.
+    The DSP `STAGE_PUSH` handler additionally checks that
+    `chunk_offset + chunk_data_len <= chunk_total_size` so a
+    misbehaving host can't push past the firmware's per-stage scratch
+    buffer.
+  - Adds 9 new entries to the dispatch switch in `protocol_dispatch()`.
+
+  Net wire-side behaviour today is unchanged: every v0.5 opcode still
+  replies `STATUS_NOSUPPORT` because the stub HAL returns `NOTIMPL`.
+  What's new is the **structural** plumbing: when the real
+  `bridge_hw_gd32.c` lands (alongside the GigaDevice firmware library
+  pull at `vendors/gd32_firmware_library/`), every v0.5 opcode lights
+  up without further protocol changes.  Host-side helpers in
+  `chips/gd32g553/gd32g553.c` and the protocol vectors in
+  `gd32-bridge/tests/protocol_vectors.txt` already cover the wire
+  envelopes -- so the HW-in-loop turn-on is "flip
+  `BRIDGE_HAL_BACKEND=gd32`, link the SDK, run the existing host-side
+  ZTESTs".  The 0x36 tombstone stays on the default-case path -- no
+  handler stub, so any residual `CMD_ADC_STREAM_CONFIGURE_DSP` caller
+  gets `STATUS_NOSUPPORT` from the fallthrough as before.
+
 - **§2B wave-2 chunked DSP-chain upload opcodes (`0x37`/`0x38`/`0x39`)
   reserved on the bridge protocol (2026-05-13).**  Finalises the wire
   format the wave-2 ADC-stream DSP pipeline uses to push FIR / IIR /

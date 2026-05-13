@@ -189,4 +189,95 @@ int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks);
  * the GD32 side (see hal/bridge_hw_gd32.c). */
 uint8_t bridge_hw_da9292_status_cached(void);
 
+/* --------------------------------------------------------------- */
+/* v0.5 (§2B.2) -- advanced timer extras                             */
+/* --------------------------------------------------------------- */
+
+/* PWM input-capture: reconfigure @p channel's pin as an input-capture
+ * source so the firmware can latch the timer counter on each edge.
+ * @p edge selects polarity: 0 = rising, 1 = falling, 2 = both.  The
+ * GD32G5's TIMERx CHxIE bit + DMAEN enable the capture interrupt /
+ * DMA; the firmware writes the latched (period, pulse_width) tuples
+ * into a per-channel ring buffer that the host drains via
+ * bridge_hw_pwm_capture_read.  Calling BEGIN on a channel that's
+ * already configured for output (via bridge_hw_pwm_set) implicitly
+ * stops the output. */
+int bridge_hw_pwm_capture_begin(uint8_t channel, uint8_t edge);
+
+/* Read one (period_ns, pulse_width_ns) tuple from the @p channel's
+ * capture ring.  Both outputs are in nanoseconds against the GD32
+ * core clock (~4.16 ns LSB at 240 MHz).  BRIDGE_HW_ERR_NOTIMPL if the
+ * ring is empty (host should poll); BRIDGE_HW_ERR_INVAL if the
+ * channel is not currently in capture mode. */
+int bridge_hw_pwm_capture_read(uint8_t channel, uint32_t *period_ns,
+                               uint32_t *pulse_width_ns);
+
+/* Stop the @p channel's input-capture session and return the pin
+ * to high-impedance.  Idempotent. */
+int bridge_hw_pwm_capture_end(uint8_t channel);
+
+/* One-shot pulse: drive @p channel high for @p pulse_ns then return
+ * to low.  Implemented on the GD32 by setting OPM (one-pulse mode) on
+ * the timer + programming period = pulse_ns.  The PWM stays in
+ * one-pulse mode until the next bridge_hw_pwm_set call switches it
+ * back to continuous output. */
+int bridge_hw_pwm_single_pulse(uint8_t channel, uint32_t pulse_ns);
+
+/* Configure master-slave timer sync.  @p master and @p slave name two
+ * of TIMER0 / TIMER7 / TIMER19 by integer id; @p mode selects the
+ * slave-mode select field (per GD32G553 §17.4.3 SMC bits):
+ * 0 = disabled, 1 = reset, 2 = gated, 3 = trigger, 4 = external-clock,
+ * 5 = encoder-mode-1 etc.  Used to synchronise multi-channel PWM
+ * outputs across the three advanced-timer groups. */
+int bridge_hw_timer_sync(uint8_t master, uint8_t slave, uint8_t mode);
+
+/* --------------------------------------------------------------- */
+/* v0.5 (§2B.3) -- system power-mode set                             */
+/* --------------------------------------------------------------- */
+
+/* Request a system-wide sleep transition.  @p mode is 0 = run (no-op),
+ * 1 = sleep, 2 = deep-sleep, 3 = standby.  @p wake_bitmap selects which
+ * wake sources the firmware should arm (ALP_POWER_WAKE_* bits;
+ * platform-specific).  @p wake_after_ms is a max wall-clock wait, or 0
+ * for "no timer wake".  The GD32 prepares the V2N supervisor handshake
+ * + signals the Renesas SoC to enter the matching mode, then re-runs
+ * the bridge handshake on wakeup so the host can resume bridge calls. */
+int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap,
+                             uint32_t wake_after_ms);
+
+/* --------------------------------------------------------------- */
+/* v0.5 (§2B wave-2) -- chunked DSP-chain upload                     */
+/* --------------------------------------------------------------- */
+
+/* Allocate a fresh DSP-chain handle from the firmware's pool.  The
+ * pool is sized firmware-side; exhaustion returns
+ * BRIDGE_HW_ERR_NOTIMPL on the stub path (real builds return a
+ * NOMEM-equivalent that the protocol layer maps to STATUS_NOMEM).
+ * Returned @p chain_id is opaque to the protocol layer and host. */
+int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id);
+
+/* Upload one chunk of one stage's per-kind parameter blob into the
+ * named chain at @p stage_index.  @p kind is one of FIR=0, IIR=1,
+ * WINDOW=2, FFT=3 (mirrors @c alp_dsp_stage_kind_t).  The firmware
+ * accumulates chunks at @p chunk_offset byte positions within an
+ * internal `[chain_id][stage_index]` buffer of size
+ * `GD32G553_BRIDGE_ADC_DSP_MAX_STAGE_BYTES`; the per-stage assembly
+ * is complete when the host has covered `[0, chunk_total_size)`.
+ * The eventual per-kind layouts the firmware decodes are documented
+ * in `docs/gd32-bridge-protocol.md` §3.x. */
+int bridge_hw_adc_dsp_stage_push(uint8_t chain_id, uint8_t stage_index,
+                                 uint8_t kind, uint16_t chunk_offset,
+                                 uint16_t chunk_total_size,
+                                 const uint8_t *chunk_data,
+                                 size_t chunk_data_len);
+
+/* Attach a fully-populated chain to a streaming ADC source previously
+ * opened with bridge_hw_adc_stream_begin.  After bind, the stream's
+ * samples flow through the chain instead of being delivered raw to
+ * subsequent bridge_hw_adc_stream_read calls.  Binding fails
+ * (BRIDGE_HW_ERR_INVAL) if the chain has unfinished stages or
+ * violates the chain-ordering rules (FFT must be terminal; WINDOW
+ * must immediately precede FFT). */
+int bridge_hw_adc_dsp_chain_bind(uint8_t chain_id, uint8_t stream_id);
+
 #endif /* GD32_BRIDGE_HAL_BRIDGE_HW_H */
