@@ -52,9 +52,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install arm-none-eabi toolchain
+        # Pull libnewlib-arm-none-eabi explicitly -- it carries
+        # `string.h` + friends and gcc-arm-none-eabi alone doesn't
+        # recommend it strongly enough to land via `apt-get install
+        # gcc-arm-none-eabi` on the Ubuntu 24.04 runner image.  Drop
+        # --no-install-recommends so we get the full libc + Specs
+        # collection the linker needs for `-nostartfiles` builds.
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi
+          sudo apt-get install -y \
+              gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
 
       - name: Configure (stub backend)
         run: |
@@ -85,9 +92,16 @@ jobs:
               vendors/gd32_firmware_library/upstream
 
       - name: Install arm-none-eabi toolchain
+        # Pull libnewlib-arm-none-eabi explicitly -- it carries
+        # `string.h` + friends and gcc-arm-none-eabi alone doesn't
+        # recommend it strongly enough to land via `apt-get install
+        # gcc-arm-none-eabi` on the Ubuntu 24.04 runner image.  Drop
+        # --no-install-recommends so we get the full libc + Specs
+        # collection the linker needs for `-nostartfiles` builds.
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi
+          sudo apt-get install -y \
+              gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
 
       - name: Configure (gd32 backend)
         run: |
