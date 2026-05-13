@@ -352,6 +352,22 @@ that lands before the v0.3.0 tag.)
   `STATUS_NOSUPPORT` pending the follow-up state machine.
   No protocol or ABI change.
 
+- **`bridge_hw_pwm_configure` partial (2026-05-13).**
+  Twelfth body, partial.  Accepts the defaults that
+  `bridge_hw_init`'s `pwm_timer_init()` programs --
+  edge-aligned counter, no dead-time, no break input --
+  with `BRIDGE_HW_ERR_NOTIMPL` for any non-default request.
+  Lets the host's idempotent "set to defaults" config call
+  succeed (useful for the v0.3 host wrapper's config-state
+  machine) while signalling that advanced tuning isn't
+  wired yet.
+  Wire opcode `CMD_PWM_CONFIGURE` (0x22) flips from
+  `STATUS_NOSUPPORT` to `STATUS_OK` for default-config
+  requests; non-defaults stay `STATUS_NOSUPPORT` pending a
+  follow-up that adds the per-timer CAM / dead-time / break
+  apply path with last-write-wins across the timer's
+  channels.
+
 ### Added (2026-05-14)
 
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**

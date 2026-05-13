@@ -36,7 +36,9 @@
  *                               code at VREF=1800mV (V2N analog supply).
  *   6. PWM_SET / GET         -- DONE: 8 channels across TIMER0 + TIMER7
  *                               at 1 us LSB; pin AFs per datasheet Rev2.0.
- *   7. PWM_CONFIGURE         -- align mode, dead-time, break input.
+ *   7. PWM_CONFIGURE         -- PARTIAL: defaults (edge-aligned, no
+ *                               dead-time, no break input) accepted;
+ *                               non-defaults NOSUPPORT pending follow-up.
  *   8. ADC_READ              -- DONE: 8-pad map across ADC0..3, single-
  *                               shot polling, mV<->code at VREF=1800mV.
  *   9. ADC_CONFIGURE         -- PARTIAL: per-channel sample_cycles
@@ -781,11 +783,19 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
 int bridge_hw_pwm_configure(uint8_t channel, uint8_t align_mode, uint32_t dead_time_ns,
                             uint8_t break_cfg)
 {
-    (void)channel;
-    (void)align_mode;
-    (void)dead_time_ns;
-    (void)break_cfg;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+
+    /* v0.3 partial: accept the default settings that bridge_hw_init's
+     * pwm_timer_init() programs (edge-aligned counter, no dead-time,
+     * no break input) so the host's idempotent "set to defaults"
+     * config calls succeed.  Non-defaults need timer-wide reconfigs
+     * (CAM field via re-init, timer_break_config struct) that share
+     * across all channels on the same timer; defer to a follow-up
+     * with a per-timer apply path + last-write-wins semantics. */
+    if (align_mode != 0u) return BRIDGE_HW_ERR_NOTIMPL;
+    if (dead_time_ns != 0u) return BRIDGE_HW_ERR_NOTIMPL;
+    if (break_cfg != 0u) return BRIDGE_HW_ERR_NOTIMPL;
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio, uint16_t sample_cycles,
