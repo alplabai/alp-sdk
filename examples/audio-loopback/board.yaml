@@ -18,12 +18,13 @@ carrier:
 os: zephyr
 
 # Zephyr peripheral subsystems exercised by this example.  Audio
-# touches the I2S TX path + the PDM RX path; both get pulled in
-# explicitly so alp_project.py emits CONFIG_I2S=y and
-# CONFIG_AUDIO_DMIC=y in the generated alp.conf.
+# touches the I2S TX path; alp_project.py emits CONFIG_I2S=y.
+# PDM RX support (CONFIG_AUDIO_DMIC=y) rides testcase.yaml's
+# extra_args -- `pdm` isn't in the schema's `peripherals:` enum
+# because Zephyr doesn't expose PDM as a standalone driver class
+# (DMIC sits under the audio subsystem).
 peripherals:
   - i2s
-  - pdm
 
 diagnostics:
   log_level: info
