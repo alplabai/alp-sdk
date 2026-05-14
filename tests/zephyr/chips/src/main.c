@@ -99,6 +99,14 @@
 #include "alp/chips/atgm336h.h"
 #include "alp/chips/atecc608b.h"
 
+/* v0.5 §D.audio batch -- 6 audio chips. */
+#include "alp/chips/ics_43434.h"
+#include "alp/chips/inmp441.h"
+#include "alp/chips/wm8960.h"
+#include "alp/chips/tlv320aic3204.h"
+#include "alp/chips/max98357a.h"
+#include "alp/chips/es8388.h"
+
 #include "fakes.h"
 
 ZTEST_SUITE(alp_chips, NULL, NULL, NULL, NULL, NULL);
@@ -2526,5 +2534,135 @@ ZTEST(alp_chips, test_veml7700_init_null_args)
     zassert_equal(veml7700_init(NULL, bus, VEML7700_I2C_ADDR), ALP_ERR_INVAL);
     zassert_equal(veml7700_init(&dev, NULL, VEML7700_I2C_ADDR), ALP_ERR_INVAL);
     zassert_equal(veml7700_init(&dev, bus, 0), ALP_ERR_INVAL);
+    alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* v0.5 §D.iot batch -- NULL-arg guard smokes                         */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_quectel_bg95_init_null_args)
+{
+    quectel_bg95_t dev;
+    zassert_equal(quectel_bg95_init(NULL, NULL, NULL, NULL), ALP_ERR_INVAL);
+    zassert_equal(quectel_bg95_init(&dev, NULL, NULL, NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_quectel_bg77_init_null_args)
+{
+    quectel_bg77_t dev;
+    zassert_equal(quectel_bg77_init(NULL, NULL, NULL, NULL), ALP_ERR_INVAL);
+    zassert_equal(quectel_bg77_init(&dev, NULL, NULL, NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_ublox_sara_r5_init_null_args)
+{
+    ublox_sara_r5_t dev;
+    zassert_equal(ublox_sara_r5_init(NULL, NULL, NULL, NULL), ALP_ERR_INVAL);
+    zassert_equal(ublox_sara_r5_init(&dev, NULL, NULL, NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_semtech_sx1262_init_null_args)
+{
+    semtech_sx1262_t dev;
+    zassert_equal(semtech_sx1262_init(NULL, NULL, NULL, NULL), ALP_ERR_INVAL);
+    zassert_equal(semtech_sx1262_init(&dev, NULL, NULL, NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_semtech_sx1276_init_null_args)
+{
+    semtech_sx1276_t dev;
+    zassert_equal(semtech_sx1276_init(NULL, NULL, NULL), ALP_ERR_INVAL);
+    zassert_equal(semtech_sx1276_init(&dev, NULL, NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_ublox_neo_m9n_init_null_args)
+{
+    ublox_neo_m9n_t dev;
+    zassert_equal(ublox_neo_m9n_init(NULL, NULL), ALP_ERR_INVAL);
+    zassert_equal(ublox_neo_m9n_init(&dev, NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_ublox_max_m10s_init_null_args)
+{
+    ublox_max_m10s_t dev;
+    zassert_equal(ublox_max_m10s_init(NULL, NULL), ALP_ERR_INVAL);
+    zassert_equal(ublox_max_m10s_init(&dev, NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_atgm336h_init_null_args)
+{
+    atgm336h_t dev;
+    zassert_equal(atgm336h_init(NULL, NULL), ALP_ERR_INVAL);
+    zassert_equal(atgm336h_init(&dev, NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_atecc608b_init_null_args)
+{
+    atecc608b_t dev;
+    alp_i2c_t  *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+    zassert_not_null(bus);
+    zassert_equal(atecc608b_init(NULL, bus, ATECC608B_I2C_ADDR_DEFAULT), ALP_ERR_INVAL);
+    zassert_equal(atecc608b_init(&dev, NULL, ATECC608B_I2C_ADDR_DEFAULT), ALP_ERR_INVAL);
+    zassert_equal(atecc608b_init(&dev, bus, 0), ALP_ERR_INVAL);
+    alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* v0.5 §D.audio batch -- NULL-arg guard smokes                       */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_ics_43434_init_null_args)
+{
+    ics_43434_t dev;
+    zassert_equal(ics_43434_init(NULL, ICS_43434_CH_LEFT), ALP_ERR_INVAL);
+    zassert_equal(ics_43434_init(&dev, (ics_43434_channel_t)99), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_inmp441_init_null_args)
+{
+    inmp441_t dev;
+    zassert_equal(inmp441_init(NULL, INMP441_CH_LEFT), ALP_ERR_INVAL);
+    zassert_equal(inmp441_init(&dev, (inmp441_channel_t)99), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_wm8960_init_null_args)
+{
+    wm8960_t   dev;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+    zassert_not_null(bus);
+    zassert_equal(wm8960_init(NULL, bus, WM8960_I2C_ADDR), ALP_ERR_INVAL);
+    zassert_equal(wm8960_init(&dev, NULL, WM8960_I2C_ADDR), ALP_ERR_INVAL);
+    zassert_equal(wm8960_init(&dev, bus, 0), ALP_ERR_INVAL);
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_tlv320aic3204_init_null_args)
+{
+    tlv320aic3204_t dev;
+    alp_i2c_t      *bus =
+        alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+    zassert_not_null(bus);
+    zassert_equal(tlv320aic3204_init(NULL, bus, TLV320AIC3204_I2C_ADDR_LOW), ALP_ERR_INVAL);
+    zassert_equal(tlv320aic3204_init(&dev, NULL, TLV320AIC3204_I2C_ADDR_LOW), ALP_ERR_INVAL);
+    zassert_equal(tlv320aic3204_init(&dev, bus, 0), ALP_ERR_INVAL);
+    alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_max98357a_init_null_args)
+{
+    max98357a_t dev;
+    zassert_equal(max98357a_init(NULL, NULL), ALP_ERR_INVAL);
+    zassert_equal(max98357a_init(&dev, NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_es8388_init_null_args)
+{
+    es8388_t   dev;
+    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+    zassert_not_null(bus);
+    zassert_equal(es8388_init(NULL, bus, ES8388_I2C_ADDR_LOW), ALP_ERR_INVAL);
+    zassert_equal(es8388_init(&dev, NULL, ES8388_I2C_ADDR_LOW), ALP_ERR_INVAL);
+    zassert_equal(es8388_init(&dev, bus, 0), ALP_ERR_INVAL);
     alp_i2c_close(bus);
 }

@@ -474,6 +474,13 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
     "ublox_max_m10s":     ("SERIAL",),
     "atgm336h":           ("SERIAL",),
     "atecc608b":          ("I2C",),
+    # v0.5 §D.audio batch -- 6 audio chips.
+    "ics_43434":          (),                 # no Zephyr subsystem dep; sample flow via <alp/i2s.h>
+    "inmp441":            (),
+    "wm8960":             ("I2C",),
+    "tlv320aic3204":      ("I2C",),
+    "max98357a":          ("GPIO",),
+    "es8388":             ("I2C",),
 }
 
 

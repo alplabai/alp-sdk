@@ -1,0 +1,34 @@
+# ALP SDK chip manifest: Maxim MAX98357A class-D audio amp.
+schema_version:   1
+chip_id:          max98357a
+driver_status:    complete
+display_name:     "ADI (Maxim) MAX98357A 3W mono class-D audio amplifier (I2S)"
+vendor:           adi_maxim
+mpn_population:
+  - "MAX98357AETE+"
+
+datasheet:
+  primary:        "Maxim MAX98357A datasheet Rev 5 (Mar 2020)"
+
+bus:              i2s              # audio in
+peripherals:
+  i2s:            ["audio data input"]
+  gpio:           ["sd_mode (active high)"]
+
+audio:
+  channels:       1
+  output_power_w: 3.2
+  features:       [class_d, mono]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_MAX98357A
+  baremetal:      ALP_SDK_CHIP_MAX98357A
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    null_arg_guard

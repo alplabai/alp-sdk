@@ -1449,6 +1449,47 @@ config ALP_SDK_CHIP_ATECC608B
 	  command shell.  Full ATCA crypto via the CryptoAuthLib
 	  import (TBD).
 
+# v0.5 §D.audio batch -- 6 audio chips.
+
+config ALP_SDK_CHIP_ICS_43434
+	bool "InvenSense ICS-43434 omnidirectional MEMS mic (I2S)"
+	help
+	  Compile chips/ics_43434/ics_43434.c.  Channel-binding helper;
+	  sample flow via <alp/i2s.h>.
+
+config ALP_SDK_CHIP_INMP441
+	bool "InvenSense INMP441 low-cost MEMS mic (I2S)"
+	help
+	  Compile chips/inmp441/inmp441.c.  Same shape as ics_43434.
+
+config ALP_SDK_CHIP_WM8960
+	bool "Cirrus / Wolfson WM8960 stereo audio codec (I2C + I2S)"
+	depends on I2C
+	help
+	  Compile chips/wm8960/wm8960.c.  I2C control surface; audio
+	  sample path through <alp/i2s.h>.
+
+config ALP_SDK_CHIP_TLV320AIC3204
+	bool "TI TLV320AIC3204 premium stereo codec w/ miniDSP"
+	depends on I2C
+	help
+	  Compile chips/tlv320aic3204/tlv320aic3204.c.  Page-paged I2C
+	  control surface.
+
+config ALP_SDK_CHIP_MAX98357A
+	bool "ADI MAX98357A 3W mono class-D amp (I2S)"
+	depends on GPIO
+	help
+	  Compile chips/max98357a/max98357a.c.  Shutdown / mode-select
+	  pin control; sample flow via <alp/i2s.h>.
+
+config ALP_SDK_CHIP_ES8388
+	bool "Everest Semi ES8388 stereo audio codec (I2C + I2S)"
+	depends on I2C
+	help
+	  Compile chips/es8388/es8388.c.  China-domestic cost-sensitive
+	  codec; same shape as WM8960.
+
 endmenu # "ALP SDK chip drivers"
 
 endif # ALP_SDK

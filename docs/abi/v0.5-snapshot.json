@@ -1682,6 +1682,46 @@
         }
       }
     },
+    "alp/chips/es8388.h": {
+      "functions": {
+        "es8388_deinit": {
+          "hash": "6b98256c9774c26f",
+          "signature": "void es8388_deinit(es8388_t *dev);"
+        },
+        "es8388_init": {
+          "hash": "81b29460deaf48df",
+          "signature": "alp_status_t es8388_init(es8388_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);"
+        },
+        "es8388_read_reg": {
+          "hash": "afb53233f8d1dfce",
+          "signature": "alp_status_t es8388_read_reg(es8388_t *dev, uint8_t reg, uint8_t *val);"
+        },
+        "es8388_soft_reset": {
+          "hash": "ac542239bcd8a086",
+          "signature": "alp_status_t es8388_soft_reset(es8388_t *dev);"
+        },
+        "es8388_write_reg": {
+          "hash": "6c4eb2fd9b936ce5",
+          "signature": "alp_status_t es8388_write_reg(es8388_t *dev, uint8_t reg, uint8_t val);"
+        }
+      },
+      "macros": {
+        "ES8388_I2C_ADDR_HIGH": {
+          "hash": "61480708a85a8fa1",
+          "value": "0x11u"
+        },
+        "ES8388_I2C_ADDR_LOW": {
+          "hash": "7601631bbaa27e68",
+          "value": "0x10u"
+        }
+      },
+      "typedefs": {
+        "addr": {
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
+          "hash": "4e6cc227fae8a2d7"
+        }
+      }
+    },
     "alp/chips/gc2145.h": {
       "functions": {
         "gc2145_deinit": {
@@ -2264,6 +2304,33 @@
         }
       }
     },
+    "alp/chips/ics_43434.h": {
+      "functions": {
+        "ics_43434_deinit": {
+          "hash": "99d664835fef5e45",
+          "signature": "void ics_43434_deinit(ics_43434_t *dev);"
+        },
+        "ics_43434_get_channel": {
+          "hash": "3af0a076ff5d3be0",
+          "signature": "alp_status_t ics_43434_get_channel(ics_43434_t *dev, ics_43434_channel_t *channel_out);"
+        },
+        "ics_43434_init": {
+          "hash": "cec1ba70bf607cf2",
+          "signature": "alp_status_t ics_43434_init(ics_43434_t *dev, ics_43434_channel_t channel);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "channel": {
+          "definition": "typedef struct { ics_43434_channel_t channel;",
+          "hash": "0b67491e533c6d57"
+        },
+        "ics_43434_channel_t": {
+          "definition": "typedef enum { ICS_43434_CH_LEFT = 0, ICS_43434_CH_RIGHT = 1, } ics_43434_channel_t;",
+          "hash": "789e60cc8d106ba3"
+        }
+      }
+    },
     "alp/chips/il3820.h": {
       "functions": {
         "il3820_deinit": {
@@ -2525,6 +2592,33 @@
         "initialised": {
           "definition": "typedef struct { bool initialised;",
           "hash": "98b22257593e61d9"
+        }
+      }
+    },
+    "alp/chips/inmp441.h": {
+      "functions": {
+        "inmp441_deinit": {
+          "hash": "4b89b71a8ff7f725",
+          "signature": "void inmp441_deinit(inmp441_t *dev);"
+        },
+        "inmp441_get_channel": {
+          "hash": "a14250ea237b51bc",
+          "signature": "alp_status_t inmp441_get_channel(inmp441_t *dev, inmp441_channel_t *channel_out);"
+        },
+        "inmp441_init": {
+          "hash": "2432a793610cf860",
+          "signature": "alp_status_t inmp441_init(inmp441_t *dev, inmp441_channel_t channel);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "channel": {
+          "definition": "typedef struct { inmp441_channel_t channel;",
+          "hash": "e86e4c5f5e65b445"
+        },
+        "inmp441_channel_t": {
+          "definition": "typedef enum { INMP441_CH_LEFT = 0, INMP441_CH_RIGHT = 1, } inmp441_channel_t;",
+          "hash": "aabeabaab28d5c7e"
         }
       }
     },
@@ -2801,6 +2895,29 @@
         "initialised": {
           "definition": "typedef struct { alp_spi_t *bus; bool initialised;",
           "hash": "16ab4d82e16f05e7"
+        }
+      }
+    },
+    "alp/chips/max98357a.h": {
+      "functions": {
+        "max98357a_deinit": {
+          "hash": "23cc72dbfc3cc70a",
+          "signature": "void max98357a_deinit(max98357a_t *dev);"
+        },
+        "max98357a_init": {
+          "hash": "721ecb01704607a1",
+          "signature": "alp_status_t max98357a_init(max98357a_t *dev, alp_gpio_t *sd_mode);"
+        },
+        "max98357a_set_enabled": {
+          "hash": "3e84477819b7b42a",
+          "signature": "alp_status_t max98357a_set_enabled(max98357a_t *dev, bool enabled);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "initialised": {
+          "definition": "typedef struct { alp_gpio_t *sd_mode; bool initialised;",
+          "hash": "2b45099551009201"
         }
       }
     },
@@ -4243,6 +4360,54 @@
         }
       }
     },
+    "alp/chips/tlv320aic3204.h": {
+      "functions": {
+        "tlv320aic3204_deinit": {
+          "hash": "88ab738bfbd54d1d",
+          "signature": "void tlv320aic3204_deinit(tlv320aic3204_t *dev);"
+        },
+        "tlv320aic3204_init": {
+          "hash": "54d0da2ae30bb201",
+          "signature": "alp_status_t tlv320aic3204_init(tlv320aic3204_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);"
+        },
+        "tlv320aic3204_read_reg": {
+          "hash": "fd2e1c0c954db85d",
+          "signature": "alp_status_t tlv320aic3204_read_reg(tlv320aic3204_t *dev, uint8_t reg, uint8_t *val);"
+        },
+        "tlv320aic3204_select_page": {
+          "hash": "c06e0910b2e75caf",
+          "signature": "alp_status_t tlv320aic3204_select_page(tlv320aic3204_t *dev, uint8_t page);"
+        },
+        "tlv320aic3204_soft_reset": {
+          "hash": "aedee724c2601e8c",
+          "signature": "alp_status_t tlv320aic3204_soft_reset(tlv320aic3204_t *dev);"
+        },
+        "tlv320aic3204_write_reg": {
+          "hash": "eabf00592324deaa",
+          "signature": "alp_status_t tlv320aic3204_write_reg(tlv320aic3204_t *dev, uint8_t reg, uint8_t val);"
+        }
+      },
+      "macros": {
+        "TLV320AIC3204_I2C_ADDR_HIGH": {
+          "hash": "4536747f0404ba69",
+          "value": "0x19u"
+        },
+        "TLV320AIC3204_I2C_ADDR_LOW": {
+          "hash": "e846babeced3ff4e",
+          "value": "0x18u"
+        },
+        "TLV320AIC3204_REG_PAGE_SELECT": {
+          "hash": "8a5405aad50bb108",
+          "value": "0x00u"
+        }
+      },
+      "typedefs": {
+        "addr": {
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
+          "hash": "4e6cc227fae8a2d7"
+        }
+      }
+    },
     "alp/chips/tmc2209.h": {
       "functions": {
         "tmc2209_deinit": {
@@ -4718,6 +4883,38 @@
         "VL53L5CX_REG_DEVICE_ID": {
           "hash": "07b75067c891787d",
           "value": "0x0000u"
+        }
+      },
+      "typedefs": {
+        "addr": {
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
+          "hash": "4e6cc227fae8a2d7"
+        }
+      }
+    },
+    "alp/chips/wm8960.h": {
+      "functions": {
+        "wm8960_deinit": {
+          "hash": "d6457be17388ac2b",
+          "signature": "void wm8960_deinit(wm8960_t *dev);"
+        },
+        "wm8960_init": {
+          "hash": "065b57d7ed258ac0",
+          "signature": "alp_status_t wm8960_init(wm8960_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);"
+        },
+        "wm8960_soft_reset": {
+          "hash": "72a5d899cd6af056",
+          "signature": "alp_status_t wm8960_soft_reset(wm8960_t *dev);"
+        },
+        "wm8960_write_reg": {
+          "hash": "5597a03b4bed760f",
+          "signature": "alp_status_t wm8960_write_reg(wm8960_t *dev, uint8_t reg, uint16_t val_9bit);"
+        }
+      },
+      "macros": {
+        "WM8960_I2C_ADDR": {
+          "hash": "f16148717b470b23",
+          "value": "0x1Au"
         }
       },
       "typedefs": {

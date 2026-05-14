@@ -84,6 +84,35 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- §D.audio: 6 audio chip drivers)
+
+Tier 1 ecosystem expansion -- Phase 1 §D.audio batch.  All headers
+carry the `[ABI-EXPERIMENTAL]` + `[UNTESTED]` badges.
+
+- **`ics_43434`**         -- InvenSense ICS-43434 omnidirectional
+  MEMS mic (I2S, channel-binding helper).
+- **`inmp441`**           -- InvenSense INMP441 low-cost MEMS mic.
+- **`wm8960`**            -- Cirrus / Wolfson WM8960 stereo codec
+  (I2C config + I2S data; packed 9-bit register write).
+- **`tlv320aic3204`**     -- TI TLV320AIC3204 premium codec w/
+  miniDSP (page-paged I2C control surface).
+- **`max98357a`**         -- ADI MAX98357A 3 W mono class-D amp
+  (shutdown / mode-select pin control).
+- **`es8388`**            -- Everest Semi ES8388 stereo codec
+  (China-domestic; same shape as WM8960).
+
+Audio sample path on these chips goes through the portable
+`<alp/i2s.h>` peripheral surface; the drivers above only own the
+I2C control / GPIO power-rail surfaces and channel-binding helpers.
+
+### Fixed (2026-05-14 -- §D.iot ZTEST tests follow-up)
+
+§D.iot ZTESTs were added in this commit as a follow-up — the
+prior §D.iot commit (6fbb14a) landed the chip drivers +
+Kconfig/CMake glue but the NULL-arg-guard ZTEST entries didn't
+make it in due to an Edit-mismatch on the test file.  Captured
+here so the audit trail stays clean.
+
 ### Added (2026-05-14 -- §D.iot: 9 IoT / connectivity chip drivers)
 
 Tier 1 ecosystem expansion -- Phase 1 §D.iot batch.  Every public

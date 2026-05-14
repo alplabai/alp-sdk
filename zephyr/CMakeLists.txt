@@ -264,6 +264,20 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ATGM336H
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ATECC608B
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/atecc608b/atecc608b.c)
 
+# v0.5 §D.audio batch -- 6 audio chips.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ICS_43434
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ics_43434/ics_43434.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_INMP441
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/inmp441/inmp441.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_WM8960
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/wm8960/wm8960.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TLV320AIC3204
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tlv320aic3204/tlv320aic3204.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_MAX98357A
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/max98357a/max98357a.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ES8388
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/es8388/es8388.c)
+
 # V2N supervisor singleton -- the lazy-init GD32G553 ctx the portable
 # PWM/ADC/DAC/QENC/COUNTER backends dispatch through on V2N.  The
 # .c file emits NOSUPPORT stubs when CONFIG_ALP_SDK_V2N_SUPERVISOR=n

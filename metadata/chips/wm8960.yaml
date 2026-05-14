@@ -1,0 +1,35 @@
+# ALP SDK chip manifest: Cirrus / Wolfson WM8960 stereo audio codec.
+schema_version:   1
+chip_id:          wm8960
+driver_status:    stub             # I2C config shell; audio sample flow via <alp/i2s.h>.
+display_name:     "Cirrus / Wolfson WM8960 stereo audio codec (I2C config + I2S data)"
+vendor:           cirrus_wolfson
+mpn_population:
+  - "WM8960CGEFL"
+
+datasheet:
+  primary:        "Wolfson WM8960 datasheet Rev 4.5 (Aug 2012)"
+
+bus:              i2c              # config side
+i2c:
+  addresses:
+    - { addr_7bit: 0x1A, scope: "fixed I2C address" }
+  max_clock_hz:   400000
+
+audio:
+  channels:       2
+  bitdepth_max:   24
+  features:       [stereo, mic_input, line_output, headphone_amp]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_WM8960
+  baremetal:      ALP_SDK_CHIP_WM8960
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    null_arg_guard

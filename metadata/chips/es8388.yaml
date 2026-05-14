@@ -1,0 +1,36 @@
+# ALP SDK chip manifest: Everest Semi ES8388 stereo audio codec.
+schema_version:   1
+chip_id:          es8388
+driver_status:    stub
+display_name:     "Everest Semi ES8388 stereo audio codec (I2C config + I2S data)"
+vendor:           everest_semi
+mpn_population:
+  - "ES8388"
+
+datasheet:
+  primary:        "Everest Semi ES8388 datasheet v6.5 (Mar 2010)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x10, scope: "CE strap = low" }
+    - { addr_7bit: 0x11, scope: "CE strap = high" }
+  max_clock_hz:   400000
+
+audio:
+  channels:       2
+  bitdepth_max:   24
+  features:       [stereo, mic_input, line_output, headphone_amp]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_ES8388
+  baremetal:      ALP_SDK_CHIP_ES8388
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    null_arg_guard

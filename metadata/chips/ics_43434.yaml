@@ -1,0 +1,33 @@
+# ALP SDK chip manifest: InvenSense ICS-43434 MEMS microphone.
+schema_version:   1
+chip_id:          ics_43434
+driver_status:    complete
+display_name:     "InvenSense ICS-43434 omnidirectional MEMS microphone (I2S)"
+vendor:           invensense
+mpn_population:
+  - "ICS-43434"
+
+datasheet:
+  primary:        "InvenSense ICS-43434 DS-000069 Rev 1.2 (Jul 2017)"
+
+bus:              i2s
+peripherals:
+  i2s:            ["data input from mic to host"]
+
+sensor:
+  type:           digital_mems_mic
+  sensitivity_db: -26
+  snr_db:         65
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_ICS_43434
+  baremetal:      ALP_SDK_CHIP_ICS_43434
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard

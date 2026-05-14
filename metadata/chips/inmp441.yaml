@@ -1,0 +1,30 @@
+# ALP SDK chip manifest: InvenSense INMP441 MEMS microphone.
+schema_version:   1
+chip_id:          inmp441
+driver_status:    complete
+display_name:     "InvenSense INMP441 low-cost omnidirectional MEMS mic (I2S)"
+vendor:           invensense
+mpn_population:
+  - "INMP441"
+
+datasheet:
+  primary:        "InvenSense INMP441 DS-INMP441 Rev 1.2 (Mar 2015)"
+
+bus:              i2s
+sensor:
+  type:           digital_mems_mic
+  sensitivity_db: -26
+  snr_db:         61
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_INMP441
+  baremetal:      ALP_SDK_CHIP_INMP441
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    null_arg_guard
