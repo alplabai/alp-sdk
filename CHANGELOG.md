@@ -159,6 +159,39 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- mproc-mailbox HE-side peer image §C.30)
+
+- **`examples/mproc-mailbox/peer/main.c`** -- HE-side peer of
+  the §C.12 HP flagship.  Opens the same mbox + shmem region,
+  blocks on `alp_mbox_recv` indefinitely, reads the
+  (offset, length) tuple the HP signalled, pulls the payload
+  out of shared memory, builds an `echo: <payload>` response,
+  stages it at a different shmem offset (256-byte gap from
+  the HP's request region so the two never overlap), signals
+  back via `alp_mbox_send`.  Steady-state loop -- one HP
+  request -> one HE reply, then back to the mbox wait.
+  Bounded request length (128 bytes max) so a stale or
+  hostile tuple can't overrun the peer's stack buffer.
+- **`examples/mproc-mailbox/peer/CMakeLists.txt`**: standalone
+  Zephyr application skeleton; builds with the same `west
+  build -b <he-board>` invocation pattern any single-image
+  example uses.  Sysbuild picks this up automatically once
+  the v0.4 dual-image build flow lands in
+  `alplabai/alp-zephyr-modules`.
+- **`examples/mproc-mailbox/peer/prj.conf`**: minimal -- just
+  `CONFIG_PRINTK=y` + `CONFIG_ALP_SDK=y`; the peer doesn't
+  need the IoT stack or inference runtime that the HP image
+  pulls in.
+- **`examples/mproc-mailbox/README.md`**: updated with the
+  expected interleaved HP / HE console output + the dual-
+  build command pair customers run today (HP image one
+  `west alp-build`, HE image one `west build`; sysbuild
+  flow ships in v0.4).
+
+This closes the only 🚧 flagship under Pillar 4 / §4 in the
+readiness doc.  The remaining 📋 flagship (production-
+deployment) lands in §C.29.
+
 ### Added (2026-05-14 -- V2N DEEPX rail-mgmt + BRD_I2C shared-handle pattern §C.28)
 
 Closes Pillar 1 §1b in the readiness doc.  Two new files +

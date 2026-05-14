@@ -43,11 +43,38 @@ west alp-build -b alif_e7_dk_rtss_he examples/mproc-mailbox
 west flash
 ```
 
-The peer-side firmware (`examples/mproc-mailbox/peer/`) lands
-alongside the v0.4 dual-image build flow in
-`alplabai/alp-zephyr-modules`.  Until that lands, real-silicon
-runs will time out at `alp_mbox_recv` and the example reports
-"reply timeout (peer not running?)".
+The peer-side firmware lives at
+[`examples/mproc-mailbox/peer/main.c`](peer/main.c) -- HE-side
+image that waits on the same mbox, reads the staged shmem
+payload, and writes back an echo via reverse send.
+
+Until the v0.4 dual-image build flow in
+`alplabai/alp-zephyr-modules` lands, the two halves build
+separately:
+
+```bash
+# HP side -- builds + runs the application.
+west alp-build -b alif_e7_dk_rtss_hp examples/mproc-mailbox
+
+# HE side -- builds the peer image manually.  Sysbuild picks
+# this up automatically once the v0.4 dual-image flow ships.
+west build -b alif_e7_dk_rtss_he examples/mproc-mailbox/peer
+```
+
+Flash both into the matching SoC partitions (HP -> RTSS-HP slot,
+HE -> RTSS-HE slot) and the roundtrip completes:
+
+```
+[mproc] init mbox + shmem
+[mproc] sending payload  "hello-from-HP" (13 bytes)
+[mproc-peer] request offset=0 len=13
+[mproc-peer] payload  "hello-from-HP"
+[mproc-peer] replied "echo: hello-from-HP" (19 bytes)
+[mproc] HE woke up, payload visible in shmem
+[mproc] HE replied       "echo: hello-from-HP" (19 bytes)
+[mproc] HP read reply OK
+[mproc] done
+```
 
 ## Reference
 
