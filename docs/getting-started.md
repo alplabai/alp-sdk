@@ -329,7 +329,7 @@ Key tasks (Command Palette → **Tasks: Run Task**):
   workflow at a larger scale.
 - **Hardware identification + production-test**:
   [`<alp/hw_info.h>`](../include/alp/hw_info.h) for the runtime
-  EEPROM-manifest + BOARD_ID-ADC API; `tools/program_eeprom.py`
+  EEPROM-manifest + BOARD_ID-ADC API; `scripts/program_eeprom.py`
   for the factory programmer.
 - **Recommended third-party libraries** that pair with the SDK
   (CMSIS-DSP, ETL, fmt, nlohmann_json, doctest, LittleFS, LVGL,

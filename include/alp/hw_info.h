@@ -26,7 +26,7 @@
  *      family populates one by default).  Carries the exact MPN
  *      string, hw_rev, factory serial number, and manufacturing
  *      date.  Programmed at production test time by
- *      `tools/program_eeprom.py`; read by the SDK at boot.
+ *      `scripts/program_eeprom.py`; read by the SDK at boot.
  *
  * The two are cross-checked: the EEPROM's `hw_rev` must agree
  * with the rev the ADC voltage decodes to.  If they disagree
@@ -91,7 +91,7 @@ extern "C" {
 /**
  * @brief On-EEPROM manifest layout (128 bytes total at offset 0x0000).
  *
- * Programmed at production-test time by `tools/program_eeprom.py`.
+ * Programmed at production-test time by `scripts/program_eeprom.py`.
  * All strings are null-terminated.  Reserved bytes are zero on
  * first programming and stay zero until a future schema_version
  * uses them.  The CRC32 (ISO-3309, polynomial 0xEDB88320 -- the

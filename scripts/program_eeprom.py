@@ -16,7 +16,7 @@ header's `_Static_assert(sizeof(...) == 128, ...)`.
 
 Usage:
 
-    python3 tools/program_eeprom.py \\
+    python3 scripts/program_eeprom.py \\
         --board-yaml board.yaml \\
         --serial 2026W19-0001 \\
         --mfg-date 2026-05-11 \\

@@ -207,7 +207,7 @@ eeprom_24c128_read(&ee, 0, raw, sizeof(raw));
 // Dump raw bytes; expect "ALPH" (0x41 0x4C 0x50 0x48) at offset 0.
 ```
 
-Re-run `tools/program_eeprom.py` against the module.
+Re-run `scripts/program_eeprom.py` against the module.
 
 ### `alp_hw_info_read` returns `ALP_ERR_NOSUPPORT`
 

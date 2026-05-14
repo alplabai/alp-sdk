@@ -147,7 +147,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 - **`board.yaml` project config** — single source of truth: SoM SKU, carrier, OS, inference backend, libraries, peripherals, IoT toggles, diagnostics, `hw_rev`
 - **`scripts/alp_project.py`** — emits Zephyr Kconfig fragments, plain-CMake `-D` flags, Yocto `local.conf` snippets, DTS overlays, or the `<alp_hw_info_build.h>` companion header
 - **`scripts/validate_board_yaml.py`** — customer-side linter (exit 0 / 1 schema / 2 missing-preset / 3 hw_rev incompatible)
-- **`tools/program_eeprom.py`** — packs board.yaml + serial + mfg date into the 128-byte EEPROM manifest for production-test programming
+- **`scripts/program_eeprom.py`** — packs board.yaml + serial + mfg date into the 128-byte EEPROM manifest for production-test programming
 - **VS Code extension** ([`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)) — schema-aware `board.yaml` editor, GUI configurator, west wrappers, per-OS bootstrap, inline validator diagnostics
 
 ### Alp SDK (`<alp/...>`)

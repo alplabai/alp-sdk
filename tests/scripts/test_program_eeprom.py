@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Unit tests for tools/program_eeprom.py.
+Unit tests for scripts/program_eeprom.py.
 
 Locks the byte layout the programmer emits against drift -- the
 C reader (`alp_hw_info_eeprom_t` in include/alp/hw_info.h) and

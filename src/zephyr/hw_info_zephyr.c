@@ -30,7 +30,7 @@
 /* ---------------------------------------------------------------- */
 /* CRC32 / ISO-3309 (polynomial 0xEDB88320; init 0xFFFFFFFF;          */
 /*   xor-out 0xFFFFFFFF).  Matches Python's `zlib.crc32` so the       */
-/*   production-test programmer at tools/program_eeprom.py and the    */
+/*   production-test programmer at scripts/program_eeprom.py and the    */
 /*   runtime here cannot disagree on the manifest's checksum.        */
 /* ---------------------------------------------------------------- */
 

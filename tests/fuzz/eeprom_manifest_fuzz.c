@@ -8,7 +8,7 @@
  * The manifest is a fixed-layout 128-byte struct (see
  * `alp_hw_info_eeprom_t` in hw_info.h) with magic + schema_version +
  * strings + CRC32.  Production-test writes it via
- * `tools/program_eeprom.py`; the SDK reads it at boot.
+ * `scripts/program_eeprom.py`; the SDK reads it at boot.
  *
  * What this harness catches:
  *   - Magic / schema-version validation that overruns the input
@@ -36,7 +36,7 @@
 
 #include "alp/hw_info.h"
 
-/* CRC-32 (ISO-3309) -- same algorithm `tools/program_eeprom.py` +
+/* CRC-32 (ISO-3309) -- same algorithm `scripts/program_eeprom.py` +
  * `zlib.crc32` use.  Inlined so the harness has no external dependency. */
 static uint32_t crc32_iso3309(const uint8_t *buf, size_t len)
 {

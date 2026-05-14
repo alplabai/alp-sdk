@@ -105,6 +105,27 @@ that lands before the v0.3.0 tag.)
   non-tracked file was dead-link bait for anyone cloning the
   public repo.  Removed; the "Open questions" stand on their
   own.
+- **`tools/program_eeprom.py` moved to `scripts/program_eeprom.py`.**
+  The `tools/` directory only held one script (the EEPROM
+  manifest packer); `scripts/` already hosts 13 similar Python
+  utilities (`abi_snapshot.py`, `validate_metadata.py`,
+  `validate_board_yaml.py`, `check_pin_conflicts.py`, etc.).
+  Folding the single-file directory into `scripts/` removes one
+  top-level entry and makes the "ALP SDK has one place for
+  helper scripts" rule unambiguous.  Files touched: `README.md`,
+  `docs/board-id.md`, `docs/bring-up-v2n.md`,
+  `docs/getting-started.md`, `docs/test-plan.md`,
+  `docs/troubleshooting.md`,
+  `examples/v2n/v2n-board-id-readout/README.md`,
+  `examples/v2n/v2n-eeprom-manifest-dump/README.md`,
+  `include/alp/hw_info.h`, `src/zephyr/hw_info_zephyr.c`,
+  `tests/fuzz/eeprom_manifest_fuzz.c`,
+  `tests/scripts/test_program_eeprom.py`, plus the script's own
+  self-reference docstring.  Stale `tools/__pycache__/`
+  directory (the only remaining content after the move, and
+  untracked) deleted to fully remove the top-level entry.
+  Historical `tools/` mentions in this `CHANGELOG.md` left
+  untouched.
 
 ### Changed (2026-05-13 -- top-level UX simplification cont.)
 

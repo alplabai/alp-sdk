@@ -50,7 +50,7 @@ typedef struct {
 
 The CRC32 polynomial matches Python's `zlib.crc32` (poly
 `0xEDB88320`, init `0xFFFFFFFF`, xor-out `0xFFFFFFFF`) so the
-production-test programmer (`tools/program_eeprom.py`) and the
+production-test programmer (`scripts/program_eeprom.py`) and the
 runtime reader cannot disagree.
 
 ## Programming flow
@@ -58,7 +58,7 @@ runtime reader cannot disagree.
 ```
 production tool                          on-module EEPROM
 ─────────────────                        ────────────────
-$ python tools/program_eeprom.py \
+$ python scripts/program_eeprom.py \
       --bus /dev/i2c-N \
       --addr 0x50 \
       --family v2n \
@@ -179,7 +179,7 @@ not `sku`.
 * [`<alp/hw_info.h>`](../include/alp/hw_info.h) -- public API.
 * [`src/zephyr/hw_info_zephyr.c`](../src/zephyr/hw_info_zephyr.c) --
   Zephyr-side reader.
-* [`tools/program_eeprom.py`](../tools/program_eeprom.py) --
+* [`scripts/program_eeprom.py`](../scripts/program_eeprom.py) --
   production-test programmer.
 * [`metadata/e1m_modules/v2n/hw-revisions.yaml`](../metadata/e1m_modules/v2n/hw-revisions.yaml) --
   V2N hw-rev divider definition (mirrored for V2N-M1 / AEN families).

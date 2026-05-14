@@ -63,5 +63,5 @@ carrier wires the EEPROM elsewhere.
   spec for the manifest.
 * [`<alp/hw_info.h>`](../../../include/alp/hw_info.h) -- `struct
   alp_hw_info_eeprom_t`.
-* [`tools/program_eeprom.py`](../../../tools/program_eeprom.py) --
+* [`scripts/program_eeprom.py`](../../../scripts/program_eeprom.py) --
   the production-test programmer that writes the manifest.

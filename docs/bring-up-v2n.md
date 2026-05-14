@@ -126,7 +126,7 @@ exercising the I2C bus):
 
 ## 4. Read the SoM hardware-info manifest
 
-If the production-test programmer (`tools/program_eeprom.py`) has
+If the production-test programmer (`scripts/program_eeprom.py`) has
 been run against this module, the on-module 24C128 EEPROM at
 `E1M_I2C0` carries a 128-byte manifest with the SKU + hw_rev +
 serial number.  Confirm:
