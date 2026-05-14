@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: drone-autopilot
+  description: |
+    Self-contained quadcopter flight controller on E1M-AEN.
+    Cascaded 1 kHz rate / 250 Hz attitude / 25 Hz nav PID loops,
+    SBUS RC receiver, motor mixer, flight-mode state machine
+    (manual / stabilise / GPS-hold / RTH / failsafe).
+    Showcases the SDK's real-time control story.
+common:
+  tags: autopilot drone uav control marketing showcase
+  harness: console
+tests:
+  alp_sdk.examples.drone_autopilot.native_sim:
+    platform_allow: native_sim/native/64
+    build_only: true
+  alp_sdk.examples.drone_autopilot.aen:
+    platform_allow:
+      - alif_e7_dk_rtss_hp
+    build_only: true

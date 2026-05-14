@@ -1,0 +1,48 @@
+# board.yaml -- quadcopter autopilot demo.
+#
+# Self-contained PID-stabilised flight controller running on an
+# E1M-AEN module.  IMU + barometer + GNSS sensor fusion via the
+# Madgwick library, four ESC PWM outputs through the portable
+# alp_pwm_t surfaces, SBUS RC receiver input via UART.  Flight-
+# mode state machine: manual / stabilised / GPS-hold / RTH /
+# failsafe.
+#
+# Demonstrates the v0.5 SDK's real-time control story: the same
+# host MCU runs the IMU sample loop, attitude estimation, PID
+# control cascade, motor mixer, AND the failsafe at deterministic
+# kHz cadences -- all in portable C with no vendor symbols.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701           # E7's M55 HP core handles the 1 kHz
+                             # rate loop comfortably; Helium MVE
+                             # accelerates Madgwick.
+
+carrier:
+  name: E1M-EVK
+
+os: zephyr
+
+# Library set: Madgwick AHRS for attitude estimation, PID for the
+# control cascade.  Both pulled in via §D.lib loader; their
+# HW-backend choice (FPU on AEN, TMU CORDIC on V2N) comes from
+# the SoM's capabilities: block.
+libraries:
+  - madgwick_ahrs
+  - pid
+
+peripherals:
+  - i2c                    # IMU + barometer.
+  - uart                   # SBUS RC receiver + GNSS.
+  - pwm                    # ESC outputs (4-6 channels for quad / hex).
+  - gpio                   # Arming-switch input + status LED.
+
+chips:
+  - lsm6dso                # 6-axis IMU (rate gyro + accel).
+  - bmp390                 # Barometer for altitude hold.
+  - ublox_neo_m9n          # GNSS for position hold / RTH.
+  - ina236                 # Battery monitor (telemetry + failsafe).
+
+diagnostics:
+  log_level: warning       # Quiet at flight time; warning + error only.
