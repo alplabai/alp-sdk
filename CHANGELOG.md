@@ -84,6 +84,34 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- meta-alp-sdk Yocto layer + drone-autopilot MAVLink GCS link)
+
+`[UNTESTED]` -- both pieces are paper-correct v0.5 scaffolding.
+
+- `meta-alp-sdk/` -- top-level Yocto layer that wires the SDK into
+  ROS 2 Humble + DEEPX-on-Linux images for V2N + V2N-M1 Linux
+  targets.  Layer compatibility: `kirkstone scarthgap`.  Ships:
+  - `conf/layer.conf` + `conf/machine/e1m-v2n101.conf` +
+    `conf/machine/e1m-v2m101.conf` (V2N base vs V2N + DEEPX SoM).
+  - `recipes-core/alp-sdk/alp-sdk_0.5.bb` -- builds + installs
+    `libalp_sdk.so` + the `<alp/*>` headers.
+  - `recipes-ros/alp-perception/alp-perception_0.5.bb` -- builds
+    the v2n-m1-ros-perception ROS 2 node from `examples/v2n/`.
+  - `recipes-deepx/dx-rt/dx-rt_2.4.bb` -- pins DEEPX runtime +
+    kernel module to v2.4.0; V2N base machines get a stub.
+  - `recipes-images/alp-image-edge.bb` -- reference edge AI
+    image bundling alp-sdk + dx-rt + ROS 2 + the perception node.
+- `examples/drone-autopilot/src/mavlink.{c,h}` -- minimal MAVLink
+  v2 stack (no upstream `c_library_v2` dependency).  Pack/parse
+  for HEARTBEAT / ATTITUDE / GPS_RAW_INT / GLOBAL_POSITION_INT /
+  BATTERY_STATUS / RC_CHANNELS outbound; HEARTBEAT + COMMAND_LONG
+  (arm/disarm + mode set) inbound.  Wired into `main.c` as two
+  threads (`mav_tx` @ 10 Hz, `mav_rx` byte-driven, both priority
+  5).  Customers drop in the upstream c_library_v2 when they need
+  the full message dialect -- symbol prefixes don't collide
+  (`alp_mavlink_*` vs `mavlink_*`).  CRC-X.25 + per-message CRC
+  extras hard-coded for the 7 message types we touch.
+
 ### Added (2026-05-14 -- twister scenarios for the 6 LVGL + application demos)
 
 Each of the new demo examples got a `testcase.yaml` registering

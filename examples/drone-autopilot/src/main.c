@@ -14,6 +14,8 @@
  *   prio 2   attitude_loop  250 Hz
  *   prio 3   rc_loop        50 Hz   -- SBUS UART read.
  *   prio 4   nav_loop       25 Hz   -- GPS + baro + battery.
+ *   prio 5   mav_tx         10 Hz   -- MAVLink telemetry pack/send.
+ *   prio 5   mav_rx         --      -- MAVLink frame parse (UART read).
  *   prio 6   main           --      -- telemetry status print.
  *
  * The rate loop owns the motors.  If it stops getting CPU time
@@ -27,18 +29,21 @@
 
 #include "autopilot.h"
 #include "sbus.h"
+#include "mavlink.h"
 
 LOG_MODULE_REGISTER(drone_autopilot, LOG_LEVEL_WRN);
 
 static autopilot_state_t g_state;
 
 #define STACK_SIZE 4096
-K_THREAD_STACK_DEFINE(stk_rate,  STACK_SIZE);
-K_THREAD_STACK_DEFINE(stk_atti,  STACK_SIZE);
-K_THREAD_STACK_DEFINE(stk_nav,   STACK_SIZE);
-K_THREAD_STACK_DEFINE(stk_rc,    STACK_SIZE);
+K_THREAD_STACK_DEFINE(stk_rate,    STACK_SIZE);
+K_THREAD_STACK_DEFINE(stk_atti,    STACK_SIZE);
+K_THREAD_STACK_DEFINE(stk_nav,     STACK_SIZE);
+K_THREAD_STACK_DEFINE(stk_rc,      STACK_SIZE);
+K_THREAD_STACK_DEFINE(stk_mav_tx,  STACK_SIZE);
+K_THREAD_STACK_DEFINE(stk_mav_rx,  STACK_SIZE);
 
-static struct k_thread t_rate, t_atti, t_nav, t_rc;
+static struct k_thread t_rate, t_atti, t_nav, t_rc, t_mav_tx, t_mav_rx;
 
 static void rate_entry(void *p1, void *p2, void *p3) {
     ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -55,6 +60,14 @@ static void nav_entry(void *p1, void *p2, void *p3) {
 static void rc_entry(void *p1, void *p2, void *p3) {
     ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
     autopilot_rc_loop(&g_state);
+}
+static void mav_tx_entry(void *p1, void *p2, void *p3) {
+    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
+    alp_mavlink_telem_loop(&g_state);
+}
+static void mav_rx_entry(void *p1, void *p2, void *p3) {
+    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
+    alp_mavlink_rx_loop(&g_state);
 }
 
 int main(void)
@@ -88,9 +101,27 @@ int main(void)
                     K_PRIO_PREEMPT(4), 0, K_NO_WAIT);
     k_thread_name_set(&t_nav, "nav_loop");
 
+    /* MAVLink ground-station link -- sysid=1, compid=1.  Customers
+     * tweak per-vehicle in a multi-drone swarm so QGroundControl can
+     * tell them apart. */
+    if (alp_mavlink_init(/*sysid=*/1, /*compid=*/1) != 0) {
+        LOG_WRN("alp_mavlink_init failed -- telemetry link disabled");
+    } else {
+        k_thread_create(&t_mav_tx, stk_mav_tx,
+                        K_THREAD_STACK_SIZEOF(stk_mav_tx),
+                        mav_tx_entry, NULL, NULL, NULL,
+                        K_PRIO_PREEMPT(5), 0, K_NO_WAIT);
+        k_thread_name_set(&t_mav_tx, "mav_tx");
+
+        k_thread_create(&t_mav_rx, stk_mav_rx,
+                        K_THREAD_STACK_SIZEOF(stk_mav_rx),
+                        mav_rx_entry, NULL, NULL, NULL,
+                        K_PRIO_PREEMPT(5), 0, K_NO_WAIT);
+        k_thread_name_set(&t_mav_rx, "mav_rx");
+    }
+
     /* Slow telemetry print -- 1 Hz status line over the diagnostic
-     * UART.  Real ground-station telemetry runs over MAVLink which
-     * is a separate downstream demo. */
+     * UART.  Useful when no GCS is attached. */
     while (1) {
         LOG_INF("mode=%d arm=%d roll=%.1f pitch=%.1f alt=%.1fm bat=%.2fV",
                 (int)g_state.mode, (int)g_state.armed,

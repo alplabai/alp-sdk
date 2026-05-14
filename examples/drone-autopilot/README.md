@@ -31,6 +31,15 @@ motor mixer → ESCs.
 - **Two libraries**: `madgwick_ahrs` (attitude fusion), `pid`
   (control kernel).  Loader-emitted FPU + Helium binding on
   AEN; TMU CORDIC on V2N.
+- **MAVLink v2 ground-station link** -- minimal in-tree stack
+  (`src/mavlink.{c,h}`) talks to QGroundControl / Mission Planner
+  over a SiK telemetry radio on UART2 @ 57600 baud.
+  - Tx: `HEARTBEAT` (1 Hz), `ATTITUDE` (10 Hz), `GPS_RAW_INT` +
+    `GLOBAL_POSITION_INT` (5 Hz), `BATTERY_STATUS` (1 Hz).
+  - Rx: `COMMAND_LONG` for arm/disarm + mode change, `HEARTBEAT`
+    for GCS link-loss detection.
+  - Swap the in-tree stack for upstream `c_library_v2` when you
+    need the full 200-message dialect.
 
 ## Hardware
 

@@ -22,4 +22,5 @@ target_sources(app PRIVATE
     src/autopilot.c
     src/sbus.c
     src/mixer.c
+    src/mavlink.c
 )
