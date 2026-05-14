@@ -10,6 +10,7 @@
 
 #include <zephyr/ztest.h>
 
+#include "alp/adc.h"        /* alp_dac_open / alp_dac_t / alp_dac_config_t */
 #include "alp/peripheral.h"
 
 ZTEST(alp_peripheral, test_dac_null_cfg) {
