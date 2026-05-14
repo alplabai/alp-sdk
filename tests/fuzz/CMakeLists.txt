@@ -45,6 +45,9 @@ _alp_add_fuzz_target(iot_mqtt)
 _alp_add_fuzz_target(eeprom_manifest)
 _alp_add_fuzz_target(gd32_bridge_frame)
 _alp_add_fuzz_target(swd_packet)
+_alp_add_fuzz_target(mproc_frame)
+_alp_add_fuzz_target(ble_adv_parser)
+_alp_add_fuzz_target(optiga_apdu)
 
 # gd32_bridge_frame additionally links the firmware-side
 # protocol.c + bridge_hw_stub.c so the harness exercises the

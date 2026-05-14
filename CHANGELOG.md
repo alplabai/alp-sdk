@@ -159,6 +159,47 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- fuzz coverage expansion §C.3)
+
+Three new libFuzzer harnesses under `tests/fuzz/` for parser
+surfaces that hadn't been covered yet.  All compile only with
+`ALP_BUILD_FUZZ=ON` + clang; default builds untouched.  Existing
+ASan + UBSan + libFuzzer flags carry over via the existing
+`_alp_add_fuzz_target` helper in `tests/fuzz/CMakeLists.txt`.
+
+- **`tests/fuzz/mproc_frame_fuzz.c`** -- the v0.4-prep mproc
+  envelope decoder (`src/common/proto/alp_mproc_frame.c`).
+  Verifies the 12-byte header decode + payload-length bound +
+  encoder/decoder round-trip.  Catches: header / payload-length
+  disagreement (OOB read if the decoder believes length blindly),
+  magic-mismatch crash vs clean drop, negative-length cast.
+- **`tests/fuzz/ble_adv_parser_fuzz.c`** -- BLE adv/scan-response
+  AD-structure enumerator.  Reference parser inline; harness
+  asserts every (offset + len) range stays within the input.
+  Catches the canonical BLE CVE class: length-field overrun
+  where a malicious adv packet claims `len_n` greater than the
+  remaining buffer.
+- **`tests/fuzz/optiga_apdu_fuzz.c`** -- OPTIGA Trust M APDU
+  response parser.  Walks ISO-7816 SW1/SW2 split + BER-TLV
+  payload.  Catches: TLV length-of-length overflow (CVE class
+  in TLV parsers generally), unknown SW codes that must surface
+  as `ALP_ERR_IO` rather than crashing, off-by-one on the
+  SW1-SW2 trailing-bytes split.
+
+Corpus directories seeded empty under `tests/fuzz/corpus/`
+(`mproc_frame/`, `ble_adv_parser/`, `optiga_apdu/`) with
+`.gitkeep` markers; real corpora grow as the fuzzers find
+interesting inputs.
+
+Deferred from this batch:
+- `tls_handshake_fuzz.c` -- OpenSSL's upstream fuzz coverage on
+  the TLS handshake state machine is comprehensive; adding our
+  own gives marginal value.
+- `board_yaml_loader_fuzz.c` + `som_preset_yaml_fuzz.c` --
+  Python-side targets via Atheris.  Need a different
+  infrastructure than the C `_alp_add_fuzz_target` pattern; lands
+  in a follow-up alongside the Atheris CI workflow.
+
 ### Added (2026-05-14 -- ABI stability markers across public headers §C.2)
 
 - **`docs/abi-markers.md`** (new) -- classification doc for the
