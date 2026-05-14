@@ -394,7 +394,7 @@ target verification still parked behind the `hil-yocto` runner.
 **Secure boot + OTA scaffolding:**
 
 - **MCUboot sysbuild profile for AEN-Zephyr.**
-  `sysbuild/aen/sysbuild.conf` configures MCUboot + ECDSA-P256 +
+  `zephyr/sysbuild/aen/sysbuild.conf` configures MCUboot + ECDSA-P256 +
   `swap-using-scratch`.  Dev-key generator at
   `keys/generate_dev_key.sh` (idempotent; `chmod 600`).  Full
   chain-of-trust + key lifecycle in `docs/secure-boot.md`.

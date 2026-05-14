@@ -54,7 +54,7 @@ and Alif provides their signing keys.
    west build -b alp_e1m_evk_aen \
        path/to/app \
        --sysbuild \
-       --sysbuild-config alp-sdk/sysbuild/aen/sysbuild.conf
+       --sysbuild-config alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
    ```
 4. `build/zephyr/zephyr.signed.bin` is your signed image.
 5. Flash both the MCUboot bootloader and the signed app:
@@ -139,7 +139,7 @@ safety net for OTA.
 
 ## See also
 
-- [`sysbuild/aen/README.md`](../sysbuild/aen/README.md) -- how
+- [`zephyr/sysbuild/aen/README.md`](../zephyr/sysbuild/aen/README.md) -- how
   to invoke the sysbuild config.
 - [`keys/README.md`](../keys/README.md) -- key files + dev
   key generation.

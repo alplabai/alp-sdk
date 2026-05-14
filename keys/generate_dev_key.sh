@@ -43,5 +43,5 @@ imgtool keygen --key "${KEY_PATH}" --type ecdsa-p256
 # device-trust story even if it has no production reach.
 chmod 600 "${KEY_PATH}"
 
-echo "Done.  Reference from sysbuild/aen/sysbuild.conf already points here."
+echo "Done.  Reference from zephyr/sysbuild/aen/sysbuild.conf already points here."
 echo "REMINDER: this key is for development only.  See keys/README.md."

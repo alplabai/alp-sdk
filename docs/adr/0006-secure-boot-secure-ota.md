@@ -201,7 +201,7 @@ Rationale for the switch:
 
 The original ADR commits AEN-Zephyr to MCUboot's swap-with-revert
 flow.  MCUboot scaffolding has landed
-([`sysbuild/aen/sysbuild.conf`](../../sysbuild/aen/sysbuild.conf) +
+([`zephyr/sysbuild/aen/sysbuild.conf`](../../zephyr/sysbuild/aen/sysbuild.conf) +
 [`docs/secure-boot.md`](../secure-boot.md)).  The OTA-delivery
 half (Mender Zephyr client vs Hawkbit-on-Zephyr) is **decision
 pending** for v0.4-final -- see

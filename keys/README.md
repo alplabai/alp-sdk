@@ -7,7 +7,7 @@ signing.  Production keys never live in git.**
 
 | File                              | Type                 | Tracked in git? | Notes |
 |-----------------------------------|----------------------|-----------------|-------|
-| `mcuboot_dev_ecdsa_p256.pem`      | ECDSA-P256 dev key   | NO (`.gitignore`'d) | Generated locally via `generate_dev_key.sh`.  Used by [`sysbuild/aen/sysbuild.conf`](../sysbuild/aen/sysbuild.conf).  **Insecure: signing power equals every developer who's ever cloned this repo.** |
+| `mcuboot_dev_ecdsa_p256.pem`      | ECDSA-P256 dev key   | NO (`.gitignore`'d) | Generated locally via `generate_dev_key.sh`.  Used by [`zephyr/sysbuild/aen/sysbuild.conf`](../zephyr/sysbuild/aen/sysbuild.conf).  **Insecure: signing power equals every developer who's ever cloned this repo.** |
 | `mcuboot_prod_ecdsa_p256.pub.pem` | ECDSA-P256 prod pub  | YES (when it lands) | Public half only.  Compiled into the bootloader for verification.  Production private key never leaves OPTIGA Trust M. |
 
 ## Generating the dev key

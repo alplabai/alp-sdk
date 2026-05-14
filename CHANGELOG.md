@@ -138,6 +138,18 @@ that lands before the v0.3.0 tag.)
   `alp,pin-array.yaml`, `vendor-prefixes.txt`.  Comment update
   in `src/zephyr/peripheral_gpio.c`.  Top-level `dts/`
   directory deleted.
+- **`sysbuild/aen/` moved to `zephyr/sysbuild/aen/`.**  Sysbuild
+  configs are Zephyr-only artefacts (MCUboot + ECDSA-P256
+  secure-boot profile for AEN-Zephyr applications); folding them
+  under the Zephyr module subtree means the top-level repo only
+  shows directories that are OS-agnostic or OS-router
+  (`chips/`, `examples/`, `src/`, etc.) -- Zephyr-specific
+  artefacts cluster under `zephyr/`.  Files touched:
+  `VERSIONS.md`, `docs/adr/0006-secure-boot-secure-ota.md`,
+  `docs/secure-boot.md`, `docs/test-plan.md`, `keys/README.md`,
+  `keys/generate_dev_key.sh`, plus the moved README +
+  sysbuild.conf internal self-refs.  Top-level `sysbuild/`
+  directory deleted (no longer holds any siblings).
 
 ### Changed (2026-05-13 -- top-level UX simplification cont.)
 

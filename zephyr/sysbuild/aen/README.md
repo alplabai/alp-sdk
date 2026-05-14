@@ -1,4 +1,4 @@
-# sysbuild/aen — E1M-AEN secure-boot build profile
+# zephyr/sysbuild/aen — E1M-AEN secure-boot build profile
 
 Sysbuild configuration template for AEN-Zephyr applications that
 want MCUboot-verified secure boot.
@@ -10,7 +10,7 @@ intended v0.4 reference path (MCUboot + ECDSA-P256 +
 swap-using-scratch).  The authoritative `alp_e1m_evk_aen` Zephyr
 board file lives at
 [`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
-(TBD; tracked in [`VERSIONS.md`](../../VERSIONS.md) v0.3 row).
+(TBD; tracked in [`VERSIONS.md`](../../../VERSIONS.md) v0.3 row).
 Once that lands, the `pr-twister` workflow gains a sysbuild scenario that
 compile-verifies this config against a smoke example.  Until
 then this directory documents the target so downstream consumers
@@ -24,7 +24,7 @@ don't have to reverse-engineer it.
 west build -b alp_e1m_evk_aen \
     path/to/app \
     --sysbuild \
-    --sysbuild-config alp-sdk/sysbuild/aen/sysbuild.conf
+    --sysbuild-config alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
 
 # Produces:
 #   build/zephyr/zephyr.signed.bin     -- signed application image
@@ -38,7 +38,7 @@ west flash --bin-file build/zephyr/zephyr.signed.bin
 ## Key management
 
 The reference config points at
-[`<repo>/keys/mcuboot_dev_ecdsa_p256.pem`](../../keys/README.md)
+[`<repo>/keys/mcuboot_dev_ecdsa_p256.pem`](../../../keys/README.md)
 -- a **development key**, not for production.  Generate it
 locally:
 
@@ -50,7 +50,7 @@ For production, regenerate the key from a secure source and
 hand the public half over to the bootloader build via a
 `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` override.  The private half
 ultimately lives in the OPTIGA Trust M's secure NVM -- see
-[`docs/secure-boot.md`](../../docs/secure-boot.md) for the full
+[`docs/secure-boot.md`](../../../docs/secure-boot.md) for the full
 lifecycle.
 
 ## Why ECDSA-P256
