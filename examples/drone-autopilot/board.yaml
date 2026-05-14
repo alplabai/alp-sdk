@@ -45,4 +45,4 @@ chips:
   - ina236                 # Battery monitor (telemetry + failsafe).
 
 diagnostics:
-  log_level: warning       # Quiet at flight time; warning + error only.
+  log_level: warn          # Quiet at flight time; warn + error only.
