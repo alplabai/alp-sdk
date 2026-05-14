@@ -84,6 +84,26 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Changed (2026-05-14 -- §D.closeout: v1.0-readiness + README + test-coverage closeout)
+
+Phase 5 (closeout) of the chip-and-library ecosystem expansion per
+docs/superpowers/specs/2026-05-14-chip-and-library-ecosystem-design.md.
+
+- `docs/v1.0-readiness.md`: new Pillar 4-bis section declaring the
+  three-tier ecosystem in operation (Tier 1 = 80 chips + 25 libs;
+  Tier 2 in `alp-sdk-community` = skeleton + 10 seed chips;
+  Tier 3 = customer / private repos via pattern-only support).
+- `README.md`: chip-count bump 20+ → 80 + Tier 2 pointer.
+- `docs/test-coverage-audit.md`: chips/ row file count 108 → 254,
+  driver count 21 → 80; notes the [UNTESTED] badge convention.
+
+Total v0.5 §D-batch delivery:
+- 49 new Tier 1 chip drivers (§D.AI 18, §D.industrial 18, §D.iot 9,
+  §D.audio 6)
+- 17 new Tier 1 library knobs + per-library hw-backends.yaml
+- §D.lib.loader cross-library HW-backend loader + Kconfig.alp-libraries
+- alp-sdk-community public repo + skeleton + 10 seed contributions
+
 ### Added (2026-05-14 -- §D.community: Tier 2 contribution surfaces in alp-sdk)
 
 Phase 3 of the chip-and-library ecosystem expansion per

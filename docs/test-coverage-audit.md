@@ -17,7 +17,7 @@ follow-up work.
 
 | Area                    | ZTEST count | File                                       | Notes                                                              |
 |-------------------------|-------------|--------------------------------------------|--------------------------------------------------------------------|
-| `chips/`                | 108         | `tests/zephyr/chips/src/main.c` (2107 LOC) | 21 chip drivers + 3 fakes (`lsm6dso`, `bme280`, `ssd1306`)         |
+| `chips/`                | 254         | `tests/zephyr/chips/src/main.c` (~2700 LOC) | 80 chip drivers + 3 fakes (`lsm6dso`, `bme280`, `ssd1306`); 49 chips added in the v0.5 §D.AI/industrial/iot/audio batches ship with `[UNTESTED]` badges + NULL-arg-guard ZTESTs |
 | `peripheral/` (13 APIs) | 82          | `tests/zephyr/peripheral/src/{main,i2c,spi,gpio,uart,pwm,adc,dac,counter,qenc,i2s,can,rtc,wdt}.c` | Split per peripheral in §C.16; `main.c` keeps cross-cutting tests (TMU, power, AEN audit gaps, delay, SoC caps, V2N supervisor, TRNG entropy) |
 | `iot/`                  | 14          | `tests/zephyr/iot/src/main.c`              | WiFi + MQTT (cleartext + TLS) negative paths                       |
 | `audio/`                | 9           | `tests/zephyr/audio/src/main.c`            | `audio_in` + `audio_out` lifecycle + arg validation                |

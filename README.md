@@ -220,7 +220,8 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
   │               │    │  ─ LVGL               ─ BOARD_ID ADC  ─ Shared mem │
   │               │    │                       ─ <alp/hw_info> ─ HW sem     │
   │               │    │                                                    │
-  │               │    │  ─── 20+ chip drivers (lsm6dso, bmi323, bmp581,    │
+  │               │    │  ─── 80 Tier 1 chip drivers + Tier 2 community repo│
+  │               │    │       (lsm6dso, bmi323, bmp581,                    │
   │               │    │       icm42670, ina236, tmp112, tcal9538,          │
   │               │    │       rv3028c7, 24c128, cc3501e, ssd13xx, ...)     │
   │               │    │                                                    │
