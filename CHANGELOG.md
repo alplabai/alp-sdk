@@ -159,6 +159,27 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- GD32 timer-sync HAL §C.15b)
+
+- **`bridge_hw_timer_sync` real body** in
+  `firmware/gd32-bridge/hal/bridge_hw_gd32.c`.  Replaces the
+  NOSUPPORT stub with a master-slave SMC configuration over the
+  three GD32G5x3 advanced timers (TIMER0 / TIMER7 / TIMER19).
+  Wire byte mapping: `master`/`slave` integer ids 0..2 ->
+  TIMER0/TIMER7/TIMER19; `mode` byte 0..5 -> vendor SMC encoding
+  (DISABLE / RESTART / PAUSE / EVENT / EXTERNAL0 /
+  QUAD_DECODER_MODE1).  Master emits its UPDATE event as
+  `TRI_OUT0_SRC_UPDATE` + flips `MASTER_SLAVE_MODE_ENABLE`; slave
+  listens to internal trigger ITI0 + adopts the mapped slave
+  mode.  Out-of-range master==slave / unknown timer ids / unknown
+  mode all return clean error codes (INVAL / RANGE) rather than
+  silently selecting a default.  Idempotent.
+
+  SYSCFG router that maps ITI0 of the slave to a specific upstream
+  TIMER's TRGO is left at chip default; a future hardware-bring-up
+  tweak via `trigsel_init` can override that for non-default
+  (master, slave) pairings.  Verification gate is HiL.
+
 ### Added (2026-05-14 -- GD32 PWM input-capture HAL §C.15a)
 
 - **`bridge_hw_pwm_capture_begin` / `_read` / `_end` real bodies**
