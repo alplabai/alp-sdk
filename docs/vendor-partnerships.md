@@ -28,6 +28,16 @@ all assume an upstream Renesas FSP for the RZ/V2N N44 SoC.
 
 **Status update 2026-05-14 (verified against upstream)**:
 
+**Zephyr-integration status (§C.40 cross-check)**: Zephyr's
+`hal_renesas` module already mirrors the RZ/V FSP under
+`drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/` -- Zephyr v3.7 pins
+revision `af77d7cd...`, which a customer `west update` pulls
+automatically once `hal_renesas` is in the name-allowlist
+(landed §C.40).  No extra customer-side setup needed for
+Zephyr builds.  Bare-metal customers can still pull the
+upstream `rzv-fsp` directly via our `vendor-sdks` group
+(pinned to v3.1.0 for audit clarity).
+
 The RZ/V FSP **is already public** at
 [`github.com/renesas/rzv-fsp`](https://github.com/renesas/rzv-fsp)
 under **BSD-3-Clause** for the MPU BSP / Board BSP / HAL
@@ -82,7 +92,21 @@ image build flow for `mproc-mailbox`.
 Alif Semiconductor publishes 59 repos at
 [`github.com/alifsemi`](https://github.com/alifsemi).  The
 relevant ones for the SDK split cleanly into two licensing
-buckets:
+buckets.
+
+**Critical Zephyr-integration gap** (verified §C.40): Unlike
+Renesas + NXP, Alif's HAL **is NOT in Zephyr v3.7's modules
+tree** -- there's no `modules/hal/alif` and no `hal_alif`
+project in Zephyr's west.yml.  Customers building for the AEN
+family MUST add Alif's own Zephyr integration as an extra
+module.  Our `west.yml`'s `vendor-sdks` group is the canonical
+SDK-side answer (pins `sdk-alif v2.3.0-rc1`); customers can
+also point `EXTRA_ZEPHYR_MODULES` at their own clone of
+`sdk-alif` or `zephyr_alif`, or use Alif's own west manifest
+as the workspace topdir.  This was a silent bug in the
+pre-§C.40 west.yml -- the `name-allowlist` listed `hal_alif`
+but Zephyr v3.7 simply doesn't have it, so `west update`
+skipped the line.
 
 **Genuinely open (Apache-2.0 / MIT, inherited from upstream
 forks)**:
@@ -222,6 +246,17 @@ exception -- those are real Apache-2.0.
 ships when NXP's FlexSPI OTFAD driver stabilises.
 
 **Status update 2026-05-14 (verified against upstream)**:
+
+**Zephyr-integration status (§C.40 cross-check)**: Zephyr's
+`hal_nxp` module mirrors MCUXpresso under
+`mcux/mcux-sdk-ng/devices/i.MX/i.MX93/` -- 10 i.MX 93 SKU
+device-headers (MIMX9301 .. MIMX9352) in tree.  Zephyr v3.7
+pins revision `862e0015...`.  E1M-NX9101's target part
+(MIMX9352) is covered.  No extra customer-side setup needed
+for Zephyr builds once `hal_nxp` is in the name-allowlist
+(landed §C.40).  Bare-metal MCU customers pull the
+manifest-aware MCUXpresso directly via our `vendor-sdks`
+group (pinned to v26.03.00 for audit clarity).
 
 NXP publishes the MCUXpresso SDK on GitHub as a manifest
 repo at

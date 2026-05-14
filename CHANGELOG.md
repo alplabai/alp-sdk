@@ -250,6 +250,69 @@ Validators after commit:
 - metadata / portability / pin-conflicts: clean
 - abi_snapshot --diff: unchanged (pure doc-comment touch).
 
+### Fixed (2026-05-14 -- Zephyr-vendor-HAL integration cross-check §C.40)
+
+Verified each vendor SDK's actual Zephyr-integration state
+(parallel to §C.33..§C.35's vendor-repo verification).
+Surfaced and fixed a silent bug in the pre-§C.40 west.yml.
+
+Findings:
+
+- **Zephyr v3.7 has NO `hal_alif`** in its modules tree.  The
+  SDK's `name-allowlist` listed `hal_alif` but `west update`
+  silently skipped it because Zephyr's manifest has no
+  project of that name.  Result: AEN builds against the
+  SDK's default west workspace would have linked against
+  *nothing* on the Alif side.  Bug.
+- **Zephyr's `hal_renesas`** mirrors RZ/V FSP at
+  `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/` (Zephyr v3.7 pins
+  revision af77d7cd).  V2N + V2N-M1 paths covered.
+- **Zephyr's `hal_nxp`** covers i.MX 93 (MIMX9301..9352) at
+  `mcux/mcux-sdk-ng/devices/i.MX/i.MX93/` (Zephyr v3.7 pins
+  revision 862e0015).  E1M-NX9101's MIMX9352 covered.
+- **DEEPX** is Linux-side (PCIe + Yocto), not a Zephyr HAL.
+  `chips/deepx_dxm1/` is the host-side bring-up code that
+  runs on the Renesas A55 cluster; the NPU runtime rides on
+  the customer's Yocto image.
+
+Fixes in west.yml:
+
+- Removed bogus `hal_alif` from `name-allowlist`.
+- Added `hal_renesas` + `hal_nxp` so the V2N + i.MX 93
+  paths actually get the upstream HALs imported by default.
+- Expanded the pin-policy comment block to document the
+  Alif gap explicitly + point customers at the three valid
+  consumption paths (vendor-sdks group, EXTRA_ZEPHYR_MODULES,
+  Alif's own west manifest as workspace topdir).
+- Expanded the `vendor-sdks` group comment to clarify which
+  pins are GENUINELY required vs which are duplicative-with-
+  Zephyr (`sdk-alif` is required; `rzv-fsp` + `mcuxsdk-manifests`
+  are for bare-metal customers who don't run under Zephyr).
+
+Docs updates:
+
+- `docs/getting-started.md` §8 gains a new "How each vendor
+  SDK reaches your Zephyr build" subsection with a four-row
+  table (Renesas / NXP / Alif / DEEPX) documenting the
+  consumption path for each.  Plus a "Bare-metal /
+  non-Zephyr customers" paragraph for the `vendor-sdks`
+  group.
+- `docs/vendor-partnerships.md` Alif / Renesas / NXP sections
+  all gain a "Zephyr-integration status (§C.40 cross-check)"
+  block that records the verified integration path.
+
+This is a real material correction.  Pre-§C.40 customers
+building for AEN would have had a silently-broken
+`west update` (no hal_alif imported); post-§C.40 they
+either consume `sdk-alif` via the vendor-sdks group, or
+they explicitly opt out with EXTRA_ZEPHYR_MODULES.
+
+Validators after commit:
+- metadata: 0 failures
+- portability: 30/30
+- pin-conflicts: clean
+- abi_snapshot --diff: unchanged (config + docs only)
+
 ### Added (2026-05-14 -- vendor-licence section + DEEPX sample + west.yml vendor pins §C.36 §C.37 §C.38)
 
 Closes the remaining in-repo work surfaced by the

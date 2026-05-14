@@ -308,6 +308,38 @@ unencumbered.  Customer integrations that need the
 vendor-licensed bits add them to their own west.yml / Yocto
 recipes, not to ours.
 
+### How each vendor SDK reaches your Zephyr build
+
+The vendor SDKs land in your workspace through three different
+paths.  Critically, **Alif is the exception** -- it does NOT
+ship as a `hal_*` module inside Zephyr's manifest, so the
+default `west update` skips it.
+
+| Vendor   | Zephyr v3.7 import path                            | What you need to do                                                                                     |
+|----------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------|
+| **Renesas (RZ/V)** | `hal_renesas` (in Zephyr's own west.yml)   | Nothing extra.  Our `name-allowlist` lets Zephyr import it; `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/` is what the V2N + V2N-M1 paths consume. |
+| **NXP (i.MX 9x)**  | `hal_nxp` (in Zephyr's own west.yml)       | Nothing extra.  `mcux/mcux-sdk-ng/devices/i.MX/i.MX93/` covers MIMX9301..9352 (E1M-NX9101 = MIMX9352).   |
+| **Alif (Ensemble)** | **NOT in Zephyr v3.7's modules tree.**     | Pick one: (a) `west update --group-filter +vendor-sdks` to pull our pinned `sdk-alif v2.3.0-rc1`; (b) set `EXTRA_ZEPHYR_MODULES` to your own `sdk-alif` / `zephyr_alif` clone; (c) use Alif's own west manifest in `alifsemi/sdk-alif` instead of ours as the workspace topdir. |
+| **DEEPX (DX-M1)**  | Out of Zephyr scope (Linux-side runtime).  | The on-device NPU runs from a Linux PCIe driver, not a Zephyr backend.  `chips/deepx_dxm1/` is the **host-side** Zephyr code that brings up the M1 from the Renesas A55 cluster; `dx_rt` itself rides on Linux/Yocto.  See `examples/v2n/v2n-m1-deepx-inference/` and the customer-side integration notes in `docs/vendor-partnerships.md` §DEEPX. |
+
+### Bare-metal / non-Zephyr customers
+
+If you're not using Zephyr -- a bare-metal MCU build, a Yocto
+image that talks directly to silicon, or a custom RTOS -- the
+`vendor-sdks` group pins the same vendor repos to the same tags
+so you can audit-verify against the maintainer-tested versions:
+
+```bash
+# Pull every vendor SDK at the verified tags into your workspace.
+west update --group-filter +vendor-sdks
+ls modules/vendors/  # sdk-alif/ rzv-fsp/ mcuxsdk-manifests/
+```
+
+For Renesas + NXP this is duplicative with `hal_renesas` /
+`hal_nxp` (which mirror the same upstream into Zephyr's tree)
+-- the duplication is intentional so bare-metal customers don't
+have to dig through Zephyr's module organisation.
+
 ## 9. SoC capability validation
 
 In v0.3 the SoC choice flows from `board.yaml`'s `som.sku` field
