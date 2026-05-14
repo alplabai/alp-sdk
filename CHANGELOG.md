@@ -84,6 +84,30 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- §D.lib.loader: cross-library HW-backend loader hook)
+
+Phase 2b of the chip-and-library ecosystem expansion.  Adds the
+loader hook that picks the highest-priority HW backend per
+(library × accelerator class) from each enabled library's
+`metadata/library-profiles/<name>/hw-backends.yaml`, cross-
+referencing the active SoM family.
+
+- `scripts/alp_project.py` grows `_emit_library_hw_backends()`
+  (~70 LoC) — runs after the SW-fallback emission and walks each
+  library's priority list, emitting the first matching backend per
+  accelerator class as `CONFIG_*=y`.
+- `zephyr/Kconfig.alp-libraries` (~200 LoC, new file) declares every
+  per-library + per-backend Kconfig symbol the loader can emit.
+  Sourced from `zephyr/Kconfig` via `rsource` under the `ALP_SDK`
+  if-block.  SW-fallback symbols default `y`; HW-acceleration
+  symbols default off and turn on only when the loader writes them.
+
+NOT in this commit (deferred per the design spec): `capabilities:`
+blocks in `metadata/e1m_modules/E1M-*.yaml`.  Loader currently maps
+SoM family directly from SKU; finer-grained per-SoM capability
+flags (`has_ethos_u: true`, `has_dave2d: true`, ...) belong to the
+maintainer per the "Pending exact HW configurations" rule.
+
 ### Added (2026-05-14 -- §D.lib: 17 library knobs + per-library hw-backends)
 
 Phase 2 of the chip-and-library ecosystem expansion per

@@ -390,9 +390,96 @@ def _emit_zephyr(
                     lines.append(f"{kc}")
             else:
                 lines.append(f"# TODO: wire library '{lib}' once the v0.4 enable lands")
+        # §D.lib.loader -- cross-library HW-backend wiring: for each
+        # library that ships a metadata/library-profiles/<name>/
+        # hw-backends.yaml, emit the highest-priority matching
+        # CONFIG_* per accelerator class given the active SoM family.
+        # The SW fallback is already emitted unconditionally above
+        # (via _LIBRARY_KCONFIG); this layer adds the HW acceleration
+        # on top.
+        hw_lines = _emit_library_hw_backends(libs, project["som"]["sku"])
+        if hw_lines:
+            lines.append("")
+            lines.append("# §D.lib.loader -- per-library HW-accelerator wiring (auto-emitted).")
+            lines.extend(hw_lines)
         lines.append("")
 
     return "\n".join(lines) + "\n"
+
+
+# §D.lib.loader: map _sku_family() return values to the soc_family
+# tokens used in metadata/library-profiles/<name>/hw-backends.yaml.
+_SOC_FAMILY_TOKEN: dict[str, str] = {
+    "aen":    "alif_ensemble",
+    "v2n":    "renesas_rzv2n",
+    "v2n-m1": "renesas_rzv2n",     # DEEPX add-on; HW-acc tokens still resolve via host family.
+    "imx93":  "nxp_imx9",
+}
+
+
+def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
+    """Per-library HW-accelerator binding loader.
+
+    For each enabled library that ships a
+    `metadata/library-profiles/<name>/hw-backends.yaml`, pick the
+    highest-priority matching backend per accelerator class given the
+    active SoM family and emit the matching CONFIG_*=y line.
+
+    Backend entries with no `soc_family:` key are treated as universal
+    (e.g. plain FPU or generic DMA) and match any SoM.
+    """
+    import re
+    from pathlib import Path
+
+    family       = _sku_family(sku)
+    soc_token    = _SOC_FAMILY_TOKEN.get(family)
+    if soc_token is None:
+        return []
+
+    out: list[str] = []
+    repo_root = Path(__file__).resolve().parent.parent
+
+    for lib in libs:
+        prof = repo_root / "metadata" / "library-profiles" / lib / "hw-backends.yaml"
+        if not prof.exists():
+            continue
+        try:
+            text = prof.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+        # Cheap line-driven parse: every `      - { ... kconfig: CONFIG_X=y }`
+        # entry sits inside a `priority:` block; we walk top-down to keep
+        # the per-class first-match.  No yaml dependency on the loader.
+        per_class_emitted: set[str] = set()
+        current_class: str | None   = None
+        for raw in text.splitlines():
+            cls_match = re.match(r"^\s*-\s*class:\s*(\S+)", raw)
+            if cls_match:
+                current_class = cls_match.group(1)
+                continue
+            if current_class is None or current_class in per_class_emitted:
+                continue
+            entry = re.match(r"^\s*-\s*\{\s*(.+)\s*\}\s*$", raw)
+            if not entry:
+                continue
+            kv: dict[str, str] = {}
+            for tok in entry.group(1).split(","):
+                tok = tok.strip()
+                if not tok or ":" not in tok:
+                    continue
+                k, v = tok.split(":", 1)
+                kv[k.strip()] = v.strip()
+            sf  = kv.get("soc_family")
+            kcv = kv.get("kconfig")
+            if not kcv:
+                continue
+            if sf is not None and sf != soc_token:
+                continue
+            out.append(f"{kcv}  # {lib} / {current_class}")
+            per_class_emitted.add(current_class)
+
+    return out
 
 
 # Chip name -> Zephyr subsystem CONFIG_* keys the chip driver

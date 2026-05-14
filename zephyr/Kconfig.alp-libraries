@@ -1,0 +1,215 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Per-library + per-backend Kconfig symbols emitted by the
+# §D.lib.loader cross-library HW-backend loader hook in
+# scripts/alp_project.py.  Each enabled library's
+# metadata/library-profiles/<name>/hw-backends.yaml names accelerator
+# *classes* (not vendor parts) -- the loader cross-references those
+# against the active SoM family and emits the highest-priority
+# matching `CONFIG_ALP_<LIB>_<BACKEND>=y` knob.  Every library has a
+# pure-SW fallback that is always available.
+#
+# Sourced under `if ALP_SDK` from zephyr/Kconfig once the loader hook
+# is consumed downstream.  This file just declares the symbols.
+
+# v0.5 §D.lib.loader -- per-library HW-accelerator Kconfig knobs.
+
+menu "ALP SDK per-library HW-accelerator wiring"
+
+# ----------------------------------------------------------------------
+# tflite_micro
+# ----------------------------------------------------------------------
+
+config ALP_TFLM_ETHOS_U
+	bool "TFLite-Micro on Alif Ethos-U NPU"
+	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
+	help
+	  Compile TFLite-Micro kernels against the Alif Ethos-U NPU
+	  back-end (delegated execution).
+
+config ALP_TFLM_DRP_AI
+	bool "TFLite-Micro on Renesas DRP-AI NPU"
+	depends on ALP_SOC_RENESAS_RZV2N_N44
+	help
+	  Compile TFLite-Micro kernels against the Renesas DRP-AI3 NPU.
+
+config ALP_TFLM_HELIUM
+	bool "TFLite-Micro CMSIS-NN with Helium MVE (Cortex-M55)"
+	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
+
+config ALP_TFLM_NEON
+	bool "TFLite-Micro with Arm Neon SIMD (Cortex-A55)"
+	depends on ALP_SOC_RENESAS_RZV2N_N44
+
+config ALP_TFLM_DMA_COPY
+	bool "TFLite-Micro input tensor copy via DMA"
+
+config ALP_TFLM_REF_KERNELS
+	bool "TFLite-Micro reference kernels (SW fallback)"
+	default y
+
+# ----------------------------------------------------------------------
+# u8g2
+# ----------------------------------------------------------------------
+
+config ALP_U8G2_DMA2D
+	bool "u8g2 fast blit via DMA2D"
+
+config ALP_U8G2_TMU
+	bool "u8g2 fast blit via GD32 TMU bridge"
+
+config ALP_U8G2_BUS_DMA
+	bool "u8g2 I2C/SPI frame push via DMA"
+
+config ALP_U8G2_SW_BLIT
+	bool "u8g2 pure-C SW blit (fallback)"
+	default y
+
+# ----------------------------------------------------------------------
+# gfx_compat (maintainer-written thin shim)
+# ----------------------------------------------------------------------
+
+config ALP_GFX_COMPAT_GPU2D
+	bool "gfx_compat -> Alif GPU2D backend"
+config ALP_GFX_COMPAT_DMA2D
+	bool "gfx_compat -> generic DMA2D backend"
+config ALP_GFX_COMPAT_SPI_DMA
+	bool "gfx_compat SPI push via DMA"
+config ALP_GFX_COMPAT_SW
+	bool "gfx_compat pure-C SW blit (fallback)"
+	default y
+
+# ----------------------------------------------------------------------
+# madgwick_ahrs + pid + modbus
+# ----------------------------------------------------------------------
+
+config ALP_MADGWICK_FPU
+	bool "Madgwick AHRS via FPU"
+config ALP_MADGWICK_TMU
+	bool "Madgwick AHRS via GD32 TMU CORDIC"
+config ALP_MADGWICK_LIBM
+	bool "Madgwick AHRS via libm (SW fallback)"
+	default y
+
+config ALP_PID_FPU
+	bool "PID via FPU"
+config ALP_PID_TIMER
+	bool "PID with hardware timer-tick"
+config ALP_PID_INT_MATH
+	bool "PID with integer math (SW fallback)"
+	default y
+
+config ALP_MODBUS_UART_DMA
+	bool "Modbus over UART with DMA TX/RX"
+config ALP_MODBUS_ETH_DMA
+	bool "Modbus over Ethernet with DMA"
+config ALP_MODBUS_SYNC_IO
+	bool "Modbus synchronous I/O (SW fallback)"
+	default y
+
+# ----------------------------------------------------------------------
+# IoT libs (coremqtt_sn / libcoap / tinygsm / nanopb / libwebsockets /
+# jsmn / bearssl)
+# ----------------------------------------------------------------------
+
+config ALP_MQTTSN_MBEDTLS
+	bool "coreMQTT-SN with mbedTLS"
+config ALP_MQTTSN_BEARSSL
+	bool "coreMQTT-SN with BearSSL"
+config ALP_MQTTSN_NO_TLS
+	bool "coreMQTT-SN without TLS (SW fallback)"
+	default y
+
+config ALP_COAP_MBEDTLS
+	bool "libcoap with mbedTLS DTLS"
+config ALP_COAP_OSCORE
+	bool "libcoap with OSCORE"
+config ALP_COAP_NO_TLS
+	bool "libcoap without TLS (SW fallback)"
+	default y
+
+config ALP_TINYGSM_UART_DMA
+	bool "TinyGSM UART traffic with DMA"
+config ALP_TINYGSM_SYNC_IO
+	bool "TinyGSM synchronous UART (SW fallback)"
+	default y
+
+config ALP_NANOPB_SW
+	bool "nanopb (always pure-SW)"
+	default y
+
+config ALP_LWS_MBEDTLS
+	bool "libwebsockets with mbedTLS"
+config ALP_LWS_BEARSSL
+	bool "libwebsockets with BearSSL"
+config ALP_LWS_TCP_DMA
+	bool "libwebsockets TCP TX/RX with DMA"
+config ALP_LWS_NO_TLS
+	bool "libwebsockets without TLS (SW fallback)"
+	default y
+
+config ALP_JSMN_SW
+	bool "jsmn (always pure-SW)"
+	default y
+
+config ALP_BEARSSL_CAU
+	bool "BearSSL backed by GD32 CAU"
+config ALP_BEARSSL_CRYPTOCELL
+	bool "BearSSL backed by Alif CryptoCell"
+config ALP_BEARSSL_INLINE_AES
+	bool "BearSSL backed by Alif inline-AES instruction"
+config ALP_BEARSSL_OPTIGA
+	bool "BearSSL TLS handshake via OPTIGA Trust M"
+config ALP_BEARSSL_PURE_C
+	bool "BearSSL pure-C (SW fallback)"
+	default y
+
+# ----------------------------------------------------------------------
+# Audio libs (minimp3 / opus / libhelix)
+# ----------------------------------------------------------------------
+
+config ALP_MINIMP3_HELIUM
+	bool "minimp3 with Helium MVE SIMD"
+config ALP_MINIMP3_NEON
+	bool "minimp3 with Arm Neon SIMD"
+config ALP_MINIMP3_FPU
+	bool "minimp3 with FPU"
+config ALP_MINIMP3_I2S_DMA
+	bool "minimp3 PCM out via I2S DMA"
+config ALP_MINIMP3_PURE_C
+	bool "minimp3 pure-C (SW fallback)"
+	default y
+
+config ALP_OPUS_HELIUM
+	bool "Opus with Helium MVE SIMD"
+config ALP_OPUS_NEON
+	bool "Opus with Arm Neon SIMD"
+config ALP_OPUS_FPU
+	bool "Opus with FPU"
+config ALP_OPUS_I2S_DMA
+	bool "Opus PCM out via I2S DMA"
+config ALP_OPUS_PURE_C
+	bool "Opus pure-C (SW fallback)"
+	default y
+
+config ALP_LIBHELIX_FPU
+	bool "libhelix with FPU"
+config ALP_LIBHELIX_I2S_DMA
+	bool "libhelix PCM out via I2S DMA"
+config ALP_LIBHELIX_PURE_C
+	bool "libhelix pure-C (SW fallback)"
+	default y
+
+# ----------------------------------------------------------------------
+# Catch2 (host-only test fixture)
+# ----------------------------------------------------------------------
+
+config ALP_CATCH2_SW
+	bool "Catch2 (always pure-SW)"
+	default y
+
+endmenu  # "ALP SDK per-library HW-accelerator wiring"

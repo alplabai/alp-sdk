@@ -1492,4 +1492,10 @@ config ALP_SDK_CHIP_ES8388
 
 endmenu # "ALP SDK chip drivers"
 
+# §D.lib.loader -- per-library HW-accelerator Kconfig knobs declared
+# in a sibling file so the chip-driver menu above stays focused on
+# chip surfaces.  Loader emits these from each enabled library's
+# metadata/library-profiles/<name>/hw-backends.yaml.
+rsource "Kconfig.alp-libraries"
+
 endif # ALP_SDK
