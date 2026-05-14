@@ -250,6 +250,45 @@ Validators after commit:
 - metadata / portability / pin-conflicts: clean
 - abi_snapshot --diff: unchanged (pure doc-comment touch).
 
+### Changed (2026-05-14 -- vendor-partnership status: NXP MCUXpresso verification §C.34)
+
+Verified the NXP claims in `docs/vendor-partnerships.md`
+against the upstream MCUXpresso manifest repo:
+
+- The MCUXpresso SDK for i.MX 9x **is already public** at
+  `github.com/nxp-mcuxpresso/mcuxsdk-manifests`.  Latest
+  stable tag **v26.03.00** (Q1 2026); prerelease tags for
+  v26.06.00 already in flight.
+- Layout: west.yml-driven Zephyr-style manifest aggregating
+  per-component repos.  Boards directory has 11 i.MX 9x
+  board manifests including `mcimx93evk` /
+  `mcimx93autoevk` / `mcimx93qsb` / `mcimx93wevk` plus
+  several i.MX 95 EVKs.
+- **License is NXP-specific**:
+  `LA_OPT_Online Code Hosting NXP_Software_License v1.4`
+  (May 2025), not Apache / BSD.  Source-visible but with
+  NXP terms.  This affects how customers integrate the
+  i.MX 9x MCU-side path through our SDK -- one new open
+  item to add an acknowledgement paragraph to
+  `docs/getting-started.md` before v1.0.
+- The mcuxsdk-manifests covers the MCU-side
+  (Cortex-M33 real-time cores) only; the Yocto / Linux-
+  side ships through `meta-imx` on its own quarterly
+  release cycle -- existing open item unchanged.
+
+`docs/vendor-partnerships.md` NXP section rewritten to
+reflect the verified state; the previous "i.MX 93 BSP
+confirmation -- tracking the calendar" line still applies
+but only to the Yocto side, not the MCU SDK side.
+
+`docs/v1.0-readiness.md` Pillar 9 line extended with the
+NXP cross-ref alongside the §C.33 Renesas + DEEPX
+findings.
+
+Validators after commit (docs-only):
+- metadata: 0 failures
+- abi_snapshot --diff: unchanged
+
 ### Changed (2026-05-14 -- vendor-partnership status: upstream verification §C.33)
 
 Verified `docs/vendor-partnerships.md` claims against the

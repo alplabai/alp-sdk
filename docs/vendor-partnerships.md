@@ -165,8 +165,46 @@ exception -- those are real Apache-2.0.
 + Yocto layer + the `<alp/storage.h>` OTFAD backend that
 ships when NXP's FlexSPI OTFAD driver stabilises.
 
+**Status update 2026-05-14 (verified against upstream)**:
+
+NXP publishes the MCUXpresso SDK on GitHub as a manifest
+repo at
+[`github.com/nxp-mcuxpresso/mcuxsdk-manifests`](https://github.com/nxp-mcuxpresso/mcuxsdk-manifests).
+Latest stable tag **v26.03.00** (Q1 2026), prerelease tags
+for v26.06.00 (Q2 2026) already in flight.  Layout:
+
+- `west.yml` -- Zephyr-style west manifest aggregating the
+  per-component repos (HAL, RTOS, examples).
+- `boards/` -- 11 i.MX 9x board manifests: `mcimx93evk`,
+  `mcimx93autoevk`, `mcimx93qsb`, `mcimx93wevk`,
+  `frdmimx95`, `imx95verdinevk`, plus several i.MX 95 EVK
+  variants.
+
+**License is the NXP-specific `LA_OPT_Online Code Hosting
+NXP_Software_License v1.4` (May 2025)** -- not Apache /
+BSD.  Source-visible but with NXP terms (acceptance of the
+licence implied by clone / install / use).  Customers
+integrating against MCUXpresso are already familiar with
+this; it's not a Yocto / Zephyr-LTS-style permissive
+licence.
+
+The mcuxsdk-manifests covers the **MCU-side** of i.MX 9x
+(the Cortex-M33 cores running real-time workloads).  The
+**Yocto / Linux-side** (Cortex-A55 application processor)
+ships through `meta-imx` -- a separate release cycle.
+
 **Open items**:
 
+- [x] **i.MX 9x MCU-side SDK availability.**  Public at
+  `github.com/nxp-mcuxpresso/mcuxsdk-manifests` v26.03.00
+  with `mcimx93evk` + 3 other i.MX 93 board manifests
+  in-tree.
+- 📋 **NXP-licence acknowledgement in v1.0 docs.**  The
+  MCUXpresso SDK isn't Apache / BSD -- customers using
+  the i.MX 9x MCU path through our SDK consume NXP-licensed
+  source via west.yml.  Add a one-paragraph cross-ref in
+  `docs/getting-started.md` so the licence story is
+  explicit before customers integrate.
 - 📋 **i.MX 93 Yocto BSP confirmation.**  meta-imx releases
   cycle quarterly; v1.0 of the SDK aligns to whichever
   meta-imx release ships closest to our v1.0 tag.  No open
@@ -177,8 +215,8 @@ ships when NXP's FlexSPI OTFAD driver stabilises.
   driver is mainline in Linux but not yet in Zephyr.  Open
   upstreaming work tracked at zephyrproject-rtos/zephyr#TBD.
 
-**Next action**: 2026-Q3 sync after meta-imx mickledore
-ships.
+**Next action**: 2026-Q3 sync after the v26.06.00 MCUXpresso
+release stabilises + meta-imx mickledore ships.
 
 ## alp-zephyr-modules repo
 
