@@ -75,11 +75,17 @@
  *                               TIMER_QUAD_DECODER_MODE* encoding.
  *                               Slave listens to ITI0; SYSCFG router
  *                               left at chip default.
- *   16. POWER_MODE_SET       -- PARTIAL: mode 0/1 (run/sleep) accepted
- *                               (main-loop WFI already handles); deep-
- *                               sleep / standby return NOSUPPORT
- *                               pending a reply-then-sleep state
- *                               machine + wake-source config.
+ *   16. POWER_MODE_SET       -- DONE (§C.15c, partial): mode 0/1
+ *                               (run/sleep) accepted no-ops, mode 2
+ *                               (deep-sleep) calls
+ *                               pmu_to_deepsleepmode(LDO_LOWPOWER, WFI),
+ *                               mode 3 (standby) calls
+ *                               pmu_to_standbymode().  Wake-source
+ *                               bitmap partial: ALP_POWER_WAKE_GPIO
+ *                               enables PMU_WAKEUP_PIN0..4; other
+ *                               bits (RTC / UART / TIMER / USB / ETH)
+ *                               return NOSUPPORT.  wake_after_ms
+ *                               rejected pending RTC-alarm wiring.
  *   17. DA9292 status poll   -- I2C-master periodic poll cached value.
  *   18. ADC_DSP_*            -- ADC stream chained with FFT/FAC blocks
  *                               for the wave-2 DSP pipeline.
@@ -1457,29 +1463,78 @@ int bridge_hw_timer_sync(uint8_t master, uint8_t slave, uint8_t mode)
 /* v0.5 (§2B.3) -- system power-mode set                             */
 /* ----------------------------------------------------------------- */
 
+/* ALP_POWER_WAKE_* bits the firmware partial-supports.  GPIO wake is
+ * the simplest to expose -- routing it through PMU_WAKEUP_PIN0..4
+ * gives the host an immediate way to bring the chip back without
+ * shipping a full RTC-alarm / UART-IDLE / USB-resume state machine.
+ * Other bits (RTC / UART_RX / TIMER / USB / ETH_LINK) are caught
+ * below as "not yet wired"; the host sees BRIDGE_HW_ERR_NOTIMPL and
+ * can either drop unsupported bits or hold off on the sleep call. */
+#define POWER_WAKE_GPIO 0x00000002u
+#define POWER_WAKE_MASK_PARTIAL POWER_WAKE_GPIO
+
 int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap, uint32_t wake_after_ms)
 {
-    /* v0.3 partial: mode 0 (run) + mode 1 (sleep) are accepted no-ops
-     * -- main()'s `for (;;) { __WFI(); bridge_hw_tick(); }` already
-     * runs the CPU in WFI between transport interrupts, which IS
-     * "sleep" on the GD32G5.  Honouring mode 0/1 here lets the host
-     * stop calling this hook without breaking; modes 2 (deep-sleep)
-     * + 3 (standby) need a reply-then-sleep state machine + wake-
-     * source EXTI/RTC config that hasn't shipped yet.
+    /* Mode 0 (run) + mode 1 (sleep) are accepted no-ops -- main()'s
+     * `for (;;) { __WFI(); bridge_hw_tick(); }` already runs the CPU
+     * in WFI between transport interrupts, which IS "sleep" on the
+     * GD32G5.  Mode 2 (deep-sleep) + mode 3 (standby) call into the
+     * vendor's PMU helpers below.
      *
-     * `wake_bitmap` + `wake_after_ms` are forwarded to that future
-     * state machine; for now any non-zero value rejects so the host
-     * sees a clean NOSUPPORT rather than silently-dropped wake
-     * config. */
-    if (wake_bitmap != 0u) return BRIDGE_HW_ERR_NOTIMPL;
+     * `wake_after_ms` requires an RTC alarm configured against
+     * LSE/LSI plus the back-end registers to clear it on wakeup;
+     * that's a follow-up commit, so any non-zero value rejects
+     * cleanly today.  `wake_bitmap` is partial-applied: GPIO wake
+     * (ALP_POWER_WAKE_GPIO) enables PMU_WAKEUP_PIN0..4; any other
+     * bits return NOSUPPORT so the host knows the request was not
+     * honoured. */
     if (wake_after_ms != 0u) return BRIDGE_HW_ERR_NOTIMPL;
+    if ((wake_bitmap & ~POWER_WAKE_MASK_PARTIAL) != 0u) return BRIDGE_HW_ERR_NOTIMPL;
+
     switch (mode) {
     case 0u: /* run -- no-op */
     case 1u: /* sleep -- already in WFI between transport ISRs */
         return BRIDGE_HW_OK;
     case 2u: /* deep-sleep */
+        /* Enable the chip's 5 wake-up pins if the host asked for
+         * GPIO wake.  The pin pads themselves are pre-configured by
+         * the carrier; PMU_WAKEUP_PIN0..4 are the gating bits in
+         * PMU_CS that arm each pin to break the chip out of
+         * deepsleep / standby on a rising edge. */
+        rcu_periph_clock_enable(RCU_PMU);
+        if (wake_bitmap & POWER_WAKE_GPIO) {
+            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN0);
+            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN1);
+            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN2);
+            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN3);
+            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN4);
+        }
+        /* PMU_LDO_LOWPOWER drops the core LDO into its low-power
+         * regulation point during deepsleep (saves a few hundred
+         * uA at the cost of a slightly slower wakeup); WFI_CMD
+         * issues the actual `wfi` instruction that suspends the
+         * core.  Returns here once a wakeup source fires. */
+        pmu_to_deepsleepmode(PMU_LDO_LOWPOWER, WFI_CMD);
+        return BRIDGE_HW_OK;
     case 3u: /* standby */
-        return BRIDGE_HW_ERR_NOTIMPL;
+        rcu_periph_clock_enable(RCU_PMU);
+        if (wake_bitmap & POWER_WAKE_GPIO) {
+            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN0);
+            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN1);
+            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN2);
+            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN3);
+            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN4);
+        }
+        /* Standby powers down the core + SRAM (except backup) and
+         * wakes via reset -- pmu_to_standbymode() never returns;
+         * the SoC re-runs Reset_Handler when a wakeup source fires.
+         * The caller's host link will see the bridge re-issue its
+         * handshake on the next transport packet, which is the
+         * documented contract. */
+        pmu_to_standbymode();
+        /* Unreachable in normal operation; keep the return so the
+         * compiler doesn't warn about a missing terminator. */
+        return BRIDGE_HW_OK;
     default:
         return BRIDGE_HW_ERR_INVAL;
     }

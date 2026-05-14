@@ -159,6 +159,27 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- GD32 power-mode-set deep-sleep + standby §C.15c)
+
+- **`bridge_hw_power_mode_set` modes 2 (deep-sleep) + 3 (standby)
+  promoted from NOSUPPORT to real bodies.**  Mode 2 calls
+  `pmu_to_deepsleepmode(PMU_LDO_LOWPOWER, WFI_CMD)`; mode 3 calls
+  `pmu_to_standbymode()` (does not return -- chip wakes via reset
+  + the bridge's normal handshake on the next host packet, per
+  the existing contract in `<alp/power.h>`).  Mode 0 (run) +
+  mode 1 (sleep) remain accepted no-ops since the bridge's main
+  loop already idles in WFI between transport ISRs.
+
+- **Wake-source bitmap partial-applied.**  `ALP_POWER_WAKE_GPIO`
+  (bit 0x02) enables `PMU_WAKEUP_PIN0..4` collectively so the
+  carrier's pre-configured WKUP pad pads can break the chip out
+  of deep-sleep / standby.  Any other ALP_POWER_WAKE_* bits
+  (RTC / UART_RX / TIMER / USB / ETH_LINK) return
+  `BRIDGE_HW_ERR_NOTIMPL` so the host knows the request was not
+  fully honoured -- those paths land alongside the RTC-alarm
+  wiring in a follow-up.  `wake_after_ms != 0` still rejects
+  cleanly for the same reason.
+
 ### Added (2026-05-14 -- GD32 timer-sync HAL §C.15b)
 
 - **`bridge_hw_timer_sync` real body** in
