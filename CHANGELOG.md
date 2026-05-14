@@ -159,6 +159,37 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- TLS handshake fuzz harness §C.26)
+
+- **`tests/fuzz/tls_handshake_fuzz.c`** -- libFuzzer harness for
+  the TLS 1.2 / 1.3 handshake-record header decode path the SDK
+  wrapper inspects before forwarding to mbedtls / OpenSSL.
+  Reference parser inline; harness asserts every claimed length
+  (record_len, hs_len, sid_len, cipher_suites_len,
+  compression_methods_len, extensions_len + per-extension
+  length) stays within the input buffer.
+- **Catches** the canonical TLS overrun CVE class (Heartbleed-
+  shape record-length lies past buffer end), reserved content
+  types (only 20/21/22/23/24 valid), bad protocol-version
+  envelopes, the four cascading length-field overruns inside
+  ClientHello, and odd cipher_suites_len (must be even since
+  each suite is 2 bytes).
+- **Build path**: `_alp_add_fuzz_target(tls_handshake)` added
+  to `tests/fuzz/CMakeLists.txt` next to the existing 8 fuzz
+  harnesses (cc3501e, iot_mqtt, eeprom_manifest,
+  gd32_bridge_frame, swd_packet, mproc_frame, ble_adv_parser,
+  optiga_apdu).  ASan + UBSan + libFuzzer flags carry over via
+  the existing helper.
+- **Corpus**: empty under `tests/fuzz/corpus/tls_handshake/`
+  with a `.gitkeep` marker -- real corpora grow as the fuzzer
+  finds interesting inputs.
+
+This closes the §6 "tls_handshake_fuzz deferred" carry-forward
+from the readiness doc; the harness now covers the SDK-owned
+slice that upstream mbedtls / OpenSSL fuzzers don't reach (the
+small framing helper the SDK keeps in
+`src/zephyr/iot_mqtt_tls.c` / `src/yocto/iot_tls.c`).
+
 ### Added (2026-05-14 -- GD32 ADC stream DMA + DSP chain_bind + RTC wake §C.23 §C.24 §C.25)
 
 Three back-to-back HAL bodies in

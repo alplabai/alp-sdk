@@ -48,6 +48,7 @@ _alp_add_fuzz_target(swd_packet)
 _alp_add_fuzz_target(mproc_frame)
 _alp_add_fuzz_target(ble_adv_parser)
 _alp_add_fuzz_target(optiga_apdu)
+_alp_add_fuzz_target(tls_handshake)
 
 # gd32_bridge_frame additionally links the firmware-side
 # protocol.c + bridge_hw_stub.c so the harness exercises the
