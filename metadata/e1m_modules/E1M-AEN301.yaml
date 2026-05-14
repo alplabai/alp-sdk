@@ -38,7 +38,42 @@ memory:
 inference:
   preferred_backend:    ethos_u
   ethos_u_variant:      u55
-  ethos_u_variants:     [u55]              # E3 carries two U55s; no U85.
+  npu_population:
+    - { variant: u55, role: NPU-HE, paired_with: M55-HE }       # E3 carries two U55s; no U85.
+    - { variant: u55, role: NPU-HP, paired_with: M55-HP }
+
+# §D.lib.loader -- per-SoM hardware-accelerator capabilities.  Loader
+# (scripts/alp_project.py) reads this against each enabled library's
+# metadata/library-profiles/<name>/hw-backends.yaml to pick the
+# highest-priority matching CONFIG_* per accelerator class.  Counts
+# are populated where the silicon has multiple instances of the same
+# accelerator; booleans elsewhere.
+capabilities:
+  # ML / NPU
+  ethos_u55_count:      2          # NPU-HE + NPU-HP per the E3 datasheet.
+  ethos_u85_count:      0
+  drp_ai:               false
+  deepx_dx:             false
+  # CPU / SIMD
+  helium_mve:           true       # 2× M55 (HE + HP).
+  neon:                 false      # E3 has no Cortex-A32 core.
+  # GPU / 2D
+  gpu2d:                false      # TBD -- E3 baseline image processing only.
+  dave2d:               false      # TBD.
+  # Crypto
+  cryptocell:           true       # Family-wide on Ensemble.
+  inline_aes:           true       # Every M55 has the inline-AES extension.
+  cau:                  false      # GD32-bridge-only.
+  optiga_trust_m:       true       # Populated on every E1M-AEN module.
+  # DMA / storage
+  xspi_dma:             true       # On-die xSPI controller.
+  emmc_dma:             false
+  quadspi_dma:          false
+  dma2d:                true       # Generic 2D DMA available on the M55 system.
+  # Hardware math (TMU / FAC) -- GD32 bridge only; none on Ensemble.
+  tmu_cordic:           false
+  tmu_fft:              false
+  tmu_fac:              false
 
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 

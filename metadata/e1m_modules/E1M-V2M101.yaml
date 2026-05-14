@@ -60,6 +60,27 @@ inference:
   preferred_backend:    deepx_dxm1             # DX-M1 NPU on-module
   ethos_u_variant:      null
 
+capabilities:
+  ethos_u55_count:      0
+  ethos_u85_count:      0
+  drp_ai:               true       # V2N host silicon's DRP-AI3 still available.
+  deepx_dx:             true       # DEEPX DX-M1 NPU on-module via PCIe.
+  helium_mve:           false
+  neon:                 true       # 4× Cortex-A55 + Neon (host).
+  gpu2d:                false
+  dave2d:               false
+  cryptocell:           false
+  inline_aes:           false
+  cau:                  true
+  optiga_trust_m:       true
+  xspi_dma:             false
+  emmc_dma:             true
+  quadspi_dma:          true
+  dma2d:                false
+  tmu_cordic:           true
+  tmu_fft:              true
+  tmu_fac:              true
+
 default_hw_rev:         r1
 default_carrier:        E1M-X-EVK
 

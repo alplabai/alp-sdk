@@ -1,0 +1,24 @@
+# Per-library hardware-accelerator binding for lvgl.
+# Pure-C blit is the floor; on AEN the LVGL canvas dispatches blits
+# through GPU2D / DAVE2D, on the V2N-host carrier through the GD32
+# bridge's TMU rotate/scale path.
+schema_version: 1
+library: lvgl
+class: graphics
+upstream_source: "github.com/lvgl/lvgl (in Zephyr west.yml already)"
+accelerators:
+  - class: gpu_2d
+    priority:
+      - { soc_family: alif_ensemble, backend: gpu2d,  kconfig: CONFIG_ALP_LVGL_GPU2D=y }
+      - { soc_family: alif_ensemble, backend: dave2d, kconfig: CONFIG_ALP_LVGL_DAVE2D=y }
+      - { soc_family: gd32_bridge,   backend: tmu,    kconfig: CONFIG_ALP_LVGL_TMU=y }
+  - class: dma
+    priority:
+      - { backend: dma2d, kconfig: CONFIG_ALP_LVGL_DMA2D=y }
+sw_fallback:
+  required: true
+  kconfig: CONFIG_ALP_LVGL_SW_BLIT=y
+
+verification:
+  hil_silicon: untested
+  smoke_tests: build_only

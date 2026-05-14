@@ -84,6 +84,62 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- §D.lib.loader: per-SoM capabilities blocks + baseline hw-backends + ml_npu split)
+
+Three audit follow-ups in one batch, after the user pointed out
+that E4 / E6 / E8 actually carry TWO Ethos-U55s alongside the
+single Ethos-U85 -- the NPU population is U55-HE (paired with
+M55-HE) + U55-HP (paired with M55-HP) + U85-HG (Hyper-Generative,
+Transformer-capable):
+
+1. **`tflite_micro/hw-backends.yaml` ml_npu split** -- single
+   `ml_npu` class restructured into `ml_npu_primary` +
+   `ml_npu_secondary`.  On E4 / E6 / E8 the primary emits
+   `CONFIG_ALP_TFLM_ETHOS_U85=y` and the secondary emits
+   `CONFIG_ALP_TFLM_ETHOS_U55=y`, so BOTH driver shims now
+   link.  On E3 / E5 / E7 only the primary fires (U55-only).
+
+2. **Baseline-library hw-backends.yaml fill-in** -- the
+   pre-existing 4 libraries with HW bindings (lvgl, mbedtls,
+   cmsis_dsp, littlefs) gained their own hw-backends.yaml.  Now
+   every Tier 1 library either ships a profile or has a
+   documented "pure-SW only" status.  Matching Kconfig knobs
+   added to `Kconfig.alp-libraries`:
+   - `ALP_LVGL_GPU2D` / `_DAVE2D` / `_TMU` / `_DMA2D` / `_SW_BLIT`
+   - `ALP_MBEDTLS_CRYPTOCELL` / `_INLINE_AES` / `_CAU` / `_OPTIGA`
+     / `_PURE_C`
+   - `ALP_CMSIS_DSP_HELIUM` / `_NEON` / `_TMU_CORDIC` / `_TMU_FFT`
+     / `_ADC_DMA` / `_SCALAR`
+   - `ALP_LITTLEFS_XSPI_DMA` / `_EMMC_DMA` / `_QSPI_DMA` / `_SYNC_IO`
+
+3. **Per-SoM `capabilities:` blocks** -- new top-level section
+   in every `metadata/e1m_modules/E1M-*.yaml` declares the
+   accelerator population per SKU.  Field shape:
+     `ethos_u55_count: <int>` / `ethos_u85_count: <int>` /
+     `ethos_u65_count: <int>` for NPU counts; booleans for the
+     remaining accelerators (drp_ai / deepx_dx / helium_mve /
+     neon / gpu2d / dave2d / cryptocell / inline_aes / cau /
+     optiga_trust_m / xspi_dma / emmc_dma / quadspi_dma / dma2d /
+     tmu_cordic / tmu_fft / tmu_fac).
+   Populated for AEN301 / AEN401 / AEN501 / AEN601 / AEN701 /
+   AEN801 / V2N101 / V2N102 / V2M101 / V2M102 / NX9101 -- every
+   SoM SKU in the registry.  Per the "Pending exact HW
+   configurations" rule, items not yet datasheet-verified (E3
+   GPU2D presence, E4 DAVE2D presence) are explicitly marked
+   `false` + `# TBD.` in a trailing comment so the maintainer
+   can flip them once the SoM BOM finalises.
+
+4. **`npu_population:` lists** -- alongside `ethos_u_variants:`,
+   each AEN SKU now declares the full NPU population as a list
+   of named instances with `role:` + `paired_with:` tags
+   (NPU-HE / M55-HE, NPU-HP / M55-HP, NPU-HG / HG-subsystem).
+   Matches the Alif Ensemble block diagram in the datasheet.
+
+The loader (`scripts/alp_project.py`) still picks matches via
+`silicon:` / `soc_family:` -- the new `capabilities:` block is
+declarative now, available for a future `requires_cap:` key in
+hw-backends.yaml.
+
 ### Fixed (2026-05-14 -- §D.lib.loader follow-up: Ethos-U85 propagated through every consumer)
 
 Phase 2b's per-NPU split landed in the new `tflite_micro` library-

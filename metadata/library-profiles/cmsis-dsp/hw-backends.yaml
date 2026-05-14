@@ -1,0 +1,31 @@
+# Per-library hardware-accelerator binding for cmsis_dsp.
+# Scalar libm is the floor; on Cortex-M55 (Alif AEN HE core) Helium
+# MVE doubles fft/fir throughput; on Cortex-A55 (V2N + V2N-M1)
+# Neon does the same; on the GD32 bridge the TMU's CORDIC + FFT
+# blocks fall in line with cmsis_dsp's API surface via the alp_dsp
+# adapter that already ships in src/common/dsp_chain.c.
+schema_version: 1
+library: cmsis_dsp
+class: DSP / math
+upstream_source: "github.com/ARM-software/CMSIS-DSP (in Zephyr west.yml already)"
+accelerators:
+  - class: simd
+    priority:
+      - { soc_family: alif_ensemble, cpu: cortex_m55, backend: helium_mve, kconfig: CONFIG_ALP_CMSIS_DSP_HELIUM=y }
+      - { soc_family: renesas_rzv2n, cpu: cortex_a55, backend: neon,       kconfig: CONFIG_ALP_CMSIS_DSP_NEON=y }
+  - class: cordic
+    priority:
+      - { soc_family: gd32_bridge,   backend: tmu_cordic, kconfig: CONFIG_ALP_CMSIS_DSP_TMU_CORDIC=y }
+  - class: fft
+    priority:
+      - { soc_family: gd32_bridge,   backend: tmu_fft,    kconfig: CONFIG_ALP_CMSIS_DSP_TMU_FFT=y }
+  - class: dma
+    priority:
+      - { backend: adc_stream_dma,   kconfig: CONFIG_ALP_CMSIS_DSP_ADC_DMA=y }
+sw_fallback:
+  required: true
+  kconfig: CONFIG_ALP_CMSIS_DSP_SCALAR=y
+
+verification:
+  hil_silicon: untested
+  smoke_tests: build_only

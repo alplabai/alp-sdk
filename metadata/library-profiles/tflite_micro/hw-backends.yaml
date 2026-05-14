@@ -3,24 +3,36 @@
 # `capabilities:` block (metadata/soms/*.yaml) and emits the highest-
 # priority matching CONFIG_* per accelerator class.  Pure-SW
 # fallback is the floor and is always available.
+#
+# NPU classes are split between `_primary` and `_secondary` so SKUs
+# carrying more than one NPU (the Alif E4 / E6 / E8 trio, which
+# ship a single Ethos-U85 + two Ethos-U55) get BOTH driver shims
+# linked.  E3 / E5 / E7 only carry U55s, so only the primary class
+# emits a Kconfig there.
 schema_version: 1
 library: tflite_micro
 class: ML inference
 upstream_source: "TensorFlow upstream (in Zephyr west.yml already)"
 accelerators:
-  - class: ml_npu
+  - class: ml_npu_primary
     priority:
-      # Ethos-U85 lives only on Alif Ensemble E4 / E6 / E8 (one U85 +
-      # two U55 in each).  U85 is the Transformer-capable / GenAI
-      # path; pin it as priority 1 on the SKUs that carry it.
+      # Ethos-U85 is the headline NPU on the E4 / E6 / E8 trio --
+      # Transformer-capable, the strategic GenAI forward path.
       - { silicon: alif:ensemble:e4, backend: ethos_u85, kconfig: CONFIG_ALP_TFLM_ETHOS_U85=y }
       - { silicon: alif:ensemble:e6, backend: ethos_u85, kconfig: CONFIG_ALP_TFLM_ETHOS_U85=y }
       - { silicon: alif:ensemble:e8, backend: ethos_u85, kconfig: CONFIG_ALP_TFLM_ETHOS_U85=y }
-      # Ethos-U55 is on every E* SoC (two per SKU).  Family-wide
-      # fallback for non-U85 SKUs (E3/E5/E7) and the second-choice
-      # binding on U85 SKUs once U85 is unavailable.
+      # Family-wide U55 catches E3 / E5 / E7 (no U85) + serves as
+      # the primary on those SKUs.
       - { soc_family: alif_ensemble, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
       - { soc_family: renesas_rzv2n, backend: drp_ai,    kconfig: CONFIG_ALP_TFLM_DRP_AI=y }
+  - class: ml_npu_secondary
+    priority:
+      # On U85-bearing SKUs, also link the U55 driver shim -- the
+      # chip carries two U55s alongside the one U85, and a model
+      # compiled for U55 should still run there.
+      - { silicon: alif:ensemble:e4, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
+      - { silicon: alif:ensemble:e6, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
+      - { silicon: alif:ensemble:e8, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
   - class: simd
     priority:
       - { soc_family: alif_ensemble, cpu: cortex_m55, backend: helium_mve, kconfig: CONFIG_ALP_TFLM_HELIUM=y }

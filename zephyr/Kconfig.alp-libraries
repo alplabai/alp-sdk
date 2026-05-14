@@ -39,8 +39,11 @@ config ALP_TFLM_ETHOS_U55
 	help
 	  Compile TFLite-Micro kernels against an Alif Ethos-U55 NPU
 	  back-end (delegated execution).  Every Ensemble SKU carries
-	  two U55s; the loader picks U55 on E3 / E5 / E7 (no U85) and
-	  as the fallback on U85 SKUs when U85 isn't available.
+	  two U55s (NPU-HE paired with M55-HE, NPU-HP paired with
+	  M55-HP); the driver shim is the same for both instances and
+	  selects at runtime via base-address + IRQ.  Enabled on every
+	  E* SoC -- it's the family-wide primary on E3 / E5 / E7 (no
+	  U85) and the secondary on E4 / E6 / E8 (alongside the U85).
 
 config ALP_TFLM_DRP_AI
 	bool "TFLite-Micro on Renesas DRP-AI NPU"
@@ -223,6 +226,81 @@ config ALP_LIBHELIX_PURE_C
 
 config ALP_CATCH2_SW
 	bool "Catch2 (always pure-SW)"
+	default y
+
+# ----------------------------------------------------------------------
+# Baseline libraries (v0.2-era) -- HW-backend knobs added in §D.lib's
+# follow-up audit so the existing 4 libraries with HW bindings now
+# match the per-library hw-backends.yaml convention introduced for
+# the 17 new libs.
+# ----------------------------------------------------------------------
+
+config ALP_LVGL_GPU2D
+	bool "LVGL via Alif GPU2D"
+	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
+config ALP_LVGL_DAVE2D
+	bool "LVGL via Alif DAVE2D"
+	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
+config ALP_LVGL_TMU
+	bool "LVGL via GD32 bridge TMU rotate/scale"
+config ALP_LVGL_DMA2D
+	bool "LVGL framebuffer push via DMA2D"
+config ALP_LVGL_SW_BLIT
+	bool "LVGL pure-C SW blit (fallback)"
+	default y
+
+config ALP_MBEDTLS_CRYPTOCELL
+	bool "mbedTLS AES/RSA/ECDSA via Alif CryptoCell"
+	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
+config ALP_MBEDTLS_INLINE_AES
+	bool "mbedTLS AES via Alif M55 inline-AES instruction"
+	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
+config ALP_MBEDTLS_CAU
+	bool "mbedTLS AES via GD32 bridge CAU"
+config ALP_MBEDTLS_OPTIGA
+	bool "mbedTLS TLS handshake via OPTIGA Trust M"
+config ALP_MBEDTLS_PURE_C
+	bool "mbedTLS pure-C (SW fallback)"
+	default y
+
+config ALP_CMSIS_DSP_HELIUM
+	bool "CMSIS-DSP via Helium MVE (Cortex-M55)"
+	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
+config ALP_CMSIS_DSP_NEON
+	bool "CMSIS-DSP via Arm Neon (Cortex-A55)"
+	depends on ALP_SOC_RENESAS_RZV2N_N44
+config ALP_CMSIS_DSP_TMU_CORDIC
+	bool "CMSIS-DSP CORDIC via GD32 bridge TMU"
+config ALP_CMSIS_DSP_TMU_FFT
+	bool "CMSIS-DSP FFT via GD32 bridge TMU"
+config ALP_CMSIS_DSP_ADC_DMA
+	bool "CMSIS-DSP ADC-stream chaining via DMA"
+config ALP_CMSIS_DSP_SCALAR
+	bool "CMSIS-DSP scalar kernels (SW fallback)"
+	default y
+
+config ALP_LITTLEFS_XSPI_DMA
+	bool "littlefs over xSPI DMA (Alif on-die flash)"
+	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
+config ALP_LITTLEFS_EMMC_DMA
+	bool "littlefs over eMMC DMA (V2N + V2N-M1)"
+	depends on ALP_SOC_RENESAS_RZV2N_N44
+config ALP_LITTLEFS_QSPI_DMA
+	bool "littlefs over QuadSPI DMA (GD32 bridge)"
+config ALP_LITTLEFS_SYNC_IO
+	bool "littlefs sync I/O (SW fallback)"
 	default y
 
 endmenu  # "ALP SDK per-library HW-accelerator wiring"

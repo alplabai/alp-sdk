@@ -24,9 +24,34 @@ memory:
   mram_kbit:            TBD
 
 inference:
-  preferred_backend:    ethos_u                # E8 ships Ethos-U85 in addition to U55.
-  ethos_u_variant:      u85                    # primary -- E8 ships one U85 alongside two U55s.
-  ethos_u_variants:     [u85, u55]             # full NPU population on this silicon.
+  preferred_backend:    ethos_u                # E8 ships Ethos-U85 alongside two U55s.
+  ethos_u_variant:      u85                    # primary.
+  npu_population:
+    - { variant: u55, role: NPU-HE, paired_with: M55-HE }
+    - { variant: u55, role: NPU-HP, paired_with: M55-HP }
+    - { variant: u85, role: NPU-HG, paired_with: HG-subsystem }
+
+capabilities:
+  ethos_u55_count:      2
+  ethos_u85_count:      1
+  drp_ai:               false
+  deepx_dx:             false
+  helium_mve:           true
+  neon:                 true       # E8 carries Cortex-A32 cores (E7 + U85 = E8 topology).
+  gpu2d:                true
+  dave2d:               true
+  cryptocell:           true
+  inline_aes:           true
+  cau:                  false
+  optiga_trust_m:       true
+  xspi_dma:             false      # E8 uses HexSPI instead of OctalSPI per datasheet.
+  hexspi_dma:           true
+  emmc_dma:             false
+  quadspi_dma:          false
+  dma2d:                true
+  tmu_cordic:           false
+  tmu_fft:              false
+  tmu_fac:              false
 
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 

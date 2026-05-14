@@ -26,7 +26,30 @@ memory:
 inference:
   preferred_backend:    ethos_u
   ethos_u_variant:      u55
-  ethos_u_variants:     [u55]              # E5 carries two U55s; no U85.
+  npu_population:
+    - { variant: u55, role: NPU-HE, paired_with: M55-HE }       # E5 carries two U55s; no U85.
+    - { variant: u55, role: NPU-HP, paired_with: M55-HP }
+
+capabilities:
+  ethos_u55_count:      2
+  ethos_u85_count:      0
+  drp_ai:               false
+  deepx_dx:             false
+  helium_mve:           true
+  neon:                 true       # E5 carries one Cortex-A32 @ 800 MHz.
+  gpu2d:                false      # TBD.
+  dave2d:               false      # TBD.
+  cryptocell:           true
+  inline_aes:           true
+  cau:                  false
+  optiga_trust_m:       true
+  xspi_dma:             true
+  emmc_dma:             false
+  quadspi_dma:          false
+  dma2d:                true
+  tmu_cordic:           false
+  tmu_fft:              false
+  tmu_fac:              false
 
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 

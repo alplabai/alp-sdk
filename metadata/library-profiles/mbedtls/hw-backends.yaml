@@ -1,0 +1,23 @@
+# Per-library hardware-accelerator binding for mbedtls.
+# Pure-C is the floor; on AEN we route AES + RSA + ECDSA through
+# the on-chip CryptoCell + Inline-AES instructions; on V2N the
+# GD32 bridge's CAU handles the same ops; OPTIGA-Trust-M handles
+# TLS handshakes when populated.
+schema_version: 1
+library: mbedtls
+class: crypto/TLS
+upstream_source: "github.com/Mbed-TLS/mbedtls (in Zephyr west.yml already)"
+accelerators:
+  - class: crypto
+    priority:
+      - { soc_family: alif_ensemble, backend: cryptocell,  kconfig: CONFIG_ALP_MBEDTLS_CRYPTOCELL=y }
+      - { soc_family: alif_ensemble, backend: inline_aes,  kconfig: CONFIG_ALP_MBEDTLS_INLINE_AES=y }
+      - { soc_family: gd32_bridge,   backend: cau,         kconfig: CONFIG_ALP_MBEDTLS_CAU=y }
+      - { backend: optiga_trust_m_handshake,               kconfig: CONFIG_ALP_MBEDTLS_OPTIGA=y }
+sw_fallback:
+  required: true
+  kconfig: CONFIG_ALP_MBEDTLS_PURE_C=y
+
+verification:
+  hil_silicon: untested
+  smoke_tests: build_only
