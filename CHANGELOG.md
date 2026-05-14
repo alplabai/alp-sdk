@@ -84,6 +84,53 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- §D.lib.loader: unit tests + west.yml extras-tier1 group)
+
+Two follow-ups so the §D.lib batch + loader stay regression-safe
+and the libraries we don't currently ship under Zephyr's tree
+have a pinned consumption path.
+
+**Loader unit tests** -- new `TestHwBackendsLoader` class in
+`tests/scripts/test_alp_project.py` (9 tests).  For each SoM SKU
+(AEN301, AEN401, AEN601, AEN801, V2N101, V2M101, NX9101) +
+12 libraries, asserts the expected `CONFIG_ALP_*=y` emission set.
+Locks in the per-SKU wiring -- any future metadata change (new
+SoM cap, silicon family, library) that drops or duplicates a
+binding fails CI at the per-priority-match level, not at twister.
+Cases covered:
+- E3 emits U55 only, never U85.
+- E4 emits BOTH U85 (primary) + U55 (secondary) driver shims.
+- E6 emits LVGL_GPU2D + GFX_COMPAT_GPU2D (gpu2d cap present).
+- E8 routes LITTLEFS_XSPI_DMA through the hexspi_dma cap path.
+- V2N101 emits DRP_AI + NEON + CAU + EMMC_DMA; nothing AEN-specific.
+- NX9101 emits ETHOS_U65 + N93 driver shim.
+- OPTIGA cross-family: fires on NX9101 where no higher-priority
+  crypto wins, suppressed on AEN401 by CryptoCell.
+- Unconditional DMA fallbacks (TFLM_DMA_COPY, MINIMP3_I2S_DMA)
+  always emit.
+- SW-fallback knobs for §D.lib libraries always emit.
+
+**`extras-tier1` west.yml group** -- 13 upstream pins for the
+Tier 1 libraries that aren't already in Zephyr's modules tree:
+u8g2 (v2.36.5), libcoap (v4.3.5), TinyGSM (v0.11.7),
+libwebsockets (v4.3.4), jsmn (v1.1.0), opus (v1.5.2),
+Catch2 (v3.7.1), libmodbus (v3.1.10), coreMQTT-SN (v1.0.1).
+Pinned to `main`/`master` with `# TBD: pin SHA after maintainer
+audit` for upstreams that have no semver releases (minimp3,
+libhelix) or are tarball-only (bearssl uses the community
+mirror at github.com/bearsslmirror/BearSSL; madgwick_ahrs
+uses x-io Technologies' Fusion successor library).
+
+`gfx_compat` is maintainer-written and ships in-tree -- no west
+pin needed.  `tflite-micro` and `nanopb` already live in Zephyr's
+own west.yml; allowlisted in our import filter.
+
+The `extras-tier1` group is disabled by default
+(`-extras-tier1` in `group-filter:`), so v0.5 workspaces stay
+light.  Customers flip via `west update --group-filter
++extras-tier1` when their `board.yaml` `libraries:` lists any
+of these libraries.
+
 ### Added (2026-05-14 -- §D.lib.loader: requires_cap matcher + capability-keyed bindings audit)
 
 Phase 2b's loader grew a `requires_cap:` matcher so library

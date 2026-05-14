@@ -69,6 +69,32 @@ manifest:
       url-base: https://github.com/renesas
     - name: nxp-mcuxpresso
       url-base: https://github.com/nxp-mcuxpresso
+    # extras-tier1 community-library remotes (§D.lib batch).
+    - name: olikraus           # u8g2
+      url-base: https://github.com/olikraus
+    - name: obgm               # libcoap
+      url-base: https://github.com/obgm
+    - name: vshymanskyy        # TinyGSM
+      url-base: https://github.com/vshymanskyy
+    - name: warmcat            # libwebsockets
+      url-base: https://github.com/warmcat
+    - name: zserge             # jsmn
+      url-base: https://github.com/zserge
+    - name: lieff              # minimp3
+      url-base: https://github.com/lieff
+    - name: xiph               # opus
+      url-base: https://github.com/xiph
+    - name: catchorg           # Catch2
+      url-base: https://github.com/catchorg
+    - name: stephane           # libmodbus
+      url-base: https://github.com/stephane
+    - name: freertos-org       # coreMQTT-SN
+      url-base: https://github.com/FreeRTOS
+    - name: xio-technologies   # Madgwick AHRS reference
+      url-base: https://github.com/xioTechnologies
+    - name: bearssl-mirror     # BearSSL community git mirror (upstream is
+      url-base: https://github.com/bearsslmirror
+                              # tarball-only; mirror tracks main branch).
 
   # Groups disabled by default.  Entries pinned below for audit
   # in source control, but `west update` on a v0.3 workspace does
@@ -79,6 +105,19 @@ manifest:
   # `extras-v04`     - lwrb + nanopb pins for v0.4 wave-2 consumers.
   #                    See vendors/lwrb/README.md +
   #                    vendors/nanopb/README.md.
+  # `extras-tier1`   - upstream pins for the 14 Tier 1 §D.lib batch
+  #                    libraries that aren't in Zephyr's modules
+  #                    tree (u8g2, libcoap, tinygsm, libwebsockets,
+  #                    jsmn, bearssl, minimp3, opus, libhelix,
+  #                    catch2, libmodbus, madgwick_ahrs,
+  #                    coremqtt_sn).  Disabled by default so v0.5
+  #                    workspaces stay light; customers flip via
+  #                    `west update --group-filter +extras-tier1`
+  #                    when they list any of those libraries in
+  #                    `board.yaml` `libraries:`.  Revisions below
+  #                    are maintainer-verified-as-of 2026-05-14;
+  #                    bumps land alongside the library knob in
+  #                    `metadata/library-profiles/<name>/hw-backends.yaml`.
   # `vendor-sdks`    - public vendor SDK repos pinned to the
   #                    verified tags (Alif sdk-alif, Renesas
   #                    rzv-fsp, NXP mcuxsdk-manifests).  Carries
@@ -88,6 +127,7 @@ manifest:
   #                    story before enabling on a customer build.
   group-filter:
     - -extras-v04
+    - -extras-tier1
     - -vendor-sdks
 
   projects:
@@ -128,6 +168,9 @@ manifest:
           # CONFIG_ALP_SDK_INFERENCE_TFLM=y just work; the module
           # is small enough that the cost-of-presence is negligible.
           - tflite-micro
+          # nanopb is also pulled in by Zephyr's tree when ALP_NANOPB
+          # is enabled.  Our SDK uses it via the upstream Zephyr
+          # module (no extras-tier1 pin needed for v0.5).
 
     # SDK-internal dependencies pinned ahead of their v0.4 consumers.
     # Behind the `extras-v04` group (disabled above) so v0.3
@@ -146,6 +189,114 @@ manifest:
       path: modules/lib/nanopb
       groups:
         - extras-v04
+
+    # ---------------------------------------------------------------
+    # extras-tier1 -- §D.lib batch.  14 libraries that aren't in
+    # Zephyr's modules tree, pinned to maintainer-verified tagged
+    # releases (or `main` where upstream has no semver releases --
+    # bearssl, minimp3, libhelix).  Disabled by default; consumers
+    # flip via `west update --group-filter +extras-tier1` when their
+    # board.yaml's `libraries:` lists any of these.  Each library
+    # ships its compile-time profile + HW-accelerator binding under
+    # metadata/library-profiles/<name>/.
+    # ---------------------------------------------------------------
+    - name: u8g2
+      remote: olikraus
+      repo-path: u8g2
+      revision: 2.36.5            # Apr 2024; matches metadata/library-profiles/u8g2/.
+      path: modules/lib/u8g2
+      groups:
+        - extras-tier1
+    - name: libcoap
+      remote: obgm
+      repo-path: libcoap
+      revision: v4.3.5            # Mar 2024.
+      path: modules/lib/libcoap
+      groups:
+        - extras-tier1
+    - name: TinyGSM
+      remote: vshymanskyy
+      repo-path: TinyGSM
+      revision: v0.11.7            # Apr 2024.
+      path: modules/lib/tinygsm
+      groups:
+        - extras-tier1
+    - name: libwebsockets
+      remote: warmcat
+      repo-path: libwebsockets
+      revision: v4.3.4            # Mar 2024.
+      path: modules/lib/libwebsockets
+      groups:
+        - extras-tier1
+    - name: jsmn
+      remote: zserge
+      repo-path: jsmn
+      revision: v1.1.0            # Header-only; latest tagged release.
+      path: modules/lib/jsmn
+      groups:
+        - extras-tier1
+    - name: minimp3
+      remote: lieff
+      repo-path: minimp3
+      revision: main              # No versioned releases; pin to commit
+                                  # when consumed.  TBD: pin to a SHA after
+                                  # the maintainer audit.
+      path: modules/lib/minimp3
+      groups:
+        - extras-tier1
+    - name: opus
+      remote: xiph
+      repo-path: opus
+      revision: v1.5.2            # Apr 2024 stable.
+      path: modules/lib/opus
+      groups:
+        - extras-tier1
+    - name: libhelix
+      remote: xiph
+      repo-path: libhelix         # TBD: confirm canonical upstream + tag.
+      revision: main
+      path: modules/lib/libhelix
+      groups:
+        - extras-tier1
+    - name: Catch2
+      remote: catchorg
+      repo-path: Catch2
+      revision: v3.7.1            # Oct 2024.
+      path: modules/lib/catch2
+      groups:
+        - extras-tier1
+    - name: libmodbus
+      remote: stephane
+      repo-path: libmodbus
+      revision: v3.1.10           # Aug 2023; v3.1.x stable.
+      path: modules/lib/libmodbus
+      groups:
+        - extras-tier1
+    - name: coreMQTT-SN
+      remote: freertos-org
+      repo-path: coreMQTT-SN
+      revision: v1.0.1            # Aug 2024.
+      path: modules/lib/coremqtt_sn
+      groups:
+        - extras-tier1
+    - name: madgwick_ahrs
+      remote: xio-technologies
+      repo-path: Fusion           # The maintained successor lib (Madgwick
+                                  # reference + Fusion are bundled).
+      revision: main              # TBD: pin SHA after maintainer audit.
+      path: modules/lib/madgwick_ahrs
+      groups:
+        - extras-tier1
+    - name: BearSSL
+      remote: bearssl-mirror
+      repo-path: BearSSL          # Community git mirror; upstream is
+                                  # tarball-only.  TBD: confirm + pin SHA.
+      revision: master
+      path: modules/lib/bearssl
+      groups:
+        - extras-tier1
+    # gfx_compat is maintainer-written and ships in-tree under
+    # src/lib/gfx_compat/ -- no west pin needed.
 
     # Optional vendor-source pins behind the `vendor-sdks` group.
     # Pinned to the maintainer-verified tags (per §C.33/34/35

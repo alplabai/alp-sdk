@@ -341,5 +341,148 @@ class TestValidatorPeripheralCheck(unittest.TestCase):
                       rv.stdout)
 
 
+class TestHwBackendsLoader(unittest.TestCase):
+    """§D.lib.loader cross-library HW-backend wiring.
+
+    For each SoM SKU + a representative library subset, assert the
+    loader emits the expected per-NPU / per-accelerator
+    `CONFIG_ALP_*=y` lines.  Locks in the per-SKU wiring so future
+    metadata changes (new caps, new silicon families) can't
+    silently drop bindings.
+    """
+
+    LIBS = [
+        "tflite_micro", "lvgl", "mbedtls", "cmsis_dsp",
+        "littlefs", "bearssl", "madgwick_ahrs", "u8g2",
+        "gfx_compat", "minimp3", "opus", "libhelix",
+    ]
+
+    @classmethod
+    def _emit(cls, sku: str) -> str:
+        """Run the full loader for `sku` + every library, return stdout."""
+        body = (
+            "schema_version: 1\n"
+            "som:\n"
+            f"  sku: {sku}\n"
+            "os: zephyr\n"
+            "libraries:\n"
+        )
+        for lib in cls.LIBS:
+            body += f"  - {lib}\n"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "board.yaml"
+            path.write_text(body, encoding="utf-8")
+            rv = _run_loader(input_path=path)
+        # In any subTest we want the actual returncode + stderr in the
+        # failure message, so attach them to the returned string.
+        return rv.stdout if rv.returncode == 0 else f"FAIL rc={rv.returncode}: {rv.stderr}\n{rv.stdout}"
+
+    def assertEmitted(self, sku: str, kconfig: str) -> None:  # noqa: N802
+        out = self._emit(sku)
+        self.assertIn(kconfig, out, msg=f"{sku}: missing {kconfig}\n{out}")
+
+    def assertNotEmitted(self, sku: str, kconfig: str) -> None:  # noqa: N802
+        out = self._emit(sku)
+        self.assertNotIn(kconfig, out, msg=f"{sku}: unexpected {kconfig}\n{out}")
+
+    # --- per-SKU expectations ---------------------------------------
+
+    def test_aen301_u55_only_no_u85(self) -> None:
+        """E3 carries two U55s, no U85; family-wide primary is U55."""
+        self.assertEmitted    ("E1M-AEN301", "CONFIG_ALP_TFLM_ETHOS_U55=y")
+        self.assertNotEmitted ("E1M-AEN301", "CONFIG_ALP_TFLM_ETHOS_U85=y")
+        self.assertEmitted    ("E1M-AEN301", "CONFIG_ALP_TFLM_HELIUM=y")
+        self.assertNotEmitted ("E1M-AEN301", "CONFIG_ALP_TFLM_NEON=y")
+
+    def test_aen401_u85_primary_plus_u55_secondary(self) -> None:
+        """E4 = 2x U55 + 1x U85; both driver shims must be linked."""
+        self.assertEmitted ("E1M-AEN401", "CONFIG_ALP_TFLM_ETHOS_U85=y")
+        self.assertEmitted ("E1M-AEN401", "CONFIG_ALP_TFLM_ETHOS_U55=y")
+        # E4 has no A32 -> no Neon.
+        self.assertEmitted    ("E1M-AEN401", "CONFIG_ALP_TFLM_HELIUM=y")
+        self.assertNotEmitted ("E1M-AEN401", "CONFIG_ALP_TFLM_NEON=y")
+
+    def test_aen601_gpu2d_present(self) -> None:
+        """E6 has GPU2D + DAVE2D; LVGL picks GPU2D priority 1."""
+        self.assertEmitted ("E1M-AEN601", "CONFIG_ALP_TFLM_ETHOS_U85=y")
+        self.assertEmitted ("E1M-AEN601", "CONFIG_ALP_TFLM_ETHOS_U55=y")
+        self.assertEmitted ("E1M-AEN601", "CONFIG_ALP_LVGL_GPU2D=y")
+        self.assertEmitted ("E1M-AEN601", "CONFIG_ALP_GFX_COMPAT_GPU2D=y")
+        # E6 has A32 -> Neon present for cmsis_dsp / opus / minimp3.
+        # NEON entries on those libraries are after HELIUM, and the
+        # loader's per-class first-match picks HELIUM on Ensemble.
+        self.assertEmitted ("E1M-AEN601", "CONFIG_ALP_TFLM_HELIUM=y")
+
+    def test_aen801_hexspi_resolves_xspi_dma(self) -> None:
+        """E8 uses HexSPI not OctalSPI; the second priority entry
+        (requires_cap: hexspi_dma) must still resolve the same
+        CONFIG_ALP_LITTLEFS_XSPI_DMA driver shim."""
+        self.assertEmitted ("E1M-AEN801", "CONFIG_ALP_LITTLEFS_XSPI_DMA=y")
+
+    def test_v2n101_drp_ai_plus_cau(self) -> None:
+        """V2N101: no Ethos, primary NPU is DRP-AI; mbedtls/bearssl
+        route through GD32 bridge CAU."""
+        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_TFLM_DRP_AI=y")
+        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_TFLM_ETHOS_U55=y")
+        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_TFLM_ETHOS_U85=y")
+        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_TFLM_NEON=y")
+        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_MBEDTLS_CAU=y")
+        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_BEARSSL_CAU=y")
+        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_LITTLEFS_EMMC_DMA=y")
+        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
+
+    def test_nx9101_u65_resolves(self) -> None:
+        """NX9101: i.MX 93's Ethos-U65 must resolve via the
+        ml_npu_primary class; the legacy preferred_backend handler
+        + the new loader hook must both contribute their gates."""
+        self.assertEmitted    ("E1M-NX9101", "CONFIG_ALP_TFLM_ETHOS_U65=y")
+        self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_TFLM_ETHOS_U55=y")
+        self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_TFLM_ETHOS_U85=y")
+        self.assertEmitted    ("E1M-NX9101", "CONFIG_ALP_TFLM_NEON=y")
+
+    def test_universal_fallback_dma_always_emitted(self) -> None:
+        """The unconditional DMA fallback (tensor_dma_copy /
+        i2s_dma / spi_dma) must fire on every SKU because none of
+        them carries a `requires_cap:` matcher."""
+        for sku in ("E1M-AEN301", "E1M-AEN801", "E1M-V2N101", "E1M-NX9101"):
+            with self.subTest(sku=sku):
+                self.assertEmitted (sku, "CONFIG_ALP_TFLM_DMA_COPY=y")
+                self.assertEmitted (sku, "CONFIG_ALP_MINIMP3_I2S_DMA=y")
+
+    def test_optiga_truth_cross_family(self) -> None:
+        """OPTIGA Trust M is populated on AEN + V2N + NX9101.  With
+        `requires_cap: optiga_trust_m`, mbedtls/bearssl's OPTIGA
+        gate fires across all three families -- but only when no
+        higher-priority crypto accelerator (CryptoCell / Inline-AES
+        / CAU) wins first.  AEN picks CryptoCell; NX9101 has no
+        higher-priority crypto so OPTIGA fires there."""
+        self.assertEmitted    ("E1M-AEN401", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
+        self.assertNotEmitted ("E1M-AEN401", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
+        self.assertEmitted    ("E1M-NX9101", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
+        self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
+
+    def test_sw_fallback_always_emitted(self) -> None:
+        """Each new (§D.lib) library's SW-fallback CONFIG_*=y is
+        emitted unconditionally via _LIBRARY_KCONFIG (separate from
+        the hw-backends loader).  Baseline libraries (lvgl /
+        mbedtls / cmsis_dsp / littlefs) inherit their SW fallback
+        from Kconfig `default y` on the *_SW / *_PURE_C / *_SCALAR /
+        *_SYNC_IO symbols -- so those aren't emitted as alp.conf
+        lines, they just default on at Kconfig parse time."""
+        out = self._emit("E1M-AEN401")
+        for fallback in (
+            "CONFIG_ALP_TFLM_REF_KERNELS=y",
+            "CONFIG_ALP_BEARSSL_PURE_C=y",
+            "CONFIG_ALP_OPUS_PURE_C=y",
+            "CONFIG_ALP_MINIMP3_PURE_C=y",
+            "CONFIG_ALP_LIBHELIX_PURE_C=y",
+            "CONFIG_ALP_MADGWICK_LIBM=y",
+            "CONFIG_ALP_U8G2_SW_BLIT=y",
+            "CONFIG_ALP_GFX_COMPAT_SW=y",
+        ):
+            with self.subTest(fallback=fallback):
+                self.assertIn(fallback, out)
+
+
 if __name__ == "__main__":
     unittest.main()
