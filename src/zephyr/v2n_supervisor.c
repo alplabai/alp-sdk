@@ -174,6 +174,53 @@ void alp_z_v2n_supervisor_release(void)
     k_mutex_unlock(&g_v2n.lock);
 }
 
+alp_status_t alp_z_v2n_supervisor_brd_i2c_acquire(alp_i2c_t **i2c_out)
+{
+    if (i2c_out == NULL) return ALP_ERR_INVAL;
+    *i2c_out = NULL;
+
+#if (CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID < 0)
+    /* No I²C bus configured for the supervisor build -- DA9292
+     * driver + any other BRD_I²C consumer has no handle to borrow.
+     * Surface NOSUPPORT so callers compile against this helper
+     * unconditionally + branch on the runtime result. */
+    return ALP_ERR_NOSUPPORT;
+#else
+    const int locked = k_mutex_lock(
+        &g_v2n.lock,
+        K_MSEC(CONFIG_ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS));
+    if (locked != 0) return ALP_ERR_BUSY;
+
+    /* Lazy-init drives the same bus-open path as the GD32 acquire
+     * helper -- this is fine because the BRD_I²C handle is exactly
+     * the one the supervisor opened.  Init failure tears the locks
+     * back down before returning. */
+    const alp_status_t s = try_init_locked();
+    if (s != ALP_OK) {
+        k_mutex_unlock(&g_v2n.lock);
+        return s;
+    }
+    if (g_v2n.i2c == NULL) {
+        /* try_init_locked() returned OK but no I²C handle -- the
+         * SPI path satisfied gd32g553_init() on this build.  BRD_I²C
+         * consumers genuinely can't proceed; release + report. */
+        k_mutex_unlock(&g_v2n.lock);
+        return ALP_ERR_NOT_READY;
+    }
+    *i2c_out = g_v2n.i2c;
+    return ALP_OK;
+#endif
+}
+
+void alp_z_v2n_supervisor_brd_i2c_release(void)
+{
+#if (CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID < 0)
+    /* No mutex was taken on the acquire path -- nothing to do. */
+#else
+    k_mutex_unlock(&g_v2n.lock);
+#endif
+}
+
 void alp_z_v2n_supervisor_invalidate(void)
 {
     /* Take the mutex for the duration of the bus teardown so a
@@ -224,6 +271,17 @@ void alp_z_v2n_supervisor_release(void)
 void alp_z_v2n_supervisor_invalidate(void)
 {
     /* Nothing to invalidate -- no supervisor compiled in. */
+}
+
+alp_status_t alp_z_v2n_supervisor_brd_i2c_acquire(alp_i2c_t **i2c_out)
+{
+    if (i2c_out != NULL) *i2c_out = NULL;
+    return ALP_ERR_NOSUPPORT;
+}
+
+void alp_z_v2n_supervisor_brd_i2c_release(void)
+{
+    /* Nothing to release. */
 }
 
 #endif  /* CONFIG_ALP_SDK_V2N_SUPERVISOR */

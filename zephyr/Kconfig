@@ -222,6 +222,27 @@ config ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS
 	  steady-state op; raise for builds where the GD32 firmware
 	  uses long clock-stretching cycles on I2C.
 
+config ALP_SDK_V2N_POWER_MGMT
+	bool "V2N DEEPX rail-management auxiliary"
+	default y if ALP_SOC_RENESAS_RZV2N_N44 && ALP_SDK_CHIP_DA9292
+	depends on ALP_SDK_CHIP_DA9292
+	help
+	  Compile src/zephyr/v2n_power_mgmt.c.  Listens on
+	  v2n-deepx-pwr-en-req-gpios (Renesas P65) for a rising edge,
+	  then brings up the DEEPX 0.75 V rail by programming the
+	  DA9292 PMIC CH2 over BRD_I2C (via the supervisor
+	  singleton's borrowed I2C handle) + drives
+	  v2n-deepx-core-0p75-en-gpios (P64) high once CH2 reaches
+	  power-good.
+
+	  Carrier boards that don't have the DEEPX rail (V2N base
+	  SoMs without the M1 DEEPX add-on) can leave the DT aliases
+	  unpopulated; the module compiles in but returns NOSUPPORT
+	  from its init hook.
+
+	  Defaults on for V2N + DA9292 builds; turn off to suppress
+	  the IRQ handler if the carrier wires DEEPX from elsewhere.
+
 endif # ALP_SDK_V2N_SUPERVISOR
 
 config ALP_SDK_MAX_I2S_HANDLES

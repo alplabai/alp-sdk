@@ -63,6 +63,45 @@ alp_status_t alp_z_v2n_supervisor_acquire(gd32g553_t **ctx_out);
 void alp_z_v2n_supervisor_release(void);
 
 /**
+ * @brief Acquire the BRD_I²C bus handle held by the supervisor.
+ *
+ * V2N's BRD_I²C is a shared bus: the GD32 bridge uses it for slow-path
+ * management commands, and the DA9292 PMIC + future BRD-side
+ * peripherals share the same physical lines.  This helper hands out
+ * the supervisor's cached `alp_i2c_t *` under the same mutex used by
+ * @ref alp_z_v2n_supervisor_acquire so a transfer in flight on either
+ * consumer can't be interrupted by the other.
+ *
+ * Pairs with @ref alp_z_v2n_supervisor_brd_i2c_release exactly the
+ * way the GD32 acquire/release pair does: exactly one release per
+ * ALP_OK return.  Failed acquires (any non-OK return) leave the
+ * mutex unlocked and MUST NOT be released.
+ *
+ * Lock semantics: GD32 acquire and BRD_I²C acquire share a single
+ * mutex.  Holding the BRD_I²C lock blocks the GD32 bridge dispatch
+ * and vice versa -- by design, since both transfer over the same
+ * physical bus.
+ *
+ * @param[out] i2c_out  Populated on @ref ALP_OK with the supervisor's
+ *                      `alp_i2c_t *` handle.  Untouched otherwise.
+ * @return ALP_OK on success;
+ *         ALP_ERR_NOSUPPORT if the supervisor is not compiled in
+ *           or its I²C bus is not configured (Kconfig
+ *           `*_I2C_BUS_ID < 0`);
+ *         ALP_ERR_BUSY if the mutex couldn't be taken within the
+ *           Kconfig-configured timeout;
+ *         ALP_ERR_NOT_READY if no bus opened during lazy init.
+ */
+alp_status_t alp_z_v2n_supervisor_brd_i2c_acquire(alp_i2c_t **i2c_out);
+
+/**
+ * @brief Release the BRD_I²C bus handle.  Pairs with a successful
+ *        @ref alp_z_v2n_supervisor_brd_i2c_acquire.  No-op when the
+ *        supervisor is not compiled in.
+ */
+void alp_z_v2n_supervisor_brd_i2c_release(void);
+
+/**
  * @brief Invalidate the cached supervisor state so the next
  *        acquire re-runs the bus open + GD32 handshake.
  *

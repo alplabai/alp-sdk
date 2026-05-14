@@ -159,6 +159,39 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- V2N DEEPX rail-mgmt + BRD_I2C shared-handle pattern §C.28)
+
+Closes Pillar 1 §1b in the readiness doc.  Two new files +
+extensions to the V2N supervisor singleton:
+
+- **`src/zephyr/v2n_supervisor.h/.c` extensions** introduce
+  `alp_z_v2n_supervisor_brd_i2c_acquire()` /
+  `alp_z_v2n_supervisor_brd_i2c_release()` borrowing pair.
+  Returns the supervisor's cached `alp_i2c_t *` under the same
+  mutex used by the existing GD32 acquire helper, so BRD_I²C
+  consumers (DA9292, future BRD peripherals) share a single
+  lock with the GD32 bridge dispatcher.  Avoids half-driven
+  transfers when the two compete on the same physical bus.
+- **`src/zephyr/v2n_power_mgmt.{h,c}`** -- DEEPX rail-bringup
+  auxiliary.  Listens on `v2n-deepx-pwr-en-req-gpios` (Renesas
+  P65) for a rising edge; defers to a workqueue (DA9292 register
+  sequence takes ~5 ms, too long for an IRQ); acquires the
+  supervisor's BRD_I²C handle; runs
+  `da9292_v2n_m1_enable_deepx_rail` (handles the VSTEP=1 OTP
+  trap captured in the memory; polls CH2 PG up to 5 ms);
+  releases the I²C; drives `v2n-deepx-core-0p75-en-gpios`
+  (P64) high to release the rest of the DEEPX clamps.
+  `SYS_INIT` at APPLICATION priority runs `da9292_v2n_base_init`
+  during boot so the DA9292 context is hot before the first
+  P65 edge arrives.
+- **`zephyr/Kconfig` + `zephyr/CMakeLists.txt`**: new
+  `CONFIG_ALP_SDK_V2N_POWER_MGMT` option (defaults on for V2N +
+  DA9292 builds) gates the module; missing DT aliases fall
+  through to a NOSUPPORT stub so non-M1 V2N carriers compile
+  cleanly without the DEEPX rail.
+
+Verification: HiL (V2N-M1 EVK).
+
 ### Changed (2026-05-14 -- SLSA L2 -> L3 via slsa-framework reusable workflow §C.27)
 
 - **`.github/workflows/release.yml` upgraded from SLSA L2 to L3.**

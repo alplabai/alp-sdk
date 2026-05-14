@@ -176,6 +176,14 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/v2n_supervisor.c
 )
 
+# V2N DEEPX rail-mgmt auxiliary.  Driven by P65 rising-edge IRQ;
+# brings up DA9292 CH2 = 0.75 V via BRD_I²C + drives P64 high to
+# release the rail.  Compiles to a NOSUPPORT stub when either the
+# supervisor or the power-mgmt feature is disabled.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/v2n_power_mgmt.c
+)
+
 # LwRB: publish the vendor stub headers on the include path so SDK
 # code compiles against <lwrb/lwrb.h> regardless of whether the
 # upstream MaJerle/lwrb module is on the workspace.  When the
