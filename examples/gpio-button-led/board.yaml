@@ -6,7 +6,7 @@
 #   1. Copy this file (and the rest of examples/gpio-button-led/)
 #      to your own app directory.
 #   2. Change `som.sku` to your MPN.  Stock SoM presets live at
-#      metadata/e1m_modules/<MPN>/som.yaml; the SDK ships one
+#      metadata/e1m_modules/<MPN>.yaml; the SDK ships one
 #      for every released MPN.
 #   3. Change `carrier.name` if your board is not the EVK.  For
 #      custom carriers, list every populated chip-driver in

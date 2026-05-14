@@ -20,7 +20,7 @@ i.MX 9352 = the top-of-line i.MX 93 SKU: dual Cortex-A55 @ 1.7 GHz
 | Wi-Fi 6 + BLE           | Murata Type 2DL/2EL/2KL/2LL (variant TBD) | (vendor HAL)             |
 | Wi-Fi 6 (alt)           | NXP IW610                  | (vendor HAL)                            |
 
-Exact populated variant: pending.  See [`metadata/e1m_modules/E1M-NX9101/som.yaml`](../../metadata/e1m_modules/E1M-NX9101/som.yaml).
+Exact populated variant: pending.  See [`metadata/e1m_modules/E1M-NX9101.yaml`](../../metadata/e1m_modules/E1M-NX9101.yaml).
 
 ## Boot + identification
 

@@ -159,6 +159,45 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Changed (2026-05-14 -- doc xref + SKU layout cleanup §B.2)
+
+- **SoM preset files flattened: `E1M-<MPN>/som.yaml` ->
+  `E1M-<MPN>.yaml`.**  The previous layout had every SKU's
+  preset named `som.yaml` inside an MPN-named directory --
+  visually ambiguous in any directory listing or recent-files
+  list ("which som.yaml is open in tab 4?").  Moving the SKU
+  into the filename makes every preset distinguishable at a
+  glance.  Eleven files renamed (`E1M-AEN301`/`401`/`501`/
+  `601`/`701`/`801`, `E1M-V2N101`/`V2N102`, `E1M-V2M101`/`V2M102`,
+  `E1M-NX9101`); the empty MPN-named directories deleted.
+  Loader logic in `scripts/{alp_project,program_eeprom,validate_board_yaml,validate_metadata,check_example_portability}.py`
+  rewired to the new path pattern; JSON schemas
+  (`board-config-v1`, `som-preset-v1`) descriptions updated.
+  ~16 doc + comment xrefs across `docs/`, `include/`,
+  `metadata/`, and `examples/` rewritten.  ABI snapshot
+  regenerated.
+- **Stale dead-link sweep across `docs/`.**  Five markdown
+  links pointed at `../memory/project_*.md` -- files that live
+  in the maintainer's local AI-memory store, not in the public
+  repo.  Anyone cloning got dead links.  Removed the link
+  decoration in five files (`docs/gd32-bridge-protocol.md`,
+  `docs/gd32-bridge.md`, `docs/ota-device-contract.md`,
+  `docs/adr/0005-alp-sdk-vs-alp-studio-boundary.md`); rewrote
+  surrounding prose to stand on its own.  Final link-checker
+  sweep: 0 dead markdown links in `docs/`.
+- **`docs/board-config.md` "Stock presets" structure refreshed.**
+  The directory illustration (~ lines 290+) showed the
+  hypothetical `sku-aen<N>.yaml` flat layout that never
+  shipped.  Replaced with the actual flat-MPN layout
+  (`E1M-<MPN>.yaml` at the `e1m_modules/` root, family
+  subdirs for family-scope artefacts).  The second illustration
+  (~ lines 580+) similarly refreshed: stale "TBD" labels on
+  the V2N + V2N-M1 + i.MX 93 family `hw-revisions.yaml` rows
+  (the FILES exist; their VALUES carry per-rev TBDs); the
+  E1M-X-EVK board.yaml row no longer mis-claimed as TBD (the
+  file exists); added the `custom-example/board.yaml`
+  template row.
+
 ### Added (2026-05-14 -- examples completeness pass §B.1)
 
 - **`examples/audio-loopback/`** now has `README.md` +

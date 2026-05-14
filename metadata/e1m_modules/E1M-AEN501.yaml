@@ -1,5 +1,5 @@
 # Stock preset for E1M-AEN501 (the SoM, NOT the EVK carrier).
-# See E1M-AEN701/som.yaml header for the file's role + the
+# See E1M-AEN701.yaml header for the file's role + the
 # project memory note governing what stays TBD.
 
 schema_version: 1

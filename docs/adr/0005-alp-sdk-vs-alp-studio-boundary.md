@@ -20,8 +20,8 @@ The two repositories share infrastructure (chip metadata, ABI
 snapshot tooling, the public header surface) but serve genuinely
 different audiences.  alp-sdk's audience includes **hand-written
 firmware authors** who never touch alp-studio — see
-`memory/project_standalone_usage_first_class.md` and
-[ADR 0001](0001-wrapper-on-top-of-zephyr.md).
+[ADR 0001](0001-wrapper-on-top-of-zephyr.md) and the "Two
+consumer paths" section of [`README.md`](../../README.md).
 
 Without an explicit rule about which repo a given new addition
 belongs in, the temptation is to land everything in alp-sdk
@@ -114,6 +114,6 @@ table makes the answer cheap to look up during PR review.
   exists and why standalone usage is first-class.
 - `docs/architecture.md` — the "Repository boundary" subsection
   surfaces this decision without requiring a click into the ADR.
-- `memory/project_standalone_usage_first_class.md` — the saved
-  project memory codifying that hand-written firmware is a
-  first-class consumer.
+- [`README.md`](../../README.md) "Two consumer paths" --
+  customer-facing framing of the same standalone-vs-studio
+  split.

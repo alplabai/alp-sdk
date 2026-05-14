@@ -36,8 +36,8 @@
  *
  * The phase pairs themselves don't surface as separate channels at
  * the I2C register level -- callers see only CH1 and CH2.  The
- * `som.yaml` files under `metadata/e1m_modules/v2n` and
- * `metadata/e1m_modules/v2n-m1` use "ch1+ch2 / ch3+ch4" notation;
+ * V2N + V2N-M1 SoM presets (`metadata/e1m_modules/E1M-V2{N,M}*.yaml`)
+ * use "ch1+ch2 / ch3+ch4" notation;
  * that refers to the underlying phase pairs that make up each
  * channel (phases 1+2 = CH1, phases 3+4 = CH2).
  *

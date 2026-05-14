@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/som-preset-v1.schema.json",
-  "title": "ALP SoM preset (metadata/e1m_modules/<SKU>/som.yaml) v1",
+  "title": "ALP SoM preset (metadata/e1m_modules/<SKU>.yaml) v1",
   "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  This schema validates the structural shape of every released-MPN preset; per-section tightness varies (the i2c_devices block is strictly typed; populated-parts refs stay loose because chip names are an open set governed by metadata/chips/<name>.yaml).",
   "type": "object",
   "required": ["schema_version", "sku", "family", "silicon"],

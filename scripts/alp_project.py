@@ -23,7 +23,7 @@ Usage:
         --output build/generated/alp.conf
 
 The loader resolves:
-  - The SoM SKU preset under metadata/e1m_modules/<SKU>/som.yaml
+  - The SoM SKU preset under metadata/e1m_modules/<SKU>.yaml
   - The carrier preset under metadata/carriers/<name>/board.yaml
     (if `carrier` block present)
   - Per-block overrides in the user's board.yaml
@@ -129,8 +129,8 @@ def _validate(project: dict[str, Any]) -> None:
 
 
 def _resolve_sku(sku: str, metadata_root: Path) -> dict[str, Any]:
-    # Per-SKU preset lives at metadata/e1m_modules/<SKU>/som.yaml.
-    preset_path = metadata_root / "e1m_modules" / sku / "som.yaml"
+    # Per-SKU preset lives at metadata/e1m_modules/<SKU>.yaml.
+    preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
     if not preset_path.is_file():
         sys.exit(
             f"alp_project: no preset for SKU {sku} at {preset_path.relative_to(REPO)} "

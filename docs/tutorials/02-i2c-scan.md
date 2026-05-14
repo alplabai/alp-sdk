@@ -65,7 +65,7 @@ Same code, swap `som.sku` to `E1M-V2N101`, rebuild.  Expected:
 
 If a documented address doesn't show up, the chip is missing or
 mis-strapped -- compare against
-`metadata/e1m_modules/<SKU>/som.yaml`'s `i2c_devices:` block.
+`metadata/e1m_modules/<SKU>.yaml`'s `i2c_devices:` block.
 
 ## See also
 

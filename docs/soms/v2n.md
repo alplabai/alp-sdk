@@ -37,7 +37,7 @@ Both SKUs share the same silicon + PCB.  Pick by memory budget.
 
 Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
-Per-SKU populated parts: [`metadata/e1m_modules/E1M-V2N10{1,2}/som.yaml`](../../metadata/e1m_modules/).
+Per-SKU populated parts: [`metadata/e1m_modules/E1M-V2N10{1,2}.yaml`](../../metadata/e1m_modules/).
 
 ## Reach the GD32 supervisor
 

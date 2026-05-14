@@ -96,7 +96,7 @@ def load_som_optional_chips() -> dict[str, set[str]]:
     """Map som.sku -> set of chip_ids whose `assembled` flag isn't a hard
     true.  Used to surface "chip is BOM-optional on this SKU" warnings."""
     out: dict[str, set[str]] = {}
-    for som_yaml in sorted((ROOT / "metadata" / "e1m_modules").glob("E1M-*/som.yaml")):
+    for som_yaml in sorted((ROOT / "metadata" / "e1m_modules").glob("E1M-*.yaml")):
         with som_yaml.open(encoding="utf-8") as f:
             doc = yaml.safe_load(f) or {}
         sku = doc.get("sku")

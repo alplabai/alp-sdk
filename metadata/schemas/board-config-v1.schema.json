@@ -21,7 +21,7 @@
         "sku": {
           "type": "string",
           "pattern": "^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$",
-          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>/som.yaml.  The SDK ships a preset for every released MPN -- customer's board.yaml just provides the MPN here and everything else (silicon, on-module radio, secure element, RTC, EEPROM, default inference backend) is inherited from the preset.  Recognised: E1M-AEN301/401/501/601/701/801 (Alif Ensemble), E1M-V2N101/V2N102 (Renesas RZ/V2N), E1M-V2M101/V2M102 (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93, exact SKU TBD)."
+          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  The SDK ships a preset for every released MPN -- customer's board.yaml just provides the MPN here and everything else (silicon, on-module radio, secure element, RTC, EEPROM, default inference backend) is inherited from the preset.  Recognised: E1M-AEN301/401/501/601/701/801 (Alif Ensemble), E1M-V2N101/V2N102 (Renesas RZ/V2N), E1M-V2M101/V2M102 (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93, exact SKU TBD)."
         },
         "hw_rev": {
           "type": "string",

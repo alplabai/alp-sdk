@@ -31,7 +31,7 @@ west alp-build -b alp_e1m_evk_v2n examples/gpio-button-led
 ```
 
 The SDK loader picks up the new `som.sku`, resolves the V2N preset
-under `metadata/e1m_modules/E1M-V2N101/som.yaml`, regenerates
+under `metadata/e1m_modules/E1M-V2N101.yaml`, regenerates
 `alp.conf` with the V2N-specific Kconfig flags, and `west build`
 drives the rest.
 

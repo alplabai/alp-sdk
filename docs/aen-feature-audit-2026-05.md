@@ -13,7 +13,7 @@ This is a **block-level** audit. It deliberately does not record
 ALP-specific bond-out choices (which AEN pads land on which E1M-AEN SKU,
 or which optional blocks are populated on which silicon variant). For
 SKU-level detail see `metadata/socs/alif/ensemble/*.json` and
-`metadata/e1m_modules/E1M-AEN*/som.yaml`; the audit cites those files by
+`metadata/e1m_modules/E1M-AEN*.yaml`; the audit cites those files by
 path but does not reproduce SKU pin mappings.
 
 ---
@@ -108,7 +108,7 @@ Secondary cross-checks from the alp-sdk repo itself:
 
 - `metadata/socs/alif/ensemble/e[3-8].json` -- per-SoC peripheral counts
 - `metadata/socs/renesas/rzv2n/n44.json` -- V2N baseline for migration risk
-- `metadata/e1m_modules/E1M-AEN*/som.yaml` -- per-SKU manifests
+- `metadata/e1m_modules/E1M-AEN*.yaml` -- per-SKU manifests
 - `metadata/e1m_modules/aen/from-alif.tsv` -- pad-level routing
 - `include/alp/soc_caps.h` -- current portable capability bounds
 - `include/alp/peripheral.h`, `adc.h`, `display.h`, `camera.h`,

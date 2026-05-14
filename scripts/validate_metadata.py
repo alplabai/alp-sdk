@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Validate every metadata/socs/**/*.json against the soc-spec v1
-schema AND every metadata/e1m_modules/<SKU>/som.yaml against the
+schema AND every metadata/e1m_modules/<SKU>.yaml against the
 som-preset v1 schema.
 
 Run locally before pushing:
@@ -82,7 +82,7 @@ def main() -> int:
     if SOM_SCHEMA.is_file():
         som_schema = json.loads(SOM_SCHEMA.read_text(encoding="utf-8"))
         som_validator = jsonschema.Draft202012Validator(som_schema)
-        som_files = sorted(SOM_PRESETS.glob("E1M-*/som.yaml"))
+        som_files = sorted(SOM_PRESETS.glob("E1M-*.yaml"))
         if som_files:
             print()
             som_failures = _check_files(

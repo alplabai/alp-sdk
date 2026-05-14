@@ -148,7 +148,8 @@ flow.
 
 **Silicon ref** -- Triple-colon string identifying SoC silicon
 (e.g. `renesas:rzv2n:n44`, `alif:ensemble:e7`, `nxp:imx9:imx93`).
-Used in `som.yaml` and `<alp/soc_caps.h>` selection.
+Used in the per-SKU SoM preset (`E1M-<MPN>.yaml`) and
+`<alp/soc_caps.h>` selection.
 
 **SKU** -- Stock-Keeping Unit.  In ALP terminology: an MPN that
 identifies a specific SoM configuration (e.g. `E1M-V2N101`).
@@ -158,9 +159,12 @@ identifies a specific SoM configuration (e.g. `E1M-V2N101`).
 **SoM** -- System-on-Module.  ALP's per-SoC PCB module that plugs
 into a carrier (e.g. E1M-V2N101, E1M-AEN701).
 
-**som.yaml** -- Per-SKU manifest declaring silicon, populated
-chips, I²C device addresses, memory specs, default carrier.
-Lives at `metadata/e1m_modules/<SKU>/som.yaml`.
+**SoM preset** (`E1M-<MPN>.yaml`) -- Per-SKU manifest declaring
+silicon, populated chips, I²C device addresses, memory specs,
+default carrier.  Lives at `metadata/e1m_modules/<SKU>.yaml`
+(e.g. `E1M-AEN701.yaml`, `E1M-V2N101.yaml`).  Earlier docs
+called this `som.yaml`; the file name carries the SKU now so
+each preset is distinguishable in a directory listing.
 
 **Supervisor MCU** -- The GD32G553 companion microcontroller on
 V2N modules.  Owns peripherals that don't fit on the main SoC's

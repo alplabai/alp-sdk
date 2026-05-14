@@ -20,7 +20,7 @@ i2c:
 
 # V2N strap (CONF input) selects 2-channel dual-phase mode + 0x1C
 # slave ID.  Channel-to-rail mapping is documented on the per-SoM
-# som.yaml; this manifest only records the chip's capabilities.
+# the per-SKU SoM preset (E1M-<MPN>.yaml); this manifest only records the chip's capabilities.
 operation_mode:   "2ch_dual_phase"   # set by carrier CONF strap
 
 channels:

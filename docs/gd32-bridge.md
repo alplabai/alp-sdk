@@ -81,8 +81,7 @@ firmware/gd32-bridge/
 The single design rule that makes this tree work:
 **both transports call the same `protocol_dispatch()`** in
 `src/protocol.c`.  Adding an opcode is therefore a one-place
-change.  See the project-memory note
-[`memory/project_gd32_bridge_hybrid_spi_i2c.md`](../memory/project_gd32_bridge_hybrid_spi_i2c.md).
+change.
 
 ## Flashing
 

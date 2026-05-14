@@ -9,7 +9,7 @@ the build kicks off:
   1. The file is valid YAML.
   2. It conforms to metadata/schemas/board-config-v1.schema.json.
   3. The referenced SoM SKU has a preset at
-     `metadata/e1m_modules/<SKU>/som.yaml` -- and the referenced
+     `metadata/e1m_modules/<SKU>.yaml` -- and the referenced
      carrier has a preset at `metadata/carriers/<name>/board.yaml`,
      or is treated as a customer-supplied custom carrier when
      `populated` is provided inline.
@@ -90,7 +90,7 @@ def _check_schema(project: dict[str, Any], path: Path) -> bool:
 def _check_som_preset(project: dict[str, Any], metadata_root: Path) -> int:
     """Return 0 on OK, 1 on warning (partial HW config), 2 on missing."""
     sku = project["som"]["sku"]
-    preset = metadata_root / "e1m_modules" / sku / "som.yaml"
+    preset = metadata_root / "e1m_modules" / f"{sku}.yaml"
     if not preset.is_file():
         print(f"FAIL som preset: no preset for {sku} at {preset.relative_to(REPO) if preset.is_relative_to(REPO) else preset}",
               file=sys.stderr)
@@ -173,7 +173,7 @@ def _check_hw_compat(
 
     # SoM side -- family-level hw_revisions table.
     sku = project["som"]["sku"]
-    sku_preset_path = metadata_root / "e1m_modules" / sku / "som.yaml"
+    sku_preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
     if sku_preset_path.is_file():
         sku_doc = yaml.safe_load(sku_preset_path.read_text(encoding="utf-8")) or {}
         family = sku_doc.get("family")
@@ -269,7 +269,7 @@ def _check_peripherals_vs_soc(
 
     # Resolve SoC ref via the SKU preset.
     sku = project["som"]["sku"]
-    preset_path = metadata_root / "e1m_modules" / sku / "som.yaml"
+    preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
     if not preset_path.is_file():
         # Already flagged by _check_som_preset; nothing more to do.
         return 0

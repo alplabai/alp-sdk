@@ -33,7 +33,7 @@ quickstart -- this doc covers the hand-written path.
 The per-SoM one-pager covers what's populated, which examples
 target it, the bring-up flow, and common gotchas.  The full
 per-SKU populated-parts list lives in
-[`metadata/e1m_modules/<SKU>/som.yaml`](../metadata/e1m_modules/);
+[`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/);
 the loader reads this file at `west alp-build` time to decide which
 chip drivers to compile in.
 

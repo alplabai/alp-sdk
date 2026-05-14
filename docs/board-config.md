@@ -18,7 +18,7 @@ schema_version: 1
 
 som:
   sku: E1M-AEN701        # your MPN -- the SDK ships a preset
-                          # at metadata/e1m_modules/<MPN>/som.yaml
+                          # at metadata/e1m_modules/<MPN>.yaml
 
 carrier:
   name: E1M-EVK          # or your own custom carrier name
@@ -32,7 +32,7 @@ running Zephyr" build.  Optional blocks (`inference`, `libraries`,
 the defaults from the MPN's SoM preset.
 
 Released MPNs the SDK ships SoM presets for (look under
-`metadata/e1m_modules/<MPN>/som.yaml`):
+`metadata/e1m_modules/<MPN>.yaml`):
 
 | Family            | MPNs (paste any into `som.sku`)                                              |
 |-------------------|------------------------------------------------------------------------------|
@@ -291,28 +291,33 @@ path).
 ```
 metadata/
 ├── e1m_modules/
-│   ├── aen/
-│   │   ├── sku-aen301.yaml      # TBD pending user HW config
-│   │   ├── sku-aen401.yaml      # TBD
-│   │   ├── sku-aen501.yaml      # TBD
-│   │   ├── sku-aen601.yaml      # TBD
-│   │   ├── sku-aen701.yaml      # v0.3 worked example
-│   │   └── sku-aen801.yaml      # TBD
-│   ├── v2n/
-│   │   ├── sku-v2n101.yaml      # v0.3 worked example
-│   │   └── sku-v2n102.yaml      # TBD
-│   ├── v2n-m1/                  # to land alongside V2N-M1 v0.4 bring-up
-│   └── imx93/                   # SKU TBD per user HW config
+│   ├── E1M-AEN301.yaml      # partial_hw_config: true (silicon-only fields filled; SKU memory + per-SKU TBDs)
+│   ├── E1M-AEN401.yaml      # partial_hw_config: true
+│   ├── E1M-AEN501.yaml      # partial_hw_config: true
+│   ├── E1M-AEN601.yaml      # partial_hw_config: true
+│   ├── E1M-AEN701.yaml      # v0.3 fully-populated worked example
+│   ├── E1M-AEN801.yaml      # partial_hw_config: true
+│   ├── E1M-V2N101.yaml      # v0.3 fully-populated worked example
+│   ├── E1M-V2N102.yaml      # partial_hw_config: true
+│   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
+│   ├── E1M-V2M102.yaml      # V2N-M1 SKU
+│   └── E1M-NX9101.yaml      # i.MX 93 (production MPN TBD pending HW config)
 └── carriers/
-    ├── e1m-evk.yaml             # 35x35 EVK (AEN / N93)
-    └── e1m-x-evk.yaml           # 45x65 EVK (V2N / V2N-M1)
+    ├── E1M-EVK/board.yaml       # 35x35 EVK (AEN / N93)
+    ├── E1M-X-EVK/board.yaml     # 45x65 EVK (V2N / V2N-M1)
+    └── custom-example/board.yaml # template downstream consumers copy + edit
 ```
 
-v0.3 ships the schema + two worked SKU examples (`sku-aen701.yaml`
-+ `sku-v2n101.yaml`) + the two stock carriers.  Remaining SKU
-presets fill in alongside the user-supplied hardware configuration
-writeup.  Per the project memory note, values not in the silicon
-datasheet stay `TBD` until the user supplies them authoritatively.
+v0.3 ships the schema + every released MPN's preset (11 SoM SKUs
+across 4 families) + the two stock carriers + a copy-friendly
+custom-example template.  Two SKUs (`E1M-AEN701`, `E1M-V2N101`)
+have their hardware configuration fully populated; the others
+carry `partial_hw_config: true` so the loader knows to expect
+SKU-specific overrides from the consumer's `board.yaml`.  Per
+the project memory note, values not in the silicon datasheet
+stay `TBD` (e.g. `board_id.adc_channel` in family-level
+`hw-revisions.yaml`) until the user supplies them
+authoritatively.
 
 ### `libraries` block (user-facing, no wrapper)
 
@@ -590,15 +595,17 @@ metadata/
 │   ├── aen/hw-revisions.yaml                   # family-level revs (AEN family
 │   │                                            #  shares one PCB; SKUs differ
 │   │                                            #  by silicon only).
-│   ├── v2n/hw-revisions.yaml                   # V2N family TBD
-│   ├── v2n-m1/hw-revisions.yaml                # V2N + DEEPX TBD
-│   ├── imx93/hw-revisions.yaml                 # i.MX 93 TBD
-│   └── E1M-AEN701/som.yaml                     # MPN preset; `default_hw_rev: r1`
+│   ├── v2n/hw-revisions.yaml                   # V2N family revs (board_id.adc_channel TBD)
+│   ├── v2n-m1/hw-revisions.yaml                # V2N-M1 family revs (mirrors V2N + DEEPX)
+│   ├── imx93/hw-revisions.yaml                 # i.MX 93 family revs (adc_channel TBD)
+│   └── E1M-AEN701.yaml                     # MPN preset; `default_hw_rev: r1`
 │                                                #  points into the family table.
 └── carriers/
     ├── E1M-EVK/board.yaml                      # carrier preset; carries its own
     │                                            #  hw_revisions + default_hw_rev.
-    └── E1M-X-EVK/board.yaml                    # TBD
+    ├── E1M-X-EVK/board.yaml                    # V2N / V2N-M1 carrier
+    │                                            #  (board_id.adc_channel TBD).
+    └── custom-example/board.yaml               # copy-friendly template
 ```
 
 `board.yaml` overrides go in the `som.hw_rev` / `carrier.hw_rev`
@@ -618,7 +625,7 @@ Three states:
 | `false`            | DNI (Do Not Install) -- the chip footprint exists but is empty.  |
 | `"optional"`       | Per-BOM-variant -- some units have it, some don't.               |
 
-Example (extract from `metadata/e1m_modules/E1M-V2N101/som.yaml`):
+Example (extract from `metadata/e1m_modules/E1M-V2N101.yaml`):
 
 ```yaml
 i2c_devices:

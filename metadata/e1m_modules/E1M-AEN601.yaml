@@ -1,17 +1,17 @@
-# Stock preset for E1M-AEN401 (the SoM, NOT the EVK carrier).
-# See E1M-AEN701/som.yaml header for the file's role + the
+# Stock preset for E1M-AEN601 (the SoM, NOT the EVK carrier).
+# See E1M-AEN701.yaml header for the file's role + the
 # project memory note governing what stays TBD.
 
 schema_version: 1
 
-sku: E1M-AEN401
+sku: E1M-AEN601
 family: alif-ensemble
-silicon: alif:ensemble:e4
+silicon: alif:ensemble:e6
 
-display_name: "E1M-AEN401 (Alif Ensemble E4 -- preliminary silicon)"
+display_name: "E1M-AEN601 (Alif Ensemble E6 -- 1x A32 + 2x M55 + 3x Ethos-U55, preliminary)"
 
 on_module:
-  silicon:              alif:ensemble:e4       # 2x Cortex-M55, 2x Ethos-U55 (no A-core)
+  silicon:              alif:ensemble:e6       # 1x A32, dual-NPU 204 GOPS
   wifi_ble:             cc3501e
   secure_element:       optiga_trust_m
   rtc_external:         rv3028c7
@@ -32,5 +32,5 @@ default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/
 default_carrier:        E1M-EVK
 
 status:
-  preliminary:          true                   # E4 datasheet not yet public
+  preliminary:          true                   # E6 datasheet not yet public
   partial_hw_config:    true

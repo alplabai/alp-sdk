@@ -1,9 +1,11 @@
 # Device-side OTA contract
 
 This document captures the **device-side** half of the OTA contract
-for the E1M-X family.  The **server-side** is owned by Hakan and
-lives in a separate repository.  See
-[`memory/project_ota_server_owner.md`](../memory/project_ota_server_owner.md).
+for the E1M-X family.  The **server-side** is owned by a separate
+team and lives in a separate repository (not part of this public
+SDK).  The interface between the two halves is the device-side
+Mender contract documented below + the shared trust model in
+[`docs/secure-boot.md`](secure-boot.md).
 
 Two layers of OTA exist:
 

@@ -3,7 +3,7 @@
 """
 Generate the 128-byte EEPROM manifest binary for the ALP SDK's
 on-module 24C128 EEPROM (AEN family, sits at I2C address 0x50 per
-the on_module section of metadata/e1m_modules/<MPN>/som.yaml).
+the on_module section of metadata/e1m_modules/<MPN>.yaml).
 
 Reads a project board.yaml for the SoM SKU + hw_rev + family, takes
 the factory serial number + manufacturing date as CLI args, and
@@ -109,7 +109,7 @@ def _load_board_yaml(path: Path) -> dict[str, Any]:
 
 def _resolve_family(sku: str, metadata_root: Path) -> str:
     """Find the family slug for an MPN by reading the SKU preset."""
-    preset = metadata_root / "e1m_modules" / sku / "som.yaml"
+    preset = metadata_root / "e1m_modules" / f"{sku}.yaml"
     if not preset.is_file():
         sys.exit(f"program_eeprom: no preset for {sku} at "
                  f"{preset} -- the production-test flow needs a "
@@ -137,7 +137,7 @@ def _resolve_hw_rev(project: dict[str, Any], metadata_root: Path) -> str:
     if declared:
         return str(declared)
     sku = project["som"]["sku"]
-    preset = metadata_root / "e1m_modules" / sku / "som.yaml"
+    preset = metadata_root / "e1m_modules" / f"{sku}.yaml"
     doc = yaml.safe_load(preset.read_text(encoding="utf-8")) or {}
     default = doc.get("default_hw_rev")
     if not default:

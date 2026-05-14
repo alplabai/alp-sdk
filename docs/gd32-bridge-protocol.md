@@ -10,8 +10,7 @@
 >
 > **Authoritative carrier wiring** is in
 > [`metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`](../metadata/e1m_modules/v2n/renesas-peripheral-map.tsv)
-> (`GD32_SPI.*` rows + `BRD_I2C` rows).  See also
-> [memory/project_gd32_bridge_hybrid_spi_i2c.md](../memory/project_gd32_bridge_hybrid_spi_i2c.md).
+> (`GD32_SPI.*` rows + `BRD_I2C` rows).
 
 ## 1. Hardware transports
 
@@ -143,8 +142,6 @@ and FAC blocks load-bearing rather than vestigial.  Portable
 surface lives in [`<alp/adc.h>`](../include/alp/adc.h)
 (`alp_adc_filter_t` / `alp_adc_spectrum_t`) plus the standalone
 in-RAM chain primitives in [`<alp/dsp.h>`](../include/alp/dsp.h).
-See `memory/project_wave2_dsp_pipeline_design.md` for the design
-rationale.
 
 Three opcodes own the upload path.  Each is **reserved** at v0.5
 -- firmware default-case dispatch returns `STATUS_NOSUPPORT` until
@@ -633,7 +630,7 @@ verification routine in `firmware/gd32-bridge/src/protocol.c`.
 
 The default GD32 slave address `0x70` is **not** occupied by any
 chip on the V2N BRD_I2C bus (verified against
-`metadata/e1m_modules/E1M-V2N101/som.yaml`).  When a carrier
+`metadata/e1m_modules/E1M-V2N101.yaml`).  When a carrier
 allocates BRD_I2C to a device that conflicts, the firmware is
 rebuildable with a different `CONFIG_GD32G553_BRIDGE_I2C_ADDR` —
 host code reads back the address from `GET_VERSION` reply payload
@@ -722,9 +719,7 @@ Two upgrade paths.  Per the V2N hardware decision (2026-05-12),
 the carrier routes `GD32_SWDIO` + `GD32_SWCLK` + `GD32_NRST` from
 the Renesas host to the GD32; the BOOT0-strap / factory-ISP path
 was dropped after the GD32G553 boot ROM was confirmed
-USART-only (User Manual Rev1.2 §1.4).  See
-[memory/project_gd32_boot0_to_v2n_planned.md](../memory/project_gd32_boot0_to_v2n_planned.md)
-for the design rationale.
+USART-only (User Manual Rev1.2 §1.4).
 
 **Path A — Application bootloader over the bridge (preferred
 normal upgrade path).**

@@ -134,10 +134,10 @@ a real I2C controller.  Check:
 
 The chip isn't ACKing on its expected address.  Causes:
 
-* Wrong I2C bus -- check `som.yaml` for which bus the chip is on
+* Wrong I2C bus -- check the SoM preset (`E1M-<MPN>.yaml`) for which bus the chip is on
   (e.g. V2N's PMICs are on `brd_i2c`, not `e1m_i2c0`).
 * Wrong slave address -- confirm against
-  `metadata/e1m_modules/<SKU>/som.yaml` `i2c_devices` block.
+  `metadata/e1m_modules/<SKU>.yaml` `i2c_devices` block.
 * Power not yet on the chip -- some chips need their REG_ON pin
   pulled high first (e.g. Murata Wi-Fi/BT module).
 
