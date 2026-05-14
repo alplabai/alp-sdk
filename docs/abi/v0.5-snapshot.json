@@ -3112,14 +3112,6 @@
           "hash": "6e3a0bcd98051272",
           "value": "1u"
         },
-        "E1M_DAC_CH0": {
-          "hash": "42488cbbac000993",
-          "value": "0u"
-        },
-        "E1M_DAC_CH1": {
-          "hash": "4cc071d400a1d6f4",
-          "value": "1u"
-        },
         "E1M_DAC_COUNT": {
           "hash": "1e554dcd20a915d3",
           "value": "2u"

@@ -130,10 +130,11 @@ extern "C" {
 #define E1M_ENC2          2u
 #define E1M_ENC3          3u
 
-/* DAC channel IDs — passed as channel_id where the DAC API lands
- * (v0.3 deliverable; reserved here for ABI stability). */
-#define E1M_DAC_CH0       0u
-#define E1M_DAC_CH1       1u
+/* DAC channel IDs: use the pin-granular E1M_DAC0 / E1M_DAC1
+ * defined above in the peripheral-instance section.  The earlier
+ * `E1M_DAC_CH0` / `_CH1` aliases (same values) were removed
+ * pre-1.0 -- callers don't pick "DAC peripheral 0 channel 0",
+ * they pick the pin. */
 
 /* Counter / generic-timer instance IDs — passed as `counter_id` to
  * alp_counter_open(). */
