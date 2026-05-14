@@ -7,6 +7,19 @@ Thanks for considering a contribution.  The ALP SDK is the unification
 software layer for ALP Lab's E1M edge AI modules; keeping it small,
 predictable, and OS-pivoted is the whole point.
 
+## Where to ask things
+
+| Channel | Use it for |
+|---|---|
+| [`community.alplab.ai`](https://community.alplab.ai/) | Open-ended questions, "how do I...", design discussions, showcasing what you built |
+| [GitHub Issues](https://github.com/alplabai/alp-sdk/issues) | Concrete bugs, feature requests, regressions, anything with a reproducer |
+| [GitHub Security Advisories](https://github.com/alplabai/alp-sdk/security/advisories) | **Security issues only** — see [`docs/security-advisories.md`](docs/security-advisories.md) for the report flow |
+| [`docs.alplab.ai/sdk/introduction`](https://docs.alplab.ai/sdk/introduction) | Rendered docs (mirror of the in-repo markdown with cross-version nav + search) |
+
+If you're unsure whether it's a bug or a usage question, start on
+the community forum — bugs that need the issue tracker get triaged
+across.
+
 ## How to contribute
 
 ### Reporting bugs

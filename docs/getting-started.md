@@ -5,6 +5,12 @@ This walkthrough takes you from "git clone" to a working
 silicon.  No `alp-studio` required — the SDK supports
 hand-written firmware as a first-class consumer.
 
+> **Rendered version:** the full SDK documentation site lives at
+> [**docs.alplab.ai/sdk/introduction**](https://docs.alplab.ai/sdk/introduction).
+> This in-repo markdown is the source of truth; the site mirrors
+> it with cross-version navigation + search.  Stuck on something?
+> Ask on [**community.alplab.ai**](https://community.alplab.ai/).
+
 If you'd rather skim, the fastest path is:
 
 ```bash

@@ -159,6 +159,30 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- V1.0 readiness tracker + external anchors §C.0)
+
+- **`docs/v1.0-readiness.md`** (new) -- the master living checklist
+  for everything between today and the v1.0.0 tag.  Organises
+  remaining work into 11 pillars (code completion, docs, fuzz, ABI
+  freeze, release engineering, hardware verification, external
+  party gates, reference apps, performance baselines, security
+  audit, and the external anchors that came in this commit).
+  Cross-links to `VERSIONS.md` (north star) + `docs/test-plan.md`
+  (verification ledger).
+- **External anchors landed across customer-facing surfaces:**
+  - `README.md` — top-of-readme pointer to
+    [`docs.alplab.ai/sdk/introduction`](https://docs.alplab.ai/sdk/introduction)
+    (rendered docs) +
+    [`community.alplab.ai`](https://community.alplab.ai/) (forum) +
+    GitHub Issues (bug tracker).
+  - `docs/getting-started.md` -- intro block points at the rendered
+    docs site and the community forum.
+  - `CONTRIBUTING.md` -- new "Where to ask things" table separating
+    open-ended questions (forum) / concrete bugs (issues) /
+    security issues (advisories) / rendered docs.
+  - `docs/troubleshooting.md` -- callout above the error catalogue
+    pointing at the forum for unlisted issues.
+
 ### Changed (2026-05-14 -- CX read-through §B.4)
 
 - **`README.md` 30-second quick start clarification.**  The

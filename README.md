@@ -10,6 +10,13 @@ SDK on top of ARM CMSIS.
 
 Supported OS targets: **Bare-metal · Zephyr RTOS · Yocto Linux**.
 
+**Where to go next:** rendered docs at
+[**docs.alplab.ai/sdk/introduction**](https://docs.alplab.ai/sdk/introduction)
+· questions + community at
+[**community.alplab.ai**](https://community.alplab.ai/) ·
+issues at
+[**github.com/alplabai/alp-sdk/issues**](https://github.com/alplabai/alp-sdk/issues).
+
 ## Two consumer paths
 
 The SDK supports both flows equally — pick whichever fits.
