@@ -76,7 +76,7 @@ SW-DPv2); used by `gd32_swd_connect` to confirm the link reaches
 the right silicon.
 
 **HiL** -- Hardware-in-the-Loop testing.  See
-[`docs/hil-plan.md`](hil-plan.md).
+the HiL rig plan in the internal `e1m-som-metadata` repo.
 
 **hw_rev** -- Hardware revision label (e.g. `r1`, `r2`, ...).
 Distinguishes board respins of the same SKU.

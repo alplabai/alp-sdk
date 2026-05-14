@@ -14,14 +14,14 @@
  * fallback for SoMs without a 2D accelerator.
  *
  * Surface rationale: the Alif Ensemble audit
- * (`docs/aen-feature-audit-2026-05.md`, top-five NEEDS-PORTABLE-
+ * (internal AEN feature audit, top-five NEEDS-PORTABLE-
  * SURFACE gap) flagged GPU2D as the highest-demand block missing a
  * Zephyr driver class.  Customers migrating from V2N to AEN
  * silently lose the 2D acceleration if the SDK does not expose a
  * portable surface.  This header declares the API so customer code
  * compiles against every SoM; the actual GPU2D dispatch lands once
  * the AEN HAL pack stabilises (see roadmap in
- * `docs/aen-feature-audit-2026-05.md` §5.2).
+ * the internal AEN feature audit §5.2).
  *
  * Backends:
  *   - AEN-family : Alif `alif_dave2d-driver` (vendor HAL).

@@ -110,7 +110,7 @@ void           alp_storage_close(alp_storage_t *s);
 /* ================================================================== */
 /* Inline AES (on-the-fly XIP encryption / decryption)                 */
 /*                                                                     */
-/* Wave-2 audit (docs/aen-feature-audit-2026-05.md §4.3) flagged       */
+/* Wave-2 audit (internal AEN feature audit, §4.3) flagged       */
 /* on-the-fly inline AES for external flash as a NEEDS-PORTABLE-       */
 /* SURFACE gap.  AEN-family OSPI / HexSPI controllers can transparently */
 /* encrypt + decrypt data between the host bus and the external chip   */

@@ -275,7 +275,7 @@ split.
 | Secure boot                                      | [`docs/secure-boot.md`](secure-boot.md)           |
 | OTA (Mender device contract)                     | [`docs/ota.md`](ota.md), [`docs/ota-device-contract.md`](ota-device-contract.md) |
 | Verification + release matrix                    | [`docs/test-plan.md`](test-plan.md)               |
-| HiL rig design                                   | [`docs/hil-plan.md`](hil-plan.md)                 |
+| HiL rig design                                   | maintained in `alplabai/e1m-som-metadata` (internal) |
 | Porting to a new SoM                             | [`docs/porting-new-som.md`](porting-new-som.md)   |
 
 ## 9. Getting help

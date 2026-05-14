@@ -159,6 +159,30 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Removed (2026-05-14 -- internal docs moved to private repo)
+
+- **`docs/hil-plan.md` removed from the public SDK.**  The
+  document described the in-house Hardware-in-the-Loop rig --
+  fault-injection wiring, instrument lattice, expected fixture
+  coverage -- which contains test-IP relevant to the
+  maintainer's HiL setup but no API contract a customer needs.
+  Moved to the private `alplabai/e1m-som-metadata` repo as
+  `HIL-PLAN.md`.  Public refs in `docs/firmware-quickstart.md`,
+  `docs/glossary.md`, and `docs/test-plan.md` rewritten to
+  point at the internal location (without leaking its content).
+- **`docs/aen-feature-audit-2026-05.md` removed from the public
+  SDK.**  The audit catalogues which Alif Ensemble peripherals
+  the SDK exposes vs the silicon's full surface -- internal
+  product/coverage roadmap, not consumer-facing API.  Moved to
+  `alplabai/e1m-som-metadata` as `AEN-FEATURE-AUDIT-2026-05.md`.
+  Public cross-refs in `examples/aen/README.md` rewritten to
+  cite the internal location; code-comment references in
+  `include/alp/camera.h`, `include/alp/gpu2d.h`,
+  `include/alp/storage.h`, `src/zephyr/gpu2d_zephyr.c`, and
+  `zephyr/Kconfig` updated to drop the explicit path while
+  keeping the audit reference ("Per the internal AEN feature
+  audit, ...").
+
 ### Changed (2026-05-14 -- doc xref + SKU layout cleanup §B.2)
 
 - **SoM preset files flattened: `E1M-<MPN>/som.yaml` ->

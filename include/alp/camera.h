@@ -61,7 +61,7 @@ void alp_camera_close(alp_camera_t *c);
 /* ================================================================== */
 /* ISP (Image Signal Processor) configuration                          */
 /*                                                                     */
-/* Wave-2 audit (docs/aen-feature-audit-2026-05.md §4.3) NEEDS-       */
+/* Wave-2 audit (internal AEN feature audit, §4.3) NEEDS-       */
 /* PORTABLE-SURFACE: AEN-family E4 / E6 / E8 ship a dedicated ISP     */
 /* (Alif's hardened Mali-C55 path) that Zephyr's portable             */
 /* drivers/video/ class doesn't expose at the on-chip-ISP level --     */

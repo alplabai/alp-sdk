@@ -16,7 +16,7 @@
  *   - i.MX 93    : Vivante GC328 (NXP BSP, planned).
  *   - V2N        : no 2D block; stays NOSUPPORT.
  *
- * Per the AEN audit (docs/aen-feature-audit-2026-05.md), GPU2D
+ * Per the internal AEN feature audit, GPU2D
  * is the highest-demand peripheral-class gap.  Customers
  * migrating from V2N to AEN silently lose 2D acceleration if the
  * SDK never exposed a portable surface -- this header + stub

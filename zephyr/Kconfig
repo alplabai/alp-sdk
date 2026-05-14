@@ -392,7 +392,7 @@ config ALP_SDK_GPU2D
 	  Zephyr modules.
 
 	  Surfaces the headline gap the Alif Ensemble feature audit
-	  (docs/aen-feature-audit-2026-05.md) called out: customers
+	  (internal AEN feature audit) called out: customers
 	  migrating from V2N to AEN otherwise silently lose 2D
 	  acceleration because Zephyr has no portable `gpu` / `2d`
 	  driver class.

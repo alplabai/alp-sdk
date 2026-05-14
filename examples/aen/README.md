@@ -25,6 +25,6 @@ i2c, pwm, ...) stay at the top level of `examples/`.
   one-pager + supported peripherals.
 - [`docs/getting-started.md`](../../docs/getting-started.md) --
   EVK bring-up flow that lands you ready to run these examples.
-- [`docs/aen-feature-audit-2026-05.md`](../../docs/aen-feature-audit-2026-05.md) --
-  AEN feature coverage matrix (what the SDK exposes vs the
-  silicon's full surface).
+- AEN feature coverage matrix -- maintained in the
+  internal `e1m-som-metadata` repo as `AEN-FEATURE-AUDIT-2026-05.md`
+  (what the SDK exposes vs the silicon's full surface).
