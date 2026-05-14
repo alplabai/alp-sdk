@@ -1,0 +1,45 @@
+# board.yaml -- IoT environment dashboard demo.
+#
+# Reads BME280 temperature/humidity/pressure, publishes the
+# samples to an MQTT broker (TLS via mbedTLS + OPTIGA-handshake),
+# and renders a live LVGL dashboard on a 240x320 ST7789.  The
+# WiFi connection comes up via the Murata LBEE5HY2FY module on
+# the E1M-AEN module's side-channel SDIO.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701
+
+carrier:
+  name: E1M-EVK
+
+os: zephyr
+
+libraries:
+  - lvgl
+  - mbedtls               # TLS for MQTT.
+  - coremqtt_sn           # Lightweight MQTT-SN client (sensor-network MQTT).
+
+iot:
+  wifi:    true
+  mqtt:    true
+  tls:     true
+
+peripherals:
+  - i2c                   # BME280.
+  - spi                   # Display.
+  - gpio                  # Display ancillaries + Murata GPIOs.
+
+chips:
+  - bme280                # Environment sensor.
+  - optiga_trust_m        # TLS handshake offload.
+  - st7789                # 240x320 TFT.
+  # WiFi connectivity comes through the <alp/iot.h> alp_wifi_*
+  # surface; on AEN the radio link is via an external WiFi module
+  # on the carrier (LWM2M-style), not an on-module chip.  V2N
+  # carries `murata_lbee5hy2fy` on-module; the same source builds
+  # against that path if `som.sku` is swapped to E1M-V2N101.
+
+diagnostics:
+  log_level: info

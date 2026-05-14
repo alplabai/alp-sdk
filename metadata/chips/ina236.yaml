@@ -1,0 +1,34 @@
+# ALP SDK chip manifest: TI INA236 power monitor.
+schema_version:   1
+chip_id:          ina236
+driver_status:    partial
+display_name:     "TI INA236 16-bit precision current + voltage monitor"
+vendor:           ti
+mpn_population:
+  - "INA236AIDDFR"
+
+datasheet:
+  primary:        "TI INA236 SBOS868 (Aug 2018)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x40, scope: "A0=GND A1=GND (default)" }
+  max_clock_hz:   2940000
+
+monitoring:
+  voltage_range_v: [0, 48]
+  current_resolution_bits: 16
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_INA236
+  baremetal:      ALP_SDK_CHIP_INA236
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    null_arg_guard

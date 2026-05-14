@@ -1,0 +1,40 @@
+# ALP SDK chip manifest: OmniVision OV5640 5 MP camera sensor.
+schema_version:   1
+chip_id:          ov5640
+driver_status:    partial
+display_name:     "OmniVision OV5640 5 MP image sensor (DVP/MIPI)"
+vendor:           omnivision
+mpn_population:
+  - "OV5640"
+
+datasheet:
+  primary:        "OmniVision OV5640 datasheet Rev 1.20 (Apr 2011)"
+
+bus:              i2c              # SCCB config side; pixel egress via DVP / MIPI.
+i2c:
+  addresses:
+    - { addr_7bit: 0x3C, scope: "fixed SCCB address" }
+  max_clock_hz:   400000
+
+resolutions:
+  max:            [2592, 1944]
+  presets:        [QVGA, VGA, 720P, 1080P, 5MP]
+
+formats:
+  - rgb565
+  - yuv422
+  - jpeg
+  - raw8
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_OV5640
+  baremetal:      ALP_SDK_CHIP_OV5640
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    null_arg_guard

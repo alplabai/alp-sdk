@@ -1,0 +1,49 @@
+# board.yaml -- AI camera viewer demo.
+#
+# OV5640 camera -> <alp/camera.h> frames -> TFLM person-detect
+# (Ethos-U dispatch on AEN) -> LVGL UI rendering the captured
+# preview + bounding boxes + per-frame inference latency.
+#
+# The headline marketing demo: shows the full edge-AI stack end
+# to end on a single SoM, with the right NPU resolved by the
+# §D.lib.loader from the SKU's `capabilities:` block.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701           # E7 -- two Ethos-U55s, fast inference
+                             # ('preferred_backend: ethos_u' resolves to
+                             # CONFIG_ALP_TFLM_ETHOS_U55=y).
+
+carrier:
+  name: E1M-EVK
+
+os: zephyr
+
+libraries:
+  - lvgl
+  - tflite_micro
+
+# Inference backend picked from the SoM preset (`ethos_u`).  The
+# loader maps that to:
+#   AEN701  -> CONFIG_ALP_TFLM_ETHOS_U55=y
+#   AEN401  -> CONFIG_ALP_TFLM_ETHOS_U85=y + ETHOS_U55=y
+#   AEN801  -> same as AEN401
+#   NX9101  -> CONFIG_ALP_TFLM_ETHOS_U65=y
+# Customers swap the `som.sku` line to compare U85 vs U55 dispatch
+# without touching the app source.
+inference:
+  backend: ethos_u
+  default_arena_kib: 256
+
+peripherals:
+  - i2c                    # Camera SCCB.
+  - spi                    # Display.
+  - gpio                   # Camera ancillaries + display D/C#.
+
+chips:
+  - ov5640                 # 5 MP camera.
+  - st7789                 # 240x320 TFT.
+
+diagnostics:
+  log_level: info

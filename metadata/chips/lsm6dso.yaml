@@ -1,0 +1,36 @@
+# ALP SDK chip manifest: STMicroelectronics LSM6DSO 6-axis IMU.
+schema_version:   1
+chip_id:          lsm6dso
+driver_status:    partial          # init + accel/gyro/temp read.
+display_name:     "STMicroelectronics LSM6DSO 6-axis IMU"
+vendor:           st
+mpn_population:
+  - "LSM6DSOTR"
+
+datasheet:
+  primary:        "ST LSM6DSO DocID Rev 5 (Nov 2018)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x6A, scope: "SDO/SA0 = GND (default on E1M-AEN)" }
+    - { addr_7bit: 0x6B, scope: "SDO/SA0 = V+" }
+  max_clock_hz:   400000
+
+sensor:
+  axes:            6
+  ranges_g:        [2, 4, 8, 16]
+  ranges_dps:      [125, 250, 500, 1000, 2000]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_LSM6DSO
+  baremetal:      ALP_SDK_CHIP_LSM6DSO
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    null_arg_guard

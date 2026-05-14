@@ -1,0 +1,45 @@
+# board.yaml -- drone-style telemetry HUD demo.
+#
+# Combines an LSM6DSO IMU + uBlox NEO-M9N GNSS + INA236 battery
+# monitor + ST7789 240x320 TFT to render a drone flight HUD:
+#   - Artificial horizon (attitude indicator) driven by IMU fusion.
+#   - GPS lat/lon/alt + sat count.
+#   - Battery voltage + current + estimated remaining minutes.
+#   - Flight mode (manual / stabilised / GPS-hold) selector.
+#
+# Showcases the v0.5 SDK story: one app drives 4 different chips
+# through the portable <alp/*> surfaces, and the LVGL UI composes
+# them on a single screen.  No vendor-specific code in the app.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701           # E7 -- SRAM headroom for LVGL + AHRS state.
+
+carrier:
+  name: E1M-EVK
+
+os: zephyr
+
+# Library set: LVGL for rendering, madgwick_ahrs for attitude
+# fusion from raw IMU samples.  Both pulled in via the §D.lib
+# loader; their HW-backend choices come from the active SoM's
+# `capabilities:` block (E7 -> GPU2D for LVGL + FPU for Madgwick).
+libraries:
+  - lvgl
+  - madgwick_ahrs
+
+peripherals:
+  - i2c                    # IMU + battery monitor.
+  - uart                   # GNSS NMEA.
+  - spi                    # Display.
+  - gpio                   # Display D/C# + reset.
+
+chips:
+  - lsm6dso                # 6-axis IMU.
+  - ublox_neo_m9n          # Multi-constellation GNSS.
+  - ina236                 # Battery V/I monitor.
+  - st7789                 # 240x320 TFT.
+
+diagnostics:
+  log_level: info
