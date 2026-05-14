@@ -3152,9 +3152,49 @@
           "hash": "4e0c57015dcfa162",
           "value": "1u"
         },
-        "E1M_GPIO_COUNT": {
-          "hash": "5a0a8cb05d32450e",
+        "E1M_GPIO_ADC0": {
+          "hash": "b2f602472f6af2d5",
           "value": "42u"
+        },
+        "E1M_GPIO_ADC1": {
+          "hash": "3b76f0569b455c9d",
+          "value": "43u"
+        },
+        "E1M_GPIO_ADC2": {
+          "hash": "afae3a2e4747e034",
+          "value": "44u"
+        },
+        "E1M_GPIO_ADC3": {
+          "hash": "a2313361156994d6",
+          "value": "45u"
+        },
+        "E1M_GPIO_ADC4": {
+          "hash": "4737c877101af9d8",
+          "value": "46u"
+        },
+        "E1M_GPIO_ADC5": {
+          "hash": "c66d6f45bdd260ae",
+          "value": "47u"
+        },
+        "E1M_GPIO_ADC6": {
+          "hash": "4706f620f56a8b69",
+          "value": "48u"
+        },
+        "E1M_GPIO_ADC7": {
+          "hash": "74014fe91899d853",
+          "value": "49u"
+        },
+        "E1M_GPIO_COUNT": {
+          "hash": "6864d3dc5c51498e",
+          "value": "52u"
+        },
+        "E1M_GPIO_DAC0": {
+          "hash": "3a762fe7cea562af",
+          "value": "50u"
+        },
+        "E1M_GPIO_DAC1": {
+          "hash": "c3b330d4edd4e925",
+          "value": "51u"
         },
         "E1M_GPIO_ENC0_X": {
           "hash": "234b2200872d09c4",

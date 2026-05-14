@@ -32,14 +32,26 @@
  * The order of entries in a board's `alp,pin-array` `gpios`
  * property MUST match the GPIO-pad enumeration here:
  *
- *   1. `IO0`–`IO25` in numeric order
- *   2. `PWM0`–`PWM7` in numeric order
- *   3. `ENC0_X`, `ENC0_Y`, `ENC1_X`, `ENC1_Y`, … `ENC3_Y`
+ *   1. `IO0`–`IO25` in numeric order                  (indices 0..25)
+ *   2. `PWM0`–`PWM7` in numeric order                 (indices 26..33)
+ *   3. `ENC0_X`, `ENC0_Y`, `ENC1_X`, `ENC1_Y`, … `ENC3_Y` (34..41)
+ *   4. `ADC0`–`ADC7` in numeric order                 (indices 42..49)
+ *   5. `DAC0`, `DAC1`                                 (indices 50..51)
  *
  * Carriers that don't route a particular pad still leave its slot
  * in `alp,pin-array` (with `status = "disabled"` on the GPIO node)
  * so the indices stay stable.  `alp_gpio_open()` for a non-routed
  * pad returns `NULL`.
+ *
+ * ## Pin-as-GPIO fallback
+ *
+ * Every analog/timer-default pad has a parallel `E1M_GPIO_<class><N>`
+ * GPIO index.  An app that doesn't need the ADC/PWM/QENC/DAC
+ * function of a pad can claim it as a digital GPIO by opening the
+ * matching `E1M_GPIO_<class><N>` index -- the backend disables the
+ * analog/timer block on that pad before returning a usable GPIO
+ * handle.  Don't hold both handles open against the same pad; the
+ * silicon is shared.
  *
  * @par ABI status: [ABI-STABLE]
  *      v0.1 + 2026-05-14 prefix-rename pre-v1.0; pinned by e1m-spec.
@@ -255,9 +267,34 @@ extern "C" {
 #define E1M_GPIO_ENC3_X   40u  /**< E1M pad A7  */
 #define E1M_GPIO_ENC3_Y   41u  /**< E1M pad B7  */
 
+/* Single-ended ADC pads as GPIO indices (silkscreen ANA_S0..ANA_S7).
+ * Default function is the analog input; opening these via
+ * `alp_gpio_open()` reclaims them as digital GPIOs (the backend
+ * disables the ADC channel on that pad first).  Indices 42..49.
+ *
+ * Note: the peripheral-instance ID `E1M_ADC<N>` (0..7) passed to
+ * `alp_adc_open()` and the GPIO-index `E1M_GPIO_ADC<N>` (42..49)
+ * passed to `alp_gpio_open()` refer to the SAME physical pad in
+ * two different namespaces.  Don't open both -- they share silicon.
+ * See `docs/board-config.md` "Pin-as-GPIO fallback" for the
+ * convention. */
+#define E1M_GPIO_ADC0     42u
+#define E1M_GPIO_ADC1     43u
+#define E1M_GPIO_ADC2     44u
+#define E1M_GPIO_ADC3     45u
+#define E1M_GPIO_ADC4     46u
+#define E1M_GPIO_ADC5     47u
+#define E1M_GPIO_ADC6     48u
+#define E1M_GPIO_ADC7     49u
+
+/* DAC output pads as GPIO indices (silkscreen ANA_OUT0 / OUT1).
+ * Same pin-as-GPIO fallback as ADC above.  Indices 50..51. */
+#define E1M_GPIO_DAC0     50u
+#define E1M_GPIO_DAC1     51u
+
 /** Total number of GPIO-capable indices in this header.
  *  Carriers' `alp,pin-array` arrays must list this many entries. */
-#define E1M_GPIO_COUNT    42u
+#define E1M_GPIO_COUNT    52u
 
 #ifdef __cplusplus
 }  /* extern "C" */
