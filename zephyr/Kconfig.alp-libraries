@@ -20,14 +20,27 @@ menu "ALP SDK per-library HW-accelerator wiring"
 # tflite_micro
 # ----------------------------------------------------------------------
 
-config ALP_TFLM_ETHOS_U
-	bool "TFLite-Micro on Alif Ethos-U NPU"
+config ALP_TFLM_ETHOS_U85
+	bool "TFLite-Micro on Alif Ethos-U85 NPU (E4 / E6 / E8 only)"
+	depends on ALP_SOC_ALIF_ENSEMBLE_E4 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
+	           ALP_SOC_ALIF_ENSEMBLE_E8
+	help
+	  Compile TFLite-Micro kernels against the Alif Ethos-U85 NPU
+	  back-end (delegated execution).  Only E4 / E6 / E8 populate a
+	  U85 alongside the family-standard pair of U55s.  U85 supports
+	  Transformers and is the strategic forward path for Generative
+	  AI workloads on the Ensemble family.
+
+config ALP_TFLM_ETHOS_U55
+	bool "TFLite-Micro on Alif Ethos-U55 NPU"
 	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
 	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
 	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
 	help
-	  Compile TFLite-Micro kernels against the Alif Ethos-U NPU
-	  back-end (delegated execution).
+	  Compile TFLite-Micro kernels against an Alif Ethos-U55 NPU
+	  back-end (delegated execution).  Every Ensemble SKU carries
+	  two U55s; the loader picks U55 on E3 / E5 / E7 (no U85) and
+	  as the fallback on U85 SKUs when U85 isn't available.
 
 config ALP_TFLM_DRP_AI
 	bool "TFLite-Micro on Renesas DRP-AI NPU"

@@ -10,12 +10,21 @@ upstream_source: "TensorFlow upstream (in Zephyr west.yml already)"
 accelerators:
   - class: ml_npu
     priority:
-      - { soc_family: alif_ensemble, backend: ethos_u, kconfig: CONFIG_ALP_TFLM_ETHOS_U=y }
-      - { soc_family: renesas_rzv2n, backend: drp_ai, kconfig: CONFIG_ALP_TFLM_DRP_AI=y }
+      # Ethos-U85 lives only on Alif Ensemble E4 / E6 / E8 (one U85 +
+      # two U55 in each).  U85 is the Transformer-capable / GenAI
+      # path; pin it as priority 1 on the SKUs that carry it.
+      - { silicon: alif:ensemble:e4, backend: ethos_u85, kconfig: CONFIG_ALP_TFLM_ETHOS_U85=y }
+      - { silicon: alif:ensemble:e6, backend: ethos_u85, kconfig: CONFIG_ALP_TFLM_ETHOS_U85=y }
+      - { silicon: alif:ensemble:e8, backend: ethos_u85, kconfig: CONFIG_ALP_TFLM_ETHOS_U85=y }
+      # Ethos-U55 is on every E* SoC (two per SKU).  Family-wide
+      # fallback for non-U85 SKUs (E3/E5/E7) and the second-choice
+      # binding on U85 SKUs once U85 is unavailable.
+      - { soc_family: alif_ensemble, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
+      - { soc_family: renesas_rzv2n, backend: drp_ai,    kconfig: CONFIG_ALP_TFLM_DRP_AI=y }
   - class: simd
     priority:
       - { soc_family: alif_ensemble, cpu: cortex_m55, backend: helium_mve, kconfig: CONFIG_ALP_TFLM_HELIUM=y }
-      - { soc_family: renesas_rzv2n, cpu: cortex_a55, backend: neon, kconfig: CONFIG_ALP_TFLM_NEON=y }
+      - { soc_family: renesas_rzv2n, cpu: cortex_a55, backend: neon,       kconfig: CONFIG_ALP_TFLM_NEON=y }
   - class: dma
     priority:
       - { backend: tensor_dma_copy, kconfig: CONFIG_ALP_TFLM_DMA_COPY=y }

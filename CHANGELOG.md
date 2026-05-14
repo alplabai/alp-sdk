@@ -84,6 +84,37 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Fixed (2026-05-14 -- §D.lib.loader: Ethos-U85 vs U55 differentiation for tflite_micro)
+
+§D.lib batch collapsed both Alif NPUs (Ethos-U55 + Ethos-U85) under
+a single `ethos_u` backend.  In silicon they are two different IPs:
+
+- Ethos-U55: on every Ensemble SKU (E3, E4, E5, E6, E7, E8) -- two
+  instances per SoC.
+- Ethos-U85: on E4, E6, E8 only -- one instance per SoC, Transformer-
+  capable, the Generative-AI forward path.
+
+The loader and the tflite_micro hw-backends.yaml now distinguish
+the two:
+
+- `scripts/alp_project.py::_emit_library_hw_backends` learns a
+  `silicon:` matcher (in addition to `soc_family:`).  When a
+  priority entry sets `silicon: alif:ensemble:e4`, the loader only
+  emits it on the SKU whose `silicon:` field in
+  `metadata/e1m_modules/<sku>.yaml` matches exactly.
+- `metadata/library-profiles/tflite_micro/hw-backends.yaml` now
+  declares three U85 entries (E4 / E6 / E8) as priority 1, then a
+  family-wide U55 entry for the remaining SKUs.  Result on an
+  AEN401 / AEN601 / AEN801 board: `CONFIG_ALP_TFLM_ETHOS_U85=y`
+  emitted.  On AEN301 / AEN501 / AEN701: `CONFIG_ALP_TFLM_ETHOS_U55=y`.
+- `zephyr/Kconfig.alp-libraries` splits the old `ALP_TFLM_ETHOS_U`
+  symbol into `ALP_TFLM_ETHOS_U85` (depends on E4 || E6 || E8) +
+  `ALP_TFLM_ETHOS_U55` (depends on any E* SoC).
+
+Other libraries (cmsis_dsp / minimp3 / opus) only bind to Helium
+MVE on the M55 cores, which every E SoC ships -- no per-silicon
+split needed there.
+
 ### Changed (2026-05-14 -- §D.closeout: v1.0-readiness + README + test-coverage closeout)
 
 Phase 5 (closeout) of the chip-and-library ecosystem expansion per

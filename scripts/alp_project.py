@@ -423,10 +423,18 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
     For each enabled library that ships a
     `metadata/library-profiles/<name>/hw-backends.yaml`, pick the
     highest-priority matching backend per accelerator class given the
-    active SoM family and emit the matching CONFIG_*=y line.
+    active SoM SKU and emit the matching `CONFIG_*=y` line.
 
-    Backend entries with no `soc_family:` key are treated as universal
-    (e.g. plain FPU or generic DMA) and match any SoM.
+    Match rules (per priority entry):
+      - `silicon:` key, if present, must equal the SKU's `silicon:`
+        ref exactly (e.g. `alif:ensemble:e4`).  Lets us pin a backend
+        to specific SoCs in a family -- Ethos-U85 on E4/E6/E8, but
+        not on E3/E5/E7 which carry only U55.
+      - `soc_family:` key, if present, must equal the SKU family
+        token (`alif_ensemble`, `renesas_rzv2n`, ...).  Selects every
+        SKU in that family.
+      - Both keys omitted = universal entry (e.g. plain FPU, generic
+        DMA), matches any SKU.
     """
     import re
     from pathlib import Path
@@ -438,6 +446,17 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
 
     out: list[str] = []
     repo_root = Path(__file__).resolve().parent.parent
+
+    # Pull the SKU's `silicon:` ref out of metadata/e1m_modules/<sku>.yaml
+    # so per-silicon backends (e.g. Ethos-U85 on E4/E6/E8) can match.
+    silicon_ref: str | None = None
+    sku_path = repo_root / "metadata" / "e1m_modules" / f"{sku}.yaml"
+    if sku_path.exists():
+        for raw in sku_path.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"^silicon:\s*(\S+)", raw)
+            if m:
+                silicon_ref = m.group(1).strip()
+                break
 
     for lib in libs:
         prof = repo_root / "metadata" / "library-profiles" / lib / "hw-backends.yaml"
@@ -470,11 +489,17 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
                     continue
                 k, v = tok.split(":", 1)
                 kv[k.strip()] = v.strip()
-            sf  = kv.get("soc_family")
-            kcv = kv.get("kconfig")
+            sili = kv.get("silicon")
+            sf   = kv.get("soc_family")
+            kcv  = kv.get("kconfig")
             if not kcv:
                 continue
-            if sf is not None and sf != soc_token:
+            # Per-silicon match wins when specified; otherwise fall back
+            # to soc_family.  Both omitted = universal entry.
+            if sili is not None:
+                if silicon_ref is None or sili != silicon_ref:
+                    continue
+            elif sf is not None and sf != soc_token:
                 continue
             out.append(f"{kcv}  # {lib} / {current_class}")
             per_class_emitted.add(current_class)
