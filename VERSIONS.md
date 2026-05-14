@@ -77,7 +77,7 @@ v1.0-shape surface from day one:
 | Peripheral coverage at 12 wrapped classes             | gradual through v0.4   | PWM, ADC, Counter+QEnc, I²S, CAN-FD, RTC, Watchdog all wrapped on Zephyr-AEN.  See [ADR 0003](docs/adr/0003-peripheral-coverage.md). |
 | `alp_last_error()` thread-local diagnostic            | v0.3 retrofit          | Stamped by every `*_open` failure; lets standalone firmware diagnose `NULL` returns precisely.  See [ADR 0002](docs/adr/0002-error-mechanism.md). |
 | `<alp/soc_caps.h>` capability tables                  | v0.3                   | Generated from `metadata/socs/**.json`; rejects 16-bit-ADC-on-12-bit-SoC at `*_open` time. |
-| `ALP_E1M_<CLASS>_COUNT` portability bounds            | undocumented           | Made the cross-SoM-portable instance count per class explicit.  See [ADR 0004](docs/adr/0004-e1m-portability-bound.md). |
+| `E1M_<CLASS>_COUNT` portability bounds            | undocumented           | Made the cross-SoM-portable instance count per class explicit.  See [ADR 0004](docs/adr/0004-e1m-portability-bound.md). |
 | `<alp/audio.h>` / `<alp/ble.h>` / `<alp/security.h>` / `<alp/mproc.h>` surface declarations | v0.2 / v0.3       | Compile-clean stubs that return `ALP_ERR_NOSUPPORT`; apps can `#include` them today, real impl in their target version. |
 | Per-peripheral hand-written reference apps            | v0.4                   | 11 examples under `examples/<peripheral>-<demo>/` covering every wrapped peripheral.  Hand-written firmware authors can crib these as starting templates. |
 | ABI snapshot tooling                                  | v1.0                   | `scripts/abi_snapshot.py` + `docs/abi/v0.1-snapshot.json` shipped.  CI gate via `pr-generated-files.yml` post-1.0. |
@@ -197,7 +197,7 @@ more sensors) and add a second SoM family.
   Canonical case: 16-bit ADC on a 12-bit SoC fails at
   `alp_adc_open` with `ALP_ERR_OUT_OF_RANGE`.  See
   [ADR 0002](docs/adr/0002-error-mechanism.md).
-- **E1M portability bound** — `ALP_E1M_<CLASS>_COUNT` macros in
+- **E1M portability bound** — `E1M_<CLASS>_COUNT` macros in
   `<alp/e1m_pinout.h>` document the cross-SoM-portable instance
   count per peripheral class.  See
   [ADR 0004](docs/adr/0004-e1m-portability-bound.md).

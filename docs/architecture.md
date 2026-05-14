@@ -238,14 +238,14 @@ functions pinned to specific pads:
 - 8 × single-ended ADC (`ADC0..ADC7`), 2 × DAC
 
 These minimums are the **portability contract**: an app that uses
-`ALP_E1M_<CLASS><N>` for `N < ALP_E1M_<CLASS>_COUNT` is guaranteed to
+`E1M_<CLASS><N>` for `N < E1M_<CLASS>_COUNT` is guaranteed to
 work on every conformant SoM.  Higher indices are vendor-specific
 extensions — the wrapper accepts them up to the SoC's documented count
 (e.g. RZ/V2N's six CAN channels), but apps that use them lose the
 "swap the SoM, no software changes" property.
 
 The constants live in [`<alp/e1m_pinout.h>`](../include/alp/e1m_pinout.h)
-as `ALP_E1M_*_COUNT` macros.  alp-studio's pin allocator enforces the
+as `E1M_*_COUNT` macros.  alp-studio's pin allocator enforces the
 E1M bound for portable blocks; the SDK's runtime layer enforces only
 the SoC-specific bound (so vendor-extension blocks work too).  Three
 tiers of validation:

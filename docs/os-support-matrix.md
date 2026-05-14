@@ -69,7 +69,7 @@ plan in `VERSIONS.md`.
 |-------------------------------------------------|--------|-------|
 | `alp_last_error()` thread-local                 | **GA** (Zephyr) | Stamped by every `*_open` failure path.  See ADR 0002. |
 | `<alp/soc_caps.h>` generated capability tables  | **GA** | From `metadata/socs/**.json` via `gen_soc_caps.py`.  Selected by `CONFIG_ALP_SOC_<TOKEN>`. |
-| `ALP_E1M_<CLASS>_COUNT` portability bounds      | **GA** | Cross-SoM-portable instance count per class.  See ADR 0004. |
+| `E1M_<CLASS>_COUNT` portability bounds      | **GA** | Cross-SoM-portable instance count per class.  See ADR 0004. |
 | ABI snapshot diff tool                          | **GA** | `scripts/abi_snapshot.py --diff prior.json`. |
 | `pr-generated-files.yml` CI workflow            | **GA** | Catches stale `soc_caps.h` / ABI snapshot. |
 

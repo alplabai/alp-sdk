@@ -64,7 +64,7 @@ the PR for experimental symbols.
 | `inference.h`         | `[ABI-STABLE]`     | v0.3 dispatcher (auto/cpu/ethos_u/drpai/deepx_dx).                |
 | `mproc.h`             | `[ABI-STABLE]`     | v0.3 mailbox + shmem + hwsem.                                     |
 | `hw_info.h`           | `[ABI-STABLE]`     | v0.3 EEPROM manifest + BOARD_ID ADC.                              |
-| `e1m_pinout.h`        | `[ABI-STABLE]`     | v0.1 portable instance IDs (`ALP_E1M_I2C0`, etc.); pinned by e1m-spec. |
+| `e1m_pinout.h`        | `[ABI-STABLE]`     | v0.1 portable instance IDs (`E1M_I2C0`, etc.); pinned by e1m-spec. |
 | `soc_caps.h`          | `[ABI-STABLE]`     | v0.1 generated; capability constants.                              |
 | `gui.h`               | `[ABI-STABLE]`     | v0.2 LVGL re-export shim.                                          |
 | `camera.h`            | `[ABI-EXPERIMENTAL]` | v0.5 added `alp_camera_configure_isp` (Mali-C55 toggles) — surface tentative pending real hardware feedback.  Base capture path stable; ISP block experimental. |
