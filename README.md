@@ -79,10 +79,13 @@ diagnostics:
 
 The build picks it up automatically — `scripts/alp_project.py`
 emits `build/generated/alp.conf` at CMake-configure time and Zephyr
-layers it on top of `prj.conf` via `OVERLAY_CONFIG`.  See the
-[`gpio-button-led` example](examples/gpio-button-led/) for the
-complete wiring and [`docs/board-config.md`](docs/board-config.md)
-for the full schema reference.
+layers it on top of `prj.conf` via `OVERLAY_CONFIG`.  Every block
+above except `schema_version` / `som` / `carrier` / `os` is optional;
+the [`gpio-button-led` example](examples/gpio-button-led/) for
+instance skips `peripherals:` entirely and uses
+`carrier.populated.button_led: true` to pull the chip driver in.
+See [`docs/board-config.md`](docs/board-config.md) for the full
+schema reference.
 
 Want a GUI?  Install the [VS Code extension](https://github.com/alplabai/alp-sdk-vscode) — schema-aware
 editing, a configurator panel with dropdowns for every released MPN

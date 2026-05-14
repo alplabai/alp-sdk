@@ -159,6 +159,27 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Changed (2026-05-14 -- CX read-through §B.4)
+
+- **`README.md` 30-second quick start clarification.**  The
+  example `board.yaml` in the README uses generic
+  `peripherals: [i2c, pwm]` for schema illustration purposes,
+  but the linked `examples/gpio-button-led/` skips
+  `peripherals:` entirely and uses `carrier.populated.button_led:
+  true` instead.  Added a sentence noting that every block
+  except `schema_version` / `som` / `carrier` / `os` is
+  optional, with the gpio-button-led pattern called out
+  explicitly so first-time readers don't trip on the mismatch.
+- **CX read-through pass: no other issues found.**  Verified
+  README.md, docs/getting-started.md, docs/firmware-quickstart.md,
+  docs/troubleshooting.md, and docs/glossary.md are internally
+  consistent post-§A.7..§B.3 restructures.  Zero TODO/FIXME
+  markers in the top customer-facing surfaces.  Zero stale
+  paths after the §A.8 (tools/->scripts/), §A.10 (dts->zephyr/dts),
+  §A.11 (sysbuild->zephyr/sysbuild), §B.1 (examples READMEs),
+  and §B.2 (SKU flatten) restructures.  No additional doc
+  changes warranted.
+
 ### Added (2026-05-14 -- test coverage audit §B.3)
 
 - **`docs/test-coverage-audit.md`** (new) -- maps ZTEST counts
