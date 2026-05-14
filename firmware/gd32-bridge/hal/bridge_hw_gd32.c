@@ -45,7 +45,14 @@
  *                               cached + applied; oversample_ratio +
  *                               resolution_bits gated to defaults (1,
  *                               12) until a follow-up commit.
- *   10. ADC_STREAM_*         -- DMA0/1 backed continuous acquisition.
+ *   10. ADC_STREAM_*         -- DONE (§C.23): DMA0/1-backed
+ *                               continuous acquisition.  Two parallel
+ *                               streams; each owns a 1024-sample
+ *                               circular ring buffer + a DMA channel
+ *                               driving it peripheral-to-memory.
+ *                               Host drains via polled stream_read;
+ *                               write cursor recovered from the DMA
+ *                               counter.
  *   11. QENC_READ / RESET    -- DONE: 4 encoders across TIMER1/2/3/4
  *                               in quadrature decoder mode 2 (X4).
  *   12. COUNTER_READ         -- DONE: Cortex-M33 DWT cycle counter
@@ -75,24 +82,28 @@
  *                               TIMER_QUAD_DECODER_MODE* encoding.
  *                               Slave listens to ITI0; SYSCFG router
  *                               left at chip default.
- *   16. POWER_MODE_SET       -- DONE (§C.15c, partial): mode 0/1
+ *   16. POWER_MODE_SET       -- DONE (§C.15c + §C.25): mode 0/1
  *                               (run/sleep) accepted no-ops, mode 2
  *                               (deep-sleep) calls
  *                               pmu_to_deepsleepmode(LDO_LOWPOWER, WFI),
  *                               mode 3 (standby) calls
  *                               pmu_to_standbymode().  Wake-source
- *                               bitmap partial: ALP_POWER_WAKE_GPIO
- *                               enables PMU_WAKEUP_PIN0..4; other
- *                               bits (RTC / UART / TIMER / USB / ETH)
- *                               return NOSUPPORT.  wake_after_ms
- *                               rejected pending RTC-alarm wiring.
+ *                               bitmap: GPIO enables PMU_WAKEUP_PIN0..4,
+ *                               RTC + TIMER arm the RTC wakeup timer
+ *                               at 0.5 ms LSB (IRC32K / DIV16); same
+ *                               timer also honours wake_after_ms.
+ *                               UART_RX / USB / ETH_LINK reject as
+ *                               NOSUPPORT (no HW path on GD32G5).
  *   17. DA9292 status poll   -- I2C-master periodic poll cached value.
- *   18. ADC_DSP_*            -- PARTIAL (§C.15d): chain_open + stage_push
- *                               implemented as a 4-chain pool with
- *                               per-stage chunk reassembly into a
- *                               260-byte buffer.  chain_bind still
- *                               NOSUPPORT pending the FFT/FAC + DMA
- *                               stream-attach plumbing.
+ *   18. ADC_DSP_*            -- DONE (§C.15d + §C.24): chain_open +
+ *                               stage_push implemented as a 4-chain
+ *                               pool with per-stage chunk reassembly
+ *                               into a 260-byte buffer.  chain_bind
+ *                               validates completeness + ordering
+ *                               rules (FFT terminal, WINDOW preceding
+ *                               FFT) and stores the binding on both
+ *                               sides; runtime FFT/FAC dispatch inside
+ *                               stream_read follows in a later commit.
  *
  * Each follow-up commit replaces ONE hook's stub body with a real
  * implementation and updates this header comment + the CHANGELOG.
@@ -926,28 +937,163 @@ int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio, uint16_t
     return BRIDGE_HW_OK;
 }
 
+/* Stream-DMA bring-up state.  Two parallel streams: stream 0 binds
+ * DMA0_CH0, stream 1 binds DMA1_CH0.  Each stream owns a circular
+ * ring buffer that the DMA fills peripheral-to-memory at the ADC
+ * clock; bridge_hw_adc_stream_read drains samples between the host's
+ * polls.
+ *
+ * Ring size is chosen so a 100 kHz stream fills it in ~10 ms (1024
+ * samples) -- comfortably above the host's typical poll cadence yet
+ * small enough to keep the SRAM footprint inside the GD32G553's
+ * 128 KB budget.  Total cost: 2 streams x 1024 samples x 2 bytes =
+ * 4 KB. */
+#define BRIDGE_ADC_STREAM_RING_SAMPLES 1024u
+#define BRIDGE_ADC_STREAM_COUNT 2u
+
+typedef struct {
+    bool          in_use;
+    uint8_t       channel;     /* ADC channel index this stream watches */
+    uint32_t      dma_periph;  /* DMA0 or DMA1                          */
+    uint8_t       dma_channel; /* dma_channel_enum value                */
+    uint16_t      ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
+    uint16_t      read_idx;    /* host's consumer cursor                */
+    uint8_t       dsp_chain_id;
+    bool          dsp_bound;
+} adc_stream_state_t;
+
+static adc_stream_state_t adc_streams[BRIDGE_ADC_STREAM_COUNT];
+
+/* DMA write-cursor read.  The DMA channel counter counts DOWN from
+ * the configured transfer length; converting to a write index uses
+ * `ring_samples - remaining`.  Wraps naturally via the circular-mode
+ * reload. */
+static uint16_t adc_stream_write_index(const adc_stream_state_t *s)
+{
+    const uint32_t remaining = dma_transfer_number_get(s->dma_periph,
+                                                       (dma_channel_enum)s->dma_channel);
+    if (remaining > BRIDGE_ADC_STREAM_RING_SAMPLES) return 0u;
+    return (uint16_t)(BRIDGE_ADC_STREAM_RING_SAMPLES - remaining);
+}
+
 int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t sample_rate_hz)
 {
-    (void)stream_id;
-    (void)channel;
-    (void)sample_rate_hz;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (stream_id >= BRIDGE_ADC_STREAM_COUNT) return BRIDGE_HW_ERR_RANGE;
+    if (channel >= ADC_CHANNEL_MAP_COUNT) return BRIDGE_HW_ERR_RANGE;
+    if (sample_rate_hz == 0u) return BRIDGE_HW_ERR_INVAL;
+
+    adc_stream_state_t *s = &adc_streams[stream_id];
+    if (s->in_use) return BRIDGE_HW_ERR_INVAL; /* stream already running */
+
+    const gd32_adc_ch_t *ch = &adc_channels_map[channel];
+
+    /* Stream 0 -> DMA0, stream 1 -> DMA1.  Channel 0 of each DMA
+     * controller is the first free slot in the GD32G5x3 dma_channel
+     * enum; bridge brings up no other DMA users today so collisions
+     * are not a concern. */
+    s->dma_periph  = (stream_id == 0u) ? DMA0 : DMA1;
+    s->dma_channel = (uint8_t)DMA_CH0;
+
+    rcu_periph_clock_enable((stream_id == 0u) ? RCU_DMA0 : RCU_DMA1);
+    dma_deinit(s->dma_periph, (dma_channel_enum)s->dma_channel);
+
+    dma_parameter_struct init;
+    init.periph_addr  = (uint32_t)(uintptr_t)&ADC_RDATA(ch->periph);
+    init.memory_addr  = (uint32_t)(uintptr_t)s->ring;
+    init.direction    = DMA_PERIPHERAL_TO_MEMORY;
+    init.number       = BRIDGE_ADC_STREAM_RING_SAMPLES;
+    init.periph_inc   = DMA_PERIPH_INCREASE_DISABLE;
+    init.memory_inc   = DMA_MEMORY_INCREASE_ENABLE;
+    init.periph_width = DMA_PERIPHERAL_WIDTH_16BIT;
+    init.memory_width = DMA_MEMORY_WIDTH_16BIT;
+    init.priority     = DMA_PRIORITY_MEDIUM;
+    dma_init(s->dma_periph, (dma_channel_enum)s->dma_channel, &init);
+
+    /* Circular mode -- DMA reloads `number` after each cycle so the
+     * channel keeps running without firmware re-arms.  Combined with
+     * adc_dma_mode_enable below this produces a steady-state
+     * peripheral-to-ring pipeline with no firmware in the hot path. */
+    dma_circulation_enable(s->dma_periph, (dma_channel_enum)s->dma_channel);
+
+    /* Set up the ADC routine slot for this channel + tell the ADC to
+     * issue a DMA request on every conversion completion.  Continuous
+     * mode means the ADC self-triggers after each conversion; the
+     * resulting sample rate is HCLK / 6 / sample_cycles -- the
+     * `sample_rate_hz` argument is currently an aspirational hint that
+     * a future commit will translate to a sample-cycle override. */
+    (void)sample_rate_hz; /* aspirational; see comment above */
+    adc_routine_channel_config(ch->periph, 0u, ch->channel,
+                               adc_sample_cycles_cache[channel]);
+    adc_special_function_config(ch->periph, ADC_CONTINUOUS_MODE, ENABLE);
+    adc_dma_mode_enable(ch->periph);
+
+    dma_channel_enable(s->dma_periph, (dma_channel_enum)s->dma_channel);
+
+    /* Software-trigger the first conversion.  In continuous mode the
+     * ADC will re-trigger itself after this. */
+    adc_software_trigger_enable(ch->periph, ADC_ROUTINE_CHANNEL);
+
+    s->in_use       = true;
+    s->channel      = channel;
+    s->read_idx     = 0u;
+    s->dsp_chain_id = 0u;
+    s->dsp_bound    = false;
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_adc_stream_read(uint8_t stream_id, uint8_t max_samples, uint8_t *got_samples,
                               uint16_t *mv)
 {
-    (void)stream_id;
-    (void)max_samples;
-    (void)mv;
-    if (got_samples != 0) *got_samples = 0u;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (got_samples == 0) return BRIDGE_HW_ERR_INVAL;
+    *got_samples = 0u;
+    if (mv == 0) return BRIDGE_HW_ERR_INVAL;
+    if (stream_id >= BRIDGE_ADC_STREAM_COUNT) return BRIDGE_HW_ERR_RANGE;
+
+    adc_stream_state_t *s = &adc_streams[stream_id];
+    if (!s->in_use) return BRIDGE_HW_ERR_INVAL;
+
+    /* Drain as many fresh samples as the host asked for, capped by
+     * what the DMA has actually deposited since the last read.  The
+     * DMA cursor walks forward through the ring; producer/consumer
+     * indices wrap independently, and a write cursor that has lapped
+     * the reader is detected via the unsigned-arithmetic delta. */
+    const uint16_t w = adc_stream_write_index(s);
+    uint16_t       avail;
+    if (w >= s->read_idx) {
+        avail = (uint16_t)(w - s->read_idx);
+    } else {
+        avail = (uint16_t)((BRIDGE_ADC_STREAM_RING_SAMPLES - s->read_idx) + w);
+    }
+    if (avail == 0u) return BRIDGE_HW_OK; /* empty ring; host should poll later */
+
+    uint16_t to_emit = (avail < max_samples) ? avail : max_samples;
+    for (uint16_t i = 0u; i < to_emit; ++i) {
+        uint32_t code = s->ring[s->read_idx];
+        if (code > ADC_FULL_SCALE) code = ADC_FULL_SCALE;
+        mv[i] = (uint16_t)((code * ADC_VREF_MV) / ADC_FULL_SCALE);
+        s->read_idx = (uint16_t)((s->read_idx + 1u) % BRIDGE_ADC_STREAM_RING_SAMPLES);
+    }
+    *got_samples = (uint8_t)to_emit;
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_adc_stream_end(uint8_t stream_id)
 {
-    (void)stream_id;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (stream_id >= BRIDGE_ADC_STREAM_COUNT) return BRIDGE_HW_ERR_RANGE;
+    adc_stream_state_t *s = &adc_streams[stream_id];
+    if (!s->in_use) return BRIDGE_HW_OK; /* idempotent */
+
+    /* Stop the ADC's self-trigger first, then disarm the DMA -- the
+     * other order can leave one in-flight transfer landing after the
+     * channel is disabled. */
+    const gd32_adc_ch_t *ch = &adc_channels_map[s->channel];
+    adc_special_function_config(ch->periph, ADC_CONTINUOUS_MODE, DISABLE);
+    adc_dma_mode_disable(ch->periph);
+    dma_channel_disable(s->dma_periph, (dma_channel_enum)s->dma_channel);
+
+    s->in_use    = false;
+    s->dsp_bound = false;
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_trng_read(uint8_t *dest, size_t len)
@@ -1467,15 +1613,109 @@ int bridge_hw_timer_sync(uint8_t master, uint8_t slave, uint8_t mode)
 /* v0.5 (§2B.3) -- system power-mode set                             */
 /* ----------------------------------------------------------------- */
 
-/* ALP_POWER_WAKE_* bits the firmware partial-supports.  GPIO wake is
- * the simplest to expose -- routing it through PMU_WAKEUP_PIN0..4
- * gives the host an immediate way to bring the chip back without
- * shipping a full RTC-alarm / UART-IDLE / USB-resume state machine.
- * Other bits (RTC / UART_RX / TIMER / USB / ETH_LINK) are caught
- * below as "not yet wired"; the host sees BRIDGE_HW_ERR_NOTIMPL and
- * can either drop unsupported bits or hold off on the sleep call. */
-#define POWER_WAKE_GPIO 0x00000002u
-#define POWER_WAKE_MASK_PARTIAL POWER_WAKE_GPIO
+/* ALP_POWER_WAKE_* bits the firmware supports (mirrors the wire
+ * encoding in <alp/power.h>).
+ *
+ * Mapping notes per V2N hardware reality:
+ *
+ *   - GPIO : routes through PMU_WAKEUP_PIN0..4 -- five fixed pads
+ *            on the GD32G553 + carrier wires the desired triggers
+ *            onto them.  Landed §C.15c.
+ *   - RTC  : RTC alarm 0 fires on a scheduled wallclock; the
+ *            wakeup timer also surfaces under this bit so the
+ *            firmware uses the timer (simpler than absolute-time
+ *            alarms in a partial bring-up).  Landed §C.25.
+ *   - TIMER: any non-zero `wake_after_ms` -- same RTC wakeup-timer
+ *            path as RTC.  The bit is redundant when wake_after_ms
+ *            > 0 (the timer wakes the chip implicitly per the
+ *            <alp/power.h> contract); honouring the bit explicitly
+ *            lets a caller arm a "wake on next tick" without a
+ *            specific deadline.  Landed §C.25.
+ *   - UART_RX / USB / ETH_LINK : no hardware path on the GD32G5
+ *            (no LPUART wake / no USB OTG / no MAC).  Future SoCs
+ *            on the bridge slot could populate these via the same
+ *            opcode; today the firmware rejects them so the host
+ *            knows the request is moot.
+ */
+#define POWER_WAKE_RTC      0x00000001u
+#define POWER_WAKE_GPIO     0x00000002u
+#define POWER_WAKE_UART_RX  0x00000004u
+#define POWER_WAKE_TIMER    0x00000008u
+#define POWER_WAKE_USB      0x00000010u
+#define POWER_WAKE_ETH_LINK 0x00000020u
+#define POWER_WAKE_MASK_SUPPORTED \
+    (POWER_WAKE_RTC | POWER_WAKE_GPIO | POWER_WAKE_TIMER)
+#define POWER_WAKE_MASK_HW_GATED \
+    (POWER_WAKE_UART_RX | POWER_WAKE_USB | POWER_WAKE_ETH_LINK)
+
+/* RTC wakeup timer LSB: with IRC32K (~32 kHz internal) clock and
+ * the /16 divider, the timer ticks at 32000/16 = 2000 Hz -- 0.5 ms
+ * per tick.  Max wake = 65535 / 2000 = 32.7 s.  Longer waits would
+ * need the CKSPRE_2EXP16 mode which sits in a future commit. */
+#define POWER_WAKE_LSB_HZ        2000u
+#define POWER_WAKE_TIMER_MAX_MS  (65535u * 1000u / POWER_WAKE_LSB_HZ)
+
+/* One-time RTC + LSI bring-up that arms the wakeup timer.  Idempotent
+ * across multiple power_mode_set calls -- the LSI stays enabled, the
+ * RTC source latches to IRC32K once.  Failure (LSI never stabilises,
+ * write-protected register won't unlock) leaves rtc_wakeup_ready
+ * false and bridge_hw_power_mode_set returns NOSUPPORT for any
+ * timer-bearing call. */
+static bool rtc_wakeup_ready = false;
+
+static bool rtc_wakeup_init_once(void)
+{
+    if (rtc_wakeup_ready) return true;
+
+    /* Bring up IRC32K (internal LSI) as the RTC clock source. */
+    rcu_osci_on(RCU_IRC32K);
+    /* Spin until IRC32K stabilises -- typical < 50 us, the upper
+     * bound keeps a dead oscillator from hanging the bridge. */
+    uint32_t to = 200000u;
+    while (--to && RESET == rcu_flag_get(RCU_FLAG_IRC32KSTB)) {
+        /* spin */
+    }
+    if (to == 0u) return false;
+
+    rcu_periph_clock_enable(RCU_PMU);
+    pmu_backup_write_enable();
+    rcu_rtc_clock_config(RCU_RTCSRC_IRC32K);
+    rcu_periph_clock_enable(RCU_RTC);
+
+    rtc_wakeup_ready = true;
+    return true;
+}
+
+static int rtc_wakeup_arm_ms(uint32_t wake_after_ms)
+{
+    if (!rtc_wakeup_init_once()) return BRIDGE_HW_ERR_IO;
+    if (wake_after_ms > POWER_WAKE_TIMER_MAX_MS) return BRIDGE_HW_ERR_RANGE;
+
+    /* Compute ticks (round up so a sub-LSB request still waits at
+     * least one tick rather than zero). */
+    uint32_t ticks = (wake_after_ms * POWER_WAKE_LSB_HZ + 999u) / 1000u;
+    if (ticks == 0u) ticks = 1u;
+    if (ticks > 65535u) ticks = 65535u;
+
+    /* The vendor sequence: disable the wakeup timer, switch its
+     * clock source, set the counter, re-enable.  rtc_wakeup_disable
+     * may return ERROR if the WTWF flag never sets; treat as IO. */
+    if (SUCCESS != rtc_wakeup_disable()) return BRIDGE_HW_ERR_IO;
+    if (SUCCESS != rtc_wakeup_clock_set(WAKEUP_RTCCK_DIV16)) return BRIDGE_HW_ERR_IO;
+    if (SUCCESS != rtc_wakeup_timer_set((uint16_t)(ticks - 1u))) return BRIDGE_HW_ERR_IO;
+    rtc_wakeup_enable();
+    return BRIDGE_HW_OK;
+}
+
+static void power_wake_pins_enable(uint32_t wake_bitmap)
+{
+    if ((wake_bitmap & POWER_WAKE_GPIO) == 0u) return;
+    pmu_wakeup_pin_enable(PMU_WAKEUP_PIN0);
+    pmu_wakeup_pin_enable(PMU_WAKEUP_PIN1);
+    pmu_wakeup_pin_enable(PMU_WAKEUP_PIN2);
+    pmu_wakeup_pin_enable(PMU_WAKEUP_PIN3);
+    pmu_wakeup_pin_enable(PMU_WAKEUP_PIN4);
+}
 
 int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap, uint32_t wake_after_ms)
 {
@@ -1485,33 +1725,28 @@ int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap, uint32_t wake_a
      * GD32G5.  Mode 2 (deep-sleep) + mode 3 (standby) call into the
      * vendor's PMU helpers below.
      *
-     * `wake_after_ms` requires an RTC alarm configured against
-     * LSE/LSI plus the back-end registers to clear it on wakeup;
-     * that's a follow-up commit, so any non-zero value rejects
-     * cleanly today.  `wake_bitmap` is partial-applied: GPIO wake
-     * (ALP_POWER_WAKE_GPIO) enables PMU_WAKEUP_PIN0..4; any other
-     * bits return NOSUPPORT so the host knows the request was not
-     * honoured. */
-    if (wake_after_ms != 0u) return BRIDGE_HW_ERR_NOTIMPL;
-    if ((wake_bitmap & ~POWER_WAKE_MASK_PARTIAL) != 0u) return BRIDGE_HW_ERR_NOTIMPL;
+     * Wake-source semantics: `wake_bitmap` enumerates the explicit
+     * sources the host wants armed; `wake_after_ms` is a timed
+     * fallback that arms the RTC wakeup timer regardless of the
+     * bitmap (per the <alp/power.h> contract: the timer is implicit
+     * when wake_after_ms > 0).  Unsupported bits (UART_RX / USB /
+     * ETH_LINK on the GD32G5 baseline) reject so the host knows the
+     * request was not honoured. */
+    if ((wake_bitmap & POWER_WAKE_MASK_HW_GATED) != 0u) return BRIDGE_HW_ERR_NOTIMPL;
 
     switch (mode) {
     case 0u: /* run -- no-op */
     case 1u: /* sleep -- already in WFI between transport ISRs */
         return BRIDGE_HW_OK;
     case 2u: /* deep-sleep */
-        /* Enable the chip's 5 wake-up pins if the host asked for
-         * GPIO wake.  The pin pads themselves are pre-configured by
-         * the carrier; PMU_WAKEUP_PIN0..4 are the gating bits in
-         * PMU_CS that arm each pin to break the chip out of
-         * deepsleep / standby on a rising edge. */
         rcu_periph_clock_enable(RCU_PMU);
-        if (wake_bitmap & POWER_WAKE_GPIO) {
-            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN0);
-            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN1);
-            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN2);
-            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN3);
-            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN4);
+        power_wake_pins_enable(wake_bitmap);
+        if (wake_after_ms != 0u ||
+            (wake_bitmap & (POWER_WAKE_RTC | POWER_WAKE_TIMER)) != 0u) {
+            const uint32_t ms = (wake_after_ms != 0u) ? wake_after_ms
+                                                      : POWER_WAKE_TIMER_MAX_MS;
+            int rc = rtc_wakeup_arm_ms(ms);
+            if (rc != BRIDGE_HW_OK) return rc;
         }
         /* PMU_LDO_LOWPOWER drops the core LDO into its low-power
          * regulation point during deepsleep (saves a few hundred
@@ -1522,12 +1757,13 @@ int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap, uint32_t wake_a
         return BRIDGE_HW_OK;
     case 3u: /* standby */
         rcu_periph_clock_enable(RCU_PMU);
-        if (wake_bitmap & POWER_WAKE_GPIO) {
-            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN0);
-            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN1);
-            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN2);
-            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN3);
-            pmu_wakeup_pin_enable(PMU_WAKEUP_PIN4);
+        power_wake_pins_enable(wake_bitmap);
+        if (wake_after_ms != 0u ||
+            (wake_bitmap & (POWER_WAKE_RTC | POWER_WAKE_TIMER)) != 0u) {
+            const uint32_t ms = (wake_after_ms != 0u) ? wake_after_ms
+                                                      : POWER_WAKE_TIMER_MAX_MS;
+            int rc = rtc_wakeup_arm_ms(ms);
+            if (rc != BRIDGE_HW_OK) return rc;
         }
         /* Standby powers down the core + SRAM (except backup) and
          * wakes via reset -- pmu_to_standbymode() never returns;
@@ -1542,6 +1778,7 @@ int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap, uint32_t wake_a
     default:
         return BRIDGE_HW_ERR_INVAL;
     }
+    (void)POWER_WAKE_MASK_SUPPORTED;
 }
 
 /* ----------------------------------------------------------------- */
@@ -1667,7 +1904,70 @@ int bridge_hw_adc_dsp_stage_push(uint8_t chain_id, uint8_t stage_index, uint8_t 
 
 int bridge_hw_adc_dsp_chain_bind(uint8_t chain_id, uint8_t stream_id)
 {
-    (void)chain_id;
-    (void)stream_id;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (chain_id >= BRIDGE_DSP_MAX_CHAINS) return BRIDGE_HW_ERR_RANGE;
+    if (stream_id >= BRIDGE_ADC_STREAM_COUNT) return BRIDGE_HW_ERR_RANGE;
+
+    adc_dsp_chain_t *chain = &adc_dsp_chains[chain_id];
+    if (!chain->in_use) return BRIDGE_HW_ERR_INVAL;
+    if (chain->bound) return BRIDGE_HW_ERR_INVAL; /* already attached */
+
+    /* Validate every populated stage is complete + the chain
+     * follows the ordering rules documented in
+     * `bridge_hw_adc_dsp_chain_bind`'s contract:
+     *   - FFT must be the terminal stage (no stage after it),
+     *   - WINDOW must immediately precede FFT,
+     *   - empty stages (total_size == 0) are allowed only at
+     *     contiguous tail positions -- not interleaved with
+     *     populated stages. */
+    uint8_t fft_index    = BRIDGE_DSP_MAX_STAGES;
+    uint8_t window_index = BRIDGE_DSP_MAX_STAGES;
+    uint8_t last_populated_index = BRIDGE_DSP_MAX_STAGES;
+    for (uint8_t i = 0u; i < BRIDGE_DSP_MAX_STAGES; ++i) {
+        adc_dsp_stage_t *st = &chain->stages[i];
+        if (st->total_size == 0u) continue;
+        if (!st->complete) return BRIDGE_HW_ERR_INVAL; /* mid-upload */
+        if (last_populated_index != BRIDGE_DSP_MAX_STAGES &&
+            (uint8_t)(i - last_populated_index) != 1u) {
+            return BRIDGE_HW_ERR_INVAL; /* gap in stage list */
+        }
+        last_populated_index = i;
+        if (st->kind == 3u /* FFT */) {
+            if (fft_index != BRIDGE_DSP_MAX_STAGES) return BRIDGE_HW_ERR_INVAL;
+            fft_index = i;
+        } else if (st->kind == 2u /* WINDOW */) {
+            if (window_index != BRIDGE_DSP_MAX_STAGES) return BRIDGE_HW_ERR_INVAL;
+            window_index = i;
+        }
+    }
+    if (last_populated_index == BRIDGE_DSP_MAX_STAGES) {
+        return BRIDGE_HW_ERR_INVAL; /* empty chain */
+    }
+    if (fft_index != BRIDGE_DSP_MAX_STAGES) {
+        /* FFT must be terminal -- no populated stage after it. */
+        if (fft_index != last_populated_index) return BRIDGE_HW_ERR_INVAL;
+        /* WINDOW (if present) must directly precede the FFT. */
+        if (window_index != BRIDGE_DSP_MAX_STAGES &&
+            (fft_index == 0u || window_index != fft_index - 1u)) {
+            return BRIDGE_HW_ERR_INVAL;
+        }
+    } else if (window_index != BRIDGE_DSP_MAX_STAGES) {
+        /* WINDOW without a terminating FFT has no defined meaning in
+         * the filtered-samples path -- reject per docs/gd32-bridge-
+         * protocol.md §3.x. */
+        return BRIDGE_HW_ERR_INVAL;
+    }
+
+    adc_stream_state_t *s = &adc_streams[stream_id];
+    if (!s->in_use) return BRIDGE_HW_ERR_INVAL; /* stream not running */
+    if (s->dsp_bound) return BRIDGE_HW_ERR_INVAL; /* stream already has a chain */
+
+    /* Attachment is a state flip on both halves.  Runtime DSP
+     * application happens inside stream_read once the wave-2 FFT/FAC
+     * dispatch lands; for now the bound chain simply rides alongside
+     * the raw stream and the host sees raw mV values until the
+     * dispatcher hook ships. */
+    s->dsp_chain_id = chain_id;
+    s->dsp_bound    = true;
+    chain->bound    = true;
+    return BRIDGE_HW_OK;
 }

@@ -159,6 +159,39 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- GD32 ADC stream DMA + DSP chain_bind + RTC wake §C.23 §C.24 §C.25)
+
+Three back-to-back HAL bodies in
+`firmware/gd32-bridge/hal/bridge_hw_gd32.c` that close the
+remaining §1a opcodes:
+
+- **§C.23 -- `bridge_hw_adc_stream_begin/read/end`** (opcodes
+  `ADC_STREAM_*`): DMA0/1-backed continuous acquisition.  Two
+  parallel streams, each owning a 1024-sample circular ring
+  buffer that the matching DMA channel fills peripheral-to-memory
+  at the ADC clock; `bridge_hw_adc_stream_read` polls the DMA
+  counter to recover the write cursor + drains the host's
+  requested span.  Total ring footprint: 2 * 1024 * 2 = 4 KB.
+- **§C.24 -- `bridge_hw_adc_dsp_chain_bind`**: completes the
+  ADC-DSP pipeline started in §C.15d.  Validates the chain is
+  complete (no half-uploaded stages) and the ordering rules
+  (FFT must be terminal, WINDOW must immediately precede FFT,
+  no gaps in the populated stage list, no WINDOW without a
+  terminating FFT).  Stores the binding on both halves; runtime
+  FFT/FAC dispatch inside `stream_read` follows in a later
+  commit.
+- **§C.25 -- `bridge_hw_power_mode_set` RTC wakeup + full
+  wake-source bitmap**: extends §C.15c.  `wake_after_ms` now
+  arms the RTC wakeup timer through a one-time IRC32K-clocked
+  bring-up (LSI -> RCU_RTCSRC_IRC32K -> WAKEUP_RTCCK_DIV16,
+  0.5 ms LSB, max wake 32.7 s in this mode).  Same path handles
+  `ALP_POWER_WAKE_RTC` + `ALP_POWER_WAKE_TIMER` bits.
+  `ALP_POWER_WAKE_UART_RX` / `_USB` / `_ETH_LINK` reject
+  cleanly with NOSUPPORT -- no HW path on the GD32G5 baseline.
+
+ABI unchanged (firmware-internal); validators all green.
+Verification gate is HiL.
+
 ### Added (2026-05-14 -- native-sim bench cases for wave-2 surfaces §C.19)
 
 - **Four new microbench files** under `tests/bench/`:
