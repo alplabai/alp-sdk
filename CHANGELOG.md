@@ -126,6 +126,18 @@ that lands before the v0.3.0 tag.)
   untracked) deleted to fully remove the top-level entry.
   Historical `tools/` mentions in this `CHANGELOG.md` left
   untouched.
+- **`dts/bindings/` moved to `zephyr/dts/bindings/`.**  Zephyr
+  devicetree bindings are Zephyr-only artefacts and belong under
+  the `zephyr/` module subtree alongside `zephyr/Kconfig` /
+  `zephyr/CMakeLists.txt` / `zephyr/module.yml`.  Folding them
+  in removes the top-level `dts/` directory.
+  `zephyr/module.yml` updated with `dts_root: zephyr` so
+  Zephyr's binding scanner finds them at the new location (the
+  default `<module-root>/dts/bindings/` no longer applies).
+  Two binding files moved verbatim:
+  `alp,pin-array.yaml`, `vendor-prefixes.txt`.  Comment update
+  in `src/zephyr/peripheral_gpio.c`.  Top-level `dts/`
+  directory deleted.
 
 ### Changed (2026-05-13 -- top-level UX simplification cont.)
 

@@ -6,7 +6,7 @@
  *
  * Pin lookup is via the `alp,pin-array` devicetree node — a single
  * node carrying a `gpios` property with one phandle/spec per pin id.
- * See dts/bindings/alp,pin-array.yaml.
+ * See zephyr/dts/bindings/alp,pin-array.yaml.
  */
 
 #include <errno.h>

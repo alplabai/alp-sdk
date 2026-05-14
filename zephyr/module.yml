@@ -8,9 +8,14 @@ build:
   cmake: zephyr
   kconfig: zephyr/Kconfig
   settings:
-    # Expose dts/bindings/ to Zephyr's devicetree binding scanner so
-    # boards / overlays can use compatible = "alp,pin-array".
-    dts_root: .
+    # Expose zephyr/dts/bindings/ to Zephyr's devicetree binding
+    # scanner so boards / overlays can use
+    # compatible = "alp,pin-array".  `dts_root: zephyr` tells
+    # Zephyr to look at `<module-root>/zephyr/dts/bindings/`
+    # instead of the default `<module-root>/dts/bindings/` --
+    # we keep all Zephyr-only artefacts under `zephyr/` so the
+    # top-level repo stays tidy (see CHANGELOG §A.10 2026-05-14).
+    dts_root: zephyr
 
 # NOTE on `west alp-build`:
 #   Zephyr v3.7's module.yml schema does NOT accept `west-commands:`
