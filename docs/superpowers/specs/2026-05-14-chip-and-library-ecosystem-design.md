@@ -1,4 +1,4 @@
-# Arduino-style library + chip ecosystem for the ALP SDK
+# Chip + library ecosystem expansion for the ALP SDK
 
 **Status**: design approved 2026-05-14.  Ready for implementation planning.
 **Cross-refs**: docs/branching-and-merge-policy.md (PR + override flow),
@@ -6,10 +6,11 @@ docs/vendor-partnerships.md (vendor SDK status), docs/v1.0-readiness.md.
 
 ## Problem
 
-Arduino's defining strength is the ~5,000-library breadth its
-ecosystem reaches.  A customer who wants to talk to chip X or
-use library Y finds it within minutes through the Library
-Manager, drops it in, and writes their app.
+Embedded SDKs that win their developer audience are the ones
+that reach thousands of community-contributed chip drivers +
+libraries through a curated index.  A customer who wants to
+talk to chip X or use library Y should find it in minutes,
+drop it in, and write their app.
 
 The ALP SDK today has **30 chip drivers** (under `chips/`) and
 **8 libraries** behind the `board.yaml` `libraries:` enum
@@ -37,11 +38,11 @@ ecosystem without depending on the maintainer's bandwidth.
 
 ## Non-goals
 
-- **Not** a public registry / search infrastructure
-  (Arduino's Library Manager scale).  v1.0 is direct
-  GitHub-browsing + `west update --group-filter`.
-- **Not** a binary-package distribution (Arduino's
-  `.zip`-via-Library-Manager).  Everything is source-tree
+- **Not** a public registry / search infrastructure on the
+  scale of a thousands-of-package package manager.  v1.0 is
+  direct GitHub-browsing + `west update --group-filter`.
+- **Not** a binary-package distribution (prebuilt
+  `.zip`-via-package-manager).  Everything is source-tree
   consumed via `west update`.
 - **Not** automated chip-driver generation from datasheet
   PDFs.  Each driver is hand-written + reviewer-approved
@@ -96,7 +97,7 @@ ecosystem without depending on the maintainer's bandwidth.
 |---|---|---|---|
 | `ov2640` | image sensor | DVP | ESP32-CAM ecosystem default |
 | `ov5645` | image sensor | MIPI CSI-2 | 5 MP, RPi-grade |
-| `ov7670` | image sensor | DVP | VGA Arduino classic |
+| `ov7670` | image sensor | DVP | VGA reference classic |
 | `ov9281` | image sensor | MIPI CSI-2 | global-shutter mono, AR/VR/ALPR |
 | `ar0234` | image sensor | MIPI CSI-2 | 1080p global shutter, industrial |
 | `imx219` | image sensor | MIPI CSI-2 | RPi Cam v2 standard |
@@ -105,7 +106,7 @@ ecosystem without depending on the maintainer's bandwidth.
 | `ti_ds90ub953_954` | camera serdes | I²C + FPD-Link III | FPD-Link III long-cable cameras |
 | `maxim_max9295_9296` | camera serdes | I²C + GMSL2 | GMSL2 automotive ecosystem |
 | `st7789` | display | SPI | 240×240 round + 240×320 rect IPS |
-| `ili9341` | display | SPI | 240×320 — most common Arduino LCD |
+| `ili9341` | display | SPI | 240×320 — most common embedded TFT |
 | `ili9488` | display | SPI | 480×320 |
 | `ra8875` | display | SPI | 5–7″ with resistive touch + LCD ctrl |
 | `sh1106` | display | I²C | OLED 128×64 alt to SSD1306 |
@@ -126,7 +127,7 @@ ecosystem without depending on the maintainer's bandwidth.
 | `drv8833` | motor driver | GPIO+PWM | dual brushed DC |
 | `drv8825` | motor driver | GPIO+PWM | bipolar stepper |
 | `tmc2209` | motor driver | UART | silent stepper (3D printer ecosystem) |
-| `a4988` | motor driver | GPIO+PWM | stepper (Arduino classic) |
+| `a4988` | motor driver | GPIO+PWM | low-cost stepper driver classic |
 | `as5048a_b` | encoder | SPI/I²C | 14-bit magnetic |
 | `mt6701` | encoder | I²C | 14-bit magnetic |
 | `hx711` | strain | bit-banged SPI | 24-bit load-cell ADC |
@@ -154,8 +155,8 @@ ecosystem without depending on the maintainer's bandwidth.
 
 | Chip | Class | Bus | Rationale |
 |---|---|---|---|
-| `ics_43434` | MEMS mic | I²S | popular Adafruit-ecosystem mic |
-| `inmp441` | MEMS mic | I²S | Arduino classic |
+| `ics_43434` | MEMS mic | I²S | popular MEMS mic with breakout-board support |
+| `inmp441` | MEMS mic | I²S | low-cost embedded MEMS mic |
 | `wm8960` | codec | I²C + I²S | Wolfson stereo (RPi HAT standard) |
 | `tlv320aic3204` | codec | I²C + I²S | TI premium codec |
 | `max98357a` | class-D amp | I²S | very common audio breakout |
@@ -175,8 +176,8 @@ ecosystem without depending on the maintainer's bandwidth.
 | Library | Class | Source | Rationale |
 |---|---|---|---|
 | `tflite_micro` | ML inference | TensorFlow upstream | already in west.yml; add `libraries:` knob |
-| `u8g2` | graphics | github.com/olikraus/u8g2 | monochrome OLED Arduino default |
-| `adafruit_gfx` | graphics | upstream | compat shim for Adafruit ecosystem |
+| `u8g2` | graphics | github.com/olikraus/u8g2 | monochrome OLED default |
+| `gfx_compat` | graphics | maintainer-written thin shim | drop-in graphics API for ports of community drawing code |
 | `madgwick_ahrs` | sensor fusion | xioTechnologies | quaternion IMU fusion |
 | `pid` | control | maintainer-written thin C lib | generic PID |
 | `modbus` | industrial bus | libmodbus | RTU + TCP |
@@ -232,7 +233,7 @@ binding.
 | `cmsis_dsp` | — | — | Helium MVE (AEN HE), Neon (A55), TMU CORDIC + FFT (GD32 bridge) | — | DMA for ADC stream chaining | scalar |
 | `lvgl` | — | GPU2D (AEN), DAVE2D (Alif), TMU rotate/scale (GD32 bridge) | — | — | DMA2D + display tearing-effect | pure-C blit |
 | `u8g2` | — | DMA2D (AEN), TMU (GD32 bridge) | — | — | I²C/SPI DMA frame push | pure-C |
-| `adafruit_gfx` | — | GPU2D (AEN), DMA2D | — | — | SPI DMA | pure-C |
+| `gfx_compat` | — | GPU2D (AEN), DMA2D | — | — | SPI DMA | pure-C |
 | `madgwick_ahrs` | — | — | FPU, TMU CORDIC (GD32 bridge) | — | — | libm trig |
 | `pid` | — | — | FPU | — | timer-tick for loop period | int math |
 | `modbus` | — | — | — | — | UART/Ethernet DMA | — |
@@ -359,7 +360,7 @@ contributions:
     author: "@yourgh"
     license: Apache-2.0
     abi_version: "0.1"
-    upstream_status: "first-class community"  # or "ported-from-arduino", etc.
+    upstream_status: "first-class community"  # or "ported-from-upstream", etc.
 ```
 
 ### Per-contribution `metadata.yaml`
@@ -394,8 +395,7 @@ abi_version: "0.1"
 
 ### Customer integration patterns
 
-**Pattern A: pull-everything** (Arduino Library Manager
-equivalent — broadest reach):
+**Pattern A: pull-everything** (broadest reach):
 
 ```bash
 # In customer's workspace, add to west.yml:
@@ -482,7 +482,7 @@ convention, batched in domain groups
 
 ### Phase 3: Seed Tier 2 (~2 weeks)
 
-- Port 10 popular Arduino-ecosystem chips/libraries that
+- Port 10 popular embedded-community chips/libraries that
   don't quite belong in Tier 1 but customers will ask for:
   `bme680`, `mpu6050`, `pca9685` (PWM driver), `sx126x` (LoRa
   alt), `nrf24l01`, `dhtxx` (temp/hum), `pcf8574` (I/O
@@ -538,8 +538,9 @@ Tier 2 contributions must pass on PR (lower bar):
   contribution's own `samples/` carries that today.
 - A web UI for browsing contributions.  registry.yaml +
   GitHub's file viewer is enough.
-- Automated migration of Arduino libraries (their .properties
-  + library.json files) into Tier 2 contributions.
+- Automated migration of community-library metadata files
+  (`.properties` / `library.json` / `package.yml` style) into
+  Tier 2 contributions.
 
 ## Open questions (none blocking)
 

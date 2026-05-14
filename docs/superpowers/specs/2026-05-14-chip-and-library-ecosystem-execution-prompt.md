@@ -1,4 +1,4 @@
-# Execution prompt — Arduino-style ecosystem (alp-sdk + alp-sdk-community)
+# Execution prompt — chip + library ecosystem expansion (alp-sdk + alp-sdk-community)
 
 > Paste the block below into a fresh Claude Code session at the
 > alp-sdk repo root.  The prompt is self-contained; the agent
@@ -6,10 +6,10 @@
 
 ---
 
-You're executing the Arduino-style ecosystem expansion for the
+You're executing the chip + library ecosystem expansion for the
 alp-sdk repo (github.com/alplabai/alp-sdk).  Branch: main.
 The full design is in
-[`docs/superpowers/specs/2026-05-14-arduino-style-ecosystem-design.md`](docs/superpowers/specs/2026-05-14-arduino-style-ecosystem-design.md).
+[`docs/superpowers/specs/2026-05-14-chip-and-library-ecosystem-design.md`](docs/superpowers/specs/2026-05-14-chip-and-library-ecosystem-design.md).
 Read it first.
 
 ## What lands in this work
@@ -67,7 +67,7 @@ Plus:
 library's HW-backend wiring per the design spec's
 §"Hardware-acceleration backend wiring" section:
 
-- **§D.lib.ai**: `tflite_micro`, `u8g2`, `adafruit_gfx`
+- **§D.lib.ai**: `tflite_micro`, `u8g2`, `gfx_compat`
 - **§D.lib.industrial**: `madgwick_ahrs`, `pid`, `modbus`
 - **§D.lib.iot**: `coremqtt_sn`, `libcoap`, `tinygsm`,
   `nanopb`, `libwebsockets`, `jsmn`, `bearssl`
@@ -147,7 +147,7 @@ Plus, in alp-sdk:
 
 **Phase 4 — Seed Tier 2**
 
-Port 10 popular Arduino-ecosystem chips to alp-sdk-community
+Port 10 popular embedded-community chips to alp-sdk-community
 to prove the template + CI before inviting external contributors:
 
 `bme680`, `mpu6050`, `pca9685`, `sx126x` (LoRa alt to the
@@ -187,21 +187,73 @@ Tier 1 sx1262), `nrf24l01`, `dhtxx`, `pcf8574`, `ssd1351`,
   - `python3 scripts/abi_snapshot.py --diff docs/abi/v0.5-snapshot.json`
     — clean or matching the commit's intended ABI change
 
-- **Memories that matter**:
-  - Chip driver naming convention: `<part>_init()`, not
-    `alp_<part>_init()`.  `alp_` is reserved for SDK
-    abstractions.
-  - No Claude co-author footer.  Commits attribute solely to
-    alpCaner.
-  - No local paths in repo files.  Never write
-    `C:\Users\caner\...` into tracked content.
-  - Example apps are documentation — heavy comments
-    (~50 % ratio) on `main.c`.
-  - Public headers get Doxygen-style `@brief`/`@param`/
-    `@return` on every function (overrides the default
-    "no comments" instinct for documentation surfaces).
-  - Standalone usage (hand-written firmware) is first-class
-    — don't gate behaviour behind alp-studio dependencies.
+- **Mandatory SDK rules** (each one is a hard pass/fail
+  gate; non-compliance blocks merge):
+
+  - **Chip driver naming convention.**  Drivers under
+    `chips/<part>/` use the chip's natural name —
+    `lsm6dso_init()`, not `alp_lsm6dso_init()`.  `alp_` is
+    reserved for SDK abstractions only.
+
+  - **Portable peripheral surfaces only in app + library
+    code.**  PWM, ADC, encoder, I²C, SPI, UART, GPIO, CAN,
+    I²S, RTC, WDT, USB, DAC MUST go through `alp_*_open` +
+    `ALP_*` instance IDs in chip drivers, libraries, and
+    example apps.  Chip-specific backends (`gd32g553_*`,
+    `alif_*`, `renesas_*`, `nxp_*`) live inside the SDK's
+    own backends + dedicated bridge demos — never in
+    general examples.
+
+  - **Portable HW-offload surfaces.**  TMU / FFT / FAC /
+    power / CAU live in `<alp/*.h>` with no vendor part name
+    visible to application code.  SW fallback (libm /
+    CMSIS-DSP / Zephyr `pm`) is preferred over NOSUPPORT
+    whenever reasonable.  HW-backends.yaml entries MUST name
+    accelerator *classes*, not vendor parts.
+
+  - **No zero-value re-export headers.**  Every public
+    `<alp/*.h>` must add value (portability shim, defaults,
+    type normalisation).  Pure `#include "upstream.h"`
+    headers are rejected.
+
+  - **No Nordic-branded tooling.**  SDK targets Alif /
+    Renesas / NXP, not Nordic.  Vendor-neutral DTS / Kconfig
+    extensions only.
+
+  - **Example apps are documentation.**  Files under
+    `examples/<peripheral>-<demo>/src/main.c` are reference
+    material for hand-written firmware — comment them as
+    teaching artefacts (~50 % comment ratio).
+
+  - **Doxygen on public headers.**  Every public function in
+    `include/alp/**.h` and `include/alp/chips/**.h` gets
+    `@brief` / `@param` / `@return` triplets.  This overrides
+    the default "no comments" instinct on documentation
+    surfaces.
+
+  - **Standalone usage is first-class.**  Hand-written
+    firmware that bypasses alp-studio is a supported
+    consumer path, not a workaround.  Don't gate behaviour
+    behind alp-studio dependencies.
+
+  - **Descriptive filenames.**  `hw-revisions.yaml`,
+    `board.yaml` — every file's name describes its
+    *contents*, not its category.  The directory carries
+    the scope.
+
+  - **No local paths or SoM design leaks.**  Never write
+    `OneDrive/...` or `C:\Users\caner\...` paths into
+    tracked files.  Minimise SoM schematic-level integration
+    detail in public docs; route detail-rich content into
+    the private `e1m-som-metadata` repo.
+
+  - **No Claude co-author footer.**  Commits attribute
+    solely to alpCaner.  No `Co-Authored-By: Claude` line.
+
+  - **Pending exact hardware configurations.**  The user
+    will hand-write authoritative pin assignments and
+    per-SoM HW config.  Mark unknowns `TBD`, never invent
+    values.
 
 ## How to run nonstop
 
