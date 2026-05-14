@@ -11,6 +11,11 @@
  *   - Zephyr   : wraps net_*, MQTT client API.
  *   - Yocto    : wraps the Linux network stack + Mosquitto/Paho.
  *   - Baremetal: ALP_ERR_NOSUPPORT (no networking on E1M-AEN bare-metal v0.1).
+ *
+
+ * @par ABI status: [ABI-STABLE]
+ *      v0.2-v0.4; Wi-Fi station + MQTT (TLS) signatures stable.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_IOT_H

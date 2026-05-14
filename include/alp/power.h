@@ -48,6 +48,10 @@
  *     // ...wake-up handler...
  *     alp_power_close(p);
  * @endcode
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      v0.5 new -- system-power-mode surface (sleep / deep-sleep / standby + wake-source bitmaps).
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_POWER_H

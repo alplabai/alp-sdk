@@ -35,6 +35,10 @@
  *     size_t got = 0;
  *     alp_audio_in_read(mic, buf, 256, &got, 100);
  * @endcode
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.2 decl + v0.3 impl; PDM-in / I2S-out shape stable.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_AUDIO_H

@@ -27,6 +27,10 @@
  * surface (CDC-ACM virtual COM, MSC mass storage, HID).  Other
  * classes go through the vendor escape hatch at
  * `<alp/vendors/.../usb.h>`.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      v0.3 placeholder; surface skeleton only.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_USB_H

@@ -22,6 +22,10 @@
  *   - Yocto    : `/dev/rtc*` for absolute alarms; input subsystem
  *                events for incremental encoders.
  *   - Baremetal: vendor HAL timer + qdec channels.
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.2.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_COUNTER_H

@@ -25,6 +25,10 @@
  *     };
  *     alp_rtc_set_time(rtc, &t);
  * @endcode
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.2.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_RTC_H

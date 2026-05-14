@@ -34,6 +34,10 @@
  *         .connectable = true,
  *     });
  * @endcode
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.2 decl + v0.3 impl; advertise + connect + GATT-read shape stable.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_BLE_H

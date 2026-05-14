@@ -10,6 +10,11 @@
  * selected the macros default to a permissive UINT16_MAX so
  * capability checks accept any config — apps that want runtime
  * validation must select a specific SoC.
+ *
+
+ * @par ABI status: [ABI-STABLE]
+ *      v0.1 generated; capability constants.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_SOC_CAPS_H

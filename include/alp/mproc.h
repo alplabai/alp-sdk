@@ -28,6 +28,10 @@
  * M55-HE core without hand-rolling IPC.  This header stays at the lower
  * primitive level on purpose — RPC is a build-time choice, not a
  * mandatory abstraction.
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.3 mailbox + shmem + hwsem.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_MPROC_H

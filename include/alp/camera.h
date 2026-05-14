@@ -10,6 +10,11 @@
  * v0.2 ships a real MIPI CSI-2 wrapper for the V2N family.  v0.1
  * declares the surface so app code can compile against it; the
  * implementation returns ALP_ERR_NOSUPPORT on every backend.
+ *
+
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      v0.5 added alp_camera_configure_isp -- surface tentative pending real hardware feedback.  Base capture path stable; ISP block experimental.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_CAMERA_H

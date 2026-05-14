@@ -32,6 +32,10 @@
  * remain available as escape hatches when the unified API can't
  * express what the vendor SDK offers.  The unification stance is
  * "best-effort, not absolute".
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.3 dispatcher (auto/cpu/ethos_u/drpai/deepx_dx).
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_INFERENCE_H

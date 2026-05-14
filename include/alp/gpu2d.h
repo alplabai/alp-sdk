@@ -50,6 +50,10 @@
  *     alp_gpu2d_fill_rect(g, &fb, 10, 10, 100, 50, 0xFFFF0000);  // red
  *     alp_gpu2d_close(g);
  * @endcode
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      v0.5 new -- AEN audit headline gap.  Portable surface but only one silicon family populates it today.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_GPU2D_H

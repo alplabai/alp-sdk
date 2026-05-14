@@ -23,6 +23,10 @@
  * The shape is deliberately small — the SDK's storage surface is
  * "block-oriented read / write / erase," not a filesystem.  Apps
  * stack ZephyrFS, LittleFS, or ext4 on top per their own choice.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      v0.5 added alp_storage_configure_inline_aes (SecAES on OSPI / HexSPI) -- surface tentative.  Base storage placeholders are still stubs.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_STORAGE_H

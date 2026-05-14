@@ -30,6 +30,10 @@
  *         .id = 0x123, .dlc = 8, .data = {1,2,3,4,5,6,7,8}
  *     }, 100);
  * @endcode
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.2.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_CAN_H

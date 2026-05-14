@@ -53,6 +53,10 @@
  *     ...
  *     alp_adc_stream_close(s);
  * @endcode
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.2 + v0.5 additive (filter/spectrum types).  Base surface stable; new alp_adc_filter_t / alp_adc_spectrum_t may evolve [ABI-EXPERIMENTAL] at function granularity.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_ADC_H

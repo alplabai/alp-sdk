@@ -40,6 +40,10 @@
  * in `alp,pin-array` (with `status = "disabled"` on the GPIO node)
  * so the indices stay stable.  `alp_gpio_open()` for a non-routed
  * pad returns `NULL`.
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.1 + 2026-05-14 prefix-rename pre-v1.0; pinned by e1m-spec.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef E1M_PINOUT_H

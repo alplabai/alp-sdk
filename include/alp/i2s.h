@@ -23,6 +23,10 @@
  * memcpys for not surfacing Zephyr's `mem_slab` lifecycle in the
  * public API.  Apps that need true zero-copy can drop to the
  * underlying Zephyr `i2s_*` driver class directly.
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.2.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_I2S_H

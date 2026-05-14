@@ -28,6 +28,10 @@
  *     // ...
  *     alp_pwm_close(led);
  * @endcode
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.2 surface; locked.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_PWM_H

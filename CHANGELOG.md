@@ -159,6 +159,30 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- ABI stability markers across public headers §C.2)
+
+- **`docs/abi-markers.md`** (new) -- classification doc for the
+  v1.0 ABI freeze.  Defines `[ABI-STABLE]` vs `[ABI-EXPERIMENTAL]`
+  semantics, lists every `include/alp/*.h` with its current
+  marker + rationale, documents the promotion path
+  (EXPERIMENTAL -> STABLE), and explains how
+  `pr-abi-snapshot.yml` reads markers to gate merges post-1.0.
+- **`@par ABI status:` line landed in all 26 public headers**:
+  - **`[ABI-STABLE]`** (20 headers): `peripheral.h`, `pwm.h`,
+    `adc.h`, `counter.h`, `i2s.h`, `can.h`, `rtc.h`, `wdt.h`,
+    `audio.h`, `iot.h`, `security.h`, `ble.h`, `inference.h`,
+    `mproc.h`, `hw_info.h`, `e1m_pinout.h`, `soc_caps.h`,
+    `gui.h`.
+  - **`[ABI-EXPERIMENTAL]`** (6 headers): `dsp.h`, `gpu2d.h`,
+    `power.h`, `tmu.h`, `camera.h` (file-level; ISP-config
+    block tentative), `storage.h` (file-level; inline-AES
+    block tentative), `display.h`, `usb.h` (both placeholders).
+- ABI snapshot unchanged -- markers are comments only.  Future
+  per-function `[ABI-EXPERIMENTAL]` annotations can override the
+  file-level marker for specific symbols (e.g.
+  `alp_camera_configure_isp` inside the otherwise-stable
+  `camera.h`).
+
 ### Changed (2026-05-14 -- ABI-BREAKING: drop ALP_ prefix from E1M instance IDs §C.1z)
 
 - **`ALP_E1M_*` -> `E1M_*` across every public surface, example,

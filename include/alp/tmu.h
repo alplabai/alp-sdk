@@ -55,6 +55,10 @@
  *       the customer-facing API stays SoM-agnostic per the SDK's
  *       portability rule.  The V2N backend in
  *       `src/zephyr/peripheral_tmu.c` performs the GD32 dispatch.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      Wave-1 GD32 CORDIC TMU helpers; surface limited and may fold into <alp/dsp.h> for v1.0.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_TMU_H

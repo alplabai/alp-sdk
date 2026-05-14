@@ -28,6 +28,10 @@
  *         alp_wdt_feed(wdt);    // every iteration; must be < 5 s
  *     }
  * @endcode
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.2.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_WDT_H

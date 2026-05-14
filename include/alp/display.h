@@ -14,6 +14,11 @@
  * v0.2 will add:
  *   - alp_display_lvgl_attach() for LVGL flush integration.
  *   - DSI / parallel-RGB framebuffer paths for the V2N family.
+ *
+
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      v0.3 placeholder; no real backend impl yet.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_DISPLAY_H

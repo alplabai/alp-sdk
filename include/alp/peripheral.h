@@ -20,6 +20,11 @@
  * in `src/zephyr/peripheral_{i2c,spi,gpio,uart}.c`; the Yocto and
  * baremetal backends fill in alongside their respective build
  * trees.
+ *
+
+ * @par ABI status: [ABI-STABLE]
+ *      v0.1 surface; locked across every release since v0.1.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_PERIPHERAL_H

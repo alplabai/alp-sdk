@@ -13,6 +13,11 @@
  *
  * Including <alp/gui.h> requires the LVGL package to be on the
  * include path; this is a build option, not bundled source.
+ *
+
+ * @par ABI status: [ABI-STABLE]
+ *      v0.2 LVGL re-export shim.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_GUI_H

@@ -31,6 +31,10 @@
  *                      plaintext, sizeof plaintext,
  *                      cipher, tag, sizeof tag);
  * @endcode
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.3 MbedTLS PSA Crypto wrapper.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_SECURITY_H

@@ -71,6 +71,10 @@
  *     alp_dsp_chain_apply_bins(c, in, 128u, mag, 128u, &got);
  *     alp_dsp_chain_close(c);
  * @endcode
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      v0.5 new -- standalone DSP-chain API.  Composes with adc.h filter/spectrum types; both sides may co-evolve.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_DSP_H

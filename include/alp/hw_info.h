@@ -61,6 +61,10 @@
  * channels are filled in by the user-supplied HW writeups.  Until
  * then both entry points return @ref ALP_ERR_NOSUPPORT and the
  * out-struct is zero-filled.
+ *
+ * @par ABI status: [ABI-STABLE]
+ *      v0.3 EEPROM manifest + BOARD_ID ADC.
+ *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_HW_INFO_H
