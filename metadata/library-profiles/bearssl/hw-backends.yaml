@@ -1,8 +1,5 @@
 # Per-library hardware-accelerator binding for bearssl.
-# Loader: scripts/alp_project.py reads this against the active SoM
-# `capabilities:` block (metadata/soms/*.yaml) and emits the highest-
-# priority matching CONFIG_* per accelerator class.  Pure-SW
-# fallback is the floor and is always available.
+# Capability-keyed crypto.  Pure-C is the floor.
 schema_version: 1
 library: bearssl
 class: crypto/TLS
@@ -10,10 +7,10 @@ upstream_source: "bearssl.org"
 accelerators:
   - class: crypto
     priority:
-      - { soc_family: gd32_bridge, backend: cau, kconfig: CONFIG_ALP_BEARSSL_CAU=y }
-      - { soc_family: alif_ensemble, backend: cryptocell, kconfig: CONFIG_ALP_BEARSSL_CRYPTOCELL=y }
-      - { soc_family: alif_ensemble, backend: inline_aes, kconfig: CONFIG_ALP_BEARSSL_INLINE_AES=y }
-      - { backend: optiga_trust_m_handshake, kconfig: CONFIG_ALP_BEARSSL_OPTIGA=y }
+      - { requires_cap: cryptocell,     backend: cryptocell,               kconfig: CONFIG_ALP_BEARSSL_CRYPTOCELL=y }
+      - { requires_cap: inline_aes,     backend: inline_aes,               kconfig: CONFIG_ALP_BEARSSL_INLINE_AES=y }
+      - { requires_cap: cau,            backend: cau,                      kconfig: CONFIG_ALP_BEARSSL_CAU=y }
+      - { requires_cap: optiga_trust_m, backend: optiga_trust_m_handshake, kconfig: CONFIG_ALP_BEARSSL_OPTIGA=y }
 sw_fallback:
   required: true
   kconfig: CONFIG_ALP_BEARSSL_PURE_C=y

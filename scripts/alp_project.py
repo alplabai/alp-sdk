@@ -439,7 +439,8 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
     highest-priority matching backend per accelerator class given the
     active SoM SKU and emit the matching `CONFIG_*=y` line.
 
-    Match rules (per priority entry):
+    Match rules (per priority entry; checked in order, all specified
+    keys must match):
       - `silicon:` key, if present, must equal the SKU's `silicon:`
         ref exactly (e.g. `alif:ensemble:e4`).  Lets us pin a backend
         to specific SoCs in a family -- Ethos-U85 on E4/E6/E8, but
@@ -447,7 +448,13 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
       - `soc_family:` key, if present, must equal the SKU family
         token (`alif_ensemble`, `renesas_rzv2n`, ...).  Selects every
         SKU in that family.
-      - Both keys omitted = universal entry (e.g. plain FPU, generic
+      - `requires_cap:` key, if present, must name a capability flag
+        in the SKU's `metadata/e1m_modules/<sku>.yaml` `capabilities:`
+        block that resolves to a truthy value (`true` or a non-zero
+        count).  Cleanest matcher when an accelerator is shared
+        across families (e.g. `optiga_trust_m` is populated on AEN
+        + V2N).
+      - All three omitted = universal entry (e.g. plain FPU, generic
         DMA), matches any SKU.
     """
     import re
@@ -461,16 +468,47 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
     out: list[str] = []
     repo_root = Path(__file__).resolve().parent.parent
 
-    # Pull the SKU's `silicon:` ref out of metadata/e1m_modules/<sku>.yaml
-    # so per-silicon backends (e.g. Ethos-U85 on E4/E6/E8) can match.
+    # Pull the SKU's `silicon:` ref + `capabilities:` block out of
+    # metadata/e1m_modules/<sku>.yaml so per-silicon and per-capability
+    # backends can match.
     silicon_ref: str | None = None
+    capabilities: dict[str, str] = {}
     sku_path = repo_root / "metadata" / "e1m_modules" / f"{sku}.yaml"
     if sku_path.exists():
+        in_caps = False
         for raw in sku_path.read_text(encoding="utf-8").splitlines():
-            m = re.match(r"^silicon:\s*(\S+)", raw)
-            if m:
-                silicon_ref = m.group(1).strip()
-                break
+            sm = re.match(r"^silicon:\s*(\S+)", raw)
+            if sm:
+                silicon_ref = sm.group(1).strip()
+                continue
+            # `capabilities:` is a top-level key; entries inside are
+            # indented `  key: value` until the next top-level key
+            # (no leading whitespace).
+            if raw.startswith("capabilities:"):
+                in_caps = True
+                continue
+            if in_caps:
+                if raw and not raw[0].isspace():
+                    in_caps = False
+                else:
+                    cm = re.match(r"^\s+(\w+):\s*(\S+)", raw)
+                    if cm:
+                        capabilities[cm.group(1)] = cm.group(2).rstrip(",")
+
+    def _cap_truthy(name: str) -> bool:
+        v = capabilities.get(name)
+        if v is None:
+            return False
+        v = v.lower()
+        if v in ("true", "yes"):
+            return True
+        if v in ("false", "no", "null", "none", "0"):
+            return False
+        # Numeric value (e.g. ethos_u55_count: 2): truthy when > 0.
+        try:
+            return int(v) > 0
+        except ValueError:
+            return False
 
     for lib in libs:
         prof = repo_root / "metadata" / "library-profiles" / lib / "hw-backends.yaml"
@@ -505,15 +543,16 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
                 kv[k.strip()] = v.strip()
             sili = kv.get("silicon")
             sf   = kv.get("soc_family")
+            cap  = kv.get("requires_cap")
             kcv  = kv.get("kconfig")
             if not kcv:
                 continue
-            # Per-silicon match wins when specified; otherwise fall back
-            # to soc_family.  Both omitted = universal entry.
-            if sili is not None:
-                if silicon_ref is None or sili != silicon_ref:
-                    continue
-            elif sf is not None and sf != soc_token:
+            # All specified matchers must succeed.
+            if sili is not None and sili != silicon_ref:
+                continue
+            if sf is not None and sf != soc_token:
+                continue
+            if cap is not None and not _cap_truthy(cap):
                 continue
             out.append(f"{kcv}  # {lib} / {current_class}")
             per_class_emitted.add(current_class)

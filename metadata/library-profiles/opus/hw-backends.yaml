@@ -1,8 +1,5 @@
 # Per-library hardware-accelerator binding for opus.
-# Loader: scripts/alp_project.py reads this against the active SoM
-# `capabilities:` block (metadata/soms/*.yaml) and emits the highest-
-# priority matching CONFIG_* per accelerator class.  Pure-SW
-# fallback is the floor and is always available.
+# Capability-keyed SIMD; I2S DMA universal.  Pure-C is the floor.
 schema_version: 1
 library: opus
 class: audio
@@ -10,9 +7,9 @@ upstream_source: "xiph.org"
 accelerators:
   - class: simd
     priority:
-      - { soc_family: alif_ensemble, cpu: cortex_m55, backend: helium_mve, kconfig: CONFIG_ALP_OPUS_HELIUM=y }
-      - { soc_family: renesas_rzv2n, cpu: cortex_a55, backend: neon, kconfig: CONFIG_ALP_OPUS_NEON=y }
-      - { backend: fpu, kconfig: CONFIG_ALP_OPUS_FPU=y }
+      - { requires_cap: helium_mve, backend: helium_mve, kconfig: CONFIG_ALP_OPUS_HELIUM=y }
+      - { requires_cap: neon,       backend: neon,       kconfig: CONFIG_ALP_OPUS_NEON=y }
+      - { backend: fpu,                                  kconfig: CONFIG_ALP_OPUS_FPU=y }
   - class: dma
     priority:
       - { backend: i2s_dma, kconfig: CONFIG_ALP_OPUS_I2S_DMA=y }

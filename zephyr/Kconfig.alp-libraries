@@ -45,6 +45,17 @@ config ALP_TFLM_ETHOS_U55
 	  E* SoC -- it's the family-wide primary on E3 / E5 / E7 (no
 	  U85) and the secondary on E4 / E6 / E8 (alongside the U85).
 
+config ALP_TFLM_ETHOS_U65
+	bool "TFLite-Micro on NXP i.MX 93 Ethos-U65 NPU"
+	depends on ALP_SOC_NXP_IMX9_IMX93
+	help
+	  Compile TFLite-Micro kernels against the Ethos-U65 NPU
+	  embedded in i.MX 93.  Same TFLM op-resolver as U55 / U85;
+	  Vela's `--accelerator-config ethos-u65-256` target.  The
+	  legacy `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y` knob is the
+	  N93-specific driver shim that complements this kernel-level
+	  knob.
+
 config ALP_TFLM_DRP_AI
 	bool "TFLite-Micro on Renesas DRP-AI NPU"
 	depends on ALP_SOC_RENESAS_RZV2N_N44

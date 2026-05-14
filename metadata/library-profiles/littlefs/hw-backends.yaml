@@ -1,9 +1,5 @@
 # Per-library hardware-accelerator binding for littlefs.
-# Sync I/O is the floor; on AEN the on-die OctalSPI (E3..E7) /
-# HexSPI (E8) flash interface has DMA shared with the xSPI
-# controller; on V2N + V2N-M1 the on-module eMMC controller has
-# its own DMA engine; on the GD32 bridge the QuadSPI shares DMA
-# with the firmware-loader.
+# Capability-keyed DMA flavours.  Sync I/O is the floor.
 schema_version: 1
 library: littlefs
 class: filesystem
@@ -11,9 +7,10 @@ upstream_source: "github.com/littlefs-project/littlefs (in Zephyr west.yml alrea
 accelerators:
   - class: dma
     priority:
-      - { soc_family: alif_ensemble, backend: xspi_dma,    kconfig: CONFIG_ALP_LITTLEFS_XSPI_DMA=y }
-      - { soc_family: renesas_rzv2n, backend: emmc_dma,    kconfig: CONFIG_ALP_LITTLEFS_EMMC_DMA=y }
-      - { soc_family: gd32_bridge,   backend: quadspi_dma, kconfig: CONFIG_ALP_LITTLEFS_QSPI_DMA=y }
+      - { requires_cap: xspi_dma,    backend: xspi_dma,    kconfig: CONFIG_ALP_LITTLEFS_XSPI_DMA=y }
+      - { requires_cap: hexspi_dma,  backend: hexspi_dma,  kconfig: CONFIG_ALP_LITTLEFS_XSPI_DMA=y }
+      - { requires_cap: emmc_dma,    backend: emmc_dma,    kconfig: CONFIG_ALP_LITTLEFS_EMMC_DMA=y }
+      - { requires_cap: quadspi_dma, backend: quadspi_dma, kconfig: CONFIG_ALP_LITTLEFS_QSPI_DMA=y }
 sw_fallback:
   required: true
   kconfig: CONFIG_ALP_LITTLEFS_SYNC_IO=y

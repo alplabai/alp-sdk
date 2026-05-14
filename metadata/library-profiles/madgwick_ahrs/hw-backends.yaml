@@ -1,8 +1,6 @@
 # Per-library hardware-accelerator binding for madgwick_ahrs.
-# Loader: scripts/alp_project.py reads this against the active SoM
-# `capabilities:` block (metadata/soms/*.yaml) and emits the highest-
-# priority matching CONFIG_* per accelerator class.  Pure-SW
-# fallback is the floor and is always available.
+# Capability-keyed.  libm trig is the floor.  Every CPU we target
+# carries an FPU, so the `fpu` simd entry is universal (no cap).
 schema_version: 1
 library: madgwick_ahrs
 class: sensor fusion
@@ -13,7 +11,7 @@ accelerators:
       - { backend: fpu, kconfig: CONFIG_ALP_MADGWICK_FPU=y }
   - class: cordic
     priority:
-      - { soc_family: gd32_bridge, backend: tmu_cordic, kconfig: CONFIG_ALP_MADGWICK_TMU=y }
+      - { requires_cap: tmu_cordic, backend: tmu_cordic, kconfig: CONFIG_ALP_MADGWICK_TMU=y }
 sw_fallback:
   required: true
   kconfig: CONFIG_ALP_MADGWICK_LIBM=y
