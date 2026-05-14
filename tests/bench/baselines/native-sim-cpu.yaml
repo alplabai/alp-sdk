@@ -65,6 +65,93 @@ cases:
   alp_wifi_open_no_radio:
     ns_per_iter: 5800
 
+  # tests/bench/bench_dsp.c (§C.19)
+  #
+  # DSP chain validators -- numbers reflect the open-time validation
+  # cost (kind enum + bound checks + per-stage param copy) on the
+  # native_sim path with no CMSIS-DSP linked in.  Realistic apply()
+  # timings need real backend / sample sizes and live in the per-(SoM,
+  # OS) baselines.
+  alp_dsp_chain_open_null_stages:
+    ns_per_iter: 18
+    note: NULL stages + zero count -- earliest INVAL exit.
+  alp_dsp_chain_open_fir_4tap:
+    ns_per_iter: 600
+    note: validation + 16-byte tap-array copy, then close.
+  alp_dsp_chain_open_window_fft64:
+    ns_per_iter: 950
+    note: WINDOW+FFT ordering check + n_points power-of-two check.
+  alp_dsp_chain_apply_samples_null:
+    ns_per_iter: 14
+    note: NULL-handle guard only.
+  alp_dsp_chain_apply_bins_null:
+    ns_per_iter: 14
+  alp_dsp_chain_close_null:
+    ns_per_iter: 10
+
+  # tests/bench/bench_tmu.c (§C.19)
+  #
+  # libm-fallback path on native_sim (no V2N supervisor).  Each
+  # number measures the SDK seam overhead added on top of libm's
+  # `sinf`/`cosf`/... cost.  V2N HiL baselines will overwrite these
+  # with the GD32 CORDIC round-trip latency, dominated by the
+  # SPI / I2C transport.
+  alp_tmu_sin:
+    ns_per_iter: 60
+  alp_tmu_cos:
+    ns_per_iter: 60
+  alp_tmu_tan:
+    ns_per_iter: 75
+  alp_tmu_atan2:
+    ns_per_iter: 95
+  alp_tmu_sqrt:
+    ns_per_iter: 35
+  alp_tmu_log:
+    ns_per_iter: 70
+  alp_tmu_exp:
+    ns_per_iter: 80
+  alp_tmu_hypot:
+    ns_per_iter: 95
+  alp_tmu_null_out_inval:
+    ns_per_iter: 12
+
+  # tests/bench/bench_power.c (§C.19)
+  #
+  # Open + wake-source-configure + close round-trip on the stub
+  # backend.  Real-silicon "enter DEEP_SLEEP / wake" latency is
+  # dominated by the vendor PMU and lives in per-(SoM, OS)
+  # baselines.
+  alp_power_open_close:
+    ns_per_iter: 90
+  alp_power_configure_wake_source_rtc:
+    ns_per_iter: 220
+  alp_power_request_sleep_inval_no_wake:
+    ns_per_iter: 240
+    note: INVAL early-exit when no wake source + zero wake_after_ms.
+  alp_power_close_null:
+    ns_per_iter: 8
+
+  # tests/bench/bench_security.c (§C.19)
+  #
+  # Hash + AEAD round-trip on the stub backend.  Real-silicon
+  # numbers (SHA-256 throughput on an Ensemble CryptoCell, AES-GCM
+  # round-trip on the CC312, hardware TRNG drain rate) live in the
+  # per-(SoM, OS) baselines.
+  alp_hash_open_sha256_no_backend:
+    ns_per_iter: 4500
+  alp_hash_update_null:
+    ns_per_iter: 14
+  alp_hash_finish_null:
+    ns_per_iter: 18
+  alp_aead_open_aes128_gcm_no_backend:
+    ns_per_iter: 4800
+  alp_aead_encrypt_null_handle:
+    ns_per_iter: 16
+  alp_aead_decrypt_null_handle:
+    ns_per_iter: 16
+  alp_random_bytes_null_out:
+    ns_per_iter: 12
+
 # Cases for which a native_sim baseline is meaningless (anything
 # that needs real silicon to produce a representative number)
 # stay unset here -- their entries land in the per-(SoM, OS)

@@ -23,6 +23,10 @@ add_executable(alp_bench
     ${CMAKE_CURRENT_SOURCE_DIR}/bench_iot.c
     ${CMAKE_CURRENT_SOURCE_DIR}/bench_audio.c
     ${CMAKE_CURRENT_SOURCE_DIR}/bench_storage.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/bench_dsp.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/bench_tmu.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/bench_power.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/bench_security.c
 )
 
 target_include_directories(alp_bench PRIVATE

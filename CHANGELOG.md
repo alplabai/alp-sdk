@@ -159,6 +159,38 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- native-sim bench cases for wave-2 surfaces §C.19)
+
+- **Four new microbench files** under `tests/bench/`:
+  - `bench_dsp.c` -- chain_open validators (FIR-4tap, WINDOW+FFT-64
+    ordering / power-of-two check) + apply / close NULL-handle
+    guards (6 cases).
+  - `bench_tmu.c` -- 8 primitives (`sin`/`cos`/`tan`/`atan2`/
+    `sqrt`/`log`/`exp`/`hypot`) on the libm-fallback path + the
+    representative NULL-out INVAL rejection cost (9 cases).
+  - `bench_power.c` -- open / configure_wake_source /
+    request_sleep INVAL-no-wake / close round-trip (4 cases).
+  - `bench_security.c` -- hash open + update + finish NULL guards,
+    AEAD open + encrypt + decrypt round-trip on the stub backend,
+    `alp_random_bytes` INVAL pre-check (7 cases).
+- **`tests/bench/bench_main.c`** updated to chain the four new
+  `bench_*_main()` entry points after the existing six.
+- **`tests/bench/CMakeLists.txt`** updated to list the four new
+  `.c` files under `add_executable(alp_bench ...)`.
+- **`tests/bench/baselines/native-sim-cpu.yaml`** extended with
+  30 new cases under explicit per-suite sub-headings, each with a
+  `note:` field documenting the path the number represents
+  (validation cost, NOSUPPORT-stub rejection, libm-fallback
+  dispatcher overhead, etc.).
+- **`docs/v1.0-readiness.md` Pillar 5 row** annotated with the
+  §C.19 extension.
+
+Real-silicon baselines (FIR throughput on V2N's CMSIS-DSP, SHA-256
+on an Ensemble CryptoCell, GD32 CORDIC round-trip latency over
+SPI / I2C, vendor PMU sleep-wake transition times) still live in
+the per-(SoM, OS) baselines under `E1M-<MPN>-<os>.yaml` and gate
+on HiL.
+
 ### Added (2026-05-14 -- SLSA L2 build provenance on releases §C.18)
 
 - **`.github/workflows/release.yml` gains a SLSA v1.0 Build

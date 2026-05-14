@@ -8,7 +8,9 @@
  * suite runs as a single binary that prints all cases in one pass.
  *
  * v0.3: six suites (status, peripheral, inference, iot, audio,
- * storage).  v1.0 extends per-API as implementations land.
+ * storage).  §C.19 adds four more (dsp, tmu, power, security)
+ * tracking the v0.5 wave-2 surfaces.  v1.0 extends per-API as
+ * implementations land.
  */
 
 #include <stdio.h>
@@ -19,6 +21,10 @@ void bench_status_main(void);
 void bench_iot_main(void);
 void bench_audio_main(void);
 void bench_storage_main(void);
+void bench_dsp_main(void);
+void bench_tmu_main(void);
+void bench_power_main(void);
+void bench_security_main(void);
 
 int  main(void)
 {
@@ -31,6 +37,10 @@ int  main(void)
     bench_iot_main();
     bench_audio_main();
     bench_storage_main();
+    bench_dsp_main();
+    bench_tmu_main();
+    bench_power_main();
+    bench_security_main();
 
     return 0;
 }
