@@ -87,8 +87,12 @@
  *                               return NOSUPPORT.  wake_after_ms
  *                               rejected pending RTC-alarm wiring.
  *   17. DA9292 status poll   -- I2C-master periodic poll cached value.
- *   18. ADC_DSP_*            -- ADC stream chained with FFT/FAC blocks
- *                               for the wave-2 DSP pipeline.
+ *   18. ADC_DSP_*            -- PARTIAL (§C.15d): chain_open + stage_push
+ *                               implemented as a 4-chain pool with
+ *                               per-stage chunk reassembly into a
+ *                               260-byte buffer.  chain_bind still
+ *                               NOSUPPORT pending the FFT/FAC + DMA
+ *                               stream-attach plumbing.
  *
  * Each follow-up commit replaces ONE hook's stub body with a real
  * implementation and updates this header comment + the CHANGELOG.
@@ -1544,9 +1548,70 @@ int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap, uint32_t wake_a
 /* v0.5 (§2B wave-2) -- chunked DSP-chain upload                     */
 /* ----------------------------------------------------------------- */
 
+/* Pool sizing -- mirrors the constants in `<alp/chips/gd32g553.h>`
+ * so the host's view of "what fits" agrees with the firmware's
+ * actual buffer reservation.  These local copies avoid pulling the
+ * SDK header into the firmware tree (which would drag in alp_status_t
+ * + supplementary ALP types the firmware doesn't otherwise consume).
+ * Bumping any of them requires a coordinated edit on both sides --
+ * see `docs/gd32-bridge-protocol.md` §3.x for the wire-format
+ * implications. */
+#define BRIDGE_DSP_MAX_CHAINS 4u
+#define BRIDGE_DSP_MAX_STAGES 4u
+#define BRIDGE_DSP_MAX_STAGE_BYTES 260u
+
+/* Valid `kind` byte range -- alp_dsp_stage_kind_t mirrors the wire
+ * encoding: 0 FIR, 1 IIR, 2 WINDOW, 3 FFT.  Anything outside this
+ * range rejects at stage_push so a typo from the host is caught
+ * before any bytes hit the per-stage buffer. */
+#define BRIDGE_DSP_KIND_MAX 3u
+
+typedef struct {
+    uint8_t  kind;           /* alp_dsp_stage_kind_t (valid when total_size > 0) */
+    uint16_t total_size;     /* declared in first chunk; locks for the stage    */
+    uint16_t bytes_received; /* running count toward total_size                  */
+    bool     complete;       /* bytes_received == total_size                     */
+    uint8_t  data[BRIDGE_DSP_MAX_STAGE_BYTES];
+} adc_dsp_stage_t;
+
+typedef struct {
+    bool            in_use;
+    bool            bound;
+    adc_dsp_stage_t stages[BRIDGE_DSP_MAX_STAGES];
+} adc_dsp_chain_t;
+
+/* 4 chains x 4 stages x 260 B = 4160 bytes of stage-data RAM + ~80
+ * bytes of metadata; well inside the GD32G553's 128 KB SRAM. */
+static adc_dsp_chain_t adc_dsp_chains[BRIDGE_DSP_MAX_CHAINS];
+
 int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id)
 {
-    if (chain_id != 0) *chain_id = 0u;
+    if (chain_id == 0) return BRIDGE_HW_ERR_INVAL;
+    *chain_id = 0u;
+
+    /* First-fit search over the chain pool.  The pool is small (4
+     * entries today) so the linear scan is comfortably faster than
+     * any free-list bookkeeping would be; if the pool grows, this
+     * function is the natural place to add a free-list head. */
+    for (uint8_t i = 0u; i < BRIDGE_DSP_MAX_CHAINS; ++i) {
+        if (!adc_dsp_chains[i].in_use) {
+            /* Zero the chain state so a previously-released chain
+             * doesn't leak stale stage data into the new allocation. */
+            for (uint8_t s = 0u; s < BRIDGE_DSP_MAX_STAGES; ++s) {
+                adc_dsp_chains[i].stages[s].kind           = 0u;
+                adc_dsp_chains[i].stages[s].total_size     = 0u;
+                adc_dsp_chains[i].stages[s].bytes_received = 0u;
+                adc_dsp_chains[i].stages[s].complete       = false;
+            }
+            adc_dsp_chains[i].in_use = true;
+            adc_dsp_chains[i].bound  = false;
+            *chain_id                = i;
+            return BRIDGE_HW_OK;
+        }
+    }
+    /* Pool exhaustion.  Protocol layer maps BRIDGE_HW_ERR_NOTIMPL to
+     * STATUS_NOSUPPORT today; a STATUS_NOMEM-equivalent would be
+     * more accurate but doesn't exist on the wire yet. */
     return BRIDGE_HW_ERR_NOTIMPL;
 }
 
@@ -1554,14 +1619,50 @@ int bridge_hw_adc_dsp_stage_push(uint8_t chain_id, uint8_t stage_index, uint8_t 
                                  uint16_t chunk_offset, uint16_t chunk_total_size,
                                  const uint8_t *chunk_data, size_t chunk_data_len)
 {
-    (void)chain_id;
-    (void)stage_index;
-    (void)kind;
-    (void)chunk_offset;
-    (void)chunk_total_size;
-    (void)chunk_data;
-    (void)chunk_data_len;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (chain_id >= BRIDGE_DSP_MAX_CHAINS) return BRIDGE_HW_ERR_RANGE;
+    if (stage_index >= BRIDGE_DSP_MAX_STAGES) return BRIDGE_HW_ERR_RANGE;
+    if (kind > BRIDGE_DSP_KIND_MAX) return BRIDGE_HW_ERR_INVAL;
+    if (chunk_total_size == 0u) return BRIDGE_HW_ERR_INVAL;
+    if (chunk_total_size > BRIDGE_DSP_MAX_STAGE_BYTES) return BRIDGE_HW_ERR_RANGE;
+    if (chunk_data_len == 0u || chunk_data == 0) return BRIDGE_HW_ERR_INVAL;
+    /* `chunk_offset + chunk_data_len <= chunk_total_size` -- guard
+     * against integer overflow on the addition (both inputs are
+     * 16-bit-bounded above) by doing the subtraction. */
+    if (chunk_data_len > (size_t)(chunk_total_size - chunk_offset)) return BRIDGE_HW_ERR_RANGE;
+
+    adc_dsp_chain_t *chain = &adc_dsp_chains[chain_id];
+    if (!chain->in_use) return BRIDGE_HW_ERR_INVAL;
+    if (chain->bound) return BRIDGE_HW_ERR_INVAL; /* mutation after bind */
+
+    adc_dsp_stage_t *st = &chain->stages[stage_index];
+
+    if (chunk_offset == 0u) {
+        /* First chunk of this stage.  Seed `kind` + `total_size`;
+         * any subsequent chunks must agree with these values so a
+         * mid-upload re-target of the stage is caught as INVAL. */
+        st->kind           = kind;
+        st->total_size     = chunk_total_size;
+        st->bytes_received = 0u;
+        st->complete       = false;
+    } else {
+        /* Continuation chunk.  The host must keep the same kind +
+         * total_size as the first chunk of this (chain, stage)
+         * pair -- otherwise the buffer would be a mix of two
+         * different stage payloads. */
+        if (st->total_size == 0u) return BRIDGE_HW_ERR_INVAL; /* stage not yet opened */
+        if (st->kind != kind) return BRIDGE_HW_ERR_INVAL;
+        if (st->total_size != chunk_total_size) return BRIDGE_HW_ERR_INVAL;
+        if (st->complete) return BRIDGE_HW_ERR_INVAL; /* already done */
+    }
+
+    for (size_t i = 0u; i < chunk_data_len; ++i) {
+        st->data[chunk_offset + i] = chunk_data[i];
+    }
+    st->bytes_received += (uint16_t)chunk_data_len;
+    if (st->bytes_received == st->total_size) {
+        st->complete = true;
+    }
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_adc_dsp_chain_bind(uint8_t chain_id, uint8_t stream_id)

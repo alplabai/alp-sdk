@@ -159,6 +159,40 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- GD32 ADC-DSP chain pool + chunk reassembly §C.15d)
+
+- **`bridge_hw_adc_dsp_chain_open` real body.**  Replaces the
+  NOSUPPORT stub with a first-fit allocation over a 4-entry
+  static pool (`BRIDGE_DSP_MAX_CHAINS`, mirrors
+  `GD32G553_BRIDGE_ADC_DSP_MAX_CHAINS`).  Returns
+  `BRIDGE_HW_ERR_NOTIMPL` on pool exhaustion (protocol layer
+  maps to STATUS_NOSUPPORT today; a STATUS_NOMEM-equivalent
+  arrives alongside chain_bind).
+- **`bridge_hw_adc_dsp_stage_push` real body.**  Reassembles
+  chunks into a per-(chain, stage) 260-byte buffer
+  (`BRIDGE_DSP_MAX_STAGE_BYTES`), enforcing:
+  - chain_id / stage_index in pool range,
+  - `kind` in 0..3 (FIR / IIR / WINDOW / FFT),
+  - non-zero `chunk_data_len` with a non-NULL pointer,
+  - `chunk_offset + chunk_data_len <= chunk_total_size`
+    (overflow-safe via subtraction),
+  - first chunk seeds `kind` + `total_size`; subsequent chunks
+    must agree (catches mid-upload re-target),
+  - re-write after stage completion rejects with INVAL.
+
+  Stage is marked complete when `bytes_received == total_size`.
+  Total RAM cost: 4 chains x 4 stages x 260 B = 4160 bytes +
+  ~80 bytes metadata; comfortable inside the GD32G553's 128 KB
+  SRAM.
+
+- **`bridge_hw_adc_dsp_chain_bind` left as NOSUPPORT.**  Wiring
+  a completed chain into the wave-2 FFT/FAC DMA stream needs
+  the ADC_STREAM_BEGIN / DMA pipeline (also still NOTIMPL); both
+  land together in a follow-up.  The new chain pool is
+  immediately usable to validate the upload protocol via the
+  host-side ZTESTs (`tests/zephyr/chips/src/main.c::test_gd32g553_v05_invalid_args`)
+  even before the streaming side is HiL-ready.
+
 ### Added (2026-05-14 -- GD32 power-mode-set deep-sleep + standby §C.15c)
 
 - **`bridge_hw_power_mode_set` modes 2 (deep-sleep) + 3 (standby)
