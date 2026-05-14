@@ -11,6 +11,10 @@
  * data select.  Same shape as `st7789` — different init sequence.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
+ * @par Verification status: [UNTESTED] — driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
  * @par Driver status: [stub-impl] — init + set-window + write-pixels.
  *
  * Datasheet: Ilitek ILI9341 v1.11 (Jun 2011).

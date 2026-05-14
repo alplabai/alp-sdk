@@ -12,6 +12,10 @@
  * `lis2dw12` accelerometer already shipped.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
+ * @par Verification status: [UNTESTED] — driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
  *
  * Datasheet: ST LPS22HB Rev 6 (Mar 2018).
  */

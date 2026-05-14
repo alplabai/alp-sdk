@@ -12,6 +12,10 @@
  * 128 columns start at column 2), and page-mode-only addressing.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
+ * @par Verification status: [UNTESTED] — driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
  * @par Driver status: [stub-impl] — init + clear + draw-pixel +
  *   display.  Geometry fixed at 128 × 64.
  *

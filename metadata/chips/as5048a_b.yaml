@@ -31,3 +31,7 @@ families:
   - aen
   - v2n
   - v2n-m1
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard

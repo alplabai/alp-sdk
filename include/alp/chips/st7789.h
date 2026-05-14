@@ -11,6 +11,10 @@
  * IPS panels.  4-wire SPI plus D/C# command/data select pin.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
+ * @par Verification status: [UNTESTED] — driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
  * @par Driver status: [stub-impl] — init sequence + window-write +
  *   set-pixel-window only.  Full font/blit primitives lean on LVGL
  *   or the SDK's gfx_compat thin shim.

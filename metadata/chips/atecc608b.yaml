@@ -1,0 +1,35 @@
+# ALP SDK chip manifest: Microchip ATECC608B secure element.
+schema_version:   1
+chip_id:          atecc608b
+driver_status:    stub             # wake / idle / sleep; crypto via CryptoAuthLib import.
+display_name:     "Microchip ATECC608B EC P-256 + AES-128 secure element (I2C)"
+vendor:           microchip
+mpn_population:
+  - "ATECC608B-MAHDA-T"
+
+datasheet:
+  primary:        "Microchip ATECC608B datasheet Rev D (Aug 2021)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x35, scope: "default; programmable post-provisioning" }
+  max_clock_hz:   1000000
+
+crypto:
+  curves:         [p256]
+  symmetric:      [aes128]
+  trng:           true
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_ATECC608B
+  baremetal:      ALP_SDK_CHIP_ATECC608B
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard

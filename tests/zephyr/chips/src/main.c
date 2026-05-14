@@ -88,6 +88,17 @@
 #include "alp/chips/qmc5883l.h"
 #include "alp/chips/veml7700.h"
 
+/* v0.5 §D.iot batch -- 9 IoT / connectivity chips. */
+#include "alp/chips/quectel_bg95.h"
+#include "alp/chips/quectel_bg77.h"
+#include "alp/chips/ublox_sara_r5.h"
+#include "alp/chips/semtech_sx1262.h"
+#include "alp/chips/semtech_sx1276.h"
+#include "alp/chips/ublox_neo_m9n.h"
+#include "alp/chips/ublox_max_m10s.h"
+#include "alp/chips/atgm336h.h"
+#include "alp/chips/atecc608b.h"
+
 #include "fakes.h"
 
 ZTEST_SUITE(alp_chips, NULL, NULL, NULL, NULL, NULL);

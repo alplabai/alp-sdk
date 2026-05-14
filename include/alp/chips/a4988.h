@@ -12,6 +12,10 @@
  * (MS1/MS2/MS3).  No on-chip register file.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
+ * @par Verification status: [UNTESTED] — driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
  *
  * Datasheet: Allegro A4988 (Rev L, May 2014).
  */

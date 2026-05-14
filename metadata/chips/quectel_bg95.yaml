@@ -1,0 +1,38 @@
+# ALP SDK chip manifest: Quectel BG95 LTE-M / NB-IoT module.
+schema_version:   1
+chip_id:          quectel_bg95
+driver_status:    stub             # AT command shell only.
+display_name:     "Quectel BG95 LTE-M / NB-IoT / EGPRS cellular module"
+vendor:           quectel
+mpn_population:
+  - "BG95-M3"
+  - "BG95-M4"
+  - "BG95-M5"
+
+datasheet:
+  primary:        "Quectel BG95 HW design Rev 1.2 (Mar 2022)"
+
+bus:              uart
+uart:
+  baud_rate:      115200            # main AT command channel
+  framing:        "8N1"
+
+peripherals:
+  uart:           ["main"]
+  gpio:           ["pwrkey", "reset (optional)"]
+
+cellular:
+  modes:          [lte_cat_m1, lte_cat_nb2, egprs]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_QUECTEL_BG95
+  baremetal:      ALP_SDK_CHIP_QUECTEL_BG95
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard

@@ -13,6 +13,10 @@
  * read using the portable `<alp/gpio.h>` surface.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
+ * @par Verification status: [UNTESTED] — driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
  * @par Driver status: [stub-impl] — read API present; DOUT-pin
  *   ready-wait is timing-only at v0.5 (no IRQ wake); fully fleshed
  *   out alongside the v0.6 cooperative timer surface.

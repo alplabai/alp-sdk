@@ -940,6 +940,65 @@
         }
       }
     },
+    "alp/chips/atecc608b.h": {
+      "functions": {
+        "atecc608b_deinit": {
+          "hash": "c1ff80b3064595aa",
+          "signature": "void atecc608b_deinit(atecc608b_t *dev);"
+        },
+        "atecc608b_idle": {
+          "hash": "422b755a3609899f",
+          "signature": "alp_status_t atecc608b_idle(atecc608b_t *dev);"
+        },
+        "atecc608b_init": {
+          "hash": "2d2b86abee8c9ee8",
+          "signature": "alp_status_t atecc608b_init(atecc608b_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);"
+        },
+        "atecc608b_sleep": {
+          "hash": "4298164305ab6132",
+          "signature": "alp_status_t atecc608b_sleep(atecc608b_t *dev);"
+        },
+        "atecc608b_wake": {
+          "hash": "1de8296eeb547a20",
+          "signature": "alp_status_t atecc608b_wake(atecc608b_t *dev);"
+        }
+      },
+      "macros": {
+        "ATECC608B_I2C_ADDR_DEFAULT": {
+          "hash": "8d144066189d5cbb",
+          "value": "0x35u"
+        }
+      },
+      "typedefs": {
+        "addr": {
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
+          "hash": "4e6cc227fae8a2d7"
+        }
+      }
+    },
+    "alp/chips/atgm336h.h": {
+      "functions": {
+        "atgm336h_deinit": {
+          "hash": "9f132cb107cc1b5c",
+          "signature": "void atgm336h_deinit(atgm336h_t *dev);"
+        },
+        "atgm336h_init": {
+          "hash": "00e847fd005003ce",
+          "signature": "alp_status_t atgm336h_init(atgm336h_t *dev, alp_uart_t *port);"
+        },
+        "atgm336h_read_nmea_line": {
+          "hash": "7dff0d3fa8c5a97b",
+          "signature": "alp_status_t atgm336h_read_nmea_line(atgm336h_t *dev, uint8_t *line_buf, size_t line_max, size_t *len_out, uint32_t timeout_ms);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "initialised": {
+          "definition": "typedef struct { alp_uart_t *port; bool initialised;",
+          "hash": "f1e3c0a7238bf7b2"
+        }
+      }
+    },
     "alp/chips/bme280.h": {
       "functions": {
         "bme280_compensate": {
@@ -3390,6 +3449,68 @@
         }
       }
     },
+    "alp/chips/quectel_bg77.h": {
+      "functions": {
+        "quectel_bg77_deinit": {
+          "hash": "f4e83ffd8cd96c5d",
+          "signature": "void quectel_bg77_deinit(quectel_bg77_t *dev);"
+        },
+        "quectel_bg77_init": {
+          "hash": "adde99ac126f7c37",
+          "signature": "alp_status_t quectel_bg77_init(quectel_bg77_t *dev, alp_uart_t *port, alp_gpio_t *pwrkey, alp_gpio_t *reset);"
+        },
+        "quectel_bg77_power_on": {
+          "hash": "7bdcf051cf1b04f2",
+          "signature": "alp_status_t quectel_bg77_power_on(quectel_bg77_t *dev);"
+        },
+        "quectel_bg77_read_response": {
+          "hash": "2e2b41a039e1131d",
+          "signature": "alp_status_t quectel_bg77_read_response(quectel_bg77_t *dev, uint8_t *buf, size_t max, size_t *received_out, uint32_t timeout_ms);"
+        },
+        "quectel_bg77_send_cmd": {
+          "hash": "7a609edf7cb20b34",
+          "signature": "alp_status_t quectel_bg77_send_cmd(quectel_bg77_t *dev, const char *at_cmd);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "initialised": {
+          "definition": "typedef struct { alp_uart_t *port; alp_gpio_t *pwrkey; alp_gpio_t *reset; bool initialised;",
+          "hash": "98d5ccde711b8270"
+        }
+      }
+    },
+    "alp/chips/quectel_bg95.h": {
+      "functions": {
+        "quectel_bg95_deinit": {
+          "hash": "53742548af314848",
+          "signature": "void quectel_bg95_deinit(quectel_bg95_t *dev);"
+        },
+        "quectel_bg95_init": {
+          "hash": "8f0b15dda978c845",
+          "signature": "alp_status_t quectel_bg95_init(quectel_bg95_t *dev, alp_uart_t *port, alp_gpio_t *pwrkey, alp_gpio_t *reset);"
+        },
+        "quectel_bg95_power_on": {
+          "hash": "3c706da45f6753b9",
+          "signature": "alp_status_t quectel_bg95_power_on(quectel_bg95_t *dev);"
+        },
+        "quectel_bg95_read_response": {
+          "hash": "94af7eda20cb8dc4",
+          "signature": "alp_status_t quectel_bg95_read_response(quectel_bg95_t *dev, uint8_t *buf, size_t max, size_t *received_out, uint32_t timeout_ms);"
+        },
+        "quectel_bg95_send_cmd": {
+          "hash": "732fbb4951fc2353",
+          "signature": "alp_status_t quectel_bg95_send_cmd(quectel_bg95_t *dev, const char *at_cmd);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "initialised": {
+          "definition": "typedef struct { alp_uart_t *port; alp_gpio_t *pwrkey; alp_gpio_t *reset; bool initialised;",
+          "hash": "98d5ccde711b8270"
+        }
+      }
+    },
     "alp/chips/ra8875.h": {
       "functions": {
         "ra8875_deinit": {
@@ -3663,6 +3784,94 @@
         "second": {
           "definition": "typedef struct { uint8_t second;",
           "hash": "a159fc4af93f57f7"
+        }
+      }
+    },
+    "alp/chips/semtech_sx1262.h": {
+      "functions": {
+        "semtech_sx1262_deinit": {
+          "hash": "dd1023be09dca1a1",
+          "signature": "void semtech_sx1262_deinit(semtech_sx1262_t *dev);"
+        },
+        "semtech_sx1262_get_status": {
+          "hash": "f9305f3003367a66",
+          "signature": "alp_status_t semtech_sx1262_get_status(semtech_sx1262_t *dev, uint8_t *status_out);"
+        },
+        "semtech_sx1262_hw_reset": {
+          "hash": "66a7f2ac6dda4e2d",
+          "signature": "alp_status_t semtech_sx1262_hw_reset(semtech_sx1262_t *dev);"
+        },
+        "semtech_sx1262_init": {
+          "hash": "ba70935a7acb150c",
+          "signature": "alp_status_t semtech_sx1262_init(semtech_sx1262_t *dev, alp_spi_t *spi, alp_gpio_t *nreset, alp_gpio_t *busy);"
+        },
+        "semtech_sx1262_wait_busy": {
+          "hash": "069ce8fb9ccb7167",
+          "signature": "alp_status_t semtech_sx1262_wait_busy(semtech_sx1262_t *dev, uint32_t timeout_ms);"
+        }
+      },
+      "macros": {
+        "SX1262_OPCODE_GET_STATUS": {
+          "hash": "2578428e331ed821",
+          "value": "0xC0u"
+        },
+        "SX1262_OPCODE_RESET": {
+          "hash": "19fdafe36b5b4b9c",
+          "value": "0x82u"
+        },
+        "SX1262_OPCODE_WAKEUP": {
+          "hash": "c1f25c6030515fb8",
+          "value": "0xC0u"
+        }
+      },
+      "typedefs": {
+        "initialised": {
+          "definition": "typedef struct { alp_spi_t *bus; alp_gpio_t *nreset; alp_gpio_t *busy; bool initialised;",
+          "hash": "1d5df15ed3f55097"
+        }
+      }
+    },
+    "alp/chips/semtech_sx1276.h": {
+      "functions": {
+        "semtech_sx1276_deinit": {
+          "hash": "33cfa1d665a7b6db",
+          "signature": "void semtech_sx1276_deinit(semtech_sx1276_t *dev);"
+        },
+        "semtech_sx1276_hw_reset": {
+          "hash": "ad402b0e7be6c9b2",
+          "signature": "alp_status_t semtech_sx1276_hw_reset(semtech_sx1276_t *dev);"
+        },
+        "semtech_sx1276_init": {
+          "hash": "0c5f4ad015753205",
+          "signature": "alp_status_t semtech_sx1276_init(semtech_sx1276_t *dev, alp_spi_t *spi, alp_gpio_t *nreset);"
+        },
+        "semtech_sx1276_read_reg": {
+          "hash": "c7c45f0bc00420e7",
+          "signature": "alp_status_t semtech_sx1276_read_reg(semtech_sx1276_t *dev, uint8_t reg, uint8_t *val);"
+        },
+        "semtech_sx1276_read_version": {
+          "hash": "3f9bec784dfeb395",
+          "signature": "alp_status_t semtech_sx1276_read_version(semtech_sx1276_t *dev, uint8_t *ver_out);"
+        },
+        "semtech_sx1276_write_reg": {
+          "hash": "e438cb7e45688daa",
+          "signature": "alp_status_t semtech_sx1276_write_reg(semtech_sx1276_t *dev, uint8_t reg, uint8_t val);"
+        }
+      },
+      "macros": {
+        "SX1276_REG_VERSION": {
+          "hash": "5dc88f3b061ca94a",
+          "value": "0x42u"
+        },
+        "SX1276_VERSION": {
+          "hash": "f5b0de7acef912f6",
+          "value": "0x12u"
+        }
+      },
+      "typedefs": {
+        "initialised": {
+          "definition": "typedef struct { alp_spi_t *bus; alp_gpio_t *nreset; bool initialised;",
+          "hash": "982f34ee23b58053"
         }
       }
     },
@@ -4306,6 +4515,83 @@
         "addr": {
           "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr;",
           "hash": "4e6cc227fae8a2d7"
+        }
+      }
+    },
+    "alp/chips/ublox_max_m10s.h": {
+      "functions": {
+        "ublox_max_m10s_deinit": {
+          "hash": "d79bf32f85de1e34",
+          "signature": "void ublox_max_m10s_deinit(ublox_max_m10s_t *dev);"
+        },
+        "ublox_max_m10s_init": {
+          "hash": "db3035d63a526d39",
+          "signature": "alp_status_t ublox_max_m10s_init(ublox_max_m10s_t *dev, alp_uart_t *port);"
+        },
+        "ublox_max_m10s_read_nmea_line": {
+          "hash": "407365e37b48ee8f",
+          "signature": "alp_status_t ublox_max_m10s_read_nmea_line(ublox_max_m10s_t *dev, uint8_t *line_buf, size_t line_max, size_t *len_out, uint32_t timeout_ms);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "initialised": {
+          "definition": "typedef struct { alp_uart_t *port; bool initialised;",
+          "hash": "f1e3c0a7238bf7b2"
+        }
+      }
+    },
+    "alp/chips/ublox_neo_m9n.h": {
+      "functions": {
+        "ublox_neo_m9n_deinit": {
+          "hash": "ccdca2c3b1b7918a",
+          "signature": "void ublox_neo_m9n_deinit(ublox_neo_m9n_t *dev);"
+        },
+        "ublox_neo_m9n_init": {
+          "hash": "eec2335e35a90dd5",
+          "signature": "alp_status_t ublox_neo_m9n_init(ublox_neo_m9n_t *dev, alp_uart_t *port);"
+        },
+        "ublox_neo_m9n_read_nmea_line": {
+          "hash": "8ce84edda8125361",
+          "signature": "alp_status_t ublox_neo_m9n_read_nmea_line(ublox_neo_m9n_t *dev, uint8_t *line_buf, size_t line_max, size_t *len_out, uint32_t timeout_ms);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "initialised": {
+          "definition": "typedef struct { alp_uart_t *port; bool initialised;",
+          "hash": "f1e3c0a7238bf7b2"
+        }
+      }
+    },
+    "alp/chips/ublox_sara_r5.h": {
+      "functions": {
+        "ublox_sara_r5_deinit": {
+          "hash": "570b637a338c68b5",
+          "signature": "void ublox_sara_r5_deinit(ublox_sara_r5_t *dev);"
+        },
+        "ublox_sara_r5_init": {
+          "hash": "637ab6d1952cabfa",
+          "signature": "alp_status_t ublox_sara_r5_init(ublox_sara_r5_t *dev, alp_uart_t *port, alp_gpio_t *pwr_on, alp_gpio_t *reset);"
+        },
+        "ublox_sara_r5_power_on": {
+          "hash": "c82f5f6e456302e3",
+          "signature": "alp_status_t ublox_sara_r5_power_on(ublox_sara_r5_t *dev);"
+        },
+        "ublox_sara_r5_read_response": {
+          "hash": "579641f55a601d79",
+          "signature": "alp_status_t ublox_sara_r5_read_response(ublox_sara_r5_t *dev, uint8_t *buf, size_t max, size_t *received_out, uint32_t timeout_ms);"
+        },
+        "ublox_sara_r5_send_cmd": {
+          "hash": "0da19ccf6cff08c3",
+          "signature": "alp_status_t ublox_sara_r5_send_cmd(ublox_sara_r5_t *dev, const char *at_cmd);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "initialised": {
+          "definition": "typedef struct { alp_uart_t *port; alp_gpio_t *pwr_on; alp_gpio_t *reset; bool initialised;",
+          "hash": "e3ce04a72565a6a3"
         }
       }
     },

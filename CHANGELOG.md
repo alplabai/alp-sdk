@@ -84,6 +84,44 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- §D.iot: 9 IoT / connectivity chip drivers)
+
+Tier 1 ecosystem expansion -- Phase 1 §D.iot batch.  Every public
+header in this batch carries the `[ABI-EXPERIMENTAL]` + `[UNTESTED]`
+badges.  The chip headers added in this batch + the prior §D.AI +
+§D.industrial batches are all tagged `[UNTESTED]` -- the verification
+badge captures the v0.5 truth: drivers compile + pass the NULL-arg
+ZTESTs but have no HiL silicon bring-up yet, so customers should
+treat all timing / register-value / lifecycle sequencing as paper-
+correct only until the v1.0 verification sweep lands.
+
+- **`quectel_bg95`**       -- Quectel LTE-M / NB-IoT / EGPRS module
+  (UART AT shell + PWRKEY pulse).
+- **`quectel_bg77`**       -- Quectel LTE-M / NB-IoT module with
+  integrated GNSS.
+- **`ublox_sara_r5`**      -- u-blox LTE-M carrier-certified module
+  (1500 ms PWR_ON pulse).
+- **`semtech_sx1262`**     -- Semtech SX1262 LoRa / FSK transceiver
+  (opcode shell + BUSY-wait + GetStatus probe).
+- **`semtech_sx1276`**     -- Semtech SX1276 legacy LoRa transceiver
+  (register R/W + REG_VERSION probe).
+- **`ublox_neo_m9n`**      -- u-blox NEO-M9N multi-constellation GNSS
+  (UART NMEA line read).
+- **`ublox_max_m10s`**     -- u-blox MAX-M10S small-footprint GNSS.
+- **`atgm336h`**           -- AllyStar ATGM336H cost-optimised GNSS.
+- **`atecc608b`**          -- Microchip ATECC608B EC P-256 + AES
+  secure element (wake / idle / sleep shell; ATCA crypto pending
+  CryptoAuthLib import).
+
+### Changed (2026-05-14 -- §D.AI + §D.industrial: [UNTESTED] verification badges)
+
+Retro-fit `@par Verification status: [UNTESTED]` Doxygen tag onto
+every chip header added in the §D.AI + §D.industrial batches earlier
+in this run, plus a matching `verification: { hil_silicon: untested,
+smoke_tests: null_arg_guard }` block in each chip's metadata YAML.
+Customer-visible signal that the v0.5 drivers compile + pass the
+NULL-arg ZTEST surface but have not yet seen HiL silicon bring-up.
+
 ### Added (2026-05-14 -- §D.industrial: 18 industrial sensing / control chip drivers)
 
 Tier 1 ecosystem expansion -- chip-and-library-ecosystem-design.md

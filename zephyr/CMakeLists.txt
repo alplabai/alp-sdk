@@ -244,6 +244,26 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_QMC5883L
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_VEML7700
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/veml7700/veml7700.c)
 
+# v0.5 §D.iot batch -- 9 IoT / connectivity chips.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_QUECTEL_BG95
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/quectel_bg95/quectel_bg95.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_QUECTEL_BG77
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/quectel_bg77/quectel_bg77.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_UBLOX_SARA_R5
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ublox_sara_r5/ublox_sara_r5.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_SEMTECH_SX1262
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/semtech_sx1262/semtech_sx1262.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_SEMTECH_SX1276
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/semtech_sx1276/semtech_sx1276.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_UBLOX_NEO_M9N
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ublox_neo_m9n/ublox_neo_m9n.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_UBLOX_MAX_M10S
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ublox_max_m10s/ublox_max_m10s.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ATGM336H
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/atgm336h/atgm336h.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ATECC608B
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/atecc608b/atecc608b.c)
+
 # V2N supervisor singleton -- the lazy-init GD32G553 ctx the portable
 # PWM/ADC/DAC/QENC/COUNTER backends dispatch through on V2N.  The
 # .c file emits NOSUPPORT stubs when CONFIG_ALP_SDK_V2N_SUPERVISOR=n

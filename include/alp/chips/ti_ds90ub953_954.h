@@ -14,6 +14,10 @@
  * vision.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
+ * @par Verification status: [UNTESTED] — driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
  * @par Driver status: [stub-impl] — chip-ID + soft reset only.
  *
  * Datasheet: TI DS90UB953-Q1 SNLS554, DS90UB954-Q1 SNLS555.

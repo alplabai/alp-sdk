@@ -1,0 +1,32 @@
+# ALP SDK chip manifest: u-blox NEO-M9N GNSS receiver.
+schema_version:   1
+chip_id:          ublox_neo_m9n
+driver_status:    complete         # NMEA line read; sentence parsing in consumer code.
+display_name:     "u-blox NEO-M9N multi-constellation GNSS receiver"
+vendor:           ublox
+mpn_population:
+  - "NEO-M9N-00B"
+
+datasheet:
+  primary:        "u-blox NEO-M9N datasheet UBX-19014285 v1.10"
+
+bus:              uart
+uart:
+  baud_rate:      9600              # default NMEA 0183
+  framing:        "8N1"
+
+gnss:
+  constellations: [gps, glonass, galileo, beidou]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_UBLOX_NEO_M9N
+  baremetal:      ALP_SDK_CHIP_UBLOX_NEO_M9N
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard

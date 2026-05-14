@@ -23,6 +23,10 @@
  *     HailoRT plus the upstream `hailo_pci` kernel module.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
+ * @par Verification status: [UNTESTED] — driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
  * @par Driver status: [stub-impl] — defines lifecycle + GPIO
  *   sequencing surface; live silicon probe arrives once a carrier
  *   ships with the M.2 slot wired.

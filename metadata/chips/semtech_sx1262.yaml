@@ -1,0 +1,38 @@
+# ALP SDK chip manifest: Semtech SX1262 LoRa transceiver.
+schema_version:   1
+chip_id:          semtech_sx1262
+driver_status:    stub
+display_name:     "Semtech SX1262 sub-GHz LoRa / FSK transceiver"
+vendor:           semtech
+mpn_population:
+  - "SX1262IMLTRT"
+
+datasheet:
+  primary:        "Semtech SX1262 datasheet v1.2 (Jun 2019)"
+
+bus:              spi
+spi:
+  mode:           [0]
+  max_clock_hz:   16000000
+
+signals:
+  - { name: SCLK,   type: input }
+  - { name: MOSI,   type: input }
+  - { name: MISO,   type: output }
+  - { name: NSS,    type: input, scope: "chip select" }
+  - { name: NRESET, type: input, scope: "active-low hardware reset" }
+  - { name: BUSY,   type: output, scope: "command-busy back to host" }
+  - { name: DIO1,   type: output, scope: "IRQ line 1" }
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_SEMTECH_SX1262
+  baremetal:      ALP_SDK_CHIP_SEMTECH_SX1262
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard

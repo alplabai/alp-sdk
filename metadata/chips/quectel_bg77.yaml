@@ -1,0 +1,37 @@
+# ALP SDK chip manifest: Quectel BG77 LTE-M / NB-IoT / GNSS module.
+schema_version:   1
+chip_id:          quectel_bg77
+driver_status:    stub
+display_name:     "Quectel BG77 LTE-M / NB-IoT cellular module + integrated GNSS"
+vendor:           quectel
+mpn_population:
+  - "BG77-M3"
+
+datasheet:
+  primary:        "Quectel BG77 HW design Rev 1.4 (Apr 2023)"
+
+bus:              uart
+uart:
+  baud_rate:      115200
+  framing:        "8N1"
+
+peripherals:
+  uart:           ["main"]
+  gpio:           ["pwrkey", "reset (optional)"]
+
+cellular:
+  modes:          [lte_cat_m1, lte_cat_nb2]
+  gnss_integrated: true
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_QUECTEL_BG77
+  baremetal:      ALP_SDK_CHIP_QUECTEL_BG77
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard

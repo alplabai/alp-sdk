@@ -464,6 +464,16 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
     "tsl2591":            ("I2C",),
     "qmc5883l":           ("I2C",),
     "veml7700":           ("I2C",),
+    # v0.5 §D.iot batch -- 9 IoT / connectivity chips.
+    "quectel_bg95":       ("SERIAL",),
+    "quectel_bg77":       ("SERIAL",),
+    "ublox_sara_r5":      ("SERIAL",),
+    "semtech_sx1262":     ("SPI", "GPIO"),
+    "semtech_sx1276":     ("SPI", "GPIO"),
+    "ublox_neo_m9n":      ("SERIAL",),
+    "ublox_max_m10s":     ("SERIAL",),
+    "atgm336h":           ("SERIAL",),
+    "atecc608b":          ("I2C",),
 }
 
 

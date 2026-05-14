@@ -13,6 +13,10 @@
  * byte (no separate D/C# pin like ILI9xxx).
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
+ * @par Verification status: [UNTESTED] — driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
  * @par Driver status: [stub-impl] — chip-ID probe + soft reset.
  *   Panel-init / BTE / touch lifecycle land once the maintainer
  *   adds the RA8875 panel-init table to the design archive.
