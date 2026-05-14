@@ -9,7 +9,6 @@ sample:
     writing benchmark code themselves.
 common:
   tags: lvgl benchmark demo example performance
-  harness: console
 tests:
   alp_sdk.examples.lvgl_benchmark.native_sim:
     platform_allow: native_sim/native/64

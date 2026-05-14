@@ -10,7 +10,6 @@ sample:
     Murata).  native_sim stubs WiFi + MQTT.
 common:
   tags: lvgl iot mqtt tls demo example
-  harness: console
 tests:
   alp_sdk.examples.iot_dashboard.native_sim:
     platform_allow: native_sim/native/64

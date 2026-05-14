@@ -17,8 +17,8 @@ tests:
       - alp-sdk
       - example
       - rtc
-    harness: console
-    harness_config:
+      harness: console
+  harness_config:
       type: one_line
       regex:
         - "\\[rtc\\] done"

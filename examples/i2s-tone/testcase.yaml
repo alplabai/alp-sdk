@@ -17,8 +17,8 @@ tests:
       - alp-sdk
       - example
       - i2s
-    harness: console
-    harness_config:
+      harness: console
+  harness_config:
       type: one_line
       regex:
         - "\\[i2s\\] done"

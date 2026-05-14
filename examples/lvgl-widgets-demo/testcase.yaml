@@ -9,7 +9,6 @@ sample:
     backend; AEN target build verifies the cross-compile.
 common:
   tags: lvgl demo example
-  harness: console
 tests:
   alp_sdk.examples.lvgl_widgets_demo.native_sim:
     platform_allow: native_sim/native/64

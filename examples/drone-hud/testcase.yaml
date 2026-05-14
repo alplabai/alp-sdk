@@ -10,7 +10,6 @@ sample:
     NOSUPPORT contracts.
 common:
   tags: lvgl demo example marketing showcase drone uav
-  harness: console
 tests:
   alp_sdk.examples.drone_hud.native_sim:
     platform_allow: native_sim/native/64

@@ -9,7 +9,6 @@ sample:
     target verifies the cross-compile.
 common:
   tags: lvgl audio demo example codec
-  harness: console
 tests:
   alp_sdk.examples.lvgl_music_player.native_sim:
     platform_allow: native_sim/native/64

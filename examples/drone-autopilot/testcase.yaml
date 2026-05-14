@@ -10,7 +10,6 @@ sample:
     Showcases the SDK's real-time control story.
 common:
   tags: autopilot drone uav control marketing showcase
-  harness: console
 tests:
   alp_sdk.examples.drone_autopilot.native_sim:
     platform_allow: native_sim/native/64

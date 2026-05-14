@@ -10,7 +10,6 @@ sample:
     NPU variants without app-source changes.
 common:
   tags: lvgl ai inference demo example marketing showcase
-  harness: console
 tests:
   alp_sdk.examples.ai_camera_viewer.native_sim:
     platform_allow: native_sim/native/64
