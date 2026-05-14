@@ -48,6 +48,12 @@ SKUs only.  See [`docs/soms/v2n-m1.md`](soms/v2n-m1.md).
 through the SDK's `<alp/inference.h>` dispatcher when
 `ALP_SDK_INFERENCE_DRPAI=y`.
 
+**DSP chain** -- A composable pipeline of filter / window / FFT
+stages under `<alp/dsp.h>` (standalone) and
+`<alp/adc.h>`'s `alp_adc_filter_t` / `alp_adc_spectrum_t`
+(ADC-pipeline-integrated).  See
+[ADR 0007](adr/0007-wave2-dsp-pipeline-design.md).
+
 ## E-K
 
 **E1M** -- 35 × 35 mm SoM form factor (312 pads).  AEN + i.MX 93
@@ -60,6 +66,12 @@ bring-up.  Two flavours: E1M-EVK (35 × 35) and E1M-X-EVK (45 × 65).
 
 **Ethos-U** -- Arm's micro-NPU IP.  AEN modules carry Ethos-U55;
 N93 modules carry Ethos-U65.
+
+**GPU2D** -- 2D compositing accelerator (alpha blending, rotation,
+scaling) for OLED/TFT pipelines.  AEN populates a Mali-D71;
+other E1M families currently don't.  Exposed via
+`<alp/gpu2d.h>` for portability.  See
+[ADR 0008](adr/0008-gpu2d-portable-shim.md).
 
 **`<family>/hw-revisions.yaml`** -- Per-rev SDK-version compatibility
 table.  Customer's `som.hw_rev` is validated against this list at
@@ -94,8 +106,16 @@ the SDK use it for per-feature opt-in.
 resolves SoM SKU preset + carrier preset, emits the per-backend
 config (Zephyr `alp.conf` / CMake `-D` flags / Yocto `local.conf`).
 
+**MCUboot** -- The bootloader used on AEN-Zephyr for secure-
+boot image verification + A/B slot swap-using-scratch.  Config
+lives at `zephyr/sysbuild/aen/sysbuild.conf`.
+
 **MDIO** -- Management Data Input/Output.  The clause-22 bus used
 to configure Ethernet PHYs.
+
+**Mender** -- The OTA update system used on Yocto-side E1M
+modules (V2N, V2N-M1, i.MX 93).  Zephyr-side equivalent
+deferred to v1.1 per [ADR 0009](adr/0009-mender-zephyr-client-deferred.md).
 
 **`metadata/`** -- Repo subtree carrying chip manifests, SoC
 capability profiles, per-SKU presets, schemas, templates.
@@ -138,6 +158,10 @@ Quad Cortex-A55 + Cortex-M33 + DRP-AI3.
 **Sample.yaml** -- Zephyr Twister test scenario metadata next to
 an application's source.  Optional; required to run as a Twister
 target.
+
+**sysbuild** -- Zephyr's umbrella build system for multi-image
+projects (application + MCUboot + ...).  AEN's secure-boot
+profile lives at `zephyr/sysbuild/aen/sysbuild.conf`.
 
 **SWD** -- Serial Wire Debug.  Arm's two-wire (SWDIO + SWCLK)
 debug protocol used to reflash + halt Cortex-M targets.  The SDK
