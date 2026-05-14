@@ -159,6 +159,36 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- HW-blocked tracker docs §C.31)
+
+Two new docs that codify the external-party items blocking
+the remaining v1.0 pillars.  The items themselves can't close
+in-repo (need third-party engagement); the docs make sure the
+maintainer doesn't lose state between weekly partnership-review
+cycles and give customers a public reference for what's coming.
+
+- **`docs/security-audit-plan.md`**: External security audit
+  engagement plan.  Covers scope (threat-model verification +
+  source review of security surfaces + MCUboot integration
+  audit + OTA pen test + fuzz-corpus inheritance), firm-
+  selection criteria + shortlist (Trail of Bits, NCC Group,
+  Doyensec), 2026-Q2..Q4 timeline, budget envelope, and the
+  workflow for landing findings as a v1.0.x point release.
+  v1.0 tag does NOT block on completion -- the audit runs in
+  parallel with customer integration against the stable v1.0
+  surface.
+- **`docs/vendor-partnerships.md`**: Per-vendor tracker for
+  the four external relationships that gate Pillar 9 (Renesas
+  RZ/V2N FSP + DA9292 pad-routing + DRP-AI runtime licence,
+  Alif AEN HAL v1.6 sync + dual-image build flow upstreaming,
+  NXP i.MX 93 meta-imx alignment + OTFAD Zephyr driver, the
+  alp-zephyr-modules public release, OpenEmbedded layerindex
+  registration).  One row per vendor with open items, next
+  action, and the maintainer's next-cycle owner.
+
+- **`docs/v1.0-readiness.md`** Pillar 8 + Pillar 9 paragraphs
+  updated to cross-ref the new trackers.
+
 ### Added (2026-05-14 -- production-deployment flagship skeleton §C.29)
 
 - **`examples/production-deployment/`** -- the v1.0 integration
