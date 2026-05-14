@@ -445,6 +445,25 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
     "il3820":             ("SPI", "GPIO"),
     "gdew0154t8":         ("SPI", "GPIO"),
     "hailo_8l":           ("GPIO",),
+    # v0.5 §D.industrial batch -- 18 industrial sensing / control chips.
+    "bmp390":             ("I2C",),
+    "ms5611":             ("I2C",),
+    "lps22hb":            ("I2C",),
+    "vl53l1x":            ("I2C",),
+    "vl53l5cx":           ("I2C",),
+    "a02yyuw":            ("SERIAL",),
+    "drv8833":            ("PWM",),
+    "drv8825":            ("PWM", "GPIO"),
+    "tmc2209":            ("SERIAL",),
+    "a4988":              ("PWM", "GPIO"),
+    "as5048a_b":          ("I2C",),
+    "mt6701":             ("I2C",),
+    "hx711":              ("GPIO",),
+    "max31855":           ("SPI",),
+    "max31865":           ("SPI",),
+    "tsl2591":            ("I2C",),
+    "qmc5883l":           ("I2C",),
+    "veml7700":           ("I2C",),
 }
 
 

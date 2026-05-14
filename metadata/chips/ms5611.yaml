@@ -1,0 +1,31 @@
+# ALP SDK chip manifest: TE Connectivity MS5611 barometer.
+schema_version:   1
+chip_id:          ms5611
+driver_status:    partial          # PROM read + reset; conversion/compensation later.
+display_name:     "TE Connectivity MS5611 high-altitude barometric pressure sensor"
+vendor:           te_connectivity
+mpn_population:
+  - "MS5611-01BA03"
+
+datasheet:
+  primary:        "TE MS5611-01BA03 datasheet v5.0 (Oct 2014)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x77, scope: "CSB = low (default)" }
+    - { addr_7bit: 0x76, scope: "CSB = high" }
+  max_clock_hz:   400000
+
+precision:
+  accuracy_hpa:   0.015            # ±1.5 mbar in [10, 1200] hPa
+  range_hpa:      [10, 1200]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_MS5611
+  baremetal:      ALP_SDK_CHIP_MS5611
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

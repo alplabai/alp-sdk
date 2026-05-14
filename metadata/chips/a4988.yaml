@@ -1,0 +1,30 @@
+# ALP SDK chip manifest: Allegro A4988 stepper driver.
+schema_version:   1
+chip_id:          a4988
+driver_status:    complete
+display_name:     "Allegro A4988 bipolar stepper motor driver"
+vendor:           allegro
+mpn_population:
+  - "A4988SETTR-T"
+
+datasheet:
+  primary:        "Allegro A4988 datasheet Rev L (May 2014)"
+
+bus:              gpio_pwm
+peripherals:
+  pwm:            ["step"]
+  gpio:           ["dir", "nenable (optional)", "ms1", "ms2", "ms3"]
+
+motor:
+  type:           bipolar_stepper
+  microstep_modes: [1, 2, 4, 8, 16]
+  current_a:      2.0
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_A4988
+  baremetal:      ALP_SDK_CHIP_A4988
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

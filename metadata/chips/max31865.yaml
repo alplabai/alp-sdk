@@ -1,0 +1,30 @@
+# ALP SDK chip manifest: ADI MAX31865 RTD-to-digital converter.
+schema_version:   1
+chip_id:          max31865
+driver_status:    complete
+display_name:     "ADI (Maxim) MAX31865 RTD (PT100/PT1000) digitiser"
+vendor:           adi_maxim
+mpn_population:
+  - "MAX31865ATP+"
+
+datasheet:
+  primary:        "Maxim MAX31865 datasheet Rev 3 (Aug 2015)"
+
+bus:              spi
+spi:
+  mode:           [1, 3]
+  max_clock_hz:   5000000
+
+sensor:
+  rtd_types:      ["PT100", "PT1000"]
+  resolution_bits: 15
+  range_c:        [-200, 850]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_MAX31865
+  baremetal:      ALP_SDK_CHIP_MAX31865
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

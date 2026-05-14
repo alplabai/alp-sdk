@@ -1,0 +1,30 @@
+# ALP SDK chip manifest: QST QMC5883L 3-axis magnetic compass.
+schema_version:   1
+chip_id:          qmc5883l
+driver_status:    complete
+display_name:     "QST QMC5883L 3-axis magnetic compass (HMC5883L-compat)"
+vendor:           qst
+mpn_population:
+  - "QMC5883L"
+
+datasheet:
+  primary:        "QST QMC5883L datasheet v1.0 (Sep 2016)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x0D, scope: "fixed I2C address" }
+  max_clock_hz:   400000
+
+sensor:
+  axes:           3
+  ranges_gauss:   [2, 8]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_QMC5883L
+  baremetal:      ALP_SDK_CHIP_QMC5883L
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

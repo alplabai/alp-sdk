@@ -1,0 +1,30 @@
+# ALP SDK chip manifest: ST VL53L5CX multi-zone ToF ranger (I2C).
+schema_version:   1
+chip_id:          vl53l5cx
+driver_status:    stub
+display_name:     "STMicroelectronics VL53L5CX 8x8 multi-zone time-of-flight ranger"
+vendor:           st
+mpn_population:
+  - "VL53L5CXV0GC/1"
+
+datasheet:
+  primary:        "ST VL53L5CX DS13754 Rev 3 (Apr 2021)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x29, scope: "factory default" }
+  max_clock_hz:   400000
+
+ranging:
+  max_distance_m: 4.0
+  zones:          64               # 8x8
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_VL53L5CX
+  baremetal:      ALP_SDK_CHIP_VL53L5CX
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

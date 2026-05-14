@@ -1,0 +1,30 @@
+# ALP SDK chip manifest: ams TSL2591 light sensor.
+schema_version:   1
+chip_id:          tsl2591
+driver_status:    complete
+display_name:     "ams TSL2591 wide-dynamic-range ambient-light sensor (I2C)"
+vendor:           ams
+mpn_population:
+  - "TSL2591"
+
+datasheet:
+  primary:        "ams TSL2591 datasheet v0.7 (May 2013)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x29, scope: "fixed I2C address" }
+  max_clock_hz:   400000
+
+sensor:
+  channels:       2                # full spectrum + IR
+  resolution_bits: 16
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_TSL2591
+  baremetal:      ALP_SDK_CHIP_TSL2591
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

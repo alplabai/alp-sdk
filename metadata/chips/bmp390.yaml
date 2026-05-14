@@ -1,0 +1,31 @@
+# ALP SDK chip manifest: Bosch BMP390 pressure sensor (I2C).
+schema_version:   1
+chip_id:          bmp390
+driver_status:    stub             # chip-ID + soft reset; pressure read path land later.
+display_name:     "Bosch BMP390 high-precision barometric pressure sensor"
+vendor:           bosch
+mpn_population:
+  - "BMP390"
+
+datasheet:
+  primary:        "Bosch BMP390 datasheet v1.4 (Nov 2020)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x77, scope: "SDO = high (default)" }
+    - { addr_7bit: 0x76, scope: "SDO = low" }
+  max_clock_hz:   3400000          # I3C-style fast-mode-plus
+
+precision:
+  accuracy_hpa:   0.03
+  range_hpa:      [300, 1250]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_BMP390
+  baremetal:      ALP_SDK_CHIP_BMP390
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

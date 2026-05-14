@@ -1,0 +1,30 @@
+# ALP SDK chip manifest: TI DRV8825 bipolar stepper driver.
+schema_version:   1
+chip_id:          drv8825
+driver_status:    complete
+display_name:     "TI DRV8825 bipolar stepper motor driver"
+vendor:           ti
+mpn_population:
+  - "DRV8825PWPR"
+
+datasheet:
+  primary:        "TI DRV8825 SLVSA73F (Aug 2014)"
+
+bus:              gpio_pwm
+peripherals:
+  pwm:            ["step"]
+  gpio:           ["dir", "nenbl (optional)", "m0", "m1", "m2"]
+
+motor:
+  type:           bipolar_stepper
+  microstep_modes: [1, 2, 4, 8, 16, 32]
+  current_a:      2.2
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_DRV8825
+  baremetal:      ALP_SDK_CHIP_DRV8825
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

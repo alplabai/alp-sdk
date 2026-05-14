@@ -1,0 +1,29 @@
+# ALP SDK chip manifest: Vishay VEML7700 ambient-light sensor.
+schema_version:   1
+chip_id:          veml7700
+driver_status:    complete
+display_name:     "Vishay VEML7700 high-precision ambient-light sensor (I2C)"
+vendor:           vishay
+mpn_population:
+  - "VEML7700-TR"
+
+datasheet:
+  primary:        "Vishay VEML7700 datasheet Rev 1.5 (May 2020)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x10, scope: "fixed I2C address" }
+  max_clock_hz:   400000
+
+sensor:
+  resolution_bits: 16
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_VEML7700
+  baremetal:      ALP_SDK_CHIP_VEML7700
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

@@ -1,0 +1,29 @@
+# ALP SDK chip manifest: TI DRV8833 dual H-bridge brushed-DC driver.
+schema_version:   1
+chip_id:          drv8833
+driver_status:    complete         # init + per-channel duty + sleep gate.
+display_name:     "TI DRV8833 dual H-bridge brushed-DC motor driver"
+vendor:           ti
+mpn_population:
+  - "DRV8833C"
+
+datasheet:
+  primary:        "TI DRV8833 SLVSAR1F (Apr 2017)"
+
+bus:              gpio_pwm
+peripherals:
+  pwm:            ["in1", "in2", "in3", "in4"]
+  gpio:           ["nsleep (optional)"]
+
+motor:
+  channels:       2
+  current_a_per_ch: 1.5
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_DRV8833
+  baremetal:      ALP_SDK_CHIP_DRV8833
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

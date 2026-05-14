@@ -1,0 +1,31 @@
+# ALP SDK chip manifest: STMicroelectronics LPS22HB pressure sensor.
+schema_version:   1
+chip_id:          lps22hb
+driver_status:    stub
+display_name:     "STMicroelectronics LPS22HB MEMS barometric pressure sensor"
+vendor:           st
+mpn_population:
+  - "LPS22HB"
+
+datasheet:
+  primary:        "STMicroelectronics LPS22HB datasheet Rev 6 (Mar 2018)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x5D, scope: "SA0 = high (default)" }
+    - { addr_7bit: 0x5C, scope: "SA0 = low" }
+  max_clock_hz:   400000
+
+precision:
+  accuracy_hpa:   0.1
+  range_hpa:      [260, 1260]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_LPS22HB
+  baremetal:      ALP_SDK_CHIP_LPS22HB
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

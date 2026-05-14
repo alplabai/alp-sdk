@@ -1,0 +1,29 @@
+# ALP SDK chip manifest: DFRobot A02YYUW waterproof ultrasonic ranger.
+schema_version:   1
+chip_id:          a02yyuw
+driver_status:    complete         # frame sync + checksum + distance read.
+display_name:     "DFRobot A02YYUW waterproof ultrasonic distance sensor (UART)"
+vendor:           dfrobot
+mpn_population:
+  - "SEN0312"
+
+datasheet:
+  primary:        "DFRobot A02YYUW datasheet v2.0 (2022)"
+
+bus:              uart
+uart:
+  baud_rate:      9600
+  framing:        "8N1"
+
+ranging:
+  max_distance_mm: 7500
+  ingress_rating: ip67
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_A02YYUW
+  baremetal:      ALP_SDK_CHIP_A02YYUW
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

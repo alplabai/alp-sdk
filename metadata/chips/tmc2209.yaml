@@ -1,0 +1,30 @@
+# ALP SDK chip manifest: Trinamic TMC2209 silent stepper driver.
+schema_version:   1
+chip_id:          tmc2209
+driver_status:    stub
+display_name:     "Trinamic TMC2209 silent stepper motor driver (UART-controlled)"
+vendor:           trinamic
+mpn_population:
+  - "TMC2209-LA"
+
+datasheet:
+  primary:        "Trinamic TMC2209 datasheet v1.09 (Aug 2020)"
+
+bus:              uart
+uart:
+  baud_rate:      115200            # single-wire half-duplex
+  framing:        "8N1"
+
+motor:
+  type:           bipolar_stepper
+  microstep_modes: [1, 2, 4, 8, 16, 32, 64, 128, 256]
+  current_a:      2.0
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_TMC2209
+  baremetal:      ALP_SDK_CHIP_TMC2209
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

@@ -84,6 +84,50 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- §D.industrial: 18 industrial sensing / control chip drivers)
+
+Tier 1 ecosystem expansion -- chip-and-library-ecosystem-design.md
+Phase 1 §D.industrial batch.  Drivers ship with Doxygen-clean public
+headers in `include/alp/chips/<name>.h`, implementations under
+`chips/<name>/`, metadata YAML, Kconfig / CMakeLists / alp_project.py
+hooks, and per-chip NULL-arg-guard ZTESTs.
+
+- **`bmp390`**     -- Bosch BMP390 high-precision pressure sensor (I2C).
+- **`ms5611`**     -- TE MS5611 drone-grade barometer (I2C; PROM
+  read at init).
+- **`lps22hb`**    -- ST LPS22HB MEMS barometer (I2C).
+- **`vl53l1x`**    -- ST VL53L1X single-zone ToF ranger (I2C).
+- **`vl53l5cx`**   -- ST VL53L5CX 8x8 multi-zone ToF ranger (I2C).
+- **`a02yyuw`**    -- DFRobot A02YYUW waterproof ultrasonic ranger
+  (UART; checksum-validated 4-byte distance frame).
+- **`drv8833`**    -- TI DRV8833 dual H-bridge brushed-DC driver
+  (PWM; signed pulse-width per channel, sleep gate).
+- **`drv8825`**    -- TI DRV8825 bipolar stepper (PWM step + GPIO
+  dir / microstep / nEnable).
+- **`tmc2209`**    -- Trinamic TMC2209 silent stepper driver
+  (UART register read / write with CRC-8/ATM).
+- **`a4988`**      -- Allegro A4988 stepper driver (PWM step + GPIO
+  dir / microstep / nEnable).
+- **`as5048a_b`**  -- ams AS5048B 14-bit magnetic encoder (I2C).
+- **`mt6701`**     -- MagnTek MT6701 14-bit magnetic encoder (I2C).
+- **`hx711`**      -- Avia Semi HX711 24-bit load-cell ADC
+  (bit-banged 2-wire, 128 / 64 / 32 gain).
+- **`max31855`**   -- ADI MAX31855 K-type thermocouple-to-digital
+  (SPI; signed milli-C decode + fault flags).
+- **`max31865`**   -- ADI MAX31865 PT100 / PT1000 RTD-to-digital
+  (SPI; 15-bit ratio + fault bit).
+- **`tsl2591`**    -- ams TSL2591 wide-dynamic-range light sensor
+  (I2C; visible + IR channels).
+- **`qmc5883l`**   -- QST QMC5883L 3-axis compass (I2C; continuous
+  mode at 200 Hz / 2 G / OSR 512).
+- **`veml7700`**   -- Vishay VEML7700 ALS (I2C; 16-bit count read).
+
+Validators clean before push:
+- scripts/validate_metadata.py
+- scripts/check_example_portability.py
+- scripts/check_pin_conflicts.py
+- scripts/abi_snapshot.py --diff docs/abi/v0.5-snapshot.json
+
 ### Added (2026-05-14 -- §D.AI: 18 vision / display / accelerator chip drivers)
 
 Tier 1 ecosystem expansion -- chip-and-library-ecosystem-design.md

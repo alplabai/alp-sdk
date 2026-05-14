@@ -1,0 +1,30 @@
+# ALP SDK chip manifest: ST VL53L1X time-of-flight ranger (I2C).
+schema_version:   1
+chip_id:          vl53l1x
+driver_status:    stub
+display_name:     "STMicroelectronics VL53L1X single-zone time-of-flight ranger"
+vendor:           st
+mpn_population:
+  - "VL53L1CXV0FY/1"
+
+datasheet:
+  primary:        "ST VL53L1X DS13088 Rev 7 (Jul 2021)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x29, scope: "factory default (programmable via XSHUT-sequenced re-address)" }
+  max_clock_hz:   400000
+
+ranging:
+  max_distance_m: 4.0
+  zones:          1
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_VL53L1X
+  baremetal:      ALP_SDK_CHIP_VL53L1X
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

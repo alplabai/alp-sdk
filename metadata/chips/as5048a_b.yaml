@@ -1,0 +1,33 @@
+# ALP SDK chip manifest: ams AS5048A/B magnetic rotary encoder.
+schema_version:   1
+chip_id:          as5048a_b
+driver_status:    complete         # AS5048B I2C side.  AS5048A SPI variant pending.
+display_name:     "ams AS5048A / AS5048B 14-bit magnetic rotary encoder"
+vendor:           ams
+mpn_population:
+  - "AS5048A-HTSP-500"
+  - "AS5048B-HTSP-500"
+
+datasheet:
+  primary:        "ams AS5048 datasheet v1.7 (Nov 2018)"
+
+bus:              i2c              # AS5048B variant; AS5048A is SPI.
+i2c:
+  addresses:
+    - { addr_7bit: 0x40, scope: "A1:A2 = 00 (default)" }
+    - { addr_7bit: 0x41, scope: "A1:A2 = 01" }
+    - { addr_7bit: 0x42, scope: "A1:A2 = 10" }
+    - { addr_7bit: 0x43, scope: "A1:A2 = 11" }
+  max_clock_hz:   1000000
+
+encoder:
+  resolution_bits: 14
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_AS5048A_B
+  baremetal:      ALP_SDK_CHIP_AS5048A_B
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

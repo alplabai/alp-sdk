@@ -1,0 +1,30 @@
+# ALP SDK chip manifest: ADI MAX31855 K-type thermocouple-to-digital.
+schema_version:   1
+chip_id:          max31855
+driver_status:    complete
+display_name:     "ADI (Maxim) MAX31855 K-type thermocouple-to-digital converter"
+vendor:           adi_maxim
+mpn_population:
+  - "MAX31855KASA+"
+
+datasheet:
+  primary:        "Maxim MAX31855 datasheet Rev 4 (Aug 2015)"
+
+bus:              spi
+spi:
+  mode:           [0]
+  max_clock_hz:   5000000
+
+sensor:
+  thermocouple_types: ["K"]
+  resolution_c:   0.25
+  range_c:        [-270, 1372]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_MAX31855
+  baremetal:      ALP_SDK_CHIP_MAX31855
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

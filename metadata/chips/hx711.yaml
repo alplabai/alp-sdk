@@ -1,0 +1,28 @@
+# ALP SDK chip manifest: Avia Semi HX711 24-bit load-cell ADC.
+schema_version:   1
+chip_id:          hx711
+driver_status:    complete         # bit-banged read + gain selection.
+display_name:     "Avia Semi HX711 24-bit load-cell ADC (bit-banged 2-wire)"
+vendor:           avia_semi
+mpn_population:
+  - "HX711"
+
+datasheet:
+  primary:        "Avia Semi HX711 datasheet v2.1 (Apr 2017)"
+
+bus:              gpio_bitbang
+peripherals:
+  gpio:           ["sck (out)", "dout (in)"]
+
+adc:
+  resolution_bits: 24
+  gain_options:    [128, 64, 32]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_HX711
+  baremetal:      ALP_SDK_CHIP_HX711
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

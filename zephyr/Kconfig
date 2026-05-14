@@ -1255,6 +1255,134 @@ config ALP_SDK_CHIP_HAILO_8L
 	  for an M.2 Hailo-8L card; PCIe enumeration + the HailoRT
 	  runtime live on the Linux side.
 
+# v0.5 §D.industrial batch -- 18 industrial sensing / control chips.
+
+config ALP_SDK_CHIP_BMP390
+	bool "Bosch BMP390 high-precision barometric pressure sensor"
+	depends on I2C
+	help
+	  Compile chips/bmp390/bmp390.c.  Chip-ID + soft reset; pressure
+	  conversion + compensation pending.
+
+config ALP_SDK_CHIP_MS5611
+	bool "TE MS5611 high-altitude barometer (drone-grade)"
+	depends on I2C
+	help
+	  Compile chips/ms5611/ms5611.c.  Soft reset + PROM read at init.
+	  Conversion + compensation per datasheet land later.
+
+config ALP_SDK_CHIP_LPS22HB
+	bool "STMicroelectronics LPS22HB pressure sensor"
+	depends on I2C
+	help
+	  Compile chips/lps22hb/lps22hb.c.  Chip-ID + soft reset; pressure
+	  read path pending.
+
+config ALP_SDK_CHIP_VL53L1X
+	bool "ST VL53L1X single-zone time-of-flight ranger"
+	depends on I2C
+	help
+	  Compile chips/vl53l1x/vl53l1x.c.  Chip-ID + soft reset; full
+	  ranging sequence pending ST ULD library import.
+
+config ALP_SDK_CHIP_VL53L5CX
+	bool "ST VL53L5CX 8x8 multi-zone time-of-flight ranger"
+	depends on I2C
+	help
+	  Compile chips/vl53l5cx/vl53l5cx.c.  Chip-ID + soft reset; full
+	  multi-zone read pending ST ULD library import.
+
+config ALP_SDK_CHIP_A02YYUW
+	bool "DFRobot A02YYUW waterproof ultrasonic distance sensor (UART)"
+	depends on SERIAL
+	help
+	  Compile chips/a02yyuw/a02yyuw.c.  4-byte distance frame read
+	  over UART; checksum-validated.
+
+config ALP_SDK_CHIP_DRV8833
+	bool "TI DRV8833 dual H-bridge brushed-DC motor driver"
+	depends on PWM
+	help
+	  Compile chips/drv8833/drv8833.c.  Per-channel pulse-width set
+	  + sleep gate.
+
+config ALP_SDK_CHIP_DRV8825
+	bool "TI DRV8825 bipolar stepper motor driver"
+	depends on PWM && GPIO
+	help
+	  Compile chips/drv8825/drv8825.c.  Step / direction / microstep
+	  / sleep control via the portable PWM + GPIO surfaces.
+
+config ALP_SDK_CHIP_TMC2209
+	bool "Trinamic TMC2209 silent stepper motor driver (UART)"
+	depends on SERIAL
+	help
+	  Compile chips/tmc2209/tmc2209.c.  Trinamic UART register
+	  read / write surface; step/dir pacing reuses <alp/pwm.h>.
+
+config ALP_SDK_CHIP_A4988
+	bool "Allegro A4988 bipolar stepper motor driver"
+	depends on PWM && GPIO
+	help
+	  Compile chips/a4988/a4988.c.  Step / direction / microstep
+	  / enable control via the portable PWM + GPIO surfaces.
+
+config ALP_SDK_CHIP_AS5048A_B
+	bool "ams AS5048B 14-bit magnetic rotary encoder (I2C variant)"
+	depends on I2C
+	help
+	  Compile chips/as5048a_b/as5048a_b.c.  AS5048B I2C absolute
+	  angle read.  AS5048A SPI variant in a follow-up.
+
+config ALP_SDK_CHIP_MT6701
+	bool "MagnTek MT6701 14-bit magnetic rotary encoder (I2C)"
+	depends on I2C
+	help
+	  Compile chips/mt6701/mt6701.c.  Cost-competitive AS5048B
+	  alternative; same lifecycle shape.
+
+config ALP_SDK_CHIP_HX711
+	bool "Avia Semi HX711 24-bit load-cell ADC (bit-banged)"
+	depends on GPIO
+	help
+	  Compile chips/hx711/hx711.c.  Bit-banged 2-wire read with
+	  gain selection (128 / 64 / 32).
+
+config ALP_SDK_CHIP_MAX31855
+	bool "ADI MAX31855 K-type thermocouple-to-digital converter"
+	depends on SPI
+	help
+	  Compile chips/max31855/max31855.c.  4-byte SPI read decoded
+	  to thermocouple + internal cold-junction milli-Celsius.
+
+config ALP_SDK_CHIP_MAX31865
+	bool "ADI MAX31865 PT100 / PT1000 RTD-to-digital converter"
+	depends on SPI
+	help
+	  Compile chips/max31865/max31865.c.  CONFIG write + RTD ratio
+	  read; fault-state machine in a follow-up.
+
+config ALP_SDK_CHIP_TSL2591
+	bool "ams TSL2591 wide-dynamic-range light sensor"
+	depends on I2C
+	help
+	  Compile chips/tsl2591/tsl2591.c.  Two-channel (full / IR)
+	  16-bit ADS read + chip-ID probe.
+
+config ALP_SDK_CHIP_QMC5883L
+	bool "QST QMC5883L 3-axis magnetic compass"
+	depends on I2C
+	help
+	  Compile chips/qmc5883l/qmc5883l.c.  Continuous-mode setup
+	  + 3-axis signed read.
+
+config ALP_SDK_CHIP_VEML7700
+	bool "Vishay VEML7700 high-precision ambient-light sensor"
+	depends on I2C
+	help
+	  Compile chips/veml7700/veml7700.c.  16-bit ALS count read
+	  + power-on / shutdown control.
+
 endmenu # "ALP SDK chip drivers"
 
 endif # ALP_SDK
