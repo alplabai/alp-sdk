@@ -64,8 +64,8 @@ alp_rtc_t *alp_rtc_open(uint32_t rtc_id) {
 }
 
 alp_status_t alp_rtc_set_time(alp_rtc_t *rtc, const alp_rtc_time_t *time) {
-    if (rtc == NULL || !rtc->in_use) return ALP_ERR_NOT_READY;
     if (time == NULL) return ALP_ERR_INVAL;
+    if (rtc == NULL || !rtc->in_use) return ALP_ERR_NOT_READY;
 
     struct rtc_time zt = {
         .tm_year = (int)time->year - 1900,
@@ -81,8 +81,8 @@ alp_status_t alp_rtc_set_time(alp_rtc_t *rtc, const alp_rtc_time_t *time) {
 }
 
 alp_status_t alp_rtc_get_time(alp_rtc_t *rtc, alp_rtc_time_t *time) {
-    if (rtc == NULL || !rtc->in_use) return ALP_ERR_NOT_READY;
     if (time == NULL) return ALP_ERR_INVAL;
+    if (rtc == NULL || !rtc->in_use) return ALP_ERR_NOT_READY;
 
     struct rtc_time zt;
     int err = rtc_get_time(rtc->dev, &zt);

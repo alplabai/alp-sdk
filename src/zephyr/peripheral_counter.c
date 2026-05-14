@@ -112,8 +112,8 @@ alp_status_t alp_counter_stop(alp_counter_t *counter) {
 }
 
 alp_status_t alp_counter_get_value(alp_counter_t *counter, uint32_t *ticks_out) {
-    if (counter == NULL || !counter->in_use) return ALP_ERR_NOT_READY;
     if (ticks_out == NULL) return ALP_ERR_INVAL;
+    if (counter == NULL || !counter->in_use) return ALP_ERR_NOT_READY;
 #if ALP_COUNTER_HAS_BRIDGE_PATH
     if (counter->dev == NULL) {
         gd32g553_t *ctx = NULL;

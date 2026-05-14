@@ -82,8 +82,8 @@ alp_qenc_t *alp_qenc_open(const alp_qenc_config_t *cfg) {
 }
 
 alp_status_t alp_qenc_get_position(alp_qenc_t *enc, int32_t *pos_out) {
-    if (enc == NULL || !enc->in_use) return ALP_ERR_NOT_READY;
     if (pos_out == NULL) return ALP_ERR_INVAL;
+    if (enc == NULL || !enc->in_use) return ALP_ERR_NOT_READY;
 
 #if ALP_QENC_HAS_BRIDGE_PATH
     if (enc->dev == NULL) {
