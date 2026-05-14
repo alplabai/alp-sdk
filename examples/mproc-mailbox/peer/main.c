@@ -75,8 +75,7 @@ static void mbox_inbound(uint32_t channel, const void *data, size_t len, void *u
     if (req_len > MAX_PAYLOAD) req_len = MAX_PAYLOAD;
     if (offset + req_len > g_peer.shmem_size) return;
 
-    printf("[mproc-peer] request offset=%u len=%u\n",
-           (unsigned)offset, (unsigned)req_len);
+    printf("[mproc-peer] request offset=%u len=%u\n", (unsigned)offset, (unsigned)req_len);
 
     /* Pull the request bytes out of shared memory.  Backend
      * handles cache-invalidate so the HP's stale write-buffer
@@ -116,8 +115,7 @@ static void mbox_inbound(uint32_t channel, const void *data, size_t len, void *u
         printf("[mproc-peer]   mbox send failed\n");
         return;
     }
-    printf("[mproc-peer] replied \"%s\" (%u bytes)\n",
-           response_buf, (unsigned)response_len);
+    printf("[mproc-peer] replied \"%s\" (%u bytes)\n", response_buf, (unsigned)response_len);
 }
 
 int main(void)
@@ -152,8 +150,8 @@ int main(void)
         return 1;
     }
 
-    printf("[mproc-peer] waiting on mbox channel=%u shmem=%zu bytes\n",
-           (unsigned)MBOX_CHANNEL, g_peer.shmem_size);
+    printf("[mproc-peer] waiting on mbox channel=%u shmem=%zu bytes\n", (unsigned)MBOX_CHANNEL,
+           g_peer.shmem_size);
 
     /* Steady-state idle.  The mbox callback fires from the SDK
      * thread on every HP send; main just keeps the system

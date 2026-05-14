@@ -141,8 +141,7 @@ int main(void)
         printf("[mproc]   mbox send failed\n");
         goto teardown;
     }
-    printf("[mproc] sending payload  \"%s\" (%u bytes)\n",
-           PAYLOAD, (unsigned)payload_len);
+    printf("[mproc] sending payload  \"%s\" (%u bytes)\n", PAYLOAD, (unsigned)payload_len);
 
     /* Register the receive callback before waiting.  On real
      * silicon the peer sends back via the same mbox; the
@@ -172,8 +171,7 @@ int main(void)
     char reply_buf[MAX_PAYLOAD + 1];
     memcpy(reply_buf, (uint8_t *)shmem_base + g_state.reply_offset, g_state.reply_len);
     reply_buf[g_state.reply_len] = '\0';
-    printf("[mproc] HE replied       \"%s\" (%u bytes)\n",
-           reply_buf, (unsigned)g_state.reply_len);
+    printf("[mproc] HE replied       \"%s\" (%u bytes)\n", reply_buf, (unsigned)g_state.reply_len);
 #endif
 
 teardown:
