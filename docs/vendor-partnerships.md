@@ -94,19 +94,65 @@ Alif Semiconductor publishes 59 repos at
 relevant ones for the SDK split cleanly into two licensing
 buckets.
 
-**Critical Zephyr-integration gap** (verified §C.40): Unlike
-Renesas + NXP, Alif's HAL **is NOT in Zephyr v3.7's modules
-tree** -- there's no `modules/hal/alif` and no `hal_alif`
-project in Zephyr's west.yml.  Customers building for the AEN
-family MUST add Alif's own Zephyr integration as an extra
-module.  Our `west.yml`'s `vendor-sdks` group is the canonical
-SDK-side answer (pins `sdk-alif v2.3.0-rc1`); customers can
-also point `EXTRA_ZEPHYR_MODULES` at their own clone of
-`sdk-alif` or `zephyr_alif`, or use Alif's own west manifest
-as the workspace topdir.  This was a silent bug in the
-pre-§C.40 west.yml -- the `name-allowlist` listed `hal_alif`
-but Zephyr v3.7 simply doesn't have it, so `west update`
-skipped the line.
+**Alif Zephyr-integration story** (verified §C.40, refined §C.41 + §C.42):
+
+The Alif story has **two pieces** -- HAL drivers and Zephyr
+board files -- and they live in different upstreams.  Both
+matter for AEN builds.
+
+**Piece 1 -- HAL drivers (`hal_alif`)**: Apache-2.0,
+standalone, at
+[`github.com/alifsemi/hal_alif`](https://github.com/alifsemi/hal_alif).
+Latest release v2.2.0 (2026-03-27); steady release cadence
+(v2.1.0 Dec 2025, v2.0.0 Nov 2025).  Standard Zephyr-module
+shape (`zephyr/module.yml` + `zephyr/Kconfig` + root
+`CMakeLists.txt`) -- structurally indistinguishable from
+`zephyrproject-rtos/hal_renesas` / `hal_nxp`.  Our `west.yml`
+imports it **unconditionally** as a top-level project so the
+HAL is on every workspace.
+
+**Piece 2 -- Zephyr board files**: Alif Ensemble board files
+(`alif_e7_dk_rtss_he`, `alif_b1_dk`, ...) are NOT in Zephyr
+v3.7 LTS -- they upstreamed to Zephyr **main** post-v3.7 (only
+3 boards visible in upstream main today: `balletto_b1_dk`,
+`ensemble_e1c_dk`, `ensemble_e8_dk`).  The full 8-board set
+lives in Alif's own
+[`alifsemi/zephyr_alif`](https://github.com/alifsemi/zephyr_alif)
+fork, which Alif's aggregate manifest at
+[`alifsemi/sdk-alif`](https://github.com/alifsemi/sdk-alif)
+imports as its Zephyr project.  Customers wanting stock Alif
+EVK board files must use `sdk-alif` as their workspace
+manifest (or `EXTRA_ZEPHYR_MODULES`-point at the cloned
+`zephyr_alif`).  Our `west.yml` keeps `sdk-alif` pinned at
+`zas-v2.0.0-rc1` in the **`vendor-sdks` opt-in group**.
+
+**Decision tree** for AEN customers:
+
+```
+Building for an Alif Ensemble EVK with Alif's stock board file?
+├── YES → enable `vendor-sdks` + use `sdk-alif` as workspace topdir.
+│         You get Alif's zephyr_alif fork (Zephyr with Alif boards
+│         in-tree) replacing our default Zephyr v3.7 pin.
+└── NO  → keep our default workspace (Zephyr v3.7 + alp-sdk topdir).
+          The top-level hal_alif direct import gives you the HAL;
+          ship your own board file under
+          alplabai/alp-zephyr-modules with the alp,pin-array
+          slot defines.  This is the canonical pattern for
+          carrier-specific Alif designs.
+```
+
+§C.40 had the wrong assumption that `hal_alif` had to come
+through `sdk-alif`'s manifest -- it doesn't, the standalone
+HAL is enough for custom-board customers.  §C.41 then went too
+far and removed `sdk-alif` from `vendor-sdks` entirely -- which
+broke the stock-EVK path.  §C.42 restores `sdk-alif` to
+`vendor-sdks` with the two-path documentation above.
+
+**Vendor-licensed Alif drivers** (`alif_dave2d-driver`,
+`alif_image-processing-lib`): source-visible under the Alif
+Semiconductor Software License Agreement, not Apache.  Stay
+in the `vendor-sdks` opt-in group alongside `sdk-alif` so the
+explicit opt-in matches the licence consent story.
 
 **Genuinely open (Apache-2.0 / MIT, inherited from upstream
 forks)**:

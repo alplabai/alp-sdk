@@ -250,6 +250,117 @@ Validators after commit:
 - metadata / portability / pin-conflicts: clean
 - abi_snapshot --diff: unchanged (pure doc-comment touch).
 
+### Fixed (2026-05-14 -- sdk-alif restoration for AEN board files §C.42)
+
+§C.41 oversight correction.  hal_alif alone gives HAL drivers
+but NOT Alif Ensemble Zephyr board files.  Verified:
+
+- `alifsemi/hal_alif` v2.2.0 has zero `boards/*` content -- it's
+  Apache-2.0 HAL drivers only.
+- Zephyr v3.7 LTS (our pin) does **not** include Alif boards.
+  Upstream Zephyr **main** has only 3 (`balletto_b1_dk`,
+  `ensemble_e1c_dk`, `ensemble_e8_dk`) -- the full 8-board set
+  lives in `alifsemi/zephyr_alif`.
+- The canonical path for stock-EVK builds is `sdk-alif`'s
+  aggregate manifest (which imports `zephyr_alif` as the
+  Zephyr project, replacing upstream v3.7).
+
+Customers building for AEN now have **two clear paths**:
+
+  Custom board overlay → default workspace (Zephyr v3.7 +
+  top-level hal_alif) suffices.  Carrier writes their own
+  `boards/<board>.overlay`.
+
+  Stock Alif EVK boards → enable `vendor-sdks` + use
+  `sdk-alif` as workspace topdir.  Replaces our Zephyr pin
+  with `zephyr_alif`; full 8-board set in tree.
+
+§C.42 changes in west.yml:
+
+- Restored `sdk-alif` to the `vendor-sdks` opt-in group at
+  `zas-v2.0.0-rc1` (latest tagged release as of 2026-05-14).
+- Kept `hal_alif` as top-level default-enabled (so the HAL
+  is always available; matches the `hal_renesas` /
+  `hal_nxp` shape).
+- Expanded the pin-policy comment block with the two-path
+  decision tree.
+- Restructured the `vendor-sdks` group comment to enumerate
+  three flavours: sdk-alif aggregate / Alif vendor-licensed
+  drivers / bare-metal Renesas+NXP mirrors.
+
+Doc updates:
+
+- `docs/getting-started.md` §8 Alif row rewritten with the
+  two-path choice + when to pick each.
+- `docs/vendor-partnerships.md` §Alif rewritten with a code
+  block showing the decision tree + explanation of why §C.40
+  and §C.41 each got part of the story right but not all.
+- `docs/v1.0-readiness.md` Pillar 9 line updated.
+
+Validators after commit (config + docs only):
+- metadata: 0 failures
+- portability: 30/30
+- pin-conflicts: clean
+- abi_snapshot --diff: unchanged
+
+### Changed (2026-05-14 -- hal_alif promoted to first-class upstream §C.41)
+
+Material correction to §C.40.  Verified Alif publishes an
+**Apache-2.0 standalone Zephyr-module-shaped HAL** at
+[`github.com/alifsemi/hal_alif`](https://github.com/alifsemi/hal_alif),
+not just inside their `sdk-alif` aggregate manifest.  Same
+shape as `zephyrproject-rtos/hal_renesas` /
+`zephyrproject-rtos/hal_nxp` -- standard `zephyr/module.yml`,
+root `CMakeLists.txt`, drivers/ subtree covering analog +
+ethos_u + isp + jpeg + ospi + utimer.  Latest release v2.2.0
+(2026-03-27); steady release cadence.
+
+`west.yml` changes:
+
+- Added `hal_alif` v2.2.0 as a **top-level project** at
+  `modules/hal/alif`, default-enabled (no group).  AEN builds
+  now get the Alif HAL automatically on `west update` --
+  parallel to how Renesas + NXP work via Zephyr's own
+  manifest.
+- Removed `sdk-alif` from the `vendor-sdks` opt-in group.
+  The §C.40 architecture had `sdk-alif` (Alif's aggregate
+  manifest) pinned there under the assumption that hal_alif
+  had to come through Alif's own Zephyr-fork manifest --
+  incorrect, hal_alif stands alone.
+- Added two NEW pins under the `vendor-sdks` opt-in group
+  for the actually-vendor-licensed Alif drivers:
+    `alif_dave2d-driver` (DAVE2D 2D accelerator)
+    `alif_image-processing-lib` (Helium image kernels)
+  These are source-visible under the Alif Semiconductor
+  Software License Agreement -- NOT Apache.  The opt-in
+  matches the licence consent story.
+- Updated the pin-policy + vendor-sdks comment blocks to
+  document the cleaner architecture.
+
+`docs/getting-started.md` §8 row for Alif rewritten:
+"**Nothing extra**" replaces the previous three-option
+workaround (group-filter / EXTRA_ZEPHYR_MODULES / alt
+topdir).  Bare-metal subsection now lists `modules/hal/alif/`
+as default-on, with the four `vendor-sdks` group pins
+clarified.
+
+`docs/vendor-partnerships.md` Alif section rewritten with
+the verified upstream story; the pre-§C.41 "critical
+Zephyr-integration gap" language replaced with the verified
+"hal_alif is its own Apache-2.0 module".
+
+The pre-§C.40 west.yml had a silently-broken `name-allowlist`
+entry (`hal_alif` listed but not in Zephyr's modules tree);
+§C.40 surfaced and reverted that.  §C.41 now adds the correct
+fix: import hal_alif from Alif's own repo as a top-level
+project.
+
+Validators after commit (config + docs only):
+- metadata: 0 failures
+- portability: 30/30
+- pin-conflicts: clean
+- abi_snapshot --diff: unchanged
+
 ### Fixed (2026-05-14 -- Zephyr-vendor-HAL integration cross-check §C.40)
 
 Verified each vendor SDK's actual Zephyr-integration state

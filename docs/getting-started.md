@@ -319,26 +319,32 @@ default `west update` skips it.
 |----------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | **Renesas (RZ/V)** | `hal_renesas` (in Zephyr's own west.yml)   | Nothing extra.  Our `name-allowlist` lets Zephyr import it; `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/` is what the V2N + V2N-M1 paths consume. |
 | **NXP (i.MX 9x)**  | `hal_nxp` (in Zephyr's own west.yml)       | Nothing extra.  `mcux/mcux-sdk-ng/devices/i.MX/i.MX93/` covers MIMX9301..9352 (E1M-NX9101 = MIMX9352).   |
-| **Alif (Ensemble)** | **NOT in Zephyr v3.7's modules tree.**     | Pick one: (a) `west update --group-filter +vendor-sdks` to pull our pinned `sdk-alif v2.3.0-rc1`; (b) set `EXTRA_ZEPHYR_MODULES` to your own `sdk-alif` / `zephyr_alif` clone; (c) use Alif's own west manifest in `alifsemi/sdk-alif` instead of ours as the workspace topdir. |
+| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + `sdk-alif` (vendor-sdks group) for stock boards | **Two-path choice.**  HAL drivers come from `alifsemi/hal_alif v2.2.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  But **Zephyr v3.7 LTS does not have Alif Ensemble board files** (those land in Zephyr main post-v3.7 and ship in Alif's own `zephyr_alif` fork meanwhile).  **Choose one:** *(a)* if you have your own AEN carrier board overlay, the default `hal_alif` import suffices — write a board file under `alplabai/alp-zephyr-modules` and you're done; *(b)* if you want Alif's stock EVK boards (`alif_e7_dk_rtss_he`, `alif_b1_dk`, ...), enable `vendor-sdks` and use `sdk-alif` as your workspace manifest (it replaces our Zephyr v3.7 pin with Alif's `zephyr_alif` fork that has the boards in tree).  See `docs/vendor-partnerships.md` §Alif for the decision tree.  Two more Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and also sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels. |
 | **DEEPX (DX-M1)**  | Out of Zephyr scope (Linux-side runtime).  | The on-device NPU runs from a Linux PCIe driver, not a Zephyr backend.  `chips/deepx_dxm1/` is the **host-side** Zephyr code that brings up the M1 from the Renesas A55 cluster; `dx_rt` itself rides on Linux/Yocto.  See `examples/v2n/v2n-m1-deepx-inference/` and the customer-side integration notes in `docs/vendor-partnerships.md` §DEEPX. |
 
 ### Bare-metal / non-Zephyr customers
 
 If you're not using Zephyr -- a bare-metal MCU build, a Yocto
 image that talks directly to silicon, or a custom RTOS -- the
-`vendor-sdks` group pins the same vendor repos to the same tags
-so you can audit-verify against the maintainer-tested versions:
+`vendor-sdks` group pins the bare-metal-side vendor source
+trees + the Alif vendor-licensed drivers behind one
+opt-in:
 
 ```bash
-# Pull every vendor SDK at the verified tags into your workspace.
 west update --group-filter +vendor-sdks
-ls modules/vendors/  # sdk-alif/ rzv-fsp/ mcuxsdk-manifests/
+ls modules/                       # hal/alif/ (always)
+ls modules/vendors/                # rzv-fsp/ mcuxsdk-manifests/ (group-on)
+ls modules/drivers/                # dave2d/ (group-on)
+ls modules/lib/                    # aipl/ (group-on)
 ```
 
-For Renesas + NXP this is duplicative with `hal_renesas` /
-`hal_nxp` (which mirror the same upstream into Zephyr's tree)
--- the duplication is intentional so bare-metal customers don't
-have to dig through Zephyr's module organisation.
+For Renesas + NXP the `vendor-sdks` pins (`rzv-fsp`,
+`mcuxsdk-manifests`) duplicate `hal_renesas` / `hal_nxp` --
+intentional, so bare-metal customers don't have to dig through
+Zephyr's module organisation.  The Alif vendor-licensed pieces
+(`alif_dave2d-driver`, `alif_image-processing-lib`) are
+distinct from the Apache-2.0 `hal_alif` -- they're only
+fetched when a customer opts in to the `vendor-sdks` group.
 
 ## 9. SoC capability validation
 
