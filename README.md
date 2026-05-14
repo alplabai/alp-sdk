@@ -356,7 +356,7 @@ alp-sdk/
 ├── src/             # common/ + zephyr/ + baremetal/ + yocto/ backends
 ├── chips/           # 20+ opt-in chip drivers
 ├── vendors/         # per-SoM HAL bindings (alif, renesas-rzv2n, nxp-imx93, deepx-dxm1)
-├── metadata/        # schemas, templates, e1m_modules/<MPN>/, carriers/, socs/
+├── metadata/        # schemas, templates, e1m_modules/E1M-<MPN>.yaml, carriers/, socs/
 ├── scripts/         # board.yaml loader, validators, soc_caps + ABI generators, EEPROM packer
 ├── examples/        # reference apps (cross-family + examples/aen/ + examples/v2n/)
 ├── docs/            # architecture, board-config, ADRs, test-plan, …
@@ -364,6 +364,7 @@ alp-sdk/
 ├── yocto/meta-alp/  # Yocto layer + machine confs
 ├── firmware/        # cc3501e/ + gd32-bridge/ on-module-MCU firmware
 ├── zephyr/          # Zephyr-module entry: Kconfig, module.yml, dts/bindings/, sysbuild/aen/
+├── (build/)         # local build outputs — gitignored.  Yocto, Zephyr, and plain-CMake all land here (e.g. build/yocto-2b/, build/zephyr/, build/<example>/).
 └── west.yml         # Zephyr manifest
 ```
 
