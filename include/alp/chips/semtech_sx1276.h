@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 #define SX1276_REG_VERSION 0x42u
-#define SX1276_VERSION     0x12u /**< Datasheet-reported silicon version. */
+#define SX1276_VERSION 0x12u /**< Datasheet-reported silicon version. */
 
 typedef struct {
     alp_spi_t  *bus;
@@ -43,9 +43,7 @@ typedef struct {
 } semtech_sx1276_t;
 
 /** @brief Bind context to caller-opened SPI + reset GPIO. */
-alp_status_t semtech_sx1276_init(semtech_sx1276_t *dev,
-                                 alp_spi_t        *spi,
-                                 alp_gpio_t       *nreset);
+alp_status_t semtech_sx1276_init(semtech_sx1276_t *dev, alp_spi_t *spi, alp_gpio_t *nreset);
 
 /** @brief Pulse NRESET (low for 100 us, then wait 5 ms). */
 alp_status_t semtech_sx1276_hw_reset(semtech_sx1276_t *dev);

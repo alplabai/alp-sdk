@@ -32,7 +32,7 @@
 extern "C" {
 #endif
 
-#define ES8388_I2C_ADDR_LOW  0x10u
+#define ES8388_I2C_ADDR_LOW 0x10u
 #define ES8388_I2C_ADDR_HIGH 0x11u
 
 typedef struct {
