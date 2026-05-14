@@ -84,6 +84,35 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- §D.community: Tier 2 contribution surfaces in alp-sdk)
+
+Phase 3 of the chip-and-library ecosystem expansion per
+docs/superpowers/specs/2026-05-14-chip-and-library-ecosystem-design.md.
+
+alp-sdk-side artefacts that pair with the new alplabai/alp-sdk-
+community repo (created separately):
+
+- `metadata/schemas/contribution-v1.schema.json` (new) -- JSON Schema
+  that every Tier 2 contribution's `metadata.yaml` validates against
+  on PR.  Permits Apache-2.0 / MIT / BSD only (GPL rejected by
+  `pr-lint`); enforces `name:` matches the parent directory; pins
+  the `family:` enum (sensor / display / camera / motor / encoder /
+  audio / power / cellular / lora / wifi / ble / gnss / crypto /
+  memory / io_expander / serdes / switch / graphics / ml / control /
+  iot / networking / parsing / serialization / testing / other);
+  pins `interfaces:` enum (i2c / spi / uart / i2s / pwm / gpio /
+  can / adc / dac / rtc / watchdog / usb / ethernet / mipi_csi2 /
+  dvp / fpd_link / gmsl / pcie / gpio_bitbang / gpio_pwm).
+- `docs/contributing-tier-2.md` (new) -- customer-facing
+  walkthrough of the three-tier model + per-contribution
+  checklist + the three integration patterns (pull-everything /
+  per-contribution selection / search-then-clone) + the
+  "Verified" → Tier-1 promotion path.
+
+The alplabai/alp-sdk-community repo + its skeleton (registry.yaml,
+west.yml, templates/, .github/workflows/, CODEOWNERS) lives in a
+separate commit on that repo's `main` branch.
+
 ### Added (2026-05-14 -- §D.lib.loader: cross-library HW-backend loader hook)
 
 Phase 2b of the chip-and-library ecosystem expansion.  Adds the

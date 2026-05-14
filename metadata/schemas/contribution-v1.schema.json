@@ -1,0 +1,115 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://alplab.ai/schemas/contribution-v1.json",
+  "title": "alp-sdk-community contribution metadata (v1)",
+  "description": "Per-contribution metadata.yaml schema for chips and libraries hosted in the alplabai/alp-sdk-community repo (Tier 2).  alp-sdk's CI (pr-metadata-validate) checks every touched contribution's metadata.yaml against this schema before allowing merge.  Tier 1 (in-tree alp-sdk chips) is governed by metadata/schemas/board-config-v1.schema.json instead.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name", "kind", "family", "license", "author"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version this metadata.yaml is written against.  Currently 1."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Filesystem directory name under chips/ or libraries/ in alp-sdk-community.  Lower-case, snake-case, ASCII only.  Must match the parent directory name exactly."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["chip", "library"],
+      "description": "What kind of contribution this is.  Determines which directory (chips/ vs libraries/) the entry lives under."
+    },
+    "family": {
+      "type": "string",
+      "enum": [
+        "sensor", "display", "camera", "motor", "encoder", "audio",
+        "power", "cellular", "lora", "wifi", "ble", "gnss",
+        "crypto", "memory", "io_expander", "serdes", "switch",
+        "graphics", "ml", "control", "iot", "networking",
+        "parsing", "serialization", "testing", "other"
+      ],
+      "description": "High-level family the contribution belongs to.  Drives filtering in registry.yaml + the eventual web index."
+    },
+    "interfaces": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "i2c", "spi", "uart", "i2s", "pwm", "gpio", "can",
+          "adc", "dac", "rtc", "watchdog", "usb", "ethernet",
+          "mipi_csi2", "dvp", "fpd_link", "gmsl", "pcie",
+          "gpio_bitbang", "gpio_pwm"
+        ]
+      },
+      "description": "Buses / interfaces the contribution drives.  Customers filter by this when searching for chips that fit their carrier."
+    },
+    "dependencies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repo"],
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "Other repo this contribution depends on (e.g. 'alp-sdk'). "
+          },
+          "version": {
+            "type": "string",
+            "description": "Minimum compatible version (SemVer range or exact tag)."
+          }
+        }
+      },
+      "description": "Repos this contribution needs to compile against.  At minimum, every contribution declares a >= alp-sdk version it works with."
+    },
+    "license": {
+      "type": "string",
+      "enum": ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause"],
+      "description": "Permissive open-source license under which the contribution is distributed.  GPL family and proprietary licenses are rejected by pr-lint."
+    },
+    "author": {
+      "type": "string",
+      "pattern": "^@[A-Za-z0-9_-]+$",
+      "description": "GitHub @handle of the primary author.  Auto-becomes the contribution's CODEOWNER under alp-sdk-community/.github/CODEOWNERS."
+    },
+    "abi_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+      "description": "Per-contribution ABI version.  Bumps when public-header symbols change in a breaking way."
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hil_silicon": {
+          "type": "string",
+          "enum": ["untested", "verified", "regression"]
+        },
+        "smoke_tests": {
+          "type": "string"
+        }
+      },
+      "description": "Verification status badge.  `untested` = compiles + smoke tests only; `verified` = at least one HiL silicon bring-up; `regression` = at least one shipping product uses the contribution."
+    },
+    "description": {
+      "type": "string",
+      "description": "Short customer-facing description; rendered in the registry index."
+    },
+    "upstream_status": {
+      "type": "string",
+      "enum": [
+        "first-class community",
+        "ported-from-upstream",
+        "fork-of-other-sdk",
+        "experimental",
+        "promoted-to-tier-1"
+      ],
+      "description": "Provenance of the contribution -- helps customers gauge maturity."
+    }
+  }
+}
