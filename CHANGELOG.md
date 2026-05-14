@@ -159,6 +159,30 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Changed (2026-05-14 -- SLSA L2 -> L3 via slsa-framework reusable workflow §C.27)
+
+- **`.github/workflows/release.yml` upgraded from SLSA L2 to L3.**
+  L2 (`actions/attest-build-provenance@v1` running inline in the
+  build job) is replaced by the
+  `slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0`
+  reusable workflow.  The build job now emits base64-encoded
+  SHA-256 digests for the tarball; the new `provenance` job
+  runs the SLSA generator inside an isolated, ephemeral
+  GitHub-hosted runner that the build job cannot tamper with --
+  the L3 hardened-builder requirement.  Resulting bundle is
+  uploaded to the same Release via `upload-assets: true`.
+- **Verification one-liner updated** in `docs/release-policy.md`:
+  `gh attestation verify alp-sdk-v<N>.tar.gz --owner alplabai`
+  now checks the L3 attestation (workflow identity is
+  `slsa-framework/slsa-github-generator`, not `alplabai/alp-sdk`).
+- **Permissions model**: top-level `permissions: read-all`; each
+  job opts in to what it needs (`build` -> `contents: write`,
+  `provenance` -> `actions: read` + `id-token: write` +
+  `contents: write`).  No leaked privileges across jobs.
+
+SLSA spec reference:
+https://slsa.dev/spec/v1.0/levels#level-3.
+
 ### Added (2026-05-14 -- TLS handshake fuzz harness §C.26)
 
 - **`tests/fuzz/tls_handshake_fuzz.c`** -- libFuzzer harness for

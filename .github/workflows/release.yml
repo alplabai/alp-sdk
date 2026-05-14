@@ -2,30 +2,52 @@
 #
 # Release workflow.  Fires when a maintainer pushes a `v*` tag.
 #
-# Steps:
-#   1. Verify the tag matches `metadata/sdk_version.yaml`.
-#   2. Verify CHANGELOG.md has a matching `## [v<N>] - YYYY-MM-DD`
-#      section (release notes will be sliced from this).
-#   3. Verify the ABI snapshot at docs/abi/v<N>-snapshot.json
-#      exists.
-#   4. Build a source tarball (no binaries -- the SDK is a source
-#      release).
-#   5. Generate SHA-256 + SHA-512 checksums.
-#   6. Generate SLSA L2 build provenance attestation via
-#      `actions/attest-build-provenance@v1` (Sigstore-backed OIDC
-#      signature; verifiable with `gh attestation verify`).
-#      Satisfies SLSA v1.0 Build Level 2 (hosted build platform,
-#      authenticated provenance, non-falsifiable).  See
-#      https://slsa.dev/spec/v1.0/levels#level-2.
-#   7. Create the GitHub Release with the CHANGELOG slice as the
-#      body and the tarball + checksums + provenance bundle as
-#      artefacts.
+# Steps (now split across two jobs for SLSA L3):
+#
+#   1. `build` job:
+#      a. Verify the tag matches `metadata/sdk_version.yaml`.
+#      b. Verify CHANGELOG.md has a matching `## [v<N>] - YYYY-MM-DD`
+#         section (release notes will be sliced from this).
+#      c. Verify the ABI snapshot at docs/abi/v<N>-snapshot.json
+#         exists.
+#      d. Build a source tarball (no binaries -- the SDK is a source
+#         release).
+#      e. Generate SHA-256 + SHA-512 checksums.
+#      f. Create the GitHub Release with the CHANGELOG slice as the
+#         body and the tarball + checksums as artefacts.
+#      g. Emit the tarball's base64-encoded SHA-256 digest for the
+#         provenance generator (consumed via `outputs.hashes`).
+#
+#   2. `provenance` job (calls the slsa-framework reusable workflow):
+#      a. Runs inside an isolated, ephemeral GitHub-hosted runner
+#         that the SLSA generator controls.  Cannot be tampered
+#         with by the `build` job above -- this is the L3 promise.
+#      b. Generates an in-toto SLSA v1.0 build-provenance predicate
+#         signed via Sigstore against the workflow's OIDC token.
+#      c. With `upload-assets: true`, the resulting bundle is
+#         attached to the GitHub Release the `build` job created in
+#         step 1.f.
+#
+# The previous L2 implementation (`actions/attest-build-provenance@v1`
+# running inline in the build job) is dropped because L3 disallows
+# in-workflow provenance generation -- a compromised build job could
+# tamper with the attestation.  The reusable-workflow split is the
+# standard SLSA pattern for L3.
 #
 # Tag form: `v<MAJOR>.<MINOR>.<PATCH>` (SemVer).  Pre-release tags
 # (`vX.Y.Z-rc1`) are supported and produce a "pre-release" Release
 # on GitHub.
 #
-# See docs/release-policy.md for the full procedure.
+# Verification (downstream customer one-liner):
+#
+#   gh attestation verify alp-sdk-v<N>.tar.gz --owner alplabai
+#
+# This checks the Sigstore signature, the workflow identity
+# (slsa-framework/slsa-github-generator), the source repo
+# (alplabai/alp-sdk), and the artefact digest match -- all four
+# bound to the SLSA L3 provenance bundle.
+#
+# See docs/release-policy.md + https://slsa.dev/spec/v1.0/levels#level-3.
 
 name: release
 
@@ -35,16 +57,17 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
-permissions:
-  contents: write      # required to create the GitHub Release
-  id-token: write      # OIDC token for Sigstore signing of SLSA provenance
-  attestations: write  # write the attestation bundle into the repo's
-                       # attestations store (where `gh attestation
-                       # verify` reads from)
+# Top-level permissions are minimal.  Each job opts in to what it needs.
+permissions: read-all
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # required to create the GitHub Release
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      hashes: ${{ steps.hash.outputs.hashes }}
     steps:
       - name: Checkout (full history for CHANGELOG slice)
         uses: actions/checkout@v4
@@ -116,42 +139,22 @@ jobs:
           TAG="${{ steps.tag.outputs.tag }}"
           ARCHIVE="alp-sdk-${TAG}.tar.gz"
           git archive --format=tar.gz --prefix="alp-sdk-${TAG}/" -o "$ARCHIVE" HEAD
-          echo "archive=$ARCHIVE" >> "$GITHUB_ENV"
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
           sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
           sha512sum "$ARCHIVE" > "$ARCHIVE.sha512"
-          # Hex-only digest (without the trailing filename) feeds the
-          # SLSA provenance subject below.
-          DIGEST=$(sha256sum "$ARCHIVE" | awk '{print $1}')
-          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
-      - name: Generate SLSA L2 build provenance
-        id: provenance
-        # actions/attest-build-provenance is GitHub's first-party
-        # provenance generator: it signs an in-toto attestation with
-        # the workflow's OIDC token through Sigstore's Fulcio CA and
-        # uploads the bundle to the repo's attestations store.  The
-        # produced bundle is a SLSA v1.0 provenance predicate naming
-        # this workflow + commit + the artefact's SHA-256 digest as
-        # subject, which is L2 by the SLSA spec (hosted build
-        # platform, authenticated provenance, non-falsifiable).
-        # `gh attestation verify <artifact>` validates the bundle
-        # off-the-shelf without any extra customer tooling.
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-path: ${{ steps.archive.outputs.archive }}
-
-      - name: Stage provenance bundle next to the tarball
-        # The provenance action returns the bundle path; copy it
-        # alongside the tarball + checksums so a single Release page
-        # carries everything a downstream verifier needs.  Naming
-        # convention mirrors the checksum siblings:
-        # `<archive>.intoto.jsonl` (`gh attestation verify` recognises
-        # the `.intoto.jsonl` extension).
+      - name: Emit base64-encoded digests for the provenance job
+        id: hash
+        # The slsa-framework reusable workflow consumes a
+        # newline-separated list of `sha256:HASH FILENAME` records
+        # base64-encoded as a single line.  One artefact per row
+        # produces one provenance subject; the tarball is the only
+        # canonical release artefact (checksums + provenance bundle
+        # are derived, not subjects in their own right).
         run: |
-          BUNDLE="${{ steps.provenance.outputs.bundle-path }}"
-          DEST="${{ steps.archive.outputs.archive }}.intoto.jsonl"
-          cp "$BUNDLE" "$DEST"
+          ARCHIVE="${{ steps.archive.outputs.archive }}"
+          HASH=$(sha256sum "$ARCHIVE" | base64 -w0)
+          echo "hashes=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -164,4 +167,20 @@ jobs:
             alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz
             alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz.sha256
             alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz.sha512
-            alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz.intoto.jsonl
+
+  # SLSA L3 provenance generator.  Runs as a separate reusable
+  # workflow inside an isolated runner so a compromised `build` job
+  # above cannot tamper with the attestation -- the source of L3.
+  # Bundle is uploaded to the GitHub Release the build job created
+  # via `upload-assets: true`.
+  provenance:
+    needs: [build]
+    permissions:
+      actions: read       # needed to read the workflow trigger event
+      id-token: write     # OIDC token for Sigstore signing
+      contents: write     # write the attestation to the Release
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
+    with:
+      base64-subjects: "${{ needs.build.outputs.hashes }}"
+      upload-assets: true
+      provenance-name: "alp-sdk-${{ needs.build.outputs.tag }}.tar.gz.intoto.jsonl"

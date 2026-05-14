@@ -107,12 +107,17 @@ Codified in `.github/workflows/release.yml` + `scripts/bump_version.py`:
 6. Push tag; the release workflow auto-creates the GitHub Release
    with the CHANGELOG slice as the body and the source tarball
    (`alp-sdk-v<N>.tar.gz`) plus three sidecar files as artefacts:
-   SHA-256 + SHA-512 checksums, and a SLSA v1.0 Build Level 2
+   SHA-256 + SHA-512 checksums, and a SLSA v1.0 Build **Level 3**
    provenance attestation (`alp-sdk-v<N>.tar.gz.intoto.jsonl`).
-   The attestation is signed via Sigstore against the GitHub
-   workflow's OIDC token and verifiable with
-   `gh attestation verify alp-sdk-v<N>.tar.gz` -- no extra customer
-   tooling required.
+   The attestation is produced by the
+   `slsa-framework/slsa-github-generator` reusable workflow
+   running in an isolated, ephemeral GitHub-hosted runner that
+   the `build` job cannot tamper with -- the L3 promise.
+   Verifiable with
+   `gh attestation verify alp-sdk-v<N>.tar.gz --owner alplabai`;
+   the command checks the Sigstore signature, the workflow
+   identity (`slsa-framework/slsa-github-generator`), the source
+   repo, and the artefact digest all match in a single check.
 
 A patch release skips steps 1-2 (the verification ledger doesn't
 move; ABI doesn't change) but still updates `sdk_version.yaml`
