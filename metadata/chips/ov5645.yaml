@@ -1,0 +1,43 @@
+# ALP SDK chip manifest: OmniVision OV5645 5 MP MIPI CSI-2 camera.
+schema_version:   1
+chip_id:          ov5645
+driver_status:    stub             # SCCB chip-ID; MIPI lane bring-up TBD.
+display_name:     "OmniVision OV5645 5 MP MIPI CSI-2 camera sensor"
+vendor:           omnivision
+mpn_population:
+  - "OV5645"
+
+datasheet:
+  primary:        "OV5645 datasheet Rev 1.0 (Sep 2014)"
+
+bus:              i2c             # SCCB config side.
+i2c:
+  addresses:
+    - { addr_7bit: 0x3C, scope: "fixed SCCB address (no strap)" }
+  max_clock_hz:   400000
+
+signals:
+  - { name: SCL,     type: input, scope: "SCCB clock" }
+  - { name: SDA,     type: bidir, scope: "SCCB data"  }
+  - { name: PWDN,    type: input, scope: "host power-down (active high)" }
+  - { name: RESETB,  type: input, scope: "host hardware reset (active low)" }
+  - { name: MIPI_CK, type: output, scope: "MIPI CSI-2 D-PHY clock lane (host RX)" }
+  - { name: MIPI_D0, type: output, scope: "MIPI CSI-2 D-PHY data lane 0" }
+  - { name: MIPI_D1, type: output, scope: "MIPI CSI-2 D-PHY data lane 1" }
+  - { name: XCLK,    type: input, scope: "master input clock (typ. 24 MHz)" }
+
+resolutions:
+  max:            [2592, 1944]
+  presets:        [VGA, 720P, 1080P, 5MP]
+
+mipi:
+  lanes_supported: [1, 2]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_OV5645
+  baremetal:      ALP_SDK_CHIP_OV5645
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

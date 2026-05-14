@@ -168,6 +168,44 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_DEEPX_DXM1
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GD32_SWD
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gd32_swd/gd32_swd.c)
 
+# v0.5 §D.AI batch -- 18 vision / display / accelerator chips.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_OV2640
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ov2640/ov2640.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_OV5645
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ov5645/ov5645.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_OV7670
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ov7670/ov7670.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_OV9281
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ov9281/ov9281.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_AR0234
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ar0234/ar0234.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_IMX219
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/imx219/imx219.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_IMX477
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/imx477/imx477.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GC2145
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gc2145/gc2145.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TI_DS90UB953_954
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ti_ds90ub953_954/ti_ds90ub953_954.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_MAXIM_MAX9295_9296
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/maxim_max9295_9296/maxim_max9295_9296.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ST7789
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/st7789/st7789.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ILI9341
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ili9341/ili9341.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ILI9488
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ili9488/ili9488.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_RA8875
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ra8875/ra8875.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_SH1106
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/sh1106/sh1106.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_IL3820
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/il3820/il3820.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GDEW0154T8
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gdew0154t8/gdew0154t8.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_HAILO_8L
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/hailo_8l/hailo_8l.c)
+
 # V2N supervisor singleton -- the lazy-init GD32G553 ctx the portable
 # PWM/ADC/DAC/QENC/COUNTER backends dispatch through on V2N.  The
 # .c file emits NOSUPPORT stubs when CONFIG_ALP_SDK_V2N_SUPERVISOR=n

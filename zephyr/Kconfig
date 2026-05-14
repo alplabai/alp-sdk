@@ -1127,6 +1127,134 @@ config ALP_SDK_CHIP_GD32_SWD
 	  write/verify + reset_and_run; pad assignments and silicon
 	  exercise still TBD on V2N (see metadata/chips/gd32_swd.yaml).
 
+# v0.5 §D.AI batch -- 18 vision / display / accelerator chips.
+
+config ALP_SDK_CHIP_OV2640
+	bool "OmniVision OV2640 2 MP UXGA DVP image sensor driver"
+	depends on I2C
+	help
+	  Compile chips/ov2640/ov2640.c.  SCCB config side; pixel data
+	  flows over the DVP 8-bit parallel bus to the host receiver.
+
+config ALP_SDK_CHIP_OV5645
+	bool "OmniVision OV5645 5 MP MIPI CSI-2 image sensor driver"
+	depends on I2C
+	help
+	  Compile chips/ov5645/ov5645.c.  SCCB config side; pixel data
+	  flows over MIPI CSI-2 D-PHY to the host receiver.
+
+config ALP_SDK_CHIP_OV7670
+	bool "OmniVision OV7670 VGA DVP image sensor driver"
+	depends on I2C
+	help
+	  Compile chips/ov7670/ov7670.c.  Classic VGA DVP sensor; SCCB
+	  config side.
+
+config ALP_SDK_CHIP_OV9281
+	bool "OmniVision OV9281 1 MP global-shutter MIPI CSI-2 driver"
+	depends on I2C
+	help
+	  Compile chips/ov9281/ov9281.c.  Global-shutter monochrome
+	  1280x800 sensor; SCCB config side.
+
+config ALP_SDK_CHIP_AR0234
+	bool "onsemi AR0234CS 1080p global-shutter MIPI CSI-2 driver"
+	depends on I2C
+	help
+	  Compile chips/ar0234/ar0234.c.  1080p60 global-shutter colour
+	  sensor with HDR; SCCB config side.
+
+config ALP_SDK_CHIP_IMX219
+	bool "Sony IMX219 8 MP MIPI CSI-2 sensor driver (RPi Cam v2)"
+	depends on I2C
+	help
+	  Compile chips/imx219/imx219.c.  SCCB config side; pixel data
+	  over MIPI CSI-2.
+
+config ALP_SDK_CHIP_IMX477
+	bool "Sony IMX477 12.3 MP MIPI CSI-2 sensor driver (RPi HQ Cam)"
+	depends on I2C
+	help
+	  Compile chips/imx477/imx477.c.  SCCB config side.
+
+config ALP_SDK_CHIP_GC2145
+	bool "GalaxyCore GC2145 2 MP DVP image sensor driver"
+	depends on I2C
+	help
+	  Compile chips/gc2145/gc2145.c.  Cost-optimised 2 MP DVP
+	  sensor; SCCB config side.
+
+config ALP_SDK_CHIP_TI_DS90UB953_954
+	bool "TI DS90UB953/954 FPD-Link III camera SerDes pair driver"
+	depends on I2C
+	help
+	  Compile chips/ti_ds90ub953_954/ti_ds90ub953_954.c.  Host-side
+	  probe + soft-reset of the FPD-Link III SerDes pair.
+
+config ALP_SDK_CHIP_MAXIM_MAX9295_9296
+	bool "ADI MAX9295A/MAX9296A GMSL2 camera SerDes pair driver"
+	depends on I2C
+	help
+	  Compile chips/maxim_max9295_9296/maxim_max9295_9296.c.  Host-
+	  side probe + soft-reset of the GMSL2 SerDes pair.
+
+config ALP_SDK_CHIP_ST7789
+	bool "Sitronix ST7789V IPS TFT controller driver (SPI)"
+	depends on SPI && GPIO
+	help
+	  Compile chips/st7789/st7789.c.  Init + window + write-pixels
+	  for 240x240 / 240x320 IPS panels.
+
+config ALP_SDK_CHIP_ILI9341
+	bool "Ilitek ILI9341 240x320 TFT controller driver (SPI)"
+	depends on SPI && GPIO
+	help
+	  Compile chips/ili9341/ili9341.c.  Init + window + write-pixels
+	  for 240x320 TFT panels.
+
+config ALP_SDK_CHIP_ILI9488
+	bool "Ilitek ILI9488 320x480 TFT controller driver (SPI)"
+	depends on SPI && GPIO
+	help
+	  Compile chips/ili9488/ili9488.c.  Init + window + write-pixels
+	  for 320x480 TFT panels.
+
+config ALP_SDK_CHIP_RA8875
+	bool "RAiO RA8875 LCD controller + resistive touch driver (SPI)"
+	depends on SPI
+	help
+	  Compile chips/ra8875/ra8875.c.  Register-level access + soft
+	  reset; panel-init waveform table is [stub-impl].
+
+config ALP_SDK_CHIP_SH1106
+	bool "Sino Wealth SH1106 128x64 monochrome OLED driver (I2C)"
+	depends on I2C
+	help
+	  Compile chips/sh1106/sh1106.c.  Drop-in alternative to SSD1306
+	  for 1.3" OLED panels.
+
+config ALP_SDK_CHIP_IL3820
+	bool "Solomon IL3820 4.2-inch tri-colour e-paper driver (SPI)"
+	depends on SPI && GPIO
+	help
+	  Compile chips/il3820/il3820.c.  Init + busy-wait + soft reset;
+	  waveform LUT is [stub-impl].
+
+config ALP_SDK_CHIP_GDEW0154T8
+	bool "GoodDisplay GDEW0154T8 1.54-inch e-paper driver (SPI)"
+	depends on SPI && GPIO
+	help
+	  Compile chips/gdew0154t8/gdew0154t8.c.  Init + busy-wait + soft
+	  reset; waveform LUT is [stub-impl].
+
+config ALP_SDK_CHIP_HAILO_8L
+	bool "Hailo-8L 13 TOPS NPU host-side bring-up driver (M.2 PCIe)"
+	depends on GPIO
+	help
+	  Compile chips/hailo_8l/hailo_8l.c.  Host-side GPIO sequence
+	  for an M.2 Hailo-8L card; PCIe enumeration + the HailoRT
+	  runtime live on the Linux side.
+
 endmenu # "ALP SDK chip drivers"
 
 endif # ALP_SDK

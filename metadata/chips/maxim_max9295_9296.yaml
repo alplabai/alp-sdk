@@ -1,0 +1,34 @@
+# ALP SDK chip manifest: ADI (Maxim) MAX9295/MAX9296 GMSL2 SerDes.
+schema_version:   1
+chip_id:          maxim_max9295_9296
+driver_status:    stub
+display_name:     "ADI MAX9295A / MAX9296A GMSL2 camera SerDes pair"
+vendor:           adi_maxim
+mpn_population:
+  - "MAX9295A"
+  - "MAX9296A"
+
+datasheet:
+  primary:        "ADI MAX9295A Rev 5, MAX9296A Rev 5"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x40, scope: "MAX9295A serialiser (strap-selectable)" }
+    - { addr_7bit: 0x48, scope: "MAX9296A deserialiser (strap-selectable)" }
+  max_clock_hz:   400000
+
+interconnect:
+  link_type:      gmsl2
+  channels:       1
+  max_throughput_gbps: 6
+  payload:        mipi_csi2 + back_channel_i2c + back_channel_gpio
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_MAXIM_MAX9295_9296
+  baremetal:      ALP_SDK_CHIP_MAXIM_MAX9295_9296
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

@@ -84,6 +84,57 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- §D.AI: 18 vision / display / accelerator chip drivers)
+
+Tier 1 ecosystem expansion -- chip-and-library-ecosystem-design.md
+Phase 1 §D.AI batch.  All drivers ship with a Doxygen-clean public
+header in `include/alp/chips/<name>.h`, implementation under
+`chips/<name>/<name>.c`, metadata at `metadata/chips/<name>.yaml`,
+Zephyr Kconfig + CMakeLists glue, and a NULL-arg-guard ZTEST under
+`tests/zephyr/chips/src/main.c`.  Driver bodies follow the
+`[stub-impl]` pattern: chip-ID + soft-reset + lifecycle is real;
+vendor-specific register tables (camera resolution / pixel format
+profiles, e-paper waveform LUTs) land in follow-up commits once the
+maintainer adds the reference init scripts to the internal design
+archive.  All public symbols are tagged `[ABI-EXPERIMENTAL]` until
+the first SoM verification.
+
+- **`ov2640`** -- OmniVision 2 MP UXGA DVP camera (ESP32-CAM default).
+- **`ov5645`** -- OmniVision 5 MP MIPI CSI-2 camera.
+- **`ov7670`** -- OmniVision VGA DVP camera (reference classic).
+- **`ov9281`** -- OmniVision 1 MP global-shutter mono MIPI CSI-2
+  (AR/VR / ALPR / industrial tracking).
+- **`ar0234`** -- onsemi 1080p global-shutter colour MIPI CSI-2.
+- **`imx219`** -- Sony 8 MP MIPI CSI-2 (RPi Cam v2 standard).
+- **`imx477`** -- Sony 12.3 MP MIPI CSI-2 (RPi HQ Camera).
+- **`gc2145`** -- GalaxyCore 2 MP cost-sensitive DVP camera.
+- **`ti_ds90ub953_954`** -- TI FPD-Link III camera SerDes pair
+  (long-cable industrial machine vision).
+- **`maxim_max9295_9296`** -- ADI (Maxim) GMSL2 6 Gbps automotive
+  camera SerDes pair.
+- **`st7789`** -- Sitronix ST7789V 240x240 / 240x320 IPS TFT
+  (init + window + write-pixels).
+- **`ili9341`** -- Ilitek ILI9341 240x320 SPI TFT.
+- **`ili9488`** -- Ilitek ILI9488 320x480 SPI TFT.
+- **`ra8875`** -- RAiO RA8875 5-7" LCD controller + resistive
+  touch (SPI; register-level access + soft reset).
+- **`sh1106`** -- Sino Wealth SH1106 128x64 monochrome OLED (I2C;
+  drop-in alternative to SSD1306, accounts for 132-column RAM
+  offset).  Driver runs full lifecycle including frame push.
+- **`il3820`** -- Solomon IL3820 4.2" tri-colour e-paper (SPI;
+  init + busy-wait + soft reset; waveform LUT pending).
+- **`gdew0154t8`** -- GoodDisplay GDEW0154T8 1.54" monochrome
+  e-paper (SPI; same lifecycle shape as `il3820`).
+- **`hailo_8l`** -- Hailo-8L 13 TOPS NPU host-side bring-up
+  driver for the M.2 PCIe form factor (host RESETB sequence +
+  WAKE# read; PCIe enumeration + HailoRT runtime live on the
+  Linux side).
+
+Validators that ran clean on this batch (each before push):
+`validate_metadata.py` / `check_example_portability.py` /
+`check_pin_conflicts.py` / `abi_snapshot.py --diff
+docs/abi/v0.5-snapshot.json`.
+
 ### Added (2026-05-14 -- V2N DEEPX rail GPIO map)
 
 - **`DEEPX_PWR_EN_REQ` (P65) + `DEEPX_CORE_0P75_EN` (P64)** added

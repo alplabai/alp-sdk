@@ -1,0 +1,46 @@
+# ALP SDK chip manifest: OmniVision OV7670 VGA DVP camera.
+schema_version:   1
+chip_id:          ov7670
+driver_status:    stub
+display_name:     "OmniVision OV7670 VGA DVP camera sensor"
+vendor:           omnivision
+mpn_population:
+  - "OV7670"
+
+datasheet:
+  primary:        "OV7670 datasheet Rev 1.01 (Jul 2005)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x21, scope: "fixed SCCB address" }
+  max_clock_hz:   400000
+
+signals:
+  - { name: SCL,    type: input, scope: "SCCB clock" }
+  - { name: SDA,    type: bidir, scope: "SCCB data"  }
+  - { name: PWDN,   type: input, scope: "host power-down" }
+  - { name: RESETB, type: input, scope: "host hardware reset" }
+  - { name: D0..D7, type: output, scope: "DVP 8-bit parallel" }
+  - { name: HREF,   type: output, scope: "DVP line-valid" }
+  - { name: VSYNC,  type: output, scope: "DVP frame-valid" }
+  - { name: PCLK,   type: output, scope: "DVP pixel clock" }
+  - { name: XCLK,   type: input, scope: "master clock (typ. 24 MHz)" }
+
+resolutions:
+  max:            [640, 480]
+  presets:        [QQVGA, QVGA, VGA]
+
+formats:
+  - rgb565
+  - yuv422
+  - bayer
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_OV7670
+  baremetal:      ALP_SDK_CHIP_OV7670
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

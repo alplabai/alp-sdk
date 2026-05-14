@@ -426,6 +426,25 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
     "ina236":             ("I2C",),
     # pdm_mic helper has no subsystem dep declared in Kconfig
     # (uses <alp/i2s.h> when enabled at v0.2+).
+    # v0.5 §D.AI batch -- 18 vision / display / accelerator chips.
+    "ov2640":             ("I2C",),
+    "ov5645":             ("I2C",),
+    "ov7670":             ("I2C",),
+    "ov9281":             ("I2C",),
+    "ar0234":             ("I2C",),
+    "imx219":             ("I2C",),
+    "imx477":             ("I2C",),
+    "gc2145":             ("I2C",),
+    "ti_ds90ub953_954":   ("I2C",),
+    "maxim_max9295_9296": ("I2C",),
+    "st7789":             ("SPI", "GPIO"),
+    "ili9341":            ("SPI", "GPIO"),
+    "ili9488":            ("SPI", "GPIO"),
+    "ra8875":             ("SPI",),
+    "sh1106":             ("I2C",),
+    "il3820":             ("SPI", "GPIO"),
+    "gdew0154t8":         ("SPI", "GPIO"),
+    "hailo_8l":           ("GPIO",),
 }
 
 

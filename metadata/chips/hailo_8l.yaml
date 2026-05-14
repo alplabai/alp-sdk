@@ -1,0 +1,32 @@
+# ALP SDK chip manifest: Hailo-8L 13 TOPS NPU (M.2 PCIe).
+schema_version:   1
+chip_id:          hailo_8l
+driver_status:    stub             # host-side GPIO sequence only; PCIe + runtime on Linux.
+display_name:     "Hailo-8L 13 TOPS NPU on M.2 PCIe (host bring-up)"
+vendor:           hailo
+mpn_population:
+  - "Hailo-8L M.2"
+
+datasheet:
+  primary:        "Hailo-8L product brief Rev 1.2 (2024)"
+
+bus:              pcie
+pcie:
+  generation:     gen3
+  lanes:          4
+  form_factor:    m_2_2242
+
+signals:
+  - { name: RESETB, type: input, scope: "host open-drain reset to M.2 slot" }
+  - { name: WAKE#,  type: output, scope: "PCIe WAKE# from card back to host" }
+  - { name: CLKREQ#, type: bidir, scope: "PCIe CLKREQ# negotiation" }
+  - { name: PERST#, type: input, scope: "host-driven PERST# release after rails settle" }
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_HAILO_8L
+  baremetal:      ALP_SDK_CHIP_HAILO_8L
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

@@ -1,0 +1,39 @@
+# ALP SDK chip manifest: RAiO RA8875 LCD controller (SPI).
+schema_version:   1
+chip_id:          ra8875
+driver_status:    stub
+display_name:     "RAiO RA8875 5-7\" LCD + resistive-touch controller (SPI)"
+vendor:           raio
+mpn_population:
+  - "RA8875"
+
+datasheet:
+  primary:        "RAiO RA8875 datasheet v1.7 (Mar 2014)"
+
+bus:              spi
+spi:
+  mode:           [0]
+  max_clock_hz:   12000000
+
+signals:
+  - { name: SCLK, type: input }
+  - { name: MOSI, type: input }
+  - { name: MISO, type: output, scope: "register-read return path" }
+  - { name: CS,   type: input }
+  - { name: RESET, type: input, scope: "optional hardware reset" }
+  - { name: INT,  type: output, scope: "touch + BTE-done interrupt" }
+  - { name: WAIT, type: output, scope: "panel-busy line" }
+
+features:
+  - lcd_controller
+  - bte_2d
+  - resistive_touch
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_RA8875
+  baremetal:      ALP_SDK_CHIP_RA8875
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

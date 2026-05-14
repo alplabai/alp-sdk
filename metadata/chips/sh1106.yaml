@@ -1,0 +1,30 @@
+# ALP SDK chip manifest: Sino Wealth SH1106 128x64 OLED (I2C).
+schema_version:   1
+chip_id:          sh1106
+driver_status:    complete         # init + clear + draw + display + deinit.
+display_name:     "Sino Wealth SH1106 128x64 monochrome OLED (I2C)"
+vendor:           sino_wealth
+mpn_population:
+  - "SH1106"
+
+datasheet:
+  primary:        "Sino Wealth SH1106 datasheet v2.4 (Mar 2008)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x3C, scope: "D/C# = GND (default)" }
+    - { addr_7bit: 0x3D, scope: "D/C# = V+" }
+  max_clock_hz:   400000
+
+resolutions:
+  max:            [128, 64]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_SH1106
+  baremetal:      ALP_SDK_CHIP_SH1106
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

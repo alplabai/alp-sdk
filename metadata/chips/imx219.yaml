@@ -1,0 +1,32 @@
+# ALP SDK chip manifest: Sony IMX219 8 MP MIPI CSI-2 (RPi Cam v2).
+schema_version:   1
+chip_id:          imx219
+driver_status:    stub
+display_name:     "Sony IMX219 8 MP MIPI CSI-2 camera sensor (RPi Cam v2)"
+vendor:           sony
+mpn_population:
+  - "IMX219PQ"
+
+datasheet:
+  primary:        "Sony IMX219 confidential datasheet (NDA-only)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x10, scope: "fixed CCI address" }
+  max_clock_hz:   400000
+
+mipi:
+  lanes_supported: [1, 2, 4]
+
+resolutions:
+  max:            [3280, 2464]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_IMX219
+  baremetal:      ALP_SDK_CHIP_IMX219
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

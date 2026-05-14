@@ -1,0 +1,46 @@
+# ALP SDK chip manifest: OmniVision OV2640 2 MP UXGA camera sensor.
+schema_version:   1
+chip_id:          ov2640
+driver_status:    stub             # SCCB chip-ID + soft-reset; vendor init table TBD.
+display_name:     "OmniVision OV2640 2 MP UXGA DVP camera sensor"
+vendor:           omnivision
+mpn_population:
+  - "OV2640"
+
+datasheet:
+  primary:        "OV2640 datasheet Rev 2.2 (Apr 2006)"
+
+bus:              i2c             # SCCB config side.
+i2c:
+  addresses:
+    - { addr_7bit: 0x30, scope: "fixed SCCB address (no strap)" }
+  max_clock_hz:   400000          # Fast-mode
+
+signals:
+  - { name: SCL,    type: input, scope: "SCCB clock" }
+  - { name: SDA,    type: bidir, scope: "SCCB data"  }
+  - { name: PWDN,   type: input, scope: "host-driven power-down (active high)" }
+  - { name: RESETB, type: input, scope: "host-driven hardware reset (active low)" }
+  - { name: D0..D7, type: output, scope: "DVP 8-bit parallel pixel data; host receiver" }
+  - { name: HREF,   type: output, scope: "DVP line-valid" }
+  - { name: VSYNC,  type: output, scope: "DVP frame-valid" }
+  - { name: PCLK,   type: output, scope: "DVP pixel clock" }
+  - { name: XCLK,   type: input, scope: "DVP master input clock (typ. 24 MHz from host)" }
+
+resolutions:
+  max:            [1600, 1200]    # UXGA
+  presets:        [QQVGA, QVGA, VGA, SVGA, XGA, SXGA, UXGA]
+
+formats:
+  - rgb565
+  - yuv422
+  - jpeg
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_OV2640
+  baremetal:      ALP_SDK_CHIP_OV2640
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

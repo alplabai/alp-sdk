@@ -1,0 +1,34 @@
+# ALP SDK chip manifest: OmniVision OV9281 1 MP global-shutter mono.
+schema_version:   1
+chip_id:          ov9281
+driver_status:    stub
+display_name:     "OmniVision OV9281 1 MP global-shutter mono MIPI CSI-2"
+vendor:           omnivision
+mpn_population:
+  - "OV9281"
+
+datasheet:
+  primary:        "OV9281 datasheet Rev 1.06 (Oct 2017)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x60, scope: "SID = AGND (default)" }
+    - { addr_7bit: 0x62, scope: "SID = AVDD" }
+  max_clock_hz:   400000
+
+mipi:
+  lanes_supported: [1, 2]
+
+resolutions:
+  max:            [1280, 800]
+  features:       [global_shutter, monochrome]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_OV9281
+  baremetal:      ALP_SDK_CHIP_OV9281
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

@@ -1,0 +1,36 @@
+# ALP SDK chip manifest: Ilitek ILI9341 SPI TFT 240x320.
+schema_version:   1
+chip_id:          ili9341
+driver_status:    partial
+display_name:     "Ilitek ILI9341 240x320 SPI TFT controller"
+vendor:           ilitek
+mpn_population:
+  - "ILI9341"
+
+datasheet:
+  primary:        "Ilitek ILI9341 datasheet v1.11 (Jun 2011)"
+
+bus:              spi
+spi:
+  mode:           [0, 3]
+  max_clock_hz:   10000000
+
+signals:
+  - { name: SCLK, type: input, scope: "SPI clock" }
+  - { name: MOSI, type: input, scope: "SPI data" }
+  - { name: CS,   type: input, scope: "chip select" }
+  - { name: DC,   type: input, scope: "D/C# command/data" }
+  - { name: RESET, type: input, scope: "optional hardware reset" }
+  - { name: BL,   type: input, scope: "backlight LED" }
+
+resolutions:
+  max:            [240, 320]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_ILI9341
+  baremetal:      ALP_SDK_CHIP_ILI9341
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

@@ -1,0 +1,29 @@
+# ALP SDK chip manifest: GalaxyCore GC2145 2 MP DVP camera.
+schema_version:   1
+chip_id:          gc2145
+driver_status:    stub
+display_name:     "GalaxyCore GC2145 2 MP DVP camera sensor"
+vendor:           galaxycore
+mpn_population:
+  - "GC2145"
+
+datasheet:
+  primary:        "GalaxyCore GC2145 datasheet (Rev 1.0)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x3C, scope: "fixed SCCB address" }
+  max_clock_hz:   400000
+
+resolutions:
+  max:            [1600, 1200]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_GC2145
+  baremetal:      ALP_SDK_CHIP_GC2145
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

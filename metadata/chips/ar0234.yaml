@@ -1,0 +1,34 @@
+# ALP SDK chip manifest: onsemi AR0234CS 1080p global-shutter MIPI CSI-2.
+schema_version:   1
+chip_id:          ar0234
+driver_status:    stub
+display_name:     "onsemi AR0234CS 1080p global-shutter colour MIPI CSI-2"
+vendor:           onsemi
+mpn_population:
+  - "AR0234CS"
+
+datasheet:
+  primary:        "onsemi AR0234CS datasheet Rev 7 (Jun 2020)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x10, scope: "SADDR = low (default)" }
+    - { addr_7bit: 0x18, scope: "SADDR = high" }
+  max_clock_hz:   400000
+
+mipi:
+  lanes_supported: [1, 2, 4]
+
+resolutions:
+  max:            [1920, 1200]
+  features:       [global_shutter, hdr]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_AR0234
+  baremetal:      ALP_SDK_CHIP_AR0234
+
+families:
+  - aen
+  - v2n
+  - v2n-m1

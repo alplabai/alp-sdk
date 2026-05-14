@@ -1,0 +1,34 @@
+# ALP SDK chip manifest: TI DS90UB953 + DS90UB954 FPD-Link III SerDes.
+schema_version:   1
+chip_id:          ti_ds90ub953_954
+driver_status:    stub
+display_name:     "TI DS90UB953/954 FPD-Link III camera SerDes pair"
+vendor:           ti
+mpn_population:
+  - "DS90UB953-Q1"
+  - "DS90UB954-Q1"
+
+datasheet:
+  primary:        "TI SNLS554 (DS90UB953-Q1), SNLS555 (DS90UB954-Q1)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x18, scope: "DS90UB953 serialiser (strap-selectable)" }
+    - { addr_7bit: 0x30, scope: "DS90UB954 deserialiser (strap-selectable)" }
+  max_clock_hz:   400000
+
+interconnect:
+  link_type:      fpd_link_iii
+  channels:       1
+  max_cable_m:    15
+  payload:        mipi_csi2 + back_channel_i2c + back_channel_gpio
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_TI_DS90UB953_954
+  baremetal:      ALP_SDK_CHIP_TI_DS90UB953_954
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
