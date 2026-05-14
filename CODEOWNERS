@@ -6,6 +6,16 @@
 # touches matching paths.  Maintainers listed below MUST review +
 # approve a PR before merge when their area is touched.
 #
+# **Approval is mandatory, not optional.**  Branch protection on
+# `main` and `release/*` has "Require review from Code Owners"
+# turned ON -- a PR cannot merge without the matching owner's
+# approval regardless of how many non-owner approvals it has.
+# Self-approval is forbidden even for owners; the approving
+# review must come from a different account than the PR author.
+#
+# Full PR / merge / push rules + branch-protection settings:
+#   docs/branching-and-merge-policy.md
+#
 # Format: `<glob>  <owner1> <owner2> ...`
 # See: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
 

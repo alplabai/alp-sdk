@@ -64,6 +64,10 @@ signatures), if you have one in mind.
    matrices.  CI green is necessary but not sufficient for tagging
    a release -- the test-plan row also has to flip to `✅`.
 
+For the full branching topology, merge methods, PR gates,
+backport flow, and branch-protection settings, see
+[`docs/branching-and-merge-policy.md`](docs/branching-and-merge-policy.md).
+
 ### Code style
 
 - Public headers are **C99-compatible** with Doxygen comments.

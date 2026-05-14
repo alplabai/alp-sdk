@@ -82,12 +82,16 @@ but the marker is a JSON-Schema `deprecated: true` field.
 
 ## Branch model
 
-| Branch                  | Purpose                                          |
-|-------------------------|--------------------------------------------------|
-| `main`                  | Pre-release development; next minor target.      |
-| `release/v1.0`          | LTS; cherry-picks of security + critical fixes.  |
-| `release/v1.1`, ...     | Next minors after they ship; same LTS rules if promoted. |
-| Feature branches        | `<gh-username>/<feature>` per contributor convention.  |
+Summary table; full topology + PR rules + merge methods +
+branch-protection settings are in
+[`docs/branching-and-merge-policy.md`](branching-and-merge-policy.md):
+
+| Branch                  | Purpose                                          | Push policy             |
+|-------------------------|--------------------------------------------------|-------------------------|
+| `main`                  | Pre-release development; next minor target.      | PR only; branch-protected. |
+| `release/v1.0`          | LTS; cherry-picks of security + critical fixes.  | PR only; signed commits required. |
+| `release/v1.1`, ...     | Next minors after they ship; same LTS rules if promoted. | PR only; signed commits required. |
+| Feature branches        | `<gh-username>/<feature>`; merged into `main` via PR. | OK on contributor forks. |
 
 Tags on `release/v1.0` are `v1.0.0`, `v1.0.1`, ... — incremented
 on each LTS-branch release.
