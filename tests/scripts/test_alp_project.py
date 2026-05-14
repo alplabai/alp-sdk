@@ -462,15 +462,14 @@ class TestHwBackendsLoader(unittest.TestCase):
         self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
 
     def test_sw_fallback_always_emitted(self) -> None:
-        """Each new (§D.lib) library's SW-fallback CONFIG_*=y is
-        emitted unconditionally via _LIBRARY_KCONFIG (separate from
-        the hw-backends loader).  Baseline libraries (lvgl /
-        mbedtls / cmsis_dsp / littlefs) inherit their SW fallback
-        from Kconfig `default y` on the *_SW / *_PURE_C / *_SCALAR /
-        *_SYNC_IO symbols -- so those aren't emitted as alp.conf
-        lines, they just default on at Kconfig parse time."""
+        """Each library's SW-fallback CONFIG_*=y is emitted
+        unconditionally via _LIBRARY_KCONFIG (separate from the
+        hw-backends loader).  Both new §D.lib libraries and the 4
+        baseline ones (lvgl / mbedtls / cmsis_dsp / littlefs) emit
+        their fallback knob alongside the upstream library knob."""
         out = self._emit("E1M-AEN401")
         for fallback in (
+            # §D.lib new libraries
             "CONFIG_ALP_TFLM_REF_KERNELS=y",
             "CONFIG_ALP_BEARSSL_PURE_C=y",
             "CONFIG_ALP_OPUS_PURE_C=y",
@@ -479,6 +478,12 @@ class TestHwBackendsLoader(unittest.TestCase):
             "CONFIG_ALP_MADGWICK_LIBM=y",
             "CONFIG_ALP_U8G2_SW_BLIT=y",
             "CONFIG_ALP_GFX_COMPAT_SW=y",
+            # Baseline libs (added explicit emission in the §D.lib
+            # follow-up audit).
+            "CONFIG_ALP_LVGL_SW_BLIT=y",
+            "CONFIG_ALP_MBEDTLS_PURE_C=y",
+            "CONFIG_ALP_CMSIS_DSP_SCALAR=y",
+            "CONFIG_ALP_LITTLEFS_SYNC_IO=y",
         ):
             with self.subTest(fallback=fallback):
                 self.assertIn(fallback, out)

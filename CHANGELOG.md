@@ -84,6 +84,40 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- §D.lib.loader: extras-tier1 CI pin-check workflow + baseline SW-fallback emission)
+
+Two follow-ups so the §D.lib batch is fully self-validating:
+
+1. **`.github/workflows/nightly-extras-tier1-pins.yml`** (new) --
+   nightly + PR-on-touch + manual workflow that runs
+   `west update --group-filter +extras-tier1` and asserts each
+   pinned library directory under `modules/lib/` ends up populated.
+   - 9 stable pins (u8g2, libcoap, tinygsm, libwebsockets, jsmn,
+     opus, Catch2, libmodbus, coreMQTT-SN) -- pin breakage FAILS
+     the workflow.
+   - 4 TBD pins (minimp3, libhelix, bearssl, madgwick_ahrs) --
+     warn-only until the maintainer locks specific SHAs.
+   Audit artefact uploaded with the first line of each fetched
+   library's README so reviewers can eyeball "did this land the
+   right repo?".
+
+2. **Baseline library SW-fallback emission** -- the 4 pre-existing
+   Tier 1 libraries with HW bindings (lvgl / mbedtls / cmsis_dsp /
+   littlefs) now emit their matching `CONFIG_ALP_<LIB>_<FALLBACK>=y`
+   line in `alp.conf` alongside the upstream Zephyr-module knob:
+   - `lvgl` → `CONFIG_LVGL=y` + `CONFIG_ALP_LVGL_SW_BLIT=y`
+   - `mbedtls` → `CONFIG_MBEDTLS=y` + `CONFIG_MBEDTLS_BUILTIN=y` +
+     `CONFIG_ALP_MBEDTLS_PURE_C=y`
+   - `cmsis_dsp` → `CONFIG_CMSIS_DSP=y` + `CONFIG_ALP_CMSIS_DSP_SCALAR=y`
+   - `littlefs` → `CONFIG_FILE_SYSTEM_LITTLEFS=y` +
+     `CONFIG_FILE_SYSTEM=y` + `CONFIG_ALP_LITTLEFS_SYNC_IO=y`
+   Redundant with `Kconfig.alp-libraries`' `default y` on those
+   symbols, but documents the fallback choice next to the
+   library-enable line in the emitted alp.conf.
+
+`TestHwBackendsLoader.test_sw_fallback_always_emitted` extended
+from 8 to 12 assertions to lock the four new emissions in.
+
 ### Added (2026-05-14 -- §D.lib.loader: native_sim twister scenario for library knobs)
 
 `tests/zephyr/library_knobs/` -- new twister test scenario that

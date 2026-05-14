@@ -1,0 +1,130 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Nightly + on-demand fetch check for the `extras-tier1` west group.
+#
+# The §D.lib batch added 13 upstream library pins to `west.yml`
+# behind the `extras-tier1` group (default off).  This workflow:
+#   1. Runs `west init -l . && west update --group-filter +extras-tier1`
+#      with `--narrow --depth 1` to grab just the pinned revisions.
+#   2. Asserts each expected library directory under `modules/lib/`
+#      ends up populated.
+#
+# Status policy:
+#   - 9 "stable" libraries (u8g2, libcoap, tinygsm, libwebsockets,
+#     jsmn, opus, Catch2, libmodbus, coreMQTT-SN) are pinned to
+#     tagged releases.  These FAIL the workflow if the pin breaks.
+#   - 4 "TBD" libraries (minimp3, libhelix, bearssl, madgwick_ahrs)
+#     are pinned to `main` / `master` because upstream has no
+#     semver releases yet.  These WARN if the fetch fails (not
+#     fatal) until the maintainer locks specific SHAs.
+#
+# Runs nightly (06:00 UTC Mondays) + on PRs that touch west.yml or
+# any library-profile YAML + manually via workflow_dispatch.
+
+name: nightly-extras-tier1-pins
+
+on:
+  schedule:
+    # Monday 06:00 UTC -- cheap, low-noise weekly heartbeat.
+    - cron: '0 6 * * 1'
+  pull_request:
+    paths:
+      - 'west.yml'
+      - 'metadata/library-profiles/**'
+      - '.github/workflows/nightly-extras-tier1-pins.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fetch-and-verify:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v4
+        with:
+          path: alp-sdk
+
+      - name: Set up Python + west
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install west
+        run: pip3 install --user west
+
+      - name: West init + update with extras-tier1 enabled
+        working-directory: alp-sdk
+        run: |
+          set -e
+          west init -l .
+          # `--narrow --depth 1` keeps the fetch under a minute and
+          # the runner disk under 1 GB.  Only fetches the project
+          # tips at the pinned revision; no history.
+          west update \
+            --group-filter +extras-tier1 \
+            --narrow \
+            -o=--depth=1 \
+            zephyr u8g2 libcoap TinyGSM libwebsockets jsmn opus \
+            Catch2 libmodbus coreMQTT-SN minimp3 libhelix BearSSL \
+            madgwick_ahrs || echo "west update returned non-zero"
+        continue-on-error: true
+
+      - name: Verify stable pins populated content
+        working-directory: alp-sdk
+        run: |
+          set -euo pipefail
+          status=0
+          # Stable tagged releases -- fetch failure is a real bug.
+          for lib in u8g2 libcoap tinygsm libwebsockets jsmn opus \
+                    catch2 libmodbus coremqtt_sn; do
+            if [ ! -d "modules/lib/${lib}" ]; then
+              echo "::error::FAIL: modules/lib/${lib} missing after west update"
+              status=1
+              continue
+            fi
+            if [ -z "$(ls -A "modules/lib/${lib}" 2>/dev/null || true)" ]; then
+              echo "::error::FAIL: modules/lib/${lib} populated empty"
+              status=1
+              continue
+            fi
+            echo "OK: modules/lib/${lib} populated"
+          done
+          exit $status
+
+      - name: Note TBD-pinned libraries (warn-only)
+        working-directory: alp-sdk
+        run: |
+          set -eu
+          # TBD pins -- track but don't gate merge until a SHA lands.
+          for lib in minimp3 libhelix bearssl madgwick_ahrs; do
+            if [ -d "modules/lib/${lib}" ] && \
+               [ -n "$(ls -A "modules/lib/${lib}" 2>/dev/null || true)" ]; then
+              echo "INFO: TBD-pinned ${lib} fetched successfully"
+            else
+              echo "::warning::TBD-pinned ${lib} missing -- expected until pin SHA locks in west.yml"
+            fi
+          done
+
+      - name: Upload artefact (per-lib README first line for audit)
+        if: always()
+        run: |
+          set -e
+          mkdir -p /tmp/extras-tier1-audit
+          for d in alp-sdk/modules/lib/*/; do
+            lib=$(basename "$d")
+            head -1 "${d}README.md" 2>/dev/null \
+              > "/tmp/extras-tier1-audit/${lib}.txt" || \
+              echo "(no README)" > "/tmp/extras-tier1-audit/${lib}.txt"
+          done
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: extras-tier1-audit
+          path: /tmp/extras-tier1-audit/

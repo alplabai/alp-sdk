@@ -689,10 +689,19 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
     # Zephyr-native libs (Tier 3) -- the SDK forwards the
     # consumer's intent to Zephyr's own Kconfig + adds the profile
     # header to the include path.
-    "lvgl":          ("CONFIG_LVGL=y",),
-    "mbedtls":       ("CONFIG_MBEDTLS=y", "CONFIG_MBEDTLS_BUILTIN=y"),
-    "cmsis_dsp":     ("CONFIG_CMSIS_DSP=y",),
-    "littlefs":      ("CONFIG_FILE_SYSTEM_LITTLEFS=y", "CONFIG_FILE_SYSTEM=y"),
+    # Baseline Tier 3 libs: emit the upstream Zephyr Kconfig + the
+    # matching ALP-side SW-fallback knob.  The SW-fallback line is
+    # redundant with Kconfig.alp-libraries' `default y`, but emitting
+    # it explicitly in alp.conf documents the fallback choice next
+    # to the library-enable line.
+    "lvgl":          ("CONFIG_LVGL=y",
+                      "CONFIG_ALP_LVGL_SW_BLIT=y"),
+    "mbedtls":       ("CONFIG_MBEDTLS=y", "CONFIG_MBEDTLS_BUILTIN=y",
+                      "CONFIG_ALP_MBEDTLS_PURE_C=y"),
+    "cmsis_dsp":     ("CONFIG_CMSIS_DSP=y",
+                      "CONFIG_ALP_CMSIS_DSP_SCALAR=y"),
+    "littlefs":      ("CONFIG_FILE_SYSTEM_LITTLEFS=y", "CONFIG_FILE_SYSTEM=y",
+                      "CONFIG_ALP_LITTLEFS_SYNC_IO=y"),
 
     # v0.5 §D.lib batch -- 17 new libraries.  Per-library hardware-
     # accelerator binding is declared in
