@@ -11,8 +11,15 @@
 #   4. Build a source tarball (no binaries -- the SDK is a source
 #      release).
 #   5. Generate SHA-256 + SHA-512 checksums.
-#   6. Create the GitHub Release with the CHANGELOG slice as the
-#      body and the tarball + checksums as artefacts.
+#   6. Generate SLSA L2 build provenance attestation via
+#      `actions/attest-build-provenance@v1` (Sigstore-backed OIDC
+#      signature; verifiable with `gh attestation verify`).
+#      Satisfies SLSA v1.0 Build Level 2 (hosted build platform,
+#      authenticated provenance, non-falsifiable).  See
+#      https://slsa.dev/spec/v1.0/levels#level-2.
+#   7. Create the GitHub Release with the CHANGELOG slice as the
+#      body and the tarball + checksums + provenance bundle as
+#      artefacts.
 #
 # Tag form: `v<MAJOR>.<MINOR>.<PATCH>` (SemVer).  Pre-release tags
 # (`vX.Y.Z-rc1`) are supported and produce a "pre-release" Release
@@ -29,7 +36,11 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
 permissions:
-  contents: write  # required to create the GitHub Release
+  contents: write      # required to create the GitHub Release
+  id-token: write      # OIDC token for Sigstore signing of SLSA provenance
+  attestations: write  # write the attestation bundle into the repo's
+                       # attestations store (where `gh attestation
+                       # verify` reads from)
 
 jobs:
   release:
@@ -100,13 +111,47 @@ jobs:
           PY
 
       - name: Build source tarball
+        id: archive
         run: |
           TAG="${{ steps.tag.outputs.tag }}"
           ARCHIVE="alp-sdk-${TAG}.tar.gz"
           git archive --format=tar.gz --prefix="alp-sdk-${TAG}/" -o "$ARCHIVE" HEAD
           echo "archive=$ARCHIVE" >> "$GITHUB_ENV"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
           sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
           sha512sum "$ARCHIVE" > "$ARCHIVE.sha512"
+          # Hex-only digest (without the trailing filename) feeds the
+          # SLSA provenance subject below.
+          DIGEST=$(sha256sum "$ARCHIVE" | awk '{print $1}')
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SLSA L2 build provenance
+        id: provenance
+        # actions/attest-build-provenance is GitHub's first-party
+        # provenance generator: it signs an in-toto attestation with
+        # the workflow's OIDC token through Sigstore's Fulcio CA and
+        # uploads the bundle to the repo's attestations store.  The
+        # produced bundle is a SLSA v1.0 provenance predicate naming
+        # this workflow + commit + the artefact's SHA-256 digest as
+        # subject, which is L2 by the SLSA spec (hosted build
+        # platform, authenticated provenance, non-falsifiable).
+        # `gh attestation verify <artifact>` validates the bundle
+        # off-the-shelf without any extra customer tooling.
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ steps.archive.outputs.archive }}
+
+      - name: Stage provenance bundle next to the tarball
+        # The provenance action returns the bundle path; copy it
+        # alongside the tarball + checksums so a single Release page
+        # carries everything a downstream verifier needs.  Naming
+        # convention mirrors the checksum siblings:
+        # `<archive>.intoto.jsonl` (`gh attestation verify` recognises
+        # the `.intoto.jsonl` extension).
+        run: |
+          BUNDLE="${{ steps.provenance.outputs.bundle-path }}"
+          DEST="${{ steps.archive.outputs.archive }}.intoto.jsonl"
+          cp "$BUNDLE" "$DEST"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -119,3 +164,4 @@ jobs:
             alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz
             alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz.sha256
             alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz.sha512
+            alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz.intoto.jsonl

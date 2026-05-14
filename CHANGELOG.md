@@ -159,6 +159,34 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- SLSA L2 build provenance on releases §C.18)
+
+- **`.github/workflows/release.yml` gains a SLSA v1.0 Build
+  Level 2 provenance attestation step** via GitHub's first-party
+  `actions/attest-build-provenance@v1`.  The action signs an
+  in-toto attestation with the workflow's OIDC token through
+  Sigstore's Fulcio CA + uploads the bundle to the repo's
+  attestations store.  The resulting bundle is a SLSA v1.0
+  provenance predicate naming this workflow + commit + the
+  artefact's SHA-256 digest as subject.
+- **New release artefact**: `alp-sdk-v<N>.tar.gz.intoto.jsonl`
+  uploaded alongside the existing `.sha256` + `.sha512` checksum
+  files.  Verifiable with `gh attestation verify
+  alp-sdk-v<N>.tar.gz` -- no extra customer tooling needed.
+- **Workflow permissions extended**: `id-token: write` (OIDC
+  signing) + `attestations: write` (bundle upload) added next
+  to the existing `contents: write`.
+- **`docs/release-policy.md` §"Release-cut procedure" step 6
+  expanded** to enumerate the three sidecar artefacts (sha256,
+  sha512, intoto.jsonl) + the `gh attestation verify`
+  one-liner.
+- **`docs/v1.0-readiness.md` Pillar 8 checkbox flipped** from
+  📋 to [x] with the SLSA L2 vs L3 note (L3 would require a
+  hermetic builder + isolated runner, not gating v1.0).
+
+  SLSA spec reference:
+  https://slsa.dev/spec/v1.0/levels#level-2.
+
 ### Added (2026-05-14 -- doxygen spot-pass on wave-2 headers §C.17)
 
 - **`@param` / `@return` blocks filled on every public function in
