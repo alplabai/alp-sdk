@@ -2,7 +2,7 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * uart-echo — read bytes from ALP_E1M_UART0 and write them back.
+ * uart-echo — read bytes from E1M_UART0 and write them back.
  *
  * In CI we don't actually feed input, so the example does a single
  * non-blocking read with a short timeout to exercise the read path
@@ -18,7 +18,7 @@
 #include "alp/e1m_pinout.h"
 
 int main(void) {
-    printf("[uart] open ALP_E1M_UART0 @ 115200 8N1\n");
+    printf("[uart] open E1M_UART0 @ 115200 8N1\n");
 
     /* The 8-N-1 framing is the lowest common denominator for serial
      * consoles -- 8 data bits, no parity, 1 stop bit.  Override
@@ -27,7 +27,7 @@ int main(void) {
      * 7-E-1, RS-485 buses with multidrop addressing use 9-bit
      * frames, etc.). */
     alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
-        .port_id   = ALP_E1M_UART0,
+        .port_id   = E1M_UART0,
         .baudrate  = 115200,
         .data_bits = 8,
         .stop_bits = 1,

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * spi-loopback — exercise alp_spi_open / alp_spi_transceive on
- * ALP_E1M_SPI0.
+ * E1M_SPI0.
  *
  * SPI is full-duplex: every byte you send out also clocks a byte
  * back from the slave.  alp_spi_transceive(tx, rx, len) does both
@@ -25,10 +25,10 @@
 #define ALP_SPI_NO_CS  0xFFFFFFFFu
 
 int main(void) {
-    printf("[spi] open ALP_E1M_SPI0 @ 1 MHz mode 0\n");
+    printf("[spi] open E1M_SPI0 @ 1 MHz mode 0\n");
 
     alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
-        .bus_id        = ALP_E1M_SPI0,
+        .bus_id        = E1M_SPI0,
         /* 1 MHz is the conservative default; SPI tolerates up to
          * tens of MHz on most controllers.  Bump after confirming
          * the slave's max clock and that wires are short. */

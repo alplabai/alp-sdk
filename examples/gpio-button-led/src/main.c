@@ -15,12 +15,12 @@
 #include "alp/e1m_pinout.h"
 
 int main(void) {
-    printf("[gpio] init button=ALP_E1M_GPIO_IO0, led=ALP_E1M_GPIO_IO1\n");
+    printf("[gpio] init button=E1M_GPIO_IO0, led=E1M_GPIO_IO1\n");
 
     alp_button_led_t bl;
     alp_status_t s = alp_button_led_init(&bl, &(alp_button_led_config_t){
-        .button_pin_id     = ALP_E1M_GPIO_IO0,
-        .led_pin_id        = ALP_E1M_GPIO_IO1,
+        .button_pin_id     = E1M_GPIO_IO0,
+        .led_pin_id        = E1M_GPIO_IO1,
         .active_low_button = true,
     });
     if (s != ALP_OK) {

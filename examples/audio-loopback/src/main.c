@@ -8,8 +8,8 @@
  * i2s-tone, etc.
  *
  * What it does
- *   1. open  a PDM mic on ALP_E1M_PDM0 (16 kHz mono, S16)
- *   2. open  an I2S DAC on ALP_E1M_I2S0 (same rate / channels)
+ *   1. open  a PDM mic on E1M_PDM0 (16 kHz mono, S16)
+ *   2. open  an I2S DAC on E1M_I2S0 (same rate / channels)
  *   3. start both, then in a tight loop: read a block from the
  *      mic, write it to the DAC.  The wrapper runs the ALP
  *      DSP chain (DC-block in v0.2) inside alp_audio_in_read,
@@ -53,7 +53,7 @@ int            main(void)
     printf("[audio] audio-loopback v0.2 reference -- mic -> DSP -> DAC\n");
 
     alp_audio_config_t cfg = {
-        .peripheral_id    = ALP_E1M_PDM0,
+        .peripheral_id    = E1M_PDM0,
         .sample_rate_hz   = SR_HZ,
         .channels         = CHANS,
         .format           = ALP_AUDIO_FMT_S16_LE,
@@ -68,7 +68,7 @@ int            main(void)
     }
     printf("[audio]   alp_audio_in_open(PDM0)         ok\n");
 
-    cfg.peripheral_id    = ALP_E1M_I2S0;
+    cfg.peripheral_id    = E1M_I2S0;
     alp_audio_out_t *spk = alp_audio_out_open(&cfg);
     if (spk == NULL) {
         printf("[audio]   alp_audio_out_open              skip (no I2S, last_err=%d)\n",

@@ -63,11 +63,11 @@ macros in [`<alp/e1m_pinout.h>`](../include/alp/e1m_pinout.h):
 #include <alp/e1m_pinout.h>
 
 alp_i2c_open(&(alp_i2c_config_t){
-    .bus_id = ALP_E1M_I2C0,         /* always 0 across every E1M carrier */
+    .bus_id = E1M_I2C0,         /* always 0 across every E1M carrier */
     .bitrate_hz = 400000
 });
 
-alp_gpio_open(ALP_E1M_GPIO_IO7);    /* always pad AG34 — silicon-agnostic */
+alp_gpio_open(E1M_GPIO_IO7);    /* always pad AG34 — silicon-agnostic */
 ```
 
 The SDK never references E1M pad IDs (`A1`, `AF2`, `R34`, …),
@@ -80,13 +80,13 @@ would break the cross-variant abstraction.
 Names like `USER_LED_RED` or `ENCODER_SW` are **not** in the E1M
 standard — they're carrier-specific.  Those live in
 [`<alp/boards/<board>.h>`](../include/alp/boards/) as thin
-re-exports of the underlying `ALP_E1M_GPIO_*` indices:
+re-exports of the underlying `E1M_GPIO_*` indices:
 
 ```c
 #include <alp/boards/alp_e1m_evk.h>
 
 alp_gpio_t *led = alp_gpio_open(EVK_PIN_LED_RED);
-/* expands to alp_gpio_open(ALP_E1M_GPIO_IO0) — the standard
+/* expands to alp_gpio_open(E1M_GPIO_IO0) — the standard
  * GPIO index, the readable name, both true at once. */
 ```
 

@@ -159,6 +159,41 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Changed (2026-05-14 -- ABI-BREAKING: drop ALP_ prefix from E1M instance IDs §C.1z)
+
+- **`ALP_E1M_*` -> `E1M_*` across every public surface, example,
+  test, and doc cross-ref.**  Captured from the maintainer:
+  "E1M is the open-standard form factor, not an ALP-specific
+  concept -- the prefix is redundant noise."  The `ALP_*`
+  namespace stays reserved for SDK-internal abstractions
+  (`ALP_OK`, `alp_status_t`, etc.); pin / peripheral instance
+  IDs lose the prefix.
+- Scope: 335 replacements across 49 files.  `include/alp/e1m_pinout.h`
+  header guard + every macro renamed; `include/alp/adc.h`,
+  `include/alp/boards/alp_e1m_evk.h`, `include/alp/chips/cc3501e.h`
+  refs updated; 27 example main.c + README + testcase.yaml + the
+  `alp,pin-array` overlay rewritten; both Twister test mains;
+  `scripts/alp_project.py` ID-validation table; docs/adr/0004 +
+  docs/board-config + docs/cc3501e-integration-plan + docs/e1m-pinout
+  + docs/getting-started + docs/soms/aen + README.md updated.
+- **Validators all green** post-rename:
+  `python3 scripts/validate_metadata.py` (0 failures),
+  `python3 scripts/check_example_portability.py` (27/27),
+  `python3 scripts/check_pin_conflicts.py` (clean).
+- **ABI-breaking, pre-1.0.**  Historical `docs/abi/v0.1-snapshot.json`
+  + `v0.3-snapshot.json` left untouched (frozen historical record
+  of those tags); `v0.5-snapshot.json` regenerated to match the
+  new surface.  Pre-1.0 the change is a normal minor-cycle
+  rename; post-1.0 it would require a major bump per
+  `docs/release-policy.md`.
+- **Follow-ups tracked in `docs/v1.0-readiness.md` §1z:**
+  - Item 2: collapse `_CH<N>` suffixes (`E1M_DAC_CH0` aliases for
+    `E1M_DAC0`, etc.) -- TBD next commit.
+  - Item 3: pin-as-GPIO fallback so `alp_gpio_open(E1M_ADC0)`
+    returns a usable handle -- design TBD, will need either an
+    ID-space unification or an explicit conversion in
+    `alp_gpio_open`.
+
 ### Added (2026-05-14 -- release engineering scaffolding §C.1)
 
 - **`CODEOWNERS`** at repo root -- GH auto-requests reviews for

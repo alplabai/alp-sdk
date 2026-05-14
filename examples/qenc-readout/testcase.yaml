@@ -4,7 +4,7 @@ sample:
   name: qenc-readout
   description: |
     Per-peripheral example for the quadrature-decoder side of
-    <alp/counter.h>.  Polls ALP_E1M_ENC0's accumulated position.
+    <alp/counter.h>.  Polls E1M_ENC0's accumulated position.
 
 tests:
   alp_sdk.example.qenc_readout:

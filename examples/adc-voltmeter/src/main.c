@@ -2,7 +2,7 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * adc-voltmeter — read ALP_E1M_ADC0 and print the result in µV.
+ * adc-voltmeter — read E1M_ADC0 and print the result in µV.
  * Demonstrates the capability-validation contract by also trying
  * a deliberately-too-high resolution and showing the rejection.
  */
@@ -22,7 +22,7 @@ int main(void) {
      *    through and we land on NOT_READY instead. */
     printf("[adc] capability check: requesting 100-bit resolution\n");
     alp_adc_t *bad = alp_adc_open(&(alp_adc_config_t){
-        .channel_id      = ALP_E1M_ADC0,
+        .channel_id      = E1M_ADC0,
         .resolution_bits = 100,        /* deliberately unreasonable */
         .reference       = ALP_ADC_REF_INTERNAL,
     });
@@ -34,9 +34,9 @@ int main(void) {
     }
 
     /* 2. Real read at 12-bit resolution. */
-    printf("[adc] open ALP_E1M_ADC0 @ 12 bits\n");
+    printf("[adc] open E1M_ADC0 @ 12 bits\n");
     alp_adc_t *adc = alp_adc_open(&(alp_adc_config_t){
-        .channel_id      = ALP_E1M_ADC0,
+        .channel_id      = E1M_ADC0,
         .resolution_bits = 12,
         .reference       = ALP_ADC_REF_INTERNAL,
     });

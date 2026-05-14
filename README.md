@@ -23,8 +23,8 @@ The SDK supports both flows equally — pick whichever fits.
 
 - **Standalone / hand-written firmware.**  Write a Zephyr (or Yocto,
   or bare-metal) app against `<alp/...>` headers directly.  Pick
-  instance IDs by hand from `<alp/e1m_pinout.h>` — `ALP_E1M_I2C0`,
-  `ALP_E1M_PWM3`, etc. — and your app is portable across every
+  instance IDs by hand from `<alp/e1m_pinout.h>` — `E1M_I2C0`,
+  `E1M_PWM3`, etc. — and your app is portable across every
   E1M-conformant SoM.  Capability validation runs at runtime in
   `*_open`; `alp_last_error()` tells you why an open failed.
 - **alp-studio codegen.**  The

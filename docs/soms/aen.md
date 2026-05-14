@@ -38,7 +38,7 @@ host driver speaks the documented inter-chip protocol over SPI1:
 
 ```c
 alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
-    .bus_id = ALP_E1M_SPI1, .freq_hz = 8000000,
+    .bus_id = E1M_SPI1, .freq_hz = 8000000,
     .mode = ALP_SPI_MODE_0, .bits_per_word = 8,
 });
 cc3501e_t fw;

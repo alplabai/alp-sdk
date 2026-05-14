@@ -5,7 +5,7 @@ sample:
   description: |
     Per-feature example for <alp/peripheral.h>'s opt-in
     interrupt-driven RX ring buffer (CONFIG_ALP_SDK_UART_RX_RINGBUF).
-    Attaches an LwRB-backed ring to ALP_E1M_UART0, polls the
+    Attaches an LwRB-backed ring to E1M_UART0, polls the
     drain count + pops batched bytes, then detaches.
 
 tests:

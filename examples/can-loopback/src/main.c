@@ -2,7 +2,7 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * can-loopback — bring up ALP_E1M_CAN0 in loopback mode, send a
+ * can-loopback — bring up E1M_CAN0 in loopback mode, send a
  * frame, show that the rx callback receives it.
  *
  * Loopback mode is the canonical bring-up test for a CAN node:
@@ -40,10 +40,10 @@ static void on_rx(const alp_can_frame_t *f, void *user) {
 }
 
 int main(void) {
-    printf("[can] open ALP_E1M_CAN0 @ 500 kbps loopback\n");
+    printf("[can] open E1M_CAN0 @ 500 kbps loopback\n");
 
     alp_can_t *bus = alp_can_open(&(alp_can_config_t){
-        .bus_id              = ALP_E1M_CAN0,
+        .bus_id              = E1M_CAN0,
         /* 500 kbps is the most common automotive default; bump to
          * 1 Mbps for industrial buses or down to 125 kbps for long
          * cable runs. */

@@ -2,7 +2,7 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * v2n-pwm-fan-control -- ramp the portable `ALP_E1M_PWM0` channel
+ * v2n-pwm-fan-control -- ramp the portable `E1M_PWM0` channel
  * along a fan-speed curve.  Demonstrates the canonical
  * `alp_pwm_open` + `alp_pwm_set_duty` usage on the V2N module,
  * walking duty cycle through a five-stop curve so the wave shape
@@ -12,11 +12,11 @@
  * the Renesas RZ/V2N (~5-8 W typical) plus a DEEPX DX-M1 NPU on
  * the M1 SKUs (~10-15 W under load), so a carrier-driven fan is
  * a normal accessory.  The same code works on any E1M-conformant
- * SoM that exposes `ALP_E1M_PWM0` -- the SDK routes the call to
+ * SoM that exposes `E1M_PWM0` -- the SDK routes the call to
  * whichever silicon physically drives that pad on the active SoM
  * (Alif GPT on AEN, GD32 IO-MCU on V2N, NXP TPU on i.MX 93).
  * Application code never names a specific peripheral block; the
- * portable surface is the `<alp/pwm.h>` API + the `ALP_E1M_PWM*`
+ * portable surface is the `<alp/pwm.h>` API + the `E1M_PWM*`
  * instance IDs from `<alp/e1m_pinout.h>`.
  *
  * The example treats PWM channel 0 as the fan-control output.  A
@@ -62,7 +62,7 @@ int main(void) {
      * IO-MCU bridge internally; on AEN through the Alif GPT; on
      * i.MX 93 through the NXP TPU.  None of that surfaces here. */
     alp_pwm_t *fan = alp_pwm_open(&(alp_pwm_config_t){
-        .channel_id = ALP_E1M_PWM0,
+        .channel_id = E1M_PWM0,
         .period_ns  = FAN_PWM_PERIOD_NS,
         .polarity   = ALP_PWM_POLARITY_NORMAL,
     });

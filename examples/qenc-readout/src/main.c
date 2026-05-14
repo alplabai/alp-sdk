@@ -2,7 +2,7 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * qenc-readout — open ALP_E1M_ENC0 and poll the accumulated
+ * qenc-readout — open E1M_ENC0 and poll the accumulated
  * position for ~1 second.
  *
  * Quadrature encoders are the standard interface for rotary
@@ -13,7 +13,7 @@
  *
  * The E1M spec reserves four encoders (ENC0..ENC3), each routed
  * as a complementary pad pair (ENCn_X / ENCn_Y).  Apps that only
- * use ALP_E1M_ENCn for n < ALP_E1M_ENC_COUNT (= 4) stay portable
+ * use E1M_ENCn for n < E1M_ENC_COUNT (= 4) stay portable
  * across every E1M-conformant SoM.
  */
 
@@ -24,10 +24,10 @@
 #include "alp/counter.h"
 
 int main(void) {
-    printf("[qenc] open ALP_E1M_ENC0\n");
+    printf("[qenc] open E1M_ENC0\n");
 
     alp_qenc_t *enc = alp_qenc_open(&(alp_qenc_config_t){
-        /* encoder_id 0 = ALP_E1M_ENC0.  This is just an index into
+        /* encoder_id 0 = E1M_ENC0.  This is just an index into
          * the alp-qenc<N> DT alias table; the SoC binds it to a
          * specific QDEC peripheral. */
         .encoder_id     = 0,

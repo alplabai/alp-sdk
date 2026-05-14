@@ -4,7 +4,7 @@ sample:
   name: i2c-scanner
   description: |
     Per-peripheral example for I²C.  Walks 7-bit addresses on
-    ALP_E1M_I2C0 and reports responders.
+    E1M_I2C0 and reports responders.
 
 tests:
   alp_sdk.example.i2c_scanner:

@@ -2,7 +2,7 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * i2s-tone — stream a triangle wave to ALP_E1M_I2S0 as 16-bit
+ * i2s-tone — stream a triangle wave to E1M_I2S0 as 16-bit
  * stereo PCM.  Demonstrates the full lifecycle: open / start /
  * write / stop / close.
  *
@@ -43,10 +43,10 @@
 #define BLOCKS_TO_SEND 4u
 
 int main(void) {
-    printf("[i2s] open ALP_E1M_I2S0 @ 48 kHz s16 stereo TX\n");
+    printf("[i2s] open E1M_I2S0 @ 48 kHz s16 stereo TX\n");
 
     alp_i2s_t *i2s = alp_i2s_open(&(alp_i2s_config_t){
-        .bus_id          = ALP_E1M_I2S0,
+        .bus_id          = E1M_I2S0,
         .sample_rate_hz  = SR,
         .word_bits       = 16,                  /* 16/24/32 supported */
         .channels        = 2,                   /* 1 = mono, 2 = stereo */

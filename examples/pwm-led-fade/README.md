@@ -1,12 +1,12 @@
 # pwm-led-fade
 
 Per-peripheral example for `<alp/pwm.h>`.  Fades an LED on PWM
-channel `ALP_E1M_PWM0` from 0 % to 100 % and back, demonstrating
+channel `E1M_PWM0` from 0 % to 100 % and back, demonstrating
 the canonical open / set-duty / close pattern.
 
 ## What this shows
 
-- Resolving a portable PWM channel ID (`ALP_E1M_PWM0`) into a
+- Resolving a portable PWM channel ID (`E1M_PWM0`) into a
   driver handle via `alp_pwm_open`.
 - Updating the duty cycle in a tick loop with `alp_pwm_set_duty`.
 - Reading `alp_last_error()` to diagnose `*_open` failures —

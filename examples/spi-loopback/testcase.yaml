@@ -4,7 +4,7 @@ sample:
   name: spi-loopback
   description: |
     Per-peripheral example for SPI.  Open / transceive / close
-    on ALP_E1M_SPI0 with no CS GPIO.
+    on E1M_SPI0 with no CS GPIO.
 
 tests:
   alp_sdk.example.spi_loopback:

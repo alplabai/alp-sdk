@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Two emulated GPIOs: index 0 = button (active low, pull-up),
- * index 1 = LED (active high).  Matches the ALP_E1M_GPIO_IO0
- * and ALP_E1M_GPIO_IO1 conventions the example uses.
+ * index 1 = LED (active high).  Matches the E1M_GPIO_IO0
+ * and E1M_GPIO_IO1 conventions the example uses.
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>

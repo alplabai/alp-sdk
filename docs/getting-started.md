@@ -20,7 +20,7 @@ bash scripts/bootstrap.sh                            # one-time: west + Python +
 export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
 west alp-build -b native_sim/native/64 examples/gpio-button-led
 west build -d build -t run
-# expect: [gpio] init button=ALP_E1M_GPIO_IO0, led=ALP_E1M_GPIO_IO1
+# expect: [gpio] init button=E1M_GPIO_IO0, led=E1M_GPIO_IO1
 #          ...
 #          [gpio] done
 ```
@@ -101,7 +101,7 @@ rationale.
 
 You write Zephyr / Yocto / bare-metal app code directly against
 `<alp/...>` headers.  Pick instance IDs by hand from
-`<alp/e1m_pinout.h>` (`ALP_E1M_I2C0`, `ALP_E1M_PWM3`, …).  Your
+`<alp/e1m_pinout.h>` (`E1M_I2C0`, `E1M_PWM3`, …).  Your
 app stays portable across every E1M-conformant SoM.  The rest
 of this document covers this path.
 
@@ -188,7 +188,7 @@ Expected output:
 
 ```
 *** Booting Zephyr OS build v3.7.0 ***
-[gpio] init button=ALP_E1M_GPIO_IO0, led=ALP_E1M_GPIO_IO1
+[gpio] init button=E1M_GPIO_IO0, led=E1M_GPIO_IO1
 [gpio] led=0 status=0
 [gpio] led=1 status=0
 [gpio] led=0 status=0

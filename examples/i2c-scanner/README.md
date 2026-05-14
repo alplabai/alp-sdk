@@ -1,11 +1,11 @@
 # i2c-scanner
 
 Per-peripheral example for `<alp/peripheral.h>` I²C.  Walks every
-7-bit address on `ALP_E1M_I2C0` and reports which respond.
+7-bit address on `E1M_I2C0` and reports which respond.
 
 ## What this shows
 
-- Opening an I²C bus by portable bus ID (`ALP_E1M_I2C0`).
+- Opening an I²C bus by portable bus ID (`E1M_I2C0`).
 - Bus scan via zero-length `alp_i2c_write`s — the canonical
   scanner pattern.
 

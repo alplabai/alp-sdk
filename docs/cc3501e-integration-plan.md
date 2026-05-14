@@ -256,7 +256,7 @@ The host driver opens SPI1 via:
 
 ```c
 alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
-    .bus_id        = ALP_E1M_SPI1,
+    .bus_id        = E1M_SPI1,
     .freq_hz       = 8000000,          // current default; TBD by signal-integrity
     .mode          = ALP_SPI_MODE_0,   // CPOL = 0, CPHA = 0
     .bits_per_word = 8,
@@ -364,7 +364,7 @@ If/when SDIO is exposed, the host driver opens via:
 
 ```c
 alp_sdio_t *bus = alp_sdio_open(&(alp_sdio_config_t){
-    .bus_id    = ALP_E1M_SDIO,
+    .bus_id    = E1M_SDIO,
     .bus_width = 4,                       // 1 or 4-bit; TBD by signal-integrity
     .freq_hz   = 50000000,                // SDIO 2.0 50 MHz default
     .obi       = ALP_SDIO_OBI_DEDICATED,  // out-of-band IRQ on GPIO_29 per datasheet (TBD)

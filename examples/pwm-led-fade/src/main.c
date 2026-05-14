@@ -27,10 +27,10 @@
 #define STEP_DELAY_MS      20
 
 int main(void) {
-    printf("[pwm] open ALP_E1M_PWM0 (period=%u ns)\n", PERIOD_NS);
+    printf("[pwm] open E1M_PWM0 (period=%u ns)\n", PERIOD_NS);
 
     alp_pwm_t *led = alp_pwm_open(&(alp_pwm_config_t){
-        .channel_id = ALP_E1M_PWM0,
+        .channel_id = E1M_PWM0,
         .period_ns  = PERIOD_NS,
         .polarity   = ALP_PWM_POLARITY_NORMAL,
     });

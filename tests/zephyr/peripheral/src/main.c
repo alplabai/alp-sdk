@@ -329,7 +329,7 @@ ZTEST(alp_peripheral, test_dac_null_cfg) {
 }
 
 ZTEST(alp_peripheral, test_dac_out_of_range_channel) {
-    /* ALP_E1M_DAC_COUNT = 2; the wrapper's internal array sized to
+    /* E1M_DAC_COUNT = 2; the wrapper's internal array sized to
      * match.  Channel id 9 must reject. */
     alp_dac_t *d = alp_dac_open(&(alp_dac_config_t){
         .channel_id = 9u,

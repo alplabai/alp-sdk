@@ -2,7 +2,7 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * i2c-scanner — open ALP_E1M_I2C0 and probe every 7-bit address.
+ * i2c-scanner — open E1M_I2C0 and probe every 7-bit address.
  * The canonical "any device on this bus?" pattern.
  */
 
@@ -12,10 +12,10 @@
 #include "alp/e1m_pinout.h"
 
 int main(void) {
-    printf("[i2c] open ALP_E1M_I2C0 @ 100 kHz\n");
+    printf("[i2c] open E1M_I2C0 @ 100 kHz\n");
 
     alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id     = ALP_E1M_I2C0,
+        .bus_id     = E1M_I2C0,
         .bitrate_hz = 100000,
     });
     if (bus == NULL) {

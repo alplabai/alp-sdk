@@ -504,7 +504,7 @@ def _emit_cmake(
 # invent gpio bank numbers or per-pad GPIO_ACTIVE_* flags.  The
 # emitted .overlay declares the carrier's bus aliases and a stub
 # alp,pin-array with one entry per EVK_PIN_* macro, each annotated
-# with a comment naming the macro and the ALP_E1M_GPIO_IO<N> it
+# with a comment naming the macro and the E1M_GPIO_IO<N> it
 # resolves to.  Customers fill the gpio bank / index columns with
 # their SoM's actual DT controller phandles once the upstream board
 # files land in alplabai/alp-zephyr-modules.
@@ -517,11 +517,11 @@ def _emit_cmake(
 # job is to surface every alias the carrier wants, not to second-
 # guess vendor DT naming.
 
-# Match `#define <NAME> ALP_E1M_<CLASS><N>` (with optional trailing
+# Match `#define <NAME> E1M_<CLASS><N>` (with optional trailing
 # token).  Class is one of the bus / pwm / gpio names we care about
 # at v0.3 scope.
 _DEFINE_E1M_RE = re.compile(
-    r"^\s*#\s*define\s+(\w+)\s+ALP_E1M_(I2C|SPI|UART|PWM|GPIO_IO)(\d+)\b",
+    r"^\s*#\s*define\s+(\w+)\s+E1M_(I2C|SPI|UART|PWM|GPIO_IO)(\d+)\b",
     re.MULTILINE,
 )
 
@@ -561,7 +561,7 @@ def _parse_carrier_macros(
     header_path: Path,
 ) -> dict[str, list[tuple[str, int]]]:
     """Return {class_name: [(macro_name, channel_index), ...]} for
-    each ALP_E1M_<CLASS><N> reference in the carrier header."""
+    each E1M_<CLASS><N> reference in the carrier header."""
     raw = header_path.read_text(encoding="utf-8")
     text = _strip_c_comments(_collapse_line_continuations(raw))
     out: dict[str, list[tuple[str, int]]] = {
@@ -635,7 +635,7 @@ def _emit_dts_overlay(
     lines.append("")
 
     # alp,pin-array -- one entry per EVK_PIN_* / EVK_ARD_DIO* macro
-    # that resolves to ALP_E1M_GPIO_IO<N>.  Preserves macro ordering
+    # that resolves to E1M_GPIO_IO<N>.  Preserves macro ordering
     # so the customer can fill in `<&gpioX Y FLAGS>` columns in place.
     gpio_entries = macros.get("GPIO_IO", [])
     if gpio_entries:
@@ -653,7 +653,7 @@ def _emit_dts_overlay(
             # carries the authoritative E1M IO index from the header.
             lines.append(
                 f"            <&gpio0 0 GPIO_ACTIVE_HIGH>{terminator}"
-                f"  /* {macro_name} = ALP_E1M_GPIO_IO{idx} */"
+                f"  /* {macro_name} = E1M_GPIO_IO{idx} */"
             )
         lines.append("    };")
         lines.append("")

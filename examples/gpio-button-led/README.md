@@ -13,7 +13,7 @@ needs comes from `board.yaml` -> `scripts/alp_project.py` ->
 ## What this shows
 
 - The portable button + LED block pattern: studio-resolved
-  `pin_id` integers (`ALP_E1M_GPIO_IO0` / `ALP_E1M_GPIO_IO1`) feed
+  `pin_id` integers (`E1M_GPIO_IO0` / `E1M_GPIO_IO1`) feed
   `alp_button_led_init`.
 - Active-low button convention.
 - Press detection via polling (interrupt path is the helper's

@@ -5,7 +5,7 @@ the canonical transceive pattern.
 
 ## What this shows
 
-- Opening an SPI bus by portable bus ID (`ALP_E1M_SPI0`).
+- Opening an SPI bus by portable bus ID (`E1M_SPI0`).
 - `alp_spi_transceive` — full-duplex byte exchange.
 - The `cs_pin_id` pattern when chip-select is driven by a GPIO.
 

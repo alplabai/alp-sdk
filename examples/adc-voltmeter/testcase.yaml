@@ -4,7 +4,7 @@ sample:
   name: adc-voltmeter
   description: |
     Per-peripheral example for <alp/adc.h>.  Demonstrates open /
-    capability-validation / read_uv / close on ALP_E1M_ADC0.
+    capability-validation / read_uv / close on E1M_ADC0.
 
 tests:
   alp_sdk.example.adc_voltmeter:

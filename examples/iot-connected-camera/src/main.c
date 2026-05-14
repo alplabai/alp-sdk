@@ -37,7 +37,7 @@ static int stage_peripherals_init(void) {
     printf("[iotcam] stage 1: peripherals\n");
 
     g_sensor_bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id     = ALP_E1M_I2C0,
+        .bus_id     = E1M_I2C0,
         .bitrate_hz = 400000,
     });
     if (g_sensor_bus == NULL) {
@@ -52,8 +52,8 @@ static int stage_peripherals_init(void) {
            (s == ALP_OK) ? "ok" : "skip (no panel)");
 
     s = alp_button_led_init(&g_trigger, &(alp_button_led_config_t){
-        .button_pin_id     = ALP_E1M_GPIO_IO0,
-        .led_pin_id        = ALP_E1M_GPIO_IO1,
+        .button_pin_id     = E1M_GPIO_IO0,
+        .led_pin_id        = E1M_GPIO_IO1,
         .active_low_button = true,
     });
     printf("[iotcam]   alp_button_led_init           %s\n",

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * uart-rx-ringbuf — exercise the opt-in LwRB-backed RX path on
- * ALP_E1M_UART0.
+ * E1M_UART0.
  *
  * The classic alp_uart_read() blocks the calling thread until at
  * least one byte arrives.  That's fine for command-line prompts but
@@ -52,14 +52,14 @@ static uint8_t rx_backing[64];
 
 int main(void)
 {
-    printf("[ringbuf] open ALP_E1M_UART0 @ 115200 8N1\n");
+    printf("[ringbuf] open E1M_UART0 @ 115200 8N1\n");
 
     /* The classic open() — no different from the uart-echo example.
      * The ringbuf is a *layer on top*, not a replacement.  Apps that
      * mix polled reads with ringbuf reads on the same handle work,
      * though the typical pattern is one or the other. */
     alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
-        .port_id   = ALP_E1M_UART0,
+        .port_id   = E1M_UART0,
         .baudrate  = 115200,
         .data_bits = 8,
         .stop_bits = 1,

@@ -514,7 +514,7 @@ is declared) `ALP_HW_BUILD_CARRIER_NAME` +
 
 `--emit dts-overlay` reads the carrier header at
 `include/alp/boards/<carrier>.h`, finds every `#define X
-ALP_E1M_<class><N>` macro for the v0.3-scoped classes (I2C, SPI,
+E1M_<class><N>` macro for the v0.3-scoped classes (I2C, SPI,
 UART, PWM, GPIO_IO), and emits a Zephyr `.overlay` declaring:
 
 - One alias per bus channel the carrier wires (`alp-i2c<N> =
@@ -524,7 +524,7 @@ UART, PWM, GPIO_IO), and emits a Zephyr `.overlay` declaring:
   channel.
 - An `alp_pins` node with `compatible = "alp,pin-array"` and one
   `gpios` entry per `EVK_PIN_*` macro that resolves to an
-  `ALP_E1M_GPIO_IO<N>`.  Each entry's `<&gpioX Y FLAGS>` triplet
+  `E1M_GPIO_IO<N>`.  Each entry's `<&gpioX Y FLAGS>` triplet
   is a TBD placeholder; the trailing comment carries the macro
   name and the E1M IO index so the customer can fill the columns
   in place without renumbering.

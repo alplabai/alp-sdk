@@ -5,7 +5,7 @@ single bytes from the UART and writes them back.
 
 ## What this shows
 
-- Opening a UART port by portable port ID (`ALP_E1M_UART0`).
+- Opening a UART port by portable port ID (`E1M_UART0`).
 - Synchronous read with timeout via `alp_uart_read`.
 - Mirror-write back via `alp_uart_write`.
 

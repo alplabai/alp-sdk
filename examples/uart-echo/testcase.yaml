@@ -4,7 +4,7 @@ sample:
   name: uart-echo
   description: |
     Per-peripheral example for UART.  Demonstrates open / read /
-    write / close on ALP_E1M_UART0.
+    write / close on E1M_UART0.
 
 tests:
   alp_sdk.example.uart_echo:
