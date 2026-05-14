@@ -24,8 +24,9 @@ memory:
   mram_kbit:            TBD
 
 inference:
-  preferred_backend:    ethos_u                # E8 ships Ethos-U85 in addition to U55
-  ethos_u_variant:      u55                    # U55 is the always-present variant; U85 path TBD
+  preferred_backend:    ethos_u                # E8 ships Ethos-U85 in addition to U55.
+  ethos_u_variant:      u85                    # primary -- E8 ships one U85 alongside two U55s.
+  ethos_u_variants:     [u85, u55]             # full NPU population on this silicon.
 
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 

@@ -43,8 +43,9 @@ memory:
 # Inference defaults -- the SoM's most-capable backend wins for
 # `inference.backend: auto`.
 inference:
-  preferred_backend:    ethos_u             # Ethos-U55 NPU on-die
-  ethos_u_variant:      u55                 # vs u65 on i.MX 93
+  preferred_backend:    ethos_u             # Ethos-U55 NPU on-die.
+  ethos_u_variant:      u55                 # vs u65 on i.MX 93.
+  ethos_u_variants:     [u55]               # E7 carries two U55s; no U85.
 
 # Standard carrier the SoM mounts on for development.  Consumers
 # can pick any carrier or write their own in board.yaml.

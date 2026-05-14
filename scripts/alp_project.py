@@ -354,6 +354,20 @@ def _emit_zephyr(
         lines.append("CONFIG_ALP_SDK_INFERENCE_TFLM=y")
         if backend == "ethos_u":
             lines.append("CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y")
+            # Per-NPU kernel driver selection.  The dispatch gate
+            # above (CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y) pulls in the
+            # TFLM op resolver; the gates below pull in the matching
+            # low-level driver shim:
+            #   - U85 lives on Alif E4 / E6 / E8 only (one per SoC,
+            #     Transformer-capable).
+            #   - U55 lives on every Alif Ensemble SKU (two per SoC).
+            #   - U65 lives on i.MX 93 (driver shim is N93-specific).
+            # Keep `ethos_u` as the customer-facing token; consumers
+            # don't have to know which variant the silicon carries.
+            if silicon in ("alif:ensemble:e4", "alif:ensemble:e6", "alif:ensemble:e8"):
+                lines.append("CONFIG_ALP_TFLM_ETHOS_U85=y")
+            if silicon and silicon.startswith("alif:ensemble:"):
+                lines.append("CONFIG_ALP_TFLM_ETHOS_U55=y")
             if silicon == "nxp:imx9:imx93":
                 lines.append("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y")
     elif backend == "drpai":

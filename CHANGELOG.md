@@ -84,6 +84,38 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Fixed (2026-05-14 -- §D.lib.loader follow-up: Ethos-U85 propagated through every consumer)
+
+Phase 2b's per-NPU split landed in the new `tflite_micro` library-
+profile loader but didn't propagate to the existing inference
+dispatcher path or the SoM-preset metadata.  This commit closes
+those gaps so every layer reflects the U85 / U55 / U65 split:
+
+- `scripts/alp_project.py`: the legacy `preferred_backend: ethos_u`
+  path now emits the per-NPU driver Kconfigs alongside the legacy
+  dispatcher gate.  Silicon `alif:ensemble:e4 | e6 | e8`
+  → `CONFIG_ALP_TFLM_ETHOS_U85=y` + `CONFIG_ALP_TFLM_ETHOS_U55=y`.
+  Other Alif Ensemble SKUs (E3 / E5 / E7) → `CONFIG_ALP_TFLM_ETHOS_U55=y`
+  only.  `nxp:imx9:imx93` → `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y`
+  (unchanged).  `CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y` stays as the
+  customer-facing dispatcher gate.
+
+- `metadata/e1m_modules/E1M-AEN*.yaml`: new `ethos_u_variants:`
+  list captures the full NPU population per SKU.  AEN401 / AEN601 /
+  AEN801 now declare `[u85, u55]`; the others stay `[u55]`.  The
+  singular `ethos_u_variant:` field promotes to the primary
+  (U85 on the U85-bearing SKUs).
+
+- `include/alp/inference.h`: `ALP_INFERENCE_BACKEND_ETHOS_U` enum
+  doc enumerates the three variants the token covers (U85 / U65 /
+  U55) + the per-SKU loader behaviour.  Public ABI stays generic.
+
+- `src/zephyr/inference_tflm.cpp`: file-header comment generalised
+  from "U55 + U65" to "U55 + U65 + U85" with the per-Kconfig matrix.
+
+- `README.md` inference-dispatcher row: notes the U55 / U85 / U65
+  coverage.
+
 ### Fixed (2026-05-14 -- §D.lib.loader: Ethos-U85 vs U55 differentiation for tflite_micro)
 
 §D.lib batch collapsed both Alif NPUs (Ethos-U55 + Ethos-U85) under

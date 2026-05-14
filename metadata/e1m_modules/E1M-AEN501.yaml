@@ -26,6 +26,7 @@ memory:
 inference:
   preferred_backend:    ethos_u
   ethos_u_variant:      u55
+  ethos_u_variants:     [u55]              # E5 carries two U55s; no U85.
 
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 

@@ -52,11 +52,24 @@ extern "C" {
 
 /** Backend selector.  AUTO routes to the best available NPU; the
  *  others force a specific backend (useful for benchmarking, or to
- *  fall through to CPU when the model doesn't map to NPU ops). */
+ *  fall through to CPU when the model doesn't map to NPU ops).
+ *
+ *  The `ETHOS_U` token is a single customer-facing handle that
+ *  covers every Arm Ethos NPU variant the SDK targets:
+ *  - Ethos-U85 on Alif Ensemble E4 / E6 / E8 (Transformer-capable;
+ *    the loader picks this first on those SKUs via the
+ *    `CONFIG_ALP_TFLM_ETHOS_U85=y` per-NPU driver gate).
+ *  - Ethos-U55 on every Alif Ensemble SKU (two per SoC;
+ *    `CONFIG_ALP_TFLM_ETHOS_U55=y`).
+ *  - Ethos-U65 on NXP i.MX 93 / E1M-NX9101
+ *    (`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y`).
+ *  Customers don't have to know which variant the silicon carries;
+ *  Vela picks at model-compile time and the runtime dispatches via
+ *  the matching driver shim emitted by `scripts/alp_project.py`. */
 typedef enum {
     ALP_INFERENCE_BACKEND_AUTO     = 0,
     ALP_INFERENCE_BACKEND_CPU      = 1,    /**< TFLM reference kernels. */
-    ALP_INFERENCE_BACKEND_ETHOS_U  = 2,    /**< Arm Ethos-U via Vela. */
+    ALP_INFERENCE_BACKEND_ETHOS_U  = 2,    /**< Arm Ethos-U via Vela (U55 / U65 / U85). */
     ALP_INFERENCE_BACKEND_DRPAI    = 3,    /**< Renesas DRP-AI3. */
     ALP_INFERENCE_BACKEND_DEEPX_DX = 4     /**< DEEPX DX-M1. */
 } alp_inference_backend_t;

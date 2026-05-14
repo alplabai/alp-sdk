@@ -14,14 +14,21 @@
  * + `tflite::MicroMutableOpResolver` only via its C++ surface; the
  * C wrapper in TFL is for the full runtime, not the micro variant.
  * Wrapping it in C++ keeps the binding simple and lets us reuse Arm's
- * Ethos-U op resolver (`AddEthosU()`) verbatim for both the
- * Alif AEN path (Ethos-U55) and the NXP i.MX 93 path (Ethos-U65) --
- * the SDK source code is identical between U55 and U65; only the
- * upstream Vela `--accelerator-config` + Arm Ethos-U driver build
- * config differ.  Per-variant hooks live in src/zephyr/inference_ethosu_n93.c
- * (gated by CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93); a future
- * inference_ethosu_aen.c would do the AEN-side equivalent if Alif's
- * driver layer needs distinct attach helpers.
+ * Ethos-U op resolver (`AddEthosU()`) verbatim across every Ethos NPU
+ * variant the SDK targets:
+ *   - Alif AEN E3 / E5 / E7  -> Ethos-U55 (CONFIG_ALP_TFLM_ETHOS_U55=y).
+ *   - Alif AEN E4 / E6 / E8  -> Ethos-U85 primary
+ *                               (CONFIG_ALP_TFLM_ETHOS_U85=y) +
+ *                               U55 fallback (always also linked).
+ *   - NXP i.MX 93            -> Ethos-U65 (CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y).
+ * The SDK source code below is identical across all three variants;
+ * only the upstream Vela `--accelerator-config` + Arm Ethos-U driver
+ * build config differ between the per-NPU `CONFIG_ALP_TFLM_ETHOS_U*`
+ * gates.  Per-variant attach hooks live in
+ * src/zephyr/inference_ethosu_n93.c (gated by
+ * CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93); a future inference_ethosu_aen.c
+ * would carry the AEN-side equivalents (U85 + U55 driver shims) if
+ * Alif's driver layer needs distinct attach helpers.
  *
  * Native-sim does NOT enable CONFIG_TENSORFLOW_LITE_MICRO so this
  * file is excluded from the native_sim build entirely; the wrapper

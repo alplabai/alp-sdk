@@ -25,7 +25,8 @@ memory:
 
 inference:
   preferred_backend:    ethos_u
-  ethos_u_variant:      u55
+  ethos_u_variant:      u85               # primary -- E6 ships one U85 alongside two U55s.
+  ethos_u_variants:     [u85, u55]        # full NPU population on this silicon.
 
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
