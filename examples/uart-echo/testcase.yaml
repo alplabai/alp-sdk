@@ -17,8 +17,8 @@ tests:
       - alp-sdk
       - example
       - uart
-      harness: console
-  harness_config:
-      type: one_line
-      regex:
-        - "\\[uart\\] done"
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[uart\\] done"

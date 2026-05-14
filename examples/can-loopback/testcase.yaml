@@ -17,8 +17,8 @@ tests:
       - alp-sdk
       - example
       - can
-      harness: console
-  harness_config:
-      type: one_line
-      regex:
-        - "\\[can\\] done"
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[can\\] done"

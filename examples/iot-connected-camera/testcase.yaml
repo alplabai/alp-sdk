@@ -19,11 +19,11 @@ tests:
       - example
       - iot
     build_only: false
-      harness: console
-  harness_config:
-      type: one_line
-      regex:
-        - "\\[iotcam\\] done"
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[iotcam\\] done"
 
   # alp_sdk.example.iot_connected_camera.evk_v2n — HW-in-loop
   # variant for the E1M EVK populated with an E1M-V2N family SoM.

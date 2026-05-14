@@ -17,8 +17,8 @@ tests:
       - alp-sdk
       - example
       - spi
-      harness: console
-  harness_config:
-      type: one_line
-      regex:
-        - "\\[spi\\] done"
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[spi\\] done"

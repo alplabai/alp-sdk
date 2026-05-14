@@ -20,8 +20,8 @@ tests:
       - example
       - uart
       - lwrb
-      harness: console
-  harness_config:
-      type: one_line
-      regex:
-        - "\\[ringbuf\\] done"
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[ringbuf\\] done"

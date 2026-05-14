@@ -19,8 +19,8 @@ tests:
       - alp-sdk
       - example
       - pwm
-      harness: console
-  harness_config:
-      type: one_line
-      regex:
-        - "\\[pwm\\] done"
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[pwm\\] done"

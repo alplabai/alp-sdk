@@ -17,8 +17,8 @@ tests:
       - alp-sdk
       - example
       - counter
-      harness: console
-  harness_config:
-      type: one_line
-      regex:
-        - "\\[counter\\] done"
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[counter\\] done"

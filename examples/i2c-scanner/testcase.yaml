@@ -17,8 +17,8 @@ tests:
       - alp-sdk
       - example
       - i2c
-      harness: console
-  harness_config:
-      type: one_line
-      regex:
-        - "\\[i2c\\] done"
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[i2c\\] done"

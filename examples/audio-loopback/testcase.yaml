@@ -22,8 +22,8 @@ tests:
       - alp-sdk
       - example
       - audio
-      harness: console
-  harness_config:
-      type: one_line
-      regex:
-        - "\\[audio\\] done"
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[audio\\] done"

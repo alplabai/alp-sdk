@@ -17,8 +17,8 @@ tests:
       - alp-sdk
       - example
       - adc
-      harness: console
-  harness_config:
-      type: one_line
-      regex:
-        - "\\[adc\\] done"
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[adc\\] done"
