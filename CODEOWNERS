@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# CODEOWNERS for the ALP SDK.
+#
+# GitHub auto-requests reviews from owners listed here whenever a PR
+# touches matching paths.  Maintainers listed below MUST review +
+# approve a PR before merge when their area is touched.
+#
+# Format: `<glob>  <owner1> <owner2> ...`
+# See: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default: anything not matched by a more specific rule falls back to
+# the maintainer.
+*                              @alpCaner
+
+# --- Public surface (ABI-load-bearing) ---
+# Every change here is a candidate for an ABI-snapshot bump + a
+# CHANGELOG entry.  Reviewer must confirm whether the change is
+# binary/source-compatible vs requires a major-version bump.
+/include/alp/                  @alpCaner
+
+# --- Schemas (consumer contract) ---
+# Edits here change what valid `board.yaml` files look like for
+# every downstream consumer.  Treat as ABI-equivalent.
+/metadata/schemas/             @alpCaner
+/metadata/templates/           @alpCaner
+
+# --- Loader + validator (silent breakage risk) ---
+# The loader is the single source of truth between board.yaml and
+# the per-backend native config; a bug here surfaces as "the build
+# silently picked the wrong CONFIG_*".
+/scripts/alp_project.py        @alpCaner
+/scripts/validate_board_yaml.py @alpCaner
+/scripts/validate_metadata.py  @alpCaner
+
+# --- ABI tooling + frozen snapshots ---
+# The snapshots are the v1.0 release-gate artefact.
+/scripts/abi_snapshot.py       @alpCaner
+/docs/abi/                     @alpCaner
+
+# --- Vendor SDK bindings (cross-SoM blast radius) ---
+/chips/                        @alpCaner
+/src/zephyr/                   @alpCaner
+/src/yocto/                    @alpCaner
+/src/baremetal/                @alpCaner
+
+# --- Firmware blobs + GD32 bridge (carrier-side load-bearing) ---
+/firmware/                     @alpCaner
+
+# --- Security-sensitive paths ---
+/zephyr/sysbuild/aen/          @alpCaner
+/keys/                         @alpCaner
+/docs/secure-boot.md           @alpCaner
+/docs/ota.md                   @alpCaner
+/docs/ota-device-contract.md   @alpCaner
+/docs/security-advisories.md   @alpCaner
+
+# --- CI infrastructure (gate logic; a regression here lets bad PRs land) ---
+/.github/                      @alpCaner
+
+# --- Release engineering ---
+/CHANGELOG.md                  @alpCaner
+/VERSIONS.md                   @alpCaner
+/docs/release-policy.md        @alpCaner
+/docs/v1.0-readiness.md        @alpCaner
