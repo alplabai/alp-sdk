@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Twister smoke test for the §D.lib library-knob path.
+# See CMakeLists.txt header for scope.
+
+tests:
+  alp_sdk.library_knobs.smoke:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - library_knobs
+      - smoke

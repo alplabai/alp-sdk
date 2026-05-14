@@ -84,6 +84,38 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- §D.lib.loader: native_sim twister scenario for library knobs)
+
+`tests/zephyr/library_knobs/` -- new twister test scenario that
+exercises the alp.conf → Kconfig → Zephyr build chain end-to-end
+for the §D.lib library set on `native_sim/native/64`.  Three
+on-purpose checks:
+
+1. **mbedtls links** -- includes `mbedtls/version.h` + asserts
+   `MBEDTLS_VERSION_NUMBER != 0` and `mbedtls_version_get_string`
+   resolves.  Catches `CONFIG_MBEDTLS=y` emission breakage that
+   the existing alp_project.py Python tests can't see (those
+   only check the emitted CONFIG_*=y lines, not whether they
+   produce a buildable Zephyr image).
+2. **cmsis_dsp links** -- includes `arm_math.h` + calls
+   `arm_copy_f32(...)`.  Confirms CMSIS-DSP's symbol surface
+   resolves at link time.
+3. **§D.lib SW-fallback knobs reachable from Kconfig** -- compile-
+   time check counts 21 `CONFIG_ALP_<LIB>_<FALLBACK>=y` knobs
+   declared in `zephyr/Kconfig.alp-libraries` and asserts each
+   one is defined.  Catches a broken `rsource "Kconfig.alp-libraries"`
+   line in `zephyr/Kconfig` (the most likely v0.6 regression).
+
+Test registers with twister under tag `library_knobs.smoke`;
+runs on every push that touches `metadata/library-profiles/`,
+`zephyr/Kconfig.alp-libraries`, or `scripts/alp_project.py`.
+
+`extras-tier1`-only libraries (u8g2, opus, libcoap, libwebsockets,
+...) are NOT exercised here because their west pin is disabled
+by default; a follow-up workflow that flips
+`--group-filter +extras-tier1` will cover them once those pins
+stabilise from `# TBD: pin SHA` to specific revisions.
+
 ### Added (2026-05-14 -- §D.lib.loader: unit tests + west.yml extras-tier1 group)
 
 Two follow-ups so the §D.lib batch + loader stay regression-safe
