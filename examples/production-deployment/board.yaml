@@ -16,16 +16,16 @@ carrier:
 
 os: zephyr
 
-peripherals:
-  - iot     # WiFi + MQTT + TLS for the Mender connection
-  - storage # internal-flash slot inspection
-  - security # AEAD + TRNG for attestation
-  # The OPTIGA Trust M chip driver opts in independently per the
-  # `chips/` block below -- it's not a portable-surface dependency.
+# IoT features (WiFi + MQTT + TLS) ride the `iot:` block; the
+# alp_project.py emitter translates wifi/mqtt/tls into
+# CONFIG_ALP_SDK_IOT_WIFI / _MQTT / _SECURITY.
+iot:
+  wifi: true
+  mqtt: true
+  tls: true
 
 libraries:
   - mbedtls    # TLS for Mender + AEAD primitives
-  - mcuboot    # secure-boot evidence read-back
 
 chips:
   - optiga_trust_m
@@ -37,4 +37,9 @@ diagnostics:
 # Secure-boot signing happens at release-build time -- the
 # zephyr/sysbuild/aen/ profile carries the ECDSA-P256 key
 # configuration that turns this app into a signed image.  See
-# docs/secure-boot.md for the key-management contract.
+# docs/secure-boot.md for the key-management contract.  MCUboot
+# slot inspection at runtime via <alp/storage.h> goes through
+# the internal-flash backend (no explicit board.yaml `chips:`
+# or libraries entry required -- the storage surface is always
+# available on Zephyr targets that have an internal flash
+# controller in DT).

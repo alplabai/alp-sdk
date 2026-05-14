@@ -16,19 +16,22 @@ carrier:
 
 os: zephyr
 
-peripherals:
-  - inference     # <alp/inference.h>
-  # power_mgmt enabled implicitly via the V2N supervisor's
-  # SYS_INIT hook; the §C.28 v2n_power_mgmt.c brings up the
-  # 0.75 V DEEPX rail when P65 fires.
-
-libraries:
-  - none
+# Inference dispatcher routes through alp_project.py's
+# `inference:` block (which emits CONFIG_ALP_SDK_INFERENCE_*).
+# DEEPX-DX backend is Yocto-only -- under Zephyr the Kconfig
+# emits a NOSUPPORT-stub note; real inference happens on the
+# customer's Yocto image via dx_rt.
+inference:
+  backend: deepx_dx
 
 chips:
   - deepx_dxm1    # host driver: PCIe mux + M1_RESET sequencer
   - da9292        # PMIC for the DEEPX 0.75 V rail
   - pi3dbs12212   # PCIe mux
+
+# v2n_power_mgmt (§C.28) auto-brings-up the 0.75 V DEEPX rail
+# on P65 IRQ via the V2N supervisor's SYS_INIT hook -- no
+# board.yaml-level wiring needed.
 
 diagnostics:
   log_level: info

@@ -14,13 +14,10 @@ carrier:
 
 os: zephyr
 
-peripherals:
-  - mproc
-
-# Pull in the SDK's mproc mailbox + shmem helpers.  The hardware
-# semaphore wires through too when CONFIG_ALP_SDK_MPROC=y.
-libraries:
-  - none
+# CONFIG_ALP_SDK_MPROC=y is supplied via testcase.yaml's
+# `extra_args` -- the schema's `peripherals:` enum is for Zephyr
+# driver-class subsystems (adc/can/i2c/spi/...), not for SDK
+# feature toggles, so mproc rides extra_args instead.
 
 diagnostics:
   log_level: info

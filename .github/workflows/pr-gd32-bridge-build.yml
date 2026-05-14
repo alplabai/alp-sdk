@@ -65,7 +65,7 @@ jobs:
 
       - name: Configure (stub backend)
         run: |
-          cmake -B firmware/gd32-bridge/build/stub -S gd32-bridge \
+          cmake -B firmware/gd32-bridge/build/stub -S firmware/gd32-bridge \
             -DCMAKE_TOOLCHAIN_FILE=$PWD/firmware/gd32-bridge/toolchain/arm-none-eabi.cmake \
             -DBRIDGE_HAL_BACKEND=stub
 
@@ -105,7 +105,7 @@ jobs:
 
       - name: Configure (gd32 backend)
         run: |
-          cmake -B firmware/gd32-bridge/build/gd32 -S gd32-bridge \
+          cmake -B firmware/gd32-bridge/build/gd32 -S firmware/gd32-bridge \
             -DCMAKE_TOOLCHAIN_FILE=$PWD/firmware/gd32-bridge/toolchain/arm-none-eabi.cmake \
             -DBRIDGE_HAL_BACKEND=gd32
 
