@@ -159,6 +159,33 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- examples completeness pass §B.1)
+
+- **`examples/audio-loopback/`** now has `README.md` +
+  `board.yaml`.  The example shipped with only
+  `CMakeLists.txt` + `prj.conf` + `testcase.yaml` + `src/main.c`,
+  making it the only example that couldn't be copied as a
+  starting-point project (no `board.yaml` for the customer to
+  edit, no README to orient a first-time reader).
+- **`examples/aen/README.md`** (new) -- per-SoM index for the
+  AEN-only examples directory.  Currently lists
+  `edgeai-vision-aen` with a sentence + cross-refs into the
+  AEN one-pager + feature audit.
+- **`examples/v2n/README.md`** (new) -- per-SoM index for the
+  V2N / V2N-M1 examples directory.  Lists all 11 V2N examples
+  with one-line summaries + cross-refs into the V2N bring-up
+  docs.
+- **Top-level `README.md` repository-layout block refreshed**:
+  dropped the `tools/` row (folded into `scripts/` per §A.8);
+  dropped the misleading `(vscode/)` "split out" placeholder
+  (`.vscode/` is currently tracked); `examples/` row updated to
+  call out the per-SoM subfolder layout (`examples/aen/` +
+  `examples/v2n/`); `firmware/` row updated to mention both
+  `cc3501e/` and `gd32-bridge/` (the latter moved in per §A.6);
+  new `zephyr/` row to capture the Zephyr-module subtree
+  (`Kconfig`, `module.yml`, `dts/bindings/`, `sysbuild/aen/`)
+  after §A.10 + §A.11.
+
 ### Changed (2026-05-13 -- top-level UX simplification cont.)
 
 - **`bench/` moved to `tests/bench/`.**  The microbench harness

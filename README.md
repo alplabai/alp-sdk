@@ -354,14 +354,13 @@ alp-sdk/
 ├── chips/           # 20+ opt-in chip drivers
 ├── vendors/         # per-SoM HAL bindings (alif, renesas-rzv2n, nxp-imx93, deepx-dxm1)
 ├── metadata/        # schemas, templates, e1m_modules/<MPN>/, carriers/, socs/
-├── scripts/         # board.yaml loader, validators, soc_caps + ABI generators
-├── tools/           # production-test EEPROM packer
-├── (vscode/)        # split out to alplabai/alp-sdk-vscode
-├── examples/        # reference apps (gpio-button-led, edgeai-vision-aen, ...)
+├── scripts/         # board.yaml loader, validators, soc_caps + ABI generators, EEPROM packer
+├── examples/        # reference apps (cross-family + examples/aen/ + examples/v2n/)
 ├── docs/            # architecture, board-config, ADRs, test-plan, …
-├── tests/           # Python script tests + ztest suites
+├── tests/           # smoke + Twister + fuzz + bench + scripts
 ├── yocto/meta-alp/  # Yocto layer + machine confs
-├── firmware/        # CC3501E prebuilt firmware blobs
+├── firmware/        # cc3501e/ + gd32-bridge/ on-module-MCU firmware
+├── zephyr/          # Zephyr-module entry: Kconfig, module.yml, dts/bindings/, sysbuild/aen/
 └── west.yml         # Zephyr manifest
 ```
 
