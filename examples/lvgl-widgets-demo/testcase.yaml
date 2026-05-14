@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: lvgl-widgets-demo
+  description: |
+    Wraps the upstream lv_demo_widgets() showcase on a 240x320
+    ST7789 panel via the SDK's chips/st7789/ driver + the lvgl
+    library knob.  native_sim builds the UI against LVGL's SDL2
+    backend; AEN target build verifies the cross-compile.
+common:
+  tags: lvgl demo example
+  harness: console
+tests:
+  alp_sdk.examples.lvgl_widgets_demo.native_sim:
+    platform_allow: native_sim/native/64
+    build_only: true            # LVGL needs an SDL2 host runtime;
+                                # twister build-only is enough for v0.5.
+  alp_sdk.examples.lvgl_widgets_demo.aen:
+    platform_allow:
+      - alif_e7_dk_rtss_hp
+    build_only: true            # No EVK runner online -- v0.6 HiL fills.

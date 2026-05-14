@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: ai-camera-viewer
+  description: |
+    Headline edge-AI demo: OV5640 camera + TFLM person-detect
+    on the on-die Ethos-U (U55/U65/U85 picked from the SKU's
+    capabilities: block by the §D.lib loader) + LVGL preview +
+    bounding-box overlay.  Customers swap som.sku to compare
+    NPU variants without app-source changes.
+common:
+  tags: lvgl ai inference demo example marketing showcase
+  harness: console
+tests:
+  alp_sdk.examples.ai_camera_viewer.native_sim:
+    platform_allow: native_sim/native/64
+    build_only: true
+  alp_sdk.examples.ai_camera_viewer.aen:
+    platform_allow:
+      - alif_e7_dk_rtss_hp
+    build_only: true

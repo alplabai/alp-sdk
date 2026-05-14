@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: lvgl-benchmark
+  description: |
+    Wraps the upstream lv_demo_benchmark() FPS harness on ST7789.
+    Customers run it to compare per-SoM rendering throughput
+    (capabilities:'s gpu2d / dave2d / dma2d wiring) without
+    writing benchmark code themselves.
+common:
+  tags: lvgl benchmark demo example performance
+  harness: console
+tests:
+  alp_sdk.examples.lvgl_benchmark.native_sim:
+    platform_allow: native_sim/native/64
+    build_only: true
+  alp_sdk.examples.lvgl_benchmark.aen:
+    platform_allow:
+      - alif_e7_dk_rtss_hp
+    build_only: true

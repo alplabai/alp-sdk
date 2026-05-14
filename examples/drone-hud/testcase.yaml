@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: drone-hud
+  description: |
+    Marketing demo: LSM6DSO IMU + uBlox NEO-M9N GNSS + INA236
+    battery monitor + ST7789 TFT driven through portable <alp/*>
+    surfaces.  Madgwick attitude fusion + LVGL HUD.  native_sim
+    runs the UI + the threading model against simulated chip
+    NOSUPPORT contracts.
+common:
+  tags: lvgl demo example marketing showcase drone uav
+  harness: console
+tests:
+  alp_sdk.examples.drone_hud.native_sim:
+    platform_allow: native_sim/native/64
+    build_only: true
+  alp_sdk.examples.drone_hud.aen:
+    platform_allow:
+      - alif_e7_dk_rtss_hp
+    build_only: true

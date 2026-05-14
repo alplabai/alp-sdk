@@ -84,6 +84,33 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- twister scenarios for the 6 LVGL + application demos)
+
+Each of the new demo examples got a `testcase.yaml` registering
+it with twister + matching tags so the demos build on every push:
+
+- `lvgl-widgets-demo`, `lvgl-benchmark`, `lvgl-music-player` --
+  tags `lvgl demo example` (+ `benchmark performance` /
+  `audio codec` per demo).
+- `drone-hud` -- tags `lvgl demo example marketing showcase
+  drone uav`.
+- `iot-dashboard` -- tags `lvgl iot mqtt tls demo example`.
+- `ai-camera-viewer` -- tags `lvgl ai inference demo example
+  marketing showcase`.
+
+Two scenarios per demo:
+1. `*.native_sim` -- `platform_allow: native_sim/native/64`,
+   `build_only: true` (LVGL needs an SDL2 host runtime; twister
+   build-only is enough for v0.5).
+2. `*.aen` -- `platform_allow: alif_e7_dk_rtss_hp`,
+   `build_only: true` (no EVK runner online; v0.6 HiL fills in
+   the flash-and-run path).
+
+LVGL upstream `demos/widgets/` + `demos/benchmark/` + `demos/music/`
+sources are already pulled in via the existing
+`name-allowlist: - lvgl` line in `west.yml` -- no west.yml change
+needed.
+
 ### Added (2026-05-14 -- §D.lib.loader: extras-tier1 CI pin-check workflow + baseline SW-fallback emission)
 
 Two follow-ups so the §D.lib batch is fully self-validating:

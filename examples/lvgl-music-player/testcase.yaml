@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: lvgl-music-player
+  description: |
+    Wraps upstream lv_demo_music() (album carousel + time slider
+    + equaliser) on ST7789, paired with the WM8960 codec wiring
+    for the audio side.  native_sim stubs the codec path; AEN
+    target verifies the cross-compile.
+common:
+  tags: lvgl audio demo example codec
+  harness: console
+tests:
+  alp_sdk.examples.lvgl_music_player.native_sim:
+    platform_allow: native_sim/native/64
+    build_only: true
+  alp_sdk.examples.lvgl_music_player.aen:
+    platform_allow:
+      - alif_e7_dk_rtss_hp
+    build_only: true
