@@ -159,6 +159,26 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- doxygen spot-pass on wave-2 headers §C.17)
+
+- **`@param` / `@return` blocks filled on every public function in
+  `<alp/camera.h>` + `<alp/storage.h>`.**  Both headers already
+  carried a `@brief` line per function but were missing the full
+  Doxygen triplet on the older v0.1 stubs (camera start / stop /
+  capture / release / close + storage get_info / read / write /
+  erase / sync / close).  Each filled-out comment lists the
+  parameter directions + every status code the function can return
+  so customers reading the header through Doxygen see the same
+  level of detail as the v0.5 wave-2 additions
+  (`alp_camera_configure_isp`, `alp_storage_configure_inline_aes`).
+- **No changes** required on `<alp/dsp.h>`, `<alp/gpu2d.h>`,
+  `<alp/power.h>`, `<alp/tmu.h>` -- those already carried full
+  `@brief` / `@param` / `@return` blocks.
+- **`docs/v1.0-readiness.md` §3a updated:** spot-pass checkbox
+  flipped to `[x]`; remaining "full pass across every header"
+  checkbox lists the headers most likely to still have gaps
+  (peripheral.h subsections, iot.h, ble.h, security.h).
+
 ### Changed (2026-05-14 -- peripheral test split per peripheral §C.16)
 
 - **`tests/zephyr/peripheral/src/main.c`** (902 LOC monolith) split

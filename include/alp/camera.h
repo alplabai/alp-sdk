@@ -43,24 +43,89 @@ typedef struct {
     uint64_t timestamp_us;
 } alp_camera_frame_t;
 
-/** @brief Open a camera capture handle. */
+/**
+ * @brief Open a camera capture handle.
+ *
+ * @param[in] cfg  Capture configuration; @c camera_id selects the
+ *                 device, width/height/fps/format request the stream
+ *                 shape.  Must be non-NULL.
+ *
+ * @return Open handle on success, or NULL with @ref alp_last_error
+ *         set to one of ALP_ERR_INVAL (NULL cfg or out-of-range
+ *         field), ALP_ERR_NOT_READY (no backend wired),
+ *         ALP_ERR_NOSUPPORT (backend lacks a camera class).
+ */
 alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg);
 
-/** @brief Start streaming.  Frames become available via @ref alp_camera_capture. */
+/**
+ * @brief Start streaming.
+ *
+ * Frames become available via @ref alp_camera_capture after this call
+ * returns ALP_OK.  Idempotent if the stream is already running.
+ *
+ * @param[in] c  Handle from @ref alp_camera_open.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT / ALP_ERR_IO.
+ */
 alp_status_t alp_camera_start(alp_camera_t *c);
 
-/** @brief Stop streaming.  Backend may keep the handle warm for restart. */
+/**
+ * @brief Stop streaming.
+ *
+ * Backend may keep the handle warm for a subsequent
+ * @ref alp_camera_start.  In-flight frames captured via
+ * @ref alp_camera_capture remain valid until released.
+ *
+ * @param[in] c  Handle from @ref alp_camera_open.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT / ALP_ERR_IO.
+ */
 alp_status_t alp_camera_stop(alp_camera_t *c);
 
-/** @brief Block until next frame.  Caller does not own the frame buffer. */
+/**
+ * @brief Block until next frame is available.
+ *
+ * Caller does not own the frame buffer; release via
+ * @ref alp_camera_release once the data is consumed.
+ *
+ * @param[in]  c           Handle from @ref alp_camera_open.
+ * @param[out] out         Receives the frame descriptor (buffer
+ *                         pointer + size + capture timestamp).
+ *                         Must be non-NULL.
+ * @param[in]  timeout_ms  Max wait in milliseconds; UINT32_MAX for
+ *                         "wait indefinitely".
+ *
+ * @return ALP_OK / ALP_ERR_INVAL (NULL out or handle) /
+ *         ALP_ERR_NOT_READY (stream not started) / ALP_ERR_TIMEOUT /
+ *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
+ */
 alp_status_t alp_camera_capture(alp_camera_t *c,
                                 alp_camera_frame_t *out,
                                 uint32_t timeout_ms);
 
-/** @brief Return the frame buffer to the backend after the caller has consumed it. */
+/**
+ * @brief Return the frame buffer to the backend after consumption.
+ *
+ * After release the frame's @c data pointer is invalid -- backends
+ * may immediately reuse the buffer for the next capture.
+ *
+ * @param[in] c      Handle from @ref alp_camera_open.
+ * @param[in] frame  Frame descriptor previously filled by
+ *                   @ref alp_camera_capture.  Must be non-NULL.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_camera_release(alp_camera_t *c, alp_camera_frame_t *frame);
 
-/** @brief Close the handle and release backend resources.  Idempotent. */
+/**
+ * @brief Close the handle and release backend resources.  Idempotent.
+ *
+ * NULL is a no-op.  In-flight frames are implicitly released; their
+ * @c data pointers become invalid immediately on return.
+ *
+ * @param[in] c  Handle from @ref alp_camera_open, or NULL.
+ */
 void alp_camera_close(alp_camera_t *c);
 
 /* ================================================================== */

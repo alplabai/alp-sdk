@@ -74,7 +74,16 @@ typedef struct {
  */
 alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg);
 
-/** Get geometry + total size for the device. */
+/**
+ * @brief Get geometry + total size for the device.
+ *
+ * @param[in]  s     Handle from @ref alp_storage_open.
+ * @param[out] info  Receives total_bytes / block_size / erase_size.
+ *                   Must be non-NULL.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
+ */
 alp_status_t   alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info);
 
 /**
@@ -83,6 +92,16 @@ alp_status_t   alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info);
  * @p offset and @p len need not align to block_size for backends
  * that read-modify-write internally; for raw flash, callers should
  * align both to the device's block_size.
+ *
+ * @param[in]  s       Handle from @ref alp_storage_open.
+ * @param[in]  offset  Byte offset from device start.
+ * @param[out] data    Destination buffer.  Must be non-NULL when
+ *                     @p len > 0.
+ * @param[in]  len     Number of bytes to read.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_OUT_OF_RANGE (offset + len past device end) /
+ *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
 alp_status_t   alp_storage_read(alp_storage_t *s,
                                 uint64_t offset,
@@ -95,20 +114,60 @@ alp_status_t   alp_storage_read(alp_storage_t *s,
  * and the Yocto backend handle this transparently, so app code that
  * doesn't care about the underlying medium can ignore the
  * write-after-erase rule.
+ *
+ * @param[in] s       Handle from @ref alp_storage_open.
+ * @param[in] offset  Byte offset from device start.
+ * @param[in] data    Source buffer.  Must be non-NULL when
+ *                    @p len > 0.
+ * @param[in] len     Number of bytes to write.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (handle is
+ *         read_only or device not present) / ALP_ERR_OUT_OF_RANGE
+ *         (offset + len past device end) / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_IO.
  */
 alp_status_t   alp_storage_write(alp_storage_t *s,
                                  uint64_t offset,
                                  const void *data, size_t len);
 
-/** Erase the region [@p offset, @p offset + @p len).  Both must
- *  align to the device's `erase_size`. */
+/**
+ * @brief Erase the region [@p offset, @p offset + @p len).
+ *
+ * Both bounds MUST align to the device's @c erase_size (from
+ * @ref alp_storage_get_info); misaligned bounds reject with
+ * ALP_ERR_INVAL rather than partially erasing.
+ *
+ * @param[in] s       Handle from @ref alp_storage_open.
+ * @param[in] offset  Byte offset from device start; @c erase_size-aligned.
+ * @param[in] len     Region length; @c erase_size-aligned.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL (alignment or read_only) /
+ *         ALP_ERR_NOT_READY / ALP_ERR_OUT_OF_RANGE /
+ *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
+ */
 alp_status_t   alp_storage_erase(alp_storage_t *s,
                                  uint64_t offset, uint64_t len);
 
-/** Flush any backend-side write cache to media. */
+/**
+ * @brief Flush any backend-side write cache to media.
+ *
+ * Implicit on @ref alp_storage_close; callers needing
+ * "write-then-power-off" durability should sync first.
+ *
+ * @param[in] s  Handle from @ref alp_storage_open.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_IO.
+ */
 alp_status_t   alp_storage_sync(alp_storage_t *s);
 
-/** Release the handle.  Implicitly syncs. */
+/**
+ * @brief Release the handle.  Implicitly syncs.
+ *
+ * NULL is a no-op.  After this call @p s is invalid.
+ *
+ * @param[in] s  Handle from @ref alp_storage_open, or NULL.
+ */
 void           alp_storage_close(alp_storage_t *s);
 
 /* ================================================================== */
