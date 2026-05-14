@@ -61,8 +61,8 @@ extern "C" {
  *    `CONFIG_ALP_TFLM_ETHOS_U85=y` per-NPU driver gate).
  *  - Ethos-U55 on every Alif Ensemble SKU (two per SoC;
  *    `CONFIG_ALP_TFLM_ETHOS_U55=y`).
- *  - Ethos-U65 on NXP i.MX 93 / E1M-NX9101
- *    (`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y`).
+ *  - Ethos-U65 on NXP i.MX 93 / E1M-NX9101 (`CONFIG_ALP_TFLM_ETHOS_U65=y`
+ *    + the N93-specific driver shim `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y`).
  *  Customers don't have to know which variant the silicon carries;
  *  Vela picks at model-compile time and the runtime dispatches via
  *  the matching driver shim emitted by `scripts/alp_project.py`. */

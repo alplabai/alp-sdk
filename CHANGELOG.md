@@ -84,6 +84,60 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- §D.lib.loader: requires_cap matcher + capability-keyed bindings audit)
+
+Phase 2b's loader grew a `requires_cap:` matcher so library
+priority entries can key off the per-SoM `capabilities:` block
+directly, rather than the family-coarse `soc_family:` token.
+Three concrete wins:
+
+1. **Cross-family bindings collapse to one entry.**  `optiga_trust_m`
+   is populated on AEN + V2N + NX9101 SKUs.  Old form needed
+   three priority entries (one per family); new form is one
+   `requires_cap: optiga_trust_m`.
+2. **Sub-family bindings stop over-firing.**  `gpu2d` is on E6 /
+   E7 / E8 but not E3 / E4 / E5.  `soc_family: alif_ensemble` fired
+   on every Ensemble SKU; `requires_cap: gpu2d` only fires where
+   the silicon actually carries it.
+3. **NPU population gets surgical.**  Numeric caps
+   (`ethos_u55_count`, `ethos_u85_count`, `ethos_u65_count`) are
+   treated as truthy when > 0 -- `requires_cap: ethos_u85_count`
+   handles "this SKU has at least one U85" directly.
+
+Loader (`scripts/alp_project.py::_emit_library_hw_backends`) now
+parses the SKU's `capabilities:` block (line-driven, no PyYAML
+dep) and exposes a `_cap_truthy()` helper that handles booleans +
+numeric counts.  Per-priority match: all specified keys
+(`silicon:` / `soc_family:` / `requires_cap:`) must match; any
+omitted key is wildcarded.
+
+Library hw-backends.yaml rewrite (capability-keyed where it beats
+soc_family): tflite_micro / lvgl / mbedtls / cmsis_dsp / littlefs /
+bearssl / madgwick_ahrs / u8g2 / gfx_compat / minimp3 / opus.
+Notable: tflite_micro grew an `ethos_u65_count` entry so NX9101
+emits `CONFIG_ALP_TFLM_ETHOS_U65=y`; littlefs now resolves E8's
+HexSPI separately from E3..E7's OctalSPI (both share the
+`CONFIG_ALP_LITTLEFS_XSPI_DMA=y` driver shim).
+
+New Kconfig knob: `ALP_TFLM_ETHOS_U65` (depends on
+ALP_SOC_NXP_IMX9_IMX93).  The legacy `preferred_backend: ethos_u`
+code path in `scripts/alp_project.py` also emits it alongside
+`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y` for the N93 driver shim.
+
+`include/alp/inference.h` ALP_INFERENCE_BACKEND_ETHOS_U enum doc
+enumerates all three U55 / U65 / U85 variants explicitly.
+
+Cross-SKU smoke-test (driver dump per SKU):
+- AEN401 (E4): U85 primary + U55 secondary + HELIUM + DMA_COPY +
+  LVGL_DMA2D + MBEDTLS_CRYPTOCELL + LITTLEFS_XSPI_DMA +
+  BEARSSL_CRYPTOCELL.
+- AEN601 (E6): same + LVGL_GPU2D + MADGWICK_FPU + MINIMP3_HELIUM +
+  OPUS_HELIUM.
+- AEN801 (E8): same as AEN601 but HexSPI resolves the
+  LITTLEFS_XSPI_DMA gate.
+- V2N101: DRP_AI + NEON; LVGL_TMU; MBEDTLS_CAU; LITTLEFS_EMMC_DMA.
+- NX9101: ETHOS_U65 + NEON; MBEDTLS_OPTIGA; LITTLEFS_EMMC_DMA.
+
 ### Added (2026-05-14 -- §D.lib.loader: per-SoM capabilities blocks + baseline hw-backends + ml_npu split)
 
 Three audit follow-ups in one batch, after the user pointed out

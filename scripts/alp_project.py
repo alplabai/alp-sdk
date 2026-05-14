@@ -369,6 +369,7 @@ def _emit_zephyr(
             if silicon and silicon.startswith("alif:ensemble:"):
                 lines.append("CONFIG_ALP_TFLM_ETHOS_U55=y")
             if silicon == "nxp:imx9:imx93":
+                lines.append("CONFIG_ALP_TFLM_ETHOS_U65=y")
                 lines.append("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y")
     elif backend == "drpai":
         lines.append("CONFIG_ALP_SDK_INFERENCE_DRPAI=y")
