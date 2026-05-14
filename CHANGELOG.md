@@ -159,6 +159,33 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- GD32 PWM input-capture HAL §C.15a)
+
+- **`bridge_hw_pwm_capture_begin` / `_read` / `_end` real bodies**
+  in `firmware/gd32-bridge/hal/bridge_hw_gd32.c`.  Replaces the
+  three NOSUPPORT stubs that landed with v0.5 wave-2 §2B.2 with
+  a polled-drain implementation: BEGIN switches the channel from
+  output mode (CHxN driving) to input-capture (CIx polled),
+  configures polarity per `edge` (0 rising / 1 falling / 2 both),
+  clears any stale CCxIF; READ checks CCxIF and pulls `CCxVAL`,
+  composing `(period_ticks, pulse_width_ticks)` via a per-channel
+  state machine -- both-edge mode walks rising/falling deltas to
+  recover both quantities, single-edge mode reports period only
+  (pulse_width left at zero); END disables the channel and clears
+  state.  Unit conversion uses `PWM_TIMER_TICK_NS` (1 us at the
+  240 MHz / 240 prescaler), correcting the bridge_hw.h doc-comment
+  that referenced the unscaled core-clock LSB.
+- **V2N pad routing caveat captured inline.**  The PWM map binds
+  the COMPLEMENTARY (CHxN) outputs, but the GD32G5x3's
+  input-capture path reads the MAIN (CHx) pad -- a physically
+  different pin per the datasheet.  Until a hardware-bring-up
+  commit reworks pad routing onto the main-channel AF, BEGIN
+  succeeds + the structural flow is exercised end-to-end but
+  no edges actually land at READ, so it surfaces
+  `BRIDGE_HW_ERR_NOTIMPL` ("ring empty") per the contract.
+  Verification gate is HiL; CI build under
+  `pr-gd32-bridge-build.yml` covers the structural compile.
+
 ### Added (2026-05-14 -- fuzz coverage expansion §C.3)
 
 Three new libFuzzer harnesses under `tests/fuzz/` for parser

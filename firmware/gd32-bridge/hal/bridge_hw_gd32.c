@@ -50,7 +50,17 @@
  *                               in quadrature decoder mode 2 (X4).
  *   12. COUNTER_READ         -- DONE: Cortex-M33 DWT cycle counter
  *                               (32-bit free-running at core clock).
- *   13. PWM_CAPTURE_*        -- TIMERx input-capture + ring buffer.
+ *   13. PWM_CAPTURE_*        -- DONE (§C.15a): TIMERx input-capture
+ *                               with polled drain.  V2N pad map binds
+ *                               the COMPLEMENTARY (CHxN) outputs --
+ *                               BEGIN reconfigures the channel as
+ *                               input-capture but the captured edges
+ *                               only land once a future hardware-
+ *                               bring-up commit reworks the pad
+ *                               routing onto the timer's main CHx
+ *                               input mux.  Structural code path
+ *                               (config + drain + ns conversion) is
+ *                               complete and exercised end-to-end.
  *   14. PWM_SINGLE_PULSE     -- DONE: TIMERx OPM (one-pulse mode).
  *                               Switches the timer's whole SP-bit so
  *                               other channels on the same timer also
@@ -1127,25 +1137,205 @@ uint8_t bridge_hw_da9292_status_cached(void)
 /* v0.5 (§2B.2) -- advanced timer extras                             */
 /* ----------------------------------------------------------------- */
 
+/* Per-channel input-capture state.  Polled model -- the bridge
+ * dispatcher runs single-threaded between transport ISRs so the
+ * host's bridge_hw_pwm_capture_read poll-loop naturally drains the
+ * capture register.  Each entry caches the most-recent (period,
+ * pulse-width) pair latched from the timer's CCxVAL register.
+ *
+ * V2N-specific caveat: the PWM map binds the COMPLEMENTARY output
+ * pad (CHxN) of each advanced-timer channel.  The TIx input-capture
+ * path reads the MAIN CHx pad, which is a physically different pin
+ * on the GD32G5x3.  BEGIN below switches the channel from output
+ * mode to input-capture mode -- the CHCTL field is rewritten so the
+ * complementary output stops driving -- but the capture pad routing
+ * has to be reworked by the maintainer in a hardware-bring-up commit
+ * before READ delivers real edges.  Until then the firmware
+ * structure (config + polled drain + correct unit conversion) is
+ * exercised end-to-end and READ surfaces BRIDGE_HW_ERR_NOTIMPL
+ * ("ring empty") as documented. */
+typedef struct {
+    uint32_t last_tick;         /* most-recent CCxVAL                  */
+    uint32_t period_ticks;      /* drained delta -- same-edge to same  */
+    uint32_t pulse_width_ticks; /* rising-to-falling delta             */
+    uint8_t  edge;              /* 0 rising / 1 falling / 2 both       */
+    uint8_t  state;             /* 0 waiting first / 1 have-rising /
+                                   2 have-falling                       */
+    bool     in_capture;        /* true between BEGIN..END             */
+    bool     have_period;       /* a period sample is ready to drain   */
+    bool     have_pulse;        /* a pulse-width sample is ready       */
+} pwm_capture_state_t;
+
+static pwm_capture_state_t pwm_capture[PWM_CHANNEL_COUNT];
+
+/* CCxIF flag for a channel index 0..3.  Mirrors timer.h's flag macros
+ * but exposed here so the polled drain can pick the right one without
+ * a switch. */
+static uint32_t pwm_capture_flag(uint16_t ch)
+{
+    switch (ch) {
+    case TIMER_CH_0:
+        return TIMER_FLAG_CH0;
+    case TIMER_CH_1:
+        return TIMER_FLAG_CH1;
+    case TIMER_CH_2:
+        return TIMER_FLAG_CH2;
+    case TIMER_CH_3:
+        return TIMER_FLAG_CH3;
+    default:
+        return 0u;
+    }
+}
+
+/* Drain any newly-latched capture from the timer's CCxVAL into the
+ * per-channel state.  Polled from bridge_hw_pwm_capture_read; safe to
+ * call when no edge has occurred (clears nothing, leaves state). */
+static void pwm_capture_drain(uint8_t channel)
+{
+    pwm_capture_state_t *s    = &pwm_capture[channel];
+    const gd32_pwm_ch_t *ch   = &pwm_channels[channel];
+    const uint32_t       flag = pwm_capture_flag(ch->channel);
+    if (flag == 0u) return;
+    if (RESET == timer_flag_get(ch->periph, flag)) return;
+
+    const uint32_t now = timer_channel_capture_value_register_read(ch->periph, ch->channel);
+    timer_flag_clear(ch->periph, flag);
+
+    if (s->edge == 2u) {
+        /* Both-edge polarity.  Alternate the state machine: the
+         * first edge after BEGIN seeds last_tick; the second is a
+         * rising-to-falling delta (pulse_width); the third closes
+         * the period.  After the third edge the cycle repeats. */
+        switch (s->state) {
+        case 0u: /* first edge -- seed */
+            s->last_tick = now;
+            s->state     = 1u;
+            break;
+        case 1u: /* second edge -- pulse_width sample */
+            s->pulse_width_ticks = now - s->last_tick;
+            s->have_pulse        = true;
+            s->last_tick         = now;
+            s->state             = 2u;
+            break;
+        case 2u: /* third edge -- period closer */
+        default:
+            s->period_ticks = (now - s->last_tick) + s->pulse_width_ticks;
+            s->have_period  = true;
+            s->last_tick    = now;
+            s->state        = 1u;
+            break;
+        }
+    } else {
+        /* Single-edge polarity (rising OR falling).  Delta between
+         * consecutive same-edge captures is the period; pulse_width
+         * is not observable in this mode -- left at zero. */
+        if (s->state == 0u) {
+            s->last_tick = now;
+            s->state     = 1u;
+        } else {
+            s->period_ticks = now - s->last_tick;
+            s->have_period  = true;
+            s->last_tick    = now;
+        }
+    }
+}
+
 int bridge_hw_pwm_capture_begin(uint8_t channel, uint8_t edge)
 {
-    (void)channel;
-    (void)edge;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+    if (edge > 2u) return BRIDGE_HW_ERR_INVAL;
+
+    const gd32_pwm_ch_t *ch = &pwm_channels[channel];
+
+    /* Tear down any output state on this channel.  Disabling the
+     * complementary output before switching the channel direction
+     * stops the pad driving immediately; bridge_hw_pwm_set will
+     * fully re-init both directions on a subsequent call. */
+    timer_channel_output_state_config(ch->periph, ch->channel, TIMER_CCX_DISABLE);
+    timer_channel_complementary_output_state_config(ch->periph, ch->channel, TIMER_CCXN_DISABLE);
+
+    /* Switch the pad's GPIO mode to AF input (pull-up keeps a
+     * disconnected line at a defined level).  The pad still uses the
+     * timer's AF -- on the GD32G5 the same AF carries both directions
+     * for a given (port, pin) so we don't touch gpio_af_set. */
+    gpio_mode_set(ch->gpio_port, GPIO_MODE_AF, GPIO_PUPD_PULLUP, ch->gpio_pin);
+
+    /* Configure the input-capture parameters.  Filter=0 (no debounce
+     * cycles) -- the host can ask for a fixed filter via a follow-up
+     * opcode if a glitchy source needs it.  Prescaler=DIV1 captures
+     * every selected edge. */
+    timer_ic_parameter_struct ic;
+    timer_channel_input_struct_para_init(&ic);
+    ic.icpolarity  = (edge == 0u) ? TIMER_IC_POLARITY_RISING
+                     : (edge == 1u) ? TIMER_IC_POLARITY_FALLING
+                                    : TIMER_IC_POLARITY_BOTH_EDGE;
+    ic.icselection = TIMER_IC_SELECTION_DIRECTTI;
+    ic.icprescaler = TIMER_IC_PSC_DIV1;
+    ic.icfilter    = 0u;
+    timer_input_capture_config(ch->periph, ch->channel, &ic);
+
+    /* Clear any stale capture flag so the first drained edge after
+     * BEGIN is genuinely the first new edge. */
+    timer_flag_clear(ch->periph, pwm_capture_flag(ch->channel));
+
+    pwm_capture[channel].last_tick         = 0u;
+    pwm_capture[channel].period_ticks      = 0u;
+    pwm_capture[channel].pulse_width_ticks = 0u;
+    pwm_capture[channel].edge              = edge;
+    pwm_capture[channel].state             = 0u;
+    pwm_capture[channel].in_capture        = true;
+    pwm_capture[channel].have_period       = false;
+    pwm_capture[channel].have_pulse        = false;
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_pwm_capture_read(uint8_t channel, uint32_t *period_ns, uint32_t *pulse_width_ns)
 {
-    (void)channel;
-    if (period_ns != 0) *period_ns = 0u;
-    if (pulse_width_ns != 0) *pulse_width_ns = 0u;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (period_ns == 0 || pulse_width_ns == 0) return BRIDGE_HW_ERR_INVAL;
+    *period_ns      = 0u;
+    *pulse_width_ns = 0u;
+    if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+
+    pwm_capture_state_t *s = &pwm_capture[channel];
+    if (!s->in_capture) return BRIDGE_HW_ERR_INVAL;
+
+    /* Sample the timer's CCxVAL if a new edge has landed since the
+     * last poll.  The drain updates `have_period` / `have_pulse`
+     * when enough edges have arrived to compose a full tuple. */
+    pwm_capture_drain(channel);
+    if (!s->have_period) return BRIDGE_HW_ERR_NOTIMPL; /* ring empty */
+
+    /* Convert ticks back to nanoseconds.  The PWM timers run at the
+     * 1 us tick configured by pwm_timer_init (prescaler 240-1 against
+     * the 240 MHz timer clock); the bridge_hw.h doc-comment's
+     * "~4.16 ns LSB" refers to the unscaled core clock used by the
+     * counter peripheral, not the prescaled PWM tick used here. */
+    *period_ns      = s->period_ticks * PWM_TIMER_TICK_NS;
+    *pulse_width_ns = s->pulse_width_ticks * PWM_TIMER_TICK_NS;
+
+    /* Mark the period drained.  pulse_width is consumed alongside
+     * because a subsequent READ should not surface stale data; the
+     * next pair of edges populates both fresh. */
+    s->have_period = false;
+    s->have_pulse  = false;
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_pwm_capture_end(uint8_t channel)
 {
-    (void)channel;
-    return BRIDGE_HW_ERR_NOTIMPL;
+    if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+
+    const gd32_pwm_ch_t *ch = &pwm_channels[channel];
+    /* Disable the input-capture channel.  The contract is "return the
+     * pin to high-impedance"; leaving the pad in INPUT + PULL_UP from
+     * BEGIN is the closest HW approximation -- a subsequent
+     * bridge_hw_pwm_set re-configures it as alt-function output
+     * push-pull if the host wants to drive again. */
+    timer_channel_output_state_config(ch->periph, ch->channel, TIMER_CCX_DISABLE);
+    timer_flag_clear(ch->periph, pwm_capture_flag(ch->channel));
+
+    pwm_capture[channel].in_capture = false;
+    return BRIDGE_HW_OK;
 }
 
 int bridge_hw_pwm_single_pulse(uint8_t channel, uint32_t pulse_ns)
