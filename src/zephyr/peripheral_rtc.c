@@ -63,7 +63,8 @@ alp_rtc_t *alp_rtc_open(uint32_t rtc_id) {
     return h;
 }
 
-alp_status_t alp_rtc_set_time(alp_rtc_t *rtc, const alp_rtc_time_t *time) {
+alp_status_t alp_rtc_set_time(alp_rtc_t *rtc, const alp_rtc_time_t *time)
+{
     if (time == NULL) return ALP_ERR_INVAL;
     if (rtc == NULL || !rtc->in_use) return ALP_ERR_NOT_READY;
 
@@ -80,7 +81,8 @@ alp_status_t alp_rtc_set_time(alp_rtc_t *rtc, const alp_rtc_time_t *time) {
     return errno_to_alp(rtc_set_time(rtc->dev, &zt));
 }
 
-alp_status_t alp_rtc_get_time(alp_rtc_t *rtc, alp_rtc_time_t *time) {
+alp_status_t alp_rtc_get_time(alp_rtc_t *rtc, alp_rtc_time_t *time)
+{
     if (time == NULL) return ALP_ERR_INVAL;
     if (rtc == NULL || !rtc->in_use) return ALP_ERR_NOT_READY;
 

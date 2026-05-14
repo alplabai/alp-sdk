@@ -62,13 +62,12 @@ static i2s_fmt_t to_fmt(alp_i2s_format_t f) {
 alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg) {
     alp_z_clear_last_error();
 
-    if (cfg == NULL || cfg->channels == 0 || cfg->channels > 2 ||
-        cfg->block_frames == 0) {
+    if (cfg == NULL || cfg->channels == 0 || cfg->channels > 2 || cfg->block_frames == 0) {
         alp_z_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
-    if (cfg->word_bits != 8 && cfg->word_bits != 16 &&
-        cfg->word_bits != 24 && cfg->word_bits != 32) {
+    if (cfg->word_bits != 8 && cfg->word_bits != 16 && cfg->word_bits != 24 &&
+        cfg->word_bits != 32) {
         alp_z_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
