@@ -150,6 +150,14 @@ that lands before the v0.3.0 tag.)
   `keys/generate_dev_key.sh`, plus the moved README +
   sysbuild.conf internal self-refs.  Top-level `sysbuild/`
   directory deleted (no longer holds any siblings).
+- **`examples/README.md` audit.**  After the §A.6 SoM-subfolder
+  refactor (`examples/v2n/v2n-*` and `examples/aen/*`), the
+  cross-family table still listed `edgeai-vision-aen` as if it
+  lived at the top level, and the V2N-specific table used bare
+  directory names (`v2n-gd32-bridge-ping`) instead of the
+  `v2n/v2n-gd32-bridge-ping` paths that actually exist on disk.
+  Split into three sections (cross-family / AEN-specific /
+  V2N-M1-specific) with correct relative paths for every row.
 
 ### Changed (2026-05-13 -- top-level UX simplification cont.)
 
