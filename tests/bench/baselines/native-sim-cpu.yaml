@@ -1,0 +1,84 @@
+# Native-sim CPU bench baseline -- captured 2026-05-14.
+# Not a real-silicon baseline; gates CI against perf regressions
+# on the host-emulated path.  Real-silicon baselines per (SoM, OS)
+# pair live as E1M-<MPN>-<os>.yaml siblings.
+#
+# Recorded against: native_sim/native/64 build of `alp_bench` on
+# a developer x86_64 host (no SIMD / NPU acceleration).  Numbers
+# are ROUGH ORDERS OF MAGNITUDE -- the CI delta gate accepts
+# ±50 % vs this baseline, not exact matches.
+#
+# Each entry is a `(case, ns_per_iter)` pair.  Cases land here
+# as `tests/bench/bench_<api>.c` files add them; missing entries
+# get filled at v1.0 prep.
+
+target:
+  som:  native-sim
+  os:   native-sim-cpu
+  arch: x86_64-host
+  date: 2026-05-14
+  captured_by: scripts/baseline_runner.py
+  note: |
+    Host-emulated baseline.  Real-silicon baselines (V2N-Yocto,
+    AEN-Zephyr, ...) overwrite these per-target once HiL goes
+    online.
+
+cases:
+  # tests/bench/bench_peripheral.c
+  alp_i2c_open_close:
+    ns_per_iter: 12000
+    note: NOSUPPORT-stub path -- bus_id rejected at validation.
+  alp_spi_open_close:
+    ns_per_iter: 12000
+    note: same NOSUPPORT-stub timing.
+  alp_gpio_open_close:
+    ns_per_iter: 8000
+    note: returns NULL on native_sim (no DT-bound GPIO).
+  alp_uart_open_close:
+    ns_per_iter: 11000
+
+  # tests/bench/bench_status.c
+  alp_last_error_set:
+    ns_per_iter: 35
+  alp_last_error_get:
+    ns_per_iter: 28
+
+  # tests/bench/bench_inference.c -- dispatcher-only paths.
+  alp_inference_open_no_backend:
+    ns_per_iter: 5000
+  alp_inference_close_null:
+    ns_per_iter: 12
+
+  # tests/bench/bench_audio.c
+  alp_audio_in_open_no_backend:
+    ns_per_iter: 4500
+  alp_audio_out_open_no_backend:
+    ns_per_iter: 4500
+
+  # tests/bench/bench_storage.c
+  alp_storage_open_no_backend:
+    ns_per_iter: 4800
+
+  # tests/bench/bench_iot.c
+  alp_mqtt_open_no_stack:
+    ns_per_iter: 6200
+  alp_wifi_open_no_radio:
+    ns_per_iter: 5800
+
+# Cases for which a native_sim baseline is meaningless (anything
+# that needs real silicon to produce a representative number)
+# stay unset here -- their entries land in the per-(SoM, OS)
+# baselines under E1M-<MPN>-<os>.yaml.  Examples:
+#   - alp_pwm_set_duty (silicon timer write)
+#   - alp_adc_read_uv  (silicon ADC settling time)
+#   - alp_inference_run (NPU inference latency)
+#   - alp_audio_in_read (DMA + DSP-chain timing)
+unset_on_native_sim:
+  - alp_pwm_set_duty
+  - alp_adc_read_uv
+  - alp_dac_write_mv
+  - alp_inference_run
+  - alp_audio_in_read
+  - alp_audio_out_write
+  - alp_mqtt_publish
+  - alp_random_bytes_optiga
