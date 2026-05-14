@@ -250,6 +250,68 @@ Validators after commit:
 - metadata / portability / pin-conflicts: clean
 - abi_snapshot --diff: unchanged (pure doc-comment touch).
 
+### Changed (2026-05-14 -- vendor-partnership status: upstream verification §C.33)
+
+Verified `docs/vendor-partnerships.md` claims against the
+actual upstream state of two key repos the user surfaced.
+
+**Renesas (better than the §C.31 tracker said):**
+
+- The RZ/V FSP **is already public** at
+  `github.com/renesas/rzv-fsp` under BSD-3-Clause for the
+  MPU BSP / Board BSP / HAL drivers / generic middleware
+  (the parts the SDK consumes).  Latest release v3.1.0
+  (2025-03-11).  Board support for `rzv2n_evk` is
+  in-tree at `rzv/board/rzv2n_evk/` -- no NDA tarball
+  needed.  Tracker line item "Public RZ/V2N N44 FSP
+  release" flipped to `[x]`.
+- Note: `github.com/renesas/fsp` (no `rz-` prefix) is the
+  **RA MCU FSP** -- a different SoC family (Cortex-M
+  MCUs).  Don't confuse the two when reading the
+  vendor-partnerships doc.
+- Remaining Renesas opens narrowed to: DRP-AI compiler
+  toolchain licence (the on-die driver ships BSD-3-Clause
+  via rzv-fsp; the *model compiler* is the licensing
+  question) + DA9292 AROVx OTP confirmation.
+
+**DEEPX (more nuanced than the §C.31 tracker said):**
+
+Added a dedicated DEEPX section to
+`docs/vendor-partnerships.md`.  Verified the 30+ public
+repos under `github.com/DEEPX-AI`:
+
+| Repo                      | License                                    |
+|---------------------------|---------------------------------------------|
+| `dx_fw`                   | **Apache-2.0** (firmware images)            |
+| `dx_rt`                   | Customer-only (despite "open source" desc)  |
+| `dx_app`                  | Customer-only                               |
+| `dx_rt_npu_linux_driver`  | Customer-only                               |
+| `meta-deepx-m1`           | **No LICENSE file** -- open question        |
+| `dx_rt_windows`           | Customer-only                               |
+| `dx-modelzoo`             | MIT (genuinely open)                        |
+| `ultralytics-deepx`       | AGPL-3.0                                    |
+
+Multiple repo descriptions say "open source" but the
+LICENSE text explicitly restricts to "customers who are
+supplied with DEEPX NPU... unauthorized sharing prohibited".
+Source-visible ≠ Apache / BSD redistributable.
+
+SDK implications:
+- `chips/deepx_dxm1/` is a thin host driver (PCIe + GPIO
+  + reset polarity) under our own Apache-2.0 -- doesn't
+  redistribute DEEPX code, so no licence-encumbered
+  dependency lands in this repo.
+- `<alp/inference.h>` DEEPX backend dispatch is a
+  header-level seam.  Customers building against the
+  DX-M1 path pull `dx_rt` themselves as DEEPX NPU
+  customers; the SDK only links against headers.
+- `meta-deepx-m1`'s missing LICENSE is the one new open
+  item -- ask DEEPX whether the Yocto layer is intended
+  to be redistributable.
+
+`docs/v1.0-readiness.md` Pillar 9 rows updated to reflect
+both verifications.
+
 ### Added (2026-05-14 -- HW-blocked tracker docs §C.31)
 
 Two new docs that codify the external-party items blocking
