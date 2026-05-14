@@ -148,8 +148,6 @@ but that's a v0.5 problem.
   ROM, key in flash, or key in OPTIGA via a small SPI/I2C cross-bus)?
 * Mender artifact-name format -- align across V2N + V2N-M1 + AEN?
 
-These are tracked in [`notes/morning-handoff-2026-05-13.md`](../notes/morning-handoff-2026-05-13.md).
-
 ## See also
 
 * [`docs/ota.md`](ota.md) -- v0.3 OTA design (high-level).

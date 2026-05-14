@@ -96,6 +96,16 @@ that lands before the v0.3.0 tag.)
   firmware module (`src/zephyr/v2n_power_mgmt.c`) wiring lands
   next.
 
+### Changed (2026-05-14 -- top-level UX simplification cont.)
+
+- **`docs/ota-device-contract.md` cross-ref to
+  `notes/morning-handoff-2026-05-13.md` removed.**  The `notes/`
+  directory is gitignored (maintainer handoff drafts that are
+  not part of the public SDK); a doc line that referenced a
+  non-tracked file was dead-link bait for anyone cloning the
+  public repo.  Removed; the "Open questions" stand on their
+  own.
+
 ### Changed (2026-05-13 -- top-level UX simplification cont.)
 
 - **`bench/` moved to `tests/bench/`.**  The microbench harness
