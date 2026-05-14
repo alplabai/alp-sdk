@@ -1,0 +1,40 @@
+# board.yaml -- per-app project configuration for the
+# production-deployment flagship.
+#
+# Designed against AEN-Zephyr (the dual-Cortex-M55 silicon with
+# OPTIGA Trust M + secure-boot fabric).  Real customer shipping
+# variants will fork this for V2N or i.MX 93 carriers; the SDK's
+# surfaces stay identical across SoMs.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701
+
+carrier:
+  name: E1M-EVK
+
+os: zephyr
+
+peripherals:
+  - iot     # WiFi + MQTT + TLS for the Mender connection
+  - storage # internal-flash slot inspection
+  - security # AEAD + TRNG for attestation
+  # The OPTIGA Trust M chip driver opts in independently per the
+  # `chips/` block below -- it's not a portable-surface dependency.
+
+libraries:
+  - mbedtls    # TLS for Mender + AEAD primitives
+  - mcuboot    # secure-boot evidence read-back
+
+chips:
+  - optiga_trust_m
+  - eeprom_24c128
+
+diagnostics:
+  log_level: info
+
+# Secure-boot signing happens at release-build time -- the
+# zephyr/sysbuild/aen/ profile carries the ECDSA-P256 key
+# configuration that turns this app into a signed image.  See
+# docs/secure-boot.md for the key-management contract.

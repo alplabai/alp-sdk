@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: production-deployment
+  description: |
+    v1.0 reference application for a field-deployable IoT product.
+    Demonstrates the full manufactured -> deployed -> updated ->
+    attested lifecycle on a single app (EEPROM factory-identity
+    read-back, MCUboot slot inspection, Mender OTA polling,
+    OPTIGA-signed remote attestation).  Native_sim exercises the
+    framing path (every stage reaches its open() call); HiL
+    verification of the actual OTA cycle gates on a staged Mender
+    server.
+common:
+  tags: production secure-boot ota attestation
+  harness: console
+  harness_config:
+    type: one_line
+    regex:
+      - "\\[prod\\] done"
+tests:
+  alp_sdk.examples.production_deployment.native_sim:
+    platform_allow: native_sim/native/64
+  alp_sdk.examples.production_deployment.aen:
+    platform_allow:
+      - alif_e7_dk_rtss_hp
+    build_only: true   # real run needs a staged Mender server.

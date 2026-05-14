@@ -159,6 +159,43 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- production-deployment flagship skeleton §C.29)
+
+- **`examples/production-deployment/`** -- the v1.0 integration
+  flagship.  Demonstrates the full
+  *manufactured → deployed → updated → attested* lifecycle on
+  a single app, so customers see how the SDK's secure-boot,
+  OTA, EEPROM-provisioning, and remote-attestation pieces fit
+  together.  Four stages in `src/main.c`:
+  1. Factory-provisioning read-back via `<alp/hw_info.h>`
+     (SoM SKU + serial + revision + mfg date from the
+     manufacturer EEPROM).
+  2. Secure-boot evidence via `<alp/storage.h>` -- internal-
+     flash slot inspection so a cloud-side fleet console can
+     confirm the deployed firmware revision.
+  3. OTA polling via `<alp/iot.h>` (Wi-Fi + MQTT + TLS to a
+     Mender server; under native_sim the WiFi open returns
+     NOSUPPORT and the example prints the transition).
+  4. Remote attestation tick via `<alp/security.h>` -- TRNG
+     nonce + OPTIGA signature published as a heartbeat.
+- **board.yaml**: targets E1M-AEN701 + E1M-EVK; pulls in the
+  iot / storage / security peripheral classes + mbedtls +
+  mcuboot libraries + optiga_trust_m + eeprom_24c128 chips.
+- **CMakeLists.txt + prj.conf + testcase.yaml**: standard
+  `alp_project.py` wiring identical to every other example;
+  Twister scenarios for native_sim (regex-match `[prod] done`)
+  + AEN-Zephyr (build-only until a Mender server is staged).
+- **README.md**: walks the four stages, expected output, the
+  HiL flow, and the "production variants" pattern (customers
+  fork the skeleton for V2N / i.MX 93 carriers, swap the OTA
+  fabric for AWS / Azure, add domain logic between OTA poll +
+  attestation).  Cross-refs to docs/secure-boot.md +
+  docs/threat-model.md + docs/tutorials/12-mender-ota.md.
+
+Example count: 28 -> 29 (verified via
+`scripts/check_example_portability.py`).  This closes the last
+flagship under Pillar 4 / §4 in the readiness doc.
+
 ### Added (2026-05-14 -- mproc-mailbox HE-side peer image §C.30)
 
 - **`examples/mproc-mailbox/peer/main.c`** -- HE-side peer of
