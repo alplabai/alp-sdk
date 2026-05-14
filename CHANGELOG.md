@@ -61,6 +61,29 @@ that lands before the v0.3.0 tag.)
 - **5L35023B I2C address -> 7-bit `0x68`** (8-bit write `0xD0`) per
   the Renesas 5L35023 public datasheet.
 
+### Fixed (2026-05-14 -- DA9292 OTP-variant bring-up correction)
+
+- **`da9292_v2n_m1_enable_deepx_rail` no longer over-volts DEEPX
+  to 1.50 V.**  The DA9292-AROVx OTP variant on V2N boots with
+  `CH2_VSTEP=1` (`PMC_CTRL_01 = 0x80`, doubled-range encoding).
+  The previous bring-up wrote byte `0x96` to `VOUT_CH2_VSEL_LO`
+  expecting it to decode as 0.75 V (the VSTEP=0 mapping), but
+  silicon interpreted it as `2 x 750 = 1500 mV`.  Fix: clear
+  `CH2_VSTEP` + `CH2_EN` together in a single `PMC_CTRL_01`
+  write before programming the voltage byte.  Datasheet
+  constraint: `CHx_VSTEP` is only writable while
+  `CHx_EN=0`, so the EN clear must precede.  See
+  `chips/da9292/da9292.c::da9292_v2n_m1_enable_deepx_rail` and
+  the `@warning` block in `include/alp/chips/da9292.h`.
+- **`DA9292_I2C_ADDR_V2N` corrected from `0x1Cu` to `0x1Eu`.**
+  The macro had carried the wrong 7-bit address since the driver
+  landed; the AROVx OTP variant's `PMC_CFG_0A` defaults to 8-bit
+  `0x3C` -> 7-bit `0x1E`.  Affects nobody at runtime today (the
+  V2N firmware module that calls `da9292_init` hasn't landed yet)
+  but the macro is exposed in `include/alp/chips/da9292.h` so it
+  needed correcting before downstream consumers caught the bad
+  value.  `docs/abi/v0.5-snapshot.json` regenerated.
+
 ### Changed (2026-05-13 -- top-level UX simplification cont.)
 
 - **`bench/` moved to `tests/bench/`.**  The microbench harness

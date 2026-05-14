@@ -16,8 +16,9 @@
  *
  * On the V2N / V2N-M1 SoMs the chip is strapped for **2-channel
  * dual-phase mode** (CONF strap value selected for that config) and
- * sits on the BRD_I2C bus at 7-bit address `0x1C` (8-bit `0x38` for
- * write, `0x39` for read).
+ * sits on the BRD_I2C bus at 7-bit address `0x1E` (8-bit `0x3C` for
+ * write, `0x3D` for read) -- matches the DA9292-AROVx OTP variant
+ * register `PMC_CFG_0A` reset value of `0x3C`.
  *
  * @par Channel-to-rail mapping on V2N
  *
@@ -54,6 +55,13 @@
  * `_set_vstep` extension that disables the channel first (per
  * datasheet: "The buck converter needs to be disabled (CHx_EN = 0)
  * before CHx_VSTEP setting can be changed by I2C write").
+ *
+ * @warning The DA9292-AROVx OTP variant used on V2N boots with
+ *          `CH2_VSTEP=1` (PMC_CTRL_01 reset value 0x80).
+ *          `_set_voltage_mv` does NOT touch VSTEP, so callers that
+ *          intend to use the 5 mV / 0.3-1.275 V range on CH2 must
+ *          clear `CH2_VSTEP` (while `CH2_EN=0`) first --
+ *          `da9292_v2n_m1_enable_deepx_rail` does this internally.
  *
  * @par Power-good and event handling
  *
@@ -100,10 +108,11 @@
 extern "C" {
 #endif
 
-/** 7-bit I2C slave address used on V2N / V2N-M1 (CONF strap value
- *  selects this address out of the chip's address table; the V2N
- *  schematic strapped to 0x1C). */
-#define DA9292_I2C_ADDR_V2N 0x1Cu
+/** 7-bit I2C slave address used on V2N / V2N-M1.  The chip's
+ *  `PMC_CFG_0A` register holds the address byte (`0x3C` 8-bit
+ *  write-form for the AROVx OTP variant our SoMs use); the 7-bit
+ *  bus address is `0x1E`. */
+#define DA9292_I2C_ADDR_V2N 0x1Eu
 
 /** Channel identifier (the two dual-phase output channels in V2N's
  *  CONF configuration). */
@@ -207,18 +216,31 @@ alp_status_t da9292_get_voltage_mv(da9292_t *ctx, da9292_channel_t ch, uint16_t 
 alp_status_t da9292_v2n_base_init(da9292_t *ctx);
 
 /**
- * @brief V2N-M1 DEEPX rail bring-up sequence.
+ * @brief V2N-M1 DEEPX rail bring-up sequence (CH2 -> 0.75 V).
  *
- *  Procedure (per the 2026-05-11 maintainer memo and the V2N power-
- *  sequence PDF):
+ *  Procedure:
  *
- *    1. Verify `ctx` initialised + DEV_ID matches.
- *    2. Write `CH2_VOUT_VSEL_LO = 0.75 V` (= 0x96 at VSTEP=0).
+ *    1. Force `CH2_VSTEP = 0` and `CH2_EN = 0` in `PMC_CTRL_01`.
+ *       The DA9292-AROVx OTP variant on V2N boots with
+ *       `PMC_CTRL_01 = 0x80` (CH2_VSTEP=1, doubled-range), so the
+ *       VSTEP=0 byte for 0.75 V (0x96) would otherwise be decoded
+ *       as 1.50 V.  VSTEP is only writable while the channel is
+ *       disabled, hence the EN-clear in the same write.
+ *    2. Write `CH2_VOUT_VSEL_LO = 0.75 V` (0x96 at VSTEP=0).
  *    3. Read back, confirm the write took.
- *    4. Write `CH2_EN = 1` in `PMC_CTRL_01`.
+ *    4. Write `CH2_EN = 1` in `PMC_CTRL_01`.  On the V2N carrier
+ *       the EN2 pin is wired to V2N GPIO P64 (`DEEPX_CORE_0P75_EN`);
+ *       the recommended bring-up has firmware drive that pin
+ *       high after this call, so the register-side enable here is
+ *       belt-and-braces.
  *    5. Poll `da9292_get_status` for `ch2_pg = true` up to a
  *       caller-supplied timeout (typically <= 5 ms per datasheet
  *       soft-start figures).
+ *
+ *  Pre-condition: `da9292_v2n_base_init` has already run (CH2 is
+ *  disabled).  This function re-asserts CH2_EN=0 defensively
+ *  before touching VSTEP so that callers who skipped base_init
+ *  still get a safe ordering.
  *
  *  @return ALP_OK if CH2 reaches PG within `timeout_us`,
  *          ALP_ERR_TIMEOUT otherwise.

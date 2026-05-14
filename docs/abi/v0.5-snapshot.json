@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-13",
+  "generated": "2026-05-14",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1255,8 +1255,8 @@
       },
       "macros": {
         "DA9292_I2C_ADDR_V2N": {
-          "hash": "bf22676761ce7f5a",
-          "value": "0x1Cu"
+          "hash": "4bb2f56b17edf391",
+          "value": "0x1Eu"
         }
       },
       "typedefs": {

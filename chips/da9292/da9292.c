@@ -275,21 +275,44 @@ alp_status_t da9292_v2n_m1_enable_deepx_rail(da9292_t *ctx, uint32_t timeout_us)
 {
     if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 
-    /* 1. Program CH2 = 0.75 V (VSTEP=0). */
-    alp_status_t s = da9292_set_voltage_mv(ctx, DA9292_CH2, 750);
+    /* 1. Force CH2 into the 5-mV/300-1275 mV range before writing the
+     * setpoint.  The DA9292-AROVx OTP variant our V2N SoMs use boots
+     * with CH2_VSTEP=1 (PMC_CTRL_01=0x80), which doubles the byte's
+     * meaning -- writing the VSTEP=0 byte for 0.75 V (0x96) at
+     * VSTEP=1 yields 1.50 V on DEEPX.  Datasheet constraint: VSTEP
+     * is only writable while CH2_EN=0, which `da9292_v2n_base_init`
+     * (the caller's first step) guarantees.  Defensive: re-clear
+     * CH2_EN here in case the caller skipped base_init. */
+    uint8_t ctrl = 0;
+    alp_status_t s = reg_read(ctx, DA9292_REG_PMC_CTRL_01, &ctrl);
+    if (s != ALP_OK) return s;
+    const uint8_t ctrl_new = (uint8_t)(ctrl & ~(DA9292_CTRL01_CH2_EN |
+                                                DA9292_CTRL01_CH2_VSTEP));
+    if (ctrl_new != ctrl) {
+        s = reg_write(ctx, DA9292_REG_PMC_CTRL_01, ctrl_new);
+        if (s != ALP_OK) return s;
+    }
+
+    /* 2. Program CH2 = 0.75 V (now at VSTEP=0 -> byte 0x96). */
+    s = da9292_set_voltage_mv(ctx, DA9292_CH2, 750);
     if (s != ALP_OK) return s;
 
-    /* 2. Read back -- belt-and-braces sanity check. */
+    /* 3. Read back -- belt-and-braces sanity check. */
     uint16_t mv = 0;
     s           = da9292_get_voltage_mv(ctx, DA9292_CH2, &mv);
     if (s != ALP_OK) return s;
     if (mv != 750) return ALP_ERR_IO;
 
-    /* 3. Enable CH2. */
+    /* 4. Enable CH2.  On the V2N schematic the EN2 pin is wired to
+     * the V2N's `DEEPX_CORE_0P75_EN` GPIO (P64); driving that pin
+     * high also asserts CH2_EN.  Writing it here via I2C is the
+     * belt-and-braces path -- callers that own the GPIO can keep
+     * doing the pin-drive, and this register write makes the rail
+     * come up even on a board where the EN2 pin is grounded. */
     s = da9292_set_enable(ctx, DA9292_CH2, true);
     if (s != ALP_OK) return s;
 
-    /* 4. Poll CH2_PG until the rail comes up or we time out.  Datasheet
+    /* 5. Poll CH2_PG until the rail comes up or we time out.  Datasheet
      * soft-start: order of milliseconds; with the caller's timeout in
      * microseconds we sample every ~100 us.  Use a coarse loop based
      * on caller-side delay to avoid pulling in a clock dependency
