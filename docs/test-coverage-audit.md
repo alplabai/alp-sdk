@@ -37,26 +37,35 @@ in §C.16.  Every `*.c` sibling now registers its ZTESTs against the
 same suite.  Counts by `<alp/X.h>` surface (matched on `test_<peri>_`
 prefix):
 
+Counts after the §C.22 thin-spot fills:
+
 | Peripheral | ZTESTs | Surface coverage health |
 |------------|--------|-------------------------|
 | `pwm`      | 9      | ✅ healthy (open/close, configure, set/get, single-pulse, capture) |
-| `adc`      | 8      | ✅ healthy (open/close, configure, single-shot, streaming, DSP)    |
+| `counter`  | 8      | ✅ healthy after §C.22 fills (every public function NULL-guarded)   |
+| `adc`      | 7      | ✅ healthy (open/close, configure, single-shot, streaming, DSP)    |
+| `spi`      | 7      | ✅ healthy after §C.22 fills (open/close, transceive/write/read guards) |
 | `uart`     | 6      | ✅ healthy (open/close, write, RX ringbuf attach/pop)              |
-| `i2c`      | 4      | 🟡 lifecycle only -- no positive write/read path                    |
-| `gpio`     | 4      | 🟡 lifecycle + IRQ-args -- no edge-detect path                      |
-| `dac`      | 3      | 🟡 thin -- no waveform path                                         |
-| `can`      | 3      | 🟡 thin -- no TX/RX exchange path                                   |
-| `wdt`      | 2      | 🔴 very thin -- no feed-loop path                                   |
-| `spi`      | 2      | 🔴 very thin -- no MISO/MOSI roundtrip                              |
-| `i2s`      | 2      | 🔴 very thin -- no stream-out path                                  |
-| `rtc`      | 1      | 🔴 single test -- needs at least open/set/get/alarm                 |
-| `qenc`     | 1      | 🔴 single test                                                      |
-| `counter`  | 1      | 🔴 single test                                                      |
+| `qenc`     | 5      | ✅ healthy after §C.22 fills (open/close + get/reset position guards)|
+| `rtc`      | 5      | ✅ healthy after §C.22 fills (open + set/get_time guards)          |
+| `wdt`      | 5      | ✅ healthy after §C.22 fills (open + feed/disable guards)          |
+| `i2c`      | 4      | 🟡 lifecycle only -- no positive write/read path (needs HiL)        |
+| `gpio`     | 4      | 🟡 lifecycle + IRQ-args -- no edge-detect path (needs HiL)          |
+| `i2s`      | 4      | ✅ healthy after §C.22 fills (open with INVAL paths on every arg)  |
+| `dac`      | 3      | 🟡 thin -- no waveform path (HiL)                                   |
+| `can`      | 2      | 🟡 thin -- no TX/RX exchange path (HiL)                             |
 
-**Sum of named-peripheral tests: 46.**  The other 36 ZTESTs in
-the file cover cross-cutting concerns (`alp_last_error()`,
+**Sum of named-peripheral tests: 69 (was 46).**  The other 38
+ZTESTs in main.c cover cross-cutting concerns (`alp_last_error()`,
 peripheral-config arg-validation, NULL-handle lifecycle on
 shared types) that don't map to a single peripheral.
+
+Positive-path tests (real device transfer correctness) remain
+HiL-gated -- native_sim has no real PWM / ADC / I²C / SPI /
+UART / CAN / I²S devices to exchange data with.  The §C.22
+fills closed the binding-layer-contract gap; positive paths
+land alongside the corresponding HiL bring-up rows in
+`docs/test-plan.md`.
 
 ## Native_sim coverage shape
 

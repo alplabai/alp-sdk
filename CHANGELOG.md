@@ -159,6 +159,54 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- peripheral thin-spot test fills §C.22)
+
+Closes the §1c "thin-spot fills" carry-forward from the
+readiness doc.  Adds NULL-handle / NULL-arg / out-of-range
+guard tests for every public function on the six thinly-
+covered peripherals so the binding-layer contract is
+exercised on every native_sim build.
+
+Per-peripheral additions:
+
+- tests/zephyr/peripheral/src/rtc.c: 1 -> 5 tests.  Added
+  set_time / get_time NULL-handle + NULL-out guards.
+- tests/zephyr/peripheral/src/counter.c: 1 -> 8 tests.
+  Added start / stop / get_value / us_to_ticks /
+  cancel_alarm / close NULL guards (every public function
+  on the counter surface).
+- tests/zephyr/peripheral/src/qenc.c: 1 -> 5 tests.  Added
+  get_position / reset_position / close NULL guards.
+- tests/zephyr/peripheral/src/spi.c: 2 -> 7 tests.  Added
+  NULL-cfg open + transceive / write / read NULL-handle
+  guards + close-on-NULL safety.
+- tests/zephyr/peripheral/src/i2s.c: 2 -> 4 tests.  Added
+  invalid-word_bits rejection (must be 8/16/24/32) +
+  zero-block_frames rejection.
+- tests/zephyr/peripheral/src/wdt.c: 2 -> 5 tests.  Added
+  out-of-range-id rejection + feed / disable NULL-handle
+  guards (NULL-feed silently no-op would mask a stuck
+  watchdog -- the test guards against that regression).
+
+Total per-peripheral test count: 46 -> 69.  Cross-cutting
+tests in main.c unchanged at 38.
+
+docs/test-coverage-audit.md headline table updated with the
+new counts + the seven peripherals now marked ✅ healthy
+(after-§C.22).
+
+docs/v1.0-readiness.md §1c thin-spot-fills row flips from
+📋🔌 to [x].
+
+Real-device transfer correctness (positive paths) still
+HiL-gated per the corresponding docs/test-plan.md row;
+native_sim covers the binding-layer contract every public
+function inherits.
+
+Validators after commit:
+- metadata / portability / pin-conflicts: clean
+- abi_snapshot --diff: unchanged
+
 ### Changed (2026-05-14 -- full doxygen pass on remaining headers §C.21)
 
 Completes the v1.0 contract: every public function in every
