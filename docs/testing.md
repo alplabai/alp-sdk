@@ -10,6 +10,8 @@ hardware.  Coverage map per `<alp/...>` header below.
 > pass/fail status (⏳ untested / 🟡 partial / ✅ verified / ❌ failing)
 > lives in [`docs/test-plan.md`](test-plan.md).  Real-hardware HIL
 > contract lives in [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md).
+> Per-area ZTEST counts + identified coverage gaps live in
+> [`docs/test-coverage-audit.md`](test-coverage-audit.md).
 
 ---
 

@@ -159,6 +159,23 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- test coverage audit §B.3)
+
+- **`docs/test-coverage-audit.md`** (new) -- maps ZTEST counts
+  per `tests/zephyr/<area>/` against the `<alp/...>` surface
+  each area covers.  Per-peripheral breakdown inside the
+  902-line `tests/zephyr/peripheral/src/main.c` monolith
+  identifies six "thin" peripherals (RTC / QENC / COUNTER
+  with 1 test each, SPI / I²S / WDT with 2 each).  The
+  native_sim coverage shape (negative-path-only for
+  audio / inference / iot / security / usb) is documented +
+  contrasted with the HiL ledger in `docs/test-plan.md` so
+  reviewers don't confuse "green native_sim" with "verified".
+  Methodology section captures the grep recipes for re-running
+  the audit on future commits.  `docs/testing.md` cross-links
+  to the new audit.  This is a no-new-tests pass; per-area test
+  additions are scheduled as follow-up work.
+
 ### Removed (2026-05-14 -- internal docs moved to private repo)
 
 - **`docs/hil-plan.md` removed from the public SDK.**  The
