@@ -1,0 +1,119 @@
+{
+  "_comment": "SPDX 2.3 SBOM template for ALP SDK releases.  The release.yml workflow generates the real per-release file by populating the placeholders below at tag time.  Lives under docs/abi/ alongside the ABI snapshots since both are per-release artefacts.",
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "ALP SDK v<VERSION>",
+  "documentNamespace": "https://docs.alplab.ai/sdk/sbom/v<VERSION>",
+  "creationInfo": {
+    "created": "<ISO-8601-AT-TAG>",
+    "creators": [
+      "Tool: scripts/abi_snapshot.py + scripts/bump_version.py",
+      "Organization: ALP Lab AB"
+    ]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-alp-sdk",
+      "name": "alp-sdk",
+      "versionInfo": "<VERSION>",
+      "downloadLocation": "https://github.com/alplabai/alp-sdk/archive/refs/tags/v<VERSION>.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "Copyright 2026 ALP Lab AB",
+      "checksums": [
+        {"algorithm": "SHA256", "checksumValue": "<SHA256-AT-TAG>"},
+        {"algorithm": "SHA512", "checksumValue": "<SHA512-AT-TAG>"}
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-zephyr",
+      "name": "zephyr",
+      "versionInfo": "v3.7.0-LTS",
+      "downloadLocation": "https://github.com/zephyrproject-rtos/zephyr/archive/refs/tags/v3.7.0.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "_comment": "Pinned by west.yml; verify against west.yml at tag time"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-mbedtls",
+      "name": "mbedtls",
+      "versionInfo": "<VERSION-FROM-WEST-YML>",
+      "downloadLocation": "https://github.com/zephyrproject-rtos/mbedtls",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-lwrb",
+      "name": "lwrb",
+      "versionInfo": "v3.2.0",
+      "downloadLocation": "https://github.com/MaJerle/lwrb",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-nanopb",
+      "name": "nanopb",
+      "versionInfo": "0.4.9",
+      "downloadLocation": "https://github.com/nanopb/nanopb",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Zlib"
+    },
+    {
+      "_comment": "Vendor SDKs land here once their west.yml pins are stable.",
+      "SPDXID": "SPDXRef-Package-hal-alif",
+      "name": "hal_alif",
+      "versionInfo": "<VERSION-FROM-WEST-YML>",
+      "downloadLocation": "https://github.com/zephyrproject-rtos/hal_alif",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-gd32g5x3-firmware-library",
+      "name": "gd32g5x3-firmware-library",
+      "versionInfo": "<VERSION-FROM-WEST-YML>",
+      "downloadLocation": "https://github.com/alplabai/gd32g5x3-firmware-library",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "_comment": "GD32 vendor HAL library; consumed by firmware/gd32-bridge/"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relatedSpdxElement": "SPDXRef-Package-alp-sdk",
+      "relationshipType": "DESCRIBES"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-alp-sdk",
+      "relatedSpdxElement": "SPDXRef-Package-zephyr",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-alp-sdk",
+      "relatedSpdxElement": "SPDXRef-Package-mbedtls",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-alp-sdk",
+      "relatedSpdxElement": "SPDXRef-Package-lwrb",
+      "relationshipType": "OPTIONAL_DEPENDENCY_OF"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-alp-sdk",
+      "relatedSpdxElement": "SPDXRef-Package-nanopb",
+      "relationshipType": "OPTIONAL_DEPENDENCY_OF"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-alp-sdk",
+      "relatedSpdxElement": "SPDXRef-Package-hal-alif",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-alp-sdk",
+      "relatedSpdxElement": "SPDXRef-Package-gd32g5x3-firmware-library",
+      "relationshipType": "DEPENDS_ON"
+    }
+  ]
+}
