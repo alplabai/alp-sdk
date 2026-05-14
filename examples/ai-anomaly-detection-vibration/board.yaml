@@ -1,0 +1,50 @@
+# board.yaml -- AI vibration-anomaly detection demo.
+#
+# Predictive-maintenance edge-AI pitch on the always-on Ethos-U:
+# read a 256-sample window from the EVK's LSM6DSO accelerometer,
+# feed it through a 1D-CNN anomaly model via TFLM, publish the
+# per-window score.  Same app source builds against the V2N's
+# DEEPX DX-M1 path when the SoM SKU is flipped.
+#
+# Why the headline matters for customers: factory-floor vibration
+# monitoring without a cloud round-trip.  The model + LSM6DSO
+# sample loop both run on the on-die NPU + M55 -- battery-powered
+# nodes can run for months on a single charge because the heavy
+# compute lives behind the Ethos-U's clock-gated path.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701           # E7's two Ethos-U55s give an always-on
+                             # inference path; AEN401/AEN601/AEN801
+                             # add U85 for transformer-style anomaly
+                             # models on the same source.
+
+carrier:
+  name: E1M-EVK
+  # The EVK already populates the LSM6DSO at I2C0 0x6A; we re-state
+  # it here so the §D.lib loader keeps the CHIP_LSM6DSO Kconfig on
+  # even if a future EVK preset trims defaults.
+  populated:
+    lsm6dso: true
+
+os: zephyr
+
+# Inference backend resolved from the SoM preset.  AEN -> Ethos-U
+# (U55 / U85 picked by Vela), V2N -> DEEPX DX-M1, NX9101 -> U65.
+# App source touches none of those names.
+inference:
+  backend: auto
+  default_arena_kib: 128
+
+libraries:
+  - tflite_micro
+
+peripherals:
+  - i2c                    # LSM6DSO link.
+
+chips:
+  - lsm6dso                # 6-axis IMU; we only use the accel here.
+
+diagnostics:
+  log_level: info

@@ -7,15 +7,18 @@
 # project in their own west.yml and let *that* manifest drive Zephyr.
 #
 # Pin policy:
-#   - zephyr: the LTS release the SDK is verified against.  Currently
-#     v3.7.0 (the same revision pr-twister.yml + the nightly AEN HIL
-#     workflow exercise).  Bumps are deliberate, not automatic --
-#     each LTS-to-LTS upgrade ships as a minor alp-sdk release after
-#     re-verifying every wrapped peripheral on the target SoMs.  See
-#     docs/zephyr-version-policy.md for the full policy.
+#   - zephyr: the stable release the SDK is verified against.  Currently
+#     v4.4.0 (the same revision pr-twister.yml + the nightly AEN HIL
+#     workflow exercise).  v0.5 bumped from v3.7.0 LTS to v4.4.0 to
+#     pick up mainline LVGL v9, upstream Alif Ensemble board files,
+#     and the I2S inclusive-language rename.  Bumps are deliberate,
+#     not automatic -- each major upgrade ships as a minor alp-sdk
+#     release after re-verifying every wrapped peripheral on the
+#     target SoMs.  See docs/zephyr-version-policy.md for the full
+#     policy + LTS migration notes.
 #   - hal_renesas / hal_nxp: imported via Zephyr's own west.yml (the
 #     name-allowlist below lets them through the import filter).
-#     Zephyr v3.7 pins specific revisions; we follow what Zephyr ships.
+#     Zephyr v4.4 pins specific revisions; we follow what Zephyr ships.
 #     hal_renesas covers the RZ/V2N + RZ/V2L + RZ/V2H BSP under
 #     `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/`; hal_nxp covers
 #     i.MX 93 (MIMX9301..9352) and i.MX 95 under
@@ -143,7 +146,7 @@ manifest:
       path: modules/hal/alif
 
     - name: zephyr
-      revision: v3.7.0        # LTS pin; see docs/zephyr-version-policy.md
+      revision: v4.4.0        # Latest stable; see docs/zephyr-version-policy.md
       west-commands: scripts/west-commands.yml
       import:
         # Pull in only the modules we actually need.  Filtering keeps

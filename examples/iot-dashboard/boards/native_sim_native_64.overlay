@@ -1,0 +1,21 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * native_sim board overlay -- chooses zephyr's dummy display
+ * driver so the LVGL demo links without a real display chip.
+ * Real-silicon builds (alif / v2n) bring up the actual panel
+ * (ST7789 / ILI9488 / DSI etc.) via the SoM board overlay.
+ */
+
+/ {
+	chosen {
+		zephyr,display = &dummy_dc;
+	};
+
+	dummy_dc: dummy_dc {
+		compatible = "zephyr,dummy-dc";
+		height = <320>;
+		width = <240>;
+	};
+};

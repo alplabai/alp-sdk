@@ -1,0 +1,52 @@
+# board.yaml -- always-on "Hey Alp" wake-word demo on E1M-AEN.
+#
+# Pitches the AEN family's low-power AI subsystem: the Cortex-M55
+# HE core stays awake at ~50 MHz running a tiny CNN over MFCC
+# features streamed off a PDM microphone, with the on-die
+# Ethos-U55 NPU bursting the convolutions in <50 ms windows.
+# Average draw budget: <1 mW for 24/7 listening.  Detection
+# wakes the M55 HP core for the heavy follow-up work (ASR /
+# command parsing / cloud upload).
+#
+# E1M-V2N has no equivalent always-on AI complex, so this demo
+# is the AEN family's headline differentiator.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701            # E7 -- Cortex-M55 HE @ 160 MHz max
+                              # (we run at 50 MHz for the duty-cycle
+                              # math) + 2x Ethos-U55, one bonded out
+                              # to each M55 core.
+
+carrier:
+  name: E1M-EVK              # PDM mic on the EVK is already
+                              # populated by the carrier preset
+                              # (`pdm_mic: true`).
+
+os: zephyr
+
+# TFLite Micro pulls in the CPU reference kernels; the AEN
+# capabilities block routes the Ethos-U55 driver shim on top via
+# CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y + CONFIG_ALP_TFLM_ETHOS_U55=y.
+libraries:
+  - tflite_micro
+
+# Inference backend stays AUTO so the same source builds on
+# native_sim (CPU fallback) and on AEN (Ethos-U dispatch).
+inference:
+  backend: ethos_u
+  default_arena_kib: 64      # ~30k-param CNN -- 64 KiB is generous.
+
+# No `peripherals:` block.  PDM mic input on Zephyr is the DMIC
+# audio subsystem rather than a peripheral driver class -- the
+# board.yaml schema's `peripherals:` enum doesn't carry `pdm`
+# (same convention as the audio-loopback example).  The mic
+# itself comes in via the carrier's pre-populated `pdm_mic`
+# chip (E1M-EVK has it true by default) and CONFIG_AUDIO_DMIC=y
+# is wired through testcase.yaml's `extra_args`.  We
+# intentionally do NOT list `i2s` -- this is the PDM mic path,
+# not an I2S codec path.
+
+diagnostics:
+  log_level: info

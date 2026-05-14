@@ -227,7 +227,7 @@ bus id matching `E1M_I2C0` on your board.
 
 ### `pr-twister.yml` fails with `west-commands: invalid in module.yml`
 
-You're using Zephyr v3.6 or older.  Pin v3.7.0 LTS per
+You're using a Zephyr release older than the SDK's pin.  Bump to v4.4.0 per
 [`docs/zephyr-version-policy.md`](zephyr-version-policy.md).
 
 ### `clang-format` CI reports diffs you can't reproduce

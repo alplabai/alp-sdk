@@ -24,7 +24,7 @@ actually buying you at runtime:
 ## Build + run
 
 ```
-west build -b alif_e7_dk_rtss_hp examples/lvgl-benchmark
+west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/lvgl-benchmark
 west flash
 # scene results print to UART after the benchmark finishes (~30 s).
 ```

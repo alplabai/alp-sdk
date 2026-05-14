@@ -84,6 +84,93 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Changed (2026-05-14 -- Zephyr v3.7.0 LTS → v4.4.0 stable bump)
+
+The SDK's `west.yml` Zephyr pin moves from v3.7.0 LTS to v4.4.0
+stable.  Mainline feature access (LVGL v9, upstream Alif Ensemble
+board files, the I2S `_CONTROLLER` naming, mbedtls 3.6) at the
+cost of LTS support window.  Customers shipping product with a
+24-month support requirement should re-pin to v3.7.x in their own
+manifest -- the SDK's `<alp/*>` surface stays binary-compatible.
+
+Knock-on changes:
+
+- `.github/workflows/pr-twister.yml` + `nightly-aen-hil.yml` --
+  `--mr v3.7.0` → `--mr v4.4.0`; cache key bumped.
+- All `examples/*/testcase.yaml` + `README.md` entries that named
+  the v3.x board `alif_e7_dk_rtss_hp` / `_rtss_he` retargeted to
+  the v4.4 upstream Alif board `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp`
+  (closest available -- AEN-specific boards land later in
+  Alif's own `zephyr_alif` fork).
+- LVGL Kconfig knob renames (LVGL v8 → v9):
+  - `CONFIG_LV_DISP_DEF_REFR_PERIOD` → `CONFIG_LV_DEF_REFR_PERIOD`.
+  - `CONFIG_LV_INDEV_DEF_READ_PERIOD` -- removed in v9; runtime
+    `lv_indev_set_read_timer_period()` instead.
+- LVGL demo source sets (`lv_demo_widgets.c`, `lv_demo_benchmark.c`,
+  `lv_demo_music*.c`) are no longer compiled by the Zephyr lvgl
+  module's CMakeLists; demo examples add them to their own
+  `target_sources()` explicitly.
+- `src/zephyr/peripheral_i2s.c` -- `I2S_OPT_FRAME_CLK_MASTER` /
+  `I2S_OPT_BIT_CLK_MASTER` are deprecated in v4.4; renamed to
+  `_CONTROLLER` per Zephyr's inclusive-language pass.
+- `docs/zephyr-version-policy.md`, `getting-started.md`,
+  `troubleshooting.md`, `glossary.md` updated.
+- New `docs/local-ci.md` -- Windows-native + WSL2 paths for
+  running twister locally so contributors don't bounce off CI for
+  every iteration.
+
+### Added (2026-05-14 -- 7 demo source-level fixes + 6 new flagship demos)
+
+Real bugs the v4.4 bump surfaced + new demo apps for the website
+gallery.  All marked `[UNTESTED]` -- they build on `native_sim`
+but haven't been HIL-validated.
+
+Source fixes (real API drift in v0.5 demos):
+
+- `drone-autopilot/src/{main,autopilot,mavlink}.c` + `board.yaml`
+  -- chip API mismatches (lsm6dso_axes_t, ina236 signature, UART
+  field name `baudrate`, INA236 default I²C addr literal, PWM
+  header include, missing `<stdio.h>`, float/double promotion in
+  the GPS pack, MAVLink UART moved off the non-existent
+  E1M_UART2).  Board.yaml gains a `carrier.populated:` override
+  for `bmp390` + `ublox_neo_m9n` so the loader emits their chip
+  knobs (the loader doesn't yet honour a top-level `chips:` block).
+- `drone-hud/src/sensors.c` -- same class of fixes.
+- `ai-camera-viewer/src/inference_loop.c` -- `alp_camera_config_t`
+  and `alp_inference_config_t` reconciled with the real header
+  field names.
+- `iot-dashboard/src/main.c` -- `bme280_compensate` signature
+  rewrite (it returns a struct, not three out-params), `<stdio.h>`
+  for `snprintf`, `CONFIG_LV_FONT_MONTSERRAT_28=y` added to prj.conf.
+- `production-deployment/prj.conf` -- `CONFIG_MBEDTLS=n` on
+  native_sim to dodge Zephyr 4.4's PSA-crypto wiring (real fix in
+  v0.6 via tf-psa-crypto).
+- All 15 `examples/*-*/testcase.yaml` files that an earlier
+  auto-edit had left with `harness: console` indented inside the
+  `tags:` list re-shaped to the correct flat layout.
+- 7 new demo `CMakeLists.txt` files -- `find_package(Python3
+  REQUIRED COMPONENTS Interpreter)` moved BEFORE
+  `find_package(Zephyr)` so `${Python3_EXECUTABLE}` is defined
+  when the alp_project loader runs.
+
+New flagship demos (paper-correct stubs, ~50 % comment ratio):
+
+- `examples/ai-object-detection-realtime/` -- YOLOv8-tiny on
+  V2N-M1 (DEEPX 29 TOPS) + V2H-M1 (DEEPX 113 TOPS).  Camera →
+  inference → bounding-box overlay → FPS counter.
+- `examples/ai-anomaly-detection-vibration/` -- accelerometer →
+  1D-CNN → anomaly score for predictive maintenance.  AEN
+  always-on Ethos-U + V2N.
+- `examples/iot-fleet-ota/` -- secure OTA + rollback signed by
+  the OPTIGA Trust M secure element.  All E1M-X SoMs.
+- `examples/audio-noise-suppression/` -- DSP + AI pipeline,
+  ~10 ms latency.  V2N + V2H DSP cores.
+- `examples/audio-wake-word/` -- always-on keyword spotting on
+  AEN's Ethos-U at sub-mW.  E1M-AEN.
+- `examples/mproc-dual-os-yocto-zephyr/` -- Yocto/A55 + Zephyr/M33
+  shared-memory IPC, dual-firmware shape, dual-update lifecycle.
+  V2N + V2H.
+
 ### Added (2026-05-14 -- meta-alp-sdk Yocto layer + drone-autopilot MAVLink GCS link)
 
 `[UNTESTED]` -- both pieces are paper-correct v0.5 scaffolding.

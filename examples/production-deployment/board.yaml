@@ -24,8 +24,10 @@ iot:
   mqtt: true
   tls: true
 
-libraries:
-  - mbedtls    # TLS for Mender + AEAD primitives
+# libraries: mbedtls dropped here for v0.5 native_sim parity
+#            (Zephyr 4.4 + mbedtls 3.6 PSA wiring is a v0.6 work item).
+#            Real-silicon builds re-enable mbedtls via the SoM-side
+#            TF-M-on-HE-core stack.
 
 chips:
   - optiga_trust_m

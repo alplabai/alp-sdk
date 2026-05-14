@@ -16,5 +16,5 @@ tests:
                                 # twister build-only is enough for v0.5.
   alp_sdk.examples.lvgl_widgets_demo.aen:
     platform_allow:
-      - alif_e7_dk_rtss_hp
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
     build_only: true            # No EVK runner online -- v0.6 HiL fills.

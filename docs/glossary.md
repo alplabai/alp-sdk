@@ -216,5 +216,5 @@ both support it.
 `os: yocto` in `board.yaml`; v0.4 deliverable per the test plan.
 
 **Zephyr** -- The RTOS the SDK targets as a first-class backend
-(`os: zephyr`).  Pinned to v3.7.0 LTS per
+(`os: zephyr`).  Pinned to v4.4.0 per
 [`docs/zephyr-version-policy.md`](zephyr-version-policy.md).

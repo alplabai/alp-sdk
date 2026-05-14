@@ -18,6 +18,11 @@
  *
  * ── What this stack carries ────────────────────────────────────
  *
+ * In v0.5 the GCS link shares UART0 with the GNSS port at the C
+ * level (the only two-UART E1M family is short on dedicated radio
+ * ports).  Real builds wire the SiK radio to a dedicated carrier
+ * UART that the TBD board overlay exposes.
+ *
  *   Tx (autopilot → ground station):
  *     - HEARTBEAT       (msg-id 0)    -- 1 Hz, always.
  *     - ATTITUDE        (msg-id 30)   -- 10 Hz.

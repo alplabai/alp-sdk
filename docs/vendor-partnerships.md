@@ -111,34 +111,36 @@ shape (`zephyr/module.yml` + `zephyr/Kconfig` + root
 imports it **unconditionally** as a top-level project so the
 HAL is on every workspace.
 
-**Piece 2 -- Zephyr board files**: Alif Ensemble board files
-(`alif_e7_dk_rtss_he`, `alif_b1_dk`, ...) are NOT in Zephyr
-v3.7 LTS -- they upstreamed to Zephyr **main** post-v3.7 (only
-3 boards visible in upstream main today: `balletto_b1_dk`,
-`ensemble_e1c_dk`, `ensemble_e8_dk`).  The full 8-board set
-lives in Alif's own
+**Piece 2 -- Zephyr board files**: As of Zephyr v4.4 (the SDK's
+current pin) upstream Zephyr ships three Alif Ensemble board
+families directly under `boards/alif/`: `ensemble_e8_dk` (with
+multiple silicon-variant qualifiers), `ensemble_e1c_dk`, and
+`balletto_b1_dk`.  This is **new in v4.x** -- v3.7 LTS had no
+Alif boards at all, and Alif's own
 [`alifsemi/zephyr_alif`](https://github.com/alifsemi/zephyr_alif)
-fork, which Alif's aggregate manifest at
-[`alifsemi/sdk-alif`](https://github.com/alifsemi/sdk-alif)
-imports as its Zephyr project.  Customers wanting stock Alif
-EVK board files must use `sdk-alif` as their workspace
-manifest (or `EXTRA_ZEPHYR_MODULES`-point at the cloned
-`zephyr_alif`).  Our `west.yml` keeps `sdk-alif` pinned at
-`zas-v2.0.0-rc1` in the **`vendor-sdks` opt-in group**.
+fork was the only path to stock board files.  With v4.4 the
+upstream coverage is enough for SDK CI -- our example twister
+scenarios target `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp` as
+the AEN proxy.  Customers wanting the **full** Alif EVK board
+catalogue (the older 8-board set under `alif_e7_*` naming) still
+fall back to `sdk-alif` (zas-v2.0.0-rc1) in the
+**`vendor-sdks` opt-in group**.
 
 **Decision tree** for AEN customers:
 
 ```
-Building for an Alif Ensemble EVK with Alif's stock board file?
-├── YES → enable `vendor-sdks` + use `sdk-alif` as workspace topdir.
-│         You get Alif's zephyr_alif fork (Zephyr with Alif boards
-│         in-tree) replacing our default Zephyr v3.7 pin.
-└── NO  → keep our default workspace (Zephyr v3.7 + alp-sdk topdir).
-          The top-level hal_alif direct import gives you the HAL;
-          ship your own board file under
-          alplabai/alp-zephyr-modules with the alp,pin-array
-          slot defines.  This is the canonical pattern for
-          carrier-specific Alif designs.
+Building for an Alif Ensemble EVK?
+├── ensemble_e8_dk / ensemble_e1c_dk / balletto_b1_dk
+│         → our default workspace works.  Upstream Zephyr v4.4
+│           ships these in tree; the top-level hal_alif import
+│           gives you the HAL drivers.  west build -b <name>/<qualifier>.
+├── Carrier-specific design (E1M-X SoM + custom carrier)
+│         → keep the default workspace; ship your own board file
+│           under alplabai/alp-zephyr-modules with the alp,pin-array
+│           slot defines.  hal_alif via west update is sufficient.
+└── Older Alif EVK variant not in upstream (alif_e7_dk_rtss_he etc.)
+          → enable vendor-sdks + use sdk-alif as workspace topdir
+            for the full 8-board set from Alif's zephyr_alif fork.
 ```
 
 §C.40 had the wrong assumption that `hal_alif` had to come

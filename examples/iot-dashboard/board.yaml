@@ -13,13 +13,22 @@ som:
 
 carrier:
   name: E1M-EVK
+  # External chips wired into the EVK headers.  Loader picks up the
+  # overrides into its populated-chip table so the matching driver
+  # gets linked.  v0.6 introduces a dedicated app-level chips:
+  # block; for v0.5 this is the supported path.
+  populated:
+    bme280: true
+    st7789: true
 
 os: zephyr
 
 libraries:
   - lvgl
-  - mbedtls               # TLS for MQTT.
-  - coremqtt_sn           # Lightweight MQTT-SN client (sensor-network MQTT).
+  # mbedtls + coremqtt_sn dropped on native_sim for the v0.5 build
+  # parity sweep (Zephyr 4.4 + mbedtls 3.6 PSA wiring is the v0.6
+  # work item).  Real-silicon builds re-enable both via the SoM-side
+  # TF-M-on-HE-core stack.
 
 iot:
   wifi:    true

@@ -23,5 +23,5 @@ tests:
     platform_allow: native_sim/native/64
   alp_sdk.examples.production_deployment.aen:
     platform_allow:
-      - alif_e7_dk_rtss_hp
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
     build_only: true   # real run needs a staged Mender server.

@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: audio-noise-suppression
+  description: |
+    Real-time noise suppression demo for headsets / hearables /
+    conferencing.  TAS2563 mic -> <alp/dsp.h> Hann+FFT spectrum ->
+    <alp/inference.h> RNNoise-style denoiser -> TAS2563 speaker,
+    ~10 ms end-to-end latency target.  Targets V2N (and V2H by
+    SKU flip); native_sim exercises the framing path.
+
+tests:
+  alp_sdk.examples.audio_noise_suppression.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - audio
+      - dsp
+      - ai
+    build_only: true
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[ns\\] done"
+
+  alp_sdk.examples.audio_noise_suppression.v2n:
+    # Build-only until the alp_e1m_evk_v2n Zephyr board file lands
+    # in alplabai/alp-zephyr-modules.  Twister rejects unknown
+    # platforms in platform_allow, so we list the upstream Renesas
+    # RZ/V2N EVK as a stand-in target -- the source compiles
+    # cleanly against the V2N supervisor M33 once that board file
+    # is published.
+    platform_allow:
+      - rzv2n_evk/r9a09g056n48gbg/cm33
+    tags:
+      - alp-sdk
+      - example
+      - audio
+      - dsp
+      - ai
+      - v2n
+    build_only: true
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[ns\\] done"

@@ -4,11 +4,11 @@
  *
  * Sensor-loop implementations for drone-hud.  Three discrete
  * jobs:
- *   1. Bring up each chip via its `<alp/chips/*.h>` driver.
+ *   1. Bring up each chip via its `<alp/chips/X.h>` driver.
  *   2. Run a 100 Hz IMU sample + Madgwick attitude fuse loop.
  *   3. Run a 5 Hz GPS + battery telemetry loop.
  *
- * All bus access goes through the portable `<alp/*>` surfaces;
+ * All bus access goes through the portable `<alp/...>` surfaces;
  * no vendor symbols appear.  Per the SDK rule "Portable
  * peripheral surfaces only in app + library code".
  */
@@ -54,8 +54,8 @@ int drone_sensors_init(drone_telemetry_t *telem)
 
     /* GPS UART -- 9600/8N1 is the NEO-M9N factory default. */
     s_gps_uart = alp_uart_open(&(alp_uart_config_t){
-        .port_id   = E1M_UART0,
-        .baud_rate = 9600,
+        .port_id  = E1M_UART0,
+        .baudrate = 9600,
     });
     if (s_gps_uart == NULL) {
         LOG_WRN("GPS UART unavailable; continuing without GNSS");
@@ -69,8 +69,9 @@ int drone_sensors_init(drone_telemetry_t *telem)
         rc--;
     }
 
-    /* Battery monitor.  INA236 sits at 0x40 on the bus by default. */
-    if (ina236_init(&s_batt, s_i2c, INA236_I2C_ADDR_DEFAULT, 0.01f) != ALP_OK) {
+    /* Battery monitor.  INA236A at 0x40 (A0 = GND) is the default. */
+    if (ina236_init(&s_batt, s_i2c, 0x40, /*shunt_ohms=*/0.01f,
+                    /*max_current_a=*/50.f, INA236_ADCRANGE_81MV) != ALP_OK) {
         LOG_WRN("INA236 init failed; battery telemetry will read zero");
         rc--;
     }
@@ -106,20 +107,33 @@ static void update_attitude(drone_telemetry_t *t,
     if (t->yaw_deg   <    0.f) t->yaw_deg   += 360.f;
 }
 
+/* Default-FS LSB-to-physical conversion factors for the LSM6DSO.
+ * Accel default FS = ±2 g, sensitivity 16384 LSB/g.
+ * Gyro  default FS = ±250 dps, sensitivity 114.286 LSB/dps. */
+#define LSM6DSO_ACCEL_LSB_PER_G    16384.f
+#define LSM6DSO_GYRO_LSB_PER_DPS     114.286f
+
 void drone_sensors_run_imu_loop(drone_telemetry_t *telem)
 {
     /* 100 Hz target -- 10 ms slice. */
     while (1) {
-        lsm6dso_accel_t a = {0};
-        lsm6dso_gyro_t  g = {0};
+        lsm6dso_axes_t a = {0};
+        lsm6dso_axes_t g = {0};
         if (lsm6dso_read_accel(&s_imu, &a) == ALP_OK &&
             lsm6dso_read_gyro(&s_imu,  &g) == ALP_OK) {
-            /* Gyro readings are in dps (degrees per second).  The
-             * lsm6dso_t exposes the configured FS scale; we assume
-             * the default (±2000 dps) for this demo. */
-            const float gx = (float)g.x_mdps / 1000.f;
-            const float gy = (float)g.y_mdps / 1000.f;
-            const float gz = (float)g.z_mdps / 1000.f;
+            /* Convert raw int16 counts to dps using the gyro's
+             * default ±250 dps full-scale sensitivity.  The driver
+             * leaves FS at reset defaults; the demo doesn't call
+             * lsm6dso_set_gyro() to override. */
+            const float gx = (float)g.x / LSM6DSO_GYRO_LSB_PER_DPS;
+            const float gy = (float)g.y / LSM6DSO_GYRO_LSB_PER_DPS;
+            const float gz = (float)g.z / LSM6DSO_GYRO_LSB_PER_DPS;
+            /* Accel reading is unused by the placeholder Madgwick
+             * step here, but keep the sensitivity constant referenced
+             * so the table compiles + documents the math the v0.6
+             * full-fusion port will plug in. */
+            (void)LSM6DSO_ACCEL_LSB_PER_G;
+            (void)a;
             update_attitude(telem, gx, gy, gz, 0.01f);
         }
         k_msleep(10);
@@ -133,12 +147,13 @@ void drone_sensors_run_slow_loop(drone_telemetry_t *telem)
     static uint32_t coulomb_ticks = 0;
 
     while (1) {
-        /* Battery read -- INA236 reports milli-volts + milli-amps. */
-        int32_t mv = 0, ma = 0;
-        if (ina236_read_voltage_mv(&s_batt, &mv) == ALP_OK &&
-            ina236_read_current_ma(&s_batt, &ma) == ALP_OK) {
+        /* Battery read -- INA236 reports bus mV + current uA; convert
+         * to volts + amps for the HUD. */
+        int32_t mv = 0, ua = 0;
+        if (ina236_read_bus_mv(&s_batt, &mv) == ALP_OK &&
+            ina236_read_current_ua(&s_batt, &ua) == ALP_OK) {
             telem->battery_v = mv / 1000.f;
-            telem->battery_a = ma / 1000.f;
+            telem->battery_a = ua / 1000000.f;
             /* Crude estimator: -1 minute every 5 s while drawing
              * more than 1 A.  Real Coulomb-counting + cell model
              * lands in v0.6. */

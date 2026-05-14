@@ -1,0 +1,44 @@
+# board.yaml -- mproc-dual-os-yocto-zephyr
+#
+# Heterogeneous compute demo for E1M-V2N101 (Renesas RZ/V2N):
+#
+#   * Cortex-A55 quad cluster runs Yocto Linux + the consumer app
+#     under `linux/`.
+#   * Cortex-M33 (same SoC, peer core) runs Zephyr + the producer
+#     app under `m33/`.
+#   * The two halves talk through a shared-memory ring buffer
+#     anchored in cache-coherent SRAM, with `<alp/mproc.h>` as the
+#     portable IPC surface (mbox channel + shmem region).
+#
+# `os:` schema only enumerates {zephyr, yocto, baremetal} (see
+# metadata/schemas/board-config-v1.schema.json) -- there is no
+# `multi` slot yet.  This file drives the *M33/Zephyr* half of the
+# build via twister + alp_project.py; the Linux half is packaged
+# by `meta-alp-sdk/recipes-apps/mproc-dual-os/` and bitbaked as
+# part of the Yocto image (it does NOT consume this board.yaml).
+#
+# The dual-OS framing therefore lives in two places that BOTH need
+# to stay in sync:
+#
+#   - This file (Zephyr/M33 side).
+#   - The bitbake recipe + `linux/CMakeLists.txt` (Yocto/A55 side).
+
+schema_version: 1
+
+som:
+  sku: E1M-V2N101            # V2N -- A55 cluster + M33 peer + DRP-AI3.
+
+carrier:
+  name: E1M-EVK
+
+# Zephyr build covers the M33 producer only.  The A55 Linux consumer
+# is a separate CMake project under `linux/` driven by Yocto.
+os: zephyr
+
+# Mailbox + shared-memory primitives ride extra_args via testcase.yaml
+# (CONFIG_ALP_SDK_MPROC=y) the same way mproc-mailbox does; the
+# schema's `peripherals:` enum is for Zephyr driver-class subsystems
+# (adc/can/i2c/spi/...), not for SDK feature toggles.
+
+diagnostics:
+  log_level: info

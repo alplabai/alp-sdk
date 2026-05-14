@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: ai-object-detection-realtime
+  description: |
+    Realtime YOLOv8-tiny object detection on a DEEPX NPU.
+    OV5640 camera + <alp/inference.h> dispatch to DEEPX DX-M1
+    (29 TOPS on V2M101) + bounding-box overlay on the ST7789
+    display + live FPS counter.  Showcase for the V2N-M1
+    edge-AI story; the same source compiles for AEN / V2N /
+    V2N-M1 by flipping `som.sku` in board.yaml.
+common:
+  tags: ai inference object-detection vision marketing showcase
+tests:
+  alp_sdk.examples.ai_object_detection.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - ai
+      - vision
+    build_only: true
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[obj-det\\] done"
+  alp_sdk.examples.ai_object_detection.v2n_m1:
+    # V2N-M1 (E1M-V2M101) Zephyr board file is still in the
+    # private Renesas fork; once it lands upstream this entry
+    # flips to `rzv2n_evk` or the public successor.  Today we
+    # exercise the AEN fallback (Ethos-U dispatch) so the
+    # cross-NPU portability claim has a public build target.
+    platform_allow:
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - ai
+      - vision
+    build_only: true

@@ -39,7 +39,7 @@ Expected output:
 ### Real silicon (AEN dual-core, requires the peer firmware)
 
 ```bash
-west alp-build -b alif_e7_dk_rtss_he examples/mproc-mailbox
+west alp-build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_he examples/mproc-mailbox
 west flash
 ```
 
@@ -54,11 +54,11 @@ separately:
 
 ```bash
 # HP side -- builds + runs the application.
-west alp-build -b alif_e7_dk_rtss_hp examples/mproc-mailbox
+west alp-build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/mproc-mailbox
 
 # HE side -- builds the peer image manually.  Sysbuild picks
 # this up automatically once the v0.4 dual-image flow ships.
-west build -b alif_e7_dk_rtss_he examples/mproc-mailbox/peer
+west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_he examples/mproc-mailbox/peer
 ```
 
 Flash both into the matching SoC partitions (HP -> RTSS-HP slot,

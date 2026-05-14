@@ -15,5 +15,5 @@ tests:
     build_only: true
   alp_sdk.examples.lvgl_music_player.aen:
     platform_allow:
-      - alif_e7_dk_rtss_hp
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
     build_only: true

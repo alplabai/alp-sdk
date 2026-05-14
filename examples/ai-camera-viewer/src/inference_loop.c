@@ -60,14 +60,19 @@ void inference_loop_run(viewer_state_t *state)
      * on with the placeholder frame data and the UI shows that
      * the camera is offline. */
     alp_camera_t *cam = alp_camera_open(&(alp_camera_config_t){
-        .width      = 240,
-        .height     = 240,
-        .pixel_fmt  = ALP_CAMERA_PIX_RGB565,
-        .frame_rate_hz = 30,
+        .camera_id = 0,
+        .width     = 240,
+        .height    = 240,
+        .fps       = 30,
+        .format    = ALP_PIXFMT_RGB565,
     });
     state->camera_ok = (cam != NULL);
     if (!state->camera_ok) {
         LOG_WRN("camera open failed; running with synthetic frame");
+    } else {
+        /* TODO(v0.6): inspect alp_camera_start() return -- v0.5
+         * tolerates NOSUPPORT silently so native_sim still runs. */
+        (void)alp_camera_start(cam);
     }
 
     /* Inference setup.  AUTO routes to the best available backend
@@ -75,12 +80,12 @@ void inference_loop_run(viewer_state_t *state)
      * AEN401 / AEN601 / AEN801, U65 on NX9101, DRPAI on V2N,
      * CPU on native_sim). */
     alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
-        .backend       = ALP_INFERENCE_BACKEND_AUTO,
-        .model_format  = ALP_INFERENCE_MODEL_VELA,
-        .model         = s_model,
-        .model_len     = sizeof(s_model),
-        .arena         = s_arena,
-        .arena_len     = sizeof(s_arena),
+        .backend     = ALP_INFERENCE_BACKEND_AUTO,
+        .format      = ALP_INFERENCE_MODEL_VELA,
+        .model_data  = s_model,
+        .model_size  = sizeof(s_model),
+        .arena       = s_arena,
+        .arena_bytes = sizeof(s_arena),
     });
     state->inference_ok = (inf != NULL);
     if (!state->inference_ok) {
@@ -91,21 +96,26 @@ void inference_loop_run(viewer_state_t *state)
     uint32_t window_start_ms  = k_uptime_get_32();
 
     while (1) {
-        /* Capture. */
+        /* Capture.  Backend owns the frame buffer; we copy out and
+         * release immediately so the next capture can reuse it. */
         if (state->camera_ok) {
-            (void)alp_camera_capture(cam, s_frame, sizeof(s_frame),
-                                     /*timeout_ms=*/100);
+            alp_camera_frame_t frame = {0};
+            if (alp_camera_capture(cam, &frame, /*timeout_ms=*/100) == ALP_OK) {
+                size_t n = frame.size < sizeof(s_frame) ? frame.size : sizeof(s_frame);
+                if (frame.data) {
+                    memcpy(s_frame, frame.data, n);
+                }
+                (void)alp_camera_release(cam, &frame);
+            }
         }
 
         /* Invoke. */
         uint32_t t0_us = k_cycle_get_32();
         if (state->inference_ok) {
-            /* Real path: copy s_frame to the model's input
-             * tensor via alp_inference_set_input(), then
-             * alp_inference_invoke().  v0.5 stubs the path so
-             * the UI shows the latency floor; v0.6 fills it in. */
-            (void)alp_inference_invoke(inf, /*input_idx=*/0,
-                                       s_frame, sizeof(s_frame));
+            /* TODO(v0.6): copy s_frame into the model's input tensor
+             * via alp_inference_get_input(), then invoke.  v0.5 just
+             * times the empty invoke so the UI shows the latency floor. */
+            (void)alp_inference_invoke(inf);
         }
         uint32_t t1_us = k_cycle_get_32();
         state->last_invoke_us = k_cyc_to_us_floor32(t1_us - t0_us);

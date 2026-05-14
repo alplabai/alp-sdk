@@ -12,7 +12,7 @@
  *   - INA236 battery voltage + current monitor.
  *
  * Showcases the v0.5 SDK story end-to-end: one app drives four
- * different chips through the portable `<alp/*>` peripheral
+ * different chips through the portable `<alp/...>` peripheral
  * surfaces, the `madgwick_ahrs` library fuses raw IMU samples
  * into a stable quaternion, and LVGL composes the result into
  * an artificial-horizon HUD that wouldn't look out of place on

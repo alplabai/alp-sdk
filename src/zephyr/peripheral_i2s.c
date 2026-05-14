@@ -121,7 +121,7 @@ alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg) {
         .word_size      = cfg->word_bits,
         .channels       = cfg->channels,
         .format         = to_fmt(cfg->format),
-        .options        = I2S_OPT_FRAME_CLK_MASTER | I2S_OPT_BIT_CLK_MASTER,
+        .options        = I2S_OPT_FRAME_CLK_CONTROLLER | I2S_OPT_BIT_CLK_CONTROLLER,
         .frame_clk_freq = cfg->sample_rate_hz,
         .mem_slab       = &h->mem_slab,
         .block_size     = block_bytes,

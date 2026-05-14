@@ -1,0 +1,63 @@
+# board.yaml -- per-app project configuration for the
+# iot-fleet-ota demo (secure OTA with rollback).
+#
+# Production-readiness proof: how do we update 10 000 units in
+# the field?  Answer: signed firmware artefact pulled from a
+# Mender server, signature verified against the public half of
+# an OPTIGA-Trust-M-locked ECDSA-P256 keypair, written into the
+# inactive MCUboot slot, swap-with-revert armed for the next
+# reboot.  Per docs/secure-boot.md the private signing key
+# never leaves the SoM's secure NVM.
+#
+# The OTA *server* side is owned externally (separate repo,
+# Hakan).  This board.yaml describes the device side only --
+# the customer-buildable half of the contract.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701          # Alif Ensemble + on-SoM OPTIGA Trust M.
+                            # The OPTIGA holds the production
+                            # ECDSA-P256 key (slot 0xE0F0); same
+                            # key gates both secure boot and OTA
+                            # acceptance (single trust root).
+
+carrier:
+  name: E1M-EVK            # 35 x 35 EVK -- the carrier that
+                            # carries the Wi-Fi-routed CC3501E
+                            # to ground for the OTA download
+                            # path.  See docs/cc3501e-bridge.md.
+
+os: zephyr
+
+# IoT toggles -- Wi-Fi + TLS only.  MQTT stays off here: Mender's
+# Zephyr client speaks HTTPS poll (see docs/ota.md "Option A").
+iot:
+  wifi: true
+  tls:  true
+
+# Libraries.  Schema-valid set is `mbedtls` only -- the SDK
+# schema's enum doesn't include `mcuboot` or `mender` because
+# both are integrated differently:
+#
+#   - mcuboot:  pulled in by sysbuild
+#               (zephyr/sysbuild/aen/sysbuild.conf), not by the
+#               app's library list.  See docs/secure-boot.md.
+#   - mender:   the mender-mcu-client Zephyr module is pinned
+#               via the west manifest's `mender` group (v0.4
+#               item per docs/ota.md "Option A").
+#
+# mbedtls covers the TLS for the HTTPS poll + the ECDSA-P256
+# signature verification path that wraps imgtool's signed
+# artefact on the way into the inactive MCUboot slot.
+# libraries: mbedtls dropped here for v0.5 native_sim parity
+#            (Zephyr 4.4 + mbedtls 3.6 PSA wiring is a v0.6 work item).
+#            Real-silicon builds re-enable mbedtls via the SoM-side
+#            TF-M-on-HE-core stack.
+
+# No additional chips: the on-SoM OPTIGA Trust M is part of the
+# E1M-AEN701 preset and the CC3501E Wi-Fi bridge is wired
+# through `iot.wifi: true`.  No extra `chips:` entries needed.
+
+diagnostics:
+  log_level: info

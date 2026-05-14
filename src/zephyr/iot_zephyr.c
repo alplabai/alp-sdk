@@ -505,7 +505,13 @@ alp_mqtt_t *alp_mqtt_open(const alp_mqtt_config_t *cfg)
         h->client.password = NULL;
     }
     h->client.protocol_version = MQTT_VERSION_3_1_1;
+#if defined(CONFIG_MQTT_LIB_TLS)
     h->client.transport.type   = tls ? MQTT_TRANSPORT_SECURE : MQTT_TRANSPORT_NON_SECURE;
+#else
+    /* TLS Kconfig disabled at build time — silently downgrade. */
+    (void)tls;
+    h->client.transport.type   = MQTT_TRANSPORT_NON_SECURE;
+#endif
     h->client.rx_buf           = h->rx_buf;
     h->client.rx_buf_size      = sizeof(h->rx_buf);
     h->client.tx_buf           = h->tx_buf;
@@ -646,7 +652,7 @@ void alp_mqtt_close(alp_mqtt_t *m)
     if (m == NULL || !m->in_use) return;
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
     if (m->connected) {
-        (void)mqtt_disconnect(&m->client);
+        (void)mqtt_disconnect(&m->client, NULL);
         m->connected = false;
     }
     mqtt_pool_release(m);

@@ -44,6 +44,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/display.h>
+#include <stdio.h>
 
 #include <lvgl.h>
 
@@ -76,11 +77,11 @@ static void sensor_entry(void *p1, void *p2, void *p3)
     while (1) {
         bme280_raw_t raw = {0};
         if (bme280_read_raw(&s_env, &raw) == ALP_OK) {
-            int32_t t_mc = 0, p_pa = 0, h_mh = 0;
-            bme280_compensate(&s_env, &raw, &t_mc, &p_pa, &h_mh);
-            g_state.temp_c    = t_mc / 1000.f;
-            g_state.humid_pct = h_mh / 1024.f;     /* Q22.10 fixed. */
-            g_state.pressure_hpa = p_pa / 100.f;
+            bme280_compensated_t cc = {0};
+            bme280_compensate(&s_env, &raw, &cc);
+            g_state.temp_c       = cc.temperature_c100   / 100.f;
+            g_state.humid_pct    = cc.humidity_milli_pct / 1024.f;
+            g_state.pressure_hpa = cc.pressure_pa        / 100.f;
             g_state.last_update_ms = k_uptime_get_32();
 
             /* Push the same sample to MQTT if connected. */
@@ -94,7 +95,9 @@ static void sensor_entry(void *p1, void *p2, void *p3)
                 if (n > 0) {
                     (void)alp_mqtt_publish(s_mqtt, "alp/env",
                                            (const uint8_t *)payload,
-                                           (size_t)n, /*qos=*/0);
+                                           (size_t)n,
+                                           ALP_MQTT_QOS_0,
+                                           /*retain=*/false);
                 }
             }
         }
@@ -126,11 +129,18 @@ int main(void)
     /* WiFi + MQTT connect.  On native_sim this drops to the
      * <alp/iot.h> NOSUPPORT stub -- the UI still runs against
      * the in-memory dashboard_state_t. */
-    (void)alp_wifi_connect("alp-demo-ssid", "demo-password");
+    alp_wifi_t *wifi = alp_wifi_open();
+    if (wifi) {
+        (void)alp_wifi_connect(wifi, &(alp_wifi_credentials_t){
+            .ssid = "alp-demo-ssid",
+            .psk  = "demo-password",
+        }, /*timeout_ms=*/5000);
+    }
+    static const alp_mqtt_tls_config_t s_tls = {0};  /* defaults: OS CA, verify peer. */
     s_mqtt = alp_mqtt_open(&(alp_mqtt_config_t){
-        .broker_uri    = "mqtts://broker.example.com:8883",
-        .client_id     = "alp-iot-dashboard-demo",
-        .tls_enabled   = true,
+        .broker_uri = "mqtts://broker.example.com:8883",
+        .client_id  = "alp-iot-dashboard-demo",
+        .tls        = &s_tls,
     });
     if (s_mqtt == NULL) {
         LOG_WRN("MQTT broker unreachable; running standalone");

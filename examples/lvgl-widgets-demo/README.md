@@ -25,7 +25,7 @@ tree -- the headline showcase of every standard LVGL widget
 ## Build
 
 ```
-west build -b alif_e7_dk_rtss_hp examples/lvgl-widgets-demo
+west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/lvgl-widgets-demo
 west flash
 ```
 

@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "alp/peripheral.h"
+#include "alp/pwm.h"
 #include "alp/e1m_pinout.h"
 #include "alp/chips/lsm6dso.h"
 #include "alp/chips/bmp390.h"
@@ -109,17 +110,19 @@ int autopilot_init(autopilot_state_t *s)
 
     if (lsm6dso_init(&s_imu,  s_i2c, LSM6DSO_I2C_ADDR_LOW) != ALP_OK) return -2;
     if (bmp390_init(&s_baro, s_i2c, BMP390_I2C_ADDR_PRIMARY) != ALP_OK) return -3;
-    if (ina236_init(&s_batt, s_i2c, INA236_I2C_ADDR_DEFAULT, 0.01f) != ALP_OK) return -4;
+    if (ina236_init(&s_batt, s_i2c, /*addr_7bit=*/0x40, /*shunt_ohms=*/0.01f,
+                    /*max_current_a=*/50.f,
+                    /*adcrange=*/INA236_ADCRANGE_81MV) != ALP_OK) return -4;
 
     /* GNSS + SBUS RC.  Both are UART; SBUS expects 100000/8E2 inverted
      * but most carriers + Zephyr UART drivers don't expose the inverted
      * polarity directly -- customers wire an external inverter or use
      * a microcontroller-side inverter chip. */
     s_gps_uart = alp_uart_open(&(alp_uart_config_t){
-        .port_id = E1M_UART0, .baud_rate = 9600,
+        .port_id = E1M_UART0, .baudrate = 9600,
     });
     s_rc_uart  = alp_uart_open(&(alp_uart_config_t){
-        .port_id = E1M_UART1, .baud_rate = 100000,
+        .port_id = E1M_UART1, .baudrate = 100000,
     });
     if (s_gps_uart) ublox_neo_m9n_init(&s_gps, s_gps_uart);
 
@@ -152,11 +155,16 @@ void autopilot_rate_loop(autopilot_state_t *s)
         /* Inputs: gyro rates (set by the attitude loop on a fresh
          * IMU read; we re-read here too so the rate loop's PID
          * sees the freshest sample at 1 kHz). */
-        lsm6dso_gyro_t g = {};
+        lsm6dso_axes_t g = {0};
         if (lsm6dso_read_gyro(&s_imu, &g) == ALP_OK) {
-            s->p = g.x_mdps / 1000.f * (3.14159265f / 180.f);
-            s->q = g.y_mdps / 1000.f * (3.14159265f / 180.f);
-            s->r = g.z_mdps / 1000.f * (3.14159265f / 180.f);
+            /* Raw int16 counts -> rad/s.  Default FS is +/-250 dps
+             * where 1 dps = 114.286 LSB; deg -> rad scales by
+             * pi/180.  v0.6 reads the SoM's configured FS. */
+            const float dps_per_lsb = 1.f / 114.286f;
+            const float deg_to_rad  = 3.14159265f / 180.f;
+            s->p = g.x * dps_per_lsb * deg_to_rad;
+            s->q = g.y * dps_per_lsb * deg_to_rad;
+            s->r = g.z * dps_per_lsb * deg_to_rad;
         }
 
         /* Rate setpoints feed in from the atti loop in stabilised
@@ -194,11 +202,14 @@ void autopilot_attitude_loop(autopilot_state_t *s)
          * v0.5 paper-correctness we approximate roll/pitch from the
          * accelerometer at static conditions; the rate loop's gyro
          * integration handles dynamics until the AHRS lands. */
-        lsm6dso_accel_t a = {};
+        lsm6dso_axes_t a = {0};
         if (lsm6dso_read_accel(&s_imu, &a) == ALP_OK) {
-            const float ax = a.x_mg / 1000.f;
-            const float ay = a.y_mg / 1000.f;
-            const float az = a.z_mg / 1000.f;
+            /* Raw int16 counts -> g.  Default FS is +/-2 g where
+             * 1 g = 16384 LSB.  v0.6 reads the SoM's configured FS
+             * and uses it here. */
+            const float ax = a.x / 16384.f;
+            const float ay = a.y / 16384.f;
+            const float az = a.z / 16384.f;
             const float pitch = atan2f(-ax, sqrtf(ay * ay + az * az));
             const float roll  = atan2f(ay, az);
             s->roll  = roll  * 180.f / 3.14159265f;
@@ -242,11 +253,11 @@ void autopilot_nav_loop(autopilot_state_t *s)
         }
 
         /* Battery telemetry + failsafe check. */
-        int32_t mv = 0, ma = 0;
-        if (ina236_read_voltage_mv(&s_batt, &mv) == ALP_OK &&
-            ina236_read_current_ma(&s_batt, &ma) == ALP_OK) {
+        int32_t mv = 0, ua = 0;
+        if (ina236_read_bus_mv(&s_batt, &mv) == ALP_OK &&
+            ina236_read_current_ua(&s_batt, &ua) == ALP_OK) {
             s->battery_v = mv / 1000.f;
-            s->battery_a = ma / 1000.f;
+            s->battery_a = ua / 1.0e6f;
         }
         /* 3.3 V/cell critical -- 4S pack -> 13.2 V trip. */
         if (s->battery_v > 0.f && s->battery_v < 13.2f) {

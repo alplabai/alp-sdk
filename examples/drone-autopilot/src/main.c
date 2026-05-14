@@ -27,6 +27,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#include "alp/peripheral.h"
+
 #include "autopilot.h"
 #include "sbus.h"
 #include "mavlink.h"
@@ -142,7 +144,6 @@ void autopilot_rc_loop(autopilot_state_t *s)
      * a small re-export to keep this file pure-orchestration. */
     uint32_t last_frame_ms = 0;
     while (1) {
-        uint8_t buf[SBUS_FRAME_LEN];
         sbus_frame_t f;
         /* TODO(sbus): real UART byte-stream framing -- find the
          * 0x0F start byte, then read 24 bytes.  Stubbed here so

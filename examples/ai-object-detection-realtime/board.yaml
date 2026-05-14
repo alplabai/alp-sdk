@@ -1,0 +1,63 @@
+# board.yaml -- realtime YOLOv8-tiny object detection demo.
+#
+# Camera -> NPU inference -> bounding-box overlay on display +
+# live FPS counter.  Targets the V2N-M1 (DEEPX DX-M1, 29 TOPS)
+# E1M SoM out of the box; swap `som.sku` to E1M-V2M201 for the
+# V2H-M1 (DEEPX DX-M2, 113 TOPS) variant when it lands -- the
+# app source is portable and doesn't change.
+#
+# Pipeline:
+#
+#     OV5640  -->  <alp/camera.h>  -->  <alp/inference.h>  -->  <alp/display.h>
+#     (MIPI)        RGB565 frame       YOLOv8-tiny .dxnn       bounding-box
+#                                      on DEEPX DX-M1          overlay + FPS
+#
+# The §D.lib loader resolves the inference backend from the
+# SKU's preferred_backend (`deepx_dxm1` for V2M101).  Customers
+# don't touch source to retarget AEN -> V2N -> V2N-M1 -- the
+# board.yaml picks the right NPU shim.
+
+schema_version: 1
+
+som:
+  # E1M-V2M101 == V2N-M1 (Renesas RZ/V2N host + DEEPX DX-M1 NPU
+  # on-module via PCIe).  preferred_backend: deepx_dxm1 in the
+  # SKU preset resolves the inference dispatch to DX-M1.
+  sku: E1M-V2M101
+
+carrier:
+  name: E1M-EVK
+  # External chips wired to the EVK carrier headers.  The loader
+  # merges these into the carrier's populated chip table so their
+  # CONFIG_ALP_SDK_CHIP_* knobs flip on at build time.  v0.5
+  # treats this as the supported "I added a sensor to my EVK"
+  # path; v0.6 introduces a dedicated app-level `chips:` block.
+  populated:
+    ov5640: true              # 5 MP MIPI camera on the EVK
+                              # camera connector.
+    st7789: true              # 240x320 TFT for the preview +
+                              # bounding-box overlay.
+
+os: zephyr
+
+# Library set: tflite_micro carries the universal NPU dispatch +
+# the CPU fallback kernels; the §D.lib loader picks the DEEPX
+# DXNN backend shim from hw-backends.yaml when the SKU's
+# preferred_backend is `deepx_dxm1`.  CMSIS-DSP handles the
+# pre-/post-process (resize, NMS) on the host CPU.
+libraries:
+  - tflite_micro
+  - cmsis_dsp
+
+peripherals:
+  - i2c                       # OV5640 SCCB + display init.
+  - spi                       # ST7789 framebuffer push.
+  - gpio                      # Camera RST/PWDN + display D/C#.
+# NOTE: dedicated CSI / display subsystem entries land in v0.6
+# alongside the V2N MIPI receiver work; today the OV5640 + ST7789
+# chip drivers under carrier.populated already pull in I2C / SPI /
+# GPIO, and the portable <alp/camera.h> + <alp/display.h> APIs
+# route through those drivers under the hood.
+
+diagnostics:
+  log_level: info

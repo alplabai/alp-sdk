@@ -20,6 +20,6 @@ tests:
     platform_allow: native_sim/native/64
   alp_sdk.examples.mproc_mailbox.aen:
     platform_allow:
-      - alif_e7_dk_rtss_he
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_he
     extra_args: CONFIG_ALP_SDK_MPROC=y
     build_only: true   # real run needs the peer firmware (v0.4+).

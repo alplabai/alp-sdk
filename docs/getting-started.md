@@ -53,7 +53,7 @@ you install them.
 
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|
-| Zephyr      | v3.7.0 LTS       | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
+| Zephyr      | v4.4.0 (stable)  | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
 | Python      | 3.10+            | For `west`, the v0.3 loader (`alp_project.py`), validators. |
 | Python deps | `pyyaml`, `jsonschema`, `imgtool` | All installed by `scripts/bootstrap.sh`; manual install: `pip install pyyaml jsonschema imgtool`. |
 | CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
@@ -127,7 +127,7 @@ west zephyr-export
 
 After this:
 
-- `alp-workspace/zephyr/`    Zephyr v3.7.0 LTS (pinned via the SDK's `west.yml`).
+- `alp-workspace/zephyr/`    Zephyr v4.4.0 (pinned via the SDK's `west.yml`).
 - `alp-workspace/modules/`   Zephyr's standard modules (HAL, libs).
 - `alp-workspace/alp-sdk/`   This repo, mounted as a Zephyr module.
 
@@ -187,7 +187,7 @@ west build -d build -t run
 Expected output:
 
 ```
-*** Booting Zephyr OS build v3.7.0 ***
+*** Booting Zephyr OS build v4.4.0 ***
 [gpio] init button=E1M_GPIO_IO0, led=E1M_GPIO_IO1
 [gpio] led=0 status=0
 [gpio] led=1 status=0
@@ -315,11 +315,11 @@ paths.  Critically, **Alif is the exception** -- it does NOT
 ship as a `hal_*` module inside Zephyr's manifest, so the
 default `west update` skips it.
 
-| Vendor   | Zephyr v3.7 import path                            | What you need to do                                                                                     |
+| Vendor   | Zephyr v4.4 import path                            | What you need to do                                                                                     |
 |----------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | **Renesas (RZ/V)** | `hal_renesas` (in Zephyr's own west.yml)   | Nothing extra.  Our `name-allowlist` lets Zephyr import it; `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/` is what the V2N + V2N-M1 paths consume. |
 | **NXP (i.MX 9x)**  | `hal_nxp` (in Zephyr's own west.yml)       | Nothing extra.  `mcux/mcux-sdk-ng/devices/i.MX/i.MX93/` covers MIMX9301..9352 (E1M-NX9101 = MIMX9352).   |
-| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + `sdk-alif` (vendor-sdks group) for stock boards | **Two-path choice.**  HAL drivers come from `alifsemi/hal_alif v2.2.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  But **Zephyr v3.7 LTS does not have Alif Ensemble board files** (those land in Zephyr main post-v3.7 and ship in Alif's own `zephyr_alif` fork meanwhile).  **Choose one:** *(a)* if you have your own AEN carrier board overlay, the default `hal_alif` import suffices — write a board file under `alplabai/alp-zephyr-modules` and you're done; *(b)* if you want Alif's stock EVK boards (`alif_e7_dk_rtss_he`, `alif_b1_dk`, ...), enable `vendor-sdks` and use `sdk-alif` as your workspace manifest (it replaces our Zephyr v3.7 pin with Alif's `zephyr_alif` fork that has the boards in tree).  See `docs/vendor-partnerships.md` §Alif for the decision tree.  Two more Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and also sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels. |
+| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + upstream Zephyr `boards/alif/` | **Simpler than v3.7.**  HAL drivers come from `alifsemi/hal_alif v2.2.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  Upstream Zephyr v4.4 also ships the stock Alif Ensemble board files under `boards/alif/` (`ensemble_e8_dk`, `ensemble_e1c_dk`, `balletto_b1_dk`).  Customers wanting AEN-specific carrier boards still need their own board overlay (write one under `alplabai/alp-zephyr-modules`) -- the upstream files target Alif's own EVKs, not the E1M carrier.  Two Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels.  See `docs/vendor-partnerships.md` §Alif for the migration history. |
 | **DEEPX (DX-M1)**  | Out of Zephyr scope (Linux-side runtime).  | The on-device NPU runs from a Linux PCIe driver, not a Zephyr backend.  `chips/deepx_dxm1/` is the **host-side** Zephyr code that brings up the M1 from the Renesas A55 cluster; `dx_rt` itself rides on Linux/Yocto.  See `examples/v2n/v2n-m1-deepx-inference/` and the customer-side integration notes in `docs/vendor-partnerships.md` §DEEPX. |
 
 ### Bare-metal / non-Zephyr customers

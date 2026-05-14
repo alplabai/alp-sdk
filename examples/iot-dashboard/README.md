@@ -26,7 +26,7 @@ LVGL dashboard on a 240×320 ST7789.
 ## Build
 
 ```
-west build -b alif_e7_dk_rtss_hp examples/iot-dashboard
+west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/iot-dashboard
 west flash
 ```
 

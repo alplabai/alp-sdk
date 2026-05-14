@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: audio-wake-word
+  description: |
+    Always-on "Hey Alp" keyword spotter on the E1M-AEN family's
+    low-power AI subsystem.  Cortex-M55 HE @ 50 MHz reads a PDM
+    mic at 16 kHz, extracts MFCC features, runs a ~30k-param CNN
+    on the on-die Ethos-U55 NPU.  Average draw <1 mW for 24/7
+    listening; detection wakes the M55 HP for the heavy work.
+
+tests:
+  alp_sdk.examples.audio_wake_word.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    extra_args: CONFIG_AUDIO_DMIC=y
+    tags:
+      - alp-sdk
+      - example
+      - audio
+      - ai
+      - low-power
+    build_only: true
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[wake\\] done"
+
+  alp_sdk.examples.audio_wake_word.aen:
+    platform_allow:
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - audio
+      - ai
+      - low-power
+    build_only: true
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[wake\\] done"

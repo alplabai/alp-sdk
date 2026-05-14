@@ -30,8 +30,8 @@
     {
       "SPDXID": "SPDXRef-Package-zephyr",
       "name": "zephyr",
-      "versionInfo": "v3.7.0-LTS",
-      "downloadLocation": "https://github.com/zephyrproject-rtos/zephyr/archive/refs/tags/v3.7.0.tar.gz",
+      "versionInfo": "v4.4.0",
+      "downloadLocation": "https://github.com/zephyrproject-rtos/zephyr/archive/refs/tags/v4.4.0.tar.gz",
       "filesAnalyzed": false,
       "licenseConcluded": "Apache-2.0",
       "_comment": "Pinned by west.yml; verify against west.yml at tag time"

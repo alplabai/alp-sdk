@@ -3,22 +3,33 @@
 This page is the single answer to *"does alp-sdk track the latest
 Zephyr, or do we own the bump cadence?"*
 
-**Short version: we pin to a Zephyr LTS release.  Bumps are
-deliberate -- each LTS-to-LTS upgrade ships as a minor alp-sdk
+**Short version: we pin to the latest stable Zephyr release.  Bumps
+are deliberate -- each major upgrade ships as a minor alp-sdk
 release after re-verifying every wrapped peripheral on the target
 SoMs.  We never track `zephyr/main` and we don't auto-merge new
 upstream releases.**
 
 ## What's pinned today
 
-| Surface                              | Pinned to        | Where                                                                                |
-|--------------------------------------|------------------|--------------------------------------------------------------------------------------|
-| Zephyr release                       | **v3.7.0 LTS**   | [`west.yml`](../west.yml) (manifest), [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml) (CI), [`.github/workflows/nightly-aen-hil.yml`](../.github/workflows/nightly-aen-hil.yml) (HIL) |
-| Zephyr CI docker image               | `v0.27.4`        | [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml)             |
+| Surface                              | Pinned to                | Where                                                                                |
+|--------------------------------------|--------------------------|--------------------------------------------------------------------------------------|
+| Zephyr release                       | **v4.4.0** (stable)      | [`west.yml`](../west.yml) (manifest), [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml) (CI), [`.github/workflows/nightly-aen-hil.yml`](../.github/workflows/nightly-aen-hil.yml) (HIL) |
+| Zephyr CI docker image               | `v0.27.4`                | [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml)             |
 | `hal_alif` Zephyr module             | Whatever ships with the pinned Zephyr | (we do **not** re-pin -- Zephyr's own west.yml owns this revision)         |
 
 All three pins move together when we bump.  Drift between them
 fails CI on the next PR -- by design.
+
+> **Migration note (2026-05).**  v0.5 bumps from Zephyr **v3.7.0
+> LTS** to **v4.4.0** stable.  The trade is mainline-feature access
+> (the LVGL v9 widget set, the new I2S `_CONTROLLER` enum spelling,
+> the upstream Alif `boards/alif/ensemble_e8_dk` board files, and
+> the mainline mbedtls 3.6 PSA-crypto wiring) at the cost of LTS
+> stability.  Customers shipping product with a 24-month support
+> window will want to re-pin alp-sdk's `west.yml` to whatever LTS
+> their fleet has been signed off against -- the SDK's own
+> `<alp/*>` surface stays binary-compatible.  See
+> [`VERSIONS.md`](../VERSIONS.md) for the alp-sdk LTS commitment.
 
 ## When we bump
 
@@ -49,7 +60,7 @@ Five reasons, in order of weight:
 3. **CI cost.**  Every Zephyr bump invalidates the `actions/cache`
    build artefacts under `~/zephyrproject` -- a clean rebuild adds
    ~5 min per PR.  Patch bumps stay within the cache key
-   (`zephyr-v3.7.0-${{ runner.os }}`); minor bumps blow it away
+   (`zephyr-v4.4.0-${{ runner.os }}`); minor bumps blow it away
    intentionally.
 4. **Customer support window.**  Per [`VERSIONS.md`](../VERSIONS.md),
    alp-sdk v1.0 carries a 24-month LTS commitment.  That commitment
@@ -82,7 +93,7 @@ When a new Zephyr LTS lands and we want to adopt it:
 6. **CHANGELOG entry** under
    `[Unreleased] -- v0.<minor>.0 candidate` calling out the
    Zephyr LTS bump + any user-visible Kconfig changes.
-7. **Tag + release.**  v0.3-Zephyr3.7 retires the day v0.4-Zephyr4.x
+7. **Tag + release.**  v0.4-Zephyr3.7 retires the day v0.5-Zephyr4.4
    ships; old tags remain available for customers who can't migrate
    immediately.
 

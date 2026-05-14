@@ -23,7 +23,7 @@ UI with the SDK's audio chain (`<alp/i2s.h>` + a WM8960 codec).
 ## Build
 
 ```
-west build -b alif_e7_dk_rtss_hp examples/lvgl-music-player
+west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/lvgl-music-player
 west flash
 ```
 

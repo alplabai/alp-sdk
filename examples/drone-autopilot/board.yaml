@@ -21,6 +21,14 @@ som:
 
 carrier:
   name: E1M-EVK
+  # External sensors plugged into the EVK's I2C/UART headers.  The
+  # loader merges these into the carrier's populated chip table so
+  # their CONFIG_ALP_SDK_CHIP_* knobs flip on at build time.  v0.6
+  # introduces a dedicated app-level `chips:` block; in v0.5 the
+  # carrier-overrides path is the supported one.
+  populated:
+    bmp390: true
+    ublox_neo_m9n: true
 
 os: zephyr
 

@@ -1,7 +1,7 @@
 # drone-autopilot
 
 > ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on
-> `native_sim/native/64` + cross-compiles to `alif_e7_dk_rtss_hp`.
+> `native_sim/native/64` + cross-compiles to `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp`.
 > **Do NOT fly this build.**  The PID gains, sensor scales,
 > failsafe thresholds, and motor mapping are starting-point
 > values that need bench tuning + ground-tied throttle tests
@@ -55,7 +55,7 @@ motor mixer → ESCs.
 ## Build
 
 ```
-west build -b alif_e7_dk_rtss_hp examples/drone-autopilot
+west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/drone-autopilot
 west flash
 ```
 

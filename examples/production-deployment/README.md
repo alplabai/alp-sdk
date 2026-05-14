@@ -75,7 +75,7 @@ Expected output:
 ### Real silicon (AEN-Zephyr, requires a staged Mender server)
 
 ```bash
-west alp-build -b alif_e7_dk_rtss_hp examples/production-deployment
+west alp-build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/production-deployment
 west flash
 ```
 

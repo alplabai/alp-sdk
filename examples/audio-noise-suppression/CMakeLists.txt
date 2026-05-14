@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+cmake_minimum_required(VERSION 3.20.0)
+
+# PYTHON_EXECUTABLE is only set after find_package(Zephyr);
+# we need a Python interpreter at configure time *before*
+# that, so resolve one ourselves here.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+# Resolve board.yaml -> alp.conf via the §D.lib loader.  This
+# emits CONFIG_ALP_SDK_* knobs for the audio path:
+#   - peripherals.i2s            -> CONFIG_I2S=y
+#   - libraries.tflite_micro     -> CONFIG_ALP_TFLM_REF_KERNELS=y
+#   - libraries.cmsis_dsp        -> CONFIG_CMSIS_DSP=y
+#   - carrier.populated.tas2563  -> CONFIG_ALP_SDK_CHIP_TAS2563=y
+#   - inference.backend: auto    -> CONFIG_ALP_SDK_INFERENCE_TFLM=y
+# The audio loop is mic-in (TAS2563 over I2S) -> <alp/dsp.h>
+# preprocess (FFT bin -> noise-floor estimate) -> <alp/inference.h>
+# denoiser -> speaker-out (TAS2563 over the same I2S link).
+execute_process(
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/alp_project.py
+            --input  ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
+            --output ${CMAKE_CURRENT_BINARY_DIR}/alp.conf
+            --emit zephyr-conf
+    RESULT_VARIABLE rc
+)
+if(NOT rc EQUAL 0)
+    message(FATAL_ERROR "alp_project.py failed (rc=${rc})")
+endif()
+set(OVERLAY_CONFIG ${CMAKE_CURRENT_BINARY_DIR}/alp.conf)
+
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(audio_noise_suppression LANGUAGES C)
+
+target_sources(app PRIVATE
+    src/main.c
+)

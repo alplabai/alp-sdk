@@ -53,7 +53,7 @@ jobs:
           if [ ! -d $HOME/zephyrproject ]; then
             mkdir -p $HOME/zephyrproject
             cd $HOME/zephyrproject
-            west init -m https://github.com/zephyrproject-rtos/zephyr --mr v3.7.0 .
+            west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 .
             west update --narrow -o=--depth=1
             west zephyr-export
           fi

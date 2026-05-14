@@ -175,8 +175,8 @@ static void send_gps_raw(const autopilot_state_t *s) {
     memset(p, 0, sizeof(p));
     uint64_t t = (uint64_t)k_uptime_get_32() * 1000u;
     memcpy(&p[0],  &t, 8);
-    int32_t lat = (int32_t)(s->lat_deg * 1e7);
-    int32_t lon = (int32_t)(s->lon_deg * 1e7);
+    int32_t lat = (int32_t)(s->lat_deg * 1.0e7f);
+    int32_t lon = (int32_t)(s->lon_deg * 1.0e7f);
     int32_t alt = (int32_t)(s->altitude_m * 1000.f);
     memcpy(&p[8],  &lat, 4);
     memcpy(&p[12], &lon, 4);
@@ -321,10 +321,13 @@ int alp_mavlink_init(uint8_t sysid, uint8_t compid)
 {
     s_sysid  = sysid;
     s_compid = compid;
-    /* The GCS link runs on UART2 (or whichever the carrier wires).
-     * 57600 baud is the SiK telemetry radio default. */
+    /* The GCS link nominally needs its own UART; the E1M family only
+     * exposes UART0/1 in v0.5 -- real flight builds wire the SiK radio
+     * to an external port on the carrier (TBD pinout).  For paper
+     * compile here we map onto UART0 (shared with GNSS); customers
+     * route their actual GCS-radio onto the dedicated port. */
     s_uart = alp_uart_open(&(alp_uart_config_t){
-        .port_id = E1M_UART2, .baud_rate = 57600,
+        .port_id = E1M_UART0, .baudrate = 57600,
     });
     return s_uart ? 0 : -1;
 }

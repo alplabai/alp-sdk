@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: iot-fleet-ota
+  description: |
+    Secure OTA firmware update with rollback.  Trust roots in the
+    on-SoM OPTIGA Trust M secure element; signatures are ECDSA-P256;
+    images swap through MCUboot's swap-using-scratch mode; downloads
+    speak Mender's HTTPS poll protocol.  Production-readiness proof
+    for fleets of 10k+ units.
+tests:
+  alp_sdk.examples.iot_fleet_ota.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - iot
+      - ota
+      - security
+    build_only: true
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[ota\\] done"
+  alp_sdk.examples.iot_fleet_ota.aen:
+    platform_allow:
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - iot
+      - ota
+      - security
+    build_only: true
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[ota\\] done"
