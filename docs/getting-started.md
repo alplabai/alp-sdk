@@ -266,7 +266,49 @@ For SoMs without an EVK board file yet, write your own:
 
 `docs/porting-new-som.md` covers the full porting checklist.
 
-## 8. SoC capability validation
+## 8. Vendor licences when integrating against real silicon
+
+The SDK itself ships under Apache-2.0 (see `LICENSE`).  Once you
+target a specific silicon backend, you also pull source from the
+vendor's public SDK -- and each vendor's terms apply to that
+source.  All four vendor SDKs in the v1.0 matrix are **publicly
+source-visible on GitHub** with steady release cadences, but the
+licence flavour differs.  Customer projects should be clear about
+which licence applies to which subtree before shipping.
+
+| Vendor       | SDK repo                                                                                | Latest tag        | Licence shape                                                                                                                                                                                                                                                            |
+|--------------|------------------------------------------------------------------------------------------|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Alif**     | [`alifsemi/sdk-alif`](https://github.com/alifsemi/sdk-alif) + 58 sibling repos           | v2.3.0-rc1        | Two-bucket: forks of upstream OSS keep upstream licensing (`zephyr_alif` / `hal_alif` / `cmsis_alif` / `mcuboot_alif` / `matter_alif` Apache-2.0; `meta-alif*` Yocto layers MIT).  Differentiating drivers (`sdk-alif`, `alif_dave2d-driver`, ML eval kit, ISP helpers) ride a **vendor-specific "Alif Semiconductor Software License Agreement"** -- source-visible but with Alif's terms. |
+| **Renesas**  | [`renesas/rzv-fsp`](https://github.com/renesas/rzv-fsp)                                  | v3.1.0 (Mar 2025) | **BSD-3-Clause** for the MPU BSP / Board BSP / HAL / generic middleware (the parts the SDK consumes).  `rzv2n_evk` board support included.  A handful of pre-compiled middleware modules (e.g. `rm_zmod4xxx`) ship under Renesas's own software-licence agreement -- per-component table in the FSP repo's `LICENSE.md`.                                                                          |
+| **NXP**      | [`nxp-mcuxpresso/mcuxsdk-manifests`](https://github.com/nxp-mcuxpresso/mcuxsdk-manifests) | v26.03.00          | **NXP-specific licence**: `LA_OPT_Online Code Hosting NXP_Software_License v1.4` (May 2025).  Acceptance implied by clone / install / use.  Source-visible, not Apache / BSD.  Yocto-side via `meta-imx` is a separate release cycle.                                                                                                                                                                  |
+| **DEEPX**    | [`DEEPX-AI`](https://github.com/DEEPX-AI) (30+ repos)                                    | dx_rt 2026-05-11   | Two-bucket: firmware images (`dx_fw`) Apache-2.0; model zoo (`dx-modelzoo`) MIT.  Runtime (`dx_rt`), app templates (`dx_app`), Linux PCIe driver (`dx_rt_npu_linux_driver`), Windows runtime (`dx_rt_windows`) **source-visible but customer-only** -- restricted to "customers supplied with DEEPX NPU".  Yocto recipes (`meta-deepx-m1`) have no LICENSE file -- ask DEEPX before redistributing. |
+
+### What this means for *your* project
+
+- **You can clone, study, and develop against** every repo above
+  without signing anything -- they're all on public GitHub.
+- **For shipping production firmware / Yocto images** that
+  redistribute vendor source, check each component's licence
+  text before stripping or relicensing.  The SDK's own
+  Apache-2.0 sits cleanly on top of all four; what you have to
+  manage is what *you* redistribute downstream.
+- **`chips/deepx_dxm1/`** is our own Apache-2.0 thin host
+  driver; it does *not* redistribute DEEPX runtime code.  When
+  you flip `CONFIG_ALP_SDK_CHIP_DEEPX_DXM1=y` you become the
+  party who fetches `dx_rt` from the DEEPX repo (as a DEEPX NPU
+  customer) -- the SDK only links against headers.
+- **The DRP-AI compiler toolchain (Renesas) + DEEPX
+  meta-deepx-m1 LICENSE clarification** are still open
+  vendor-side -- see [`docs/vendor-partnerships.md`](vendor-partnerships.md)
+  for the current state.
+
+The SDK's CI consumes only the permissively-licensed (Apache /
+BSD / MIT) subtrees of each vendor SDK so the public build is
+unencumbered.  Customer integrations that need the
+vendor-licensed bits add them to their own west.yml / Yocto
+recipes, not to ours.
+
+## 9. SoC capability validation
 
 In v0.3 the SoC choice flows from `board.yaml`'s `som.sku` field
 automatically -- the loader resolves the MPN to the silicon ref
@@ -283,7 +325,7 @@ e.g. `alp_adc_open` with `resolution_bits = 16` on a 12-bit SoC
 returns NULL with `alp_last_error() == ALP_ERR_OUT_OF_RANGE`.  See
 ADR [0002](adr/0002-error-mechanism.md) for the diagnostic contract.
 
-## 9. Editing in VS Code
+## 10. Editing in VS Code
 
 Two complementary surfaces:
 
@@ -317,7 +359,7 @@ Key tasks (Command Palette → **Tasks: Run Task**):
 - `west build · edgeai-vision-aen` / `iot-connected-camera` —
   builds the end-to-end reference apps.
 
-## 10. Where to go next
+## 11. Where to go next
 
 - **[`docs/board-config.md`](board-config.md)** -- the authoritative
   `board.yaml` schema reference + recipe table for every loader

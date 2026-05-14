@@ -134,12 +134,9 @@ DAVE2D + Ethos-U + CSI driver repos are **already public**
 - [x] **DAVE2D + Ethos-U evaluation kit availability.**
   `alif_dave2d-driver` + `alif_ml-embedded-evaluation-kit`
   both already public (vendor-licensed, source-visible).
-- 📋 **Alif-licence acknowledgement in v1.0 docs.**  Same
-  pattern as the §C.34 NXP MCUXpresso line item -- our
-  consumer-facing `docs/getting-started.md` should mention
-  that the AEN GPU2D / ISP / Ethos-U paths pull
-  vendor-licensed source from `github.com/alifsemi` rather
-  than Apache / MIT bits.  One paragraph cross-ref.
+- [x] **Alif-licence acknowledgement in v1.0 docs.**  Section 8
+  of `docs/getting-started.md` now carries a per-vendor licence
+  table covering Alif / Renesas / NXP / DEEPX (landed §C.36).
 - 📋 **Dual-image build flow upstreaming.**  The §C.30
   HE-side peer image needs sysbuild glue that builds both
   HP + HE halves in one invocation.  This sits in
@@ -209,10 +206,11 @@ exception -- those are real Apache-2.0.
   plans to upstream into mainline Linux is open; meanwhile
   customers vendor the driver from the GitHub repo at
   integration time.
-- 📋 **Yocto BSP integration sample.**  No
-  `examples/v2n/v2n-m1-deepx-inference/` flagship exists
-  yet; lands once a customer-side `meta-deepx-m1` build
-  is reproducible on our reference V2N-M1 hardware.
+- [x] **V2N-M1 DEEPX inference sample skeleton.**  Landed
+  §C.37 at `examples/v2n/v2n-m1-deepx-inference/`.
+  Build-only Twister scenario today; flips to a positive-
+  path run once a V2N-M1 board file + the customer-side
+  `dx_rt` integration are wired up on a HiL rig.
 
 **Next action**: Ping DEEPX customer support about the
 `meta-deepx-m1` LICENSE.
@@ -257,12 +255,9 @@ ships through `meta-imx` -- a separate release cycle.
   `github.com/nxp-mcuxpresso/mcuxsdk-manifests` v26.03.00
   with `mcimx93evk` + 3 other i.MX 93 board manifests
   in-tree.
-- 📋 **NXP-licence acknowledgement in v1.0 docs.**  The
-  MCUXpresso SDK isn't Apache / BSD -- customers using
-  the i.MX 9x MCU path through our SDK consume NXP-licensed
-  source via west.yml.  Add a one-paragraph cross-ref in
-  `docs/getting-started.md` so the licence story is
-  explicit before customers integrate.
+- [x] **NXP-licence acknowledgement in v1.0 docs.**  Section 8
+  of `docs/getting-started.md` now carries the per-vendor licence
+  table covering all four vendors (landed §C.36).
 - 📋 **i.MX 93 Yocto BSP confirmation.**  meta-imx releases
   cycle quarterly; v1.0 of the SDK aligns to whichever
   meta-imx release ships closest to our v1.0 tag.  No open

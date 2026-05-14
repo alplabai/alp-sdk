@@ -1,0 +1,34 @@
+# board.yaml -- per-app project configuration for the
+# v2n-m1-deepx-inference example.
+#
+# Targets V2N-M1 (the Renesas RZ/V2N + DEEPX DX-M1 NPU SoM).
+# Real silicon required to run the inference path; native_sim
+# exercises the framing only (every call returns NOSUPPORT or
+# NOT_READY but the structure is verified).
+
+schema_version: 1
+
+som:
+  sku: E1M-V2M101  # V2N-M1 variant with DEEPX DX-M1 NPU
+
+carrier:
+  name: E1M-EVK
+
+os: zephyr
+
+peripherals:
+  - inference     # <alp/inference.h>
+  # power_mgmt enabled implicitly via the V2N supervisor's
+  # SYS_INIT hook; the §C.28 v2n_power_mgmt.c brings up the
+  # 0.75 V DEEPX rail when P65 fires.
+
+libraries:
+  - none
+
+chips:
+  - deepx_dxm1    # host driver: PCIe mux + M1_RESET sequencer
+  - da9292        # PMIC for the DEEPX 0.75 V rail
+  - pi3dbs12212   # PCIe mux
+
+diagnostics:
+  log_level: info

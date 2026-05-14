@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-m1-deepx-inference
+  description: |
+    DEEPX DX-M1 NPU bring-up + single inference through
+    <alp/inference.h> on a V2N-M1 SoM.  Native_sim exercises
+    the framing (every step lands on the documented NOSUPPORT
+    contract); HiL verification gates on a V2N-M1 EVK + the
+    DEEPX runtime + a DXNN-compiled model.
+common:
+  tags: inference deepx v2n-m1
+  harness: console
+  harness_config:
+    type: one_line
+    regex:
+      - "\\[deepx\\] done"
+tests:
+  alp_sdk.examples.v2n_m1_deepx_inference.native_sim:
+    platform_allow: native_sim/native/64
+  alp_sdk.examples.v2n_m1_deepx_inference.v2n_m1:
+    # Build-only until a V2N-M1 board file lands in
+    # alplabai/alp-zephyr-modules + the customer-side dx_rt
+    # integration ships.
+    build_only: true

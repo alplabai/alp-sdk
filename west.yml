@@ -33,16 +33,32 @@ manifest:
       url-base: https://github.com/MaJerle
     - name: nanopb
       url-base: https://github.com/nanopb
+    - name: alifsemi
+      url-base: https://github.com/alifsemi
+    - name: renesas
+      url-base: https://github.com/renesas
+    - name: nxp-mcuxpresso
+      url-base: https://github.com/nxp-mcuxpresso
 
   # Groups disabled by default.  Entries pinned below for audit
   # in source control, but `west update` on a v0.3 workspace does
   # not fetch them and the Zephyr build does not auto-import them.
-  # Flip via `west update --group-filter +extras-v04` (or by
-  # editing this filter line) when v0.4 lands the real consumers.
-  # See vendors/lwrb/README.md + vendors/nanopb/README.md for the
-  # per-library wiring story.
+  # Flip via `west update --group-filter +<group>` (or by editing
+  # this filter line) when the consuming work lands.
+  #
+  # `extras-v04`     - lwrb + nanopb pins for v0.4 wave-2 consumers.
+  #                    See vendors/lwrb/README.md +
+  #                    vendors/nanopb/README.md.
+  # `vendor-sdks`    - public vendor SDK repos pinned to the
+  #                    verified tags (Alif sdk-alif, Renesas
+  #                    rzv-fsp, NXP mcuxsdk-manifests).  Carries
+  #                    vendor-specific licensing -- see
+  #                    docs/getting-started.md §8 and
+  #                    docs/vendor-partnerships.md for the licence
+  #                    story before enabling on a customer build.
   group-filter:
     - -extras-v04
+    - -vendor-sdks
 
   projects:
     - name: zephyr
@@ -81,6 +97,31 @@ manifest:
       path: modules/lib/nanopb
       groups:
         - extras-v04
+
+    # Public vendor SDK repos.  Pinned to the maintainer-verified
+    # tags (per §C.33/34/35 vendor-partnership verification 2026-
+    # 05-14).  Disabled by default via the `vendor-sdks` group;
+    # customer builds enable per-vendor by including the group
+    # in their workspace's `--group-filter`.  Each repo carries
+    # its own licence text -- see docs/getting-started.md §8.
+    - name: sdk-alif
+      remote: alifsemi
+      revision: v2.3.0-rc1
+      path: modules/vendors/sdk-alif
+      groups:
+        - vendor-sdks
+    - name: rzv-fsp
+      remote: renesas
+      revision: v3.1.0
+      path: modules/vendors/rzv-fsp
+      groups:
+        - vendor-sdks
+    - name: mcuxsdk-manifests
+      remote: nxp-mcuxpresso
+      revision: v26.03.00
+      path: modules/vendors/mcuxsdk-manifests
+      groups:
+        - vendor-sdks
 
   self:
     path: alp-sdk

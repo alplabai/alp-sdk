@@ -250,6 +250,61 @@ Validators after commit:
 - metadata / portability / pin-conflicts: clean
 - abi_snapshot --diff: unchanged (pure doc-comment touch).
 
+### Added (2026-05-14 -- vendor-licence section + DEEPX sample + west.yml vendor pins §C.36 §C.37 §C.38)
+
+Closes the remaining in-repo work surfaced by the
+§C.33..§C.35 upstream verification of the four vendor SDKs
+(Alif / Renesas / NXP / DEEPX).  Three coordinated changes:
+
+- **§C.36 `docs/getting-started.md` §8** -- new
+  "Vendor licences when integrating against real silicon"
+  section.  Per-vendor table covering Alif (two-bucket:
+  Apache-2.0 / MIT forks + vendor-licensed differentiating
+  drivers), Renesas (BSD-3-Clause rzv-fsp), NXP (NXP-
+  specific licence on mcuxsdk-manifests), DEEPX (two-bucket:
+  dx_fw Apache + customer-only runtime).  Spells out what
+  this means for customer projects: clone-and-study is free
+  on all four; production redistribution requires
+  per-component licence review.  Renumbers downstream
+  sections (was 8/9/10; now 9/10/11).
+- **§C.37 `examples/v2n/v2n-m1-deepx-inference/`** --
+  V2N-M1 DEEPX inference flagship skeleton.  Walks the
+  four-stage bring-up: §C.28 v2n_power_mgmt for the 0.75 V
+  DEEPX rail, `chips/deepx_dxm1/` host driver for the PCIe
+  mux + M1_RESET sequencer, `<alp/inference.h>` open with
+  `BACKEND_DEEPX_DX`, invoke + result.  Targets
+  `som.sku: E1M-V2M101` (the V2N-M1 family).  README
+  documents the customer-side `dx_rt` integration path
+  (clone from `github.com/DEEPX-AI` under DEEPX's
+  customer licence).  Twister scenario `build_only: true`
+  until a V2N-M1 board file + the dx_rt integration ship
+  on a HiL rig.  Example count: 29 -> 30.
+- **§C.38 `west.yml`** -- new `vendor-sdks` group (disabled
+  by default like `extras-v04`) pinning the three public
+  vendor SDK repos to the maintainer-verified tags:
+    - `sdk-alif` @ v2.3.0-rc1 (from `github.com/alifsemi`)
+    - `rzv-fsp` @ v3.1.0 (from `github.com/renesas`)
+    - `mcuxsdk-manifests` @ v26.03.00 (from
+      `github.com/nxp-mcuxpresso`)
+  v0.3 workspaces don't see them on `west update`;
+  customers enable per-vendor via
+  `west update --group-filter +vendor-sdks` after
+  reviewing the §8 licence table.
+
+Updated trackers:
+- `docs/vendor-partnerships.md`: Alif + NXP licence-
+  acknowledgement line items flipped to [x] cross-ref §C.36;
+  DEEPX V2N-M1 sample line item flipped to [x] cross-ref
+  §C.37.
+- `docs/v1.0-readiness.md` Pillar 9: paragraph extended
+  with the §C.36 + §C.38 cross-refs.
+
+Validators after commit:
+- metadata: 0 failures
+- portability: 30/30
+- pin-conflicts: clean
+- abi_snapshot --diff: unchanged
+
 ### Changed (2026-05-14 -- vendor-partnership status: Alif upstream verification §C.35)
 
 Verified Alif claims in `docs/vendor-partnerships.md` against
