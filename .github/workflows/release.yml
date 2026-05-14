@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Release workflow.  Fires when a maintainer pushes a `v*` tag.
+#
+# Steps:
+#   1. Verify the tag matches `metadata/sdk_version.yaml`.
+#   2. Verify CHANGELOG.md has a matching `## [v<N>] - YYYY-MM-DD`
+#      section (release notes will be sliced from this).
+#   3. Verify the ABI snapshot at docs/abi/v<N>-snapshot.json
+#      exists.
+#   4. Build a source tarball (no binaries -- the SDK is a source
+#      release).
+#   5. Generate SHA-256 + SHA-512 checksums.
+#   6. Create the GitHub Release with the CHANGELOG slice as the
+#      body and the tarball + checksums as artefacts.
+#
+# Tag form: `v<MAJOR>.<MINOR>.<PATCH>` (SemVer).  Pre-release tags
+# (`vX.Y.Z-rc1`) are supported and produce a "pre-release" Release
+# on GitHub.
+#
+# See docs/release-policy.md for the full procedure.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write  # required to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for CHANGELOG slice)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: pip install pyyaml jsonschema
+
+      - name: Parse tag + verify against metadata
+        id: tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Strip leading 'v', strip pre-release suffix if any.
+          VERSION="${TAG#v}"
+          CORE_VERSION="${VERSION%%-*}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "core_version=$CORE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$([ "$VERSION" = "$CORE_VERSION" ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+
+          # Verify metadata/sdk_version.yaml matches.
+          DECLARED=$(python3 -c "import yaml; print(yaml.safe_load(open('metadata/sdk_version.yaml'))['version'])")
+          if [ "$DECLARED" != "$CORE_VERSION" ]; then
+            echo "::error::Tag core version $CORE_VERSION doesn't match metadata/sdk_version.yaml ($DECLARED)"
+            exit 1
+          fi
+
+      - name: Verify ABI snapshot exists
+        run: |
+          MINOR=$(echo "${{ steps.tag.outputs.core_version }}" | cut -d. -f1-2)
+          SNAPSHOT="docs/abi/v${MINOR}-snapshot.json"
+          if [ ! -f "$SNAPSHOT" ]; then
+            echo "::error::Missing $SNAPSHOT -- regenerate via scripts/abi_snapshot.py before tagging"
+            exit 1
+          fi
+          # Confirm working-tree headers match the committed snapshot.
+          python3 scripts/abi_snapshot.py --diff "$SNAPSHOT"
+
+      - name: Slice CHANGELOG section for the release notes
+        id: changelog
+        run: |
+          VERSION="${{ steps.tag.outputs.core_version }}"
+          # The CHANGELOG section header is `## [v<VERSION>]` (date
+          # follows after a dash).  Slice from that line up to (but
+          # not including) the next `## ` line.
+          python3 - <<PY > release_notes.md
+          import re, sys
+          version = "${{ steps.tag.outputs.core_version }}"
+          text = open("CHANGELOG.md").read()
+          # Match either '## [v0.4.0] - ...' or '## [Unreleased] - v0.4.0 candidate'
+          # We want the first form once the slice has been cut.
+          pattern = rf"^## \[v{re.escape(version)}\][^\n]*\n(.*?)(?=^## |\Z)"
+          m = re.search(pattern, text, re.MULTILINE | re.DOTALL)
+          if not m:
+              print(f"# v{version}\n\nRelease notes pending CHANGELOG slice.", file=sys.stdout)
+              sys.exit(0)
+          print(m.group(1).strip())
+          PY
+
+      - name: Build source tarball
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          ARCHIVE="alp-sdk-${TAG}.tar.gz"
+          git archive --format=tar.gz --prefix="alp-sdk-${TAG}/" -o "$ARCHIVE" HEAD
+          echo "archive=$ARCHIVE" >> "$GITHUB_ENV"
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+          sha512sum "$ARCHIVE" > "$ARCHIVE.sha512"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          body_path: release_notes.md
+          prerelease: ${{ steps.tag.outputs.is_prerelease == 'true' }}
+          files: |
+            alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz
+            alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz.sha256
+            alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz.sha512

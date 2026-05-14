@@ -159,6 +159,41 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Added (2026-05-14 -- release engineering scaffolding §C.1)
+
+- **`CODEOWNERS`** at repo root -- GH auto-requests reviews for
+  the maintainer on every PR touching the ABI-load-bearing,
+  schema, loader, security, or CI surfaces.
+- **`docs/release-policy.md`** -- SemVer + LTS + deprecation
+  contract.  v1.0 = first LTS, 24-month support, 6-month overlap
+  when superseded.  `[ABI-STABLE]` vs `[ABI-EXPERIMENTAL]` marker
+  semantics.  Release-cut procedure codified end-to-end (ledger
+  check -> ABI regen -> sdk_version bump -> CHANGELOG slice ->
+  signed tag -> workflow auto-publish).
+- **`docs/security-advisories.md`** -- embargoed-disclosure
+  workflow.  Reports via GitHub Security Advisories (private),
+  not public issues / not community forum.  CVSS severity rubric
+  mapped to embargo + backport reach.  Vendor-SDK CVEs explicit
+  out-of-scope; track upstream.
+- **`.github/workflows/release.yml`** -- fires on `v*` tag push:
+  verify tag matches `metadata/sdk_version.yaml`, verify
+  `docs/abi/v<MAJOR.MINOR>-snapshot.json` exists, slice the
+  matching CHANGELOG section, build source tarball + SHA-256/512
+  checksums, create the GitHub Release.
+- **`.github/workflows/pr-abi-snapshot.yml`** -- post-1.0 ABI
+  gate.  Diffs the working-tree ABI snapshot against the latest
+  committed one; classifies entries by `[ABI-STABLE]` /
+  `[ABI-EXPERIMENTAL]` markers; posts the diff as a PR comment.
+  Currently parked behind `continue-on-error: true` so it runs
+  informationally until the v1.0 tag flips it to a hard gate.
+- **`scripts/bump_version.py`** -- one-command release-prep tool.
+  Bumps `metadata/sdk_version.yaml`, slices the CHANGELOG
+  `[Unreleased]` section into a dated `[vX.Y.Z]` section,
+  regenerates the ABI snapshot for the new minor.  Dry-run mode
+  prints the diff plan without writing.  Operator still has to
+  run `git commit + git tag -s` themselves -- the tooling stops
+  short of the irreversible step.
+
 ### Added (2026-05-14 -- V1.0 readiness tracker + external anchors §C.0)
 
 - **`docs/v1.0-readiness.md`** (new) -- the master living checklist

@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# ABI snapshot gate.  Activates post-1.0 when ABI stability is the
+# release-gate contract; pre-1.0 the equivalent drift check runs
+# inside `pr-generated-files.yml` (informational, not blocking).
+#
+# What this workflow does:
+#
+#   1. Regenerate the ABI snapshot from the working tree's
+#      include/alp/*.h headers.
+#   2. Diff against the most recent committed
+#      docs/abi/v<N>-snapshot.json.
+#   3. Classify each diff entry by [ABI-STABLE] vs
+#      [ABI-EXPERIMENTAL] marker presence in the header comment:
+#      - ADDED [ABI-STABLE]              -> minor bump required, PASS
+#      - ADDED [ABI-EXPERIMENTAL]        -> any release, PASS
+#      - CHANGED / REMOVED [ABI-STABLE]  -> major bump required, FAIL unless the PR also bumps sdk_version.yaml's major
+#      - CHANGED / REMOVED [ABI-EXPERIMENTAL] -> any release, PASS with a warning
+#
+# This workflow is currently parked behind a no-op shim until v1.0
+# tags.  The shim runs the snapshot diff and prints results without
+# enforcing exit codes; flipping the `gate` job's
+# `continue-on-error: true` to `false` after the v1.0 tag activates
+# the gate.
+
+name: pr-abi-snapshot
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - 'include/alp/**'
+      - 'metadata/sdk_version.yaml'
+      - 'scripts/abi_snapshot.py'
+      - 'docs/abi/**'
+      - '.github/workflows/pr-abi-snapshot.yml'
+
+permissions:
+  contents: read
+  pull-requests: write  # to post the diff as a comment
+
+jobs:
+  snapshot-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Locate latest snapshot
+        id: snap
+        run: |
+          # The latest committed snapshot for the active version
+          # line.  Pre-1.0 this is v0.5; the v1.0 tag generates
+          # v1.0-snapshot.json and this step starts picking that up.
+          LATEST=$(ls -1 docs/abi/v*-snapshot.json | sort -V | tail -1)
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "Latest snapshot: $LATEST"
+
+      - name: Run snapshot diff
+        id: diff
+        run: |
+          python3 scripts/abi_snapshot.py --diff "${{ steps.snap.outputs.latest }}" | tee abi_diff.txt
+          if grep -q "REMOVED\|CHANGED" abi_diff.txt; then
+            echo "has_breaking=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_breaking=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post diff to the PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const diff = fs.readFileSync('abi_diff.txt', 'utf8').trim();
+            if (!diff || diff.includes('ABI unchanged')) return;
+            const body = '### ABI snapshot diff\n\n```\n' + diff + '\n```\n\n' +
+              'See [`docs/release-policy.md`](../blob/main/docs/release-policy.md#what-counts-as-breaking-for-the-sdk) ' +
+              'for what counts as breaking.  `[ABI-STABLE]` removals require a major version bump.';
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      - name: Gate (post-1.0 only -- currently informational)
+        # Flip this to remove `continue-on-error` after the v1.0
+        # tag.  Until then the workflow runs to publish the diff
+        # comment but does not fail the PR.
+        continue-on-error: true
+        run: |
+          if [ "${{ steps.diff.outputs.has_breaking }}" = "true" ]; then
+            echo "::warning::ABI-breaking change detected.  Post-1.0 this fails the PR unless the major version is also bumped."
+            # Post-1.0: also assert metadata/sdk_version.yaml major
+            # bumped vs main.  Logic lives in this block once the
+            # gate flips active.
+          fi
