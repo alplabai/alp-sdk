@@ -82,7 +82,11 @@ typedef struct alp_ble_conn alp_ble_conn_t;
  */
 alp_ble_t   *alp_ble_open(void);
 
-/** @brief Release the host (last close shuts the controller down).  NULL safe. */
+/**
+ * @brief Release the host (last close shuts the controller down).  NULL safe.
+ *
+ * @param[in] ble  Handle from @ref alp_ble_open, or NULL.
+ */
 void         alp_ble_close(alp_ble_t *ble);
 
 /* ------------------------------------------------------------------ */
@@ -110,7 +114,13 @@ typedef struct {
 alp_status_t alp_ble_advertise_start(alp_ble_t *ble,
                                      const alp_ble_adv_config_t *cfg);
 
-/** @brief Stop advertising.  Idempotent. */
+/**
+ * @brief Stop advertising.  Idempotent.
+ *
+ * @param[in] ble  Host handle from @ref alp_ble_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO.
+ */
 alp_status_t alp_ble_advertise_stop(alp_ble_t *ble);
 
 /** GATT characteristic property bits (BT-SIG values). */
@@ -202,7 +212,13 @@ alp_status_t alp_ble_scan_start(alp_ble_t *ble,
                                 bool active,
                                 alp_ble_scan_cb_t cb, void *user);
 
-/** @brief Stop scanning.  Idempotent. */
+/**
+ * @brief Stop scanning.  Idempotent.
+ *
+ * @param[in] ble  Host handle from @ref alp_ble_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO.
+ */
 alp_status_t alp_ble_scan_stop(alp_ble_t *ble);
 
 /**

@@ -68,28 +68,72 @@ typedef struct {
 /**
  * @brief Acquire a USB device-role handle and present @p cfg's
  *        descriptor to the host on enumerate.
+ *
+ * @param[in] cfg  Device class + VID/PID + strings.  Must be non-NULL.
+ *
+ * @return Open handle on success; NULL with @ref alp_last_error set
+ *         to @ref ALP_ERR_INVAL / @ref ALP_ERR_NOSUPPORT.
  */
 alp_usb_dev_t *alp_usb_device_open(const alp_usb_device_config_t *cfg);
 
-/** @brief Attach the USB device to the bus (presents the descriptor on enumerate). */
+/**
+ * @brief Attach the USB device to the bus (presents the descriptor on enumerate).
+ *
+ * @param[in] dev  Handle from @ref alp_usb_device_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_NOSUPPORT.
+ */
 alp_status_t   alp_usb_device_enable(alp_usb_dev_t *dev);
-/** @brief Detach the USB device from the bus.  Pair with @ref alp_usb_device_enable. */
+
+/**
+ * @brief Detach the USB device from the bus.  Pair with @ref alp_usb_device_enable.
+ *
+ * @param[in] dev  Handle from @ref alp_usb_device_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t   alp_usb_device_disable(alp_usb_dev_t *dev);
 
-/** @brief Send @p len bytes through the device's primary endpoint
- *         (CDC-ACM TX, HID IN, MSC bulk-in). */
+/**
+ * @brief Send @p len bytes through the device's primary endpoint
+ *        (CDC-ACM TX, HID IN, MSC bulk-in).
+ *
+ * @param[in] dev         Handle from @ref alp_usb_device_open.
+ * @param[in] data        Bytes to send.  Must be non-NULL when @p len > 0.
+ * @param[in] len         Byte count.
+ * @param[in] timeout_ms  Max wait for the host to drain.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (not enumerated) /
+ *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t   alp_usb_device_write(alp_usb_dev_t *dev,
                                     const uint8_t *data, size_t len,
                                     uint32_t timeout_ms);
 
-/** @brief Receive up to @p len bytes from the device's primary endpoint
- *         (CDC-ACM RX, HID OUT, MSC bulk-out). */
+/**
+ * @brief Receive up to @p len bytes from the device's primary endpoint
+ *        (CDC-ACM RX, HID OUT, MSC bulk-out).
+ *
+ * @param[in]  dev         Handle from @ref alp_usb_device_open.
+ * @param[out] data        Destination buffer.
+ * @param[in]  len         Capacity of @p data.
+ * @param[out] out_len     Receives the byte count actually read.
+ * @param[in]  timeout_ms  Max wait.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t   alp_usb_device_read(alp_usb_dev_t *dev,
                                    uint8_t *data, size_t len,
                                    size_t *out_len,
                                    uint32_t timeout_ms);
 
-/** @brief Release the USB device handle.  Idempotent on NULL. */
+/**
+ * @brief Release the USB device handle.  Idempotent on NULL.
+ *
+ * @param[in] dev  Handle from @ref alp_usb_device_open, or NULL.
+ */
 void           alp_usb_device_close(alp_usb_dev_t *dev);
 
 /* ------------------------------------------------------------------ */
@@ -98,15 +142,38 @@ void           alp_usb_device_close(alp_usb_dev_t *dev);
 
 typedef struct alp_usb_host alp_usb_host_t;
 
-/** Acquire the USB host singleton. */
+/**
+ * @brief Acquire the USB host singleton.
+ *
+ * @return Open handle on success; NULL with @ref alp_last_error
+ *         set to @ref ALP_ERR_NOSUPPORT (no host stack wired) or
+ *         @ref ALP_ERR_BUSY (already opened).
+ */
 alp_usb_host_t *alp_usb_host_open(void);
 
-/** @brief Start the host-role controller (enables enumeration of attached devices). */
+/**
+ * @brief Start the host-role controller (enables enumeration of attached devices).
+ *
+ * @param[in] host  Handle from @ref alp_usb_host_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT / ALP_ERR_IO.
+ */
 alp_status_t    alp_usb_host_enable(alp_usb_host_t *host);
-/** @brief Stop the host-role controller.  Pair with @ref alp_usb_host_enable. */
+
+/**
+ * @brief Stop the host-role controller.  Pair with @ref alp_usb_host_enable.
+ *
+ * @param[in] host  Handle from @ref alp_usb_host_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t    alp_usb_host_disable(alp_usb_host_t *host);
 
-/** @brief Release the USB host handle.  Idempotent on NULL. */
+/**
+ * @brief Release the USB host handle.  Idempotent on NULL.
+ *
+ * @param[in] host  Handle from @ref alp_usb_host_open, or NULL.
+ */
 void            alp_usb_host_close(alp_usb_host_t *host);
 
 #ifdef __cplusplus

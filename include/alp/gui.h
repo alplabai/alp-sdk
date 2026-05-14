@@ -41,8 +41,12 @@ extern "C" {
  * Allocates an lv_display_t (LVGL >= 9) or lv_disp_drv_t
  * (LVGL 8) wired to alp_display_blit().
  *
- * Returns ALP_ERR_NOSUPPORT when the build was not compiled with
- * ALP_HAS_LVGL.
+ * @param[in] display  Open handle from @ref alp_display_open.
+ *                     Must be non-NULL.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL (NULL display) /
+ *         ALP_ERR_NOSUPPORT (build not compiled with
+ *         ALP_HAS_LVGL).
  */
 alp_status_t alp_gui_lvgl_attach(alp_display_t *display);
 

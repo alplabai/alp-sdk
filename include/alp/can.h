@@ -121,10 +121,23 @@ typedef void (*alp_can_rx_cb_t)(const alp_can_frame_t *frame, void *user);
  */
 alp_can_t   *alp_can_open(const alp_can_config_t *cfg);
 
-/** @brief Enable bus RX/TX.  Required before send / receive succeeds. */
+/**
+ * @brief Enable bus RX/TX.  Required before send / receive succeeds.
+ *
+ * @param[in] can  Handle from @ref alp_can_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_IO (bus-off state).
+ */
 alp_status_t alp_can_start(alp_can_t *can);
 
-/** @brief Disable bus RX/TX.  Pending TX frames are discarded. */
+/**
+ * @brief Disable bus RX/TX.  Pending TX frames are discarded.
+ *
+ * @param[in] can  Handle from @ref alp_can_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY.
+ */
 alp_status_t alp_can_stop(alp_can_t *can);
 
 /**
@@ -164,10 +177,21 @@ alp_status_t alp_can_add_filter(alp_can_t *can,
                                 void *user,
                                 int32_t *filter_id_out);
 
-/** @brief Remove a previously-installed filter by id. */
+/**
+ * @brief Remove a previously-installed filter by id.
+ *
+ * @param[in] can        Handle from @ref alp_can_open.
+ * @param[in] filter_id  Opaque id returned by @ref alp_can_add_filter.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL (unknown id) / ALP_ERR_NOT_READY.
+ */
 alp_status_t alp_can_remove_filter(alp_can_t *can, int32_t filter_id);
 
-/** @brief Stop the bus, release the handle.  NULL is a no-op. */
+/**
+ * @brief Stop the bus, release the handle.  NULL is a no-op.
+ *
+ * @param[in] can  Handle from @ref alp_can_open, or NULL.
+ */
 void         alp_can_close(alp_can_t *can);
 
 #ifdef __cplusplus

@@ -159,6 +159,49 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Changed (2026-05-14 -- full doxygen pass on remaining headers §C.21)
+
+Completes the v1.0 contract: every public function in every
+`include/alp/*.h` now carries the full Doxygen triplet
+(`@brief` + `@param` + `@return`).  Void functions get
+`@brief` + `@param` only (no `@return`).
+
+Filled headers:
+- **peripheral.h** -- GPIO + I2C + SPI + UART surfaces; 17
+  functions extended from one-line `@brief` to full triplet
+  blocks documenting parameter directions + the status-code
+  menu each function can return.
+- **iot.h** -- Wi-Fi (4 functions) + MQTT (6 functions) full
+  triplets.
+- **usb.h** -- device-role (5 functions) + host-role (3
+  functions) full triplets.
+- **inference.h** -- 4 accessor functions (num_inputs /
+  num_outputs / get_input / get_output / invoke / close)
+  upgraded with parameter directions + status-code menus.
+- **audio.h** -- 4 in/out start/stop/close functions
+  upgraded from one-liners.
+- **can.h** -- 3 (start / stop / close / remove_filter)
+  upgraded.
+- **counter.h** -- 4 (start / stop / cancel_alarm / close +
+  qenc_reset_position / qenc_close) upgraded.
+- **display.h** -- all 4 public functions plus get_caps
+  upgraded.
+- **ble.h** -- close / advertise_stop / scan_stop upgraded.
+- **mproc.h** -- hwsem_close upgraded.
+- **gui.h** -- lvgl_attach upgraded.
+
+Headers that were already complete (no changes): dsp.h,
+gpu2d.h, power.h, tmu.h (the §C.17 wave-2 spot-pass) +
+hw_info.h, pwm.h, adc.h, rtc.h, wdt.h, i2s.h, security.h,
+soc_caps.h, e1m_pinout.h.
+
+`docs/v1.0-readiness.md` §3a "Full pass" checkbox flips to
+`[x]`.
+
+Validators after commit:
+- metadata / portability / pin-conflicts: clean
+- abi_snapshot --diff: unchanged (pure doc-comment touch).
+
 ### Added (2026-05-14 -- HW-blocked tracker docs §C.31)
 
 Two new docs that codify the external-party items blocking

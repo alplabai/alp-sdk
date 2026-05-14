@@ -126,10 +126,20 @@ typedef struct {
  */
 alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg);
 
-/** Number of input tensors the model expects. */
+/**
+ * @brief Number of input tensors the model expects.
+ *
+ * @param[in] inf  Handle from @ref alp_inference_open, or NULL.
+ * @return Input tensor count, or 0 if @p inf is NULL or closed.
+ */
 size_t           alp_inference_num_inputs(alp_inference_t *inf);
 
-/** Number of output tensors the model produces. */
+/**
+ * @brief Number of output tensors the model produces.
+ *
+ * @param[in] inf  Handle from @ref alp_inference_open, or NULL.
+ * @return Output tensor count, or 0 if @p inf is NULL or closed.
+ */
 size_t           alp_inference_num_outputs(alp_inference_t *inf);
 
 /**
@@ -138,12 +148,33 @@ size_t           alp_inference_num_outputs(alp_inference_t *inf);
  * The returned tensor's `data` pointer is owned by the SDK and
  * remains valid until @ref alp_inference_close.  Apps fill the
  * buffer before calling @ref alp_inference_invoke.
+ *
+ * @param[in]  inf    Handle from @ref alp_inference_open.
+ * @param[in]  index  0..@ref alp_inference_num_inputs - 1.
+ * @param[out] out    Filled with the tensor descriptor.
+ *                    Must be non-NULL.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
+ *         ALP_ERR_NOT_READY.
  */
 alp_status_t     alp_inference_get_input(alp_inference_t *inf,
                                          size_t index,
                                          alp_inference_tensor_t *out);
 
-/** Get a descriptor for output tensor @p index. */
+/**
+ * @brief Get a descriptor for output tensor @p index.
+ *
+ * Same ownership semantics as @ref alp_inference_get_input.  The
+ * output buffer's contents are valid after @ref alp_inference_invoke
+ * returns ALP_OK; reading before the first invoke returns the
+ * backend's zero-initialised buffer.
+ *
+ * @param[in]  inf    Handle from @ref alp_inference_open.
+ * @param[in]  index  0..@ref alp_inference_num_outputs - 1.
+ * @param[out] out    Filled with the tensor descriptor.
+ *                    Must be non-NULL.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
+ *         ALP_ERR_NOT_READY.
+ */
 alp_status_t     alp_inference_get_output(alp_inference_t *inf,
                                           size_t index,
                                           alp_inference_tensor_t *out);
@@ -155,13 +186,19 @@ alp_status_t     alp_inference_get_output(alp_inference_t *inf,
  * backends this offloads to the NPU and blocks the calling thread
  * until the result lands; on the CPU backend it executes in-thread.
  *
+ * @param[in] inf  Handle from @ref alp_inference_open.
+ *
  * @return ALP_OK / ALP_ERR_NOT_READY (handle closed) /
  *         ALP_ERR_INVAL / ALP_ERR_TIMEOUT (NPU stuck) /
  *         ALP_ERR_IO (NPU error).
  */
 alp_status_t     alp_inference_invoke(alp_inference_t *inf);
 
-/** Release the model + tensor buffers.  NULL-safe. */
+/**
+ * @brief Release the model + tensor buffers.  NULL-safe.
+ *
+ * @param[in] inf  Handle from @ref alp_inference_open, or NULL.
+ */
 void             alp_inference_close(alp_inference_t *inf);
 
 #ifdef __cplusplus

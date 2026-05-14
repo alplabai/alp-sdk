@@ -202,7 +202,11 @@ alp_status_t alp_hwsem_lock(alp_hwsem_t *sem, uint32_t timeout_ms);
 /** @brief Release ownership.  Must be called by the same core that locked. */
 alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem);
 
-/** @brief Release the handle.  Doesn't release the lock — call unlock first. */
+/**
+ * @brief Release the handle.  Doesn't release the lock — call unlock first.
+ *
+ * @param[in] sem  Handle from @ref alp_hwsem_open, or NULL.
+ */
 void         alp_hwsem_close(alp_hwsem_t *sem);
 
 #ifdef __cplusplus

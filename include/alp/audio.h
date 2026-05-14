@@ -85,10 +85,24 @@ typedef struct alp_audio_in alp_audio_in_t;
  */
 alp_audio_in_t *alp_audio_in_open(const alp_audio_config_t *cfg);
 
-/** @brief Begin capturing.  Frames flow into an internal ring buffer. */
+/**
+ * @brief Begin capturing.  Frames flow into an internal ring buffer.
+ *
+ * @param[in] in  Handle from @ref alp_audio_in_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
+ */
 alp_status_t alp_audio_in_start(alp_audio_in_t *in);
 
-/** @brief Stop capturing.  In-flight frames are drained. */
+/**
+ * @brief Stop capturing.  In-flight frames are drained.
+ *
+ * @param[in] in  Handle from @ref alp_audio_in_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_audio_in_stop(alp_audio_in_t *in);
 
 /**
@@ -111,7 +125,11 @@ alp_status_t alp_audio_in_read(alp_audio_in_t *in,
                                size_t *out_frames,
                                uint32_t timeout_ms);
 
-/** @brief Stop, free buffers, release handle.  NULL is a no-op. */
+/**
+ * @brief Stop, free buffers, release handle.  NULL is a no-op.
+ *
+ * @param[in] in  Handle from @ref alp_audio_in_open, or NULL.
+ */
 void          alp_audio_in_close(alp_audio_in_t *in);
 
 /* ------------------------------------------------------------------ */
@@ -129,10 +147,24 @@ typedef struct alp_audio_out alp_audio_out_t;
  */
 alp_audio_out_t *alp_audio_out_open(const alp_audio_config_t *cfg);
 
-/** @brief Begin playback.  Caller must keep feeding via @ref alp_audio_out_write. */
+/**
+ * @brief Begin playback.  Caller must keep feeding via @ref alp_audio_out_write.
+ *
+ * @param[in] out  Handle from @ref alp_audio_out_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
+ */
 alp_status_t alp_audio_out_start(alp_audio_out_t *out);
 
-/** @brief Stop playback.  Pending frames are drained. */
+/**
+ * @brief Stop playback.  Pending frames are drained.
+ *
+ * @param[in] out  Handle from @ref alp_audio_out_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_audio_out_stop (alp_audio_out_t *out);
 
 /**
@@ -160,7 +192,11 @@ alp_status_t alp_audio_out_write(alp_audio_out_t *out,
  */
 alp_status_t alp_audio_out_set_volume(alp_audio_out_t *out, uint8_t vol);
 
-/** @brief Stop, free buffers, release handle.  NULL is a no-op. */
+/**
+ * @brief Stop, free buffers, release handle.  NULL is a no-op.
+ *
+ * @param[in] out  Handle from @ref alp_audio_out_open, or NULL.
+ */
 void          alp_audio_out_close(alp_audio_out_t *out);
 
 #ifdef __cplusplus

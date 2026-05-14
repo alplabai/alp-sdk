@@ -79,10 +79,22 @@ typedef void (*alp_counter_alarm_cb_t)(alp_counter_t *counter,
  */
 alp_counter_t *alp_counter_open(const alp_counter_config_t *cfg);
 
-/** @brief Start the free-running counter. */
+/**
+ * @brief Start the free-running counter.
+ *
+ * @param[in] counter  Handle from @ref alp_counter_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO.
+ */
 alp_status_t alp_counter_start(alp_counter_t *counter);
 
-/** @brief Stop the counter.  The current value is preserved. */
+/**
+ * @brief Stop the counter.  The current value is preserved.
+ *
+ * @param[in] counter  Handle from @ref alp_counter_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY.
+ */
 alp_status_t alp_counter_stop(alp_counter_t *counter);
 
 /**
@@ -140,10 +152,20 @@ alp_status_t alp_counter_set_alarm(alp_counter_t *counter,
                                    alp_counter_alarm_cb_t cb,
                                    void *user);
 
-/** @brief Cancel a pending alarm.  No-op if no alarm is armed. */
+/**
+ * @brief Cancel a pending alarm.  No-op if no alarm is armed.
+ *
+ * @param[in] counter  Handle from @ref alp_counter_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY.
+ */
 alp_status_t alp_counter_cancel_alarm(alp_counter_t *counter);
 
-/** @brief Stop the counter and release the handle.  NULL is a no-op. */
+/**
+ * @brief Stop the counter and release the handle.  NULL is a no-op.
+ *
+ * @param[in] counter  Handle from @ref alp_counter_open, or NULL.
+ */
 void         alp_counter_close(alp_counter_t *counter);
 
 /* ------------------------------------------------------------------ */
@@ -184,10 +206,20 @@ alp_qenc_t  *alp_qenc_open(const alp_qenc_config_t *cfg);
  */
 alp_status_t alp_qenc_get_position(alp_qenc_t *enc, int32_t *pos_out);
 
-/** @brief Reset the accumulated count to zero. */
+/**
+ * @brief Reset the accumulated count to zero.
+ *
+ * @param[in] enc  Handle from @ref alp_qenc_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO.
+ */
 alp_status_t alp_qenc_reset_position(alp_qenc_t *enc);
 
-/** @brief Release the handle.  NULL is a no-op. */
+/**
+ * @brief Release the handle.  NULL is a no-op.
+ *
+ * @param[in] enc  Handle from @ref alp_qenc_open, or NULL.
+ */
 void         alp_qenc_close(alp_qenc_t *enc);
 
 #ifdef __cplusplus

@@ -47,22 +47,62 @@ typedef struct {
     alp_pixfmt_t format;
 } alp_display_caps_t;
 
-/** @brief Open the display handle defined by @p cfg. */
+/**
+ * @brief Open the display handle defined by @p cfg.
+ *
+ * @param[in] cfg  Display id.  Must be non-NULL.
+ *
+ * @return Open handle on success; NULL with @ref alp_last_error
+ *         set to @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY
+ *         (display id not DT-resolved) / @ref ALP_ERR_NOSUPPORT.
+ */
 alp_display_t *alp_display_open(const alp_display_config_t *cfg);
 
-/** @brief Read the display's static capabilities (geometry + pixel format). */
+/**
+ * @brief Read the display's static capabilities (geometry + pixel format).
+ *
+ * @param[in]  d    Handle from @ref alp_display_open.
+ * @param[out] out  Filled with width / height / format.
+ *                  Must be non-NULL.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_display_get_caps(alp_display_t *d, alp_display_caps_t *out);
 
-/** @brief Push a rectangular framebuffer region.  `pixels` size is implied by w*h*format. */
+/**
+ * @brief Push a rectangular framebuffer region.  `pixels` size is implied by w*h*format.
+ *
+ * @param[in] d       Handle from @ref alp_display_open.
+ * @param[in] x, y    Top-left of the destination rect (pixels).
+ * @param[in] w, h    Size of the rect (pixels).
+ * @param[in] pixels  Source framebuffer pointer; must be non-NULL.
+ *                    Byte size = `w * h * bytes-per-pixel-for-format`.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE
+ *         (rect outside display caps) / ALP_ERR_NOT_READY /
+ *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_display_blit(alp_display_t *d,
                               uint16_t x, uint16_t y,
                               uint16_t w, uint16_t h,
                               const void *pixels);
 
-/** @brief Clear the framebuffer to the background colour. */
+/**
+ * @brief Clear the framebuffer to the background colour.
+ *
+ * @param[in] d  Handle from @ref alp_display_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_display_clear(alp_display_t *d);
 
-/** @brief Release the display handle.  Idempotent on NULL. */
+/**
+ * @brief Release the display handle.  Idempotent on NULL.
+ *
+ * @param[in] d  Handle from @ref alp_display_open, or NULL.
+ */
 void alp_display_close(alp_display_t *d);
 
 #ifdef __cplusplus

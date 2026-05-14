@@ -156,25 +156,76 @@ typedef void (*alp_gpio_cb_t)(alp_gpio_t *pin, void *user);
  */
 alp_gpio_t *alp_gpio_open(uint32_t pin_id);
 
-/** @brief Configure a pin's direction + pull-up / pull-down resistors. */
+/**
+ * @brief Configure a pin's direction + pull-up / pull-down resistors.
+ *
+ * @param[in] pin   Handle from @ref alp_gpio_open.
+ * @param[in] dir   Direction (INPUT / OUTPUT / OUTPUT_OPEN_DRAIN / DISCONNECTED).
+ * @param[in] pull  Pull-up / pull-down resistor selection.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_gpio_configure(alp_gpio_t *pin,
                                 alp_gpio_dir_t dir,
                                 alp_gpio_pull_t pull);
 
-/** @brief Drive an output pin to @p level. */
+/**
+ * @brief Drive an output pin to @p level.
+ *
+ * @param[in] pin    Handle from @ref alp_gpio_open.
+ * @param[in] level  true = drive high, false = drive low.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (pin not
+ *         configured as output) / ALP_ERR_IO.
+ */
 alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level);
-/** @brief Read the current level of an input pin. */
+
+/**
+ * @brief Read the current level of an input pin.
+ *
+ * @param[in]  pin    Handle from @ref alp_gpio_open.
+ * @param[out] level  Receives the read level.  Must be non-NULL.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO.
+ */
 alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level);
 
-/** @brief Register an edge-triggered callback for @p pin. */
+/**
+ * @brief Register an edge-triggered callback for @p pin.
+ *
+ * Callback runs in the IRQ context (ISR); keep work minimal +
+ * defer to a thread / workqueue for anything substantive.
+ *
+ * @param[in] pin   Handle from @ref alp_gpio_open.
+ * @param[in] edge  Edge polarity (RISING / FALLING / BOTH / NONE).
+ *                  NONE rejects with INVAL when @p cb is non-NULL.
+ * @param[in] cb    Per-edge callback.  NULL with edge != NONE
+ *                  rejects with INVAL.
+ * @param[in] user  Opaque pointer forwarded to @p cb.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_gpio_irq_enable(alp_gpio_t *pin,
                                  alp_gpio_edge_t edge,
                                  alp_gpio_cb_t cb,
                                  void *user);
-/** @brief Tear down the IRQ registration from @ref alp_gpio_irq_enable. */
+
+/**
+ * @brief Tear down the IRQ registration from @ref alp_gpio_irq_enable.
+ *
+ * @param[in] pin  Handle from @ref alp_gpio_open.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY.
+ */
 alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin);
 
-/** @brief Release the GPIO handle.  Idempotent on NULL. */
+/**
+ * @brief Release the GPIO handle.  Idempotent on NULL.
+ *
+ * @param[in] pin  Handle from @ref alp_gpio_open, or NULL.
+ */
 void alp_gpio_close(alp_gpio_t *pin);
 
 /* ------------------------------------------------------------------ */
@@ -188,22 +239,70 @@ typedef struct {
     uint32_t bitrate_hz;    /**< 100k / 400k / 1M typical. */
 } alp_i2c_config_t;
 
+/**
+ * @brief Acquire an I2C bus handle.
+ *
+ * @param[in] cfg  Bus configuration.  Must be non-NULL.
+ *
+ * @return Open handle on success; NULL with @ref alp_last_error
+ *         set to @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY /
+ *         @ref ALP_ERR_NOSUPPORT.
+ */
 alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg);
 
-/** 7-bit-address blocking write. */
+/**
+ * @brief 7-bit-address blocking write.
+ *
+ * @param[in] bus   Handle from @ref alp_i2c_open.
+ * @param[in] addr  7-bit slave address.
+ * @param[in] data  Source bytes.
+ * @param[in] len   Byte count.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_IO (NACK / bus fault) / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr,
                            const uint8_t *data, size_t len);
 
-/** 7-bit-address blocking read. */
+/**
+ * @brief 7-bit-address blocking read.
+ *
+ * @param[in]  bus   Handle from @ref alp_i2c_open.
+ * @param[in]  addr  7-bit slave address.
+ * @param[out] data  Destination buffer.
+ * @param[in]  len   Byte count to read.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr,
                           uint8_t *data, size_t len);
 
-/** Write-then-read (typical register read pattern). */
+/**
+ * @brief Write-then-read (typical register read pattern).
+ *
+ * Issues a write phase followed by a repeated START + read phase
+ * with no STOP between -- the canonical "read register N" idiom.
+ *
+ * @param[in]  bus    Handle from @ref alp_i2c_open.
+ * @param[in]  addr   7-bit slave address.
+ * @param[in]  wdata  Bytes to write (typically register address).
+ * @param[in]  wlen   Write length.
+ * @param[out] rdata  Receive buffer.
+ * @param[in]  rlen   Read length.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_i2c_write_read(alp_i2c_t *bus, uint8_t addr,
                                 const uint8_t *wdata, size_t wlen,
                                 uint8_t *rdata, size_t rlen);
 
-/** @brief Release the I2C bus handle.  Idempotent on NULL. */
+/**
+ * @brief Release the I2C bus handle.  Idempotent on NULL.
+ *
+ * @param[in] bus  Handle from @ref alp_i2c_open, or NULL.
+ */
 void alp_i2c_close(alp_i2c_t *bus);
 
 /* ------------------------------------------------------------------ */
@@ -227,18 +326,62 @@ typedef struct {
     uint32_t cs_pin_id;     /**< Studio-resolved chip-select pin. */
 } alp_spi_config_t;
 
+/**
+ * @brief Acquire an SPI bus handle.
+ *
+ * @param[in] cfg  Bus configuration (bus id + freq + mode + bits-
+ *                 per-word + chip-select pin).  Must be non-NULL.
+ *
+ * @return Open handle on success; NULL with @ref alp_last_error
+ *         set to @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY /
+ *         @ref ALP_ERR_NOSUPPORT.
+ */
 alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg);
 
+/**
+ * @brief Full-duplex SPI transfer (simultaneous TX + RX).
+ *
+ * @param[in]  bus  Handle from @ref alp_spi_open.
+ * @param[in]  tx   Bytes to send.  May be NULL for "send 0xFF".
+ * @param[out] rx   Receive buffer.  May be NULL to discard MISO.
+ * @param[in]  len  Transfer length in bytes.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_spi_transceive(alp_spi_t *bus,
                                 const uint8_t *tx, uint8_t *rx,
                                 size_t len);
 
-/** @brief Half-duplex SPI write (no MISO read). */
+/**
+ * @brief Half-duplex SPI write (no MISO read).
+ *
+ * @param[in] bus  Handle from @ref alp_spi_open.
+ * @param[in] tx   Bytes to send.  Must be non-NULL when @p len > 0.
+ * @param[in] len  Byte count.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len);
-/** @brief Half-duplex SPI read (no MOSI write). */
+
+/**
+ * @brief Half-duplex SPI read (no MOSI write).
+ *
+ * @param[in]  bus  Handle from @ref alp_spi_open.
+ * @param[out] rx   Receive buffer.  Must be non-NULL when @p len > 0.
+ * @param[in]  len  Byte count.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len);
 
-/** @brief Release the SPI bus handle.  Idempotent on NULL. */
+/**
+ * @brief Release the SPI bus handle.  Idempotent on NULL.
+ *
+ * @param[in] bus  Handle from @ref alp_spi_open, or NULL.
+ */
 void alp_spi_close(alp_spi_t *bus);
 
 /* ------------------------------------------------------------------ */
@@ -261,15 +404,48 @@ typedef struct {
     alp_uart_parity_t parity;
 } alp_uart_config_t;
 
+/**
+ * @brief Acquire a UART port handle.
+ *
+ * @param[in] cfg  Port configuration.  Must be non-NULL.
+ *
+ * @return Open handle on success; NULL with @ref alp_last_error
+ *         set to @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY /
+ *         @ref ALP_ERR_NOSUPPORT.
+ */
 alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg);
 
-/** @brief Blocking UART write. */
+/**
+ * @brief Blocking UART write.
+ *
+ * @param[in] port  Handle from @ref alp_uart_open.
+ * @param[in] data  Source bytes.
+ * @param[in] len   Byte count.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
-/** @brief Blocking UART read with millisecond timeout. */
+
+/**
+ * @brief Blocking UART read with millisecond timeout.
+ *
+ * @param[in]  port        Handle from @ref alp_uart_open.
+ * @param[out] data        Destination buffer.
+ * @param[in]  len         Byte count to read.
+ * @param[in]  timeout_ms  Max wait.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
 alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len,
                            uint32_t timeout_ms);
 
-/** @brief Release the UART port handle.  Idempotent on NULL. */
+/**
+ * @brief Release the UART port handle.  Idempotent on NULL.
+ *
+ * @param[in] port  Handle from @ref alp_uart_open, or NULL.
+ */
 void alp_uart_close(alp_uart_t *port);
 
 /* ------------------------------------------------------------------ */
