@@ -1,0 +1,26 @@
+# board.yaml -- per-app project configuration for the
+# mproc-mailbox example (M55-HP side).
+#
+# Targets AEN-Zephyr; the peer-side (M55-HE) firmware lands
+# alongside the v0.4 dual-image build flow.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701
+
+carrier:
+  name: E1M-EVK
+
+os: zephyr
+
+peripherals:
+  - mproc
+
+# Pull in the SDK's mproc mailbox + shmem helpers.  The hardware
+# semaphore wires through too when CONFIG_ALP_SDK_MPROC=y.
+libraries:
+  - none
+
+diagnostics:
+  log_level: info

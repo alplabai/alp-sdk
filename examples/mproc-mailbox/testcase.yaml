@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: mproc-mailbox
+  description: |
+    AEN M55-HP side of a Cortex-M55 mailbox + shared-memory
+    roundtrip via <alp/mproc.h>.  Under native_sim the example
+    exercises the HP-side init + alp_mbox_send framing path and
+    exits cleanly (no peer core to talk to).  Real silicon
+    waits for the peer firmware to echo the payload back.
+common:
+  tags: mproc shmem
+  harness: console
+  harness_config:
+    type: one_line
+    regex:
+      - "\\[mproc\\] done"
+tests:
+  alp_sdk.examples.mproc_mailbox.native_sim:
+    platform_allow: native_sim/native/64
+  alp_sdk.examples.mproc_mailbox.aen:
+    platform_allow:
+      - alif_e7_dk_rtss_he
+    extra_args: CONFIG_ALP_SDK_MPROC=y
+    build_only: true   # real run needs the peer firmware (v0.4+).
