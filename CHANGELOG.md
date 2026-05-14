@@ -250,6 +250,64 @@ Validators after commit:
 - metadata / portability / pin-conflicts: clean
 - abi_snapshot --diff: unchanged (pure doc-comment touch).
 
+### Changed (2026-05-14 -- vendor-partnership status: Alif upstream verification §C.35)
+
+Verified Alif claims in `docs/vendor-partnerships.md` against
+the 59 public repos at `github.com/alifsemi`.
+
+Findings:
+
+- The Alif Zephyr SDK aggregate (`sdk-alif`) ships steady
+  releases: v2.3.0-rc1 (2026-05-09), v2.2.0 (2026-03-27),
+  v2.1.0 (2026-01-21).  The §C.31 tracker's "Alif HAL v1.6
+  ships 2026-Q2" line was reading the wrong release stream;
+  the `sdk-alif` repo is the canonical Zephyr-facing
+  delivery.
+- DAVE2D + Ethos-U + ISP drivers are ALREADY PUBLIC:
+  - `alif_dave2d-driver` (updated 2026-04-30)
+  - `alif_ml-embedded-evaluation-kit` (2026-05-13, fork of
+    ARM's reference Ethos-U eval kit)
+  - `alif_image-processing-lib` (D/AVE2D + Helium image
+    kernels, 2026-05-13)
+- Two licensing buckets:
+  - **Apache-2.0 / MIT** (inherited from upstream forks):
+    `zephyr_alif`, `hal_alif`, `cmsis_alif`,
+    `mcuboot_alif`, `matter_alif`, Alif's `tinyusb` port.
+    Yocto layers `meta-alif` / `meta-alif-ensemble` /
+    `meta-alif-iot` all MIT.  Build containers
+    (`alif-sdk-containers`) MIT.
+  - **"Alif Semiconductor Software License Agreement"**
+    (source-visible vendor terms): `sdk-alif`,
+    `alif_dave2d-driver`, `alif_lvgl-dave2d`,
+    `alif_image-processing-lib`,
+    `alif_ml-embedded-evaluation-kit`,
+    `alif_ensemble-cmsis-dfp`.
+
+Same pattern as NXP MCUXpresso: vendor's forks of upstream
+OSS keep permissive licensing; differentiating drivers ride
+a vendor-specific licence.  Source-visible but with vendor
+terms.
+
+`docs/vendor-partnerships.md` Alif section rewritten with
+the two-bucket licence table + flipped:
+- "Public AEN Zephyr SDK availability" -> [x]
+- "DAVE2D + Ethos-U evaluation kit availability" -> [x]
+
+New open items added:
+- Alif-licence acknowledgement paragraph in
+  `docs/getting-started.md` (parallels the §C.34 NXP
+  one).
+- Sync `metadata/socs/alif/ensemble/*.json` to
+  `sdk-alif` v2.3.0-rc1's Zephyr-board manifests.
+
+`docs/v1.0-readiness.md` Pillar 9 row now lists all three
+vendor SDKs as "already public with steady release
+cadences" with per-vendor crisp summaries.
+
+Validators after commit (docs-only):
+- metadata: 0 failures
+- abi_snapshot --diff: unchanged
+
 ### Changed (2026-05-14 -- vendor-partnership status: NXP MCUXpresso verification §C.34)
 
 Verified the NXP claims in `docs/vendor-partnerships.md`

@@ -77,21 +77,79 @@ compiler licence + DA9292 OTP confirmation.
 `chips/aen-isp` /`<alp/gpu2d.h>` AEN backends + the dual-
 image build flow for `mproc-mailbox`.
 
+**Status update 2026-05-14 (verified against upstream)**:
+
+Alif Semiconductor publishes 59 repos at
+[`github.com/alifsemi`](https://github.com/alifsemi).  The
+relevant ones for the SDK split cleanly into two licensing
+buckets:
+
+**Genuinely open (Apache-2.0 / MIT, inherited from upstream
+forks)**:
+
+| Repo                       | License     | Purpose                                           |
+|----------------------------|-------------|---------------------------------------------------|
+| `zephyr_alif`              | Apache-2.0  | Alif's Zephyr fork                                |
+| `hal_alif`                 | Apache-2.0  | HAL integration layer for Zephyr                  |
+| `cmsis_alif`               | Apache-2.0  | CMSIS fork                                        |
+| `mcuboot_alif`             | Apache-2.0  | MCUboot port for Ensemble                         |
+| `matter_alif`              | Apache-2.0  | Matter port                                       |
+| `tinyusb` (Alif's port)    | MIT         | TinyUSB stack                                     |
+| `meta-alif`                | MIT         | Ensemble BSP Yocto layer                          |
+| `meta-alif-ensemble`       | MIT         | Ensemble device recipes                           |
+| `meta-alif-iot`            | MIT         | IoT meta layer                                    |
+| `alif-sdk-containers`      | MIT         | Docker containers for building releases           |
+
+**Vendor-licensed (Alif Semiconductor Software License
+Agreement) for the differentiating drivers**:
+
+| Repo                                | Purpose                                    |
+|-------------------------------------|--------------------------------------------|
+| `sdk-alif`                          | Zephyr SDK aggregate                        |
+| `alif_dave2d-driver`                | D/AVE 2D graphics driver                   |
+| `alif_lvgl-dave2d`                  | LVGL+D/AVE 2D integration                  |
+| `alif_image-processing-lib`         | D/AVE 2D + Helium image-processing kernels |
+| `alif_ml-embedded-evaluation-kit`   | Ethos-U eval-kit fork                      |
+| `alif_ensemble-cmsis-dfp`           | CMSIS Device Family Pack                   |
+
+Same pattern as NXP: Alif's forks of upstream OSS keep
+upstream's permissive licensing; their proprietary
+differentiating drivers (DAVE2D, Ethos-U eval kit, ISP
+helpers) ride a vendor-specific licence.  Source-visible
+but with Alif terms.
+
+The `sdk-alif` aggregate Zephyr SDK has been **steadily
+released** (v2.3.0-rc1 2026-05-09, v2.2.0 2026-03-27,
+v2.1.0 2026-01-21) -- the tracker's "Alif HAL v1.6 ships
+2026-Q2" line was reading the wrong release stream.  The
+DAVE2D + Ethos-U + CSI driver repos are **already public**
+(updated 2026-04-30 / 2026-05-13).
+
 **Open items**:
 
-- 📋 **Public AEN HAL pack.**  We're building against
-  the Alif Ensemble HAL v1.5 which is publicly available;
-  v1.6 ships in 2026-Q2 with the DAVE2D + Ethos-U + CSI
-  surfaces that <alp/gpu2d.h> / <alp/inference.h> /
-  <alp/camera.h> consume.  v1.0 of the SDK syncs to v1.6
-  once it ships.
+- [x] **Public AEN Zephyr SDK availability.**  Public at
+  `github.com/alifsemi/sdk-alif`, with steady releases.
+  Tracker line item closed; what was open is just our own
+  alignment cadence to specific tags.
+- [x] **DAVE2D + Ethos-U evaluation kit availability.**
+  `alif_dave2d-driver` + `alif_ml-embedded-evaluation-kit`
+  both already public (vendor-licensed, source-visible).
+- 📋 **Alif-licence acknowledgement in v1.0 docs.**  Same
+  pattern as the §C.34 NXP MCUXpresso line item -- our
+  consumer-facing `docs/getting-started.md` should mention
+  that the AEN GPU2D / ISP / Ethos-U paths pull
+  vendor-licensed source from `github.com/alifsemi` rather
+  than Apache / MIT bits.  One paragraph cross-ref.
 - 📋 **Dual-image build flow upstreaming.**  The §C.30
   HE-side peer image needs sysbuild glue that builds both
   HP + HE halves in one invocation.  This sits in
-  `alplabai/alp-zephyr-modules` (not this repo); Alif is
-  reviewing our proposed pattern.
+  `alplabai/alp-zephyr-modules` (not this repo); the
+  upstream pattern from `sdk-alif` v2.x sysbuild can be
+  the model.
 
-**Next action**: 2026-Q2 sync at the Alif partner summit.
+**Next action**: Sync `metadata/socs/alif/ensemble/*.json`
+to the v2.3.0-rc1 `sdk-alif` Zephyr-board manifests; ping
+Alif about the §C.30 dual-image pattern once that lands.
 
 ## DEEPX (DX-M1 NPU for V2N-M1)
 
