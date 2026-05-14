@@ -7,6 +7,11 @@
  * @file ssd1306.h
  * @brief Solomon Systech SSD1306 monochrome OLED driver.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * Public surface consumed by alp-studio block `blk_oled_ssd1306`.
  * Symbols carry the chip's natural prefix `ssd1306_*` — no `alp_`.
  *

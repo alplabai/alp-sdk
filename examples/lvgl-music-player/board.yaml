@@ -1,0 +1,35 @@
+# board.yaml -- LVGL music-player demo.
+#
+# Wraps the upstream `lv_demo_music()` which is the most polished
+# of LVGL's bundled demos -- album-art carousel, time slider,
+# track list, equaliser visualiser.  Pairs nicely with a real
+# audio output path: WM8960 or TLV320AIC3204 codec over I²S.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701
+
+carrier:
+  name: E1M-EVK
+
+os: zephyr
+
+libraries:
+  - lvgl
+  - minimp3                # Optional: actual MP3 decode on the audio path.
+                            # The demo's `lv_demo_music()` itself only animates
+                            # the UI; minimp3 wires the decode to alp_i2s_*.
+
+peripherals:
+  - spi
+  - gpio
+  - i2c                    # Codec control surface.
+  - i2s                    # Audio data path.
+
+chips:
+  - st7789                 # Display.
+  - wm8960                 # Audio codec (I²C config + I²S data).
+
+diagnostics:
+  log_level: info

@@ -7,6 +7,11 @@
  * @file gd32_swd.h
  * @brief Bit-bang SWD controller for flashing the GD32G553 over GPIO.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * The companion GD32G553MEY7TR on the E1M-X V2N / V2N-M1 SoMs is
  * a Cortex-M33 with the standard Arm Coresight SWD debug port.
  * Per the 2026-05-12 hardware decision the V2N carrier routes

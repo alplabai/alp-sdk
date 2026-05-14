@@ -7,6 +7,11 @@
  * @file pdm_mic.h
  * @brief Generic PDM microphone block helper.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * Consumed by alp-studio block `blk_pdm_mic`.  Like
  * `<alp/chips/button_led.h>` — and unlike the single-IC drivers in
  * this directory — **this helper carries the `alp_` prefix** because

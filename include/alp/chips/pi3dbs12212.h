@@ -7,6 +7,11 @@
  * @file pi3dbs12212.h
  * @brief Diodes Inc PI3DBS12212A 2:1 high-speed differential mux.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * The PI3DBS12212A is a passive 4-into-2 differential mux/demux (or
  * equivalently, a 2-position 1-lane switch).  3.3 V supply, up to
  * 12 Gbps per channel, supports PCIe v3.0, USB 3.0/3.1, Thunderbolt,

@@ -71,3 +71,7 @@ kconfig:
 families:
   - v2n           # E1M-X V2N base (E1M-V2N101, E1M-V2N102)
   - v2n-m1        # E1M-X V2N-M1 (E1M-V2M101, E1M-V2M102) -- inherited V2N-common
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard

@@ -7,6 +7,11 @@
  * @file button_led.h
  * @brief Generic button + LED block helper.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * Consumed by alp-studio block `blk_button_led`.  Unlike
  * `lsm6dso_*` and `ssd1306_*`, **this helper carries the `alp_`
  * prefix** because it's an SDK-level block utility, not a binding

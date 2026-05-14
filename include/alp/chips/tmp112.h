@@ -7,6 +7,11 @@
  * @file tmp112.h
  * @brief TI TMP112 digital temperature sensor driver.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * 12/13-bit I2C temperature sensor, +/-0.5 C accuracy from
  * -25..+85 C, 0.0625 C/LSB resolution.  On the E1M-AEN module
  * the sensor sits on Alif's LPI2C bus alongside the RV-3028-C7

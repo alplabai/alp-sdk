@@ -7,6 +7,11 @@
  * @file bme280.h
  * @brief Bosch BME280 combined temperature / humidity / pressure sensor driver.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * Public surface consumed by alp-studio block `blk_env_bme280`.  Symbols
  * carry the chip's natural prefix `bme280_*` — no `alp_`.
  *

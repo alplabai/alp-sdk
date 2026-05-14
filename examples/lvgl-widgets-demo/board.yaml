@@ -1,0 +1,38 @@
+# board.yaml -- LVGL widgets demo on E1M-AEN.
+#
+# Wraps the upstream `lv_demo_widgets` from LVGL's demos/ tree --
+# the headline showcase of every standard widget (buttons, sliders,
+# tabs, charts, meters, ...).  Customer workflow: copy this dir,
+# point `som.sku` at your AEN MPN, attach a 240x320 ST7789 TFT to
+# the E1M-EVK SPI0 + GPIO IO0 (D/C) + GPIO IO1 (reset) pads, and
+# `west build`.
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701           # E7 has the Cortex-A32 + 13.5 MB SRAM that
+                             # LVGL widgets needs comfortably.
+
+carrier:
+  name: E1M-EVK
+
+os: zephyr
+
+# LVGL pulls in via the standard Tier 1 library knob.  The
+# §D.lib.loader cross-references AEN's `capabilities:` block and
+# emits CONFIG_ALP_LVGL_DMA2D=y on E*-series.
+libraries:
+  - lvgl
+
+# SPI for the display + GPIO for the D/C# + reset pins.  The
+# st7789 chip driver wraps these into <alp/chips/st7789.h>'s
+# init / set_window / write_pixels surface.
+peripherals:
+  - spi
+  - gpio
+
+chips:
+  - st7789
+
+diagnostics:
+  log_level: info

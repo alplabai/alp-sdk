@@ -7,6 +7,11 @@
  * @file eeprom_24c128.h
  * @brief Generic 24Cxx-class 128-Kbit (16 KB) I2C EEPROM driver.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * Covers the two footprint-compatible variants populated on the
  * E1M-AEN module: **N24S128C4DYT3G** (Onsemi, default) and
  * **M24128-BFMH6TG** (STMicro, alternate / DNP).  Both speak the

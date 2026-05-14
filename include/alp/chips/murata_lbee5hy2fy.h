@@ -7,6 +7,11 @@
  * @file murata_lbee5hy2fy.h
  * @brief Murata LBEE5HY2FY-922 Wi-Fi 6 + BLE 5.4 module thin GPIO surface.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * The LBEE5HY2FY-922 (Type 2FY) wraps the Infineon CYW55513 dual-band
  * combo silicon.  Air-side traffic rides SDIO (Wi-Fi) + UART (BT)
  * + I2S (BT audio); this driver covers only the **side-channel GPIO

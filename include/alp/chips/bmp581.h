@@ -7,6 +7,11 @@
  * @file bmp581.h
  * @brief Bosch BMP581 ultra-low-power barometric pressure sensor.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * Public surface consumed by alp-studio block `blk_baro_bmp581`.
  * Symbols carry the chip's natural prefix `bmp581_*` — no `alp_`.
  *

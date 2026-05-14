@@ -7,6 +7,11 @@
  * @file cam_mux_pi3wvr626.h
  * @brief Diodes / Pericom PI3WVR626 2:1 MIPI CSI multiplexer helper.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * The PI3WVR626 routes one MIPI CSI lane pair (CLK + 2 data lanes)
  * from one of two camera inputs (A or B) to a single output.  The
  * chip exposes only two control pins -- SEL (input switch) and

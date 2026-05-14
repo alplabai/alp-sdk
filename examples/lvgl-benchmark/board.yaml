@@ -1,0 +1,31 @@
+# board.yaml -- LVGL benchmark demo.
+#
+# Wraps the upstream `lv_demo_benchmark()` which measures rendering
+# throughput across LVGL's standard scenes.  Use this to compare:
+#   - GPU2D / DAVE2D HW acceleration (E6 / E7 / E8) vs pure-C blit (E3 / E4 / E5)
+#   - DMA2D framebuffer push vs sync SPI push
+#   - Native_sim baseline (CPU-only) vs SoM hardware path
+
+schema_version: 1
+
+som:
+  sku: E1M-AEN701           # E7 has GPU2D + DAVE2D + DMA2D populated.
+
+carrier:
+  name: E1M-EVK
+
+os: zephyr
+
+libraries:
+  - lvgl                    # Pulls in CONFIG_ALP_LVGL_GPU2D=y / DMA2D=y
+                             # on AEN601 / AEN701 / AEN801 via the §D.lib loader.
+
+peripherals:
+  - spi
+  - gpio
+
+chips:
+  - st7789
+
+diagnostics:
+  log_level: info

@@ -7,6 +7,11 @@
  * @file deepx_dxm1.h
  * @brief DEEPX DX-M1 NPU host-side bring-up sequencer (V2N-M1 only).
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * The DX-M1 is the AI accelerator on the **E1M-X V2N-M1** family
  * of SoMs (NOT populated on V2N base).  It sits behind a PCIe lane
  * that V2N-M1 routes through two passive Diodes PI3DBS12212A

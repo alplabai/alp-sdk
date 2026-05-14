@@ -2,6 +2,22 @@
 
 > Write once, run on any E1M module.
 
+> ⚠️ **[UNTESTED] — `v0.5` status: paper-correct, no real-silicon verification yet.**
+>
+> Every chip driver, library binding, peripheral wrapper, and
+> example app in this repo builds clean on `native_sim/native/64`
+> and passes its NULL-arg-guard ZTEST.  **Nothing has been brought
+> up on real silicon yet.**  Treat register addresses, timing
+> values, lifecycle sequencing, and per-SoM accelerator wiring as
+> *paper-correct only* until the v1.0 HiL verification sweep
+> lands.  Per-driver verification status is recorded in
+> `metadata/chips/<name>.yaml`'s `verification:` block and as
+> `@par Verification status: [UNTESTED]` Doxygen tags on every
+> public header.  Customers shipping production firmware should
+> assume nothing in here has been silicon-validated and budget
+> their own bring-up time accordingly.  Verification rolls out
+> per-SKU + per-chip from v0.6 onward.
+
 The **ALP SDK** is the unification software layer for ALP Lab edge AI
 modules built on the **E1M open-standard form factor**.  It provides
 application developers a single C/C++ API that works across every

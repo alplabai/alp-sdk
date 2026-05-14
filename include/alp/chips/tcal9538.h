@@ -7,6 +7,11 @@
  * @file tcal9538.h
  * @brief TI TCA9538 / TCAL9538 8-channel I2C I/O expander driver.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * Both parts share the same register layout; TCAL adds latched-
  * interrupt regs (0x40+) that this driver doesn't yet surface
  * (v0.3.x).  Eight I/O pins, individually configurable as

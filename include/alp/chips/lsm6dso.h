@@ -7,6 +7,11 @@
  * @file lsm6dso.h
  * @brief STMicroelectronics LSM6DSO 6-axis IMU driver.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * Public surface consumed by alp-studio block `blk_imu_lsm6dso`.
  * Symbols carry the chip's natural prefix `lsm6dso_*` — no `alp_`
  * (chip drivers are bindings to third-party silicon).

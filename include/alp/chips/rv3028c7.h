@@ -7,6 +7,11 @@
  * @file rv3028c7.h
  * @brief Micro Crystal RV-3028-C7 32.768 kHz extreme-low-power RTC.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * 1 PPM TCXO accuracy, 100 nA typical I_DD at 3.0 V, integrated
  * trickle charger, programmable alarm with INT pin.  On the
  * E1M-AEN module the RTC sits on Alif's LPI2C bus; its INT line

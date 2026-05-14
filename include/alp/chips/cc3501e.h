@@ -6,6 +6,11 @@
 /**
  * @file cc3501e.h
  * @brief Alif-side host driver for the on-module TI CC3501E
+ *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
  *        Wi-Fi 6 + BLE 5.4 coprocessor.
  *
  * Wraps the inter-chip SPI1 host-control protocol defined in

@@ -7,6 +7,11 @@
  * @file act8760.h
  * @brief Qorvo / Active-Semi ACT88760 primary PMIC driver.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * The V2N / V2N-M1 SoMs populate the **ACT88760-120.E1** variant
  * (Code Matrix Index 120, revision E1).  The configuration ID is
  * stamped in the chip's non-volatile memory and is what determines

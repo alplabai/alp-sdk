@@ -7,6 +7,11 @@
  * @file tas2563.h
  * @brief Texas Instruments TAS2563 smart Class-D mono speaker amp.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * Digital input I2S + I2C control + algorithm-driven smart-amp
  * features (DRC, DSP, EQ, IV-sense feedback for excursion +
  * thermal protection).  This driver is intentionally thin --

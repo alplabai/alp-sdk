@@ -7,6 +7,11 @@
  * @file bmi323.h
  * @brief Bosch BMI323 6-axis IMU driver.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * Public surface consumed by alp-studio block `blk_imu_bmi323`.
  * Symbols carry the chip's natural prefix `bmi323_*` — no `alp_`.
  *

@@ -59,3 +59,7 @@ kconfig:
 families:
   - v2n           # only the 0x4D Renesas-rail instance, when assembled
   - v2n-m1        # all four instances
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard

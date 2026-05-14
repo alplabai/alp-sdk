@@ -6,6 +6,11 @@
 /**
  * @file gd32g553.h
  * @brief Host-side driver for the GD32G553MEY7TR supervisor MCU on
+ *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
  *        the E1M-X V2N / V2N-M1 SoMs.
  *
  * The GD32G553 is the V2N module's general-purpose supervisor MCU.

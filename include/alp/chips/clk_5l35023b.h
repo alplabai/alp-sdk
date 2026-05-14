@@ -7,6 +7,11 @@
  * @file clk_5l35023b.h
  * @brief Renesas / IDT 5L35023(B) VersaClock 3S programmable clock generator.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * Three-PLL 1.8 V clock generator with OTP-loadable configuration:
  * up to six unique frequency outputs (2 differential pairs + 3
  * single-ended), 1 MHz..125 MHz per output, with PCIe Gen 1/2/3

@@ -7,6 +7,11 @@
  * @file da9292.h
  * @brief Renesas DA9292 high-current multi-phase buck PMIC driver.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * The DA9292 is a multi-phase DC-DC buck PMIC that can be configured
  * (via the silicon's `CONF` strap pin) as either:
  *

@@ -7,6 +7,11 @@
  * @file tps628640.h
  * @brief TI TPS62864 / TPS62866 single-channel I2C-controlled buck.
  *
+ * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
+ *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
+ *   sequencing as paper-correct only until the v1.0 verification
+ *   sweep lands.
+ *
  * The TPS62864 family is a 6-A / 7-A buck with two switchable VOUT
  * registers (selected at runtime by the VID pin), an FPWM-mode
  * forcing bit, HICCUP / latching short-circuit protection, and a
