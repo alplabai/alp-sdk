@@ -84,6 +84,18 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- V2N DEEPX rail GPIO map)
+
+- **`DEEPX_PWR_EN_REQ` (P65) + `DEEPX_CORE_0P75_EN` (P64)** added
+  to `metadata/e1m_modules/v2n/renesas-peripheral-map.{tsv,csv}`.
+  P65 is the rising-edge "DEEPX should come up now" signal from
+  the primary PMIC into V2N; P64 is V2N's drive to the DA9292
+  EN2 pin (and other shared-rail consumers) that physically
+  enables the 0.75 V DEEPX rail.  Sequence captured in
+  [memory `project_v2n_da9292_core_0p75_control.md`].  V2N
+  firmware module (`src/zephyr/v2n_power_mgmt.c`) wiring lands
+  next.
+
 ### Changed (2026-05-13 -- top-level UX simplification cont.)
 
 - **`bench/` moved to `tests/bench/`.**  The microbench harness
