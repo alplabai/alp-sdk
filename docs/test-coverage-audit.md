@@ -18,7 +18,7 @@ follow-up work.
 | Area                    | ZTEST count | File                                       | Notes                                                              |
 |-------------------------|-------------|--------------------------------------------|--------------------------------------------------------------------|
 | `chips/`                | 108         | `tests/zephyr/chips/src/main.c` (2107 LOC) | 21 chip drivers + 3 fakes (`lsm6dso`, `bme280`, `ssd1306`)         |
-| `peripheral/` (13 APIs) | 82          | `tests/zephyr/peripheral/src/main.c` (902 LOC) | Single monolithic file covering I²C/SPI/UART/GPIO/PWM/ADC/CAN/I²S/RTC/WDT/DAC/QENC/COUNTER |
+| `peripheral/` (13 APIs) | 82          | `tests/zephyr/peripheral/src/{main,i2c,spi,gpio,uart,pwm,adc,dac,counter,qenc,i2s,can,rtc,wdt}.c` | Split per peripheral in §C.16; `main.c` keeps cross-cutting tests (TMU, power, AEN audit gaps, delay, SoC caps, V2N supervisor, TRNG entropy) |
 | `iot/`                  | 14          | `tests/zephyr/iot/src/main.c`              | WiFi + MQTT (cleartext + TLS) negative paths                       |
 | `audio/`                | 9           | `tests/zephyr/audio/src/main.c`            | `audio_in` + `audio_out` lifecycle + arg validation                |
 | `inference/`            | 8           | `tests/zephyr/inference/src/main.c`        | Backend-dispatcher rejection paths (CPU / Ethos-U / null cfg)      |
@@ -31,9 +31,11 @@ follow-up work.
 
 ## Per-peripheral breakdown inside `peripheral/`
 
-`tests/zephyr/peripheral/src/main.c` is a single file with one
-`ZTEST_SUITE(alp_peripheral, ...)` and 82 ZTESTs.  Counts by
-`<alp/X.h>` surface (matched on `test_<peri>_` prefix):
+`tests/zephyr/peripheral/src/` was a single `main.c` (902 LOC) with one
+`ZTEST_SUITE(alp_peripheral, ...)` and 82 ZTESTs; split per peripheral
+in §C.16.  Every `*.c` sibling now registers its ZTESTs against the
+same suite.  Counts by `<alp/X.h>` surface (matched on `test_<peri>_`
+prefix):
 
 | Peripheral | ZTESTs | Surface coverage health |
 |------------|--------|-------------------------|
@@ -77,9 +79,9 @@ positive-path gate.
 
 Ranked by "ease of testing in native_sim" × "API-surface impact":
 
-### 1. Split `tests/zephyr/peripheral/src/main.c`
+### 1. Split `tests/zephyr/peripheral/src/main.c` — DONE §C.16
 
-902-line monolith.  Splitting into `tests/zephyr/peripheral/src/{i2c,spi,uart,gpio,pwm,adc,dac,can,i2s,rtc,wdt,qenc,counter}.c` makes the per-peripheral test counts visible from the filesystem, lets developers run a single peripheral's suite, and creates the natural insertion point for the gaps below.
+Landed in §C.16.  `tests/zephyr/peripheral/src/{i2c,spi,uart,gpio,pwm,adc,dac,can,i2s,rtc,wdt,qenc,counter}.c` now sit alongside the slimmed-down `main.c` (which retains the cross-cutting sections + the `ZTEST_SUITE` declaration).  Per-peripheral test counts visible from the filesystem; the natural insertion points for gaps 2..4 below are now the matching `*.c` file.
 
 ### 2. RTC / QENC / COUNTER positive-path tests
 
@@ -122,12 +124,14 @@ visible via `grep -c '^ZTEST' tests/zephyr/<area>/src/main.c`.
 ## Methodology
 
 ```bash
-# Per-area total
+# Per-area total (areas that are still single-file)
 grep -c '^ZTEST' tests/zephyr/<area>/src/main.c
 
-# Per-peripheral inside peripheral/main.c
-grep -oE 'test_(i2c|spi|gpio|uart|pwm|adc|can|i2s|rtc|wdt|usb|dac|qenc|counter)_' \
-    tests/zephyr/peripheral/src/main.c | sort | uniq -c
+# Per-peripheral after the §C.16 split: one file per peripheral
+grep -c '^ZTEST' tests/zephyr/peripheral/src/*.c | sort
+
+# Or grep across all files when an area is multi-file
+grep -c '^ZTEST' tests/zephyr/<area>/src/*.c
 ```
 
 Re-running both shows whether a future change moved the

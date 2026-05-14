@@ -159,6 +159,37 @@ that lands before the v0.3.0 tag.)
   Split into three sections (cross-family / AEN-specific /
   V2N-M1-specific) with correct relative paths for every row.
 
+### Changed (2026-05-14 -- peripheral test split per peripheral §C.16)
+
+- **`tests/zephyr/peripheral/src/main.c`** (902 LOC monolith) split
+  into 13 per-peripheral files alongside a slimmed-down `main.c`:
+  `i2c.c`, `spi.c`, `gpio.c` (incl. pool exhaustion), `uart.c`
+  (incl. RX ringbuf), `pwm.c` (incl. single-pulse + capture
+  NOSUPPORT contract), `adc.c` (incl. streaming), `dac.c`,
+  `counter.c`, `qenc.c`, `i2s.c`, `can.c`, `rtc.c`, `wdt.c`.
+  `main.c` retains the cross-cutting sections that don't pair
+  1:1 with a single peripheral header: TMU primitives, power-
+  mode NOSUPPORT contract, AEN audit gap surfaces (gpu2d /
+  camera ISP / storage AES), portable delay helpers, SoC
+  capability validation, V2N supervisor cross-peripheral
+  dispatch, GD32-TRNG entropy source -- plus the
+  `ZTEST_SUITE(alp_peripheral, ...)` declaration that the
+  split files register against.
+- **`CMakeLists.txt` updated** to list all 14 source files
+  under `target_sources(app PRIVATE ...)`.
+- **`testcase.yaml` unchanged** -- Twister discovers ZTESTs
+  through the suite registration mechanism, not the file list,
+  so the 4 existing scenarios (`smoke`, `caps_e3`,
+  `uart_rx_ringbuf`, `v2n_supervisor`) keep covering the same
+  82-test surface.
+- **All 82 ZTESTs preserved verbatim** (verified via
+  `grep -c '^ZTEST'` -- pre-split 82 / post-split sum 82).
+- **`docs/test-coverage-audit.md` updated** to reference the
+  new layout + flip §1 ("Split `peripheral/main.c`") to DONE.
+- **`docs/v1.0-readiness.md` §1c first checkbox flipped to
+  `[x]`**; thin-spot fills row now points to the per-peripheral
+  `.c` as the natural insertion point.
+
 ### Added (2026-05-14 -- GD32 ADC-DSP chain pool + chunk reassembly §C.15d)
 
 - **`bridge_hw_adc_dsp_chain_open` real body.**  Replaces the
