@@ -1,0 +1,20 @@
+# Per-library hardware-accelerator binding for tinygsm.
+# Loader: scripts/alp_project.py reads this against the active SoM
+# `capabilities:` block (metadata/soms/*.yaml) and emits the highest-
+# priority matching CONFIG_* per accelerator class.  Pure-SW
+# fallback is the floor and is always available.
+schema_version: 1
+library: tinygsm
+class: cellular
+upstream_source: "vshymanskyy/TinyGSM"
+accelerators:
+  - class: dma
+    priority:
+      - { backend: uart_dma, kconfig: CONFIG_ALP_TINYGSM_UART_DMA=y }
+sw_fallback:
+  required: true
+  kconfig: CONFIG_ALP_TINYGSM_SYNC_IO=y
+
+verification:
+  hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests: build_only

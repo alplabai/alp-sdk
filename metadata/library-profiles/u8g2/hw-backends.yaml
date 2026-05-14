@@ -1,0 +1,24 @@
+# Per-library hardware-accelerator binding for u8g2.
+# Loader: scripts/alp_project.py reads this against the active SoM
+# `capabilities:` block (metadata/soms/*.yaml) and emits the highest-
+# priority matching CONFIG_* per accelerator class.  Pure-SW
+# fallback is the floor and is always available.
+schema_version: 1
+library: u8g2
+class: graphics
+upstream_source: "github.com/olikraus/u8g2"
+accelerators:
+  - class: gpu_2d
+    priority:
+      - { soc_family: alif_ensemble, backend: dma2d, kconfig: CONFIG_ALP_U8G2_DMA2D=y }
+      - { soc_family: gd32_bridge, backend: tmu, kconfig: CONFIG_ALP_U8G2_TMU=y }
+  - class: dma
+    priority:
+      - { backend: spi_i2c_dma_push, kconfig: CONFIG_ALP_U8G2_BUS_DMA=y }
+sw_fallback:
+  required: true
+  kconfig: CONFIG_ALP_U8G2_SW_BLIT=y
+
+verification:
+  hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests: build_only

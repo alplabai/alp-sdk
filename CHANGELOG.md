@@ -84,6 +84,49 @@ that lands before the v0.3.0 tag.)
   needed correcting before downstream consumers caught the bad
   value.  `docs/abi/v0.5-snapshot.json` regenerated.
 
+### Added (2026-05-14 -- §D.lib: 17 library knobs + per-library hw-backends)
+
+Phase 2 of the chip-and-library ecosystem expansion per
+docs/superpowers/specs/2026-05-14-chip-and-library-ecosystem-design.md.
+
+17 new libraries available via `board.yaml`'s `libraries:` enum
+(was 8, now 25 -- on the v1.0 target).  Each library ships:
+- One `metadata/library-profiles/<name>/hw-backends.yaml` declaring
+  which accelerator classes (NPU / GPU / SIMD / DMA / crypto /
+  cordic / timing) it binds to per SoM family, with priority order
+  + matching `CONFIG_*` symbol.  Pure-SW fallback required + always
+  available.
+- An entry in `scripts/alp_project.py`'s `_LIBRARY_KCONFIG` table
+  that emits the SW-fallback `CONFIG_*` unconditionally.  The
+  cross-library loader hook (§D.lib.loader, next commit) layers
+  the HW-backend `CONFIG_*` on top by cross-referencing
+  `hw-backends.yaml` against the active SoM's `capabilities:`
+  block in `metadata/soms/*.yaml`.
+- An entry in `metadata/schemas/board-config-v1.schema.json`'s
+  `libraries:` enum so the schema validator accepts the new names.
+
+Libraries by domain (§D.lib.<batch> tag):
+- §D.lib.ai (3): `tflite_micro`, `u8g2`, `gfx_compat`
+- §D.lib.industrial (3): `madgwick_ahrs`, `pid`, `modbus`
+- §D.lib.iot (7): `coremqtt_sn`, `libcoap`, `tinygsm`, `nanopb`,
+  `libwebsockets`, `jsmn`, `bearssl`
+- §D.lib.audio (3): `minimp3`, `opus`, `libhelix`
+- §D.lib.test (1): `catch2`
+
+Verification: every hw-backends.yaml carries `verification:
+hil_silicon: untested / smoke_tests: build_only` -- the wiring is
+schema-validated but no per-(library × SoM-family) HiL bring-up
+has been run yet.
+
+`west.yml` pins for the libraries NOT already in Zephyr's modules
+tree (u8g2, libcoap, tinygsm, libwebsockets, jsmn, bearssl,
+minimp3, opus, libhelix, catch2, libmodbus, madgwick_ahrs,
+coremqtt_sn, gfx_compat) are NOT in this commit -- they land in
+a follow-up `feat(west): extras-tier1 group` once the maintainer
+picks the per-library tagged revisions.  Tier 1 libraries that
+ARE already in Zephyr's west.yml (`tflite_micro`, `nanopb`)
+flow through the existing name-allowlist filter.
+
 ### Added (2026-05-14 -- §D.audio: 6 audio chip drivers)
 
 Tier 1 ecosystem expansion -- Phase 1 §D.audio batch.  All headers

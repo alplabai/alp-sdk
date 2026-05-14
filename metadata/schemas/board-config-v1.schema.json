@@ -133,7 +133,24 @@
           "lvgl",
           "mbedtls",
           "cmsis_dsp",
-          "littlefs"
+          "littlefs",
+          "tflite_micro",
+          "u8g2",
+          "gfx_compat",
+          "madgwick_ahrs",
+          "pid",
+          "modbus",
+          "coremqtt_sn",
+          "libcoap",
+          "tinygsm",
+          "nanopb",
+          "libwebsockets",
+          "jsmn",
+          "bearssl",
+          "minimp3",
+          "opus",
+          "libhelix",
+          "catch2"
         ]
       }
     },

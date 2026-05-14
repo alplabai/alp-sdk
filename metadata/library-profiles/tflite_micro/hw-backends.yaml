@@ -1,0 +1,28 @@
+# Per-library hardware-accelerator binding for tflite_micro.
+# Loader: scripts/alp_project.py reads this against the active SoM
+# `capabilities:` block (metadata/soms/*.yaml) and emits the highest-
+# priority matching CONFIG_* per accelerator class.  Pure-SW
+# fallback is the floor and is always available.
+schema_version: 1
+library: tflite_micro
+class: ML inference
+upstream_source: "TensorFlow upstream (in Zephyr west.yml already)"
+accelerators:
+  - class: ml_npu
+    priority:
+      - { soc_family: alif_ensemble, backend: ethos_u, kconfig: CONFIG_ALP_TFLM_ETHOS_U=y }
+      - { soc_family: renesas_rzv2n, backend: drp_ai, kconfig: CONFIG_ALP_TFLM_DRP_AI=y }
+  - class: simd
+    priority:
+      - { soc_family: alif_ensemble, cpu: cortex_m55, backend: helium_mve, kconfig: CONFIG_ALP_TFLM_HELIUM=y }
+      - { soc_family: renesas_rzv2n, cpu: cortex_a55, backend: neon, kconfig: CONFIG_ALP_TFLM_NEON=y }
+  - class: dma
+    priority:
+      - { backend: tensor_dma_copy, kconfig: CONFIG_ALP_TFLM_DMA_COPY=y }
+sw_fallback:
+  required: true
+  kconfig: CONFIG_ALP_TFLM_REF_KERNELS=y
+
+verification:
+  hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests: build_only

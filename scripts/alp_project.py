@@ -527,6 +527,45 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
     "mbedtls":       ("CONFIG_MBEDTLS=y", "CONFIG_MBEDTLS_BUILTIN=y"),
     "cmsis_dsp":     ("CONFIG_CMSIS_DSP=y",),
     "littlefs":      ("CONFIG_FILE_SYSTEM_LITTLEFS=y", "CONFIG_FILE_SYSTEM=y"),
+
+    # v0.5 §D.lib batch -- 17 new libraries.  Per-library hardware-
+    # accelerator binding is declared in
+    # metadata/library-profiles/<name>/hw-backends.yaml and emitted
+    # by the §D.lib.loader hook (next commit).  The entries here just
+    # surface the per-library include-path + base-Kconfig hook so the
+    # consumer's `libraries: [...]` enumeration works end-to-end.
+    # SW-fallback CONFIG_* knobs are emitted unconditionally; the
+    # HW-backend CONFIG_* knobs come from the cross-reference loader.
+
+    # §D.lib.ai
+    "tflite_micro":   ("CONFIG_ALP_TFLM_REF_KERNELS=y",
+                       "# tflite_micro: include path + tflm_config.h via v0.4 loader hook",),
+    "u8g2":           ("CONFIG_ALP_U8G2_SW_BLIT=y",
+                       "# u8g2: include path + u8g2_config.h via v0.4 loader hook",),
+    "gfx_compat":     ("CONFIG_ALP_GFX_COMPAT_SW=y",
+                       "# gfx_compat: maintainer-shipped thin shim; no external dep",),
+
+    # §D.lib.industrial
+    "madgwick_ahrs":  ("CONFIG_ALP_MADGWICK_LIBM=y",),
+    "pid":            ("CONFIG_ALP_PID_INT_MATH=y",),
+    "modbus":         ("CONFIG_ALP_MODBUS_SYNC_IO=y",),
+
+    # §D.lib.iot
+    "coremqtt_sn":    ("CONFIG_ALP_MQTTSN_NO_TLS=y",),
+    "libcoap":        ("CONFIG_ALP_COAP_NO_TLS=y",),
+    "tinygsm":        ("CONFIG_ALP_TINYGSM_SYNC_IO=y",),
+    "nanopb":         ("CONFIG_ALP_NANOPB_SW=y",),
+    "libwebsockets":  ("CONFIG_ALP_LWS_NO_TLS=y",),
+    "jsmn":           ("CONFIG_ALP_JSMN_SW=y",),
+    "bearssl":        ("CONFIG_ALP_BEARSSL_PURE_C=y",),
+
+    # §D.lib.audio
+    "minimp3":        ("CONFIG_ALP_MINIMP3_PURE_C=y",),
+    "opus":           ("CONFIG_ALP_OPUS_PURE_C=y",),
+    "libhelix":       ("CONFIG_ALP_LIBHELIX_PURE_C=y",),
+
+    # §D.lib.test
+    "catch2":         ("CONFIG_ALP_CATCH2_SW=y",),
 }
 
 

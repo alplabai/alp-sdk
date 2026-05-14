@@ -1,0 +1,24 @@
+# Per-library hardware-accelerator binding for gfx_compat.
+# Loader: scripts/alp_project.py reads this against the active SoM
+# `capabilities:` block (metadata/soms/*.yaml) and emits the highest-
+# priority matching CONFIG_* per accelerator class.  Pure-SW
+# fallback is the floor and is always available.
+schema_version: 1
+library: gfx_compat
+class: graphics
+upstream_source: "maintainer-written thin shim"
+accelerators:
+  - class: gpu_2d
+    priority:
+      - { soc_family: alif_ensemble, backend: gpu2d, kconfig: CONFIG_ALP_GFX_COMPAT_GPU2D=y }
+      - { backend: dma2d, kconfig: CONFIG_ALP_GFX_COMPAT_DMA2D=y }
+  - class: dma
+    priority:
+      - { backend: spi_dma, kconfig: CONFIG_ALP_GFX_COMPAT_SPI_DMA=y }
+sw_fallback:
+  required: true
+  kconfig: CONFIG_ALP_GFX_COMPAT_SW=y
+
+verification:
+  hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests: build_only
