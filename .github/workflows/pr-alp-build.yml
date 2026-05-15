@@ -1,0 +1,226 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Heterogeneous orchestrator gate -- `west alp-build` across the
+# SoM x scenario matrix.  Per the v0.6 heterogeneous-OS design at
+# docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
+# (§7 Phase 5 + §11 acceptance), this workflow verifies:
+#
+#   1. The orchestrator fans out per-core slices for every supported
+#      SoM (E1M-V2N101, E1M-AEN701, E1M-NX9101).
+#   2. `build/system-manifest.yaml` lands with per-slice entries
+#      (per §5.2 fan-out + §6.1 carve-out resolution).
+#   3. The manifest is *byte-stable* across rebuilds -- the spec's
+#      §6.1 "Determinism" clause requires re-running the build to
+#      produce identical layouts so CI can diff.
+#
+# CAVEAT: the `west alp-build` command + `board-config-v2.schema.json`
+# this workflow consumes don't exist yet -- they land in Phase 2 + 1
+# respectively.  Until then every leg fails at step (d).  That's
+# intentional; the workflow's YAML structure ships now so Phase 2's
+# PR can flip these legs green without touching CI.
+#
+# v0.6 examples referenced below (`examples/rpmsg-<som-short>/`,
+# `examples/iot-connected-camera/`, `examples/gpio-button-led/`)
+# may not all exist yet; per-leg `hashFiles()` guards auto-skip
+# missing cells so partial Phase 4 progress doesn't break the
+# whole matrix.
+
+name: pr-alp-build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'metadata/**'
+      - 'scripts/**'
+      - 'examples/**/board.yaml'
+      - 'src/**'
+      - '.github/workflows/pr-alp-build.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'metadata/**'
+      - 'scripts/**'
+      - 'examples/**/board.yaml'
+      - 'src/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  alp-build:
+    name: alp-build · ${{ matrix.som }} · ${{ matrix.scenario }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      # Partial failures should surface every broken cell at once
+      # rather than masking later legs behind an early `set -e` exit.
+      fail-fast: false
+      matrix:
+        som:
+          - E1M-V2N101
+          - E1M-AEN701
+          - E1M-NX9101
+        scenario:
+          - heterogeneous-default
+          - zephyr-only-slice
+          - yocto-only-slice
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v4
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      # Mirror pr-metadata-validate.yml's Python setup -- same
+      # toolchain version pin keeps the orchestrator behaviour
+      # consistent across the metadata gate + this gate.
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: pip install jsonschema pyyaml
+
+      # `yq` parses the system-manifest.  Pin to the mikefarah Go
+      # build (apt's `yq` is the Python wrapper around jq and has a
+      # different CLI surface).
+      - name: Install yq (mikefarah)
+        run: |
+          sudo wget -qO /usr/local/bin/yq \
+              https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      # Mirror pr-twister.yml's workspace pattern: Zephyr workspace
+      # lives next to alp-sdk via scripts/bootstrap.sh.  The script
+      # is idempotent + skips work that's already done, so re-runs
+      # on the same cache hit are cheap.
+      - name: Bootstrap Zephyr workspace
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: bash scripts/bootstrap.sh
+
+      # Pick the representative board.yaml per (SoM, scenario) cell.
+      # The exact example path depends on Phase 4 example migration
+      # -- the `hashFiles()` guard on subsequent steps auto-skips
+      # legs where the chosen example doesn't exist yet.
+      #
+      # Naming convention:
+      #   heterogeneous-default -> examples/rpmsg-<som-short>/board.yaml
+      #   zephyr-only-slice     -> examples/gpio-button-led/board.yaml
+      #   yocto-only-slice      -> examples/iot-connected-camera/board.yaml
+      - name: Resolve example path for this matrix cell
+        id: pick
+        run: |
+          set -euo pipefail
+          som="${{ matrix.som }}"
+          scenario="${{ matrix.scenario }}"
+          # Strip the E1M- prefix and any -101/-701/-9101 suffix
+          # to get the short form for the rpmsg-* example naming.
+          case "${som}" in
+            E1M-V2N101)  som_short="v2n"  ;;
+            E1M-AEN701)  som_short="aen"  ;;
+            E1M-NX9101)  som_short="imx93" ;;
+            *)           som_short="unknown" ;;
+          esac
+          case "${scenario}" in
+            heterogeneous-default)
+              example_path="examples/rpmsg-${som_short}"
+              ;;
+            zephyr-only-slice)
+              example_path="examples/gpio-button-led"
+              ;;
+            yocto-only-slice)
+              example_path="examples/iot-connected-camera"
+              ;;
+          esac
+          echo "example_path=${example_path}" >> "$GITHUB_OUTPUT"
+          echo "board_yaml=${example_path}/board.yaml" >> "$GITHUB_OUTPUT"
+          echo "Selected example: ${example_path}"
+
+      - name: Skip leg if example not migrated yet (Phase 4 gate)
+        id: gate
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          if [ -f "${{ steps.pick.outputs.board_yaml }}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::${{ steps.pick.outputs.board_yaml }} not present in tree yet -- leg auto-skipped pending Phase 4."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ----- Steps below run only when the example exists ---------
+
+      - name: west alp-build (primary verification)
+        if: steps.gate.outputs.present == 'true'
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+        run: |
+          set -euo pipefail
+          west alp-build "${{ steps.pick.outputs.example_path }}"
+
+      - name: Assert system-manifest.yaml exists + has per-slice entries
+        if: steps.gate.outputs.present == 'true'
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          manifest="${{ steps.pick.outputs.example_path }}/build/system-manifest.yaml"
+          test -s "${manifest}" || {
+            echo "::error::system-manifest.yaml missing or empty at ${manifest}"
+            exit 1
+          }
+          echo "--- system-manifest.yaml ---"
+          cat "${manifest}"
+          # Per §5.2 fan-out, the manifest must carry a `slices:`
+          # block with at least one entry.  `yq` returns null (not
+          # an empty list) if the key is absent -- guard both cases.
+          slice_count=$(yq '.slices | length // 0' "${manifest}")
+          if [ "${slice_count}" -lt 1 ]; then
+            echo "::error::system-manifest.yaml has no slices[] entries (got ${slice_count})"
+            exit 1
+          fi
+          echo "Manifest declares ${slice_count} slice(s)."
+
+      # Determinism check per §6.1 -- re-run the build into a
+      # separate output dir and diff the two manifests.  Any byte
+      # delta fails the gate (timestamps, sort-order drift, etc.).
+      - name: Determinism check (rebuild + diff system-manifest.yaml)
+        if: steps.gate.outputs.present == 'true'
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+        run: |
+          set -euo pipefail
+          manifest_a="${{ steps.pick.outputs.example_path }}/build/system-manifest.yaml"
+          # Snapshot the first manifest before the rebuild clobbers
+          # the file.
+          cp "${manifest_a}" /tmp/system-manifest-run-a.yaml
+          # Tear down + rebuild from scratch.  The spec requires
+          # byte-stable output across re-runs regardless of build
+          # dir state.
+          west alp-clean "${{ steps.pick.outputs.example_path }}" || true
+          west alp-build "${{ steps.pick.outputs.example_path }}"
+          cp "${manifest_a}" /tmp/system-manifest-run-b.yaml
+          if ! diff -u /tmp/system-manifest-run-a.yaml /tmp/system-manifest-run-b.yaml; then
+            echo "::error::system-manifest.yaml is NOT byte-stable across rebuilds (spec §6.1 violation)"
+            exit 1
+          fi
+          echo "Manifest is byte-stable across rebuilds."
+
+      - name: Upload system-manifest artefact
+        if: always() && steps.gate.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-manifest-${{ matrix.som }}-${{ matrix.scenario }}
+          path: ${{ github.workspace }}/alp-sdk/${{ steps.pick.outputs.example_path }}/build/system-manifest.yaml
+          retention-days: 14
+          if-no-files-found: ignore

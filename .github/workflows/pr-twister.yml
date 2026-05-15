@@ -91,6 +91,24 @@ jobs:
           find "$GITHUB_WORKSPACE/alp-sdk/tests" "$GITHUB_WORKSPACE/alp-sdk/examples" \
               -name "testcase.yaml" -o -name "sample.yaml" || true
 
+      # ---------------------------------------------------------------
+      # v0.6 heterogeneous-orchestrator note (per
+      # docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
+      # §5.6 + §7 Phase 5):
+      #
+      # In v0.6 the orchestrator (`scripts/alp_orchestrate.py`) fans
+      # board.yaml out into per-core slices.  For Zephyr-only slices
+      # the orchestrator routes through twister via the new emit
+      # mode `alp_project.py --emit zephyr-conf --core <id>`.  Twister
+      # itself stays the fast lane for pure-Zephyr coverage (no
+      # bitbake spin-up, no Renode boot) and remains the
+      # native_sim/native/64 gate for every PR.
+      #
+      # The orchestrator-side integration (calling twister with a
+      # per-core conf fragment) lands in Phase 2 -- this workflow's
+      # invocation below is intentionally unchanged for v0.6 so
+      # twister coverage stays stable while Phase 2 is in flight.
+      # ---------------------------------------------------------------
       - name: twister · run tests + examples on native_sim/native/64
         working-directory: ${{ github.workspace }}/zephyrproject
         env:

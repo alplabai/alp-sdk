@@ -24,7 +24,7 @@ application developers a single C/C++ API that works across every
 E1M-* SoM variant — present and future — by wrapping each vendor's
 SDK on top of ARM CMSIS.
 
-Supported OS targets: **Bare-metal · Zephyr RTOS · Yocto Linux**.
+Supported runtime topologies: **single-OS** (Zephyr / Yocto / bare-metal on a single core) and **heterogeneous** (Zephyr + Yocto + bare-metal coexisting on the same SoM, one declarative project).
 
 **Where to go next:** rendered docs at
 [**docs.alplab.ai/sdk/introduction**](https://docs.alplab.ai/sdk/introduction)
@@ -78,37 +78,72 @@ indexes the common ones with fixes.
 
 ## 30-second quick start
 
-A v0.3 project is **one declarative file** plus an empty `prj.conf`.
-Drop a `board.yaml` at your app root:
+A v0.6 project is **one declarative file** plus per-core app
+directories.  Drop a `board.yaml` at your app root:
 
 ```yaml
-schema_version: 1
+schema_version: 2
 
 som:
-  sku: E1M-AEN701      # your MPN -- the SDK ships a preset for every released MPN
+  sku: E1M-V2N101      # your MPN -- the SDK ships a preset for every released MPN
+  hw_rev: r1
 
 carrier:
-  name: E1M-EVK        # or your own custom carrier
+  name: E1M-X-EVK      # or your own custom carrier
 
-os: zephyr             # zephyr | yocto | baremetal
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+    peripherals: [ethernet, usb, emmc]
+    libraries:   [mbedtls, nlohmann_json]
+    iot:         { wifi: true, mqtt: true }
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    peripherals: [adc, pwm, i2c, gpio]
+    libraries:   [cmsis_dsp]
+    inference:   { backend: cpu }
 
-peripherals:           # what your app actually uses
-  - i2c
-  - pwm
+ipc:
+  - kind: rpmsg
+    endpoints: [a55_cluster, m33_sm]
+    carve_out_kb: 512
+    name: alp_default_rpmsg
 
 diagnostics:
   log_level: info
 ```
 
-The build picks it up automatically — `scripts/alp_project.py`
-emits `build/generated/alp.conf` at CMake-configure time and Zephyr
-layers it on top of `prj.conf` via `OVERLAY_CONFIG`.  Every block
-above except `schema_version` / `som` / `carrier` / `os` is optional;
+Each entry under `cores:` maps one on-die programmable core to a
+runtime (`yocto`, `zephyr`, `baremetal`, or `off`) plus its app
+slice.  The loader (`scripts/alp_project.py`) fans out per-core:
+each Zephyr slice gets a Kconfig fragment layered onto its own
+`prj.conf` via `OVERLAY_CONFIG`; each Yocto slice gets a
+`local.conf` snippet consumed by bitbake.  Inside each
+`cores.<id>` block every field except `os:` + `app:` is optional;
 the [`gpio-button-led` example](examples/gpio-button-led/) for
 instance skips `peripherals:` entirely and uses
 `carrier.populated.button_led: true` to pull the chip driver in.
 See [`docs/board-config.md`](docs/board-config.md) for the full
-schema reference.
+schema reference and
+[`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md) for
+the dual-app project walk-through.
+
+### What runs where
+
+| SoM family | A-class cores | M-class cores | Heterogeneous? |
+|---|---|---|---|
+| E1M-AEN E3/E4 | — | M55-HP, M55-HE (both Zephyr) | No — RTOS-only silicon |
+| E1M-AEN E5..E8 | A32 cluster (Yocto) | M55-HP, M55-HE (Zephyr) | Yes |
+| E1M-X V2N / V2N-M1 | A55 cluster (Yocto) | M33-SM (Zephyr) | Yes |
+| E1M-N93 (iMX93) | A55 cluster (Yocto) | M33 (Zephyr) | Yes |
+
+A bare `som: { sku: <MPN> }` produces a working dual-image build
+for every heterogeneous SoM — the per-core OS defaults come from
+the SoM preset's `topology:` block.  Customers override on a
+per-core basis via the project's `cores:` block.
 
 Want a GUI?  Install the [VS Code extension](https://github.com/alplabai/alp-sdk-vscode) — schema-aware
 editing, a configurator panel with dropdowns for every released MPN
@@ -135,6 +170,8 @@ landed; runtime implementations fill in across point releases.  Code
 merged ≠ verified — every claim is tracked in
 [`docs/test-plan.md`](docs/test-plan.md), and a release does not tag
 until its gating rows flip to ✅.
+
+v0.6 redesigns the OS model — see ADR 0010 + `docs/heterogeneous-builds.md`.
 
 - Roadmap: [`VERSIONS.md`](VERSIONS.md).
 - What changed when: [`CHANGELOG.md`](CHANGELOG.md).
@@ -191,7 +228,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 
 ### OS backend
 
-Bare-metal · Yocto · Zephyr.  Selected by `os:` in `board.yaml`.
+Bare-metal · Yocto · Zephyr.  Selected per-core in `board.yaml`'s `cores:` block.
 
 ### Vendor SDK
 
