@@ -1,7 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
+#
+# Lives under m33_sm/ (not the project root) because rpmsg-v2n is a
+# multi-slice project: the parent directory carries the orchestrator's
+# board.yaml + linux/ Yocto consumer + this m33_sm/ Zephyr app.  Only
+# the m33_sm/ tree is a self-contained Zephyr app twister can build,
+# so the testcase has to sit next to its CMakeLists.txt — otherwise
+# twister picks up the parent directory and tries to configure the
+# multi-slice marker as a Zephyr app (no prj.conf, no Zephyr CMake).
 
 sample:
-  name: rpmsg-v2n
+  name: rpmsg-v2n-m33_sm
   description: |
     Heterogeneous-compute flagship: Yocto Linux on the V2N's
     Cortex-A55 cluster + Zephyr on the same SoC's Cortex-M33-SM,
@@ -23,6 +31,9 @@ tests:
       - heterogeneous
       - rpmsg
     build_only: true
+    # CONFIG_ALP_SDK_RPC=y -- enables <alp/rpc.h> which the producer
+    # uses to publish samples; matches the comment in m33_sm/prj.conf.
+    extra_args: CONFIG_ALP_SDK_RPC=y
     harness: console
     harness_config:
       type: one_line
