@@ -187,20 +187,32 @@ For each `ipc:` entry, `west alp-build` emits a header both halves
 `#include`:
 
 ```c
-/* build/generated/alp_system_ipc.h — auto-generated, do not edit */
-#define ALP_IPC_DEFAULT_RPMSG_NAME       "alp_default_rpmsg"
-#define ALP_IPC_DEFAULT_RPMSG_ADDR       0x10078000u
-#define ALP_IPC_DEFAULT_RPMSG_SIZE       0x00080000u
-#define ALP_IPC_DEFAULT_RPMSG_SRC_EPT    0x00000401u
-#define ALP_IPC_DEFAULT_RPMSG_DST_EPT    0x00000402u
-#define ALP_IPC_DEFAULT_RPMSG_MBOX_CH    0u
+/* build/generated/alp/system_ipc.h — auto-generated, do not edit */
+#define ALP_IPC_ALP_DEFAULT_RPMSG_NAME       "alp_default_rpmsg"
+#define ALP_IPC_ALP_DEFAULT_RPMSG_ADDR       0x00010000u
+#define ALP_IPC_ALP_DEFAULT_RPMSG_SIZE       0x00080000u
+#define ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT    0x000004e6u
+#define ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT    0x000004e7u
+#define ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH    0u
 ```
 
-Both `linux/src/main.c` and `m33_sm/src/main.c` `#include
-<alp/system_ipc.h>` and use the same constants.  Endpoint IDs are
-derived from `name` deterministically — re-running the build produces
-byte-identical headers.  Drift between the Linux DT and the Zephyr
-overlay becomes impossible.
+The macro stem is the channel `name:` upper-cased (so `alp_default_rpmsg`
+→ `ALP_IPC_ALP_DEFAULT_RPMSG_*`).  Both `linux/src/main.c` and
+`m33_sm/src/main.c` `#include <alp/system_ipc.h>` and use the same
+constants.  Endpoint IDs are derived from `name` deterministically via
+FNV-1a — re-running the build produces byte-identical headers.  Drift
+between the Linux DT and the Zephyr overlay becomes impossible.
+
+**Blocked carve-outs.**  When a SoM preset still carries TBD
+`mailbox.controller` or TBD `memory_map.base` / `size` (the common
+case while the SoM is being HW-mapped), the orchestrator emits the
+manifest entry as `status: blocked` + `reason: ...` instead of
+aborting.  The generated `<alp/system_ipc.h>` carries an `#error`
+directive for the blocked channel so the slice build trips at compile
+time — but `--emit system-manifest` succeeds, which keeps the CI
+manifest-shape gate green while the preset metadata is in flight.
+Fill in the missing values in `metadata/e1m_modules/<sku>.yaml` to
+unblock.
 
 ## 6. Building
 
@@ -236,11 +248,23 @@ build/
 ├── helper-cc3501e/
 │   └── cc3501e_otp.blob
 ├── generated/
-│   ├── alp_system_ipc.h
+│   ├── alp/system_ipc.h           (matches the `<alp/system_ipc.h>` include)
 │   ├── dts-reservations.dtsi
 │   └── alp_hw_info_build.h
 └── system-manifest.yaml
 ```
+
+The `generated/` directory ends up on each slice's include path, so
+`#include <alp/system_ipc.h>` resolves from either the Yocto recipe
+or the Zephyr CMakeLists.
+
+**Manifest determinism.**  `system-manifest.yaml` is byte-stable
+across rebuilds — re-running `west alp-build` after `west alp-clean`
+yields an identical manifest, which `pr-alp-build.yml` enforces.
+Wall-clock fields (per-slice `duration_s`) live on the runtime Slice
+dataclass but never land in the manifest; the cache state in
+`build/.alp-build-state.json` is internal and not part of the
+declarative output either.
 
 ### Iterating on one slice
 
@@ -331,9 +355,10 @@ endpoint IDs, or mailbox channels by hand.
 
 int main(void) {
     alp_rpc_channel_t *ch = alp_rpc_open(&(alp_rpc_config_t){
-        .name      = ALP_IPC_DEFAULT_RPMSG_NAME,
-        .src_ept   = ALP_IPC_DEFAULT_RPMSG_SRC_EPT,
-        .dst_ept   = ALP_IPC_DEFAULT_RPMSG_DST_EPT,
+        .name      = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
+        .src_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
+        .dst_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
+        .mbox_ch   = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
     });
     if (ch == NULL) {
         return -1;  /* alp_last_error() reports why */
@@ -365,9 +390,10 @@ static void on_temperature(const void *buf, size_t len, void *user) {
 
 int main(void) {
     alp_rpc_channel_t *ch = alp_rpc_open(&(alp_rpc_config_t){
-        .name      = ALP_IPC_DEFAULT_RPMSG_NAME,
-        .src_ept   = ALP_IPC_DEFAULT_RPMSG_DST_EPT,  /* swap src/dst */
-        .dst_ept   = ALP_IPC_DEFAULT_RPMSG_SRC_EPT,
+        .name      = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
+        .src_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,  /* swap src/dst */
+        .dst_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
+        .mbox_ch   = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
     });
 
     alp_rpc_subscribe(ch, "temperature", on_temperature, NULL);
@@ -379,8 +405,8 @@ int main(void) {
 Both sides `#include` the same generated header, so endpoint IDs match
 by construction.  The producer's `src_ept` is the consumer's `dst_ept`
 and vice versa — that symmetry is the only piece a developer keeps
-straight.  For multiple channels, declare multiple `ipc:` entries with
-distinct `name:` values.
+straight.  `mbox_ch` is the same on both sides.  For multiple
+channels, declare multiple `ipc:` entries with distinct `name:` values.
 
 ## 10. Common pitfalls
 

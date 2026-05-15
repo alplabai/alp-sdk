@@ -372,7 +372,7 @@ manifest:
   projects:
     - name: alp-sdk
       url: https://github.com/alplabai/alp-sdk
-      revision: v0.1.0
+      revision: main        # pin to a tag (v0.6.0, etc.) once released; v0.6 is pre-release
       path: modules/lib/alp-sdk
 ```
 
@@ -403,10 +403,10 @@ cmake -B build -DALP_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 
-# Zephyr (E1M-AEN, after the v0.1 implementation lands)
-west init -m https://github.com/alplabai/alp-sdk --mr v0.1.0 alp-ws
+# Zephyr (heterogeneous slice, v0.6 pre-release flow)
+west init -m https://github.com/alplabai/alp-sdk --mr main alp-ws
 cd alp-ws && west update
-west build -b alif_e7_dk_rtss_he tests/zephyr/peripheral
+west alp-build examples/rpmsg-v2n
 ```
 
 ## Repository layout

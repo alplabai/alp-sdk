@@ -64,8 +64,9 @@ alp-sdk/
 │   ├── display.h
 │   ├── camera.h
 │   ├── gui.h                        # LVGL re-export with ALP defaults
-│   ├── math.h                       # CMSIS-DSP re-export
-│   ├── signal.h
+│   ├── dsp.h                        # composable DSP pipeline (FFT / FAC / filters)
+│   ├── rpc.h                        # framed RPMsg surface; opens with <alp/system_ipc.h>
+│   ├── inference.h                  # TFLM / Ethos-U / DRP-AI / DEEPX dispatcher
 │   └── iot.h
 ├── src/
 │   ├── common/                      # OS-agnostic helpers (bit ops, ring buffers, status->str)
