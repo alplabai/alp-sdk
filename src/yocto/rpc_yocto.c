@@ -109,37 +109,37 @@ struct alp_rpc_sub {
 };
 
 struct alp_rpc_channel {
-    bool                in_use;
-    char                name[ALP_RPC_METHOD_MAX_LEN];
-    uint32_t            src_ept;
-    uint32_t            dst_ept;
-    uint32_t            mbox_ch;
-    bool                cacheable;
+    bool               in_use;
+    char               name[ALP_RPC_METHOD_MAX_LEN];
+    uint32_t           src_ept;
+    uint32_t           dst_ept;
+    uint32_t           mbox_ch;
+    bool               cacheable;
 
-    int                 ept_fd;            /* /dev/rpmsgN */
-    int                 ctrl_fd;           /* /dev/rpmsg_ctrlN (kept for close) */
+    int                ept_fd;  /* /dev/rpmsgN */
+    int                ctrl_fd; /* /dev/rpmsg_ctrlN (kept for close) */
 
-    pthread_t           rx_thread;
-    atomic_int          rx_run;
-    int                 rx_wake_pipe[2];   /* close-side notification */
+    pthread_t          rx_thread;
+    atomic_int         rx_run;
+    int                rx_wake_pipe[2]; /* close-side notification */
 
-    pthread_mutex_t     tx_mutex;
-    pthread_mutex_t     sub_mutex;
-    struct alp_rpc_sub  subs[ALP_RPC_SUBS_PER_CHANNEL];
+    pthread_mutex_t    tx_mutex;
+    pthread_mutex_t    sub_mutex;
+    struct alp_rpc_sub subs[ALP_RPC_SUBS_PER_CHANNEL];
 
-    uint8_t             tx_scratch[ALP_RPC_TX_FRAME_MAX];
+    uint8_t            tx_scratch[ALP_RPC_TX_FRAME_MAX];
 
     /* Synchronous-call slot.  Single-element by design -- tx_mutex
      * serialises alp_rpc_call invocations on this channel so only one
      * response can ever be in flight here. */
-    pthread_mutex_t     call_mutex;
-    pthread_cond_t      call_cond;
-    char                call_method[ALP_RPC_METHOD_MAX_LEN];
-    void               *call_resp_buf;
-    size_t              call_resp_cap;
-    size_t              call_resp_len;   /* actual response size on the wire */
-    alp_status_t        call_result;
-    bool                call_pending;
+    pthread_mutex_t call_mutex;
+    pthread_cond_t  call_cond;
+    char            call_method[ALP_RPC_METHOD_MAX_LEN];
+    void           *call_resp_buf;
+    size_t          call_resp_cap;
+    size_t          call_resp_len; /* actual response size on the wire */
+    alp_status_t    call_result;
+    bool            call_pending;
 };
 
 static struct alp_rpc_channel g_rpc_pool[ALP_RPC_MAX_CHANNELS];
@@ -168,9 +168,8 @@ static bool method_valid(const char *m)
     return n < ALP_RPC_METHOD_MAX_LEN;
 }
 
-static int frame_build(uint8_t *out, size_t cap,
-                       const char *method,
-                       const void *payload, size_t payload_len)
+static int frame_build(uint8_t *out, size_t cap, const char *method, const void *payload,
+                       size_t payload_len)
 {
     size_t method_len = strnlen(method, ALP_RPC_METHOD_MAX_LEN);
     if (method_len == ALP_RPC_METHOD_MAX_LEN) {
@@ -188,16 +187,15 @@ static int frame_build(uint8_t *out, size_t cap,
     return (int)total;
 }
 
-static const char *frame_parse(const void *data, size_t len,
-                               const void **payload_out,
+static const char *frame_parse(const void *data, size_t len, const void **payload_out,
                                size_t *payload_len_out)
 {
     if (data == NULL || len == 0) {
         return NULL;
     }
-    const char *bytes = (const char *)data;
-    size_t cap = len < ALP_RPC_METHOD_MAX_LEN ? len : ALP_RPC_METHOD_MAX_LEN;
-    size_t method_len = 0;
+    const char *bytes      = (const char *)data;
+    size_t      cap        = len < ALP_RPC_METHOD_MAX_LEN ? len : ALP_RPC_METHOD_MAX_LEN;
+    size_t      method_len = 0;
     while (method_len < cap && bytes[method_len] != '\0') {
         method_len++;
     }
@@ -235,11 +233,11 @@ static void rpc_pool_release(struct alp_rpc_channel *ch)
 static void *rpc_rx_main(void *arg)
 {
     struct alp_rpc_channel *ch = (struct alp_rpc_channel *)arg;
-    uint8_t buf[ALP_RPC_TX_FRAME_MAX];
+    uint8_t                 buf[ALP_RPC_TX_FRAME_MAX];
 
-    struct pollfd fds[2] = {
-        { .fd = ch->ept_fd,           .events = POLLIN },
-        { .fd = ch->rx_wake_pipe[0],  .events = POLLIN },
+    struct pollfd           fds[2] = {
+                  { .fd = ch->ept_fd, .events = POLLIN },
+                  { .fd = ch->rx_wake_pipe[0], .events = POLLIN },
     };
 
     while (atomic_load(&ch->rx_run)) {
@@ -249,7 +247,7 @@ static void *rpc_rx_main(void *arg)
             break;
         }
         if (fds[1].revents & POLLIN) {
-            break;  /* close-side notification */
+            break; /* close-side notification */
         }
         if (!(fds[0].revents & POLLIN)) {
             continue;
@@ -263,10 +261,9 @@ static void *rpc_rx_main(void *arg)
 
         const void *payload     = NULL;
         size_t      payload_len = 0;
-        const char *method      = frame_parse(buf, (size_t)n,
-                                              &payload, &payload_len);
+        const char *method      = frame_parse(buf, (size_t)n, &payload, &payload_len);
         if (method == NULL) {
-            continue;  /* malformed; drop silently */
+            continue; /* malformed; drop silently */
         }
 
         /* Synchronous-call path: a pending alp_rpc_call wakes the caller
@@ -276,20 +273,18 @@ static void *rpc_rx_main(void *arg)
          * routing decision. */
         pthread_mutex_lock(&ch->call_mutex);
         bool consumed_by_call = false;
-        if (ch->call_pending &&
-            strncmp(method, ch->call_method, ALP_RPC_METHOD_MAX_LEN) == 0) {
+        if (ch->call_pending && strncmp(method, ch->call_method, ALP_RPC_METHOD_MAX_LEN) == 0) {
             if (ch->call_resp_buf != NULL && ch->call_resp_cap > 0) {
-                size_t copy_n = payload_len <= ch->call_resp_cap
-                                ? payload_len : ch->call_resp_cap;
+                size_t copy_n = payload_len <= ch->call_resp_cap ? payload_len : ch->call_resp_cap;
                 memcpy(ch->call_resp_buf, payload, copy_n);
             }
             ch->call_resp_len = payload_len;
-            ch->call_result   = (payload_len > ch->call_resp_cap &&
-                                 ch->call_resp_buf != NULL)
-                                ? ALP_ERR_NOMEM : ALP_OK;
+            ch->call_result   = (payload_len > ch->call_resp_cap && ch->call_resp_buf != NULL)
+                                    ? ALP_ERR_NOMEM
+                                    : ALP_OK;
             ch->call_pending  = false;
             pthread_cond_signal(&ch->call_cond);
-            consumed_by_call  = true;
+            consumed_by_call = true;
         }
         pthread_mutex_unlock(&ch->call_mutex);
 
@@ -313,8 +308,8 @@ static void *rpc_rx_main(void *arg)
         /* Snapshot cb + user under the lock so we can release before
          * invoking the callback (avoids deadlock if the cb subscribes
          * to a different method). */
-        alp_rpc_method_cb_t cb = match ? match->cb : NULL;
-        void *user             = match ? match->user : NULL;
+        alp_rpc_method_cb_t cb   = match ? match->cb : NULL;
+        void               *user = match ? match->user : NULL;
         pthread_mutex_unlock(&ch->sub_mutex);
         if (cb != NULL) {
             cb(payload, payload_len, user);
@@ -358,9 +353,7 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
     }
 
     strncpy(ch->name, cfg->name, sizeof(ch->name) - 1);
-    ch->src_ept   = cfg->src_ept != 0u
-                    ? cfg->src_ept
-                    : (0x400u | (fnv1a_32(cfg->name) & 0x0FFu));
+    ch->src_ept   = cfg->src_ept != 0u ? cfg->src_ept : (0x400u | (fnv1a_32(cfg->name) & 0x0FFu));
     ch->dst_ept   = cfg->dst_ept != 0u ? cfg->dst_ept : ch->src_ept + 1u;
     ch->mbox_ch   = cfg->mbox_ch != 0u ? cfg->mbox_ch : ALP_RPC_DEFAULT_MBOX_CH;
     ch->cacheable = cfg->cacheable;
@@ -369,17 +362,16 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
     pthread_mutex_init(&ch->sub_mutex, NULL);
     pthread_mutex_init(&ch->call_mutex, NULL);
     pthread_cond_init(&ch->call_cond, NULL);
-    ch->call_pending = false;
-    ch->ept_fd  = -1;
-    ch->ctrl_fd = -1;
+    ch->call_pending    = false;
+    ch->ept_fd          = -1;
+    ch->ctrl_fd         = -1;
     ch->rx_wake_pipe[0] = -1;
     ch->rx_wake_pipe[1] = -1;
 
     /* Open the control device + create our endpoint via ioctl. */
     ch->ctrl_fd = open(rpmsg_ctrl_path(), O_RDWR);
     if (ch->ctrl_fd < 0) {
-        fprintf(stderr, "alp_rpc: open(%s) failed: %s\n",
-                rpmsg_ctrl_path(), strerror(errno));
+        fprintf(stderr, "alp_rpc: open(%s) failed: %s\n", rpmsg_ctrl_path(), strerror(errno));
         rpc_pool_release(ch);
         return NULL;
     }
@@ -391,8 +383,8 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
     eptinfo.dst = ch->dst_ept;
 
     if (ioctl(ch->ctrl_fd, RPMSG_CREATE_EPT_IOCTL, &eptinfo) < 0) {
-        fprintf(stderr, "alp_rpc: RPMSG_CREATE_EPT_IOCTL(%s) failed: %s\n",
-                ch->name, strerror(errno));
+        fprintf(stderr, "alp_rpc: RPMSG_CREATE_EPT_IOCTL(%s) failed: %s\n", ch->name,
+                strerror(errno));
         close(ch->ctrl_fd);
         rpc_pool_release(ch);
         return NULL;
@@ -408,10 +400,9 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
      * ALP_RPMSG_EPT_DEV. */
     const char *ept_path_env = getenv("ALP_RPMSG_EPT_DEV");
     const char *ept_path     = ept_path_env ? ept_path_env : "/dev/rpmsg0";
-    ch->ept_fd = open(ept_path, O_RDWR | O_NONBLOCK);
+    ch->ept_fd               = open(ept_path, O_RDWR | O_NONBLOCK);
     if (ch->ept_fd < 0) {
-        fprintf(stderr, "alp_rpc: open(%s) failed: %s\n",
-                ept_path, strerror(errno));
+        fprintf(stderr, "alp_rpc: open(%s) failed: %s\n", ept_path, strerror(errno));
         close(ch->ctrl_fd);
         rpc_pool_release(ch);
         return NULL;
@@ -451,9 +442,9 @@ void alp_rpc_close(alp_rpc_channel_t *ch)
      * caller that is about to enter pthread_cond_timedwait. */
     pthread_mutex_lock(&ch->call_mutex);
     if (ch->call_pending) {
-        ch->call_result  = ALP_ERR_NOT_READY;
+        ch->call_result   = ALP_ERR_NOT_READY;
         ch->call_resp_len = 0;
-        ch->call_pending = false;
+        ch->call_pending  = false;
         pthread_cond_broadcast(&ch->call_cond);
     }
     pthread_mutex_unlock(&ch->call_mutex);
@@ -468,7 +459,7 @@ void alp_rpc_close(alp_rpc_channel_t *ch)
 
     if (ch->rx_wake_pipe[0] >= 0) close(ch->rx_wake_pipe[0]);
     if (ch->rx_wake_pipe[1] >= 0) close(ch->rx_wake_pipe[1]);
-    if (ch->ept_fd >= 0)  close(ch->ept_fd);
+    if (ch->ept_fd >= 0) close(ch->ept_fd);
     if (ch->ctrl_fd >= 0) close(ch->ctrl_fd);
 
     pthread_mutex_destroy(&ch->tx_mutex);
@@ -478,11 +469,11 @@ void alp_rpc_close(alp_rpc_channel_t *ch)
     rpc_pool_release(ch);
 }
 
-alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method,
-                               alp_rpc_method_cb_t cb, void *user)
+alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb,
+                               void *user)
 {
     if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
-    if (!method_valid(method))     return ALP_ERR_INVAL;
+    if (!method_valid(method)) return ALP_ERR_INVAL;
     if (cb == NULL) {
         return alp_rpc_unsubscribe(ch, method);
     }
@@ -502,7 +493,7 @@ alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method,
     if (slot == NULL) {
         for (size_t i = 0; i < ALP_RPC_SUBS_PER_CHANNEL; ++i) {
             if (ch->subs[i].cb == NULL) {
-                slot = &ch->subs[i];
+                slot              = &ch->subs[i];
                 slot->method_hash = h;
                 strncpy(slot->method, method, sizeof(slot->method) - 1);
                 slot->method[sizeof(slot->method) - 1] = '\0';
@@ -516,7 +507,7 @@ alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method,
     } else {
         slot->cb   = cb;
         slot->user = user;
-        rc = ALP_OK;
+        rc         = ALP_OK;
     }
     pthread_mutex_unlock(&ch->sub_mutex);
     return rc;
@@ -525,7 +516,7 @@ alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method,
 alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
 {
     if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
-    if (!method_valid(method))     return ALP_ERR_INVAL;
+    if (!method_valid(method)) return ALP_ERR_INVAL;
 
     uint32_t h = fnv1a_32(method);
     pthread_mutex_lock(&ch->sub_mutex);
@@ -538,7 +529,7 @@ alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
             s->user        = NULL;
             s->method[0]   = '\0';
             s->method_hash = 0u;
-            rc = ALP_OK;
+            rc             = ALP_OK;
             break;
         }
     }
@@ -546,25 +537,22 @@ alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
     return rc;
 }
 
-alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method,
-                          const void *payload, size_t len)
+alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload,
+                          size_t len)
 {
-    if (ch == NULL || !ch->in_use)       return ALP_ERR_NOT_READY;
-    if (!method_valid(method))            return ALP_ERR_INVAL;
-    if (payload == NULL && len > 0)       return ALP_ERR_INVAL;
+    if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
+    if (!method_valid(method)) return ALP_ERR_INVAL;
+    if (payload == NULL && len > 0) return ALP_ERR_INVAL;
 
     pthread_mutex_lock(&ch->tx_mutex);
-    int built = frame_build(ch->tx_scratch, sizeof ch->tx_scratch,
-                            method, payload, len);
+    int          built = frame_build(ch->tx_scratch, sizeof ch->tx_scratch, method, payload, len);
     alp_status_t rc;
     if (built < 0) {
         rc = (built == -ENOMEM) ? ALP_ERR_NOMEM : ALP_ERR_INVAL;
     } else {
         ssize_t w = write(ch->ept_fd, ch->tx_scratch, (size_t)built);
         if (w < 0) {
-            rc = (errno == EAGAIN || errno == EWOULDBLOCK)
-                 ? ALP_ERR_BUSY
-                 : ALP_ERR_IO;
+            rc = (errno == EAGAIN || errno == EWOULDBLOCK) ? ALP_ERR_BUSY : ALP_ERR_IO;
         } else if (w != built) {
             rc = ALP_ERR_IO;
         } else {
@@ -587,24 +575,22 @@ static int absolute_deadline(struct timespec *ts, uint32_t timeout_ms)
      * nanoseconds, then normalise tv_nsec into [0, 1e9). */
     uint64_t add_s  = (uint64_t)(timeout_ms / 1000u);
     uint64_t add_ns = (uint64_t)(timeout_ms % 1000u) * 1000000u;
-    ts->tv_sec  += (time_t)add_s;
+    ts->tv_sec += (time_t)add_s;
     ts->tv_nsec += (long)add_ns;
     if (ts->tv_nsec >= 1000000000L) {
-        ts->tv_sec  += ts->tv_nsec / 1000000000L;
+        ts->tv_sec += ts->tv_nsec / 1000000000L;
         ts->tv_nsec %= 1000000000L;
     }
     return 0;
 }
 
-alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method,
-                          const void *req, size_t req_len,
-                          void *resp, size_t *resp_len,
-                          uint32_t timeout_ms)
+alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method, const void *req,
+                          size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms)
 {
-    if (ch == NULL || !ch->in_use)         return ALP_ERR_NOT_READY;
-    if (!method_valid(method))              return ALP_ERR_INVAL;
-    if (req == NULL && req_len > 0)         return ALP_ERR_INVAL;
-    if (resp != NULL && resp_len == NULL)   return ALP_ERR_INVAL;
+    if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
+    if (!method_valid(method)) return ALP_ERR_INVAL;
+    if (req == NULL && req_len > 0) return ALP_ERR_INVAL;
+    if (resp != NULL && resp_len == NULL) return ALP_ERR_INVAL;
 
     /* Serialise calls on this channel (matches the Zephyr backend's
      * tx_mutex + single call-slot model).  Customers needing
@@ -617,7 +603,7 @@ alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method,
     pthread_mutex_lock(&ch->call_mutex);
     strncpy(ch->call_method, method, sizeof(ch->call_method) - 1);
     ch->call_method[sizeof(ch->call_method) - 1] = '\0';
-    ch->call_resp_buf = resp;
+    ch->call_resp_buf                            = resp;
     ch->call_resp_cap = (resp != NULL && resp_len != NULL) ? *resp_len : 0u;
     ch->call_resp_len = 0u;
     ch->call_result   = ALP_ERR_TIMEOUT;
@@ -625,17 +611,14 @@ alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method,
     pthread_mutex_unlock(&ch->call_mutex);
 
     /* Frame + send the request. */
-    int built = frame_build(ch->tx_scratch, sizeof ch->tx_scratch,
-                            method, req, req_len);
-    alp_status_t s = ALP_OK;
+    int          built = frame_build(ch->tx_scratch, sizeof ch->tx_scratch, method, req, req_len);
+    alp_status_t s     = ALP_OK;
     if (built < 0) {
         s = (built == -ENOMEM) ? ALP_ERR_NOMEM : ALP_ERR_INVAL;
     } else {
         ssize_t w = write(ch->ept_fd, ch->tx_scratch, (size_t)built);
         if (w < 0) {
-            s = (errno == EAGAIN || errno == EWOULDBLOCK)
-                ? ALP_ERR_BUSY
-                : ALP_ERR_IO;
+            s = (errno == EAGAIN || errno == EWOULDBLOCK) ? ALP_ERR_BUSY : ALP_ERR_IO;
         } else if (w != built) {
             s = ALP_ERR_IO;
         }
@@ -669,18 +652,17 @@ alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method,
             return ALP_ERR_IO;
         }
         while (ch->call_pending) {
-            rc = pthread_cond_timedwait(&ch->call_cond, &ch->call_mutex,
-                                        &deadline);
+            rc = pthread_cond_timedwait(&ch->call_cond, &ch->call_mutex, &deadline);
             if (rc != 0) break;
         }
     }
 
     if (rc == ETIMEDOUT) {
         ch->call_pending = false;
-        s = ALP_ERR_TIMEOUT;
+        s                = ALP_ERR_TIMEOUT;
     } else if (rc != 0) {
         ch->call_pending = false;
-        s = ALP_ERR_IO;
+        s                = ALP_ERR_IO;
     } else {
         s = ch->call_result;
         if (resp_len != NULL && (s == ALP_OK || s == ALP_ERR_NOMEM)) {
@@ -693,7 +675,7 @@ alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method,
     return s;
 }
 
-#else  /* !__linux__ || !ALP_SDK_HAVE_OPENAMP_USERLAND */
+#else /* !__linux__ || !ALP_SDK_HAVE_OPENAMP_USERLAND */
 
 /* Build-time fallback: no OpenAMP user-space libs available on the
  * host (typical for Windows / macOS dev boxes).  Compile to NOSUPPORT
@@ -711,34 +693,44 @@ void alp_rpc_close(alp_rpc_channel_t *ch)
     (void)ch;
 }
 
-alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method,
-                               alp_rpc_method_cb_t cb, void *user)
+alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb,
+                               void *user)
 {
-    (void)ch; (void)method; (void)cb; (void)user;
+    (void)ch;
+    (void)method;
+    (void)cb;
+    (void)user;
     return ALP_ERR_NOSUPPORT;
 }
 
 alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
 {
-    (void)ch; (void)method;
+    (void)ch;
+    (void)method;
     return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method,
-                          const void *payload, size_t len)
+alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload,
+                          size_t len)
 {
-    (void)ch; (void)method; (void)payload; (void)len;
+    (void)ch;
+    (void)method;
+    (void)payload;
+    (void)len;
     return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method,
-                          const void *req, size_t req_len,
-                          void *resp, size_t *resp_len,
-                          uint32_t timeout_ms)
+alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method, const void *req,
+                          size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms)
 {
-    (void)ch; (void)method; (void)req; (void)req_len;
-    (void)resp; (void)resp_len; (void)timeout_ms;
+    (void)ch;
+    (void)method;
+    (void)req;
+    (void)req_len;
+    (void)resp;
+    (void)resp_len;
+    (void)timeout_ms;
     return ALP_ERR_NOSUPPORT;
 }
 
-#endif  /* __linux__ && ALP_SDK_HAVE_OPENAMP_USERLAND */
+#endif /* __linux__ && ALP_SDK_HAVE_OPENAMP_USERLAND */
