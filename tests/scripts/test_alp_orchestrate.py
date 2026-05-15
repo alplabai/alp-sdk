@@ -267,18 +267,25 @@ def test_resolve_carve_outs_happy(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------
-# 6. resolve_carve_outs raises on TBD
+# 6. resolve_carve_outs emits a blocked entry on TBD metadata
 # ---------------------------------------------------------------------
 
 
-def test_resolve_carve_outs_raises_on_tbd(tmp_path: Path) -> None:
+def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
+    """When the SoM preset still carries TBD metadata (mailbox /
+    memory_map), resolve_carve_outs MUST return a `status: blocked`
+    entry rather than raise.  The manifest stays emit-able so CI can
+    see the gap; the actual slice-build step trips on the C header's
+    `#error` directive."""
     path = _write_board(tmp_path, AEN_TBD)
     project = load_board_yaml(path)
-    with pytest.raises(OrchestratorError) as excinfo:
-        resolve_carve_outs(project)
-    msg = str(excinfo.value)
-    assert "TBD" in msg
-    assert "E1M-AEN701" in msg
+    resolved = resolve_carve_outs(project)
+    assert len(resolved) == 1
+    entry = resolved[0]
+    assert entry.status == "blocked"
+    assert entry.reason is not None
+    assert "TBD" in entry.reason
+    assert "E1M-AEN701" in entry.reason
 
 
 # ---------------------------------------------------------------------
@@ -455,15 +462,17 @@ def test_resolve_carve_outs_deterministic(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------
 
 
-def test_resolve_carve_outs_raises_on_no_reserved_channel(
+def test_resolve_carve_outs_blocks_on_no_reserved_channel(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Phase 3 strict mailbox-reservation check (spec §6.4).
+    """Phase 3 strict mailbox-reservation check (spec §6.4), Phase 4
+    blocked-entry semantics.
 
     Synthesises a V2N-like preset whose mailbox channels DON'T
     reserve a channel for alp_default_rpmsg, then loads + resolves
     a project whose ipc[] declares a `kind: rpmsg` entry.  The
-    resolver MUST raise rather than silently fall back to channel 0.
+    resolver MUST emit a blocked entry rather than silently fall
+    back to channel 0.
     """
     import alp_orchestrate
 
@@ -523,11 +532,13 @@ def test_resolve_carve_outs_raises_on_no_reserved_channel(
 
     path = _write_board(tmp_path, V2N_HAPPY)
     project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
-    with pytest.raises(OrchestratorError) as excinfo:
-        resolve_carve_outs(project)
-    msg = str(excinfo.value)
-    assert "alp_default_rpmsg" in msg
-    assert "E1M-V2N101" in msg
+    resolved = resolve_carve_outs(project)
+    assert len(resolved) == 1
+    entry = resolved[0]
+    assert entry.status == "blocked"
+    assert entry.reason is not None
+    assert "alp_default_rpmsg" in entry.reason
+    assert "E1M-V2N101" in entry.reason
 
 
 def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:

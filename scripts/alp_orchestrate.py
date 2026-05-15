@@ -134,20 +134,38 @@ class IpcEntry:
 
 @dataclass
 class ResolvedCarveOut:
-    """An IpcEntry after allocation from the SoM memory_map."""
+    """An IpcEntry after allocation from the SoM memory_map.
+
+    `status` is "ok" for a fully resolved carve-out; "blocked" when
+    the SoM metadata has TBDs (mailbox controller, memory_map base /
+    size, etc.) or the board.yaml entry can't be satisfied.  Blocked
+    entries land in `system-manifest.yaml` with `status: blocked` +
+    `reason: ...` so reviewers see the gap; the actual slice-build
+    step (which CI doesn't run) is what fails on a blocked carve-out.
+    """
 
     name: str
     kind: str
     endpoints: list[str]
-    base: int
-    size: int                # in bytes
-    region: str              # source memory-region name
+    base: int                # 0 when blocked
+    size: int                # in bytes; 0 when blocked
+    region: str              # source memory-region name; "" when blocked
     cacheable: bool
-    src_ept: int
-    dst_ept: int
-    mailbox_channel: int
+    src_ept: int             # 0 when blocked
+    dst_ept: int             # 0 when blocked
+    mailbox_channel: int     # 0 when blocked
+    status: str = "ok"       # "ok" | "blocked"
+    reason: Optional[str] = None     # populated when blocked
 
     def to_manifest_entry(self) -> dict[str, Any]:
+        if self.status == "blocked":
+            return {
+                "name":      self.name,
+                "kind":      self.kind,
+                "endpoints": list(self.endpoints),
+                "status":    "blocked",
+                "reason":    self.reason or "",
+            }
         return {
             "name":            self.name,
             "kind":            self.kind,
@@ -537,6 +555,26 @@ def _resolve_default_mailbox_channel(
     return 0
 
 
+def _blocked_carve_out(entry: IpcEntry, reason: str) -> ResolvedCarveOut:
+    """Project an IpcEntry into a blocked ResolvedCarveOut.
+
+    Used when SoM metadata isn't ready yet (TBD addresses, missing
+    mailbox controller) or the board.yaml entry can't be satisfied
+    (no region, collision, etc.).  The manifest records the entry as
+    `status: blocked` + `reason: ...` so reviewers see the gap; the
+    actual slice-build step is what trips on it.
+    """
+    return ResolvedCarveOut(
+        name=entry.name,
+        kind=entry.kind,
+        endpoints=list(entry.endpoints),
+        base=0, size=0, region="",
+        cacheable=bool(entry.cacheable) if entry.cacheable is not None else False,
+        src_ept=0, dst_ept=0, mailbox_channel=0,
+        status="blocked", reason=reason,
+    )
+
+
 def resolve_carve_outs(
     project: BoardProject,
 ) -> list[ResolvedCarveOut]:
@@ -547,20 +585,23 @@ def resolve_carve_outs(
        accessible_from: covers every endpoint and whose `cacheable:`
        attribute matches the entry's preference (non-cacheable by
        default; explicit `cacheable: true` flips the preference).
-    3. Raise OrchestratorError when the matching region has a TBD
-       base / size (the SoM isn't HW-mapped yet).
+    3. Emit a `status: blocked` entry when the matching region has a
+       TBD base / size (the SoM isn't HW-mapped yet); the manifest
+       records the block reason and the actual slice-build step is
+       what fails.
     4. Allocate top-down within the region, page-aligned (4 KiB).
     5. Endpoint IDs: FNV-1a of the entry name, low byte ORed with
        0x400 for src, +1 for dst.  Collision check at emit time.
 
     Phase 3 strict-channel-reservation enforcement (spec §6.4):
-       - If the SoM preset's `mailbox.controller` is `TBD`, raise
-         OrchestratorError with a clear hint pointing at the preset
+       - If the SoM preset's `mailbox.controller` is `TBD`, every
+         rpmsg entry lands blocked with a hint pointing at the preset
          that owes the value.
        - If the controller is set but no channel is `reserved_for:
          alp_default_rpmsg` (and any `ipc[].kind == rpmsg` entry is
-         present), raise so the customer adds an explicit reservation
-         rather than silently dropping the channel to 0.
+         present), the rpmsg entries land blocked so the customer
+         adds an explicit reservation rather than silently dropping
+         the channel to 0.
     """
     if not project.ipc:
         return []
@@ -570,12 +611,15 @@ def resolve_carve_outs(
 
     # Phase 3 strict mailbox checks (spec §6.4).  Surfaces preset
     # bugs before the user spends time on a build that would silently
-    # collide on mailbox channel 0.
+    # collide on mailbox channel 0.  When metadata is incomplete, the
+    # rpmsg entries land blocked rather than aborting resolution
+    # (Phase 4 acceptance §6.1: emit a manifest, fail the build).
     has_rpmsg_entry = any(e.kind == "rpmsg" for e in project.ipc)
+    rpmsg_block_reason: Optional[str] = None
     if has_rpmsg_entry:
         controller = mailbox.get("controller")
         if controller is None or controller == "TBD":
-            raise OrchestratorError(
+            rpmsg_block_reason = (
                 f"SoM {project.sku} mailbox controller is "
                 f"{'unset' if controller is None else 'TBD'}; "
                 f"carve-out resolution requires authoritative mailbox "
@@ -584,45 +628,47 @@ def resolve_carve_outs(
                 f"vendor mailbox node name (e.g. `renesas_mhu`, "
                 f"`nxp_mu`, `alif_evtrtr`) or remove the rpmsg "
                 f"entries from board.yaml.")
-        reserved_tags = {
-            ch.get("reserved_for")
-            for ch in (mailbox.get("channels") or [])
-        }
-        if "alp_default_rpmsg" not in reserved_tags:
-            raise OrchestratorError(
-                f"no mailbox channel reserved for alp_default_rpmsg "
-                f"in {project.sku}; add one with `reserved_for: "
-                f"alp_default_rpmsg` to metadata/e1m_modules/"
-                f"{project.sku}.yaml mailbox.channels (e.g. "
-                f"`- {{ id: 0, reserved_for: alp_default_rpmsg }}`).")
+        else:
+            reserved_tags = {
+                ch.get("reserved_for")
+                for ch in (mailbox.get("channels") or [])
+            }
+            if "alp_default_rpmsg" not in reserved_tags:
+                rpmsg_block_reason = (
+                    f"no mailbox channel reserved for alp_default_rpmsg "
+                    f"in {project.sku}; add one with `reserved_for: "
+                    f"alp_default_rpmsg` to metadata/e1m_modules/"
+                    f"{project.sku}.yaml mailbox.channels (e.g. "
+                    f"`- {{ id: 0, reserved_for: alp_default_rpmsg }}`).")
 
     # Per-region high-water-mark allocator state.  Initialised lazily
-    # the first time we touch a region (also raises TBD here).
+    # the first time we touch a region; returns None when the region
+    # carries a TBD base or unresolvable size.
     region_top: dict[str, int] = {}
 
-    def _region_top_init(region: dict[str, Any]) -> int:
+    def _region_top_init(region: dict[str, Any]) -> tuple[Optional[int], Optional[str]]:
         name = region["name"]
         if name in region_top:
-            return region_top[name]
+            return region_top[name], None
         base = region["base"]
         size_bytes = _region_size_bytes(region)
         if isinstance(base, str) and base.strip().upper() == "TBD":
-            raise OrchestratorError(
-                f"SoM {project.sku} memory_map region '{name}' has "
-                f"`base: TBD`; this SoM hasn't been HW-mapped yet so "
+            return None, (
+                f"memory_map.base is TBD for region '{name}' in SoM "
+                f"{project.sku}; this SoM hasn't been HW-mapped yet so "
                 f"IPC carve-outs cannot be allocated.  Fill the value "
                 f"in metadata/e1m_modules/{project.sku}.yaml or remove "
                 f"the matching ipc entry from board.yaml.")
         if size_bytes is None:
-            raise OrchestratorError(
-                f"SoM {project.sku} memory_map region '{name}' has "
-                f"no resolvable size (size_mib / size_kib unset or "
+            return None, (
+                f"memory_map.size is unresolvable for region '{name}' "
+                f"in SoM {project.sku} (size_mib / size_kib unset or "
                 f"TBD).  Cannot allocate carve-outs.")
         # Top-down allocator: top = base + size, page-aligned.
         top = base + size_bytes
         top = _align_down(top, _PAGE)
         region_top[name] = top
-        return top
+        return top, None
 
     # Sort entries alphabetically by name for determinism.
     sorted_entries = sorted(project.ipc, key=lambda e: e.name)
@@ -631,6 +677,11 @@ def resolve_carve_outs(
     seen_low_bytes: dict[int, str] = {}
 
     for entry in sorted_entries:
+        # Mailbox metadata blocked? rpmsg entries can't proceed.
+        if entry.kind == "rpmsg" and rpmsg_block_reason is not None:
+            resolved.append(_blocked_carve_out(entry, rpmsg_block_reason))
+            continue
+
         prefers_cacheable = bool(entry.cacheable) if entry.cacheable is not None else False
         endpoint_set = set(entry.endpoints)
 
@@ -642,10 +693,11 @@ def resolve_carve_outs(
                 continue
             candidates.append(region)
         if not candidates:
-            raise OrchestratorError(
+            resolved.append(_blocked_carve_out(entry, (
                 f"ipc entry '{entry.name}' endpoints {entry.endpoints} "
                 f"have no matching memory_map region in SoM "
-                f"{project.sku}")
+                f"{project.sku}")))
+            continue
 
         # Prefer the region whose `cacheable:` flag matches the entry's
         # preference.  Default carve-out is non-cacheable.
@@ -660,8 +712,12 @@ def resolve_carve_outs(
         chosen = candidates[0]
         region_name = chosen["name"]
 
-        # Initialise the region (and surface any TBD field).
-        _region_top_init(chosen)
+        # Initialise the region (and surface any TBD field).  Blocked
+        # regions emit a blocked entry rather than aborting.
+        _top, region_block_reason = _region_top_init(chosen)
+        if region_block_reason is not None:
+            resolved.append(_blocked_carve_out(entry, region_block_reason))
+            continue
         carve_size = entry.carve_out_kb * 1024
         carve_size_aligned = ((carve_size + _PAGE - 1) // _PAGE) * _PAGE
 
@@ -669,17 +725,19 @@ def resolve_carve_outs(
         if entry.address is not None:
             base = entry.address
             if base % _PAGE != 0:
-                raise OrchestratorError(
+                resolved.append(_blocked_carve_out(entry, (
                     f"ipc entry '{entry.name}' explicit address "
-                    f"0x{base:x} is not page-aligned (4 KiB)")
+                    f"0x{base:x} is not page-aligned (4 KiB)")))
+                continue
         else:
             new_top = region_top[region_name] - carve_size_aligned
             region_lo = int(chosen["base"])
             if new_top < region_lo:
-                raise OrchestratorError(
+                resolved.append(_blocked_carve_out(entry, (
                     f"ipc entry '{entry.name}' ({entry.carve_out_kb} "
                     f"KiB) doesn't fit in region '{region_name}' "
-                    f"after prior allocations")
+                    f"after prior allocations")))
+                continue
             region_top[region_name] = new_top
             base = new_top
 
@@ -687,10 +745,11 @@ def resolve_carve_outs(
         h = _fnv1a_32(entry.name.encode("utf-8"))
         low = h & 0x0FF
         if low in seen_low_bytes:
-            raise OrchestratorError(
+            resolved.append(_blocked_carve_out(entry, (
                 f"ipc entry '{entry.name}' endpoint-id low byte "
                 f"0x{low:02x} collides with prior entry "
-                f"'{seen_low_bytes[low]}'.  Rename one of the channels.")
+                f"'{seen_low_bytes[low]}'.  Rename one of the channels.")))
+            continue
         seen_low_bytes[low] = entry.name
         src_ept = 0x400 | low
         dst_ept = src_ept + 1
@@ -750,6 +809,15 @@ def emit_ipc_contract_h(project: BoardProject) -> str:
         upper = c.name.upper()
         lines.append(f"/* {c.kind} channel '{c.name}' -- endpoints "
                      f"{', '.join(c.endpoints)} */")
+        if c.status == "blocked":
+            # No #defines for blocked entries: the slice build is
+            # supposed to trip when consumers `#include` this header.
+            lines.append(f"/* BLOCKED: {c.reason or 'unknown reason'} */")
+            lines.append(f'#define ALP_IPC_{upper}_NAME       "{c.name}"')
+            lines.append(f'#error "IPC channel \'{c.name}\' is blocked; '
+                         'fix the SoM metadata before building this slice."')
+            lines.append("")
+            continue
         lines.append(f'#define ALP_IPC_{upper}_NAME       "{c.name}"')
         lines.append(f'#define ALP_IPC_{upper}_ADDR       0x{c.base:08x}u')
         lines.append(f'#define ALP_IPC_{upper}_SIZE       0x{c.size:08x}u')
@@ -784,6 +852,14 @@ def emit_dts_reservations(project: BoardProject) -> str:
         lines.append("        /* No ipc[] carve-outs declared. */")
     else:
         for c in carve_outs:
+            if c.status == "blocked":
+                # Blocked carve-outs land as a comment so reviewers see
+                # the gap; the slice build trips elsewhere (the C
+                # header carries an #error directive).
+                lines.append(f"        /* BLOCKED: {c.name} -- "
+                             f"{c.reason or 'unknown reason'} */")
+                lines.append("")
+                continue
             # Split base / size into two 32-bit halves for the
             # #address-cells = <2>; #size-cells = <2>; addressing.
             base_hi = (c.base >> 32) & 0xFFFFFFFF
