@@ -252,8 +252,10 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
-  │ Dev Tooling   │ ─► │  VS Code extension  ·  board.yaml + loader         │
-  │   (v0.3 NEW)  │    │  validate_board_yaml.py  ·  GUI configurator       │
+  │ Dev Tooling   │ ─► │  board.yaml v2  ·  alp_project.py (per-core emit)  │
+  │   (v0.6)      │    │  alp_orchestrate.py (fan-out + system-manifest)    │
+  │               │    │  west alp-build / alp-image / alp-flash / alp-clean│
+  │               │    │  validate_board_yaml.py  ·  VS Code extension      │
   │               │    │  program_eeprom.py  ·  per-OS dependency bootstrap │
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
@@ -268,10 +270,16 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
   │               │    │  ─ Ethos-U / DRP-AI   ─ MQTT          ─ PSA Crypto │
   │               │    │  ─ DEEPX / CPU        ─ BLE 5.4       ─ OPTIGA TM  │
   │               │    │                                                    │
-  │               │    │  Display / GUI        HW Info         Multi-proc   │
-  │               │    │  ─ SSD1306 / 1331     ─ EEPROM mfst   ─ Mailbox    │
-  │               │    │  ─ LVGL               ─ BOARD_ID ADC  ─ Shared mem │
-  │               │    │                       ─ <alp/hw_info> ─ HW sem     │
+  │               │    │  Display / GUI        HW Info         DSP / Power  │
+  │               │    │  ─ SSD1306 / 1331     ─ EEPROM mfst   ─ alp_dsp_*  │
+  │               │    │  ─ LVGL               ─ BOARD_ID ADC    chain (FFT │
+  │               │    │  ─ GPU2D / Dave2D     ─ <alp/hw_info>   FAC, IIR)  │
+  │               │    │                                       ─ alp/power  │
+  │               │    │                                                    │
+  │               │    │  Heterogeneous IPC   (v0.6 NEW)                    │
+  │               │    │  ─ <alp/rpc.h>       framed RPMsg over OpenAMP     │
+  │               │    │  ─ <alp/system_ipc.h> auto-generated endpoint IDs  │
+  │               │    │  ─ <alp/mproc.h>     mailbox · shared mem · hwsem  │
   │               │    │                                                    │
   │               │    │  ─── 80 Tier 1 chip drivers + Tier 2 community repo│
   │               │    │       (lsm6dso, bmi323, bmp581,                    │
@@ -284,7 +292,9 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
-  │      OS       │ ─► │   Bare-metal         Yocto            Zephyr       │
+  │  OS  (per-    │ ─► │   Zephyr             Yocto            Bare-metal   │
+  │   core slice  │    │   M-class cores      A-class cores    no-RTOS      │
+  │   in cores:)  │    │   (heterogeneous = peers on the same SoM)          │
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
