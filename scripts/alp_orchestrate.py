@@ -1208,6 +1208,24 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
             if kc:
                 lines.append(f"CONFIG_{kc}=y")
         lines.append("")
+    if slice_.libraries:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _scripts = _Path(__file__).resolve().parent
+        if str(_scripts) not in _sys.path:
+            _sys.path.insert(0, str(_scripts))
+        from alp_project import _LIBRARY_KCONFIG  # type: ignore
+        lines.append(f"# Libraries declared on core "
+                     f"`{slice_.core_id}`")
+        for lib in sorted(slice_.libraries):
+            kcs = _LIBRARY_KCONFIG.get(lib)
+            if kcs:
+                for kc in kcs:
+                    lines.append(kc)
+            else:
+                lines.append(
+                    f"# TODO: wire library '{lib}' once its v0.4 enable lands")
+        lines.append("")
     return "\n".join(lines) + "\n"
 
 
