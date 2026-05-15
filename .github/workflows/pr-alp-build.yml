@@ -157,7 +157,13 @@ jobs:
 
       # ----- Steps below run only when the example exists ---------
 
-      - name: west alp-build (primary verification)
+      # The CI's west workspace topdir is `zephyrproject/`, not
+      # `alp-sdk/`, so west's extension-command lookup never finds
+      # alp-sdk's `west-commands.yml`.  Bypass west entirely and
+      # invoke the orchestrator (and its pre-flight validator)
+      # directly -- the wrapper at scripts/west_commands/alp_build.py
+      # delegates to exactly these two scripts.
+      - name: alp-build (primary verification, orchestrator-direct)
         if: steps.gate.outputs.present == 'true'
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
@@ -165,7 +171,12 @@ jobs:
           ZEPHYR_TOOLCHAIN_VARIANT: zephyr
         run: |
           set -euo pipefail
-          west alp-build "${{ steps.pick.outputs.example_path }}"
+          app_path="${{ steps.pick.outputs.example_path }}"
+          board_yaml="${{ steps.pick.outputs.board_yaml }}"
+          python scripts/validate_board_yaml.py --input "${board_yaml}"
+          python scripts/alp_orchestrate.py \
+              --input "${board_yaml}" \
+              --build-root "${app_path}/build"
 
       - name: Assert system-manifest.yaml exists + has per-slice entries
         if: steps.gate.outputs.present == 'true'
@@ -200,15 +211,20 @@ jobs:
           ZEPHYR_TOOLCHAIN_VARIANT: zephyr
         run: |
           set -euo pipefail
-          manifest_a="${{ steps.pick.outputs.example_path }}/build/system-manifest.yaml"
+          app_path="${{ steps.pick.outputs.example_path }}"
+          board_yaml="${{ steps.pick.outputs.board_yaml }}"
+          manifest_a="${app_path}/build/system-manifest.yaml"
           # Snapshot the first manifest before the rebuild clobbers
           # the file.
           cp "${manifest_a}" /tmp/system-manifest-run-a.yaml
           # Tear down + rebuild from scratch.  The spec requires
           # byte-stable output across re-runs regardless of build
-          # dir state.
-          west alp-clean "${{ steps.pick.outputs.example_path }}" || true
-          west alp-build "${{ steps.pick.outputs.example_path }}"
+          # dir state.  Mirror `west alp-clean` by hand: remove the
+          # build dir + the orchestrator state cache.
+          rm -rf "${app_path}/build" "${app_path}/.alp-build-state.json"
+          python scripts/alp_orchestrate.py \
+              --input "${board_yaml}" \
+              --build-root "${app_path}/build"
           cp "${manifest_a}" /tmp/system-manifest-run-b.yaml
           if ! diff -u /tmp/system-manifest-run-a.yaml /tmp/system-manifest-run-b.yaml; then
             echo "::error::system-manifest.yaml is NOT byte-stable across rebuilds (spec §6.1 violation)"
