@@ -13,6 +13,7 @@
   },
   "cores": [
     {
+      "id": "a55_cluster",
       "type": "cortex-a55",
       "count": 4,
       "freq_mhz": 1800,
@@ -26,6 +27,7 @@
       "mmu": true
     },
     {
+      "id": "m33_sm",
       "type": "cortex-m33",
       "subtype": "system-manager",
       "count": 1,

@@ -12,6 +12,7 @@
   },
   "cores": [
     {
+      "id": "m55_internal",
       "type": "cortex-m55",
       "subtype": "internal-companion",
       "count": 1,

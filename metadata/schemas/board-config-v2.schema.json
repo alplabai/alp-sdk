@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/board-config-v2.schema.json",
+  "title": "ALP board configuration (board.yaml) v2",
+  "description": "Schema for the per-project board.yaml file under the heterogeneous-OS orchestration design (2026-05-15).  Replaces v1's single top-level `os:` enum with a per-core `cores:` block: each on-die programmable core declares its own runtime (Zephyr / Yocto / baremetal / off), app slice, peripherals, libraries, inference + IoT toggles.  Cross-core IPC carve-outs live under top-level `ipc:`.  Carrier + chips + diagnostics blocks describe physical assembly + project-wide settings shared across cores.  See docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "som", "cores"],
+  "not": {
+    "required": ["os"]
+  },
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2,
+      "description": "Schema revision.  Bumped from v1 because the per-core `cores:` block replaces the global `os:` field."
+    },
+    "som": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sku"],
+      "description": "SoM identity -- the *module* the carrier mounts.  Distinct from `carrier` (below): the SoM is fixed at SoM-fab time and its on-module components (silicon, on-module radio, secure element, on-module sensors) cannot be DNI'd after order.",
+      "properties": {
+        "sku": {
+          "type": "string",
+          "pattern": "^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$",
+          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  Recognised: E1M-AEN301/401/501/601/701/801 (Alif Ensemble), E1M-V2N101/V2N102 (Renesas RZ/V2N), E1M-V2M101/V2M102 (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93)."
+        },
+        "hw_rev": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+$",
+          "description": "Family-level hardware revision the firmware targets.  Optional; the SDK falls back to the SKU preset's `default_hw_rev` when omitted."
+        },
+        "overrides": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-on-module-component deltas vs the stock SKU preset.  Only covers components actually populated on the SoM PCB -- carrier-side sensors go in `carrier.populated` instead.",
+          "properties": {
+            "wifi_ble": { "$ref": "#/$defs/component_state" },
+            "secure_element": {
+              "type": "string",
+              "enum": ["optiga_trust_m", "none"]
+            },
+            "rtc_external": {
+              "type": "string",
+              "enum": ["rv3028c7", "none"]
+            },
+            "ethernet": { "$ref": "#/$defs/component_state" }
+          }
+        },
+        "memory": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Memory subsystem capacities -- per-SKU presets fill these from the released parts list.",
+          "properties": {
+            "dram_mbit":  { "type": "integer" },
+            "flash_mbit": { "type": "integer" },
+            "mram_kbit":  { "type": "integer" }
+          }
+        }
+      }
+    },
+
+    "carrier": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Carrier board the SoM is soldered onto.  Shared across cores -- it describes physical assembly, not runtime mapping.  Omit this block for headless / inference-only firmware on a custom carrier.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Carrier board name.  Stock values resolve to a preset under metadata/carriers/<name>.yaml: `E1M-EVK` (35x35 EVK for AEN / N93 SoMs), `E1M-X-EVK` (45x65 EVK for V2N / V2N-M1 SoMs).  Custom carriers use any unique name + declare populated components in `populated`."
+        },
+        "hw_rev": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+$"
+        },
+        "populated": {
+          "type": "object",
+          "additionalProperties": { "type": "boolean" },
+          "description": "Per-component populated flags.  Keys match chip-driver names; each `true` enables the corresponding CONFIG_ALP_SDK_CHIP_<name> in the resulting build."
+        }
+      }
+    },
+
+    "cores": {
+      "type": "object",
+      "description": "Per-core runtime + app mapping.  Keys are canonical core IDs from the SoM preset's `topology:` (e.g. `a55_cluster`, `m33_sm`, `m55_hp`, `m55_he`, `a32_cluster`, `m33`).  The orchestrator (scripts/alp_orchestrate.py) fans out one slice per non-`off` entry.  Customer may declare a subset; unspecified cores inherit the preset's `topology:` default.",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]+$": {
+          "$ref": "#/$defs/core_entry"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "ipc": {
+      "type": "array",
+      "description": "Cross-core IPC carve-outs.  Each entry declares a shared-memory region the orchestrator allocates from the SoM preset's `memory_map:` regions whose `accessible_from:` covers every listed endpoint.  Carve-out addresses are computed deterministically and recorded in the system manifest.",
+      "items": {
+        "$ref": "#/$defs/ipc_entry"
+      }
+    },
+
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Project-wide diagnostics configuration (applies to every slice).",
+      "properties": {
+        "last_error": {
+          "type": "boolean",
+          "default": true,
+          "description": "Thread-local alp_last_error() slot.  Disable to save a few bytes of TLS on extremely-tight builds."
+        },
+        "log_level": {
+          "type": "string",
+          "enum": ["error", "warn", "info", "debug", "trace"],
+          "default": "info"
+        }
+      }
+    },
+
+    "chips": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]+$" },
+      "description": "Chip drivers the application links directly via <alp/chips/<name>.h>.  Each entry enables the matching CONFIG_ALP_SDK_CHIP_<NAME>=y.  Shared across cores (project-wide chip population)."
+    },
+
+    "features": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "App-specific feature configuration that doesn't map cleanly onto the strict-typed blocks above.  Free-form map; the loader passes structured entries through to the right backend."
+    }
+  },
+
+  "$defs": {
+    "core_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os"],
+      "description": "Per-core runtime + app slice.  Mirrors the SoM preset's `topology.<id>` shape, with the addition of per-slice app/library/peripheral/inference/iot settings.",
+      "properties": {
+        "os": {
+          "type": "string",
+          "enum": ["zephyr", "yocto", "baremetal", "off"],
+          "description": "Runtime for this core.  `off` skips the slice entirely (no `app:` required)."
+        },
+        "app": {
+          "type": "string",
+          "description": "Path to the app source directory for this core.  Required for `os: zephyr` (must contain prj.conf or CMakeLists.txt), `os: baremetal` (must contain CMakeLists.txt).  For `os: yocto` either `app:` (custom CMake project recipe) or `image:` (override the stock recipe)."
+        },
+        "image": {
+          "type": "string",
+          "description": "Yocto image recipe name (e.g. `alp-image-edge`).  Used when `os: yocto` and no custom `app:` is supplied."
+        },
+        "peripherals": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Peripheral subsystems this slice uses directly via the matching <alp/<class>.h> wrapper.  Each entry enables the corresponding Zephyr Kconfig / Yocto package at build time.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "adc", "can", "counter", "emmc", "ethernet", "flash",
+              "gpio", "i2c", "i2s", "pwm", "rtc", "sensor", "spi",
+              "uart", "usb", "watchdog"
+            ]
+          }
+        },
+        "libraries": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Libraries available to this slice's app code.  The SDK adds the library's include path + the matching compile-time profile.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "etl", "fmt", "nlohmann_json", "doctest", "lvgl",
+              "mbedtls", "cmsis_dsp", "littlefs", "tflite_micro",
+              "u8g2", "gfx_compat", "madgwick_ahrs", "pid", "modbus",
+              "coremqtt_sn", "libcoap", "tinygsm", "nanopb",
+              "libwebsockets", "jsmn", "bearssl", "minimp3", "opus",
+              "libhelix", "catch2"
+            ]
+          }
+        },
+        "inference": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Inference backend selection for this slice.  Defaults pick the best available NPU reachable from this core.",
+          "properties": {
+            "backend": {
+              "type": "string",
+              "enum": ["auto", "cpu", "ethos_u", "drpai", "deepx_dx"],
+              "default": "auto"
+            },
+            "default_arena_kib": {
+              "type": "integer",
+              "minimum": 16,
+              "default": 128
+            }
+          }
+        },
+        "iot": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Connectivity feature toggles for this slice.",
+          "properties": {
+            "wifi": { "type": "boolean", "default": false },
+            "mqtt": { "type": "boolean", "default": false },
+            "ble":  { "type": "boolean", "default": false },
+            "tls":  { "type": "boolean", "default": false }
+          }
+        }
+      }
+    },
+    "ipc_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "endpoints", "carve_out_kb", "name"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["rpmsg", "raw_shmem", "mailbox_only"],
+          "description": "IPC channel kind.  `rpmsg` rides OpenAMP; `raw_shmem` is plain shared memory + custom synchronisation; `mailbox_only` is doorbell + signal only (no shared memory)."
+        },
+        "endpoints": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]+$"
+          },
+          "description": "Core IDs participating in this channel.  Must all be present in `cores:` with `os != off`."
+        },
+        "carve_out_kb": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Shared-memory region size in KiB requested for this channel.  The orchestrator allocates from the SoM preset's `memory_map:` regions whose `accessible_from:` covers every endpoint."
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Channel identifier (e.g. `alp_default_rpmsg`).  Used as the carve-out label in DT reservations + as the RPMsg name-service tag."
+        },
+        "cacheable": {
+          "type": "boolean",
+          "description": "Override the default cacheable hint.  Default carve-out is non-cacheable (cf. spec §6.8)."
+        },
+        "address": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Explicit base address override.  Normally the orchestrator allocates an address from the memory map; setting this pins the carve-out."
+        }
+      }
+    },
+    "component_state": {
+      "oneOf": [
+        { "type": "string", "enum": ["present", "absent"] },
+        { "type": "string", "pattern": "^[a-z0-9_-]+$" }
+      ]
+    }
+  }
+}
