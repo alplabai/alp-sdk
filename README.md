@@ -199,7 +199,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 ### AI framework (on-device)
 
 - **TFLite Micro** dispatched to silicon-specific NPU back-ends:
-  - **Arm Ethos-U** — Alif Ensemble (AEN family) + NXP i.MX 93 (N93 family; U55 / U65 variants)
+  - **Arm Ethos-U** — Alif Ensemble (AEN family; **U55** on every E3..E8 SKU, **U85** on E4 / E6 / E8 — Transformer-capable) + NXP i.MX 93 (N93 family; **U65**)
   - **Renesas DRP-AI3** — RZ/V2N (V2N family); supports YOLO v5 / v8 detection on top of classification + segmentation models.
   - **DEEPX DX-M1** — V2N + DX-M1 (V2M family); ONNX → DXNN compiler, model-family agnostic; first-class support for YOLO v5 / v8 / NAS detection backbones.
   - **CPU** — reference-kernel fallback on any target
@@ -244,8 +244,10 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
 └──────────────────────────────────────────────────────────────────────────────┘
 
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
-  │ AI Framework  │ ─► │  TFLM   →  Ethos-U   (Alif AEN, NXP N93 / U55+U65) │
-  │  (on-device)  │    │         →  DRP-AI3   (Renesas V2N)                 │
+  │ AI Framework  │ ─► │  TFLM   →  Ethos-U   Alif AEN (U55 all E3..E8;     │
+  │  (on-device)  │    │                       U85 on E4/E6/E8 — Transformer)│
+  │               │    │                      NXP N93 (U65)                 │
+  │               │    │         →  DRP-AI3   (Renesas V2N)                 │
   │               │    │         →  DEEPX DX-M1  (V2M family)               │
   │               │    │         →  CPU       (reference kernels)           │
   │               │    │  Model families: classification, detection (YOLO   │
@@ -353,7 +355,7 @@ whole family.
 
 | Family             | Form factor       | SKUs                                                                                  | Primary silicon                                              | AI throughput | OS targets         |
 |--------------------|-------------------|---------------------------------------------------------------------------------------|--------------------------------------------------------------|---------------|--------------------|
-| **E1M-AEN**        | E1M (35×35 mm)    | `E1M-AEN301`, `E1M-AEN401`, `E1M-AEN501`, `E1M-AEN601`, `E1M-AEN701`, `E1M-AEN801`    | Alif Semiconductor *Ensemble* E3–E8 (Cortex-M55 + optional Cortex-A32 + Ethos-U55) | up to ~1024 GOPS | Zephyr · bare-metal |
+| **E1M-AEN**        | E1M (35×35 mm)    | `E1M-AEN301`, `E1M-AEN401`, `E1M-AEN501`, `E1M-AEN601`, `E1M-AEN701`, `E1M-AEN801`    | Alif Semiconductor *Ensemble* E3–E8 (Cortex-M55 + optional Cortex-A32 + Ethos-U55, plus Ethos-U85 on E4 / E6 / E8) | up to ~1024 GOPS | Zephyr · bare-metal |
 | **E1M-X V2N**      | E1M-X (45×65 mm)  | `E1M-V2N101`, `E1M-V2N102`                                                            | Renesas RZ/V2N (4× Cortex-A55 + Cortex-M33 + DRP-AI3)        | 4 TOPS        | Yocto              |
 | **E1M-X V2N-M1**   | E1M-X (45×65 mm)  | `E1M-V2M101`, `E1M-V2M102`                                                            | Renesas RZ/V2N + DeepX DX-M1                                 | 4 + 25 TOPS   | Yocto              |
 | **E1M-i.MX93**     | E1M (35×35 mm)    | TBD                                                                                   | NXP i.MX 93 (2× Cortex-A55 + Cortex-M33 + Ethos-U65)         | ~0.5 TOPS     | Yocto              |
