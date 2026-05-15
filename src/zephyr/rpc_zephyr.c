@@ -120,6 +120,23 @@ struct alp_rpc_channel {
 #endif
 };
 
+/* Pure-string helper -- always compiled in so the public API stubs
+ * below (which run even when CONFIG_ALP_SDK_RPC is off and just
+ * return ALP_ERR_NOSUPPORT) can still validate caller arguments
+ * before short-circuiting.  Pre-bounds-check protects strnlen() from
+ * unterminated input. */
+static bool method_valid(const char *m)
+{
+    if (m == NULL || m[0] == '\0') {
+        return false;
+    }
+    size_t n = strnlen(m, ALP_RPC_METHOD_MAX_LEN);
+    if (n == ALP_RPC_METHOD_MAX_LEN) {
+        return false; /* unterminated within budget */
+    }
+    return true;
+}
+
 #if defined(CONFIG_ALP_SDK_RPC)
 
 static struct alp_rpc_channel g_rpc_pool[CONFIG_ALP_SDK_RPC_MAX_CHANNELS];
@@ -168,18 +185,6 @@ static alp_status_t errno_to_alp(int err)
     default:
         return ALP_ERR_IO;
     }
-}
-
-static bool method_valid(const char *m)
-{
-    if (m == NULL || m[0] == '\0') {
-        return false;
-    }
-    size_t n = strnlen(m, ALP_RPC_METHOD_MAX_LEN);
-    if (n == ALP_RPC_METHOD_MAX_LEN) {
-        return false; /* unterminated within budget */
-    }
-    return true;
 }
 
 static struct alp_rpc_sub *sub_find(struct alp_rpc_channel *ch, const char *method, uint32_t hash)
