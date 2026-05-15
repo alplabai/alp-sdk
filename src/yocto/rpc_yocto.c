@@ -22,19 +22,41 @@
  *     to the registered method callbacks.
  *   - TX serialisation via a pthread_mutex.
  *
- * v0.6 status -- partial implementation.
+ * v0.6 status -- complete implementation.
  *   - alp_rpc_open / alp_rpc_close / alp_rpc_subscribe /
- *     alp_rpc_unsubscribe / alp_rpc_send are implemented end-to-end.
- *   - alp_rpc_call returns ALP_ERR_NOSUPPORT.  The synchronous path
- *     on Linux needs poll() + read() plumbing wired through the same
- *     RX worker that already dispatches subscribes, plus a per-channel
- *     condition variable to hand the response back to the calling
- *     thread.  Substantial enough to land in a follow-up PR after the
- *     v0.6 IPC contract stabilises.
+ *     alp_rpc_unsubscribe / alp_rpc_send / alp_rpc_call are all
+ *     implemented end-to-end.
  *
  * Header conventions: this file uses the same fnv1a + frame_build +
  * frame_parse helpers as src/zephyr/rpc_zephyr.c so the two backends
  * stay byte-compatible on the wire without depending on each other.
+ *
+ * alp_rpc_call -- correlation strategy.
+ *   Matches the Zephyr backend (src/zephyr/rpc_zephyr.c) byte-for-byte:
+ *   no correlation ID prepended to the frame, the peer is expected to
+ *   reply on the same channel with the same method name, and concurrent
+ *   calls on a single channel are serialised by the channel's tx_mutex.
+ *   Applications needing concurrent in-flight requests open multiple
+ *   channels.
+ *
+ *   Per-channel synchronous-call state:
+ *     - tx_mutex            held end-to-end for one alp_rpc_call (also
+ *                            serialises alp_rpc_send).
+ *     - call_mutex          protects the call slot (call_method /
+ *                            call_resp_* / call_result / call_pending);
+ *                            briefly taken by both the caller thread and
+ *                            the RX worker so they never race.
+ *     - call_cond           pthread_cond_t signalled by the RX worker
+ *                            when a matching response arrives, or by
+ *                            alp_rpc_close when the channel is torn
+ *                            down with a pending call.
+ *     - call_pending        bool; the RX worker only routes responses
+ *                            into the call slot while it is true.
+ *
+ *   Buffer-too-small policy: we copy what fits into the caller's resp
+ *   buffer (truncated) and report the actual response size in *resp_len
+ *   along with ALP_ERR_NOMEM.  Matches the alp/rpc.h documentation;
+ *   diverges from the Zephyr backend which drops the partial copy.
  *
  * Linking: src/yocto/CMakeLists.txt gates this file behind
  * find_package(Threads) + pkg_check_modules(libmetal librpmsg).  When
@@ -58,6 +80,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <linux/rpmsg.h>
@@ -105,6 +128,18 @@ struct alp_rpc_channel {
     struct alp_rpc_sub  subs[ALP_RPC_SUBS_PER_CHANNEL];
 
     uint8_t             tx_scratch[ALP_RPC_TX_FRAME_MAX];
+
+    /* Synchronous-call slot.  Single-element by design -- tx_mutex
+     * serialises alp_rpc_call invocations on this channel so only one
+     * response can ever be in flight here. */
+    pthread_mutex_t     call_mutex;
+    pthread_cond_t      call_cond;
+    char                call_method[ALP_RPC_METHOD_MAX_LEN];
+    void               *call_resp_buf;
+    size_t              call_resp_cap;
+    size_t              call_resp_len;   /* actual response size on the wire */
+    alp_status_t        call_result;
+    bool                call_pending;
 };
 
 static struct alp_rpc_channel g_rpc_pool[ALP_RPC_MAX_CHANNELS];
@@ -233,6 +268,36 @@ static void *rpc_rx_main(void *arg)
         if (method == NULL) {
             continue;  /* malformed; drop silently */
         }
+
+        /* Synchronous-call path: a pending alp_rpc_call wakes the caller
+         * only when the response method matches the requested one.  We
+         * take the call slot's mutex briefly so the caller's read of
+         * call_pending + the result/payload write happen-after this
+         * routing decision. */
+        pthread_mutex_lock(&ch->call_mutex);
+        bool consumed_by_call = false;
+        if (ch->call_pending &&
+            strncmp(method, ch->call_method, ALP_RPC_METHOD_MAX_LEN) == 0) {
+            if (ch->call_resp_buf != NULL && ch->call_resp_cap > 0) {
+                size_t copy_n = payload_len <= ch->call_resp_cap
+                                ? payload_len : ch->call_resp_cap;
+                memcpy(ch->call_resp_buf, payload, copy_n);
+            }
+            ch->call_resp_len = payload_len;
+            ch->call_result   = (payload_len > ch->call_resp_cap &&
+                                 ch->call_resp_buf != NULL)
+                                ? ALP_ERR_NOMEM : ALP_OK;
+            ch->call_pending  = false;
+            pthread_cond_signal(&ch->call_cond);
+            consumed_by_call  = true;
+        }
+        pthread_mutex_unlock(&ch->call_mutex);
+
+        if (consumed_by_call) {
+            continue;
+        }
+
+        /* Async dispatch via the per-method subscribe table. */
         uint32_t h = fnv1a_32(method);
 
         pthread_mutex_lock(&ch->sub_mutex);
@@ -302,6 +367,9 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
 
     pthread_mutex_init(&ch->tx_mutex, NULL);
     pthread_mutex_init(&ch->sub_mutex, NULL);
+    pthread_mutex_init(&ch->call_mutex, NULL);
+    pthread_cond_init(&ch->call_cond, NULL);
+    ch->call_pending = false;
     ch->ept_fd  = -1;
     ch->ctrl_fd = -1;
     ch->rx_wake_pipe[0] = -1;
@@ -376,6 +444,20 @@ void alp_rpc_close(alp_rpc_channel_t *ch)
     if (ch == NULL || !ch->in_use) {
         return;
     }
+
+    /* Wake any pending alp_rpc_call so the caller unblocks with a
+     * clear NOT_READY rather than waiting for its timeout to expire.
+     * Holding call_mutex here is mandatory to synchronise with a
+     * caller that is about to enter pthread_cond_timedwait. */
+    pthread_mutex_lock(&ch->call_mutex);
+    if (ch->call_pending) {
+        ch->call_result  = ALP_ERR_NOT_READY;
+        ch->call_resp_len = 0;
+        ch->call_pending = false;
+        pthread_cond_broadcast(&ch->call_cond);
+    }
+    pthread_mutex_unlock(&ch->call_mutex);
+
     atomic_store(&ch->rx_run, 0);
     /* Kick the RX worker out of poll(). */
     if (ch->rx_wake_pipe[1] >= 0) {
@@ -391,6 +473,8 @@ void alp_rpc_close(alp_rpc_channel_t *ch)
 
     pthread_mutex_destroy(&ch->tx_mutex);
     pthread_mutex_destroy(&ch->sub_mutex);
+    pthread_cond_destroy(&ch->call_cond);
+    pthread_mutex_destroy(&ch->call_mutex);
     rpc_pool_release(ch);
 }
 
@@ -491,25 +575,122 @@ alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method,
     return rc;
 }
 
+/* Compute an absolute CLOCK_REALTIME deadline `timeout_ms` from now,
+ * for pthread_cond_timedwait.  Returns 0 on success, -1 on clock_gettime
+ * failure (vanishingly rare; we surface ALP_ERR_IO in that case). */
+static int absolute_deadline(struct timespec *ts, uint32_t timeout_ms)
+{
+    if (clock_gettime(CLOCK_REALTIME, ts) != 0) {
+        return -1;
+    }
+    /* Carry-safe add: split timeout_ms into whole seconds + remainder
+     * nanoseconds, then normalise tv_nsec into [0, 1e9). */
+    uint64_t add_s  = (uint64_t)(timeout_ms / 1000u);
+    uint64_t add_ns = (uint64_t)(timeout_ms % 1000u) * 1000000u;
+    ts->tv_sec  += (time_t)add_s;
+    ts->tv_nsec += (long)add_ns;
+    if (ts->tv_nsec >= 1000000000L) {
+        ts->tv_sec  += ts->tv_nsec / 1000000000L;
+        ts->tv_nsec %= 1000000000L;
+    }
+    return 0;
+}
+
 alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method,
                           const void *req, size_t req_len,
                           void *resp, size_t *resp_len,
                           uint32_t timeout_ms)
 {
-    /* TODO(v0.6.x): The Linux synchronous-call path needs the RX
-     * worker to forward responses to a per-channel pthread_cond_t the
-     * calling thread waits on.  Substantial enough to land in a
-     * follow-up PR.  Apps that need request/response on the Linux side
-     * today use alp_rpc_send + alp_rpc_subscribe on a "<method>.reply"
-     * paired channel; the Zephyr side gets the full synchronous API. */
-    (void)ch;
-    (void)method;
-    (void)req;
-    (void)req_len;
-    (void)resp;
-    (void)resp_len;
-    (void)timeout_ms;
-    return ALP_ERR_NOSUPPORT;
+    if (ch == NULL || !ch->in_use)         return ALP_ERR_NOT_READY;
+    if (!method_valid(method))              return ALP_ERR_INVAL;
+    if (req == NULL && req_len > 0)         return ALP_ERR_INVAL;
+    if (resp != NULL && resp_len == NULL)   return ALP_ERR_INVAL;
+
+    /* Serialise calls on this channel (matches the Zephyr backend's
+     * tx_mutex + single call-slot model).  Customers needing
+     * concurrent in-flight requests open multiple channels. */
+    pthread_mutex_lock(&ch->tx_mutex);
+
+    /* Stage the call slot under call_mutex so the RX worker observes
+     * a consistent (method, resp_buf, resp_cap, pending=true) snapshot
+     * the moment we make pending visible. */
+    pthread_mutex_lock(&ch->call_mutex);
+    strncpy(ch->call_method, method, sizeof(ch->call_method) - 1);
+    ch->call_method[sizeof(ch->call_method) - 1] = '\0';
+    ch->call_resp_buf = resp;
+    ch->call_resp_cap = (resp != NULL && resp_len != NULL) ? *resp_len : 0u;
+    ch->call_resp_len = 0u;
+    ch->call_result   = ALP_ERR_TIMEOUT;
+    ch->call_pending  = true;
+    pthread_mutex_unlock(&ch->call_mutex);
+
+    /* Frame + send the request. */
+    int built = frame_build(ch->tx_scratch, sizeof ch->tx_scratch,
+                            method, req, req_len);
+    alp_status_t s = ALP_OK;
+    if (built < 0) {
+        s = (built == -ENOMEM) ? ALP_ERR_NOMEM : ALP_ERR_INVAL;
+    } else {
+        ssize_t w = write(ch->ept_fd, ch->tx_scratch, (size_t)built);
+        if (w < 0) {
+            s = (errno == EAGAIN || errno == EWOULDBLOCK)
+                ? ALP_ERR_BUSY
+                : ALP_ERR_IO;
+        } else if (w != built) {
+            s = ALP_ERR_IO;
+        }
+    }
+
+    if (s != ALP_OK) {
+        /* Cancel the pending slot atomically so any late response
+         * doesn't try to write into a stale resp_buf. */
+        pthread_mutex_lock(&ch->call_mutex);
+        ch->call_pending = false;
+        pthread_mutex_unlock(&ch->call_mutex);
+        pthread_mutex_unlock(&ch->tx_mutex);
+        return s;
+    }
+
+    /* Wait for response, timeout, or close. */
+    pthread_mutex_lock(&ch->call_mutex);
+    int rc = 0;
+    if (timeout_ms == UINT32_MAX) {
+        /* Unbounded wait: pthread_cond_wait until pending clears. */
+        while (ch->call_pending) {
+            rc = pthread_cond_wait(&ch->call_cond, &ch->call_mutex);
+            if (rc != 0) break;
+        }
+    } else {
+        struct timespec deadline;
+        if (absolute_deadline(&deadline, timeout_ms) != 0) {
+            ch->call_pending = false;
+            pthread_mutex_unlock(&ch->call_mutex);
+            pthread_mutex_unlock(&ch->tx_mutex);
+            return ALP_ERR_IO;
+        }
+        while (ch->call_pending) {
+            rc = pthread_cond_timedwait(&ch->call_cond, &ch->call_mutex,
+                                        &deadline);
+            if (rc != 0) break;
+        }
+    }
+
+    if (rc == ETIMEDOUT) {
+        ch->call_pending = false;
+        s = ALP_ERR_TIMEOUT;
+    } else if (rc != 0) {
+        ch->call_pending = false;
+        s = ALP_ERR_IO;
+    } else {
+        s = ch->call_result;
+        if (resp_len != NULL && (s == ALP_OK || s == ALP_ERR_NOMEM)) {
+            *resp_len = ch->call_resp_len;
+        }
+    }
+    pthread_mutex_unlock(&ch->call_mutex);
+
+    pthread_mutex_unlock(&ch->tx_mutex);
+    return s;
 }
 
 #else  /* !__linux__ || !ALP_SDK_HAVE_OPENAMP_USERLAND */
