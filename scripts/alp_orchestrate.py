@@ -89,7 +89,15 @@ class Slice:
     duration_s: float = 0.0
 
     def to_manifest_entry(self) -> dict[str, Any]:
-        """Project this slice as a dict for system-manifest.yaml."""
+        """Project this slice as a dict for system-manifest.yaml.
+
+        Includes the per-os `flash_method:` + `flash_args:` so
+        `west alp-flash` can dispatch each slice without re-deriving
+        the backend.  The actual backend implementations (driver
+        invocations) are the subject of Phase 5 follow-ups; this
+        Phase 3 wiring is just the data plumbing.
+        """
+        flash_method, flash_args = _slice_flash_recipe(self)
         entry: dict[str, Any] = {
             "core_id":          self.core_id,
             "os":               self.os,
@@ -103,6 +111,8 @@ class Slice:
             "status":           self.status,
             "log_path":         str(self.log_path) if self.log_path else None,
             "duration_s":       round(self.duration_s, 3),
+            "flash_method":     flash_method,
+            "flash_args":       flash_args,
         }
         if self.reason:
             entry["reason"] = self.reason
@@ -542,12 +552,49 @@ def resolve_carve_outs(
     4. Allocate top-down within the region, page-aligned (4 KiB).
     5. Endpoint IDs: FNV-1a of the entry name, low byte ORed with
        0x400 for src, +1 for dst.  Collision check at emit time.
+
+    Phase 3 strict-channel-reservation enforcement (spec §6.4):
+       - If the SoM preset's `mailbox.controller` is `TBD`, raise
+         OrchestratorError with a clear hint pointing at the preset
+         that owes the value.
+       - If the controller is set but no channel is `reserved_for:
+         alp_default_rpmsg` (and any `ipc[].kind == rpmsg` entry is
+         present), raise so the customer adds an explicit reservation
+         rather than silently dropping the channel to 0.
     """
     if not project.ipc:
         return []
 
     memory_map = list(project.som_preset.get("memory_map") or [])
     mailbox = dict(project.som_preset.get("mailbox") or {})
+
+    # Phase 3 strict mailbox checks (spec §6.4).  Surfaces preset
+    # bugs before the user spends time on a build that would silently
+    # collide on mailbox channel 0.
+    has_rpmsg_entry = any(e.kind == "rpmsg" for e in project.ipc)
+    if has_rpmsg_entry:
+        controller = mailbox.get("controller")
+        if controller is None or controller == "TBD":
+            raise OrchestratorError(
+                f"SoM {project.sku} mailbox controller is "
+                f"{'unset' if controller is None else 'TBD'}; "
+                f"carve-out resolution requires authoritative mailbox "
+                f"metadata.  Fill `mailbox.controller:` in "
+                f"metadata/e1m_modules/{project.sku}.yaml with the "
+                f"vendor mailbox node name (e.g. `renesas_mhu`, "
+                f"`nxp_mu`, `alif_evtrtr`) or remove the rpmsg "
+                f"entries from board.yaml.")
+        reserved_tags = {
+            ch.get("reserved_for")
+            for ch in (mailbox.get("channels") or [])
+        }
+        if "alp_default_rpmsg" not in reserved_tags:
+            raise OrchestratorError(
+                f"no mailbox channel reserved for alp_default_rpmsg "
+                f"in {project.sku}; add one with `reserved_for: "
+                f"alp_default_rpmsg` to metadata/e1m_modules/"
+                f"{project.sku}.yaml mailbox.channels (e.g. "
+                f"`- {{ id: 0, reserved_for: alp_default_rpmsg }}`).")
 
     # Per-region high-water-mark allocator state.  Initialised lazily
     # the first time we touch a region (also raises TBD here).
@@ -778,24 +825,12 @@ def emit_system_manifest(
 
     boot_order = list(project.som_preset.get("boot_order") or [])
 
-    helper_mcus: list[dict[str, Any]] = []
-    om = project.som_preset.get("on_module") or {}
-    for key in ("supervisor_mcu", "wifi_ble"):
-        val = om.get(key)
-        if val:
-            helper_mcus.append({
-                "name":          val,
-                "role":          key,
-                "firmware_path": None,
-                "flash_method":  None,
-            })
-
     manifest = SystemManifest(
         project=project,
         slices=effective_slices,
         carve_outs=carve_outs,
         boot_order=boot_order,
-        helper_mcus=helper_mcus,
+        helper_mcus=_helper_mcus(project),
     )
 
     out = manifest.to_dict()
@@ -1071,7 +1106,46 @@ class Orchestrator:
 
 
 def _helper_mcus(project: BoardProject) -> list[dict[str, Any]]:
+    """Build the manifest's `helper_mcus[]` block.
+
+    Two sources contribute:
+
+    1. The SoM preset's `helper_firmware:` list (Phase 3) -- carries
+       authoritative firmware_path + flash_method + flash_args; each
+       entry projects verbatim into the manifest.  Entries whose
+       firmware_path is `TBD` still land in the manifest with a
+       human-readable note so reviewers see the gap (the orchestrator
+       does NOT fail the build on TBD helper firmware -- the
+       Renesas + Alif flash flows are independently scriptable).
+
+    2. Legacy `on_module.{supervisor_mcu,wifi_ble}` strings (kept
+       for back-compat with the pre-Phase-3 metadata shape) -- only
+       added if the SKU has no explicit helper_firmware list, so
+       Phase 1 presets that haven't yet been extended still surface
+       their helper MCUs in the manifest.
+    """
     out: list[dict[str, Any]] = []
+
+    helper_firmware = project.som_preset.get("helper_firmware")
+    if isinstance(helper_firmware, list):
+        for entry in helper_firmware:
+            if not isinstance(entry, dict):
+                continue
+            row: dict[str, Any] = {
+                "name":          entry.get("name"),
+                "chip":          entry.get("chip"),
+                "firmware_path": entry.get("firmware_path"),
+                "flash_method":  entry.get("flash_method"),
+                "flash_args":    entry.get("flash_args"),
+            }
+            if entry.get("firmware_path") == "TBD":
+                row["note"] = ("firmware_path TBD; populated when the "
+                               "upstream firmware release lands")
+            out.append(row)
+        return out
+
+    # Back-compat path -- only invoked when the preset is still on
+    # the pre-Phase-3 shape (no helper_firmware: block at all).
     om = project.som_preset.get("on_module") or {}
     for key in ("supervisor_mcu", "wifi_ble"):
         val = om.get(key)
@@ -1183,6 +1257,34 @@ _PERIPHERAL_KCONFIG: dict[str, str] = {
     "uart":     "SERIAL",
     "watchdog": "WATCHDOG",
 }
+
+
+def _slice_flash_recipe(
+    slice_: Slice,
+) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    """Per-runtime default flash backend + args for a slice.
+
+    Used by `Slice.to_manifest_entry` to record how `west alp-flash`
+    should program the slice's output artefact.  The actual backend
+    implementations land in subsequent PRs alongside `alp_flash.py`
+    -- this Phase 3 wiring is just data plumbing.
+
+    Returns ``(None, None)`` for `os: off` slices (skipped at flash
+    time) and unknown `os:` values; the manifest emitter drops keys
+    with None values, so off slices stay tidy.
+    """
+    if slice_.os == "yocto":
+        return ("yocto_wic_to_sd_or_emmc",
+                {"target": slice_.machine or ""})
+    if slice_.os == "zephyr":
+        # OpenOCD is the canonical Zephyr runner for the SoCs we
+        # ship; vendor-specific runners (jlink for AEN, segger for
+        # NX) are picked up via the slice's toolchain when set.
+        runner = "openocd"
+        return ("zephyr_west_flash", {"runner": runner})
+    if slice_.os == "baremetal":
+        return ("baremetal_cmake_flash", {})
+    return (None, None)
 
 
 def _slice_command(

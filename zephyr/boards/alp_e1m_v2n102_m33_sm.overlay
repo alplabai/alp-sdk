@@ -1,0 +1,34 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Devicetree overlay for the M33 system-manager slice of an
+ * E1M-V2N102 (Renesas RZ/V2N memory-variant) heterogeneous project.
+ * Wiring matches the V2N101 SKU; the SoC silicon is identical, only
+ * the on-module DRAM / flash capacity differs (handled in
+ * `metadata/e1m_modules/E1M-V2N102.yaml`).
+ */
+
+#include "../../build/generated/dts-reservations.dtsi"
+
+/ {
+    chosen {
+        zephyr,ipc     = &ipc0;
+        zephyr,ipc-shm = &alp_default_rpmsg;
+    };
+
+    soc {
+        ipc0: ipc@0 {
+            compatible = "zephyr,ipc-openamp-static-vrings";
+            memory-region = <&alp_default_rpmsg>;
+            mboxes = <&mhu 0>, <&mhu 1>;
+            mbox-names = "tx", "rx";
+            role = "remote";
+            status = "okay";
+        };
+    };
+};
+
+&mhu {
+    status = "okay";
+};

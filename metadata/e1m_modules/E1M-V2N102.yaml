@@ -101,6 +101,16 @@ mailbox:
     - { id: 2, reserved_for: app }
     - { id: 3, reserved_for: power_mgmt }
 
+helper_firmware:
+  - name:          gd32_bridge
+    chip:          gd32g553
+    firmware_path: firmware/gd32-bridge/build/gd32_bridge.bin
+    flash_method:  swd_v2n_host
+    flash_args:
+      interface: cmsis-dap
+      target:    gd32g553
+      base:      "0x08000000"
+
 default_hw_rev:         r1
 default_carrier:        E1M-X-EVK
 

@@ -103,6 +103,11 @@
         }
       }
     },
+    "helper_firmware": {
+      "type": "array",
+      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`); they're independently-flashed supervisor / coprocessor MCUs whose flash flow needs to be visible to `west alp-flash`.  Per the project's standing convention, AEN CC3501E entries stay TBD until the `alplabai/cc3501e-firmware` repo releases its first binary.",
+      "items": { "$ref": "#/$defs/helper_firmware_entry" }
+    },
     "default_hw_rev": {
       "type": "string",
       "pattern": "^[a-z0-9_-]+$"
@@ -214,6 +219,43 @@
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]*$",
           "description": "Reservation tag (e.g. `alp_default_rpmsg`, `app`, `power_mgmt`)."
+        }
+      }
+    },
+    "helper_firmware_entry": {
+      "type": "object",
+      "required": ["name", "chip"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Helper-MCU instance identifier (e.g. `gd32_bridge`, `cc3501e_otp`).  Unique within the SoM preset's helper_firmware list."
+        },
+        "chip": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$",
+          "description": "Chip-id slug matching a `metadata/chips/<chip>.yaml` manifest (e.g. `gd32g553`, `cc3501e`)."
+        },
+        "firmware_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the prebuilt firmware image, or the literal string \"TBD\" pending an upstream release."
+        },
+        "flash_method": {
+          "type": "string",
+          "anyOf": [
+            { "pattern": "^[a-z][a-z0-9_]+$" },
+            { "const": "TBD" }
+          ],
+          "description": "Backend tool key consumed by `west alp-flash`'s helper-MCU dispatcher (e.g. `swd_v2n_host`, `cc3501e_usb_bootloader`).  TBD pending the authoritative flow."
+        },
+        "flash_args": {
+          "oneOf": [
+            { "type": "object", "additionalProperties": true },
+            { "type": "string", "const": "TBD" }
+          ],
+          "description": "Backend-specific args (interface, target, base address, ...) forwarded verbatim to the flash backend.  Object shape varies per `flash_method`; TBD when the method is TBD."
         }
       }
     },

@@ -104,6 +104,18 @@ mailbox:
     - { id: 2, reserved_for: app }
     - { id: 3, reserved_for: power_mgmt }
 
+# On-module helper MCUs.  CC3501E is the TI Wi-Fi 6 + BLE 5.4
+# coprocessor wired to the Alif over SPI1.  Firmware image is
+# delivered as a signed binary by the separate
+# `alplabai/cc3501e-firmware` repo; once a release lands its
+# version replaces TBD here.
+helper_firmware:
+  - name:          cc3501e_otp
+    chip:          cc3501e
+    firmware_path: TBD                       # populated when alplabai/cc3501e-firmware releases v0.1
+    flash_method:  TBD                       # cc3501e_usb_bootloader or alif_spi_relay; see firmware/cc3501e/flash.py
+    flash_args:    TBD
+
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
 default_carrier:        E1M-EVK

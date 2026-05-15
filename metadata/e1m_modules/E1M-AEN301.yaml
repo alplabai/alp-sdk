@@ -104,6 +104,17 @@ mailbox:
     - { id: 2, reserved_for: app }
     - { id: 3, reserved_for: power_mgmt }
 
+# On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
+# on the AEN module; firmware comes from the separate
+# `alplabai/cc3501e-firmware` repo and stays TBD until a release
+# lands (matches the project's standing convention).
+helper_firmware:
+  - name:          cc3501e_otp
+    chip:          cc3501e
+    firmware_path: TBD
+    flash_method:  TBD
+    flash_args:    TBD
+
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
 default_carrier:        E1M-EVK

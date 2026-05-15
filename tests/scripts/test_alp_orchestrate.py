@@ -368,10 +368,16 @@ def test_emit_system_manifest_round_trip(tmp_path: Path) -> None:
     assert len(parsed["ipc"]) == 1
     assert parsed["ipc"][0]["name"] == "alp_default_rpmsg"
 
-    # Helper-MCU registration: V2N101 preset lists gd32g553 +
-    # murata_lbee5hy2fy on-module.
+    # Helper-MCU registration: V2N101's Phase-3 `helper_firmware:`
+    # block lists gd32_bridge (the GD32G553 supervisor firmware
+    # image).  The manifest carries the chip slug + firmware_path
+    # + flash_method verbatim.
     helper_names = [h["name"] for h in parsed["helper_mcus"]]
-    assert "gd32g553" in helper_names
+    assert "gd32_bridge" in helper_names
+    gd32 = next(h for h in parsed["helper_mcus"]
+                if h["name"] == "gd32_bridge")
+    assert gd32["chip"] == "gd32g553"
+    assert gd32["flash_method"] == "swd_v2n_host"
 
 
 # ---------------------------------------------------------------------
@@ -442,3 +448,134 @@ def test_resolve_carve_outs_deterministic(tmp_path: Path) -> None:
         assert ca.size == cb.size
         assert ca.src_ept == cb.src_ept
         assert ca.dst_ept == cb.dst_ept
+
+
+# ---------------------------------------------------------------------
+# Phase 3 follow-up tests
+# ---------------------------------------------------------------------
+
+
+def test_resolve_carve_outs_raises_on_no_reserved_channel(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Phase 3 strict mailbox-reservation check (spec §6.4).
+
+    Synthesises a V2N-like preset whose mailbox channels DON'T
+    reserve a channel for alp_default_rpmsg, then loads + resolves
+    a project whose ipc[] declares a `kind: rpmsg` entry.  The
+    resolver MUST raise rather than silently fall back to channel 0.
+    """
+    import alp_orchestrate
+
+    # Compose the synthetic SoM preset on a scratch metadata root.
+    meta = tmp_path / "metadata"
+    e1m = meta / "e1m_modules"
+    socs = meta / "socs" / "renesas" / "rzv2n"
+    schemas = meta / "schemas"
+    for d in (e1m, socs, schemas):
+        d.mkdir(parents=True)
+
+    # Symlink / copy the v2 board-config schema + SoC + som-preset
+    # schemas from the real repo so the validator finds them.
+    import shutil
+    real_meta = REPO / "metadata"
+    shutil.copy(real_meta / "schemas" / "board-config-v2.schema.json",
+                schemas / "board-config-v2.schema.json")
+    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
+                schemas / "som-preset-v1.schema.json")
+    shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
+                schemas / "soc-spec-v1.schema.json")
+    shutil.copy(real_meta / "socs" / "renesas" / "rzv2n" / "n44.json",
+                socs / "n44.json")
+
+    preset = e1m / "E1M-V2N101.yaml"
+    preset.write_text(textwrap.dedent("""
+        schema_version: 1
+        sku: E1M-V2N101
+        family: renesas-rzv2n
+        silicon: renesas:rzv2n:n44
+        topology:
+          a55_cluster:
+            os: yocto
+            app: alp-image-edge
+            machine: e1m-v2n101-a55
+            toolchain: poky-glibc
+          m33_sm:
+            os: zephyr
+            app: alp-stock-shim
+            board: alp_e1m_v2n101_m33_sm
+            toolchain: arm-zephyr-eabi
+        memory_map:
+          - { name: ocram_low, base: 0x00010000, size_kib: 512, accessible_from: [a55_cluster, m33_sm], cacheable: false }
+        mailbox:
+          controller: renesas_mhu
+          channels:
+            - { id: 0, reserved_for: app }
+            - { id: 1, reserved_for: power_mgmt }
+        default_hw_rev:  r1
+        default_carrier: E1M-X-EVK
+    """).lstrip("\n"), encoding="utf-8")
+
+    # Patch the orchestrator's METADATA_ROOT for this test.
+    monkeypatch.setattr(alp_orchestrate, "METADATA_ROOT", meta)
+    monkeypatch.setattr(alp_orchestrate, "SCHEMA_V2",
+                        schemas / "board-config-v2.schema.json")
+
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
+    with pytest.raises(OrchestratorError) as excinfo:
+        resolve_carve_outs(project)
+    msg = str(excinfo.value)
+    assert "alp_default_rpmsg" in msg
+    assert "E1M-V2N101" in msg
+
+
+def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
+    """Phase 3 helper-MCU population.
+
+    V2N101's preset declares one helper_firmware entry (gd32_bridge);
+    the manifest must carry the chip slug + firmware_path + flash_method
+    verbatim.
+    """
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    out = emit_system_manifest(project)
+    parsed = yaml.safe_load(out)
+
+    helpers = parsed["helper_mcus"]
+    assert isinstance(helpers, list)
+    by_name = {h["name"]: h for h in helpers}
+    assert "gd32_bridge" in by_name
+    gd32 = by_name["gd32_bridge"]
+    assert gd32["chip"] == "gd32g553"
+    assert gd32["firmware_path"] == \
+        "firmware/gd32-bridge/build/gd32_bridge.bin"
+    assert gd32["flash_method"] == "swd_v2n_host"
+    assert isinstance(gd32["flash_args"], dict)
+    assert gd32["flash_args"]["target"] == "gd32g553"
+
+
+def test_emit_system_manifest_populates_flash_method(tmp_path: Path) -> None:
+    """Phase 3 per-slice flash_method + flash_args.
+
+    Every non-off slice in a heterogeneous V2N project must carry
+    a `flash_method:` + `flash_args:` block in the manifest so
+    `west alp-flash` can dispatch each slice without re-deriving
+    the backend.
+    """
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    out = emit_system_manifest(project)
+    parsed = yaml.safe_load(out)
+
+    by_core = {s["core_id"]: s for s in parsed["slices"]}
+
+    a55 = by_core["a55_cluster"]
+    assert a55["flash_method"] == "yocto_wic_to_sd_or_emmc"
+    assert isinstance(a55["flash_args"], dict)
+    assert "target" in a55["flash_args"]
+
+    m33 = by_core["m33_sm"]
+    assert m33["flash_method"] == "zephyr_west_flash"
+    assert isinstance(m33["flash_args"], dict)
+    assert m33["flash_args"]["runner"] == "openocd"

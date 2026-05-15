@@ -80,6 +80,11 @@ mailbox:
     - { id: 2, reserved_for: app }
     - { id: 3, reserved_for: power_mgmt }
 
+# No on-module helper MCUs on the iMX93 SKU -- everything that
+# matters lives on the SoC die (M33 system core is a `topology:`
+# peer, not an on-module helper).
+helper_firmware: []
+
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
 default_carrier:        E1M-EVK                # 35x35 carrier same as AEN family
