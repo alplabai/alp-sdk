@@ -6,7 +6,7 @@
 #   - DMA2D framebuffer push vs sync SPI push
 #   - Native_sim baseline (CPU-only) vs SoM hardware path
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701           # E7 has GPU2D + DAVE2D + DMA2D populated.
@@ -14,15 +14,20 @@ som:
 carrier:
   name: E1M-EVK
 
-os: zephyr
-
-libraries:
-  - lvgl                    # Pulls in CONFIG_ALP_LVGL_GPU2D=y / DMA2D=y
-                             # on AEN601 / AEN701 / AEN801 via the §D.lib loader.
-
-peripherals:
-  - spi
-  - gpio
+# Single-OS benchmark on M55-HP; A32 cluster off so the test is
+# CPU-deterministic.
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./src
+    libraries:
+      - lvgl                  # Pulls in CONFIG_ALP_LVGL_GPU2D=y / DMA2D=y
+                               # on AEN601 / AEN701 / AEN801 via the §D.lib loader.
+    peripherals:
+      - spi
+      - gpio
 
 chips:
   - st7789

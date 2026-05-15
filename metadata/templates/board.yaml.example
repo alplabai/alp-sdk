@@ -1,9 +1,9 @@
-# Minimal board.yaml example for testing scripts/alp_project.py.
-# This is a fully-uncommented config the loader can exercise
-# end-to-end; the rich commented template at board.yaml is for
-# consumers.
+# Minimal board.yaml v2 example for testing scripts/alp_project.py
+# and scripts/alp_orchestrate.py.  The richly-commented template at
+# board.yaml is what consumers fork; this file is the smallest
+# valid v2 document the loader can exercise end-to-end.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701
@@ -13,23 +13,28 @@ carrier:
   populated:
     bme280: false       # demonstrate an override
 
-os: zephyr
-
-inference:
-  backend: ethos_u
-  default_arena_kib: 128
-
-libraries:
-  - lvgl                # exercise the LVGL CONFIG_* path
-  - mbedtls             # exercise the MbedTLS CONFIG_* path
-  - cmsis_dsp           # exercise the CMSIS-DSP CONFIG_* path
-  - etl                 # exercise the user-facing C++ lib path (TODO marker)
-
-iot:
-  wifi: true
-  mqtt: true
-  ble: false
-  tls: true
+# Per-core runtime mapping (board.yaml v2 replaces the v1 top-level
+# `os:` field).  The E7 silicon carries no Cortex-A class core, so
+# the only programmable peer-pair is M55-HP + M55-HE.  This example
+# runs Zephyr on M55-HP only; M55-HE inherits the SoM topology's
+# default Zephyr shim (so the build covers both halves by default).
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./src
+    inference:
+      backend: ethos_u
+      default_arena_kib: 128
+    libraries:
+      - lvgl              # exercise the LVGL CONFIG_* path
+      - mbedtls           # exercise the MbedTLS CONFIG_* path
+      - cmsis_dsp         # exercise the CMSIS-DSP CONFIG_* path
+      - etl               # exercise the user-facing C++ lib path
+    iot:
+      wifi: true
+      mqtt: true
+      ble: false
+      tls: true
 
 diagnostics:
   last_error: true

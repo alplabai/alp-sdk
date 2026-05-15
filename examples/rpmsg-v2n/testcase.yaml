@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: rpmsg-v2n
+  description: |
+    Heterogeneous-compute flagship: Yocto Linux on the V2N's
+    Cortex-A55 cluster + Zephyr on the same SoC's Cortex-M33-SM,
+    communicating via <alp/rpc.h> over RPMsg.  This testcase
+    covers ONLY the Zephyr/M33-SM half (build_only under
+    native_sim) -- twister stays the Zephyr-only fast lane per
+    spec §4.4.  The A55/Yocto consumer is tested separately by
+    the bitbake CI lane.
+
+tests:
+  alp_sdk.examples.rpmsg_v2n.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - multiprocessor
+      - yocto
+      - heterogeneous
+      - rpmsg
+    build_only: true
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[rpmsg-v2n\\] done"

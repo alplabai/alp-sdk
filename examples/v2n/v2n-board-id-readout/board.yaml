@@ -1,6 +1,6 @@
 # board.yaml -- per-app project configuration for v2n-board-id-readout.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-V2N101
@@ -8,10 +8,18 @@ som:
 carrier:
   name: E1M-X-EVK
 
-os: zephyr
-
-peripherals:
-  - i2c
+# M33-SM-only Zephyr build (matches the v1 `os: zephyr` behaviour for
+# this example).  The A55 cluster is opted off so the build runs
+# fast under twister; customers wanting the dual-OS flavour add an
+# `a55_cluster:` block.
+cores:
+  a55_cluster:
+    os: "off"
+  m33_sm:
+    os: zephyr
+    app: ./src
+    peripherals:
+      - i2c
 
 chips:
   - eeprom_24c128
@@ -19,7 +27,7 @@ chips:
 features:
   hw_info:
     eeprom:
-      bus: e1m_i2c0       # studio resolves to the right bus_id
+      bus: e1m_i2c0           # studio resolves to the right bus_id
       addr_7bit: 0x50
       offset: 0
 

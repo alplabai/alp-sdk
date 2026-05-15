@@ -6,7 +6,7 @@
 # WiFi connection comes up via the Murata LBEE5HY2FY module on
 # the E1M-AEN module's side-channel SDIO.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701
@@ -15,35 +15,39 @@ carrier:
   name: E1M-EVK
   # External chips wired into the EVK headers.  Loader picks up the
   # overrides into its populated-chip table so the matching driver
-  # gets linked.  v0.6 introduces a dedicated app-level chips:
-  # block; for v0.5 this is the supported path.
+  # gets linked.
   populated:
     bme280: true
     st7789: true
 
-os: zephyr
-
-libraries:
-  - lvgl
-  # mbedtls + coremqtt_sn dropped on native_sim for the v0.5 build
-  # parity sweep (Zephyr 4.4 + mbedtls 3.6 PSA wiring is the v0.6
-  # work item).  Real-silicon builds re-enable both via the SoM-side
-  # TF-M-on-HE-core stack.
-
-iot:
-  wifi:    true
-  mqtt:    true
-  tls:     true
-
-peripherals:
-  - i2c                   # BME280.
-  - spi                   # Display.
-  - gpio                  # Display ancillaries + Murata GPIOs.
+# Dashboard demo runs entirely on M55-HP (sensor poll + LVGL UI +
+# Wi-Fi/MQTT publish).  A32 cluster off; M55-HE inherits the SoM
+# topology default for the second NPU's future hooks.
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./src
+    libraries:
+      - lvgl
+      # mbedtls + coremqtt_sn dropped on native_sim for the v0.5 build
+      # parity sweep (Zephyr 4.4 + mbedtls 3.6 PSA wiring is the v0.6
+      # work item).  Real-silicon builds re-enable both via the SoM-side
+      # TF-M-on-HE-core stack.
+    iot:
+      wifi:    true
+      mqtt:    true
+      tls:     true
+    peripherals:
+      - i2c                  # BME280.
+      - spi                  # Display.
+      - gpio                 # Display ancillaries + Murata GPIOs.
 
 chips:
-  - bme280                # Environment sensor.
-  - optiga_trust_m        # TLS handshake offload.
-  - st7789                # 240x320 TFT.
+  - bme280                   # Environment sensor.
+  - optiga_trust_m           # TLS handshake offload.
+  - st7789                   # 240x320 TFT.
   # WiFi connectivity comes through the <alp/iot.h> alp_wifi_*
   # surface; on AEN the radio link is via an external WiFi module
   # on the carrier (LWM2M-style), not an on-module chip.  V2N

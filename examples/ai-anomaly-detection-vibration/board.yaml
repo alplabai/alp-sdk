@@ -12,7 +12,7 @@
 # nodes can run for months on a single charge because the heavy
 # compute lives behind the Ethos-U's clock-gated path.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701           # E7's two Ethos-U55s give an always-on
@@ -28,23 +28,28 @@ carrier:
   populated:
     lsm6dso: true
 
-os: zephyr
-
-# Inference backend resolved from the SoM preset.  AEN -> Ethos-U
-# (U55 / U85 picked by Vela), V2N -> DEEPX DX-M1, NX9101 -> U65.
-# App source touches none of those names.
-inference:
-  backend: auto
-  default_arena_kib: 128
-
-libraries:
-  - tflite_micro
-
-peripherals:
-  - i2c                    # LSM6DSO link.
+# Single-OS app: M55-HP owns the sample loop + NPU dispatch.  Skip the
+# A32 cluster (this is a battery-powered always-on demo) and keep
+# M55-HE on the SoM topology default so the peer NPU stays accessible.
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./src
+    # Inference backend resolved from the SoM preset.  AEN -> Ethos-U
+    # (U55 / U85 picked by Vela), V2N -> DEEPX DX-M1, NX9101 -> U65.
+    # App source touches none of those names.
+    inference:
+      backend: auto
+      default_arena_kib: 128
+    libraries:
+      - tflite_micro
+    peripherals:
+      - i2c                  # LSM6DSO link.
 
 chips:
-  - lsm6dso                # 6-axis IMU; we only use the accel here.
+  - lsm6dso                  # 6-axis IMU; we only use the accel here.
 
 diagnostics:
   log_level: info

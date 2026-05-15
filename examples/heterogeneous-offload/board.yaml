@@ -1,0 +1,60 @@
+# board.yaml -- heterogeneous-offload
+#
+# The flagship "why heterogeneous compute?" demo on E1M-V2N101.
+# The Cortex-A55 cluster runs Yocto Linux + a 1024-sample audio
+# producer (or a synthetic sine wave when no codec is attached).
+# It calls alp_rpc_call(..., "fft", ...) over RPMsg to delegate
+# the FFT to its Cortex-M33-SM peer, which runs CMSIS-DSP with
+# deterministic timing.  The A55 then identifies the dominant
+# frequency from the magnitude spectrum.
+#
+# Why it matters
+# --------------
+# Each core is good at something the other isn't:
+#
+#   * M-class cores have CMSIS-DSP, hardware FPU, predictable
+#     interrupt latency.  They run the FFT in a known cycle budget.
+#   * A-class cores have the Linux audio plumbing (ALSA, libcamera,
+#     PulseAudio, gstreamer) and the dynamic memory layout customers
+#     expect from "Linux".
+#
+# A best-of-both-worlds product offloads time-critical numeric
+# kernels to the M-class peer while keeping the user-space stack
+# on Linux.  alp_rpc_call is the synchronous request/response
+# primitive that makes that pattern ergonomic.
+#
+# Targets the same SoM as rpmsg-v2n -- E1M-V2N101 -- so the build
+# inherits ocram_low's hard memory_map values; no TBD addresses.
+
+schema_version: 2
+
+som:
+  sku: E1M-V2N101
+  hw_rev: r1
+
+carrier:
+  name: E1M-X-EVK
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+    libraries: [mbedtls, nlohmann_json]
+  m33_sm:
+    os: zephyr
+    app: ./m33_sm
+    peripherals: [adc, i2c, gpio]
+    libraries: [cmsis_dsp]    # CMSIS-DSP carries the FFT we offload.
+    inference: { backend: cpu }
+
+# Cross-core RPMsg channel.  The orchestrator sizes it large enough
+# to carry a 1024-sample float buffer (4 KiB) plus framing overhead.
+ipc:
+  - kind: rpmsg
+    endpoints: [a55_cluster, m33_sm]
+    carve_out_kb: 512
+    name: alp_default_rpmsg
+
+diagnostics:
+  log_level: info

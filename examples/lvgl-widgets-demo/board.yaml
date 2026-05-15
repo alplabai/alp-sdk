@@ -7,7 +7,7 @@
 # the E1M-EVK SPI0 + GPIO IO0 (D/C) + GPIO IO1 (reset) pads, and
 # `west build`.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701           # E7 has the Cortex-A32 + 13.5 MB SRAM that
@@ -16,20 +16,24 @@ som:
 carrier:
   name: E1M-EVK
 
-os: zephyr
-
-# LVGL pulls in via the standard Tier 1 library knob.  The
-# §D.lib.loader cross-references AEN's `capabilities:` block and
-# emits CONFIG_ALP_LVGL_DMA2D=y on E*-series.
-libraries:
-  - lvgl
-
-# SPI for the display + GPIO for the D/C# + reset pins.  The
-# st7789 chip driver wraps these into <alp/chips/st7789.h>'s
-# init / set_window / write_pixels surface.
-peripherals:
-  - spi
-  - gpio
+# Single-OS app -- M55-HP drives LVGL + display.  A32 cluster off.
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./src
+    # LVGL pulls in via the standard Tier 1 library knob.  The
+    # §D.lib.loader cross-references AEN's `capabilities:` block and
+    # emits CONFIG_ALP_LVGL_DMA2D=y on E*-series.
+    libraries:
+      - lvgl
+    # SPI for the display + GPIO for the D/C# + reset pins.  The
+    # st7789 chip driver wraps these into <alp/chips/st7789.h>'s
+    # init / set_window / write_pixels surface.
+    peripherals:
+      - spi
+      - gpio
 
 chips:
   - st7789

@@ -13,7 +13,7 @@
 # Hakan).  This board.yaml describes the device side only --
 # the customer-buildable half of the contract.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701          # Alif Ensemble + on-SoM OPTIGA Trust M.
@@ -28,36 +28,41 @@ carrier:
                             # to ground for the OTA download
                             # path.  See docs/cc3501e-bridge.md.
 
-os: zephyr
-
-# IoT toggles -- Wi-Fi + TLS only.  MQTT stays off here: Mender's
-# Zephyr client speaks HTTPS poll (see docs/ota.md "Option A").
-iot:
-  wifi: true
-  tls:  true
-
-# Libraries.  Schema-valid set is `mbedtls` only -- the SDK
-# schema's enum doesn't include `mcuboot` or `mender` because
-# both are integrated differently:
-#
-#   - mcuboot:  pulled in by sysbuild
-#               (zephyr/sysbuild/aen/sysbuild.conf), not by the
-#               app's library list.  See docs/secure-boot.md.
-#   - mender:   the mender-mcu-client Zephyr module is pinned
-#               via the west manifest's `mender` group (v0.4
-#               item per docs/ota.md "Option A").
-#
-# mbedtls covers the TLS for the HTTPS poll + the ECDSA-P256
-# signature verification path that wraps imgtool's signed
-# artefact on the way into the inactive MCUboot slot.
-# libraries: mbedtls dropped here for v0.5 native_sim parity
-#            (Zephyr 4.4 + mbedtls 3.6 PSA wiring is a v0.6 work item).
-#            Real-silicon builds re-enable mbedtls via the SoM-side
-#            TF-M-on-HE-core stack.
+# OTA flow runs on M55-HP (boot + image-swap + signature verify all
+# live on the application core).  A32 cluster off (no Linux); M55-HE
+# inherits the SoM topology default.
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./src
+    # IoT toggles -- Wi-Fi + TLS only.  MQTT stays off here: Mender's
+    # Zephyr client speaks HTTPS poll (see docs/ota.md "Option A").
+    iot:
+      wifi: true
+      tls:  true
+    # Libraries.  Schema-valid set is `mbedtls` only -- the SDK
+    # schema's enum doesn't include `mcuboot` or `mender` because
+    # both are integrated differently:
+    #
+    #   - mcuboot:  pulled in by sysbuild
+    #               (zephyr/sysbuild/aen/sysbuild.conf), not by the
+    #               app's library list.  See docs/secure-boot.md.
+    #   - mender:   the mender-mcu-client Zephyr module is pinned
+    #               via the west manifest's `mender` group (v0.4
+    #               item per docs/ota.md "Option A").
+    #
+    # mbedtls covers the TLS for the HTTPS poll + the ECDSA-P256
+    # signature verification path that wraps imgtool's signed
+    # artefact on the way into the inactive MCUboot slot.
+    # libraries: mbedtls dropped here for v0.5 native_sim parity
+    #            (Zephyr 4.4 + mbedtls 3.6 PSA wiring is a v0.6 work item).
 
 # No additional chips: the on-SoM OPTIGA Trust M is part of the
 # E1M-AEN701 preset and the CC3501E Wi-Fi bridge is wired
-# through `iot.wifi: true`.  No extra `chips:` entries needed.
+# through cores.m55_hp.iot.wifi: true.  No extra `chips:` entries
+# needed.
 
 diagnostics:
   log_level: info

@@ -7,7 +7,7 @@
 # at configure time and layers the generated alp.conf over
 # prj.conf via OVERLAY_CONFIG.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-V2N101          # Renesas RZ/V2N -- DRP-AI3 on-die NPU
@@ -22,18 +22,26 @@ carrier:
     ssd1306: true          # Mono OLED for the local status pane.
     button_led: true       # GPIO button + LED helper.
 
-os: zephyr
-
-# IoT block stays OFF in the base config so the native_sim CI
-# build picks up the v0.1 NULL-with-NOSUPPORT contract.  Opt in to
-# the real Wi-Fi/MQTT path by enabling these here AND building
-# with --extra-conf-file overlay-aen.conf (which pulls in the
-# Zephyr networking stack).  v0.3 finalizes the on-target path.
-#
-# iot:
-#   wifi: true
-#   mqtt: true
-#   tls:  true
+# Camera + IoT demo on the V2N's M33-SM.  Keep the A55 cluster off
+# until the Linux-side capture pipeline lands (post-v0.6 OTA-flagship
+# work).
+cores:
+  a55_cluster:
+    os: "off"
+  m33_sm:
+    os: zephyr
+    app: ./src
+    # IoT block stays OFF in the base config so the native_sim CI
+    # build picks up the v0.1 NULL-with-NOSUPPORT contract.  Opt in to
+    # the real Wi-Fi/MQTT path by enabling these under cores.m33_sm.iot
+    # here AND building with --extra-conf-file overlay-aen.conf (which
+    # pulls in the Zephyr networking stack).  v0.3 finalizes the
+    # on-target path.
+    #
+    # iot:
+    #   wifi: true
+    #   mqtt: true
+    #   tls:  true
 
 diagnostics:
   log_level: info
