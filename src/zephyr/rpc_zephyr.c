@@ -130,11 +130,15 @@ static bool method_valid(const char *m)
     if (m == NULL || m[0] == '\0') {
         return false;
     }
-    size_t n = strnlen(m, ALP_RPC_METHOD_MAX_LEN);
-    if (n == ALP_RPC_METHOD_MAX_LEN) {
-        return false; /* unterminated within budget */
+    /* Bounded length check.  strnlen() is POSIX, not C99 -- Zephyr's
+     * default libc settings don't always expose it; -Werror catches
+     * the implicit declaration.  This open-coded loop is portable. */
+    for (size_t i = 0; i < ALP_RPC_METHOD_MAX_LEN; ++i) {
+        if (m[i] == '\0') {
+            return true;
+        }
     }
-    return true;
+    return false; /* unterminated within budget */
 }
 
 #if defined(CONFIG_ALP_SDK_RPC)
