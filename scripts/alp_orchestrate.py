@@ -96,6 +96,12 @@ class Slice:
         the backend.  The actual backend implementations (driver
         invocations) are the subject of Phase 5 follow-ups; this
         Phase 3 wiring is just the data plumbing.
+
+        Spec §6.1 byte-stability: the manifest MUST be deterministic
+        across rebuilds.  `duration_s` is a wall-clock runtime metric
+        that varies run-to-run, so it stays on the Slice dataclass
+        but never lands in the manifest.  Same goes for anything else
+        timer / PID-style — keep the manifest content-addressable.
         """
         flash_method, flash_args = _slice_flash_recipe(self)
         entry: dict[str, Any] = {
@@ -110,7 +116,6 @@ class Slice:
             "output_artefact":  self.output_artefact,
             "status":           self.status,
             "log_path":         str(self.log_path) if self.log_path else None,
-            "duration_s":       round(self.duration_s, 3),
             "flash_method":     flash_method,
             "flash_args":       flash_args,
         }
