@@ -164,14 +164,14 @@ setup notes.
 
 ## Status
 
-**v0.3 candidate** — recorded in
+**v0.6 ramp — paper-correct, pre-HIL** — recorded in
 [`metadata/sdk_version.yaml`](metadata/sdk_version.yaml).  Surface
 landed; runtime implementations fill in across point releases.  Code
 merged ≠ verified — every claim is tracked in
 [`docs/test-plan.md`](docs/test-plan.md), and a release does not tag
 until its gating rows flip to ✅.
 
-v0.6 redesigns the OS model — see ADR 0010 + `docs/heterogeneous-builds.md`.
+v0.6 lands heterogeneous OS orchestration — see ADR 0010 + [`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md).
 
 - Roadmap: [`VERSIONS.md`](VERSIONS.md).
 - What changed when: [`CHANGELOG.md`](CHANGELOG.md).

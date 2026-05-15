@@ -92,6 +92,13 @@ jobs:
           # upstream run's artefacts.
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+        # Renode integration is a stretch goal -- the upstream
+        # bitbake artefact only lands when a self-hosted runner is
+        # available + pr-bitbake succeeded.  Keep advisory so the
+        # workflow stays useful via workflow_dispatch even when the
+        # cross-workflow artefact handshake isn't wired yet.
+        # Promotes to required when the self-hosted bitbake runner
+        # is provisioned and the artefact name stabilises.
         continue-on-error: true
 
       # Download the M33-SM Zephyr ELF from pr-alp-build.yml.  Same
@@ -106,12 +113,17 @@ jobs:
           path: ${{ github.workspace }}/artefacts/zephyr
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+        # Advisory until the per-slice ELF upload-artifact lands in
+        # pr-alp-build.yml under a stable name.  Promotes alongside
+        # the artefact-name stabilisation above.
         continue-on-error: true
 
-      # The primary verification step.  `west alp-renode` doesn't
-      # exist yet (Phase 3); `continue-on-error: true` keeps this
-      # workflow advisory until then.  Promotes to required after
-      # Phase 3 lands.
+      # The primary verification step.  `west alp-renode` is a Phase 2
+      # stub today and Renode itself isn't part of the standard CI
+      # runner image.  Keep advisory until the self-hosted runner
+      # ships Renode + the orchestrator's `alp-renode` command boots
+      # the dual-OS image to a stable handshake.  Promotes to
+      # required when the HW integration path lands in v0.6.1.
       - name: west alp-renode (V2N dual-OS boot)
         id: renode_boot
         working-directory: ${{ github.workspace }}/alp-sdk

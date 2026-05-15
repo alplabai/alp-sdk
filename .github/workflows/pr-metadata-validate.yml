@@ -173,27 +173,18 @@ jobs:
 
       # v2 schema validity sweep -- walks every board.yaml under
       # examples/ + tests/ and runs scripts/validate_board_yaml.py.
-      # Per the v0.6 heterogeneous-OS design (§7 Phase 5), this step
-      # is `continue-on-error: true` until Phase 4 migrates every
-      # in-repo board.yaml to schema_version: 2.  TODO: flip to a
-      # hard gate (drop `continue-on-error`) once Phase 4 lands and
-      # `validate_board_yaml.py` rejects any remaining v1 file.
+      # Per the v0.6 heterogeneous-OS design (§7 Phase 5), this is
+      # now a hard gate: Phase 4 migrated every in-repo board.yaml
+      # to schema_version: 2, so the loader rejects any remaining v1
+      # file at validate time and a fresh v1 paste into the tree
+      # fails the PR here (not at twister / bitbake time).
       - name: v2 schema sweep across examples/ + tests/
-        continue-on-error: true
         run: |
-          set -u
-          status=0
+          set -euo pipefail
           while IFS= read -r f; do
               echo "--- v2-check: $f ---"
-              if ! python3 scripts/validate_board_yaml.py --input "$f"; then
-                  echo "::warning::v2 schema check failed for $f -- expected until Phase 4 migration."
-                  status=1
-              fi
+              python3 scripts/validate_board_yaml.py --input "$f"
           done < <(find examples tests -name board.yaml 2>/dev/null)
-          if [ "$status" -ne 0 ]; then
-              echo "::warning::At least one board.yaml not yet on schema_version: 2."
-          fi
-          exit 0
 
       # Cross-validate: every `id:` in every metadata/socs/.../*.json
       # cores[] block must have a matching key in every consuming

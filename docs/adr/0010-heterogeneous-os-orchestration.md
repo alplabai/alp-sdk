@@ -59,9 +59,10 @@ Full design at [`docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestratio
 
 - **Dual-OS becomes table-stakes.**  Heterogeneous SoMs (V2N, AEN E5+,
   iMX93) ship out-of-the-box with both halves built from one declarative
-  file.  The 13-line apology comment in
-  `examples/mproc-dual-os-yocto-zephyr/board.yaml` is deleted; the
-  example becomes the reference for how the schema *expects* to be used.
+  file.  The 13-line apology comment in the old
+  `examples/mproc-dual-os-yocto-zephyr/board.yaml` is deleted; that
+  example is renamed to `examples/rpmsg-v2n/` and becomes the reference
+  for how the schema *expects* to be used.
 - **One declarative file drives the whole system.**  The customer's
   `board.yaml` plus the SoM preset is the single source of truth.  Cross-
   core artefacts (RPMsg endpoint IDs, DT carve-outs, remoteproc firmware
