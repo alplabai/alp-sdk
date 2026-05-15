@@ -1024,7 +1024,14 @@ class Orchestrator:
     def _materialise_shared(self) -> Path:
         gen = self.build_root / "generated"
         gen.mkdir(parents=True, exist_ok=True)
-        (gen / "alp_system_ipc.h").write_text(
+        # `<alp/system_ipc.h>` is the canonical include path consumers
+        # use (see include/alp/rpc.h §usage and the per-slice main.c
+        # references) — write the generated header at the matching
+        # `alp/` subdir so slice CMakeLists can add this directory
+        # straight to the include path.
+        alp_subdir = gen / "alp"
+        alp_subdir.mkdir(parents=True, exist_ok=True)
+        (alp_subdir / "system_ipc.h").write_text(
             emit_ipc_contract_h(self.project), encoding="utf-8")
         (gen / "dts-reservations.dtsi").write_text(
             emit_dts_reservations(self.project), encoding="utf-8")

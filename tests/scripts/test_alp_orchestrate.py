@@ -421,8 +421,10 @@ def test_orchestrator_fan_out_skips_when_tools_absent(
     assert "bitbake" in (a55.reason or "")
     assert "west" in (m33.reason or "")
 
-    # Shared artefacts materialised.
-    assert (build_root / "generated" / "alp_system_ipc.h").is_file()
+    # Shared artefacts materialised.  The IPC header lands under
+    # `alp/` so consumer code uses `#include <alp/system_ipc.h>`
+    # canonically (build_root/generated ends up on the include path).
+    assert (build_root / "generated" / "alp" / "system_ipc.h").is_file()
     assert (build_root / "generated" / "dts-reservations.dtsi").is_file()
     assert (build_root / "system-manifest.yaml").is_file()
 
