@@ -228,8 +228,8 @@ The orchestrator:
 3. For each core with `os: != off`, materialises per-core config
    (`build/m33_sm-zephyr/alp.conf`,
    `build/a55_cluster-yocto/conf/local.conf`).
-4. Emits shared generated artefacts (`alp_system_ipc.h`,
-   `dts-reservations.dtsi`).
+4. Emits shared generated artefacts (`generated/alp/system_ipc.h`,
+   `generated/dts-reservations.dtsi`).
 5. Registers helper-MCU artefacts (GD32, CC3501E).
 6. Dispatches slice builds in parallel.
 7. Writes `build/system-manifest.yaml` joining everything together.
@@ -324,7 +324,7 @@ jumps straight to the right log on a failure.
   installs `build/m33_sm-zephyr/openocd.cfg`; `west debug --build-dir
   build/m33_sm-zephyr` attaches a GDB session.
 - **Cross-core sanity check:** print your endpoint IDs on both sides
-  with `printk("ept=%u\n", ALP_IPC_DEFAULT_RPMSG_SRC_EPT)` — they
+  with `printk("ept=%u\n", ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT)` — they
   should match the manifest's `ipc[].rpmsg_endpoint_ids` field.
 
 ### Renode smoke test

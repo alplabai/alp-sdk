@@ -102,20 +102,26 @@ those headers directly.
 
 ### Peripheral primitives
 
-| Class            | Header              | Backed by Zephyr            | v0.1 | v0.2 |
-|------------------|---------------------|-----------------------------|------|------|
-| I2C              | `alp/peripheral.h`  | `i2c_*`                     | ✓    | ✓    |
-| SPI              | `alp/peripheral.h`  | `spi_*`                     | ✓    | ✓    |
-| GPIO             | `alp/peripheral.h`  | `gpio_*`                    | ✓    | ✓    |
-| UART             | `alp/peripheral.h`  | `uart_*`                    | ✓    | ✓    |
-| PWM              | `alp/pwm.h`         | `pwm_*`                     |      | ✓    |
-| ADC              | `alp/adc.h`         | `adc_*` + `adc_dt_spec`     |      | ✓    |
-| Counter / Timer  | `alp/counter.h`     | `counter_*`                 |      | ✓    |
-| Quadrature decoder | `alp/counter.h`   | `sensor_*` (SENSOR_CHAN_ROTATION) |    | ✓    |
-| I2S / SAI        | `alp/i2s.h`         | `i2s_*` + memory slab       |      | ✓    |
-| CAN / CAN-FD     | `alp/can.h`         | `can_*` (FD via `CAN_MODE_FD`) |   | ✓    |
-| RTC              | `alp/rtc.h`         | `rtc_*`                     |      | ✓    |
-| Watchdog         | `alp/wdt.h`         | `wdt_*` + `wdt_install_timeout` |  | ✓    |
+All peripheral surfaces below are landed as of v0.6.  Per-row HW
+verification status (silicon-validated vs paper-correct) is tracked
+in [`docs/test-plan.md`](test-plan.md), not duplicated here.
+
+| Class            | Header              | Backed by Zephyr                              |
+|------------------|---------------------|-----------------------------------------------|
+| I2C              | `alp/peripheral.h`  | `i2c_*`                                       |
+| SPI              | `alp/peripheral.h`  | `spi_*`                                       |
+| GPIO             | `alp/peripheral.h`  | `gpio_*`                                      |
+| UART             | `alp/peripheral.h`  | `uart_*`                                      |
+| PWM              | `alp/pwm.h`         | `pwm_*`                                       |
+| ADC              | `alp/adc.h`         | `adc_*` + `adc_dt_spec`                       |
+| Counter / Timer  | `alp/counter.h`     | `counter_*`                                   |
+| Quadrature decoder | `alp/counter.h`   | `sensor_*` (SENSOR_CHAN_ROTATION)             |
+| I2S / SAI        | `alp/i2s.h`         | `i2s_*` + memory slab                         |
+| CAN / CAN-FD     | `alp/can.h`         | `can_*` (FD via `CAN_MODE_FD`)                |
+| RTC              | `alp/rtc.h`         | `rtc_*`                                       |
+| Watchdog         | `alp/wdt.h`         | `wdt_*` + `wdt_install_timeout`               |
+| USB              | `alp/usb.h`         | `usb_*` device stack                          |
+| Power            | `alp/power.h`       | `pm_*` (Zephyr power management subsystem)    |
 
 See [ADR 0003](adr/0003-peripheral-coverage.md) for why this list and
 not others.

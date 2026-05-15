@@ -506,9 +506,10 @@ static void on_temperature(float c, void *u) { /* ... */ }
 
 int main(void) {
     alp_rpc_channel_t *ch = alp_rpc_open(&(alp_rpc_config_t){
-        .name      = ALP_IPC_DEFAULT_RPMSG_NAME,
-        .src_ept   = ALP_IPC_DEFAULT_RPMSG_SRC_EPT,
-        .dst_ept   = ALP_IPC_DEFAULT_RPMSG_DST_EPT,
+        .name      = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
+        .src_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
+        .dst_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
+        .mbox_ch   = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
     });
     alp_rpc_subscribe(ch, "temperature", on_temperature, NULL);
 }

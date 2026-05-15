@@ -232,7 +232,7 @@ Bare-metal · Yocto · Zephyr.  Selected per-core in `board.yaml`'s `cores:` blo
 
 ### Vendor SDK
 
-Alif Ensemble · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1 · TI SimpleLink (CC3501E coprocessor).
+Alif Ensemble · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1.
 
 ### HW + HAL
 
@@ -300,7 +300,6 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
   │  Vendor SDK   │ ─► │   Alif Ensemble (AEN)   Renesas RZ/V2N             │
   │               │    │   NXP i.MX 93           DEEPX DX-M1                │
-  │               │    │   TI SimpleLink (CC3501E coprocessor)              │
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
