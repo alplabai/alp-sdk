@@ -30,22 +30,29 @@ jobs:
     # Pre-baked Zephyr CI image.  Pin a tag (not :latest) so the
     # CI is reproducible.  Bump intentionally when upgrading Zephyr.
     #
-    # v0.28.8 is the first 0.28.x line image based on Ubuntu 24.04
-    # (Python 3.12 default).  Zephyr v4.4.0's `twisterlib/environment.py`
-    # imports `from datetime import UTC, datetime`, which requires
-    # Python >= 3.11; the previous v0.27.4 image was Ubuntu 22.04 with
-    # Python 3.10 and tripped on this import.  v0.28.8 also ships
-    # Zephyr SDK 0.17.4 (vs 0.17.0 in v0.27.4) -- bumped together below.
+    # Image v0.29.1 is the first stable tag that bundles every
+    # requirement for Zephyr v4.4.0:
+    #
+    #   - Ubuntu 24.04 (Python 3.12 default) -- needed because
+    #     Zephyr v4.4.0's twisterlib/environment.py uses
+    #     `from datetime import UTC, datetime`, which requires
+    #     Python >= 3.11.  The v0.27.4 image was Ubuntu 22.04 with
+    #     Python 3.10 and tripped on this import.
+    #
+    #   - Zephyr SDK 1.0.1 -- needed because Zephyr v4.4 dropped
+    #     support for the 0.17.x SDK line; FindZephyr-sdk.cmake now
+    #     requires version "1.0" or newer.  v0.28.8 fixed Python but
+    #     still shipped SDK 0.17.4 and tripped on this constraint.
     container:
-      image: ghcr.io/zephyrproject-rtos/ci:v0.28.8
+      image: ghcr.io/zephyrproject-rtos/ci:v0.29.1
       options: --user root
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
-      # SDK version must match what the ci:v0.28.8 docker image ships
+      # SDK version must match what the ci:v0.29.1 docker image ships
       # (echoes `ZSDK_VERSION` at container start).  Bump together
       # with the image tag.
-      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-0.17.4
+      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-1.0.1
 
     steps:
       - name: Checkout alp-sdk
