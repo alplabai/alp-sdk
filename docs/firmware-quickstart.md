@@ -49,12 +49,12 @@ For the rest of this doc, all paths are relative to `alp-workspace/`.
 ## 3. Your first `board.yaml`
 
 The application's `board.yaml` is a single declarative file that
-selects the target SoM, carrier, and which peripherals + chip
-drivers your app uses.  Example for a V2N101 application that
-exercises the on-module GD32 bridge:
+selects the target SoM, carrier, and per-core runtime + peripherals
++ chip drivers your app uses.  Example for a V2N101 single-core
+Zephyr-on-M33 application that exercises the on-module GD32 bridge:
 
 ```yaml
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-V2N101
@@ -62,11 +62,13 @@ som:
 carrier:
   name: E1M-X-EVK
 
-os: zephyr
-
-peripherals:
-  - spi
-  - i2c
+cores:
+  a55_cluster:
+    os: "off"            # not used by this app
+  m33_sm:
+    os: zephyr
+    app: ./src
+    peripherals: [spi, i2c]
 
 chips:
   - gd32g553
@@ -75,9 +77,11 @@ diagnostics:
   log_level: info
 ```
 
-`west alp-build` validates this, generates the build-time config,
-and delegates to `west build`.  See
-[`docs/board-config.md`](board-config.md) for the full schema.
+`west alp-build` validates this, fans out into per-core slices, and
+emits `build/system-manifest.yaml`.  See
+[`docs/board-config.md`](board-config.md) for the full schema and
+[`docs/heterogeneous-builds.md`](heterogeneous-builds.md) for the
+multi-core flagship walkthrough.
 
 ## 4. Pick a starting example
 

@@ -200,8 +200,8 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 
 - **TFLite Micro** dispatched to silicon-specific NPU back-ends:
   - **Arm Ethos-U** — Alif Ensemble (AEN family) + NXP i.MX 93 (N93 family; U55 / U65 variants)
-  - **Renesas DRP-AI3** — RZ/V2N (V2N family)
-  - **DEEPX DX-M1** — V2N + DX-M1 (V2M family); ONNX → DXNN compiler, model-family agnostic
+  - **Renesas DRP-AI3** — RZ/V2N (V2N family); supports YOLO v5 / v8 detection on top of classification + segmentation models.
+  - **DEEPX DX-M1** — V2N + DX-M1 (V2M family); ONNX → DXNN compiler, model-family agnostic; first-class support for YOLO v5 / v8 / NAS detection backbones.
   - **CPU** — reference-kernel fallback on any target
 - Offline training (off-device) lives in TensorFlow / PyTorch.
 
@@ -248,6 +248,9 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
   │  (on-device)  │    │         →  DRP-AI3   (Renesas V2N)                 │
   │               │    │         →  DEEPX DX-M1  (V2M family)               │
   │               │    │         →  CPU       (reference kernels)           │
+  │               │    │  Model families: classification, detection (YOLO   │
+  │               │    │    v5/v8 on DEEPX + DRP-AI3), segmentation,        │
+  │               │    │    keyword-spotting, pose                          │
   │               │    │  · · · offline training only: TensorFlow, PyTorch  │
   └───────────────┘    └────────────────────────────────────────────────────┘
           │

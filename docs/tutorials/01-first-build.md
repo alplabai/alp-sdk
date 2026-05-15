@@ -28,14 +28,16 @@ The whole "what does this app target?" surface lives in
 `board.yaml`:
 
 ```yaml
-schema_version: 1
+schema_version: 2
 som:
   sku: E1M-AEN701
 carrier:
   name: E1M-EVK
-os: zephyr
-peripherals:
-  - gpio
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./src
+    peripherals: [gpio]
 ```
 
 That's it.  No DT overlay, no hand-rolled Kconfig fragment.  The

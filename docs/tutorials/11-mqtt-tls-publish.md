@@ -130,7 +130,7 @@ int main(void) {
 ## 4. `board.yaml` for Yocto
 
 ```yaml
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-V2N101
@@ -138,14 +138,18 @@ som:
 carrier:
   name: E1M-X-EVK
 
-os: yocto
-
-iot:
-  wifi:
-    enabled: true
-  mqtt:
-    enabled: true
-    tls:     true
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+    libraries: [mbedtls]
+    iot:
+      wifi: true
+      mqtt: true
+      tls:  true
+  m33_sm:
+    os: "off"
 
 diagnostics:
   log_level: info
