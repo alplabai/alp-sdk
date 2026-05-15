@@ -1,0 +1,709 @@
+# SPDX-License-Identifier: Apache-2.0
+"""
+Unit tests for scripts/flash_backends/ and scripts/west_commands/alp_flash.py
+(Wave 5B of the 2026-05-15 heterogeneous-OS orchestration design).
+
+Every test stubs ``subprocess.run`` + ``shutil.which`` so the suite
+runs cleanly on Windows without any real flashing tools installed.
+
+Run locally:
+
+    python -m pytest tests/scripts/test_flash_backends.py -v
+"""
+
+from __future__ import annotations
+
+import sys
+import types
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+import yaml
+
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "scripts"))
+sys.path.insert(0, str(REPO / "scripts" / "west_commands"))
+
+import flash_backends                              # noqa: E402,F401
+from flash_backends import (                       # noqa: E402
+    FlashContext,
+    REGISTRY,
+    lookup,
+)
+from flash_backends.baremetal_cmake_flash import (  # noqa: E402
+    BaremetalCmakeFlash,
+)
+from flash_backends.cc3501e_usb_bootloader import (  # noqa: E402
+    Cc3501eUsbBootloaderFlash,
+)
+from flash_backends.swd_v2n_host import (          # noqa: E402
+    SwdV2nHostFlash,
+)
+from flash_backends.yocto_wic import (             # noqa: E402
+    YoctoWicFlash,
+)
+from flash_backends.zephyr_west_flash import (     # noqa: E402
+    ZephyrWestFlash,
+)
+
+
+# ---------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------
+
+
+def _proc(rc: int = 0, stdout: str = "", stderr: str = "") -> types.SimpleNamespace:
+    """Build a CompletedProcess-shaped mock."""
+    return SimpleNamespace(returncode=rc, stdout=stdout, stderr=stderr)
+
+
+def _ctx(method_args: dict | None = None,
+         dry_run: bool = False,
+         core_id: str = "test_core",
+         artefact: str = "/tmp/dummy.bin",
+         sku: str = "E1M-V2N101") -> FlashContext:
+    return FlashContext(
+        artefact_path=Path(artefact),
+        flash_args=dict(method_args or {}),
+        core_id=core_id,
+        sku=sku,
+        dry_run=dry_run,
+    )
+
+
+# ---------------------------------------------------------------------
+# 1. Registry
+# ---------------------------------------------------------------------
+
+
+def test_registry_has_all_canonical_backends() -> None:
+    expected = {
+        "yocto_wic_to_sd_or_emmc",
+        "yocto_wic",                    # alias
+        "zephyr_west_flash",
+        "baremetal_cmake_flash",
+        "swd_v2n_host",
+        "cc3501e_usb_bootloader",
+    }
+    assert expected.issubset(set(REGISTRY.keys())), \
+        f"missing keys: {expected - set(REGISTRY.keys())}"
+
+
+def test_lookup_returns_zephyr_instance() -> None:
+    backend = lookup("zephyr_west_flash")
+    assert isinstance(backend, ZephyrWestFlash)
+    assert backend.name == "zephyr_west_flash"
+    assert "west" in backend.requires
+
+
+def test_lookup_returns_none_for_unknown() -> None:
+    assert lookup("does_not_exist") is None
+
+
+# ---------------------------------------------------------------------
+# 2. YoctoWicFlash
+# ---------------------------------------------------------------------
+
+
+def test_yocto_wic_dry_run_uses_bmaptool() -> None:
+    backend = YoctoWicFlash()
+    with patch("flash_backends.yocto_wic.shutil.which",
+               side_effect=lambda t: f"/usr/bin/{t}" if t == "bmaptool"
+               else None), \
+         patch("flash_backends.yocto_wic.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/dev/sdb", "confirm": True},
+            dry_run=True,
+            artefact="/tmp/image.wic",
+        ))
+    assert result.ok is True
+    assert run_mock.call_count == 0
+    assert "bmaptool" in " ".join(result.command)
+    assert "/dev/sdb" in " ".join(result.command)
+
+
+def test_yocto_wic_happy_path_invokes_bmaptool() -> None:
+    backend = YoctoWicFlash()
+    with patch("flash_backends.yocto_wic.shutil.which",
+               side_effect=lambda t: "/usr/bin/bmaptool"
+               if t == "bmaptool" else None), \
+         patch("flash_backends.yocto_wic.subprocess.run",
+               return_value=_proc(rc=0, stdout="ok")) as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/dev/sdb", "confirm": True},
+            artefact="/tmp/image.wic",
+        ))
+    assert result.ok is True
+    assert run_mock.call_count == 1
+    invoked_cmd = run_mock.call_args[0][0]
+    assert invoked_cmd[0].endswith("bmaptool")
+    assert "/dev/sdb" in invoked_cmd
+
+
+def test_yocto_wic_falls_back_to_dd_when_bmaptool_absent() -> None:
+    backend = YoctoWicFlash()
+    artefact = "/tmp/image.wic"
+    with patch("flash_backends.yocto_wic.shutil.which",
+               side_effect=lambda t: "/bin/dd" if t == "dd" else None), \
+         patch("flash_backends.yocto_wic.subprocess.run",
+               return_value=_proc(rc=0)) as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/dev/sdb", "confirm": True},
+            artefact=artefact,
+        ))
+    assert result.ok is True
+    invoked_cmd = run_mock.call_args[0][0]
+    joined = " ".join(invoked_cmd)
+    assert "dd" in joined
+    # On Windows Path() normalises forward slashes to backslashes; the
+    # artefact path token therefore appears as the Path-rendered form.
+    artefact_token = str(Path(artefact))
+    assert f"if={artefact_token}" in joined
+    assert "of=/dev/sdb" in joined
+
+
+def test_yocto_wic_refuses_non_dev_target() -> None:
+    backend = YoctoWicFlash()
+    with patch("flash_backends.yocto_wic.shutil.which",
+               return_value="/usr/bin/bmaptool"), \
+         patch("flash_backends.yocto_wic.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/tmp/file.img", "confirm": True},
+            artefact="/tmp/image.wic",
+        ))
+    assert result.ok is False
+    assert run_mock.call_count == 0
+    assert "/dev/" in result.message
+
+
+def test_yocto_wic_missing_tool_returns_clear_error() -> None:
+    backend = YoctoWicFlash()
+    with patch("flash_backends.yocto_wic.shutil.which", return_value=None), \
+         patch("flash_backends.yocto_wic.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/dev/sdb", "confirm": True},
+            artefact="/tmp/image.wic",
+        ))
+    assert result.ok is False
+    assert run_mock.call_count == 0
+    msg = result.message.lower()
+    assert "bmaptool" in msg
+    assert "dd" in msg
+
+
+def test_yocto_wic_without_confirm_dry_runs_even_when_dry_run_false() -> None:
+    """Safety check: without explicit confirm flag, the backend
+    should NOT actually run subprocess even if dry_run is False."""
+    backend = YoctoWicFlash()
+    with patch("flash_backends.yocto_wic.shutil.which",
+               return_value="/usr/bin/bmaptool"), \
+         patch("flash_backends.yocto_wic.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/dev/sdb"},          # confirm omitted
+            dry_run=False,
+            artefact="/tmp/image.wic",
+        ))
+    assert result.ok is True                   # dry-runs, doesn't fail
+    assert run_mock.call_count == 0
+    assert "confirm" in result.message.lower()
+
+
+# ---------------------------------------------------------------------
+# 3. ZephyrWestFlash
+# ---------------------------------------------------------------------
+
+
+def test_zephyr_west_flash_dry_run() -> None:
+    backend = ZephyrWestFlash()
+    with patch("flash_backends.zephyr_west_flash.shutil.which",
+               return_value="/usr/bin/west"), \
+         patch("flash_backends.zephyr_west_flash.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"runner": "openocd", "build_dir": "/tmp/build/m33"},
+            dry_run=True,
+            artefact="/tmp/build/m33/zephyr/zephyr.elf",
+        ))
+    assert result.ok is True
+    assert run_mock.call_count == 0
+    joined = " ".join(result.command)
+    assert "west flash" in joined
+    assert "--runner openocd" in joined
+    assert "--build-dir /tmp/build/m33" in joined
+
+
+def test_zephyr_west_flash_happy_path() -> None:
+    backend = ZephyrWestFlash()
+    with patch("flash_backends.zephyr_west_flash.shutil.which",
+               return_value="/usr/bin/west"), \
+         patch("flash_backends.zephyr_west_flash.subprocess.run",
+               return_value=_proc(rc=0)) as run_mock:
+        result = backend.flash(_ctx(
+            {"runner": "jlink", "build_dir": "/build/m33"},
+            artefact="/build/m33/zephyr/zephyr.elf",
+        ))
+    assert result.ok is True
+    invoked = run_mock.call_args[0][0]
+    assert invoked[0].endswith("west")
+    assert "--runner" in invoked
+    assert "jlink" in invoked
+
+
+def test_zephyr_west_flash_missing_tool() -> None:
+    backend = ZephyrWestFlash()
+    with patch("flash_backends.zephyr_west_flash.shutil.which",
+               return_value=None), \
+         patch("flash_backends.zephyr_west_flash.subprocess.run") as run_mock:
+        result = backend.flash(_ctx({"runner": "openocd"}))
+    assert result.ok is False
+    assert run_mock.call_count == 0
+    assert "west" in result.message.lower()
+
+
+def test_zephyr_west_flash_requires_runner() -> None:
+    backend = ZephyrWestFlash()
+    with patch("flash_backends.zephyr_west_flash.shutil.which",
+               return_value="/usr/bin/west"), \
+         patch("flash_backends.zephyr_west_flash.subprocess.run") as run_mock:
+        result = backend.flash(_ctx({}))     # no runner
+    assert result.ok is False
+    assert run_mock.call_count == 0
+    assert "runner" in result.message.lower()
+
+
+# ---------------------------------------------------------------------
+# 4. BaremetalCmakeFlash
+# ---------------------------------------------------------------------
+
+
+def test_baremetal_cmake_flash_dry_run() -> None:
+    backend = BaremetalCmakeFlash()
+    with patch("flash_backends.baremetal_cmake_flash.shutil.which",
+               return_value="/usr/bin/cmake"), \
+         patch("flash_backends.baremetal_cmake_flash.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"build_dir": "/tmp/build/bm", "target": "program"},
+            dry_run=True,
+        ))
+    assert result.ok is True
+    assert run_mock.call_count == 0
+    joined = " ".join(result.command)
+    assert "--build /tmp/build/bm" in joined
+    assert "--target program" in joined
+
+
+def test_baremetal_cmake_flash_happy_path_default_target() -> None:
+    backend = BaremetalCmakeFlash()
+    with patch("flash_backends.baremetal_cmake_flash.shutil.which",
+               return_value="/usr/bin/cmake"), \
+         patch("flash_backends.baremetal_cmake_flash.subprocess.run",
+               return_value=_proc(rc=0)) as run_mock:
+        result = backend.flash(_ctx({"build_dir": "/tmp/bm"}))
+    assert result.ok is True
+    invoked = run_mock.call_args[0][0]
+    # default target is "flash"
+    assert "flash" in invoked
+
+
+def test_baremetal_cmake_flash_missing_tool() -> None:
+    backend = BaremetalCmakeFlash()
+    with patch("flash_backends.baremetal_cmake_flash.shutil.which",
+               return_value=None), \
+         patch("flash_backends.baremetal_cmake_flash.subprocess.run") as run_mock:
+        result = backend.flash(_ctx({"build_dir": "/tmp/bm"}))
+    assert result.ok is False
+    assert run_mock.call_count == 0
+    assert "cmake" in result.message.lower()
+
+
+# ---------------------------------------------------------------------
+# 5. SwdV2nHostFlash
+# ---------------------------------------------------------------------
+
+
+def test_swd_v2n_host_dry_run_uses_openocd() -> None:
+    backend = SwdV2nHostFlash()
+    artefact = "/tmp/gd32_bridge.bin"
+    with patch("flash_backends.swd_v2n_host.shutil.which",
+               side_effect=lambda t: f"/usr/bin/{t}" if t == "openocd"
+               else None), \
+         patch("flash_backends.swd_v2n_host.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {
+                "interface": "cmsis-dap",
+                "target":    "gd32g553",
+                "base":      "0x08000000",
+            },
+            dry_run=True,
+            artefact=artefact,
+        ))
+    assert result.ok is True
+    assert run_mock.call_count == 0
+    joined = " ".join(result.command)
+    assert "openocd" in joined
+    assert "interface/cmsis-dap.cfg" in joined
+    assert "target/gd32g553.cfg" in joined
+    assert "0x08000000" in joined
+    # On Windows Path() renders the artefact path with backslashes; the
+    # joined command therefore contains the platform-rendered form.
+    assert str(Path(artefact)) in joined
+
+
+def test_swd_v2n_host_happy_path_openocd_call() -> None:
+    backend = SwdV2nHostFlash()
+    with patch("flash_backends.swd_v2n_host.shutil.which",
+               side_effect=lambda t: f"/usr/bin/{t}" if t == "openocd"
+               else None), \
+         patch("flash_backends.swd_v2n_host.subprocess.run",
+               return_value=_proc(rc=0)) as run_mock:
+        result = backend.flash(_ctx(
+            {"interface": "cmsis-dap", "target": "gd32g553"},
+            artefact="/tmp/gd32.bin",
+        ))
+    assert result.ok is True
+    assert run_mock.call_count == 1
+
+
+def test_swd_v2n_host_falls_back_to_pyocd() -> None:
+    backend = SwdV2nHostFlash()
+    with patch("flash_backends.swd_v2n_host.shutil.which",
+               side_effect=lambda t: "/usr/bin/pyocd"
+               if t == "pyocd" else None), \
+         patch("flash_backends.swd_v2n_host.subprocess.run",
+               return_value=_proc(rc=0)) as run_mock:
+        result = backend.flash(_ctx(
+            {"interface": "cmsis-dap", "target": "gd32g553"},
+            artefact="/tmp/gd32.bin",
+        ))
+    assert result.ok is True
+    invoked = run_mock.call_args[0][0]
+    assert invoked[0].endswith("pyocd")
+    assert "flash" in invoked
+
+
+def test_swd_v2n_host_missing_both_tools() -> None:
+    backend = SwdV2nHostFlash()
+    with patch("flash_backends.swd_v2n_host.shutil.which",
+               return_value=None), \
+         patch("flash_backends.swd_v2n_host.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"interface": "cmsis-dap", "target": "gd32g553"},
+        ))
+    assert result.ok is False
+    assert run_mock.call_count == 0
+    msg = result.message.lower()
+    assert "openocd" in msg or "pyocd" in msg
+
+
+def test_swd_v2n_host_requires_interface_and_target() -> None:
+    backend = SwdV2nHostFlash()
+    with patch("flash_backends.swd_v2n_host.shutil.which",
+               return_value="/usr/bin/openocd"), \
+         patch("flash_backends.swd_v2n_host.subprocess.run") as run_mock:
+        result = backend.flash(_ctx({}))    # no interface / target
+    assert result.ok is False
+    assert run_mock.call_count == 0
+
+
+# ---------------------------------------------------------------------
+# 6. Cc3501eUsbBootloaderFlash
+# ---------------------------------------------------------------------
+
+
+def test_cc3501e_dry_run() -> None:
+    """Dry-run should print the planned command without raising
+    NotImplementedError -- caller wants to see what WOULD run."""
+    backend = Cc3501eUsbBootloaderFlash()
+    with patch("flash_backends.cc3501e_usb_bootloader.shutil.which",
+               return_value="/usr/bin/cc3501e-flasher"), \
+         patch("flash_backends.cc3501e_usb_bootloader.time.monotonic",
+               return_value=0.0):
+        result = backend.flash(_ctx(
+            {"device": "/dev/ttyACM0", "mode": "otp_program"},
+            dry_run=True,
+            artefact="/tmp/wifi.bin",
+        ))
+    assert result.ok is True
+    joined = " ".join(result.command)
+    assert "/dev/ttyACM0" in joined
+    assert "otp_program" in joined
+
+
+def test_cc3501e_real_invocation_raises_not_implemented() -> None:
+    """The body is marked NotImplementedError because TI's CLI shape
+    isn't validated upstream yet.  Caller (alp_flash.py) converts
+    that into a 'skipped' status with a clear log line."""
+    backend = Cc3501eUsbBootloaderFlash()
+    with patch("flash_backends.cc3501e_usb_bootloader.shutil.which",
+               return_value="/usr/bin/cc3501e-flasher"):
+        with pytest.raises(NotImplementedError):
+            backend.flash(_ctx(
+                {"device": "/dev/ttyACM0", "mode": "ram_load"},
+                artefact="/tmp/wifi.bin",
+            ))
+
+
+def test_cc3501e_missing_tool() -> None:
+    backend = Cc3501eUsbBootloaderFlash()
+    with patch("flash_backends.cc3501e_usb_bootloader.shutil.which",
+               return_value=None):
+        result = backend.flash(_ctx(
+            {"device": "/dev/ttyACM0", "mode": "ram_load"},
+            artefact="/tmp/wifi.bin",
+        ))
+    assert result.ok is False
+    msg = result.message.lower()
+    assert "cc3501e" in msg
+
+
+def test_cc3501e_invalid_mode_rejects() -> None:
+    backend = Cc3501eUsbBootloaderFlash()
+    with patch("flash_backends.cc3501e_usb_bootloader.shutil.which",
+               return_value="/usr/bin/cc3501e-flasher"):
+        result = backend.flash(_ctx(
+            {"device": "/dev/ttyACM0", "mode": "bogus_mode"},
+            artefact="/tmp/wifi.bin",
+        ))
+    assert result.ok is False
+    assert "mode" in result.message.lower()
+
+
+# ---------------------------------------------------------------------
+# 7. alp_flash.py dispatcher integration
+# ---------------------------------------------------------------------
+
+
+def _write_manifest(tmp: Path, body: dict) -> Path:
+    """Write a system-manifest.yaml into a freshly-created build root."""
+    build = tmp / "build"
+    build.mkdir(parents=True)
+    path = build / "system-manifest.yaml"
+    path.write_text(yaml.safe_dump(body), encoding="utf-8")
+    return path
+
+
+_HAPPY_MANIFEST = {
+    "schema_version": 1,
+    "hw_info": {"sku": "E1M-V2N101", "silicon": "renesas:rzv2n:n44"},
+    "slices": [
+        {
+            "core_id":         "a55_cluster",
+            "os":              "yocto",
+            "output_artefact": "/tmp/alp-image-edge.wic",
+            "flash_method":    "yocto_wic_to_sd_or_emmc",
+            "flash_args":      {"target": "/dev/sdb"},   # confirm absent
+        },
+        {
+            "core_id":         "m33_sm",
+            "os":              "zephyr",
+            "output_artefact": "/tmp/build/m33/zephyr/zephyr.elf",
+            "flash_method":    "zephyr_west_flash",
+            "flash_args":      {"runner": "openocd",
+                                "build_dir": "/tmp/build/m33"},
+        },
+    ],
+    "ipc": [],
+    "helper_mcus": [
+        {
+            "name":          "gd32_bridge",
+            "chip":          "gd32g553",
+            "firmware_path": "firmware/gd32-bridge/build/gd32_bridge.bin",
+            "flash_method":  "swd_v2n_host",
+            "flash_args":    {
+                "interface": "cmsis-dap",
+                "target":    "gd32g553",
+                "base":      "0x08000000",
+            },
+        },
+    ],
+    "boot_order": [
+        {"core": "m33_sm",     "stage": 1},
+        {"core": "a55_cluster", "stage": 2},
+    ],
+}
+
+
+def _stub_args(app_path: Path, **overrides) -> SimpleNamespace:
+    base = dict(
+        app_path=str(app_path),
+        build_root=str(app_path / "build"),
+        dry_run=False,
+        core=None,
+        helper=None,
+        skip_missing_tools=False,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_alp_flash_dispatch_dry_run_walks_all_entries(tmp_path) -> None:
+    """End-to-end: --dry-run walks the manifest + calls each backend's
+    flash() once, NEVER invokes subprocess."""
+    _write_manifest(tmp_path, _HAPPY_MANIFEST)
+
+    import alp_flash
+
+    called: list[tuple[str, str]] = []   # (method, core_id)
+
+    def fake_flash(self_backend, ctx):
+        called.append((self_backend.name, ctx.core_id))
+        from flash_backends import FlashResult
+        return FlashResult(
+            ok=True, elapsed_s=0.0,
+            message=f"stub-ok[{ctx.core_id}]", command=[],
+        )
+
+    with patch.object(YoctoWicFlash,        "flash", fake_flash), \
+         patch.object(ZephyrWestFlash,      "flash", fake_flash), \
+         patch.object(SwdV2nHostFlash,      "flash", fake_flash), \
+         patch.object(BaremetalCmakeFlash,  "flash", fake_flash), \
+         patch.object(Cc3501eUsbBootloaderFlash, "flash", fake_flash), \
+         patch("alp_flash.shutil.which", return_value="/usr/bin/x"):
+        rc = alp_flash.run(_stub_args(tmp_path, dry_run=True))
+
+    assert rc == 0
+    core_ids = {core for _, core in called}
+    # Both slices + the gd32 helper.
+    assert core_ids == {"a55_cluster", "m33_sm", "gd32_bridge"}
+
+
+def test_alp_flash_dispatch_filters_by_core(tmp_path) -> None:
+    """--core m33_sm should flash ONLY the m33_sm slice; no other
+    backend invocation should occur."""
+    _write_manifest(tmp_path, _HAPPY_MANIFEST)
+
+    import alp_flash
+    called: list[str] = []
+
+    def fake_flash(self_backend, ctx):
+        called.append(ctx.core_id)
+        from flash_backends import FlashResult
+        return FlashResult(ok=True, elapsed_s=0.0,
+                           message="ok", command=[])
+
+    with patch.object(YoctoWicFlash,        "flash", fake_flash), \
+         patch.object(ZephyrWestFlash,      "flash", fake_flash), \
+         patch.object(SwdV2nHostFlash,      "flash", fake_flash), \
+         patch.object(BaremetalCmakeFlash,  "flash", fake_flash), \
+         patch.object(Cc3501eUsbBootloaderFlash, "flash", fake_flash), \
+         patch("alp_flash.shutil.which", return_value="/usr/bin/x"):
+        rc = alp_flash.run(_stub_args(tmp_path, dry_run=True,
+                                      core="m33_sm"))
+
+    assert rc == 0
+    assert called == ["m33_sm"]
+
+
+def test_alp_flash_dispatch_filters_by_helper(tmp_path) -> None:
+    """--helper gd32_bridge should flash ONLY the gd32 helper."""
+    _write_manifest(tmp_path, _HAPPY_MANIFEST)
+
+    import alp_flash
+    called: list[str] = []
+
+    def fake_flash(self_backend, ctx):
+        called.append(ctx.core_id)
+        from flash_backends import FlashResult
+        return FlashResult(ok=True, elapsed_s=0.0,
+                           message="ok", command=[])
+
+    with patch.object(YoctoWicFlash,        "flash", fake_flash), \
+         patch.object(ZephyrWestFlash,      "flash", fake_flash), \
+         patch.object(SwdV2nHostFlash,      "flash", fake_flash), \
+         patch.object(BaremetalCmakeFlash,  "flash", fake_flash), \
+         patch.object(Cc3501eUsbBootloaderFlash, "flash", fake_flash), \
+         patch("alp_flash.shutil.which", return_value="/usr/bin/x"):
+        rc = alp_flash.run(_stub_args(tmp_path, dry_run=True,
+                                      helper="gd32_bridge"))
+
+    assert rc == 0
+    assert called == ["gd32_bridge"]
+
+
+def test_alp_flash_dispatch_skip_missing_tools(tmp_path) -> None:
+    """When --skip-missing-tools is set + no required tool is on PATH,
+    every slice is skipped (warned, not failed)."""
+    _write_manifest(tmp_path, _HAPPY_MANIFEST)
+
+    import alp_flash
+    flash_calls: list[str] = []
+
+    def fake_flash(self_backend, ctx):
+        flash_calls.append(ctx.core_id)
+        from flash_backends import FlashResult
+        return FlashResult(ok=True, elapsed_s=0.0,
+                           message="ok", command=[])
+
+    with patch.object(YoctoWicFlash,        "flash", fake_flash), \
+         patch.object(ZephyrWestFlash,      "flash", fake_flash), \
+         patch.object(SwdV2nHostFlash,      "flash", fake_flash), \
+         patch.object(BaremetalCmakeFlash,  "flash", fake_flash), \
+         patch.object(Cc3501eUsbBootloaderFlash, "flash", fake_flash), \
+         patch("alp_flash.shutil.which", return_value=None):
+        rc = alp_flash.run(_stub_args(tmp_path, skip_missing_tools=True))
+
+    assert rc == 0
+    # When tools are missing AND --skip-missing-tools is set, no
+    # backend.flash() is invoked at all.
+    assert flash_calls == []
+
+
+def test_alp_flash_dispatch_missing_manifest(tmp_path) -> None:
+    """If the manifest is missing, the command should fail loudly."""
+    # No manifest file at all.
+    import alp_flash
+    args = _stub_args(tmp_path)
+    with pytest.raises(SystemExit):
+        alp_flash.run(args)
+
+
+def test_alp_flash_dispatch_unknown_flash_method(tmp_path) -> None:
+    """A slice with a bogus flash_method should fail (not crash)."""
+    bad = dict(_HAPPY_MANIFEST)
+    bad["slices"] = [{
+        "core_id":         "m33_sm",
+        "os":              "zephyr",
+        "output_artefact": "/tmp/zephyr.elf",
+        "flash_method":    "totally_bogus",
+        "flash_args":      {"runner": "openocd"},
+    }]
+    bad["helper_mcus"] = []
+    bad["boot_order"] = [{"core": "m33_sm", "stage": 1}]
+    _write_manifest(tmp_path, bad)
+
+    import alp_flash
+    with patch("alp_flash.shutil.which", return_value="/usr/bin/x"):
+        rc = alp_flash.run(_stub_args(tmp_path, dry_run=True))
+    assert rc != 0
+
+
+def test_alp_flash_dispatch_cc3501e_not_implemented_is_skip(tmp_path) -> None:
+    """When a backend raises NotImplementedError, the dispatcher
+    should log + skip rather than failing the whole flow."""
+    manifest = {
+        "schema_version": 1,
+        "hw_info": {"sku": "E1M-V2N101"},
+        "slices": [],
+        "ipc": [],
+        "helper_mcus": [
+            {
+                "name":          "wifi_bt",
+                "chip":          "cc3501e",
+                "firmware_path": "firmware/cc3501e.bin",
+                "flash_method":  "cc3501e_usb_bootloader",
+                "flash_args":    {
+                    "device": "/dev/ttyACM0", "mode": "otp_program",
+                },
+            },
+        ],
+        "boot_order": [],
+    }
+    _write_manifest(tmp_path, manifest)
+
+    import alp_flash
+    with patch("alp_flash.shutil.which", return_value="/usr/bin/x"):
+        # Not a dry-run -> real call -> NotImplementedError -> skip.
+        rc = alp_flash.run(_stub_args(tmp_path, dry_run=False))
+    assert rc == 0    # skipped, not failed
