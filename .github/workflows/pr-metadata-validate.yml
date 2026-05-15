@@ -171,6 +171,64 @@ jobs:
               python3 scripts/validate_board_yaml.py --input "$f"
           done
 
+      # v2 schema validity sweep -- walks every board.yaml under
+      # examples/ + tests/ and runs scripts/validate_board_yaml.py.
+      # Per the v0.6 heterogeneous-OS design (§7 Phase 5), this is
+      # now a hard gate: Phase 4 migrated every in-repo board.yaml
+      # to schema_version: 2, so the loader rejects any remaining v1
+      # file at validate time and a fresh v1 paste into the tree
+      # fails the PR here (not at twister / bitbake time).
+      - name: v2 schema sweep across examples/ + tests/
+        run: |
+          set -euo pipefail
+          while IFS= read -r f; do
+              echo "--- v2-check: $f ---"
+              python3 scripts/validate_board_yaml.py --input "$f"
+          done < <(find examples tests -name board.yaml 2>/dev/null)
+
+      # Cross-validate: every `id:` in every metadata/socs/.../*.json
+      # cores[] block must have a matching key in every consuming
+      # SoM preset's `topology:` block.  Catches the case where a
+      # silicon update adds a new core (e.g. m33_sm) but the SoM
+      # preset's topology stops declaring an OS for it.  Per design
+      # §4.2 the topology key set is required to mirror the SoC's
+      # cores[].id set exactly.
+      - name: Cross-check SoC cores[].id vs SoM topology keys
+        run: |
+          python3 -c '
+          import json, sys, pathlib, yaml
+          root = pathlib.Path(".")
+          # Index every SoC cores[].id set keyed by relative path.
+          soc_cores = {}
+          for jf in (root / "metadata/socs").rglob("*.json"):
+              with jf.open() as fh:
+                  data = json.load(fh)
+              ids = [c.get("id") for c in data.get("cores", []) if c.get("id")]
+              soc_cores[jf.as_posix()] = set(ids)
+          # Walk every SoM preset, resolve its referenced SoC, and
+          # compare its topology keys against that SoC s id set.
+          failures = []
+          for sf in (root / "metadata/e1m_modules").glob("*.yaml"):
+              with sf.open() as fh:
+                  preset = yaml.safe_load(fh) or {}
+              topology = preset.get("topology") or {}
+              if not topology:
+                  continue
+              soc_ref = preset.get("soc_ref") or preset.get("soc") or ""
+              matched = [p for p in soc_cores if soc_ref and p.endswith(soc_ref)]
+              if not matched:
+                  print(f"NOTE: {sf} -> soc_ref={soc_ref!r} not yet resolvable; skipping.")
+                  continue
+              soc_path = matched[0]
+              expected = soc_cores[soc_path]
+              actual = set(topology.keys())
+              if expected != actual:
+                  failures.append((sf.as_posix(), soc_path, expected, actual))
+          for sf, sp, exp, act in failures:
+              print(f"::error::topology mismatch in {sf}: SoC {sp} declares cores={sorted(exp)}, topology has {sorted(act)}")
+          sys.exit(1 if failures else 0)
+          '
+
       # Unit-test the loader contract -- schema pass/fail, missing-
       # preset error, override merge, all four emit modes produce
       # non-empty output, dts-overlay structural shape.  Catches

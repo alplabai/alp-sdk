@@ -1,9 +1,10 @@
-# board.yaml -- ALP SDK project configuration
+# board.yaml -- ALP SDK project configuration (schema v2)
 #
 # Copy this template to your application root and edit the values
-# for your project.  scripts/alp_project.py reads this file and
-# emits the equivalent Kconfig fragments (Zephyr), CMake -D flags
-# (plain CMake), or local.conf snippets (Yocto).
+# for your project.  scripts/alp_orchestrate.py reads this file,
+# resolves the SoM topology, fans out into per-core build slices
+# (Zephyr / Yocto / baremetal), and emits a system manifest that
+# `west alp-image` / `west alp-flash` / OTA consume.
 #
 # === This is the ONLY place to configure the firmware. ===
 #
@@ -12,13 +13,14 @@
 # from this file.  If you can't express what you need here, the
 # right fix is to extend the schema -- file an issue.
 #
-# See docs/board-config.md ("Single source of truth" section)
-# for the rationale + the v0.4 follow-ups (DTS overlays + west.yml
-# pinning + per-test configs) that close the remaining gaps.
+# See docs/heterogeneous-builds.md for the per-core walk-through
+# and docs/board-config.md for the schema reference.  The full
+# design rationale lives at
+# docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
 #
-# Validated against metadata/schemas/board-config-v1.schema.json.
+# Validated against metadata/schemas/board-config-v2.schema.json.
 
-schema_version: 1
+schema_version: 2
 
 # -------------------------------------------------------------------
 # SoM identity -- which MODULE does this firmware target?
@@ -34,10 +36,10 @@ som:
   #   E1M-AEN301 / AEN401 / AEN501 / AEN601 / AEN701 / AEN801   (Alif Ensemble)
   #   E1M-V2N101 / V2N102                                       (Renesas RZ/V2N)
   #   E1M-V2M101 / V2M102                                       (V2N + DEEPX DX-M1)
-  #   E1M-NX9xxx                                                (NXP i.MX 93, SKU TBD)
+  #   E1M-NX9xxx                                                (NXP i.MX 93)
   #
   # The SDK ships per-SKU presets at:
-  #   metadata/e1m_modules/<family>/sku-<sku>.yaml
+  #   metadata/e1m_modules/<MPN>.yaml
   sku: E1M-AEN701
 
   # Hardware revision the firmware is built for.  Optional --
@@ -70,7 +72,8 @@ som:
 # Distinct from `som` above: the carrier is the user-or-EVK PCB the
 # SoM mounts on.  This is where IMUs, barometers, OLEDs, cameras,
 # mic/speaker amps, current monitors, I/O expanders, and similar
-# carrier-side parts get declared.
+# carrier-side parts get declared.  Shared across cores (a carrier
+# is a physical assembly fact, not a runtime mapping fact).
 #
 # Stock carrier names:
 #   E1M-EVK     -- 35x35 EVK for AEN / N93 SoMs
@@ -101,70 +104,87 @@ carrier:
   #   tas2563:    false   # no speaker amps populated
 
 # -------------------------------------------------------------------
-# Target OS backend
+# Per-core runtime + app slices (board.yaml v2)
 # -------------------------------------------------------------------
-# zephyr     -- RTOS path, lands on E1M-AEN (full v0.1+) and
-#               V2N-Zephyr (v0.3+).  Uses prj.conf for fine-tuning.
-# yocto      -- Linux user-space, V2N/V2N-M1 family (v0.4
-#               first-class).  See yocto/meta-alp/README.md.
-# baremetal  -- No OS; CMSIS-Driver layer directly on Alif/Renesas
-#               HALs.  v0.2+ for AEN.
-os: zephyr
-
-# -------------------------------------------------------------------
-# Inference backend (omit for default "auto")
-# -------------------------------------------------------------------
-# inference:
-#   backend: auto         # auto picks the best NPU for the SoM
-#                         # (Ethos-U on AEN, DRP-AI on V2N, DEEPX
-#                         # on V2N-M1, Ethos-U65 on N93)
-#                         # Explicit alternatives: cpu | ethos_u |
-#                         # drpai | deepx_dx
-#   default_arena_kib: 128
-
-# -------------------------------------------------------------------
-# Optional libraries (no SDK wrapper -- apps use native API)
-# -------------------------------------------------------------------
-# Uncomment any you want.  When listed, the SDK adds the upstream
-# include path + the matching compile-time profile (from
-# metadata/library-profiles/<lib>/) so the library is set up
-# correctly for the embedded environment.  You use the library
-# through its native API (e.g. `#include "etl/vector.h"`,
-# `lv_label_create(...)`, `nlohmann::json::parse(...)`).  No
-# <alp/...> wrapper -- "wrapping everything would be chaos."
+# Heterogeneous-OS orchestration (replaces v1's top-level `os:`).
+# Keys are canonical core IDs from the SoM preset's `topology:`
+# block (e.g. `a55_cluster`, `m33_sm`, `m55_hp`, `m55_he`,
+# `a32_cluster`, `m33`).  Per-core fields the orchestrator reads:
 #
-# libraries:
-#   # User-facing C++ libs
-#   - etl                 # ETL CPP container library (no-STL profile)
-#   - fmt                 # libfmt (header-only, no-iostream profile)
-#   - nlohmann_json       # nlohmann/json (no-exception profile)
-#   - doctest             # single-header C++ test framework
-#   # UI / display
-#   - lvgl                # LVGL (lv_conf.h profile for E1M displays)
-#   # Crypto / TLS
-#   - mbedtls             # TLS 1.3 client + AEAD subset (no MD5/SHA1/CBC)
-#   # Filesystem
-#   - littlefs            # Fail-safe filesystem for microcontrollers
-#   # DSP / math
-#   - cmsis_dsp           # ARM CMSIS-DSP (Cortex-M / Cortex-A FFT, FIR, ...)
+#   os:          zephyr | yocto | baremetal | off
+#   app:         path to the app source directory for this core
+#                  - zephyr   -> dir with prj.conf or CMakeLists.txt
+#                  - baremetal-> dir with CMakeLists.txt
+#                  - yocto    -> recipe directory OR `image:` instead
+#   image:       Yocto image recipe name (e.g. alp-image-edge)
+#   peripherals: Zephyr peripheral subsystems / Yocto packages
+#                  needed by this slice (per-core, not project-wide)
+#   libraries:   Library knobs scoped to this slice
+#   inference:   Inference backend selection (per-slice)
+#   iot:         Connectivity feature toggles (per-slice)
 #
-# Note: SDK-internal libraries (LwRB used for audio DMA staging,
-# nanopb used for <alp/mproc.h> IPC frame serialisation) don't
-# appear in this list.  The SDK uses them directly when the
-# relevant subsystem is compiled in; consumers never enable them.
+# Customers may declare a subset of cores; missing keys inherit
+# the SoM preset's `topology:` defaults.  Use `os: off` to skip a
+# core entirely.
+#
+# Single-OS example:
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./src
+    peripherals: [gpio, i2c]
+    inference: { backend: auto, default_arena_kib: 128 }
+    # libraries: [...]
+    # iot:       {...}
+
+  # Other cores left unspecified inherit the SoM preset's defaults
+  # (e.g. m55_he gets `os: zephyr, app: alp-stock-shim`).  To skip
+  # a peer core explicitly:
+  #
+  # m55_he:
+  #   os: off
+
+# Heterogeneous example (V2N -- A55 Yocto + M33 Zephyr peers):
+#
+# cores:
+#   a55_cluster:
+#     os: yocto
+#     app: ./linux
+#     image: alp-image-edge
+#     peripherals: [ethernet, usb, emmc]
+#     libraries:   [mbedtls, nlohmann_json]
+#     iot:         { wifi: true, mqtt: true }
+#   m33_sm:
+#     os: zephyr
+#     app: ./m33_sm
+#     peripherals: [adc, pwm, i2c, gpio]
+#     libraries:   [cmsis_dsp]
 
 # -------------------------------------------------------------------
-# Connectivity feature toggles
+# Cross-core IPC carve-outs (optional)
 # -------------------------------------------------------------------
-# iot:
-#   wifi: true            # Pull in <alp/iot.h>'s Wi-Fi station path
-#   mqtt: true            # MQTT client (requires wifi or wired net)
-#   ble:  false           # BLE host stack (requires CONFIG_BT on Zephyr)
-#   tls:  true            # MbedTLS for <alp/security.h>
+# Each entry declares a shared-memory region the orchestrator
+# allocates from the SoM preset's `memory_map:` (filtered by
+# `accessible_from:` for the listed endpoints).  Addresses + endpoint
+# IDs are computed deterministically and emitted into the generated
+# <alp/system_ipc.h> header that both slices include.
+#
+# ipc:
+#   - kind: rpmsg                # rpmsg | raw_shmem | mailbox_only
+#     endpoints: [a55_cluster, m33_sm]
+#     carve_out_kb: 512
+#     name: alp_default_rpmsg
 
 # -------------------------------------------------------------------
-# Diagnostic surface
+# Chips populated for THIS project (not pre-populated by carrier)
 # -------------------------------------------------------------------
-# diagnostics:
-#   last_error: true      # alp_last_error() thread-local slot
-#   log_level:  info      # error | warn | info | debug | trace
+# chips:
+#   - lsm6dso
+#   - st7789
+
+# -------------------------------------------------------------------
+# Diagnostic surface (project-wide)
+# -------------------------------------------------------------------
+diagnostics:
+  log_level: info       # error | warn | info | debug | trace
+  # last_error: true    # alp_last_error() thread-local slot

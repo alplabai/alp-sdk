@@ -1,0 +1,49 @@
+# board.yaml -- rpmsg-imx93
+#
+# Heterogeneous compute demo for E1M-NX9101 (NXP i.MX 93).  Same
+# pattern as rpmsg-v2n but for the i.MX 9-family heterogeneous SoC:
+#
+#   * `a55_cluster` -- Yocto consumer under `linux/`.
+#   * `m33`         -- Zephyr producer under `m33/` -- the same
+#                       source pattern as rpmsg-v2n's m33_sm slice,
+#                       but the iMX93's M33 carries no system-manager
+#                       role so the core ID is just `m33`.
+#
+# The iMX93 SoM preset's memory_map values are TBD pending the
+# user's authoritative HW writeup; until those land, `west alp-build`
+# will fail at carve-out resolution with a clear message.  This
+# example's structural files are correct in shape today.
+
+schema_version: 2
+
+som:
+  sku: E1M-NX9101
+  hw_rev: r1
+
+carrier:
+  name: E1M-EVK              # 35x35 EVK -- same carrier as the AEN family.
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+    libraries: [mbedtls, nlohmann_json]
+  m33:
+    os: zephyr
+    app: ./m33
+    peripherals: [adc, pwm, i2c, gpio]
+    libraries: [cmsis_dsp]
+
+# Cross-core RPMsg carve-out.  Once the SoM preset carries hard
+# memory_map values, the orchestrator allocates from the region whose
+# `accessible_from:` covers both endpoints.  Spec §6.8: i.MX 93's
+# M33 has no cache, so the default non-cacheable region wins.
+ipc:
+  - kind: rpmsg
+    endpoints: [a55_cluster, m33]
+    carve_out_kb: 512
+    name: alp_default_rpmsg
+
+diagnostics:
+  log_level: info

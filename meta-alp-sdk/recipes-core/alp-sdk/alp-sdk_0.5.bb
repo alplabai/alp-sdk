@@ -32,6 +32,23 @@ EXTRA_OECMAKE = "-DALP_SDK_BUILD_SHARED=ON      \
                  -DALP_SDK_BUILD_EXAMPLES=OFF   \
                  -DALP_OS=yocto"
 
+# Per-machine inference backend selection drives optional deps.
+# alp-inference auto-detects at runtime, but if the build pins a
+# default the matching runtime must be installed.  These overrides
+# fire on the historical (un-suffixed) MACHINEOVERRIDES strings;
+# the -a55 cluster MACHINEs prepend those onto MACHINEOVERRIDES.
+DEPENDS:append:e1m-v2n101 = " drpai-driver"
+DEPENDS:append:e1m-v2n102 = " drpai-driver"
+DEPENDS:append:e1m-v2m101 = " drpai-driver dxm1-runtime"
+DEPENDS:append:e1m-v2m102 = " drpai-driver dxm1-runtime"
+DEPENDS:append:e1m-nx9101 = " ethosu-driver-library"
+
+EXTRA_OECMAKE:append:e1m-v2n101 = " -DALP_INFERENCE_BACKEND=drpai"
+EXTRA_OECMAKE:append:e1m-v2n102 = " -DALP_INFERENCE_BACKEND=drpai"
+EXTRA_OECMAKE:append:e1m-v2m101 = " -DALP_INFERENCE_BACKEND=deepx"
+EXTRA_OECMAKE:append:e1m-v2m102 = " -DALP_INFERENCE_BACKEND=deepx"
+EXTRA_OECMAKE:append:e1m-nx9101 = " -DALP_INFERENCE_BACKEND=ethosu"
+
 FILES:${PN}     += "${libdir}/libalp_sdk.so.*"
 FILES:${PN}-dev += "${libdir}/libalp_sdk.so    \
                     ${includedir}/alp/*.h      \

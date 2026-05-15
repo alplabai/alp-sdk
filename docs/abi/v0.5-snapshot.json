@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-14",
+  "generated": "2026-05-15",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -6340,6 +6340,58 @@
         "channel_id": {
           "definition": "typedef struct { uint32_t channel_id;",
           "hash": "b9a759f74c683398"
+        }
+      }
+    },
+    "alp/rpc.h": {
+      "functions": {
+        "alp_rpc_call": {
+          "hash": "bf0cb5629f817367",
+          "signature": "alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method, const void *req, size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms);"
+        },
+        "alp_rpc_close": {
+          "hash": "dcf59935692075e0",
+          "signature": "void alp_rpc_close(alp_rpc_channel_t *ch);"
+        },
+        "alp_rpc_send": {
+          "hash": "c85e5a8d173ec7dc",
+          "signature": "alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, size_t len);"
+        },
+        "alp_rpc_subscribe": {
+          "hash": "d0eb3f7a68d621cf",
+          "signature": "alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb, void *user);"
+        },
+        "alp_rpc_unsubscribe": {
+          "hash": "6b615c99daa84716",
+          "signature": "alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method);"
+        }
+      },
+      "macros": {
+        "ALP_RPC_DEFAULT_MBOX_CH": {
+          "hash": "0a9d80500b4b162f",
+          "value": "0u"
+        },
+        "ALP_RPC_METHOD_MAX_LEN": {
+          "hash": "6b42f50741d77374",
+          "value": "32"
+        }
+      },
+      "typedefs": {
+        "alp_rpc_channel_t": {
+          "definition": "typedef struct alp_rpc_channel alp_rpc_channel_t;",
+          "hash": "a5e67bbb41d8209b"
+        },
+        "alp_rpc_method_cb_t": {
+          "definition": "typedef void (*alp_rpc_method_cb_t)(const void *payload, size_t len, void *user);",
+          "hash": "81e09f97c916d4c0"
+        },
+        "alp_rpc_msg_cb_t": {
+          "definition": "typedef void (*alp_rpc_msg_cb_t)(const char *method, const void *payload, size_t len, void *user);",
+          "hash": "aad3e2a0d07c94f5"
+        },
+        "src_ept": {
+          "definition": "typedef struct { const char *name; uint32_t src_ept;",
+          "hash": "72a56650c509b2a5"
         }
       }
     },

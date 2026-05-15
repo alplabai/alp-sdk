@@ -4,8 +4,30 @@
   "title": "ALP SoM preset (metadata/e1m_modules/<SKU>.yaml) v1",
   "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  This schema validates the structural shape of every released-MPN preset; per-section tightness varies (the i2c_devices block is strictly typed; populated-parts refs stay loose because chip names are an open set governed by metadata/chips/<name>.yaml).",
   "type": "object",
-  "required": ["schema_version", "sku", "family", "silicon"],
+  "required": ["schema_version", "sku", "family", "silicon", "topology", "memory_map"],
   "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "topology": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "os": { "enum": ["zephyr", "baremetal"] }
+              },
+              "required": ["os"]
+            }
+          }
+        },
+        "required": ["topology"]
+      },
+      "then": {
+        "required": ["mailbox"]
+      }
+    }
+  ],
   "properties": {
     "schema_version": {
       "type": "integer",
@@ -48,6 +70,44 @@
       "type": "object",
       "additionalProperties": true
     },
+    "topology": {
+      "type": "object",
+      "description": "Per-core default runtime + app mapping.  Keys are canonical `cores[].id` values from the resolved SoC spec (e.g. `a55_cluster`, `m33_sm`, `m55_hp`, `m55_he`, `a32_cluster`, `m33`).  Customer's board.yaml `cores:` block inherits + overrides.",
+      "additionalProperties": {
+        "$ref": "#/$defs/topology_entry"
+      }
+    },
+    "memory_map": {
+      "type": "array",
+      "description": "On-die + on-module memory regions visible to one or more cores.  Used by the orchestrator to allocate IPC carve-outs.  Per the project's standing convention, AEN / iMX93 numeric values may be TBD until the user supplies the HW-config writeup.",
+      "items": {
+        "$ref": "#/$defs/memory_region"
+      }
+    },
+    "mailbox": {
+      "type": "object",
+      "description": "Vendor mailbox / IPC controller + channel reservations.  Required when any topology entry runs Zephyr or baremetal.  Per the project's standing convention, AEN / iMX93 controller name may be TBD until the user supplies the HW-config writeup.",
+      "required": ["controller", "channels"],
+      "additionalProperties": false,
+      "properties": {
+        "controller": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[a-z][a-z0-9_]+$" },
+            { "type": "string", "const": "TBD" }
+          ],
+          "description": "Vendor mailbox controller identifier (e.g. `renesas_mhu`, `nxp_mu`, `alif_evtrtr`).  TBD when the hand-written HW config still owes the value."
+        },
+        "channels": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/mailbox_channel" }
+        }
+      }
+    },
+    "helper_firmware": {
+      "type": "array",
+      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`); they're independently-flashed supervisor / coprocessor MCUs whose flash flow needs to be visible to `west alp-flash`.  Per the project's standing convention, AEN CC3501E entries stay TBD until the `alplabai/cc3501e-firmware` repo releases its first binary.",
+      "items": { "$ref": "#/$defs/helper_firmware_entry" }
+    },
     "default_hw_rev": {
       "type": "string",
       "pattern": "^[a-z0-9_-]+$"
@@ -61,6 +121,144 @@
     }
   },
   "$defs": {
+    "topology_entry": {
+      "type": "object",
+      "required": ["os"],
+      "additionalProperties": false,
+      "properties": {
+        "os": {
+          "type": "string",
+          "enum": ["yocto", "zephyr", "baremetal", "off"],
+          "description": "Default runtime for this core.  Customer's board.yaml `cores.<id>.os` overrides."
+        },
+        "app": {
+          "type": "string",
+          "description": "Stock app (`alp-image-edge` for Yocto A-class, `alp-stock-shim` for Zephyr M-class) or a path to a custom app directory."
+        },
+        "machine": {
+          "type": "string",
+          "description": "Yocto MACHINE name.  Required for `os: yocto` entries."
+        },
+        "board": {
+          "type": "string",
+          "description": "Zephyr board target name.  Required for `os: zephyr` entries."
+        },
+        "toolchain": {
+          "type": "string",
+          "description": "Toolchain identifier (e.g. `poky-glibc`, `arm-zephyr-eabi`)."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "os": { "const": "yocto" } } },
+          "then": { "required": ["machine"] }
+        },
+        {
+          "if": { "properties": { "os": { "const": "zephyr" } } },
+          "then": { "required": ["board"] }
+        }
+      ]
+    },
+    "memory_region": {
+      "type": "object",
+      "required": ["name", "base", "accessible_from"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Region identifier (e.g. `ddr_main`, `ocram_low`, `m33_tcm`)."
+        },
+        "base": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "string", "const": "TBD" }
+          ],
+          "description": "Physical base address.  TBD when the hand-written HW config still owes the value."
+        },
+        "size_mib": {
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "const": "TBD" }
+          ],
+          "description": "Region size in MiB.  Provide either size_mib or size_kib."
+        },
+        "size_kib": {
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "const": "TBD" }
+          ],
+          "description": "Region size in KiB.  Provide either size_mib or size_kib."
+        },
+        "accessible_from": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]+$"
+          },
+          "description": "Core IDs that can access the region.  Must match keys in `topology:`.",
+          "minItems": 1
+        },
+        "cacheable": {
+          "type": "boolean",
+          "description": "When true the region is cacheable from all `accessible_from` cores.  Default carve-out is non-cacheable."
+        }
+      }
+    },
+    "mailbox_channel": {
+      "type": "object",
+      "required": ["id", "reserved_for"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Mailbox controller channel index."
+        },
+        "reserved_for": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Reservation tag (e.g. `alp_default_rpmsg`, `app`, `power_mgmt`)."
+        }
+      }
+    },
+    "helper_firmware_entry": {
+      "type": "object",
+      "required": ["name", "chip"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Helper-MCU instance identifier (e.g. `gd32_bridge`, `cc3501e_otp`).  Unique within the SoM preset's helper_firmware list."
+        },
+        "chip": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$",
+          "description": "Chip-id slug matching a `metadata/chips/<chip>.yaml` manifest (e.g. `gd32g553`, `cc3501e`)."
+        },
+        "firmware_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the prebuilt firmware image, or the literal string \"TBD\" pending an upstream release."
+        },
+        "flash_method": {
+          "type": "string",
+          "anyOf": [
+            { "pattern": "^[a-z][a-z0-9_]+$" },
+            { "const": "TBD" }
+          ],
+          "description": "Backend tool key consumed by `west alp-flash`'s helper-MCU dispatcher (e.g. `swd_v2n_host`, `cc3501e_usb_bootloader`).  TBD pending the authoritative flow."
+        },
+        "flash_args": {
+          "oneOf": [
+            { "type": "object", "additionalProperties": true },
+            { "type": "string", "const": "TBD" }
+          ],
+          "description": "Backend-specific args (interface, target, base address, ...) forwarded verbatim to the flash backend.  Object shape varies per `flash_method`; TBD when the method is TBD."
+        }
+      }
+    },
     "i2c_bus": {
       "type": "object",
       "required": ["devices"],

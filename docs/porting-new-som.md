@@ -13,11 +13,39 @@ E1M-* variant.  It assumes you already have:
 - A vendor HAL/SDK that exposes I2C/SPI/GPIO/UART (and any extras the
   variant offers, e.g. MIPI CSI-2).
 
-## 1. Decide your OS targets
+## 1. Confirm core topology + default OS mapping
 
-Edit `docs/os-support-matrix.md` and add a column for the new SoM.
-Mark each library `stub`, `planned`, or `GA` as appropriate.  Land
-this row first — it sets the contract for the rest of the port.
+A SoM is no longer "a Zephyr SoM" or "a Yocto SoM"; it's a set of
+on-die programmable cores, each of which runs a runtime.  Land the
+metadata for that topology first — every downstream step assumes
+it exists.
+
+1. **Populate `cores[]` in the SoC spec.**  Edit
+   `metadata/socs/<vendor>/<family>/<part>.json` and give each
+   on-die programmable core a normalized `id` per the §3.3
+   nomenclature in
+   [`docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`](superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md)
+   (cluster cores collapse into one key, e.g. `a55_cluster`;
+   M-class cores stay separate, e.g. `m33_sm`, `m55_hp`, `m55_he`).
+   The `id` must match the regex `^[a-z][a-z0-9_]+$` and be unique
+   within the SoC.
+2. **Add the per-SoM defaults.**  In
+   `metadata/e1m_modules/<SKU>.yaml`, add three blocks:
+   - `topology:` — one entry per `cores[].id` declaring the
+     default `os:` (+ `app:` / `image:` / `machine:` / `board:` /
+     `toolchain:` as appropriate).
+   - `memory_map:` — DDR + on-chip-RAM + per-core TCM regions
+     with `accessible_from:` so the orchestrator can resolve
+     carve-outs.
+   - `mailbox:` — controller name + per-channel reservations,
+     at minimum one channel `reserved_for: alp_default_rpmsg`.
+3. **Update `docs/os-support-matrix.md`.**  Add one column per
+   `<core_id>` × runtime pairing (not one per SoM × OS like the
+   pre-v0.6 shape).  A V2N port adds two columns: `V2N: a55_cluster
+   Yocto` and `V2N: m33_sm Zephyr`.  Mark each library `stub`,
+   `planned`, `code complete (untested)`, or `GA` as appropriate.
+   Land this row first — it sets the contract for the rest of the
+   port.
 
 ## 2. Add a vendor wrapper directory
 
@@ -36,21 +64,26 @@ The wrapper functions are **internal** — they are called from
 `src/<os>/peripheral.c`.  They are not part of the public surface.
 Naming convention: `vendors_<slug>_<peripheral>_<verb>()`.
 
-## 3. Hook the wrapper into one OS backend
+## 3. Hook the wrapper into each per-core OS backend
 
-Pick the OS this SoM ships against and edit:
+Wire the vendor wrapper into the backend(s) for every core class
+the SoM exposes — each per-core wiring is a separate step.
 
-- `src/zephyr/peripheral.c`     — for Zephyr targets, route through
-  Zephyr drivers first; fall back to vendor calls only when Zephyr
-  doesn't expose the feature.
-- `src/baremetal/peripheral.c`  — for bare-metal, call vendor wrappers
-  directly.
-- `src/yocto/peripheral.c`      — for Yocto, call into Linux userspace
+- **A-cluster present** (V2N, AEN E5..E8, iMX93)?  Wire
+  `src/yocto/peripheral.c` — call into Linux userspace
   (`/dev/i2c-N`, `spidev`, `gpio chardev v2`, `tty*`).
+- **M-class peer present** (V2N M33-SM, AEN M55-HP / M55-HE,
+  iMX93 M33)?  Wire `src/zephyr/peripheral.c` — route through
+  Zephyr drivers first; fall back to vendor calls only when
+  Zephyr doesn't expose the feature.
+- **Bare-metal slice** (any core with `os: baremetal`)?  Wire
+  `src/baremetal/peripheral.c` — call vendor wrappers directly.
 
-The OS backend dispatches on the studio-resolved instance id (`bus_id`,
-`pin_id`).  How that id maps to a vendor handle is per-SoM — typically
-a static lookup table.
+A SoM with both an A-cluster and an M-class peer needs both Yocto
+and Zephyr wiring; neither half is optional.  Each per-core
+backend dispatches on the studio-resolved instance id (`bus_id`,
+`pin_id`).  How that id maps to a vendor handle is per-SoM —
+typically a static lookup table.
 
 ## 4. Update the build glue
 

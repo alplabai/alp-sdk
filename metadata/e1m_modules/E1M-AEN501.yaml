@@ -51,6 +51,45 @@ capabilities:
   tmu_fft:              false
   tmu_fac:              false
 
+topology:
+  a32_cluster:
+    os: yocto
+    app: alp-image-edge
+    machine: e1m-aen501-a32             # Yocto MACHINE
+    toolchain: poky-glibc
+  m55_hp:
+    os: zephyr
+    app: alp-stock-shim
+    board: alp_e1m_aen501_m55_hp        # Zephyr board target
+    toolchain: arm-zephyr-eabi
+  m55_he:
+    os: zephyr
+    app: alp-stock-shim
+    board: alp_e1m_aen501_m55_he        # Zephyr board target
+    toolchain: arm-zephyr-eabi
+
+# Memory base addresses + sizes stay TBD until the user supplies
+# the authoritative HW config writeup.
+memory_map:
+  - { name: mram_main, base: TBD, size_kib: TBD, accessible_from: [a32_cluster, m55_hp, m55_he], cacheable: true  }
+  - { name: sram_main, base: TBD, size_kib: TBD, accessible_from: [a32_cluster, m55_hp, m55_he], cacheable: false }
+
+# Alif IPC controller name TBD pending the hand-written HW config.
+mailbox:
+  controller: TBD
+  channels:
+    - { id: 0, reserved_for: alp_default_rpmsg }
+    - { id: 1, reserved_for: app }
+    - { id: 2, reserved_for: app }
+    - { id: 3, reserved_for: power_mgmt }
+
+helper_firmware:
+  - name:          cc3501e_otp
+    chip:          cc3501e
+    firmware_path: TBD
+    flash_method:  TBD
+    flash_args:    TBD
+
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
 default_carrier:        E1M-EVK

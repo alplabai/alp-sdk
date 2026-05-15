@@ -44,6 +44,13 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/usb_zephyr.c
 )
 
+# v0.6 -- <alp/rpc.h> framed RPC over OpenAMP / RPMsg.  Gated on
+# CONFIG_ALP_SDK_RPC; when OFF the .c file compiles to NOSUPPORT
+# stubs so apps that don't opt in still link cleanly.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/rpc_zephyr.c
+)
+
 # Per-backend inference executors -- compile only when the matching
 # Kconfig opt-in is set.  Each backend's .cpp / .c source file
 # defines the alp_inference_<backend>_* hooks that inference_zephyr.c

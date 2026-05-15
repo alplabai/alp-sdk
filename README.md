@@ -24,7 +24,7 @@ application developers a single C/C++ API that works across every
 E1M-* SoM variant — present and future — by wrapping each vendor's
 SDK on top of ARM CMSIS.
 
-Supported OS targets: **Bare-metal · Zephyr RTOS · Yocto Linux**.
+Supported runtime topologies: **single-OS** (Zephyr / Yocto / bare-metal on a single core) and **heterogeneous** (Zephyr + Yocto + bare-metal coexisting on the same SoM, one declarative project).
 
 **Where to go next:** rendered docs at
 [**docs.alplab.ai/sdk/introduction**](https://docs.alplab.ai/sdk/introduction)
@@ -78,37 +78,72 @@ indexes the common ones with fixes.
 
 ## 30-second quick start
 
-A v0.3 project is **one declarative file** plus an empty `prj.conf`.
-Drop a `board.yaml` at your app root:
+A v0.6 project is **one declarative file** plus per-core app
+directories.  Drop a `board.yaml` at your app root:
 
 ```yaml
-schema_version: 1
+schema_version: 2
 
 som:
-  sku: E1M-AEN701      # your MPN -- the SDK ships a preset for every released MPN
+  sku: E1M-V2N101      # your MPN -- the SDK ships a preset for every released MPN
+  hw_rev: r1
 
 carrier:
-  name: E1M-EVK        # or your own custom carrier
+  name: E1M-X-EVK      # or your own custom carrier
 
-os: zephyr             # zephyr | yocto | baremetal
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+    peripherals: [ethernet, usb, emmc]
+    libraries:   [mbedtls, nlohmann_json]
+    iot:         { wifi: true, mqtt: true }
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    peripherals: [adc, pwm, i2c, gpio]
+    libraries:   [cmsis_dsp]
+    inference:   { backend: cpu }
 
-peripherals:           # what your app actually uses
-  - i2c
-  - pwm
+ipc:
+  - kind: rpmsg
+    endpoints: [a55_cluster, m33_sm]
+    carve_out_kb: 512
+    name: alp_default_rpmsg
 
 diagnostics:
   log_level: info
 ```
 
-The build picks it up automatically — `scripts/alp_project.py`
-emits `build/generated/alp.conf` at CMake-configure time and Zephyr
-layers it on top of `prj.conf` via `OVERLAY_CONFIG`.  Every block
-above except `schema_version` / `som` / `carrier` / `os` is optional;
+Each entry under `cores:` maps one on-die programmable core to a
+runtime (`yocto`, `zephyr`, `baremetal`, or `off`) plus its app
+slice.  The loader (`scripts/alp_project.py`) fans out per-core:
+each Zephyr slice gets a Kconfig fragment layered onto its own
+`prj.conf` via `OVERLAY_CONFIG`; each Yocto slice gets a
+`local.conf` snippet consumed by bitbake.  Inside each
+`cores.<id>` block every field except `os:` + `app:` is optional;
 the [`gpio-button-led` example](examples/gpio-button-led/) for
 instance skips `peripherals:` entirely and uses
 `carrier.populated.button_led: true` to pull the chip driver in.
 See [`docs/board-config.md`](docs/board-config.md) for the full
-schema reference.
+schema reference and
+[`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md) for
+the dual-app project walk-through.
+
+### What runs where
+
+| SoM family | A-class cores | M-class cores | Heterogeneous? |
+|---|---|---|---|
+| E1M-AEN E3/E4 | — | M55-HP, M55-HE (both Zephyr) | No — RTOS-only silicon |
+| E1M-AEN E5..E8 | A32 cluster (Yocto) | M55-HP, M55-HE (Zephyr) | Yes |
+| E1M-X V2N / V2N-M1 | A55 cluster (Yocto) | M33-SM (Zephyr) | Yes |
+| E1M-N93 (iMX93) | A55 cluster (Yocto) | M33 (Zephyr) | Yes |
+
+A bare `som: { sku: <MPN> }` produces a working dual-image build
+for every heterogeneous SoM — the per-core OS defaults come from
+the SoM preset's `topology:` block.  Customers override on a
+per-core basis via the project's `cores:` block.
 
 Want a GUI?  Install the [VS Code extension](https://github.com/alplabai/alp-sdk-vscode) — schema-aware
 editing, a configurator panel with dropdowns for every released MPN
@@ -129,12 +164,14 @@ setup notes.
 
 ## Status
 
-**v0.3 candidate** — recorded in
+**v0.6 ramp — paper-correct, pre-HIL** — recorded in
 [`metadata/sdk_version.yaml`](metadata/sdk_version.yaml).  Surface
 landed; runtime implementations fill in across point releases.  Code
 merged ≠ verified — every claim is tracked in
 [`docs/test-plan.md`](docs/test-plan.md), and a release does not tag
 until its gating rows flip to ✅.
+
+v0.6 lands heterogeneous OS orchestration — see ADR 0010 + [`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md).
 
 - Roadmap: [`VERSIONS.md`](VERSIONS.md).
 - What changed when: [`CHANGELOG.md`](CHANGELOG.md).
@@ -162,9 +199,9 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 ### AI framework (on-device)
 
 - **TFLite Micro** dispatched to silicon-specific NPU back-ends:
-  - **Arm Ethos-U** — Alif Ensemble (AEN family) + NXP i.MX 93 (N93 family; U55 / U65 variants)
-  - **Renesas DRP-AI3** — RZ/V2N (V2N family)
-  - **DEEPX DX-M1** — V2N + DX-M1 (V2M family); ONNX → DXNN compiler, model-family agnostic
+  - **Arm Ethos-U** — Alif Ensemble (AEN family; **U55** on every E3..E8 SKU, **U85** on E4 / E6 / E8 — Transformer-capable) + NXP i.MX 93 (N93 family; **U65**)
+  - **Renesas DRP-AI3** — RZ/V2N (V2N family); supports YOLO v5 / v8 detection on top of classification + segmentation models.
+  - **DEEPX DX-M1** — V2N + DX-M1 (V2M family); ONNX → DXNN compiler, model-family agnostic; first-class support for YOLO v5 / v8 / NAS detection backbones.
   - **CPU** — reference-kernel fallback on any target
 - Offline training (off-device) lives in TensorFlow / PyTorch.
 
@@ -191,11 +228,11 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 
 ### OS backend
 
-Bare-metal · Yocto · Zephyr.  Selected by `os:` in `board.yaml`.
+Bare-metal · Yocto · Zephyr.  Selected per-core in `board.yaml`'s `cores:` block.
 
 ### Vendor SDK
 
-Alif Ensemble · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1 · TI SimpleLink (CC3501E coprocessor).
+Alif Ensemble · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1.
 
 ### HW + HAL
 
@@ -207,16 +244,23 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
 └──────────────────────────────────────────────────────────────────────────────┘
 
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
-  │ AI Framework  │ ─► │  TFLM   →  Ethos-U   (Alif AEN, NXP N93 / U55+U65) │
-  │  (on-device)  │    │         →  DRP-AI3   (Renesas V2N)                 │
+  │ AI Framework  │ ─► │  TFLM   →  Ethos-U   Alif AEN (U55 all E3..E8;     │
+  │  (on-device)  │    │                       U85 on E4/E6/E8 — Transformer)│
+  │               │    │                      NXP N93 (U65)                 │
+  │               │    │         →  DRP-AI3   (Renesas V2N)                 │
   │               │    │         →  DEEPX DX-M1  (V2M family)               │
   │               │    │         →  CPU       (reference kernels)           │
+  │               │    │  Model families: classification, detection (YOLO   │
+  │               │    │    v5/v8 on DEEPX + DRP-AI3), segmentation,        │
+  │               │    │    keyword-spotting, pose                          │
   │               │    │  · · · offline training only: TensorFlow, PyTorch  │
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
-  │ Dev Tooling   │ ─► │  VS Code extension  ·  board.yaml + loader         │
-  │   (v0.3 NEW)  │    │  validate_board_yaml.py  ·  GUI configurator       │
+  │ Dev Tooling   │ ─► │  board.yaml v2  ·  alp_project.py (per-core emit)  │
+  │   (v0.6)      │    │  alp_orchestrate.py (fan-out + system-manifest)    │
+  │               │    │  west alp-build / alp-image / alp-flash / alp-clean│
+  │               │    │  validate_board_yaml.py  ·  VS Code extension      │
   │               │    │  program_eeprom.py  ·  per-OS dependency bootstrap │
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
@@ -231,10 +275,16 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
   │               │    │  ─ Ethos-U / DRP-AI   ─ MQTT          ─ PSA Crypto │
   │               │    │  ─ DEEPX / CPU        ─ BLE 5.4       ─ OPTIGA TM  │
   │               │    │                                                    │
-  │               │    │  Display / GUI        HW Info         Multi-proc   │
-  │               │    │  ─ SSD1306 / 1331     ─ EEPROM mfst   ─ Mailbox    │
-  │               │    │  ─ LVGL               ─ BOARD_ID ADC  ─ Shared mem │
-  │               │    │                       ─ <alp/hw_info> ─ HW sem     │
+  │               │    │  Display / GUI        HW Info         DSP / Power  │
+  │               │    │  ─ SSD1306 / 1331     ─ EEPROM mfst   ─ alp_dsp_*  │
+  │               │    │  ─ LVGL               ─ BOARD_ID ADC    chain (FFT │
+  │               │    │  ─ GPU2D / Dave2D     ─ <alp/hw_info>   FAC, IIR)  │
+  │               │    │                                       ─ alp/power  │
+  │               │    │                                                    │
+  │               │    │  Heterogeneous IPC   (v0.6 NEW)                    │
+  │               │    │  ─ <alp/rpc.h>       framed RPMsg over OpenAMP     │
+  │               │    │  ─ <alp/system_ipc.h> auto-generated endpoint IDs  │
+  │               │    │  ─ <alp/mproc.h>     mailbox · shared mem · hwsem  │
   │               │    │                                                    │
   │               │    │  ─── 80 Tier 1 chip drivers + Tier 2 community repo│
   │               │    │       (lsm6dso, bmi323, bmp581,                    │
@@ -247,13 +297,14 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
-  │      OS       │ ─► │   Bare-metal         Yocto            Zephyr       │
+  │  OS  (per-    │ ─► │   Zephyr             Yocto            Bare-metal   │
+  │   core slice  │    │   M-class cores      A-class cores    no-RTOS      │
+  │   in cores:)  │    │   (heterogeneous = peers on the same SoM)          │
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
   │  Vendor SDK   │ ─► │   Alif Ensemble (AEN)   Renesas RZ/V2N             │
   │               │    │   NXP i.MX 93           DEEPX DX-M1                │
-  │               │    │   TI SimpleLink (CC3501E coprocessor)              │
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
@@ -304,7 +355,7 @@ whole family.
 
 | Family             | Form factor       | SKUs                                                                                  | Primary silicon                                              | AI throughput | OS targets         |
 |--------------------|-------------------|---------------------------------------------------------------------------------------|--------------------------------------------------------------|---------------|--------------------|
-| **E1M-AEN**        | E1M (35×35 mm)    | `E1M-AEN301`, `E1M-AEN401`, `E1M-AEN501`, `E1M-AEN601`, `E1M-AEN701`, `E1M-AEN801`    | Alif Semiconductor *Ensemble* E3–E8 (Cortex-M55 + optional Cortex-A32 + Ethos-U55) | up to ~1024 GOPS | Zephyr · bare-metal |
+| **E1M-AEN**        | E1M (35×35 mm)    | `E1M-AEN301`, `E1M-AEN401`, `E1M-AEN501`, `E1M-AEN601`, `E1M-AEN701`, `E1M-AEN801`    | Alif Semiconductor *Ensemble* E3–E8 (Cortex-M55 + optional Cortex-A32 + Ethos-U55, plus Ethos-U85 on E4 / E6 / E8) | up to ~1024 GOPS | Zephyr · bare-metal |
 | **E1M-X V2N**      | E1M-X (45×65 mm)  | `E1M-V2N101`, `E1M-V2N102`                                                            | Renesas RZ/V2N (4× Cortex-A55 + Cortex-M33 + DRP-AI3)        | 4 TOPS        | Yocto              |
 | **E1M-X V2N-M1**   | E1M-X (45×65 mm)  | `E1M-V2M101`, `E1M-V2M102`                                                            | Renesas RZ/V2N + DeepX DX-M1                                 | 4 + 25 TOPS   | Yocto              |
 | **E1M-i.MX93**     | E1M (35×35 mm)    | TBD                                                                                   | NXP i.MX 93 (2× Cortex-A55 + Cortex-M33 + Ethos-U65)         | ~0.5 TOPS     | Yocto              |
@@ -335,7 +386,7 @@ manifest:
   projects:
     - name: alp-sdk
       url: https://github.com/alplabai/alp-sdk
-      revision: v0.1.0
+      revision: main        # pin to a tag (v0.6.0, etc.) once released; v0.6 is pre-release
       path: modules/lib/alp-sdk
 ```
 
@@ -366,10 +417,10 @@ cmake -B build -DALP_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 
-# Zephyr (E1M-AEN, after the v0.1 implementation lands)
-west init -m https://github.com/alplabai/alp-sdk --mr v0.1.0 alp-ws
+# Zephyr (heterogeneous slice, v0.6 pre-release flow)
+west init -m https://github.com/alplabai/alp-sdk --mr main alp-ws
 cd alp-ws && west update
-west build -b alif_e7_dk_rtss_he tests/zephyr/peripheral
+west alp-build examples/rpmsg-v2n
 ```
 
 ## Repository layout

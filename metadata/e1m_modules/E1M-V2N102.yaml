@@ -76,6 +76,41 @@ capabilities:
   tmu_fft:              true
   tmu_fac:              true
 
+topology:
+  a55_cluster:
+    os: yocto
+    app: alp-image-edge
+    machine: e1m-v2n102-a55           # Yocto MACHINE
+    toolchain: poky-glibc
+  m33_sm:
+    os: zephyr
+    app: alp-stock-shim
+    board: alp_e1m_v2n102_m33_sm      # Zephyr board target
+    toolchain: arm-zephyr-eabi
+
+memory_map:
+  - { name: ddr_main,  base: 0x48000000, size_mib: 4096, accessible_from: [a55_cluster, m33_sm], cacheable: true  }
+  - { name: ocram_low, base: 0x00010000, size_kib:  512, accessible_from: [a55_cluster, m33_sm], cacheable: false }
+  - { name: m33_tcm,   base: 0x80000000, size_kib:  128, accessible_from: [m33_sm],               cacheable: false }
+
+mailbox:
+  controller: renesas_mhu
+  channels:
+    - { id: 0, reserved_for: alp_default_rpmsg }
+    - { id: 1, reserved_for: app }
+    - { id: 2, reserved_for: app }
+    - { id: 3, reserved_for: power_mgmt }
+
+helper_firmware:
+  - name:          gd32_bridge
+    chip:          gd32g553
+    firmware_path: firmware/gd32-bridge/build/gd32_bridge.bin
+    flash_method:  swd_v2n_host
+    flash_args:
+      interface: cmsis-dap
+      target:    gd32g553
+      base:      "0x08000000"
+
 default_hw_rev:         r1
 default_carrier:        E1M-X-EVK
 

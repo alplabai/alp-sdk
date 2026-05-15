@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Reference image for V2N / V2N-M1 edge AI development.  Built by:
-#   MACHINE = "e1m-v2m101" bitbake alp-image-edge
+# Reference image for V2N / V2N-M1 / i.MX 93 edge AI development.
+# Built by:
+#   MACHINE = "e1m-v2m101-a55" bitbake alp-image-edge
 #
 # Image contents:
 #   - Poky core-image-base.
@@ -36,9 +37,15 @@ IMAGE_INSTALL = " \
     openssh                        \
 "
 
-# Add the DEEPX runtime only on the V2N-M1 machine; the V2N101
-# machine config overrides this back to empty.
+# Add the DEEPX runtime only on the V2M (V2N + DEEPX) variants;
+# the plain V2N101 / V2N102 machine configs leave this empty.
+# Drives both -a55 sibling and historical e1m-v2m101 override
+# (via MACHINEOVERRIDES in the .conf).
 IMAGE_INSTALL:append:e1m-v2m101 = " \
+    dx-rt                          \
+    kernel-module-dx-rt-npu        \
+"
+IMAGE_INSTALL:append:e1m-v2m102 = " \
     dx-rt                          \
     kernel-module-dx-rt-npu        \
 "

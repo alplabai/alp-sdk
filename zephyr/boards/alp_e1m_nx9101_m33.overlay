@@ -1,0 +1,38 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Devicetree overlay for the M33 slice of an E1M-NX9101
+ * (NXP i.MX 93, A55 cluster + M33) heterogeneous project.
+ *
+ * NOTE: the NX9101 preset's `mailbox.controller` is still TBD
+ * (the i.MX 9 family uses the NXP MU "Messaging Unit"; the exact
+ * DT node name comes from the hand-written HW config).  Builds that
+ * pull in IPC carve-outs fail at orchestrator carve-out-resolve
+ * time with a clear OrchestratorError; the structural shape below
+ * is in place so the overlay compiles the moment the
+ * authoritative controller node lands.
+ */
+
+#include "../../build/generated/dts-reservations.dtsi"
+
+/ {
+    chosen {
+        zephyr,ipc     = &ipc0;
+        zephyr,ipc-shm = &alp_default_rpmsg;
+    };
+
+    soc {
+        ipc0: ipc@0 {
+            compatible = "zephyr,ipc-openamp-static-vrings";
+            memory-region = <&alp_default_rpmsg>;
+            /* TBD: insert NXP MU (Messaging Unit) phandle when the
+             *      NX9101 hand-written HW config supplies the node
+             *      name (preset.mailbox.controller in
+             *      metadata/e1m_modules/E1M-NX9101.yaml). */
+            mbox-names = "tx", "rx";
+            role = "remote";
+            status = "okay";
+        };
+    };
+};

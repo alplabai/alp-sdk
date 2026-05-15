@@ -173,11 +173,12 @@ On Yocto the same `<alp/audio.h>` API maps to ALSA's
 `board.yaml`:
 
 ```yaml
-os: yocto
-peripherals:
-  - audio
-libraries:
-  - none
+schema_version: 2
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    peripherals: [audio]
 ```
 
 Build + run as a normal Yocto userspace binary.

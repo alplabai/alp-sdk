@@ -8,7 +8,7 @@
 # to end on a single SoM, with the right NPU resolved by the
 # §D.lib.loader from the SKU's `capabilities:` block.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701           # E7 -- two Ethos-U55s, fast inference
@@ -18,32 +18,37 @@ som:
 carrier:
   name: E1M-EVK
 
-os: zephyr
-
-libraries:
-  - lvgl
-  - tflite_micro
-
-# Inference backend picked from the SoM preset (`ethos_u`).  The
-# loader maps that to:
-#   AEN701  -> CONFIG_ALP_TFLM_ETHOS_U55=y
-#   AEN401  -> CONFIG_ALP_TFLM_ETHOS_U85=y + ETHOS_U55=y
-#   AEN801  -> same as AEN401
-#   NX9101  -> CONFIG_ALP_TFLM_ETHOS_U65=y
-# Customers swap the `som.sku` line to compare U85 vs U55 dispatch
-# without touching the app source.
-inference:
-  backend: ethos_u
-  default_arena_kib: 256
-
-peripherals:
-  - i2c                    # Camera SCCB.
-  - spi                    # Display.
-  - gpio                   # Camera ancillaries + display D/C#.
+# Single-OS app on AEN701.  M55-HP runs camera capture, LVGL UI, and
+# NPU dispatch.  A32 cluster off (no Linux here); M55-HE inherits
+# the SoM topology's stock-shim so the second NPU stays paired.
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./src
+    libraries:
+      - lvgl
+      - tflite_micro
+    # Inference backend picked from the SoM preset (`ethos_u`).  The
+    # loader maps that to:
+    #   AEN701  -> CONFIG_ALP_TFLM_ETHOS_U55=y
+    #   AEN401  -> CONFIG_ALP_TFLM_ETHOS_U85=y + ETHOS_U55=y
+    #   AEN801  -> same as AEN401
+    #   NX9101  -> CONFIG_ALP_TFLM_ETHOS_U65=y
+    # Customers swap the `som.sku` line to compare U85 vs U55 dispatch
+    # without touching the app source.
+    inference:
+      backend: ethos_u
+      default_arena_kib: 256
+    peripherals:
+      - i2c                  # Camera SCCB.
+      - spi                  # Display.
+      - gpio                 # Camera ancillaries + display D/C#.
 
 chips:
-  - ov5640                 # 5 MP camera.
-  - st7789                 # 240x320 TFT.
+  - ov5640                   # 5 MP camera.
+  - st7789                   # 240x320 TFT.
 
 diagnostics:
   log_level: info

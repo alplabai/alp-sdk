@@ -11,7 +11,7 @@
 # E1M-V2N has no equivalent always-on AI complex, so this demo
 # is the AEN family's headline differentiator.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701            # E7 -- Cortex-M55 HE @ 160 MHz max
@@ -24,22 +24,28 @@ carrier:
                               # populated by the carrier preset
                               # (`pdm_mic: true`).
 
-os: zephyr
+# The wake-word demo lives on M55-HE (low-power always-on path).
+# A32 cluster off (no Linux).  M55-HP stays at the SoM topology
+# default so it can wake on detection for command parsing.
+cores:
+  a32_cluster:
+    os: "off"
+  m55_he:
+    os: zephyr
+    app: ./src
+    # TFLite Micro pulls in the CPU reference kernels; the AEN
+    # capabilities block routes the Ethos-U55 driver shim on top via
+    # CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y + CONFIG_ALP_TFLM_ETHOS_U55=y.
+    libraries:
+      - tflite_micro
+    # Inference backend stays AUTO so the same source builds on
+    # native_sim (CPU fallback) and on AEN (Ethos-U dispatch).
+    inference:
+      backend: ethos_u
+      default_arena_kib: 64  # ~30k-param CNN -- 64 KiB is generous.
 
-# TFLite Micro pulls in the CPU reference kernels; the AEN
-# capabilities block routes the Ethos-U55 driver shim on top via
-# CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y + CONFIG_ALP_TFLM_ETHOS_U55=y.
-libraries:
-  - tflite_micro
-
-# Inference backend stays AUTO so the same source builds on
-# native_sim (CPU fallback) and on AEN (Ethos-U dispatch).
-inference:
-  backend: ethos_u
-  default_arena_kib: 64      # ~30k-param CNN -- 64 KiB is generous.
-
-# No `peripherals:` block.  PDM mic input on Zephyr is the DMIC
-# audio subsystem rather than a peripheral driver class -- the
+# No per-core `peripherals:` block.  PDM mic input on Zephyr is the
+# DMIC audio subsystem rather than a peripheral driver class -- the
 # board.yaml schema's `peripherals:` enum doesn't carry `pdm`
 # (same convention as the audio-loopback example).  The mic
 # itself comes in via the carrier's pre-populated `pdm_mic`

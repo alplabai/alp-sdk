@@ -25,7 +25,7 @@ from datetime import date
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-TOOL = REPO / "tools" / "program_eeprom.py"
+TOOL = REPO / "scripts" / "program_eeprom.py"
 
 
 def _import_tool() -> object:

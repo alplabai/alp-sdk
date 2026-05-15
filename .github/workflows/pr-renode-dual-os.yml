@@ -1,0 +1,171 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Renode heterogeneous-boot smoke test.  Boots the V2N A55-Yocto +
+# M33-SM-Zephyr pair in Renode and asserts the RPMsg name-service
+# handshake completes within 60s.  Per the v0.6 heterogeneous-OS
+# design (§7 Phase 5 + §11 acceptance) this is the canary that
+# proves the orchestrator's two slices actually talk to each other.
+#
+# v0.6 note: Renode dual-OS test is a stretch goal -- `west alp-renode`
+# + the dual-OS REPL script don't exist yet (they land in Phase 3).
+# The actual command is wrapped in `continue-on-error: true` so this
+# workflow can't block PRs while Phases 1-3 are in flight.  Promotes
+# to a required check in v0.6.1 once the Phase 3 IPC contract lands
+# and the handshake message is stable.
+#
+# === Trigger chain choice ===
+#
+# Option A: `workflow_run` chained to pr-bitbake.yml succeeding.
+# Option B: re-run bitbake-from-cache inline in this workflow.
+#
+# We pick (A) -- `workflow_run`.  Reasoning: bitbake's self-hosted
+# runner is expensive + serialised; re-running it from cache here
+# would either need the same self-hosted runner (defeats the
+# point of cheap ubuntu-latest for the Renode VM) or refetch the
+# image artefact via the bitbake job's `actions/upload-artifact`
+# (already happening).  Downloading the artefact is strictly
+# cheaper than re-running bitbake.
+#
+# Caveat: `workflow_run` fires only for the *target branch* of
+# the PR -- it doesn't auto-run on the PR head ref.  That's fine
+# for the v0.6.1 promotion: the orchestrator only needs to verify
+# main's dual-OS contract hasn't regressed.  For PR-level coverage
+# pre-promotion, devs trigger `workflow_dispatch` manually.
+
+name: pr-renode-dual-os
+
+on:
+  workflow_run:
+    workflows: [pr-bitbake]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  renode:
+    name: renode · V2N101 dual-OS handshake
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Only run if the upstream bitbake workflow actually succeeded.
+    # `workflow_dispatch` triggers always run.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v4
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      # Renode's published apt repo carries stable releases.  Pin
+      # the version inline so a runner-image bump doesn't silently
+      # change Renode behaviour mid-month.  v1.15 is the current
+      # LTS-style line as of 2026-05.
+      - name: Install Renode
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              ca-certificates curl gnupg
+          curl -fsSL https://github.com/renode/renode/releases/download/v1.15.3/renode_1.15.3_amd64.deb \
+              -o /tmp/renode.deb
+          sudo apt-get install -y /tmp/renode.deb
+          renode --version
+
+      # Download the V2N A55 bitbake image from the upstream
+      # pr-bitbake.yml run (when triggered via workflow_run) or
+      # the latest successful run on main (when manually dispatched).
+      - name: Download V2N A55 bitbake image
+        uses: actions/download-artifact@v4
+        with:
+          name: bitbake-e1m-v2n101-a55-image
+          path: ${{ github.workspace }}/artefacts/bitbake
+          # `run-id`+`github-token` chain across workflows.  When
+          # triggered by workflow_run, GITHUB_TOKEN can reach the
+          # upstream run's artefacts.
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        # Renode integration is a stretch goal -- the upstream
+        # bitbake artefact only lands when a self-hosted runner is
+        # available + pr-bitbake succeeded.  Keep advisory so the
+        # workflow stays useful via workflow_dispatch even when the
+        # cross-workflow artefact handshake isn't wired yet.
+        # Promotes to required when the self-hosted bitbake runner
+        # is provisioned and the artefact name stabilises.
+        continue-on-error: true
+
+      # Download the M33-SM Zephyr ELF from pr-alp-build.yml.  Same
+      # cross-workflow artefact-fetch contract.  Note: the M33-SM
+      # ELF artefact name is not yet stabilised; once Phase 2 lands
+      # an explicit `actions/upload-artifact` for the per-slice ELF
+      # in pr-alp-build.yml, update the name pattern below.
+      - name: Download M33-SM Zephyr ELF
+        uses: actions/download-artifact@v4
+        with:
+          name: system-manifest-E1M-V2N101-heterogeneous-default
+          path: ${{ github.workspace }}/artefacts/zephyr
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        # Advisory until the per-slice ELF upload-artifact lands in
+        # pr-alp-build.yml under a stable name.  Promotes alongside
+        # the artefact-name stabilisation above.
+        continue-on-error: true
+
+      # The primary verification step.  `west alp-renode` is a Phase 2
+      # stub today and Renode itself isn't part of the standard CI
+      # runner image.  Keep advisory until the self-hosted runner
+      # ships Renode + the orchestrator's `alp-renode` command boots
+      # the dual-OS image to a stable handshake.  Promotes to
+      # required when the HW integration path lands in v0.6.1.
+      - name: west alp-renode (V2N dual-OS boot)
+        id: renode_boot
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/renode-logs
+          # The orchestrator picks up artefacts from a single
+          # bundle dir; copy both downloads into it.
+          mkdir -p /tmp/image-bundle
+          cp -r "${GITHUB_WORKSPACE}/artefacts/bitbake/." /tmp/image-bundle/ || true
+          cp -r "${GITHUB_WORKSPACE}/artefacts/zephyr/."  /tmp/image-bundle/ || true
+          # Cap wall time at 60s per design §11 acceptance ("RPMsg
+          # handshake completes within 60s in CI").  Renode's own
+          # script-level termination is layered on top.
+          timeout 90 west alp-renode \
+              --board E1M-V2N101 \
+              --image-bundle /tmp/image-bundle \
+              --log /tmp/renode-logs/v2n-dual-os.log
+        continue-on-error: true
+
+      - name: Assert "RPMsg handshake complete" in Renode log
+        if: steps.renode_boot.outcome == 'success'
+        run: |
+          set -euo pipefail
+          log=/tmp/renode-logs/v2n-dual-os.log
+          if [ ! -s "${log}" ]; then
+            echo "::error::Renode log missing or empty at ${log}"
+            exit 1
+          fi
+          if ! grep -q "RPMsg handshake complete" "${log}"; then
+            echo "::error::Renode log does not contain 'RPMsg handshake complete' within timeout"
+            echo "--- tail of ${log} ---"
+            tail -100 "${log}"
+            exit 1
+          fi
+          echo "RPMsg handshake observed; dual-OS smoke OK."
+
+      - name: Upload Renode logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renode-dual-os-logs
+          path: /tmp/renode-logs/
+          retention-days: 14
+          if-no-files-found: ignore

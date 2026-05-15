@@ -14,7 +14,7 @@ to your MPN, and you're done -- everything else is inherited from
 the SDK's per-MPN preset:
 
 ```yaml
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701        # your MPN -- the SDK ships a preset
@@ -23,13 +23,21 @@ som:
 carrier:
   name: E1M-EVK          # or your own custom carrier name
 
-os: zephyr               # zephyr | yocto | baremetal
+cores:
+  m55_hp:                # core IDs come from the SoC spec under
+    os: zephyr           # metadata/socs/<vendor>/<family>/<part>.json
+    app: ./src           # path (relative to board.yaml) of the Zephyr app
 ```
 
-That's the whole config for a vanilla "E1M-AEN701 on the EVK
-running Zephyr" build.  Optional blocks (`inference`, `libraries`,
-`iot`, `diagnostics`) add capability on top -- omit them to get
-the defaults from the MPN's SoM preset.
+That's the whole config for a vanilla "E1M-AEN701 on the EVK,
+M55-HP core running Zephyr" build.  Optional per-core blocks
+(`peripherals`, `libraries`, `inference`, `iot`, `diagnostics`)
+add capability on top — omit them to get the defaults from the
+MPN's SoM preset (`metadata/e1m_modules/<MPN>.yaml` `topology:`
+block).  See
+[`docs/heterogeneous-builds.md`](heterogeneous-builds.md) for the
+multi-core (`a55_cluster` + `m33_sm`, `a32_cluster` + `m55_hp` +
+`m55_he`) shape and the cross-core `ipc:` block.
 
 Released MPNs the SDK ships SoM presets for (look under
 `metadata/e1m_modules/<MPN>.yaml`):
@@ -690,19 +698,22 @@ the build config.  No SDK fork needed.
 
 ## Versioning
 
-`schema_version: 1` is the only valid value today.  Breaking
-changes bump to `2`; the SDK supports both for at least one
-minor cycle so consumers can migrate.  Backward-compatible
-additions (new optional fields, new enum values) ship in the
-same v1 schema with a CHANGELOG note.
+`schema_version: 2` is the only valid value as of v0.6.  The v1
+schema (top-level `os:` + global `peripherals:` / `libraries:`)
+was removed when heterogeneous orchestration landed; every project
+must now declare `cores:` even when it only uses one core.  See
+[`docs/heterogeneous-builds.md`](heterogeneous-builds.md) §"Migrating
+from v1" for the mechanical translation rules.
 
 ## See also
 
 - [`metadata/templates/board.yaml`](../metadata/templates/board.yaml)
   -- the canonical commented template.
+- [`docs/heterogeneous-builds.md`](heterogeneous-builds.md)
+  -- the multi-slice / `cores:` / `ipc:` walk-through.
 - [`docs/recommended-libraries.md`](recommended-libraries.md)
   -- the curated library list `libraries:` draws from.
 - [`docs/getting-started.md`](getting-started.md) -- the
   consumer-facing walkthrough.
-- [`metadata/schemas/board-config-v1.schema.json`](../metadata/schemas/board-config-v1.schema.json)
+- [`metadata/schemas/board-config-v2.schema.json`](../metadata/schemas/board-config-v2.schema.json)
   -- the authoritative schema.

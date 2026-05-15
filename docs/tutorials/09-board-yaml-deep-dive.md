@@ -20,35 +20,39 @@ the loader translates each block into backend config.
 `board.yaml` is the **single declarative file** that says what a
 firmware project targets.  Every backend's config -- Zephyr's
 `alp.conf`, plain-CMake `-D` flags, Yocto's `local.conf` -- is
-**derived** from it by `scripts/alp_project.py`.  The schema
-lives at
-[`metadata/schemas/board-config-v1.schema.json`](../../metadata/schemas/board-config-v1.schema.json);
+**derived** from it by `scripts/alp_project.py` +
+`scripts/alp_orchestrate.py`.  The schema lives at
+[`metadata/schemas/board-config-v2.schema.json`](../../metadata/schemas/board-config-v2.schema.json);
 this tutorial walks every top-level block.
 
 ## Required vs optional
 
 Required (the loader rejects a `board.yaml` missing any of these):
 
-- `schema_version: 1`
+- `schema_version: 2`
 - `som.sku`
-- `carrier.name`
-- `os` (one of `zephyr`, `yocto`, `baremetal`)
+- `cores:` (mapping of core_id → `{ os, ... }`); every non-`off`
+  core needs at least `os:` + (for Zephyr / baremetal) `app:`
 
-Everything else is optional.  Adding a block adds capability;
-omitting it falls back to defaults pulled from the SoM preset
-and carrier preset.
+Everything else is optional.  `carrier.name` is optional but
+strongly recommended (without it, the loader can't pull a
+populated-chips preset).  Adding any per-core or top-level block
+adds capability; omitting it falls back to defaults pulled from
+the SoM preset's `topology:` block.
 
 ## Block-by-block walkthrough
 
 ### `schema_version`
 
 ```yaml
-schema_version: 1
+schema_version: 2
 ```
 
-Locked at `1` until a major breaking schema change requires a
-bump.  Per [`docs/release-policy.md`](../release-policy.md),
-that won't happen pre-1.0 or in any minor v1.x release.
+Bumped to `2` in v0.6 when heterogeneous orchestration landed
+(top-level `os:` → per-core `cores.<id>.os:`).  The v1 schema is
+no longer accepted; see
+[`docs/heterogeneous-builds.md`](../heterogeneous-builds.md)
+§"Migrating from v1" for the mechanical translation.
 
 ### `som`
 
@@ -221,7 +225,7 @@ A custom carrier that doesn't match any shipped preset, with
 BLE + MQTT-TLS + LVGL display:
 
 ```yaml
-schema_version: 1
+schema_version: 2
 
 som:
   sku:    E1M-AEN701
@@ -239,26 +243,19 @@ carrier:
     USER_LED_0: E1M_GPIO_IO5
     BUTTON_0:   E1M_GPIO_IO3
 
-os: zephyr
-
-peripherals:
-  - i2c
-  - gpio
-  - audio
-
-inference:
-  backend: cpu       # don't use Ethos-U on this app
-
-iot:
-  wifi:
-    enabled: true
-  mqtt:
-    enabled: true
-    tls:     true
-
-libraries:
-  - lvgl
-  - mbedtls
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./src
+    peripherals: [i2c, gpio, audio]
+    libraries:   [lvgl, mbedtls]
+    inference:   { backend: cpu }      # don't use Ethos-U on this app
+    iot:
+      wifi: true
+      mqtt: true
+      tls:  true
+  m55_he:
+    os: "off"       # E7's second M55 stays dark on this app
 
 diagnostics:
   log_level: debug   # bring-up phase; tighten before release

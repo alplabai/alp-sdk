@@ -174,9 +174,14 @@
   "$defs": {
     "core": {
       "type": "object",
-      "required": ["type", "count"],
+      "required": ["id", "type", "count"],
       "additionalProperties": false,
       "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]+$",
+          "description": "Canonical core identifier used by board.yaml cores: and SoM preset topology: blocks. Unique within a SoC."
+        },
         "type":     { "type": "string", "description": "e.g. cortex-m55, cortex-a32, cortex-m33." },
         "subtype":  { "type": "string", "description": "e.g. high-perf, high-efficiency, supervisor." },
         "count":    { "type": "integer", "minimum": 1 },

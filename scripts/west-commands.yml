@@ -3,10 +3,35 @@
 # Registers alp-sdk's west-extension commands with any Zephyr
 # workspace that imports this repo as a module.  See
 # zephyr/module.yml's `west-commands:` field for how it's surfaced.
+#
+# Phase 2 of the 2026-05-15 heterogeneous-OS redesign splits the
+# single `alp-build` command into five focused commands; see
+# docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
+# §5.1.
 
 west-commands:
-  - file: scripts/west_commands/alp.py
+  - file: scripts/west_commands/alp_build.py
     commands:
       - name: alp-build
         class: AlpBuild
-        help: Validate board.yaml + generate config + build an alp-sdk app
+        help: Fan out a board.yaml v2 project into per-core build slices
+  - file: scripts/west_commands/alp_image.py
+    commands:
+      - name: alp-image
+        class: AlpImage
+        help: Assemble a single flashable bundle from system-manifest.yaml
+  - file: scripts/west_commands/alp_flash.py
+    commands:
+      - name: alp-flash
+        class: AlpFlash
+        help: Walk system-manifest.yaml and program every slice
+  - file: scripts/west_commands/alp_clean.py
+    commands:
+      - name: alp-clean
+        class: AlpClean
+        help: Remove the per-project build dir + orchestrator cache
+  - file: scripts/west_commands/alp_renode.py
+    commands:
+      - name: alp-renode
+        class: AlpRenode
+        help: Boot the system manifest in Renode (Phase 3 stub)

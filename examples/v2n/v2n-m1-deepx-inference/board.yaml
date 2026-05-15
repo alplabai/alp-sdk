@@ -6,7 +6,7 @@
 # exercises the framing only (every call returns NOSUPPORT or
 # NOT_READY but the structure is verified).
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-V2M101  # V2N-M1 variant with DEEPX DX-M1 NPU
@@ -14,15 +14,23 @@ som:
 carrier:
   name: E1M-EVK
 
-os: zephyr
-
-# Inference dispatcher routes through alp_project.py's
-# `inference:` block (which emits CONFIG_ALP_SDK_INFERENCE_*).
-# DEEPX-DX backend is Yocto-only -- under Zephyr the Kconfig
-# emits a NOSUPPORT-stub note; real inference happens on the
-# customer's Yocto image via dx_rt.
-inference:
-  backend: deepx_dx
+# Zephyr-side bring-up of the DEEPX rail + NPU dispatch sits on the
+# M33-SM (mirrors v1 `os: zephyr` shape).  The A55 cluster's real
+# DEEPX inference path is the v2n-m1-ros-perception example; we opt
+# the A-cluster off here so this slice runs fast under twister.
+cores:
+  a55_cluster:
+    os: "off"
+  m33_sm:
+    os: zephyr
+    app: ./src
+    # Inference dispatcher routes through alp_project.py's
+    # `inference:` block (which emits CONFIG_ALP_SDK_INFERENCE_*).
+    # DEEPX-DX backend is Yocto-only -- under Zephyr the Kconfig
+    # emits a NOSUPPORT-stub note; real inference happens on the
+    # customer's Yocto image via dx_rt.
+    inference:
+      backend: deepx_dx
 
 chips:
   - deepx_dxm1    # host driver: PCIe mux + M1_RESET sequencer

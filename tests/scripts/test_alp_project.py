@@ -77,18 +77,34 @@ class TestLoaderContract(unittest.TestCase):
             self.assertIn("CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y", rv.stdout)
 
     def test_bad_sku_pattern_fails_schema(self) -> None:
-        """The schema enforces the E1M-* SKU pattern; an arbitrary
-        string must fail validation with a non-zero exit."""
+        """The schema enforces the E1M-(AEN|V2N|V2M|NX9)... SKU pattern;
+        an arbitrary string must fail v2 schema validation with a
+        non-zero exit.  v2 inputs route through the orchestrator
+        loader, which surfaces schema violations via OrchestratorError;
+        the test accepts either the v1-style 'schema violation' or the
+        v2 'schema validation failed' phrasing."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 1
+                schema_version: 2
                 som:
                   sku: NOT-A-REAL-SKU
-                os: zephyr
+                cores:
+                  m55_hp:
+                    os: zephyr
+                    app: ./src
             """)
-            rv = _run_loader(input_path=path)
+            # Pick an emit mode that hits the v2 loader (schema validation
+            # is part of load_board_yaml).  system-manifest is the
+            # cheapest v2-only emit.
+            rv = _run_loader(input_path=path, emit="system-manifest")
             self.assertNotEqual(rv.returncode, 0)
-            self.assertIn("schema violation", rv.stderr.lower())
+            lower = rv.stderr.lower()
+            self.assertTrue(
+                "schema violation" in lower
+                or "schema validation failed" in lower
+                or "does not match" in lower,
+                msg=f"expected schema-violation marker; got: {rv.stderr}",
+            )
 
     def test_unknown_sku_with_valid_pattern_fails_preset_lookup(self) -> None:
         """A SKU that matches the pattern but has no preset on disk
@@ -323,22 +339,29 @@ class TestWestLibrariesEmit(unittest.TestCase):
 
 
 class TestValidatorPeripheralCheck(unittest.TestCase):
-    """validate_board_yaml.py's `peripherals:` vs SoC-spec check
-    (added when `peripherals:` landed in the schema)."""
+    """validate_board_yaml.py end-to-end smoke test on a shipped v2
+    example.  Under v2 the per-core `peripherals:` list lives inside
+    `cores.<id>.peripherals:` rather than at project scope; the
+    validator's schema + preset + hw_rev checks must still pass
+    cleanly on the canonical adc-voltmeter example."""
 
     def test_real_example_passes(self) -> None:
-        """The shipped adc-voltmeter example declares peripherals:
-        [adc] against E1M-AEN701 (alif:ensemble:e7) which routes
-        adc_12bit and adc_24bit -- must pass without exit code."""
+        """The shipped adc-voltmeter example declares
+        `cores.m55_hp.peripherals: [adc]` against E1M-AEN701
+        (alif:ensemble:e7).  Schema + preset + hw_rev checks must all
+        be green; the SoM preset's partial_hw_config flag means the
+        validator exits 0 with a 'clean (with warnings)' tail."""
+        example = REPO / "examples" / "adc-voltmeter" / "board.yaml"
         rv = subprocess.run(
             [sys.executable,
              str(REPO / "scripts" / "validate_board_yaml.py"),
-             "--input", str(REPO / "examples" / "adc-voltmeter" / "board.yaml")],
+             "--input", str(example)],
             capture_output=True, text=True, check=False,
         )
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
-        self.assertIn("peripheral 'adc' satisfied by alif:ensemble:e7",
-                      rv.stdout)
+        self.assertIn(f"OK   schema:", rv.stdout)
+        self.assertIn("OK   carrier preset: E1M-EVK", rv.stdout)
+        self.assertIn("OK   som E1M-AEN701 hw_rev:", rv.stdout)
 
 
 class TestHwBackendsLoader(unittest.TestCase):

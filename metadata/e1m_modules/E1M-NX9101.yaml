@@ -52,6 +52,39 @@ capabilities:
   tmu_fft:              false
   tmu_fac:              false
 
+topology:
+  a55_cluster:
+    os: yocto
+    app: alp-image-edge
+    machine: e1m-nx9101-a55             # Yocto MACHINE
+    toolchain: poky-glibc
+  m33:
+    os: zephyr
+    app: alp-stock-shim
+    board: alp_e1m_nx9101_m33           # Zephyr board target
+    toolchain: arm-zephyr-eabi
+
+# Memory base addresses + sizes stay TBD until the user supplies
+# the authoritative HW config writeup.
+memory_map:
+  - { name: ddr_main,  base: TBD, size_mib: TBD, accessible_from: [a55_cluster, m33], cacheable: true  }
+  - { name: ocram,     base: TBD, size_kib: TBD, accessible_from: [a55_cluster, m33], cacheable: false }
+
+# NXP MU (Messaging Unit) controller name TBD pending the
+# hand-written HW config.
+mailbox:
+  controller: TBD
+  channels:
+    - { id: 0, reserved_for: alp_default_rpmsg }
+    - { id: 1, reserved_for: app }
+    - { id: 2, reserved_for: app }
+    - { id: 3, reserved_for: power_mgmt }
+
+# No on-module helper MCUs on the iMX93 SKU -- everything that
+# matters lives on the SoC die (M33 system core is a `topology:`
+# peer, not an on-module helper).
+helper_firmware: []
+
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
 default_carrier:        E1M-EVK                # 35x35 carrier same as AEN family

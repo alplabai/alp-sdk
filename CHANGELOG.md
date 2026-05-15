@@ -5,20 +5,166 @@ All notable changes to the ALP SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] — v0.3.0 candidate
+## [Unreleased] — v0.6.0 candidate
 
 (Tracks `metadata/sdk_version.yaml`'s declared version.  Per
-`VERSIONS.md`, v0.1 / v0.2 / v0.3 each ship the *surface* first
-and accumulate runtime implementations in subsequent point
+`VERSIONS.md`, every point release ships the *surface* first
+and accumulates runtime implementations in subsequent point
 releases -- entries below collect every Added / Changed item
-that lands before the v0.3.0 tag.)
+that lands before the v0.6.0 tag.)
 
 > **Verification status.**  Entries below describe what's been
 > *coded and merged* on `main`; passing `pr-plain-cmake` /
-> `pr-twister` / `pr-static-analysis` is necessary but not
-> sufficient to call an item "GA".  Real-hardware verification is
-> tracked separately in [`docs/test-plan.md`](docs/test-plan.md)
-> -- a release does not tag until every row gating it flips to ✅.
+> `pr-twister` / `pr-static-analysis` / `pr-alp-build` is
+> necessary but not sufficient to call an item "GA".  Real-hardware
+> verification is tracked separately in
+> [`docs/test-plan.md`](docs/test-plan.md) -- a release does not
+> tag until every row gating it flips to ✅.
+
+### v0.6.0 — Heterogeneous OS orchestration (2026-05-15)
+
+The v0.6 redesign drops the framing that `os:` is a single
+SoM-wide choice and turns Zephyr / Yocto / bare-metal into
+peers that coexist on the same SoM, declared per-core from one
+`board.yaml`.  Full design at
+[`docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`](docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md);
+decision recorded in
+[`docs/adr/0010-heterogeneous-os-orchestration.md`](docs/adr/0010-heterogeneous-os-orchestration.md).
+
+`[UNTESTED]` across the board -- AEN + iMX93 hardware-fact
+fields carry `TBD` strings pending the maintainer's hand-written
+HW config per the project's "never invent values" convention.
+
+#### Added
+
+- **Heterogeneous OS orchestration.**  Per-core `cores:` block in
+  `board.yaml` v2 lets one project run Yocto on a Cortex-A cluster,
+  Zephyr on a Cortex-M peer, and bare-metal on a third core -- all
+  from one declarative config.  Each on-die programmable core takes
+  its own `os:` / `app:` / `peripherals:` / `libraries:` /
+  `inference:` / `iot:` block.
+- **`<alp/rpc.h>` framed RPC layer** on top of OpenAMP / RPMsg.
+  Zephyr backend (full) + Linux backend (full per Wave 5A); apps
+  never type endpoint IDs or carve-out addresses by hand.
+- **Five west extension commands** replacing the single
+  `west alp-build` from v0.5:
+  - `west alp-build` -- fan board.yaml out into per-core slices,
+    emit `system-manifest.yaml`.
+  - `west alp-image` -- consume the manifest, assemble a flashable
+    bundle (`build/image-bundle/`).
+  - `west alp-flash` -- walk the manifest's `boot_order:` and
+    program each piece with the right backend tool.
+  - `west alp-clean` -- tear down per-slice build dirs idempotently.
+  - `west alp-renode` -- boot the dual-OS image in Renode and
+    drive the RPMsg handshake smoke test.
+- **Generated artefacts** emitted by `scripts/alp_orchestrate.py`:
+  - `build/system-manifest.yaml` -- per-slice status + log paths +
+    artefact paths + boot order, byte-stable across rebuilds.
+  - `build/generated/dts-reservations.dtsi` -- shared-memory
+    carve-outs as Linux + Zephyr DT reservations.
+  - `build/generated/alp_system_ipc.h` -- name + address + endpoint
+    ID + mailbox channel macros that both halves `#include`.
+- **3 flagship heterogeneous examples** plus an offload demo:
+  - `examples/rpmsg-v2n/` -- V2N101 A55 (Yocto) ↔ M33-SM (Zephyr)
+    over RPMsg.
+  - `examples/rpmsg-aen/` -- AEN701 A32 (Yocto) ↔ M55-HP (Zephyr).
+  - `examples/rpmsg-imx93/` -- iMX93 A55 (Yocto) ↔ M33 (Zephyr).
+  - `examples/heterogeneous-offload/` -- A-cluster delegates an FFT
+    computation to the M peer over RPMsg.
+- **14 Zephyr DT overlays** covering every SoM × M-class core combo.
+- **Yocto recipes** under `meta-alp-sdk/recipes-alp/`:
+  - `alp-remoteproc_0.6.bb` -- userspace remoteproc helper.
+  - `alp-dts-reservations_0.6.bb` -- generated `reserved-memory:`
+    fragment shipped into the kernel DT.
+  - `alp-chips_0.6.bb` -- absorbed from the deleted
+    `yocto/meta-alp/` layer.
+  - `alp-edgeai_0.6.bb` -- path-rebased to track the renamed
+    `examples/aen/edgeai-vision-aen/` source tree.
+- **Per-SoM `topology:`, `memory_map:`, `mailbox:`,
+  `helper_firmware:` blocks** in `metadata/e1m_modules/E1M-*.yaml`
+  drive the orchestrator.  The topology key set mirrors the SoC's
+  `cores[].id` set exactly (cross-checked by
+  `pr-metadata-validate.yml`).
+- **ADR 0010** + [`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md)
+  walkthrough + glossary terms (system manifest, slice, carve-out,
+  helper-MCU firmware, topology key set).
+- **3 new CI workflows**:
+  - `.github/workflows/pr-alp-build.yml` -- orchestrator gate
+    across SoM × scenario matrix, asserts the system-manifest is
+    byte-stable across rebuilds.
+  - `.github/workflows/pr-bitbake.yml` -- self-hosted runner gate
+    that builds `alp-image-edge` per A-cluster MACHINE.
+  - `.github/workflows/pr-renode-dual-os.yml` -- Renode dual-OS
+    smoke test (advisory until the self-hosted Renode runner
+    ships in v0.6.1).
+- **Real flash backends** under `scripts/flash_backends/` (Wave 5B):
+  vendor flasher for the SoC, openocd-via-SWD for the GD32 helper,
+  USB-CDC bootloader for CC3501E.  `west alp-flash` walks the
+  manifest and dispatches to the right backend per artefact -- no
+  developer-side tool-selection.
+
+#### Changed
+
+- **`board.yaml` schema bumped to v2** -- top-level `os:` field
+  removed; `peripherals:` / `libraries:` / `inference:` / `iot:`
+  moved per-core under `cores.<id>`.  `carrier.populated:` +
+  `chips:` and `diagnostics:` stay top-level (they describe
+  physical assembly + project-wide diagnostics).  No migration
+  script -- no shipping customers yet; every in-repo `board.yaml`
+  is rewritten in the same redesign PR (32 files).
+- **`examples/mproc-dual-os-yocto-zephyr/` →
+  `examples/rpmsg-v2n/`** (renamed + sub-tree restructured;
+  `m33/` → `m33_sm/` to match the SoM topology key).
+- **`metadata/e1m_modules/E1M-*.yaml`** gained `topology:` +
+  `memory_map:` + `mailbox:` + `helper_firmware:` blocks.  V2N
+  preset is fully authored from the maintainer-confirmed pinmap;
+  AEN + iMX93 carry `TBD` strings on hardware-fact fields
+  (`memory_map.base`, `mailbox.controller`, AEN `cc3501e_otp`
+  firmware path).
+- **`metadata/socs/.../*.json` `cores[]`** -- every entry now
+  carries an `id:` field used as the topology key.
+- **`docs/os-support-matrix.md`** restructured from per-(SoM, OS)
+  columns to per-(SoM, core, OS) columns; split into Cortex-A and
+  Cortex-M tables.
+- **README "30-second quick start"** rewritten with a v2 per-core
+  example; "Status" section updated to v0.6 ramp.
+- **`meta-alp-sdk/conf/machine/` MACHINEs** renamed from
+  `e1m-v2n101.conf` to `e1m-v2n101-a55.conf` (per-cluster
+  naming -- the M33-SM is no longer implied to be part of the same
+  MACHINE).  `pr-bitbake.yml` matrix updated accordingly.
+- **AEN + iMX93 SoM presets** carry `TBD` strings on hardware-fact
+  fields pending the maintainer's hand-written HW config.  Per the
+  project's "never invent values" convention these stay `TBD`
+  rather than guessed defaults; the AEN audit at
+  `docs/aen-feature-audit-2026-05.md` and the iMX93 reference
+  manual sections to cross-check are linked from each preset.
+
+#### Removed
+
+- **`metadata/schemas/board-config-v1.schema.json`** -- v2 fully
+  replaces; no dual-schema fallback in the loader.
+- **`yocto/meta-alp/`** (entire tree) -- content absorbed into
+  `meta-alp-sdk/`; the duplicate layer is deleted.  Customers
+  consuming the old layer name should re-point at `meta-alp-sdk`.
+- **`scripts/west_commands/alp.py`** -- split into 5 focused
+  command modules (`alp_build.py`, `alp_image.py`, `alp_flash.py`,
+  `alp_clean.py`, `alp_renode.py`) under the same directory.  The
+  `west alp-build` entry point keeps its CLI surface; the v0.5
+  monolithic file is gone.
+
+#### Fixed
+
+- **The 13-line workaround comment** at the top of the old
+  `examples/mproc-dual-os-yocto-zephyr/board.yaml` apologising
+  that the two halves could not share one declaration -- removed.
+  Both halves now drive from one v2 `board.yaml`, the example
+  shape the schema *expects* to be used.
+
+#### References
+
+- ADR: [`docs/adr/0010-heterogeneous-os-orchestration.md`](docs/adr/0010-heterogeneous-os-orchestration.md)
+- Design spec: [`docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`](docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md)
+- App-developer walkthrough: [`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md)
 
 ### Decided (hardware-design decisions captured 2026-05-12)
 

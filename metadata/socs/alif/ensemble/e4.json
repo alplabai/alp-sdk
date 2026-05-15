@@ -60,6 +60,7 @@
   ],
   "cores": [
     {
+      "id": "m55_hp",
       "type": "cortex-m55",
       "subtype": "high-perf",
       "count": 1,
@@ -71,6 +72,7 @@
       "fpu": "double-precision"
     },
     {
+      "id": "m55_he",
       "type": "cortex-m55",
       "subtype": "high-efficiency",
       "count": 1,

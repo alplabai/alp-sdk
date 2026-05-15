@@ -1,0 +1,39 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Devicetree overlay for the M55-HP slice of an E1M-AEN301
+ * (Alif Ensemble E3, no A-class) heterogeneous project.
+ *
+ * NOTE: the AEN preset's `mailbox.controller` is still TBD (per
+ * `metadata/e1m_modules/E1M-AEN301.yaml`) -- builds that pull in
+ * IPC carve-outs fail at orchestrator carve-out-resolve time with
+ * a clear OrchestratorError so the customer cannot accidentally
+ * ship an unbacked overlay.  The structural shape below is in
+ * place so the overlay compiles the moment the hand-written HW
+ * config supplies the authoritative controller node name + memory
+ * map bases.
+ */
+
+#include "../../build/generated/dts-reservations.dtsi"
+
+/ {
+    chosen {
+        zephyr,ipc     = &ipc0;
+        zephyr,ipc-shm = &alp_default_rpmsg;
+    };
+
+    soc {
+        ipc0: ipc@0 {
+            compatible = "zephyr,ipc-openamp-static-vrings";
+            memory-region = <&alp_default_rpmsg>;
+            /* TBD: insert mailbox controller phandle when the AEN
+             *      hand-written HW config supplies the Alif evtrtr /
+             *      MHU node name (preset.mailbox.controller in
+             *      metadata/e1m_modules/E1M-AEN301.yaml). */
+            mbox-names = "tx", "rx";
+            role = "remote";
+            status = "okay";
+        };
+    };
+};

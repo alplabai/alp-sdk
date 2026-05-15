@@ -64,8 +64,9 @@ alp-sdk/
 │   ├── display.h
 │   ├── camera.h
 │   ├── gui.h                        # LVGL re-export with ALP defaults
-│   ├── math.h                       # CMSIS-DSP re-export
-│   ├── signal.h
+│   ├── dsp.h                        # composable DSP pipeline (FFT / FAC / filters)
+│   ├── rpc.h                        # framed RPMsg surface; opens with <alp/system_ipc.h>
+│   ├── inference.h                  # TFLM / Ethos-U / DRP-AI / DEEPX dispatcher
 │   └── iot.h
 ├── src/
 │   ├── common/                      # OS-agnostic helpers (bit ops, ring buffers, status->str)
@@ -89,7 +90,7 @@ alp-sdk/
 │   ├── module.yml                   # makes the repo importable as a Zephyr module
 │   └── Kconfig                      # ALP_SDK_* options exposed to Zephyr apps
 ├── ci/                              # GitHub Actions workflows (mirrored into .github/workflows/)
-├── yocto/meta-alp/                  # Yocto BSP layer (v0.4+; placeholder before then)
+├── meta-alp-sdk/                    # Yocto BSP layer (V2N / V2N-M1 / iMX93 SKUs)
 └── tests/                           # Unity / ztest smoke tests, QEMU + real silicon
 ```
 
@@ -101,20 +102,26 @@ those headers directly.
 
 ### Peripheral primitives
 
-| Class            | Header              | Backed by Zephyr            | v0.1 | v0.2 |
-|------------------|---------------------|-----------------------------|------|------|
-| I2C              | `alp/peripheral.h`  | `i2c_*`                     | ✓    | ✓    |
-| SPI              | `alp/peripheral.h`  | `spi_*`                     | ✓    | ✓    |
-| GPIO             | `alp/peripheral.h`  | `gpio_*`                    | ✓    | ✓    |
-| UART             | `alp/peripheral.h`  | `uart_*`                    | ✓    | ✓    |
-| PWM              | `alp/pwm.h`         | `pwm_*`                     |      | ✓    |
-| ADC              | `alp/adc.h`         | `adc_*` + `adc_dt_spec`     |      | ✓    |
-| Counter / Timer  | `alp/counter.h`     | `counter_*`                 |      | ✓    |
-| Quadrature decoder | `alp/counter.h`   | `sensor_*` (SENSOR_CHAN_ROTATION) |    | ✓    |
-| I2S / SAI        | `alp/i2s.h`         | `i2s_*` + memory slab       |      | ✓    |
-| CAN / CAN-FD     | `alp/can.h`         | `can_*` (FD via `CAN_MODE_FD`) |   | ✓    |
-| RTC              | `alp/rtc.h`         | `rtc_*`                     |      | ✓    |
-| Watchdog         | `alp/wdt.h`         | `wdt_*` + `wdt_install_timeout` |  | ✓    |
+All peripheral surfaces below are landed as of v0.6.  Per-row HW
+verification status (silicon-validated vs paper-correct) is tracked
+in [`docs/test-plan.md`](test-plan.md), not duplicated here.
+
+| Class            | Header              | Backed by Zephyr                              |
+|------------------|---------------------|-----------------------------------------------|
+| I2C              | `alp/peripheral.h`  | `i2c_*`                                       |
+| SPI              | `alp/peripheral.h`  | `spi_*`                                       |
+| GPIO             | `alp/peripheral.h`  | `gpio_*`                                      |
+| UART             | `alp/peripheral.h`  | `uart_*`                                      |
+| PWM              | `alp/pwm.h`         | `pwm_*`                                       |
+| ADC              | `alp/adc.h`         | `adc_*` + `adc_dt_spec`                       |
+| Counter / Timer  | `alp/counter.h`     | `counter_*`                                   |
+| Quadrature decoder | `alp/counter.h`   | `sensor_*` (SENSOR_CHAN_ROTATION)             |
+| I2S / SAI        | `alp/i2s.h`         | `i2s_*` + memory slab                         |
+| CAN / CAN-FD     | `alp/can.h`         | `can_*` (FD via `CAN_MODE_FD`)                |
+| RTC              | `alp/rtc.h`         | `rtc_*`                                       |
+| Watchdog         | `alp/wdt.h`         | `wdt_*` + `wdt_install_timeout`               |
+| USB              | `alp/usb.h`         | `usb_*` device stack                          |
+| Power            | `alp/power.h`       | `pm_*` (Zephyr power management subsystem)    |
 
 See [ADR 0003](adr/0003-peripheral-coverage.md) for why this list and
 not others.

@@ -1,0 +1,34 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Devicetree overlay for the M33 system-manager slice of an
+ * E1M-V2M101 (V2N + DEEPX DX-M1) heterogeneous project.  The SoC
+ * silicon is the same RZ/V2N N44 family as V2N101 -- the V2M delta
+ * is the on-module DEEPX NPU plus PCIe mux, none of which affect
+ * the M33's IPC plumbing.
+ */
+
+#include "../../build/generated/dts-reservations.dtsi"
+
+/ {
+    chosen {
+        zephyr,ipc     = &ipc0;
+        zephyr,ipc-shm = &alp_default_rpmsg;
+    };
+
+    soc {
+        ipc0: ipc@0 {
+            compatible = "zephyr,ipc-openamp-static-vrings";
+            memory-region = <&alp_default_rpmsg>;
+            mboxes = <&mhu 0>, <&mhu 1>;
+            mbox-names = "tx", "rx";
+            role = "remote";
+            status = "okay";
+        };
+    };
+};
+
+&mhu {
+    status = "okay";
+};

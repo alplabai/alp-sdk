@@ -62,6 +62,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio.c
+        # <alp/rpc.h> userspace RPMsg backend.  The .c file gates its
+        # full implementation behind ALP_SDK_HAVE_OPENAMP_USERLAND; the
+        # NOSUPPORT fallback is compile-tested on every Linux build so
+        # apps that don't pull in OpenAMP still link cleanly.
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc_yocto.c
     )
     target_compile_definitions(alp_sdk PRIVATE
         ALP_VENDOR_OVERRIDES_I2C=1
@@ -74,6 +79,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # alp_sdk target keeps consumer link lines simple.
     find_package(Threads REQUIRED)
     target_link_libraries(alp_sdk PUBLIC Threads::Threads)
+
+    # OpenAMP user-space libraries (libmetal + open-amp).  On Yocto
+    # these come from meta-openamp; on plain Debian/Ubuntu install
+    # libopen-amp-dev + libmetal-dev.  When the host doesn't have them
+    # the rpc_yocto.c file falls back to NOSUPPORT stubs at compile
+    # time (gated on ALP_SDK_HAVE_OPENAMP_USERLAND) so the SDK still
+    # links cleanly.
+    find_package(PkgConfig)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(OPENAMP_USER IMPORTED_TARGET open-amp libmetal)
+        if(OPENAMP_USER_FOUND)
+            target_compile_definitions(alp_sdk PRIVATE
+                ALP_SDK_HAVE_OPENAMP_USERLAND=1
+            )
+            target_link_libraries(alp_sdk PUBLIC PkgConfig::OPENAMP_USER)
+        else()
+            message(STATUS
+                "alp-sdk yocto: open-amp/libmetal not found via pkg-config; "
+                "alp_rpc_* stays NOSUPPORT.  Install libopen-amp-dev + "
+                "libmetal-dev (Debian/Ubuntu) or the meta-openamp recipes "
+                "on Yocto to enable.")
+        endif()
+    endif()
 
     # MQTT via libmosquitto -- gated on presence so plain-CMake builds
     # without a Mosquitto sysroot fall back to the NOSUPPORT stubs

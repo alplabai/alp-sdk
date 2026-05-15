@@ -1,0 +1,31 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Devicetree overlay for the M55-HP slice of an E1M-AEN401
+ * (Alif Ensemble E4, no A-class) heterogeneous project.
+ *
+ * NOTE: AEN preset's `mailbox.controller` is still TBD.  See the
+ * E1M-AEN301 M55-HP overlay for the same build-time guard rails.
+ */
+
+#include "../../build/generated/dts-reservations.dtsi"
+
+/ {
+    chosen {
+        zephyr,ipc     = &ipc0;
+        zephyr,ipc-shm = &alp_default_rpmsg;
+    };
+
+    soc {
+        ipc0: ipc@0 {
+            compatible = "zephyr,ipc-openamp-static-vrings";
+            memory-region = <&alp_default_rpmsg>;
+            /* TBD: insert mailbox controller phandle when AEN HW
+             *      config supplies it. */
+            mbox-names = "tx", "rx";
+            role = "remote";
+            status = "okay";
+        };
+    };
+};

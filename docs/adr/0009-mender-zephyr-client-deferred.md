@@ -39,7 +39,7 @@ ships:
 - ✅ **Secure boot on AEN-Zephyr** -- MCUboot + ECDSA-P256 +
   swap-using-scratch (`zephyr/sysbuild/aen/sysbuild.conf`).
 - ✅ **Secure OTA on V2N-Yocto + i.MX 93-Yocto** -- Mender via
-  meta-mender (`yocto/meta-alp/conf/distro/include/mender.inc`).
+  meta-mender (`meta-alp-sdk/conf/distro/include/mender.inc`).
 - 📋 **Secure OTA on AEN-Zephyr** -- deferred.  The
   `test-plan.md` row for v0.4 secure-OTA-on-Zephyr moves to
   v1.1.

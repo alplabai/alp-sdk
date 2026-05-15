@@ -9,16 +9,22 @@ project, and modify.
 
 ```bash
 cd alp-workspace
-west alp-build -b <board> alp-sdk/examples/<name>
-west build -d build -t run            # native_sim
-# or:
-west flash                            # real silicon
+west alp-build alp-sdk/examples/<name>
 ```
 
-`<board>` is your Zephyr board target.  Use `native_sim/native/64`
-for host simulation (no hardware needed).  Real-silicon boards
-match what [`docs/getting-started.md`](../docs/getting-started.md)
-documents per SoM family.
+`west alp-build` reads the example's `board.yaml` v2, resolves the
+SoM topology, and fans out per-core slices (Zephyr / Yocto /
+baremetal).  Single-OS examples fan out into one slice; heterogeneous
+examples fan out into multiple slices in parallel.  See
+[`docs/heterogeneous-builds.md`](../docs/heterogeneous-builds.md)
+for the dual-OS walk-through and
+[`docs/firmware-quickstart.md`](../docs/firmware-quickstart.md) for
+the Zephyr-only fast lane.
+
+Real-silicon boards match what
+[`docs/getting-started.md`](../docs/getting-started.md) documents
+per SoM family; `native_sim/native/64` covers host simulation when
+no hardware is plugged in.
 
 ## Cross-family examples
 
@@ -41,6 +47,20 @@ These work on every E1M-X SoM family.  Good starting points.
 | `i2s-tone`                   | Generate a tone on an I2S DAC.                                           |
 | `audio-loopback`             | PDM-in → I2S-out audio pass-through (low-latency).                       |
 | `iot-connected-camera`       | End-to-end IoT: capture frame, publish to MQTT.                          |
+
+## Heterogeneous-OS examples
+
+These declare more than one core in `board.yaml` and exercise the
+v0.6 orchestrator's per-core fan-out.  Each example carries a
+per-core subdirectory layout (`linux/`, `m33_sm/`, `m55_hp/`, ...)
+matching its `cores:` keys.
+
+| Directory                    | What it shows                                                                                |
+|------------------------------|----------------------------------------------------------------------------------------------|
+| `rpmsg-v2n`                  | V2N flagship -- A55 Yocto consumer + M33-SM Zephyr producer, framed RPC over RPMsg.          |
+| `rpmsg-aen`                  | AEN E7 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer.      |
+| `rpmsg-imx93`                | iMX93 -- A55 Yocto consumer + M33 Zephyr producer (structural; build pending iMX93 HW map).  |
+| `heterogeneous-offload`      | "Why heterogeneous compute?" -- A55 delegates 1024-pt FFT to M33-SM via `alp_rpc_call`.      |
 
 ## AEN-specific examples
 
@@ -71,18 +91,32 @@ SoM EEPROM manifest).
 | `v2n/v2n-emmc-block-stat`       | Disk-access ioctls + first-block read on the on-module eMMC.             |
 | `v2n/v2n-gd32-swd-flash`        | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
 
-## Anatomy of an example
-
-Every example has the same shape:
+## Anatomy of a single-OS example
 
 ```
 examples/<name>/
 ├── CMakeLists.txt    # invokes scripts/alp_project.py + delegates to west build
 ├── prj.conf          # mostly empty -- feature selection is in board.yaml
-├── board.yaml        # SoM + carrier + peripherals + chip drivers
+├── board.yaml        # SoM + carrier + cores + peripherals + chip drivers
 ├── src/
 │   └── main.c        # the application code (heavily commented)
-└── sample.yaml       # (optional) twister scenario metadata
+└── testcase.yaml     # (optional) twister scenario metadata
+```
+
+## Anatomy of a heterogeneous example
+
+```
+examples/<name>/
+├── CMakeLists.txt        # multi-slice project marker (no add_subdirectory)
+├── board.yaml            # declares 2+ cores under `cores:` + cross-core `ipc:`
+├── README.md
+├── <a-core-id>/          # one sub-dir per `cores.<id>` (e.g. `linux/`)
+│   ├── CMakeLists.txt
+│   └── src/main.c
+└── <m-core-id>/          # (e.g. `m33_sm/`, `m55_hp/`)
+    ├── CMakeLists.txt
+    ├── prj.conf
+    └── src/main.c
 ```
 
 To adapt to your own project:
@@ -91,13 +125,16 @@ To adapt to your own project:
 2. Edit `board.yaml`:
    * `som.sku` -- your SoM MPN.
    * `carrier.name` -- your carrier preset (or inline `carrier.populated`).
-   * `peripherals:` -- what your app uses.
-   * `chips:` -- chip drivers to opt in.
-3. Modify `src/main.c` to whatever your app needs.
-4. `west alp-build -b <board> .` from your project directory.
+   * `cores.<id>.peripherals` -- what each core uses.
+   * `cores.<id>.libraries` -- per-core library knobs.
+   * Heterogeneous projects: `ipc:` -- name a carve-out the
+     orchestrator allocates from the SoM's `memory_map:`.
+3. Modify each core's `src/main.c` to whatever your app needs.
+4. `west alp-build .` from your project directory.
 
 ## See also
 
-* [`docs/firmware-quickstart.md`](../docs/firmware-quickstart.md) -- target-specific patterns.
+* [`docs/firmware-quickstart.md`](../docs/firmware-quickstart.md) -- single-OS patterns.
+* [`docs/heterogeneous-builds.md`](../docs/heterogeneous-builds.md) -- per-core walk-through.
 * [`docs/board-config.md`](../docs/board-config.md) -- `board.yaml` schema reference.
 * [`docs/troubleshooting.md`](../docs/troubleshooting.md) -- common errors + fixes.

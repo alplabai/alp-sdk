@@ -5,7 +5,7 @@
 # track list, equaliser visualiser.  Pairs nicely with a real
 # audio output path: WM8960 or TLV320AIC3204 codec over I²S.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701
@@ -13,23 +13,28 @@ som:
 carrier:
   name: E1M-EVK
 
-os: zephyr
-
-libraries:
-  - lvgl
-  - minimp3                # Optional: actual MP3 decode on the audio path.
-                            # The demo's `lv_demo_music()` itself only animates
-                            # the UI; minimp3 wires the decode to alp_i2s_*.
-
-peripherals:
-  - spi
-  - gpio
-  - i2c                    # Codec control surface.
-  - i2s                    # Audio data path.
+# Single-OS app -- M55-HP drives both LVGL UI and the I²S codec.
+# A32 cluster off (no Linux); M55-HE inherits SoM topology default.
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./src
+    libraries:
+      - lvgl
+      - minimp3              # Optional: actual MP3 decode on the audio path.
+                              # The demo's `lv_demo_music()` itself only animates
+                              # the UI; minimp3 wires the decode to alp_i2s_*.
+    peripherals:
+      - spi
+      - gpio
+      - i2c                  # Codec control surface.
+      - i2s                  # Audio data path.
 
 chips:
-  - st7789                 # Display.
-  - wm8960                 # Audio codec (I²C config + I²S data).
+  - st7789                   # Display.
+  - wm8960                   # Audio codec (I²C config + I²S data).
 
 diagnostics:
   log_level: info

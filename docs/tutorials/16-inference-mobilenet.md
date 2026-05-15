@@ -124,7 +124,7 @@ int main(void) {
 ## 4. `board.yaml`
 
 ```yaml
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701
@@ -132,14 +132,15 @@ som:
 carrier:
   name: E1M-EVK
 
-os: zephyr
-
-peripherals:
-  - none      # inference doesn't need a peripheral block
-
-inference:
-  backend:    ethos_u           # explicit; or omit for auto
-  arena_size: 524288            # 512 KiB
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./src
+    inference:
+      backend:    ethos_u       # explicit; or omit for auto
+      arena_size: 524288        # 512 KiB
+  m55_he:
+    os: "off"                   # second M55 stays dark on this app
 ```
 
 The `inference.backend` + `arena_size` translate to the

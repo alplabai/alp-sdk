@@ -33,6 +33,12 @@ the PMICs, RTC, OPTIGA, supervisor MCU slave interface.
 **Carrier** -- A board that an E1M SoM plugs into.  The SDK ships
 presets for the E1M-EVK + E1M-X-EVK reference carriers.
 
+**Carve-out** -- A physical memory region reserved for cross-core
+IPC, declared in `board.yaml ipc[]` and resolved against the SoM
+preset's `memory_map:` block.  The orchestrator emits matching
+reservations into both kernels' device trees so neither side maps
+the region as ordinary memory.
+
 **Chip driver** -- A non-OS-specific C module under `chips/<part>/`
 that wraps a single silicon part's I²C / SPI / GPIO surface.
 Symbols use the chip's natural name (e.g. `lsm6dso_init`); the
@@ -40,6 +46,12 @@ Symbols use the chip's natural name (e.g. `lsm6dso_init`); the
 
 **CMI** -- Code Matrix Index, Qorvo's term for the ACT88760 PMIC's
 configuration profile.  V2N populates the **CMI 120.E1** variant.
+
+**Core id** -- A normalized identifier (e.g. `a55_cluster`,
+`m33_sm`, `m55_hp`) assigned to each on-die programmable core in
+`metadata/socs/.../*.json cores[]`.  Used by `board.yaml cores:`
+blocks and SoM preset `topology:` blocks to address cores by name
+rather than by `cores[]` array index.
 
 **DEEPX DX-M1** -- An on-module AI accelerator populated on V2N-M1
 SKUs only.  See [`docs/soms/v2n-m1.md`](soms/v2n-m1.md).
@@ -80,6 +92,12 @@ build time.
 **Hand-written firmware** -- Application code that calls
 `<alp/...>` directly without alp-studio's codegen.  First-class
 consumer path -- not a fallback.
+
+**Helper MCU** -- An on-module microcontroller other than the host
+SoC's on-die cores (e.g. GD32G553 supervisor on V2N, CC3501E Wi-Fi
+coprocessor on AEN).  Its firmware builds via dedicated pipelines
+and registers into the system manifest; it is not a
+heterogeneous-compute peer.
 
 **IDCODE** -- The 32-bit Arm Coresight SW-DP identification value
 returned by the target on the first SWD read after a line reset.
@@ -178,6 +196,11 @@ Used in the per-SKU SoM preset (`E1M-<MPN>.yaml`) and
 **SKU** -- Stock-Keeping Unit.  In ALP terminology: an MPN that
 identifies a specific SoM configuration (e.g. `E1M-V2N101`).
 
+**Slice** -- One per-core build invocation produced by the
+orchestrator (e.g. `a55_cluster-yocto`, `m33_sm-zephyr`).  Each
+slice runs its native build system (bitbake, west) in its own
+scoped subprocess.
+
 **SoC** -- System-on-Chip.  The main silicon under a SoM's lid.
 
 **SoM** -- System-on-Module.  ALP's per-SoC PCB module that plugs
@@ -194,8 +217,20 @@ each preset is distinguishable in a directory listing.
 V2N modules.  Owns peripherals that don't fit on the main SoC's
 pinmux.  See [`docs/gd32-bridge.md`](gd32-bridge.md).
 
+**System manifest** -- `build/system-manifest.yaml`, the generated
+artefact produced by `west alp-build` that captures every slice's
+output binary, every IPC carve-out's resolved address, the boot
+order, and pointers to helper-MCU firmware.  The single source of
+truth consumed by `west alp-image`, `west alp-flash`, the OTA
+bundler, and (eventually) alp-studio.
+
 **TBD** -- "To be determined".  Used in metadata where the
 authoritative value is pending (e.g. a board-rev divider voltage).
+
+**Topology block** -- The `topology:` block in
+`metadata/e1m_modules/<SKU>.yaml` that declares the default OS +
+app for each on-die core.  Customers inherit + override these
+defaults in their project's `board.yaml cores:` block.
 
 **V2N** -- ALP module family based on Renesas RZ/V2N silicon.
 E1M-X form factor.  See [`docs/soms/v2n.md`](soms/v2n.md).

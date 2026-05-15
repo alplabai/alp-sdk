@@ -47,7 +47,7 @@ Walk-through with code: [`docs/bring-up-v2n-m1.md`](../bring-up-v2n-m1.md).
 The DEEPX silicon's userland API (`libdxrt.so`) is upstream at
 [`github.com/DEEPX-AI/dx_rt`](https://github.com/DEEPX-AI/dx_rt).
 The Yocto layer that brings it into your image is wired in
-`yocto/meta-alp/conf/machine/e1m-x-v2n-m1.conf` and references
+`meta-alp-sdk/conf/machine/e1m-v2m101-a55.conf` and references
 `github.com/DEEPX-AI/meta-deepx-m1`.
 
 Integration cross-link: [`vendors/deepx-dxm1/README.md`](../../vendors/deepx-dxm1/README.md).

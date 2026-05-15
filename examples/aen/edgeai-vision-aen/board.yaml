@@ -7,7 +7,7 @@
 # at configure time and layers the generated alp.conf over
 # prj.conf via OVERLAY_CONFIG.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701          # Alif Ensemble E7 -- has the Ethos-U55 NPU
@@ -20,15 +20,24 @@ carrier:
                             # lsm6dso + ssd1306 already true in the
                             # EVK preset's defaults.
 
-os: zephyr
-
-inference:
-  backend: ethos_u         # Vela-compiled TFLM model dispatches to
-                            # the on-die NPU.  In v0.1 the
-                            # alp_inference_open path falls back to
-                            # NOSUPPORT under native_sim; v0.2 fills
-                            # in the real Ethos-U dispatcher.
-  default_arena_kib: 256
+# Single-OS app: the M55-HP core runs the vision pipeline + dispatches
+# to the NPU bonded to it via topology.  M55-HE keeps the SoM
+# topology default (stock-shim Zephyr image) so the peer-NPU stays
+# powered for fallback.  The A32 cluster on E7 is not used here; v2
+# defaults Linux on for A-cores so opt-out explicitly via `os: off`.
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./src
+    inference:
+      backend: ethos_u    # Vela-compiled TFLM model dispatches to
+                           # the on-die NPU.  In v0.1 the
+                           # alp_inference_open path falls back to
+                           # NOSUPPORT under native_sim; v0.2 fills
+                           # in the real Ethos-U dispatcher.
+      default_arena_kib: 256
 
 diagnostics:
   log_level: info

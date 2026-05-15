@@ -1,0 +1,44 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Devicetree overlay for the M33 system-manager slice of an
+ * E1M-V2N101 (Renesas RZ/V2N) heterogeneous project.
+ *
+ * Pulled in by the orchestrator-emitted slice config; the overlay
+ * enables Renesas MHU as the mailbox controller, picks the
+ * orchestrator-generated `alp_default_rpmsg` carve-out as the
+ * shared IPC region, and registers the rpmsg ipc instance with
+ * `chosen { zephyr,ipc = ...; zephyr,ipc-shm = ...; }` so
+ * `subsys/ipc/ipc_service` finds them automatically.
+ *
+ * The carve-out node itself comes from the orchestrator's
+ * `dts-reservations.dtsi`; the build invokes Zephyr's `EXTRA_DTC_FLAGS`
+ * with `-Ibuild/generated` so the relative include below resolves.
+ * (The orchestrator's slice-config materialiser sets this flag in
+ * the per-core alp.conf for Zephyr slices.)
+ */
+
+#include "../../build/generated/dts-reservations.dtsi"
+
+/ {
+    chosen {
+        zephyr,ipc     = &ipc0;
+        zephyr,ipc-shm = &alp_default_rpmsg;
+    };
+
+    soc {
+        ipc0: ipc@0 {
+            compatible = "zephyr,ipc-openamp-static-vrings";
+            memory-region = <&alp_default_rpmsg>;
+            mboxes = <&mhu 0>, <&mhu 1>;
+            mbox-names = "tx", "rx";
+            role = "remote";
+            status = "okay";
+        };
+    };
+};
+
+&mhu {
+    status = "okay";
+};

@@ -28,6 +28,7 @@
 #include <stdbool.h>
 
 #include "alp/peripheral.h"
+#include "alp/pwm.h" /* alp_pwm_t lives here, not in peripheral.h */
 
 #ifdef __cplusplus
 extern "C" {

@@ -54,7 +54,7 @@ you install them.
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|
 | Zephyr      | v4.4.0 (stable)  | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
-| Python      | 3.10+            | For `west`, the v0.3 loader (`alp_project.py`), validators. |
+| Python      | 3.10+            | For `west`, the v0.6 orchestrator (`alp_project.py` + `alp_orchestrate.py`), validators. |
 | Python deps | `pyyaml`, `jsonschema`, `imgtool` | All installed by `scripts/bootstrap.sh`; manual install: `pip install pyyaml jsonschema imgtool`. |
 | CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |
@@ -82,9 +82,10 @@ wsl --install -d Ubuntu
 ```
 
 For real-silicon builds you'll also need the Zephyr SDK
-(`zephyr-sdk-0.17.0` is the v0.1 SDK matrix's pin) and a JTAG /
-SWD probe matching your board.  See
-[`docs/boards/e1m-evk.md`](boards/e1m-evk.md) for the EVK's wiring.
+(`zephyr-sdk-1.0.1` matches the v0.6 Zephyr v4.4 pin — see
+`docs/zephyr-version-policy.md`) and a JTAG / SWD probe matching
+your board.  See [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) for
+the EVK's wiring.
 
 > **Note for Windows users.**  The repo's `.gitattributes` pins
 > LF on every source file -- a fresh clone gets identical bytes
@@ -348,9 +349,10 @@ fetched when a customer opts in to the `vendor-sdks` group.
 
 ## 9. SoC capability validation
 
-In v0.3 the SoC choice flows from `board.yaml`'s `som.sku` field
-automatically -- the loader resolves the MPN to the silicon ref
-(`alif:ensemble:e7` for `E1M-AEN701`) and emits the matching
+The SoC choice flows from `board.yaml`'s `som.sku` field
+automatically (board.yaml v2, current since v0.6) — the loader
+resolves the MPN to the silicon ref (`alif:ensemble:e7` for
+`E1M-AEN701`) and emits the matching
 `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y` line, so you never set it by
 hand.  The validator also cross-checks every entry in
 `peripherals:` against the SoC's `metadata/socs/<vendor>/<family>/<part>.json`

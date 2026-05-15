@@ -17,10 +17,10 @@
 #      generated build/generated/alp.conf is rsource'd from
 #      prj.conf -- no hand-edited Kconfig.
 #
-# Validated against metadata/schemas/board-config-v1.schema.json;
+# Validated against metadata/schemas/board-config-v2.schema.json;
 # documented in docs/board-config.md.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701          # Alif Ensemble E7 SoM
@@ -30,7 +30,13 @@ carrier:
   populated:
     button_led: true       # GPIO button + LED helper used by main.c
 
-os: zephyr
+# Single-core slice on AEN701: M55-HP runs the demo.  M55-HE inherits
+# the SoM topology default (stock-shim Zephyr image), keeping the
+# peer-core RPMsg boot path intact for advanced users.
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./src
 
 diagnostics:
   log_level: info

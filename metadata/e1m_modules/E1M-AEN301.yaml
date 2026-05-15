@@ -75,6 +75,46 @@ capabilities:
   tmu_fft:              false
   tmu_fac:              false
 
+topology:
+  m55_hp:
+    os: zephyr
+    app: alp-stock-shim
+    board: alp_e1m_aen301_m55_hp        # Zephyr board target
+    toolchain: arm-zephyr-eabi
+  m55_he:
+    os: zephyr
+    app: alp-stock-shim
+    board: alp_e1m_aen301_m55_he        # Zephyr board target
+    toolchain: arm-zephyr-eabi
+
+# Memory base addresses + sizes stay TBD until the user supplies
+# the authoritative HW config writeup (project memory note:
+# "the user will hand-write authoritative pin assignments and
+# per-SoM HW config later; mark unknowns TBD, never invent values").
+memory_map:
+  - { name: mram_main, base: TBD, size_kib: TBD, accessible_from: [m55_hp, m55_he], cacheable: true  }
+  - { name: sram_main, base: TBD, size_kib: TBD, accessible_from: [m55_hp, m55_he], cacheable: false }
+
+# Alif IPC controller name TBD pending the hand-written HW config.
+mailbox:
+  controller: TBD
+  channels:
+    - { id: 0, reserved_for: alp_default_rpmsg }
+    - { id: 1, reserved_for: app }
+    - { id: 2, reserved_for: app }
+    - { id: 3, reserved_for: power_mgmt }
+
+# On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
+# on the AEN module; firmware comes from the separate
+# `alplabai/cc3501e-firmware` repo and stays TBD until a release
+# lands (matches the project's standing convention).
+helper_firmware:
+  - name:          cc3501e_otp
+    chip:          cc3501e
+    firmware_path: TBD
+    flash_method:  TBD
+    flash_args:    TBD
+
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
 default_carrier:        E1M-EVK

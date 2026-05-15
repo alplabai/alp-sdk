@@ -27,18 +27,18 @@ jobs:
     name: twister · native_sim/native/64
     runs-on: ubuntu-latest
 
-    # Pre-baked Zephyr CI image.  Pin a tag (not :latest) so the
-    # CI is reproducible.  Bump intentionally when upgrading Zephyr.
-    container:
-      image: ghcr.io/zephyrproject-rtos/ci:v0.27.4
-      options: --user root
+    # We deliberately do NOT use the zephyrprojectrtos/ci docker
+    # image here.  The image bundles Zephyr SDK 1.0.1 (~17 GB on disk
+    # with every cross-toolchain) which intermittently blows out the
+    # ubuntu-latest runner's ~14 GB free space at docker-pull time
+    # with "no space left on device".  Since native_sim builds use
+    # the host's gcc directly (ZEPHYR_TOOLCHAIN_VARIANT=host), the
+    # SDK isn't needed — we just need Python, west, dtc, ninja, and
+    # the Zephyr Python deps.  Installing those is ~2 minutes vs a
+    # 5+ minute image pull, and stays well within disk budget.
 
     env:
-      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
-      # SDK version must match what the ci:v0.27.4 docker image ships
-      # (echoes `ZSDK_VERSION` at container start).  Bump together
-      # with the image tag.
-      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-0.17.0
+      ZEPHYR_TOOLCHAIN_VARIANT: host
 
     steps:
       - name: Checkout alp-sdk
@@ -46,6 +46,23 @@ jobs:
         with:
           path: alp-sdk
           fetch-depth: 1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install host build tools (dtc, ninja, ccache, gperf, libffi)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              ninja-build gperf ccache dfu-util device-tree-compiler \
+              python3-dev python3-pip python3-setuptools python3-wheel \
+              libffi-dev libssl-dev xz-utils file make gcc gcc-multilib \
+              g++-multilib libsdl2-dev libmagic1
+
+      - name: Install west
+        run: pip3 install west
 
       # Zephyr workspace lives next to alp-sdk.  We use west init
       # from a temporary topdir so alp-sdk itself isn't relocated.
@@ -55,8 +72,8 @@ jobs:
           mkdir -p zephyrproject
           cd zephyrproject
           # Pin to the Zephyr release the v0.1 dependency matrix
-          # documents (VERSIONS.md).  Bump intentionally with the
-          # SDK; do not track main.
+          # documents (VERSIONS.md).  Bump intentionally; do not
+          # track main.
           west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 .
           west update --narrow -o=--depth=1
           west zephyr-export
@@ -67,12 +84,12 @@ jobs:
           path: |
             ${{ github.workspace }}/zephyrproject/modules
             ${{ github.workspace }}/zephyrproject/zephyr
-          key: zephyr-v4.4.0-${{ runner.os }}
+          key: zephyr-v4.4.0-host-${{ runner.os }}
 
       - name: pip install Zephyr requirements
         working-directory: ${{ github.workspace }}/zephyrproject
         run: |
-          pip3 install --break-system-packages -r zephyr/scripts/requirements.txt
+          pip3 install -r zephyr/scripts/requirements.txt
 
       # alp-sdk's CMake-time loader (scripts/alp_project.py) needs
       # jsonschema in addition to PyYAML (already pulled in by
@@ -80,7 +97,7 @@ jobs:
       # Zephyr deps so version pins don't override.
       - name: pip install ALP SDK Python deps
         run: |
-          pip3 install --break-system-packages jsonschema
+          pip3 install jsonschema
 
       - name: debug · verify checkout paths are reachable inside container
         run: |
@@ -91,6 +108,24 @@ jobs:
           find "$GITHUB_WORKSPACE/alp-sdk/tests" "$GITHUB_WORKSPACE/alp-sdk/examples" \
               -name "testcase.yaml" -o -name "sample.yaml" || true
 
+      # ---------------------------------------------------------------
+      # v0.6 heterogeneous-orchestrator note (per
+      # docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
+      # §5.6 + §7 Phase 5):
+      #
+      # In v0.6 the orchestrator (`scripts/alp_orchestrate.py`) fans
+      # board.yaml out into per-core slices.  For Zephyr-only slices
+      # the orchestrator routes through twister via the new emit
+      # mode `alp_project.py --emit zephyr-conf --core <id>`.  Twister
+      # itself stays the fast lane for pure-Zephyr coverage (no
+      # bitbake spin-up, no Renode boot) and remains the
+      # native_sim/native/64 gate for every PR.
+      #
+      # The orchestrator-side integration (calling twister with a
+      # per-core conf fragment) lands in Phase 2 -- this workflow's
+      # invocation below is intentionally unchanged for v0.6 so
+      # twister coverage stays stable while Phase 2 is in flight.
+      # ---------------------------------------------------------------
       - name: twister · run tests + examples on native_sim/native/64
         working-directory: ${{ github.workspace }}/zephyrproject
         env:

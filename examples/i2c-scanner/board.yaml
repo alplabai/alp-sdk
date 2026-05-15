@@ -7,7 +7,7 @@
 # scripts/alp_project.py at configure time + layers the
 # generated alp.conf over prj.conf via OVERLAY_CONFIG.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701
@@ -15,12 +15,14 @@ som:
 carrier:
   name: E1M-EVK
 
-os: zephyr
-
-# Zephyr peripheral subsystem exercised by this example.  The
-# loader translates the entry to CONFIG_<X>=y in alp.conf.
-peripherals:
-  - i2c
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./src
+    # Zephyr peripheral subsystem exercised by this example.  The
+    # loader translates the entry to CONFIG_<X>=y in alp.conf.
+    peripherals:
+      - i2c
 
 diagnostics:
   log_level: info

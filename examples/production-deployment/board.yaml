@@ -6,7 +6,7 @@
 # variants will fork this for V2N or i.MX 93 carriers; the SDK's
 # surfaces stay identical across SoMs.
 
-schema_version: 1
+schema_version: 2
 
 som:
   sku: E1M-AEN701
@@ -14,20 +14,27 @@ som:
 carrier:
   name: E1M-EVK
 
-os: zephyr
-
-# IoT features (WiFi + MQTT + TLS) ride the `iot:` block; the
-# alp_project.py emitter translates wifi/mqtt/tls into
-# CONFIG_ALP_SDK_IOT_WIFI / _MQTT / _SECURITY.
-iot:
-  wifi: true
-  mqtt: true
-  tls: true
-
-# libraries: mbedtls dropped here for v0.5 native_sim parity
-#            (Zephyr 4.4 + mbedtls 3.6 PSA wiring is a v0.6 work item).
-#            Real-silicon builds re-enable mbedtls via the SoM-side
-#            TF-M-on-HE-core stack.
+# Production flagship runs on M55-HP (application core for the
+# signed-OTA + IoT-connected workload).  A32 cluster off; M55-HE
+# inherits the SoM topology default so the secondary NPU stays
+# powered for future inference offload.
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./src
+    # IoT features (WiFi + MQTT + TLS) ride the per-core `iot:` block;
+    # the alp_project.py emitter translates wifi/mqtt/tls into
+    # CONFIG_ALP_SDK_IOT_WIFI / _MQTT / _SECURITY.
+    iot:
+      wifi: true
+      mqtt: true
+      tls: true
+    # libraries: mbedtls dropped here for v0.5 native_sim parity
+    #            (Zephyr 4.4 + mbedtls 3.6 PSA wiring is a v0.6 work item).
+    #            Real-silicon builds re-enable mbedtls via the SoM-side
+    #            TF-M-on-HE-core stack.
 
 chips:
   - optiga_trust_m

@@ -61,6 +61,7 @@
   ],
   "cores": [
     {
+      "id": "a32_cluster",
       "type": "cortex-a32",
       "count": 2,
       "freq_mhz": 800,
@@ -74,6 +75,7 @@
       "mmu": true
     },
     {
+      "id": "m55_hp",
       "type": "cortex-m55",
       "subtype": "high-perf",
       "count": 1,
@@ -85,6 +87,7 @@
       "fpu": "double-precision"
     },
     {
+      "id": "m55_he",
       "type": "cortex-m55",
       "subtype": "high-efficiency",
       "count": 1,

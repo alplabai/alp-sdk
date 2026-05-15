@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 
 # Fan-control case study on a V2N module.  The application code is
 # fully portable -- E1M_PWM0 resolves on any E1M-conformant
@@ -12,10 +12,14 @@ som:
 carrier:
   name: E1M-X-EVK
 
-os: zephyr
-
-peripherals:
-  - pwm
+cores:
+  a55_cluster:
+    os: "off"
+  m33_sm:
+    os: zephyr
+    app: ./src
+    peripherals:
+      - pwm
 
 diagnostics:
   log_level: info

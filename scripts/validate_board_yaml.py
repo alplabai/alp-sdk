@@ -55,7 +55,10 @@ except ImportError:
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT_DEFAULT = REPO / "metadata"
-SCHEMA = METADATA_ROOT_DEFAULT / "schemas" / "board-config-v1.schema.json"
+# Phase 2 of the 2026-05-15 heterogeneous-OS redesign points the
+# validator at the v2 schema.  v1 inputs fail validation by design
+# -- Phase 4 rewrites every shipped board.yaml.
+SCHEMA = METADATA_ROOT_DEFAULT / "schemas" / "board-config-v2.schema.json"
 
 
 def _load_yaml(path: Path) -> dict[str, Any] | None:
