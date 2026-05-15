@@ -1,0 +1,1295 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""
+ALP heterogeneous-OS build orchestrator (Phase 2 of the 2026-05-15 design).
+
+A board.yaml v2 declares per-core runtimes; this module loads the
+project, resolves topology defaults from the SoM preset, allocates
+IPC carve-outs from the SoM's memory_map, and fans out into one
+build slice per non-`off` core.
+
+Public API:
+
+    load_board_yaml(path)          -> BoardProject
+    resolve_carve_outs(project)    -> list[ResolvedCarveOut]
+    emit_system_manifest(project, slices=...) -> str
+    emit_dts_reservations(project) -> str
+    emit_ipc_contract_h(project)   -> str
+
+    BoardProject, Slice, ResolvedCarveOut, SystemManifest, Orchestrator,
+    OrchestratorError
+
+Reference: docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Iterable, Optional
+
+try:
+    import yaml  # type: ignore[import-untyped]
+except ImportError:
+    sys.exit("alp_orchestrate: PyYAML is required.  Install via `pip install pyyaml`.")
+
+try:
+    import jsonschema  # type: ignore[import-untyped]
+except ImportError:
+    sys.exit("alp_orchestrate: jsonschema is required.  Install via `pip install jsonschema`.")
+
+
+REPO = Path(__file__).resolve().parent.parent
+METADATA_ROOT = REPO / "metadata"
+SCHEMA_V2 = METADATA_ROOT / "schemas" / "board-config-v2.schema.json"
+
+
+class OrchestratorError(RuntimeError):
+    """Raised when the orchestrator can't resolve / build a project.
+
+    Carries a human-readable message; the caller (west wrapper / CI)
+    prints it and exits non-zero.
+    """
+
+
+# ---------------------------------------------------------------------
+# Dataclasses
+# ---------------------------------------------------------------------
+
+
+@dataclass
+class Slice:
+    """One per-core build slice."""
+
+    core_id: str
+    os: str                              # zephyr | yocto | baremetal | off
+    app: Optional[str] = None
+    image: Optional[str] = None          # Yocto image recipe name
+    machine: Optional[str] = None        # Yocto MACHINE
+    board: Optional[str] = None          # Zephyr board target
+    toolchain: Optional[str] = None
+    peripherals: list[str] = field(default_factory=list)
+    libraries: list[str] = field(default_factory=list)
+    inference: dict[str, Any] = field(default_factory=dict)
+    iot: dict[str, Any] = field(default_factory=dict)
+
+    # Populated by Orchestrator.fan_out:
+    build_dir: Optional[Path] = None
+    output_artefact: Optional[str] = None
+    status: str = "pending"              # pending | ok | failed | skipped
+    reason: Optional[str] = None         # populated for skipped / failed
+    log_path: Optional[Path] = None
+    duration_s: float = 0.0
+
+    def to_manifest_entry(self) -> dict[str, Any]:
+        """Project this slice as a dict for system-manifest.yaml."""
+        entry: dict[str, Any] = {
+            "core_id":          self.core_id,
+            "os":               self.os,
+            "app":              self.app,
+            "image":            self.image,
+            "machine":          self.machine,
+            "board":            self.board,
+            "toolchain":        self.toolchain,
+            "build_dir":        str(self.build_dir) if self.build_dir else None,
+            "output_artefact":  self.output_artefact,
+            "status":           self.status,
+            "log_path":         str(self.log_path) if self.log_path else None,
+            "duration_s":       round(self.duration_s, 3),
+        }
+        if self.reason:
+            entry["reason"] = self.reason
+        # Drop keys with None values to keep the manifest tidy.
+        return {k: v for k, v in entry.items() if v is not None}
+
+
+@dataclass
+class IpcEntry:
+    """Raw IPC declaration straight from board.yaml."""
+
+    name: str
+    kind: str
+    endpoints: list[str]
+    carve_out_kb: int
+    cacheable: Optional[bool] = None
+    address: Optional[int] = None    # explicit base-address override
+
+
+@dataclass
+class ResolvedCarveOut:
+    """An IpcEntry after allocation from the SoM memory_map."""
+
+    name: str
+    kind: str
+    endpoints: list[str]
+    base: int
+    size: int                # in bytes
+    region: str              # source memory-region name
+    cacheable: bool
+    src_ept: int
+    dst_ept: int
+    mailbox_channel: int
+
+    def to_manifest_entry(self) -> dict[str, Any]:
+        return {
+            "name":            self.name,
+            "kind":            self.kind,
+            "endpoints":       list(self.endpoints),
+            "carve_out_base":  f"0x{self.base:08x}",
+            "carve_out_size":  f"0x{self.size:08x}",
+            "carve_out_region": self.region,
+            "cacheable":       self.cacheable,
+            "rpmsg_endpoint_ids": {
+                "src": f"0x{self.src_ept:08x}",
+                "dst": f"0x{self.dst_ept:08x}",
+            },
+            "mailbox_channel": self.mailbox_channel,
+        }
+
+
+@dataclass
+class BoardProject:
+    """Resolved board.yaml v2 project ready for fan-out."""
+
+    sku: str
+    hw_rev: Optional[str]
+    carrier_name: Optional[str]
+    carrier_hw_rev: Optional[str]
+    cores: dict[str, Slice]                       # effective per-core slices
+    ipc: list[IpcEntry]
+    soc_spec: dict[str, Any]
+    som_preset: dict[str, Any]
+    carrier_preset: Optional[dict[str, Any]]
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+    chips: list[str] = field(default_factory=list)
+    features: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SystemManifest:
+    """The artefact written to build/system-manifest.yaml."""
+
+    project: BoardProject
+    slices: list[Slice]
+    carve_outs: list[ResolvedCarveOut]
+    boot_order: list[dict[str, Any]] = field(default_factory=list)
+    helper_mcus: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "generated_by":   "scripts/alp_orchestrate.py",
+            "hw_info": {
+                "sku":             self.project.sku,
+                "som_hw_rev":      self.project.hw_rev,
+                "carrier_name":    self.project.carrier_name,
+                "carrier_hw_rev":  self.project.carrier_hw_rev,
+                "silicon":         self.project.som_preset.get("silicon"),
+            },
+            "slices":      [s.to_manifest_entry() for s in self.slices],
+            "ipc":         [c.to_manifest_entry() for c in self.carve_outs],
+            "helper_mcus": list(self.helper_mcus),
+            "boot_order":  list(self.boot_order),
+        }
+
+
+# ---------------------------------------------------------------------
+# Silicon ref -> SoC JSON path
+# ---------------------------------------------------------------------
+
+# Mirrors scripts/alp_project.py:_SILICON_TO_KCONFIG so the orchestrator
+# can resolve any silicon ref it sees -- used to check the loader's
+# Kconfig coverage matches the SoC spec coverage.
+_SILICON_TO_KCONFIG: dict[str, str] = {
+    "alif:ensemble:e3": "ALP_SOC_ALIF_ENSEMBLE_E3",
+    "alif:ensemble:e4": "ALP_SOC_ALIF_ENSEMBLE_E4",
+    "alif:ensemble:e5": "ALP_SOC_ALIF_ENSEMBLE_E5",
+    "alif:ensemble:e6": "ALP_SOC_ALIF_ENSEMBLE_E6",
+    "alif:ensemble:e7": "ALP_SOC_ALIF_ENSEMBLE_E7",
+    "alif:ensemble:e8": "ALP_SOC_ALIF_ENSEMBLE_E8",
+    "renesas:rzv2n:n44": "ALP_SOC_RENESAS_RZV2N_N44",
+    "nxp:imx9:imx93":   "ALP_SOC_NXP_IMX9_IMX93",
+}
+
+
+def _silicon_to_soc_path(silicon: str, metadata_root: Path) -> Path:
+    """`alif:ensemble:e7` -> metadata/socs/alif/ensemble/e7.json."""
+    parts = silicon.split(":")
+    if len(parts) != 3:
+        raise OrchestratorError(
+            f"silicon ref '{silicon}' is not a triple-colon string")
+    return (metadata_root / "socs" / parts[0] / parts[1] /
+            f"{parts[2]}.json")
+
+
+# ---------------------------------------------------------------------
+# Loader
+# ---------------------------------------------------------------------
+
+
+def _load_yaml(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        raise OrchestratorError(f"file not found: {path}")
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        raise OrchestratorError(f"failed to parse {path}: {e}") from e
+    if not isinstance(data, dict):
+        raise OrchestratorError(
+            f"{path} did not parse to a top-level mapping")
+    return data
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        raise OrchestratorError(f"file not found: {path}")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise OrchestratorError(f"failed to parse {path}: {e}") from e
+
+
+def _validate_v2(project: dict[str, Any]) -> None:
+    schema = json.loads(SCHEMA_V2.read_text(encoding="utf-8"))
+    validator = jsonschema.Draft202012Validator(schema)
+    errors = sorted(validator.iter_errors(project),
+                    key=lambda e: list(e.path))
+    if errors:
+        messages = []
+        for e in errors:
+            loc = "/".join(str(p) for p in e.path) or "<root>"
+            messages.append(f"  - {loc}: {e.message}")
+        raise OrchestratorError(
+            "board.yaml schema validation failed:\n" +
+            "\n".join(messages))
+
+
+def _resolve_carrier_preset(
+    carrier_name: str,
+    metadata_root: Path,
+) -> Optional[dict[str, Any]]:
+    p = metadata_root / "carriers" / carrier_name / "board.yaml"
+    if not p.is_file():
+        return None
+    return _load_yaml(p)
+
+
+def _resolve_topology_for_core(
+    core_id: str,
+    project_cores: dict[str, Any],
+    som_topology: dict[str, Any],
+) -> Optional[dict[str, Any]]:
+    """Per spec §4.5: project's `cores.<id>` overrides the SoM preset's
+    `topology.<id>`.  Returns None when neither source has the key."""
+    if core_id in project_cores:
+        # Customer-supplied entry; merge missing keys from topology.
+        merged: dict[str, Any] = dict(som_topology.get(core_id, {}) or {})
+        merged.update(project_cores[core_id] or {})
+        return merged
+    if core_id in som_topology:
+        return dict(som_topology[core_id] or {})
+    return None
+
+
+def _slice_from_resolved(
+    core_id: str,
+    entry: dict[str, Any],
+) -> Slice:
+    """Build a Slice dataclass from the resolved per-core entry."""
+    return Slice(
+        core_id=core_id,
+        os=str(entry.get("os") or "off"),
+        app=entry.get("app"),
+        image=entry.get("image"),
+        machine=entry.get("machine"),
+        board=entry.get("board"),
+        toolchain=entry.get("toolchain"),
+        peripherals=list(entry.get("peripherals") or []),
+        libraries=list(entry.get("libraries") or []),
+        inference=dict(entry.get("inference") or {}),
+        iot=dict(entry.get("iot") or {}),
+    )
+
+
+def _enforce_loader_rules(slice_: Slice) -> None:
+    """Loader rules from spec §4.5: every non-off slice must declare
+    enough to actually build."""
+    if slice_.os == "off":
+        return
+    if slice_.os == "zephyr":
+        if not slice_.app:
+            raise OrchestratorError(
+                f"core '{slice_.core_id}': os: zephyr requires `app:` "
+                f"pointing at a prj.conf / CMakeLists.txt directory")
+    elif slice_.os == "baremetal":
+        if not slice_.app:
+            raise OrchestratorError(
+                f"core '{slice_.core_id}': os: baremetal requires `app:` "
+                f"pointing at a CMakeLists.txt directory")
+    elif slice_.os == "yocto":
+        if not slice_.app and not slice_.image:
+            raise OrchestratorError(
+                f"core '{slice_.core_id}': os: yocto requires either "
+                f"`app:` (custom recipe) or `image:` (stock recipe)")
+    elif slice_.os not in ("zephyr", "yocto", "baremetal", "off"):
+        raise OrchestratorError(
+            f"core '{slice_.core_id}': unknown os '{slice_.os}'")
+
+
+def load_board_yaml(path: Path, *,
+                    metadata_root: Path = METADATA_ROOT) -> BoardProject:
+    """Load + validate a v2 board.yaml.
+
+    Raises OrchestratorError on any schema / preset / topology error.
+    """
+    path = Path(path)
+    project = _load_yaml(path)
+
+    # 1. v2 schema validation.
+    _validate_v2(project)
+
+    sku = project["som"]["sku"]
+    hw_rev = project["som"].get("hw_rev")
+
+    # 2. Resolve SKU preset.
+    sku_preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
+    if not sku_preset_path.is_file():
+        raise OrchestratorError(
+            f"no preset for SoM SKU {sku} at "
+            f"{sku_preset_path.relative_to(REPO) if sku_preset_path.is_relative_to(REPO) else sku_preset_path}")
+    som_preset = _load_yaml(sku_preset_path)
+
+    # 3. Resolve SoC spec via the preset's `silicon:` ref.
+    silicon = som_preset.get("silicon")
+    if not silicon:
+        raise OrchestratorError(
+            f"SoM preset {sku} has no `silicon:` field")
+    soc_path = _silicon_to_soc_path(silicon, metadata_root)
+    if not soc_path.is_file():
+        raise OrchestratorError(
+            f"no SoC spec at {soc_path.relative_to(REPO) if soc_path.is_relative_to(REPO) else soc_path} for ref '{silicon}'")
+    soc_spec = _load_json(soc_path)
+
+    # 4. Carrier preset (optional).
+    carrier_name = None
+    carrier_hw_rev = None
+    carrier_preset = None
+    carrier_block = project.get("carrier") or {}
+    if carrier_block:
+        carrier_name = carrier_block.get("name")
+        carrier_hw_rev = carrier_block.get("hw_rev")
+        if carrier_name:
+            carrier_preset = _resolve_carrier_preset(
+                carrier_name, metadata_root)
+
+    # 5. Compute per-core effective mapping.
+    project_cores = project.get("cores") or {}
+    som_topology = som_preset.get("topology") or {}
+    soc_core_ids = [c["id"] for c in (soc_spec.get("cores") or []) if "id" in c]
+
+    # Reject cores: keys not present in the SoC spec.
+    unknown = [k for k in project_cores.keys() if k not in soc_core_ids]
+    if unknown:
+        raise OrchestratorError(
+            f"board.yaml `cores:` references unknown core IDs "
+            f"{unknown} for SoC {silicon} (known: {soc_core_ids})")
+
+    # Reject SoM topology keys that don't exist in the SoC spec --
+    # surfaces preset bugs early.
+    bad_topology = [k for k in som_topology.keys() if k not in soc_core_ids]
+    if bad_topology:
+        raise OrchestratorError(
+            f"SoM preset {sku} `topology:` references core IDs "
+            f"{bad_topology} that aren't in SoC {silicon}'s "
+            f"cores[] (known: {soc_core_ids})")
+
+    cores: dict[str, Slice] = {}
+    for core_id in soc_core_ids:
+        resolved = _resolve_topology_for_core(
+            core_id, project_cores, som_topology)
+        if resolved is None:
+            # Multi-core SoCs require either project cores: or topology
+            # preset coverage; single-core SoCs default the one core to
+            # the preset (which we already checked above -- if we got
+            # here for a single-core SoC, the preset has no topology
+            # entry for the only core, which is a real error).
+            raise OrchestratorError(
+                f"core '{core_id}' has no runtime assigned (neither "
+                f"board.yaml `cores.{core_id}` nor SoM preset "
+                f"`topology.{core_id}` is set)")
+        slice_ = _slice_from_resolved(core_id, resolved)
+        _enforce_loader_rules(slice_)
+        cores[core_id] = slice_
+
+    # 6. IPC entries.
+    ipc_raw = project.get("ipc") or []
+    ipc_entries: list[IpcEntry] = []
+    for entry in ipc_raw:
+        ipc_entries.append(IpcEntry(
+            name=entry["name"],
+            kind=entry["kind"],
+            endpoints=list(entry["endpoints"]),
+            carve_out_kb=int(entry["carve_out_kb"]),
+            cacheable=entry.get("cacheable"),
+            address=entry.get("address"),
+        ))
+
+    # 7. Loader rule §4.5.6: every ipc endpoint must be a core with
+    # os != off.
+    for e in ipc_entries:
+        for ep in e.endpoints:
+            if ep not in cores:
+                raise OrchestratorError(
+                    f"ipc entry '{e.name}' references core '{ep}' "
+                    f"that isn't in this project")
+            if cores[ep].os == "off":
+                raise OrchestratorError(
+                    f"ipc entry '{e.name}' references core '{ep}' "
+                    f"which is os: off")
+
+    return BoardProject(
+        sku=sku,
+        hw_rev=hw_rev or som_preset.get("default_hw_rev"),
+        carrier_name=carrier_name,
+        carrier_hw_rev=(carrier_hw_rev
+                        or (carrier_preset or {}).get("default_hw_rev")),
+        cores=cores,
+        ipc=ipc_entries,
+        soc_spec=soc_spec,
+        som_preset=som_preset,
+        carrier_preset=carrier_preset,
+        diagnostics=dict(project.get("diagnostics") or {}),
+        chips=list(project.get("chips") or []),
+        features=dict(project.get("features") or {}),
+        raw=project,
+    )
+
+
+# ---------------------------------------------------------------------
+# Carve-out resolver
+# ---------------------------------------------------------------------
+
+
+_PAGE = 4096
+
+
+def _fnv1a_32(data: bytes) -> int:
+    """FNV-1a 32-bit hash.  10 lines, no deps."""
+    h = 0x811c9dc5
+    for b in data:
+        h ^= b
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
+def _region_size_bytes(region: dict[str, Any]) -> Optional[int]:
+    """Convert a memory_map entry's size_mib / size_kib to bytes.
+
+    Returns None if the size field is unset OR is the literal 'TBD'.
+    """
+    if "size_mib" in region:
+        v = region["size_mib"]
+        if isinstance(v, int):
+            return v * 1024 * 1024
+        return None
+    if "size_kib" in region:
+        v = region["size_kib"]
+        if isinstance(v, int):
+            return v * 1024
+        return None
+    return None
+
+
+def _align_down(value: int, alignment: int) -> int:
+    return value - (value % alignment)
+
+
+def _resolve_default_mailbox_channel(
+    mailbox: dict[str, Any],
+    entry_name: str,
+) -> int:
+    """Pick the mailbox channel reserved for a given IPC name.
+
+    Returns the channel `id` from mailbox.channels[] whose
+    `reserved_for:` matches the entry name; falls back to channel 0
+    when nothing matches (loader-rule check happens at emit time)."""
+    for ch in mailbox.get("channels") or []:
+        if ch.get("reserved_for") == entry_name:
+            return int(ch["id"])
+    return 0
+
+
+def resolve_carve_outs(
+    project: BoardProject,
+) -> list[ResolvedCarveOut]:
+    """Spec §6.1 algorithm.
+
+    1. Sort ipc entries alphabetically by name.
+    2. For each entry, pick the first memory region whose
+       accessible_from: covers every endpoint and whose `cacheable:`
+       attribute matches the entry's preference (non-cacheable by
+       default; explicit `cacheable: true` flips the preference).
+    3. Raise OrchestratorError when the matching region has a TBD
+       base / size (the SoM isn't HW-mapped yet).
+    4. Allocate top-down within the region, page-aligned (4 KiB).
+    5. Endpoint IDs: FNV-1a of the entry name, low byte ORed with
+       0x400 for src, +1 for dst.  Collision check at emit time.
+    """
+    if not project.ipc:
+        return []
+
+    memory_map = list(project.som_preset.get("memory_map") or [])
+    mailbox = dict(project.som_preset.get("mailbox") or {})
+
+    # Per-region high-water-mark allocator state.  Initialised lazily
+    # the first time we touch a region (also raises TBD here).
+    region_top: dict[str, int] = {}
+
+    def _region_top_init(region: dict[str, Any]) -> int:
+        name = region["name"]
+        if name in region_top:
+            return region_top[name]
+        base = region["base"]
+        size_bytes = _region_size_bytes(region)
+        if isinstance(base, str) and base.strip().upper() == "TBD":
+            raise OrchestratorError(
+                f"SoM {project.sku} memory_map region '{name}' has "
+                f"`base: TBD`; this SoM hasn't been HW-mapped yet so "
+                f"IPC carve-outs cannot be allocated.  Fill the value "
+                f"in metadata/e1m_modules/{project.sku}.yaml or remove "
+                f"the matching ipc entry from board.yaml.")
+        if size_bytes is None:
+            raise OrchestratorError(
+                f"SoM {project.sku} memory_map region '{name}' has "
+                f"no resolvable size (size_mib / size_kib unset or "
+                f"TBD).  Cannot allocate carve-outs.")
+        # Top-down allocator: top = base + size, page-aligned.
+        top = base + size_bytes
+        top = _align_down(top, _PAGE)
+        region_top[name] = top
+        return top
+
+    # Sort entries alphabetically by name for determinism.
+    sorted_entries = sorted(project.ipc, key=lambda e: e.name)
+
+    resolved: list[ResolvedCarveOut] = []
+    seen_low_bytes: dict[int, str] = {}
+
+    for entry in sorted_entries:
+        prefers_cacheable = bool(entry.cacheable) if entry.cacheable is not None else False
+        endpoint_set = set(entry.endpoints)
+
+        # Filter candidates: accessibility covers every endpoint.
+        candidates: list[dict[str, Any]] = []
+        for region in memory_map:
+            af = set(region.get("accessible_from") or [])
+            if not endpoint_set.issubset(af):
+                continue
+            candidates.append(region)
+        if not candidates:
+            raise OrchestratorError(
+                f"ipc entry '{entry.name}' endpoints {entry.endpoints} "
+                f"have no matching memory_map region in SoM "
+                f"{project.sku}")
+
+        # Prefer the region whose `cacheable:` flag matches the entry's
+        # preference.  Default carve-out is non-cacheable.
+        def _rank(r: dict[str, Any]) -> tuple[int, int]:
+            cacheable_match = (bool(r.get("cacheable")) == prefers_cacheable)
+            # Smaller region size first (avoid eating the giant DDR
+            # region with tiny carve-outs when ocram fits).
+            size_b = _region_size_bytes(r) or 1 << 62
+            return (0 if cacheable_match else 1, size_b)
+
+        candidates.sort(key=_rank)
+        chosen = candidates[0]
+        region_name = chosen["name"]
+
+        # Initialise the region (and surface any TBD field).
+        _region_top_init(chosen)
+        carve_size = entry.carve_out_kb * 1024
+        carve_size_aligned = ((carve_size + _PAGE - 1) // _PAGE) * _PAGE
+
+        # Honour an explicit address override per ipc_entry.
+        if entry.address is not None:
+            base = entry.address
+            if base % _PAGE != 0:
+                raise OrchestratorError(
+                    f"ipc entry '{entry.name}' explicit address "
+                    f"0x{base:x} is not page-aligned (4 KiB)")
+        else:
+            new_top = region_top[region_name] - carve_size_aligned
+            region_lo = int(chosen["base"])
+            if new_top < region_lo:
+                raise OrchestratorError(
+                    f"ipc entry '{entry.name}' ({entry.carve_out_kb} "
+                    f"KiB) doesn't fit in region '{region_name}' "
+                    f"after prior allocations")
+            region_top[region_name] = new_top
+            base = new_top
+
+        # Endpoint ID derivation.
+        h = _fnv1a_32(entry.name.encode("utf-8"))
+        low = h & 0x0FF
+        if low in seen_low_bytes:
+            raise OrchestratorError(
+                f"ipc entry '{entry.name}' endpoint-id low byte "
+                f"0x{low:02x} collides with prior entry "
+                f"'{seen_low_bytes[low]}'.  Rename one of the channels.")
+        seen_low_bytes[low] = entry.name
+        src_ept = 0x400 | low
+        dst_ept = src_ept + 1
+
+        mbox = _resolve_default_mailbox_channel(mailbox, entry.name)
+
+        resolved.append(ResolvedCarveOut(
+            name=entry.name,
+            kind=entry.kind,
+            endpoints=list(entry.endpoints),
+            base=base,
+            size=carve_size_aligned,
+            region=region_name,
+            cacheable=bool(chosen.get("cacheable", False))
+                       if entry.cacheable is None
+                       else bool(entry.cacheable),
+            src_ept=src_ept,
+            dst_ept=dst_ept,
+            mailbox_channel=mbox,
+        ))
+
+    return resolved
+
+
+# ---------------------------------------------------------------------
+# Emitters
+# ---------------------------------------------------------------------
+
+
+def emit_ipc_contract_h(project: BoardProject) -> str:
+    """Generate alp_system_ipc.h per spec §6.3."""
+    carve_outs = resolve_carve_outs(project)
+
+    lines: list[str] = [
+        "/*",
+        " * Auto-generated by scripts/alp_orchestrate.py -- do not edit.",
+        " * Regenerate after changes to board.yaml `ipc:` or the SoM's",
+        " * memory_map / mailbox blocks.",
+        " */",
+        "",
+        "#ifndef ALP_SYSTEM_IPC_H",
+        "#define ALP_SYSTEM_IPC_H",
+        "",
+        f'#define ALP_IPC_SKU "{project.sku}"',
+        "",
+    ]
+    if not carve_outs:
+        lines += [
+            "/* No ipc[] entries declared in board.yaml; nothing to emit. */",
+            "",
+            "#endif /* ALP_SYSTEM_IPC_H */",
+            "",
+        ]
+        return "\n".join(lines)
+
+    for c in carve_outs:
+        upper = c.name.upper()
+        lines.append(f"/* {c.kind} channel '{c.name}' -- endpoints "
+                     f"{', '.join(c.endpoints)} */")
+        lines.append(f'#define ALP_IPC_{upper}_NAME       "{c.name}"')
+        lines.append(f'#define ALP_IPC_{upper}_ADDR       0x{c.base:08x}u')
+        lines.append(f'#define ALP_IPC_{upper}_SIZE       0x{c.size:08x}u')
+        lines.append(f'#define ALP_IPC_{upper}_SRC_EPT    0x{c.src_ept:08x}u')
+        lines.append(f'#define ALP_IPC_{upper}_DST_EPT    0x{c.dst_ept:08x}u')
+        lines.append(f'#define ALP_IPC_{upper}_MBOX_CH    {c.mailbox_channel}u')
+        lines.append("")
+
+    lines.append("#endif /* ALP_SYSTEM_IPC_H */")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def emit_dts_reservations(project: BoardProject) -> str:
+    """Generate dts-reservations.dtsi per spec §6.2."""
+    carve_outs = resolve_carve_outs(project)
+    lines: list[str] = [
+        "/*",
+        " * Auto-generated by scripts/alp_orchestrate.py -- do not edit.",
+        " * Regenerate after changes to board.yaml `ipc:` or the SoM's",
+        " * memory_map block.  #include this file from your kernel /",
+        " * Zephyr DT.",
+        " */",
+        "",
+        "/ {",
+        "    reserved-memory {",
+        "        #address-cells = <2>;",
+        "        #size-cells = <2>;",
+        "",
+    ]
+    if not carve_outs:
+        lines.append("        /* No ipc[] carve-outs declared. */")
+    else:
+        for c in carve_outs:
+            # Split base / size into two 32-bit halves for the
+            # #address-cells = <2>; #size-cells = <2>; addressing.
+            base_hi = (c.base >> 32) & 0xFFFFFFFF
+            base_lo = c.base & 0xFFFFFFFF
+            size_hi = (c.size >> 32) & 0xFFFFFFFF
+            size_lo = c.size & 0xFFFFFFFF
+            lines.append(
+                f"        {c.name}: {c.name}@{c.base:x} {{")
+            lines.append(
+                '            compatible = "shared-dma-pool";')
+            lines.append(
+                f"            reg = <0x{base_hi:x} 0x{base_lo:08x} "
+                f"0x{size_hi:x} 0x{size_lo:08x}>;")
+            lines.append("            no-map;")
+            lines.append(f'            label = "{c.name}";')
+            lines.append("        };")
+            lines.append("")
+
+    lines.append("    };")
+    lines.append("};")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def emit_system_manifest(
+    project: BoardProject,
+    *,
+    slices: Optional[list[Slice]] = None,
+) -> str:
+    """Generate system-manifest.yaml per spec §5.2.
+
+    If `slices` is None, projects the BoardProject's `cores` dict
+    as-is (typical "describe what will run" call).  When the
+    orchestrator finishes fan_out it passes its updated Slice list
+    so the manifest carries status / log_path / etc.
+    """
+    carve_outs = resolve_carve_outs(project)
+    effective_slices = list(slices) if slices is not None else list(project.cores.values())
+
+    boot_order = list(project.som_preset.get("boot_order") or [])
+
+    helper_mcus: list[dict[str, Any]] = []
+    om = project.som_preset.get("on_module") or {}
+    for key in ("supervisor_mcu", "wifi_ble"):
+        val = om.get(key)
+        if val:
+            helper_mcus.append({
+                "name":          val,
+                "role":          key,
+                "firmware_path": None,
+                "flash_method":  None,
+            })
+
+    manifest = SystemManifest(
+        project=project,
+        slices=effective_slices,
+        carve_outs=carve_outs,
+        boot_order=boot_order,
+        helper_mcus=helper_mcus,
+    )
+
+    out = manifest.to_dict()
+    # Comment when boot_order is empty so reviewers see the gap.
+    text = yaml.safe_dump(out, sort_keys=False, default_flow_style=False)
+    if not boot_order:
+        text += ("\n# boot_order is empty -- add a `boot_order:` list to "
+                 f"metadata/e1m_modules/{project.sku}.yaml when the\n"
+                 "# bring-up order is finalised.\n")
+    return text
+
+
+# ---------------------------------------------------------------------
+# Orchestrator (fan-out)
+# ---------------------------------------------------------------------
+
+
+# Tool table used to decide whether a slice can actually be built on
+# this host.  Each os maps to the executable the slice's build dispatch
+# needs; missing tools land the slice in `status: skipped`.
+_TOOL_FOR_OS: dict[str, str] = {
+    "zephyr":    "west",
+    "yocto":     "bitbake",
+    "baremetal": "cmake",
+    # 'off' never reaches the dispatcher.
+}
+
+
+class Orchestrator:
+    """Fans out one build sub-process per non-off slice.
+
+    Phase 2 ships the dispatch + manifest assembly; the per-os build
+    invocations are stubbed where a tool isn't present so the
+    orchestrator completes end-to-end on Windows / non-Yocto hosts.
+    """
+
+    def __init__(
+        self,
+        project: BoardProject,
+        build_root: Path,
+    ) -> None:
+        self.project = project
+        self.build_root = Path(build_root)
+        self.state_path = self.build_root / ".alp-build-state.json"
+        self._state: dict[str, Any] = self._load_state()
+
+    # ---- state cache ----
+
+    def _load_state(self) -> dict[str, Any]:
+        if not self.state_path.is_file():
+            return {}
+        try:
+            return json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _save_state(self) -> None:
+        try:
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            self.state_path.write_text(
+                json.dumps(self._state, indent=2, sort_keys=True),
+                encoding="utf-8")
+        except OSError as e:
+            print(f"alp-orchestrate: warning: failed to write "
+                  f"{self.state_path}: {e}", file=sys.stderr)
+
+    def _slice_hash(self, slice_: Slice) -> str:
+        """Hash the inputs that determine a slice's output."""
+        import hashlib
+        m = hashlib.sha256()
+        m.update(self.project.sku.encode("utf-8"))
+        m.update(slice_.os.encode("utf-8"))
+        m.update((slice_.app or "").encode("utf-8"))
+        m.update((slice_.image or "").encode("utf-8"))
+        m.update((slice_.board or "").encode("utf-8"))
+        m.update((slice_.machine or "").encode("utf-8"))
+        m.update(",".join(sorted(slice_.peripherals)).encode("utf-8"))
+        m.update(",".join(sorted(slice_.libraries)).encode("utf-8"))
+        m.update(json.dumps(slice_.inference, sort_keys=True)
+                 .encode("utf-8"))
+        m.update(json.dumps(slice_.iot, sort_keys=True)
+                 .encode("utf-8"))
+        for entry in sorted(self.project.ipc, key=lambda e: e.name):
+            m.update(entry.name.encode("utf-8"))
+            m.update(entry.kind.encode("utf-8"))
+            m.update(",".join(sorted(entry.endpoints)).encode("utf-8"))
+            m.update(str(entry.carve_out_kb).encode("utf-8"))
+        return m.hexdigest()[:16]
+
+    # ---- materialisation ----
+
+    def _materialise_slice_config(self, slice_: Slice) -> Path:
+        """Write per-core config artefacts under
+        build/<core>-<os>/."""
+        slice_dir = self.build_root / f"{slice_.core_id}-{slice_.os}"
+        slice_dir.mkdir(parents=True, exist_ok=True)
+        slice_.build_dir = slice_dir
+        slice_.log_path = slice_dir / "build.log"
+        if slice_.os == "zephyr":
+            (slice_dir / "alp.conf").write_text(
+                _slice_alp_conf(self.project, slice_), encoding="utf-8")
+        elif slice_.os == "yocto":
+            (slice_dir / "local.conf").write_text(
+                _slice_local_conf(self.project, slice_), encoding="utf-8")
+        elif slice_.os == "baremetal":
+            (slice_dir / "cmake-args.txt").write_text(
+                _slice_cmake_args(self.project, slice_), encoding="utf-8")
+        return slice_dir
+
+    def _materialise_shared(self) -> Path:
+        gen = self.build_root / "generated"
+        gen.mkdir(parents=True, exist_ok=True)
+        (gen / "alp_system_ipc.h").write_text(
+            emit_ipc_contract_h(self.project), encoding="utf-8")
+        (gen / "dts-reservations.dtsi").write_text(
+            emit_dts_reservations(self.project), encoding="utf-8")
+        return gen
+
+    # ---- dispatch ----
+
+    def _dispatch_slice(self, slice_: Slice) -> Slice:
+        """Run the per-slice build sub-process (or skip if its tool
+        isn't on PATH)."""
+        if slice_.os == "off":
+            slice_.status = "skipped"
+            slice_.reason = "os: off"
+            return slice_
+
+        tool = _TOOL_FOR_OS.get(slice_.os)
+        if tool is None:
+            slice_.status = "failed"
+            slice_.reason = f"unknown os '{slice_.os}'"
+            return slice_
+
+        if shutil.which(tool) is None:
+            slice_.status = "skipped"
+            slice_.reason = (f"{tool} not found in PATH; this is normal "
+                             f"on non-{slice_.os} dev hosts")
+            return slice_
+
+        cmd = _slice_command(self.project, slice_)
+        if cmd is None:
+            slice_.status = "skipped"
+            slice_.reason = ("no command resolver implemented yet for "
+                             f"os: {slice_.os} -- Phase 3 wires this up")
+            return slice_
+
+        # Slice subprocess: scoped env + dedicated log file.
+        env = os.environ.copy()
+        env["ALP_SDK_ROOT"] = str(REPO)
+        log_path = slice_.log_path or (slice_.build_dir / "build.log")
+        start = time.time()
+        try:
+            with open(log_path, "w", encoding="utf-8") as logf:
+                logf.write(f"# alp_orchestrate.py slice command: "
+                           f"{' '.join(cmd)}\n")
+                logf.flush()
+                proc = subprocess.run(
+                    cmd, cwd=str(slice_.build_dir),
+                    env=env, stdout=logf, stderr=subprocess.STDOUT,
+                    check=False)
+            slice_.duration_s = time.time() - start
+            if proc.returncode == 0:
+                slice_.status = "ok"
+            else:
+                slice_.status = "failed"
+                slice_.reason = (f"{tool} exited rc={proc.returncode}; "
+                                 f"see {log_path}")
+        except (OSError, subprocess.SubprocessError) as e:
+            slice_.duration_s = time.time() - start
+            slice_.status = "failed"
+            slice_.reason = f"slice subprocess raised: {e}"
+        return slice_
+
+    # ---- public API ----
+
+    def fan_out(
+        self,
+        only_core: Optional[str] = None,
+        parallel: bool = True,
+    ) -> SystemManifest:
+        """Run every non-off slice, write the manifest, return it."""
+        self.build_root.mkdir(parents=True, exist_ok=True)
+        # 1. Shared artefacts.
+        self._materialise_shared()
+
+        # 2. Per-slice config materialisation.
+        targets: list[Slice] = []
+        for cid, slice_ in self.project.cores.items():
+            if slice_.os == "off":
+                slice_.status = "skipped"
+                slice_.reason = "os: off"
+                continue
+            if only_core is not None and cid != only_core:
+                slice_.status = "skipped"
+                slice_.reason = f"--core {only_core} selected; this slice not in scope"
+                continue
+            self._materialise_slice_config(slice_)
+            targets.append(slice_)
+
+        # 3. Caching: skip slices whose inputs hash matches the last
+        #    successful run AND whose build dir still exists.
+        skip_targets: set[str] = set()
+        for slice_ in targets:
+            h = self._slice_hash(slice_)
+            cached = self._state.get(slice_.core_id) or {}
+            if (cached.get("hash") == h
+                    and cached.get("status") == "ok"
+                    and slice_.build_dir and slice_.build_dir.is_dir()):
+                slice_.status = "ok"
+                slice_.reason = "cache-hit (inputs unchanged since last successful build)"
+                slice_.output_artefact = cached.get("output_artefact")
+                skip_targets.add(slice_.core_id)
+
+        runnable = [s for s in targets if s.core_id not in skip_targets]
+
+        # 4. Dispatch.  Use ProcessPoolExecutor for parallel, but the
+        # cheap reality on Phase 2 is most slices skip (missing tool)
+        # so the sequential path is fine when parallel=False.
+        if parallel and len(runnable) > 1:
+            try:
+                from concurrent.futures import ProcessPoolExecutor, as_completed
+                with ProcessPoolExecutor(max_workers=len(runnable)) as ex:
+                    futures = {
+                        ex.submit(self._dispatch_slice, s): s
+                        for s in runnable
+                    }
+                    for fut in as_completed(futures):
+                        result = fut.result()
+                        # Mutate the original Slice in place.
+                        original = futures[fut]
+                        original.status = result.status
+                        original.reason = result.reason
+                        original.duration_s = result.duration_s
+                        original.output_artefact = result.output_artefact
+            except (OSError, RuntimeError) as e:
+                # ProcessPool on Windows in some envs fails; degrade to
+                # sequential.
+                print(f"alp-orchestrate: ProcessPoolExecutor unusable "
+                      f"({e}); falling back to sequential", file=sys.stderr)
+                for slice_ in runnable:
+                    self._dispatch_slice(slice_)
+        else:
+            for slice_ in runnable:
+                self._dispatch_slice(slice_)
+
+        # 5. Persist cache state.
+        for slice_ in self.project.cores.values():
+            if slice_.status == "ok":
+                self._state[slice_.core_id] = {
+                    "hash":           self._slice_hash(slice_),
+                    "status":         slice_.status,
+                    "output_artefact": slice_.output_artefact,
+                }
+        self._save_state()
+
+        # 6. Manifest.
+        ordered = sorted(self.project.cores.values(),
+                         key=lambda s: s.core_id)
+        manifest = SystemManifest(
+            project=self.project,
+            slices=ordered,
+            carve_outs=resolve_carve_outs(self.project),
+            boot_order=list(self.project.som_preset.get("boot_order") or []),
+            helper_mcus=_helper_mcus(self.project),
+        )
+
+        out = self.build_root / "system-manifest.yaml"
+        out.write_text(emit_system_manifest(
+            self.project, slices=ordered), encoding="utf-8")
+
+        return manifest
+
+
+def _helper_mcus(project: BoardProject) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    om = project.som_preset.get("on_module") or {}
+    for key in ("supervisor_mcu", "wifi_ble"):
+        val = om.get(key)
+        if val:
+            out.append({
+                "name":          val,
+                "role":          key,
+                "firmware_path": None,
+                "flash_method":  None,
+            })
+    return out
+
+
+# ---------------------------------------------------------------------
+# Per-slice config emitters (consumed by both Orchestrator and the
+# new --core <id> --emit zephyr-conf / yocto-conf modes in alp_project.py).
+# ---------------------------------------------------------------------
+
+
+def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
+    """Per-core Kconfig fragment for a Zephyr slice.
+
+    Phase 2 emits a minimal, well-formed fragment.  The richer
+    library / chip-driver mapping in alp_project.py:_emit_zephyr
+    remains the project-level union; this scoped fragment is the
+    per-core delta.
+    """
+    silicon = project.som_preset.get("silicon")
+    kconfig = _SILICON_TO_KCONFIG.get(silicon)
+    diagnostics = project.diagnostics
+
+    lines: list[str] = []
+    lines.append("# Auto-generated by scripts/alp_orchestrate.py "
+                 "-- do not edit.")
+    lines.append(f"# Per-core Kconfig fragment for slice "
+                 f"`{slice_.core_id}` ({slice_.os}).")
+    lines.append("")
+    lines.append("CONFIG_ALP_SDK=y")
+    lines.append("CONFIG_LOG=y")
+    lines.append("CONFIG_PRINTK=y")
+    if diagnostics.get("last_error", True):
+        lines.append("CONFIG_THREAD_LOCAL_STORAGE=y")
+    log_level = diagnostics.get("log_level")
+    if log_level is not None:
+        log_level_kc = {
+            "error": 1, "warn": 2, "info": 3, "debug": 4, "trace": 4,
+        }
+        if log_level in log_level_kc:
+            lines.append(f"CONFIG_LOG_DEFAULT_LEVEL={log_level_kc[log_level]}")
+    lines.append("")
+    if kconfig:
+        lines.append(f"# SoM silicon ({silicon} via {project.sku})")
+        lines.append(f"CONFIG_{kconfig}=y")
+        lines.append("")
+    if slice_.peripherals:
+        lines.append(f"# Peripherals declared on core "
+                     f"`{slice_.core_id}`")
+        for periph in sorted(slice_.peripherals):
+            kc = _PERIPHERAL_KCONFIG.get(periph)
+            if kc:
+                lines.append(f"CONFIG_{kc}=y")
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
+    """Per-core local.conf snippet for a Yocto slice."""
+    machine = slice_.machine or f"e1m-{project.sku.lower().replace('e1m-', '')}"
+    lines: list[str] = []
+    lines.append("# Auto-generated by scripts/alp_orchestrate.py "
+                 "-- append to local.conf.")
+    lines.append(f"# Per-core slice `{slice_.core_id}` "
+                 f"(image: {slice_.image or 'custom'})")
+    lines.append(f'MACHINE = "{machine}"')
+    if slice_.libraries:
+        imageinstall = " ".join(
+            f"lib-{lib.replace('_', '-')}" for lib in slice_.libraries)
+        lines.append(f'IMAGE_INSTALL:append = " {imageinstall}"')
+    if slice_.image:
+        lines.append(f"# bitbake target: {slice_.image}")
+    return "\n".join(lines) + "\n"
+
+
+def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
+    """Per-core cmake -D args for a baremetal slice."""
+    family = project.som_preset.get("family") or "unknown"
+    lines: list[str] = []
+    lines.append("# Auto-generated by scripts/alp_orchestrate.py "
+                 "-- pass to cmake.")
+    lines.append(f"-DALP_SOM_SKU={project.sku}")
+    lines.append(f"-DALP_SOM_FAMILY={family}")
+    lines.append(f"-DALP_CORE_ID={slice_.core_id}")
+    if slice_.toolchain:
+        lines.append(f"-DALP_TOOLCHAIN={slice_.toolchain}")
+    return "\n".join(lines) + "\n"
+
+
+_PERIPHERAL_KCONFIG: dict[str, str] = {
+    "adc":      "ADC",
+    "can":      "CAN",
+    "counter":  "COUNTER",
+    "gpio":     "GPIO",
+    "i2c":      "I2C",
+    "i2s":      "I2S",
+    "pwm":      "PWM",
+    "rtc":      "RTC",
+    "sensor":   "SENSOR",
+    "spi":      "SPI",
+    "uart":     "SERIAL",
+    "watchdog": "WATCHDOG",
+}
+
+
+def _slice_command(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[list[str]]:
+    """Resolve the build command for a slice.  Returns None when
+    Phase 2 has no command for this os yet (caller marks the slice
+    `skipped`)."""
+    if slice_.os == "zephyr":
+        if not slice_.app or not slice_.board:
+            return None
+        return [
+            "west", "build",
+            "-b", slice_.board,
+            str(_resolve_app_path(slice_.app)),
+        ]
+    if slice_.os == "yocto":
+        target = slice_.image or slice_.app
+        if not target:
+            return None
+        return ["bitbake", str(target)]
+    if slice_.os == "baremetal":
+        if not slice_.app:
+            return None
+        return ["cmake", "-S", str(_resolve_app_path(slice_.app)),
+                "-B", str(slice_.build_dir)]
+    return None
+
+
+def _resolve_app_path(app: str) -> Path:
+    """Resolve `./linux` or absolute paths from a slice.app."""
+    p = Path(app)
+    if p.is_absolute():
+        return p
+    return (Path.cwd() / p).resolve()
+
+
+# ---------------------------------------------------------------------
+# CLI (thin wrapper for ad-hoc invocation)
+# ---------------------------------------------------------------------
+
+
+def main(argv: Optional[Iterable[str]] = None) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Fan-out orchestrator for board.yaml v2.")
+    parser.add_argument("--input", type=Path, default=Path("board.yaml"),
+                        help="Path to the project's board.yaml.")
+    parser.add_argument("--build-root", type=Path,
+                        default=Path("build"),
+                        help="Build root directory.")
+    parser.add_argument("--core", default=None,
+                        help="Limit fan-out to a single core ID.")
+    parser.add_argument("--no-parallel", action="store_true",
+                        help="Force sequential dispatch.")
+    parser.add_argument("--emit", default=None,
+                        choices=["system-manifest", "ipc-contract-h",
+                                 "dts-reservations"],
+                        help="Skip the build; just emit one of the "
+                             "generated artefacts to stdout.")
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    try:
+        project = load_board_yaml(args.input)
+    except OrchestratorError as e:
+        print(f"alp-orchestrate: {e}", file=sys.stderr)
+        return 1
+
+    if args.emit:
+        try:
+            if args.emit == "system-manifest":
+                sys.stdout.write(emit_system_manifest(project))
+            elif args.emit == "ipc-contract-h":
+                sys.stdout.write(emit_ipc_contract_h(project))
+            elif args.emit == "dts-reservations":
+                sys.stdout.write(emit_dts_reservations(project))
+        except OrchestratorError as e:
+            print(f"alp-orchestrate: {e}", file=sys.stderr)
+            return 1
+        return 0
+
+    orchestrator = Orchestrator(project, args.build_root)
+    try:
+        manifest = orchestrator.fan_out(
+            only_core=args.core, parallel=not args.no_parallel)
+    except OrchestratorError as e:
+        print(f"alp-orchestrate: {e}", file=sys.stderr)
+        return 1
+
+    # Surface per-slice status to the console.
+    failed = 0
+    for s in manifest.slices:
+        marker = {
+            "ok":      "[OK ]",
+            "failed":  "[FAIL]",
+            "skipped": "[SKIP]",
+            "pending": "[??? ]",
+        }.get(s.status, "[??? ]")
+        extra = f" -- {s.reason}" if s.reason else ""
+        print(f"{marker} {s.core_id}/{s.os}{extra}")
+        if s.status == "failed":
+            failed += 1
+    print(f"alp-orchestrate: manifest at "
+          f"{(args.build_root / 'system-manifest.yaml')}")
+    return 1 if failed > 0 else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

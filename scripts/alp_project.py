@@ -64,6 +64,7 @@ except ImportError:
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
 SCHEMA = METADATA_ROOT / "schemas" / "board-config-v1.schema.json"
+SCHEMA_V2 = METADATA_ROOT / "schemas" / "board-config-v2.schema.json"
 SDK_VERSION_FILE = METADATA_ROOT / "sdk_version.yaml"
 
 
@@ -118,6 +119,16 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _validate(project: dict[str, Any]) -> None:
+    if not SCHEMA.is_file():
+        # Phase 1 of the 2026-05-15 redesign deleted v1 schema.  Phase 4
+        # rewrites every shipped board.yaml; until then the v1 emit
+        # modes are kept as a best-effort backwards-compat path.
+        print(f"alp_project: board-config-v1.schema.json was removed in "
+              f"the Phase 1 metadata land; this v1 board.yaml cannot "
+              f"be schema-validated.  Phase 4 rewrites every board.yaml "
+              f"to v2; this command runs against v2 inputs only.",
+              file=sys.stderr)
+        return
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     validator = jsonschema.Draft202012Validator(schema)
     errors = sorted(validator.iter_errors(project), key=lambda e: list(e.path))
@@ -1114,6 +1125,175 @@ def _emit_yocto(
 
 
 # ---------------------------------------------------------------------
+# v2 emit shims (Phase 2)
+# ---------------------------------------------------------------------
+#
+# The orchestrator (scripts/alp_orchestrate.py) owns the v2 board.yaml
+# loader + carve-out resolver + system-manifest emitter.  The v1
+# loader above keeps working unchanged for backwards compatibility;
+# these shims route the new v2-only `--emit` modes (and the per-core
+# `--emit zephyr-conf --core <id>`) through the orchestrator.
+#
+# Phase 4 rewrites every shipped board.yaml; once that lands, the v1
+# path becomes dead code we can excise.
+
+
+def _write_or_print(out: str, target: Path | None) -> int:
+    if target is not None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(out, encoding="utf-8")
+        try:
+            rel = target.relative_to(Path.cwd())
+        except ValueError:
+            rel = target
+        print(f"alp_project: wrote {rel} ({len(out)} bytes)",
+              file=sys.stderr)
+    else:
+        sys.stdout.write(out)
+    return 0
+
+
+def _run_v2_emit(args: argparse.Namespace) -> int:
+    """Handle the three project-level v2 emit modes."""
+    if args.core is not None:
+        print(f"alp_project: --core is ignored for --emit {args.emit} "
+              f"(project-level emit)", file=sys.stderr)
+    try:
+        # Imported here so the v1 path doesn't pay the import cost when
+        # the orchestrator module is being modified in-tree.
+        from alp_orchestrate import (
+            OrchestratorError,
+            emit_dts_reservations,
+            emit_ipc_contract_h,
+            emit_system_manifest,
+            load_board_yaml,
+        )
+    except ImportError as e:
+        print(f"alp_project: failed to import alp_orchestrate: {e}",
+              file=sys.stderr)
+        return 1
+
+    try:
+        project = load_board_yaml(args.input,
+                                  metadata_root=args.metadata_root)
+        if args.emit == "system-manifest":
+            out = emit_system_manifest(project)
+        elif args.emit == "ipc-contract-h":
+            out = emit_ipc_contract_h(project)
+        elif args.emit == "dts-reservations":
+            out = emit_dts_reservations(project)
+        else:
+            print(f"alp_project: unknown v2 emit '{args.emit}'",
+                  file=sys.stderr)
+            return 1
+    except OrchestratorError as e:
+        print(f"alp_project: {e}", file=sys.stderr)
+        return 1
+
+    return _write_or_print(out, args.output)
+
+
+def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
+    """v2 board.yaml + per-core --emit zephyr-conf / yocto-conf.
+
+    The orchestrator owns the per-slice config emitters; this shim
+    delegates after resolving the requested core.
+    """
+    try:
+        from alp_orchestrate import (
+            OrchestratorError,
+            _slice_alp_conf,
+            _slice_cmake_args,
+            _slice_local_conf,
+            load_board_yaml,
+        )
+    except ImportError as e:
+        print(f"alp_project: failed to import alp_orchestrate: {e}",
+              file=sys.stderr)
+        return 1
+
+    try:
+        project = load_board_yaml(args.input,
+                                  metadata_root=args.metadata_root)
+    except OrchestratorError as e:
+        print(f"alp_project: {e}", file=sys.stderr)
+        return 1
+
+    # If --core is unset, sum across cores.  Per spec §4.6, the new
+    # per-core invocation is the canonical entry point; the
+    # unscoped invocation is a sum-across-cores convenience for
+    # tools that haven't moved off the v1 single-OS world yet.
+    core_ids: list[str]
+    if args.core is not None:
+        if args.core not in project.cores:
+            print(f"alp_project: --core {args.core} not present in "
+                  f"board.yaml (known: {sorted(project.cores.keys())})",
+                  file=sys.stderr)
+            return 1
+        core_ids = [args.core]
+    else:
+        core_ids = sorted(project.cores.keys())
+
+    parts: list[str] = []
+    for cid in core_ids:
+        slice_ = project.cores[cid]
+        if slice_.os == "off":
+            continue
+        if args.emit == "zephyr-conf":
+            if slice_.os != "zephyr":
+                # When --core is unset, filter by os: zephyr; with --core,
+                # honour the explicit selection but warn.
+                if args.core is None:
+                    continue
+                print(f"alp_project: --core {cid} has os: {slice_.os}; "
+                      f"emitting Kconfig fragment anyway", file=sys.stderr)
+            parts.append(f"# --- core: {cid} ({slice_.os}) ---")
+            parts.append(_slice_alp_conf(project, slice_))
+        elif args.emit == "yocto-conf":
+            if slice_.os != "yocto":
+                if args.core is None:
+                    continue
+                print(f"alp_project: --core {cid} has os: {slice_.os}; "
+                      f"emitting local.conf snippet anyway", file=sys.stderr)
+            parts.append(f"# --- core: {cid} ({slice_.os}) ---")
+            parts.append(_slice_local_conf(project, slice_))
+        elif args.emit == "cmake-args":
+            if slice_.os not in ("baremetal", "zephyr"):
+                if args.core is None:
+                    continue
+            parts.append(f"# --- core: {cid} ({slice_.os}) ---")
+            parts.append(_slice_cmake_args(project, slice_))
+        elif args.emit == "hw-info-h":
+            # The hw-info-h emit isn't per-core; fall back to a one-
+            # shot project-level emit by synthesising a v1-shaped
+            # dict the existing emitter understands.
+            project_v1_shaped: dict[str, Any] = {
+                "som": {
+                    "sku":    project.sku,
+                    "hw_rev": project.hw_rev,
+                },
+                "carrier": {
+                    "name":   project.carrier_name,
+                    "hw_rev": project.carrier_hw_rev,
+                } if project.carrier_name else None,
+                "os":    "heterogeneous",
+            }
+            parts.append(_emit_hw_info_h(
+                project_v1_shaped, project.som_preset,
+                project.carrier_preset))
+            break
+        else:
+            print(f"alp_project: --emit {args.emit} is not implemented "
+                  f"for v2 board.yaml -- Phase 4 rewrites the world; "
+                  f"this command runs against v2 inputs only.",
+                  file=sys.stderr)
+            return 1
+
+    out = "\n".join(parts) + ("\n" if parts and not parts[-1].endswith("\n") else "")
+    return _write_or_print(out, args.output)
+
+
+# ---------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------
 
@@ -1124,16 +1304,43 @@ def main() -> int:
                         help="Path to the project's board.yaml (default: ./board.yaml).")
     parser.add_argument("--emit",
                         choices=["zephyr-conf", "cmake-args", "yocto-conf",
-                                 "dts-overlay", "hw-info-h", "west-libraries"],
+                                 "dts-overlay", "hw-info-h", "west-libraries",
+                                 # v2 orchestration emits (Phase 2):
+                                 "system-manifest", "dts-reservations",
+                                 "ipc-contract-h"],
                         default="zephyr-conf",
                         help="Output format (default: zephyr-conf).")
     parser.add_argument("--output", type=Path, default=None,
                         help="Write to this path; default: stdout.")
     parser.add_argument("--metadata-root", type=Path, default=METADATA_ROOT,
                         help="Override the metadata search root.")
+    parser.add_argument("--core", default=None,
+                        help="When the project is v2, limit per-core emits "
+                             "(zephyr-conf, yocto-conf) to this core ID.  "
+                             "Ignored for project-level emit modes.")
     args = parser.parse_args()
 
+    # v2 emit modes route through scripts/alp_orchestrate.py.  We resolve
+    # them before the v1 path so a v2 input doesn't trip the v1 validator.
+    if args.emit in ("system-manifest", "dts-reservations",
+                     "ipc-contract-h"):
+        return _run_v2_emit(args)
+
     project = _load_yaml(args.input)
+
+    # v2 board.yamls can flow through the per-core --emit zephyr-conf /
+    # yocto-conf paths; everything else stays on the v1 schema for now
+    # (Phase 4 rewrites every board.yaml).
+    schema_version = project.get("schema_version")
+    if schema_version == 2:
+        if args.core is not None and args.emit not in ("zephyr-conf", "yocto-conf"):
+            print(f"alp_project: --core is ignored for --emit {args.emit}",
+                  file=sys.stderr)
+        return _run_v2_per_core_emit(args)
+    elif args.core is not None:
+        print(f"alp_project: --core requires a v2 board.yaml; input is "
+              f"v{schema_version} -- ignoring", file=sys.stderr)
+
     _validate(project)
 
     sku_preset = _resolve_sku(project["som"]["sku"], args.metadata_root)
