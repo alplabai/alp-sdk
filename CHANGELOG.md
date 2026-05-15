@@ -62,8 +62,11 @@ HW config per the project's "never invent values" convention.
     artefact paths + boot order, byte-stable across rebuilds.
   - `build/generated/dts-reservations.dtsi` -- shared-memory
     carve-outs as Linux + Zephyr DT reservations.
-  - `build/generated/alp_system_ipc.h` -- name + address + endpoint
-    ID + mailbox channel macros that both halves `#include`.
+  - `build/generated/alp/system_ipc.h` -- name + address + endpoint
+    ID + mailbox channel macros that both halves `#include` via
+    `<alp/system_ipc.h>`.  Carries an `#error` directive for any
+    blocked channel so the slice build trips when the SoM metadata
+    isn't ready yet (see "Blocked carve-outs" below).
 - **3 flagship heterogeneous examples** plus an offload demo:
   - `examples/rpmsg-v2n/` -- V2N101 A55 (Yocto) ↔ M33-SM (Zephyr)
     over RPMsg.
@@ -159,6 +162,72 @@ HW config per the project's "never invent values" convention.
   that the two halves could not share one declaration -- removed.
   Both halves now drive from one v2 `board.yaml`, the example
   shape the schema *expects* to be used.
+- **`resolve_carve_outs()` emits `status: blocked` instead of
+  raising on TBD SoM metadata** (mailbox controller, memory_map
+  base / size).  The manifest stays emit-able when the preset
+  isn't fully HW-mapped yet — CI's manifest-shape + determinism
+  gates pass while the actual slice build is what trips (via the
+  generated `<alp/system_ipc.h>` `#error` directive).  Required
+  for the AEN + iMX93 examples to flow through `pr-alp-build` while
+  the preset's hardware-fact fields are still TBD.
+- **`system-manifest.yaml` is byte-stable across rebuilds.**
+  Dropped the wall-clock `duration_s` field from
+  `Slice.to_manifest_entry()` — the metric stays on the runtime
+  Slice dataclass for `west alp-build` logging but never lands in
+  the declarative manifest.  Satisfies spec §6.1's determinism
+  clause: `west alp-clean && rebuild && diff` is now a no-op.
+  Enforced by `pr-alp-build.yml`'s "Determinism check" step.
+- **`<alp/system_ipc.h>` path canonical at `generated/alp/`**
+  (was `generated/alp_system_ipc.h`) — matches the
+  `#include <alp/system_ipc.h>` consumer pattern documented in
+  `include/alp/rpc.h`.  Slice CMakeLists drop
+  `${CMAKE_BINARY_DIR}/generated` onto `zephyr_include_directories`
+  and the include resolves with no munging.
+- **v2 `zephyr-conf` emit now carries chip drivers + subsystem deps.**
+  `_slice_alp_conf` was only emitting baseline + silicon +
+  per-core peripherals + libraries; it dropped the `carrier.populated:`
+  chip-driver block that the v1 emit had under `_emit_zephyr`.
+  Apps that depend on a populated chip (e.g. `iot-connected-camera`'s
+  `ssd1306` + `button_led`) lost `CONFIG_ALP_SDK_CHIP_*` under v2 so
+  twister's native_sim link hit `undefined reference to ssd1306_init`.
+  v2 path now merges the SoM/carrier preset's `populated:` block with
+  the board.yaml override and emits both the chip-driver Kconfigs and
+  the matching subsystem enables (`CONFIG_GPIO=y` / `CONFIG_I2C=y` /
+  ...) so `GPIO_EMUL` / `I2C_EMUL` deps are satisfied.
+- **`examples/rpmsg-v2n/m33_sm/testcase.yaml`** (moved from project
+  root).  The old top-level location made twister try to configure
+  the multi-slice project root as a Zephyr app — there's no
+  `CMakeLists.txt` finding `Zephyr` at that level, so configure
+  crashed and aborted the whole run with
+  `FileNotFoundError: zephyr/.config`.  Move puts the testcase next
+  to its real `CMakeLists.txt` + adds `extra_args:
+  CONFIG_ALP_SDK_RPC=y` so the producer's `<alp/rpc.h>` symbols link.
+- **Pre-existing chip header gaps surfaced once twister stopped
+  aborting mid-run.**  `a4988.h` / `drv8825.h` / `drv8833.h` now
+  `#include "alp/pwm.h"` (they declare `alp_pwm_t` fields but only
+  pulled in `peripheral.h`).  `tests/zephyr/chips/prj.conf` now
+  enables every chip the suite calls `*_init()` on (the v0.5
+  §D.AI / §D.industrial / §D.iot / §D.audio batches were on by-include
+  but off by-Kconfig, so 80+ chip _init calls hit
+  `undefined reference`).
+- **`tests/zephyr/library_knobs/src/main.c`** stopped using
+  `defined(CONFIG_##x)` as a runtime expression (the C preprocessor
+  operator only works in `#if` directives — Zephyr provides
+  `IS_ENABLED()` for the C-expression form).  Dropped the
+  `CONFIG_FILE_SYSTEM_LITTLEFS=y` pin and the mbedtls header
+  include — Zephyr v4.4's `subsys/fs/littlefs_fs.c` + `ssl_misc.h`
+  trip -Werror on this profile and the knob smoke doesn't need them.
+
+#### Changed (CI)
+
+- **`pr-twister.yml` drops the `ghcr.io/zephyrproject-rtos/ci:v0.29.1`
+  Docker container** (~17 GB on disk; the public ubuntu-latest
+  runners only ship ~14 GB free, so the image pull intermittently
+  failed with `no space left on device`).  Replaced with a native
+  ubuntu-latest job that pip-installs `west` + the Zephyr Python
+  requirements and uses `ZEPHYR_TOOLCHAIN_VARIANT=host` so
+  `native_sim/native/64` builds use the runner's stock gcc.  Saves
+  ~5 minutes per run; eliminates the disk-pressure failure mode.
 
 #### References
 

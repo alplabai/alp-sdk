@@ -36,7 +36,10 @@ RPMsg protocol details (OpenAMP docs).
 
 1. West workspace bootstrapped — `bash scripts/bootstrap.sh` from the
    SDK root.  See [`docs/getting-started.md`](getting-started.md) §1–3.
-2. Zephyr SDK installed, `ZEPHYR_SDK_INSTALL_DIR` exported.
+2. Zephyr SDK installed (1.0.1, `ZEPHYR_SDK_INSTALL_DIR` exported) for
+   the Zephyr slice's real-silicon target.  Not required for
+   `native_sim/native/64` smoke builds — those use host gcc with
+   `ZEPHYR_TOOLCHAIN_VARIANT=host`.
 3. Yocto build host set up (50+ GB free, Poky host packages).  See
    [`docs/getting-started.md`](getting-started.md) "Yocto host
    requirements" — the orchestrator delegates to bitbake; it does not
