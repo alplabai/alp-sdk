@@ -237,10 +237,25 @@ static const char *frame_parse(const void *data, size_t len, const void **payloa
     return bytes;
 }
 
+/* Bounded strlen -- C99-portable replacement for POSIX strnlen().
+ * Returns the index of the first '\0' or `cap` if none found within
+ * the budget.  Matches strnlen() semantics for the way this file
+ * uses it (callers compare the result against cap to detect
+ * unterminated strings). */
+static size_t bounded_strlen(const char *s, size_t cap)
+{
+    for (size_t i = 0; i < cap; ++i) {
+        if (s[i] == '\0') {
+            return i;
+        }
+    }
+    return cap;
+}
+
 static int frame_build(uint8_t *out, size_t cap, const char *method, const void *payload,
                        size_t payload_len)
 {
-    size_t method_len = strnlen(method, ALP_RPC_METHOD_MAX_LEN);
+    size_t method_len = bounded_strlen(method, ALP_RPC_METHOD_MAX_LEN);
     if (method_len == ALP_RPC_METHOD_MAX_LEN) {
         return -EINVAL;
     }
@@ -327,7 +342,7 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
         return NULL;
     }
 #if defined(CONFIG_ALP_SDK_RPC)
-    if (strnlen(cfg->name, ALP_RPC_METHOD_MAX_LEN) == ALP_RPC_METHOD_MAX_LEN) {
+    if (bounded_strlen(cfg->name, ALP_RPC_METHOD_MAX_LEN) == ALP_RPC_METHOD_MAX_LEN) {
         alp_z_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
