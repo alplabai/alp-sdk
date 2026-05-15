@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Mender OTA distro config for meta-alp targets.
+# Mender OTA distro config for meta-alp-sdk targets.
 #
 # Opt-in.  Pull in from a machine .conf via:
 #
@@ -16,7 +16,7 @@
 #     git clone -b scarthgap https://github.com/mendersoftware/meta-mender
 #     bitbake-layers add-layer ../meta-mender/meta-mender-core
 #
-# Status: v0.4 prep scaffolding.  HIL roundtrip (mock-update +
+# Status: v0.6 scaffolding.  HIL roundtrip (mock-update +
 # rollback simulation) parked behind docs/ci/HW-IN-LOOP.md.
 
 # Mender's core image-generation class.  Adds the .mender artefact
@@ -25,7 +25,7 @@
 INHERIT += "mender-full"
 
 # Storage layout.  meta-mender-core supports several patterns; the
-# v0.4 reference path uses block-device-backed A/B rootfs
+# v0.6 reference path uses block-device-backed A/B rootfs
 # partitions.  Override in machine .conf or local.conf when the SoM
 # uses raw NAND, eMMC RPMB, or partition-table-free SD media.
 MENDER_STORAGE_DEVICE_BASE ?= "/dev/mmcblk0p"
@@ -34,13 +34,13 @@ MENDER_ROOTFS_PART_A ?= "${MENDER_STORAGE_DEVICE_BASE}2"
 MENDER_ROOTFS_PART_B ?= "${MENDER_STORAGE_DEVICE_BASE}3"
 MENDER_DATA_PART ?= "${MENDER_STORAGE_DEVICE_BASE}4"
 
-# Rootfs sizing.  256 MiB per A/B slot covers the v0.4 reference
-# image (alp-sdk-runtime + alp-chips + alp-edgeai + a TensorFlow
-# Lite Micro runtime + a representative model).  Bump in
-# local.conf for fatter app payloads.
-MENDER_STORAGE_TOTAL_SIZE_MB ?= "1024"
-MENDER_BOOT_PART_SIZE_MB ?= "32"
-MENDER_DATA_PART_SIZE_MB ?= "256"
+# Rootfs sizing.  alp-image-edge (ROS 2 + alp-sdk + libcamera +
+# GStreamer + DEEPX runtime where applicable) targets ~1 GiB
+# slot ceiling on V2N101 / V2M101.  Bump in local.conf for fatter
+# app payloads.
+MENDER_STORAGE_TOTAL_SIZE_MB ?= "4096"
+MENDER_BOOT_PART_SIZE_MB ?= "64"
+MENDER_DATA_PART_SIZE_MB ?= "512"
 
 # Server URL placeholder.  Override in local.conf for production
 # fleets.  The default points at Mender's hosted demo so

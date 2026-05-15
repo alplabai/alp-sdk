@@ -5,10 +5,11 @@
 # Builds libalp_chips.a as a static library that links into
 # alp-sdk apps that need on-board chip drivers (LSM6DSO, SSD1306,
 # TCAL9538, TAS2563, INA236, CC3501E, etc.).  Each chip driver
-# is opt-in via CONFIG_ALP_SDK_CHIP_<NAME>.
+# is opt-in via the PACKAGECONFIG knobs below; alp-sdk's CMake
+# build maps those to -DALP_SDK_CHIP_<NAME>=ON/OFF.
 #
 # The chip drivers are OS-agnostic C; they call back into
-# <alp/peripheral.h> which alp-sdk-runtime resolves to Linux V4L2 /
+# <alp/peripheral.h> which alp-sdk resolves to Linux V4L2 /
 # I2C-dev / spidev / GPIO-cdev backends on the Yocto side.
 
 SUMMARY     = "ALP SDK on-board chip-driver collection"
@@ -18,13 +19,15 @@ HOMEPAGE    = "https://github.com/alplabai/alp-sdk"
 LICENSE     = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327"
 
+# Pinned to the v0.6 release tag; CI bumps SRCREV when alp-sdk
+# tags a new release.
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
 SRCREV  = "${AUTOREV}"
-PV      = "0.1.0+git${SRCPV}"
+PV      = "0.6.0"
 
 S = "${WORKDIR}/git"
 
-DEPENDS = "alp-sdk-runtime"
+DEPENDS = "alp-sdk"
 
 inherit cmake
 
@@ -34,9 +37,17 @@ EXTRA_OECMAKE = " \
 "
 
 # Per-machine chip subset.  V2N / V2N-M1 / N93 carriers all use
-# the same E1M EVK, so the chip set is identical -- only the
-# peripheral routing underneath differs (handled by
-# alp-sdk-runtime).
+# the same E1M / E1M-X EVK, so the chip set is largely identical;
+# only the peripheral routing underneath differs (handled by
+# alp-sdk's Linux backend).
+#
+# Chip list is kept in sync with the chips/ directory at the
+# alp-sdk repo root.  v0.6 additions vs the v0.1 carryover:
+#   bmi323, bmp581, icm42670, ssd1331, optiga_trust_m,
+#   eeprom_24c128, ov5640, cam_mux_pi3wvr626 — present in v0.6.
+# v0.1 entries that have since moved into vendor-specific
+# subtrees (deepx_dxm1, gd32g553, alif HALs, etc.) are NOT
+# listed here; they ship via vendor recipes, not alp-chips.
 PACKAGECONFIG ??= " \
     tcal9538 ina236 tas2563 lsm6dso bmi323 bmp581 \
     icm42670 ssd1306 ssd1331 tmp112 rv3028c7 \

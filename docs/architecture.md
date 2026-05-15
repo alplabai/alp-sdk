@@ -89,7 +89,7 @@ alp-sdk/
 │   ├── module.yml                   # makes the repo importable as a Zephyr module
 │   └── Kconfig                      # ALP_SDK_* options exposed to Zephyr apps
 ├── ci/                              # GitHub Actions workflows (mirrored into .github/workflows/)
-├── yocto/meta-alp/                  # Yocto BSP layer (v0.4+; placeholder before then)
+├── meta-alp-sdk/                    # Yocto BSP layer (V2N / V2N-M1 / iMX93 SKUs)
 └── tests/                           # Unity / ztest smoke tests, QEMU + real silicon
 ```
 
