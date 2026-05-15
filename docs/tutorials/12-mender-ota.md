@@ -68,15 +68,16 @@ ota:
   rootfs_ab: true                        # A/B partition layout
 ```
 
-The loader threads these into the meta-alp Mender config block.
-The matching `yocto/meta-alp/conf/distro/include/mender.inc`
+The loader threads these into the meta-alp-sdk Mender config block.
+The matching `meta-alp-sdk/conf/distro/include/mender.inc`
 turns into the right `IMAGE_FSTYPES` + Mender `inherit` lines.
 
 ## 3. Build a signed image artefact (10 minutes)
 
 ```bash
-cd yocto/meta-alp
-source ../poky/oe-init-build-env build-v2n
+source poky/oe-init-build-env build-v2n
+# bitbake-layers add-layer ../alp-sdk/meta-alp-sdk  (if not already added)
+MACHINE=e1m-v2n101-a55
 
 # Build a Mender-aware image (instead of plain
 # core-image-minimal):
@@ -195,7 +196,7 @@ matching Zephyr-side helper.
 - [`docs/ota.md`](../ota.md) -- design + trust model.
 - [`docs/ota-device-contract.md`](../ota-device-contract.md) --
   device-side contract.
-- [`yocto/meta-alp/conf/distro/include/mender.inc`](../../yocto/meta-alp/conf/distro/include/mender.inc)
+- [`meta-alp-sdk/conf/distro/include/mender.inc`](../../meta-alp-sdk/conf/distro/include/mender.inc)
   -- the Mender opt-in block.
 - [Mender docs](https://docs.mender.io/) -- upstream
   reference for the server + client protocols.

@@ -29,9 +29,9 @@ fewer keys, fewer surfaces, fewer mistakes.
 
 ## Yocto path: Mender
 
-`meta-alp` ships an opt-in Mender integration via
-[`yocto/meta-alp/conf/distro/include/mender.inc`](../yocto/meta-alp/conf/distro/include/mender.inc).
-See the [`meta-alp` README](../yocto/meta-alp/README.md#ota-via-mender-v04-prep)
+`meta-alp-sdk` ships an opt-in Mender integration via
+[`meta-alp-sdk/conf/distro/include/mender.inc`](../meta-alp-sdk/conf/distro/include/mender.inc).
+See the [`meta-alp-sdk` README](../meta-alp-sdk/README.md#ota-via-mender)
 for the enablement walk-through.
 
 Reference flow on a Mender-enabled image:
@@ -136,8 +136,8 @@ brick the Alif side and vice versa.
 
 - [`docs/secure-boot.md`](secure-boot.md) — the secure-boot half
   of the chain (key lifecycle, signing flow).
-- [`yocto/meta-alp/README.md`](../yocto/meta-alp/README.md) —
-  the meta-alp layer's Mender integration walk-through.
+- [`meta-alp-sdk/README.md`](../meta-alp-sdk/README.md) —
+  the Yocto layer's Mender integration walk-through.
 - [`docs/cc3501e-bridge.md`](cc3501e-bridge.md) — Wi-Fi/BLE
   bridge architecture; relevant for the network transport of
   OTA payloads on AEN.

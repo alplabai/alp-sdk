@@ -88,15 +88,15 @@ mkdir -p ~/work/yocto-alp && cd ~/work/yocto-alp
 git clone https://git.yoctoproject.org/poky -b kirkstone
 cd poky
 git clone https://github.com/nxp-imx/meta-imx -b kirkstone
-git clone https://github.com/alplabai/alp-sdk    # then symlink yocto/meta-alp
-ln -s alp-sdk/yocto/meta-alp ./meta-alp
+git clone https://github.com/alplabai/alp-sdk    # then symlink meta-alp-sdk
+ln -s alp-sdk/meta-alp-sdk ./meta-alp-sdk
 
 source oe-init-build-env build-n93
 
 # Add the three layers:
 bitbake-layers add-layer ../meta-imx/meta-bsp
 bitbake-layers add-layer ../meta-imx/meta-ml
-bitbake-layers add-layer ../meta-alp
+bitbake-layers add-layer ../meta-alp-sdk
 
 # In conf/local.conf:
 echo 'MACHINE = "e1m-n93"' >> conf/local.conf
@@ -208,8 +208,8 @@ Once §1..6 pass:
 1. Use [`scripts/program_eeprom.py`](../scripts/program_eeprom.py)
    to write the production manifest.
 2. Build a signed image with Mender support enabled in
-   `meta-alp` (see [`docs/ota.md`](ota.md) and
-   [`yocto/meta-alp/conf/distro/include/mender.inc`](../yocto/meta-alp/conf/distro/include/mender.inc)).
+   `meta-alp-sdk` (see [`docs/ota.md`](ota.md) and
+   [`meta-alp-sdk/conf/distro/include/mender.inc`](../meta-alp-sdk/conf/distro/include/mender.inc)).
 3. Flash to eMMC for production deployment (microSD is bring-up
    only).
 
@@ -220,7 +220,7 @@ Once §1..6 pass:
   selects "external boot".
 * **U-Boot OK but kernel panics** -- usually a DTB
   incompatibility.  Confirm the kernel + DTB came from the
-  same `meta-alp` build.
+  same `meta-alp-sdk` build.
 * **PHY links but no IP** -- `systemd-networkd` config (`/etc/
   systemd/network/`) might not be installed; fallback to manual
   `ip link set eth0 up; udhcpc -i eth0`.
@@ -236,5 +236,5 @@ anything not covered.
 
 - [`docs/soms/imx93.md`](soms/imx93.md) -- N93 one-pager.
 - [`docs/ota.md`](ota.md) -- Mender OTA setup for the Yocto side.
-- [`yocto/meta-alp/`](../yocto/meta-alp/) -- the Yocto layer
+- [`meta-alp-sdk/`](../meta-alp-sdk/) -- the Yocto layer
   consumed in §3.

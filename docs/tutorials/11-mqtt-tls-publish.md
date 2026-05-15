@@ -161,8 +161,8 @@ build, ensuring libmosquitto links OpenSSL.
 cd ~/work/alp-sdk
 
 # Yocto:
-cd yocto/meta-alp && bitbake core-image-minimal -k
-sudo dd if=tmp/deploy/images/e1m-v2n/core-image-minimal-e1m-v2n.wic \
+MACHINE=e1m-v2n101-a55 bitbake alp-image-edge -k
+sudo dd if=tmp/deploy/images/e1m-v2n101-a55/alp-image-edge-e1m-v2n101-a55.wic \
         of=/dev/sdX bs=4M conv=fsync
 
 # Boot the module, login, drop the cert + binary, run:

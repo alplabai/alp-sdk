@@ -183,7 +183,7 @@ sections above remain for the audit trail.
 
 The original decision picked RAUC for the Linux side.  v0.4-prep
 landed Mender wiring instead, via
-[`yocto/meta-alp/conf/distro/include/mender.inc`](../../yocto/meta-alp/conf/distro/include/mender.inc).
+[`meta-alp-sdk/conf/distro/include/mender.inc`](../../meta-alp-sdk/conf/distro/include/mender.inc).
 Rationale for the switch:
 
 - Mender's hosted server + on-target client are mature and
