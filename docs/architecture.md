@@ -370,7 +370,7 @@ manifest:
   projects:
     - name: alp-sdk
       url: https://github.com/alplabai/alp-sdk
-      revision: v0.1.0
+      revision: main           # pin to a release tag once v0.6.0 ships
       path: modules/alp-sdk
 ```
 

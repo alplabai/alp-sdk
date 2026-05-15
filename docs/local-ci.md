@@ -4,19 +4,20 @@ This is the page for: *"how do I reproduce the GitHub Actions
 twister run on my own machine so I'm not waiting on push → CI
 roundtrip every iteration?"*
 
-The CI workflow (`.github/workflows/pr-twister.yml`) installs
-Zephyr + the Zephyr SDK + the Python toolchain into a fresh
-Ubuntu container per run.  Doing the same setup on a dev box
-once gives you a ~30-second iteration cycle for the same checks
-CI runs in ~3-5 minutes.
+The CI workflow (`.github/workflows/pr-twister.yml`) runs natively
+on `ubuntu-latest` (no docker container) with `ZEPHYR_TOOLCHAIN_VARIANT=host`
+so the `native_sim/native/64` build uses the runner's stock gcc.
+That makes the CI ~5 min and avoids the 17 GB Zephyr CI Docker image.
+Doing the same setup on a dev box once gives you a ~30-second
+iteration cycle for the same checks.
 
 ## What you need
 
 | Piece                          | Why                                                 |
 |--------------------------------|-----------------------------------------------------|
-| Zephyr v4.4.0 (pinned by SDK)  | Twister, board files, the kernel itself.            |
-| Zephyr SDK 0.17.0 (arm-eabi)   | Cross-compiler for the `*.aen` scenarios.           |
-| System gcc + g++               | `native_sim/native/64` builds use host gcc.         |
+| Zephyr v4.4.0 (pinned)         | Twister, board files, the kernel itself.            |
+| Zephyr SDK 1.0.1 (arm-eabi)    | Cross-compiler for the `*.aen` scenarios — optional for native_sim. |
+| System gcc + g++               | `native_sim/native/64` builds use host gcc (CI does the same). |
 | `dtc` (devicetree compiler)    | Preprocesses board `.dts` files.                    |
 | `gperf`                        | Kconfig hash tables.                                |
 | Python 3.10+                   | `west`, twister, project loader, pytest tests.      |
@@ -69,9 +70,9 @@ This is the path that matches GitHub Actions exactly.
    export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/<you>/Documents/GitHub/alp-sdk
    ```
    For `*.aen` cross-compiled scenarios you also need the Zephyr
-   SDK; install it under `~/zephyr-sdk-0.17.0/` and add:
+   SDK; install it under `~/zephyr-sdk-1.0.1/` and add:
    ```sh
-   export ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk-0.17.0
+   export ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk-1.0.1
    ```
 
 5. **Run twister.**  From the alp-sdk root (Windows path is fine):
@@ -132,22 +133,22 @@ builds are not supported on Windows by upstream Zephyr.
    python -m pip install --user -r zephyr\scripts\requirements.txt
    ```
 
-5. **Install the Zephyr SDK 0.17.0** (minimal + arm-zephyr-eabi
+5. **Install the Zephyr SDK 1.0.1** (minimal + arm-zephyr-eabi
    only is enough; ~1.5 GB).  Download from
-   `github.com/zephyrproject-rtos/sdk-ng/releases/v0.17.0`,
-   extract `zephyr-sdk-0.17.0_windows-x86_64_minimal.7z` to
-   `C:\Users\<you>\zephyr-sdk-0.17.0\`, then unpack the
+   `github.com/zephyrproject-rtos/sdk-ng/releases/v1.0.1`,
+   extract `zephyr-sdk-1.0.1_windows-x86_64_minimal.7z` to
+   `C:\Users\<you>\zephyr-sdk-1.0.1\`, then unpack the
    `toolchain_windows-x86_64_arm-zephyr-eabi.7z` into the same
    directory.  Register with CMake:
    ```pwsh
-   cd C:\Users\<you>\zephyr-sdk-0.17.0
+   cd C:\Users\<you>\zephyr-sdk-1.0.1
    cmake -P cmake\zephyr_sdk_export.cmake
    ```
 
 6. **Persist env vars** (User scope -- survives reboots):
    ```pwsh
    [Environment]::SetEnvironmentVariable('ZEPHYR_BASE', 'C:\Users\<you>\Documents\GitHub\zephyrproject\zephyr', 'User')
-   [Environment]::SetEnvironmentVariable('ZEPHYR_SDK_INSTALL_DIR', 'C:\Users\<you>\zephyr-sdk-0.17.0', 'User')
+   [Environment]::SetEnvironmentVariable('ZEPHYR_SDK_INSTALL_DIR', 'C:\Users\<you>\zephyr-sdk-1.0.1', 'User')
    [Environment]::SetEnvironmentVariable('ZEPHYR_TOOLCHAIN_VARIANT', 'zephyr', 'User')
    [Environment]::SetEnvironmentVariable('EXTRA_ZEPHYR_MODULES', 'C:\Users\<you>\Documents\GitHub\alp-sdk', 'User')
    ```
