@@ -7,7 +7,7 @@ Runs the three checks an alp-sdk app author cares about *before*
 the build kicks off:
 
   1. The file is valid YAML.
-  2. It conforms to metadata/schemas/board-config-v1.schema.json.
+  2. It conforms to metadata/schemas/board-config-v2.schema.json.
   3. The referenced SoM SKU has a preset at
      `metadata/e1m_modules/<SKU>.yaml` -- and the referenced
      carrier has a preset at `metadata/carriers/<name>/board.yaml`,

@@ -93,7 +93,8 @@ opinionated tuning is the consumer's job.
 Adding a new library: drop a directory + a config header named
 to match the upstream's expected filename (or a `README.md` if
 no compile-time config is needed), then extend the `libraries:`
-enum in `metadata/schemas/board-config-v1.schema.json` and the
+enum (under `cores.<id>.libraries:`) in
+`metadata/schemas/board-config-v2.schema.json` and the
 `_LIBRARY_KCONFIG` map in `scripts/alp_project.py` so consumers
 can enable it via `board.yaml`.
 

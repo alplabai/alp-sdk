@@ -55,8 +55,7 @@ alp_hw_info_t info;
 if (alp_hw_info_read(&info) == ALP_OK) {
     if (alp_hw_info_assert_matches_build(&info,
             ALP_HW_BUILD_SOM_SKU,
-            NULL,   /* don't pin hw_rev */
-            NULL    /* don't pin carrier */) != ALP_OK) {
+            NULL    /* don't pin hw_rev */) != ALP_OK) {
         printf("FATAL: this firmware was built for %s, "
                "running on %s\n",
                ALP_HW_BUILD_SOM_SKU, info.som_sku);

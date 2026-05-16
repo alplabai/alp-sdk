@@ -183,7 +183,7 @@ If a library you want isn't in the Tier-1 list above, see the
 deferred / considered tiers below or open an issue.  Adding a
 library is a matter of writing a profile header at
 `metadata/library-profiles/<lib>/` + a `libraries:` enum entry
-in `metadata/schemas/board-config-v1.schema.json` -- low friction
+in `metadata/schemas/board-config-v2.schema.json` -- low friction
 once the case is made.
 
 ## Tier 2 — deferred to v0.5+

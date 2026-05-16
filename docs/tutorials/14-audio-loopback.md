@@ -176,9 +176,9 @@ On Yocto the same `<alp/audio.h>` API maps to ALSA's
 schema_version: 2
 cores:
   a55_cluster:
-    os: yocto
-    app: ./linux
-    peripherals: [audio]
+    app: ./linux                  # os: omitted -- A-cores default to yocto per topology
+    peripherals: [i2s]            # i2s carries the audio data path; <alp/audio.h> is
+                                  # the higher-level surface composed on top
 ```
 
 Build + run as a normal Yocto userspace binary.

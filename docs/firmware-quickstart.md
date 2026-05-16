@@ -64,10 +64,9 @@ carrier:
 
 cores:
   a55_cluster:
-    os: "off"            # not used by this app
+    os: "off"            # explicit override -- skip the Linux slice for this app
   m33_sm:
-    os: zephyr
-    app: ./src
+    app: ./src           # os: omitted -- M-cores default to zephyr per topology
     peripherals: [spi, i2c]
 
 chips:

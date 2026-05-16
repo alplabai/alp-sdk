@@ -228,8 +228,8 @@ Before tagging a customer-facing release:
 - [ ] Debug-disable fuse blown.  See per-SoM bring-up doc.
 - [ ] Production manifest written to the EEPROM via
       `scripts/program_eeprom.py` (real serial, real
-      mfg-date).  See Tutorial [Tutorial: EEPROM
-      provisioning](11-eeprom-provisioning.md) (TBD).
+      mfg-date).  See [Tutorial 13: EEPROM
+      provisioning](13-eeprom-provisioning.md).
 - [ ] Signed image SHA-256 / SHA-512 captured in the release
       artefact list (the `release.yml` workflow does this
       automatically).

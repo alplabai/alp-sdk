@@ -60,19 +60,21 @@ prompted.  Save the credentials.
 # In your board.yaml (schema_version: 2):
 cores:
   a55_cluster:
-    os: yocto
-    app: ./linux
+    app: ./linux                    # os: omitted -- A-cores default to yocto per topology
 
-# Add the ota block:
-ota:
-  client:    mender
-  server:    https://localhost           # or hosted Mender URL
-  tenant:    default                     # multi-tenancy: set per customer
-  rootfs_ab: true                        # A/B partition layout
+# Add an OTA block under `features:` (schema's free-form
+# extension point for app-level concerns the strict-typed
+# blocks above don't cover):
+features:
+  ota:
+    client:    mender
+    server:    https://localhost    # or hosted Mender URL
+    tenant:    default              # multi-tenancy: set per customer
+    rootfs_ab: true                 # A/B partition layout
 ```
 
-The loader threads these into the meta-alp-sdk Mender config block.
-The matching `meta-alp-sdk/conf/distro/include/mender.inc`
+The loader threads `features.ota:` into the meta-alp-sdk Mender
+config block.  The matching `meta-alp-sdk/conf/distro/include/mender.inc`
 turns into the right `IMAGE_FSTYPES` + Mender `inherit` lines.
 
 ## 3. Build a signed image artefact (10 minutes)

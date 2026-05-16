@@ -183,11 +183,21 @@ payload in a 12-byte envelope (magic / sequence / length).  Opt
 in via:
 
 ```yaml
-# board.yaml
-peripherals:
-  - mproc
+# board.yaml -- v2 shape: ipc: is a top-level array of carve-outs
+# the orchestrator allocates from the SoM preset's memory_map.
+# The nanopb framing rides per-app via an extra Kconfig overlay
+# (CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y) emitted by the loader
+# when `features.ipc.framing: nanopb` is set.
 ipc:
-  framing: nanopb_placeholder    # v0.4: nanopb_protobuf
+  - kind: raw_shmem
+    endpoints: [m55_hp, m55_he]
+    carve_out_kb: 64
+    name: alp_mproc_he_offload
+
+features:
+  ipc:
+    framing: nanopb              # v0.4-prep; placeholder framing
+                                  # rides automatically when this is unset
 ```
 
 Once the v0.4 `extras-v04` group lands the upstream MaJerle/lwrb

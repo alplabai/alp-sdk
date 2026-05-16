@@ -261,8 +261,11 @@ exact arena size the compiled model needs.  Round up to the
 nearest 64 KiB:
 
 ```yaml
-inference:
-  default_arena_kib: 512   # 512 KiB; matches MobileNet v2 quant
+cores:
+  m55_hp:
+    app: ./src
+    inference:
+      default_arena_kib: 512   # 512 KiB; matches MobileNet v2 quant
 ```
 
 Per-backend latency baselines (native_sim CPU + AEN Ethos-U55):

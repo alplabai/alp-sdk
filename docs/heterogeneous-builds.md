@@ -91,8 +91,7 @@ carrier:
 
 cores:
   a55_cluster:
-    os: yocto
-    app: ./linux
+    app: ./linux         # os: omitted -- A-cores default to yocto per SoM topology
     image: alp-image-edge
     peripherals: [ethernet, usb, emmc]
     libraries:   [mbedtls, nlohmann_json]

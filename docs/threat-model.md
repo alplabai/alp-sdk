@@ -127,7 +127,7 @@ supervisor MCU) or pretend to be a slave.
 - GD32 bridge framing fuzzed under
   `tests/fuzz/gd32_bridge_frame_fuzz.c`.
 - EEPROM manifest carries a CRC32; runtime
-  `<alp/hw_info.h>::alp_hw_info_load` rejects mismatched CRC.
+  `<alp/hw_info.h>::alp_hw_info_read` rejects mismatched CRC.
   Production-side: 24C128 has a write-protect strap; carrier
   designs should tie it to "WP active" at runtime.
 

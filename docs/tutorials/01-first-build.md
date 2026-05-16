@@ -35,8 +35,7 @@ carrier:
   name: E1M-EVK
 cores:
   m55_hp:
-    os: zephyr
-    app: ./src
+    app: ./src                # os: omitted -- M-cores default to zephyr per topology
     peripherals: [gpio]
 ```
 

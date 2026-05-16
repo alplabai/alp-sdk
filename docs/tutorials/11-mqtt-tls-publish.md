@@ -140,8 +140,7 @@ carrier:
 
 cores:
   a55_cluster:
-    os: yocto
-    app: ./linux
+    app: ./linux                  # os: omitted -- A-cores default to yocto per topology
     image: alp-image-edge
     libraries: [mbedtls]
     iot:
@@ -149,7 +148,7 @@ cores:
       mqtt: true
       tls:  true
   m33_sm:
-    os: "off"
+    os: "off"                     # explicit override -- skip the M-core slice
 
 diagnostics:
   log_level: info

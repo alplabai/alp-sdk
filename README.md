@@ -93,15 +93,13 @@ carrier:
 
 cores:
   a55_cluster:
-    os: yocto
-    app: ./linux
+    app: ./linux                   # os: omitted -- A-cores default to yocto per topology
     image: alp-image-edge
     peripherals: [ethernet, usb, emmc]
     libraries:   [mbedtls, nlohmann_json]
     iot:         { wifi: true, mqtt: true }
   m33_sm:
-    os: zephyr
-    app: ./m33
+    app: ./m33                     # os: omitted -- M-cores default to zephyr per topology
     peripherals: [adc, pwm, i2c, gpio]
     libraries:   [cmsis_dsp]
 

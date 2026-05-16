@@ -183,14 +183,17 @@ chip-driver under `carrier.populated:`.
 Omit the block entirely if your slice uses no peripherals
 (rare; most apps need at least `gpio`).
 
-### `inference`
+### `cores.<id>.inference`
 
 ```yaml
-inference:
-  default_arena_kib: 512    # per-model scratch arena; the only knob.
+cores:
+  m55_hp:
+    app: ./src
+    inference:
+      default_arena_kib: 512    # per-model scratch arena; the only knob.
 ```
 
-App-level inference tuning.  There is **no `backend:` field** —
+App-level inference tuning, scoped per-core.  There is **no `backend:` field** —
 the dispatcher set is silicon-determined from the SoM preset's
 `capabilities:` block.  The SDK compiles in every NPU the SoM
 declares (Ethos-U on AEN + N93, DRP-AI on V2N + V2M, DEEPX on

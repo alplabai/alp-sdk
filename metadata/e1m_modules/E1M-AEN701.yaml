@@ -40,8 +40,12 @@ memory:
   flash_mbit:           TBD                 # SPI-NAND boot flash capacity
   mram_kbit:            TBD                 # on-die MRAM (E7 has 5.5 MB typical)
 
-# Inference defaults -- the SoM's most-capable backend wins for
-# `inference.backend: auto`.
+# Inference defaults -- silicon-determined.  `preferred_backend` is
+# consumed by the build to set the default per-handle dispatcher when
+# the app doesn't pin one; customers cannot countermand it via
+# board.yaml (per the v0.6 schema cleanup -- `inference.backend` was
+# removed as a customer field).  Apps still pick at runtime via
+# `alp_inference_open(.backend = ...)`.
 inference:
   preferred_backend:    ethos_u             # Ethos-U55 NPU on-die.
   ethos_u_variant:      u55                 # vs u65 on i.MX 93.

@@ -134,19 +134,19 @@ manifest:
 
 int main(void) {
     alp_hw_info_t info;
-    if (alp_hw_info_load(&info) != ALP_OK) {
-        printf("hw_info: load failed last_err=%d\n",
+    if (alp_hw_info_read(&info) != ALP_OK) {
+        printf("hw_info: read failed last_err=%d\n",
                (int)alp_last_error());
         return 1;
     }
 
     printf("[hw_info] family=%s sku=%s hw_rev=%s\n",
-           info.family, info.sku, info.hw_rev);
+           info.som_family, info.som_sku, info.som_hw_rev);
     printf("[hw_info] serial=%s mfg_date=%04u-%02u-%02u\n",
-           info.serial,
-           info.mfg_date.year,
-           info.mfg_date.month,
-           info.mfg_date.day);
+           info.som_serial,
+           info.som_mfg_year,
+           info.som_mfg_month,
+           info.som_mfg_day);
     return 0;
 }
 ```
@@ -154,11 +154,11 @@ int main(void) {
 Expected on the UART:
 
 ```
-[hw_info] family=AEN_ sku=E1M-AEN701 hw_rev=r1
+[hw_info] family=aen sku=E1M-AEN701 hw_rev=r1
 [hw_info] serial=A20260514-0001 mfg_date=2026-05-14
 ```
 
-`alp_hw_info_load` verifies the magic + CRC; an unprogrammed
+`alp_hw_info_read` verifies the magic + CRC; an unprogrammed
 EEPROM returns `ALP_ERR_NOT_READY` and the application can
 react (factory-test fallback, refuse to boot in production,
 etc.).

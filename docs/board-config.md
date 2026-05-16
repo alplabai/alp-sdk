@@ -164,7 +164,7 @@ One per project.  Hand-written by the user.
 ## Schema
 
 The full JSON Schema lives at
-[`metadata/schemas/board-config-v1.schema.json`](../metadata/schemas/board-config-v1.schema.json).
+[`metadata/schemas/board-config-v2.schema.json`](../metadata/schemas/board-config-v2.schema.json).
 Top-level fields:
 
 | Field            | Required | What it picks                                                 |
