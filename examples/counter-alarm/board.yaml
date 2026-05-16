@@ -17,7 +17,6 @@ carrier:
 
 cores:
   m55_hp:
-    os: zephyr
     app: ./src
     # Zephyr peripheral subsystem exercised by this example.  The
     # loader translates the entry to CONFIG_<X>=y in alp.conf.

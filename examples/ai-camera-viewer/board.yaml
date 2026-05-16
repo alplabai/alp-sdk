@@ -26,7 +26,6 @@ cores:
   a32_cluster:
     os: "off"
   m55_hp:
-    os: zephyr
     app: ./src
     libraries:
       - lvgl

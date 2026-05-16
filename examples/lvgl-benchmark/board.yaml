@@ -20,7 +20,6 @@ cores:
   a32_cluster:
     os: "off"
   m55_hp:
-    os: zephyr
     app: ./src
     libraries:
       - lvgl                  # Pulls in CONFIG_ALP_LVGL_GPU2D=y / DMA2D=y

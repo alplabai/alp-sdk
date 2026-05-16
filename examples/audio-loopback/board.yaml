@@ -17,7 +17,6 @@ carrier:
 
 cores:
   m55_hp:
-    os: zephyr
     app: ./src
     # Zephyr peripheral subsystems exercised by this example.  Audio
     # touches the I2S TX path; alp_project.py emits CONFIG_I2S=y.

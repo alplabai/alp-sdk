@@ -12,7 +12,6 @@ cores:
   a55_cluster:
     os: "off"
   m33_sm:
-    os: zephyr
     app: ./src
     # Both SPI + I2C are exercised so the example can demonstrate the
     # hybrid bridge routing.

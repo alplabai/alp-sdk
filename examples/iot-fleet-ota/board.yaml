@@ -35,7 +35,6 @@ cores:
   a32_cluster:
     os: "off"
   m55_hp:
-    os: zephyr
     app: ./src
     # IoT toggles -- Wi-Fi + TLS only.  MQTT stays off here: Mender's
     # Zephyr client speaks HTTPS poll (see docs/ota.md "Option A").

@@ -22,7 +22,6 @@ cores:
   a55_cluster:
     os: "off"
   m33_sm:
-    os: zephyr
     app: ./src
     # Inference dispatcher set comes from V2M101's `capabilities:`
     # block (drp_ai: true + deepx_dx: true).  DEEPX dispatches via the

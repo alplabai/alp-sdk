@@ -36,7 +36,6 @@ cores:
   a32_cluster:
     os: "off"
   m55_hp:
-    os: zephyr
     app: ./src
     # Library set: Madgwick AHRS for attitude estimation, PID for the
     # control cascade.  Both pulled in via §D.lib loader; their

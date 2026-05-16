@@ -25,12 +25,10 @@ carrier:
 
 cores:
   a55_cluster:
-    os: yocto
     app: ./linux
     image: alp-image-edge
     libraries: [mbedtls, nlohmann_json]
   m33:
-    os: zephyr
     app: ./m33
     peripherals: [adc, pwm, i2c, gpio]
     libraries: [cmsis_dsp]

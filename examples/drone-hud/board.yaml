@@ -31,7 +31,6 @@ cores:
   a32_cluster:
     os: "off"
   m55_hp:
-    os: zephyr
     app: ./src
     # Library set: LVGL for rendering, madgwick_ahrs for attitude
     # fusion from raw IMU samples.  Both pulled in via the §D.lib

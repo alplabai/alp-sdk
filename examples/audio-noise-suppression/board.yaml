@@ -37,7 +37,6 @@ cores:
   a55_cluster:
     os: "off"
   m33_sm:
-    os: zephyr
     app: ./src
     # Inference dispatcher set comes from the SoM preset's
     # `capabilities:` -- on V2M101 DEEPX + DRPAI both compile in,

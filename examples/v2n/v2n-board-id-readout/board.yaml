@@ -16,7 +16,6 @@ cores:
   a55_cluster:
     os: "off"
   m33_sm:
-    os: zephyr
     app: ./src
     peripherals:
       - i2c

@@ -29,7 +29,6 @@ cores:
   a32_cluster:
     os: "off"
   m55_hp:
-    os: zephyr
     app: ./src
     inference:
       default_arena_kib: 256   # AEN's Ethos-U dispatcher is wired in

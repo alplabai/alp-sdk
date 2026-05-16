@@ -21,7 +21,6 @@ cores:
   a32_cluster:
     os: "off"
   m55_hp:
-    os: zephyr
     app: ./src
     # LVGL pulls in via the standard Tier 1 library knob.  The
     # §D.lib.loader cross-references AEN's `capabilities:` block and

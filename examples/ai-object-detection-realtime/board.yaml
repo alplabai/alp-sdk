@@ -46,7 +46,6 @@ cores:
   a55_cluster:
     os: "off"
   m33_sm:
-    os: zephyr
     app: ./src
     # Library set: tflite_micro carries the universal NPU dispatch +
     # the CPU fallback kernels; the §D.lib loader picks the DEEPX

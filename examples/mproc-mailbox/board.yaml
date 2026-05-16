@@ -22,7 +22,6 @@ carrier:
 # feature toggles, so mproc rides extra_args instead.
 cores:
   m55_hp:
-    os: zephyr
     app: ./src
 
 diagnostics:

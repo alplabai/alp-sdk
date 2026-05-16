@@ -29,7 +29,6 @@ cores:
   a55_cluster:
     os: "off"
   m33_sm:
-    os: zephyr
     app: ./src
     # IoT block stays OFF in the base config so the native_sim CI
     # build picks up the v0.1 NULL-with-NOSUPPORT contract.  Opt in to

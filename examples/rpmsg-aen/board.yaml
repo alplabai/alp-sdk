@@ -44,12 +44,10 @@ carrier:
 
 cores:
   a32_cluster:
-    os: yocto
     app: ./linux
     image: alp-image-edge
     libraries: [mbedtls, nlohmann_json]
   m55_hp:
-    os: zephyr
     app: ./m55_hp
     peripherals: [i2c]
     libraries: [cmsis_dsp]

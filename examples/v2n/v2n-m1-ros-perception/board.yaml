@@ -27,7 +27,6 @@ carrier:
 # alive for future telemetry topics.
 cores:
   a55_cluster:
-    os: yocto
     app: ./src                # the colcon workspace + ROS 2 recipes
     # ROS 2 is brought in via the Yocto image's meta-ros layer, not
     # via libraries: -- the recipe pulls ros-rclcpp + ros-vision-msgs +

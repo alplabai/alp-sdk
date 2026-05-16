@@ -29,7 +29,6 @@ carrier:
 
 cores:
   a55_cluster:
-    os: yocto
     app: ./linux
     image: alp-image-edge    # stock alp-sdk reference rootfs.
     peripherals: [ethernet, usb, emmc]
@@ -39,7 +38,6 @@ cores:
       mqtt: true
       tls:  true
   m33_sm:
-    os: zephyr
     app: ./m33_sm
     peripherals: [adc, pwm, i2c, gpio]
     libraries: [cmsis_dsp]

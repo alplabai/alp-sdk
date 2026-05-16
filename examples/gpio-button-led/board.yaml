@@ -35,7 +35,6 @@ carrier:
 # peer-core RPMsg boot path intact for advanced users.
 cores:
   m55_hp:
-    os: zephyr
     app: ./src
 
 diagnostics:

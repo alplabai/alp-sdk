@@ -22,7 +22,6 @@ cores:
   a32_cluster:
     os: "off"
   m55_hp:
-    os: zephyr
     app: ./src
     # IoT features (WiFi + MQTT + TLS) ride the per-core `iot:` block;
     # the alp_project.py emitter translates wifi/mqtt/tls into

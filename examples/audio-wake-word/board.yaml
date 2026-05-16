@@ -31,7 +31,6 @@ cores:
   a32_cluster:
     os: "off"
   m55_he:
-    os: zephyr
     app: ./src
     # TFLite Micro pulls in the CPU reference kernels; the AEN
     # SoM preset's `capabilities:` block routes the Ethos-U55 driver

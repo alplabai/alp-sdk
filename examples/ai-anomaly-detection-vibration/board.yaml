@@ -35,7 +35,6 @@ cores:
   a32_cluster:
     os: "off"
   m55_hp:
-    os: zephyr
     app: ./src
     # Inference dispatcher set is resolved from the SoM preset's
     # `capabilities:` block (AEN -> Ethos-U, V2N -> DRP-AI3,

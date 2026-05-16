@@ -20,7 +20,6 @@ carrier:
 # default Zephyr shim (so the build covers both halves by default).
 cores:
   m55_hp:
-    os: zephyr
     app: ./src
     inference:
       default_arena_kib: 128
