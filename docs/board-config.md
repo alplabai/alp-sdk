@@ -2,10 +2,14 @@
 
 `board.yaml` is the **single file** that declares what a firmware
 project targets: which SoM SKU (MPN), which carrier (daughter
-board), which OS backend, which inference backend, which optional
-libraries, which connectivity features.  Consumers place one at
-their app root, fill in their MPN, and the SDK's loader handles
-the rest.
+board), which app + libraries + peripherals per core, which
+optional connectivity features.  Consumers place one at their app
+root, fill in their MPN, and the SDK's loader handles the rest.
+
+Silicon-determined facts (which NPUs the SoM ships with, on-module
+memory + components, the natural OS for each core class) are
+dictated by the SoM SKU preset under `metadata/e1m_modules/<MPN>.yaml`
+and are NOT customer-facing knobs.
 
 ## Quick start: minimum-viable `board.yaml`
 
@@ -165,13 +169,34 @@ Top-level fields:
 
 | Field            | Required | What it picks                                                 |
 |------------------|----------|---------------------------------------------------------------|
-| `schema_version` | yes      | Constant `1` until a breaking format change.                  |
-| `som`            | yes      | SoM SKU + per-component / memory overrides.                   |
-| `os`             | yes      | `zephyr` / `yocto` / `baremetal`.                             |
-| `inference`      | no       | Backend selector + tensor-arena defaults.                     |
-| `libraries`      | no       | Optional libraries to make available to app code.             |
-| `iot`            | no       | Wi-Fi / MQTT / BLE / TLS feature toggles.                     |
+| `schema_version` | yes      | Constant `2` until a breaking format change.                  |
+| `som`            | yes      | SoM SKU (+ optional `hw_rev`).  Silicon-level facts (memory, on-module components, NPU capabilities) live in the SKU preset and are NOT customer-tunable here. |
+| `carrier`        | no       | Carrier name + chip-population deltas vs the carrier preset.  |
+| `cores`          | yes      | Per-core app + library/peripheral knobs.  Each core's `os:` is optional; the SoM topology supplies the natural runtime per core class (Cortex-M → Zephyr, Cortex-A → Yocto). |
+| `ipc`            | no       | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only). |
+| `chips`          | no       | Project-level chip drivers beyond what the carrier ships.     |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
+
+Per-core fields under `cores.<id>` (all optional, all inherit from
+the SoM preset's `topology.<id>` when omitted):
+
+| Field          | Notes                                                                                  |
+|----------------|----------------------------------------------------------------------------------------|
+| `app`          | App source dir.  Required for `os: zephyr` / `os: baremetal`.                          |
+| `image`        | Yocto image recipe name (e.g. `alp-image-edge`).                                       |
+| `os`           | Override the natural runtime only — `off` (skip slice) or `baremetal` (rare).          |
+| `peripherals`  | Zephyr subsystem / Yocto package list for this slice.                                  |
+| `libraries`    | Library opt-in list for this slice.                                                    |
+| `inference`    | App-level inference tuning (`default_arena_kib` only — backend set is silicon-driven). |
+| `iot`          | Wi-Fi / MQTT / BLE / TLS toggles.                                                      |
+
+**Silicon-determined fields never appear in `board.yaml`.**  Inference
+backend selection, NPU presence, on-module component populations,
+and memory capacities are all dictated by the SoM SKU preset under
+`metadata/e1m_modules/<MPN>.yaml`.  For a custom SoM variant (e.g.
+an AEN without the OPTIGA Trust M, or with non-stock memory),
+create a new SKU preset rather than overriding here — there is no
+`som.overrides:` or `som.memory:` block to write into.
 
 ### SoM vs carrier (kept deliberately separate)
 

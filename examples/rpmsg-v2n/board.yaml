@@ -43,7 +43,6 @@ cores:
     app: ./m33_sm
     peripherals: [adc, pwm, i2c, gpio]
     libraries: [cmsis_dsp]
-    inference: { backend: cpu }
 
 # Cross-core RPMsg carve-out.  The orchestrator allocates from
 # E1M-V2N101's `memory_map:` -- ocram_low for the default

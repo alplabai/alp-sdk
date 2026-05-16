@@ -11,9 +11,10 @@
 schema_version: 2
 
 som:
-  sku: E1M-AEN701           # E7 -- two Ethos-U55s, fast inference
-                             # ('preferred_backend: ethos_u' resolves to
-                             # CONFIG_ALP_TFLM_ETHOS_U55=y).
+  sku: E1M-AEN701           # E7 -- two Ethos-U55s; the SoM `capabilities:`
+                             # block (ethos_u55_count: 2) drives
+                             # CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y +
+                             # CONFIG_ALP_TFLM_ETHOS_U55=y automatically.
 
 carrier:
   name: E1M-EVK
@@ -30,16 +31,15 @@ cores:
     libraries:
       - lvgl
       - tflite_micro
-    # Inference backend picked from the SoM preset (`ethos_u`).  The
-    # loader maps that to:
-    #   AEN701  -> CONFIG_ALP_TFLM_ETHOS_U55=y
-    #   AEN401  -> CONFIG_ALP_TFLM_ETHOS_U85=y + ETHOS_U55=y
+    # Inference dispatcher set is driven by the SoM preset's
+    # `capabilities:` block, not by board.yaml:
+    #   AEN701  -> CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y + ETHOS_U55=y
+    #   AEN401  -> ETHOS_U=y + ETHOS_U55=y + ETHOS_U85=y
     #   AEN801  -> same as AEN401
-    #   NX9101  -> CONFIG_ALP_TFLM_ETHOS_U65=y
+    #   NX9101  -> ETHOS_U=y + ETHOS_U65=y
     # Customers swap the `som.sku` line to compare U85 vs U55 dispatch
-    # without touching the app source.
+    # without touching the app source.  arena_kib is the only knob.
     inference:
-      backend: ethos_u
       default_arena_kib: 256
     peripherals:
       - i2c                  # Camera SCCB.

@@ -70,7 +70,7 @@ cores:
     app: ./m33
     peripherals: [adc, pwm, i2c, gpio]
     libraries:   [cmsis_dsp]
-    inference:   { backend: cpu }
+    inference:   { default_arena_kib: 64 }
 
 ipc:
   - kind: rpmsg

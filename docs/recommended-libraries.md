@@ -66,8 +66,9 @@ arm_fir_f32(&fir, in, out, 256);
 ```
 
 Enable: `CONFIG_CMSIS_DSP=y` in board.yaml-generated alp.conf
-(triggered when an `inference.backend` that needs CMSIS-DSP is
-selected, or when you explicitly want the math primitives).
+(triggered automatically when the SoM's `capabilities:` block
+declares a backend that needs CMSIS-DSP, or when you explicitly
+add `cmsis_dsp` to a core's `libraries:` list).
 
 ### ETLCPP
 

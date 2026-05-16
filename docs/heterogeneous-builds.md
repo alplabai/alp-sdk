@@ -98,11 +98,10 @@ cores:
     libraries:   [mbedtls, nlohmann_json]
     iot:         { wifi: true, mqtt: true }
   m33_sm:
-    os: zephyr
-    app: ./m33_sm
+    app: ./m33_sm        # os: omitted -- M-cores default to zephyr per SoM topology
     peripherals: [adc, pwm, i2c, gpio]
     libraries:   [cmsis_dsp]
-    inference:   { backend: cpu }
+    inference:   { default_arena_kib: 64 }
 
 ipc:
   - kind: rpmsg
@@ -114,14 +113,16 @@ diagnostics:
   log_level: info
 ```
 
-**`os`** — runtime for this core:
+**`os`** — runtime for this core.  **Optional** — every core has a
+natural runtime baked into the SoM preset's `topology:` block
+(Cortex-M → Zephyr, Cortex-A → Yocto Linux).  Write `os:` only to
+**override** the topology default:
 
-| Value      | Meaning                                                  |
-|------------|----------------------------------------------------------|
-| `yocto`    | A-class core(s) running Linux from a bitbake rootfs.     |
-| `zephyr`   | M-class core running Zephyr.                             |
-| `baremetal`| M-class core running a bare-metal CMake app (no RTOS).   |
-| `off`      | Core present in silicon but **intentionally** not used.  |
+| Value      | When to write it                                                              |
+|------------|-------------------------------------------------------------------------------|
+| `off`      | Intentionally skip a core (e.g. AEN's A32 cluster, M55-HE peer).              |
+| `baremetal`| Rare — hand-written firmware on a core that would normally run Zephyr.        |
+| `zephyr` / `yocto` | Almost never needed — these match the topology defaults.              |
 
 `off` is a first-class state.  If your firmware doesn't need the
 M33-SM, write `os: off` and the orchestrator skips it — no implicit
@@ -146,9 +147,16 @@ symbols.  Pay code-size only for what you use.
 Typically only on the A-cluster on V2N — the M33-SM doesn't carry
 networking here.
 
-**`inference`** — per-core inference backend.  `cpu` is universally
-available; `npu` is gated on the SoM populating an NPU (DRP-AI on V2N,
-Ethos-U on AEN); `gpu` on populating a GPU.
+**`inference`** — per-core inference tuning.  Carries only
+`default_arena_kib:` (per-model memory budget).  The dispatcher
+set (which NPUs compile in) is silicon-determined by the SoM
+preset's `capabilities:` block — the SDK compiles in **every**
+NPU the SoM has, plus the TFLM CPU fallback.  Apps pick which one
+to run per-handle at runtime via `alp_inference_open(.backend=…)`,
+which is what makes concurrent multi-NPU dispatch possible on
+V2M101 (DRP-AI3 + DEEPX DX-M1 running independent models at the
+same time).  See `docs/tutorials/16-inference-mobilenet.md` for
+the full pattern.
 
 ### Migrating from v1
 

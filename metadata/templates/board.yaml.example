@@ -23,7 +23,6 @@ cores:
     os: zephyr
     app: ./src
     inference:
-      backend: ethos_u
       default_arena_kib: 128
     libraries:
       - lvgl              # exercise the LVGL CONFIG_* path

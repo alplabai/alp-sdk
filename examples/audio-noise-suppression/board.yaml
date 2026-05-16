@@ -39,12 +39,12 @@ cores:
   m33_sm:
     os: zephyr
     app: ./src
-    # Inference backend stays AUTO -- on V2N-M1 the §D.lib loader
-    # routes to DEEPX DX-M1, on V2N (no NPU) to the CPU reference
-    # kernels.  Either way the same source compiles + runs.
+    # Inference dispatcher set comes from the SoM preset's
+    # `capabilities:` -- on V2M101 DEEPX + DRPAI both compile in,
+    # on V2N101 only DRPAI, with TFLM CPU fallback always present.
+    # Apps pick per-handle at runtime via alp_inference_open(.backend=...).
     inference:
-      backend: auto
-      default_arena_kib: 96  # ~50k-param RNNoise-style denoiser.
+      default_arena_kib: 96   # ~50k-param RNNoise-style denoiser.
     # Library set: tflite_micro carries the universal NPU dispatch +
     # the CPU fallback kernels; cmsis_dsp covers the on-host
     # preprocess (FFT/notch/window) when the GD32 bridge isn't

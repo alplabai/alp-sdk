@@ -50,21 +50,13 @@ som:
   #
   # hw_rev: r1
 
-  # SoM-variant overrides (uncomment for custom modules only).
-  # IMUs / barometers / OLEDs / cameras live on the CARRIER, not the
-  # SoM -- see the carrier block below.
-  #
-  # overrides:
-  #   wifi_ble:       absent          # DNI'd the on-module CC3501E / Murata radio
-  #   secure_element: none            # custom AEN without the OPTIGA Trust M
-  #   rtc_external:   none            # custom AEN without the RV-3028-C7
-
-  # Memory overrides (custom DRAM / flash population of the same SKU).
-  #
-  # memory:
-  #   dram_mbit:   65536              # 64 Gbit LPDDR4X (V2N102 default)
-  #   flash_mbit:  131072             # 128 Gbit eMMC
-  #   mram_kbit:   13312              # 13 Mbit (Alif Ensemble only)
+  # SoM is silicon-determined.  On-module component populations
+  # (Wi-Fi/BLE radio, OPTIGA Trust M, RV-3028-C7 RTC, on-module
+  # EEPROM) and memory capacities (DRAM/flash/MRAM) come from the
+  # SKU preset at metadata/e1m_modules/<MPN>.yaml -- they're NOT
+  # customer-tunable in board.yaml.  For a custom AEN variant
+  # (e.g. DNI'd OPTIGA), create a new MPN preset rather than
+  # overriding here.
 
 # -------------------------------------------------------------------
 # Carrier board -- where the on-board sensors, OLEDs, cameras live
@@ -120,42 +112,49 @@ carrier:
 #   peripherals: Zephyr peripheral subsystems / Yocto packages
 #                  needed by this slice (per-core, not project-wide)
 #   libraries:   Library knobs scoped to this slice
-#   inference:   Inference backend selection (per-slice)
+#   inference:   Per-slice inference tuning (arena_kib only --
+#                  backend set is silicon-determined by the SoM
+#                  preset's `capabilities:` block, not a knob)
 #   iot:         Connectivity feature toggles (per-slice)
 #
 # Customers may declare a subset of cores; missing keys inherit
 # the SoM preset's `topology:` defaults.  Use `os: off` to skip a
 # core entirely.
 #
-# Single-OS example:
+# Single-OS example.  Note that `os:` is OPTIONAL -- every core has a
+# natural runtime baked into the SoM preset's `topology:` block
+# (Cortex-M -> Zephyr, Cortex-A -> Yocto Linux); the customer only
+# writes `os:` to override (`os: off` to skip a core, `os: baremetal`
+# for hand-written firmware on a core that normally runs Zephyr).
 cores:
   m55_hp:
-    os: zephyr
     app: ./src
     peripherals: [gpio, i2c]
-    inference: { backend: auto, default_arena_kib: 128 }
+    inference: { default_arena_kib: 128 }   # arena = per-model memory budget;
+                                             # the dispatcher set is silicon-determined
+                                             # (SoM preset's `capabilities:` block).
     # libraries: [...]
     # iot:       {...}
 
   # Other cores left unspecified inherit the SoM preset's defaults
-  # (e.g. m55_he gets `os: zephyr, app: alp-stock-shim`).  To skip
-  # a peer core explicitly:
+  # entirely (e.g. m55_he gets `os: zephyr, app: alp-stock-shim`).
+  # To skip a peer core explicitly:
   #
   # m55_he:
   #   os: off
 
-# Heterogeneous example (V2N -- A55 Yocto + M33 Zephyr peers):
+# Heterogeneous example (V2N -- A55 Yocto + M33 Zephyr peers).  `os:`
+# is omitted on both -- topology defaults pick the right runtime per
+# core class:
 #
 # cores:
 #   a55_cluster:
-#     os: yocto
 #     app: ./linux
 #     image: alp-image-edge
 #     peripherals: [ethernet, usb, emmc]
 #     libraries:   [mbedtls, nlohmann_json]
 #     iot:         { wifi: true, mqtt: true }
 #   m33_sm:
-#     os: zephyr
 #     app: ./m33_sm
 #     peripherals: [adc, pwm, i2c, gpio]
 #     libraries:   [cmsis_dsp]

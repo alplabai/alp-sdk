@@ -34,15 +34,13 @@ cores:
     os: zephyr
     app: ./src
     # TFLite Micro pulls in the CPU reference kernels; the AEN
-    # capabilities block routes the Ethos-U55 driver shim on top via
-    # CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y + CONFIG_ALP_TFLM_ETHOS_U55=y.
+    # SoM preset's `capabilities:` block routes the Ethos-U55 driver
+    # shim on top via CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y +
+    # CONFIG_ALP_TFLM_ETHOS_U55=y -- no board.yaml selection needed.
     libraries:
       - tflite_micro
-    # Inference backend stays AUTO so the same source builds on
-    # native_sim (CPU fallback) and on AEN (Ethos-U dispatch).
     inference:
-      backend: ethos_u
-      default_arena_kib: 64  # ~30k-param CNN -- 64 KiB is generous.
+      default_arena_kib: 64   # ~30k-param CNN -- 64 KiB is generous.
 
 # No per-core `peripherals:` block.  PDM mic input on Zephyr is the
 # DMIC audio subsystem rather than a peripheral driver class -- the

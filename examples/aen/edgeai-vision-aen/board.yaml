@@ -32,12 +32,12 @@ cores:
     os: zephyr
     app: ./src
     inference:
-      backend: ethos_u    # Vela-compiled TFLM model dispatches to
-                           # the on-die NPU.  In v0.1 the
-                           # alp_inference_open path falls back to
-                           # NOSUPPORT under native_sim; v0.2 fills
-                           # in the real Ethos-U dispatcher.
-      default_arena_kib: 256
+      default_arena_kib: 256   # AEN's Ethos-U dispatcher is wired in
+                                # automatically from the SoM preset's
+                                # `capabilities:` block; the customer
+                                # only tunes the per-model arena size.
+                                # Vela-compiled .tflite picks up the
+                                # on-die NPU at alp_inference_open time.
 
 diagnostics:
   log_level: info

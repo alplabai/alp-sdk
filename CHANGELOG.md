@@ -7,6 +7,83 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Schema tightening — silicon-determined fields removed from board.yaml (2026-05-16)
+
+Customer-facing knobs in `board.yaml` v2 are now restricted to
+project-level choices.  Anything dictated by the SoM SKU's silicon
+(NPU presence, on-module component populations, memory capacities,
+per-core natural runtime) is read from the SoM preset under
+`metadata/e1m_modules/<MPN>.yaml` and is no longer overridable at
+the project level.
+
+**Schema changes (breaking — board.yaml v2):**
+
+- **`cores.<id>.inference.backend` removed.**  The build now compiles
+  in *every* dispatcher the SoM preset's `capabilities:` block
+  declares (TFLM CPU always, plus Ethos-U / DRP-AI3 / DEEPX DX-M1
+  per the SoM caps).  Apps pick which to use per-handle at runtime
+  via `alp_inference_open(.backend = …)`.  This unblocks concurrent
+  multi-NPU dispatch on V2M101 (DRP-AI3 + DEEPX DX-M1 running
+  independent models simultaneously) which the old "pick one
+  backend" wiring silently broke.
+- **`cores.<id>.os` is now optional.**  Every core has a natural
+  runtime baked into the SoM preset's `topology:` block (Cortex-M
+  → Zephyr, Cortex-A → Yocto Linux); customers write `os:` only to
+  override (`os: off` to skip a core, `os: baremetal` for hand-
+  written firmware on a core that normally runs Zephyr).
+- **`som.overrides` removed.**  For a custom SoM variant (e.g. an
+  AEN without the OPTIGA Trust M), create a new MPN preset under
+  `metadata/e1m_modules/` rather than overriding here.
+- **`som.memory` removed.**  Same reasoning — memory capacities are
+  silicon-determined.  Custom memory variants get their own MPN
+  preset.
+
+**Loader changes:**
+
+- `scripts/alp_orchestrate.py:_slice_alp_conf` now emits
+  `CONFIG_ALP_SDK_INFERENCE_*` from the SoM `capabilities:` matrix
+  (was: emitted nothing — examples carried hand-written
+  `CONFIG_ALP_SDK_INFERENCE_TFLM=y` in `prj.conf`).
+- `scripts/alp_orchestrate.py:_slice_cmake_args` now emits
+  `-DALP_SDK_USE_DRPAI=ON` / `-DALP_SDK_USE_DEEPX_DXM1=ON` per
+  the SoM caps; V2M101 baremetal/Yocto builds get **both**.
+
+**Migration:**
+
+```diff
+ cores:
+   m55_hp:
+-    os: zephyr                          # delete -- topology default
+     app: ./src
+     inference:
+-      backend: ethos_u                  # delete -- silicon-determined
+       default_arena_kib: 256
+```
+
+```diff
+ som:
+   sku: E1M-AEN701
+-  overrides:                            # delete -- create new MPN preset instead
+-    secure_element: none
+-  memory:                               # delete -- create new MPN preset instead
+-    flash_mbit: 131072
+```
+
+**Tests:**
+
+- `tests/scripts/test_alp_project.py` adds `TestInferenceFromSomCaps`
+  covering: SoM-caps-driven CONFIG emission per family, schema-level
+  rejection of `inference.backend`, V2M101 cmake-args emitting both
+  DRPAI + DEEPX_DXM1 flags.
+
+**Principle:** silicon-determined facts live in
+`metadata/e1m_modules/<MPN>.yaml`; `board.yaml` carries only
+project-level choices.  See
+[`docs/board-config.md`](docs/board-config.md) "Silicon-determined
+fields never appear in `board.yaml`".
+
+
+
 (Tracks `metadata/sdk_version.yaml`'s declared version.  Per
 `VERSIONS.md`, every point release ships the *surface* first
 and accumulates runtime implementations in subsequent point

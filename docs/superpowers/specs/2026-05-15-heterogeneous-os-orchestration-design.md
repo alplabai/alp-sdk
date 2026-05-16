@@ -215,11 +215,10 @@ cores:
     libraries:   [mbedtls, nlohmann_json]
     iot:         { wifi: true, mqtt: true }
   m33_sm:
-    os: zephyr
-    app: ./m33
+    app: ./m33                                # os: omitted (topology default)
     peripherals: [adc, pwm, i2c, gpio]
     libraries:   [cmsis_dsp]
-    inference:   { backend: cpu }
+    inference:   { default_arena_kib: 64 }    # arena tuning only
 
 ipc:
   - kind: rpmsg

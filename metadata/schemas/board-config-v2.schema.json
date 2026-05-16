@@ -30,33 +30,6 @@
           "type": "string",
           "pattern": "^[a-z0-9_-]+$",
           "description": "Family-level hardware revision the firmware targets.  Optional; the SDK falls back to the SKU preset's `default_hw_rev` when omitted."
-        },
-        "overrides": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Per-on-module-component deltas vs the stock SKU preset.  Only covers components actually populated on the SoM PCB -- carrier-side sensors go in `carrier.populated` instead.",
-          "properties": {
-            "wifi_ble": { "$ref": "#/$defs/component_state" },
-            "secure_element": {
-              "type": "string",
-              "enum": ["optiga_trust_m", "none"]
-            },
-            "rtc_external": {
-              "type": "string",
-              "enum": ["rv3028c7", "none"]
-            },
-            "ethernet": { "$ref": "#/$defs/component_state" }
-          }
-        },
-        "memory": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Memory subsystem capacities -- per-SKU presets fill these from the released parts list.",
-          "properties": {
-            "dram_mbit":  { "type": "integer" },
-            "flash_mbit": { "type": "integer" },
-            "mram_kbit":  { "type": "integer" }
-          }
         }
       }
     },
@@ -138,13 +111,12 @@
     "core_entry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["os"],
-      "description": "Per-core runtime + app slice.  Mirrors the SoM preset's `topology.<id>` shape, with the addition of per-slice app/library/peripheral/inference/iot settings.",
+      "description": "Per-core runtime + app slice.  Mirrors the SoM preset's `topology.<id>` shape, with the addition of per-slice app/library/peripheral/inference/iot settings.  EVERY field is optional and inherits from the SoM preset's `topology.<core_id>` defaults when omitted; the customer writes only what differs.",
       "properties": {
         "os": {
           "type": "string",
           "enum": ["zephyr", "yocto", "baremetal", "off"],
-          "description": "Runtime for this core.  `off` skips the slice entirely (no `app:` required)."
+          "description": "Override the natural runtime for this core.  Optional: the SoM topology already picks the right OS for each core's silicon class (Cortex-M -> Zephyr, Cortex-A -> Yocto Linux).  Write `os:` only to override -- `off` (skip the slice; no app required) or `baremetal` (rare hand-written firmware on a core that normally runs Zephyr)."
         },
         "app": {
           "type": "string",
@@ -186,17 +158,13 @@
         "inference": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Inference backend selection for this slice.  Defaults pick the best available NPU reachable from this core.",
+          "description": "Per-slice inference tuning.  Backend selection is NOT a field here -- silicon capability is dictated by the SoM preset's `capabilities:` matrix and the SDK compiles in every dispatcher the SoM supports.  Apps pick per-handle at runtime via alp_inference_open(.backend=...), enabling concurrent multi-NPU dispatch on V2M101 (DRP-AI3 + DEEPX DX-M1).  This block carries app-level tuning only (memory arena size).",
           "properties": {
-            "backend": {
-              "type": "string",
-              "enum": ["auto", "cpu", "ethos_u", "drpai", "deepx_dx"],
-              "default": "auto"
-            },
             "default_arena_kib": {
               "type": "integer",
               "minimum": 16,
-              "default": 128
+              "default": 128,
+              "description": "Per-model TFLM scratch arena size in KiB.  App-level memory budget; not silicon-determined."
             }
           }
         },
@@ -253,12 +221,6 @@
           "description": "Explicit base address override.  Normally the orchestrator allocates an address from the memory map; setting this pins the carve-out."
         }
       }
-    },
-    "component_state": {
-      "oneOf": [
-        { "type": "string", "enum": ["present", "absent"] },
-        { "type": "string", "pattern": "^[a-z0-9_-]+$" }
-      ]
     }
   }
 }

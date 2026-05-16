@@ -134,19 +134,21 @@ carrier:
 
 cores:
   m55_hp:
-    os: zephyr
-    app: ./src
+    app: ./src                    # os: omitted -- M-cores default to zephyr
     inference:
-      backend:    ethos_u       # explicit; or omit for auto
-      arena_size: 524288        # 512 KiB
+      default_arena_kib: 512      # 512 KiB scratch for MobileNet v2 quant
   m55_he:
-    os: "off"                   # second M55 stays dark on this app
+    os: "off"                     # second M55 stays dark on this app
 ```
 
-The `inference.backend` + `arena_size` translate to the
-matching `CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y` +
-`CONFIG_ALP_INFERENCE_ARENA_SIZE=524288` in the generated
-config.
+There is no `inference.backend:` field — the dispatcher set is
+silicon-determined.  AEN701's SoM preset declares
+`capabilities.ethos_u55_count: 2`, so the loader emits
+`CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y` + `CONFIG_ALP_TFLM_ETHOS_U55=y`
+automatically, alongside the universal `CONFIG_ALP_SDK_INFERENCE_TFLM=y`
+CPU fallback.  The app picks Ethos-U vs CPU per-handle at runtime
+via `alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or
+an explicit value).
 
 ## 5. Build + flash
 
@@ -184,24 +186,72 @@ test plan asserts this as the verification criterion in
 Same `main.c`, swap `board.yaml`:
 
 ```yaml
+schema_version: 2
 som:
   sku: E1M-V2N101
-
 carrier:
   name: E1M-X-EVK
-
-os: yocto
-
-inference:
-  backend: drpai
+cores:
+  m33_sm:
+    app: ./src
 ```
 
-But the model must be re-compiled with Renesas's **DRP-AI
-translator** rather than Vela.  The translator produces a
-`.drpai` artefact + a companion `.tflite`; the SDK's DRP-AI
-backend reads both.  Customers writing portable apps that
-target both Ethos-U and DRP-AI ship both model variants and
-let `alp_inference_open` pick per-SoM at runtime.
+No backend pick needed in `board.yaml` — V2N101's SoM preset
+declares `capabilities.drp_ai: true`, so the loader emits
+`CONFIG_ALP_SDK_INFERENCE_DRPAI=y` automatically, alongside the
+TFLM CPU fallback.  The app calls `alp_inference_open` with the
+same `.backend = ALP_INFERENCE_BACKEND_AUTO`, and the dispatcher
+routes to DRP-AI on V2N silicon, Ethos-U on AEN silicon, CPU under
+native_sim — same source, three SoMs.
+
+The model itself must be re-compiled with Renesas's **DRP-AI
+translator** rather than Vela.  The translator produces a `.drpai`
+artefact + a companion `.tflite`; the SDK's DRP-AI backend reads
+both.  Customers writing portable apps ship both model variants
+and switch at runtime based on `alp_hw_info_read()`.
+
+## 6b. Concurrent multi-NPU on V2M101 (V2N + DEEPX)
+
+V2M101 ships both DRP-AI3 (on the V2N host silicon) and DEEPX
+DX-M1 (on-module via PCIe).  The SoM preset declares both:
+
+```yaml
+# metadata/e1m_modules/E1M-V2M101.yaml
+capabilities:
+  drp_ai:    true
+  deepx_dx:  true
+```
+
+The loader compiles both dispatchers into the build.  Apps can
+open **multiple handles** in parallel, each bound to a different
+NPU, to run independent models concurrently:
+
+```c
+alp_inference_t *m_vision = alp_inference_open(&(alp_inference_config_t){
+    .model_data = vision_dxnn,
+    .model_size = sizeof(vision_dxnn),
+    .format     = ALP_INFERENCE_MODEL_DXNN,
+    .backend    = ALP_INFERENCE_BACKEND_DEEPX_DX,   // dispatch to DEEPX
+    .arena_bytes = 256 * 1024,
+});
+
+alp_inference_t *m_audio = alp_inference_open(&(alp_inference_config_t){
+    .model_data = audio_drpai,
+    .model_size = sizeof(audio_drpai),
+    .format     = ALP_INFERENCE_MODEL_DRPAI,
+    .backend    = ALP_INFERENCE_BACKEND_DRPAI,      // dispatch to DRP-AI3
+    .arena_bytes = 128 * 1024,
+});
+
+/* Run independent models on the two NPUs concurrently. */
+alp_inference_invoke(m_vision);   /* DEEPX over PCIe */
+alp_inference_invoke(m_audio);    /* DRP-AI3 on-die */
+```
+
+The runtime per-handle `backend` field is what makes the
+concurrent-multi-NPU pattern possible.  `board.yaml` doesn't need
+to (and can't) declare which backend "wins" — both compile in,
+and the app picks per inference call.
 
 ## 7. Performance + memory budget
 
@@ -212,7 +262,7 @@ nearest 64 KiB:
 
 ```yaml
 inference:
-  arena_size: 524288     # 512 KiB; matches MobileNet v2 quant
+  default_arena_kib: 512   # 512 KiB; matches MobileNet v2 quant
 ```
 
 Per-backend latency baselines (native_sim CPU + AEN Ethos-U55):

@@ -24,13 +24,12 @@ cores:
   m33_sm:
     os: zephyr
     app: ./src
-    # Inference dispatcher routes through alp_project.py's
-    # `inference:` block (which emits CONFIG_ALP_SDK_INFERENCE_*).
-    # DEEPX-DX backend is Yocto-only -- under Zephyr the Kconfig
-    # emits a NOSUPPORT-stub note; real inference happens on the
-    # customer's Yocto image via dx_rt.
-    inference:
-      backend: deepx_dx
+    # Inference dispatcher set comes from V2M101's `capabilities:`
+    # block (drp_ai: true + deepx_dx: true).  DEEPX dispatches via the
+    # Linux PCIe driver -- under Zephyr the dispatcher emits a
+    # NOSUPPORT-stub.  Real DEEPX inference happens on the customer's
+    # Yocto image via dx_rt; alp_inference_open(.backend=DEEPX_DX, ...)
+    # picks it per-handle.
 
 chips:
   - deepx_dxm1    # host driver: PCIe mux + M1_RESET sequencer

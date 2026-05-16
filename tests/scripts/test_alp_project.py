@@ -512,5 +512,162 @@ class TestHwBackendsLoader(unittest.TestCase):
                 self.assertIn(fallback, out)
 
 
+class TestInferenceFromSomCaps(unittest.TestCase):
+    """Inference CONFIGs are emitted from the SoM preset's
+    `capabilities:` matrix, NEVER from board.yaml.  Captures the
+    2026-05-16 schema tightening: `inference.backend` was a footgun
+    (let customers pick backends incompatible with the silicon, and
+    duplicated a fact the SoM preset already encoded).  See
+    feedback_silicon_determined_fields_not_customer_facing.md.
+
+    The runtime API (`alp_inference_open(.backend = ...)`) still
+    lets apps pick per-handle for concurrent multi-NPU dispatch on
+    multi-accelerator SKUs (V2M101 = DRP-AI3 + DEEPX DX-M1); the
+    build wires in EVERY backend the SoM has so the runtime pick
+    always finds a compiled dispatcher.
+    """
+
+    def _v2_zephyr_slice(self, sku: str, core: str) -> tuple[int, str, str]:
+        body = f"""
+            schema_version: 2
+            som:
+              sku: {sku}
+            cores:
+              {core}:
+                os: zephyr
+                app: ./src
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), body)
+            rv = subprocess.run(
+                [sys.executable, str(LOADER),
+                 "--input", str(path),
+                 "--emit", "zephyr-conf",
+                 "--core", core],
+                capture_output=True, text=True, check=False,
+            )
+        return rv.returncode, rv.stdout, rv.stderr
+
+    def _v2_cmake_slice(self, sku: str, core: str, os_: str) -> tuple[int, str, str]:
+        body = f"""
+            schema_version: 2
+            som:
+              sku: {sku}
+            cores:
+              {core}:
+                os: {os_}
+                app: ./src
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), body)
+            rv = subprocess.run(
+                [sys.executable, str(LOADER),
+                 "--input", str(path),
+                 "--emit", "cmake-args",
+                 "--core", core],
+                capture_output=True, text=True, check=False,
+            )
+        return rv.returncode, rv.stdout, rv.stderr
+
+    # --- Zephyr emit: SoM caps drive inference CONFIGs ----------------
+
+    def test_aen701_zephyr_emits_tflm_plus_ethos_u(self) -> None:
+        """E1M-AEN701 ships 2x Ethos-U55 (no U85, no DRP-AI, no DEEPX).
+        SoM caps drive the inference CONFIGs; board.yaml never asked."""
+        rc, out, err = self._v2_zephyr_slice("E1M-AEN701", "m55_hp")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_TFLM=y", out)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_DRPAI=y", out)
+
+    def test_v2n101_zephyr_emits_tflm_plus_drpai(self) -> None:
+        """E1M-V2N101 has DRP-AI3 on V2N silicon, no Ethos, no DEEPX."""
+        rc, out, err = self._v2_zephyr_slice("E1M-V2N101", "m33_sm")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_TFLM=y", out)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_DRPAI=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y", out)
+
+    def test_v2m101_zephyr_emits_tflm_plus_drpai(self) -> None:
+        """E1M-V2M101 = V2N + DEEPX.  On Zephyr only DRPAI is wired
+        (DEEPX is host-Linux-only via the PCIe driver); the Yocto
+        emit path carries the concurrent-NPU plumbing."""
+        rc, out, err = self._v2_zephyr_slice("E1M-V2M101", "m33_sm")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_TFLM=y", out)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_DRPAI=y", out)
+
+    # --- cmake-args / Yocto emit: concurrent multi-NPU on V2M101 ------
+
+    def test_v2m101_baremetal_cmake_args_enable_both_npus(self) -> None:
+        """V2M101 must compile both DRP-AI3 and DEEPX DX-M1 dispatchers
+        in -- concurrent independent models (e.g. m_vision on DEEPX,
+        m_audio on DRP-AI) is the whole point of the V2N+DEEPX
+        co-package.  Pre-2026-05-16 the loader picked ONE backend and
+        the second `alp_inference_open()` call would fail NOSUPPORT."""
+        rc, out, err = self._v2_cmake_slice(
+            "E1M-V2M101", "a55_cluster", "baremetal")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIn("ALP_SDK_USE_DRPAI=ON", out)
+        self.assertIn("ALP_SDK_USE_DEEPX_DXM1=ON", out)
+
+    def test_v2n101_baremetal_cmake_args_drpai_only(self) -> None:
+        """V2N101 has DRP-AI3 but no DEEPX -- the cmake-args emit
+        must NOT include the DEEPX flag, even though V2M101 (same
+        family) does."""
+        rc, out, err = self._v2_cmake_slice(
+            "E1M-V2N101", "a55_cluster", "baremetal")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIn("ALP_SDK_USE_DRPAI=ON", out)
+        self.assertNotIn("ALP_SDK_USE_DEEPX_DXM1=ON", out)
+
+    # --- Schema-level rejection of inference.backend ------------------
+
+    def test_inference_backend_field_rejected_by_schema(self) -> None:
+        """board.yaml v2 cannot declare `inference.backend` -- silicon
+        capability is not a project-level choice.  Schema's
+        additionalProperties: false rejects the unknown property at
+        validation time."""
+        body = """
+            schema_version: 2
+            som:
+              sku: E1M-AEN701
+            cores:
+              m55_hp:
+                os: zephyr
+                app: ./src
+                inference:
+                  backend: ethos_u
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), body)
+            rv = _run_loader(input_path=path, emit="system-manifest")
+        self.assertNotEqual(rv.returncode, 0,
+                            msg=f"schema accepted inference.backend; stdout={rv.stdout}")
+        # The error should mention `backend` so the customer knows what
+        # to delete from their board.yaml.
+        self.assertIn("backend", rv.stderr.lower(),
+                      msg=f"error must name the offending field; got: {rv.stderr}")
+
+    def test_default_arena_kib_still_allowed(self) -> None:
+        """`default_arena_kib` is genuinely app-level tuning (per-model
+        memory budget) and stays as a per-core knob."""
+        body = """
+            schema_version: 2
+            som:
+              sku: E1M-AEN701
+            cores:
+              m55_hp:
+                os: zephyr
+                app: ./src
+                inference:
+                  default_arena_kib: 256
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), body)
+            rv = _run_loader(input_path=path, emit="system-manifest")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

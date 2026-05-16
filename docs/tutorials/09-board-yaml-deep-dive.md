@@ -160,14 +160,18 @@ most apps need at least gpio).
 
 ```yaml
 inference:
-  backend:    ethos_u       # auto | cpu | ethos_u | drpai | deepx_dx
-  arena_size: 524288        # bytes; default depends on backend
+  default_arena_kib: 512    # per-model scratch arena; the only knob.
 ```
 
-Selects the inference dispatcher's default backend.  `auto`
-picks based on the SoM (Ethos-U on AEN + N93, DRP-AI on V2N,
-CPU fallback otherwise).  Apps that want explicit control
-override here.
+App-level inference tuning.  There is **no `backend:` field** —
+the dispatcher set is silicon-determined from the SoM preset's
+`capabilities:` block.  The SDK compiles in every NPU the SoM
+declares (Ethos-U on AEN + N93, DRP-AI on V2N + V2M, DEEPX on
+V2M) plus the TFLM CPU fallback as universal.  Apps pick which
+to run **per-handle at runtime** via `alp_inference_open(.backend = …)`
+— V2M101 can run independent models on DRP-AI3 and DEEPX
+DX-M1 concurrently this way.  See
+[`docs/tutorials/16-inference-mobilenet.md`](16-inference-mobilenet.md).
 
 ### `iot`
 
@@ -245,17 +249,16 @@ carrier:
 
 cores:
   m55_hp:
-    os: zephyr
-    app: ./src
+    app: ./src        # os: omitted -- M-cores default to zephyr per topology
     peripherals: [i2c, gpio, audio]
     libraries:   [lvgl, mbedtls]
-    inference:   { backend: cpu }      # don't use Ethos-U on this app
+    inference:   { default_arena_kib: 256 }   # arena tuning only
     iot:
       wifi: true
       mqtt: true
       tls:  true
   m55_he:
-    os: "off"       # E7's second M55 stays dark on this app
+    os: "off"         # E7's second M55 stays dark on this app
 
 diagnostics:
   log_level: debug   # bring-up phase; tighten before release

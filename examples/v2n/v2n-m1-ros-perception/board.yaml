@@ -37,10 +37,11 @@ cores:
       - tflite_micro          # CPU fallback for V2N (no DEEPX) builds.
       - opus                  # Audio compression if the node carries
                                # an audio capture topic.
-    # ROS 2 perception node uses the DEEPX NPU on V2N-M1; V2N (no
-    # DEEPX) falls through to DRP-AI3 automatically.
-    inference:
-      backend: deepx_dx       # V2N-M1 primary; V2N degrades to drpai.
+    # ROS 2 perception node uses the DEEPX NPU on V2N-M1 + DRP-AI3
+    # on V2N; both dispatchers compile in from the SoM `capabilities:`
+    # block, and the C++ source picks per-handle at runtime via
+    # alp_inference_open(.backend=DEEPX_DX or DRPAI).  Vision model on
+    # DEEPX, optional audio model on DRP-AI3 = concurrent multi-NPU.
     peripherals:
       - uart                  # GNSS (NEO-M9N).
       - i2c                   # IMU (LSM6DSO) + battery (INA236).

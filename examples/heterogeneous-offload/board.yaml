@@ -46,7 +46,6 @@ cores:
     app: ./m33_sm
     peripherals: [adc, i2c, gpio]
     libraries: [cmsis_dsp]    # CMSIS-DSP carries the FFT we offload.
-    inference: { backend: cpu }
 
 # Cross-core RPMsg channel.  The orchestrator sizes it large enough
 # to carry a 1024-sample float buffer (4 KiB) plus framing overhead.

@@ -37,11 +37,12 @@ cores:
   m55_hp:
     os: zephyr
     app: ./src
-    # Inference backend resolved from the SoM preset.  AEN -> Ethos-U
-    # (U55 / U85 picked by Vela), V2N -> DEEPX DX-M1, NX9101 -> U65.
-    # App source touches none of those names.
+    # Inference dispatcher set is resolved from the SoM preset's
+    # `capabilities:` block (AEN -> Ethos-U, V2N -> DRP-AI3,
+    # V2M101 -> DRP-AI3 + DEEPX, NX9101 -> Ethos-U65).  App source
+    # touches none of those names.  This block only tunes the
+    # per-model arena.
     inference:
-      backend: auto
       default_arena_kib: 128
     libraries:
       - tflite_micro
