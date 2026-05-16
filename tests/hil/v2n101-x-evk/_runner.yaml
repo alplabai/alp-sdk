@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Runner defaults for E1M-V2N101 (Renesas RZ/V2N quad A55 + M33-SM +
+# DRP-AI3) + E1M-X-EVK (45x65 carrier).  Inherits the portable spec
+# set from tests/hil/_common/; SoM-specific specs (GD32 bridge ping,
+# Ethernet, eMMC, xSPI, EEPROM, OPTIGA) live alongside in this dir.
+
+schema_version: 1
+board: alp_e1m_v2n101_m33_sm        # V2N's M33 system-manager.
+serial_port: /dev/ttyACM0
+flash_method: westflash
+defaults:
+  serial:
+    baud:       115200
+    duration_s: 20                  # V2N M33 boot is slightly slower than AEN's M55.

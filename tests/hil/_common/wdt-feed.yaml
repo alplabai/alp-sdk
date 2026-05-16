@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for examples/wdt-feed.  Works on every E1M-
+# conformant SoM (every supported SoC ships a watchdog block).
+#
+# What this proves end-to-end:
+#   - alp_wdt_open(id=0, 5 s timeout) returns a real handle.
+#   - 3 successive alp_wdt_feed() calls return ALP_OK (the watchdog
+#     accepts the pet).
+#   - alp_wdt_disable() either succeeds (rare; programmable WDTs) or
+#     returns ALP_ERR_NOSUPPORT (typical; once-armed WDTs).  Either
+#     is acceptable.
+#
+# CRITICAL: This test must NOT let the watchdog actually fire -- the
+# 5-second timeout is well above the 3x500ms = 1.5s feed loop.  If
+# the spec runs > 5s without a feed, the SoC resets and the
+# capture-serial collects garbled output.  Keep duration_s low.
+
+schema_version: 1
+name: wdt-feed
+description: |
+  Watchdog open + feed loop (NO miss-feed reset).
+
+example: examples/wdt-feed
+
+serial:
+  duration_s: 8       # tight: feed loop is ~1.5s; 5s WDT timeout
+  expect_contains:
+    - "[wdt] open id=0 timeout=5000 ms"
+    - "[wdt] feed 0 -> 0"
+    - "[wdt] feed 2 -> 0"
+    - "[wdt] disable ->"             # 0 (programmable) or -6 NOSUPPORT
+    - "[wdt] done"
+  expect_absent:
+    - "open failed"
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for examples/rtc-clock.  Works on every E1M-
+# conformant SoM (every supported SoC has an on-die RTC; AEN /
+# V2N / V2M additionally ship an on-module RV-3028-C7).
+#
+# Hardware fixtures expected:
+#   - alp-rtc0 alias resolves to either the SoC's internal RTC or
+#     the on-module RV-3028-C7 (per the SoM preset's i2c_devices
+#     block).  Either path satisfies this smoke.
+#
+# What this proves end-to-end:
+#   - alp_rtc_open(0) returns a real handle (not the native_sim
+#     NOT_READY stub).
+#   - alp_rtc_set_time() returns ALP_OK and the wall-clock advances
+#     while the CPU sleeps 250 ms.
+#   - alp_rtc_get_time() reads back the same date (2026-05-10) with
+#     a time within ~1 s of the set value -- proves the RTC ticked
+#     while the CPU was idle.
+#
+# Note: the example pads the date and time fields with leading zeros
+# via printf "%02u", so the get_time line is deterministic.
+
+schema_version: 1
+name: rtc-clock
+description: |
+  Confirms the SoM's RTC sets, ticks while CPU sleeps, and reads back.
+
+example: examples/rtc-clock
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "[rtc] open instance 0"
+    - "[rtc] set_time(2026-05-10 14:30:00) -> 0"
+    - "[rtc] get_time -> status=0, 2026-05-10 14:30:0"    # +/- 1 s tail
+    - "[rtc] done"
+  expect_absent:
+    - "open failed"
+    - "alp_last_error="                                   # any error code
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

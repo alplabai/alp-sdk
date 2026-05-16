@@ -104,7 +104,6 @@ cores:
     app: ./m33
     peripherals: [adc, pwm, i2c, gpio]
     libraries:   [cmsis_dsp]
-    inference:   { backend: cpu }
 
 ipc:
   - kind: rpmsg

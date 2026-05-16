@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for examples/counter-alarm.  Works on every E1M-
+# conformant SoM (every supported SoC has at least one 32-bit timer
+# the alp-counter0 alias targets).
+#
+# What this proves end-to-end:
+#   - alp_counter_open(id=0) returns a real handle.
+#   - alp_counter_start() begins ticking.
+#   - alp_counter_us_to_ticks(100000) returns a non-zero tick value.
+#   - alp_counter_set_alarm() installs the callback.
+#   - The alarm fires within the 250 ms spin-poll window (the example
+#     polls 25x10ms = 250 ms for the 100 ms alarm).
+
+schema_version: 1
+name: counter-alarm
+description: |
+  Counter open + 100 ms one-shot alarm dispatch.
+
+example: examples/counter-alarm
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "[counter] open id=0"
+    - "[counter] start -> 0"
+    - "[counter] set_alarm -> 0"
+    - "[counter] alarm fired @"      # the IRQ callback printed
+    - "[counter] fired=1"
+    - "[counter] done"
+  expect_absent:
+    - "open failed"
+    - "fired=0"                      # alarm didn't fire = timer broken
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

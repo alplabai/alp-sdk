@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# V2N-specific HiL smoke for examples/v2n/v2n-gd32-bridge-ping.
+# Exercises the hybrid SPI + I2C bridge between the V2N's M33-SM and
+# the GD32G553 supervisor MCU.  V2N + V2M only -- no equivalent on
+# AEN / NX9.
+#
+# Hardware fixtures expected:
+#   - GD32G553 supervisor MCU populated on the V2N SoM (true for
+#     E1M-V2N101 / V2N102 / V2M101 / V2M102 per the SoM presets).
+#   - GD32 bridge firmware already flashed (`west alp-flash --helper
+#     gd32_bridge ...` before this run -- the bridge is a HELPER MCU
+#     in the system manifest, not a peer in topology).
+#
+# What this proves end-to-end:
+#   - The V2N M33-SM opens both BRD_I2C and the SPI fast-path.
+#   - The bridge wire framing on both transports gets a response.
+
+schema_version: 1
+name: v2n-gd32-bridge-ping
+description: |
+  V2N's M33-SM ↔ GD32G553 hybrid SPI+I2C bridge round-trip.
+
+example: examples/v2n/v2n-gd32-bridge-ping
+
+serial:
+  duration_s: 20
+  expect_contains:
+    - "ALP SDK"
+    - "[bridge]"           # the example logs under this prefix
+  expect_absent:
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"
+    - "open failed"

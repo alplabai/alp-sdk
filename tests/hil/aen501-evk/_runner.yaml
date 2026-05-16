@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Runner defaults for E1M-AEN501 (Alif Ensemble E5, 1x A32 + 2x M55)
+# + E1M-EVK.  Inherits the portable spec set from tests/hil/_common/.
+
+schema_version: 1
+board: alp_e1m_aen501_m55_hp        # Pick M55-HP for the M-class smokes.
+serial_port: /dev/ttyACM0
+flash_method: westflash
+defaults:
+  serial:
+    baud:       115200
+    duration_s: 15

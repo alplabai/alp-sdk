@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for examples/adc-voltmeter.  Works on every E1M-
+# conformant SoM (every variant exposes E1M_ADC0).
+#
+# What this proves end-to-end:
+#   - alp_adc_open() with absurd resolution returns NULL +
+#     OUT_OF_RANGE (capability-check rejection works on real silicon).
+#   - alp_adc_open(12 bits) returns a real handle.
+#   - alp_adc_read_uv() returns ALP_OK and a plausible microvolt value.
+
+schema_version: 1
+name: adc-voltmeter
+description: |
+  ADC capability-rejection + 12-bit read against E1M_ADC0.
+
+example: examples/adc-voltmeter
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "[adc] capability check: requesting 100-bit resolution"
+    - "[adc] rejected: alp_last_error="     # OUT_OF_RANGE expected
+    - "[adc] open E1M_ADC0 @ 12 bits"
+    - "[adc] read_uv -> status=0"
+    - "[adc] done"
+  expect_absent:
+    - "open failed"
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Runner defaults for E1M-AEN401 (Alif Ensemble E4, preliminary) +
+# E1M-EVK.  Inherits the portable spec set from tests/hil/_common/.
+
+schema_version: 1
+board: alp_e1m_aen401_m55_hp        # E4 adds U85 alongside two U55s.
+serial_port: /dev/ttyACM0
+flash_method: westflash
+defaults:
+  serial:
+    baud:       115200
+    duration_s: 15

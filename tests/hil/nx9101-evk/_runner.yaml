@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Runner defaults for E1M-NX9101 (NXP i.MX 93 + Ethos-U65) +
+# E1M-EVK (same 35x35 carrier as the AEN family).  Inherits the
+# portable spec set from tests/hil/_common/.
+
+schema_version: 1
+board: alp_e1m_nx9101_m33            # NX9 has Cortex-M33 (no _sm suffix).
+serial_port: /dev/ttyACM0
+flash_method: westflash
+defaults:
+  serial:
+    baud:       115200
+    duration_s: 20                   # NX9's M33 boot via remoteproc takes longer.

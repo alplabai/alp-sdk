@@ -169,6 +169,49 @@ stage_metadata_validate() {
     fi
 }
 
+stage_doc_yaml_fragments() {
+    # Lints ```yaml fenced blocks in *.md against board-config-v2.schema.json.
+    # Catches README + tutorial drift after schema changes.  Skips if
+    # the linter or schema isn't present (older checkouts).
+    if [ ! -f scripts/lint_doc_yaml_fragments.py ]; then
+        return 99
+    fi
+    if [ ! -f metadata/schemas/board-config-v2.schema.json ]; then
+        return 99
+    fi
+    python3 scripts/lint_doc_yaml_fragments.py || return 1
+}
+
+stage_pytest_scripts() {
+    # Runs the full pytest suite under tests/scripts/ -- linter,
+    # silicon-determined-field rejection (a3cd4fd regression lock),
+    # topology default resolution (e3a4c6b regression lock), and
+    # the existing loader / orchestrator / flash / EEPROM coverage.
+    if [ ! -d tests/scripts ]; then
+        return 99
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        return 99
+    fi
+    python3 -m pytest tests/scripts/ -q || return 1
+}
+
+stage_hil_spec_validate() {
+    # Cheap host-side validation of every HiL smoke spec under
+    # tests/hil/.  Catches stale board targets, missing example
+    # paths, malformed YAML before a nightly HiL flash run.
+    if [ ! -f tests/hil/run_smoke.py ]; then
+        return 99
+    fi
+    for board_dir in tests/hil/*/; do
+        # Skip the shared _common dir (no _runner.yaml).
+        if [ -f "${board_dir}/_runner.yaml" ]; then
+            python3 tests/hil/run_smoke.py --validate "${board_dir}" \
+                > /dev/null || return 1
+        fi
+    done
+}
+
 stage_doxygen() {
     if ! command -v doxygen >/dev/null 2>&1; then
         return 99
@@ -221,6 +264,29 @@ else
     fi
 
     run_stage "metadata-validate" stage_metadata_validate
+
+    # Documentation lint -- cheap, always runnable, no special tooling.
+    if [ -f scripts/lint_doc_yaml_fragments.py ]; then
+        run_stage "doc-yaml-fragments" stage_doc_yaml_fragments
+    else
+        skip_stage "doc-yaml-fragments" "scripts/lint_doc_yaml_fragments.py missing"
+    fi
+
+    # Pytest -- subsumes metadata-validate's unittest coverage and adds
+    # the linter + regression locks for a3cd4fd / e3a4c6b.
+    if command -v python3 >/dev/null 2>&1 && [ -d tests/scripts ]; then
+        run_stage "pytest-scripts" stage_pytest_scripts
+    else
+        skip_stage "pytest-scripts" "tests/scripts missing or no python3"
+    fi
+
+    # HiL spec validation -- host-side parse + board-target check
+    # for every smoke spec under tests/hil/.  No hardware required.
+    if [ -f tests/hil/run_smoke.py ]; then
+        run_stage "hil-spec-validate" stage_hil_spec_validate
+    else
+        skip_stage "hil-spec-validate" "tests/hil/run_smoke.py missing"
+    fi
 
     if [ "${QUICK}" -eq 0 ] && [ "${YOCTO_ONLY}" -eq 0 ]; then
         if command -v doxygen >/dev/null 2>&1 && [ -f Doxyfile ]; then

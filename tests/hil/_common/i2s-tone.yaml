@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for examples/i2s-tone.  Works on every E1M-
+# conformant SoM (e1m-spec mandates 2x I2S).
+#
+# Hardware fixtures expected:
+#   - E1M_I2S0 wired to either an on-EVK codec (TAS2563 on the
+#     E1M-X-EVK; WM8960 on V2N+M1 carriers) or a logic-analyser
+#     pad listening to bit-clock / frame-clock / data.  This smoke
+#     doesn't assert audio fidelity; it only asserts the I2S
+#     controller accepts blocks without timing out.
+#
+# What this proves end-to-end:
+#   - alp_i2s_open() configures the controller (48 kHz s16 stereo TX).
+#   - alp_i2s_start() begins clock generation (no PMIC complaint).
+#   - 4 successive alp_i2s_write() calls return ALP_OK (DMA slabs
+#     ingesting data; consumer keeping up).
+
+schema_version: 1
+name: i2s-tone
+description: |
+  I2S open + 4-block triangle-wave write against E1M_I2S0.
+
+example: examples/i2s-tone
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "[i2s] open E1M_I2S0 @ 48 kHz s16 stereo TX"
+    - "[i2s] start -> 0"
+    - "[i2s] write block 0 -> 0"
+    - "[i2s] write block 3 -> 0"
+    - "[i2s] done"
+  expect_absent:
+    - "open failed"
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

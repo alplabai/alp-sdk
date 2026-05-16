@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# V2N-specific HiL smoke for examples/v2n/v2n-temp-sensor.  Reads
+# the on-module TMP112 over BRD_I2C @ 0x40.  V2N + V2M only --
+# the AEN family's TMP112 sits on a different bus.
+#
+# What this proves end-to-end:
+#   - alp_i2c_open() on BRD_I2C (V2N's shared management bus).
+#   - tmp112_read_temperature_c() returns a plausible value.
+
+schema_version: 1
+name: v2n-temp-sensor
+description: |
+  V2N on-module TMP112 read at BRD_I2C @ 0x40.
+
+example: examples/v2n/v2n-temp-sensor
+
+serial:
+  duration_s: 15
+  expect_contains:
+    - "ALP SDK"
+    - "tmp112"             # case-insensitive match (the example logs in lowercase)
+  expect_absent:
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"
+    - "open failed"

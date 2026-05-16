@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for examples/gpio-button-led.  Works on every
+# E1M-conformant SoM -- the example uses E1M_GPIO_IO0 + IO1 which
+# the e1m-spec guarantees route on every variant.
+#
+# Hardware fixtures expected:
+#   - The carrier's BUTTON_LED helper populated at E1M_GPIO_IO0 (button)
+#     and E1M_GPIO_IO1 (LED).  E1M-EVK + E1M-X-EVK presets default
+#     `button_led: true`; custom carriers need it declared.
+#
+# What this proves end-to-end:
+#   - alp_button_led_init() returns ALP_OK on real silicon.
+#   - alp_button_led_set() drives the LED pin (4 toggles visible
+#     on the carrier's LED).
+#   - alp_button_led_is_pressed() returns ALP_OK and a 0/1 value
+#     reflecting the button's actual state at sample time.
+#   - The example exits cleanly without a panic.
+
+schema_version: 1
+name: gpio-button-led
+description: |
+  Verifies GPIO read (button) + GPIO write (LED) end-to-end through
+  the <alp/chips/button_led.h> helper.
+
+example: examples/gpio-button-led
+
+# board: inherited from the per-SoM _runner.yaml
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "[gpio] init button=E1M_GPIO_IO0, led=E1M_GPIO_IO1"
+    - "[gpio] led=1 status=0"     # at least one ALP_OK set
+    - "[gpio] is_pressed -> status=0"
+    - "[gpio] done"
+  expect_absent:
+    - "init failed"
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

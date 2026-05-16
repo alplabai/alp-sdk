@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for examples/i2c-scanner.  Works on every E1M-
+# conformant SoM (e1m-spec mandates 2x I2C; E1M_I2C0 always present).
+#
+# Hardware fixtures expected:
+#   - At least ONE I2C peripheral reachable on E1M_I2C0.  Typical
+#     populations:
+#       * E1M-EVK    (AEN/NX9): LSM6DSO @ 0x6A, BMP581 @ 0x47,
+#                               SSD1306 @ 0x3C.
+#       * E1M-X-EVK  (V2N/V2M): per-carrier breakouts; LSM6DSO + IMU
+#                               variants common.
+#     The scan must find AT LEAST ONE responder; the exact set
+#     varies per assembly so we don't assert specific addresses.
+#
+# What this proves end-to-end:
+#   - alp_i2c_open(E1M_I2C0) returns a real handle on the active SoM.
+#   - alp_i2c_write(addr, NULL, 0) probes the bus without writing
+#     payload (zero-length probe pattern).
+#   - At least one device on the bus ACKs (proves I2C lines are
+#     pulled up + clock is generating).
+
+schema_version: 1
+name: i2c-scanner
+description: |
+  Confirms the I2C bus on E1M_I2C0 reaches at least one populated
+  device on the carrier.
+
+example: examples/i2c-scanner
+
+serial:
+  duration_s: 15
+  expect_contains:
+    - "[i2c] open E1M_I2C0 @ 100 kHz"
+    - "[i2c] addr 0x"           # any responder line is enough
+    - "[i2c] scan complete"
+    - "responder(s)"
+    - "[i2c] done"
+  expect_absent:
+    - "open failed"
+    - "scan complete, 0 responder(s)"   # zero responders = wiring bug
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

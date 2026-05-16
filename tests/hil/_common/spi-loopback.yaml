@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for examples/spi-loopback.  Works on every E1M-
+# conformant SoM.
+#
+# Hardware fixtures expected:
+#   - E1M_SPI0 MOSI shorted to MISO on the EVK (or a loopback jumper
+#     on the breakout).  Without the jumper the test still passes
+#     the open + transceive call -- but rx bytes won't match tx and
+#     the spec doesn't assert rx values (that's a smoke test, not a
+#     fidelity test).
+#
+# What this proves end-to-end:
+#   - alp_spi_open(E1M_SPI0, 1 MHz, mode 0) returns a real handle.
+#   - alp_spi_transceive() returns ALP_OK (silicon actually clocked).
+
+schema_version: 1
+name: spi-loopback
+description: |
+  SPI open + full-duplex transceive against E1M_SPI0.
+
+example: examples/spi-loopback
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "[spi] open E1M_SPI0 @ 1 MHz mode 0"
+    - "[spi] transceive -> status=0"
+    - "[spi] done"
+  expect_absent:
+    - "open failed"
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

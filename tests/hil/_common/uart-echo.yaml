@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for examples/uart-echo.  Works on every E1M-
+# conformant SoM (e1m-spec mandates 2x UART; E1M_UART0 always
+# present).
+#
+# Hardware fixtures expected:
+#   - E1M_UART0 routed out the EVK's USB-C bridge as the runner-
+#     side serial port (Linux: /dev/ttyACM0; Windows: COM<N>;
+#     macOS: /dev/cu.usbmodem*).  The example's printf output AND
+#     its alp_uart_write("hello") output both land on the same
+#     wire when the Zephyr console is wired to E1M_UART0.
+#
+# What this proves end-to-end:
+#   - alp_uart_open(E1M_UART0, 115200) returns a real handle.
+#   - alp_uart_read() with a 50 ms timeout returns ALP_ERR_TIMEOUT
+#     (-7) when no input arrives -- status reaches the wrapper from
+#     the underlying Zephyr UART driver.
+#   - alp_uart_write() succeeds (status=0).
+
+schema_version: 1
+name: uart-echo
+description: |
+  Confirms UART open / read-with-timeout / write end-to-end on the
+  carrier's console UART.
+
+example: examples/uart-echo
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "[uart] open E1M_UART0 @ 115200 8N1"
+    - "[uart] read -> status="    # real-silicon: TIMEOUT (-7) expected
+    - "[uart] write -> 0"
+    - "[uart] done"
+  expect_absent:
+    - "open failed"
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

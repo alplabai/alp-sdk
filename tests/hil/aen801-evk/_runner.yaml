@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Runner defaults for E1M-AEN801 (Alif Ensemble E8, 2x A32 + 2x M55
+# + 3x Ethos-U incl. U85) + E1M-EVK.  Inherits the portable spec
+# set from tests/hil/_common/.
+
+schema_version: 1
+board: alp_e1m_aen801_m55_hp
+serial_port: /dev/ttyACM0
+flash_method: westflash
+defaults:
+  serial:
+    baud:       115200
+    duration_s: 15

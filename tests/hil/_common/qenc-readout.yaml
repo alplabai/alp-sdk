@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for examples/qenc-readout.  Works on every E1M-
+# conformant SoM (e1m-spec mandates 4x quadrature decoder).
+#
+# Hardware fixtures expected:
+#   - A quadrature encoder wired to E1M_ENC0_X / E1M_ENC0_Y is
+#     PREFERRED but optional -- the test asserts the lifecycle calls
+#     succeed, not that the position changes.  Without an encoder,
+#     position stays at 0 across all 10 polls.
+#
+# What this proves end-to-end:
+#   - alp_qenc_open(E1M_ENC0, 24 PPR) returns a real handle.
+#   - alp_qenc_reset_position() succeeds.
+#   - alp_qenc_get_position() returns ALP_OK on every poll.
+
+schema_version: 1
+name: qenc-readout
+description: |
+  Quadrature-decoder open + position polling against E1M_ENC0.
+
+example: examples/qenc-readout
+
+serial:
+  duration_s: 12      # 1 s of polling + setup overhead
+  expect_contains:
+    - "[qenc] open E1M_ENC0"
+    - "[qenc] reset_position -> 0"
+    - "[qenc] t=100 ms  status=0"
+    - "[qenc] t=1000 ms  status=0"
+    - "[qenc] done"
+  expect_absent:
+    - "open failed"
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

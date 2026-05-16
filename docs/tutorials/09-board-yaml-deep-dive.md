@@ -102,7 +102,7 @@ drivers in / out per the customer's specific assembly.  Each
 `alp.conf`.
 
 **Custom carrier without a preset:** drop `name` entirely and
-declare everything inline:
+declare the populated chips inline:
 
 ```yaml
 carrier:
@@ -110,51 +110,78 @@ carrier:
     bmi323:   true
     ssd1306:  true
     rv3028c7: true
-  i2c_addresses:
-    bmi323:   0x68
-    ssd1306:  0x3C
-    rv3028c7: 0x52
-  pin_aliases:
-    USER_LED_0: E1M_GPIO_IO5
-    BUTTON_0:   E1M_GPIO_IO3
 ```
 
-See the `custom-example/board.yaml` shipped under
-`metadata/carriers/`.
+Each `true` enables the matching `CONFIG_ALP_SDK_CHIP_<NAME>=y`
+and links the chip driver from `chips/<name>/`.  Bus addresses
+and pin assignments live in the chip-driver metadata under
+`metadata/chips/<name>.yaml` (resolved against the SoM preset's
+`i2c_devices:` block), not in `board.yaml` itself.  For custom
+pad mappings, layer a devicetree overlay -- emit a starter via
+`python3 scripts/alp_project.py --input board.yaml --emit dts-overlay`
+and hand-edit from there.
 
-### `os`
+### `cores.<id>.os` (per-core runtime)
 
 ```yaml
-os: zephyr   # zephyr | yocto | baremetal
+cores:
+  m55_hp:
+    os: zephyr       # zephyr | yocto | baremetal | off (rarely written)
+    app: ./src
+  m55_he:
+    os: "off"        # explicit opt-out for a peer core
 ```
 
-Selects the OS-pivoted backend.  Tied to the SoM family --
-AEN ships Zephyr + baremetal; V2N + V2N-M1 + N93 ship Yocto.
-The loader validates the pair: `os: yocto` against
-`som.sku: E1M-AEN701` is rejected at validation time.
+Per-core runtime selector.  **Usually omitted:** each core's
+natural runtime is baked into the SoM preset's `topology:` block
+(Cortex-M → zephyr, Cortex-A → yocto), so the loader fills it in
+automatically.  Write `os:` only to override:
 
-### `peripherals`
+- `os: "off"` -- skip the slice entirely (no app required).  The
+  peer core stays at reset; useful when an example demos a
+  single core and you want the build fast.
+- `os: baremetal` -- hand-written firmware on a core that
+  normally runs Zephyr.
+- `os: yocto` / `os: zephyr` -- only meaningful when you need to
+  override the topology default.  The SoM preset is the source
+  of truth otherwise.
+
+The loader validates the pair against the SoM's `topology:`
+declaration -- `os: yocto` on a Cortex-M core is rejected with a
+clear error.
+
+### `cores.<id>.peripherals`
 
 ```yaml
-peripherals:
-  - i2c
-  - spi
-  - pwm
-  - adc
+cores:
+  m55_hp:
+    app: ./src
+    peripherals:
+      - i2c
+      - spi
+      - pwm
+      - adc
 ```
 
-List the `<alp/X.h>` subsystems the app uses.  Each entry
-becomes `CONFIG_<X>=y` in the generated `alp.conf`.  Allowed
-values:
+List the Zephyr peripheral subsystems this slice's app uses.
+Each entry becomes `CONFIG_<X>=y` in the generated `alp.conf`
+for that slice.  Per-core under v2 -- different cores in a
+heterogeneous build can declare different peripheral sets.
+Allowed values (exactly the schema enum):
 
 ```
-i2c, spi, uart, gpio, i2s, pwm, adc, dac, counter, qenc,
-can, rtc, wdt, usb, audio, inference, iot, ble, security,
-mproc, dsp, gpu2d, power, tmu, camera, storage
+adc, can, counter, emmc, ethernet, flash, gpio, i2c, i2s,
+pwm, rtc, sensor, spi, uart, usb, watchdog
 ```
 
-Omit the block entirely if your app uses no peripherals (rare;
-most apps need at least gpio).
+Higher-level concerns ride other paths: audio is composed from
+`i2s` + a codec chip driver; inference / IoT / BLE / security /
+mproc / DSP / GPU2D have dedicated `<alp/...>` surfaces wired
+in via `libraries:`, `iot:`, `inference:`, or by enabling the
+chip-driver under `carrier.populated:`.
+
+Omit the block entirely if your slice uses no peripherals
+(rare; most apps need at least `gpio`).
 
 ### `inference`
 
@@ -173,22 +200,25 @@ to run **per-handle at runtime** via `alp_inference_open(.backend = …)`
 DX-M1 concurrently this way.  See
 [`docs/tutorials/16-inference-mobilenet.md`](16-inference-mobilenet.md).
 
-### `iot`
+### `cores.<id>.iot`
 
 ```yaml
-iot:
-  wifi:
-    enabled: true
-  mqtt:
-    enabled: true
-    tls:     true
-  ble:
-    enabled: false
+cores:
+  m55_hp:
+    app: ./src
+    iot:
+      wifi: true
+      mqtt: true
+      tls:  true
+      ble:  false
 ```
 
-Toggles the connectivity subsystems.  Each `enabled: true`
-pulls in the matching backend.  TLS pinning lives in
-application code -- see Tutorial [11: MQTT-TLS publish](11-mqtt-tls-publish.md).
+Toggles the connectivity subsystems for this slice.  Each
+`true` pulls in the matching backend (Wi-Fi stack, MQTT client,
+mbedTLS / OpenSSL, BLE host).  Per-core under v2 -- a
+heterogeneous build typically lights up `wifi/mqtt/tls` on the
+A-class slice and leaves the M-class slice quiet.  TLS pinning
+lives in application code -- see Tutorial [11: MQTT-TLS publish](11-mqtt-tls-publish.md).
 
 ### `libraries`
 
@@ -240,23 +270,21 @@ carrier:
     bme280:     true
     ssd1306:    true
     button_led: true
-  i2c_addresses:
-    bme280:  0x76
-    ssd1306: 0x3C
-  pin_aliases:
-    USER_LED_0: E1M_GPIO_IO5
-    BUTTON_0:   E1M_GPIO_IO3
+  # Bus addresses + pad aliases live in chip-driver metadata
+  # + devicetree overlays; see the `### carrier` section above
+  # for the contract.  board.yaml itself stays declarative.
 
 cores:
   m55_hp:
     app: ./src        # os: omitted -- M-cores default to zephyr per topology
-    peripherals: [i2c, gpio, audio]
+    peripherals: [i2c, spi, gpio]
     libraries:   [lvgl, mbedtls]
     inference:   { default_arena_kib: 256 }   # arena tuning only
     iot:
       wifi: true
       mqtt: true
       tls:  true
+      ble:  true
   m55_he:
     os: "off"         # E7's second M55 stays dark on this app
 

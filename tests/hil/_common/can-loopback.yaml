@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for examples/can-loopback.  Works on every E1M-
+# conformant SoM (e1m-spec mandates 1x CAN-FD).
+#
+# Loopback mode means no transceiver wiring needed -- the controller
+# routes TX back to RX internally.  Validates the CAN block is
+# clocked + the encoder/decoder paths work end-to-end without
+# requiring an external bus partner.
+#
+# What this proves end-to-end:
+#   - alp_can_open(E1M_CAN0, 500 kbps loopback) returns a real handle.
+#   - alp_can_add_filter() registers an accept-all filter.
+#   - alp_can_start() brings the controller out of init mode.
+#   - alp_can_send() queues a frame and gets it back via the
+#     installed callback (rx_count > 0 after the spin-poll window).
+
+schema_version: 1
+name: can-loopback
+description: |
+  CAN controller loopback: send -> rx callback within 200 ms.
+
+example: examples/can-loopback
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "[can] open E1M_CAN0 @ 500 kbps loopback"
+    - "[can] start -> 0"
+    - "[can] send id=0x123 -> 0"
+    - "[can] rx id=0x123"            # callback received the loopback
+    - "[can] done"
+  expect_absent:
+    - "open failed"
+    - "[can] rx_count=0"             # zero loopback receives = controller silent
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

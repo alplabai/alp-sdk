@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Per-directory runner defaults for E1M-AEN701 + E1M-EVK HiL specs.
+# Inherited by every spec under this directory AND every shared
+# spec in tests/hil/_common/ when the runner is invoked with this
+# directory as the target.  Per-spec values override these.
+# See tests/hil/README.md.
+
+schema_version: 1
+
+# Zephyr board target -- AEN701's M55-HP per the SoM preset's
+# topology.m55_hp.board field.  Ships in alplabai/alp-zephyr-modules.
+# Override per-spec with `board:` for tests that need M55-HE
+# (alp_e1m_aen701_m55_he) or the A32 cluster.
+board: alp_e1m_aen701_m55_hp
+
+# Serial port the EVK's USB-C exposes the UART on.  Linux default.
+# Windows runners override to COM<N>; macOS to /dev/cu.usbmodem*.
+serial_port: /dev/ttyACM0
+
+# Flash command pattern.  `westflash` uses the SDK's existing
+# `west flash` wrapper.  `pyocd-flash` is the J-Link / DAPLink path.
+flash_method: westflash
+
+defaults:
+  serial:
+    baud:       115200
+    # 15 s is comfortable for the simple peripherals -- the example
+    # apps print their banner + 2-3 iterations within 5 s; double
+    # gives flake margin.
+    duration_s: 15

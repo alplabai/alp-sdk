@@ -20,9 +20,12 @@ on:
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
+      - 'scripts/lint_doc_yaml_fragments.py'
       - 'tests/scripts/**'
       - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
+      - 'README.md'
+      - 'docs/**/*.md'
   push:
     branches: [main]
     paths:
@@ -31,9 +34,12 @@ on:
       - 'include/alp/boards/**'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
+      - 'scripts/lint_doc_yaml_fragments.py'
       - 'tests/scripts/**'
       - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
+      - 'README.md'
+      - 'docs/**/*.md'
   workflow_dispatch:
 
 concurrency:
@@ -236,6 +242,40 @@ jobs:
       - name: Unit tests for the loader
         run: |
           python3 -m unittest tests.scripts.test_alp_project -v
+
+      # Lint board.yaml fragments embedded in markdown documentation
+      # against the v2 schema.  Catches doc drift -- e.g. a README
+      # quickstart that still shows `inference: { backend: cpu }`
+      # after the schema removed it (the failure mode that motivated
+      # the linter).  Walks README + docs/**/*.md by default.
+      - name: Lint board.yaml fragments in documentation
+        run: |
+          python3 scripts/lint_doc_yaml_fragments.py
+
+      # Validate every HiL smoke spec under tests/hil/ parses against
+      # its board's _runner.yaml.  Cheap host-side check (no hardware
+      # needed); catches a spec that references a deleted example,
+      # a typo'd board target naming convention, or a malformed
+      # YAML payload before the nightly HiL run trips on it.
+      - name: Validate HiL smoke specs (every shipped board)
+        run: |
+          set -e
+          for board_dir in tests/hil/*/; do
+              # Skip the shared _common dir; it has no _runner.yaml.
+              if [ -f "${board_dir}/_runner.yaml" ]; then
+                  echo "--- ${board_dir} ---"
+                  python3 tests/hil/run_smoke.py --validate "${board_dir}"
+              fi
+          done
+
+      # Pytest sweep -- covers the doc-yaml linter, silicon-determined-
+      # field rejection (regression-lock for commit a3cd4fd), and
+      # per-(SoM x core) topology default resolution (regression-lock
+      # for commit e3a4c6b's bulk-strip).  These all share fixtures
+      # with the orchestrator tests and run in <2 s.
+      - name: Pytest -- linter + schema regression + topology defaults
+        run: |
+          python3 -m pytest tests/scripts/ -v --tb=short
 
       # The gd32-bridge protocol vectors must stay in lockstep with
       # the generator.  The script's --check mode exits non-zero if

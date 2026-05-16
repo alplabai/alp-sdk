@@ -8,29 +8,51 @@
  * @brief ALP SDK multi-processor IPC primitives.
  *
  * v0.3 deliverable.  v0.1 ships only the public surface; every entry
- * point returns ALP_ERR_NOSUPPORT.  This header is the wrapping the
- * "Multi-Processor Support Completion" line in `VERSIONS.md` v0.3
- * targets.
+ * point returns ALP_ERR_NOSUPPORT.
  *
- * Scope.  E1M-AEN ships with at minimum two heterogeneous Cortex-M55
- * cores (HP @ 400 MHz + HE @ 160 MHz), and on E5/E6/E7/E8 also one or
- * two Cortex-A32 cores @ 800 MHz.  This header gives the M55-HP / M55-HE
- * peer pair a uniform IPC surface; A32 ↔ M55 IPC is added in v0.4
- * when Linux/Yocto handles the A32 side.
+ * @par Layering
+ * This header is the LOW-LEVEL primitive layer.  Use it when the app
+ * needs raw shared memory, a specific mailbox channel, or a hardware
+ * semaphore -- e.g. lock-free SPSC ring buffers between Alif's
+ * M55-HP and M55-HE, or a tight latency-bounded mailbox handshake.
  *
- * Three primitives:
+ * For HIGH-LEVEL portable IPC across SoMs (Yocto Linux on the A-cluster
+ * talking to Zephyr on the M-class peer) prefer `<alp/rpc.h>`.  That
+ * surface carries OpenAMP / RPMsg framing, looks up endpoint IDs +
+ * mailbox channels + carve-out addresses from the build-time-generated
+ * `<alp/system_ipc.h>`, and works identically on every heterogeneous
+ * SoM (AEN E5+, V2N, V2M, NX9).  rpc.h is the right answer for almost
+ * every "two cores talk to each other" use case; mproc.h is the
+ * escape hatch when you need to bypass RPMsg overhead.
+ *
+ * @par Scope
+ * The three primitives are intended to cover every E1M SoM:
  *   1. Shared-memory regions      — `alp_shmem_*`
- *   2. Mailbox channels           — `alp_mbox_*`  (Zephyr `mbox_*` / MHU)
- *   3. Hardware semaphores        — `alp_hwsem_*` (Zephyr `hwsem_*` / HWSEM)
+ *   2. Mailbox channels           — `alp_mbox_*`  (Zephyr `mbox_*`)
+ *   3. Hardware semaphores        — `alp_hwsem_*` (Zephyr `hwsem_*`)
  *
- * On top of these v0.3 also lands an OpenAMP-based RPC primitive (see
- * `<alp/rpc.h>`, ships with v0.3) so blocks can offload compute to the
- * M55-HE core without hand-rolling IPC.  This header stays at the lower
- * primitive level on purpose — RPC is a build-time choice, not a
- * mandatory abstraction.
+ * The @ref alp_core_id_t enum enumerates every core that appears in
+ * any shipped SoM preset's `topology:` block, so apps can address
+ * peers on AEN (M55-HP / M55-HE / A32 cluster), V2N (M33-SM / A55
+ * cluster), V2M (same as V2N), or NX9 (M33 / A55 cluster) through
+ * the same surface.  Adding a new SoM SKU MUST extend the enum and
+ * the test in `tests/scripts/test_core_id_enum_coverage.py` enforces
+ * that.
+ *
+ * @par Implementation status
+ *   - `alp_mbox_*` -- functional on AEN-Zephyr (DT-anchored MBOX
+ *     devices via the `alp-mboxN` aliases).
+ *   - `alp_shmem_*` -- v0.3.x.  Surface in place; runtime returns
+ *     ALP_ERR_NOSUPPORT until the DT memory-region nodes land in the
+ *     EVK overlay.
+ *   - `alp_hwsem_*` -- v0.3.x.  Surface in place; lock/unlock falls
+ *     through to ALP_ERR_NOSUPPORT until the per-SoC HWSEM register
+ *     map is wired up.
  *
  * @par ABI status: [ABI-STABLE]
- *      v0.3 mailbox + shmem + hwsem.
+ *      v0.3 mailbox + shmem + hwsem.  The @ref alp_core_id_t enum is
+ *      extended (not reshaped) as new SoMs land; existing values
+ *      keep their integer assignments forever.
  *      See docs/abi-markers.md for the convention.
  */
 
@@ -47,13 +69,52 @@
 extern "C" {
 #endif
 
-/** Identifies a peer core in the MP topology. */
+/** Identifies a peer core in the MP topology.
+ *
+ *  Names mirror the canonical core_ids used in each SoM preset's
+ *  `topology:` block at `metadata/e1m_modules/E1M-<MPN>.yaml`.  The
+ *  integer assignments are stable across ALP SDK releases: adding a
+ *  new SoM appends entries with fresh integer values; it never
+ *  re-numbers existing ones.  The coverage test in
+ *  `tests/scripts/test_core_id_enum_coverage.py` enforces that every
+ *  topology core_id has a matching enum entry here.
+ *
+ *  **Alif HP / HE distinction.**  Alif Ensemble's M55-HP (400 MHz,
+ *  Helium + the application workload) and M55-HE (160 MHz, always-on
+ *  low-power) are genuinely different cores; preserving them as
+ *  distinct enum entries keeps the firmware author in control of
+ *  which peer they're addressing -- routing "always-on" work to
+ *  M55-HE preserves the AEN family's headline low-power story.
+ *
+ *  **Cross-SoM portability.**  For apps that need to be SoM-agnostic
+ *  (Yocto consumer talks to Zephyr producer regardless of which
+ *  M-class core it lives on), prefer `<alp/rpc.h>` -- it looks up
+ *  the peer endpoint via the board.yaml-declared channel name, not
+ *  via this enum.  Use `alp_core_id_t` when the app is explicitly
+ *  SoM-scoped and wants to talk to a specific physical core. */
 typedef enum {
-    ALP_CORE_SELF      = 0,     /**< Whichever core this code is running on. */
-    ALP_CORE_M55_HP    = 1,     /**< Application core on E1M-AEN. */
-    ALP_CORE_M55_HE    = 2,     /**< High-efficiency core on E1M-AEN. */
-    ALP_CORE_A32_0     = 3,     /**< Cortex-A32 #0 on E5/E6/E7/E8 (Linux). */
-    ALP_CORE_A32_1     = 4      /**< Cortex-A32 #1 on E7/E8 (Linux). */
+    ALP_CORE_SELF        = 0,   /**< Whichever core this code is running on. */
+
+    /* ---- Alif Ensemble (AEN family) ---- */
+    ALP_CORE_M55_HP      = 1,   /**< AEN High-Performance Cortex-M55 (400 MHz). */
+    ALP_CORE_M55_HE      = 2,   /**< AEN High-Efficiency Cortex-M55 (160 MHz, always-on). */
+    ALP_CORE_A32_0       = 3,   /**< AEN Cortex-A32 #0 on E5/E6/E7/E8 (Linux). */
+    ALP_CORE_A32_1       = 4,   /**< AEN Cortex-A32 #1 on E7/E8 (Linux). */
+    ALP_CORE_A32_CLUSTER = 5,   /**< AEN Cortex-A32 cluster as a single endpoint
+                                     (E5/E6/E7/E8 -- matches `a32_cluster` in
+                                     the AEN5+ topology blocks). */
+
+    /* ---- Renesas RZ/V2N (V2N + V2M families) ---- */
+    ALP_CORE_M33_SM      = 6,   /**< V2N Cortex-M33 system-manager
+                                     (matches `m33_sm` in V2N101/V2M101
+                                     topology). */
+    ALP_CORE_A55_CLUSTER = 7,   /**< V2N / NX9 Cortex-A55 cluster as a single
+                                     endpoint (matches `a55_cluster`). */
+
+    /* ---- NXP i.MX 93 (NX9 family) ---- */
+    ALP_CORE_M33         = 8    /**< NX9 Cortex-M33 (no _sm suffix -- NX9's
+                                     M33 doesn't carry the system-manager
+                                     role; matches `m33` in NX9101 topology). */
 } alp_core_id_t;
 
 /* ------------------------------------------------------------------ */
