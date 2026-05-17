@@ -1,0 +1,39 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Overlay declaring alp-shmem0 for the mproc-mailbox example so the
+ * HP-side native_sim build resolves "alp_shmem0" through the new
+ * DT-anchored lookup path (commit 2e9deec, v0.7).  native_sim never
+ * dereferences the address; alp_shmem_view just reports the
+ * DT-anchored base + size verbatim and the example's memcpy is
+ * skipped on the !CONFIG_BOARD_NATIVE_SIM branch.
+ *
+ * On real AEN silicon the alp-shmem0 alias must point at a
+ * reserved-memory carve-out shared between the M55-HP and M55-HE
+ * images.  The orchestrator (scripts/alp_orchestrate.py) emits the
+ * per-core overlay with the matching alias when the board.yaml v2
+ * declares an ipc[] block; until that ships customers can declare
+ * the alias by hand in a board overlay following this same shape:
+ *
+ *     / {
+ *         alp_shmem0_node: shmem@<carve_out_addr> {
+ *             compatible = "mmio-sram";
+ *             reg = <0x<addr> 0x<size>>;
+ *             status = "okay";
+ *         };
+ *         aliases { alp-shmem0 = &alp_shmem0_node; };
+ *     };
+ */
+
+/ {
+    alp_shmem0_node: shmem@70000000 {
+        compatible = "mmio-sram";
+        reg = <0x70000000 0x1000>;
+        status = "okay";
+    };
+
+    aliases {
+        alp-shmem0 = &alp_shmem0_node;
+    };
+};

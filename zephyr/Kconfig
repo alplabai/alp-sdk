@@ -630,11 +630,24 @@ config ALP_SDK_MPROC
 	depends on MBOX
 	help
 	  Wires the alp_mbox_* / alp_shmem_* / alp_hwsem_*
-	  primitives onto Zephyr's MBOX driver class (Alif's MHU is
-	  registered as a Zephyr mbox device on AEN).  Per-SoC hwsem
-	  + DT-anchored shared-memory bindings finalise in v0.3.x;
-	  the wrapper falls back to NOSUPPORT for those paths until
-	  the EVK overlay declares the regions.
+	  primitives onto the Zephyr backend.  Per-surface state:
+
+	    - mbox: Zephyr MBOX driver class (v0.4).  Alif's MHU is
+	      registered as a Zephyr mbox device on AEN; the wrapper
+	      resolves alp_mbox_config.channel through the alp-mboxN
+	      DT aliases.
+	    - shmem: DT-anchored carve-outs (v0.7, commit 2e9deec).
+	      alp_shmem_open(name) resolves "alp_shmem0".."alp_shmemN"
+	      strictly against the alp-shmemN aliases; boards that
+	      don't declare the aliases get NOT_READY at open.
+	    - hwsem: intra-core k_sem fallback (v0.7, commit 877fa29)
+	      indexed by integer hwsem_id, sized by
+	      ALP_SDK_MPROC_HWSEM_COUNT.  Cross-core / per-SoC
+	      HWSEM-block wiring (AEN HWSEM, ST HSEM, etc.) is
+	      tracked separately.
+
+	  Yocto + GD32 backends still return NULL / NOSUPPORT for
+	  shmem + hwsem; Yocto carries the mbox shim only.
 
 config ALP_SDK_MPROC_NANOPB_FRAMING
 	bool "Frame alp_mbox_send payloads through the IPC envelope"

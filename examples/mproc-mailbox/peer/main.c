@@ -40,7 +40,10 @@
 #include "alp/mproc.h"
 #include "alp/peripheral.h"
 
-#define SHMEM_REGION_NAME "alp_mproc_shmem"
+/* Region name resolved against the alp-shmemN DT aliases.  Must
+ * match the HP side; both peers see the same physical bytes via
+ * the alp-shmem0 alias. */
+#define SHMEM_REGION_NAME "alp_shmem0"
 #define SHMEM_REGION_SIZE 512u
 #define MBOX_CHANNEL      0u
 #define RESPONSE_OFFSET   256u  /* must match HP's expectation */

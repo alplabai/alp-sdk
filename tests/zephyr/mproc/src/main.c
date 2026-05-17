@@ -2,9 +2,36 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Smoke tests for <alp/mproc.h> under native_sim.  No mbox device
- * present, no peer core; the wrapper falls back to NOSUPPORT and
- * we verify that contract plus every NULL-arg branch.
+ * Smoke tests for <alp/mproc.h> under native_sim, covering four
+ * buckets driven by the testcase.yaml scenarios:
+ *
+ *   1. NOSUPPORT-fallback (default scenario, CONFIG_ALP_SDK_MPROC=n).
+ *      Guarded with #if !defined(CONFIG_ALP_SDK_MPROC).  Verifies
+ *      alp_shmem_open / alp_mbox_open / alp_hwsem_open all return
+ *      NULL with ALP_ERR_NOSUPPORT plus every NULL-arg branch
+ *      stays safe.
+ *
+ *   2. shmem-impl (alp_sdk.mproc.shmem_hwsem scenario,
+ *      CONFIG_ALP_SDK_MPROC=y + boards/native_sim_native_64.overlay
+ *      declaring alp-shmem0 + alp-shmem1).  Guarded with
+ *      #if defined(CONFIG_ALP_SDK_MPROC) && DT_HAS_ALIAS(alp_shmem0).
+ *      Verifies the DT-alias lookup table resolves names to the
+ *      right base+size, unknown names hit NOT_READY, the handle
+ *      pool exhausts cleanly.
+ *
+ *   3. hwsem-impl (same scenario as shmem-impl).  Verifies the
+ *      k_sem-backed lock/unlock cycle, contention between distinct
+ *      handles on the same id, timed lock semantics, out-of-range
+ *      id rejection, and the "unlock without lock returns INVAL"
+ *      contract.
+ *
+ *   4. IPC envelope framing (always on -- no MPROC backend needed).
+ *      Exercises alp_mproc_frame_encode / alp_mproc_frame_decode
+ *      directly so the v0.4-prep placeholder codec stays correct
+ *      ahead of the nanopb-generated wire format.  The
+ *      alp_sdk.mproc.nanopb_framing scenario additionally compiles
+ *      CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y so the framing branch
+ *      in alp_mbox_send / mbox_rx_cb builds cleanly.
  */
 
 #include <string.h>

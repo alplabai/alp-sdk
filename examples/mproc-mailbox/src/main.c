@@ -54,7 +54,10 @@
 #include "alp/mproc.h"
 #include "alp/peripheral.h"
 
-#define SHMEM_REGION_NAME "alp_mproc_shmem"
+/* Region name resolved against the alp-shmemN DT aliases in the
+ * board overlay -- here, alp-shmem0 in boards/<board>.overlay or
+ * the orchestrator-emitted carve-out for AEN dual-core builds. */
+#define SHMEM_REGION_NAME "alp_shmem0"
 #define SHMEM_REGION_SIZE 512u
 #define MBOX_CHANNEL      0u
 #define REQUEST_OFFSET    0u

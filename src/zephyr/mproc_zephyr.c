@@ -4,16 +4,32 @@
  *
  * Zephyr backend for <alp/mproc.h> -- multi-processor IPC.
  *
- * Replaces the v0.1 NOSUPPORT stub.  Wraps Zephyr's MBOX driver
- * (Alif's MHU controller is registered as a Zephyr mbox device on
- * AEN), the hwsem driver class, and a DT-anchored shared-memory
- * region for the M55-HP <-> M55-HE peer pair.
+ * Replaces the v0.1 NOSUPPORT stub.  Three surfaces, three
+ * underlying mechanisms:
  *
- * The DT alias `alp-shmemN` points at a memory-region node; v0.3
- * supports name = "alp_shmem0" mapping to alias 0.  The mbox
- * channel comes from the studio-supplied alp_mbox_config.channel
- * (resolved through the alp-mboxN alias).  The hwsem from
- * alp-hwsemN.
+ *   - mbox:  Zephyr MBOX driver class (Alif's MHU controller is
+ *            registered as a Zephyr mbox device on AEN).  The
+ *            studio-supplied alp_mbox_config.channel is resolved
+ *            through the alp-mboxN DT aliases into a
+ *            (const struct device *, channel_id) pair.
+ *
+ *   - shmem: DT-anchored carve-outs.  alp_shmem_open(cfg) matches
+ *            cfg->name strictly against names "alp_shmem0".."N"
+ *            derived from the alp-shmemN DT aliases (a static
+ *            lookup table built at compile time from
+ *            DT_ALIAS(alp_shmemN)).  base + size come from the
+ *            aliased node's `reg` property.  Unknown names yield
+ *            NOT_READY -- the wrapper does not synthesise regions.
+ *
+ *   - hwsem: Intra-core k_sem fallback.  alp_hwsem_open(id) maps
+ *            an integer hwsem_id directly to one of
+ *            CONFIG_ALP_SDK_MPROC_HWSEM_COUNT k_sem slots (count=1,
+ *            mutex semantics).  This serialises access WITHIN one
+ *            Zephyr image only -- the lookup does NOT consult
+ *            alp-hwsemN DT aliases and there is NO Zephyr hwsem
+ *            driver-class device behind the handle.  Real per-SoC
+ *            HWSEM-block wiring (AEN HWSEM, ST HSEM, etc.) lands
+ *            per-SoC in a follow-on track.
  *
  * Gated on CONFIG_ALP_SDK_MPROC.  When OFF, NULL/NOSUPPORT.
  *
