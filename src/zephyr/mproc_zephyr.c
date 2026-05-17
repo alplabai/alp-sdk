@@ -165,6 +165,40 @@ static alp_status_t errno_to_alp(int err)
 /* Shared memory                                                       */
 /* ================================================================== */
 
+#if defined(CONFIG_ALP_SDK_MPROC)
+
+#include <zephyr/devicetree.h>
+#include <zephyr/sys/util_macro.h>
+
+struct alp_shmem_region {
+    const char *name;       /* matches alp_shmem_open's cfg->name */
+    void       *base;
+    size_t      size;
+};
+
+/* Build a const lookup table from DT_ALIAS(alp_shmemN).  IF_ENABLED
+ * skips the entry when the alias isn't defined.  Up to 4 regions
+ * supported -- raise the upper bound here if a SoM needs more. */
+#define ALP_SHMEM_REGION_ENTRY_IF(idx)                                 \
+    IF_ENABLED(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_shmem, idx))),       \
+               ({ .name = "alp_shmem" #idx,                            \
+                  .base = (void *)DT_REG_ADDR(                          \
+                              DT_ALIAS(_CONCAT(alp_shmem, idx))),       \
+                  .size = (size_t)DT_REG_SIZE(                          \
+                              DT_ALIAS(_CONCAT(alp_shmem, idx))),       \
+               },))
+
+static const struct alp_shmem_region alp_shmem_regions[] = {
+    ALP_SHMEM_REGION_ENTRY_IF(0)
+    ALP_SHMEM_REGION_ENTRY_IF(1)
+    ALP_SHMEM_REGION_ENTRY_IF(2)
+    ALP_SHMEM_REGION_ENTRY_IF(3)
+};
+#define ALP_SHMEM_REGION_COUNT \
+    (sizeof(alp_shmem_regions) / sizeof(alp_shmem_regions[0]))
+
+#endif /* CONFIG_ALP_SDK_MPROC */
+
 alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg)
 {
     alp_z_clear_last_error();
@@ -173,13 +207,26 @@ alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg)
         return NULL;
     }
 #if defined(CONFIG_ALP_SDK_MPROC)
-    /* DT-anchored shared regions land in v0.3.x once the M55-HE
-     * peer firmware build pipeline is in place.  The wrapper shape
-     * stands; the runtime mapping returns NOSUPPORT until the
-     * memory-region nodes appear in the EVK overlay. */
-    (void)cfg;
-    alp_z_set_last_error(ALP_ERR_NOSUPPORT);
-    return NULL;
+    /* Resolve cfg->name against the DT-alias lookup table. */
+    const struct alp_shmem_region *region = NULL;
+    for (size_t i = 0; i < ALP_SHMEM_REGION_COUNT; ++i) {
+        if (strcmp(alp_shmem_regions[i].name, cfg->name) == 0) {
+            region = &alp_shmem_regions[i];
+            break;
+        }
+    }
+    if (region == NULL) {
+        alp_z_set_last_error(ALP_ERR_NOT_READY);
+        return NULL;
+    }
+    struct alp_shmem *s = shmem_pool_acquire();
+    if (s == NULL) {
+        alp_z_set_last_error(ALP_ERR_NOMEM);
+        return NULL;
+    }
+    s->base = region->base;
+    s->size = region->size;
+    return s;
 #else
     alp_z_set_last_error(ALP_ERR_NOSUPPORT);
     return NULL;

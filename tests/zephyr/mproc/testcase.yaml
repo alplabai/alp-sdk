@@ -29,3 +29,20 @@ tests:
       - alp-sdk
       - mproc
       - nanopb
+
+  # 2026-05-17: real-backend exercise for shmem + hwsem -- pulls in
+  # the native_sim DT overlay declaring alp-shmem0/1 + flips
+  # CONFIG_ALP_SDK_MPROC=y so the wrapper takes the DT-alias-lookup
+  # path (shmem) + the k_sem fallback (hwsem) instead of the
+  # NOSUPPORT shortcircuit.
+  alp_sdk.mproc.shmem_hwsem:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_shmem_hwsem.conf"
+    tags:
+      - alp-sdk
+      - mproc

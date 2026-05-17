@@ -9,6 +9,7 @@
 
 #include <string.h>
 
+#include <zephyr/devicetree.h>
 #include <zephyr/ztest.h>
 
 #include "alp/peripheral.h"
@@ -200,3 +201,71 @@ ZTEST(alp_mproc, test_frame_decode_null_frame_invalid)
     zassert_is_null(payload_out, "payload_out must be NULLed on failure");
     zassert_equal(payload_len, 0u, "payload_len must be zeroed on failure");
 }
+
+/* ------------------------------------------------------------------ */
+/* Real backend (CONFIG_ALP_SDK_MPROC=y + DT overlay supplying        */
+/* alp-shmem0..1 + the k_sem-backed hwsem fallback).                  */
+/* ------------------------------------------------------------------ */
+#if defined(CONFIG_ALP_SDK_MPROC) && DT_HAS_ALIAS(alp_shmem0)
+
+ZTEST(alp_mproc, test_shmem_open_resolves_name)
+{
+    alp_shmem_config_t cfg = {.name = "alp_shmem0", .size = 0, .cacheable = false};
+    alp_shmem_t       *s   = alp_shmem_open(&cfg);
+    zassert_not_null(s, "open should resolve alp_shmem0 alias");
+
+    void  *base = NULL;
+    size_t size = 0;
+    zassert_equal(alp_shmem_view(s, &base, &size), ALP_OK);
+    zassert_equal((uintptr_t)base, (uintptr_t)DT_REG_ADDR(DT_ALIAS(alp_shmem0)),
+                  "base must match DT reg-address");
+    zassert_equal(size, DT_REG_SIZE(DT_ALIAS(alp_shmem0)),
+                  "size must match DT reg-size");
+
+    alp_shmem_close(s);
+}
+
+ZTEST(alp_mproc, test_shmem_open_unknown_name_returns_null)
+{
+    alp_shmem_config_t cfg = {.name = "nope_not_a_region",
+                              .size = 0, .cacheable = false};
+    zassert_is_null(alp_shmem_open(&cfg));
+    zassert_equal(alp_last_error(), ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_mproc, test_shmem_open_two_regions)
+{
+    alp_shmem_config_t cfg0 = {.name = "alp_shmem0", .size = 0};
+    alp_shmem_config_t cfg1 = {.name = "alp_shmem1", .size = 0};
+    alp_shmem_t       *s0   = alp_shmem_open(&cfg0);
+    alp_shmem_t       *s1   = alp_shmem_open(&cfg1);
+    zassert_not_null(s0);
+    zassert_not_null(s1);
+    zassert_not_equal((void *)s0, (void *)s1, "distinct handles for distinct regions");
+
+    void  *base0 = NULL, *base1 = NULL;
+    size_t size0 = 0,    size1 = 0;
+    zassert_equal(alp_shmem_view(s0, &base0, &size0), ALP_OK);
+    zassert_equal(alp_shmem_view(s1, &base1, &size1), ALP_OK);
+    zassert_not_equal((uintptr_t)base0, (uintptr_t)base1);
+
+    alp_shmem_close(s0);
+    alp_shmem_close(s1);
+}
+
+ZTEST(alp_mproc, test_shmem_open_exhausts_pool)
+{
+    /* CONFIG_ALP_SDK_MAX_SHMEM_HANDLES = 2 by default; open both then
+     * verify a third open with the same name fails with NOMEM. */
+    alp_shmem_config_t cfg = {.name = "alp_shmem0", .size = 0};
+    alp_shmem_t *a = alp_shmem_open(&cfg);
+    alp_shmem_t *b = alp_shmem_open(&cfg);
+    zassert_not_null(a);
+    zassert_not_null(b);
+    zassert_is_null(alp_shmem_open(&cfg));
+    zassert_equal(alp_last_error(), ALP_ERR_NOMEM);
+    alp_shmem_close(a);
+    alp_shmem_close(b);
+}
+
+#endif /* CONFIG_ALP_SDK_MPROC && DT_HAS_ALIAS(alp_shmem0) */

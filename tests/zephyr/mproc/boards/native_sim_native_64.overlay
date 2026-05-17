@@ -1,0 +1,30 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * DT overlay for the alp_sdk.mproc.shmem_hwsem ZTEST scenario.
+ * Declares two alp-shmem aliases backed by mmio-sram nodes with
+ * arbitrary "addresses" -- native_sim never dereferences them; the
+ * tests only verify the wrapper reports the DT-anchored base+size
+ * verbatim.  Real-silicon boards define the same aliases against
+ * actual reserved-memory carve-outs (orchestrator-allocated).
+ */
+
+/ {
+    alp_shmem0_node: shmem@70000000 {
+        compatible = "mmio-sram";
+        reg = <0x70000000 0x1000>;
+        status = "okay";
+    };
+
+    alp_shmem1_node: shmem@70001000 {
+        compatible = "mmio-sram";
+        reg = <0x70001000 0x800>;
+        status = "okay";
+    };
+
+    aliases {
+        alp-shmem0 = &alp_shmem0_node;
+        alp-shmem1 = &alp_shmem1_node;
+    };
+};
