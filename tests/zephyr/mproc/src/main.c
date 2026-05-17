@@ -280,9 +280,10 @@ ZTEST(alp_mproc, test_hwsem_lock_unlock_cycle)
     zassert_not_null(sem);
 
     zassert_equal(alp_hwsem_try_lock(sem), ALP_OK);
-    /* Holding -- a second try_lock from the SAME handle re-locks
-     * (k_sem is counting; the fallback's contract is sticky locks
-     * across distinct handles to the same id, see below). */
+    /* Holding -- the k_sem behind id 0 is now count=0.  A second
+     * try_lock from this same handle would return ALP_ERR_BUSY
+     * (binary-mutex semantics, limit=1).  We don't exercise that
+     * here; the distinct-handles-same-id test covers contention. */
 
     zassert_equal(alp_hwsem_unlock(sem), ALP_OK);
     alp_hwsem_close(sem);

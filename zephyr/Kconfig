@@ -747,6 +747,17 @@ config ALP_SDK_MAX_HWSEM_HANDLES
 	int "Maximum concurrent alp_hwsem_t handles"
 	default 4
 
+config ALP_SDK_MPROC_HWSEM_COUNT
+	int "Number of k_sem slots backing alp_hwsem_open (intra-core fallback)"
+	default 16
+	depends on ALP_SDK_MPROC
+	help
+	  Pool size for the k_sem-backed intra-core hwsem fallback in the
+	  Zephyr mproc backend.  Each alp_hwsem_open(id) maps id -> one of
+	  these k_sems (count=1, mutex semantics).  Bump if a SoM needs
+	  more than 16 hwsem IDs intra-core.  Has no effect on real-HWSEM
+	  paths (AEN HWSEM block, ST HSEM, etc.) which are per-SoC.
+
 config ALP_SDK_MAX_HASH_HANDLES
 	int "Maximum concurrent alp_hash_t handles"
 	default 4
