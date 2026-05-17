@@ -78,7 +78,7 @@ flag/opcode extensions that v1 reserved.
 | MCUboot vendor-image signing + initial-programming tooling | **cc3501e-firmware** |
 | TI BL1/BL2 chain, OTP root-of-trust                     | **cc3501e-firmware** (governs build artefacts) |
 
-> **Net for alp-sdk:** the host driver never #includes TI SimpleLink
+> **Net for alp-sdk:** the host driver never `#includes` TI SimpleLink
 > headers, never references CC3501E peripheral registers by name, and
 > never assumes anything about M33-side memory layout. It only sees the
 > 4-byte protocol header + payload.
