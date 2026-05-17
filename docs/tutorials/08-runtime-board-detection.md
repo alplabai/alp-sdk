@@ -19,7 +19,7 @@ the underlying data flow.
 2. **BOARD_ID ADC.**  Each board revision has a resistor divider
    tied to an ADC channel; the firmware reads the divider voltage
    + cross-references against the family's
-   `hw-revisions.yaml::board_id_mv` table.  Authoritative for the
+   `board_id_mv` table in `hw-revisions.yaml`.  Authoritative for the
    hardware revision -- catches "someone relabelled the SoM
    sticker but the resistor says otherwise."
 

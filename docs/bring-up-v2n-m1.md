@@ -136,5 +136,5 @@ After every change in the bring-up flow, re-run these in order:
 
 * [`vendors/deepx-dxm1/README.md`](../vendors/deepx-dxm1/README.md) --
   upstream cross-link + Yocto integration.
-* [`metadata/e1m_modules/v2n-m1/README.md`](../metadata/e1m_modules/v2n-m1/README.md) --
+* `metadata/e1m_modules/v2n-m1/README.md` --
   authoritative V2N-M1 pinout delta.

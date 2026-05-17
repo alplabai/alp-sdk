@@ -35,10 +35,10 @@ under `metadata/e1m_modules/E1M-V2N101.yaml`, regenerates
 `alp.conf` with the V2N-specific Kconfig flags, and `west build`
 drives the rest.
 
-## Retarget Ring-2 -- read the chip families[]
+## Retarget Ring-2 -- read the chip families list
 
 If your example uses `<alp/chips/rv3028c7.h>`, the chip's
-`metadata/chips/rv3028c7.yaml::families` list tells you which SoMs
+`families:` list in `metadata/chips/rv3028c7.yaml` tells you which SoMs
 work:
 
 ```yaml

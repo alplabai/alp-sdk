@@ -131,8 +131,8 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   the **PI3WVR626XEBEX** 2:1 MIPI CSI mux.  Camera rails
   `+1V2_CAM`, `+2V6_CAM` are feedback-resistor-tunable.
 
-  The mux's `SEL` pin is driven by **`CAM_MUX.SEL`**, which the
-  EVK schematic ties to **E1M `IO2` (`W2`, Alif `P12.5`)**.  Per
+  The mux's `SEL` pin is driven by `CAM_MUX.SEL`, which the
+  EVK schematic ties to E1M `IO2` (`W2`, Alif `P12.5`).  Per
   the PI3WVR626 truth table:
 
       SEL = 0  -> input A (`A_MIPI_CSI_*`) routes to the SoM

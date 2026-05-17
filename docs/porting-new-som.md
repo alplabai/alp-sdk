@@ -24,7 +24,7 @@ it exists.
    `metadata/socs/<vendor>/<family>/<part>.json` and give each
    on-die programmable core a normalized `id` per the §3.3
    nomenclature in
-   [`docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`](superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md)
+   `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`
    (cluster cores collapse into one key, e.g. `a55_cluster`;
    M-class cores stay separate, e.g. `m33_sm`, `m55_hp`, `m55_he`).
    The `id` must match the regex `^[a-z][a-z0-9_]+$` and be unique

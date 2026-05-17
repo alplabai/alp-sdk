@@ -115,7 +115,7 @@ waveform/frame validation.  Same approach as #3.
 
 Not breaking these out yet -- spot-check first that they
 follow the established `ZTEST_SUITE` pattern; if so, count is
-visible via `grep -c '^ZTEST' tests/zephyr/<area>/src/main.c`.
+visible via `grep -c '^ZTEST' tests/zephyr/$AREA/src/main.c`.
 
 ## What this audit does **not** cover
 

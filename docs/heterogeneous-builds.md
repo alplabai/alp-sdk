@@ -472,7 +472,7 @@ The orchestrator writes `build/` next to the project's `board.yaml`.
 ## 11. Next steps
 
 - **Full design rationale:** the spec at
-  [`docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`](superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md)
+  `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`
   covers the metadata layer, the loader rules, and the boot-order
   semantics in depth.
 - **ADR:** [`docs/adr/0010-heterogeneous-os-orchestration.md`](adr/0010-heterogeneous-os-orchestration.md)

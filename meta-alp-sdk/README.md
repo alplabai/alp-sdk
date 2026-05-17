@@ -297,5 +297,5 @@ upstream releases.  v0.7 V2N HiL is the verification gate.
   — Software overview + getting-started + how-to-build.
 - [`vendors/deepx-dxm1/README.md`](../vendors/deepx-dxm1/README.md)
   — DEEPX DX-M1 integration notes (covers V2M101 / V2M102).
-- [`docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`](../docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md)
+- `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`
   — the orchestrator spec this layer is wired to.

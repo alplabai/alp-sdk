@@ -1,3 +1,5 @@
+@page chips_impl_index Chip driver implementations
+
 # chips/ — chip driver implementations
 
 One subdirectory per supported part.  Each chip driver is a thin C

@@ -51,7 +51,7 @@ Drive every heterogeneous SoM from a single per-core mapping in
 | **CI** | PR-level: bitbake every A-cluster MACHINE, Zephyr-build every M-class slice, Renode dual-OS smoke test.  Twister stays as the Zephyr-only fast lane because the iteration loop on a single slice should not pay the orchestrator's overhead. |
 | **Defaults** | Heterogeneous-by-default: every on-die programmable core in the SoM preset declares a sensible default OS + app.  A bare `som: { sku: E1M-V2N101 }` produces both A55=Yocto and M33-SM=Zephyr; opt-out is explicit (`os: off`). |
 
-Full design at [`docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`](../superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md).
+Full design at `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`.
 
 ## Consequences
 
@@ -155,7 +155,7 @@ hwsem by hand.  Rejected because:
 
 ## References
 
-- [`docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`](../superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md)
+- `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`
   — the full design spec this ADR ratifies.
 - [`docs/heterogeneous-builds.md`](../heterogeneous-builds.md) —
   app-developer-facing walkthrough for writing a dual-app project.

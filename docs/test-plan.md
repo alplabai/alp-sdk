@@ -165,7 +165,7 @@ been green on `main` for at least two consecutive PRs.
 | `pr-generated-files.yml` (`soc_caps.h` + ABI snapshot drift) | `pr-generated-files.yml` | ✅ verified |
 | `pr-metadata-validate.yml` (`board.yaml` schema + loader smoke) | `pr-metadata-validate.yml` | ✅ verified |
 | `pr-doxygen.yml` zero-warnings | `pr-doxygen.yml` | ✅ verified |
-| VS Code extension build (split repo) | [`alplabai/alp-sdk-vscode::ci`](https://github.com/alplabai/alp-sdk-vscode/actions/workflows/ci.yml) | ✅ verified |
+| VS Code extension build (split repo) | [`alplabai/alp-sdk-vscode` &mdash; ci workflow](https://github.com/alplabai/alp-sdk-vscode/actions/workflows/ci.yml) | ✅ verified |
 | `coverity.yml` weekly scan | `coverity.yml` | ✅ verified |
 
 ---

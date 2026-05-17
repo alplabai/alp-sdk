@@ -184,7 +184,7 @@ v0.6 lands heterogeneous OS orchestration — see ADR 0010 + [`docs/heterogeneou
 *Deferred indefinitely past v1.0:* Ubuntu backend (`cores.<id>.os: ubuntu`), NXP NX9101 silicon enablement, FreeRTOS / ThreadX / NuttX backends.
 
 - Roadmap: [`VERSIONS.md`](VERSIONS.md).
-- What changed when: [`CHANGELOG.md`](CHANGELOG.md).
+- What changed when: `CHANGELOG.md` (in the repo root).
 - Per-(library × OS × SoM) status: [`docs/os-support-matrix.md`](docs/os-support-matrix.md).
 - Architecture decisions: [`docs/adr/`](docs/adr/).
 
