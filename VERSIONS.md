@@ -636,6 +636,38 @@ target — porting across all four SoMs is additive.
 - Python bindings on Linux backend — for Yocto-side scripting + telemetry tools (small).
 - Lua scripting integration — lightweight on-device scripting common in IoT (medium).
 
+**Chip driver expansion** (extends the ~80 drivers already in `chips/` — see `chips/README.md` for the current matrix.  Items below are gap-fills for common customer asks; sizing is per-chip, ~small unless noted):
+
+- **Motor / actuation:** Trinamic TMC5160 (stepper w/ stealthChop), TMC4671 (FOC servo), TMC6300 (BLDC), TI DRV8870 (brushed H-bridge), DRV10987 (BLDC sensorless), Toshiba TB6612FNG (dual brushed).
+- **PMICs / battery management:** TI TPS65xxx multi-rail family, BQ25895 (Li-ion charger), MAX17048 / MAX17260 (fuel gauge), TI BQ27441 (fuel gauge), LTC4081 (linear charger), TPS62840 (low-quiescent buck for always-on).
+- **AI / NPU accelerators** (alongside existing DEEPX DX-M1 + Hailo-8L): Coral Edge TPU (USB + PCIe variants), Kneron KL730, Maxim MAX78002 (AI MCU, on-device training), BrainChip Akida AKD1000 (event-based), Innatera Pulsar SNN, Synaptics Katana.
+- **Cellular / LPWA modems** (alongside existing Quectel BG77/BG95 + u-blox SARA-R5): Quectel BG770A-GL (Cat NB2), EG915N (Cat 1), Telit ME310G1, Sierra Wireless HL7800, u-blox SARA-R422S, Nordic nRF9160 (M33 + LTE-M/NB-IoT SiP — pairs with custom firmware).
+- **Wireless co-processors** (alongside existing Murata LBEE5HY2FY): ESP32-C3 / ESP32-S3 (WiFi + BLE coprocessor over UART/SPI), Nordic nRF7002 (WiFi 6 companion IC), Silicon Labs EFR32MG24 (Matter / Thread / 802.15.4 SoC), Microchip ATWILC3000.
+- **UWB ranging** (new category): Qorvo (Decawave) DW3000 / DW3110, NXP Trimension SR040 / SR150 — popular for keyless entry + indoor localisation.
+- **Camera sensors** (alongside existing IMX219/477, AR0234, OV264x/56x0/9281, GC2145): Sony IMX415 (4K), IMX585 (low-light HDR), IMX296 (global shutter), OnSemi AR0521, OmniVision OS04A10 / OS05A20, Hynix Hi-846.
+- **Camera SerDes / multiplexers** (alongside existing Maxim MAX9295/96, TI DS90UB953/954): TI DS90UB960 (8-channel hub), Maxim MAX96706/707, MAX96717F (newer GMSL2), TI FPD-Link DS90UB949 (deserializer).
+- **Audio codecs / amps / DSPs** (alongside existing ES8388, TLV320AIC3204, TAS2563, WM8960): Cirrus CS43L21 (codec), CS47L96 (codec + DSP), TI TPA3116 / TPA3138 (Class-D amp), AKM AK4493 (high-res DAC), Knowles IA8201 (audio DSP), Espressif ES7210 (4-mic array codec for beamforming), Realtek ALC5640.
+- **IMU / motion (industrial + safety)** (alongside existing LSM6DSO, BMI323, ICM42670, LIS2DW12): Bosch BMI088 (ASIL-B for drones / robotics), BMI270 (ultra-low-power wearables), TDK ICM-20948 (9-axis with built-in DMP), ADI ADIS16505 (tactical-grade, RS-422), ST LSM6DSV16X (newer LSM6 with sensor-fusion engine), Memsic MC3635.
+- **Environmental sensors** (alongside existing BME280, BMP390/581, LPS22HB, TMP112, TSL2591, VEML7700): Sensirion SHT45 / SHT41 (high-accuracy T+H), SGP41 (VOC + NOx index), SCD41 (CO2 + T+H photoacoustic), SEN55 (PM + VOC + NOx + T+H combo), Bosch BME688 (gas + AI nose), Plantower PMS5003 (laser PM2.5), AMS ENS160 (air quality), Honeywell HPMA115S0 (PM).
+- **ToF / LiDAR** (alongside existing VL53L1X, VL53L5CX): ST VL53L7CX (8x8 multi-zone), VL53L8CX (newer 8x8), AMS TMF8820 / TMF8828 (multi-target time-of-flight), Garmin LIDAR-Lite v3HP (single-beam medium-range).
+- **Power monitoring** (alongside existing INA236): TI INA228 (precision 20-bit), INA260 (integrated shunt), INA3221 (3-channel), Allegro ACS758 / ACS37800 (hall-effect, high-current), Maxim MAX17262 (fuel gauge with charge-cycle counter), LTC2945 (high-side power).
+- **Touch / haptics:** FocalTech FT5x06 / FT6336 (cap touch — paired with display drivers), Goodix GT911 / GT9147 (cap touch), TI DRV2605L / DRV2624 (haptic drivers — popular ask for handhelds), AT42QT2160 (16-channel cap touch for buttons).
+- **Display extras** (alongside existing ILI9341/9488, ST7789, SH1106, SSD1306/1331, GDEW0154T8, IL3820, RA8875): Sitronix ST7796S (newer ST family), Himax HX8347 / HX8357 (popular Arduino-shield TFTs), Solomon SSD1351 (color OLED), Pervasive E-Paper (1.54" / 2.13" / 2.9" / 4.2"), Sharp Memory LCD, FocalTech FT6206 (touch overlay).
+- **Secure elements (additional)** (alongside existing ATECC608B, OPTIGA Trust M): NXP A1006 / SE051 (auth IC + Java Card), ST STSAFE-A110, Infineon SLI97 / SLE97, Microchip ATECC608C (newer revision with provisioning improvements).
+- **Storage flash / NAND:** Macronix MX25 SPI NOR family, Winbond W25Q xSPI NOR, Adesto AT25 family, Cypress S25FL, Micron MT25Q xSPI NOR + MT29F SLC NAND, Greenliant GLS27Q SLC NAND (industrial-grade), Kioxia TC58 series.
+- **EEPROM extras** (alongside existing 24C128): Microchip 25LC256 / 25LC512 (SPI), 24C256 / 24C512 (larger I²C), ST M95M02 (2 Mbit SPI EEPROM).
+- **RTCs (precision)** (alongside existing RV-3028-C7): Maxim DS3231SN (±2 ppm), Microcrystal RV-8803-C7 (Time-CC), Epson RX8025T (±3.5 ppm), ST M41T82 (battery-backed).
+- **Magnetometers / compass** (alongside existing QMC5883L): TDK MMC5983MA (high-resolution 18-bit), ST LIS2MDL, Bosch BMM150, AKM AK09918.
+- **Light / proximity / colour:** Vishay VEML6030 / VEML6075 (UVA/UVB), Avago APDS-9960 (gesture + proximity + RGB), AMS TMD3725 (RGB + IR), Liteon LTR-303 / LTR-559.
+- **Magnetic encoders / hall** (alongside existing AS5048A/B, MT6701): AMS AS5600 / AS5601 (12-bit magnetic encoder, popular), Infineon TLE5012B (GMR-based, automotive), Allegro A1335 / A1339, Honeywell SS495A.
+- **USB-PD / power-delivery:** TI TPS65987 / TPS65988 (full PD3.0 controller), Cypress CYPD3175 / CYPD7271, TI TUSB320 (CC-logic only), Microchip UPD350 (low-cost PD).
+- **Ethernet PHYs** (alongside existing RTL8211FDI): Microchip LAN8740A / LAN8742A (popular RMII), LAN8770 (10BASE-T1S single-pair Ethernet for industrial), TI DP83825 / DP83826 / DP83869 (RGMII), Realtek RTL8201F.
+- **CAN / RS-485 transceivers:** TI SN65HVD230 (CAN), NXP TJA1042 (CAN), TJA1145 (CAN w/ partial-networking), TI THVD1500 / THVD1551 (RS-485), Maxim MAX13441E, Linear LTC2862 (high-voltage RS-485).
+- **IO-Link transceivers** (gates the IO-Link master/device stack in the protocols backlog): Maxim MAX14820 / MAX14821 (master), TI TIOL111 / TIOL112 (device).
+- **Precision ADC / DAC** (deeper than the on-chip ADCs `<alp/adc.h>` covers): TI ADS1115 / ADS1119 (delta-sigma 16-bit), ADS131M02 / ADS131M04 (industrial 24-bit), ADS1219 (4-channel low-power), DAC53202 / DAC60002, MCP4728 (quad I²C DAC), Microchip MCP3xxx family.
+- **Precision temperature** (alongside existing TMP112, MAX31855 / MAX31865 for thermocouples / RTDs): TI TMP117 (±0.1 °C — popular for medical), Maxim MAX31875 (ultra-low-power), Sensirion STS40 (single-package T sensor matching SHT4x family), Microchip MCP9808 (±0.25 °C, popular).
+- **Differential pressure / flow** (new category — HVAC + medical asks): Sensirion SDP610 / SDP800 family (DP), Sensirion SLF3S liquid-flow, Honeywell ABP series, TE 4525DO.
+
 ### Tier 3 — deferred indefinitely past v1.0
 
 (No version commitment — revisit when customer pull + ecosystem state make it worthwhile.)
