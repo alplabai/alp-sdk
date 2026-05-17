@@ -255,6 +255,12 @@ ZTEST(alp_mproc, test_shmem_open_two_regions)
 
 ZTEST(alp_mproc, test_shmem_open_exhausts_pool)
 {
+    /* This test specifically exercises the NOMEM path on the 3rd open.
+     * If the pool grows, open the right number to exhaust it instead.
+     */
+    BUILD_ASSERT(CONFIG_ALP_SDK_MAX_SHMEM_HANDLES == 2,
+                 "test assumes default pool of 2; revisit if Kconfig default changes");
+
     /* CONFIG_ALP_SDK_MAX_SHMEM_HANDLES = 2 by default; open both then
      * verify a third open with the same name fails with NOMEM. */
     alp_shmem_config_t cfg = {.name = "alp_shmem0", .size = 0};

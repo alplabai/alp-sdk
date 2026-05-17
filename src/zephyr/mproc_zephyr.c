@@ -41,7 +41,9 @@
 
 #if defined(CONFIG_ALP_SDK_MPROC)
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/drivers/mbox.h>
+#include <zephyr/sys/util_macro.h>
 #endif
 
 #if defined(CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING)
@@ -166,9 +168,6 @@ static alp_status_t errno_to_alp(int err)
 /* ================================================================== */
 
 #if defined(CONFIG_ALP_SDK_MPROC)
-
-#include <zephyr/devicetree.h>
-#include <zephyr/sys/util_macro.h>
 
 struct alp_shmem_region {
     const char *name;       /* matches alp_shmem_open's cfg->name */
