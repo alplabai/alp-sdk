@@ -458,6 +458,20 @@ deliberate — earlier per-version commitments turned into churn (Ubuntu
 was on v0.8 for an afternoon before being deferred past v1.0), and
 the team works better with a backlog + cadence than with hard slots.
 
+The backlog is grouped into three tiers by how it relates to the v1.0
+cut criteria:
+
+- **Tier 1 — v1.0 must-have:** verification, mproc/power/ABI, OTA,
+  customer onboarding.  Everything here gates the v1.0.0 tag.
+- **Tier 2 — post-v1.0 expansion:** comprehensive items that boost
+  each vertical (connectivity, security, ML ecosystem, industrial
+  protocols, drone helpers, HMI, storage, cloud, DX, language
+  bindings).  Cherry-picked into v1.x point releases as ready.
+- **Tier 3 — deferred indefinitely:** items with no current customer
+  pull or with non-trivial lifts; revisit when conditions change.
+
+### Tier 1 — v1.0 must-have
+
 **Verification (the longest pole — most other items gate on this):**
 
 - AEN family silicon-verified via self-hosted lab HiL (AEN701 + AEN301/401 EVKs wired; 12 portable peripheral smokes + per-AEN specs flip ⏳→✅).
@@ -489,16 +503,149 @@ the team works better with a backlog + cadence than with hard slots.
 - Pilot-evaluation kit under `tools/pilot-kit/` with one-command setup.
 - Customer onboarding ≤30-day dry-run passes (internal engineer plays customer end-to-end).
 
-**v1.0.0 cut criteria** (next phase after the backlog above clears):
+**v1.0.0 cut criteria** (next phase after Tier 1 clears):
 
 - After first customer pilot deployment completes + testimonial.
 - v1.0 detailed section continues below.
 
-**Deferred indefinitely past v1.0** (no version commitment — revisit when customer pull + ecosystem state make it worthwhile):
+### Tier 2 — post-v1.0 expansion
+
+Cherry-picked into v1.x point releases as items land.  Grouped by what
+they unlock; items are sized roughly small (≤2 engineer-weeks) /
+medium (2-8 weeks) / large (8+ weeks).  Sizing assumes one SoM
+target — porting across all four SoMs is additive.
+
+**Connectivity & protocols** (boosts IoT + industrial verticals):
+
+- BLE 5.3 stack hardening + `<alp/ble.h>` GATT server/client deepening (medium).
+- BLE mesh (Bluetooth SIG mesh model) — popular in smart-lighting + industrial deployments (medium).
+- WiFi 6/6E provisioning UX (captive-portal helper + WPS + first-boot setup) (medium).
+- Matter protocol support (Smart-home staple in 2026 — Matter 1.3+ via OpenThread or WiFi commissioner) (large).
+- Thread / OpenThread 802.15.4 stack on AEN (large; pairs with Matter).
+- LoRaWAN backend (Semtech SX126x driver + LoRaMAC-node integration) (medium).
+- Cellular IoT — NB-IoT / LTE-M via Quectel BG95/BG96 or u-blox SARA modem AT-interface helper (medium).
+- MQTT-SN + CoAP secondary protocols (small each; share `<alp/iot.h>` surface).
+- WireGuard VPN client on Yocto image (small).
+- IPv6 dual-stack + SLAAC + DHCPv6 hardening (small).
+- Time-sync helpers — PTP (IEEE 1588), NTP, SNTP (small each).
+- Cloud-agent pre-bakes — AWS IoT Device SDK, Azure IoT Hub SDK, GCP IoT Core agent (medium each).
+
+**Security depth** (table-stakes for industrial + medical customers):
+
+- TF-M (Trusted Firmware-M) integration for AEN M55 — secure partition for keys + attestation (large).
+- PSA Crypto API full coverage across `<alp/security.h>` (medium).
+- Secure element driver matrix — Microchip ATECC608A, NXP SE050, Infineon OPTIGA Trust M (small per chip; share `<alp/security.h>` surface).
+- Secure provisioning workflow — factory key injection helper + per-device identity + first-boot key rotation (medium).
+- TLS 1.3 + DTLS 1.3 mandatory in `<alp/iot.h>` (small — wire mbedtls 3.6+).
+- Certificate enrollment — ACME (Let's Encrypt) client + EST (RFC 7030) (medium).
+- Encrypted filesystem option (`fscrypt` on Yocto, custom on Zephyr LittleFS) (medium).
+- Hardware-attested remote attestation (PSA initial attestation + cloud verifier reference) (medium).
+- MPU enforcement + stack canaries + control-flow integrity (small; tune `CONFIG_*` defaults).
+- Coverity static analysis 100% clean (currently partial; medium ongoing).
+- Anti-rollback counter enforcement in the OTA path (small; extends signed-artefact).
+- Encrypted OTA payload option (small; extends signed-artefact).
+
+**ML / AI ecosystem** (the SDK's headline differentiator):
+
+- TensorFlow Lite Micro full integration + per-NPU optimizer hooks (Vela for Ethos-U, DRP-AI converter, DEEPX DX-COM compiler) (medium).
+- ONNX runtime backend — cross-NPU portability so customer models trained in PyTorch run anywhere (large).
+- LiteRT (TFLite rebrand) tracking — keep current as Google ships (small ongoing).
+- Model zoo — pre-quantized vision (YOLO-NAS / DETR / EfficientNet) + audio (KWS / VAD / Wake-Word) + anomaly (autoencoder family) per NPU (medium per family).
+- One-command quantize-and-deploy CLI — `alp model deploy model.onnx --target aen701` does the full chain (medium).
+- Per-layer inference profiling — host-side viewer for latency + memory per op (medium).
+- Encrypted model weights on flash — IP-protection-grade key wrap (small; extends `<alp/storage.h>::alp_storage_configure_inline_aes`).
+- Continuous model OTA (separate channel from firmware OTA — push model updates without rebuilding firmware) (medium).
+- Federated learning client — on-device fine-tuning + secure aggregation (large; post-v1.0).
+- Vision reference apps: YOLO-NAS object detection, DETR open-set, SAM-2 segmentation (small each on top of existing dispatcher).
+- Audio reference apps: keyword spotting, voice activity detection, wake-word, on-device ASR (small each).
+- Anomaly detection helpers — autoencoder + one-class SVM + isolation-forest patterns (medium).
+
+**Industrial vertical depth** (factory floor + utilities):
+
+- Modbus RTU + Modbus TCP — most common industrial fieldbus (medium).
+- CAN FD + CANopen profile + J1939 (truck/heavy-equipment) (medium).
+- EtherCAT slave stack — high-cycle-rate motor control (large; requires IP licensing decision).
+- PROFINET / PROFIsafe (large; same).
+- IO-Link master + device profiles (medium; common in factory automation sensors).
+- OPC UA client + server (medium; standard for SCADA integration).
+- BACnet client + server (medium; building automation).
+- TSN (Time-Sensitive Networking) deterministic Ethernet (medium; needs NIC support).
+- Functional safety prep — IEC 61508 SIL2 hooks + ASIL-B trace doc (large; certification work).
+
+**Drone / autonomous vertical depth** (the autonomous reference):
+
+- MAVLink integration helpers — message-pack/unpack + heartbeat + parameter protocol (small).
+- PX4 / ArduPilot bridge code — co-host the FC stack on V2N M33 + payload AI on V2N A55 (medium).
+- Geo-fencing + return-to-launch helpers (small).
+- Optical flow + obstacle avoidance reference app — uses V2N DRP-AI for vision pipeline (medium).
+- RTK GNSS module bring-up (u-blox ZED-F9P + NTRIP client) (small).
+- mmWave radar processing (TI IWR / Infineon BGT) (medium).
+- LiDAR / time-of-flight integration (Ouster / Velodyne UDP parsing) (medium).
+
+**HMI / display** (table-stakes for any device with a screen):
+
+- LVGL 9.x deeper integration — theming + complex widgets + memory tuning (medium).
+- TouchGFX — popular in ST ecosystem; many customers migrating (medium).
+- EmWin (Segger) — legacy installed base (small if customer asks).
+- Framebuffer driver standardization across AEN + V2N + V2M DSI / MIPI (medium).
+- HDMI output on V2N (V2N has HDMI; SDK should expose easily) (small).
+- Touch input — capacitive + resistive controllers (small per chip).
+- E-ink display support (EPD common in low-power signage) (small).
+- Haptics — DRV2605 + similar (small).
+
+**Storage & data** (everything that's not the model):
+
+- LittleFS hardening — wear-leveling tuning + powerloss recovery testing (small; mostly verification).
+- FAT/exFAT for USB mass storage + SD card removable media (small).
+- Time-series sensor data store — local ring buffer with TTL + InfluxDB line-protocol sync (medium).
+- S3-compatible object storage sync — for image / video / blob upload from edge to cloud (medium).
+
+**Cloud / edge orchestration** (the Yocto-side opportunity):
+
+- WASM workload deployment runtime — push WebAssembly workloads to A-cluster (large).
+- Kubernetes edge agent (k3s) for Yocto images — popular pattern for IoT fleets at scale (medium).
+- AWS Greengrass v2 runtime integration on Yocto (medium).
+- Azure IoT Edge runtime integration on Yocto (medium).
+- Container runtime on Yocto — Podman or containerd, for ship-app-as-container deployments (medium).
+- Edge inference fleet management API — list / load / unload / version models across N devices (medium).
+- OpenTelemetry traces + metrics exporter — DevOps culture is moving edge-side (medium).
+- Prometheus exporter on Yocto for monitoring (small).
+- Crash dump collection + field log aggregation (Loki / Elastic compatible) (medium).
+- Feature-flag service for staged rollouts (small).
+
+**Developer experience & tooling** (every minute saved here compounds):
+
+- Doxygen 100% coverage on public headers (medium ongoing).
+- Tutorial per library — covers every `<alp/*.h>` (medium).
+- Video walkthroughs — 1 per vertical, screen-recorded bring-up to working demo (medium).
+- Web-based device dashboard — local-only first, cloud-optional later (medium).
+- VS Code IntelliSense full integration — header parsing + completion + go-to-def across all `<alp/*.h>` (small).
+- Eclipse + CLion plugins (medium each; depends on customer ask).
+- Docker dev container + GitHub Codespaces template (small).
+- One-command device provisioning UI — `alp provision` wizard for first-time setup (medium).
+- Renode emulation for CI on every SoM — supplements HiL with model-based testing (medium per SoM).
+- Trace viewer (perfetto / chrome://tracing format) for runtime profiling (medium).
+- Memory analyzer — heap + stack high-water marks across runs (small).
+- Power profiler — per-API energy budget + sleep state introspection (medium; pairs with `<alp/power.h>`).
+- Sample-apps repo (separate from alp-sdk) — community-contributed projects with CI matrix (medium ongoing).
+
+**Language bindings** (lowers adoption friction):
+
+- C++ RAII-friendly handle wrappers — same surface, scoped destruction (small).
+- Rust bindings — growing demand in embedded; `alp-rs` crate with `embedded-hal` shims (medium).
+- Python bindings on Linux backend — for Yocto-side scripting + telemetry tools (small).
+- Lua scripting integration — lightweight on-device scripting common in IoT (medium).
+
+### Tier 3 — deferred indefinitely past v1.0
+
+(No version commitment — revisit when customer pull + ecosystem state make it worthwhile.)
 
 - Ubuntu backend (`cores.<id>.os: ubuntu`) — non-trivial lift (RZ/V2N mainline-kernel coverage is the long pole, plus apt packaging + image flow + per-distro PPA infra).
-- NXP NX9101 silicon enablement — pairs naturally with Ubuntu if/when both pick up.
-- FreeRTOS / Azure RTOS / NuttX backends.
+- NXP NX9101 silicon enablement — pairs naturally with Ubuntu if/when both pick up (i.MX 93 has the better Ubuntu mainline-kernel story).
+- FreeRTOS / Azure RTOS / NuttX backends — H2-2026 has zero OS expansion; later cycles only if customer asks.
+- Apple HomeKit Accessory Protocol (HAP) — Matter supersedes for most consumer use cases; deferred unless a customer specifically asks.
+- Zigbee 3.0 stack — Matter/Thread coverage probably enough; revisit if industrial customer asks.
+- Sub-GHz proprietary radios (sigfox, mioty) — niche; only if customer asks.
 
 ---
 
