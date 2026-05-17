@@ -75,7 +75,8 @@ jobs:
           DOT_GRAPH_MAX_NODES    = 200
           JAVADOC_AUTOBRIEF      = YES
           USE_MDFILE_AS_MAINPAGE = README.md
-          INPUT                 += README.md
+          INPUT                 += README.md CHANGELOG.md VERSIONS.md docs chips/README.md
+          EXCLUDE_PATTERNS       = */superpowers/*
           EOF
           fi
 
