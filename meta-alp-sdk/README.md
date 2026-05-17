@@ -167,17 +167,25 @@ MACHINE = "e1m-nx9101-a55"
 bitbake alp-image-edge
 ```
 
-## Per-machine inference backend
+## Per-machine inference runtime install
 
-| MACHINE              | Default backend | Why                                                 |
-|----------------------|-----------------|-----------------------------------------------------|
-| `e1m-v2n101-a55`     | `drpai`         | DRP-AI3 on-chip; no external NPU.                   |
-| `e1m-v2n102-a55`     | `drpai`         | Same as V2N101 (variant).                           |
-| `e1m-v2m101-a55`     | `deepx`         | DEEPX DX-M1 outperforms DRP-AI for most models.     |
-| `e1m-v2m102-a55`     | `deepx`         | Same as V2M101 (variant).                           |
-| `e1m-nx9101-a55`     | `ethosu`        | Ethos-U65 micro-NPU shared with the M33 RT-core.    |
+The SDK's `<alp/inference.h>` compiles in every dispatcher the SoM
+preset's `capabilities:` block declares (silicon-determined), so
+each machine pulls the matching userspace runtime via the
+`alp-sdk` recipe's `DEPENDS:append:<machine>` lines.
 
-Override via `ALP_INFERENCE_DEFAULT_BACKEND` in `local.conf`.
+| MACHINE              | Runtime installed                       | Source                                     |
+|----------------------|------------------------------------------|--------------------------------------------|
+| `e1m-v2n101-a55`     | `drpai-driver`                           | Renesas RZ/V2N on-chip DRP-AI3             |
+| `e1m-v2n102-a55`     | `drpai-driver`                           | Same as V2N101 (memory variant)            |
+| `e1m-v2m101-a55`     | `drpai-driver` + `dxm1-runtime`          | V2N silicon + DEEPX DX-M1 NPU on-module    |
+| `e1m-v2m102-a55`     | `drpai-driver` + `dxm1-runtime`          | Same as V2M101 (memory variant)            |
+| `e1m-nx9101-a55`     | `ethosu-driver-library`                  | NXP i.MX 93 on-die Ethos-U65               |
+
+Customer apps pick the active backend per-handle at runtime via
+`alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or
+an explicit `ETHOS_U / DRPAI / DEEPX_DX` value for benchmarking).
+There is NO build-time pin -- silicon is the source of truth.
 
 ### DRP-AI userspace headers
 

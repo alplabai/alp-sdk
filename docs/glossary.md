@@ -20,8 +20,10 @@ silicon (E3..E8).  See [`docs/soms/aen.md`](soms/aen.md).
 allocator places against the active SoM.
 
 **board.yaml** -- The single declarative file at the root of every
-application.  Lists `som.sku`, `carrier.name`, `os`, `peripherals`,
-`chips`, etc.  Validated by `scripts/validate_board_yaml.py`.
+application.  Lists `som.sku`, `carrier.name`, the per-core
+`cores.<id>` block (`os`, `app`, `peripherals`, `libraries`,
+`iot`, `inference`), top-level `chips`, cross-core `ipc`
+carve-outs, etc.  Validated by `scripts/validate_board_yaml.py`.
 
 **BRD_I2C** -- Board-management I²C bus on V2N + V2N-M1.  Hosts
 the PMICs, RTC, OPTIGA, supervisor MCU slave interface.
@@ -248,8 +250,13 @@ that pre-flights `board.yaml` validation before delegating to
 both support it.
 
 **Yocto** -- Embedded Linux build system.  Selected via
-`os: yocto` in `board.yaml`; v0.4 deliverable per the test plan.
+`cores.<id>.os: yocto` in `board.yaml` (typically the A-cluster
+core); on supported SoMs the SoM topology default already supplies
+`yocto` so customers usually omit the field.  v0.4 deliverable per
+the test plan.
 
 **Zephyr** -- The RTOS the SDK targets as a first-class backend
-(`os: zephyr`).  Pinned to v4.4.0 per
+(`cores.<id>.os: zephyr`, typically on M-class cores; the SoM
+topology supplies `zephyr` by default so customers usually omit
+the field).  Pinned to v4.4.0 per
 [`docs/zephyr-version-policy.md`](zephyr-version-policy.md).

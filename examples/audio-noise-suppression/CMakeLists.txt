@@ -12,7 +12,9 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 #   - libraries.tflite_micro     -> CONFIG_ALP_TFLM_REF_KERNELS=y
 #   - libraries.cmsis_dsp        -> CONFIG_CMSIS_DSP=y
 #   - carrier.populated.tas2563  -> CONFIG_ALP_SDK_CHIP_TAS2563=y
-#   - inference.backend: auto    -> CONFIG_ALP_SDK_INFERENCE_TFLM=y
+# Inference dispatchers compile in from the SoM preset's
+# `capabilities:` block; the app picks per-handle at runtime via
+# `alp_inference_open(.backend = ...)`.
 # The audio loop is mic-in (TAS2563 over I2S) -> <alp/dsp.h>
 # preprocess (FFT bin -> noise-floor estimate) -> <alp/inference.h>
 # denoiser -> speaker-out (TAS2563 over the same I2S link).

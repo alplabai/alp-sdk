@@ -32,22 +32,22 @@ EXTRA_OECMAKE = "-DALP_SDK_BUILD_SHARED=ON      \
                  -DALP_SDK_BUILD_EXAMPLES=OFF   \
                  -DALP_OS=yocto"
 
-# Per-machine inference backend selection drives optional deps.
-# alp-inference auto-detects at runtime, but if the build pins a
-# default the matching runtime must be installed.  These overrides
-# fire on the historical (un-suffixed) MACHINEOVERRIDES strings;
-# the -a55 cluster MACHINEs prepend those onto MACHINEOVERRIDES.
+# Per-machine optional runtime deps -- the SDK's <alp/inference.h>
+# compiles in every dispatcher the SoM's `capabilities:` block
+# declares, so the runtime libraries the dispatchers wrap must be
+# installed on the target.  These overrides fire on the historical
+# (un-suffixed) MACHINEOVERRIDES strings; the -a55 cluster MACHINEs
+# prepend those onto MACHINEOVERRIDES.
+#
+# There is NO build-time backend pinning -- the customer cannot
+# select a single dispatcher at build time (silicon is the source
+# of truth).  Apps pick per-handle at runtime via
+# alp_inference_open(.backend = ...).
 DEPENDS:append:e1m-v2n101 = " drpai-driver"
 DEPENDS:append:e1m-v2n102 = " drpai-driver"
 DEPENDS:append:e1m-v2m101 = " drpai-driver dxm1-runtime"
 DEPENDS:append:e1m-v2m102 = " drpai-driver dxm1-runtime"
 DEPENDS:append:e1m-nx9101 = " ethosu-driver-library"
-
-EXTRA_OECMAKE:append:e1m-v2n101 = " -DALP_INFERENCE_BACKEND=drpai"
-EXTRA_OECMAKE:append:e1m-v2n102 = " -DALP_INFERENCE_BACKEND=drpai"
-EXTRA_OECMAKE:append:e1m-v2m101 = " -DALP_INFERENCE_BACKEND=deepx"
-EXTRA_OECMAKE:append:e1m-v2m102 = " -DALP_INFERENCE_BACKEND=deepx"
-EXTRA_OECMAKE:append:e1m-nx9101 = " -DALP_INFERENCE_BACKEND=ethosu"
 
 FILES:${PN}     += "${libdir}/libalp_sdk.so.*"
 FILES:${PN}-dev += "${libdir}/libalp_sdk.so    \

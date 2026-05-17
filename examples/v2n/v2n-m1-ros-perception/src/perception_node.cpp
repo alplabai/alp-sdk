@@ -48,10 +48,13 @@
 //   - V2M101 / V2M102 (V2N + DEEPX) ->
 //       alp_inference_open(backend=AUTO) -> ALP_INFERENCE_BACKEND_DEEPX_DX
 //
-// The board.yaml's `inference: backend: deepx_dx` line ALSO emits
-// CONFIG_ALP_SDK_INFERENCE_DEEPX=y in the alp.conf the Yocto recipe
-// embeds.  On V2N101 builds (no DEEPX silicon), the dispatcher
-// returns NOSUPPORT for DEEPX and AUTO falls through to DRP-AI.
+// The SoM preset's `capabilities:` block drives which dispatchers
+// the build compiles in: V2M101 ships both `drp_ai: true` and
+// `deepx_dx: true`, so CONFIG_ALP_SDK_INFERENCE_DRPAI=y and
+// CONFIG_ALP_SDK_INFERENCE_DEEPX=y both fire.  On V2N101 (no DEEPX
+// silicon, `deepx_dx: false`), the DEEPX dispatcher isn't compiled
+// in; AUTO falls through to DRP-AI.  Customer board.yaml does NOT
+// pin a backend -- silicon is the source of truth.
 
 #include <chrono>
 #include <memory>

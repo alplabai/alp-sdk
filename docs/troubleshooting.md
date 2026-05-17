@@ -31,9 +31,12 @@ The validator caught a `board.yaml` problem.  The error message
 names the JSON-pointer location (e.g. `peripherals/2` for the
 third entry).  Common slip-ups:
 
-* `peripherals:` entries must be lowercase strings from the allowed
-  set (`i2c`, `spi`, `pwm`, `adc`, `uart`, `i2s`, `can`, `rtc`, `wdt`,
-  `counter`).
+* `cores.<id>.peripherals:` entries must be lowercase strings from
+  the allowed set (`adc`, `can`, `counter`, `emmc`, `ethernet`,
+  `flash`, `gpio`, `i2c`, `i2s`, `pwm`, `rtc`, `sensor`, `spi`,
+  `uart`, `usb`, `watchdog`).  Note: under v2 `peripherals:` lives
+  per-core under `cores.<id>:`, not at top level; and `watchdog`
+  (not `wdt`) is the canonical name.
 * `som.sku` follows `E1M-{AEN,V2N,V2M,NX9}\d{3}` (case-sensitive).
 * `carrier.name` must point at a preset under
   `metadata/carriers/<name>/board.yaml` OR carry an inline

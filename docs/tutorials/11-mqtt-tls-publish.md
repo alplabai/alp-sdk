@@ -216,7 +216,8 @@ keepalive-timeout).
 The same `<alp/iot.h>` API on AEN-Zephyr; the differences are
 config-level only:
 
-- `os: zephyr` in `board.yaml`.
+- `cores.<m-core>.os: zephyr` in `board.yaml` (usually omitted --
+  the SoM topology default already supplies `zephyr` for M-cores).
 - TLS CA bundle embedded into the firmware via Zephyr's
   `CONFIG_MQTT_LIB_TLS_INCLUDE_CERTIFICATE_NICKNAMES` flow,
   not loaded from `/etc/`.
