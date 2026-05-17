@@ -143,6 +143,13 @@ typedef struct {
  * @param[in] cfg  Configuration.  Must be non-NULL with a non-empty name.
  * @return Open handle on success, or NULL if the region isn't declared
  *         in the build's DT or isn't reachable from this core.
+ *
+ * @note The region pool is built at compile time from the DT aliases
+ *       @c alp-shmem0 .. @c alp-shmemN; @p cfg->name must match the
+ *       alias-derived label (e.g. @c "alp_shmem0").  Aliases that
+ *       aren't defined for the active board simply don't contribute
+ *       entries.  On lookup miss the call returns NULL with
+ *       @c alp_last_error() == @c ALP_ERR_NOT_READY.
  */
 alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg);
 
@@ -238,6 +245,14 @@ typedef struct alp_hwsem alp_hwsem_t;
  *
  * @param[in] hwsem_id  SoC-specific hardware-semaphore index.
  * @return Open handle on success, or NULL if the index is out of range.
+ *
+ * @note The Zephyr backend's intra-core fallback caps @p hwsem_id at
+ *       @c CONFIG_ALP_SDK_MPROC_HWSEM_COUNT (default 16); passing an
+ *       id at or above the cap returns NULL with
+ *       @c alp_last_error() == @c ALP_ERR_OUT_OF_RANGE.  Raise the
+ *       Kconfig knob if a SoM needs more.  The fallback serialises
+ *       within a single Zephyr image only -- a real per-SoC HWSEM
+ *       block (cross-core) is wired up in a follow-on track.
  */
 alp_hwsem_t *alp_hwsem_open(uint32_t hwsem_id);
 
@@ -255,18 +270,39 @@ alp_status_t alp_hwsem_try_lock(alp_hwsem_t *sem);
  * @brief Block until the hwsem is owned, or @p timeout_ms elapses.
  *
  * @param[in] sem         Semaphore handle.
- * @param[in] timeout_ms  Max wait.  Use UINT32_MAX for unbounded.
+ * @param[in] timeout_ms  Max wait in milliseconds.  The sentinel value
+ *                        @c UINT32_MAX means "wait indefinitely"
+ *                        (maps to Zephyr's @c K_FOREVER on the
+ *                        Zephyr backend); a value of @c 0 returns
+ *                        immediately if the semaphore isn't free.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
  */
 alp_status_t alp_hwsem_lock(alp_hwsem_t *sem, uint32_t timeout_ms);
 
-/** @brief Release ownership.  Must be called by the same core that locked. */
+/**
+ * @brief Release ownership.  Must be called by the same core that locked.
+ *
+ * @param[in] sem  Semaphore handle previously locked by this core.
+ * @return ALP_OK on successful release;
+ *         ALP_ERR_NOT_READY if @p sem is NULL or no longer in use
+ *         (e.g. already closed);
+ *         ALP_ERR_INVAL if @p sem is a valid handle but the caller
+ *         isn't currently holding the lock (catches double-unlock
+ *         and unlock-without-lock bugs).
+ */
 alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem);
 
 /**
- * @brief Release the handle.  Doesn't release the lock — call unlock first.
+ * @brief Release the handle back to the pool.
  *
  * @param[in] sem  Handle from @ref alp_hwsem_open, or NULL.
+ *
+ * @note If @p sem is still holding the lock at close time the
+ *       backend defensively gives the kobj back, so a leaked-lock
+ *       close doesn't permanently strand the underlying hwsem id.
+ *       Callers should still pair every successful lock with an
+ *       explicit @ref alp_hwsem_unlock; the defensive release is a
+ *       safety net, not a substitute.
  */
 void         alp_hwsem_close(alp_hwsem_t *sem);
 
