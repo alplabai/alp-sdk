@@ -69,7 +69,7 @@ jobs:
           GENERATE_HTML          = YES
           GENERATE_LATEX         = NO
           QUIET                  = NO
-          WARN_AS_ERROR          = YES
+          WARN_AS_ERROR          = FAIL_ON_WARNINGS
           WARN_LOGFILE           = doxygen-warnings.log
           OPTIMIZE_OUTPUT_FOR_C  = YES
           DOT_GRAPH_MAX_NODES    = 200
@@ -83,6 +83,7 @@ jobs:
         run: doxygen Doxyfile
 
       - name: Summarise warnings
+        if: always()
         run: |
           if [ -s doxygen-warnings.log ]; then
             echo "::group::Doxygen warnings"
