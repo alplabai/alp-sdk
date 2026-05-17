@@ -40,7 +40,7 @@ hw_revisions:
     board_id:
       adc_channel:    TBD
       # Resistor values + expected_mv + bin_radius_mv live in
-      # the private e1m-som-metadata repo (see E1M-EVK board.yaml
+      # the private alp-sdk-internal repo (see E1M-EVK board.yaml
       # for the same split rationale).
 
 status:

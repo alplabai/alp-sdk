@@ -103,7 +103,7 @@ hw_revisions:
     board_id:
       adc_channel:    TBD
       # Divider resistor values + per-rev `expected_mv` + `bin_radius_mv`
-      # thresholds live in the private `e1m-som-metadata` repo per
+      # thresholds live in the private `alp-sdk-internal` repo per
       # the public/private split policy.  hw_info_zephyr.c's ADC
       # cross-check consumes them via a generated header (see
       # docs/board-id.md for the divider math + the studio pipeline).
