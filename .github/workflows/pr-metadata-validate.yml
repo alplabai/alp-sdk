@@ -61,7 +61,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Python deps
-        run: pip install jsonschema pyyaml
+        run: pip install jsonschema pyyaml pytest
 
       - name: Validate every SoC file against the v1 schema
         run: python3 scripts/validate_metadata.py

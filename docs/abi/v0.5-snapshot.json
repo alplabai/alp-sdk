@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-15",
+  "generated": "2026-05-17",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -5904,8 +5904,8 @@
       "macros": {},
       "typedefs": {
         "alp_core_id_t": {
-          "definition": "typedef enum { ALP_CORE_SELF = 0, ALP_CORE_M55_HP = 1, ALP_CORE_M55_HE = 2, ALP_CORE_A32_0 = 3, ALP_CORE_A32_1 = 4 } alp_core_id_t;",
-          "hash": "71c1c3ef46bf4221"
+          "definition": "typedef enum { ALP_CORE_SELF = 0, ALP_CORE_M55_HP = 1, ALP_CORE_M55_HE = 2, ALP_CORE_A32_0 = 3, ALP_CORE_A32_1 = 4, ALP_CORE_A32_CLUSTER = 5, ALP_CORE_M33_SM = 6, ALP_CORE_A55_CLUSTER = 7, ALP_CORE_M33 = 8 } alp_core_id_t;",
+          "hash": "134b1f44f4947092"
         },
         "alp_hwsem_t": {
           "definition": "typedef struct alp_hwsem alp_hwsem_t;",
