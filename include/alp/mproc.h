@@ -7,8 +7,11 @@
  * @file mproc.h
  * @brief ALP SDK multi-processor IPC primitives.
  *
- * v0.3 deliverable.  v0.1 ships only the public surface; every entry
- * point returns ALP_ERR_NOSUPPORT.
+ * v0.3 deliverable; v0.7 wires the Zephyr backend.  As of v0.7 the
+ * Zephyr backend implements all three primitives (mailbox, shared
+ * memory, hardware semaphore).  The Yocto + GD32 backends still
+ * return ALP_ERR_NOSUPPORT for every entry point and are tracked
+ * separately.
  *
  * @par Layering
  * This header is the LOW-LEVEL primitive layer.  Use it when the app
@@ -40,14 +43,19 @@
  * that.
  *
  * @par Implementation status
- *   - `alp_mbox_*` -- functional on AEN-Zephyr (DT-anchored MBOX
- *     devices via the `alp-mboxN` aliases).
- *   - `alp_shmem_*` -- v0.3.x.  Surface in place; runtime returns
- *     ALP_ERR_NOSUPPORT until the DT memory-region nodes land in the
- *     EVK overlay.
- *   - `alp_hwsem_*` -- v0.3.x.  Surface in place; lock/unlock falls
- *     through to ALP_ERR_NOSUPPORT until the per-SoC HWSEM register
- *     map is wired up.
+ *   - `alp_mbox_*` -- Zephyr backend functional since v0.4 (DT-anchored
+ *     MBOX devices via the `alp-mboxN` aliases, with optional nanopb
+ *     framing).  Yocto backend is a shim only; GD32 backend is
+ *     NOSUPPORT.
+ *   - `alp_shmem_*` -- Zephyr backend functional since v0.7 via the
+ *     DT aliases `alp-shmem0..N` (commit 2e9deec).  Yocto + GD32
+ *     backends still return ALP_ERR_NOSUPPORT.
+ *   - `alp_hwsem_*` -- Zephyr backend functional since v0.7 with an
+ *     intra-core `k_sem` fallback (commit 877fa29);
+ *     `CONFIG_ALP_SDK_MPROC_HWSEM_COUNT` controls the pool size
+ *     (default 16).  Real per-SoC HWSEM blocks (AEN HWSEM, ST HSEM,
+ *     etc.) are wired up under Track 1 HiL bring-up.  Yocto + GD32
+ *     backends still return ALP_ERR_NOSUPPORT.
  *
  * @par ABI status: [ABI-STABLE]
  *      v0.3 mailbox + shmem + hwsem.  The @ref alp_core_id_t enum is
@@ -249,10 +257,10 @@ typedef struct alp_hwsem alp_hwsem_t;
  * @note The Zephyr backend's intra-core fallback caps @p hwsem_id at
  *       @c CONFIG_ALP_SDK_MPROC_HWSEM_COUNT (default 16); passing an
  *       id at or above the cap returns NULL with
- *       @c alp_last_error() == @c ALP_ERR_OUT_OF_RANGE.  Raise the
- *       Kconfig knob if a SoM needs more.  The fallback serialises
- *       within a single Zephyr image only -- a real per-SoC HWSEM
- *       block (cross-core) is wired up in a follow-on track.
+ *       @c alp_last_error() == @c ALP_ERR_OUT_OF_RANGE.  The fallback
+ *       serialises within a single Zephyr image only -- a real
+ *       per-SoC HWSEM block (cross-core) is wired up in a follow-on
+ *       track.
  */
 alp_hwsem_t *alp_hwsem_open(uint32_t hwsem_id);
 
