@@ -39,7 +39,7 @@
  *     FFT is rejected -- it has no defined audible meaning in the
  *     filtered-samples path.
  *   - Per-stage param ranges (n_taps / n_sections / n_points) are
- *     bounded -- see the @ref ALP_DSP_MAX_* macros.
+ *     bounded -- see the @c ALP_DSP_MAX_* macros.
  *
  * Typical usage (filter-terminated):
  * @code
@@ -165,9 +165,9 @@ typedef struct {
 } alp_dsp_fir_params_t;
 
 /** Cascaded biquad IIR parameters (one per @ref ALP_DSP_STAGE_IIR).
- *  Each biquad section is `y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2]
- *                                - a1*y[n-1] - a2*y[n-2]`.  Coefficient
- *  order on the wire and in memory: `b0, b1, b2, a1, a2` per section. */
+ *  Each biquad section computes
+ *  @c y[n]=b0*x[n]+b1*x[n-1]+b2*x[n-2]-a1*y[n-1]-a2*y[n-2].  Coefficient
+ *  order on the wire and in memory: @c b0,b1,b2,a1,a2 per section. */
 typedef struct {
     alp_dsp_coeff_format_t coeff_format; /**< F32 or Q31.            */
     uint16_t               n_sections;   /**< 1..@ref ALP_DSP_MAX_IIR_SECTIONS. */
@@ -228,7 +228,7 @@ typedef struct alp_dsp_chain alp_dsp_chain_t;
  *           terminal, WINDOW not preceding FFT, etc).
  *         - @ref ALP_ERR_OUT_OF_RANGE on per-stage bound violation
  *           (@c n_taps / @c n_sections / @c n_points outside the
- *           @ref ALP_DSP_MAX_* / @ref ALP_DSP_MIN_FFT_POINTS limits,
+ *           @c ALP_DSP_MAX_* / @ref ALP_DSP_MIN_FFT_POINTS limits,
  *           or @c n_points not a power-of-two).
  *         - @ref ALP_ERR_NOMEM when the static chain pool is
  *           exhausted (compile-time pool size).
@@ -271,9 +271,9 @@ alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
  * window output and emits bins per the configured @c output_format.
  *
  * Output element count:
- *   - @ref ALP_DSP_FFT_OUTPUT_COMPLEX:    2 * @c n_points
+ *   - @ref ALP_DSP_FFT_OUTPUT_COMPLEX -- 2 * @c n_points
  *     (interleaved re/im pairs).
- *   - @ref ALP_DSP_FFT_OUTPUT_MAGNITUDE:  @c n_points
+ *   - @ref ALP_DSP_FFT_OUTPUT_MAGNITUDE -- @c n_points
  *     (per-bin magnitudes).
  *
  * @param[in]  chain     Handle from @ref alp_dsp_chain_open.

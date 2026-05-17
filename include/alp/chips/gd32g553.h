@@ -342,6 +342,7 @@ alp_status_t gd32g553_get_version(gd32g553_t *ctx, gd32g553_version_t *out);
 
 /** @brief Read the bridge firmware's truncated SHA-1 build-id.
  *
+ *  @param ctx       GD32G553 bridge context (must be initialised first).
  *  @param build_id  Destination buffer for the NUL-terminated ASCII
  *                   hex string of length up to @ref GD32G553_BUILD_ID_LEN.
  *                   Buffer size MUST be at least
@@ -356,6 +357,7 @@ alp_status_t gd32g553_get_reset_reason(gd32g553_t *ctx,
 
 /** @brief Read a masked subset of the GD32's pad levels.
  *
+ *  @param ctx     GD32G553 bridge context (must be initialised first).
  *  @param mask    Logical GD32 pad indices the caller cares about.
  *                 Mapping is documented in firmware/gd32-bridge/README.md;
  *                 the host MUST NOT assume bit `n` is `Pxn`.
@@ -381,6 +383,7 @@ alp_status_t gd32g553_pwm_get(gd32g553_t *ctx, uint8_t channel,
 
 /** @brief Read @p samples ADC measurements from @p channel.
  *
+ *  @param ctx      GD32G553 bridge context (must be initialised first).
  *  @param channel  Firmware-defined logical ADC channel index.
  *  @param samples  Number of consecutive measurements
  *                  (1..@ref GD32G553_BRIDGE_ADC_MAX_SAMPLES).  Values
@@ -403,7 +406,8 @@ alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status);
  *  (12-bit on the GD32's built-in DAC); the host can read back via
  *  @ref gd32g553_dac_get to see what actually got programmed.
  *
- *  @param channel   DAC channel (0..@ref GD32G553_BRIDGE_DAC_CHANNELS-1).
+ *  @param ctx       GD32G553 bridge context (must be initialised first).
+ *  @param channel   DAC channel (0..@c GD32G553_BRIDGE_DAC_CHANNELS - 1).
  *  @param value_mv  Requested output in mV.  Saturates to the DAC's
  *                   reference rail on the firmware side.
  *
@@ -419,7 +423,8 @@ alp_status_t gd32g553_dac_get(gd32g553_t *ctx, uint8_t channel,
 
 /** @brief Read the signed accumulated count of a quadrature encoder.
  *
- *  @param encoder      Encoder index (0..@ref GD32G553_BRIDGE_QENC_CHANNELS-1).
+ *  @param ctx          GD32G553 bridge context (must be initialised first).
+ *  @param encoder      Encoder index (0..@c GD32G553_BRIDGE_QENC_CHANNELS - 1).
  *  @param position_out Signed count since the last reset / boot.
  *                      Wraps modulo 2^32 on overflow.
  */
@@ -437,7 +442,8 @@ alp_status_t gd32g553_qenc_reset(gd32g553_t *ctx, uint8_t encoder);
  *  minor revision will add `CMD_COUNTER_GET_FREQ` so the host can
  *  convert ticks ↔ microseconds without that out-of-band knowledge.
  *
- *  @param counter   Counter index (0..@ref GD32G553_BRIDGE_COUNTER_CHANNELS-1).
+ *  @param ctx       GD32G553 bridge context (must be initialised first).
+ *  @param counter   Counter index (0..@c GD32G553_BRIDGE_COUNTER_CHANNELS - 1).
  *  @param ticks_out Current tick value.
  */
 alp_status_t gd32g553_counter_read(gd32g553_t *ctx, uint8_t counter,
@@ -468,6 +474,7 @@ typedef enum {
  *  to the closest achievable tick count, and @ref gd32g553_pwm_get
  *  returns the rounded actual.
  *
+ *  @param ctx             GD32G553 bridge context (must be initialised first).
  *  @param channel         PWM channel (0..7 per the E1M spec).
  *  @param align_mode      One of @ref gd32g553_pwm_align_t.
  *  @param dead_time_ns    Programmable dead-time for complementary
@@ -488,6 +495,7 @@ alp_status_t gd32g553_pwm_configure(gd32g553_t *ctx, uint8_t channel,
  *  the configured oversampling + sample-and-hold cycles + resolution
  *  on its next call.
  *
+ *  @param ctx                GD32G553 bridge context (must be initialised first).
  *  @param channel            ADC channel (0..7 per the E1M spec).
  *  @param oversample_ratio   1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256.
  *                            Firmware rounds down to the nearest
@@ -519,6 +527,7 @@ alp_status_t gd32g553_adc_configure(gd32g553_t *ctx, uint8_t channel,
  *  simultaneously across the two streams.  Calling BEGIN on a
  *  stream_id that's already active returns @ref ALP_ERR_BUSY.
  *
+ *  @param ctx            GD32G553 bridge context (must be initialised first).
  *  @param stream_id      Stream slot (0 .. @ref GD32G553_BRIDGE_ADC_STREAM_COUNT - 1).
  *  @param channel        ADC channel (0..7).
  *  @param sample_rate_hz Target rate.  Firmware caps at the SoC's
@@ -533,6 +542,7 @@ alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx, uint8_t stream_id,
 /** Drain up to @p max_samples samples from the named stream's ring.
  *  Caller buffer must be at least @p max_samples entries.
  *
+ *  @param[in]  ctx          GD32G553 bridge context (must be initialised first).
  *  @param[in]  stream_id    Stream slot (must match a previous BEGIN).
  *  @param[in]  max_samples  Caller's drain limit.  Firmware caps at
  *                           @ref GD32G553_BRIDGE_ADC_STREAM_READ_MAX.
@@ -557,6 +567,7 @@ alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id);
 /** Pull true-random bytes from the GD32G5's NIST SP800-90B
  *  pre-certified TRNG.
  *
+ *  @param[in]  ctx   GD32G553 bridge context (must be initialised first).
  *  @param[out] dest  Caller buffer.  Length >= @p len.
  *  @param[in]  len   Bytes requested (1 .. @ref GD32G553_BRIDGE_TRNG_MAX_BYTES).
  *
@@ -746,7 +757,7 @@ alp_status_t gd32g553_timer_sync(gd32g553_t *ctx, uint8_t master, uint8_t slave,
  * @param[in] ctx            Initialised driver context.
  * @param[in] mode           Sleep mode: 0 = run (no-op),
  *                           1 = sleep, 2 = deep-sleep, 3 = standby.
- * @param[in] wake_bitmap    @ref ALP_POWER_WAKE_* bitmap.
+ * @param[in] wake_bitmap    Bitmap of @c ALP_POWER_WAKE_* macros.
  * @param[in] wake_after_ms  Max wall-clock wait, or 0 for "no timer".
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
@@ -934,6 +945,9 @@ alp_status_t gd32g553_ota_begin(gd32g553_t *ctx,
  * firmware re-writes the destination region without an erase.  Chunks
  * arriving out of order are also safe because the offset is absolute.
  *
+ * @param ctx             GD32G553 bridge context (must be initialised first).
+ * @param offset          Absolute byte offset of this chunk within the
+ *                        OTA payload (0-based).
  * @param data            Chunk bytes.
  * @param data_len        Chunk byte count.  Must be > 0 and
  *                        <= the `chunk_max_bytes` returned by BEGIN.
@@ -949,6 +963,7 @@ alp_status_t gd32g553_ota_write_chunk(gd32g553_t *ctx,
  * @brief Ask the bridge to re-compute the CRC32 over the staging
  *        slot and compare against the value passed to BEGIN.
  *
+ * @param ctx             GD32G553 bridge context (must be initialised first).
  * @param verified        Out: true iff the recomputed CRC32 matched.
  * @param computed_crc32  Out: the CRC32 the bridge actually saw.
  */
@@ -984,6 +999,7 @@ alp_status_t gd32g553_ota_rollback(gd32g553_t *ctx);
  * Answers concretely today even on scaffold firmware: the firmware
  * handler reads its own in-RAM session struct + the metadata page.
  *
+ * @param ctx  GD32G553 bridge context (must be initialised first).
  * @param out  Populated on @ref ALP_OK.  May not be NULL.
  */
 alp_status_t gd32g553_ota_get_state(gd32g553_t *ctx,

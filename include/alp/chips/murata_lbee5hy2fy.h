@@ -45,8 +45,7 @@
  * |               |         |         | pass NULL to the init helper.         |
  *
  * Because the two `REG_ON` lines live on the GD32 supervisor MCU
- * (the V2N module's companion -- see
- * [`docs/gd32-bridge-protocol.md`](../docs/gd32-bridge-protocol.md))
+ * (the V2N module's companion -- see [the GD32 bridge protocol](../docs/gd32-bridge-protocol.md))
  * and the host cannot reach them through `alp_gpio_t`, the driver
  * takes **caller-supplied set/get callbacks** for those lines.
  * Carriers point the callbacks at `gd32g553_gpio_write` (V2N) or at

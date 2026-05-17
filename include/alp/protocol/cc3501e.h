@@ -294,7 +294,7 @@ typedef enum {
  *  effect on the next idle-detection cycle (firmware-defined; ~ms).
  *  Field-level meanings:
  *   - policy: one of @ref alp_cc3501e_pp_preset_t.
- *   - wake_events: bitmap of @ref ALP_CC3501E_WAKE_* values.
+ *   - wake_events: bitmap of @c ALP_CC3501E_WAKE_* values.
  *   - idle_ms_before_sleep: minimum idle time before entering the
  *     chosen policy's sleep mode.  0 = use firmware default for
  *     the policy. */

@@ -155,7 +155,7 @@ alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns);
  * @param[in] align_mode    One of @ref alp_pwm_align_t.
  * @param[in] dead_time_ns  Dead-time for complementary outputs (ns).
  *                          0 = no dead time.
- * @param[in] break_cfg     Bitmap of @ref ALP_PWM_BREAK_* flags.
+ * @param[in] break_cfg     Bitmap of @c ALP_PWM_BREAK_* flags.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL (bad align
  *         enum) / ALP_ERR_NOSUPPORT (backend can't honour) /
  *         ALP_ERR_OUT_OF_RANGE (dead_time_ns exceeds the timer's

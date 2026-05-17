@@ -96,16 +96,18 @@ typedef struct {
  *        calibration register for the rail's shunt resistance and
  *        expected maximum current.
  *
- * @param[in] addr_7bit       7-bit I2C address (0x40..0x47).  Use 0
+ * @param[out] ctx            Driver context (output; populated on success).
+ * @param[in]  bus            Open I2C bus handle the chip sits on.
+ * @param[in]  addr_7bit      7-bit I2C address (0x40..0x47).  Use 0
  *                            to fall back to 0x40 (INA236A default).
- * @param[in] shunt_ohms      Shunt resistance in Ohms, e.g.
+ * @param[in]  shunt_ohms     Shunt resistance in Ohms, e.g.
  *                            0.010 for a 10 mOhm sense resistor.
  *                            Must be > 0.
- * @param[in] max_current_a   Maximum expected rail current in
+ * @param[in]  max_current_a  Maximum expected rail current in
  *                            Amps.  Used to compute CURRENT_LSB =
  *                            max_current / 32768.  Set generously
  *                            (10x typical) to avoid clipping.
- * @param[in] adcrange        ADC full-scale range; pick
+ * @param[in]  adcrange       ADC full-scale range; pick
  *                            INA236_ADCRANGE_20MV when the rail's
  *                            current rarely exceeds 25 % of max
  *                            (better resolution).

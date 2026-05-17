@@ -73,6 +73,7 @@ typedef struct {
  * driver retains the pointer and writes into it via
  * @ref ssd1331_draw_pixel.
  *
+ * @param dev    SSD1331 driver context (output; populated on success).
  * @param spi    Open SPI bus configured for the panel (MODE_0 typical,
  *               up to 6.25 MHz per the datasheet).
  * @param dc     GPIO open & configured as output for the D/C# line.
@@ -104,7 +105,10 @@ void         ssd1331_clear(ssd1331_t *dev);
  * Out-of-range coordinates are silently ignored (standard graphics-lib
  * contract — keeps callers from having to clip every primitive).
  *
- * @param colour RGB565 pixel value.  See @ref ssd1331_rgb565.
+ * @param dev    SSD1331 driver context (must be initialised first).
+ * @param x      Column coordinate, 0..@ref SSD1331_WIDTH - 1.
+ * @param y      Row coordinate, 0..@ref SSD1331_HEIGHT - 1.
+ * @param colour RGB565 pixel value.  See the ssd1331_rgb565 helper.
  */
 void         ssd1331_draw_pixel(ssd1331_t *dev,
                                 uint16_t x, uint16_t y,

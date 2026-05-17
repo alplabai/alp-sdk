@@ -145,6 +145,7 @@ typedef void (*rv3028c7_src_handler_t)(rv3028c7_t *ctx, rv3028c7_src_t src, void
 
 /** @brief Register (or replace) the handler for a specific event source.
  *
+ *  @param ctx        RV-3028-C7 driver context (must be initialised first).
  *  @param src        Event source.
  *  @param handler    Callback.  Pass NULL to unregister.
  *  @param user       Cookie passed through to the callback. */
@@ -159,6 +160,7 @@ alp_status_t rv3028c7_register_handler(rv3028c7_t *ctx, rv3028c7_src_t src,
  * asserts.  Returns the raw `STATUS` byte read (post-dispatch) for
  * diagnostic logging; the actual clear-write happens internally.
  *
+ * @param ctx          RV-3028-C7 driver context (must be initialised first).
  * @param status_seen  Output: the latched STATUS value before the
  *                     clear.  May be NULL if the caller doesn't care.
  * @return ALP_OK on a clean dispatch + clear cycle, ALP_ERR_IO on

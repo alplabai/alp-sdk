@@ -172,6 +172,8 @@ alp_status_t act8760_init(act8760_t *ctx, alp_i2c_t *bus);
  *        populate a different CMI variant -- 0x27/0x28, 0x67/0x68,
  *        0x6B/0x6C).
  *
+ * @param ctx         Driver context (output).
+ * @param bus         I2C bus handle for BRD_I2C.
  * @param addr_page0  Page-0 7-bit address.  Page-1 is assumed to be
  *                    at `addr_page0 + 1` per chip design.
  */
@@ -190,6 +192,7 @@ alp_status_t act8760_get_status(act8760_t *ctx, act8760_status_t *out);
 /**
  * @brief Raw register read on either page.
  *
+ * @param ctx   ACT8760 context handle (must be initialised first).
  * @param page  Which slave-address page hosts the register.
  * @param reg   8-bit register address.
  * @param out   Pointer to the destination byte.
@@ -218,6 +221,7 @@ alp_status_t act8760_write_reg(act8760_t *ctx, act8760_page_t page,
  * tables).  This driver intentionally does not encode the mapping
  * since the per-range table is rail- and CMI-dependent.
  *
+ * @param ctx       ACT8760 context handle (must be initialised first).
  * @param rail      Which regulator.
  * @param vset_raw  Raw VSET value (0..127 for bucks, 0..63 for LDOs).
  */
@@ -230,6 +234,8 @@ alp_status_t act8760_rail_get_vset(act8760_t *ctx, act8760_rail_t rail,
  * The new value applies immediately (volatile shadow).  Power-cycle
  * reverts to the CMI default.
  *
+ * @param ctx       ACT8760 context handle (must be initialised first).
+ * @param rail      Which regulator to program.
  * @param vset_raw  New VSET value.  Must fit in 7 bits for bucks,
  *                  6 bits for LDOs; otherwise ALP_ERR_INVAL.
  */

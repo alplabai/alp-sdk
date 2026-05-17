@@ -91,7 +91,7 @@ typedef enum {
 typedef struct {
     alp_power_mode_t realised_mode; /**< Mode the backend actually entered. */
     uint32_t         wake_source;   /**< Wake-source bit that fired (one of
-                                          @ref ALP_POWER_WAKE_* values).  Zero
+                                          the @c ALP_POWER_WAKE_* macros).  Zero
                                           if the call returned without sleeping
                                           (e.g. wake_after_ms == 0). */
     uint32_t         slept_ms;      /**< Wall-clock duration of the sleep cycle
@@ -122,7 +122,7 @@ alp_power_t *alp_power_open(void);
  * (because the SoC would not wake without the watchdog firing).
  *
  * @param[in] handle       Handle from @ref alp_power_open.
- * @param[in] wake_bitmap  Bitmap of @ref ALP_POWER_WAKE_* values.
+ * @param[in] wake_bitmap  Bitmap of @c ALP_POWER_WAKE_* macros.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_NOSUPPORT (backend can't honour any of the

@@ -204,6 +204,7 @@ alp_status_t rtl8211fdi_restart_autoneg(rtl8211fdi_t *ctx);
  *  register 0x1A.  When the link is down, @p *speed reads
  *  @ref RTL8211FDI_SPEED_UNKNOWN and @p *full_duplex is undefined.
  *
+ *  @param ctx          RTL8211FDI driver context (must be initialised first).
  *  @param up           [out] true if link is up.
  *  @param speed        [out] negotiated speed.
  *  @param full_duplex  [out] true if full-duplex.

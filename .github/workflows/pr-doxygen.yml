@@ -2,11 +2,12 @@
 #
 # Builds the public-API Doxygen reference on every PR.
 #
-# v0.1: best-effort.  No Doxyfile committed yet — the workflow
-# generates one inline targeting include/alp/.  Treats Doxygen
-# warnings as informational, not fatal, until a Doxyfile lands.
-# v1.0 acceptance bar (per VERSIONS.md) tightens this to
-# "fail on any Doxygen warning."
+# Gate is hard: WARN_AS_ERROR=YES + the summarise step exits 1 on a
+# non-empty warning log, so a regression fails PR CI immediately.
+# This matches the v1.0 acceptance bar (per VERSIONS.md "Quality
+# bar"): "Doxygen build passes with zero warnings."  No Doxyfile is
+# committed yet — the workflow generates one inline targeting
+# include/alp/.
 
 name: pr-doxygen
 
@@ -56,7 +57,7 @@ jobs:
             doxygen -g Doxyfile.default
             cat > Doxyfile <<'EOF'
           PROJECT_NAME           = "ALP SDK"
-          PROJECT_NUMBER         = $(git describe --tags --always 2>/dev/null || echo "0.1.0-pre")
+          PROJECT_NUMBER         = "$(git describe --tags --always 2>/dev/null || echo "0.1.0-pre")"
           OUTPUT_DIRECTORY       = doxygen-out
           INPUT                  = include/alp
           RECURSIVE              = YES
@@ -65,9 +66,10 @@ jobs:
           GENERATE_HTML          = YES
           GENERATE_LATEX         = NO
           QUIET                  = NO
-          WARN_AS_ERROR          = NO
+          WARN_AS_ERROR          = YES
           WARN_LOGFILE           = doxygen-warnings.log
           OPTIMIZE_OUTPUT_FOR_C  = YES
+          DOT_GRAPH_MAX_NODES    = 200
           JAVADOC_AUTOBRIEF      = YES
           USE_MDFILE_AS_MAINPAGE = README.md
           INPUT                 += README.md
@@ -83,7 +85,8 @@ jobs:
             echo "::group::Doxygen warnings"
             cat doxygen-warnings.log
             echo "::endgroup::"
-            echo "::warning::Doxygen reported $(wc -l < doxygen-warnings.log) warning(s).  v1.0 will gate on this — fix incrementally."
+            echo "::error::Doxygen reported $(wc -l < doxygen-warnings.log) warning(s).  Gate is hard -- fix the warnings."
+            exit 1
           else
             echo "Doxygen produced zero warnings."
           fi

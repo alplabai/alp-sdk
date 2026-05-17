@@ -1,3 +1,5 @@
+@page chips_index Chip drivers index
+
 # include/alp/chips/ — public chip-driver headers
 
 One header per supported chip.  These are the headers that

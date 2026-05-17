@@ -89,6 +89,7 @@ alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx
  * the Trust M data-link-layer transport (PRESET frame, GET
  * frame, error retries).
  *
+ * @param[in]  ctx         OPTIGA Trust M context (must be initialised first).
  * @param[in]  apdu        Bytes of the command APDU.
  * @param[in]  apdu_len    APDU length.
  * @param[out] resp        Response buffer.

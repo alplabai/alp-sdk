@@ -359,8 +359,8 @@ alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg);
  * overlap; overlapping windows land in a later revision).
  *
  * Output element count when a block is emitted:
- *  - @ref ALP_DSP_FFT_OUTPUT_COMPLEX:   2 * N (interleaved re,im pairs).
- *  - @ref ALP_DSP_FFT_OUTPUT_MAGNITUDE: N.
+ *  - @ref ALP_DSP_FFT_OUTPUT_COMPLEX -- 2 * N (interleaved re,im pairs).
+ *  - @ref ALP_DSP_FFT_OUTPUT_MAGNITUDE -- N.
  *
  * @param[in]  spec   Handle from @ref alp_adc_spectrum_open.
  * @param[out] bins   Caller buffer for FFT bins (float).

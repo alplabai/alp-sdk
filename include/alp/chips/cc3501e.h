@@ -96,11 +96,15 @@ alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);
 
 /** Issue a synchronous command + wait for the response.
  *
- *  @param tx_payload + @p tx_len  Outbound payload bytes (may be NULL with len 0).
- *  @param rx_buf + @p rx_cap      Reply buffer (response payload, less the
- *                                 frame header).  Truncated to @p rx_cap.
- *  @param rx_len                  Receives bytes copied (may be NULL).
- *  @param timeout_ms              Max wait. */
+ *  @param ctx         CC3501E driver context (must be initialised first).
+ *  @param cmd         Command opcode (one of @c ALP_CC3501E_CMD_* ).
+ *  @param tx_payload  Outbound payload bytes (may be NULL with len 0).
+ *  @param tx_len      Outbound payload length in bytes.
+ *  @param rx_buf      Reply buffer (response payload, less the
+ *                     frame header).  Truncated to @p rx_cap.
+ *  @param rx_cap      Capacity of @p rx_buf in bytes.
+ *  @param rx_len      Receives bytes copied (may be NULL).
+ *  @param timeout_ms  Max wait. */
 alp_status_t cc3501e_request(cc3501e_t *ctx, alp_cc3501e_cmd_t cmd, const uint8_t *tx_payload,
                              size_t tx_len, uint8_t *rx_buf, size_t rx_cap, size_t *rx_len,
                              uint32_t timeout_ms);

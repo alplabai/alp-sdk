@@ -113,7 +113,7 @@ alp_status_t ov5640_set_resolution(ov5640_t *dev, ov5640_resolution_t res);
 /**
  * @brief Remember a pixel-format preset for the v0.3 apply path.
  *
- * Same contract as @ref ov5640_set_resolution: the chosen format is
+ * Same contract as @ref ov5640_set_resolution -- the chosen format is
  * remembered in `dev->fmt` but the driver returns
  * `ALP_ERR_NOSUPPORT` until v0.3's `FORMAT_CTRL` / `FORMAT_CTRL_MUX`
  * write table lands.

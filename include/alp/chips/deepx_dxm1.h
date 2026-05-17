@@ -130,6 +130,7 @@ alp_status_t deepx_dxm1_set_reset_polarity(deepx_dxm1_t *ctx,
  *   - Linux kernel driver can attempt `dxrt_init()` after the boot
  *     delay has elapsed.
  *
+ * @param ctx      DEEPX DX-M1 sequencer context (must be initialised first).
  * @param boot_us  Delay (microseconds) the sequencer waits between
  *                 releasing M1_RESET and returning.  Pass 0 to skip
  *                 the wait (the caller will poll PCIe link-up via

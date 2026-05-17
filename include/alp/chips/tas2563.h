@@ -81,9 +81,11 @@ typedef struct {
  * @brief Probe the chip + (optionally) drive SD_N high to leave
  *        hardware shutdown.
  *
- * @param[in] addr_7bit  7-bit I2C address (one of the
+ * @param[out] ctx       Driver context (output; populated on success).
+ * @param[in]  bus       Open I2C bus handle the amp sits on.
+ * @param[in]  addr_7bit 7-bit I2C address (one of the
  *                       TAS2563_I2C_ADDR_* constants).
- * @param[in] sd_n       Open GPIO handle bound to AMP.ENABLE.  May
+ * @param[in]  sd_n      Open GPIO handle bound to AMP.ENABLE.  May
  *                       be NULL if the caller drives SD_N
  *                       elsewhere (or if the pin is tied permanently
  *                       to V+).

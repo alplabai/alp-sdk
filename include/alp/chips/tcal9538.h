@@ -67,14 +67,19 @@ typedef struct {
 /**
  * @brief Probe + cache the chip's register state.
  *
- * @param[in] addr_7bit  7-bit I2C address (0x70..0x73 by strap).
+ * @param[out] ctx       Driver context (output; populated on success).
+ * @param[in]  bus       Open I2C bus handle the expander sits on.
+ * @param[in]  addr_7bit 7-bit I2C address (0x70..0x73 by strap).
  *                       Use 0 to fall back to TCAL9538_I2C_ADDR_BASE.
  */
 alp_status_t tcal9538_init(tcal9538_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);
 
 /**
  * @brief Set the direction (input/output) of a single pin.
+ *
+ * @param ctx  TCAL9538 driver context (must be initialised first).
  * @param pin  0..7
+ * @param dir  One of @ref tcal9538_direction_t.
  */
 alp_status_t tcal9538_set_direction(tcal9538_t *ctx, uint8_t pin, tcal9538_direction_t dir);
 
