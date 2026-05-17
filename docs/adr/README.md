@@ -1,3 +1,5 @@
+@page docs_adr_index Architecture Decision Records
+
 # Architecture Decision Records
 
 This directory captures the **why** behind significant architectural

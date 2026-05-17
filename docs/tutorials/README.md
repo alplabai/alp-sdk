@@ -1,3 +1,5 @@
+@page docs_tutorials_index Tutorials
+
 # Tutorials
 
 Companion walkthroughs for the example apps under `examples/`.

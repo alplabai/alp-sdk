@@ -1,3 +1,5 @@
+@page docs_doxygen_index Doxygen reference build
+
 # docs/doxygen/ — generated API reference
 
 Doxygen configuration + per-library reference pages live here.  The

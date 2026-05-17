@@ -1,3 +1,5 @@
+@page docs_abi_index ABI snapshots
+
 # ALP SDK ABI snapshots
 
 Each snapshot in this directory is a per-symbol fingerprint of the

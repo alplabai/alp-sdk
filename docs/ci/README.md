@@ -1,3 +1,5 @@
+@page docs_ci_index CI policy
+
 # docs/ci/
 
 CI policy + auxiliary documentation for the ALP SDK.
