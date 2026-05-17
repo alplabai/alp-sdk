@@ -1,3 +1,5 @@
+@page meta_alp_sdk_index Yocto meta-layer (meta-alp-sdk)
+
 # meta-alp-sdk
 
 > **`[UNTESTED]` -- v0.6 paper-correct.** Recipes parse cleanly against

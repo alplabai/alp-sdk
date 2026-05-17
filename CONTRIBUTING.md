@@ -1,3 +1,5 @@
+@page contributing_index Contributing
+
 # Contributing to ALP SDK
 
 Canonical contributor guide: [`docs/contribution.md`](docs/contribution.md).

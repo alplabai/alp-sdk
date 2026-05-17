@@ -1,3 +1,5 @@
+@page vendors_alif_index Alif Ensemble vendor wrapper
+
 # vendors/alif
 
 Vendor wrapper for the **Alif Ensemble** family — backs the

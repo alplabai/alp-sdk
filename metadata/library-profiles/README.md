@@ -1,3 +1,5 @@
+@page metadata_library_profiles_index Library compile-time profile headers
+
 # metadata/library-profiles
 
 Per-library **compile-time profile headers** the SDK ships so that

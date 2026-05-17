@@ -356,4 +356,5 @@ breaks the gate-everything-with-a-PR invariant.
 - Security disclosure / embargo: [`docs/security-advisories.md`](security-advisories.md).
 - Reviewer assignments: [`CODEOWNERS`](../CODEOWNERS).
 - PR template (what each PR description should contain):
-  [`.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md).
+  `.github/PULL_REQUEST_TEMPLATE.md` (in the repo root, alongside
+  CODEOWNERS).

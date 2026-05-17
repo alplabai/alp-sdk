@@ -1,3 +1,5 @@
+@page zephyr_sysbuild_aen_index E1M-AEN sysbuild profile
+
 # zephyr/sysbuild/aen — E1M-AEN secure-boot build profile
 
 Sysbuild configuration template for AEN-Zephyr applications that

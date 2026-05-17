@@ -1,3 +1,5 @@
+@page firmware_cc3501e_index CC3501E firmware bootstrap
+
 # CC3501E firmware — bootstrap from this repo
 
 The CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on the E1M-AEN module runs

@@ -1,3 +1,5 @@
+@page vendors_deepx_dxm1_index DEEPX DX-M1 vendor wrapper
+
 # vendors/deepx-dxm1
 
 Vendor wrapper for the **DEEPX DX-M1** companion AI accelerator that

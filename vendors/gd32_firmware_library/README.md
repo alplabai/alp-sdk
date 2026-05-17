@@ -1,3 +1,5 @@
+@page vendors_gd32_firmware_library_index GD32G5x3 firmware library wrapper
+
 # vendors/gd32_firmware_library
 
 Vendor wrapper for the **GigaDevice GD32G5x3 firmware library** --

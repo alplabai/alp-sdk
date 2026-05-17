@@ -1,3 +1,5 @@
+@page keys_index MCUboot signing keys
+
 # keys/ — MCUboot signing keys
 
 **This directory holds development keys for MCUboot image

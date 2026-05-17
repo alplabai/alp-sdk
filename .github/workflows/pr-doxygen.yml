@@ -75,7 +75,23 @@ jobs:
           DOT_GRAPH_MAX_NODES    = 200
           JAVADOC_AUTOBRIEF      = YES
           USE_MDFILE_AS_MAINPAGE = README.md
-          INPUT                 += README.md
+          INPUT                 += README.md VERSIONS.md CONTRIBUTING.md docs \
+                                   chips/README.md \
+                                   vendors/alif/README.md \
+                                   vendors/deepx-dxm1/README.md \
+                                   vendors/gd32_firmware_library/README.md \
+                                   firmware/cc3501e/README.md \
+                                   keys/README.md \
+                                   meta-alp-sdk/README.md \
+                                   examples/README.md \
+                                   metadata/library-profiles/README.md \
+                                   zephyr/sysbuild/aen/README.md
+          # CHANGELOG.md is volatile release notes (not customer-
+          # facing reference) and contains literals Doxygen
+          # mis-parses (<batch>, @v3, etc.); keep it out of INPUT.
+          # docs/superpowers/* are internal design specs / WIP
+          # plans, not part of the public reference.
+          EXCLUDE_PATTERNS       = */superpowers/*
           EOF
           fi
 

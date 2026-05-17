@@ -1,3 +1,5 @@
+@page examples_index Examples
+
 # Examples
 
 Reference applications that double as tutorials.  Comment density
