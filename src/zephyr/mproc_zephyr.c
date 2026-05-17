@@ -411,21 +411,49 @@ void alp_mbox_close(alp_mbox_t *mb)
 /* Hardware semaphore                                                  */
 /* ================================================================== */
 
-/* Zephyr 3.7 doesn't ship a fully-portable hwsem driver class --
- * support is per-vendor (Alif provides hwsem in their HAL, ST has
- * a separate driver, etc.).  v0.3.x lands the per-SoC hwsem hooks
- * once the AEN HIL CI runs against a real Alif HWSEM register
- * map.  For v0.3 the wrapper shape is in place and validates
- * args; the real lock/unlock falls through to NOSUPPORT. */
+/* Intra-core fallback: an array of k_sem indexed by hwsem_id, with
+ * count=1 (mutex semantics).  This serializes access WITHIN one
+ * Zephyr image but does NOT cross cores -- a peer Zephyr / Linux
+ * image on the same SoM uses a DIFFERENT k_sem array and won't see
+ * the lock.  Per-SoC real-HWSEM (AEN HWSEM block, ST HSEM, etc.)
+ * land per-SoC in a follow-on track; until then call sites that
+ * need cross-core mutex must use a real shared-state primitive
+ * (DT-anchored memory + atomic ops) instead.
+ *
+ * hwsem_id range: 0..15.  Bump CONFIG_ALP_SDK_MPROC_HWSEM_COUNT
+ * if a SoM needs more. */
+
+#ifndef CONFIG_ALP_SDK_MPROC_HWSEM_COUNT
+#define CONFIG_ALP_SDK_MPROC_HWSEM_COUNT 16
+#endif
+
+#if defined(CONFIG_ALP_SDK_MPROC)
+static struct k_sem alp_hwsem_kobjs[CONFIG_ALP_SDK_MPROC_HWSEM_COUNT];
+static bool         alp_hwsem_kobjs_initialised;
+static struct k_spinlock alp_hwsem_init_lock;
+
+static void hwsem_kobjs_init_once(void)
+{
+    k_spinlock_key_t key = k_spin_lock(&alp_hwsem_init_lock);
+    if (!alp_hwsem_kobjs_initialised) {
+        for (size_t i = 0; i < CONFIG_ALP_SDK_MPROC_HWSEM_COUNT; ++i) {
+            k_sem_init(&alp_hwsem_kobjs[i], 1, 1);
+        }
+        alp_hwsem_kobjs_initialised = true;
+    }
+    k_spin_unlock(&alp_hwsem_init_lock, key);
+}
+#endif
 
 alp_hwsem_t *alp_hwsem_open(uint32_t hwsem_id)
 {
     alp_z_clear_last_error();
 #if defined(CONFIG_ALP_SDK_MPROC)
-    if (hwsem_id >= 16) {
+    if (hwsem_id >= CONFIG_ALP_SDK_MPROC_HWSEM_COUNT) {
         alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
         return NULL;
     }
+    hwsem_kobjs_init_once();
     struct alp_hwsem *s = hwsem_pool_acquire();
     if (s == NULL) {
         alp_z_set_last_error(ALP_ERR_NOMEM);
@@ -444,27 +472,58 @@ alp_hwsem_t *alp_hwsem_open(uint32_t hwsem_id)
 alp_status_t alp_hwsem_try_lock(alp_hwsem_t *sem)
 {
     if (sem == NULL || !sem->in_use) return ALP_ERR_NOT_READY;
-    /* SoC-specific HWSEM register access lands v0.3.x. */
+#if defined(CONFIG_ALP_SDK_MPROC)
+    /* k_sem_take with K_NO_WAIT returns -EBUSY when the count is 0. */
+    int rc = k_sem_take(&alp_hwsem_kobjs[sem->hwsem_id], K_NO_WAIT);
+    if (rc == -EBUSY) return ALP_ERR_BUSY;
+    if (rc != 0)      return errno_to_alp(rc);
+    sem->held = true;
+    return ALP_OK;
+#else
     return ALP_ERR_NOSUPPORT;
+#endif
 }
 
 alp_status_t alp_hwsem_lock(alp_hwsem_t *sem, uint32_t timeout_ms)
 {
     if (sem == NULL || !sem->in_use) return ALP_ERR_NOT_READY;
+#if defined(CONFIG_ALP_SDK_MPROC)
+    k_timeout_t to = (timeout_ms == UINT32_MAX)
+        ? K_FOREVER : K_MSEC(timeout_ms);
+    int rc = k_sem_take(&alp_hwsem_kobjs[sem->hwsem_id], to);
+    if (rc == -EAGAIN) return ALP_ERR_TIMEOUT;
+    if (rc != 0)       return errno_to_alp(rc);
+    sem->held = true;
+    return ALP_OK;
+#else
     (void)timeout_ms;
     return ALP_ERR_NOSUPPORT;
+#endif
 }
 
 alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem)
 {
     if (sem == NULL || !sem->in_use) return ALP_ERR_NOT_READY;
+#if defined(CONFIG_ALP_SDK_MPROC)
+    if (!sem->held) return ALP_ERR_INVAL;
+    k_sem_give(&alp_hwsem_kobjs[sem->hwsem_id]);
+    sem->held = false;
+    return ALP_OK;
+#else
     return ALP_ERR_NOSUPPORT;
+#endif
 }
 
 void alp_hwsem_close(alp_hwsem_t *sem)
 {
     if (sem == NULL || !sem->in_use) return;
 #if defined(CONFIG_ALP_SDK_MPROC)
+    /* If still held when closed, give the kobj back so the next opener
+     * can take it -- not the caller's bug to leak the lock. */
+    if (sem->held) {
+        k_sem_give(&alp_hwsem_kobjs[sem->hwsem_id]);
+        sem->held = false;
+    }
     sem->in_use = false;
 #endif
 }

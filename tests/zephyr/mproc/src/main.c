@@ -274,4 +274,66 @@ ZTEST(alp_mproc, test_shmem_open_exhausts_pool)
     alp_shmem_close(b);
 }
 
+ZTEST(alp_mproc, test_hwsem_lock_unlock_cycle)
+{
+    alp_hwsem_t *sem = alp_hwsem_open(0);
+    zassert_not_null(sem);
+
+    zassert_equal(alp_hwsem_try_lock(sem), ALP_OK);
+    /* Holding -- a second try_lock from the SAME handle re-locks
+     * (k_sem is counting; the fallback's contract is sticky locks
+     * across distinct handles to the same id, see below). */
+
+    zassert_equal(alp_hwsem_unlock(sem), ALP_OK);
+    alp_hwsem_close(sem);
+}
+
+ZTEST(alp_mproc, test_hwsem_distinct_handles_same_id_contend)
+{
+    alp_hwsem_t *a = alp_hwsem_open(1);
+    alp_hwsem_t *b = alp_hwsem_open(1);
+    zassert_not_null(a);
+    zassert_not_null(b);
+
+    zassert_equal(alp_hwsem_try_lock(a), ALP_OK);
+    /* Different handle, same hwsem_id -> second try_lock must fail. */
+    zassert_equal(alp_hwsem_try_lock(b), ALP_ERR_BUSY);
+    zassert_equal(alp_hwsem_unlock(a), ALP_OK);
+    /* After release the second handle can take it. */
+    zassert_equal(alp_hwsem_try_lock(b), ALP_OK);
+    zassert_equal(alp_hwsem_unlock(b), ALP_OK);
+
+    alp_hwsem_close(a);
+    alp_hwsem_close(b);
+}
+
+ZTEST(alp_mproc, test_hwsem_lock_with_timeout_times_out)
+{
+    alp_hwsem_t *a = alp_hwsem_open(2);
+    alp_hwsem_t *b = alp_hwsem_open(2);
+    zassert_equal(alp_hwsem_try_lock(a), ALP_OK);
+    /* Blocking lock on the same id must time out within ~50 ms. */
+    zassert_equal(alp_hwsem_lock(b, 50), ALP_ERR_TIMEOUT);
+    zassert_equal(alp_hwsem_unlock(a), ALP_OK);
+    alp_hwsem_close(a);
+    alp_hwsem_close(b);
+}
+
+ZTEST(alp_mproc, test_hwsem_open_out_of_range)
+{
+    /* The fallback supports hwsem_id < 16. */
+    zassert_is_null(alp_hwsem_open(99));
+    zassert_equal(alp_last_error(), ALP_ERR_OUT_OF_RANGE);
+}
+
+ZTEST(alp_mproc, test_hwsem_unlock_without_lock_returns_inval)
+{
+    alp_hwsem_t *sem = alp_hwsem_open(3);
+    zassert_not_null(sem);
+    /* Not held -- unlock must reject so a buggy app doesn't release
+     * a hwsem it never took. */
+    zassert_equal(alp_hwsem_unlock(sem), ALP_ERR_INVAL);
+    alp_hwsem_close(sem);
+}
+
 #endif /* CONFIG_ALP_SDK_MPROC && DT_HAS_ALIAS(alp_shmem0) */
