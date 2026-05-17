@@ -60,7 +60,7 @@ elseif(BRIDGE_HAL_BACKEND STREQUAL "gd32")
     # fatal-errors with a clear "drop the SDK into sdk/" instruction
     # when the unpacked archive is missing, so an unconfigured
     # workspace doesn't fall through to a confusing link error.
-    set(_GD32_VENDOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../vendors/gd32_firmware_library)
+    set(_GD32_VENDOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../vendors/gd32_firmware_library)
     if(NOT EXISTS ${_GD32_VENDOR_DIR}/CMakeLists.txt)
         message(FATAL_ERROR
             "BRIDGE_HAL_BACKEND=gd32 selected but "

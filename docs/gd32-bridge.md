@@ -29,7 +29,7 @@ build it, how to flash it, and what state the implementation is in.
 ## Build
 
 ```bash
-cd gd32-bridge
+cd firmware/gd32-bridge
 cmake -B build -DCMAKE_TOOLCHAIN_FILE=toolchain/arm-none-eabi.cmake
 cmake --build build
 ```

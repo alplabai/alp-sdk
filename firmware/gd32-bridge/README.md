@@ -44,7 +44,7 @@ The CMake build runs **outside** the Zephyr build (the Renesas
 side's `west build` does not descend here).  Invoke directly:
 
 ```bash
-cd gd32-bridge
+cd firmware/gd32-bridge
 cmake -B build -DCMAKE_TOOLCHAIN_FILE=toolchain/arm-none-eabi.cmake
 cmake --build build
 ```
