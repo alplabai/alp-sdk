@@ -170,14 +170,18 @@ until its gating rows flip to ✅.
 
 v0.6 lands heterogeneous OS orchestration — see ADR 0010 + [`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md).
 
-**Next milestones** (rough; full per-version detail in [`VERSIONS.md`](VERSIONS.md)):
+**Backlog** (cherry-picked into future tags as items land — no per-version commitments; full list in [`VERSIONS.md`](VERSIONS.md)):
 
-| Version   | Target date  | Headline                                                                                        |
-|-----------|--------------|--------------------------------------------------------------------------------------------------|
-| v0.7.0    | 2026-07-17   | AEN family + V2N101 silicon-verified via self-hosted lab HiL; `<alp/mproc.h>` shmem + hwsem land. |
-| v0.8.0    | 2026-09-17   | V2M101 (DEEPX) silicon-verified + concurrent multi-NPU dispatch (DRP-AI3 + DEEPX) + Mender OTA E2E. |
-| v1.0-RC1  | 2026-11-17   | Pilot-evaluation ready: ABI snapshot frozen + 4 vertical reference apps verified on real silicon. |
-| v1.0.0    | (post-pilot) | Production-ready (after first customer pilot deployment completes).                              |
+- AEN family + V2N101 + V2M101 silicon-verified via self-hosted lab HiL.
+- `<alp/mproc.h>` shmem + hwsem implementations land on Zephyr backend.
+- `<alp/power.h>` surface fleshed out for industrial / always-on use cases.
+- Concurrent multi-NPU dispatch (DRP-AI3 + DEEPX) proven on V2M101.
+- Mender OTA E2E (signed artefact + swap + rollback) on V2N101 fleet of N≥3 boards.
+- ABI snapshot frozen for v1.0 commitment + 4 vertical reference apps verified end-to-end on real silicon.
+- Customer onboarding ≤30-day dry-run passes.
+- v1.0.0 cut after first customer pilot deployment completes.
+
+*Deferred indefinitely past v1.0:* Ubuntu backend (`cores.<id>.os: ubuntu`), NXP NX9101 silicon enablement, FreeRTOS / ThreadX / NuttX backends.
 
 - Roadmap: [`VERSIONS.md`](VERSIONS.md).
 - What changed when: [`CHANGELOG.md`](CHANGELOG.md).

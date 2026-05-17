@@ -32,10 +32,7 @@ the old plan to this one:
 | v0.4.0  | **in-progress (prep code merged, untested)** | Yocto first-class (V2N + V2N+M1 full); secure boot + secure OTA on AEN-Zephyr.  **Prep merged on main:** Yocto core-4 peripheral wrappers (I²C / SPI / UART / GPIO + IRQ dispatcher), MQTT via libmosquitto, per-class override gates, `lwrb` + `nanopb` pinned behind `extras-v04` group.  Failure-path ctest green; **HW roundtrip still pending** — every row in [`docs/test-plan.md`](docs/test-plan.md)'s v0.4 section gates the tag. |
 | v0.5.0  | **wave-2 surface complete; HAL bodies pending** | Wave-2 GD32-bridge DSP + advanced-timer + power-saving + AEN-audit top-five gap surfaces.  **Shipped on main** (per `memory/project_v05_autonomous_burst_2026_05_12.md`): PROTOCOL_VERSION_MINOR 4 -> 5 + seven new reserved opcodes (`0x23..0x28` + `0x36`).  `<alp/dsp.h>` standalone DSP-chain API (FIR / IIR / WINDOW / FFT) with CMSIS-DSP + portable-C fallback.  `alp_adc_filter_t` + `alp_adc_spectrum_t` in `<alp/adc.h>` composing stream + chain.  Advanced timer extras in `<alp/pwm.h>` (`alp_pwm_capture_t` + `alp_pwm_single_pulse`).  `<alp/power.h>` system-power-mode surface.  `<alp/gpu2d.h>` 2D-accelerator surface (AEN audit headline gap).  `<alp/camera.h>::alp_camera_configure_isp` for Mali-C55 ISP toggles.  `<alp/storage.h>::alp_storage_configure_inline_aes` for AEN SecAES on OSPI / HexSPI.  `alp_delay_us` + `alp_delay_ms` portable primitives.  CC3501E §2A.2-plan items §5.1..§5.5 + §5.7 (protocol docs hygiene, named GPIO enums, IRQ event structs, diag info, reset-timing fix, power policy).  v2n_supervisor `alp_z_v2n_supervisor_invalidate()` post-wake re-init hook.  Six `gd32g553_*` host helpers mirroring the new opcodes.  Tests for every new surface.  **HAL bodies pending** in the GD32 firmware tree (`firmware/gd32-bridge/hal/`) -- every wave-2 reserved opcode returns STATUS_NOSUPPORT until the firmware ships them.  CAU (DES / TDES / AES) deferred to v0.6 with PSA driver registration. |
 | v0.6.0  | **shipped on main; pre-HiL** | Heterogeneous-OS orchestration.  `board.yaml` v2 introduces the per-core `cores:` block + cross-core `ipc:` carve-outs (v1 top-level `os:` / `peripherals:` / `libraries:` / `iot:` / `inference:` removed).  `scripts/alp_orchestrate.py` fans out one build slice per non-`off` core; `<alp/rpc.h>` + the generated `<alp/system_ipc.h>` give apps a framed RPC surface over OpenAMP RPMsg.  Reference: rpmsg-aen / rpmsg-v2n / rpmsg-imx93 / heterogeneous-offload examples.  Silicon-determined fields (`inference.backend`) removed from customer scope -- per-handle runtime selection via `alp_inference_open(.backend=...)`.  `alp_core_id_t` generalized to cover every SoM topology core_id.  HiL spec scaffolding for all 11 boards lands.  **Pre-HiL** -- still untested on real silicon. |
-| v0.7.0  | planned (2026-07-17) | AEN family + V2N101 silicon-verified.  Self-hosted HiL runner in lab; AEN701 + V2N101 + EVKs wired; 26+ HiL smoke specs flipped ⏳→✅.  `<alp/mproc.h>` shmem + hwsem implementations land on AEN's M55-HP↔M55-HE.  `<alp/power.h>` surface fleshed out for industrial / always-on use cases. |
-| v0.8.0  | planned (2026-09-17) | V2M101 (DEEPX) silicon-verified + concurrent multi-NPU dispatch (DRP-AI3 + DEEPX simultaneously) proven on V2M101 + Mender OTA E2E.  Mender E2E demonstrated on V2N101 fleet of N≥3 boards (signed artefact + swap-using-scratch + rollback).  Ubuntu backend deferred indefinitely past v1.0 — non-trivial lift (kernel mainline coverage on RZ/V2N, apt packaging, image flow); not committed to any specific version.  H2-2026 stays Zephyr-on-M-cores + Yocto-on-A-cores. |
-| v1.0-RC1 | planned (2026-11-17) | Pilot-evaluation ready.  ABI snapshot frozen at `docs/abi/v1.0-snapshot.json` -- any breaking change between RC and v1.0 must justify itself in an ADR.  4 vertical reference apps verified end-to-end on real silicon (`ai-camera-viewer` / `iot-fleet-ota` / `audio-wake-word` / `drone-autopilot`).  Customer onboarding ≤30-day dry-run passes.  `test-plan.md` ≥40 rows ✅, ≤20 ⏳. |
-| v1.0.0  | planned     | unified repo, docs, ABI freeze, production-ready  |
+| **Backlog** | (cherry-pick into future tags) | See "Backlog -- cherry-pick into future tags" section below.  No per-version commitments for future items; releases tag whatever's ready at the time. |
 
 > **Note on v0.2 sequencing.**  The original v0.2 plan in this file
 > assumed only ~5 chip drivers + a couple of new libraries.  In
@@ -449,6 +446,59 @@ All three OS targets × both SoM families: real.
 - "Vision-on-the-edge" reference app: video capture → on-device
   classifier → MQTT to cloud, runs the same logic on AEN-Zephyr
   and V2N-Yocto with only OS-target switching.
+
+---
+
+## Backlog — cherry-pick into future tags
+
+Future items live as a pool, not pinned to specific versions.  When we
+cut the next release we tag whatever's ready at the time; the same
+item can land in v0.7 or v0.9 depending on when it's done.  This is
+deliberate — earlier per-version commitments turned into churn (Ubuntu
+was on v0.8 for an afternoon before being deferred past v1.0), and
+the team works better with a backlog + cadence than with hard slots.
+
+**Verification (the longest pole — most other items gate on this):**
+
+- AEN family silicon-verified via self-hosted lab HiL (AEN701 + AEN301/401 EVKs wired; 12 portable peripheral smokes + per-AEN specs flip ⏳→✅).
+- V2N101 silicon-verified (12 portable + `v2n-gd32-bridge-ping` + `v2n-temp-sensor` smokes).
+- V2M101 silicon-verified including DEEPX bring-up (DA9292 0.75 V rail + PCIe mux + M1_RESET release sequence).
+- Concurrent multi-NPU dispatch (DRP-AI3 + DEEPX simultaneously) proven on V2M101 — the V2M's headline differentiator.
+- Inference dispatcher correctness on every NPU (Ethos-U55 / DRP-AI3 / DEEPX DX-M1) — reference TFLite model output bit-equality + latency within vendor budget.
+- `test-plan.md` verification ledger ≥40 rows ✅, ≤20 ⏳ remaining.
+
+**API maturation (closes the v0.6 audit gaps):**
+
+- `<alp/mproc.h>` shmem + hwsem implementations on the Zephyr backend (intra-core fallback shipped 2026-05-17; cross-core HWSEM block wiring tracked under HiL bring-up).
+- `<alp/power.h>` surface fleshed out for industrial / always-on use cases (PM API on both Zephyr CONFIG_PM and Yocto systemd-suspend).
+- Sensor library deepening — IMU calibration helpers, environment-sensor sampling helpers, GNSS NMEA parsing.
+- `<alp/dsp.h>` chain verified end-to-end — FFT/FAC/biquad on AEN's M55 + GD32 bridge offload on V2N.
+- **ABI snapshot frozen for v1.0 commitment** at `docs/abi/v1.0-snapshot.json` — any breaking change between snapshot and v1.0 tag must justify itself in an ADR.
+
+**OTA end-to-end (production-pilot blocker):**
+
+- Device-side Mender client wired on V2N101 build; `.mender` artefact produced from Yocto image.
+- A/B partition layout + swap-using-scratch + post-boot health check + rollback path verified.
+- Signed artefact path (ECDSA-P256 via `mender-artifact write --key-pair`).
+- Fleet OTA dry run on N≥3 V2N101 boards.
+
+**Customer onboarding (pilot-ready means customer-touchable):**
+
+- 4 vertical reference apps polished + verified end-to-end on real silicon: `ai-camera-viewer` (vision), `iot-fleet-ota` (connected IoT), `audio-wake-word` (industrial), `drone-autopilot` (autonomous).
+- VS Code extension validated on Win/Mac/Linux against the live SDK.
+- Pilot-evaluation kit under `tools/pilot-kit/` with one-command setup.
+- Customer onboarding ≤30-day dry-run passes (internal engineer plays customer end-to-end).
+
+**v1.0.0 cut criteria** (next phase after the backlog above clears):
+
+- After first customer pilot deployment completes + testimonial.
+- v1.0 detailed section continues below.
+
+**Deferred indefinitely past v1.0** (no version commitment — revisit when customer pull + ecosystem state make it worthwhile):
+
+- Ubuntu backend (`cores.<id>.os: ubuntu`) — non-trivial lift (RZ/V2N mainline-kernel coverage is the long pole, plus apt packaging + image flow + per-distro PPA infra).
+- NXP NX9101 silicon enablement — pairs naturally with Ubuntu if/when both pick up.
+- FreeRTOS / Azure RTOS / NuttX backends.
 
 ---
 
