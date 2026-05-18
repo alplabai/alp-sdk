@@ -42,10 +42,13 @@ the PMICs, RTC, OPTIGA, supervisor MCU slave interface.
 presets for the E1M-EVK + E1M-X-EVK reference carriers.
 
 **Carve-out** -- A physical memory region reserved for cross-core
-IPC, declared in `board.yaml ipc[]` and resolved against the SoM
-preset's `memory_map:` block.  The orchestrator emits matching
-reservations into both kernels' device trees so neither side maps
-the region as ordinary memory.
+IPC, declared in `board.yaml ipc[]` and resolved against the
+auto-derived region table (from `metadata/socs/.../<part>.json
+variants[].sram_banks_kb` + `mram_mb`, computed by
+`_resolve_memory_map()`); SoM presets may override this with an
+explicit `memory_map:` block for non-stock partitioning.  The
+orchestrator emits matching reservations into both kernels' device
+trees so neither side maps the region as ordinary memory.
 
 **Chip driver** -- A non-OS-specific C module under `chips/<part>/`
 that wraps a single silicon part's I²C / SPI / GPIO surface.

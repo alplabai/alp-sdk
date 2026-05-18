@@ -47,6 +47,19 @@
 #define ALP_SOC_USB_COUNT 1
 #define ALP_SOC_MIPI_CSI_COUNT 1
 #define ALP_SOC_MIPI_DSI_COUNT 1
+#define ALP_SOC_XSPI_DMA 1
+#define ALP_SOC_HEXSPI_DMA 0
+#define ALP_SOC_EMMC_DMA 0
+#define ALP_SOC_QUADSPI_DMA 0
+#define ALP_SOC_DRP_AI 0
+#define ALP_SOC_HELIUM_MVE 1
+#define ALP_SOC_NEON 0
+#define ALP_SOC_GPU2D 0
+#define ALP_SOC_DAVE2D 0
+#define ALP_SOC_CRYPTOCELL 1
+#define ALP_SOC_INLINE_AES 1
+#define ALP_SOC_CAU 0
+#define ALP_SOC_DMA2D 1
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E4)
 /* alif:ensemble:e4 */
@@ -71,6 +84,19 @@
 #define ALP_SOC_USB_COUNT 0
 #define ALP_SOC_MIPI_CSI_COUNT 0
 #define ALP_SOC_MIPI_DSI_COUNT 0
+#define ALP_SOC_XSPI_DMA 1
+#define ALP_SOC_HEXSPI_DMA 0
+#define ALP_SOC_EMMC_DMA 0
+#define ALP_SOC_QUADSPI_DMA 0
+#define ALP_SOC_DRP_AI 0
+#define ALP_SOC_HELIUM_MVE 1
+#define ALP_SOC_NEON 0
+#define ALP_SOC_GPU2D 0
+#define ALP_SOC_DAVE2D 0
+#define ALP_SOC_CRYPTOCELL 1
+#define ALP_SOC_INLINE_AES 1
+#define ALP_SOC_CAU 0
+#define ALP_SOC_DMA2D 1
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E5)
 /* alif:ensemble:e5 */
@@ -95,6 +121,19 @@
 #define ALP_SOC_USB_COUNT 0
 #define ALP_SOC_MIPI_CSI_COUNT 0
 #define ALP_SOC_MIPI_DSI_COUNT 0
+#define ALP_SOC_XSPI_DMA 1
+#define ALP_SOC_HEXSPI_DMA 0
+#define ALP_SOC_EMMC_DMA 0
+#define ALP_SOC_QUADSPI_DMA 0
+#define ALP_SOC_DRP_AI 0
+#define ALP_SOC_HELIUM_MVE 1
+#define ALP_SOC_NEON 1
+#define ALP_SOC_GPU2D 0
+#define ALP_SOC_DAVE2D 0
+#define ALP_SOC_CRYPTOCELL 1
+#define ALP_SOC_INLINE_AES 1
+#define ALP_SOC_CAU 0
+#define ALP_SOC_DMA2D 1
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E6)
 /* alif:ensemble:e6 */
@@ -119,6 +158,19 @@
 #define ALP_SOC_USB_COUNT 0
 #define ALP_SOC_MIPI_CSI_COUNT 0
 #define ALP_SOC_MIPI_DSI_COUNT 0
+#define ALP_SOC_XSPI_DMA 1
+#define ALP_SOC_HEXSPI_DMA 0
+#define ALP_SOC_EMMC_DMA 0
+#define ALP_SOC_QUADSPI_DMA 0
+#define ALP_SOC_DRP_AI 0
+#define ALP_SOC_HELIUM_MVE 1
+#define ALP_SOC_NEON 1
+#define ALP_SOC_GPU2D 1
+#define ALP_SOC_DAVE2D 1
+#define ALP_SOC_CRYPTOCELL 1
+#define ALP_SOC_INLINE_AES 1
+#define ALP_SOC_CAU 0
+#define ALP_SOC_DMA2D 1
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7)
 /* alif:ensemble:e7 */
@@ -143,6 +195,19 @@
 #define ALP_SOC_USB_COUNT 1
 #define ALP_SOC_MIPI_CSI_COUNT 1
 #define ALP_SOC_MIPI_DSI_COUNT 1
+#define ALP_SOC_XSPI_DMA 1
+#define ALP_SOC_HEXSPI_DMA 0
+#define ALP_SOC_EMMC_DMA 0
+#define ALP_SOC_QUADSPI_DMA 0
+#define ALP_SOC_DRP_AI 0
+#define ALP_SOC_HELIUM_MVE 1
+#define ALP_SOC_NEON 1
+#define ALP_SOC_GPU2D 1
+#define ALP_SOC_DAVE2D 1
+#define ALP_SOC_CRYPTOCELL 1
+#define ALP_SOC_INLINE_AES 1
+#define ALP_SOC_CAU 0
+#define ALP_SOC_DMA2D 1
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8)
 /* alif:ensemble:e8 */
@@ -167,6 +232,19 @@
 #define ALP_SOC_USB_COUNT 1
 #define ALP_SOC_MIPI_CSI_COUNT 1
 #define ALP_SOC_MIPI_DSI_COUNT 1
+#define ALP_SOC_XSPI_DMA 0
+#define ALP_SOC_HEXSPI_DMA 1
+#define ALP_SOC_EMMC_DMA 0
+#define ALP_SOC_QUADSPI_DMA 0
+#define ALP_SOC_DRP_AI 0
+#define ALP_SOC_HELIUM_MVE 1
+#define ALP_SOC_NEON 1
+#define ALP_SOC_GPU2D 1
+#define ALP_SOC_DAVE2D 1
+#define ALP_SOC_CRYPTOCELL 1
+#define ALP_SOC_INLINE_AES 1
+#define ALP_SOC_CAU 0
+#define ALP_SOC_DMA2D 1
 
 #elif defined(CONFIG_ALP_SOC_DEEPX_DX_M1)
 /* deepx:dx:m1 */
@@ -191,6 +269,19 @@
 #define ALP_SOC_USB_COUNT 0
 #define ALP_SOC_MIPI_CSI_COUNT 0
 #define ALP_SOC_MIPI_DSI_COUNT 0
+#define ALP_SOC_XSPI_DMA 0
+#define ALP_SOC_HEXSPI_DMA 0
+#define ALP_SOC_EMMC_DMA 0
+#define ALP_SOC_QUADSPI_DMA 0
+#define ALP_SOC_DRP_AI 0
+#define ALP_SOC_HELIUM_MVE 0
+#define ALP_SOC_NEON 0
+#define ALP_SOC_GPU2D 0
+#define ALP_SOC_DAVE2D 0
+#define ALP_SOC_CRYPTOCELL 0
+#define ALP_SOC_INLINE_AES 0
+#define ALP_SOC_CAU 0
+#define ALP_SOC_DMA2D 0
 
 #elif defined(CONFIG_ALP_SOC_NXP_IMX9_IMX93)
 /* nxp:imx9:imx93 */
@@ -215,6 +306,19 @@
 #define ALP_SOC_USB_COUNT 0
 #define ALP_SOC_MIPI_CSI_COUNT 0
 #define ALP_SOC_MIPI_DSI_COUNT 0
+#define ALP_SOC_XSPI_DMA 0
+#define ALP_SOC_HEXSPI_DMA 0
+#define ALP_SOC_EMMC_DMA 1
+#define ALP_SOC_QUADSPI_DMA 0
+#define ALP_SOC_DRP_AI 0
+#define ALP_SOC_HELIUM_MVE 0
+#define ALP_SOC_NEON 1
+#define ALP_SOC_GPU2D 0
+#define ALP_SOC_DAVE2D 0
+#define ALP_SOC_CRYPTOCELL 0
+#define ALP_SOC_INLINE_AES 0
+#define ALP_SOC_CAU 0
+#define ALP_SOC_DMA2D 0
 
 #elif defined(CONFIG_ALP_SOC_RENESAS_RZV2N_N44)
 /* renesas:rzv2n:n44 */
@@ -239,6 +343,19 @@
 #define ALP_SOC_USB_COUNT 1
 #define ALP_SOC_MIPI_CSI_COUNT 2
 #define ALP_SOC_MIPI_DSI_COUNT 1
+#define ALP_SOC_XSPI_DMA 0
+#define ALP_SOC_HEXSPI_DMA 0
+#define ALP_SOC_EMMC_DMA 1
+#define ALP_SOC_QUADSPI_DMA 0
+#define ALP_SOC_DRP_AI 1
+#define ALP_SOC_HELIUM_MVE 0
+#define ALP_SOC_NEON 1
+#define ALP_SOC_GPU2D 0
+#define ALP_SOC_DAVE2D 0
+#define ALP_SOC_CRYPTOCELL 0
+#define ALP_SOC_INLINE_AES 0
+#define ALP_SOC_CAU 0
+#define ALP_SOC_DMA2D 0
 
 #else  /* No SoC selected — accept any config. */
 #define ALP_SOC_REF_STR "unknown"
@@ -262,6 +379,19 @@
 #define ALP_SOC_USB_COUNT UINT16_MAX
 #define ALP_SOC_MIPI_CSI_COUNT UINT16_MAX
 #define ALP_SOC_MIPI_DSI_COUNT UINT16_MAX
+#define ALP_SOC_XSPI_DMA UINT16_MAX
+#define ALP_SOC_HEXSPI_DMA UINT16_MAX
+#define ALP_SOC_EMMC_DMA UINT16_MAX
+#define ALP_SOC_QUADSPI_DMA UINT16_MAX
+#define ALP_SOC_DRP_AI UINT16_MAX
+#define ALP_SOC_HELIUM_MVE UINT16_MAX
+#define ALP_SOC_NEON UINT16_MAX
+#define ALP_SOC_GPU2D UINT16_MAX
+#define ALP_SOC_DAVE2D UINT16_MAX
+#define ALP_SOC_CRYPTOCELL UINT16_MAX
+#define ALP_SOC_INLINE_AES UINT16_MAX
+#define ALP_SOC_CAU UINT16_MAX
+#define ALP_SOC_DMA2D UINT16_MAX
 
 #endif
 

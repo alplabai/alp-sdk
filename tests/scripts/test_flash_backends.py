@@ -431,18 +431,19 @@ def test_cc3501e_dry_run() -> None:
     assert "otp_program" in joined
 
 
-def test_cc3501e_real_invocation_raises_not_implemented() -> None:
-    """The body is marked NotImplementedError because TI's CLI shape
-    isn't validated upstream yet.  Caller (alp_flash.py) converts
-    that into a 'skipped' status with a clear log line."""
+def test_cc3501e_real_invocation_returns_graceful_failure() -> None:
+    """The backend now returns FlashResult(ok=False) instead of raising
+    NotImplementedError, so west alp-flash gets a clean failure message
+    rather than an unhandled exception."""
     backend = Cc3501eUsbBootloaderFlash()
     with patch("flash_backends.cc3501e_usb_bootloader.shutil.which",
                return_value="/usr/bin/cc3501e-flasher"):
-        with pytest.raises(NotImplementedError):
-            backend.flash(_ctx(
-                {"device": "/dev/ttyACM0", "mode": "ram_load"},
-                artefact="/tmp/wifi.bin",
-            ))
+        result = backend.flash(_ctx(
+            {"device": "/dev/ttyACM0", "mode": "ram_load"},
+            artefact="/tmp/wifi.bin",
+        ))
+    assert result.ok is False
+    assert "cc3501e-flasher" in result.message.lower() or "not yet public" in result.message.lower()
 
 
 def test_cc3501e_missing_tool() -> None:
@@ -679,9 +680,11 @@ def test_alp_flash_dispatch_unknown_flash_method(tmp_path) -> None:
     assert rc != 0
 
 
-def test_alp_flash_dispatch_cc3501e_not_implemented_is_skip(tmp_path) -> None:
-    """When a backend raises NotImplementedError, the dispatcher
-    should log + skip rather than failing the whole flow."""
+def test_alp_flash_dispatch_cc3501e_graceful_failure(tmp_path) -> None:
+    """When the cc3501e backend returns FlashResult(ok=False), the
+    dispatcher should count it as a failure (rc=1) rather than raising.
+    The old NotImplementedError path is gone; the backend now surfaces
+    a human-readable message instead."""
     manifest = {
         "schema_version": 1,
         "hw_info": {"sku": "E1M-V2N101"},
@@ -704,6 +707,6 @@ def test_alp_flash_dispatch_cc3501e_not_implemented_is_skip(tmp_path) -> None:
 
     import alp_flash
     with patch("alp_flash.shutil.which", return_value="/usr/bin/x"):
-        # Not a dry-run -> real call -> NotImplementedError -> skip.
+        # Not a dry-run -> real call -> FlashResult(ok=False) -> failure.
         rc = alp_flash.run(_stub_args(tmp_path, dry_run=False))
-    assert rc == 0    # skipped, not failed
+    assert rc == 1    # counted as a real failure, not a silent skip

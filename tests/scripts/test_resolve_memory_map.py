@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for `_resolve_memory_map()` in alp_project.py.
+"""Tests for `resolve_memory_map()` in alp_project.py.
 
 Covers the silicon-variant-derived path (no memory_map in preset),
 the override path (preset declares memory_map verbatim), and the
@@ -39,7 +39,7 @@ def test_aen301_derives_regions_from_e3_variant(alp_project):
         "silicon": "alif:ensemble:e3",
         "silicon_variant": "AE302F80F55D5LE",
     }
-    regions = alp_project._resolve_memory_map(preset, METADATA)
+    regions = alp_project.resolve_memory_map(preset, METADATA)
     by_name = {r["name"]: r for r in regions}
 
     # MRAM
@@ -79,7 +79,7 @@ def test_preset_with_memory_map_override_wins_verbatim(alp_project):
              "size_kib": 128, "accessible_from": ["m55_he"], "cacheable": False},
         ],
     }
-    regions = alp_project._resolve_memory_map(preset, METADATA)
+    regions = alp_project.resolve_memory_map(preset, METADATA)
     assert len(regions) == 1
     assert regions[0]["name"] == "secure_enclave_sram"
     assert regions[0]["base"] == 0x60000000
@@ -93,14 +93,14 @@ def test_silicon_variant_tbd_returns_empty(alp_project):
         "silicon": "nxp:imx9:imx93",
         "silicon_variant": "TBD",
     }
-    regions = alp_project._resolve_memory_map(preset, METADATA)
+    regions = alp_project.resolve_memory_map(preset, METADATA)
     assert regions == []
 
 
 def test_missing_silicon_returns_empty(alp_project):
     """A preset without `silicon:` shouldn't crash."""
-    assert alp_project._resolve_memory_map({}, METADATA) == []
-    assert alp_project._resolve_memory_map({"silicon_variant": "X"}, METADATA) == []
+    assert alp_project.resolve_memory_map({}, METADATA) == []
+    assert alp_project.resolve_memory_map({"silicon_variant": "X"}, METADATA) == []
 
 
 def test_v2n101_includes_a55_cluster_and_m33_sm(alp_project):
@@ -112,7 +112,7 @@ def test_v2n101_includes_a55_cluster_and_m33_sm(alp_project):
         "silicon": "renesas:rzv2n:n44",
         "silicon_variant": "R9A09G056N44GBG",
     }
-    regions = alp_project._resolve_memory_map(preset, METADATA)
+    regions = alp_project.resolve_memory_map(preset, METADATA)
     # At minimum the function shouldn't crash and should return SOMETHING
     # (V2N's variant has at least one bank declared). Looser smoke test
     # than AEN since the V2N JSON layout may be sparser pre-HiL.

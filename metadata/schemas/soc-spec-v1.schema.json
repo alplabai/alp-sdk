@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://alplab.ai/schemas/soc-spec-v1.json",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/soc-spec-v1.schema.json",
   "title": "ALP SoC Specification v1",
-  "description": "Machine-readable per-SoC specification consumed by alp-studio. Studio's per-SKU `soc_ref` (e.g. \"alif:ensemble:e3\") resolves into one of these files under metadata/socs/<vendor>/<family>/<part>.json.",
+  "description": "Machine-readable per-SoC specification consumed by alp-sdk tooling and downstream consumers (alp-studio, etc.). The SDK's per-SoM preset `silicon:` ref (e.g. \"alif:ensemble:e3\") resolves into one of these files under metadata/socs/<vendor>/<family>/<part>.json.",
   "type": "object",
   "required": [
     "soc_spec_version",
@@ -24,7 +24,7 @@
     "ref": {
       "type": "string",
       "pattern": "^[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]+$",
-      "description": "Canonical reference like \"alif:ensemble:e3\" — what alp-studio uses to look this file up."
+      "description": "Canonical reference like \"alif:ensemble:e3\" — used by the SDK loader + downstream consumers to look this file up."
     },
     "vendor": { "type": "string" },
     "family": { "type": "string" },

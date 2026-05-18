@@ -49,8 +49,6 @@ full per-(library × core × runtime) picture.
 | Display     | stub                          | stub                   | stub                      | planned |
 | Camera      | stub                          | stub (planned v0.2 MIPI CSI-2) | stub (planned v0.2) | planned |
 | GUI/LVGL    | planned                       | planned                | planned                   | planned |
-| Math        | **GA**                        | **GA**                 | **GA**                    | planned |
-| Signal      | stub                          | stub                   | stub                      | planned |
 | IoT         | stub                          | stub                   | stub                      | planned |
 
 ### Cortex-M (Zephyr)
@@ -61,9 +59,9 @@ full per-(library × core × runtime) picture.
 | Display     | **GA** (SSD1306)         | **GA** (SSD1306)         | **GA** (SSD1306)          | **GA** (SSD1306)          | stub               | stub                 | stub               |
 | Camera      | stub                     | stub                     | stub                      | stub                      | stub               | stub                 | stub               |
 | GUI/LVGL    | **GA** (re-export)       | **GA** (re-export)       | **GA** (re-export)        | **GA** (re-export)        | stub               | stub                 | stub               |
-| Math        | **GA** (re-export)       | **GA** (re-export)       | **GA** (re-export)        | **GA** (re-export)        | stub               | stub                 | stub               |
-| Signal      | stub                     | stub                     | stub                      | stub                      | stub               | stub                 | stub               |
 | IoT         | stub (real Wi-Fi+MQTT in v0.2) | stub (real Wi-Fi+MQTT in v0.2) | stub | stub | stub | stub | stub |
+
+> **Note:** CMSIS-DSP is consumed directly via `arm_math.h` from app code; the SDK does not re-export it.
 
 ## v0.2.0 — landed (peripheral expansion + capability validation)
 

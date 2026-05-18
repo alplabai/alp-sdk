@@ -35,15 +35,23 @@ it exists.
    The `id` must match the regex `^[a-z][a-z0-9_]+$` and be unique
    within the SoC.
 2. **Add the per-SoM defaults.**  In
-   `metadata/e1m_modules/<SKU>.yaml`, add three blocks:
-   - `topology:` — one entry per `cores[].id` declaring the
-     default `os:` (+ `app:` / `image:` / `machine:` / `board:` /
-     `toolchain:` as appropriate).
-   - `memory_map:` — DDR + on-chip-RAM + per-core TCM regions
-     with `accessible_from:` so the orchestrator can resolve
-     carve-outs.
-   - `mailbox:` — controller name + per-channel reservations,
+   `metadata/e1m_modules/<SKU>.yaml`, add the following blocks:
+   - `topology:` **(required)** — one entry per `cores[].id`
+     declaring `app:` + either `machine:` (Yocto) or `board:`
+     (Zephyr) + `toolchain:`.  Do **not** add an `os:` field —
+     the loader infers the OS from each core's type and declared
+     `app:` / `machine:` / `board:` fields automatically.
+   - `mailbox:` **(required when any core runs Zephyr or
+     baremetal)** — controller name + per-channel reservations,
      at minimum one channel `reserved_for: alp_default_rpmsg`.
+   - `memory_map:` **(optional — non-stock partitioning only)**
+     — DDR + on-chip-RAM + per-core TCM regions with
+     `accessible_from:` so the orchestrator can resolve
+     carve-outs.  For stock SoMs the loader auto-derives memory
+     layout from the SoC JSON `variants[].sram_banks_kb` +
+     `mram_mb`; only add this block if you need to override the
+     derived layout (e.g. non-standard DDR population or custom
+     TCM split).
 3. **Add the per-SoM `pad_routes:` block.**  Still in
    `metadata/e1m_modules/<SKU>.yaml`, declare which E1M pads and
    peripheral instances route directly to host silicon and which
@@ -136,7 +144,7 @@ Don't try to ship every library at once.  The expected order is:
 3. **Camera** (optional) — only if the SoM is used in vision designs.
 4. **IoT** (optional) — only if the SoM exposes Wi-Fi or wired networking.
 5. **GUI/LVGL** — automatic once Display is GA.
-6. **Math / Signal** — usually GA-by-construction (CMSIS-DSP scalar paths).
+6. **DSP** — usually GA-by-construction (CMSIS-DSP scalar paths via `arm_math.h` + `<alp/dsp.h>` chain).
 
 After each library reaches GA on the new SoM, flip its cell in
 `os-support-matrix.md` from `stub`/`planned` to `GA`.

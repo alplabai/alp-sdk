@@ -131,18 +131,20 @@ class Cc3501eUsbBootloaderFlash:
             )
 
         # The CLI shape above is the intended one per the §5.7 design
-        # doc, but the upstream tool isn't shipping yet.  Raise to
-        # avoid silently invoking a binary whose flags we haven't
-        # validated against the real release.
+        # doc, but the upstream tool isn't shipping yet.  Return a
+        # clean failure rather than raising so west alp-flash can
+        # report the skip gracefully instead of crashing.
         #
-        # TODO(cc3501e §5.7): once TI ships cc3501e-flasher, drop this
-        # NotImplementedError and let the subprocess.run path live.
-        raise NotImplementedError(
-            "cc3501e_usb_bootloader: tool is on PATH but the wire-level "
-            "shape isn't yet validated against TI's first public release. "
-            "Re-run with --dry-run to surface the planned command, or "
-            "follow docs/cc3501e-integration-plan.md §5.7 for the manual "
-            "bring-up procedure."
+        # TODO(cc3501e §5.7): once TI ships cc3501e-flasher and the
+        # wire-level CLI shape is validated, drop this early return and
+        # let the subprocess.run path live.
+        return FlashResult(
+            ok=False,
+            elapsed_s=time.monotonic() - start,
+            message=("cc3501e-flasher CLI is not yet public; this backend "
+                     "lands when the upstream tool stabilises.  Use the "
+                     "manual SWD path documented in docs/bring-up-aen.md "
+                     "for now."),
         )
 
 

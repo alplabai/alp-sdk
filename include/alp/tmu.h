@@ -57,7 +57,7 @@
  *       `src/zephyr/peripheral_tmu.c` performs the GD32 dispatch.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
- *      Wave-1 GD32 CORDIC TMU helpers; surface limited and may fold into <alp/dsp.h> for v1.0.
+ *      Wave-1 GD32 CORDIC TMU helpers; surface limited and consolidation with `<alp/dsp.h>` is under consideration.
  *      See docs/abi-markers.md for the convention.
  */
 

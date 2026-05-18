@@ -86,6 +86,26 @@ CAPS: list[tuple[str, callable]] = [
 ]
 
 
+# Boolean feature flags derived from each SoC's `capabilities:` block.
+# When a key is absent (sparse principle) we emit 0 — feature not present.
+# Keys match the `capabilities:` properties in metadata/schemas/soc-spec-v1.schema.json.
+BOOL_CAPS: list[str] = [
+    "xspi_dma",
+    "hexspi_dma",
+    "emmc_dma",
+    "quadspi_dma",
+    "drp_ai",
+    "helium_mve",
+    "neon",
+    "gpu2d",
+    "dave2d",
+    "cryptocell",
+    "inline_aes",
+    "cau",
+    "dma2d",
+]
+
+
 def kconfig_token(ref: str) -> str:
     """`alif:ensemble:e7` → `ALIF_ENSEMBLE_E7`."""
     return ref.upper().replace(":", "_").replace("-", "_")
@@ -96,12 +116,22 @@ def extract_caps(soc: dict[str, Any]) -> dict[str, int]:
     return {name: int(fn(p)) for name, fn in CAPS}
 
 
+def extract_bool_caps(soc: dict[str, Any]) -> dict[str, int]:
+    """Extract boolean feature flags from ``soc["capabilities"]``.
+
+    Returns a dict mapping the upper-cased flag name to 1 or 0.
+    Absent keys default to 0 (feature not present on this SoC).
+    """
+    caps = soc.get("capabilities", {}) or {}
+    return {key.upper(): (1 if caps.get(key) else 0) for key in BOOL_CAPS}
+
+
 def emit() -> str:
-    socs: list[tuple[str, str, dict[str, int]]] = []
+    socs: list[tuple[str, str, dict[str, int], dict[str, int]]] = []
     for path in sorted(META_DIR.rglob("*.json")):
         soc = json.loads(path.read_text(encoding="utf-8"))
         ref = soc["ref"]
-        socs.append((ref, kconfig_token(ref), extract_caps(soc)))
+        socs.append((ref, kconfig_token(ref), extract_caps(soc), extract_bool_caps(soc)))
 
     lines: list[str] = [
         "/**",
@@ -134,19 +164,23 @@ def emit() -> str:
         "",
     ]
 
-    for i, (ref, kc, caps) in enumerate(socs):
+    for i, (ref, kc, caps, bool_caps) in enumerate(socs):
         keyword = "if" if i == 0 else "elif"
         lines.append(f"#{keyword} defined(CONFIG_ALP_SOC_{kc})")
         lines.append(f"/* {ref} */")
         lines.append(f"#define ALP_SOC_REF_STR \"{ref}\"")
         for cap, _ in CAPS:
             lines.append(f"#define ALP_SOC_{cap} {caps[cap]}")
+        for key in BOOL_CAPS:
+            lines.append(f"#define ALP_SOC_{key.upper()} {bool_caps[key.upper()]}")
         lines.append("")
 
     lines.append("#else  /* No SoC selected — accept any config. */")
     lines.append("#define ALP_SOC_REF_STR \"unknown\"")
     for cap, _ in CAPS:
         lines.append(f"#define ALP_SOC_{cap} UINT16_MAX")
+    for key in BOOL_CAPS:
+        lines.append(f"#define ALP_SOC_{key.upper()} UINT16_MAX")
     lines.append("")
     lines.append("#endif")
     lines.append("")

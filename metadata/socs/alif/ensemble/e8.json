@@ -5,6 +5,7 @@
   "family": "Ensemble",
   "part": "E8",
   "status": "released",
+  "pending_alif_datasheet": true,
   "datasheet": {
     "version": "1.0",
     "extracted_at": "2026-05-11",

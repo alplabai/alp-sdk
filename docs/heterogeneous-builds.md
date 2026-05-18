@@ -184,8 +184,11 @@ ipc:
 - **`endpoints`** — the cores sharing this channel.  Both must have
   `os: != off`.  Exactly two; RPMsg is point-to-point today.
 - **`carve_out_kb`** — shared-memory region size in kibibytes.  The
-  orchestrator allocates it from the SoM preset's `memory_map:`,
-  preferring non-cacheable regions on SoMs with no M-class cache
+  orchestrator allocates it from the auto-derived region table
+  (from `metadata/socs/.../<part>.json variants[].sram_banks_kb` +
+  `mram_mb`) or from the explicit `memory_map:` override block if
+  the SoM preset defines one for non-stock partitioning.  Prefers
+  non-cacheable regions on SoMs with no M-class cache
   (V2N) and cacheable regions with auto-generated cache-maintenance
   hooks on SoMs that do (AEN).
 - **`name`** — stable identifier.  Becomes the resource-table label
@@ -485,5 +488,6 @@ The orchestrator writes `build/` next to the project's `board.yaml`.
   useful when you want CPU-vs-NPU-vs-M-class compute routing in one
   project.
 - **Adding a new SoM:** [`docs/porting-new-som.md`](porting-new-som.md)
-  covers authoring a SoM preset's `topology:`, `memory_map:`, and
-  `mailbox:` blocks for silicon the SDK hasn't met yet.
+  covers authoring a SoM preset's `topology:` (required),
+  `mailbox:` (required), and `memory_map:` (optional — non-stock
+  partitioning only) blocks for silicon the SDK hasn't met yet.

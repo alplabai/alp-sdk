@@ -102,7 +102,7 @@ One commit (`§D.lib.loader`) adds the loader hook itself:
 
 - Extend `scripts/alp_project.py` (~80 LoC) to read each
   enabled library's `hw-backends.yaml` and cross-reference
-  with the active SoM's `metadata/soms/<sku>.yaml`
+  with the active SoM's `metadata/e1m_modules/<SKU>.yaml`
   `capabilities:` block.  Emit the highest-priority matching
   `CONFIG_*` knob per accelerator class.
 - Fill `capabilities:` blocks for each existing SoM

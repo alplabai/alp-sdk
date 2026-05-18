@@ -6,11 +6,12 @@ Doxygen-coverage audit -- walks include/alp/*.h and flags every
 public function declaration that lacks a `@brief` (or `\\brief`) tag
 in the preceding doc-comment block.
 
-The pr-doxygen.yml workflow runs Doxygen with WARN_AS_ERROR=NO
-today; the v1.0 acceptance bar (per VERSIONS.md) is "Doxygen build
-passes with zero warnings", which means every public function needs
-a `@brief`.  This script lets us drive coverage to zero
-incrementally without waiting for Doxygen to be installed locally.
+The pr-doxygen.yml workflow now runs Doxygen with WARN_AS_ERROR=YES
+(FAIL_ON_WARNINGS gate, enabled since commit 718d81d).  Every public
+function therefore needs a `@brief` or the CI Doxygen build fails.
+This script provides incremental per-function gap detection that
+catches missing tags BEFORE the Doxygen gate fails — useful for
+driving coverage to zero without needing Doxygen installed locally.
 
 Heuristic:
   * A function declaration looks like `<type> name(...);` on a line

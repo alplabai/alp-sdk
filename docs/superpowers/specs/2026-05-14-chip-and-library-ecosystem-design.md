@@ -208,7 +208,7 @@ on every backend and best performance on each.
    `metadata/library-profiles/<name>/hw-backends.yaml`.
 2. `scripts/alp_project.py` cross-references the library's
    declared accelerators against the active SoM's
-   `metadata/soms/<sku>.yaml` `capabilities:` block and emits
+   `metadata/e1m_modules/<SKU>.yaml` `capabilities:` block and emits
    the matching `CONFIG_*` knobs in addition to the library's
    own `CONFIG_*`.
 3. Every library MUST have a working pure-software fallback
@@ -306,7 +306,7 @@ wires the eight underlying backends.
 - One `hw-backends.yaml` per Tier 1 library: 25 files,
   hand-written, ~30–60 LoC each.
 - SoM capability blocks already exist in
-  `metadata/soms/*.yaml`; one additive pass to fill
+  `metadata/e1m_modules/*.yaml`; one additive pass to fill
   `capabilities:` for each existing SoM (AEN-DK, AEN-CARRIER,
   V2N-DEV, V2N-M101, V2N-M102, GD32-Discovery, etc.).
 - Backend Kconfig knobs (`CONFIG_ALP_<LIB>_<BACKEND>`) added

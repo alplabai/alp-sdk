@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for `_resolve_capabilities()` in alp_project.py.
+"""Tests for `resolve_capabilities()` in alp_project.py.
 
 Covers:
   - Happy-path silicon merge (SoC side keys present in result).
@@ -76,7 +76,7 @@ def test_soc_caps_appear_in_merged_result(alp_project, tmp_path):
         "sku": "E1M-TEST",
         "silicon": "testvendor:testfam:testpart",
     }
-    result = alp_project._resolve_capabilities(preset, meta)
+    result = alp_project.resolve_capabilities(preset, meta)
 
     assert result["drp_ai"] is True
     assert result["neon"] is True
@@ -94,7 +94,7 @@ def test_som_override_wins_over_soc_default(alp_project, tmp_path):
         # SoM says cau is available via bridge
         "capabilities": {"cau": True},
     }
-    result = alp_project._resolve_capabilities(preset, meta)
+    result = alp_project.resolve_capabilities(preset, meta)
 
     # SoM wins
     assert result["cau"] is True
@@ -118,7 +118,7 @@ def test_som_only_extension_keys_survive(alp_project, tmp_path):
             "tmu_fac": True,
         },
     }
-    result = alp_project._resolve_capabilities(preset, meta)
+    result = alp_project.resolve_capabilities(preset, meta)
 
     assert result["optiga_trust_m"] is True
     assert result["tmu_cordic"] is True
@@ -134,13 +134,13 @@ def test_missing_silicon_returns_only_som_caps(alp_project, tmp_path):
         "sku": "E1M-TEST",
         "capabilities": {"optiga_trust_m": True},
     }
-    result = alp_project._resolve_capabilities(preset, tmp_path)
+    result = alp_project.resolve_capabilities(preset, tmp_path)
     assert result == {"optiga_trust_m": True}
 
 
 def test_both_sides_absent_returns_empty(alp_project, tmp_path):
     """Preset with no silicon and no capabilities returns {}."""
-    result = alp_project._resolve_capabilities({}, tmp_path)
+    result = alp_project.resolve_capabilities({}, tmp_path)
     assert result == {}
 
 
@@ -151,7 +151,7 @@ def test_unknown_silicon_ref_returns_only_som_caps(alp_project, tmp_path):
         "silicon": "unknown:vendor:part",
         "capabilities": {"custom_key": True},
     }
-    result = alp_project._resolve_capabilities(preset, tmp_path)
+    result = alp_project.resolve_capabilities(preset, tmp_path)
     assert result == {"custom_key": True}
 
 
@@ -173,7 +173,7 @@ def test_v2n101_real_soc_drp_ai_true_and_cau_override(alp_project):
             "tmu_fac": True,
         },
     }
-    result = alp_project._resolve_capabilities(preset, METADATA)
+    result = alp_project.resolve_capabilities(preset, METADATA)
 
     # SoC-side facts
     assert result["drp_ai"] is True
@@ -202,7 +202,7 @@ def test_aen701_real_soc_silicon_caps_present(alp_project):
         "silicon": "alif:ensemble:e7",
         "capabilities": {"optiga_trust_m": True},
     }
-    result = alp_project._resolve_capabilities(preset, METADATA)
+    result = alp_project.resolve_capabilities(preset, METADATA)
 
     assert result["helium_mve"] is True
     assert result["neon"] is True

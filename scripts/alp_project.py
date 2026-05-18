@@ -257,7 +257,7 @@ def _compose_route(
     return out
 
 
-def _resolve_memory_map(
+def resolve_memory_map(
     sku_preset: dict[str, Any],
     metadata_root: Path,
 ) -> list[dict[str, Any]]:
@@ -350,7 +350,7 @@ def _resolve_memory_map(
     return regions
 
 
-def _resolve_capabilities(
+def resolve_capabilities(
     sku_preset: dict[str, Any],
     metadata_root: Path,
 ) -> dict[str, Any]:
@@ -362,7 +362,7 @@ def _resolve_capabilities(
 
     Precedence:
       1. Resolve the SoC ref via the ``silicon:`` field (same path used by
-         ``_resolve_silicon_variant`` and ``_resolve_memory_map``).
+         ``_resolve_silicon_variant`` and ``resolve_memory_map``).
       2. Read ``soc["capabilities"]`` (defaults to ``{}`` when absent --
          older SoC JSONs that pre-date this field continue to work).
       3. Read ``sku_preset.get("capabilities", {})``.
@@ -438,7 +438,7 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
     repo_root = Path(__file__).resolve().parent.parent
 
     # Resolve the SKU's `silicon:` ref and merged capabilities (SoC JSON
-    # defaults + SoM-level overrides) via _resolve_capabilities().  This
+    # defaults + SoM-level overrides) via resolve_capabilities().  This
     # replaces the former inline YAML text-parser so that silicon-determined
     # capabilities removed from SoM YAMLs (Task 3, slice 3b) continue to
     # resolve from the SoC JSON that sibling Agent D populated.
@@ -449,7 +449,7 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
         sku_preset = _load_yaml(sku_path) or {}
         silicon_ref = sku_preset.get("silicon")
 
-    merged_caps: dict[str, Any] = _resolve_capabilities(sku_preset, repo_root / "metadata")
+    merged_caps: dict[str, Any] = resolve_capabilities(sku_preset, repo_root / "metadata")
 
     def _cap_truthy(name: str) -> bool:
         v = merged_caps.get(name)
@@ -460,7 +460,7 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
         if isinstance(v, int):
             return v > 0
         # String value from a YAML-loaded dict (should not occur after
-        # _resolve_capabilities, but guard for safety).
+        # resolve_capabilities, but guard for safety).
         sv = str(v).lower()
         if sv in ("true", "yes"):
             return True

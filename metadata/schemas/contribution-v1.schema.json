@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://alplab.ai/schemas/contribution-v1.json",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/contribution-v1.schema.json",
   "title": "alp-sdk-community contribution metadata (v1)",
   "description": "Per-contribution metadata.yaml schema for chips and libraries hosted in the alplabai/alp-sdk-community repo (Tier 2).  alp-sdk's CI (pr-metadata-validate) checks every touched contribution's metadata.yaml against this schema before allowing merge.  Tier 1 (in-tree alp-sdk chips) is governed by metadata/schemas/board-config-v2.schema.json instead.",
   "type": "object",

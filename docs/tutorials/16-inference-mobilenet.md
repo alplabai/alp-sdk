@@ -215,6 +215,8 @@ and switch at runtime based on `alp_hw_info_read()`.
 V2M101 ships both DRP-AI3 (on the V2N host silicon) and DEEPX
 DX-M1 (on-module via PCIe).  The SoM preset declares both:
 
+> **Note**: the `capabilities:` block in a SoM preset is an SDK-internal field — the loader reads it (merged with the SoC JSON's `capabilities:` per silicon defaults) and surfaces the merged dict to backends. You never write `capabilities:` in your own `board.yaml`. Shown here for illustration only.
+
 ```yaml
 # metadata/e1m_modules/E1M-V2M101.yaml
 capabilities:

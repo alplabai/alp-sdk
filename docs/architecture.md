@@ -15,8 +15,8 @@ SDK on top of ARM CMSIS.
 │  Zephyr RTOS  /  Yocto Linux  /  Bare Metal                 │  ← OS, picked per variant
 ├─────────────────────────────────────────────────────────────┤
 │  ALP SDK                                                    │  ← THIS REPO
-│    Libraries:  GUI/LVGL · Display · Camera · Math ·         │
-│                Signal Processing · IoT · Peripherals        │
+│    Libraries:  GUI/LVGL · Display · Camera · DSP ·          │
+│                IoT · Peripherals                            │
 │    Vendor wrappers:  Alif HAL · Renesas RZ · ...            │
 │    Chip drivers:  lsm6dso · ssd1306 · ov5640 · bme280 · ... │
 │    Chip metadata: metadata/socs/<vendor>/<family>/<part>    │
@@ -89,7 +89,7 @@ alp-sdk/
 ├── zephyr/
 │   ├── module.yml                   # makes the repo importable as a Zephyr module
 │   └── Kconfig                      # ALP_SDK_* options exposed to Zephyr apps
-├── ci/                              # GitHub Actions workflows (mirrored into .github/workflows/)
+├── .github/workflows/               # GitHub Actions workflows
 ├── meta-alp-sdk/                    # Yocto BSP layer (V2N / V2N-M1 / iMX93 SKUs)
 └── tests/                           # Unity / ztest smoke tests, QEMU + real silicon
 ```
@@ -133,7 +133,7 @@ not others.
 | Display          | `alp/display.h`      | Zephyr `display_*` (SSD1306 first).                            | v0.1 surface; full impl v0.3 |
 | Camera           | `alp/camera.h`       | Zephyr `video_*` API.  V2N MIPI CSI-2 wrapper in v0.2.          | v0.1 stub (NOSUPPORT) |
 | GUI/LVGL         | `alp/gui.h`          | Upstream LVGL with an ALP `lv_conf.h`.                         | Header re-export only — no custom widgets |
-| Math / DSP       | _(no ALP wrapper)_   | Use CMSIS-DSP (`arm_math.h`) directly from app code; ALP SDK does not re-export it.  SDK internals may pull CMSIS-DSP in for filtering / FFT inside `<alp/audio.h>` etc. when `ALP_HAS_CMSIS_DSP` is set. | Removed in pre-v0.1; `<alp/math.h>` and `<alp/signal.h>` were thin re-exports that added no value. |
+| DSP              | `alp/dsp.h`          | Composable chain primitives — FIR/IIR/FFT/WINDOW via `alp_dsp_chain_t`; CMSIS-DSP SW fallback when `ALP_HAS_CMSIS_DSP` is set; GD32 FAC/CORDIC HW path on V2N via the bridge.  CMSIS-DSP low-level math (`arm_math.h`) consumed directly from app code — the SDK does not re-export it. | v0.5 surface (Wave-2 DSP); see ADR 0007. |
 | IoT              | `alp/iot.h`          | Zephyr `net_*` + MQTT client (AEN); Linux net + libmosquitto (Yocto). | v0.1 surface; Yocto MQTT cleartext + TLS (`mqtts://` via `mosquitto_tls_set`) code complete via libmosquitto (v0.4 prep, `pkg_check_modules`-gated), **broker roundtrip untested** -- see [test-plan.md](test-plan.md); Zephyr Wi-Fi+MQTT v0.4 |
 | Audio            | `alp/audio.h`        | Zephyr `audio_dmic` + `i2s_*` chains; ALSA `snd_pcm_*` on Yocto.| v0.1 surface; Zephyr backend v0.2; Yocto ALSA backend code complete v0.4-prep (`pkg_check_modules(alsa)`-gated), real capture/playback gates on `hil-yocto` |
 | BLE              | `alp/ble.h`          | Zephyr `bt` host stack (peripheral + central + GATT).           | v0.1 surface; impl v0.3 |
@@ -362,7 +362,7 @@ integration contract is:
   `<alp/chips/...>.h`, and (for camera / IoT / GUI blocks) the
   per-library `<alp/...>` headers.
 - The studio reads `metadata/e1m_modules/<SKU>.yaml` (SoM preset,
-  including the `pad_routes:` block landing in slice 2) and
+  including the `pad_routes:` block added in slice 2) and
   `metadata/socs/<vendor>/<family>/<part>.json` (chip datasheet) to
   resolve a project's active SoM + SoC and tailor codegen to the
   inventory the silicon exposes.  alp-sdk's metadata is alp-studio's
@@ -446,13 +446,13 @@ for the full rationale and edge-case guidance.
 ## Sources of truth (do not duplicate)
 
 - HW pinout — [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
-  (v1.0).  See [`docs/e1m-pinout.md`](e1m-pinout.md) for how the
+  (v1.1).  See [`docs/e1m-pinout.md`](e1m-pinout.md) for how the
   spec, the per-SoM pad-routing YAMLs, and the SDK's opaque `bus_id` /
   `pin_id` integers all relate.
 - **Per-SoM E1M pad → silicon-pin routing** —
   [`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/) in
-  this repo (the `pad_routes:` block, landing in slice 2 of the
-  unification work).  Earlier drafts of this doc placed the routes
+  this repo (the `pad_routes:` block, introduced in slice 2 of the
+  metadata unification work).  Earlier drafts of this doc placed the routes
   in `alp-studio/library/_soms/<id>/manifest.json`; that direction
   was reversed on 2026-05-18 to keep all generator inputs in one
   repo.  alp-studio's pin allocator now reads these YAMLs directly.

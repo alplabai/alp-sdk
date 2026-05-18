@@ -8,7 +8,7 @@
 # Two equivalent ways to express this:
 #
 #   (a) Reference E1M-EVK + override in board.yaml (lightweight).
-#       See the example block in metadata/carriers/e1m-evk.yaml
+#       See the example block in metadata/carriers/E1M-EVK/board.yaml
 #       header.
 #
 #   (b) Fork this YAML to your own carrier preset (heavyweight,

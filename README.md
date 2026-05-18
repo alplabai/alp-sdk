@@ -235,7 +235,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 | Inference dispatcher | `inference.h` — backend selector (auto / cpu / ethos_u / drpai / deepx_dx) + tensor-arena management.  `ethos_u` covers U55 (every Alif Ensemble SKU), U85 (E4 / E6 / E8 only -- Transformer-capable), and U65 (i.MX 93); the project loader picks per-NPU driver gates from the SoM's silicon ref. |
 | Multi-proc / IPC | `mproc.h` — mailbox + shared memory + hardware semaphore |
 | Hardware info | `hw_info.h` — 128-byte EEPROM manifest + BOARD_ID ADC + `assert_matches_build()` |
-| Chip drivers | 20+ under `chips/` — LSM6DSO, BMI323, ICM-42670, BMP581, INA236, TMP112, RV-3028-C7, 24C128, CC3501E, TCAL9538, button-LED helper, … |
+| Chip drivers | **80+** under `chips/` — LSM6DSO, BMI323, ICM-42670, BMP581, INA236, TMP112, RV-3028-C7, 24C128, CC3501E, TCAL9538, button-LED helper, … |
 | User libraries (via `libraries:` in board.yaml) | ETL · fmt · nlohmann_json · doctest · LVGL · MbedTLS · CMSIS-DSP · LittleFS |
 
 ### OS backend
@@ -350,7 +350,7 @@ All consumer-facing headers live under `include/alp/`:
 | `alp/soc_caps.h`     | (generated) active-SoC capability constants |
 | `alp/e1m_pinout.h`   | E1M-spec instance IDs + portability bounds |
 | `alp/boards/<carrier>.h` | Carrier-feature names (e.g. EVK pin map) |
-| `chips/<part>/`      | 20+ chip drivers, opt-in via `board.yaml` `carrier.populated:` |
+| `chips/<part>/`      | **80+** chip drivers, opt-in via `board.yaml` `carrier.populated:` |
 
 Per-row implementation status (which backend, which OS, HW-verified
 vs. code-merged-pending) lives in
@@ -441,7 +441,7 @@ west alp-build examples/rpmsg-v2n
 alp-sdk/
 ├── include/alp/     # PUBLIC headers (the consumer surface)
 ├── src/             # common/ + zephyr/ + baremetal/ + yocto/ backends
-├── chips/           # 20+ opt-in chip drivers
+├── chips/           # 80+ opt-in chip drivers
 ├── vendors/         # per-SoM HAL bindings (alif, renesas-rzv2n, nxp-imx93, deepx-dxm1)
 ├── metadata/        # schemas, templates, e1m_modules/E1M-<MPN>.yaml, carriers/, socs/
 ├── scripts/         # board.yaml loader, validators, soc_caps + ABI generators, EEPROM packer

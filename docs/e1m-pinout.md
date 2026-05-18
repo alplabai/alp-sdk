@@ -144,17 +144,17 @@ It does **not** specify:
 
 ## Version pinning
 
-The SDK's v0.1 release is built against **e1m-spec v1.0** (the
-first public release, currently in preparation).  Once tagged, the
-pin will be referenced explicitly in `west.yml` so a `west update`
-on this SDK pulls a known-compatible spec revision.
+The SDK's v0.1 release is built against **e1m-spec v1.1** (the
+first public release).  The pin is referenced explicitly in
+`west.yml` so a `west update` on this SDK pulls a known-compatible
+spec revision.
 
 If you're adding support for a new SoM or carrier board:
 
 1. The pad-level routing of your SoM goes into a new entry under
    [`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/)
-   in this repo (the `pad_routes:` block, landing in slice 2 of
-   the metadata unification work).  See
+   in this repo (the `pad_routes:` block, introduced as of slice 2
+   of the metadata unification work).  See
    [`e1m-spec/examples/alp-aen.som-manifest.json`](https://github.com/alplabai/e1m-spec/blob/main/examples/alp-aen.som-manifest.json)
    for the shape (the spec's JSON example translates 1:1 into the
    YAML block).
