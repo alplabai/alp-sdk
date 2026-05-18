@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: timer-periodic-interrupt
+  description: |
+    Per-peripheral example for Counter (timer) + GPIO.  Schedules
+    a re-arming alarm every 100 ms; ISR sets a flag, main thread
+    drains the flag and toggles the user LED.  Demonstrates the
+    recommended ISR-safety pattern (no printf from ISR -- defer
+    via a flag).
+
+tests:
+  alp_sdk.example.timer_periodic_interrupt:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - counter
+      - gpio
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[timer\\] done"

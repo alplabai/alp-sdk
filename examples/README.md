@@ -34,21 +34,29 @@ These work on every E1M-X SoM family.  Good starting points.
 
 | Directory                    | What it shows                                                            |
 |------------------------------|--------------------------------------------------------------------------|
+| `hello-world`                | Minimal "first program" -- no peripherals; just a printf heartbeat.       |
 | `gpio-button-led`            | GPIO open + configure (input + output); the canonical first build.       |
 | `i2c-scanner`                | Walk an I2C bus + report devices that ACK.                               |
+| `i2c-master`                 | Read a known I2C device (TMP112) at a known address.                     |
+| `i2c-slave`                  | Slave-mode shape + SDK gap notice (master-only today; v0.7 lands slave). |
 | `pwm-led-fade`               | PWM channel open + sweep duty cycle.                                     |
 | `adc-voltmeter`              | Sample an ADC channel; convert raw → millivolts.                         |
 | `uart-echo`                  | Open a UART; loop received bytes back to TX.                             |
+| `uart-hello-world`           | Canonical "printf via UART" walkthrough -- producer-only counterpart.     |
 | `uart-rx-ringbuf`            | Byte-granular IRQ-driven RX into a ring buffer (no polling).             |
 | `rtc-clock`                  | Set + read the wall clock.                                               |
 | `counter-alarm`              | Free-running counter + alarm callback at a configured value.             |
+| `timer-periodic-interrupt`   | Re-arming periodic alarm + ISR-safe coordination pattern (flag + drain). |
 | `qenc-readout`               | Quadrature-encoder pulse counter.                                        |
 | `wdt-feed`                   | Watchdog open + feed cadence; demonstrates reset-on-stall.               |
 | `spi-loopback`               | SPI MOSI ↔ MISO loopback (jumper between the two pins).                  |
+| `spi-master`                 | Discrete SPI master -- write / transceive / read patterns.               |
+| `spi-slave`                  | Slave-mode shape + SDK gap notice (master-only today; v0.7 lands slave). |
 | `can-loopback`               | CAN(-FD) frame TX + self-reception via loopback mode.                    |
 | `i2s-tone`                   | Generate a tone on an I2S DAC.                                           |
 | `audio-loopback`             | PDM-in → I2S-out audio pass-through (low-latency).                       |
 | `iot-connected-camera`       | End-to-end IoT: capture frame, publish to MQTT.                          |
+| `dac-waveform`               | Generate a sine wave on `E1M_X_DAC0` (E1M-X form factor; V2N today).      |
 
 ## Heterogeneous-OS examples
 

@@ -1,0 +1,37 @@
+# board.yaml -- per-app project configuration for the
+# timer-periodic-interrupt example.
+#
+# Canonical "periodic ISR + main-thread coordination" example.
+# Registers an alarm callback that fires every 100 ms; the
+# callback flips a flag, the main thread drains the flag and
+# toggles a GPIO LED.  Teaches the recommended ISR-safety
+# pattern: never call printf or log from an ISR -- defer to the
+# main thread via a flag or work queue.
+#
+# Customer workflow: copy this directory, change `som.sku` to
+# your MPN, edit `carrier.name` if you're on a non-EVK board,
+# and `west build`.  CMakeLists.txt invokes
+# scripts/alp_project.py at configure time + layers the
+# generated alp.conf over prj.conf via OVERLAY_CONFIG.
+
+schema_version: 2
+
+som:
+  sku: E1M-AEN701
+
+carrier:
+  name: E1M-EVK
+
+cores:
+  m55_hp:
+    app: ./src
+    # Two peripheral subsystems exercised by this example.  The
+    # loader translates the list to:
+    #   CONFIG_COUNTER=y  -- backs alp_counter_*
+    #   CONFIG_GPIO=y     -- backs alp_gpio_*
+    peripherals:
+      - counter
+      - gpio
+
+diagnostics:
+  log_level: info

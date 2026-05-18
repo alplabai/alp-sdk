@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: hello-world
+  description: |
+    Minimal "first program" example.  Prints a periodic heartbeat
+    so customers can verify their toolchain + flash flow + log
+    console before tackling peripheral wiring.
+
+tests:
+  alp_sdk.example.hello_world:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - hello-world
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[hello\\] done"

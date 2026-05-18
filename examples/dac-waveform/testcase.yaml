@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: dac-waveform
+  description: |
+    Per-peripheral example for DAC.  Generates a sine wave on
+    E1M_X_DAC0 (V2N family GD32-bridged output).  Walks a 32-point
+    sine LUT at a configurable sample rate.  build_only on
+    native_sim -- no DAC controller available.
+
+tests:
+  alp_sdk.example.dac_waveform:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - dac
+      - v2n
+    build_only: true

@@ -1,0 +1,25 @@
+/*
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * One emulated SPI bus exposed via the alp-spi0 alias.  No emul
+ * slave targets are attached so MISO reads back 0x00 on every
+ * transfer -- the write / transceive / read path still runs and
+ * the harness latches on the `[spi-master] done` marker.
+ */
+
+/ {
+    aliases {
+        alp-spi0 = &spi0_emul;
+    };
+
+    soc {
+        spi0_emul: spi@200 {
+            compatible = "zephyr,spi-emul-controller";
+            status = "okay";
+            reg = <0 0x200 4>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+        };
+    };
+};

@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: i2c-slave
+  description: |
+    Per-peripheral example for I2C slave mode.  As of v0.6 the
+    ALP SDK <alp/peripheral.h> surface is master-only; this
+    example documents the API gap, stakes out the proposed
+    slave-mode shape, and exits with the NOSUPPORT diagnostic.
+
+tests:
+  alp_sdk.example.i2c_slave:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - i2c
+      - api-gap
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[i2c-slave\\] done"

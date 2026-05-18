@@ -1,0 +1,46 @@
+# board.yaml -- per-app project configuration for the
+# dac-waveform example.
+#
+# Generates a sine wave on DAC0 via the E1M-X GD32-bridged DAC.
+# Base E1M (35x35 mm) doesn't expose a DAC output pad; this example
+# targets E1M-X form-factor SoMs (V2N family) where the DAC is
+# physically routed to ANA_OUT0 / ANA_OUT1.
+#
+# The DAC is exposed through the same <alp/adc.h> header as ADCs --
+# both are "analog converters" from the SDK's perspective.  Hence
+# the `adc` entry in peripherals (no separate `dac` token).  On V2N
+# the SDK dispatches DAC writes through the on-module GD32G553
+# supervisor bridge automatically; customer code never sees the
+# dispatch.
+#
+# Customer workflow: copy this directory, change `som.sku` to
+# your MPN, edit `carrier.name` if you're on a non-EVK board,
+# and `west build`.  CMakeLists.txt invokes
+# scripts/alp_project.py at configure time + layers the
+# generated alp.conf over prj.conf via OVERLAY_CONFIG.
+
+schema_version: 2
+
+som:
+  sku: E1M-V2N101
+
+carrier:
+  name: E1M-X-EVK
+
+cores:
+  # The A55 Linux cluster has nothing to do in this DAC example --
+  # mark it `os: "off"` so the orchestrator doesn't spin up a Yocto
+  # build for it.  The M33 system-manager runs the demo.
+  a55_cluster:
+    os: "off"
+  m33_sm:
+    app: ./src
+    # The DAC half of <alp/adc.h> is enabled by the `adc` peripheral
+    # token (no separate `dac` token in the board.yaml schema today).
+    # On V2N the GD32 supervisor singleton auto-initialises and
+    # routes alp_dac_* through the bridge without further config.
+    peripherals:
+      - adc
+
+diagnostics:
+  log_level: info
