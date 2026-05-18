@@ -63,7 +63,10 @@ This is the path that matches GitHub Actions exactly.
 4. **Hook your alp-sdk checkout in via `EXTRA_ZEPHYR_MODULES`.**
    Your repo lives on the Windows side; WSL sees it under
    `/mnt/c/Users/<you>/Documents/GitHub/alp-sdk`.  Add the
-   following lines to `~/.bashrc` so every shell has them:
+   following lines to your shell rc file (`<your-shell-rc>` --
+   see [`docs/cross-platform-setup.md`](cross-platform-setup.md)
+   section 5 for the per-shell file name on each OS) so every
+   shell has them:
    ```sh
    export ZEPHYR_BASE=$HOME/zephyrproject/zephyr
    export ZEPHYR_TOOLCHAIN_VARIANT=host

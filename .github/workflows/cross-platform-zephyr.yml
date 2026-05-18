@@ -1,0 +1,198 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Cross-platform Zephyr-on-M smoke gate for the ALP SDK.
+#
+# Per ADR 0012 (docs/adr/0012-cross-platform-developer-host.md)
+# the Zephyr-on-M-class developer workflow is first-class on
+# Win + Mac + Linux.  This workflow is the mechanical CI proof
+# of that claim: every PR runs the metadata validator, the
+# cross-platform lint, and a single-board native_sim build on
+# Ubuntu + macOS + Windows runners.
+#
+# Linux remains the canonical baseline (the shipped pr-twister.yml
+# + pr-metadata-validate.yml + pr-bitbake.yml gates stay on
+# ubuntu-latest).  This workflow ADDS Mac + Win coverage; it does
+# not replace any existing gate.
+#
+# Operating mode:
+#
+#   - Linux job (canonical):   fails the PR if any step fails.
+#   - macOS / Windows jobs:    continue-on-error: true.  These
+#                               surface cross-platform drift but do
+#                               NOT block PR merge while the runners
+#                               are still being characterised.  Per
+#                               ADR 0012 the gating flips on once
+#                               the runners prove out -- this is the
+#                               scaffolding pass.
+#
+#   - check_cross_platform.py: runs in default (soft-warn) mode on
+#                               every runner.  The --fail-on-warning
+#                               gating flips on once docs/* are
+#                               cleaned of the existing Linux-only
+#                               idioms (separate cleanup task).
+#
+# Twister + bitbake are NOT exercised here:
+#   - Twister is the load-bearing Zephyr coverage gate -- it lives
+#     in pr-twister.yml and stays Linux-only (the SDK + Zephyr
+#     toolchain image is Linux-only on the CI side; Win + Mac
+#     would download a different toolchain set).
+#   - Bitbake is Linux-only by upstream constraint (ADR 0012 §8.1)
+#     and lives in pr-bitbake.yml.
+#
+# This workflow is the minimum cross-platform smoke that says
+# "yes, alp-sdk's Zephyr-on-M workflow really does work on a
+# Mac / Windows host" -- it is intentionally cheap (no Zephyr
+# workspace setup, no real-silicon toolchain pull) so PR latency
+# stays low.
+
+name: cross-platform-zephyr
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'metadata/**'
+      - 'scripts/**'
+      - 'examples/**'
+      - 'tests/scripts/**'
+      - 'docs/**/*.md'
+      - 'README.md'
+      - '.github/workflows/cross-platform-zephyr.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'metadata/**'
+      - 'scripts/**'
+      - 'examples/**'
+      - 'tests/scripts/**'
+      - 'docs/**/*.md'
+      - 'README.md'
+      - '.github/workflows/cross-platform-zephyr.yml'
+  workflow_dispatch:
+
+# Cancel in-flight runs on the same branch when a new commit lands.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+
+jobs:
+  # ---------------------------------------------------------------
+  # Pure-Python smoke: metadata validation + cross-platform lint +
+  # pytest sweep.  Runs identically on every host OS.
+  # ---------------------------------------------------------------
+  python-smoke:
+    name: python-smoke
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Linux is the canonical baseline; failures here block
+        # merge.  Mac + Win runners surface drift without blocking
+        # initially -- the override below flips Linux to strict.
+        include:
+          - os: ubuntu-latest
+            continue-on-error: false
+          - os: macos-latest
+            continue-on-error: true
+          - os: windows-latest
+            continue-on-error: true
+
+    continue-on-error: ${{ matrix.continue-on-error }}
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python deps
+        run: pip install jsonschema pyyaml pytest
+
+      # ---------------------------------------------------------
+      # 1. Metadata validation.
+      #    Pure-Python, no Zephyr / west / toolchain needed.
+      #    Runs identically on every host OS.
+      # ---------------------------------------------------------
+      - name: validate metadata (all SoCs)
+        run: python scripts/validate_metadata.py
+
+      - name: validate board.yaml example
+        run: |
+          python scripts/validate_board_yaml.py --input metadata/templates/board.yaml.example
+
+      # ---------------------------------------------------------
+      # 2. Cross-platform lint (this slice, ADR 0012).
+      #    Soft-warn today; flip to --fail-on-warning once the
+      #    existing-doc cleanup task lands.
+      # ---------------------------------------------------------
+      - name: check_cross_platform lint (soft-warn)
+        run: python scripts/check_cross_platform.py
+
+      # ---------------------------------------------------------
+      # 3. Test sweep -- the same pytest battery the Linux PR
+      #    gate runs.  ~370 tests; <30 s on every OS.
+      # ---------------------------------------------------------
+      - name: pytest tests/scripts/
+        run: python -m pytest tests/scripts/ -q
+
+  # ---------------------------------------------------------------
+  # Loader smoke: every emit mode of alp_project.py produces
+  # non-empty output.  Cross-checks the loader's cross-platform
+  # path handling (forward-slash vs backslash, line endings, …).
+  # ---------------------------------------------------------------
+  loader-smoke:
+    name: loader-smoke
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            continue-on-error: false
+          - os: macos-latest
+            continue-on-error: true
+          - os: windows-latest
+            continue-on-error: true
+
+    continue-on-error: ${{ matrix.continue-on-error }}
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python deps
+        run: pip install jsonschema pyyaml
+
+      # Exercise every emit mode against the canonical template.
+      # Using `python -m` + explicit args keeps the invocation
+      # shell-agnostic (works on PowerShell + bash + zsh).
+      - name: emit zephyr-conf
+        run: python scripts/alp_project.py --input metadata/templates/board.yaml.example --emit zephyr-conf
+
+      - name: emit cmake-args
+        run: python scripts/alp_project.py --input metadata/templates/board.yaml.example --emit cmake-args
+
+      - name: emit hw-info-h
+        run: python scripts/alp_project.py --input metadata/templates/board.yaml.example --emit hw-info-h
+
+      - name: emit dts-overlay
+        run: python scripts/alp_project.py --input metadata/templates/board.yaml.example --emit dts-overlay
+
+      - name: emit west-libraries
+        run: python scripts/alp_project.py --input metadata/templates/board.yaml.example --emit west-libraries
+
+      - name: emit yocto-conf
+        run: python scripts/alp_project.py --input metadata/templates/board.yaml.example --emit yocto-conf

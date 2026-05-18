@@ -3,6 +3,15 @@
 #
 # scripts/test-all.sh
 #
+# Cross-platform scope: this script targets Linux + macOS (POSIX
+# shells).  Windows users should invoke it via WSL2 or run the
+# underlying commands by hand -- the individual stages
+# (`cmake --build`, `west twister`, `python -m pytest`,
+# `clang-format`, `python scripts/validate_metadata.py`,
+# `doxygen`) are all cross-platform on their own; this script is
+# just a one-shot wrapper.  See docs/cross-platform-setup.md
+# section 4 for native PowerShell equivalents.
+#
 # Single-command verifier for the ALP SDK.  Runs every test surface
 # the project has locally-runnable (no HIL):
 #

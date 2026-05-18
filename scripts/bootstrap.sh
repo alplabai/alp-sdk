@@ -3,6 +3,14 @@
 #
 # scripts/bootstrap.sh
 #
+# Cross-platform scope: this script targets Linux + macOS (POSIX
+# shells).  Windows users should invoke it via WSL2 (Ubuntu-22.04
+# is the tested distro) or run the equivalent commands by hand --
+# see docs/cross-platform-setup.md section 4 for the native
+# PowerShell equivalents (winget + scoop install of west, the
+# Zephyr SDK, the Python bits) that get you the same workspace
+# without bash.
+#
 # Fresh-clone bootstrap for the ALP SDK.  Sets up a Zephyr workspace
 # beside the alp-sdk checkout, installs Python deps, and prints the
 # apt/brew commands for the optional native libraries the Yocto-side
