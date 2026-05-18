@@ -8,7 +8,7 @@
  * @brief ALP SDK I²S / SAI bus abstraction.
  *
  * The audio-data bus underneath `<alp/audio.h>` and the PDM helper in
- * `<alp/chips/pdm_mic.h>`.  Apps that want to talk directly to a DAC,
+ * `<alp/blocks/pdm_mic.h>`.  Apps that want to talk directly to a DAC,
  * a digital-mic array, or a SAI-attached codec come here.
  *
  * Backends:

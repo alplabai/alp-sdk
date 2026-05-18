@@ -67,7 +67,18 @@ alp_status_t alp_ethosu_n93_register(void)
  *         Vela's `--accelerator-config` flag was set to when the
  *         model in `cfg.model_data` was compiled; mismatch is a
  *         user-side error today (no runtime cross-check yet).
+ *
+ * @note   Cross-checked at compile time against the per-variant
+ *         CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U65 switch emitted by the
+ *         orchestrator (G-1 wiring).  If a future build flips this
+ *         file on without setting U65 the assert fires immediately,
+ *         catching Kconfig drift before it reaches HIL.
  */
+#if defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93) && \
+    !defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U65)
+#error "ALP_SDK_INFERENCE_ETHOS_U_N93 selected without ALP_SDK_INFERENCE_ETHOS_U_U65; orchestrator drift"
+#endif
+
 const char *alp_ethosu_variant_name(void)
 {
     return "ethos-u65";

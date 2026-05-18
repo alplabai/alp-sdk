@@ -12,6 +12,20 @@
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
  *
+ * @par Verification status: [PAPER-CORRECT-STUB]
+ *   Per-resolution / per-format register tables are deferred to
+ *   v0.3.  `ov5640_init` (chip-ID readback), `ov5640_read_id`,
+ *   `ov5640_soft_reset`, and `ov5640_set_test_pattern` issue real
+ *   SCCB writes and succeed against silicon; `ov5640_set_resolution`
+ *   and `ov5640_set_format` stash the requested preset in
+ *   `dev->res` / `dev->fmt` and then return `ALP_ERR_NOSUPPORT`
+ *   (silent OK would be a contract lie -- the sensor stays at its
+ *   2592x1944 / default-format power-on state).  Both gates lift
+ *   in v0.3 when the alp_camera_v2n capture path lands and the
+ *   OmniVision vendor init tables are imported.  See the TODO
+ *   comment blocks in ov5640.c (`ov5640_set_resolution` and
+ *   `ov5640_set_format`) for the exact unfinished work.
+ *
  * Public surface consumed by alp-studio block `blk_camera_ov5640`.
  * Symbols carry the chip's natural prefix `ov5640_*` — no `alp_`.
  *

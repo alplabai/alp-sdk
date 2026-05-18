@@ -34,6 +34,23 @@ SOCS = REPO / "metadata" / "socs"
 SOM_PRESETS = REPO / "metadata" / "e1m_modules"
 
 
+def _emit_pending_warnings(rel: Path, doc) -> None:
+    """Non-fatal TODO surfaces for SoC JSONs that declare known-incomplete fields.
+
+    Currently surfaces:
+
+    * pending_reference_manual_ingestion -- peripherals: {} on such SoCs means
+      "unknown / TBD", so ALP_SOC_*_COUNT ceilings on derived SoMs will
+      under-report until the RM has been ingested.
+    """
+    if not isinstance(doc, dict):
+        return
+    if doc.get("pending_reference_manual_ingestion"):
+        print(f"WARN  {rel}: pending_reference_manual_ingestion -> "
+              f"peripheral counts default to zero, ALP_SOC_*_COUNT ceilings "
+              f"may under-report")
+
+
 def _check_files(label, files, validator, loader, key_for_summary):
     failures: list[tuple[Path, list[str]]] = []
     for path in files:
@@ -58,6 +75,7 @@ def _check_files(label, files, validator, loader, key_for_summary):
         else:
             summary = doc.get(key_for_summary, "?") if isinstance(doc, dict) else "?"
             print(f"OK   {rel}  ({key_for_summary}={summary})")
+            _emit_pending_warnings(rel, doc)
     return failures
 
 

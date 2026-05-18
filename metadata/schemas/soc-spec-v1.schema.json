@@ -39,6 +39,15 @@
       "default": false,
       "description": "When true, this file was populated from secondary sources (ALP module datasheet, family pattern). Replace with primary datasheet data before locking metadata for production."
     },
+    "pending_reference_manual_ingestion": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, the per-peripheral counts and any other Reference-Manual-derived fields have not yet been extracted (RM ingestion still pending). peripherals: {} on such a SoC means \"unknown / TBD\", not \"silicon has no peripherals\". Downstream tooling MUST treat ALP_SOC_*_COUNT ceilings as under-reporting until this flag is cleared."
+    },
+    "_pending_reason": {
+      "type": "string",
+      "description": "Optional sibling rationale for pending_reference_manual_ingestion / pending_alif_datasheet. Free-form note describing what is pending and why, since JSON itself has no native comment syntax."
+    },
     "datasheet": {
       "type": "object",
       "additionalProperties": false,

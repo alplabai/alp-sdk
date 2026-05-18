@@ -8,7 +8,7 @@
 
 #include <stddef.h>
 
-#include "alp/chips/button_led.h"
+#include "alp/blocks/button_led.h"
 
 static void on_gpio_irq(alp_gpio_t *pin, void *user) {
     (void)pin;

@@ -145,6 +145,18 @@ pad_routes:
   - { e1m: E1M_X_GPIO_IO24, dispatch: gd32_bridge, dispatch_pin: PC14 }
   - { e1m: E1M_X_GPIO_IO25, dispatch: gd32_bridge, dispatch_pin: PC15 }
 
+  # E1M-X form-factor GPIO extensions (IO27..IO35, IO33 absent on V2N).
+  # See `E1M_X_GPIO_IO27..IO35` in <alp/e1m_x_pinout.h>.
+  # Source: metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv
+  - { e1m: E1M_X_GPIO_IO27, dispatch: gd32_bridge, dispatch_pin: PB11 }
+  - { e1m: E1M_X_GPIO_IO28, dispatch: gd32_bridge, dispatch_pin: PC2  }
+  - { e1m: E1M_X_GPIO_IO29, dispatch: gd32_bridge, dispatch_pin: PD11 }
+  - { e1m: E1M_X_GPIO_IO30, dispatch: gd32_bridge, dispatch_pin: PD10 }
+  - { e1m: E1M_X_GPIO_IO31, dispatch: gd32_bridge, dispatch_pin: PE12 }
+  - { e1m: E1M_X_GPIO_IO32, dispatch: gd32_bridge, dispatch_pin: PD2  }
+  - { e1m: E1M_X_GPIO_IO34, dispatch: gd32_bridge, dispatch_pin: PD8  }
+  - { e1m: E1M_X_GPIO_IO35, dispatch: gd32_bridge, dispatch_pin: PD1  }
+
 helper_firmware:
   - name:          gd32_bridge
     chip:          gd32g553

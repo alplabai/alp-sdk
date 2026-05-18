@@ -471,13 +471,6 @@ def load_board_yaml(path: Path, *,
     som_topology = som_preset.get("topology") or {}
     soc_core_ids = [c["id"] for c in (soc_spec.get("cores") or []) if "id" in c]
 
-    # Reject cores: keys not present in the SoC spec.
-    unknown = [k for k in project_cores.keys() if k not in soc_core_ids]
-    if unknown:
-        raise OrchestratorError(
-            f"board.yaml `cores:` references unknown core IDs "
-            f"{unknown} for SoC {silicon} (known: {soc_core_ids})")
-
     # Reject SoM topology keys that don't exist in the SoC spec --
     # surfaces preset bugs early.
     bad_topology = [k for k in som_topology.keys() if k not in soc_core_ids]
@@ -486,6 +479,39 @@ def load_board_yaml(path: Path, *,
             f"SoM preset {sku} `topology:` references core IDs "
             f"{bad_topology} that aren't in SoC {silicon}'s "
             f"cores[] (known: {soc_core_ids})")
+
+    # Phase B gap fix G-4: catch the cross-class `som.sku:` swap where
+    # `cores.<key>` doesn't match this SoM preset's `topology:`.
+    # Example: customer has `cores.m55_hp:` and swaps som.sku from
+    # E1M-AEN701 (topology: m55_hp + m55_he + a32_cluster) to
+    # E1M-NX9101 (topology: m33 + a55_cluster).  Pre-fix the slice-
+    # build loop iterated topology keys, NOT project_cores keys, so
+    # `cores.m55_hp:` was silently dropped and the customer got an
+    # empty slice with no diagnostic.  Hard-fail when NO project key
+    # matches topology; soft-warn for unmatched keys when SOME match
+    # (the customer likely forgot to rename one of several cores).
+    # The SoC-level mismatch check (topology is a subset of SoC core
+    # IDs per the bad_topology guard above) is subsumed by this
+    # topology-level check: anything not in topology is wrong from
+    # the customer's POV, whether it's SoC-absent or merely SoM-
+    # preset-absent.
+    topology_keys = set(som_topology.keys())
+    project_keys = set(project_cores.keys())
+    unmatched = sorted(project_keys - topology_keys)
+    matched = project_keys & topology_keys
+    if unmatched and project_keys:
+        sku_topology = sorted(topology_keys)
+        if not matched:
+            raise OrchestratorError(
+                f"board.yaml `cores:` declares {unmatched} but the "
+                f"SoM SKU {sku}'s `topology:` exposes no such core. "
+                f"Did you mean one of: {sku_topology}?")
+        for key in unmatched:
+            print(
+                f"alp_orchestrate: WARN: board.yaml `cores.{key}:` "
+                f"has no match in SoM SKU {sku}'s `topology:` "
+                f"(exposes: {sku_topology}); slice will be dropped.",
+                file=sys.stderr)
 
     # Index SoC cores[] by id so we can look up `type` for the OS
     # default inference (Finding A: pre-2026-05-18 every SoM YAML's
@@ -1465,13 +1491,23 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     for slug in _slugs_from_helper_firmware(hf):
         som_chips.add(slug)
 
+    # Slugs that map to BLOCK_ Kconfig symbols rather than CHIP_.
+    # These live under blocks/ + <alp/blocks/*.h> because they are
+    # SDK-level *block* utilities (`alp_button_led_*`, `alp_pdm_mic_*`)
+    # rather than third-party-IC chip drivers; see blocks/README.md.
+    _BLOCK_SLUGS = frozenset({"button_led", "pdm_mic"})
+
+    def _slug_kconfig(slug: str) -> str:
+        kind = "BLOCK" if slug in _BLOCK_SLUGS else "CHIP"
+        return f"CONFIG_ALP_SDK_{kind}_{slug.upper()}"
+
     chip_subsystems: set[str] = set()
     if som_chips:
         sku_str = project.sku
         lines.append(f"# SoM-intrinsic chip drivers (from `{sku_str}` "
                      f"on_module + helper_firmware)")
         for chip in sorted(som_chips):
-            lines.append(f"CONFIG_ALP_SDK_CHIP_{chip.upper()}=y")
+            lines.append(f"{_slug_kconfig(chip)}=y")
             for s in _CHIP_SUBSYSTEMS.get(chip, ()):
                 chip_subsystems.add(s)
         lines.append("")
@@ -1482,7 +1518,8 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # `carrier.populated:` block (project-level overrides).  The
     # chip drivers compile per-chip via the
     # zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_<NAME> ...)
-    # entries in zephyr/CMakeLists.txt.
+    # (or CONFIG_ALP_SDK_BLOCK_<NAME> for the `button_led` / `pdm_mic`
+    # SDK-level block helpers) entries in zephyr/CMakeLists.txt.
     #
     # We emit the chip-driver block on every zephyr slice — Kconfig
     # dedupes when multiple per-core fragments overlay onto the same
@@ -1503,7 +1540,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
             # the carrier line to avoid redundant CONFIG entries.
             if on and chip in som_chips:
                 continue
-            lines.append(f"CONFIG_ALP_SDK_CHIP_{chip.upper()}={'y' if on else 'n'}")
+            lines.append(f"{_slug_kconfig(chip)}={'y' if on else 'n'}")
             if on:
                 for s in _CHIP_SUBSYSTEMS.get(chip, ()):
                     chip_subsystems.add(s)
@@ -1539,24 +1576,87 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append("")
 
     # Inference dispatchers.  Driven entirely by the SoM preset's
-    # `capabilities:` matrix -- NOT by board.yaml.  The customer
-    # never picks a backend at build time; the SDK compiles in
-    # every dispatcher the silicon supports, and apps choose
+    # `capabilities:` matrix + SoC-JSON `cores[]` -- NOT by board.yaml.
+    # The customer never picks a backend at build time; the SDK compiles
+    # in every dispatcher the silicon supports, and apps choose
     # per-handle at runtime via alp_inference_open(.backend=...).
     # CPU/TFLM is the universal SW fallback and is always on.
+    #
+    # Two layers of variant detail are emitted alongside the umbrella
+    # switches so the SDK driver code + (upstream) kernel libraries
+    # compile against the right per-silicon variant:
+    #
+    #   - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y -- picked from
+    #     the SoM preset's `npu_population:` list (preferred) with a
+    #     capability-count fallback for SoMs that haven't declared the
+    #     fine-grained population block yet.  U85 carries Arm's larger
+    #     MAC array + TensorOptimized kernels; U55 carries the smaller
+    #     MAC + reference kernels; U65 is i.MX 93-only.
+    #
+    #   - CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y -- picked
+    #     from the SoC JSON's `cores[<slice.core_id>].vector_extension`
+    #     so the CPU-side TFLM kernel set matches the target core's SIMD
+    #     reality (NEON on A-cluster, Helium MVE on M55, scalar / REF
+    #     on baseline M33 / M4).  Per-core in case a single SoM hosts
+    #     multiple core classes (E7 = A32 + M55, all three Helium /
+    #     Neon flavours).
+    #
     # resolve_capabilities merges SoC-JSON defaults with SoM overrides
     # so silicon-determined caps (ethos_u55_count, drp_ai, ...) resolve
     # even when removed from the SoM YAML (capability unification, slice 3b).
     capabilities = resolve_capabilities(project.som_preset, METADATA_ROOT)
     inference_lines: list[str] = ["CONFIG_ALP_SDK_INFERENCE_TFLM=y"]
-    ethos_present = (
-        (capabilities.get("ethos_u55_count") or 0) > 0
-        or (capabilities.get("ethos_u65_count") or 0) > 0
-        or (capabilities.get("ethos_u85_count") or 0) > 0
-    )
+
+    # ---- G-2 -- CPU-class TFLM kernel selector --------------------
+    # Look up this slice's core in the SoC spec; pick exactly one of
+    # NEON / HELIUM / REF based on the vector_extension field.  Defaults
+    # to REF when the SoC JSON is silent (paper-correct on the scalar
+    # M33s -- iMX 93 m33, V2N m33_sm).
+    tflm_kernel_kc: str = "CONFIG_ALP_SDK_INFERENCE_TFLM_REF=y"
+    for c in (project.soc_spec.get("cores") or []):
+        if c.get("id") != slice_.core_id:
+            continue
+        vec = (c.get("vector_extension") or "").lower()
+        ctype = (c.get("type") or "").lower()
+        if vec == "neon" or ctype.startswith("cortex-a"):
+            tflm_kernel_kc = "CONFIG_ALP_SDK_INFERENCE_TFLM_NEON=y"
+        elif vec == "helium":
+            tflm_kernel_kc = "CONFIG_ALP_SDK_INFERENCE_TFLM_HELIUM=y"
+        else:
+            tflm_kernel_kc = "CONFIG_ALP_SDK_INFERENCE_TFLM_REF=y"
+        break
+    inference_lines.append(tflm_kernel_kc)
+
+    # ---- G-1 -- per-variant Ethos-U selector ---------------------
+    # Prefer the SoM preset's `inference.npu_population[]` (richer --
+    # also names the role + paired-core); fall back to the capability
+    # counts (ethos_u{55,65,85}_count) for SoMs that haven't yet
+    # declared the per-instance block.  Both AEN401 / AEN601 / AEN801
+    # populate npu_population[]; AEN701 declares U55s there too; the
+    # i.MX 93 SoM relies on the capability-count fallback today.
+    ethos_variants: set[str] = set()
+    npu_pop = (project.som_preset.get("inference") or {}).get("npu_population") or []
+    for entry in npu_pop:
+        v = (entry.get("variant") if isinstance(entry, dict) else "") or ""
+        v = v.lower()
+        if v in ("u55", "u65", "u85"):
+            ethos_variants.add(v)
+    # Capability-count fallback (handles SoMs without npu_population:).
+    if (capabilities.get("ethos_u55_count") or 0) > 0:
+        ethos_variants.add("u55")
+    if (capabilities.get("ethos_u65_count") or 0) > 0:
+        ethos_variants.add("u65")
+    if (capabilities.get("ethos_u85_count") or 0) > 0:
+        ethos_variants.add("u85")
+    ethos_present = bool(ethos_variants)
     if ethos_present:
         inference_lines.append("CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y")
+        for v in sorted(ethos_variants):
+            inference_lines.append(f"CONFIG_ALP_SDK_INFERENCE_ETHOS_U_{v.upper()}=y")
         if silicon == "nxp:imx9:imx93":
+            # N93 is the NXP-side PHY / driver-shim layer for the i.MX 93's
+            # Ethos-U65; orthogonal to the U55/U65/U85 silicon-variant
+            # switch above, both stay on the build.
             inference_lines.append("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y")
     if capabilities.get("drp_ai"):
         inference_lines.append("CONFIG_ALP_SDK_INFERENCE_DRPAI=y")

@@ -40,6 +40,8 @@
 #include <cstring>
 #include <cstdint>
 
+#include <zephyr/logging/log.h>
+
 extern "C" {
 #include "alp/inference.h"
 #include "handles.h"
@@ -52,6 +54,66 @@ extern "C" {
 #if defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U)
 #include "tensorflow/lite/micro/kernels/ethos_u/ethosu.h"
 #endif
+
+LOG_MODULE_REGISTER(alp_inference_tflm, CONFIG_LOG_DEFAULT_LEVEL);
+
+/*
+ * Per-variant kernel selection (G-1 + G-2 wiring).
+ *
+ * The orchestrator emits one of:
+ *
+ *   CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U55 / _U65 / _U85   (per NPU variant)
+ *   CONFIG_ALP_SDK_INFERENCE_TFLM_NEON   / _HELIUM / _REF (per CPU class)
+ *
+ * for every Zephyr slice based on the SoM preset's
+ * `inference.npu_population[]` + the SoC JSON's
+ * `cores[<core_id>].vector_extension`.  The umbrella switches
+ * (ALP_SDK_INFERENCE_ETHOS_U, ALP_SDK_INFERENCE_TFLM) stay as the
+ * "any NPU/TFLM is available" indicators that the dispatcher checks.
+ *
+ * At the SDK level (this file) the per-variant macros do two things:
+ *
+ *   1. Pick the printable variant string the runtime logs on open()
+ *      -- visible in the boot log so a customer running on a U85 SoM
+ *      can confirm the build linked the U85 kernel set instead of
+ *      falling back to U55.
+ *
+ *   2. Mark hand-off points for the upstream Arm Ethos-U driver
+ *      library + Vela-compiled kernel objects.  The kernels themselves
+ *      are NOT vendored in this repo -- they come from
+ *      `tensorflow-lite-micro` + Arm's `core_driver` pulled in via
+ *      `west.yml`.  The right-variant build of those libraries is
+ *      gated by the matching CONFIG_* the upstream module reads, OR
+ *      by the Vela compiler invocation on the host model-compile
+ *      side.  Source-level branching below logs / records the
+ *      decision so a HIL session can verify the chosen path.
+ */
+namespace {
+
+#if defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U85)
+constexpr const char *kEthosUVariantName = "ethos-u85";
+#elif defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U65)
+constexpr const char *kEthosUVariantName = "ethos-u65";
+#elif defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U55)
+constexpr const char *kEthosUVariantName = "ethos-u55";
+#else
+constexpr const char *kEthosUVariantName = "none";
+#endif
+
+#if defined(CONFIG_ALP_SDK_INFERENCE_TFLM_NEON)
+constexpr const char *kTflmKernelVariant = "neon";
+#elif defined(CONFIG_ALP_SDK_INFERENCE_TFLM_HELIUM)
+constexpr const char *kTflmKernelVariant = "helium-mve";
+#elif defined(CONFIG_ALP_SDK_INFERENCE_TFLM_REF)
+constexpr const char *kTflmKernelVariant = "scalar-ref";
+#else
+/* The orchestrator always emits exactly one of the three; this branch
+ * only fires when someone hand-edits prj.conf and drops the variant.
+ * Default to scalar-ref so the build still functions. */
+constexpr const char *kTflmKernelVariant = "scalar-ref-default";
+#endif
+
+} // namespace
 
 namespace
 {
@@ -161,6 +223,20 @@ extern "C" alp_status_t alp_inference_tflm_open(struct alp_inference         *h_
                                                 const alp_inference_config_t *cfg)
 {
     auto *h     = reinterpret_cast<AlpInferenceHandle *>(h_);
+
+    /* One-shot variant log so HIL operators can confirm which kernel
+     * set the build actually linked against.  Drops to LOG_DBG after
+     * the first call to keep per-model open() noise down. */
+    static bool s_variant_logged = false;
+    if (!s_variant_logged) {
+        LOG_INF("tflm backend: cpu_kernels=%s npu_variant=%s",
+                kTflmKernelVariant, kEthosUVariantName);
+        s_variant_logged = true;
+    } else {
+        LOG_DBG("tflm backend: cpu_kernels=%s npu_variant=%s",
+                kTflmKernelVariant, kEthosUVariantName);
+    }
+
     auto *state = new (std::nothrow) TflmState();
     if (state == nullptr) return ALP_ERR_NOMEM;
 
@@ -261,4 +337,33 @@ extern "C" void alp_inference_tflm_close(struct alp_inference *h_)
     if (state->own_arena) g_default_arena_in_use = false;
     delete state;
     h->be_state = nullptr;
+}
+
+/* ------------------------------------------------------------------ */
+/* Variant introspection.                                              */
+/*                                                                     */
+/* Apps + integration tests can ask the SDK which kernel-variant the   */
+/* build actually selected -- handy when the runtime is on a multi-    */
+/* variant SoM (E4 / E6 / E8: U55 pair + U85) and the customer needs   */
+/* to confirm the Vela target on their model-compile pipeline matches. */
+/*                                                                     */
+/* The returned pointers are static-storage string literals; callers   */
+/* must NOT free.  Stable across builds for the same CONFIG_* set.    */
+/* ------------------------------------------------------------------ */
+
+extern "C" const char *alp_inference_tflm_cpu_kernel_variant(void)
+{
+    return kTflmKernelVariant;
+}
+
+extern "C" const char *alp_inference_tflm_npu_variant_name(void)
+{
+    /* TODO(v0.7 + Arm driver vendor pack): when multiple Ethos-U
+     * variants are linked (U55+U85 on E4/E6/E8), the active variant
+     * for a given handle is decided by the Vela-compiled model's
+     * accelerator-config tag -- not by build-time selection.  Surface
+     * a per-handle variant query once the Arm driver pack lands.
+     * Today we return the highest-tier variant the build linked,
+     * which is the right answer for the headline log line. */
+    return kEthosUVariantName;
 }

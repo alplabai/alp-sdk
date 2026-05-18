@@ -235,7 +235,90 @@ def test_load_board_yaml_rejects_unknown_core(tmp_path: Path) -> None:
         load_board_yaml(path)
     msg = str(excinfo.value)
     assert "m99_garbage" in msg
-    assert "unknown core ID" in msg or "core IDs" in msg
+    # Phase B gap fix G-4: error now points at the SoM SKU's
+    # `topology:` (the customer-actionable surface) and offers a
+    # "did you mean" hint listing the preset's actual core keys.
+    assert "topology" in msg
+    assert "did you mean" in msg.lower()
+
+
+# ---------------------------------------------------------------------
+# 4b. Phase B gap fix G-4: cross-class `som.sku:` swap diagnostic
+# ---------------------------------------------------------------------
+
+
+# Customer kept the AEN-shaped `cores.m55_hp:` block but swapped
+# `som.sku:` to E1M-NX9101 (i.MX 93 topology: m33 + a55_cluster, no
+# m55_hp).  Pre-fix the orchestrator silently dropped the m55_hp
+# entry; the customer got an empty slice with no diagnostic.
+G4_CROSS_CLASS_SWAP = """
+schema_version: 2
+
+som:
+  sku: E1M-NX9101
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+    peripherals: [i2c]
+"""
+
+
+# Customer remembered to rename one core (m33) but forgot the second
+# (m55_hp).  m33 builds; m55_hp triggers a soft WARN so the customer
+# notices the drop without losing the working m33 slice.
+G4_PARTIAL_MATCH = """
+schema_version: 2
+
+som:
+  sku: E1M-NX9101
+
+cores:
+  m33:
+    os: zephyr
+    app: ./m33
+    peripherals: [i2c]
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+    peripherals: [spi]
+"""
+
+
+def test_unknown_cores_key_raises(tmp_path: Path) -> None:
+    """G-4 hard-fail: NO `cores:` key matches `topology:`."""
+    path = _write_board(tmp_path, G4_CROSS_CLASS_SWAP)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "m55_hp" in msg
+    assert "did you mean" in msg.lower()
+    assert "m33" in msg
+    assert "a55_cluster" in msg
+    assert "E1M-NX9101" in msg
+    assert "topology" in msg
+
+
+def test_partial_match_warns(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """G-4 soft-warn: SOME `cores:` keys match, SOME don't.  The
+    matching keys still build slices; the dropped keys emit a stderr
+    WARN so the customer sees what was discarded."""
+    path = _write_board(tmp_path, G4_PARTIAL_MATCH)
+    project = load_board_yaml(path)
+
+    captured = capsys.readouterr()
+    assert "m55_hp" in captured.err
+    assert "WARN" in captured.err
+    assert "E1M-NX9101" in captured.err
+    # The matching `m33` slice still builds.
+    assert "m33" in project.cores
+    assert project.cores["m33"].app == "./m33"
+    # The unmatched key is NOT in the slice map (silently dropped by
+    # the soc_core_ids loop, but the WARN above made it visible).
+    assert "m55_hp" not in project.cores
 
 
 # ---------------------------------------------------------------------

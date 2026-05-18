@@ -43,10 +43,11 @@ portable across the three OS targets.
   `blk_imu_lsm6dso`).
 - `ssd1306/` — Solomon Systech monochrome OLED controller
   (alp-studio block `blk_oled_ssd1306`).
-- `button_led/` — generic button + LED block helper (alp-studio
-  block `blk_button_led`).  Note: this is an SDK-level *block*
-  utility rather than a single-IC driver, so it carries the `alp_`
-  prefix as `alp_button_led_*`.
+
+SDK-level *block* helpers (`alp_button_led_*`, `alp_pdm_mic_*`)
+live in [`blocks/`](../blocks/) -- not here -- because they are
+abstractions over multiple peripherals rather than bindings to a
+single third-party IC.  See [`blocks/README.md`](../blocks/README.md).
 
 Implementations land after sign-off on the v0.1 peripheral wrapper
 work.  See [`VERSIONS.md`](../VERSIONS.md) for the full roster.

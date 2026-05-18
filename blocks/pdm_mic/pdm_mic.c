@@ -13,7 +13,7 @@
 
 #include <stddef.h>
 
-#include "alp/chips/pdm_mic.h"
+#include "alp/blocks/pdm_mic.h"
 
 alp_pdm_mic_t *alp_pdm_mic_open(const alp_pdm_mic_config_t *cfg) {
     (void)cfg;

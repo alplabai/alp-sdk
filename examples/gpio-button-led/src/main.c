@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * gpio-button-led — read a button and toggle an LED.  Uses the
- * <alp/chips/button_led.h> helper which wraps the underlying
+ * <alp/blocks/button_led.h> helper which wraps the underlying
  * <alp/peripheral.h> GPIO calls.
  */
 
@@ -11,7 +11,7 @@
 
 #include <zephyr/kernel.h>
 
-#include "alp/chips/button_led.h"
+#include "alp/blocks/button_led.h"
 #include "alp/e1m_pinout.h"
 
 int main(void) {

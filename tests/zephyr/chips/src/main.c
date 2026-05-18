@@ -2,7 +2,8 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Smoke tests for the v0.1 chip drivers (lsm6dso, ssd1306, button_led).
+ * Smoke tests for the v0.1 chip drivers (lsm6dso, ssd1306) and
+ * block helpers (button_led — `<alp/blocks/>` from v0.6+).
  *
  * Coverage focus: lifecycle, NULL-arg validation, status-code
  * propagation, and the layer of plumbing between the chip driver
@@ -19,12 +20,12 @@
 #include "alp/e1m_pinout.h"
 #include "alp/chips/lsm6dso.h"
 #include "alp/chips/ssd1306.h"
-#include "alp/chips/button_led.h"
+#include "alp/blocks/button_led.h"
 #include "alp/chips/bme280.h"
 #include "alp/chips/lis2dw12.h"
 #include "alp/chips/ssd1331.h"
 #include "alp/chips/ov5640.h"
-#include "alp/chips/pdm_mic.h"
+#include "alp/blocks/pdm_mic.h"
 #include "alp/chips/icm42670.h"
 #include "alp/chips/bmi323.h"
 #include "alp/chips/bmp581.h"
@@ -677,12 +678,12 @@ ZTEST(alp_chips, test_bmp581_post_init_calls_reject_uninitialised)
 #include "alp/boards/alp_e1m_evk.h"
 #include "alp/chips/lsm6dso.h"
 #include "alp/chips/ssd1306.h"
-#include "alp/chips/button_led.h"
+#include "alp/blocks/button_led.h"
 #include "alp/chips/bme280.h"
 #include "alp/chips/lis2dw12.h"
 #include "alp/chips/ssd1331.h"
 #include "alp/chips/ov5640.h"
-#include "alp/chips/pdm_mic.h"
+#include "alp/blocks/pdm_mic.h"
 
 ZTEST(alp_chips, test_public_headers_co_compile)
 {

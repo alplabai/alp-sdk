@@ -21,7 +21,7 @@
 #include "alp/peripheral.h"
 #include "alp/e1m_pinout.h"
 #include "alp/chips/ssd1306.h"
-#include "alp/chips/button_led.h"
+#include "alp/blocks/button_led.h"
 #include "alp/camera.h"
 #include "alp/iot.h"
 

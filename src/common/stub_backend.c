@@ -429,6 +429,7 @@ void alp_qenc_close(alp_qenc_t *e)
     (void)e;
 }
 
+#if !defined(ALP_VENDOR_OVERRIDES_I2S)
 alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg)
 {
     (void)cfg;
@@ -466,7 +467,9 @@ void alp_i2s_close(alp_i2s_t *i)
 {
     (void)i;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_I2S */
 
+#if !defined(ALP_VENDOR_OVERRIDES_CAN)
 alp_can_t *alp_can_open(const alp_can_config_t *cfg)
 {
     (void)cfg;
@@ -510,7 +513,9 @@ void alp_can_close(alp_can_t *c)
 {
     (void)c;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_CAN */
 
+#if !defined(ALP_VENDOR_OVERRIDES_RTC)
 alp_rtc_t *alp_rtc_open(uint32_t rtc_id)
 {
     (void)rtc_id;
@@ -533,7 +538,9 @@ void alp_rtc_close(alp_rtc_t *r)
 {
     (void)r;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_RTC */
 
+#if !defined(ALP_VENDOR_OVERRIDES_WDT)
 alp_wdt_t *alp_wdt_open(uint32_t id, const alp_wdt_config_t *cfg)
 {
     (void)id;
@@ -555,6 +562,7 @@ void alp_wdt_close(alp_wdt_t *w)
 {
     (void)w;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_WDT */
 
 /* ------------------------------------------------------------------ */
 /* Higher libraries (camera, iot, audio, ble, security, mproc, display) */

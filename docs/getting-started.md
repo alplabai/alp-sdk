@@ -219,7 +219,7 @@ spell out:
 - Lifecycle expectations of `*_close`.
 
 Read the `gpio-button-led` example through, then look at
-`<alp/chips/button_led.h>` to see what API the example is
+`<alp/blocks/button_led.h>` to see what API the example is
 calling into.  The button_led helper (`alp_button_led_*`) is
 SDK-level; the underlying primitives (`alp_gpio_*`) are in
 `<alp/peripheral.h>`.

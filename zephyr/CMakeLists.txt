@@ -118,8 +118,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_LSM6DSO
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/lsm6dso/lsm6dso.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_SSD1306
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ssd1306/ssd1306.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_BUTTON_LED
-    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/button_led/button_led.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BLOCK_BUTTON_LED
+    ${ZEPHYR_CURRENT_MODULE_DIR}/blocks/button_led/button_led.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_BME280
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/bme280/bme280.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_LIS2DW12
@@ -128,8 +128,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_SSD1331
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ssd1331/ssd1331.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_OV5640
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ov5640/ov5640.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PDM_MIC
-    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/pdm_mic/pdm_mic.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BLOCK_PDM_MIC
+    ${ZEPHYR_CURRENT_MODULE_DIR}/blocks/pdm_mic/pdm_mic.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ICM42670
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/icm42670/icm42670.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_BMI323

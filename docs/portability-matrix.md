@@ -1,0 +1,223 @@
+# Intra-family portability matrix
+
+Empirical proof of the alp-sdk's load-bearing customer promise:
+
+> Change `som.sku:` in `board.yaml`, rebuild, ship — **within a SoM family**.
+
+Cross-family portability between E1M (Cortex-M-class, Alif Ensemble / NXP
+i.MX 93) and E1M-X (Cortex-A55 + Cortex-M33, Renesas RZ/V2N) is
+intentionally NOT a goal — they are separate product lines with
+different power envelopes, different SoCs, and a separate `<alp/*_pinout.h>`
+namespace.  See
+[`docs/adr/0011-intra-family-portability.md`](adr/0011-intra-family-portability.md).
+
+## Method
+
+For each (SKU × example) cell:
+
+1. Copy the example's `board.yaml` to a temp working directory.
+2. Set `som.sku:` to the target SKU and adjust `cores.<key>:` to match
+   the SKU's `topology:` block (`m55_hp` for E1M-AEN, `m33` for
+   E1M-NX9101, `m33_sm` for E1M-X V2N/V2M).
+3. Run `python scripts/alp_project.py --input <temp/board.yaml> --core <core_id> --emit zephyr-conf`.
+4. Capture `alp.conf`; diff across SKUs within each example.
+
+`west build` is not the gate — the contract is that
+generated `alp.conf` is uniform within the family up to documented
+silicon-determined deltas.  Per-SoM Zephyr board files are emitted by
+`scripts/alp_project.py --emit zephyr-board` from the same YAML
+sources; once they exist for a given SoM, `west build` against that
+board is the customer's final step.
+
+## E1M family (Cortex-M-class)
+
+| SKU \ Example       | i2c-scanner | gpio-button-led | pwm-led-fade | Notes                                |
+| ------------------- | :---------: | :-------------: | :----------: | ------------------------------------ |
+| E1M-AEN301 (E3)     | ✅          | ✅              | ✅           |                                      |
+| E1M-AEN401 (E4)     | ✅          | ✅              | ✅           | U85-carrying — see Gap G-1           |
+| E1M-AEN501 (E5)     | ✅          | ✅              | ✅           |                                      |
+| E1M-AEN601 (E6)     | ✅          | ✅              | ✅           | U85-carrying — see Gap G-1           |
+| E1M-AEN701 (E7)     | ✅          | ✅              | ✅           | (baseline)                           |
+| E1M-AEN801 (E8)     | ✅          | ✅              | ✅           | U85-carrying — see Gap G-1           |
+| E1M-NX9101 (i.MX93) | ✅          | ✅              | ✅           | paper-correct, `partial_hw_config:true` |
+
+**21 / 21 cells generate cleanly.**  After stripping the
+`CONFIG_ALP_SOC_*=y` line and the one identity comment, **all 6 AEN
+SKUs produce byte-identical `alp.conf` for every example.**  That is
+the load-bearing intra-AEN portability proof.
+
+### Expected diffs (legitimate — driven by silicon / SoM facts)
+
+| Line family                                       | Differs how                                         |
+| ------------------------------------------------- | --------------------------------------------------- |
+| `CONFIG_ALP_SOC_ALIF_ENSEMBLE_{E3..E8}=y`         | one variant per AEN SKU                             |
+| `CONFIG_ALP_SOC_NXP_IMX9_IMX93=y`                 | only on E1M-NX9101                                  |
+| `CONFIG_ALP_SDK_CHIP_CC3501E=y`                   | on all AEN (on-module Wi-Fi/BLE coprocessor)        |
+| `CONFIG_ALP_SDK_CHIP_PCA9451A=y`                  | only on E1M-NX9101 (its on-module PMIC)             |
+| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y`          | only on E1M-NX9101                                  |
+| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U55=y`          | on every AEN (every E3..E8 carries a U55 pair) + NX9101 fallback (none) |
+| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U65=y`          | only on E1M-NX9101                                  |
+| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U85=y`          | AEN401 / AEN601 / AEN801 only (E4 / E6 / E8 silicon) |
+| `CONFIG_ALP_SDK_INFERENCE_TFLM_HELIUM=y`          | every AEN m55_hp / m55_he slice (ARMv8.1-M Helium)  |
+| `CONFIG_ALP_SDK_INFERENCE_TFLM_REF=y`             | every NX9101 m33 slice (baseline ARMv8-M, no MVE)   |
+| `CONFIG_ALP_SDK_INFERENCE_TFLM_NEON=y`            | every cortex-a* slice across all SoMs               |
+| `CONFIG_SPI=y`                                    | auto-enabled on AEN because CC3501E drives an SPI master |
+
+The 14 carrier-populated chips (`BMI323`, `BMP581`, `INA236`,
+`LSM6DSO`, `TAS2563`, `TCAL9538`, …) are byte-identical across every
+E1M SKU — the carrier abstraction decouples SoM swap from carrier
+population, as designed.
+
+## E1M-X family (Cortex-A55 + Cortex-M33, all RZ/V2N R9A09G056N44GBG)
+
+| SKU \ Example   | adc-voltmeter | pwm-led-fade | v2n-pwm-fan-control | Notes                       |
+| --------------- | :-----------: | :----------: | :-----------------: | --------------------------- |
+| E1M-V2N101      | ✅            | ✅           | ✅ (baseline)       |                             |
+| E1M-V2N102      | ✅            | ✅           | ✅                  | 64 Gbit DRAM/eMMC variant   |
+| E1M-V2M101      | ✅            | ✅           | ✅                  | DEEPX DX-M1 + PCIe mux      |
+| E1M-V2M102      | ✅            | ✅           | ✅                  | V2M + 64 Gbit — see Gap A2-1, A2-2 |
+
+**12 / 12 cells generate cleanly.**  Within each example, `alp.conf`
+differs only by:
+
+1. Two cosmetic identity comments
+2. Three chip-driver enables on V2M SKUs only:
+   - `CONFIG_ALP_SDK_CHIP_DEEPX_DXM1=y` (the NPU)
+   - `CONFIG_ALP_SDK_CHIP_PI3DBS12212=y` (PCIe mux)
+   - `CONFIG_ALP_SDK_CHIP_TPS628640=y` (DEEPX rail buck;
+     `assembled: optional` on V2N so the orchestrator omits it there)
+
+V2N101 vs V2N102, and V2M101 vs V2M102, are byte-identical save
+the identity comments — the DRAM density delta lives at the metadata
+level and intentionally does NOT leak into application-facing CONFIG.
+
+### Expected diffs (legitimate)
+
+| Line family                                       | Differs how                                         |
+| ------------------------------------------------- | --------------------------------------------------- |
+| `CONFIG_ALP_SOC_RENESAS_RZV2N_N44=y`              | identical on all four (same silicon)                |
+| `CONFIG_ALP_SDK_CHIP_GD32G553=y`                  | identical on all four (every E1M-X has the GD32 bridge) |
+| `CONFIG_ALP_SDK_INFERENCE_DRPAI=y`                | identical on all four (silicon-determined)          |
+| `CONFIG_ALP_SDK_CHIP_DEEPX_DXM1=y`                | V2M only                                            |
+| `CONFIG_ALP_SDK_CHIP_PI3DBS12212=y`               | V2M only                                            |
+| `-DALP_SDK_USE_DEEPX_DXM1=ON` (`--emit cmake-args`) | V2M only — DEEPX lives on the Linux PCIe path, not Zephyr |
+
+## Gaps surfaced by Phase A (tracked in Phase B)
+
+### A2-1 — V2M102 `pad_routes:` use the wrong form-factor namespace  *(RESOLVED 2026-05-18)*
+
+Originally: `metadata/e1m_modules/E1M-V2M102.yaml` declared pad routes
+as `E1M_PWM0..7`, `E1M_ADC0..7`, `E1M_DAC0..1`, `E1M_ENC0..3`,
+`E1M_GPIO_*` — i.e. the E1M form-factor namespace.  V2N101, V2N102,
+V2M101 (the other three E1M-X SoMs) all correctly used the
+`E1M_X_*` namespace.  Per memory note
+`[[e1m-vs-e1m-x-separate-product-lines]]` and
+`<alp/e1m_x_pinout.h>` these prefixes are deliberately distinct, so
+apps using the E1M-X pinout header resolved on V2N101/V2N102/V2M101
+but missed every route on V2M102.
+
+**Fix landed:** bulk rename of every `e1m: E1M_*` → `e1m: E1M_X_*` in
+`metadata/e1m_modules/E1M-V2M102.yaml` `pad_routes:` (34 lines).  The
+two comment headers that mentioned "E1M PWM channels" / "E1M GPIO
+pads" became "E1M-X …".  Verified: `--emit composed-route-table` on
+V2M102 now emits 40 routes, all `E1M_X_*` prefix, zero non-X leaks —
+structurally identical to V2M101 after A2-2 also landed.
+
+### A2-2 — V2M101 + V2M102 missing E1M-X extension GPIO routes (IO27..IO35)  *(RESOLVED 2026-05-18)*
+
+Originally: V2N101 and V2N102 each declared 18 GPIO routes (10 base
+IO8..IO16 + IO24..IO25 + 8 extension IO27..IO35; IO33 absent on V2N).
+V2M101 declared only the 10 base; V2M102 declared only 10 base (also
+with wrong namespace per A2-1).  Apps using `E1M_X_GPIO_IO27..IO35`
+resolved on V2N variants but missed on V2M variants.
+
+**Fix landed:** maintainer confirmed the GD32 routing is identical on
+V2M (pins PB11/PC2/PD11/PD10/PE12/PD2/PD8/PD1 are physically the same
+on both subfamilies).  Copied the 8 extension rows + comment header
+from V2N101 into V2M101 and V2M102.  Verified: `pad_routes:` blocks
+for V2M101 vs V2N101 and V2M102 vs V2N102 are now byte-identical;
+swap-test sweep on both V2M SKUs reports 40 routes including all 8
+IO27..IO35 entries, 0 namespace leaks.
+
+### G-1 — Ethos-U variant (U55 / U65 / U85) is invisible to the build  *(RESOLVED 2026-05-18)*
+
+Originally: `scripts/alp_orchestrate.py:1551-1567` emitted a single
+`CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y` regardless of whether the SoM
+carried U55, U65, or U85.  The only variant-specific line was
+`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y` (hard-coded for i.MX 93).
+
+Cross-checked: AEN401/601/801 (U85-carrying per their
+`npu_population:`) generated byte-identical `alp.conf` to
+AEN301/501/701 (U55 only).  The U85's TensorOptimized kernels and
+larger MAC array could not be selected at compile time from the
+generated config alone.
+
+**Fix landed:** the orchestrator now walks the SoM preset's
+`inference.npu_population[]` (with a `capabilities.ethos_u{55,65,85}_count`
+fallback) and emits one `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
+line per variant present.  AEN401/601/801 now emit BOTH `_U55=y` and
+`_U85=y` (the U55 pair alongside the U85); AEN301/501/701 emit only
+`_U55=y`; NX9101 emits `_U65=y`; the existing N93 PHY switch coexists.
+Matching Kconfig entries live at `zephyr/Kconfig` § *Per-variant
+Ethos-U silicon switches*; the TFLM driver source
+(`src/zephyr/inference_tflm.cpp`) reads the per-variant macros via
+`alp_inference_tflm_npu_variant_name()` and logs the active variant
+once per boot.
+
+### G-2 — No CPU-class TFLM kernel selector (NEON / Helium / CMSIS-NN)  *(RESOLVED 2026-05-18)*
+
+Symmetric to G-1: the SDK emitted a single
+`CONFIG_ALP_SDK_INFERENCE_TFLM=y` regardless of whether the target
+core had NEON (A-cluster), Helium MVE-I (M55), or scalar (baseline
+M33).
+
+**Fix landed:** the orchestrator now consults the SoC JSON's
+`cores[<slice.core_id>].vector_extension` (per-slice, since one SoM
+can host multiple CPU classes — E7's A32 + M55 mix) and emits exactly
+one `CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y` per slice.
+Verified: M55_HP slices on every AEN SKU emit `_HELIUM=y`; A55 slices
+on V2N101 emit `_NEON=y`; the V2N M33_SM slice + NX9101 M33 slice
+both emit `_REF=y` (baseline ARMv8-M, no DSP / MVE).  Matching Kconfig
+entries live at `zephyr/Kconfig` § *Per-CPU-class TFLM kernel
+selectors*; the TFLM driver source surfaces the choice via
+`alp_inference_tflm_cpu_kernel_variant()`.
+
+### G-4 — `cores.<key>` rename diagnostic for cross-core-class swaps  *(RESOLVED 2026-05-18)*
+
+Originally: customer promise "change `som.sku:`" — reality: a swap
+from E1M-AEN701 to E1M-NX9101 also requires renaming `cores.m55_hp:`
+to `cores.m33:` because `m55_hp` is not a key in NX9101's `topology:`.
+The orchestrator silently dropped the unmatched key.
+
+**Fix landed:** `scripts/alp_orchestrate.py::load_board_yaml` now
+hard-fails with `OrchestratorError` carrying a "did you mean one of:
+['a55_cluster', 'm33']?" hint when NO `cores:` key intersects the
+preset's `topology:` keys.  Soft-warns on stderr (per dropped key)
+when SOME `cores:` keys match and others don't.  Two new tests
+(`test_unknown_cores_key_raises`, `test_partial_match_warns`) lock
+the contract.
+
+### G-5 — `CONFIG_SPI=y` auto-enables from SoM-intrinsic chip presence
+
+CC3501E forces `CONFIG_SPI=y` on AEN; NX9101 has no on-module SPI
+device so the line is absent.  An app calling `alp_spi_open()`
+without declaring `peripherals: [spi]` in its `board.yaml` builds
+fine on AEN and link-fails on NX9101.
+
+**Fix layer:** doc-only.  `docs/portability.md` (cookbook) section
+*Capability validation* explains: `peripherals:` is the
+load-bearing declaration; the SoM-chip auto-enables are
+incremental, not a substitute.  An optional lint extension to
+`scripts/check_example_portability.py` could catch missing
+declarations at CI time.
+
+## Status
+
+All Phase B gap fixes have landed (A2-1, A2-2, G-1, G-2, G-4
+resolved; G-5 is doc-only and lives in `docs/portability.md`
+*Capability validation*).  This matrix is now the customer-facing
+guarantee.  CI will re-run the swap-test matrix via the script
+proposed in Phase E.3
+(`scripts/gen_portability_matrix.py`).  Today the matrix is
+maintained by hand against the evidence under
+`build/portability-test/` (gitignored).

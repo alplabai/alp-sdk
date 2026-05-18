@@ -9,9 +9,11 @@
 #      metadata/e1m_modules/<MPN>.yaml; the SDK ships one
 #      for every released MPN.
 #   3. Change `carrier.name` if your board is not the EVK.  For
-#      custom carriers, list every populated chip-driver in
-#      `populated:` -- each `true` enables the matching
-#      CONFIG_ALP_SDK_CHIP_<NAME>=y.
+#      custom carriers, list every populated chip-driver / block
+#      helper in `populated:` -- each `true` enables the matching
+#      CONFIG_ALP_SDK_CHIP_<NAME>=y (or CONFIG_ALP_SDK_BLOCK_<NAME>=y
+#      for the SDK-level helpers `button_led` / `pdm_mic`; the loader
+#      picks the right symbol per slug).
 #   4. Build with `west build`.  The example's CMakeLists.txt
 #      invokes scripts/alp_project.py at configure time and the
 #      generated build/generated/alp.conf is rsource'd from

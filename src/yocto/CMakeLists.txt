@@ -62,6 +62,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio.c
+        # CAN / I2S / RTC / WDT carry Yocto-side NOSUPPORT stubs that
+        # stamp alp_last_error so apps detect-and-fallback at runtime
+        # rather than discovering the gap at link time via the umbrella
+        # stub_backend.c bodies.  Real Linux backends (SocketCAN, ALSA,
+        # /dev/rtcN, /dev/watchdogN) land alongside the rest of the
+        # Yocto first-class peripheral work tracked in VERSIONS.md.
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_can.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2s.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_rtc.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_wdt.c
         # <alp/rpc.h> userspace RPMsg backend.  The .c file gates its
         # full implementation behind ALP_SDK_HAVE_OPENAMP_USERLAND; the
         # NOSUPPORT fallback is compile-tested on every Linux build so
@@ -73,6 +83,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ALP_VENDOR_OVERRIDES_SPI=1
         ALP_VENDOR_OVERRIDES_UART=1
         ALP_VENDOR_OVERRIDES_GPIO=1
+        ALP_VENDOR_OVERRIDES_CAN=1
+        ALP_VENDOR_OVERRIDES_I2S=1
+        ALP_VENDOR_OVERRIDES_RTC=1
+        ALP_VENDOR_OVERRIDES_WDT=1
     )
     # The GPIO wrapper's IRQ dispatcher runs on a shared pthread; the
     # other wrappers don't touch pthread today but linking the whole

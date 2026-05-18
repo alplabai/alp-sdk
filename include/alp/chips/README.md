@@ -23,6 +23,12 @@ the symbols inside use the **chip's natural name** — `lsm6dso_t`,
 |---------------------|---------------------------------------|---------------------------|
 | `lsm6dso.h`         | STMicroelectronics LSM6DSO IMU        | `blk_imu_lsm6dso`         |
 | `ssd1306.h`         | Solomon Systech SSD1306 OLED          | `blk_oled_ssd1306`        |
-| `button_led.h`      | generic button + LED helper           | `blk_button_led`          |
+
+SDK-level *block* helpers (`<alp/blocks/button_led.h>`,
+`<alp/blocks/pdm_mic.h>`) live one directory up under
+[`include/alp/blocks/`](../blocks/) rather than here; they are
+abstractions over multiple peripherals and carry the `alp_*`
+prefix (`alp_button_led_*`, `alp_pdm_mic_*`).  See
+[`blocks/README.md`](../../../blocks/README.md).
 
 Headers land alongside the implementations under [`chips/`](../../../chips/).

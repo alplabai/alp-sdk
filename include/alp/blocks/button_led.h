@@ -12,19 +12,20 @@
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
  *
- * Consumed by alp-studio block `blk_button_led`.  Unlike
- * `lsm6dso_*` and `ssd1306_*`, **this helper carries the `alp_`
- * prefix** because it's an SDK-level block utility, not a binding
- * to a single third-party IC.  The button could be any momentary
- * switch and the LED any indicator — the helper just orchestrates
- * the GPIO pair.
+ * Consumed by alp-studio block `blk_button_led`.  Lives under
+ * `<alp/blocks/>` (NOT `<alp/chips/>`) because this is an
+ * SDK-level *block* utility, not a binding to a single third-party
+ * IC.  Hence the `alp_` prefix on every symbol — the button could
+ * be any momentary switch and the LED any indicator; the helper
+ * just orchestrates the GPIO pair.  See `blocks/README.md` for the
+ * full block-vs-chip rationale.
  *
  * Wraps `<alp/peripheral.h>` GPIO calls; portable across all three
  * OS targets.
  */
 
-#ifndef ALP_CHIPS_BUTTON_LED_H
-#define ALP_CHIPS_BUTTON_LED_H
+#ifndef ALP_BLOCKS_BUTTON_LED_H
+#define ALP_BLOCKS_BUTTON_LED_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -90,4 +91,4 @@ void         alp_button_led_deinit(alp_button_led_t *bl);
 }  /* extern "C" */
 #endif
 
-#endif  /* ALP_CHIPS_BUTTON_LED_H */
+#endif  /* ALP_BLOCKS_BUTTON_LED_H */

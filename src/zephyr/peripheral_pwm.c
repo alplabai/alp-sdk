@@ -268,9 +268,16 @@ alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint3
         gd32g553_t  *ctx = NULL;
         alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
         if (s != ALP_OK) return s;
-        /* alp_pwm_align_t and gd32g553_pwm_align_t share the same wire
-         * values (0..3) by construction; the cast is enum-renaming
-         * only.  See <alp/pwm.h>'s alp_pwm_align_t doc. */
+        /* Enum-renaming cast; the _Static_assert quartet below guards
+         * the wire-encoding invariant the cast depends on. */
+        _Static_assert((int)ALP_PWM_ALIGN_EDGE == (int)GD32G553_PWM_ALIGN_EDGE,
+                       "alp_pwm_align_t and gd32g553_pwm_align_t must share the same wire encoding");
+        _Static_assert((int)ALP_PWM_ALIGN_CENTER_UP == (int)GD32G553_PWM_ALIGN_CENTER_UP,
+                       "alp_pwm_align_t and gd32g553_pwm_align_t must share the same wire encoding");
+        _Static_assert((int)ALP_PWM_ALIGN_CENTER_DOWN == (int)GD32G553_PWM_ALIGN_CENTER_DOWN,
+                       "alp_pwm_align_t and gd32g553_pwm_align_t must share the same wire encoding");
+        _Static_assert((int)ALP_PWM_ALIGN_CENTER_BOTH == (int)GD32G553_PWM_ALIGN_CENTER_BOTH,
+                       "alp_pwm_align_t and gd32g553_pwm_align_t must share the same wire encoding");
         s = gd32g553_pwm_configure(ctx, (uint8_t)pwm->channel, (gd32g553_pwm_align_t)align_mode,
                                    dead_time_ns, break_cfg);
         alp_z_v2n_supervisor_release();

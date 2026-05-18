@@ -97,49 +97,61 @@ mailbox:
 #
 # Source of truth: metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv
 pad_routes:
-  # All eight E1M PWM channels via GD32.
-  - { e1m: E1M_PWM0, dispatch: gd32_bridge, dispatch_pin: PA11 }
-  - { e1m: E1M_PWM1, dispatch: gd32_bridge, dispatch_pin: PB1 }
-  - { e1m: E1M_PWM2, dispatch: gd32_bridge, dispatch_pin: PB14 }
-  - { e1m: E1M_PWM3, dispatch: gd32_bridge, dispatch_pin: PC5 }
-  - { e1m: E1M_PWM4, dispatch: gd32_bridge, dispatch_pin: PC10 }
-  - { e1m: E1M_PWM5, dispatch: gd32_bridge, dispatch_pin: PC11 }
-  - { e1m: E1M_PWM6, dispatch: gd32_bridge, dispatch_pin: PC12 }
-  - { e1m: E1M_PWM7, dispatch: gd32_bridge, dispatch_pin: PD0 }
+  # All eight E1M-X PWM channels via GD32.
+  - { e1m: E1M_X_PWM0, dispatch: gd32_bridge, dispatch_pin: PA11 }
+  - { e1m: E1M_X_PWM1, dispatch: gd32_bridge, dispatch_pin: PB1 }
+  - { e1m: E1M_X_PWM2, dispatch: gd32_bridge, dispatch_pin: PB14 }
+  - { e1m: E1M_X_PWM3, dispatch: gd32_bridge, dispatch_pin: PC5 }
+  - { e1m: E1M_X_PWM4, dispatch: gd32_bridge, dispatch_pin: PC10 }
+  - { e1m: E1M_X_PWM5, dispatch: gd32_bridge, dispatch_pin: PC11 }
+  - { e1m: E1M_X_PWM6, dispatch: gd32_bridge, dispatch_pin: PC12 }
+  - { e1m: E1M_X_PWM7, dispatch: gd32_bridge, dispatch_pin: PD0 }
 
   # All four quadrature encoders via GD32 (X / Y pads paired by
   # the GD32 timer-encoder hardware).
-  - { e1m: E1M_ENC0, dispatch: gd32_bridge, dispatch_pin: "PA0/PB3"  }
-  - { e1m: E1M_ENC1, dispatch: gd32_bridge, dispatch_pin: "PC6/PC7"  }
-  - { e1m: E1M_ENC2, dispatch: gd32_bridge, dispatch_pin: "PB6/PB7"  }
-  - { e1m: E1M_ENC3, dispatch: gd32_bridge, dispatch_pin: "PB2/PA1"  }
+  - { e1m: E1M_X_ENC0, dispatch: gd32_bridge, dispatch_pin: "PA0/PB3"  }
+  - { e1m: E1M_X_ENC1, dispatch: gd32_bridge, dispatch_pin: "PC6/PC7"  }
+  - { e1m: E1M_X_ENC2, dispatch: gd32_bridge, dispatch_pin: "PB6/PB7"  }
+  - { e1m: E1M_X_ENC3, dispatch: gd32_bridge, dispatch_pin: "PB2/PA1"  }
 
   # All eight ADC channels via GD32.
-  - { e1m: E1M_ADC0, dispatch: gd32_bridge, dispatch_pin: PD9  }
-  - { e1m: E1M_ADC1, dispatch: gd32_bridge, dispatch_pin: PB12 }
-  - { e1m: E1M_ADC2, dispatch: gd32_bridge, dispatch_pin: PE13 }
-  - { e1m: E1M_ADC3, dispatch: gd32_bridge, dispatch_pin: PE11 }
-  - { e1m: E1M_ADC4, dispatch: gd32_bridge, dispatch_pin: PC4  }
-  - { e1m: E1M_ADC5, dispatch: gd32_bridge, dispatch_pin: PA5  }
-  - { e1m: E1M_ADC6, dispatch: gd32_bridge, dispatch_pin: PA2  }
-  - { e1m: E1M_ADC7, dispatch: gd32_bridge, dispatch_pin: PA3  }
+  - { e1m: E1M_X_ADC0, dispatch: gd32_bridge, dispatch_pin: PD9  }
+  - { e1m: E1M_X_ADC1, dispatch: gd32_bridge, dispatch_pin: PB12 }
+  - { e1m: E1M_X_ADC2, dispatch: gd32_bridge, dispatch_pin: PE13 }
+  - { e1m: E1M_X_ADC3, dispatch: gd32_bridge, dispatch_pin: PE11 }
+  - { e1m: E1M_X_ADC4, dispatch: gd32_bridge, dispatch_pin: PC4  }
+  - { e1m: E1M_X_ADC5, dispatch: gd32_bridge, dispatch_pin: PA5  }
+  - { e1m: E1M_X_ADC6, dispatch: gd32_bridge, dispatch_pin: PA2  }
+  - { e1m: E1M_X_ADC7, dispatch: gd32_bridge, dispatch_pin: PA3  }
 
   # Both DAC outputs via GD32.
-  - { e1m: E1M_DAC0, dispatch: gd32_bridge, dispatch_pin: PA4 }
-  - { e1m: E1M_DAC1, dispatch: gd32_bridge, dispatch_pin: PA6 }
+  - { e1m: E1M_X_DAC0, dispatch: gd32_bridge, dispatch_pin: PA4 }
+  - { e1m: E1M_X_DAC1, dispatch: gd32_bridge, dispatch_pin: PA6 }
 
-  # Selected E1M GPIO pads via GD32 (the IOs not driven from the
+  # Selected E1M-X GPIO pads via GD32 (the IOs not driven from the
   # Renesas side -- see the TSV for the full set).
-  - { e1m: E1M_GPIO_IO8,  dispatch: gd32_bridge, dispatch_pin: PB10 }
-  - { e1m: E1M_GPIO_IO9,  dispatch: gd32_bridge, dispatch_pin: PA7  }
-  - { e1m: E1M_GPIO_IO10, dispatch: gd32_bridge, dispatch_pin: PA12 }
-  - { e1m: E1M_GPIO_IO11, dispatch: gd32_bridge, dispatch_pin: PB0  }
-  - { e1m: E1M_GPIO_IO12, dispatch: gd32_bridge, dispatch_pin: PC1  }
-  - { e1m: E1M_GPIO_IO13, dispatch: gd32_bridge, dispatch_pin: PF1  }
-  - { e1m: E1M_GPIO_IO14, dispatch: gd32_bridge, dispatch_pin: PB5  }
-  - { e1m: E1M_GPIO_IO16, dispatch: gd32_bridge, dispatch_pin: PC0  }
-  - { e1m: E1M_GPIO_IO24, dispatch: gd32_bridge, dispatch_pin: PC14 }
-  - { e1m: E1M_GPIO_IO25, dispatch: gd32_bridge, dispatch_pin: PC15 }
+  - { e1m: E1M_X_GPIO_IO8,  dispatch: gd32_bridge, dispatch_pin: PB10 }
+  - { e1m: E1M_X_GPIO_IO9,  dispatch: gd32_bridge, dispatch_pin: PA7  }
+  - { e1m: E1M_X_GPIO_IO10, dispatch: gd32_bridge, dispatch_pin: PA12 }
+  - { e1m: E1M_X_GPIO_IO11, dispatch: gd32_bridge, dispatch_pin: PB0  }
+  - { e1m: E1M_X_GPIO_IO12, dispatch: gd32_bridge, dispatch_pin: PC1  }
+  - { e1m: E1M_X_GPIO_IO13, dispatch: gd32_bridge, dispatch_pin: PF1  }
+  - { e1m: E1M_X_GPIO_IO14, dispatch: gd32_bridge, dispatch_pin: PB5  }
+  - { e1m: E1M_X_GPIO_IO16, dispatch: gd32_bridge, dispatch_pin: PC0  }
+  - { e1m: E1M_X_GPIO_IO24, dispatch: gd32_bridge, dispatch_pin: PC14 }
+  - { e1m: E1M_X_GPIO_IO25, dispatch: gd32_bridge, dispatch_pin: PC15 }
+
+  # E1M-X form-factor GPIO extensions (IO27..IO35, IO33 absent on V2N).
+  # See `E1M_X_GPIO_IO27..IO35` in <alp/e1m_x_pinout.h>.
+  # Source: metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv
+  - { e1m: E1M_X_GPIO_IO27, dispatch: gd32_bridge, dispatch_pin: PB11 }
+  - { e1m: E1M_X_GPIO_IO28, dispatch: gd32_bridge, dispatch_pin: PC2  }
+  - { e1m: E1M_X_GPIO_IO29, dispatch: gd32_bridge, dispatch_pin: PD11 }
+  - { e1m: E1M_X_GPIO_IO30, dispatch: gd32_bridge, dispatch_pin: PD10 }
+  - { e1m: E1M_X_GPIO_IO31, dispatch: gd32_bridge, dispatch_pin: PE12 }
+  - { e1m: E1M_X_GPIO_IO32, dispatch: gd32_bridge, dispatch_pin: PD2  }
+  - { e1m: E1M_X_GPIO_IO34, dispatch: gd32_bridge, dispatch_pin: PD8  }
+  - { e1m: E1M_X_GPIO_IO35, dispatch: gd32_bridge, dispatch_pin: PD1  }
 
 helper_firmware:
   - name:          gd32_bridge

@@ -12,6 +12,22 @@
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
  *
+ * @par Verification status: [PAPER-CORRECT-STUB]
+ *   `PMC_STATUS_00` per-bit assignment is provisional.  The chip
+ *   ACK + ID probe (`da9292_init`), voltage encoding, `CHx_EN`
+ *   control, and event read-and-clear paths are coded against the
+ *   datasheet's documented register layout; however the
+ *   `PMC_STATUS_00` bit order is assumed to mirror `PMC_MASK_00`
+ *   (whose layout IS documented in Table 19) and that assumption
+ *   needs cross-check against datasheet Table 14 before the
+ *   decoded `ch1_*` / `ch2_*` boolean fields in `da9292_status_t`
+ *   are trusted in production.  No surface returns
+ *   `ALP_ERR_NOSUPPORT` -- if the bit order turns out to be
+ *   different, `da9292_get_status` will succeed but report
+ *   under/over-voltage flags swapped with over-current flags.
+ *   See the comment block above `DA9292_STATUS00_*` in da9292.c
+ *   for the exact unverified bit positions.
+ *
  * The DA9292 is a multi-phase DC-DC buck PMIC that can be configured
  * (via the silicon's `CONF` strap pin) as either:
  *

@@ -312,7 +312,11 @@ When the loader resolves the file, each `populated.<name>: true`
 becomes `CONFIG_ALP_SDK_CHIP_<NAME>=y` in the generated Kconfig
 fragment -- enabling the corresponding chip driver in
 `chips/<name>/` without you having to touch a separate config
-file.
+file.  SDK-level *block* helpers (`button_led`, `pdm_mic`) emit
+`CONFIG_ALP_SDK_BLOCK_<NAME>=y` instead -- the loader picks the
+correct symbol per slug; the `board.yaml` syntax is identical
+either way.  See `blocks/README.md` for the block-vs-chip
+distinction.
 
 #### Carrier-side pin routing (`e1m_routes:`)
 

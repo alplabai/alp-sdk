@@ -12,12 +12,13 @@
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
  *
- * Consumed by alp-studio block `blk_pdm_mic`.  Like
- * `<alp/chips/button_led.h>` — and unlike the single-IC drivers in
- * this directory — **this helper carries the `alp_` prefix** because
- * it's an SDK-level block utility, not a binding to a specific
- * microphone IC.  Any compliant PDM mic (Knowles SPH0645LM4H-B,
- * STMicro MP34DT06J, Infineon IM73A135V01, …) drops in.
+ * Consumed by alp-studio block `blk_pdm_mic`.  Lives under
+ * `<alp/blocks/>` (NOT `<alp/chips/>`) because — like
+ * `<alp/blocks/button_led.h>` — this is an SDK-level *block*
+ * utility, not a binding to a specific microphone IC.  Hence the
+ * `alp_` prefix on every symbol.  Any compliant PDM mic (Knowles
+ * SPH0645LM4H-B, STMicro MP34DT06J, Infineon IM73A135V01, …) drops
+ * in.  See `blocks/README.md` for the full block-vs-chip rationale.
  *
  * v0.2 scope: declares the surface a PDM source needs to expose to
  * `<alp/audio.h>`; the underlying I²S/PDM peripheral abstraction
@@ -26,8 +27,8 @@
  * `ALP_ERR_NOSUPPORT`.  Same shape as `<alp/iot.h>` in v0.1.
  */
 
-#ifndef ALP_CHIPS_PDM_MIC_H
-#define ALP_CHIPS_PDM_MIC_H
+#ifndef ALP_BLOCKS_PDM_MIC_H
+#define ALP_BLOCKS_PDM_MIC_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -87,4 +88,4 @@ void          alp_pdm_mic_close(alp_pdm_mic_t *mic);
 }  /* extern "C" */
 #endif
 
-#endif  /* ALP_CHIPS_PDM_MIC_H */
+#endif  /* ALP_BLOCKS_PDM_MIC_H */

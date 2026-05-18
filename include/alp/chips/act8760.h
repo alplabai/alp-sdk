@@ -12,6 +12,17 @@
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
  *
+ * @par Verification status: [PAPER-CORRECT-STUB]
+ *   Per-rail VSET register-offset table is provisional.
+ *   `act8760_init` / `act8760_init_at`, `act8760_get_status`, and
+ *   `act8760_read_reg` / `act8760_write_reg` exercise real I2C and
+ *   succeed against silicon; `act8760_rail_get_vset` /
+ *   `act8760_rail_set_vset` return `ALP_ERR_NOSUPPORT` until the
+ *   per-rail offsets in `rail_table[]` (act8760.c) are cross-checked
+ *   against the ACT88760 Users Guide Rev 3.0 register-summary table
+ *   or the BUCK<n>_19Feb2025 TileLib XML.  See the `TODO: confirm`
+ *   markers in act8760.c for the exact unverified offsets.
+ *
  * The V2N / V2N-M1 SoMs populate the **ACT88760-120.E1** variant
  * (Code Matrix Index 120, revision E1).  The configuration ID is
  * stamped in the chip's non-volatile memory and is what determines

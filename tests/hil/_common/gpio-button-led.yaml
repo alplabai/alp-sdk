@@ -21,7 +21,7 @@ schema_version: 1
 name: gpio-button-led
 description: |
   Verifies GPIO read (button) + GPIO write (LED) end-to-end through
-  the <alp/chips/button_led.h> helper.
+  the <alp/blocks/button_led.h> helper.
 
 example: examples/gpio-button-led
 

@@ -238,19 +238,25 @@ Full sequence with code: [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md).
 ## 6. Chip driver opt-in
 
 Every chip driver is gated on a `CONFIG_ALP_SDK_CHIP_<NAME>=y`
-symbol so unused chips don't cost code size.  Two ways to flip
-the flag:
+symbol so unused chips don't cost code size.  SDK-level block
+helpers (see `blocks/README.md` -- currently `button_led` and
+`pdm_mic`) live behind `CONFIG_ALP_SDK_BLOCK_<NAME>=y` instead;
+the loader picks the right symbol for each populated slug, so
+declarative `board.yaml` use is identical either way.  Two ways
+to flip the flag:
 
-* **Declarative** (recommended): add the chip to
+* **Declarative** (recommended): add the slug to
   `carrier.populated:` in `board.yaml` (`button_led: true`,
   `ssd1306: true`, ...).  The v0.6 loader's per-core Kconfig
   emitter merges the carrier-preset `populated:` block with the
-  board.yaml override and writes `CONFIG_ALP_SDK_CHIP_<NAME>=y`
+  board.yaml override and writes the appropriate
+  `CONFIG_ALP_SDK_CHIP_<NAME>=y` / `CONFIG_ALP_SDK_BLOCK_<NAME>=y`
   on every Zephyr slice, plus the Zephyr subsystem (`CONFIG_I2C`,
-  `CONFIG_GPIO`, ...) each enabled chip needs.
-* **Manual**: add `CONFIG_ALP_SDK_CHIP_GD32G553=y` etc. to your
-  `prj.conf`.  Necessary for chips your carrier preset doesn't
-  cover (custom carriers + Tier-2 community chip drivers).
+  `CONFIG_GPIO`, ...) each enabled driver needs.
+* **Manual**: add `CONFIG_ALP_SDK_CHIP_GD32G553=y` (or
+  `CONFIG_ALP_SDK_BLOCK_BUTTON_LED=y`) etc. to your `prj.conf`.
+  Necessary for parts your carrier preset doesn't cover (custom
+  carriers + Tier-2 community drivers).
 
 The full chip catalogue is in `metadata/chips/` -- one yaml per
 part, listing the driver status (`stub` / `partial` / `complete`),

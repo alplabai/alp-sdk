@@ -4,7 +4,7 @@ sample:
   name: gpio-button-led
   description: |
     Per-peripheral example for the GPIO surface (via the
-    <alp/chips/button_led.h> block helper).  Toggles the LED and
+    <alp/blocks/button_led.h> block helper).  Toggles the LED and
     reads the button state.
 
 tests:

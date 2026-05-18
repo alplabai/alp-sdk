@@ -10,7 +10,7 @@
  *   2. CI catches breakage of v0.1 SDK surfaces early (the init
  *      stages are real and exercise <alp/peripheral.h>,
  *      <alp/chips/ssd1306.h>, <alp/chips/lsm6dso.h>,
- *      <alp/chips/button_led.h>).
+ *      <alp/blocks/button_led.h>).
  *   3. Each v0.2 step has a concrete TODO it slots into.
  *
  * v0.1 prints a one-line status per stage and exits cleanly under
@@ -26,7 +26,7 @@
 #include "alp/e1m_pinout.h"
 #include "alp/chips/lsm6dso.h"
 #include "alp/chips/ssd1306.h"
-#include "alp/chips/button_led.h"
+#include "alp/blocks/button_led.h"
 #include "alp/camera.h"
 #include "alp/inference.h"
 

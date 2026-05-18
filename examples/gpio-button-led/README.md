@@ -1,7 +1,7 @@
 # gpio-button-led
 
 Per-peripheral example wrapping `<alp/peripheral.h>` GPIO via the
-`<alp/chips/button_led.h>` block helper.  Polls a button and
+`<alp/blocks/button_led.h>` block helper.  Polls a button and
 toggles an LED.
 
 This example is also the **canonical demonstration of the
@@ -63,7 +63,7 @@ CONFIG_LOG_DEFAULT_LEVEL=3
 CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y
 
 # Carrier chip drivers (E1M-EVK)
-CONFIG_ALP_SDK_CHIP_BUTTON_LED=y
+CONFIG_ALP_SDK_BLOCK_BUTTON_LED=y
 ...
 
 # Zephyr subsystems pulled in by the enabled chip drivers
@@ -87,7 +87,7 @@ else needs to change.
 
 ## Reference
 
-- [`<alp/chips/button_led.h>`](../../include/alp/chips/button_led.h)
+- [`<alp/blocks/button_led.h>`](../../include/alp/blocks/button_led.h)
 - [`<alp/peripheral.h>`](../../include/alp/peripheral.h) GPIO surface
 - [`docs/board-config.md`](../../docs/board-config.md) -- the
   authoritative reference for `board.yaml`.
