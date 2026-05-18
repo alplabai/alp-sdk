@@ -117,31 +117,6 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
-def _validate(project: dict[str, Any]) -> None:
-    """Legacy v1 board.yaml validator (noop).
-
-    The v1 schema (`board-config-v1.schema.json`) was removed in Phase
-    1 of the 2026-05-15 metadata redesign.  v1 board.yaml inputs are
-    no longer schema-validated; the migration target is v2
-    (`schema_version: 2` with the per-core `cores:` block -- see
-    `docs/board-config.md`).  Existing v1 emit modes remain operative
-    against unvalidated input for the transition window so older test
-    fixtures + tooling that still write v1 board.yamls keep working.
-    """
-    return
-    # Unreachable; preserved so a future re-introduction of v1
-    # validation can drop in a schema path without touching call
-    # sites.
-    schema = json.loads(SCHEMA_V2.read_text(encoding="utf-8"))
-    validator = jsonschema.Draft202012Validator(schema)
-    errors = sorted(validator.iter_errors(project), key=lambda e: list(e.path))
-    if errors:
-        for e in errors:
-            loc = "/".join(str(p) for p in e.path) or "<root>"
-            print(f"alp_project: schema violation at {loc}: {e.message}", file=sys.stderr)
-        sys.exit(1)
-
-
 def _resolve_sku(sku: str, metadata_root: Path) -> dict[str, Any]:
     # Per-SKU preset lives at metadata/e1m_modules/<SKU>.yaml.
     preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
@@ -411,276 +386,8 @@ def _resolve_capabilities(
 
 
 # ---------------------------------------------------------------------
-# Hardware-revision compatibility (board.yaml hw_rev vs SDK version)
-# ---------------------------------------------------------------------
-
-
-def _read_sdk_version(metadata_root: Path) -> str | None:
-    """Read metadata/sdk_version.yaml.  Returns the version string,
-    or None if the file is absent (allows running the loader on
-    older checkouts that pre-date the hw_rev work)."""
-    p = metadata_root / "sdk_version.yaml"
-    if not p.is_file():
-        return None
-    data = yaml.safe_load(p.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        return None
-    v = data.get("version")
-    return str(v) if v else None
-
-
-def _parse_semver(s: str) -> tuple[int, ...]:
-    """Lenient '0.3.0' -> (0, 3, 0) split.  Non-numeric trailing
-    pre-release suffixes like '0.3.0-rc1' are dropped."""
-    head = s.split("-", 1)[0].split("+", 1)[0]
-    parts = []
-    for chunk in head.split("."):
-        try:
-            parts.append(int(chunk))
-        except ValueError:
-            parts.append(0)
-    return tuple(parts)
-
-
-def _load_family_hw_revisions(
-    family: str, metadata_root: Path,
-) -> dict[str, Any] | None:
-    """metadata/e1m_modules/<family>/hw-revisions.yaml -- returns
-    the file's `hw_revisions` block (or None if the file is missing)."""
-    p = metadata_root / "e1m_modules" / family / "hw-revisions.yaml"
-    if not p.is_file():
-        return None
-    doc = yaml.safe_load(p.read_text(encoding="utf-8"))
-    if not isinstance(doc, dict):
-        return None
-    revs = doc.get("hw_revisions")
-    return revs if isinstance(revs, dict) else None
-
-
-def _resolve_hw_rev(
-    declared: str | None,
-    preset_default: str | None,
-    label: str,
-) -> str | None:
-    """Pick the effective hw_rev -- the explicit board.yaml field
-    wins; otherwise fall back to the preset's default_hw_rev.  Returns
-    None when both are absent (in which case the check is skipped
-    with a comment, not a hard error)."""
-    rev = declared or preset_default
-    if rev is None:
-        print(f"alp_project: no hw_rev declared for {label} -- check skipped",
-              file=sys.stderr)
-    return rev
-
-
-def _check_hw_rev_vs_sdk(
-    rev: str,
-    hw_revisions: dict[str, Any],
-    sdk_version: str,
-    label: str,
-) -> None:
-    """Fail-fast: validate that the chosen hw_rev's
-    [min_sdk_version, max_sdk_version] window covers the SDK
-    version.  Exits with the loader's standard error path on
-    mismatch."""
-    if rev not in hw_revisions:
-        sys.exit(
-            f"alp_project: {label} hw_rev '{rev}' is not declared in "
-            f"hw_revisions; known: {sorted(hw_revisions.keys())}")
-    entry = hw_revisions[rev] or {}
-    min_s = entry.get("min_sdk_version")
-    max_s = entry.get("max_sdk_version")
-    sdk_t = _parse_semver(sdk_version)
-    if min_s is not None and sdk_t < _parse_semver(str(min_s)):
-        sys.exit(
-            f"alp_project: SDK {sdk_version} is older than {label} hw_rev "
-            f"'{rev}' minimum {min_s}.  Upgrade the SDK or pick an "
-            f"older hw_rev.")
-    # max_sdk_version may be null/None -- treated as "unlimited".
-    if max_s is not None and str(max_s).strip() not in ("", "~"):
-        if sdk_t > _parse_semver(str(max_s)):
-            sys.exit(
-                f"alp_project: SDK {sdk_version} is newer than {label} "
-                f"hw_rev '{rev}' maximum {max_s}.  Downgrade the SDK or "
-                f"pick a newer hw_rev.")
-
-
-# ---------------------------------------------------------------------
-# Override merge
-# ---------------------------------------------------------------------
-
-
-def _merge_populated(base: dict[str, bool], overrides: dict[str, bool] | None) -> dict[str, bool]:
-    out = dict(base or {})
-    for k, v in (overrides or {}).items():
-        out[k] = bool(v)
-    return out
-
-
-# ---------------------------------------------------------------------
 # Emission
 # ---------------------------------------------------------------------
-
-
-def _emit_zephyr(
-    project: dict[str, Any],
-    sku_preset: dict[str, Any],
-    carrier_preset: dict[str, Any] | None,
-) -> str:
-    lines: list[str] = []
-    lines.append("# Auto-generated by scripts/alp_project.py -- do not edit by hand.")
-    lines.append("# Regenerate after changes to board.yaml.")
-    lines.append("")
-
-    # 0. ALP SDK + Zephyr baseline.  Always required when emitting
-    # zephyr-conf so the customer's prj.conf can be a single rsource
-    # of the generated fragment (board.yaml is the single source of
-    # truth -- prj.conf no longer carries CONFIG_ALP_SDK / CONFIG_LOG
-    # / CONFIG_PRINTK / TLS by hand).
-    diagnostics = project.get("diagnostics") or {}
-    lines.append("# ALP SDK + Zephyr baseline")
-    lines.append("CONFIG_ALP_SDK=y")
-    lines.append("CONFIG_LOG=y")
-    lines.append("CONFIG_PRINTK=y")
-    if diagnostics.get("last_error", True):
-        # Thread-local alp_last_error() slot requires TLS.
-        lines.append("CONFIG_THREAD_LOCAL_STORAGE=y")
-    log_level = diagnostics.get("log_level")
-    if log_level is not None:
-        # Zephyr's CONFIG_LOG_DEFAULT_LEVEL is 0..4 (off, err, wrn,
-        # inf, dbg).  Map our `trace` to dbg since Zephyr has no
-        # finer-grained slot.
-        log_level_kc = {"error": 1, "warn": 2, "info": 3, "debug": 4, "trace": 4}
-        if log_level in log_level_kc:
-            lines.append(f"CONFIG_LOG_DEFAULT_LEVEL={log_level_kc[log_level]}")
-    lines.append("")
-
-    # 1. Silicon selection
-    silicon = sku_preset.get("silicon")
-    kconfig = _SILICON_TO_KCONFIG.get(silicon, None) if silicon else None
-    if kconfig is not None:
-        lines.append(f"# SoM silicon ({silicon} via {project['som']['sku']})")
-        lines.append(f"CONFIG_{kconfig}=y")
-        lines.append("")
-    elif silicon is not None:
-        lines.append(f"# silicon '{silicon}' has no Kconfig mapping yet -- update _SILICON_TO_KCONFIG")
-        lines.append("")
-
-    # 2. Carrier-populated chip drivers
-    final: dict[str, bool] = {}
-    if carrier_preset is not None:
-        base = carrier_preset.get("populated", {}) or {}
-        user_overrides = (project.get("carrier", {}) or {}).get("populated", {}) or {}
-        final = _merge_populated(base, user_overrides)
-        if final:
-            lines.append(f"# Carrier chip drivers ({carrier_preset.get('name', '?')})")
-            for chip, on in sorted(final.items()):
-                lines.append(f"CONFIG_ALP_SDK_CHIP_{chip.upper()}={'y' if on else 'n'}")
-            lines.append("")
-
-    # 2b. Zephyr subsystems required by the enabled chip drivers.
-    # Each chip driver's Kconfig has a `depends on <SUBSYS>` line;
-    # Kconfig won't auto-select GPIO / I2C / SPI / PWM when the
-    # chip is enabled, so we map populated chips to the subsystems
-    # they need and emit the matching CONFIG_<SUBSYS>=y.
-    subsystems: set[str] = set()
-    for chip, on in final.items():
-        if not on:
-            continue
-        for s in _CHIP_SUBSYSTEMS.get(chip, ()):
-            subsystems.add(s)
-
-    # 2c. Subsystems the app declares directly via the `peripherals:`
-    # block.  Covers apps that hit <alp/<class>.h> without going
-    # through any chip driver -- the per-peripheral examples are the
-    # canonical case (adc-voltmeter / i2c-scanner / etc.).
-    for periph in project.get("peripherals") or []:
-        kc = _PERIPHERAL_KCONFIG.get(periph)
-        if kc:
-            subsystems.add(kc)
-        else:
-            lines.append(f"# TODO: peripheral '{periph}' has no Kconfig mapping yet")
-    if subsystems:
-        lines.append("# Zephyr subsystems pulled in by enabled chip drivers + peripherals")
-        for s in sorted(subsystems):
-            lines.append(f"CONFIG_{s}=y")
-        lines.append("")
-
-    # 3. Inference backend
-    inference = project.get("inference") or {}
-    backend = inference.get("backend") or sku_preset.get("inference", {}).get("preferred_backend") \
-        or "auto"
-    lines.append(f"# Inference backend ({backend})")
-    if backend in ("cpu", "ethos_u"):
-        lines.append("CONFIG_ALP_SDK_INFERENCE_TFLM=y")
-        if backend == "ethos_u":
-            lines.append("CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y")
-            # Per-NPU kernel driver selection.  The dispatch gate
-            # above (CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y) pulls in the
-            # TFLM op resolver; the gates below pull in the matching
-            # low-level driver shim:
-            #   - U85 lives on Alif E4 / E6 / E8 only (one per SoC,
-            #     Transformer-capable).
-            #   - U55 lives on every Alif Ensemble SKU (two per SoC).
-            #   - U65 lives on i.MX 93 (driver shim is N93-specific).
-            # Keep `ethos_u` as the customer-facing token; consumers
-            # don't have to know which variant the silicon carries.
-            if silicon in ("alif:ensemble:e4", "alif:ensemble:e6", "alif:ensemble:e8"):
-                lines.append("CONFIG_ALP_TFLM_ETHOS_U85=y")
-            if silicon and silicon.startswith("alif:ensemble:"):
-                lines.append("CONFIG_ALP_TFLM_ETHOS_U55=y")
-            if silicon == "nxp:imx9:imx93":
-                lines.append("CONFIG_ALP_TFLM_ETHOS_U65=y")
-                lines.append("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y")
-    elif backend == "drpai":
-        lines.append("CONFIG_ALP_SDK_INFERENCE_DRPAI=y")
-    elif backend == "deepx_dx":
-        lines.append("# Note: DEEPX backend is Yocto-only today; the Zephyr build")
-        lines.append("# falls back to NOSUPPORT.  Use --emit cmake-args for V2N-M1.")
-    elif backend == "auto":
-        lines.append("# auto -- the dispatcher's resolve_auto() picks based on compiled backends")
-    lines.append("")
-
-    # 4. IoT features
-    iot = project.get("iot") or {}
-    if iot:
-        lines.append("# IoT features")
-        if iot.get("wifi"):
-            lines.append("CONFIG_ALP_SDK_IOT_WIFI=y")
-        if iot.get("mqtt"):
-            lines.append("CONFIG_ALP_SDK_IOT_MQTT=y")
-        if iot.get("ble"):
-            lines.append("CONFIG_ALP_SDK_BLE=y")
-        if iot.get("tls"):
-            lines.append("CONFIG_ALP_SDK_SECURITY=y")
-        lines.append("")
-
-    # 5. Optional libraries
-    libs = project.get("libraries") or []
-    if libs:
-        lines.append("# Optional libraries (apps use the upstream native API; the SDK")
-        lines.append("# adds the matching compile-time profile from metadata/library-profiles/)")
-        for lib in libs:
-            if lib in _LIBRARY_KCONFIG:
-                for kc in _LIBRARY_KCONFIG[lib]:
-                    lines.append(f"{kc}")
-            else:
-                lines.append(f"# TODO: wire library '{lib}' once the v0.4 enable lands")
-        # §D.lib.loader -- cross-library HW-backend wiring: for each
-        # library that ships a metadata/library-profiles/<name>/
-        # hw-backends.yaml, emit the highest-priority matching
-        # CONFIG_* per accelerator class given the active SoM family.
-        # The SW fallback is already emitted unconditionally above
-        # (via _LIBRARY_KCONFIG); this layer adds the HW acceleration
-        # on top.
-        hw_lines = _emit_library_hw_backends(libs, project["som"]["sku"])
-        if hw_lines:
-            lines.append("")
-            lines.append("# §D.lib.loader -- per-library HW-accelerator wiring (auto-emitted).")
-            lines.extend(hw_lines)
-        lines.append("")
-
-    return "\n".join(lines) + "\n"
 
 
 # §D.lib.loader: map _sku_family() return values to the soc_family
@@ -995,25 +702,6 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
     # §D.lib.test
     "catch2":         ("CONFIG_ALP_CATCH2_SW=y",),
 }
-
-
-def _emit_cmake(
-    project: dict[str, Any],
-    sku_preset: dict[str, Any],
-    carrier_preset: dict[str, Any] | None,
-) -> str:
-    args: list[str] = []
-    # SoM family → ALP_SOM
-    family = _sku_family(project["som"]["sku"])
-    som_family_alias = {"aen": "aen", "v2n": "v2n", "v2n-m1": "v2n", "imx93": "imx93"}[family]
-    args.append(f"-DALP_SOM={som_family_alias}")
-    args.append(f"-DALP_OS={project['os']}")
-
-    # V2N-M1 → enable DEEPX backend in the Yocto build
-    if family == "v2n-m1":
-        args.append("-DALP_SDK_USE_DEEPX_DXM1=ON")
-
-    return " \\\n    ".join(args) + "\n"
 
 
 # ---------------------------------------------------------------------
@@ -1502,29 +1190,6 @@ def _emit_hw_info_h(
     return "\n".join(lines)
 
 
-def _emit_yocto(
-    project: dict[str, Any],
-    sku_preset: dict[str, Any],
-    carrier_preset: dict[str, Any] | None,
-) -> str:
-    family = _sku_family(project["som"]["sku"])
-    machine = {
-        "aen":     "e1m-aen-evk",       # TBD -- meta-alp will land this MACHINE
-        "v2n":     "e1m-x-v2n",
-        "v2n-m1":  "e1m-x-v2n-m1",
-        "imx93":   "e1m-n93",
-    }[family]
-    lines = [
-        f"# Auto-generated by scripts/alp_project.py.  Append to local.conf.",
-        f"MACHINE = \"{machine}\"",
-    ]
-    libs = project.get("libraries") or []
-    if libs:
-        imageinstall = " ".join(f"lib-{lib.replace('_', '-')}" for lib in libs)
-        lines.append(f"IMAGE_INSTALL:append = \" {imageinstall}\"")
-    return "\n".join(lines) + "\n"
-
-
 # ---------------------------------------------------------------------
 # Composed-route-table emitter (demonstrator)
 # ---------------------------------------------------------------------
@@ -1661,17 +1326,13 @@ def _emit_composed_route_table(
 
 
 # ---------------------------------------------------------------------
-# v2 emit shims (Phase 2)
+# v2 emit shims
 # ---------------------------------------------------------------------
 #
 # The orchestrator (scripts/alp_orchestrate.py) owns the v2 board.yaml
-# loader + carve-out resolver + system-manifest emitter.  The v1
-# loader above keeps working unchanged for backwards compatibility;
-# these shims route the new v2-only `--emit` modes (and the per-core
+# loader + carve-out resolver + system-manifest emitter.  These shims
+# route the v2-only `--emit` modes (and the per-core
 # `--emit zephyr-conf --core <id>`) through the orchestrator.
-#
-# Phase 4 rewrites every shipped board.yaml; once that lands, the v1
-# path becomes dead code we can excise.
 
 
 def _write_or_print(out: str, target: Path | None) -> int:
@@ -1863,6 +1524,11 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
                       f"emitting Kconfig fragment anyway", file=sys.stderr)
             parts.append(f"# --- core: {cid} ({slice_.os}) ---")
             parts.append(_slice_alp_conf(project, slice_))
+            hw_lines = _emit_library_hw_backends(slice_.libraries, project.sku)
+            if hw_lines:
+                parts.append("# §D.lib.loader -- per-library HW-accelerator wiring (auto-emitted).")
+                parts.extend(hw_lines)
+                parts.append("")
         elif args.emit == "yocto-conf":
             if slice_.os != "yocto":
                 if args.core is None:
@@ -1922,18 +1588,16 @@ def main() -> int:
                              "ipc-contract-h, dts-reservations.")
     args = parser.parse_args()
 
-    # v2 emit modes route through scripts/alp_orchestrate.py.  We resolve
-    # them before the v1 path so a v2 input doesn't trip the v1 validator.
+    # Project-wide v2 emit modes (system-manifest, dts-reservations,
+    # ipc-contract-h) route through alp_orchestrate.py directly.
     if args.emit in ("system-manifest", "dts-reservations",
                      "ipc-contract-h"):
         return _run_v2_emit(args)
 
     project = _load_yaml(args.input)
 
-    # composed-route-table works against both v1 and v2 board.yamls: it
-    # only needs the SoM preset + carrier preset, not the per-core slice
-    # machinery.  Intercept before the v2 schema branch so it runs on any
-    # schema version.
+    # composed-route-table only needs the SoM + carrier presets; it does
+    # not require the per-core slice machinery and works on any v2 input.
     if args.emit == "composed-route-table":
         sku_preset_rt = _resolve_sku(project["som"]["sku"], args.metadata_root)
         carrier_preset_rt = None
@@ -1949,76 +1613,13 @@ def main() -> int:
     # v2 board.yamls flow through the per-core / project-wide emit path
     # in _run_v2_per_core_emit.  Project-wide v2 emits (system-manifest,
     # dts-reservations, ipc-contract-h) were already dispatched above.
-    # --core is honoured for zephyr-conf / yocto-conf / cmake-args (per-
-    # core fan-out) and for dts-overlay / hw-info-h / west-libraries
-    # (scopes the union calculation to a single slice).
     schema_version = project.get("schema_version")
-    if schema_version == 2:
-        return _run_v2_per_core_emit(args)
-    elif args.core is not None:
-        print(f"alp_project: --core requires a v2 board.yaml; input is "
-              f"v{schema_version} -- ignoring", file=sys.stderr)
-
-    _validate(project)
-
-    sku_preset = _resolve_sku(project["som"]["sku"], args.metadata_root)
-    carrier_preset = None
-    if "carrier" in project and project["carrier"]:
-        carrier_preset = _resolve_carrier(project["carrier"]["name"], args.metadata_root)
-
-    # Hardware-rev / SDK-version compatibility.  Skipped silently
-    # when sdk_version.yaml is absent so the loader stays usable
-    # on pre-v0.3 checkouts.
-    sdk_version = _read_sdk_version(args.metadata_root)
-    if sdk_version is not None:
-        family = _sku_family(project["som"]["sku"])
-        family_revs = _load_family_hw_revisions(family, args.metadata_root)
-        if family_revs:
-            som_rev = _resolve_hw_rev(
-                project["som"].get("hw_rev"),
-                sku_preset.get("default_hw_rev"),
-                f"SoM {project['som']['sku']}",
-            )
-            if som_rev is not None:
-                _check_hw_rev_vs_sdk(
-                    som_rev, family_revs, sdk_version,
-                    f"SoM {project['som']['sku']}")
-        if carrier_preset is not None:
-            carrier_revs = carrier_preset.get("hw_revisions") or {}
-            if isinstance(carrier_revs, dict) and carrier_revs:
-                carrier_rev = _resolve_hw_rev(
-                    (project.get("carrier") or {}).get("hw_rev"),
-                    carrier_preset.get("default_hw_rev"),
-                    f"carrier {carrier_preset.get('name', '?')}",
-                )
-                if carrier_rev is not None:
-                    _check_hw_rev_vs_sdk(
-                        carrier_rev, carrier_revs, sdk_version,
-                        f"carrier {carrier_preset.get('name', '?')}")
-
-    if args.emit == "zephyr-conf":
-        out = _emit_zephyr(project, sku_preset, carrier_preset)
-    elif args.emit == "cmake-args":
-        out = _emit_cmake(project, sku_preset, carrier_preset)
-    elif args.emit == "yocto-conf":
-        out = _emit_yocto(project, sku_preset, carrier_preset)
-    elif args.emit == "dts-overlay":
-        out = _emit_dts_overlay(project, sku_preset, carrier_preset)
-    elif args.emit == "hw-info-h":
-        out = _emit_hw_info_h(project, sku_preset, carrier_preset)
-    elif args.emit == "west-libraries":
-        out = _emit_west_libraries(project, sku_preset, carrier_preset)
-    else:
-        sys.exit(f"alp_project: unknown emit format {args.emit}")
-
-    if args.output is not None:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(out, encoding="utf-8")
-        print(f"alp_project: wrote {args.output.relative_to(Path.cwd()) if args.output.is_relative_to(Path.cwd()) else args.output} ({len(out)} bytes)", file=sys.stderr)
-    else:
-        sys.stdout.write(out)
-
-    return 0
+    if schema_version != 2:
+        sys.exit(
+            f"alp_project: schema_version: {schema_version} not supported. "
+            f"Use schema_version: 2 (per-core cores: block; see docs/board-config.md)."
+        )
+    return _run_v2_per_core_emit(args)
 
 
 if __name__ == "__main__":

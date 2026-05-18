@@ -62,14 +62,17 @@ class TestLoaderContract(unittest.TestCase):
                                 msg=f"{emit}: empty output")
 
     def test_minimum_viable_board_yaml(self) -> None:
-        """A board.yaml with just schema_version + som + os should be
-        accepted (carrier is optional in the schema)."""
+        """A board.yaml with just schema_version + som + a single core
+        should be accepted (carrier is optional in the schema)."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 1
+                schema_version: 2
                 som:
                   sku: E1M-AEN701
-                os: zephyr
+                cores:
+                  m55_hp:
+                    os: zephyr
+                    app: ./src
             """)
             rv = _run_loader(input_path=path)
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
@@ -111,10 +114,13 @@ class TestLoaderContract(unittest.TestCase):
         must produce a clear missing-preset error, not a schema error."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 1
+                schema_version: 2
                 som:
                   sku: E1M-NX9999
-                os: zephyr
+                cores:
+                  m33:
+                    os: zephyr
+                    app: ./src
             """)
             rv = _run_loader(input_path=path)
             self.assertNotEqual(rv.returncode, 0)
@@ -126,14 +132,17 @@ class TestLoaderContract(unittest.TestCase):
         override flips it to true."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 1
+                schema_version: 2
                 som:
                   sku: E1M-AEN701
                 carrier:
                   name: E1M-EVK
                   populated:
                     bme280: true
-                os: zephyr
+                cores:
+                  m55_hp:
+                    os: zephyr
+                    app: ./src
             """)
             rv = _run_loader(input_path=path)
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
@@ -147,10 +156,13 @@ class TestZephyrEmit(unittest.TestCase):
     def test_baseline_alp_sdk_always_on(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 1
+                schema_version: 2
                 som:
                   sku: E1M-AEN701
-                os: zephyr
+                cores:
+                  m55_hp:
+                    os: zephyr
+                    app: ./src
             """)
             rv = _run_loader(input_path=path)
             self.assertIn("CONFIG_ALP_SDK=y", rv.stdout)
@@ -181,12 +193,15 @@ class TestZephyrEmit(unittest.TestCase):
             with self.subTest(peripheral=periph):
                 with tempfile.TemporaryDirectory() as td:
                     path = _write_board(Path(td), f"""
-                        schema_version: 1
+                        schema_version: 2
                         som:
                           sku: E1M-AEN701
-                        os: zephyr
-                        peripherals:
-                          - {periph}
+                        cores:
+                          m55_hp:
+                            os: zephyr
+                            app: ./src
+                            peripherals:
+                              - {periph}
                     """)
                     rv = _run_loader(input_path=path)
                     self.assertEqual(rv.returncode, 0, msg=rv.stderr)
@@ -198,12 +213,15 @@ class TestZephyrEmit(unittest.TestCase):
             with self.subTest(log_level=log_level):
                 with tempfile.TemporaryDirectory() as td:
                     path = _write_board(Path(td), f"""
-                        schema_version: 1
+                        schema_version: 2
                         som:
                           sku: E1M-AEN701
-                        os: zephyr
                         diagnostics:
                           log_level: {log_level}
+                        cores:
+                          m55_hp:
+                            os: zephyr
+                            app: ./src
                     """)
                     rv = _run_loader(input_path=path)
                     self.assertEqual(rv.returncode, 0)
@@ -278,10 +296,13 @@ class TestHwInfoHEmit(unittest.TestCase):
         no empty ALP_HW_BUILD_CARRIER_* macros."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 1
+                schema_version: 2
                 som:
                   sku: E1M-AEN701
-                os: zephyr
+                cores:
+                  m55_hp:
+                    os: zephyr
+                    app: ./src
             """)
             rv = _run_loader(input_path=path, emit="hw-info-h")
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
@@ -293,11 +314,14 @@ class TestHwInfoHEmit(unittest.TestCase):
         default_hw_rev (matching the loader's wider behaviour)."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 1
+                schema_version: 2
                 som:
                   sku: E1M-AEN701
                   hw_rev: r1
-                os: zephyr
+                cores:
+                  m55_hp:
+                    os: zephyr
+                    app: ./src
             """)
             rv = _run_loader(input_path=path, emit="hw-info-h")
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
@@ -327,10 +351,13 @@ class TestWestLibrariesEmit(unittest.TestCase):
     def test_empty_libraries_emits_well_formed_empty_block(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 1
+                schema_version: 2
                 som:
                   sku: E1M-AEN701
-                os: zephyr
+                cores:
+                  m55_hp:
+                    os: zephyr
+                    app: ./src
             """)
             rv = _run_loader(input_path=path, emit="west-libraries")
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
@@ -380,22 +407,46 @@ class TestHwBackendsLoader(unittest.TestCase):
         "gfx_compat", "minimp3", "opus", "libhelix",
     ]
 
+    _SKU_CORE: dict[str, str] = {
+        "AEN": "m55_hp",
+        "V2N": "m33_sm",
+        "V2M": "m33_sm",
+        "NX9": "m33",
+    }
+
+    @classmethod
+    def _core_for_sku(cls, sku: str) -> str:
+        for prefix, core in cls._SKU_CORE.items():
+            if f"E1M-{prefix}" in sku:
+                return core
+        return "m55_hp"
+
     @classmethod
     def _emit(cls, sku: str) -> str:
         """Run the full loader for `sku` + every library, return stdout."""
+        core = cls._core_for_sku(sku)
+        libs_yaml = "".join(f"              - {lib}\n" for lib in cls.LIBS)
         body = (
-            "schema_version: 1\n"
+            "schema_version: 2\n"
             "som:\n"
             f"  sku: {sku}\n"
-            "os: zephyr\n"
-            "libraries:\n"
+            "cores:\n"
+            f"  {core}:\n"
+            "    os: zephyr\n"
+            "    app: ./src\n"
+            "    libraries:\n"
+            f"{libs_yaml}"
         )
-        for lib in cls.LIBS:
-            body += f"  - {lib}\n"
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "board.yaml"
             path.write_text(body, encoding="utf-8")
-            rv = _run_loader(input_path=path)
+            rv = subprocess.run(
+                [sys.executable, str(LOADER),
+                 "--input", str(path),
+                 "--emit", "zephyr-conf",
+                 "--core", core],
+                capture_output=True, text=True, check=False,
+            )
         # In any subTest we want the actual returncode + stderr in the
         # failure message, so attach them to the returned string.
         return rv.stdout if rv.returncode == 0 else f"FAIL rc={rv.returncode}: {rv.stderr}\n{rv.stdout}"
