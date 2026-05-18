@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-temp-sensor
+  description: |
+    Read the V2N's on-module TMP112 temperature sensor over
+    BRD_I2C via the chip-driver header.  Useful as a basic
+    on-module-chip sanity check.
+
+tests:
+  alp_sdk.examples.v2n.temp_sensor.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - i2c
+      - sensors
+    build_only: true

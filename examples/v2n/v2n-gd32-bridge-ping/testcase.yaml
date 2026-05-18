@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-gd32-bridge-ping
+  description: |
+    V2N-specific bring-up demo: ping + version round-trip against
+    the on-module GD32G553 supervisor MCU via both SPI and I2C
+    transports.  Exercises the gd32g553 chip-driver surface
+    directly (intentional for this bridge demo per spec §4.5).
+
+tests:
+  alp_sdk.examples.v2n.gd32_bridge_ping.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - supervisor-mcu
+      - gd32-bridge
+    build_only: true

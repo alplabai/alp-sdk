@@ -40,7 +40,7 @@ on_module:
         - { chip: gd32g553,         role: supervisor_mcu_i2c_slave,  address_7bit: "0x70" }
         - { chip: act8760,          role: pmic_main_page0,           address_7bit: "0x25" }
         - { chip: act8760,          role: pmic_main_page1,           address_7bit: "0x26" }
-        - { chip: da9292,           role: pmic_secondary,            address_7bit: "0x1C" }
+        - { chip: da9292,           role: pmic_secondary,            address_7bit: "0x1E" }
         - { chip: tps628640,        role: lpddr4x_0v6,               address_7bit: "0x4D", assembled: optional }
     e1m_i2c0:
       bus_master: renesas-rzv2n

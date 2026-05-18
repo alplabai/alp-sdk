@@ -1,6 +1,6 @@
-/*
- * Copyright 2026 ALP Lab AB
- * SPDX-License-Identifier: Apache-2.0
+/**
+ * @file soc_caps.h
+ * @brief Per-SoC peripheral capability macros (auto-generated).
  *
  * Auto-generated from metadata/socs/<vendor>/<family>/<part>.json
  * by scripts/gen_soc_caps.py.  DO NOT EDIT BY HAND — regenerate.
@@ -10,6 +10,9 @@
  * selected the macros default to a permissive UINT16_MAX so
  * capability checks accept any config — apps that want runtime
  * validation must select a specific SoC.
+ *
+ * Copyright 2026 ALP Lab AB
+ * SPDX-License-Identifier: Apache-2.0
  *
  * @par ABI status: [ABI-STABLE]
  *      v0.1 generated; capability constants.

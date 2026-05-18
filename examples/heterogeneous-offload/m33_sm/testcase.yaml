@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Lives under m33_sm/ (not the project root) because this is a
+# multi-slice project: the Yocto consumer under linux/ is tested
+# by the bitbake CI lane.  Twister sees the Zephyr slice only.
+
+sample:
+  name: heterogeneous-offload-m33_sm
+  description: |
+    Heterogeneous-compute offload demo: the M33-SM core (Zephyr)
+    offloads a workload submitted by the A55 cluster (Yocto) via
+    `<alp/rpc.h>`.  This testcase covers ONLY the Zephyr/M33-SM
+    half; the A55 side is bitbake-only.
+
+tests:
+  alp_sdk.examples.heterogeneous_offload.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - heterogeneous
+      - rpc
+      - mproc
+    build_only: true
+    extra_args: CONFIG_ALP_SDK_RPC=y

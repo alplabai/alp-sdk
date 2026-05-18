@@ -125,7 +125,7 @@ static int stage_network_connect(void) {
         return 0;
     }
     alp_status_t s = alp_wifi_connect(g_wifi, &(alp_wifi_credentials_t){
-        .ssid = "alp-lab-2g",
+        .ssid = "your-ssid",     /* replace with your Wi-Fi SSID */
         .psk  = NULL,            /* TODO(v0.3): pull from secure store */
     }, 30000);
     printf("[iotcam]   alp_wifi_connect              %s\n",
@@ -147,7 +147,7 @@ static int stage_mqtt_connect(void) {
      * subscribe path picks up commands; publish emits inference
      * results as JSON. */
     g_mqtt = alp_mqtt_open(&(alp_mqtt_config_t){
-        .broker_uri    = "mqtts://broker.alplab.ai:8883",
+        .broker_uri    = "mqtts://broker.example.com:8883",
         .client_id     = "alp-iotcam-skeleton",
         .keepalive_s   = 60,
         .clean_session = true,

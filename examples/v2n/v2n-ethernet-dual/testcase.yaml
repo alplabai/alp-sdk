@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-ethernet-dual
+  description: |
+    V2N's dual on-module RTL8211FDI Ethernet PHYs: bring both
+    links up, report MDIO link state per port, exercise the
+    `<alp/iot.h>` net surface across both PHYs.
+
+tests:
+  alp_sdk.examples.v2n.ethernet_dual.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - ethernet
+      - iot
+    build_only: true

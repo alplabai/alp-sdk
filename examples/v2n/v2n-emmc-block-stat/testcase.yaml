@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-emmc-block-stat
+  description: |
+    Read block-device statistics (sector count, erase block size,
+    error counters) from the V2N's on-module eMMC 5.1 via
+    `<alp/storage.h>`.
+
+tests:
+  alp_sdk.examples.v2n.emmc_block_stat.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - storage
+      - emmc
+    build_only: true

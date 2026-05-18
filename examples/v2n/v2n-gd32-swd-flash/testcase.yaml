@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-gd32-swd-flash
+  description: |
+    Reflash the on-module GD32G553 via SWD from the V2N host's
+    three GPIOs (SWDIO + SWCLK + nRST).  Bring-up recovery flow
+    for a bricked bridge MCU; uses the chip-driver gd32_swd
+    surface directly.
+
+tests:
+  alp_sdk.examples.v2n.gd32_swd_flash.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - swd
+      - bridge-recovery
+    build_only: true

@@ -85,7 +85,7 @@ development.
 
 ### 5. MQTT (v0.3)
 
-Eclipse Mosquitto-compatible broker at `mqtts://broker.alplab.ai:8883`
+Eclipse Mosquitto-compatible broker at `mqtts://broker.example.com:8883`
 by default; per-deployment override via `CONFIG_ALP_IOT_BROKER_URI`.
 
 Default topics:

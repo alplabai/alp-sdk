@@ -38,7 +38,7 @@ on_module:
         - { chip: gd32g553,         role: supervisor_mcu_i2c_slave,  address_7bit: "0x70" }
         - { chip: act8760,          role: pmic_main_page0,           address_7bit: "0x25" }
         - { chip: act8760,          role: pmic_main_page1,           address_7bit: "0x26" }
-        - { chip: da9292,           role: pmic_secondary,            address_7bit: "0x1C" }
+        - { chip: da9292,           role: pmic_secondary,            address_7bit: "0x1E" }
         - { chip: tps628640,        role: deepx_lpddr_0v85,          address_7bit: "0x48" }
         - { chip: tps628640,        role: deepx_ddr5_vdd,            address_7bit: "0x44" }
         - { chip: tps628640,        role: deepx_ddr5_vddq,           address_7bit: "0x4F" }

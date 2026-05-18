@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Lives under m33/ because rpmsg-imx93 is a multi-slice project
+# (A55 cluster Yocto + M33 Zephyr on i.MX 93).  Twister sees the
+# Zephyr slice only; the linux/ consumer is bitbake-tested.
+
+sample:
+  name: rpmsg-imx93-m33
+  description: |
+    Heterogeneous-compute on NXP i.MX 93: A55 cluster (Yocto) +
+    M33 (Zephyr) communicating via `<alp/rpc.h>` over RPMsg.
+    This testcase covers ONLY the M33 Zephyr half.
+
+tests:
+  alp_sdk.examples.rpmsg_imx93.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - imx93
+      - heterogeneous
+      - rpmsg
+    build_only: true
+    extra_args: CONFIG_ALP_SDK_RPC=y

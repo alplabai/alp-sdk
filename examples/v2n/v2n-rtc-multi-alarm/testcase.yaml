@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-rtc-multi-alarm
+  description: |
+    Multi-alarm scheduling against the V2N's RV-3028-C7 external
+    RTC via `<alp/rtc.h>`.  Exercises the multi-source event-line
+    pattern documented in the RV-3028-C7 app note.
+
+tests:
+  alp_sdk.examples.v2n.rtc_multi_alarm.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - rtc
+    build_only: true

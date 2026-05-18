@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-secure-element-sign
+  description: |
+    Sign a payload with the OPTIGA Trust M secure element on the
+    V2N SoM, then verify the signature via `<alp/security.h>`
+    (MbedTLS PSA Crypto).  Demonstrates the SoM-portable secure
+    element surface.
+
+tests:
+  alp_sdk.examples.v2n.secure_element_sign.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - security
+      - optiga
+    build_only: true

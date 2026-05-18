@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Lives under m55_hp/ because rpmsg-aen is a multi-slice project
+# (M55-HP + M55-HE peers on the Alif Ensemble).  Twister picks up
+# this single self-contained Zephyr slice.
+
+sample:
+  name: rpmsg-aen-m55_hp
+  description: |
+    Heterogeneous-compute on the Alif Ensemble: M55-HP +
+    M55-HE peers exchanging messages via `<alp/rpc.h>` over
+    RPMsg.  This testcase covers the M55-HP Zephyr slice; the
+    M55-HE peer is built separately by the same orchestrator.
+
+tests:
+  alp_sdk.examples.rpmsg_aen.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - heterogeneous
+      - rpmsg
+    build_only: true
+    extra_args: CONFIG_ALP_SDK_RPC=y

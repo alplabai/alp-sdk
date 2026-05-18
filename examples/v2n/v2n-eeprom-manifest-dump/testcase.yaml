@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-eeprom-manifest-dump
+  description: |
+    Dump the 128-byte EEPROM manifest packed by
+    `scripts/program_eeprom.py` into a human-readable form
+    (serial, mfg date, sku, hw_rev).  Useful as a production-line
+    sanity-check binary.
+
+tests:
+  alp_sdk.examples.v2n.eeprom_manifest_dump.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - eeprom
+      - hw-info
+    build_only: true

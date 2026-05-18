@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-board-id-readout
+  description: |
+    Read the V2N SoM's EEPROM manifest + BOARD_ID ADC and assert
+    the resolved SKU matches the build's `som.sku`.  Uses
+    `<alp/hw_info.h>` exclusively; no chip-specific calls in app
+    code.
+
+tests:
+  alp_sdk.examples.v2n.board_id_readout.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - hw-info
+      - eeprom
+    build_only: true

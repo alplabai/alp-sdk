@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-pwm-fan-control
+  description: |
+    Drive a fan via a PWM channel routed through the on-module
+    GD32 bridge.  Uses the portable `<alp/pwm.h>` surface;
+    backend dispatch to the GD32G553 is transparent to app code.
+
+tests:
+  alp_sdk.examples.v2n.pwm_fan_control.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - pwm
+    build_only: true
