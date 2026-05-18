@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # 06 -- Secure-element ECDSA sign
 
 Walks `examples/v2n/v2n-secure-element-sign/` -- initialise the

@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # 05 -- The supervisor MCU bridge (V2N)
 
 Walks `examples/v2n/v2n-gd32-bridge-ping/` and explains the hybrid

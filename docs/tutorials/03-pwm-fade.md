@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # 03 -- PWM fade
 
 Walks `examples/pwm-led-fade/`.  A PWM channel ramps its duty cycle

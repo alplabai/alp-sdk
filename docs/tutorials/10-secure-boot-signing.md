@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # Tutorial 10: Secure boot + image signing
 
 **Target audience:** firmware engineers preparing the first

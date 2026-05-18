@@ -1,7 +1,10 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # Tutorial 16: Inference on Ethos-U (MobileNet)
 
 **Target audience:** developers running ML inference on AEN
-(Ethos-U55) or N93 (Ethos-U65) via `<alp/inference.h>`.
+(Ethos-U55 + Ethos-U85 on E4/E6/E8) or N93 (Ethos-U65) via
+`<alp/inference.h>`.
 
 **Prerequisites:**
 
@@ -9,7 +12,8 @@
 - An AEN EVK or N93 EVK on the bench.
 - A Vela-compiled MobileNet TFLite model (~600 KiB).  Build
   one with `pip install ethos-u-vela` + the upstream
-  MobileNet v2 reference model.
+  MobileNet v2 reference model.  **You compile a different
+  artefact per NPU variant** — see §6 below.
 
 **Outcome:** load a Vela-compiled model into the SDK's
 inference dispatcher, run a single inference, read out the
@@ -34,10 +38,11 @@ code is the same regardless of which NPU runs the model:
 
 ```c
 alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
-    .backend       = ALP_INFERENCE_AUTO,   // or _ETHOS_U, _DRPAI, _DEEPX_DX, _CPU
-    .model_bytes   = mobilenet_tflite,
-    .model_size    = sizeof(mobilenet_tflite),
-    .arena_size    = 512 * 1024,
+    .backend     = ALP_INFERENCE_BACKEND_AUTO,
+    .model_data  = mobilenet_vela_tflite,
+    .model_size  = sizeof(mobilenet_vela_tflite),
+    .format      = ALP_INFERENCE_MODEL_VELA,
+    .arena_bytes = 512 * 1024,
 });
 ```
 
@@ -46,10 +51,20 @@ Backend selection:
 | `backend` | Active on |
 |-----------|-----------|
 | `_AUTO` | Picks per SoM: Ethos-U on AEN/N93, DRP-AI on V2N, DEEPX on V2M, CPU fallback otherwise. |
-| `_ETHOS_U` | AEN (E3..E8 with Ethos-U55) + N93 (Ethos-U65). |
-| `_DRPAI` | V2N + V2N-M1 (DRP-AI3). |
-| `_DEEPX_DX` | V2N-M1 (DEEPX DX-M1 on a PCIe-like link). |
-| `_CPU` | Reference kernels; always available, slow. |
+| `_ETHOS_U` | AEN (E3..E8 with Ethos-U55 + E4/E6/E8 with Ethos-U85) + N93 (Ethos-U65). |
+| `_DRPAI` | V2N + V2M (DRP-AI3). |
+| `_DEEPX_DX` | V2M101 / V2M102 (DEEPX DX-M1 on a PCIe-like link). |
+| `_CPU` | TFLM reference / Helium / NEON kernels; always available. |
+
+The `ETHOS_U` token is a single customer-facing handle that
+covers every Arm Ethos NPU variant.  The orchestrator emits
+per-variant `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
+gates from the SoM preset's `inference.npu_population[]` (G-1
+selector); the driver code at runtime dispatches to the right
+shim and logs the active variant once per boot
+(`alp_inference_tflm_npu_variant_name()`).  Customers don't
+touch these — Vela picks at model-compile time and the SDK
+takes care of the rest.
 
 A `_AUTO` open on AEN routes to Ethos-U if the model is Vela-
 compiled (Ethos-U requires the Vela pre-compilation step);
@@ -78,6 +93,14 @@ xxd -i vela-out/mobilenet_v2_1.0_224_quant_vela.tflite \
 # Output: a C array + size constant; include in main.c.
 ```
 
+> **Variant matters at the artefact level.**  `vela
+> --accelerator-config ethos-u55-256` targets the U55; for U85
+> on AEN E4/E6/E8, recompile with `ethos-u85-256` (or another
+> U85 config string).  The compiled `.tflite` is **NOT
+> portable across Ethos-U variants** — Vela picks the
+> operator-fusion + kernel set at compile time.  See §6
+> for the cross-NPU story.
+
 ## 3. The application
 
 ```c
@@ -87,10 +110,11 @@ xxd -i vela-out/mobilenet_v2_1.0_224_quant_vela.tflite \
 
 int main(void) {
     alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
-        .backend     = ALP_INFERENCE_AUTO,
-        .model_bytes = vela_out_mobilenet_v2_1_0_224_quant_vela_tflite,
+        .backend     = ALP_INFERENCE_BACKEND_AUTO,
+        .model_data  = vela_out_mobilenet_v2_1_0_224_quant_vela_tflite,
         .model_size  = vela_out_mobilenet_v2_1_0_224_quant_vela_tflite_len,
-        .arena_size  = 512 * 1024,
+        .format      = ALP_INFERENCE_MODEL_VELA,
+        .arena_bytes = 512 * 1024,
     });
     if (inf == NULL) {
         printf("[inf] open failed: last_err=%d\n", (int)alp_last_error());
@@ -98,21 +122,23 @@ int main(void) {
     }
 
     /* Set input -- MobileNet wants 224x224x3 uint8. */
-    uint8_t *input  = alp_inference_input_tensor(inf, 0);
-    /* Fill `input` with your image bytes (camera capture, test image, ...) */
-    fill_test_image(input, 224 * 224 * 3);
+    alp_inference_tensor_t in;
+    alp_inference_get_input(inf, 0, &in);
+    fill_test_image((uint8_t *)in.data, 224 * 224 * 3);
 
-    if (alp_inference_run(inf) != ALP_OK) {
-        printf("[inf] run failed: last_err=%d\n", (int)alp_last_error());
+    if (alp_inference_invoke(inf) != ALP_OK) {
+        printf("[inf] invoke failed: last_err=%d\n", (int)alp_last_error());
         return 1;
     }
 
     /* Read output -- MobileNet emits 1001 class scores (uint8 quant). */
-    const uint8_t *output = alp_inference_output_tensor(inf, 0);
+    alp_inference_tensor_t out;
+    alp_inference_get_output(inf, 0, &out);
+    const uint8_t *scores = (const uint8_t *)out.data;
     int top_idx   = 0;
     uint8_t top_v = 0;
     for (int i = 0; i < 1001; ++i) {
-        if (output[i] > top_v) { top_v = output[i]; top_idx = i; }
+        if (scores[i] > top_v) { top_v = scores[i]; top_idx = i; }
     }
     printf("[inf] top-1 class %d score %u\n", top_idx, top_v);
 
@@ -142,12 +168,27 @@ cores:
 ```
 
 There is no `inference.backend:` field — the dispatcher set is
-silicon-determined.  AEN701's SoM preset declares
-`capabilities.ethos_u55_count: 2`, so the loader emits
-`CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y` + `CONFIG_ALP_TFLM_ETHOS_U55=y`
-automatically, alongside the universal `CONFIG_ALP_SDK_INFERENCE_TFLM=y`
-CPU fallback.  The app picks Ethos-U vs CPU per-handle at runtime
-via `alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or
+silicon-determined.  AEN701's SoM preset declares the U55
+silicon via `inference.npu_population[]` (and a fallback
+`capabilities.ethos_u55_count: 2`), so the loader emits:
+
+```
+CONFIG_ALP_SDK_INFERENCE_TFLM=y
+CONFIG_ALP_SDK_INFERENCE_TFLM_HELIUM=y           # G-2: M55 Helium MVE kernels
+CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y
+CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U55=y           # G-1: per-variant U55 gate
+```
+
+…automatically, alongside the universal TFLM CPU fallback.
+For AEN801 (which carries the U85 too) the loader would also
+emit `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U85=y`; for N93 it
+emits `_U65=y` plus `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y`
+(the i.MX 93 PHY shim).  Advanced readers: the emit logic
+lives in `scripts/alp_orchestrate.py` § *Per-variant Ethos-U
+selector* (G-1) and § *CPU-class TFLM kernel selector* (G-2).
+
+The app picks Ethos-U vs CPU per-handle at runtime via
+`alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or
 an explicit value).
 
 ## 5. Build + flash
@@ -160,9 +201,9 @@ west flash
 Expected output (on real silicon):
 
 ```
-[inf] open: model 612 KiB, backend ETHOS_U
+[inf] open: model 612 KiB, backend ETHOS_U (variant U55)
 [inf] tensor arena 512 KiB allocated
-[inf] run: 7.2 ms (Ethos-U inference)
+[inf] invoke: 7.2 ms (Ethos-U inference)
 [inf] top-1 class 285 score 240  -- "Egyptian cat"
 ```
 
@@ -172,7 +213,7 @@ falls back to CPU:
 ```
 [inf] open: model 612 KiB, backend CPU (Ethos-U unavailable)
 [inf] tensor arena 512 KiB allocated
-[inf] run: 1240 ms (CPU inference)
+[inf] invoke: 1240 ms (CPU inference, kernels=REF)
 [inf] top-1 class 285 score 240  -- "Egyptian cat"
 ```
 
@@ -181,9 +222,9 @@ The CPU and Ethos-U paths produce identical top-N classification
 test plan asserts this as the verification criterion in
 [`docs/test-plan.md`](../test-plan.md).
 
-## 6. Targeting V2N (DRP-AI) instead
+## 6. Targeting V2N (DRP-AI) instead -- the cross-NPU story
 
-Same `main.c`, swap `board.yaml`:
+Same `main.c` API surface, swap `board.yaml`:
 
 ```yaml
 schema_version: 2
@@ -201,14 +242,34 @@ declares `capabilities.drp_ai: true`, so the loader emits
 `CONFIG_ALP_SDK_INFERENCE_DRPAI=y` automatically, alongside the
 TFLM CPU fallback.  The app calls `alp_inference_open` with the
 same `.backend = ALP_INFERENCE_BACKEND_AUTO`, and the dispatcher
-routes to DRP-AI on V2N silicon, Ethos-U on AEN silicon, CPU under
-native_sim — same source, three SoMs.
+routes to DRP-AI on V2N silicon, Ethos-U on AEN silicon, CPU
+under native_sim — same source, three SoMs.
 
-The model itself must be re-compiled with Renesas's **DRP-AI
-translator** rather than Vela.  The translator produces a `.drpai`
-artefact + a companion `.tflite`; the SDK's DRP-AI backend reads
-both.  Customers writing portable apps ship both model variants
-and switch at runtime based on `alp_hw_info_read()`.
+> **The one thing the SDK cannot abstract: the model
+> artefact.**  Each NPU vendor ships its own offline compiler
+> that lowers a `.tflite` (or other source format) to that
+> NPU's instruction set.  The compiled artefacts are NOT
+> interchangeable:
+>
+> | NPU                  | Compiler                  | Produces                    |
+> |----------------------|---------------------------|-----------------------------|
+> | Ethos-U55 (AEN)      | `vela --accelerator-config ethos-u55-256`   | `.tflite` (Vela-rewritten)  |
+> | Ethos-U85 (AEN E4/E6/E8) | `vela --accelerator-config ethos-u85-256` | `.tflite` (Vela-rewritten)  |
+> | Ethos-U65 (N93)      | `vela --accelerator-config ethos-u65-256`   | `.tflite` (Vela-rewritten)  |
+> | DRP-AI3 (V2N / V2M)  | Renesas DRP-AI translator | `.drpai` + companion `.tflite` |
+> | DEEPX DX-M1 (V2M)    | DEEPX SDK toolchain       | `.dxnn` binary              |
+>
+> Customers writing one-source-multiple-target apps ship every
+> model variant they want to run and select at runtime based on
+> `alp_hw_info_read()` (the runtime SoM identity).  The
+> `alp_inference_config_t.format` field tells the loader which
+> dispatcher to bind: `ALP_INFERENCE_MODEL_VELA` for Ethos-U,
+> `_DRPAI` for DRP-AI, `_DXNN` for DEEPX.
+>
+> This is **what you can't abstract** — the C surface stays
+> uniform, but the bytes a model compiles to are
+> NPU-instruction-set-specific.  Plan model artefact storage +
+> OTA flows accordingly.
 
 ## 6b. Concurrent multi-NPU on V2M101 (V2N + DEEPX)
 
@@ -230,18 +291,18 @@ NPU, to run independent models concurrently:
 
 ```c
 alp_inference_t *m_vision = alp_inference_open(&(alp_inference_config_t){
-    .model_data = vision_dxnn,
-    .model_size = sizeof(vision_dxnn),
-    .format     = ALP_INFERENCE_MODEL_DXNN,
-    .backend    = ALP_INFERENCE_BACKEND_DEEPX_DX,   // dispatch to DEEPX
+    .model_data  = vision_dxnn,
+    .model_size  = sizeof(vision_dxnn),
+    .format      = ALP_INFERENCE_MODEL_DXNN,
+    .backend     = ALP_INFERENCE_BACKEND_DEEPX_DX,   // dispatch to DEEPX
     .arena_bytes = 256 * 1024,
 });
 
 alp_inference_t *m_audio = alp_inference_open(&(alp_inference_config_t){
-    .model_data = audio_drpai,
-    .model_size = sizeof(audio_drpai),
-    .format     = ALP_INFERENCE_MODEL_DRPAI,
-    .backend    = ALP_INFERENCE_BACKEND_DRPAI,      // dispatch to DRP-AI3
+    .model_data  = audio_drpai,
+    .model_size  = sizeof(audio_drpai),
+    .format      = ALP_INFERENCE_MODEL_DRPAI,
+    .backend     = ALP_INFERENCE_BACKEND_DRPAI,      // dispatch to DRP-AI3
     .arena_bytes = 128 * 1024,
 });
 
@@ -286,9 +347,13 @@ provisioned.
 - **`alp_inference_open` returns NULL with NOSUPPORT** -- the
   selected backend isn't compiled in.  Check `board.yaml` and
   the generated `alp.conf`.
-- **Open succeeds but `_run` returns ALP_ERR_NOMEM** -- arena
-  too small for the model.  Bump `arena_size`; check Vela's
-  output for the required value.
+- **Open succeeds but `_invoke` returns ALP_ERR_NOMEM** --
+  arena too small for the model.  Bump `arena_bytes`; check
+  Vela's output for the required value.
+- **Open fails with format mismatch** -- you passed an Ethos-U
+  Vela-compiled `.tflite` but ran on V2N (which needs DRP-AI
+  artefacts) or vice versa.  Match `format:` to the SoM you're
+  targeting; see §6 for the per-NPU artefact table.
 - **Classification result differs CPU vs NPU** -- expected at
   the quantisation level (Vela may shuffle the op order in
   ways that change low-order bits).  Top-N classes should
@@ -305,5 +370,8 @@ provisioned.
   -- end-to-end demo: camera → ISP → inference → OLED overlay.
 - [Vela docs](https://github.com/ARM-software/ethos-u-vela) --
   the Ethos-U pre-compiler.
+- [`scripts/alp_orchestrate.py`](../../scripts/alp_orchestrate.py)
+  § *Per-variant Ethos-U selector* + § *CPU-class TFLM kernel
+  selector* -- the G-1 / G-2 emit logic for advanced readers.
 - [`docs/test-plan.md`](../test-plan.md) -- the verification
   ledger row for "Ethos-U inference matches CPU reference".

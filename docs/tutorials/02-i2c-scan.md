@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # 02 -- I²C bus scan
 
 Walks `examples/i2c-scanner/` -- a 7-bit-address scan over an I²C
@@ -70,5 +72,5 @@ mis-strapped -- compare against
 ## See also
 
 * [`examples/i2c-scanner/`](../../examples/i2c-scanner/)
-* [Tutorial 04 -- cross-family portability](04-cross-family-portability.md)
+* [Tutorial 04 -- intra-family portability](04-cross-family-portability.md)
 * [Tutorial 08 -- runtime board detection](08-runtime-board-detection.md)

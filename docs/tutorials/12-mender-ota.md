@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # Tutorial 12: Mender OTA on Yocto
 
 **Target audience:** developers who already have a V2N or

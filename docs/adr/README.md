@@ -47,6 +47,8 @@ Bad / costs: ...
 | [0008](0008-gpu2d-portable-shim.md)       | GPU2D: portable shim under `<alp/gpu2d.h>` even for single-silicon | Accepted |
 | [0009](0009-mender-zephyr-client-deferred.md) | Mender Zephyr client deferred to v1.1 | Accepted |
 | [0010](0010-heterogeneous-os-orchestration.md) | Heterogeneous OS orchestration: Zephyr + Yocto as peers, not alternatives | Accepted |
+| [0011](0011-intra-family-portability.md) | Intra-family portability is load-bearing; cross-form-factor portability is intentionally not a goal | Accepted |
+| [0012](0012-cross-platform-developer-host.md) | alp-sdk developer host is cross-platform; Linux required ONLY for Yocto | Accepted |
 
 ## When to write an ADR
 

@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # Tutorial 13: EEPROM manifest provisioning
 
 **Target audience:** production-test technicians + firmware

@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # Tutorial 15: Multi-proc mailbox (M55-HP ↔ M55-HE)
 
 **Target audience:** developers building AEN firmware that

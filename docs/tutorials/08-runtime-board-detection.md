@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # 08 -- Runtime board detection
 
 `<alp/hw_info.h>` answers two questions at runtime:

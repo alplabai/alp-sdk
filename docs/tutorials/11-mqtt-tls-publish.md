@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # Tutorial 11: MQTT publish (with TLS) end-to-end
 
 **Target audience:** developers building a connected IoT

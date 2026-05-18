@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # 01 -- First build: GPIO + LED
 
 The canonical "your first ALP-SDK build."  This tutorial walks
@@ -104,7 +106,7 @@ LED goes dark.
 
 * Try `som.sku: E1M-AEN301` in `board.yaml` -- the build retargets
   to E3 silicon without source-code edits.  This is the
-  cross-family portability promise; see
+  intra-family portability promise; see
   [Tutorial 04](04-cross-family-portability.md).
 * Swap `pin_id: 0/1` for the carrier's actual pin ids declared in
   `metadata/carriers/E1M-EVK/board.yaml`.

@@ -55,10 +55,13 @@ SDK build picks the matching backend from `src/` based on whether
 alp-sdk/
 ├── README.md
 ├── LICENSE                          # Apache-2.0
-├── docs/
+├── docs/                            # Architecture, ADRs, board-config, bring-up guides
 │   ├── architecture.md              # this file
+│   ├── board-config.md              # board.yaml v2 schema reference
+│   ├── heterogeneous-builds.md      # per-core fan-out walkthrough
 │   ├── os-support-matrix.md         # OS × variant × library status
-│   └── porting-new-som.md           # adding HAL/HW for a new E1M variant
+│   ├── porting-new-som.md           # adding HAL/HW for a new E1M variant
+│   └── adr/                         # numbered architectural decisions
 ├── include/alp/                     # PUBLIC HEADERS — the consumer surface
 │   ├── peripheral.h                 # alp_i2c_t, alp_spi_t, alp_gpio_t, alp_uart_t
 │   ├── display.h
@@ -67,7 +70,13 @@ alp-sdk/
 │   ├── dsp.h                        # composable DSP pipeline (FFT / FAC / filters)
 │   ├── rpc.h                        # framed RPMsg surface; opens with <alp/system_ipc.h>
 │   ├── inference.h                  # TFLM / Ethos-U / DRP-AI / DEEPX dispatcher
-│   └── iot.h
+│   ├── iot.h
+│   ├── soc_caps.h                   # GENERATED: per-SoC ALP_SOC_*_COUNT macros
+│   ├── e1m_pinout.h                 # E1M-family portable pad constants
+│   ├── e1m_x_pinout.h               # E1M-X-family portable pad constants
+│   ├── chips/                       # one <alp/chips/<part>.h> per chip driver
+│   ├── blocks/                      # <alp/blocks/<name>.h> for SDK-level block helpers
+│   └── boards/                      # GENERATED: per-carrier route headers
 ├── src/
 │   ├── common/                      # OS-agnostic helpers (bit ops, ring buffers, status->str)
 │   ├── zephyr/                      # Zephyr-backed implementation
@@ -76,27 +85,177 @@ alp-sdk/
 ├── chips/                           # CHIP DRIVER IMPLEMENTATIONS — one dir per IC
 │   ├── lsm6dso/                     # symbols are lsm6dso_* (no alp_ prefix on chip drivers)
 │   ├── ssd1306/
-│   └── ...
+│   ├── gd32g553/                    # GD32 supervisor / bridge driver (V2N)
+│   ├── cc3501e/                     # TI CC3501E Wi-Fi bridge (Alif Ensemble SoMs)
+│   └── ...                          # ~80 driver dirs; see chips/README.md for the index
+├── blocks/                          # SDK-LEVEL BLOCK HELPERS — multi-peripheral abstractions
+│   ├── button_led/                  # symbols are alp_button_led_* (SDK abstraction, not an IC binding)
+│   ├── pdm_mic/
+│   └── README.md                    # block-vs-chip rationale (`alp_` prefix vs chip-natural name)
 ├── vendors/
-│   ├── alif/                        # Alif HAL bindings (start here for v0.1)
-│   └── renesas-rzv2n/               # stub for v0.2
-├── metadata/                        # CHIP + SoM METADATA — single source of truth for codegen inputs
-│   ├── schemas/soc-spec-v1.schema.json
-│   └── socs/alif/ensemble/{e3,e4,e5,e6,e7,e8}.json
+│   ├── alif/                        # Alif HAL bindings (Ensemble)
+│   └── renesas-rzv2n/               # Renesas FSP bindings (RZ/V2N)
+├── metadata/                        # ALL HW + LIBRARY METADATA — single source of truth
+│   ├── schemas/                     # JSON Schemas (board-config-v2, soc-spec-v1, …)
+│   ├── socs/<vendor>/<family>/<part>.json   # silicon datasheets (peripheral counts, caps)
+│   ├── e1m_modules/<SKU>.yaml       # SoM presets (`on_module:`, `topology:`, `pad_routes:`)
+│   ├── carriers/<NAME>/board.yaml   # carrier presets (`populated:`, `e1m_routes:`)
+│   ├── library-profiles/<name>/     # per-library HW-accelerator binding tables
+│   ├── templates/board.yaml         # customer-facing board.yaml v2 template
+│   └── protos/                      # protobuf schemas (mproc framing, …)
+├── firmware/                        # PREBUILT HELPER-MCU FIRMWARE BLOBS
+│   ├── gd32-bridge/                 # GD32G553 bridge firmware (V2N supervisor)
+│   └── cc3501e/                     # TI CC3501E Wi-Fi bridge firmware (AEN)
 ├── cmake/                           # find_package + Zephyr module helpers
 │   └── AlpSdkConfig.cmake.in
+├── scripts/                         # CODEGEN + ORCHESTRATION
+│   ├── alp_orchestrate.py           # board.yaml v2 → per-core slice fan-out + manifest
+│   ├── alp_project.py               # per-slice Kconfig / cmake-args / DTS overlay emit
+│   ├── gen_soc_caps.py              # SoC JSONs → include/alp/soc_caps.h
+│   ├── gen_carrier_header.py        # carrier YAML → include/alp/boards/<carrier>_routes.h
+│   ├── validate_board_yaml.py       # board.yaml v2 schema check
+│   ├── validate_metadata.py         # SoC / SoM / carrier preset schema check
+│   └── west_commands/               # `west alp-image`, `west alp-flash`
 ├── west.yml                         # Zephyr-side manifest
 ├── zephyr/
 │   ├── module.yml                   # makes the repo importable as a Zephyr module
 │   └── Kconfig                      # ALP_SDK_* options exposed to Zephyr apps
-├── .github/workflows/               # GitHub Actions workflows
+├── examples/<peripheral>-<demo>/    # hand-written firmware reference apps (~50% comment density)
+├── tests/                           # Unity / ztest smoke tests, QEMU + real silicon
 ├── meta-alp-sdk/                    # Yocto BSP layer (V2N / V2N-M1 / iMX93 SKUs)
-└── tests/                           # Unity / ztest smoke tests, QEMU + real silicon
+└── .github/workflows/               # GitHub Actions workflows
 ```
 
 The public surface is **only** `include/alp/`.  Anything under `src/`,
 `vendors/`, or `cmake/` is implementation; consumers must not include
 those headers directly.
+
+### chips/ vs blocks/
+
+The `chips/` and `blocks/` trees look adjacent but mean different
+things — both lower-level enough to be confusing on first contact:
+
+| Aspect             | `chips/<part>/`                            | `blocks/<name>/`                                |
+|--------------------|--------------------------------------------|--------------------------------------------------|
+| Bound to           | One datasheet (LSM6DSO, SSD1306, …)        | A *pattern* over peripherals (button+LED, PDM)   |
+| Symbol prefix      | The chip's natural name (`lsm6dso_init()`) | `alp_<block>_*` -- it's an SDK abstraction       |
+| Public header path | `<alp/chips/<part>.h>`                     | `<alp/blocks/<name>.h>`                          |
+| Kconfig symbol     | `CONFIG_ALP_SDK_CHIP_<NAME>`               | `CONFIG_ALP_SDK_BLOCK_<NAME>`                    |
+| Swap-friendly      | No — replacing the IC means a new driver   | Yes — any compliant peripheral plugs in          |
+
+The `alp_` prefix is **reserved** for the SDK's portable abstractions
+(`<alp/peripheral.h>`, `<alp/dsp.h>`, `<alp/blocks/...>`); chip
+drivers stay on their datasheet-native symbol names so a developer
+who reads the chip's reference manual recognises the API.  Full
+rationale: [`blocks/README.md`](../blocks/README.md) and the memory
+note `[[chip-driver-naming]]`.
+
+## Build orchestration
+
+The build flow runs entirely from a single `board.yaml` v2 file in
+the consumer's application directory; everything below the
+`<alp/...>` line is derived from there + the metadata tree.  Three
+distinct mechanisms cooperate:
+
+### Per-core slice fan-out
+
+`board.yaml` v2 carries a top-level `cores:` block keyed by the
+canonical core IDs of the active SoM's SoC (`a55_cluster`,
+`m33_sm`, `m55_hp`, `m55_he`, …).  Each entry declares the runtime,
+app source, peripherals, libraries, and inference / IoT toggles for
+*that* core.  `scripts/alp_orchestrate.py` loads the file, resolves
+each entry against the SoM preset's `topology:` defaults, and emits
+one **slice** per non-`off` core:
+
+```
+board.yaml v2 (`cores:`)
+        │
+        ▼
+   load_board_yaml()              # validate, resolve presets, infer OS per core
+        │
+        ▼
+   {core_id: Slice}               # one Slice per non-off core
+        │
+        ▼
+   Orchestrator.fan_out()         # materialise alp.conf / local.conf / cmake-args
+        │                         # per slice under build/<core>-<os>/
+        ▼
+   build/system-manifest.yaml     # content-addressed; deterministic across rebuilds
+```
+
+OS inference defaults are silicon-class driven: Cortex-M cores
+default to Zephyr, Cortex-A cores default to Yocto Linux.  The
+customer writes an explicit `os:` only when overriding the default
+(`os: off` to skip a peer core, `os: baremetal` on a Cortex-M that
+normally takes Zephyr).  Yocto-on-A55 + Zephyr-on-M33 on a single
+V2N SoM is one `alp_orchestrate.py` invocation, not two.  Full
+walkthrough: [`docs/heterogeneous-builds.md`](heterogeneous-builds.md).
+
+### Sparse capabilities flow
+
+Silicon-determined capabilities (`ethos_u55_count`, `drp_ai`,
+`neon`, `cau`, …) live as the **defaults** in
+`metadata/socs/<vendor>/<family>/<part>.json` under a top-level
+`capabilities:` block.  Per-SoM YAMLs declare only the **deltas** —
+e.g. an E1M-V2N101 sets `tmu_cordic: true` / `tmu_fft: true` /
+`tmu_fac: true` to advertise the GD32G553 bridge's hardware math
+units, even though the RZ/V2N silicon itself has no on-die CORDIC/FFT
+block.
+
+The loader merges them via `resolve_capabilities()` in
+`scripts/alp_project.py`: SoC JSON `capabilities:` is the base layer,
+SoM YAML `capabilities:` overlays on top, and SoM-side keys win on
+collision (so an add-on chip / bridge can override a silicon
+default).  No SoM YAML repeats facts already in the SoC JSON — per
+the memory note `[[silicon-determined-fields-not-customer-facing]]`,
+every silicon-fixed value has exactly one home.
+
+### on_module: auto-enable
+
+A SoM's preset YAML carries an `on_module:` block that names the
+chips physically present on the module (PMIC, RTC, secure element,
+Wi-Fi/BLE radio, supervisor MCU, Ethernet PHY, …).  The customer's
+`board.yaml` does **not** repeat these — swapping `som.sku:` from
+`E1M-V2N101` to `E1M-AEN701` automatically swaps the on-module chip
+set with zero edits.
+
+`scripts/alp_orchestrate.py::_slugs_from_on_module` walks the
+`on_module:` block (scalar fields, plus the `i2c_devices:` and
+`ospi_memories:` sub-blocks) and the `helper_firmware:` list, then
+emits `CONFIG_ALP_SDK_CHIP_<NAME>=y` per chip slug (or
+`CONFIG_ALP_SDK_BLOCK_<NAME>=y` for slugs that map to a `blocks/`
+helper rather than a `chips/` driver — the `button_led` and
+`pdm_mic` exceptions).  The orchestrator also pulls in each chip
+driver's required Zephyr subsystems (`CONFIG_I2C=y`, `CONFIG_SPI=y`,
+…) via the `_CHIP_SUBSYSTEMS` table in `scripts/alp_project.py`.
+
+Devices marked `assembled: optional` in `i2c_devices:` (DNI on some
+builds) are **not** auto-enabled; the customer opts them in via
+`carrier.populated:` instead.
+
+### Generators inventory
+
+The metadata-as-source-of-truth principle (memory note
+`[[simplification-unification-principle]]`) means most C headers,
+Kconfig fragments, and DTS overlays are generated, not hand-edited.
+The active generators are:
+
+| Script                                  | Reads                                                | Writes                                                                         |
+|-----------------------------------------|------------------------------------------------------|--------------------------------------------------------------------------------|
+| `scripts/alp_orchestrate.py`            | `board.yaml` + SoM preset + SoC JSON + carrier preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, per-slice `alp.conf` / `local.conf` / `cmake-args.txt` |
+| `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × carrier route-table demonstrator) |
+| `scripts/gen_soc_caps.py`               | `metadata/socs/**/*.json`                            | `include/alp/soc_caps.h` (per-SoC `ALP_SOC_*_COUNT` + `ALP_SOC_*_MAX_*` macros) |
+| `scripts/gen_carrier_header.py`         | `metadata/carriers/<NAME>/board.yaml`                | `include/alp/boards/alp_<carrier>_routes.h` (carrier macro mapping)            |
+| `scripts/validate_board_yaml.py`        | `board.yaml`                                         | (validator only — non-zero exit on schema error)                               |
+| `scripts/validate_metadata.py`          | `metadata/**/*.{json,yaml}`                          | (validator only)                                                               |
+
+All generated artefacts are byte-stable across rebuilds (deterministic
+key ordering, no timestamps, no run IDs) so CI can diff them against
+the checked-in copies under `include/alp/` and reject any drift.
+Zephyr board files for ALP modules are slated to be generated from
+the SoM preset YAMLs by a future `--emit zephyr-board` mode (memory
+note `[[zephyr-board-from-yaml]]`); for now they are tracked as a
+roadmap item in [`docs/porting-new-som.md`](porting-new-som.md).
 
 ## Library design
 
@@ -367,9 +526,9 @@ integration contract is:
   resolve a project's active SoM + SoC and tailor codegen to the
   inventory the silicon exposes.  alp-sdk's metadata is alp-studio's
   input, not its output.
-- The studio does **not** read `src/` or `chips/<part>/`.  Those are
-  implementation; the studio only sees the public headers and the
-  metadata directory.
+- The studio does **not** read `src/`, `chips/<part>/`, or
+  `blocks/<name>/`.  Those are implementation; the studio only sees
+  the public headers and the metadata directory.
 
 When a v0.x release ships, the studio's `library/` directory pins to
 the matching SDK tag in `west.yml`.

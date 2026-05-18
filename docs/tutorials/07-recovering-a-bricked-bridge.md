@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # 07 -- Recovering a bricked bridge
 
 When the GD32G553 supervisor MCU's firmware goes bad -- corrupt

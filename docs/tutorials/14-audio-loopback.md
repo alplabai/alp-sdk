@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-05-18 against slice-3b state. -->
+
 # Tutorial 14: Audio loopback (PDM → DSP → I²S)
 
 **Target audience:** developers building audio-aware firmware
