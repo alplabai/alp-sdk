@@ -104,13 +104,12 @@ def emit() -> str:
         socs.append((ref, kconfig_token(ref), extract_caps(soc)))
 
     lines: list[str] = [
-        "/*",
-        " * Copyright 2026 ALP Lab AB",
-        " * SPDX-License-Identifier: Apache-2.0",
+        "/**",
+        " * @file soc_caps.h",
+        " * @brief Per-SoC peripheral capability macros (auto-generated).",
         " *",
         # Avoid `/**` inside the C comment — gcc -Wcomment treats it as
-        # a nested-comment opener.  Use `<vendor>/<family>/<part>.json`
-        # in prose instead of the regex-style `**.json` glob.
+        # a nested-comment opener.  Use `<vendor>/<family>/<part>.json`",
         " * Auto-generated from metadata/socs/<vendor>/<family>/<part>.json",
         " * by scripts/gen_soc_caps.py.  DO NOT EDIT BY HAND — regenerate.",
         " *",
@@ -119,6 +118,9 @@ def emit() -> str:
         " * selected the macros default to a permissive UINT16_MAX so",
         " * capability checks accept any config — apps that want runtime",
         " * validation must select a specific SoC.",
+        " *",
+        " * Copyright 2026 ALP Lab AB",
+        " * SPDX-License-Identifier: Apache-2.0",
         " *",
         " * @par ABI status: [ABI-STABLE]",
         " *      v0.1 generated; capability constants.",

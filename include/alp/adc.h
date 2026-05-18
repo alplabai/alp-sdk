@@ -292,10 +292,9 @@ alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg);
  *
  * Polls the underlying @ref alp_adc_stream_t, converts the raw
  * uint16 mV samples to int16, runs them through the DSP chain, and
- * writes the result into the caller's buffer.  Per-call sample
- * ceiling matches the backend stream
- * (@c GD32G553_BRIDGE_ADC_STREAM_READ_MAX on V2N's GD32 bridge);
- * callers wanting more than that per batch must loop.
+ * writes the result into the caller's buffer.  The per-batch sample
+ * ceiling is backend-defined; callers wanting more samples per call
+ * must loop.
  *
  * @param[in]  filter  Handle from @ref alp_adc_filter_open.
  * @param[out] out_mv  Caller buffer for filtered samples (int16 mV).

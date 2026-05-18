@@ -77,6 +77,11 @@
     "irq_external": 16,
     "dmac_channels": 80
   },
+  "capabilities": {
+    "drp_ai":   true,
+    "neon":     true,
+    "emmc_dma": true
+  },
   "external_memory_interfaces": [
     {
       "kind": "LPDDR4/4X",

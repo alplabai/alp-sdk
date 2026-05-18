@@ -24,8 +24,9 @@
  * the internal AEN feature audit §5.2).
  *
  * Backends:
- *   - AEN-family : Alif `alif_dave2d-driver` (vendor HAL).
- *   - i.MX 93    : Vivante GC328 (vendor BSP, planned).
+ *   - AEN-family : D/AVE 2D hardware block (SDK backend; no vendor
+ *                  SDK dependency in app code).
+ *   - i.MX 93    : Vivante 2D core (SDK backend, planned).
  *   - V2N        : NOSUPPORT (no on-die 2D block).
  *   - Yocto      : DRM / KMS planes where available; NOSUPPORT
  *                  otherwise.

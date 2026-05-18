@@ -72,6 +72,15 @@
   "soc_flash_mb": 5.5,
   "always_on_sram_kb": 4,
   "peripherals": {},
+  "capabilities": {
+    "ethos_u55_count": 2,
+    "helium_mve":      true,
+    "neon":            true,
+    "cryptocell":      true,
+    "inline_aes":      true,
+    "xspi_dma":        true,
+    "dma2d":           true
+  },
   "external_memory_interfaces": [
     {
       "kind": "OctalSPI",

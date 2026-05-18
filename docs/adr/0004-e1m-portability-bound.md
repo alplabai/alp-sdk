@@ -104,3 +104,16 @@ escape hatch.
   through the e1m-spec → SoM manifest → SDK chain.
 - `alplabai/e1m-spec` — the canonical pinout standard (currently
   v1.1; SDK pinned to v1.0).
+
+## 2026-05-18 SoM pad-map relocation addendum
+
+As of 2026-05-18 the per-SoM E1M-pad → silicon-pin routes (the
+`pad_routes:` block) live in **alp-sdk** at
+`metadata/e1m_modules/<SKU>.yaml`, not in alp-studio.  This ADR's
+body describes alp-studio as enforcing the portability bound at
+block-declaration time — that role is unchanged — but the
+authoritative pad-route data the studio reads is now in alp-sdk
+alongside the `E1M_*_COUNT` constants this ADR cites.  Hand-written
+firmware and studio-emitted firmware consume the same `pad_routes:`
+block from the same file.  No change to the four concentric bounds
+above; only the storage location of the SoM pad map moved.

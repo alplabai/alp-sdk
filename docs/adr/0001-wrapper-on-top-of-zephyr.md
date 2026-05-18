@@ -105,3 +105,17 @@ Rejected because:
 - `docs/architecture.md` — "Why this wrapper exists" section.
 - `docs/adr/0003-peripheral-coverage.md` — what we *do* and *don't*
   wrap.
+
+## 2026-05-18 alp-studio positioning addendum
+
+As of 2026-05-18 alp-studio is reaffirmed as a **consumer on top of
+alp-sdk** — a visual programmer / AI hardware creator that emits C
+against the `<alp/...>` surface, not a peer layer that the SDK depends
+on.  This ADR's reasoning predates that reaffirmation but remains
+correct: "Studio codegen target" and "Opaque studio-resolved IDs"
+above are framed as benefits *the wrapper grants to a consumer*, not
+as a dependency the wrapper has on alp-studio.  The studio reads the
+same `metadata/e1m_modules/<SKU>.yaml` `pad_routes:` block that
+hand-written firmware reads (per the 2026-05-18 metadata relocation —
+see ADR 0004's addendum and `docs/e1m-pinout.md`); the wrapper's
+contract with that integer-ID handoff is unchanged.

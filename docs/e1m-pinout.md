@@ -4,9 +4,17 @@ The ALP SDK **does not duplicate** the E1M pinout.  The standard
 lives in [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
 and the SDK only sees opaque integers (`bus_id`, `pin_id`,
 `port_id`) that have already been resolved through a chain of
-external repositories.  This file explains the chain and how each
-layer sees the pinout, so contributors don't try to import pad data
-into this repo.
+inputs (the spec + this repo's per-SoM metadata).  This file
+explains the chain and how each layer sees the pinout, so
+contributors don't try to import pad data into this repo's source
+tree.
+
+**The per-SoM pad → silicon-pin layer also lives in this repo** (the
+SoM preset's `pad_routes:` block under
+[`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/)); only
+the spec itself stays external.  (This is a 2026-05-18 reversal of an
+earlier design that placed the routes in `alp-studio`; see the box
+below.)
 
 ## The chain
 
@@ -21,12 +29,13 @@ into this repo.
                               │ pad → silicon pin mapping
                               ▼
 +----------------------------------------------------------------+
-|  Per-SoM manifest (lives in alp-studio, not here)              |
-|    library/_soms/<id>/manifest.json                            |
-|    "routes": [{ "pad_id": "AF2",                               |
-|                 "soc_pin": "P3_4",                             |
-|                 "as": "I2C_SCL",                               |
-|                 "instance": "I2C0" }, ...]                     |
+|  Per-SoM pad routes (lives in alp-sdk, slice 2)                |
+|    metadata/e1m_modules/<SKU>.yaml  -> pad_routes:             |
+|    pad_routes:                                                 |
+|      - pad: AF2                                                |
+|        soc_pin: P3_4                                           |
+|        as: I2C_SCL                                             |
+|        instance: I2C0                                          |
 +----------------------------------------------------------------+
                               │
                               │ pad routing + block requirements
@@ -92,17 +101,29 @@ alp_gpio_t *led = alp_gpio_open(EVK_PIN_LED_RED);
 
 ## What the studio sees
 
+The studio is the **AI-driven visual programmer** that sits on top
+of alp-sdk.  It reads alp-sdk metadata to power its pin allocator +
+codegen for vibe-coded hardware projects.  Hand-written firmware
+authors bypass the studio entirely and call `<alp/...>` directly.
+
 The studio is the **only** layer that sees the full chain.  When it
 imports a block with `interfaces.provides = ["alp_i2c"]`, it:
 
-1. Reads the active SKU's SoM manifest from
-   `library/_soms/<id>/manifest.json`.
+1. Reads the active SKU's SoM preset at
+   [`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/) in
+   alp-sdk (`pad_routes:` for pad → silicon routes, `silicon:` +
+   `silicon_variant:` for the SoC + exact MPN).  alp-sdk's metadata
+   is alp-studio's input, not its output.
 2. Looks up which E1M pads expose `I2C_SCL` / `I2C_SDA` for that
    SKU and which `instance` value those routes name (`I2C0`,
    `I2C1`, …).
 3. Picks a free instance for the block.
 4. Emits codegen that translates the instance into the integer
    `bus_id` the SDK consumes.
+
+(Until 2026-05-18 the SoM preset lived in alp-studio at
+`library/_soms/<id>/manifest.json`; it now lives in alp-sdk so all
+generator inputs sit in one repo.)
 
 ## What e1m-spec sees
 
@@ -130,10 +151,13 @@ on this SDK pulls a known-compatible spec revision.
 
 If you're adding support for a new SoM or carrier board:
 
-1. The pad-level routing of your SoM goes into a new manifest in
-   `alp-studio`'s `library/_soms/<id>/`.  See
+1. The pad-level routing of your SoM goes into a new entry under
+   [`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/)
+   in this repo (the `pad_routes:` block, landing in slice 2 of
+   the metadata unification work).  See
    [`e1m-spec/examples/alp-aen.som-manifest.json`](https://github.com/alplabai/e1m-spec/blob/main/examples/alp-aen.som-manifest.json)
-   for the shape.
+   for the shape (the spec's JSON example translates 1:1 into the
+   YAML block).
 2. The chip-level metadata (cores, peripherals, NPUs, packages,
    variants) goes into [`metadata/socs/<vendor>/<family>/<part>.json`](../metadata/socs/)
    in this repo.

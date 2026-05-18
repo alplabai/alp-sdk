@@ -44,11 +44,13 @@ The SDK supports both flows equally — pick whichever fits.
   E1M-conformant SoM.  Capability validation runs at runtime in
   `*_open`; `alp_last_error()` tells you why an open failed.
 - **alp-studio codegen.**  The
-  [studio](https://github.com/alplabai/alp-studio) reads block
-  manifests, runs the pin allocator over the active SoM's
-  manifest, and emits C that calls the same `<alp/...>` API the
-  hand-written path uses.  Pin allocation correctness comes for
-  free.
+  [studio](https://github.com/alplabai/alp-studio) reads the SoM
+  preset stored in this repo's `metadata/e1m_modules/<SKU>.yaml`,
+  runs the pin allocator using that preset's `pad_routes:` block,
+  and emits C that calls the same `<alp/...>` API the
+  hand-written path uses.  alp-sdk is the source of truth for
+  per-SoM hardware data; alp-studio consumes it.  Pin allocation
+  correctness comes for free.
 
 The standalone path is **not** a studio escape hatch — it's a
 first-class consumer.  Anything the studio can emit, a developer

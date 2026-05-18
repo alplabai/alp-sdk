@@ -1,10 +1,15 @@
 # Stock preset for the E1M Development Board (35x35 SoM carrier).
 #
 # Reference carrier for E1M-AEN and (future) E1M-N93 SoM families.
-# Authoritative wiring + per-pad assignment live in
-# include/alp/boards/alp_e1m_evk.h; this YAML file lists the chip
-# drivers the project loader enables (CONFIG_ALP_SDK_CHIP_<NAME>=y)
-# when `carrier.name: E1M-EVK` is set in board.yaml.
+# Authoritative per-E1M-pad routing lives in this file's
+# `e1m_routes:` block below; `scripts/gen_carrier_header.py`
+# produces `include/alp/boards/alp_e1m_evk_routes.h` from it.  The
+# remaining sections of `alp_e1m_evk.h` (mux enums, INA236 tuning
+# constants, overlay-pad indices, on-board I2C addresses) stay
+# hand-authored until follow-up slices lift them too.  This YAML
+# file also lists the chip drivers the project loader enables
+# (CONFIG_ALP_SDK_CHIP_<NAME>=y) when `carrier.name: E1M-EVK` is
+# set in board.yaml.
 #
 # === This file doubles as the canonical reference design ===
 #
@@ -81,6 +86,99 @@ populated:
   # Power instrumentation
   ina236:                   true                # 6x current monitors at 0x40..0x46
 
+# E1M-pad → carrier-feature routing.  Each entry binds an
+# E1M-standard pad or peripheral instance to a carrier-side
+# macro name.  The generator `scripts/gen_carrier_header.py`
+# reads this block and produces
+# `include/alp/boards/alp_e1m_evk_routes.h` with one
+# `#define EVK_<NAME> E1M_<...>` line per entry.
+#
+# This is the single source of truth for the EVK_PIN_* /
+# EVK_*_BUS_* / EVK_UART_PORT_* / EVK_PWM_* / EVK_ARD_PWM* /
+# EVK_MB_PWM macros that hand-written firmware uses; do not
+# hand-edit the generated header.  The remaining sections of
+# `include/alp/boards/alp_e1m_evk.h` (mux enums, INA236 tuning,
+# overlay-pad indices, on-board I2C addresses) stay
+# hand-authored until follow-up slices lift them too.
+#
+# Entry schema:
+#   - e1m:         <E1M_GPIO_IO<N> | E1M_PWM<N> | E1M_<bus_class><N>>
+#     macro:       <EVK_* C-macro name to emit>
+#     doc:         "<one-line Doxygen `@brief` text>"  (optional)
+#     active_low:  true                                  (optional)
+#
+# SoM-side dispatch (which pad reaches the host SoC directly vs. via
+# an on-module mediator like the CC3501E) lives in the SoM preset's
+# `pad_routes:` block, NOT here -- this carrier YAML is SoM-agnostic.
+e1m_routes:
+  gpio:
+    - { e1m: E1M_GPIO_IO2,  macro: EVK_PIN_CAM_MUX_SEL,
+        doc: "PI3WVR626 SEL pin; see `evk_cam_select_*` enum + chips/cam_mux_pi3wvr626." }
+    - { e1m: E1M_GPIO_IO4,  macro: EVK_PIN_ENCODER_SW,    active_low: true,
+        doc: "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce." }
+    - { e1m: E1M_GPIO_IO5,  macro: EVK_PIN_CAM_RST,       active_low: true,
+        doc: "Camera reset (active-low)." }
+    - { e1m: E1M_GPIO_IO7,  macro: EVK_PIN_PCIE_IOEXP_INT,
+        doc: "INT input from the PCIe IO expander." }
+    - { e1m: E1M_GPIO_IO8,  macro: EVK_PIN_I2S_MUX_EN,    active_low: true,
+        doc: "I2S0 74LVC157 /E (Alif side P7.1); drive low to enable mux." }
+    - { e1m: E1M_GPIO_IO9,  macro: EVK_PIN_PCIE_IOEXP_RST,
+        doc: "Reset output to the PCIe IO expander." }
+    - { e1m: E1M_GPIO_IO10, macro: EVK_PIN_PCIE0_I2C_EN,
+        doc: "Drive high to enable I2C mux to the PCIe slot." }
+    - { e1m: E1M_GPIO_IO11, macro: EVK_PIN_USB2_MUX_SEL,
+        doc: "USB2 TMUXHS221 select: 0 = USB connector, 1 = M.2 E-key USB." }
+    - { e1m: E1M_GPIO_IO13, macro: EVK_PIN_I2S_MUX_SEL,
+        doc: "I2S0 74LVC157 S; 0 = TAS2563 amps, 1 = M.2 E-key I2S." }
+    - { e1m: E1M_GPIO_IO15, macro: EVK_PIN_BMI323_INT1,
+        doc: "BMI323 INT1 (data-ready / motion / FIFO); CC3501E GPIO14." }
+    - { e1m: E1M_GPIO_IO16, macro: EVK_PIN_W_DISABLE2,    active_low: true,
+        doc: "Bluetooth disable (open-drain, active-low) on M.2 E-key." }
+    - { e1m: E1M_GPIO_IO17, macro: EVK_PIN_W_DISABLE1,    active_low: true,
+        doc: "Wi-Fi disable (open-drain, active-low) on M.2 E-key." }
+    - { e1m: E1M_GPIO_IO18, macro: EVK_PIN_M2E_SDIO_WAKE, active_low: true,
+        doc: "M.2 E-key SDIO-path wake (active-low)." }
+    - { e1m: E1M_GPIO_IO19, macro: EVK_PIN_M2E_UART_WAKE, active_low: true,
+        doc: "M.2 E-key UART-path wake (active-low)." }
+    - { e1m: E1M_GPIO_IO20, macro: EVK_PIN_SDIO_MUX_EN,   active_low: true,
+        doc: "SDIO 74LVC157 /E; drive low to enable mux." }
+    - { e1m: E1M_GPIO_IO21, macro: EVK_PIN_SDIO_MUX_SEL,
+        doc: "SDIO 74LVC157 S; 0 = M.2 E-key SDIO, 1 = microSD slot." }
+    - { e1m: E1M_GPIO_IO22, macro: EVK_PIN_PCIE_MUX_PD,
+        doc: "Drive HIGH to power down all four PCIe lane muxes." }
+    - { e1m: E1M_GPIO_IO23, macro: EVK_PIN_PCIE_MUX_SEL,
+        doc: "Selects M-key vs E-key routing on the PCIe lane muxes." }
+  buses:
+    - { e1m: E1M_I2C0,  macro: EVK_I2C_BUS_SENSORS,
+        doc: "Shared sensor + IO-expander + INA236 bus." }
+    - { e1m: E1M_I2C1,  macro: EVK_I2C_BUS_DSI_CSI,
+        doc: "Display + camera control I2C (touch panel, camera-side I2C config)." }
+    - { e1m: E1M_I3C0,  macro: EVK_I2C_BUS_ARDUINO,
+        doc: "Arduino UNO header I2C ride on I3C0 (I3C is backwards-compatible with classic I2C)." }
+    - { e1m: E1M_SPI1,  macro: EVK_SPI_BUS_ARDUINO,
+        doc: "Arduino UNO header SPI; terminates on the on-module CC3501E, not the main SoC." }
+    - { e1m: E1M_UART0, macro: EVK_UART_PORT_DEBUG,
+        doc: "Console UART exposed on the JTAG/SWD-side debug header." }
+    - { e1m: E1M_UART1, macro: EVK_UART_PORT_ARDUINO,
+        doc: "Arduino UNO header UART (D0/D1); CK_RXD = UART1_TX, CK_TXD = UART1_RX." }
+  pwm:
+    - { e1m: E1M_PWM0, macro: EVK_PWM_LED_GREEN,
+        doc: "RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B)." }
+    - { e1m: E1M_PWM1, macro: EVK_PWM_LED_BLUE,
+        doc: "RGB LED blue channel." }
+    - { e1m: E1M_PWM1, macro: EVK_ARD_PWM1,
+        doc: "Arduino header CK_PWM1; shares E1M_PWM1 with LED_BLUE." }
+    - { e1m: E1M_PWM2, macro: EVK_ARD_PWM4,
+        doc: "Arduino header CK_PWM4 = E1M_PWM2." }
+    - { e1m: E1M_PWM3, macro: EVK_PWM_LED_RED,
+        doc: "RGB LED red channel." }
+    - { e1m: E1M_PWM4, macro: EVK_ARD_PWM2,
+        doc: "Arduino header CK_PWM2 = E1M_PWM4." }
+    - { e1m: E1M_PWM5, macro: EVK_ARD_PWM3,
+        doc: "Arduino header CK_PWM3 = E1M_PWM5." }
+    - { e1m: E1M_PWM6, macro: EVK_MB_PWM,
+        doc: "mikroBUS PWM pin." }
+
 # Inference + display defaults a stock EVK app would pick.  Apps
 # override in their board.yaml as needed.
 defaults:
@@ -109,8 +207,10 @@ hw_revisions:
       # docs/board-id.md for the divider math + the studio pipeline).
     notes: |
       First production revision of the E1M EVK (35x35 carrier).
-      Wiring authoritative per include/alp/boards/alp_e1m_evk.h.
+      Wiring authoritative per the `e1m_routes:` block above
+      (`include/alp/boards/alp_e1m_evk_routes.h` is generated
+      from it).
 
 status:
   preliminary:              false
-  partial_hw_config:        false               # wiring authoritative via the C header
+  partial_hw_config:        false               # wiring authoritative via the `e1m_routes:` block

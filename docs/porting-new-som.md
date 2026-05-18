@@ -1,12 +1,17 @@
 # Porting a new E1M SoM to the ALP SDK
 
 > **Read first:** [`docs/e1m-pinout.md`](e1m-pinout.md) explains
-> the pinout chain (e1m-spec → per-SoM manifest → studio →
-> SDK).  This guide assumes that chain is understood and only
-> covers the SDK-side steps.
+> the pinout chain (e1m-spec → per-SoM preset in alp-sdk → optional
+> alp-studio consumer → generated/hand-written firmware).  This
+> guide assumes that chain is understood and only covers the
+> SDK-side steps — which is where all per-SoM data lives.
 
 This guide walks through the steps to add HAL/HW support for a new
-E1M-* variant.  It assumes you already have:
+E1M-* variant.  Everything you produce lands in this repo (alp-sdk):
+the per-SoM preset, the vendor wrapper, the backend wiring, the CI
+matrix entry.  alp-studio is one of two first-class consumers of
+what you land here; it does not host any of the per-SoM data
+itself.  Before you start you need:
 
 - A board file in `alplabai/alp-zephyr-modules` (for Zephyr targets) or
   a Yocto BSP layer (for Linux targets).
@@ -39,7 +44,21 @@ it exists.
      carve-outs.
    - `mailbox:` — controller name + per-channel reservations,
      at minimum one channel `reserved_for: alp_default_rpmsg`.
-3. **Update `docs/os-support-matrix.md`.**  Add one column per
+3. **Add the per-SoM `pad_routes:` block.**  Still in
+   `metadata/e1m_modules/<SKU>.yaml`, declare which E1M pads and
+   peripheral instances route directly to host silicon and which
+   ones traverse an on-module mediator (e.g. the AEN family's
+   CC3501E coprocessor).  Schema is in
+   `metadata/schemas/som-preset-v1.schema.json`; for working
+   examples mirror an existing SoM's shape — Alif Ensemble parts
+   route a chunk of GPIOs + `E1M_SPI1` through the CC3501E (see
+   `metadata/e1m_modules/E1M-AEN401.yaml`), while a Renesas V2N
+   routes everything direct-to-silicon (see
+   `metadata/e1m_modules/E1M-V2N101.yaml`).  This block is the
+   single source of truth for pad → silicon-pin routing; nothing
+   downstream (alp-studio's pin allocator, the hand-written
+   firmware path, codegen) holds a parallel copy.
+4. **Update `docs/os-support-matrix.md`.**  Add one column per
    `<core_id>` × runtime pairing (not one per SoM × OS like the
    pre-v0.6 shape).  A V2N port adds two columns: `V2N: a55_cluster
    Yocto` and `V2N: m33_sm Zephyr`.  Mark each library `stub`,
@@ -81,9 +100,11 @@ the SoM exposes — each per-core wiring is a separate step.
 
 A SoM with both an A-cluster and an M-class peer needs both Yocto
 and Zephyr wiring; neither half is optional.  Each per-core
-backend dispatches on the studio-resolved instance id (`bus_id`,
-`pin_id`).  How that id maps to a vendor handle is per-SoM —
-typically a static lookup table.
+backend dispatches on the resolved E1M instance id (`bus_id`,
+`pin_id`) — picked by hand in the standalone path, by the
+studio's pin allocator in the codegen path; both paths arrive at
+the same set of `<alp/...>` instance IDs.  How that id maps to a
+vendor handle is per-SoM — typically a static lookup table.
 
 ## 4. Update the build glue
 
@@ -129,6 +150,9 @@ Drop a `vendors/<som-slug>/README.md` covering:
 - Any deviations from the generic Zephyr/Linux mapping.
 - Known limitations (e.g. only DMA on SPI0).
 
-This is what the alp-studio pin allocator reads (indirectly, via the
-SoM manifest in `alplabai/alp-studio/library/_soms/<id>/manifest.json`)
-to decide which peripheral instance to assign each block.
+This porting note plus the SoM preset at
+`metadata/e1m_modules/<SKU>.yaml` (the `pad_routes:` block in
+particular) is what the alp-studio pin allocator reads to decide
+which peripheral instance to assign each block.  Hand-written
+firmware reads the same preset through the SDK's `<alp/...>`
+surface — no separate manifest, no studio detour.

@@ -5,6 +5,7 @@ schema_version: 1
 sku: E1M-V2M102
 family: renesas-rzv2n
 silicon: renesas:rzv2n:n44
+silicon_variant: R9A09G056N44GBG         # see metadata/socs/renesas/rzv2n/n44.json variants[]
 
 display_name: "E1M-V2M102 (Renesas RZ/V2N + DEEPX DX-M1, larger memory)"
 
@@ -57,42 +58,29 @@ inference:
   ethos_u_variant:      null
 
 capabilities:
-  ethos_u55_count:      0
-  ethos_u85_count:      0
-  drp_ai:               true
-  deepx_dx:             true
-  helium_mve:           false
-  neon:                 true
-  gpu2d:                false
-  dave2d:               false
-  cryptocell:           false
-  inline_aes:           false
-  cau:                  true
+  deepx_dx:             true       # DEEPX DX-M1 NPU on-module via PCIe.
+  cau:                  true       # GD32G553 supervisor's CAU accessible via bridge.
   optiga_trust_m:       true
-  xspi_dma:             false
-  emmc_dma:             true
-  quadspi_dma:          true
-  dma2d:                false
-  tmu_cordic:           true
-  tmu_fft:              true
-  tmu_fac:              true
+  quadspi_dma:          true       # GD32-side QuadSPI accessible via bridge.
+  tmu_cordic:           true       # GD32 bridge TMU CORDIC.
+  tmu_fft:              true       # GD32 bridge TMU FFT.
+  tmu_fac:              true       # GD32 bridge TMU FAC.
 
 topology:
   a55_cluster:
-    os: yocto
     app: alp-image-edge
     machine: e1m-v2m102-a55           # Yocto MACHINE
     toolchain: poky-glibc
   m33_sm:
-    os: zephyr
     app: alp-stock-shim
     board: alp_e1m_v2m102_m33_sm      # Zephyr board target
     toolchain: arm-zephyr-eabi
 
-memory_map:
-  - { name: ddr_main,  base: 0x48000000, size_mib: 4096, accessible_from: [a55_cluster, m33_sm], cacheable: true  }
-  - { name: ocram_low, base: 0x00010000, size_kib:  512, accessible_from: [a55_cluster, m33_sm], cacheable: false }
-  - { name: m33_tcm,   base: 0x80000000, size_kib:  128, accessible_from: [m33_sm],               cacheable: false }
+# Memory layout (SRAM banks + MRAM) is derived from the SoC variant
+# resolved via `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json
+# `variants[].sram_banks_kb` + `mram_mb`. Declare a memory_map: block
+# here ONLY for non-stock partitioning (none of the current 11 SKUs
+# need one).
 
 mailbox:
   controller: renesas_mhu
@@ -101,6 +89,59 @@ mailbox:
     - { id: 1, reserved_for: app }
     - { id: 2, reserved_for: app }
     - { id: 3, reserved_for: power_mgmt }
+
+# E1M pads / instances that route through the on-module GD32G553
+# IO MCU (the V2N family's peripheral bridge).  RZ/V2N silicon
+# does not own the E1M PWM / encoder / ADC / DAC channels; the
+# GD32 fills those gaps and proxies them over the inter-chip
+# SPI + I2C bridge.  Apps using these channels via the portable
+# `<alp/...>` surface get the bridge dispatch automatically.
+#
+# Source of truth: metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv
+pad_routes:
+  # All eight E1M PWM channels via GD32.
+  - { e1m: E1M_PWM0, dispatch: gd32_bridge, dispatch_pin: PA11 }
+  - { e1m: E1M_PWM1, dispatch: gd32_bridge, dispatch_pin: PB1 }
+  - { e1m: E1M_PWM2, dispatch: gd32_bridge, dispatch_pin: PB14 }
+  - { e1m: E1M_PWM3, dispatch: gd32_bridge, dispatch_pin: PC5 }
+  - { e1m: E1M_PWM4, dispatch: gd32_bridge, dispatch_pin: PC10 }
+  - { e1m: E1M_PWM5, dispatch: gd32_bridge, dispatch_pin: PC11 }
+  - { e1m: E1M_PWM6, dispatch: gd32_bridge, dispatch_pin: PC12 }
+  - { e1m: E1M_PWM7, dispatch: gd32_bridge, dispatch_pin: PD0 }
+
+  # All four quadrature encoders via GD32 (X / Y pads paired by
+  # the GD32 timer-encoder hardware).
+  - { e1m: E1M_ENC0, dispatch: gd32_bridge, dispatch_pin: "PA0/PB3"  }
+  - { e1m: E1M_ENC1, dispatch: gd32_bridge, dispatch_pin: "PC6/PC7"  }
+  - { e1m: E1M_ENC2, dispatch: gd32_bridge, dispatch_pin: "PB6/PB7"  }
+  - { e1m: E1M_ENC3, dispatch: gd32_bridge, dispatch_pin: "PB2/PA1"  }
+
+  # All eight ADC channels via GD32.
+  - { e1m: E1M_ADC0, dispatch: gd32_bridge, dispatch_pin: PD9  }
+  - { e1m: E1M_ADC1, dispatch: gd32_bridge, dispatch_pin: PB12 }
+  - { e1m: E1M_ADC2, dispatch: gd32_bridge, dispatch_pin: PE13 }
+  - { e1m: E1M_ADC3, dispatch: gd32_bridge, dispatch_pin: PE11 }
+  - { e1m: E1M_ADC4, dispatch: gd32_bridge, dispatch_pin: PC4  }
+  - { e1m: E1M_ADC5, dispatch: gd32_bridge, dispatch_pin: PA5  }
+  - { e1m: E1M_ADC6, dispatch: gd32_bridge, dispatch_pin: PA2  }
+  - { e1m: E1M_ADC7, dispatch: gd32_bridge, dispatch_pin: PA3  }
+
+  # Both DAC outputs via GD32.
+  - { e1m: E1M_DAC0, dispatch: gd32_bridge, dispatch_pin: PA4 }
+  - { e1m: E1M_DAC1, dispatch: gd32_bridge, dispatch_pin: PA6 }
+
+  # Selected E1M GPIO pads via GD32 (the IOs not driven from the
+  # Renesas side -- see the TSV for the full set).
+  - { e1m: E1M_GPIO_IO8,  dispatch: gd32_bridge, dispatch_pin: PB10 }
+  - { e1m: E1M_GPIO_IO9,  dispatch: gd32_bridge, dispatch_pin: PA7  }
+  - { e1m: E1M_GPIO_IO10, dispatch: gd32_bridge, dispatch_pin: PA12 }
+  - { e1m: E1M_GPIO_IO11, dispatch: gd32_bridge, dispatch_pin: PB0  }
+  - { e1m: E1M_GPIO_IO12, dispatch: gd32_bridge, dispatch_pin: PC1  }
+  - { e1m: E1M_GPIO_IO13, dispatch: gd32_bridge, dispatch_pin: PF1  }
+  - { e1m: E1M_GPIO_IO14, dispatch: gd32_bridge, dispatch_pin: PB5  }
+  - { e1m: E1M_GPIO_IO16, dispatch: gd32_bridge, dispatch_pin: PC0  }
+  - { e1m: E1M_GPIO_IO24, dispatch: gd32_bridge, dispatch_pin: PC14 }
+  - { e1m: E1M_GPIO_IO25, dispatch: gd32_bridge, dispatch_pin: PC15 }
 
 helper_firmware:
   - name:          gd32_bridge

@@ -56,36 +56,36 @@
 
 #include "alp/e1m_pinout.h"
 
+/* GENERATED carrier route bindings (EVK_PIN_*, EVK_*_BUS_*,
+ * EVK_UART_PORT_*, EVK_PWM_*, EVK_ARD_PWM*, EVK_MB_PWM).
+ * Source of truth: metadata/carriers/E1M-EVK/board.yaml
+ * `e1m_routes:` block. Regenerate via:
+ *     python scripts/gen_carrier_header.py
+ * The prose blocks below describe the hardware those macros bind
+ * to; the macro values themselves come from the included header. */
+#include "alp/boards/alp_e1m_evk_routes.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* ================================================================== */
-/* RGB LED (PWM channels)                                             */
+/* RGB LED (PWM channels)  -- GENERATED, see alp_e1m_evk_routes.h     */
 /*                                                                    */
 /* The EVK drives the three RGB LED channels through PWM, not as      */
 /* simple GPIOs -- this gives the studio's UI block proper            */
 /* brightness control out of the box.  Use alp_pwm_open() with        */
-/* these channel IDs.                                                 */
+/* these channel IDs.  Macros (EVK_PWM_LED_RED/GREEN/BLUE) come from  */
+/* the generated routes header included above.                        */
 /* ================================================================== */
-
-#define EVK_PWM_LED_RED E1M_PWM3 /**< RGB LED red  channel. */
-#define EVK_PWM_LED_GREEN                                                                          \
-    E1M_PWM0 /**< RGB LED green channel.  Note: not contiguous with R/B -- the EVK schematic wires green via PWM0, not PWM2. */
-#define EVK_PWM_LED_BLUE E1M_PWM1 /**< RGB LED blue channel. */
 
 /* ================================================================== */
 /* Direct GPIO mappings (E1M-standard pads)                           */
+/*                                                                    */
+/* Carrier-feature -> E1M pad macros are GENERATED -- see             */
+/* alp_e1m_evk_routes.h (included above).  The prose blocks below     */
+/* describe the hardware those macros bind to.                        */
 /* ================================================================== */
-
-#define EVK_PIN_CAM_MUX_SEL                                                                        \
-    E1M_GPIO_IO2 /**< PI3WVR626 SEL pin. See `evk_cam_select_*` enum below + chips/cam_mux_pi3wvr626. */
-/** Rotary encoder push switch (PEC12R-4222F-S0024 SW pin, R92 10k
- *  pull-up to VIO, 0.1uF debounce cap to GND, active-low when
- *  pressed).  Maps to E1M IO4. */
-#define EVK_PIN_ENCODER_SW E1M_GPIO_IO4
-#define EVK_PIN_CAM_RST                                                                            \
-    E1M_GPIO_IO5 /**< Camera reset (was previously misdocumented as IO_EXP_RST -- the schematic confirms IO5 -> CAM_RST and the I/O expander reset is on a different pad; see below). */
 
 /* SDIO 74LVC157 multiplexer (M.2 E-key SDIO vs microSD card slot).
  *
@@ -106,11 +106,10 @@ extern "C" {
  * CC3501E side).  Firmware drives the mux by dispatching
  * GPIO_WRITE commands to the CC3501E over the inter-chip SPI1
  * (see <alp/protocol/cc3501e.h>'s ALP_CC3501E_CMD_GPIO_WRITE),
- * NOT via Alif's GPIO peripheral. */
-#define EVK_PIN_SDIO_MUX_EN                                                                        \
-    E1M_GPIO_IO20 /**< /E -- drive low to enable the mux.  Routed through CC3501E. */
-#define EVK_PIN_SDIO_MUX_SEL                                                                       \
-    E1M_GPIO_IO21 /**< S  -- 0 = M.2 E SDIO, 1 = microSD.  Routed through CC3501E. */
+ * NOT via Alif's GPIO peripheral.
+ *
+ * EVK_PIN_SDIO_MUX_EN (= E1M_GPIO_IO20) and EVK_PIN_SDIO_MUX_SEL
+ * (= E1M_GPIO_IO21) are defined in the generated routes header. */
 
 typedef enum {
     EVK_SDIO_M2E_KEY = 0, /**< MUX_SEL.SDIO low. */
@@ -129,10 +128,10 @@ typedef enum {
  * this EVK -- I2S_EN is driven from Alif via alp_gpio_*, but
  * I2S_SELECT is on the CC3501E side and must be driven via
  * ALP_CC3501E_CMD_GPIO_WRITE on the inter-chip SPI1.  Apps that
- * switch the I2S routing need both code paths. */
-#define EVK_PIN_I2S_MUX_EN E1M_GPIO_IO8 /**< /E -- Alif GPIO P7.1.  Drive low to enable mux. */
-#define EVK_PIN_I2S_MUX_SEL                                                                        \
-    E1M_GPIO_IO13 /**< S  -- CC3501E GPIO13.  Routed via CC3501E firmware. */
+ * switch the I2S routing need both code paths.
+ *
+ * EVK_PIN_I2S_MUX_EN (= E1M_GPIO_IO8) and EVK_PIN_I2S_MUX_SEL
+ * (= E1M_GPIO_IO13) are defined in the generated routes header. */
 
 typedef enum {
     EVK_I2S_AMP     = 0, /**< I2S0 routed to the TAS2563 amplifiers. */
@@ -152,9 +151,10 @@ typedef enum {
  * Drive the line via E1M IO11 -- which routes through the
  * on-module CC3501E (GPIO2 per from-cc3501e.tsv).  Firmware
  * drives the mux via ALP_CC3501E_CMD_GPIO_WRITE on the inter-chip
- * SPI1, NOT via Alif's GPIO peripheral. */
-#define EVK_PIN_USB2_MUX_SEL                                                                       \
-    E1M_GPIO_IO11 /**< 0 = USB connector, 1 = M.2 E-key USB.  Routed through CC3501E. */
+ * SPI1, NOT via Alif's GPIO peripheral.
+ *
+ * EVK_PIN_USB2_MUX_SEL (= E1M_GPIO_IO11) is defined in the
+ * generated routes header. */
 
 typedef enum {
     EVK_USB2_CONNECTOR = 0, /**< External USB-A jack. */
@@ -172,9 +172,10 @@ typedef enum {
  * ALP_CC3501E_CMD_GPIO_SET_INTERRUPT and propagates the wake event
  * up to Alif over the inter-chip SPI1.  Apps that want to surface
  * either as a system wake source must subscribe via the CC3501E
- * event callback (alp/chips/cc3501e.h's cc3501e_set_event_callback). */
-#define EVK_PIN_M2E_UART_WAKE E1M_GPIO_IO19 /**< UART-path wake (active-low). */
-#define EVK_PIN_M2E_SDIO_WAKE E1M_GPIO_IO18 /**< SDIO-path wake (active-low). */
+ * event callback (alp/chips/cc3501e.h's cc3501e_set_event_callback).
+ *
+ * EVK_PIN_M2E_UART_WAKE (= E1M_GPIO_IO19) and EVK_PIN_M2E_SDIO_WAKE
+ * (= E1M_GPIO_IO18) are defined in the generated routes header. */
 
 /* M.2 E-key W_DISABLE control lines (per the M.2 spec).
  *
@@ -189,9 +190,10 @@ typedef enum {
  * input pull-up + write 0 to assert / write 1 / Hi-Z to release)
  * + ALP_CC3501E_CMD_GPIO_WRITE.  The CC3501E firmware needs the
  * open-drain mode wired into its GPIO_CONFIGURE handler -- noted
- * for the alplabai/cc3501e-firmware project. */
-#define EVK_PIN_W_DISABLE1 E1M_GPIO_IO17 /**< Wi-Fi disable (open-drain, active-low). */
-#define EVK_PIN_W_DISABLE2 E1M_GPIO_IO16 /**< Bluetooth disable (open-drain, active-low). */
+ * for the alplabai/cc3501e-firmware project.
+ *
+ * EVK_PIN_W_DISABLE1 (= E1M_GPIO_IO17) and EVK_PIN_W_DISABLE2
+ * (= E1M_GPIO_IO16) are defined in the generated routes header. */
 
 /* PCIe I2C mux + control-IO-expander cluster.
  *
@@ -210,10 +212,11 @@ typedef enum {
  *
  * The PCIe expander is at I2C address 0x71 (A0=1, A1=0 per the
  * schematic strap).  Its alternate part TCA6408ARSVR uses
- * R112-only / R145-DNP per the schematic note. */
-#define EVK_PIN_PCIE0_I2C_EN E1M_GPIO_IO10  /**< Drive high to enable I2C mux to PCIe slot. */
-#define EVK_PIN_PCIE_IOEXP_INT E1M_GPIO_IO7 /**< INT input from the PCIe IO expander. */
-#define EVK_PIN_PCIE_IOEXP_RST E1M_GPIO_IO9 /**< Reset output to the PCIe IO expander. */
+ * R112-only / R145-DNP per the schematic note.
+ *
+ * EVK_PIN_PCIE0_I2C_EN (= E1M_GPIO_IO10), EVK_PIN_PCIE_IOEXP_INT
+ * (= E1M_GPIO_IO7) and EVK_PIN_PCIE_IOEXP_RST (= E1M_GPIO_IO9) are
+ * defined in the generated routes header. */
 
 /* PCIe LANE 2:1 multiplexer cluster (PI3DBS12212AXUAEX x4 +
  * SY75602BTWL-TR refclk buffer).
@@ -242,11 +245,10 @@ typedef enum {
  * U50/U51 take level-shifted versions (`PCIe.MUX_PD_L` and
  * `_SEL_L`) of the same signals -- U49 (a TXS0102) sits between
  * the SoM's IO22/IO23 and the PD_L/SEL_L nets.  Apps don't need
- * to think about that; the level shifter is transparent. */
-#define EVK_PIN_PCIE_MUX_PD                                                                        \
-    E1M_GPIO_IO22 /**< Drive HIGH to power down all four lane muxes.        */
-#define EVK_PIN_PCIE_MUX_SEL                                                                       \
-    E1M_GPIO_IO23 /**< Selects M-key vs E-key routing on the lane muxes. */
+ * to think about that; the level shifter is transparent.
+ *
+ * EVK_PIN_PCIE_MUX_PD (= E1M_GPIO_IO22) and EVK_PIN_PCIE_MUX_SEL
+ * (= E1M_GPIO_IO23) are defined in the generated routes header. */
 
 typedef enum {
     EVK_PCIE_E_KEY = 0, /**< Lanes 0 routed to PCIe E-key (Wi-Fi/BT modules). */
@@ -456,44 +458,36 @@ typedef enum {
 } evk_ioexp_pin_t;
 
 /* ================================================================== */
-/* EVK bus assignments                                                */
+/* EVK bus assignments  -- GENERATED, see alp_e1m_evk_routes.h        */
+/*                                                                    */
+/* The carrier-named bus / port macros (EVK_I2C_BUS_SENSORS,          */
+/* EVK_I2C_BUS_DSI_CSI, EVK_SPI_BUS_ARDUINO, EVK_I2C_BUS_ARDUINO,     */
+/* EVK_UART_PORT_DEBUG, EVK_UART_PORT_ARDUINO) live in the generated  */
+/* routes header.  Hardware-context notes for each binding:           */
+/*                                                                    */
+/*  - EVK_I2C_BUS_SENSORS    (E1M_I2C0) -- shared sensor +            */
+/*    IO-expander + INA236 bus.                                       */
+/*  - EVK_I2C_BUS_DSI_CSI    (E1M_I2C1) -- display + camera control   */
+/*    I2C (touch panel, camera-side I2C config); EVK schematic        */
+/*    DSI_CSI_I2C net.                                                */
+/*  - EVK_SPI_BUS_ARDUINO    (E1M_SPI1) -- Arduino UNO header SPI;    */
+/*    SPI1 terminates on the on-module CC3501E (per                   */
+/*    metadata/e1m_modules/aen/from-cc3501e.tsv).  The Alif does NOT  */
+/*    drive SPI1 directly here -- apps wanting to talk to an Arduino  */
+/*    shield's SPI device dispatch through the CC3501E firmware.     */
+/*    CK_CS = E1M_SPI1_CS0 is the chip-select line.                   */
+/*    M.2 (Key M and Key E) on the EVK carrier uses PCIe + SDIO,      */
+/*    not SPI; the previous `EVK_SPI_BUS_M2_KEYM` macro was a guess   */
+/*    and has been removed.                                           */
+/*  - EVK_I2C_BUS_ARDUINO    (E1M_I3C0) -- Arduino UNO header I2C     */
+/*    rides I3C0 (backwards-compatible with classic I2C); I3C-aware   */
+/*    apps get the higher-rate path.                                  */
+/*  - EVK_UART_PORT_DEBUG    (E1M_UART0) -- console UART exposed on   */
+/*    the JTAG/SWD-side debug header.                                 */
+/*  - EVK_UART_PORT_ARDUINO  (E1M_UART1) -- Arduino UNO header UART   */
+/*    (D0/D1); CK_RXD = UART1_TX, CK_TXD = UART1_RX (the              */
+/*    Arduino-shield "RX" pin reads the host's TX, and vice versa).  */
 /* ================================================================== */
-
-/** Shared sensor + IO-expander + INA236 bus.  Maps to E1M's `I2C0`. */
-#define EVK_I2C_BUS_SENSORS E1M_I2C0
-
-/** Display + camera control I2C bus (touch panel, camera-side I2C
- *  configuration).  Maps to E1M's `I2C1` per the EVK schematic's
- *  DSI_CSI_I2C net. */
-#define EVK_I2C_BUS_DSI_CSI E1M_I2C1
-
-/** Arduino UNO header SPI bus.  Maps to E1M's `SPI1`, which on
- *  this EVK terminates on the on-module CC3501E (per
- *  metadata/e1m_modules/aen/from-cc3501e.tsv).  The Alif does NOT
- *  drive SPI1 directly here -- apps wanting to talk to an Arduino
- *  shield's SPI device dispatch through the CC3501E firmware.
- *  CK_CS = E1M_SPI1_CS0 is the chip-select line.
- *
- *  M.2 (Key M and Key E) on the EVK carrier uses PCIe + SDIO,
- *  not SPI; the previous `EVK_SPI_BUS_M2_KEYM` macro was a
- *  guess and has been removed. */
-#define EVK_SPI_BUS_ARDUINO E1M_SPI1
-
-/** Arduino UNO header I2C bus.  Maps to E1M's `I3C0` -- the
- *  Arduino's SCL/SDA on this EVK ride the I3C bus (which is
- *  backwards-compatible with classic I2C).  Apps that only need
- *  I2C semantics use it as such; I3C-aware apps get the
- *  higher-rate path. */
-#define EVK_I2C_BUS_ARDUINO E1M_I3C0
-
-/** Console UART exposed on the JTAG/SWD-side debug header.  Maps to `UART0`. */
-#define EVK_UART_PORT_DEBUG E1M_UART0
-
-/** Arduino UNO header UART (D0/D1).  Maps to E1M's `UART1`.
- *  Net-naming note: CK_RXD = E1M_UART1_TX, CK_TXD = E1M_UART1_RX
- *  (the Arduino-shield "RX" pin reads the host's TX, and vice
- *  versa). */
-#define EVK_UART_PORT_ARDUINO E1M_UART1
 
 /* ================================================================== */
 /* Arduino UNO header pin mappings (full)                             */
@@ -505,11 +499,12 @@ typedef enum {
 /* repurposed peripheral pads.                                        */
 /* ================================================================== */
 
-/* PWM (header pins driven by a PWM channel). */
-#define EVK_ARD_PWM1 E1M_PWM1 /**< CK_PWM1 = E1M PWM1. */
-#define EVK_ARD_PWM2 E1M_PWM4 /**< CK_PWM2 = E1M PWM4. */
-#define EVK_ARD_PWM3 E1M_PWM5 /**< CK_PWM3 = E1M PWM5. */
-#define EVK_ARD_PWM4 E1M_PWM2 /**< CK_PWM4 = E1M PWM2. */
+/* PWM (header pins driven by a PWM channel) -- EVK_ARD_PWM1..4
+ * are GENERATED, see alp_e1m_evk_routes.h.  Shorthand:
+ *   CK_PWM1 = E1M PWM1 (shares LED_BLUE)
+ *   CK_PWM2 = E1M PWM4
+ *   CK_PWM3 = E1M PWM5
+ *   CK_PWM4 = E1M PWM2 */
 
 /* Digital I/O (header pins riding repurposed peripheral pads --
  * the OVERLAY_BASE + N indices defined above). */
@@ -537,8 +532,8 @@ typedef enum {
 /* the shared-pin map.                                                */
 /* ================================================================== */
 
-/** mikroBUS PWM pin.  Maps to E1M_PWM6. */
-#define EVK_MB_PWM E1M_PWM6
+/* mikroBUS PWM pin (EVK_MB_PWM = E1M_PWM6) is defined in the
+ * generated routes header. */
 
 /** mikroBUS INT pin.  Maps to E1M I2S1_SDI -- the dedicated
  *  mikroBUS interrupt line on this EVK.  No longer shared with
@@ -591,8 +586,11 @@ typedef enum {
  * an interrupt via ALP_CC3501E_CMD_GPIO_SET_INTERRUPT and receive
  * the rising/falling edge through the CC3501E event callback,
  * rather than installing an alp_gpio handler against Alif's GPIO
- * peripheral. */
-#define EVK_PIN_BMI323_INT1 E1M_GPIO_IO15
+ * peripheral.
+ *
+ * EVK_PIN_BMI323_INT1 (= E1M_GPIO_IO15) is defined in the generated
+ * routes header. */
+
 /* The EVK populates TWO TCAL9538 I/O expanders, both on E1M_I2C0
  * but at different strap-selected addresses:
  *   - The "main" expander handles LCD / camera / capacitive-touch

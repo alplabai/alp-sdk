@@ -126,6 +126,30 @@
       "additionalProperties": { "type": "integer", "minimum": 0 }
     },
 
+    "capabilities": {
+      "type": "object",
+      "description": "Silicon-determined feature flags. SoM YAMLs may override or extend specific keys via their own capabilities: block (e.g., V2N declares cau: true because the on-module GD32 bridge provides CAU even though the host silicon does not).",
+      "additionalProperties": false,
+      "properties": {
+        "ethos_u55_count":   { "type": "integer", "minimum": 0 },
+        "ethos_u65_count":   { "type": "integer", "minimum": 0 },
+        "ethos_u85_count":   { "type": "integer", "minimum": 0 },
+        "drp_ai":            { "type": "boolean", "description": "Renesas DRP-AI NPU on-die." },
+        "helium_mve":        { "type": "boolean", "description": "Arm Helium MVE vector extension (Armv8.1-M)." },
+        "neon":              { "type": "boolean", "description": "Arm Neon SIMD extension." },
+        "gpu2d":             { "type": "boolean", "description": "Vendor 2D GPU block." },
+        "dave2d":            { "type": "boolean", "description": "Renesas D/AVE 2D accelerator." },
+        "cryptocell":        { "type": "boolean", "description": "Arm CryptoCell crypto subsystem." },
+        "inline_aes":        { "type": "boolean", "description": "Inline AES extension on the host core." },
+        "cau":               { "type": "boolean", "description": "Vendor CAU (cryptographic acceleration unit) on-die." },
+        "xspi_dma":          { "type": "boolean", "description": "OctalSPI controller with DMA support." },
+        "hexspi_dma":        { "type": "boolean", "description": "HexSPI controller with DMA support." },
+        "emmc_dma":          { "type": "boolean", "description": "eMMC controller with DMA support." },
+        "quadspi_dma":       { "type": "boolean", "description": "QuadSPI controller with DMA support." },
+        "dma2d":             { "type": "boolean", "description": "Generic 2D DMA engine." }
+      }
+    },
+
     "external_memory_interfaces": {
       "type": "array",
       "items": { "$ref": "#/$defs/external_memory_interface" }

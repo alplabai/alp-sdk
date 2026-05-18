@@ -94,7 +94,9 @@ the EVK's wiring.
 
 ## 2. Two consumer paths
 
-The SDK supports both flows equally — pick whichever fits.  ADR
+alp-sdk is standalone — nothing in this walkthrough requires
+alp-studio.  Both consumer paths below are first-class; pick
+whichever fits.  ADR
 [0001](adr/0001-wrapper-on-top-of-zephyr.md) explains the
 rationale.
 
@@ -106,12 +108,14 @@ You write Zephyr / Yocto / bare-metal app code directly against
 app stays portable across every E1M-conformant SoM.  The rest
 of this document covers this path.
 
-### 2.2 alp-studio codegen
+### 2.2 alp-studio codegen (optional, on top of alp-sdk)
 
-The studio reads block manifests, runs the pin allocator, and
-emits the same `<alp/...>` calls.  Switching to studio at any
-point is non-destructive — your standalone app keeps working
-alongside the studio-generated code.  See
+alp-studio is a consumer that sits on top of alp-sdk: its pin
+allocator reads the SoM preset + `pad_routes:` from this repo's
+`metadata/e1m_modules/<SKU>.yaml`, ingests block manifests, and
+emits the same `<alp/...>` calls you'd write by hand.  Switching
+to studio at any point is non-destructive — your standalone app
+keeps working alongside the studio-generated code.  See
 [`alplabai/alp-studio`](https://github.com/alplabai/alp-studio).
 
 ## 3. Set up a Zephyr workspace

@@ -43,6 +43,9 @@ Bad / costs: ...
 | [0004](0004-e1m-portability-bound.md)    | E1M-spec instance counts as the portability bound | Accepted |
 | [0005](0005-alp-sdk-vs-alp-studio-boundary.md) | alp-sdk vs alp-studio repo boundary (dual-use acid test) | Accepted |
 | [0006](0006-secure-boot-secure-ota.md)   | Secure boot (vendor-native) + secure OTA (MCUboot + Mender) | Accepted, partially superseded (2026-05-11 amendment: Mender replaces RAUC on Linux side; AEN-Zephyr OTA client choice pending) |
+| [0007](0007-wave2-dsp-pipeline-design.md) | Wave-2 DSP: pipeline stages, not standalone primitives | Accepted |
+| [0008](0008-gpu2d-portable-shim.md)       | GPU2D: portable shim under `<alp/gpu2d.h>` even for single-silicon | Accepted |
+| [0009](0009-mender-zephyr-client-deferred.md) | Mender Zephyr client deferred to v1.1 | Accepted |
 | [0010](0010-heterogeneous-os-orchestration.md) | Heterogeneous OS orchestration: Zephyr + Yocto as peers, not alternatives | Accepted |
 
 ## When to write an ADR

@@ -117,3 +117,18 @@ table makes the answer cheap to look up during PR review.
 - [`README.md`](../../README.md) "Two consumer paths" --
   customer-facing framing of the same standalone-vs-studio
   split.
+
+## 2026-05-18 reaffirmation
+
+The 2026-05-18 metadata-unification work explicitly reaffirmed this
+boundary and operationalised it further:
+
+- Per-SoM E1M-pad → silicon-pin routing data was relocated from a
+  proposed home in `alplabai/alp-studio/library/_soms/<id>/manifest.json`
+  into alp-sdk's `metadata/e1m_modules/<SKU>.yaml` `pad_routes:` block.
+  See `docs/e1m-pinout.md`.
+- alp-sdk is the standalone foundation; alp-studio is one of two
+  first-class consumers (the other is hand-written firmware).
+  alp-studio reads alp-sdk metadata, never the reverse.
+- The dual-use acid test now resolves MORE artefacts to alp-sdk
+  (per-SoM pad maps especially).

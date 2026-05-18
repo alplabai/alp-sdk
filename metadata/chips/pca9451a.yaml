@@ -1,0 +1,38 @@
+# ALP SDK chip manifest: NXP PCA9451A multi-channel PMIC.
+schema_version:   1
+chip_id:          pca9451a
+driver_status:    stub             # manifest only; chip-driver headers + impl
+                                   # land alongside the NX9101 bring-up.
+display_name:     "NXP PCA9451A multi-channel power-management IC"
+vendor:           nxp
+mpn_population:
+  - "PCA9451A"                     # base order code; sub-variants TBD per BOM
+datasheet:
+  primary:        TBD              # NXP PCA9451A datasheet -- pending HW-config writeup
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: TBD, scope: "I2C2 on i.MX 93 (BRD_I2C); fixed by silicon variant" }
+  max_clock_hz:   400000           # Fast-mode (typical PMIC); confirm against datasheet
+                                   # once it lands
+
+# Per [[pending-hw-configs]]: rail voltages, enable straps, and signal
+# routing are TBD until the maintainer hand-writes the NX9101 HW config.
+# The block exists so cross-reference validators (validate_metadata.py,
+# alp_project.py loader) can resolve E1M-NX9101.yaml's `pmic: pca9451a`
+# reference without flagging a missing-chip error.
+
+signals: []                        # populate when datasheet + V0 schematic land
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_PCA9451A
+  baremetal:      ALP_SDK_CHIP_PCA9451A
+  yocto:          "kernel pmic-pca9450 driver (PCA9451A is software-compatible per NXP)"
+
+families:
+  - imx93
+
+verification:
+  hil_silicon:    untested         # paper-correct stub; no driver bodies yet.
+  smoke_tests:    null_arg_guard

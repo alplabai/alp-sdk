@@ -18,8 +18,14 @@ Module (AEN, V2N, V2N-M1, or N93 family) and you want:
   module, Ethernet PHYs, DEEPX NPU on V2N-M1).
 * Pointers into the rest of the doc tree for deeper topics.
 
-If you're going to use `alp-studio` for codegen, follow its own
-quickstart -- this doc covers the hand-written path.
+The hand-written firmware path is a first-class consumer of
+alp-sdk — co-equal with the alp-studio codegen path, not a
+fallback.  alp-sdk is self-contained: every file this guide
+references (board.yaml schema, SoM presets at
+`metadata/e1m_modules/<SKU>.yaml`, chip drivers, the loader)
+ships in this repo.  alp-studio is optional; if you want
+visual block-based codegen on top of the same SDK, follow its
+own quickstart.
 
 ## 1. Pick a target
 
@@ -123,7 +129,7 @@ west flash                     # real silicon
 
 ```c
 alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-    .bus_id     = 0u,           // studio-resolved or alias-based
+    .bus_id     = 0u,           // E1M_I2C0 from <alp/e1m_pinout.h>
     .bitrate_hz = 400000u,
 });
 if (bus == NULL) {

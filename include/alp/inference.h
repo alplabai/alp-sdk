@@ -34,7 +34,11 @@
  * "best-effort, not absolute".
  *
  * @par ABI status: [ABI-STABLE]
- *      v0.3 dispatcher (auto/cpu/ethos_u/drpai/deepx_dx).
+ *      Shape is frozen; per-backend implementations land per the
+ *      v0.3 dispatcher (auto/cpu/ethos_u/drpai/deepx_dx) and the
+ *      v0.4+ NPU integrations.  Stub returns of ALP_ERR_NOSUPPORT
+ *      (until a backend lands for a given target) are part of the
+ *      stable contract — callers handle them via @ref alp_last_error.
  *      See docs/abi-markers.md for the convention.
  */
 

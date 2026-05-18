@@ -48,6 +48,11 @@
   "soc_ram_kb": 256,
   "always_on_sram_kb": 0,
   "peripherals": {},
+  "capabilities": {
+    "ethos_u65_count": 1,
+    "neon":            true,
+    "emmc_dma":        true
+  },
   "external_memory_interfaces": [
     {
       "kind": "LPDDR4/4X",

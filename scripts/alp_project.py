@@ -160,6 +160,247 @@ def _resolve_carrier(name: str, metadata_root: Path) -> dict[str, Any]:
     return _load_yaml(preset_path)
 
 
+def _resolve_silicon_variant(
+    sku_preset: dict[str, Any],
+    metadata_root: Path,
+) -> dict[str, Any] | None:
+    """Resolve a SoM preset to its matching SoC-JSON variant entry.
+
+    Two paths, in order of preference:
+
+    1. Forward: the SoM preset's top-level `silicon_variant:` field
+       names the exact `variants[].order_code` to pick out.
+    2. Reverse fallback: scan the SoC JSON's `variants[]` for one
+       whose `alp_module_skus` array contains the SoM SKU.
+
+    Returns the matched variant dict (with keys order_code, package,
+    mram_mb, sram_kb, optional_features, ...) or None when neither
+    path resolves (the SoC JSON has no variant for this SKU AND the
+    preset declares no silicon_variant, or declares `silicon_variant:
+    TBD` per the no-inventing-values rule).
+    """
+    silicon = sku_preset.get("silicon")
+    if not silicon:
+        return None
+    parts = silicon.split(":")
+    if len(parts) != 3:
+        return None
+    soc_path = metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
+    if not soc_path.is_file():
+        return None
+    soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
+    variants = soc_spec.get("variants") or []
+
+    declared = sku_preset.get("silicon_variant")
+    if declared and declared != "TBD":
+        for v in variants:
+            if v.get("order_code") == declared:
+                return v
+        # Forward declared but not found -- noisy fall-through to reverse lookup.
+
+    sku = sku_preset.get("sku")
+    if sku:
+        for v in variants:
+            if sku in (v.get("alp_module_skus") or []):
+                return v
+    return None
+
+
+def _resolve_pad_routes(
+    sku_preset: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Index a SoM preset's `pad_routes:` block by E1M pad/instance.
+
+    Returns a dict keyed by `E1M_*` identifier (e.g., `E1M_GPIO_IO15`,
+    `E1M_SPI1`) with the full route entry as value:
+
+        { "dispatch": "cc3501e", "dispatch_pin": 14, "doc": "..." }
+
+    Pads NOT present in the preset's `pad_routes:` (or absent block
+    entirely) are implicitly `direct` -- they route to the main
+    silicon's GPIO / peripheral with no mediator.
+
+    The SDK's codegen layer composes this with the carrier preset's
+    `e1m_routes:` block: when an E1M pad appears in both, the carrier
+    supplies the role (e.g. `bmi323_int1`) and the SoM supplies the
+    dispatch path (e.g. CC3501E GPIO 14). The two blocks together
+    let a customer swap SoMs (AEN701 -> NX9101) without touching the
+    carrier YAML or any app source -- the [[som-swappable-without-board-changes]]
+    promise.
+    """
+    routes = sku_preset.get("pad_routes") or []
+    if not isinstance(routes, list):
+        return {}
+    indexed: dict[str, dict[str, Any]] = {}
+    for entry in routes:
+        if not isinstance(entry, dict):
+            continue
+        e1m = entry.get("e1m")
+        if not isinstance(e1m, str):
+            continue
+        # Last-write-wins on duplicates -- the schema doesn't forbid
+        # them but real SoMs shouldn't have any; if the YAML carries
+        # duplicates, surface the later entry (most-recent author wins).
+        indexed[e1m] = entry
+    return indexed
+
+
+def _compose_route(
+    e1m_pad: str,
+    carrier_route: dict[str, Any] | None,
+    pad_routes: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Compose a carrier `e1m_routes:` entry (role on the carrier
+    side) with the SoM's `pad_routes:` entry (dispatch path on the
+    SoM side) for a single E1M pad / instance.
+
+    Returns a dict with: `carrier_role`, `carrier_macro`, `dispatch`
+    (defaults to `direct` when the SoM declares no proxy),
+    `dispatch_pin`, plus any docs.
+
+    Callers use the composed dict to drive codegen (Zephyr DTS
+    overlays, dispatch shims, capability validation).
+    """
+    out: dict[str, Any] = {"e1m": e1m_pad}
+    if carrier_route:
+        out["carrier_role"] = carrier_route.get("role")
+        out["carrier_macro"] = carrier_route.get("macro")
+        if carrier_route.get("doc"):
+            out["carrier_doc"] = carrier_route["doc"]
+    som_route = pad_routes.get(e1m_pad)
+    if som_route:
+        out["dispatch"] = som_route.get("dispatch", "direct")
+        if som_route.get("dispatch_pin") is not None:
+            out["dispatch_pin"] = som_route["dispatch_pin"]
+        if som_route.get("doc"):
+            out["som_doc"] = som_route["doc"]
+    else:
+        out["dispatch"] = "direct"
+    return out
+
+
+def _resolve_memory_map(
+    sku_preset: dict[str, Any],
+    metadata_root: Path,
+) -> list[dict[str, Any]]:
+    """Derive the effective memory-region table for a SoM.
+
+    Precedence:
+      1. If the SoM preset declares `memory_map:` explicitly (used
+         only for non-stock partitioning -- e.g. reserving SRAM for
+         a hardware secure enclave outside the default layout), it
+         wins verbatim.
+      2. Otherwise the loader derives the region list from the SoC
+         JSON variant resolved via `silicon_variant:`. Each named
+         SRAM bank becomes one region; the MRAM becomes one region.
+         Per-core TCM banks (SRAM names ending `_<core>_(ITCM|DTCM)`)
+         carry `accessible_from: [<core>]`; un-suffixed banks are
+         shared across every core declared in the variant's parent
+         SoC `cores[]` list.
+
+    The returned dicts have the keys defined by the memory_region
+    schema: `name`, `size_kib`, `accessible_from`, `cacheable` (plus
+    optional `base` only when the SoM preset's override declares one
+    -- silicon-default bases stay unset, so downstream emitters know
+    to use the silicon's defaults).
+
+    Returns an empty list when the silicon_variant cannot be resolved
+    (e.g. NX9101's `silicon_variant: TBD`) -- callers should treat
+    that as "memory layout pending the HW-config writeup".
+    """
+    declared = sku_preset.get("memory_map")
+    if declared:
+        # SoM-side override wins; the loader trusts the maintainer.
+        return list(declared)
+
+    variant = _resolve_silicon_variant(sku_preset, metadata_root)
+    if not variant:
+        return []
+
+    # Re-load the SoC JSON to grab the cores[] topology (the variant
+    # dict alone doesn't carry per-core ids).
+    silicon = sku_preset.get("silicon", "")
+    parts = silicon.split(":")
+    if len(parts) != 3:
+        return []
+    soc_path = metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
+    if not soc_path.is_file():
+        return []
+    soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
+    soc_cores = [c.get("id") for c in soc_spec.get("cores", []) if c.get("id")]
+
+    regions: list[dict[str, Any]] = []
+
+    # MRAM as one region (size in KiB; mram_mb -> *1024).
+    mram_mb = variant.get("mram_mb")
+    if isinstance(mram_mb, (int, float)) and mram_mb > 0:
+        regions.append({
+            "name": "mram_main",
+            "size_kib": int(mram_mb * 1024),
+            "accessible_from": list(soc_cores),
+            "cacheable": True,
+        })
+
+    # SRAM banks. Per-core TCM banks get `accessible_from: [<core>]`;
+    # the rest are shared across every core in the SoC.
+    sram_banks = variant.get("sram_banks_kb") or {}
+    for bank_name, size_kib in sram_banks.items():
+        if not isinstance(size_kib, int) or size_kib <= 0:
+            continue
+        # Detect per-core TCM by suffix.
+        accessible: list[str] = list(soc_cores)
+        for core_id in soc_cores:
+            suffix_token = f"_{core_id.upper()}_"
+            if suffix_token in bank_name.upper():
+                accessible = [core_id]
+                break
+        # TCMs are typically non-cacheable; bulk SRAM is cacheable.
+        is_tcm = "ITCM" in bank_name.upper() or "DTCM" in bank_name.upper()
+        regions.append({
+            "name": bank_name.lower(),
+            "size_kib": int(size_kib),
+            "accessible_from": accessible,
+            "cacheable": not is_tcm,
+        })
+
+    return regions
+
+
+def _resolve_capabilities(
+    sku_preset: dict[str, Any],
+    metadata_root: Path,
+) -> dict[str, Any]:
+    """Compose silicon capabilities from the SoC JSON with SoM-side overrides/extensions.
+
+    Returns a dict where SoM-declared keys override SoC-declared defaults for the same key
+    (e.g., V2N's `cau: true` via the GD32 bridge overrides the RZ/V2N silicon's `cau: false`).
+    Keys that exist on only one side are passed through unchanged.
+
+    Precedence:
+      1. Resolve the SoC ref via the ``silicon:`` field (same path used by
+         ``_resolve_silicon_variant`` and ``_resolve_memory_map``).
+      2. Read ``soc["capabilities"]`` (defaults to ``{}`` when absent --
+         older SoC JSONs that pre-date this field continue to work).
+      3. Read ``sku_preset.get("capabilities", {})``.
+      4. Return a merged dict; SoM-side wins on key collision so that
+         SoM add-on chips / GD32 bridge capabilities can override the
+         host silicon's defaults.
+    """
+    silicon = sku_preset.get("silicon", "")
+    parts = silicon.split(":")
+    soc_caps: dict[str, Any] = {}
+    if len(parts) == 3:
+        soc_path = metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
+        if soc_path.is_file():
+            soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
+            soc_caps = soc_spec.get("capabilities") or {}
+
+    som_caps: dict[str, Any] = sku_preset.get("capabilities") or {}
+
+    # SoM side wins on collision (bridge / add-on overrides silicon default).
+    return {**soc_caps, **som_caps}
+
+
 # ---------------------------------------------------------------------
 # Hardware-revision compatibility (board.yaml hw_rev vs SDK version)
 # ---------------------------------------------------------------------
@@ -480,45 +721,37 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
     out: list[str] = []
     repo_root = Path(__file__).resolve().parent.parent
 
-    # Pull the SKU's `silicon:` ref + `capabilities:` block out of
-    # metadata/e1m_modules/<sku>.yaml so per-silicon and per-capability
-    # backends can match.
+    # Resolve the SKU's `silicon:` ref and merged capabilities (SoC JSON
+    # defaults + SoM-level overrides) via _resolve_capabilities().  This
+    # replaces the former inline YAML text-parser so that silicon-determined
+    # capabilities removed from SoM YAMLs (Task 3, slice 3b) continue to
+    # resolve from the SoC JSON that sibling Agent D populated.
     silicon_ref: str | None = None
-    capabilities: dict[str, str] = {}
     sku_path = repo_root / "metadata" / "e1m_modules" / f"{sku}.yaml"
+    sku_preset: dict[str, Any] = {}
     if sku_path.exists():
-        in_caps = False
-        for raw in sku_path.read_text(encoding="utf-8").splitlines():
-            sm = re.match(r"^silicon:\s*(\S+)", raw)
-            if sm:
-                silicon_ref = sm.group(1).strip()
-                continue
-            # `capabilities:` is a top-level key; entries inside are
-            # indented `  key: value` until the next top-level key
-            # (no leading whitespace).
-            if raw.startswith("capabilities:"):
-                in_caps = True
-                continue
-            if in_caps:
-                if raw and not raw[0].isspace():
-                    in_caps = False
-                else:
-                    cm = re.match(r"^\s+(\w+):\s*(\S+)", raw)
-                    if cm:
-                        capabilities[cm.group(1)] = cm.group(2).rstrip(",")
+        sku_preset = _load_yaml(sku_path) or {}
+        silicon_ref = sku_preset.get("silicon")
+
+    merged_caps: dict[str, Any] = _resolve_capabilities(sku_preset, repo_root / "metadata")
 
     def _cap_truthy(name: str) -> bool:
-        v = capabilities.get(name)
+        v = merged_caps.get(name)
         if v is None:
             return False
-        v = v.lower()
-        if v in ("true", "yes"):
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, int):
+            return v > 0
+        # String value from a YAML-loaded dict (should not occur after
+        # _resolve_capabilities, but guard for safety).
+        sv = str(v).lower()
+        if sv in ("true", "yes"):
             return True
-        if v in ("false", "no", "null", "none", "0"):
+        if sv in ("false", "no", "null", "none", "0"):
             return False
-        # Numeric value (e.g. ethos_u55_count: 2): truthy when > 0.
         try:
-            return int(v) > 0
+            return int(sv) > 0
         except ValueError:
             return False
 
@@ -837,12 +1070,37 @@ def _carrier_header_path(carrier_name: str, repo_root: Path) -> Path:
     return repo_root / "include" / "alp" / "boards" / fname
 
 
+_INCLUDE_LOCAL_RE = re.compile(
+    r'^\s*#\s*include\s+"(alp/boards/[^"]+\.h)"', re.MULTILINE,
+)
+
+
+def _read_carrier_header_with_includes(header_path: Path) -> str:
+    """Read `header_path` and inline any `#include "alp/boards/<file>.h"`
+    that exists under include/.  Used so the loader picks up the
+    generated routes header (alp_e1m_evk_routes.h) which holds the
+    EVK_* -> E1M_* macro bindings since slice 1c.
+
+    Single-level inlining is sufficient -- the generated routes header
+    only `#include`s `alp/e1m_pinout.h`, which carries no EVK_* macros.
+    """
+    text = header_path.read_text(encoding="utf-8")
+    include_root = header_path.parent.parent.parent  # .../include/
+    pieces: list[str] = [text]
+    for m in _INCLUDE_LOCAL_RE.finditer(text):
+        inc_rel = m.group(1)
+        inc_path = include_root / inc_rel
+        if inc_path.is_file() and inc_path.resolve() != header_path.resolve():
+            pieces.append(inc_path.read_text(encoding="utf-8"))
+    return "\n".join(pieces)
+
+
 def _parse_carrier_macros(
     header_path: Path,
 ) -> dict[str, list[tuple[str, int]]]:
     """Return {class_name: [(macro_name, channel_index), ...]} for
     each E1M_<CLASS><N> reference in the carrier header."""
-    raw = header_path.read_text(encoding="utf-8")
+    raw = _read_carrier_header_with_includes(header_path)
     text = _strip_c_comments(_collapse_line_continuations(raw))
     out: dict[str, list[tuple[str, int]]] = {
         "I2C": [], "SPI": [], "UART": [], "PWM": [], "GPIO_IO": [],
@@ -1259,6 +1517,141 @@ def _emit_yocto(
 
 
 # ---------------------------------------------------------------------
+# Composed-route-table emitter (demonstrator)
+# ---------------------------------------------------------------------
+#
+# Purpose: give early visibility into what _resolve_pad_routes() +
+# _compose_route() return for the current (carrier x SoM) pair.
+# Output is JSON to stdout (or --output path).  Informs the larger
+# codegen design (Zephyr DTS overlays for proxy peripherals, etc.)
+# without committing to a production schema yet.
+
+
+def _emit_composed_route_table(
+    project: dict[str, Any],
+    sku_preset: dict[str, Any],
+    carrier_preset: dict[str, Any] | None,
+    metadata_root: Path,
+) -> str:
+    """Emit a JSON summary of the fully-composed pad route table for
+    the current (carrier x SoM) pair.
+
+    The table is derived by calling _resolve_pad_routes() (SoM side) and
+    _compose_route() (join with carrier side) for every E1M pad that
+    appears in either the carrier's e1m_routes: block or the SoM's
+    pad_routes: block.
+
+    JSON shape::
+
+        {
+          "carrier": "<name or null>",
+          "som": "<SKU>",
+          "silicon_variant": "<order_code or null>",
+          "routes": [
+            {
+              "e1m": "E1M_GPIO_IO15",
+              "carrier_category": "gpio",
+              "carrier_macro": "EVK_PIN_BMI323_INT1",
+              "carrier_role": null,
+              "carrier_doc": "...",
+              "active_low": true,
+              "dispatch": "cc3501e",
+              "dispatch_pin": 14,
+              "som_doc": "..."
+            },
+            ...
+          ]
+        }
+
+    Pads that only appear in the SoM's pad_routes: block (i.e. no
+    carrier-side role assigned) are included with null carrier_* fields
+    so the table is complete for the SoM-standalone scenario.
+    """
+    pad_routes = _resolve_pad_routes(sku_preset)
+
+    # Resolve silicon variant order_code for the top-level summary field.
+    variant = _resolve_silicon_variant(sku_preset, metadata_root)
+    silicon_variant_str = variant["order_code"] if variant else None
+
+    # Collect carrier-side entries, preserving the sub-category name.
+    # Build a mapping: e1m_id -> (category, entry_dict).
+    # When the same E1M pad appears multiple times (e.g. E1M_PWM1 maps to
+    # both EVK_PWM_LED_BLUE and EVK_ARD_PWM1 in the EVK YAML) we emit one
+    # row per carrier entry so no information is lost.
+    carrier_entries: list[tuple[str, dict[str, Any]]] = []
+    seen_from_carrier: set[str] = set()
+    if carrier_preset is not None:
+        e1m_routes = carrier_preset.get("e1m_routes") or {}
+        for category, entries in e1m_routes.items():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                e1m = entry.get("e1m")
+                if not isinstance(e1m, str):
+                    continue
+                carrier_entries.append((category, entry))
+                seen_from_carrier.add(e1m)
+
+    # Also include SoM-only pads (in pad_routes but not in carrier).
+    som_only_pads = sorted(set(pad_routes.keys()) - seen_from_carrier)
+
+    routes: list[dict[str, Any]] = []
+
+    # Carrier-defined entries first (preserves YAML order).
+    for category, c_entry in carrier_entries:
+        e1m = c_entry["e1m"]
+        composed = _compose_route(e1m, c_entry, pad_routes)
+        row: dict[str, Any] = {"e1m": e1m, "carrier_category": category}
+        row["carrier_macro"] = composed.get("carrier_macro")
+        row["carrier_role"] = composed.get("carrier_role")
+        if "carrier_doc" in composed:
+            row["carrier_doc"] = composed["carrier_doc"]
+        # active_low is a carrier-side flag, not surfaced by _compose_route;
+        # read it directly from the carrier entry.
+        active_low = c_entry.get("active_low")
+        if active_low is not None:
+            row["active_low"] = bool(active_low)
+        row["dispatch"] = composed.get("dispatch", "direct")
+        if "dispatch_pin" in composed:
+            row["dispatch_pin"] = composed["dispatch_pin"]
+        if "som_doc" in composed:
+            row["som_doc"] = composed["som_doc"]
+        routes.append(row)
+
+    # SoM-only pads (not assigned a carrier role in this carrier YAML).
+    for e1m in som_only_pads:
+        composed = _compose_route(e1m, None, pad_routes)
+        row = {
+            "e1m": e1m,
+            "carrier_category": None,
+            "carrier_macro": None,
+            "carrier_role": None,
+            "dispatch": composed.get("dispatch", "direct"),
+        }
+        if "dispatch_pin" in composed:
+            row["dispatch_pin"] = composed["dispatch_pin"]
+        if "som_doc" in composed:
+            row["som_doc"] = composed["som_doc"]
+        routes.append(row)
+
+    carrier_name = None
+    if carrier_preset is not None:
+        carrier_name = carrier_preset.get("name") or (project.get("carrier") or {}).get("name")
+    elif "carrier" in project and project["carrier"]:
+        carrier_name = (project["carrier"] or {}).get("name")
+
+    result: dict[str, Any] = {
+        "carrier": carrier_name,
+        "som": project["som"]["sku"],
+        "silicon_variant": silicon_variant_str,
+        "routes": routes,
+    }
+    return json.dumps(result, indent=2) + "\n"
+
+
+# ---------------------------------------------------------------------
 # v2 emit shims (Phase 2)
 # ---------------------------------------------------------------------
 #
@@ -1498,7 +1891,9 @@ def main() -> int:
                                  "dts-overlay", "hw-info-h", "west-libraries",
                                  # v2 orchestration emits (Phase 2):
                                  "system-manifest", "dts-reservations",
-                                 "ipc-contract-h"],
+                                 "ipc-contract-h",
+                                 # Demonstrator: JSON route-table dump.
+                                 "composed-route-table"],
                         default="zephyr-conf",
                         help="Output format (default: zephyr-conf).")
     parser.add_argument("--output", type=Path, default=None,
@@ -1525,6 +1920,22 @@ def main() -> int:
         return _run_v2_emit(args)
 
     project = _load_yaml(args.input)
+
+    # composed-route-table works against both v1 and v2 board.yamls: it
+    # only needs the SoM preset + carrier preset, not the per-core slice
+    # machinery.  Intercept before the v2 schema branch so it runs on any
+    # schema version.
+    if args.emit == "composed-route-table":
+        sku_preset_rt = _resolve_sku(project["som"]["sku"], args.metadata_root)
+        carrier_preset_rt = None
+        if "carrier" in project and project["carrier"]:
+            carrier_preset_rt = _resolve_carrier(
+                project["carrier"]["name"], args.metadata_root
+            )
+        out = _emit_composed_route_table(
+            project, sku_preset_rt, carrier_preset_rt, args.metadata_root
+        )
+        return _write_or_print(out, args.output)
 
     # v2 board.yamls flow through the per-core / project-wide emit path
     # in _run_v2_per_core_emit.  Project-wide v2 emits (system-manifest,

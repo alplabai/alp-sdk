@@ -45,10 +45,37 @@ try:
 except ImportError:
     sys.exit("alp_orchestrate: jsonschema is required.  Install via `pip install jsonschema`.")
 
+# _resolve_memory_map derives the effective region table from the SoC variant
+# when the SoM preset does not declare an explicit `memory_map:` block.
+# _resolve_capabilities merges SoC-JSON defaults with SoM-level overrides so
+# that silicon-determined caps removed from SoM YAMLs (slice 3b) still resolve.
+# Imported here so the orchestrator never duplicates that logic.
+from alp_project import _resolve_memory_map, _resolve_capabilities  # noqa: E402
+
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
 SCHEMA_V2 = METADATA_ROOT / "schemas" / "board-config-v2.schema.json"
+
+
+def _default_os_from_core_type(core_type: str) -> str:
+    """Infer default OS from a SoC's `cores[].type`.
+
+    Convention (codified across the SoM presets pre-2026-05-18):
+        cortex-a*  ->  yocto
+        cortex-m*  ->  zephyr
+        anything else ->  off
+
+    Used as the fallback when a SoM preset's `topology.<core>.os` is
+    omitted (the field is now optional in som-preset-v1.schema.json --
+    M-class cores default to Zephyr, A-class to Yocto).
+    """
+    t = (core_type or "").lower()
+    if t.startswith("cortex-a"):
+        return "yocto"
+    if t.startswith("cortex-m"):
+        return "zephyr"
+    return "off"
 
 
 class OrchestratorError(RuntimeError):
@@ -335,11 +362,19 @@ def _resolve_topology_for_core(
 def _slice_from_resolved(
     core_id: str,
     entry: dict[str, Any],
+    soc_core_type: str = "",
 ) -> Slice:
-    """Build a Slice dataclass from the resolved per-core entry."""
+    """Build a Slice dataclass from the resolved per-core entry.
+
+    When `entry["os"]` is missing/empty, the OS is inferred from
+    `soc_core_type` via `_default_os_from_core_type()` (cortex-m* ->
+    zephyr, cortex-a* -> yocto, else "off").  Passing the empty
+    string for `soc_core_type` preserves the historical default of
+    "off".
+    """
     return Slice(
         core_id=core_id,
-        os=str(entry.get("os") or "off"),
+        os=str(entry.get("os") or _default_os_from_core_type(soc_core_type)),
         app=entry.get("app"),
         image=entry.get("image"),
         machine=entry.get("machine"),
@@ -444,6 +479,15 @@ def load_board_yaml(path: Path, *,
             f"{bad_topology} that aren't in SoC {silicon}'s "
             f"cores[] (known: {soc_core_ids})")
 
+    # Index SoC cores[] by id so we can look up `type` for the OS
+    # default inference (Finding A: pre-2026-05-18 every SoM YAML's
+    # `topology.<core>.os` followed cortex-m* -> zephyr, cortex-a* ->
+    # yocto; the loader now infers that fallback when `os:` is absent).
+    soc_core_type_by_id: dict[str, str] = {
+        str(c["id"]): str(c.get("type") or "")
+        for c in (soc_spec.get("cores") or []) if "id" in c
+    }
+
     cores: dict[str, Slice] = {}
     for core_id in soc_core_ids:
         resolved = _resolve_topology_for_core(
@@ -458,7 +502,10 @@ def load_board_yaml(path: Path, *,
                 f"core '{core_id}' has no runtime assigned (neither "
                 f"board.yaml `cores.{core_id}` nor SoM preset "
                 f"`topology.{core_id}` is set)")
-        slice_ = _slice_from_resolved(core_id, resolved)
+        slice_ = _slice_from_resolved(
+            core_id, resolved,
+            soc_core_type=soc_core_type_by_id.get(core_id, ""),
+        )
         _enforce_loader_rules(slice_)
         cores[core_id] = slice_
 
@@ -611,7 +658,11 @@ def resolve_carve_outs(
     if not project.ipc:
         return []
 
-    memory_map = list(project.som_preset.get("memory_map") or [])
+    # Derive the effective memory-region table.  An explicit `memory_map:`
+    # block in the SoM preset wins verbatim (non-stock partitioning); when
+    # absent the helper derives the table from the SoC variant JSON so the
+    # orchestrator doesn't need to duplicate that logic.
+    memory_map = _resolve_memory_map(project.som_preset, METADATA_ROOT)
     mailbox = dict(project.som_preset.get("mailbox") or {})
 
     # Phase 3 strict mailbox checks (spec §6.4).  Surfaces preset
@@ -1253,13 +1304,96 @@ def _helper_mcus(project: BoardProject) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------
 
 
+# on_module fields that carry non-chip-slug values — skip them when
+# walking the block for chip-driver enables.  Numeric fields, silicon
+# identifiers, and structured sub-blocks are excluded by name rather
+# than by type so the logic stays explicit and easy to audit.
+_ON_MODULE_NON_CHIP_FIELDS: frozenset[str] = frozenset({
+    "silicon",             # e.g. "renesas:rzv2n:n44" — SoC identifier, not a driver
+    "ethernet_phy_count",  # integer count, not a chip slug
+    "i2c_devices",         # sub-block: handled by extracting chip: entries below
+    "ospi_memories",       # sub-block: handled by extracting chip: entries below
+})
+
+
+def _slugs_from_on_module(on_module: dict) -> list[str]:
+    """Extract unique, non-TBD chip slugs from an ``on_module:`` block.
+
+    Walks every scalar field that is NOT in ``_ON_MODULE_NON_CHIP_FIELDS``,
+    then recurses into the ``ospi_memories`` sub-block (extracting the
+    ``chip:`` field from each memory entry) and the ``i2c_devices``
+    sub-block (extracting the ``chip:`` field from each device entry).
+    Duplicate slugs and values of ``TBD`` / ``null`` are silently dropped.
+
+    Returns a sorted, deduplicated list of slug strings.
+    """
+    seen: set[str] = set()
+
+    def _add(val: object) -> None:
+        if not val or val == "TBD":
+            return
+        if not isinstance(val, str):
+            return
+        seen.add(val)
+
+    # 1. Scalar fields — every key whose value is a plain string and
+    #    is not in the exclusion list.
+    for key, val in on_module.items():
+        if key in _ON_MODULE_NON_CHIP_FIELDS:
+            continue
+        if isinstance(val, str):
+            _add(val)
+
+    # 2. ospi_memories sub-block — each value is a dict with a `chip:`
+    #    key.
+    ospi = on_module.get("ospi_memories")
+    if isinstance(ospi, dict):
+        for _slot, entry in ospi.items():
+            if isinstance(entry, dict):
+                _add(entry.get("chip"))
+
+    # 3. i2c_devices sub-block — each bus entry contains a `devices:`
+    #    list; extract the `chip:` field from each device.
+    i2c_buses = on_module.get("i2c_devices")
+    if isinstance(i2c_buses, dict):
+        for _bus, bus_entry in i2c_buses.items():
+            if not isinstance(bus_entry, dict):
+                continue
+            for dev in bus_entry.get("devices") or []:
+                if isinstance(dev, dict):
+                    _add(dev.get("chip"))
+
+    return sorted(seen)
+
+
+def _slugs_from_helper_firmware(helper_firmware: list) -> list[str]:
+    """Extract unique, non-TBD chip slugs from a ``helper_firmware:`` list.
+
+    Each entry is a dict; we pull the ``chip:`` field.  TBD values and
+    missing fields are skipped.  Returns a sorted, deduplicated list.
+    """
+    seen: set[str] = set()
+    for entry in helper_firmware or []:
+        if not isinstance(entry, dict):
+            continue
+        chip = entry.get("chip")
+        if chip and chip != "TBD":
+            seen.add(chip)
+    return sorted(seen)
+
+
 def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     """Per-core Kconfig fragment for a Zephyr slice.
 
     Emits the full Kconfig the slice needs: baseline + log + silicon +
-    per-core peripherals/libraries + project-wide carrier chip drivers
-    + the Zephyr subsystem enables those chip drivers need (e.g. an
-    enabled `ssd1306` chip driver pulls in `CONFIG_I2C=y`).
+    per-core peripherals/libraries + SoM-intrinsic chip drivers (auto-
+    derived from ``on_module:`` + ``helper_firmware:`` in the SoM preset)
+    + carrier-populated chip drivers (from board.yaml ``carrier.populated:``
+    + the carrier preset) + the Zephyr subsystem enables those chip drivers
+    need (e.g. an enabled ``rv3028c7`` chip driver pulls in ``CONFIG_I2C=y``).
+
+    Swapping ``som.sku:`` in board.yaml automatically changes the SoM-
+    intrinsic chip set with no other board.yaml edits required.
     """
     silicon = project.som_preset.get("silicon")
     kconfig = _SILICON_TO_KCONFIG.get(silicon)
@@ -1302,6 +1436,34 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append(f"CONFIG_{kconfig}=y")
         lines.append("")
 
+    # ----------------------------------------------------------------
+    # SoM-intrinsic chip drivers — derived from on_module: + helper_firmware:
+    # in the SoM preset.  These are NOT declared by the customer; they
+    # are determined by which SoM SKU the project targets.  Swapping
+    # `som.sku:` from E1M-V2N101 to E1M-AEN701 automatically swaps
+    # the on-module chip set without any board.yaml changes.
+    # ----------------------------------------------------------------
+    som_chips: set[str] = set()
+    om = project.som_preset.get("on_module") or {}
+    if om:
+        for slug in _slugs_from_on_module(om):
+            som_chips.add(slug)
+    hf = project.som_preset.get("helper_firmware") or []
+    for slug in _slugs_from_helper_firmware(hf):
+        som_chips.add(slug)
+
+    chip_subsystems: set[str] = set()
+    if som_chips:
+        sku_str = project.sku
+        lines.append(f"# SoM-intrinsic chip drivers (from `{sku_str}` "
+                     f"on_module + helper_firmware)")
+        for chip in sorted(som_chips):
+            lines.append(f"CONFIG_ALP_SDK_CHIP_{chip.upper()}=y")
+            for s in _CHIP_SUBSYSTEMS.get(chip, ()):
+                chip_subsystems.add(s)
+        lines.append("")
+
+    # ----------------------------------------------------------------
     # Carrier-populated chip drivers.  Source order: SoM/carrier
     # preset `populated:` block (base) overlaid by the board.yaml
     # `carrier.populated:` block (project-level overrides).  The
@@ -1314,16 +1476,20 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # base.  This keeps `--core <id>` invocations self-sufficient
     # (the slice carries everything it needs to compile) without
     # depending on cross-slice ordering.
+    # ----------------------------------------------------------------
     populated: dict[str, bool] = {}
     if project.carrier_preset is not None:
         populated.update(project.carrier_preset.get("populated") or {})
     raw_carrier = (project.raw.get("carrier") or {}) if project.raw else {}
     populated.update(raw_carrier.get("populated") or {})
-    chip_subsystems: set[str] = set()
     if populated:
         lines.append("# Carrier-populated chip drivers (from board.yaml "
                      "carrier.populated + carrier preset)")
         for chip, on in sorted(populated.items()):
+            # Deduplicate: if the SoM block already emitted =y, skip
+            # the carrier line to avoid redundant CONFIG entries.
+            if on and chip in som_chips:
+                continue
             lines.append(f"CONFIG_ALP_SDK_CHIP_{chip.upper()}={'y' if on else 'n'}")
             if on:
                 for s in _CHIP_SUBSYSTEMS.get(chip, ()):
@@ -1365,7 +1531,10 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # every dispatcher the silicon supports, and apps choose
     # per-handle at runtime via alp_inference_open(.backend=...).
     # CPU/TFLM is the universal SW fallback and is always on.
-    capabilities = project.som_preset.get("capabilities") or {}
+    # _resolve_capabilities merges SoC-JSON defaults with SoM overrides
+    # so silicon-determined caps (ethos_u55_count, drp_ai, ...) resolve
+    # even when removed from the SoM YAML (capability unification, slice 3b).
+    capabilities = _resolve_capabilities(project.som_preset, METADATA_ROOT)
     inference_lines: list[str] = ["CONFIG_ALP_SDK_INFERENCE_TFLM=y"]
     ethos_present = (
         (capabilities.get("ethos_u55_count") or 0) > 0
@@ -1416,7 +1585,8 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
     via alp_inference_open(.backend=...) per-handle.
     """
     family = project.som_preset.get("family") or "unknown"
-    capabilities = project.som_preset.get("capabilities") or {}
+    # _resolve_capabilities merges SoC-JSON defaults with SoM overrides.
+    capabilities = _resolve_capabilities(project.som_preset, METADATA_ROOT)
     lines: list[str] = []
     lines.append("# Auto-generated by scripts/alp_orchestrate.py "
                  "-- pass to cmake.")

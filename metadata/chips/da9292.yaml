@@ -15,12 +15,13 @@ datasheet:
 bus:              i2c
 i2c:
   addresses:
-    - { addr_7bit: 0x1C, addr_8bit_write: 0x38, addr_8bit_read: 0x39 }
+    - { addr_7bit: 0x1E, addr_8bit_write: 0x3C, addr_8bit_read: 0x3D }
   max_clock_hz:   1000000       # FM+ per datasheet section 5.3
 
-# V2N strap (CONF input) selects 2-channel dual-phase mode + 0x1C
-# slave ID.  Channel-to-rail mapping is documented on the per-SoM
-# the per-SKU SoM preset (E1M-<MPN>.yaml); this manifest only records the chip's capabilities.
+# V2N strap (CONF input) selects 2-channel dual-phase mode + 0x1E
+# slave ID.  Channel-to-rail mapping is documented per-SoM in the
+# per-SKU SoM preset (E1M-<MPN>.yaml); this manifest only records
+# the chip's capabilities.
 operation_mode:   "2ch_dual_phase"   # set by carrier CONF strap
 
 channels:

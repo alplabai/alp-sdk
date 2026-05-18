@@ -17,6 +17,7 @@ schema_version: 1
 sku: E1M-AEN301
 family: alif-ensemble
 silicon: alif:ensemble:e3
+silicon_variant: AE302F80F55D5LE         # see metadata/socs/alif/ensemble/e3.json variants[]
 
 display_name: "E1M-AEN301 (Alif Ensemble E3)"
 
@@ -29,11 +30,17 @@ on_module:
   rtc_external:         rv3028c7               # Micro Crystal ultra-low-power RTC
   temperature_sensor:   tmp112                 # TI TMP112 on Alif's LPI2C
   eeprom:               eeprom_24c128          # Onsemi N24S128C4DYT3G (128-Kbit I2C)
-
-memory:
-  dram_mbit:            TBD
-  flash_mbit:           TBD
-  mram_kbit:            TBD                    # on-die MRAM; E3 typical TBD
+  ospi_memories:
+    ospi0:
+      chip:           TBD            # part MPN pending HW design freeze
+      assembled:      optional       # BOM variant
+      capacity_mbit:  TBD            # density pending HW design freeze
+      role:           app_storage
+    ospi1:
+      chip:           TBD
+      assembled:      optional
+      capacity_mbit:  TBD
+      role:           data_log
 
 inference:
   preferred_backend:    ethos_u
@@ -49,51 +56,23 @@ inference:
 # are populated where the silicon has multiple instances of the same
 # accelerator; booleans elsewhere.
 capabilities:
-  # ML / NPU
-  ethos_u55_count:      2          # NPU-HE + NPU-HP per the E3 datasheet.
-  ethos_u85_count:      0
-  drp_ai:               false
-  deepx_dx:             false
-  # CPU / SIMD
-  helium_mve:           true       # 2× M55 (HE + HP).
-  neon:                 false      # E3 has no Cortex-A32 core.
-  # GPU / 2D
-  gpu2d:                false      # TBD -- E3 baseline image processing only.
-  dave2d:               false      # TBD.
-  # Crypto
-  cryptocell:           true       # Family-wide on Ensemble.
-  inline_aes:           true       # Every M55 has the inline-AES extension.
-  cau:                  false      # GD32-bridge-only.
   optiga_trust_m:       true       # Populated on every E1M-AEN module.
-  # DMA / storage
-  xspi_dma:             true       # On-die xSPI controller.
-  emmc_dma:             false
-  quadspi_dma:          false
-  dma2d:                true       # Generic 2D DMA available on the M55 system.
-  # Hardware math (TMU / FAC) -- GD32 bridge only; none on Ensemble.
-  tmu_cordic:           false
-  tmu_fft:              false
-  tmu_fac:              false
 
 topology:
   m55_hp:
-    os: zephyr
     app: alp-stock-shim
     board: alp_e1m_aen301_m55_hp        # Zephyr board target
     toolchain: arm-zephyr-eabi
   m55_he:
-    os: zephyr
     app: alp-stock-shim
     board: alp_e1m_aen301_m55_he        # Zephyr board target
     toolchain: arm-zephyr-eabi
 
-# Memory base addresses + sizes stay TBD until the user supplies
-# the authoritative HW config writeup (project memory note:
-# "the user will hand-write authoritative pin assignments and
-# per-SoM HW config later; mark unknowns TBD, never invent values").
-memory_map:
-  - { name: mram_main, base: TBD, size_kib: TBD, accessible_from: [m55_hp, m55_he], cacheable: true  }
-  - { name: sram_main, base: TBD, size_kib: TBD, accessible_from: [m55_hp, m55_he], cacheable: false }
+# Memory layout (SRAM banks + MRAM) is derived from the SoC variant
+# resolved via `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json
+# `variants[].sram_banks_kb` + `mram_mb`. Declare a memory_map: block
+# here ONLY for non-stock partitioning (none of the current 11 SKUs
+# need one).
 
 # Alif IPC controller name TBD pending the hand-written HW config.
 mailbox:
@@ -103,6 +82,40 @@ mailbox:
     - { id: 1, reserved_for: app }
     - { id: 2, reserved_for: app }
     - { id: 3, reserved_for: power_mgmt }
+
+# E1M pads / instances that route through the on-module CC3501E
+# coprocessor instead of through the Alif Ensemble silicon.  Apps
+# using these pads via `alp_gpio_open()` / `alp_spi_open()` etc.
+# get CC3501E command dispatch automatically; the carrier-side
+# role (e.g. EVK_PIN_BMI323_INT1) stays SoM-agnostic.
+#
+# Source of truth:
+#   - metadata/e1m_modules/aen/from-cc3501e.tsv  (SPI1 bus)
+#   - AEN family hardware design (IO11/13/15..21 termination)
+pad_routes:
+  # SPI1 inter-chip bus -- CC3501E hosts the SPI peripheral.
+  - { e1m: E1M_SPI1,      dispatch: cc3501e,
+      doc: "Inter-chip SPI1 fast path; CC3501E acts as SPI peripheral." }
+
+  # GPIO pads that physically terminate on CC3501E (not on Alif silicon).
+  - { e1m: E1M_GPIO_IO11, dispatch: cc3501e, dispatch_pin: 2,
+      doc: "CC3501E GPIO_2." }
+  - { e1m: E1M_GPIO_IO13, dispatch: cc3501e, dispatch_pin: 13,
+      doc: "CC3501E GPIO_13." }
+  - { e1m: E1M_GPIO_IO15, dispatch: cc3501e, dispatch_pin: 14,
+      doc: "CC3501E GPIO_14." }
+  - { e1m: E1M_GPIO_IO16, dispatch: cc3501e, dispatch_pin: 16,
+      doc: "CC3501E GPIO_16." }
+  - { e1m: E1M_GPIO_IO17, dispatch: cc3501e, dispatch_pin: 17,
+      doc: "CC3501E GPIO_17." }
+  - { e1m: E1M_GPIO_IO18, dispatch: cc3501e, dispatch_pin: 18,
+      doc: "CC3501E GPIO_18." }
+  - { e1m: E1M_GPIO_IO19, dispatch: cc3501e, dispatch_pin: 19,
+      doc: "CC3501E GPIO_19." }
+  - { e1m: E1M_GPIO_IO20, dispatch: cc3501e, dispatch_pin: 26,
+      doc: "CC3501E GPIO_26." }
+  - { e1m: E1M_GPIO_IO21, dispatch: cc3501e, dispatch_pin: 30,
+      doc: "CC3501E GPIO_30." }
 
 # On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
 # on the AEN module; firmware comes from the separate

@@ -80,7 +80,7 @@ alp-sdk/
 ├── vendors/
 │   ├── alif/                        # Alif HAL bindings (start here for v0.1)
 │   └── renesas-rzv2n/               # stub for v0.2
-├── metadata/                        # CHIP METADATA — alp-studio's soc_ref resolves here
+├── metadata/                        # CHIP + SoM METADATA — single source of truth for codegen inputs
 │   ├── schemas/soc-spec-v1.schema.json
 │   └── socs/alif/ensemble/{e3,e4,e5,e6,e7,e8}.json
 ├── cmake/                           # find_package + Zephyr module helpers
@@ -144,9 +144,11 @@ not others.
 
 Each block in `alplabai/alp-studio` declares the SDK API it needs in
 its manifest (`interfaces.provides`).  The studio's deterministic pin
-allocator picks peripheral instances per block and emits codegen that
-calls into `<alp/peripheral.h>`.  Block-side driver C files include
-ALP SDK headers and consume `alp_i2c_t`, `alp_gpio_t`, etc.
+allocator reads the per-SoM pad routes from this repo (the
+`pad_routes:` block under `metadata/e1m_modules/<SKU>.yaml`), picks
+peripheral instances per block, and emits codegen that calls into
+`<alp/peripheral.h>`.  Block-side driver C files include ALP SDK
+headers and consume `alp_i2c_t`, `alp_gpio_t`, etc.
 
 The SDK's job is to take the resolved instance identifier (the
 `bus_id`/`pin_id` field) and bind to the right vendor driver, picking
@@ -280,10 +282,13 @@ that can't satisfy it.
 The SDK's three-layer error mechanism:
 
 1. **Studio codegen (best place).**  alp-studio reads the active
-   SoM's metadata (`metadata/socs/<vendor>/<family>/<part>.json`)
-   and rejects block configurations that exceed the SoC's
-   documented caps **at codegen time** — the cheapest layer to
-   enforce.
+   SoM's metadata from this repo
+   (`metadata/e1m_modules/<SKU>.yaml` for the SoM preset, which
+   pins the active SoC via `silicon:` + `silicon_variant:`, plus
+   `metadata/socs/<vendor>/<family>/<part>.json` for the chip
+   datasheet) and rejects block configurations that exceed the
+   SoC's documented caps **at codegen time** — the cheapest layer
+   to enforce.
 2. **SDK runtime open() (defensive).**  Each `alp_*_open` validates
    its config against the active SoC's compile-time capability
    table (`include/alp/soc_caps.h`, generated from the metadata
@@ -341,18 +346,27 @@ through them.
 
 ### alp-studio integration contract
 
-`alplabai/alp-studio` is the visual programmer that reads block
-manifests and generates Zephyr-app source code that calls into this
-SDK.  The integration contract is:
+**alp-studio is one of two first-class consumers of this SDK; the
+other is hand-written firmware (see
+[`docs/firmware-quickstart.md`](firmware-quickstart.md)).**  Both
+call the same `<alp/...>` headers.
+
+`alplabai/alp-studio` is the AI-driven visual programmer that sits
+on top of alp-sdk.  It reads block manifests + this repo's metadata
+and generates Zephyr-app source code that calls into the SDK.  The
+integration contract is:
 
 - The studio's pin allocator produces opaque `bus_id` / `pin_id`
   integers per the chain in [`e1m-pinout.md`](e1m-pinout.md).
 - The codegen emits calls into `<alp/peripheral.h>`,
   `<alp/chips/...>.h`, and (for camera / IoT / GUI blocks) the
   per-library `<alp/...>` headers.
-- The studio reads `metadata/socs/<vendor>/<family>/<part>.json` to
-  resolve a project's `soc_ref` and tailor codegen to the active
-  chip's peripheral inventory.
+- The studio reads `metadata/e1m_modules/<SKU>.yaml` (SoM preset,
+  including the `pad_routes:` block landing in slice 2) and
+  `metadata/socs/<vendor>/<family>/<part>.json` (chip datasheet) to
+  resolve a project's active SoM + SoC and tailor codegen to the
+  inventory the silicon exposes.  alp-sdk's metadata is alp-studio's
+  input, not its output.
 - The studio does **not** read `src/` or `chips/<part>/`.  Those are
   implementation; the studio only sees the public headers and the
   metadata directory.
@@ -404,16 +418,25 @@ decides where any new artefact lands is the *dual-use acid test*:
 > If no → alp-studio.  If yes (or "both audiences want it") →
 > alp-sdk.
 
+With the 2026-05-18 standalone reaffirmation (alp-sdk works
+without alp-studio; alp-studio is a consumer on top), more
+artefacts now meet the "yes" criterion than earlier drafts
+assumed — per-SoM pad maps especially.  Anything the studio's
+pin allocator + codegen ingests is data a hand-written-firmware
+author can also read, so its home is here.
+
 | Belongs in alp-sdk                       | Belongs in alp-studio                   |
 |------------------------------------------|-----------------------------------------|
 | `<alp/...>` public headers               | Block manifests (`library/blocks/*`)    |
 | Chip metadata (`metadata/socs/*.json`)   | Pin allocator                           |
-| Generated capability tables              | Codegen templates                       |
-| ABI snapshot tooling                     | Studio-only Kconfig helpers             |
-| Per-peripheral examples (hand-written)   | Block-level examples (studio-exported)  |
-| ADRs about API design                    | ADRs about studio architecture          |
-| `scripts/abi_snapshot.py`,               | `scripts/gen_block_manifest.py`,        |
-| `scripts/gen_soc_caps.py` (dual-use)     | `scripts/studio_codegen_*` (studio-only)|
+| SoM presets + pad routes                 | Codegen templates                       |
+| (`metadata/e1m_modules/*.yaml`)          | Studio-only Kconfig helpers             |
+| Generated capability tables              | Block-level examples (studio-exported)  |
+| ABI snapshot tooling                     | ADRs about studio architecture          |
+| Per-peripheral examples (hand-written)   | `scripts/gen_block_manifest.py`,        |
+| ADRs about API design                    | `scripts/studio_codegen_*` (studio-only)|
+| `scripts/abi_snapshot.py`,               |                                         |
+| `scripts/gen_soc_caps.py` (dual-use)     |                                         |
 
 The shared infrastructure (chip metadata, ABI tooling) lives in
 alp-sdk because that is where it is *generated from*; alp-studio
@@ -424,10 +447,15 @@ for the full rationale and edge-case guidance.
 
 - HW pinout — [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
   (v1.0).  See [`docs/e1m-pinout.md`](e1m-pinout.md) for how the
-  spec, the per-SoM manifests, and the SDK's opaque `bus_id` /
+  spec, the per-SoM pad-routing YAMLs, and the SDK's opaque `bus_id` /
   `pin_id` integers all relate.
-- Per-SoM peripheral exposure — `alplabai/alp-studio` →
-  `library/_soms/<id>/manifest.json`.
+- **Per-SoM E1M pad → silicon-pin routing** —
+  [`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/) in
+  this repo (the `pad_routes:` block, landing in slice 2 of the
+  unification work).  Earlier drafts of this doc placed the routes
+  in `alp-studio/library/_soms/<id>/manifest.json`; that direction
+  was reversed on 2026-05-18 to keep all generator inputs in one
+  repo.  alp-studio's pin allocator now reads these YAMLs directly.
 - AI accelerator runtimes (Ethos-U `vela`, Renesas DRP-AI translator) —
   separate vendor repos.
 - Zephyr board files for ALP modules — `alplabai/alp-zephyr-modules`

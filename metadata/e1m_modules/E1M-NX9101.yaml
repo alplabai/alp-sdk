@@ -12,6 +12,7 @@ schema_version: 1
 sku: E1M-NX9101
 family: nxp-imx9
 silicon: nxp:imx9:imx93
+silicon_variant: TBD
 
 display_name: "E1M-NX9101 (NXP i.MX 93 -- exact SKU TBD)"
 
@@ -31,44 +32,23 @@ inference:
   ethos_u_variant:      u65                    # i.MX 93 ships Ethos-U65
 
 capabilities:
-  ethos_u55_count:      0
-  ethos_u65_count:      1          # i.MX 93's single Ethos-U65.
-  ethos_u85_count:      0
-  drp_ai:               false
-  deepx_dx:             false
-  helium_mve:           false      # i.MX 93's M33 has no Helium.
-  neon:                 true       # 2× Cortex-A55 + Neon.
-  gpu2d:                false      # i.MX 93 has no 2D accelerator block.
-  dave2d:               false
-  cryptocell:           false
-  inline_aes:           false
-  cau:                  false
   optiga_trust_m:       true       # Populated on the E1M-NX9101 module.
-  xspi_dma:             false
-  emmc_dma:             true
-  quadspi_dma:          false
-  dma2d:                false
-  tmu_cordic:           false
-  tmu_fft:              false
-  tmu_fac:              false
 
 topology:
   a55_cluster:
-    os: yocto
     app: alp-image-edge
     machine: e1m-nx9101-a55             # Yocto MACHINE
     toolchain: poky-glibc
   m33:
-    os: zephyr
     app: alp-stock-shim
     board: alp_e1m_nx9101_m33           # Zephyr board target
     toolchain: arm-zephyr-eabi
 
-# Memory base addresses + sizes stay TBD until the user supplies
-# the authoritative HW config writeup.
-memory_map:
-  - { name: ddr_main,  base: TBD, size_mib: TBD, accessible_from: [a55_cluster, m33], cacheable: true  }
-  - { name: ocram,     base: TBD, size_kib: TBD, accessible_from: [a55_cluster, m33], cacheable: false }
+# Memory layout (SRAM banks + MRAM) is derived from the SoC variant
+# resolved via `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json
+# `variants[].sram_banks_kb` + `mram_mb`. Declare a memory_map: block
+# here ONLY for non-stock partitioning (none of the current 11 SKUs
+# need one).
 
 # NXP MU (Messaging Unit) controller name TBD pending the
 # hand-written HW config.
@@ -79,6 +59,12 @@ mailbox:
     - { id: 1, reserved_for: app }
     - { id: 2, reserved_for: app }
     - { id: 3, reserved_for: power_mgmt }
+
+# E1M-NX9101 has no on-module mediator chip; every E1M pad
+# routes directly to the i.MX 93 GPIO / peripherals.  Listing
+# pad_routes explicitly (as empty) signals "no proxy" rather
+# than "TBD" to the SDK loader.
+pad_routes: []
 
 # No on-module helper MCUs on the iMX93 SKU -- everything that
 # matters lives on the SoC die (M33 system core is a `topology:`

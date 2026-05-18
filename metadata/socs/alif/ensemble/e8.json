@@ -166,6 +166,18 @@
     "isp": 1,
     "jpeg_encoder": 1
   },
+  "capabilities": {
+    "ethos_u55_count": 2,
+    "ethos_u85_count": 1,
+    "helium_mve":      true,
+    "neon":            true,
+    "gpu2d":           true,
+    "dave2d":          true,
+    "cryptocell":      true,
+    "inline_aes":      true,
+    "hexspi_dma":      true,
+    "dma2d":           true
+  },
   "external_memory_interfaces": [
     {
       "kind": "HexSPI",

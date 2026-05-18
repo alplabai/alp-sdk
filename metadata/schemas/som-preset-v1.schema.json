@@ -4,7 +4,7 @@
   "title": "ALP SoM preset (metadata/e1m_modules/<SKU>.yaml) v1",
   "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  This schema validates the structural shape of every released-MPN preset; per-section tightness varies (the i2c_devices block is strictly typed; populated-parts refs stay loose because chip names are an open set governed by metadata/chips/<name>.yaml).",
   "type": "object",
-  "required": ["schema_version", "sku", "family", "silicon", "topology", "memory_map"],
+  "required": ["schema_version", "sku", "family", "silicon", "topology"],
   "additionalProperties": true,
   "allOf": [
     {
@@ -45,6 +45,13 @@
       "pattern": "^[a-z0-9_-]+:[a-z0-9_-]+:[a-z0-9_-]+$",
       "description": "Triple-colon silicon ref, e.g. `renesas:rzv2n:n44`, `alif:ensemble:e7`, `nxp:imx9:imx93`."
     },
+    "silicon_variant": {
+      "oneOf": [
+        { "type": "string", "pattern": "^[A-Za-z0-9-]{8,}$" },
+        { "type": "string", "const": "TBD" }
+      ],
+      "description": "SoC variant order code matching the vendor's datasheet (e.g. `AE302F80F55D5LE` for Alif E3, `R9A09G056N44GBG` for Renesas RZ/V2N, `MIMX9352xxxxM` for NXP i.MX 93 — the latter is partial pending the HW config writeup, encoded as `silicon_variant: TBD` per the project's no-inventing-values rule). Enables forward lookup of per-variant memory, optional features, and package-specific GPIO counts without reverse-scanning all SoC JSON files. Optional; when absent the loader falls back to reverse lookup via `alp_module_skus` in the SoC JSON."
+    },
     "display_name": {
       "type": "string"
     },
@@ -79,10 +86,8 @@
     },
     "memory_map": {
       "type": "array",
-      "description": "On-die + on-module memory regions visible to one or more cores.  Used by the orchestrator to allocate IPC carve-outs.  Per the project's standing convention, AEN / iMX93 numeric values may be TBD until the user supplies the HW-config writeup.",
-      "items": {
-        "$ref": "#/$defs/memory_region"
-      }
+      "description": "OPTIONAL declarative memory-region table. Stock SoMs whose memory layout matches the silicon default omit this block; the loader derives effective regions from the SoC JSON variant's `sram_banks_kb` + `mram_mb` (resolved via `silicon_variant`). Declare entries here ONLY for non-stock partitioning (e.g. reserving SRAM for a hardware secure enclave outside the default layout). Per-app IPC carve-outs live in the customer's `board.yaml` `ipc:` block, not here.",
+      "items": { "$ref": "#/$defs/memory_region" }
     },
     "mailbox": {
       "type": "object",
@@ -102,6 +107,11 @@
           "items": { "$ref": "#/$defs/mailbox_channel" }
         }
       }
+    },
+    "pad_routes": {
+      "type": "array",
+      "description": "E1M pads / peripheral instances that route through a SoM-side mediator chip (e.g., CC3501E coprocessor on AEN, GD32G553 IO MCU on V2N). Pads NOT listed here are assumed to route directly to the main silicon's GPIO / peripheral. The SDK loader composes this list with the carrier's `e1m_routes:` block at codegen time: when an E1M pad appears in both blocks, the carrier supplies the role (e.g., `bmi323_int1`) and the SoM supplies the dispatch path (e.g., CC3501E GPIO 14).",
+      "items": { "$ref": "#/$defs/pad_route_entry" }
     },
     "helper_firmware": {
       "type": "array",
@@ -123,7 +133,7 @@
   "$defs": {
     "topology_entry": {
       "type": "object",
-      "required": ["os"],
+      "required": [],
       "additionalProperties": false,
       "properties": {
         "os": {
@@ -150,11 +160,17 @@
       },
       "allOf": [
         {
-          "if": { "properties": { "os": { "const": "yocto" } } },
+          "if": {
+            "properties": { "os": { "const": "yocto" } },
+            "required": ["os"]
+          },
           "then": { "required": ["machine"] }
         },
         {
-          "if": { "properties": { "os": { "const": "zephyr" } } },
+          "if": {
+            "properties": { "os": { "const": "zephyr" } },
+            "required": ["os"]
+          },
           "then": { "required": ["board"] }
         }
       ]
@@ -256,6 +272,34 @@
             { "type": "string", "const": "TBD" }
           ],
           "description": "Backend-specific args (interface, target, base address, ...) forwarded verbatim to the flash backend.  Object shape varies per `flash_method`; TBD when the method is TBD."
+        }
+      }
+    },
+    "pad_route_entry": {
+      "type": "object",
+      "required": ["e1m", "dispatch"],
+      "additionalProperties": false,
+      "properties": {
+        "e1m": {
+          "type": "string",
+          "pattern": "^E1M_[A-Z0-9_]+$",
+          "description": "E1M-standard pad or peripheral instance identifier, e.g. `E1M_GPIO_IO15`, `E1M_SPI1`, `E1M_PWM0`."
+        },
+        "dispatch": {
+          "type": "string",
+          "enum": ["cc3501e", "gd32_bridge", "direct", "TBD"],
+          "description": "SoM-side mediator the pad routes through. `direct` is the default for pads not in the list; an explicit `direct` entry is allowed for clarity. `TBD` marks pads whose routing is pending the user's HW-config writeup (per the no-inventing-values rule)."
+        },
+        "dispatch_pin": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "string", "pattern": "^[A-Za-z0-9_./]+$" }
+          ],
+          "description": "Mediator-local pin or bus identifier. Forms: integer (CC3501E GPIO index, e.g. `14`); single pad name (`\"PA11\"` for a GD32 port pad); bus pin (`\"SPI1.MISO\"`); or a slash-joined pair for multi-pin peripherals (`\"PA0/PB3\"` for a quadrature encoder's X/Y pads)."
+        },
+        "doc": {
+          "type": "string",
+          "description": "One-line free-form note (matches the e1m_routes entry shape on the carrier side)."
         }
       }
     },

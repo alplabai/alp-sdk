@@ -190,6 +190,25 @@ the SoM preset's `topology.<id>` when omitted):
 | `inference`    | App-level inference tuning (`default_arena_kib` only — backend set is silicon-driven). |
 | `iot`          | Wi-Fi / MQTT / BLE / TLS toggles.                                                      |
 
+#### OS inference from core type
+
+SoM presets under `metadata/e1m_modules/<MPN>.yaml` no longer
+declare `os: zephyr` / `os: yocto` per `topology.<core>` entry --
+the field is gone from every released preset and the schema
+([`metadata/schemas/som-preset-v1.schema.json`](../metadata/schemas/som-preset-v1.schema.json))
+no longer lists it under `topology_entry.required`.  Instead the
+loader picks the natural runtime from each core's `cores[].type`
+in the matching SoC JSON: `cortex-m*` -> `zephyr`, `cortex-a*`
+-> `yocto`, anything else -> `off`.  Helper:
+[`scripts/alp_orchestrate.py::_default_os_from_core_type()`](../scripts/alp_orchestrate.py).
+
+Customer override behaviour is unchanged: `cores.<id>.os:` in
+`board.yaml` wins when set, the inference applies when omitted.
+Custom SoMs ported via
+[`docs/porting-new-som.md`](porting-new-som.md) get this OS
+inference for free as long as their SoC JSON declares core types
+correctly.
+
 **Silicon-determined fields never appear in `board.yaml`.**  Inference
 backend selection, NPU presence, on-module component populations,
 and memory capacities are all dictated by the SoM SKU preset under
@@ -251,6 +270,28 @@ som:
     flash_mbit: 65536       # vs the SKU default
 ```
 
+#### `silicon_variant:` (forward MPN reference, set by Alp)
+
+Each released SoM preset declares a top-level `silicon_variant:`
+field naming the exact vendor order code the module is built
+around -- `AE302F80F55D5LE` for `E1M-AEN301`, `R9A09G056N44GBG`
+for `E1M-V2N101`, etc.  The loader uses it to forward-resolve the
+matching `variants[]` entry in
+[`metadata/socs/<vendor>/<family>/<part>.json`](../metadata/socs/),
+which carries the per-variant MRAM / SRAM / package /
+`optional_features` data the build needs.
+
+The reverse path (`alp_module_skus` arrays inside each SoC JSON
+variant) stays in place as a fallback for legacy presets that
+omit the field, AND for the released `E1M-NX9101` preset which
+carries `silicon_variant: TBD` per the no-inventing-values rule.
+Resolver:
+[`scripts/alp_project.py::_resolve_silicon_variant()`](../scripts/alp_project.py).
+
+Customers don't touch this field -- it is Alp-set on the released
+preset; consumer's `board.yaml` references the SoM by `som.sku:`
+only and the variant is resolved automatically.
+
 ### `carrier` block
 
 ```yaml
@@ -272,6 +313,48 @@ becomes `CONFIG_ALP_SDK_CHIP_<NAME>=y` in the generated Kconfig
 fragment -- enabling the corresponding chip driver in
 `chips/<name>/` without you having to touch a separate config
 file.
+
+#### Carrier-side pin routing (`e1m_routes:`)
+
+The carrier preset's `e1m_routes:` block is the single editable
+source of truth for the carrier-side macros hand-written firmware
+uses (`EVK_PIN_BMI323_INT1`, `EVK_I2C_BUS_SENSORS`,
+`EVK_PWM_LED_RED`, ...).  Each entry binds an E1M-standard pad
+or peripheral instance (`E1M_GPIO_IO<N>`, `E1M_PWM<N>`,
+`E1M_I2C<N>` / `E1M_SPI<N>` / `E1M_UART<N>` / `E1M_I3C<N>`) to
+its carrier-side `EVK_*` macro name plus optional `doc:` /
+`active_low:` / `routes_via:` flags:
+
+```yaml
+    e1m_routes:
+      gpio:
+        - { e1m: E1M_GPIO_IO15, macro: EVK_PIN_BMI323_INT1, routes_via: cc3501e,
+            doc: "BMI323 INT1 (data-ready / motion / FIFO); CC3501E GPIO14." }
+      buses:
+        - { e1m: E1M_I2C0,      macro: EVK_I2C_BUS_SENSORS,
+            doc: "Shared sensor + IO-expander + INA236 bus." }
+      pwm:
+        - { e1m: E1M_PWM3,      macro: EVK_PWM_LED_RED,
+            doc: "RGB LED red channel." }
+```
+
+[`scripts/gen_carrier_header.py`](../scripts/gen_carrier_header.py)
+reads the block and emits
+`include/alp/boards/alp_<carrier>_routes.h` with one
+`#define EVK_<NAME> E1M_<...>` line per entry (`active_low:`
+becomes a Doxygen note, `routes_via: cc3501e` annotates the
+CC3501E hop).  The generator is idempotent; CI regenerates on
+every PR touching the carrier YAML and fails if the working tree
+diff is non-empty.
+
+The hand-authored `include/alp/boards/alp_<carrier>.h`
+(`alp_e1m_evk.h` for the stock EVK) now `#include`s the
+generated routes header -- existing firmware that references
+`EVK_PIN_BMI323_INT1`, `EVK_I2C_BUS_SENSORS`, etc. compiles
+unchanged.  The remaining sections of `alp_e1m_evk.h` (mux enums,
+INA236 tuning constants, overlay-pad indices, on-board I2C
+addresses) stay hand-authored until follow-up slices lift them
+into the YAML too.
 
 ### EVK as reference design (custom carriers)
 

@@ -11,13 +11,19 @@ abstracts the SoC's ADC peripheral.
 **AEN** -- ALP Lab module family based on **Alif Ensemble**
 silicon (E3..E8).  See [`docs/soms/aen.md`](soms/aen.md).
 
-**alp-studio** -- The optional GUI / codegen tool that emits
-`<alp/...>` calls from block manifests + a pin allocator.  See
+**alp-studio** -- An optional consumer that sits on top of alp-sdk:
+a GUI / codegen tool that emits `<alp/...>` calls from block
+manifests + a pin allocator.  Reads SoM metadata
+(including the `pad_routes:` block) from this repo's
+`metadata/e1m_modules/<SKU>.yaml`; alp-sdk's metadata is
+alp-studio's input, not its output.  alp-sdk is fully usable
+without it.  See
 [`github.com/alplabai/alp-studio`](https://github.com/alplabai/alp-studio).
 
 **Block** -- An alp-studio concept: a reusable feature unit
-(button-LED, OLED display, IMU read) that the studio's pin
-allocator places against the active SoM.
+(button-LED, OLED display, IMU read) that alp-studio's pin
+allocator places against the active SoM by consuming the SoM
+preset's `pad_routes:` from alp-sdk.
 
 **board.yaml** -- The single declarative file at the root of every
 application.  Lists `som.sku`, `carrier.name`, the per-core
@@ -156,6 +162,17 @@ helpers in `<alp/chips/gd32g553.h>` (`gd32g553_ota_begin`,
 `_write_chunk`, `_verify`, `_commit`, `_rollback`, `_get_state`,
 `_abort`).
 
+**`pad_routes:`** -- A block inside each SoM preset
+(`metadata/e1m_modules/<SKU>.yaml`) that lists, per E1M pad, the
+SoC pin it lands on and which peripheral function it carries
+(`pad: AF2`, `soc_pin: P3_4`, `as: I2C_SCL`).  This is the SoM-
+side dispatch routing — the layer that turns an E1M pad name into
+an actual silicon pin for the active SKU.  alp-sdk holds these
+routes; alp-studio's pin allocator consumes them at codegen time.
+Earlier designs placed the routes inside `alp-studio/library/_soms/`;
+that direction was reversed on 2026-05-18 so all generator inputs
+live in one repo.
+
 **PMIC** -- Power Management IC.  V2N + V2N-M1 carry two:
 ACT88760 (primary) + DA9292 (secondary).
 
@@ -194,6 +211,16 @@ flow.
 (e.g. `renesas:rzv2n:n44`, `alif:ensemble:e7`, `nxp:imx9:imx93`).
 Used in the per-SKU SoM preset (`E1M-<MPN>.yaml`) and
 `<alp/soc_caps.h>` selection.
+
+**`silicon_variant:`** -- Forward MPN-reference field on each SoM
+preset that names the exact vendor order code the module is built
+around (`AE302F80F55D5LE` for `E1M-AEN301`, `R9A09G056N44GBG` for
+`E1M-V2N101`, …).  The loader uses it to forward-resolve the
+active SoC variant in `metadata/socs/<vendor>/<family>/<part>.json`
+without scanning the reverse `alp_module_skus[]` arrays.  Alp-set
+on released presets; customers don't write it.  `TBD` is honoured
+per the no-inventing-values rule (e.g. the current `E1M-NX9101`
+preset).
 
 **SKU** -- Stock-Keeping Unit.  In ALP terminology: an MPN that
 identifies a specific SoM configuration (e.g. `E1M-V2N101`).
