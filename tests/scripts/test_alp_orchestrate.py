@@ -697,21 +697,38 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
 
     Creates a throwaway metadata root under tmp_path, writes the supplied
     preset YAML as the SoM file, and loads a board.yaml with no carrier.
+    The board-config-v2 schema copy has its ``som.sku`` pattern relaxed to
+    also accept ``E1M-TST*`` names used by fixture tests.  The renesas n44
+    SoC JSON is copied so presets that reference ``renesas:rzv2n:n44`` can
+    resolve without the full repo metadata tree.
     """
+    import json as _json
     import alp_orchestrate
     meta = tmp_path / "metadata"
     e1m = meta / "e1m_modules"
     schemas = meta / "schemas"
-    for d in (e1m, schemas):
+    socs_v2n = meta / "socs" / "renesas" / "rzv2n"
+    for d in (e1m, schemas, socs_v2n):
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
-    shutil.copy(real_meta / "schemas" / "board-config-v2.schema.json",
-                schemas / "board-config-v2.schema.json")
+    # Copy the board-config schema and relax the sku pattern so synthetic
+    # E1M-TST* SKUs used by fixture tests validate without error.
+    bc_schema_text = (real_meta / "schemas" / "board-config-v2.schema.json"
+                      ).read_text(encoding="utf-8")
+    bc_schema = _json.loads(bc_schema_text)
+    bc_schema["properties"]["som"]["properties"]["sku"]["pattern"] = (
+        r"^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3}|TST[0-9]{3})$"
+    )
+    (schemas / "board-config-v2.schema.json").write_text(
+        _json.dumps(bc_schema), encoding="utf-8")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
                 schemas / "som-preset-v1.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
                 schemas / "soc-spec-v1.schema.json")
+    # Copy the renesas n44 SoC JSON so silicon refs resolve in the temp root.
+    shutil.copy(real_meta / "socs" / "renesas" / "rzv2n" / "n44.json",
+                socs_v2n / "n44.json")
 
     (e1m / f"{sku}.yaml").write_text(
         textwrap.dedent(sku_yaml_content).lstrip("\n"), encoding="utf-8")
@@ -744,6 +761,10 @@ _SYNTHETIC_V2N_WITH_ON_MODULE = """\
           target: gd32g553
           base: "0x08000000"
     topology:
+      a55_cluster:
+        app: alp-image-edge
+        machine: e1m-tst001-a55
+        toolchain: poky-glibc
       m33_sm:
         app: alp-stock-shim
         board: alp_e1m_tst001_m33_sm
@@ -801,12 +822,25 @@ def test_slice_alp_conf_deduplicate_som_vs_carrier(tmp_path: Path) -> None:
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
-    shutil.copy(real_meta / "schemas" / "board-config-v2.schema.json",
-                schemas / "board-config-v2.schema.json")
+    # Relax the sku pattern so E1M-TST002 validates.
+    import json as _json2
+    bc_schema_text = (real_meta / "schemas" / "board-config-v2.schema.json"
+                      ).read_text(encoding="utf-8")
+    bc_schema = _json2.loads(bc_schema_text)
+    bc_schema["properties"]["som"]["properties"]["sku"]["pattern"] = (
+        r"^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3}|TST[0-9]{3})$"
+    )
+    (schemas / "board-config-v2.schema.json").write_text(
+        _json2.dumps(bc_schema), encoding="utf-8")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
                 schemas / "som-preset-v1.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
                 schemas / "soc-spec-v1.schema.json")
+    # Copy SoC JSON so silicon ref renesas:rzv2n:n44 resolves in temp root.
+    socs_v2n = meta / "socs" / "renesas" / "rzv2n"
+    socs_v2n.mkdir(parents=True, exist_ok=True)
+    shutil.copy(real_meta / "socs" / "renesas" / "rzv2n" / "n44.json",
+                socs_v2n / "n44.json")
 
     # SoM preset lists rv3028c7 as on-module.
     (e1m / "E1M-TST002.yaml").write_text(textwrap.dedent("""
@@ -820,6 +854,10 @@ def test_slice_alp_conf_deduplicate_som_vs_carrier(tmp_path: Path) -> None:
           rtc_external:   rv3028c7
         helper_firmware: []
         topology:
+          a55_cluster:
+            app: alp-image-edge
+            machine: e1m-tst002-a55
+            toolchain: poky-glibc
           m33_sm:
             app: alp-stock-shim
             board: alp_e1m_tst002_m33_sm
@@ -880,6 +918,10 @@ def test_slice_alp_conf_tbd_values_excluded(tmp_path: Path) -> None:
               pmic_main:    act8760
             helper_firmware: []
             topology:
+              a55_cluster:
+                app: alp-image-edge
+                machine: e1m-tst001-a55
+                toolchain: poky-glibc
               m33_sm:
                 app: alp-stock-shim
                 board: alp_e1m_tst001_m33_sm
@@ -908,6 +950,10 @@ def test_slice_alp_conf_no_on_module_no_som_block(tmp_path: Path) -> None:
             silicon: renesas:rzv2n:n44
             silicon_variant: R9A09G056N44GBG
             topology:
+              a55_cluster:
+                app: alp-image-edge
+                machine: e1m-tst001-a55
+                toolchain: poky-glibc
               m33_sm:
                 app: alp-stock-shim
                 board: alp_e1m_tst001_m33_sm

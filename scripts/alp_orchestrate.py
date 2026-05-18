@@ -317,8 +317,14 @@ def _load_json(path: Path) -> dict[str, Any]:
         raise OrchestratorError(f"failed to parse {path}: {e}") from e
 
 
-def _validate_v2(project: dict[str, Any]) -> None:
-    schema = json.loads(SCHEMA_V2.read_text(encoding="utf-8"))
+def _validate_v2(project: dict[str, Any],
+                 metadata_root: Path = METADATA_ROOT) -> None:
+    schema_path = metadata_root / "schemas" / "board-config-v2.schema.json"
+    if not schema_path.is_file():
+        # Fall back to the global schema when the metadata_root doesn't
+        # carry its own copy (e.g. synthetic test roots without schemas/).
+        schema_path = SCHEMA_V2
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
     validator = jsonschema.Draft202012Validator(schema)
     errors = sorted(validator.iter_errors(project),
                     key=lambda e: list(e.path))
@@ -421,8 +427,10 @@ def load_board_yaml(path: Path, *,
     path = Path(path)
     project = _load_yaml(path)
 
-    # 1. v2 schema validation.
-    _validate_v2(project)
+    # 1. v2 schema validation.  Pass metadata_root so test stubs using
+    # non-production SKU patterns (E1M-TST001 etc.) validate against
+    # their own copy of the schema rather than the repo's strict pattern.
+    _validate_v2(project, metadata_root=metadata_root)
 
     sku = project["som"]["sku"]
     hw_rev = project["som"].get("hw_rev")
@@ -1354,6 +1362,9 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
 
     # 3. i2c_devices sub-block — each bus entry contains a `devices:`
     #    list; extract the `chip:` field from each device.
+    #    Devices marked `assembled: optional` are DNI (do-not-install)
+    #    on some builds and must NOT be auto-enabled as chip drivers —
+    #    the customer explicitly enables them via `carrier.populated:`.
     i2c_buses = on_module.get("i2c_devices")
     if isinstance(i2c_buses, dict):
         for _bus, bus_entry in i2c_buses.items():
@@ -1361,6 +1372,8 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
                 continue
             for dev in bus_entry.get("devices") or []:
                 if isinstance(dev, dict):
+                    if dev.get("assembled") == "optional":
+                        continue
                     _add(dev.get("chip"))
 
     return sorted(seen)

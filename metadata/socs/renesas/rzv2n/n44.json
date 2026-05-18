@@ -169,6 +169,30 @@
       "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
     }
   ],
+  "memory_regions": [
+    {
+      "name":            "ddr_main",
+      "base":            1207959552,
+      "size_mib":        4096,
+      "accessible_from": ["a55_cluster", "m33_sm"],
+      "cacheable":       true
+    },
+    {
+      "name":            "ocram_low",
+      "base":            65536,
+      "size_kib":        512,
+      "accessible_from": ["a55_cluster", "m33_sm"],
+      "cacheable":       false
+    },
+    {
+      "name":            "m33_tcm",
+      "base":            2147483648,
+      "size_kib":        128,
+      "accessible_from": ["m33_sm"],
+      "cacheable":       false
+    }
+  ],
+
   "notes": [
     "Datasheet: 137 pages, R01DS0466EJ0120 v1.20, Sep 2025.",
     "Single die with 8 orderable SKUs that toggle Mali-G31 GPU, Mali-C55 ISP (RZ/V2NP suffix), and security-crypto extensions on/off.  N41/N42/N45/N46 are RZ/V2N (no ISP); N43/N44/N47/N48 are RZ/V2NP (with ISP).",

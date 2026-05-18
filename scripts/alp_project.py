@@ -63,7 +63,6 @@ except ImportError:
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
-SCHEMA = METADATA_ROOT / "schemas" / "board-config-v1.schema.json"
 SCHEMA_V2 = METADATA_ROOT / "schemas" / "board-config-v2.schema.json"
 SDK_VERSION_FILE = METADATA_ROOT / "sdk_version.yaml"
 
@@ -119,17 +118,21 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _validate(project: dict[str, Any]) -> None:
-    if not SCHEMA.is_file():
-        # Phase 1 of the 2026-05-15 redesign deleted v1 schema.  Phase 4
-        # rewrites every shipped board.yaml; until then the v1 emit
-        # modes are kept as a best-effort backwards-compat path.
-        print(f"alp_project: board-config-v1.schema.json was removed in "
-              f"the Phase 1 metadata land; this v1 board.yaml cannot "
-              f"be schema-validated.  Phase 4 rewrites every board.yaml "
-              f"to v2; this command runs against v2 inputs only.",
-              file=sys.stderr)
-        return
-    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    """Legacy v1 board.yaml validator (noop).
+
+    The v1 schema (`board-config-v1.schema.json`) was removed in Phase
+    1 of the 2026-05-15 metadata redesign.  v1 board.yaml inputs are
+    no longer schema-validated; the migration target is v2
+    (`schema_version: 2` with the per-core `cores:` block -- see
+    `docs/board-config.md`).  Existing v1 emit modes remain operative
+    against unvalidated input for the transition window so older test
+    fixtures + tooling that still write v1 board.yamls keep working.
+    """
+    return
+    # Unreachable; preserved so a future re-introduction of v1
+    # validation can drop in a schema path without touching call
+    # sites.
+    schema = json.loads(SCHEMA_V2.read_text(encoding="utf-8"))
     validator = jsonschema.Draft202012Validator(schema)
     errors = sorted(validator.iter_errors(project), key=lambda e: list(e.path))
     if errors:
@@ -330,6 +333,12 @@ def _resolve_memory_map(
     soc_cores = [c.get("id") for c in soc_spec.get("cores", []) if c.get("id")]
 
     regions: list[dict[str, Any]] = []
+
+    # Prefer SoC-level fixed memory_regions when present — these carry
+    # authoritative base addresses (e.g. RZ/V2N OCRAM at 0x00010000).
+    soc_memory_regions = soc_spec.get("memory_regions")
+    if soc_memory_regions:
+        return list(soc_memory_regions)
 
     # MRAM as one region (size in KiB; mram_mb -> *1024).
     mram_mb = variant.get("mram_mb")

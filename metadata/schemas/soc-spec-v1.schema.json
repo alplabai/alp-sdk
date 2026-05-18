@@ -188,6 +188,24 @@
       "items": { "$ref": "#/$defs/variant" }
     },
 
+    "memory_regions": {
+      "type": "array",
+      "description": "SoC-level fixed memory regions with base addresses.  Used by _resolve_memory_map when the SoM preset has no explicit memory_map: block and the variant sram_banks_kb does not carry base addresses (e.g. Renesas RZ/V2N OCRAM + DDR window).  Entries follow the som-preset memory_map: shape.",
+      "items": {
+        "type": "object",
+        "required": ["name", "base", "accessible_from"],
+        "additionalProperties": false,
+        "properties": {
+          "name":             { "type": "string" },
+          "base":             {},
+          "size_kib":         { "type": "integer" },
+          "size_mib":         { "type": "integer" },
+          "accessible_from":  { "type": "array", "items": { "type": "string" } },
+          "cacheable":        { "type": "boolean" }
+        }
+      }
+    },
+
     "notes": {
       "type": "array",
       "items": { "type": "string" },
