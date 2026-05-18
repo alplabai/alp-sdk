@@ -51,11 +51,9 @@ on_module:
 memory:
   dram_mbit:            65536                  # 64 Gbit LPDDR4X
   flash_mbit:           65536                  # 64 Gbit eMMC 5.1
-  mram_kbit:            null
 
 inference:
   preferred_backend:    deepx_dxm1
-  ethos_u_variant:      null
 
 capabilities:
   deepx_dx:             true       # DEEPX DX-M1 NPU on-module via PCIe.

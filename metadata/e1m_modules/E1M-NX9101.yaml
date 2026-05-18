@@ -25,7 +25,6 @@ on_module:
 memory:
   dram_mbit:            TBD
   flash_mbit:           TBD
-  mram_kbit:            null                   # i.MX 93 has no on-die MRAM
 
 inference:
   preferred_backend:    ethos_u
