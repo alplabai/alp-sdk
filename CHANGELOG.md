@@ -7,6 +7,172 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — Intra-family portability proof + Phase B/C audit cleanups (2026-05-18)
+
+**Portability is now empirically proven.**  Phase A swap-test
+matrix: 21/21 E1M cells green (i2c-scanner / gpio-button-led /
+pwm-led-fade across all 7 E1M SKUs) + 12/12 E1M-X cells green
+(adc-voltmeter / pwm-led-fade / v2n-pwm-fan-control across all 4
+E1M-X SKUs).  Within the AEN sub-family, generated `alp.conf` is
+byte-identical across all 6 SKUs after stripping the SoC-enable
+line.  Customer-facing matrix at
+[`docs/portability-matrix.md`](docs/portability-matrix.md) (new).
+
+**Phase B gap fixes** (all 5 surfaced gaps resolved):
+
+- **A2-1** `metadata/e1m_modules/E1M-V2M102.yaml` `pad_routes:` use
+  `E1M_X_*` namespace (was `E1M_*` — E1M form factor leaked into
+  an E1M-X SoM).  Apps consuming `<alp/e1m_x_pinout.h>` now resolve
+  on V2M102 like the other 3 E1M-X SoMs.
+- **A2-2** V2M101 + V2M102 gain the 8 `E1M_X_GPIO_IO27..IO35`
+  extension routes V2N already had (maintainer confirmed GD32
+  routing is identical on V2M).
+- **G-1** Per-variant Ethos-U Kconfig: orchestrator walks SoM
+  `inference.npu_population[]` and emits
+  `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U55=y` / `_U65=y` / `_U85=y`
+  per variant present.  AEN401/601/801 now emit BOTH `_U55` and
+  `_U85`; previously the U85's TensorOptimized kernels were
+  invisible to the build.  Driver dispatch in
+  `src/zephyr/inference_tflm.cpp` selects per-variant kernel pack
+  at compile time; `alp_inference_tflm_npu_variant_name()` exposes
+  the active variant for HiL operators.
+- **G-2** Per-CPU-class TFLM kernel selector: orchestrator emits
+  `CONFIG_ALP_SDK_INFERENCE_TFLM_NEON=y` (A-cluster) /
+  `_HELIUM=y` (M55) / `_REF=y` (baseline Cortex-M) per slice
+  from SoC-JSON `cores[<core_id>].vector_extension`.
+- **G-4** `cores.<key>` rename diagnostic: hard-fails with "did
+  you mean one of: [...]" hint when no `cores:` key intersects
+  the preset's `topology:` keys.  Soft-warns per dropped key on
+  partial matches.
+
+**Phase C cleanups** (bundled — audit-deferred items):
+
+- **C.1** `button_led` + `pdm_mic` relocated from `chips/` to
+  `blocks/` (alp_*-prefixed helpers are SDK abstractions, not
+  chip drivers, per `[[chip-driver-naming]]`).  History-preserving
+  `git mv`.  Kconfig `CONFIG_ALP_SDK_CHIP_BUTTON_LED` →
+  `_BLOCK_BUTTON_LED` + `_BLOCK_PDM_MIC`; orchestrator dispatches
+  per slug.  Updated 25+ consumers; new `blocks/README.md`.
+- **C.2** Four Yocto NOSUPPORT stubs added
+  (`src/yocto/peripheral_{can,i2s,rtc,wdt}.c`) — Yocto link line
+  now provides every `<alp/*>` symbol the public headers declare.
+- **C.3** `_Static_assert` ALP↔GD32 PWM align wire-encoding parity
+  in `src/zephyr/peripheral_pwm.c`; cast now fails to compile if
+  either enum is reordered.
+- **C.4** Comment density boost on `examples/rpmsg-imx93/m33/src/main.c`
+  (21 % → 67 %) and `examples/drone-autopilot/src/main.c`
+  (30 % → 60 %); both clear the ~50 % examples-are-documentation target.
+- **C.5** `[PAPER-CORRECT-STUB]` `@par Verification status` blocks
+  added to `act8760.h` / `da9292.h` / `ov5640.h` public headers so
+  API consumers see which surfaces return `ALP_ERR_NOSUPPORT`.
+- **C.6** `metadata/socs/nxp/imx9/imx93.json` flagged with
+  `pending_reference_manual_ingestion: true` (no invented peripheral
+  counts); schema + `validate_metadata.py` extended to accept + WARN
+  on the new field.
+
+Verification: pytest `tests/scripts/` 367 passed (357 baseline + 10
+new G-1/G-2/G-4 tests, 0 regressions); `validate_metadata.py` 0
+failures; `check_example_portability.py` 47/0.
+
+### Added — Phase D documentation push (2026-05-18)
+
+Six-pack of documentation work anchoring the just-proven intra-
+family portability promise:
+
+- **D.1** `docs/portability.md` (NEW, 814 lines) — customer-facing
+  portability cookbook with 6 sections: swap-and-run scope, the
+  swap-test recipe (two worked examples), dual-namespace decision
+  tree, intentional gaps (NPU model artefacts, form-factor symbol
+  errors, heterogeneous-OS topology, carrier-specific HW),
+  capability validation via `alp_last_error()` + `ALP_ERR_NOSUPPORT`
+  + the runtime fallback ladder, link to the empirical matrix.
+- **D.2** `docs/porting-new-som.md` rewritten as a 30-minute
+  walkthrough of adding a hypothetical 7th AEN SKU (E1M-AEN901).
+- **D.3** `docs/architecture.md` repository-layout tree refreshed
+  to the post-slice-3a/3b state; four new sub-sections under
+  "Build orchestration" (per-core slice fan-out, sparse capabilities
+  flow, on_module: auto-enable, generators inventory).
+- **D.4** `docs/v1.0-readiness.md` gains Pillar 3f "Intra-family
+  portability proven" with checkboxes for the matrix, cookbook,
+  ADR 0011, and the 5 Phase B gap closures.
+- **D.5** All 16 `docs/tutorials/*.md` cross-checked.  Tutorial-04
+  rewritten around the intra-family promise (old three-rings
+  cross-family model superseded).  Tutorial-09 + tutorial-16
+  light-edited to fix board.yaml + inference API drift + add G-1/G-2
+  variant-selector pointers.  Other 13 got a "Last verified:
+  2026-05-18" header line.
+- **D.6** `docs/adr/0011-intra-family-portability.md` (NEW, 191
+  lines) — Architecture Decision Record ratifying the load-bearing
+  intra-family portability scope.
+
+Plus `docs/README.md` (NEW) — top-level doc navigation hub linking
+all the new and existing docs into topic groupings.
+
+### Added — Cross-platform developer host first-class (2026-05-18)
+
+Codify cross-platform Win + Mac + Linux developer support as a
+load-bearing SDK principle so customers never feel "I need Linux
+to use the alp-sdk."  Yocto remains Linux-only by upstream
+constraint; the Zephyr-on-M-class workflow is first-class on every
+host.
+
+- `docs/adr/0012-cross-platform-developer-host.md` (NEW) — ADR
+  codifying the principle, alternatives rejected (Linux-first via
+  WSL2, Linux-only, per-OS forks), consequences (CI cost rises
+  but adoption uplift justifies it).
+- `docs/cross-platform-setup.md` (NEW, 720 lines) — 8-section
+  per-OS quickstart (Linux Debian/Ubuntu/Fedora, macOS Homebrew
+  + Apple Silicon, Windows native PowerShell + winget + Arm GNU
+  MSI + setx, Windows + WSL2 for Yocto), verification walkthrough,
+  known gotchas (MAX_PATH, AV, CRLF, Gatekeeper, symlinks, serial
+  device naming), what's-Linux-only-and-why scoping.
+- `scripts/check_cross_platform.py` (NEW, 618 lines) — soft-warn
+  lint for Linux-only idioms (hard-coded `/dev/` paths,
+  `~/.bashrc` mentions, bash-only shebangs, `make` in
+  tutorial-grade docs, forward-slash absolute paths).  Two
+  suppression mechanisms: `INTENTIONALLY_DISCUSSES_OS_PATHS`
+  allowlist (collapses N findings to one summary line) and inline
+  `<!-- cross-platform-lint:ignore -->` skip markers.  CLI flags
+  `--fail-on-warning`, `--quiet`, `--json`.  37 pytest cases at
+  `tests/scripts/test_check_cross_platform.py` (NEW).
+- `.github/workflows/cross-platform-zephyr.yml` (NEW) — CI matrix
+  scaffolding.  Ubuntu strict; macOS + Windows
+  `continue-on-error: true` per ADR 0012 (surface drift, don't
+  block while runners prove out).
+- Lint cleanup of 28 → 0 findings on the existing tree (placeholder
+  serial device paths in example READMEs; `<your-shell-rc>`
+  placeholder in `docs/local-ci.md`; cross-platform header notes
+  on `scripts/bootstrap.sh` + `scripts/test-all.sh`).
+
+### Added — 8 vendor-SDK-style peripheral tutorial examples (2026-05-18)
+
+Vendor-SDK-style canonical "first program" + per-peripheral
+tutorial set.  Each example follows the standard six-file layout
+(board.yaml, prj.conf, CMakeLists.txt, README.md, src/main.c,
+testcase.yaml) plus native_sim overlays where needed; comment
+density on main.c targets ~50 % per `[[examples-are-documentation]]`.
+
+- `examples/hello-world` — zero-peripheral printf heartbeat via
+  `alp_log_*`.  The canonical first build (74 % comment density).
+- `examples/uart-hello-world` — producer-only "printf via UART"
+  walkthrough (companion to bidirectional uart-echo).
+- `examples/i2c-master` — read TMP112 temperature sensor; contrasts
+  with `i2c-scanner` (discovery vs known-address read).
+- `examples/i2c-slave` — slave-mode SHAPE + explicit SDK gap notice
+  (`<alp/peripheral.h>` is master-only today; local NOSUPPORT shim
+  templates the proposed `alp_i2c_slave_*` surface for v0.7).
+- `examples/spi-master` — discrete master demonstrating write /
+  transceive / read patterns.
+- `examples/spi-slave` — slave-mode SHAPE + SDK gap notice (same
+  class as i2c-slave).
+- `examples/dac-waveform` — 100 Hz sine on `E1M_X_DAC0` via the
+  V2N GD32 supervisor bridge (E1M-X targeted).
+- `examples/timer-periodic-interrupt` — re-arming periodic alarm
+  via `alp_counter_*` + ISR-safe coordination pattern.
+
+`examples/README.md` index updated.  `check_example_portability.py`:
+55 examples (was 47), 0 errors.
+
 ### Schema tightening — silicon-determined fields removed from board.yaml (2026-05-16)
 
 Customer-facing knobs in `board.yaml` v2 are now restricted to

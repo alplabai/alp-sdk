@@ -56,6 +56,32 @@ The standalone path is **not** a studio escape hatch — it's a
 first-class consumer.  Anything the studio can emit, a developer
 should be able to write by hand.
 
+## Portability promise — swap-and-run within a family
+
+Change `som.sku:` in `board.yaml`, rebuild, ship — **within a SoM
+family**.  Empirically proven across all 7 E1M SKUs (AEN301..801 +
+NX9101) and all 4 E1M-X SKUs (V2N101, V2N102, V2M101, V2M102) for
+the canonical portable examples; matrix at
+[`docs/portability-matrix.md`](docs/portability-matrix.md).
+
+Cross-form-factor portability between E1M and E1M-X is intentionally
+NOT a goal — they are separate product lines with separate
+`<alp/*_pinout.h>` namespaces.
+
+- [`docs/portability.md`](docs/portability.md) — customer cookbook
+  with the swap-test recipe, dual-namespace decision tree, the
+  runtime-detection ladder pattern, and worked examples
+  (AEN701 → AEN801, V2N101 → V2M101).
+- [`docs/portability-matrix.md`](docs/portability-matrix.md) — the
+  empirical guarantee (21/21 E1M + 12/12 E1M-X cells green; all 5
+  Phase B gaps resolved).
+- [ADR 0011](docs/adr/0011-intra-family-portability.md) —
+  architectural decision: load-bearing intra-family scope,
+  alternatives rejected (single namespace, lowest-common-denominator
+  API, per-SoM custom APIs).
+- [`docs/porting-new-som.md`](docs/porting-new-som.md) — 30-minute
+  guide to adding a new SKU.
+
 ## Firmware engineers start here
 
 Writing Zephyr / bare-metal C against an E1M-X module?
@@ -68,10 +94,16 @@ Pick your SoM and start with its one-pager:
 
 | SoM family       | One-pager                                                   | Bring-up doc                                                | Reference examples                              |
 |------------------|-------------------------------------------------------------|-------------------------------------------------------------|-------------------------------------------------|
-| E1M-AEN          | [`docs/soms/aen.md`](docs/soms/aen.md)                      | [`docs/getting-started.md`](docs/getting-started.md) §4..5  | `examples/gpio-button-led`, `i2c-scanner`, `rtc-clock` |
-| E1M-X V2N        | [`docs/soms/v2n.md`](docs/soms/v2n.md)                      | [`docs/bring-up-v2n.md`](docs/bring-up-v2n.md)              | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual` |
+| E1M-AEN          | [`docs/soms/aen.md`](docs/soms/aen.md)                      | [`docs/getting-started.md`](docs/getting-started.md) §4..5  | `examples/gpio-button-led`, `i2c-scanner`, `rtc-clock`, `hello-world` |
+| E1M-X V2N        | [`docs/soms/v2n.md`](docs/soms/v2n.md)                      | [`docs/bring-up-v2n.md`](docs/bring-up-v2n.md)              | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual`, `dac-waveform` |
 | E1M-X V2N-M1     | [`docs/soms/v2n-m1.md`](docs/soms/v2n-m1.md)                | [`docs/bring-up-v2n-m1.md`](docs/bring-up-v2n-m1.md)        | DEEPX bring-up delta on top of V2N             |
 | E1M-N93 (i.MX93) | [`docs/soms/imx93.md`](docs/soms/imx93.md)                  | [`docs/getting-started.md`](docs/getting-started.md) §4..5  | same cross-family examples as AEN              |
+
+**Peripheral tutorial set** (2026-05-18 — vendor-SDK-style basics):
+`hello-world`, `uart-hello-world`, `i2c-master`, `i2c-slave`,
+`spi-master`, `spi-slave`, `dac-waveform`, `timer-periodic-interrupt`
+— each is a six-file teaching artifact with ~50 % comment density.
+Full index in [`examples/README.md`](examples/README.md).
 
 New to the terminology?  [**docs/glossary.md**](docs/glossary.md)
 defines every term used across the SDK + module docs.  Stuck on
@@ -152,14 +184,27 @@ inline validator diagnostics in the Problems panel, west wrappers.
 ## Development hosts
 
 First-class on **Linux**, **macOS**, and **Windows 11 / 10** (native
-PowerShell or WSL2).  Line endings pinned to LF via `.gitattributes`
-so a Windows checkout and a Linux pull see identical bytes.  VS Code
-config ships in `.vscode/` (recommended extensions, build tasks,
-debug profiles); install the
-[`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)
-extension for schema-aware `board.yaml` editing.  See
-[`docs/getting-started.md`](docs/getting-started.md) for per-host
-setup notes.
+PowerShell or WSL2).  The Zephyr-on-M-class developer workflow is
+fully cross-platform; only Yocto host builds require Linux (or WSL2)
+by upstream `bitbake` / OE-core constraint.  Codified in
+[ADR 0012](docs/adr/0012-cross-platform-developer-host.md).
+
+- [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) —
+  per-OS quickstart (Linux + macOS + Windows native + WSL2),
+  verification walkthrough, known gotchas (MAX_PATH, AV, CRLF,
+  Gatekeeper, serial device naming).
+- `.gitattributes` pins line endings to LF so a Windows checkout
+  and a Linux pull see identical bytes.
+- VS Code config ships in `.vscode/`; install the
+  [`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)
+  extension for schema-aware `board.yaml` editing.
+- `scripts/check_cross_platform.py` lints docs + scripts for
+  Linux-only idioms; CI matrix scaffolding at
+  `.github/workflows/cross-platform-zephyr.yml` runs the Python +
+  loader smoke tests on Ubuntu (strict), macOS, and Windows
+  (continue-on-error while runners prove out).
+- See [`docs/getting-started.md`](docs/getting-started.md) for
+  per-host setup notes.
 
 ## Status
 
@@ -185,10 +230,12 @@ v0.6 lands heterogeneous OS orchestration — see ADR 0010 + [`docs/heterogeneou
 
 *Deferred indefinitely past v1.0:* Ubuntu backend (`cores.<id>.os: ubuntu`), NXP NX9101 silicon enablement, FreeRTOS / ThreadX / NuttX backends.
 
+- Doc navigation hub: [`docs/README.md`](docs/README.md).
 - Roadmap: [`VERSIONS.md`](VERSIONS.md).
 - What changed when: `CHANGELOG.md` (in the repo root).
 - Per-(library × OS × SoM) status: [`docs/os-support-matrix.md`](docs/os-support-matrix.md).
-- Architecture decisions: [`docs/adr/`](docs/adr/).
+- Architecture decisions: [`docs/adr/`](docs/adr/) (12 ADRs, latest:
+  0011 intra-family portability + 0012 cross-platform host).
 
 ## Test it from scratch
 
