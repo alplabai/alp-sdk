@@ -45,9 +45,9 @@ portable across the three OS targets.
   (alp-studio block `blk_oled_ssd1306`).
 
 SDK-level *block* helpers (`alp_button_led_*`, `alp_pdm_mic_*`)
-live in [`blocks/`](../blocks/) -- not here -- because they are
+live in `blocks/` at the repo root -- not here -- because they are
 abstractions over multiple peripherals rather than bindings to a
-single third-party IC.  See [`blocks/README.md`](../blocks/README.md).
+single third-party IC.  See `blocks/README.md` for the helper roster.
 
 Implementations land after sign-off on the v0.1 peripheral wrapper
 work.  See [`VERSIONS.md`](../VERSIONS.md) for the full roster.

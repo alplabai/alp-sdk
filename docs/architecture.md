@@ -147,7 +147,7 @@ The `alp_` prefix is **reserved** for the SDK's portable abstractions
 (`<alp/peripheral.h>`, `<alp/dsp.h>`, `<alp/blocks/...>`); chip
 drivers stay on their datasheet-native symbol names so a developer
 who reads the chip's reference manual recognises the API.  Full
-rationale: [`blocks/README.md`](../blocks/README.md) and the memory
+rationale: `blocks/README.md` at the repo root and the memory
 note `[[chip-driver-naming]]`.
 
 ## Build orchestration
@@ -219,7 +219,7 @@ Wi-Fi/BLE radio, supervisor MCU, Ethernet PHY, …).  The customer's
 `E1M-V2N101` to `E1M-AEN701` automatically swaps the on-module chip
 set with zero edits.
 
-`scripts/alp_orchestrate.py::_slugs_from_on_module` walks the
+`scripts/alp_orchestrate.py` `_slugs_from_on_module` walks the
 `on_module:` block (scalar fields, plus the `i2c_devices:` and
 `ospi_memories:` sub-blocks) and the `helper_firmware:` list, then
 emits `CONFIG_ALP_SDK_CHIP_<NAME>=y` per chip slug (or

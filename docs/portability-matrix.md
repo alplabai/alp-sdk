@@ -189,7 +189,7 @@ from E1M-AEN701 to E1M-NX9101 also requires renaming `cores.m55_hp:`
 to `cores.m33:` because `m55_hp` is not a key in NX9101's `topology:`.
 The orchestrator silently dropped the unmatched key.
 
-**Fix landed:** `scripts/alp_orchestrate.py::load_board_yaml` now
+**Fix landed:** `load_board_yaml` in `scripts/alp_orchestrate.py` now
 hard-fails with `OrchestratorError` carrying a "did you mean one of:
 ['a55_cluster', 'm33']?" hint when NO `cores:` key intersects the
 preset's `topology:` keys.  Soft-warns on stderr (per dropped key)

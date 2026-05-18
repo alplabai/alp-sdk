@@ -16,14 +16,16 @@ see [ADR 0012](adr/0012-cross-platform-developer-host.md).
 
 ## Contents
 
-1. [Overview — workflow vs host matrix](#1-overview--workflow-vs-host-matrix)
-2. [Linux setup](#2-linux-setup-debian--ubuntu--fedora)
-3. [macOS setup](#3-macos-setup-13-ventura)
-4. [Windows native setup (PowerShell)](#4-windows-native-setup-powershell)
-5. [Windows + WSL2 setup (for Yocto targets)](#5-windows--wsl2-setup-for-yocto-targets)
-6. [Verification — hello-world per OS](#6-verification--hello-world-per-os)
-7. [Known gotchas](#7-known-gotchas)
-8. [What is Linux-only and why](#8-what-is-linux-only-and-why)
+Sections:
+
+- §1 Overview -- workflow vs host matrix
+- §2 Linux setup (Debian / Ubuntu / Fedora)
+- §3 macOS setup (13 Ventura+)
+- §4 Windows native setup (PowerShell)
+- §5 Windows + WSL2 setup (for Yocto targets)
+- §6 Verification -- hello-world per OS
+- §7 Known gotchas
+- §8 What is Linux-only and why
 
 ---
 
@@ -46,8 +48,8 @@ Read: a Mac or Windows user can do everything **except** build
 the Yocto half on the host directly.  For Mac users this means
 "use a Linux VM if you need Yocto"; for Windows users it means
 "use WSL2 for the Yocto half, native PowerShell for the Zephyr
-half" — switching is `cd <project>` from PowerShell into the WSL
-filesystem (`\\wsl$\Ubuntu-22.04\home\<user>\...`).
+half" — switching is `cd {project}` from PowerShell into the WSL
+filesystem (`\\wsl$\Ubuntu-22.04\home\{user}\...`).
 
 ADR [0012](adr/0012-cross-platform-developer-host.md) is the
 load-bearing decision behind this matrix.  ADR
@@ -383,10 +385,18 @@ Two cross-edit patterns work well:
 
 1. **Edit on Windows, build in WSL.**  Keep the alp-sdk
    workspace inside the WSL filesystem (e.g.
-   `/home/<user>/dev/alp-workspace/`) for fast I/O.  Access from
-   Windows tools (VS Code, Explorer) via the
-   `\\wsl$\Ubuntu-22.04\home\<user>\...` UNC path.  VS Code with
-   the *Remote — WSL* extension handles this transparently.
+   `/home/{user}/dev/alp-workspace/`) for fast I/O.  Access from
+   Windows tools (VS Code, Explorer) via a Windows UNC path
+   pointing at the WSL distro's filesystem (template + concrete
+   example below):
+
+   ```text
+   Template: \\wsl$\{distro}\home\{user}\...
+   Example : \\wsl$\Ubuntu-22.04\home\caner\dev\alp-workspace
+   ```
+
+   VS Code with the *Remote -- WSL* extension handles this
+   transparently.
 2. **Edit in WSL, build in WSL.**  Open VS Code via
    `code .` inside the WSL shell — VS Code launches a remote
    session and your editor runs in WSL natively.

@@ -1,3 +1,5 @@
+@page docs_index Documentation index
+
 # alp-sdk documentation index
 
 Navigation hub for everything under `docs/`.  Start here, then drill

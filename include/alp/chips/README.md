@@ -29,6 +29,6 @@ SDK-level *block* helpers (`<alp/blocks/button_led.h>`,
 [`include/alp/blocks/`](../blocks/) rather than here; they are
 abstractions over multiple peripherals and carry the `alp_*`
 prefix (`alp_button_led_*`, `alp_pdm_mic_*`).  See
-[`blocks/README.md`](../../../blocks/README.md).
+`blocks/README.md` at the repo root for the block-helper roster.
 
 Headers land alongside the implementations under [`chips/`](../../../chips/).

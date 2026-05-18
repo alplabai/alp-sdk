@@ -470,7 +470,7 @@ If a failure appears:
 |---------------------------------------------------|--------------------------------------------------------------------------------------------------|
 | `sku: 'E1M-AEN901' does not match ...`            | Skipped Step 3 (schema pattern).                                                                  |
 | `silicon: ... unknown ref`                        | The triple-colon `silicon:` in the SoM YAML doesn't resolve to a JSON file under `metadata/socs/`. |
-| `topology/<key>: additional properties not allowed` | A `topology.<core_id>` key doesn't match any `cores[].id` in the SoC JSON (e.g. typo: `m55hp`).    |
+| `topology/{key}: additional properties not allowed` | A `topology.{core_id}` key doesn't match any `cores[].id` in the SoC JSON (e.g. typo: `m55hp`).    |
 | `mailbox: required when any core runs Zephyr/baremetal` | Forgot the `mailbox:` block, or it lacks a `controller:` / `channels:`.                        |
 
 ---
@@ -497,7 +497,8 @@ SKU) so the doc-YAML linter accepts it.  In your real port, swap the
 single `som.sku:` line to your new SKU — `E1M-AEN901` for this
 walkthrough — and the schema pattern in
 `metadata/schemas/board-config-v2.schema.json` must be widened to
-accept it (one regex tweak; see [Common pitfalls](#common-pitfalls)).
+accept it (one regex tweak; see the **Common pitfalls** section
+later in this document).
 
 ```yaml
 schema_version: 2

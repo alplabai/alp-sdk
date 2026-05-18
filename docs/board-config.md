@@ -190,7 +190,7 @@ the SoM preset's `topology.<id>` when omitted):
 | `inference`    | App-level inference tuning (`default_arena_kib` only — backend set is silicon-driven). |
 | `iot`          | Wi-Fi / MQTT / BLE / TLS toggles.                                                      |
 
-#### OS inference from core type
+### OS inference from core type
 
 SoM presets under `metadata/e1m_modules/<MPN>.yaml` no longer
 declare `os: zephyr` / `os: yocto` per `topology.<core>` entry --
@@ -200,7 +200,8 @@ no longer lists it under `topology_entry.required`.  Instead the
 loader picks the natural runtime from each core's `cores[].type`
 in the matching SoC JSON: `cortex-m*` -> `zephyr`, `cortex-a*`
 -> `yocto`, anything else -> `off`.  Helper:
-[`scripts/alp_orchestrate.py::_default_os_from_core_type()`](../scripts/alp_orchestrate.py).
+`_default_os_from_core_type()` in
+[`scripts/alp_orchestrate.py`](../scripts/alp_orchestrate.py).
 
 Customer override behaviour is unchanged: `cores.<id>.os:` in
 `board.yaml` wins when set, the inference applies when omitted.
@@ -285,8 +286,8 @@ The reverse path (`alp_module_skus` arrays inside each SoC JSON
 variant) stays in place as a fallback for legacy presets that
 omit the field, AND for the released `E1M-NX9101` preset which
 carries `silicon_variant: TBD` per the no-inventing-values rule.
-Resolver:
-[`scripts/alp_project.py::_resolve_silicon_variant()`](../scripts/alp_project.py).
+Resolver: `_resolve_silicon_variant()` in
+[`scripts/alp_project.py`](../scripts/alp_project.py).
 
 Customers don't touch this field -- it is Alp-set on the released
 preset; consumer's `board.yaml` references the SoM by `som.sku:`

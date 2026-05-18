@@ -139,11 +139,14 @@ def emit() -> str:
         " * @brief Per-SoC peripheral capability macros (auto-generated).",
         " *",
         # Avoid `/**` inside the C comment — gcc -Wcomment treats it as
-        # a nested-comment opener.  Use `<vendor>/<family>/<part>.json`",
-        " * Auto-generated from metadata/socs/<vendor>/<family>/<part>.json",
+        # a nested-comment opener.  Use `{vendor}/{family}/{part}.json`
+        # with curly braces (not angle brackets) because Doxygen would
+        # otherwise parse `<vendor>` as an unknown HTML tag and fail
+        # the pr-doxygen WARN_AS_ERROR gate.
+        " * Auto-generated from metadata/socs/{vendor}/{family}/{part}.json",
         " * by scripts/gen_soc_caps.py.  DO NOT EDIT BY HAND — regenerate.",
         " *",
-        " * Each SoC's capability macros are gated by CONFIG_ALP_SOC_<TOKEN>.",
+        " * Each SoC's capability macros are gated by CONFIG_ALP_SOC_{TOKEN}.",
         " * Apps select the active SoC via Kconfig.  When no SoC is",
         " * selected the macros default to a permissive UINT16_MAX so",
         " * capability checks accept any config — apps that want runtime",
