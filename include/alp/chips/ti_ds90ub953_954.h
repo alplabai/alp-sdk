@@ -8,7 +8,7 @@
  * @brief TI DS90UB953-Q1 + DS90UB954-Q1 FPD-Link III camera SerDes.
  *
  * Serialiser (DS90UB953) sits at the remote camera end; the
- * deserialiser (DS90UB954) sits on the host carrier.  Pair carries
+ * deserialiser (DS90UB954) sits on the host board.  Pair carries
  * MIPI CSI-2 + back-channel I²C + back-channel GPIO over a single
  * coax up to 15 m.  Common in ADAS test rigs + industrial machine
  * vision.

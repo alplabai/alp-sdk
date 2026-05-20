@@ -94,7 +94,7 @@ What you MUST NOT see (would be a portability gap):
 - Different `<alp/*>`-using libraries pulled in
 - Different peripheral CONFIG (the example uses portable
   peripherals — those should be identical)
-- Different opt-in chips beyond what the on_module:/carrier.populated:
+- Different opt-in chips beyond what the on_module:/board.populated:
   data justifies
 
 ### Phase A.2 — E1M-X family
@@ -295,7 +295,7 @@ The post-slice-3a state isn't fully captured.  Add or update:
 - Per-core fan-out + slice emission section
 - Sparse capabilities flow (SoC defaults → SoM extensions merge)
 - `on_module:` auto-enable for SoM-intrinsic chips
-- Generators inventory: `gen_carrier_header.py` + `gen_soc_caps.py`
+- Generators inventory: `gen_board_header.py` + `gen_soc_caps.py`
   + the `--emit composed-route-table` demonstrator
 
 ### D.4 — Update `docs/v1.0-readiness.md`

@@ -6,7 +6,7 @@
 #
 #   * `a32_cluster` -- Yocto Linux consumer under `linux/`.
 #   * `m55_hp`      -- Zephyr producer under `m55_hp/` reading the
-#                       carrier's on-board LSM6DSO + BMP581 sensors
+#                       board's on-board LSM6DSO + BMP581 sensors
 #                       and publishing them over RPMsg.
 #   * `m55_he`      -- left at the SoM topology default (stock-shim
 #                       Zephyr image); the always-on M55-HE core
@@ -27,21 +27,16 @@
 # `OrchestratorError: memory_map.base is TBD` until E1M-AEN701.yaml
 # carries hard addresses.
 
-schema_version: 2
-
 som:
   sku: E1M-AEN701
   hw_rev: r1
 
-carrier:
-  name: E1M-EVK
-  # LSM6DSO + BMP581 already populated by the EVK preset defaults;
-  # re-state lsm6dso so the producer's chip driver stays linked even
-  # if a future EVK trim removes it.
-  populated:
-    lsm6dso: true
-    bmp581:  true
+preset: e1m-evk             # LSM6DSO + BMP581 already populated by
+                            # the EVK preset defaults.
 
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
 cores:
   a32_cluster:
     app: ./linux

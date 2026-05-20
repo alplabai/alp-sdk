@@ -32,7 +32,7 @@ OV5640 --> <alp/camera.h> --> <alp/inference.h> --> <alp/display.h>
 ## Hardware needed
 
 - E1M-V2M101 SoM (V2N + DEEPX DX-M1).
-- E1M-EVK carrier.
+- E1M-EVK board.
 - OV5640 camera on the EVK MIPI connector.
 - ST7789 240x320 TFT on SPI0.
 

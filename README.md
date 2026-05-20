@@ -116,14 +116,11 @@ A v0.6 project is **one declarative file** plus per-core app
 directories.  Drop a `board.yaml` at your app root:
 
 ```yaml
-schema_version: 2
-
 som:
   sku: E1M-V2N101      # your MPN -- the SDK ships a preset for every released MPN
   hw_rev: r1
 
-carrier:
-  name: E1M-X-EVK      # or your own custom carrier
+preset: e1m-x-evk      # or write your board out inline -- see docs/board-config.md
 
 cores:
   a55_cluster:
@@ -156,7 +153,7 @@ each Zephyr slice gets a Kconfig fragment layered onto its own
 `cores.<id>` block every field except `os:` + `app:` is optional;
 the [`gpio-button-led` example](examples/gpio-button-led/) for
 instance skips `peripherals:` entirely and uses
-`carrier.populated.button_led: true` to pull the chip driver in.
+`populated.button_led: true` to pull the chip driver in.
 See [`docs/board-config.md`](docs/board-config.md) for the full
 schema reference and
 [`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md) for
@@ -178,7 +175,7 @@ per-core basis via the project's `cores:` block.
 
 Want a GUI?  Install the [VS Code extension](https://github.com/alplabai/alp-sdk-vscode) — schema-aware
 editing, a configurator panel with dropdowns for every released MPN
-and carrier, one-keypress "Generate all" for the four emit modes,
+and board, one-keypress "Generate all" for the four emit modes,
 inline validator diagnostics in the Problems panel, west wrappers.
 
 ## Development hosts
@@ -266,7 +263,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 
 ### Dev tooling
 
-- **`board.yaml` project config** — single source of truth: SoM SKU, carrier, OS, inference backend, libraries, peripherals, IoT toggles, diagnostics, `hw_rev`
+- **`board.yaml` project config** — single source of truth: SoM SKU, board, OS, inference backend, libraries, peripherals, IoT toggles, diagnostics, `hw_rev`
 - **`scripts/alp_project.py`** — emits Zephyr Kconfig fragments, plain-CMake `-D` flags, Yocto `local.conf` snippets, DTS overlays, or the `<alp_hw_info_build.h>` companion header
 - **`scripts/validate_board_yaml.py`** — customer-side linter (exit 0 / 1 schema / 2 missing-preset / 3 hw_rev incompatible)
 - **`scripts/program_eeprom.py`** — packs board.yaml + serial + mfg date into the 128-byte EEPROM manifest for production-test programming
@@ -295,7 +292,7 @@ Alif Ensemble · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1.
 
 ### HW + HAL
 
-E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference carriers · vendor HALs.
+E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference boards · vendor HALs.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -316,7 +313,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
-  │ Dev Tooling   │ ─► │  board.yaml v2  ·  alp_project.py (per-core emit)  │
+  │ Dev Tooling   │ ─► │  board.yaml     ·  alp_project.py (per-core emit)  │
   │   (v0.6)      │    │  alp_orchestrate.py (fan-out + system-manifest)    │
   │               │    │  west alp-build / alp-image / alp-flash / alp-clean│
   │               │    │  validate_board_yaml.py  ·  VS Code extension      │
@@ -368,7 +365,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference ca
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
   │      HW       │ ─► │   E1M (35×35) + E1M-X (45×65) SoMs                 │
-  │   + HAL       │    │   E1M-EVK / E1M-X-EVK carriers + vendor HALs       │
+  │   + HAL       │    │   E1M-EVK / E1M-X-EVK reference boards + vendor HALs│
   └───────────────┘    └────────────────────────────────────────────────────┘
 ```
 
@@ -396,8 +393,8 @@ All consumer-facing headers live under `include/alp/`:
 | `alp/hw_info.h`      | EEPROM manifest + BOARD_ID ADC             |
 | `alp/soc_caps.h`     | (generated) active-SoC capability constants |
 | `alp/e1m_pinout.h`   | E1M-spec instance IDs + portability bounds |
-| `alp/boards/<carrier>.h` | Carrier-feature names (e.g. EVK pin map) |
-| `chips/<part>/`      | **80+** chip drivers, opt-in via `board.yaml` `carrier.populated:` |
+| `alp/boards/<board>.h` | Board-feature names (e.g. EVK pin map) |
+| `chips/<part>/`      | **80+** chip drivers, opt-in via `board.yaml` `populated:` |
 
 Per-row implementation status (which backend, which OS, HW-verified
 vs. code-merged-pending) lives in
@@ -490,7 +487,7 @@ alp-sdk/
 ├── src/             # common/ + zephyr/ + baremetal/ + yocto/ backends
 ├── chips/           # 80+ opt-in chip drivers
 ├── vendors/         # per-SoM HAL bindings (alif, renesas-rzv2n, nxp-imx93, deepx-dxm1)
-├── metadata/        # schemas, templates, e1m_modules/E1M-<MPN>.yaml, carriers/, socs/
+├── metadata/        # schemas, templates, e1m_modules/E1M-<MPN>.yaml, boards/, socs/
 ├── scripts/         # board.yaml loader, validators, soc_caps + ABI generators, EEPROM packer
 ├── examples/        # reference apps (cross-family + examples/aen/ + examples/v2n/)
 ├── docs/            # architecture, board-config, ADRs, test-plan, …

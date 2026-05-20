@@ -22,7 +22,7 @@ i2c:
 signals:
   - { name: SDA,   type: bidir,        scope: "I2C0 / BRD_I2C on the host" }
   - { name: SCL,   type: input,        scope: "I2C0 / BRD_I2C on the host" }
-  - { name: RST,   type: input,        scope: "optional reset line; carrier ties high if not driven" }
+  - { name: RST,   type: input,        scope: "optional reset line; board ties high if not driven" }
   - { name: VCC,   type: input,        scope: "1.62..5.5 V" }
 
 capabilities:

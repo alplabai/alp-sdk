@@ -52,14 +52,10 @@ def _write_board(tmp: Path, body: str, name: str = "board.yaml") -> Path:
 
 
 V2N_HAPPY = """
-schema_version: 2
-
+name: test-v2n-board
 som:
   sku: E1M-V2N101
   hw_rev: r1
-
-carrier:
-  name: E1M-X-EVK
 
 cores:
   a55_cluster:
@@ -88,8 +84,6 @@ diagnostics:
 
 
 V2N_TOPOLOGY_FALLBACK = """
-schema_version: 2
-
 som:
   sku: E1M-V2N101
 
@@ -101,8 +95,6 @@ cores:
 
 
 V1_REJECT = """
-schema_version: 2
-
 som:
   sku: E1M-V2N101
 
@@ -116,8 +108,6 @@ cores:
 
 
 UNKNOWN_CORE = """
-schema_version: 2
-
 som:
   sku: E1M-V2N101
 
@@ -131,8 +121,6 @@ cores:
 # AEN701 has TBD memory_map entries (per the Phase 1 metadata land);
 # any ipc carve-out must surface that as a clear OrchestratorError.
 AEN_TBD = """
-schema_version: 2
-
 som:
   sku: E1M-AEN701
 
@@ -163,7 +151,7 @@ def test_load_board_yaml_v2n_happy(tmp_path: Path) -> None:
     assert isinstance(project, BoardProject)
     assert project.sku == "E1M-V2N101"
     assert project.hw_rev == "r1"
-    assert project.carrier_name == "E1M-X-EVK"
+    assert project.board_name == "test-v2n-board"
     assert set(project.cores.keys()) == {"a55_cluster", "m33_sm"}
 
     a55 = project.cores["a55_cluster"]
@@ -252,8 +240,6 @@ def test_load_board_yaml_rejects_unknown_core(tmp_path: Path) -> None:
 # m55_hp).  Pre-fix the orchestrator silently dropped the m55_hp
 # entry; the customer got an empty slice with no diagnostic.
 G4_CROSS_CLASS_SWAP = """
-schema_version: 2
-
 som:
   sku: E1M-NX9101
 
@@ -269,8 +255,6 @@ cores:
 # (m55_hp).  m33 builds; m55_hp triggers a soft WARN so the customer
 # notices the drop without losing the working m33 slice.
 G4_PARTIAL_MATCH = """
-schema_version: 2
-
 som:
   sku: E1M-NX9101
 
@@ -577,8 +561,8 @@ def test_resolve_carve_outs_blocks_on_no_reserved_channel(
     # schemas from the real repo so the validator finds them.
     import shutil
     real_meta = REPO / "metadata"
-    shutil.copy(real_meta / "schemas" / "board-config-v2.schema.json",
-                schemas / "board-config-v2.schema.json")
+    shutil.copy(real_meta / "schemas" / "board.schema.json",
+                schemas / "board.schema.json")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
                 schemas / "som-preset-v1.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
@@ -611,13 +595,13 @@ def test_resolve_carve_outs_blocks_on_no_reserved_channel(
             - { id: 0, reserved_for: app }
             - { id: 1, reserved_for: power_mgmt }
         default_hw_rev:  r1
-        default_carrier: E1M-X-EVK
+        default_board: E1M-X-EVK
     """).lstrip("\n"), encoding="utf-8")
 
     # Patch the orchestrator's METADATA_ROOT for this test.
     monkeypatch.setattr(alp_orchestrate, "METADATA_ROOT", meta)
-    monkeypatch.setattr(alp_orchestrate, "SCHEMA_V2",
-                        schemas / "board-config-v2.schema.json")
+    monkeypatch.setattr(alp_orchestrate, "BOARD_SCHEMA",
+                        schemas / "board.schema.json")
 
     path = _write_board(tmp_path, V2N_HAPPY)
     project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
@@ -779,8 +763,8 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
     """Build a minimal BoardProject from an inline SoM preset + board.yaml.
 
     Creates a throwaway metadata root under tmp_path, writes the supplied
-    preset YAML as the SoM file, and loads a board.yaml with no carrier.
-    The board-config-v2 schema copy has its ``som.sku`` pattern relaxed to
+    preset YAML as the SoM file, and loads a board.yaml with no board.
+    The board.schema schema copy has its ``som.sku`` pattern relaxed to
     also accept ``E1M-TST*`` names used by fixture tests.  The renesas n44
     SoC JSON is copied so presets that reference ``renesas:rzv2n:n44`` can
     resolve without the full repo metadata tree.
@@ -797,13 +781,13 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
     real_meta = REPO / "metadata"
     # Copy the board-config schema and relax the sku pattern so synthetic
     # E1M-TST* SKUs used by fixture tests validate without error.
-    bc_schema_text = (real_meta / "schemas" / "board-config-v2.schema.json"
+    bc_schema_text = (real_meta / "schemas" / "board.schema.json"
                       ).read_text(encoding="utf-8")
     bc_schema = _json.loads(bc_schema_text)
     bc_schema["properties"]["som"]["properties"]["sku"]["pattern"] = (
         r"^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3}|TST[0-9]{3})$"
     )
-    (schemas / "board-config-v2.schema.json").write_text(
+    (schemas / "board.schema.json").write_text(
         _json.dumps(bc_schema), encoding="utf-8")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
                 schemas / "som-preset-v1.schema.json")
@@ -853,11 +837,10 @@ _SYNTHETIC_V2N_WITH_ON_MODULE = """\
         board: alp_e1m_tst001_m33_sm
         toolchain: arm-zephyr-eabi
     default_hw_rev: r1
-    default_carrier: E1M-EVK
+    default_board: E1M-EVK
 """
 
 _BOARD_WITH_SOM_ONLY = """\
-    schema_version: 2
     som:
       sku: E1M-TST001
       hw_rev: r1
@@ -870,7 +853,7 @@ _BOARD_WITH_SOM_ONLY = """\
 
 def test_slice_alp_conf_emits_som_intrinsic_chips(tmp_path: Path) -> None:
     """_slice_alp_conf must include CONFIG_ALP_SDK_CHIP_* for every chip
-    derived from on_module: + helper_firmware: when no carrier is present."""
+    derived from on_module: + helper_firmware: when no board is present."""
     project = _make_som_only_project(
         tmp_path,
         _SYNTHETIC_V2N_WITH_ON_MODULE,
@@ -893,27 +876,27 @@ def test_slice_alp_conf_emits_som_intrinsic_chips(tmp_path: Path) -> None:
     assert "CONFIG_I2C=y" in conf
 
 
-def test_slice_alp_conf_deduplicate_som_vs_carrier(tmp_path: Path) -> None:
-    """A chip listed in both on_module: and carrier populated: must appear
+def test_slice_alp_conf_deduplicate_som_vs_board(tmp_path: Path) -> None:
+    """A chip listed in both on_module: and board populated: must appear
     exactly once in the emitted conf (no duplicate CONFIG lines)."""
     import alp_orchestrate
     meta = tmp_path / "metadata"
     e1m = meta / "e1m_modules"
     schemas = meta / "schemas"
-    carriers = meta / "carriers" / "E1M-EVK"
-    for d in (e1m, schemas, carriers):
+    boards = meta / "boards"
+    for d in (e1m, schemas, boards):
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
     # Relax the sku pattern so E1M-TST002 validates.
     import json as _json2
-    bc_schema_text = (real_meta / "schemas" / "board-config-v2.schema.json"
+    bc_schema_text = (real_meta / "schemas" / "board.schema.json"
                       ).read_text(encoding="utf-8")
     bc_schema = _json2.loads(bc_schema_text)
     bc_schema["properties"]["som"]["properties"]["sku"]["pattern"] = (
         r"^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3}|TST[0-9]{3})$"
     )
-    (schemas / "board-config-v2.schema.json").write_text(
+    (schemas / "board.schema.json").write_text(
         _json2.dumps(bc_schema), encoding="utf-8")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
                 schemas / "som-preset-v1.schema.json")
@@ -946,11 +929,11 @@ def test_slice_alp_conf_deduplicate_som_vs_carrier(tmp_path: Path) -> None:
             board: alp_e1m_tst002_m33_sm
             toolchain: arm-zephyr-eabi
         default_hw_rev: r1
-        default_carrier: E1M-EVK
+        default_board: E1M-EVK
     """).lstrip("\n"), encoding="utf-8")
 
-    # Carrier preset also lists rv3028c7 in populated:.
-    (carriers / "board.yaml").write_text(textwrap.dedent("""
+    # Board preset also lists rv3028c7 in populated:.
+    (boards / "e1m-evk.yaml").write_text(textwrap.dedent("""
         name: E1M-EVK
         populated:
           rv3028c7: true
@@ -959,12 +942,10 @@ def test_slice_alp_conf_deduplicate_som_vs_carrier(tmp_path: Path) -> None:
 
     board_path = tmp_path / "board.yaml"
     board_path.write_text(textwrap.dedent("""
-        schema_version: 2
         som:
           sku: E1M-TST002
           hw_rev: r1
-        carrier:
-          name: E1M-EVK
+        preset: e1m-evk
         cores:
           m33_sm:
             os: zephyr
@@ -980,7 +961,7 @@ def test_slice_alp_conf_deduplicate_som_vs_carrier(tmp_path: Path) -> None:
     assert count == 1, (
         f"rv3028c7 appears {count} times; expected exactly 1 (deduplicated)")
 
-    # bmi323 is carrier-only; it must still appear.
+    # bmi323 is board-only; it must still appear.
     assert "CONFIG_ALP_SDK_CHIP_BMI323=y" in conf
 
 
@@ -1010,7 +991,7 @@ def test_slice_alp_conf_tbd_values_excluded(tmp_path: Path) -> None:
                 board: alp_e1m_tst001_m33_sm
                 toolchain: arm-zephyr-eabi
             default_hw_rev: r1
-            default_carrier: E1M-EVK
+            default_board: E1M-EVK
         """,
         _BOARD_WITH_SOM_ONLY,
     )
@@ -1042,7 +1023,7 @@ def test_slice_alp_conf_no_on_module_no_som_block(tmp_path: Path) -> None:
                 board: alp_e1m_tst001_m33_sm
                 toolchain: arm-zephyr-eabi
             default_hw_rev: r1
-            default_carrier: E1M-EVK
+            default_board: E1M-EVK
         """,
         _BOARD_WITH_SOM_ONLY,
     )
@@ -1064,8 +1045,8 @@ def test_slice_alp_conf_real_v2n101(tmp_path: Path) -> None:
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
-    shutil.copy(real_meta / "schemas" / "board-config-v2.schema.json",
-                schemas / "board-config-v2.schema.json")
+    shutil.copy(real_meta / "schemas" / "board.schema.json",
+                schemas / "board.schema.json")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
                 schemas / "som-preset-v1.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
@@ -1077,7 +1058,6 @@ def test_slice_alp_conf_real_v2n101(tmp_path: Path) -> None:
 
     board_path = tmp_path / "board.yaml"
     board_path.write_text(textwrap.dedent("""
-        schema_version: 2
         som:
           sku: E1M-V2N101
           hw_rev: r1
@@ -1122,8 +1102,8 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
-    shutil.copy(real_meta / "schemas" / "board-config-v2.schema.json",
-                schemas / "board-config-v2.schema.json")
+    shutil.copy(real_meta / "schemas" / "board.schema.json",
+                schemas / "board.schema.json")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
                 schemas / "som-preset-v1.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
@@ -1138,7 +1118,6 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
 
     board_path = tmp_path / "board.yaml"
     board_path.write_text(textwrap.dedent("""
-        schema_version: 2
         som:
           sku: E1M-AEN701
         cores:

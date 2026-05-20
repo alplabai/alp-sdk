@@ -136,8 +136,6 @@ def test_omitted_os_resolves_to_topology_default(
     anchor = _M_CORE_PER_SOM[sku]
     if core_id == anchor:
         body = f"""
-schema_version: 2
-
 som:
   sku: {sku}
 
@@ -150,8 +148,6 @@ cores:
         # (with app: but no os:) so we exercise the per-key merge on
         # the non-anchor core.
         body = f"""
-schema_version: 2
-
 som:
   sku: {sku}
 
@@ -194,8 +190,6 @@ def test_undeclared_core_filled_from_topology(
     SoM preset's topology block."""
     anchor = _M_CORE_PER_SOM[sku]
     body = f"""
-        schema_version: 2
-
         som:
           sku: {sku}
 
@@ -226,8 +220,6 @@ def test_explicit_os_off_overrides_topology_zephyr(tmp_path: Path) -> None:
     """`os: "off"` skips a slice that topology would otherwise make
     zephyr.  Locks the override precedence on M-class cores."""
     body = """
-        schema_version: 2
-
         som:
           sku: E1M-AEN701
 
@@ -247,8 +239,6 @@ def test_explicit_os_off_overrides_topology_yocto(tmp_path: Path) -> None:
     """`os: "off"` also skips an A-class core that topology would
     otherwise make yocto -- the override is symmetric."""
     body = """
-        schema_version: 2
-
         som:
           sku: E1M-V2N101
 
@@ -268,8 +258,6 @@ def test_explicit_os_baremetal_overrides_topology_zephyr(tmp_path: Path) -> None
     """`os: baremetal` on an M-class core overrides the topology's
     zephyr default -- the rare hand-written-firmware path."""
     body = """
-        schema_version: 2
-
         som:
           sku: E1M-AEN701
 
@@ -294,8 +282,6 @@ def test_per_key_merge_app_overrides_topology(tmp_path: Path) -> None:
     per-key, not all-or-nothing -- the case that supports the
     bulk-strip pattern of `app: ./src` with no `os:` line."""
     body = """
-        schema_version: 2
-
         som:
           sku: E1M-V2N101
 
@@ -322,8 +308,6 @@ def test_per_key_merge_yocto_a_cluster(tmp_path: Path) -> None:
     """Symmetric proof on the Yocto side: customer's app: + image:
     win, topology supplies os: + machine: + toolchain."""
     body = """
-        schema_version: 2
-
         som:
           sku: E1M-V2N101
 

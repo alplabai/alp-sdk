@@ -5,14 +5,14 @@
 # the e1m-spec guarantees route on every variant.
 #
 # Hardware fixtures expected:
-#   - The carrier's BUTTON_LED helper populated at E1M_GPIO_IO0 (button)
+#   - The board's BUTTON_LED helper populated at E1M_GPIO_IO0 (button)
 #     and E1M_GPIO_IO1 (LED).  E1M-EVK + E1M-X-EVK presets default
-#     `button_led: true`; custom carriers need it declared.
+#     `button_led: true`; custom boards need it declared.
 #
 # What this proves end-to-end:
 #   - alp_button_led_init() returns ALP_OK on real silicon.
 #   - alp_button_led_set() drives the LED pin (4 toggles visible
-#     on the carrier's LED).
+#     on the board's LED).
 #   - alp_button_led_is_pressed() returns ALP_OK and a 0/1 value
 #     reflecting the button's actual state at sample time.
 #   - The example exits cleanly without a panic.

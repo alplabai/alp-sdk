@@ -48,7 +48,7 @@ rejects it with a malformed-line warning.  The `OVERLAY_CONFIG`
 path is the right one and the example uses it now.)
 
 What the generated `alp.conf` looks like for this example (subset
--- the EVK preset enables the carrier's stock chip set in addition
+-- the EVK preset enables the board's stock chip set in addition
 to `button_led`):
 
 ```kconfig
@@ -62,7 +62,7 @@ CONFIG_LOG_DEFAULT_LEVEL=3
 # SoM silicon (alif:ensemble:e7 via E1M-AEN701)
 CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y
 
-# Carrier chip drivers (E1M-EVK)
+# Board chip drivers (E1M-EVK)
 CONFIG_ALP_SDK_BLOCK_BUTTON_LED=y
 ...
 
@@ -82,7 +82,7 @@ west build -b native_sim/native/64 examples/gpio-button-led \
 west build -t run
 ```
 
-To target a different SoM / carrier, edit `board.yaml` -- nothing
+To target a different SoM / board, edit `board.yaml` -- nothing
 else needs to change.
 
 ## Reference

@@ -20,9 +20,9 @@ datasheet:
 notes: |
   Same part is used on the Renesas RZ/V2N EVK.  The chip carries
   an OTP-loaded configuration that applies at POR; for the V2N
-  Audio_CLKB use-case the OTP defaults plus the carrier-driven
+  Audio_CLKB use-case the OTP defaults plus the board-driven
   `Audio_CLKB_OE` GPIO (Renesas P67) cover normal operation -- no
-  runtime I2C writes are required.  Carriers needing runtime PLL
+  runtime I2C writes are required.  Boards needing runtime PLL
   reconfiguration consume the driver's raw register R/W against
   the documented register table.
 

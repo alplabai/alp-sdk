@@ -58,7 +58,7 @@ extern "C" {
  *         ALP_ERR_NOSUPPORT if the supervisor is not compiled in
  *           or the V2N power-mgmt DT nodes are missing;
  *         ALP_ERR_NOT_READY if a GPIO controller could not bind
- *           or the DA9292 base-init failed (carrier ordering,
+ *           or the DA9292 base-init failed (board ordering,
  *           PMIC not present);
  *         ALP_ERR_IO on a transport-level failure during the base
  *           init.

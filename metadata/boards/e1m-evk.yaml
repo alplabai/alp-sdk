@@ -1,57 +1,31 @@
-# Stock preset for the E1M Development Board (35x35 SoM carrier).
+# Shared board definition for the E1M Development Board
+# (35x35 SoM board).  SDK-internal: customers do not reference
+# this file directly -- their own board.yaml either points at it
+# via `preset: e1m-evk` (for demo apps targeting the stock EVK) or
+# carries the same fields inline at the top level (for custom
+# boards).  See docs/board-config.md.
 #
-# Reference carrier for E1M-AEN and (future) E1M-N93 SoM families.
 # Authoritative per-E1M-pad routing lives in this file's
-# `e1m_routes:` block below; `scripts/gen_carrier_header.py`
+# `e1m_routes:` block below; `scripts/gen_board_header.py`
 # produces `include/alp/boards/alp_e1m_evk_routes.h` from it.  The
 # remaining sections of `alp_e1m_evk.h` (mux enums, INA236 tuning
 # constants, overlay-pad indices, on-board I2C addresses) stay
-# hand-authored until follow-up slices lift them too.  This YAML
-# file also lists the chip drivers the project loader enables
-# (CONFIG_ALP_SDK_CHIP_<NAME>=y) when `carrier.name: E1M-EVK` is
-# set in board.yaml.
+# hand-authored until follow-up slices lift them too.
 #
-# === This file doubles as the canonical reference design ===
-#
-# Customer carriers usually inherit *most* of the EVK's chip
-# population (the EVK is the validated reference Alp ships).
-# Two ways to consume it:
-#
-#   1. Reference + override (lightweight -- recommended for
-#      derivatives that change a handful of components).  In
-#      board.yaml:
-#
-#          carrier:
-#            name: E1M-EVK
-#            populated:
-#              tas2563: false   # custom variant DNI'd the speaker amps
-#              ina236:  false   # no current monitors on the prod board
-#              ssd1306: false   # no on-board display
-#
-#      The loader merges the deltas over this preset's defaults.
-#
-#   2. Fork the file (heavyweight -- recommended for full custom
-#      boards).  Copy this YAML to:
-#
-#          metadata/carriers/<your-board-name>.yaml
-#
-#      Edit the populated list to reflect your assembly.  Point
-#      board.yaml at it:
-#
-#          carrier:
-#            name: <your-board-name>
-#
-#      A worked example lives at metadata/carriers/custom-example.yaml.
-
-schema_version: 1
+# Customers building a custom board copy this file into their
+# project root as `board.yaml`, drop the SDK-internal preamble +
+# `hw_revisions:` table they don't need, add their own `som:` +
+# `cores:` blocks, and edit `name:`, `populated:`, `e1m_routes:`
+# for their assembly.  A worked custom example lives at
+# metadata/boards/custom-example.yaml.
 
 name: E1M-EVK
-display_name: "E1M Development Board (35x35 carrier)"
+display_name: "E1M Development Board (35x35 board)"
 hosts_som_families: [alif-ensemble, nxp-imx9]
 
 # Standard population.  Each `true` becomes
 # CONFIG_ALP_SDK_CHIP_<NAME>=y at build time; the user can flip
-# individual entries to `false` in board.yaml's carrier.populated
+# individual entries to `false` in board.yaml's board.populated
 # block for DNI variants.
 populated:
   # IMUs (the EVK mounts multiple for benchmark comparison; the
@@ -86,9 +60,12 @@ populated:
   # Power instrumentation
   ina236:                   true                # 6x current monitors at 0x40..0x46
 
-# E1M-pad → carrier-feature routing.  Each entry binds an
-# E1M-standard pad or peripheral instance to a carrier-side
-# macro name.  The generator `scripts/gen_carrier_header.py`
+  # SDK-level block helpers (GPIO button + LED on the EVK headers).
+  button_led:               true
+
+# E1M-pad → board-feature routing.  Each entry binds an
+# E1M-standard pad or peripheral instance to a board-side
+# macro name.  The generator `scripts/gen_board_header.py`
 # reads this block and produces
 # `include/alp/boards/alp_e1m_evk_routes.h` with one
 # `#define EVK_<NAME> E1M_<...>` line per entry.
@@ -109,7 +86,7 @@ populated:
 #
 # SoM-side dispatch (which pad reaches the host SoC directly vs. via
 # an on-module mediator like the CC3501E) lives in the SoM preset's
-# `pad_routes:` block, NOT here -- this carrier YAML is SoM-agnostic.
+# `pad_routes:` block, NOT here -- this board YAML is SoM-agnostic.
 e1m_routes:
   gpio:
     - { e1m: E1M_GPIO_IO2,  macro: EVK_PIN_CAM_MUX_SEL,
@@ -178,6 +155,39 @@ e1m_routes:
         doc: "Arduino header CK_PWM3 = E1M_PWM5." }
     - { e1m: E1M_PWM6, macro: EVK_MB_PWM,
         doc: "mikroBUS PWM pin." }
+  adc:
+    - { e1m: E1M_ADC0, macro: EVK_ADC_BOARD_ID,
+        doc: "Carrier-side BOARD_ID resistor divider (see docs/board-id.md)." }
+    - { e1m: E1M_ADC1, macro: EVK_ADC_ARDUINO_A1,
+        doc: "Arduino UNO header A1 analog input." }
+    - { e1m: E1M_ADC2, macro: EVK_ADC_ARDUINO_A2,
+        doc: "Arduino UNO header A2 analog input." }
+    - { e1m: E1M_ADC3, macro: EVK_ADC_ARDUINO_A3,
+        doc: "Arduino UNO header A3 analog input." }
+    - { e1m: E1M_ADC4, macro: EVK_ADC_ARDUINO_A4,
+        doc: "Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards)." }
+    - { e1m: E1M_ADC5, macro: EVK_ADC_ARDUINO_A5,
+        doc: "Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards)." }
+    - { e1m: E1M_ADC6, macro: EVK_ADC_MB_AN,
+        doc: "mikroBUS click AN pin." }
+    - { e1m: E1M_ADC7, macro: EVK_ADC_VBAT_SENSE,
+        doc: "Battery voltage divider (4:1 resistor scale) for power-monitor demos." }
+  dac:
+    - { e1m: E1M_DAC0, macro: EVK_DAC_ARDUINO_DAC0,
+        doc: "Arduino-shield-style DAC0 output exposed on header J3." }
+    - { e1m: E1M_DAC1, macro: EVK_DAC_AUDIO_LINE_OUT,
+        doc: "Auxiliary line-level audio output (analog, sums with TAS2563 mix)." }
+  i2s:
+    - { e1m: E1M_I2S0, macro: EVK_I2S_AUDIO_CODEC,
+        doc: "Routed through the 74LVC157 mux to either the TAS2563 amps (default) or the M.2 E-key I2S; see EVK_PIN_I2S_MUX_SEL." }
+    - { e1m: E1M_I2S1, macro: EVK_I2S_PDM_MIC,
+        doc: "PDM mic capture (4x MP34DT05 mics)." }
+  can:
+    - { e1m: E1M_CAN0, macro: EVK_CAN_VEHICLE_BUS,
+        doc: "TCAN1044A transceiver on header J9; termination via jumpers JP1-JP4." }
+  qenc:
+    - { e1m: E1M_ENC0, macro: EVK_ENC_ROTARY,
+        doc: "PEC12R-4222F-S0024 rotary encoder: ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4)." }
 
 # Inference + display defaults a stock EVK app would pick.  Apps
 # override in their board.yaml as needed.
@@ -187,9 +197,9 @@ defaults:
 
 # Hardware revisions.  Same ADC + resistor-divider scheme as the
 # SoM modules (see metadata/e1m_modules/aen/hw-revisions.yaml for
-# the full math) -- the carrier has no spare GPIO either, so the
+# the full math) -- the board has no spare GPIO either, so the
 # rev is sampled on a dedicated ADC channel exposed at one of the
-# E1M-spec ADC pads.  Carrier-specific ADC channel is TBD pending
+# E1M-spec ADC pads.  Board-specific ADC channel is TBD pending
 # the EVK schematic's BOARD_ID net assignment.
 default_hw_rev:             r1
 
@@ -206,7 +216,7 @@ hw_revisions:
       # cross-check consumes them via a generated header (see
       # docs/board-id.md for the divider math + the studio pipeline).
     notes: |
-      First production revision of the E1M EVK (35x35 carrier).
+      First production revision of the E1M EVK (35x35 board).
       Wiring authoritative per the `e1m_routes:` block above
       (`include/alp/boards/alp_e1m_evk_routes.h` is generated
       from it).

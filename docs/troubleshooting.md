@@ -38,9 +38,9 @@ third entry).  Common slip-ups:
   per-core under `cores.<id>:`, not at top level; and `watchdog`
   (not `wdt`) is the canonical name.
 * `som.sku` follows `E1M-{AEN,V2N,V2M,NX9}\d{3}` (case-sensitive).
-* `carrier.name` must point at a preset under
-  `metadata/carriers/<name>/board.yaml` OR carry an inline
-  `carrier.populated:` block.
+* the `preset:` (or use an inline board) must point at a preset under
+  `metadata/boards/<name>.yaml` OR carry an inline
+  `board.populated:` block.
 
 Full schema reference: [`docs/board-config.md`](board-config.md).
 
@@ -251,4 +251,4 @@ Include in every report:
 * Output of `git rev-parse HEAD` for alp-sdk.
 * Your `board.yaml`.
 * The full `west alp-build` + `west build` log.
-* If real-silicon: which carrier + SoM SKU.
+* If real-silicon: which board + SoM SKU.

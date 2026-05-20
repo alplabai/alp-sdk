@@ -13,16 +13,16 @@
 # user's authoritative HW writeup; until those land, `west alp-build`
 # will fail at carve-out resolution with a clear message.  This
 # example's structural files are correct in shape today.
-
-schema_version: 2
-
 som:
   sku: E1M-NX9101
   hw_rev: r1
 
-carrier:
-  name: E1M-EVK              # 35x35 EVK -- same carrier as the AEN family.
+preset: e1m-evk
 
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_PWM0, macro: EVK_PWM_LED_GREEN, doc: "RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B)" }
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
 cores:
   a55_cluster:
     app: ./linux

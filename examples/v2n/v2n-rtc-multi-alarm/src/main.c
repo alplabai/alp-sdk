@@ -9,7 +9,7 @@
  * dispatch-from-IRQ pattern.
  *
  * The real production usage is:
- *   - Carrier-side ISR fires when the INT pin falls.
+ *   - Board-side ISR fires when the INT pin falls.
  *   - The ISR posts a work item that calls rv3028c7_dispatch_irq().
  *   - dispatch_irq reads STATUS, fans out to the per-source
  *     handlers we registered below, and write-0-to-clears every
@@ -125,7 +125,7 @@ int main(void) {
 
     /* Optional: route the CLKOUT pin to a different source so the
      * board has a second physical interrupt line for the alarm.
-     * Carriers that wire CLKOUT as a programmable IRQ use this
+     * Boards that wire CLKOUT as a programmable IRQ use this
      * to route alarm separately from the generic INT pin. */
     s = rv3028c7_route_clkout(&rtc, RV3028C7_SRC_ALARM);
     printf("[rtc] route_clkout(ALARM) -> status=%d\n", (int)s);

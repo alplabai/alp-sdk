@@ -90,7 +90,7 @@ int drone_sensors_init(drone_telemetry_t *telem)
  * real library lives at metadata/library-profiles/madgwick_ahrs/;
  * this is a placeholder inline that integrates gyro into Euler
  * angles so the HUD has something to animate even on the demo
- * carrier without the upstream lib fetched. */
+ * board without the upstream lib fetched. */
 static void update_attitude(drone_telemetry_t *t,
                             float gx_dps, float gy_dps, float gz_dps,
                             float dt_s)

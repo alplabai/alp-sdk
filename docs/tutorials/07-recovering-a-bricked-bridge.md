@@ -16,7 +16,7 @@ external-probe alternative see
 
 * SWDIO + SWCLK + (optional) NRST routed from a Renesas RZ/V2N
   GPIO bank to the GD32's SWD pads.  The 2026-05-12 hardware
-  decision committed the V2N carrier to this routing; specific pad
+  decision committed the V2N board to this routing; specific pad
   assignments are documented per-board.
 * A known-good bridge firmware ELF to flash.
 

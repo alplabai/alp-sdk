@@ -32,5 +32,6 @@ boundary.
   `alp_i2s_*` peripheral abstraction lands alongside `<alp/audio.h>`.
 
 Both live behind a `CONFIG_ALP_SDK_BLOCK_<NAME>` Kconfig flag and
-get auto-enabled when the matching slug appears in the carrier
-preset's or `board.yaml`'s `carrier.populated:` block.
+get auto-enabled when the matching slug appears in the resolved
+board's `populated:` block (either inline in the project's
+`board.yaml` or pulled in via `preset:`).

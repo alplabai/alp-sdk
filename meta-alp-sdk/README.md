@@ -104,7 +104,7 @@ DRP-AI is fully covered by `meta-rz-drpai` — there's no separate
 post-build tarball install for the runtime headers, and no NDA gate
 on it.  Only the e-con Systems MIPI camera patch requires a
 manufacturer contact, and it's optional (only needed if you
-populate `e-CAM22_CURZH` on the carrier).
+populate `e-CAM22_CURZH` on the board).
 
 Yocto release: **Scarthgap (5.0.11)**.  GCC 13.  Toolchain SDK:
 `bitbake core-image-weston -c populate_sdk` against the matching
@@ -161,7 +161,7 @@ The NX9101 path tracks NXP's
 base BSP plus
 [`meta-freescale`](https://git.yoctoproject.org/meta-freescale) for
 the broader i.MX userspace stack.  The `e1m-nx9101-a55.conf`
-MACHINE ships today; carrier DTB + full image-bake gate on v0.7
+MACHINE ships today; board DTB + full image-bake gate on v0.7
 HW-in-loop.
 
 ```bash

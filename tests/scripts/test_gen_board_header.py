@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for `scripts/gen_carrier_header.py`.
+"""Tests for `scripts/gen_board_header.py`.
 
 Covers:
-- `emit_carrier()` shape for a hand-built sample YAML dict;
+- `emit_board()` shape for a hand-built sample YAML dict;
 - the `active_low` flag appearing in the doc comment;
 - empty `e1m_routes` block returning None;
 - idempotency of the real `main()` against the committed
-  `metadata/carriers/E1M-EVK/board.yaml`;
+  `metadata/boards/E1M-EVK/board.yaml`;
 - macro-coverage smoke check (the generated EVK header must define
   every macro that hand-written firmware already uses).
 """
@@ -22,18 +22,18 @@ from typing import Any
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPT = REPO / "scripts" / "gen_carrier_header.py"
+SCRIPT = REPO / "scripts" / "gen_board_header.py"
 EVK_OUT = REPO / "include" / "alp" / "boards" / "alp_e1m_evk_routes.h"
 
 
 @pytest.fixture(scope="module")
 def gen_module():
     spec = importlib.util.spec_from_file_location(
-        "gen_carrier_header", SCRIPT
+        "gen_board_header", SCRIPT
     )
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["gen_carrier_header"] = mod
+    sys.modules["gen_board_header"] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -58,8 +58,8 @@ def _sample_doc() -> dict[str, Any]:
     }
 
 
-def test_emit_carrier_produces_header_for_well_formed_yaml(gen_module):
-    out = gen_module.emit_carrier("TEST-CARRIER", _sample_doc())
+def test_emit_board_produces_header_for_well_formed_yaml(gen_module):
+    out = gen_module.emit_board("TEST-CARRIER", _sample_doc())
     assert out is not None
     assert "ALP_BOARDS_TEST_CARRIER_ROUTES_H" in out
     assert "#define TST_PIN_BUTTON" in out
@@ -69,9 +69,9 @@ def test_emit_carrier_produces_header_for_well_formed_yaml(gen_module):
     assert "DO NOT EDIT BY HAND" in out
 
 
-def test_emit_carrier_returns_none_without_e1m_routes(gen_module):
-    assert gen_module.emit_carrier("EMPTY", {"name": "EMPTY"}) is None
-    assert gen_module.emit_carrier("EMPTY", {"name": "EMPTY", "e1m_routes": {}}) is None
+def test_emit_board_returns_none_without_e1m_routes(gen_module):
+    assert gen_module.emit_board("EMPTY", {"name": "EMPTY"}) is None
+    assert gen_module.emit_board("EMPTY", {"name": "EMPTY", "e1m_routes": {}}) is None
 
 
 def test_active_low_flag_renders_in_doxygen(gen_module):
@@ -84,7 +84,7 @@ def test_active_low_flag_renders_in_doxygen(gen_module):
             ],
         },
     }
-    out = gen_module.emit_carrier("T", doc)
+    out = gen_module.emit_board("T", doc)
     assert out is not None
     assert "Active-low." in out
 

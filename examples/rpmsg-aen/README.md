@@ -9,7 +9,7 @@ Heterogeneous compute on **E1M-AEN701** (Alif Ensemble E7):
 
 - The 2-core **Cortex-A32 cluster** boots Yocto Linux from MRAM and
   runs the consumer under `linux/`.
-- The **Cortex-M55 HP** core boots from MRAM, reads the carrier's
+- The **Cortex-M55 HP** core boots from MRAM, reads the board's
   on-board LSM6DSO IMU + BMP581 barometer, and publishes one
   `imu_sample` event per second over `<alp/rpc.h>`.
 - The **Cortex-M55 HE** core stays at the SoM topology default

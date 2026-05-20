@@ -9,7 +9,7 @@
  * / `/dev/ttyUSB<N>` depending on the SoC's serial controller.
  *
  * Path resolution is intentionally simple: `alp_uart_config_t.port_id`
- * maps to `/dev/tty<port_id>` via a small lookup table.  Carriers
+ * maps to `/dev/tty<port_id>` via a small lookup table.  Boards
  * that need symbolic naming (e.g. "debug-uart" -> "/dev/ttyAMA0")
  * resolve those names ahead of `alp_uart_open` -- this layer is
  * the raw binding.  The lookup table covers the common Linux

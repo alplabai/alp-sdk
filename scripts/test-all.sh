@@ -179,13 +179,13 @@ stage_metadata_validate() {
 }
 
 stage_doc_yaml_fragments() {
-    # Lints ```yaml fenced blocks in *.md against board-config-v2.schema.json.
+    # Lints ```yaml fenced blocks in *.md against board.schema.json.
     # Catches README + tutorial drift after schema changes.  Skips if
     # the linter or schema isn't present (older checkouts).
     if [ ! -f scripts/lint_doc_yaml_fragments.py ]; then
         return 99
     fi
-    if [ ! -f metadata/schemas/board-config-v2.schema.json ]; then
+    if [ ! -f metadata/schemas/board.schema.json ]; then
         return 99
     fi
     python3 scripts/lint_doc_yaml_fragments.py || return 1

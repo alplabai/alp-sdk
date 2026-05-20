@@ -59,7 +59,7 @@ prompted.  Save the credentials.
 ## 2. Enable Mender in your `meta-alp` build (5 minutes)
 
 ```yaml
-# In your board.yaml (schema_version: 2):
+# In your board.yaml:
 cores:
   a55_cluster:
     app: ./linux                    # os: omitted -- A-cores default to yocto per topology
@@ -192,7 +192,7 @@ is deferred per [ADR 0009](../adr/0009-mender-zephyr-client-deferred.md).
 Workarounds in the v0.4..v1.0 window:
 
 - Physical-access reflash via J-Link / OpenOCD.
-- Carrier-side OTA fronted by a Linux companion (e.g. a V2N SoM
+- Board-side OTA fronted by a Linux companion (e.g. a V2N SoM
   coordinating the AEN-Zephyr update through the GD32 bridge).
 
 The v1.1 cycle picks `mender-mcu-client` vs Hawkbit + ships the

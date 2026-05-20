@@ -167,7 +167,7 @@ alp_status_t alp_hw_info_read(alp_hw_info_t *out)
     s = adc_cross_check(&manifest, out);
     if (s != ALP_OK) return s;
 
-    /* TODO: carrier-side BOARD_ID + carrier_name once the per-carrier
+    /* TODO: board-side BOARD_ID + board_name once the per-board
      * board.yaml -> generated-header pipeline lands. */
     return ALP_OK;
 #endif

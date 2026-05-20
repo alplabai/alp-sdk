@@ -85,7 +85,7 @@ ROM has executed and PCIe link training can start.
 
 > **`M1_RESET` polarity is ACTIVE-LOW on V2N-M1** -- this is the
 > driver's default, so no `_set_reset_polarity` call is required.
-> Carrier boards on different DEEPX revisions can flip the
+> Boards on different DEEPX revisions can flip the
 > polarity via `deepx_dxm1_set_reset_polarity` if the silicon's
 > reset polarity ever changes.
 
@@ -123,7 +123,7 @@ After every change in the bring-up flow, re-run these in order:
 
 * **PCIe link trains but the kernel driver reports BAR errors.**
   The muxes may be on the wrong path (E1M edge instead of DEEPX);
-  check `PI3DBS_STATE_PATH_0` matches the carrier's silk-screen.
+  check `PI3DBS_STATE_PATH_0` matches the board's silk-screen.
 
 * **`da9292_v2n_m1_enable_deepx_rail` succeeds but DEEPX silicon is
   flaky under load.**  Check the three TPS628640 rails -- the

@@ -146,7 +146,7 @@
 /* this table; numbering is compact (0..17) rather than matching the  */
 /* physical E1M IO numbering, which has gaps at 15 / 17..23 / 26 / 33 */
 /* because those positions are assigned to other peripherals on the   */
-/* carrier.  Host-side translation table lives in                     */
+/* board.  Host-side translation table lives in                     */
 /* `chips/gd32g553/gd32g553.c`.                                       */
 /* ----------------------------------------------------------------- */
 
@@ -605,7 +605,7 @@ void bridge_hw_init(void)
 
     /* Configure every entry in `gpio_pad_map` as INPUT + PULL_UP.
      * Safe default per the GPIO direction policy: no driven
-     * contention with whatever the carrier might pull / drive on
+     * contention with whatever the board might pull / drive on
      * those pads.  bridge_hw_gpio_write() promotes individual
      * pads to OUTPUT on demand. */
     for (size_t i = 0; i < GPIO_PAD_MAP_COUNT; ++i) {
@@ -1619,7 +1619,7 @@ int bridge_hw_timer_sync(uint8_t master, uint8_t slave, uint8_t mode)
  * Mapping notes per V2N hardware reality:
  *
  *   - GPIO : routes through PMU_WAKEUP_PIN0..4 -- five fixed pads
- *            on the GD32G553 + carrier wires the desired triggers
+ *            on the GD32G553 + board wires the desired triggers
  *            onto them.  Landed §C.15c.
  *   - RTC  : RTC alarm 0 fires on a scheduled wallclock; the
  *            wakeup timer also surfaces under this bit so the

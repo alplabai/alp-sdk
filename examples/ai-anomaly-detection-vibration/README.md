@@ -32,7 +32,7 @@ Three customer questions get one answer:
 
 - E1M-AEN701 SoM (or any E1M-AEN variant; SKU lives in
   `board.yaml`).  Flip to E1M-V2N201 for the DEEPX path.
-- E1M-EVK carrier.  LSM6DSO is already populated at I2C0 0x6A.
+- E1M-EVK board.  LSM6DSO is already populated at I2C0 0x6A.
 - (Production) attach the accelerometer module to the monitored
   asset via a magnet base or a stud-mount fixture.
 

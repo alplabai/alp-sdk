@@ -110,7 +110,7 @@
     },
     "pad_routes": {
       "type": "array",
-      "description": "E1M pads / peripheral instances that route through a SoM-side mediator chip (e.g., CC3501E coprocessor on AEN, GD32G553 IO MCU on V2N). Pads NOT listed here are assumed to route directly to the main silicon's GPIO / peripheral. The SDK loader composes this list with the carrier's `e1m_routes:` block at codegen time: when an E1M pad appears in both blocks, the carrier supplies the role (e.g., `bmi323_int1`) and the SoM supplies the dispatch path (e.g., CC3501E GPIO 14).",
+      "description": "E1M pads / peripheral instances that route through a SoM-side mediator chip (e.g., CC3501E coprocessor on AEN, GD32G553 IO MCU on V2N). Pads NOT listed here are assumed to route directly to the main silicon's GPIO / peripheral. The SDK loader composes this list with the board's `e1m_routes:` block at codegen time: when an E1M pad appears in both blocks, the board supplies the role (e.g., `bmi323_int1`) and the SoM supplies the dispatch path (e.g., CC3501E GPIO 14).",
       "items": { "$ref": "#/$defs/pad_route_entry" }
     },
     "helper_firmware": {
@@ -122,7 +122,7 @@
       "type": "string",
       "pattern": "^[a-z0-9_-]+$"
     },
-    "default_carrier": {
+    "default_board": {
       "type": "string"
     },
     "status": {
@@ -299,7 +299,7 @@
         },
         "doc": {
           "type": "string",
-          "description": "One-line free-form note (matches the e1m_routes entry shape on the carrier side)."
+          "description": "One-line free-form note (matches the e1m_routes entry shape on the board side)."
         }
       }
     },

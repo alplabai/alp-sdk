@@ -1,5 +1,3 @@
-schema_version: 2
-
 # Fan-control case study on a V2N module.  The application code is
 # fully portable -- E1M_PWM0 resolves on any E1M-conformant
 # SoM.  Switch `som.sku` to `E1M-AEN701`, `E1M-V2M101`, etc. to
@@ -9,9 +7,7 @@ schema_version: 2
 som:
   sku: E1M-V2N101
 
-carrier:
-  name: E1M-X-EVK
-
+preset: e1m-x-evk
 cores:
   a55_cluster:
     os: "off"

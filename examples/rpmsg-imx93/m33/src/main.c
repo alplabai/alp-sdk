@@ -5,7 +5,7 @@
  * rpmsg-imx93 -- Cortex-M33 / Zephyr producer.
  *
  * Sister slice to ../../linux/src/main.c on the same i.MX93 silicon.
- * Both halves are generated from one board.yaml v2 and share the
+ * Both halves are generated from one board.yaml and share the
  * auto-generated <alp/system_ipc.h> contract: same channel name,
  * same endpoint ids, same mailbox channel.  No address or id is
  * ever typed by hand -- the orchestrator computes everything from
@@ -74,9 +74,9 @@ int main(void)
 
     /* ----- Producer loop ---------------------------------------- */
     /* Synthetic counter so the example is hardware-free; on real
-     * i.MX93 carriers this would read alp_adc_read() / alp_i2c_xfer()
+     * i.MX93 boards this would read alp_adc_read() / alp_i2c_xfer()
      * / alp_sensor_read() against whatever sensor the customer wired
-     * onto the carrier.  The point of the demo is the link, not the
+     * onto the board.  The point of the demo is the link, not the
      * source of the bytes. */
     for (uint32_t i = 0; i < SAMPLE_BURST; ++i) {
         /* Fake a slowly-rising temperature in °C so the consumer

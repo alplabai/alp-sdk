@@ -29,7 +29,7 @@ own quickstart.
 
 ## 1. Pick a target
 
-| If your hardware is...                      | `som.sku` to declare | Carrier default     | One-pager                                         |
+| If your hardware is...                      | `som.sku` to declare | Board default     | One-pager                                         |
 |---------------------------------------------|----------------------|---------------------|---------------------------------------------------|
 | E1M-AEN3..801 SoM on E1M EVK                | `E1M-AEN701` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 |
 | E1M-X V2N101 / V2N102 SoM on E1M-X-EVK      | `E1M-V2N101`         | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 |
@@ -55,19 +55,15 @@ For the rest of this doc, all paths are relative to `alp-workspace/`.
 ## 3. Your first `board.yaml`
 
 The application's `board.yaml` is a single declarative file that
-selects the target SoM, carrier, and per-core runtime + peripherals
+selects the target SoM, board, and per-core runtime + peripherals
 + chip drivers your app uses.  Example for a V2N101 single-core
 Zephyr-on-M33 application that exercises the on-module GD32 bridge:
 
 ```yaml
-schema_version: 2
-
 som:
   sku: E1M-V2N101
 
-carrier:
-  name: E1M-X-EVK
-
+preset: e1m-x-evk
 cores:
   a55_cluster:
     os: "off"            # explicit override -- skip the Linux slice for this app
@@ -245,18 +241,19 @@ the loader picks the right symbol for each populated slug, so
 declarative `board.yaml` use is identical either way.  Two ways
 to flip the flag:
 
-* **Declarative** (recommended): add the slug to
-  `carrier.populated:` in `board.yaml` (`button_led: true`,
-  `ssd1306: true`, ...).  The v0.6 loader's per-core Kconfig
-  emitter merges the carrier-preset `populated:` block with the
-  board.yaml override and writes the appropriate
-  `CONFIG_ALP_SDK_CHIP_<NAME>=y` / `CONFIG_ALP_SDK_BLOCK_<NAME>=y`
-  on every Zephyr slice, plus the Zephyr subsystem (`CONFIG_I2C`,
-  `CONFIG_GPIO`, ...) each enabled driver needs.
+* **Declarative** (recommended): add the slug to the top-level
+  `populated:` block in `board.yaml` (`button_led: true`,
+  `ssd1306: true`, ...) -- or, if you're using `preset:` to
+  reference a shared board definition, add it to the project's
+  `chips:` array.  The loader's per-core Kconfig emitter writes
+  the appropriate `CONFIG_ALP_SDK_CHIP_<NAME>=y` /
+  `CONFIG_ALP_SDK_BLOCK_<NAME>=y` on every Zephyr slice, plus
+  the Zephyr subsystem (`CONFIG_I2C`, `CONFIG_GPIO`, ...) each
+  enabled driver needs.
 * **Manual**: add `CONFIG_ALP_SDK_CHIP_GD32G553=y` (or
   `CONFIG_ALP_SDK_BLOCK_BUTTON_LED=y`) etc. to your `prj.conf`.
-  Necessary for parts your carrier preset doesn't cover (custom
-  carriers + Tier-2 community drivers).
+  Necessary for parts your board preset doesn't cover (custom
+  boards + Tier-2 community drivers).
 
 The full chip catalogue is in `metadata/chips/` -- one yaml per
 part, listing the driver status (`stub` / `partial` / `complete`),

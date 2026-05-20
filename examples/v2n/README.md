@@ -5,7 +5,7 @@ Reference applications that exercise E1M-X-V2N-family hardware
 MCU, on-module PMIC fleet, OPTIGA Trust M secure element, eMMC +
 xSPI NOR storage, dual Gigabit Ethernet, on-module RTC + temp
 sensor).  Build any of these against an E1M-X-V2N SKU on the
-E1M-X-EVK carrier.
+E1M-X-EVK board.
 
 V2N-M1 SKUs add the DEEPX-DXM1 NPU rail; the bring-up delta is
 captured in [`docs/bring-up-v2n-m1.md`](../../docs/bring-up-v2n-m1.md).
@@ -18,7 +18,7 @@ captured in [`docs/bring-up-v2n-m1.md`](../../docs/bring-up-v2n-m1.md).
 | [`v2n-ethernet-dual`](v2n-ethernet-dual/)              | Bring up both RTL8211FDI PHYs (ET0 + ET1) -- probe, reset, autoneg, link, Wake-on-LAN config.                                                    |
 | [`v2n-rtc-multi-alarm`](v2n-rtc-multi-alarm/)          | Register per-source callbacks on the rv3028c7 multi-source alarm dispatcher (timer + periodic + clock-out + manual).                             |
 | [`v2n-temp-sensor`](v2n-temp-sensor/)                  | Read the on-module TMP112 once per second and print degrees Celsius.                                                                             |
-| [`v2n-pwm-fan-control`](v2n-pwm-fan-control/)          | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz carrier, 0--100 % duty interpolation).                                          |
+| [`v2n-pwm-fan-control`](v2n-pwm-fan-control/)          | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz board, 0--100 % duty interpolation).                                          |
 | [`v2n-secure-element-sign`](v2n-secure-element-sign/)  | OPTIGA Trust M init + product info readout + raw-APDU ECDSA-P256 sign over a 32-byte digest.                                                     |
 | [`v2n-xspi-flash-readwrite`](v2n-xspi-flash-readwrite/)| Erase + write + read-back one page on the on-module xSPI NOR.                                                                                    |
 | [`v2n-emmc-block-stat`](v2n-emmc-block-stat/)          | Disk-access ioctls + first-block read on the on-module eMMC.                                                                                     |

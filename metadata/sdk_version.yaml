@@ -2,7 +2,7 @@
 #
 # Read by:
 #   - scripts/alp_project.py        -- compared against the family /
-#                                       carrier hw_revisions tables
+#                                       board hw_revisions tables
 #                                       when emitting any backend
 #                                       config; refuses to emit when
 #                                       the requested hw_rev is

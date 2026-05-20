@@ -12,21 +12,20 @@
 # control cascade, motor mixer, AND the failsafe at deterministic
 # kHz cadences -- all in portable C with no vendor symbols.
 
-schema_version: 2
-
 som:
   sku: E1M-AEN701           # E7's M55 HP core handles the 1 kHz
                              # rate loop comfortably; Helium MVE
                              # accelerates Madgwick.
 
-carrier:
-  name: E1M-EVK
-  # External sensors plugged into the EVK's I2C/UART headers.  The
-  # loader merges these into the carrier's populated chip table so
-  # their CONFIG_ALP_SDK_CHIP_* knobs flip on at build time.
-  populated:
-    bmp390: true
-    ublox_neo_m9n: true
+preset: e1m-evk             # External sensors plugged into the EVK's
+                            # I2C/UART headers are listed in `chips:`
+                            # below to flip on their chip drivers.
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
+  - { e1m: E1M_UART0, macro: EVK_UART_PORT_DEBUG, doc: "Console UART exposed on the JTAG/SWD-side debug header" }
+  - { e1m: E1M_PWM0, macro: EVK_PWM_LED_GREEN, doc: "RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B)" }
 
 # Flight controller on M55-HP only.  A32 cluster off (no Linux on a
 # weight-sensitive vehicle); M55-HE inherits the SoM topology

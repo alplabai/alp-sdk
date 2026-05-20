@@ -61,7 +61,7 @@
 #include "gd32g5x3_trng.h"
 #include "gd32g5x3_cau.h"
 
-/* Serial buses (host bridge + DA9292 + carrier I2C). */
+/* Serial buses (host bridge + DA9292 + board I2C). */
 #include "gd32g5x3_spi.h"
 #include "gd32g5x3_i2c.h"
 #include "gd32g5x3_usart.h"

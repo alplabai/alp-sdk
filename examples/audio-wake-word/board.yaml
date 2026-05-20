@@ -10,23 +10,13 @@
 #
 # E1M-V2N has no equivalent always-on AI complex, so this demo
 # is the AEN family's headline differentiator.
-
-schema_version: 2
-
 som:
   sku: E1M-AEN701            # E7 -- Cortex-M55 HE @ 160 MHz max
                               # (we run at 50 MHz for the duty-cycle
                               # math) + 2x Ethos-U55, one bonded out
                               # to each M55 core.
 
-carrier:
-  name: E1M-EVK              # PDM mic on the EVK is already
-                              # populated by the carrier preset
-                              # (`pdm_mic: true`).
-
-# The wake-word demo lives on M55-HE (low-power always-on path).
-# A32 cluster off (no Linux).  M55-HP stays at the SoM topology
-# default so it can wake on detection for command parsing.
+preset: e1m-evk
 cores:
   a32_cluster:
     os: "off"
@@ -45,7 +35,7 @@ cores:
 # DMIC audio subsystem rather than a peripheral driver class -- the
 # board.yaml schema's `peripherals:` enum doesn't carry `pdm`
 # (same convention as the audio-loopback example).  The mic
-# itself comes in via the carrier's pre-populated `pdm_mic`
+# itself comes in via the board's pre-populated `pdm_mic`
 # chip (E1M-EVK has it true by default) and CONFIG_AUDIO_DMIC=y
 # is wired through testcase.yaml's `extra_args`.  We
 # intentionally do NOT list `i2s` -- this is the PDM mic path,

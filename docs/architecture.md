@@ -57,7 +57,7 @@ alp-sdk/
 ├── LICENSE                          # Apache-2.0
 ├── docs/                            # Architecture, ADRs, board-config, bring-up guides
 │   ├── architecture.md              # this file
-│   ├── board-config.md              # board.yaml v2 schema reference
+│   ├── board-config.md              # board.yaml schema reference
 │   ├── heterogeneous-builds.md      # per-core fan-out walkthrough
 │   ├── os-support-matrix.md         # OS × variant × library status
 │   ├── porting-new-som.md           # adding HAL/HW for a new E1M variant
@@ -76,7 +76,7 @@ alp-sdk/
 │   ├── e1m_x_pinout.h               # E1M-X-family portable pad constants
 │   ├── chips/                       # one <alp/chips/<part>.h> per chip driver
 │   ├── blocks/                      # <alp/blocks/<name>.h> for SDK-level block helpers
-│   └── boards/                      # GENERATED: per-carrier route headers
+│   └── boards/                      # GENERATED: per-board route headers
 ├── src/
 │   ├── common/                      # OS-agnostic helpers (bit ops, ring buffers, status->str)
 │   ├── zephyr/                      # Zephyr-backed implementation
@@ -96,12 +96,12 @@ alp-sdk/
 │   ├── alif/                        # Alif HAL bindings (Ensemble)
 │   └── renesas-rzv2n/               # Renesas FSP bindings (RZ/V2N)
 ├── metadata/                        # ALL HW + LIBRARY METADATA — single source of truth
-│   ├── schemas/                     # JSON Schemas (board-config-v2, soc-spec-v1, …)
+│   ├── schemas/                     # JSON Schemas (board, board-preset, soc-spec-v1, …)
 │   ├── socs/<vendor>/<family>/<part>.json   # silicon datasheets (peripheral counts, caps)
 │   ├── e1m_modules/<SKU>.yaml       # SoM presets (`on_module:`, `topology:`, `pad_routes:`)
-│   ├── carriers/<NAME>/board.yaml   # carrier presets (`populated:`, `e1m_routes:`)
+│   ├── boards/<name>.yaml          # shared board definitions (`populated:`, `e1m_routes:`)
 │   ├── library-profiles/<name>/     # per-library HW-accelerator binding tables
-│   ├── templates/board.yaml         # customer-facing board.yaml v2 template
+│   ├── templates/board.yaml         # customer-facing board.yaml template
 │   └── protos/                      # protobuf schemas (mproc framing, …)
 ├── firmware/                        # PREBUILT HELPER-MCU FIRMWARE BLOBS
 │   ├── gd32-bridge/                 # GD32G553 bridge firmware (V2N supervisor)
@@ -109,12 +109,12 @@ alp-sdk/
 ├── cmake/                           # find_package + Zephyr module helpers
 │   └── AlpSdkConfig.cmake.in
 ├── scripts/                         # CODEGEN + ORCHESTRATION
-│   ├── alp_orchestrate.py           # board.yaml v2 → per-core slice fan-out + manifest
+│   ├── alp_orchestrate.py           # board.yaml → per-core slice fan-out + manifest
 │   ├── alp_project.py               # per-slice Kconfig / cmake-args / DTS overlay emit
 │   ├── gen_soc_caps.py              # SoC JSONs → include/alp/soc_caps.h
-│   ├── gen_carrier_header.py        # carrier YAML → include/alp/boards/<carrier>_routes.h
-│   ├── validate_board_yaml.py       # board.yaml v2 schema check
-│   ├── validate_metadata.py         # SoC / SoM / carrier preset schema check
+│   ├── gen_board_header.py        # board YAML → include/alp/boards/<board>_routes.h
+│   ├── validate_board_yaml.py       # board.yaml schema check
+│   ├── validate_metadata.py         # SoC / SoM / board preset schema check
 │   └── west_commands/               # `west alp-image`, `west alp-flash`
 ├── west.yml                         # Zephyr-side manifest
 ├── zephyr/
@@ -168,7 +168,7 @@ each entry against the SoM preset's `topology:` defaults, and emits
 one **slice** per non-`off` core:
 
 ```
-board.yaml v2 (`cores:`)
+board.yaml (`cores:`)
         │
         ▼
    load_board_yaml()              # validate, resolve presets, infer OS per core
@@ -231,7 +231,7 @@ driver's required Zephyr subsystems (`CONFIG_I2C=y`, `CONFIG_SPI=y`,
 
 Devices marked `assembled: optional` in `i2c_devices:` (DNI on some
 builds) are **not** auto-enabled; the customer opts them in via
-`carrier.populated:` instead.
+`board.populated:` instead.
 
 ### Generators inventory
 
@@ -242,10 +242,10 @@ The active generators are:
 
 | Script                                  | Reads                                                | Writes                                                                         |
 |-----------------------------------------|------------------------------------------------------|--------------------------------------------------------------------------------|
-| `scripts/alp_orchestrate.py`            | `board.yaml` + SoM preset + SoC JSON + carrier preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, per-slice `alp.conf` / `local.conf` / `cmake-args.txt` |
-| `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × carrier route-table demonstrator) |
+| `scripts/alp_orchestrate.py`            | `board.yaml` + SoM preset + SoC JSON + board preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, per-slice `alp.conf` / `local.conf` / `cmake-args.txt` |
+| `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × board route-table demonstrator) |
 | `scripts/gen_soc_caps.py`               | `metadata/socs/**/*.json`                            | `include/alp/soc_caps.h` (per-SoC `ALP_SOC_*_COUNT` + `ALP_SOC_*_MAX_*` macros) |
-| `scripts/gen_carrier_header.py`         | `metadata/carriers/<NAME>/board.yaml`                | `include/alp/boards/alp_<carrier>_routes.h` (carrier macro mapping)            |
+| `scripts/gen_board_header.py`         | `metadata/boards/<name>.yaml`                       | `include/alp/boards/alp_<board>_routes.h` (board macro mapping)            |
 | `scripts/validate_board_yaml.py`        | `board.yaml`                                         | (validator only — non-zero exit on schema error)                               |
 | `scripts/validate_metadata.py`          | `metadata/**/*.{json,yaml}`                          | (validator only)                                                               |
 

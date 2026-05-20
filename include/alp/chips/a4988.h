@@ -7,7 +7,7 @@
  * @file a4988.h
  * @brief Allegro A4988 low-cost bipolar stepper motor driver.
  *
- * Step/dir-driven bipolar stepper driver carrier.  Same shape as
+ * Step/dir-driven bipolar stepper driver board.  Same shape as
  * `drv8825` -- STEP (PWM) + DIR + nENABLE + microstep-select pins
  * (MS1/MS2/MS3).  No on-chip register file.
  *

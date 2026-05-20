@@ -1,4 +1,4 @@
-# Stock preset for E1M-AEN601 (the SoM, NOT the EVK carrier).
+# Stock preset for E1M-AEN601 (the SoM, NOT the EVK board).
 # See E1M-AEN701.yaml header for the file's role + the
 # project memory note governing what stays TBD.
 
@@ -73,7 +73,7 @@ mailbox:
 # E1M pads / instances that route through the on-module CC3501E
 # coprocessor instead of through the Alif Ensemble silicon.  Apps
 # using these pads via `alp_gpio_open()` / `alp_spi_open()` etc.
-# get CC3501E command dispatch automatically; the carrier-side
+# get CC3501E command dispatch automatically; the board-side
 # role (e.g. EVK_PIN_BMI323_INT1) stays SoM-agnostic.
 #
 # Source of truth:
@@ -113,7 +113,7 @@ helper_firmware:
 
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
-default_carrier:        E1M-EVK
+default_board:        E1M-EVK
 
 status:
   preliminary:          true                   # E6 datasheet not yet public

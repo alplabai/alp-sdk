@@ -13,7 +13,7 @@
  *
  * On Linux the kernel owns the CS line -- there's no userspace
  * bit-banging here.  alp_spi_config_t.cs_pin_id therefore selects
- * the kernel-registered spidev minor, not a raw GPIO.  Carriers
+ * the kernel-registered spidev minor, not a raw GPIO.  Boards
  * that genuinely need GPIO-bit-banged CS should bind GPIO via
  * alp_gpio_* and toggle it between half-duplex transfers (the
  * standard Linux "user-space bit-bang CS" pattern); the SPI

@@ -19,10 +19,10 @@
  *   range: 0x00 (400 mV) .. 0xFF (1675 mV)
  *
  * The VID pin selects between VOUT1 (low) and VOUT2 (high) at
- * runtime; carriers that drive VID statically can pick either
- * register.  Carriers that hold VID at one level only use the
+ * runtime; boards that drive VID statically can pick either
+ * register.  Boards that hold VID at one level only use the
  * matching register.  This driver writes VOUT1 by default (the
- * V2N-M1 carrier holds VID low).  The raw register R/W helpers
+ * V2N-M1 board holds VID low).  The raw register R/W helpers
  * remain available for callers that need direct access to VOUT2 /
  * CONTROL / STATUS.
  */

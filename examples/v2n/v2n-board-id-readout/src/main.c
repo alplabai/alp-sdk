@@ -25,7 +25,7 @@ int main(void) {
      * manufacturing date from the EEPROM manifest.  The Kconfig
      * symbols CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID +
      * CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT must be set to the
-     * carrier's wiring (E1M_I2C0 on V2N; 0x50 strap default). */
+     * board's wiring (E1M_I2C0 on V2N; 0x50 strap default). */
     alp_hw_info_t info;
     alp_status_t  s = alp_hw_info_read(&info);
 

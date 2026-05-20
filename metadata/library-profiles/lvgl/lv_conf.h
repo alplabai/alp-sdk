@@ -33,7 +33,7 @@
 
 /* RGB565 -- the practical baseline across the E1M display roster.
  * Override to 1 for mono OLEDs or to 32 for ARGB8888 if a custom
- * carrier ships a 24-bit-color panel. */
+ * board ships a 24-bit-color panel. */
 #define LV_COLOR_DEPTH 16
 
 /* Standard sRGB ordering matches the Zephyr display driver default

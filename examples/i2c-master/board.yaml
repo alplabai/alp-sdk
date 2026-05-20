@@ -7,19 +7,18 @@
 # probes every 7-bit address for ACKs.
 #
 # Customer workflow: copy this directory, change `som.sku` to
-# your MPN, edit `carrier.name` if you're on a non-EVK board,
+# your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
 # and `west build`.  CMakeLists.txt invokes
 # scripts/alp_project.py at configure time + layers the
 # generated alp.conf over prj.conf via OVERLAY_CONFIG.
-
-schema_version: 2
-
 som:
   sku: E1M-AEN701
 
-carrier:
-  name: E1M-EVK
+preset: e1m-evk
 
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
 cores:
   m55_hp:
     app: ./src

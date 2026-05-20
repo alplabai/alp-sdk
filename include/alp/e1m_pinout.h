@@ -8,22 +8,22 @@
  * @brief Global, fixed pin/instance map derived from the E1M
  *        standard.
  *
- * The E1M open standard (`alplabai/e1m-spec`) fixes the carrier-side
+ * The E1M open standard (`alplabai/e1m-spec`) fixes the board-side
  * pinout: which peripheral instances exist (`I2C0`, `SPI0`, …) and
  * which physical pads carry their default function plus the
  * GPIO-secondary IO numbers (`IO0`, `IO1`, …, `PWM0`–`PWM7`,
  * `ENC0`–`ENC3`).  Because that mapping is **silicon- and
- * carrier-agnostic**, the integers the SDK consumes can be baked
- * here as portable C macros — every E1M-conformant carrier
+ * board-agnostic**, the integers the SDK consumes can be baked
+ * here as portable C macros — every E1M-conformant board
  * resolves them identically.
  *
  * Derived from `alplabai/e1m-spec/pinout/v1.json` (E1M v1.0,
  * 35 × 35 mm, 312 pads).  Pinned to `e1m-spec` v1.0.
  *
- * ## Per-carrier feature names
+ * ## Per-board feature names
  *
  * Names like `USER_LED_RED` or `ENCODER_SW` are **not** in E1M —
- * they're carrier-specific.  Those live in
+ * they're board-specific.  Those live in
  * `<alp/boards/<board>.h>` and reference the macros below for
  * their underlying pin/instance integers.
  *
@@ -38,7 +38,7 @@
  *   4. `ADC0`–`ADC7` in numeric order                 (indices 42..49)
  *   5. `DAC0`, `DAC1`                                 (indices 50..51)
  *
- * Carriers that don't route a particular pad still leave its slot
+ * Boards that don't route a particular pad still leave its slot
  * in `alp,pin-array` (with `status = "disabled"` on the GPIO node)
  * so the indices stay stable.  `alp_gpio_open()` for a non-routed
  * pad returns `NULL`.
@@ -293,7 +293,7 @@ extern "C" {
 #define E1M_GPIO_DAC1     51u
 
 /** Total number of GPIO-capable indices in this header.
- *  Carriers' `alp,pin-array` arrays must list this many entries. */
+ *  Boards' `alp,pin-array` arrays must list this many entries. */
 #define E1M_GPIO_COUNT    52u
 
 #ifdef __cplusplus

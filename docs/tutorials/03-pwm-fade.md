@@ -11,7 +11,7 @@ wrapper.
 
 * How to open an `alp_pwm_t` with an explicit period (frequency).
 * That `duty_ns = period_ns` is "permanently on" and `duty_ns = 0`
-  is "permanently off"; values in between produce the carrier.
+  is "permanently off"; values in between produce the board.
 * When to use the host-SoC PWM vs the GD32 supervisor's PWM (V2N
   only, see Tutorial 05).
 

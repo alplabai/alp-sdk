@@ -96,7 +96,7 @@ Adding a new library: drop a directory + a config header named
 to match the upstream's expected filename (or a `README.md` if
 no compile-time config is needed), then extend the `libraries:`
 enum (under `cores.<id>.libraries:`) in
-`metadata/schemas/board-config-v2.schema.json` and the
+`metadata/schemas/board.schema.json` and the
 `_LIBRARY_KCONFIG` map in `scripts/alp_project.py` so consumers
 can enable it via `board.yaml`.
 

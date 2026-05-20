@@ -8,7 +8,7 @@
 #     populations:
 #       * E1M-EVK    (AEN/NX9): LSM6DSO @ 0x6A, BMP581 @ 0x47,
 #                               SSD1306 @ 0x3C.
-#       * E1M-X-EVK  (V2N/V2M): per-carrier breakouts; LSM6DSO + IMU
+#       * E1M-X-EVK  (V2N/V2M): per-board breakouts; LSM6DSO + IMU
 #                               variants common.
 #     The scan must find AT LEAST ONE responder; the exact set
 #     varies per assembly so we don't assert specific addresses.
@@ -24,7 +24,7 @@ schema_version: 1
 name: i2c-scanner
 description: |
   Confirms the I2C bus on E1M_I2C0 reaches at least one populated
-  device on the carrier.
+  device on the board.
 
 example: examples/i2c-scanner
 

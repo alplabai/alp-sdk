@@ -1,7 +1,7 @@
 # Bench bring-up — E1M-N93 (NXP i.MX 93)
 
 Step-by-step procedure for bringing a freshly-assembled E1M-N93
-module up on the bench.  Assumes you have an `E1M-EVK` carrier
+module up on the bench.  Assumes you have an `E1M-EVK` board
 (or pin-compatible custom), a J-Link or ST-Link debug probe, a
 USB-UART adapter, and a 1 Gb Ethernet link partner.
 
@@ -31,7 +31,7 @@ Inventory check before powering anything:
   - **DP83825I** Ethernet PHY (single MAC routed; ETH1 lives on
     E1M-X form factor only).
   - **OPTIGA Trust M** secure element.
-* Carrier populated: E1M-edge passthroughs + 5 V power input +
+* Board populated: E1M-edge passthroughs + 5 V power input +
   JTAG/SWD header + USB-UART for console + microSD card slot
   (Yocto images boot from SD by default during bring-up).
 
@@ -54,7 +54,7 @@ Check the PMIC's `INT_STATUS` register over BRD_I2C; the
 
 ## 2. Console + first boot
 
-1. Wire USB-UART to UART1 on the carrier (silkscreen
+1. Wire USB-UART to UART1 on the board (silkscreen
    `USB_UART_TXD` / `_RXD`).  Standard 115200 8N1.
 2. Open a terminal.
 3. Insert the microSD with the `meta-alp` image and power on.
@@ -216,7 +216,7 @@ Once §1..6 pass:
 ## 8. Troubleshooting
 
 * **No U-Boot output** -- check the BOOT_MODE strap on the
-  carrier; i.MX 93 boot ROM probes SD first only if BOOT_MODE
+  board; i.MX 93 boot ROM probes SD first only if BOOT_MODE
   selects "external boot".
 * **U-Boot OK but kernel panics** -- usually a DTB
   incompatibility.  Confirm the kernel + DTB came from the

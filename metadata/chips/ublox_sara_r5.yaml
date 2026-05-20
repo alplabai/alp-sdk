@@ -2,7 +2,7 @@
 schema_version:   1
 chip_id:          ublox_sara_r5
 driver_status:    stub
-display_name:     "u-blox SARA-R5 LTE-M carrier-certified cellular module"
+display_name:     "u-blox SARA-R5 LTE-M board-certified cellular module"
 vendor:           ublox
 mpn_population:
   - "SARA-R510M8S"

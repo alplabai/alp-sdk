@@ -64,7 +64,7 @@ Going **between** the families (E1M ↔ E1M-X) is **not** a portability
 promise.  An app written for `E1M-AEN701` does not source-compile
 on `E1M-V2N101` and vice versa, by design:
 
-- different physical pinouts (the carrier-side spec differs);
+- different physical pinouts (the board-side spec differs);
 - different power envelopes (mW-class M-only vs W-class A+M);
 - different SoC architecture (Cortex-M-only vs heterogeneous
   Cortex-A55 + Cortex-M33);
@@ -101,21 +101,17 @@ target is the same field you edit to change targets.
 ### 2.1  Same-class swap: AEN701 → AEN801
 
 This is the cleanest case — two SKUs in the same family, with
-different silicon tiers (E7 → E8) but compatible carrier shapes
+different silicon tiers (E7 → E8) but compatible board shapes
 and identical app-facing pinout.  We'll walk through it using the
 canonical `examples/i2c-scanner/` example.
 
 **Starting `examples/i2c-scanner/board.yaml`:**
 
 ```yaml
-schema_version: 2
-
 som:
   sku: E1M-AEN701
 
-carrier:
-  name: E1M-EVK
-
+preset: e1m-evk
 cores:
   m55_hp:
     app: ./src
@@ -129,14 +125,10 @@ diagnostics:
 **Edit:** change one line.
 
 ```yaml
-schema_version: 2
-
 som:
   sku: E1M-AEN801          # was: E1M-AEN701
 
-carrier:
-  name: E1M-EVK
-
+preset: e1m-evk
 cores:
   m55_hp:
     app: ./src
@@ -208,21 +200,17 @@ through a different SoC under the hood.
 
 V2N101 carries the Renesas RZ/V2N silicon with its on-die DRP-AI3
 NPU.  V2M101 is the same silicon plus a DEEPX DX-M1 NPU on a PCIe-
-mux daughter footprint.  Same E1M-X form factor, same carrier
+mux daughter footprint.  Same E1M-X form factor, same board
 shape.  The swap demonstrates how the SDK exposes a *gained*
 capability without source change.
 
 **Edit `board.yaml`:**
 
 ```yaml
-schema_version: 2
-
 som:
   sku: E1M-V2M101          # was: E1M-V2N101
 
-carrier:
-  name: E1M-X-EVK
-
+preset: e1m-x-evk
 cores:
   a55_cluster:
     app: ./linux
@@ -305,7 +293,7 @@ Two things make this work portably:
    `alp_inference_open()` call.  This is why the `inference:` block
    in `board.yaml` has no `backend:` field — see the schema
    description on `cores.<id>.inference` in
-   [`metadata/schemas/board-config-v2.schema.json`](../metadata/schemas/board-config-v2.schema.json),
+   [`metadata/schemas/board.schema.json`](../metadata/schemas/board.schema.json),
    which spells out exactly this contract.
 
 If you specifically want DEEPX (say, for a benchmark run), pass
@@ -329,7 +317,7 @@ pinout namespaces, one per form factor.
 | SoC class | Cortex-M only (Alif Ensemble, NXP i.MX 93 RT core) | Heterogeneous Cortex-A55 + Cortex-M33 (Renesas RZ/V2N) |
 | Power envelope | mW-class | W-class |
 | NPU options | Ethos-U55 / U65 / U85 | DRP-AI3 (V2N), DRP-AI3 + DEEPX DX-M1 (V2M) |
-| Carrier | `E1M-EVK` or compatible | `E1M-X-EVK` or compatible |
+| Board | `E1M-EVK` or compatible | `E1M-X-EVK` or compatible |
 | GPIO count | 26 (`E1M_GPIO_IO0..IO25`) | 36 (`E1M_X_GPIO_IO0..IO35`) |
 | Ethernet | 1 MAC (`E1M_ETH0`) | 2 MAC (`E1M_X_ETH0`, `E1M_X_ETH1`) |
 | PCIe | not routed | 1 instance (`E1M_X_PCIE0`) |
@@ -354,7 +342,7 @@ A decision tree:
 - ML at the edge with Transformer/large-conv models that benefit
   from a 512-MAC accelerator?  → either family works (AEN E4/E6/
   E8 with Ethos-U85, or V2M with DEEPX DX-M1).  The cost / TDP /
-  carrier-spec deltas drive the call.
+  board-spec deltas drive the call.
 - Headless audio DSP (wake-word, noise suppression)?  → either
   family; AEN's Helium MVE is a strong baseline at low power,
   V2N's NEON + DRP-AI3 covers heavier acoustic models.
@@ -515,29 +503,29 @@ slice (both SKUs run Zephyr on the system manager M33) and on the
 A55-side app and the M33-side app are still distinct source trees;
 the portability is *within* each slice, not across slices.
 
-### 4.4  Carrier-specific hardware
+### 4.4  Board-specific hardware
 
 If your code calls `alp_camera_open()` with the OV5640 driver, it
-will not work on a carrier where OV5640 is not populated — the
-chip is on the carrier, not on the SoM.  The SDK reads
-`carrier.populated:` in `board.yaml` (or the carrier preset's
+will not work on a board where OV5640 is not populated — the
+chip is on the board, not on the SoM.  The SDK reads
+`board.populated:` in `board.yaml` (or the board preset's
 default population list) to decide which `CONFIG_ALP_SDK_CHIP_*=y`
-lines to emit; flipping the carrier flips that set.
+lines to emit; flipping the board flips that set.
 
-The relevant rule: **SoM swap ≠ carrier swap.**  The portability
-matrix specifically tests SoM swaps with the carrier held
-constant.  If you also need to migrate carriers, that is a
+The relevant rule: **SoM swap ≠ board swap.**  The portability
+matrix specifically tests SoM swaps with the board held
+constant.  If you also need to migrate boards, that is a
 separate audit — typically a one-time per-product decision.
 
 Two helpful patterns:
 
-- For optional carrier components, gate the open call on the
+- For optional board components, gate the open call on the
   matching chip enable, e.g.
   `#ifdef CONFIG_ALP_SDK_CHIP_OV5640` around the
   `alp_camera_open()` block and fall back to a "no camera"
   diagnostic mode.
 - For mandatory components, declare them in `chips:` at the top
-  of `board.yaml` so the build fails fast if the carrier doesn't
+  of `board.yaml` so the build fails fast if the board doesn't
   populate them.
 
 ---
@@ -794,12 +782,12 @@ implementation is verified each release against the matrix.
   targets, repository layout, the SDK ↔ studio boundary).
 - [`docs/e1m-pinout.md`](e1m-pinout.md) — how E1M pads link the
   open-standard spec, the per-SoM `pad_routes:` block, and the
-  carrier's `e1m_routes:` block.
+  board's `e1m_routes:` block.
 - [`docs/heterogeneous-builds.md`](heterogeneous-builds.md) — the
   per-core fan-out walkthrough for heterogeneous SoMs.
 - [`docs/firmware-quickstart.md`](firmware-quickstart.md) — the
   "I have hardware on the bench" entry point; complements this
-  cookbook with carrier wiring + bring-up flow.
+  cookbook with board wiring + bring-up flow.
 - Per-SoM bring-up notes —
   [`docs/bring-up-aen.md`](bring-up-aen.md),
   [`docs/bring-up-v2n.md`](bring-up-v2n.md),

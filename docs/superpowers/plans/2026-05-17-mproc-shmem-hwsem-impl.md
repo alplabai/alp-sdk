@@ -592,7 +592,7 @@ Edit `include/alp/mproc.h`.  Find the `Shared memory` block (around lines 60-103
  *
  * @note On Zephyr-on-AEN the loader emits alp-shmem aliases for
  *       each `ipc.kind: raw_shmem` carve-out declared in
- *       board.yaml.  Custom carriers can also declare aliases by
+ *       board.yaml.  Custom boards can also declare aliases by
  *       hand via a DTS overlay.  Under native_sim the test build
  *       provides synthetic aliases for API-contract testing; the
  *       returned base pointers are never dereferenced because no

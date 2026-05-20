@@ -27,11 +27,11 @@
  * config (PLL1/2/3 M+N dividers, OUTDIVn source, spread-spectrum,
  * VDD rail selection) is left to a higher layer because V2N's
  * design intent is to rely on the chip's OTP defaults + the
- * carrier-driven `Audio_CLKB_OE` GPIO.  Carriers that need to
+ * board-driven `Audio_CLKB_OE` GPIO.  Boards that need to
  * reprogram on the fly compose the raw R/W helpers against the
  * datasheet's register table (cross-referenced below).
  *
- * @par Carrier wiring (V2N)
+ * @par Board wiring (V2N)
  *
  * | Signal         | Renesas pad | Notes                                       |
  * |----------------|-------------|---------------------------------------------|

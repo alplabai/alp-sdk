@@ -7,7 +7,7 @@
  * @file max98357a.h
  * @brief ADI (Maxim) MAX98357A 3 W class-D mono amplifier (I²S).
  *
- * Single-pin "shutdown" carrier-board class-D amp.  No I²C config
+ * Single-pin "shutdown" board-board class-D amp.  No I²C config
  * surface -- gain is set by a single resistor / strap pin.  This
  * driver controls the shutdown GPIO + the I²S handle is owned by
  * the consumer.

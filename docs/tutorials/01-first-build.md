@@ -11,7 +11,7 @@ an LED.  Time budget: 20 minutes.
 
 * A working Zephyr workspace with this repo loaded as a module via
   `west.yml` (see [`docs/getting-started.md`](../getting-started.md)).
-* An E1M-AEN family SoM mounted on an E1M-EVK carrier (any AEN
+* An E1M-AEN family SoM mounted on an E1M-EVK board (any AEN
   variant -- E3..E8 -- works identically for this tutorial).
 * A SWD probe attached to the EVK's JTAG header.
 
@@ -21,7 +21,7 @@ an LED.  Time budget: 20 minutes.
 examples/gpio-button-led/
 ├── CMakeLists.txt    # invokes scripts/alp_project.py + west
 ├── prj.conf          # mostly empty -- features come from board.yaml
-├── board.yaml        # SoM SKU + carrier + OS + peripherals
+├── board.yaml        # SoM SKU + board + OS + peripherals
 ├── src/
 │   └── main.c        # the application code
 ```
@@ -30,11 +30,9 @@ The whole "what does this app target?" surface lives in
 `board.yaml`:
 
 ```yaml
-schema_version: 2
 som:
   sku: E1M-AEN701
-carrier:
-  name: E1M-EVK
+preset: e1m-evk
 cores:
   m55_hp:
     app: ./src                # os: omitted -- M-cores default to zephyr per topology
@@ -108,8 +106,8 @@ LED goes dark.
   to E3 silicon without source-code edits.  This is the
   intra-family portability promise; see
   [Tutorial 04](04-cross-family-portability.md).
-* Swap `pin_id: 0/1` for the carrier's actual pin ids declared in
-  `metadata/carriers/E1M-EVK/board.yaml`.
+* Swap `pin_id: 0/1` for the board's actual pin ids declared in
+  `metadata/boards/E1M-EVK/board.yaml`.
 
 ## See also
 

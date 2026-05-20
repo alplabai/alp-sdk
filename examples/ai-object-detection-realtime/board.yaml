@@ -17,8 +17,6 @@
 # don't touch source to retarget AEN -> V2N -> V2N-M1 -- the
 # board.yaml picks the right NPU shim.
 
-schema_version: 2
-
 som:
   # E1M-V2M101 == V2N-M1 (Renesas RZ/V2N host + DEEPX DX-M1 NPU
   # on-module via PCIe).  V2M101's `capabilities:` block declares
@@ -27,13 +25,20 @@ som:
   # alp_inference_open(.backend = DEEPX_DX or DRPAI).
   sku: E1M-V2M101
 
-carrier:
-  name: E1M-EVK
-  populated:
-    ov5640: true              # 5 MP MIPI camera on the EVK
-                              # camera connector.
-    st7789: true              # 240x320 TFT for the preview +
-                              # bounding-box overlay.
+preset: e1m-evk
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
+  - { e1m: E1M_SPI1, macro: EVK_SPI_BUS_ARDUINO, doc: "Arduino UNO header SPI; terminates on the on-module CC3501E, not the main SoC" }
+
+# OV5640 + ST7789 plug into the EVK headers for this demo (not part
+# of the EVK's default `populated:` table).  Listing them in the
+# project's `chips:` array flips on the matching chip drivers without
+# needing a per-project board fork.
+chips:
+  - ov5640                      # 5 MP MIPI camera on the EVK camera connector
+  - st7789                      # 240x320 TFT for preview + bounding-box overlay
 
 # The V2M101 silicon carries a Cortex-A55 cluster (Linux/Yocto) plus
 # an M33 system-manager.  This example currently builds only the M33
@@ -61,9 +66,9 @@ cores:
       - gpio                  # Camera RST/PWDN + display D/C#.
 # NOTE: dedicated CSI / display subsystem entries land in v0.6
 # alongside the V2N MIPI receiver work; today the OV5640 + ST7789
-# chip drivers under carrier.populated already pull in I2C / SPI /
-# GPIO, and the portable <alp/camera.h> + <alp/display.h> APIs
-# route through those drivers under the hood.
+# chip drivers in the project `chips:` array already pull in I2C /
+# SPI / GPIO, and the portable <alp/camera.h> + <alp/display.h>
+# APIs route through those drivers under the hood.
 
 diagnostics:
   log_level: info

@@ -33,7 +33,7 @@
  * (Yocto/Linux brcmfmac + BlueZ on V2N).  This driver doesn't try
  * to be a full stack -- it just owns the four (five) GPIO lines.
  *
- * @par V2N carrier wiring
+ * @par V2N board wiring
  *
  * | Line          | Side    | Pad     | Notes                                 |
  * |---------------|---------|---------|---------------------------------------|
@@ -49,7 +49,7 @@
  * document under `docs/gd32-bridge-protocol.md`)
  * and the host cannot reach them through `alp_gpio_t`, the driver
  * takes **caller-supplied set/get callbacks** for those lines.
- * Carriers point the callbacks at `gd32g553_gpio_write` (V2N) or at
+ * Boards point the callbacks at `gd32g553_gpio_write` (V2N) or at
  * a direct `alp_gpio_*` wrapper (boards that route the REG_ON pins
  * straight to the host SoC).
  *
@@ -97,8 +97,8 @@ typedef struct {
     murata_reg_get_t  reg_get;
     void             *reg_user;
     /* HOST_WAKE inputs (Renesas-side on V2N) -- direct alp_gpio_t. */
-    alp_gpio_t       *bt_host_wake;   /**< NULL if the carrier doesn't route this. */
-    alp_gpio_t       *wl_host_wake;   /**< NULL if the carrier doesn't route this. */
+    alp_gpio_t       *bt_host_wake;   /**< NULL if the board doesn't route this. */
+    alp_gpio_t       *wl_host_wake;   /**< NULL if the board doesn't route this. */
     alp_gpio_t       *bt_dev_wake;    /**< NULL today (TBD on V2N). */
     /* Cached state. */
     bool              bt_powered;
@@ -142,7 +142,7 @@ alp_status_t murata_lbee5hy2fy_wl_power(murata_lbee5hy2fy_t *ctx, bool on);
  * @brief Pulse `BT_DEV_WAKE` to wake the BT subsystem from sleep.
  *
  * @return ALP_OK on success.
- * @return ALP_ERR_NOSUPPORT if the line isn't wired on this carrier. */
+ * @return ALP_ERR_NOSUPPORT if the line isn't wired on this board. */
 alp_status_t murata_lbee5hy2fy_bt_wake_device(murata_lbee5hy2fy_t *ctx);
 
 /** @brief Read the BT_HOST_WAKE pin level (true = module asserting wake). */

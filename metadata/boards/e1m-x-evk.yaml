@@ -1,22 +1,25 @@
-# Stock preset for the E1M-X Development Board (45x65 SoM carrier).
+# Shared board definition for the E1M-X Development Board
+# (45x65 SoM board).  SDK-internal: customers do not reference
+# this file directly -- their own board.yaml either points at it
+# via `preset: e1m-x-evk` (for demo apps targeting the stock E1M-X
+# EVK) or carries the same fields inline at the top level (for
+# custom boards).  See docs/board-config.md.
 #
-# Reference carrier for E1M-X V2N and E1M-X V2N-M1 SoM families.
-# Authoritative wiring lives in the carrier-specific board header
+# Reference board for E1M-X V2N and E1M-X V2N-M1 SoM families.
+# Authoritative wiring lives in the board-specific board header
 # (planned: include/alp/boards/alp_e1m_x_evk.h, lands alongside the
 # v0.4 Yocto first-class work).
 #
 # Per the project memory note, the populated chip list below stays
 # minimal until the user supplies the authoritative HW config for
 # the E1M-X-EVK.  Until then this file's role is to give
-# `carrier.name: E1M-X-EVK` a known schema landing point.
-
-schema_version: 1
+# `preset: e1m-x-evk` a known schema landing point.
 
 name: E1M-X-EVK
-display_name: "E1M-X Development Board (45x65 carrier)"
+display_name: "E1M-X Development Board (45x65 board)"
 hosts_som_families: [renesas-rzv2n]
 
-# TBD pending user HW config.  The E1M-X carrier is richer than
+# TBD pending user HW config.  The E1M-X board is richer than
 # the 35x35 EVK (Arduino UNO + mikroBUS click + M.2 E-key + PCIe
 # x4 slot) but the exact chip-driver enable list depends on the
 # user-supplied schematic.
@@ -27,7 +30,7 @@ defaults:
   primary_imu:              null
 
 # Hardware revisions.  Same ADC + resistor-divider scheme as the
-# E1M-EVK (see metadata/carriers/E1M-EVK/board.yaml for the
+# E1M-EVK (see metadata/boards/E1M-EVK/board.yaml for the
 # rationale + math).  All concrete values TBD until the user-
 # supplied X-EVK schematic lands.
 default_hw_rev:             r1

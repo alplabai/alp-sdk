@@ -49,7 +49,7 @@ Three questions answered side-by-side:
 ## Hardware needed
 
 - E1M-AEN family SoM (E7 recommended).
-- E1M-EVK carrier.
+- E1M-EVK board.
 - OV5640 camera on the EVK camera connector (MIPI / DVP).
 - ST7789 240×320 TFT on SPI0 + 2 GPIOs.
 

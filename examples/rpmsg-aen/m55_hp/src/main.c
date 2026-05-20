@@ -4,7 +4,7 @@
  *
  * rpmsg-aen -- Cortex-M55-HP / Zephyr producer.
  *
- * Reads the carrier's on-board LSM6DSO IMU + BMP581 barometer
+ * Reads the board's on-board LSM6DSO IMU + BMP581 barometer
  * through the portable <alp/chips/...> surfaces and publishes one
  * `imu_sample` event per second over the framed RPC channel.  The
  * A32 cluster's Linux consumer subscribes to `imu_sample` and

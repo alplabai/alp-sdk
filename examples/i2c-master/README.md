@@ -77,11 +77,11 @@ native_sim (emul I2C, no TMP112 registered):
 ## Troubleshooting
 
 * **`tmp112_init -> -5`** (ALP_ERR_IO / NACK).  Either the chip
-  isn't populated on your carrier, the address is wrong (see
+  isn't populated on your board, the address is wrong (see
   table above), or the bus is held low (missing pull-ups, stuck
   slave).  Run `examples/i2c-scanner` to confirm what ACKs.
 * **`alp_i2c_open failed`** (NULL return).  The `alp-i2c0` DT
-  alias isn't set -- check your carrier overlay or, for
+  alias isn't set -- check your board overlay or, for
   native_sim, that `CONFIG_EMUL=y CONFIG_I2C_EMUL=y` and the
   overlay we ship are picked up.
 * **Garbled readings.**  Wrong baud (bitrate) for the bus

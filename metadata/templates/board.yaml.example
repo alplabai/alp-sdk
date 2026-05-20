@@ -1,23 +1,18 @@
-# Minimal board.yaml v2 example for testing scripts/alp_project.py
+# Minimal board.yaml example for testing scripts/alp_project.py
 # and scripts/alp_orchestrate.py.  The richly-commented template at
 # board.yaml is what consumers fork; this file is the smallest
-# valid v2 document the loader can exercise end-to-end.
-
-schema_version: 2
+# valid document the loader can exercise end-to-end.
 
 som:
   sku: E1M-AEN701
 
-carrier:
-  name: E1M-EVK
-  populated:
-    bme280: false       # demonstrate an override
+preset: e1m-evk
 
-# Per-core runtime mapping (board.yaml v2 replaces the v1 top-level
-# `os:` field).  The E7 silicon carries no Cortex-A class core, so
-# the only programmable peer-pair is M55-HP + M55-HE.  This example
-# runs Zephyr on M55-HP only; M55-HE inherits the SoM topology's
-# default Zephyr shim (so the build covers both halves by default).
+# Per-core runtime mapping.  The E7 silicon carries no Cortex-A
+# class core, so the only programmable peer-pair is M55-HP + M55-HE.
+# This example runs Zephyr on M55-HP only; M55-HE inherits the SoM
+# topology's default Zephyr shim (so the build covers both halves
+# by default).
 cores:
   m55_hp:
     app: ./src

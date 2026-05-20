@@ -1,7 +1,7 @@
 # v2n-pwm-fan-control
 
 Drive a fan from `E1M_PWM0` on V2N.  Walks duty cycle through a
-five-stop curve at a fixed 25 kHz carrier (above audible) using the
+five-stop curve at a fixed 25 kHz board (above audible) using the
 portable `<alp/pwm.h>` surface, so the wave shape is observable on
 a scope.
 
@@ -25,7 +25,7 @@ a scope.
 ## Why a V2N case study?
 
 V2N modules carry the Renesas RZ/V2N (~5-8 W typical) plus a DEEPX
-DX-M1 NPU on the M1 SKUs (~10-15 W under load), so a carrier-driven
+DX-M1 NPU on the M1 SKUs (~10-15 W under load), so a board-driven
 fan is a normal accessory.  The example is named for the **scenario**;
 the **code** is fully portable.
 

@@ -31,8 +31,8 @@
  *        - <alp/gui.h>         (optional) for the LVGL bind glue
  *      No `gd32g553_*` / `alif_*` / `renesas_*` symbols appear
  *      anywhere -- per the SDK's "Portable peripheral surfaces
- *      only in app + library code" rule.  Carrier-specific
- *      backends live inside the SDK; this file stays carrier-
+ *      only in app + library code" rule.  Board-specific
+ *      backends live inside the SDK; this file stays board-
  *      portable.
  *
  *   3. Zephyr's `lvgl` module handles the display-driver registration
@@ -88,7 +88,7 @@ int main(void)
      * subsequent UI updates are driven by lv_task_handler() below. */
     lv_demo_widgets();
 
-    /* Turn the backlight on (carrier-specific GPIO; the Zephyr
+    /* Turn the backlight on (board-specific GPIO; the Zephyr
      * display driver handles it via the `backlight-gpios` property
      * in the devicetree overlay if one is declared).  The display
      * starts off blank either way until LVGL renders the first

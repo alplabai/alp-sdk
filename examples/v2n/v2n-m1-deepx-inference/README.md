@@ -15,7 +15,7 @@ customer-only licence -- see
 
 1. **PCIe mux + DEEPX power rail bring-up.**  The V2N
    supervisor's [`v2n_power_mgmt.c`](../../../src/zephyr/v2n_power_mgmt.c)
-   module (landed in §C.28) responds to the carrier's
+   module (landed in §C.28) responds to the board's
    `DEEPX_PWR_EN_REQ` rising edge on `P65`, brings up the
    DA9292 CH2 = 0.75 V DEEPX rail, then drives
    `DEEPX_CORE_0P75_EN` (`P64`) high.  This happens

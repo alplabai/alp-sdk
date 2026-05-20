@@ -1,0 +1,40 @@
+# ALP SDK chip manifest: Solomon Systech SSD1306 monochrome OLED controller.
+schema_version:   1
+chip_id:          ssd1306
+driver_status:    partial          # init + raw-pixel-write; full <alp/display.h> backend lands in v0.6.
+display_name:     "Solomon Systech SSD1306 128x64 mono OLED (I2C)"
+vendor:           solomon-systech
+mpn_population:
+  - "SSD1306"
+
+datasheet:
+  primary:        "Solomon Systech SSD1306 Rev 1.5 (Apr 2008)"
+
+bus:              i2c
+i2c:
+  default_address: 0x3C
+  alt_addresses:   [0x3D]
+  max_clock_hz:    400000
+
+signals:
+  - { name: SCL, type: input,  scope: "I2C clock from host" }
+  - { name: SDA, type: bidir,  scope: "I2C data (open-drain)" }
+  - { name: RST, type: input,  scope: "optional hardware reset (active-low)" }
+
+# SoM families this chip is mechanically + electrically compatible with.
+# The EVK populates the SSD1306 on its 35x35 carrier directly off the
+# host SoC's I2C0; AEN / V2N / V2M / NX9 are all wired the same way.
+families:
+  - aen
+  - v2n
+  - v2n-m1
+  - imx93
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_SSD1306
+  baremetal:      ALP_SDK_CHIP_SSD1306
+
+verification:
+  status: "[UNTESTED]"           # paper-correct only; HiL sweep in v0.6
+  silicon_revisions_seen: []
+  hil_pass: false

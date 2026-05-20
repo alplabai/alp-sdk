@@ -1,0 +1,600 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/board.schema.json",
+  "title": "ALP board configuration (board.yaml)",
+  "description": "Schema for a project's board.yaml -- the single configuration file a firmware project supplies.  Describes the board the firmware targets: its name, the SoM mounted on it, the firmware running on each core, the chips populated on the board, and the E1M-pad routing.  Pin + populated declarations are either INLINE (`populated:` + `e1m_routes:` at top level) or by REFERENCE (`preset:` pointing at a shared board definition under `metadata/boards/<preset>.yaml`).  Mixing inline and preset is rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["som", "cores"],
+  "not": {
+    "required": ["os"]
+  },
+  "allOf": [
+    {
+      "description": "`preset:` is mutually exclusive with inline `populated:` / `e1m_routes:`.  Projects without any board declaration (headless / inference-only builds) are also valid -- they get no chip drivers and no E1M-pad routes header.",
+      "not": {
+        "anyOf": [
+          {
+            "allOf": [
+              { "required": ["preset"] },
+              { "required": ["populated"] }
+            ]
+          },
+          {
+            "allOf": [
+              { "required": ["preset"] },
+              { "required": ["e1m_routes"] }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+      "description": "Board name.  Required when the board is defined inline (no `preset:`); used in the generated `include/alp/boards/alp_<name>_routes.h` filename + as the `@brief` board identity in Doxygen.  When `preset:` is used the field is forbidden -- the resolved preset's `name:` carries the board identity."
+    },
+    "description": {
+      "type": "string",
+      "description": "Free-form one-line description of this project / board."
+    },
+    "preset": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "SDK-internal shortcut: reference to a shared board definition at `metadata/boards/<preset>.yaml`.  Used by the SDK's own EVK demo projects under `examples/` to share the EVK + X-EVK definitions without copy-paste.  Customer projects write the board out inline (`name:` + `populated:` + `e1m_routes:` at the top level) -- they don't need to use `preset:`.  When set, the preset's `name`, `populated`, `e1m_routes`, `default_hw_rev`, and `hw_revisions` blocks are pulled in wholesale; mutually exclusive with inline `populated:` / `e1m_routes:`."
+    },
+    "hw_rev": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$",
+      "description": "Board hardware revision.  Optional; the SDK falls back to the preset's `default_hw_rev` (preset mode) or treats the board as unrevisioned (inline mode).  Distinct from `som.hw_rev` which versions the SoM module itself."
+    },
+    "som": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sku"],
+      "description": "SoM identity -- the *module* the board mounts.  On-module components (silicon, on-module radio, secure element, on-module sensors) are fixed at SoM-fab time and cannot be DNI'd after order.",
+      "properties": {
+        "sku": {
+          "type": "string",
+          "pattern": "^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$",
+          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  Recognised: E1M-AEN301/401/501/601/701/801 (Alif Ensemble), E1M-V2N101/V2N102 (Renesas RZ/V2N), E1M-V2M101/V2M102 (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93)."
+        },
+        "hw_rev": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+$",
+          "description": "SoM module hardware revision.  Optional; the SDK falls back to the SKU preset's `default_hw_rev` when omitted."
+        }
+      }
+    },
+
+    "cores": {
+      "type": "object",
+      "description": "Per-core runtime + app mapping.  Keys are canonical core IDs from the SoM preset's `topology:` (e.g. `a55_cluster`, `m33_sm`, `m55_hp`, `m55_he`, `a32_cluster`, `m33`).  The orchestrator fans out one slice per non-`off` entry.  Customer may declare a subset; unspecified cores inherit the preset's `topology:` defaults.  Across-SoM-family swaps (AEN <-> V2N) require updating these keys -- per ADR-0011 cross-family portability is explicitly not a goal.",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]+$": {
+          "$ref": "#/$defs/core_entry"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "populated": {
+      "$ref": "#/$defs/populated",
+      "description": "Inline mode only.  Board-side chip-driver / block-helper population.  Keys match chip-driver / block names; each `true` enables the corresponding CONFIG_ALP_SDK_{CHIP,BLOCK}_<name>=y.  Mutually exclusive with `preset:`."
+    },
+
+    "e1m_routes": {
+      "$ref": "#/$defs/e1m_routes",
+      "description": "Inline mode only.  Authoritative board-side E1M-pad routing.  scripts/gen_board_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.  Mutually exclusive with `preset:`."
+    },
+
+    "pins": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "pattern": "^E1M_(GPIO_IO[0-9]+|I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|I2S[0-9]+|CAN[0-9]+|QENC[0-9]+)$",
+            "description": "Bare E1M pad name (loader looks up the matching macro + doc from the resolved board)."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["e1m"],
+            "properties": {
+              "e1m":   { "type": "string", "pattern": "^E1M_(GPIO_IO[0-9]+|I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|I2S[0-9]+|CAN[0-9]+|QENC[0-9]+)$" },
+              "macro": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$", "description": "C macro the project's source references for this pad (must match the resolved board's `e1m_routes:` entry for the same pad)." },
+              "doc":   { "type": "string", "description": "One-line human-readable label for this pad as the project uses it.  Optional; the loader falls back to the resolved board's `doc:` when omitted." }
+            }
+          }
+        ]
+      },
+      "description": "E1M pads / peripheral instances the project actively uses.  Each entry is either a bare E1M pad name (e.g. `E1M_GPIO_IO4`) or a `{e1m, macro?, doc?}` object that pins the C macro the source references + a one-line label.  The loader cross-checks every entry against the resolved board's `e1m_routes:` block: the `e1m` must exist, and when `macro:` is supplied it must match the board's macro for that pad.  Bare-string and object entries can mix in the same list.  Optional even when `preset:` is set."
+    },
+
+    "ipc": {
+      "type": "array",
+      "description": "Cross-core IPC carve-outs.  Each entry declares a shared-memory region the orchestrator allocates from the SoM preset's `memory_map:` regions whose `accessible_from:` covers every listed endpoint.  Carve-out addresses are computed deterministically and recorded in the system manifest.",
+      "items": {
+        "$ref": "#/$defs/ipc_entry"
+      }
+    },
+
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Project-wide diagnostics configuration (applies to every slice).",
+      "properties": {
+        "last_error": {
+          "type": "boolean",
+          "default": true,
+          "description": "Thread-local alp_last_error() slot.  Disable to save a few bytes of TLS on extremely-tight builds."
+        },
+        "log_level": {
+          "type": "string",
+          "enum": ["error", "warn", "info", "debug", "trace"],
+          "default": "info",
+          "description": "Default log level for every ALP SDK module that does not appear in `modules:` below."
+        },
+        "modules": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["error", "warn", "info", "debug", "trace", "off"]
+          },
+          "description": "Per-module log-level overrides.  Keys match ALP SDK module names (e.g. `alp_iot`, `alp_inference`, `alp_audio`, `alp_security`, `alp_gpio`, ...).  Each value is the same log-level enum as the top-level `log_level`, plus `off` to silence the module entirely.  The loader emits CONFIG_<MODULE>_LOG_LEVEL_<LEVEL>=y per entry into the generated alp.conf."
+        }
+      }
+    },
+
+    "storage": {
+      "type": "array",
+      "description": "Optional flash / persistent-storage partitioning.  Each entry declares one partition: a name, a filesystem (or `raw: true` for unformatted partitions used as OTA slot backing / image cache), a size, an optional mount point, and a flash-device reference into the SoM preset's `memory_map:` or `on_module.ospi_memories:` block.  The loader emits a partial DTS overlay (the `partitions { ... }` node) plus the matching Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS / CONFIG_FAT_FILESYSTEM_ELM / ...) per entry.  See docs/v0.6-tbd-and-assumptions.md -- the emit path lands in v0.6 alongside the deterministic flash-allocator.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "size_kib"],
+        "properties": {
+          "name":         { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Partition label; becomes the DT node name + CONFIG_FS_LITTLEFS_PARTITION_<NAME> stem." },
+          "size_kib":     { "type": "integer", "minimum": 4 },
+          "fs":           { "type": "string", "enum": ["littlefs", "fat", "ext4", "raw"], "default": "raw", "description": "Filesystem to format the partition with.  `raw` leaves it unformatted (e.g. for image slots managed by MCUboot)." },
+          "mount":        { "type": "string", "description": "Mount point at boot.  Optional; when omitted the partition isn't auto-mounted." },
+          "flash_device": { "type": "string", "description": "Region this partition lives in.  References the SoM preset's `memory_map:` name (`mram_main`, `ocram_low`, ...) or an `on_module.ospi_memories:` entry (`ospi0`, ...)." },
+          "raw":          { "type": "boolean", "description": "Legacy alias for `fs: raw`.  Prefer `fs:` directly." }
+        }
+      }
+    },
+
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional security-stack configuration.  Today covers the PSA Crypto persistent-key store + TF-M boundary; future blocks (secure-boot key provisioning, attestation enrolment) land here.",
+      "properties": {
+        "psa": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "PSA Crypto persistent-key storage.  See docs/security-audit-plan.md and ADR-0010 for the cross-core trust-boundary discussion.  v0.6 lands the TF-M sysbuild child image; pre-v0.6 the schema accepts these fields but the emit path is a no-op.",
+          "properties": {
+            "persistent_slots": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 16,
+              "description": "Number of PSA Crypto persistent key slots (emits CONFIG_PSA_CRYPTO_PERSISTENT_SLOT_COUNT)."
+            },
+            "its_storage": {
+              "type": "string",
+              "description": "ITS (Internal Trusted Storage) backing region.  References the SoM preset's `memory_map:` name -- typically `mram_secure` on AEN, `ocram_secure` on V2N."
+            },
+            "ps_storage": {
+              "type": "string",
+              "description": "PS (Protected Storage) backing region.  Optional; references an on-module OSPI / EEPROM region when the customer wants encrypted-at-rest persistence outside the secure MRAM."
+            },
+            "tfm": {
+              "type": "boolean",
+              "default": false,
+              "description": "Enable the TF-M secure-side partition image.  When true the orchestrator emits SB_CONFIG_TFM_BUILD_TYPE + a sysbuild child image; when false PSA Crypto runs entirely non-secure (mbedTLS-only)."
+            },
+            "attestation_root": {
+              "type": "string",
+              "enum": ["optiga_trust_m", "tfm_internal", "none"],
+              "default": "none",
+              "description": "Source of the attestation root key.  `optiga_trust_m` uses the on-module secure element (AEN family); `tfm_internal` keeps the root in TF-M's secure storage; `none` disables attestation."
+            }
+          }
+        }
+      }
+    },
+
+    "boot": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional bootloader + image-signing configuration.  When absent, SDK defaults apply (AEN-Zephyr: MCUboot + ECDSA-P256 + swap-using-scratch + 480 KiB slots; Yocto SoMs: U-Boot inherited from machine.conf).  Project-wide (not per-core): the bootloader is a device-level artifact, not a per-OS choice.  See docs/secure-boot.md.",
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["mcuboot", "none"],
+          "description": "Bootloader strategy.  `mcuboot` pulls MCUboot into the Zephyr build via sysbuild; `none` disables the bootloader (firmware runs unverified -- dev / lab only).  Optional; the SoM family supplies the default (AEN/N93 -> mcuboot, V2N/V2N-M1 -> none on the Zephyr slice since U-Boot owns boot on Linux)."
+        },
+        "signing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["algorithm", "key_file"],
+          "description": "Image-signing configuration.  Required when method is `mcuboot`.",
+          "properties": {
+            "algorithm": {
+              "type": "string",
+              "enum": ["ecdsa_p256", "rsa2048", "rsa3072", "ed25519"],
+              "description": "Image signature algorithm.  Must match the SoM's hardware constraints (e.g. OPTIGA Trust M slot type on AEN)."
+            },
+            "key_file": {
+              "type": "string",
+              "description": "Public key file (PEM) relative to the project root.  Baked into the bootloader; the private half stays in OPTIGA / dev-keys / vault."
+            }
+          }
+        },
+        "slots": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["primary", "secondary"],
+          "description": "Dual-bank image partition layout.  Sizes validated against the SoM preset's `memory_map:` at load time.",
+          "properties": {
+            "primary":   { "type": "object", "additionalProperties": false, "required": ["size_kib"], "properties": { "size_kib": { "type": "integer", "minimum": 32 } } },
+            "secondary": { "type": "object", "additionalProperties": false, "required": ["size_kib"], "properties": { "size_kib": { "type": "integer", "minimum": 32 } } }
+          }
+        },
+        "swap_algorithm": {
+          "type": "string",
+          "enum": ["scratch", "move", "overwrite"],
+          "default": "scratch",
+          "description": "MCUboot swap strategy.  `scratch` (crash-safe, needs scratch partition), `move` (more erases, no scratch), `overwrite` (no rollback)."
+        },
+        "scratch_size_kib": {
+          "type": "integer",
+          "minimum": 16,
+          "default": 32,
+          "description": "Scratch partition size (only when swap_algorithm is `scratch`)."
+        },
+        "anti_rollback": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable monotonic image counters.  Requires OTP fuse provisioning at production time (see docs/secure-boot.md §anti-rollback)."
+        }
+      }
+    },
+
+    "ota": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "description": "Optional OTA configuration.  Project-wide (one device = one OTA orchestration).  See docs/ota.md for the device contract.  Yocto path: Mender; Zephyr path: deferred until the SDK lands its in-tree OTA client (Mender MCU client or Hawkbit, decision pending per ADR 0009).",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["mender", "mcumgr", "none"],
+          "description": "OTA provider.  `mender` for Yocto, `mcumgr` for Zephyr (placeholder until ADR 0009 lands), `none` to disable."
+        },
+        "artifact_name": {
+          "type": "string",
+          "description": "Artifact identifier (e.g. `alp-v0.4-v2n101-build42`).  Required when `provider: mender`."
+        },
+        "signing_key": {
+          "type": "string",
+          "description": "Path to the public key / cert (relative to project root) used to verify OTA artifacts.  Private key never lives here."
+        },
+        "server": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url"],
+          "properties": {
+            "url":           { "type": "string", "format": "uri", "description": "Deployment server URL (Mender / Hawkbit)." },
+            "tenant":        { "type": "string", "description": "Multi-tenancy token / tenant name." },
+            "tls_ca_bundle": { "type": "string", "description": "Optional pinned CA bundle for production.  Path relative to project root." }
+          }
+        },
+        "rollback": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled":     { "type": "boolean", "default": true, "description": "Automatic rollback on health-check failure after update." },
+            "retries":     { "type": "integer", "minimum": 0, "default": 3 },
+            "min_version": { "type": "integer", "minimum": 0, "description": "Anti-downgrade floor.  Reject OTA images claiming version < min_version." }
+          }
+        },
+        "poll_interval_s": {
+          "type": "integer",
+          "minimum": 60,
+          "default": 1800,
+          "description": "How often the device polls the deployment server for updates.  Mender default is 60 s; SDK default is 1800 s (30 min) for battery-friendly nodes."
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Linux/Yocto-only: A/B rootfs partition geometry.  Ignored on Zephyr (MCUboot is slot-based).",
+          "properties": {
+            "device":        { "type": "string", "description": "Base storage device (e.g. `/dev/mmcblk0p`)." },
+            "boot_part_mb":  { "type": "integer", "minimum": 1 },
+            "rootfs_ab":     { "type": "boolean", "default": true },
+            "total_size_mb": { "type": "integer", "minimum": 256 }
+          }
+        }
+      }
+    },
+
+    "chips": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]+$" },
+      "description": "Chip drivers the application links directly via <alp/chips/<name>.h>.  Each entry enables the matching CONFIG_ALP_SDK_CHIP_<NAME>=y.  Shared across cores (project-wide chip population)."
+    },
+
+    "features": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "App-specific feature configuration that doesn't map cleanly onto the strict-typed blocks above.  Free-form map; the loader passes structured entries through to the right backend."
+    }
+  },
+
+  "$defs": {
+    "populated": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "e1m_routes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gpio":  { "$ref": "#/$defs/route_entry_list_gpio" },
+        "buses": { "$ref": "#/$defs/route_entry_list_buses" },
+        "pwm":   { "$ref": "#/$defs/route_entry_list_pwm" },
+        "adc":   { "$ref": "#/$defs/route_entry_list_adc" },
+        "dac":   { "$ref": "#/$defs/route_entry_list_dac" },
+        "i2s":   { "$ref": "#/$defs/route_entry_list_i2s" },
+        "can":   { "$ref": "#/$defs/route_entry_list_can" },
+        "qenc":  { "$ref": "#/$defs/route_entry_list_qenc" }
+      }
+    },
+    "route_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["e1m", "macro"],
+      "properties": {
+        "e1m":         { "type": "string" },
+        "macro":       { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
+        "doc":         { "type": "string", "description": "One-line Doxygen @brief documenting what the pad is wired to on this board." },
+        "active_low":  { "type": "boolean", "description": "Board convention -- pressed/asserted = 0 V.  Documentation only; the app passes ALP_GPIO_ACTIVE_LOW at alp_gpio_open() time if it wants auto-inversion." },
+        "pull":        { "type": "string", "enum": ["up", "down", "none"], "default": "none", "description": "Physical pull-resistor present on the PCB (board-static fact).  Apps still pass the matching ALP_GPIO_PULL_{UP,DOWN} at alp_gpio_open() time -- this field documents what the board ships with, it does not drive the controller's internal pulls." },
+        "debounce_ms": { "type": "integer", "minimum": 0, "description": "RC-debounce time constant in milliseconds for the board's hardware debounce (mostly buttons).  Documentation hint; the app may add software debounce on top." }
+      }
+    },
+    "route_entry_list_gpio": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/route_entry" },
+          { "properties": { "e1m": { "pattern": "^E1M_GPIO_IO[0-9]+$" } } }
+        ]
+      }
+    },
+    "route_entry_list_buses": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/route_entry" },
+          { "properties": { "e1m": { "pattern": "^E1M_(I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+)$" } } }
+        ]
+      }
+    },
+    "route_entry_list_pwm": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/route_entry" },
+          { "properties": { "e1m": { "pattern": "^E1M_PWM[0-9]+$" } } }
+        ]
+      }
+    },
+    "route_entry_list_adc": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/route_entry" },
+          { "properties": { "e1m": { "pattern": "^E1M_ADC[0-9]+$" } } }
+        ]
+      }
+    },
+    "route_entry_list_dac": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/route_entry" },
+          { "properties": { "e1m": { "pattern": "^E1M_DAC[0-9]+$" } } }
+        ]
+      }
+    },
+    "route_entry_list_i2s": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/route_entry" },
+          { "properties": { "e1m": { "pattern": "^E1M_I2S[0-9]+$" } } }
+        ]
+      }
+    },
+    "route_entry_list_can": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/route_entry" },
+          { "properties": { "e1m": { "pattern": "^E1M_CAN[0-9]+$" } } }
+        ]
+      }
+    },
+    "route_entry_list_qenc": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/route_entry" },
+          { "properties": { "e1m": { "pattern": "^E1M_ENC[0-9]+$" } } }
+        ]
+      }
+    },
+    "core_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-core runtime + app slice.  Mirrors the SoM preset's `topology.<id>` shape, with the addition of per-slice app/library/peripheral/inference/iot settings.  EVERY field is optional and inherits from the SoM preset's `topology.<core_id>` defaults when omitted; the customer writes only what differs.",
+      "properties": {
+        "os": {
+          "type": "string",
+          "enum": ["zephyr", "yocto", "baremetal", "off"],
+          "description": "Override the natural runtime for this core.  Optional: the SoM topology already picks the right OS for each core's silicon class (Cortex-M -> Zephyr, Cortex-A -> Yocto Linux).  Write `os:` only to override -- `off` (skip the slice; no app required) or `baremetal` (rare hand-written firmware on a core that normally runs Zephyr)."
+        },
+        "app": {
+          "type": "string",
+          "description": "Path to the app source directory for this core.  Required for `os: zephyr` (must contain prj.conf or CMakeLists.txt), `os: baremetal` (must contain CMakeLists.txt).  For `os: yocto` either `app:` (custom CMake project recipe) or `image:` (override the stock recipe)."
+        },
+        "image": {
+          "type": "string",
+          "description": "Yocto image recipe name (e.g. `alp-image-edge`).  Used when `os: yocto` and no custom `app:` is supplied."
+        },
+        "peripherals": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Peripheral subsystems this slice uses directly via the matching <alp/<class>.h> wrapper.  Each entry enables the corresponding Zephyr Kconfig / Yocto package at build time.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "adc", "can", "counter", "emmc", "ethernet", "flash",
+              "gpio", "i2c", "i2s", "pwm", "rtc", "sensor", "spi",
+              "uart", "usb", "watchdog"
+            ]
+          }
+        },
+        "libraries": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Libraries available to this slice's app code.  The SDK adds the library's include path + the matching compile-time profile.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "etl", "fmt", "nlohmann_json", "doctest", "lvgl",
+              "mbedtls", "cmsis_dsp", "littlefs", "tflite_micro",
+              "u8g2", "gfx_compat", "madgwick_ahrs", "pid", "modbus",
+              "coremqtt_sn", "libcoap", "tinygsm", "nanopb",
+              "libwebsockets", "jsmn", "bearssl", "minimp3", "opus",
+              "libhelix", "catch2"
+            ]
+          }
+        },
+        "memory": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-slice memory tuning.  Optional; the SoC's Kconfig defaults apply when omitted.",
+          "properties": {
+            "stack_kib": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Main thread stack size in KiB.  Zephyr: emits CONFIG_MAIN_STACK_SIZE=<bytes> into the slice's alp.conf.  Yocto: ignored (kernel-side stack sized by the kernel)."
+            },
+            "heap_kib": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Heap pool size in KiB.  Zephyr: emits CONFIG_HEAP_MEM_POOL_SIZE=<bytes>.  Yocto: ignored."
+            },
+            "isr_stack_kib": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "ISR stack size in KiB.  Zephyr only; emits CONFIG_ISR_STACK_SIZE."
+            }
+          }
+        },
+        "power": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-slice power-management profile.  Optional; conservative defaults apply when omitted.  Maps to the SoM's PMIC + Zephyr PM subsystem knobs.",
+          "properties": {
+            "sleep_mode": {
+              "type": "string",
+              "enum": ["disabled", "idle", "standby", "deep"],
+              "default": "disabled",
+              "description": "Lowest sleep state the slice is allowed to enter.  Zephyr: enables CONFIG_PM + CONFIG_PM_DEVICE; selects the corresponding PM_STATE_* hierarchy.  `disabled` = always-on (default); `deep` = lowest-power retention state the silicon supports."
+            },
+            "wakeup_sources": {
+              "type": "array",
+              "uniqueItems": true,
+              "description": "Peripherals / IRQ lines allowed to wake the slice from sleep.  Each entry is a peripheral subsystem name (`uart`, `gpio`, `rtc`, `i2c`, ...) or an `E1M_*` pad name.  The loader maps to the matching `CONFIG_PM_DEVICE_WAKE_*` Kconfig per silicon family.",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "inference": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-slice inference tuning.  Backend selection is NOT a field here -- silicon capability is dictated by the SoM preset's `capabilities:` matrix and the SDK compiles in every dispatcher the SoM supports.  Apps pick per-handle at runtime via alp_inference_open(.backend=...), enabling concurrent multi-NPU dispatch on V2M101 (DRP-AI3 + DEEPX DX-M1).  This block carries app-level tuning only (memory arena size).",
+          "properties": {
+            "default_arena_kib": {
+              "type": "integer",
+              "minimum": 16,
+              "default": 128,
+              "description": "Per-model TFLM scratch arena size in KiB.  App-level memory budget; not silicon-determined."
+            }
+          }
+        },
+        "iot": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Connectivity feature toggles for this slice.",
+          "properties": {
+            "wifi": { "type": "boolean", "default": false },
+            "mqtt": { "type": "boolean", "default": false },
+            "ble":  { "type": "boolean", "default": false },
+            "tls":  { "type": "boolean", "default": false }
+          }
+        }
+      }
+    },
+    "ipc_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "endpoints", "carve_out_kb", "name"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["rpmsg", "raw_shmem", "mailbox_only"],
+          "description": "IPC channel kind.  `rpmsg` rides OpenAMP; `raw_shmem` is plain shared memory + custom synchronisation; `mailbox_only` is doorbell + signal only (no shared memory)."
+        },
+        "endpoints": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]+$"
+          },
+          "description": "Core IDs participating in this channel.  Must all be present in `cores:` with `os != off`."
+        },
+        "carve_out_kb": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Shared-memory region size in KiB requested for this channel.  The orchestrator allocates from the SoM preset's `memory_map:` regions whose `accessible_from:` covers every endpoint."
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Channel identifier (e.g. `alp_default_rpmsg`).  Used as the carve-out label in DT reservations + as the RPMsg name-service tag."
+        },
+        "cacheable": {
+          "type": "boolean",
+          "description": "Override the default cacheable hint.  Default carve-out is non-cacheable (cf. spec §6.8)."
+        },
+        "address": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Explicit base address override.  Normally the orchestrator allocates an address from the memory map; setting this pins the carve-out."
+        }
+      }
+    }
+  }
+}

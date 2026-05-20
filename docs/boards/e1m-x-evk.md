@@ -1,6 +1,6 @@
 # E1M-X Development Board — SDK reference
 
-Carrier board for the **E1M-X** form factor (45 × 65 mm) — hosts
+Board for the **E1M-X** form factor (45 × 65 mm) — hosts
 the Renesas RZ/V2N family (`E1M-V2N101`, `E1M-V2N102`,
 `E1M-V2M101`, `E1M-V2M102`) and any future E1M-X conformant SoM.
 
@@ -20,7 +20,7 @@ strap settings land when the user supplies them.
 ## Schematic-sheet inventory (per the Altium project)
 
 The E1M-X dev board V1 schematic is split across the following
-sheets — each is a discoverable feature block on the carrier:
+sheets — each is a discoverable feature block on the board:
 
 | Sheet                          | Block                                                         |
 |--------------------------------|---------------------------------------------------------------|
@@ -81,7 +81,7 @@ deltas (verify when the HW config writeup lands):
 ## Pending from the user
 
 - Authoritative pad-by-pad routing (which E1M-X pad maps to which
-  feature on the carrier).
+  feature on the board).
 - I²C addresses for any on-board sensors / IO expanders / current
   monitors.
 - Boot-strap dipswitch positions for V2N vs V2N-M1.

@@ -22,7 +22,7 @@ schema_version: 1
 name: uart-echo
 description: |
   Confirms UART open / read-with-timeout / write end-to-end on the
-  carrier's console UART.
+  board's console UART.
 
 example: examples/uart-echo
 

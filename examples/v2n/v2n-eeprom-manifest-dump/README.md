@@ -55,7 +55,7 @@ attempting to deploy firmware to it.
 
 The example's `board.yaml` declares the EEPROM at the V2N default
 bus (E1M_I2C0) + address (`0x50`).  Change those values if your
-carrier wires the EEPROM elsewhere.
+board wires the EEPROM elsewhere.
 
 ## See also
 

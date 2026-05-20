@@ -74,7 +74,7 @@ are not interchangeable, by design:
 - Different SoC architecture (single-die M-class vs
   heterogeneous A+M).
 - Different NPU choices (Ethos-U / DEEPX DX-M1 / DRP-AI).
-- Different carrier connector pinout
+- Different board connector pinout
   (`pinout/v1.json` vs `pinout/x-v1.json` in the e1m-spec
   repo).
 
@@ -98,13 +98,13 @@ are the *only* allowed source of divergence:
 | Line family                                  | Differs how                                            |
 | -------------------------------------------- | ------------------------------------------------------ |
 | `CONFIG_ALP_SOC_ALIF_ENSEMBLE_{E3..E8}=y`    | one variant per AEN SKU                                |
-| `CONFIG_ALP_SDK_CHIP_<NAME>=y`               | per on-module / on-carrier population                  |
+| `CONFIG_ALP_SDK_CHIP_<NAME>=y`               | per on-module / on-board population                  |
 | `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y` | per silicon NPU population (G-1 selector)          |
 | `CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y` | per CPU class on the slice (G-2 selector)       |
 
-The carrier-populated chips (`BMI323`, `LSM6DSO`, `TCAL9538`,
+The board-populated chips (`BMI323`, `LSM6DSO`, `TCAL9538`,
 ...) are byte-identical across every SKU in a family -- the
-carrier abstraction decouples SoM swap from carrier population,
+board abstraction decouples SoM swap from board population,
 as designed.
 
 For the cookbook (validation steps, lint flow, common gotchas

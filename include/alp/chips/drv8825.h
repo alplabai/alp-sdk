@@ -7,7 +7,7 @@
  * @file drv8825.h
  * @brief TI DRV8825 bipolar stepper motor driver.
  *
- * Step/dir-driven bipolar stepper carrier-board control surface.
+ * Step/dir-driven bipolar stepper board-board control surface.
  * The driver orchestrates STEP (PWM) + DIR (GPIO) + nENBL (GPIO)
  * + the three microstep-select pins M0/M1/M2 (GPIO).  No on-chip
  * register file.

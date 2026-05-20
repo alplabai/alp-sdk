@@ -134,7 +134,7 @@ Building for an Alif Ensemble EVK?
 │         → our default workspace works.  Upstream Zephyr v4.4
 │           ships these in tree; the top-level hal_alif import
 │           gives you the HAL drivers.  west build -b <name>/<qualifier>.
-├── Carrier-specific design (E1M-X SoM + custom carrier)
+├── Board-specific design (E1M-X SoM + custom board)
 │         → keep the default workspace; ship your own board file
 │           under alplabai/alp-zephyr-modules with the alp,pin-array
 │           slot defines.  hal_alif via west update is sufficient.

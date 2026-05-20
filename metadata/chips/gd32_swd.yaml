@@ -17,7 +17,7 @@ datasheet:
 notes: |
   The companion GD32G553MEY7TR on V2N / V2N-M1 carries the standard
   Arm Coresight SWD debug port.  Per the 2026-05-12 hardware
-  decision the V2N carrier routes GD32_SWDIO + GD32_SWCLK + GD32_NRST
+  decision the V2N board routes GD32_SWDIO + GD32_SWCLK + GD32_NRST
   back to the Renesas RZ/V2N host so the host can reflash the
   supervisor MCU in the field without an external probe.
 

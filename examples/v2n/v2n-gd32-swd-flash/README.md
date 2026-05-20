@@ -32,15 +32,15 @@ bridge image, factory first-flash, dev-board bring-up).
 8. `gd32_swd_reset_and_run` releases the core via HW NRST pulse
    (when wired) or AIRCR.SYSRESETREQ otherwise.
 
-## Pin model + carrier dependency
+## Pin model + board dependency
 
 The SWD pin assignments on V2N are **TBD** in the schematic
 (per `metadata/chips/gd32_swd.yaml`).  The example uses
 studio-resolved pin ids — `alp_gpio_open` returns NULL if the
-carrier preset hasn't routed the lines yet, and the example exits
+board preset hasn't routed the lines yet, and the example exits
 cleanly with a log message rather than wedging the host.
 
-If your carrier wires the SWD lines to non-default pads, override
+If your board wires the SWD lines to non-default pads, override
 the three `pin_id` constants at the top of `src/main.c` (or extend
 `board.yaml` with the studio routing for your custom pad mapping).
 
@@ -65,10 +65,10 @@ sector; the driver rounds out to sector boundaries automatically.
 [swd] done
 ```
 
-## Expected output (carrier hasn't routed SWD yet)
+## Expected output (board hasn't routed SWD yet)
 
 ```
-[swd] alp_gpio_open failed (SWDIO + SWCLK required); carrier may not have routed SWD lines yet
+[swd] alp_gpio_open failed (SWDIO + SWCLK required); board may not have routed SWD lines yet
 [swd] done
 ```
 

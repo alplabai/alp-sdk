@@ -72,7 +72,7 @@ helper_firmware: []
 
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
-default_carrier:        E1M-EVK                # 35x35 carrier same as AEN family
+default_board:        E1M-EVK                # 35x35 board same as AEN family
 
 status:
   preliminary:          true                   # production SKU + BOM choices TBD

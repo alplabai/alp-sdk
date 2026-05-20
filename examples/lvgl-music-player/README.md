@@ -16,7 +16,7 @@ UI with the SDK's audio chain (`<alp/i2s.h>` + a WM8960 codec).
 ## Hardware needed
 
 - E1M-AEN family SoM.
-- E1M-EVK carrier with the audio breakout board.
+- E1M-EVK board with the audio breakout board.
 - 240 x 320 ST7789 TFT.
 - Wolfson WM8960 audio codec + headphone jack.
 

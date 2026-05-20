@@ -3,8 +3,8 @@
 Reference applications that exercise E1M-AEN-family-only
 hardware (Alif Ensemble E7 dual-M55 + Ethos-U55 NPU, on-module
 ISP / camera path, GPU2D).  Build any of these against an
-E1M-AEN SoM populated on the E1M-EVK carrier; the per-example
-`board.yaml` carries the exact SKU + carrier.
+E1M-AEN SoM populated on the E1M-EVK board; the per-example
+`board.yaml` carries the exact SKU + board.
 
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|

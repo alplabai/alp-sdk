@@ -13,9 +13,9 @@
 #      §6.1 "Determinism" clause requires re-running the build to
 #      produce identical layouts so CI can diff.
 #
-# CAVEAT: the `west alp-build` command + `board-config-v2.schema.json`
-# this workflow consumes don't exist yet -- they land in Phase 2 + 1
-# respectively.  Until then every leg fails at step (d).  That's
+# CAVEAT: the `west alp-build` command this workflow consumes
+# doesn't exist yet -- it lands in Phase 2.  Until then every leg
+# fails at step (d).  That's
 # intentional; the workflow's YAML structure ships now so Phase 2's
 # PR can flip these legs green without touching CI.
 #

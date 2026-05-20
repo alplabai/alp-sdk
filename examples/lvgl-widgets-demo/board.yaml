@@ -6,17 +6,15 @@
 # point `som.sku` at your AEN MPN, attach a 240x320 ST7789 TFT to
 # the E1M-EVK SPI0 + GPIO IO0 (D/C) + GPIO IO1 (reset) pads, and
 # `west build`.
-
-schema_version: 2
-
 som:
   sku: E1M-AEN701           # E7 has the Cortex-A32 + 13.5 MB SRAM that
                              # LVGL widgets needs comfortably.
 
-carrier:
-  name: E1M-EVK
+preset: e1m-evk
 
-# Single-OS app -- M55-HP drives LVGL + display.  A32 cluster off.
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_SPI1, macro: EVK_SPI_BUS_ARDUINO, doc: "Arduino UNO header SPI; terminates on the on-module CC3501E, not the main SoC" }
 cores:
   a32_cluster:
     os: "off"

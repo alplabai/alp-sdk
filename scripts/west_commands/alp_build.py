@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-`west alp-build` -- fan out a board.yaml v2 project into one
+`west alp-build` -- fan out a board.yaml project into one
 build slice per non-`off` core.
 
 Replaces the v1 single-OS `west alp-build` (which only ever
@@ -54,7 +54,7 @@ class AlpBuild(WestCommand):
     def __init__(self) -> None:
         super().__init__(
             "alp-build",
-            "Fan out a board.yaml v2 project into per-core build slices",
+            "Fan out a board.yaml project into per-core build slices",
             ("\n".join(__doc__.splitlines()[2:])
              if __doc__ else ""),
         )

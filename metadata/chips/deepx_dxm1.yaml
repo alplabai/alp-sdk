@@ -22,7 +22,7 @@ bus:              "pcie + i2c"        # control surface uses PCIe; host-side
                                       # DEEPX SDK).
 control_lines:
   - { name: M1_RESET,     direction: output, v2n_route: "Renesas PA6", notes: "polarity TBD per DEEPX datasheet" }
-  - { name: PCIe.MUX_PD,  direction: output, v2n_route: "Renesas P80 via pi3dbs12212", notes: "active-high; carrier sets via the chips/pi3dbs12212 driver" }
+  - { name: PCIe.MUX_PD,  direction: output, v2n_route: "Renesas P80 via pi3dbs12212", notes: "active-high; board sets via the chips/pi3dbs12212 driver" }
   - { name: PCIe.MUX_SEL, direction: output, v2n_route: "Renesas P95 via pi3dbs12212", notes: "DEEPX_path mapped to PI3DBS_STATE_PATH_0 per metadata/chips/pi3dbs12212.yaml" }
 
 upstream:

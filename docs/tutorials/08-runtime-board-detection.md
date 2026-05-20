@@ -74,7 +74,7 @@ single-source-of-truth for "what was this firmware intended for?"
 
 * A unit relabelled or swapped post-production -- caught by the
   manifest read + assert.
-* A SoM in the wrong carrier -- the carrier's BOARD_ID ADC will
+* A SoM in the wrong board -- the board's BOARD_ID ADC will
   read a value the firmware doesn't expect.
 * A schematic respin between hw_rev r1 and r2 where pin moves
   matter -- caught by the SoM-side BOARD_ID ADC + the

@@ -3,23 +3,10 @@
 #
 # Targets AEN-Zephyr; the peer-side (M55-HE) firmware lands
 # alongside the v0.4 dual-image build flow.
-
-schema_version: 2
-
 som:
   sku: E1M-AEN701
 
-carrier:
-  name: E1M-EVK
-
-# M55-HP runs the producer source under ./src.  M55-HE keeps the
-# SoM topology default (stock Zephyr shim) so the on-die peer is
-# alive and discoverable when the producer opens the mailbox; the
-# AEN E7 on-die M55-HP <-> M55-HE pair is the canonical single-SoC
-# mproc demo.  CONFIG_ALP_SDK_MPROC=y is supplied via testcase.yaml's
-# `extra_args` -- the per-core `peripherals:` enum is for Zephyr
-# driver-class subsystems (adc/can/i2c/spi/...), not for SDK
-# feature toggles, so mproc rides extra_args instead.
+preset: e1m-evk
 cores:
   m55_hp:
     app: ./src

@@ -62,8 +62,8 @@ as the NPU integration matures.
 | Symptom                                              | Cause + fix                                                            |
 |------------------------------------------------------|------------------------------------------------------------------------|
 | `da9292_v2n_m1_enable_deepx_rail` -> `ALP_ERR_TIMEOUT` | 0.75 V plane shorted; probe the rail directly.                       |
-| DEEPX rails up but PCIe link never trains            | `M1_RESET` polarity wrong -- the driver default is active-low; carrier may need override via `deepx_dxm1_set_reset_polarity`. |
-| PCIe link trains but kernel driver reports BAR errors| PCIe muxes on the wrong path -- check `PI3DBS_STATE_PATH_0` matches your carrier's silk-screen. |
+| DEEPX rails up but PCIe link never trains            | `M1_RESET` polarity wrong -- the driver default is active-low; board may need override via `deepx_dxm1_set_reset_polarity`. |
+| PCIe link trains but kernel driver reports BAR errors| PCIe muxes on the wrong path -- check `PI3DBS_STATE_PATH_0` matches your board's silk-screen. |
 | `dxrt_init()` returns an error                       | Check the DEEPX kernel driver (`dx_rt_npu_linux_driver`) is loaded.    |
 
 ## See also

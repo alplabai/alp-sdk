@@ -56,7 +56,7 @@ trees.
 
 ```
 examples/rpmsg-v2n/
-├── board.yaml                       (v2; declares a55_cluster + m33_sm)
+├── board.yaml                       (declares a55_cluster + m33_sm)
 ├── README.md
 ├── linux/                           (a55_cluster's app)
 │   ├── CMakeLists.txt
@@ -80,15 +80,11 @@ split is opt-in per project.
 Here's a complete V2N `board.yaml` v2:
 
 ```yaml
-schema_version: 2
-
 som:
   sku: E1M-V2N101
   hw_rev: r1
 
-carrier:
-  name: E1M-X-EVK
-
+preset: e1m-x-evk
 cores:
   a55_cluster:
     app: ./linux         # os: omitted -- A-cores default to yocto per SoM topology
@@ -163,7 +159,7 @@ the full pattern.
   per programmable core.
 - Top-level `peripherals:` / `libraries:` / `inference:` / `iot:`
   move **per-core** under `cores.<id>`.
-- `carrier.populated:` + `chips:` and `diagnostics:` are
+- `board.populated:` + `chips:` and `diagnostics:` are
   **unchanged** — they describe physical assembly + project-wide
   diagnostics respectively.
 
@@ -235,7 +231,7 @@ west alp-build examples/rpmsg-v2n
 
 The orchestrator:
 
-1. Loads + validates `board.yaml` against the v2 schema.
+1. Loads + validates `board.yaml` against the board.yaml schema.
 2. Resolves the SoM preset → topology defaults → effective per-core
    mapping.
 3. For each core with `os: != off`, materialises per-core config

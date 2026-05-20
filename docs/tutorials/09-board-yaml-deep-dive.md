@@ -4,12 +4,12 @@
 
 **Target audience:** developers who've shipped one ALP SDK build
 and want to understand every knob in `board.yaml`, including
-the custom-carrier flow.
+the custom-board flow.
 
 **Prerequisites:** Tutorial [01](01-first-build.md) completed.
 
 **Outcome:** confident hand-authoring of `board.yaml` for any
-SoM / carrier combination, including custom carriers.  Understand
+SoM / board combination, including custom boards.  Understand
 when each block is required, when the defaults suffice, and how
 the loader translates each block into backend config.
 
@@ -24,37 +24,27 @@ firmware project targets.  Every backend's config -- Zephyr's
 `alp.conf`, plain-CMake `-D` flags, Yocto's `local.conf` -- is
 **derived** from it by `scripts/alp_project.py` +
 `scripts/alp_orchestrate.py`.  The schema lives at
-[`metadata/schemas/board-config-v2.schema.json`](../../metadata/schemas/board-config-v2.schema.json);
+[`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json);
 this tutorial walks every top-level block.
 
 ## Required vs optional
 
 Required (the loader rejects a `board.yaml` missing any of these):
 
-- `schema_version: 2`
 - `som.sku`
 - `cores:` (mapping of core_id → `{ os, ... }`); every non-`off`
   core needs at least `os:` + (for Zephyr / baremetal) `app:`
+- One of:
+  - top-level `name:` plus `populated:` / `e1m_routes:` (inline mode,
+    customer projects), OR
+  - top-level `preset:` (SDK-internal shortcut used by the EVK
+    demos at `examples/`)
 
-Everything else is optional.  `carrier.name` is optional but
-strongly recommended (without it, the loader can't pull a
-populated-chips preset).  Adding any per-core or top-level block
-adds capability; omitting it falls back to defaults pulled from
+Everything else is optional.  Adding any per-core or top-level
+block adds capability; omitting it falls back to defaults pulled from
 the SoM preset's `topology:` block.
 
 ## Block-by-block walkthrough
-
-### `schema_version`
-
-```yaml
-schema_version: 2
-```
-
-Bumped to `2` in v0.6 when heterogeneous orchestration landed
-(top-level `os:` → per-core `cores.<id>.os:`).  The v1 schema is
-no longer accepted; see
-[`docs/heterogeneous-builds.md`](../heterogeneous-builds.md)
-§"Migrating from v1" for the mechanical translation.
 
 ### `som`
 
@@ -80,48 +70,127 @@ If the customer's SDK version is older than the rev's
 `min_sdk_version`, the loader exits with code 3.  Always pin
 `hw_rev` for production; omit for bring-up convenience.
 
-### `carrier`
+### Board declaration
+
+The board the firmware targets is declared at the **top level**
+of `board.yaml`, with two mutually-exclusive modes:
+
+**Inline (the customer path).**  Self-contained, no indirection
+-- write your board out in the same file:
 
 ```yaml
-carrier:
-  name: E1M-EVK            # required (or inline `populated`)
-  populated:               # optional override on top of the preset
-    button_led: true
-    bme280:    false
+name: my-sensor-board       # required when going inline
+description: "..."          # optional, free-form
+hw_rev: r1                  # optional board hardware revision
+
+populated:                  # chips populated on this board
+  bmi323:   true
+  ssd1306:  true
+  rv3028c7: true
+
+e1m_routes:                 # E1M-pad -> board-side macro
+  gpio:
+    - { e1m: E1M_GPIO_IO15, macro: PIN_BMI323_INT1,
+        doc: "BMI323 INT1 (data-ready / motion / FIFO)." }
+  buses:
+    - { e1m: E1M_I2C0, macro: I2C_BUS_SENSORS,
+        doc: "Shared sensor bus." }
+  pwm:
+    - { e1m: E1M_PWM3, macro: PWM_LED_RED,
+        doc: "Status LED red channel." }
 ```
 
-`name` resolves to a preset at
-`metadata/carriers/<name>/board.yaml`.  The SDK ships:
+Each `populated.<name>: true` enables the matching
+`CONFIG_ALP_SDK_CHIP_<NAME>=y` (or
+`CONFIG_ALP_SDK_BLOCK_<NAME>=y` for the SDK-level helpers
+`button_led` / `pdm_mic`).  Bus addresses and pin assignments
+live in the chip-driver metadata under
+`metadata/chips/<name>.yaml`; `e1m_routes:` is the canonical
+source for E1M-pad → board-side macro names that hand-written
+firmware references (`PIN_*`, `I2C_BUS_*`, `PWM_*`).
+`scripts/gen_board_header.py` reads `e1m_routes:` and emits
+`include/alp/boards/alp_<name>_routes.h` automatically.
 
-- `E1M-EVK` -- 35×35 reference carrier for AEN + N93.
-- `E1M-X-EVK` -- 45×65 reference carrier for V2N + V2N-M1.
-- `custom-example` -- copy-friendly template.
-
-`populated` is an additive override on top of the carrier
-preset's populated block.  Use `true` / `false` to opt chip
-drivers in / out per the customer's specific assembly.  Each
-`true` becomes `CONFIG_ALP_SDK_CHIP_<NAME>=y` in the generated
-`alp.conf`.
-
-**Custom carrier without a preset:** drop `name` entirely and
-declare the populated chips inline:
-
-```yaml
-carrier:
-  populated:
-    bmi323:   true
-    ssd1306:  true
-    rv3028c7: true
-```
-
-Each `true` enables the matching `CONFIG_ALP_SDK_CHIP_<NAME>=y`
-and links the chip driver from `chips/<name>/`.  Bus addresses
-and pin assignments live in the chip-driver metadata under
-`metadata/chips/<name>.yaml` (resolved against the SoM preset's
-`i2c_devices:` block), not in `board.yaml` itself.  For custom
-pad mappings, layer a devicetree overlay -- emit a starter via
+For custom pad mappings layered on top of the SoM-provided
+defaults, emit a starter devicetree overlay via
 `python3 scripts/alp_project.py --input board.yaml --emit dts-overlay`
 and hand-edit from there.
+
+**Preset (SDK-internal shortcut).**  The 41 example projects in
+this repo all target the EVK + X-EVK, so they share a single
+shared board definition via `preset:`:
+
+```yaml
+preset: e1m-evk             # or e1m-x-evk
+```
+
+The resolved preset lives at `metadata/boards/<name>.yaml` and
+supplies `name`, `populated`, `e1m_routes`, `default_hw_rev`,
+and `hw_revisions` wholesale.  Customer projects don't need this
+-- write your board inline as above so the file is
+self-contained -- but you can use a shared preset if your fleet
+of firmware projects all target one physical board.
+
+The SDK ships these shared presets:
+
+- `e1m-evk` -- 35×35 reference board for AEN + N93.
+- `e1m-x-evk` -- 45×65 reference board for V2N + V2N-M1.
+- `custom-example` -- copy-friendly template (use `cp` on the
+  file contents into your own project's `board.yaml`).
+
+When `preset:` is set, you cannot ALSO carry inline
+`populated:` / `e1m_routes:` -- the schema rejects mixing.
+
+### `pins` (optional E1M-pad usage list)
+
+```yaml
+pins:
+  - { e1m: E1M_GPIO_IO4, macro: EVK_PIN_ENCODER_SW, doc: "user button" }
+  - { e1m: E1M_PWM3,     macro: EVK_PWM_LED_RED,    doc: "red status LED" }
+  - E1M_I2C0                                                       # bare form OK
+```
+
+Optional top-level array.  Names the E1M pads / peripheral
+instances the project actively touches.  Most useful in preset
+mode, where the resolved board defines the full wiring but
+readers can't tell which subset this particular firmware uses
+without diving into the source.  Listing them here surfaces the
+project's hardware usage in one place.
+
+Each entry is either a bare E1M pad name (e.g. `E1M_GPIO_IO4`)
+or a `{e1m, macro?, doc?}` mapping that pins the C macro the
+source actually references plus a one-line label.  Bare-string
+and object entries can mix in the same list.
+
+The loader cross-checks every entry against the resolved board's
+`e1m_routes:` block: the `e1m` must exist, and when `macro:` is
+supplied it must match the board's macro for that pad.  Typos
+and stale macro names error out at validate time.
+
+### Pin direction (NOT in `board.yaml`)
+
+`board.yaml` describes the **wiring** (pad ↔ feature) and
+**board-static electrical facts** (`active_low`, `pull`,
+`debounce_ms`); it does NOT describe pin direction.
+
+Pin direction is a per-app runtime choice -- set at the
+`alp_gpio_open()` call site by the firmware:
+
+```c
+alp_gpio_t *btn = alp_gpio_open(EVK_PIN_ENCODER_SW,
+                                ALP_GPIO_INPUT | ALP_GPIO_INT_EDGE_FALLING);
+alp_gpio_t *led = alp_gpio_open(EVK_PWM_LED_RED, ALP_GPIO_OUTPUT);
+```
+
+For peripheral use (UART / SPI / I²C / PWM / …) the
+`alp_<class>_open()` call muxes the pads to the right function
+automatically; the app doesn't say "TX is output" by hand.
+
+The reason direction stays in the firmware: the same pad can
+have multiple legitimate directions in different apps.  The
+drone-autopilot uses `E1M_PWM3` as a PWM output driving an ESC
+channel; gpio-button-led uses the same pad as a GPIO output
+driving the red status LED.
 
 ### `cores.<id>.os` (per-core runtime)
 
@@ -180,7 +249,7 @@ Higher-level concerns ride other paths: audio is composed from
 `i2s` + a codec chip driver; inference / IoT / BLE / security /
 mproc / DSP / GPU2D have dedicated `<alp/...>` surfaces wired
 in via `libraries:`, `iot:`, `inference:`, or by enabling the
-chip-driver under `carrier.populated:`.
+chip-driver under `board.populated:`.
 
 Omit the block entirely if your slice uses no peripherals
 (rare; most apps need at least `gpio`).
@@ -254,7 +323,7 @@ APIs):
 - `littlefs`    -- LittleFS
 - `tflite_micro`, `pid`, `modbus`, `nanopb`, ... -- see the
   full enum in
-  [`metadata/schemas/board-config-v2.schema.json`](../../metadata/schemas/board-config-v2.schema.json).
+  [`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json).
 
 ### `chips` (top-level, opt-in chip drivers)
 
@@ -272,7 +341,7 @@ matching `CONFIG_ALP_SDK_CHIP_<NAME>=y`.  Shared across cores
 Two ways a chip ends up enabled in the build:
 
 1. **Opt-in** -- the customer lists the driver here.  Used for
-   chips populated on a custom carrier or hand-soldered onto a
+   chips populated on a custom board or hand-soldered onto a
    stock one.
 2. **Auto-enabled from `on_module:`** -- the SoM preset's
    `on_module:` block declares every chip soldered onto the
@@ -313,26 +382,25 @@ diagnostics:
 Sets the SDK's log verbosity.  Maps to Zephyr's
 `CONFIG_LOG_DEFAULT_LEVEL` + the Yocto-side `LOG_LEVEL` env var.
 
-## Worked example: custom IoT carrier on AEN
+## Worked example: custom IoT board on AEN
 
-A custom carrier that doesn't match any shipped preset, with
+A custom board that doesn't match any shipped preset, with
 BLE + MQTT-TLS + LVGL display:
 
 ```yaml
-schema_version: 2
+name: my-iot-board       # inline board: required when no `preset:`
 
 som:
   sku:    E1M-AEN701
   hw_rev: r1
 
-carrier:
-  populated:
-    bme280:     true
-    ssd1306:    true
-    button_led: true
-  # Bus addresses + pad aliases live in chip-driver metadata
-  # + devicetree overlays; see the `### carrier` section above
-  # for the contract.  board.yaml itself stays declarative.
+populated:
+  bme280:     true
+  ssd1306:    true
+  button_led: true
+# Bus addresses + pad aliases live in chip-driver metadata
+# + devicetree overlays; see the `### board` section above
+# for the contract.  board.yaml itself stays declarative.
 
 cores:
   m55_hp:

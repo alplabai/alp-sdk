@@ -5,7 +5,7 @@
  * SBUS receiver decoder.  SBUS is Futaba's 16-channel digital RC
  * protocol.  Each frame is 25 bytes long, sent every 7-14 ms at
  * 100000 baud / 8E2 / inverted.  This decoder runs on the host
- * SoC + assumes the carrier provides the polarity inverter.
+ * SoC + assumes the board provides the polarity inverter.
  */
 
 #ifndef DRONE_AUTOPILOT_SBUS_H

@@ -115,7 +115,7 @@ int autopilot_init(autopilot_state_t *s)
                     /*adcrange=*/INA236_ADCRANGE_81MV) != ALP_OK) return -4;
 
     /* GNSS + SBUS RC.  Both are UART; SBUS expects 100000/8E2 inverted
-     * but most carriers + Zephyr UART drivers don't expose the inverted
+     * but most boards + Zephyr UART drivers don't expose the inverted
      * polarity directly -- customers wire an external inverter or use
      * a microcontroller-side inverter chip. */
     s_gps_uart = alp_uart_open(&(alp_uart_config_t){

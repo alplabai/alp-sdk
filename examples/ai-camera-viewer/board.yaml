@@ -7,21 +7,18 @@
 # The headline marketing demo: shows the full edge-AI stack end
 # to end on a single SoM, with the right NPU resolved by the
 # §D.lib.loader from the SKU's `capabilities:` block.
-
-schema_version: 2
-
 som:
   sku: E1M-AEN701           # E7 -- two Ethos-U55s; the SoM `capabilities:`
                              # block (ethos_u55_count: 2) drives
                              # CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y +
                              # CONFIG_ALP_TFLM_ETHOS_U55=y automatically.
 
-carrier:
-  name: E1M-EVK
+preset: e1m-evk
 
-# Single-OS app on AEN701.  M55-HP runs camera capture, LVGL UI, and
-# NPU dispatch.  A32 cluster off (no Linux here); M55-HE inherits
-# the SoM topology's stock-shim so the second NPU stays paired.
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
+  - { e1m: E1M_SPI1, macro: EVK_SPI_BUS_ARDUINO, doc: "Arduino UNO header SPI; terminates on the on-module CC3501E, not the main SoC" }
 cores:
   a32_cluster:
     os: "off"

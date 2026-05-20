@@ -49,7 +49,7 @@ typedef struct {
 } drone_telemetry_t;
 
 /** Bring up every chip + library this demo touches.  Tolerates
- *  partially-populated carriers (missing chip -> log + continue).
+ *  partially-populated boards (missing chip -> log + continue).
  *  @return 0 on full bring-up, non-zero if any chip failed. */
 int drone_sensors_init(drone_telemetry_t *telem);
 

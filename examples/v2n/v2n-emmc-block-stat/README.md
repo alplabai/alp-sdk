@@ -13,7 +13,7 @@ the eMMC.
 
 1. `disk_access_init("SD")` mounts the eMMC + reads its
    CSD (Card-Specific Data).  `"SD"` is the default Zephyr name
-   for the SD0 controller; carriers can override with
+   for the SD0 controller; boards can override with
    `-DEMMC_DISK_NAME=...`.
 2. `disk_access_ioctl(GET_SECTOR_SIZE)` +
    `disk_access_ioctl(GET_SECTOR_COUNT)` give the geometry.

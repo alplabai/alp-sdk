@@ -11,7 +11,7 @@
  * V2N's eMMC sits on the SD0 controller (per
  * metadata/e1m_modules/v2n/renesas-peripheral-map.tsv).  The Zephyr
  * disk-access subsystem mounts it under the name `SD` by default --
- * carriers that want a different alias can rename in their
+ * boards that want a different alias can rename in their
  * board overlay.  This example only **reads** -- it does not write
  * anything to the eMMC.  Reading the MBR / GPT region is safe.
  *
@@ -30,7 +30,7 @@
 #include <zephyr/storage/disk_access.h>
 
 /* Zephyr names the SD0 disk "SD" by default; the V2N board overlay
- * confirms this.  Carriers that strap differently can override at
+ * confirms this.  Boards that strap differently can override at
  * build time. */
 #ifndef EMMC_DISK_NAME
 #define EMMC_DISK_NAME "SD"

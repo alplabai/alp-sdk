@@ -32,7 +32,7 @@ v2n_m1_path_mapping:
 kconfig:
   zephyr:         ALP_SDK_CHIP_PI3DBS12212
   baremetal:      ALP_SDK_CHIP_PI3DBS12212
-  yocto:          n/a                    # Linux carrier code drives GPIOs directly
+  yocto:          n/a                    # Linux board code drives GPIOs directly
 
 families:
   - v2n-m1

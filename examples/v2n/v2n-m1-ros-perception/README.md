@@ -55,7 +55,7 @@ colcon build --packages-select alp_perception
 ## Hardware needed
 
 - E1M-V2N101 or E1M-V2M101 SoM.
-- E1M-X-EVK carrier with the camera connector populated.
+- E1M-X-EVK board with the camera connector populated.
 - (Optional) external WiFi for remote ROS 2 graph access.
 
 ## Run

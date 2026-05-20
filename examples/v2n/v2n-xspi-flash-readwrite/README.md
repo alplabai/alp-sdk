@@ -2,7 +2,7 @@
 
 Erase one sector on the V2N module's on-module xSPI NOR, write a
 known pattern, read it back, and report the comparison.  Exercises
-Zephyr's standard `flash` driver class against the carrier-facing
+Zephyr's standard `flash` driver class against the board-facing
 xSPI bus.
 
 ## What it shows
@@ -40,4 +40,4 @@ xSPI NOR holds production firmware.
 
 * Zephyr documentation: `<zephyr/drivers/flash.h>`.
 * `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv` -- xSPI
-  bus pad assignment on the V2N carrier.
+  bus pad assignment on the V2N board.

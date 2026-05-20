@@ -38,7 +38,7 @@
 #     zephyr_alif as the Zephyr project) or set
 #     EXTRA_ZEPHYR_MODULES to a zephyr_alif clone.  Direct
 #     hal_alif import is the "I have my own board overlay"
-#     path -- useful for customers shipping carrier-specific
+#     path -- useful for customers shipping board-specific
 #     Alif designs.  See docs/getting-started.md §8 for the
 #     two-path decision tree.
 #
@@ -321,7 +321,7 @@ manifest:
     #       (b) use sdk-alif itself as the workspace topdir (which
     #           replaces our Zephyr v3.7 pin with zephyr_alif's
     #           Alif-patched Zephyr fork).
-    #     Customers with their own AEN carrier board overlay don't
+    #     Customers with their own AEN board overlay don't
     #     need sdk-alif -- the top-level hal_alif direct import
     #     above suffices for them.
     #

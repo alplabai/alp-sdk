@@ -175,7 +175,6 @@ On Yocto the same `<alp/audio.h>` API maps to ALSA's
 `board.yaml`:
 
 ```yaml
-schema_version: 2
 cores:
   a55_cluster:
     app: ./linux                  # os: omitted -- A-cores default to yocto per topology
@@ -191,8 +190,8 @@ Build + run as a normal Yocto userspace binary.
   SoM's PDM mic isn't routed.  Confirm via the SKU's preset
   (`metadata/e1m_modules/E1M-<MPN>.yaml` peripherals block).
 - **Loopback works but audio is silent** -- volume too low or
-  the I²S DAC's amp not enabled.  Some carriers gate the amp
-  via a GPIO (see the SKU's `carrier.populated` list for the
+  the I²S DAC's amp not enabled.  Some boards gate the amp
+  via a GPIO (see the SKU's `board.populated` list for the
   TAS2563 amp driver opt-in).
 - **Audio crackles / drops blocks** -- buffer underrun.
   Increase `frames_per_block` to 512 to absorb more jitter;

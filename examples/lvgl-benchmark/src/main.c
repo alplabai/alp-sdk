@@ -35,7 +35,7 @@
  * Customers picking between Ensemble SKUs care about the cost of
  * rendering: a smart-thermostat UI that runs at 60 fps on E7 may
  * cap at 18 fps on E3.  This demo lets them measure that on their
- * actual carrier + panel combination without writing benchmark
+ * actual board + panel combination without writing benchmark
  * code themselves.
  */
 

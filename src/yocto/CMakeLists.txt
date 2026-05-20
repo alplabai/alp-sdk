@@ -51,7 +51,7 @@ target_compile_definitions(alp_sdk PRIVATE
 # v0.4: real Yocto peripheral wrappers binding against Linux
 # userspace ABIs.  Each class is independently gated via the
 # ALP_VENDOR_OVERRIDES_<CLASS> macros split out in
-# src/common/stub_backend.c, so a SoM/carrier that only needs I2C
+# src/common/stub_backend.c, so a SoM/board that only needs I2C
 # can ship without the SPI wrapper hitting an undefined symbol
 # at link time.  All are gated on Linux hosts so cross-compilers
 # building plain-CMake on macOS/Windows still produce a link-clean

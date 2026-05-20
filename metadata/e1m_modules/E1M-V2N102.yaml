@@ -1,7 +1,7 @@
 # Stock preset for E1M-V2N102 (memory variant of V2N101).
 #
 # Lists the chip drivers, I2C device addresses, memory capacity,
-# and default carrier for this SKU; `scripts/alp_project.py` and
+# and default board for this SKU; `scripts/alp_project.py` and
 # the alp-studio pin allocator read it at build time.
 
 schema_version: 1
@@ -162,7 +162,7 @@ helper_firmware:
       base:      "0x08000000"
 
 default_hw_rev:         r1
-default_carrier:        E1M-X-EVK
+default_board:        E1M-X-EVK
 
 status:
   preliminary:          false

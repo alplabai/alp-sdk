@@ -10,7 +10,7 @@
  *
  * Why E1M-V2N for the fan-control case study?  V2N modules carry
  * the Renesas RZ/V2N (~5-8 W typical) plus a DEEPX DX-M1 NPU on
- * the M1 SKUs (~10-15 W under load), so a carrier-driven fan is
+ * the M1 SKUs (~10-15 W under load), so a board-driven fan is
  * a normal accessory.  The same code works on any E1M-conformant
  * SoM that exposes `E1M_PWM0` -- the SDK routes the call to
  * whichever silicon physically drives that pad on the active SoM
@@ -20,7 +20,7 @@
  * instance IDs from `<alp/e1m_pinout.h>`.
  *
  * The example treats PWM channel 0 as the fan-control output.  A
- * production firmware would read the carrier's thermistor /
+ * production firmware would read the board's thermistor /
  * temp-sensor + adjust duty in a control loop -- this example uses
  * a fixed five-stop ramp so the staircase is visible on a scope
  * without needing live sensor data.
@@ -48,7 +48,7 @@ static const fan_curve_step_t fan_curve[] = {
     {1000u, 1000u }, /* max:    e.g. CPU at 80 C+ */
 };
 
-/* PWM period.  25 kHz keeps the carrier above the audible range so
+/* PWM period.  25 kHz keeps the board above the audible range so
  * a 4-wire fan's tach line stays clean.  40 us = 25 kHz. */
 #define FAN_PWM_PERIOD_NS    40000u
 

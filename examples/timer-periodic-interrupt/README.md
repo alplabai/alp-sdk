@@ -109,7 +109,7 @@ example on AEN for the working ISR path.)
   100 Hz toggle (visible LED breathe); raise to 1000000 for
   1 Hz (a slow blink for "is it alive?" checks).
 * **Different LED pin.**  Change `E1M_GPIO_IO1` to whatever pin
-  your carrier wires to an LED (or any free GPIO if you just
+  your board wires to an LED (or any free GPIO if you just
   want to scope-probe the toggle).
 * **No LED at all.**  Drop the GPIO block; the printf trace
   alone proves the alarm is firing.

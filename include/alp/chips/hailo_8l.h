@@ -11,7 +11,7 @@
  * M.2 2242 / 2230 PCIe card.  The on-host inference runtime
  * (`HailoRT`, Apache-2.0) talks to the device over PCIe Gen3 x4.
  * This driver only covers the *host-side* power-rail + reset +
- * heartbeat surface that an embedded carrier needs before the
+ * heartbeat surface that an embedded board needs before the
  * Linux PCIe enumeration sees the device.
  *
  * @par Scope split
@@ -28,7 +28,7 @@
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
  * @par Driver status: [stub-impl] — defines lifecycle + GPIO
- *   sequencing surface; live silicon probe arrives once a carrier
+ *   sequencing surface; live silicon probe arrives once a board
  *   ships with the M.2 slot wired.
  *
  * Datasheet: Hailo-8L product brief Rev 1.2 (2024); pin map from

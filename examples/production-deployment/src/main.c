@@ -74,7 +74,7 @@
  *   - Boot from a factory-signed image.
  *   - Read manufacturer EEPROM, print serial + SKU + rev.
  *   - Inspect MCUboot slots, print image revision.
- *   - Connect to a Mender server (carrier-staged
+ *   - Connect to a Mender server (board-staged
  *     production-test rig), poll for an update.
  *   - When a deployment lands, download + verify + apply
  *     it, request reboot.
@@ -115,8 +115,8 @@ static void stage_factory_identity(void)
            (unsigned)info.som_mfg_year,
            (unsigned)info.som_mfg_month,
            (unsigned)info.som_mfg_day);
-    if (info.carrier_name[0] != '\0') {
-        printf("[prod]   carrier=%s rev=%s\n", info.carrier_name, info.carrier_hw_rev);
+    if (info.board_name[0] != '\0') {
+        printf("[prod]   board=%s rev=%s\n", info.board_name, info.board_hw_rev);
     }
 }
 

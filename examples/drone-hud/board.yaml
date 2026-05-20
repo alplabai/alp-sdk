@@ -11,17 +11,18 @@
 # through the portable <alp/*> surfaces, and the LVGL UI composes
 # them on a single screen.  No vendor-specific code in the app.
 
-schema_version: 2
-
 som:
   sku: E1M-AEN701           # E7 -- SRAM headroom for LVGL + AHRS state.
 
-carrier:
-  name: E1M-EVK
-  # External chips plugged into the EVK's headers for this demo.
-  populated:
-    ublox_neo_m9n: true
-    st7789:        true
+preset: e1m-evk             # External chips (GNSS, ST7789) plugged
+                            # into the EVK's headers are listed in
+                            # the `chips:` array below.
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
+  - { e1m: E1M_UART0, macro: EVK_UART_PORT_DEBUG, doc: "Console UART exposed on the JTAG/SWD-side debug header" }
+  - { e1m: E1M_SPI1, macro: EVK_SPI_BUS_ARDUINO, doc: "Arduino UNO header SPI; terminates on the on-module CC3501E, not the main SoC" }
 
 # Single-OS app -- M55-HP runs LVGL HUD + Madgwick + sensor IO.
 # A32 cluster off; M55-HE keeps the SoM topology default so the

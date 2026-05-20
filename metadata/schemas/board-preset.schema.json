@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/board-preset.schema.json",
+  "title": "ALP shared board preset",
+  "description": "Schema for a shared board definition under metadata/boards/<name>.yaml.  Referenced from project board.yaml files via the top-level `preset:` field.  Exists only as SDK-internal plumbing so multiple projects targeting the same physical board (e.g. the EVK + its ~40 demo apps) share one source of truth for chip population + E1M-pad routing.  Customers building a custom board put these fields inline at the top level of their board.yaml instead.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+      "description": "Board name.  Used in include/alp/boards/alp_<name>_routes.h + as the board identity in generated Doxygen blocks."
+    },
+    "display_name": {
+      "type": "string",
+      "description": "Human-readable board name (free-form)."
+    },
+    "hosts_som_families": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "description": "SoM families this board mechanically + electrically supports (alif-ensemble, renesas-rzv2n, ...).  Informational; the orchestrator does not currently enforce."
+    },
+    "populated": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" },
+      "description": "Per-component populated flags.  Keys match chip-driver / block names; each `true` enables the corresponding CONFIG_ALP_SDK_{CHIP,BLOCK}_<name>=y."
+    },
+    "e1m_routes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "E1M-pad routing.  scripts/gen_board_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.",
+      "properties": {
+        "gpio":  { "$ref": "#/$defs/route_entry_list_gpio" },
+        "buses": { "$ref": "#/$defs/route_entry_list_buses" },
+        "pwm":   { "$ref": "#/$defs/route_entry_list_pwm" },
+        "adc":   { "$ref": "#/$defs/route_entry_list_adc" },
+        "dac":   { "$ref": "#/$defs/route_entry_list_dac" },
+        "i2s":   { "$ref": "#/$defs/route_entry_list_i2s" },
+        "can":   { "$ref": "#/$defs/route_entry_list_can" },
+        "qenc":  { "$ref": "#/$defs/route_entry_list_qenc" }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Reference-design app defaults (e.g. canonical display chip, primary IMU)."
+    },
+    "default_hw_rev": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$"
+    },
+    "hw_revisions": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Per-rev metadata (min/max SDK versions, board_id ADC channel + thresholds, status, notes)."
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preliminary":       { "type": "boolean" },
+        "partial_hw_config": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "route_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["e1m", "macro"],
+      "properties": {
+        "e1m":         { "type": "string" },
+        "macro":       { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
+        "doc":         { "type": "string", "description": "One-line Doxygen @brief documenting what the pad is wired to on this board." },
+        "active_low":  { "type": "boolean", "description": "Board convention -- pressed/asserted = 0 V.  Documentation only; the app passes ALP_GPIO_ACTIVE_LOW at alp_gpio_open() time if it wants auto-inversion." },
+        "pull":        { "type": "string", "enum": ["up", "down", "none"], "default": "none", "description": "Physical pull-resistor present on the PCB (board-static fact).  Apps still pass the matching ALP_GPIO_PULL_{UP,DOWN} at alp_gpio_open() time -- this field documents what the board ships with, it does not drive the controller's internal pulls." },
+        "debounce_ms": { "type": "integer", "minimum": 0, "description": "RC-debounce time constant in milliseconds for the board's hardware debounce (mostly buttons).  Documentation hint; the app may add software debounce on top." }
+      }
+    },
+    "route_entry_list_gpio":  { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_GPIO_IO[0-9]+$" } } }] } },
+    "route_entry_list_buses": { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_(I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+)$" } } }] } },
+    "route_entry_list_pwm":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_PWM[0-9]+$" } } }] } },
+    "route_entry_list_adc":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_ADC[0-9]+$" } } }] } },
+    "route_entry_list_dac":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_DAC[0-9]+$" } } }] } },
+    "route_entry_list_i2s":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_I2S[0-9]+$" } } }] } },
+    "route_entry_list_can":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_CAN[0-9]+$" } } }] } },
+    "route_entry_list_qenc":  { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_ENC[0-9]+$" } } }] } }
+  }
+}

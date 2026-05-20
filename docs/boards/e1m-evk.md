@@ -1,11 +1,11 @@
 # E1M EVK — SDK reference
 
 The **E1M Development Board** (UG-E1M-001) is the official ALP Lab
-carrier board for E1M / E1M-X System-on-Modules.  It exposes USB,
+board for E1M / E1M-X System-on-Modules.  It exposes USB,
 Ethernet, CAN, MIPI DSI, multiple camera options, audio, sensors,
 M.2/PCIe, and Arduino + mikroBUS expansion — all wired so that any
 E1M-conformant SoM (E1M-AEN family, E1M-X V2N, etc.) plugs into the
-same carrier and the same SDK build runs.
+same board and the same SDK build runs.
 
 > Source: *E1M Development Board User Guide* — UG-E1M-001 Rev. 0.1
 > (April 2026), archived vendor documentation

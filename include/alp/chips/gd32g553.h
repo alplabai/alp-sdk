@@ -79,7 +79,7 @@ extern "C" {
 
 /** Default 7-bit I2C slave address (compile-time configurable on the
  *  firmware side; production builds may relocate to dodge address
- *  collisions on a specific carrier). */
+ *  collisions on a specific board). */
 #define GD32G553_BRIDGE_DEFAULT_I2C_ADDR 0x70u
 
 /** Default reply timeout in milliseconds for the SPI path (the GD32
@@ -146,7 +146,7 @@ extern "C" {
 #define GD32G553_BRIDGE_QENC_CHANNELS    4u
 
 /** Number of free-running counters the bridge exposes.  v0.2 of
- *  the protocol surfaces a single reader; carriers that need
+ *  the protocol surfaces a single reader; boards that need
  *  multiple counters await the v0.3 opcode set. */
 #define GD32G553_BRIDGE_COUNTER_CHANNELS 1u
 

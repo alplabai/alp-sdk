@@ -2,17 +2,17 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Auto-generated from metadata/carriers/E1M-EVK/board.yaml
- * by scripts/gen_carrier_header.py.  DO NOT EDIT BY HAND --
+ * Auto-generated from metadata/boards/e1m-evk.yaml
+ * by scripts/gen_board_header.py.  DO NOT EDIT BY HAND --
  * regenerate after changing the YAML.
  *
- * Mirrors the carrier preset's `e1m_routes:` block into plain
+ * Mirrors the board YAML's `e1m_routes:` block into plain
  * `#define EVK_<NAME> E1M_<...>` lines so hand-written firmware
- * can keep using the carrier-named macros while the YAML stays
+ * can keep using the board-named macros while the YAML stays
  * the single editable source of truth.
  *
  * @par ABI status: [ABI-STABLE]
- *      v0.6 generated; macro names + values track the carrier YAML.
+ *      v0.6 generated; macro names + values track the board YAML.
  *      See docs/abi-markers.md for the convention.
  */
 
@@ -21,12 +21,17 @@
 
 #include "alp/e1m_pinout.h"
 
+/* This header is auto-generated; clang-format ignores it so the
+ * generator's column-aligned `#define` blocks survive PR static
+ * analysis without forcing 100-col wraps on long doc strings. */
+/* clang-format off */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* ------------------------------------------------------------------ */
-/* GPIO routes (E1M_GPIO_IO<N> -> carrier-side feature) */
+/* GPIO routes (E1M_GPIO_IO<N> -> board-side feature) */
 /* ------------------------------------------------------------------ */
 
 #define EVK_PIN_CAM_MUX_SEL    E1M_GPIO_IO2  /**< PI3WVR626 SEL pin; see `evk_cam_select_*` enum + chips/cam_mux_pi3wvr626. */
@@ -49,7 +54,7 @@ extern "C" {
 #define EVK_PIN_PCIE_MUX_SEL   E1M_GPIO_IO23  /**< Selects M-key vs E-key routing on the PCIe lane muxes. */
 
 /* ------------------------------------------------------------------ */
-/* Bus assignments (E1M peripheral instance -> carrier role) */
+/* Bus assignments (E1M_I2C / I3C / SPI / UART -> board role) */
 /* ------------------------------------------------------------------ */
 
 #define EVK_I2C_BUS_SENSORS   E1M_I2C0  /**< Shared sensor + IO-expander + INA236 bus. */
@@ -60,7 +65,7 @@ extern "C" {
 #define EVK_UART_PORT_ARDUINO E1M_UART1  /**< Arduino UNO header UART (D0/D1); CK_RXD = UART1_TX, CK_TXD = UART1_RX. */
 
 /* ------------------------------------------------------------------ */
-/* PWM channels (E1M_PWM<N> -> carrier-side feature) */
+/* PWM channels (E1M_PWM<N> -> board-side feature) */
 /* ------------------------------------------------------------------ */
 
 #define EVK_PWM_LED_GREEN E1M_PWM0  /**< RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B). */
@@ -72,8 +77,49 @@ extern "C" {
 #define EVK_ARD_PWM3      E1M_PWM5  /**< Arduino header CK_PWM3 = E1M_PWM5. */
 #define EVK_MB_PWM        E1M_PWM6  /**< mikroBUS PWM pin. */
 
+/* ------------------------------------------------------------------ */
+/* ADC channels (E1M_ADC<N> -> board-side signal) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_ADC_BOARD_ID   E1M_ADC0  /**< Carrier-side BOARD_ID resistor divider (see docs/board-id.md). */
+#define EVK_ADC_ARDUINO_A1 E1M_ADC1  /**< Arduino UNO header A1 analog input. */
+#define EVK_ADC_ARDUINO_A2 E1M_ADC2  /**< Arduino UNO header A2 analog input. */
+#define EVK_ADC_ARDUINO_A3 E1M_ADC3  /**< Arduino UNO header A3 analog input. */
+#define EVK_ADC_ARDUINO_A4 E1M_ADC4  /**< Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards). */
+#define EVK_ADC_ARDUINO_A5 E1M_ADC5  /**< Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards). */
+#define EVK_ADC_MB_AN      E1M_ADC6  /**< mikroBUS click AN pin. */
+#define EVK_ADC_VBAT_SENSE E1M_ADC7  /**< Battery voltage divider (4:1 resistor scale) for power-monitor demos. */
+
+/* ------------------------------------------------------------------ */
+/* DAC channels (E1M_DAC<N> -> board-side signal) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_DAC_ARDUINO_DAC0   E1M_DAC0  /**< Arduino-shield-style DAC0 output exposed on header J3. */
+#define EVK_DAC_AUDIO_LINE_OUT E1M_DAC1  /**< Auxiliary line-level audio output (analog, sums with TAS2563 mix). */
+
+/* ------------------------------------------------------------------ */
+/* I2S instances (E1M_I2S<N> -> board-side codec / mic role) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_I2S_AUDIO_CODEC E1M_I2S0  /**< Routed through the 74LVC157 mux to either the TAS2563 amps (default) or the M.2 E-key I2S; see EVK_PIN_I2S_MUX_SEL. */
+#define EVK_I2S_PDM_MIC     E1M_I2S1  /**< PDM mic capture (4x MP34DT05 mics). */
+
+/* ------------------------------------------------------------------ */
+/* CAN buses (E1M_CAN<N> -> board-side bus role) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_CAN_VEHICLE_BUS E1M_CAN0  /**< TCAN1044A transceiver on header J9; termination via jumpers JP1-JP4. */
+
+/* ------------------------------------------------------------------ */
+/* Quadrature encoder channels (E1M_ENC<N> -> board-side encoder) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_ENC_ROTARY E1M_ENC0  /**< PEC12R-4222F-S0024 rotary encoder: ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4). */
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
+
+/* clang-format on */
 
 #endif /* ALP_BOARDS_E1M_EVK_ROUTES_H */

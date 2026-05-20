@@ -23,7 +23,7 @@
  *      Driver-level helpers for those live in
  *      [`<alp/chips/da9292.h>`](da9292.h) and
  *      [`<alp/chips/tps628640.h>`](tps628640.h); this header does
- *      not orchestrate the rail bring-up itself -- carrier-board
+ *      not orchestrate the rail bring-up itself -- board-board
  *      firmware composes the helpers + this driver in the right
  *      order.
  *   3. Configure the PCIe muxes to the DEEPX path then enable them
@@ -38,7 +38,7 @@
  * pre-opened GPIO + mux contexts and runs steps 3..5.  Steps 1-2
  * are the caller's responsibility (the secondary PMIC + buck
  * drivers ship the right helpers, but composing them depends on
- * carrier-board design decisions).
+ * board-board design decisions).
  *
  * @par Datasheet provenance
  * DEEPX DX-M1 commercial + M.2-card datasheets are held in the
@@ -68,7 +68,7 @@ extern "C" {
 /** Polarity of the DEEPX `M1_RESET` line.  Confirmed
  *  **active-LOW** for V2N-M1 (2026-05-12 maintainer decision):
  *  the host drives `M1_RESET` low to hold reset, high to release.
- *  Carrier boards on different DEEPX revisions can flip via
+ *  Board boards on different DEEPX revisions can flip via
  *  @ref deepx_dxm1_set_reset_polarity() if the silicon polarity
  *  ever changes. */
 typedef enum {
@@ -97,8 +97,8 @@ typedef struct {
  *                     as an output by the caller.
  * @param pcie_mux     pi3dbs12212_t context already initialised
  *                     against the two PD + SEL GPIOs (`P80`, `P95`).
- * @param deepx_path   Which mux state the carrier has wired to the
- *                     DEEPX side (carrier convention --
+ * @param deepx_path   Which mux state the board has wired to the
+ *                     DEEPX side (board convention --
  *                     `PI3DBS_STATE_PATH_0` is the typical V2N-M1
  *                     mapping per `metadata/chips/pi3dbs12212.yaml`).
  *

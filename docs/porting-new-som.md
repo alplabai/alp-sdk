@@ -16,7 +16,7 @@ machine-readable metadata*.  It is **not**:
 - *adding a new chip driver* — that lands under `chips/<part>/` and
   is orthogonal to SoM identity (a chip driver is shared across every
   SoM that populates it);
-- *adding a new carrier* — that lands under `metadata/carriers/<name>/`
+- *adding a new board* — that lands under `metadata/boards/<name>/`
   and only describes the off-module PCB the SoM plugs into;
 - *adding a new SoC family* — same shape as below but starts one
   layer deeper (a brand-new vendor / family directory under
@@ -72,7 +72,7 @@ Ensemble SoM:
 | On-module BOM     | Identical to AEN701 + one new chip (`cc3511e`, an     |
 |                   | imagined CC3501E successor; replace with the real     |
 |                   | part when AEN9 silicon lands)                         |
-| Default carrier   | `E1M-EVK`                                             |
+| Default board   | `E1M-EVK`                                             |
 
 We treat the E1M-AEN701 preset as our template — it is the closest
 existing SKU shape.  See
@@ -234,7 +234,7 @@ where.
 ### Template
 
 ```yaml
-# Stock preset for E1M-AEN901 (the SoM, NOT the EVK carrier).
+# Stock preset for E1M-AEN901 (the SoM, NOT the EVK board).
 # See E1M-AEN701.yaml for the file's role + the project memory note
 # governing what stays TBD.
 
@@ -247,8 +247,8 @@ silicon_variant: AE921F80F55D5LS         # see metadata/socs/alif/ensemble/e9.js
 
 display_name: "E1M-AEN901 (Alif Ensemble E9 -- preliminary)"
 
-# On-module components only.  Carrier-side parts (IMUs, OLEDs, ...)
-# live in metadata/carriers/<carrier>/board.yaml.
+# On-module components only.  Board-side parts (IMUs, OLEDs, ...)
+# live in metadata/boards/<board>/board.yaml.
 on_module:
   silicon:              alif:ensemble:e9
   wifi_ble:             cc3511e               # next-gen TI Wi-Fi 6E + BLE coprocessor
@@ -333,7 +333,7 @@ helper_firmware:
     flash_args:    TBD
 
 default_hw_rev:         r1
-default_carrier:        E1M-EVK
+default_board:          E1M-EVK
 
 status:
   preliminary:          true               # E9 silicon not yet released
@@ -496,18 +496,15 @@ The fragment below is shown using `E1M-AEN801` (a real, schema-known
 SKU) so the doc-YAML linter accepts it.  In your real port, swap the
 single `som.sku:` line to your new SKU — `E1M-AEN901` for this
 walkthrough — and the schema pattern in
-`metadata/schemas/board-config-v2.schema.json` must be widened to
+`metadata/schemas/board.schema.json` must be widened to
 accept it (one regex tweak; see the **Common pitfalls** section
 later in this document).
 
 ```yaml
-schema_version: 2
-
 som:
   sku: E1M-AEN801          # in your port: E1M-AEN901 (the new SKU)
 
-carrier:
-  name: E1M-EVK            # AEN901 ships on the same EVK as AEN701
+preset: e1m-evk            # AEN901 ships on the same EVK as AEN701
 
 cores:
   m55_hp:
@@ -673,7 +670,7 @@ or under `native_sim` for portable CI today.
   surface (`<alp/...>`), the SDK ↔ studio boundary.
 - **Pinout chain** — [`docs/e1m-pinout.md`](e1m-pinout.md) explains
   how E1M pads link the E1M open-standard spec, the per-SoM
-  `pad_routes:` block, and the carrier's `e1m_routes:` block.
+  `pad_routes:` block, and the board's `e1m_routes:` block.
 - **Reference SoM presets** —
   [`metadata/e1m_modules/E1M-AEN701.yaml`](../metadata/e1m_modules/E1M-AEN701.yaml)
   (AEN reference) and

@@ -3,7 +3,7 @@
 """
 ALP heterogeneous-OS build orchestrator (Phase 2 of the 2026-05-15 design).
 
-A board.yaml v2 declares per-core runtimes; this module loads the
+A board.yaml declares per-core runtimes; this module loads the
 project, resolves topology defaults from the SoM preset, allocates
 IPC carve-outs from the SoM's memory_map, and fans out into one
 build slice per non-`off` core.
@@ -55,7 +55,8 @@ from alp_project import resolve_memory_map, resolve_capabilities  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
-SCHEMA_V2 = METADATA_ROOT / "schemas" / "board-config-v2.schema.json"
+BOARD_SCHEMA = METADATA_ROOT / "schemas" / "board.schema.json"
+BOARD_PRESET_SCHEMA = METADATA_ROOT / "schemas" / "board-preset.schema.json"
 
 
 def _default_os_from_core_type(core_type: str) -> str:
@@ -106,6 +107,8 @@ class Slice:
     libraries: list[str] = field(default_factory=list)
     inference: dict[str, Any] = field(default_factory=dict)
     iot: dict[str, Any] = field(default_factory=dict)
+    memory: dict[str, Any] = field(default_factory=dict)   # stack_kib, heap_kib, isr_stack_kib
+    power: dict[str, Any] = field(default_factory=dict)    # sleep_mode, wakeup_sources
 
     # Populated by Orchestrator.fan_out:
     build_dir: Optional[Path] = None
@@ -216,20 +219,22 @@ class ResolvedCarveOut:
 
 @dataclass
 class BoardProject:
-    """Resolved board.yaml v2 project ready for fan-out."""
+    """Resolved board.yaml project ready for fan-out."""
 
     sku: str
     hw_rev: Optional[str]
-    carrier_name: Optional[str]
-    carrier_hw_rev: Optional[str]
+    board_name: Optional[str]
+    board_hw_rev: Optional[str]
     cores: dict[str, Slice]                       # effective per-core slices
     ipc: list[IpcEntry]
     soc_spec: dict[str, Any]
     som_preset: dict[str, Any]
-    carrier_preset: Optional[dict[str, Any]]
+    board_preset: Optional[dict[str, Any]]
     diagnostics: dict[str, Any] = field(default_factory=dict)
     chips: list[str] = field(default_factory=list)
     features: dict[str, Any] = field(default_factory=dict)
+    boot: dict[str, Any] = field(default_factory=dict)
+    ota: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -250,8 +255,8 @@ class SystemManifest:
             "hw_info": {
                 "sku":             self.project.sku,
                 "som_hw_rev":      self.project.hw_rev,
-                "carrier_name":    self.project.carrier_name,
-                "carrier_hw_rev":  self.project.carrier_hw_rev,
+                "board_name":    self.project.board_name,
+                "board_hw_rev":  self.project.board_hw_rev,
                 "silicon":         self.project.som_preset.get("silicon"),
             },
             "slices":      [s.to_manifest_entry() for s in self.slices],
@@ -317,13 +322,13 @@ def _load_json(path: Path) -> dict[str, Any]:
         raise OrchestratorError(f"failed to parse {path}: {e}") from e
 
 
-def _validate_v2(project: dict[str, Any],
-                 metadata_root: Path = METADATA_ROOT) -> None:
-    schema_path = metadata_root / "schemas" / "board-config-v2.schema.json"
+def _validate_board(project: dict[str, Any],
+                    metadata_root: Path = METADATA_ROOT) -> None:
+    schema_path = metadata_root / "schemas" / "board.schema.json"
     if not schema_path.is_file():
         # Fall back to the global schema when the metadata_root doesn't
         # carry its own copy (e.g. synthetic test roots without schemas/).
-        schema_path = SCHEMA_V2
+        schema_path = BOARD_SCHEMA
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     validator = jsonschema.Draft202012Validator(schema)
     errors = sorted(validator.iter_errors(project),
@@ -338,14 +343,49 @@ def _validate_v2(project: dict[str, Any],
             "\n".join(messages))
 
 
-def _resolve_carrier_preset(
-    carrier_name: str,
+def _resolve_board_preset(
+    preset: str,
     metadata_root: Path,
-) -> Optional[dict[str, Any]]:
-    p = metadata_root / "carriers" / carrier_name / "board.yaml"
+) -> dict[str, Any]:
+    """Load the shared board YAML referenced by `preset:`.
+
+    Shared boards live at metadata/boards/<preset>.yaml.  Raises
+    OrchestratorError when the file is missing (`preset:` must resolve;
+    customers with a custom board define it inline instead).
+    """
+    p = metadata_root / "boards" / f"{preset}.yaml"
     if not p.is_file():
-        return None
+        raise OrchestratorError(
+            f"`preset: {preset}` does not resolve: no shared board "
+            f"at {p.relative_to(REPO) if p.is_relative_to(REPO) else p}. "
+            f"Available presets: "
+            f"{sorted(_available_presets(metadata_root))}")
     return _load_yaml(p)
+
+
+def _available_presets(metadata_root: Path) -> list[str]:
+    boards_dir = metadata_root / "boards"
+    if not boards_dir.is_dir():
+        return []
+    return [p.stem for p in boards_dir.glob("*.yaml")]
+
+
+def _synthesize_inline_board(project: dict[str, Any]) -> dict[str, Any]:
+    """Build a board-shaped dict from a project's inline top-level fields.
+
+    Used when board.yaml has no `preset:` -- the project's own `name`,
+    `populated`, `e1m_routes` (and optional `hw_rev`) double as the
+    board definition.  Returned dict has the same shape downstream
+    emitters expect from a preset-resolved board.
+    """
+    return {
+        "name":       project.get("name"),
+        "populated":  dict(project.get("populated") or {}),
+        "e1m_routes": dict(project.get("e1m_routes") or {}),
+        # Inline mode has no per-board hw_revisions table; loader code
+        # that reads default_hw_rev / hw_revisions tolerates None.
+        "default_hw_rev": project.get("hw_rev"),
+    }
 
 
 def _resolve_topology_for_core(
@@ -390,6 +430,8 @@ def _slice_from_resolved(
         libraries=list(entry.get("libraries") or []),
         inference=dict(entry.get("inference") or {}),
         iot=dict(entry.get("iot") or {}),
+        memory=dict(entry.get("memory") or {}),
+        power=dict(entry.get("power") or {}),
     )
 
 
@@ -420,17 +462,17 @@ def _enforce_loader_rules(slice_: Slice) -> None:
 
 def load_board_yaml(path: Path, *,
                     metadata_root: Path = METADATA_ROOT) -> BoardProject:
-    """Load + validate a v2 board.yaml.
+    """Load + validate a board.yaml.
 
     Raises OrchestratorError on any schema / preset / topology error.
     """
     path = Path(path)
     project = _load_yaml(path)
 
-    # 1. v2 schema validation.  Pass metadata_root so test stubs using
+    # 1. Schema validation.  Pass metadata_root so test stubs using
     # non-production SKU patterns (E1M-TST001 etc.) validate against
     # their own copy of the schema rather than the repo's strict pattern.
-    _validate_v2(project, metadata_root=metadata_root)
+    _validate_board(project, metadata_root=metadata_root)
 
     sku = project["som"]["sku"]
     hw_rev = project["som"].get("hw_rev")
@@ -454,17 +496,20 @@ def load_board_yaml(path: Path, *,
             f"no SoC spec at {soc_path.relative_to(REPO) if soc_path.is_relative_to(REPO) else soc_path} for ref '{silicon}'")
     soc_spec = _load_json(soc_path)
 
-    # 4. Carrier preset (optional).
-    carrier_name = None
-    carrier_hw_rev = None
-    carrier_preset = None
-    carrier_block = project.get("carrier") or {}
-    if carrier_block:
-        carrier_name = carrier_block.get("name")
-        carrier_hw_rev = carrier_block.get("hw_rev")
-        if carrier_name:
-            carrier_preset = _resolve_carrier_preset(
-                carrier_name, metadata_root)
+    # 4. Board definition.  Two mutually-exclusive sources (the
+    # schema's `oneOf` rule enforces this):
+    #   - `preset: <name>`  -> load metadata/boards/<name>.yaml
+    #   - inline `name:` + `populated:` + `e1m_routes:` at top level
+    # Either way the rest of the loader sees a single board_preset
+    # dict with `name`, `populated`, `e1m_routes`.
+    if "preset" in project:
+        board_preset = _resolve_board_preset(
+            project["preset"], metadata_root)
+    else:
+        board_preset = _synthesize_inline_board(project)
+    board_name = board_preset.get("name")
+    board_hw_rev = (project.get("hw_rev")
+                      or board_preset.get("default_hw_rev"))
 
     # 5. Compute per-core effective mapping.
     project_cores = project.get("cores") or {}
@@ -569,20 +614,62 @@ def load_board_yaml(path: Path, *,
                     f"ipc entry '{e.name}' references core '{ep}' "
                     f"which is os: off")
 
+    # 8. Optional top-level `pins:` cross-check.  When the project
+    # lists which E1M pads it actively uses, every entry must exist
+    # in the resolved board's `e1m_routes:` block; entries that
+    # supply a `macro:` must also match the board's macro for that
+    # pad.  Catches typos + demos drifting from the EVK preset's
+    # wiring.  Each entry is either a bare string (just the pad
+    # name) or a `{e1m, macro?, doc?}` mapping.
+    used_pins = list(project.get("pins") or [])
+    if used_pins:
+        routes = (board_preset or {}).get("e1m_routes") or {}
+        # Build a {pad -> [macros]} index; one pad can have several
+        # macros aliasing it (e.g. E1M_PWM1 maps to EVK_PWM_LED_BLUE
+        # AND EVK_ARD_PWM1 on the EVK).
+        macros_by_pad: dict[str, set[str]] = {}
+        for section in ("gpio", "buses", "pwm", "adc", "dac", "i2s", "can", "qenc"):
+            for entry in (routes.get(section) or []):
+                e1m = entry.get("e1m")
+                macro = entry.get("macro")
+                if isinstance(e1m, str) and isinstance(macro, str):
+                    macros_by_pad.setdefault(e1m, set()).add(macro)
+        board_label = board_name or "<inline>"
+        for idx, item in enumerate(used_pins):
+            if isinstance(item, str):
+                e1m_pad, macro_decl = item, None
+            elif isinstance(item, dict):
+                e1m_pad = item.get("e1m")
+                macro_decl = item.get("macro")
+            else:
+                raise OrchestratorError(
+                    f"board.yaml `pins[{idx}]` is neither a string nor a mapping")
+            if e1m_pad not in macros_by_pad:
+                raise OrchestratorError(
+                    f"board.yaml `pins[{idx}].e1m: {e1m_pad}` is not in the "
+                    f"resolved board '{board_label}'s `e1m_routes:` block.  "
+                    f"Known pads: {sorted(macros_by_pad.keys())}")
+            if macro_decl is not None and macro_decl not in macros_by_pad[e1m_pad]:
+                raise OrchestratorError(
+                    f"board.yaml `pins[{idx}].macro: {macro_decl}` does not "
+                    f"match the resolved board '{board_label}'s macros for "
+                    f"pad {e1m_pad}: {sorted(macros_by_pad[e1m_pad])}")
+
     return BoardProject(
         sku=sku,
         hw_rev=hw_rev or som_preset.get("default_hw_rev"),
-        carrier_name=carrier_name,
-        carrier_hw_rev=(carrier_hw_rev
-                        or (carrier_preset or {}).get("default_hw_rev")),
+        board_name=board_name,
+        board_hw_rev=board_hw_rev,
         cores=cores,
         ipc=ipc_entries,
         soc_spec=soc_spec,
         som_preset=som_preset,
-        carrier_preset=carrier_preset,
+        board_preset=board_preset,
         diagnostics=dict(project.get("diagnostics") or {}),
         chips=list(project.get("chips") or []),
         features=dict(project.get("features") or {}),
+        boot=dict(project.get("boot") or {}),
+        ota=dict(project.get("ota") or {}),
         raw=project,
     )
 
@@ -1390,7 +1477,7 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
     #    list; extract the `chip:` field from each device.
     #    Devices marked `assembled: optional` are DNI (do-not-install)
     #    on some builds and must NOT be auto-enabled as chip drivers —
-    #    the customer explicitly enables them via `carrier.populated:`.
+    #    the customer explicitly enables them via `board.populated:`.
     i2c_buses = on_module.get("i2c_devices")
     if isinstance(i2c_buses, dict):
         for _bus, bus_entry in i2c_buses.items():
@@ -1427,8 +1514,8 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     Emits the full Kconfig the slice needs: baseline + log + silicon +
     per-core peripherals/libraries + SoM-intrinsic chip drivers (auto-
     derived from ``on_module:`` + ``helper_firmware:`` in the SoM preset)
-    + carrier-populated chip drivers (from board.yaml ``carrier.populated:``
-    + the carrier preset) + the Zephyr subsystem enables those chip drivers
+    + board-populated chip drivers (from board.yaml ``board.populated:``
+    + the board preset) + the Zephyr subsystem enables those chip drivers
     need (e.g. an enabled ``rv3028c7`` chip driver pulls in ``CONFIG_I2C=y``).
 
     Swapping ``som.sku:`` in board.yaml automatically changes the SoM-
@@ -1513,10 +1600,13 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append("")
 
     # ----------------------------------------------------------------
-    # Carrier-populated chip drivers.  Source order: SoM/carrier
-    # preset `populated:` block (base) overlaid by the board.yaml
-    # `carrier.populated:` block (project-level overrides).  The
-    # chip drivers compile per-chip via the
+    # Board-populated chip drivers.  Single source: the resolved
+    # board_preset dict, which comes from either the shared
+    # metadata/boards/<preset>.yaml or the project's inline
+    # top-level fields (synthesised by the loader).  No project-level
+    # override merge -- the schema's `oneOf` rule rejects mixing.
+    #
+    # Chip drivers compile per-chip via the
     # zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_<NAME> ...)
     # (or CONFIG_ALP_SDK_BLOCK_<NAME> for the `button_led` / `pdm_mic`
     # SDK-level block helpers) entries in zephyr/CMakeLists.txt.
@@ -1527,23 +1617,36 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # (the slice carries everything it needs to compile) without
     # depending on cross-slice ordering.
     # ----------------------------------------------------------------
-    populated: dict[str, bool] = {}
-    if project.carrier_preset is not None:
-        populated.update(project.carrier_preset.get("populated") or {})
-    raw_carrier = (project.raw.get("carrier") or {}) if project.raw else {}
-    populated.update(raw_carrier.get("populated") or {})
+    populated: dict[str, bool] = dict(
+        (project.board_preset or {}).get("populated") or {})
     if populated:
-        lines.append("# Carrier-populated chip drivers (from board.yaml "
-                     "carrier.populated + carrier preset)")
+        lines.append("# Board-populated chip drivers (from the resolved "
+                     "board definition)")
         for chip, on in sorted(populated.items()):
             # Deduplicate: if the SoM block already emitted =y, skip
-            # the carrier line to avoid redundant CONFIG entries.
+            # the board line to avoid redundant CONFIG entries.
             if on and chip in som_chips:
                 continue
             lines.append(f"{_slug_kconfig(chip)}={'y' if on else 'n'}")
             if on:
                 for s in _CHIP_SUBSYSTEMS.get(chip, ()):
                     chip_subsystems.add(s)
+        lines.append("")
+
+    # Project-declared chips (board.yaml top-level `chips:` array).
+    # Adds chip drivers the application links directly via
+    # <alp/chips/<name>.h> -- e.g. when the project plugs an external
+    # sensor into a board's headers that's not in the board's
+    # `populated:` table.  Each entry maps to CHIP_<NAME>=y (or
+    # BLOCK_<NAME>=y for the SDK-level block helpers).
+    project_chips = [c for c in (project.chips or [])
+                     if c not in som_chips and not populated.get(c)]
+    if project_chips:
+        lines.append("# Project-declared chips (board.yaml `chips:` array)")
+        for chip in sorted(set(project_chips)):
+            lines.append(f"{_slug_kconfig(chip)}=y")
+            for s in _CHIP_SUBSYSTEMS.get(chip, ()):
+                chip_subsystems.add(s)
         lines.append("")
 
     # Zephyr subsystems: union of (chip-driver-required subsystems for
@@ -1667,6 +1770,62 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     lines.extend(inference_lines)
     lines.append("")
 
+    # ----------------------------------------------------------------
+    # Per-slice memory tuning (board.yaml `cores.<id>.memory:`).
+    # ----------------------------------------------------------------
+    mem = slice_.memory or {}
+    mem_lines: list[str] = []
+    if mem.get("stack_kib"):
+        mem_lines.append(f"CONFIG_MAIN_STACK_SIZE={int(mem['stack_kib']) * 1024}")
+    if mem.get("isr_stack_kib"):
+        mem_lines.append(f"CONFIG_ISR_STACK_SIZE={int(mem['isr_stack_kib']) * 1024}")
+    if mem.get("heap_kib") is not None:
+        mem_lines.append(f"CONFIG_HEAP_MEM_POOL_SIZE={int(mem['heap_kib']) * 1024}")
+    if mem_lines:
+        lines.append("# Per-slice memory tuning (board.yaml cores.<id>.memory:)")
+        lines.extend(mem_lines)
+        lines.append("")
+
+    # ----------------------------------------------------------------
+    # Per-slice power-management profile.
+    # ----------------------------------------------------------------
+    pwr = slice_.power or {}
+    pwr_lines: list[str] = []
+    sleep_mode = (pwr.get("sleep_mode") or "disabled").lower()
+    if sleep_mode != "disabled":
+        pwr_lines.append("CONFIG_PM=y")
+        pwr_lines.append("CONFIG_PM_DEVICE=y")
+        # PM_STATE_* selection is silicon-family-specific; lowest-power
+        # state the hierarchy keeps is mirrored in a single hint flag.
+        pwr_lines.append(f"# Sleep target: {sleep_mode}")
+    for wake in (pwr.get("wakeup_sources") or []):
+        # Subsystem-style wake-source (e.g. `uart`) -> PM_DEVICE_WAKE_<SUBSYS>.
+        # E1M_* pad names are emitted as a hint comment; the per-silicon
+        # wake-pin Kconfig is family-specific and lands in v0.7.
+        if isinstance(wake, str) and not wake.startswith("E1M_"):
+            pwr_lines.append(f"CONFIG_PM_DEVICE_WAKE_{wake.upper()}=y  # wakeup source")
+        elif isinstance(wake, str):
+            pwr_lines.append(f"# wakeup source: {wake} (per-silicon Kconfig pending)")
+    if pwr_lines:
+        lines.append("# Per-slice power-management profile (board.yaml cores.<id>.power:)")
+        lines.extend(pwr_lines)
+        lines.append("")
+
+    # ----------------------------------------------------------------
+    # Per-module log levels (board.yaml `diagnostics.modules:`).
+    # ----------------------------------------------------------------
+    modules = (project.diagnostics or {}).get("modules") or {}
+    if modules:
+        level_to_n = {"off": 0, "error": 1, "warn": 2, "info": 3, "debug": 4, "trace": 4}
+        lines.append("# Per-module log-level overrides (board.yaml diagnostics.modules:)")
+        for mod, lvl in sorted(modules.items()):
+            n = level_to_n.get(str(lvl).lower())
+            if n is None:
+                continue
+            kc_stem = mod.upper()
+            lines.append(f"CONFIG_{kc_stem}_LOG_LEVEL={n}")
+        lines.append("")
+
     return "\n".join(lines) + "\n"
 
 
@@ -1685,6 +1844,96 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append(f'IMAGE_INSTALL:append = " {imageinstall}"')
     if slice_.image:
         lines.append(f"# bitbake target: {slice_.image}")
+
+    # Mender OTA wiring (board.yaml `ota:` block).  Emits Mender
+    # `?=` (weak) assignments so hand-edited local.conf values in
+    # the build dir still win.
+    ota = project.ota or {}
+    if ota.get("provider") == "mender":
+        lines.append("")
+        lines.append("# OTA (board.yaml `ota:` block)")
+        lines.append('INHERIT += "mender-full"')
+        if ota.get("artifact_name"):
+            lines.append(f'MENDER_ARTIFACT_NAME ?= "{ota["artifact_name"]}"')
+        srv = ota.get("server") or {}
+        if srv.get("url"):
+            lines.append(f'MENDER_SERVER_URL ?= "{srv["url"]}"')
+        if srv.get("tenant"):
+            lines.append(f'MENDER_TENANT_TOKEN ?= "{srv["tenant"]}"')
+        sto = ota.get("storage") or {}
+        if sto.get("device"):
+            lines.append(f'MENDER_STORAGE_DEVICE_BASE ?= "{sto["device"]}"')
+        if sto.get("boot_part_mb"):
+            lines.append(f'MENDER_BOOT_PART_SIZE_MB ?= "{sto["boot_part_mb"]}"')
+        if sto.get("total_size_mb"):
+            lines.append(f'MENDER_STORAGE_TOTAL_SIZE_MB ?= "{sto["total_size_mb"]}"')
+        if ota.get("poll_interval_s"):
+            lines.append(f'MENDER_INVENTORY_INTERVAL ?= "{ota["poll_interval_s"]}"')
+
+    return "\n".join(lines) + "\n"
+
+
+def emit_sysbuild_conf(project: BoardProject) -> str:
+    """Emit the sysbuild.conf overlay for the project's `boot:` block.
+
+    Returns a SB_CONFIG_*-style snippet the build wires into
+    `build/alp_sysbuild.conf` (consumed via `west build --sysbuild
+    --sysbuild-config`).  Returns an empty string when the project
+    does not declare a `boot:` block (the SDK's stock per-family
+    defaults at zephyr/sysbuild/<family>/sysbuild.conf apply).
+    """
+    boot = project.boot or {}
+    if not boot:
+        return ""
+    method = (boot.get("method") or "mcuboot").lower()
+    if method == "none":
+        return ("# Auto-generated from board.yaml `boot:` block.\n"
+                "SB_CONFIG_BOOTLOADER_MCUBOOT=n\n")
+    if method != "mcuboot":
+        return ""
+
+    lines: list[str] = [
+        "# Auto-generated by scripts/alp_orchestrate.py from "
+        "board.yaml `boot:`.",
+        "# Drives the sysbuild MCUboot child image.  Customers who",
+        "# omit `boot:` get the SDK's stock per-family defaults.",
+        "",
+        "SB_CONFIG_BOOTLOADER_MCUBOOT=y",
+    ]
+    sign = boot.get("signing") or {}
+    algo = (sign.get("algorithm") or "").lower()
+    algo_kc = {
+        "ecdsa_p256": "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ECDSA_P256=y",
+        "rsa2048":    "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA=y\n"
+                      "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA_LEN=2048",
+        "rsa3072":    "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA=y\n"
+                      "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA_LEN=3072",
+        "ed25519":    "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ED25519=y",
+    }.get(algo)
+    if algo_kc:
+        lines.append(algo_kc)
+    if sign.get("key_file"):
+        lines.append(f'SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="{sign["key_file"]}"')
+    slots = boot.get("slots") or {}
+    primary = (slots.get("primary") or {}).get("size_kib")
+    secondary = (slots.get("secondary") or {}).get("size_kib")
+    if primary:
+        lines.append(f"SB_CONFIG_BOOT_PRIMARY_PARTITION_SIZE={int(primary) * 1024}")
+    if secondary:
+        lines.append(f"SB_CONFIG_BOOT_SECONDARY_PARTITION_SIZE={int(secondary) * 1024}")
+    swap = (boot.get("swap_algorithm") or "scratch").lower()
+    swap_kc = {
+        "scratch":   "SB_CONFIG_MCUBOOT_MODE_SWAP_USING_SCRATCH=y",
+        "move":      "SB_CONFIG_MCUBOOT_MODE_SWAP_USING_MOVE=y",
+        "overwrite": "SB_CONFIG_MCUBOOT_MODE_OVERWRITE_ONLY=y",
+    }.get(swap)
+    if swap_kc:
+        lines.append(swap_kc)
+    if swap == "scratch" and boot.get("scratch_size_kib"):
+        lines.append(f"SB_CONFIG_BOOT_SCRATCH_PARTITION_SIZE="
+                     f"{int(boot['scratch_size_kib']) * 1024}")
+    if boot.get("anti_rollback"):
+        lines.append("SB_CONFIG_BOOT_COUNTERS_MCUBOOT=y")
     return "\n".join(lines) + "\n"
 
 
@@ -1803,7 +2052,7 @@ def _resolve_app_path(app: str) -> Path:
 def main(argv: Optional[Iterable[str]] = None) -> int:
     import argparse
     parser = argparse.ArgumentParser(
-        description="Fan-out orchestrator for board.yaml v2.")
+        description="Fan-out orchestrator for board.yaml.")
     parser.add_argument("--input", type=Path, default=Path("board.yaml"),
                         help="Path to the project's board.yaml.")
     parser.add_argument("--build-root", type=Path,

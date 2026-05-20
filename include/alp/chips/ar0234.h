@@ -8,7 +8,7 @@
  * @brief onsemi AR0234CS 1080p global-shutter colour MIPI CSI-2 sensor.
  *
  * 1/2.6-inch industrial 1080p60 global-shutter sensor with HDR.
- * Common in machine-vision carriers.  SCCB config side only.
+ * Common in machine-vision boards.  SCCB config side only.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  * @par Verification status: [UNTESTED] — driver compiles + passes NULL-arg smokes;

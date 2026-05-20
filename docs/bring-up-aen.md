@@ -1,8 +1,8 @@
 # Bench bring-up — E1M-AEN
 
 Step-by-step procedure for bringing a freshly-assembled E1M-AEN
-module up on the bench.  Assumes you have an `E1M-EVK` carrier
-(or a pin-compatible custom carrier), a SWD debug probe (J-Link
+module up on the bench.  Assumes you have an `E1M-EVK` board
+(or a pin-compatible custom board), a SWD debug probe (J-Link
 or ST-Link), an external 5 V bench supply, and a USB-UART
 adapter.
 
@@ -27,7 +27,7 @@ Inventory check before powering anything:
   - **CAM_MUX_PI3WVR626** camera multiplexer for the CSI side.
   - Optional sensor stuffing per the SKU (LSM6DSO IMU, BMP581
     barometer, TMP112 thermometer, INA236 power monitor).
-* Carrier populated: at minimum, E1M-edge passthroughs + the
+* Board populated: at minimum, E1M-edge passthroughs + the
   5 V power input + JTAG/SWD header + USB-UART for console.
 
 ## 1. First-power smoke test
@@ -42,13 +42,13 @@ Inventory check before powering anything:
    Within spec: 0.90 V ±3 %.
 
 If V_CORE is missing the Alif PMIC sequencer didn't release the
-core rail.  Check the EN strap on the carrier first, then the
+core rail.  Check the EN strap on the board first, then the
 PMIC's `EVENT_00` status register over BRD_I2C.
 
 ## 2. SWD probe attach
 
-1. Wire the SWD probe to the carrier's debug header
-   (SWDIO/SWCLK/nRST/GND).  Power the carrier (probe stays
+1. Wire the SWD probe to the board's debug header
+   (SWDIO/SWCLK/nRST/GND).  Power the board (probe stays
    unpowered; standard 1.8/3.3 V level convention applies).
 2. With the probe plugged in, run:
 
@@ -66,7 +66,7 @@ PMIC's `EVENT_00` status register over BRD_I2C.
 ## 3. EEPROM manifest read
 
 The 24C128 carries the 128-byte ALP manifest at offset
-`0x0000`.  Read it back through the carrier's BRD_I2C bus:
+`0x0000`.  Read it back through the board's BRD_I2C bus:
 
 ```bash
 i2cdetect -y 1                 # confirm 0x50 ACKs
@@ -92,10 +92,10 @@ against the SKU's `som.yaml` preset.
 
 ## 4. Console + first boot
 
-1. Wire USB-UART to UART0 on the carrier (silkscreen
+1. Wire USB-UART to UART0 on the board (silkscreen
    `USB_UART_TXD` / `_RXD`).  Standard 115200 8N1.
 2. Open a terminal (minicom, screen, picocom).
-3. Power-cycle the carrier.  Expect the boot ROM banner on the
+3. Power-cycle the board.  Expect the boot ROM banner on the
    UART within ~200 ms:
 
    ```
@@ -123,7 +123,7 @@ against the SKU's `som.yaml` preset.
 ## 5. Peripheral sanity checks
 
 Run these in order; each one exercises a different on-module
-or on-carrier subsystem.
+or on-board subsystem.
 
 ### 5.1 BRD_I2C: probe every on-module slave
 
@@ -159,7 +159,7 @@ means the OPTIGA wasn't bonded out correctly on this assembly.
 
 ### 5.3 Ethernet PHY link
 
-Connect a 1 Gb link partner to the carrier's RJ45.  Reset the
+Connect a 1 Gb link partner to the board's RJ45.  Reset the
 module and check link-up via the DP83825I's MDIO registers:
 
 ```c
@@ -173,7 +173,7 @@ of cable insert.
 
 ### 5.4 Camera + display
 
-These are optional per the SKU and the carrier.  See
+These are optional per the SKU and the board.  See
 [`docs/soms/aen.md`](soms/aen.md) for the camera-mux truth table
 and the per-SKU display options.
 
@@ -199,11 +199,11 @@ Once §1..5 pass:
   image-rejected scenario.  Re-flash with the dev key or check
   the MCUboot trailer.
 * **`i2cdetect` returns no slaves at all** -- BRD_I2C pull-ups
-  missing or wrong voltage.  Standard ALP carriers pull to
-  1.8 V; some custom carriers use 3.3 V (re-strap the SoC
+  missing or wrong voltage.  Standard ALP boards pull to
+  1.8 V; some custom boards use 3.3 V (re-strap the SoC
   side accordingly).
 * **PHY won't link** -- DP83825I requires its 25 MHz REFCLK
-  before the strap latches.  Check `OSC_25M` on the carrier
+  before the strap latches.  Check `OSC_25M` on the board
   with a scope; the PHY won't link if the clock is missing at
   PHY-reset-release.
 

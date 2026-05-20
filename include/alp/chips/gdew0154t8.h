@@ -8,7 +8,7 @@
  * @brief GoodDisplay GDEW0154T8 1.54" monochrome e-paper module (SPI).
  *
  * 200 × 200 monochrome e-paper module common on the M5Stack Core
- * Ink and ESP32 e-paper carriers.  4-wire SPI plus D/C# / RESET /
+ * Ink and ESP32 e-paper boards.  4-wire SPI plus D/C# / RESET /
  * BUSY ancillaries.  Same overall shape as `il3820` — different
  * panel geometry and refresh waveform.
  *

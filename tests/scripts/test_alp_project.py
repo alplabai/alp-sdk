@@ -62,11 +62,10 @@ class TestLoaderContract(unittest.TestCase):
                                 msg=f"{emit}: empty output")
 
     def test_minimum_viable_board_yaml(self) -> None:
-        """A board.yaml with just schema_version + som + a single core
-        should be accepted (carrier is optional in the schema)."""
+        """A board.yaml with just `som:` + a single core should be
+        accepted (board declaration is optional in the schema)."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 2
                 som:
                   sku: E1M-AEN701
                 cores:
@@ -81,14 +80,12 @@ class TestLoaderContract(unittest.TestCase):
 
     def test_bad_sku_pattern_fails_schema(self) -> None:
         """The schema enforces the E1M-(AEN|V2N|V2M|NX9)... SKU pattern;
-        an arbitrary string must fail v2 schema validation with a
-        non-zero exit.  v2 inputs route through the orchestrator
-        loader, which surfaces schema violations via OrchestratorError;
-        the test accepts either the v1-style 'schema violation' or the
-        v2 'schema validation failed' phrasing."""
+        an arbitrary string must fail schema validation with a non-zero
+        exit.  The loader surfaces schema violations via
+        OrchestratorError ('schema validation failed' or
+        'does not match' in the message)."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 2
                 som:
                   sku: NOT-A-REAL-SKU
                 cores:
@@ -98,7 +95,7 @@ class TestLoaderContract(unittest.TestCase):
             """)
             # Pick an emit mode that hits the v2 loader (schema validation
             # is part of load_board_yaml).  system-manifest is the
-            # cheapest v2-only emit.
+            # cheapest non-Kconfig emit.
             rv = _run_loader(input_path=path, emit="system-manifest")
             self.assertNotEqual(rv.returncode, 0)
             lower = rv.stderr.lower()
@@ -114,7 +111,6 @@ class TestLoaderContract(unittest.TestCase):
         must produce a clear missing-preset error, not a schema error."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 2
                 som:
                   sku: E1M-NX9999
                 cores:
@@ -126,23 +122,22 @@ class TestLoaderContract(unittest.TestCase):
             self.assertNotEqual(rv.returncode, 0)
             self.assertIn("no preset", rv.stderr.lower())
 
-    def test_carrier_override_flips_populated_flag(self) -> None:
-        """A user override under carrier.populated must win over the
-        EVK preset's default -- bme280 ships false on the EVK; the
-        override flips it to true."""
+    def test_inline_populated_flips_chip_kconfig(self) -> None:
+        """An inline `populated:` block in a project's board.yaml
+        produces the matching CONFIG_ALP_SDK_CHIP_* entries.  This is
+        the customer path: one board.yaml, fully self-contained, no
+        `preset:` reference."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 2
+                name: test-board
                 som:
                   sku: E1M-AEN701
-                carrier:
-                  name: E1M-EVK
-                  populated:
-                    bme280: true
                 cores:
                   m55_hp:
                     os: zephyr
                     app: ./src
+                populated:
+                  bme280: true
             """)
             rv = _run_loader(input_path=path)
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
@@ -156,7 +151,6 @@ class TestZephyrEmit(unittest.TestCase):
     def test_baseline_alp_sdk_always_on(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 2
                 som:
                   sku: E1M-AEN701
                 cores:
@@ -193,7 +187,6 @@ class TestZephyrEmit(unittest.TestCase):
             with self.subTest(peripheral=periph):
                 with tempfile.TemporaryDirectory() as td:
                     path = _write_board(Path(td), f"""
-                        schema_version: 2
                         som:
                           sku: E1M-AEN701
                         cores:
@@ -213,7 +206,6 @@ class TestZephyrEmit(unittest.TestCase):
             with self.subTest(log_level=log_level):
                 with tempfile.TemporaryDirectory() as td:
                     path = _write_board(Path(td), f"""
-                        schema_version: 2
                         som:
                           sku: E1M-AEN701
                         diagnostics:
@@ -239,9 +231,9 @@ class TestDtsOverlayEmit(unittest.TestCase):
         out = rv.stdout
         # Header + dt-bindings include
         self.assertIn('#include <zephyr/dt-bindings/gpio/gpio.h>', out)
-        # Root node + the carrier comment line
+        # Root node + the board comment line
         self.assertIn("/ {", out)
-        self.assertIn("Carrier: E1M-EVK", out)
+        self.assertIn("Board: E1M-EVK", out)
         # Aliases block
         self.assertIn("aliases {", out)
         # Closing brace + semicolon for the root node
@@ -286,17 +278,16 @@ class TestHwInfoHEmit(unittest.TestCase):
         self.assertIn('#define ALP_HW_BUILD_SOM_SKU         "E1M-AEN701"', out)
         self.assertIn('#define ALP_HW_BUILD_SOM_FAMILY      "aen"', out)
         self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "r1"', out)
-        self.assertIn('#define ALP_HW_BUILD_CARRIER_NAME    "E1M-EVK"', out)
-        self.assertIn('#define ALP_HW_BUILD_CARRIER_HW_REV  "r1"', out)
+        self.assertIn('#define ALP_HW_BUILD_BOARD_NAME      "E1M-EVK"', out)
+        self.assertIn('#define ALP_HW_BUILD_BOARD_HW_REV    "r1"', out)
         self.assertIn('#define ALP_HW_BUILD_OS              "zephyr"', out)
 
-    def test_no_carrier_skips_carrier_macros(self) -> None:
-        """When board.yaml omits the carrier block the loader must
+    def test_no_board_skips_board_macros(self) -> None:
+        """When board.yaml omits the board block the loader must
         emit a clean header that only carries the SoM identifiers --
-        no empty ALP_HW_BUILD_CARRIER_* macros."""
+        no empty ALP_HW_BUILD_BOARD_* macros."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 2
                 som:
                   sku: E1M-AEN701
                 cores:
@@ -307,14 +298,13 @@ class TestHwInfoHEmit(unittest.TestCase):
             rv = _run_loader(input_path=path, emit="hw-info-h")
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
             self.assertIn('ALP_HW_BUILD_SOM_SKU', rv.stdout)
-            self.assertNotIn('ALP_HW_BUILD_CARRIER_NAME', rv.stdout)
+            self.assertNotIn('ALP_HW_BUILD_BOARD_NAME', rv.stdout)
 
     def test_explicit_hw_rev_overrides_default(self) -> None:
         """Explicit som.hw_rev wins over the SKU preset's
         default_hw_rev (matching the loader's wider behaviour)."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 2
                 som:
                   sku: E1M-AEN701
                   hw_rev: r1
@@ -351,7 +341,6 @@ class TestWestLibrariesEmit(unittest.TestCase):
     def test_empty_libraries_emits_well_formed_empty_block(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
-                schema_version: 2
                 som:
                   sku: E1M-AEN701
                 cores:
@@ -387,7 +376,7 @@ class TestValidatorPeripheralCheck(unittest.TestCase):
         )
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
         self.assertIn(f"OK   schema:", rv.stdout)
-        self.assertIn("OK   carrier preset: E1M-EVK", rv.stdout)
+        self.assertIn("OK   board preset: e1m-evk", rv.stdout)
         self.assertIn("OK   som E1M-AEN701 hw_rev:", rv.stdout)
 
 
@@ -427,7 +416,7 @@ class TestHwBackendsLoader(unittest.TestCase):
         core = cls._core_for_sku(sku)
         libs_yaml = "".join(f"              - {lib}\n" for lib in cls.LIBS)
         body = (
-            "schema_version: 2\n"
+
             "som:\n"
             f"  sku: {sku}\n"
             "cores:\n"
@@ -580,7 +569,6 @@ class TestInferenceFromSomCaps(unittest.TestCase):
 
     def _v2_zephyr_slice(self, sku: str, core: str) -> tuple[int, str, str]:
         body = f"""
-            schema_version: 2
             som:
               sku: {sku}
             cores:
@@ -601,7 +589,6 @@ class TestInferenceFromSomCaps(unittest.TestCase):
 
     def _v2_cmake_slice(self, sku: str, core: str, os_: str) -> tuple[int, str, str]:
         body = f"""
-            schema_version: 2
             som:
               sku: {sku}
             cores:
@@ -755,12 +742,11 @@ class TestInferenceFromSomCaps(unittest.TestCase):
     # --- Schema-level rejection of inference.backend ------------------
 
     def test_inference_backend_field_rejected_by_schema(self) -> None:
-        """board.yaml v2 cannot declare `inference.backend` -- silicon
+        """board.yaml cannot declare `inference.backend` -- silicon
         capability is not a project-level choice.  Schema's
         additionalProperties: false rejects the unknown property at
         validation time."""
         body = """
-            schema_version: 2
             som:
               sku: E1M-AEN701
             cores:
@@ -784,7 +770,6 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         """`default_arena_kib` is genuinely app-level tuning (per-model
         memory budget) and stays as a per-core knob."""
         body = """
-            schema_version: 2
             som:
               sku: E1M-AEN701
             cores:
