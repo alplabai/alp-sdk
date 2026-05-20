@@ -167,8 +167,17 @@ def check_example(example_dir: pathlib.Path,
             f"add the prefix to _SKU_FAMILY_TABLE in {pathlib.Path(__file__).name}"
         )
 
+    # SDK-level block helpers live under `blocks/<name>/`, not
+    # `chips/<name>/`, so they don't have a metadata/chips/<name>.yaml.
+    # Skip them in the families[] check -- block helpers are
+    # SoM-family-agnostic by design (they're software abstractions
+    # over GPIO / PDM, not third-party ICs).
+    _BLOCK_SLUGS = {"button_led", "pdm_mic"}
+
     if family is not None:
         for chip in chips:
+            if chip in _BLOCK_SLUGS:
+                continue
             families = chip_families.get(chip)
             if families is None:
                 errors.append(

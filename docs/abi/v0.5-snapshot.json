@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-18",
+  "generated": "2026-05-20",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -567,6 +567,38 @@
     "alp/boards/alp_e1m_evk_routes.h": {
       "functions": {},
       "macros": {
+        "EVK_ADC_ARDUINO_A1": {
+          "hash": "66218ed769d9ba28",
+          "value": "E1M_ADC1"
+        },
+        "EVK_ADC_ARDUINO_A2": {
+          "hash": "f5d465c3f7868a98",
+          "value": "E1M_ADC2"
+        },
+        "EVK_ADC_ARDUINO_A3": {
+          "hash": "82d9eda72c65fac8",
+          "value": "E1M_ADC3"
+        },
+        "EVK_ADC_ARDUINO_A4": {
+          "hash": "2cb528047b48e048",
+          "value": "E1M_ADC4"
+        },
+        "EVK_ADC_ARDUINO_A5": {
+          "hash": "118cbc6eadb95f9e",
+          "value": "E1M_ADC5"
+        },
+        "EVK_ADC_BOARD_ID": {
+          "hash": "a120600581513ee7",
+          "value": "E1M_ADC0"
+        },
+        "EVK_ADC_MB_AN": {
+          "hash": "b5ef7db57d6959a0",
+          "value": "E1M_ADC6"
+        },
+        "EVK_ADC_VBAT_SENSE": {
+          "hash": "d04239c1ccc29e33",
+          "value": "E1M_ADC7"
+        },
         "EVK_ARD_PWM1": {
           "hash": "8f2729acf3a3fcf7",
           "value": "E1M_PWM1"
@@ -583,6 +615,22 @@
           "hash": "e6869154a05a2eaf",
           "value": "E1M_PWM2"
         },
+        "EVK_CAN_VEHICLE_BUS": {
+          "hash": "afc500495d49dffd",
+          "value": "E1M_CAN0"
+        },
+        "EVK_DAC_ARDUINO_DAC0": {
+          "hash": "045e9d8568588ca4",
+          "value": "E1M_DAC0"
+        },
+        "EVK_DAC_AUDIO_LINE_OUT": {
+          "hash": "a7385ecbec398655",
+          "value": "E1M_DAC1"
+        },
+        "EVK_ENC_ROTARY": {
+          "hash": "55d6b7ae7f0b1752",
+          "value": "E1M_ENC0"
+        },
         "EVK_I2C_BUS_ARDUINO": {
           "hash": "e1f267464849b385",
           "value": "E1M_I3C0"
@@ -594,6 +642,14 @@
         "EVK_I2C_BUS_SENSORS": {
           "hash": "ae1409fa9c140e92",
           "value": "E1M_I2C0"
+        },
+        "EVK_I2S_AUDIO_CODEC": {
+          "hash": "8cefae7b5bbdfb60",
+          "value": "E1M_I2S0"
+        },
+        "EVK_I2S_PDM_MIC": {
+          "hash": "195da68faea3d5a0",
+          "value": "E1M_I2S1"
         },
         "EVK_MB_PWM": {
           "hash": "73553ea70af5379f",
