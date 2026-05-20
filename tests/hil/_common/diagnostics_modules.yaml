@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for the board.yaml `diagnostics.modules:` block (PR #3).
+#
+# scripts/alp_orchestrate.py:_slice_alp_conf() turns
+#
+#   diagnostics:
+#     log_level: info
+#     modules:
+#       alp_iot:      debug
+#       alp_security: off
+#       alp_gpio:     info
+#
+# into per-slice Kconfig:
+#
+#   CONFIG_ALP_IOT_LOG_LEVEL=4         # debug -> 4
+#   CONFIG_ALP_SECURITY_LOG_LEVEL=0    # off   -> 0
+#   CONFIG_ALP_GPIO_LOG_LEVEL=3        # info  -> 3
+#
+# (level map per _slice_alp_conf: off=0, error=1, warn=2, info=3,
+#  debug=trace=4.)
+#
+# This spec confirms the per-module log-level overrides actually
+# filter at runtime.  The gpio-button-led example exercises both
+# alp_gpio (info-level) and the alp-security helper path; bumping
+# alp_iot to debug requires a small IoT trace in the app, which
+# the iot-fleet-ota example already carries.  We assert:
+#
+#   - `alp_iot: debug` -> debug-level IoT messages appear in trace
+#     (the `[D]` prefix Zephyr's LOG_DBG macro emits).
+#   - `alp_security: off` -> no `alp_security:` messages at all.
+#
+# What this proves end-to-end:
+#   - The orchestrator emits CONFIG_<MODULE>_LOG_LEVEL=<n> per entry.
+#   - alp.conf is layered onto prj.conf via OVERLAY_CONFIG.
+#   - The Zephyr LOG subsystem respects the per-module level at
+#     link time (debug messages compile in; off-level modules emit
+#     nothing).
+
+schema_version: 1
+name: diagnostics-modules
+description: |
+  Confirms per-module log levels in `diagnostics.modules:` filter
+  at runtime: a module set to `debug` emits debug-prefixed lines;
+  a module set to `off` emits no lines at all on the serial trace.
+
+example: examples/iot-fleet-ota
+
+serial:
+  duration_s: 18
+  expect_contains:
+    - "<dbg> alp_iot"                 # debug-level message from alp_iot
+    - "alp_iot: connect"              # the IoT connect path's INFO line
+  expect_absent:
+    - "alp_security:"                 # `off` -> no messages at all
+    - "<dbg> alp_security"
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

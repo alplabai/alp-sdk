@@ -196,3 +196,35 @@ works on every E1M SoM:
    required peripheral has a spec; add the entry there too.
 3. The spec automatically applies to every board dir on the next
    run.
+
+## Declarative-block coverage (v0.6+)
+
+In addition to the per-peripheral smoke specs, `_common/` carries
+one spec per **declarative board.yaml block** the orchestrator
+emits CONFIG_* for.  Each spec confirms the CONFIG_* lines reach
+real silicon -- not just that the schema accepts the block.
+
+| Spec                          | board.yaml block            | What it asserts on serial                                                       |
+|-------------------------------|-----------------------------|---------------------------------------------------------------------------------|
+| `boot_mcuboot.yaml`           | `boot:`                     | MCUboot banner is the first boot stage; signature type matches the declared algorithm; app boots cleanly. |
+| `memory_stacks.yaml`          | `cores.<id>.memory:`        | `CONFIG_MAIN_STACK_SIZE` / `_ISR_STACK_SIZE` byte counts print on boot; no stack-overflow events. |
+| `power_sleep_wake.yaml`       | `cores.<id>.power:`         | PM subsystem activates; device enters declared `sleep_mode`; wakes from a declared `wakeup_sources:` entry. |
+| `diagnostics_modules.yaml`    | `diagnostics.modules:`      | Per-module log levels filter at runtime -- `alp_iot: debug` -> `<dbg>` lines appear; `alp_security: off` -> module silent. |
+
+The block-coverage specs are exercised in CI by the same matrix as
+the peripheral specs (`.github/workflows/nightly-aen-hil.yml`'s
+"HiL smoke" step).  An adjacent host-side test --
+`tests/scripts/test_hil_blocks_coverage.py` -- cross-checks each
+spec against the orchestrator's emit code so a schema field that
+the emit silently drops fails CI on a normal machine, before the
+HiL runner ever gets near it.
+
+### Optional spec flag: `pending_hardware_support:`
+
+When a block requires a probe the existing HiL rig doesn't carry
+(e.g. an inline ammeter for current-draw assertions during deep
+sleep), the spec sets `pending_hardware_support: <gap-id>` and
+falls back to serial-trace assertions.  The flag documents the gap
+in-tree so the spec can be sharpened once the probe lands.  Today
+only `power_sleep_wake.yaml` carries the flag
+(`pending_hardware_support: deep-sleep-current-draw`).

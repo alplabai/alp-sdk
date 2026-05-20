@@ -91,6 +91,34 @@ jobs:
             grep -q "PROJECT EXECUTION SUCCESSFUL" hil-output.log
           fi
 
+      # ---- HiL smoke specs -------------------------------------------------
+      # Drives every *.yaml under tests/hil/_common/ + the aen701-evk
+      # board dir through the standard runner (build + flash + serial
+      # capture + assertion).  Each spec covers one peripheral OR (since
+      # v0.6) one declarative board.yaml block:
+      #
+      #   boot_mcuboot.yaml         -> board.yaml `boot:`
+      #   memory_stacks.yaml        -> board.yaml `cores.<id>.memory:`
+      #   power_sleep_wake.yaml     -> board.yaml `cores.<id>.power:`
+      #   diagnostics_modules.yaml  -> board.yaml `diagnostics.modules:`
+      #
+      # The runner exits 0 if every spec asserts cleanly, 1 if any fail,
+      # 2 on invocation error.  Skipped when the board-target module
+      # isn't published yet (same gate as the ztest build above).
+      - name: HiL smoke -- _common + AEN701 board specs
+        if: success()
+        env:
+          ZEPHYR_BASE: ${{ env.HOME }}/zephyrproject/zephyr
+          EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
+        run: |
+          if ! ls $HOME/zephyrproject/modules 2>/dev/null | grep -q alp-zephyr-modules; then
+            echo "::warning::alp_e1m_evk_aen board file not yet published; skipping HiL smoke matrix"
+            exit 0
+          fi
+          cd ${{ github.workspace }}/alp-sdk
+          python3 tests/hil/run_smoke.py --validate tests/hil/aen701-evk/
+          python3 tests/hil/run_smoke.py tests/hil/aen701-evk/
+
       - name: Upload HIL artefacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -98,6 +126,7 @@ jobs:
           name: hil-aen-${{ github.run_number }}
           path: |
             hil-output.log
+            /tmp/hil-output.log
             ${{ env.HOME }}/zephyrproject/build/twister-out/
           retention-days: 30
           if-no-files-found: ignore
