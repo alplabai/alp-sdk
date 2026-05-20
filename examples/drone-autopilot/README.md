@@ -44,12 +44,12 @@ motor mixer → ESCs.
 ## Hardware
 
 - E1M-AEN701 SoM.
-- E1M-EVK carrier (4× PWM out, 1× SBUS UART in, I²C0).
-- External 4S LiPo battery wired through the carrier's INA236
+- E1M-EVK board (4× PWM out, 1× SBUS UART in, I²C0).
+- External 4S LiPo battery wired through the board's INA236
   shunt for telemetry.
 - Standard quadcopter frame, four BLHeli-compatible ESCs +
   brushless motors.
-- FrSky/Futaba SBUS-capable RC receiver (with carrier-side
+- FrSky/Futaba SBUS-capable RC receiver (with board-side
   inverter -- SBUS is inverted UART).
 
 ## Build

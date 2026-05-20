@@ -86,7 +86,7 @@ On a DSO probe attached to `ANA_OUT0`:
   Keep entries in Q15 (signed 16-bit centred on 0) so the
   `lut_to_mv` scaler stays unchanged.
 * **DAC1 instead of DAC0.**  Change `E1M_X_DAC0` ->
-  `E1M_X_DAC1`.  The carrier routes that to ANA_OUT1.
+  `E1M_X_DAC1`.  The board routes that to ANA_OUT1.
 
 ## Verifying with a DMM (no scope)
 
@@ -97,7 +97,7 @@ A DMM in AC RMS mode will read:
 A DMM in DC mode will read SINE_DC_OFFSET_MV (1650 mV).
 
 If neither value matches, your DAC isn't reaching the pad --
-suspect carrier routing or supervisor-not-ready
+suspect board routing or supervisor-not-ready
 (`open` returning NULL with last_error = `ALP_ERR_NOT_READY`).
 
 ## Reference

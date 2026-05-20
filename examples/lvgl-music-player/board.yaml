@@ -4,17 +4,10 @@
 # of LVGL's bundled demos -- album-art carousel, time slider,
 # track list, equaliser visualiser.  Pairs nicely with a real
 # audio output path: WM8960 or TLV320AIC3204 codec over I²S.
-
-schema_version: 2
-
 som:
   sku: E1M-AEN701
 
-carrier:
-  name: E1M-EVK
-
-# Single-OS app -- M55-HP drives both LVGL UI and the I²S codec.
-# A32 cluster off (no Linux); M55-HE inherits SoM topology default.
+preset: e1m-evk
 cores:
   a32_cluster:
     os: "off"

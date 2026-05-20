@@ -139,7 +139,7 @@ int main(void) {
          *   * ALP_ERR_NOSUPPORT -- backend has no DAC at all
          *     (e.g. an E1M-AEN SoM running this on the base E1M
          *     form factor; the AEN's SoC DAC isn't routed to a
-         *     carrier pad in the E1M v1.0 pinout).
+         *     board pad in the E1M v1.0 pinout).
          *   * ALP_ERR_OUT_OF_RANGE -- channel_id >= E1M_X_DAC_COUNT.
          *   * On native_sim there's no DAC controller; open
          *     returns NULL with NOT_READY. */

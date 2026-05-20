@@ -5,7 +5,7 @@
  * v2n-xspi-flash-readwrite -- erase one page on the V2N's on-module
  * xSPI NOR, write a known pattern, read it back, compare.
  *
- * V2N populates an xSPI NOR flash on the carrier-facing xSPI bus
+ * V2N populates an xSPI NOR flash on the board-facing xSPI bus
  * (see metadata/e1m_modules/v2n/renesas-peripheral-map.tsv for the
  * pad assignment).  Zephyr's flash subsystem abstracts the chip
  * behind a `flash` driver class; this example uses the standard
@@ -14,7 +14,7 @@
  * binding.
  *
  * The example writes at the *start of the highest 4-KiB sector* on
- * a 256-Mbit (32 MiB) part: offset 0x1FFF000.  Carriers that ship a
+ * a 256-Mbit (32 MiB) part: offset 0x1FFF000.  Boards that ship a
  * different part size or partition layout can override
  * `XSPI_TEST_OFFSET` at build time.
  *

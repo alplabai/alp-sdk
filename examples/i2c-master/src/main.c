@@ -74,7 +74,7 @@ int main(void) {
         /* No alp-i2c0 alias on this build -> NULL handle.
          *
          * Common causes:
-         *   * Carrier overlay forgot to set the alias.
+         *   * Board overlay forgot to set the alias.
          *   * SoM has no I2C0 routed (rare -- it's part of the
          *     portable E1M baseline).
          *   * On native_sim without the emul overlay we ship,

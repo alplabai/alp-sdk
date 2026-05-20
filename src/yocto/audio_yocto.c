@@ -20,7 +20,7 @@
  *
  * So `peripheral_id = 1` => `hw:0,0` (the first hardware card).  Apps
  * that need a non-default device subname can extend this mapping by
- * adding entries to the carrier's metadata; the SDK doesn't shoehorn
+ * adding entries to the board's metadata; the SDK doesn't shoehorn
  * a free-form string into `peripheral_id` because every other
  * peripheral surface uses a numeric instance ID.
  *

@@ -46,7 +46,7 @@
  * Two channels, each backed by two phases:
  *
  *   - **CH1** (phases 1 + 2) -> 0.8 V Renesas rail.  Enabled at
- *     boot by the carrier-driven `EN1` strap; firmware doesn't have
+ *     boot by the board-driven `EN1` strap; firmware doesn't have
  *     to touch it.
  *   - **CH2** (phases 3 + 4) -> 0.75 V DEEPX DDR / NPU rail.
  *     **Disabled at boot on every variant**; only V2N-M1 firmware
@@ -95,7 +95,7 @@
  * surfaces both the live status (via `da9292_get_status`) and the
  * latched events (via `da9292_read_and_clear_events`).
  *
- * @par Carrier-side IRQ wiring
+ * @par Board-side IRQ wiring
  *
  * On V2N the two IO outputs from DA9292 are routed to the Renesas
  * RZ/V2N (after the 2026-05-11 schematic revision that reassigned
@@ -105,7 +105,7 @@
  *   - `INT_N` -> Renesas `P37` (`DA9292_INT`) -- generic interrupt
  *     output that goes low on any unmasked event.
  *
- * The driver itself doesn't grab those GPIOs -- carrier-board code
+ * The driver itself doesn't grab those GPIOs -- board-board code
  * wires the `alp_gpio_*` ISR to call `da9292_read_and_clear_events`
  * when the line falls.
  *
@@ -202,11 +202,11 @@ alp_status_t da9292_read_and_clear_events(da9292_t *ctx, da9292_events_t *out);
  *
  *  @note  This sets/clears the **register-side** enable.  When the
  *         CONF strap routes EN1/EN2 to host GPIOs the channel is
- *         the AND of pin and register; when the carrier ties EN1/EN2
+ *         the AND of pin and register; when the board ties EN1/EN2
  *         to AVDD (always-on), only the register matters.  The V2N
  *         schematic ties EN1 always-on and routes EN2 to a host
  *         signal -- check the V2N peripheral map for the exact
- *         carrier wiring. */
+ *         board wiring. */
 alp_status_t da9292_set_enable(da9292_t *ctx, da9292_channel_t ch, bool enable);
 
 /** @brief Set channel output voltage in millivolts (VSTEP = 0, 5 mV step).
@@ -249,7 +249,7 @@ alp_status_t da9292_v2n_base_init(da9292_t *ctx);
  *       disabled, hence the EN-clear in the same write.
  *    2. Write `CH2_VOUT_VSEL_LO = 0.75 V` (0x96 at VSTEP=0).
  *    3. Read back, confirm the write took.
- *    4. Write `CH2_EN = 1` in `PMC_CTRL_01`.  On the V2N carrier
+ *    4. Write `CH2_EN = 1` in `PMC_CTRL_01`.  On the V2N board
  *       the EN2 pin is wired to V2N GPIO P64 (`DEEPX_CORE_0P75_EN`);
  *       the recommended bring-up has firmware drive that pin
  *       high after this call, so the register-side enable here is

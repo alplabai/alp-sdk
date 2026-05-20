@@ -80,7 +80,7 @@
  * - **ACT88760_CMI120 Power Sequence_250916.pdf** -- the V2N power-on
  *   timing diagram + per-rail target voltage list for CMI 120.E1.
  *   This driver does NOT encode the rail names from that PDF in code
- *   -- carrier-board firmware reads them from `metadata/chips/act8760.yaml`
+ *   -- board-board firmware reads them from `metadata/chips/act8760.yaml`
  *   instead (the rail manifest), so a CMI swap doesn't require a code
  *   rebuild.
  *

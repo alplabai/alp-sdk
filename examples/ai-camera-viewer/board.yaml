@@ -7,21 +7,13 @@
 # The headline marketing demo: shows the full edge-AI stack end
 # to end on a single SoM, with the right NPU resolved by the
 # §D.lib.loader from the SKU's `capabilities:` block.
-
-schema_version: 2
-
 som:
   sku: E1M-AEN701           # E7 -- two Ethos-U55s; the SoM `capabilities:`
                              # block (ethos_u55_count: 2) drives
                              # CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y +
                              # CONFIG_ALP_TFLM_ETHOS_U55=y automatically.
 
-carrier:
-  name: E1M-EVK
-
-# Single-OS app on AEN701.  M55-HP runs camera capture, LVGL UI, and
-# NPU dispatch.  A32 cluster off (no Linux here); M55-HE inherits
-# the SoM topology's stock-shim so the second NPU stays paired.
+preset: e1m-evk
 cores:
   a32_cluster:
     os: "off"

@@ -174,7 +174,7 @@ alp_status_t tps628640_init(tps628640_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit,
  * down; read back via @ref tps628640_get_voltage_mv to see what
  * actually landed.
  *
- * @warning  Carrier-side firmware MUST enforce the rail's design-
+ * @warning  Board-side firmware MUST enforce the rail's design-
  *           safe operating window before calling this -- e.g. the
  *           V2N-M1 `DDR5_VDDQ` instance at I²C `0x4F` targets
  *           0.5 V and a write to 1 V would damage downstream

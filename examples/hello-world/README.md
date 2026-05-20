@@ -1,7 +1,7 @@
 # hello-world
 
 The canonical "first program" for the ALP SDK.  No peripherals,
-no chips, no carrier-specific wiring -- just a periodic `printf`
+no chips, no board-specific wiring -- just a periodic `printf`
 loop so you can confirm the toolchain, flash flow, and log
 console are wired correctly before chasing harder bugs.
 
@@ -21,7 +21,7 @@ Pin down which one BEFORE moving on to `gpio-button-led` or
 ## What this shows
 
 * The minimal `board.yaml` v2 shape: `schema_version`, `som.sku`,
-  `carrier.name`, one `cores.<id>` with an empty `peripherals: []`.
+  `board.name`, one `cores.<id>` with an empty `peripherals: []`.
 * That `prj.conf` stays empty -- all CONFIG_* selection comes from
   the loader-generated `alp.conf`.
 * The Zephyr boot -> `main()` -> printf path with no peripheral

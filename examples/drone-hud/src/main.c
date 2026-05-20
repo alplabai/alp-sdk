@@ -90,7 +90,7 @@ int main(void)
     LOG_INF("drone-hud demo starting");
 
     /* Sensor bring-up.  Returns immediately if a chip is absent so
-     * the demo still runs on a partial carrier (e.g. no GPS lock
+     * the demo still runs on a partial board (e.g. no GPS lock
      * indoors -- the IMU + battery + UI still work). */
     if (drone_sensors_init(&g_telem) != 0) {
         LOG_WRN("drone_sensors_init returned non-zero; degraded mode");

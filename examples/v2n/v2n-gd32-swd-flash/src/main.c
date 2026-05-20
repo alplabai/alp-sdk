@@ -20,7 +20,7 @@
  * with the primary PMIC reset-out).  Authoritative source:
  * `metadata/chips/gd32_swd.yaml` + `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`.
  * The studio's pin allocator resolves these to the integer pin ids
- * below at build time from the carrier preset.  If the carrier
+ * below at build time from the board preset.  If the board
  * preset hasn't propagated the routing yet, the alp_gpio_open call
  * below will return NULL -- the example prints the failure and exits
  * cleanly rather than wedging the host.
@@ -43,12 +43,12 @@
 #include "alp/chips/gd32_swd.h"
 
 /* Studio-resolved pin ids for the V2N gd32_swd routing.  The
- * carrier preset (`metadata/carriers/E1M-X-EVK/board.yaml`) declares
+ * board preset (`metadata/boards/E1M-X-EVK/board.yaml`) declares
  * the gd32_swd block; `alp_project.py` emits these as part of the
  * studio's generated build.  The integer values below are the
  * canonical preset ordering (SWDIO first, SWCLK second, NRST third)
- * resolved against the carrier's auxiliary-GPIO array -- if the
- * carrier shuffles the array the example follows the carrier. */
+ * resolved against the board's auxiliary-GPIO array -- if the
+ * board shuffles the array the example follows the board. */
 #define V2N_GD32_SWDIO_PIN_ID   0u   /* Renesas P70 on V2N */
 #define V2N_GD32_SWCLK_PIN_ID   1u   /* Renesas P71 on V2N */
 #define V2N_GD32_NRST_PIN_ID    2u   /* Renesas P74 (open-drain) on V2N */
@@ -73,7 +73,7 @@ int main(void) {
     printf("[swd] v2n-gd32-swd-flash\n");
 
     /* Open the three GPIO handles.  Each call resolves a
-     * studio-supplied pin id; failure usually means the carrier
+     * studio-supplied pin id; failure usually means the board
      * preset hasn't routed the SWD lines yet (still TBD on the V2N
      * schematic). */
     alp_gpio_t *swdio = alp_gpio_open(V2N_GD32_SWDIO_PIN_ID);
@@ -81,13 +81,13 @@ int main(void) {
     alp_gpio_t *nrst  = alp_gpio_open(V2N_GD32_NRST_PIN_ID);
     if (swdio == NULL || swclk == NULL) {
         printf("[swd] alp_gpio_open failed (SWDIO + SWCLK required); "
-               "carrier may not have routed SWD lines yet\n");
+               "board may not have routed SWD lines yet\n");
         alp_gpio_close(swdio);
         alp_gpio_close(swclk);
         alp_gpio_close(nrst);
         return 0;
     }
-    /* NRST is optional -- carriers that don't route it work via
+    /* NRST is optional -- boards that don't route it work via
      * software AIRCR.SYSRESETREQ in the driver's reset path. */
     if (nrst == NULL) {
         printf("[swd] note: NRST not opened; software-reset fallback will be used\n");

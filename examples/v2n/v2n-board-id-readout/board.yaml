@@ -1,17 +1,8 @@
 # board.yaml -- per-app project configuration for v2n-board-id-readout.
-
-schema_version: 2
-
 som:
   sku: E1M-V2N101
 
-carrier:
-  name: E1M-X-EVK
-
-# M33-SM-only Zephyr build (matches the v1 `os: zephyr` behaviour for
-# this example).  The A55 cluster is opted off so the build runs
-# fast under twister; customers wanting the dual-OS flavour add an
-# `a55_cluster:` block.
+preset: e1m-x-evk
 cores:
   a55_cluster:
     os: "off"

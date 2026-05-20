@@ -8,7 +8,7 @@
  * devicetree alias on SoMs whose SoC carries a DAC peripheral
  * (Alif Ensemble E3 / E7, etc.).  On V2N
  * (CONFIG_ALP_SOC_RENESAS_RZV2N_N44) the Renesas SoC has no DAC; the
- * carrier routes E1M `DAC0` + `DAC1` to the GD32 IO MCU's PA4 / PA6
+ * board routes E1M `DAC0` + `DAC1` to the GD32 IO MCU's PA4 / PA6
  * pads, and the SDK dispatches through the supervisor singleton.
  *
  * The Zephyr DAC API is write-only; read-back is recovered from the

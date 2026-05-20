@@ -58,7 +58,7 @@ To exercise I2C slave mode end-to-end on real hardware:
    at address `0x42` and use a simple register read/write loop)
    onto board B.
 3. Wire SDA-SDA, SCL-SCL, GND-GND between the two boards.  Use
-   external 4.7 kΩ pull-ups on SDA + SCL if neither carrier
+   external 4.7 kΩ pull-ups on SDA + SCL if neither board
    provides them.
 4. Power both boards.  Board A's console should show
    `writes_seen` incrementing as board B sends register writes;

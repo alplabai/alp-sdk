@@ -360,7 +360,7 @@ typedef struct {
  *  Stored on the wire as a single byte; the named values keep callers
  *  from shipping magic numbers.  OPEN_DRAIN is required by the M.2
  *  W_DISABLE1 / W_DISABLE2 contract (host drives low to disable; HiZ
- *  releases via the carrier's external pull-up). */
+ *  releases via the board's external pull-up). */
 typedef enum {
     ALP_CC3501E_GPIO_DIR_INPUT      = 0u,
     ALP_CC3501E_GPIO_DIR_OUTPUT     = 1u,
@@ -368,7 +368,7 @@ typedef enum {
 } alp_cc3501e_gpio_direction_t;
 
 /** Internal-pull selector for @ref alp_cc3501e_gpio_configure_t::pull.
- *  Stored on the wire as a single byte.  Carriers that need a stronger
+ *  Stored on the wire as a single byte.  Boards that need a stronger
  *  pull MUST add an external resistor; the on-die pull strengths are
  *  documented as weak. */
 typedef enum {

@@ -286,8 +286,8 @@ class TestHwInfoHEmit(unittest.TestCase):
         self.assertIn('#define ALP_HW_BUILD_SOM_SKU         "E1M-AEN701"', out)
         self.assertIn('#define ALP_HW_BUILD_SOM_FAMILY      "aen"', out)
         self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "r1"', out)
-        self.assertIn('#define ALP_HW_BUILD_CARRIER_NAME    "E1M-EVK"', out)
-        self.assertIn('#define ALP_HW_BUILD_CARRIER_HW_REV  "r1"', out)
+        self.assertIn('#define ALP_HW_BUILD_BOARD_NAME    "E1M-EVK"', out)
+        self.assertIn('#define ALP_HW_BUILD_BOARD_HW_REV  "r1"', out)
         self.assertIn('#define ALP_HW_BUILD_OS              "zephyr"', out)
 
     def test_no_board_skips_board_macros(self) -> None:
@@ -307,7 +307,7 @@ class TestHwInfoHEmit(unittest.TestCase):
             rv = _run_loader(input_path=path, emit="hw-info-h")
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
             self.assertIn('ALP_HW_BUILD_SOM_SKU', rv.stdout)
-            self.assertNotIn('ALP_HW_BUILD_CARRIER_NAME', rv.stdout)
+            self.assertNotIn('ALP_HW_BUILD_BOARD_NAME', rv.stdout)
 
     def test_explicit_hw_rev_overrides_default(self) -> None:
         """Explicit som.hw_rev wins over the SKU preset's

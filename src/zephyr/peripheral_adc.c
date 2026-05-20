@@ -49,7 +49,7 @@
 #include "v2n_supervisor.h"
 
 /* On V2N every E1M ADC channel is GD32-driven (Renesas SoC's
- * ALP_SOC_ADC_COUNT = 24 but the carrier exposes the 8 E1M channels
+ * ALP_SOC_ADC_COUNT = 24 but the board exposes the 8 E1M channels
  * via the GD32 IO MCU per gd32-io-mcu-map.tsv).  The bridge already
  * returns mV-corrected readings, so the V2N path uses mV as the
  * "raw" value (16-bit unsigned, sign-extended into int32) and

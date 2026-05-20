@@ -1571,8 +1571,8 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     populated: dict[str, bool] = dict(
         (project.board_preset or {}).get("populated") or {})
     if populated:
-        lines.append("# Board-populated chip drivers (from board.yaml "
-                     "board.populated + board preset)")
+        lines.append("# Board-populated chip drivers (from the resolved "
+                     "board definition)")
         for chip, on in sorted(populated.items()):
             # Deduplicate: if the SoM block already emitted =y, skip
             # the board line to avoid redundant CONFIG entries.
@@ -1582,6 +1582,22 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
             if on:
                 for s in _CHIP_SUBSYSTEMS.get(chip, ()):
                     chip_subsystems.add(s)
+        lines.append("")
+
+    # Project-declared chips (board.yaml top-level `chips:` array).
+    # Adds chip drivers the application links directly via
+    # <alp/chips/<name>.h> -- e.g. when the project plugs an external
+    # sensor into a board's headers that's not in the board's
+    # `populated:` table.  Each entry maps to CHIP_<NAME>=y (or
+    # BLOCK_<NAME>=y for the SDK-level block helpers).
+    project_chips = [c for c in (project.chips or [])
+                     if c not in som_chips and not populated.get(c)]
+    if project_chips:
+        lines.append("# Project-declared chips (board.yaml `chips:` array)")
+        for chip in sorted(set(project_chips)):
+            lines.append(f"{_slug_kconfig(chip)}=y")
+            for s in _CHIP_SUBSYSTEMS.get(chip, ()):
+                chip_subsystems.add(s)
         lines.append("")
 
     # Zephyr subsystems: union of (chip-driver-required subsystems for

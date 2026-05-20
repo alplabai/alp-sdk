@@ -12,21 +12,14 @@
 # nodes can run for months on a single charge because the heavy
 # compute lives behind the Ethos-U's clock-gated path.
 
-schema_version: 2
-
 som:
   sku: E1M-AEN701           # E7's two Ethos-U55s give an always-on
                              # inference path; AEN401/AEN601/AEN801
                              # add U85 for transformer-style anomaly
                              # models on the same source.
 
-carrier:
-  name: E1M-EVK
-  # The EVK already populates the LSM6DSO at I2C0 0x6A; we re-state
-  # it here so the §D.lib loader keeps the CHIP_LSM6DSO Kconfig on
-  # even if a future EVK preset trims defaults.
-  populated:
-    lsm6dso: true
+preset: e1m-evk             # EVK preset populates the LSM6DSO at
+                            # I2C0 0x6A by default.
 
 # Single-OS app: M55-HP owns the sample loop + NPU dispatch.  Skip the
 # A32 cluster (this is a battery-powered always-on demo) and keep

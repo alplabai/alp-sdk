@@ -14,7 +14,7 @@
  *
  * The companion GD32G553MEY7TR on the E1M-X V2N / V2N-M1 SoMs is
  * a Cortex-M33 with the standard Arm Coresight SWD debug port.
- * Per the 2026-05-12 hardware decision the V2N carrier routes
+ * Per the 2026-05-12 hardware decision the V2N board routes
  * `GD32_SWDIO` + `GD32_SWCLK` + `GD32_NRST` from the Renesas RZ/V2N
  * host back to the GD32 so the host can reflash the supervisor MCU
  * in the field without an external probe.
@@ -59,7 +59,7 @@ extern "C" {
 #endif
 
 /** Expected SW-DP IDCODE for the GD32G553 (Cortex-M33 r0p1 SW-DPv2).
- *  Carriers can match against this value in production test. */
+ *  Boards can match against this value in production test. */
 #define GD32_SWD_EXPECTED_IDCODE          0x6BA02477u
 
 /** Default clock-delay loop count.  Higher = slower SWCLK. */

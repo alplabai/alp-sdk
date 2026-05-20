@@ -12,9 +12,6 @@
 # The OTA *server* side is owned externally (separate repo,
 # Hakan).  This board.yaml describes the device side only --
 # the customer-buildable half of the contract.
-
-schema_version: 2
-
 som:
   sku: E1M-AEN701          # Alif Ensemble + on-SoM OPTIGA Trust M.
                             # The OPTIGA holds the production
@@ -22,15 +19,7 @@ som:
                             # key gates both secure boot and OTA
                             # acceptance (single trust root).
 
-carrier:
-  name: E1M-EVK            # 35 x 35 EVK -- the carrier that
-                            # carries the Wi-Fi-routed CC3501E
-                            # to ground for the OTA download
-                            # path.  See docs/cc3501e-bridge.md.
-
-# OTA flow runs on M55-HP (boot + image-swap + signature verify all
-# live on the application core).  A32 cluster off (no Linux); M55-HE
-# inherits the SoM topology default.
+preset: e1m-evk
 cores:
   a32_cluster:
     os: "off"

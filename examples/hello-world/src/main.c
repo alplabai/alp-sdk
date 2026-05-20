@@ -4,7 +4,7 @@
  *
  * hello-world -- the canonical "first program" for the ALP SDK.
  *
- * No peripherals, no chips, no carrier-specific wiring.  Just the
+ * No peripherals, no chips, no board-specific wiring.  Just the
  * boot path + a periodic printf loop so customers can confirm
  * their toolchain + flash flow + log console are wired correctly
  * before chasing harder bugs.
@@ -21,7 +21,7 @@
  * Where the output lands depends on the SoM:
  *
  *   * E1M-AEN (Alif Ensemble) -- the SoC's first USART, surfaced
- *     on the EVK carrier as the FTDI USB-UART (open at 115200 8N1).
+ *     on the EVK board as the FTDI USB-UART (open at 115200 8N1).
  *   * E1M-V2N / V2N-M1        -- the Renesas SCIF console; same FTDI
  *     bridge on the E1M-X-EVK at 115200 8N1.
  *   * native_sim host build   -- stdout of the host binary.

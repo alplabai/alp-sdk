@@ -18,7 +18,7 @@ Kconfig-pinned device.  Many real apps need to drive a
 * Bluetooth modem on a secondary serial port.
 * GPS module on a board-specific header.
 * Stepper-motor driver expecting a stream of TMC2209 datagrams.
-* Debug pin on a custom carrier that isn't the console.
+* Debug pin on a custom board that isn't the console.
 
 `alp_uart_*()` lets you open ANY UART by portable instance ID
 (`E1M_UART0`, `E1M_UART1`) without touching `CONFIG_CONSOLE_*`
@@ -48,7 +48,7 @@ west flash
 
 ## Attaching a terminal
 
-The output appears on whatever the carrier wires `E1M_UART0` to.
+The output appears on whatever the board wires `E1M_UART0` to.
 On the E1M-EVK and E1M-X-EVK that's the on-board FTDI USB-UART
 (115200 8N1, 8 data bits, no parity, 1 stop bit).
 

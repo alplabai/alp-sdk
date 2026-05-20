@@ -25,16 +25,11 @@
 #
 # Targets the same SoM as rpmsg-v2n -- E1M-V2N101 -- so the build
 # inherits ocram_low's hard memory_map values; no TBD addresses.
-
-schema_version: 2
-
 som:
   sku: E1M-V2N101
   hw_rev: r1
 
-carrier:
-  name: E1M-X-EVK
-
+preset: e1m-x-evk
 cores:
   a55_cluster:
     app: ./linux

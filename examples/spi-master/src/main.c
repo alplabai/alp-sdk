@@ -100,7 +100,7 @@ int main(void) {
     });
     if (bus == NULL) {
         /* Likely causes:
-         *   * No `alp-spi0` alias on this build (carrier overlay
+         *   * No `alp-spi0` alias on this build (board overlay
          *     missing or wrong).
          *   * Requested freq_hz exceeds the controller's max
          *     (returns NOSUPPORT via alp_last_error).

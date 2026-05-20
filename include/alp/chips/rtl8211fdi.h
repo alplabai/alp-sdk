@@ -19,7 +19,7 @@
  *   - MDC + MDIO management bus (1.8 V level, 1 kΩ pull-up per PHY)
  *   - PHY_INTR open-drain interrupt-out (board nets ENET0_nINT, ENET1_nINT)
  *
- * @par Carrier wiring (V2N)
+ * @par Board wiring (V2N)
  *
  * | Signal       | Renesas pad | Notes                                          |
  * |--------------|-------------|------------------------------------------------|
@@ -48,7 +48,7 @@
  * Each callback must return `0` on success and a negative value
  * on bus error.  This keeps the chip driver portable across Zephyr
  * (where the callback wraps `mdio_read`/`mdio_write` against the
- * Renesas RZ/V2N MAC's MDIO controller) and bare-metal carriers
+ * Renesas RZ/V2N MAC's MDIO controller) and bare-metal boards
  * (where the callback can drive MDC/MDIO via GPIO bit-banging or a
  * vendor MAC's register interface).
  *

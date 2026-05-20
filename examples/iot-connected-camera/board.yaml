@@ -2,25 +2,23 @@
 # iot-connected-camera reference application.
 #
 # Customer workflow: copy this directory, change `som.sku` to
-# your V2N MPN, edit `carrier.name` if you fork the X-EVK, and
+# your V2N MPN, edit `preset:` if you fork the X-EVK, and
 # `west build`.  CMakeLists.txt invokes scripts/alp_project.py
 # at configure time and layers the generated alp.conf over
 # prj.conf via OVERLAY_CONFIG.
-
-schema_version: 2
 
 som:
   sku: E1M-V2N101          # Renesas RZ/V2N -- DRP-AI3 on-die NPU
                             # plus Murata Wi-Fi 6 / BLE radio.
 
-carrier:
-  name: E1M-X-EVK
-  populated:
-    # The X-EVK preset's `populated` block is still TBD pending
-    # the user-supplied schematic; the local UI + button this
-    # example uses are declared inline.
-    ssd1306: true          # Mono OLED for the local status pane.
-    button_led: true       # GPIO button + LED helper.
+preset: e1m-x-evk           # X-EVK preset's `populated:` is TBD
+                            # pending the user-supplied schematic;
+                            # the local UI + button this example uses
+                            # are listed in `chips:` below.
+
+chips:
+  - ssd1306                 # Mono OLED for the local status pane.
+  - button_led              # GPIO button + LED helper.
 
 # Camera + IoT demo on the V2N's M33-SM.  Keep the A55 cluster off
 # until the Linux-side capture pipeline lands (post-v0.6 OTA-flagship

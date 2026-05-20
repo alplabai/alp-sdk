@@ -3,21 +3,12 @@
 #
 # Designed against AEN-Zephyr (the dual-Cortex-M55 silicon with
 # OPTIGA Trust M + secure-boot fabric).  Real customer shipping
-# variants will fork this for V2N or i.MX 93 carriers; the SDK's
+# variants will fork this for V2N or i.MX 93 boards; the SDK's
 # surfaces stay identical across SoMs.
-
-schema_version: 2
-
 som:
   sku: E1M-AEN701
 
-carrier:
-  name: E1M-EVK
-
-# Production flagship runs on M55-HP (application core for the
-# signed-OTA + IoT-connected workload).  A32 cluster off; M55-HE
-# inherits the SoM topology default so the secondary NPU stays
-# powered for future inference offload.
+preset: e1m-evk
 cores:
   a32_cluster:
     os: "off"

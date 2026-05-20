@@ -47,7 +47,7 @@ LOG_MODULE_REGISTER(alp_v2n_power_mgmt, CONFIG_ALP_SDK_LOG_LEVEL);
  *   v2n-deepx-core-0p75-en-gpios = <&renesas_gpioN PORT_BIT GPIO_ACTIVE_HIGH>;
  *
  * If either alias is absent the module compiles to no-ops + the
- * init function returns NOSUPPORT.  Carrier boards that don't have
+ * init function returns NOSUPPORT.  Board boards that don't have
  * the DEEPX rail (V2N base SoMs without the M1 DEEPX add-on)
  * legitimately don't populate these aliases. */
 #define V2N_PWR_EN_REQ_NODE DT_ALIAS(v2n_deepx_pwr_en_req)
@@ -98,7 +98,7 @@ static void v2n_pwr_work_handler(struct k_work *work)
         return;
     }
 
-    /* Release the host-side gate.  Carrier wiring routes P64 into
+    /* Release the host-side gate.  Board wiring routes P64 into
      * the EN2 pin of the DA9292 (belt-and-braces against the
      * register-side enable) + into any downstream consumers
      * gated on the VCORE_0P75 rail being live. */
@@ -185,11 +185,11 @@ static int v2n_pwr_sys_init(void)
 }
 SYS_INIT(v2n_pwr_sys_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
-#else  /* DT aliases missing -- carrier doesn't wire DEEPX */
+#else  /* DT aliases missing -- board doesn't wire DEEPX */
 
 alp_status_t alp_z_v2n_power_mgmt_init(void)
 {
-    /* DT aliases not populated -- this carrier doesn't have the
+    /* DT aliases not populated -- this board doesn't have the
      * DEEPX rail.  Surface NOSUPPORT so a misconfigured board
      * doesn't silently look "fine". */
     return ALP_ERR_NOSUPPORT;

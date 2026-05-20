@@ -323,7 +323,7 @@ int alp_mavlink_init(uint8_t sysid, uint8_t compid)
     s_compid = compid;
     /* The GCS link nominally needs its own UART; the E1M family only
      * exposes UART0/1 in v0.5 -- real flight builds wire the SiK radio
-     * to an external port on the carrier (TBD pinout).  For paper
+     * to an external port on the board (TBD pinout).  For paper
      * compile here we map onto UART0 (shared with GNSS); customers
      * route their actual GCS-radio onto the dedicated port. */
     s_uart = alp_uart_open(&(alp_uart_config_t){

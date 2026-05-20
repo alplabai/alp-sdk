@@ -116,12 +116,12 @@ alp_status_t rv3028c7_alarm_check_and_clear(rv3028c7_t *ctx, bool *fired);
  *
  * The chip also exposes the `CLKOUT` pin which can be configured to
  * emit pulses on certain events (per Micro Crystal AN
- * "Multiple Interrupt Lines with RV-3028-C7"), giving carriers a
+ * "Multiple Interrupt Lines with RV-3028-C7"), giving boards a
  * **second physical output line** that fires independently of `INT`
  * when wired through an event-routing config.  The driver doesn't
  * directly toggle CLKOUT routing -- that's a board-design question
- * carried in the carrier overlay -- but `rv3028c7_route_clkout` lets
- * firmware reprogram the CLKOUT source bits when the carrier
+ * carried in the board overlay -- but `rv3028c7_route_clkout` lets
+ * firmware reprogram the CLKOUT source bits when the board
  * supports it.
  */
 
@@ -184,7 +184,7 @@ typedef enum {
     RV3028C7_CLKOUT_LOW        = 7, /**< CLKOUT driven low (effectively disabled). */
 } rv3028c7_clkout_src_t;
 
-/** @brief Reprogram the CLKOUT pin's source.  Used by carriers that
+/** @brief Reprogram the CLKOUT pin's source.  Used by boards that
  *         wire CLKOUT as a second interrupt line (Micro Crystal AN
  *         "Multiple Interrupt Lines with RV-3028-C7"). */
 alp_status_t rv3028c7_route_clkout(rv3028c7_t *ctx, rv3028c7_clkout_src_t src);

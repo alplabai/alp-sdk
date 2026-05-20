@@ -5,19 +5,10 @@
 # Real silicon required to run the inference path; native_sim
 # exercises the framing only (every call returns NOSUPPORT or
 # NOT_READY but the structure is verified).
-
-schema_version: 2
-
 som:
   sku: E1M-V2M101  # V2N-M1 variant with DEEPX DX-M1 NPU
 
-carrier:
-  name: E1M-EVK
-
-# Zephyr-side bring-up of the DEEPX rail + NPU dispatch sits on the
-# M33-SM (mirrors v1 `os: zephyr` shape).  The A55 cluster's real
-# DEEPX inference path is the v2n-m1-ros-perception example; we opt
-# the A-cluster off here so this slice runs fast under twister.
+preset: e1m-evk
 cores:
   a55_cluster:
     os: "off"

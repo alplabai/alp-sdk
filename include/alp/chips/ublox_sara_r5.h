@@ -7,7 +7,7 @@
  * @file ublox_sara_r5.h
  * @brief u-blox SARA-R5 LTE-M cellular module (UART AT).
  *
- * Carrier-certified LTE Cat M1 module.  Same AT-command shell
+ * Board-certified LTE Cat M1 module.  Same AT-command shell
  * shape as `quectel_bg95` -- different power-rail sequencing
  * (PWR_ON pulse + RESET line).
  *

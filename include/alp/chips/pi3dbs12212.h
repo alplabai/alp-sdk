@@ -48,8 +48,8 @@
  *   - `PI3DBS_STATE_PATH_0` -- enabled, routing input pair 0 -> output.
  *   - `PI3DBS_STATE_PATH_1` -- enabled, routing input pair 1 -> output.
  *
- * The "which path is DEEPX vs E1M edge" mapping is a carrier-board
- * convention; the driver is agnostic.  Carriers document the mapping
+ * The "which path is DEEPX vs E1M edge" mapping is a board-board
+ * convention; the driver is agnostic.  Boards document the mapping
  * in `metadata/e1m_modules/v2n-m1/README.md` and in
  * `metadata/chips/pi3dbs12212.yaml`.
  *

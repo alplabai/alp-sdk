@@ -16,7 +16,7 @@
  *   1. printf goes to the *console* UART (a single, Kconfig-pinned
  *      device).  Many real apps need to drive a *different* UART
  *      -- one wired to a Bluetooth modem, a GPS, a stepper-motor
- *      driver, a debug pin on a custom carrier.  The
+ *      driver, a debug pin on a custom board.  The
  *      alp_uart_*() surface gives you that without touching
  *      CONFIG_CONSOLE knobs.
  *   2. printf is a one-way text formatter.  alp_uart_write()
@@ -35,7 +35,7 @@
  *
  * On real silicon you'd also see the greeting + ticks on whatever
  * terminal is wired to E1M_UART0 (the FTDI USB-UART on the EVK,
- * the carrier's modem header on a custom board, ...).
+ * the board's modem header on a custom board, ...).
  */
 
 #include <stdio.h>

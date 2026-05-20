@@ -11,20 +11,10 @@
 # over PCIe.  The same C++ source builds against V2N (no DEEPX --
 # falls through to DRP-AI) and V2N-M1 (DEEPX) by swapping
 # `som.sku`.
-
-schema_version: 2
-
 som:
   sku: E1M-V2M101            # V2N-M1: V2N + DEEPX DX-M1.
 
-carrier:
-  name: E1M-X-EVK
-
-# The ROS 2 perception node is a Yocto-Linux user-space binary that
-# runs on the A55 cluster.  The M33-SM is left at the SoM topology
-# default (stock-shim Zephyr image -- gets brought up by remoteproc
-# from the rootfs) so the cross-core RPMsg supervisor path stays
-# alive for future telemetry topics.
+preset: e1m-x-evk
 cores:
   a55_cluster:
     app: ./src                # the colcon workspace + ROS 2 recipes

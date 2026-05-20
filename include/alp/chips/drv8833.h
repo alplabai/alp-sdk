@@ -7,7 +7,7 @@
  * @file drv8833.h
  * @brief TI DRV8833 dual H-bridge brushed-DC motor driver.
  *
- * Carrier-board control surface: 2 H-bridges, four PWM-capable
+ * Board-board control surface: 2 H-bridges, four PWM-capable
  * inputs IN1/IN2/IN3/IN4 + nSLEEP enable.  No on-chip register
  * file -- the driver just orchestrates the four PWMs + the sleep
  * GPIO.  All PWM access goes through the portable `<alp/pwm.h>`

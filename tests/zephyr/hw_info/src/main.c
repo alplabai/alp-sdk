@@ -37,8 +37,8 @@ ZTEST(alp_hw_info, test_read_returns_nosupport_v03)
     zassert_equal(info.som_sku[0], 0);
     zassert_equal(info.som_hw_rev[0], 0);
     zassert_equal(info.som_board_id_mv, 0);
-    zassert_equal(info.carrier_hw_rev[0], 0);
-    zassert_equal(info.carrier_board_id_mv, 0);
+    zassert_equal(info.board_hw_rev[0], 0);
+    zassert_equal(info.board_id_mv, 0);
 }
 
 ZTEST(alp_hw_info, test_assert_null_info_returns_inval)

@@ -8,7 +8,7 @@
  * @brief Everest Semi ES8388 stereo audio codec (I²C config + I²S data).
  *
  * China-domestic cost-sensitive stereo codec (dominant on ESP32
- * audio carriers).  Same shape as `wm8960` -- I²C control surface
+ * audio boards).  Same shape as `wm8960` -- I²C control surface
  * here; audio sample path via `<alp/i2s.h>`.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]

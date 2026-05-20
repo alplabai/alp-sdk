@@ -2,28 +2,23 @@
 # edgeai-vision-aen reference application.
 #
 # Customer workflow: copy this directory, change `som.sku` to
-# your AEN MPN, edit `carrier.name` if you fork the EVK, and
+# your AEN MPN, edit `preset:` if you fork the EVK, and
 # `west build`.  CMakeLists.txt invokes scripts/alp_project.py
 # at configure time and layers the generated alp.conf over
 # prj.conf via OVERLAY_CONFIG.
-
-schema_version: 2
 
 som:
   sku: E1M-AEN701          # Alif Ensemble E7 -- has the Ethos-U55 NPU
                             # this example dispatches inference to.
 
-carrier:
-  name: E1M-EVK
-  populated:
-    button_led: true       # GPIO button + LED helper used by stage 1.
-                            # lsm6dso + ssd1306 already true in the
-                            # EVK preset's defaults.
+preset: e1m-evk            # EVK preset already populates button_led,
+                           # lsm6dso, ssd1306 -- everything this demo
+                           # needs.
 
 # Single-OS app: the M55-HP core runs the vision pipeline + dispatches
 # to the NPU bonded to it via topology.  M55-HE keeps the SoM
 # topology default (stock-shim Zephyr image) so the peer-NPU stays
-# powered for fallback.  The A32 cluster on E7 is not used here; v2
+# powered for fallback.  The A32 cluster on E7 is not used here;
 # defaults Linux on for A-cores so opt-out explicitly via `os: off`.
 cores:
   a32_cluster:

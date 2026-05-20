@@ -180,7 +180,7 @@ int main(void) {
         .bits_per_word = 8,
         .cs_pin_id     = E1M_GPIO_IO0,  /* arbitrary; master must
                                           * drive whatever pin our
-                                          * carrier wires to /CS. */
+                                          * board wires to /CS. */
     });
     if (s == NULL) {
         /* Today this branch ALWAYS fires because the shim returns

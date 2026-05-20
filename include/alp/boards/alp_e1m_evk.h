@@ -5,7 +5,7 @@
 
 /**
  * @file alp_e1m_evk.h
- * @brief Carrier-feature names for the E1M EVK (UG-E1M-001).
+ * @brief Board-feature names for the E1M EVK (UG-E1M-001).
  *
  * Form-factor scope: the E1M EVK accepts 35x35 mm E1M-standard
  * SoMs ONLY.  Currently shipping families that fit:
@@ -14,10 +14,10 @@
  *
  * The 45x65 mm form factor (E1M-X) -- which carries the E1M-X-V2N
  * (Renesas RZ/V2N) family among others -- plugs into a different
- * carrier, the E1M-X EVK.  That gets its own header
+ * board, the E1M-X EVK.  That gets its own header
  * `<alp/boards/alp_e1m_x_evk.h>` (added when the first E1M-X
- * carrier wiring is locked).  Do not assume the macros below
- * describe wiring on the E1M-X carrier.
+ * board wiring is locked).  Do not assume the macros below
+ * describe wiring on the E1M-X board.
  *
  * The E1M EVK is one PCB.  Its on-board features (RGB LED, rotary
  * encoder, IO-expander pins, sensor I2C addresses, header
@@ -56,11 +56,11 @@
 
 #include "alp/e1m_pinout.h"
 
-/* GENERATED carrier route bindings (EVK_PIN_*, EVK_*_BUS_*,
+/* GENERATED board route bindings (EVK_PIN_*, EVK_*_BUS_*,
  * EVK_UART_PORT_*, EVK_PWM_*, EVK_ARD_PWM*, EVK_MB_PWM).
- * Source of truth: metadata/carriers/E1M-EVK/board.yaml
+ * Source of truth: metadata/boards/E1M-EVK/board.yaml
  * `e1m_routes:` block. Regenerate via:
- *     python scripts/gen_carrier_header.py
+ *     python scripts/gen_board_header.py
  * The prose blocks below describe the hardware those macros bind
  * to; the macro values themselves come from the included header. */
 #include "alp/boards/alp_e1m_evk_routes.h"
@@ -82,7 +82,7 @@ extern "C" {
 /* ================================================================== */
 /* Direct GPIO mappings (E1M-standard pads)                           */
 /*                                                                    */
-/* Carrier-feature -> E1M pad macros are GENERATED -- see             */
+/* Board-feature -> E1M pad macros are GENERATED -- see             */
 /* alp_e1m_evk_routes.h (included above).  The prose blocks below     */
 /* describe the hardware those macros bind to.                        */
 /* ================================================================== */
@@ -279,7 +279,7 @@ typedef enum {
 /* The EVK's schematic ties a few non-IO pads to GPIO functions.      */
 /* These can't ride the global `E1M_GPIO_IO*` namespace -- their  */
 /* pad indices live past the standard 42-entry GPIO array.  The       */
-/* carrier's `alp,pin-array` overlay extends the array with the       */
+/* board's `alp,pin-array` overlay extends the array with the       */
 /* extra entries (indices 42..N) and the macros below map a name to  */
 /* that overlay-defined index.                                        */
 /*                                                                    */
@@ -362,7 +362,7 @@ typedef enum {
  *     I2S1_WS   -> CK_DIO2
  *     I2S1_SDI  -> CTP_INT
  *     I2S1_SCLK -> CK_RST
- * There is no peripheral I2S1 bus on this carrier; do not call
+ * There is no peripheral I2S1 bus on this board; do not call
  * `alp_i2s_open(E1M_I2S1)` on the EVK -- it'll conflict with
  * the GPIO repurposes above.  The I2S0 path remains available
  * for audio. */
@@ -370,7 +370,7 @@ typedef enum {
 /* SPI0 is fully consumed by the EVK -- all five SPI0 pads
  * (MISO=AMP_FAULT, CS0=AMP_ENABLE, CS1=IO_EXP_RST, MOSI=CK_DIO4,
  * SCLK=CK_DIO3) are repurposed as GPIOs.  There is no peripheral
- * SPI0 bus available on this carrier; do NOT call
+ * SPI0 bus available on this board; do NOT call
  * `alp_spi_open(E1M_SPI0)` on the EVK -- it'll work at the
  * wrapper level but conflict with the AMP / IOEXP / CK_DIO
  * routing above.  Use the CC3501E-mediated SPI surface for any
@@ -460,7 +460,7 @@ typedef enum {
 /* ================================================================== */
 /* EVK bus assignments  -- GENERATED, see alp_e1m_evk_routes.h        */
 /*                                                                    */
-/* The carrier-named bus / port macros (EVK_I2C_BUS_SENSORS,          */
+/* The board-named bus / port macros (EVK_I2C_BUS_SENSORS,          */
 /* EVK_I2C_BUS_DSI_CSI, EVK_SPI_BUS_ARDUINO, EVK_I2C_BUS_ARDUINO,     */
 /* EVK_UART_PORT_DEBUG, EVK_UART_PORT_ARDUINO) live in the generated  */
 /* routes header.  Hardware-context notes for each binding:           */
@@ -476,7 +476,7 @@ typedef enum {
 /*    drive SPI1 directly here -- apps wanting to talk to an Arduino  */
 /*    shield's SPI device dispatch through the CC3501E firmware.     */
 /*    CK_CS = E1M_SPI1_CS0 is the chip-select line.                   */
-/*    M.2 (Key M and Key E) on the EVK carrier uses PCIe + SDIO,      */
+/*    M.2 (Key M and Key E) on the EVK board uses PCIe + SDIO,      */
 /*    not SPI; the previous `EVK_SPI_BUS_M2_KEYM` macro was a guess   */
 /*    and has been removed.                                           */
 /*  - EVK_I2C_BUS_ARDUINO    (E1M_I3C0) -- Arduino UNO header I2C     */

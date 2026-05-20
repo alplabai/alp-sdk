@@ -8,19 +8,19 @@ tree -- the headline showcase of every standard LVGL widget
 
 - LVGL renders into the Zephyr display subsystem unchanged.
 - The SDK's `st7789` chip driver handles the panel-specific init.
-- Customer code (`src/main.c`) stays carrier-portable: no
+- Customer code (`src/main.c`) stays board-portable: no
   vendor-specific symbols, only `<alp/*>` peripheral surfaces +
   the portable LVGL API.
 
 ## Hardware needed
 
 - An E1M-AEN-family SoM (E7 recommended for the SRAM headroom).
-- E1M-EVK carrier (or any carrier exposing SPI0 + two GPIOs).
+- E1M-EVK board (or any board exposing SPI0 + two GPIOs).
 - 240 x 320 ST7789 TFT panel wired to:
   - SPI0 → display SCLK + MOSI + CS
   - GPIO IO0 → D/C#
   - GPIO IO1 → RESET (optional; SW-reset works too)
-  - 3V3 / GND from the carrier.
+  - 3V3 / GND from the board.
 
 ## Build
 

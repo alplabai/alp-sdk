@@ -81,7 +81,7 @@ west flash
 
 On HiL the full lifecycle runs: boot from a factory-signed
 image, read the EEPROM manifest, inspect MCUboot slots, connect
-to the carrier-staged Mender server, poll for an update.  When
+to the board-staged Mender server, poll for an update.  When
 a deployment lands the SDK downloads + verifies + applies it,
 requests reboot, then confirms post-reboot.  Attestation
 heartbeats publish every 60 s thereafter.
@@ -90,7 +90,7 @@ heartbeats publish every 60 s thereafter.
 
 Customer-side variants typically:
 
-- Fork this skeleton for V2N or i.MX 93 carriers (the SDK's
+- Fork this skeleton for V2N or i.MX 93 boards (the SDK's
   portable surfaces stay identical; only `board.yaml` changes).
 - Replace the Mender connection with a different OTA fabric
   (azure-iot-hub, AWS IoT Core, custom HTTPS endpoint).  The

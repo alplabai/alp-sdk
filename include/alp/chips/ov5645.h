@@ -8,7 +8,7 @@
  * @brief OmniVision OV5645 5 MP MIPI CSI-2 image sensor — config-side driver.
  *
  * MIPI CSI-2 5 MP camera popular as the "RPi-grade colour camera"
- * on industrial carriers.  This driver covers the SCCB (I²C-
+ * on industrial boards.  This driver covers the SCCB (I²C-
  * compatible) config side only; pixel data egress flows over
  * MIPI CSI-2 D-PHY lanes and is handled by the SoC's camera
  * receiver behind `<alp/camera.h>`.

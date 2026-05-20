@@ -6,19 +6,12 @@
 # WiFi connection comes up via the Murata LBEE5HY2FY module on
 # the E1M-AEN module's side-channel SDIO.
 
-schema_version: 2
-
 som:
   sku: E1M-AEN701
 
-carrier:
-  name: E1M-EVK
-  # External chips wired into the EVK headers.  Loader picks up the
-  # overrides into its populated-chip table so the matching driver
-  # gets linked.
-  populated:
-    bme280: true
-    st7789: true
+preset: e1m-evk             # External chips wired into the EVK
+                            # headers (BME280, ST7789) are listed in
+                            # `chips:` below.
 
 # Dashboard demo runs entirely on M55-HP (sensor poll + LVGL UI +
 # Wi-Fi/MQTT publish).  A32 cluster off; M55-HE inherits the SoM
@@ -49,7 +42,7 @@ chips:
   - st7789                   # 240x320 TFT.
   # WiFi connectivity comes through the <alp/iot.h> alp_wifi_*
   # surface; on AEN the radio link is via an external WiFi module
-  # on the carrier (LWM2M-style), not an on-module chip.  V2N
+  # on the board (LWM2M-style), not an on-module chip.  V2N
   # carries `murata_lbee5hy2fy` on-module; the same source builds
   # against that path if `som.sku` is swapped to E1M-V2N101.
 

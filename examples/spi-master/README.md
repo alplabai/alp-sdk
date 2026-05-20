@@ -43,7 +43,7 @@ For this example:
   controller drive its own /CS or wire a free GPIO to the
   slave's /CS pin.
 * Add a common ground between boards if the slave isn't on the
-  same carrier.
+  same board.
 
 ## Build
 

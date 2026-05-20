@@ -11,7 +11,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 #   - peripherals.i2s            -> CONFIG_I2S=y
 #   - libraries.tflite_micro     -> CONFIG_ALP_TFLM_REF_KERNELS=y
 #   - libraries.cmsis_dsp        -> CONFIG_CMSIS_DSP=y
-#   - carrier.populated.tas2563  -> CONFIG_ALP_SDK_CHIP_TAS2563=y
+#   - board.populated.tas2563  -> CONFIG_ALP_SDK_CHIP_TAS2563=y
 # Inference dispatchers compile in from the SoM preset's
 # `capabilities:` block; the app picks per-handle at runtime via
 # `alp_inference_open(.backend = ...)`.

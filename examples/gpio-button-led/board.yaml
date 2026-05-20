@@ -8,9 +8,10 @@
 #   2. Change `som.sku` to your MPN.  Stock SoM presets live at
 #      metadata/e1m_modules/<MPN>.yaml; the SDK ships one
 #      for every released MPN.
-#   3. Change `carrier.name` if your board is not the EVK.  For
-#      custom carriers, list every populated chip-driver / block
-#      helper in `populated:` -- each `true` enables the matching
+#   3. If your board is not the EVK, swap `preset: e1m-evk` for
+#      an inline board definition: top-level `name:` + `populated:`
+#      + `e1m_routes:` blocks.  See docs/board-config.md for the
+#      shape.  Each `populated.<name>: true` enables the matching
 #      CONFIG_ALP_SDK_CHIP_<NAME>=y (or CONFIG_ALP_SDK_BLOCK_<NAME>=y
 #      for the SDK-level helpers `button_led` / `pdm_mic`; the loader
 #      picks the right symbol per slug).
@@ -19,18 +20,15 @@
 #      generated build/generated/alp.conf is rsource'd from
 #      prj.conf -- no hand-edited Kconfig.
 #
-# Validated against metadata/schemas/board-config-v2.schema.json;
-# documented in docs/board-config.md.
-
-schema_version: 2
+# Validated against metadata/schemas/board.schema.json; documented
+# in docs/board-config.md.
 
 som:
   sku: E1M-AEN701          # Alif Ensemble E7 SoM
 
-carrier:
-  name: E1M-EVK            # 35x35 EVK -- reference carrier
-  populated:
-    button_led: true       # GPIO button + LED helper used by main.c
+preset: e1m-evk            # 35x35 EVK -- reference board.  The EVK
+                           # preset already populates `button_led:
+                           # true` for the on-board user button + LED.
 
 # Single-core slice on AEN701: M55-HP runs the demo.  M55-HE inherits
 # the SoM topology default (stock-shim Zephyr image), keeping the

@@ -21,7 +21,7 @@ application's state-machine cleanly separates concerns.
 
 ## Wiring it to a real IRQ
 
-In production firmware the carrier side wires the RTC's INT pin
+In production firmware the board side wires the RTC's INT pin
 to a host GPIO, registers an ISR, and posts a work-queue item
 that calls `rv3028c7_dispatch_irq` from thread context.  This
 example calls `dispatch_irq` directly from `main()` to show the

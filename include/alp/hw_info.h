@@ -15,11 +15,11 @@
  * full design):
  *
  *   1. **BOARD_ID ADC + resistor divider** -- one ADC pin per
- *      board (SoM-side and carrier-side) fed by a 1.8 V resistor
+ *      board (SoM-side and board-side) fed by a 1.8 V resistor
  *      divider.  Encodes the coarse rev string (r1, r2, ...).
  *      Per-rev resistor + nominal mV values live in
  *      `metadata/e1m_modules/<family>/hw-revisions.yaml` and the
- *      carrier's `board.yaml`.
+ *      board's `board.yaml`.
  *
  *   2. **On-module EEPROM manifest** -- a fixed-layout 128-byte
  *      block at offset 0x0000 of the SoM's on-module 24C128 (AEN
@@ -125,8 +125,8 @@ typedef struct alp_hw_info_eeprom_t {
  *
  * Populated from BOTH the EEPROM manifest (authoritative MPN +
  * serial + dates) and the BOARD_ID ADC readings (cross-check on
- * hw_rev).  Carrier-side fields stay zero/empty when no carrier
- * is declared in `board.yaml` or no carrier-side BOARD_ID ADC
+ * hw_rev).  Board-side fields stay zero/empty when no board
+ * is declared in `board.yaml` or no board-side BOARD_ID ADC
  * channel is wired.
  */
 typedef struct alp_hw_info_t {
@@ -141,13 +141,13 @@ typedef struct alp_hw_info_t {
     /** Measured SoM BOARD_ID ADC reading, mV.  0 when not read. */
     uint32_t som_board_id_mv;
 
-    /* Carrier identifiers -- decoded from the carrier-side BOARD_ID
-     * ADC + the carrier preset's hw_revisions table.  No EEPROM
-     * on the carrier today; the name comes from the build-time
+    /* Board identifiers -- decoded from the board-side BOARD_ID
+     * ADC + the board preset's hw_revisions table.  No EEPROM
+     * on the board today; the name comes from the build-time
      * declaration in board.yaml, not from runtime detection. */
-    char     carrier_name[ALP_HW_INFO_SKU_LEN];
-    char     carrier_hw_rev[ALP_HW_INFO_HW_REV_LEN];
-    uint32_t carrier_board_id_mv;
+    char     board_name[ALP_HW_INFO_SKU_LEN];
+    char     board_hw_rev[ALP_HW_INFO_HW_REV_LEN];
+    uint32_t board_id_mv;
 } alp_hw_info_t;
 
 /**
@@ -162,8 +162,8 @@ typedef struct alp_hw_info_t {
  *      reading against the hw_rev row in the family's
  *      hw-revisions table (so a swapped or relabelled module
  *      surfaces here).
- *   -# The carrier-side BOARD_ID ADC channel (when the carrier
- *      preset declares one) and decodes the carrier hw_rev.
+ *   -# The board-side BOARD_ID ADC channel (when the board
+ *      preset declares one) and decodes the board hw_rev.
  *
  * @param[out] out  Populated with whatever could be read.  Fields
  *                  unavailable on the running build stay

@@ -49,7 +49,7 @@
  *   [timer] done
  *
  * On the EVK, the LED on `E1M_GPIO_IO1` (USER_LED on the AEN
- * carrier) blinks at 5 Hz (200 ms period, 50% duty since we
+ * board) blinks at 5 Hz (200 ms period, 50% duty since we
  * toggle every 100 ms).
  *
  * On the V2N supervisor backend the counter alarm callback
@@ -181,7 +181,7 @@ int main(void) {
     }
 
     /* Open the user LED.  E1M_GPIO_IO1 is wired to USER_LED on
-     * the E1M-EVK carrier; on custom carriers swap the index
+     * the E1M-EVK board; on custom boards swap the index
      * for whatever your LED maps to (or comment the GPIO out
      * if you only need the timer half). */
     printf("[timer] open LED on E1M_GPIO_IO1\n");

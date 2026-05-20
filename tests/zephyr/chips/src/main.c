@@ -1462,7 +1462,7 @@ ZTEST(alp_chips, test_gd32_swd_init_null_args)
     zassert_equal(gd32_swd_init(&ctx, NULL, bogus, NULL), ALP_ERR_INVAL);
     /* NULL swclk -> INVAL. */
     zassert_equal(gd32_swd_init(&ctx, bogus, NULL, NULL), ALP_ERR_INVAL);
-    /* NULL nrst is allowed (carriers that don't route it work via
+    /* NULL nrst is allowed (boards that don't route it work via
      * AIRCR.SYSRESETREQ).  Not asserted here -- the gpio_emul-backed
      * init would still try alp_gpio_configure on the two bogus
      * pointers, which is not a contract this layer tests. */
@@ -2172,7 +2172,7 @@ ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
 /* Pattern: each new chip's init/post-init API rejects NULL ctx /     */
 /* NULL bus / zero-address.  The functional verification of these     */
 /* drivers happens against real silicon under the HIL suite once the  */
-/* matching carrier boards land -- these smokes only confirm the      */
+/* matching board boards land -- these smokes only confirm the      */
 /* defensive argument-checking layer compiles + behaves uniformly.    */
 /* ------------------------------------------------------------------ */
 

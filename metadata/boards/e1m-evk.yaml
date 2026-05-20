@@ -60,9 +60,12 @@ populated:
   # Power instrumentation
   ina236:                   true                # 6x current monitors at 0x40..0x46
 
-# E1M-pad → carrier-feature routing.  Each entry binds an
-# E1M-standard pad or peripheral instance to a carrier-side
-# macro name.  The generator `scripts/gen_carrier_header.py`
+  # SDK-level block helpers (GPIO button + LED on the EVK headers).
+  button_led:               true
+
+# E1M-pad → board-feature routing.  Each entry binds an
+# E1M-standard pad or peripheral instance to a board-side
+# macro name.  The generator `scripts/gen_board_header.py`
 # reads this block and produces
 # `include/alp/boards/alp_e1m_evk_routes.h` with one
 # `#define EVK_<NAME> E1M_<...>` line per entry.

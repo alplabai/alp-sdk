@@ -20,7 +20,7 @@
  *
  * In v0.5 the GCS link shares UART0 with the GNSS port at the C
  * level (the only two-UART E1M family is short on dedicated radio
- * ports).  Real builds wire the SiK radio to a dedicated carrier
+ * ports).  Real builds wire the SiK radio to a dedicated board
  * UART that the TBD board overlay exposes.
  *
  *   Tx (autopilot → ground station):

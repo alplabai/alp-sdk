@@ -54,7 +54,7 @@ int main(void)
 
     /* Producer loop.  Synthetic counter on native_sim; on real
      * V2N silicon this would read alp_adc_read() / alp_i2c_xfer()
-     * / alp_sensor_read() against the carrier's on-board sensor. */
+     * / alp_sensor_read() against the board's on-board sensor. */
     for (uint32_t i = 0; i < SAMPLE_BURST; ++i) {
         const float        sample = 22.5f + (float)i * 0.1f;
         const alp_status_t rv     = alp_rpc_send(ch, "temperature", &sample, sizeof(sample));

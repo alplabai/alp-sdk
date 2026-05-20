@@ -7,7 +7,7 @@
  * Binds against the kernel's i2c-dev character devices at
  * `/dev/i2c-N`, where N is the kernel's adapter index.  The
  * mapping is direct: `alp_i2c_config_t.bus_id` becomes the
- * trailing integer in the device path.  Carriers that need
+ * trailing integer in the device path.  Boards that need
  * symbolic naming (e.g. "imu-bus") should resolve those names
  * to integers ahead of `alp_i2c_open` -- this layer is the raw
  * binding.

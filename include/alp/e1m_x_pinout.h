@@ -18,9 +18,9 @@
  * Derived from `alplabai/e1m-spec/pinout/x-v1.json` (E1M-X v1.0,
  * 45 x 65 mm).  Pinned to `e1m-spec` x-v1.0.
  *
- * ## Per-carrier feature names
+ * ## Per-board feature names
  *
- * Names like `ENCODER_SW` or `USER_LED` are carrier-specific and
+ * Names like `ENCODER_SW` or `USER_LED` are board-specific and
  * live in `<alp/boards/<board>.h>`.  Those boards reference the
  * macros below for their underlying pin/instance integers.
  *
@@ -259,7 +259,7 @@ extern "C" {
 #define E1M_X_GPIO_DAC1     61u
 
 /** Total number of GPIO-capable indices in this header.
- *  E1M-X carriers' `alp,pin-array` arrays must list this many entries. */
+ *  E1M-X boards' `alp,pin-array` arrays must list this many entries. */
 #define E1M_X_GPIO_COUNT    62u
 
 #ifdef __cplusplus
