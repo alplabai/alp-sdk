@@ -7,6 +7,25 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — examples adopting v0.6 declarative blocks (iot-fleet-ota promotion + production-deployment + power-managed-sensor) (2026-05-20)
+
+- `examples/iot-fleet-ota/board.yaml` promoted from prose-only OTA
+  narration to declarative `boot:` + `ota:` blocks (MCUboot +
+  ECDSA-P256 + Mender HTTPS-poll with `${MENDER_TENANT_TOKEN}`
+  placeholder).  README rewritten with the "What lands
+  declaratively in v0.6" walkthrough.
+- `examples/production-deployment/board.yaml` refactored into the
+  SDK's declarative-stack flagship: every v0.6 block applied at
+  production stance (`boot:`/`ota:`/`security.psa:`/`storage:`/
+  `cores.<id>.memory:`/`cores.<id>.power:`/`diagnostics.modules:`)
+  on AEN701 with TF-M + OPTIGA-rooted attestation.  README gains
+  a full per-block walkthrough.
+- `examples/power-managed-sensor/` (new): reference for the v0.6
+  `cores.<id>.power:` block.  AEN301 + M55-HE deep sleep with
+  `wakeup_sources: [uart, gpio_int, rtc]` covering the periodic
+  sample / motion-event / console-debug duty cycle.  Memory tuned
+  for the short-lived per-wake task (4 KiB stack, 16 KiB heap).
+
 ### Changed — board.yaml flatten + carrier→board rename + 7 declarative blocks (2026-05-20)
 
 **Breaking schema changes (no migration script — every in-repo
