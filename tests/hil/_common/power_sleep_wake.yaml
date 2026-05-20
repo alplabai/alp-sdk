@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for the board.yaml `cores.<id>.power:` block (PR #3).
+#
+# scripts/alp_orchestrate.py:_slice_alp_conf() turns
+#
+#   cores:
+#     m55_hp:
+#       power:
+#         sleep_mode: standby
+#         wakeup_sources: [uart, rtc]
+#
+# into per-slice Kconfig:
+#
+#   CONFIG_PM=y
+#   CONFIG_PM_DEVICE=y
+#   # Sleep target: standby
+#   CONFIG_PM_DEVICE_WAKE_UART=y       # wakeup source
+#   CONFIG_PM_DEVICE_WAKE_RTC=y        # wakeup source
+#
+# This spec confirms the runtime PM subsystem is enabled and that
+# the device actually enters the declared sleep mode + wakes from
+# at least one declared wakeup source.  The uart-echo example is
+# used as the test app: it idles the main thread on UART RX (a
+# declared wakeup source), so the PM subsystem can legitimately
+# suspend the SoC between bytes and the test trace can sample the
+# `PM_STATE_SUSPEND` / wake events.
+#
+# Wakeup sources covered: `uart` (peripheral-subsystem class).
+# E1M_* pad-named sources (e.g. `E1M_GPIO_IO0`) emit a comment
+# rather than a CONFIG_* line until v0.7 lands per-silicon wake-pin
+# Kconfig (per the _slice_alp_conf comment) -- this spec sticks to
+# the subsystem class so it works on every E1M SoM today.
+#
+# pending_hardware_support: deep-sleep current-draw probe.  The
+# stock AEN HiL rig does NOT have an inline ammeter on the SoM's
+# 1.8 V rail, so we cannot directly assert "the SoC drew <X mA in
+# standby".  The serial-trace assertion below is the strongest
+# proof the existing rig supports.  When the rig gains a Joulescope
+# or equivalent, replace `expect_contains: [...]` with a current-
+# draw threshold assertion + this `pending_hardware_support:` flag
+# can come off.
+pending_hardware_support: deep-sleep-current-draw
+
+schema_version: 1
+name: power-sleep-wake
+description: |
+  Confirms the `cores.<id>.power:` block reaches the runtime: PM
+  subsystem activates (CONFIG_PM=y / CONFIG_PM_DEVICE=y), the
+  device enters the declared sleep_mode, and a declared UART wake
+  source brings it back without a fault.
+
+example: examples/uart-echo
+
+serial:
+  duration_s: 20
+  expect_contains:
+    - "PM: state="                    # Zephyr PM subsystem trace
+    - "PM: suspend"                   # entered the declared sleep_mode
+    - "PM: resume"                    # woke (from UART RX)
+    - "[uart] done"                   # app continued after the wake event
+  expect_absent:
+    - "PM: fault"
+    - "wake source: rejected"
+    - "PANIC"
+    - "ASSERT"
+    - "FAULT"

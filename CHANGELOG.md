@@ -7,6 +7,33 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — HiL coverage for `boot:` / `memory:` / `power:` / `diagnostics.modules:` (2026-05-20)
+
+- Four new portable HiL specs under `tests/hil/_common/`, one per
+  declarative board.yaml block landed at schema level in PR #3.
+  Each spec asserts the orchestrator's CONFIG_* emit actually reaches
+  real silicon (MCUboot is the first boot stage; CONFIG_MAIN_STACK_SIZE
+  shows up in the runtime trace; PM subsystem suspend/resume cycle
+  fires from a declared wakeup source; per-module log levels filter):
+  - `boot_mcuboot.yaml`        — covers `boot:`
+  - `memory_stacks.yaml`       — covers `cores.<id>.memory:`
+  - `power_sleep_wake.yaml`    — covers `cores.<id>.power:`
+    (flags `pending_hardware_support: deep-sleep-current-draw` — the
+    AEN HiL rig doesn't carry an inline ammeter yet; the spec falls
+    back to serial-trace assertions)
+  - `diagnostics_modules.yaml` — covers `diagnostics.modules:`
+- Host-side cross-check at `tests/scripts/test_hil_blocks_coverage.py`
+  (23 tests) validates each spec parses + the matching emit code
+  produces the CONFIG_* lines the spec claims to observe.  A schema
+  field the emit silently drops fails CI on a normal machine, before
+  the HiL runner ever sees it.
+- `.github/workflows/nightly-aen-hil.yml` now invokes
+  `tests/hil/run_smoke.py` against `tests/hil/aen701-evk/` after the
+  existing ztest build, picking up the new specs automatically via
+  the `_common/` discovery flow.
+- `tests/hil/README.md` documents the block-coverage convention and
+  the `pending_hardware_support:` flag.
+
 ### Changed — board.yaml flatten + carrier→board rename + 7 declarative blocks (2026-05-20)
 
 **Breaking schema changes (no migration script — every in-repo
