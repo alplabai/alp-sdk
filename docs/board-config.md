@@ -1007,11 +1007,28 @@ ota:
     total_size_mb: 4096
 ```
 
-Project-wide.  `provider: mender` emits `MENDER_*` weak-assignment
-lines (`?=`) into the Yocto slice's `local.conf` so hand-edited
-values still win.  `provider: mcumgr` is reserved for the Zephyr
-OTA client decision (Mender MCU client vs Hawkbit, ADR 0009 pending).
-See `docs/ota.md` + `docs/ota-device-contract.md`.
+Project-wide, provider-driven dispatch (ADR 0009 resolved):
+
+| Provider   | Yocto emit                              | Zephyr emit                                                                       |
+|------------|-----------------------------------------|-----------------------------------------------------------------------------------|
+| `mender`   | `MENDER_*` weak-assigns in `local.conf` | `CONFIG_MENDER_MCU_CLIENT=y` + URL/tenant/poll Kconfig (out-of-tree, west.yml)    |
+| `hawkbit`  | n/a (Zephyr only)                       | `CONFIG_HAWKBIT=y` + `HAWKBIT_SERVER` + `HAWKBIT_POLL_INTERVAL` (Zephyr upstream) |
+| `mcumgr`   | n/a (Zephyr only)                       | `CONFIG_MCUMGR=y` + GRP_IMG/GRP_OS (transport is the app's call)                  |
+| `none`     | OTA disabled                            | OTA disabled                                                                      |
+
+The validator (P2.3 rule 1) requires:
+- `provider: mender` → at least one `cores.<id>.os: yocto` OR `cores.<id>.os: zephyr`
+- `provider: hawkbit` → at least one `cores.<id>.os: zephyr`
+- `provider: mcumgr` → at least one `cores.<id>.os: zephyr`
+
+When `provider: mender` and at least one Zephyr slice is present,
+the west-libraries emitter (`--emit west-libraries`) auto-adds a
+`mender-mcu-client` entry to the `name-allowlist:` so the customer's
+`west update` pulls the module without hand-edits.  Hawkbit and
+MCUmgr are upstream Zephyr modules so they don't need a west.yml
+entry.
+
+See `docs/ota.md` + `docs/ota-device-contract.md` + ADR 0009.
 
 ### Storage partitions (`storage:`)
 

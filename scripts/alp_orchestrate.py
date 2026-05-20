@@ -643,17 +643,35 @@ def _validate_consistency(project: "BoardProject") -> None:
                         f"'{name}' `profile: {prof}` does not resolve "
                         f"to a file at {prof_path}")
 
-    # ---- Rule 1: ota.provider: mender requires a yocto slice -----
+    # ---- Rule 1: ota.provider requires a compatible slice -------
+    # Provider-driven dispatch (ADR 0009 follow-up resolved):
+    #   mender   -> Yocto (server-mode) OR Zephyr (Mender-MCU-client)
+    #   hawkbit  -> Zephyr (upstream Hawkbit DDI client)
+    #   mcumgr   -> Zephyr (upstream MCUmgr / SMP)
     ota = project.ota or {}
     provider = (ota.get("provider") or "").lower() if isinstance(ota, dict) else ""
     if provider == "mender":
-        if not any(s.os == "yocto" for s in project.cores.values()):
+        has_target = any(s.os in ("yocto", "zephyr")
+                         for s in project.cores.values())
+        if not has_target:
             raise OrchestratorError(
                 "ota.provider: mender requires at least one "
-                "cores.<id>.os: yocto (none found).  Mender "
-                "server-mode is a Yocto-only flow today; the "
-                "Zephyr-side dispatch (Mender-MCU-client) lands "
-                "separately per ADR 0009.")
+                "cores.<id>.os: yocto (server-mode Mender) OR "
+                "cores.<id>.os: zephyr (Mender-MCU-client); none "
+                "found.  See ADR 0009 for the provider-driven "
+                "dispatch.")
+    elif provider == "hawkbit":
+        if not any(s.os == "zephyr" for s in project.cores.values()):
+            raise OrchestratorError(
+                "ota.provider: hawkbit requires at least one "
+                "cores.<id>.os: zephyr (Hawkbit DDI client is in "
+                "Zephyr upstream); none found.")
+    elif provider == "mcumgr":
+        if not any(s.os == "zephyr" for s in project.cores.values()):
+            raise OrchestratorError(
+                "ota.provider: mcumgr requires at least one "
+                "cores.<id>.os: zephyr (MCUmgr is Zephyr's SMP "
+                "transport for OTA); none found.")
 
     # ---- Rule 2: boot.signing.algorithm supported by SoM family --
     boot = project.boot or {}
@@ -2833,6 +2851,57 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         for p in blocked:
             lines.append(f"# BLOCKED storage[{p.name}]: "
                          f"{p.reason or 'unknown reason'}")
+        lines.append("")
+
+    # ----------------------------------------------------------------
+    # OTA Zephyr client (board.yaml `ota:` block, provider-driven dispatch).
+    #
+    # Resolved design Q on the Zephyr-side OTA client (ADR 0009 follow-up):
+    #   provider: mender   -> Mender-MCU-client (out-of-tree, BSD-3)
+    #   provider: hawkbit  -> Zephyr Hawkbit DDI client (upstream)
+    #   provider: mcumgr   -> Zephyr MCUmgr (upstream; transport is the app's call)
+    #
+    # Yocto slices keep the existing Mender server-mode dispatch in
+    # _slice_local_conf().  This block handles the Zephyr side: per-slice
+    # Kconfig that compiles the matching client in.  Settings (server URL,
+    # poll interval, tenant token) thread through Kconfig string values
+    # when declared in `ota:`; placeholders (${VAR}) pass through verbatim
+    # so the build system substitutes at link time.
+    # ----------------------------------------------------------------
+    ota = project.ota or {}
+    provider = (ota.get("provider") or "").lower() if isinstance(ota, dict) else ""
+    if provider and provider in ("mender", "hawkbit", "mcumgr"):
+        lines.append(f"# OTA Zephyr client (board.yaml `ota.provider: {provider}`)")
+        srv = (ota.get("server") or {}) if isinstance(ota.get("server"), dict) else {}
+        poll = ota.get("poll_interval_s")
+        if provider == "mender":
+            # Mender-MCU-client.  Pulled in via west.yml manifest; the
+            # west-libraries emitter adds the module entry.
+            lines.append("CONFIG_MENDER_MCU_CLIENT=y")
+            if srv.get("url"):
+                lines.append(f'CONFIG_MENDER_SERVER_URL="{srv["url"]}"')
+            if srv.get("tenant"):
+                lines.append(f'CONFIG_MENDER_TENANT_TOKEN="{srv["tenant"]}"')
+            if ota.get("artifact_name"):
+                lines.append(f'CONFIG_MENDER_ARTIFACT_NAME="{ota["artifact_name"]}"')
+            if isinstance(poll, int) and poll > 0:
+                lines.append(f"CONFIG_MENDER_UPDATE_POLL_INTERVAL={poll}")
+        elif provider == "hawkbit":
+            # Zephyr upstream's Hawkbit DDI client.
+            lines.append("CONFIG_HAWKBIT=y")
+            lines.append("CONFIG_HAWKBIT_SHELL=y")
+            if srv.get("url"):
+                lines.append(f'CONFIG_HAWKBIT_SERVER="{srv["url"]}"')
+            if isinstance(poll, int) and poll > 0:
+                lines.append(f"CONFIG_HAWKBIT_POLL_INTERVAL={poll}")
+        elif provider == "mcumgr":
+            # MCUmgr is upstream; the transport (UART/BLE/UDP) stays the
+            # app's call -- we only enable the base SMP server.
+            lines.append("CONFIG_MCUMGR=y")
+            lines.append("CONFIG_MCUMGR_GRP_IMG=y")
+            lines.append("CONFIG_MCUMGR_GRP_OS=y")
+            lines.append("# MCUmgr transport (UART/BLE/UDP) is the app's call;")
+            lines.append("# enable the matching CONFIG_MCUMGR_TRANSPORT_* in your prj.conf.")
         lines.append("")
 
     # ----------------------------------------------------------------

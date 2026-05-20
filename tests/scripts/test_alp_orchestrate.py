@@ -1910,12 +1910,11 @@ def test_extra_libraries_profile_file_missing(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------
 
 
-def test_consistency_mender_without_yocto_rejected(tmp_path: Path) -> None:
-    """Rule 1: ota.provider: mender on an all-Zephyr project must fail.
-
-    AEN701 has three cores (a32_cluster + m55_hp + m55_he); explicitly
-    set the A-class core to `off` so no slice ends up yocto -- the
-    rule triggers on the absence of any yocto slice."""
+def test_consistency_mender_on_zephyr_only_ok(tmp_path: Path) -> None:
+    """Rule 1 (post-ADR-0009): ota.provider: mender on an all-Zephyr
+    project is now valid -- Mender-MCU-client is the Zephyr-side
+    dispatch.  Was rejected pre-ADR-0009; the v0.6 provider-driven
+    dispatch flips this to ok."""
     body = """
 som:
   sku: E1M-AEN701
@@ -1932,13 +1931,147 @@ cores:
 ota:
   provider: mender
   artifact_name: alp-aen-test
+  server:
+    url:    "https://hosted.mender.io"
+    tenant: "${MENDER_TENANT_TOKEN}"
+  poll_interval_s: 1800
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    # Zephyr Mender-MCU-client Kconfig must show up on the m55_hp slice.
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "CONFIG_MENDER_MCU_CLIENT=y" in conf
+    assert 'CONFIG_MENDER_SERVER_URL="https://hosted.mender.io"' in conf
+    assert "CONFIG_MENDER_UPDATE_POLL_INTERVAL=1800" in conf
+
+
+def test_consistency_mender_without_any_target_rejected(tmp_path: Path) -> None:
+    """Rule 1: ota.provider: mender with NO yocto AND NO zephyr core
+    (e.g. a project where every core is `off`) must still fail."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: "off"
+  m55_he:
+    os: "off"
+
+ota:
+  provider: mender
+  artifact_name: alp-aen-test
 """
     path = _write_board(tmp_path, body)
     with pytest.raises(OrchestratorError) as excinfo:
         load_board_yaml(path)
     msg = str(excinfo.value)
     assert "mender" in msg
-    assert "yocto" in msg
+    assert "yocto" in msg.lower() or "zephyr" in msg.lower()
+
+
+def test_consistency_hawkbit_requires_zephyr(tmp_path: Path) -> None:
+    """Rule 1 (new in v0.6 dispatch): ota.provider: hawkbit requires
+    at least one Zephyr core."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+  m33_sm:
+    os: "off"
+
+ota:
+  provider: hawkbit
+  server:
+    url: "https://hawkbit.example.com"
+"""
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError, match="hawkbit"):
+        load_board_yaml(path)
+
+
+def test_consistency_hawkbit_on_zephyr_ok_with_kconfig(tmp_path: Path) -> None:
+    """ota.provider: hawkbit on a Zephyr-targeted board.yaml validates
+    and emits the Hawkbit DDI Kconfig on the Zephyr slice."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: "off"
+
+ota:
+  provider: hawkbit
+  server:
+    url: "https://hawkbit.example.com"
+  poll_interval_s: 600
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "CONFIG_HAWKBIT=y" in conf
+    assert 'CONFIG_HAWKBIT_SERVER="https://hawkbit.example.com"' in conf
+    assert "CONFIG_HAWKBIT_POLL_INTERVAL=600" in conf
+    # Negative: mender Kconfig must NOT bleed in.
+    assert "CONFIG_MENDER_MCU_CLIENT" not in conf
+
+
+def test_consistency_mcumgr_requires_zephyr(tmp_path: Path) -> None:
+    """Rule 1 (new): ota.provider: mcumgr requires at least one Zephyr core."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+  m33_sm:
+    os: "off"
+
+ota:
+  provider: mcumgr
+"""
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError, match="mcumgr"):
+        load_board_yaml(path)
+
+
+def test_consistency_mcumgr_on_zephyr_emits_smp_kconfig(tmp_path: Path) -> None:
+    """ota.provider: mcumgr enables the upstream SMP/MCUmgr Kconfig
+    on every Zephyr slice; transport selection stays the app's call."""
+    body = """
+som:
+  sku: E1M-AEN301
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+
+ota:
+  provider: mcumgr
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "CONFIG_MCUMGR=y" in conf
+    assert "CONFIG_MCUMGR_GRP_IMG=y" in conf
+    assert "CONFIG_MCUMGR_GRP_OS=y" in conf
 
 
 def test_consistency_mender_with_yocto_ok(tmp_path: Path) -> None:

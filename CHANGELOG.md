@@ -7,6 +7,46 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — OTA Zephyr-client provider-driven dispatch (ADR 0009 resolved) (2026-05-20)
+
+Lands the v0.6 follow-on to ADR 0009: `ota.provider:` is now a
+provider-driven dispatch with real Zephyr-side emit for every
+recognised provider, not just Yocto-side Mender.
+
+- Schema enum widened: `ota.provider: hawkbit` joins `mender` /
+  `mcumgr` / `none` (`metadata/schemas/board.schema.json`).
+- `_slice_alp_conf()` emits per-provider Kconfig on every Zephyr
+  slice when `ota:` is declared:
+  - `mender`  → `CONFIG_MENDER_MCU_CLIENT=y` + server URL / tenant
+    token / artifact name / poll interval (Mender-MCU-client,
+    out-of-tree BSD-3).
+  - `hawkbit` → `CONFIG_HAWKBIT=y` + `CONFIG_HAWKBIT_SHELL=y` +
+    `HAWKBIT_SERVER` + `HAWKBIT_POLL_INTERVAL` (Zephyr upstream).
+  - `mcumgr`  → `CONFIG_MCUMGR=y` + `CONFIG_MCUMGR_GRP_IMG=y` +
+    `CONFIG_MCUMGR_GRP_OS=y`.  Transport (UART / BLE / UDP) stays
+    the app's call.
+- Yocto-side dispatch unchanged: `provider: mender` keeps the
+  existing `MENDER_*` weak-assignments in `local.conf`.
+- west.yml fragment emit (`scripts/alp_project.py` `_emit_west_libraries`)
+  auto-adds a `mender-mcu-client` `name-allowlist:` entry when
+  `ota.provider: mender` is declared.  Hawkbit and MCUmgr are
+  Zephyr-upstream so no west.yml change is needed.
+- Validator rule 1 (P2.3) relaxed for the new dispatch:
+  - `provider: mender` accepts EITHER a Yocto OR a Zephyr core
+    (was Yocto-only).
+  - `provider: hawkbit` requires at least one Zephyr core.
+  - `provider: mcumgr` requires at least one Zephyr core.
+  Errors point at the offending rule with the resolved-dispatch
+  hint.
+- Tests: 6 new cases under `tests/scripts/test_alp_orchestrate.py`
+  (mender-on-zephyr ok, mender-with-no-target rejected, hawkbit
+  requires zephyr, hawkbit Kconfig emit shape, mcumgr requires
+  zephyr, mcumgr SMP Kconfig emit).  Pre-existing
+  `mender_without_yocto_rejected` test rewritten to assert the
+  new "ok" behaviour.
+- Docs: `docs/board-config.md` § "OTA" rewritten with the
+  per-provider emit matrix + validator rule listing.
+
 ### Added — per-library HW-backend profile coverage (25 profiles) (2026-05-20)
 
 **Priority 2.2 of the v0.6 milestone lands as a regression guard.**
