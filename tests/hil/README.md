@@ -5,7 +5,7 @@ Real-silicon verification harness.  The layout is two-tier:
 | Directory                          | Role                                                |
 |------------------------------------|-----------------------------------------------------|
 | [`_common/`](_common/)             | Portable smoke specs that work on every E1M SoM.  One per peripheral example under `examples/`. |
-| `<sku>-<carrier>/`                 | Per-board directory.  Carries a `_runner.yaml` (board target, serial port, flash method) and ANY SoM-specific specs that don't apply to other SoMs. |
+| `<sku>-<board>/`                 | Per-board directory.  Carries a `_runner.yaml` (board target, serial port, flash method) and ANY SoM-specific specs that don't apply to other SoMs. |
 
 A runner script ([`run_smoke.py`](run_smoke.py)) reads the specs
 and drives the hardware.  When invoked against a board directory
@@ -32,7 +32,7 @@ HiL spec under this tree passes against the matching board.
 | Item          | Spec                                                        |
 |---------------|-------------------------------------------------------------|
 | **SoM**       | One supported per smoke-spec directory (today: AEN701)      |
-| **Carrier**   | The E1M EVK that matches (today: E1M-EVK -- 35x35 reference)|
+| **Board**   | The E1M EVK that matches (today: E1M-EVK -- 35x35 reference)|
 | **Debug**     | SEGGER J-Link or Alif's recommended SWD adapter on J2       |
 | **Serial**    | USB-C from the EVK exposes the UART (Linux: `/dev/ttyACM0`) |
 | **Power**     | 12 V barrel jack OR USB-C from the runner host              |
@@ -84,7 +84,7 @@ Zephyr board target itself lives in [`alplabai/alp-zephyr-modules`](https://gith
 module publishes, override per-invocation with `--board` or by
 editing the dir's `_runner.yaml`.
 
-| Board dir              | SoM          | Carrier       | Board target                  |
+| Board dir              | SoM          | Board       | Board target                  |
 |------------------------|--------------|---------------|-------------------------------|
 | `aen301-evk/`          | E1M-AEN301   | E1M-EVK       | `alp_e1m_aen301_m55_hp`       |
 | `aen401-evk/`          | E1M-AEN401   | E1M-EVK       | `alp_e1m_aen401_m55_hp`       |
@@ -102,7 +102,7 @@ editing the dir's `_runner.yaml`.
 
 ## Spec format
 
-Each `*.yaml` file under `<sku>-<carrier>/` describes one smoke test:
+Each `*.yaml` file under `<sku>-<board>/` describes one smoke test:
 
 ```yaml
 # tests/hil/aen701-evk/gpio-button-led.yaml
@@ -134,7 +134,7 @@ serial:
     - "ASSERT"
 ```
 
-Per-directory defaults live in `<sku>-<carrier>/_runner.yaml`:
+Per-directory defaults live in `<sku>-<board>/_runner.yaml`:
 
 ```yaml
 schema_version: 1
@@ -170,13 +170,13 @@ The runner merges per-spec values on top of these.
 
 ## Adding a new SoM
 
-1. Create `tests/hil/<sku>-<carrier>/_runner.yaml` with the
+1. Create `tests/hil/<sku>-<board>/_runner.yaml` with the
    per-directory defaults (board target, serial port, flash method).
    The 12 portable specs in `_common/` apply automatically.
 2. Add SoM-specific YAML specs alongside `_runner.yaml` for the
    peripherals only that SoM has (e.g. V2N's GD32 supervisor bridge,
    V2M's DEEPX NPU bring-up, AEN's CC3501E Wi-Fi).
-3. Run `python tests/hil/run_smoke.py --validate tests/hil/<sku>-<carrier>/`
+3. Run `python tests/hil/run_smoke.py --validate tests/hil/<sku>-<board>/`
    to confirm every spec parses against the board target.
 4. Add the runner label (`hil-<sku>`) to the matching
    `.github/workflows/nightly-<sku>-hil.yml`.

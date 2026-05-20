@@ -5,7 +5,7 @@
 #
 # Hardware fixtures expected:
 #   - E1M_I2S0 wired to either an on-EVK codec (TAS2563 on the
-#     E1M-X-EVK; WM8960 on V2N+M1 carriers) or a logic-analyser
+#     E1M-X-EVK; WM8960 on V2N+M1 boards) or a logic-analyser
 #     pad listening to bit-clock / frame-clock / data.  This smoke
 #     doesn't assert audio fidelity; it only asserts the I2S
 #     controller accepts blocks without timing out.

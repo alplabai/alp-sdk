@@ -1,10 +1,10 @@
-# Stock preset for E1M-AEN701 (the SoM, NOT the EVK carrier).
+# Stock preset for E1M-AEN701 (the SoM, NOT the EVK board).
 #
 # This file lists ONLY components physically populated on the
 # E1M-AEN module PCB -- silicon, on-module radio, on-module
-# secure element + RTC + temperature sensor + EEPROM.  Carrier-
+# secure element + RTC + temperature sensor + EEPROM.  Board-
 # side parts (IMUs, barometers, OLEDs, cameras, current monitors,
-# speaker amps...) live in metadata/carriers/e1m-evk.yaml.
+# speaker amps...) live in metadata/boards/e1m-evk.yaml.
 #
 # Per the project memory note "pending exact hardware configurations
 # -- the user will hand-write authoritative pin assignments and
@@ -60,8 +60,8 @@ inference:
 capabilities:
   optiga_trust_m:       true
 
-# Standard carrier the SoM mounts on for development.  Consumers
-# can pick any carrier or write their own in board.yaml.
+# Standard board the SoM mounts on for development.  Consumers
+# can pick any board or write their own in board.yaml.
 topology:
   a32_cluster:
     app: alp-image-edge
@@ -94,7 +94,7 @@ mailbox:
 # E1M pads / instances that route through the on-module CC3501E
 # coprocessor instead of through the Alif Ensemble silicon.  Apps
 # using these pads via `alp_gpio_open()` / `alp_spi_open()` etc.
-# get CC3501E command dispatch automatically; the carrier-side
+# get CC3501E command dispatch automatically; the board-side
 # role (e.g. EVK_PIN_BMI323_INT1) stays SoM-agnostic.
 #
 # Source of truth:

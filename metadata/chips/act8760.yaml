@@ -52,7 +52,7 @@ rails:
   - { id: ldo5,  page: 1, role: "TBD; may be configured as load switch" }
   - { id: ldo6,  page: 1, role: "TBD; may be configured as load switch" }
 
-# Pin-level signals the driver expects the carrier to route.  TWARN
+# Pin-level signals the driver expects the board to route.  TWARN
 # is exposed inside the IC's status register (no dedicated pin); the
 # real-world status signals that DO exit the WLCSP are nIRQ + nRESET
 # + nPB + PWREN/PWRON.

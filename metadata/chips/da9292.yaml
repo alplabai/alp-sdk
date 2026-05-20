@@ -22,7 +22,7 @@ i2c:
 # slave ID.  Channel-to-rail mapping is documented per-SoM in the
 # per-SKU SoM preset (E1M-<MPN>.yaml); this manifest only records
 # the chip's capabilities.
-operation_mode:   "2ch_dual_phase"   # set by carrier CONF strap
+operation_mode:   "2ch_dual_phase"   # set by board CONF strap
 
 channels:
   - id: ch1
@@ -34,7 +34,7 @@ channels:
     role_v2n:      "DISABLED on V2N base"
     role_v2n_m1:   "0.75 V DEEPX rail; firmware sets + enables via da9292_v2n_m1_enable_deepx_rail"
 
-# Signals exiting the chip that the carrier must route.
+# Signals exiting the chip that the board must route.
 signals:
   - { name: TW_N,  type: open_drain_output, v2n_route: "Renesas P36 (DA9292_TW)",  notes: "active-low thermal-warning" }
   - { name: INT_N, type: open_drain_output, v2n_route: "Renesas P37 (DA9292_INT)", notes: "active-low generic interrupt; cleared by read+write-1 on PMC_EVENT_00/01" }

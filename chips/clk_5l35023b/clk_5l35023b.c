@@ -102,7 +102,7 @@ alp_status_t clk_5l35023b_set_power_down(clk_5l35023b_t *ctx, bool powered_down)
     if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 
     /* Read-modify-write Byte 0x24 -- preserves the SE1_CLKSEL1 /
-     * REF_EN / DIV4_CH{2,3}_EN bits the carrier may have configured
+     * REF_EN / DIV4_CH{2,3}_EN bits the board may have configured
      * for its specific output mix. */
     uint8_t reg = CLK_5L35023B_REG_SE1_DIV4_CTRL;
     uint8_t v   = 0u;

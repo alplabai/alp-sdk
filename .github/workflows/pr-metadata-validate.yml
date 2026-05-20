@@ -101,8 +101,8 @@ jobs:
           echo "--- generated yocto-conf ---"
           cat /tmp/alp-yocto.conf
 
-      # The dts-overlay path reads include/alp/boards/<carrier>.h.
-      # Smoke-test against the only released carrier (E1M-EVK).
+      # The dts-overlay path reads include/alp/boards/<board>.h.
+      # Smoke-test against the only released board (E1M-EVK).
       # Validates the alias block contains the expected bus alphabet
       # and that the alp,pin-array block is well-formed.
       - name: Smoke-test board.yaml loader (dts-overlay)

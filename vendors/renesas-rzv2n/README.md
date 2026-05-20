@@ -45,13 +45,13 @@ versus the standard's max are:
   `PCIE0` internally, so external `PCIE0_*` is functionally a bridge
   share, not an independent ×4.
 - **Ethernet** — both `ETH0_*` and `ETH1_*` are routed and each goes
-  through an on-module Realtek `RTL8211FDI-VD-CG` PHY; carrier-side
+  through an on-module Realtek `RTL8211FDI-VD-CG` PHY; board-side
   pads are post-PHY differential MDI.
 - **Wi-Fi 6 + BLE 5.4** — driven by an on-module Murata `LBEE5HY2FY`
   (Type2FY, Infineon `CYW55513`); `ANT_2.4GHz`, `ANT_5GHz`, and
   `ANT_6GHz` are all populated.
 - **CAN** — both `CAN0` and `CAN1` are routed, each through an
-  on-module CAN transceiver (carrier-side pads are bus-level
+  on-module CAN transceiver (board-side pads are bus-level
   `CANxH` / `CANxL`).
 - **Boot strap** — E1M-X `BOOT3` (pad Y1) maps to Renesas
   `MD_BOOT4`, *not* `MD_BOOT3` (the chip has `MD_BOOT0/1/2/4`,
@@ -94,7 +94,7 @@ standard build path.  Setup recipe (extract tarball, add the four
 `MACHINE=rzv2n-evk`) lives in
 [`yocto/meta-alp/README.md`](../../yocto/meta-alp/README.md).
 `meta-alp`'s `e1m-x-v2n.conf` inherits from Renesas's stock
-`rzv2n-evk` MACHINE; carrier deltas are TBD per the user-supplied
+`rzv2n-evk` MACHINE; board deltas are TBD per the user-supplied
 HW config writeup.
 
 ## DRP-AI inference toolchain

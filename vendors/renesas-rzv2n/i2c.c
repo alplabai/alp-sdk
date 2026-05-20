@@ -7,7 +7,7 @@
  * Active when ALP_OS=baremetal + ALP_SOM=v2n + ALP_HAS_RENESAS_FSP=ON.
  * RZ/V2N exposes I2C through Renesas FSP's `r_riic_master` driver;
  * we wrap nine I2C channels (RIIC0..RIIC8) -- E1M-X routes I2C0/I2C1
- * to the carrier and the rest stay SoC-internal.
+ * to the board and the rest stay SoC-internal.
  *
  * Body gated on ALP_HAS_RENESAS_FSP -- absent the FSP pack, this
  * file is an empty translation unit and stub_backend.c provides

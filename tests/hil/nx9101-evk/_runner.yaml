@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Runner defaults for E1M-NX9101 (NXP i.MX 93 + Ethos-U65) +
-# E1M-EVK (same 35x35 carrier as the AEN family).  Inherits the
+# E1M-EVK (same 35x35 board as the AEN family).  Inherits the
 # portable spec set from tests/hil/_common/.
 
 schema_version: 1

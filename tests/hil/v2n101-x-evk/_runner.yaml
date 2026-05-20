@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Runner defaults for E1M-V2N101 (Renesas RZ/V2N quad A55 + M33-SM +
-# DRP-AI3) + E1M-X-EVK (45x65 carrier).  Inherits the portable spec
+# DRP-AI3) + E1M-X-EVK (45x65 board).  Inherits the portable spec
 # set from tests/hil/_common/; SoM-specific specs (GD32 bridge ping,
 # Ethernet, eMMC, xSPI, EEPROM, OPTIGA) live alongside in this dir.
 

@@ -1,12 +1,12 @@
-# Stock preset for E1M-AEN301 (the SoM, NOT the EVK carrier).
+# Stock preset for E1M-AEN301 (the SoM, NOT the EVK board).
 #
 # Customer's board.yaml references this preset by setting:
 #   som:
 #     sku: E1M-AEN301
 #
 # This file lists ONLY components physically populated on the
-# E1M-AEN module PCB.  Carrier-side parts live in
-# metadata/carriers/<name>/board.yaml.
+# E1M-AEN module PCB.  Board-side parts live in
+# metadata/boards/<name>/board.yaml.
 #
 # Per the project memory note, memory capacities + the per-SKU
 # silicon SKU-specific numbers stay TBD until the user supplies
@@ -86,7 +86,7 @@ mailbox:
 # E1M pads / instances that route through the on-module CC3501E
 # coprocessor instead of through the Alif Ensemble silicon.  Apps
 # using these pads via `alp_gpio_open()` / `alp_spi_open()` etc.
-# get CC3501E command dispatch automatically; the carrier-side
+# get CC3501E command dispatch automatically; the board-side
 # role (e.g. EVK_PIN_BMI323_INT1) stays SoM-agnostic.
 #
 # Source of truth:
