@@ -186,6 +186,59 @@ library is a matter of writing a profile header at
 in `metadata/schemas/board.schema.json` -- low friction
 once the case is made.
 
+## HW-backend profiles (per-library accelerator binding)
+
+Alongside the compile-time profile header (`etl_profile.h`,
+`fmt_config.h`, ...) each enabled library also ships a
+[`hw-backends.yaml`](../metadata/library-profiles/) table.  This
+table is the source of truth that
+[`scripts/alp_project.py`](../scripts/alp_project.py) reads against
+each SoM preset's `capabilities:` matrix to emit the right
+accelerator-binding `CONFIG_*` lines into the slice's `alp.conf`.
+
+The shape mirrors `metadata/library-profiles/mbedtls/hw-backends.yaml`:
+a list of `accelerators:` (one block per accelerator class --
+`crypto`, `gpu_2d`, `dma`, `simd`, `cordic`, `fft`, `ml_npu_primary`,
+...) where each entry pairs a `requires_cap:` (capability flag
+declared in the SoM preset) with the Kconfig that lights up that
+backend.  A `sw_fallback:` floor (always `required: true`) backs
+every library so a slice with no matching capability still builds
+and runs.
+
+**Coverage status (v0.6).**  All 25 libraries in the schema enum
+ship a per-library `hw-backends.yaml`:
+
+| Class                 | Libraries                                                            |
+|-----------------------|----------------------------------------------------------------------|
+| Crypto / TLS          | `mbedtls`, `bearssl`                                                 |
+| ML inference          | `tflite_micro`                                                       |
+| DSP / math            | `cmsis_dsp`                                                          |
+| Filesystem            | `littlefs`                                                           |
+| Graphics              | `lvgl`, `u8g2`, `gfx_compat`                                         |
+| Sensor fusion / control | `madgwick_ahrs`, `pid`                                             |
+| Industrial bus        | `modbus`                                                             |
+| IoT / networking      | `coremqtt_sn`, `libcoap`, `tinygsm`, `libwebsockets`, `nanopb`, `jsmn` |
+| Audio codecs          | `minimp3`, `opus`, `libhelix`                                        |
+| Header-only utility   | `etl`, `fmt`, `nlohmann_json`, `doctest`                             |
+| Test framework        | `catch2`                                                             |
+
+Seven libraries declare an empty `accelerators:` list -- the four
+header-only utility libraries (`etl`, `fmt`, `nlohmann_json`,
+`doctest`) plus `catch2` (test framework, host-side), `jsmn`
+(parser, pure-SW only), and `nanopb` (serialisation, pure-SW only)
+-- their value lives in the pure-SW path with no accelerator class
+to bind.  The other 18 libraries each carry at least one
+`requires_cap:`-gated backend entry.
+
+Regression-tested by
+[`tests/scripts/test_library_profiles.py`](../tests/scripts/test_library_profiles.py):
+the test fails if a library is added to the schema enum without a
+matching `hw-backends.yaml`, if a profile's `library:` slug drifts
+from the directory name, or if any emitted `kconfig:` line is not a
+real-looking `CONFIG_<NAME>=<value>` token.  The test does NOT
+validate that each emitted symbol exists in the pinned Zephyr's
+Kconfig tree -- that's a build-time concern.
+
 ## Tier 2 — deferred to v0.5+
 
 The libraries below cleared the evaluation but didn't land in v0.3's
