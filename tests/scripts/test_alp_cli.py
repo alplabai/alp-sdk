@@ -11,6 +11,8 @@ def test_alp_cli_help_lists_subcommands():
 
 
 def test_alp_cli_reports_version():
+    from alp_cli import __version__
+
     result = CliRunner().invoke(cli, ["--version"])
     assert result.exit_code == 0
-    assert "alp" in result.output.lower()
+    assert __version__ in result.output
