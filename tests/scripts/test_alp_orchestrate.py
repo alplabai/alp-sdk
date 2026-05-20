@@ -1137,3 +1137,475 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
 
     assert "CONFIG_ALP_SDK_CHIP_TBD" not in conf
     assert "SoM-intrinsic chip drivers" in conf
+
+
+# ---------------------------------------------------------------------
+# v0.6 P2.1 -- extra_libraries: escape hatch
+# ---------------------------------------------------------------------
+
+
+_V2N_BASE_FOR_EXTRA = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+{extra}
+"""
+
+
+def _v2n_with_extra(extra_yaml: str) -> str:
+    """Build a V2N101 board.yaml with the given extra_libraries block
+    (indented two spaces under the m33_sm core)."""
+    return _V2N_BASE_FOR_EXTRA.format(extra=extra_yaml)
+
+
+def test_extra_libraries_inline_kconfig_happy(tmp_path: Path) -> None:
+    """An entry with `name:` + `kconfig:` loads cleanly and lands in
+    the slice's emitted alp.conf verbatim."""
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: mylib\n"
+        "        include_path: third_party/mylib/include\n"
+        "        kconfig:\n"
+        "          - CONFIG_MYLIB=y\n"
+        "          - CONFIG_MYLIB_FEATURE_X=y\n")
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    slice_ = project.cores["m33_sm"]
+    assert len(slice_.extra_libraries) == 1
+    assert slice_.extra_libraries[0]["name"] == "mylib"
+    conf = _slice_alp_conf(project, slice_)
+    assert "extra_libraries[mylib]" in conf
+    assert "CONFIG_MYLIB=y" in conf
+    assert "CONFIG_MYLIB_FEATURE_X=y" in conf
+
+
+def test_extra_libraries_profile_happy(tmp_path: Path) -> None:
+    """An entry with `name:` + `profile:` resolves the profile file
+    and emits its accelerators / sw_fallback Kconfig per the same
+    silicon / soc_family / requires_cap matcher used by curated libs."""
+    # Profile file lives under metadata/library-profiles/ -- mbedtls
+    # ships with one out of the box, and it carries an `optiga_trust_m`
+    # priority entry plus an sw_fallback that always matches.  Reuse
+    # it as the test stub.
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: mylib_profile\n"
+        "        profile: metadata/library-profiles/mbedtls/hw-backends.yaml\n")
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    slice_ = project.cores["m33_sm"]
+    conf = _slice_alp_conf(project, slice_)
+    assert "extra_libraries[mylib_profile]" in conf
+    # V2N101 has optiga_trust_m capability + cau capability;
+    # _emit_extra_library_profile is deterministic in priority order.
+    # mbedtls profile's first-matching V2N entry is `cau` (priority
+    # ordering); regardless, *some* CONFIG_ALP_MBEDTLS_* must land,
+    # and the sw_fallback line is always emitted.
+    assert "CONFIG_ALP_MBEDTLS_PURE_C=y" in conf
+    assert "sw_fallback" in conf
+
+
+def test_extra_libraries_both_kconfig_and_profile_rejected(
+    tmp_path: Path,
+) -> None:
+    """An entry declaring BOTH `kconfig:` and `profile:` must fail
+    the cross-field validator (the exactly-one rule)."""
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: mylib_bad\n"
+        "        kconfig: [CONFIG_X=y]\n"
+        "        profile: metadata/library-profiles/mbedtls/hw-backends.yaml\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "mylib_bad" in msg
+    assert "exactly one" in msg
+    assert "both" in msg.lower()
+
+
+def test_extra_libraries_neither_kconfig_nor_profile_rejected(
+    tmp_path: Path,
+) -> None:
+    """An entry declaring NEITHER `kconfig:` nor `profile:` must
+    fail the cross-field validator (the exactly-one rule)."""
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: mylib_empty\n"
+        "        include_path: third_party/foo/include\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "mylib_empty" in msg
+    assert "exactly one" in msg
+    assert "neither" in msg.lower()
+
+
+def test_extra_libraries_name_collides_with_curated(tmp_path: Path) -> None:
+    """A name that matches the curated `libraries:` enum (e.g.
+    `mbedtls`) must be rejected -- the escape hatch is for
+    non-curated entries only."""
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: mbedtls\n"
+        "        kconfig: [CONFIG_FOO=y]\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "mbedtls" in msg
+    assert "curated" in msg.lower()
+
+
+def test_extra_libraries_name_collides_across_cores(tmp_path: Path) -> None:
+    """Names must be globally unique across all cores' extra_libraries."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+    extra_libraries:
+      - name: shared_slug
+        kconfig: [CONFIG_X=y]
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    extra_libraries:
+      - name: shared_slug
+        kconfig: [CONFIG_Y=y]
+"""
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "shared_slug" in msg
+    assert "globally unique" in msg.lower() or "collides" in msg.lower()
+
+
+def test_extra_libraries_profile_file_missing(tmp_path: Path) -> None:
+    """A `profile:` path that doesn't resolve to a file must fail."""
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: phantom\n"
+        "        profile: metadata/library-profiles/does-not-exist/hw-backends.yaml\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "phantom" in msg
+    assert "does not resolve" in msg
+
+
+# ---------------------------------------------------------------------
+# v0.6 P2.3 -- cross-field validator pass
+# ---------------------------------------------------------------------
+
+
+def test_consistency_mender_without_yocto_rejected(tmp_path: Path) -> None:
+    """Rule 1: ota.provider: mender on an all-Zephyr project must fail.
+
+    AEN701 has three cores (a32_cluster + m55_hp + m55_he); explicitly
+    set the A-class core to `off` so no slice ends up yocto -- the
+    rule triggers on the absence of any yocto slice."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: "off"
+
+ota:
+  provider: mender
+  artifact_name: alp-aen-test
+"""
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "mender" in msg
+    assert "yocto" in msg
+
+
+def test_consistency_mender_with_yocto_ok(tmp_path: Path) -> None:
+    """Rule 1 happy path: V2N (A55 yocto + M33 zephyr) with mender OK."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+  m33_sm:
+    os: zephyr
+    app: ./m33
+
+ota:
+  provider: mender
+  artifact_name: alp-v2n-test
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert project.ota.get("provider") == "mender"
+
+
+def test_consistency_boot_signing_unsupported_for_family(
+    tmp_path: Path,
+) -> None:
+    """Rule 2: AEN family with rsa2048 must fail (AEN only supports
+    ECDSA-P256 + ed25519 under the OPTIGA Trust M attestation flow)."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+
+boot:
+  method: mcuboot
+  signing:
+    algorithm: rsa2048
+    key_file: keys/dev_rsa.pem
+"""
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "rsa2048" in msg
+    assert "alif-ensemble" in msg
+    assert "ecdsa_p256" in msg or "ed25519" in msg
+
+
+def test_consistency_boot_signing_supported_aen_ecdsa(tmp_path: Path) -> None:
+    """Rule 2 happy path: AEN + ecdsa_p256 OK."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+
+boot:
+  method: mcuboot
+  signing:
+    algorithm: ecdsa_p256
+    key_file: keys/dev_ecdsa_p256.pem
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert (project.boot.get("signing") or {}).get("algorithm") == "ecdsa_p256"
+
+
+def test_consistency_boot_signing_supported_v2n_rsa(tmp_path: Path) -> None:
+    """Rule 2: V2N family accepts rsa2048 (different SoM family)."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+
+boot:
+  method: mcuboot
+  signing:
+    algorithm: rsa2048
+    key_file: keys/dev_rsa.pem
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert (project.boot.get("signing") or {}).get("algorithm") == "rsa2048"
+
+
+def test_consistency_tls_without_provider_rejected(tmp_path: Path) -> None:
+    """Rule 3: iot.tls: true with no mbedtls / bearssl in libraries
+    or extra_libraries must fail."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    iot: { tls: true }
+"""
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "m33_sm" in msg
+    assert "tls" in msg.lower()
+    assert "mbedtls" in msg
+    assert "bearssl" in msg
+
+
+def test_consistency_tls_satisfied_by_curated_mbedtls(tmp_path: Path) -> None:
+    """Rule 3 happy path: mbedtls in `libraries:` covers iot.tls."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    libraries: [mbedtls]
+    iot: { tls: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert "mbedtls" in project.cores["m33_sm"].libraries
+
+
+def test_consistency_tls_satisfied_by_curated_bearssl(tmp_path: Path) -> None:
+    """Rule 3: `bearssl` declared via the curated `libraries:` enum
+    also satisfies iot.tls.  (bearssl + mbedtls are the two TLS
+    providers rule 3 accepts.)"""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    libraries: [bearssl]
+    iot: { tls: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert "bearssl" in project.cores["m33_sm"].libraries
+
+
+def test_consistency_arena_larger_than_heap_warns(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rule 4: arena_kib > heap_kib emits a WARN, but doesn't fail."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    memory: { heap_kib: 32 }
+    inference: { default_arena_kib: 128 }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    err = capsys.readouterr().err
+    assert "WARN" in err
+    assert "default_arena_kib=128" in err
+    assert "heap_kib=32" in err
+    # Project loaded successfully (warning, not error).
+    assert project.cores["m33_sm"].inference["default_arena_kib"] == 128
+
+
+def test_consistency_arena_within_heap_silent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rule 4 happy path: arena fits in heap; no WARN emitted."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    memory: { heap_kib: 256 }
+    inference: { default_arena_kib: 128 }
+"""
+    path = _write_board(tmp_path, body)
+    load_board_yaml(path)
+    err = capsys.readouterr().err
+    # Rule 4 should not emit a WARN; G-4 partial-match WARN unrelated.
+    assert "default_arena_kib" not in err
+
+
+def test_consistency_sleep_mode_without_wakeup_warns(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rule 5: sleep_mode != disabled without wakeup_sources emits a WARN."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    power: { sleep_mode: deep }
+"""
+    path = _write_board(tmp_path, body)
+    load_board_yaml(path)
+    err = capsys.readouterr().err
+    assert "WARN" in err
+    assert "sleep_mode=deep" in err
+    assert "wakeup_sources" in err
+
+
+def test_consistency_sleep_mode_with_wakeup_silent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rule 5 happy path: sleep_mode with wakeup_sources declared -- no WARN."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    power:
+      sleep_mode: standby
+      wakeup_sources: [uart, gpio]
+"""
+    path = _write_board(tmp_path, body)
+    load_board_yaml(path)
+    err = capsys.readouterr().err
+    assert "sleep_mode" not in err
+
+
+def test_consistency_sleep_mode_disabled_silent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rule 5: explicit `sleep_mode: disabled` (the default) doesn't WARN
+    even when wakeup_sources is empty -- the device isn't sleeping."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    power: { sleep_mode: disabled }
+"""
+    path = _write_board(tmp_path, body)
+    load_board_yaml(path)
+    err = capsys.readouterr().err
+    assert "sleep_mode" not in err

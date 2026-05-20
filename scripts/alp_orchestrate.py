@@ -105,6 +105,12 @@ class Slice:
     toolchain: Optional[str] = None
     peripherals: list[str] = field(default_factory=list)
     libraries: list[str] = field(default_factory=list)
+    # Open-set escape hatch for libraries the SDK doesn't curate.  Each
+    # entry is a dict with `name:` + (exclusively) `kconfig:` OR
+    # `profile:`; loader's _validate_consistency() enforces the
+    # exactly-one and uniqueness rules.  See docs/board-config.md
+    # `extra_libraries:`.
+    extra_libraries: list[dict[str, Any]] = field(default_factory=list)
     inference: dict[str, Any] = field(default_factory=dict)
     iot: dict[str, Any] = field(default_factory=dict)
     memory: dict[str, Any] = field(default_factory=dict)   # stack_kib, heap_kib, isr_stack_kib
@@ -428,11 +434,216 @@ def _slice_from_resolved(
         toolchain=entry.get("toolchain"),
         peripherals=list(entry.get("peripherals") or []),
         libraries=list(entry.get("libraries") or []),
+        extra_libraries=[dict(e) for e in (entry.get("extra_libraries") or [])],
         inference=dict(entry.get("inference") or {}),
         iot=dict(entry.get("iot") or {}),
         memory=dict(entry.get("memory") or {}),
         power=dict(entry.get("power") or {}),
     )
+
+
+# ---------------------------------------------------------------------
+# Cross-field validator helpers (P2.1 + P2.3 of v0.6).
+# ---------------------------------------------------------------------
+
+
+# Curated `libraries:` enum, mirrored from
+# metadata/schemas/board.schema.json `cores.<id>.libraries.items.enum`.
+# Used by _validate_consistency() to reject `extra_libraries:` slugs
+# that collide with the curated set (the curated library MUST be
+# declared via `libraries:` -- the escape hatch is for non-curated
+# entries only).
+_CURATED_LIBRARIES: frozenset[str] = frozenset({
+    "etl", "fmt", "nlohmann_json", "doctest", "lvgl",
+    "mbedtls", "cmsis_dsp", "littlefs", "tflite_micro",
+    "u8g2", "gfx_compat", "madgwick_ahrs", "pid", "modbus",
+    "coremqtt_sn", "libcoap", "tinygsm", "nanopb",
+    "libwebsockets", "jsmn", "bearssl", "minimp3", "opus",
+    "libhelix", "catch2",
+})
+
+
+def _boot_signing_supported_for_family(
+    family: str,
+) -> Optional[frozenset[str]]:
+    """Return the allowed `boot.signing.algorithm:` values for a SoM
+    family, or None when the family is unknown (caller accepts any
+    schema-enum value).
+
+    Per the v0.6 P2.3 cross-field-validator pass:
+      - Alif Ensemble (with OPTIGA Trust M as attestation root):
+        `ecdsa_p256`, `ed25519` only.  RSA is excluded -- the OPTIGA
+        slot type paired with the AEN secure-boot flow is ECC-only.
+      - Renesas RZ/V2N (+ V2N + DEEPX): `ecdsa_p256`, `rsa2048`,
+        `rsa3072`.  ed25519 is excluded (not in the U-Boot
+        fit-signature stack used on V2N today).
+      - NXP i.MX 9x: `ecdsa_p256`, `rsa2048`, `rsa3072`.
+      - Unknown families: None (validator falls through to the schema
+        enum -- don't block on missing capability data for
+        in-development presets).
+    """
+    f = (family or "").lower()
+    if f.startswith("alif-ensemble"):
+        return frozenset({"ecdsa_p256", "ed25519"})
+    if f.startswith("renesas-rzv2n"):
+        return frozenset({"ecdsa_p256", "rsa2048", "rsa3072"})
+    if f.startswith("nxp-imx9"):
+        return frozenset({"ecdsa_p256", "rsa2048", "rsa3072"})
+    return None
+
+
+# TLS providers acceptable for `cores.<id>.iot.tls: true` (rule 3).
+# A library named `mbedtls` or `bearssl` in either `libraries:` or
+# `extra_libraries:` satisfies the requirement.
+_TLS_PROVIDERS: frozenset[str] = frozenset({"mbedtls", "bearssl"})
+
+
+def _validate_consistency(project: "BoardProject") -> None:
+    """Cross-field validation that the schema can't express cleanly.
+
+    Runs after the project is fully assembled by `load_board_yaml()`.
+    Raises `OrchestratorError` for hard violations; emits stderr
+    `WARN: ...` lines for soft signals (rules 4 + 5).
+
+    Rules (v0.6 P2.3):
+
+    1. `ota.provider: mender` requires at least one
+       `cores.<id>.os: yocto` slice.  Reason: server-mode Mender is a
+       Yocto-only flow today; the Zephyr-side dispatch
+       (Mender-MCU-client) lands separately per ADR 0009.
+    2. `boot.signing.algorithm:` must be in the SoM family's supported
+       set (see `_boot_signing_supported_for_family`).  Unknown
+       families pass through (don't block on missing capability data).
+    3. `cores.<id>.iot.tls: true` requires `libraries:` (curated) OR
+       `extra_libraries:` (open-set) to include `mbedtls` or `bearssl`.
+    4. WARNING (not error): `cores.<id>.inference.default_arena_kib`
+       larger than `cores.<id>.memory.heap_kib`; inference may OOM.
+    5. WARNING (not error): `cores.<id>.power.sleep_mode != disabled`
+       with no `wakeup_sources:` declared; device will sleep but can't
+       wake.
+
+    Also enforces the `extra_libraries:` invariants the schema can't
+    cleanly express (P2.1):
+
+      - Exactly one of `kconfig:` / `profile:` per entry.
+      - Names globally unique across every core's `extra_libraries:`.
+      - Names don't collide with the curated `libraries:` enum.
+      - `profile:` paths resolve to a real file (repo-relative).
+    """
+    # ---- extra_libraries invariants (P2.1) -----------------------
+    seen_names: dict[str, str] = {}    # name -> first core_id seen on
+    for core_id, slice_ in project.cores.items():
+        for idx, entry in enumerate(slice_.extra_libraries):
+            name = entry.get("name")
+            if not isinstance(name, str) or not name:
+                raise OrchestratorError(
+                    f"core '{core_id}' extra_libraries[{idx}]: missing "
+                    f"or non-string `name:`")
+            has_kc = "kconfig" in entry and entry.get("kconfig") is not None
+            has_pf = "profile" in entry and entry.get("profile") is not None
+            if has_kc == has_pf:
+                # Both set OR both unset -- reject.
+                raise OrchestratorError(
+                    f"core '{core_id}' extra_libraries entry '{name}' "
+                    f"must declare exactly one of `kconfig:` or "
+                    f"`profile:` (got "
+                    f"{'both' if has_kc and has_pf else 'neither'}).  "
+                    f"Inline `kconfig:` is the fast path; `profile:` "
+                    f"points at a hw-backends.yaml-style file.")
+            if name in _CURATED_LIBRARIES:
+                raise OrchestratorError(
+                    f"core '{core_id}' extra_libraries entry '{name}' "
+                    f"collides with the curated `libraries:` enum; "
+                    f"declare curated libraries via "
+                    f"`cores.{core_id}.libraries:` instead.")
+            if name in seen_names:
+                raise OrchestratorError(
+                    f"core '{core_id}' extra_libraries entry '{name}' "
+                    f"collides with the same name on core "
+                    f"'{seen_names[name]}'; extra_libraries names "
+                    f"must be globally unique across all cores.")
+            seen_names[name] = core_id
+            if has_pf:
+                prof = entry.get("profile")
+                if not isinstance(prof, str) or not prof:
+                    raise OrchestratorError(
+                        f"core '{core_id}' extra_libraries entry "
+                        f"'{name}' has non-string `profile:`")
+                prof_path = (REPO / prof).resolve()
+                if not prof_path.is_file():
+                    raise OrchestratorError(
+                        f"core '{core_id}' extra_libraries entry "
+                        f"'{name}' `profile: {prof}` does not resolve "
+                        f"to a file at {prof_path}")
+
+    # ---- Rule 1: ota.provider: mender requires a yocto slice -----
+    ota = project.ota or {}
+    provider = (ota.get("provider") or "").lower() if isinstance(ota, dict) else ""
+    if provider == "mender":
+        if not any(s.os == "yocto" for s in project.cores.values()):
+            raise OrchestratorError(
+                "ota.provider: mender requires at least one "
+                "cores.<id>.os: yocto (none found).  Mender "
+                "server-mode is a Yocto-only flow today; the "
+                "Zephyr-side dispatch (Mender-MCU-client) lands "
+                "separately per ADR 0009.")
+
+    # ---- Rule 2: boot.signing.algorithm supported by SoM family --
+    boot = project.boot or {}
+    sign = (boot.get("signing") or {}) if isinstance(boot, dict) else {}
+    algo = ((sign.get("algorithm") or "").lower()
+            if isinstance(sign, dict) else "")
+    if algo:
+        family = (project.som_preset.get("family") or "")
+        supported = _boot_signing_supported_for_family(family)
+        if supported is not None and algo not in supported:
+            raise OrchestratorError(
+                f"boot.signing.algorithm: {algo} is not supported by "
+                f"SoM family '{family}'; supported algorithms for "
+                f"this family: {sorted(supported)}.  Edit "
+                f"boot.signing.algorithm or pick a SoM family that "
+                f"supports {algo}.")
+
+    # ---- Rule 3: iot.tls: true requires mbedtls/bearssl ----------
+    for core_id, slice_ in project.cores.items():
+        if not (slice_.iot or {}).get("tls"):
+            continue
+        libs = set(slice_.libraries or [])
+        extras = {e.get("name") for e in slice_.extra_libraries
+                  if isinstance(e.get("name"), str)}
+        if not (libs & _TLS_PROVIDERS) and not (extras & _TLS_PROVIDERS):
+            raise OrchestratorError(
+                f"core '{core_id}' has iot.tls: true but neither "
+                f"`libraries:` nor `extra_libraries:` declares a TLS "
+                f"provider (mbedtls or bearssl).  Add one of these "
+                f"to cores.{core_id}.libraries: (curated) or "
+                f"cores.{core_id}.extra_libraries: (open-set).")
+
+    # ---- Rule 4: inference arena > heap is a WARN ----------------
+    for core_id, slice_ in project.cores.items():
+        arena_kib = (slice_.inference or {}).get("default_arena_kib")
+        heap_kib = (slice_.memory or {}).get("heap_kib")
+        if (isinstance(arena_kib, int) and isinstance(heap_kib, int)
+                and arena_kib > heap_kib):
+            print(
+                f"WARN: cores.{core_id}.inference.default_arena_kib="
+                f"{arena_kib} > cores.{core_id}.memory.heap_kib="
+                f"{heap_kib}; inference may OOM",
+                file=sys.stderr,
+            )
+
+    # ---- Rule 5: sleep_mode != disabled with no wakeup_sources --
+    for core_id, slice_ in project.cores.items():
+        pwr = slice_.power or {}
+        sleep_mode = (pwr.get("sleep_mode") or "disabled").lower()
+        wake = pwr.get("wakeup_sources") or []
+        if sleep_mode != "disabled" and not wake:
+            print(
+                f"WARN: cores.{core_id}.power.sleep_mode={sleep_mode} "
+                f"but no wakeup_sources: declared; device will sleep "
+                f"but cannot wake",
+                file=sys.stderr,
+            )
 
 
 def _enforce_loader_rules(slice_: Slice) -> None:
@@ -655,7 +866,7 @@ def load_board_yaml(path: Path, *,
                     f"match the resolved board '{board_label}'s macros for "
                     f"pad {e1m_pad}: {sorted(macros_by_pad[e1m_pad])}")
 
-    return BoardProject(
+    out = BoardProject(
         sku=sku,
         hw_rev=hw_rev or som_preset.get("default_hw_rev"),
         board_name=board_name,
@@ -672,6 +883,13 @@ def load_board_yaml(path: Path, *,
         ota=dict(project.get("ota") or {}),
         raw=project,
     )
+
+    # 9. Cross-field consistency pass (v0.6 P2.3).  Runs last so it
+    # can inspect the fully-assembled project + every per-core
+    # extra_libraries: entry the schema couldn't validate cleanly.
+    _validate_consistency(out)
+
+    return out
 
 
 # ---------------------------------------------------------------------
@@ -1508,6 +1726,110 @@ def _slugs_from_helper_firmware(helper_firmware: list) -> list[str]:
     return sorted(seen)
 
 
+def _emit_extra_library_profile(
+    name: str,
+    profile_rel: str,
+    project: "BoardProject",
+) -> list[str]:
+    """Walk an extra_libraries `profile:` file and emit the per-class
+    first-match Kconfig lines for the active SoM.
+
+    Mirrors the curated `metadata/library-profiles/<lib>/hw-backends.yaml`
+    matcher in `alp_project._emit_library_hw_backends`: each accelerator
+    class declares a `priority:` list whose entries carry
+    `silicon:` / `soc_family:` / `requires_cap:` matchers plus a
+    `kconfig:` directive.  First matching entry per class wins; an
+    `sw_fallback:` block with `kconfig:` is always emitted at the end
+    so the build has a SW floor when no HW backend matches.
+
+    Returns the list of emitted lines (each line is a complete
+    `CONFIG_*=y` or `# ...` comment); empty list when the profile
+    parses but nothing matches and there's no sw_fallback.
+
+    Failures (malformed YAML, missing keys) emit a single `#`-prefixed
+    diagnostic comment so the customer sees the failure in the slice's
+    alp.conf rather than getting silent drop-out.
+    """
+    profile_path = (REPO / profile_rel).resolve()
+    try:
+        doc = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as e:
+        return [f"# extra_libraries[{name}] profile parse failed: {e}"]
+    if not isinstance(doc, dict):
+        return [f"# extra_libraries[{name}] profile is not a mapping"]
+
+    # Match keys come from the active SoM.  Mirror
+    # alp_project._SOC_FAMILY_TOKEN so extra_libraries entries can
+    # share existing curated-profile match keys when desired.
+    silicon_ref = project.som_preset.get("silicon") or ""
+    family = (project.som_preset.get("family") or "").lower()
+    soc_family_token: Optional[str] = None
+    if family.startswith("alif-ensemble"):
+        soc_family_token = "alif_ensemble"
+    elif family.startswith("renesas-rzv2n"):
+        soc_family_token = "renesas_rzv2n"
+    elif family.startswith("nxp-imx9"):
+        soc_family_token = "nxp_imx9"
+
+    # resolve_capabilities merges SoC-JSON defaults + SoM overrides.
+    capabilities = resolve_capabilities(project.som_preset, METADATA_ROOT)
+
+    def _cap_truthy(cap_name: str) -> bool:
+        v = capabilities.get(cap_name)
+        if v is None:
+            return False
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, int):
+            return v > 0
+        s = str(v).lower()
+        if s in ("true", "yes"):
+            return True
+        if s in ("false", "no", "null", "none", "0", ""):
+            return False
+        try:
+            return int(s) > 0
+        except ValueError:
+            return False
+
+    def _entry_matches(e: dict[str, Any]) -> bool:
+        sili = e.get("silicon")
+        sf = e.get("soc_family")
+        cap = e.get("requires_cap")
+        if sili is not None and sili != silicon_ref:
+            return False
+        if sf is not None and sf != soc_family_token:
+            return False
+        if cap is not None and not _cap_truthy(str(cap)):
+            return False
+        return True
+
+    out: list[str] = []
+    accelerators = doc.get("accelerators") or []
+    if isinstance(accelerators, list):
+        for cls in accelerators:
+            if not isinstance(cls, dict):
+                continue
+            cls_name = cls.get("class") or "<unknown>"
+            for p in (cls.get("priority") or []):
+                if not isinstance(p, dict):
+                    continue
+                if not _entry_matches(p):
+                    continue
+                kc = p.get("kconfig")
+                if isinstance(kc, str) and kc:
+                    out.append(f"{kc}  # {name} / {cls_name}")
+                break
+
+    sw = doc.get("sw_fallback")
+    if isinstance(sw, dict):
+        kc = sw.get("kconfig")
+        if isinstance(kc, str) and kc:
+            out.append(f"{kc}  # {name} / sw_fallback")
+
+    return out
+
+
 def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     """Per-core Kconfig fragment for a Zephyr slice.
 
@@ -1676,6 +1998,40 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
             else:
                 lines.append(
                     f"# TODO: wire library '{lib}' once its v0.4 enable lands")
+        lines.append("")
+
+    # ----------------------------------------------------------------
+    # Open-set extra_libraries (v0.6 P2.1).  Each entry declares either
+    # inline `kconfig:` lines (emitted verbatim) or a `profile:` path
+    # to a hw-backends.yaml-style file we walk with the same silicon /
+    # soc_family / requires_cap matcher as the curated libraries.
+    # _validate_consistency() guarantees exactly-one of kconfig/profile
+    # and the profile file resolves, so the per-entry checks here are
+    # just for emit-time safety.
+    # ----------------------------------------------------------------
+    if slice_.extra_libraries:
+        lines.append(f"# Extra libraries declared on core "
+                     f"`{slice_.core_id}` (open-set escape hatch)")
+        for entry in sorted(slice_.extra_libraries,
+                            key=lambda e: e.get("name", "")):
+            name = entry.get("name", "<unnamed>")
+            kc_lines = entry.get("kconfig")
+            profile = entry.get("profile")
+            if kc_lines:
+                lines.append(f"# extra_libraries[{name}] (inline kconfig)")
+                for kc in kc_lines:
+                    lines.append(str(kc))
+            elif profile:
+                lines.append(f"# extra_libraries[{name}] (profile: {profile})")
+                profile_lines = _emit_extra_library_profile(
+                    name, profile, project)
+                if profile_lines:
+                    lines.extend(profile_lines)
+                else:
+                    lines.append(
+                        f"# (no matching backend for "
+                        f"silicon={project.som_preset.get('silicon')} "
+                        f"in {profile})")
         lines.append("")
 
     # Inference dispatchers.  Driven entirely by the SoM preset's

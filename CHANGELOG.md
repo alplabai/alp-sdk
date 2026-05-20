@@ -7,6 +7,63 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — `extra_libraries:` escape hatch for non-curated libraries (2026-05-20)
+
+`cores.<id>.extra_libraries:` joins `libraries:` (the closed,
+25-entry curated enum) with an open-set escape hatch for libraries
+the SDK doesn't curate -- one-off vendor SDKs, research-only deps,
+or libraries on their way into the curated set.  Each entry MUST
+declare exactly one of:
+
+- `kconfig:` -- inline Kconfig fragment lines emitted verbatim
+  into the slice's `alp.conf`.  Fast path for one-off entries.
+- `profile:` -- path to a `hw-backends.yaml`-style profile file.
+  The loader walks the file with the same silicon / soc_family /
+  requires_cap matcher used by curated libraries; first match per
+  `class:` wins, `sw_fallback:` always emits.
+
+The "exactly-one" rule is enforced by the new
+`_validate_consistency()` pass (see below), along with global
+uniqueness of `name:` across cores and a check that
+`profile:` paths resolve to a real file.  Names that collide with
+the curated `libraries:` enum are rejected -- the curated path is
+the right way to wire curated libraries.
+
+Schema lives in `metadata/schemas/board.schema.json` under
+`cores.<id>.extra_libraries`; reference doc at
+`docs/board-config.md` § `extra_libraries:` and tutorial coverage
+at `docs/tutorials/09-board-yaml-deep-dive.md` § extra_libraries.
+
+### Added — cross-field validator pass with 5 rules (2026-05-20)
+
+`scripts/alp_orchestrate.py:_validate_consistency()` runs after
+the JSON Schema pass and the per-core loader rules.  Five rules,
+two warnings:
+
+1. (ERROR) `ota.provider: mender` requires at least one
+   `cores.<id>.os: yocto` slice.  Mender server-mode is a
+   Yocto-only flow today; the Zephyr-side dispatch
+   (Mender-MCU-client) lands separately per ADR 0009.
+2. (ERROR) `boot.signing.algorithm:` must be supported by the SoM
+   family.  Per-family allow-lists: Alif Ensemble (with OPTIGA
+   Trust M attestation root) `ecdsa_p256` / `ed25519`; Renesas
+   RZ/V2N + NXP i.MX 9 `ecdsa_p256` / `rsa2048` / `rsa3072`.
+   Unknown families fall through (no capability-block enforcement).
+3. (ERROR) `cores.<id>.iot.tls: true` requires `mbedtls` or
+   `bearssl` in `libraries:` (curated) or `extra_libraries:`
+   (open-set).
+4. (WARN) `cores.<id>.inference.default_arena_kib >
+   cores.<id>.memory.heap_kib` -- inference may OOM.  Build
+   continues; stderr `WARN: ...` line emitted.
+5. (WARN) `cores.<id>.power.sleep_mode != disabled` with no
+   `wakeup_sources:` declared -- device will sleep but cannot
+   wake.
+
+Reference doc: `docs/board-config.md` § Cross-field validation.
+Two in-repo examples (`iot-fleet-ota`, `iot-dashboard`,
+`production-deployment`) updated to satisfy rule 3 by declaring
+`mbedtls` in `libraries:`.
+
 ### Changed — board.yaml flatten + carrier→board rename + 7 declarative blocks (2026-05-20)
 
 **Breaking schema changes (no migration script — every in-repo

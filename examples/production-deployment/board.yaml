@@ -21,10 +21,11 @@ cores:
       wifi: true
       mqtt: true
       tls: true
-    # libraries: mbedtls dropped here for v0.5 native_sim parity
-    #            (Zephyr 4.4 + mbedtls 3.6 PSA wiring is a v0.6 work item).
-    #            Real-silicon builds re-enable mbedtls via the SoM-side
-    #            TF-M-on-HE-core stack.
+    # mbedtls covers the TLS stack the MQTT pub/sub + OPTIGA-handshake
+    # paths use.  Required by v0.6 cross-field validator (P2.3 rule 3)
+    # whenever `iot.tls: true`.
+    libraries:
+      - mbedtls
 
 chips:
   - optiga_trust_m

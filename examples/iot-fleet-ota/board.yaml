@@ -43,9 +43,12 @@ cores:
     #
     # mbedtls covers the TLS for the HTTPS poll + the ECDSA-P256
     # signature verification path that wraps imgtool's signed
-    # artefact on the way into the inactive MCUboot slot.
-    # libraries: mbedtls dropped here for v0.5 native_sim parity
-    #            (Zephyr 4.4 + mbedtls 3.6 PSA wiring is a v0.6 work item).
+    # artefact on the way into the inactive MCUboot slot.  The
+    # v0.6 cross-field validator (P2.3 rule 3) requires `mbedtls`
+    # (or `bearssl`) in `libraries:` whenever `iot.tls: true` --
+    # native_sim parity is restored at the v0.6 PSA work item.
+    libraries:
+      - mbedtls
 
 # No additional chips: the on-SoM OPTIGA Trust M is part of the
 # E1M-AEN701 preset and the CC3501E Wi-Fi bridge is wired

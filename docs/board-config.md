@@ -548,6 +548,57 @@ See
 [`metadata/library-profiles/README.md`](../metadata/library-profiles/README.md)
 for the full design + per-library notes.
 
+### `extra_libraries` -- open-set escape hatch (v0.6)
+
+`libraries:` is closed -- the schema's enum lists the 25 libraries
+the SDK curates.  For one-off vendor SDKs, research-only deps, or
+libraries on their way into the curated set, `extra_libraries:`
+provides an open-set escape hatch.  Each entry declares either an
+inline Kconfig fragment OR a `profile:` path (mutually exclusive,
+enforced by the loader):
+
+```yaml
+cores:
+  m55_hp:
+    app: ./src
+    libraries:
+      - mbedtls           # curated -- closed enum
+    extra_libraries:
+      - name: zforce      # one-off vendor SDK, inline Kconfig path
+        include_path: third_party/zforce/include
+        kconfig:
+          - CONFIG_ZFORCE=y
+          - CONFIG_ZFORCE_I2C_ADDR=0x50
+      - name: mycrypto    # library with per-silicon backend selection
+        profile: third_party/mycrypto/hw-backends.yaml
+```
+
+The two shapes:
+
+| Field      | When to use                                                                                              |
+|------------|----------------------------------------------------------------------------------------------------------|
+| `kconfig:` | Fast path for one-off libraries.  Lines emit verbatim into the slice's `alp.conf`.                       |
+| `profile:` | Library wants per-silicon backend selection consistent with the curated `libraries:`.  See below.        |
+
+The `profile:` file follows the same shape as
+`metadata/library-profiles/<lib>/hw-backends.yaml`: an
+`accelerators:` block of priority entries (each with optional
+`silicon:` / `soc_family:` / `requires_cap:` matchers + a
+`kconfig:` directive) and an optional `sw_fallback:` block whose
+`kconfig:` always emits.  First match per `class:` wins; see the
+[`mbedtls` profile](../metadata/library-profiles/mbedtls/hw-backends.yaml)
+for a worked example.
+
+Loader rules (enforced by `_validate_consistency()` in
+`scripts/alp_orchestrate.py`):
+
+- Each entry MUST declare exactly one of `kconfig:` / `profile:`.
+- `name:` is globally unique across every core's
+  `extra_libraries:`.
+- `name:` must NOT collide with the curated `libraries:` enum --
+  use the curated path for curated entries.
+- `profile:` must resolve to a file (repo-relative).
+
 ## How the loader compiles the file
 
 `scripts/alp_project.py` reads `board.yaml`, validates against the
@@ -991,6 +1042,37 @@ security:
 Project-wide.  Pre-v0.6 the schema accepts the block but the
 emit path is a no-op (TF-M sysbuild child-image plumbing lands
 in v0.6).  See `docs/security-audit-plan.md` + ADR 0010.
+
+## Cross-field validation (v0.6)
+
+JSON Schema validates one field at a time; many real-world
+mistakes only become apparent when two fields disagree.
+`scripts/alp_orchestrate.py:_validate_consistency()` runs after
+the schema pass and enforces a small set of cross-field rules.
+A violation raises `OrchestratorError`; warnings print to
+`stderr` and let the load continue.
+
+| #  | Rule                                                                                                    | Severity |
+|----|---------------------------------------------------------------------------------------------------------|----------|
+| 1  | `ota.provider: mender` requires at least one `cores.<id>.os: yocto` slice.                              | ERROR    |
+| 2  | `boot.signing.algorithm:` must be in the SoM family's supported set (see table below).                  | ERROR    |
+| 3  | `cores.<id>.iot.tls: true` requires `mbedtls` or `bearssl` in `libraries:` or `extra_libraries:`.       | ERROR    |
+| 4  | `cores.<id>.inference.default_arena_kib` > `cores.<id>.memory.heap_kib` -- inference may OOM.           | WARN     |
+| 5  | `cores.<id>.power.sleep_mode != disabled` with no `wakeup_sources:` declared -- device cannot wake.     | WARN     |
+
+Rule 2 family-specific allow-list (built from the SoM preset's
+`family:` field):
+
+| Family             | Allowed `boot.signing.algorithm:` values             |
+|--------------------|------------------------------------------------------|
+| `alif-ensemble`    | `ecdsa_p256`, `ed25519`  (OPTIGA Trust M slot type)  |
+| `renesas-rzv2n`    | `ecdsa_p256`, `rsa2048`, `rsa3072`                   |
+| `nxp-imx9`         | `ecdsa_p256`, `rsa2048`, `rsa3072`                   |
+| *(unknown family)* | Schema enum unrestricted (no capability data yet)    |
+
+The warning rules (4 + 5) are informational: the build still
+succeeds.  Tightening one of them to ERROR is a v0.7+ tightening
+decision once enough field data confirms the heuristic.
 
 ## Versioning
 
