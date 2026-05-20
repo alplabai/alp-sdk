@@ -79,8 +79,12 @@ def test_run_finds_board_yaml_from_subdirectory(tmp_path: Path, monkeypatch, moc
     monkeypatch.chdir(subdir)
     # Mock the actual build/exec so the test doesn't shell out.
     called = {}
-    mocker.patch("alp_cli.run._build_and_exec_native_sim",
-                 side_effect=lambda project_dir: called.setdefault("dir", project_dir) or 0)
+
+    def _stub(project_dir):
+        called["dir"] = project_dir
+        return 0
+
+    mocker.patch("alp_cli.run._build_and_exec_native_sim", side_effect=_stub)
     result = CliRunner().invoke(cli, ["run"])
     assert result.exit_code == 0
     assert called["dir"] == proj

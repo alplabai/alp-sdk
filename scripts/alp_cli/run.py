@@ -58,5 +58,5 @@ def run_cmd(board: str | None, flash: bool) -> None:
         rc = _build_for_board(project, board, flash)
     else:
         rc = _build_and_exec_native_sim(project)
-    if isinstance(rc, int) and rc != 0:
+    if rc != 0:
         raise SystemExit(rc)
