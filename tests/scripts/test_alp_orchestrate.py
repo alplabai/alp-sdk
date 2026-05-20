@@ -1391,18 +1391,32 @@ def test_emit_storage_mounts_c_littlefs(tmp_path: Path) -> None:
 
 
 def test_slice_alp_conf_storage_kconfig(tmp_path: Path) -> None:
-    """The Kconfig fragment must enable CONFIG_FILE_SYSTEM_LITTLEFS and
-    a per-partition CONFIG_FS_LITTLEFS_PARTITION_<NAME> for every
-    littlefs entry."""
+    """The Kconfig fragment must enable CONFIG_FILE_SYSTEM_LITTLEFS for
+    every littlefs entry, plus a documentation comment per littlefs
+    partition so the customer knows how to reach the partition at
+    runtime (FIXED_PARTITION_ID(<name>_partition)).  The previous
+    `CONFIG_FS_LITTLEFS_PARTITION_<NAME>=y` per-partition emit was a
+    fictional Kconfig -- modern Zephyr's per-partition LFS wiring is
+    DT-driven (`fixed-partitions` node + chosen
+    `zephyr,storage-partition`), and setting the undefined symbol
+    aborted twister with "assignment to undefined symbol"."""
     path = _write_board(tmp_path, AEN_STORAGE)
     project = load_board_yaml(path)
     conf = _slice_alp_conf(project, project.cores["m55_hp"])
     assert "CONFIG_FILE_SYSTEM=y" in conf
     assert "CONFIG_FILE_SYSTEM_LITTLEFS=y" in conf
-    assert "CONFIG_FS_LITTLEFS_PARTITION_SETTINGS=y" in conf
-    assert "CONFIG_FS_LITTLEFS_PARTITION_APP_DATA=y" in conf
-    # raw partition contributes no per-partition Kconfig.
-    assert "CONFIG_FS_LITTLEFS_PARTITION_MCUBOOT_SCRATCH" not in conf
+    # Per-partition hint comments (no live CONFIG_* line -- see comment block
+    # above for why).
+    assert "partition[settings]" in conf
+    assert "FIXED_PARTITION_ID(settings_partition)" in conf
+    assert "partition[app_data]" in conf
+    assert "FIXED_PARTITION_ID(app_data_partition)" in conf
+    # Raw partition does NOT get a littlefs comment.
+    assert "partition[mcuboot_scratch]" not in conf
+    # Live CONFIG_FS_LITTLEFS_PARTITION_* lines must never come back --
+    # they are the undefined-symbol form that aborts the build.
+    for stem in ("SETTINGS", "APP_DATA", "MCUBOOT_SCRATCH"):
+        assert f"\nCONFIG_FS_LITTLEFS_PARTITION_{stem}=" not in conf
     # FAT / EXT2 not pulled in (no entries declared them).
     assert "CONFIG_FAT_FILESYSTEM_ELM" not in conf
     assert "CONFIG_FILE_SYSTEM_EXT2" not in conf
