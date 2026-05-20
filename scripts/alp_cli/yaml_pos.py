@@ -49,6 +49,8 @@ def _construct_sequence(loader: _PosLoader, node: yaml.SequenceNode) -> list[Any
         if isinstance(item, dict):
             item.setdefault("__line__", child.start_mark.line + 1)
             item.setdefault("__column__", child.start_mark.column + 1)
+            item.setdefault("__end_line__", child.end_mark.line + 1)
+            item.setdefault("__end_column__", child.end_mark.column + 1)
         items.append(item)
     return items
 

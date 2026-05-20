@@ -34,6 +34,18 @@ def test_sequence_items_carry_position():
     assert items[1]["__line__"] == 3
 
 
+def test_sequence_item_carries_end_position():
+    src = (
+        "peripherals:\n"
+        "  - id: i2c0\n"
+        "    kind: i2c\n"
+    )
+    data = load_with_positions(src, source="board.yaml")
+    item = data["peripherals"][0]
+    assert item["__line__"] == 2
+    assert item["__end_line__"] >= 3
+
+
 def test_scalar_value_position_via_helper():
     src = "som:\n  sku: E1M-AEN701\n"
     data = load_with_positions(src, source="board.yaml")
