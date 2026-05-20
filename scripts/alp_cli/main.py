@@ -6,6 +6,7 @@ import click
 
 from alp_cli import __version__
 from alp_cli.init import init_cmd
+from alp_cli.run import run_cmd
 from alp_cli.validate import validate_cmd
 
 
@@ -15,12 +16,8 @@ def cli() -> None:
     """ALP SDK command-line interface."""
 
 
-@cli.command(help="(stub) Build and run on native_sim.")
-def run() -> None:
-    click.echo("run: not yet implemented")
-
-
 cli.add_command(init_cmd)
+cli.add_command(run_cmd)
 cli.add_command(validate_cmd)
 
 
