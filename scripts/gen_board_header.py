@@ -51,7 +51,7 @@ _SECTIONS: list[tuple[str, str]] = [
     ("dac",   "DAC channels (E1M_DAC<N> -> board-side signal)"),
     ("i2s",   "I2S instances (E1M_I2S<N> -> board-side codec / mic role)"),
     ("can",   "CAN buses (E1M_CAN<N> -> board-side bus role)"),
-    ("qenc",  "Quadrature encoder channels (E1M_QENC<N> -> board-side encoder)"),
+    ("qenc",  "Quadrature encoder channels (E1M_ENC<N> -> board-side encoder)"),
 ]
 
 

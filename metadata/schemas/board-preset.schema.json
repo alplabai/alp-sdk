@@ -85,6 +85,6 @@
     "route_entry_list_dac":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_DAC[0-9]+$" } } }] } },
     "route_entry_list_i2s":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_I2S[0-9]+$" } } }] } },
     "route_entry_list_can":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_CAN[0-9]+$" } } }] } },
-    "route_entry_list_qenc":  { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_QENC[0-9]+$" } } }] } }
+    "route_entry_list_qenc":  { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_ENC[0-9]+$" } } }] } }
   }
 }

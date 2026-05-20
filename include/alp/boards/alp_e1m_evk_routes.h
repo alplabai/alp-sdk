@@ -72,6 +72,45 @@ extern "C" {
 #define EVK_ARD_PWM3      E1M_PWM5  /**< Arduino header CK_PWM3 = E1M_PWM5. */
 #define EVK_MB_PWM        E1M_PWM6  /**< mikroBUS PWM pin. */
 
+/* ------------------------------------------------------------------ */
+/* ADC channels (E1M_ADC<N> -> board-side signal) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_ADC_BOARD_ID   E1M_ADC0  /**< Carrier-side BOARD_ID resistor divider (see docs/board-id.md). */
+#define EVK_ADC_ARDUINO_A1 E1M_ADC1  /**< Arduino UNO header A1 analog input. */
+#define EVK_ADC_ARDUINO_A2 E1M_ADC2  /**< Arduino UNO header A2 analog input. */
+#define EVK_ADC_ARDUINO_A3 E1M_ADC3  /**< Arduino UNO header A3 analog input. */
+#define EVK_ADC_ARDUINO_A4 E1M_ADC4  /**< Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards). */
+#define EVK_ADC_ARDUINO_A5 E1M_ADC5  /**< Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards). */
+#define EVK_ADC_MB_AN      E1M_ADC6  /**< mikroBUS click AN pin. */
+#define EVK_ADC_VBAT_SENSE E1M_ADC7  /**< Battery voltage divider (4:1 resistor scale) for power-monitor demos. */
+
+/* ------------------------------------------------------------------ */
+/* DAC channels (E1M_DAC<N> -> board-side signal) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_DAC_ARDUINO_DAC0   E1M_DAC0  /**< Arduino-shield-style DAC0 output exposed on header J3. */
+#define EVK_DAC_AUDIO_LINE_OUT E1M_DAC1  /**< Auxiliary line-level audio output (analog, sums with TAS2563 mix). */
+
+/* ------------------------------------------------------------------ */
+/* I2S instances (E1M_I2S<N> -> board-side codec / mic role) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_I2S_AUDIO_CODEC E1M_I2S0  /**< Routed through the 74LVC157 mux to either the TAS2563 amps (default) or the M.2 E-key I2S; see EVK_PIN_I2S_MUX_SEL. */
+#define EVK_I2S_PDM_MIC     E1M_I2S1  /**< PDM mic capture (4x MP34DT05 mics). */
+
+/* ------------------------------------------------------------------ */
+/* CAN buses (E1M_CAN<N> -> board-side bus role) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_CAN_VEHICLE_BUS E1M_CAN0  /**< TCAN1044A transceiver on header J9; termination via jumpers JP1-JP4. */
+
+/* ------------------------------------------------------------------ */
+/* Quadrature encoder channels (E1M_ENC<N> -> board-side encoder) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_ENC_ROTARY E1M_ENC0  /**< PEC12R-4222F-S0024 rotary encoder: ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4). */
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

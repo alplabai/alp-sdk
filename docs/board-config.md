@@ -860,6 +860,138 @@ som:
 The loader merges your overrides onto the preset before generating
 the build config.  No SDK fork needed.
 
+## Build-system integration knobs
+
+For declarative coverage of build options that customers used to
+hand-edit in `prj.conf` / `local.conf` / sysbuild.conf,
+`board.yaml` carries a small set of structured blocks.  All
+optional; sensible defaults from the SoM family / SDK baseline
+apply when omitted.
+
+### Per-slice memory (`cores.<id>.memory:`)
+
+```yaml
+cores:
+  m55_hp:
+    app: ./src
+    memory:
+      stack_kib:     8       # CONFIG_MAIN_STACK_SIZE  = 8192
+      heap_kib:      4       # CONFIG_HEAP_MEM_POOL_SIZE = 4096
+      isr_stack_kib: 2       # CONFIG_ISR_STACK_SIZE  = 2048
+```
+
+Zephyr slice only; ignored on Yocto / baremetal.  Replaces
+hand-edited `CONFIG_MAIN_STACK_SIZE` etc. in `prj.conf`.
+
+### Per-slice power (`cores.<id>.power:`)
+
+```yaml
+cores:
+  m55_he:
+    app: ./src
+    power:
+      sleep_mode:     standby      # disabled | idle | standby | deep
+      wakeup_sources: [uart, gpio, rtc]
+```
+
+`sleep_mode != disabled` emits `CONFIG_PM=y` + `CONFIG_PM_DEVICE=y`
+and lands the per-state hierarchy.  `wakeup_sources:` entries that
+name a subsystem (`uart`, `gpio`, ...) emit
+`CONFIG_PM_DEVICE_WAKE_<SUBSYS>=y`; `E1M_*` pad names emit a hint
+comment (per-silicon wake-pin Kconfig lands in v0.7).
+
+### Per-module log levels (`diagnostics.modules:`)
+
+```yaml
+diagnostics:
+  log_level: info               # default for everything else
+  modules:
+    alp_iot:       debug
+    alp_inference: warn
+    alp_security:  "off"        # quote 'off' -- bare off parses as YAML false
+```
+
+Emits `CONFIG_<MODULE>_LOG_LEVEL=<n>` per entry into the slice's
+`alp.conf`.  Saves customers from finding the right
+`CONFIG_LOG_*` symbol per module.
+
+### Bootloader (`boot:` -- MCUboot)
+
+```yaml
+boot:
+  method: mcuboot                # mcuboot | none
+  signing:
+    algorithm: ecdsa_p256        # ecdsa_p256 | rsa2048 | rsa3072 | ed25519
+    key_file: keys/prod_ecdsa_p256.pub.pem
+  slots:
+    primary:   { size_kib: 480 }
+    secondary: { size_kib: 480 }
+  swap_algorithm: scratch        # scratch | move | overwrite
+  scratch_size_kib: 32
+  anti_rollback: false
+```
+
+Project-wide (one bootloader per device).  The loader emits a
+sysbuild.conf overlay with the corresponding `SB_CONFIG_*` lines
+(MCUboot signature type, slot sizes, swap algorithm, scratch size,
+anti-rollback counter).  See `docs/secure-boot.md` for the
+underlying secure-boot contract.
+
+### OTA (`ota:` -- Mender / MCUmgr)
+
+```yaml
+ota:
+  provider: mender               # mender | mcumgr | none
+  artifact_name: my-product-1.2.3
+  signing_key: keys/mender_artifact.pem
+  server:
+    url:    https://hosted.mender.io
+    tenant: my-tenant
+  rollback: { enabled: true, retries: 3, min_version: 1 }
+  poll_interval_s: 1800
+  storage:
+    device: /dev/mmcblk0p        # Yocto-only
+    boot_part_mb: 64
+    rootfs_ab: true
+    total_size_mb: 4096
+```
+
+Project-wide.  `provider: mender` emits `MENDER_*` weak-assignment
+lines (`?=`) into the Yocto slice's `local.conf` so hand-edited
+values still win.  `provider: mcumgr` is reserved for the Zephyr
+OTA client decision (Mender MCU client vs Hawkbit, ADR 0009 pending).
+See `docs/ota.md` + `docs/ota-device-contract.md`.
+
+### Storage partitions (`storage:`)
+
+```yaml
+storage:
+  - { name: settings,    fs: littlefs, size_kib: 64,  mount: /lfs, flash_device: mram_main }
+  - { name: ota_slot_a,  fs: raw,      size_kib: 512,              flash_device: mram_main }
+```
+
+Project-wide.  Each entry declares a partition; the loader
+validates `flash_device:` against the SoM preset's `memory_map:` /
+`on_module.ospi_memories:`.  The DTS-overlay emitter materialises
+the `partitions { ... }` node + per-fs Kconfig in v0.6 (schema is
+authoritative now, generator integration is the in-flight piece).
+
+### PSA Crypto + TF-M (`security.psa:`)
+
+```yaml
+security:
+  psa:
+    persistent_slots:  16
+    its_storage:       mram_secure        # ITS backing region
+    ps_storage:        ospi0              # optional (PS)
+    tfm:               false              # enable TF-M secure partition
+    attestation_root:  optiga_trust_m     # optiga_trust_m | tfm_internal | none
+```
+
+Project-wide.  Pre-v0.6 the schema accepts the block but the
+emit path is a no-op (TF-M sysbuild child-image plumbing lands
+in v0.6).  See `docs/security-audit-plan.md` + ADR 0010.
+
 ## Versioning
 
 There is no explicit `schema_version` field -- the schema at

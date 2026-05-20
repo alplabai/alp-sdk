@@ -136,7 +136,189 @@
         "log_level": {
           "type": "string",
           "enum": ["error", "warn", "info", "debug", "trace"],
-          "default": "info"
+          "default": "info",
+          "description": "Default log level for every ALP SDK module that does not appear in `modules:` below."
+        },
+        "modules": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["error", "warn", "info", "debug", "trace", "off"]
+          },
+          "description": "Per-module log-level overrides.  Keys match ALP SDK module names (e.g. `alp_iot`, `alp_inference`, `alp_audio`, `alp_security`, `alp_gpio`, ...).  Each value is the same log-level enum as the top-level `log_level`, plus `off` to silence the module entirely.  The loader emits CONFIG_<MODULE>_LOG_LEVEL_<LEVEL>=y per entry into the generated alp.conf."
+        }
+      }
+    },
+
+    "storage": {
+      "type": "array",
+      "description": "Optional flash / persistent-storage partitioning.  Each entry declares one partition: a name, a filesystem (or `raw: true` for unformatted partitions used as OTA slot backing / image cache), a size, an optional mount point, and a flash-device reference into the SoM preset's `memory_map:` or `on_module.ospi_memories:` block.  The loader emits a partial DTS overlay (the `partitions { ... }` node) plus the matching Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS / CONFIG_FAT_FILESYSTEM_ELM / ...) per entry.  See docs/v0.6-tbd-and-assumptions.md -- the emit path lands in v0.6 alongside the deterministic flash-allocator.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "size_kib"],
+        "properties": {
+          "name":         { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Partition label; becomes the DT node name + CONFIG_FS_LITTLEFS_PARTITION_<NAME> stem." },
+          "size_kib":     { "type": "integer", "minimum": 4 },
+          "fs":           { "type": "string", "enum": ["littlefs", "fat", "ext4", "raw"], "default": "raw", "description": "Filesystem to format the partition with.  `raw` leaves it unformatted (e.g. for image slots managed by MCUboot)." },
+          "mount":        { "type": "string", "description": "Mount point at boot.  Optional; when omitted the partition isn't auto-mounted." },
+          "flash_device": { "type": "string", "description": "Region this partition lives in.  References the SoM preset's `memory_map:` name (`mram_main`, `ocram_low`, ...) or an `on_module.ospi_memories:` entry (`ospi0`, ...)." },
+          "raw":          { "type": "boolean", "description": "Legacy alias for `fs: raw`.  Prefer `fs:` directly." }
+        }
+      }
+    },
+
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional security-stack configuration.  Today covers the PSA Crypto persistent-key store + TF-M boundary; future blocks (secure-boot key provisioning, attestation enrolment) land here.",
+      "properties": {
+        "psa": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "PSA Crypto persistent-key storage.  See docs/security-audit-plan.md and ADR-0010 for the cross-core trust-boundary discussion.  v0.6 lands the TF-M sysbuild child image; pre-v0.6 the schema accepts these fields but the emit path is a no-op.",
+          "properties": {
+            "persistent_slots": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 16,
+              "description": "Number of PSA Crypto persistent key slots (emits CONFIG_PSA_CRYPTO_PERSISTENT_SLOT_COUNT)."
+            },
+            "its_storage": {
+              "type": "string",
+              "description": "ITS (Internal Trusted Storage) backing region.  References the SoM preset's `memory_map:` name -- typically `mram_secure` on AEN, `ocram_secure` on V2N."
+            },
+            "ps_storage": {
+              "type": "string",
+              "description": "PS (Protected Storage) backing region.  Optional; references an on-module OSPI / EEPROM region when the customer wants encrypted-at-rest persistence outside the secure MRAM."
+            },
+            "tfm": {
+              "type": "boolean",
+              "default": false,
+              "description": "Enable the TF-M secure-side partition image.  When true the orchestrator emits SB_CONFIG_TFM_BUILD_TYPE + a sysbuild child image; when false PSA Crypto runs entirely non-secure (mbedTLS-only)."
+            },
+            "attestation_root": {
+              "type": "string",
+              "enum": ["optiga_trust_m", "tfm_internal", "none"],
+              "default": "none",
+              "description": "Source of the attestation root key.  `optiga_trust_m` uses the on-module secure element (AEN family); `tfm_internal` keeps the root in TF-M's secure storage; `none` disables attestation."
+            }
+          }
+        }
+      }
+    },
+
+    "boot": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional bootloader + image-signing configuration.  When absent, SDK defaults apply (AEN-Zephyr: MCUboot + ECDSA-P256 + swap-using-scratch + 480 KiB slots; Yocto SoMs: U-Boot inherited from machine.conf).  Project-wide (not per-core): the bootloader is a device-level artifact, not a per-OS choice.  See docs/secure-boot.md.",
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["mcuboot", "none"],
+          "description": "Bootloader strategy.  `mcuboot` pulls MCUboot into the Zephyr build via sysbuild; `none` disables the bootloader (firmware runs unverified -- dev / lab only).  Optional; the SoM family supplies the default (AEN/N93 -> mcuboot, V2N/V2N-M1 -> none on the Zephyr slice since U-Boot owns boot on Linux)."
+        },
+        "signing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["algorithm", "key_file"],
+          "description": "Image-signing configuration.  Required when method is `mcuboot`.",
+          "properties": {
+            "algorithm": {
+              "type": "string",
+              "enum": ["ecdsa_p256", "rsa2048", "rsa3072", "ed25519"],
+              "description": "Image signature algorithm.  Must match the SoM's hardware constraints (e.g. OPTIGA Trust M slot type on AEN)."
+            },
+            "key_file": {
+              "type": "string",
+              "description": "Public key file (PEM) relative to the project root.  Baked into the bootloader; the private half stays in OPTIGA / dev-keys / vault."
+            }
+          }
+        },
+        "slots": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["primary", "secondary"],
+          "description": "Dual-bank image partition layout.  Sizes validated against the SoM preset's `memory_map:` at load time.",
+          "properties": {
+            "primary":   { "type": "object", "additionalProperties": false, "required": ["size_kib"], "properties": { "size_kib": { "type": "integer", "minimum": 32 } } },
+            "secondary": { "type": "object", "additionalProperties": false, "required": ["size_kib"], "properties": { "size_kib": { "type": "integer", "minimum": 32 } } }
+          }
+        },
+        "swap_algorithm": {
+          "type": "string",
+          "enum": ["scratch", "move", "overwrite"],
+          "default": "scratch",
+          "description": "MCUboot swap strategy.  `scratch` (crash-safe, needs scratch partition), `move` (more erases, no scratch), `overwrite` (no rollback)."
+        },
+        "scratch_size_kib": {
+          "type": "integer",
+          "minimum": 16,
+          "default": 32,
+          "description": "Scratch partition size (only when swap_algorithm is `scratch`)."
+        },
+        "anti_rollback": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable monotonic image counters.  Requires OTP fuse provisioning at production time (see docs/secure-boot.md §anti-rollback)."
+        }
+      }
+    },
+
+    "ota": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "description": "Optional OTA configuration.  Project-wide (one device = one OTA orchestration).  See docs/ota.md for the device contract.  Yocto path: Mender; Zephyr path: deferred until the SDK lands its in-tree OTA client (Mender MCU client or Hawkbit, decision pending per ADR 0009).",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["mender", "mcumgr", "none"],
+          "description": "OTA provider.  `mender` for Yocto, `mcumgr` for Zephyr (placeholder until ADR 0009 lands), `none` to disable."
+        },
+        "artifact_name": {
+          "type": "string",
+          "description": "Artifact identifier (e.g. `alp-v0.4-v2n101-build42`).  Required when `provider: mender`."
+        },
+        "signing_key": {
+          "type": "string",
+          "description": "Path to the public key / cert (relative to project root) used to verify OTA artifacts.  Private key never lives here."
+        },
+        "server": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url"],
+          "properties": {
+            "url":           { "type": "string", "format": "uri", "description": "Deployment server URL (Mender / Hawkbit)." },
+            "tenant":        { "type": "string", "description": "Multi-tenancy token / tenant name." },
+            "tls_ca_bundle": { "type": "string", "description": "Optional pinned CA bundle for production.  Path relative to project root." }
+          }
+        },
+        "rollback": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled":     { "type": "boolean", "default": true, "description": "Automatic rollback on health-check failure after update." },
+            "retries":     { "type": "integer", "minimum": 0, "default": 3 },
+            "min_version": { "type": "integer", "minimum": 0, "description": "Anti-downgrade floor.  Reject OTA images claiming version < min_version." }
+          }
+        },
+        "poll_interval_s": {
+          "type": "integer",
+          "minimum": 60,
+          "default": 1800,
+          "description": "How often the device polls the deployment server for updates.  Mender default is 60 s; SDK default is 1800 s (30 min) for battery-friendly nodes."
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Linux/Yocto-only: A/B rootfs partition geometry.  Ignored on Zephyr (MCUboot is slot-based).",
+          "properties": {
+            "device":        { "type": "string", "description": "Base storage device (e.g. `/dev/mmcblk0p`)." },
+            "boot_part_mb":  { "type": "integer", "minimum": 1 },
+            "rootfs_ab":     { "type": "boolean", "default": true },
+            "total_size_mb": { "type": "integer", "minimum": 256 }
+          }
         }
       }
     },
@@ -255,7 +437,7 @@
       "items": {
         "allOf": [
           { "$ref": "#/$defs/route_entry" },
-          { "properties": { "e1m": { "pattern": "^E1M_QENC[0-9]+$" } } }
+          { "properties": { "e1m": { "pattern": "^E1M_ENC[0-9]+$" } } }
         ]
       }
     },
@@ -304,6 +486,47 @@
               "libwebsockets", "jsmn", "bearssl", "minimp3", "opus",
               "libhelix", "catch2"
             ]
+          }
+        },
+        "memory": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-slice memory tuning.  Optional; the SoC's Kconfig defaults apply when omitted.",
+          "properties": {
+            "stack_kib": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Main thread stack size in KiB.  Zephyr: emits CONFIG_MAIN_STACK_SIZE=<bytes> into the slice's alp.conf.  Yocto: ignored (kernel-side stack sized by the kernel)."
+            },
+            "heap_kib": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Heap pool size in KiB.  Zephyr: emits CONFIG_HEAP_MEM_POOL_SIZE=<bytes>.  Yocto: ignored."
+            },
+            "isr_stack_kib": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "ISR stack size in KiB.  Zephyr only; emits CONFIG_ISR_STACK_SIZE."
+            }
+          }
+        },
+        "power": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-slice power-management profile.  Optional; conservative defaults apply when omitted.  Maps to the SoM's PMIC + Zephyr PM subsystem knobs.",
+          "properties": {
+            "sleep_mode": {
+              "type": "string",
+              "enum": ["disabled", "idle", "standby", "deep"],
+              "default": "disabled",
+              "description": "Lowest sleep state the slice is allowed to enter.  Zephyr: enables CONFIG_PM + CONFIG_PM_DEVICE; selects the corresponding PM_STATE_* hierarchy.  `disabled` = always-on (default); `deep` = lowest-power retention state the silicon supports."
+            },
+            "wakeup_sources": {
+              "type": "array",
+              "uniqueItems": true,
+              "description": "Peripherals / IRQ lines allowed to wake the slice from sleep.  Each entry is a peripheral subsystem name (`uart`, `gpio`, `rtc`, `i2c`, ...) or an `E1M_*` pad name.  The loader maps to the matching `CONFIG_PM_DEVICE_WAKE_*` Kconfig per silicon family.",
+              "items": { "type": "string" }
+            }
           }
         },
         "inference": {

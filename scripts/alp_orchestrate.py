@@ -107,6 +107,8 @@ class Slice:
     libraries: list[str] = field(default_factory=list)
     inference: dict[str, Any] = field(default_factory=dict)
     iot: dict[str, Any] = field(default_factory=dict)
+    memory: dict[str, Any] = field(default_factory=dict)   # stack_kib, heap_kib, isr_stack_kib
+    power: dict[str, Any] = field(default_factory=dict)    # sleep_mode, wakeup_sources
 
     # Populated by Orchestrator.fan_out:
     build_dir: Optional[Path] = None
@@ -231,6 +233,8 @@ class BoardProject:
     diagnostics: dict[str, Any] = field(default_factory=dict)
     chips: list[str] = field(default_factory=list)
     features: dict[str, Any] = field(default_factory=dict)
+    boot: dict[str, Any] = field(default_factory=dict)
+    ota: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -426,6 +430,8 @@ def _slice_from_resolved(
         libraries=list(entry.get("libraries") or []),
         inference=dict(entry.get("inference") or {}),
         iot=dict(entry.get("iot") or {}),
+        memory=dict(entry.get("memory") or {}),
+        power=dict(entry.get("power") or {}),
     )
 
 
@@ -662,6 +668,8 @@ def load_board_yaml(path: Path, *,
         diagnostics=dict(project.get("diagnostics") or {}),
         chips=list(project.get("chips") or []),
         features=dict(project.get("features") or {}),
+        boot=dict(project.get("boot") or {}),
+        ota=dict(project.get("ota") or {}),
         raw=project,
     )
 
@@ -1762,6 +1770,62 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     lines.extend(inference_lines)
     lines.append("")
 
+    # ----------------------------------------------------------------
+    # Per-slice memory tuning (board.yaml `cores.<id>.memory:`).
+    # ----------------------------------------------------------------
+    mem = slice_.memory or {}
+    mem_lines: list[str] = []
+    if mem.get("stack_kib"):
+        mem_lines.append(f"CONFIG_MAIN_STACK_SIZE={int(mem['stack_kib']) * 1024}")
+    if mem.get("isr_stack_kib"):
+        mem_lines.append(f"CONFIG_ISR_STACK_SIZE={int(mem['isr_stack_kib']) * 1024}")
+    if mem.get("heap_kib") is not None:
+        mem_lines.append(f"CONFIG_HEAP_MEM_POOL_SIZE={int(mem['heap_kib']) * 1024}")
+    if mem_lines:
+        lines.append("# Per-slice memory tuning (board.yaml cores.<id>.memory:)")
+        lines.extend(mem_lines)
+        lines.append("")
+
+    # ----------------------------------------------------------------
+    # Per-slice power-management profile.
+    # ----------------------------------------------------------------
+    pwr = slice_.power or {}
+    pwr_lines: list[str] = []
+    sleep_mode = (pwr.get("sleep_mode") or "disabled").lower()
+    if sleep_mode != "disabled":
+        pwr_lines.append("CONFIG_PM=y")
+        pwr_lines.append("CONFIG_PM_DEVICE=y")
+        # PM_STATE_* selection is silicon-family-specific; lowest-power
+        # state the hierarchy keeps is mirrored in a single hint flag.
+        pwr_lines.append(f"# Sleep target: {sleep_mode}")
+    for wake in (pwr.get("wakeup_sources") or []):
+        # Subsystem-style wake-source (e.g. `uart`) -> PM_DEVICE_WAKE_<SUBSYS>.
+        # E1M_* pad names are emitted as a hint comment; the per-silicon
+        # wake-pin Kconfig is family-specific and lands in v0.7.
+        if isinstance(wake, str) and not wake.startswith("E1M_"):
+            pwr_lines.append(f"CONFIG_PM_DEVICE_WAKE_{wake.upper()}=y  # wakeup source")
+        elif isinstance(wake, str):
+            pwr_lines.append(f"# wakeup source: {wake} (per-silicon Kconfig pending)")
+    if pwr_lines:
+        lines.append("# Per-slice power-management profile (board.yaml cores.<id>.power:)")
+        lines.extend(pwr_lines)
+        lines.append("")
+
+    # ----------------------------------------------------------------
+    # Per-module log levels (board.yaml `diagnostics.modules:`).
+    # ----------------------------------------------------------------
+    modules = (project.diagnostics or {}).get("modules") or {}
+    if modules:
+        level_to_n = {"off": 0, "error": 1, "warn": 2, "info": 3, "debug": 4, "trace": 4}
+        lines.append("# Per-module log-level overrides (board.yaml diagnostics.modules:)")
+        for mod, lvl in sorted(modules.items()):
+            n = level_to_n.get(str(lvl).lower())
+            if n is None:
+                continue
+            kc_stem = mod.upper()
+            lines.append(f"CONFIG_{kc_stem}_LOG_LEVEL={n}")
+        lines.append("")
+
     return "\n".join(lines) + "\n"
 
 
@@ -1780,6 +1844,96 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append(f'IMAGE_INSTALL:append = " {imageinstall}"')
     if slice_.image:
         lines.append(f"# bitbake target: {slice_.image}")
+
+    # Mender OTA wiring (board.yaml `ota:` block).  Emits Mender
+    # `?=` (weak) assignments so hand-edited local.conf values in
+    # the build dir still win.
+    ota = project.ota or {}
+    if ota.get("provider") == "mender":
+        lines.append("")
+        lines.append("# OTA (board.yaml `ota:` block)")
+        lines.append('INHERIT += "mender-full"')
+        if ota.get("artifact_name"):
+            lines.append(f'MENDER_ARTIFACT_NAME ?= "{ota["artifact_name"]}"')
+        srv = ota.get("server") or {}
+        if srv.get("url"):
+            lines.append(f'MENDER_SERVER_URL ?= "{srv["url"]}"')
+        if srv.get("tenant"):
+            lines.append(f'MENDER_TENANT_TOKEN ?= "{srv["tenant"]}"')
+        sto = ota.get("storage") or {}
+        if sto.get("device"):
+            lines.append(f'MENDER_STORAGE_DEVICE_BASE ?= "{sto["device"]}"')
+        if sto.get("boot_part_mb"):
+            lines.append(f'MENDER_BOOT_PART_SIZE_MB ?= "{sto["boot_part_mb"]}"')
+        if sto.get("total_size_mb"):
+            lines.append(f'MENDER_STORAGE_TOTAL_SIZE_MB ?= "{sto["total_size_mb"]}"')
+        if ota.get("poll_interval_s"):
+            lines.append(f'MENDER_INVENTORY_INTERVAL ?= "{ota["poll_interval_s"]}"')
+
+    return "\n".join(lines) + "\n"
+
+
+def emit_sysbuild_conf(project: BoardProject) -> str:
+    """Emit the sysbuild.conf overlay for the project's `boot:` block.
+
+    Returns a SB_CONFIG_*-style snippet the build wires into
+    `build/alp_sysbuild.conf` (consumed via `west build --sysbuild
+    --sysbuild-config`).  Returns an empty string when the project
+    does not declare a `boot:` block (the SDK's stock per-family
+    defaults at zephyr/sysbuild/<family>/sysbuild.conf apply).
+    """
+    boot = project.boot or {}
+    if not boot:
+        return ""
+    method = (boot.get("method") or "mcuboot").lower()
+    if method == "none":
+        return ("# Auto-generated from board.yaml `boot:` block.\n"
+                "SB_CONFIG_BOOTLOADER_MCUBOOT=n\n")
+    if method != "mcuboot":
+        return ""
+
+    lines: list[str] = [
+        "# Auto-generated by scripts/alp_orchestrate.py from "
+        "board.yaml `boot:`.",
+        "# Drives the sysbuild MCUboot child image.  Customers who",
+        "# omit `boot:` get the SDK's stock per-family defaults.",
+        "",
+        "SB_CONFIG_BOOTLOADER_MCUBOOT=y",
+    ]
+    sign = boot.get("signing") or {}
+    algo = (sign.get("algorithm") or "").lower()
+    algo_kc = {
+        "ecdsa_p256": "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ECDSA_P256=y",
+        "rsa2048":    "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA=y\n"
+                      "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA_LEN=2048",
+        "rsa3072":    "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA=y\n"
+                      "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA_LEN=3072",
+        "ed25519":    "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ED25519=y",
+    }.get(algo)
+    if algo_kc:
+        lines.append(algo_kc)
+    if sign.get("key_file"):
+        lines.append(f'SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="{sign["key_file"]}"')
+    slots = boot.get("slots") or {}
+    primary = (slots.get("primary") or {}).get("size_kib")
+    secondary = (slots.get("secondary") or {}).get("size_kib")
+    if primary:
+        lines.append(f"SB_CONFIG_BOOT_PRIMARY_PARTITION_SIZE={int(primary) * 1024}")
+    if secondary:
+        lines.append(f"SB_CONFIG_BOOT_SECONDARY_PARTITION_SIZE={int(secondary) * 1024}")
+    swap = (boot.get("swap_algorithm") or "scratch").lower()
+    swap_kc = {
+        "scratch":   "SB_CONFIG_MCUBOOT_MODE_SWAP_USING_SCRATCH=y",
+        "move":      "SB_CONFIG_MCUBOOT_MODE_SWAP_USING_MOVE=y",
+        "overwrite": "SB_CONFIG_MCUBOOT_MODE_OVERWRITE_ONLY=y",
+    }.get(swap)
+    if swap_kc:
+        lines.append(swap_kc)
+    if swap == "scratch" and boot.get("scratch_size_kib"):
+        lines.append(f"SB_CONFIG_BOOT_SCRATCH_PARTITION_SIZE="
+                     f"{int(boot['scratch_size_kib']) * 1024}")
+    if boot.get("anti_rollback"):
+        lines.append("SB_CONFIG_BOOT_COUNTERS_MCUBOOT=y")
     return "\n".join(lines) + "\n"
 
 

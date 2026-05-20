@@ -155,6 +155,39 @@ e1m_routes:
         doc: "Arduino header CK_PWM3 = E1M_PWM5." }
     - { e1m: E1M_PWM6, macro: EVK_MB_PWM,
         doc: "mikroBUS PWM pin." }
+  adc:
+    - { e1m: E1M_ADC0, macro: EVK_ADC_BOARD_ID,
+        doc: "Carrier-side BOARD_ID resistor divider (see docs/board-id.md)." }
+    - { e1m: E1M_ADC1, macro: EVK_ADC_ARDUINO_A1,
+        doc: "Arduino UNO header A1 analog input." }
+    - { e1m: E1M_ADC2, macro: EVK_ADC_ARDUINO_A2,
+        doc: "Arduino UNO header A2 analog input." }
+    - { e1m: E1M_ADC3, macro: EVK_ADC_ARDUINO_A3,
+        doc: "Arduino UNO header A3 analog input." }
+    - { e1m: E1M_ADC4, macro: EVK_ADC_ARDUINO_A4,
+        doc: "Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards)." }
+    - { e1m: E1M_ADC5, macro: EVK_ADC_ARDUINO_A5,
+        doc: "Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards)." }
+    - { e1m: E1M_ADC6, macro: EVK_ADC_MB_AN,
+        doc: "mikroBUS click AN pin." }
+    - { e1m: E1M_ADC7, macro: EVK_ADC_VBAT_SENSE,
+        doc: "Battery voltage divider (4:1 resistor scale) for power-monitor demos." }
+  dac:
+    - { e1m: E1M_DAC0, macro: EVK_DAC_ARDUINO_DAC0,
+        doc: "Arduino-shield-style DAC0 output exposed on header J3." }
+    - { e1m: E1M_DAC1, macro: EVK_DAC_AUDIO_LINE_OUT,
+        doc: "Auxiliary line-level audio output (analog, sums with TAS2563 mix)." }
+  i2s:
+    - { e1m: E1M_I2S0, macro: EVK_I2S_AUDIO_CODEC,
+        doc: "Routed through the 74LVC157 mux to either the TAS2563 amps (default) or the M.2 E-key I2S; see EVK_PIN_I2S_MUX_SEL." }
+    - { e1m: E1M_I2S1, macro: EVK_I2S_PDM_MIC,
+        doc: "PDM mic capture (4x MP34DT05 mics)." }
+  can:
+    - { e1m: E1M_CAN0, macro: EVK_CAN_VEHICLE_BUS,
+        doc: "TCAN1044A transceiver on header J9; termination via jumpers JP1-JP4." }
+  qenc:
+    - { e1m: E1M_ENC0, macro: EVK_ENC_ROTARY,
+        doc: "PEC12R-4222F-S0024 rotary encoder: ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4)." }
 
 # Inference + display defaults a stock EVK app would pick.  Apps
 # override in their board.yaml as needed.
