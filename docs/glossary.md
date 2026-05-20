@@ -26,10 +26,18 @@ allocator places against the active SoM by consuming the SoM
 preset's `pad_routes:` from alp-sdk.
 
 **board.yaml** -- The single declarative file at the root of every
-application.  Lists `som.sku`, the `preset:` (or use an inline board), the per-core
-`cores.<id>` block (`os`, `app`, `peripherals`, `libraries`,
-`iot`, `inference`), top-level `chips`, cross-core `ipc`
-carve-outs, etc.  Validated by `scripts/validate_board_yaml.py`.
+application.  Top-level fields: board identity (`name` /
+`description` / `hw_rev`, or `preset:` referencing a shared
+definition under `metadata/boards/<preset>.yaml`), `som.sku`,
+the per-core `cores.<id>` block (`os`, `app`, `peripherals`,
+`libraries`, `iot`, `inference`, `memory`, `power`), the
+board-side `populated:` chip list + `e1m_routes:` pad-to-macro
+routing (sections gpio / buses / pwm / adc / dac / i2s / can /
+qenc), used-pad subset `pins:`, project-level `chips:`,
+cross-core `ipc:`, `boot:` (MCUboot), `ota:` (Mender), `storage:`,
+`security.psa:`, and `diagnostics:`.  Validated by
+`scripts/validate_board_yaml.py` against
+`metadata/schemas/board.schema.json`.
 
 **BRD_I2C** -- Board-management I²C bus on V2N + V2N-M1.  Hosts
 the PMICs, RTC, OPTIGA, supervisor MCU slave interface.
