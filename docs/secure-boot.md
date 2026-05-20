@@ -42,6 +42,34 @@ The SDK touches the MCUboot layer.  The Alif Secure Enclave
 ROM + first-stage are out of scope -- they ship with the SoM
 and Alif provides their signing keys.
 
+## Declarative wiring (`boot:` block in `board.yaml`)
+
+The recommended path is the top-level `boot:` block in your
+project's `board.yaml` -- the loader (`scripts/alp_orchestrate.py`)
+emits the matching `SB_CONFIG_*` overlay (sysbuild Kconfig) into
+`build/alp_sysbuild.conf` and passes it via
+`--sysbuild-config`.  No hand-edited sysbuild.conf.
+
+```yaml
+# board.yaml
+boot:
+  method: mcuboot
+  signing:
+    algorithm: ecdsa_p256
+    key_file: keys/prod_ecdsa_p256.pub.pem
+  slots:
+    primary:   { size_kib: 480 }
+    secondary: { size_kib: 480 }
+  swap_algorithm: scratch
+  scratch_size_kib: 32
+  anti_rollback: false
+```
+
+See [`docs/board-config.md` §Bootloader](board-config.md#bootloader-boot----mcuboot)
+for the full field reference.  Omit the block to inherit the SDK's
+stock per-family defaults (AEN-Zephyr: MCUboot + ECDSA-P256 +
+swap-using-scratch + 480 KiB slots).
+
 ## Signing key lifecycle
 
 ### Development
@@ -56,6 +84,9 @@ and Alif provides their signing keys.
        --sysbuild \
        --sysbuild-config alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
    ```
+   (Or, if your `board.yaml` carries a `boot:` block, the loader's
+   emitted overlay at `build/alp_sysbuild.conf` is the canonical
+   `--sysbuild-config` path.)
 4. `build/zephyr/zephyr.signed.bin` is your signed image.
 5. Flash both the MCUboot bootloader and the signed app:
    ```bash

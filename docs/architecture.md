@@ -152,18 +152,40 @@ note `[[chip-driver-naming]]`.
 
 ## Build orchestration
 
-The build flow runs entirely from a single `board.yaml` v2 file in
+The build flow runs entirely from a single `board.yaml` file in
 the consumer's application directory; everything below the
 `<alp/...>` line is derived from there + the metadata tree.  Three
-distinct mechanisms cooperate:
+distinct mechanisms cooperate.
+
+Top-level blocks the schema accepts (full reference:
+[`docs/board-config.md`](board-config.md)):
+
+| Block | Scope |
+|---|---|
+| `name` / `description` / `hw_rev` | Board identity (inline mode) |
+| `preset` | SDK-internal shortcut to a shared definition under `metadata/boards/<preset>.yaml` (used by the EVK demos) |
+| `som` | SoM SKU + module hw_rev |
+| `cores.<id>` | Per-core runtime + app + peripherals + libraries + inference + iot + memory + power |
+| `populated` | Chips populated on the board (chip-driver / block-helper slugs) |
+| `e1m_routes` | E1M-pad → board macro routing, 8 sections (gpio / buses / pwm / adc / dac / i2s / can / qenc) |
+| `pins` | E1M pads the project actively uses; rich `{e1m, macro, doc}` form validated against `e1m_routes` |
+| `chips` | Project-level chip drivers beyond what the board ships |
+| `ipc` | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only) |
+| `diagnostics` | log level + per-module overrides + `last_error` |
+| `boot` | MCUboot config → sysbuild.conf overlay |
+| `ota` | Mender / MCUmgr config → Yocto local.conf / sysbuild integration |
+| `storage` | Flash partitions (DTS overlay emit lands in v0.6) |
+| `security.psa` | PSA Crypto + TF-M (sysbuild child image lands in v0.6) |
+| `features` | Free-form passthrough for app-specific extras |
 
 ### Per-core slice fan-out
 
-`board.yaml` v2 carries a top-level `cores:` block keyed by the
+`board.yaml` carries a top-level `cores:` block keyed by the
 canonical core IDs of the active SoM's SoC (`a55_cluster`,
 `m33_sm`, `m55_hp`, `m55_he`, …).  Each entry declares the runtime,
-app source, peripherals, libraries, and inference / IoT toggles for
-*that* core.  `scripts/alp_orchestrate.py` loads the file, resolves
+app source, peripherals, libraries, inference, iot, plus the new
+`memory:` and `power:` sub-blocks for stack/heap sizing and
+sleep-mode wake sources.  `scripts/alp_orchestrate.py` loads the file, resolves
 each entry against the SoM preset's `topology:` defaults, and emits
 one **slice** per non-`off` core:
 

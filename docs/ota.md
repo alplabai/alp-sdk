@@ -29,10 +29,45 @@ fewer keys, fewer surfaces, fewer mistakes.
 
 ## Yocto path: Mender
 
-`meta-alp-sdk` ships an opt-in Mender integration via
-[`meta-alp-sdk/conf/distro/include/mender.inc`](../meta-alp-sdk/conf/distro/include/mender.inc).
+### Declarative wiring (`ota:` block in `board.yaml`)
+
+The recommended path is the top-level `ota:` block in your
+project's `board.yaml` -- the loader (`scripts/alp_orchestrate.py`)
+emits the matching `MENDER_*` weak-assignments + `INHERIT +=
+"mender-full"` into the slice's generated `local.conf`.  No
+hand-edited Mender variables.
+
+```yaml
+# board.yaml
+ota:
+  provider: mender
+  artifact_name: my-product-1.2.3
+  signing_key: keys/mender_artifact.pem
+  server:
+    url: https://hosted.mender.io
+    tenant: my-tenant
+  rollback: { enabled: true, retries: 3, min_version: 1 }
+  poll_interval_s: 1800
+  storage:
+    device: /dev/mmcblk0p
+    boot_part_mb: 64
+    rootfs_ab: true
+    total_size_mb: 4096
+```
+
+See [`docs/board-config.md` §OTA](board-config.md#ota-ota----mender--mcumgr)
+for the full field reference.  The emitted `local.conf` uses `?=`
+(weak) assignments so hand-edits in the build directory still win
+if a developer wants to override per-tree.
+
+### Underlying layer
+
+The orchestrator output drives
+[`meta-alp-sdk/conf/distro/include/mender.inc`](../meta-alp-sdk/conf/distro/include/mender.inc),
+which `meta-alp-sdk` pulls in via the generated `INHERIT +=` line.
 See the [`meta-alp-sdk` README](../meta-alp-sdk/README.md#ota-via-mender)
-for the enablement walk-through.
+for the layer-level walk-through if you're working below the
+`board.yaml` surface.
 
 Reference flow on a Mender-enabled image:
 

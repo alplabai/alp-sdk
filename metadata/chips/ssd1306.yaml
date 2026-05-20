@@ -22,7 +22,7 @@ signals:
   - { name: RST, type: input,  scope: "optional hardware reset (active-low)" }
 
 # SoM families this chip is mechanically + electrically compatible with.
-# The EVK populates the SSD1306 on its 35x35 carrier directly off the
+# The EVK populates the SSD1306 on its 35x35 board directly off the
 # host SoC's I2C0; AEN / V2N / V2M / NX9 are all wired the same way.
 families:
   - aen

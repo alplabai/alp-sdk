@@ -152,8 +152,45 @@ each Zephyr slice gets a Kconfig fragment layered onto its own
 `local.conf` snippet consumed by bitbake.  Inside each
 `cores.<id>` block every field except `os:` + `app:` is optional;
 the [`gpio-button-led` example](examples/gpio-button-led/) for
-instance skips `peripherals:` entirely and uses
-`populated.button_led: true` to pull the chip driver in.
+instance skips `peripherals:` entirely and uses `populated:
+button_led: true` to pull the chip driver in.
+
+For a **custom board** (not the EVK / X-EVK), drop the `preset:`
+line and describe the board inline:
+
+```yaml
+name: my-sensor-board
+populated:
+  bmi323:  true
+  ssd1306: true
+e1m_routes:
+  gpio:
+    - { e1m: E1M_GPIO_IO15, macro: PIN_BMI323_INT1, doc: "BMI323 INT1" }
+  buses:
+    - { e1m: E1M_I2C0, macro: I2C_BUS_SENSORS }
+  adc:
+    - { e1m: E1M_ADC0, macro: ADC_VBAT_SENSE, doc: "Battery 4:1 divider" }
+```
+
+The `e1m_routes:` block covers all eight E1M peripheral classes
+(gpio / buses / pwm / adc / dac / i2s / can / qenc) and per-entry
+electrical facts (`active_low`, `pull: up|down|none`,
+`debounce_ms`).  `scripts/gen_board_header.py` emits the matching
+`include/alp/boards/alp_<name>_routes.h` automatically.
+
+The same `board.yaml` also covers build-system knobs customers used
+to hand-edit:
+
+| Block | What it replaces |
+|---|---|
+| `cores.<id>.memory: { stack_kib, heap_kib, isr_stack_kib }` | `CONFIG_MAIN_STACK_SIZE` / `_HEAP_MEM_POOL_SIZE` / `_ISR_STACK_SIZE` in prj.conf |
+| `cores.<id>.power: { sleep_mode, wakeup_sources }` | `CONFIG_PM` + `CONFIG_PM_DEVICE_WAKE_*` |
+| `diagnostics.modules: { <name>: <level> }` | Per-module `CONFIG_<MOD>_LOG_LEVEL_*` |
+| `boot: { method, signing, slots, swap_algorithm }` | Hand-edited `sysbuild.conf` |
+| `ota: { provider, server, signing_key, ... }` | Hand-edited Mender `local.conf` |
+| `storage:` + `security.psa:` | DTS partitions + TF-M sysbuild (v0.6 emit) |
+| `pins: [{e1m, macro, doc}]` | None — surfaces the subset of pads each project actually uses |
+
 See [`docs/board-config.md`](docs/board-config.md) for the full
 schema reference and
 [`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md) for
