@@ -2885,15 +2885,18 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         # types are enabled; dedupe before emit.
         for kc in sorted(set(fs_kconfig)):
             lines.append(kc)
-        # Per-partition LITTLEFS partition stems carry the partition
-        # label so customers can drive runtime mount discovery via
-        # FIXED_PARTITION_ID(<name>_partition).  Zephyr's
-        # CONFIG_FS_LITTLEFS_PARTITION_<NAME> is set per littlefs
-        # partition; raw partitions get no fs Kconfig.
+        # Per-partition LITTLEFS partition labels surface as a hint
+        # comment only.  Modern Zephyr does NOT define a per-partition
+        # CONFIG_FS_LITTLEFS_PARTITION_<NAME> Kconfig -- the partition
+        # gets matched via the DT `fixed-partitions` node + the
+        # chosen `zephyr,storage-partition` / FIXED_PARTITION_ID()
+        # macro at runtime.  Emitting a Kconfig stem trips Zephyr's
+        # "assignment to undefined symbol" warning + aborts the build.
         for p in ok_partitions:
             if p.fs == "littlefs":
                 lines.append(
-                    f"CONFIG_FS_LITTLEFS_PARTITION_{p.name.upper()}=y")
+                    f"# partition[{p.name}] -> mount at runtime via "
+                    f"FIXED_PARTITION_ID({p.name}_partition)")
         blocked = [p for p in partitions if p.status == "blocked"]
         for p in blocked:
             lines.append(f"# BLOCKED storage[{p.name}]: "

@@ -680,6 +680,23 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
     "mbedtls":       ("CONFIG_MBEDTLS=y", "CONFIG_MBEDTLS_BUILTIN=y",
                       "CONFIG_ALP_MBEDTLS_PURE_C=y"),
     "cmsis_dsp":     ("CONFIG_CMSIS_DSP=y",
+                      # CMSIS-DSP's per-component switches are off by default in
+                      # the upstream Zephyr module -- enabling CMSIS_DSP alone
+                      # only pulls in BASICMATH.  We turn on every component
+                      # consumers might reach so kernels like arm_rfft_fast_*
+                      # (TRANSFORM), arm_biquad_cascade_* (FILTERING),
+                      # arm_correlate_* (STATISTICS), etc. link cleanly.  Cost
+                      # is minimal -- LD's --gc-sections drops unused symbols.
+                      "CONFIG_CMSIS_DSP_BASICMATH=y",
+                      "CONFIG_CMSIS_DSP_COMPLEXMATH=y",
+                      "CONFIG_CMSIS_DSP_CONTROLLER=y",
+                      "CONFIG_CMSIS_DSP_FASTMATH=y",
+                      "CONFIG_CMSIS_DSP_FILTERING=y",
+                      "CONFIG_CMSIS_DSP_INTERPOLATION=y",
+                      "CONFIG_CMSIS_DSP_MATRIX=y",
+                      "CONFIG_CMSIS_DSP_STATISTICS=y",
+                      "CONFIG_CMSIS_DSP_SUPPORT=y",
+                      "CONFIG_CMSIS_DSP_TRANSFORM=y",
                       "CONFIG_ALP_CMSIS_DSP_SCALAR=y"),
     "littlefs":      ("CONFIG_FILE_SYSTEM_LITTLEFS=y", "CONFIG_FILE_SYSTEM=y",
                       "CONFIG_ALP_LITTLEFS_SYNC_IO=y"),
