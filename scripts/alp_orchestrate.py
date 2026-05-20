@@ -610,25 +610,44 @@ def load_board_yaml(path: Path, *,
 
     # 8. Optional top-level `pins:` cross-check.  When the project
     # lists which E1M pads it actively uses, every entry must exist
-    # in the resolved board's `e1m_routes:` block.  Catches typos +
-    # demos drifting from the EVK preset's wiring.
+    # in the resolved board's `e1m_routes:` block; entries that
+    # supply a `macro:` must also match the board's macro for that
+    # pad.  Catches typos + demos drifting from the EVK preset's
+    # wiring.  Each entry is either a bare string (just the pad
+    # name) or a `{e1m, macro?, doc?}` mapping.
     used_pins = list(project.get("pins") or [])
     if used_pins:
         routes = (board_preset or {}).get("e1m_routes") or {}
-        defined_pads: set[str] = set()
+        # Build a {pad -> [macros]} index; one pad can have several
+        # macros aliasing it (e.g. E1M_PWM1 maps to EVK_PWM_LED_BLUE
+        # AND EVK_ARD_PWM1 on the EVK).
+        macros_by_pad: dict[str, set[str]] = {}
         for section in ("gpio", "buses", "pwm"):
             for entry in (routes.get(section) or []):
                 e1m = entry.get("e1m")
-                if isinstance(e1m, str):
-                    defined_pads.add(e1m)
-        unknown = [p for p in used_pins if p not in defined_pads]
-        if unknown:
-            board_label = board_name or "<inline>"
-            raise OrchestratorError(
-                f"board.yaml `pins:` references {unknown} "
-                f"that are not in the resolved board '{board_label}'s "
-                f"`e1m_routes:` block.  Known pads: "
-                f"{sorted(defined_pads)}")
+                macro = entry.get("macro")
+                if isinstance(e1m, str) and isinstance(macro, str):
+                    macros_by_pad.setdefault(e1m, set()).add(macro)
+        board_label = board_name or "<inline>"
+        for idx, item in enumerate(used_pins):
+            if isinstance(item, str):
+                e1m_pad, macro_decl = item, None
+            elif isinstance(item, dict):
+                e1m_pad = item.get("e1m")
+                macro_decl = item.get("macro")
+            else:
+                raise OrchestratorError(
+                    f"board.yaml `pins[{idx}]` is neither a string nor a mapping")
+            if e1m_pad not in macros_by_pad:
+                raise OrchestratorError(
+                    f"board.yaml `pins[{idx}].e1m: {e1m_pad}` is not in the "
+                    f"resolved board '{board_label}'s `e1m_routes:` block.  "
+                    f"Known pads: {sorted(macros_by_pad.keys())}")
+            if macro_decl is not None and macro_decl not in macros_by_pad[e1m_pad]:
+                raise OrchestratorError(
+                    f"board.yaml `pins[{idx}].macro: {macro_decl}` does not "
+                    f"match the resolved board '{board_label}'s macros for "
+                    f"pad {e1m_pad}: {sorted(macros_by_pad[e1m_pad])}")
 
     return BoardProject(
         sku=sku,

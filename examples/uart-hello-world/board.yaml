@@ -19,7 +19,7 @@ preset: e1m-evk
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
-  - E1M_UART0
+  - { e1m: E1M_UART0, macro: EVK_UART_PORT_DEBUG, doc: "Console UART exposed on the JTAG/SWD-side debug header" }
 cores:
   m55_hp:
     app: ./src

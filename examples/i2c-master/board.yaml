@@ -18,7 +18,7 @@ preset: e1m-evk
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
-  - E1M_I2C0
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
 cores:
   m55_hp:
     app: ./src

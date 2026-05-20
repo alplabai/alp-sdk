@@ -13,7 +13,7 @@ preset: e1m-evk
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
-  - E1M_PWM3
+  - { e1m: E1M_PWM3, macro: EVK_PWM_LED_RED, doc: "RGB LED red channel" }
 cores:
   m55_hp:
     app: ./src

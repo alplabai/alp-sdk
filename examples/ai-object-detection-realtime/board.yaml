@@ -29,10 +29,8 @@ preset: e1m-evk
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
-  - E1M_I2C0
-  - E1M_SPI1
-
-# OV5640 + ST7789 plug into the EVK headers for this demo (not part
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
+  - { e1m: E1M_SPI1, macro: EVK_SPI_BUS_ARDUINO, doc: "Arduino UNO header SPI; terminates on the on-module CC3501E, not the main SoC" }
 # of the EVK's default `populated:` table).  Listing them in the
 # project's `chips:` array flips on the matching chip drivers without
 # needing a per-project board fork.

@@ -145,9 +145,9 @@ When `preset:` is set, you cannot ALSO carry inline
 
 ```yaml
 pins:
-  - E1M_GPIO_IO15   # BMI323 INT1
-  - E1M_PWM3        # status LED red
-  - E1M_I2C0        # sensor bus
+  - { e1m: E1M_GPIO_IO4, macro: EVK_PIN_ENCODER_SW, doc: "user button" }
+  - { e1m: E1M_PWM3,     macro: EVK_PWM_LED_RED,    doc: "red status LED" }
+  - E1M_I2C0                                                       # bare form OK
 ```
 
 Optional top-level array.  Names the E1M pads / peripheral
@@ -157,11 +157,40 @@ readers can't tell which subset this particular firmware uses
 without diving into the source.  Listing them here surfaces the
 project's hardware usage in one place.
 
-The loader validates each entry against the resolved board's
-`e1m_routes:` block at load time -- typos and pad references
-that don't exist on the board error out clearly.  Omit the
-field entirely for inline-mode projects where the `e1m_routes:`
-block already enumerates the full set.
+Each entry is either a bare E1M pad name (e.g. `E1M_GPIO_IO4`)
+or a `{e1m, macro?, doc?}` mapping that pins the C macro the
+source actually references plus a one-line label.  Bare-string
+and object entries can mix in the same list.
+
+The loader cross-checks every entry against the resolved board's
+`e1m_routes:` block: the `e1m` must exist, and when `macro:` is
+supplied it must match the board's macro for that pad.  Typos
+and stale macro names error out at validate time.
+
+### Pin direction (NOT in `board.yaml`)
+
+`board.yaml` describes the **wiring** (pad ↔ feature) and
+**board-static electrical facts** (`active_low`, `pull`,
+`debounce_ms`); it does NOT describe pin direction.
+
+Pin direction is a per-app runtime choice -- set at the
+`alp_gpio_open()` call site by the firmware:
+
+```c
+alp_gpio_t *btn = alp_gpio_open(EVK_PIN_ENCODER_SW,
+                                ALP_GPIO_INPUT | ALP_GPIO_INT_EDGE_FALLING);
+alp_gpio_t *led = alp_gpio_open(EVK_PWM_LED_RED, ALP_GPIO_OUTPUT);
+```
+
+For peripheral use (UART / SPI / I²C / PWM / …) the
+`alp_<class>_open()` call muxes the pads to the right function
+automatically; the app doesn't say "TX is output" by hand.
+
+The reason direction stays in the firmware: the same pad can
+have multiple legitimate directions in different apps.  The
+drone-autopilot uses `E1M_PWM3` as a PWM output driving an ESC
+channel; gpio-button-led uses the same pad as a GPIO output
+driving the red status LED.
 
 ### `cores.<id>.os` (per-core runtime)
 

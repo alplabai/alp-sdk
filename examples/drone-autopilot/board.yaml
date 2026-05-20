@@ -23,9 +23,9 @@ preset: e1m-evk             # External sensors plugged into the EVK's
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
-  - E1M_I2C0
-  - E1M_UART0
-  - E1M_PWM0
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
+  - { e1m: E1M_UART0, macro: EVK_UART_PORT_DEBUG, doc: "Console UART exposed on the JTAG/SWD-side debug header" }
+  - { e1m: E1M_PWM0, macro: EVK_PWM_LED_GREEN, doc: "RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B)" }
 
 # Flight controller on M55-HP only.  A32 cluster off (no Linux on a
 # weight-sensitive vehicle); M55-HE inherits the SoM topology

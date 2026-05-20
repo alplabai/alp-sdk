@@ -23,7 +23,7 @@ preset: e1m-evk             # EVK preset populates the LSM6DSO at
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
-  - E1M_I2C0
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
 
 # Single-OS app: M55-HP owns the sample loop + NPU dispatch.  Skip the
 # A32 cluster (this is a battery-powered always-on demo) and keep
