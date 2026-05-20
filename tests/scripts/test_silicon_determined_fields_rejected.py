@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Regression tests for commit a3cd4fd "schema: silicon-determined
-fields out of board.yaml v2".
+fields out of board.yaml".
 
 Locks in the post-cleanup schema behaviour:
 

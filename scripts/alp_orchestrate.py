@@ -3,7 +3,7 @@
 """
 ALP heterogeneous-OS build orchestrator (Phase 2 of the 2026-05-15 design).
 
-A board.yaml v2 declares per-core runtimes; this module loads the
+A board.yaml declares per-core runtimes; this module loads the
 project, resolves topology defaults from the SoM preset, allocates
 IPC carve-outs from the SoM's memory_map, and fans out into one
 build slice per non-`off` core.
@@ -217,7 +217,7 @@ class ResolvedCarveOut:
 
 @dataclass
 class BoardProject:
-    """Resolved board.yaml v2 project ready for fan-out."""
+    """Resolved board.yaml project ready for fan-out."""
 
     sku: str
     hw_rev: Optional[str]
@@ -622,7 +622,7 @@ def load_board_yaml(path: Path, *,
         # macros aliasing it (e.g. E1M_PWM1 maps to EVK_PWM_LED_BLUE
         # AND EVK_ARD_PWM1 on the EVK).
         macros_by_pad: dict[str, set[str]] = {}
-        for section in ("gpio", "buses", "pwm"):
+        for section in ("gpio", "buses", "pwm", "adc", "dac", "i2s", "can", "qenc"):
             for entry in (routes.get(section) or []):
                 e1m = entry.get("e1m")
                 macro = entry.get("macro")
@@ -1898,7 +1898,7 @@ def _resolve_app_path(app: str) -> Path:
 def main(argv: Optional[Iterable[str]] = None) -> int:
     import argparse
     parser = argparse.ArgumentParser(
-        description="Fan-out orchestrator for board.yaml v2.")
+        description="Fan-out orchestrator for board.yaml.")
     parser.add_argument("--input", type=Path, default=Path("board.yaml"),
                         help="Path to the project's board.yaml.")
     parser.add_argument("--build-root", type=Path,

@@ -62,8 +62,8 @@ class TestLoaderContract(unittest.TestCase):
                                 msg=f"{emit}: empty output")
 
     def test_minimum_viable_board_yaml(self) -> None:
-        """A board.yaml with just schema_version + som + a single core
-        should be accepted (board is optional in the schema)."""
+        """A board.yaml with just `som:` + a single core should be
+        accepted (board declaration is optional in the schema)."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
@@ -80,11 +80,10 @@ class TestLoaderContract(unittest.TestCase):
 
     def test_bad_sku_pattern_fails_schema(self) -> None:
         """The schema enforces the E1M-(AEN|V2N|V2M|NX9)... SKU pattern;
-        an arbitrary string must fail v2 schema validation with a
-        non-zero exit.  v2 inputs route through the orchestrator
-        loader, which surfaces schema violations via OrchestratorError;
-        the test accepts either the v1-style 'schema violation' or the
-        v2 'schema validation failed' phrasing."""
+        an arbitrary string must fail schema validation with a non-zero
+        exit.  The loader surfaces schema violations via
+        OrchestratorError ('schema validation failed' or
+        'does not match' in the message)."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
@@ -96,7 +95,7 @@ class TestLoaderContract(unittest.TestCase):
             """)
             # Pick an emit mode that hits the v2 loader (schema validation
             # is part of load_board_yaml).  system-manifest is the
-            # cheapest v2-only emit.
+            # cheapest non-Kconfig emit.
             rv = _run_loader(input_path=path, emit="system-manifest")
             self.assertNotEqual(rv.returncode, 0)
             lower = rv.stderr.lower()
@@ -743,7 +742,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
     # --- Schema-level rejection of inference.backend ------------------
 
     def test_inference_backend_field_rejected_by_schema(self) -> None:
-        """board.yaml v2 cannot declare `inference.backend` -- silicon
+        """board.yaml cannot declare `inference.backend` -- silicon
         capability is not a project-level choice.  Schema's
         additionalProperties: false rejects the unknown property at
         validation time."""

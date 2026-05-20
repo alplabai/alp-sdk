@@ -49,7 +49,7 @@ extern "C" {
 #define EVK_PIN_PCIE_MUX_SEL   E1M_GPIO_IO23  /**< Selects M-key vs E-key routing on the PCIe lane muxes. */
 
 /* ------------------------------------------------------------------ */
-/* Bus assignments (E1M peripheral instance -> board role) */
+/* Bus assignments (E1M_I2C / I3C / SPI / UART -> board role) */
 /* ------------------------------------------------------------------ */
 
 #define EVK_I2C_BUS_SENSORS   E1M_I2C0  /**< Shared sensor + IO-expander + INA236 bus. */

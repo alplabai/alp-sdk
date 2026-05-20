@@ -45,8 +45,13 @@ OUT_DIR = REPO / "include" / "alp" / "boards"
 
 _SECTIONS: list[tuple[str, str]] = [
     ("gpio",  "GPIO routes (E1M_GPIO_IO<N> -> board-side feature)"),
-    ("buses", "Bus assignments (E1M peripheral instance -> board role)"),
+    ("buses", "Bus assignments (E1M_I2C / I3C / SPI / UART -> board role)"),
     ("pwm",   "PWM channels (E1M_PWM<N> -> board-side feature)"),
+    ("adc",   "ADC channels (E1M_ADC<N> -> board-side signal)"),
+    ("dac",   "DAC channels (E1M_DAC<N> -> board-side signal)"),
+    ("i2s",   "I2S instances (E1M_I2S<N> -> board-side codec / mic role)"),
+    ("can",   "CAN buses (E1M_CAN<N> -> board-side bus role)"),
+    ("qenc",  "Quadrature encoder channels (E1M_QENC<N> -> board-side encoder)"),
 ]
 
 

@@ -5,7 +5,7 @@
  * rpmsg-imx93 -- Cortex-M33 / Zephyr producer.
  *
  * Sister slice to ../../linux/src/main.c on the same i.MX93 silicon.
- * Both halves are generated from one board.yaml v2 and share the
+ * Both halves are generated from one board.yaml and share the
  * auto-generated <alp/system_ipc.h> contract: same channel name,
  * same endpoint ids, same mailbox channel.  No address or id is
  * ever typed by hand -- the orchestrator computes everything from

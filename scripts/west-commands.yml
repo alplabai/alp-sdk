@@ -14,7 +14,7 @@ west-commands:
     commands:
       - name: alp-build
         class: AlpBuild
-        help: Fan out a board.yaml v2 project into per-core build slices
+        help: Fan out a board.yaml project into per-core build slices
   - file: scripts/west_commands/alp_image.py
     commands:
       - name: alp-image

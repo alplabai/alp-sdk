@@ -8,7 +8,7 @@
  * @brief ALP SDK framed RPC over OpenAMP / RPMsg.
  *
  * v0.6 deliverable -- this header is the high-level surface customers
- * call from per-core app slices in a heterogeneous board.yaml v2
+ * call from per-core app slices in a heterogeneous board.yaml
  * project.  It sits on top of the lower-level primitives in
  * `<alp/mproc.h>` (mailbox + shared memory + hardware semaphore) and
  * the build-time-generated carve-out + endpoint-id macros in
