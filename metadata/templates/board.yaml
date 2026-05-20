@@ -172,6 +172,29 @@ e1m_routes:
 #     name: alp_default_rpmsg
 
 # -------------------------------------------------------------------
+# Flash / persistent storage partitions (optional)
+# -------------------------------------------------------------------
+# Each entry declares one fixed partition on the referenced flash
+# device.  The orchestrator allocates offsets bottom-up within the
+# device (name-sorted, page-aligned to 4 KiB) for byte-stable layouts
+# across rebuilds -- supply `offset_kib:` to override the allocator.
+#
+# `flash_device:` references either a SoM `memory_map:` region (e.g.
+# mram_main on AEN) or an `on_module.ospi_memories:` key (e.g. ospi0
+# when the SoM ships with external OSPI flash).  The orchestrator
+# emits a partial DTS overlay (the `partitions { ... }` node under
+# `&<dt_label>`) plus the matching Kconfig (FILE_SYSTEM_LITTLEFS /
+# FAT_FILESYSTEM_ELM / ...).
+#
+# storage:
+#   - { name: settings, size_kib: 64,  fs: littlefs, mount: /lfs/settings,
+#       flash_device: mram_main }
+#   - { name: app_data, size_kib: 128, fs: littlefs, mount: /lfs/app,
+#       flash_device: mram_main }
+#   - { name: mcuboot_scratch, size_kib: 32, fs: raw,
+#       flash_device: mram_main }
+
+# -------------------------------------------------------------------
 # Project-declared chips (beyond the board's `populated:` table)
 # -------------------------------------------------------------------
 # Chip drivers the application links directly via <alp/chips/<name>.h>

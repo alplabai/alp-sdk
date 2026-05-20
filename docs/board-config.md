@@ -966,15 +966,69 @@ See `docs/ota.md` + `docs/ota-device-contract.md`.
 
 ```yaml
 storage:
-  - { name: settings,    fs: littlefs, size_kib: 64,  mount: /lfs, flash_device: mram_main }
-  - { name: ota_slot_a,  fs: raw,      size_kib: 512,              flash_device: mram_main }
+  - { name: settings,        fs: littlefs, size_kib: 64,  mount: /lfs/settings,
+      flash_device: mram_main }
+  - { name: app_data,        fs: littlefs, size_kib: 128, mount: /lfs/app,
+      flash_device: mram_main }
+  - { name: mcuboot_scratch, fs: raw,      size_kib: 32,
+      flash_device: mram_main }
+  - { name: pinned_low,      fs: raw,      size_kib: 32,
+      flash_device: mram_main, offset_kib: 0 }    # explicit offset override
 ```
 
-Project-wide.  Each entry declares a partition; the loader
-validates `flash_device:` against the SoM preset's `memory_map:` /
-`on_module.ospi_memories:`.  The DTS-overlay emitter materialises
-the `partitions { ... }` node + per-fs Kconfig in v0.6 (schema is
-authoritative now, generator integration is the in-flight piece).
+Project-wide.  Each entry declares a fixed partition on the
+referenced flash device.  Partitions on the same device are
+**name-sorted** and allocated **bottom-up, page-aligned to 4 KiB**
+so layouts stay byte-stable across rebuilds (the address determinism
+property OTA images depend on).  Supply `offset_kib:` to pin an
+entry to an explicit offset within the device -- useful for
+coexistence with bootloader-managed slots or when migrating a
+legacy layout.
+
+`flash_device:` resolves against the SoM preset in this order:
+
+1. `memory_map:` region names (e.g. `mram_main`, `ocram_low`) --
+   either declared on the SoM or auto-derived from the SoC variant's
+   `mram_mb` / `sram_banks_kb` (the same resolution `resolve_memory_map()`
+   does for IPC carve-outs).
+2. `on_module.ospi_memories:` keys (e.g. `ospi0`) -- external OSPI
+   flash declared on the SoM.
+
+The loader rejects typoed `flash_device:` references at parse time
+with the list of known devices for the project's SoM.  When the
+referenced device's size is `TBD` (HW-config still owed), the
+resolver projects the entry as `status: blocked` in the generated
+manifest with a reason that points at the SoM file owing the value.
+
+The orchestrator emits two artefacts per project:
+
+* `dts-partitions.dtsi` -- a DTS overlay that decorates each
+  referenced flash device with a `partitions { compatible =
+  "fixed-partitions"; ... };` child node carrying every resolved
+  partition's `label`, `reg`, and DT phandle (`<name>_partition`).
+  Materialised under `build/generated/` alongside
+  `dts-reservations.dtsi` (IPC).
+* Per-fs Kconfig in each Zephyr slice's `alp.conf`:
+  `CONFIG_FILE_SYSTEM=y`, plus `CONFIG_FILE_SYSTEM_LITTLEFS=y` /
+  `CONFIG_FAT_FILESYSTEM_ELM=y` / `CONFIG_FILE_SYSTEM_EXT2=y`
+  per the `fs:` enum, plus `CONFIG_FS_LITTLEFS_PARTITION_<NAME>=y`
+  per littlefs entry.
+
+An optional static C mount table (`--emit storage-mounts-c`)
+generates a `fs_mount_t` per entry with a `mount:` declared, plus an
+aggregate `alp_storage_mounts[]` array for boot-time iteration.
+
+Inspect the resolved layout with:
+
+```bash
+python3 scripts/alp_orchestrate.py --input board.yaml --emit dts-partitions
+python3 scripts/alp_orchestrate.py --input board.yaml --emit system-manifest \
+    | yq '.storage[]'
+```
+
+The `system-manifest.yaml` carries every resolved partition's
+`offset_kib`, `size_kib`, `dt_label`, `mount`, and (when blocked)
+`reason:` so reviewers see the full flash map alongside IPC carve-outs.
 
 ### PSA Crypto + TF-M (`security.psa:`)
 

@@ -218,6 +218,11 @@
         "cacheable": {
           "type": "boolean",
           "description": "When true the region is cacheable from all `accessible_from` cores.  Default carve-out is non-cacheable."
+        },
+        "dt_label": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Optional Zephyr Devicetree label for this region.  Used by the storage emitter when board.yaml `storage:` entries reference this region as their `flash_device:`; the emitted overlay decorates `&<dt_label>` with a `partitions { ... }` child node.  Defaults to the region `name` when omitted."
         }
       }
     },

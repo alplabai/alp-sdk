@@ -7,6 +7,71 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — `storage:` block: deterministic flash-partition allocator + DTS/Kconfig emit (2026-05-20)
+
+Closes the first v0.6 schema-only gap: `storage:` lands its real
+emit pipeline so the schema-authoritative partitions become
+build-system artefacts.
+
+- **New resolver** `resolve_storage_partitions()` in
+  `scripts/alp_orchestrate.py` allocates physical offsets for every
+  `storage[]` entry, name-sorted and page-aligned to 4 KiB within
+  each `flash_device:`.  Mirrors the IPC carve-out pattern: blocked
+  entries (TBD capacity, unknown device, page-misaligned offset,
+  sibling overlap) land in `system-manifest.yaml` with `status:
+  blocked` + `reason:` so reviewers see the gap.  Byte-stable
+  allocation across rebuilds (per resolved design Q on storage
+  address determinism — "pin in orchestrator").
+- **Schema additive:** new optional `storage[].offset_kib:` (integer,
+  4 KiB-aligned) — explicit offset override for partitions that need
+  to coexist with bootloader-managed slots or migrate a legacy
+  layout.  When supplied, the allocator does NOT shift its
+  high-water mark, so the bump-allocated siblings stay byte-stable.
+  Also new optional `memory_region.dt_label:` on the SoM preset
+  schema for regions whose Zephyr DT label differs from the SDK
+  name (defaults to the region `name`).
+- **New emitters:**
+  - `emit_dts_partitions(project)` → `dts-partitions.dtsi` (a
+    DTS overlay decorating `&<dt_label>` with a `partitions
+    { compatible = "fixed-partitions"; ... }` child node carrying
+    `label = "<name>";` and `reg = <offset size>;` per partition).
+    Apps reach partitions via Zephyr's
+    `FIXED_PARTITION_ID(<name>_partition)`.
+  - `emit_storage_mounts_c(project)` → optional static
+    `fs_mount_t alp_storage_mounts[]` table for boot-time iteration.
+    Per-fs declarations (`FS_LITTLEFS_DECLARE_DEFAULT_CONFIG`,
+    `FATFS`, `FS_EXT2`) emitted under `/* clang-format off */`.
+  - Per-fs Kconfig in `_slice_alp_conf()`: `CONFIG_FILE_SYSTEM=y`
+    plus the matching `CONFIG_FILE_SYSTEM_LITTLEFS=y` /
+    `CONFIG_FAT_FILESYSTEM_ELM=y` / `CONFIG_FILE_SYSTEM_EXT2=y`
+    + per-littlefs partition `CONFIG_FS_LITTLEFS_PARTITION_<NAME>=y`.
+- **CLI:** `python3 scripts/alp_orchestrate.py --emit dts-partitions
+  | storage-mounts-c` — two new emit modes for inspecting the
+  resolved layout.  `Orchestrator._materialise_shared()` now writes
+  `build/generated/dts-partitions.dtsi` alongside the existing
+  `dts-reservations.dtsi`.
+- **Cross-field validation:** `load_board_yaml()` rejects typoed
+  `flash_device:` references at parse time with the list of known
+  devices for the project's SoM (memory_map regions + ospi keys);
+  duplicate partition names within `storage:` error eagerly.
+- **System manifest:** `storage:` round-trips through
+  `build/system-manifest.yaml` carrying every resolved partition's
+  `offset_kib`, `size_kib`, `dt_label`, `mount`, and (when blocked)
+  `reason:`.
+- **Tests:** 14 new cases under
+  `tests/scripts/test_alp_orchestrate.py` covering: happy-path
+  allocation, unknown / duplicate / page-misaligned / overflow /
+  overlap blocking, byte-stable determinism, explicit `offset_kib:`
+  override, DTS shape, Kconfig fragment, C mount table, manifest
+  round-trip, and AEN301 OSPI TBD-capacity blocking.  Total
+  orchestrator suite: 28 → 42 cases.
+- **Docs:** `docs/board-config.md` storage section rewritten with
+  the full v0.6 contract (allocator semantics, emit artefacts,
+  inspection commands).  Tutorial 09 (`board.yaml deep dive`) gains
+  a `storage:` block walkthrough with a worked allocation table.
+  Template at `metadata/templates/board.yaml` carries an annotated
+  storage example.
+
 ### Changed — board.yaml flatten + carrier→board rename + 7 declarative blocks (2026-05-20)
 
 **Breaking schema changes (no migration script — every in-repo
