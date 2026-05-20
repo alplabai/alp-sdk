@@ -300,7 +300,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 
 ### Dev tooling
 
-- **`board.yaml` project config** — single source of truth: SoM SKU, board, OS, inference backend, libraries, peripherals, IoT toggles, diagnostics, `hw_rev`
+- **`board.yaml` project config** — single source of truth, covering: board identity (`name` / `description` / `hw_rev`, or `preset:` for the EVKs), SoM SKU + `hw_rev`, per-core runtime + app + peripherals + libraries + inference + iot + `memory` (stack/heap) + `power` (sleep/wakeup), board-side `populated:` chip list + `e1m_routes:` pad-to-macro routing (8 sections: gpio/buses/pwm/adc/dac/i2s/can/qenc, with `active_low` / `pull` / `debounce_ms`), used-pad subset `pins:`, cross-core `ipc:`, `boot:` (MCUboot config → sysbuild overlay), `ota:` (Mender config → Yocto local.conf), `storage:` (flash partitions), `security.psa:` (TF-M + persistent key slots), and `diagnostics:` with per-module log-level overrides
 - **`scripts/alp_project.py`** — emits Zephyr Kconfig fragments, plain-CMake `-D` flags, Yocto `local.conf` snippets, DTS overlays, or the `<alp_hw_info_build.h>` companion header
 - **`scripts/validate_board_yaml.py`** — customer-side linter (exit 0 / 1 schema / 2 missing-preset / 3 hw_rev incompatible)
 - **`scripts/program_eeprom.py`** — packs board.yaml + serial + mfg date into the 128-byte EEPROM manifest for production-test programming
