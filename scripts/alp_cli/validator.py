@@ -22,6 +22,10 @@ from alp_cli.yaml_pos import load_with_positions, node_position
 REPO = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = REPO / "metadata" / "schemas" / "board.schema.json"
 
+METADATA = REPO / "metadata"
+SOM_DIR = METADATA / "e1m_modules"
+PRESET_DIR = METADATA / "boards"
+
 
 def _load_schema() -> dict[str, Any]:
     return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -50,8 +54,76 @@ def validate_board_yaml(path: Path) -> DiagnosticCollector:
 
     schema = _load_schema()
     _schema_pass(data, schema, path, collector)
-    # xref + compat passes added in subsequent tasks.
+    _xref_pass(data, path, collector)
+    # compat pass added in 1.4.
     return collector
+
+
+def _xref_pass(
+    data: dict[str, Any], path: Path, collector: DiagnosticCollector
+) -> None:
+    som = data.get("som") or {}
+    sku = som.get("sku")
+    if isinstance(sku, str):
+        if not _sku_resolves(sku):
+            line, col = node_position(som, "sku", target="value")
+            collector.add(
+                Diagnostic(
+                    severity="error",
+                    path=path,
+                    line=line,
+                    col=col,
+                    span=len(sku),
+                    code="ALP-B005",
+                    message=f"SoM SKU '{sku}' does not resolve to a known module",
+                    hint=_sku_suggestion(sku),
+                )
+            )
+
+    preset = data.get("preset")
+    if isinstance(preset, str):
+        if not (PRESET_DIR / f"{preset}.yaml").is_file():
+            line, col = node_position(data, "preset", target="value")
+            collector.add(
+                Diagnostic(
+                    severity="error",
+                    path=path,
+                    line=line,
+                    col=col,
+                    span=len(preset),
+                    code="ALP-B006",
+                    message=f"board preset '{preset}' does not exist",
+                    hint=_preset_suggestion(preset),
+                )
+            )
+
+
+def _sku_resolves(sku: str) -> bool:
+    for _candidate in SOM_DIR.rglob(f"{sku}.yaml"):
+        return True
+    return False
+
+
+def _all_skus() -> list[str]:
+    return sorted(p.stem for p in SOM_DIR.rglob("*.yaml") if p.stem.startswith("E1M-"))
+
+
+def _all_presets() -> list[str]:
+    return sorted(p.stem for p in PRESET_DIR.glob("*.yaml"))
+
+
+def _sku_suggestion(sku: str) -> str | None:
+    from difflib import get_close_matches
+
+    match = get_close_matches(sku, _all_skus(), n=1)
+    return f"did you mean '{match[0]}'?" if match else None
+
+
+def _preset_suggestion(preset: str) -> str | None:
+    from difflib import get_close_matches
+
+    match = get_close_matches(preset, _all_presets(), n=1)
+    return f"did you mean '{match[0]}'?" if match else None
 
 
 def _schema_pass(

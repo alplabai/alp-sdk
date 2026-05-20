@@ -39,3 +39,13 @@ def test_bad_enum_emits_ALP_B003():
 def test_wrong_type_emits_ALP_B004():
     c = validate_board_yaml(FIX_BAD / "ALP-B004-wrong-type.yaml")
     assert "ALP-B004" in _codes(c)
+
+
+def test_bad_sku_emits_ALP_B005():
+    c = validate_board_yaml(FIX_BAD / "ALP-B005-bad-sku.yaml")
+    assert "ALP-B005" in _codes(c)
+
+
+def test_bad_preset_emits_ALP_B006():
+    c = validate_board_yaml(FIX_BAD / "ALP-B006-bad-preset.yaml")
+    assert "ALP-B006" in _codes(c)
