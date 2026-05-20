@@ -7,6 +7,60 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — per-library HW-backend profile coverage (25 profiles) (2026-05-20)
+
+**Priority 2.2 of the v0.6 milestone lands as a regression guard.**
+All 25 libraries enumerated in `cores.<id>.libraries:` in
+`metadata/schemas/board.schema.json` already ship a
+`metadata/library-profiles/<libname>/hw-backends.yaml` table
+declaring their per-class accelerator binding (crypto, gpu_2d, dma,
+simd, cordic, fft, ml_npu_primary, ...) against the SoM
+preset's `capabilities:` matrix.  Audit revealed full coverage; the
+gap was test-side -- no regression test enforced that the schema
+enum and the on-disk profile set stay in lock-step.
+
+- New `tests/scripts/test_library_profiles.py` (77 parametrised
+  cases) enforces four invariants:
+  1. **Coverage** — every library in the schema enum has a matching
+     `hw-backends.yaml`; every shipped profile directory maps back
+     to an enum entry (no orphans).  The single `cmsis_dsp` →
+     `cmsis-dsp` directory rename is accommodated explicitly,
+     mirroring `_LIBRARY_WEST_MODULES` in `scripts/alp_project.py`.
+  2. **Shape** — each profile carries the required top-level fields
+     (`schema_version`, `library`, `class`, `accelerators`,
+     `sw_fallback`, `verification`) and the `library:` slug matches
+     the directory's normalised name.
+  3. **Binding axis** — each profile surfaces at least one of an
+     `accelerators[]` entry, a `sw_fallback.kconfig:` knob, or a
+     `verification:` block.  Empty profiles are rejected.
+  4. **Kconfig well-formedness** — every emitted `kconfig:` line is
+     a real-looking `CONFIG_<NAME>=<value>` token (y / n / m /
+     quoted string / integer / hex) OR a comment-only sentinel
+     (`# foo: ...`) for header-only libraries.  We intentionally do
+     NOT verify that each symbol exists in Zephyr's Kconfig tree
+     — that's a build-time concern that depends on the pinned
+     Zephyr version.
+
+- `docs/recommended-libraries.md` grows a "HW-backend profiles
+  (per-library accelerator binding)" subsection summarising the
+  coverage matrix (crypto / ML / DSP / FS / graphics / sensor-fusion
+  / industrial / IoT / audio / header-only / test) and pointing at
+  the new regression test.
+
+The 18 libraries carrying at least one `requires_cap:`-gated
+accelerator entry today (every SoM-relevant library): `bearssl`,
+`cmsis_dsp`, `coremqtt_sn`, `gfx_compat`, `libcoap`, `libhelix`,
+`libwebsockets`, `littlefs`, `lvgl`, `madgwick_ahrs`, `mbedtls`,
+`minimp3`, `modbus`, `opus`, `pid`, `tflite_micro`, `tinygsm`,
+`u8g2`.  The remaining 7 (`etl`, `fmt`, `nlohmann_json`, `doctest`,
+`catch2`, `jsmn`, `nanopb`) declare an empty `accelerators:` list —
+their value lives in the pure-SW path with no accelerator class
+to bind.
+
+No source / loader / data changes outside the test + docs +
+CHANGELOG.  Existing 402-test suite still green (now 479 with the
+77 new parametrised cases).
+
 ### Changed — board.yaml flatten + carrier→board rename + 7 declarative blocks (2026-05-20)
 
 **Breaking schema changes (no migration script — every in-repo
