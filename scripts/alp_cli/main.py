@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from alp_cli import __version__
+from alp_cli.validate import validate_cmd
 
 
 @click.group(help="ALP SDK command-line interface.")
@@ -23,9 +24,7 @@ def run() -> None:
     click.echo("run: not yet implemented")
 
 
-@cli.command(help="(stub) Validate board.yaml.")
-def validate() -> None:
-    click.echo("validate: not yet implemented")
+cli.add_command(validate_cmd)
 
 
 if __name__ == "__main__":
