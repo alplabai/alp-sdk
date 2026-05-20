@@ -117,7 +117,14 @@ def _schema_error_to_diagnostic(
         )
 
     if err.validator == "additionalProperties":
-        bad_key = abs_path[-1] if abs_path else "?"
+        if abs_path:
+            bad_key = abs_path[-1]
+        else:
+            # jsonschema reports additionalProperties errors at the parent level;
+            # the offending key is embedded in the message text.
+            import re as _re
+            _m = _re.search(r"'([^']+)'", err.message)
+            bad_key = _m.group(1) if _m else "?"
         if parent and "__keys__" in parent and bad_key in parent["__keys__"]:
             line, col = node_position(parent, bad_key, target="key")
             span = len(str(bad_key))
