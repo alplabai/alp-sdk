@@ -60,7 +60,7 @@ except ImportError:
     import yaml
     import jsonschema
 
-    SCHEMA_PATH = REPO / "metadata" / "schemas" / "board-config-v2.schema.json"
+    SCHEMA_PATH = REPO / "metadata" / "schemas" / "board.schema.json"
     import json
     SCHEMA = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 

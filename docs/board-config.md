@@ -50,15 +50,18 @@ Released MPNs the SDK ships SoM presets for (look under
 | RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                       |
 | NXP i.MX 93       | `E1M-NX9101` (production MPN TBD pending HW config)                          |
 
-Stock boards (paste into the `preset:` (or use an inline board)):
+Stock board presets (paste into `preset:`):
 
-| Board name  | Form factor   | Hosts                                  |
-|---------------|---------------|----------------------------------------|
-| `E1M-EVK`     | 35×35 board | E1M-AEN family, future E1M-N93 family  |
-| `E1M-X-EVK`   | 45×65 board | E1M-X V2N family, V2N-M1 family        |
+| Preset       | Form factor | Hosts                                  |
+|--------------|-------------|----------------------------------------|
+| `e1m-evk`    | 35×35       | E1M-AEN family, future E1M-N93 family  |
+| `e1m-x-evk`  | 45×65       | E1M-X V2N family, V2N-M1 family        |
 
-For custom board boards, the EVK preset works as the reference
-design customers fork -- see "Board" section below.
+`preset:` is the SDK-internal shortcut the demos use.  For a
+**custom board** (your own PCB design), drop the `preset:` line
+and write the board out inline at the top level (`name:`,
+`populated:`, `e1m_routes:`) -- see the "Board declaration"
+section below.
 
 ---
 
@@ -166,13 +169,22 @@ Top-level fields:
 
 | Field            | Required | What it picks                                                 |
 |------------------|----------|---------------------------------------------------------------|
-| `name`           | inline*  | Board name (when not using `preset:`).                          |
+| `name`           | inline*  | Board name; required in inline mode, forbidden when using `preset:`. |
+| `description`    | no       | Free-form one-line board description.                         |
+| `hw_rev`         | no       | Board hardware revision.  Defaults to the preset's `default_hw_rev` (preset mode) or unrevisioned (inline mode). |
 | `som`            | yes      | SoM SKU (+ optional `hw_rev`).  Silicon-level facts (memory, on-module components, NPU capabilities) live in the SKU preset and are NOT customer-tunable here. |
-| `board`        | no       | Board name + chip-population deltas vs the board preset.  |
+| `preset`         | preset*  | SDK-internal: pulls a shared board definition from `metadata/boards/<preset>.yaml`.  Mutually exclusive with inline `populated:` / `e1m_routes:`. |
+| `populated`      | inline*  | Chips populated on this board.  Each `true` → `CONFIG_ALP_SDK_{CHIP,BLOCK}_<name>=y`.  Mutually exclusive with `preset:`. |
+| `e1m_routes`     | inline*  | E1M-pad → board-side macro routing.  Read by `gen_board_header.py` → `include/alp/boards/alp_<name>_routes.h`.  Mutually exclusive with `preset:`. |
+| `pins`           | no       | Optional array naming the E1M pads the project actively uses.  Validated against the resolved board's `e1m_routes:`. |
 | `cores`          | yes      | Per-core app + library/peripheral knobs.  Each core's `os:` is optional; the SoM topology supplies the natural runtime per core class (Cortex-M → Zephyr, Cortex-A → Yocto). |
 | `ipc`            | no       | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only). |
 | `chips`          | no       | Project-level chip drivers beyond what the board ships.     |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
+
+*Either `preset:` (preset mode) or inline `name:` + `populated:` +
+`e1m_routes:` (customer path).  Both omitted is also fine -- a
+headless / inference-only build with no board declaration.
 
 Per-core fields under `cores.<id>` (all optional, all inherit from
 the SoM preset's `topology.<id>` when omitted):
@@ -290,119 +302,122 @@ Customers don't touch this field -- it is Alp-set on the released
 preset; consumer's `board.yaml` references the SoM by `som.sku:`
 only and the variant is resolved automatically.
 
-### `board` block
+### Board declaration
+
+The board the firmware targets is declared at the **top level**
+of `board.yaml` in one of two mutually-exclusive modes.
+
+#### Inline mode (the customer path)
+
+Self-contained -- write your board's chip population + E1M-pad
+wiring directly in your project's `board.yaml`:
 
 ```yaml
-board:
-  name: E1M-EVK             # stock preset, or any unique name for a custom board
+name: my-sensor-board       # required; used in alp_<name>_routes.h
+description: "..."          # optional
+hw_rev: r1                  # optional board hardware revision
 
-  hw_rev: r1                # optional -- defaults to the board preset's
-                             # `default_hw_rev`.  Same enforcement rules as
-                             # `som.hw_rev`; the runtime read happens on a
-                             # board-side BOARD_ID ADC + divider.
+populated:                  # chips populated on this board
+  lsm6dso: true
+  bmi323:  true
+  bmp581:  true
+  ssd1306: true
 
-  populated:                # delta vs the board preset's defaults
-    lsm6dso: false          # DNI'd on this custom assembly
-    tas2563: false          # no speaker amps populated
+e1m_routes:                 # E1M-pad -> board-side macro
+  gpio:
+    - { e1m: E1M_GPIO_IO15, macro: PIN_BMI323_INT1,
+        doc: "BMI323 INT1 (data-ready / motion / FIFO)." }
+  buses:
+    - { e1m: E1M_I2C0, macro: I2C_BUS_SENSORS,
+        doc: "Shared sensor bus." }
+  pwm:
+    - { e1m: E1M_PWM3, macro: PWM_LED_RED,
+        doc: "Status LED red channel." }
 ```
 
-When the loader resolves the file, each `populated.<name>: true`
-becomes `CONFIG_ALP_SDK_CHIP_<NAME>=y` in the generated Kconfig
-fragment -- enabling the corresponding chip driver in
-`chips/<name>/` without you having to touch a separate config
-file.  SDK-level *block* helpers (`button_led`, `pdm_mic`) emit
-`CONFIG_ALP_SDK_BLOCK_<NAME>=y` instead -- the loader picks the
-correct symbol per slug; the `board.yaml` syntax is identical
-either way.  See `blocks/README.md` for the block-vs-chip
-distinction.
+Each `populated.<name>: true` enables the matching
+`CONFIG_ALP_SDK_CHIP_<NAME>=y` (or
+`CONFIG_ALP_SDK_BLOCK_<NAME>=y` for the SDK-level helpers
+`button_led` / `pdm_mic` -- the loader picks the right symbol per
+slug).  See `blocks/README.md` for the block-vs-chip distinction.
 
-#### Board-side pin routing (`e1m_routes:`)
-
-The board preset's `e1m_routes:` block is the single editable
-source of truth for the board-side macros hand-written firmware
-uses (`EVK_PIN_BMI323_INT1`, `EVK_I2C_BUS_SENSORS`,
-`EVK_PWM_LED_RED`, ...).  Each entry binds an E1M-standard pad
-or peripheral instance (`E1M_GPIO_IO<N>`, `E1M_PWM<N>`,
-`E1M_I2C<N>` / `E1M_SPI<N>` / `E1M_UART<N>` / `E1M_I3C<N>`) to
-its board-side `EVK_*` macro name plus optional `doc:` /
-`active_low:` / `routes_via:` flags:
-
-```yaml
-    e1m_routes:
-      gpio:
-        - { e1m: E1M_GPIO_IO15, macro: EVK_PIN_BMI323_INT1, routes_via: cc3501e,
-            doc: "BMI323 INT1 (data-ready / motion / FIFO); CC3501E GPIO14." }
-      buses:
-        - { e1m: E1M_I2C0,      macro: EVK_I2C_BUS_SENSORS,
-            doc: "Shared sensor + IO-expander + INA236 bus." }
-      pwm:
-        - { e1m: E1M_PWM3,      macro: EVK_PWM_LED_RED,
-            doc: "RGB LED red channel." }
-```
-
+The `e1m_routes:` block is the single editable source of truth
+for the board-side C macros hand-written firmware uses
+(`PIN_BMI323_INT1`, `I2C_BUS_SENSORS`, `PWM_LED_RED`, …).  Each
+entry binds an E1M-standard pad or peripheral instance
+(`E1M_GPIO_IO<N>`, `E1M_PWM<N>`, `E1M_I2C<N>` / `E1M_SPI<N>` /
+`E1M_UART<N>` / `E1M_I3C<N>`) to a board-side macro plus optional
+`doc:` / `active_low:` / `routes_via:` flags.
 [`scripts/gen_board_header.py`](../scripts/gen_board_header.py)
-reads the block and emits
-`include/alp/boards/alp_<board>_routes.h` with one
-`#define EVK_<NAME> E1M_<...>` line per entry (`active_low:`
-becomes a Doxygen note, `routes_via: cc3501e` annotates the
-CC3501E hop).  The generator is idempotent; CI regenerates on
-every PR touching the board YAML and fails if the working tree
-diff is non-empty.
+reads the block and emits `include/alp/boards/alp_<name>_routes.h`
+with one `#define <MACRO> E1M_<…>` line per entry.
 
-The hand-authored `include/alp/boards/alp_<board>.h`
-(`alp_e1m_evk.h` for the stock EVK) now `#include`s the
-generated routes header -- existing firmware that references
-`EVK_PIN_BMI323_INT1`, `EVK_I2C_BUS_SENSORS`, etc. compiles
-unchanged.  The remaining sections of `alp_e1m_evk.h` (mux enums,
-INA236 tuning constants, overlay-pad indices, on-board I2C
-addresses) stay hand-authored until follow-up slices lift them
-into the YAML too.
+#### Preset mode (SDK-internal shortcut)
+
+The 41 example projects under `examples/` all target the EVK or
+X-EVK, so they share a single board definition each via the
+`preset:` field:
+
+```yaml
+preset: e1m-evk             # or e1m-x-evk
+```
+
+The resolved file lives at `metadata/boards/<preset>.yaml` and
+supplies `name`, `populated`, `e1m_routes`, `default_hw_rev`,
+and `hw_revisions` wholesale.  When `preset:` is set, top-level
+`name:`, `populated:`, `e1m_routes:` are forbidden -- the schema
+rejects mixing.
+
+`preset:` is a shortcut for the SDK's own demos; customer
+projects don't need it -- the inline form keeps your `board.yaml`
+self-contained and grep-able.
+
+#### `pins:` (optional E1M-pad usage list)
+
+```yaml
+pins:
+  - E1M_GPIO_IO15   # BMI323 INT1
+  - E1M_PWM3        # status LED red
+  - E1M_I2C0        # sensor bus
+```
+
+Optional top-level array.  Names the E1M pads the project
+actively uses.  Most useful in preset mode, where the resolved
+board carries the full wiring but readers can't tell which
+subset this firmware touches without diving into the source.
+
+The loader validates each entry against the resolved board's
+`e1m_routes:` block at load time -- typos and pad references
+that don't exist on the board error out clearly.
 
 ### EVK as reference design (custom boards)
 
-The two stock EVK presets aren't just for the dev kit -- they're
-the **canonical reference designs** for customer board boards
-based on Alp SoMs.  Most production boards inherit ~80% of the
-EVK's chip population (it's the validated baseline Alp ships).
-Two ways to consume the reference:
+The stock EVK definitions aren't just for the dev kit -- they're
+the **canonical reference designs** for customer boards based on
+Alp SoMs.  Most production boards inherit ~80% of the EVK's chip
+population (it's the validated baseline Alp ships).
 
-**(a) Reference + override** -- best for small derivatives:
-
-```yaml
-board:
-  name: E1M-EVK             # reference the EVK preset
-  populated:                # only list deltas
-    tas2563: false          # production board has no speaker amps
-    ina236:  false          # no current monitors
-    ssd1306: false          # no on-board display
-```
-
-The loader merges the deltas over the EVK preset's defaults.
-Minimal config, easy to read.
-
-**(b) Fork the board preset** -- best for full custom boards:
+The customer workflow: copy the EVK YAML content into your
+project's `board.yaml` as a starting template, then edit
+`name:`, `populated:`, `e1m_routes:` for your assembly.
 
 ```bash
-# Copy the EVK preset as a starting point.
-cp metadata/boards/e1m-evk.yaml \
-   metadata/boards/my-sensor-board.yaml
-
-# Edit the populated list to reflect your assembly.
-$EDITOR metadata/boards/my-sensor-board.yaml
+# Open the canonical EVK definition.
+less metadata/boards/e1m-evk.yaml
 ```
 
-```yaml
-# In board.yaml:
-board:
-  name: my-sensor-board
-```
+Paste the `name:`, `populated:`, `e1m_routes:` blocks into your
+project's `board.yaml` (alongside the `som:` + `cores:` you
+already have), edit `name:` to your board's name, drop chip rows
+you don't populate, add the rows for chips you do, edit the
+`e1m_routes:` entries to reflect your schematic.  Result: one
+self-contained file describing your project.
 
-A worked example fork lives at
-[`metadata/boards/custom-example.yaml`](../metadata/boards/custom-example.yaml).
-Custom board presets can live in the alp-sdk repo (when the
-board design ships under Alp), or in the consumer's own repo
-(the loader's `--metadata-root` arg accepts an alternate search
-path).
+A worked example of the inline form for a slimmed-down sensor
+board derived from the EVK lives at
+[`metadata/boards/custom-example.yaml`](../metadata/boards/custom-example.yaml)
+-- copy that file's body into your project's `board.yaml` if it's
+closer to your starting point than the full EVK.
 
 ### Stock presets (SDK-shipped)
 
@@ -421,9 +436,9 @@ metadata/
 │   ├── E1M-V2M102.yaml      # V2N-M1 SKU
 │   └── E1M-NX9101.yaml      # i.MX 93 (production MPN TBD pending HW config)
 └── boards/
-    ├── E1M-EVK/board.yaml       # 35x35 EVK (AEN / N93)
-    ├── E1M-X-EVK/board.yaml     # 45x65 EVK (V2N / V2N-M1)
-    └── custom-example/board.yaml # template downstream consumers copy + edit
+    ├── e1m-evk.yaml            # 35x35 EVK (AEN / N93)
+    ├── e1m-x-evk.yaml          # 45x65 EVK (V2N / V2N-M1)
+    └── custom-example.yaml     # template downstream consumers copy + edit
 ```
 
 v0.3 ships the schema + every released MPN's preset (11 SoM SKUs

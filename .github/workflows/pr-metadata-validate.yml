@@ -136,7 +136,7 @@ jobs:
           cat /tmp/alp_hw_info_build.h
           grep -q '#define ALP_HW_BUILD_SOM_SKU' /tmp/alp_hw_info_build.h
           grep -q '#define ALP_HW_BUILD_SOM_HW_REV' /tmp/alp_hw_info_build.h
-          grep -q '#define ALP_HW_BUILD_CARRIER_NAME' /tmp/alp_hw_info_build.h
+          grep -q '#define ALP_HW_BUILD_BOARD_NAME' /tmp/alp_hw_info_build.h
           grep -q '#define ALP_HW_BUILD_OS' /tmp/alp_hw_info_build.h
 
       # The west-libraries path emits a paste-ready west.yml fragment

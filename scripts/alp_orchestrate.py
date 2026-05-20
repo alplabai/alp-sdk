@@ -56,7 +56,7 @@ from alp_project import resolve_memory_map, resolve_capabilities  # noqa: E402
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
 BOARD_SCHEMA = METADATA_ROOT / "schemas" / "board.schema.json"
-CARRIER_SCHEMA = METADATA_ROOT / "schemas" / "board-preset.schema.json"
+BOARD_PRESET_SCHEMA = METADATA_ROOT / "schemas" / "board-preset.schema.json"
 
 
 def _default_os_from_core_type(core_type: str) -> str:

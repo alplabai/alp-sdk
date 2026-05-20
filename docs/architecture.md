@@ -96,7 +96,7 @@ alp-sdk/
 │   ├── alif/                        # Alif HAL bindings (Ensemble)
 │   └── renesas-rzv2n/               # Renesas FSP bindings (RZ/V2N)
 ├── metadata/                        # ALL HW + LIBRARY METADATA — single source of truth
-│   ├── schemas/                     # JSON Schemas (board-config-v2, soc-spec-v1, …)
+│   ├── schemas/                     # JSON Schemas (board, board-preset, soc-spec-v1, …)
 │   ├── socs/<vendor>/<family>/<part>.json   # silicon datasheets (peripheral counts, caps)
 │   ├── e1m_modules/<SKU>.yaml       # SoM presets (`on_module:`, `topology:`, `pad_routes:`)
 │   ├── boards/<NAME>/board.yaml   # board presets (`populated:`, `e1m_routes:`)

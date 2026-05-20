@@ -46,17 +46,6 @@ the SoM preset's `topology:` block.
 
 ## Block-by-block walkthrough
 
-### `schema_version`
-
-```yaml
-```
-
-Bumped to `2` in v0.6 when heterogeneous orchestration landed
-(top-level `os:` → per-core `cores.<id>.os:`).  The v1 schema is
-no longer accepted; see
-[`docs/heterogeneous-builds.md`](../heterogeneous-builds.md)
-§"Migrating from v1" for the mechanical translation.
-
 ### `som`
 
 ```yaml
@@ -81,48 +70,98 @@ If the customer's SDK version is older than the rev's
 `min_sdk_version`, the loader exits with code 3.  Always pin
 `hw_rev` for production; omit for bring-up convenience.
 
-### `board`
+### Board declaration
+
+The board the firmware targets is declared at the **top level**
+of `board.yaml`, with two mutually-exclusive modes:
+
+**Inline (the customer path).**  Self-contained, no indirection
+-- write your board out in the same file:
 
 ```yaml
-board:
-  name: E1M-EVK            # required (or inline `populated`)
-  populated:               # optional override on top of the preset
-    button_led: true
-    bme280:    false
+name: my-sensor-board       # required when going inline
+description: "..."          # optional, free-form
+hw_rev: r1                  # optional board hardware revision
+
+populated:                  # chips populated on this board
+  bmi323:   true
+  ssd1306:  true
+  rv3028c7: true
+
+e1m_routes:                 # E1M-pad -> board-side macro
+  gpio:
+    - { e1m: E1M_GPIO_IO15, macro: PIN_BMI323_INT1,
+        doc: "BMI323 INT1 (data-ready / motion / FIFO)." }
+  buses:
+    - { e1m: E1M_I2C0, macro: I2C_BUS_SENSORS,
+        doc: "Shared sensor bus." }
+  pwm:
+    - { e1m: E1M_PWM3, macro: PWM_LED_RED,
+        doc: "Status LED red channel." }
 ```
 
-`name` resolves to a preset at
-`metadata/boards/<name>.yaml`.  The SDK ships:
+Each `populated.<name>: true` enables the matching
+`CONFIG_ALP_SDK_CHIP_<NAME>=y` (or
+`CONFIG_ALP_SDK_BLOCK_<NAME>=y` for the SDK-level helpers
+`button_led` / `pdm_mic`).  Bus addresses and pin assignments
+live in the chip-driver metadata under
+`metadata/chips/<name>.yaml`; `e1m_routes:` is the canonical
+source for E1M-pad → board-side macro names that hand-written
+firmware references (`PIN_*`, `I2C_BUS_*`, `PWM_*`).
+`scripts/gen_board_header.py` reads `e1m_routes:` and emits
+`include/alp/boards/alp_<name>_routes.h` automatically.
 
-- `E1M-EVK` -- 35×35 reference board for AEN + N93.
-- `E1M-X-EVK` -- 45×65 reference board for V2N + V2N-M1.
-- `custom-example` -- copy-friendly template.
-
-`populated` is an additive override on top of the board
-preset's populated block.  Use `true` / `false` to opt chip
-drivers in / out per the customer's specific assembly.  Each
-`true` becomes `CONFIG_ALP_SDK_CHIP_<NAME>=y` in the generated
-`alp.conf`.
-
-**Custom board without a preset:** drop `name` entirely and
-declare the populated chips inline:
-
-```yaml
-board:
-  populated:
-    bmi323:   true
-    ssd1306:  true
-    rv3028c7: true
-```
-
-Each `true` enables the matching `CONFIG_ALP_SDK_CHIP_<NAME>=y`
-and links the chip driver from `chips/<name>/`.  Bus addresses
-and pin assignments live in the chip-driver metadata under
-`metadata/chips/<name>.yaml` (resolved against the SoM preset's
-`i2c_devices:` block), not in `board.yaml` itself.  For custom
-pad mappings, layer a devicetree overlay -- emit a starter via
+For custom pad mappings layered on top of the SoM-provided
+defaults, emit a starter devicetree overlay via
 `python3 scripts/alp_project.py --input board.yaml --emit dts-overlay`
 and hand-edit from there.
+
+**Preset (SDK-internal shortcut).**  The 41 example projects in
+this repo all target the EVK + X-EVK, so they share a single
+shared board definition via `preset:`:
+
+```yaml
+preset: e1m-evk             # or e1m-x-evk
+```
+
+The resolved preset lives at `metadata/boards/<name>.yaml` and
+supplies `name`, `populated`, `e1m_routes`, `default_hw_rev`,
+and `hw_revisions` wholesale.  Customer projects don't need this
+-- write your board inline as above so the file is
+self-contained -- but you can use a shared preset if your fleet
+of firmware projects all target one physical board.
+
+The SDK ships these shared presets:
+
+- `e1m-evk` -- 35×35 reference board for AEN + N93.
+- `e1m-x-evk` -- 45×65 reference board for V2N + V2N-M1.
+- `custom-example` -- copy-friendly template (use `cp` on the
+  file contents into your own project's `board.yaml`).
+
+When `preset:` is set, you cannot ALSO carry inline
+`populated:` / `e1m_routes:` -- the schema rejects mixing.
+
+### `pins` (optional E1M-pad usage list)
+
+```yaml
+pins:
+  - E1M_GPIO_IO15   # BMI323 INT1
+  - E1M_PWM3        # status LED red
+  - E1M_I2C0        # sensor bus
+```
+
+Optional top-level array.  Names the E1M pads / peripheral
+instances the project actively touches.  Most useful in preset
+mode, where the resolved board defines the full wiring but
+readers can't tell which subset this particular firmware uses
+without diving into the source.  Listing them here surfaces the
+project's hardware usage in one place.
+
+The loader validates each entry against the resolved board's
+`e1m_routes:` block at load time -- typos and pad references
+that don't exist on the board error out clearly.  Omit the
+field entirely for inline-mode projects where the `e1m_routes:`
+block already enumerates the full set.
 
 ### `cores.<id>.os` (per-core runtime)
 
