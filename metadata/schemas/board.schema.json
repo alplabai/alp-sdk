@@ -280,8 +280,8 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": ["mender", "mcumgr", "none"],
-          "description": "OTA provider.  `mender` for Yocto, `mcumgr` for Zephyr (placeholder until ADR 0009 lands), `none` to disable."
+          "enum": ["mender", "hawkbit", "mcumgr", "none"],
+          "description": "OTA provider (provider-driven dispatch, ADR 0009 follow-up).  `mender` -> server-mode Mender on Yocto OR Mender-MCU-client on Zephyr; `hawkbit` -> Zephyr upstream's Hawkbit DDI client; `mcumgr` -> Zephyr's MCUmgr/SMP (transport selection stays the app's call); `none` to disable."
         },
         "artifact_name": {
           "type": "string",
