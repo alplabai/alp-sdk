@@ -5,13 +5,14 @@
 # the field?  Answer: signed firmware artefact pulled from a
 # Mender server, signature verified against the public half of
 # an OPTIGA-Trust-M-locked ECDSA-P256 keypair, written into the
-# inactive MCUboot slot, swap-with-revert armed for the next
+# inactive MCUboot slot (Zephyr side) or the inactive A/B rootfs
+# partition (Linux side), swap-with-revert armed for the next
 # reboot.  Per docs/secure-boot.md the private signing key
 # never leaves the SoM's secure NVM.
 #
-# The OTA *server* side is owned externally (separate repo,
-# Hakan).  This board.yaml describes the device side only --
-# the customer-buildable half of the contract.
+# This board.yaml describes the device side only -- the
+# customer-buildable half of the contract.  The Mender server
+# side is owned externally (separate repo, Hakan).
 som:
   sku: E1M-AEN701          # Alif Ensemble + on-SoM OPTIGA Trust M.
                             # The OPTIGA holds the production
@@ -34,9 +35,8 @@ cores:
     # schema's enum doesn't include `mcuboot` or `mender` because
     # both are integrated differently:
     #
-    #   - mcuboot:  pulled in by sysbuild
-    #               (zephyr/sysbuild/aen/sysbuild.conf), not by the
-    #               app's library list.  See docs/secure-boot.md.
+    #   - mcuboot:  pulled in by sysbuild via the `boot:` block
+    #               below.  See docs/secure-boot.md.
     #   - mender:   the mender-mcu-client Zephyr module is pinned
     #               via the west manifest's `mender` group (v0.4
     #               item per docs/ota.md "Option A").
@@ -51,6 +51,57 @@ cores:
 # E1M-AEN701 preset and the CC3501E Wi-Fi bridge is wired
 # through cores.m55_hp.iot.wifi: true.  No extra `chips:` entries
 # needed.
+
+# ----------------------------------------------------------------
+# Bootloader (project-wide, board.yaml v0.6 `boot:` block).
+# ----------------------------------------------------------------
+# MCUboot + ECDSA-P256 + swap-using-scratch is the AEN-family
+# default; we declare it explicitly here so the contract is
+# self-evident to anyone reading the example.  The private signing
+# key never lives in this repo -- the public-key PEM at
+# keys/prod_ecdsa_p256.pub.pem is bound into the bootloader at
+# build time; signing happens in the manufacturing CA's HSM
+# (see docs/secure-boot.md "Signing key lifecycle").
+boot:
+  method: mcuboot
+  signing:
+    algorithm: ecdsa_p256
+    key_file:  keys/prod_ecdsa_p256.pub.pem
+  swap_algorithm: scratch
+  anti_rollback:  false
+
+# ----------------------------------------------------------------
+# OTA (project-wide, board.yaml v0.6 `ota:` block).
+# ----------------------------------------------------------------
+# `provider: mender` triggers two emitters:
+#
+#   - Yocto slices (`os: yocto`): scripts/alp_orchestrate.py's
+#     _slice_local_conf() emits `INHERIT += "mender-full"` and
+#     `MENDER_*` weak-assignments into local.conf.  Customers
+#     forking this skeleton for V2N101 (Linux + M33) inherit the
+#     `storage:` geometry below without re-typing it.
+#
+#   - Zephyr slices (`os: zephyr`): the mender-mcu-client west
+#     module reads the same `provider:` + `server:` + `poll_interval_s:`
+#     fields at app init time (HTTPS poll path; `storage:` is
+#     ignored -- MCUboot's slot layout owns the on-device geometry,
+#     not the OTA block).
+#
+# Tokens stay outside the repo: `${MENDER_TENANT_TOKEN}` is
+# expanded by the build host's environment (Yocto bblayers) or
+# the device's Mender provisioning step (Zephyr).  See
+# docs/ota.md "Secrets handling".
+ota:
+  provider: mender
+  artifact_name: iot-fleet-ota
+  server:
+    url:    "https://hosted.mender.io"
+    tenant: "${MENDER_TENANT_TOKEN}"
+  storage:
+    device: /dev/mmcblk0     # Linux variants of this skeleton
+    boot_part_mb: 32         # use the same rootfs A/B geometry;
+    total_size_mb: 4096      # ignored on the AEN-only Zephyr build.
+  poll_interval_s: 1800
 
 diagnostics:
   log_level: info

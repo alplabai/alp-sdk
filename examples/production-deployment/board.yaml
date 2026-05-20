@@ -1,44 +1,188 @@
 # board.yaml -- per-app project configuration for the
 # production-deployment flagship.
 #
-# Designed against AEN-Zephyr (the dual-Cortex-M55 silicon with
-# OPTIGA Trust M + secure-boot fabric).  Real customer shipping
-# variants will fork this for V2N or i.MX 93 boards; the SDK's
-# surfaces stay identical across SoMs.
+# v1.0 reference application for a field-deployable IoT product.
+# Designed against AEN701 (the security-target SoM: dual-Cortex-M55
+# silicon with on-module OPTIGA Trust M + TF-M secure-boot fabric).
+# Demonstrates EVERY v0.6 declarative block applied at production
+# stance:
+#
+#   - `boot:`              MCUboot + ECDSA-P256, anti-rollback armed
+#   - `ota:`               Mender HTTPS-poll, A/B rootfs (for the
+#                           Linux-fork variant) + MCUboot slots
+#                           (Zephyr side)
+#   - `security.psa:`      TF-M secure partition + OPTIGA-rooted
+#                           attestation
+#   - `storage:`           explicit partitions for primary +
+#                           secondary slots + scratch + settings +
+#                           app_data
+#   - `cores.<id>.memory:` tuned stack / heap / ISR-stack sizes
+#   - `cores.<id>.power:`  standby with multi-source wakeup
+#   - `diagnostics.modules:` security / iot at info, everything
+#                           else at warn
+#
+# Real customer shipping variants fork this for V2N or i.MX 93
+# boards; the SDK's declarative surface stays identical across
+# SoMs.
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN701              # security-target SoM (OPTIGA + TF-M)
 
 preset: e1m-evk
 cores:
   a32_cluster:
-    os: "off"
+    os: "off"                  # AEN family is M-class only; the
+                               # a32 key is the SoM topology's
+                               # placeholder slot.
   m55_hp:
     app: ./src
     # IoT features (WiFi + MQTT + TLS) ride the per-core `iot:` block;
-    # the alp_project.py emitter translates wifi/mqtt/tls into
+    # the orchestrator translates wifi/mqtt/tls into
     # CONFIG_ALP_SDK_IOT_WIFI / _MQTT / _SECURITY.
     iot:
       wifi: true
       mqtt: true
-      tls: true
+      tls:  true
+    # Memory tuning -- production stance keeps headroom for the
+    # mender-mcu-client + mbedTLS handshake buffers + the TF-M
+    # NS-callable trampoline.
+    memory:
+      stack_kib:     8         # CONFIG_MAIN_STACK_SIZE
+      heap_kib:      64        # CONFIG_HEAP_MEM_POOL_SIZE
+      isr_stack_kib: 4         # CONFIG_ISR_STACK_SIZE
+    # Power -- the production stance is "wake on network or
+    # explicit interrupt, otherwise standby."  Deep sleep is
+    # reserved for the low-power sensor profile
+    # (examples/power-managed-sensor); on the application core
+    # we stay in `standby` so the Mender poll thread can resume
+    # without losing TLS session state.
+    power:
+      sleep_mode: standby
+      wakeup_sources:
+        - uart                 # console for field diagnostics
+        - gpio                 # external watchdog / supervisor IRQ
+        - rtc                  # periodic Mender poll wake
     # libraries: mbedtls dropped here for v0.5 native_sim parity
-    #            (Zephyr 4.4 + mbedtls 3.6 PSA wiring is a v0.6 work item).
-    #            Real-silicon builds re-enable mbedtls via the SoM-side
-    #            TF-M-on-HE-core stack.
+    #            (Zephyr 4.4 + mbedtls 3.6 PSA wiring is a v0.6
+    #            work item).  Real-silicon builds re-enable mbedtls
+    #            via the TF-M-on-HE-core stack declared below.
+  m55_he:
+    os: "off"                  # this skeleton runs the security
+                               # workload on m55_hp; real shipping
+                               # variants put TF-M's secure partition
+                               # on m55_he and IPC over RPMsg.
 
 chips:
   - optiga_trust_m
   - eeprom_24c128
 
-diagnostics:
-  log_level: info
+# ----------------------------------------------------------------
+# Bootloader (project-wide).
+# ----------------------------------------------------------------
+# MCUboot + ECDSA-P256 with explicit slot geometry + anti-rollback.
+# `anti_rollback: true` enables monotonic image counters --
+# requires OTP fuse provisioning at factory test (one-way; see
+# docs/secure-boot.md "anti-rollback").
+boot:
+  method: mcuboot
+  signing:
+    algorithm: ecdsa_p256
+    key_file:  keys/prod_ecdsa_p256.pub.pem
+  slots:
+    primary:   { size_kib: 1024 }
+    secondary: { size_kib: 1024 }
+  swap_algorithm:   scratch
+  scratch_size_kib: 64
+  anti_rollback:    true
 
-# Secure-boot signing happens at release-build time -- the
-# zephyr/sysbuild/aen/ profile carries the ECDSA-P256 key
-# configuration that turns this app into a signed image.  See
-# docs/secure-boot.md for the key-management contract.  MCUboot
-# slot inspection at runtime via <alp/storage.h> goes through
-# the internal-flash backend (no explicit board.yaml `chips:`
-# or libraries entry required -- the storage surface is always
-# available on Zephyr targets that have an internal flash
-# controller in DT).
+# ----------------------------------------------------------------
+# OTA (project-wide).
+# ----------------------------------------------------------------
+# Mender HTTPS-poll fabric with anti-downgrade floor + automatic
+# rollback on health-check failure.  The tenant token stays
+# outside the repo; it's injected by the device provisioning step.
+ota:
+  provider:        mender
+  artifact_name:   production-deployment
+  signing_key:     keys/prod_ecdsa_p256.pub.pem
+  server:
+    url:    "https://hosted.mender.io"
+    tenant: "${MENDER_TENANT_TOKEN}"
+  rollback:
+    enabled:     true
+    retries:     3
+    min_version: 1            # anti-downgrade: never accept v0.x
+                              # after we've shipped v1.0
+  poll_interval_s: 1800
+  storage:
+    # Linux-fork variants reuse the same A/B geometry; ignored on
+    # the AEN-only Zephyr build (MCUboot owns slot management
+    # there via `boot:`).
+    device:        /dev/mmcblk0
+    boot_part_mb:  32
+    rootfs_ab:     true
+    total_size_mb: 4096
+
+# ----------------------------------------------------------------
+# Security (PSA crypto + TF-M secure partition).
+# ----------------------------------------------------------------
+# TF-M-on-HE-core is the AEN production stance.  Persistent keys
+# live in Internal Trusted Storage backed by the secure half of
+# MRAM; Protected Storage (encrypted-at-rest) lives in the on-
+# module OSPI for app-managed credentials that don't need the
+# tamper-resistant tier.  Attestation root is the OPTIGA Trust M
+# (single trust root with boot + OTA -- see iot-fleet-ota for the
+# shared signing key story).
+security:
+  psa:
+    persistent_slots: 32
+    its_storage:      mram_main     # AEN E7: 5.5 MiB MRAM (secure half)
+    ps_storage:       ospi0         # on-module OSPI for app-tier creds
+    tfm:              true
+    attestation_root: optiga_trust_m
+
+# ----------------------------------------------------------------
+# Storage partitions.
+# ----------------------------------------------------------------
+# Explicit partition table backing the MCUboot slot layout + the
+# Zephyr settings subsystem + an app_data littlefs mount.  Sizes
+# add up to ~2.4 MiB out of the AEN E7's 5.5 MiB MRAM -- the
+# remainder stays available for code + MCUboot itself + the
+# TF-M secure partition.
+storage:
+  - name:         mcuboot_primary
+    fs:           raw
+    size_kib:     1024
+    flash_device: mram_main
+  - name:         mcuboot_secondary
+    fs:           raw
+    size_kib:     1024
+    flash_device: mram_main
+  - name:         mcuboot_scratch
+    fs:           raw
+    size_kib:     64
+    flash_device: mram_main
+  - name:         settings
+    fs:           littlefs
+    size_kib:     64
+    flash_device: mram_main
+    mount:        /lfs/settings
+  - name:         app_data
+    fs:           littlefs
+    size_kib:     256
+    flash_device: mram_main
+    mount:        /lfs/app
+
+# ----------------------------------------------------------------
+# Diagnostics (project-wide).
+# ----------------------------------------------------------------
+# Production log policy: security + iot at info (so the field
+# console captures TLS handshake + Mender state transitions);
+# everything else at warn (smaller log buffer, less flash chatter).
+diagnostics:
+  log_level: warn
+  modules:
+    alp_security:  info
+    alp_iot:       info
+    alp_storage:   warn
+    alp_gpio:      warn
+    alp_inference: warn

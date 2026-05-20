@@ -1,0 +1,65 @@
+# board.yaml -- per-app project configuration for the
+# power-managed-sensor example.
+#
+# A low-power BME280 + IMU sensor node running on the AEN301's
+# M55-HE high-efficiency core.  The narrative the example proves:
+#
+#   1. Sit in deep sleep between events (microamps, not
+#      milliamps -- the difference between weeks and years of
+#      battery life).
+#   2. Wake on three orthogonal triggers:
+#        - RTC alarm  -> periodic sensor sample (every 60 s)
+#        - GPIO IRQ   -> one-shot user interrupt / IMU motion event
+#        - UART       -> diagnostic console (lab / field debug)
+#   3. After each wake, take the sample, push the reading over
+#      the host channel, return to deep sleep.
+#
+# AEN301 is the small AEN SKU (lower static power than the
+# AEN701 used by production-deployment).  The M55-HE
+# (high-efficiency core) is the right home for the always-on
+# sensor task -- the M55-HP (high-performance core) stays parked
+# unless burst compute is needed.
+#
+# This example is the reference for the v0.6 `cores.<id>.power:`
+# declarative block.  See docs/board-config.md
+# "Per-slice power-management profile".
+som:
+  sku: E1M-AEN301              # small AEN, lower-power profile
+
+preset: e1m-evk
+cores:
+  a32_cluster:
+    os: "off"                  # AEN family is M-class only.
+  m55_hp:
+    os: "off"                  # HP core parked; sensor work stays
+                               # on the high-efficiency core.
+  m55_he:
+    os: zephyr
+    app: ./src
+    peripherals:
+      - gpio                   # IMU motion interrupt + user button
+      - i2c                    # BME280 + IMU bus
+      - rtc                    # periodic wake source
+      - uart                   # diagnostic console
+      - sensor                 # Zephyr sensor subsystem
+    power:
+      sleep_mode: deep         # lowest retention state the
+                               # silicon supports (schema enum:
+                               # disabled | idle | standby | deep)
+      wakeup_sources:
+        - uart                 # diagnostic console wake
+        - gpio_int             # IMU motion-event IRQ + user button
+        - rtc                  # periodic sample wake
+    memory:
+      stack_kib: 4             # CONFIG_MAIN_STACK_SIZE -- the
+                               # sensor task is short-lived per wake,
+                               # 4 KiB is comfortable headroom.
+      heap_kib:  16            # CONFIG_HEAP_MEM_POOL_SIZE -- enough
+                               # for the I2C transfer buffers + the
+                               # Zephyr sensor_value vector.
+
+diagnostics:
+  log_level: info
+  modules:
+    alp_gpio: warn             # less chatty for the always-on path
+    alp_i2c:  warn

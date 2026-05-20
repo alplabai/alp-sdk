@@ -1,53 +1,141 @@
 # production-deployment
 
 The v1.0 reference application for a field-deployable IoT
-product.  Demonstrates the full manufactured → deployed →
-updated → attested lifecycle on a single app, so customers see
+product.  Demonstrates the full manufactured -> deployed ->
+updated -> attested lifecycle on a single app, so customers see
 how the SDK's secure-boot, OTA, EEPROM-provisioning, and
 remote-attestation pieces fit together.
 
-## What this shows
+This is also the SDK's **declarative-stack flagship**: every
+v0.6 block (`boot:`, `ota:`, `security.psa:`, `storage:`,
+`cores.<id>.memory:`, `cores.<id>.power:`,
+`diagnostics.modules:`) appears in this `board.yaml` at the
+production stance the SDK recommends for shipping product.
 
-This is the SDK's *integration* flagship -- every other example
-covers one library surface; this one covers the production
-lifecycle that ties them all together.
+## The v0.6 block walkthrough
 
-### Stage 1: factory-provisioning read-back
+### `boot:` -- signed bootloader
 
-On boot, `<alp/hw_info.h>` reads the manufacturer EEPROM
-manifest programmed at factory test.  The manifest carries the
-board's per-unit identity (SKU, serial, HW revision, factory
-date).  Production firmware treats this as authoritative --
-never derive identity from the SoC's internal UID alone.
+```yaml
+boot:
+  method: mcuboot
+  signing:
+    algorithm: ecdsa_p256
+    key_file:  keys/prod_ecdsa_p256.pub.pem
+  slots:
+    primary:   { size_kib: 1024 }
+    secondary: { size_kib: 1024 }
+  swap_algorithm:   scratch
+  scratch_size_kib: 64
+  anti_rollback:    true
+```
 
-### Stage 2: secure-boot evidence
+Drives sysbuild's MCUboot child image. ECDSA-P256 ties to the
+OPTIGA Trust M production key (see `iot-fleet-ota`).
+`anti_rollback: true` enables monotonic image counters -- this
+requires OTP fuse provisioning at factory test (one-way; cannot
+be backed out in the field).
 
-MCUboot has already validated the running image against the
-ECDSA-P256 boot key by the time `main()` runs (the bootloader
-rejects unsigned / wrong-key images at boot).  The app reads
-back the active slot + image revision so a cloud-side fleet
-console can confirm the deployed firmware matches what the
-signing service produced.  Signing-service contract lives in
-[`docs/secure-boot.md`](../../docs/secure-boot.md).
+### `ota:` -- Mender HTTPS poll + A/B rollback
 
-### Stage 3: OTA polling + apply
+```yaml
+ota:
+  provider:        mender
+  artifact_name:   production-deployment
+  server:
+    url:    "https://hosted.mender.io"
+    tenant: "${MENDER_TENANT_TOKEN}"
+  rollback:
+    enabled:     true
+    min_version: 1
+  poll_interval_s: 1800
+  storage:
+    device:        /dev/mmcblk0
+    boot_part_mb:  32
+    total_size_mb: 4096
+```
 
-`<alp/iot.h>` opens a TLS-mutual-auth connection to a Mender
-server and polls for a deployment.  When one is pending, the
-SDK downloads the new image, verifies its signature against the
-same ECDSA-P256 boot key, writes it to the inactive MCUboot
-slot, sets the swap-pending flag, and requests a reboot.
-Post-reboot, MCUboot confirms or reverts based on the new
-image's `mark_confirmed` call.
+`rollback.min_version: 1` is the anti-downgrade floor -- once v1.0
+ships, the device refuses any OTA claiming version < 1, even if
+it's signed correctly. `${MENDER_TENANT_TOKEN}` never lives in
+the repo; it's injected at provisioning.
 
-### Stage 4: remote attestation
+### `security.psa:` -- TF-M + OPTIGA attestation root
 
-A cloud-side fleet operator needs evidence that the device
-hasn't been physically tampered with -- per the threat model
-([`docs/threat-model.md`](../../docs/threat-model.md) §asset 8).
-The app publishes a periodic heartbeat that includes the
-OPTIGA-signed boot log + the current secure-boot slot.  An
-attacker who swaps the flash sees the OPTIGA signature break.
+```yaml
+security:
+  psa:
+    persistent_slots: 32
+    its_storage:      mram_main
+    ps_storage:       ospi0
+    tfm:              true
+    attestation_root: optiga_trust_m
+```
+
+`tfm: true` lands TF-M's secure-partition image as a sysbuild
+child build. Internal Trusted Storage (PSA persistent keys) backs
+to the secure half of MRAM; Protected Storage (encrypted-at-rest
+app credentials) backs to the on-module OSPI. The attestation
+root is the OPTIGA Trust M -- single trust root with boot + OTA,
+fewer surfaces for an attacker to chip away at.
+
+### `storage:` -- explicit partition table
+
+```yaml
+storage:
+  - { name: mcuboot_primary,   fs: raw,      size_kib: 1024, flash_device: mram_main }
+  - { name: mcuboot_secondary, fs: raw,      size_kib: 1024, flash_device: mram_main }
+  - { name: mcuboot_scratch,   fs: raw,      size_kib:   64, flash_device: mram_main }
+  - { name: settings,          fs: littlefs, size_kib:   64, flash_device: mram_main, mount: /lfs/settings }
+  - { name: app_data,          fs: littlefs, size_kib:  256, flash_device: mram_main, mount: /lfs/app }
+```
+
+The MCUboot slots are explicit (matching `boot.slots:` sizes);
+Zephyr's settings subsystem gets its own littlefs partition;
+app-managed runtime data gets its own. Adds to ~2.4 MiB of the
+AEN E7's 5.5 MiB MRAM -- the rest stays free for code + MCUboot
+itself + TF-M's secure partition. The orchestrator emits a
+partial DTS overlay (`partitions { ... }` node) + matching
+Kconfig (`CONFIG_FILE_SYSTEM_LITTLEFS=y`) per entry.
+
+### `cores.m55_hp.memory:` -- per-core memory tuning
+
+```yaml
+memory:
+  stack_kib:     8     # CONFIG_MAIN_STACK_SIZE
+  heap_kib:      64    # CONFIG_HEAP_MEM_POOL_SIZE
+  isr_stack_kib: 4     # CONFIG_ISR_STACK_SIZE
+```
+
+Production stance: enough heap for mbedTLS handshake buffers +
+mender-mcu-client state; enough stack for the TF-M NS-callable
+trampoline.
+
+### `cores.m55_hp.power:` -- standby with wake-on-network
+
+```yaml
+power:
+  sleep_mode: standby
+  wakeup_sources: [uart, gpio, rtc]
+```
+
+Application cores run `standby` rather than `deep` so the
+mender-mcu-client poll thread resumes without losing TLS state.
+The low-power case (deep sleep + sensor-driven wake) is in
+`examples/power-managed-sensor`.
+
+### `diagnostics.modules:` -- per-module log levels
+
+```yaml
+diagnostics:
+  log_level: warn
+  modules:
+    alp_security: info
+    alp_iot:      info
+```
+
+Field console captures TLS handshake + Mender state transitions;
+the rest stays quiet to save flash and console bandwidth.
 
 ## Build
 
@@ -56,20 +144,6 @@ attacker who swaps the flash sees the OPTIGA signature break.
 ```bash
 west build -b native_sim/native/64 examples/production-deployment
 west build -t run
-```
-
-Expected output:
-
-```
-[prod] alp-sdk production-deployment flagship
-[prod] stage 1: reading manufacturer EEPROM manifest
-[prod]   alp_hw_info_read -> -2 -- continuing with no identity
-[prod] stage 2: reading MCUboot slot info
-[prod]   internal flash open -> last_err=-2
-[prod] stage 3: connecting to Mender server
-[prod]   wifi open -> NOSUPPORT (native_sim) or NOT_READY (HiL pre-DT)
-[prod]   attestation: 64-byte nonce drawn from TRNG
-[prod] done
 ```
 
 ### Real silicon (AEN-Zephyr, requires a staged Mender server)
@@ -90,17 +164,12 @@ heartbeats publish every 60 s thereafter.
 
 Customer-side variants typically:
 
-- Fork this skeleton for V2N or i.MX 93 boards (the SDK's
-  portable surfaces stay identical; only `board.yaml` changes).
+- Fork this skeleton for V2N or i.MX 93 boards (`som.sku:` +
+  `cores:` edits; the declarative blocks above stay portable).
 - Replace the Mender connection with a different OTA fabric
-  (azure-iot-hub, AWS IoT Core, custom HTTPS endpoint).  The
-  `<alp/storage.h>` slot-write code path stays the same.
+  (`ota.provider:` -- `mcumgr` lands in v0.7 per ADR 0009).
 - Add domain-specific business logic between the OTA poll +
   the attestation heartbeat.
-
-The skeleton is structured so each stage is one short function
-in `src/main.c`; customers wire their domain logic alongside
-without rewriting the SDK glue.
 
 ## Reference
 
