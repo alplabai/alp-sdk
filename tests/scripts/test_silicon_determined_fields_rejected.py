@@ -90,8 +90,6 @@ def test_inference_backend_rejected(
     """Every value the removed `backend:` field used to accept must
     now trip the schema's `additionalProperties: false` rule."""
     body = f"""
-        schema_version: 2
-
         som:
           sku: E1M-AEN701
 
@@ -112,8 +110,6 @@ def test_inference_arena_only_accepted(tmp_path: Path) -> None:
     """POSITIVE CONTROL: `inference: { default_arena_kib: N }` (the
     one knob the schema still carries) must load cleanly."""
     body = """
-        schema_version: 2
-
         som:
           sku: E1M-AEN701
 
@@ -133,8 +129,6 @@ def test_inference_arena_below_minimum_rejected(tmp_path: Path) -> None:
     """Schema bounds-check on the arena: `minimum: 16` means a 15-KiB
     request must fail (catches a regression where the bound is dropped)."""
     body = """
-        schema_version: 2
-
         som:
           sku: E1M-AEN701
 
@@ -156,8 +150,6 @@ def test_top_level_os_rejected(tmp_path: Path) -> None:
     """The v2 schema's `not: { required: [os] }` clause must reject
     any board.yaml that still uses the v1 top-level `os:` field."""
     body = """
-        schema_version: 2
-
         som:
           sku: E1M-AEN701
 
@@ -177,8 +169,6 @@ def test_top_level_inference_rejected(tmp_path: Path) -> None:
     """V1 also accepted a top-level `inference:` block.  V2 forces it
     per-core, so a top-level instance violates additionalProperties."""
     body = """
-        schema_version: 2
-
         som:
           sku: E1M-AEN701
 
@@ -195,8 +185,6 @@ def test_top_level_inference_rejected(tmp_path: Path) -> None:
 def test_top_level_peripherals_rejected(tmp_path: Path) -> None:
     """Same for top-level `peripherals:` -- v1 shape, v2 forbids it."""
     body = """
-        schema_version: 2
-
         som:
           sku: E1M-AEN701
 
@@ -214,8 +202,6 @@ def test_top_level_peripherals_rejected(tmp_path: Path) -> None:
 def test_top_level_libraries_rejected(tmp_path: Path) -> None:
     """And top-level `libraries:`."""
     body = """
-        schema_version: 2
-
         som:
           sku: E1M-AEN701
 
@@ -233,8 +219,6 @@ def test_top_level_libraries_rejected(tmp_path: Path) -> None:
 def test_top_level_iot_rejected(tmp_path: Path) -> None:
     """And top-level `iot:`."""
     body = """
-        schema_version: 2
-
         som:
           sku: E1M-AEN701
 
@@ -262,8 +246,6 @@ def test_per_core_os_enum_closed(tmp_path: Path, bad_os: str) -> None:
     future maintainer can't quietly extend the runtime set without
     going through the schema review."""
     body = f"""
-        schema_version: 2
-
         som:
           sku: E1M-V2N101
 
@@ -293,8 +275,6 @@ def test_inference_block_rejects_unknown_fields(
     where someone re-leaks SoM-preset fields into the customer
     schema."""
     body = f"""
-        schema_version: 2
-
         som:
           sku: E1M-AEN701
 

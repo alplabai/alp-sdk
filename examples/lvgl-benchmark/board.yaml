@@ -9,6 +9,10 @@ som:
   sku: E1M-AEN701           # E7 has GPU2D + DAVE2D + DMA2D populated.
 
 preset: e1m-evk
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - E1M_SPI1
 cores:
   a32_cluster:
     os: "off"

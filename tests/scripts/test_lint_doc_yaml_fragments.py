@@ -4,8 +4,9 @@ Unit tests for scripts/lint_doc_yaml_fragments.py.
 
 Covers:
   - fragment extraction (``` yaml … ``` fenced blocks)
-  - schema_version + som gating (partial snippets are skipped)
-  - schema validation (v2 success + failure modes)
+  - gating heuristic (a fragment is a board.yaml document iff it has
+    both `som:` and `cores:`; partial snippets are skipped)
+  - schema validation against metadata/schemas/board.schema.json
   - exclude-prefix handling
   - --path single-file invocation
   - YAML parse failures are non-fatal (skipped, not crashed)
@@ -31,7 +32,7 @@ REPO = Path(__file__).resolve().parents[2]
 LINTER = REPO / "scripts" / "lint_doc_yaml_fragments.py"
 SCHEMAS_DIR = REPO / "metadata" / "schemas"
 
-# Import the linter module directly for unit tests against its helpers
+# Import the linter as a module so we can unit-test its internals
 # (the script's APIs are documented and intended for reuse).
 sys.path.insert(0, str(REPO / "scripts"))
 import lint_doc_yaml_fragments as linter  # noqa: E402
@@ -58,11 +59,9 @@ def _run_linter(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-# Minimal valid v2 fragment.  Used as a known-good baseline; tests
-# mutate it to produce known-bad fragments.
-_VALID_V2 = """
-schema_version: 2
-
+# Minimal valid board.yaml fragment.  Used as a known-good baseline;
+# tests mutate it to produce known-bad fragments.
+_VALID_BOARD = """
 som:
   sku: E1M-AEN701
 
@@ -89,14 +88,16 @@ def test_extract_fragments_yaml_fence(tmp_path: Path) -> None:
         # Header
 
         ```yaml
-        schema_version: 2
         som:
           sku: E1M-AEN701
+        cores:
+          m55_hp:
+            app: ./src
         ```
     """)
     fragments = linter.extract_fragments(p)
     assert len(fragments) == 1
-    assert "schema_version: 2" in fragments[0].body
+    assert "som:" in fragments[0].body
     assert fragments[0].line > 0
 
 
@@ -104,7 +105,6 @@ def test_extract_fragments_yml_alias(tmp_path: Path) -> None:
     """The ``` yml alias is also accepted."""
     p = _write_md(tmp_path, "doc.md", """
         ```yml
-        schema_version: 2
         som: { sku: E1M-AEN701 }
         ```
     """)
@@ -154,8 +154,8 @@ def test_extract_fragments_multiple_blocks(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------
 
 
-def test_parse_fragment_requires_schema_version(tmp_path: Path) -> None:
-    """A fenced fragment without `schema_version:` is NOT a board.yaml
+def test_parse_fragment_requires_cores(tmp_path: Path) -> None:
+    """A fenced fragment with `som:` but no `cores:` is NOT a board.yaml
     document and is silently skipped."""
     p = _write_md(tmp_path, "doc.md", """
         ```yaml
@@ -169,12 +169,13 @@ def test_parse_fragment_requires_schema_version(tmp_path: Path) -> None:
 
 
 def test_parse_fragment_requires_som(tmp_path: Path) -> None:
-    """A fenced fragment with `schema_version` but no `som:` is also
-    skipped -- could be a soc-spec or library-profile snippet."""
+    """A fenced fragment with `cores:` but no `som:` is also skipped --
+    could be a snippet of a partial example."""
     p = _write_md(tmp_path, "doc.md", """
         ```yaml
-        schema_version: 2
-        library: tflite_micro
+        cores:
+          m55_hp:
+            app: ./src
         ```
     """)
     fragments = linter.extract_fragments(p)
@@ -186,7 +187,6 @@ def test_parse_fragment_invalid_yaml_skipped(tmp_path: Path) -> None:
     silently skipped (fragments are often work-in-progress)."""
     p = _write_md(tmp_path, "doc.md", """
         ```yaml
-        schema_version: 2
         som:
           sku: E1M-AEN701
         [unclosed bracket
@@ -201,15 +201,15 @@ def test_parse_fragment_accepts_valid_board_yaml(tmp_path: Path) -> None:
     """A fragment with both markers is parsed as a board.yaml document."""
     p = _write_md(tmp_path, "doc.md", f"""
         ```yaml
-{textwrap.indent(_VALID_V2, "        ").rstrip()}
+{textwrap.indent(_VALID_BOARD, "        ").rstrip()}
         ```
     """)
     fragments = linter.extract_fragments(p)
     assert len(fragments) == 1
     parsed = linter.parse_fragment(fragments[0])
     assert isinstance(parsed, dict)
-    assert parsed.get("schema_version") == 2
     assert parsed.get("som", {}).get("sku") == "E1M-AEN701"
+    assert "m55_hp" in parsed.get("cores", {})
 
 
 # ---------------------------------------------------------------------
@@ -217,25 +217,23 @@ def test_parse_fragment_accepts_valid_board_yaml(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------
 
 
-def test_validate_fragment_v2_clean(tmp_path: Path) -> None:
-    """A minimal valid v2 fragment passes."""
+def test_validate_fragment_clean(tmp_path: Path) -> None:
+    """A minimal valid fragment passes."""
     p = _write_md(tmp_path, "doc.md", f"""
         ```yaml
-{textwrap.indent(_VALID_V2, "        ").rstrip()}
+{textwrap.indent(_VALID_BOARD, "        ").rstrip()}
         ```
     """)
     results, checked = linter.lint([p], SCHEMAS_DIR)
     assert checked == 1
     assert len(results) == 1
     assert results[0].ok, results[0].error
-    assert results[0].schema_version == 2
 
 
 def test_validate_fragment_rejects_inference_backend(tmp_path: Path) -> None:
-    """REGRESSION: the post-a3cd4fd schema removed `inference.backend`
-    as a per-core field.  A doc fragment with it must fail."""
+    """REGRESSION: the schema removed `inference.backend` as a per-core
+    field.  A doc fragment with it must fail."""
     bad = """
-        schema_version: 2
         som:
           sku: E1M-AEN701
         cores:
@@ -252,15 +250,13 @@ def test_validate_fragment_rejects_inference_backend(tmp_path: Path) -> None:
     results, checked = linter.lint([p], SCHEMAS_DIR)
     assert checked == 1
     assert not results[0].ok
-    # Error mentions the offending field path.
     assert "backend" in (results[0].error or "")
 
 
 def test_validate_fragment_rejects_top_level_os(tmp_path: Path) -> None:
-    """REGRESSION: v1's top-level `os:` is explicitly rejected by the
-    v2 schema (`not: { required: [os] }`)."""
+    """REGRESSION: legacy top-level `os:` is explicitly rejected by the
+    schema (`not: { required: [os] }`)."""
     bad = """
-        schema_version: 2
         som:
           sku: E1M-AEN701
         os: zephyr
@@ -281,7 +277,6 @@ def test_validate_fragment_rejects_top_level_os(tmp_path: Path) -> None:
 def test_validate_fragment_rejects_unknown_peripheral(tmp_path: Path) -> None:
     """`peripherals:` is a fixed enum; `audio` (not in the enum) fails."""
     bad = """
-        schema_version: 2
         som:
           sku: E1M-AEN701
         cores:
@@ -300,43 +295,6 @@ def test_validate_fragment_rejects_unknown_peripheral(tmp_path: Path) -> None:
     assert "audio" in (results[0].error or "")
 
 
-def test_validate_fragment_unknown_schema_version_passes(tmp_path: Path) -> None:
-    """A fragment claiming an unsupported schema version is NOT the
-    linter's concern -- the loader rejects it at build time.  The
-    linter just warns no-schema and reports OK."""
-    body = """
-        schema_version: 99
-        som:
-          sku: E1M-AEN701
-    """
-    p = _write_md(tmp_path, "doc.md", f"""
-        ```yaml
-{textwrap.indent(body, "        ").rstrip()}
-        ```
-    """)
-    results, checked = linter.lint([p], SCHEMAS_DIR)
-    assert checked == 1
-    assert results[0].ok
-    assert results[0].schema_version == 99
-
-
-def test_validate_fragment_non_integer_schema_version_fails(tmp_path: Path) -> None:
-    """A `schema_version: "foo"` fragment fails with a clear message."""
-    body = """
-        schema_version: foo
-        som:
-          sku: E1M-AEN701
-    """
-    p = _write_md(tmp_path, "doc.md", f"""
-        ```yaml
-{textwrap.indent(body, "        ").rstrip()}
-        ```
-    """)
-    results, checked = linter.lint([p], SCHEMAS_DIR)
-    assert checked == 1
-    assert not results[0].ok
-
-
 # ---------------------------------------------------------------------
 # 4. Exclude handling
 # ---------------------------------------------------------------------
@@ -347,17 +305,16 @@ def test_excludes_prefix_skips_subtree(tmp_path: Path) -> None:
     (tmp_path / "build").mkdir()
     _write_md(tmp_path / "build", "broken.md", """
         ```yaml
-        schema_version: 2
         som: { sku: NOPE }
+        cores: { m55_hp: { app: ./src } }
         ```
     """)
     _write_md(tmp_path, "good.md", f"""
         ```yaml
-{textwrap.indent(_VALID_V2, "        ").rstrip()}
+{textwrap.indent(_VALID_BOARD, "        ").rstrip()}
         ```
     """)
     paths = linter.discover_markdown(tmp_path, excludes=("build",))
-    # The `build/` doc must not appear in the walk.
     assert (tmp_path / "good.md") in paths
     assert (tmp_path / "build" / "broken.md") not in paths
 
@@ -382,7 +339,7 @@ def test_cli_exit_zero_on_clean_path(tmp_path: Path) -> None:
     """A single-file run with a clean fragment exits 0."""
     p = _write_md(tmp_path, "doc.md", f"""
         ```yaml
-{textwrap.indent(_VALID_V2, "        ").rstrip()}
+{textwrap.indent(_VALID_BOARD, "        ").rstrip()}
         ```
     """)
     rv = _run_linter("--path", str(p))
@@ -393,7 +350,6 @@ def test_cli_exit_zero_on_clean_path(tmp_path: Path) -> None:
 def test_cli_exit_one_on_bad_fragment(tmp_path: Path) -> None:
     """A bad fragment causes exit code 1, surfaces the broken field."""
     bad = """
-        schema_version: 2
         som:
           sku: E1M-AEN701
         cores:
@@ -439,25 +395,24 @@ def test_cli_missing_path_exits_two(tmp_path: Path) -> None:
 
 
 def test_repo_readme_lints_clean() -> None:
-    """The shipped README must lint clean.  Regression-locks the
-    a3cd4fd cleanup."""
+    """The shipped README must lint clean."""
     readme = REPO / "README.md"
     rv = _run_linter("--path", str(readme))
     assert rv.returncode == 0, rv.stderr + rv.stdout
 
 
 def test_repo_default_walk_is_clean() -> None:
-    """The full default-scope walk must be clean today (post-fix).
+    """The full default-scope walk must be clean today.
     Locks in the absence of in-tree drift."""
     rv = _run_linter()
     assert rv.returncode == 0, rv.stderr + rv.stdout
 
 
-def test_schema_v2_file_exists() -> None:
-    """The linter is useless without the v2 schema; if anyone moves
-    it, fail loudly."""
-    schema = SCHEMAS_DIR / "board-config-v2.schema.json"
+def test_schema_file_exists() -> None:
+    """The linter is useless without the board.yaml schema; if anyone
+    moves it, fail loudly."""
+    schema = SCHEMAS_DIR / "board.schema.json"
     assert schema.is_file(), \
-        f"missing v2 schema at {schema} -- did the metadata layout move?"
+        f"missing schema at {schema} -- did the metadata layout move?"
     data = json.loads(schema.read_text(encoding="utf-8"))
-    assert data.get("$id", "").endswith("board-config-v2.schema.json")
+    assert data.get("$id", "").endswith("board.schema.json")

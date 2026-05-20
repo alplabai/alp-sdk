@@ -20,7 +20,7 @@ For ordinary application code, none of that surfaces -- callers
 use `<alp/pwm.h>`, `<alp/adc.h>`, `<alp/counter.h>` etc. with the
 portable `E1M_*` instance IDs and the SDK routes the call
 through the bridge internally.  This tutorial is for advanced
-users who need to bypass the abstraction (carrier-specific OTA,
+users who need to bypass the abstraction (board-specific OTA,
 direct bridge-protocol exercises, low-level diagnostics).
 
 ## The two transports

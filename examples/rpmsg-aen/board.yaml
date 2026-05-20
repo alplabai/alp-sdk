@@ -34,6 +34,10 @@ som:
 preset: e1m-evk             # LSM6DSO + BMP581 already populated by
                             # the EVK preset defaults.
 
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - E1M_I2C0
+
 cores:
   a32_cluster:
     app: ./linux

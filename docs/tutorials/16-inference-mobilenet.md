@@ -150,14 +150,10 @@ int main(void) {
 ## 4. `board.yaml`
 
 ```yaml
-schema_version: 2
-
 som:
   sku: E1M-AEN701
 
-carrier:
-  name: E1M-EVK
-
+preset: e1m-evk
 cores:
   m55_hp:
     app: ./src                    # os: omitted -- M-cores default to zephyr
@@ -227,11 +223,9 @@ test plan asserts this as the verification criterion in
 Same `main.c` API surface, swap `board.yaml`:
 
 ```yaml
-schema_version: 2
 som:
   sku: E1M-V2N101
-carrier:
-  name: E1M-X-EVK
+preset: e1m-x-evk
 cores:
   m33_sm:
     app: ./src

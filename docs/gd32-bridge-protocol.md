@@ -8,7 +8,7 @@
 > live in this file; the host-side public API is documented under
 > `<alp/chips/gd32g553.h>`.
 >
-> **Authoritative carrier wiring** is in
+> **Authoritative board wiring** is in
 > [`metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`](../metadata/e1m_modules/v2n/renesas-peripheral-map.tsv)
 > (`GD32_SPI.*` rows + `BRD_I2C` rows).
 
@@ -30,7 +30,7 @@ the framing layer differs.
 | Liveness signalling   | CS edge transitions                                                        | START / STOP envelope                          |
 
 The host driver can **route a given command over whichever
-transport is open** at call time.  Carriers that only wire one of the
+transport is open** at call time.  Boards that only wire one of the
 two transports work unchanged; commands on the un-wired transport
 return `ALP_ERR_NOSUPPORT`.
 
@@ -77,7 +77,7 @@ byte; their numeric encoding is:
 | `0x28` | `POWER_MODE_SET`      | `mode:u8 reserved:u8 wake_bitmap:u32 wake_after_ms:u32` | _(empty; returns STATUS_NOSUPPORT today)_       |
 
 Opcodes `0x81..0xEF` are **reserved** for future ALP-defined
-extensions (next slot: hardware AES via the CAU engine).  Carriers
+extensions (next slot: hardware AES via the CAU engine).  Boards
 SHOULD NOT define their own opcodes in this range -- the firmware
 replies with **`ALP_ERR_NOSUPPORT`** (see §6) for any opcode it
 does not implement at build time, so a host that speaks a newer
@@ -583,7 +583,7 @@ code is used so the bridge looks like a regular I2C slave to
 discovery tools.
 
 The GD32 firmware presents itself at a **single 7-bit slave
-address** configured at compile time (default `0x70`; carriers can
+address** configured at compile time (default `0x70`; boards can
 override).  Inside that slave address space the firmware exposes
 **one virtual register** through which all commands flow:
 
@@ -630,7 +630,7 @@ verification routine in `firmware/gd32-bridge/src/protocol.c`.
 
 The default GD32 slave address `0x70` is **not** occupied by any
 chip on the V2N BRD_I2C bus (verified against
-`metadata/e1m_modules/E1M-V2N101.yaml`).  When a carrier
+`metadata/e1m_modules/E1M-V2N101.yaml`).  When a board
 allocates BRD_I2C to a device that conflicts, the firmware is
 rebuildable with a different `CONFIG_GD32G553_BRIDGE_I2C_ADDR` —
 host code reads back the address from `GET_VERSION` reply payload
@@ -716,7 +716,7 @@ that file so the two implementations cannot diverge.
 > **Status: design committed; implementation pending.**
 
 Two upgrade paths.  Per the V2N hardware decision (2026-05-12),
-the carrier routes `GD32_SWDIO` + `GD32_SWCLK` + `GD32_NRST` from
+the board routes `GD32_SWDIO` + `GD32_SWCLK` + `GD32_NRST` from
 the Renesas host to the GD32; the BOOT0-strap / factory-ISP path
 was dropped after the GD32G553 boot ROM was confirmed
 USART-only (User Manual Rev1.2 §1.4).

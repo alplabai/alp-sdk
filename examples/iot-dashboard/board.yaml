@@ -13,6 +13,11 @@ preset: e1m-evk             # External chips wired into the EVK
                             # headers (BME280, ST7789) are listed in
                             # `chips:` below.
 
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - E1M_I2C0
+  - E1M_SPI1
+
 # Dashboard demo runs entirely on M55-HP (sensor poll + LVGL UI +
 # Wi-Fi/MQTT publish).  A32 cluster off; M55-HE inherits the SoM
 # topology default for the second NPU's future hooks.

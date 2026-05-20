@@ -375,7 +375,7 @@ def _synthesize_inline_board(project: dict[str, Any]) -> dict[str, Any]:
     emitters expect from a preset-resolved board.
     """
     return {
-        "name":       project["name"],
+        "name":       project.get("name"),
         "populated":  dict(project.get("populated") or {}),
         "e1m_routes": dict(project.get("e1m_routes") or {}),
         # Inline mode has no per-board hw_revisions table; loader code
@@ -607,6 +607,28 @@ def load_board_yaml(path: Path, *,
                 raise OrchestratorError(
                     f"ipc entry '{e.name}' references core '{ep}' "
                     f"which is os: off")
+
+    # 8. Optional top-level `pins:` cross-check.  When the project
+    # lists which E1M pads it actively uses, every entry must exist
+    # in the resolved board's `e1m_routes:` block.  Catches typos +
+    # demos drifting from the EVK preset's wiring.
+    used_pins = list(project.get("pins") or [])
+    if used_pins:
+        routes = (board_preset or {}).get("e1m_routes") or {}
+        defined_pads: set[str] = set()
+        for section in ("gpio", "buses", "pwm"):
+            for entry in (routes.get(section) or []):
+                e1m = entry.get("e1m")
+                if isinstance(e1m, str):
+                    defined_pads.add(e1m)
+        unknown = [p for p in used_pins if p not in defined_pads]
+        if unknown:
+            board_label = board_name or "<inline>"
+            raise OrchestratorError(
+                f"board.yaml `pins:` references {unknown} "
+                f"that are not in the resolved board '{board_label}'s "
+                f"`e1m_routes:` block.  Known pads: "
+                f"{sorted(defined_pads)}")
 
     return BoardProject(
         sku=sku,

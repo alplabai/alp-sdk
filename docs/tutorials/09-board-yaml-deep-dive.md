@@ -4,12 +4,12 @@
 
 **Target audience:** developers who've shipped one ALP SDK build
 and want to understand every knob in `board.yaml`, including
-the custom-carrier flow.
+the custom-board flow.
 
 **Prerequisites:** Tutorial [01](01-first-build.md) completed.
 
 **Outcome:** confident hand-authoring of `board.yaml` for any
-SoM / carrier combination, including custom carriers.  Understand
+SoM / board combination, including custom boards.  Understand
 when each block is required, when the defaults suffice, and how
 the loader translates each block into backend config.
 
@@ -24,22 +24,24 @@ firmware project targets.  Every backend's config -- Zephyr's
 `alp.conf`, plain-CMake `-D` flags, Yocto's `local.conf` -- is
 **derived** from it by `scripts/alp_project.py` +
 `scripts/alp_orchestrate.py`.  The schema lives at
-[`metadata/schemas/board-config-v2.schema.json`](../../metadata/schemas/board-config-v2.schema.json);
+[`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json);
 this tutorial walks every top-level block.
 
 ## Required vs optional
 
 Required (the loader rejects a `board.yaml` missing any of these):
 
-- `schema_version: 2`
 - `som.sku`
 - `cores:` (mapping of core_id → `{ os, ... }`); every non-`off`
   core needs at least `os:` + (for Zephyr / baremetal) `app:`
+- One of:
+  - top-level `name:` plus `populated:` / `e1m_routes:` (inline mode,
+    customer projects), OR
+  - top-level `preset:` (SDK-internal shortcut used by the EVK
+    demos at `examples/`)
 
-Everything else is optional.  `carrier.name` is optional but
-strongly recommended (without it, the loader can't pull a
-populated-chips preset).  Adding any per-core or top-level block
-adds capability; omitting it falls back to defaults pulled from
+Everything else is optional.  Adding any per-core or top-level
+block adds capability; omitting it falls back to defaults pulled from
 the SoM preset's `topology:` block.
 
 ## Block-by-block walkthrough
@@ -47,7 +49,6 @@ the SoM preset's `topology:` block.
 ### `schema_version`
 
 ```yaml
-schema_version: 2
 ```
 
 Bumped to `2` in v0.6 when heterogeneous orchestration landed
@@ -80,10 +81,10 @@ If the customer's SDK version is older than the rev's
 `min_sdk_version`, the loader exits with code 3.  Always pin
 `hw_rev` for production; omit for bring-up convenience.
 
-### `carrier`
+### `board`
 
 ```yaml
-carrier:
+board:
   name: E1M-EVK            # required (or inline `populated`)
   populated:               # optional override on top of the preset
     button_led: true
@@ -91,23 +92,23 @@ carrier:
 ```
 
 `name` resolves to a preset at
-`metadata/carriers/<name>/board.yaml`.  The SDK ships:
+`metadata/boards/<name>.yaml`.  The SDK ships:
 
-- `E1M-EVK` -- 35×35 reference carrier for AEN + N93.
-- `E1M-X-EVK` -- 45×65 reference carrier for V2N + V2N-M1.
+- `E1M-EVK` -- 35×35 reference board for AEN + N93.
+- `E1M-X-EVK` -- 45×65 reference board for V2N + V2N-M1.
 - `custom-example` -- copy-friendly template.
 
-`populated` is an additive override on top of the carrier
+`populated` is an additive override on top of the board
 preset's populated block.  Use `true` / `false` to opt chip
 drivers in / out per the customer's specific assembly.  Each
 `true` becomes `CONFIG_ALP_SDK_CHIP_<NAME>=y` in the generated
 `alp.conf`.
 
-**Custom carrier without a preset:** drop `name` entirely and
+**Custom board without a preset:** drop `name` entirely and
 declare the populated chips inline:
 
 ```yaml
-carrier:
+board:
   populated:
     bmi323:   true
     ssd1306:  true
@@ -180,7 +181,7 @@ Higher-level concerns ride other paths: audio is composed from
 `i2s` + a codec chip driver; inference / IoT / BLE / security /
 mproc / DSP / GPU2D have dedicated `<alp/...>` surfaces wired
 in via `libraries:`, `iot:`, `inference:`, or by enabling the
-chip-driver under `carrier.populated:`.
+chip-driver under `board.populated:`.
 
 Omit the block entirely if your slice uses no peripherals
 (rare; most apps need at least `gpio`).
@@ -254,7 +255,7 @@ APIs):
 - `littlefs`    -- LittleFS
 - `tflite_micro`, `pid`, `modbus`, `nanopb`, ... -- see the
   full enum in
-  [`metadata/schemas/board-config-v2.schema.json`](../../metadata/schemas/board-config-v2.schema.json).
+  [`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json).
 
 ### `chips` (top-level, opt-in chip drivers)
 
@@ -272,7 +273,7 @@ matching `CONFIG_ALP_SDK_CHIP_<NAME>=y`.  Shared across cores
 Two ways a chip ends up enabled in the build:
 
 1. **Opt-in** -- the customer lists the driver here.  Used for
-   chips populated on a custom carrier or hand-soldered onto a
+   chips populated on a custom board or hand-soldered onto a
    stock one.
 2. **Auto-enabled from `on_module:`** -- the SoM preset's
    `on_module:` block declares every chip soldered onto the
@@ -313,26 +314,25 @@ diagnostics:
 Sets the SDK's log verbosity.  Maps to Zephyr's
 `CONFIG_LOG_DEFAULT_LEVEL` + the Yocto-side `LOG_LEVEL` env var.
 
-## Worked example: custom IoT carrier on AEN
+## Worked example: custom IoT board on AEN
 
-A custom carrier that doesn't match any shipped preset, with
+A custom board that doesn't match any shipped preset, with
 BLE + MQTT-TLS + LVGL display:
 
 ```yaml
-schema_version: 2
+name: my-iot-board       # inline board: required when no `preset:`
 
 som:
   sku:    E1M-AEN701
   hw_rev: r1
 
-carrier:
-  populated:
-    bme280:     true
-    ssd1306:    true
-    button_led: true
-  # Bus addresses + pad aliases live in chip-driver metadata
-  # + devicetree overlays; see the `### carrier` section above
-  # for the contract.  board.yaml itself stays declarative.
+populated:
+  bme280:     true
+  ssd1306:    true
+  button_led: true
+# Bus addresses + pad aliases live in chip-driver metadata
+# + devicetree overlays; see the `### board` section above
+# for the contract.  board.yaml itself stays declarative.
 
 cores:
   m55_hp:

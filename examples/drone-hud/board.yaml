@@ -18,6 +18,12 @@ preset: e1m-evk             # External chips (GNSS, ST7789) plugged
                             # into the EVK's headers are listed in
                             # the `chips:` array below.
 
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - E1M_I2C0
+  - E1M_UART0
+  - E1M_SPI1
+
 # Single-OS app -- M55-HP runs LVGL HUD + Madgwick + sensor IO.
 # A32 cluster off; M55-HE keeps the SoM topology default so the
 # peer-NPU stays available for ML-style flight intent prediction in

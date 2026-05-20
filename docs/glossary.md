@@ -26,7 +26,7 @@ allocator places against the active SoM by consuming the SoM
 preset's `pad_routes:` from alp-sdk.
 
 **board.yaml** -- The single declarative file at the root of every
-application.  Lists `som.sku`, `carrier.name`, the per-core
+application.  Lists `som.sku`, the `preset:` (or use an inline board), the per-core
 `cores.<id>` block (`os`, `app`, `peripherals`, `libraries`,
 `iot`, `inference`), top-level `chips`, cross-core `ipc`
 carve-outs, etc.  Validated by `scripts/validate_board_yaml.py`.
@@ -38,8 +38,8 @@ the PMICs, RTC, OPTIGA, supervisor MCU slave interface.
 (GD32G553) reachable over a hybrid SPI + I2C transport.  See
 [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md).
 
-**Carrier** -- A board that an E1M SoM plugs into.  The SDK ships
-presets for the E1M-EVK + E1M-X-EVK reference carriers.
+**Board** -- A board that an E1M SoM plugs into.  The SDK ships
+presets for the E1M-EVK + E1M-X-EVK reference boards.
 
 **Carve-out** -- A physical memory region reserved for cross-core
 IPC, declared in `board.yaml ipc[]` and resolved against the
@@ -84,7 +84,7 @@ families ship in this size.
 
 **E1M-X** -- 45 × 65 mm SoM form factor (496 pads).  V2N family.
 
-**EVK** -- Evaluation Kit.  The reference carrier ALP Lab ships for
+**EVK** -- Evaluation Kit.  The reference board ALP Lab ships for
 bring-up.  Two flavours: E1M-EVK (35 × 35) and E1M-X-EVK (45 × 65).
 
 **Ethos-U** -- Arm's micro-NPU IP.  AEN modules carry Ethos-U55;
@@ -132,7 +132,7 @@ the SDK use it for per-feature opt-in.
 ## L-P
 
 **Loader** -- `scripts/alp_project.py` -- reads `board.yaml`,
-resolves SoM SKU preset + carrier preset, emits the per-backend
+resolves SoM SKU preset + board preset, emits the per-backend
 config (Zephyr `alp.conf` / CMake `-D` flags / Yocto `local.conf`).
 
 **MCUboot** -- The bootloader used on AEN-Zephyr for secure-
@@ -236,11 +236,11 @@ scoped subprocess.
 **SoC** -- System-on-Chip.  The main silicon under a SoM's lid.
 
 **SoM** -- System-on-Module.  ALP's per-SoC PCB module that plugs
-into a carrier (e.g. E1M-V2N101, E1M-AEN701).
+into a board (e.g. E1M-V2N101, E1M-AEN701).
 
 **SoM preset** (`E1M-<MPN>.yaml`) -- Per-SKU manifest declaring
 silicon, populated chips, I²C device addresses, memory specs,
-default carrier.  Lives at `metadata/e1m_modules/<SKU>.yaml`
+default board.  Lives at `metadata/e1m_modules/<SKU>.yaml`
 (e.g. `E1M-AEN701.yaml`, `E1M-V2N101.yaml`).  Earlier docs
 called this `som.yaml`; the file name carries the SKU now so
 each preset is distinguishable in a directory listing.

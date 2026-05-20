@@ -14,6 +14,11 @@ som:
                              # CONFIG_ALP_TFLM_ETHOS_U55=y automatically.
 
 preset: e1m-evk
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - E1M_I2C0
+  - E1M_SPI1
 cores:
   a32_cluster:
     os: "off"

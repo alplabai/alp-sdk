@@ -63,9 +63,9 @@ the load-bearing intra-AEN portability proof.
 | `CONFIG_ALP_SDK_INFERENCE_TFLM_NEON=y`            | every cortex-a* slice across all SoMs               |
 | `CONFIG_SPI=y`                                    | auto-enabled on AEN because CC3501E drives an SPI master |
 
-The 14 carrier-populated chips (`BMI323`, `BMP581`, `INA236`,
+The 14 board-populated chips (`BMI323`, `BMP581`, `INA236`,
 `LSM6DSO`, `TAS2563`, `TCAL9538`, …) are byte-identical across every
-E1M SKU — the carrier abstraction decouples SoM swap from carrier
+E1M SKU — the board abstraction decouples SoM swap from board
 population, as designed.
 
 ## E1M-X family (Cortex-A55 + Cortex-M33, all RZ/V2N R9A09G056N44GBG)

@@ -1,8 +1,8 @@
 # Bench bring-up — E1M-X V2N
 
 Step-by-step procedure for bringing a freshly-assembled E1M-X V2N
-module up on the bench.  Assumes you have an `E1M-X-EVK` carrier
-(or a pin-compatible custom carrier), a SWD debug probe (J-Link or
+module up on the bench.  Assumes you have an `E1M-X-EVK` board
+(or a pin-compatible custom board), a SWD debug probe (J-Link or
 ST-Link), an external 5 V bench supply, a USB-UART adapter, and a
 1 Gb Ethernet link partner.
 
@@ -20,7 +20,7 @@ Inventory check before powering anything:
   (secure element), TMP112 (temp sensor), N24S128 (EEPROM),
   Murata LBEE5HY2FY-922 (Wi-Fi/BT), 2x RTL8211FDI (Ethernet PHYs),
   5L35023B (audio clock generator), and the on-module eMMC + xSPI.
-* Carrier populated: at minimum, E1M-edge passthroughs + the 5 V
+* Board populated: at minimum, E1M-edge passthroughs + the 5 V
   power input + JTAG/SWD header + USB-UART for console.
 
 ## 1. First-power smoke test
@@ -37,7 +37,7 @@ Inventory check before powering anything:
 If the SoC console stays silent:
 
 * Probe `VDD_0V8` (DA9292 CH1) on a test point — should be 0.8 V ± 1 %.
-* Probe `VDD_3V3` and `VDD_1V8` on the carrier; should be at their
+* Probe `VDD_3V3` and `VDD_1V8` on the board; should be at their
   ACT88760-stamped values.
 * `DA9292.TW_N` line should be high (no thermal-warning); if low,
   the secondary PMIC is over temperature -- reduce load and retry.
@@ -214,6 +214,6 @@ Expected: PHYID1 reads `0x001C` (Realtek OUI).  After ~3-5 s with a
 After the basic bring-up clears:
 
 * Run the [test plan](test-plan.md) for the V2N family.
-* If the carrier is V2N-M1, continue with
+* If the board is V2N-M1, continue with
   [`bring-up-v2n-m1.md`](bring-up-v2n-m1.md) to bring the DEEPX
   rails up and load the NPU runtime.

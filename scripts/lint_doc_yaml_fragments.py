@@ -5,7 +5,7 @@ Lint board.yaml fragments embedded in Markdown documentation.
 
 Walks every tracked *.md file under the repo root, extracts ```yaml
 fenced blocks that *look like* full board.yaml documents (top-level
-`schema_version:` key), and validates each fragment against the
+`som:` + `cores:` markers), and validates each fragment against the
 corresponding schema in `metadata/schemas/`.
 
 Catches the failure mode where a doc shows a board.yaml snippet that
@@ -77,12 +77,12 @@ _FENCE_RE = re.compile(
     flags=re.MULTILINE | re.DOTALL,
 )
 
-# Minimum keys a fragment must carry to be considered a board.yaml
-# document.  We deliberately gate on `schema_version` so plain
-# library-profile / soc-spec / hw-revisions snippets that share the
-# same fenced-block syntax don't get force-validated against the
-# board.yaml schema.
-_BOARD_YAML_MARKERS: frozenset[str] = frozenset({"schema_version", "som"})
+# Heuristic: a fragment is treated as a board.yaml document when it
+# has `som:` plus at least one of `cores:` (the per-core mapping the
+# schema requires) so that plain library-profile / soc-spec /
+# hw-revisions snippets that share the same fenced-block syntax
+# don't get force-validated against the board.yaml schema.
+_BOARD_YAML_MARKERS: frozenset[str] = frozenset({"som", "cores"})
 
 
 @dataclass(frozen=True)
@@ -100,7 +100,6 @@ class Fragment:
 class LintResult:
     """One validated fragment + its outcome."""
     fragment: Fragment
-    schema_version: int
     ok: bool
     error: str | None       # populated when ok=False
 
@@ -143,7 +142,7 @@ def extract_fragments(md_path: Path) -> list[Fragment]:
 
 def parse_fragment(fragment: Fragment) -> dict[str, Any] | None:
     """YAML-parse one fragment.  Returns None for fragments that are
-    not board.yaml documents (lack the `schema_version` marker) or
+    not board.yaml documents (lack the `som:` + `cores:` markers) or
     that fail to parse.  The latter is intentionally non-fatal:
     fragments are often examples mid-thought, and the linter only
     enforces schema-correctness on fragments that claim to be
@@ -159,11 +158,9 @@ def parse_fragment(fragment: Fragment) -> dict[str, Any] | None:
     return data
 
 
-def _load_schema(version: int, schemas_dir: Path) -> dict[str, Any] | None:
-    """Locate the JSON Schema for a given board.yaml schema_version.
-    Returns None when no schema is available (e.g. v1 in a tree that
-    only ships v2)."""
-    path = schemas_dir / f"board-config-v{version}.schema.json"
+def _load_schema(schemas_dir: Path) -> dict[str, Any] | None:
+    """Return the board.yaml schema, or None when the file is missing."""
+    path = schemas_dir / "board.schema.json"
     if not path.is_file():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
@@ -175,28 +172,11 @@ def validate_fragment(
     schemas_dir: Path,
 ) -> LintResult:
     """Schema-validate one parsed fragment."""
-    raw_v = data.get("schema_version")
-    try:
-        version = int(raw_v)
-    except (TypeError, ValueError):
-        return LintResult(
-            fragment=fragment,
-            schema_version=0,
-            ok=False,
-            error=f"schema_version must be an integer; got {raw_v!r}",
-        )
-
-    schema = _load_schema(version, schemas_dir)
+    schema = _load_schema(schemas_dir)
     if schema is None:
-        # Unknown schema version -- not the linter's job to police
-        # which versions are still in flight; the loader will reject
-        # it at build time.
-        return LintResult(
-            fragment=fragment,
-            schema_version=version,
-            ok=True,
-            error=None,
-        )
+        # Schema missing on disk -- not the linter's job to police the
+        # SDK layout; the loader will reject builds without it.
+        return LintResult(fragment=fragment, ok=True, error=None)
 
     validator = jsonschema.Draft202012Validator(schema)
     errors = sorted(
@@ -204,24 +184,13 @@ def validate_fragment(
         key=lambda e: list(e.absolute_path),
     )
     if not errors:
-        return LintResult(
-            fragment=fragment,
-            schema_version=version,
-            ok=True,
-            error=None,
-        )
+        return LintResult(fragment=fragment, ok=True, error=None)
 
-    # Compose a compact multi-error string.
     bits: list[str] = []
     for err in errors:
         loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
         bits.append(f"  {loc}: {err.message}")
-    return LintResult(
-        fragment=fragment,
-        schema_version=version,
-        ok=False,
-        error="\n".join(bits),
-    )
+    return LintResult(fragment=fragment, ok=False, error="\n".join(bits))
 
 
 def lint(
@@ -252,7 +221,7 @@ def _print_report(results: list[LintResult], checked: int) -> int:
         return 0
     for r in results:
         marker = "OK  " if r.ok else "FAIL"
-        print(f"{marker} {r.fragment} (schema v{r.schema_version})")
+        print(f"{marker} {r.fragment}")
         if not r.ok and r.error:
             print(r.error)
     print()

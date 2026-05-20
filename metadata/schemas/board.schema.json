@@ -11,22 +11,23 @@
   },
   "allOf": [
     {
-      "description": "Either `preset:` OR inline board definition -- not both.  Inline mode requires a top-level `name:` (used in the generated `alp_<name>_routes.h` filename + Doxygen blocks); preset mode takes the name from the resolved preset.",
-      "oneOf": [
-        {
-          "required": ["preset"],
-          "not": {
-            "anyOf": [
-              { "required": ["populated"] },
+      "description": "`preset:` is mutually exclusive with inline `populated:` / `e1m_routes:`.  Projects without any board declaration (headless / inference-only builds) are also valid -- they get no chip drivers and no E1M-pad routes header.",
+      "not": {
+        "anyOf": [
+          {
+            "allOf": [
+              { "required": ["preset"] },
+              { "required": ["populated"] }
+            ]
+          },
+          {
+            "allOf": [
+              { "required": ["preset"] },
               { "required": ["e1m_routes"] }
             ]
           }
-        },
-        {
-          "required": ["name"],
-          "not": { "required": ["preset"] }
-        }
-      ]
+        ]
+      }
     }
   ],
   "properties": {
@@ -42,7 +43,7 @@
     "preset": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*$",
-      "description": "Reference to a shared board definition at `metadata/boards/<preset>.yaml`.  The preset's `name`, `populated`, `e1m_routes`, `default_hw_rev` and `hw_revisions` blocks are pulled in wholesale.  Mutually exclusive with inline `populated:` / `e1m_routes:`."
+      "description": "SDK-internal shortcut: reference to a shared board definition at `metadata/boards/<preset>.yaml`.  Used by the SDK's own EVK demo projects under `examples/` to share the EVK + X-EVK definitions without copy-paste.  Customer projects write the board out inline (`name:` + `populated:` + `e1m_routes:` at the top level) -- they don't need to use `preset:`.  When set, the preset's `name`, `populated`, `e1m_routes`, `default_hw_rev`, and `hw_revisions` blocks are pulled in wholesale; mutually exclusive with inline `populated:` / `e1m_routes:`."
     },
     "hw_rev": {
       "type": "string",
@@ -88,6 +89,16 @@
     "e1m_routes": {
       "$ref": "#/$defs/e1m_routes",
       "description": "Inline mode only.  Authoritative board-side E1M-pad routing.  scripts/gen_board_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.  Mutually exclusive with `preset:`."
+    },
+
+    "pins": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^E1M_(GPIO_IO[0-9]+|I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|I2S[0-9]+|CAN[0-9]+|QENC[0-9]+)$"
+      },
+      "description": "E1M pads / peripheral instances the project actively uses.  Useful when `preset:` is set -- the resolved board defines the full wiring, this list names the subset the app actually touches so a reader sees the project's hardware usage in one place.  The loader validates each entry against the resolved board's `e1m_routes:` block (typos / missing pads error out at validate time).  Optional even when `preset:` is set."
     },
 
     "ipc": {

@@ -63,7 +63,7 @@ below.)
 
 The public surface (`<alp/peripheral.h>`) takes only **opaque
 integers** for instance selection.  Those integers are
-**fixed by the E1M standard** — every E1M-conformant carrier
+**fixed by the E1M standard** — every E1M-conformant board
 resolves them identically — and the SDK ships them as named
 macros in [`<alp/e1m_pinout.h>`](../include/alp/e1m_pinout.h):
 
@@ -72,7 +72,7 @@ macros in [`<alp/e1m_pinout.h>`](../include/alp/e1m_pinout.h):
 #include <alp/e1m_pinout.h>
 
 alp_i2c_open(&(alp_i2c_config_t){
-    .bus_id = E1M_I2C0,         /* always 0 across every E1M carrier */
+    .bus_id = E1M_I2C0,         /* always 0 across every E1M board */
     .bitrate_hz = 400000
 });
 
@@ -84,10 +84,10 @@ silicon pin names (`P3_4`, `VDD_5V_IN`, …), or SoM SKUs
 (`E1M-AEN301`, …) in its public API.  It can't — those couplings
 would break the cross-variant abstraction.
 
-### Carrier-specific feature names
+### Board-specific feature names
 
 Names like `USER_LED_RED` or `ENCODER_SW` are **not** in the E1M
-standard — they're carrier-specific.  Those live in
+standard — they're board-specific.  Those live in
 [`<alp/boards/<board>.h>`](../include/alp/boards/) as thin
 re-exports of the underlying `E1M_GPIO_*` indices:
 
@@ -149,7 +149,7 @@ first public release).  The pin is referenced explicitly in
 `west.yml` so a `west update` on this SDK pulls a known-compatible
 spec revision.
 
-If you're adding support for a new SoM or carrier board:
+If you're adding support for a new SoM or board board:
 
 1. The pad-level routing of your SoM goes into a new entry under
    [`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/)

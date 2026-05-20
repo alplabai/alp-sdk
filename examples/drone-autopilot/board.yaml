@@ -21,6 +21,12 @@ preset: e1m-evk             # External sensors plugged into the EVK's
                             # I2C/UART headers are listed in `chips:`
                             # below to flip on their chip drivers.
 
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - E1M_I2C0
+  - E1M_UART0
+  - E1M_PWM0
+
 # Flight controller on M55-HP only.  A32 cluster off (no Linux on a
 # weight-sensitive vehicle); M55-HE inherits the SoM topology
 # default (stays available as the failsafe peer for v0.7's dual-MCU

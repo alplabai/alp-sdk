@@ -1,7 +1,7 @@
 # board.yaml -- ALP SDK project configuration.
 #
 # Copy this template to your application root and edit the values
-# for your project.  scripts/alp_orchestrate.py reads this file,
+# for your board.  scripts/alp_orchestrate.py reads this file,
 # resolves the SoM topology, fans out into per-core build slices
 # (Zephyr / Yocto / baremetal), and emits a system manifest that
 # `west alp-image` / `west alp-flash` / OTA consume.
@@ -14,51 +14,22 @@
 # right fix is to extend the schema -- file an issue.
 #
 # See docs/heterogeneous-builds.md for the per-core walk-through
-# and docs/board-config.md for the schema reference.  The full
-# design rationale lives at
-# docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
+# and docs/board-config.md for the schema reference.
 #
 # Validated against metadata/schemas/board.schema.json.
 
 # -------------------------------------------------------------------
-# Board identity -- what BOARD does this firmware target?
+# Board identity
 # -------------------------------------------------------------------
-# Two mutually-exclusive ways to declare which board:
-#
-#   (A) Inline -- you're targeting a custom board (production
-#       PCB, bespoke daughter board, lab fixture).  Provide
-#       top-level `name:` plus `populated:` and `e1m_routes:`
-#       blocks below.  The board is fully described in this one
-#       file.
-#
-#   (B) Preset -- you're targeting a board the SDK ships a shared
-#       definition for (the EVKs, or any custom board you've added
-#       under metadata/boards/<name>.yaml).  Provide top-level
-#       `preset: <name>` and omit `populated:` / `e1m_routes:` --
-#       they come from metadata/boards/<name>.yaml.
-#
-# Pick one mode; the schema rejects mixing.
+# `name:` is your board's name.  Used in the generated
+# `include/alp/boards/alp_<name>_routes.h` filename + as the board
+# identity in build artefacts.
+name: my-board                # change to your board name
+description: "..."            # optional, free-form
 
-# Mode B (preset) shown -- swap for inline below if you have a
-# custom board.
-preset: e1m-evk
-
-# -- Mode A (inline) example --
-# name: my-sensor-board       # board name; required when no `preset:`
-# description: "Slim sensor board, AEN-based, ships in Q3."
-# hw_rev: r1                  # optional board hardware revision
-#
-# populated:                  # chips populated on this board
-#   bmi323: true
-#   ssd1306: true
-#
-# e1m_routes:                 # E1M-pad -> board-side macro
-#   gpio:
-#     - { e1m: E1M_GPIO_IO15, macro: PIN_BMI323_INT1,
-#         doc: "BMI323 INT1 (data-ready / motion / FIFO)." }
-#   buses:
-#     - { e1m: E1M_I2C0, macro: I2C_BUS_SENSORS,
-#         doc: "Shared sensor bus." }
+# Optional: your board's own hardware revision (separate from the
+# SoM's revision, set under `som.hw_rev` below).
+# hw_rev: r1
 
 # -------------------------------------------------------------------
 # SoM identity -- which MODULE is mounted on the board?
@@ -110,7 +81,9 @@ som:
 #
 # Customers may declare a subset of cores; missing keys inherit
 # the SoM preset's `topology:` defaults.  Use `os: off` to skip a
-# core entirely.
+# core entirely.  Across-SoM-family swaps (AEN <-> V2N) require
+# updating these keys -- per ADR-0011 cross-family portability is
+# explicitly not a goal.
 cores:
   m55_hp:
     app: ./src
@@ -121,28 +94,67 @@ cores:
     # libraries: [...]
     # iot:       {...}
 
-  # Other cores left unspecified inherit the SoM preset's defaults
-  # entirely (e.g. m55_he gets `os: zephyr, app: alp-stock-shim`).
-  # To skip a peer core explicitly:
+  # Heterogeneous example (V2N -- A55 Yocto + M33 Zephyr peers).
+  # `os:` is omitted on both -- topology defaults pick the right
+  # runtime per core class:
   #
-  # m55_he:
-  #   os: off
+  # a55_cluster:
+  #   app: ./linux
+  #   image: alp-image-edge
+  #   peripherals: [ethernet, usb, emmc]
+  #   libraries:   [mbedtls, nlohmann_json]
+  #   iot:         { wifi: true, mqtt: true }
+  # m33_sm:
+  #   app: ./m33_sm
+  #   peripherals: [adc, pwm, i2c, gpio]
+  #   libraries:   [cmsis_dsp]
 
-# Heterogeneous example (V2N -- A55 Yocto + M33 Zephyr peers).  `os:`
-# is omitted on both -- topology defaults pick the right runtime per
-# core class:
+# -------------------------------------------------------------------
+# Chips populated on THIS board
+# -------------------------------------------------------------------
+# Each `true` enables the matching CONFIG_ALP_SDK_CHIP_<NAME>=y
+# (or CONFIG_ALP_SDK_BLOCK_<NAME>=y for the SDK-level helpers
+# `button_led` / `pdm_mic`; the loader picks the right symbol).
 #
-# cores:
-#   a55_cluster:
-#     app: ./linux
-#     image: alp-image-edge
-#     peripherals: [ethernet, usb, emmc]
-#     libraries:   [mbedtls, nlohmann_json]
-#     iot:         { wifi: true, mqtt: true }
-#   m33_sm:
-#     app: ./m33_sm
-#     peripherals: [adc, pwm, i2c, gpio]
-#     libraries:   [cmsis_dsp]
+# Edit this list to reflect your board's actual chip population.
+# A worked example for a real board ships at
+# metadata/boards/e1m-evk.yaml (the EVK reference) -- copy it as a
+# starting template if you're laying out a derivative board.
+populated:
+  bmi323: true                # IMU
+  ssd1306: true               # mono OLED
+  # bme280: true              # environmental sensor
+  # tas2563: true             # I2S audio codec
+  # ...
+
+# -------------------------------------------------------------------
+# E1M-pad -> board-side macro routing
+# -------------------------------------------------------------------
+# Authoritative wiring for the board: which E1M-standard pad
+# (E1M_GPIO_IO<N>, E1M_PWM<N>, E1M_I2C<N>, ...) connects to which
+# board-side feature.
+#
+# scripts/gen_board_header.py reads this block and emits
+# `include/alp/boards/alp_<name>_routes.h` with one
+# `#define PIN_<NAME> E1M_<...>` line per entry -- hand-written
+# firmware references the resulting macro names.
+#
+# Per entry:
+#   - e1m:        E1M_GPIO_IO<N> | E1M_PWM<N> | E1M_I2C<N> | E1M_SPI<N> | E1M_UART<N> | E1M_I3C<N>
+#   - macro:      uppercase C-identifier the generator emits
+#   - doc:        optional one-line Doxygen `@brief` text
+#   - active_low: optional bool
+#   - routes_via: optional SoM-side mediator note (e.g. `cc3501e`)
+e1m_routes:
+  gpio:
+    - { e1m: E1M_GPIO_IO15, macro: PIN_BMI323_INT1,
+        doc: "BMI323 INT1 (data-ready / motion / FIFO)." }
+  buses:
+    - { e1m: E1M_I2C0, macro: I2C_BUS_SENSORS,
+        doc: "Shared sensor bus." }
+  pwm:
+    - { e1m: E1M_PWM3, macro: PWM_LED_RED,
+        doc: "Status LED red channel." }
 
 # -------------------------------------------------------------------
 # Cross-core IPC carve-outs (optional)
@@ -160,8 +172,12 @@ cores:
 #     name: alp_default_rpmsg
 
 # -------------------------------------------------------------------
-# Chips populated for THIS project (beyond the board's `populated:`)
+# Project-declared chips (beyond the board's `populated:` table)
 # -------------------------------------------------------------------
+# Chip drivers the application links directly via <alp/chips/<name>.h>
+# -- typically external sensors plugged into the board's headers that
+# aren't part of the board's stock population.
+#
 # chips:
 #   - lsm6dso
 #   - st7789
@@ -172,3 +188,11 @@ cores:
 diagnostics:
   log_level: info       # error | warn | info | debug | trace
   # last_error: true    # alp_last_error() thread-local slot
+
+# -------------------------------------------------------------------
+# Note on `preset:` (SDK-internal -- you don't need it)
+# -------------------------------------------------------------------
+# The SDK demos under examples/ use `preset: e1m-evk` / `preset:
+# e1m-x-evk` as a shortcut to share the EVK board definitions across
+# ~40 demo projects.  Your project's board.yaml goes inline, as
+# above -- one file, fully self-contained.

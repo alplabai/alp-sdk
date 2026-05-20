@@ -8,6 +8,11 @@ som:
   sku: E1M-AEN701
 
 preset: e1m-evk
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - E1M_SPI1
+  - E1M_I2C0
 cores:
   a32_cluster:
     os: "off"

@@ -132,14 +132,10 @@ int main(void) {
 ## 4. `board.yaml` for Yocto
 
 ```yaml
-schema_version: 2
-
 som:
   sku: E1M-V2N101
 
-carrier:
-  name: E1M-X-EVK
-
+preset: e1m-x-evk
 cores:
   a55_cluster:
     app: ./linux                  # os: omitted -- A-cores default to yocto per topology

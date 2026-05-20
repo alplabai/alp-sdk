@@ -1172,9 +1172,9 @@ def _emit_hw_info_h(
         f'#define ALP_HW_BUILD_SOM_HW_REV      "{som_hw_rev}"',
     ]
     if board_name:
-        lines.append(f'#define ALP_HW_BUILD_CARRIER_NAME    "{board_name}"')
+        lines.append(f'#define ALP_HW_BUILD_BOARD_NAME      "{board_name}"')
         if board_hw_rev:
-            lines.append(f'#define ALP_HW_BUILD_CARRIER_HW_REV  "{board_hw_rev}"')
+            lines.append(f'#define ALP_HW_BUILD_BOARD_HW_REV    "{board_hw_rev}"')
     if os_choice:
         lines.append(f'#define ALP_HW_BUILD_OS              "{os_choice}"')
     if v2_cores is not None:

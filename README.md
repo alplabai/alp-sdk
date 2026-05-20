@@ -116,14 +116,11 @@ A v0.6 project is **one declarative file** plus per-core app
 directories.  Drop a `board.yaml` at your app root:
 
 ```yaml
-schema_version: 2
-
 som:
   sku: E1M-V2N101      # your MPN -- the SDK ships a preset for every released MPN
   hw_rev: r1
 
-carrier:
-  name: E1M-X-EVK      # or your own custom carrier
+preset: e1m-x-evk      # or write your board out inline -- see docs/board-config.md
 
 cores:
   a55_cluster:

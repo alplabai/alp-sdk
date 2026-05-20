@@ -62,7 +62,7 @@ untrusted from the receiving side's perspective.
 | **Firmware image signing key (development)** | Integrity (test-only) | `keys/mcuboot_dev_ecdsa_p256.pem` -- gitignored |
 | **OPTIGA Trust M device-unique key** | Confidential | OPTIGA's secure NVM (never leaves) |
 | **MQTT broker TLS client cert + private key** | Confidential + integrity | Application-owned; SDK exposes the pinning API |
-| **EEPROM manifest (SKU + serial + hw_rev)** | Integrity (authenticity) | 24C128 EEPROM (carrier-side); read-only at runtime |
+| **EEPROM manifest (SKU + serial + hw_rev)** | Integrity (authenticity) | 24C128 EEPROM (board-side); read-only at runtime |
 | **Application firmware in flash** | Integrity | MCUboot-verified slot |
 | **Mender update artefact** | Integrity (signed) + confidentiality (TLS in transit) | Mender server → A/B partitions |
 | **OTA bootloader keys** | Integrity | MCUboot's compiled-in pub key |
@@ -108,7 +108,7 @@ In RF range; can advertise/scan but not pair without consent.
 
 ### 3.3 Local I²C / I²S / UART attacker
 
-Has access to the carrier's expansion header.  Can drive bytes
+Has access to the board's expansion header.  Can drive bytes
 into the on-module BRD_I²C bus (PMICs, RTC, secure element,
 supervisor MCU) or pretend to be a slave.
 
@@ -128,12 +128,12 @@ supervisor MCU) or pretend to be a slave.
   `tests/fuzz/gd32_bridge_frame_fuzz.c`.
 - EEPROM manifest carries a CRC32; runtime
   `<alp/hw_info.h>::alp_hw_info_read` rejects mismatched CRC.
-  Production-side: 24C128 has a write-protect strap; carrier
+  Production-side: 24C128 has a write-protect strap; board
   designs should tie it to "WP active" at runtime.
 
 ### 3.4 Local physical attacker (JTAG/SWD)
 
-Direct probe access to the carrier's debug header.  Can halt the
+Direct probe access to the board's debug header.  Can halt the
 CPU, dump RAM, reflash.
 
 **Surfaces under threat:**

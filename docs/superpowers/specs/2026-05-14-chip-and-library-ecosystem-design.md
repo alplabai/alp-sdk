@@ -72,7 +72,7 @@ ecosystem without depending on the maintainer's bandwidth.
 │ Tier 3: customer / private repos                            │
 │ ─────────────────────────────                               │
 │ Customer-owned drivers that don't make sense upstream        │
-│ (proprietary silicon, NDA-encumbered, one-off carrier).      │
+│ (proprietary silicon, NDA-encumbered, one-off board).      │
 │ Same `chips/<name>/` shape; consumed via                     │
 │ EXTRA_ZEPHYR_MODULES or their own west.yml.                  │
 │ Pattern-supported but zero infra on our side.                │
@@ -143,7 +143,7 @@ ecosystem without depending on the maintainer's bandwidth.
 |---|---|---|---|
 | `quectel_bg95` | LTE-M / NB-IoT | UART AT | popular cellular module |
 | `quectel_bg77` | LTE-M / NB-IoT | UART AT | newer Quectel |
-| `ublox_sara_r5` | LTE-M | UART AT | carrier-certified |
+| `ublox_sara_r5` | LTE-M | UART AT | board-certified |
 | `semtech_sx1262` | LoRa | SPI | LoRa (newer SX) |
 | `semtech_sx1276` | LoRa | SPI | LoRa (legacy, ubiquitous) |
 | `ublox_neo_m9n` | GNSS | UART | high-precision GPS |

@@ -43,11 +43,8 @@ def _run_emitter(board_yaml: Path, alp_project) -> dict:
     """Load the project and run _emit_composed_route_table() directly."""
     project = alp_project._load_yaml(board_yaml)
     sku_preset = alp_project._resolve_sku(project["som"]["sku"], METADATA)
-    board_preset = None
-    if "board" in project and project["board"]:
-        board_preset = alp_project._resolve_board(
-            project["board"]["name"], METADATA
-        )
+    board_preset = alp_project._resolve_inline_or_preset_board(
+        project, METADATA)
     raw = alp_project._emit_composed_route_table(
         project, sku_preset, board_preset, METADATA
     )
@@ -124,7 +121,7 @@ class TestAen701Evk:
         """The emitter must return well-formed JSON (no trailing garbage)."""
         project = alp_project._load_yaml(AEN701_EVK_BOARD)
         sku_preset = alp_project._resolve_sku(project["som"]["sku"], METADATA)
-        board_preset = alp_project._resolve_board("E1M-EVK", METADATA)
+        board_preset = alp_project._resolve_board("e1m-evk", METADATA)
         raw = alp_project._emit_composed_route_table(
             project, sku_preset, board_preset, METADATA
         )

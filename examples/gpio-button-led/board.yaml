@@ -30,6 +30,11 @@ preset: e1m-evk            # 35x35 EVK -- reference board.  The EVK
                            # preset already populates `button_led:
                            # true` for the on-board user button + LED.
 
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - E1M_GPIO_IO4
+  - E1M_PWM3
+
 # Single-core slice on AEN701: M55-HP runs the demo.  M55-HE inherits
 # the SoM topology default (stock-shim Zephyr image), keeping the
 # peer-core RPMsg boot path intact for advanced users.

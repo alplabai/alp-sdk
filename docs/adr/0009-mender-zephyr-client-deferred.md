@@ -51,7 +51,7 @@ release notes.  Workarounds for the v0.4 → v1.0 window:
 
 - Physical-access flash (J-Link / OpenOCD against MCUboot's
   secondary slot).
-- Carrier-side OTA fronted by a Linux companion (e.g. a V2N
+- Board-side OTA fronted by a Linux companion (e.g. a V2N
   SoM coordinating the AEN-Zephyr update through the bridge).
 
 ## Consequences

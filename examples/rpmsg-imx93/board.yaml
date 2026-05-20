@@ -18,6 +18,11 @@ som:
   hw_rev: r1
 
 preset: e1m-evk
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - E1M_PWM0
+  - E1M_I2C0
 cores:
   a55_cluster:
     app: ./linux

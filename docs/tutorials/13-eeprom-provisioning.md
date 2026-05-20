@@ -10,7 +10,7 @@ date programming flow.
 
 - A populated E1M module with an unprogrammed 24C128 EEPROM
   (factory state).
-- The carrier exposing BRD_I²C with a suitable USB-I²C adapter
+- The board exposing BRD_I²C with a suitable USB-I²C adapter
   (Aardvark, MCP2221, FT232H).
 - Python 3.10+, `pip install pyyaml`.
 
@@ -52,10 +52,10 @@ CRC doesn't match.
 
 Hardware:
 
-- USB-I²C adapter wired to the carrier's BRD_I²C test points
+- USB-I²C adapter wired to the board's BRD_I²C test points
   (SCL + SDA + GND).  Standard 1.8 V or 3.3 V level shifter on
   the adapter, matching the SoM family.
-- Carrier in factory-test mode (no application running --
+- Board in factory-test mode (no application running --
   either powered through the USB-I²C alone, or running a
   factory-test firmware that gives I²C bus access to the
   external master).

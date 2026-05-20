@@ -1,7 +1,7 @@
 # Project configuration (`board.yaml`)
 
 `board.yaml` is the **single file** that declares what a firmware
-project targets: which SoM SKU (MPN), which carrier (daughter
+project targets: which SoM SKU (MPN), which board (daughter
 board), which app + libraries + peripherals per core, which
 optional connectivity features.  Consumers place one at their app
 root, fill in their MPN, and the SDK's loader handles the rest.
@@ -18,14 +18,11 @@ to your MPN, and you're done -- everything else is inherited from
 the SDK's per-MPN preset:
 
 ```yaml
-schema_version: 2
-
 som:
   sku: E1M-AEN701        # your MPN -- the SDK ships a preset
                           # at metadata/e1m_modules/<MPN>.yaml
 
-carrier:
-  name: E1M-EVK          # or your own custom carrier name
+preset: e1m-evk          # or write your custom board out inline -- see below
 
 cores:
   m55_hp:                # core IDs come from the SoC spec under
@@ -53,15 +50,15 @@ Released MPNs the SDK ships SoM presets for (look under
 | RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                       |
 | NXP i.MX 93       | `E1M-NX9101` (production MPN TBD pending HW config)                          |
 
-Stock carriers (paste into `carrier.name`):
+Stock boards (paste into the `preset:` (or use an inline board)):
 
-| Carrier name  | Form factor   | Hosts                                  |
+| Board name  | Form factor   | Hosts                                  |
 |---------------|---------------|----------------------------------------|
-| `E1M-EVK`     | 35×35 carrier | E1M-AEN family, future E1M-N93 family  |
-| `E1M-X-EVK`   | 45×65 carrier | E1M-X V2N family, V2N-M1 family        |
+| `E1M-EVK`     | 35×35 board | E1M-AEN family, future E1M-N93 family  |
+| `E1M-X-EVK`   | 45×65 board | E1M-X V2N family, V2N-M1 family        |
 
-For custom carrier boards, the EVK preset works as the reference
-design customers fork -- see "Carrier" section below.
+For custom board boards, the EVK preset works as the reference
+design customers fork -- see "Board" section below.
 
 ---
 
@@ -100,7 +97,7 @@ extend the schema, not to bypass it.
 
 ### Today's gaps (v0.3 -> v0.4)
 
-`board.yaml` covers the SoM + carrier + OS backend + inference + IoT
+`board.yaml` covers the SoM + board + OS backend + inference + IoT
 features + optional libraries + Zephyr peripherals today.  One
 remaining gap where hand-written config still leaks in, targeted
 for v0.4:
@@ -111,10 +108,10 @@ for v0.4:
    facing) and stay as-is until the loader handles test-style
    configs in v0.4.
 
-DTS overlays for carrier wiring (`--emit dts-overlay`) and
+DTS overlays for board wiring (`--emit dts-overlay`) and
 `west.yml` libraries auto-pinning (`--emit west-libraries`) were
 previously v0.4 gaps; both ship in v0.3.  The loader's `--emit dts-overlay` mode
-parses `include/alp/boards/<carrier>.h` and generates the bus
+parses `include/alp/boards/<board>.h` and generates the bus
 aliases (`alp-i2c<N>`, `alp-spi<N>`, `alp-uart<N>`, `alp-pwm<N>`)
 plus a stub `alp,pin-array` with one entry per `EVK_PIN_*`
 macro.  Per-pad GPIO bank/index columns remain TBD until the
@@ -164,17 +161,17 @@ One per project.  Hand-written by the user.
 ## Schema
 
 The full JSON Schema lives at
-[`metadata/schemas/board-config-v2.schema.json`](../metadata/schemas/board-config-v2.schema.json).
+[`metadata/schemas/board.schema.json`](../metadata/schemas/board.schema.json).
 Top-level fields:
 
 | Field            | Required | What it picks                                                 |
 |------------------|----------|---------------------------------------------------------------|
-| `schema_version` | yes      | Constant `2` until a breaking format change.                  |
+| `name`           | inline*  | Board name (when not using `preset:`).                          |
 | `som`            | yes      | SoM SKU (+ optional `hw_rev`).  Silicon-level facts (memory, on-module components, NPU capabilities) live in the SKU preset and are NOT customer-tunable here. |
-| `carrier`        | no       | Carrier name + chip-population deltas vs the carrier preset.  |
+| `board`        | no       | Board name + chip-population deltas vs the board preset.  |
 | `cores`          | yes      | Per-core app + library/peripheral knobs.  Each core's `os:` is optional; the SoM topology supplies the natural runtime per core class (Cortex-M → Zephyr, Cortex-A → Yocto). |
 | `ipc`            | no       | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only). |
-| `chips`          | no       | Project-level chip drivers beyond what the carrier ships.     |
+| `chips`          | no       | Project-level chip drivers beyond what the board ships.     |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
 
 Per-core fields under `cores.<id>` (all optional, all inherit from
@@ -218,35 +215,35 @@ an AEN without the OPTIGA Trust M, or with non-stock memory),
 create a new SKU preset rather than overriding here — there is no
 `som.overrides:` or `som.memory:` block to write into.
 
-### SoM vs carrier (kept deliberately separate)
+### SoM vs board (kept deliberately separate)
 
-The schema **separates SoM SKU + carrier into distinct blocks**
+The schema **separates SoM SKU + board into distinct blocks**
 and keeps the stock SoM presets under their own directory tree
 (`metadata/e1m_modules/<family>/sku-*.yaml`).  This is on purpose:
 
 - The SoM is a tightly-controlled, Alp-released hardware item;
   the SKU preset is authoritative + shared across every customer
   using that part.
-- The carrier varies per customer board design; the carrier
+- The board varies per customer board design; the board
   preset is either the stock Alp EVK reference or a customer-
   authored fork.
 
 Keeping them in separate file hierarchies means consumer-authored
-carrier presets never accidentally override SoM data, and SoM
-preset updates from Alp don't drag carrier opinions with them.
+board presets never accidentally override SoM data, and SoM
+preset updates from Alp don't drag board opinions with them.
 
 The schema deliberately separates two concerns that get conflated:
 
 | Block      | What it describes                                                                | When it changes                                                       |
 |------------|----------------------------------------------------------------------------------|-----------------------------------------------------------------------|
-| `som`      | The **module** that mounts on the carrier -- silicon, on-module radio, on-module secure element / RTC / temperature sensor / EEPROM. | Fixed at SoM-fab time.  You can't DNI on-module parts after order; only SoM-variant SKUs differ. |
-| `carrier`  | The **carrier board** -- IMUs, barometers, OLEDs, cameras, microphones, speaker amps, current monitors, I/O expanders, etc. | Different per carrier design.  Custom carriers DNI any component; the EVK ships with a default population. |
+| `som`      | The **module** that mounts on the board -- silicon, on-module radio, on-module secure element / RTC / temperature sensor / EEPROM. | Fixed at SoM-fab time.  You can't DNI on-module parts after order; only SoM-variant SKUs differ. |
+| `board`  | The **board board** -- IMUs, barometers, OLEDs, cameras, microphones, speaker amps, current monitors, I/O expanders, etc. | Different per board design.  Custom boards DNI any component; the EVK ships with a default population. |
 
 On E1M-AEN, the on-module parts are: Alif Ensemble silicon, TI
 CC3501E (Wi-Fi/BLE), Infineon OPTIGA Trust M, Micro Crystal
 RV-3028-C7 RTC, TI TMP112, Onsemi 24C128 EEPROM.  Everything else
 on the dev kit (LSM6DSO, BMI323, ICM-42670, BMP581, OLEDs, OV5640,
-TAS2563, INA236, ...) is on the **E1M-EVK carrier**, not on the
+TAS2563, INA236, ...) is on the **E1M-EVK board**, not on the
 module.
 
 ### `som` block
@@ -293,18 +290,18 @@ Customers don't touch this field -- it is Alp-set on the released
 preset; consumer's `board.yaml` references the SoM by `som.sku:`
 only and the variant is resolved automatically.
 
-### `carrier` block
+### `board` block
 
 ```yaml
-carrier:
-  name: E1M-EVK             # stock preset, or any unique name for a custom carrier
+board:
+  name: E1M-EVK             # stock preset, or any unique name for a custom board
 
-  hw_rev: r1                # optional -- defaults to the carrier preset's
+  hw_rev: r1                # optional -- defaults to the board preset's
                              # `default_hw_rev`.  Same enforcement rules as
                              # `som.hw_rev`; the runtime read happens on a
-                             # carrier-side BOARD_ID ADC + divider.
+                             # board-side BOARD_ID ADC + divider.
 
-  populated:                # delta vs the carrier preset's defaults
+  populated:                # delta vs the board preset's defaults
     lsm6dso: false          # DNI'd on this custom assembly
     tas2563: false          # no speaker amps populated
 ```
@@ -319,15 +316,15 @@ correct symbol per slug; the `board.yaml` syntax is identical
 either way.  See `blocks/README.md` for the block-vs-chip
 distinction.
 
-#### Carrier-side pin routing (`e1m_routes:`)
+#### Board-side pin routing (`e1m_routes:`)
 
-The carrier preset's `e1m_routes:` block is the single editable
-source of truth for the carrier-side macros hand-written firmware
+The board preset's `e1m_routes:` block is the single editable
+source of truth for the board-side macros hand-written firmware
 uses (`EVK_PIN_BMI323_INT1`, `EVK_I2C_BUS_SENSORS`,
 `EVK_PWM_LED_RED`, ...).  Each entry binds an E1M-standard pad
 or peripheral instance (`E1M_GPIO_IO<N>`, `E1M_PWM<N>`,
 `E1M_I2C<N>` / `E1M_SPI<N>` / `E1M_UART<N>` / `E1M_I3C<N>`) to
-its carrier-side `EVK_*` macro name plus optional `doc:` /
+its board-side `EVK_*` macro name plus optional `doc:` /
 `active_low:` / `routes_via:` flags:
 
 ```yaml
@@ -343,16 +340,16 @@ its carrier-side `EVK_*` macro name plus optional `doc:` /
             doc: "RGB LED red channel." }
 ```
 
-[`scripts/gen_carrier_header.py`](../scripts/gen_carrier_header.py)
+[`scripts/gen_board_header.py`](../scripts/gen_board_header.py)
 reads the block and emits
-`include/alp/boards/alp_<carrier>_routes.h` with one
+`include/alp/boards/alp_<board>_routes.h` with one
 `#define EVK_<NAME> E1M_<...>` line per entry (`active_low:`
 becomes a Doxygen note, `routes_via: cc3501e` annotates the
 CC3501E hop).  The generator is idempotent; CI regenerates on
-every PR touching the carrier YAML and fails if the working tree
+every PR touching the board YAML and fails if the working tree
 diff is non-empty.
 
-The hand-authored `include/alp/boards/alp_<carrier>.h`
+The hand-authored `include/alp/boards/alp_<board>.h`
 (`alp_e1m_evk.h` for the stock EVK) now `#include`s the
 generated routes header -- existing firmware that references
 `EVK_PIN_BMI323_INT1`, `EVK_I2C_BUS_SENSORS`, etc. compiles
@@ -361,18 +358,18 @@ INA236 tuning constants, overlay-pad indices, on-board I2C
 addresses) stay hand-authored until follow-up slices lift them
 into the YAML too.
 
-### EVK as reference design (custom carriers)
+### EVK as reference design (custom boards)
 
 The two stock EVK presets aren't just for the dev kit -- they're
-the **canonical reference designs** for customer carrier boards
-based on Alp SoMs.  Most production carriers inherit ~80% of the
+the **canonical reference designs** for customer board boards
+based on Alp SoMs.  Most production boards inherit ~80% of the
 EVK's chip population (it's the validated baseline Alp ships).
 Two ways to consume the reference:
 
 **(a) Reference + override** -- best for small derivatives:
 
 ```yaml
-carrier:
+board:
   name: E1M-EVK             # reference the EVK preset
   populated:                # only list deltas
     tas2563: false          # production board has no speaker amps
@@ -383,26 +380,26 @@ carrier:
 The loader merges the deltas over the EVK preset's defaults.
 Minimal config, easy to read.
 
-**(b) Fork the carrier preset** -- best for full custom boards:
+**(b) Fork the board preset** -- best for full custom boards:
 
 ```bash
 # Copy the EVK preset as a starting point.
-cp metadata/carriers/e1m-evk.yaml \
-   metadata/carriers/my-sensor-board.yaml
+cp metadata/boards/e1m-evk.yaml \
+   metadata/boards/my-sensor-board.yaml
 
 # Edit the populated list to reflect your assembly.
-$EDITOR metadata/carriers/my-sensor-board.yaml
+$EDITOR metadata/boards/my-sensor-board.yaml
 ```
 
 ```yaml
 # In board.yaml:
-carrier:
+board:
   name: my-sensor-board
 ```
 
 A worked example fork lives at
-[`metadata/carriers/custom-example.yaml`](../metadata/carriers/custom-example.yaml).
-Custom carrier presets can live in the alp-sdk repo (when the
+[`metadata/boards/custom-example.yaml`](../metadata/boards/custom-example.yaml).
+Custom board presets can live in the alp-sdk repo (when the
 board design ships under Alp), or in the consumer's own repo
 (the loader's `--metadata-root` arg accepts an alternate search
 path).
@@ -423,14 +420,14 @@ metadata/
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
 │   ├── E1M-V2M102.yaml      # V2N-M1 SKU
 │   └── E1M-NX9101.yaml      # i.MX 93 (production MPN TBD pending HW config)
-└── carriers/
+└── boards/
     ├── E1M-EVK/board.yaml       # 35x35 EVK (AEN / N93)
     ├── E1M-X-EVK/board.yaml     # 45x65 EVK (V2N / V2N-M1)
     └── custom-example/board.yaml # template downstream consumers copy + edit
 ```
 
 v0.3 ships the schema + every released MPN's preset (11 SoM SKUs
-across 4 families) + the two stock carriers + a copy-friendly
+across 4 families) + the two stock boards + a copy-friendly
 custom-example template.  Two SKUs (`E1M-AEN701`, `E1M-V2N101`)
 have their hardware configuration fully populated; the others
 carry `partial_hw_config: true` so the loader knows to expect
@@ -500,7 +497,7 @@ for the full design + per-library notes.
 ## How the loader compiles the file
 
 `scripts/alp_project.py` reads `board.yaml`, validates against the
-schema, resolves the SoM SKU + carrier presets, applies overrides,
+schema, resolves the SoM SKU + board presets, applies overrides,
 and emits one of three formats.  Common workflows below.
 
 ### Zephyr -- generated `alp.conf` appended to `prj.conf`
@@ -627,21 +624,21 @@ python3 $ALP_SDK/scripts/alp_project.py \
 ```
 
 Macros emitted: `ALP_HW_BUILD_SOM_SKU`, `ALP_HW_BUILD_SOM_FAMILY`,
-`ALP_HW_BUILD_SOM_HW_REV`, `ALP_HW_BUILD_OS`, and (when a carrier
-is declared) `ALP_HW_BUILD_CARRIER_NAME` +
-`ALP_HW_BUILD_CARRIER_HW_REV`.
+`ALP_HW_BUILD_SOM_HW_REV`, `ALP_HW_BUILD_OS`, and (when a board
+is declared) `ALP_HW_BUILD_BOARD_NAME` +
+`ALP_HW_BUILD_BOARD_HW_REV`.
 
-### DTS overlay for carrier wiring (v0.3)
+### DTS overlay for board wiring (v0.3)
 
-`--emit dts-overlay` reads the carrier header at
-`include/alp/boards/<carrier>.h`, finds every `#define X
+`--emit dts-overlay` reads the board header at
+`include/alp/boards/<board>.h`, finds every `#define X
 E1M_<class><N>` macro for the v0.3-scoped classes (I2C, SPI,
 UART, PWM, GPIO_IO), and emits a Zephyr `.overlay` declaring:
 
-- One alias per bus channel the carrier wires (`alp-i2c<N> =
+- One alias per bus channel the board wires (`alp-i2c<N> =
   &i2c<N>;`, `alp-spi<N> = &spi<N>;`, `alp-uart<N> = &uart<N>;`,
   `alp-pwm<N> = &pwm<N>;`).  The trailing comment on each alias
-  lists every macro in the carrier header that references that
+  lists every macro in the board header that references that
   channel.
 - An `alp_pins` node with `compatible = "alp,pin-array"` and one
   `gpios` entry per `EVK_PIN_*` macro that resolves to an
@@ -674,7 +671,7 @@ files lock the gpio bank/index columns.
 
 ## Hardware revision tracking
 
-Every released SoM family and every released carrier carries a
+Every released SoM family and every released board carries a
 `hw_revisions:` table.  The SDK uses it to detect "wrong firmware
 for this hardware" two ways:
 
@@ -685,7 +682,7 @@ for this hardware" two ways:
   current SDK version.  Validator exit code `3`; loader aborts the
   CMake configure with a clear error.
 - **Runtime** -- the SDK boots into a board-ID check that uses
-  a single ADC pin per board (SoM-side and carrier-side) fed by a
+  a single ADC pin per board (SoM-side and board-side) fed by a
   resistor divider from a 1.8 V rail.  Each `hw_rev` entry's
   `board_id:` sub-block fixes the divider resistor values and the
   nominal mV reading the SDK looks for.  A second, finer-grained
@@ -721,15 +718,15 @@ metadata/
 │   ├── imx93/hw-revisions.yaml                 # i.MX 93 family revs (adc_channel TBD)
 │   └── E1M-AEN701.yaml                     # MPN preset; `default_hw_rev: r1`
 │                                                #  points into the family table.
-└── carriers/
-    ├── E1M-EVK/board.yaml                      # carrier preset; carries its own
+└── boards/
+    ├── E1M-EVK/board.yaml                      # board preset; carries its own
     │                                            #  hw_revisions + default_hw_rev.
-    ├── E1M-X-EVK/board.yaml                    # V2N / V2N-M1 carrier
+    ├── E1M-X-EVK/board.yaml                    # V2N / V2N-M1 board
     │                                            #  (board_id.adc_channel TBD).
     └── custom-example/board.yaml               # copy-friendly template
 ```
 
-`board.yaml` overrides go in the `som.hw_rev` / `carrier.hw_rev`
+`board.yaml` overrides go in the `som.hw_rev` / `board.hw_rev`
 fields described above.  Omit them on stock builds -- the preset's
 `default_hw_rev` is picked up automatically.
 
@@ -778,7 +775,7 @@ Two complementary mechanisms:
    ACK-probes the I2C bus.  If the chip isn't populated the
    driver returns `ALP_ERR_NOT_READY`; firmware branches off
    that.  This is the right mechanism for runtime discovery on
-   carriers that don't carry the SoM manifest.
+   boards that don't carry the SoM manifest.
 
 The two mechanisms cooperate: `<alp/hw_info.h>` answers "what was
 this unit *intended* to carry?", and the per-chip `_init()` probe
@@ -789,7 +786,7 @@ defect).
 
 ### When you'd add a new optional flag
 
-If your carrier strips a chip the upstream preset declares populated,
+If your board strips a chip the upstream preset declares populated,
 the right approach is **per-app override in `board.yaml`** rather
 than editing the preset:
 
@@ -811,12 +808,13 @@ the build config.  No SDK fork needed.
 
 ## Versioning
 
-`schema_version: 2` is the only valid value as of v0.6.  The v1
-schema (top-level `os:` + global `peripherals:` / `libraries:`)
-was removed when heterogeneous orchestration landed; every project
-must now declare `cores:` even when it only uses one core.  See
-[`docs/heterogeneous-builds.md`](heterogeneous-builds.md) §"Migrating
-from v1" for the mechanical translation rules.
+There is no explicit `schema_version` field -- the schema at
+`metadata/schemas/board.schema.json` is the single live shape, and
+boards declare `cores:` (per-core runtimes + slices) even when only
+one core is used.  Earlier schemas with a top-level `os:` were
+removed when heterogeneous orchestration landed; see
+[`docs/heterogeneous-builds.md`](heterogeneous-builds.md) for the
+per-core walk-through.
 
 ## See also
 
@@ -828,5 +826,5 @@ from v1" for the mechanical translation rules.
   -- the curated library list `libraries:` draws from.
 - [`docs/getting-started.md`](getting-started.md) -- the
   consumer-facing walkthrough.
-- [`metadata/schemas/board-config-v2.schema.json`](../metadata/schemas/board-config-v2.schema.json)
+- [`metadata/schemas/board.schema.json`](../metadata/schemas/board.schema.json)
   -- the authoritative schema.

@@ -55,7 +55,7 @@ abandons that proposition the moment heterogeneous compute enters the picture.
 | **Scope** | All heterogeneous SoMs (V2N, AEN E5..E8, iMX93, and any future heterogeneous silicon). One generic mapping driven from `metadata/socs/.../cores[]`. |
 | **IPC** | OpenAMP / RPMsg + virtio as canonical. `alp_mbox` / `alp_shmem` / `alp_hwsem` stay as the low-level primitives. `<alp/rpc.h>` (already declared as v0.3 in `mproc.h`) is the framed channel customers use. |
 | **CLI** | Extend `west alp-build` to fan out across cores. New companions: `west alp-image`, `west alp-flash`, `west alp-clean`. |
-| **Schema** | Bump `board.yaml` to `schema_version: 2`. Per-core `cores:` block mandatory; the `os:` enum removed. No migration script — every in-repo `board.yaml` rewritten as part of the implementation. |
+| **Schema** | Rewrite `board.yaml`: per-core `cores:` block mandatory; the global `os:` enum removed.  No migration script — every in-repo `board.yaml` rewritten as part of the implementation.  (The original `schema_version: 2` marker has since been dropped — there is one live schema at `metadata/schemas/board.schema.json`.) |
 | **CI** | PR-level: bitbake every A-cluster MACHINE, Zephyr-build every M-class slice, Renode dual-OS smoke test. Twister stays as the Zephyr-only fast lane. |
 | **Defaults** | Heterogeneous-by-default: for every on-die programmable core, the SoM preset declares a sensible default OS + app. A bare `som: { sku: E1M-V2N101 }` produces both A55=Yocto and M33-SM=Zephyr with stock apps. Opt-out is explicit (`os: off`). |
 
@@ -197,15 +197,11 @@ in the SoC spec; missing keys produce a loader error at validate time.
 ### 4.3 Per-project mapping (`board.yaml` v2)
 
 ```yaml
-schema_version: 2
-
 som:
   sku: E1M-V2N101
   hw_rev: r1
 
-carrier:
-  name: E1M-X-EVK
-
+preset: e1m-x-evk
 cores:
   a55_cluster:
     os: yocto
@@ -235,7 +231,7 @@ diagnostics: { log_level: info }
 |---|---|
 | top-level `os:` (enum) | **removed** |
 | top-level `peripherals: / libraries: / inference: / iot:` | moved **per-core** under `cores.<id>` |
-| `carrier.populated:` + `chips:` | **unchanged** — describe physical assembly, shared across cores |
+| `board.populated:` + `chips:` | **unchanged** — describe physical assembly, shared across cores |
 | `diagnostics:` | **unchanged** — applies project-wide |
 | (none) | new top-level `cores:` block (required) |
 | (none) | new top-level `ipc:` block (optional) |
@@ -314,7 +310,7 @@ One Python core (`scripts/alp_orchestrate.py`), multiple west wrappers
      - ipc[]:     { kind, endpoints, carve_out_addr, carve_out_size, rpmsg_endpoint_ids }
      - helper_mcus[]: { name, firmware_path, flash_method }
      - boot_order: [ ... ] (from SoM preset)
-     - hw_info:   { sku, hw_rev, carrier, ... }
+     - hw_info:   { sku, hw_rev, board, ... }
 ```
 
 ### 5.3 Output directory layout
@@ -557,7 +553,7 @@ before the next opens.
   `cores[]`. Update `metadata/schemas/soc-spec-v1.schema.json` to require it.
 - Add `topology:` + `memory_map:` + `mailbox:` blocks to every SoM preset in
   `metadata/e1m_modules/<SKU>.yaml`.
-- Author `metadata/schemas/board-config-v2.schema.json` with the per-core
+- Author `metadata/schemas/board.schema.json` with the per-core
   `cores:` block + `ipc:` block. **Delete** `board-config-v1.schema.json`.
 - Update `metadata/schemas/som-preset-v1.schema.json` to validate the new
   topology/memory_map/mailbox blocks.

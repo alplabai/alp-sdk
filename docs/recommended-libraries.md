@@ -134,7 +134,7 @@ the generated alp.conf.  Or for finer control, drop a Zephyr
 `prj.conf` override (see "Today's gaps" in `docs/board-config.md`).
 
 Driver-side wiring (which display, which framebuffer) comes from
-the carrier preset -- e.g. `metadata/carriers/e1m-evk.yaml`
+the board preset -- e.g. `metadata/boards/e1m-evk.yaml`
 populates the SSD1306 OLED, and `<alp/boards/alp_e1m_evk.h>` maps
 the I²C bus + reset pin.  Your app code just calls `lv_*` against
 the resolved display.
@@ -183,7 +183,7 @@ If a library you want isn't in the Tier-1 list above, see the
 deferred / considered tiers below or open an issue.  Adding a
 library is a matter of writing a profile header at
 `metadata/library-profiles/<lib>/` + a `libraries:` enum entry
-in `metadata/schemas/board-config-v2.schema.json` -- low friction
+in `metadata/schemas/board.schema.json` -- low friction
 once the case is made.
 
 ## Tier 2 — deferred to v0.5+

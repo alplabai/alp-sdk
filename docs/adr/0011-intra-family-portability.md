@@ -24,12 +24,12 @@ code changes" — but that promise has two very different meanings:
 1. **Intra-family** — swap from E1M-AEN701 to E1M-AEN801, or from
    V2N101 to V2M102, with `som.sku:` as the only change.  Same form
    factor, same E1M-spec reservations, same power envelope class,
-   compatible carrier.
+   compatible board.
 2. **Cross-form-factor** — swap an E1M app onto an E1M-X SoM, or
    vice versa.  Different mechanical footprint, different power
    envelope (mW vs W), different SoC architecture (M-class vs
    heterogeneous A+M), different NPU choices (Ethos-U / DEEPX
-   DX-M1 / DRP-AI), different carrier.
+   DX-M1 / DRP-AI), different board.
 
 The `<alp/e1m_pinout.h>` vs `<alp/e1m_x_pinout.h>` split already
 exists, and the e1m-spec itself splits the form factors at the

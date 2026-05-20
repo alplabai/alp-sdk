@@ -47,7 +47,7 @@ Drive every heterogeneous SoM from a single per-core mapping in
 | **Scope** | All heterogeneous SoMs (V2N, AEN E5..E8, iMX93, future silicon).  One generic mapping driven from `metadata/socs/.../cores[]` — no per-SoM special cases bleed into the schema. |
 | **IPC** | OpenAMP / RPMsg + virtio as canonical.  `alp_mbox` / `alp_shmem` / `alp_hwsem` stay as low-level primitives; `<alp/rpc.h>` is the framed channel customers use — apps never type an endpoint ID or carve-out address by hand. |
 | **CLI** | Extend `west alp-build` to fan out across cores.  New companions: `west alp-image`, `west alp-flash`, `west alp-clean`, `west alp-renode` — one entry point per stage of the build → bundle → flash → simulate pipeline. |
-| **Schema** | Bump `board.yaml` to `schema_version: 2`.  Per-core `cores:` block mandatory; the `os:` enum removed.  No migration script — every in-repo `board.yaml` is rewritten in the same PR as the schema rev. |
+| **Schema** | Rewrite `board.yaml`: per-core `cores:` block mandatory; the global `os:` enum removed.  No migration script — every in-repo `board.yaml` is rewritten in the same PR as the schema rev.  (The original `schema_version: 2` marker has since been dropped — there is one live schema at `metadata/schemas/board.schema.json`.) |
 | **CI** | PR-level: bitbake every A-cluster MACHINE, Zephyr-build every M-class slice, Renode dual-OS smoke test.  Twister stays as the Zephyr-only fast lane because the iteration loop on a single slice should not pay the orchestrator's overhead. |
 | **Defaults** | Heterogeneous-by-default: every on-die programmable core in the SoM preset declares a sensible default OS + app.  A bare `som: { sku: E1M-V2N101 }` produces both A55=Yocto and M33-SM=Zephyr; opt-out is explicit (`os: off`). |
 
