@@ -93,6 +93,19 @@ cores:
                                              # (SoM preset's `capabilities:` block).
     # libraries: [...]
     # iot:       {...}
+    #
+    # Open-set escape hatch for libraries the SDK doesn't curate.
+    # Each entry MUST declare exactly one of `kconfig:` (inline
+    # fragment) or `profile:` (hw-backends.yaml-style file).  See
+    # docs/board-config.md `extra_libraries:` for the full reference.
+    #
+    # extra_libraries:
+    #   - name: zforce
+    #     include_path: third_party/zforce/include
+    #     kconfig:
+    #       - CONFIG_ZFORCE=y
+    #   - name: mycrypto
+    #     profile: third_party/mycrypto/hw-backends.yaml
 
   # Heterogeneous example (V2N -- A55 Yocto + M33 Zephyr peers).
   # `os:` is omitted on both -- topology defaults pick the right

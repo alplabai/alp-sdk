@@ -325,6 +325,36 @@ APIs):
   full enum in
   [`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json).
 
+### `cores.<id>.extra_libraries` -- open-set escape hatch (v0.6)
+
+The curated `libraries:` enum is closed; `extra_libraries:` is the
+open-set escape hatch for libraries the SDK doesn't curate (a
+one-off vendor SDK, a research-only dep, a library on its way
+into the curated set).  Each entry MUST declare exactly one of
+`kconfig:` (inline fragment) or `profile:` (`hw-backends.yaml`-style
+file):
+
+```yaml
+cores:
+  m55_hp:
+    app: ./src
+    libraries:
+      - mbedtls            # curated, closed enum
+    extra_libraries:
+      - name: zforce       # one-off vendor SDK
+        include_path: third_party/zforce/include
+        kconfig:
+          - CONFIG_ZFORCE=y
+      - name: mycrypto     # per-silicon backend selection
+        profile: third_party/mycrypto/hw-backends.yaml
+```
+
+Loader rules: exactly-one of `kconfig`/`profile`, names globally
+unique across every core's `extra_libraries:`, no collisions with
+the curated `libraries:` enum, and `profile:` paths must resolve
+to a real file.  See `docs/board-config.md` §`extra_libraries:`
+for the full reference + the cross-field validator pass.
+
 ### `chips` (top-level, opt-in chip drivers)
 
 ```yaml

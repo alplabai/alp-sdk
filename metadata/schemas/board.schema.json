@@ -495,6 +495,21 @@
             ]
           }
         },
+        "extra_libraries": {
+          "type": "array",
+          "description": "Open-set escape hatch for libraries the SDK doesn't curate.  Each entry must declare inline `kconfig:` OR a `profile:` file path -- exactly one (enforced by the loader).  Use this when you need to pull in a library that isn't part of the curated `libraries:` enum (a one-off vendor SDK, a research-only dep, a soon-to-be-curated lib while the profile lands).  Inline `kconfig:` is the fast path; `profile:` points at a `hw-backends.yaml`-style file for libraries that want per-silicon backend selection consistent with the curated entries.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name":         { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Unique slug.  Loader enforces global uniqueness across every core's `extra_libraries:` and rejects collisions with the curated `libraries:` enum." },
+              "include_path": { "type": "string", "description": "Optional include search path (repo-relative or absolute) the build adds for this library's headers." },
+              "kconfig":      { "type": "array", "items": { "type": "string" }, "description": "Inline Kconfig fragment lines emitted verbatim into alp.conf (e.g. `CONFIG_MYLIB=y`).  Mutually exclusive with `profile:`." },
+              "profile":      { "type": "string", "description": "Path (repo-relative) to a hw-backends.yaml-style profile file with `accelerators:`/`sw_fallback:` blocks.  Loader applies the same silicon / soc_family / requires_cap matching used by the curated libraries.  Mutually exclusive with `kconfig:`." }
+            }
+          }
+        },
         "memory": {
           "type": "object",
           "additionalProperties": false,

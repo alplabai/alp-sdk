@@ -28,10 +28,10 @@ cores:
     app: ./src
     libraries:
       - lvgl
-      # mbedtls + coremqtt_sn dropped on native_sim for the v0.5 build
-      # parity sweep (Zephyr 4.4 + mbedtls 3.6 PSA wiring is the v0.6
-      # work item).  Real-silicon builds re-enable both via the SoM-side
-      # TF-M-on-HE-core stack.
+      - mbedtls          # v0.6 cross-field validator (P2.3 rule 3)
+                         # requires a TLS provider whenever
+                         # `iot.tls: true`.  coremqtt_sn re-enables
+                         # alongside the PSA wiring work item.
     iot:
       wifi:    true
       mqtt:    true
