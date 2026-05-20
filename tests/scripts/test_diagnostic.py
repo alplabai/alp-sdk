@@ -55,3 +55,21 @@ def test_render_omits_color_codes_when_color_false(tmp_path: Path):
     )
     out = render(diag, source_text=src, color=False)
     assert "\x1b[" not in out
+
+
+def test_render_respects_no_color_env(tmp_path: Path, monkeypatch):
+    src = "som:\n  sku: x\n"
+    fixture = tmp_path / "board.yaml"
+    fixture.write_text(src)
+    diag = Diagnostic(
+        severity="error",
+        path=fixture,
+        line=2,
+        col=8,
+        span=1,
+        code="ALP-B003",
+        message="bad sku",
+    )
+    monkeypatch.setenv("NO_COLOR", "1")
+    out = render(diag, source_text=src, color=None)
+    assert "\x1b[" not in out

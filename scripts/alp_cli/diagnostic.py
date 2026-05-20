@@ -21,6 +21,7 @@ except ImportError:  # pragma: no cover - colorama is listed as a dep
     Fore = _Stub()  # type: ignore[assignment]
     Style = _Stub()  # type: ignore[assignment]
 
+from collections.abc import Iterator
 
 Severity = Literal["error", "warning", "note"]
 
@@ -97,7 +98,7 @@ class DiagnosticCollector:
     def add(self, diag: Diagnostic) -> None:
         self._items.append(diag)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Diagnostic]:
         return iter(self._items)
 
     def __len__(self) -> int:
