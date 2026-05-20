@@ -52,18 +52,26 @@ static void build_pattern(void) {
     }
 }
 
+/* Resolve the xSPI NOR via the `xspi-flash` DT alias.  The V2N
+ * board file (alplabai/alp-zephyr-modules) is responsible for
+ * setting `aliases { xspi-flash = &mx25l25645g; };` or whatever
+ * matches the populated part.  Boards without the alias (native_sim,
+ * AEN, IMX9) compile to a NULL device pointer + the runtime check
+ * below short-circuits so the same source builds across the SDK's
+ * twister matrix.  DEVICE_DT_GET would otherwise fail at link time
+ * with `__device_dts_ord_DT_N_ALIAS_xspi_flash_ORD undeclared`. */
+#define XSPI_FLASH_NODE  DT_ALIAS(xspi_flash)
+#if DT_NODE_HAS_STATUS(XSPI_FLASH_NODE, okay)
+#define XSPI_FLASH_DEV   DEVICE_DT_GET(XSPI_FLASH_NODE)
+#else
+#define XSPI_FLASH_DEV   NULL
+#endif
+
 int main(void) {
     printf("[xspi] v2n-xspi-flash-readwrite\n");
 
-    /* Resolve the xSPI NOR via the `xspi-flash` DT alias.  The V2N
-     * board file (alplabai/alp-zephyr-modules) is responsible for
-     * setting `aliases { xspi-flash = &mx25l25645g; };` or whatever
-     * matches the populated part.  If the alias isn't set the
-     * example just exits cleanly -- it does NOT walk other flash
-     * devices (e.g. the on-die MRAM) because erasing those would
-     * brick boot. */
-    const struct device *flash = DEVICE_DT_GET(DT_ALIAS(xspi_flash));
-    if (!device_is_ready(flash)) {
+    const struct device *flash = XSPI_FLASH_DEV;
+    if (flash == NULL || !device_is_ready(flash)) {
         printf("[xspi] xspi-flash alias not present or device not ready\n");
         return 0;
     }
