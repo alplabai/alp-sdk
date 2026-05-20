@@ -26,7 +26,8 @@
 
 #include <zephyr/kernel.h>
 
-int main(void) {
+int main(void)
+{
     printf("[pm] power-managed-sensor (AEN301 / M55-HE)\n");
     printf("[pm] wake sources: rtc(60s) | gpio_int(IMU/user) | "
            "uart(console)\n");
@@ -36,9 +37,9 @@ int main(void) {
     /* Three wake-stage announcements -- the loop on real silicon
      * repeats these forever; native_sim runs them once and exits. */
     const char *stages[] = {
-        "rtc",       /* periodic sample (60 s) */
-        "gpio_int",  /* IMU motion event / user button */
-        "uart",      /* diagnostic console */
+        "rtc",      /* periodic sample (60 s) */
+        "gpio_int", /* IMU motion event / user button */
+        "uart",     /* diagnostic console */
     };
 
     for (int i = 0; i < (int)(sizeof(stages) / sizeof(stages[0])); i++) {

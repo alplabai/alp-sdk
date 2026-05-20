@@ -93,7 +93,7 @@ int main(void)
      * autopilot_init() opens the IMU (LSM6DSO over I2C), the
      * barometer (BMP390), the GPS UART (u-blox NEO-M9N), the battery
      * sense (INA236), the SBUS RX UART, and the four ESC PWMs.  All
-     * of these come through the portable `<alp/*>` surfaces so the
+     * of these come through the portable `<alp/...>` surfaces so the
      * same code runs across any SoM whose preset declares the bus
      * mapping; chip-specific work lives behind alp_chips/<part>.
      *

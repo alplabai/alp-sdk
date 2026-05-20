@@ -211,10 +211,15 @@ def test_memory_block_emits_stack_heap_isr_config() -> None:
 
 def test_power_block_emits_pm_and_wake_sources() -> None:
     """`cores.<id>.power:` -> _slice_alp_conf() emits CONFIG_PM=y +
-    CONFIG_PM_DEVICE=y when sleep_mode != disabled, plus one
-    CONFIG_PM_DEVICE_WAKE_<SUBSYS>=y per declared subsystem-class
-    wakeup source.  The power_sleep_wake.yaml HiL spec confirms the
-    runtime PM subsystem activates and a UART wake works."""
+    CONFIG_PM_DEVICE=y when sleep_mode != disabled, plus one hint
+    comment per declared wakeup source.  The actual wake-source
+    plumbing in Zephyr is DT-driven (`wakeup-source;` property on the
+    device node + a runtime pm_device_wakeup_enable() call) and per
+    silicon family -- there is no top-level CONFIG_PM_DEVICE_WAKE_<X>
+    symbol upstream, so emitting one trips the build with an
+    `undefined symbol` warning.  Until per-silicon DT-overlay + runtime
+    enable lands (v0.7), the wake-source list is documented in the
+    generated alp.conf for the customer to wire by hand."""
     project = _make_project()
     slice_ = _make_slice(power={
         "sleep_mode": "standby",
@@ -223,10 +228,14 @@ def test_power_block_emits_pm_and_wake_sources() -> None:
     conf = _slice_alp_conf(project, slice_)
     assert "CONFIG_PM=y" in conf
     assert "CONFIG_PM_DEVICE=y" in conf
-    assert "CONFIG_PM_DEVICE_WAKE_UART=y" in conf, (
-        "power.wakeup_sources=[uart] must emit CONFIG_PM_DEVICE_WAKE_UART=y"
+    assert "# wakeup source: uart" in conf, (
+        "power.wakeup_sources=[uart] must emit a hint comment until the "
+        "per-silicon DT-overlay + pm_device_wakeup_enable() plumbing lands"
     )
-    assert "CONFIG_PM_DEVICE_WAKE_RTC=y" in conf
+    assert "# wakeup source: rtc" in conf
+    # The undefined-symbol Kconfig form must NEVER be re-introduced --
+    # it trips twister with a Kconfig warning on every native_sim build.
+    assert "CONFIG_PM_DEVICE_WAKE_" not in conf
 
 
 def test_power_block_disabled_emits_no_pm() -> None:
@@ -239,10 +248,15 @@ def test_power_block_disabled_emits_no_pm() -> None:
 
 
 def test_diagnostics_modules_emits_per_module_log_level() -> None:
-    """`diagnostics.modules:` -> _slice_alp_conf() emits one
-    CONFIG_<MODULE>_LOG_LEVEL=<n> line per entry, with the
-    level-name -> integer mapping per the alp.conf emit
-    (off=0, error=1, warn=2, info=3, debug=trace=4)."""
+    """`diagnostics.modules:` -> _slice_alp_conf() emits one log-level
+    line per entry.  ALP_* SDK-side modules have not registered any
+    LOG_MODULE yet, so emitting `CONFIG_ALP_<MOD>_LOG_LEVEL=N`
+    upstream is rejected as an undefined symbol; until each ALP
+    module gains its LOG_MODULE_REGISTER call, the emit is a hint
+    comment.  Non-ALP modules (Zephyr subsystems whose Kconfig
+    already exists) keep the live CONFIG_<MOD>_LOG_LEVEL=N form.
+    Level-name -> integer mapping (off=0 / error=1 / warn=2 / info=3
+    / debug=trace=4) is preserved either way."""
     project = _make_project(diagnostics={
         "log_level": "info",
         "modules": {
@@ -253,9 +267,17 @@ def test_diagnostics_modules_emits_per_module_log_level() -> None:
     })
     slice_ = _make_slice()
     conf = _slice_alp_conf(project, slice_)
-    assert "CONFIG_ALP_IOT_LOG_LEVEL=4" in conf
-    assert "CONFIG_ALP_SECURITY_LOG_LEVEL=0" in conf
-    assert "CONFIG_ALP_GPIO_LOG_LEVEL=3" in conf
+    # ALP_* modules: hint comment with the would-be Kconfig + level.
+    assert "# CONFIG_ALP_IOT_LOG_LEVEL=4" in conf
+    assert "# CONFIG_ALP_SECURITY_LOG_LEVEL=0" in conf
+    assert "# CONFIG_ALP_GPIO_LOG_LEVEL=3" in conf
+    # And not as a live setting -- the undefined-symbol form is rejected
+    # by Zephyr Kconfig today; re-introducing it would break twister.
+    for stem in ("ALP_IOT_LOG_LEVEL", "ALP_SECURITY_LOG_LEVEL", "ALP_GPIO_LOG_LEVEL"):
+        assert f"\nCONFIG_{stem}=" not in conf, (
+            f"CONFIG_{stem} must stay commented until alp_{stem.split('_')[1].lower()} "
+            "calls LOG_MODULE_REGISTER (otherwise Zephyr aborts on undefined symbol)"
+        )
 
 
 # ---------------------------------------------------------------------
@@ -265,11 +287,12 @@ def test_diagnostics_modules_emits_per_module_log_level() -> None:
 
 
 # Subsystem-class wake names the emit code understands.  Anything
-# not in this set (and not starting with `E1M_`) is silently
-# emitted as a CONFIG_PM_DEVICE_WAKE_<UPPER>=y line; the schema
-# itself doesn't enum-restrict.  We keep the spec's references
-# inside the de-facto supported set so the test doesn't drift
-# against the silicon-family Kconfig that lands in v0.7.
+# not in this set (and not starting with `E1M_`) is documented in
+# the generated alp.conf as a hint comment until the per-silicon
+# DT-overlay + runtime pm_device_wakeup_enable() plumbing lands in
+# v0.7; the schema itself doesn't enum-restrict.  We keep the spec's
+# references inside the de-facto supported set so the test doesn't
+# drift against the silicon-family wake-source wiring.
 _SUPPORTED_WAKE_SUBSYSTEMS = frozenset({
     "uart", "gpio", "rtc", "i2c", "spi", "can", "usb", "ethernet",
 })
@@ -305,9 +328,12 @@ def test_diagnostics_spec_references_known_modules() -> None:
     and `alp_security:` -- both must be names the emit path
     (_slice_alp_conf's modules loop) would accept.  The convention
     is lowercase `alp_<surface>`; we check the spec references
-    at least one such identifier."""
+    at least one such identifier.  alp_* modules currently emit as
+    hint comments (#CONFIG_ALP_<UPPER>_LOG_LEVEL=N) until each
+    surface calls LOG_MODULE_REGISTER -- the spec text still uses
+    the same identifiers."""
     text = (_COMMON / "diagnostics_modules.yaml").read_text(encoding="utf-8")
-    # Stock ALP SDK module names that emit CONFIG_<UPPER>_LOG_LEVEL.
+    # Stock ALP SDK module names the emit path knows how to render.
     known = ("alp_iot", "alp_security", "alp_gpio", "alp_audio",
              "alp_inference", "alp_uart", "alp_i2c", "alp_spi")
     found = [m for m in known if m in text]

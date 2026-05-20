@@ -31,7 +31,31 @@ endif()
 
 list(APPEND OVERLAY_CONFIG ${_alp_generated})
 
+# Generate <alp/system_ipc.h> from the board.yaml `ipc:` block.  The
+# producer (src/main.c) opens RPC channels via the auto-emitted macros
+# (ALP_IPC_<NAME>_NAME, _ADDR, _SIZE, ...), so the header must be on
+# the include path before any source compiles.
+set(_alp_ipc_header ${CMAKE_BINARY_DIR}/generated/alp/system_ipc.h)
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
+            --input ${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml
+            --emit ipc-contract-h
+            --output ${_alp_ipc_header}
+    RESULT_VARIABLE _alp_ipc_rv
+    OUTPUT_VARIABLE _alp_ipc_stdout
+    ERROR_VARIABLE  _alp_ipc_stderr
+)
+if(NOT _alp_ipc_rv EQUAL 0)
+    message(FATAL_ERROR
+        "alp_project.py --emit ipc-contract-h failed "
+        "(rv=${_alp_ipc_rv}); stderr: ${_alp_ipc_stderr}")
+endif()
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(rpmsg_imx93_m33 LANGUAGES C)
+
+# Expose the orchestrator's generated/ directory so the
+# `#include <alp/system_ipc.h>` in src/main.c resolves.
+zephyr_include_directories(${CMAKE_BINARY_DIR}/generated)
 
 target_sources(app PRIVATE src/main.c)
