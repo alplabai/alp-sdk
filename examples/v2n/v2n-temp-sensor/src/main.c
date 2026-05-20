@@ -49,7 +49,7 @@ int main(void) {
      * firmware would post the value to a logging subsystem or
      * publish over MQTT. */
     for (int i = 0; i < 10; ++i) {
-        int16_t milli_c = 0;
+        int32_t milli_c = 0;
         s = tmp112_read_temp_milli_c(&sensor, &milli_c);
         if (s == ALP_OK) {
             int whole = milli_c / 1000;

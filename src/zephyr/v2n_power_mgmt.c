@@ -38,7 +38,7 @@
 #include "alp/chips/da9292.h"
 #include "v2n_supervisor.h"
 
-LOG_MODULE_REGISTER(alp_v2n_power_mgmt, CONFIG_ALP_SDK_LOG_LEVEL);
+LOG_MODULE_REGISTER(alp_v2n_power_mgmt, CONFIG_LOG_DEFAULT_LEVEL);
 
 /* DT spec aliases.  The Zephyr device tree for an E1M-V2N101 board
  * is expected to publish:

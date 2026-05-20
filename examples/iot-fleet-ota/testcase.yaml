@@ -24,6 +24,12 @@ tests:
       type: one_line
       regex:
         - "\\[ota\\] done"
+    # native_sim.conf loads LAST (after alp.conf's OVERLAY_CONFIG
+    # emit) so it can flip CONFIG_MBEDTLS off -- works around the
+    # Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; see
+    # native_sim.conf for the full rationale.
+    extra_args:
+      - "EXTRA_CONF_FILE=native_sim.conf"
   alp_sdk.examples.iot_fleet_ota.aen:
     platform_allow:
       - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp

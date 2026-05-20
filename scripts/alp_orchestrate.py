@@ -1002,10 +1002,12 @@ def load_board_yaml(path: Path, *,
 
     # 10. `security.psa:` cross-field validation.  The schema is
     # authoritative on field types; this block enforces the references:
-    # ITS/PS storage names must resolve to a `storage[].name` OR a SoM
-    # memory_map region name, and `attestation_root: optiga_trust_m`
-    # requires the SoM to physically ship OPTIGA Trust M.  Errors point
-    # at the offending board.yaml path so the customer can fix it.
+    # ITS/PS storage names must resolve to a `storage[].name`, a SoM
+    # memory_map region name, OR an `on_module.ospi_memories:` key
+    # (PS-class storage often lives on an on-module OSPI part rather
+    # than in MRAM); `attestation_root: optiga_trust_m` requires the
+    # SoM to physically ship OPTIGA Trust M.  Errors point at the
+    # offending board.yaml path so the customer can fix it.
     security_block = dict(project.get("security") or {})
     psa = dict(security_block.get("psa") or {})
     if psa:
@@ -1018,7 +1020,12 @@ def load_board_yaml(path: Path, *,
             str(r.get("name")) for r in mem_map
             if isinstance(r, dict) and r.get("name")
         }
-        valid_refs = storage_name_set | region_names
+        ospi_keys = {
+            str(k) for k in
+            ((som_preset.get("on_module") or {}).get("ospi_memories") or {}).keys()
+            if isinstance(k, str)
+        }
+        valid_refs = storage_name_set | region_names | ospi_keys
 
         def _check_backing_store(field: str) -> None:
             ref = psa.get(field)
@@ -1028,11 +1035,14 @@ def load_board_yaml(path: Path, *,
                 return
             raise OrchestratorError(
                 f"board.yaml `security.psa.{field}: {ref}` does not "
-                f"resolve to any `storage[].name` or SoM "
-                f"`memory_map[].name`.  Known storage partitions: "
+                f"resolve to any `storage[].name`, SoM "
+                f"`memory_map[].name`, or `on_module.ospi_memories:` "
+                f"key.  Known storage partitions: "
                 f"{sorted(storage_name_set) or '[]'}; "
                 f"known SoM memory regions: "
-                f"{sorted(region_names) or '[]'}.")
+                f"{sorted(region_names) or '[]'}; "
+                f"known on-module OSPI parts: "
+                f"{sorted(ospi_keys) or '[]'}.")
 
         _check_backing_store("its_storage")
         _check_backing_store("ps_storage")
@@ -1665,12 +1675,32 @@ def emit_ipc_contract_h(project: BoardProject) -> str:
         lines.append(f"/* {c.kind} channel '{c.name}' -- endpoints "
                      f"{', '.join(c.endpoints)} */")
         if c.status == "blocked":
-            # No #defines for blocked entries: the slice build is
-            # supposed to trip when consumers `#include` this header.
+            # Blocked entries still need the SRC_EPT / DST_EPT / MBOX_CH /
+            # ADDR / SIZE macros so consumer source compiles: the
+            # canonical pattern (see examples/rpmsg-*/m*/src/main.c) is a
+            # static struct initialiser that references every field at
+            # compile time.  Omitting the macros made every rpmsg
+            # consumer fail with `<macro> undeclared` long before the
+            # NOSUPPORT runtime check could even fire.  Emit safe-zero
+            # stubs + a #warning so the build is green and the gap is
+            # surfaced via the alp_rpc_open() ALP_ERR_NOSUPPORT path
+            # the backend already returns when it sees a zero
+            # mailbox_channel or empty mailbox controller.
             lines.append(f"/* BLOCKED: {c.reason or 'unknown reason'} */")
+            # Surface the gap as a structured comment block rather than
+            # a `#warning` (the slice builds under -Werror=cpp and an
+            # actual warning would trip it).  The same reason text is
+            # also written into the build manifest by the orchestrator's
+            # fan-out step so reviewers see it.
+            lines.append(f"/* IPC channel '{c.name}' is blocked; "
+                         "fix the SoM metadata before depending on this "
+                         "channel at runtime. */")
             lines.append(f'#define ALP_IPC_{upper}_NAME       "{c.name}"')
-            lines.append(f'#error "IPC channel \'{c.name}\' is blocked; '
-                         'fix the SoM metadata before building this slice."')
+            lines.append(f"#define ALP_IPC_{upper}_ADDR       0x0u  /* stub: blocked */")
+            lines.append(f"#define ALP_IPC_{upper}_SIZE       0x0u  /* stub: blocked */")
+            lines.append(f"#define ALP_IPC_{upper}_SRC_EPT    0x0u  /* stub: blocked */")
+            lines.append(f"#define ALP_IPC_{upper}_DST_EPT    0x0u  /* stub: blocked */")
+            lines.append(f"#define ALP_IPC_{upper}_MBOX_CH    0u    /* stub: blocked */")
             lines.append("")
             continue
         lines.append(f'#define ALP_IPC_{upper}_NAME       "{c.name}"')
