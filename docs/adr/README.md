@@ -49,6 +49,7 @@ Bad / costs: ...
 | [0010](0010-heterogeneous-os-orchestration.md) | Heterogeneous OS orchestration: Zephyr + Yocto as peers, not alternatives | Accepted |
 | [0011](0011-intra-family-portability.md) | Intra-family portability is load-bearing; cross-form-factor portability is intentionally not a goal | Accepted |
 | [0012](0012-cross-platform-developer-host.md) | alp-sdk developer host is cross-platform; Linux required ONLY for Yocto | Accepted |
+| [0013](0013-tfm-boundary-m55-hp-trustzone.md) | TF-M trust boundary on AEN: TrustZone-M split on M55-HP, not a dedicated M55-HE | Accepted |
 
 ## When to write an ADR
 

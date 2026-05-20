@@ -33,6 +33,22 @@ The v1.0 audit covers:
    `tests/fuzz/` and either inherits a corpus or stages
    their own; findings come back as new corpus entries.
 
+## TF-M trust boundary (cross-core)
+
+The PSA Crypto secure partition runs on the same M55-HP core as the
+non-secure app via the Armv8-M security extension (TrustZone-M split),
+**not** on a dedicated M55-HE core.  This is the standard Cortex-M
+pattern, costs no extra IPC, and keeps M55-HE free for compute /
+inference offload.  The decision is captured in
+[`docs/adr/0013-tfm-boundary-m55-hp-trustzone.md`](adr/0013-tfm-boundary-m55-hp-trustzone.md);
+see ADR 0010 for the broader cross-core trust-boundary discussion.
+
+The auditor reviews the TF-M build flow (`board.yaml`
+`security.psa.tfm: true` -> orchestrator emits
+`build/sysbuild/tfm/tfm.conf` -> sysbuild builds the TF-M secure
+image as a child image) and the PSA <-> OPTIGA Trust M bridge driver
+at `src/security/optiga_trust_m_bridge.c`.
+
 ## Out of scope (separate engagements)
 
 - **Vendor-side silicon vulnerabilities** -- those belong
