@@ -24,7 +24,7 @@ READMEs.
 | [06-secure-element-sign.md](06-secure-element-sign.md)                   | intermediate | `v2n-secure-element-sign`                      |
 | [07-recovering-a-bricked-bridge.md](07-recovering-a-bricked-bridge.md)   | advanced     | `v2n-gd32-swd-flash`                           |
 | [08-runtime-board-detection.md](08-runtime-board-detection.md)           | advanced     | `v2n-board-id-readout`                         |
-| [09-board-yaml-deep-dive.md](09-board-yaml-deep-dive.md)                 | intermediate | `board.yaml` v2 schema reference (every block) |
+| [09-board-yaml-deep-dive.md](09-board-yaml-deep-dive.md)                 | intermediate | `board.yaml` schema reference (every block)    |
 | [10-secure-boot-signing.md](10-secure-boot-signing.md)                   | advanced     | MCUboot + ECDSA-P256 signing on AEN-Zephyr     |
 | [11-mqtt-tls-publish.md](11-mqtt-tls-publish.md)                         | intermediate | `<alp/iot.h>` MQTT-over-TLS on Yocto           |
 | [12-mender-ota.md](12-mender-ota.md)                                     | advanced     | Mender A/B-partition OTA on Yocto              |

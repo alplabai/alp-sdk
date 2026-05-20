@@ -313,7 +313,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
-  │ Dev Tooling   │ ─► │  board.yaml v2  ·  alp_project.py (per-core emit)  │
+  │ Dev Tooling   │ ─► │  board.yaml     ·  alp_project.py (per-core emit)  │
   │   (v0.6)      │    │  alp_orchestrate.py (fan-out + system-manifest)    │
   │               │    │  west alp-build / alp-image / alp-flash / alp-clean│
   │               │    │  validate_board_yaml.py  ·  VS Code extension      │
@@ -365,7 +365,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
   │      HW       │ ─► │   E1M (35×35) + E1M-X (45×65) SoMs                 │
-  │   + HAL       │    │   E1M-EVK / E1M-X-EVK boards + vendor HALs       │
+  │   + HAL       │    │   E1M-EVK / E1M-X-EVK reference boards + vendor HALs│
   └───────────────┘    └────────────────────────────────────────────────────┘
 ```
 

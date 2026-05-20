@@ -149,7 +149,7 @@ first public release).  The pin is referenced explicitly in
 `west.yml` so a `west update` on this SDK pulls a known-compatible
 spec revision.
 
-If you're adding support for a new SoM or board board:
+If you're adding support for a new SoM or board:
 
 1. The pad-level routing of your SoM goes into a new entry under
    [`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/)

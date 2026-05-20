@@ -246,10 +246,10 @@ preset updates from Alp don't drag board opinions with them.
 
 The schema deliberately separates two concerns that get conflated:
 
-| Block      | What it describes                                                                | When it changes                                                       |
-|------------|----------------------------------------------------------------------------------|-----------------------------------------------------------------------|
-| `som`      | The **module** that mounts on the board -- silicon, on-module radio, on-module secure element / RTC / temperature sensor / EEPROM. | Fixed at SoM-fab time.  You can't DNI on-module parts after order; only SoM-variant SKUs differ. |
-| `board`  | The **board board** -- IMUs, barometers, OLEDs, cameras, microphones, speaker amps, current monitors, I/O expanders, etc. | Different per board design.  Custom boards DNI any component; the EVK ships with a default population. |
+| Block                                  | What it describes                                                                | When it changes                                                       |
+|----------------------------------------|----------------------------------------------------------------------------------|-----------------------------------------------------------------------|
+| `som:` (block)                         | The **module** that mounts on the board -- silicon, on-module radio, on-module secure element / RTC / temperature sensor / EEPROM. | Fixed at SoM-fab time.  You can't DNI on-module parts after order; only SoM-variant SKUs differ. |
+| Top-level `populated:` + `e1m_routes:` (inline) or `preset:` (shared)  | The **board** -- IMUs, barometers, OLEDs, cameras, microphones, speaker amps, current monitors, I/O expanders, etc. | Different per board design.  Custom boards DNI any component; the EVK ships with a default population. |
 
 On E1M-AEN, the on-module parts are: Alif Ensemble silicon, TI
 CC3501E (Wi-Fi/BLE), Infineon OPTIGA Trust M, Micro Crystal

@@ -23,7 +23,7 @@ What actually happens.
 ## Environment
 - **SoM SKU:** (e.g. `E1M-AEN701`, `E1M-V2N101`, `E1M-V2M102`, or `host` for native_sim builds)
 - **SoC variant:** (e.g. `alif:ensemble:e7`, `renesas:rzv2n:n44` — the `ref` from the `metadata/socs/` JSON)
-- **Board board:** (E1M EVK / custom board — paste the board ID)
+- **Board:** (E1M EVK / custom board — paste the board ID)
 - **SDK version / commit:** (`git describe --tags --always`)
 - **OS / backend:** (Bare-metal / Zephyr / Yocto Linux)
 - **Zephyr version:** (`west list zephyr`, if applicable)

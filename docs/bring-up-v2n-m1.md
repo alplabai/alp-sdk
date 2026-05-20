@@ -85,7 +85,7 @@ ROM has executed and PCIe link training can start.
 
 > **`M1_RESET` polarity is ACTIVE-LOW on V2N-M1** -- this is the
 > driver's default, so no `_set_reset_polarity` call is required.
-> Board boards on different DEEPX revisions can flip the
+> Boards on different DEEPX revisions can flip the
 > polarity via `deepx_dxm1_set_reset_polarity` if the silicon's
 > reset polarity ever changes.
 

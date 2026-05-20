@@ -56,7 +56,7 @@ trees.
 
 ```
 examples/rpmsg-v2n/
-├── board.yaml                       (v2; declares a55_cluster + m33_sm)
+├── board.yaml                       (declares a55_cluster + m33_sm)
 ├── README.md
 ├── linux/                           (a55_cluster's app)
 │   ├── CMakeLists.txt

@@ -4,7 +4,7 @@
 
 Walks `examples/i2c-scanner/` -- a 7-bit-address scan over an I²C
 bus that prints the addresses that ACK.  Useful for confirming on-
-module chip populations + smoke-testing a new board board's I²C
+module chip populations + smoke-testing a new board's I²C
 wiring.
 
 ## What it teaches

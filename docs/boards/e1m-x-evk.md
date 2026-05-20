@@ -1,6 +1,6 @@
 # E1M-X Development Board — SDK reference
 
-Board board for the **E1M-X** form factor (45 × 65 mm) — hosts
+Board for the **E1M-X** form factor (45 × 65 mm) — hosts
 the Renesas RZ/V2N family (`E1M-V2N101`, `E1M-V2N102`,
 `E1M-V2M101`, `E1M-V2M102`) and any future E1M-X conformant SoM.
 
