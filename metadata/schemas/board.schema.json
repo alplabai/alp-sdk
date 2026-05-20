@@ -177,7 +177,7 @@
         "psa": {
           "type": "object",
           "additionalProperties": false,
-          "description": "PSA Crypto persistent-key storage.  See docs/security-audit-plan.md and ADR-0010 for the cross-core trust-boundary discussion.  v0.6 lands the TF-M sysbuild child image; pre-v0.6 the schema accepts these fields but the emit path is a no-op.",
+          "description": "PSA Crypto persistent-key storage.  See docs/security-audit-plan.md and ADR-0010 + ADR-0013 for the cross-core trust-boundary discussion.  When `tfm: true` the orchestrator emits a TF-M sysbuild child-image overlay at `build/sysbuild/tfm/tfm.conf` (SB_CONFIG_TFM + CONFIG_PSA_CRYPTO_*); `tfm: false` keeps PSA Crypto entirely non-secure (mbedTLS-only).",
           "properties": {
             "persistent_slots": {
               "type": "integer",
@@ -262,6 +262,12 @@
           "type": "boolean",
           "default": false,
           "description": "Enable monotonic image counters.  Requires OTP fuse provisioning at production time (see docs/secure-boot.md §anti-rollback)."
+        },
+        "build_type": {
+          "type": "string",
+          "enum": ["Release", "Debug", "MinSizeRel"],
+          "default": "Release",
+          "description": "Build flavour propagated to sysbuild child images (MCUboot + TF-M).  Set to `Debug` for symbol-rich dev builds; `MinSizeRel` matches the upstream sysbuild template's size-optimised default."
         }
       }
     },

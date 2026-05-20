@@ -153,6 +153,56 @@ build-system artefacts.
   Template at `metadata/templates/board.yaml` carries an annotated
   storage example.
 
+### Added — security.psa: TF-M sysbuild integration + ADR 0013 (2026-05-20)
+
+Pulls the `security.psa:` block from "schema authoritative, emit
+no-op" to "real build-system artefacts".  Scoped to the v0.6
+TF-M cross-core trust-boundary land.
+
+- `scripts/alp_orchestrate.py` gains `emit_tfm_sysbuild_conf(project)`.
+  When `security.psa.tfm: true` it returns a `SB_CONFIG_TFM=y` +
+  `SB_CONFIG_TFM_BUILD_TYPE=<Release|Debug|MinSizeRel>` +
+  `CONFIG_PSA_CRYPTO_PERSISTENT_SLOT_COUNT=<n>` +
+  `CONFIG_PSA_CRYPTO_{ITS,PS}_BACKING_STORE="<name>"` overlay.
+  `attestation_root: optiga_trust_m` adds
+  `CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y` + a comment pointing at
+  the PSA <-> OPTIGA bridge driver.  Returns "" when the block is
+  absent or `tfm: false` (PSA Crypto then runs non-secure-only).
+- `Orchestrator._materialise_shared()` writes the overlay to
+  `build/sysbuild/tfm/tfm.conf` when non-empty; no directory is
+  created otherwise.
+- New CLI mode: `python3 scripts/alp_orchestrate.py
+  --emit tfm-sysbuild-conf` (alongside the existing
+  `system-manifest` / `ipc-contract-h` / `dts-reservations`
+  emitters).
+- `load_board_yaml()` gains three cross-field checks:
+  `security.psa.its_storage:` and `ps_storage:` must resolve to a
+  `storage[].name` OR a SoM `memory_map:` region name; and
+  `attestation_root: optiga_trust_m` is rejected when the SoM
+  preset doesn't ship OPTIGA Trust M (on-module or via
+  `capabilities:`).  Errors point at the offending YAML path.
+- New `boot.build_type:` enum (`Release` | `Debug` | `MinSizeRel`,
+  default `Release`).  Propagates to both the MCUboot and TF-M
+  sysbuild child images so they ship the same flavour.
+- New ADR: [`docs/adr/0013-tfm-boundary-m55-hp-trustzone.md`](docs/adr/0013-tfm-boundary-m55-hp-trustzone.md)
+  -- captures the locked-in cross-core trust-boundary decision
+  (TrustZone-M on M55-HP, not a dedicated M55-HE).  Refines ADR
+  0010.  M55-HE stays available for compute / inference offload.
+- Schema: `security.psa:` description refreshed (the "pre-v0.6 ...
+  emit path is a no-op" note is gone); `boot.build_type:`
+  documented.  Template `metadata/templates/board.yaml` grows a
+  commented `security.psa:` example.
+- Docs: `docs/board-config.md` §PSA Crypto + TF-M now describes
+  the v0.6 emit contract; `docs/security-audit-plan.md` gains a
+  short TF-M trust boundary section pointing at ADR 0013.
+- Tests: 11 new cases in
+  `tests/scripts/test_alp_orchestrate.py` covering happy-path
+  emit, schema field round-trip, ITS/PS backing-store reference
+  validation (happy + rejection), attestation-root OPTIGA
+  cross-check, absence-emits-nothing, materialise round-trip, and
+  build-type inheritance.  Full suite: 413 passed / 5 skipped (was
+  402 / 5).
+
 ### Changed — board.yaml flatten + carrier→board rename + 7 declarative blocks (2026-05-20)
 
 **Breaking schema changes (no migration script — every in-repo

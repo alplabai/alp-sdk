@@ -297,6 +297,7 @@ class BoardProject:
     boot: dict[str, Any] = field(default_factory=dict)
     ota: dict[str, Any] = field(default_factory=dict)
     storage: list[StorageEntry] = field(default_factory=list)
+    security: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -770,6 +771,67 @@ def load_board_yaml(path: Path, *,
                     f"unique within the project")
             names_seen.add(entry.name)
 
+    # 10. `security.psa:` cross-field validation.  The schema is
+    # authoritative on field types; this block enforces the references:
+    # ITS/PS storage names must resolve to a `storage[].name` OR a SoM
+    # memory_map region name, and `attestation_root: optiga_trust_m`
+    # requires the SoM to physically ship OPTIGA Trust M.  Errors point
+    # at the offending board.yaml path so the customer can fix it.
+    security_block = dict(project.get("security") or {})
+    psa = dict(security_block.get("psa") or {})
+    if psa:
+        storage_name_set = {e.name for e in storage_entries}
+        try:
+            mem_map = resolve_memory_map(som_preset, METADATA_ROOT)
+        except Exception:                                # noqa: BLE001
+            mem_map = []
+        region_names = {
+            str(r.get("name")) for r in mem_map
+            if isinstance(r, dict) and r.get("name")
+        }
+        valid_refs = storage_name_set | region_names
+
+        def _check_backing_store(field: str) -> None:
+            ref = psa.get(field)
+            if ref is None:
+                return
+            if str(ref) in valid_refs:
+                return
+            raise OrchestratorError(
+                f"board.yaml `security.psa.{field}: {ref}` does not "
+                f"resolve to any `storage[].name` or SoM "
+                f"`memory_map[].name`.  Known storage partitions: "
+                f"{sorted(storage_name_set) or '[]'}; "
+                f"known SoM memory regions: "
+                f"{sorted(region_names) or '[]'}.")
+
+        _check_backing_store("its_storage")
+        _check_backing_store("ps_storage")
+
+        att_root = psa.get("attestation_root")
+        if att_root == "optiga_trust_m":
+            on_module = som_preset.get("on_module") or {}
+            chip_set: set[str] = set()
+            for key, val in on_module.items():
+                if key == "ospi_memories":
+                    continue
+                if isinstance(val, str):
+                    chip_set.add(val)
+            capabilities = som_preset.get("capabilities") or {}
+            has_optiga = (
+                "optiga_trust_m" in chip_set
+                or bool(capabilities.get("optiga_trust_m"))
+            )
+            if not has_optiga:
+                raise OrchestratorError(
+                    f"board.yaml `security.psa.attestation_root: "
+                    f"optiga_trust_m` requires the SoM preset to "
+                    f"ship OPTIGA Trust M on-module, but SoM SKU "
+                    f"{sku} does not list it under `on_module:` or "
+                    f"`capabilities:`.  Pick `tfm_internal` or "
+                    f"`none`, or switch to a SoM that carries OPTIGA "
+                    f"(AEN family).")
+
     return BoardProject(
         sku=sku,
         hw_rev=hw_rev or som_preset.get("default_hw_rev"),
@@ -786,6 +848,7 @@ def load_board_yaml(path: Path, *,
         boot=dict(project.get("boot") or {}),
         ota=dict(project.get("ota") or {}),
         storage=storage_entries,
+        security=security_block,
         raw=project,
     )
 
@@ -1757,6 +1820,14 @@ class Orchestrator:
         # a "nothing to emit" comment so downstream `#include` resolves.
         (gen / "dts-partitions.dtsi").write_text(
             emit_dts_partitions(self.project), encoding="utf-8")
+        # TF-M sysbuild child-image overlay -- only when the project
+        # opts in to `security.psa.tfm: true`.  Absence-emits-nothing:
+        # we don't create the directory when the file would be empty.
+        tfm_conf = emit_tfm_sysbuild_conf(self.project)
+        if tfm_conf:
+            tfm_dir = self.build_root / "sysbuild" / "tfm"
+            tfm_dir.mkdir(parents=True, exist_ok=True)
+            (tfm_dir / "tfm.conf").write_text(tfm_conf, encoding="utf-8")
         return gen
 
     # ---- dispatch ----
@@ -2534,6 +2605,83 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
     return "\n".join(lines) + "\n"
 
 
+def emit_tfm_sysbuild_conf(project: BoardProject) -> str:
+    """Emit the TF-M sysbuild child-image overlay for `security.psa:`.
+
+    Returns a `SB_CONFIG_*` + `CONFIG_PSA_CRYPTO_*` snippet the build
+    wires into `build/sysbuild/tfm/tfm.conf` (consumed via
+    `west build --sysbuild --sysbuild-config`).  Returns an empty
+    string when the project omits `security.psa:` or sets
+    `tfm: false` -- PSA Crypto then runs entirely non-secure
+    (mbedTLS-only) and no child image is built.
+
+    The TF-M boundary lives on the same M55-HP core as the non-secure
+    app via Armv8-M TrustZone-M; see ADR 0013.
+    """
+    security = project.security or {}
+    psa = security.get("psa") or {}
+    if not psa or not psa.get("tfm"):
+        return ""
+
+    # TF-M build type follows the project's MCUboot build_type when
+    # set so the secure + bootloader artefacts ship the same flavour.
+    # Default is Release; debug builds use MinSizeRel for parity with
+    # the upstream sysbuild template.
+    boot = project.boot or {}
+    build_type = (boot.get("build_type") or "Release")
+    if build_type.lower() == "debug":
+        tfm_build_type = "Debug"
+    elif build_type.lower() in ("minsizerel", "min_size_rel"):
+        tfm_build_type = "MinSizeRel"
+    elif build_type.lower() == "release":
+        tfm_build_type = "Release"
+    else:
+        # Pass through verbatim if the customer set an exact CMake
+        # build-type string we don't pre-canonicalise.
+        tfm_build_type = build_type
+
+    lines: list[str] = [
+        "# Auto-generated by scripts/alp_orchestrate.py from "
+        "board.yaml `security.psa:`.",
+        "# Drives the sysbuild TF-M child image on the M55-HP core via "
+        "Armv8-M TrustZone-M.",
+        "# See docs/adr/0013-tfm-boundary-m55-hp-trustzone.md and "
+        "docs/security-audit-plan.md.",
+        "",
+        "SB_CONFIG_TFM=y",
+        f"SB_CONFIG_TFM_BUILD_TYPE={tfm_build_type}",
+    ]
+
+    persistent_slots = psa.get("persistent_slots")
+    if persistent_slots is None:
+        # Schema default mirrors v0.6: 16 slots.
+        persistent_slots = 16
+    lines.append(
+        f"CONFIG_PSA_CRYPTO_PERSISTENT_SLOT_COUNT={int(persistent_slots)}"
+    )
+
+    its = psa.get("its_storage")
+    if its:
+        lines.append(f'CONFIG_PSA_CRYPTO_ITS_BACKING_STORE="{its}"')
+    ps = psa.get("ps_storage")
+    if ps:
+        lines.append(f'CONFIG_PSA_CRYPTO_PS_BACKING_STORE="{ps}"')
+
+    att_root = (psa.get("attestation_root") or "none").lower()
+    if att_root == "optiga_trust_m":
+        lines.append(
+            "# Attestation root anchored in OPTIGA Trust M (on-module "
+            "secure element).")
+        lines.append(
+            "# See src/security/optiga_trust_m_bridge.c for the "
+            "PSA <-> OPTIGA bridge driver.")
+        lines.append("CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y")
+    elif att_root == "tfm_internal":
+        lines.append("CONFIG_ALP_SDK_PSA_ATTESTATION_TFM_INTERNAL=y")
+
+    return "\n".join(lines) + "\n"
+
+
 def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
     """Per-core cmake -D args for a baremetal / yocto slice.
 
@@ -2662,7 +2810,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     parser.add_argument("--emit", default=None,
                         choices=["system-manifest", "ipc-contract-h",
                                  "dts-reservations", "dts-partitions",
-                                 "storage-mounts-c"],
+                                 "storage-mounts-c",
+                                 "tfm-sysbuild-conf"],
                         help="Skip the build; just emit one of the "
                              "generated artefacts to stdout.")
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -2685,6 +2834,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 sys.stdout.write(emit_dts_partitions(project))
             elif args.emit == "storage-mounts-c":
                 sys.stdout.write(emit_storage_mounts_c(project))
+            elif args.emit == "tfm-sysbuild-conf":
+                sys.stdout.write(emit_tfm_sysbuild_conf(project))
         except OrchestratorError as e:
             print(f"alp-orchestrate: {e}", file=sys.stderr)
             return 1

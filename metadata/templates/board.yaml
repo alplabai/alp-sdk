@@ -213,6 +213,28 @@ diagnostics:
   # last_error: true    # alp_last_error() thread-local slot
 
 # -------------------------------------------------------------------
+# PSA Crypto + TF-M (`security.psa:`) -- optional, project-wide
+# -------------------------------------------------------------------
+# When `tfm: true` the orchestrator emits a sysbuild child-image
+# overlay at `build/sysbuild/tfm/tfm.conf`.  The TF-M secure
+# partition runs on the same M55-HP core as the non-secure app via
+# the Armv8-M security extension (TrustZone-M split) -- see
+# docs/adr/0013-tfm-boundary-m55-hp-trustzone.md.
+#
+# `its_storage:` and `ps_storage:` reference either a SoM
+# `memory_map:` region name or a `storage[].name` from the storage
+# block above.  `attestation_root: optiga_trust_m` requires the SoM
+# to physically ship OPTIGA Trust M (AEN + V2N families do).
+#
+# security:
+#   psa:
+#     persistent_slots: 16
+#     its_storage:      mram_main          # or e.g. psa_its from storage[]
+#     ps_storage:       ospi0              # optional
+#     tfm:              true
+#     attestation_root: optiga_trust_m     # optiga_trust_m | tfm_internal | none
+
+# -------------------------------------------------------------------
 # Note on `preset:` (SDK-internal -- you don't need it)
 # -------------------------------------------------------------------
 # The SDK demos under examples/ use `preset: e1m-evk` / `preset:

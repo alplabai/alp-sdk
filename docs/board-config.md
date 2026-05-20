@@ -1036,15 +1036,32 @@ The `system-manifest.yaml` carries every resolved partition's
 security:
   psa:
     persistent_slots:  16
-    its_storage:       mram_secure        # ITS backing region
+    its_storage:       mram_main          # SoM memory_map region OR storage[] name
     ps_storage:        ospi0              # optional (PS)
-    tfm:               false              # enable TF-M secure partition
+    tfm:               true               # enable TF-M secure partition
     attestation_root:  optiga_trust_m     # optiga_trust_m | tfm_internal | none
 ```
 
-Project-wide.  Pre-v0.6 the schema accepts the block but the
-emit path is a no-op (TF-M sysbuild child-image plumbing lands
-in v0.6).  See `docs/security-audit-plan.md` + ADR 0010.
+Project-wide.  When `tfm: true` the orchestrator emits a sysbuild
+child-image overlay at `build/sysbuild/tfm/tfm.conf` containing
+`SB_CONFIG_TFM=y`, `SB_CONFIG_TFM_BUILD_TYPE=<Release|Debug|MinSizeRel>`
+(inherited from `boot.build_type` when set), the
+`CONFIG_PSA_CRYPTO_PERSISTENT_SLOT_COUNT` value, and string-form
+`CONFIG_PSA_CRYPTO_{ITS,PS}_BACKING_STORE` references resolving to a
+`storage[].name` or a SoM `memory_map:` region.  When `tfm: false`
+PSA Crypto runs entirely non-secure (mbedTLS-only) and the overlay is
+not written.
+
+`attestation_root: optiga_trust_m` only validates when the SoM preset
+physically ships OPTIGA Trust M (AEN family + V2N family today); the
+emitter additionally surfaces `CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y`
+and a comment pointing at the `src/security/optiga_trust_m_bridge.c`
+PSA <-> OPTIGA bridge driver.
+
+The TF-M secure partition runs on the same M55-HP core as the
+non-secure app via the Armv8-M security extension (TrustZone-M split,
+not a separate M55-HE core).  See `docs/adr/0013-tfm-boundary-m55-hp-trustzone.md`
++ `docs/security-audit-plan.md` + ADR 0010.
 
 ## Versioning
 
