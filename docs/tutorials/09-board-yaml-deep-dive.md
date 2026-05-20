@@ -382,6 +382,68 @@ diagnostics:
 Sets the SDK's log verbosity.  Maps to Zephyr's
 `CONFIG_LOG_DEFAULT_LEVEL` + the Yocto-side `LOG_LEVEL` env var.
 
+### `storage` (persistent partitions)
+
+```yaml
+storage:
+  - { name: settings,        fs: littlefs, size_kib: 64,  mount: /lfs/settings,
+      flash_device: mram_main }
+  - { name: app_data,        fs: littlefs, size_kib: 128, mount: /lfs/app,
+      flash_device: mram_main }
+  - { name: mcuboot_scratch, fs: raw,      size_kib: 32,
+      flash_device: mram_main }
+```
+
+Each entry declares one fixed partition.  `flash_device:` resolves
+against either the SoM's `memory_map:` regions (auto-derived from
+the SoC variant when not overridden) or `on_module.ospi_memories:`
+keys (when the SoM ships with external OSPI flash).
+
+The orchestrator allocates partitions bottom-up within each device,
+**name-sorted, page-aligned to 4 KiB**, so addresses stay byte-stable
+across rebuilds -- the property OTA images depend on.  In the example
+above the resolver yields:
+
+| Partition          | Offset | Size  | DT label        |
+|--------------------|--------|-------|-----------------|
+| `app_data`         |   0    | 128 K | `&mram_main`    |
+| `mcuboot_scratch`  | 128 K  |  32 K | `&mram_main`    |
+| `settings`         | 160 K  |  64 K | `&mram_main`    |
+
+(name-sorted, hence `app_data` before `mcuboot_scratch` before
+`settings`).  Override the allocator with `offset_kib: <N>` on any
+entry; the resolver checks page alignment + sibling overlap and
+projects collisions as `status: blocked` in the manifest with a
+clear reason.
+
+The build absorbs three outputs per project:
+
+* `build/generated/dts-partitions.dtsi` -- a DTS overlay decorating
+  `&<dt_label>` with a `partitions { compatible = "fixed-partitions"; ... }`
+  child node.  Apps reach individual partitions via Zephyr's
+  `FIXED_PARTITION_ID(<name>_partition)`.
+* `CONFIG_FILE_SYSTEM=y` + the per-fs Kconfig (`LITTLEFS` /
+  `FAT_FILESYSTEM_ELM` / `FILE_SYSTEM_EXT2`) + per-partition
+  `CONFIG_FS_LITTLEFS_PARTITION_<NAME>=y` in each Zephyr slice's
+  `alp.conf`.
+* Optional `--emit storage-mounts-c` produces a static
+  `fs_mount_t alp_storage_mounts[]` array the app iterates at boot.
+
+Inspect the resolved layout:
+
+```bash
+python3 scripts/alp_orchestrate.py --input board.yaml --emit system-manifest \
+    | yq '.storage[]'
+python3 scripts/alp_orchestrate.py --input board.yaml --emit dts-partitions
+```
+
+The loader rejects typoed `flash_device:` references at parse time
+with the list of known devices for the project's SoM.  When the
+device's size is `TBD` (HW-config still owed), the resolver projects
+the entry as `status: blocked` with a reason pointing at the SoM
+file owing the value -- so the manifest stays emit-able and CI
+sees the gap.
+
 ## Worked example: custom IoT board on AEN
 
 A custom board that doesn't match any shipped preset, with

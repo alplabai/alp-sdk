@@ -152,7 +152,7 @@
 
     "storage": {
       "type": "array",
-      "description": "Optional flash / persistent-storage partitioning.  Each entry declares one partition: a name, a filesystem (or `raw: true` for unformatted partitions used as OTA slot backing / image cache), a size, an optional mount point, and a flash-device reference into the SoM preset's `memory_map:` or `on_module.ospi_memories:` block.  The loader emits a partial DTS overlay (the `partitions { ... }` node) plus the matching Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS / CONFIG_FAT_FILESYSTEM_ELM / ...) per entry.  See docs/v0.6-tbd-and-assumptions.md -- the emit path lands in v0.6 alongside the deterministic flash-allocator.",
+      "description": "Optional flash / persistent-storage partitioning.  Each entry declares one partition: a name, a filesystem (or `raw: true` for unformatted partitions used as OTA slot backing / image cache), a size, an optional mount point, and a flash-device reference into the SoM preset's `memory_map:` or `on_module.ospi_memories:` block.  The orchestrator emits a partial DTS overlay (the `&<flash>; partitions { ... }` node) plus the matching Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS / CONFIG_FAT_FILESYSTEM_ELM / ...) per entry.  Partition addresses are pinned by the orchestrator (bottom-up, page-aligned within the flash device) for byte-stable OTA images across rebuilds; supply `offset_kib:` to override the allocator with an explicit offset.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -163,6 +163,7 @@
           "fs":           { "type": "string", "enum": ["littlefs", "fat", "ext4", "raw"], "default": "raw", "description": "Filesystem to format the partition with.  `raw` leaves it unformatted (e.g. for image slots managed by MCUboot)." },
           "mount":        { "type": "string", "description": "Mount point at boot.  Optional; when omitted the partition isn't auto-mounted." },
           "flash_device": { "type": "string", "description": "Region this partition lives in.  References the SoM preset's `memory_map:` name (`mram_main`, `ocram_low`, ...) or an `on_module.ospi_memories:` entry (`ospi0`, ...)." },
+          "offset_kib":   { "type": "integer", "minimum": 0, "description": "Optional explicit offset (in KiB) within the flash device.  When omitted, the orchestrator allocates bottom-up from offset 0 in name-sorted order.  When supplied, must be page-aligned (4 KiB); the allocator surfaces overlaps via `status: blocked` on the resolved partition." },
           "raw":          { "type": "boolean", "description": "Legacy alias for `fs: raw`.  Prefer `fs:` directly." }
         }
       }

@@ -218,6 +218,67 @@ class ResolvedCarveOut:
 
 
 @dataclass
+class StorageEntry:
+    """Raw storage-partition declaration straight from board.yaml.
+
+    Mirrors the shape under `storage:` in board.schema.json; the
+    orchestrator turns these into ResolvedPartitions in
+    `resolve_storage_partitions()`.
+    """
+
+    name: str
+    size_kib: int
+    fs: str                  # littlefs | fat | ext4 | raw
+    mount: Optional[str] = None
+    flash_device: Optional[str] = None
+    offset_kib: Optional[int] = None     # explicit offset override
+
+
+@dataclass
+class ResolvedPartition:
+    """A StorageEntry after allocation against the SoM flash devices.
+
+    `status` follows the IPC carve-out convention: "ok" for a fully
+    resolved partition; "blocked" when the SoM metadata has TBDs
+    (flash device base/size unset) or the entry can't be satisfied
+    (unknown flash_device, page-misaligned offset, overlap with a
+    sibling partition).  Blocked entries land in `system-manifest.yaml`
+    with `reason: ...` so reviewers see the gap.
+    """
+
+    name: str
+    fs: str
+    flash_device: str        # original SDK name from board.yaml
+    dt_label: str            # Zephyr DT label resolved by the loader
+    base_kib: int            # offset within the flash device, in KiB; 0 when blocked
+    size_kib: int
+    mount: Optional[str] = None
+    status: str = "ok"       # "ok" | "blocked"
+    reason: Optional[str] = None
+
+    def to_manifest_entry(self) -> dict[str, Any]:
+        if self.status == "blocked":
+            return {
+                "name":         self.name,
+                "fs":           self.fs,
+                "flash_device": self.flash_device,
+                "status":       "blocked",
+                "reason":       self.reason or "",
+            }
+        entry: dict[str, Any] = {
+            "name":          self.name,
+            "fs":            self.fs,
+            "flash_device":  self.flash_device,
+            "dt_label":      self.dt_label,
+            "offset_kib":    self.base_kib,
+            "size_kib":      self.size_kib,
+        }
+        if self.mount:
+            entry["mount"] = self.mount
+        return entry
+
+
+@dataclass
 class BoardProject:
     """Resolved board.yaml project ready for fan-out."""
 
@@ -235,6 +296,7 @@ class BoardProject:
     features: dict[str, Any] = field(default_factory=dict)
     boot: dict[str, Any] = field(default_factory=dict)
     ota: dict[str, Any] = field(default_factory=dict)
+    storage: list[StorageEntry] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -245,11 +307,12 @@ class SystemManifest:
     project: BoardProject
     slices: list[Slice]
     carve_outs: list[ResolvedCarveOut]
+    partitions: list[ResolvedPartition] = field(default_factory=list)
     boot_order: list[dict[str, Any]] = field(default_factory=list)
     helper_mcus: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "schema_version": 1,
             "generated_by":   "scripts/alp_orchestrate.py",
             "hw_info": {
@@ -264,6 +327,9 @@ class SystemManifest:
             "helper_mcus": list(self.helper_mcus),
             "boot_order":  list(self.boot_order),
         }
+        if self.partitions:
+            out["storage"] = [p.to_manifest_entry() for p in self.partitions]
+        return out
 
 
 # ---------------------------------------------------------------------
@@ -655,6 +721,55 @@ def load_board_yaml(path: Path, *,
                     f"match the resolved board '{board_label}'s macros for "
                     f"pad {e1m_pad}: {sorted(macros_by_pad[e1m_pad])}")
 
+    # 9. Storage partitions (board.yaml `storage:` block).  Parse into
+    # StorageEntry dataclasses + cross-field check: every `flash_device:`
+    # must resolve to either a memory_map region name or an
+    # `on_module.ospi_memories:` key.  Resolution of base addresses /
+    # overlap detection happens in `resolve_storage_partitions()`; the
+    # loader catches typos eagerly because they are cheap to surface
+    # before the build kicks off.
+    storage_raw = project.get("storage") or []
+    storage_entries: list[StorageEntry] = []
+    for idx, item in enumerate(storage_raw):
+        # `raw: true` is the legacy alias for `fs: raw`; the schema
+        # accepts both, the loader normalises.
+        fs = item.get("fs")
+        if fs is None and item.get("raw") is True:
+            fs = "raw"
+        if fs is None:
+            fs = "raw"
+        storage_entries.append(StorageEntry(
+            name=item["name"],
+            size_kib=int(item["size_kib"]),
+            fs=fs,
+            mount=item.get("mount"),
+            flash_device=item.get("flash_device"),
+            offset_kib=(int(item["offset_kib"])
+                        if item.get("offset_kib") is not None else None),
+        ))
+
+    # Cross-field: known flash device set is memory_map names + ospi keys.
+    if storage_entries:
+        known_devices = set(_known_flash_devices(som_preset, METADATA_ROOT))
+        for entry in storage_entries:
+            if entry.flash_device is None:
+                continue   # resolver will block it with a clear reason
+            if entry.flash_device not in known_devices:
+                raise OrchestratorError(
+                    f"board.yaml `storage[{entry.name}].flash_device: "
+                    f"{entry.flash_device}` does not resolve to any "
+                    f"flash device on SoM {sku}.  Known devices: "
+                    f"{sorted(known_devices)}")
+        # Name uniqueness within storage[].
+        names_seen: set[str] = set()
+        for entry in storage_entries:
+            if entry.name in names_seen:
+                raise OrchestratorError(
+                    f"board.yaml `storage:` declares partition "
+                    f"`{entry.name}` more than once; names must be "
+                    f"unique within the project")
+            names_seen.add(entry.name)
+
     return BoardProject(
         sku=sku,
         hw_rev=hw_rev or som_preset.get("default_hw_rev"),
@@ -670,6 +785,7 @@ def load_board_yaml(path: Path, *,
         features=dict(project.get("features") or {}),
         boot=dict(project.get("boot") or {}),
         ota=dict(project.get("ota") or {}),
+        storage=storage_entries,
         raw=project,
     )
 
@@ -952,6 +1068,269 @@ def resolve_carve_outs(
 
 
 # ---------------------------------------------------------------------
+# Storage partition resolver
+# ---------------------------------------------------------------------
+
+
+def _known_flash_devices(
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+) -> list[str]:
+    """Enumerate every flash-device name a `storage[].flash_device:` may
+    reference for the given SoM preset.
+
+    Today this is the union of:
+      - `memory_map:` region names (explicit override or derived from
+        the SoC variant), AND
+      - `on_module.ospi_memories:` keys (when declared on the SoM).
+
+    Kept as a list so the loader's "did you mean..." message can sort
+    it deterministically.
+    """
+    names: set[str] = set()
+    for region in resolve_memory_map(som_preset, metadata_root):
+        n = region.get("name")
+        if isinstance(n, str):
+            names.add(n)
+    om = som_preset.get("on_module") or {}
+    ospi = om.get("ospi_memories") or {}
+    if isinstance(ospi, dict):
+        for k in ospi.keys():
+            if isinstance(k, str):
+                names.add(k)
+    return sorted(names)
+
+
+def _resolve_flash_device(
+    flash_device: str,
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Resolve a board.yaml `flash_device:` reference to a device descriptor.
+
+    Returns `(descriptor, None)` on success; `(None, reason)` when the
+    device is known but cannot be allocated against (TBD capacity).
+    The descriptor carries:
+        name        -- the SDK device name (verbatim from board.yaml)
+        dt_label    -- the Zephyr DT label to decorate
+        size_bytes  -- capacity in bytes (None when unresolvable)
+
+    Address allocation is offset-within-device; the descriptor does
+    NOT carry a physical base because Zephyr's flash-mapping layer
+    derives that from the DT controller node.  The emitted overlay
+    references `&<dt_label>` and lets Zephyr handle the physical mapping.
+    """
+    # memory_map: region match first (covers the auto-derived MRAM /
+    # SRAM region table from resolve_memory_map()).
+    for region in resolve_memory_map(som_preset, metadata_root):
+        if region.get("name") != flash_device:
+            continue
+        size_bytes = _region_size_bytes(region)
+        if size_bytes is None:
+            return None, (
+                f"flash device '{flash_device}' resolves to memory_map "
+                f"region but size_mib / size_kib is unset or TBD on "
+                f"SoM {som_preset.get('sku', '<unknown>')}; the SoM "
+                f"hasn't been HW-mapped yet")
+        dt_label = (region.get("dt_label")
+                    if isinstance(region.get("dt_label"), str)
+                    else flash_device)
+        return {
+            "name":       flash_device,
+            "dt_label":   dt_label,
+            "size_bytes": size_bytes,
+        }, None
+
+    # on_module.ospi_memories: key match.
+    om = som_preset.get("on_module") or {}
+    ospi = om.get("ospi_memories") or {}
+    if isinstance(ospi, dict) and flash_device in ospi:
+        entry = ospi[flash_device] or {}
+        cap = entry.get("capacity_mbit")
+        if isinstance(cap, str) and cap.strip().upper() == "TBD":
+            return None, (
+                f"on_module.ospi_memories.{flash_device}.capacity_mbit "
+                f"is TBD on SoM {som_preset.get('sku', '<unknown>')}; "
+                f"fill the value or move the storage entry to a sized "
+                f"flash device")
+        if not isinstance(cap, int):
+            return None, (
+                f"on_module.ospi_memories.{flash_device}.capacity_mbit "
+                f"is missing on SoM {som_preset.get('sku', '<unknown>')}; "
+                f"the storage allocator needs an authoritative capacity")
+        dt_label = (entry.get("dt_label")
+                    if isinstance(entry.get("dt_label"), str)
+                    else flash_device)
+        # capacity_mbit is megabits; convert to bytes.
+        size_bytes = int(cap) * 1024 * 1024 // 8
+        return {
+            "name":       flash_device,
+            "dt_label":   dt_label,
+            "size_bytes": size_bytes,
+        }, None
+
+    # Unknown device — the loader catches this earlier, but defend
+    # in depth in case a resolver is called with a hand-built project.
+    return None, (
+        f"flash device '{flash_device}' is neither a memory_map region "
+        f"nor an on_module.ospi_memories key on SoM "
+        f"{som_preset.get('sku', '<unknown>')}")
+
+
+def _blocked_partition(
+    entry: StorageEntry,
+    reason: str,
+) -> ResolvedPartition:
+    """Project a StorageEntry into a blocked ResolvedPartition."""
+    return ResolvedPartition(
+        name=entry.name,
+        fs=entry.fs,
+        flash_device=entry.flash_device or "",
+        dt_label="",
+        base_kib=0,
+        size_kib=entry.size_kib,
+        mount=entry.mount,
+        status="blocked",
+        reason=reason,
+    )
+
+
+def resolve_storage_partitions(
+    project: BoardProject,
+) -> list[ResolvedPartition]:
+    """Allocate physical offsets for every storage[] entry.
+
+    Algorithm (mirrors `resolve_carve_outs()`):
+      1. Group entries by `flash_device:` (entries without one block
+         immediately; the loader normally catches that, but this is
+         the resolver's failure mode for hand-built projects).
+      2. Within each group, sort by name for determinism (an explicit
+         `offset_kib:` doesn't change sort order — it's an override
+         the allocator simply respects).
+      3. For each entry: if `offset_kib:` is set, honour it (page-
+         aligned check; overlap check against prior entries).  Else
+         allocate bottom-up from the current high-water mark, page-
+         aligned.
+      4. Block on capacity overflow, TBD device, page-misaligned
+         offset, or sibling overlap.  Blocked entries land in the
+         manifest with `status: blocked` + `reason:` so reviewers see
+         the gap; the slice build trips when the DTS overlay is
+         consumed.
+
+    Spec note: byte-stable OTA images require the orchestrator to pin
+    addresses (resolved in design Q1 for v0.6 -- option "Pin in
+    orchestrator").  Customers get reproducible per-rebuild addresses
+    by declaring stable `name:` slugs; partitions stay at the same
+    offset across rebuilds as long as their relative order doesn't
+    change.  Explicit `offset_kib:` is the escape hatch.
+    """
+    if not project.storage:
+        return []
+
+    # Group by flash device, preserving original order for the
+    # downstream resolver (we re-sort for allocation determinism below).
+    by_device: dict[str, list[StorageEntry]] = {}
+    no_device: list[StorageEntry] = []
+    for entry in project.storage:
+        if not entry.flash_device:
+            no_device.append(entry)
+        else:
+            by_device.setdefault(entry.flash_device, []).append(entry)
+
+    resolved: list[ResolvedPartition] = []
+
+    for entry in no_device:
+        resolved.append(_blocked_partition(entry, (
+            f"storage entry '{entry.name}' has no flash_device: "
+            f"declared; add one referencing a SoM memory_map region "
+            f"or an on_module.ospi_memories key")))
+
+    # Iterate flash devices in alphabetical order; within each device,
+    # entries are name-sorted for byte-stable allocation.
+    for device_name in sorted(by_device.keys()):
+        descriptor, block_reason = _resolve_flash_device(
+            device_name, project.som_preset, METADATA_ROOT)
+        if descriptor is None:
+            for entry in by_device[device_name]:
+                resolved.append(_blocked_partition(
+                    entry, block_reason or "flash device unresolvable"))
+            continue
+
+        dt_label = descriptor["dt_label"]
+        capacity_bytes = descriptor["size_bytes"]
+        # Page-aligned high-water mark; sibling partitions allocate
+        # bottom-up from offset 0.  Page = 4 KiB matches the IPC
+        # carve-out allocator; storage erase blocks on every silicon
+        # the SDK targets are 4 KiB-or-larger multiples.
+        high_water_bytes = 0
+        # Track allocated [lo, hi) ranges so explicit `offset_kib:`
+        # overrides can be checked against sibling allocations even
+        # when the bump allocator would have placed them differently.
+        allocated: list[tuple[int, int, str]] = []   # (lo, hi, name)
+
+        entries_sorted = sorted(
+            by_device[device_name], key=lambda e: e.name)
+
+        for entry in entries_sorted:
+            size_bytes = entry.size_kib * 1024
+            size_aligned = ((size_bytes + _PAGE - 1) // _PAGE) * _PAGE
+
+            if entry.offset_kib is not None:
+                base_bytes = entry.offset_kib * 1024
+                if base_bytes % _PAGE != 0:
+                    resolved.append(_blocked_partition(entry, (
+                        f"storage entry '{entry.name}' explicit "
+                        f"offset_kib={entry.offset_kib} is not page-"
+                        f"aligned (4 KiB)")))
+                    continue
+            else:
+                base_bytes = high_water_bytes
+
+            top_bytes = base_bytes + size_aligned
+            if top_bytes > capacity_bytes:
+                resolved.append(_blocked_partition(entry, (
+                    f"storage entry '{entry.name}' ({entry.size_kib} "
+                    f"KiB at offset {base_bytes // 1024} KiB) overruns "
+                    f"flash device '{device_name}' "
+                    f"(capacity {capacity_bytes // 1024} KiB)")))
+                continue
+
+            # Sibling-overlap check (only meaningful when offset_kib was
+            # supplied; the bump allocator can't overlap with itself).
+            overlap_with: Optional[str] = None
+            for lo, hi, peer_name in allocated:
+                if not (top_bytes <= lo or base_bytes >= hi):
+                    overlap_with = peer_name
+                    break
+            if overlap_with is not None:
+                resolved.append(_blocked_partition(entry, (
+                    f"storage entry '{entry.name}' explicit "
+                    f"offset_kib={entry.offset_kib} overlaps sibling "
+                    f"partition '{overlap_with}' on device "
+                    f"'{device_name}'")))
+                continue
+
+            allocated.append((base_bytes, top_bytes, entry.name))
+            if entry.offset_kib is None:
+                # Only bump the allocator when we used it; explicit
+                # offsets don't shift the high-water mark (they may be
+                # below it deliberately, e.g. to reserve a low slot).
+                high_water_bytes = top_bytes
+
+            resolved.append(ResolvedPartition(
+                name=entry.name,
+                fs=entry.fs,
+                flash_device=device_name,
+                dt_label=dt_label,
+                base_kib=base_bytes // 1024,
+                size_kib=size_aligned // 1024,
+                mount=entry.mount,
+            ))
+
+    return resolved
+
+
+# ---------------------------------------------------------------------
 # Emitters
 # ---------------------------------------------------------------------
 
@@ -1061,6 +1440,170 @@ def emit_dts_reservations(project: BoardProject) -> str:
     return "\n".join(lines)
 
 
+def emit_dts_partitions(project: BoardProject) -> str:
+    """Generate dts-partitions.dtsi from board.yaml `storage:`.
+
+    The overlay decorates each referenced flash device with a
+    `partitions { ... }` child node carrying every resolved
+    partition for that device.  Zephyr's `fixed-partitions` binding
+    consumes the result; downstream Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS
+    etc., emitted by `_slice_alp_conf()`) wires the filesystem driver.
+
+    Blocked partitions appear as bare comments so reviewers see the
+    gap; the slice build trips elsewhere (the per-fs Kconfig will not
+    have a backing partition and Zephyr's link-time fs-table assembly
+    surfaces the error).
+    """
+    partitions = resolve_storage_partitions(project)
+    lines: list[str] = [
+        "/*",
+        " * Auto-generated by scripts/alp_orchestrate.py -- do not edit.",
+        " * Regenerate after changes to board.yaml `storage:` or the SoM's",
+        " * memory_map / on_module.ospi_memories blocks.  #include this file",
+        " * from your Zephyr DT.",
+        " */",
+        "",
+    ]
+    if not partitions:
+        lines += [
+            "/* No `storage:` entries declared in board.yaml; nothing to emit. */",
+            "",
+        ]
+        return "\n".join(lines)
+
+    # Group resolved partitions by dt_label; blocked entries get a
+    # standalone comment block so reviewers see the gap.
+    by_label: dict[str, list[ResolvedPartition]] = {}
+    blocked: list[ResolvedPartition] = []
+    for p in partitions:
+        if p.status == "blocked":
+            blocked.append(p)
+            continue
+        by_label.setdefault(p.dt_label, []).append(p)
+
+    for label in sorted(by_label.keys()):
+        lines.append(f"&{label} {{")
+        lines.append("    partitions {")
+        lines.append('        compatible = "fixed-partitions";')
+        lines.append("        #address-cells = <1>;")
+        lines.append("        #size-cells = <1>;")
+        lines.append("")
+        # Sort by base offset for human readability + DT-binding
+        # convention (low-address first).
+        for p in sorted(by_label[label], key=lambda x: x.base_kib):
+            base_bytes = p.base_kib * 1024
+            size_bytes = p.size_kib * 1024
+            lines.append(
+                f"        {p.name}_partition: partition@{base_bytes:x} {{")
+            lines.append(f'            label = "{p.name}";')
+            lines.append(
+                f"            reg = <0x{base_bytes:x} 0x{size_bytes:x}>;")
+            lines.append("        };")
+            lines.append("")
+        lines.append("    };")
+        lines.append("};")
+        lines.append("")
+
+    if blocked:
+        lines.append(
+            "/* Blocked storage entries -- see system-manifest.yaml for details. */")
+        for p in blocked:
+            lines.append(f"/* BLOCKED: {p.name} -- "
+                         f"{p.reason or 'unknown reason'} */")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def emit_storage_mounts_c(project: BoardProject) -> str:
+    """Generate storage_mount_table.c -- a static fs_mount_t[] array.
+
+    Optional companion to emit_dts_partitions.  Apps that want
+    deterministic boot-time mounting include this file and call
+    `alp_storage_mount_all()` (or iterate the table manually).
+    Partitions with no `mount:` declared are omitted from the table.
+    """
+    partitions = resolve_storage_partitions(project)
+    mountable = [p for p in partitions
+                 if p.status == "ok" and p.mount and p.fs != "raw"]
+
+    lines: list[str] = [
+        "/*",
+        " * Auto-generated by scripts/alp_orchestrate.py -- do not edit.",
+        " * Regenerate after changes to board.yaml `storage:`.",
+        " */",
+        "/* clang-format off */",
+        "",
+        "#include <zephyr/fs/fs.h>",
+        "#include <zephyr/storage/flash_map.h>",
+        "",
+    ]
+    if not mountable:
+        lines += [
+            "/* No mountable storage[] entries declared; emitting empty table. */",
+            "",
+            "const struct fs_mount_t *alp_storage_mounts[] = { 0 };",
+            "const size_t alp_storage_mount_count = 0;",
+            "/* clang-format on */",
+            "",
+        ]
+        return "\n".join(lines)
+
+    # Per-fs includes + per-partition fs_<name>_data + fs_mount_t.
+    fs_seen: set[str] = set()
+    for p in mountable:
+        if p.fs in fs_seen:
+            continue
+        fs_seen.add(p.fs)
+        if p.fs == "littlefs":
+            lines.append("#include <zephyr/fs/littlefs.h>")
+        elif p.fs == "fat":
+            lines.append("#include <ff.h>")
+        elif p.fs == "ext4":
+            lines.append("#include <zephyr/fs/ext2.h>")
+    lines.append("")
+
+    for p in mountable:
+        upper = p.name.upper()
+        if p.fs == "littlefs":
+            lines.append(f"FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(alp_lfs_{p.name});")
+            lines.append(f"static struct fs_mount_t alp_mnt_{p.name} = {{")
+            lines.append(f"    .type = FS_LITTLEFS,")
+            lines.append(f"    .fs_data = &alp_lfs_{p.name},")
+            lines.append(f"    .storage_dev = (void *)FIXED_PARTITION_ID({p.name}_partition),")
+            lines.append(f'    .mnt_point = "{p.mount}",')
+            lines.append("};")
+        elif p.fs == "fat":
+            lines.append(f"static FATFS alp_fat_{p.name};")
+            lines.append(f"static struct fs_mount_t alp_mnt_{p.name} = {{")
+            lines.append(f"    .type = FS_FATFS,")
+            lines.append(f"    .fs_data = &alp_fat_{p.name},")
+            lines.append(f"    .storage_dev = (void *)FIXED_PARTITION_ID({p.name}_partition),")
+            lines.append(f'    .mnt_point = "{p.mount}",')
+            lines.append("};")
+        elif p.fs == "ext4":
+            lines.append(f"static struct fs_mount_t alp_mnt_{p.name} = {{")
+            lines.append(f"    .type = FS_EXT2,")
+            lines.append(f"    .storage_dev = (void *)FIXED_PARTITION_ID({p.name}_partition),")
+            lines.append(f'    .mnt_point = "{p.mount}",')
+            lines.append("};")
+        lines.append("")
+        # Silence -Wunused on the per-partition mount when the app
+        # iterates only via alp_storage_mounts[]; the explicit symbol
+        # lets test fixtures reach a specific mount by name.
+        _ = upper
+
+    lines.append("const struct fs_mount_t *alp_storage_mounts[] = {")
+    for p in mountable:
+        lines.append(f"    &alp_mnt_{p.name},")
+    lines.append("};")
+    lines.append("const size_t alp_storage_mount_count = "
+                 f"{len(mountable)};")
+    lines.append("/* clang-format on */")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def emit_system_manifest(
     project: BoardProject,
     *,
@@ -1074,6 +1617,7 @@ def emit_system_manifest(
     so the manifest carries status / log_path / etc.
     """
     carve_outs = resolve_carve_outs(project)
+    partitions = resolve_storage_partitions(project)
     effective_slices = list(slices) if slices is not None else list(project.cores.values())
 
     boot_order = list(project.som_preset.get("boot_order") or [])
@@ -1082,6 +1626,7 @@ def emit_system_manifest(
         project=project,
         slices=effective_slices,
         carve_outs=carve_outs,
+        partitions=partitions,
         boot_order=boot_order,
         helper_mcus=_helper_mcus(project),
     )
@@ -1207,6 +1752,11 @@ class Orchestrator:
             emit_ipc_contract_h(self.project), encoding="utf-8")
         (gen / "dts-reservations.dtsi").write_text(
             emit_dts_reservations(self.project), encoding="utf-8")
+        # Storage partitions land alongside the IPC reservations DTS;
+        # apps that don't declare storage[] still get a stub file with
+        # a "nothing to emit" comment so downstream `#include` resolves.
+        (gen / "dts-partitions.dtsi").write_text(
+            emit_dts_partitions(self.project), encoding="utf-8")
         return gen
 
     # ---- dispatch ----
@@ -1812,6 +2362,53 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append("")
 
     # ----------------------------------------------------------------
+    # Storage partitions (board.yaml `storage:` block).  Emits per-fs
+    # Kconfig for every resolved (non-blocked) partition.  Blocked
+    # partitions produce a hint comment so the slice build still
+    # compiles but the runtime mount fails loudly via the DTS overlay.
+    #
+    # Per-slice ownership of partitions is not modelled today: every
+    # Zephyr/baremetal slice gets the union.  Kconfig dedupes when
+    # multiple per-core fragments overlay onto the same base.  v0.7
+    # may add `core:` to storage entries for per-slice scoping.
+    # ----------------------------------------------------------------
+    partitions = resolve_storage_partitions(project)
+    ok_partitions = [p for p in partitions if p.status == "ok"]
+    fs_seen: set[str] = set()
+    for p in ok_partitions:
+        fs_seen.add(p.fs)
+    fs_kconfig: list[str] = []
+    if "littlefs" in fs_seen:
+        fs_kconfig.append("CONFIG_FILE_SYSTEM=y")
+        fs_kconfig.append("CONFIG_FILE_SYSTEM_LITTLEFS=y")
+    if "fat" in fs_seen:
+        fs_kconfig.append("CONFIG_FILE_SYSTEM=y")
+        fs_kconfig.append("CONFIG_FAT_FILESYSTEM_ELM=y")
+    if "ext4" in fs_seen:
+        fs_kconfig.append("CONFIG_FILE_SYSTEM=y")
+        fs_kconfig.append("CONFIG_FILE_SYSTEM_EXT2=y")
+    if fs_kconfig or ok_partitions:
+        lines.append("# Storage partitions (board.yaml `storage:`)")
+        # FILE_SYSTEM=y appears twice in the list when multiple fs
+        # types are enabled; dedupe before emit.
+        for kc in sorted(set(fs_kconfig)):
+            lines.append(kc)
+        # Per-partition LITTLEFS partition stems carry the partition
+        # label so customers can drive runtime mount discovery via
+        # FIXED_PARTITION_ID(<name>_partition).  Zephyr's
+        # CONFIG_FS_LITTLEFS_PARTITION_<NAME> is set per littlefs
+        # partition; raw partitions get no fs Kconfig.
+        for p in ok_partitions:
+            if p.fs == "littlefs":
+                lines.append(
+                    f"CONFIG_FS_LITTLEFS_PARTITION_{p.name.upper()}=y")
+        blocked = [p for p in partitions if p.status == "blocked"]
+        for p in blocked:
+            lines.append(f"# BLOCKED storage[{p.name}]: "
+                         f"{p.reason or 'unknown reason'}")
+        lines.append("")
+
+    # ----------------------------------------------------------------
     # Per-module log levels (board.yaml `diagnostics.modules:`).
     # ----------------------------------------------------------------
     modules = (project.diagnostics or {}).get("modules") or {}
@@ -2064,7 +2661,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         help="Force sequential dispatch.")
     parser.add_argument("--emit", default=None,
                         choices=["system-manifest", "ipc-contract-h",
-                                 "dts-reservations"],
+                                 "dts-reservations", "dts-partitions",
+                                 "storage-mounts-c"],
                         help="Skip the build; just emit one of the "
                              "generated artefacts to stdout.")
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -2083,6 +2681,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 sys.stdout.write(emit_ipc_contract_h(project))
             elif args.emit == "dts-reservations":
                 sys.stdout.write(emit_dts_reservations(project))
+            elif args.emit == "dts-partitions":
+                sys.stdout.write(emit_dts_partitions(project))
+            elif args.emit == "storage-mounts-c":
+                sys.stdout.write(emit_storage_mounts_c(project))
         except OrchestratorError as e:
             print(f"alp-orchestrate: {e}", file=sys.stderr)
             return 1
