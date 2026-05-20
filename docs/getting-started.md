@@ -354,7 +354,7 @@ fetched when a customer opts in to the `vendor-sdks` group.
 ## 9. SoC capability validation
 
 The SoC choice flows from `board.yaml`'s `som.sku` field
-automatically (board.yaml v2, current since v0.6) — the loader
+automatically (board.yaml, current since v0.6) — the loader
 resolves the MPN to the silicon ref (`alif:ensemble:e7` for
 `E1M-AEN701`) and emits the matching
 `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y` line, so you never set it by

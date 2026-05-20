@@ -231,7 +231,7 @@ west alp-build examples/rpmsg-v2n
 
 The orchestrator:
 
-1. Loads + validates `board.yaml` against the v2 schema.
+1. Loads + validates `board.yaml` against the board.yaml schema.
 2. Resolves the SoM preset → topology defaults → effective per-core
    mapping.
 3. For each core with `os: != off`, materialises per-core config

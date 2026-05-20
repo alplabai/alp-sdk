@@ -59,7 +59,7 @@ prompted.  Save the credentials.
 ## 2. Enable Mender in your `meta-alp` build (5 minutes)
 
 ```yaml
-# In your board.yaml (schema_version: 2):
+# In your board.yaml:
 cores:
   a55_cluster:
     app: ./linux                    # os: omitted -- A-cores default to yocto per topology

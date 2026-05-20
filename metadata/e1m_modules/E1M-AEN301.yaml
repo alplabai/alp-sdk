@@ -6,7 +6,7 @@
 #
 # This file lists ONLY components physically populated on the
 # E1M-AEN module PCB.  Board-side parts live in
-# metadata/boards/<name>/board.yaml.
+# metadata/boards/<name>.yaml.
 #
 # Per the project memory note, memory capacities + the per-SKU
 # silicon SKU-specific numbers stay TBD until the user supplies

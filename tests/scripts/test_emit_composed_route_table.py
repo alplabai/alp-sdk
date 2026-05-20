@@ -20,7 +20,7 @@ METADATA = REPO / "metadata"
 SCRIPT = REPO / "scripts" / "alp_project.py"
 
 # E1M-AEN701 + E1M-EVK: the canonical reference combination.
-# board.yaml used by the gpio-button-led example (schema_version: 2).
+# board.yaml used by the gpio-button-led example.
 AEN701_EVK_BOARD = REPO / "examples" / "gpio-button-led" / "board.yaml"
 
 # E1M-V2N101 + E1M-X-EVK: all-gd32_bridge pad_routes, no board

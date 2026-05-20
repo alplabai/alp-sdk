@@ -177,14 +177,12 @@ jobs:
               python3 scripts/validate_board_yaml.py --input "$f"
           done
 
-      # v2 schema validity sweep -- walks every board.yaml under
-      # examples/ + tests/ and runs scripts/validate_board_yaml.py.
-      # Per the v0.6 heterogeneous-OS design (§7 Phase 5), this is
-      # now a hard gate: Phase 4 migrated every in-repo board.yaml
-      # to schema_version: 2, so the loader rejects any remaining v1
-      # file at validate time and a fresh v1 paste into the tree
-      # fails the PR here (not at twister / bitbake time).
-      - name: v2 schema sweep across examples/ + tests/
+      # Board-schema validity sweep -- walks every board.yaml under
+      # examples/ + tests/ and runs scripts/validate_board_yaml.py
+      # against metadata/schemas/board.schema.json.  Hard gate: any
+      # board.yaml that doesn't validate fails the PR here (not at
+      # twister / bitbake time).
+      - name: schema sweep across examples/ + tests/
         run: |
           set -euo pipefail
           while IFS= read -r f; do

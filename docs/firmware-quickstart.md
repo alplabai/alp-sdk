@@ -241,14 +241,15 @@ the loader picks the right symbol for each populated slug, so
 declarative `board.yaml` use is identical either way.  Two ways
 to flip the flag:
 
-* **Declarative** (recommended): add the slug to
-  `board.populated:` in `board.yaml` (`button_led: true`,
-  `ssd1306: true`, ...).  The v0.6 loader's per-core Kconfig
-  emitter merges the board-preset `populated:` block with the
-  board.yaml override and writes the appropriate
-  `CONFIG_ALP_SDK_CHIP_<NAME>=y` / `CONFIG_ALP_SDK_BLOCK_<NAME>=y`
-  on every Zephyr slice, plus the Zephyr subsystem (`CONFIG_I2C`,
-  `CONFIG_GPIO`, ...) each enabled driver needs.
+* **Declarative** (recommended): add the slug to the top-level
+  `populated:` block in `board.yaml` (`button_led: true`,
+  `ssd1306: true`, ...) -- or, if you're using `preset:` to
+  reference a shared board definition, add it to the project's
+  `chips:` array.  The loader's per-core Kconfig emitter writes
+  the appropriate `CONFIG_ALP_SDK_CHIP_<NAME>=y` /
+  `CONFIG_ALP_SDK_BLOCK_<NAME>=y` on every Zephyr slice, plus
+  the Zephyr subsystem (`CONFIG_I2C`, `CONFIG_GPIO`, ...) each
+  enabled driver needs.
 * **Manual**: add `CONFIG_ALP_SDK_CHIP_GD32G553=y` (or
   `CONFIG_ALP_SDK_BLOCK_BUTTON_LED=y`) etc. to your `prj.conf`.
   Necessary for parts your board preset doesn't cover (custom
