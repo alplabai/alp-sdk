@@ -105,6 +105,62 @@ BOOL_CAPS: list[str] = [
     "dma2d",
 ]
 
+# Map ALP_SOC_* field name -> ALP_CAP_* name.
+# Count-style fields produce HW_<NAME> (presence boolean from count > 0).
+# Boolean / flag fields keep their name verbatim.
+CAP_ALIASES: list[tuple[str, str, str]] = [
+    # (soc_macro_name, cap_macro_name, kind: "count" | "bool")
+    ("I2C_COUNT", "HW_I2C", "count"),
+    ("SPI_COUNT", "HW_SPI", "count"),
+    ("UART_COUNT", "HW_UART", "count"),
+    ("I2S_COUNT", "HW_I2S", "count"),
+    ("PDM_COUNT", "HW_PDM", "count"),
+    ("ADC_COUNT", "HW_ADC", "count"),
+    ("DAC_COUNT", "HW_DAC", "count"),
+    ("CAN_COUNT", "HW_CAN", "count"),
+    ("CAN_FD_SUPPORTED", "HW_CAN_FD", "bool"),
+    ("RTC_COUNT", "HW_RTC", "count"),
+    ("WDT_COUNT", "HW_WDT", "count"),
+    ("QENC_COUNT", "HW_QENC", "count"),
+    ("TIMER_COUNT", "HW_TIMER", "count"),
+    ("PWM_COUNT", "HW_PWM", "count"),
+    ("ETHERNET_COUNT", "HW_ETHERNET", "count"),
+    ("USB_COUNT", "HW_USB", "count"),
+    ("MIPI_CSI_COUNT", "HW_MIPI_CSI", "count"),
+    ("MIPI_DSI_COUNT", "HW_MIPI_DSI", "count"),
+    ("XSPI_DMA", "XSPI_DMA", "bool"),
+    ("HEXSPI_DMA", "HEXSPI_DMA", "bool"),
+    ("EMMC_DMA", "EMMC_DMA", "bool"),
+    ("QUADSPI_DMA", "QUADSPI_DMA", "bool"),
+    ("DRP_AI", "NPU_DRPAI", "bool"),
+    ("HELIUM_MVE", "HELIUM_MVE", "bool"),
+    ("NEON", "NEON", "bool"),
+    ("GPU2D", "GPU2D", "bool"),
+    ("DAVE2D", "DAVE2D", "bool"),
+    ("CRYPTOCELL", "CRYPTOCELL", "bool"),
+    ("INLINE_AES", "INLINE_AES", "bool"),
+    ("CAU", "CAU", "bool"),
+    ("DMA2D", "DMA2D", "bool"),
+]
+
+
+def _emit_cap_layer(out: list[str]) -> None:
+    out.append("")
+    out.append("/* ---------------------------------------------------------------")
+    out.append(" * Capability layer -- portable, SoM-agnostic.  Derived from the")
+    out.append(" * active CONFIG_ALP_SOC_* selection via the macros above.")
+    out.append(" *")
+    out.append(" * Counts collapse to 0/1 via `> 0`, so ALP_HAS() is always a")
+    out.append(" * constant expression and safe inside #if and static_assert.")
+    out.append(" * --------------------------------------------------------------- */")
+    for soc_name, cap_name, kind in CAP_ALIASES:
+        if kind == "count":
+            out.append(f"#define ALP_CAP_{cap_name} (ALP_SOC_{soc_name} > 0)")
+        else:
+            out.append(f"#define ALP_CAP_{cap_name} (ALP_SOC_{soc_name})")
+    out.append("")
+    out.append("#define ALP_HAS(cap) (ALP_CAP_##cap)")
+
 
 def kconfig_token(ref: str) -> str:
     """`alif:ensemble:e7` → `ALIF_ENSEMBLE_E7`."""
@@ -186,6 +242,9 @@ def emit() -> str:
         lines.append(f"#define ALP_SOC_{key.upper()} UINT16_MAX")
     lines.append("")
     lines.append("#endif")
+
+    _emit_cap_layer(lines)
+
     lines.append("")
     lines.append("#endif  /* ALP_SOC_CAPS_H */")
     lines.append("")
