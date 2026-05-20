@@ -209,6 +209,24 @@ def _load_soc_caps(silicon_ref: str) -> dict[str, int] | None:
     return peripherals if isinstance(peripherals, dict) else {}
 
 
+# Map user-facing board.yaml peripheral kind names to the SoC JSON key
+# prefixes that represent the underlying silicon capability.  Entries
+# here are only needed when the user-facing name differs from the SoC
+# JSON key (e.g. 'counter' is a Zephyr driver-model class that maps to
+# the SoC's timer_* counters; 'sensor' is a driver-model class with no
+# silicon peripheral equivalent so it is always considered present).
+_PERIPHERAL_KIND_ALIASES: dict[str, tuple[str, ...]] = {
+    # Zephyr COUNTER driver class backed by hardware timers.
+    "counter": ("timer",),
+    # Zephyr PWM driver class backed by hardware timers / PWM units.
+    "pwm": ("timer", "pwm"),
+    # Zephyr SENSOR driver class: software abstraction over various
+    # I2C/SPI sensors; no dedicated silicon peripheral block required.
+    # Always allow it -- the I2C/SPI bus is the actual constraint.
+    "sensor": (),  # empty tuple = unconditionally present
+}
+
+
 def _soc_has_kind(caps: dict[str, int], kind: str) -> bool:
     """Map a peripheral 'kind' onto SoC capability keys.
 
@@ -217,7 +235,27 @@ def _soc_has_kind(caps: dict[str, int], kind: str) -> bool:
     variants; presence in EITHER counts.  Some peripherals also have
     variant suffixes (e.g. can_fd) -- if the base name matches a key
     whose value > 0 that also counts.
+
+    High-level Zephyr driver classes (counter, pwm, sensor) that do not
+    map 1-to-1 to SoC JSON keys are resolved via ``_PERIPHERAL_KIND_ALIASES``.
     """
+    # Alias table: if the kind has a (possibly empty) alias list, check
+    # those SoC key prefixes instead.  An empty alias list means the kind
+    # is always considered present (software-only abstraction).
+    if kind in _PERIPHERAL_KIND_ALIASES:
+        aliases = _PERIPHERAL_KIND_ALIASES[kind]
+        if not aliases:
+            return True  # unconditionally present (e.g. 'sensor')
+        for alias_prefix in aliases:
+            direct_keys = (alias_prefix, f"{alias_prefix}_lp")
+            if any((caps.get(k, 0) or 0) > 0 for k in direct_keys):
+                return True
+            for key, count in caps.items():
+                if key == alias_prefix or key.startswith(f"{alias_prefix}_"):
+                    if (count or 0) > 0:
+                        return True
+        return False
+
     # Direct and LP-suffixed match.
     direct_keys = (kind, f"{kind}_lp")
     if any((caps.get(k, 0) or 0) > 0 for k in direct_keys):
