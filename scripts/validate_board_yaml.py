@@ -10,8 +10,8 @@ build kicks off:
   2. It conforms to metadata/schemas/board.schema.json.
   3. The referenced SoM SKU has a preset at
      `metadata/e1m_modules/<SKU>.yaml`.
-  4. When `preset:` is used, the shared carrier definition at
-     `metadata/carriers/<preset>.yaml` exists.
+  4. When `preset:` is used, the shared board definition at
+     `metadata/boards/<preset>.yaml` exists.
 
 Customer usage (from the app root):
 
@@ -26,7 +26,7 @@ CI usage (smoke-checks every shipped example):
 Exit codes:
   0  clean
   1  YAML parse or schema violation
-  2  missing SoM SKU preset or missing carrier preset referenced
+  2  missing SoM SKU preset or missing board preset referenced
      by `preset:`
   3  hardware-revision / SDK-version incompatibility (the chosen
      hw_rev's [min_sdk_version, max_sdk_version] window does not
@@ -153,7 +153,7 @@ def _check_hw_rev(
 def _check_hw_compat(
     project: dict[str, Any], metadata_root: Path,
 ) -> int:
-    """Cross-check the chosen SoM + carrier hw_rev against the SDK
+    """Cross-check the chosen SoM + board hw_rev against the SDK
     version recorded in metadata/sdk_version.yaml.  Returns the
     highest exit code from the two sub-checks (0 / 2 / 3)."""
     sdk_path = metadata_root / "sdk_version.yaml"
@@ -197,12 +197,12 @@ def _check_hw_compat(
                 print(f"WARN som {sku}: no hw_rev declared, no "
                       f"default_hw_rev in preset -- check skipped")
 
-    # Carrier side -- only the shared-preset path carries a
-    # hw_revisions table; inline-carrier projects use top-level
+    # Board side -- only the shared-preset path carries a
+    # hw_revisions table; inline-board projects use top-level
     # `hw_rev:` directly without a min/max-SDK window.
     preset = project.get("preset")
     if preset:
-        cp_path = metadata_root / "carriers" / f"{preset}.yaml"
+        cp_path = metadata_root / "boards" / f"{preset}.yaml"
         if cp_path.is_file():
             cp_doc = yaml.safe_load(cp_path.read_text(encoding="utf-8")) or {}
             hw_revs = cp_doc.get("hw_revisions") or {}
@@ -211,9 +211,9 @@ def _check_hw_compat(
                        or cp_doc.get("default_hw_rev"))
                 if rev:
                     rv = max(rv, _check_hw_rev(
-                        f"carrier {preset}", rev, hw_revs, sdk_version))
+                        f"board {preset}", rev, hw_revs, sdk_version))
                 else:
-                    print(f"WARN carrier {preset}: no hw_rev declared, "
+                    print(f"WARN board {preset}: no hw_rev declared, "
                           f"no default_hw_rev in preset -- check "
                           f"skipped")
     return rv
@@ -317,32 +317,32 @@ def _check_peripherals_vs_soc(
     return rv
 
 
-def _check_carrier_preset(project: dict[str, Any], metadata_root: Path) -> int:
+def _check_board_preset(project: dict[str, Any], metadata_root: Path) -> int:
     """Return 0 on OK, 2 on missing preset."""
     preset = project.get("preset")
     if preset:
-        preset_path = metadata_root / "carriers" / f"{preset}.yaml"
+        preset_path = metadata_root / "boards" / f"{preset}.yaml"
         if preset_path.is_file():
-            print(f"OK   carrier preset: {preset}")
+            print(f"OK   board preset: {preset}")
             return 0
-        print(f"FAIL carrier: `preset: {preset}` does not resolve",
+        print(f"FAIL board: `preset: {preset}` does not resolve",
               file=sys.stderr)
         print(f"     expected shared definition at "
               f"{preset_path.relative_to(REPO) if preset_path.is_relative_to(REPO) else preset_path}",
               file=sys.stderr)
         return 2
 
-    # Inline carrier definition.  Schema already enforced
+    # Inline board definition.  Schema already enforced
     # `name:` is present; check populated/e1m_routes are non-empty.
     name = project.get("name")
     populated = project.get("populated") or {}
     routes = project.get("e1m_routes") or {}
     if populated or routes:
-        print(f"OK   carrier: '{name}' defined inline "
+        print(f"OK   board: '{name}' defined inline "
               f"({len(populated)} populated, "
               f"{sum(len(v or []) for v in routes.values())} routes)")
     else:
-        print(f"OK   carrier: '{name}' defined inline (empty -- headless / inference-only)")
+        print(f"OK   board: '{name}' defined inline (empty -- headless / inference-only)")
     return 0
 
 
@@ -354,7 +354,7 @@ def main() -> int:
     parser.add_argument("--metadata-root", type=Path, default=METADATA_ROOT_DEFAULT,
                         help="Override the metadata search root.")
     parser.add_argument("--no-presets", action="store_true",
-                        help="Skip the SoM SKU + carrier preset checks (schema-only mode).")
+                        help="Skip the SoM SKU + board preset checks (schema-only mode).")
     args = parser.parse_args()
 
     project = _load_yaml(args.input)
@@ -369,7 +369,7 @@ def main() -> int:
         return 0
 
     som_rv = _check_som_preset(project, args.metadata_root)
-    carrier_rv = _check_carrier_preset(project, args.metadata_root)
+    board_rv = _check_board_preset(project, args.metadata_root)
     hw_rv = _check_hw_compat(project, args.metadata_root)
     periph_rv = _check_peripherals_vs_soc(project, args.metadata_root)
 
@@ -377,7 +377,7 @@ def main() -> int:
         print(f"\n{args.input}: hardware / capability incompatibility",
               file=sys.stderr)
         return 3
-    if som_rv == 2 or carrier_rv == 2 or hw_rv == 2 or periph_rv == 2:
+    if som_rv == 2 or board_rv == 2 or hw_rv == 2 or periph_rv == 2:
         print(f"\n{args.input}: missing-preset failures", file=sys.stderr)
         return 2
 

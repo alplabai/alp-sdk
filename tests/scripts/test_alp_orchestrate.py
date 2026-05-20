@@ -58,7 +58,7 @@ som:
   sku: E1M-V2N101
   hw_rev: r1
 
-carrier:
+board:
   name: E1M-X-EVK
 
 cores:
@@ -163,7 +163,7 @@ def test_load_board_yaml_v2n_happy(tmp_path: Path) -> None:
     assert isinstance(project, BoardProject)
     assert project.sku == "E1M-V2N101"
     assert project.hw_rev == "r1"
-    assert project.carrier_name == "E1M-X-EVK"
+    assert project.board_name == "E1M-X-EVK"
     assert set(project.cores.keys()) == {"a55_cluster", "m33_sm"}
 
     a55 = project.cores["a55_cluster"]
@@ -611,7 +611,7 @@ def test_resolve_carve_outs_blocks_on_no_reserved_channel(
             - { id: 0, reserved_for: app }
             - { id: 1, reserved_for: power_mgmt }
         default_hw_rev:  r1
-        default_carrier: E1M-X-EVK
+        default_board: E1M-X-EVK
     """).lstrip("\n"), encoding="utf-8")
 
     # Patch the orchestrator's METADATA_ROOT for this test.
@@ -779,7 +779,7 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
     """Build a minimal BoardProject from an inline SoM preset + board.yaml.
 
     Creates a throwaway metadata root under tmp_path, writes the supplied
-    preset YAML as the SoM file, and loads a board.yaml with no carrier.
+    preset YAML as the SoM file, and loads a board.yaml with no board.
     The board-config-v2 schema copy has its ``som.sku`` pattern relaxed to
     also accept ``E1M-TST*`` names used by fixture tests.  The renesas n44
     SoC JSON is copied so presets that reference ``renesas:rzv2n:n44`` can
@@ -853,7 +853,7 @@ _SYNTHETIC_V2N_WITH_ON_MODULE = """\
         board: alp_e1m_tst001_m33_sm
         toolchain: arm-zephyr-eabi
     default_hw_rev: r1
-    default_carrier: E1M-EVK
+    default_board: E1M-EVK
 """
 
 _BOARD_WITH_SOM_ONLY = """\
@@ -870,7 +870,7 @@ _BOARD_WITH_SOM_ONLY = """\
 
 def test_slice_alp_conf_emits_som_intrinsic_chips(tmp_path: Path) -> None:
     """_slice_alp_conf must include CONFIG_ALP_SDK_CHIP_* for every chip
-    derived from on_module: + helper_firmware: when no carrier is present."""
+    derived from on_module: + helper_firmware: when no board is present."""
     project = _make_som_only_project(
         tmp_path,
         _SYNTHETIC_V2N_WITH_ON_MODULE,
@@ -893,15 +893,15 @@ def test_slice_alp_conf_emits_som_intrinsic_chips(tmp_path: Path) -> None:
     assert "CONFIG_I2C=y" in conf
 
 
-def test_slice_alp_conf_deduplicate_som_vs_carrier(tmp_path: Path) -> None:
-    """A chip listed in both on_module: and carrier populated: must appear
+def test_slice_alp_conf_deduplicate_som_vs_board(tmp_path: Path) -> None:
+    """A chip listed in both on_module: and board populated: must appear
     exactly once in the emitted conf (no duplicate CONFIG lines)."""
     import alp_orchestrate
     meta = tmp_path / "metadata"
     e1m = meta / "e1m_modules"
     schemas = meta / "schemas"
-    carriers = meta / "carriers" / "E1M-EVK"
-    for d in (e1m, schemas, carriers):
+    boards = meta / "boards" / "E1M-EVK"
+    for d in (e1m, schemas, boards):
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
@@ -946,11 +946,11 @@ def test_slice_alp_conf_deduplicate_som_vs_carrier(tmp_path: Path) -> None:
             board: alp_e1m_tst002_m33_sm
             toolchain: arm-zephyr-eabi
         default_hw_rev: r1
-        default_carrier: E1M-EVK
+        default_board: E1M-EVK
     """).lstrip("\n"), encoding="utf-8")
 
-    # Carrier preset also lists rv3028c7 in populated:.
-    (carriers / "board.yaml").write_text(textwrap.dedent("""
+    # Board preset also lists rv3028c7 in populated:.
+    (boards / "board.yaml").write_text(textwrap.dedent("""
         name: E1M-EVK
         populated:
           rv3028c7: true
@@ -963,7 +963,7 @@ def test_slice_alp_conf_deduplicate_som_vs_carrier(tmp_path: Path) -> None:
         som:
           sku: E1M-TST002
           hw_rev: r1
-        carrier:
+        board:
           name: E1M-EVK
         cores:
           m33_sm:
@@ -980,7 +980,7 @@ def test_slice_alp_conf_deduplicate_som_vs_carrier(tmp_path: Path) -> None:
     assert count == 1, (
         f"rv3028c7 appears {count} times; expected exactly 1 (deduplicated)")
 
-    # bmi323 is carrier-only; it must still appear.
+    # bmi323 is board-only; it must still appear.
     assert "CONFIG_ALP_SDK_CHIP_BMI323=y" in conf
 
 
@@ -1010,7 +1010,7 @@ def test_slice_alp_conf_tbd_values_excluded(tmp_path: Path) -> None:
                 board: alp_e1m_tst001_m33_sm
                 toolchain: arm-zephyr-eabi
             default_hw_rev: r1
-            default_carrier: E1M-EVK
+            default_board: E1M-EVK
         """,
         _BOARD_WITH_SOM_ONLY,
     )
@@ -1042,7 +1042,7 @@ def test_slice_alp_conf_no_on_module_no_som_block(tmp_path: Path) -> None:
                 board: alp_e1m_tst001_m33_sm
                 toolchain: arm-zephyr-eabi
             default_hw_rev: r1
-            default_carrier: E1M-EVK
+            default_board: E1M-EVK
         """,
         _BOARD_WITH_SOM_ONLY,
     )

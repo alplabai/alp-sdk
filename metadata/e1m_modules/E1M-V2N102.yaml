@@ -162,7 +162,7 @@ helper_firmware:
       base:      "0x08000000"
 
 default_hw_rev:         r1
-default_carrier:        E1M-X-EVK
+default_board:        E1M-X-EVK
 
 status:
   preliminary:          false

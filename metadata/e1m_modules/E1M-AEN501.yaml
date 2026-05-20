@@ -112,7 +112,7 @@ helper_firmware:
 
 default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
-default_carrier:        E1M-EVK
+default_board:        E1M-EVK
 
 status:
   preliminary:          true                   # E5 datasheet not yet public

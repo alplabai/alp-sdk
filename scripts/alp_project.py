@@ -24,10 +24,10 @@ Usage:
 
 The loader resolves:
   - The SoM SKU preset under metadata/e1m_modules/<SKU>.yaml
-  - The shared carrier definition under metadata/carriers/<preset>.yaml
+  - The shared board definition under metadata/boards/<preset>.yaml
     (when board.yaml uses `preset:`), OR the inline top-level
     `populated:` + `e1m_routes:` block (when board.yaml defines
-    its carrier inline)
+    its board inline)
 
 Then emits the appropriate native config.  For Zephyr this is a
 .conf file the build appends to prj.conf; for plain CMake a
@@ -129,9 +129,9 @@ def _resolve_sku(sku: str, metadata_root: Path) -> dict[str, Any]:
     return _load_yaml(preset_path)
 
 
-def _resolve_carrier(preset: str, metadata_root: Path) -> dict[str, Any]:
-    # Shared carrier definition lives at metadata/carriers/<preset>.yaml.
-    preset_path = metadata_root / "carriers" / f"{preset}.yaml"
+def _resolve_board(preset: str, metadata_root: Path) -> dict[str, Any]:
+    # Shared board definition lives at metadata/boards/<preset>.yaml.
+    preset_path = metadata_root / "boards" / f"{preset}.yaml"
     if not preset_path.is_file():
         sys.exit(
             f"alp_project: `preset: {preset}` does not resolve at "
@@ -139,18 +139,18 @@ def _resolve_carrier(preset: str, metadata_root: Path) -> dict[str, Any]:
     return _load_yaml(preset_path)
 
 
-def _resolve_inline_or_preset_carrier(
+def _resolve_inline_or_preset_board(
     project: dict[str, Any], metadata_root: Path,
 ) -> dict[str, Any]:
-    """Return the resolved carrier dict for a project.
+    """Return the resolved board dict for a project.
 
     Mirrors the orchestrator's resolution: `preset: <name>` loads
-    metadata/carriers/<name>.yaml; otherwise the project's own
+    metadata/boards/<name>.yaml; otherwise the project's own
     top-level `name`/`populated`/`e1m_routes` are wrapped into the
     same shape the downstream emitters consume.
     """
     if "preset" in project:
-        return _resolve_carrier(project["preset"], metadata_root)
+        return _resolve_board(project["preset"], metadata_root)
     return {
         "name":           project.get("name"),
         "populated":      dict(project.get("populated") or {}),
@@ -219,12 +219,12 @@ def _resolve_pad_routes(
     entirely) are implicitly `direct` -- they route to the main
     silicon's GPIO / peripheral with no mediator.
 
-    The SDK's codegen layer composes this with the carrier preset's
-    `e1m_routes:` block: when an E1M pad appears in both, the carrier
+    The SDK's codegen layer composes this with the board preset's
+    `e1m_routes:` block: when an E1M pad appears in both, the board
     supplies the role (e.g. `bmi323_int1`) and the SoM supplies the
     dispatch path (e.g. CC3501E GPIO 14). The two blocks together
     let a customer swap SoMs (AEN701 -> NX9101) without touching the
-    carrier YAML or any app source -- the [[som-swappable-without-board-changes]]
+    board YAML or any app source -- the [[som-swappable-without-board-changes]]
     promise.
     """
     routes = sku_preset.get("pad_routes") or []
@@ -246,14 +246,14 @@ def _resolve_pad_routes(
 
 def _compose_route(
     e1m_pad: str,
-    carrier_route: dict[str, Any] | None,
+    board_route: dict[str, Any] | None,
     pad_routes: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    """Compose a carrier `e1m_routes:` entry (role on the carrier
+    """Compose a board `e1m_routes:` entry (role on the board
     side) with the SoM's `pad_routes:` entry (dispatch path on the
     SoM side) for a single E1M pad / instance.
 
-    Returns a dict with: `carrier_role`, `carrier_macro`, `dispatch`
+    Returns a dict with: `board_role`, `board_macro`, `dispatch`
     (defaults to `direct` when the SoM declares no proxy),
     `dispatch_pin`, plus any docs.
 
@@ -261,11 +261,11 @@ def _compose_route(
     overlays, dispatch shims, capability validation).
     """
     out: dict[str, Any] = {"e1m": e1m_pad}
-    if carrier_route:
-        out["carrier_role"] = carrier_route.get("role")
-        out["carrier_macro"] = carrier_route.get("macro")
-        if carrier_route.get("doc"):
-            out["carrier_doc"] = carrier_route["doc"]
+    if board_route:
+        out["board_role"] = board_route.get("role")
+        out["board_macro"] = board_route.get("macro")
+        if board_route.get("doc"):
+            out["board_doc"] = board_route["doc"]
     som_route = pad_routes.get(e1m_pad)
     if som_route:
         out["dispatch"] = som_route.get("dispatch", "direct")
@@ -731,9 +731,9 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
 #
 # Per the project memory note "pending exact hardware configurations
 # -- mark unknowns TBD, never invent values", the loader translates
-# the macros in include/alp/boards/<carrier>.h verbatim; it does not
+# the macros in include/alp/boards/<board>.h verbatim; it does not
 # invent gpio bank numbers or per-pad GPIO_ACTIVE_* flags.  The
-# emitted .overlay declares the carrier's bus aliases and a stub
+# emitted .overlay declares the board's bus aliases and a stub
 # alp,pin-array with one entry per EVK_PIN_* macro, each annotated
 # with a comment naming the macro and the E1M_GPIO_IO<N> it
 # resolves to.  Customers fill the gpio bank / index columns with
@@ -745,7 +745,7 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
 # &i2c<N>, &spi<N>, &uart<N>, &pwm<N>.  Per-SoC vendor DT may use
 # alternate names (e.g. &lpi2c0 on some Alif boards); the customer
 # fixes the phandle if their board file diverges -- the loader's
-# job is to surface every alias the carrier wants, not to second-
+# job is to surface every alias the board wants, not to second-
 # guess vendor DT naming.
 
 # Match `#define <NAME> E1M_<CLASS><N>` (with optional trailing
@@ -779,12 +779,12 @@ def _collapse_line_continuations(text: str) -> str:
     return re.sub(r"\\\s*\n\s*", " ", text)
 
 
-def _carrier_header_path(carrier_name: str, repo_root: Path) -> Path:
-    """Resolve include/alp/boards/alp_<carrier>.h for a carrier name.
+def _board_header_path(board_name: str, repo_root: Path) -> Path:
+    """Resolve include/alp/boards/alp_<board>.h for a board name.
 
     Example: 'E1M-EVK' -> include/alp/boards/alp_e1m_evk.h.
     """
-    fname = "alp_" + carrier_name.lower().replace("-", "_") + ".h"
+    fname = "alp_" + board_name.lower().replace("-", "_") + ".h"
     return repo_root / "include" / "alp" / "boards" / fname
 
 
@@ -793,7 +793,7 @@ _INCLUDE_LOCAL_RE = re.compile(
 )
 
 
-def _read_carrier_header_with_includes(header_path: Path) -> str:
+def _read_board_header_with_includes(header_path: Path) -> str:
     """Read `header_path` and inline any `#include "alp/boards/<file>.h"`
     that exists under include/.  Used so the loader picks up the
     generated routes header (alp_e1m_evk_routes.h) which holds the
@@ -813,12 +813,12 @@ def _read_carrier_header_with_includes(header_path: Path) -> str:
     return "\n".join(pieces)
 
 
-def _parse_carrier_macros(
+def _parse_board_macros(
     header_path: Path,
 ) -> dict[str, list[tuple[str, int]]]:
     """Return {class_name: [(macro_name, channel_index), ...]} for
-    each E1M_<CLASS><N> reference in the carrier header."""
-    raw = _read_carrier_header_with_includes(header_path)
+    each E1M_<CLASS><N> reference in the board header."""
+    raw = _read_board_header_with_includes(header_path)
     text = _strip_c_comments(_collapse_line_continuations(raw))
     out: dict[str, list[tuple[str, int]]] = {
         "I2C": [], "SPI": [], "UART": [], "PWM": [], "GPIO_IO": [],
@@ -834,22 +834,22 @@ def _parse_carrier_macros(
 def _emit_dts_overlay(
     project: dict[str, Any],
     sku_preset: dict[str, Any],
-    carrier_preset: dict[str, Any] | None,
+    board_preset: dict[str, Any] | None,
     *,
     v2_peripherals: list[str] | None = None,
     v2_core_id: str | None = None,
     v2_core_os: str | None = None,
 ) -> str:
-    """Emit a Zephyr DTS overlay describing the carrier wiring.
+    """Emit a Zephyr DTS overlay describing the board wiring.
 
     v1 path (`v2_peripherals is None`): reads project-level
-    `peripherals:` implicitly via the carrier header macros.
+    `peripherals:` implicitly via the board header macros.
 
     v2 path: the project's peripherals live under `cores.<id>.peripherals`.
     Callers compute the union across Zephyr/baremetal cores (or pick one
     when `--core <id>` is supplied) and pass it in via `v2_peripherals`.
     The list is currently informational -- the bus aliases + `alp,pin-array`
-    binding root node are derived from the carrier header, which describes
+    binding root node are derived from the board header, which describes
     the SoM mounting, not the project.  When `v2_core_os` is set to a
     non-Zephyr runtime (`yocto`, `off`, ...), the emitter returns a stub
     overlay with just the header comment.
@@ -859,7 +859,7 @@ def _emit_dts_overlay(
     lines.append(" * Auto-generated by scripts/alp_project.py "
                  "-- do not edit by hand.")
     lines.append(" * Regenerate after changes to board.yaml or "
-                 "include/alp/boards/<carrier>.h.")
+                 "include/alp/boards/<board>.h.")
     lines.append(" *")
     lines.append(" * Per-pad GPIO bank/index values are TBD pending the upstream")
     lines.append(" * alp_<board>_<som>.dts board file (alplabai/alp-zephyr-modules).")
@@ -880,21 +880,21 @@ def _emit_dts_overlay(
     lines.append("")
 
     sku = project["som"]["sku"]
-    carrier_name = (carrier_preset or {}).get("name", "")
-    if not carrier_name:
-        lines.append("// No carrier declared in board.yaml; nothing to emit.")
+    board_name = (board_preset or {}).get("name", "")
+    if not board_name:
+        lines.append("// No board declared in board.yaml; nothing to emit.")
         return "\n".join(lines) + "\n"
 
-    header_path = _carrier_header_path(carrier_name, REPO)
+    header_path = _board_header_path(board_name, REPO)
     if not header_path.is_file():
-        sys.exit(f"alp_project: no carrier header at "
-                 f"{header_path.relative_to(REPO)} for carrier '{carrier_name}' "
+        sys.exit(f"alp_project: no board header at "
+                 f"{header_path.relative_to(REPO)} for board '{board_name}' "
                  f"-- DTS overlay emission requires one.")
 
-    macros = _parse_carrier_macros(header_path)
+    macros = _parse_board_macros(header_path)
 
     lines.append(f"/ {{")
-    lines.append(f"    /* Carrier: {carrier_name} (SoM SKU {sku}) */")
+    lines.append(f"    /* Board: {board_name} (SoM SKU {sku}) */")
     lines.append(f"    /* Source: include/alp/boards/{header_path.name} */")
     if v2_peripherals is not None:
         # Surface which Zephyr peripherals the v2 union resolved to so
@@ -911,7 +911,7 @@ def _emit_dts_overlay(
             )
     lines.append("")
 
-    # Bus aliases -- one per unique channel the carrier wires.
+    # Bus aliases -- one per unique channel the board wires.
     lines.append("    aliases {")
     for class_name, alp_prefix, phandle_prefix in _BUS_BUCKETS:
         entries = sorted(set(idx for _macro, idx in macros.get(class_name, [])))
@@ -919,7 +919,7 @@ def _emit_dts_overlay(
             continue
         lines.append(f"        /* {class_name} */")
         for idx in entries:
-            # Comment lists every carrier macro that references this channel.
+            # Comment lists every board macro that references this channel.
             referencing = [m for (m, i) in macros[class_name] if i == idx]
             comment = ", ".join(referencing)
             lines.append(
@@ -937,7 +937,7 @@ def _emit_dts_overlay(
         lines.append("    alp_pins: alp-pins {")
         lines.append('        compatible = "alp,pin-array";')
         lines.append("        /* The order MUST match the EVK_PIN_* / EVK_ARD_DIO* macro")
-        lines.append("         * declarations in the carrier header.  Each <&gpioX Y FLAGS>")
+        lines.append("         * declarations in the board header.  Each <&gpioX Y FLAGS>")
         lines.append("         * triplet is TBD pending the upstream SoM board file.        */")
         lines.append("        gpios =")
         # Emit each gpio with a placeholder.  The trailing comma /
@@ -988,7 +988,7 @@ _LIBRARY_WEST_MODULES: dict[str, str] = {
 def _emit_west_libraries(
     project: dict[str, Any],
     sku_preset: dict[str, Any],
-    carrier_preset: dict[str, Any] | None,
+    board_preset: dict[str, Any] | None,
     *,
     v2_libraries: list[str] | None = None,
 ) -> str:
@@ -1002,7 +1002,7 @@ def _emit_west_libraries(
     (or pick one when `--core <id>` is supplied) and pass it in via
     `v2_libraries`.
     """
-    del sku_preset, carrier_preset  # unused -- libraries are SoM-agnostic
+    del sku_preset, board_preset  # unused -- libraries are SoM-agnostic
     if v2_libraries is not None:
         libs = list(v2_libraries)
     else:
@@ -1105,7 +1105,7 @@ def _pick_primary_core_os(cores: dict[str, str]) -> tuple[str, str]:
 def _emit_hw_info_h(
     project: dict[str, Any],
     sku_preset: dict[str, Any],
-    carrier_preset: dict[str, Any] | None,
+    board_preset: dict[str, Any] | None,
     *,
     v2_cores: dict[str, str] | None = None,
     v2_selected_core: str | None = None,
@@ -1132,12 +1132,12 @@ def _emit_hw_info_h(
                   or "unknown")
     family = _sku_family(sku)
 
-    carrier_block = project.get("carrier") or {}
-    carrier_name = carrier_block.get("name") or ""
-    carrier_hw_rev = ""
-    if carrier_name and carrier_preset is not None:
-        carrier_hw_rev = (carrier_block.get("hw_rev")
-                          or carrier_preset.get("default_hw_rev")
+    board_block = project.get("board") or {}
+    board_name = board_block.get("name") or ""
+    board_hw_rev = ""
+    if board_name and board_preset is not None:
+        board_hw_rev = (board_block.get("hw_rev")
+                          or board_preset.get("default_hw_rev")
                           or "")
 
     # Resolve the OS string.
@@ -1171,10 +1171,10 @@ def _emit_hw_info_h(
         f'#define ALP_HW_BUILD_SOM_FAMILY      "{family}"',
         f'#define ALP_HW_BUILD_SOM_HW_REV      "{som_hw_rev}"',
     ]
-    if carrier_name:
-        lines.append(f'#define ALP_HW_BUILD_CARRIER_NAME    "{carrier_name}"')
-        if carrier_hw_rev:
-            lines.append(f'#define ALP_HW_BUILD_CARRIER_HW_REV  "{carrier_hw_rev}"')
+    if board_name:
+        lines.append(f'#define ALP_HW_BUILD_CARRIER_NAME    "{board_name}"')
+        if board_hw_rev:
+            lines.append(f'#define ALP_HW_BUILD_CARRIER_HW_REV  "{board_hw_rev}"')
     if os_choice:
         lines.append(f'#define ALP_HW_BUILD_OS              "{os_choice}"')
     if v2_cores is not None:
@@ -1216,7 +1216,7 @@ def _emit_hw_info_h(
 # ---------------------------------------------------------------------
 #
 # Purpose: give early visibility into what _resolve_pad_routes() +
-# _compose_route() return for the current (carrier x SoM) pair.
+# _compose_route() return for the current (board x SoM) pair.
 # Output is JSON to stdout (or --output path).  Informs the larger
 # codegen design (Zephyr DTS overlays for proxy peripherals, etc.)
 # without committing to a production schema yet.
@@ -1225,30 +1225,30 @@ def _emit_hw_info_h(
 def _emit_composed_route_table(
     project: dict[str, Any],
     sku_preset: dict[str, Any],
-    carrier_preset: dict[str, Any] | None,
+    board_preset: dict[str, Any] | None,
     metadata_root: Path,
 ) -> str:
     """Emit a JSON summary of the fully-composed pad route table for
-    the current (carrier x SoM) pair.
+    the current (board x SoM) pair.
 
     The table is derived by calling _resolve_pad_routes() (SoM side) and
-    _compose_route() (join with carrier side) for every E1M pad that
-    appears in either the carrier's e1m_routes: block or the SoM's
+    _compose_route() (join with board side) for every E1M pad that
+    appears in either the board's e1m_routes: block or the SoM's
     pad_routes: block.
 
     JSON shape::
 
         {
-          "carrier": "<name or null>",
+          "board": "<name or null>",
           "som": "<SKU>",
           "silicon_variant": "<order_code or null>",
           "routes": [
             {
               "e1m": "E1M_GPIO_IO15",
-              "carrier_category": "gpio",
-              "carrier_macro": "EVK_PIN_BMI323_INT1",
-              "carrier_role": null,
-              "carrier_doc": "...",
+              "board_category": "gpio",
+              "board_macro": "EVK_PIN_BMI323_INT1",
+              "board_role": null,
+              "board_doc": "...",
               "active_low": true,
               "dispatch": "cc3501e",
               "dispatch_pin": 14,
@@ -1259,7 +1259,7 @@ def _emit_composed_route_table(
         }
 
     Pads that only appear in the SoM's pad_routes: block (i.e. no
-    carrier-side role assigned) are included with null carrier_* fields
+    board-side role assigned) are included with null board_* fields
     so the table is complete for the SoM-standalone scenario.
     """
     pad_routes = _resolve_pad_routes(sku_preset)
@@ -1268,15 +1268,15 @@ def _emit_composed_route_table(
     variant = _resolve_silicon_variant(sku_preset, metadata_root)
     silicon_variant_str = variant["order_code"] if variant else None
 
-    # Collect carrier-side entries, preserving the sub-category name.
+    # Collect board-side entries, preserving the sub-category name.
     # Build a mapping: e1m_id -> (category, entry_dict).
     # When the same E1M pad appears multiple times (e.g. E1M_PWM1 maps to
     # both EVK_PWM_LED_BLUE and EVK_ARD_PWM1 in the EVK YAML) we emit one
-    # row per carrier entry so no information is lost.
-    carrier_entries: list[tuple[str, dict[str, Any]]] = []
-    seen_from_carrier: set[str] = set()
-    if carrier_preset is not None:
-        e1m_routes = carrier_preset.get("e1m_routes") or {}
+    # row per board entry so no information is lost.
+    board_entries: list[tuple[str, dict[str, Any]]] = []
+    seen_from_board: set[str] = set()
+    if board_preset is not None:
+        e1m_routes = board_preset.get("e1m_routes") or {}
         for category, entries in e1m_routes.items():
             if not isinstance(entries, list):
                 continue
@@ -1286,25 +1286,25 @@ def _emit_composed_route_table(
                 e1m = entry.get("e1m")
                 if not isinstance(e1m, str):
                     continue
-                carrier_entries.append((category, entry))
-                seen_from_carrier.add(e1m)
+                board_entries.append((category, entry))
+                seen_from_board.add(e1m)
 
-    # Also include SoM-only pads (in pad_routes but not in carrier).
-    som_only_pads = sorted(set(pad_routes.keys()) - seen_from_carrier)
+    # Also include SoM-only pads (in pad_routes but not in board).
+    som_only_pads = sorted(set(pad_routes.keys()) - seen_from_board)
 
     routes: list[dict[str, Any]] = []
 
-    # Carrier-defined entries first (preserves YAML order).
-    for category, c_entry in carrier_entries:
+    # Board-defined entries first (preserves YAML order).
+    for category, c_entry in board_entries:
         e1m = c_entry["e1m"]
         composed = _compose_route(e1m, c_entry, pad_routes)
-        row: dict[str, Any] = {"e1m": e1m, "carrier_category": category}
-        row["carrier_macro"] = composed.get("carrier_macro")
-        row["carrier_role"] = composed.get("carrier_role")
-        if "carrier_doc" in composed:
-            row["carrier_doc"] = composed["carrier_doc"]
-        # active_low is a carrier-side flag, not surfaced by _compose_route;
-        # read it directly from the carrier entry.
+        row: dict[str, Any] = {"e1m": e1m, "board_category": category}
+        row["board_macro"] = composed.get("board_macro")
+        row["board_role"] = composed.get("board_role")
+        if "board_doc" in composed:
+            row["board_doc"] = composed["board_doc"]
+        # active_low is a board-side flag, not surfaced by _compose_route;
+        # read it directly from the board entry.
         active_low = c_entry.get("active_low")
         if active_low is not None:
             row["active_low"] = bool(active_low)
@@ -1315,14 +1315,14 @@ def _emit_composed_route_table(
             row["som_doc"] = composed["som_doc"]
         routes.append(row)
 
-    # SoM-only pads (not assigned a carrier role in this carrier YAML).
+    # SoM-only pads (not assigned a board role in this board YAML).
     for e1m in som_only_pads:
         composed = _compose_route(e1m, None, pad_routes)
         row = {
             "e1m": e1m,
-            "carrier_category": None,
-            "carrier_macro": None,
-            "carrier_role": None,
+            "board_category": None,
+            "board_macro": None,
+            "board_role": None,
             "dispatch": composed.get("dispatch", "direct"),
         }
         if "dispatch_pin" in composed:
@@ -1331,10 +1331,10 @@ def _emit_composed_route_table(
             row["som_doc"] = composed["som_doc"]
         routes.append(row)
 
-    carrier_name = (carrier_preset or {}).get("name") or project.get("name")
+    board_name = (board_preset or {}).get("name") or project.get("name")
 
     result: dict[str, Any] = {
-        "carrier": carrier_name,
+        "board": board_name,
         "som": project["som"]["sku"],
         "silicon_variant": silicon_variant_str,
         "routes": routes,
@@ -1443,7 +1443,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
 
-    # Build a dict in the legacy "carrier:"-wrapper shape that the
+    # Build a dict in the legacy "board:"-wrapper shape that the
     # in-file emitters still consume internally (dts-overlay,
     # hw-info-h, west-libraries).  The public board.yaml schema no
     # longer uses this wrapper, but it's a convenient internal
@@ -1453,15 +1453,15 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             "sku":    project.sku,
             "hw_rev": project.hw_rev,
         },
-        "carrier": ({
-            "name":   project.carrier_name,
-            "hw_rev": project.carrier_hw_rev,
-        } if project.carrier_name else None),
+        "board": ({
+            "name":   project.board_name,
+            "hw_rev": project.board_hw_rev,
+        } if project.board_name else None),
     }
 
     # --- legacy project-wide emits, v2-flavoured -------------------------
     if args.emit == "dts-overlay":
-        # The DTS overlay is shaped by the carrier header (bus aliases +
+        # The DTS overlay is shaped by the board header (bus aliases +
         # alp,pin-array) which is a SoM-mounting fact, not a per-core
         # fact.  v2 contributes only the peripherals list: union across
         # Zephyr/baremetal cores (or one core when --core is set).
@@ -1470,7 +1470,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             v2_peripherals = sorted(set(slice_.peripherals))
             out = _emit_dts_overlay(
                 project_v1_shaped, project.som_preset,
-                project.carrier_preset,
+                project.board_preset,
                 v2_peripherals=v2_peripherals,
                 v2_core_id=args.core,
                 v2_core_os=slice_.os,
@@ -1482,7 +1482,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
                     union.update(slice_.peripherals)
             out = _emit_dts_overlay(
                 project_v1_shaped, project.som_preset,
-                project.carrier_preset,
+                project.board_preset,
                 v2_peripherals=sorted(union),
             )
         return _write_or_print(out, args.output)
@@ -1494,7 +1494,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
         v2_cores = {cid: s.os for cid, s in project.cores.items()}
         out = _emit_hw_info_h(
             project_v1_shaped, project.som_preset,
-            project.carrier_preset,
+            project.board_preset,
             v2_cores=v2_cores,
             v2_selected_core=args.core,
         )
@@ -1512,7 +1512,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             v2_libraries = sorted(union_l)
         out = _emit_west_libraries(
             project_v1_shaped, project.som_preset,
-            project.carrier_preset,
+            project.board_preset,
             v2_libraries=v2_libraries,
         )
         return _write_or_print(out, args.output)
@@ -1615,14 +1615,14 @@ def main() -> int:
 
     project = _load_yaml(args.input)
 
-    # composed-route-table only needs the SoM + carrier definitions; it
+    # composed-route-table only needs the SoM + board definitions; it
     # does not require the per-core slice machinery.
     if args.emit == "composed-route-table":
         sku_preset_rt = _resolve_sku(project["som"]["sku"], args.metadata_root)
-        carrier_preset_rt = _resolve_inline_or_preset_carrier(
+        board_preset_rt = _resolve_inline_or_preset_board(
             project, args.metadata_root)
         out = _emit_composed_route_table(
-            project, sku_preset_rt, carrier_preset_rt, args.metadata_root
+            project, sku_preset_rt, board_preset_rt, args.metadata_root
         )
         return _write_or_print(out, args.output)
 

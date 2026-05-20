@@ -45,7 +45,7 @@
           "gpio_bitbang", "gpio_pwm"
         ]
       },
-      "description": "Buses / interfaces the contribution drives.  Customers filter by this when searching for chips that fit their carrier."
+      "description": "Buses / interfaces the contribution drives.  Customers filter by this when searching for chips that fit their board."
     },
     "dependencies": {
       "type": "array",

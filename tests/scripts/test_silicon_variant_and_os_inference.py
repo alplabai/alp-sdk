@@ -37,7 +37,7 @@ METADATA_ROOT = REPO / "metadata"
 
 # ---------------------------------------------------------------------
 # Module-load fixtures (importlib.util pattern, matches
-# tests/scripts/test_gen_carrier_header.py)
+# tests/scripts/test_gen_board_header.py)
 # ---------------------------------------------------------------------
 
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/carrier.schema.json",
-  "title": "ALP shared carrier definition",
-  "description": "Schema for a shared carrier YAML under metadata/carriers/<name>.yaml.  Referenced from project board.yaml files via the top-level `preset:` field.  Exists only as SDK-internal plumbing so multiple projects targeting the same physical board (e.g. the EVK + its ~40 demo apps) share one source of truth for chip population + E1M-pad routing.  Customers building a custom carrier put these fields inline at the top level of their board.yaml instead.",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/board-preset.schema.json",
+  "title": "ALP shared board preset",
+  "description": "Schema for a shared board definition under metadata/boards/<name>.yaml.  Referenced from project board.yaml files via the top-level `preset:` field.  Exists only as SDK-internal plumbing so multiple projects targeting the same physical board (e.g. the EVK + its ~40 demo apps) share one source of truth for chip population + E1M-pad routing.  Customers building a custom board put these fields inline at the top level of their board.yaml instead.",
   "type": "object",
   "additionalProperties": false,
   "required": ["name"],
@@ -10,16 +10,16 @@
     "name": {
       "type": "string",
       "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
-      "description": "Carrier board name.  Used in include/alp/boards/alp_<name>_routes.h + as the board identity in generated Doxygen blocks."
+      "description": "Board name.  Used in include/alp/boards/alp_<name>_routes.h + as the board identity in generated Doxygen blocks."
     },
     "display_name": {
       "type": "string",
-      "description": "Human-readable carrier name (free-form)."
+      "description": "Human-readable board name (free-form)."
     },
     "hosts_som_families": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-      "description": "SoM families this carrier mechanically + electrically supports (alif-ensemble, renesas-rzv2n, ...).  Informational; the orchestrator does not currently enforce."
+      "description": "SoM families this board mechanically + electrically supports (alif-ensemble, renesas-rzv2n, ...).  Informational; the orchestrator does not currently enforce."
     },
     "populated": {
       "type": "object",
@@ -29,7 +29,7 @@
     "e1m_routes": {
       "type": "object",
       "additionalProperties": false,
-      "description": "E1M-pad routing.  scripts/gen_carrier_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.",
+      "description": "E1M-pad routing.  scripts/gen_board_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.",
       "properties": {
         "gpio":  { "$ref": "#/$defs/route_entry_list" },
         "buses": { "$ref": "#/$defs/route_entry_list" },

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/board.schema.json",
   "title": "ALP board configuration (board.yaml)",
-  "description": "Schema for a project's board.yaml -- the single configuration file a firmware project supplies.  Describes the board the firmware targets: its name, the SoM mounted on it, the firmware running on each core, the chips populated on the carrier side, and the E1M-pad routing.  Pin + populated declarations are either INLINE (`populated:` + `e1m_routes:` at top level) or by REFERENCE (`preset:` pointing at a shared carrier YAML under `metadata/carriers/<preset>.yaml`).  Mixing inline and preset is rejected.",
+  "description": "Schema for a project's board.yaml -- the single configuration file a firmware project supplies.  Describes the board the firmware targets: its name, the SoM mounted on it, the firmware running on each core, the chips populated on the board, and the E1M-pad routing.  Pin + populated declarations are either INLINE (`populated:` + `e1m_routes:` at top level) or by REFERENCE (`preset:` pointing at a shared board definition under `metadata/boards/<preset>.yaml`).  Mixing inline and preset is rejected.",
   "type": "object",
   "additionalProperties": false,
   "required": ["som", "cores"],
@@ -11,7 +11,7 @@
   },
   "allOf": [
     {
-      "description": "Either `preset:` OR inline carrier definition -- not both.  Inline mode requires a top-level `name:` (used in the generated `alp_<name>_routes.h` filename + Doxygen blocks); preset mode takes the name from the resolved preset.",
+      "description": "Either `preset:` OR inline board definition -- not both.  Inline mode requires a top-level `name:` (used in the generated `alp_<name>_routes.h` filename + Doxygen blocks); preset mode takes the name from the resolved preset.",
       "oneOf": [
         {
           "required": ["preset"],
@@ -33,7 +33,7 @@
     "name": {
       "type": "string",
       "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
-      "description": "Board name.  Required when the carrier is defined inline (no `preset:`); used in the generated `include/alp/boards/alp_<name>_routes.h` filename + as the `@brief` board identity in Doxygen.  When `preset:` is used the field is forbidden -- the resolved preset's `name:` carries the board identity."
+      "description": "Board name.  Required when the board is defined inline (no `preset:`); used in the generated `include/alp/boards/alp_<name>_routes.h` filename + as the `@brief` board identity in Doxygen.  When `preset:` is used the field is forbidden -- the resolved preset's `name:` carries the board identity."
     },
     "description": {
       "type": "string",
@@ -42,12 +42,12 @@
     "preset": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*$",
-      "description": "Reference to a shared carrier definition at `metadata/carriers/<preset>.yaml`.  The preset's `name`, `populated`, `e1m_routes`, `default_hw_rev` and `hw_revisions` blocks are pulled in wholesale.  Mutually exclusive with inline `populated:` / `e1m_routes:`."
+      "description": "Reference to a shared board definition at `metadata/boards/<preset>.yaml`.  The preset's `name`, `populated`, `e1m_routes`, `default_hw_rev` and `hw_revisions` blocks are pulled in wholesale.  Mutually exclusive with inline `populated:` / `e1m_routes:`."
     },
     "hw_rev": {
       "type": "string",
       "pattern": "^[a-z0-9_-]+$",
-      "description": "Board hardware revision.  Optional; the SDK falls back to the carrier preset's `default_hw_rev` (preset mode) or treats the board as unrevisioned (inline mode).  Distinct from `som.hw_rev` which versions the SoM module itself."
+      "description": "Board hardware revision.  Optional; the SDK falls back to the preset's `default_hw_rev` (preset mode) or treats the board as unrevisioned (inline mode).  Distinct from `som.hw_rev` which versions the SoM module itself."
     },
     "som": {
       "type": "object",
@@ -82,12 +82,12 @@
 
     "populated": {
       "$ref": "#/$defs/populated",
-      "description": "Inline mode only.  Carrier-side chip-driver / block-helper population.  Keys match chip-driver / block names; each `true` enables the corresponding CONFIG_ALP_SDK_{CHIP,BLOCK}_<name>=y.  Mutually exclusive with `preset:`."
+      "description": "Inline mode only.  Board-side chip-driver / block-helper population.  Keys match chip-driver / block names; each `true` enables the corresponding CONFIG_ALP_SDK_{CHIP,BLOCK}_<name>=y.  Mutually exclusive with `preset:`."
     },
 
     "e1m_routes": {
       "$ref": "#/$defs/e1m_routes",
-      "description": "Inline mode only.  Authoritative carrier-side E1M-pad routing.  scripts/gen_carrier_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.  Mutually exclusive with `preset:`."
+      "description": "Inline mode only.  Authoritative board-side E1M-pad routing.  scripts/gen_board_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.  Mutually exclusive with `preset:`."
     },
 
     "ipc": {

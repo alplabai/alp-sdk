@@ -63,7 +63,7 @@ class TestLoaderContract(unittest.TestCase):
 
     def test_minimum_viable_board_yaml(self) -> None:
         """A board.yaml with just schema_version + som + a single core
-        should be accepted (carrier is optional in the schema)."""
+        should be accepted (board is optional in the schema)."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 schema_version: 2
@@ -126,8 +126,8 @@ class TestLoaderContract(unittest.TestCase):
             self.assertNotEqual(rv.returncode, 0)
             self.assertIn("no preset", rv.stderr.lower())
 
-    def test_carrier_override_flips_populated_flag(self) -> None:
-        """A user override under carrier.populated must win over the
+    def test_board_override_flips_populated_flag(self) -> None:
+        """A user override under board.populated must win over the
         EVK preset's default -- bme280 ships false on the EVK; the
         override flips it to true."""
         with tempfile.TemporaryDirectory() as td:
@@ -135,7 +135,7 @@ class TestLoaderContract(unittest.TestCase):
                 schema_version: 2
                 som:
                   sku: E1M-AEN701
-                carrier:
+                board:
                   name: E1M-EVK
                   populated:
                     bme280: true
@@ -239,9 +239,9 @@ class TestDtsOverlayEmit(unittest.TestCase):
         out = rv.stdout
         # Header + dt-bindings include
         self.assertIn('#include <zephyr/dt-bindings/gpio/gpio.h>', out)
-        # Root node + the carrier comment line
+        # Root node + the board comment line
         self.assertIn("/ {", out)
-        self.assertIn("Carrier: E1M-EVK", out)
+        self.assertIn("Board: E1M-EVK", out)
         # Aliases block
         self.assertIn("aliases {", out)
         # Closing brace + semicolon for the root node
@@ -290,8 +290,8 @@ class TestHwInfoHEmit(unittest.TestCase):
         self.assertIn('#define ALP_HW_BUILD_CARRIER_HW_REV  "r1"', out)
         self.assertIn('#define ALP_HW_BUILD_OS              "zephyr"', out)
 
-    def test_no_carrier_skips_carrier_macros(self) -> None:
-        """When board.yaml omits the carrier block the loader must
+    def test_no_board_skips_board_macros(self) -> None:
+        """When board.yaml omits the board block the loader must
         emit a clean header that only carries the SoM identifiers --
         no empty ALP_HW_BUILD_CARRIER_* macros."""
         with tempfile.TemporaryDirectory() as td:
@@ -387,7 +387,7 @@ class TestValidatorPeripheralCheck(unittest.TestCase):
         )
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
         self.assertIn(f"OK   schema:", rv.stdout)
-        self.assertIn("OK   carrier preset: E1M-EVK", rv.stdout)
+        self.assertIn("OK   board preset: E1M-EVK", rv.stdout)
         self.assertIn("OK   som E1M-AEN701 hw_rev:", rv.stdout)
 
 

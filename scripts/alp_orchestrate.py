@@ -56,7 +56,7 @@ from alp_project import resolve_memory_map, resolve_capabilities  # noqa: E402
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
 BOARD_SCHEMA = METADATA_ROOT / "schemas" / "board.schema.json"
-CARRIER_SCHEMA = METADATA_ROOT / "schemas" / "carrier.schema.json"
+CARRIER_SCHEMA = METADATA_ROOT / "schemas" / "board-preset.schema.json"
 
 
 def _default_os_from_core_type(core_type: str) -> str:
@@ -221,13 +221,13 @@ class BoardProject:
 
     sku: str
     hw_rev: Optional[str]
-    carrier_name: Optional[str]
-    carrier_hw_rev: Optional[str]
+    board_name: Optional[str]
+    board_hw_rev: Optional[str]
     cores: dict[str, Slice]                       # effective per-core slices
     ipc: list[IpcEntry]
     soc_spec: dict[str, Any]
     som_preset: dict[str, Any]
-    carrier_preset: Optional[dict[str, Any]]
+    board_preset: Optional[dict[str, Any]]
     diagnostics: dict[str, Any] = field(default_factory=dict)
     chips: list[str] = field(default_factory=list)
     features: dict[str, Any] = field(default_factory=dict)
@@ -251,8 +251,8 @@ class SystemManifest:
             "hw_info": {
                 "sku":             self.project.sku,
                 "som_hw_rev":      self.project.hw_rev,
-                "carrier_name":    self.project.carrier_name,
-                "carrier_hw_rev":  self.project.carrier_hw_rev,
+                "board_name":    self.project.board_name,
+                "board_hw_rev":  self.project.board_hw_rev,
                 "silicon":         self.project.som_preset.get("silicon"),
             },
             "slices":      [s.to_manifest_entry() for s in self.slices],
@@ -339,20 +339,20 @@ def _validate_board(project: dict[str, Any],
             "\n".join(messages))
 
 
-def _resolve_carrier_preset(
+def _resolve_board_preset(
     preset: str,
     metadata_root: Path,
 ) -> dict[str, Any]:
-    """Load the shared carrier YAML referenced by `preset:`.
+    """Load the shared board YAML referenced by `preset:`.
 
-    Shared carriers live at metadata/carriers/<preset>.yaml.  Raises
+    Shared boards live at metadata/boards/<preset>.yaml.  Raises
     OrchestratorError when the file is missing (`preset:` must resolve;
-    customers with a custom carrier define it inline instead).
+    customers with a custom board define it inline instead).
     """
-    p = metadata_root / "carriers" / f"{preset}.yaml"
+    p = metadata_root / "boards" / f"{preset}.yaml"
     if not p.is_file():
         raise OrchestratorError(
-            f"`preset: {preset}` does not resolve: no shared carrier "
+            f"`preset: {preset}` does not resolve: no shared board "
             f"at {p.relative_to(REPO) if p.is_relative_to(REPO) else p}. "
             f"Available presets: "
             f"{sorted(_available_presets(metadata_root))}")
@@ -360,19 +360,19 @@ def _resolve_carrier_preset(
 
 
 def _available_presets(metadata_root: Path) -> list[str]:
-    carriers_dir = metadata_root / "carriers"
-    if not carriers_dir.is_dir():
+    boards_dir = metadata_root / "boards"
+    if not boards_dir.is_dir():
         return []
-    return [p.stem for p in carriers_dir.glob("*.yaml")]
+    return [p.stem for p in boards_dir.glob("*.yaml")]
 
 
-def _synthesize_inline_carrier(project: dict[str, Any]) -> dict[str, Any]:
-    """Build a carrier-shaped dict from a project's inline top-level fields.
+def _synthesize_inline_board(project: dict[str, Any]) -> dict[str, Any]:
+    """Build a board-shaped dict from a project's inline top-level fields.
 
     Used when board.yaml has no `preset:` -- the project's own `name`,
     `populated`, `e1m_routes` (and optional `hw_rev`) double as the
-    carrier definition.  Returned dict has the same shape downstream
-    emitters expect from a preset-resolved carrier.
+    board definition.  Returned dict has the same shape downstream
+    emitters expect from a preset-resolved board.
     """
     return {
         "name":       project["name"],
@@ -490,20 +490,20 @@ def load_board_yaml(path: Path, *,
             f"no SoC spec at {soc_path.relative_to(REPO) if soc_path.is_relative_to(REPO) else soc_path} for ref '{silicon}'")
     soc_spec = _load_json(soc_path)
 
-    # 4. Carrier definition.  Two mutually-exclusive sources (the
+    # 4. Board definition.  Two mutually-exclusive sources (the
     # schema's `oneOf` rule enforces this):
-    #   - `preset: <name>`  -> load metadata/carriers/<name>.yaml
+    #   - `preset: <name>`  -> load metadata/boards/<name>.yaml
     #   - inline `name:` + `populated:` + `e1m_routes:` at top level
-    # Either way the rest of the loader sees a single carrier_preset
+    # Either way the rest of the loader sees a single board_preset
     # dict with `name`, `populated`, `e1m_routes`.
     if "preset" in project:
-        carrier_preset = _resolve_carrier_preset(
+        board_preset = _resolve_board_preset(
             project["preset"], metadata_root)
     else:
-        carrier_preset = _synthesize_inline_carrier(project)
-    carrier_name = carrier_preset.get("name")
-    carrier_hw_rev = (project.get("hw_rev")
-                      or carrier_preset.get("default_hw_rev"))
+        board_preset = _synthesize_inline_board(project)
+    board_name = board_preset.get("name")
+    board_hw_rev = (project.get("hw_rev")
+                      or board_preset.get("default_hw_rev"))
 
     # 5. Compute per-core effective mapping.
     project_cores = project.get("cores") or {}
@@ -611,13 +611,13 @@ def load_board_yaml(path: Path, *,
     return BoardProject(
         sku=sku,
         hw_rev=hw_rev or som_preset.get("default_hw_rev"),
-        carrier_name=carrier_name,
-        carrier_hw_rev=carrier_hw_rev,
+        board_name=board_name,
+        board_hw_rev=board_hw_rev,
         cores=cores,
         ipc=ipc_entries,
         soc_spec=soc_spec,
         som_preset=som_preset,
-        carrier_preset=carrier_preset,
+        board_preset=board_preset,
         diagnostics=dict(project.get("diagnostics") or {}),
         chips=list(project.get("chips") or []),
         features=dict(project.get("features") or {}),
@@ -1428,7 +1428,7 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
     #    list; extract the `chip:` field from each device.
     #    Devices marked `assembled: optional` are DNI (do-not-install)
     #    on some builds and must NOT be auto-enabled as chip drivers —
-    #    the customer explicitly enables them via `carrier.populated:`.
+    #    the customer explicitly enables them via `board.populated:`.
     i2c_buses = on_module.get("i2c_devices")
     if isinstance(i2c_buses, dict):
         for _bus, bus_entry in i2c_buses.items():
@@ -1465,8 +1465,8 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     Emits the full Kconfig the slice needs: baseline + log + silicon +
     per-core peripherals/libraries + SoM-intrinsic chip drivers (auto-
     derived from ``on_module:`` + ``helper_firmware:`` in the SoM preset)
-    + carrier-populated chip drivers (from board.yaml ``carrier.populated:``
-    + the carrier preset) + the Zephyr subsystem enables those chip drivers
+    + board-populated chip drivers (from board.yaml ``board.populated:``
+    + the board preset) + the Zephyr subsystem enables those chip drivers
     need (e.g. an enabled ``rv3028c7`` chip driver pulls in ``CONFIG_I2C=y``).
 
     Swapping ``som.sku:`` in board.yaml automatically changes the SoM-
@@ -1551,9 +1551,9 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append("")
 
     # ----------------------------------------------------------------
-    # Carrier-populated chip drivers.  Single source: the resolved
-    # carrier_preset dict, which comes from either the shared
-    # metadata/carriers/<preset>.yaml or the project's inline
+    # Board-populated chip drivers.  Single source: the resolved
+    # board_preset dict, which comes from either the shared
+    # metadata/boards/<preset>.yaml or the project's inline
     # top-level fields (synthesised by the loader).  No project-level
     # override merge -- the schema's `oneOf` rule rejects mixing.
     #
@@ -1569,13 +1569,13 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # depending on cross-slice ordering.
     # ----------------------------------------------------------------
     populated: dict[str, bool] = dict(
-        (project.carrier_preset or {}).get("populated") or {})
+        (project.board_preset or {}).get("populated") or {})
     if populated:
-        lines.append("# Carrier-populated chip drivers (from board.yaml "
-                     "carrier.populated + carrier preset)")
+        lines.append("# Board-populated chip drivers (from board.yaml "
+                     "board.populated + board preset)")
         for chip, on in sorted(populated.items()):
             # Deduplicate: if the SoM block already emitted =y, skip
-            # the carrier line to avoid redundant CONFIG entries.
+            # the board line to avoid redundant CONFIG entries.
             if on and chip in som_chips:
                 continue
             lines.append(f"{_slug_kconfig(chip)}={'y' if on else 'n'}")
