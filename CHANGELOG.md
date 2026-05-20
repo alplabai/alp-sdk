@@ -7,6 +7,78 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Changed — board.yaml flatten + carrier→board rename + 7 declarative blocks (2026-05-20)
+
+**Breaking schema changes (no migration script — every in-repo
+`board.yaml` rewritten in the same change).**
+
+- `board.yaml` schema flattened: dropped the `carrier:` wrapper.
+  `name`, `description`, `hw_rev`, `populated`, `e1m_routes`,
+  `pins`, `preset` are now top-level fields.  Two modes: inline
+  (customer path) or `preset:` (SDK-internal shortcut, used by
+  the ~40 EVK demos under `examples/`).
+- `schema_version` field removed entirely.  One live schema at
+  `metadata/schemas/board.schema.json`.
+- "Carrier" noun retired in favour of "board" everywhere: file
+  paths (`metadata/carriers/` → `metadata/boards/`,
+  `scripts/gen_carrier_header.py` → `scripts/gen_board_header.py`,
+  `metadata/schemas/board-config-v2.schema.json` →
+  `metadata/schemas/board.schema.json`, new
+  `metadata/schemas/board-preset.schema.json` for the shared
+  YAMLs); SoM presets' `default_carrier:` → `default_board:`; C
+  API `alp_hw_info_t.carrier_*` → `board_*` fields and
+  `ALP_HW_BUILD_CARRIER_*` → `ALP_HW_BUILD_BOARD_*` macros.
+
+**Schema additions (additive; existing board.yaml files validate):**
+
+- `e1m_routes:` grows 5 sections beyond the original
+  gpio/buses/pwm: `adc`, `dac`, `i2s`, `can`, `qenc` (E1M_ENC<N>
+  pads).  Per-section pad-class validation: misclassified pads
+  (e.g. `E1M_I2C0` under `adc:`) error at validate time.
+- `e1m_routes:` entry shape gains optional `pull:` (`up|down|none`)
+  and `debounce_ms:` (board-static electrical facts).
+  `routes_via:` removed (SoM concern; moved to SoM preset's
+  `pad_routes.dispatch:`).
+- `pins:` entries can be bare strings OR `{e1m, macro?, doc?}`
+  rich form.  Validator cross-checks the macro against the
+  resolved board.
+- `cores.<id>.memory: { stack_kib, heap_kib, isr_stack_kib }`
+  → emits `CONFIG_MAIN_STACK_SIZE` / `CONFIG_HEAP_MEM_POOL_SIZE`
+  / `CONFIG_ISR_STACK_SIZE`.
+- `cores.<id>.power: { sleep_mode, wakeup_sources }` → emits
+  `CONFIG_PM` + `CONFIG_PM_DEVICE_WAKE_<SUBSYS>`.
+- `diagnostics.modules: { <name>: <level> }` → per-module
+  `CONFIG_<MODULE>_LOG_LEVEL=<n>` (supports `off`).
+- New top-level `boot:` block (MCUboot configuration).  Loader's
+  new `emit_sysbuild_conf()` produces a `SB_CONFIG_*` overlay
+  consumed via `west build --sysbuild-config build/alp_sysbuild.conf`.
+- New top-level `ota:` block (Mender / MCUmgr).  Loader appends
+  `MENDER_*` weak-assignments (`?=`) + `INHERIT += "mender-full"`
+  to the Yocto slice's `local.conf`.
+- New top-level `storage:` block (filesystem partitions).
+  Schema authoritative; DTS-overlay emit lands in v0.6 alongside
+  the deterministic flash-allocator.
+- New top-level `security.psa:` block (TF-M + PSA Crypto).
+  Schema authoritative; TF-M sysbuild child-image plumbing lands
+  in v0.6.
+
+**EVK preset seeded:** `metadata/boards/e1m-evk.yaml` now declares
+the full canonical EVK wiring across all 8 sections — ADC0..ADC7
+(board-id, Arduino A1..A5, mikroBUS AN, VBAT sense), DAC0/DAC1,
+I2S0/I2S1, CAN0, ENC0 (PEC12R rotary).  Generated routes header
+grows 79 → 125 lines.
+
+**Migration delta:** 41 example `board.yaml` files migrated to the
+flat form with annotated `pins:` arrays where applicable; 9
+test files in `tests/scripts/` updated; ~200 source files swept
+for prose-level carrier→board rename.  Full docs sweep across
+README, architecture, board-config, getting-started,
+firmware-quickstart, heterogeneous-builds, portability,
+porting-new-som, secure-boot, ota, and tutorials 09/10/11/12/16.
+ABI snapshot at `docs/abi/v0.5-snapshot.json` regenerated to
+match the renamed `alp_hw_info_t` fields.  All tests green:
+402 passed / 5 skipped.
+
 ### Added — Intra-family portability proof + Phase B/C audit cleanups (2026-05-18)
 
 **Portability is now empirically proven.**  Phase A swap-test

@@ -89,6 +89,30 @@ The MCUboot profile lives at
 Sysbuild is Zephyr's umbrella build for multi-image projects --
 it builds the bootloader + the application in one invocation.
 
+For projects that want to customise the bootloader's signing
+key / slot sizes / swap algorithm, drop a `boot:` block into your
+`board.yaml`:
+
+```yaml
+# board.yaml
+boot:
+  method: mcuboot
+  signing:
+    algorithm: ecdsa_p256
+    key_file: keys/prod_ecdsa_p256.pub.pem
+  slots:
+    primary:   { size_kib: 480 }
+    secondary: { size_kib: 480 }
+  swap_algorithm: scratch
+```
+
+The loader emits the matching `SB_CONFIG_*` overlay; `west alp-build`
+passes it as `--sysbuild-config build/alp_sysbuild.conf`
+automatically.  Without a `boot:` block the SDK's stock profile
+above is used unchanged.
+
+Direct build (without `west alp-build` orchestration):
+
 ```bash
 west build -b alif_e7_dk_rtss_he \
     examples/gpio-button-led \

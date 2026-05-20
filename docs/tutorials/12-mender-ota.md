@@ -64,20 +64,31 @@ cores:
   a55_cluster:
     app: ./linux                    # os: omitted -- A-cores default to yocto per topology
 
-# Add an OTA block under `features:` (schema's free-form
-# extension point for app-level concerns the strict-typed
-# blocks above don't cover):
-features:
-  ota:
-    client:    mender
-    server:    https://localhost    # or hosted Mender URL
-    tenant:    default              # multi-tenancy: set per customer
-    rootfs_ab: true                 # A/B partition layout
+# Top-level `ota:` block.  The loader writes the matching
+# MENDER_* lines into the Yocto slice's local.conf (via
+# weak ?= assignments so hand-edits in the build dir still win)
+# plus INHERIT += "mender-full".
+ota:
+  provider:        mender
+  artifact_name:   my-product-1.0.0
+  signing_key:     keys/mender_artifact.pem
+  server:
+    url:           https://localhost     # or hosted Mender URL
+    tenant:        default               # multi-tenancy: set per customer
+  rollback: { enabled: true, retries: 3 }
+  poll_interval_s: 1800
+  storage:
+    device:        /dev/mmcblk0p
+    boot_part_mb:  64
+    rootfs_ab:     true
+    total_size_mb: 4096
 ```
 
-The loader threads `features.ota:` into the meta-alp-sdk Mender
-config block.  The matching `meta-alp-sdk/conf/distro/include/mender.inc`
-turns into the right `IMAGE_FSTYPES` + Mender `inherit` lines.
+The loader writes the top-level `ota:` block out as `MENDER_*`
+weak-assignments (`?=`) plus `INHERIT += "mender-full"` into the
+Yocto slice's generated `local.conf`.  `meta-alp-sdk/conf/distro/
+include/mender.inc` then turns into the right `IMAGE_FSTYPES` +
+Mender `inherit` lines.
 
 ## 3. Build a signed image artefact (10 minutes)
 
