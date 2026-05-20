@@ -185,7 +185,7 @@ static int v2n_pwr_sys_init(void)
 }
 SYS_INIT(v2n_pwr_sys_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
-#else  /* DT aliases missing -- board doesn't wire DEEPX */
+#else /* DT aliases missing -- board doesn't wire DEEPX */
 
 alp_status_t alp_z_v2n_power_mgmt_init(void)
 {

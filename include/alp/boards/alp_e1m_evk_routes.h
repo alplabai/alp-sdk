@@ -21,6 +21,11 @@
 
 #include "alp/e1m_pinout.h"
 
+/* This header is auto-generated; clang-format ignores it so the
+ * generator's column-aligned `#define` blocks survive PR static
+ * analysis without forcing 100-col wraps on long doc strings. */
+/* clang-format off */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -114,5 +119,7 @@ extern "C" {
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
+
+/* clang-format on */
 
 #endif /* ALP_BOARDS_E1M_EVK_ROUTES_H */
