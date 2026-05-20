@@ -1,0 +1,8 @@
+som:
+  sku: E1M-NX9101   # NXP i.MX 93 -- peripherals: {} in metadata/socs/nxp/imx9/imx93.json
+preset: e1m-evk     # (pending full RM ingestion; all counts remain 0)
+cores:
+  m33:
+    app: ./src
+    peripherals:
+      - can           # triggers ALP-B010: 'can' not in i.MX 93 SoC caps (count=0)

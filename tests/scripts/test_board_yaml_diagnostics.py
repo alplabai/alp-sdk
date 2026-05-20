@@ -49,3 +49,8 @@ def test_bad_sku_emits_ALP_B005():
 def test_bad_preset_emits_ALP_B006():
     c = validate_board_yaml(FIX_BAD / "ALP-B006-bad-preset.yaml")
     assert "ALP-B006" in _codes(c)
+
+
+def test_peripheral_not_on_soc_emits_ALP_B010():
+    c = validate_board_yaml(FIX_BAD / "ALP-B010-peripheral-not-on-soc.yaml")
+    assert "ALP-B010" in _codes(c)

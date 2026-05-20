@@ -25,6 +25,7 @@ SCHEMA_PATH = REPO / "metadata" / "schemas" / "board.schema.json"
 METADATA = REPO / "metadata"
 SOM_DIR = METADATA / "e1m_modules"
 PRESET_DIR = METADATA / "boards"
+SOC_DIR = METADATA / "socs"
 
 
 def _load_schema() -> dict[str, Any]:
@@ -55,7 +56,7 @@ def validate_board_yaml(path: Path) -> DiagnosticCollector:
     schema = _load_schema()
     _schema_pass(data, schema, path, collector)
     _xref_pass(data, path, collector)
-    # compat pass added in 1.4.
+    _compat_pass(data, path, collector)
     return collector
 
 
@@ -124,6 +125,109 @@ def _preset_suggestion(preset: str) -> str | None:
 
     match = get_close_matches(preset, _all_presets(), n=1)
     return f"did you mean '{match[0]}'?" if match else None
+
+
+# ---------------------------------------------------------------------------
+# compat_pass helpers (ALP-B010)
+# ---------------------------------------------------------------------------
+
+
+def _compat_pass(
+    data: dict[str, Any], path: Path, collector: DiagnosticCollector
+) -> None:
+    silicon_ref = _silicon_ref_for_sku(data.get("som", {}).get("sku"))
+    if silicon_ref is None:
+        return
+    soc_caps = _load_soc_caps(silicon_ref)
+    if soc_caps is None:
+        return
+
+    for core_name, core in (data.get("cores") or {}).items():
+        if not isinstance(core, dict):
+            continue
+        peripherals = core.get("peripherals") or []
+        if not isinstance(peripherals, list):
+            continue
+        for idx, periph in enumerate(peripherals):
+            # The board.yaml schema defines peripherals as an array of
+            # strings (e.g. ["can", "i2c"]).  The schema pass already
+            # rejects non-string entries, so skip anything unexpected.
+            if not isinstance(periph, str):
+                continue
+            kind = periph
+            if _soc_has_kind(soc_caps, kind):
+                continue
+            # Best-effort line: the sequence loader only attaches position
+            # metadata to dict items; strings carry no __line__.  Fall back
+            # to the core block's opening position.
+            line = core.get("__line__", 1)
+            col = core.get("__column__", 1)
+            collector.add(
+                Diagnostic(
+                    severity="error",
+                    path=path,
+                    line=line,
+                    col=col,
+                    span=len(kind),
+                    code="ALP-B010",
+                    message=(
+                        f"core '{core_name}': peripheral kind '{kind}' is not "
+                        f"available on silicon '{silicon_ref}'"
+                    ),
+                    hint=(
+                        f"remove this peripheral or switch som.sku to a part "
+                        f"with {kind} support"
+                    ),
+                )
+            )
+
+
+def _silicon_ref_for_sku(sku: str | None) -> str | None:
+    if not sku:
+        return None
+    for som_path in SOM_DIR.rglob(f"{sku}.yaml"):
+        import yaml as _yaml
+
+        text = som_path.read_text(encoding="utf-8")
+        doc = _yaml.safe_load(text) or {}
+        ref = doc.get("silicon")
+        if isinstance(ref, str):
+            return ref
+    return None
+
+
+def _load_soc_caps(silicon_ref: str) -> dict[str, int] | None:
+    parts = silicon_ref.split(":")
+    if len(parts) != 3:
+        return None
+    vendor, family, part = parts
+    fp = SOC_DIR / vendor / family / f"{part}.json"
+    if not fp.is_file():
+        return None
+    doc = json.loads(fp.read_text(encoding="utf-8"))
+    peripherals = doc.get("peripherals", {}) if isinstance(doc, dict) else {}
+    return peripherals if isinstance(peripherals, dict) else {}
+
+
+def _soc_has_kind(caps: dict[str, int], kind: str) -> bool:
+    """Map a peripheral 'kind' onto SoC capability keys.
+
+    'kind' is the user-facing peripheral category (i2c, spi, can, ...).
+    The SoC JSON uses the same names plus _lp suffixes for low-power
+    variants; presence in EITHER counts.  Some peripherals also have
+    variant suffixes (e.g. can_fd) -- if the base name matches a key
+    whose value > 0 that also counts.
+    """
+    # Direct and LP-suffixed match.
+    direct_keys = (kind, f"{kind}_lp")
+    if any((caps.get(k, 0) or 0) > 0 for k in direct_keys):
+        return True
+    # Variant-suffixed match: e.g. user writes 'can', SoC JSON has 'can_fd'.
+    for key, count in caps.items():
+        if key == kind or key.startswith(f"{kind}_"):
+            if (count or 0) > 0:
+                return True
+    return False
 
 
 def _schema_pass(
