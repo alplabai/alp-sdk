@@ -11,26 +11,33 @@
 #       alp_security: off
 #       alp_gpio:     info
 #
-# into per-slice Kconfig:
+# into per-slice Kconfig.  Zephyr's per-module CONFIG_<MOD>_LOG_LEVEL
+# only exists once the module has called LOG_MODULE_REGISTER(); the
+# SDK's alp_* surfaces have not registered any LOG modules yet, so
+# the emit downgrades each ALP_* line to a hint comment until those
+# LOG_MODULE_REGISTER calls land:
 #
-#   CONFIG_ALP_IOT_LOG_LEVEL=4         # debug -> 4
-#   CONFIG_ALP_SECURITY_LOG_LEVEL=0    # off   -> 0
-#   CONFIG_ALP_GPIO_LOG_LEVEL=3        # info  -> 3
+#   # CONFIG_ALP_IOT_LOG_LEVEL=4 (pending LOG_MODULE_REGISTER on this SDK module)
+#   # CONFIG_ALP_SECURITY_LOG_LEVEL=0 (pending LOG_MODULE_REGISTER on this SDK module)
+#   # CONFIG_ALP_GPIO_LOG_LEVEL=3 (pending LOG_MODULE_REGISTER on this SDK module)
 #
+# Non-alp module names (Zephyr subsystems whose CONFIG_<MOD>_LOG_LEVEL
+# already exists) keep the live form.
 # (level map per _slice_alp_conf: off=0, error=1, warn=2, info=3,
 #  debug=trace=4.)
 #
 # This spec confirms the per-module log-level overrides actually
-# filter at runtime.  The gpio-button-led example exercises both
-# alp_gpio (info-level) and the alp-security helper path; bumping
-# alp_iot to debug requires a small IoT trace in the app, which
-# the iot-fleet-ota example already carries.  We assert:
+# filter at runtime once the LOG_MODULE_REGISTER calls land.  The
+# gpio-button-led example exercises both alp_gpio (info-level) and
+# the alp-security helper path; bumping alp_iot to debug requires a
+# small IoT trace in the app, which the iot-fleet-ota example already
+# carries.  We assert:
 #
 #   - `alp_iot: debug` -> debug-level IoT messages appear in trace
 #     (the `[D]` prefix Zephyr's LOG_DBG macro emits).
 #   - `alp_security: off` -> no `alp_security:` messages at all.
 #
-# What this proves end-to-end:
+# What this proves end-to-end (once LOG_MODULE_REGISTER lands):
 #   - The orchestrator emits CONFIG_<MODULE>_LOG_LEVEL=<n> per entry.
 #   - alp.conf is layered onto prj.conf via OVERLAY_CONFIG.
 #   - The Zephyr LOG subsystem respects the per-module level at

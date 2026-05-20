@@ -1914,7 +1914,12 @@ def test_consistency_mender_on_zephyr_only_ok(tmp_path: Path) -> None:
     """Rule 1 (post-ADR-0009): ota.provider: mender on an all-Zephyr
     project is now valid -- Mender-MCU-client is the Zephyr-side
     dispatch.  Was rejected pre-ADR-0009; the v0.6 provider-driven
-    dispatch flips this to ok."""
+    dispatch flips this to ok.  The mender-mcu-client west group is
+    not yet active (v0.7 follow-up), so the slice alp.conf emits the
+    Kconfig settings as hint comments -- live CONFIG_MENDER_*=y lines
+    would resolve to undefined-symbol warnings under Zephyr Kconfig
+    today.  The validator still accepts the provider; only the emit
+    shape is gated."""
     body = """
 som:
   sku: E1M-AEN701
@@ -1938,11 +1943,20 @@ ota:
 """
     path = _write_board(tmp_path, body)
     project = load_board_yaml(path)
-    # Zephyr Mender-MCU-client Kconfig must show up on the m55_hp slice.
+    # Zephyr Mender-MCU-client Kconfig must show up on the m55_hp slice
+    # as hint comments while the west group is dormant.
     conf = _slice_alp_conf(project, project.cores["m55_hp"])
-    assert "CONFIG_MENDER_MCU_CLIENT=y" in conf
-    assert 'CONFIG_MENDER_SERVER_URL="https://hosted.mender.io"' in conf
-    assert "CONFIG_MENDER_UPDATE_POLL_INTERVAL=1800" in conf
+    assert "# CONFIG_MENDER_MCU_CLIENT=y" in conf
+    assert '# CONFIG_MENDER_SERVER_URL="https://hosted.mender.io"' in conf
+    assert "# CONFIG_MENDER_UPDATE_POLL_INTERVAL=1800" in conf
+    # And not as live settings -- the undefined-symbol form aborts the
+    # twister build until the mender west group activates.
+    for stem in ("CONFIG_MENDER_MCU_CLIENT", "CONFIG_MENDER_SERVER_URL",
+                 "CONFIG_MENDER_UPDATE_POLL_INTERVAL"):
+        assert f"\n{stem}=" not in conf, (
+            f"{stem} must stay commented until mender-mcu-client lands "
+            "in west.yml (otherwise Zephyr aborts on undefined symbol)"
+        )
 
 
 def test_consistency_mender_without_any_target_rejected(tmp_path: Path) -> None:

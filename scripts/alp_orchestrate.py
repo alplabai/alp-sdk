@@ -2291,6 +2291,15 @@ _ON_MODULE_NON_CHIP_FIELDS: frozenset[str] = frozenset({
     "ethernet_phy_count",  # integer count, not a chip slug
     "i2c_devices",         # sub-block: handled by extracting chip: entries below
     "ospi_memories",       # sub-block: handled by extracting chip: entries below
+    # Storage-class fields encode the SoC controller / peripheral name
+    # that reaches the on-module storage (e.g. `nor_flash: xspi` -> the
+    # NOR flash is wired to the xSPI controller; `emmc: sd0` -> eMMC on
+    # SD/MMC controller 0).  They are routing annotations, not chip
+    # slugs, and have no `chips/<part>/` driver behind them; emitting
+    # them as CHIP_<NAME> trips the Zephyr build with an undefined-symbol
+    # warning (no CONFIG_ALP_SDK_CHIP_XSPI / SD0 declaration exists).
+    "nor_flash",
+    "emmc",
 })
 
 
@@ -2794,11 +2803,19 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         # state the hierarchy keeps is mirrored in a single hint flag.
         pwr_lines.append(f"# Sleep target: {sleep_mode}")
     for wake in (pwr.get("wakeup_sources") or []):
-        # Subsystem-style wake-source (e.g. `uart`) -> PM_DEVICE_WAKE_<SUBSYS>.
-        # E1M_* pad names are emitted as a hint comment; the per-silicon
-        # wake-pin Kconfig is family-specific and lands in v0.7.
+        # Wake-source declarations land as hint comments only.  Zephyr
+        # marks a device as wakeup-capable via the DT `wakeup-source;`
+        # property + a runtime pm_device_wakeup_enable() call; there is
+        # no top-level CONFIG_PM_DEVICE_WAKE_<SUBSYS> Kconfig symbol, so
+        # emitting one trips the build with `undefined symbol` warnings
+        # (-> kconfig errors -> twister CMake build failure).  The real
+        # DT-overlay + runtime-enable plumbing lands per silicon in v0.7;
+        # until then the wake-source list is documented in the generated
+        # alp.conf for the customer to wire by hand.
         if isinstance(wake, str) and not wake.startswith("E1M_"):
-            pwr_lines.append(f"CONFIG_PM_DEVICE_WAKE_{wake.upper()}=y  # wakeup source")
+            pwr_lines.append(
+                f"# wakeup source: {wake} "
+                "(DT wakeup-source; + pm_device_wakeup_enable() pending v0.7)")
         elif isinstance(wake, str):
             pwr_lines.append(f"# wakeup source: {wake} (per-silicon Kconfig pending)")
     if pwr_lines:
@@ -2875,17 +2892,27 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         srv = (ota.get("server") or {}) if isinstance(ota.get("server"), dict) else {}
         poll = ota.get("poll_interval_s")
         if provider == "mender":
-            # Mender-MCU-client.  Pulled in via west.yml manifest; the
-            # west-libraries emitter adds the module entry.
-            lines.append("CONFIG_MENDER_MCU_CLIENT=y")
+            # Mender-MCU-client.  The west.yml `mender` group is NOT
+            # active by default (the upstream mender-mcu-client
+            # repository is pinned alongside the v0.7 OTA wiring), so
+            # CONFIG_MENDER_* would resolve to undefined-symbol warnings
+            # under twister and abort the build.  Emit the settings as
+            # hint comments so the configuration is visible to the
+            # customer (and to anyone reviewing the generated alp.conf)
+            # while keeping the build clean.  When the mender west
+            # group flips active the comments here go back to live
+            # CONFIG_* lines in a single commit.
+            lines.append("# Mender-MCU-client wiring is pending the v0.7 OTA module")
+            lines.append("# (mender-mcu-client west group activation).")
+            lines.append("# CONFIG_MENDER_MCU_CLIENT=y")
             if srv.get("url"):
-                lines.append(f'CONFIG_MENDER_SERVER_URL="{srv["url"]}"')
+                lines.append(f'# CONFIG_MENDER_SERVER_URL="{srv["url"]}"')
             if srv.get("tenant"):
-                lines.append(f'CONFIG_MENDER_TENANT_TOKEN="{srv["tenant"]}"')
+                lines.append(f'# CONFIG_MENDER_TENANT_TOKEN="{srv["tenant"]}"')
             if ota.get("artifact_name"):
-                lines.append(f'CONFIG_MENDER_ARTIFACT_NAME="{ota["artifact_name"]}"')
+                lines.append(f'# CONFIG_MENDER_ARTIFACT_NAME="{ota["artifact_name"]}"')
             if isinstance(poll, int) and poll > 0:
-                lines.append(f"CONFIG_MENDER_UPDATE_POLL_INTERVAL={poll}")
+                lines.append(f"# CONFIG_MENDER_UPDATE_POLL_INTERVAL={poll}")
         elif provider == "hawkbit":
             # Zephyr upstream's Hawkbit DDI client.
             lines.append("CONFIG_HAWKBIT=y")
@@ -2906,6 +2933,15 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
 
     # ----------------------------------------------------------------
     # Per-module log levels (board.yaml `diagnostics.modules:`).
+    #
+    # Zephyr's per-module CONFIG_<MOD>_LOG_LEVEL symbol exists only when
+    # the matching module has called LOG_MODULE_REGISTER() at build time.
+    # ALP_* SDK-side modules have not registered any LOG modules yet, so
+    # emitting `CONFIG_ALP_<MOD>_LOG_LEVEL=N` trips the Zephyr build with
+    # `undefined symbol ALP_<MOD>_LOG_LEVEL`.  We restrict the active
+    # emit to modules whose Kconfig declaration is known to exist and
+    # downgrade ALP_* + unknown modules to a hint comment until their
+    # LOG_MODULE_REGISTER call lands.
     # ----------------------------------------------------------------
     modules = (project.diagnostics or {}).get("modules") or {}
     if modules:
@@ -2916,7 +2952,12 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
             if n is None:
                 continue
             kc_stem = mod.upper()
-            lines.append(f"CONFIG_{kc_stem}_LOG_LEVEL={n}")
+            if kc_stem.startswith("ALP_"):
+                lines.append(
+                    f"# CONFIG_{kc_stem}_LOG_LEVEL={n} "
+                    "(pending LOG_MODULE_REGISTER on this SDK module)")
+            else:
+                lines.append(f"CONFIG_{kc_stem}_LOG_LEVEL={n}")
         lines.append("")
 
     return "\n".join(lines) + "\n"

@@ -15,8 +15,8 @@
 #   CONFIG_PM=y
 #   CONFIG_PM_DEVICE=y
 #   # Sleep target: standby
-#   CONFIG_PM_DEVICE_WAKE_UART=y       # wakeup source
-#   CONFIG_PM_DEVICE_WAKE_RTC=y        # wakeup source
+#   # wakeup source: uart (DT wakeup-source; + pm_device_wakeup_enable() pending v0.7)
+#   # wakeup source: rtc  (DT wakeup-source; + pm_device_wakeup_enable() pending v0.7)
 #
 # This spec confirms the runtime PM subsystem is enabled and that
 # the device actually enters the declared sleep mode + wakes from
@@ -27,10 +27,13 @@
 # `PM_STATE_SUSPEND` / wake events.
 #
 # Wakeup sources covered: `uart` (peripheral-subsystem class).
-# E1M_* pad-named sources (e.g. `E1M_GPIO_IO0`) emit a comment
-# rather than a CONFIG_* line until v0.7 lands per-silicon wake-pin
-# Kconfig (per the _slice_alp_conf comment) -- this spec sticks to
-# the subsystem class so it works on every E1M SoM today.
+# Zephyr models a wake-source via the DT property `wakeup-source;`
+# on the underlying device node + a runtime pm_device_wakeup_enable()
+# call -- there is no top-level CONFIG_PM_DEVICE_WAKE_<SUBSYS>
+# Kconfig symbol upstream, so the emit deliberately stays as a hint
+# comment until the per-silicon DT-overlay + runtime-enable plumbing
+# lands (v0.7).  E1M_* pad-named sources (e.g. `E1M_GPIO_IO0`) also
+# emit a comment until per-silicon wake-pin Kconfig arrives.
 #
 # pending_hardware_support: deep-sleep current-draw probe.  The
 # stock AEN HiL rig does NOT have an inline ammeter on the SoM's
