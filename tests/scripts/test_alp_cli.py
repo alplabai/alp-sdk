@@ -33,3 +33,31 @@ def test_validate_fails_on_bad_fixture_and_prints_code():
     result = CliRunner().invoke(cli, ["validate", str(bad)])
     assert result.exit_code != 0
     assert "ALP-B001" in result.output
+
+
+def test_init_non_interactive_scaffolds_project(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        cli,
+        ["init", "my-app", "--som", "E1M-AEN701", "--preset", "e1m-evk",
+         "--peripherals", "uart,gpio"],
+    )
+    assert result.exit_code == 0, result.output
+    proj = tmp_path / "my-app"
+    assert (proj / "board.yaml").is_file()
+    assert (proj / "src" / "main.c").is_file()
+    assert (proj / "CMakeLists.txt").is_file()
+    board_yaml = (proj / "board.yaml").read_text(encoding="utf-8")
+    assert "E1M-AEN701" in board_yaml
+    assert "e1m-evk" in board_yaml
+
+
+def test_init_refuses_existing_directory(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "already-there").mkdir()
+    result = CliRunner().invoke(
+        cli,
+        ["init", "already-there", "--som", "E1M-AEN701", "--preset", "e1m-evk"],
+    )
+    assert result.exit_code != 0
+    assert "already exists" in result.output
