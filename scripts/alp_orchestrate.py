@@ -1002,10 +1002,12 @@ def load_board_yaml(path: Path, *,
 
     # 10. `security.psa:` cross-field validation.  The schema is
     # authoritative on field types; this block enforces the references:
-    # ITS/PS storage names must resolve to a `storage[].name` OR a SoM
-    # memory_map region name, and `attestation_root: optiga_trust_m`
-    # requires the SoM to physically ship OPTIGA Trust M.  Errors point
-    # at the offending board.yaml path so the customer can fix it.
+    # ITS/PS storage names must resolve to a `storage[].name`, a SoM
+    # memory_map region name, OR an `on_module.ospi_memories:` key
+    # (PS-class storage often lives on an on-module OSPI part rather
+    # than in MRAM); `attestation_root: optiga_trust_m` requires the
+    # SoM to physically ship OPTIGA Trust M.  Errors point at the
+    # offending board.yaml path so the customer can fix it.
     security_block = dict(project.get("security") or {})
     psa = dict(security_block.get("psa") or {})
     if psa:
@@ -1018,7 +1020,12 @@ def load_board_yaml(path: Path, *,
             str(r.get("name")) for r in mem_map
             if isinstance(r, dict) and r.get("name")
         }
-        valid_refs = storage_name_set | region_names
+        ospi_keys = {
+            str(k) for k in
+            ((som_preset.get("on_module") or {}).get("ospi_memories") or {}).keys()
+            if isinstance(k, str)
+        }
+        valid_refs = storage_name_set | region_names | ospi_keys
 
         def _check_backing_store(field: str) -> None:
             ref = psa.get(field)
@@ -1028,11 +1035,14 @@ def load_board_yaml(path: Path, *,
                 return
             raise OrchestratorError(
                 f"board.yaml `security.psa.{field}: {ref}` does not "
-                f"resolve to any `storage[].name` or SoM "
-                f"`memory_map[].name`.  Known storage partitions: "
+                f"resolve to any `storage[].name`, SoM "
+                f"`memory_map[].name`, or `on_module.ospi_memories:` "
+                f"key.  Known storage partitions: "
                 f"{sorted(storage_name_set) or '[]'}; "
                 f"known SoM memory regions: "
-                f"{sorted(region_names) or '[]'}.")
+                f"{sorted(region_names) or '[]'}; "
+                f"known on-module OSPI parts: "
+                f"{sorted(ospi_keys) or '[]'}.")
 
         _check_backing_store("its_storage")
         _check_backing_store("ps_storage")
