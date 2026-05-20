@@ -1,4 +1,9 @@
-# Stock preset for the E1M-X Development Board (45x65 SoM carrier).
+# Shared carrier definition for the E1M-X Development Board
+# (45x65 SoM carrier).  SDK-internal: customers do not reference
+# this file directly -- their own board.yaml either points at it
+# via `preset: e1m-x-evk` (for demo apps targeting the stock E1M-X
+# EVK) or carries the same fields inline at the top level (for
+# custom carriers).  See docs/board-config.md.
 #
 # Reference carrier for E1M-X V2N and E1M-X V2N-M1 SoM families.
 # Authoritative wiring lives in the carrier-specific board header
@@ -8,9 +13,7 @@
 # Per the project memory note, the populated chip list below stays
 # minimal until the user supplies the authoritative HW config for
 # the E1M-X-EVK.  Until then this file's role is to give
-# `carrier.name: E1M-X-EVK` a known schema landing point.
-
-schema_version: 1
+# `preset: e1m-x-evk` a known schema landing point.
 
 name: E1M-X-EVK
 display_name: "E1M-X Development Board (45x65 carrier)"

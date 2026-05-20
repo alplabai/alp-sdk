@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/carrier.schema.json",
+  "title": "ALP shared carrier definition",
+  "description": "Schema for a shared carrier YAML under metadata/carriers/<name>.yaml.  Referenced from project board.yaml files via the top-level `preset:` field.  Exists only as SDK-internal plumbing so multiple projects targeting the same physical board (e.g. the EVK + its ~40 demo apps) share one source of truth for chip population + E1M-pad routing.  Customers building a custom carrier put these fields inline at the top level of their board.yaml instead.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+      "description": "Carrier board name.  Used in include/alp/boards/alp_<name>_routes.h + as the board identity in generated Doxygen blocks."
+    },
+    "display_name": {
+      "type": "string",
+      "description": "Human-readable carrier name (free-form)."
+    },
+    "hosts_som_families": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "description": "SoM families this carrier mechanically + electrically supports (alif-ensemble, renesas-rzv2n, ...).  Informational; the orchestrator does not currently enforce."
+    },
+    "populated": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" },
+      "description": "Per-component populated flags.  Keys match chip-driver / block names; each `true` enables the corresponding CONFIG_ALP_SDK_{CHIP,BLOCK}_<name>=y."
+    },
+    "e1m_routes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "E1M-pad routing.  scripts/gen_carrier_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.",
+      "properties": {
+        "gpio":  { "$ref": "#/$defs/route_entry_list" },
+        "buses": { "$ref": "#/$defs/route_entry_list" },
+        "pwm":   { "$ref": "#/$defs/route_entry_list" }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Reference-design app defaults (e.g. canonical display chip, primary IMU)."
+    },
+    "default_hw_rev": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$"
+    },
+    "hw_revisions": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Per-rev metadata (min/max SDK versions, board_id ADC channel + thresholds, status, notes)."
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preliminary":       { "type": "boolean" },
+        "partial_hw_config": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "route_entry_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["e1m", "macro"],
+        "properties": {
+          "e1m":        { "type": "string", "pattern": "^E1M_(GPIO_IO[0-9]+|I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|I2S[0-9]+|CAN[0-9]+|QENC[0-9]+)$" },
+          "macro":      { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
+          "doc":        { "type": "string" },
+          "active_low": { "type": "boolean" },
+          "routes_via": { "type": "string" }
+        }
+      }
+    }
+  }
+}

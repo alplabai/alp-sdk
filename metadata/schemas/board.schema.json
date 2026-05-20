@@ -1,25 +1,59 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/board-config-v2.schema.json",
-  "title": "ALP board configuration (board.yaml) v2",
-  "description": "Schema for the per-project board.yaml file under the heterogeneous-OS orchestration design (2026-05-15).  Replaces v1's single top-level `os:` enum with a per-core `cores:` block: each on-die programmable core declares its own runtime (Zephyr / Yocto / baremetal / off), app slice, peripherals, libraries, inference + IoT toggles.  Cross-core IPC carve-outs live under top-level `ipc:`.  Carrier + chips + diagnostics blocks describe physical assembly + project-wide settings shared across cores.  See docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md.",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/board.schema.json",
+  "title": "ALP board configuration (board.yaml)",
+  "description": "Schema for a project's board.yaml -- the single configuration file a firmware project supplies.  Describes the board the firmware targets: its name, the SoM mounted on it, the firmware running on each core, the chips populated on the carrier side, and the E1M-pad routing.  Pin + populated declarations are either INLINE (`populated:` + `e1m_routes:` at top level) or by REFERENCE (`preset:` pointing at a shared carrier YAML under `metadata/carriers/<preset>.yaml`).  Mixing inline and preset is rejected.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "som", "cores"],
+  "required": ["som", "cores"],
   "not": {
     "required": ["os"]
   },
+  "allOf": [
+    {
+      "description": "Either `preset:` OR inline carrier definition -- not both.  Inline mode requires a top-level `name:` (used in the generated `alp_<name>_routes.h` filename + Doxygen blocks); preset mode takes the name from the resolved preset.",
+      "oneOf": [
+        {
+          "required": ["preset"],
+          "not": {
+            "anyOf": [
+              { "required": ["populated"] },
+              { "required": ["e1m_routes"] }
+            ]
+          }
+        },
+        {
+          "required": ["name"],
+          "not": { "required": ["preset"] }
+        }
+      ]
+    }
+  ],
   "properties": {
-    "schema_version": {
-      "type": "integer",
-      "const": 2,
-      "description": "Schema revision.  Bumped from v1 because the per-core `cores:` block replaces the global `os:` field."
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+      "description": "Board name.  Required when the carrier is defined inline (no `preset:`); used in the generated `include/alp/boards/alp_<name>_routes.h` filename + as the `@brief` board identity in Doxygen.  When `preset:` is used the field is forbidden -- the resolved preset's `name:` carries the board identity."
+    },
+    "description": {
+      "type": "string",
+      "description": "Free-form one-line description of this project / board."
+    },
+    "preset": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Reference to a shared carrier definition at `metadata/carriers/<preset>.yaml`.  The preset's `name`, `populated`, `e1m_routes`, `default_hw_rev` and `hw_revisions` blocks are pulled in wholesale.  Mutually exclusive with inline `populated:` / `e1m_routes:`."
+    },
+    "hw_rev": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$",
+      "description": "Board hardware revision.  Optional; the SDK falls back to the carrier preset's `default_hw_rev` (preset mode) or treats the board as unrevisioned (inline mode).  Distinct from `som.hw_rev` which versions the SoM module itself."
     },
     "som": {
       "type": "object",
       "additionalProperties": false,
       "required": ["sku"],
-      "description": "SoM identity -- the *module* the carrier mounts.  Distinct from `carrier` (below): the SoM is fixed at SoM-fab time and its on-module components (silicon, on-module radio, secure element, on-module sensors) cannot be DNI'd after order.",
+      "description": "SoM identity -- the *module* the board mounts.  On-module components (silicon, on-module radio, secure element, on-module sensors) are fixed at SoM-fab time and cannot be DNI'd after order.",
       "properties": {
         "sku": {
           "type": "string",
@@ -29,35 +63,14 @@
         "hw_rev": {
           "type": "string",
           "pattern": "^[a-z0-9_-]+$",
-          "description": "Family-level hardware revision the firmware targets.  Optional; the SDK falls back to the SKU preset's `default_hw_rev` when omitted."
-        }
-      }
-    },
-
-    "carrier": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Carrier board the SoM is soldered onto.  Shared across cores -- it describes physical assembly, not runtime mapping.  Omit this block for headless / inference-only firmware on a custom carrier.",
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "Carrier board name.  Stock values resolve to a preset under metadata/carriers/<name>.yaml: `E1M-EVK` (35x35 EVK for AEN / N93 SoMs), `E1M-X-EVK` (45x65 EVK for V2N / V2N-M1 SoMs).  Custom carriers use any unique name + declare populated components in `populated`."
-        },
-        "hw_rev": {
-          "type": "string",
-          "pattern": "^[a-z0-9_-]+$"
-        },
-        "populated": {
-          "type": "object",
-          "additionalProperties": { "type": "boolean" },
-          "description": "Per-component populated flags.  Keys match chip-driver names; each `true` enables the corresponding CONFIG_ALP_SDK_CHIP_<name> in the resulting build."
+          "description": "SoM module hardware revision.  Optional; the SDK falls back to the SKU preset's `default_hw_rev` when omitted."
         }
       }
     },
 
     "cores": {
       "type": "object",
-      "description": "Per-core runtime + app mapping.  Keys are canonical core IDs from the SoM preset's `topology:` (e.g. `a55_cluster`, `m33_sm`, `m55_hp`, `m55_he`, `a32_cluster`, `m33`).  The orchestrator (scripts/alp_orchestrate.py) fans out one slice per non-`off` entry.  Customer may declare a subset; unspecified cores inherit the preset's `topology:` default.",
+      "description": "Per-core runtime + app mapping.  Keys are canonical core IDs from the SoM preset's `topology:` (e.g. `a55_cluster`, `m33_sm`, `m55_hp`, `m55_he`, `a32_cluster`, `m33`).  The orchestrator fans out one slice per non-`off` entry.  Customer may declare a subset; unspecified cores inherit the preset's `topology:` defaults.  Across-SoM-family swaps (AEN <-> V2N) require updating these keys -- per ADR-0011 cross-family portability is explicitly not a goal.",
       "minProperties": 1,
       "patternProperties": {
         "^[a-z][a-z0-9_]+$": {
@@ -65,6 +78,16 @@
         }
       },
       "additionalProperties": false
+    },
+
+    "populated": {
+      "$ref": "#/$defs/populated",
+      "description": "Inline mode only.  Carrier-side chip-driver / block-helper population.  Keys match chip-driver / block names; each `true` enables the corresponding CONFIG_ALP_SDK_{CHIP,BLOCK}_<name>=y.  Mutually exclusive with `preset:`."
+    },
+
+    "e1m_routes": {
+      "$ref": "#/$defs/e1m_routes",
+      "description": "Inline mode only.  Authoritative carrier-side E1M-pad routing.  scripts/gen_carrier_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.  Mutually exclusive with `preset:`."
     },
 
     "ipc": {
@@ -108,6 +131,34 @@
   },
 
   "$defs": {
+    "populated": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "e1m_routes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gpio":  { "$ref": "#/$defs/route_entry_list" },
+        "buses": { "$ref": "#/$defs/route_entry_list" },
+        "pwm":   { "$ref": "#/$defs/route_entry_list" }
+      }
+    },
+    "route_entry_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["e1m", "macro"],
+        "properties": {
+          "e1m":        { "type": "string", "pattern": "^E1M_(GPIO_IO[0-9]+|I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|I2S[0-9]+|CAN[0-9]+|QENC[0-9]+)$" },
+          "macro":      { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
+          "doc":        { "type": "string" },
+          "active_low": { "type": "boolean" },
+          "routes_via": { "type": "string" }
+        }
+      }
+    },
     "core_entry": {
       "type": "object",
       "additionalProperties": false,

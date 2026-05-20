@@ -1,49 +1,23 @@
-# Stock preset for the E1M Development Board (35x35 SoM carrier).
+# Shared carrier definition for the E1M Development Board
+# (35x35 SoM carrier).  SDK-internal: customers do not reference
+# this file directly -- their own board.yaml either points at it
+# via `preset: e1m-evk` (for demo apps targeting the stock EVK) or
+# carries the same fields inline at the top level (for custom
+# carriers).  See docs/board-config.md.
 #
-# Reference carrier for E1M-AEN and (future) E1M-N93 SoM families.
 # Authoritative per-E1M-pad routing lives in this file's
 # `e1m_routes:` block below; `scripts/gen_carrier_header.py`
 # produces `include/alp/boards/alp_e1m_evk_routes.h` from it.  The
 # remaining sections of `alp_e1m_evk.h` (mux enums, INA236 tuning
 # constants, overlay-pad indices, on-board I2C addresses) stay
-# hand-authored until follow-up slices lift them too.  This YAML
-# file also lists the chip drivers the project loader enables
-# (CONFIG_ALP_SDK_CHIP_<NAME>=y) when `carrier.name: E1M-EVK` is
-# set in board.yaml.
+# hand-authored until follow-up slices lift them too.
 #
-# === This file doubles as the canonical reference design ===
-#
-# Customer carriers usually inherit *most* of the EVK's chip
-# population (the EVK is the validated reference Alp ships).
-# Two ways to consume it:
-#
-#   1. Reference + override (lightweight -- recommended for
-#      derivatives that change a handful of components).  In
-#      board.yaml:
-#
-#          carrier:
-#            name: E1M-EVK
-#            populated:
-#              tas2563: false   # custom variant DNI'd the speaker amps
-#              ina236:  false   # no current monitors on the prod board
-#              ssd1306: false   # no on-board display
-#
-#      The loader merges the deltas over this preset's defaults.
-#
-#   2. Fork the file (heavyweight -- recommended for full custom
-#      boards).  Copy this YAML to:
-#
-#          metadata/carriers/<your-board-name>.yaml
-#
-#      Edit the populated list to reflect your assembly.  Point
-#      board.yaml at it:
-#
-#          carrier:
-#            name: <your-board-name>
-#
-#      A worked example lives at metadata/carriers/custom-example.yaml.
-
-schema_version: 1
+# Customers building a custom carrier copy this file into their
+# project root as `board.yaml`, drop the SDK-internal preamble +
+# `hw_revisions:` table they don't need, add their own `som:` +
+# `cores:` blocks, and edit `name:`, `populated:`, `e1m_routes:`
+# for their assembly.  A worked custom example lives at
+# metadata/carriers/custom-example.yaml.
 
 name: E1M-EVK
 display_name: "E1M Development Board (35x35 carrier)"

@@ -5,22 +5,14 @@
 # motion + altitude, drops the multimedia / debug parts (OLEDs,
 # camera, speaker amps, current monitors, I/O expander).
 #
-# Two equivalent ways to express this:
+# This file shows the SHARED-CARRIER form -- it lives under
+# metadata/carriers/<name>.yaml and gets pulled in by demo projects
+# that share the same board via `preset: custom-example`.
 #
-#   (a) Reference E1M-EVK + override in board.yaml (lightweight).
-#       See the example block in metadata/carriers/E1M-EVK/board.yaml
-#       header.
-#
-#   (b) Fork this YAML to your own carrier preset (heavyweight,
-#       reusable across projects).  This file is the example fork.
-#
-# Copy this file to metadata/carriers/<your-board-name>.yaml,
-# edit the populated list, and point board.yaml at it:
-#
-#     carrier:
-#       name: my-sensor-board
-
-schema_version: 1
+# In practice a customer with a custom carrier puts these same
+# fields INLINE at the top level of their project's board.yaml --
+# no separate shared file is needed when only one firmware project
+# targets the board.  See docs/board-config.md for the inline form.
 
 name: custom-example
 display_name: "Custom sensor board (E1M-AEN derivative)"
