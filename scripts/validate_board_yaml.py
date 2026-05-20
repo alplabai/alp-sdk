@@ -3,16 +3,15 @@
 """
 Customer-side validator for `board.yaml`.
 
-Runs the three checks an alp-sdk app author cares about *before*
-the build kicks off:
+Runs the checks an alp-sdk app author cares about *before* the
+build kicks off:
 
   1. The file is valid YAML.
-  2. It conforms to metadata/schemas/board-config-v2.schema.json.
+  2. It conforms to metadata/schemas/board.schema.json.
   3. The referenced SoM SKU has a preset at
-     `metadata/e1m_modules/<SKU>.yaml` -- and the referenced
-     carrier has a preset at `metadata/carriers/<name>/board.yaml`,
-     or is treated as a customer-supplied custom carrier when
-     `populated` is provided inline.
+     `metadata/e1m_modules/<SKU>.yaml`.
+  4. When `preset:` is used, the shared carrier definition at
+     `metadata/carriers/<preset>.yaml` exists.
 
 Customer usage (from the app root):
 
@@ -22,13 +21,13 @@ Customer usage (from the app root):
 CI usage (smoke-checks every shipped example):
 
     python3 scripts/validate_board_yaml.py \\
-        --input metadata/templates/board.yaml.example
+        --input metadata/templates/board.yaml
 
 Exit codes:
   0  clean
   1  YAML parse or schema violation
-  2  missing SoM SKU preset or missing carrier preset without
-     inline `populated`
+  2  missing SoM SKU preset or missing carrier preset referenced
+     by `preset:`
   3  hardware-revision / SDK-version incompatibility (the chosen
      hw_rev's [min_sdk_version, max_sdk_version] window does not
      cover metadata/sdk_version.yaml)
@@ -55,10 +54,7 @@ except ImportError:
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT_DEFAULT = REPO / "metadata"
-# Phase 2 of the 2026-05-15 heterogeneous-OS redesign points the
-# validator at the v2 schema.  v1 inputs fail validation by design
-# -- Phase 4 rewrites every shipped board.yaml.
-SCHEMA = METADATA_ROOT_DEFAULT / "schemas" / "board-config-v2.schema.json"
+SCHEMA = METADATA_ROOT_DEFAULT / "schemas" / "board.schema.json"
 
 
 def _load_yaml(path: Path) -> dict[str, Any] | None:
@@ -201,22 +197,23 @@ def _check_hw_compat(
                 print(f"WARN som {sku}: no hw_rev declared, no "
                       f"default_hw_rev in preset -- check skipped")
 
-    # Carrier side -- carrier-level hw_revisions block.
-    carrier_block = project.get("carrier")
-    if carrier_block:
-        name = carrier_block.get("name", "")
-        cp_path = metadata_root / "carriers" / name / "board.yaml"
+    # Carrier side -- only the shared-preset path carries a
+    # hw_revisions table; inline-carrier projects use top-level
+    # `hw_rev:` directly without a min/max-SDK window.
+    preset = project.get("preset")
+    if preset:
+        cp_path = metadata_root / "carriers" / f"{preset}.yaml"
         if cp_path.is_file():
             cp_doc = yaml.safe_load(cp_path.read_text(encoding="utf-8")) or {}
             hw_revs = cp_doc.get("hw_revisions") or {}
             if hw_revs:
-                rev = (carrier_block.get("hw_rev")
+                rev = (project.get("hw_rev")
                        or cp_doc.get("default_hw_rev"))
                 if rev:
                     rv = max(rv, _check_hw_rev(
-                        f"carrier {name}", rev, hw_revs, sdk_version))
+                        f"carrier {preset}", rev, hw_revs, sdk_version))
                 else:
-                    print(f"WARN carrier {name}: no hw_rev declared, "
+                    print(f"WARN carrier {preset}: no hw_rev declared, "
                           f"no default_hw_rev in preset -- check "
                           f"skipped")
     return rv
@@ -321,29 +318,32 @@ def _check_peripherals_vs_soc(
 
 
 def _check_carrier_preset(project: dict[str, Any], metadata_root: Path) -> int:
-    """Return 0 on OK, 2 on missing-without-inline-populated."""
-    carrier_block = project.get("carrier")
-    if not carrier_block:
-        # No carrier -- headless / inference-only build.  Schema permits.
-        print("OK   carrier: <none declared>")
-        return 0
-    name = carrier_block.get("name", "")
-    preset = metadata_root / "carriers" / name / "board.yaml"
-    if preset.is_file():
-        print(f"OK   carrier preset: {name}")
-        return 0
+    """Return 0 on OK, 2 on missing preset."""
+    preset = project.get("preset")
+    if preset:
+        preset_path = metadata_root / "carriers" / f"{preset}.yaml"
+        if preset_path.is_file():
+            print(f"OK   carrier preset: {preset}")
+            return 0
+        print(f"FAIL carrier: `preset: {preset}` does not resolve",
+              file=sys.stderr)
+        print(f"     expected shared definition at "
+              f"{preset_path.relative_to(REPO) if preset_path.is_relative_to(REPO) else preset_path}",
+              file=sys.stderr)
+        return 2
 
-    # No preset -- accept iff the user's board.yaml supplies a
-    # `populated` block (custom carrier path).
-    populated = carrier_block.get("populated") or {}
-    if populated:
-        print(f"OK   carrier: '{name}' is a custom carrier ({len(populated)} populated entries)")
-        return 0
-    print(f"FAIL carrier: '{name}' has no preset and no inline `populated` block",
-          file=sys.stderr)
-    print(f"     expected preset at {preset.relative_to(REPO) if preset.is_relative_to(REPO) else preset}",
-          file=sys.stderr)
-    return 2
+    # Inline carrier definition.  Schema already enforced
+    # `name:` is present; check populated/e1m_routes are non-empty.
+    name = project.get("name")
+    populated = project.get("populated") or {}
+    routes = project.get("e1m_routes") or {}
+    if populated or routes:
+        print(f"OK   carrier: '{name}' defined inline "
+              f"({len(populated)} populated, "
+              f"{sum(len(v or []) for v in routes.values())} routes)")
+    else:
+        print(f"OK   carrier: '{name}' defined inline (empty -- headless / inference-only)")
+    return 0
 
 
 def main() -> int:

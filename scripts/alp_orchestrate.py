@@ -55,7 +55,8 @@ from alp_project import resolve_memory_map, resolve_capabilities  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
-SCHEMA_V2 = METADATA_ROOT / "schemas" / "board-config-v2.schema.json"
+BOARD_SCHEMA = METADATA_ROOT / "schemas" / "board.schema.json"
+CARRIER_SCHEMA = METADATA_ROOT / "schemas" / "carrier.schema.json"
 
 
 def _default_os_from_core_type(core_type: str) -> str:
@@ -317,13 +318,13 @@ def _load_json(path: Path) -> dict[str, Any]:
         raise OrchestratorError(f"failed to parse {path}: {e}") from e
 
 
-def _validate_v2(project: dict[str, Any],
-                 metadata_root: Path = METADATA_ROOT) -> None:
-    schema_path = metadata_root / "schemas" / "board-config-v2.schema.json"
+def _validate_board(project: dict[str, Any],
+                    metadata_root: Path = METADATA_ROOT) -> None:
+    schema_path = metadata_root / "schemas" / "board.schema.json"
     if not schema_path.is_file():
         # Fall back to the global schema when the metadata_root doesn't
         # carry its own copy (e.g. synthetic test roots without schemas/).
-        schema_path = SCHEMA_V2
+        schema_path = BOARD_SCHEMA
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     validator = jsonschema.Draft202012Validator(schema)
     errors = sorted(validator.iter_errors(project),
@@ -339,13 +340,48 @@ def _validate_v2(project: dict[str, Any],
 
 
 def _resolve_carrier_preset(
-    carrier_name: str,
+    preset: str,
     metadata_root: Path,
-) -> Optional[dict[str, Any]]:
-    p = metadata_root / "carriers" / carrier_name / "board.yaml"
+) -> dict[str, Any]:
+    """Load the shared carrier YAML referenced by `preset:`.
+
+    Shared carriers live at metadata/carriers/<preset>.yaml.  Raises
+    OrchestratorError when the file is missing (`preset:` must resolve;
+    customers with a custom carrier define it inline instead).
+    """
+    p = metadata_root / "carriers" / f"{preset}.yaml"
     if not p.is_file():
-        return None
+        raise OrchestratorError(
+            f"`preset: {preset}` does not resolve: no shared carrier "
+            f"at {p.relative_to(REPO) if p.is_relative_to(REPO) else p}. "
+            f"Available presets: "
+            f"{sorted(_available_presets(metadata_root))}")
     return _load_yaml(p)
+
+
+def _available_presets(metadata_root: Path) -> list[str]:
+    carriers_dir = metadata_root / "carriers"
+    if not carriers_dir.is_dir():
+        return []
+    return [p.stem for p in carriers_dir.glob("*.yaml")]
+
+
+def _synthesize_inline_carrier(project: dict[str, Any]) -> dict[str, Any]:
+    """Build a carrier-shaped dict from a project's inline top-level fields.
+
+    Used when board.yaml has no `preset:` -- the project's own `name`,
+    `populated`, `e1m_routes` (and optional `hw_rev`) double as the
+    carrier definition.  Returned dict has the same shape downstream
+    emitters expect from a preset-resolved carrier.
+    """
+    return {
+        "name":       project["name"],
+        "populated":  dict(project.get("populated") or {}),
+        "e1m_routes": dict(project.get("e1m_routes") or {}),
+        # Inline mode has no per-board hw_revisions table; loader code
+        # that reads default_hw_rev / hw_revisions tolerates None.
+        "default_hw_rev": project.get("hw_rev"),
+    }
 
 
 def _resolve_topology_for_core(
@@ -420,17 +456,17 @@ def _enforce_loader_rules(slice_: Slice) -> None:
 
 def load_board_yaml(path: Path, *,
                     metadata_root: Path = METADATA_ROOT) -> BoardProject:
-    """Load + validate a v2 board.yaml.
+    """Load + validate a board.yaml.
 
     Raises OrchestratorError on any schema / preset / topology error.
     """
     path = Path(path)
     project = _load_yaml(path)
 
-    # 1. v2 schema validation.  Pass metadata_root so test stubs using
+    # 1. Schema validation.  Pass metadata_root so test stubs using
     # non-production SKU patterns (E1M-TST001 etc.) validate against
     # their own copy of the schema rather than the repo's strict pattern.
-    _validate_v2(project, metadata_root=metadata_root)
+    _validate_board(project, metadata_root=metadata_root)
 
     sku = project["som"]["sku"]
     hw_rev = project["som"].get("hw_rev")
@@ -454,17 +490,20 @@ def load_board_yaml(path: Path, *,
             f"no SoC spec at {soc_path.relative_to(REPO) if soc_path.is_relative_to(REPO) else soc_path} for ref '{silicon}'")
     soc_spec = _load_json(soc_path)
 
-    # 4. Carrier preset (optional).
-    carrier_name = None
-    carrier_hw_rev = None
-    carrier_preset = None
-    carrier_block = project.get("carrier") or {}
-    if carrier_block:
-        carrier_name = carrier_block.get("name")
-        carrier_hw_rev = carrier_block.get("hw_rev")
-        if carrier_name:
-            carrier_preset = _resolve_carrier_preset(
-                carrier_name, metadata_root)
+    # 4. Carrier definition.  Two mutually-exclusive sources (the
+    # schema's `oneOf` rule enforces this):
+    #   - `preset: <name>`  -> load metadata/carriers/<name>.yaml
+    #   - inline `name:` + `populated:` + `e1m_routes:` at top level
+    # Either way the rest of the loader sees a single carrier_preset
+    # dict with `name`, `populated`, `e1m_routes`.
+    if "preset" in project:
+        carrier_preset = _resolve_carrier_preset(
+            project["preset"], metadata_root)
+    else:
+        carrier_preset = _synthesize_inline_carrier(project)
+    carrier_name = carrier_preset.get("name")
+    carrier_hw_rev = (project.get("hw_rev")
+                      or carrier_preset.get("default_hw_rev"))
 
     # 5. Compute per-core effective mapping.
     project_cores = project.get("cores") or {}
@@ -573,8 +612,7 @@ def load_board_yaml(path: Path, *,
         sku=sku,
         hw_rev=hw_rev or som_preset.get("default_hw_rev"),
         carrier_name=carrier_name,
-        carrier_hw_rev=(carrier_hw_rev
-                        or (carrier_preset or {}).get("default_hw_rev")),
+        carrier_hw_rev=carrier_hw_rev,
         cores=cores,
         ipc=ipc_entries,
         soc_spec=soc_spec,
@@ -1513,10 +1551,13 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append("")
 
     # ----------------------------------------------------------------
-    # Carrier-populated chip drivers.  Source order: SoM/carrier
-    # preset `populated:` block (base) overlaid by the board.yaml
-    # `carrier.populated:` block (project-level overrides).  The
-    # chip drivers compile per-chip via the
+    # Carrier-populated chip drivers.  Single source: the resolved
+    # carrier_preset dict, which comes from either the shared
+    # metadata/carriers/<preset>.yaml or the project's inline
+    # top-level fields (synthesised by the loader).  No project-level
+    # override merge -- the schema's `oneOf` rule rejects mixing.
+    #
+    # Chip drivers compile per-chip via the
     # zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_<NAME> ...)
     # (or CONFIG_ALP_SDK_BLOCK_<NAME> for the `button_led` / `pdm_mic`
     # SDK-level block helpers) entries in zephyr/CMakeLists.txt.
@@ -1527,11 +1568,8 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # (the slice carries everything it needs to compile) without
     # depending on cross-slice ordering.
     # ----------------------------------------------------------------
-    populated: dict[str, bool] = {}
-    if project.carrier_preset is not None:
-        populated.update(project.carrier_preset.get("populated") or {})
-    raw_carrier = (project.raw.get("carrier") or {}) if project.raw else {}
-    populated.update(raw_carrier.get("populated") or {})
+    populated: dict[str, bool] = dict(
+        (project.carrier_preset or {}).get("populated") or {})
     if populated:
         lines.append("# Carrier-populated chip drivers (from board.yaml "
                      "carrier.populated + carrier preset)")

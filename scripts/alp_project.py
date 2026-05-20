@@ -24,9 +24,10 @@ Usage:
 
 The loader resolves:
   - The SoM SKU preset under metadata/e1m_modules/<SKU>.yaml
-  - The carrier preset under metadata/carriers/<name>/board.yaml
-    (if `carrier` block present)
-  - Per-block overrides in the user's board.yaml
+  - The shared carrier definition under metadata/carriers/<preset>.yaml
+    (when board.yaml uses `preset:`), OR the inline top-level
+    `populated:` + `e1m_routes:` block (when board.yaml defines
+    its carrier inline)
 
 Then emits the appropriate native config.  For Zephyr this is a
 .conf file the build appends to prj.conf; for plain CMake a
@@ -63,7 +64,7 @@ except ImportError:
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
-SCHEMA_V2 = METADATA_ROOT / "schemas" / "board-config-v2.schema.json"
+BOARD_SCHEMA = METADATA_ROOT / "schemas" / "board.schema.json"
 SDK_VERSION_FILE = METADATA_ROOT / "sdk_version.yaml"
 
 
@@ -128,14 +129,34 @@ def _resolve_sku(sku: str, metadata_root: Path) -> dict[str, Any]:
     return _load_yaml(preset_path)
 
 
-def _resolve_carrier(name: str, metadata_root: Path) -> dict[str, Any]:
-    # Per-carrier preset lives at metadata/carriers/<name>/board.yaml.
-    preset_path = metadata_root / "carriers" / name / "board.yaml"
+def _resolve_carrier(preset: str, metadata_root: Path) -> dict[str, Any]:
+    # Shared carrier definition lives at metadata/carriers/<preset>.yaml.
+    preset_path = metadata_root / "carriers" / f"{preset}.yaml"
     if not preset_path.is_file():
-        # Custom carrier -- no preset; the board.yaml's `carrier.populated`
-        # block is authoritative.  Return an empty preset.
-        return {"name": name, "populated": {}}
+        sys.exit(
+            f"alp_project: `preset: {preset}` does not resolve at "
+            f"{preset_path.relative_to(REPO) if preset_path.is_relative_to(REPO) else preset_path}")
     return _load_yaml(preset_path)
+
+
+def _resolve_inline_or_preset_carrier(
+    project: dict[str, Any], metadata_root: Path,
+) -> dict[str, Any]:
+    """Return the resolved carrier dict for a project.
+
+    Mirrors the orchestrator's resolution: `preset: <name>` loads
+    metadata/carriers/<name>.yaml; otherwise the project's own
+    top-level `name`/`populated`/`e1m_routes` are wrapped into the
+    same shape the downstream emitters consume.
+    """
+    if "preset" in project:
+        return _resolve_carrier(project["preset"], metadata_root)
+    return {
+        "name":           project.get("name"),
+        "populated":      dict(project.get("populated") or {}),
+        "e1m_routes":     dict(project.get("e1m_routes") or {}),
+        "default_hw_rev": project.get("hw_rev"),
+    }
 
 
 def _resolve_silicon_variant(
@@ -1310,11 +1331,7 @@ def _emit_composed_route_table(
             row["som_doc"] = composed["som_doc"]
         routes.append(row)
 
-    carrier_name = None
-    if carrier_preset is not None:
-        carrier_name = carrier_preset.get("name") or (project.get("carrier") or {}).get("name")
-    elif "carrier" in project and project["carrier"]:
-        carrier_name = (project["carrier"] or {}).get("name")
+    carrier_name = (carrier_preset or {}).get("name") or project.get("name")
 
     result: dict[str, Any] = {
         "carrier": carrier_name,
@@ -1426,9 +1443,11 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
 
-    # Build a v1-shaped dict that the legacy emitters can read from for
-    # som / carrier fields.  Used by dts-overlay + hw-info-h + west-
-    # libraries v2 paths.
+    # Build a dict in the legacy "carrier:"-wrapper shape that the
+    # in-file emitters still consume internally (dts-overlay,
+    # hw-info-h, west-libraries).  The public board.yaml schema no
+    # longer uses this wrapper, but it's a convenient internal
+    # representation for the emitters' read paths.
     project_v1_shaped: dict[str, Any] = {
         "som": {
             "sku":    project.sku,
@@ -1596,29 +1615,20 @@ def main() -> int:
 
     project = _load_yaml(args.input)
 
-    # composed-route-table only needs the SoM + carrier presets; it does
-    # not require the per-core slice machinery and works on any v2 input.
+    # composed-route-table only needs the SoM + carrier definitions; it
+    # does not require the per-core slice machinery.
     if args.emit == "composed-route-table":
         sku_preset_rt = _resolve_sku(project["som"]["sku"], args.metadata_root)
-        carrier_preset_rt = None
-        if "carrier" in project and project["carrier"]:
-            carrier_preset_rt = _resolve_carrier(
-                project["carrier"]["name"], args.metadata_root
-            )
+        carrier_preset_rt = _resolve_inline_or_preset_carrier(
+            project, args.metadata_root)
         out = _emit_composed_route_table(
             project, sku_preset_rt, carrier_preset_rt, args.metadata_root
         )
         return _write_or_print(out, args.output)
 
-    # v2 board.yamls flow through the per-core / project-wide emit path
-    # in _run_v2_per_core_emit.  Project-wide v2 emits (system-manifest,
+    # board.yamls flow through the per-core / project-wide emit path
+    # in _run_v2_per_core_emit.  Project-wide emits (system-manifest,
     # dts-reservations, ipc-contract-h) were already dispatched above.
-    schema_version = project.get("schema_version")
-    if schema_version != 2:
-        sys.exit(
-            f"alp_project: schema_version: {schema_version} not supported. "
-            f"Use schema_version: 2 (per-core cores: block; see docs/board-config.md)."
-        )
     return _run_v2_per_core_emit(args)
 
 

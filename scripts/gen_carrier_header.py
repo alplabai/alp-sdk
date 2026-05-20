@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Generate include/alp/boards/alp_<carrier>_routes.h from each
-metadata/carriers/<NAME>/board.yaml `e1m_routes:` block.
+metadata/carriers/<name>.yaml `e1m_routes:` block.
 
 The generated header mirrors the YAML `e1m_routes:` block into plain
 `#define EVK_* E1M_*` lines so hand-written firmware can keep using
@@ -156,16 +156,11 @@ def main() -> int:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     written = 0
-    for carrier_dir in sorted(CARRIERS_DIR.iterdir()):
-        if not carrier_dir.is_dir():
-            continue
-        preset = carrier_dir / "board.yaml"
-        if not preset.is_file():
-            continue
-        doc = yaml.safe_load(preset.read_text(encoding="utf-8"))
+    for preset_path in sorted(CARRIERS_DIR.glob("*.yaml")):
+        doc = yaml.safe_load(preset_path.read_text(encoding="utf-8"))
         if not isinstance(doc, dict):
             continue
-        name = doc.get("name") or carrier_dir.name
+        name = doc.get("name") or preset_path.stem
         out_text = emit_carrier(name, doc)
         if out_text is None:
             continue
@@ -179,7 +174,8 @@ def main() -> int:
 
     if written == 0:
         print(
-            "gen_carrier_header: no carriers with e1m_routes blocks found",
+            "gen_carrier_header: no shared carrier YAMLs with "
+            "e1m_routes blocks found",
             file=sys.stderr,
         )
         return 1
