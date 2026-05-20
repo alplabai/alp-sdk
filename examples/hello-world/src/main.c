@@ -36,6 +36,9 @@
 
 #include <zephyr/kernel.h>
 
+#include <alp/cap.h>
+#include <alp/soc_caps.h>
+
 /* Capped tick count keeps the native_sim run inside twister's
  * timeout.  Real on-silicon firmware would loop forever instead --
  * see TICKS_ON_REAL_SILICON below.  We expose the cap as a macro
@@ -76,6 +79,28 @@ int main(void) {
      *
      * Returning from main() on Zephyr is technically legal but the
      * kernel idles afterwards -- nothing keeps the heartbeat going. */
+
+    /* Capability-API teaching block.
+     *
+     * `ALP_HAS()` is a compile-time constant expression.  Use it for
+     * #if / static_assert -- the unused branch disappears entirely
+     * from the binary, so this is zero-cost on parts that lack the
+     * feature. */
+#if ALP_HAS(HELIUM_MVE)
+    printf("[hello] this build targets a Helium-capable SoC\n");
+#else
+    printf("[hello] no Helium MVE on this SoC -- scalar path\n");
+#endif
+
+    /* `alp_has()` is the runtime equivalent.  Useful when the same
+     * binary may run on different SoCs (rare on Zephyr, common in
+     * board-bringup tooling) or when the branch only matters for
+     * logging rather than codegen. */
+    if (alp_has(ALP_CAP_ID_HW_I2C)) {
+        printf("[hello] HW I2C available (could probe sensors here)\n");
+    } else {
+        printf("[hello] no HW I2C on this SoC\n");
+    }
 
     printf("[hello] done\n");
     return 0;
