@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for the board.yaml `boot:` block (PR #3).
+#
+# The orchestrator's emit_sysbuild_conf() in scripts/alp_orchestrate.py
+# turns `boot: { method: mcuboot, signing: { algorithm: ecdsa_p256, ... }, ... }`
+# into a sysbuild.conf overlay carrying:
+#
+#   SB_CONFIG_BOOTLOADER_MCUBOOT=y
+#   SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ECDSA_P256=y
+#   SB_CONFIG_BOOT_PRIMARY_PARTITION_SIZE=<bytes>
+#   SB_CONFIG_BOOT_SECONDARY_PARTITION_SIZE=<bytes>
+#   SB_CONFIG_MCUBOOT_MODE_SWAP_USING_SCRATCH=y   (or _MOVE / OVERWRITE)
+#
+# This spec asserts those CONFIG_* lines actually reach real silicon:
+# MCUboot must be the first boot stage on the device's serial output,
+# and the declared signature algorithm must match what MCUboot prints
+# at boot.  The `iot-fleet-ota` example is the in-repo project that
+# carries (or will carry, after Priority 3.2 of v0.6) an explicit
+# `boot:` block; its src/ slice is the test app.
+#
+# Hardware fixtures expected:
+#   - Standard E1M EVK + AEN701 SoM (the OPTIGA Trust M slot type
+#     dictates the signature algorithm the bootloader can verify).
+#   - Signed image flashed via `west flash`; sysbuild builds MCUboot
+#     + the signed app image automatically.
+#
+# What this proves end-to-end:
+#   - The `boot:` block reaches the build: MCUboot banner appears
+#     on serial before any application output.
+#   - The `signing.algorithm` field reaches the build: MCUboot's
+#     boot log names the matching signature type (`ecdsa-p256`).
+#   - The application boots cleanly after MCUboot hands off
+#     (no swap-loop, no rollback, no `BOOT_FAULT`).
+
+schema_version: 1
+name: boot-mcuboot
+description: |
+  Confirms the board.yaml `boot:` block lands real MCUboot config on
+  the device: bootloader is the first stage on serial output,
+  signature type matches the declared algorithm, and the application
+  boots cleanly after the handoff.
+
+example: examples/iot-fleet-ota
+
+serial:
+  duration_s: 25
+  expect_contains:
+    - "MCUboot"                       # bootloader banner (mcuboot/zephyr/zephyr/main.c)
+    - "Image index: 0"                # MCUboot per-slot trace
+    - "Bootloader chainload"          # handoff to the signed app
+  expect_absent:
+    - "BOOT_FAULT"
+    - "Image not found"
+    - "Signature verification failed"
+    - "PANIC"
+    - "ASSERT"

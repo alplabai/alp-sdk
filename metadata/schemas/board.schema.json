@@ -152,7 +152,7 @@
 
     "storage": {
       "type": "array",
-      "description": "Optional flash / persistent-storage partitioning.  Each entry declares one partition: a name, a filesystem (or `raw: true` for unformatted partitions used as OTA slot backing / image cache), a size, an optional mount point, and a flash-device reference into the SoM preset's `memory_map:` or `on_module.ospi_memories:` block.  The loader emits a partial DTS overlay (the `partitions { ... }` node) plus the matching Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS / CONFIG_FAT_FILESYSTEM_ELM / ...) per entry.  See docs/v0.6-tbd-and-assumptions.md -- the emit path lands in v0.6 alongside the deterministic flash-allocator.",
+      "description": "Optional flash / persistent-storage partitioning.  Each entry declares one partition: a name, a filesystem (or `raw: true` for unformatted partitions used as OTA slot backing / image cache), a size, an optional mount point, and a flash-device reference into the SoM preset's `memory_map:` or `on_module.ospi_memories:` block.  The orchestrator emits a partial DTS overlay (the `&<flash>; partitions { ... }` node) plus the matching Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS / CONFIG_FAT_FILESYSTEM_ELM / ...) per entry.  Partition addresses are pinned by the orchestrator (bottom-up, page-aligned within the flash device) for byte-stable OTA images across rebuilds; supply `offset_kib:` to override the allocator with an explicit offset.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -163,6 +163,7 @@
           "fs":           { "type": "string", "enum": ["littlefs", "fat", "ext4", "raw"], "default": "raw", "description": "Filesystem to format the partition with.  `raw` leaves it unformatted (e.g. for image slots managed by MCUboot)." },
           "mount":        { "type": "string", "description": "Mount point at boot.  Optional; when omitted the partition isn't auto-mounted." },
           "flash_device": { "type": "string", "description": "Region this partition lives in.  References the SoM preset's `memory_map:` name (`mram_main`, `ocram_low`, ...) or an `on_module.ospi_memories:` entry (`ospi0`, ...)." },
+          "offset_kib":   { "type": "integer", "minimum": 0, "description": "Optional explicit offset (in KiB) within the flash device.  When omitted, the orchestrator allocates bottom-up from offset 0 in name-sorted order.  When supplied, must be page-aligned (4 KiB); the allocator surfaces overlaps via `status: blocked` on the resolved partition." },
           "raw":          { "type": "boolean", "description": "Legacy alias for `fs: raw`.  Prefer `fs:` directly." }
         }
       }
@@ -176,7 +177,7 @@
         "psa": {
           "type": "object",
           "additionalProperties": false,
-          "description": "PSA Crypto persistent-key storage.  See docs/security-audit-plan.md and ADR-0010 for the cross-core trust-boundary discussion.  v0.6 lands the TF-M sysbuild child image; pre-v0.6 the schema accepts these fields but the emit path is a no-op.",
+          "description": "PSA Crypto persistent-key storage.  See docs/security-audit-plan.md and ADR-0010 + ADR-0013 for the cross-core trust-boundary discussion.  When `tfm: true` the orchestrator emits a TF-M sysbuild child-image overlay at `build/sysbuild/tfm/tfm.conf` (SB_CONFIG_TFM + CONFIG_PSA_CRYPTO_*); `tfm: false` keeps PSA Crypto entirely non-secure (mbedTLS-only).",
           "properties": {
             "persistent_slots": {
               "type": "integer",
@@ -261,6 +262,12 @@
           "type": "boolean",
           "default": false,
           "description": "Enable monotonic image counters.  Requires OTP fuse provisioning at production time (see docs/secure-boot.md §anti-rollback)."
+        },
+        "build_type": {
+          "type": "string",
+          "enum": ["Release", "Debug", "MinSizeRel"],
+          "default": "Release",
+          "description": "Build flavour propagated to sysbuild child images (MCUboot + TF-M).  Set to `Debug` for symbol-rich dev builds; `MinSizeRel` matches the upstream sysbuild template's size-optimised default."
         }
       }
     },
@@ -273,8 +280,8 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": ["mender", "mcumgr", "none"],
-          "description": "OTA provider.  `mender` for Yocto, `mcumgr` for Zephyr (placeholder until ADR 0009 lands), `none` to disable."
+          "enum": ["mender", "hawkbit", "mcumgr", "none"],
+          "description": "OTA provider (provider-driven dispatch, ADR 0009 follow-up).  `mender` -> server-mode Mender on Yocto OR Mender-MCU-client on Zephyr; `hawkbit` -> Zephyr upstream's Hawkbit DDI client; `mcumgr` -> Zephyr's MCUmgr/SMP (transport selection stays the app's call); `none` to disable."
         },
         "artifact_name": {
           "type": "string",
@@ -486,6 +493,21 @@
               "libwebsockets", "jsmn", "bearssl", "minimp3", "opus",
               "libhelix", "catch2"
             ]
+          }
+        },
+        "extra_libraries": {
+          "type": "array",
+          "description": "Open-set escape hatch for libraries the SDK doesn't curate.  Each entry must declare inline `kconfig:` OR a `profile:` file path -- exactly one (enforced by the loader).  Use this when you need to pull in a library that isn't part of the curated `libraries:` enum (a one-off vendor SDK, a research-only dep, a soon-to-be-curated lib while the profile lands).  Inline `kconfig:` is the fast path; `profile:` points at a `hw-backends.yaml`-style file for libraries that want per-silicon backend selection consistent with the curated entries.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name":         { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Unique slug.  Loader enforces global uniqueness across every core's `extra_libraries:` and rejects collisions with the curated `libraries:` enum." },
+              "include_path": { "type": "string", "description": "Optional include search path (repo-relative or absolute) the build adds for this library's headers." },
+              "kconfig":      { "type": "array", "items": { "type": "string" }, "description": "Inline Kconfig fragment lines emitted verbatim into alp.conf (e.g. `CONFIG_MYLIB=y`).  Mutually exclusive with `profile:`." },
+              "profile":      { "type": "string", "description": "Path (repo-relative) to a hw-backends.yaml-style profile file with `accelerators:`/`sw_fallback:` blocks.  Loader applies the same silicon / soc_family / requires_cap matching used by the curated libraries.  Mutually exclusive with `kconfig:`." }
+            }
           }
         },
         "memory": {

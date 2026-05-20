@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: power-managed-sensor
+  description: |
+    Low-power sensor node demonstrating the v0.6
+    `cores.<id>.power:` declarative block.  M55-HE high-efficiency
+    core sleeps between wakeups; RTC ticks every 60 s for a
+    periodic sample, GPIO IRQ wakes on motion / user interrupt,
+    UART wakes on diagnostic console input.
+
+tests:
+  alp_sdk.example.power_managed_sensor:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - power
+      - sensor
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[pm\\] done"

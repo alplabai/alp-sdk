@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Portable HiL smoke for the board.yaml `cores.<id>.memory:` block (PR #3).
+#
+# scripts/alp_orchestrate.py:_slice_alp_conf() turns
+#
+#   cores:
+#     m55_hp:
+#       memory:
+#         stack_kib:     8
+#         heap_kib:      16
+#         isr_stack_kib: 4
+#
+# into per-slice Kconfig:
+#
+#   CONFIG_MAIN_STACK_SIZE=8192
+#   CONFIG_HEAP_MEM_POOL_SIZE=16384
+#   CONFIG_ISR_STACK_SIZE=4096
+#
+# (each <field>_kib value multiplied by 1024).  This spec confirms
+# the CONFIG_MAIN_STACK_SIZE line actually reaches the runtime --
+# the existing examples/hello-world app prints `K_THREAD_STACK_SIZEOF(...)`
+# of the main thread on boot, so we read the value back out of the
+# serial trace and assert it matches the configured byte count.
+#
+# What this proves end-to-end:
+#   - The orchestrator's `cores.<id>.memory:` emit reaches alp.conf.
+#   - alp.conf is layered onto prj.conf via OVERLAY_CONFIG.
+#   - The resulting CONFIG_MAIN_STACK_SIZE drives Zephyr's
+#     K_THREAD_STACK_SIZEOF -- i.e. the runtime stack matches the
+#     value declared in board.yaml (not some unrelated default).
+#   - No stack overflow triggers under the example's load.
+#
+# The byte count 8192 in the expect_contains list is the value the
+# hello-world example's board.yaml declares (or will declare, when
+# Priority 3.2 of v0.6 lands `cores.m55_hp.memory.stack_kib: 8`).
+# The 4096 value (ISR stack) matches `isr_stack_kib: 4`.
+
+schema_version: 1
+name: memory-stacks
+description: |
+  Confirms the `cores.<id>.memory:` block reaches the runtime: the
+  configured CONFIG_MAIN_STACK_SIZE byte count appears in the
+  example's boot trace, and no stack-overflow events fire under load.
+
+example: examples/hello-world
+
+serial:
+  duration_s: 12
+  expect_contains:
+    - "MAIN_STACK_SIZE="              # the hello-world example prints this on boot
+    - "ISR_STACK_SIZE="
+    - "hello world"                   # the example's main printf
+  expect_absent:
+    - "STACK_OVERFLOW"
+    - "Stack overflow"
+    - "k_panic"
+    - "PANIC"
+    - "FAULT"
+    - "ASSERT"

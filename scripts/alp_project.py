@@ -985,6 +985,16 @@ _LIBRARY_WEST_MODULES: dict[str, str] = {
 }
 
 
+# OTA provider -> Zephyr module name the workspace's west.yml must
+# import.  Hawkbit and MCUmgr ship in Zephyr upstream so no entry --
+# only out-of-tree clients need a west.yml line.  See ADR 0009.
+_OTA_PROVIDER_WEST_MODULES: dict[str, str] = {
+    "mender":  "mender-mcu-client",
+    # hawkbit -- in Zephyr upstream
+    # mcumgr  -- in Zephyr upstream
+}
+
+
 def _emit_west_libraries(
     project: dict[str, Any],
     sku_preset: dict[str, Any],
@@ -1015,6 +1025,16 @@ def _emit_west_libraries(
             unsupported.append(lib)
         else:
             modules.append((lib, mod))
+
+    # OTA provider-driven dispatch (ADR 0009 follow-up): out-of-tree
+    # Zephyr OTA clients need their own west.yml entry.  Mender-MCU-client
+    # is the only one today; hawkbit and mcumgr ship in Zephyr upstream.
+    ota = project.get("ota") or {}
+    if isinstance(ota, dict):
+        ota_provider = (ota.get("provider") or "").lower()
+        ota_mod = _OTA_PROVIDER_WEST_MODULES.get(ota_provider)
+        if ota_mod is not None:
+            modules.append((f"ota:{ota_provider}", ota_mod))
 
     lines: list[str] = []
     lines.append("# SPDX-License-Identifier: Apache-2.0")

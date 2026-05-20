@@ -7,6 +7,318 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — OTA Zephyr-client provider-driven dispatch (ADR 0009 resolved) (2026-05-20)
+
+Lands the v0.6 follow-on to ADR 0009: `ota.provider:` is now a
+provider-driven dispatch with real Zephyr-side emit for every
+recognised provider, not just Yocto-side Mender.
+
+- Schema enum widened: `ota.provider: hawkbit` joins `mender` /
+  `mcumgr` / `none` (`metadata/schemas/board.schema.json`).
+- `_slice_alp_conf()` emits per-provider Kconfig on every Zephyr
+  slice when `ota:` is declared:
+  - `mender`  → `CONFIG_MENDER_MCU_CLIENT=y` + server URL / tenant
+    token / artifact name / poll interval (Mender-MCU-client,
+    out-of-tree BSD-3).
+  - `hawkbit` → `CONFIG_HAWKBIT=y` + `CONFIG_HAWKBIT_SHELL=y` +
+    `HAWKBIT_SERVER` + `HAWKBIT_POLL_INTERVAL` (Zephyr upstream).
+  - `mcumgr`  → `CONFIG_MCUMGR=y` + `CONFIG_MCUMGR_GRP_IMG=y` +
+    `CONFIG_MCUMGR_GRP_OS=y`.  Transport (UART / BLE / UDP) stays
+    the app's call.
+- Yocto-side dispatch unchanged: `provider: mender` keeps the
+  existing `MENDER_*` weak-assignments in `local.conf`.
+- west.yml fragment emit (`scripts/alp_project.py` `_emit_west_libraries`)
+  auto-adds a `mender-mcu-client` `name-allowlist:` entry when
+  `ota.provider: mender` is declared.  Hawkbit and MCUmgr are
+  Zephyr-upstream so no west.yml change is needed.
+- Validator rule 1 (P2.3) relaxed for the new dispatch:
+  - `provider: mender` accepts EITHER a Yocto OR a Zephyr core
+    (was Yocto-only).
+  - `provider: hawkbit` requires at least one Zephyr core.
+  - `provider: mcumgr` requires at least one Zephyr core.
+  Errors point at the offending rule with the resolved-dispatch
+  hint.
+- Tests: 6 new cases under `tests/scripts/test_alp_orchestrate.py`
+  (mender-on-zephyr ok, mender-with-no-target rejected, hawkbit
+  requires zephyr, hawkbit Kconfig emit shape, mcumgr requires
+  zephyr, mcumgr SMP Kconfig emit).  Pre-existing
+  `mender_without_yocto_rejected` test rewritten to assert the
+  new "ok" behaviour.
+- Docs: `docs/board-config.md` § "OTA" rewritten with the
+  per-provider emit matrix + validator rule listing.
+
+### Added — per-library HW-backend profile coverage (25 profiles) (2026-05-20)
+
+**Priority 2.2 of the v0.6 milestone lands as a regression guard.**
+All 25 libraries enumerated in `cores.<id>.libraries:` in
+`metadata/schemas/board.schema.json` already ship a
+`metadata/library-profiles/<libname>/hw-backends.yaml` table
+declaring their per-class accelerator binding (crypto, gpu_2d, dma,
+simd, cordic, fft, ml_npu_primary, ...) against the SoM
+preset's `capabilities:` matrix.  Audit revealed full coverage; the
+gap was test-side -- no regression test enforced that the schema
+enum and the on-disk profile set stay in lock-step.
+
+- New `tests/scripts/test_library_profiles.py` (77 parametrised
+  cases) enforces four invariants:
+  1. **Coverage** — every library in the schema enum has a matching
+     `hw-backends.yaml`; every shipped profile directory maps back
+     to an enum entry (no orphans).  The single `cmsis_dsp` →
+     `cmsis-dsp` directory rename is accommodated explicitly,
+     mirroring `_LIBRARY_WEST_MODULES` in `scripts/alp_project.py`.
+  2. **Shape** — each profile carries the required top-level fields
+     (`schema_version`, `library`, `class`, `accelerators`,
+     `sw_fallback`, `verification`) and the `library:` slug matches
+     the directory's normalised name.
+  3. **Binding axis** — each profile surfaces at least one of an
+     `accelerators[]` entry, a `sw_fallback.kconfig:` knob, or a
+     `verification:` block.  Empty profiles are rejected.
+  4. **Kconfig well-formedness** — every emitted `kconfig:` line is
+     a real-looking `CONFIG_<NAME>=<value>` token (y / n / m /
+     quoted string / integer / hex) OR a comment-only sentinel
+     (`# foo: ...`) for header-only libraries.  We intentionally do
+     NOT verify that each symbol exists in Zephyr's Kconfig tree
+     — that's a build-time concern that depends on the pinned
+     Zephyr version.
+
+- `docs/recommended-libraries.md` grows a "HW-backend profiles
+  (per-library accelerator binding)" subsection summarising the
+  coverage matrix (crypto / ML / DSP / FS / graphics / sensor-fusion
+  / industrial / IoT / audio / header-only / test) and pointing at
+  the new regression test.
+
+The 18 libraries carrying at least one `requires_cap:`-gated
+accelerator entry today (every SoM-relevant library): `bearssl`,
+`cmsis_dsp`, `coremqtt_sn`, `gfx_compat`, `libcoap`, `libhelix`,
+`libwebsockets`, `littlefs`, `lvgl`, `madgwick_ahrs`, `mbedtls`,
+`minimp3`, `modbus`, `opus`, `pid`, `tflite_micro`, `tinygsm`,
+`u8g2`.  The remaining 7 (`etl`, `fmt`, `nlohmann_json`, `doctest`,
+`catch2`, `jsmn`, `nanopb`) declare an empty `accelerators:` list —
+their value lives in the pure-SW path with no accelerator class
+to bind.
+
+No source / loader / data changes outside the test + docs +
+CHANGELOG.  Existing 402-test suite still green (now 479 with the
+77 new parametrised cases).
+
+### Added — HiL coverage for `boot:` / `memory:` / `power:` / `diagnostics.modules:` (2026-05-20)
+
+- Four new portable HiL specs under `tests/hil/_common/`, one per
+  declarative board.yaml block landed at schema level in PR #3.
+  Each spec asserts the orchestrator's CONFIG_* emit actually reaches
+  real silicon (MCUboot is the first boot stage; CONFIG_MAIN_STACK_SIZE
+  shows up in the runtime trace; PM subsystem suspend/resume cycle
+  fires from a declared wakeup source; per-module log levels filter):
+  - `boot_mcuboot.yaml`        — covers `boot:`
+  - `memory_stacks.yaml`       — covers `cores.<id>.memory:`
+  - `power_sleep_wake.yaml`    — covers `cores.<id>.power:`
+    (flags `pending_hardware_support: deep-sleep-current-draw` — the
+    AEN HiL rig doesn't carry an inline ammeter yet; the spec falls
+    back to serial-trace assertions)
+  - `diagnostics_modules.yaml` — covers `diagnostics.modules:`
+- Host-side cross-check at `tests/scripts/test_hil_blocks_coverage.py`
+  (23 tests) validates each spec parses + the matching emit code
+  produces the CONFIG_* lines the spec claims to observe.  A schema
+  field the emit silently drops fails CI on a normal machine, before
+  the HiL runner ever sees it.
+- `.github/workflows/nightly-aen-hil.yml` now invokes
+  `tests/hil/run_smoke.py` against `tests/hil/aen701-evk/` after the
+  existing ztest build, picking up the new specs automatically via
+  the `_common/` discovery flow.
+- `tests/hil/README.md` documents the block-coverage convention and
+  the `pending_hardware_support:` flag.
+
+### Added — `storage:` block: deterministic flash-partition allocator + DTS/Kconfig emit (2026-05-20)
+
+Closes the first v0.6 schema-only gap: `storage:` lands its real
+emit pipeline so the schema-authoritative partitions become
+build-system artefacts.
+
+- **New resolver** `resolve_storage_partitions()` in
+  `scripts/alp_orchestrate.py` allocates physical offsets for every
+  `storage[]` entry, name-sorted and page-aligned to 4 KiB within
+  each `flash_device:`.  Mirrors the IPC carve-out pattern: blocked
+  entries (TBD capacity, unknown device, page-misaligned offset,
+  sibling overlap) land in `system-manifest.yaml` with `status:
+  blocked` + `reason:` so reviewers see the gap.  Byte-stable
+  allocation across rebuilds (per resolved design Q on storage
+  address determinism — "pin in orchestrator").
+- **Schema additive:** new optional `storage[].offset_kib:` (integer,
+  4 KiB-aligned) — explicit offset override for partitions that need
+  to coexist with bootloader-managed slots or migrate a legacy
+  layout.  When supplied, the allocator does NOT shift its
+  high-water mark, so the bump-allocated siblings stay byte-stable.
+  Also new optional `memory_region.dt_label:` on the SoM preset
+  schema for regions whose Zephyr DT label differs from the SDK
+  name (defaults to the region `name`).
+- **New emitters:**
+  - `emit_dts_partitions(project)` → `dts-partitions.dtsi` (a
+    DTS overlay decorating `&<dt_label>` with a `partitions
+    { compatible = "fixed-partitions"; ... }` child node carrying
+    `label = "<name>";` and `reg = <offset size>;` per partition).
+    Apps reach partitions via Zephyr's
+    `FIXED_PARTITION_ID(<name>_partition)`.
+  - `emit_storage_mounts_c(project)` → optional static
+    `fs_mount_t alp_storage_mounts[]` table for boot-time iteration.
+    Per-fs declarations (`FS_LITTLEFS_DECLARE_DEFAULT_CONFIG`,
+    `FATFS`, `FS_EXT2`) emitted under `/* clang-format off */`.
+  - Per-fs Kconfig in `_slice_alp_conf()`: `CONFIG_FILE_SYSTEM=y`
+    plus the matching `CONFIG_FILE_SYSTEM_LITTLEFS=y` /
+    `CONFIG_FAT_FILESYSTEM_ELM=y` / `CONFIG_FILE_SYSTEM_EXT2=y`
+    + per-littlefs partition `CONFIG_FS_LITTLEFS_PARTITION_<NAME>=y`.
+- **CLI:** `python3 scripts/alp_orchestrate.py --emit dts-partitions
+  | storage-mounts-c` — two new emit modes for inspecting the
+  resolved layout.  `Orchestrator._materialise_shared()` now writes
+  `build/generated/dts-partitions.dtsi` alongside the existing
+  `dts-reservations.dtsi`.
+- **Cross-field validation:** `load_board_yaml()` rejects typoed
+  `flash_device:` references at parse time with the list of known
+  devices for the project's SoM (memory_map regions + ospi keys);
+  duplicate partition names within `storage:` error eagerly.
+- **System manifest:** `storage:` round-trips through
+  `build/system-manifest.yaml` carrying every resolved partition's
+  `offset_kib`, `size_kib`, `dt_label`, `mount`, and (when blocked)
+  `reason:`.
+- **Tests:** 14 new cases under
+  `tests/scripts/test_alp_orchestrate.py` covering: happy-path
+  allocation, unknown / duplicate / page-misaligned / overflow /
+  overlap blocking, byte-stable determinism, explicit `offset_kib:`
+  override, DTS shape, Kconfig fragment, C mount table, manifest
+  round-trip, and AEN301 OSPI TBD-capacity blocking.  Total
+  orchestrator suite: 28 → 42 cases.
+- **Docs:** `docs/board-config.md` storage section rewritten with
+  the full v0.6 contract (allocator semantics, emit artefacts,
+  inspection commands).  Tutorial 09 (`board.yaml deep dive`) gains
+  a `storage:` block walkthrough with a worked allocation table.
+  Template at `metadata/templates/board.yaml` carries an annotated
+  storage example.
+
+### Added — security.psa: TF-M sysbuild integration + ADR 0013 (2026-05-20)
+
+Pulls the `security.psa:` block from "schema authoritative, emit
+no-op" to "real build-system artefacts".  Scoped to the v0.6
+TF-M cross-core trust-boundary land.
+
+- `scripts/alp_orchestrate.py` gains `emit_tfm_sysbuild_conf(project)`.
+  When `security.psa.tfm: true` it returns a `SB_CONFIG_TFM=y` +
+  `SB_CONFIG_TFM_BUILD_TYPE=<Release|Debug|MinSizeRel>` +
+  `CONFIG_PSA_CRYPTO_PERSISTENT_SLOT_COUNT=<n>` +
+  `CONFIG_PSA_CRYPTO_{ITS,PS}_BACKING_STORE="<name>"` overlay.
+  `attestation_root: optiga_trust_m` adds
+  `CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y` + a comment pointing at
+  the PSA <-> OPTIGA bridge driver.  Returns "" when the block is
+  absent or `tfm: false` (PSA Crypto then runs non-secure-only).
+- `Orchestrator._materialise_shared()` writes the overlay to
+  `build/sysbuild/tfm/tfm.conf` when non-empty; no directory is
+  created otherwise.
+- New CLI mode: `python3 scripts/alp_orchestrate.py
+  --emit tfm-sysbuild-conf` (alongside the existing
+  `system-manifest` / `ipc-contract-h` / `dts-reservations`
+  emitters).
+- `load_board_yaml()` gains three cross-field checks:
+  `security.psa.its_storage:` and `ps_storage:` must resolve to a
+  `storage[].name` OR a SoM `memory_map:` region name; and
+  `attestation_root: optiga_trust_m` is rejected when the SoM
+  preset doesn't ship OPTIGA Trust M (on-module or via
+  `capabilities:`).  Errors point at the offending YAML path.
+- New `boot.build_type:` enum (`Release` | `Debug` | `MinSizeRel`,
+  default `Release`).  Propagates to both the MCUboot and TF-M
+  sysbuild child images so they ship the same flavour.
+- New ADR: [`docs/adr/0013-tfm-boundary-m55-hp-trustzone.md`](docs/adr/0013-tfm-boundary-m55-hp-trustzone.md)
+  -- captures the locked-in cross-core trust-boundary decision
+  (TrustZone-M on M55-HP, not a dedicated M55-HE).  Refines ADR
+  0010.  M55-HE stays available for compute / inference offload.
+- Schema: `security.psa:` description refreshed (the "pre-v0.6 ...
+  emit path is a no-op" note is gone); `boot.build_type:`
+  documented.  Template `metadata/templates/board.yaml` grows a
+  commented `security.psa:` example.
+- Docs: `docs/board-config.md` §PSA Crypto + TF-M now describes
+  the v0.6 emit contract; `docs/security-audit-plan.md` gains a
+  short TF-M trust boundary section pointing at ADR 0013.
+- Tests: 11 new cases in
+  `tests/scripts/test_alp_orchestrate.py` covering happy-path
+  emit, schema field round-trip, ITS/PS backing-store reference
+  validation (happy + rejection), attestation-root OPTIGA
+  cross-check, absence-emits-nothing, materialise round-trip, and
+  build-type inheritance.  Full suite: 413 passed / 5 skipped (was
+  402 / 5).
+
+### Added — `extra_libraries:` escape hatch for non-curated libraries (2026-05-20)
+
+`cores.<id>.extra_libraries:` joins `libraries:` (the closed,
+25-entry curated enum) with an open-set escape hatch for libraries
+the SDK doesn't curate -- one-off vendor SDKs, research-only deps,
+or libraries on their way into the curated set.  Each entry MUST
+declare exactly one of:
+
+- `kconfig:` -- inline Kconfig fragment lines emitted verbatim
+  into the slice's `alp.conf`.  Fast path for one-off entries.
+- `profile:` -- path to a `hw-backends.yaml`-style profile file.
+  The loader walks the file with the same silicon / soc_family /
+  requires_cap matcher used by curated libraries; first match per
+  `class:` wins, `sw_fallback:` always emits.
+
+The "exactly-one" rule is enforced by the new
+`_validate_consistency()` pass (see below), along with global
+uniqueness of `name:` across cores and a check that
+`profile:` paths resolve to a real file.  Names that collide with
+the curated `libraries:` enum are rejected -- the curated path is
+the right way to wire curated libraries.
+
+Schema lives in `metadata/schemas/board.schema.json` under
+`cores.<id>.extra_libraries`; reference doc at
+`docs/board-config.md` § `extra_libraries:` and tutorial coverage
+at `docs/tutorials/09-board-yaml-deep-dive.md` § extra_libraries.
+
+### Added — cross-field validator pass with 5 rules (2026-05-20)
+
+`scripts/alp_orchestrate.py:_validate_consistency()` runs after
+the JSON Schema pass and the per-core loader rules.  Five rules,
+two warnings:
+
+1. (ERROR) `ota.provider: mender` requires at least one
+   `cores.<id>.os: yocto` slice.  Mender server-mode is a
+   Yocto-only flow today; the Zephyr-side dispatch
+   (Mender-MCU-client) lands separately per ADR 0009.
+2. (ERROR) `boot.signing.algorithm:` must be supported by the SoM
+   family.  Per-family allow-lists: Alif Ensemble (with OPTIGA
+   Trust M attestation root) `ecdsa_p256` / `ed25519`; Renesas
+   RZ/V2N + NXP i.MX 9 `ecdsa_p256` / `rsa2048` / `rsa3072`.
+   Unknown families fall through (no capability-block enforcement).
+3. (ERROR) `cores.<id>.iot.tls: true` requires `mbedtls` or
+   `bearssl` in `libraries:` (curated) or `extra_libraries:`
+   (open-set).
+4. (WARN) `cores.<id>.inference.default_arena_kib >
+   cores.<id>.memory.heap_kib` -- inference may OOM.  Build
+   continues; stderr `WARN: ...` line emitted.
+5. (WARN) `cores.<id>.power.sleep_mode != disabled` with no
+   `wakeup_sources:` declared -- device will sleep but cannot
+   wake.
+
+Reference doc: `docs/board-config.md` § Cross-field validation.
+Two in-repo examples (`iot-fleet-ota`, `iot-dashboard`,
+`production-deployment`) updated to satisfy rule 3 by declaring
+`mbedtls` in `libraries:`.
+
+### Added — examples adopting v0.6 declarative blocks (iot-fleet-ota promotion + production-deployment + power-managed-sensor) (2026-05-20)
+
+- `examples/iot-fleet-ota/board.yaml` promoted from prose-only OTA
+  narration to declarative `boot:` + `ota:` blocks (MCUboot +
+  ECDSA-P256 + Mender HTTPS-poll with `${MENDER_TENANT_TOKEN}`
+  placeholder).  README rewritten with the "What lands
+  declaratively in v0.6" walkthrough.
+- `examples/production-deployment/board.yaml` refactored into the
+  SDK's declarative-stack flagship: every v0.6 block applied at
+  production stance (`boot:`/`ota:`/`security.psa:`/`storage:`/
+  `cores.<id>.memory:`/`cores.<id>.power:`/`diagnostics.modules:`)
+  on AEN701 with TF-M + OPTIGA-rooted attestation.  README gains
+  a full per-block walkthrough.
+- `examples/power-managed-sensor/` (new): reference for the v0.6
+  `cores.<id>.power:` block.  AEN301 + M55-HE deep sleep with
+  `wakeup_sources: [uart, gpio_int, rtc]` covering the periodic
+  sample / motion-event / console-debug duty cycle.  Memory tuned
+  for the short-lived per-wake task (4 KiB stack, 16 KiB heap).
+
 ### Changed — board.yaml flatten + carrier→board rename + 7 declarative blocks (2026-05-20)
 
 **Breaking schema changes (no migration script — every in-repo

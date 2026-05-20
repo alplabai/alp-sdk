@@ -105,6 +105,12 @@ class Slice:
     toolchain: Optional[str] = None
     peripherals: list[str] = field(default_factory=list)
     libraries: list[str] = field(default_factory=list)
+    # Open-set escape hatch for libraries the SDK doesn't curate.  Each
+    # entry is a dict with `name:` + (exclusively) `kconfig:` OR
+    # `profile:`; loader's _validate_consistency() enforces the
+    # exactly-one and uniqueness rules.  See docs/board-config.md
+    # `extra_libraries:`.
+    extra_libraries: list[dict[str, Any]] = field(default_factory=list)
     inference: dict[str, Any] = field(default_factory=dict)
     iot: dict[str, Any] = field(default_factory=dict)
     memory: dict[str, Any] = field(default_factory=dict)   # stack_kib, heap_kib, isr_stack_kib
@@ -218,6 +224,67 @@ class ResolvedCarveOut:
 
 
 @dataclass
+class StorageEntry:
+    """Raw storage-partition declaration straight from board.yaml.
+
+    Mirrors the shape under `storage:` in board.schema.json; the
+    orchestrator turns these into ResolvedPartitions in
+    `resolve_storage_partitions()`.
+    """
+
+    name: str
+    size_kib: int
+    fs: str                  # littlefs | fat | ext4 | raw
+    mount: Optional[str] = None
+    flash_device: Optional[str] = None
+    offset_kib: Optional[int] = None     # explicit offset override
+
+
+@dataclass
+class ResolvedPartition:
+    """A StorageEntry after allocation against the SoM flash devices.
+
+    `status` follows the IPC carve-out convention: "ok" for a fully
+    resolved partition; "blocked" when the SoM metadata has TBDs
+    (flash device base/size unset) or the entry can't be satisfied
+    (unknown flash_device, page-misaligned offset, overlap with a
+    sibling partition).  Blocked entries land in `system-manifest.yaml`
+    with `reason: ...` so reviewers see the gap.
+    """
+
+    name: str
+    fs: str
+    flash_device: str        # original SDK name from board.yaml
+    dt_label: str            # Zephyr DT label resolved by the loader
+    base_kib: int            # offset within the flash device, in KiB; 0 when blocked
+    size_kib: int
+    mount: Optional[str] = None
+    status: str = "ok"       # "ok" | "blocked"
+    reason: Optional[str] = None
+
+    def to_manifest_entry(self) -> dict[str, Any]:
+        if self.status == "blocked":
+            return {
+                "name":         self.name,
+                "fs":           self.fs,
+                "flash_device": self.flash_device,
+                "status":       "blocked",
+                "reason":       self.reason or "",
+            }
+        entry: dict[str, Any] = {
+            "name":          self.name,
+            "fs":            self.fs,
+            "flash_device":  self.flash_device,
+            "dt_label":      self.dt_label,
+            "offset_kib":    self.base_kib,
+            "size_kib":      self.size_kib,
+        }
+        if self.mount:
+            entry["mount"] = self.mount
+        return entry
+
+
+@dataclass
 class BoardProject:
     """Resolved board.yaml project ready for fan-out."""
 
@@ -235,6 +302,8 @@ class BoardProject:
     features: dict[str, Any] = field(default_factory=dict)
     boot: dict[str, Any] = field(default_factory=dict)
     ota: dict[str, Any] = field(default_factory=dict)
+    storage: list[StorageEntry] = field(default_factory=list)
+    security: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -245,11 +314,12 @@ class SystemManifest:
     project: BoardProject
     slices: list[Slice]
     carve_outs: list[ResolvedCarveOut]
+    partitions: list[ResolvedPartition] = field(default_factory=list)
     boot_order: list[dict[str, Any]] = field(default_factory=list)
     helper_mcus: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "schema_version": 1,
             "generated_by":   "scripts/alp_orchestrate.py",
             "hw_info": {
@@ -264,6 +334,9 @@ class SystemManifest:
             "helper_mcus": list(self.helper_mcus),
             "boot_order":  list(self.boot_order),
         }
+        if self.partitions:
+            out["storage"] = [p.to_manifest_entry() for p in self.partitions]
+        return out
 
 
 # ---------------------------------------------------------------------
@@ -428,11 +501,234 @@ def _slice_from_resolved(
         toolchain=entry.get("toolchain"),
         peripherals=list(entry.get("peripherals") or []),
         libraries=list(entry.get("libraries") or []),
+        extra_libraries=[dict(e) for e in (entry.get("extra_libraries") or [])],
         inference=dict(entry.get("inference") or {}),
         iot=dict(entry.get("iot") or {}),
         memory=dict(entry.get("memory") or {}),
         power=dict(entry.get("power") or {}),
     )
+
+
+# ---------------------------------------------------------------------
+# Cross-field validator helpers (P2.1 + P2.3 of v0.6).
+# ---------------------------------------------------------------------
+
+
+# Curated `libraries:` enum, mirrored from
+# metadata/schemas/board.schema.json `cores.<id>.libraries.items.enum`.
+# Used by _validate_consistency() to reject `extra_libraries:` slugs
+# that collide with the curated set (the curated library MUST be
+# declared via `libraries:` -- the escape hatch is for non-curated
+# entries only).
+_CURATED_LIBRARIES: frozenset[str] = frozenset({
+    "etl", "fmt", "nlohmann_json", "doctest", "lvgl",
+    "mbedtls", "cmsis_dsp", "littlefs", "tflite_micro",
+    "u8g2", "gfx_compat", "madgwick_ahrs", "pid", "modbus",
+    "coremqtt_sn", "libcoap", "tinygsm", "nanopb",
+    "libwebsockets", "jsmn", "bearssl", "minimp3", "opus",
+    "libhelix", "catch2",
+})
+
+
+def _boot_signing_supported_for_family(
+    family: str,
+) -> Optional[frozenset[str]]:
+    """Return the allowed `boot.signing.algorithm:` values for a SoM
+    family, or None when the family is unknown (caller accepts any
+    schema-enum value).
+
+    Per the v0.6 P2.3 cross-field-validator pass:
+      - Alif Ensemble (with OPTIGA Trust M as attestation root):
+        `ecdsa_p256`, `ed25519` only.  RSA is excluded -- the OPTIGA
+        slot type paired with the AEN secure-boot flow is ECC-only.
+      - Renesas RZ/V2N (+ V2N + DEEPX): `ecdsa_p256`, `rsa2048`,
+        `rsa3072`.  ed25519 is excluded (not in the U-Boot
+        fit-signature stack used on V2N today).
+      - NXP i.MX 9x: `ecdsa_p256`, `rsa2048`, `rsa3072`.
+      - Unknown families: None (validator falls through to the schema
+        enum -- don't block on missing capability data for
+        in-development presets).
+    """
+    f = (family or "").lower()
+    if f.startswith("alif-ensemble"):
+        return frozenset({"ecdsa_p256", "ed25519"})
+    if f.startswith("renesas-rzv2n"):
+        return frozenset({"ecdsa_p256", "rsa2048", "rsa3072"})
+    if f.startswith("nxp-imx9"):
+        return frozenset({"ecdsa_p256", "rsa2048", "rsa3072"})
+    return None
+
+
+# TLS providers acceptable for `cores.<id>.iot.tls: true` (rule 3).
+# A library named `mbedtls` or `bearssl` in either `libraries:` or
+# `extra_libraries:` satisfies the requirement.
+_TLS_PROVIDERS: frozenset[str] = frozenset({"mbedtls", "bearssl"})
+
+
+def _validate_consistency(project: "BoardProject") -> None:
+    """Cross-field validation that the schema can't express cleanly.
+
+    Runs after the project is fully assembled by `load_board_yaml()`.
+    Raises `OrchestratorError` for hard violations; emits stderr
+    `WARN: ...` lines for soft signals (rules 4 + 5).
+
+    Rules (v0.6 P2.3):
+
+    1. `ota.provider: mender` requires at least one
+       `cores.<id>.os: yocto` slice.  Reason: server-mode Mender is a
+       Yocto-only flow today; the Zephyr-side dispatch
+       (Mender-MCU-client) lands separately per ADR 0009.
+    2. `boot.signing.algorithm:` must be in the SoM family's supported
+       set (see `_boot_signing_supported_for_family`).  Unknown
+       families pass through (don't block on missing capability data).
+    3. `cores.<id>.iot.tls: true` requires `libraries:` (curated) OR
+       `extra_libraries:` (open-set) to include `mbedtls` or `bearssl`.
+    4. WARNING (not error): `cores.<id>.inference.default_arena_kib`
+       larger than `cores.<id>.memory.heap_kib`; inference may OOM.
+    5. WARNING (not error): `cores.<id>.power.sleep_mode != disabled`
+       with no `wakeup_sources:` declared; device will sleep but can't
+       wake.
+
+    Also enforces the `extra_libraries:` invariants the schema can't
+    cleanly express (P2.1):
+
+      - Exactly one of `kconfig:` / `profile:` per entry.
+      - Names globally unique across every core's `extra_libraries:`.
+      - Names don't collide with the curated `libraries:` enum.
+      - `profile:` paths resolve to a real file (repo-relative).
+    """
+    # ---- extra_libraries invariants (P2.1) -----------------------
+    seen_names: dict[str, str] = {}    # name -> first core_id seen on
+    for core_id, slice_ in project.cores.items():
+        for idx, entry in enumerate(slice_.extra_libraries):
+            name = entry.get("name")
+            if not isinstance(name, str) or not name:
+                raise OrchestratorError(
+                    f"core '{core_id}' extra_libraries[{idx}]: missing "
+                    f"or non-string `name:`")
+            has_kc = "kconfig" in entry and entry.get("kconfig") is not None
+            has_pf = "profile" in entry and entry.get("profile") is not None
+            if has_kc == has_pf:
+                # Both set OR both unset -- reject.
+                raise OrchestratorError(
+                    f"core '{core_id}' extra_libraries entry '{name}' "
+                    f"must declare exactly one of `kconfig:` or "
+                    f"`profile:` (got "
+                    f"{'both' if has_kc and has_pf else 'neither'}).  "
+                    f"Inline `kconfig:` is the fast path; `profile:` "
+                    f"points at a hw-backends.yaml-style file.")
+            if name in _CURATED_LIBRARIES:
+                raise OrchestratorError(
+                    f"core '{core_id}' extra_libraries entry '{name}' "
+                    f"collides with the curated `libraries:` enum; "
+                    f"declare curated libraries via "
+                    f"`cores.{core_id}.libraries:` instead.")
+            if name in seen_names:
+                raise OrchestratorError(
+                    f"core '{core_id}' extra_libraries entry '{name}' "
+                    f"collides with the same name on core "
+                    f"'{seen_names[name]}'; extra_libraries names "
+                    f"must be globally unique across all cores.")
+            seen_names[name] = core_id
+            if has_pf:
+                prof = entry.get("profile")
+                if not isinstance(prof, str) or not prof:
+                    raise OrchestratorError(
+                        f"core '{core_id}' extra_libraries entry "
+                        f"'{name}' has non-string `profile:`")
+                prof_path = (REPO / prof).resolve()
+                if not prof_path.is_file():
+                    raise OrchestratorError(
+                        f"core '{core_id}' extra_libraries entry "
+                        f"'{name}' `profile: {prof}` does not resolve "
+                        f"to a file at {prof_path}")
+
+    # ---- Rule 1: ota.provider requires a compatible slice -------
+    # Provider-driven dispatch (ADR 0009 follow-up resolved):
+    #   mender   -> Yocto (server-mode) OR Zephyr (Mender-MCU-client)
+    #   hawkbit  -> Zephyr (upstream Hawkbit DDI client)
+    #   mcumgr   -> Zephyr (upstream MCUmgr / SMP)
+    ota = project.ota or {}
+    provider = (ota.get("provider") or "").lower() if isinstance(ota, dict) else ""
+    if provider == "mender":
+        has_target = any(s.os in ("yocto", "zephyr")
+                         for s in project.cores.values())
+        if not has_target:
+            raise OrchestratorError(
+                "ota.provider: mender requires at least one "
+                "cores.<id>.os: yocto (server-mode Mender) OR "
+                "cores.<id>.os: zephyr (Mender-MCU-client); none "
+                "found.  See ADR 0009 for the provider-driven "
+                "dispatch.")
+    elif provider == "hawkbit":
+        if not any(s.os == "zephyr" for s in project.cores.values()):
+            raise OrchestratorError(
+                "ota.provider: hawkbit requires at least one "
+                "cores.<id>.os: zephyr (Hawkbit DDI client is in "
+                "Zephyr upstream); none found.")
+    elif provider == "mcumgr":
+        if not any(s.os == "zephyr" for s in project.cores.values()):
+            raise OrchestratorError(
+                "ota.provider: mcumgr requires at least one "
+                "cores.<id>.os: zephyr (MCUmgr is Zephyr's SMP "
+                "transport for OTA); none found.")
+
+    # ---- Rule 2: boot.signing.algorithm supported by SoM family --
+    boot = project.boot or {}
+    sign = (boot.get("signing") or {}) if isinstance(boot, dict) else {}
+    algo = ((sign.get("algorithm") or "").lower()
+            if isinstance(sign, dict) else "")
+    if algo:
+        family = (project.som_preset.get("family") or "")
+        supported = _boot_signing_supported_for_family(family)
+        if supported is not None and algo not in supported:
+            raise OrchestratorError(
+                f"boot.signing.algorithm: {algo} is not supported by "
+                f"SoM family '{family}'; supported algorithms for "
+                f"this family: {sorted(supported)}.  Edit "
+                f"boot.signing.algorithm or pick a SoM family that "
+                f"supports {algo}.")
+
+    # ---- Rule 3: iot.tls: true requires mbedtls/bearssl ----------
+    for core_id, slice_ in project.cores.items():
+        if not (slice_.iot or {}).get("tls"):
+            continue
+        libs = set(slice_.libraries or [])
+        extras = {e.get("name") for e in slice_.extra_libraries
+                  if isinstance(e.get("name"), str)}
+        if not (libs & _TLS_PROVIDERS) and not (extras & _TLS_PROVIDERS):
+            raise OrchestratorError(
+                f"core '{core_id}' has iot.tls: true but neither "
+                f"`libraries:` nor `extra_libraries:` declares a TLS "
+                f"provider (mbedtls or bearssl).  Add one of these "
+                f"to cores.{core_id}.libraries: (curated) or "
+                f"cores.{core_id}.extra_libraries: (open-set).")
+
+    # ---- Rule 4: inference arena > heap is a WARN ----------------
+    for core_id, slice_ in project.cores.items():
+        arena_kib = (slice_.inference or {}).get("default_arena_kib")
+        heap_kib = (slice_.memory or {}).get("heap_kib")
+        if (isinstance(arena_kib, int) and isinstance(heap_kib, int)
+                and arena_kib > heap_kib):
+            print(
+                f"WARN: cores.{core_id}.inference.default_arena_kib="
+                f"{arena_kib} > cores.{core_id}.memory.heap_kib="
+                f"{heap_kib}; inference may OOM",
+                file=sys.stderr,
+            )
+
+    # ---- Rule 5: sleep_mode != disabled with no wakeup_sources --
+    for core_id, slice_ in project.cores.items():
+        pwr = slice_.power or {}
+        sleep_mode = (pwr.get("sleep_mode") or "disabled").lower()
+        wake = pwr.get("wakeup_sources") or []
+        if sleep_mode != "disabled" and not wake:
+            print(
+                f"WARN: cores.{core_id}.power.sleep_mode={sleep_mode} "
+                f"but no wakeup_sources: declared; device will sleep "
+                f"but cannot wake",
+                file=sys.stderr,
+            )
 
 
 def _enforce_loader_rules(slice_: Slice) -> None:
@@ -655,7 +951,117 @@ def load_board_yaml(path: Path, *,
                     f"match the resolved board '{board_label}'s macros for "
                     f"pad {e1m_pad}: {sorted(macros_by_pad[e1m_pad])}")
 
-    return BoardProject(
+    # 9. Storage partitions (board.yaml `storage:` block).  Parse into
+    # StorageEntry dataclasses + cross-field check: every `flash_device:`
+    # must resolve to either a memory_map region name or an
+    # `on_module.ospi_memories:` key.  Resolution of base addresses /
+    # overlap detection happens in `resolve_storage_partitions()`; the
+    # loader catches typos eagerly because they are cheap to surface
+    # before the build kicks off.
+    storage_raw = project.get("storage") or []
+    storage_entries: list[StorageEntry] = []
+    for idx, item in enumerate(storage_raw):
+        # `raw: true` is the legacy alias for `fs: raw`; the schema
+        # accepts both, the loader normalises.
+        fs = item.get("fs")
+        if fs is None and item.get("raw") is True:
+            fs = "raw"
+        if fs is None:
+            fs = "raw"
+        storage_entries.append(StorageEntry(
+            name=item["name"],
+            size_kib=int(item["size_kib"]),
+            fs=fs,
+            mount=item.get("mount"),
+            flash_device=item.get("flash_device"),
+            offset_kib=(int(item["offset_kib"])
+                        if item.get("offset_kib") is not None else None),
+        ))
+
+    # Cross-field: known flash device set is memory_map names + ospi keys.
+    if storage_entries:
+        known_devices = set(_known_flash_devices(som_preset, METADATA_ROOT))
+        for entry in storage_entries:
+            if entry.flash_device is None:
+                continue   # resolver will block it with a clear reason
+            if entry.flash_device not in known_devices:
+                raise OrchestratorError(
+                    f"board.yaml `storage[{entry.name}].flash_device: "
+                    f"{entry.flash_device}` does not resolve to any "
+                    f"flash device on SoM {sku}.  Known devices: "
+                    f"{sorted(known_devices)}")
+        # Name uniqueness within storage[].
+        names_seen: set[str] = set()
+        for entry in storage_entries:
+            if entry.name in names_seen:
+                raise OrchestratorError(
+                    f"board.yaml `storage:` declares partition "
+                    f"`{entry.name}` more than once; names must be "
+                    f"unique within the project")
+            names_seen.add(entry.name)
+
+    # 10. `security.psa:` cross-field validation.  The schema is
+    # authoritative on field types; this block enforces the references:
+    # ITS/PS storage names must resolve to a `storage[].name` OR a SoM
+    # memory_map region name, and `attestation_root: optiga_trust_m`
+    # requires the SoM to physically ship OPTIGA Trust M.  Errors point
+    # at the offending board.yaml path so the customer can fix it.
+    security_block = dict(project.get("security") or {})
+    psa = dict(security_block.get("psa") or {})
+    if psa:
+        storage_name_set = {e.name for e in storage_entries}
+        try:
+            mem_map = resolve_memory_map(som_preset, METADATA_ROOT)
+        except Exception:                                # noqa: BLE001
+            mem_map = []
+        region_names = {
+            str(r.get("name")) for r in mem_map
+            if isinstance(r, dict) and r.get("name")
+        }
+        valid_refs = storage_name_set | region_names
+
+        def _check_backing_store(field: str) -> None:
+            ref = psa.get(field)
+            if ref is None:
+                return
+            if str(ref) in valid_refs:
+                return
+            raise OrchestratorError(
+                f"board.yaml `security.psa.{field}: {ref}` does not "
+                f"resolve to any `storage[].name` or SoM "
+                f"`memory_map[].name`.  Known storage partitions: "
+                f"{sorted(storage_name_set) or '[]'}; "
+                f"known SoM memory regions: "
+                f"{sorted(region_names) or '[]'}.")
+
+        _check_backing_store("its_storage")
+        _check_backing_store("ps_storage")
+
+        att_root = psa.get("attestation_root")
+        if att_root == "optiga_trust_m":
+            on_module = som_preset.get("on_module") or {}
+            chip_set: set[str] = set()
+            for key, val in on_module.items():
+                if key == "ospi_memories":
+                    continue
+                if isinstance(val, str):
+                    chip_set.add(val)
+            capabilities = som_preset.get("capabilities") or {}
+            has_optiga = (
+                "optiga_trust_m" in chip_set
+                or bool(capabilities.get("optiga_trust_m"))
+            )
+            if not has_optiga:
+                raise OrchestratorError(
+                    f"board.yaml `security.psa.attestation_root: "
+                    f"optiga_trust_m` requires the SoM preset to "
+                    f"ship OPTIGA Trust M on-module, but SoM SKU "
+                    f"{sku} does not list it under `on_module:` or "
+                    f"`capabilities:`.  Pick `tfm_internal` or "
+                    f"`none`, or switch to a SoM that carries OPTIGA "
+                    f"(AEN family).")
+
+    out = BoardProject(
         sku=sku,
         hw_rev=hw_rev or som_preset.get("default_hw_rev"),
         board_name=board_name,
@@ -670,8 +1076,17 @@ def load_board_yaml(path: Path, *,
         features=dict(project.get("features") or {}),
         boot=dict(project.get("boot") or {}),
         ota=dict(project.get("ota") or {}),
+        storage=storage_entries,
+        security=security_block,
         raw=project,
     )
+
+    # 11. Cross-field consistency pass (v0.6 P2.3).  Runs last so it
+    # can inspect the fully-assembled project + every per-core
+    # extra_libraries: entry the schema couldn't validate cleanly.
+    _validate_consistency(out)
+
+    return out
 
 
 # ---------------------------------------------------------------------
@@ -952,6 +1367,269 @@ def resolve_carve_outs(
 
 
 # ---------------------------------------------------------------------
+# Storage partition resolver
+# ---------------------------------------------------------------------
+
+
+def _known_flash_devices(
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+) -> list[str]:
+    """Enumerate every flash-device name a `storage[].flash_device:` may
+    reference for the given SoM preset.
+
+    Today this is the union of:
+      - `memory_map:` region names (explicit override or derived from
+        the SoC variant), AND
+      - `on_module.ospi_memories:` keys (when declared on the SoM).
+
+    Kept as a list so the loader's "did you mean..." message can sort
+    it deterministically.
+    """
+    names: set[str] = set()
+    for region in resolve_memory_map(som_preset, metadata_root):
+        n = region.get("name")
+        if isinstance(n, str):
+            names.add(n)
+    om = som_preset.get("on_module") or {}
+    ospi = om.get("ospi_memories") or {}
+    if isinstance(ospi, dict):
+        for k in ospi.keys():
+            if isinstance(k, str):
+                names.add(k)
+    return sorted(names)
+
+
+def _resolve_flash_device(
+    flash_device: str,
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Resolve a board.yaml `flash_device:` reference to a device descriptor.
+
+    Returns `(descriptor, None)` on success; `(None, reason)` when the
+    device is known but cannot be allocated against (TBD capacity).
+    The descriptor carries:
+        name        -- the SDK device name (verbatim from board.yaml)
+        dt_label    -- the Zephyr DT label to decorate
+        size_bytes  -- capacity in bytes (None when unresolvable)
+
+    Address allocation is offset-within-device; the descriptor does
+    NOT carry a physical base because Zephyr's flash-mapping layer
+    derives that from the DT controller node.  The emitted overlay
+    references `&<dt_label>` and lets Zephyr handle the physical mapping.
+    """
+    # memory_map: region match first (covers the auto-derived MRAM /
+    # SRAM region table from resolve_memory_map()).
+    for region in resolve_memory_map(som_preset, metadata_root):
+        if region.get("name") != flash_device:
+            continue
+        size_bytes = _region_size_bytes(region)
+        if size_bytes is None:
+            return None, (
+                f"flash device '{flash_device}' resolves to memory_map "
+                f"region but size_mib / size_kib is unset or TBD on "
+                f"SoM {som_preset.get('sku', '<unknown>')}; the SoM "
+                f"hasn't been HW-mapped yet")
+        dt_label = (region.get("dt_label")
+                    if isinstance(region.get("dt_label"), str)
+                    else flash_device)
+        return {
+            "name":       flash_device,
+            "dt_label":   dt_label,
+            "size_bytes": size_bytes,
+        }, None
+
+    # on_module.ospi_memories: key match.
+    om = som_preset.get("on_module") or {}
+    ospi = om.get("ospi_memories") or {}
+    if isinstance(ospi, dict) and flash_device in ospi:
+        entry = ospi[flash_device] or {}
+        cap = entry.get("capacity_mbit")
+        if isinstance(cap, str) and cap.strip().upper() == "TBD":
+            return None, (
+                f"on_module.ospi_memories.{flash_device}.capacity_mbit "
+                f"is TBD on SoM {som_preset.get('sku', '<unknown>')}; "
+                f"fill the value or move the storage entry to a sized "
+                f"flash device")
+        if not isinstance(cap, int):
+            return None, (
+                f"on_module.ospi_memories.{flash_device}.capacity_mbit "
+                f"is missing on SoM {som_preset.get('sku', '<unknown>')}; "
+                f"the storage allocator needs an authoritative capacity")
+        dt_label = (entry.get("dt_label")
+                    if isinstance(entry.get("dt_label"), str)
+                    else flash_device)
+        # capacity_mbit is megabits; convert to bytes.
+        size_bytes = int(cap) * 1024 * 1024 // 8
+        return {
+            "name":       flash_device,
+            "dt_label":   dt_label,
+            "size_bytes": size_bytes,
+        }, None
+
+    # Unknown device — the loader catches this earlier, but defend
+    # in depth in case a resolver is called with a hand-built project.
+    return None, (
+        f"flash device '{flash_device}' is neither a memory_map region "
+        f"nor an on_module.ospi_memories key on SoM "
+        f"{som_preset.get('sku', '<unknown>')}")
+
+
+def _blocked_partition(
+    entry: StorageEntry,
+    reason: str,
+) -> ResolvedPartition:
+    """Project a StorageEntry into a blocked ResolvedPartition."""
+    return ResolvedPartition(
+        name=entry.name,
+        fs=entry.fs,
+        flash_device=entry.flash_device or "",
+        dt_label="",
+        base_kib=0,
+        size_kib=entry.size_kib,
+        mount=entry.mount,
+        status="blocked",
+        reason=reason,
+    )
+
+
+def resolve_storage_partitions(
+    project: BoardProject,
+) -> list[ResolvedPartition]:
+    """Allocate physical offsets for every storage[] entry.
+
+    Algorithm (mirrors `resolve_carve_outs()`):
+      1. Group entries by `flash_device:` (entries without one block
+         immediately; the loader normally catches that, but this is
+         the resolver's failure mode for hand-built projects).
+      2. Within each group, sort by name for determinism (an explicit
+         `offset_kib:` doesn't change sort order — it's an override
+         the allocator simply respects).
+      3. For each entry: if `offset_kib:` is set, honour it (page-
+         aligned check; overlap check against prior entries).  Else
+         allocate bottom-up from the current high-water mark, page-
+         aligned.
+      4. Block on capacity overflow, TBD device, page-misaligned
+         offset, or sibling overlap.  Blocked entries land in the
+         manifest with `status: blocked` + `reason:` so reviewers see
+         the gap; the slice build trips when the DTS overlay is
+         consumed.
+
+    Spec note: byte-stable OTA images require the orchestrator to pin
+    addresses (resolved in design Q1 for v0.6 -- option "Pin in
+    orchestrator").  Customers get reproducible per-rebuild addresses
+    by declaring stable `name:` slugs; partitions stay at the same
+    offset across rebuilds as long as their relative order doesn't
+    change.  Explicit `offset_kib:` is the escape hatch.
+    """
+    if not project.storage:
+        return []
+
+    # Group by flash device, preserving original order for the
+    # downstream resolver (we re-sort for allocation determinism below).
+    by_device: dict[str, list[StorageEntry]] = {}
+    no_device: list[StorageEntry] = []
+    for entry in project.storage:
+        if not entry.flash_device:
+            no_device.append(entry)
+        else:
+            by_device.setdefault(entry.flash_device, []).append(entry)
+
+    resolved: list[ResolvedPartition] = []
+
+    for entry in no_device:
+        resolved.append(_blocked_partition(entry, (
+            f"storage entry '{entry.name}' has no flash_device: "
+            f"declared; add one referencing a SoM memory_map region "
+            f"or an on_module.ospi_memories key")))
+
+    # Iterate flash devices in alphabetical order; within each device,
+    # entries are name-sorted for byte-stable allocation.
+    for device_name in sorted(by_device.keys()):
+        descriptor, block_reason = _resolve_flash_device(
+            device_name, project.som_preset, METADATA_ROOT)
+        if descriptor is None:
+            for entry in by_device[device_name]:
+                resolved.append(_blocked_partition(
+                    entry, block_reason or "flash device unresolvable"))
+            continue
+
+        dt_label = descriptor["dt_label"]
+        capacity_bytes = descriptor["size_bytes"]
+        # Page-aligned high-water mark; sibling partitions allocate
+        # bottom-up from offset 0.  Page = 4 KiB matches the IPC
+        # carve-out allocator; storage erase blocks on every silicon
+        # the SDK targets are 4 KiB-or-larger multiples.
+        high_water_bytes = 0
+        # Track allocated [lo, hi) ranges so explicit `offset_kib:`
+        # overrides can be checked against sibling allocations even
+        # when the bump allocator would have placed them differently.
+        allocated: list[tuple[int, int, str]] = []   # (lo, hi, name)
+
+        entries_sorted = sorted(
+            by_device[device_name], key=lambda e: e.name)
+
+        for entry in entries_sorted:
+            size_bytes = entry.size_kib * 1024
+            size_aligned = ((size_bytes + _PAGE - 1) // _PAGE) * _PAGE
+
+            if entry.offset_kib is not None:
+                base_bytes = entry.offset_kib * 1024
+                if base_bytes % _PAGE != 0:
+                    resolved.append(_blocked_partition(entry, (
+                        f"storage entry '{entry.name}' explicit "
+                        f"offset_kib={entry.offset_kib} is not page-"
+                        f"aligned (4 KiB)")))
+                    continue
+            else:
+                base_bytes = high_water_bytes
+
+            top_bytes = base_bytes + size_aligned
+            if top_bytes > capacity_bytes:
+                resolved.append(_blocked_partition(entry, (
+                    f"storage entry '{entry.name}' ({entry.size_kib} "
+                    f"KiB at offset {base_bytes // 1024} KiB) overruns "
+                    f"flash device '{device_name}' "
+                    f"(capacity {capacity_bytes // 1024} KiB)")))
+                continue
+
+            # Sibling-overlap check (only meaningful when offset_kib was
+            # supplied; the bump allocator can't overlap with itself).
+            overlap_with: Optional[str] = None
+            for lo, hi, peer_name in allocated:
+                if not (top_bytes <= lo or base_bytes >= hi):
+                    overlap_with = peer_name
+                    break
+            if overlap_with is not None:
+                resolved.append(_blocked_partition(entry, (
+                    f"storage entry '{entry.name}' explicit "
+                    f"offset_kib={entry.offset_kib} overlaps sibling "
+                    f"partition '{overlap_with}' on device "
+                    f"'{device_name}'")))
+                continue
+
+            allocated.append((base_bytes, top_bytes, entry.name))
+            if entry.offset_kib is None:
+                # Only bump the allocator when we used it; explicit
+                # offsets don't shift the high-water mark (they may be
+                # below it deliberately, e.g. to reserve a low slot).
+                high_water_bytes = top_bytes
+
+            resolved.append(ResolvedPartition(
+                name=entry.name,
+                fs=entry.fs,
+                flash_device=device_name,
+                dt_label=dt_label,
+                base_kib=base_bytes // 1024,
+                size_kib=size_aligned // 1024,
+                mount=entry.mount,
+            ))
+
+    return resolved
+
+
+# ---------------------------------------------------------------------
 # Emitters
 # ---------------------------------------------------------------------
 
@@ -1061,6 +1739,170 @@ def emit_dts_reservations(project: BoardProject) -> str:
     return "\n".join(lines)
 
 
+def emit_dts_partitions(project: BoardProject) -> str:
+    """Generate dts-partitions.dtsi from board.yaml `storage:`.
+
+    The overlay decorates each referenced flash device with a
+    `partitions { ... }` child node carrying every resolved
+    partition for that device.  Zephyr's `fixed-partitions` binding
+    consumes the result; downstream Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS
+    etc., emitted by `_slice_alp_conf()`) wires the filesystem driver.
+
+    Blocked partitions appear as bare comments so reviewers see the
+    gap; the slice build trips elsewhere (the per-fs Kconfig will not
+    have a backing partition and Zephyr's link-time fs-table assembly
+    surfaces the error).
+    """
+    partitions = resolve_storage_partitions(project)
+    lines: list[str] = [
+        "/*",
+        " * Auto-generated by scripts/alp_orchestrate.py -- do not edit.",
+        " * Regenerate after changes to board.yaml `storage:` or the SoM's",
+        " * memory_map / on_module.ospi_memories blocks.  #include this file",
+        " * from your Zephyr DT.",
+        " */",
+        "",
+    ]
+    if not partitions:
+        lines += [
+            "/* No `storage:` entries declared in board.yaml; nothing to emit. */",
+            "",
+        ]
+        return "\n".join(lines)
+
+    # Group resolved partitions by dt_label; blocked entries get a
+    # standalone comment block so reviewers see the gap.
+    by_label: dict[str, list[ResolvedPartition]] = {}
+    blocked: list[ResolvedPartition] = []
+    for p in partitions:
+        if p.status == "blocked":
+            blocked.append(p)
+            continue
+        by_label.setdefault(p.dt_label, []).append(p)
+
+    for label in sorted(by_label.keys()):
+        lines.append(f"&{label} {{")
+        lines.append("    partitions {")
+        lines.append('        compatible = "fixed-partitions";')
+        lines.append("        #address-cells = <1>;")
+        lines.append("        #size-cells = <1>;")
+        lines.append("")
+        # Sort by base offset for human readability + DT-binding
+        # convention (low-address first).
+        for p in sorted(by_label[label], key=lambda x: x.base_kib):
+            base_bytes = p.base_kib * 1024
+            size_bytes = p.size_kib * 1024
+            lines.append(
+                f"        {p.name}_partition: partition@{base_bytes:x} {{")
+            lines.append(f'            label = "{p.name}";')
+            lines.append(
+                f"            reg = <0x{base_bytes:x} 0x{size_bytes:x}>;")
+            lines.append("        };")
+            lines.append("")
+        lines.append("    };")
+        lines.append("};")
+        lines.append("")
+
+    if blocked:
+        lines.append(
+            "/* Blocked storage entries -- see system-manifest.yaml for details. */")
+        for p in blocked:
+            lines.append(f"/* BLOCKED: {p.name} -- "
+                         f"{p.reason or 'unknown reason'} */")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def emit_storage_mounts_c(project: BoardProject) -> str:
+    """Generate storage_mount_table.c -- a static fs_mount_t[] array.
+
+    Optional companion to emit_dts_partitions.  Apps that want
+    deterministic boot-time mounting include this file and call
+    `alp_storage_mount_all()` (or iterate the table manually).
+    Partitions with no `mount:` declared are omitted from the table.
+    """
+    partitions = resolve_storage_partitions(project)
+    mountable = [p for p in partitions
+                 if p.status == "ok" and p.mount and p.fs != "raw"]
+
+    lines: list[str] = [
+        "/*",
+        " * Auto-generated by scripts/alp_orchestrate.py -- do not edit.",
+        " * Regenerate after changes to board.yaml `storage:`.",
+        " */",
+        "/* clang-format off */",
+        "",
+        "#include <zephyr/fs/fs.h>",
+        "#include <zephyr/storage/flash_map.h>",
+        "",
+    ]
+    if not mountable:
+        lines += [
+            "/* No mountable storage[] entries declared; emitting empty table. */",
+            "",
+            "const struct fs_mount_t *alp_storage_mounts[] = { 0 };",
+            "const size_t alp_storage_mount_count = 0;",
+            "/* clang-format on */",
+            "",
+        ]
+        return "\n".join(lines)
+
+    # Per-fs includes + per-partition fs_<name>_data + fs_mount_t.
+    fs_seen: set[str] = set()
+    for p in mountable:
+        if p.fs in fs_seen:
+            continue
+        fs_seen.add(p.fs)
+        if p.fs == "littlefs":
+            lines.append("#include <zephyr/fs/littlefs.h>")
+        elif p.fs == "fat":
+            lines.append("#include <ff.h>")
+        elif p.fs == "ext4":
+            lines.append("#include <zephyr/fs/ext2.h>")
+    lines.append("")
+
+    for p in mountable:
+        upper = p.name.upper()
+        if p.fs == "littlefs":
+            lines.append(f"FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(alp_lfs_{p.name});")
+            lines.append(f"static struct fs_mount_t alp_mnt_{p.name} = {{")
+            lines.append(f"    .type = FS_LITTLEFS,")
+            lines.append(f"    .fs_data = &alp_lfs_{p.name},")
+            lines.append(f"    .storage_dev = (void *)FIXED_PARTITION_ID({p.name}_partition),")
+            lines.append(f'    .mnt_point = "{p.mount}",')
+            lines.append("};")
+        elif p.fs == "fat":
+            lines.append(f"static FATFS alp_fat_{p.name};")
+            lines.append(f"static struct fs_mount_t alp_mnt_{p.name} = {{")
+            lines.append(f"    .type = FS_FATFS,")
+            lines.append(f"    .fs_data = &alp_fat_{p.name},")
+            lines.append(f"    .storage_dev = (void *)FIXED_PARTITION_ID({p.name}_partition),")
+            lines.append(f'    .mnt_point = "{p.mount}",')
+            lines.append("};")
+        elif p.fs == "ext4":
+            lines.append(f"static struct fs_mount_t alp_mnt_{p.name} = {{")
+            lines.append(f"    .type = FS_EXT2,")
+            lines.append(f"    .storage_dev = (void *)FIXED_PARTITION_ID({p.name}_partition),")
+            lines.append(f'    .mnt_point = "{p.mount}",')
+            lines.append("};")
+        lines.append("")
+        # Silence -Wunused on the per-partition mount when the app
+        # iterates only via alp_storage_mounts[]; the explicit symbol
+        # lets test fixtures reach a specific mount by name.
+        _ = upper
+
+    lines.append("const struct fs_mount_t *alp_storage_mounts[] = {")
+    for p in mountable:
+        lines.append(f"    &alp_mnt_{p.name},")
+    lines.append("};")
+    lines.append("const size_t alp_storage_mount_count = "
+                 f"{len(mountable)};")
+    lines.append("/* clang-format on */")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def emit_system_manifest(
     project: BoardProject,
     *,
@@ -1074,6 +1916,7 @@ def emit_system_manifest(
     so the manifest carries status / log_path / etc.
     """
     carve_outs = resolve_carve_outs(project)
+    partitions = resolve_storage_partitions(project)
     effective_slices = list(slices) if slices is not None else list(project.cores.values())
 
     boot_order = list(project.som_preset.get("boot_order") or [])
@@ -1082,6 +1925,7 @@ def emit_system_manifest(
         project=project,
         slices=effective_slices,
         carve_outs=carve_outs,
+        partitions=partitions,
         boot_order=boot_order,
         helper_mcus=_helper_mcus(project),
     )
@@ -1207,6 +2051,19 @@ class Orchestrator:
             emit_ipc_contract_h(self.project), encoding="utf-8")
         (gen / "dts-reservations.dtsi").write_text(
             emit_dts_reservations(self.project), encoding="utf-8")
+        # Storage partitions land alongside the IPC reservations DTS;
+        # apps that don't declare storage[] still get a stub file with
+        # a "nothing to emit" comment so downstream `#include` resolves.
+        (gen / "dts-partitions.dtsi").write_text(
+            emit_dts_partitions(self.project), encoding="utf-8")
+        # TF-M sysbuild child-image overlay -- only when the project
+        # opts in to `security.psa.tfm: true`.  Absence-emits-nothing:
+        # we don't create the directory when the file would be empty.
+        tfm_conf = emit_tfm_sysbuild_conf(self.project)
+        if tfm_conf:
+            tfm_dir = self.build_root / "sysbuild" / "tfm"
+            tfm_dir.mkdir(parents=True, exist_ok=True)
+            (tfm_dir / "tfm.conf").write_text(tfm_conf, encoding="utf-8")
         return gen
 
     # ---- dispatch ----
@@ -1508,6 +2365,110 @@ def _slugs_from_helper_firmware(helper_firmware: list) -> list[str]:
     return sorted(seen)
 
 
+def _emit_extra_library_profile(
+    name: str,
+    profile_rel: str,
+    project: "BoardProject",
+) -> list[str]:
+    """Walk an extra_libraries `profile:` file and emit the per-class
+    first-match Kconfig lines for the active SoM.
+
+    Mirrors the curated `metadata/library-profiles/<lib>/hw-backends.yaml`
+    matcher in `alp_project._emit_library_hw_backends`: each accelerator
+    class declares a `priority:` list whose entries carry
+    `silicon:` / `soc_family:` / `requires_cap:` matchers plus a
+    `kconfig:` directive.  First matching entry per class wins; an
+    `sw_fallback:` block with `kconfig:` is always emitted at the end
+    so the build has a SW floor when no HW backend matches.
+
+    Returns the list of emitted lines (each line is a complete
+    `CONFIG_*=y` or `# ...` comment); empty list when the profile
+    parses but nothing matches and there's no sw_fallback.
+
+    Failures (malformed YAML, missing keys) emit a single `#`-prefixed
+    diagnostic comment so the customer sees the failure in the slice's
+    alp.conf rather than getting silent drop-out.
+    """
+    profile_path = (REPO / profile_rel).resolve()
+    try:
+        doc = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as e:
+        return [f"# extra_libraries[{name}] profile parse failed: {e}"]
+    if not isinstance(doc, dict):
+        return [f"# extra_libraries[{name}] profile is not a mapping"]
+
+    # Match keys come from the active SoM.  Mirror
+    # alp_project._SOC_FAMILY_TOKEN so extra_libraries entries can
+    # share existing curated-profile match keys when desired.
+    silicon_ref = project.som_preset.get("silicon") or ""
+    family = (project.som_preset.get("family") or "").lower()
+    soc_family_token: Optional[str] = None
+    if family.startswith("alif-ensemble"):
+        soc_family_token = "alif_ensemble"
+    elif family.startswith("renesas-rzv2n"):
+        soc_family_token = "renesas_rzv2n"
+    elif family.startswith("nxp-imx9"):
+        soc_family_token = "nxp_imx9"
+
+    # resolve_capabilities merges SoC-JSON defaults + SoM overrides.
+    capabilities = resolve_capabilities(project.som_preset, METADATA_ROOT)
+
+    def _cap_truthy(cap_name: str) -> bool:
+        v = capabilities.get(cap_name)
+        if v is None:
+            return False
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, int):
+            return v > 0
+        s = str(v).lower()
+        if s in ("true", "yes"):
+            return True
+        if s in ("false", "no", "null", "none", "0", ""):
+            return False
+        try:
+            return int(s) > 0
+        except ValueError:
+            return False
+
+    def _entry_matches(e: dict[str, Any]) -> bool:
+        sili = e.get("silicon")
+        sf = e.get("soc_family")
+        cap = e.get("requires_cap")
+        if sili is not None and sili != silicon_ref:
+            return False
+        if sf is not None and sf != soc_family_token:
+            return False
+        if cap is not None and not _cap_truthy(str(cap)):
+            return False
+        return True
+
+    out: list[str] = []
+    accelerators = doc.get("accelerators") or []
+    if isinstance(accelerators, list):
+        for cls in accelerators:
+            if not isinstance(cls, dict):
+                continue
+            cls_name = cls.get("class") or "<unknown>"
+            for p in (cls.get("priority") or []):
+                if not isinstance(p, dict):
+                    continue
+                if not _entry_matches(p):
+                    continue
+                kc = p.get("kconfig")
+                if isinstance(kc, str) and kc:
+                    out.append(f"{kc}  # {name} / {cls_name}")
+                break
+
+    sw = doc.get("sw_fallback")
+    if isinstance(sw, dict):
+        kc = sw.get("kconfig")
+        if isinstance(kc, str) and kc:
+            out.append(f"{kc}  # {name} / sw_fallback")
+
+    return out
+
+
 def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     """Per-core Kconfig fragment for a Zephyr slice.
 
@@ -1678,6 +2639,40 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
                     f"# TODO: wire library '{lib}' once its v0.4 enable lands")
         lines.append("")
 
+    # ----------------------------------------------------------------
+    # Open-set extra_libraries (v0.6 P2.1).  Each entry declares either
+    # inline `kconfig:` lines (emitted verbatim) or a `profile:` path
+    # to a hw-backends.yaml-style file we walk with the same silicon /
+    # soc_family / requires_cap matcher as the curated libraries.
+    # _validate_consistency() guarantees exactly-one of kconfig/profile
+    # and the profile file resolves, so the per-entry checks here are
+    # just for emit-time safety.
+    # ----------------------------------------------------------------
+    if slice_.extra_libraries:
+        lines.append(f"# Extra libraries declared on core "
+                     f"`{slice_.core_id}` (open-set escape hatch)")
+        for entry in sorted(slice_.extra_libraries,
+                            key=lambda e: e.get("name", "")):
+            name = entry.get("name", "<unnamed>")
+            kc_lines = entry.get("kconfig")
+            profile = entry.get("profile")
+            if kc_lines:
+                lines.append(f"# extra_libraries[{name}] (inline kconfig)")
+                for kc in kc_lines:
+                    lines.append(str(kc))
+            elif profile:
+                lines.append(f"# extra_libraries[{name}] (profile: {profile})")
+                profile_lines = _emit_extra_library_profile(
+                    name, profile, project)
+                if profile_lines:
+                    lines.extend(profile_lines)
+                else:
+                    lines.append(
+                        f"# (no matching backend for "
+                        f"silicon={project.som_preset.get('silicon')} "
+                        f"in {profile})")
+        lines.append("")
+
     # Inference dispatchers.  Driven entirely by the SoM preset's
     # `capabilities:` matrix + SoC-JSON `cores[]` -- NOT by board.yaml.
     # The customer never picks a backend at build time; the SDK compiles
@@ -1812,6 +2807,104 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append("")
 
     # ----------------------------------------------------------------
+    # Storage partitions (board.yaml `storage:` block).  Emits per-fs
+    # Kconfig for every resolved (non-blocked) partition.  Blocked
+    # partitions produce a hint comment so the slice build still
+    # compiles but the runtime mount fails loudly via the DTS overlay.
+    #
+    # Per-slice ownership of partitions is not modelled today: every
+    # Zephyr/baremetal slice gets the union.  Kconfig dedupes when
+    # multiple per-core fragments overlay onto the same base.  v0.7
+    # may add `core:` to storage entries for per-slice scoping.
+    # ----------------------------------------------------------------
+    partitions = resolve_storage_partitions(project)
+    ok_partitions = [p for p in partitions if p.status == "ok"]
+    fs_seen: set[str] = set()
+    for p in ok_partitions:
+        fs_seen.add(p.fs)
+    fs_kconfig: list[str] = []
+    if "littlefs" in fs_seen:
+        fs_kconfig.append("CONFIG_FILE_SYSTEM=y")
+        fs_kconfig.append("CONFIG_FILE_SYSTEM_LITTLEFS=y")
+    if "fat" in fs_seen:
+        fs_kconfig.append("CONFIG_FILE_SYSTEM=y")
+        fs_kconfig.append("CONFIG_FAT_FILESYSTEM_ELM=y")
+    if "ext4" in fs_seen:
+        fs_kconfig.append("CONFIG_FILE_SYSTEM=y")
+        fs_kconfig.append("CONFIG_FILE_SYSTEM_EXT2=y")
+    if fs_kconfig or ok_partitions:
+        lines.append("# Storage partitions (board.yaml `storage:`)")
+        # FILE_SYSTEM=y appears twice in the list when multiple fs
+        # types are enabled; dedupe before emit.
+        for kc in sorted(set(fs_kconfig)):
+            lines.append(kc)
+        # Per-partition LITTLEFS partition stems carry the partition
+        # label so customers can drive runtime mount discovery via
+        # FIXED_PARTITION_ID(<name>_partition).  Zephyr's
+        # CONFIG_FS_LITTLEFS_PARTITION_<NAME> is set per littlefs
+        # partition; raw partitions get no fs Kconfig.
+        for p in ok_partitions:
+            if p.fs == "littlefs":
+                lines.append(
+                    f"CONFIG_FS_LITTLEFS_PARTITION_{p.name.upper()}=y")
+        blocked = [p for p in partitions if p.status == "blocked"]
+        for p in blocked:
+            lines.append(f"# BLOCKED storage[{p.name}]: "
+                         f"{p.reason or 'unknown reason'}")
+        lines.append("")
+
+    # ----------------------------------------------------------------
+    # OTA Zephyr client (board.yaml `ota:` block, provider-driven dispatch).
+    #
+    # Resolved design Q on the Zephyr-side OTA client (ADR 0009 follow-up):
+    #   provider: mender   -> Mender-MCU-client (out-of-tree, BSD-3)
+    #   provider: hawkbit  -> Zephyr Hawkbit DDI client (upstream)
+    #   provider: mcumgr   -> Zephyr MCUmgr (upstream; transport is the app's call)
+    #
+    # Yocto slices keep the existing Mender server-mode dispatch in
+    # _slice_local_conf().  This block handles the Zephyr side: per-slice
+    # Kconfig that compiles the matching client in.  Settings (server URL,
+    # poll interval, tenant token) thread through Kconfig string values
+    # when declared in `ota:`; placeholders (${VAR}) pass through verbatim
+    # so the build system substitutes at link time.
+    # ----------------------------------------------------------------
+    ota = project.ota or {}
+    provider = (ota.get("provider") or "").lower() if isinstance(ota, dict) else ""
+    if provider and provider in ("mender", "hawkbit", "mcumgr"):
+        lines.append(f"# OTA Zephyr client (board.yaml `ota.provider: {provider}`)")
+        srv = (ota.get("server") or {}) if isinstance(ota.get("server"), dict) else {}
+        poll = ota.get("poll_interval_s")
+        if provider == "mender":
+            # Mender-MCU-client.  Pulled in via west.yml manifest; the
+            # west-libraries emitter adds the module entry.
+            lines.append("CONFIG_MENDER_MCU_CLIENT=y")
+            if srv.get("url"):
+                lines.append(f'CONFIG_MENDER_SERVER_URL="{srv["url"]}"')
+            if srv.get("tenant"):
+                lines.append(f'CONFIG_MENDER_TENANT_TOKEN="{srv["tenant"]}"')
+            if ota.get("artifact_name"):
+                lines.append(f'CONFIG_MENDER_ARTIFACT_NAME="{ota["artifact_name"]}"')
+            if isinstance(poll, int) and poll > 0:
+                lines.append(f"CONFIG_MENDER_UPDATE_POLL_INTERVAL={poll}")
+        elif provider == "hawkbit":
+            # Zephyr upstream's Hawkbit DDI client.
+            lines.append("CONFIG_HAWKBIT=y")
+            lines.append("CONFIG_HAWKBIT_SHELL=y")
+            if srv.get("url"):
+                lines.append(f'CONFIG_HAWKBIT_SERVER="{srv["url"]}"')
+            if isinstance(poll, int) and poll > 0:
+                lines.append(f"CONFIG_HAWKBIT_POLL_INTERVAL={poll}")
+        elif provider == "mcumgr":
+            # MCUmgr is upstream; the transport (UART/BLE/UDP) stays the
+            # app's call -- we only enable the base SMP server.
+            lines.append("CONFIG_MCUMGR=y")
+            lines.append("CONFIG_MCUMGR_GRP_IMG=y")
+            lines.append("CONFIG_MCUMGR_GRP_OS=y")
+            lines.append("# MCUmgr transport (UART/BLE/UDP) is the app's call;")
+            lines.append("# enable the matching CONFIG_MCUMGR_TRANSPORT_* in your prj.conf.")
+        lines.append("")
+
+    # ----------------------------------------------------------------
     # Per-module log levels (board.yaml `diagnostics.modules:`).
     # ----------------------------------------------------------------
     modules = (project.diagnostics or {}).get("modules") or {}
@@ -1934,6 +3027,83 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
                      f"{int(boot['scratch_size_kib']) * 1024}")
     if boot.get("anti_rollback"):
         lines.append("SB_CONFIG_BOOT_COUNTERS_MCUBOOT=y")
+    return "\n".join(lines) + "\n"
+
+
+def emit_tfm_sysbuild_conf(project: BoardProject) -> str:
+    """Emit the TF-M sysbuild child-image overlay for `security.psa:`.
+
+    Returns a `SB_CONFIG_*` + `CONFIG_PSA_CRYPTO_*` snippet the build
+    wires into `build/sysbuild/tfm/tfm.conf` (consumed via
+    `west build --sysbuild --sysbuild-config`).  Returns an empty
+    string when the project omits `security.psa:` or sets
+    `tfm: false` -- PSA Crypto then runs entirely non-secure
+    (mbedTLS-only) and no child image is built.
+
+    The TF-M boundary lives on the same M55-HP core as the non-secure
+    app via Armv8-M TrustZone-M; see ADR 0013.
+    """
+    security = project.security or {}
+    psa = security.get("psa") or {}
+    if not psa or not psa.get("tfm"):
+        return ""
+
+    # TF-M build type follows the project's MCUboot build_type when
+    # set so the secure + bootloader artefacts ship the same flavour.
+    # Default is Release; debug builds use MinSizeRel for parity with
+    # the upstream sysbuild template.
+    boot = project.boot or {}
+    build_type = (boot.get("build_type") or "Release")
+    if build_type.lower() == "debug":
+        tfm_build_type = "Debug"
+    elif build_type.lower() in ("minsizerel", "min_size_rel"):
+        tfm_build_type = "MinSizeRel"
+    elif build_type.lower() == "release":
+        tfm_build_type = "Release"
+    else:
+        # Pass through verbatim if the customer set an exact CMake
+        # build-type string we don't pre-canonicalise.
+        tfm_build_type = build_type
+
+    lines: list[str] = [
+        "# Auto-generated by scripts/alp_orchestrate.py from "
+        "board.yaml `security.psa:`.",
+        "# Drives the sysbuild TF-M child image on the M55-HP core via "
+        "Armv8-M TrustZone-M.",
+        "# See docs/adr/0013-tfm-boundary-m55-hp-trustzone.md and "
+        "docs/security-audit-plan.md.",
+        "",
+        "SB_CONFIG_TFM=y",
+        f"SB_CONFIG_TFM_BUILD_TYPE={tfm_build_type}",
+    ]
+
+    persistent_slots = psa.get("persistent_slots")
+    if persistent_slots is None:
+        # Schema default mirrors v0.6: 16 slots.
+        persistent_slots = 16
+    lines.append(
+        f"CONFIG_PSA_CRYPTO_PERSISTENT_SLOT_COUNT={int(persistent_slots)}"
+    )
+
+    its = psa.get("its_storage")
+    if its:
+        lines.append(f'CONFIG_PSA_CRYPTO_ITS_BACKING_STORE="{its}"')
+    ps = psa.get("ps_storage")
+    if ps:
+        lines.append(f'CONFIG_PSA_CRYPTO_PS_BACKING_STORE="{ps}"')
+
+    att_root = (psa.get("attestation_root") or "none").lower()
+    if att_root == "optiga_trust_m":
+        lines.append(
+            "# Attestation root anchored in OPTIGA Trust M (on-module "
+            "secure element).")
+        lines.append(
+            "# See src/security/optiga_trust_m_bridge.c for the "
+            "PSA <-> OPTIGA bridge driver.")
+        lines.append("CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y")
+    elif att_root == "tfm_internal":
+        lines.append("CONFIG_ALP_SDK_PSA_ATTESTATION_TFM_INTERNAL=y")
+
     return "\n".join(lines) + "\n"
 
 
@@ -2064,7 +3234,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         help="Force sequential dispatch.")
     parser.add_argument("--emit", default=None,
                         choices=["system-manifest", "ipc-contract-h",
-                                 "dts-reservations"],
+                                 "dts-reservations", "dts-partitions",
+                                 "storage-mounts-c",
+                                 "tfm-sysbuild-conf"],
                         help="Skip the build; just emit one of the "
                              "generated artefacts to stdout.")
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -2083,6 +3255,12 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 sys.stdout.write(emit_ipc_contract_h(project))
             elif args.emit == "dts-reservations":
                 sys.stdout.write(emit_dts_reservations(project))
+            elif args.emit == "dts-partitions":
+                sys.stdout.write(emit_dts_partitions(project))
+            elif args.emit == "storage-mounts-c":
+                sys.stdout.write(emit_storage_mounts_c(project))
+            elif args.emit == "tfm-sysbuild-conf":
+                sys.stdout.write(emit_tfm_sysbuild_conf(project))
         except OrchestratorError as e:
             print(f"alp-orchestrate: {e}", file=sys.stderr)
             return 1

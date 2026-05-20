@@ -28,15 +28,21 @@ from alp_orchestrate import (                       # noqa: E402
     BoardProject,
     OrchestratorError,
     Orchestrator,
+    ResolvedPartition,
     Slice,
+    StorageEntry,
     _slice_alp_conf,
     _slugs_from_helper_firmware,
     _slugs_from_on_module,
+    emit_dts_partitions,
     emit_dts_reservations,
     emit_ipc_contract_h,
+    emit_storage_mounts_c,
     emit_system_manifest,
+    emit_tfm_sysbuild_conf,
     load_board_yaml,
     resolve_carve_outs,
+    resolve_storage_partitions,
 )
 
 
@@ -1137,3 +1143,1202 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
 
     assert "CONFIG_ALP_SDK_CHIP_TBD" not in conf
     assert "SoM-intrinsic chip drivers" in conf
+
+# ---------------------------------------------------------------------
+# Storage partition resolver + emitters (v0.6 schema-only gap closed).
+# ---------------------------------------------------------------------
+
+
+# AEN301's auto-derived memory_map includes `mram_main` (5632 KiB) from
+# the Alif e3 variant.  Used as the flash device throughout the storage
+# tests because MRAM is the realistic persistent-store target on the AEN
+# family; V2N101 has no MRAM (DDR + OCRAM only) so it would be a
+# semantically odd test fixture.
+AEN_STORAGE = """
+name: test-aen-storage
+som:
+  sku: E1M-AEN301
+  hw_rev: r1
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+
+storage:
+  - { name: settings,        size_kib: 64,  fs: littlefs, flash_device: mram_main, mount: /lfs/settings }
+  - { name: app_data,        size_kib: 128, fs: littlefs, flash_device: mram_main, mount: /lfs/app }
+  - { name: mcuboot_scratch, size_kib: 32,  fs: raw,      flash_device: mram_main }
+"""
+
+
+# Storage entry with an explicit offset override; combined with a
+# bump-allocated sibling to exercise both code paths in one project.
+AEN_STORAGE_OFFSET = """
+name: test-aen-storage-offset
+som:
+  sku: E1M-AEN301
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+
+storage:
+  - { name: bump_alloc, size_kib: 64, fs: raw, flash_device: mram_main }
+  - { name: pinned_low, size_kib: 32, fs: raw, flash_device: mram_main, offset_kib: 4096 }
+"""
+
+
+def test_resolve_storage_partitions_happy(tmp_path: Path) -> None:
+    """Three littlefs+raw partitions on mram_main allocate bottom-up,
+    page-aligned, name-sorted for determinism."""
+    path = _write_board(tmp_path, AEN_STORAGE)
+    project = load_board_yaml(path)
+    parts = resolve_storage_partitions(project)
+    assert len(parts) == 3
+    # All three resolved OK against mram_main (auto-derived from
+    # Alif e3 variant's mram_mb -> "mram_main" region).
+    for p in parts:
+        assert p.status == "ok", (p.name, p.reason)
+        assert p.flash_device == "mram_main"
+        assert p.dt_label == "mram_main"  # no dt_label override declared
+    # Sorted alphabetically: app_data (0), mcuboot_scratch (128), settings (160).
+    by_name = {p.name: p for p in parts}
+    assert by_name["app_data"].base_kib == 0
+    assert by_name["app_data"].size_kib == 128
+    # Page-aligned: 128 KiB stays 128 KiB.
+    assert by_name["mcuboot_scratch"].base_kib == 128
+    assert by_name["mcuboot_scratch"].size_kib == 32
+    assert by_name["settings"].base_kib == 160
+    assert by_name["settings"].size_kib == 64
+
+
+def test_resolve_storage_partitions_unknown_flash_device(
+    tmp_path: Path,
+) -> None:
+    """A typoed flash_device: must surface as a loader error with the
+    list of known devices in the message."""
+    body = AEN_STORAGE.replace(
+        "flash_device: mram_main, mount: /lfs/settings",
+        "flash_device: not_a_real_region, mount: /lfs/settings",
+        1,
+    )
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError, match="not_a_real_region"):
+        load_board_yaml(path)
+
+
+def test_resolve_storage_partitions_duplicate_name(
+    tmp_path: Path,
+) -> None:
+    """Duplicate partition names within `storage:` must error eagerly."""
+    body = """
+    name: test-dup
+    som: { sku: E1M-AEN301 }
+    cores:
+      m55_hp: { os: zephyr, app: ./m55_hp }
+    storage:
+      - { name: dup, size_kib: 64, fs: raw, flash_device: mram_main }
+      - { name: dup, size_kib: 64, fs: raw, flash_device: mram_main }
+    """
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError, match="more than once"):
+        load_board_yaml(path)
+
+
+def test_resolve_storage_partitions_explicit_offset(
+    tmp_path: Path,
+) -> None:
+    """offset_kib: must be honoured verbatim and not shift the bump
+    allocator (so byte-stable layouts stay byte-stable)."""
+    path = _write_board(tmp_path, AEN_STORAGE_OFFSET)
+    project = load_board_yaml(path)
+    parts = resolve_storage_partitions(project)
+    assert len(parts) == 2
+    by_name = {p.name: p for p in parts}
+    # Sort order is alphabetical: bump_alloc allocates first at 0;
+    # pinned_low honours its explicit offset of 4096 KiB.
+    assert by_name["bump_alloc"].status == "ok"
+    assert by_name["bump_alloc"].base_kib == 0
+    assert by_name["bump_alloc"].size_kib == 64
+    assert by_name["pinned_low"].status == "ok"
+    assert by_name["pinned_low"].base_kib == 4096
+    assert by_name["pinned_low"].size_kib == 32
+
+
+def test_resolve_storage_partitions_misaligned_offset(
+    tmp_path: Path,
+) -> None:
+    """A page-misaligned offset_kib: must produce a `blocked` partition
+    with a clear reason, not raise."""
+    body = """
+    name: test-misalign
+    som: { sku: E1M-AEN301 }
+    cores:
+      m55_hp: { os: zephyr, app: ./m55_hp }
+    storage:
+      - { name: bad, size_kib: 64, fs: raw, flash_device: mram_main, offset_kib: 5 }
+    """
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    parts = resolve_storage_partitions(project)
+    assert len(parts) == 1
+    assert parts[0].status == "blocked"
+    assert "page-aligned" in (parts[0].reason or "")
+
+
+def test_resolve_storage_partitions_overflow(tmp_path: Path) -> None:
+    """A partition larger than the device's capacity must block."""
+    body = """
+    name: test-overflow
+    som: { sku: E1M-AEN301 }
+    cores:
+      m55_hp: { os: zephyr, app: ./m55_hp }
+    storage:
+      - { name: huge, size_kib: 1048576, fs: raw, flash_device: mram_main }
+    """
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    parts = resolve_storage_partitions(project)
+    assert len(parts) == 1
+    assert parts[0].status == "blocked"
+    assert "overruns" in (parts[0].reason or "")
+
+
+def test_resolve_storage_partitions_overlap(tmp_path: Path) -> None:
+    """Two explicit offsets that overlap must surface the offending pair."""
+    body = """
+    name: test-overlap
+    som: { sku: E1M-AEN301 }
+    cores:
+      m55_hp: { os: zephyr, app: ./m55_hp }
+    storage:
+      - { name: a, size_kib: 64, fs: raw, flash_device: mram_main, offset_kib: 0 }
+      - { name: b, size_kib: 64, fs: raw, flash_device: mram_main, offset_kib: 32 }
+    """
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    parts = resolve_storage_partitions(project)
+    # `a` allocates at offset 0 (0..64KiB), `b` overlaps via its
+    # explicit offset 32 KiB; the resolver blocks `b` (alphabetically
+    # later, processed after `a` is already in the allocated set).
+    by_name = {p.name: p for p in parts}
+    assert by_name["a"].status == "ok"
+    assert by_name["b"].status == "blocked"
+    assert "overlaps" in (by_name["b"].reason or "")
+
+
+def test_resolve_storage_partitions_deterministic(tmp_path: Path) -> None:
+    """Two identical projects must produce byte-identical resolutions."""
+    p1 = _write_board(tmp_path, AEN_STORAGE, name="b1.yaml")
+    p2 = _write_board(tmp_path, AEN_STORAGE, name="b2.yaml")
+    r1 = resolve_storage_partitions(load_board_yaml(p1))
+    r2 = resolve_storage_partitions(load_board_yaml(p2))
+    assert [(p.name, p.base_kib, p.size_kib) for p in r1] == \
+           [(p.name, p.base_kib, p.size_kib) for p in r2]
+
+
+def test_emit_dts_partitions_shape(tmp_path: Path) -> None:
+    path = _write_board(tmp_path, AEN_STORAGE)
+    out = emit_dts_partitions(load_board_yaml(path))
+    # Decorates the flash device's DT label.
+    assert "&mram_main {" in out
+    # Standard fixed-partitions binding.
+    assert 'compatible = "fixed-partitions";' in out
+    assert "#address-cells = <1>;" in out
+    assert "#size-cells = <1>;" in out
+    # One partition node per entry, with label + reg.
+    for name in ("settings", "app_data", "mcuboot_scratch"):
+        assert f"{name}_partition: partition@" in out
+        assert f'label = "{name}";' in out
+    # Address determinism: app_data is at offset 0 bytes; settings is
+    # at 160 KiB = 0x28000 bytes; size 64 KiB = 0x10000 bytes.
+    assert "app_data_partition: partition@0 {" in out
+    assert "settings_partition: partition@28000 {" in out
+    assert "reg = <0x28000 0x10000>;" in out
+
+
+def test_emit_dts_partitions_no_storage(tmp_path: Path) -> None:
+    """A board with no `storage:` block must emit the stub-only file
+    (so downstream `#include` still resolves) without raising."""
+    body = """
+    name: test-no-storage
+    som: { sku: E1M-AEN301 }
+    cores:
+      m55_hp: { os: zephyr, app: ./m55_hp }
+    """
+    path = _write_board(tmp_path, body)
+    out = emit_dts_partitions(load_board_yaml(path))
+    assert "No `storage:` entries" in out
+    assert "fixed-partitions" not in out
+
+
+def test_emit_storage_mounts_c_littlefs(tmp_path: Path) -> None:
+    """The optional C mount table must declare an fs_mount_t per
+    mountable partition + the global alp_storage_mounts[] array."""
+    path = _write_board(tmp_path, AEN_STORAGE)
+    out = emit_storage_mounts_c(load_board_yaml(path))
+    assert "/* clang-format off */" in out
+    assert "/* clang-format on */" in out
+    # littlefs declarations for the two littlefs-formatted partitions.
+    assert "FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(alp_lfs_settings)" in out
+    assert "FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(alp_lfs_app_data)" in out
+    # raw partition has no mount: it is omitted from the table.
+    assert "alp_mnt_mcuboot_scratch" not in out
+    # The aggregate array carries the two mountable partitions.
+    assert "alp_storage_mount_count = 2;" in out
+
+
+def test_slice_alp_conf_storage_kconfig(tmp_path: Path) -> None:
+    """The Kconfig fragment must enable CONFIG_FILE_SYSTEM_LITTLEFS and
+    a per-partition CONFIG_FS_LITTLEFS_PARTITION_<NAME> for every
+    littlefs entry."""
+    path = _write_board(tmp_path, AEN_STORAGE)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "CONFIG_FILE_SYSTEM=y" in conf
+    assert "CONFIG_FILE_SYSTEM_LITTLEFS=y" in conf
+    assert "CONFIG_FS_LITTLEFS_PARTITION_SETTINGS=y" in conf
+    assert "CONFIG_FS_LITTLEFS_PARTITION_APP_DATA=y" in conf
+    # raw partition contributes no per-partition Kconfig.
+    assert "CONFIG_FS_LITTLEFS_PARTITION_MCUBOOT_SCRATCH" not in conf
+    # FAT / EXT2 not pulled in (no entries declared them).
+    assert "CONFIG_FAT_FILESYSTEM_ELM" not in conf
+    assert "CONFIG_FILE_SYSTEM_EXT2" not in conf
+
+
+def test_resolve_storage_partitions_blocks_on_tbd_ospi(
+    tmp_path: Path,
+) -> None:
+    """A partition pointing at an ospi_memories: entry with capacity_mbit
+    TBD must block with a clear reason -- AEN301 has this shape today
+    (capacity_mbit: TBD), so the storage emitter should not silently
+    allocate against unknown capacity."""
+    # AEN301 declares on_module.ospi_memories.ospi0 with capacity_mbit: TBD.
+    body = """
+    name: test-aen-ospi-tbd
+    som: { sku: E1M-AEN301 }
+    cores:
+      m55_hp: { os: zephyr, app: ./m55_hp }
+    storage:
+      - { name: app_data, size_kib: 64, fs: littlefs, flash_device: ospi0 }
+    """
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    parts = resolve_storage_partitions(project)
+    assert len(parts) == 1
+    assert parts[0].status == "blocked"
+    reason = parts[0].reason or ""
+    assert "TBD" in reason
+    assert "ospi0" in reason
+
+
+def test_emit_system_manifest_carries_storage(tmp_path: Path) -> None:
+    """`storage:` must round-trip through the system manifest so the
+    flash-allocation map ships into build/system-manifest.yaml."""
+    path = _write_board(tmp_path, AEN_STORAGE)
+    project = load_board_yaml(path)
+    out = emit_system_manifest(project)
+    parsed = yaml.safe_load(out)
+    assert "storage" in parsed
+    names = sorted(p["name"] for p in parsed["storage"])
+    assert names == ["app_data", "mcuboot_scratch", "settings"]
+    # Each ok entry carries its resolved offset + size.
+    for p in parsed["storage"]:
+        assert "offset_kib" in p
+        assert "size_kib" in p
+        assert "dt_label" in p
+
+# ---------------------------------------------------------------------
+# security.psa: emit + cross-field validation (v0.6)
+# ---------------------------------------------------------------------
+
+
+_AEN301_SECURITY_HAPPY = """
+name: test-aen301-security
+som:
+  sku: E1M-AEN301
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: zephyr
+    app: ./m55_he
+
+storage:
+  - name: psa_its
+    size_kib: 64
+    fs: raw
+    flash_device: mram_main
+  - name: psa_ps
+    size_kib: 64
+    fs: raw
+    flash_device: mram_main
+
+security:
+  psa:
+    persistent_slots: 32
+    its_storage: psa_its
+    ps_storage: psa_ps
+    tfm: true
+    attestation_root: optiga_trust_m
+"""
+
+
+def test_emit_tfm_sysbuild_conf_happy_path(tmp_path: Path) -> None:
+    """Happy path: AEN301 + security.psa.tfm: true emits a TF-M
+    sysbuild overlay with the expected SB_/CONFIG_ lines."""
+    path = _write_board(tmp_path, _AEN301_SECURITY_HAPPY)
+    project = load_board_yaml(path)
+    out = emit_tfm_sysbuild_conf(project)
+
+    # Core sysbuild knobs.
+    assert "SB_CONFIG_TFM=y" in out
+    assert "SB_CONFIG_TFM_BUILD_TYPE=Release" in out
+
+    # PSA slot count + ITS/PS backing stores.
+    assert "CONFIG_PSA_CRYPTO_PERSISTENT_SLOT_COUNT=32" in out
+    assert 'CONFIG_PSA_CRYPTO_ITS_BACKING_STORE="psa_its"' in out
+    assert 'CONFIG_PSA_CRYPTO_PS_BACKING_STORE="psa_ps"' in out
+
+    # OPTIGA attestation root surfaced.
+    assert "CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y" in out
+    # And the bridge-driver comment is present.
+    assert "optiga_trust_m_bridge" in out
+
+
+def test_emit_tfm_sysbuild_conf_absent_emits_nothing(tmp_path: Path) -> None:
+    """No security.psa: block -> empty string + no file written."""
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    assert emit_tfm_sysbuild_conf(project) == ""
+
+
+def test_emit_tfm_sysbuild_conf_tfm_false_emits_nothing(
+    tmp_path: Path,
+) -> None:
+    """`security.psa:` block present but `tfm: false` -> empty.
+
+    PSA Crypto runs non-secure-only (mbedTLS) -- no child image.
+    """
+    body = """
+        name: test-aen301-no-tfm
+        som:
+          sku: E1M-AEN301
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        security:
+          psa:
+            persistent_slots: 8
+            tfm: false
+    """
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert emit_tfm_sysbuild_conf(project) == ""
+
+
+def test_security_psa_schema_round_trip(tmp_path: Path) -> None:
+    """Schema-level: every documented security.psa.* field survives
+    the loader and lands in BoardProject.security."""
+    path = _write_board(tmp_path, _AEN301_SECURITY_HAPPY)
+    project = load_board_yaml(path)
+    psa = project.security["psa"]
+    assert psa["persistent_slots"] == 32
+    assert psa["its_storage"] == "psa_its"
+    assert psa["ps_storage"] == "psa_ps"
+    assert psa["tfm"] is True
+    assert psa["attestation_root"] == "optiga_trust_m"
+
+
+def test_security_psa_its_storage_resolves_to_memory_map(
+    tmp_path: Path,
+) -> None:
+    """ITS backing store may reference a SoM memory_map region directly,
+    not just a storage[] partition."""
+    body = """
+        name: test-aen301-its-memmap
+        som:
+          sku: E1M-AEN301
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        security:
+          psa:
+            its_storage: mram_main
+            tfm: true
+    """
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    out = emit_tfm_sysbuild_conf(project)
+    assert 'CONFIG_PSA_CRYPTO_ITS_BACKING_STORE="mram_main"' in out
+
+
+def test_security_psa_its_storage_unknown_reference_rejected(
+    tmp_path: Path,
+) -> None:
+    """Unknown ITS backing-store ref -> OrchestratorError pointing at
+    the offending YAML path."""
+    body = """
+        name: test-aen301-its-bad
+        som:
+          sku: E1M-AEN301
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        security:
+          psa:
+            its_storage: nope_not_a_region
+            tfm: true
+    """
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "security.psa.its_storage" in msg
+    assert "nope_not_a_region" in msg
+
+
+def test_security_psa_ps_storage_unknown_reference_rejected(
+    tmp_path: Path,
+) -> None:
+    """Same rule for ps_storage when set."""
+    body = """
+        name: test-aen301-ps-bad
+        som:
+          sku: E1M-AEN301
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        security:
+          psa:
+            its_storage: mram_main
+            ps_storage: definitely_missing
+            tfm: true
+    """
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    assert "security.psa.ps_storage" in str(excinfo.value)
+
+
+def test_security_psa_attestation_optiga_rejected_when_som_lacks_it(
+    tmp_path: Path,
+) -> None:
+    """SoM without OPTIGA Trust M -> attestation_root: optiga_trust_m
+    must reject with a helpful message.  Every shipping SKU carries
+    OPTIGA, so this test stubs a synthetic E1M-AEN301 preset with the
+    secure_element field DNI'd to exercise the rejection path."""
+    import alp_orchestrate
+    meta = tmp_path / "metadata"
+    e1m = meta / "e1m_modules"
+    socs_alif = meta / "socs" / "alif" / "ensemble"
+    schemas = meta / "schemas"
+    for d in (e1m, socs_alif, schemas):
+        d.mkdir(parents=True)
+
+    real_meta = REPO / "metadata"
+    shutil.copy(real_meta / "schemas" / "board.schema.json",
+                schemas / "board.schema.json")
+    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
+                schemas / "som-preset-v1.schema.json")
+    shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
+                schemas / "soc-spec-v1.schema.json")
+    real_soc_dir = real_meta / "socs" / "alif" / "ensemble"
+    for soc_f in real_soc_dir.iterdir():
+        shutil.copy(soc_f, socs_alif / soc_f.name)
+
+    # Synthetic AEN301 variant with OPTIGA explicitly DNI'd.
+    preset = yaml.safe_load(
+        (real_meta / "e1m_modules" / "E1M-AEN301.yaml").read_text())
+    preset["on_module"].pop("secure_element", None)
+    preset["capabilities"].pop("optiga_trust_m", None)
+    (e1m / "E1M-AEN301.yaml").write_text(yaml.safe_dump(preset),
+                                          encoding="utf-8")
+
+    board_path = tmp_path / "board.yaml"
+    board_path.write_text(textwrap.dedent("""
+        name: test-no-optiga
+        som:
+          sku: E1M-AEN301
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        security:
+          psa:
+            attestation_root: optiga_trust_m
+            tfm: true
+    """).lstrip("\n"), encoding="utf-8")
+
+    with pytest.raises(OrchestratorError) as excinfo:
+        alp_orchestrate.load_board_yaml(board_path, metadata_root=meta)
+    msg = str(excinfo.value)
+    assert "attestation_root" in msg
+    assert "optiga_trust_m" in msg
+    assert "E1M-AEN301" in msg
+
+
+def test_security_psa_materialise_writes_tfm_conf(tmp_path: Path) -> None:
+    """Orchestrator._materialise_shared() writes build/sysbuild/tfm/tfm.conf
+    when security.psa.tfm: true, and skips it otherwise."""
+    path = _write_board(tmp_path, _AEN301_SECURITY_HAPPY)
+    project = load_board_yaml(path)
+    build_root = tmp_path / "build"
+    orch = Orchestrator(project, build_root)
+    orch._materialise_shared()
+
+    tfm_conf = build_root / "sysbuild" / "tfm" / "tfm.conf"
+    assert tfm_conf.is_file(), "TF-M overlay not written"
+    text = tfm_conf.read_text(encoding="utf-8")
+    assert "SB_CONFIG_TFM=y" in text
+    assert "CONFIG_PSA_CRYPTO_PERSISTENT_SLOT_COUNT=32" in text
+
+
+def test_security_psa_materialise_skips_when_absent(tmp_path: Path) -> None:
+    """No security.psa: -> build/sysbuild/tfm/ is not created."""
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    build_root = tmp_path / "build"
+    orch = Orchestrator(project, build_root)
+    orch._materialise_shared()
+
+    assert not (build_root / "sysbuild" / "tfm").exists()
+
+
+def test_security_psa_build_type_inherits_from_boot(tmp_path: Path) -> None:
+    """TF-M build type follows boot.build_type when set."""
+    body = """
+        name: test-aen301-debug
+        som:
+          sku: E1M-AEN301
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        boot:
+          method: mcuboot
+          build_type: Debug
+          signing:
+            algorithm: ecdsa_p256
+            key_file: keys/dev.pem
+        security:
+          psa:
+            tfm: true
+            its_storage: mram_main
+    """
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    out = emit_tfm_sysbuild_conf(project)
+    assert "SB_CONFIG_TFM_BUILD_TYPE=Debug" in out
+
+# ---------------------------------------------------------------------
+# v0.6 P2.1 -- extra_libraries: escape hatch
+# ---------------------------------------------------------------------
+
+
+_V2N_BASE_FOR_EXTRA = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+{extra}
+"""
+
+
+def _v2n_with_extra(extra_yaml: str) -> str:
+    """Build a V2N101 board.yaml with the given extra_libraries block
+    (indented two spaces under the m33_sm core)."""
+    return _V2N_BASE_FOR_EXTRA.format(extra=extra_yaml)
+
+
+def test_extra_libraries_inline_kconfig_happy(tmp_path: Path) -> None:
+    """An entry with `name:` + `kconfig:` loads cleanly and lands in
+    the slice's emitted alp.conf verbatim."""
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: mylib\n"
+        "        include_path: third_party/mylib/include\n"
+        "        kconfig:\n"
+        "          - CONFIG_MYLIB=y\n"
+        "          - CONFIG_MYLIB_FEATURE_X=y\n")
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    slice_ = project.cores["m33_sm"]
+    assert len(slice_.extra_libraries) == 1
+    assert slice_.extra_libraries[0]["name"] == "mylib"
+    conf = _slice_alp_conf(project, slice_)
+    assert "extra_libraries[mylib]" in conf
+    assert "CONFIG_MYLIB=y" in conf
+    assert "CONFIG_MYLIB_FEATURE_X=y" in conf
+
+
+def test_extra_libraries_profile_happy(tmp_path: Path) -> None:
+    """An entry with `name:` + `profile:` resolves the profile file
+    and emits its accelerators / sw_fallback Kconfig per the same
+    silicon / soc_family / requires_cap matcher used by curated libs."""
+    # Profile file lives under metadata/library-profiles/ -- mbedtls
+    # ships with one out of the box, and it carries an `optiga_trust_m`
+    # priority entry plus an sw_fallback that always matches.  Reuse
+    # it as the test stub.
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: mylib_profile\n"
+        "        profile: metadata/library-profiles/mbedtls/hw-backends.yaml\n")
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    slice_ = project.cores["m33_sm"]
+    conf = _slice_alp_conf(project, slice_)
+    assert "extra_libraries[mylib_profile]" in conf
+    # V2N101 has optiga_trust_m capability + cau capability;
+    # _emit_extra_library_profile is deterministic in priority order.
+    # mbedtls profile's first-matching V2N entry is `cau` (priority
+    # ordering); regardless, *some* CONFIG_ALP_MBEDTLS_* must land,
+    # and the sw_fallback line is always emitted.
+    assert "CONFIG_ALP_MBEDTLS_PURE_C=y" in conf
+    assert "sw_fallback" in conf
+
+
+def test_extra_libraries_both_kconfig_and_profile_rejected(
+    tmp_path: Path,
+) -> None:
+    """An entry declaring BOTH `kconfig:` and `profile:` must fail
+    the cross-field validator (the exactly-one rule)."""
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: mylib_bad\n"
+        "        kconfig: [CONFIG_X=y]\n"
+        "        profile: metadata/library-profiles/mbedtls/hw-backends.yaml\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "mylib_bad" in msg
+    assert "exactly one" in msg
+    assert "both" in msg.lower()
+
+
+def test_extra_libraries_neither_kconfig_nor_profile_rejected(
+    tmp_path: Path,
+) -> None:
+    """An entry declaring NEITHER `kconfig:` nor `profile:` must
+    fail the cross-field validator (the exactly-one rule)."""
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: mylib_empty\n"
+        "        include_path: third_party/foo/include\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "mylib_empty" in msg
+    assert "exactly one" in msg
+    assert "neither" in msg.lower()
+
+
+def test_extra_libraries_name_collides_with_curated(tmp_path: Path) -> None:
+    """A name that matches the curated `libraries:` enum (e.g.
+    `mbedtls`) must be rejected -- the escape hatch is for
+    non-curated entries only."""
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: mbedtls\n"
+        "        kconfig: [CONFIG_FOO=y]\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "mbedtls" in msg
+    assert "curated" in msg.lower()
+
+
+def test_extra_libraries_name_collides_across_cores(tmp_path: Path) -> None:
+    """Names must be globally unique across all cores' extra_libraries."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+    extra_libraries:
+      - name: shared_slug
+        kconfig: [CONFIG_X=y]
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    extra_libraries:
+      - name: shared_slug
+        kconfig: [CONFIG_Y=y]
+"""
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "shared_slug" in msg
+    assert "globally unique" in msg.lower() or "collides" in msg.lower()
+
+
+def test_extra_libraries_profile_file_missing(tmp_path: Path) -> None:
+    """A `profile:` path that doesn't resolve to a file must fail."""
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: phantom\n"
+        "        profile: metadata/library-profiles/does-not-exist/hw-backends.yaml\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "phantom" in msg
+    assert "does not resolve" in msg
+
+
+# ---------------------------------------------------------------------
+# v0.6 P2.3 -- cross-field validator pass
+# ---------------------------------------------------------------------
+
+
+def test_consistency_mender_on_zephyr_only_ok(tmp_path: Path) -> None:
+    """Rule 1 (post-ADR-0009): ota.provider: mender on an all-Zephyr
+    project is now valid -- Mender-MCU-client is the Zephyr-side
+    dispatch.  Was rejected pre-ADR-0009; the v0.6 provider-driven
+    dispatch flips this to ok."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: "off"
+
+ota:
+  provider: mender
+  artifact_name: alp-aen-test
+  server:
+    url:    "https://hosted.mender.io"
+    tenant: "${MENDER_TENANT_TOKEN}"
+  poll_interval_s: 1800
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    # Zephyr Mender-MCU-client Kconfig must show up on the m55_hp slice.
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "CONFIG_MENDER_MCU_CLIENT=y" in conf
+    assert 'CONFIG_MENDER_SERVER_URL="https://hosted.mender.io"' in conf
+    assert "CONFIG_MENDER_UPDATE_POLL_INTERVAL=1800" in conf
+
+
+def test_consistency_mender_without_any_target_rejected(tmp_path: Path) -> None:
+    """Rule 1: ota.provider: mender with NO yocto AND NO zephyr core
+    (e.g. a project where every core is `off`) must still fail."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: "off"
+  m55_he:
+    os: "off"
+
+ota:
+  provider: mender
+  artifact_name: alp-aen-test
+"""
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "mender" in msg
+    assert "yocto" in msg.lower() or "zephyr" in msg.lower()
+
+
+def test_consistency_hawkbit_requires_zephyr(tmp_path: Path) -> None:
+    """Rule 1 (new in v0.6 dispatch): ota.provider: hawkbit requires
+    at least one Zephyr core."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+  m33_sm:
+    os: "off"
+
+ota:
+  provider: hawkbit
+  server:
+    url: "https://hawkbit.example.com"
+"""
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError, match="hawkbit"):
+        load_board_yaml(path)
+
+
+def test_consistency_hawkbit_on_zephyr_ok_with_kconfig(tmp_path: Path) -> None:
+    """ota.provider: hawkbit on a Zephyr-targeted board.yaml validates
+    and emits the Hawkbit DDI Kconfig on the Zephyr slice."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: "off"
+
+ota:
+  provider: hawkbit
+  server:
+    url: "https://hawkbit.example.com"
+  poll_interval_s: 600
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "CONFIG_HAWKBIT=y" in conf
+    assert 'CONFIG_HAWKBIT_SERVER="https://hawkbit.example.com"' in conf
+    assert "CONFIG_HAWKBIT_POLL_INTERVAL=600" in conf
+    # Negative: mender Kconfig must NOT bleed in.
+    assert "CONFIG_MENDER_MCU_CLIENT" not in conf
+
+
+def test_consistency_mcumgr_requires_zephyr(tmp_path: Path) -> None:
+    """Rule 1 (new): ota.provider: mcumgr requires at least one Zephyr core."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+  m33_sm:
+    os: "off"
+
+ota:
+  provider: mcumgr
+"""
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError, match="mcumgr"):
+        load_board_yaml(path)
+
+
+def test_consistency_mcumgr_on_zephyr_emits_smp_kconfig(tmp_path: Path) -> None:
+    """ota.provider: mcumgr enables the upstream SMP/MCUmgr Kconfig
+    on every Zephyr slice; transport selection stays the app's call."""
+    body = """
+som:
+  sku: E1M-AEN301
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+
+ota:
+  provider: mcumgr
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "CONFIG_MCUMGR=y" in conf
+    assert "CONFIG_MCUMGR_GRP_IMG=y" in conf
+    assert "CONFIG_MCUMGR_GRP_OS=y" in conf
+
+
+def test_consistency_mender_with_yocto_ok(tmp_path: Path) -> None:
+    """Rule 1 happy path: V2N (A55 yocto + M33 zephyr) with mender OK."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+  m33_sm:
+    os: zephyr
+    app: ./m33
+
+ota:
+  provider: mender
+  artifact_name: alp-v2n-test
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert project.ota.get("provider") == "mender"
+
+
+def test_consistency_boot_signing_unsupported_for_family(
+    tmp_path: Path,
+) -> None:
+    """Rule 2: AEN family with rsa2048 must fail (AEN only supports
+    ECDSA-P256 + ed25519 under the OPTIGA Trust M attestation flow)."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+
+boot:
+  method: mcuboot
+  signing:
+    algorithm: rsa2048
+    key_file: keys/dev_rsa.pem
+"""
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "rsa2048" in msg
+    assert "alif-ensemble" in msg
+    assert "ecdsa_p256" in msg or "ed25519" in msg
+
+
+def test_consistency_boot_signing_supported_aen_ecdsa(tmp_path: Path) -> None:
+    """Rule 2 happy path: AEN + ecdsa_p256 OK."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+
+boot:
+  method: mcuboot
+  signing:
+    algorithm: ecdsa_p256
+    key_file: keys/dev_ecdsa_p256.pem
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert (project.boot.get("signing") or {}).get("algorithm") == "ecdsa_p256"
+
+
+def test_consistency_boot_signing_supported_v2n_rsa(tmp_path: Path) -> None:
+    """Rule 2: V2N family accepts rsa2048 (different SoM family)."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+
+boot:
+  method: mcuboot
+  signing:
+    algorithm: rsa2048
+    key_file: keys/dev_rsa.pem
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert (project.boot.get("signing") or {}).get("algorithm") == "rsa2048"
+
+
+def test_consistency_tls_without_provider_rejected(tmp_path: Path) -> None:
+    """Rule 3: iot.tls: true with no mbedtls / bearssl in libraries
+    or extra_libraries must fail."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    iot: { tls: true }
+"""
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "m33_sm" in msg
+    assert "tls" in msg.lower()
+    assert "mbedtls" in msg
+    assert "bearssl" in msg
+
+
+def test_consistency_tls_satisfied_by_curated_mbedtls(tmp_path: Path) -> None:
+    """Rule 3 happy path: mbedtls in `libraries:` covers iot.tls."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    libraries: [mbedtls]
+    iot: { tls: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert "mbedtls" in project.cores["m33_sm"].libraries
+
+
+def test_consistency_tls_satisfied_by_curated_bearssl(tmp_path: Path) -> None:
+    """Rule 3: `bearssl` declared via the curated `libraries:` enum
+    also satisfies iot.tls.  (bearssl + mbedtls are the two TLS
+    providers rule 3 accepts.)"""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    libraries: [bearssl]
+    iot: { tls: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert "bearssl" in project.cores["m33_sm"].libraries
+
+
+def test_consistency_arena_larger_than_heap_warns(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rule 4: arena_kib > heap_kib emits a WARN, but doesn't fail."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    memory: { heap_kib: 32 }
+    inference: { default_arena_kib: 128 }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    err = capsys.readouterr().err
+    assert "WARN" in err
+    assert "default_arena_kib=128" in err
+    assert "heap_kib=32" in err
+    # Project loaded successfully (warning, not error).
+    assert project.cores["m33_sm"].inference["default_arena_kib"] == 128
+
+
+def test_consistency_arena_within_heap_silent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rule 4 happy path: arena fits in heap; no WARN emitted."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    memory: { heap_kib: 256 }
+    inference: { default_arena_kib: 128 }
+"""
+    path = _write_board(tmp_path, body)
+    load_board_yaml(path)
+    err = capsys.readouterr().err
+    # Rule 4 should not emit a WARN; G-4 partial-match WARN unrelated.
+    assert "default_arena_kib" not in err
+
+
+def test_consistency_sleep_mode_without_wakeup_warns(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rule 5: sleep_mode != disabled without wakeup_sources emits a WARN."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    power: { sleep_mode: deep }
+"""
+    path = _write_board(tmp_path, body)
+    load_board_yaml(path)
+    err = capsys.readouterr().err
+    assert "WARN" in err
+    assert "sleep_mode=deep" in err
+    assert "wakeup_sources" in err
+
+
+def test_consistency_sleep_mode_with_wakeup_silent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rule 5 happy path: sleep_mode with wakeup_sources declared -- no WARN."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    power:
+      sleep_mode: standby
+      wakeup_sources: [uart, gpio]
+"""
+    path = _write_board(tmp_path, body)
+    load_board_yaml(path)
+    err = capsys.readouterr().err
+    assert "sleep_mode" not in err
+
+
+def test_consistency_sleep_mode_disabled_silent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rule 5: explicit `sleep_mode: disabled` (the default) doesn't WARN
+    even when wakeup_sources is empty -- the device isn't sleeping."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    power: { sleep_mode: disabled }
+"""
+    path = _write_board(tmp_path, body)
+    load_board_yaml(path)
+    err = capsys.readouterr().err
+    assert "sleep_mode" not in err
