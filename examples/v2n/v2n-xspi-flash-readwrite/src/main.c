@@ -60,11 +60,11 @@ static void build_pattern(void) {
  * below short-circuits so the same source builds across the SDK's
  * twister matrix.  DEVICE_DT_GET would otherwise fail at link time
  * with `__device_dts_ord_DT_N_ALIAS_xspi_flash_ORD undeclared`. */
-#define XSPI_FLASH_NODE  DT_ALIAS(xspi_flash)
+#define XSPI_FLASH_NODE DT_ALIAS(xspi_flash)
 #if DT_NODE_HAS_STATUS(XSPI_FLASH_NODE, okay)
-#define XSPI_FLASH_DEV   DEVICE_DT_GET(XSPI_FLASH_NODE)
+#define XSPI_FLASH_DEV DEVICE_DT_GET(XSPI_FLASH_NODE)
 #else
-#define XSPI_FLASH_DEV   NULL
+#define XSPI_FLASH_DEV NULL
 #endif
 
 int main(void) {
