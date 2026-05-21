@@ -250,6 +250,15 @@ jobs:
         run: |
           python3 scripts/lint_doc_yaml_fragments.py
 
+      - name: Gate — every *_stub.c references a GitHub issue
+        run: python3 scripts/check_stub_issues.py
+
+      - name: Gate — vendor-ext headers carry @par Supported silicon tag
+        run: python3 scripts/check_vendor_ext_tags.py
+
+      - name: Gate — sw_fallback.c files carry Cost + Performance tags
+        run: python3 scripts/check_sw_fallback_tags.py
+
       # Validate every HiL smoke spec under tests/hil/ parses against
       # its board's _runner.yaml.  Cheap host-side check (no hardware
       # needed); catches a spec that references a deleted example,
