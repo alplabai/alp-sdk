@@ -341,3 +341,10 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/proto/alp_mproc_frame.c
 )
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/nanopb/include)
+
+# Instance-capability helpers (<alp/cap_instance.h>).  Hand-written
+# runtime logic that does not depend on per-SoC metadata; always
+# compiled so any subsystem can call alp_capabilities_has().
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/cap_helpers.c
+)
