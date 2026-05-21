@@ -66,6 +66,7 @@ DEFAULT_EXCLUDES: tuple[str, ...] = (
     "node_modules",
     "vendors",
     "docs/superpowers/specs",
+    "docs/superpowers/plans",
     "metadata/library-profiles/cmsis-dsp",
 )
 
