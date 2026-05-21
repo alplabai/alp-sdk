@@ -56,7 +56,9 @@ typedef enum {
     ALP_ERR_IO          = -5,   /**< Bus / line error. */
     ALP_ERR_NOSUPPORT   = -6,   /**< Backend lacks this feature. */
     ALP_ERR_NOMEM       = -7,   /**< Allocation failure. */
-    ALP_ERR_OUT_OF_RANGE = -8   /**< Config exceeds the SoC's documented hardware caps. */
+    ALP_ERR_OUT_OF_RANGE = -8,                    /**< Config exceeds the SoC's documented hardware caps. */
+    ALP_ERR_NOT_PRESENT_ON_THIS_SOC = -9,         /**< Hardware does not exist on this silicon (silicon-absent). Paired with ALP_BACKEND_AVAILABLE() == 0 at compile time. */
+    ALP_ERR_NOT_IMPLEMENTED = -10                 /**< Backend exists for this silicon but the implementation is a tracked stub (planned, not yet wired). Consult the linked @par Tracking: GitHub issue on the stub backend. */
 } alp_status_t;
 
 /**
