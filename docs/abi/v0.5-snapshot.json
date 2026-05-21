@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-20",
+  "generated": "2026-05-21",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -140,6 +140,38 @@
         "peripheral_id": {
           "definition": "typedef struct { uint32_t peripheral_id;",
           "hash": "c6d34a422215091d"
+        }
+      }
+    },
+    "alp/backend.h": {
+      "functions": {
+        "alp_backend_count": {
+          "hash": "739b6b1158ad65ae",
+          "signature": "size_t alp_backend_count(const char *class_name);"
+        }
+      },
+      "macros": {
+        "ALP_BACKEND_AVAILABLE": {
+          "hash": "18b781a0e45bc46e",
+          "value": "(class) (alp_backend_count(#class) > 0u)"
+        },
+        "ALP_BACKEND_DEFINE_CLASS": {
+          "hash": "bf141b06a3b5f762",
+          "value": "(class)"
+        },
+        "ALP_BACKEND_REGISTER": {
+          "hash": "51ac515a65458c06",
+          "value": "(class, name, ...)"
+        }
+      },
+      "typedefs": {
+        "alp_backend_class_range_t": {
+          "definition": "typedef struct alp_backend_class_range { const char *class_name; const alp_backend_t *start; const alp_backend_t *stop; } alp_backend_class_range_t;",
+          "hash": "f79b8094981e6857"
+        },
+        "base_caps": {
+          "definition": "typedef struct alp_backend { const char *silicon_ref; const char *vendor; uint32_t base_caps;",
+          "hash": "e65be8d68d466e7e"
         }
       }
     },
@@ -858,6 +890,30 @@
         "id": {
           "definition": "typedef struct { uint32_t id;",
           "hash": "87ed538825078832"
+        }
+      }
+    },
+    "alp/cap.h": {
+      "functions": {},
+      "macros": {},
+      "typedefs": {}
+    },
+    "alp/cap_instance.h": {
+      "functions": {
+        "alp_capabilities_has": {
+          "hash": "c2695132a1baa263",
+          "signature": "bool alp_capabilities_has(const alp_capabilities_t *c, alp_instance_cap_t f);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_instance_cap_t": {
+          "definition": "typedef enum { ALP_INSTANCE_CAP_DMA = 1u << 0, ALP_INSTANCE_CAP_HW_OVERSAMPLE = 1u << 1, ALP_INSTANCE_CAP_HW_TRIGGER = 1u << 2, ALP_INSTANCE_CAP_DIFFERENTIAL = 1u << 3, } alp_instance_cap_t;",
+          "hash": "93c927d1790b87b3"
+        },
+        "flags": {
+          "definition": "typedef struct alp_capabilities { uint32_t flags;",
+          "hash": "97a62ffae9776ac4"
         }
       }
     },
@@ -6679,8 +6735,8 @@
           "hash": "3d4c6b8b6611f2e7"
         },
         "alp_status_t": {
-          "definition": "typedef enum { ALP_OK = 0, ALP_ERR_INVAL = -1, ALP_ERR_NOT_READY = -2, ALP_ERR_BUSY = -3, ALP_ERR_TIMEOUT = -4, ALP_ERR_IO = -5, ALP_ERR_NOSUPPORT = -6, ALP_ERR_NOMEM = -7, ALP_ERR_OUT_OF_RANGE = -8 } alp_status_t;",
-          "hash": "c0fcd8155acd85e0"
+          "definition": "typedef enum { ALP_OK = 0, ALP_ERR_INVAL = -1, ALP_ERR_NOT_READY = -2, ALP_ERR_BUSY = -3, ALP_ERR_TIMEOUT = -4, ALP_ERR_IO = -5, ALP_ERR_NOSUPPORT = -6, ALP_ERR_NOMEM = -7, ALP_ERR_OUT_OF_RANGE = -8, ALP_ERR_NOT_PRESENT_ON_THIS_SOC = -9, ALP_ERR_NOT_IMPLEMENTED = -10 } alp_status_t;",
+          "hash": "aea8362fc383ca21"
         },
         "alp_uart_parity_t": {
           "definition": "typedef enum { ALP_UART_PARITY_NONE = 0, ALP_UART_PARITY_EVEN = 1, ALP_UART_PARITY_ODD = 2 } alp_uart_parity_t;",
