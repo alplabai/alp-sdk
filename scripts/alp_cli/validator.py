@@ -164,7 +164,14 @@ def _compat_pass(
             col = core.get("__column__", 1)
             collector.add(
                 Diagnostic(
-                    severity="error",
+                    # warning, not error: SoC peripherals JSON ingestion is
+                    # incomplete for several parts (e.g. iMX93 with its
+                    # `_pending_reason` placeholder), and some peripheral
+                    # categories surface board-side rather than directly on
+                    # the SoC (emmc / flash / ethernet via I/O controllers).
+                    # A false-positive ALP-B010 must not block the build —
+                    # surface the discrepancy and let the customer decide.
+                    severity="warning",
                     path=path,
                     line=line,
                     col=col,
@@ -172,11 +179,13 @@ def _compat_pass(
                     code="ALP-B010",
                     message=(
                         f"core '{core_name}': peripheral kind '{kind}' is not "
-                        f"available on silicon '{silicon_ref}'"
+                        f"listed on silicon '{silicon_ref}' (SoC JSON may be "
+                        f"incomplete or the peripheral is board-side)"
                     ),
                     hint=(
-                        f"remove this peripheral or switch som.sku to a part "
-                        f"with {kind} support"
+                        f"verify the SoC truly lacks {kind} before removing "
+                        f"this entry; if the SoC has it but the metadata is "
+                        f"stale, update metadata/socs/.../*.json"
                     ),
                 )
             )
