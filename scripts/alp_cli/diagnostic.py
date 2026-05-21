@@ -109,4 +109,4 @@ class DiagnosticCollector:
 
     def emit(self, source_text: str, color: bool | None = None) -> None:
         for diag in self._items:
-            print(render(diag, source_text=source_text, color=color))
+            print(render(diag, source_text=source_text, color=color), file=sys.stderr)
