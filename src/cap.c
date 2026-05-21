@@ -75,14 +75,16 @@ static const char *const _cap_names[ALP_CAP_ID_COUNT] = {
     [ALP_CAP_ID_DMA2D]       = "DMA2D",
 };
 
-bool alp_has(alp_cap_id_t cap) {
+bool alp_has(alp_cap_id_t cap)
+{
     if ((unsigned)cap >= (unsigned)ALP_CAP_ID_COUNT) {
         return false;
     }
     return _cap_table[cap];
 }
 
-const char *alp_cap_name(alp_cap_id_t cap) {
+const char *alp_cap_name(alp_cap_id_t cap)
+{
     if ((unsigned)cap >= (unsigned)ALP_CAP_ID_COUNT) {
         return NULL;
     }
