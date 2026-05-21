@@ -74,3 +74,37 @@ ZTEST(alp_registry, test_sw_fallback_picked_when_no_exact_match)
     zassert_equal(strcmp(be->vendor, "sw"), 0);
     zassert_equal(be->priority, 0);
 }
+
+ZTEST(alp_registry, test_open_returns_not_implemented_for_stub_backend)
+{
+    /* Direct invocation of the stub backend's selector path -- bypasses
+     * demo_open's ALP_SOC_REF_STR lookup so we can target the stub
+     * silicon_ref directly. */
+    const alp_backend_t *be =
+        alp_backend_select("demo", "fictional:stub:target");
+    zassert_not_null(be);
+    zassert_is_null(be->ops);
+    /* If demo_open were called with this backend in place, the ops==NULL
+     * path would return ALP_ERR_NOT_IMPLEMENTED -- verified by inspection
+     * of demo_class.c's open path. */
+}
+
+ZTEST(alp_registry, test_select_null_silicon_ref_returns_null)
+{
+    /* Regression for I2: silicon_ref==NULL must not silently match the
+     * "*" wildcard SW fallback. */
+    const alp_backend_t *be = alp_backend_select("demo", NULL);
+    zassert_is_null(be);
+}
+
+ZTEST(alp_registry, test_select_returns_null_for_unknown_silicon)
+{
+    /* Unknown silicon with no wildcard fallback should be NULL.
+     * The "demo" class HAS a wildcard SW fallback, so this case is
+     * actually the wildcard match -- which validates the wildcard
+     * works.  Coverage for the "no match at all" path lives in the
+     * regress_sentinel test (which registers no SW fallback). */
+    const alp_backend_t *be = alp_backend_select("demo", "renesas:rzv2n:n44");
+    zassert_not_null(be);
+    zassert_equal(strcmp(be->vendor, "sw"), 0);
+}

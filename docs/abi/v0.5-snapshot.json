@@ -11,9 +11,17 @@
           "hash": "4a46d073d2406412",
           "signature": "void alp_adc_filter_close(alp_adc_filter_t *filter);"
         },
+        "alp_adc_filter_open": {
+          "hash": "10146d31d595620d",
+          "signature": "alp_adc_filter_t * alp_adc_filter_open(const alp_adc_filter_config_t *cfg);"
+        },
         "alp_adc_filter_read": {
           "hash": "6274d4a82cac55b3",
           "signature": "alp_status_t alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got);"
+        },
+        "alp_adc_open": {
+          "hash": "d92fbf03c9a5f30c",
+          "signature": "alp_adc_t * alp_adc_open(const alp_adc_config_t *cfg);"
         },
         "alp_adc_read_raw": {
           "hash": "46239a90badd99fe",
@@ -27,6 +35,10 @@
           "hash": "4bf6b1f5d14c0a9a",
           "signature": "void alp_adc_spectrum_close(alp_adc_spectrum_t *spec);"
         },
+        "alp_adc_spectrum_open": {
+          "hash": "656d15c0f5171768",
+          "signature": "alp_adc_spectrum_t * alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg);"
+        },
         "alp_adc_spectrum_read_bins": {
           "hash": "90394e30f88e96d2",
           "signature": "alp_status_t alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, size_t *got);"
@@ -35,6 +47,10 @@
           "hash": "44e705b63f648978",
           "signature": "void alp_adc_stream_close(alp_adc_stream_t *stream);"
         },
+        "alp_adc_stream_open": {
+          "hash": "e44faa9127a200bd",
+          "signature": "alp_adc_stream_t * alp_adc_stream_open(const alp_adc_stream_config_t *cfg);"
+        },
         "alp_adc_stream_read": {
           "hash": "87c7b34244772693",
           "signature": "alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got);"
@@ -42,6 +58,10 @@
         "alp_dac_close": {
           "hash": "36ff8acebd09531e",
           "signature": "void alp_dac_close(alp_dac_t *dac);"
+        },
+        "alp_dac_open": {
+          "hash": "75d205275f109f14",
+          "signature": "alp_dac_t * alp_dac_open(const alp_dac_config_t *cfg);"
         },
         "alp_dac_read_mv": {
           "hash": "05d55c9c26cb2b19",
@@ -90,6 +110,10 @@
           "hash": "dac60281393e8fc5",
           "signature": "void alp_audio_in_close(alp_audio_in_t *in);"
         },
+        "alp_audio_in_open": {
+          "hash": "ab9e0c96b6f97c1b",
+          "signature": "alp_audio_in_t * alp_audio_in_open(const alp_audio_config_t *cfg);"
+        },
         "alp_audio_in_read": {
           "hash": "a43903a928fdde75",
           "signature": "alp_status_t alp_audio_in_read(alp_audio_in_t *in, void *buf, size_t frames, size_t *out_frames, uint32_t timeout_ms);"
@@ -105,6 +129,10 @@
         "alp_audio_out_close": {
           "hash": "9bf8d3aa01bec9b9",
           "signature": "void alp_audio_out_close(alp_audio_out_t *out);"
+        },
+        "alp_audio_out_open": {
+          "hash": "b31ec318c63d48f1",
+          "signature": "alp_audio_out_t * alp_audio_out_open(const alp_audio_config_t *cfg);"
         },
         "alp_audio_out_set_volume": {
           "hash": "be605d5a604b6efb",
@@ -148,6 +176,10 @@
         "alp_backend_count": {
           "hash": "739b6b1158ad65ae",
           "signature": "size_t alp_backend_count(const char *class_name);"
+        },
+        "alp_backend_select": {
+          "hash": "81b0140e2a62eb48",
+          "signature": "const alp_backend_t * alp_backend_select(const char *class_name, const char *silicon_ref);"
         }
       },
       "macros": {
@@ -212,6 +244,10 @@
         "alp_ble_gatt_write": {
           "hash": "cd09890f6549b4e0",
           "signature": "alp_status_t alp_ble_gatt_write(alp_ble_conn_t *conn, alp_ble_attr_handle_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms);"
+        },
+        "alp_ble_open": {
+          "hash": "ff2e07b972e0fbc0",
+          "signature": "alp_ble_t * alp_ble_open(void);"
         },
         "alp_ble_scan_start": {
           "hash": "e1c40e7e32fe4673",
@@ -331,6 +367,10 @@
         "alp_pdm_mic_close": {
           "hash": "17b93427b2127618",
           "signature": "void alp_pdm_mic_close(alp_pdm_mic_t *mic);"
+        },
+        "alp_pdm_mic_open": {
+          "hash": "daa22375478c4c40",
+          "signature": "alp_pdm_mic_t * alp_pdm_mic_open(const alp_pdm_mic_config_t *cfg);"
         },
         "alp_pdm_mic_read": {
           "hash": "643148cb708da6ab",
@@ -800,6 +840,10 @@
           "hash": "d99ef9681316b5cd",
           "signature": "alp_status_t alp_camera_configure_isp(alp_camera_t *camera, const alp_camera_isp_config_t *isp);"
         },
+        "alp_camera_open": {
+          "hash": "e14b545584b912d5",
+          "signature": "alp_camera_t * alp_camera_open(const alp_camera_config_t *cfg);"
+        },
         "alp_camera_release": {
           "hash": "9c155c4bf49789d5",
           "signature": "alp_status_t alp_camera_release(alp_camera_t *c, alp_camera_frame_t *frame);"
@@ -842,6 +886,10 @@
         "alp_can_close": {
           "hash": "b8c8447bc94fa110",
           "signature": "void alp_can_close(alp_can_t *can);"
+        },
+        "alp_can_open": {
+          "hash": "ff12d22baa1b1bc3",
+          "signature": "alp_can_t * alp_can_open(const alp_can_config_t *cfg);"
         },
         "alp_can_remove_filter": {
           "hash": "cb572459d356a5d3",
@@ -5056,6 +5104,10 @@
           "hash": "b5220300fde3902a",
           "signature": "alp_status_t alp_counter_get_value(alp_counter_t *counter, uint32_t *ticks_out);"
         },
+        "alp_counter_open": {
+          "hash": "21fd87ea1099801e",
+          "signature": "alp_counter_t * alp_counter_open(const alp_counter_config_t *cfg);"
+        },
         "alp_counter_set_alarm": {
           "hash": "619a01028cea584e",
           "signature": "alp_status_t alp_counter_set_alarm(alp_counter_t *counter, uint32_t ticks_from_now, alp_counter_alarm_cb_t cb, void *user);"
@@ -5079,6 +5131,10 @@
         "alp_qenc_get_position": {
           "hash": "cd78301e754f3f2c",
           "signature": "alp_status_t alp_qenc_get_position(alp_qenc_t *enc, int32_t *pos_out);"
+        },
+        "alp_qenc_open": {
+          "hash": "e283bafddc82ed78",
+          "signature": "alp_qenc_t * alp_qenc_open(const alp_qenc_config_t *cfg);"
         },
         "alp_qenc_reset_position": {
           "hash": "107f90806e3c93a2",
@@ -5126,6 +5182,10 @@
         "alp_display_get_caps": {
           "hash": "201dcea1acc1b993",
           "signature": "alp_status_t alp_display_get_caps(alp_display_t *d, alp_display_caps_t *out);"
+        },
+        "alp_display_open": {
+          "hash": "a45b753201339251",
+          "signature": "alp_display_t * alp_display_open(const alp_display_config_t *cfg);"
         }
       },
       "macros": {},
@@ -5157,6 +5217,10 @@
         "alp_dsp_chain_close": {
           "hash": "78d18aa7552747a3",
           "signature": "void alp_dsp_chain_close(alp_dsp_chain_t *chain);"
+        },
+        "alp_dsp_chain_open": {
+          "hash": "56e4a0992d1e4126",
+          "signature": "alp_dsp_chain_t * alp_dsp_chain_open(const alp_dsp_stage_t *stages, size_t n_stages);"
         }
       },
       "macros": {
@@ -6285,6 +6349,10 @@
         "alp_gpu2d_fill_rect": {
           "hash": "a8a4b826440370f3",
           "signature": "alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *dst, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t argb_color);"
+        },
+        "alp_gpu2d_open": {
+          "hash": "9a5c8e5b745a4917",
+          "signature": "alp_gpu2d_t * alp_gpu2d_open(void);"
         }
       },
       "macros": {},
@@ -6371,6 +6439,10 @@
           "hash": "95e26939ec2f8b35",
           "signature": "void alp_i2s_close(alp_i2s_t *i2s);"
         },
+        "alp_i2s_open": {
+          "hash": "5f445c6fd7de08fe",
+          "signature": "alp_i2s_t * alp_i2s_open(const alp_i2s_config_t *cfg);"
+        },
         "alp_i2s_read": {
           "hash": "00df1aed7da0a0d7",
           "signature": "alp_status_t alp_i2s_read(alp_i2s_t *i2s, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms);"
@@ -6433,6 +6505,10 @@
         "alp_inference_num_outputs": {
           "hash": "6b961d3c54c3ebbf",
           "signature": "size_t alp_inference_num_outputs(alp_inference_t *inf);"
+        },
+        "alp_inference_open": {
+          "hash": "176980d6c3627f80",
+          "signature": "alp_inference_t * alp_inference_open(const alp_inference_config_t *cfg);"
         }
       },
       "macros": {},
@@ -6477,6 +6553,10 @@
           "hash": "c1b2a52fb8ced50e",
           "signature": "alp_status_t alp_mqtt_loop(alp_mqtt_t *m, uint32_t timeout_ms);"
         },
+        "alp_mqtt_open": {
+          "hash": "9a4054a30c37321a",
+          "signature": "alp_mqtt_t * alp_mqtt_open(const alp_mqtt_config_t *cfg);"
+        },
         "alp_mqtt_publish": {
           "hash": "4c1fd4c8e907da33",
           "signature": "alp_status_t alp_mqtt_publish(alp_mqtt_t *m, const char *topic, const uint8_t *payload, size_t len, alp_mqtt_qos_t qos, bool retain);"
@@ -6496,6 +6576,10 @@
         "alp_wifi_disconnect": {
           "hash": "9b6a44ba61887635",
           "signature": "alp_status_t alp_wifi_disconnect(alp_wifi_t *w);"
+        },
+        "alp_wifi_open": {
+          "hash": "dd242f8d0b132c08",
+          "signature": "alp_wifi_t * alp_wifi_open(void);"
         }
       },
       "macros": {},
@@ -6540,6 +6624,10 @@
           "hash": "76755b7a89b05432",
           "signature": "alp_status_t alp_hwsem_lock(alp_hwsem_t *sem, uint32_t timeout_ms);"
         },
+        "alp_hwsem_open": {
+          "hash": "a160d9314494aa47",
+          "signature": "alp_hwsem_t * alp_hwsem_open(uint32_t hwsem_id);"
+        },
         "alp_hwsem_try_lock": {
           "hash": "573390058e39a10c",
           "signature": "alp_status_t alp_hwsem_try_lock(alp_hwsem_t *sem);"
@@ -6552,6 +6640,10 @@
           "hash": "6d1bbc72889a6ca9",
           "signature": "void alp_mbox_close(alp_mbox_t *mb);"
         },
+        "alp_mbox_open": {
+          "hash": "c9058394d9c1919a",
+          "signature": "alp_mbox_t * alp_mbox_open(const alp_mbox_config_t *cfg);"
+        },
         "alp_mbox_send": {
           "hash": "9c9d37adaa84a0f4",
           "signature": "alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len, uint32_t timeout_ms);"
@@ -6563,6 +6655,10 @@
         "alp_shmem_close": {
           "hash": "8c6ab0d499f113be",
           "signature": "void alp_shmem_close(alp_shmem_t *s);"
+        },
+        "alp_shmem_open": {
+          "hash": "6bed44c98b629389",
+          "signature": "alp_shmem_t * alp_shmem_open(const alp_shmem_config_t *cfg);"
         },
         "alp_shmem_view": {
           "hash": "f4af38b75a515761",
@@ -6627,6 +6723,10 @@
           "hash": "0d39b8224a038585",
           "signature": "alp_status_t alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, void *user);"
         },
+        "alp_gpio_open": {
+          "hash": "b79e5e0b389314aa",
+          "signature": "alp_gpio_t * alp_gpio_open(uint32_t pin_id);"
+        },
         "alp_gpio_read": {
           "hash": "e6150f59872b3bcb",
           "signature": "alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level);"
@@ -6638,6 +6738,10 @@
         "alp_i2c_close": {
           "hash": "37c43c93fb338484",
           "signature": "void alp_i2c_close(alp_i2c_t *bus);"
+        },
+        "alp_i2c_open": {
+          "hash": "40af1c8bc1769c3e",
+          "signature": "alp_i2c_t * alp_i2c_open(const alp_i2c_config_t *cfg);"
         },
         "alp_i2c_read": {
           "hash": "936f06f7f4414abc",
@@ -6659,6 +6763,10 @@
           "hash": "7dbfaa8be9435a4a",
           "signature": "void alp_spi_close(alp_spi_t *bus);"
         },
+        "alp_spi_open": {
+          "hash": "7b834f262fe18d50",
+          "signature": "alp_spi_t * alp_spi_open(const alp_spi_config_t *cfg);"
+        },
         "alp_spi_read": {
           "hash": "71e5873d83ffd4ff",
           "signature": "alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len);"
@@ -6675,9 +6783,17 @@
           "hash": "d1aa431d5117c45d",
           "signature": "void alp_uart_close(alp_uart_t *port);"
         },
+        "alp_uart_open": {
+          "hash": "f762da5801442675",
+          "signature": "alp_uart_t * alp_uart_open(const alp_uart_config_t *cfg);"
+        },
         "alp_uart_read": {
           "hash": "0bc64d97998fef72",
           "signature": "alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms);"
+        },
+        "alp_uart_rx_ringbuf_attach": {
+          "hash": "90c8d1d2d64d9ce8",
+          "signature": "alp_uart_rx_ringbuf_t * alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_size);"
         },
         "alp_uart_rx_ringbuf_count": {
           "hash": "4d630761e73e93ab",
@@ -6769,6 +6885,10 @@
         "alp_power_configure_wake_source": {
           "hash": "d42b698bee57d079",
           "signature": "alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_bitmap);"
+        },
+        "alp_power_open": {
+          "hash": "884b334187b41b49",
+          "signature": "alp_power_t * alp_power_open(void);"
         },
         "alp_power_request_sleep": {
           "hash": "6df7bca8e77d8254",
@@ -6949,6 +7069,10 @@
           "hash": "28a6ed8173d3a045",
           "signature": "void alp_pwm_capture_close(alp_pwm_capture_t *cap);"
         },
+        "alp_pwm_capture_open": {
+          "hash": "b3f58825c4b8156e",
+          "signature": "alp_pwm_capture_t * alp_pwm_capture_open(const alp_pwm_capture_config_t *cfg);"
+        },
         "alp_pwm_capture_read": {
           "hash": "f2203eef222a472e",
           "signature": "alp_status_t alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_out, uint32_t *pulse_ns_out);"
@@ -6960,6 +7084,10 @@
         "alp_pwm_configure": {
           "hash": "b4752c16814d2eca",
           "signature": "alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint32_t dead_time_ns, uint8_t break_cfg);"
+        },
+        "alp_pwm_open": {
+          "hash": "3c9d4c4ed3cf6433",
+          "signature": "alp_pwm_t * alp_pwm_open(const alp_pwm_config_t *cfg);"
         },
         "alp_pwm_set_duty": {
           "hash": "d7a2dc20068fdea1",
@@ -7021,6 +7149,10 @@
           "hash": "dcf59935692075e0",
           "signature": "void alp_rpc_close(alp_rpc_channel_t *ch);"
         },
+        "alp_rpc_open": {
+          "hash": "1e0d36d7b43c476d",
+          "signature": "alp_rpc_channel_t * alp_rpc_open(const alp_rpc_config_t *cfg);"
+        },
         "alp_rpc_send": {
           "hash": "c85e5a8d173ec7dc",
           "signature": "alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, size_t len);"
@@ -7073,6 +7205,10 @@
           "hash": "9558aa6199ab2b51",
           "signature": "alp_status_t alp_rtc_get_time(alp_rtc_t *rtc, alp_rtc_time_t *time);"
         },
+        "alp_rtc_open": {
+          "hash": "60e495cd0ee7db41",
+          "signature": "alp_rtc_t * alp_rtc_open(uint32_t rtc_id);"
+        },
         "alp_rtc_set_time": {
           "hash": "6605d83c9c82e365",
           "signature": "alp_status_t alp_rtc_set_time(alp_rtc_t *rtc, const alp_rtc_time_t *time);"
@@ -7104,6 +7240,10 @@
           "hash": "db1ba2a691af1f65",
           "signature": "alp_status_t alp_aead_encrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, const uint8_t *aad, size_t aad_len, const uint8_t *plain, size_t plain_len, uint8_t *cipher_out, uint8_t *tag_out, size_t tag_len);"
         },
+        "alp_aead_open": {
+          "hash": "bec66b9478a06de3",
+          "signature": "alp_aead_t * alp_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t key_len);"
+        },
         "alp_hash_close": {
           "hash": "3038e7f80bc7c87e",
           "signature": "void alp_hash_close(alp_hash_t *h);"
@@ -7111,6 +7251,10 @@
         "alp_hash_finish": {
           "hash": "7152a82c966179f1",
           "signature": "alp_status_t alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_cap, size_t *digest_len);"
+        },
+        "alp_hash_open": {
+          "hash": "4744e25e8658e60f",
+          "signature": "alp_hash_t * alp_hash_open(alp_hash_alg_t alg);"
         },
         "alp_hash_update": {
           "hash": "c7396515496760ab",
@@ -7301,6 +7445,10 @@
           "hash": "79f4f2bdc334cf92",
           "signature": "alp_status_t alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info);"
         },
+        "alp_storage_open": {
+          "hash": "d4d135f67ba2336d",
+          "signature": "alp_storage_t * alp_storage_open(const alp_storage_config_t *cfg);"
+        },
         "alp_storage_read": {
           "hash": "34b9475c84273d35",
           "signature": "alp_status_t alp_storage_read(alp_storage_t *s, uint64_t offset, void *data, size_t len);"
@@ -7410,6 +7558,10 @@
           "hash": "1e54586c5a30a0b0",
           "signature": "alp_status_t alp_usb_device_enable(alp_usb_dev_t *dev);"
         },
+        "alp_usb_device_open": {
+          "hash": "d2a69d936788c836",
+          "signature": "alp_usb_dev_t * alp_usb_device_open(const alp_usb_device_config_t *cfg);"
+        },
         "alp_usb_device_read": {
           "hash": "8953f7d180fe9d75",
           "signature": "alp_status_t alp_usb_device_read(alp_usb_dev_t *dev, uint8_t *data, size_t len, size_t *out_len, uint32_t timeout_ms);"
@@ -7429,6 +7581,10 @@
         "alp_usb_host_enable": {
           "hash": "a51f06f2026201a6",
           "signature": "alp_status_t alp_usb_host_enable(alp_usb_host_t *host);"
+        },
+        "alp_usb_host_open": {
+          "hash": "9e993b426bf31271",
+          "signature": "alp_usb_host_t * alp_usb_host_open(void);"
         }
       },
       "macros": {},
@@ -7464,6 +7620,10 @@
         "alp_wdt_feed": {
           "hash": "444a982055668a0b",
           "signature": "alp_status_t alp_wdt_feed(alp_wdt_t *wdt);"
+        },
+        "alp_wdt_open": {
+          "hash": "646cfd5cbef425f9",
+          "signature": "alp_wdt_t * alp_wdt_open(uint32_t wdt_id, const alp_wdt_config_t *cfg);"
         }
       },
       "macros": {},

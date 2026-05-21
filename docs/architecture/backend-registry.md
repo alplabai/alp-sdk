@@ -63,7 +63,7 @@ returns `ALP_ERR_NOT_IMPLEMENTED`. Stub files MUST live at
 
 | Code | Meaning |
 |---|---|
-| `ALP_ERR_NOT_PRESENT_ON_THIS_SOC` | Silicon physically lacks this block. Use a different SKU or accept the limitation. Paired with `ALP_HAS()`/`ALP_BACKEND_AVAILABLE()` at compile time. |
+| `ALP_ERR_NOT_PRESENT_ON_THIS_SOC` | Silicon physically lacks this block. Use a different SKU or accept the limitation. Paired with `ALP_HAS()` at compile time, or `ALP_BACKEND_AVAILABLE()` at runtime. |
 | `ALP_ERR_NOSUPPORT` | Backend exists, rejected the specific config. Adjust your config. |
 | `ALP_ERR_NOT_IMPLEMENTED` | Backend is a tracked stub. Consult the linked GitHub issue. |
 

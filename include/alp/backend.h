@@ -115,11 +115,13 @@ const alp_backend_t *alp_backend_select(const char *class_name,
 size_t alp_backend_count(const char *class_name);
 
 /**
- * @brief Convenience: does any backend exist for this class?
+ * @brief Runtime check: is any backend linked in for this class?
  *
- * Resolves at runtime via alp_backend_count.  For compile-time
- * pruning, customer code should use ALP_HAS(<CAP>) from <alp/cap.h>
- * which queries the SoC-level capability table.
+ * Resolves at runtime via alp_backend_count.  Use in `if(...)` —
+ * NOT preprocessor `#if`, since the count is a function call, not
+ * a constant expression.  For compile-time pruning, customer code
+ * should use ALP_HAS(<CAP>) from <alp/cap.h> which queries the
+ * SoC-level capability table.
  */
 #define ALP_BACKEND_AVAILABLE(class) (alp_backend_count(#class) > 0u)
 

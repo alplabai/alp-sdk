@@ -54,6 +54,9 @@ const alp_backend_t *alp_backend_select(const char *class_name,
     if (class_name == NULL) {
         return NULL;
     }
+    if (silicon_ref == NULL) {
+        return NULL;
+    }
     for (const alp_backend_class_range_t *c = __start_alp_backend_classes;
          c < __stop_alp_backend_classes; ++c) {
         if (strcmp(c->class_name, class_name) == 0) {

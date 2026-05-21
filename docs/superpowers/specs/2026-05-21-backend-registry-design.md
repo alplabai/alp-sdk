@@ -287,19 +287,21 @@ A stub file (`src/backends/<class>/<vendor>_stub.c`) registers normally but its 
 
 CI gate: every stub backend must reference an open GitHub issue. Closing the issue triggers a stub-removal task in the maintainer's queue.
 
-### Compile-time `ALP_BACKEND_AVAILABLE()` macro
+### Runtime `ALP_BACKEND_AVAILABLE()` macro
 
-Distinct from PR #14's `ALP_HAS(<CAP>)` (which queries SoC-level capability macros). The new `ALP_BACKEND_AVAILABLE(<class>)` evaluates `(0 != ALP_BACKEND_COUNT(<class>))` — a compile-time constant when the section is collected at link time. Customer code can `#if ALP_BACKEND_AVAILABLE(adc)` around blocks; the call site disappears on no-ADC builds without runtime check. The two macros coexist:
+Distinct from PR #14's `ALP_HAS(<CAP>)` (which queries SoC-level capability macros). `ALP_BACKEND_AVAILABLE(<class>)` calls `alp_backend_count()` at runtime — it is NOT a compile-time constant and MUST NOT be used in `#if` directives. Use it in an ordinary `if(...)` statement. The two macros coexist:
 
 ```c
-#if ALP_HAS(NPU_DRPAI)              /* SoC has the silicon block */
-#if ALP_BACKEND_AVAILABLE(inference) /* AND a backend is linked in */
-    /* call alp_inference_open(...) — both gates satisfied */
-#endif
+#if ALP_HAS(NPU_DRPAI)                  /* compile-time: SoC has the silicon block */
+    if (ALP_BACKEND_AVAILABLE(inference)) {   /* runtime: backend is linked in */
+        /* call alp_inference_open(...) — both gates satisfied */
+    }
 #endif
 ```
 
-Both gates true → call is safe. SoC gate true but backend missing → reachable, but `alp_inference_open` will return `ALP_ERR_NOT_PRESENT_ON_THIS_SOC` at runtime. The double gate lets customers ship one binary across multiple SoMs in the same family.
+(The outer `#if` removes the call site on no-NPU silicon at compile time; the inner `if` guards against backend-not-linked at runtime.)
+
+SoC gate true but backend missing at runtime → `alp_inference_open` returns `ALP_ERR_NOT_PRESENT_ON_THIS_SOC`. For compile-time pruning on no-backend builds, use `ALP_HAS(<CAP>)` alone. The double gate lets customers ship one binary across multiple SoMs in the same family.
 
 ---
 
