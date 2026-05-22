@@ -24,10 +24,10 @@ zephyr_library_sources(
     # src/backends/wifi/{zephyr_drv,sw_fallback}.c and the MQTT half
     # to src/backends/mqtt/{zephyr_drv,sw_fallback}.c.  Both halves
     # now ship as registry-shaped backends; see the MQTT block below.
-    # audio_zephyr.c follows the same split: real DMIC + alp_i2s_*
-    # delegation behind CONFIG_ALP_SDK_AUDIO_IN / _OUT, NOSUPPORT
-    # contract elsewhere.
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/audio_zephyr.c
+    # audio_zephyr.c retired in Slice 4d -- both directions
+    # (alp_audio_in_t + alp_audio_out_t) migrated to
+    # src/backends/audio/{zephyr_drv,sw_fallback}.c with the
+    # dispatcher in src/audio_dispatch.c.  See the audio block below.
     # inference_zephyr.c carries the public-API glue + handle pool;
     # per-backend executors (TFLM C++ wrapper, DRP-AI, DEEPX) compile
     # in only when their CONFIG_ flag is on so the wrapper itself
@@ -128,6 +128,22 @@ zephyr_library_sources(
 if(CONFIG_ALP_SDK_SECURITY_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/sw_fallback.c)
+endif()
+
+# Audio registry sources -- replace the legacy
+# src/zephyr/audio_zephyr.c from the v0.3 contract.  The dispatcher
+# owns two handle pools (alp_audio_in_t + alp_audio_out_t) keyed off
+# the same class registry; the portable Zephyr backend lifts the
+# DMIC input + alp_i2s_*-delegated output body verbatim.
+# Dispatcher + Zephyr backend ship unconditionally; sw_fallback
+# gated on the native_sim opt-in.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/audio_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/audio/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_AUDIO_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/audio/sw_fallback.c)
 endif()
 
 # RPC registry sources -- replace the legacy src/zephyr/rpc_zephyr.c
