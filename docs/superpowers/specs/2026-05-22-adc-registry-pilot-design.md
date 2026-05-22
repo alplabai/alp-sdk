@@ -238,9 +238,15 @@ config ALP_SDK_ADC_SW_FALLBACK
 
 - Defines `ALP_EXT_ALIF_ADC_AVAILABLE 1` for compile-time discoverability.
 - Declares `alp_alif_adc_trigger_t` enum (SOFTWARE, TIMER0–3, EXT_PIN).
-- Declares `alp_alif_adc_set_oversampling(alp_adc_t *h, uint16_t ratio)` and `alp_alif_adc_set_trigger_source(alp_adc_t *h, alp_alif_adc_trigger_t src)`.
+- Declares `alp_alif_adc_set_trigger_source(alp_adc_t *h, alp_alif_adc_trigger_t src)`.
 - Every public function carries `@par Supported silicon: alif:ensemble:e7` (enforced by Slice 0's `check_vendor_ext_tags.py`).
 - File-level `[ABI-EXPERIMENTAL]` marker.
+
+**Note:** `alp_alif_adc_set_oversampling` was originally planned but
+dropped (2026-05-22) per the vendor-ext audit rule in the master spec.
+Zephyr's `adc_sequence.oversampling` already covers the feature, and
+the portable `alp_adc_config_t.oversampling_ratio` field reaches every
+OS backend.  The Alif backend reads it at open time.
 
 ### Implementation
 

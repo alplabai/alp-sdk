@@ -153,39 +153,9 @@ ZTEST(alp_adc_registry, test_sw_handle_advertises_no_hw_caps)
 
 /* ---------- Vendor-extension tests --------------------------------- */
 
-ZTEST(alp_adc_registry, test_alif_set_oversampling_rejects_non_alif_handle)
-{
-    alp_adc_t *h = _make_fake_handle("fictional:soc:zz");
-    zassert_not_null(h);
-    alp_status_t rc = alp_alif_adc_set_oversampling(h, 8u);
-    zassert_equal(rc, ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-}
-
-ZTEST(alp_adc_registry, test_alif_set_oversampling_rejects_non_power_of_two)
-{
-    alp_adc_t *h = _make_fake_handle("alif:ensemble:e7");
-    zassert_not_null(h);
-    /* be_data is NULL on the fake handle, but the validation gate
-     * is reached BEFORE the dereference. */
-    alp_status_t rc = alp_alif_adc_set_oversampling(h, 7u);   /* not 2^N */
-    zassert_equal(rc, ALP_ERR_INVAL);
-}
-
-ZTEST(alp_adc_registry, test_alif_set_oversampling_rejects_zero)
-{
-    alp_adc_t *h = _make_fake_handle("alif:ensemble:e7");
-    zassert_not_null(h);
-    alp_status_t rc = alp_alif_adc_set_oversampling(h, 0u);
-    zassert_equal(rc, ALP_ERR_INVAL);
-}
-
-ZTEST(alp_adc_registry, test_alif_set_oversampling_rejects_above_256)
-{
-    alp_adc_t *h = _make_fake_handle("alif:ensemble:e7");
-    zassert_not_null(h);
-    alp_status_t rc = alp_alif_adc_set_oversampling(h, 512u);
-    zassert_equal(rc, ALP_ERR_INVAL);
-}
+/* set_oversampling tests removed (2026-05-22): the function was
+ * dropped per the vendor-ext audit rule -- oversampling is reachable
+ * via the portable alp_adc_config_t::oversampling_ratio field. */
 
 ZTEST(alp_adc_registry, test_alif_set_trigger_rejects_non_alif_handle)
 {
@@ -207,7 +177,6 @@ ZTEST(alp_adc_registry, test_alif_set_trigger_rejects_out_of_range_enum)
 
 ZTEST(alp_adc_registry, test_vendor_ext_null_handle_returns_inval)
 {
-    zassert_equal(alp_alif_adc_set_oversampling(NULL, 8u), ALP_ERR_INVAL);
     zassert_equal(alp_alif_adc_set_trigger_source(NULL,
                                                    ALP_ALIF_ADC_TRIGGER_SOFTWARE),
                   ALP_ERR_INVAL);

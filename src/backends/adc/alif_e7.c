@@ -86,7 +86,7 @@ typedef struct alif_e7_adc_state {
     const struct adc_dt_spec *spec;
     uint8_t                   channel_id;
     uint8_t                   resolution_bits;
-    uint16_t                  oversample_ratio;     /* 1 = disabled */
+    uint16_t                  oversample_ratio;     /* sourced from cfg->oversampling_ratio at open */
     alp_alif_adc_trigger_t    trigger_source;
     int16_t                   sample_buf;
     bool                      in_use;
@@ -142,6 +142,12 @@ static alp_status_t alif_e7_open(const alp_adc_config_t *cfg,
     s->resolution_bits = (cfg->resolution_bits != 0)
                             ? cfg->resolution_bits
                             : (uint8_t)spec->resolution;
+    /* HW oversampling reaches us via the portable config field (Zephyr's
+     * adc_sequence.oversampling already abstracts this).  Vendor-ext
+     * for oversampling would be redundant -- it's promoted to portable. */
+    s->oversample_ratio = (cfg->oversampling_ratio > 1u)
+                              ? cfg->oversampling_ratio
+                              : 1u;
 
     int err = adc_channel_setup_dt(spec);
     if (err != 0) {
@@ -205,27 +211,6 @@ ALP_BACKEND_REGISTER(adc, alif_e7, {
 });
 
 /* === Vendor-extension bodies === */
-
-static bool _is_power_of_two_le_256(uint16_t v)
-{
-    return v != 0 && v <= 256 && (v & (uint16_t)(v - 1u)) == 0u;
-}
-
-alp_status_t alp_alif_adc_set_oversampling(alp_adc_t *h, uint16_t ratio)
-{
-    if (h == NULL) {
-        return ALP_ERR_INVAL;
-    }
-    if (strcmp(h->backend->vendor, "alif") != 0) {
-        return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
-    }
-    if (!_is_power_of_two_le_256(ratio)) {
-        return ALP_ERR_INVAL;
-    }
-    alif_e7_adc_state_t *s = (alif_e7_adc_state_t *)h->state.be_data;
-    s->oversample_ratio = ratio;
-    return ALP_OK;
-}
 
 alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h,
                                              alp_alif_adc_trigger_t src)

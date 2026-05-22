@@ -6338,10 +6338,6 @@
     },
     "alp/ext/alif/adc.h": {
       "functions": {
-        "alp_alif_adc_set_oversampling": {
-          "hash": "bef0293c04d6ea50",
-          "signature": "alp_status_t alp_alif_adc_set_oversampling(alp_adc_t *h, uint16_t ratio);"
-        },
         "alp_alif_adc_set_trigger_source": {
           "hash": "d42eab7bb5587960",
           "signature": "alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h, alp_alif_adc_trigger_t src);"

@@ -44,20 +44,13 @@ typedef enum {
     ALP_ALIF_ADC_TRIGGER_EXT_PIN,
 } alp_alif_adc_trigger_t;
 
-/**
- * @brief Configure Alif ADC hardware oversampling sequencer.
- *
- * @par Supported silicon: alif:ensemble:e7
- *
- * @param h      Handle from @ref alp_adc_open opened against an Alif SoC.
- * @param ratio  Oversampling ratio: 1, 2, 4, 8, 16, 32, 64, 128, or 256.
- *               1 disables oversampling.
- * @return  @ref ALP_OK on success.
- *          @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC if h was opened on
- *               non-Alif silicon.
- *          @ref ALP_ERR_INVAL on a non-power-of-2 ratio or ratio > 256.
- */
-alp_status_t alp_alif_adc_set_oversampling(alp_adc_t *h, uint16_t ratio);
+/* Note: HW oversampling is NOT a vendor extension -- it's reachable
+ * through the portable @ref alp_adc_config_t::oversampling_ratio field
+ * at open time, which the Alif backend translates into Zephyr's
+ * adc_sequence.oversampling.  Adding alp_alif_adc_set_oversampling()
+ * would duplicate functionality the portable surface already covers.
+ * Per the vendor-ext audit rule: extensions are reserved for surface
+ * that the portable layer (or Zephyr's adc_*) genuinely cannot reach. */
 
 /**
  * @brief Configure Alif ADC hardware trigger source.
