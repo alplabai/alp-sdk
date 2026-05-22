@@ -163,22 +163,10 @@ struct alp_pwm {
 };
 
 /* ------------------------------------------------------------------ */
-/* ADC                                                                 */
+/* ADC -- struct alp_adc layout moved to src/backends/adc/adc_ops.h    */
+/*   (Slice 1 ADC-registry pilot, 2026-05-22).  Both the new           */
+/*   dispatcher and the per-vendor backends share that definition.     */
 /* ------------------------------------------------------------------ */
-
-struct alp_adc {
-    bool                  in_use;
-    uint32_t              channel_id;
-    const struct device  *dev;
-    uint8_t               channel;       /* hardware channel id */
-    uint8_t               resolution;
-    uint8_t               oversampling;
-    uint8_t               gain;          /* zephyr adc_gain encoded enum */
-    uint8_t               reference;     /* zephyr adc_reference encoded enum */
-    uint16_t              vref_mv;
-    uint16_t              acquisition_us;
-    int16_t               sample_buf;    /* room for one sample */
-};
 
 /* ------------------------------------------------------------------ */
 /* Counter                                                             */
@@ -319,8 +307,8 @@ void                alp_z_gpio_pool_release(struct alp_gpio *h);
 struct alp_pwm     *alp_z_pwm_pool_acquire(void);
 void                alp_z_pwm_pool_release(struct alp_pwm *h);
 
-struct alp_adc     *alp_z_adc_pool_acquire(void);
-void                alp_z_adc_pool_release(struct alp_adc *h);
+/* alp_z_adc_pool_* removed in Slice 1 -- the new src/adc_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_adc layout. */
 
 struct alp_counter *alp_z_counter_pool_acquire(void);
 void                alp_z_counter_pool_release(struct alp_counter *h);
