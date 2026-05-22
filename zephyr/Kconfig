@@ -300,6 +300,21 @@ config ALP_SDK_PERIPH_ADC
 	  an io-channels phandle and the standard ADC channel-config
 	  properties).
 
+config ALP_SDK_ADC_SW_FALLBACK
+	bool "Software ADC fallback (polled, deterministic saw wave)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles src/backends/adc/sw_fallback.c, which registers a
+	  wildcard ADC backend at priority 0 in the .alp_backends_adc
+	  linker section.  The registry selector picks this backend
+	  only when no hardware backend matches the active SoC ref.
+	  Off by default on real silicon; default on for native_sim
+	  builds so examples compile without a real ADC peripheral.
+	  Compiled into the build only after Slice 1 Task 8 swaps the
+	  legacy peripheral_adc.c for the new dispatcher.
+
 config ALP_SDK_PERIPH_COUNTER
 	bool "Enable <alp/counter.h> free-running counter wrapper"
 	default y if COUNTER
