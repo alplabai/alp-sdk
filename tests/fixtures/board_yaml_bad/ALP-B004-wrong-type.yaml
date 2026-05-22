@@ -1,0 +1,9 @@
+som:
+  sku: E1M-AEN701
+preset: e1m-evk
+cores:
+  m55_hp:
+    app: ./src
+    peripherals: "should be a list"
+diagnostics:
+  log_level: info

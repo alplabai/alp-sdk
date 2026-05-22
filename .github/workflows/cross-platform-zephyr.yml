@@ -112,7 +112,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Python deps
-        run: pip install jsonschema pyyaml pytest
+        run: pip install -e ".[dev]"
 
       # ---------------------------------------------------------
       # 1. Metadata validation.

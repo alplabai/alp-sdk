@@ -1,0 +1,7 @@
+som:
+  sku: E1M-AEN701
+preset: nope-doesnt-exist
+cores:
+  m55_hp:
+    app: ./src
+    peripherals: []
