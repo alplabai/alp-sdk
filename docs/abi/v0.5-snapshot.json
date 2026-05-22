@@ -6660,6 +6660,10 @@
     },
     "alp/mproc.h": {
       "functions": {
+        "alp_hwsem_capabilities": {
+          "hash": "37a6a928a5906e7b",
+          "signature": "const alp_capabilities_t * alp_hwsem_capabilities(const alp_hwsem_t *sem);"
+        },
         "alp_hwsem_close": {
           "hash": "47518fc58aae0b5f",
           "signature": "void alp_hwsem_close(alp_hwsem_t *sem);"
@@ -6680,6 +6684,10 @@
           "hash": "487aa9bd01cd2ae9",
           "signature": "alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem);"
         },
+        "alp_mbox_capabilities": {
+          "hash": "fbcc69bea5611a77",
+          "signature": "const alp_capabilities_t * alp_mbox_capabilities(const alp_mbox_t *mb);"
+        },
         "alp_mbox_close": {
           "hash": "6d1bbc72889a6ca9",
           "signature": "void alp_mbox_close(alp_mbox_t *mb);"
@@ -6695,6 +6703,10 @@
         "alp_mbox_set_callback": {
           "hash": "47b4010791d6990b",
           "signature": "alp_status_t alp_mbox_set_callback(alp_mbox_t *mb, alp_mbox_msg_cb_t cb, void *user);"
+        },
+        "alp_shmem_capabilities": {
+          "hash": "4dd2cd77b19f9c51",
+          "signature": "const alp_capabilities_t * alp_shmem_capabilities(const alp_shmem_t *s);"
         },
         "alp_shmem_close": {
           "hash": "8c6ab0d499f113be",
@@ -7188,6 +7200,10 @@
         "alp_rpc_call": {
           "hash": "bf0cb5629f817367",
           "signature": "alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method, const void *req, size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms);"
+        },
+        "alp_rpc_capabilities": {
+          "hash": "a640e9a33587fb20",
+          "signature": "const alp_capabilities_t * alp_rpc_capabilities(const alp_rpc_channel_t *ch);"
         },
         "alp_rpc_close": {
           "hash": "dcf59935692075e0",
