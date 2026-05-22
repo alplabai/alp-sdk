@@ -534,10 +534,29 @@ config ALP_SDK_IOT_MQTT
 	default y if MQTT_LIB
 	depends on MQTT_LIB && NET_TCP
 	help
-	  Enable the real mqtt_client-backed alp_mqtt_* implementation.
-	  Requires CONFIG_MQTT_LIB=y + CONFIG_NET_TCP=y.  When OFF
-	  alp_mqtt_open() returns NULL with alp_last_error() =
-	  ALP_ERR_NOSUPPORT.
+	  Gates the real Zephyr mqtt_client body inside
+	  src/backends/mqtt/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  MQTT-side op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4b the dispatcher (src/mqtt_dispatch.c) and its
+	  Zephyr backend (src/backends/mqtt/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_MQTT_SW_FALLBACK for the software-backend opt-in.
+
+	  Requires CONFIG_MQTT_LIB=y + CONFIG_NET_TCP=y.
+
+config ALP_SDK_MQTT_SW_FALLBACK
+	bool "Software MQTT fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op MQTT backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test only -- no real
+	  broker is reachable, so open succeeds silently and every
+	  other op returns ALP_ERR_NOT_IMPLEMENTED.
 
 config ALP_SDK_MAX_WIFI_HANDLES
 	int "Maximum concurrent alp_wifi_t handles"

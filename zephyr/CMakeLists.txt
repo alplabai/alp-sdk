@@ -20,12 +20,10 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_gpio.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_uart.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/camera_stub.c
-    # iot_zephyr.c replaces the v0.2 NOSUPPORT stub. The wrapper is
-    # always compiled; the real wifi_mgmt + mqtt_client glue inside
-    # is gated on CONFIG_ALP_SDK_IOT_WIFI / CONFIG_ALP_SDK_IOT_MQTT
-    # so host / native_sim builds without those subsystems still get
-    # the documented v0.1 NULL-with-NOSUPPORT contract.
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/iot_zephyr.c
+    # iot_zephyr.c retired in Slice 4b -- the Wi-Fi half migrated to
+    # src/backends/wifi/{zephyr_drv,sw_fallback}.c and the MQTT half
+    # to src/backends/mqtt/{zephyr_drv,sw_fallback}.c.  Both halves
+    # now ship as registry-shaped backends; see the MQTT block below.
     # audio_zephyr.c follows the same split: real DMIC + alp_i2s_*
     # delegation behind CONFIG_ALP_SDK_AUDIO_IN / _OUT, NOSUPPORT
     # contract elsewhere.
@@ -67,8 +65,8 @@ if(CONFIG_ALP_SDK_BLE_SW_FALLBACK)
 endif()
 
 # Wi-Fi registry sources -- replace the Wi-Fi half of the legacy
-# src/zephyr/iot_zephyr.c (MQTT still lives there until the next
-# subagent lifts it).  Dispatcher + portable Zephyr backend ship
+# src/zephyr/iot_zephyr.c (retired in Slice 4b together with its
+# MQTT sibling below).  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/wifi_dispatch.c
@@ -77,6 +75,19 @@ zephyr_library_sources(
 if(CONFIG_ALP_SDK_WIFI_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/sw_fallback.c)
+endif()
+
+# MQTT registry sources -- replace the MQTT half of the legacy
+# src/zephyr/iot_zephyr.c (now deleted in Slice 4b).  Dispatcher +
+# portable Zephyr backend ship unconditionally; sw_fallback gated
+# on the native_sim opt-in.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/mqtt_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mqtt/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_MQTT_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mqtt/sw_fallback.c)
 endif()
 
 # v0.6 -- <alp/rpc.h> framed RPC over OpenAMP / RPMsg.  Gated on
