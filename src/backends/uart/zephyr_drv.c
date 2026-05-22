@@ -167,25 +167,7 @@ extern void alp_z_clear_last_error(void);
 
 #if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)
 
-#include <lwrb/lwrb.h>
-
-/* Forward-declare the pool functions from handles.c so we can call
- * them without pulling in handles.h (which would re-define struct alp_uart
- * -- already defined via uart_ops.h above). */
-struct alp_uart_rx_ringbuf;
-extern struct alp_uart_rx_ringbuf *alp_z_uart_rx_ringbuf_pool_acquire(void);
-extern void alp_z_uart_rx_ringbuf_pool_release(struct alp_uart_rx_ringbuf *h);
-
-/* The full struct is needed inside this TU to read/write fields.
- * Replicate the definition here using the same layout as handles.h;
- * the two definitions are identical and both guarded by the same
- * CONFIG flag so the compiler sees only one per TU. */
-struct alp_uart_rx_ringbuf {
-    bool                 in_use;
-    const struct device *dev;     /* mirror of port->state.dev for ISR use */
-    struct alp_uart     *port;    /* back-ref for detach */
-    lwrb_t               rb;
-};
+#include "../../zephyr/handles.h"
 
 /* IRQ-context drain: pull bytes out of the controller FIFO into the
  * caller's LwRB.  Single-producer / single-consumer holds because

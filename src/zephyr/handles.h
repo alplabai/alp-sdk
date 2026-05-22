@@ -83,10 +83,8 @@ extern "C" {
 #endif
 
 /* ------------------------------------------------------------------ */
-/* UART                                                                */
+/* UART RX ring buffer                                                 */
 /* ------------------------------------------------------------------ */
-
-/* struct alp_uart is defined in src/backends/uart/uart_ops.h.         */
 
 /* RX ring buffer state -- only compiled when the feature is enabled
  * so builds without CONFIG_ALP_SDK_UART_RX_RINGBUF don't pull in the
