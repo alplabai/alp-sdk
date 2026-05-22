@@ -36,7 +36,10 @@ zephyr_library_sources(
     # Remaining v0.3 surfaces still on the stub contract -- swap in
     # their *_zephyr.c counterparts as they ship.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/security_zephyr.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/mproc_zephyr.c
+    # mproc_zephyr.c retired in Slice 4c -- all three primitives
+    # (shmem + mbox + hwsem) migrated to
+    # src/backends/mproc/{zephyr_drv,sw_fallback}.c with the
+    # dispatcher in src/mproc_dispatch.c.  See the mproc block below.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/storage_stub.c
 )
 
@@ -88,6 +91,22 @@ zephyr_library_sources(
 if(CONFIG_ALP_SDK_MQTT_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mqtt/sw_fallback.c)
+endif()
+
+# mproc registry sources -- replace the legacy
+# src/zephyr/mproc_zephyr.c from the v0.7 contract.  The dispatcher
+# owns three handle pools (shmem + mbox + hwsem) keyed off the same
+# class registry; the portable Zephyr backend covers all three
+# primitives via DT_ALIAS(alp_shmemN) / DT_ALIAS(alp_mboxN) /
+# intra-core k_sem fallback.  Dispatcher + Zephyr backend ship
+# unconditionally; sw_fallback gated on the native_sim opt-in.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/mproc_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_MPROC_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/sw_fallback.c)
 endif()
 
 # v0.6 -- <alp/rpc.h> framed RPC over OpenAMP / RPMsg.  Gated on
