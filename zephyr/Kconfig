@@ -93,14 +93,27 @@ config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4
 
+config ALP_SDK_UART_SW_FALLBACK
+	bool "Software UART fallback (in-memory circular buffer)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a deterministic in-memory UART loopback backend that
+	  registers as a wildcard at priority 0.  write() appends bytes
+	  into a 64-byte circular buffer (overflow silently truncated);
+	  read() drains available bytes up to len.  For native_sim build
+	  / test only -- production firmware MUST NOT rely on this since
+	  no real device is driven.
+
 config ALP_SDK_UART_RX_RINGBUF
 	bool "Byte-granular RX ring buffer (LwRB) for <alp/peripheral.h> UART"
 	default n
 	depends on SERIAL && UART_INTERRUPT_DRIVEN
 	help
-	  Enable the alp_uart_rx_ringbuf_* helpers in src/zephyr/peripheral_uart.c.
-	  When attached to an open alp_uart_t, the SDK registers an
-	  interrupt-driven RX callback that drains the controller's FIFO
+	  Enable the alp_uart_rx_ringbuf_* helpers in the UART Zephyr
+	  backend.  When attached to an open alp_uart_t, the SDK registers
+	  an interrupt-driven RX callback that drains the controller's FIFO
 	  into a caller-supplied LwRB-backed ring; consumer code drains
 	  bytes via alp_uart_rx_ringbuf_pop without polling.  Backed by
 	  the SDK-internal LwRB stub (vendors/lwrb/) until the v0.4
