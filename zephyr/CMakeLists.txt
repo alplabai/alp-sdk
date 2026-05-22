@@ -35,7 +35,11 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_zephyr.c
     # Remaining v0.3 surfaces still on the stub contract -- swap in
     # their *_zephyr.c counterparts as they ship.
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/security_zephyr.c
+    # security_zephyr.c retired in Slice 4d -- all three primitives
+    # (hash + AEAD + random) migrated to
+    # src/backends/security/{zephyr_drv,sw_fallback}.c with the
+    # dispatcher in src/security_dispatch.c.  See the security block
+    # below.
     # mproc_zephyr.c retired in Slice 4c -- all three primitives
     # (shmem + mbox + hwsem) migrated to
     # src/backends/mproc/{zephyr_drv,sw_fallback}.c with the
@@ -107,6 +111,23 @@ zephyr_library_sources(
 if(CONFIG_ALP_SDK_MPROC_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/sw_fallback.c)
+endif()
+
+# Security registry sources -- replace the legacy
+# src/zephyr/security_zephyr.c from the v0.3 contract.  The dispatcher
+# owns two handle pools (hash + AEAD) plus a cached ops pointer for
+# the stateless alp_random_bytes fast path; the portable Zephyr
+# backend lifts the PSA Crypto body verbatim (PSA picks the active
+# SoC's HW accelerator transparently via MbedTLS's driver layer).
+# Dispatcher + Zephyr backend ship unconditionally; sw_fallback gated
+# on the native_sim opt-in.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/security_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_SECURITY_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/sw_fallback.c)
 endif()
 
 # RPC registry sources -- replace the legacy src/zephyr/rpc_zephyr.c

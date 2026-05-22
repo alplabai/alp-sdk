@@ -838,12 +838,42 @@ config ALP_SDK_SECURITY
 	default y if MBEDTLS_PSA_CRYPTO_C
 	depends on MBEDTLS && MBEDTLS_PSA_CRYPTO_C
 	help
+	  Gates the real body inside src/backends/security/zephyr_drv.c.
+	  When OFF, the registry backend still links (so the dispatcher
+	  resolves) but every primitive's I/O op returns
+	  ALP_ERR_NOSUPPORT.
+
 	  Wires the alp_hash_* / alp_aead_* / alp_random_bytes
 	  surface onto MbedTLS's PSA Crypto API.  PSA picks the
 	  active SoC's hardware accelerator transparently when the
 	  vendor's driver layer registers it (Alif Ensemble crypto
-	  subsystem, Renesas RZ/V2N RSIP).  When OFF the wrapper
-	  falls back to NULL / NOSUPPORT.
+	  subsystem, Renesas RZ/V2N RSIP).
+
+	  After Slice 4d the dispatcher (src/security_dispatch.c) owns
+	  two handle pools (hash + AEAD) and caches the selected
+	  backend's ops vtable for the stateless alp_random_bytes fast
+	  path; the Zephyr backend (src/backends/security/zephyr_drv.c)
+	  is compiled unconditionally so the registry resolves on every
+	  build.  See ALP_SDK_SECURITY_SW_FALLBACK for the software-
+	  backend opt-in.
+
+config ALP_SDK_SECURITY_SW_FALLBACK
+	bool "Software security fallback (no-op / deterministic random)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a stub security backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test and for any build
+	  where MbedTLS / PSA Crypto is absent -- hash_open / aead_open
+	  succeed (the dispatcher hands out a handle) but hash_update /
+	  hash_finish / aead_encrypt / aead_decrypt all return
+	  ALP_ERR_NOT_IMPLEMENTED; random_bytes returns ALP_OK and fills
+	  the buffer with a deterministic counter+0xAA pattern.  NOT
+	  cryptographically random -- the wildcard exists for native_sim
+	  portability, not security.  Production builds always link the
+	  priority-100 zephyr_drv backend which routes through PSA
+	  Crypto's DRBG.
 
 config ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
 	bool "Feed the GD32 supervisor's TRNG into MbedTLS entropy on V2N"
@@ -851,7 +881,7 @@ config ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
 	depends on ALP_SDK_V2N_SUPERVISOR && ALP_SDK_SECURITY
 	help
 	  Compile the mbedtls_hardware_poll() implementation in
-	  src/zephyr/security_zephyr.c that drains true-random bytes
+	  src/backends/security/zephyr_drv.c that drains true-random bytes
 	  from the GD32G553 supervisor's NIST SP800-90B pre-certified
 	  TRNG.  The mbedtls profile (metadata/library-profiles/mbedtls/
 	  mbedtls_config.h) sets MBEDTLS_NO_PLATFORM_ENTROPY, so
