@@ -12,16 +12,11 @@
  * what the generated init/usage code (and any hand-written application
  * code) calls into.
  *
- * Each peripheral handle is opaque.  The OS-pivoted backend
- * (src/zephyr, src/baremetal, src/yocto) materialises the struct and
- * routes through the vendor wrapper (vendors/alif, vendors/renesas-rzv2n).
+ * Each peripheral handle is opaque.  Backends are picked by the
+ * `<alp/backend.h>` registry mechanism; the Zephyr backends live
+ * under `src/backends/<peripheral>/` and the Yocto / baremetal
+ * backends fill in alongside their respective build trees.
  *
- * Zephyr backends for all four classes (I2C, SPI, GPIO, UART) ship
- * in `src/zephyr/peripheral_{i2c,spi,gpio,uart}.c`; the Yocto and
- * baremetal backends fill in alongside their respective build
- * trees.
- *
-
  * @par ABI status: [ABI-STABLE]
  *      v0.1 surface; locked across every release since v0.1.
  *      See docs/abi-markers.md for the convention.

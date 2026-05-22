@@ -44,7 +44,7 @@ static alp_status_t sw_open(const alp_i2c_config_t *cfg,
                             alp_capabilities_t *caps_out) {
     (void)cfg;
     st->dev    = NULL;
-    st->bus_id = cfg->bus_id;
+    st->bus_id = 0u;
     st->be_data = NULL;
     caps_out->flags = 0u;
     return ALP_OK;

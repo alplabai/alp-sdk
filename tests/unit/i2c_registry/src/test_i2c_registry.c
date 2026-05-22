@@ -121,3 +121,46 @@ ZTEST(alp_i2c_registry, test_close_releases_handle)
     /* alp_i2c_capabilities(NULL) -> NULL (idempotent after bad open) */
     zassert_is_null(alp_i2c_capabilities(NULL));
 }
+
+/* ---------- (f) sw_fallback loopback round-trip --------------------------- */
+
+extern const alp_backend_t __start_alp_backends_i2c[];
+extern const alp_backend_t __stop_alp_backends_i2c[];
+
+static const alp_i2c_ops_t *_find_sw_fallback_ops(void)
+{
+    for (const alp_backend_t *be = __start_alp_backends_i2c;
+         be < __stop_alp_backends_i2c; ++be) {
+        if (strcmp(be->vendor, "sw_fallback") == 0) {
+            return (const alp_i2c_ops_t *)be->ops;
+        }
+    }
+    return NULL;
+}
+
+ZTEST(alp_i2c_registry, test_sw_fallback_loopback_round_trip)
+{
+    const alp_i2c_ops_t *ops = _find_sw_fallback_ops();
+    zassert_not_null(ops);
+
+    alp_i2c_backend_state_t st = {0};
+    alp_capabilities_t caps = {0};
+    alp_i2c_config_t cfg = { .bus_id = 0u, .bitrate_hz = 100000u };
+
+    zassert_equal(ops->open(&cfg, &st, &caps), ALP_OK);
+
+    const uint8_t tx[4] = { 0xDE, 0xAD, 0xBE, 0xEF };
+    zassert_equal(ops->write(&st, 0x42u, tx, sizeof(tx)), ALP_OK);
+
+    uint8_t rx[4] = {0};
+    zassert_equal(ops->read(&st, 0x42u, rx, sizeof(rx)), ALP_OK);
+    zassert_mem_equal(rx, tx, sizeof(tx));
+
+    /* Reading longer than the buffered frame zero-pads the tail. */
+    uint8_t rx_long[8] = { 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA };
+    zassert_equal(ops->read(&st, 0x42u, rx_long, sizeof(rx_long)), ALP_OK);
+    zassert_mem_equal(rx_long, tx, sizeof(tx));
+    for (size_t i = sizeof(tx); i < sizeof(rx_long); ++i) {
+        zassert_equal(rx_long[i], 0u);
+    }
+}
