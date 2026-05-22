@@ -15,7 +15,6 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/delay_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/handles.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/last_error.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_i2c.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_spi.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_gpio.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_uart.c
@@ -355,3 +354,15 @@ zephyr_library_sources(
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backend.c
 )
+
+# I2C class dispatcher + backends (Slice 2a migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_I2C_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/i2c_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_I2C_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/sw_fallback.c)
+endif()

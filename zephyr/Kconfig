@@ -61,6 +61,18 @@ config ALP_SDK_MAX_I2C_HANDLES
 	int "Maximum concurrent alp_i2c_t handles"
 	default 4
 
+config ALP_SDK_I2C_SW_FALLBACK
+	bool "Software I2C fallback (in-memory loopback)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a deterministic in-memory I2C loopback backend that
+	  registers as a wildcard at priority 0.  write() stashes the
+	  last frame keyed by address; read() returns it zero-padded or
+	  truncated.  For native_sim build / test only -- production
+	  firmware MUST NOT rely on this since no real device is driven.
+
 config ALP_SDK_MAX_SPI_HANDLES
 	int "Maximum concurrent alp_spi_t handles"
 	default 4
