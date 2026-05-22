@@ -221,6 +221,14 @@ alp_status_t  alp_mqtt_loop(alp_mqtt_t *m, uint32_t timeout_ms);
  */
 void          alp_mqtt_close(alp_mqtt_t *m);
 
+/**
+ * @brief Query the capabilities of an opened MQTT handle.
+ *
+ * @param m  Handle from @ref alp_mqtt_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p m is NULL.
+ */
+const alp_capabilities_t *alp_mqtt_capabilities(const alp_mqtt_t *m);
+
 #ifdef __cplusplus
 }
 #endif
