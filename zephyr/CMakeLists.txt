@@ -190,8 +190,19 @@ if(CONFIG_ALP_SDK_QENC_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/sw_fallback.c)
 endif()
+# TMU registry sources -- replace the legacy src/zephyr/peripheral_tmu.c
+# from the v0.4 contract.  TMU is handle-less; the dispatcher caches
+# the selected backend's ops vtable on first call instead of owning a
+# handle pool.  Dispatcher + portable Zephyr/bridge backend ship
+# unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_TMU
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_tmu.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/tmu_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/tmu/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_PERIPH_TMU AND CONFIG_ALP_SDK_TMU_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/tmu/sw_fallback.c)
+endif()
 
 # Standalone DSP-chain API (<alp/dsp.h>).  Source lives in src/common
 # because it is OS-agnostic -- the math kernels are libm + CMSIS-DSP

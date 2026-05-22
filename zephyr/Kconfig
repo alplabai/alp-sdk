@@ -433,12 +433,33 @@ config ALP_SDK_PERIPH_TMU
 	bool "Enable <alp/tmu.h> wrapper (CORDIC math accelerator surface)"
 	default y
 	help
-	  Compile src/zephyr/peripheral_tmu.c.  Provides alp_tmu_sin /
-	  cos / tan / atan / atan2 / sqrt / log / exp / sinh / cosh /
-	  tanh / hypot on top of either the V2N supervisor's GD32G5
-	  TMU (CORDIC) accelerator (when CONFIG_ALP_SDK_V2N_SUPERVISOR=y)
-	  or libm directly (every other SoM).  The customer-facing
-	  header is SoM-agnostic; the V2N dispatch is internal.
+	  Compile the TMU registry sources -- src/tmu_dispatch.c plus
+	  src/backends/tmu/zephyr_drv.c (and, when
+	  ALP_SDK_TMU_SW_FALLBACK=y, src/backends/tmu/sw_fallback.c).
+	  Provides alp_tmu_sin / cos / tan / atan / atan2 / sqrt / log /
+	  exp / sinh / cosh / tanh / hypot on top of either the V2N
+	  supervisor's GD32G5 TMU (CORDIC) accelerator (when
+	  CONFIG_ALP_SDK_V2N_SUPERVISOR=y) or libm directly (every other
+	  SoM).  The customer-facing header is SoM-agnostic; the V2N
+	  dispatch is internal.
+
+	  After Slice 4d the dispatcher caches the selected backend's
+	  ops vtable on first call -- TMU is handle-less, so there is no
+	  per-call selector cost on the hot path.  See
+	  ALP_SDK_TMU_SW_FALLBACK for the software-backend opt-in.
+
+config ALP_SDK_TMU_SW_FALLBACK
+	bool "Software TMU fallback (libm)"
+	depends on ALP_SDK && ALP_SDK_PERIPH_TMU
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a libm-direct TMU backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test and for any SoM
+	  whose dedicated TMU backend is not linked into the build --
+	  every alp_tmu_* primitive then routes through sinf / cosf /
+	  ... and returns ALP_OK.  Marginal cost is ~24 bytes for the ops
+	  vtable when the rest of the firmware already pulls in libm.
 
 config ALP_SDK_DSP
 	bool "Enable <alp/dsp.h> standalone DSP-chain API"
