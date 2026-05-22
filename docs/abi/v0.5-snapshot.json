@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-22",
+  "generated": "2026-05-23",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -882,6 +882,10 @@
         "alp_can_add_filter": {
           "hash": "8c22c431a6676e12",
           "signature": "alp_status_t alp_can_add_filter(alp_can_t *can, const alp_can_filter_t *filter, alp_can_rx_cb_t cb, void *user, int32_t *filter_id_out);"
+        },
+        "alp_can_capabilities": {
+          "hash": "668144a539eb633b",
+          "signature": "const alp_capabilities_t * alp_can_capabilities(const alp_can_t *can);"
         },
         "alp_can_close": {
           "hash": "b8c8447bc94fa110",
@@ -6435,6 +6439,10 @@
     },
     "alp/i2s.h": {
       "functions": {
+        "alp_i2s_capabilities": {
+          "hash": "be6df5c993b1d0da",
+          "signature": "const alp_capabilities_t * alp_i2s_capabilities(const alp_i2s_t *i2s);"
+        },
         "alp_i2s_close": {
           "hash": "95e26939ec2f8b35",
           "signature": "void alp_i2s_close(alp_i2s_t *i2s);"
@@ -6706,6 +6714,10 @@
         "alp_delay_us": {
           "hash": "2c48785b3707b468",
           "signature": "void alp_delay_us(uint32_t us);"
+        },
+        "alp_gpio_capabilities": {
+          "hash": "427845bade07b0c6",
+          "signature": "const alp_capabilities_t * alp_gpio_capabilities(const alp_gpio_t *pin);"
         },
         "alp_gpio_close": {
           "hash": "bff6723b4416ce0b",
@@ -7077,6 +7089,10 @@
     },
     "alp/pwm.h": {
       "functions": {
+        "alp_pwm_capabilities": {
+          "hash": "6113598646f7e606",
+          "signature": "const alp_capabilities_t * alp_pwm_capabilities(const alp_pwm_t *pwm);"
+        },
         "alp_pwm_capture_close": {
           "hash": "28a6ed8173d3a045",
           "signature": "void alp_pwm_capture_close(alp_pwm_capture_t *cap);"
