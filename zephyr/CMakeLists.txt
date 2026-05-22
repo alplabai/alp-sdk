@@ -15,7 +15,6 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/delay_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/handles.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/last_error.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_gpio.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/camera_stub.c
     # iot_zephyr.c replaces the v0.2 NOSUPPORT stub. The wrapper is
     # always compiled; the real wifi_mgmt + mqtt_client glue inside
@@ -387,4 +386,16 @@ zephyr_library_sources(
 if(CONFIG_ALP_SDK_UART_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/sw_fallback.c)
+endif()
+
+# GPIO class dispatcher + backends (Slice 2b migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_GPIO_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpio_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_GPIO_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/sw_fallback.c)
 endif()
