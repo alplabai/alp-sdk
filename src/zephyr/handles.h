@@ -104,17 +104,7 @@ struct alp_uart_rx_ringbuf {
 /* GPIO                                                                */
 /* ------------------------------------------------------------------ */
 
-struct alp_gpio {
-    bool                  in_use;
-    uint32_t              pin_id;
-    struct gpio_dt_spec   spec;
-    alp_gpio_dir_t        dir;
-    alp_gpio_pull_t       pull;
-    alp_gpio_edge_t       edge;
-    alp_gpio_cb_t         cb;
-    void                  *cb_user;
-    struct gpio_callback  zcb;
-};
+/* struct alp_gpio is defined in src/backends/gpio/gpio_ops.h.         */
 
 /* ------------------------------------------------------------------ */
 /* PWM                                                                 */
@@ -270,9 +260,6 @@ void alp_z_clear_last_error(void);
 struct alp_uart_rx_ringbuf *alp_z_uart_rx_ringbuf_pool_acquire(void);
 void                        alp_z_uart_rx_ringbuf_pool_release(struct alp_uart_rx_ringbuf *h);
 #endif
-
-struct alp_gpio    *alp_z_gpio_pool_acquire(void);
-void                alp_z_gpio_pool_release(struct alp_gpio *h);
 
 struct alp_pwm     *alp_z_pwm_pool_acquire(void);
 void                alp_z_pwm_pool_release(struct alp_pwm *h);
