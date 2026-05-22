@@ -65,6 +65,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "alp/cap_instance.h"
 #include "alp/dsp.h"
 #include "alp/peripheral.h"
 
@@ -159,6 +160,20 @@ alp_status_t alp_adc_read_uv(alp_adc_t *adc, int32_t *uv_out);
  * @param[in] adc  Handle from @ref alp_adc_open, or NULL.
  */
 void         alp_adc_close(alp_adc_t *adc);
+
+/**
+ * @brief Query the capabilities of an opened ADC handle.
+ *
+ * Returns a pointer to the @ref alp_capabilities_t descriptor the
+ * backend populated at open time. Useful for runtime gating
+ * (e.g. only enabling DMA-stream code paths when the backend
+ * advertises @ref ALP_INSTANCE_CAP_DMA).
+ *
+ * @param adc  Handle from @ref alp_adc_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p adc
+ *         is NULL.
+ */
+const alp_capabilities_t *alp_adc_capabilities(const alp_adc_t *adc);
 
 /* ================================================================== */
 /* Streaming ADC acquisition                                           */
