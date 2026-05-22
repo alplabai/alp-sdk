@@ -19,7 +19,12 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_spi.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_gpio.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_uart.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/camera_stub.c
+    # Camera class dispatcher + stub backend (Slice 5 -- registry
+    # migration).  Replaces the legacy free-standing
+    # src/zephyr/camera_stub.c.  Real backends (Alif MIPI CSI-2,
+    # V2N camera-input) land per issue #20; ISP knobs per #21.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/camera_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_stub.c
     # iot_zephyr.c replaces the v0.2 NOSUPPORT stub. The wrapper is
     # always compiled; the real wifi_mgmt + mqtt_client glue inside
     # is gated on CONFIG_ALP_SDK_IOT_WIFI / CONFIG_ALP_SDK_IOT_MQTT
