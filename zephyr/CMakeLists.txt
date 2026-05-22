@@ -37,7 +37,6 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_zephyr.c
     # Remaining v0.3 surfaces still on the stub contract -- swap in
     # their *_zephyr.c counterparts as they ship.
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/ble_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/security_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/mproc_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/storage_stub.c
@@ -53,6 +52,18 @@ zephyr_library_sources(
 if(CONFIG_ALP_SDK_USB_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/usb/sw_fallback.c)
+endif()
+
+# BLE registry sources -- replace the legacy src/zephyr/ble_zephyr.c
+# from the v0.3 contract.  Dispatcher + portable Zephyr backend ship
+# unconditionally; sw_fallback gated on the native_sim opt-in.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/ble_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_BLE_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/sw_fallback.c)
 endif()
 
 # v0.6 -- <alp/rpc.h> framed RPC over OpenAMP / RPMsg.  Gated on

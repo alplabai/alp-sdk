@@ -749,11 +749,30 @@ config ALP_SDK_BLE
 	default y if BT
 	depends on BT
 	help
-	  Enables the wifi_mgmt + GATT-server peripheral path and the
-	  scan + connect central path on top of Zephyr's `bt` host
-	  stack.  Requires CONFIG_BT=y plus CONFIG_BT_PERIPHERAL=y
-	  and/or CONFIG_BT_CENTRAL=y for the matching role.  When OFF
-	  alp_ble_open() returns NULL with ALP_ERR_NOSUPPORT.
+	  Gates the real Zephyr bt-host body inside
+	  src/backends/ble/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  radio-side op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4b the dispatcher (src/ble_dispatch.c) and its
+	  Zephyr backend (src/backends/ble/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_BLE_SW_FALLBACK for the software-backend opt-in.
+
+	  Requires CONFIG_BT=y plus CONFIG_BT_PERIPHERAL=y and/or
+	  CONFIG_BT_CENTRAL=y for the matching role.
+
+config ALP_SDK_BLE_SW_FALLBACK
+	bool "Software BLE fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op BLE backend that registers as a wildcard at
+	  priority 0.  For native_sim build / test only -- no real
+	  controller exists, so open/advertise/scan succeed silently
+	  and connect/GATT ops return ALP_ERR_NOT_IMPLEMENTED.
 
 config ALP_SDK_SECURITY
 	bool "Real MbedTLS PSA Crypto for <alp/security.h>"
@@ -966,11 +985,32 @@ config ALP_SDK_MAX_AEAD_HANDLES
 	default 4
 
 config ALP_SDK_BLE_MAX_CONNS
-	int "Maximum concurrent alp_ble_conn_t handles"
+	int "Maximum concurrent alp_ble_conn_t handles (Zephyr backend pool)"
 	default 2
 	help
 	  Mirrors CONFIG_BT_MAX_CONN; raise both together if your app
-	  holds more than two simultaneous connections.
+	  holds more than two simultaneous connections.  Sizes the
+	  backend-internal pool inside src/backends/ble/zephyr_drv.c
+	  (struct ble_conn_be).  Pair with
+	  ALP_SDK_MAX_BLE_CONN_HANDLES which sizes the dispatcher's
+	  per-handle pool.
+
+config ALP_SDK_MAX_BLE_HANDLES
+	int "Maximum concurrent alp_ble_t handles (dispatcher pool)"
+	default 1
+	help
+	  BLE radio is a singleton on every E1M-conformant SoM (one
+	  controller per module).  Sizes the dispatcher's per-handle
+	  pool in src/ble_dispatch.c.
+
+config ALP_SDK_MAX_BLE_CONN_HANDLES
+	int "Maximum concurrent alp_ble_conn_t handles (dispatcher pool)"
+	default 4
+	help
+	  Sizes the dispatcher's per-connection handle pool in
+	  src/ble_dispatch.c.  Default chosen above
+	  ALP_SDK_BLE_MAX_CONNS so transient close/reopen flows do not
+	  starve.
 
 config ALP_SDK_MAX_INFERENCE_HANDLES
 	int "Maximum concurrent alp_inference_t handles"
