@@ -214,6 +214,12 @@ alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port,
         alp_z_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
+    /* IRQ-driven RX requires a real Zephyr device; the sw_fallback
+     * backend leaves state.dev = NULL -- reject it cleanly. */
+    if (port->state.dev == NULL) {
+        alp_z_set_last_error(ALP_ERR_NOSUPPORT);
+        return NULL;
+    }
     struct alp_uart_rx_ringbuf *s = alp_z_uart_rx_ringbuf_pool_acquire();
     if (s == NULL) {
         alp_z_set_last_error(ALP_ERR_NOMEM);
