@@ -422,15 +422,19 @@ config ALP_SDK_GPU2D
 	bool "Enable <alp/gpu2d.h> 2D graphics accelerator surface"
 	default y
 	help
-	  Compile src/zephyr/gpu2d_zephyr.c.  Provides the portable
+	  Compile src/gpu2d_dispatch.c + src/backends/gpu2d/zephyr_stub.c
+	  (Slice 8b -- registry migration).  Provides the portable
 	  alp_gpu2d_open / fill_rect / blit / blend / close surface
 	  that maps to vendor 2D-accelerator HALs (Alif D/AVE 2D on
 	  Ensemble, planned Vivante GC328 on i.MX 93).
 
-	  v0.5 ships NOSUPPORT-with-INVAL-pre-checks stubs so
-	  customers can write portable 2D-graphics code today; the
-	  per-vendor HAL bodies land once their packs stabilise as
-	  Zephyr modules.
+	  Slice 8b ships the surface on top of the backend registry
+	  with a wildcard stub backend: open() returns a valid handle
+	  and the dispatcher's surface-validation pre-checks (NULL
+	  pointer, zero dimensions, format range -> ALP_ERR_INVAL)
+	  still fire, but fill_rect / blit / blend return
+	  ALP_ERR_NOT_IMPLEMENTED.  Per-vendor HAL bodies land in
+	  follow-up commits per issue #24.
 
 	  Surfaces the headline gap the Alif Ensemble feature audit
 	  (internal AEN feature audit) called out: customers

@@ -117,12 +117,15 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/display_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/display/zephyr_stub.c)
 
-# 2D graphics accelerator surface (<alp/gpu2d.h>).  v0.5 stub
-# implementation; per-vendor HAL bodies (Alif D/AVE 2D, NXP
-# Vivante GC328) land via CONFIG_ALP_SOC_* selection once the
-# vendor packs stabilise as Zephyr modules.
+# 2D graphics accelerator surface (<alp/gpu2d.h>).  Slice 8b --
+# registry migration: replaces the legacy free-standing
+# src/zephyr/gpu2d_zephyr.c with the class dispatcher + wildcard
+# stub backend.  Real backends (Alif D/AVE 2D on AEN, NXP Vivante
+# GC328 on i.MX 93) land per issue #24 with their own
+# silicon-specific registry entries.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/gpu2d_zephyr.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpu2d_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpu2d/zephyr_stub.c)
 
 # Runtime hardware-info reader (EEPROM manifest + BOARD_ID ADC).
 # v0.3 stub returns NOSUPPORT; v0.3.x fills in the real impl.
