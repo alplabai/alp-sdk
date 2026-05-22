@@ -3,47 +3,31 @@
  *
  * Software DSP fallback.  Wildcard backend at priority 0 -- picked
  * unconditionally on every SoC in Slice 4d because no HW-DSP backend
- * is registered against the dsp class on this slice (the V2N
- * GD32G5 FFT/FAC hardware is consumed through wave-2's
- * alp_adc_filter_t / alp_adc_spectrum_t in <alp/adc.h>, not through
- * this standalone class).  When a future HW backend lands at a
- * higher priority it pre-empts this one transparently.
+ * is registered against the dsp class today (the V2N GD32G5 FFT/FAC
+ * surfaces via wave-2's alp_adc_filter_t / alp_adc_spectrum_t in
+ * <alp/adc.h>, not through this standalone class).  Future HW
+ * backends at higher priority pre-empt this one transparently.
  *
- * Body lifted verbatim from the v0.3 src/common/dsp_chain.c (deleted
- * in this commit).  Functional behaviour is unchanged:
- *   - Chain validation enforces 1..ALP_DSP_MAX_STAGES, at most one
- *     FFT (terminal only), WINDOW only immediately preceding FFT,
- *     per-stage param bounds.
- *   - FIR / IIR / WINDOW / FFT kernels prefer CMSIS-DSP when
- *     ALP_HAS_CMSIS_DSP=1; portable-C otherwise (naive convolution +
- *     direct-form-1 biquad + radix-2 Cooley-Tukey).
+ * Body lifted verbatim from the v0.3 src/common/dsp_chain.c.  The
+ * legacy struct alp_dsp_chain (per-stage state + window samples +
+ * FFT scratch) is now struct dsp_be, owned by the backend and reached
+ * via state->be_data; the dispatcher's handle (in dsp_ops.h) is now
+ * a thin wrapper.  alp_dsp_chain_open/_close/_apply_* are now
+ * sw_open/_close/_apply_* ops; public entry points moved to
+ * src/dsp_dispatch.c.  CMSIS-DSP gating (ALP_HAS_CMSIS_DSP -> arm_fir
+ * / arm_rfft_fast; otherwise portable-C convolution + radix-2 FFT)
+ * is preserved verbatim.
  *
- * Restructuring vs. the legacy file:
- *   - The legacy struct alp_dsp_chain body (state for every stage +
- *     window samples + FFT scratch) is now struct dsp_be, owned by
- *     the backend and reached via state->be_data.  The dispatcher's
- *     handle layout (struct alp_dsp_chain in dsp_ops.h) carries only
- *     the void *be_data + ops pointer + cached caps -- no
- *     CMSIS-DSP-shaped fields leak through.
- *   - alp_dsp_chain_open / _close / _apply_samples / _apply_bins are
- *     now sw_open / sw_close / sw_apply_samples / sw_apply_bins ops
- *     functions; the public entry points moved to src/dsp_dispatch.c.
- *   - last-error stamping is gone (the dispatcher stamps it before
- *     ops->open / on a NULL handle / on ops->open's status code).
- *
- * @par Cost: ROM ~varies with CMSIS-DSP linkage (8-30 KB depending on
- *      which stages the customer build pulls in -- arm_fir_f32 alone is
- *      ~1.5 KB, arm_rfft_fast_f32 ~12 KB).  RAM = sizeof(struct dsp_be)
- *      per backend slot = ~17 KB worst case (per-stage state +
- *      ALP_DSP_MAX_FFT_POINTS * 2 floats for the real/imag scratch +
- *      one window-sample buffer).  Two pool slots = ~34 KB static.
- * @par Performance: CMSIS-DSP soft-FP implementations on M-class cores
- *      with FPU; on Cortex-M55 + Helium the vendor backend (not yet
- *      registered) will be ~5-10x faster.  On Cortex-M33 or native_sim
- *      this is the best portable path.  For SoMs without a HW DSP block
- *      this stays the production backend.  Portable-C fallback
- *      (ALP_HAS_CMSIS_DSP undefined) is O(N*M) FIR / O(N) biquad /
- *      O(N log N) radix-2 FFT -- correct but slow; documented as such.
+ * @par Cost: ROM varies with CMSIS-DSP linkage (8-30 KB).  RAM =
+ *      sizeof(struct dsp_be) per backend slot = ~17 KB worst case
+ *      (per-stage state + ALP_DSP_MAX_FFT_POINTS * 2 floats scratch
+ *      + one window-sample buffer); two pool slots = ~34 KB static.
+ * @par Performance: CMSIS-DSP soft-FP on M-class cores with FPU; on
+ *      Cortex-M55 + Helium a future vendor backend will be ~5-10x
+ *      faster.  On Cortex-M33 / native_sim this is the best portable
+ *      path; for SoMs without a HW DSP block this stays production.
+ *      Portable-C path (ALP_HAS_CMSIS_DSP undefined) is O(N*M) FIR /
+ *      O(N) biquad / O(N log N) radix-2 -- correct but slow.
  */
 
 #include <math.h>
