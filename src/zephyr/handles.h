@@ -157,16 +157,7 @@ struct alp_qenc {
 /* I2S                                                                 */
 /* ------------------------------------------------------------------ */
 
-struct alp_i2s {
-    bool                  in_use;
-    uint32_t              bus_id;
-    const struct device  *dev;
-    alp_i2s_config_t      cfg;
-    struct k_mem_slab     mem_slab;
-    uint8_t              *slab_buf;       /* allocated lazily on first start */
-    size_t                slab_buf_bytes;
-    bool                  started;
-};
+/* struct alp_i2s is defined in src/backends/i2s/i2s_ops.h.             */
 
 /* ------------------------------------------------------------------ */
 /* CAN                                                                 */
@@ -262,9 +253,6 @@ void                alp_z_counter_pool_release(struct alp_counter *h);
 
 struct alp_qenc    *alp_z_qenc_pool_acquire(void);
 void                alp_z_qenc_pool_release(struct alp_qenc *h);
-
-struct alp_i2s     *alp_z_i2s_pool_acquire(void);
-void                alp_z_i2s_pool_release(struct alp_i2s *h);
 
 struct alp_can     *alp_z_can_pool_acquire(void);
 void                alp_z_can_pool_release(struct alp_can *h);
