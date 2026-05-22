@@ -232,6 +232,14 @@ alp_status_t alp_qenc_reset_position(alp_qenc_t *enc);
  */
 void         alp_qenc_close(alp_qenc_t *enc);
 
+/**
+ * @brief Query the capabilities of an opened quadrature-encoder handle.
+ *
+ * @param enc  Handle from @ref alp_qenc_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p enc is NULL.
+ */
+const alp_capabilities_t *alp_qenc_capabilities(const alp_qenc_t *enc);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif
