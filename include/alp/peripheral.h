@@ -227,6 +227,14 @@ alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin);
  */
 void alp_gpio_close(alp_gpio_t *pin);
 
+/**
+ * @brief Query the capabilities of an opened GPIO pin handle.
+ *
+ * @param pin  Handle from @ref alp_gpio_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p pin is NULL.
+ */
+const alp_capabilities_t *alp_gpio_capabilities(const alp_gpio_t *pin);
+
 /* ------------------------------------------------------------------ */
 /* I2C                                                                 */
 /* ------------------------------------------------------------------ */
