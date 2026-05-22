@@ -218,15 +218,7 @@ struct alp_can {
     bool                  started;
 };
 
-/* ------------------------------------------------------------------ */
-/* RTC                                                                 */
-/* ------------------------------------------------------------------ */
-
-struct alp_rtc {
-    bool                  in_use;
-    uint32_t              rtc_id;
-    const struct device  *dev;
-};
+/* RTC -- struct alp_rtc layout moved to src/backends/rtc/rtc_ops.h (Slice 4a, 2026-05-22) */
 
 /* ------------------------------------------------------------------ */
 /* Watchdog                                                            */
@@ -321,9 +313,6 @@ void                alp_z_i2s_pool_release(struct alp_i2s *h);
 
 struct alp_can     *alp_z_can_pool_acquire(void);
 void                alp_z_can_pool_release(struct alp_can *h);
-
-struct alp_rtc     *alp_z_rtc_pool_acquire(void);
-void                alp_z_rtc_pool_release(struct alp_rtc *h);
 
 struct alp_wdt     *alp_z_wdt_pool_acquire(void);
 void                alp_z_wdt_pool_release(struct alp_wdt *h);
