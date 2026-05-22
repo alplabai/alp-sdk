@@ -62,8 +62,6 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93
 # v0.2 peripheral wrappers — opt-in per-class so apps that don't use
 # a given Zephyr subsystem don't link the wrapper.  Each defaults on
 # when its underlying Zephyr driver class is enabled.
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_PWM
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_pwm.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_ADC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_adc.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_COUNTER
@@ -398,4 +396,16 @@ zephyr_library_sources(
 if(CONFIG_ALP_SDK_GPIO_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/sw_fallback.c)
+endif()
+
+# PWM class dispatcher + backends (Slice 2b migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_PWM_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/pwm_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_PWM_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/sw_fallback.c)
 endif()

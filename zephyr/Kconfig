@@ -151,6 +151,20 @@ config ALP_SDK_MAX_PWM_HANDLES
 	int "Maximum concurrent alp_pwm_t handles"
 	default 8
 
+config ALP_SDK_PWM_SW_FALLBACK
+	bool "Software PWM fallback (stateless stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a stateless PWM stub backend that registers as a
+	  wildcard at priority 0.  open() succeeds and primes the
+	  handle's period_ns so set_duty bounds-checks behave; set_duty /
+	  set_period are no-ops; configure / single_pulse / capture_*
+	  return ALP_ERR_NOSUPPORT.  For native_sim build / test only --
+	  production firmware MUST NOT rely on this since no real timer
+	  is driven.
+
 config ALP_SDK_MAX_ADC_HANDLES
 	int "Maximum concurrent alp_adc_t handles"
 	default 8
