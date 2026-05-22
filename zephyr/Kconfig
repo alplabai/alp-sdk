@@ -504,11 +504,30 @@ config ALP_SDK_IOT_WIFI
 	default y if WIFI && NET_MGMT
 	depends on WIFI && NET_MGMT
 	help
-	  Enable the real wifi_mgmt-backed alp_wifi_* implementation.
+	  Gates the real Zephyr wifi_mgmt body inside
+	  src/backends/wifi/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  Wi-Fi-side op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4b the dispatcher (src/wifi_dispatch.c) and its
+	  Zephyr backend (src/backends/wifi/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_WIFI_SW_FALLBACK for the software-backend opt-in.
+
 	  Requires CONFIG_WIFI=y and a wifi-management subsystem (e.g.
-	  CONFIG_WIFI_NM_WPA_SUPPLICANT=y on AEN-Zephyr).  When OFF
-	  alp_wifi_open() returns NULL with alp_last_error() =
-	  ALP_ERR_NOSUPPORT.
+	  CONFIG_WIFI_NM_WPA_SUPPLICANT=y on AEN-Zephyr).
+
+config ALP_SDK_WIFI_SW_FALLBACK
+	bool "Software Wi-Fi fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op Wi-Fi backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test only -- no real
+	  radio exists, so open succeeds silently and connect returns
+	  ALP_ERR_NOT_IMPLEMENTED.
 
 config ALP_SDK_IOT_MQTT
 	bool "Real MQTT client via Zephyr mqtt_client"

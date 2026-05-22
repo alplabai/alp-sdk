@@ -66,6 +66,19 @@ if(CONFIG_ALP_SDK_BLE_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/sw_fallback.c)
 endif()
 
+# Wi-Fi registry sources -- replace the Wi-Fi half of the legacy
+# src/zephyr/iot_zephyr.c (MQTT still lives there until the next
+# subagent lifts it).  Dispatcher + portable Zephyr backend ship
+# unconditionally; sw_fallback gated on the native_sim opt-in.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/wifi_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_WIFI_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/sw_fallback.c)
+endif()
+
 # v0.6 -- <alp/rpc.h> framed RPC over OpenAMP / RPMsg.  Gated on
 # CONFIG_ALP_SDK_RPC; when OFF the .c file compiles to NOSUPPORT
 # stubs so apps that don't opt in still link cleanly.
