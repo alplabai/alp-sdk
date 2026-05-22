@@ -34,6 +34,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include <alp/cap_instance.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -306,6 +308,14 @@ alp_status_t alp_i2c_write_read(alp_i2c_t *bus, uint8_t addr,
  * @param[in] bus  Handle from @ref alp_i2c_open, or NULL.
  */
 void alp_i2c_close(alp_i2c_t *bus);
+
+/**
+ * @brief Query the capabilities of an opened I2C bus handle.
+ *
+ * @param bus  Handle from @ref alp_i2c_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p bus is NULL.
+ */
+const alp_capabilities_t *alp_i2c_capabilities(const alp_i2c_t *bus);
 
 /* ------------------------------------------------------------------ */
 /* SPI                                                                 */
