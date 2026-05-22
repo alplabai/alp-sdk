@@ -108,6 +108,15 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/power_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/zephyr_stub.c)
 
+# Display class dispatcher + stub backend (Slice 8a -- registry
+# pattern).  Display has no legacy free-standing src/zephyr/*.c, so
+# this is a pure ADD rather than a swap.  Real backends (Zephyr
+# display_* driver-class wrapper for SSD1306 / ILI9341 / ST7789 on
+# AEN, V2N DSI / parallel-RGB framebuffer paths) land per issue #23.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/display_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/display/zephyr_stub.c)
+
 # 2D graphics accelerator surface (<alp/gpu2d.h>).  v0.5 stub
 # implementation; per-vendor HAL bodies (Alif D/AVE 2D, NXP
 # Vivante GC328) land via CONFIG_ALP_SOC_* selection once the
