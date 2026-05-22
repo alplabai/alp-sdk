@@ -82,8 +82,6 @@ extern "C" {
 #define CONFIG_ALP_SDK_MAX_ADC_STREAM_HANDLES 2
 #endif
 
-/* struct alp_i2c moved to src/backends/i2c/i2c_ops.h (Slice 2a).   */
-
 /* ------------------------------------------------------------------ */
 /* SPI                                                                 */
 /* ------------------------------------------------------------------ */
@@ -289,8 +287,6 @@ void alp_z_clear_last_error(void);
 /* ------------------------------------------------------------------ */
 /* Internal pool API — used only by the per-peripheral source files.   */
 /* ------------------------------------------------------------------ */
-
-/* alp_z_i2c_pool_acquire / _release removed (Slice 2a). */
 
 struct alp_spi     *alp_z_spi_pool_acquire(void);
 void                alp_z_spi_pool_release(struct alp_spi *h);

@@ -3,13 +3,8 @@
  *
  * Portable Zephyr i2c_* driver-class backend.  Used on any SoC
  * unless a vendor-specific backend registers a more specific
- * silicon_ref match.
- *
- * Lifted from src/zephyr/peripheral_i2c.c (125 lines): the
- * alp_i2c_devs[] DT-alias table, alp_to_zephyr_bitrate_flags,
- * errno_to_alp, and the open/write/read/write_read/close bodies.
- * Pooling now lives in i2c_dispatch.c; this backend's open fills
- * state->dev and configures the bus speed.
+ * silicon_ref match.  Pooling lives in src/i2c_dispatch.c; the
+ * backend's open fills state->dev and configures the bus speed.
  */
 
 #include <errno.h>
