@@ -220,17 +220,7 @@ struct alp_can {
 
 /* RTC -- struct alp_rtc layout moved to src/backends/rtc/rtc_ops.h (Slice 4a, 2026-05-22) */
 
-/* ------------------------------------------------------------------ */
-/* Watchdog                                                            */
-/* ------------------------------------------------------------------ */
-
-struct alp_wdt {
-    bool                  in_use;
-    uint32_t              wdt_id;
-    const struct device  *dev;
-    int                   channel_id;     /* zephyr wdt_install_timeout return */
-    alp_wdt_config_t      cfg;
-};
+/* WDT -- struct alp_wdt layout moved to src/backends/wdt/wdt_ops.h (Slice 4a, 2026-05-22) */
 
 /* ------------------------------------------------------------------ */
 /* DAC                                                                 */
@@ -313,9 +303,6 @@ void                alp_z_i2s_pool_release(struct alp_i2s *h);
 
 struct alp_can     *alp_z_can_pool_acquire(void);
 void                alp_z_can_pool_release(struct alp_can *h);
-
-struct alp_wdt     *alp_z_wdt_pool_acquire(void);
-void                alp_z_wdt_pool_release(struct alp_wdt *h);
 
 struct alp_dac     *alp_z_dac_pool_acquire(void);
 void                alp_z_dac_pool_release(struct alp_dac *h);
