@@ -70,8 +70,6 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_QENC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_qenc.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_DAC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_dac.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_I2S
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_i2s.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_CAN
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_can.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_RTC
@@ -408,4 +406,16 @@ zephyr_library_sources(
 if(CONFIG_ALP_SDK_PWM_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/sw_fallback.c)
+endif()
+
+# I2S class dispatcher + backends (Slice 2b migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_I2S_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/i2s_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2s/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_I2S_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2s/sw_fallback.c)
 endif()
