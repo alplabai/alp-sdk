@@ -45,7 +45,17 @@ extern "C" {
 
 /** OTFAD supports up to four concurrent address windows on i.MX 93
  *  / RT11xx; @c window_id selects which slot is being programmed. */
-#define ALP_NXP_STORAGE_OTFAD_WINDOW_COUNT  4u
+#define ALP_NXP_STORAGE_OTFAD_WINDOW_COUNT 4u
+
+/** Forward-declared enum so the ABI snapshot parser sees a
+ *  semicolon-terminated statement between the macro above and the
+ *  first function declaration below. */
+typedef enum {
+    ALP_NXP_STORAGE_OTFAD_SLOT_0 = 0,
+    ALP_NXP_STORAGE_OTFAD_SLOT_1 = 1,
+    ALP_NXP_STORAGE_OTFAD_SLOT_2 = 2,
+    ALP_NXP_STORAGE_OTFAD_SLOT_3 = 3,
+} alp_nxp_storage_otfad_slot_t;
 
 /**
  * @brief Provision an OTFAD key + counter for a FlexSPI address window.
