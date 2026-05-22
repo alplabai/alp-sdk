@@ -77,6 +77,18 @@ config ALP_SDK_MAX_SPI_HANDLES
 	int "Maximum concurrent alp_spi_t handles"
 	default 4
 
+config ALP_SDK_SPI_SW_FALLBACK
+	bool "Software SPI fallback (in-memory loopback)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a deterministic in-memory SPI loopback backend that
+	  registers as a wildcard at priority 0.  transceive() copies tx
+	  into rx when both non-NULL; tx-only is a no-op; rx-only zero-fills.
+	  For native_sim build / test only -- production firmware MUST NOT
+	  rely on this since no real device is driven.
+
 config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4

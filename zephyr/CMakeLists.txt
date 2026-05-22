@@ -15,7 +15,6 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/delay_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/handles.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/last_error.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_spi.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_gpio.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_uart.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/camera_stub.c
@@ -365,4 +364,16 @@ zephyr_library_sources(
 if(CONFIG_ALP_SDK_I2C_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/sw_fallback.c)
+endif()
+
+# SPI class dispatcher + backends (Slice 2a migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_SPI_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/spi_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_SPI_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/sw_fallback.c)
 endif()
