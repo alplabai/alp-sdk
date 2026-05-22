@@ -168,17 +168,7 @@ struct alp_pwm {
 /*   dispatcher and the per-vendor backends share that definition.     */
 /* ------------------------------------------------------------------ */
 
-/* ------------------------------------------------------------------ */
-/* Counter                                                             */
-/* ------------------------------------------------------------------ */
-
-struct alp_counter {
-    bool                       in_use;
-    uint32_t                   counter_id;
-    const struct device       *dev;
-    alp_counter_alarm_cb_t     alarm_cb;
-    void                      *alarm_user;
-};
+/* Counter -- struct alp_counter layout moved to src/backends/counter/counter_ops.h (Slice 4a, 2026-05-22) */
 
 /* ------------------------------------------------------------------ */
 /* Quadrature encoder                                                  */
@@ -292,8 +282,8 @@ void                alp_z_pwm_pool_release(struct alp_pwm *h);
 /* alp_z_adc_pool_* removed in Slice 1 -- the new src/adc_dispatch.c
  * owns its own handle pool keyed on the registry's alp_adc layout. */
 
-struct alp_counter *alp_z_counter_pool_acquire(void);
-void                alp_z_counter_pool_release(struct alp_counter *h);
+/* alp_z_counter_pool_* removed in Slice 4a -- the new src/counter_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_counter layout. */
 
 struct alp_qenc    *alp_z_qenc_pool_acquire(void);
 void                alp_z_qenc_pool_release(struct alp_qenc *h);
