@@ -2,29 +2,29 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Zephyr backend for <alp/iot.h> — Wi-Fi station + MQTT publish.
+ * Zephyr backend for <alp/iot.h> -- MQTT publish.
  *
- * Replaces the v0.1 NOSUPPORT stub.  The body is split in two:
+ * Replaces the v0.1 NOSUPPORT stub.  The body is split:
  *
- *   1. The core wrapper (handle pools, last-error, public-API
- *      glue) compiles unconditionally.  It is the same shape as
- *      every other peripheral wrapper in src/zephyr/.
+ *   1. The core wrapper (handle pool, last-error, public-API glue)
+ *      compiles unconditionally.  Same shape as every other
+ *      peripheral wrapper in src/zephyr/.
  *
- *   2. The Zephyr-net glue (wifi_mgmt + mqtt_client calls) is
- *      gated on CONFIG_ALP_SDK_IOT_WIFI / CONFIG_ALP_SDK_IOT_MQTT.
- *      When those are off (host build, native_sim, any target
- *      without a Wi-Fi/TCP stack), `*_open()` honours the v0.1
- *      contract and returns NULL with `alp_last_error()` =
- *      ALP_ERR_NOSUPPORT.
+ *   2. The Zephyr-net glue (mqtt_client calls) is gated on
+ *      CONFIG_ALP_SDK_IOT_MQTT.  When OFF (host build, native_sim,
+ *      any target without a TCP stack), `alp_mqtt_open()` honours
+ *      the v0.1 contract and returns NULL with `alp_last_error()`
+ *      = ALP_ERR_NOSUPPORT.
  *
- * That split keeps the example app + the smoke test compilable on
- * native_sim while AEN-Zephyr (CONFIG_WIFI=y + CONFIG_MQTT_LIB=y)
- * gets a real Wi-Fi-station + MQTT-publish path.
+ * The Wi-Fi station half of <alp/iot.h> migrated to the backend
+ * registry in Slice 4b -- see src/wifi_dispatch.c +
+ * src/backends/wifi/{zephyr_drv,sw_fallback}.c for the public
+ * surface.  This file ships only the MQTT body now.
  *
  * The wrapper deliberately stays thin.  Provisioning helpers,
- * SoftAP, auto-reconnect, MQTT-over-TLS certificate-store
- * binding, and DTLS arrive in v0.3 (`<alp/security.h>`).  v0.2
- * is "open station, publish QoS-0/1 payloads, pump the loop".
+ * MQTT-over-TLS certificate-store binding, and DTLS arrive in v0.3
+ * (`<alp/security.h>`).  v0.2 is "publish QoS-0/1 payloads, pump
+ * the loop".
  */
 
 #include <errno.h>
@@ -38,12 +38,6 @@
 #include "alp/iot.h"
 #include "handles.h"
 
-#if defined(CONFIG_ALP_SDK_IOT_WIFI)
-#include <zephyr/net/net_if.h>
-#include <zephyr/net/net_mgmt.h>
-#include <zephyr/net/wifi_mgmt.h>
-#endif
-
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
 #include <zephyr/net/socket.h>
 #include <zephyr/net/mqtt.h>
@@ -53,9 +47,6 @@
 /* Pool sizes                                                          */
 /* ------------------------------------------------------------------ */
 
-#ifndef CONFIG_ALP_SDK_MAX_WIFI_HANDLES
-#define CONFIG_ALP_SDK_MAX_WIFI_HANDLES 1
-#endif
 #ifndef CONFIG_ALP_SDK_MAX_MQTT_HANDLES
 #define CONFIG_ALP_SDK_MAX_MQTT_HANDLES 2
 #endif
@@ -71,16 +62,6 @@
 /* ------------------------------------------------------------------ */
 /* Internal handle structures                                          */
 /* ------------------------------------------------------------------ */
-
-struct alp_wifi {
-    bool in_use;
-#if defined(CONFIG_ALP_SDK_IOT_WIFI)
-    struct net_if                 *iface;
-    struct net_mgmt_event_callback wifi_cb;
-    struct k_sem                   connect_sem;
-    int                            connect_status; /* 0 = up, errno-style on failure */
-#endif
-};
 
 struct alp_mqtt {
     bool              in_use;
@@ -101,27 +82,6 @@ struct alp_mqtt {
     uint16_t                next_msg_id; /* monotonic, wraps past 0xFFFF */
 #endif
 };
-
-#if defined(CONFIG_ALP_SDK_IOT_WIFI)
-static struct alp_wifi  g_wifi_pool[CONFIG_ALP_SDK_MAX_WIFI_HANDLES];
-
-static struct alp_wifi *wifi_pool_acquire(void)
-{
-    for (size_t i = 0; i < ARRAY_SIZE(g_wifi_pool); ++i) {
-        if (!g_wifi_pool[i].in_use) {
-            memset(&g_wifi_pool[i], 0, sizeof(g_wifi_pool[i]));
-            g_wifi_pool[i].in_use = true;
-            return &g_wifi_pool[i];
-        }
-    }
-    return NULL;
-}
-
-static void wifi_pool_release(struct alp_wifi *h)
-{
-    if (h != NULL) h->in_use = false;
-}
-#endif /* CONFIG_ALP_SDK_IOT_WIFI */
 
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
 static struct alp_mqtt  g_mqtt_pool[CONFIG_ALP_SDK_MAX_MQTT_HANDLES];
@@ -144,7 +104,7 @@ static void mqtt_pool_release(struct alp_mqtt *h)
 }
 #endif /* CONFIG_ALP_SDK_IOT_MQTT */
 
-#if defined(CONFIG_ALP_SDK_IOT_WIFI) || defined(CONFIG_ALP_SDK_IOT_MQTT)
+#if defined(CONFIG_ALP_SDK_IOT_MQTT)
 static alp_status_t errno_to_alp(int err)
 {
     switch (err) {
@@ -169,126 +129,6 @@ static alp_status_t errno_to_alp(int err)
     }
 }
 #endif
-
-/* ================================================================== */
-/* Wi-Fi station                                                       */
-/* ================================================================== */
-
-#if defined(CONFIG_ALP_SDK_IOT_WIFI)
-
-static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_event,
-                               struct net_if *iface)
-{
-    (void)iface;
-    struct alp_wifi *h = CONTAINER_OF(cb, struct alp_wifi, wifi_cb);
-
-    switch (mgmt_event) {
-    case NET_EVENT_WIFI_CONNECT_RESULT: {
-        const struct wifi_status *status = (const struct wifi_status *)cb->info;
-        h->connect_status                = (status != NULL) ? status->status : -EIO;
-        k_sem_give(&h->connect_sem);
-        break;
-    }
-    case NET_EVENT_WIFI_DISCONNECT_RESULT:
-        /* Disconnect signal — keep status field untouched so a pending
-         * connect()'s wait can surface its own result. */
-        break;
-    default:
-        break;
-    }
-}
-
-#endif /* CONFIG_ALP_SDK_IOT_WIFI */
-
-alp_wifi_t *alp_wifi_open(void)
-{
-    alp_z_clear_last_error();
-
-#if defined(CONFIG_ALP_SDK_IOT_WIFI)
-    struct alp_wifi *h = wifi_pool_acquire();
-    if (h == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOMEM);
-        return NULL;
-    }
-
-    h->iface = net_if_get_default();
-    if (h->iface == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOT_READY);
-        wifi_pool_release(h);
-        return NULL;
-    }
-
-    k_sem_init(&h->connect_sem, 0, 1);
-    net_mgmt_init_event_callback(&h->wifi_cb, wifi_event_handler,
-                                 NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT);
-    net_mgmt_add_event_callback(&h->wifi_cb);
-    return h;
-#else
-    alp_z_set_last_error(ALP_ERR_NOSUPPORT);
-    return NULL;
-#endif
-}
-
-alp_status_t alp_wifi_connect(alp_wifi_t *w, const alp_wifi_credentials_t *creds,
-                              uint32_t timeout_ms)
-{
-    if (w == NULL || !w->in_use) return ALP_ERR_NOT_READY;
-    if (creds == NULL || creds->ssid == NULL) return ALP_ERR_INVAL;
-
-#if defined(CONFIG_ALP_SDK_IOT_WIFI)
-    struct wifi_connect_req_params params = {0};
-    params.ssid                           = (const uint8_t *)creds->ssid;
-    params.ssid_length                    = strlen(creds->ssid);
-    params.channel                        = WIFI_CHANNEL_ANY;
-    params.mfp                            = WIFI_MFP_OPTIONAL;
-    if (creds->psk != NULL) {
-        params.psk        = (const uint8_t *)creds->psk;
-        params.psk_length = strlen(creds->psk);
-        params.security   = WIFI_SECURITY_TYPE_PSK;
-    } else {
-        params.security = WIFI_SECURITY_TYPE_NONE;
-    }
-
-    k_sem_reset(&w->connect_sem);
-    w->connect_status = -EIO;
-
-    int err           = net_mgmt(NET_REQUEST_WIFI_CONNECT, w->iface, &params, sizeof(params));
-    if (err != 0) {
-        return errno_to_alp(err);
-    }
-
-    if (k_sem_take(&w->connect_sem, K_MSEC(timeout_ms)) != 0) {
-        return ALP_ERR_TIMEOUT;
-    }
-
-    return (w->connect_status == 0) ? ALP_OK : ALP_ERR_IO;
-#else
-    (void)timeout_ms;
-    return ALP_ERR_NOSUPPORT;
-#endif
-}
-
-alp_status_t alp_wifi_disconnect(alp_wifi_t *w)
-{
-    if (w == NULL || !w->in_use) return ALP_ERR_NOT_READY;
-
-#if defined(CONFIG_ALP_SDK_IOT_WIFI)
-    int err = net_mgmt(NET_REQUEST_WIFI_DISCONNECT, w->iface, NULL, 0);
-    return errno_to_alp(err);
-#else
-    return ALP_ERR_NOSUPPORT;
-#endif
-}
-
-void alp_wifi_close(alp_wifi_t *w)
-{
-    if (w == NULL || !w->in_use) return;
-
-#if defined(CONFIG_ALP_SDK_IOT_WIFI)
-    net_mgmt_del_event_callback(&w->wifi_cb);
-    wifi_pool_release(w);
-#endif
-}
 
 /* ================================================================== */
 /* MQTT client                                                         */
