@@ -170,16 +170,7 @@ struct alp_pwm {
 
 /* Counter -- struct alp_counter layout moved to src/backends/counter/counter_ops.h (Slice 4a, 2026-05-22) */
 
-/* ------------------------------------------------------------------ */
-/* Quadrature encoder                                                  */
-/* ------------------------------------------------------------------ */
-
-struct alp_qenc {
-    bool                  in_use;
-    uint32_t              encoder_id;
-    const struct device  *dev;
-    int32_t               last_position;  /* monotonic accumulator */
-};
+/* QEnc -- struct alp_qenc layout moved to src/backends/qenc/qenc_ops.h (Slice 4a, 2026-05-22) */
 
 /* ------------------------------------------------------------------ */
 /* I2S                                                                 */
@@ -285,8 +276,8 @@ void                alp_z_pwm_pool_release(struct alp_pwm *h);
 /* alp_z_counter_pool_* removed in Slice 4a -- the new src/counter_dispatch.c
  * owns its own handle pool keyed on the registry's alp_counter layout. */
 
-struct alp_qenc    *alp_z_qenc_pool_acquire(void);
-void                alp_z_qenc_pool_release(struct alp_qenc *h);
+/* alp_z_qenc_pool_* removed in Slice 4a -- the new src/qenc_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_qenc layout. */
 
 struct alp_i2s     *alp_z_i2s_pool_acquire(void);
 void                alp_z_i2s_pool_release(struct alp_i2s *h);
