@@ -163,13 +163,7 @@ struct alp_qenc {
 /* CAN                                                                 */
 /* ------------------------------------------------------------------ */
 
-struct alp_can {
-    bool                  in_use;
-    uint32_t              bus_id;
-    const struct device  *dev;
-    alp_can_config_t      cfg;
-    bool                  started;
-};
+/* struct alp_can is defined in src/backends/can/can_ops.h.             */
 
 /* ------------------------------------------------------------------ */
 /* RTC                                                                 */
@@ -253,9 +247,6 @@ void                alp_z_counter_pool_release(struct alp_counter *h);
 
 struct alp_qenc    *alp_z_qenc_pool_acquire(void);
 void                alp_z_qenc_pool_release(struct alp_qenc *h);
-
-struct alp_can     *alp_z_can_pool_acquire(void);
-void                alp_z_can_pool_release(struct alp_can *h);
 
 struct alp_rtc     *alp_z_rtc_pool_acquire(void);
 void                alp_z_rtc_pool_release(struct alp_rtc *h);
