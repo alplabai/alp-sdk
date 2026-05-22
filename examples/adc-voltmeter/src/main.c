@@ -12,7 +12,17 @@
 #include <zephyr/kernel.h>
 
 #include "alp/adc.h"
+#include "alp/cap_instance.h"
 #include "alp/e1m_pinout.h"
+
+/* Defensive include: the Alif vendor-extension header only exists when
+ * the build sees CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7 (or similar).  __has_include
+ * lets the example compile on every SoM without per-SoC #ifdefs. */
+#ifdef __has_include
+# if __has_include(<alp/ext/alif/adc.h>)
+#  include <alp/ext/alif/adc.h>
+# endif
+#endif
 
 int main(void) {
     /* 1. Capability rejection: ask for an absurd resolution.
@@ -46,6 +56,28 @@ int main(void) {
                (int)alp_last_error());
         printf("[adc] done\n");
         return 0;
+    }
+
+    /* 3. Capability-gated configuration teaching block.
+     *
+     * `alp_adc_capabilities` asks the backend what THIS opened handle can
+     * do (runtime gate — pairs with ALP_HAS() from <alp/cap.h> which is
+     * the SoC-level compile-time gate).  If the backend advertises
+     * ALP_INSTANCE_CAP_HW_OVERSAMPLE AND the Alif vendor-ext header is
+     * linked in, use the Alif knob to enable 8x oversampling. */
+    const alp_capabilities_t *caps = alp_adc_capabilities(adc);
+    if (alp_capabilities_has(caps, ALP_INSTANCE_CAP_HW_OVERSAMPLE)) {
+        printf("[adc] backend advertises HW oversampling\n");
+#if ALP_EXT_ALIF_ADC_AVAILABLE
+        alp_status_t r = alp_alif_adc_set_oversampling(adc, 8u);
+        if (r == ALP_OK) {
+            printf("[adc] alif HW 8x oversampling enabled\n");
+        } else {
+            printf("[adc] alif oversampling rejected: %d\n", (int)r);
+        }
+#endif
+    } else {
+        printf("[adc] no HW oversampling on this build\n");
     }
 
     int32_t uv = 0;
