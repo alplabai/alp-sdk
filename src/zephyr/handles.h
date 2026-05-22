@@ -86,12 +86,7 @@ extern "C" {
 /* UART                                                                */
 /* ------------------------------------------------------------------ */
 
-struct alp_uart {
-    bool                in_use;
-    uint32_t            port_id;
-    const struct device *dev;
-    alp_uart_config_t   cfg;
-};
+/* struct alp_uart is defined in src/backends/uart/uart_ops.h.         */
 
 /* RX ring buffer state -- only compiled when the feature is enabled
  * so builds without CONFIG_ALP_SDK_UART_RX_RINGBUF don't pull in the
@@ -101,7 +96,7 @@ struct alp_uart {
 
 struct alp_uart_rx_ringbuf {
     bool                 in_use;
-    const struct device *dev;     /* mirror of port->dev for ISR use */
+    const struct device *dev;     /* mirror of port->state.dev for ISR use */
     struct alp_uart     *port;    /* back-ref for detach */
     lwrb_t               rb;
 };
@@ -272,9 +267,6 @@ void alp_z_clear_last_error(void);
 /* ------------------------------------------------------------------ */
 /* Internal pool API — used only by the per-peripheral source files.   */
 /* ------------------------------------------------------------------ */
-
-struct alp_uart    *alp_z_uart_pool_acquire(void);
-void                alp_z_uart_pool_release(struct alp_uart *h);
 
 #if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)
 struct alp_uart_rx_ringbuf *alp_z_uart_rx_ringbuf_pool_acquire(void);

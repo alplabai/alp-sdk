@@ -55,7 +55,6 @@ serialised with a single `k_mutex` per pool.
 | `handles.h`           | Internal struct definitions  |
 | `handles.c`           | Pool allocators              |
 | `peripheral_gpio.c`   | GPIO surface + IRQ glue      |
-| `peripheral_uart.c`   | UART surface (poll-based v0.1) |
 
 ## Tests
 
