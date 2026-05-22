@@ -832,6 +832,10 @@
     },
     "alp/camera.h": {
       "functions": {
+        "alp_camera_capabilities": {
+          "hash": "e1fc70ce67d38385",
+          "signature": "const alp_capabilities_t * alp_camera_capabilities(const alp_camera_t *c);"
+        },
         "alp_camera_capture": {
           "hash": "f658f9abdc48ba2e",
           "signature": "alp_status_t alp_camera_capture(alp_camera_t *c, alp_camera_frame_t *out, uint32_t timeout_ms);"
@@ -5175,6 +5179,10 @@
           "hash": "8f4cb6197d53cea3",
           "signature": "alp_status_t alp_display_blit(alp_display_t *d, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *pixels);"
         },
+        "alp_display_capabilities": {
+          "hash": "713bbb5589d2b43e",
+          "signature": "const alp_capabilities_t * alp_display_capabilities(const alp_display_t *d);"
+        },
         "alp_display_clear": {
           "hash": "78a602221f830803",
           "signature": "alp_status_t alp_display_clear(alp_display_t *d);"
@@ -6366,6 +6374,10 @@
           "hash": "c3ba97a61493478d",
           "signature": "alp_status_t alp_gpu2d_blit(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src, uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy, uint32_t w, uint32_t h);"
         },
+        "alp_gpu2d_capabilities": {
+          "hash": "d0cc9c643fd6e4c6",
+          "signature": "const alp_capabilities_t * alp_gpu2d_capabilities(const alp_gpu2d_t *handle);"
+        },
         "alp_gpu2d_close": {
           "hash": "fc8dcedc5ac12eaf",
           "signature": "void alp_gpu2d_close(alp_gpu2d_t *handle);"
@@ -6902,6 +6914,10 @@
     },
     "alp/power.h": {
       "functions": {
+        "alp_power_capabilities": {
+          "hash": "b46993ac0455f417",
+          "signature": "const alp_capabilities_t * alp_power_capabilities(const alp_power_t *handle);"
+        },
         "alp_power_close": {
           "hash": "8f0eaa7bd51f8d72",
           "signature": "void alp_power_close(alp_power_t *handle);"
