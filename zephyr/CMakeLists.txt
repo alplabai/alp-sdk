@@ -99,9 +99,14 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
 
 # System-power-mode surface (<alp/power.h>).  Wired behind
 # CONFIG_ALP_SDK_POWER so customers can opt out on builds that
-# don't need sleep transitions.
+# don't need sleep transitions.  Slice 7 -- registry migration:
+# replaces the legacy free-standing src/zephyr/power_zephyr.c with
+# the class dispatcher + wildcard stub backend.  Real backends
+# (Zephyr pm_policy_* on AEN, GD32G553 supervisor
+# CMD_POWER_MODE_SET on V2N) land per issue #22.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/power_zephyr.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/power_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/zephyr_stub.c)
 
 # 2D graphics accelerator surface (<alp/gpu2d.h>).  v0.5 stub
 # implementation; per-vendor HAL bodies (Alif D/AVE 2D, NXP

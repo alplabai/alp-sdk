@@ -401,17 +401,22 @@ config ALP_SDK_POWER
 	bool "Enable <alp/power.h> system-power-mode surface"
 	default y
 	help
-	  Compile src/zephyr/power_zephyr.c.  Provides the portable
+	  Compile src/power_dispatch.c + src/backends/power/zephyr_stub.c
+	  (Slice 7 -- registry migration).  Provides the portable
 	  alp_power_open / configure_wake_source / request_sleep /
 	  close surface that backends route either through Zephyr's
 	  pm_policy_* primitives (off-V2N) or through the GD32G553
 	  supervisor's CMD_POWER_MODE_SET opcode (0x28) on V2N.
 
-	  v0.5 ships the surface with NOSUPPORT-with-INVAL-pre-checks
-	  stubs so customers can wire portable sleep code today; the
-	  per-backend HAL bodies (Zephyr pm_state tables on AEN +
-	  the GD32 firmware-side wake-handler + the supervisor
-	  re-init state machine) land in follow-up commits.
+	  Slice 7 ships the surface on top of the backend registry with
+	  a wildcard stub backend: open() returns a valid handle and
+	  configure_wake_source() succeeds silently, but request_sleep()
+	  returns ALP_ERR_NOT_IMPLEMENTED.  The dispatcher still enforces
+	  the legacy INVAL pre-checks (RUN-mode, invalid enum,
+	  no-wake-source-and-no-timer).  The per-backend HAL bodies
+	  (Zephyr pm_state tables on AEN + the GD32 firmware-side
+	  wake-handler + the supervisor re-init state machine) land in
+	  follow-up commits per issue #22.
 
 config ALP_SDK_GPU2D
 	bool "Enable <alp/gpu2d.h> 2D graphics accelerator surface"
