@@ -173,6 +173,14 @@ alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint3
  */
 void         alp_pwm_close(alp_pwm_t *pwm);
 
+/**
+ * @brief Query the capabilities of an opened PWM channel handle.
+ *
+ * @param pwm  Handle from @ref alp_pwm_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p pwm is NULL.
+ */
+const alp_capabilities_t *alp_pwm_capabilities(const alp_pwm_t *pwm);
+
 /* ================================================================== */
 /* Single-pulse output (v0.5, §2B.2)                                   */
 /* ================================================================== */
