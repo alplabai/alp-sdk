@@ -83,21 +83,6 @@ extern "C" {
 #endif
 
 /* ------------------------------------------------------------------ */
-/* SPI                                                                 */
-/* ------------------------------------------------------------------ */
-
-struct alp_spi {
-    bool                in_use;
-    uint32_t            bus_id;
-    const struct device *dev;
-    alp_spi_config_t    cfg;
-    struct spi_config   zspi_cfg;
-    struct gpio_dt_spec cs_spec;        /* zeroed when no CS gpio resolved */
-    bool                cs_present;
-    struct spi_cs_control cs_ctrl;
-};
-
-/* ------------------------------------------------------------------ */
 /* UART                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -287,9 +272,6 @@ void alp_z_clear_last_error(void);
 /* ------------------------------------------------------------------ */
 /* Internal pool API — used only by the per-peripheral source files.   */
 /* ------------------------------------------------------------------ */
-
-struct alp_spi     *alp_z_spi_pool_acquire(void);
-void                alp_z_spi_pool_release(struct alp_spi *h);
 
 struct alp_uart    *alp_z_uart_pool_acquire(void);
 void                alp_z_uart_pool_release(struct alp_uart *h);
