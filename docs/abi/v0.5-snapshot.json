@@ -1,8 +1,12 @@
 {
-  "generated": "2026-05-21",
+  "generated": "2026-05-22",
   "headers": {
     "alp/adc.h": {
       "functions": {
+        "alp_adc_capabilities": {
+          "hash": "8fabce049bef8f55",
+          "signature": "const alp_capabilities_t * alp_adc_capabilities(const alp_adc_t *adc);"
+        },
         "alp_adc_close": {
           "hash": "ac53dbc20ca22519",
           "signature": "void alp_adc_close(alp_adc_t *adc);"
@@ -6331,6 +6335,30 @@
         }
       },
       "typedefs": {}
+    },
+    "alp/ext/alif/adc.h": {
+      "functions": {
+        "alp_alif_adc_set_oversampling": {
+          "hash": "bef0293c04d6ea50",
+          "signature": "alp_status_t alp_alif_adc_set_oversampling(alp_adc_t *h, uint16_t ratio);"
+        },
+        "alp_alif_adc_set_trigger_source": {
+          "hash": "d42eab7bb5587960",
+          "signature": "alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h, alp_alif_adc_trigger_t src);"
+        }
+      },
+      "macros": {
+        "ALP_EXT_ALIF_ADC_AVAILABLE": {
+          "hash": "8e3e237b02c6267d",
+          "value": "1"
+        }
+      },
+      "typedefs": {
+        "alp_alif_adc_trigger_t": {
+          "definition": "typedef enum { ALP_ALIF_ADC_TRIGGER_SOFTWARE = 0, ALP_ALIF_ADC_TRIGGER_TIMER0, ALP_ALIF_ADC_TRIGGER_TIMER1, ALP_ALIF_ADC_TRIGGER_TIMER2, ALP_ALIF_ADC_TRIGGER_TIMER3, ALP_ALIF_ADC_TRIGGER_EXT_PIN, } alp_alif_adc_trigger_t;",
+          "hash": "3a9bdb7c129f9140"
+        }
+      }
     },
     "alp/gpu2d.h": {
       "functions": {
