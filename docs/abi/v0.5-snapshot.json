@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-21",
+  "generated": "2026-05-23",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -6332,6 +6332,58 @@
       },
       "typedefs": {}
     },
+    "alp/ext/alif/storage.h": {
+      "functions": {
+        "alp_alif_storage_secaes_get_status": {
+          "hash": "23e2e91e6c1ac3fc",
+          "signature": "alp_status_t alp_alif_storage_secaes_get_status(alp_storage_t *s, uint32_t *status_out);"
+        },
+        "alp_alif_storage_secaes_key_provision": {
+          "hash": "38cbae4245c0cd8a",
+          "signature": "alp_status_t alp_alif_storage_secaes_key_provision(alp_storage_t *s, const uint8_t *key, uint8_t key_bytes);"
+        }
+      },
+      "macros": {
+        "ALP_EXT_ALIF_STORAGE_AVAILABLE": {
+          "hash": "cc6c34571d39d0d3",
+          "value": "1"
+        }
+      },
+      "typedefs": {
+        "alp_alif_storage_secaes_status_t": {
+          "definition": "typedef enum { ALP_ALIF_STORAGE_SECAES_STATUS_IDLE = 0u, ALP_ALIF_STORAGE_SECAES_STATUS_ARMED = 1u << 0, ALP_ALIF_STORAGE_SECAES_STATUS_ENGAGED = 1u << 1, ALP_ALIF_STORAGE_SECAES_STATUS_KEY_LOAD_ERR = 1u << 2, ALP_ALIF_STORAGE_SECAES_STATUS_BUS_ERR = 1u << 3, } alp_alif_storage_secaes_status_t;",
+          "hash": "23a43a1151fc6b0f"
+        }
+      }
+    },
+    "alp/ext/nxp/storage.h": {
+      "functions": {
+        "alp_nxp_storage_otfad_provision": {
+          "hash": "fba3b8139815badd",
+          "signature": "alp_status_t alp_nxp_storage_otfad_provision(alp_storage_t *s, uint8_t window_id, const uint8_t *key, const uint8_t *counter);"
+        },
+        "alp_nxp_storage_otfad_set_window": {
+          "hash": "bd5a1b3e18f2f5d3",
+          "signature": "alp_status_t alp_nxp_storage_otfad_set_window(alp_storage_t *s, uint8_t window_id, uint32_t start_addr, uint32_t end_addr);"
+        }
+      },
+      "macros": {
+        "ALP_EXT_NXP_STORAGE_AVAILABLE": {
+          "hash": "a814acd2b79543a7",
+          "value": "1"
+        },
+        "ALP_NXP_STORAGE_OTFAD_WINDOW_COUNT": {
+          "hash": "9189b764c02da9b5",
+          "value": "4u"
+        }
+      },
+      "typedefs": {
+        "alp_nxp_storage_otfad_slot_t": {
+          "definition": "typedef enum { ALP_NXP_STORAGE_OTFAD_SLOT_0 = 0, ALP_NXP_STORAGE_OTFAD_SLOT_1 = 1, ALP_NXP_STORAGE_OTFAD_SLOT_2 = 2, ALP_NXP_STORAGE_OTFAD_SLOT_3 = 3, } alp_nxp_storage_otfad_slot_t;",
+          "hash": "c98f98b2f8d1b7d9"
+        }
+      }
+    },
     "alp/gpu2d.h": {
       "functions": {
         "alp_gpu2d_blend": {
@@ -7429,6 +7481,10 @@
     },
     "alp/storage.h": {
       "functions": {
+        "alp_storage_capabilities": {
+          "hash": "f625ea74c58af8da",
+          "signature": "const alp_capabilities_t * alp_storage_capabilities(const alp_storage_t *s);"
+        },
         "alp_storage_close": {
           "hash": "5d5e8e7dbc5bedfd",
           "signature": "void alp_storage_close(alp_storage_t *s);"
