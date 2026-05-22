@@ -463,6 +463,14 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len,
  */
 void alp_uart_close(alp_uart_t *port);
 
+/**
+ * @brief Query the capabilities of an opened UART port handle.
+ *
+ * @param port  Handle from @ref alp_uart_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p port is NULL.
+ */
+const alp_capabilities_t *alp_uart_capabilities(const alp_uart_t *port);
+
 /* ------------------------------------------------------------------ */
 /* UART -- byte-granular RX ring buffer (optional)                     */
 /*                                                                     */
