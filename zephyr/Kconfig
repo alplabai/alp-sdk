@@ -329,6 +329,19 @@ config ALP_SDK_MAX_CAN_HANDLES
 	int "Maximum concurrent alp_can_t handles"
 	default 4
 
+config ALP_SDK_CAN_SW_FALLBACK
+	bool "Software CAN fallback (stateless stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a stateless CAN stub backend that registers as a
+	  wildcard at priority 0.  open() succeeds, start / stop / close
+	  / remove_filter are no-ops, send / add_filter return
+	  ALP_ERR_NOSUPPORT.  For native_sim build / test only --
+	  production firmware MUST NOT rely on this since no real
+	  transceiver / peer node is driven.
+
 config ALP_SDK_MAX_RTC_HANDLES
 	int "Maximum concurrent alp_rtc_t handles"
 	default 2

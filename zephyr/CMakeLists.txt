@@ -70,8 +70,6 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_QENC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_qenc.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_DAC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_dac.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_CAN
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_can.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_RTC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_rtc.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_WDT
@@ -418,4 +416,16 @@ zephyr_library_sources(
 if(CONFIG_ALP_SDK_I2S_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2s/sw_fallback.c)
+endif()
+
+# CAN class dispatcher + backends (Slice 2b migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_CAN_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/can_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/can/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_CAN_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/can/sw_fallback.c)
 endif()
