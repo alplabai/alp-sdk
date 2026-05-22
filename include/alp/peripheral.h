@@ -391,6 +391,14 @@ alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len);
  */
 void alp_spi_close(alp_spi_t *bus);
 
+/**
+ * @brief Query the capabilities of an opened SPI bus handle.
+ *
+ * @param bus  Handle from @ref alp_spi_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p bus is NULL.
+ */
+const alp_capabilities_t *alp_spi_capabilities(const alp_spi_t *bus);
+
 /* ------------------------------------------------------------------ */
 /* UART                                                                */
 /* ------------------------------------------------------------------ */
