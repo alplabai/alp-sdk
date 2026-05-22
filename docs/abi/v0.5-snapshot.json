@@ -5100,6 +5100,10 @@
           "hash": "432318c7c8b84354",
           "signature": "alp_status_t alp_counter_cancel_alarm(alp_counter_t *counter);"
         },
+        "alp_counter_capabilities": {
+          "hash": "96c1c998e1aaf892",
+          "signature": "const alp_capabilities_t * alp_counter_capabilities(const alp_counter_t *counter);"
+        },
         "alp_counter_close": {
           "hash": "90a56336db669504",
           "signature": "void alp_counter_close(alp_counter_t *counter);"
@@ -5127,6 +5131,10 @@
         "alp_counter_us_to_ticks": {
           "hash": "5c3a090883be43f4",
           "signature": "alp_status_t alp_counter_us_to_ticks(alp_counter_t *counter, uint32_t us, uint32_t *ticks_out);"
+        },
+        "alp_qenc_capabilities": {
+          "hash": "64c55fe2dd9df388",
+          "signature": "const alp_capabilities_t * alp_qenc_capabilities(const alp_qenc_t *enc);"
         },
         "alp_qenc_close": {
           "hash": "a06b2ff8ad940293",
@@ -7221,6 +7229,10 @@
     },
     "alp/rtc.h": {
       "functions": {
+        "alp_rtc_capabilities": {
+          "hash": "c83172e9b5c5ab28",
+          "signature": "const alp_capabilities_t * alp_rtc_capabilities(const alp_rtc_t *rtc);"
+        },
         "alp_rtc_close": {
           "hash": "3b53bd2693381efa",
           "signature": "void alp_rtc_close(alp_rtc_t *rtc);"
@@ -7633,6 +7645,10 @@
     },
     "alp/wdt.h": {
       "functions": {
+        "alp_wdt_capabilities": {
+          "hash": "e6da4a1100116ce2",
+          "signature": "const alp_capabilities_t * alp_wdt_capabilities(const alp_wdt_t *wdt);"
+        },
         "alp_wdt_close": {
           "hash": "40af7d03567c0c9a",
           "signature": "void alp_wdt_close(alp_wdt_t *wdt);"
