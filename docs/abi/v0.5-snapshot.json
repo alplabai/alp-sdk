@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-21",
+  "generated": "2026-05-22",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -6735,6 +6735,10 @@
           "hash": "1ed2c1a2170d6399",
           "signature": "alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level);"
         },
+        "alp_i2c_capabilities": {
+          "hash": "24a89b8df3f55eb4",
+          "signature": "const alp_capabilities_t * alp_i2c_capabilities(const alp_i2c_t *bus);"
+        },
         "alp_i2c_close": {
           "hash": "37c43c93fb338484",
           "signature": "void alp_i2c_close(alp_i2c_t *bus);"
@@ -6759,6 +6763,10 @@
           "hash": "a15ddf9d11450877",
           "signature": "alp_status_t alp_last_error(void);"
         },
+        "alp_spi_capabilities": {
+          "hash": "e8ad25bb45d3ba91",
+          "signature": "const alp_capabilities_t * alp_spi_capabilities(const alp_spi_t *bus);"
+        },
         "alp_spi_close": {
           "hash": "7dbfaa8be9435a4a",
           "signature": "void alp_spi_close(alp_spi_t *bus);"
@@ -6778,6 +6786,10 @@
         "alp_spi_write": {
           "hash": "add1df22e2fbb139",
           "signature": "alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len);"
+        },
+        "alp_uart_capabilities": {
+          "hash": "e51cfb1268f534d4",
+          "signature": "const alp_capabilities_t * alp_uart_capabilities(const alp_uart_t *port);"
         },
         "alp_uart_close": {
           "hash": "d1aa431d5117c45d",
