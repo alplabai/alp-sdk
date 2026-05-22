@@ -41,8 +41,19 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/security_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/mproc_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/storage_stub.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/usb_zephyr.c
 )
+
+# USB registry sources -- replace the legacy src/zephyr/usb_zephyr.c
+# from the v0.3 contract.  Dispatcher + portable Zephyr backend ship
+# unconditionally; sw_fallback gated on the native_sim opt-in.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/usb_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/usb/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_USB_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/usb/sw_fallback.c)
+endif()
 
 # v0.6 -- <alp/rpc.h> framed RPC over OpenAMP / RPMsg.  Gated on
 # CONFIG_ALP_SDK_RPC; when OFF the .c file compiles to NOSUPPORT

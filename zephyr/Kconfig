@@ -899,18 +899,40 @@ config ALP_SDK_USB
 	default y if USB_DEVICE_STACK
 	depends on USB_DEVICE_STACK
 	help
-	  Wires alp_usb_device_open / enable / disable on top of
-	  Zephyr's USB device stack.  Per-class endpoint
-	  read/write (CDC-ACM, MSC, HID) lands in v0.3.x once
-	  the per-class wrappers are wired.  Host role lands
-	  alongside the SoC's USB-host controller driver.
+	  Gates the real Zephyr USBD-stack body inside
+	  src/backends/usb/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but
+	  every device-side op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4b the dispatcher (src/usb_dispatch.c) and its
+	  Zephyr backend (src/backends/usb/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_USB_SW_FALLBACK for the software-backend opt-in.
+
+config ALP_SDK_USB_SW_FALLBACK
+	bool "Software USB fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op USB backend that registers as a wildcard at
+	  priority 0.  For native_sim build / test only.
 
 config ALP_SDK_MAX_USB_DEV_HANDLES
 	int "Maximum concurrent alp_usb_dev_t handles"
-	default 1
+	default 2
 	help
 	  USB device role is single-instance on every E1M-conformant
-	  SoM (one USB controller per module).
+	  SoM (one USB controller per module).  Default raised from
+	  1 to 2 in Slice 4b so unit tests and customer code can hold
+	  a transient second handle during reopen flows.
+
+config ALP_SDK_MAX_USB_HOST_HANDLES
+	int "Maximum concurrent alp_usb_host_t handles"
+	default 1
+	help
+	  USB host role is single-instance on every supported SoM.
 
 config ALP_SDK_MAX_SHMEM_HANDLES
 	int "Maximum concurrent alp_shmem_t handles"
