@@ -110,14 +110,7 @@ struct alp_uart_rx_ringbuf {
 /* PWM                                                                 */
 /* ------------------------------------------------------------------ */
 
-struct alp_pwm {
-    bool                  in_use;
-    uint32_t              channel_id;
-    const struct device  *dev;
-    uint32_t              channel;       /* hardware channel within @ref dev */
-    uint32_t              period_ns;
-    uint32_t              flags;         /* zephyr pwm_flags_t */
-};
+/* struct alp_pwm is defined in src/backends/pwm/pwm_ops.h.            */
 
 /* ------------------------------------------------------------------ */
 /* ADC                                                                 */
@@ -260,9 +253,6 @@ void alp_z_clear_last_error(void);
 struct alp_uart_rx_ringbuf *alp_z_uart_rx_ringbuf_pool_acquire(void);
 void                        alp_z_uart_rx_ringbuf_pool_release(struct alp_uart_rx_ringbuf *h);
 #endif
-
-struct alp_pwm     *alp_z_pwm_pool_acquire(void);
-void                alp_z_pwm_pool_release(struct alp_pwm *h);
 
 struct alp_adc     *alp_z_adc_pool_acquire(void);
 void                alp_z_adc_pool_release(struct alp_adc *h);

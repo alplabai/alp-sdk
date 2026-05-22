@@ -41,7 +41,6 @@
         k_mutex_unlock(&kind##_lock);                                      \
     }
 
-DEFINE_POOL(pwm,     CONFIG_ALP_SDK_MAX_PWM_HANDLES,     alp_pwm)
 DEFINE_POOL(adc,     CONFIG_ALP_SDK_MAX_ADC_HANDLES,     alp_adc)
 DEFINE_POOL(counter, CONFIG_ALP_SDK_MAX_COUNTER_HANDLES, alp_counter)
 DEFINE_POOL(qenc,    CONFIG_ALP_SDK_MAX_QENC_HANDLES,    alp_qenc)
