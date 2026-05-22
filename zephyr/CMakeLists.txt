@@ -241,12 +241,23 @@ if(CONFIG_ALP_SDK_PERIPH_TMU AND CONFIG_ALP_SDK_TMU_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/tmu/sw_fallback.c)
 endif()
 
-# Standalone DSP-chain API (<alp/dsp.h>).  Source lives in src/common
-# because it is OS-agnostic -- the math kernels are libm + CMSIS-DSP
-# only.  The wave-2 bridge surfaces (alp_adc_filter_t / spectrum_t in
-# <alp/adc.h>) compose on top of this same machinery once they land.
+# DSP registry sources -- replace the legacy src/common/dsp_chain.c
+# from the v0.3 contract.  The dispatcher owns one alp_dsp_chain_t
+# pool keyed off the dsp class registry; the OS-agnostic CMSIS-DSP /
+# portable-radix-2 body now lives in src/backends/dsp/sw_fallback.c
+# (no separate zephyr_drv exists -- the V2N GD32G5 HW-FFT surfaces
+# via wave-2's alp_adc_filter_t / spectrum_t in <alp/adc.h>, not
+# through this standalone class, so the SW backend is the
+# unconditional production pick today).
+#
+# Dispatcher + sw_fallback ship unconditionally -- they ARE the
+# production code on every SoC in Slice 4d.  CONFIG_ALP_SDK_DSP is
+# retained as the opt-in feature gate; when off, neither file is
+# linked so the static cost (~17 KB pool slot) is paid only by apps
+# that use the chain API.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/dsp_chain.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/dsp_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dsp/sw_fallback.c)
 
 # System-power-mode surface (<alp/power.h>).  Wired behind
 # CONFIG_ALP_SDK_POWER so customers can opt out on builds that

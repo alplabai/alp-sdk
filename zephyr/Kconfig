@@ -465,20 +465,28 @@ config ALP_SDK_DSP
 	bool "Enable <alp/dsp.h> standalone DSP-chain API"
 	default n
 	help
-	  Compile src/common/dsp_chain.c.  Provides the standalone
+	  Compile the DSP registry sources -- src/dsp_dispatch.c plus
+	  src/backends/dsp/sw_fallback.c.  Provides the standalone
 	  alp_dsp_chain_* surface for in-RAM FIR / IIR / window /
 	  FFT processing against int16 mV-scale buffers.  Uses
 	  CMSIS-DSP when ALP_HAS_CMSIS_DSP=1; otherwise falls back
 	  to a portable-C math kernel set (naive FIR convolution,
 	  direct-form-1 biquad cascade, radix-2 Cooley-Tukey FFT).
 
+	  Slice 4d migration: the legacy OS-agnostic body that lived at
+	  src/common/dsp_chain.c is now the sw_fallback backend.  There
+	  is no separate zephyr_drv backend today -- the V2N GD32G5
+	  HW-FFT surfaces via wave-2's alp_adc_filter_t /
+	  alp_adc_spectrum_t in <alp/adc.h>, not through this
+	  standalone class.  Future HW backends (V2N standalone-FFT,
+	  AEN once the wave-2 bridge stabilises) pre-empt the
+	  sw_fallback transparently when registered at higher priority.
+
 	  Static cost: ~30 KB for the chain pool (two concurrent
 	  chains sized to ALP_DSP_MAX_FIR_TAPS / IIR_SECTIONS /
 	  FFT_POINTS).  Pulls in math.h transcendentals (sinf, cosf,
 	  sqrtf, lrintf).  Off by default to keep tight firmware
-	  images lean.  The wave-2 bridge surfaces
-	  alp_adc_filter_t / alp_adc_spectrum_t (in <alp/adc.h>,
-	  landing v0.5.x) reuse the same chain machinery.
+	  images lean.
 
 config ALP_SDK_POWER
 	bool "Enable <alp/power.h> system-power-mode surface"
