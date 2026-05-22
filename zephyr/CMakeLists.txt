@@ -86,8 +86,14 @@ if(CONFIG_ALP_SDK_RTC_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/sw_fallback.c)
 endif()
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_WDT
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_wdt.c)
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/wdt_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wdt/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_WDT_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wdt/sw_fallback.c)
+endif()
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_TMU
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_tmu.c)
 
