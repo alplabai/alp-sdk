@@ -78,8 +78,14 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_I2S
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_i2s.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_CAN
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_can.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_RTC
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_rtc.c)
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/rtc_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_RTC_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/sw_fallback.c)
+endif()
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_WDT
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_wdt.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_TMU
