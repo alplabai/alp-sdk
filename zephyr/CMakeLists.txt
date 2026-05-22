@@ -355,3 +355,9 @@ zephyr_library_sources(
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backend.c
 )
+
+# NOTE: src/adc_dispatch.c + src/backends/adc/*.c are added to the
+# build in Slice 1 Task 8 (along with the deletion of the legacy
+# src/zephyr/peripheral_adc.c).  Adding them earlier would cause
+# duplicate-symbol link errors with the still-present legacy
+# implementation.
