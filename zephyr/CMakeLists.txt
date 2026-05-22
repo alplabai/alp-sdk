@@ -109,12 +109,21 @@ if(CONFIG_ALP_SDK_MPROC_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/sw_fallback.c)
 endif()
 
-# v0.6 -- <alp/rpc.h> framed RPC over OpenAMP / RPMsg.  Gated on
-# CONFIG_ALP_SDK_RPC; when OFF the .c file compiles to NOSUPPORT
-# stubs so apps that don't opt in still link cleanly.
+# RPC registry sources -- replace the legacy src/zephyr/rpc_zephyr.c
+# from the v0.6 contract.  The dispatcher owns one alp_rpc_channel_t
+# pool keyed off the same class registry; the portable Zephyr backend
+# carries the lifted ipc_service / RPMsg body + the per-channel
+# subscription table + the synchronous-call slot.  Dispatcher +
+# Zephyr backend ship unconditionally; sw_fallback gated on the
+# native_sim opt-in.
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/rpc_zephyr.c
-)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/rpc_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rpc/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_RPC_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rpc/sw_fallback.c)
+endif()
 
 # Per-backend inference executors -- compile only when the matching
 # Kconfig opt-in is set.  Each backend's .cpp / .c source file
