@@ -70,8 +70,6 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93
 # when its underlying Zephyr driver class is enabled.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_PWM
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_pwm.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_ADC
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_adc.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_COUNTER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_counter.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_QENC
@@ -357,3 +355,26 @@ zephyr_library_sources(
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backend.c
 )
+
+# ADC class dispatcher.  Owns the one-shot alp_adc_* API surface
+# (alp_adc_open / read_raw / read_uv / close / capabilities) and
+# routes through the backend registry.  Backends register under
+# .alp_backends_adc and ship from src/backends/adc/*.c.
+#
+# Streaming (alp_adc_stream_*) stays in src/zephyr/peripheral_adc.c
+# until Slice 1.x migrates it; both files coexist under the same
+# Kconfig because they implement different API surfaces and share
+# no symbols.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_ADC
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/adc_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_adc.c)
+
+# ADC backends.  Each registers itself into .alp_backends_adc via
+# ALP_BACKEND_REGISTER.  SoC-gated so unused vendor code is
+# tree-shaken from the build.
+zephyr_library_sources_ifdef(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/alif_e7.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SOC_RENESAS_RZV2N_N44
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/gd32_bridge.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_ADC_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/sw_fallback.c)
