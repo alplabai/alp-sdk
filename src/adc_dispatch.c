@@ -62,6 +62,15 @@ alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg)
         alp_z_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
+    /* SoC capability gate: reject a resolution the active SoC can't
+     * deliver before any backend dispatch.  ALP_SOC_ADC_MAX_RESOLUTION_BITS
+     * is UINT16_MAX under CONFIG_ALP_SOC_NONE, so this is a no-op there
+     * and a valid-but-unresolved channel surfaces NOT_READY from the
+     * backend open() instead. */
+    if ((uint32_t)cfg->resolution_bits > (uint32_t)ALP_SOC_ADC_MAX_RESOLUTION_BITS) {
+        alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
+        return NULL;
+    }
     const alp_backend_t *be = alp_backend_select("adc", ALP_SOC_REF_STR);
     if (be == NULL) {
         alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);

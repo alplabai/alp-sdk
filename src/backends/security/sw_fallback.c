@@ -6,17 +6,16 @@
  * backend is linked into the build (the typical native_sim
  * trimmed-image case, or any build with CONFIG_ALP_SDK_SECURITY=n).
  *
- * Contract:
- *   - hash_open / aead_open  -> ALP_OK (the dispatcher hands out a
- *     handle the caller can subsequently address; no underlying PSA
- *     state stands behind it)
- *   - hash_update / hash_finish / aead_encrypt / aead_decrypt
- *     -> ALP_ERR_NOT_IMPLEMENTED
+ * Contract: NOSUPPORT stub.  It registers (priority 0, "*") only so
+ * the `security` class section is never empty -- that keeps the
+ * linker emitting the registry's __start_/__stop_ bounds.  It backs
+ * no crypto, so every surface reports unsupported:
+ *   - hash_open / aead_open  -> ALP_ERR_NOSUPPORT (the dispatcher
+ *     relays this as a NULL handle + last_error = NOSUPPORT)
+ *   - random_bytes           -> ALP_ERR_NOSUPPORT
+ *   - hash_update / finish / aead_encrypt / decrypt
+ *     -> ALP_ERR_NOT_IMPLEMENTED (unreachable -- no handle handed out)
  *   - hash_close / aead_close -> no-op
- *   - random_bytes -> ALP_OK; fills the buffer with a deterministic
- *     counter+0xAA pattern so tests that need bytes get something
- *     predictable.  NOT cryptographically random -- the wildcard
- *     fallback exists for native_sim portability, not security.
  *
  * Matches the design spec Section 5 sw_fallback contract.
  *
@@ -25,11 +24,7 @@
  *      linkage required, so this backend compiles cleanly on
  *      native_sim trimmed-image builds where MbedTLS is absent.
  * @par Performance: O(1) per call; every op short-circuits to
- *      ALP_OK / ALP_ERR_NOT_IMPLEMENTED with no library touch.
- *      random_bytes is O(len) -- one store per byte through the
- *      deterministic generator; bit-identical to a portable
- *      counter+xor reference, which is exactly the property the
- *      unit tests in tests/unit/security_registry/ exercise.
+ *      ALP_ERR_NOSUPPORT / NOT_IMPLEMENTED with no library touch.
  *      All ops are reentrant and lock-free.
  */
 
@@ -49,10 +44,12 @@ static alp_status_t sw_hash_open(alp_hash_alg_t alg,
                                  alp_hash_backend_state_t *state,
                                  alp_capabilities_t *caps_out)
 {
-    state->alg      = alg;
-    state->be_data  = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+    /* NOSUPPORT stub: no software hash on native_sim.  The dispatcher
+     * relays this as a NULL handle + last_error = NOSUPPORT. */
+    (void)alg;
+    (void)state;
+    (void)caps_out;
+    return ALP_ERR_NOSUPPORT;
 }
 
 static alp_status_t sw_hash_update(alp_hash_backend_state_t *state,
@@ -87,12 +84,13 @@ static alp_status_t sw_aead_open(alp_aead_alg_t alg,
                                  alp_aead_backend_state_t *state,
                                  alp_capabilities_t *caps_out)
 {
+    /* NOSUPPORT stub: no software AEAD on native_sim. */
+    (void)alg;
     (void)key;
     (void)key_len;
-    state->alg      = alg;
-    state->be_data  = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+    (void)state;
+    (void)caps_out;
+    return ALP_ERR_NOSUPPORT;
 }
 
 static alp_status_t sw_aead_encrypt(alp_aead_backend_state_t *state,
@@ -144,14 +142,12 @@ static void sw_aead_close(alp_aead_backend_state_t *state)
 
 static alp_status_t sw_random_bytes(uint8_t *out, size_t len)
 {
-    /* Deterministic counter+0xAA fill -- NOT cryptographically random.
-     * Tests that need bytes get a predictable pattern; production
-     * builds that need real randomness MUST link the zephyr_drv
-     * backend (priority 100) which routes through PSA Crypto's DRBG. */
-    for (size_t i = 0; i < len; ++i) {
-        out[i] = (uint8_t)((i + 1u) ^ 0xAAu);
-    }
-    return ALP_OK;
+    /* NOSUPPORT stub: no entropy source on native_sim.  Production
+     * builds link the zephyr_drv backend (priority 100), which routes
+     * through PSA Crypto's DRBG and wins selection ahead of this. */
+    (void)out;
+    (void)len;
+    return ALP_ERR_NOSUPPORT;
 }
 
 /* ---------- Registration ---------- */

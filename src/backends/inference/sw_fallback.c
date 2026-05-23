@@ -36,11 +36,12 @@ static alp_status_t sw_open(const alp_inference_config_t *cfg,
                             alp_inference_backend_state_t *state,
                             alp_capabilities_t *caps_out)
 {
+    /* NOSUPPORT stub: no inference engine on native_sim.  The
+     * dispatcher relays this as a NULL handle + last_error = NOSUPPORT. */
     (void)cfg;
-    state->dev      = NULL;
-    state->be_data  = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+    (void)state;
+    (void)caps_out;
+    return ALP_ERR_NOSUPPORT;
 }
 
 static size_t sw_num_inputs(alp_inference_backend_state_t *state)

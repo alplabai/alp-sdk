@@ -74,7 +74,10 @@ static alp_status_t stub_request_sleep(alp_power_backend_state_t *state,
         info->wake_source   = 0u;
         info->slept_ms      = 0u;
     }
-    return ALP_ERR_NOT_IMPLEMENTED;
+    /* No real PM backend on this build: report NOSUPPORT (matching the
+     * <alp/power.h> portable contract), not NOT_IMPLEMENTED.  open() +
+     * configure_wake_source still succeed so setup code links/runs. */
+    return ALP_ERR_NOSUPPORT;
 }
 
 static const alp_power_ops_t _ops = {

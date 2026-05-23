@@ -8,18 +8,15 @@
  * lets examples that include <alp/mproc.h> compile and exercise
  * the dispatcher without pulling in CONFIG_MBOX or any DT alias.
  *
- * Contract:
- *   - shmem_open / mbox_open / hwsem_open -> ALP_OK (no underlying
- *     bring-up; the dispatcher hands out a handle that subsequent
- *     I/O ops can address but which has no real backing)
- *   - shmem_view                          -> ALP_ERR_NOT_IMPLEMENTED
- *   - mbox_send / mbox_set_callback       -> ALP_ERR_NOT_IMPLEMENTED
- *   - hwsem_try_lock / hwsem_lock         -> ALP_OK (no-op lock --
- *     useful for tests that just need the lock-protected code path
- *     to execute under native_sim without a real cross-core sync
- *     primitive being available)
- *   - hwsem_unlock                        -> ALP_OK
- *   - everything else (close / view)      -> ALP_ERR_NOT_IMPLEMENTED
+ * Contract: NOSUPPORT stub.  It registers (priority 0, "*") only so
+ * the `mproc` class section is never empty -- that keeps the linker
+ * emitting the registry's __start_/__stop_ bounds.  No MHU /
+ * shared-memory / hwsem hardware exists under native_sim, so:
+ *   - shmem_open / mbox_open / hwsem_open -> ALP_ERR_NOSUPPORT (the
+ *     dispatcher relays this as a NULL handle + last_error)
+ *   - all I/O ops (view / send / lock / unlock) keep their
+ *     no-op / NOT_IMPLEMENTED bodies but are unreachable, since no
+ *     handle is ever handed out
  *
  * Matches the design spec Section 5 sw_fallback contract.
  *
@@ -47,10 +44,11 @@ static alp_status_t sw_shmem_open(const alp_shmem_config_t *cfg,
                                   alp_shmem_backend_state_t *state,
                                   alp_capabilities_t *caps_out)
 {
+    /* NOSUPPORT stub: no shared-memory carve-out on native_sim. */
     (void)cfg;
-    state->be_data  = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+    (void)state;
+    (void)caps_out;
+    return ALP_ERR_NOSUPPORT;
 }
 
 static alp_status_t sw_shmem_view(alp_shmem_backend_state_t *state,
@@ -73,10 +71,11 @@ static alp_status_t sw_mbox_open(const alp_mbox_config_t *cfg,
                                  alp_mbox_backend_state_t *state,
                                  alp_capabilities_t *caps_out)
 {
+    /* NOSUPPORT stub: no MHU / mailbox device on native_sim. */
     (void)cfg;
-    state->be_data  = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+    (void)state;
+    (void)caps_out;
+    return ALP_ERR_NOSUPPORT;
 }
 
 static alp_status_t sw_mbox_send(alp_mbox_backend_state_t *state,
@@ -110,10 +109,11 @@ static alp_status_t sw_hwsem_open(uint32_t hwsem_id,
                                   alp_hwsem_backend_state_t *state,
                                   alp_capabilities_t *caps_out)
 {
+    /* NOSUPPORT stub: no hardware semaphore block on native_sim. */
     (void)hwsem_id;
-    state->be_data  = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+    (void)state;
+    (void)caps_out;
+    return ALP_ERR_NOSUPPORT;
 }
 
 static alp_status_t sw_hwsem_try_lock(alp_hwsem_backend_state_t *state)

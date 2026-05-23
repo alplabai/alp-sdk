@@ -89,8 +89,7 @@ zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mqtt/sw
 # fallback.  Dispatcher + Zephyr backend ship unconditionally;
 # sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/mproc_dispatch.c)
-zephyr_library_sources_ifdef(CONFIG_IPC_SERVICE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/mproc_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/zephyr_drv.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/sw_fallback.c)
@@ -573,6 +572,11 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/pwm_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_PWM
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/zephyr_drv.c)
+# V2N drives zero native E1M PWMs -- all eight route through the
+# GD32G553 supervisor MCU.  SoC-gated like the adc bridge so it links
+# only on the V2N target (where the supervisor symbols exist).
+zephyr_library_sources_ifdef(CONFIG_ALP_SOC_RENESAS_RZV2N_N44
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/gd32_bridge.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/sw_fallback.c)
 # I2S class dispatcher + backends.
