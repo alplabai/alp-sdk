@@ -48,6 +48,7 @@
 #include <stdbool.h>
 
 #include "alp/peripheral.h"
+#include "alp/cap_instance.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -272,6 +273,14 @@ alp_status_t alp_ble_gatt_write(alp_ble_conn_t *conn,
                                 alp_ble_attr_handle_t handle,
                                 const uint8_t *data, size_t len,
                                 uint32_t timeout_ms);
+
+/**
+ * @brief Query the capabilities of an opened BLE radio handle.
+ *
+ * @param ble  Handle from @ref alp_ble_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p ble is NULL.
+ */
+const alp_capabilities_t *alp_ble_capabilities(const alp_ble_t *ble);
 
 #ifdef __cplusplus
 }  /* extern "C" */

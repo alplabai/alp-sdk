@@ -221,6 +221,10 @@
           "hash": "6311564f47855586",
           "signature": "alp_status_t alp_ble_advertise_stop(alp_ble_t *ble);"
         },
+        "alp_ble_capabilities": {
+          "hash": "8ea01b27a277fe1f",
+          "signature": "const alp_capabilities_t * alp_ble_capabilities(const alp_ble_t *ble);"
+        },
         "alp_ble_close": {
           "hash": "5f8be9db14a7abbd",
           "signature": "void alp_ble_close(alp_ble_t *ble);"
@@ -6599,6 +6603,10 @@
     },
     "alp/iot.h": {
       "functions": {
+        "alp_mqtt_capabilities": {
+          "hash": "0a2c8f40a25a0f4a",
+          "signature": "const alp_capabilities_t * alp_mqtt_capabilities(const alp_mqtt_t *m);"
+        },
         "alp_mqtt_close": {
           "hash": "0ac8ff8b3605fe22",
           "signature": "void alp_mqtt_close(alp_mqtt_t *m);"
@@ -6622,6 +6630,10 @@
         "alp_mqtt_subscribe": {
           "hash": "b8479a63c6a41f12",
           "signature": "alp_status_t alp_mqtt_subscribe(alp_mqtt_t *m, const char *topic_filter, alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user);"
+        },
+        "alp_wifi_capabilities": {
+          "hash": "928cc4fd382e7d3d",
+          "signature": "const alp_capabilities_t * alp_wifi_capabilities(const alp_wifi_t *w);"
         },
         "alp_wifi_close": {
           "hash": "54a8c1b1f5700c8d",
@@ -7740,6 +7752,10 @@
     },
     "alp/usb.h": {
       "functions": {
+        "alp_usb_capabilities": {
+          "hash": "80634bbc3c26e493",
+          "signature": "const alp_capabilities_t * alp_usb_capabilities(const alp_usb_dev_t *dev);"
+        },
         "alp_usb_device_close": {
           "hash": "a0d61c2498d34493",
           "signature": "void alp_usb_device_close(alp_usb_dev_t *dev);"

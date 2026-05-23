@@ -41,6 +41,7 @@
 #include <stdbool.h>
 
 #include "alp/peripheral.h"
+#include "alp/cap_instance.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -175,6 +176,14 @@ alp_status_t    alp_usb_host_disable(alp_usb_host_t *host);
  * @param[in] host  Handle from @ref alp_usb_host_open, or NULL.
  */
 void            alp_usb_host_close(alp_usb_host_t *host);
+
+/**
+ * @brief Query the capabilities of an opened USB device handle.
+ *
+ * @param dev  Handle from @ref alp_usb_device_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p dev is NULL.
+ */
+const alp_capabilities_t *alp_usb_capabilities(const alp_usb_dev_t *dev);
 
 #ifdef __cplusplus
 }  /* extern "C" */

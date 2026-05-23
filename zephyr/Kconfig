@@ -513,21 +513,59 @@ config ALP_SDK_IOT_WIFI
 	default y if WIFI && NET_MGMT
 	depends on WIFI && NET_MGMT
 	help
-	  Enable the real wifi_mgmt-backed alp_wifi_* implementation.
+	  Gates the real Zephyr wifi_mgmt body inside
+	  src/backends/wifi/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  Wi-Fi-side op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4b the dispatcher (src/wifi_dispatch.c) and its
+	  Zephyr backend (src/backends/wifi/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_WIFI_SW_FALLBACK for the software-backend opt-in.
+
 	  Requires CONFIG_WIFI=y and a wifi-management subsystem (e.g.
-	  CONFIG_WIFI_NM_WPA_SUPPLICANT=y on AEN-Zephyr).  When OFF
-	  alp_wifi_open() returns NULL with alp_last_error() =
-	  ALP_ERR_NOSUPPORT.
+	  CONFIG_WIFI_NM_WPA_SUPPLICANT=y on AEN-Zephyr).
+
+config ALP_SDK_WIFI_SW_FALLBACK
+	bool "Software Wi-Fi fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op Wi-Fi backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test only -- no real
+	  radio exists, so open succeeds silently and connect returns
+	  ALP_ERR_NOT_IMPLEMENTED.
 
 config ALP_SDK_IOT_MQTT
 	bool "Real MQTT client via Zephyr mqtt_client"
 	default y if MQTT_LIB
 	depends on MQTT_LIB && NET_TCP
 	help
-	  Enable the real mqtt_client-backed alp_mqtt_* implementation.
-	  Requires CONFIG_MQTT_LIB=y + CONFIG_NET_TCP=y.  When OFF
-	  alp_mqtt_open() returns NULL with alp_last_error() =
-	  ALP_ERR_NOSUPPORT.
+	  Gates the real Zephyr mqtt_client body inside
+	  src/backends/mqtt/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  MQTT-side op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4b the dispatcher (src/mqtt_dispatch.c) and its
+	  Zephyr backend (src/backends/mqtt/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_MQTT_SW_FALLBACK for the software-backend opt-in.
+
+	  Requires CONFIG_MQTT_LIB=y + CONFIG_NET_TCP=y.
+
+config ALP_SDK_MQTT_SW_FALLBACK
+	bool "Software MQTT fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op MQTT backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test only -- no real
+	  broker is reachable, so open succeeds silently and every
+	  other op returns ALP_ERR_NOT_IMPLEMENTED.
 
 config ALP_SDK_MAX_WIFI_HANDLES
 	int "Maximum concurrent alp_wifi_t handles"
@@ -758,11 +796,30 @@ config ALP_SDK_BLE
 	default y if BT
 	depends on BT
 	help
-	  Enables the wifi_mgmt + GATT-server peripheral path and the
-	  scan + connect central path on top of Zephyr's `bt` host
-	  stack.  Requires CONFIG_BT=y plus CONFIG_BT_PERIPHERAL=y
-	  and/or CONFIG_BT_CENTRAL=y for the matching role.  When OFF
-	  alp_ble_open() returns NULL with ALP_ERR_NOSUPPORT.
+	  Gates the real Zephyr bt-host body inside
+	  src/backends/ble/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  radio-side op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4b the dispatcher (src/ble_dispatch.c) and its
+	  Zephyr backend (src/backends/ble/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_BLE_SW_FALLBACK for the software-backend opt-in.
+
+	  Requires CONFIG_BT=y plus CONFIG_BT_PERIPHERAL=y and/or
+	  CONFIG_BT_CENTRAL=y for the matching role.
+
+config ALP_SDK_BLE_SW_FALLBACK
+	bool "Software BLE fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op BLE backend that registers as a wildcard at
+	  priority 0.  For native_sim build / test only -- no real
+	  controller exists, so open/advertise/scan succeed silently
+	  and connect/GATT ops return ALP_ERR_NOT_IMPLEMENTED.
 
 config ALP_SDK_SECURITY
 	bool "Real MbedTLS PSA Crypto for <alp/security.h>"
@@ -908,18 +965,40 @@ config ALP_SDK_USB
 	default y if USB_DEVICE_STACK
 	depends on USB_DEVICE_STACK
 	help
-	  Wires alp_usb_device_open / enable / disable on top of
-	  Zephyr's USB device stack.  Per-class endpoint
-	  read/write (CDC-ACM, MSC, HID) lands in v0.3.x once
-	  the per-class wrappers are wired.  Host role lands
-	  alongside the SoC's USB-host controller driver.
+	  Gates the real Zephyr USBD-stack body inside
+	  src/backends/usb/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but
+	  every device-side op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4b the dispatcher (src/usb_dispatch.c) and its
+	  Zephyr backend (src/backends/usb/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_USB_SW_FALLBACK for the software-backend opt-in.
+
+config ALP_SDK_USB_SW_FALLBACK
+	bool "Software USB fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op USB backend that registers as a wildcard at
+	  priority 0.  For native_sim build / test only.
 
 config ALP_SDK_MAX_USB_DEV_HANDLES
 	int "Maximum concurrent alp_usb_dev_t handles"
-	default 1
+	default 2
 	help
 	  USB device role is single-instance on every E1M-conformant
-	  SoM (one USB controller per module).
+	  SoM (one USB controller per module).  Default raised from
+	  1 to 2 in Slice 4b so unit tests and customer code can hold
+	  a transient second handle during reopen flows.
+
+config ALP_SDK_MAX_USB_HOST_HANDLES
+	int "Maximum concurrent alp_usb_host_t handles"
+	default 1
+	help
+	  USB host role is single-instance on every supported SoM.
 
 config ALP_SDK_MAX_SHMEM_HANDLES
 	int "Maximum concurrent alp_shmem_t handles"
@@ -953,11 +1032,32 @@ config ALP_SDK_MAX_AEAD_HANDLES
 	default 4
 
 config ALP_SDK_BLE_MAX_CONNS
-	int "Maximum concurrent alp_ble_conn_t handles"
+	int "Maximum concurrent alp_ble_conn_t handles (Zephyr backend pool)"
 	default 2
 	help
 	  Mirrors CONFIG_BT_MAX_CONN; raise both together if your app
-	  holds more than two simultaneous connections.
+	  holds more than two simultaneous connections.  Sizes the
+	  backend-internal pool inside src/backends/ble/zephyr_drv.c
+	  (struct ble_conn_be).  Pair with
+	  ALP_SDK_MAX_BLE_CONN_HANDLES which sizes the dispatcher's
+	  per-handle pool.
+
+config ALP_SDK_MAX_BLE_HANDLES
+	int "Maximum concurrent alp_ble_t handles (dispatcher pool)"
+	default 1
+	help
+	  BLE radio is a singleton on every E1M-conformant SoM (one
+	  controller per module).  Sizes the dispatcher's per-handle
+	  pool in src/ble_dispatch.c.
+
+config ALP_SDK_MAX_BLE_CONN_HANDLES
+	int "Maximum concurrent alp_ble_conn_t handles (dispatcher pool)"
+	default 4
+	help
+	  Sizes the dispatcher's per-connection handle pool in
+	  src/ble_dispatch.c.  Default chosen above
+	  ALP_SDK_BLE_MAX_CONNS so transient close/reopen flows do not
+	  starve.
 
 config ALP_SDK_MAX_INFERENCE_HANDLES
 	int "Maximum concurrent alp_inference_t handles"
