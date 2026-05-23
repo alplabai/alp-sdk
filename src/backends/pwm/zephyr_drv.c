@@ -132,7 +132,7 @@ static alp_status_t z_open(const alp_pwm_config_t *cfg,
     int err = pwm_set(spec->dev, h->channel, h->period_ns, 0u, h->flags);
     if (err != 0) return _errno_to_alp(err);
 
-    st->dev        = spec->dev;
+    st->dev        = (void *)spec->dev;
     st->channel_id = cfg->channel_id;
     caps_out->flags = 0u;
     return ALP_OK;
@@ -140,16 +140,18 @@ static alp_status_t z_open(const alp_pwm_config_t *cfg,
 
 static alp_status_t z_set_duty(alp_pwm_backend_state_t *st, uint32_t pulse_ns) {
     struct alp_pwm *h = CONTAINER_OF(st, struct alp_pwm, state);
-    return _errno_to_alp(pwm_set(st->dev, h->channel,
+    const struct device *dev = (const struct device *)st->dev;
+    return _errno_to_alp(pwm_set(dev, h->channel,
                                  h->period_ns, pulse_ns, h->flags));
 }
 
 static alp_status_t z_set_period(alp_pwm_backend_state_t *st, uint32_t period_ns) {
     struct alp_pwm *h = CONTAINER_OF(st, struct alp_pwm, state);
+    const struct device *dev = (const struct device *)st->dev;
     /* Dispatcher caches period_ns on ALP_OK return; reset duty to 0
      * (mirrors legacy peripheral_pwm.c behaviour and the documented
      * @ref alp_pwm_set_period contract). */
-    return _errno_to_alp(pwm_set(st->dev, h->channel,
+    return _errno_to_alp(pwm_set(dev, h->channel,
                                  period_ns, 0u, h->flags));
 }
 
@@ -200,9 +202,10 @@ static void z_capture_close(alp_pwm_backend_state_t *st) { (void)st; }
 
 static void z_close(alp_pwm_backend_state_t *st) {
     struct alp_pwm *h = CONTAINER_OF(st, struct alp_pwm, state);
-    if (st->dev != NULL) {
+    const struct device *dev = (const struct device *)st->dev;
+    if (dev != NULL) {
         /* Best-effort: drive output low before releasing. */
-        (void)pwm_set(st->dev, h->channel, h->period_ns, 0u, h->flags);
+        (void)pwm_set(dev, h->channel, h->period_ns, 0u, h->flags);
     }
 }
 

@@ -145,7 +145,7 @@ static alp_status_t z_open(uint32_t pin_id,
     s->spec  = spec;
     s->owner = CONTAINER_OF(st, struct alp_gpio, state);
 
-    st->dev     = spec.port;
+    st->dev     = (void *)spec.port;
     st->pin_id  = pin_id;
     st->be_data = s;
     caps_out->flags = 0u;

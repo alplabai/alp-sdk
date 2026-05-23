@@ -11,7 +11,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <zephyr/device.h>
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
@@ -20,7 +19,10 @@
 typedef struct alp_pwm_ops alp_pwm_ops_t;
 
 typedef struct alp_pwm_backend_state {
-    const struct device     *dev;        /* Zephyr backend device pointer */
+    void                    *dev;        /* opaque backend device pointer
+                                          * (const struct device * on Zephyr;
+                                          * kept void* so the portable handle
+                                          * does not pull in <zephyr/device.h>) */
     uint32_t                 channel_id; /* studio-resolved E1M index 0..7 */
     void                    *be_data;
     const alp_pwm_ops_t     *ops;
@@ -71,7 +73,7 @@ struct alp_pwm {
     bool                     in_use;
     uint32_t                 channel;       /* hardware channel within state->dev */
     uint32_t                 period_ns;     /* current configured period */
-    uint32_t                 flags;         /* zephyr pwm_flags_t */
+    uint32_t                 flags;         /* backend-private polarity / DT flags */
 };
 
 /*

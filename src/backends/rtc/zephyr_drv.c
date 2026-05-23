@@ -48,7 +48,7 @@ static alp_status_t z_open(uint32_t rtc_id,
     if (rtc_id >= ALP_SOC_RTC_COUNT) return ALP_ERR_OUT_OF_RANGE;
     const struct device *dev = _devs[rtc_id];
     if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
-    st->dev = dev;
+    st->dev = (void *)dev;
     st->rtc_id = rtc_id;
     caps_out->flags = 0u;
     return ALP_OK;
@@ -56,6 +56,7 @@ static alp_status_t z_open(uint32_t rtc_id,
 
 static alp_status_t z_set_time(alp_rtc_backend_state_t *st,
                                const alp_rtc_time_t *t) {
+    const struct device *dev = (const struct device *)st->dev;
     struct rtc_time zt = {
         .tm_year = (int)t->year - 1900,
         .tm_mon  = (int)t->month - 1,
@@ -66,13 +67,14 @@ static alp_status_t z_set_time(alp_rtc_backend_state_t *st,
         .tm_sec  = (int)t->second,
         .tm_nsec = (int)t->millisecond * 1000000,
     };
-    return _errno_to_alp(rtc_set_time(st->dev, &zt));
+    return _errno_to_alp(rtc_set_time(dev, &zt));
 }
 
 static alp_status_t z_get_time(alp_rtc_backend_state_t *st,
                                alp_rtc_time_t *t) {
+    const struct device *dev = (const struct device *)st->dev;
     struct rtc_time zt;
-    int err = rtc_get_time(st->dev, &zt);
+    int err = rtc_get_time(dev, &zt);
     if (err != 0) return _errno_to_alp(err);
     t->year        = (uint16_t)(zt.tm_year + 1900);
     t->month       = (uint8_t)(zt.tm_mon + 1);
