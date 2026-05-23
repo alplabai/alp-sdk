@@ -48,6 +48,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "alp/cap_instance.h"
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -217,6 +218,20 @@ alp_status_t     alp_inference_invoke(alp_inference_t *inf);
  * @param[in] inf  Handle from @ref alp_inference_open, or NULL.
  */
 void             alp_inference_close(alp_inference_t *inf);
+
+/**
+ * @brief Query the per-instance capabilities of an opened inference handle.
+ *
+ * Returns the refined capability descriptor captured at @ref
+ * alp_inference_open time by the selected backend's `probe` /
+ * `open` hook.  The pointer is valid for the lifetime of the
+ * handle.
+ *
+ * @param[in] inf  Handle from @ref alp_inference_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p inf
+ *         is NULL.
+ */
+const alp_capabilities_t *alp_inference_capabilities(const alp_inference_t *inf);
 
 #ifdef __cplusplus
 }  /* extern "C" */

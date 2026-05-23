@@ -139,6 +139,14 @@ alp_status_t alp_i2s_read(alp_i2s_t *i2s,
 /** @brief Stop streaming, free the slab, release the handle.  NULL safe. */
 void         alp_i2s_close(alp_i2s_t *i2s);
 
+/**
+ * @brief Query the capabilities of an opened I²S handle.
+ *
+ * @param i2s  Handle from @ref alp_i2s_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p i2s is NULL.
+ */
+const alp_capabilities_t *alp_i2s_capabilities(const alp_i2s_t *i2s);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif
