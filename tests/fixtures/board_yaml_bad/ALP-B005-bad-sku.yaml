@@ -1,0 +1,7 @@
+som:
+  sku: E1M-AEN999   # not a real SKU
+preset: e1m-evk
+cores:
+  m55_hp:
+    app: ./src
+    peripherals: []

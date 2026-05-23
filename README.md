@@ -33,6 +33,22 @@ Supported runtime topologies: **single-OS** (Zephyr / Yocto / bare-metal on a si
 issues at
 [**github.com/alplabai/alp-sdk/issues**](https://github.com/alplabai/alp-sdk/issues).
 
+## Quickstart
+
+```bash
+# Install the CLI (once per clone)
+pip install -e .
+
+# Scaffold + run a hello-world on native_sim — no hardware needed
+alp init my-app
+cd my-app
+alp run
+```
+
+`alp init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `alp run` builds for `native_sim` by default and prints the app's stdout straight through; pass `--board <name>` for a real-hardware build (`--flash` to chain flash).
+
+`alp validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.
+
 ## Two consumer paths
 
 The SDK supports both flows equally — pick whichever fits.

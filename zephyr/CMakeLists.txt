@@ -12,6 +12,8 @@ endif()
 zephyr_library_named(alp_sdk)
 
 zephyr_library_sources(
+    # Runtime capability table -- always compiled; pure .rodata, no Kconfig guard.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/cap.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/delay_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/handles.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/last_error.c
@@ -19,7 +21,12 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_spi.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_gpio.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_uart.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/camera_stub.c
+    # Camera class dispatcher + stub backend (Slice 5 -- registry
+    # migration).  Replaces the legacy free-standing
+    # src/zephyr/camera_stub.c.  Real backends (Alif MIPI CSI-2,
+    # V2N camera-input) land per issue #20; ISP knobs per #21.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/camera_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_stub.c
     # iot_zephyr.c retired in Slice 4b -- the Wi-Fi half migrated to
     # src/backends/wifi/{zephyr_drv,sw_fallback}.c and the MQTT half
     # to src/backends/mqtt/{zephyr_drv,sw_fallback}.c.  Both halves
@@ -174,16 +181,33 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
 
 # System-power-mode surface (<alp/power.h>).  Wired behind
 # CONFIG_ALP_SDK_POWER so customers can opt out on builds that
-# don't need sleep transitions.
+# don't need sleep transitions.  Slice 7 -- registry migration:
+# replaces the legacy free-standing src/zephyr/power_zephyr.c with
+# the class dispatcher + wildcard stub backend.  Real backends
+# (Zephyr pm_policy_* on AEN, GD32G553 supervisor
+# CMD_POWER_MODE_SET on V2N) land per issue #22.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/power_zephyr.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/power_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/zephyr_stub.c)
 
-# 2D graphics accelerator surface (<alp/gpu2d.h>).  v0.5 stub
-# implementation; per-vendor HAL bodies (Alif D/AVE 2D, NXP
-# Vivante GC328) land via CONFIG_ALP_SOC_* selection once the
-# vendor packs stabilise as Zephyr modules.
+# Display class dispatcher + stub backend (Slice 8a -- registry
+# pattern).  Display has no legacy free-standing src/zephyr/*.c, so
+# this is a pure ADD rather than a swap.  Real backends (Zephyr
+# display_* driver-class wrapper for SSD1306 / ILI9341 / ST7789 on
+# AEN, V2N DSI / parallel-RGB framebuffer paths) land per issue #23.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/display_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/display/zephyr_stub.c)
+
+# 2D graphics accelerator surface (<alp/gpu2d.h>).  Slice 8b --
+# registry migration: replaces the legacy free-standing
+# src/zephyr/gpu2d_zephyr.c with the class dispatcher + wildcard
+# stub backend.  Real backends (Alif D/AVE 2D on AEN, NXP Vivante
+# GC328 on i.MX 93) land per issue #24 with their own
+# silicon-specific registry entries.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/gpu2d_zephyr.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpu2d_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpu2d/zephyr_stub.c)
 
 # Runtime hardware-info reader (EEPROM manifest + BOARD_ID ADC).
 # v0.3 stub returns NOSUPPORT; v0.3.x fills in the real impl.
