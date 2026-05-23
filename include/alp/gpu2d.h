@@ -62,6 +62,7 @@
 
 #include <stdint.h>
 
+#include "alp/cap_instance.h"
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -198,6 +199,14 @@ alp_status_t alp_gpu2d_blend(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src
  * @param[in] handle  Handle from @ref alp_gpu2d_open, or NULL.
  */
 void alp_gpu2d_close(alp_gpu2d_t *handle);
+
+/**
+ * @brief Query the capabilities of an opened GPU2D handle.
+ *
+ * @param handle  Handle from @ref alp_gpu2d_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p handle is NULL.
+ */
+const alp_capabilities_t *alp_gpu2d_capabilities(const alp_gpu2d_t *handle);
 
 #ifdef __cplusplus
 } /* extern "C" */
