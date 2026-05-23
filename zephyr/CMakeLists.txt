@@ -35,39 +35,8 @@ zephyr_library_sources(
     # target.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/camera_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_stub.c
-<<<<<<< HEAD
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/camera.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/camera.c
-    # iot_zephyr.c replaces the v0.2 NOSUPPORT stub. The wrapper is
-    # always compiled; the real wifi_mgmt + mqtt_client glue inside
-    # is gated on CONFIG_ALP_SDK_IOT_WIFI / CONFIG_ALP_SDK_IOT_MQTT
-    # so host / native_sim builds without those subsystems still get
-    # the documented v0.1 NULL-with-NOSUPPORT contract.
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/iot_zephyr.c
-    # audio_zephyr.c follows the same split: real DMIC + alp_i2s_*
-    # delegation behind CONFIG_ALP_SDK_AUDIO_IN / _OUT, NOSUPPORT
-    # contract elsewhere.
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/audio_zephyr.c
-    # inference_zephyr.c carries the public-API glue + handle pool;
-    # per-backend executors (TFLM C++ wrapper, DRP-AI, DEEPX) compile
-    # in only when their CONFIG_ flag is on so the wrapper itself
-    # links cleanly under native_sim with no neural runtime present.
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_zephyr.c
-=======
-    # iot_zephyr.c retired in Slice 4b -- the Wi-Fi half migrated to
-    # src/backends/wifi/{zephyr_drv,sw_fallback}.c and the MQTT half
-    # to src/backends/mqtt/{zephyr_drv,sw_fallback}.c.  Both halves
-    # now ship as registry-shaped backends; see the MQTT block below.
-    # audio_zephyr.c retired in Slice 4d -- both directions
-    # (alp_audio_in_t + alp_audio_out_t) migrated to
-    # src/backends/audio/{zephyr_drv,sw_fallback}.c with the
-    # dispatcher in src/audio_dispatch.c.  See the audio block below.
-    # inference_zephyr.c retired in Slice 3 -- per-backend executors
-    # (tflm, ethos_u_aen, ethos_u_n93, drpai_v2n_stub, deepx_dxm1_stub,
-    # sw_fallback) migrated to src/backends/inference/*.{c,cpp} with
-    # the dispatcher in src/inference_dispatch.c.  See the inference
-    # block below.
->>>>>>> origin/main
     # Remaining v0.3 surfaces still on the stub contract -- swap in
     # their *_zephyr.c counterparts as they ship.
     # security_zephyr.c retired in Slice 4d -- all three primitives
