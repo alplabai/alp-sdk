@@ -110,7 +110,7 @@ static struct hw_out_be g_out_be_pool[CONFIG_ALP_SDK_MAX_AUDIO_OUT_HANDLES];
 
 #endif /* CONFIG_ALP_SDK_AUDIO_OUT */
 
-#if defined(CONFIG_ALP_SDK_AUDIO_IN) || defined(CONFIG_ALP_SDK_AUDIO_OUT)
+#if defined(CONFIG_ALP_SDK_AUDIO_IN)
 
 static alp_status_t errno_to_alp(int err)
 {
@@ -127,6 +127,10 @@ static alp_status_t errno_to_alp(int err)
     default:          return ALP_ERR_IO;
     }
 }
+
+#endif /* CONFIG_ALP_SDK_AUDIO_IN */
+
+#if defined(CONFIG_ALP_SDK_AUDIO_IN) || defined(CONFIG_ALP_SDK_AUDIO_OUT)
 
 static uint8_t pcm_width_for(alp_audio_format_t f)
 {
