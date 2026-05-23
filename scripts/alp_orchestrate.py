@@ -2742,25 +2742,25 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # so silicon-determined caps (ethos_u55_count, drp_ai, ...) resolve
     # even when removed from the SoM YAML (capability unification, slice 3b).
     capabilities = resolve_capabilities(project.som_preset, METADATA_ROOT)
-    inference_lines: list[str] = ["CONFIG_ALP_SDK_INFERENCE_TFLM=y"]
+    inference_lines: list[str] = ["CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y"]
 
     # ---- G-2 -- CPU-class TFLM kernel selector --------------------
     # Look up this slice's core in the SoC spec; pick exactly one of
     # NEON / HELIUM / REF based on the vector_extension field.  Defaults
     # to REF when the SoC JSON is silent (paper-correct on the scalar
     # M33s -- iMX 93 m33, V2N m33_sm).
-    tflm_kernel_kc: str = "CONFIG_ALP_SDK_INFERENCE_TFLM_REF=y"
+    tflm_kernel_kc: str = "CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y"
     for c in (project.soc_spec.get("cores") or []):
         if c.get("id") != slice_.core_id:
             continue
         vec = (c.get("vector_extension") or "").lower()
         ctype = (c.get("type") or "").lower()
         if vec == "neon" or ctype.startswith("cortex-a"):
-            tflm_kernel_kc = "CONFIG_ALP_SDK_INFERENCE_TFLM_NEON=y"
+            tflm_kernel_kc = "CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_NEON=y"
         elif vec == "helium":
-            tflm_kernel_kc = "CONFIG_ALP_SDK_INFERENCE_TFLM_HELIUM=y"
+            tflm_kernel_kc = "CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y"
         else:
-            tflm_kernel_kc = "CONFIG_ALP_SDK_INFERENCE_TFLM_REF=y"
+            tflm_kernel_kc = "CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y"
         break
     inference_lines.append(tflm_kernel_kc)
 
@@ -2787,16 +2787,17 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         ethos_variants.add("u85")
     ethos_present = bool(ethos_variants)
     if ethos_present:
-        inference_lines.append("CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y")
-        for v in sorted(ethos_variants):
-            inference_lines.append(f"CONFIG_ALP_SDK_INFERENCE_ETHOS_U_{v.upper()}=y")
+        # Per-silicon Ethos-U backend (Slice 3 registry layout):
+        # Alif Ensemble (AEN) -> _BACKEND_ETHOS_U_AEN
+        # NXP i.MX 93        -> _BACKEND_ETHOS_U_N93
         if silicon == "nxp:imx9:imx93":
-            # N93 is the NXP-side PHY / driver-shim layer for the i.MX 93's
-            # Ethos-U65; orthogonal to the U55/U65/U85 silicon-variant
-            # switch above, both stay on the build.
-            inference_lines.append("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y")
+            inference_lines.append("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y")
+        else:
+            inference_lines.append("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y")
+        for v in sorted(ethos_variants):
+            inference_lines.append(f"CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{v.upper()}=y")
     if capabilities.get("drp_ai"):
-        inference_lines.append("CONFIG_ALP_SDK_INFERENCE_DRPAI=y")
+        inference_lines.append("CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y")
     # DEEPX DX-M1 dispatches via Linux PCIe driver -- no Zephyr Kconfig.
     # Its build wiring lives on the cmake-args / Yocto emit paths.
     lines.append(f"# Inference dispatchers (from SoM capabilities -- "
