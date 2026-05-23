@@ -51,8 +51,36 @@ zephyr_library_sources(
     # (shmem + mbox + hwsem) migrated to
     # src/backends/mproc/{zephyr_drv,sw_fallback}.c with the
     # dispatcher in src/mproc_dispatch.c.  See the mproc block below.
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/storage_stub.c
+    # storage_stub.c retired in Slice 6 -- replaced by the storage
+    # class dispatcher + Zephyr flash/littlefs backends below.
 )
+
+# Storage class dispatcher + backends (Slice 6 migration).
+# The dispatcher compiles unconditionally so apps that depend on the
+# <alp/storage.h> ABI always link cleanly; each backend gates on its
+# own Kconfig so builds that don't enable a path don't pay its code
+# size.  Vendor-ext bodies under src/backends/ext/{alif,nxp}/storage.c
+# compile unconditionally -- they only emit NOSUPPORT + parameter
+# validation today, so they pull zero vendor dependencies.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/storage_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/storage.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/nxp/storage.c)
+
+if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_FLASH)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_flash.c)
+endif()
+
+if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_LITTLEFS)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_littlefs.c)
+endif()
+
+if(CONFIG_ALP_SDK_STORAGE_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
+endif()
 
 # USB registry sources -- replace the legacy src/zephyr/usb_zephyr.c
 # from the v0.3 contract.  Dispatcher + portable Zephyr backend ship
@@ -518,6 +546,7 @@ zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include)
 # never see new symbols pollute the include namespace.
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/src/common)
 zephyr_library_include_directories(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common
 )

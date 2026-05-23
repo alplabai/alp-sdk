@@ -35,6 +35,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "alp/cap_instance.h"
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -169,6 +170,14 @@ alp_status_t   alp_storage_sync(alp_storage_t *s);
  * @param[in] s  Handle from @ref alp_storage_open, or NULL.
  */
 void           alp_storage_close(alp_storage_t *s);
+
+/**
+ * @brief Query the capabilities of an opened storage handle.
+ *
+ * @param s  Handle from @ref alp_storage_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p s is NULL.
+ */
+const alp_capabilities_t *alp_storage_capabilities(const alp_storage_t *s);
 
 /* ================================================================== */
 /* Inline AES (on-the-fly XIP encryption / decryption)                 */

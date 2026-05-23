@@ -163,6 +163,46 @@ config ALP_SDK_MAX_ADC_STREAM_HANDLES
 	  exactly two concurrent stream slots (one per DMA controller);
 	  raise only if a future backend grows additional slots.
 
+config ALP_SDK_MAX_STORAGE_HANDLES
+	int "Maximum concurrent alp_storage_t handles"
+	default 4
+
+config ALP_SDK_STORAGE_ZEPHYR_FLASH
+	bool "Zephyr flash_area backend for <alp/storage.h>"
+	depends on ALP_SDK
+	default y if FLASH_MAP
+	default n
+	help
+	  Compiles src/backends/storage/zephyr_flash.c.  Routes the
+	  alp_storage_* surface through the <zephyr/storage/flash_map.h>
+	  API; the SoC pack supplies the fixed-partition DT entries that
+	  flash_area_open consumes.  instance_id maps directly to a
+	  flash-area ID.
+
+config ALP_SDK_STORAGE_ZEPHYR_LITTLEFS
+	bool "Zephyr littlefs backend for <alp/storage.h>"
+	depends on ALP_SDK
+	default y if FILE_SYSTEM_LITTLEFS
+	default n
+	help
+	  Compiles src/backends/storage/zephyr_littlefs.c.  Wraps a
+	  mounted FS_LITTLEFS instance as an offset-addressed
+	  alp_storage device under /lfs<N>/alp_storage.bin.  Loses to
+	  zephyr_flash on priority when both are present; pick the
+	  storage_kind explicitly to force one over the other.
+
+config ALP_SDK_STORAGE_SW_FALLBACK
+	bool "Software storage fallback (stateless stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a stateless storage backend that registers as a
+	  wildcard at priority 0.  Every op besides open returns
+	  ALP_ERR_NOSUPPORT.  For native_sim build / test only --
+	  production firmware MUST NOT rely on this since no real
+	  device is driven.
+
 config ALP_SDK_V2N_SUPERVISOR
 	bool "V2N supervisor singleton (GD32G553 bridge auto-init)"
 	default y if ALP_SOC_RENESAS_RZV2N_N44 && ALP_SDK_CHIP_GD32G553
