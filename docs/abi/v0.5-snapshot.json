@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-22",
+  "generated": "2026-05-23",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -836,6 +836,10 @@
     },
     "alp/camera.h": {
       "functions": {
+        "alp_camera_capabilities": {
+          "hash": "e1fc70ce67d38385",
+          "signature": "const alp_capabilities_t * alp_camera_capabilities(const alp_camera_t *c);"
+        },
         "alp_camera_capture": {
           "hash": "f658f9abdc48ba2e",
           "signature": "alp_status_t alp_camera_capture(alp_camera_t *c, alp_camera_frame_t *out, uint32_t timeout_ms);"
@@ -950,9 +954,23 @@
       }
     },
     "alp/cap.h": {
-      "functions": {},
+      "functions": {
+        "alp_cap_name": {
+          "hash": "4eafdeef47a09347",
+          "signature": "const char * alp_cap_name(alp_cap_id_t cap);"
+        },
+        "alp_has": {
+          "hash": "0ec2b2c9cee654f4",
+          "signature": "bool alp_has(alp_cap_id_t cap);"
+        }
+      },
       "macros": {},
-      "typedefs": {}
+      "typedefs": {
+        "alp_cap_id_t": {
+          "definition": "typedef enum { ALP_CAP_ID_HW_I2C, ALP_CAP_ID_HW_SPI, ALP_CAP_ID_HW_UART, ALP_CAP_ID_HW_I2S, ALP_CAP_ID_HW_PDM, ALP_CAP_ID_HW_ADC, ALP_CAP_ID_HW_DAC, ALP_CAP_ID_HW_CAN, ALP_CAP_ID_HW_CAN_FD, ALP_CAP_ID_HW_RTC, ALP_CAP_ID_HW_WDT, ALP_CAP_ID_HW_QENC, ALP_CAP_ID_HW_TIMER, ALP_CAP_ID_HW_PWM, ALP_CAP_ID_HW_ETHERNET, ALP_CAP_ID_HW_USB, ALP_CAP_ID_HW_MIPI_CSI, ALP_CAP_ID_HW_MIPI_DSI, ALP_CAP_ID_XSPI_DMA, ALP_CAP_ID_HEXSPI_DMA, ALP_CAP_ID_EMMC_DMA, ALP_CAP_ID_QUADSPI_DMA, ALP_CAP_ID_NPU_DRPAI, ALP_CAP_ID_HELIUM_MVE, ALP_CAP_ID_NEON, ALP_CAP_ID_GPU2D, ALP_CAP_ID_DAVE2D, ALP_CAP_ID_CRYPTOCELL, ALP_CAP_ID_INLINE_AES, ALP_CAP_ID_CAU, ALP_CAP_ID_DMA2D, ALP_CAP_ID_COUNT } alp_cap_id_t;",
+          "hash": "b5f55c03569ac7e0"
+        }
+      }
     },
     "alp/cap_instance.h": {
       "functions": {
@@ -5187,6 +5205,10 @@
           "hash": "8f4cb6197d53cea3",
           "signature": "alp_status_t alp_display_blit(alp_display_t *d, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *pixels);"
         },
+        "alp_display_capabilities": {
+          "hash": "713bbb5589d2b43e",
+          "signature": "const alp_capabilities_t * alp_display_capabilities(const alp_display_t *d);"
+        },
         "alp_display_clear": {
           "hash": "78a602221f830803",
           "signature": "alp_status_t alp_display_clear(alp_display_t *d);"
@@ -6378,6 +6400,10 @@
           "hash": "c3ba97a61493478d",
           "signature": "alp_status_t alp_gpu2d_blit(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src, uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy, uint32_t w, uint32_t h);"
         },
+        "alp_gpu2d_capabilities": {
+          "hash": "d0cc9c643fd6e4c6",
+          "signature": "const alp_capabilities_t * alp_gpu2d_capabilities(const alp_gpu2d_t *handle);"
+        },
         "alp_gpu2d_close": {
           "hash": "fc8dcedc5ac12eaf",
           "signature": "void alp_gpu2d_close(alp_gpu2d_t *handle);"
@@ -6934,6 +6960,10 @@
     },
     "alp/power.h": {
       "functions": {
+        "alp_power_capabilities": {
+          "hash": "b46993ac0455f417",
+          "signature": "const alp_capabilities_t * alp_power_capabilities(const alp_power_t *handle);"
+        },
         "alp_power_close": {
           "hash": "8f0eaa7bd51f8d72",
           "signature": "void alp_power_close(alp_power_t *handle);"
@@ -7352,6 +7382,134 @@
     "alp/soc_caps.h": {
       "functions": {},
       "macros": {
+        "ALP_CAP_CAU": {
+          "hash": "9f4302620b16b573",
+          "value": "(ALP_SOC_CAU)"
+        },
+        "ALP_CAP_CRYPTOCELL": {
+          "hash": "d9e5836873835e81",
+          "value": "(ALP_SOC_CRYPTOCELL)"
+        },
+        "ALP_CAP_DAVE2D": {
+          "hash": "7c287d35d490bd93",
+          "value": "(ALP_SOC_DAVE2D)"
+        },
+        "ALP_CAP_DMA2D": {
+          "hash": "bd1b8ac6ea2c47d4",
+          "value": "(ALP_SOC_DMA2D)"
+        },
+        "ALP_CAP_EMMC_DMA": {
+          "hash": "7aea83817767d724",
+          "value": "(ALP_SOC_EMMC_DMA)"
+        },
+        "ALP_CAP_GPU2D": {
+          "hash": "ba53a01d7fbf30fc",
+          "value": "(ALP_SOC_GPU2D)"
+        },
+        "ALP_CAP_HELIUM_MVE": {
+          "hash": "5581405c3d20ae89",
+          "value": "(ALP_SOC_HELIUM_MVE)"
+        },
+        "ALP_CAP_HEXSPI_DMA": {
+          "hash": "9a3251edaaf99f62",
+          "value": "(ALP_SOC_HEXSPI_DMA)"
+        },
+        "ALP_CAP_HW_ADC": {
+          "hash": "1f872a36d423604e",
+          "value": "(ALP_SOC_ADC_COUNT > 0)"
+        },
+        "ALP_CAP_HW_CAN": {
+          "hash": "bae66d69374428a5",
+          "value": "(ALP_SOC_CAN_COUNT > 0)"
+        },
+        "ALP_CAP_HW_CAN_FD": {
+          "hash": "cc3adbe7dd495ed3",
+          "value": "(ALP_SOC_CAN_FD_SUPPORTED)"
+        },
+        "ALP_CAP_HW_DAC": {
+          "hash": "0f8836815d0d9436",
+          "value": "(ALP_SOC_DAC_COUNT > 0)"
+        },
+        "ALP_CAP_HW_ETHERNET": {
+          "hash": "c88b11fa82683c8a",
+          "value": "(ALP_SOC_ETHERNET_COUNT > 0)"
+        },
+        "ALP_CAP_HW_I2C": {
+          "hash": "135e7afb41a89369",
+          "value": "(ALP_SOC_I2C_COUNT > 0)"
+        },
+        "ALP_CAP_HW_I2S": {
+          "hash": "1aadee7172fb0900",
+          "value": "(ALP_SOC_I2S_COUNT > 0)"
+        },
+        "ALP_CAP_HW_MIPI_CSI": {
+          "hash": "d6b4fe2c839d101a",
+          "value": "(ALP_SOC_MIPI_CSI_COUNT > 0)"
+        },
+        "ALP_CAP_HW_MIPI_DSI": {
+          "hash": "55c4dc3ed342f364",
+          "value": "(ALP_SOC_MIPI_DSI_COUNT > 0)"
+        },
+        "ALP_CAP_HW_PDM": {
+          "hash": "9395da8274ec8fff",
+          "value": "(ALP_SOC_PDM_COUNT > 0)"
+        },
+        "ALP_CAP_HW_PWM": {
+          "hash": "bd2cbaec38281109",
+          "value": "(ALP_SOC_PWM_COUNT > 0)"
+        },
+        "ALP_CAP_HW_QENC": {
+          "hash": "8865ccf9d0849a55",
+          "value": "(ALP_SOC_QENC_COUNT > 0)"
+        },
+        "ALP_CAP_HW_RTC": {
+          "hash": "48a3b35d056b396b",
+          "value": "(ALP_SOC_RTC_COUNT > 0)"
+        },
+        "ALP_CAP_HW_SPI": {
+          "hash": "7e8032cd7bfcf8e3",
+          "value": "(ALP_SOC_SPI_COUNT > 0)"
+        },
+        "ALP_CAP_HW_TIMER": {
+          "hash": "33f4ea52f12bc0ab",
+          "value": "(ALP_SOC_TIMER_COUNT > 0)"
+        },
+        "ALP_CAP_HW_UART": {
+          "hash": "3d72dddf4d35920c",
+          "value": "(ALP_SOC_UART_COUNT > 0)"
+        },
+        "ALP_CAP_HW_USB": {
+          "hash": "c4fddec878153598",
+          "value": "(ALP_SOC_USB_COUNT > 0)"
+        },
+        "ALP_CAP_HW_WDT": {
+          "hash": "b811592e40e9f8f7",
+          "value": "(ALP_SOC_WDT_COUNT > 0)"
+        },
+        "ALP_CAP_INLINE_AES": {
+          "hash": "2485d38c457f2cc6",
+          "value": "(ALP_SOC_INLINE_AES)"
+        },
+        "ALP_CAP_NEON": {
+          "hash": "4294b4b5e2159a7f",
+          "value": "(ALP_SOC_NEON)"
+        },
+        "ALP_CAP_NPU_DRPAI": {
+          "hash": "7093de00f8a12ca4",
+          "value": "(ALP_SOC_DRP_AI)"
+        },
+        "ALP_CAP_QUADSPI_DMA": {
+          "hash": "776bb6d8731c2a11",
+          "value": "(ALP_SOC_QUADSPI_DMA)"
+        },
+        "ALP_CAP_XSPI_DMA": {
+          "hash": "dd0012dcc15f11e9",
+          "value": "(ALP_SOC_XSPI_DMA)"
+        },
+        "ALP_HAS": {
+          "hash": "14d66ec4232ed62c",
+          "value": "(cap) (ALP_CAP_##cap)"
+        },
         "ALP_SOC_ADC_COUNT": {
           "hash": "6a0b6d0b6de57454",
           "value": "UINT16_MAX"
