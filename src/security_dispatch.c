@@ -39,8 +39,7 @@
  * v0.5 base_caps are sufficient for the three handle surfaces.
  *
  * Pool defaults: 2 hash, 2 aead (Kconfig-tunable via
- * CONFIG_ALP_SDK_MAX_{HASH,AEAD}_HANDLES which already existed
- * for the legacy wrapper).
+ * CONFIG_ALP_SDK_MAX_{HASH,AEAD}_HANDLES).
  */
 
 #include <stdbool.h>

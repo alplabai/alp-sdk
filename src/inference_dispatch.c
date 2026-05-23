@@ -23,10 +23,9 @@
  *                                   pinned model on an Ethos-U-only
  *                                   build).
  *
- * Customer-visible legacy enum (CPU / ETHOS_U / DRPAI / DEEPX_DX)
- * is preserved verbatim in <alp/inference.h>; the dispatcher
- * forwards the value into state.backend_id so the picked backend
- * sees the original intent.
+ * The customer-visible enum (CPU / ETHOS_U / DRPAI / DEEPX_DX) in
+ * <alp/inference.h> is forwarded through the dispatcher into
+ * state.backend_id so the picked backend sees the original intent.
  */
 
 #include <stdbool.h>

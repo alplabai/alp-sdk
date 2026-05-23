@@ -2,20 +2,18 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * GPU2D class dispatcher.  Routes the public alp_gpu2d_* API
- * through the backend registry mechanism shipped in Slice 0
- * (PR #17).
+ * through the backend registry.
  *
  * Surface validation (NULL pointer, zero dimensions, format range)
  * lives here at the dispatcher so every backend gets consistent
- * INVAL pre-checks before the op fires.  Mirrors the legacy
- * src/zephyr/gpu2d_zephyr.c behaviour exactly: invalid surfaces
- * surface as ALP_ERR_INVAL regardless of whether the active backend
- * has a real implementation yet.
+ * INVAL pre-checks before the op fires: invalid surfaces surface
+ * as ALP_ERR_INVAL regardless of whether the active backend has a
+ * real implementation yet.
  *
  * Handle pool defaults to 1 (CONFIG_ALP_SDK_MAX_GPU2D_HANDLES) --
- * the legacy header documents the GPU2D handle as a "system-wide"
- * singleton (one DAVE2D block per SoC).  Customers needing per-core
- * handles can bump the Kconfig.
+ * the GPU2D handle is a "system-wide" singleton (one DAVE2D block
+ * per SoC).  Customers needing per-core handles can bump the
+ * Kconfig.
  *
  * The handle struct layout (struct alp_gpu2d) lives in
  * src/backends/gpu2d/gpu2d_ops.h so per-backend .c files can reach

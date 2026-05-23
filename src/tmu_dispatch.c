@@ -24,13 +24,12 @@
  * the per-call hot path is two loads + one branch + an indirect
  * call.
  *
- * Thread safety: the legacy src/zephyr/peripheral_tmu.c did not
- * guard the per-call work with a mutex (the inner GD32 bridge
- * acquires the V2N supervisor itself; the libm path is reentrant),
- * so the cache here stays equally lock-free.  The cached pointer
- * is written exactly once; in the worst case two threads race the
- * first call and both observe the same value `alp_backend_select`
- * computes deterministically.
+ * Thread safety: the per-call work does not need a mutex (the
+ * inner GD32 bridge acquires the V2N supervisor itself; the libm
+ * path is reentrant), so the cache here is lock-free.  The cached
+ * pointer is written exactly once; in the worst case two threads
+ * race the first call and both observe the same value
+ * `alp_backend_select` computes deterministically.
  */
 
 #include <stdbool.h>
