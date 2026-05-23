@@ -57,7 +57,7 @@
  * Yocto / Linux deferral
  * ----------------------
  * The /sys/power/state-write Yocto path is intentionally not
- * implemented here -- per the standing "NEVER touch src/yocto/*.c"
+ * implemented here -- per the standing "src/yocto/ off-limits"
  * guardrail it lands in a separate slice (#33).  Customers on a
  * Linux backend should expect alp_power_request_sleep to surface
  * NOSUPPORT until that lands.  See the matching comment in

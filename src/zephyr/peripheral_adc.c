@@ -11,10 +11,10 @@
  * wave-2 roadmap).
  *
  * One-shot ADC (alp_adc_open / read_raw / read_uv / close) lives in
- * the registry-based src/adc_dispatch.c + src/backends/adc/*.c as of
- * the Slice 1 migration (2026-05-22).  This file shares no symbols
- * with the dispatcher; both compile together under
- * CONFIG_ALP_SDK_PERIPH_ADC.
+ * src/adc_dispatch.c plus the per-backend sources under
+ * src/backends/adc/ as of the Slice 1 migration (2026-05-22).  This
+ * file shares no symbols with the dispatcher; both compile together
+ * under CONFIG_ALP_SDK_PERIPH_ADC.
  */
 
 #include <errno.h>
