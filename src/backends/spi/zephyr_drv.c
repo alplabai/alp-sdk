@@ -4,11 +4,17 @@
  * Portable Zephyr spi_* driver-class backend.  Used on any SoC
  * unless a vendor-specific backend registers a more specific
  * silicon_ref match.  Pooling lives in src/spi_dispatch.c; the
- * backend's open fills state->dev, builds the spi_config, and
- * resolves the chip-select GPIO if one is specified.
+ * backend's open fills state->dev, allocates a per-handle sidecar
+ * (spi_config + cs_ctrl + cs_spec + cs_present), and resolves the
+ * chip-select GPIO if one is specified.
+ *
+ * The sidecar is reached via state->be_data so the portable
+ * dispatcher TU + struct alp_spi layout never pull in
+ * <zephyr/drivers/spi.h> or <zephyr/drivers/gpio.h>.
  */
 
 #include <errno.h>
+#include <stddef.h>
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
@@ -42,6 +48,38 @@ extern bool alp_z_gpio_resolve(uint32_t pin_id, struct gpio_dt_spec *out);
 
 #define ALP_SPI_NO_CS  0xFFFFFFFFu
 
+#ifndef CONFIG_ALP_SDK_MAX_SPI_HANDLES
+#define CONFIG_ALP_SDK_MAX_SPI_HANDLES 4
+#endif
+
+/* Per-handle Zephyr sidecar.  One slot per handle in the dispatcher
+ * pool; the dispatcher passes the slot via state->be_data (set at
+ * open() time). */
+typedef struct {
+    struct spi_config        zspi_cfg;
+    struct spi_cs_control    cs_ctrl;
+    struct gpio_dt_spec      cs_spec;    /* zeroed when no CS gpio resolved */
+    bool                     cs_present;
+    bool                     in_use;
+} alp_z_spi_side_t;
+
+static alp_z_spi_side_t _sides[CONFIG_ALP_SDK_MAX_SPI_HANDLES];
+
+static alp_z_spi_side_t *_alloc_side(void) {
+    for (size_t i = 0; i < ARRAY_SIZE(_sides); ++i) {
+        if (!_sides[i].in_use) {
+            _sides[i] = (alp_z_spi_side_t){0};
+            _sides[i].in_use = true;
+            return &_sides[i];
+        }
+    }
+    return NULL;
+}
+
+static void _free_side(alp_z_spi_side_t *s) {
+    if (s != NULL) s->in_use = false;
+}
+
 static uint16_t _to_spi_op(const alp_spi_config_t *cfg) {
     uint16_t op = SPI_WORD_SET(cfg->bits_per_word ? cfg->bits_per_word : 8);
     op |= SPI_OP_MODE_MASTER;
@@ -72,28 +110,29 @@ static alp_status_t z_open(const alp_spi_config_t *cfg,
     const struct device *dev = _devs[cfg->bus_id];
     if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
 
-    /* Recover the full handle via container_of so we can populate the
-     * Zephyr SPI config fields that transceive will need. */
-    struct alp_spi *h = CONTAINER_OF(st, struct alp_spi, state);
+    alp_z_spi_side_t *s = _alloc_side();
+    if (s == NULL) return ALP_ERR_NOMEM;
 
-    h->zspi_cfg.frequency = cfg->freq_hz ? cfg->freq_hz : 1000000u;
-    h->zspi_cfg.operation = _to_spi_op(cfg);
-    h->zspi_cfg.slave     = 0;
+    s->zspi_cfg.frequency = cfg->freq_hz ? cfg->freq_hz : 1000000u;
+    s->zspi_cfg.operation = _to_spi_op(cfg);
+    s->zspi_cfg.slave     = 0;
 
     if (cfg->cs_pin_id != ALP_SPI_NO_CS &&
-        alp_z_gpio_resolve(cfg->cs_pin_id, &h->cs_spec)) {
-        if (!device_is_ready(h->cs_spec.port)) {
+        alp_z_gpio_resolve(cfg->cs_pin_id, &s->cs_spec)) {
+        if (!device_is_ready(s->cs_spec.port)) {
+            _free_side(s);
             return ALP_ERR_NOT_READY;
         }
-        gpio_pin_configure_dt(&h->cs_spec, GPIO_OUTPUT_INACTIVE);
-        h->cs_ctrl.gpio  = h->cs_spec;
-        h->cs_ctrl.delay = 0;
-        h->zspi_cfg.cs   = h->cs_ctrl;
-        h->cs_present    = true;
+        gpio_pin_configure_dt(&s->cs_spec, GPIO_OUTPUT_INACTIVE);
+        s->cs_ctrl.gpio  = s->cs_spec;
+        s->cs_ctrl.delay = 0;
+        s->zspi_cfg.cs   = s->cs_ctrl;
+        s->cs_present    = true;
     }
 
-    st->dev    = dev;
-    st->bus_id = cfg->bus_id;
+    st->dev     = (void *)dev;
+    st->bus_id  = cfg->bus_id;
+    st->be_data = s;
     caps_out->flags = 0u;
     return ALP_OK;
 }
@@ -101,23 +140,31 @@ static alp_status_t z_open(const alp_spi_config_t *cfg,
 static alp_status_t z_transceive(alp_spi_backend_state_t *st,
                                  const uint8_t *tx, uint8_t *rx,
                                  size_t len) {
-    struct alp_spi *h = CONTAINER_OF(st, struct alp_spi, state);
+    const struct device *dev = (const struct device *)st->dev;
+    alp_z_spi_side_t *s = (alp_z_spi_side_t *)st->be_data;
+    if (s == NULL) return ALP_ERR_NOT_READY;
 
     struct spi_buf tx_buf = { .buf = (void *)tx, .len = (tx != NULL) ? len : 0 };
     struct spi_buf rx_buf = { .buf = rx,         .len = (rx != NULL) ? len : 0 };
     struct spi_buf_set tx_set = { .buffers = &tx_buf, .count = 1 };
     struct spi_buf_set rx_set = { .buffers = &rx_buf, .count = 1 };
 
-    int err = spi_transceive(st->dev, &h->zspi_cfg,
+    int err = spi_transceive(dev, &s->zspi_cfg,
                              (tx != NULL) ? &tx_set : NULL,
                              (rx != NULL) ? &rx_set : NULL);
     return _errno_to_alp(err);
 }
 
+static void z_close(alp_spi_backend_state_t *st) {
+    alp_z_spi_side_t *s = (alp_z_spi_side_t *)st->be_data;
+    _free_side(s);
+    st->be_data = NULL;
+}
+
 static const alp_spi_ops_t _ops = {
     .open       = z_open,
     .transceive = z_transceive,
-    .close      = NULL,     /* no teardown needed for spi_transceive */
+    .close      = z_close,
 };
 
 ALP_BACKEND_REGISTER(spi, zephyr_drv, {

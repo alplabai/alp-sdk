@@ -3,6 +3,14 @@
  *
  * Internal ABI between alp_spi dispatcher and per-backend
  * implementations.  NOT a public header.
+ *
+ * Zephyr leakage: state->dev is typed void* and the per-handle
+ * Zephyr SPI config (spi_config + spi_cs_control + gpio_dt_spec)
+ * lives in a backend-private sidecar reached via state.be_data
+ * inside src/backends/spi/zephyr_drv.c.  This keeps the portable
+ * dispatcher TU and the struct alp_spi layout free of
+ * <zephyr/device.h>, <zephyr/drivers/gpio.h>, and
+ * <zephyr/drivers/spi.h>.
  */
 
 #ifndef ALP_BACKENDS_SPI_OPS_H
@@ -11,9 +19,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/gpio.h>
-#include <zephyr/drivers/spi.h>
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
@@ -22,9 +27,14 @@
 typedef struct alp_spi_ops alp_spi_ops_t;
 
 typedef struct alp_spi_backend_state {
-    const struct device     *dev;        /* Zephyr backend device pointer */
+    void                    *dev;        /* opaque backend device pointer
+                                          * (const struct device * on Zephyr;
+                                          * kept void* so the portable handle
+                                          * does not pull in <zephyr/device.h>) */
     uint32_t                 bus_id;
-    void                    *be_data;
+    void                    *be_data;    /* per-handle backend sidecar
+                                          * (Zephyr backend stashes spi_config +
+                                          * cs_ctrl + cs_spec + cs_present here) */
     const alp_spi_ops_t     *ops;
 } alp_spi_backend_state_t;
 
@@ -43,11 +53,6 @@ struct alp_spi {
     const alp_backend_t     *backend;
     alp_capabilities_t       cached_caps;
     bool                     in_use;
-    /* Zephyr SPI configuration -- populated by zephyr_drv backend */
-    struct spi_config        zspi_cfg;
-    struct spi_cs_control    cs_ctrl;
-    struct gpio_dt_spec      cs_spec;    /* zeroed when no CS gpio resolved */
-    bool                     cs_present;
 };
 
 #endif /* ALP_BACKENDS_SPI_OPS_H */
