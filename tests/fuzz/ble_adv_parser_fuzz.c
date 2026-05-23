@@ -34,7 +34,7 @@
  *     cases in the length / type-byte handling.
  *
  * The reference parser here mirrors what the SDK's BLE backend
- * (src/zephyr/ble_zephyr.c) calls into Zephyr's bt_data_parse +
+ * (src/backends/ble/zephyr_drv.c) calls into Zephyr's bt_data_parse +
  * what a Yocto BlueZ-side consumer would parse via D-Bus.  Both
  * upstreams have known CVE history in this area; keeping our
  * own reference + fuzzing it is cheap insurance.
