@@ -82,19 +82,19 @@ A release does **not** tag until every row gating it is `verified`.
 | `<alp/can.h>` AEN-Zephyr | `src/backends/can/zephyr_drv.c` | ⏳ untested | CAN-FD frame sent + acknowledged against a second node | HIL | v0.2 |
 | `<alp/rtc.h>` AEN-Zephyr | `src/backends/rtc/zephyr_drv.c` | ⏳ untested | Wall-clock advances 1 s ± kernel jitter over 60 s | HIL | v0.2 |
 | `<alp/wdt.h>` AEN-Zephyr | `src/backends/wdt/zephyr_drv.c` | ⏳ untested | Watchdog reset observed when feed thread is starved | HIL | v0.2 |
-| Real Wi-Fi station + MQTT on AEN-Zephyr | `src/zephyr/iot_zephyr.c` | ⏳ untested | Publish + subscribe roundtrip against a known broker | HIL | v0.2 |
+| Real Wi-Fi station + MQTT on AEN-Zephyr | `src/backends/wifi/zephyr_drv.c + src/backends/mqtt/zephyr_drv.c` | ⏳ untested | Publish + subscribe roundtrip against a known broker | HIL | v0.2 |
 | EdgeAI vision reference app | `examples/aen/edgeai-vision-aen/` | ⏳ untested | ≥10 fps inference on real E1M EVK | HIL | v0.2 |
 
 ## v0.3.0 — IoT app, multi-proc, board.yaml
 
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
-| `<alp/inference.h>` Ethos-U on AEN | `src/zephyr/inference_zephyr.c` | ⏳ untested | Vela-compiled MobileNetV2 outputs logits matching CPU reference within tolerance | HIL | v0.3 |
+| `<alp/inference.h>` Ethos-U on AEN | `src/backends/inference/tflm.cpp` | ⏳ untested | Vela-compiled MobileNetV2 outputs logits matching CPU reference within tolerance | HIL | v0.3 |
 | `<alp/inference.h>` DEEPX dispatcher routing | `src/yocto/inference_yocto.c` + `inference_deepx.cpp` | 🟡 partial | Dispatcher selects DEEPX backend when configured; real `dxnn_*` link still pending | Yocto plain-CMake build green; `tests/yocto/inference_dispatcher.c` covers NULL/INVAL paths; **real link gates v0.4** | v0.3 |
-| `<alp/audio.h>` real impl | `src/zephyr/audio_zephyr.c` | ⏳ untested | PDM mic captures audio playable through I²S DAC, no buffer underruns | HIL | v0.3 |
-| `<alp/ble.h>` real impl | `src/zephyr/ble_zephyr.c` | ⏳ untested | Advertise + connect + GATT read from a second BLE device | HIL | v0.3 |
-| `<alp/security.h>` real impl | `src/zephyr/security_zephyr.c` | ⏳ untested | SHA-256 + AES-128-GCM round-trip against MbedTLS reference vectors | unit test or HIL | v0.3 |
-| `<alp/mproc.h>` real impl | `src/zephyr/mproc_zephyr.c` | ⏳ untested | M55-HP <-> M55-HE shared-memory mailbox echoes a payload | HIL | v0.3 |
+| `<alp/audio.h>` real impl | `src/backends/audio/zephyr_drv.c` | ⏳ untested | PDM mic captures audio playable through I²S DAC, no buffer underruns | HIL | v0.3 |
+| `<alp/ble.h>` real impl | `src/backends/ble/zephyr_drv.c` | ⏳ untested | Advertise + connect + GATT read from a second BLE device | HIL | v0.3 |
+| `<alp/security.h>` real impl | `src/backends/security/zephyr_drv.c` | ⏳ untested | SHA-256 + AES-128-GCM round-trip against MbedTLS reference vectors | unit test or HIL | v0.3 |
+| `<alp/mproc.h>` real impl | `src/backends/mproc/zephyr_drv.c` | ⏳ untested | M55-HP <-> M55-HE shared-memory mailbox echoes a payload | HIL | v0.3 |
 | `board.yaml` loader (`scripts/alp_project.py`) | `scripts/alp_project.py` | 🟡 partial | Schema-level + capability-level checks unit-tested; cross-OS round-trips not exercised on hardware | `tests/scripts/test_alp_project.py`; **HIL exercise gates v0.3** | v0.3 |
 | `validate_board_yaml.py` v0.3 capability cross-check | `scripts/validate_board_yaml.py` | 🟡 partial | Returns exit 3 on the deliberately-broken sample boards | `pr-metadata-validate.yml` | v0.3 |
 | VS Code extension `Generate all` + inline diagnostics | [`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode) (separate repo since 2026-05-12) | ⏳ untested | Loaded into VS Code; commands run; problems panel surfaces validator errors | Manual capture (screencast/gist) | v0.3 |
@@ -116,7 +116,7 @@ A release does **not** tag until every row gating it is `verified`.
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
 | AEN-Zephyr UART RX ring buffer (LwRB) | `src/backends/uart/zephyr_drv.c` (RX ringbuf section) | 🟡 partial | IRQ-driven attach delivers a known 1 KiB burst into the caller's ring with zero byte loss over 10 consecutive bursts | `tests/zephyr/peripheral/` (NULL/INVAL failure paths) + `examples/uart-rx-ringbuf` (attach -> pop -> detach happy path on native_sim); **real-IRQ attach via `nightly-aen-hil`** | v0.4 |
-| AEN-Zephyr `<alp/mproc.h>` IPC envelope framing (placeholder) | `src/common/proto/alp_mproc_frame.{h,c}` + `src/zephyr/mproc_zephyr.c` framing branches | 🟡 partial | A real M55-HP <-> M55-HE roundtrip echoes the wrapped envelope unchanged through `alp_mbox_send` -> peer -> `alp_mbox_msg_cb_t` | `tests/zephyr/mproc/` (9 framing ZTESTs cover encode/decode + the `alp_sdk.mproc.nanopb_framing` twister scenario compiles the framing branch in `alp_mbox_send`); **peer-firmware roundtrip via `nightly-aen-hil`** | v0.4 (placeholder), v0.4-final (real nanopb wire) |
+| AEN-Zephyr `<alp/mproc.h>` IPC envelope framing (placeholder) | `src/common/proto/alp_mproc_frame.{h,c}` + `src/backends/mproc/zephyr_drv.c` framing branches | 🟡 partial | A real M55-HP <-> M55-HE roundtrip echoes the wrapped envelope unchanged through `alp_mbox_send` -> peer -> `alp_mbox_msg_cb_t` | `tests/unit/mproc_registry/` (9 framing ZTESTs cover encode/decode + the `alp_sdk.mproc.nanopb_framing` twister scenario compiles the framing branch in `alp_mbox_send`); **peer-firmware roundtrip via `nightly-aen-hil`** | v0.4 (placeholder), v0.4-final (real nanopb wire) |
 | Yocto I²C wrapper (i2c-dev) | `src/yocto/peripheral_i2c.c` | 🟡 partial | LSM6DSO WHOAMI = 0x6C reads back over real `/dev/i2c-N` on a Yocto target | `tests/yocto/peripheral_i2c.c` (failure paths only); **HIL via `hil-yocto`** | v0.4 |
 | Yocto SPI wrapper (spidev) | `src/yocto/peripheral_spi.c` | 🟡 partial | SPI flash JEDEC-ID via `/dev/spidev<bus>.<cs>` returns expected bytes | `tests/yocto/peripheral_spi.c`; **HIL via `hil-yocto`** | v0.4 |
 | Yocto UART wrapper (termios) | `src/yocto/peripheral_uart.c` | 🟡 partial | TX/RX loopback at 115200 8N1, zero byte loss over 1 KiB | `tests/yocto/peripheral_uart.c`; **HIL via `hil-yocto`** | v0.4 |
@@ -134,7 +134,7 @@ A release does **not** tag until every row gating it is `verified`.
 | Secure OTA on i.MX 93-Yocto (`meta-mender`) | same scaffolding as V2N row above | ⏳ untested | A/B partition swap survives an interrupted-update simulation | HIL via `hil-yocto` | v0.4 |
 | OPTIGA Trust M-rooted device identity | TBD | ⏳ untested | TLS handshake succeeds using OPTIGA-stored ECC key; tampered key rejects | HIL | v0.4 |
 | DEEPX DX-M1 real `dxnn_*` link | `src/yocto/inference_deepx.cpp` | ⏳ untested | DX-M1 SDK on sysroot; sample model run completes; outputs match host-CPU reference | HIL | v0.4 |
-| Ethos-U65 real attach on i.MX 93 | `src/zephyr/inference_ethosu_n93.c` | ⏳ untested | Vela-compiled model run on i.MX 93 NPU; outputs match Ethos-U55 reference | HIL | v0.4 |
+| Ethos-U65 real attach on i.MX 93 | `src/backends/inference/ethos_u_n93.cpp` | ⏳ untested | Vela-compiled model run on i.MX 93 NPU; outputs match Ethos-U55 reference | HIL | v0.4 |
 | DRP-AI3 real attach on V2N | TBD | ⏳ untested | DRP-AI-translator output runs on V2N silicon | HIL | v0.4 |
 
 ## v0.4 prep — landed on `main` (2026-05-11)
