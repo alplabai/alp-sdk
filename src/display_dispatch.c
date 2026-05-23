@@ -2,16 +2,11 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Display class dispatcher.  Owns the public alp_display_* API
- * surface and routes through the backend registry mechanism
- * shipped in Slice 0 (PR #17).
+ * surface and routes through the backend registry.
  *
  * The handle struct layout (struct alp_display) lives in
  * src/backends/display/display_ops.h so per-backend .c files can
  * reach the fields without duplicating the layout.
- *
- * Slice 8a is the first concrete implementation for <alp/display.h>;
- * there is no legacy free-standing src/zephyr/display_*.c to retire,
- * so the build wiring is a pure ADD rather than a swap.
  */
 
 #include <stdbool.h>

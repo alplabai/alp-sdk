@@ -25,9 +25,9 @@
  * base_caps are sufficient for the two handle surfaces.
  *
  * Pool defaults: 1 in, 1 out (Kconfig-tunable via
- * CONFIG_ALP_SDK_MAX_AUDIO_{IN,OUT}_HANDLES which already existed
- * for the legacy wrapper).  Typical E1M-conformant SoMs expose one
- * PDM mic + one I2S DAC; apps that need more raise the cap.
+ * CONFIG_ALP_SDK_MAX_AUDIO_{IN,OUT}_HANDLES).  Typical E1M-conformant
+ * SoMs expose one PDM mic + one I2S DAC; apps that need more raise
+ * the cap.
  */
 
 #include <stdbool.h>

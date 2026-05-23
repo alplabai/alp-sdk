@@ -17,42 +17,21 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/delay_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/handles.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/last_error.c
-    # peripheral_gpio.c retired in Slice 2B -- migrated to
-    # src/backends/gpio/{zephyr_drv,sw_fallback}.c with the
-    # dispatcher in src/gpio_dispatch.c.  See the GPIO block below.
-    # peripheral_uart.c retired in Slice 2A -- migrated to
-    # src/backends/uart/{zephyr_drv,sw_fallback}.c with the
-    # dispatcher in src/uart_dispatch.c.  See the UART block below.
-    # Camera class dispatcher + stub backend (Slice 5 -- registry
-    # migration).  Replaces the legacy free-standing
-    # src/zephyr/camera_stub.c.  The real Zephyr drivers/video/
-    # backend (priority 50) + V2N N44 ISP-aware backend
-    # (priority 100 on renesas:rzv2n:n44) ride above the wildcard
-    # stub via the opt-in Kconfigs below.  Vendor-ext bodies for
-    # the Mali-C55 (NOSUPPORT today) + V2N N44 ISP (ALP_OK
-    # skeleton) compile unconditionally so apps that #include the
-    # ext headers link cleanly regardless of which silicon they
-    # target.
+    # Camera class dispatcher + stub backend.  The real Zephyr
+    # drivers/video/ backend (priority 50) + V2N N44 ISP-aware
+    # backend (priority 100 on renesas:rzv2n:n44) ride above the
+    # wildcard stub via the opt-in Kconfigs below.  Vendor-ext
+    # bodies for the Mali-C55 (NOSUPPORT today) + V2N N44 ISP
+    # (ALP_OK skeleton) compile unconditionally so apps that
+    # #include the ext headers link cleanly regardless of which
+    # silicon they target.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/camera_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/camera.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/camera.c
-    # Remaining v0.3 surfaces still on the stub contract -- swap in
-    # their *_zephyr.c counterparts as they ship.
-    # security_zephyr.c retired in Slice 4d -- all three primitives
-    # (hash + AEAD + random) migrated to
-    # src/backends/security/{zephyr_drv,sw_fallback}.c with the
-    # dispatcher in src/security_dispatch.c.  See the security block
-    # below.
-    # mproc_zephyr.c retired in Slice 4c -- all three primitives
-    # (shmem + mbox + hwsem) migrated to
-    # src/backends/mproc/{zephyr_drv,sw_fallback}.c with the
-    # dispatcher in src/mproc_dispatch.c.  See the mproc block below.
-    # storage_stub.c retired in Slice 6 -- replaced by the storage
-    # class dispatcher + Zephyr flash/littlefs backends below.
 )
 
-# Storage class dispatcher + backends (Slice 6 migration).
+# Storage class dispatcher + backends.
 # The dispatcher compiles unconditionally so apps that depend on the
 # <alp/storage.h> ABI always link cleanly; each backend gates on its
 # own Kconfig so builds that don't enable a path don't pay its code
@@ -79,8 +58,7 @@ if(CONFIG_ALP_SDK_STORAGE_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 endif()
 
-# USB registry sources -- replace the legacy src/zephyr/usb_zephyr.c
-# from the v0.3 contract.  Dispatcher + portable Zephyr backend ship
+# USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/usb_dispatch.c
@@ -91,8 +69,7 @@ if(CONFIG_ALP_SDK_USB_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/usb/sw_fallback.c)
 endif()
 
-# BLE registry sources -- replace the legacy src/zephyr/ble_zephyr.c
-# from the v0.3 contract.  Dispatcher + portable Zephyr backend ship
+# BLE registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/ble_dispatch.c
@@ -103,9 +80,7 @@ if(CONFIG_ALP_SDK_BLE_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/sw_fallback.c)
 endif()
 
-# Wi-Fi registry sources -- replace the Wi-Fi half of the legacy
-# src/zephyr/iot_zephyr.c (retired in Slice 4b together with its
-# MQTT sibling below).  Dispatcher + portable Zephyr backend ship
+# Wi-Fi registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/wifi_dispatch.c
@@ -116,10 +91,8 @@ if(CONFIG_ALP_SDK_WIFI_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/sw_fallback.c)
 endif()
 
-# MQTT registry sources -- replace the MQTT half of the legacy
-# src/zephyr/iot_zephyr.c (now deleted in Slice 4b).  Dispatcher +
-# portable Zephyr backend ship unconditionally; sw_fallback gated
-# on the native_sim opt-in.
+# MQTT registry sources.  Dispatcher + portable Zephyr backend ship
+# unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/mqtt_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mqtt/zephyr_drv.c)
@@ -129,13 +102,12 @@ if(CONFIG_ALP_SDK_MQTT_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mqtt/sw_fallback.c)
 endif()
 
-# mproc registry sources -- replace the legacy
-# src/zephyr/mproc_zephyr.c from the v0.7 contract.  The dispatcher
-# owns three handle pools (shmem + mbox + hwsem) keyed off the same
-# class registry; the portable Zephyr backend covers all three
-# primitives via DT_ALIAS(alp_shmemN) / DT_ALIAS(alp_mboxN) /
-# intra-core k_sem fallback.  Dispatcher + Zephyr backend ship
-# unconditionally; sw_fallback gated on the native_sim opt-in.
+# mproc registry sources.  The dispatcher owns three handle pools
+# (shmem + mbox + hwsem) keyed off the same class registry; the
+# portable Zephyr backend covers all three primitives via
+# DT_ALIAS(alp_shmemN) / DT_ALIAS(alp_mboxN) / intra-core k_sem
+# fallback.  Dispatcher + Zephyr backend ship unconditionally;
+# sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/mproc_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/zephyr_drv.c)
@@ -145,14 +117,13 @@ if(CONFIG_ALP_SDK_MPROC_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/sw_fallback.c)
 endif()
 
-# Security registry sources -- replace the legacy
-# src/zephyr/security_zephyr.c from the v0.3 contract.  The dispatcher
-# owns two handle pools (hash + AEAD) plus a cached ops pointer for
-# the stateless alp_random_bytes fast path; the portable Zephyr
-# backend lifts the PSA Crypto body verbatim (PSA picks the active
-# SoC's HW accelerator transparently via MbedTLS's driver layer).
-# Dispatcher + Zephyr backend ship unconditionally; sw_fallback gated
-# on the native_sim opt-in.
+# Security registry sources.  The dispatcher owns two handle pools
+# (hash + AEAD) plus a cached ops pointer for the stateless
+# alp_random_bytes fast path; the portable Zephyr backend uses
+# PSA Crypto (PSA picks the active SoC's HW accelerator
+# transparently via MbedTLS's driver layer).  Dispatcher + Zephyr
+# backend ship unconditionally; sw_fallback gated on the
+# native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/security_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/zephyr_drv.c)
@@ -162,13 +133,11 @@ if(CONFIG_ALP_SDK_SECURITY_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/sw_fallback.c)
 endif()
 
-# Audio registry sources -- replace the legacy
-# src/zephyr/audio_zephyr.c from the v0.3 contract.  The dispatcher
-# owns two handle pools (alp_audio_in_t + alp_audio_out_t) keyed off
-# the same class registry; the portable Zephyr backend lifts the
-# DMIC input + alp_i2s_*-delegated output body verbatim.
-# Dispatcher + Zephyr backend ship unconditionally; sw_fallback
-# gated on the native_sim opt-in.
+# Audio registry sources.  The dispatcher owns two handle pools
+# (alp_audio_in_t + alp_audio_out_t) keyed off the same class
+# registry; the portable Zephyr backend wires DMIC input +
+# alp_i2s_*-delegated output.  Dispatcher + Zephyr backend ship
+# unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/audio_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/audio/zephyr_drv.c)
@@ -178,10 +147,9 @@ if(CONFIG_ALP_SDK_AUDIO_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/audio/sw_fallback.c)
 endif()
 
-# RPC registry sources -- replace the legacy src/zephyr/rpc_zephyr.c
-# from the v0.6 contract.  The dispatcher owns one alp_rpc_channel_t
-# pool keyed off the same class registry; the portable Zephyr backend
-# carries the lifted ipc_service / RPMsg body + the per-channel
+# RPC registry sources.  The dispatcher owns one alp_rpc_channel_t
+# pool keyed off the same class registry; the portable Zephyr
+# backend carries the ipc_service / RPMsg body + the per-channel
 # subscription table + the synchronous-call slot.  Dispatcher +
 # Zephyr backend ship unconditionally; sw_fallback gated on the
 # native_sim opt-in.
@@ -194,7 +162,7 @@ if(CONFIG_ALP_SDK_RPC_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rpc/sw_fallback.c)
 endif()
 
-# Inference class dispatcher + backends (Slice 3 migration).
+# Inference class dispatcher + backends.
 # The dispatcher compiles unconditionally so apps that depend on
 # the <alp/inference.h> ABI always link cleanly; each backend
 # gates on its own Kconfig so builds that don't enable a path
@@ -237,7 +205,7 @@ if(CONFIG_ALP_SDK_INFERENCE_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/sw_fallback.c)
 endif()
 
-# Camera real backends (Slice 5).  Gate each on its own Kconfig
+# Camera real backends.  Gate each on its own Kconfig
 # opt-in so builds that don't need the Zephyr video subsystem or
 # the V2N N44 ISP skeleton don't pay their code size.  The
 # wildcard stub stays unconditionally compiled (above) so
@@ -294,10 +262,9 @@ if(CONFIG_ALP_SDK_QENC_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/sw_fallback.c)
 endif()
-# TMU registry sources -- replace the legacy src/zephyr/peripheral_tmu.c
-# from the v0.4 contract.  TMU is handle-less; the dispatcher caches
-# the selected backend's ops vtable on first call instead of owning a
-# handle pool.  Dispatcher + portable Zephyr/bridge backend ship
+# TMU registry sources.  TMU is handle-less; the dispatcher caches
+# the selected backend's ops vtable on first call instead of owning
+# a handle pool.  Dispatcher + portable Zephyr/bridge backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_TMU
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/tmu_dispatch.c
@@ -308,32 +275,30 @@ if(CONFIG_ALP_SDK_PERIPH_TMU AND CONFIG_ALP_SDK_TMU_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/tmu/sw_fallback.c)
 endif()
 
-# DSP registry sources -- replace the legacy src/common/dsp_chain.c
-# from the v0.3 contract.  The dispatcher owns one alp_dsp_chain_t
+# DSP registry sources.  The dispatcher owns one alp_dsp_chain_t
 # pool keyed off the dsp class registry; the OS-agnostic CMSIS-DSP /
-# portable-radix-2 body now lives in src/backends/dsp/sw_fallback.c
-# (no separate zephyr_drv exists -- the V2N GD32G5 HW-FFT surfaces
-# via wave-2's alp_adc_filter_t / spectrum_t in <alp/adc.h>, not
+# portable-radix-2 body lives in src/backends/dsp/sw_fallback.c (no
+# separate zephyr_drv exists -- the V2N GD32G5 HW-FFT surfaces via
+# wave-2's alp_adc_filter_t / spectrum_t in <alp/adc.h>, not
 # through this standalone class, so the SW backend is the
 # unconditional production pick today).
 #
 # Dispatcher + sw_fallback ship unconditionally -- they ARE the
-# production code on every SoC in Slice 4d.  CONFIG_ALP_SDK_DSP is
-# retained as the opt-in feature gate; when off, neither file is
-# linked so the static cost (~17 KB pool slot) is paid only by apps
-# that use the chain API.
+# production code on every SoC.  CONFIG_ALP_SDK_DSP is the opt-in
+# feature gate; when off, neither file is linked so the static
+# cost (~17 KB pool slot) is paid only by apps that use the chain
+# API.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/dsp_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dsp/sw_fallback.c)
 
 # System-power-mode surface (<alp/power.h>).  Wired behind
 # CONFIG_ALP_SDK_POWER so customers can opt out on builds that
-# don't need sleep transitions.  Slice 7 -- registry migration:
-# replaces the legacy free-standing src/zephyr/power_zephyr.c with
-# the class dispatcher + wildcard stub backend; the real Zephyr
-# pm_policy_* backend rides above the stub at priority 100 on
-# builds that link Zephyr's PM subsystem (gated on CONFIG_PM so
-# the pm_policy_state_lock_* symbols are visible).  V2N supervisor
+# don't need sleep transitions.  Class dispatcher + wildcard stub
+# backend ship unconditionally; the real Zephyr pm_policy_*
+# backend rides above the stub at priority 100 on builds that
+# link Zephyr's PM subsystem (gated on CONFIG_PM so the
+# pm_policy_state_lock_* symbols are visible).  V2N supervisor
 # CMD_POWER_MODE_SET routes through the Renesas vendor-ext body
 # whenever CONFIG_ALP_SDK_V2N_SUPERVISOR=y.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER
@@ -344,21 +309,18 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_PM_POLICY
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_EXT_RENESAS
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/power.c)
 
-# Display class dispatcher + stub backend (Slice 8a -- registry
-# pattern).  Display has no legacy free-standing src/zephyr/*.c, so
-# this is a pure ADD rather than a swap.  Real backends (Zephyr
+# Display class dispatcher + stub backend.  Real backends (Zephyr
 # display_* driver-class wrapper for SSD1306 / ILI9341 / ST7789 on
 # AEN, V2N DSI / parallel-RGB framebuffer paths) land per issue #23.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/display_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/display/zephyr_stub.c)
 
-# 2D graphics accelerator surface (<alp/gpu2d.h>).  Slice 8b --
-# registry migration: replaces the legacy free-standing
-# src/zephyr/gpu2d_zephyr.c with the class dispatcher + wildcard
-# stub backend.  Real backends (Alif D/AVE 2D on AEN, NXP Vivante
-# GC328 on i.MX 93) land per issue #24 with their own
-# silicon-specific registry entries.
+# 2D graphics accelerator surface (<alp/gpu2d.h>).  Class
+# dispatcher + wildcard stub backend ship unconditionally.  Real
+# backends (Alif D/AVE 2D on AEN, NXP Vivante GC328 on i.MX 93)
+# land per issue #24 with their own silicon-specific registry
+# entries.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpu2d_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpu2d/zephyr_stub.c)
@@ -614,7 +576,7 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backend.c
 )
 
-# I2C class dispatcher + backends (Slice 2a migration).
+# I2C class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_I2C_SW_FALLBACK.
 zephyr_library_sources(
@@ -626,7 +588,7 @@ if(CONFIG_ALP_SDK_I2C_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/sw_fallback.c)
 endif()
 
-# SPI class dispatcher + backends (Slice 2a migration).
+# SPI class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_SPI_SW_FALLBACK.
 zephyr_library_sources(
@@ -638,7 +600,7 @@ if(CONFIG_ALP_SDK_SPI_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/sw_fallback.c)
 endif()
 
-# UART class dispatcher + backends (Slice 2a migration).
+# UART class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_UART_SW_FALLBACK.
 zephyr_library_sources(
@@ -650,7 +612,7 @@ if(CONFIG_ALP_SDK_UART_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/sw_fallback.c)
 endif()
 
-# GPIO class dispatcher + backends (Slice 2b migration).
+# GPIO class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_GPIO_SW_FALLBACK.
 zephyr_library_sources(
@@ -662,7 +624,7 @@ if(CONFIG_ALP_SDK_GPIO_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/sw_fallback.c)
 endif()
 
-# PWM class dispatcher + backends (Slice 2b migration).
+# PWM class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_PWM_SW_FALLBACK.
 zephyr_library_sources(
@@ -674,7 +636,7 @@ if(CONFIG_ALP_SDK_PWM_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/sw_fallback.c)
 endif()
 
-# I2S class dispatcher + backends (Slice 2b migration).
+# I2S class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_I2S_SW_FALLBACK.
 zephyr_library_sources(
@@ -686,7 +648,7 @@ if(CONFIG_ALP_SDK_I2S_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2s/sw_fallback.c)
 endif()
 
-# CAN class dispatcher + backends (Slice 2b migration).
+# CAN class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_CAN_SW_FALLBACK.
 zephyr_library_sources(
@@ -703,10 +665,9 @@ endif()
 # routes through the backend registry.  Backends register under
 # .alp_backends_adc and ship from src/backends/adc/*.c.
 #
-# Streaming (alp_adc_stream_*) stays in src/zephyr/peripheral_adc.c
-# until Slice 1.x migrates it; both files coexist under the same
-# Kconfig because they implement different API surfaces and share
-# no symbols.
+# Streaming (alp_adc_stream_*) lives in src/zephyr/peripheral_adc.c;
+# both files coexist under the same Kconfig because they implement
+# different API surfaces and share no symbols.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_ADC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/adc_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_adc.c)

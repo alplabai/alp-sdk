@@ -3,8 +3,7 @@
  *
  * DSP class dispatcher.  Owns the public <alp/dsp.h> surface -- one
  * stateful handle type (alp_dsp_chain_t) carrying a composable
- * FIR / IIR / window / FFT pipeline -- on top of the backend registry
- * mechanism shipped in Slice 0 (PR #17).
+ * FIR / IIR / window / FFT pipeline -- on top of the backend registry.
  *
  * Dispatch shape mirrors the rtc / audio siblings: each open()
  * resolves the backend, allocates from a static pool, stores the
@@ -13,23 +12,22 @@
  * getters return per-handle cached snapshots the registry produced
  * at open() time.
  *
- * DSP is structurally unusual within Slice 4d: the legacy file lived
- * at src/common/dsp_chain.c (NOT src/zephyr/...) because the math
- * kernels are libm + CMSIS-DSP only -- OS-agnostic.  In the registry
- * world that body becomes the sw_fallback backend; no separate
- * zephyr_drv backend exists today (V2N's HW-FFT bridge surface lands
- * via wave-2's alp_adc_filter_t / alp_adc_spectrum_t composition in
- * <alp/adc.h>, not through this class).  The dispatcher accepts a
- * future HW backend without change.
+ * DSP is structurally unusual: the math kernels are libm +
+ * CMSIS-DSP only -- OS-agnostic -- so the body ships as the
+ * sw_fallback backend, and no separate zephyr_drv backend exists
+ * today (V2N's HW-FFT bridge surface lands via wave-2's
+ * alp_adc_filter_t / alp_adc_spectrum_t composition in <alp/adc.h>,
+ * not through this class).  The dispatcher accepts a future HW
+ * backend without change.
  *
- * Pool default: 2 chains (CONFIG_ALP_SDK_MAX_DSP_HANDLES) -- matches
- * the legacy ALP_DSP_CHAIN_POOL_SIZE.  Bumping the cap costs ~9 KB
- * per slot (FFT scratch + window samples + per-stage state) so apps
- * that need more should size the Kconfig deliberately.
+ * Pool default: 2 chains (CONFIG_ALP_SDK_MAX_DSP_HANDLES).  Bumping
+ * the cap costs ~9 KB per slot (FFT scratch + window samples +
+ * per-stage state) so apps that need more should size the Kconfig
+ * deliberately.
  *
  * last_error stamping reuses the existing TLS slot via extern
  * forward decls so the dispatcher does not pull in handles.h.  No
- * probe() is invoked -- the v0.5 base_caps are sufficient until a
+ * probe() is invoked -- base_caps are sufficient until a
  * SoC-specific backend with refined caps lands.
  */
 

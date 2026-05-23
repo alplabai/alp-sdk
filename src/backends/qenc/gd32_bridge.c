@@ -2,9 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * V2N QEnc backend routed through the GD32G553 supervisor MCU.
- * Lifted from the #if-ladder branches of the legacy
- * peripheral_qenc.c during the Slice 4a registry migration.  Every
- * E1M encoder rides the GD32 IO MCU bridge on V2N silicon.
+ * Every E1M encoder rides the GD32 IO MCU bridge on V2N silicon.
  */
 
 #include <stdint.h>

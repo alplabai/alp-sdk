@@ -2,16 +2,14 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Portable Zephyr USBD-stack backend for the <alp/usb.h> surface.
- * Lifted verbatim from src/zephyr/usb_zephyr.c (the legacy v0.3
- * wrapper) into a registry-shaped backend.  Registers as
- * silicon_ref="*" at priority 100 -- mirrors the design spec
- * Section 2 backend matrix (zephyr_drv wins on every SoC unless a
- * more specific backend registers).
+ * Registers as silicon_ref="*" at priority 100 -- mirrors the
+ * design spec Section 2 backend matrix (zephyr_drv wins on every
+ * SoC unless a more specific backend registers).
  *
  * Device side: usb_enable / usb_disable lifecycle on top of
  * Zephyr's USB device stack.  Per-class endpoint read/write
  * (CDC-ACM / MSC / HID) lands once the per-class wrappers are
- * wired -- v0.3 contract preserved as-is.
+ * wired.
  *
  * Host side: NOSUPPORT.  Zephyr 3.7's usbh_* host stack is in tree
  * but the SoC-side controller drivers are still landing on a

@@ -35,7 +35,7 @@
 /* Internal SDK header — NOT customer-facing.  Provides
  *   alp_z_v2n_supervisor_acquire / _release
  *   gd32g553_adc_configure / gd32g553_adc_read
- * Same surface the legacy src/zephyr/peripheral_adc.c uses. */
+ */
 #include "../../zephyr/handles.h"   /* For alp_z_v2n_supervisor_* */
 #include <alp/chips/gd32g553.h>
 
@@ -75,7 +75,7 @@ static alp_status_t gd32_open(const alp_adc_config_t *cfg,
     }
 
     /* Probe the supervisor up-front + push any provided tuning knobs
-     * before returning the handle (matches the legacy contract). */
+     * before returning the handle. */
     gd32g553_t *ctx = NULL;
     alp_status_t s = alp_z_v2n_supervisor_acquire(&ctx);
     if (s != ALP_OK) {

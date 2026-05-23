@@ -113,14 +113,14 @@ struct alp_uart_rx_ringbuf {
 /* struct alp_pwm is defined in src/backends/pwm/pwm_ops.h.            */
 
 /* ------------------------------------------------------------------ */
-/* ADC -- struct alp_adc layout moved to src/backends/adc/adc_ops.h    */
-/*   (Slice 1 ADC-registry pilot, 2026-05-22).  Both the new           */
-/*   dispatcher and the per-vendor backends share that definition.     */
+/* ADC                                                                 */
 /* ------------------------------------------------------------------ */
 
-/* Counter -- struct alp_counter layout moved to src/backends/counter/counter_ops.h (Slice 4a, 2026-05-22) */
+/* struct alp_adc is defined in src/backends/adc/adc_ops.h.             */
 
-/* QEnc -- struct alp_qenc layout moved to src/backends/qenc/qenc_ops.h (Slice 4a, 2026-05-22) */
+/* struct alp_counter is defined in src/backends/counter/counter_ops.h. */
+
+/* struct alp_qenc is defined in src/backends/qenc/qenc_ops.h.          */
 
 /* ------------------------------------------------------------------ */
 /* I2S                                                                 */
@@ -134,9 +134,9 @@ struct alp_uart_rx_ringbuf {
 
 /* struct alp_can is defined in src/backends/can/can_ops.h.             */
 
-/* RTC -- struct alp_rtc layout moved to src/backends/rtc/rtc_ops.h (Slice 4a, 2026-05-22) */
+/* struct alp_rtc is defined in src/backends/rtc/rtc_ops.h.             */
 
-/* WDT -- struct alp_wdt layout moved to src/backends/wdt/wdt_ops.h (Slice 4a, 2026-05-22) */
+/* struct alp_wdt is defined in src/backends/wdt/wdt_ops.h.             */
 
 /* ------------------------------------------------------------------ */
 /* DAC                                                                 */
@@ -189,33 +189,6 @@ void alp_z_clear_last_error(void);
 struct alp_uart_rx_ringbuf *alp_z_uart_rx_ringbuf_pool_acquire(void);
 void                        alp_z_uart_rx_ringbuf_pool_release(struct alp_uart_rx_ringbuf *h);
 #endif
-
-/* alp_z_adc_pool_* removed in Slice 1 -- the new src/adc_dispatch.c
- * owns its own handle pool keyed on the registry's alp_adc layout. */
-
-/* alp_z_gpio_pool_* removed in Slice 2B -- the new src/gpio_dispatch.c
- * owns its own handle pool keyed on the registry's alp_gpio layout. */
-
-/* alp_z_pwm_pool_* removed in Slice 2B -- the new src/pwm_dispatch.c
- * owns its own handle pool keyed on the registry's alp_pwm layout. */
-
-/* alp_z_counter_pool_* removed in Slice 4a -- the new src/counter_dispatch.c
- * owns its own handle pool keyed on the registry's alp_counter layout. */
-
-/* alp_z_qenc_pool_* removed in Slice 4a -- the new src/qenc_dispatch.c
- * owns its own handle pool keyed on the registry's alp_qenc layout. */
-
-/* alp_z_rtc_pool_* removed in Slice 4a -- the new src/rtc_dispatch.c
- * owns its own handle pool keyed on the registry's alp_rtc layout. */
-
-/* alp_z_wdt_pool_* removed in Slice 4a -- the new src/wdt_dispatch.c
- * owns its own handle pool keyed on the registry's alp_wdt layout. */
-
-/* alp_z_i2s_pool_* removed in Slice 2B -- the new src/i2s_dispatch.c
- * owns its own handle pool keyed on the registry's alp_i2s layout. */
-
-/* alp_z_can_pool_* removed in Slice 2B -- the new src/can_dispatch.c
- * owns its own handle pool keyed on the registry's alp_can layout. */
 
 struct alp_dac     *alp_z_dac_pool_acquire(void);
 void                alp_z_dac_pool_release(struct alp_dac *h);

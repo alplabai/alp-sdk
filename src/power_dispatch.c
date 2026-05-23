@@ -16,10 +16,10 @@
  * src/backends/power/power_ops.h so per-backend .c files can reach
  * the fields without duplicating the layout.
  *
- * The dispatcher preserves the legacy request_sleep INVAL
- * pre-checks (RUN-mode rejection, invalid enum, no-wake-source +
- * zero wake_after_ms guard) so customer code that relied on those
- * error returns keeps working after the registry migration.
+ * The dispatcher runs the request_sleep INVAL pre-checks
+ * (RUN-mode rejection, invalid enum, no-wake-source + zero
+ * wake_after_ms guard) before reaching the backend so every
+ * backend sees a validated request.
  */
 
 #include <stdbool.h>

@@ -6,9 +6,9 @@
  * DT node and the driver class handles register-level details.
  *
  * Channel resolution: uses the alp-adcN DT aliases (alp-adc0,
- * alp-adc1, ...) -- same idiom the legacy peripheral_adc.c
- * used.  An alp-adcN alias must point at a DT node carrying
- * io-channels + the standard ADC channel-config properties.
+ * alp-adc1, ...).  An alp-adcN alias must point at a DT node
+ * carrying io-channels + the standard ADC channel-config
+ * properties.
  *
  * Also hosts the alp_alif_adc_* vendor-extension bodies, since
  * the vendor knobs reach into per-instance state stored alongside
@@ -33,9 +33,8 @@
 
 #include "adc_ops.h"
 
-/* DT alias table -- mirrors the legacy peripheral_adc.c pattern.
- * Each alp-adcN alias resolves to an adc_dt_spec; we look it up
- * by channel_id at open time. */
+/* DT alias table.  Each alp-adcN alias resolves to an adc_dt_spec;
+ * we look it up by channel_id at open time. */
 #if DT_NODE_EXISTS(DT_ALIAS(alp_adc0))
 #define ALIF_ADC_SPEC_0 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc0))
 #else

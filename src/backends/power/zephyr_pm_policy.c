@@ -51,9 +51,8 @@
  * passes @p wake_after_ms > 0 we register a Zephyr k_timer to
  * guarantee the wake, which covers the most common case (RTC
  * timed wake).  GPIO / UART / USB wakes rely on the caller having
- * configured the matching IRQ source before calling sleep --
- * mirroring how the legacy src/zephyr/power_zephyr.c left those
- * bits up to the caller's setup code.
+ * configured the matching IRQ source before calling sleep -- the
+ * setup of those bits is the caller's responsibility.
  *
  * Yocto / Linux deferral
  * ----------------------

@@ -7,11 +7,10 @@
  *
  * Stub open() returns ALP_OK so the dispatcher hands the caller a
  * real handle -- this keeps the dispatcher's surface-validation
- * pre-checks (NULL pointer, zero dimensions, format range) reachable
- * and preserves the legacy src/zephyr/gpu2d_zephyr.c contract where
- * customers got an ALP_ERR_INVAL on bad surfaces rather than a
- * silent NOSUPPORT.  fill_rect / blit / blend bodies return
- * ALP_ERR_NOT_IMPLEMENTED -- they're only reached after the
+ * pre-checks (NULL pointer, zero dimensions, format range)
+ * reachable, so customers get an ALP_ERR_INVAL on bad surfaces
+ * rather than a silent NOSUPPORT.  fill_rect / blit / blend bodies
+ * return ALP_ERR_NOT_IMPLEMENTED -- they're only reached after the
  * dispatcher's surface validation passes.
  *
  * Real backends (Alif D/AVE 2D HAL on the AEN family, NXP Vivante
@@ -38,9 +37,8 @@ static alp_status_t stub_open(alp_gpu2d_backend_state_t *state,
     (void)state;
     (void)caps_out;
     /* Successful open keeps the dispatcher's INVAL surface validation
-     * reachable, matching legacy gpu2d_zephyr.c behaviour where the
-     * NOSUPPORT surfaced at fill_rect / blit / blend time AFTER the
-     * surface pre-checks ran. */
+     * reachable; the NOSUPPORT surfaces at fill_rect / blit / blend
+     * time AFTER the surface pre-checks have run. */
     return ALP_OK;
 }
 

@@ -2,8 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Portable Zephyr backend for the <alp/rpc.h> surface -- framed
- * RPC over OpenAMP / RPMsg.  Lifted from src/zephyr/rpc_zephyr.c
- * (the legacy v0.6 wrapper) into a registry-shaped backend.
+ * RPC over OpenAMP / RPMsg.
  *
  * Builds on Zephyr v4.4's subsys/ipc/ipc_service framework with
  * the rpmsg backend (CONFIG_IPC_SERVICE_BACKEND_RPMSG=y).  The
