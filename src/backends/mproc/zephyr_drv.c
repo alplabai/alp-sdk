@@ -1,11 +1,9 @@
 /*
- * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Zephyr backend for <alp/mproc.h> -- multi-processor IPC.
- *
- * Replaces the v0.1 NOSUPPORT stub.  Three surfaces, three
- * underlying mechanisms:
+ * Portable Zephyr backend for the <alp/mproc.h> surface.  Lifts
+ * the body of src/zephyr/mproc_zephyr.c (the legacy v0.7 wrapper)
+ * into a registry-shaped backend that owns all three primitives:
  *
  *   - mbox:  Zephyr MBOX driver class (Alif's MHU controller is
  *            registered as a Zephyr mbox device on AEN).  The
@@ -25,35 +23,40 @@
  *            an integer hwsem_id directly to one of
  *            CONFIG_ALP_SDK_MPROC_HWSEM_COUNT k_sem slots (count=1,
  *            mutex semantics).  This serialises access WITHIN one
- *            Zephyr image only -- the lookup does NOT consult
- *            alp-hwsemN DT aliases and there is NO Zephyr hwsem
- *            driver-class device behind the handle.  Real per-SoC
- *            HWSEM-block wiring (AEN HWSEM, ST HSEM, etc.) lands
- *            per-SoC in a follow-on track.
+ *            Zephyr image only -- cross-core / per-SoC HWSEM-block
+ *            wiring (AEN HWSEM, ST HSEM, etc.) lands per-SoC in a
+ *            follow-on track.  The single-core limitation is the
+ *            documented v0.7 behaviour and stays here verbatim.
  *
- * Gated on CONFIG_ALP_SDK_MPROC.  When OFF, NULL/NOSUPPORT.
+ * Registers as silicon_ref="*" at priority 100 -- mirrors the
+ * design spec Section 2 backend matrix (zephyr_drv wins on every
+ * SoC unless a more specific backend registers).
  *
- * Frame serialisation (v0.3 scaffolding, v0.4 first real use):
- * the v0.4 path frames each outbound mbox payload through nanopb
- * against the schema at metadata/protos/alp_mproc.proto.  Self-
- * describing payloads survive independent firmware upgrades of the
- * two M55 cores.  nanopb is an SDK-internal dependency -- consumers
- * don't enable it; the wrapper just uses it when the v0.4 mproc
- * path is built.  The proto types are internal; <alp/mproc.h>'s
- * public surface still accepts plain (data, len) so callers send
- * raw bytes unchanged from their POV.  See vendors/nanopb/README.md
- * for the runtime contract.
+ * Gated on CONFIG_ALP_SDK_MPROC -- when OFF the I/O ops return
+ * NOSUPPORT but the registry entry still links so the dispatcher
+ * picks it ahead of sw_fallback on real silicon builds with the
+ * MBOX driver class in the device tree.
+ *
+ * Frame serialisation: when CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING is
+ * on, the mbox payload is wrapped in the placeholder envelope from
+ * src/common/proto/alp_mproc_frame.h before handing it to Zephyr's
+ * mbox driver; inbound frames are unwrapped before invoking the
+ * user callback.  Both ends must agree on the flag value.
  */
 
 #include <errno.h>
-#include <string.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 
-#include "alp/mproc.h"
-#include "handles.h"
+#include <alp/backend.h>
+#include <alp/cap_instance.h>
+#include <alp/mproc.h>
+#include <alp/peripheral.h>
+
+#include "mproc_ops.h"
 
 #if defined(CONFIG_ALP_SDK_MPROC)
 #include <zephyr/device.h>
@@ -69,6 +72,32 @@
 #endif
 #endif
 
+/* ------------------------------------------------------------------ */
+/* Backend-owned per-handle state                                      */
+/* ------------------------------------------------------------------ */
+
+#if defined(CONFIG_ALP_SDK_MPROC)
+struct shmem_be {
+    void  *base;
+    size_t size;
+};
+
+struct mbox_be {
+    const struct device *dev;
+    uint32_t             channel;
+    alp_mbox_msg_cb_t    cb;
+    void                *cb_user;
+#if defined(CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING)
+    uint32_t             tx_sequence;  /* monotonic outbound counter */
+    uint8_t              tx_scratch[CONFIG_ALP_SDK_MPROC_FRAME_MAX_BYTES];
+#endif
+};
+
+struct hwsem_be {
+    uint32_t hwsem_id;
+    bool     held;
+};
+
 #ifndef CONFIG_ALP_SDK_MAX_SHMEM_HANDLES
 #define CONFIG_ALP_SDK_MAX_SHMEM_HANDLES 2
 #endif
@@ -79,79 +108,82 @@
 #define CONFIG_ALP_SDK_MAX_HWSEM_HANDLES 4
 #endif
 
-/* ------------------------------------------------------------------ */
-/* Internal handle structures                                          */
-/* ------------------------------------------------------------------ */
+static struct shmem_be _shmem_be_pool[CONFIG_ALP_SDK_MAX_SHMEM_HANDLES];
+static bool            _shmem_be_in_use[CONFIG_ALP_SDK_MAX_SHMEM_HANDLES];
 
-struct alp_shmem {
-    bool in_use;
-#if defined(CONFIG_ALP_SDK_MPROC)
-    void  *base;
-    size_t size;
-#endif
-};
+static struct mbox_be  _mbox_be_pool[CONFIG_ALP_SDK_MAX_MBOX_HANDLES];
+static bool            _mbox_be_in_use[CONFIG_ALP_SDK_MAX_MBOX_HANDLES];
 
-struct alp_mbox {
-    bool in_use;
-#if defined(CONFIG_ALP_SDK_MPROC)
-    const struct device *dev;
-    uint32_t             channel;
-    alp_mbox_msg_cb_t    cb;
-    void                *cb_user;
-#endif
-#if defined(CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING)
-    uint32_t             tx_sequence;  /* monotonic outbound counter */
-    uint8_t              tx_scratch[CONFIG_ALP_SDK_MPROC_FRAME_MAX_BYTES];
-#endif
-};
+static struct hwsem_be _hwsem_be_pool[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
+static bool            _hwsem_be_in_use[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
 
-struct alp_hwsem {
-    bool in_use;
-#if defined(CONFIG_ALP_SDK_MPROC)
-    uint32_t hwsem_id;
-    bool     held;
-#endif
-};
-
-#if defined(CONFIG_ALP_SDK_MPROC)
-static struct alp_shmem  g_shmem_pool[CONFIG_ALP_SDK_MAX_SHMEM_HANDLES];
-static struct alp_mbox   g_mbox_pool[CONFIG_ALP_SDK_MAX_MBOX_HANDLES];
-static struct alp_hwsem  g_hwsem_pool[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
-
-__attribute__((unused)) static struct alp_shmem *shmem_pool_acquire(void)
+static struct shmem_be *_shmem_be_alloc(void)
 {
-    for (size_t i = 0; i < ARRAY_SIZE(g_shmem_pool); ++i) {
-        if (!g_shmem_pool[i].in_use) {
-            memset(&g_shmem_pool[i], 0, sizeof(g_shmem_pool[i]));
-            g_shmem_pool[i].in_use = true;
-            return &g_shmem_pool[i];
+    for (size_t i = 0; i < ARRAY_SIZE(_shmem_be_pool); ++i) {
+        if (!_shmem_be_in_use[i]) {
+            memset(&_shmem_be_pool[i], 0, sizeof(_shmem_be_pool[i]));
+            _shmem_be_in_use[i] = true;
+            return &_shmem_be_pool[i];
         }
     }
     return NULL;
 }
 
-static struct alp_mbox *mbox_pool_acquire(void)
+static void _shmem_be_free(struct shmem_be *p)
 {
-    for (size_t i = 0; i < ARRAY_SIZE(g_mbox_pool); ++i) {
-        if (!g_mbox_pool[i].in_use) {
-            memset(&g_mbox_pool[i], 0, sizeof(g_mbox_pool[i]));
-            g_mbox_pool[i].in_use = true;
-            return &g_mbox_pool[i];
+    if (p == NULL) return;
+    for (size_t i = 0; i < ARRAY_SIZE(_shmem_be_pool); ++i) {
+        if (&_shmem_be_pool[i] == p) {
+            _shmem_be_in_use[i] = false;
+            return;
+        }
+    }
+}
+
+static struct mbox_be *_mbox_be_alloc(void)
+{
+    for (size_t i = 0; i < ARRAY_SIZE(_mbox_be_pool); ++i) {
+        if (!_mbox_be_in_use[i]) {
+            memset(&_mbox_be_pool[i], 0, sizeof(_mbox_be_pool[i]));
+            _mbox_be_in_use[i] = true;
+            return &_mbox_be_pool[i];
         }
     }
     return NULL;
 }
 
-static struct alp_hwsem *hwsem_pool_acquire(void)
+static void _mbox_be_free(struct mbox_be *p)
 {
-    for (size_t i = 0; i < ARRAY_SIZE(g_hwsem_pool); ++i) {
-        if (!g_hwsem_pool[i].in_use) {
-            memset(&g_hwsem_pool[i], 0, sizeof(g_hwsem_pool[i]));
-            g_hwsem_pool[i].in_use = true;
-            return &g_hwsem_pool[i];
+    if (p == NULL) return;
+    for (size_t i = 0; i < ARRAY_SIZE(_mbox_be_pool); ++i) {
+        if (&_mbox_be_pool[i] == p) {
+            _mbox_be_in_use[i] = false;
+            return;
+        }
+    }
+}
+
+static struct hwsem_be *_hwsem_be_alloc(void)
+{
+    for (size_t i = 0; i < ARRAY_SIZE(_hwsem_be_pool); ++i) {
+        if (!_hwsem_be_in_use[i]) {
+            memset(&_hwsem_be_pool[i], 0, sizeof(_hwsem_be_pool[i]));
+            _hwsem_be_in_use[i] = true;
+            return &_hwsem_be_pool[i];
         }
     }
     return NULL;
+}
+
+static void _hwsem_be_free(struct hwsem_be *p)
+{
+    if (p == NULL) return;
+    for (size_t i = 0; i < ARRAY_SIZE(_hwsem_be_pool); ++i) {
+        if (&_hwsem_be_pool[i] == p) {
+            _hwsem_be_in_use[i] = false;
+            return;
+        }
+    }
 }
 
 static alp_status_t errno_to_alp(int err)
@@ -214,13 +246,11 @@ static const struct alp_shmem_region alp_shmem_regions[] = {
 
 #endif /* CONFIG_ALP_SDK_MPROC */
 
-alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg)
+static alp_status_t z_shmem_open(const alp_shmem_config_t *cfg,
+                                 alp_shmem_backend_state_t *state,
+                                 alp_capabilities_t *caps_out)
 {
-    alp_z_clear_last_error();
-    if (cfg == NULL || cfg->name == NULL) {
-        alp_z_set_last_error(ALP_ERR_INVAL);
-        return NULL;
-    }
+    (void)caps_out;
 #if defined(CONFIG_ALP_SDK_MPROC)
     /* Resolve cfg->name against the DT-alias lookup table. */
     const struct alp_shmem_region *region = NULL;
@@ -230,43 +260,46 @@ alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg)
             break;
         }
     }
-    if (region == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOT_READY);
-        return NULL;
-    }
-    struct alp_shmem *s = shmem_pool_acquire();
-    if (s == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOMEM);
-        return NULL;
-    }
-    s->base = region->base;
-    s->size = region->size;
-    return s;
-#else
-    alp_z_set_last_error(ALP_ERR_NOSUPPORT);
-    return NULL;
-#endif
-}
-
-alp_status_t alp_shmem_view(alp_shmem_t *s, void **base_out, size_t *size_out)
-{
-    if (base_out != NULL) *base_out = NULL;
-    if (size_out != NULL) *size_out = 0;
-    if (s == NULL || !s->in_use) return ALP_ERR_NOT_READY;
-#if defined(CONFIG_ALP_SDK_MPROC)
-    if (base_out != NULL) *base_out = s->base;
-    if (size_out != NULL) *size_out = s->size;
+    if (region == NULL) return ALP_ERR_NOT_READY;
+    struct shmem_be *be = _shmem_be_alloc();
+    if (be == NULL) return ALP_ERR_NOMEM;
+    be->base = region->base;
+    be->size = region->size;
+    state->be_data = be;
     return ALP_OK;
 #else
+    (void)cfg;
+    (void)state;
     return ALP_ERR_NOSUPPORT;
 #endif
 }
 
-void alp_shmem_close(alp_shmem_t *s)
+static alp_status_t z_shmem_view(alp_shmem_backend_state_t *state,
+                                 void **base_out, size_t *size_out)
 {
-    if (s == NULL || !s->in_use) return;
 #if defined(CONFIG_ALP_SDK_MPROC)
-    s->in_use = false;
+    struct shmem_be *be = (struct shmem_be *)state->be_data;
+    if (be == NULL) return ALP_ERR_NOT_READY;
+    if (base_out != NULL) *base_out = be->base;
+    if (size_out != NULL) *size_out = be->size;
+    return ALP_OK;
+#else
+    (void)state;
+    (void)base_out;
+    (void)size_out;
+    return ALP_ERR_NOSUPPORT;
+#endif
+}
+
+static void z_shmem_close(alp_shmem_backend_state_t *state)
+{
+#if defined(CONFIG_ALP_SDK_MPROC)
+    struct shmem_be *be = (struct shmem_be *)state->be_data;
+    if (be == NULL) return;
+    _shmem_be_free(be);
+    state->be_data = NULL;
+#else
+    (void)state;
 #endif
 }
 
@@ -287,12 +320,12 @@ static const struct device *const alp_mbox_devs[] = {
     ALP_MBOX_DEV_OR_NULL(3),
 };
 
-static void mbox_rx_cb(const struct device *dev, mbox_channel_id_t channel_id, void *user_data,
-                       struct mbox_msg *data)
+static void mbox_rx_cb(const struct device *dev, mbox_channel_id_t channel_id,
+                       void *user_data, struct mbox_msg *data)
 {
     (void)dev;
-    struct alp_mbox *mb = (struct alp_mbox *)user_data;
-    if (mb == NULL || mb->cb == NULL) return;
+    struct mbox_be *be = (struct mbox_be *)user_data;
+    if (be == NULL || be->cb == NULL) return;
 
     const void *cb_data = data ? data->data : NULL;
     size_t      cb_len  = data ? data->size : 0;
@@ -317,71 +350,64 @@ static void mbox_rx_cb(const struct device *dev, mbox_channel_id_t channel_id, v
     }
 #endif
 
-    mb->cb((uint32_t)channel_id, cb_data, cb_len, mb->cb_user);
+    be->cb((uint32_t)channel_id, cb_data, cb_len, be->cb_user);
 }
 
 #endif /* CONFIG_ALP_SDK_MPROC */
 
-alp_mbox_t *alp_mbox_open(const alp_mbox_config_t *cfg)
+static alp_status_t z_mbox_open(const alp_mbox_config_t *cfg,
+                                alp_mbox_backend_state_t *state,
+                                alp_capabilities_t *caps_out)
 {
-    alp_z_clear_last_error();
-    if (cfg == NULL) {
-        alp_z_set_last_error(ALP_ERR_INVAL);
-        return NULL;
-    }
+    (void)caps_out;
 #if defined(CONFIG_ALP_SDK_MPROC)
-    if (cfg->channel >= ARRAY_SIZE(alp_mbox_devs)) {
-        alp_z_set_last_error(ALP_ERR_INVAL);
-        return NULL;
-    }
+    if (cfg->channel >= ARRAY_SIZE(alp_mbox_devs)) return ALP_ERR_INVAL;
     const struct device *dev = alp_mbox_devs[cfg->channel];
-    if (dev == NULL || !device_is_ready(dev)) {
-        alp_z_set_last_error(ALP_ERR_NOT_READY);
-        return NULL;
-    }
-    struct alp_mbox *mb = mbox_pool_acquire();
-    if (mb == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOMEM);
-        return NULL;
-    }
-    mb->dev     = dev;
-    mb->channel = cfg->channel;
-    return mb;
+    if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
+    struct mbox_be *be = _mbox_be_alloc();
+    if (be == NULL) return ALP_ERR_NOMEM;
+    be->dev     = dev;
+    be->channel = cfg->channel;
+    state->be_data = be;
+    return ALP_OK;
 #else
-    alp_z_set_last_error(ALP_ERR_NOSUPPORT);
-    return NULL;
+    (void)cfg;
+    (void)state;
+    return ALP_ERR_NOSUPPORT;
 #endif
 }
 
-alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len, uint32_t timeout_ms)
+static alp_status_t z_mbox_send(alp_mbox_backend_state_t *state,
+                                const void *data, size_t len,
+                                uint32_t timeout_ms)
 {
     (void)timeout_ms;
-    if (mb == NULL || !mb->in_use) return ALP_ERR_NOT_READY;
-    if (data == NULL && len > 0) return ALP_ERR_INVAL;
 #if defined(CONFIG_ALP_SDK_MPROC)
+    struct mbox_be *be = (struct mbox_be *)state->be_data;
+    if (be == NULL) return ALP_ERR_NOT_READY;
 #if defined(CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING)
     /* Encode into the per-handle scratch buffer.  Sequence is bumped
      * only on a successful encode + queue so failed sends don't leave
      * gaps the peer interprets as packet loss.  First successful send
      * carries sequence=1 (sequence==0 doubles as "no message yet" in
      * peer-side debugging). */
-    uint32_t     next_seq   = mb->tx_sequence + 1u;
+    uint32_t     next_seq   = be->tx_sequence + 1u;
     size_t       framed_len = 0;
     alp_status_t s          = alp_mproc_frame_encode(next_seq,
                                                      data, len,
-                                                     mb->tx_scratch,
-                                                     sizeof(mb->tx_scratch),
+                                                     be->tx_scratch,
+                                                     sizeof(be->tx_scratch),
                                                      &framed_len);
     if (s != ALP_OK) {
         return s;
     }
     struct mbox_msg msg = {
-        .data = mb->tx_scratch,
+        .data = be->tx_scratch,
         .size = framed_len,
     };
-    int rc = mbox_send(mb->dev, mb->channel, &msg);
+    int rc = mbox_send(be->dev, be->channel, &msg);
     if (rc == 0) {
-        mb->tx_sequence = next_seq;
+        be->tx_sequence = next_seq;
     }
     return errno_to_alp(rc);
 #else
@@ -389,37 +415,48 @@ alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len, uint32_
         .data = data,
         .size = len,
     };
-    return errno_to_alp(mbox_send(mb->dev, mb->channel, &msg));
+    return errno_to_alp(mbox_send(be->dev, be->channel, &msg));
 #endif
 #else
+    (void)state;
+    (void)data;
+    (void)len;
     return ALP_ERR_NOSUPPORT;
 #endif
 }
 
-alp_status_t alp_mbox_set_callback(alp_mbox_t *mb, alp_mbox_msg_cb_t cb, void *user)
+static alp_status_t z_mbox_set_callback(alp_mbox_backend_state_t *state,
+                                        alp_mbox_msg_cb_t cb, void *user)
 {
-    if (mb == NULL || !mb->in_use) return ALP_ERR_NOT_READY;
 #if defined(CONFIG_ALP_SDK_MPROC)
-    mb->cb      = cb;
-    mb->cb_user = user;
-    int err     = mbox_register_callback(mb->dev, mb->channel, cb ? mbox_rx_cb : NULL, mb);
+    struct mbox_be *be = (struct mbox_be *)state->be_data;
+    if (be == NULL) return ALP_ERR_NOT_READY;
+    be->cb      = cb;
+    be->cb_user = user;
+    int err     = mbox_register_callback(be->dev, be->channel,
+                                         cb ? mbox_rx_cb : NULL, be);
     if (err == 0) {
-        err = mbox_set_enabled(mb->dev, mb->channel, cb ? true : false);
+        err = mbox_set_enabled(be->dev, be->channel, cb ? true : false);
     }
     return errno_to_alp(err);
 #else
+    (void)state;
     (void)cb;
     (void)user;
     return ALP_ERR_NOSUPPORT;
 #endif
 }
 
-void alp_mbox_close(alp_mbox_t *mb)
+static void z_mbox_close(alp_mbox_backend_state_t *state)
 {
-    if (mb == NULL || !mb->in_use) return;
 #if defined(CONFIG_ALP_SDK_MPROC)
-    (void)mbox_set_enabled(mb->dev, mb->channel, false);
-    mb->in_use = false;
+    struct mbox_be *be = (struct mbox_be *)state->be_data;
+    if (be == NULL) return;
+    (void)mbox_set_enabled(be->dev, be->channel, false);
+    _mbox_be_free(be);
+    state->be_data = NULL;
+#else
+    (void)state;
 #endif
 }
 
@@ -461,85 +498,123 @@ static void hwsem_kobjs_init_once(void)
 }
 #endif
 
-alp_hwsem_t *alp_hwsem_open(uint32_t hwsem_id)
+static alp_status_t z_hwsem_open(uint32_t hwsem_id,
+                                 alp_hwsem_backend_state_t *state,
+                                 alp_capabilities_t *caps_out)
 {
-    alp_z_clear_last_error();
+    (void)caps_out;
 #if defined(CONFIG_ALP_SDK_MPROC)
     if (hwsem_id >= CONFIG_ALP_SDK_MPROC_HWSEM_COUNT) {
-        alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
-        return NULL;
+        return ALP_ERR_OUT_OF_RANGE;
     }
     hwsem_kobjs_init_once();
-    struct alp_hwsem *s = hwsem_pool_acquire();
-    if (s == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOMEM);
-        return NULL;
-    }
-    s->hwsem_id = hwsem_id;
-    s->held     = false;
-    return s;
-#else
-    (void)hwsem_id;
-    alp_z_set_last_error(ALP_ERR_NOSUPPORT);
-    return NULL;
-#endif
-}
-
-alp_status_t alp_hwsem_try_lock(alp_hwsem_t *sem)
-{
-    if (sem == NULL || !sem->in_use) return ALP_ERR_NOT_READY;
-#if defined(CONFIG_ALP_SDK_MPROC)
-    /* k_sem_take with K_NO_WAIT returns -EBUSY when the count is 0. */
-    int rc = k_sem_take(&alp_hwsem_kobjs[sem->hwsem_id], K_NO_WAIT);
-    if (rc == -EBUSY) return ALP_ERR_BUSY;
-    if (rc != 0)      return errno_to_alp(rc);
-    sem->held = true;
+    struct hwsem_be *be = _hwsem_be_alloc();
+    if (be == NULL) return ALP_ERR_NOMEM;
+    be->hwsem_id = hwsem_id;
+    be->held     = false;
+    state->be_data = be;
     return ALP_OK;
 #else
+    (void)hwsem_id;
+    (void)state;
     return ALP_ERR_NOSUPPORT;
 #endif
 }
 
-alp_status_t alp_hwsem_lock(alp_hwsem_t *sem, uint32_t timeout_ms)
+static alp_status_t z_hwsem_try_lock(alp_hwsem_backend_state_t *state)
 {
-    if (sem == NULL || !sem->in_use) return ALP_ERR_NOT_READY;
 #if defined(CONFIG_ALP_SDK_MPROC)
-    k_timeout_t to = (timeout_ms == UINT32_MAX)
-        ? K_FOREVER : K_MSEC(timeout_ms);
-    int rc = k_sem_take(&alp_hwsem_kobjs[sem->hwsem_id], to);
-    if (rc == -EAGAIN) return ALP_ERR_TIMEOUT;
-    if (rc != 0)       return errno_to_alp(rc);
-    sem->held = true;
+    struct hwsem_be *be = (struct hwsem_be *)state->be_data;
+    if (be == NULL) return ALP_ERR_NOT_READY;
+    /* k_sem_take with K_NO_WAIT returns -EBUSY when the count is 0. */
+    int rc = k_sem_take(&alp_hwsem_kobjs[be->hwsem_id], K_NO_WAIT);
+    if (rc == -EBUSY) return ALP_ERR_BUSY;
+    if (rc != 0)      return errno_to_alp(rc);
+    be->held = true;
     return ALP_OK;
 #else
+    (void)state;
+    return ALP_ERR_NOSUPPORT;
+#endif
+}
+
+static alp_status_t z_hwsem_lock(alp_hwsem_backend_state_t *state,
+                                 uint32_t timeout_ms)
+{
+#if defined(CONFIG_ALP_SDK_MPROC)
+    struct hwsem_be *be = (struct hwsem_be *)state->be_data;
+    if (be == NULL) return ALP_ERR_NOT_READY;
+    k_timeout_t to = (timeout_ms == UINT32_MAX)
+        ? K_FOREVER : K_MSEC(timeout_ms);
+    int rc = k_sem_take(&alp_hwsem_kobjs[be->hwsem_id], to);
+    if (rc == -EAGAIN) return ALP_ERR_TIMEOUT;
+    if (rc != 0)       return errno_to_alp(rc);
+    be->held = true;
+    return ALP_OK;
+#else
+    (void)state;
     (void)timeout_ms;
     return ALP_ERR_NOSUPPORT;
 #endif
 }
 
-alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem)
+static alp_status_t z_hwsem_unlock(alp_hwsem_backend_state_t *state)
 {
-    if (sem == NULL || !sem->in_use) return ALP_ERR_NOT_READY;
 #if defined(CONFIG_ALP_SDK_MPROC)
-    if (!sem->held) return ALP_ERR_INVAL;
-    k_sem_give(&alp_hwsem_kobjs[sem->hwsem_id]);
-    sem->held = false;
+    struct hwsem_be *be = (struct hwsem_be *)state->be_data;
+    if (be == NULL) return ALP_ERR_NOT_READY;
+    if (!be->held) return ALP_ERR_INVAL;
+    k_sem_give(&alp_hwsem_kobjs[be->hwsem_id]);
+    be->held = false;
     return ALP_OK;
 #else
+    (void)state;
     return ALP_ERR_NOSUPPORT;
 #endif
 }
 
-void alp_hwsem_close(alp_hwsem_t *sem)
+static void z_hwsem_close(alp_hwsem_backend_state_t *state)
 {
-    if (sem == NULL || !sem->in_use) return;
 #if defined(CONFIG_ALP_SDK_MPROC)
+    struct hwsem_be *be = (struct hwsem_be *)state->be_data;
+    if (be == NULL) return;
     /* If still held when closed, give the kobj back so the next opener
      * can take it -- not the caller's bug to leak the lock. */
-    if (sem->held) {
-        k_sem_give(&alp_hwsem_kobjs[sem->hwsem_id]);
-        sem->held = false;
+    if (be->held) {
+        k_sem_give(&alp_hwsem_kobjs[be->hwsem_id]);
+        be->held = false;
     }
-    sem->in_use = false;
+    _hwsem_be_free(be);
+    state->be_data = NULL;
+#else
+    (void)state;
 #endif
 }
+
+/* ------------------------------------------------------------------ */
+/* Registration                                                        */
+/* ------------------------------------------------------------------ */
+
+static const alp_mproc_ops_t _ops = {
+    .shmem_open        = z_shmem_open,
+    .shmem_view        = z_shmem_view,
+    .shmem_close       = z_shmem_close,
+    .mbox_open         = z_mbox_open,
+    .mbox_send         = z_mbox_send,
+    .mbox_set_callback = z_mbox_set_callback,
+    .mbox_close        = z_mbox_close,
+    .hwsem_open        = z_hwsem_open,
+    .hwsem_try_lock    = z_hwsem_try_lock,
+    .hwsem_lock        = z_hwsem_lock,
+    .hwsem_unlock      = z_hwsem_unlock,
+    .hwsem_close       = z_hwsem_close,
+};
+
+ALP_BACKEND_REGISTER(mproc, zephyr_drv, {
+    .silicon_ref = "*",
+    .vendor      = "zephyr",
+    .base_caps   = 0u,
+    .priority    = 100,
+    .ops         = &_ops,
+    .probe       = NULL,
+});

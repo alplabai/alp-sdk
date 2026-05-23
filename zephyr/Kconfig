@@ -859,11 +859,21 @@ config ALP_SDK_MPROC
 	default y if MBOX
 	depends on MBOX
 	help
-	  Wires the alp_mbox_* / alp_shmem_* / alp_hwsem_*
-	  primitives onto the Zephyr backend.  Per-surface state:
+	  Gates the real Zephyr-side body inside
+	  src/backends/mproc/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  primitive's I/O op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4c the dispatcher (src/mproc_dispatch.c) and its
+	  Zephyr backend (src/backends/mproc/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_MPROC_SW_FALLBACK for the software-backend opt-in.
+
+	  Per-surface state when ON:
 
 	    - mbox: Zephyr MBOX driver class (v0.4).  Alif's MHU is
-	      registered as a Zephyr mbox device on AEN; the wrapper
+	      registered as a Zephyr mbox device on AEN; the backend
 	      resolves alp_mbox_config.channel through the alp-mboxN
 	      DT aliases.
 	    - shmem: DT-anchored carve-outs (v0.7, commit 2e9deec).
@@ -878,6 +888,20 @@ config ALP_SDK_MPROC
 
 	  Yocto + GD32 backends still return NULL / NOSUPPORT for
 	  shmem + hwsem; Yocto carries the mbox shim only.
+
+config ALP_SDK_MPROC_SW_FALLBACK
+	bool "Software mproc fallback (no-op stubs)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op mproc backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test only -- no real
+	  MHU / shared-memory carve-out / hwsem block exists, so
+	  shmem_open / mbox_open / hwsem_open succeed silently,
+	  hwsem_try_lock / lock / unlock are no-op ALP_OK, and
+	  shmem_view / mbox_send / mbox_set_callback return
+	  ALP_ERR_NOT_IMPLEMENTED.
 
 config ALP_SDK_MPROC_NANOPB_FRAMING
 	bool "Frame alp_mbox_send payloads through the IPC envelope"
@@ -915,29 +939,61 @@ config ALP_SDK_RPC
 	default y if IPC_SERVICE_BACKEND_RPMSG
 	depends on IPC_SERVICE_BACKEND_RPMSG && OPENAMP
 	help
-	  Wires the alp_rpc_open / alp_rpc_subscribe / alp_rpc_send /
-	  alp_rpc_call surface onto Zephyr's subsys/ipc/ipc_service
-	  with the rpmsg backend.  The orchestrator (scripts/alp_orchestrate.py)
-	  generates <alp/system_ipc.h> + a per-board DT overlay under
-	  zephyr/boards/<sku>_<core>.overlay that wires up the carve-out,
-	  mailbox channel, and chosen { zephyr,ipc } node so customer
-	  code calls alp_rpc_open(&(alp_rpc_config_t){...}) without
-	  knowing the address layout.
+	  Gates the real Zephyr ipc_service / RPMsg body inside
+	  src/backends/rpc/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  channel-side op returns ALP_ERR_NOSUPPORT.
 
-	  Off-builds compile rpc_zephyr.c to NOSUPPORT stubs so apps
-	  that don't opt in still link cleanly.  Heterogeneous projects
+	  After Slice 4c the dispatcher (src/rpc_dispatch.c) and its
+	  Zephyr backend (src/backends/rpc/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_RPC_SW_FALLBACK for the software-backend opt-in.
+
+	  The orchestrator (scripts/alp_orchestrate.py) generates
+	  <alp/system_ipc.h> + a per-board DT overlay under
+	  zephyr/boards/<sku>_<core>.overlay that wires up the
+	  carve-out, mailbox channel, and chosen { zephyr,ipc } node
+	  so customer code calls alp_rpc_open(&(alp_rpc_config_t){...})
+	  without knowing the address layout.  Heterogeneous projects
 	  (board.yaml v2 with an ipc[] block) flip this on automatically
 	  via the orchestrator-emitted per-core alp.conf.
 
+config ALP_SDK_RPC_SW_FALLBACK
+	bool "Software RPC fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op RPC backend that registers as a wildcard at
+	  priority 0.  For native_sim build / test only -- no real
+	  OpenAMP / RPMsg transport exists, so open / subscribe /
+	  unsubscribe / send all succeed silently and call returns
+	  ALP_ERR_TIMEOUT immediately (mirrors the documented header
+	  contract for a peer that fails to respond).
+
+config ALP_SDK_MAX_RPC_HANDLES
+	int "Maximum concurrent alp_rpc_channel_t handles (dispatcher pool)"
+	default 2
+	help
+	  Sizes the dispatcher's per-handle pool in src/rpc_dispatch.c.
+	  Default 2 covers the typical "control + telemetry" channel
+	  pair an M-class slice opens; raise for apps that segment more
+	  aggressively.  Separate from ALP_SDK_RPC_MAX_CHANNELS, which
+	  sizes the Zephyr backend's internal struct rpc_be pool (must
+	  be >= this value).
+
 config ALP_SDK_RPC_MAX_CHANNELS
-	int "Maximum concurrent alp_rpc_channel_t handles"
+	int "Maximum struct rpc_be slots in the Zephyr backend pool"
 	default 4
 	depends on ALP_SDK_RPC
 	help
-	  Each handle reserves one ipc_service endpoint + a method-
-	  subscribe table.  4 is plenty for the typical "control +
-	  telemetry" channel pair an M-class slice opens; raise for
-	  apps that segment more aggressively.
+	  Each backend slot reserves one ipc_service endpoint + a
+	  method-subscribe table + the per-channel TX scratch and
+	  sync-call slot.  4 covers the dispatcher's default pool of
+	  2 with comfortable headroom for transient reopen flows;
+	  raise alongside ALP_SDK_MAX_RPC_HANDLES if more handles are
+	  held concurrently.
 
 config ALP_SDK_RPC_SUBS_PER_CHANNEL
 	int "Maximum alp_rpc_subscribe registrations per channel"

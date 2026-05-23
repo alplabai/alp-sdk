@@ -72,6 +72,7 @@
 #include <stdbool.h>
 
 #include "alp/peripheral.h"
+#include "alp/cap_instance.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -177,6 +178,14 @@ alp_status_t alp_shmem_view(alp_shmem_t *s, void **base_out, size_t *size_out);
 /** @brief Release the region handle.  Doesn't free underlying memory. */
 void         alp_shmem_close(alp_shmem_t *s);
 
+/**
+ * @brief Query the capabilities of an opened shared-memory handle.
+ *
+ * @param[in] s  Handle from @ref alp_shmem_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p s is NULL.
+ */
+const alp_capabilities_t *alp_shmem_capabilities(const alp_shmem_t *s);
+
 /* ------------------------------------------------------------------ */
 /* Mailbox                                                             */
 /* ------------------------------------------------------------------ */
@@ -236,6 +245,14 @@ alp_status_t alp_mbox_set_callback(alp_mbox_t *mb,
 
 /** @brief Release the channel handle.  In-flight messages may be dropped. */
 void         alp_mbox_close(alp_mbox_t *mb);
+
+/**
+ * @brief Query the capabilities of an opened mailbox channel handle.
+ *
+ * @param[in] mb  Handle from @ref alp_mbox_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p mb is NULL.
+ */
+const alp_capabilities_t *alp_mbox_capabilities(const alp_mbox_t *mb);
 
 /* ------------------------------------------------------------------ */
 /* Hardware semaphore                                                  */
@@ -313,6 +330,14 @@ alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem);
  *       safety net, not a substitute.
  */
 void         alp_hwsem_close(alp_hwsem_t *sem);
+
+/**
+ * @brief Query the capabilities of an opened hardware-semaphore handle.
+ *
+ * @param[in] sem  Handle from @ref alp_hwsem_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p sem is NULL.
+ */
+const alp_capabilities_t *alp_hwsem_capabilities(const alp_hwsem_t *sem);
 
 #ifdef __cplusplus
 }  /* extern "C" */
