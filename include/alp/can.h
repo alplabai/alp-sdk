@@ -194,6 +194,14 @@ alp_status_t alp_can_remove_filter(alp_can_t *can, int32_t filter_id);
  */
 void         alp_can_close(alp_can_t *can);
 
+/**
+ * @brief Query the capabilities of an opened CAN handle.
+ *
+ * @param can  Handle from @ref alp_can_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p can is NULL.
+ */
+const alp_capabilities_t *alp_can_capabilities(const alp_can_t *can);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

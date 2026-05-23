@@ -94,3 +94,8 @@ venv/
 # These are deliberately uncommitted -- they capture run state for
 # the next day, not durable documentation.
 notes/
+
+# Python packaging artefacts
+*.egg-info/
+dist/
+*.dist-info/

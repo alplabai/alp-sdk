@@ -1,0 +1,64 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Internal ABI between alp_gpio dispatcher and per-backend
+ * implementations.  NOT a public header.
+ */
+
+#ifndef ALP_BACKENDS_GPIO_OPS_H
+#define ALP_BACKENDS_GPIO_OPS_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <zephyr/device.h>
+
+#include <alp/backend.h>
+#include <alp/cap_instance.h>
+#include <alp/peripheral.h>
+
+typedef struct alp_gpio_ops alp_gpio_ops_t;
+
+typedef struct alp_gpio_backend_state {
+    const struct device     *dev;        /* Zephyr backend device pointer */
+    uint32_t                 pin_id;
+    void                    *be_data;
+    const alp_gpio_ops_t    *ops;
+} alp_gpio_backend_state_t;
+
+struct alp_gpio_ops {
+    alp_status_t (*open)(uint32_t pin_id,
+                         alp_gpio_backend_state_t *state,
+                         alp_capabilities_t *caps_out);
+    alp_status_t (*configure)(alp_gpio_backend_state_t *state,
+                              alp_gpio_dir_t dir,
+                              alp_gpio_pull_t pull);
+    alp_status_t (*write)(alp_gpio_backend_state_t *state, bool level);
+    alp_status_t (*read)(alp_gpio_backend_state_t *state, bool *level);
+    alp_status_t (*irq_enable)(alp_gpio_backend_state_t *state,
+                               alp_gpio_edge_t edge,
+                               alp_gpio_cb_t cb,
+                               void *user);
+    alp_status_t (*irq_disable)(alp_gpio_backend_state_t *state);
+    void         (*close)(alp_gpio_backend_state_t *state);
+};
+
+/*
+ * Portable handle layout.  The user-facing edge / cb / cb_user fields
+ * live here so non-Zephyr backends can drive them without dragging in
+ * <zephyr/drivers/gpio.h>.  Zephyr-specific glue (struct gpio_callback)
+ * lives in a sidecar inside src/backends/gpio/zephyr_drv.c.
+ */
+struct alp_gpio {
+    alp_gpio_backend_state_t  state;
+    const alp_backend_t      *backend;
+    alp_capabilities_t        cached_caps;
+    bool                      in_use;
+    alp_gpio_dir_t            dir;
+    alp_gpio_pull_t           pull;
+    alp_gpio_edge_t           edge;
+    alp_gpio_cb_t             cb;
+    void                     *cb_user;
+};
+
+#endif /* ALP_BACKENDS_GPIO_OPS_H */

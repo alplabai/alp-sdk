@@ -110,6 +110,10 @@
     },
     "alp/audio.h": {
       "functions": {
+        "alp_audio_in_capabilities": {
+          "hash": "f2f393b94963d89e",
+          "signature": "const alp_capabilities_t * alp_audio_in_capabilities(const alp_audio_in_t *in);"
+        },
         "alp_audio_in_close": {
           "hash": "dac60281393e8fc5",
           "signature": "void alp_audio_in_close(alp_audio_in_t *in);"
@@ -129,6 +133,10 @@
         "alp_audio_in_stop": {
           "hash": "8c939589c1ba114d",
           "signature": "alp_status_t alp_audio_in_stop(alp_audio_in_t *in);"
+        },
+        "alp_audio_out_capabilities": {
+          "hash": "7e26dc7ad4e1058e",
+          "signature": "const alp_capabilities_t * alp_audio_out_capabilities(const alp_audio_out_t *out);"
         },
         "alp_audio_out_close": {
           "hash": "9bf8d3aa01bec9b9",
@@ -220,6 +228,10 @@
         "alp_ble_advertise_stop": {
           "hash": "6311564f47855586",
           "signature": "alp_status_t alp_ble_advertise_stop(alp_ble_t *ble);"
+        },
+        "alp_ble_capabilities": {
+          "hash": "8ea01b27a277fe1f",
+          "signature": "const alp_capabilities_t * alp_ble_capabilities(const alp_ble_t *ble);"
         },
         "alp_ble_close": {
           "hash": "5f8be9db14a7abbd",
@@ -891,6 +903,10 @@
           "hash": "8c22c431a6676e12",
           "signature": "alp_status_t alp_can_add_filter(alp_can_t *can, const alp_can_filter_t *filter, alp_can_rx_cb_t cb, void *user, int32_t *filter_id_out);"
         },
+        "alp_can_capabilities": {
+          "hash": "668144a539eb633b",
+          "signature": "const alp_capabilities_t * alp_can_capabilities(const alp_can_t *can);"
+        },
         "alp_can_close": {
           "hash": "b8c8447bc94fa110",
           "signature": "void alp_can_close(alp_can_t *can);"
@@ -950,9 +966,23 @@
       }
     },
     "alp/cap.h": {
-      "functions": {},
+      "functions": {
+        "alp_cap_name": {
+          "hash": "4eafdeef47a09347",
+          "signature": "const char * alp_cap_name(alp_cap_id_t cap);"
+        },
+        "alp_has": {
+          "hash": "0ec2b2c9cee654f4",
+          "signature": "bool alp_has(alp_cap_id_t cap);"
+        }
+      },
       "macros": {},
-      "typedefs": {}
+      "typedefs": {
+        "alp_cap_id_t": {
+          "definition": "typedef enum { ALP_CAP_ID_HW_I2C, ALP_CAP_ID_HW_SPI, ALP_CAP_ID_HW_UART, ALP_CAP_ID_HW_I2S, ALP_CAP_ID_HW_PDM, ALP_CAP_ID_HW_ADC, ALP_CAP_ID_HW_DAC, ALP_CAP_ID_HW_CAN, ALP_CAP_ID_HW_CAN_FD, ALP_CAP_ID_HW_RTC, ALP_CAP_ID_HW_WDT, ALP_CAP_ID_HW_QENC, ALP_CAP_ID_HW_TIMER, ALP_CAP_ID_HW_PWM, ALP_CAP_ID_HW_ETHERNET, ALP_CAP_ID_HW_USB, ALP_CAP_ID_HW_MIPI_CSI, ALP_CAP_ID_HW_MIPI_DSI, ALP_CAP_ID_XSPI_DMA, ALP_CAP_ID_HEXSPI_DMA, ALP_CAP_ID_EMMC_DMA, ALP_CAP_ID_QUADSPI_DMA, ALP_CAP_ID_NPU_DRPAI, ALP_CAP_ID_HELIUM_MVE, ALP_CAP_ID_NEON, ALP_CAP_ID_GPU2D, ALP_CAP_ID_DAVE2D, ALP_CAP_ID_CRYPTOCELL, ALP_CAP_ID_INLINE_AES, ALP_CAP_ID_CAU, ALP_CAP_ID_DMA2D, ALP_CAP_ID_COUNT } alp_cap_id_t;",
+          "hash": "b5f55c03569ac7e0"
+        }
+      }
     },
     "alp/cap_instance.h": {
       "functions": {
@@ -5104,6 +5134,10 @@
           "hash": "432318c7c8b84354",
           "signature": "alp_status_t alp_counter_cancel_alarm(alp_counter_t *counter);"
         },
+        "alp_counter_capabilities": {
+          "hash": "96c1c998e1aaf892",
+          "signature": "const alp_capabilities_t * alp_counter_capabilities(const alp_counter_t *counter);"
+        },
         "alp_counter_close": {
           "hash": "90a56336db669504",
           "signature": "void alp_counter_close(alp_counter_t *counter);"
@@ -5131,6 +5165,10 @@
         "alp_counter_us_to_ticks": {
           "hash": "5c3a090883be43f4",
           "signature": "alp_status_t alp_counter_us_to_ticks(alp_counter_t *counter, uint32_t us, uint32_t *ticks_out);"
+        },
+        "alp_qenc_capabilities": {
+          "hash": "64c55fe2dd9df388",
+          "signature": "const alp_capabilities_t * alp_qenc_capabilities(const alp_qenc_t *enc);"
         },
         "alp_qenc_close": {
           "hash": "a06b2ff8ad940293",
@@ -5225,6 +5263,10 @@
         "alp_dsp_chain_apply_samples": {
           "hash": "0cf56ad70c03aad2",
           "signature": "alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain, const int16_t *in_mv, size_t in_n, int16_t *out_mv, size_t out_cap, size_t *got);"
+        },
+        "alp_dsp_chain_capabilities": {
+          "hash": "48b0fe36389f6123",
+          "signature": "const alp_capabilities_t * alp_dsp_chain_capabilities(const alp_dsp_chain_t *chain);"
         },
         "alp_dsp_chain_close": {
           "hash": "78d18aa7552747a3",
@@ -6400,6 +6442,94 @@
         }
       }
     },
+    "alp/ext/alif/storage.h": {
+      "functions": {
+        "alp_alif_storage_secaes_get_status": {
+          "hash": "23e2e91e6c1ac3fc",
+          "signature": "alp_status_t alp_alif_storage_secaes_get_status(alp_storage_t *s, uint32_t *status_out);"
+        },
+        "alp_alif_storage_secaes_key_provision": {
+          "hash": "38cbae4245c0cd8a",
+          "signature": "alp_status_t alp_alif_storage_secaes_key_provision(alp_storage_t *s, const uint8_t *key, uint8_t key_bytes);"
+        }
+      },
+      "macros": {
+        "ALP_EXT_ALIF_STORAGE_AVAILABLE": {
+          "hash": "cc6c34571d39d0d3",
+          "value": "1"
+        }
+      },
+      "typedefs": {
+        "alp_alif_storage_secaes_status_t": {
+          "definition": "typedef enum { ALP_ALIF_STORAGE_SECAES_STATUS_IDLE = 0u, ALP_ALIF_STORAGE_SECAES_STATUS_ARMED = 1u << 0, ALP_ALIF_STORAGE_SECAES_STATUS_ENGAGED = 1u << 1, ALP_ALIF_STORAGE_SECAES_STATUS_KEY_LOAD_ERR = 1u << 2, ALP_ALIF_STORAGE_SECAES_STATUS_BUS_ERR = 1u << 3, } alp_alif_storage_secaes_status_t;",
+          "hash": "23a43a1151fc6b0f"
+        }
+      }
+    },
+    "alp/ext/deepx/inference.h": {
+      "functions": {
+        "alp_deepx_inference_dram_tile_reserve": {
+          "hash": "5a70bdc2c7523a54",
+          "signature": "alp_status_t alp_deepx_inference_dram_tile_reserve(alp_inference_t *inf, uint32_t tile_bytes);"
+        },
+        "alp_deepx_inference_get_status": {
+          "hash": "b461f6c819b47450",
+          "signature": "alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, uint32_t *status_out);"
+        },
+        "alp_deepx_inference_slot_pin": {
+          "hash": "88c845fb54e20f21",
+          "signature": "alp_status_t alp_deepx_inference_slot_pin(alp_inference_t *inf, alp_deepx_inference_slot_t slot);"
+        }
+      },
+      "macros": {
+        "ALP_DEEPX_INFERENCE_SLOT_COUNT": {
+          "hash": "9ab5d9f7dd966afd",
+          "value": "4u"
+        },
+        "ALP_EXT_DEEPX_INFERENCE_AVAILABLE": {
+          "hash": "2e12530fe6ec1333",
+          "value": "1"
+        }
+      },
+      "typedefs": {
+        "alp_deepx_inference_slot_t": {
+          "definition": "typedef enum { ALP_DEEPX_INFERENCE_SLOT_0 = 0u, ALP_DEEPX_INFERENCE_SLOT_1 = 1u, ALP_DEEPX_INFERENCE_SLOT_2 = 2u, ALP_DEEPX_INFERENCE_SLOT_3 = 3u, } alp_deepx_inference_slot_t;",
+          "hash": "7ab2bf9f10d84737"
+        },
+        "alp_deepx_inference_status_t": {
+          "definition": "typedef enum { ALP_DEEPX_INFERENCE_STATUS_IDLE = 0u, ALP_DEEPX_INFERENCE_STATUS_ARMED = 1u << 0, ALP_DEEPX_INFERENCE_STATUS_RUNNING = 1u << 1, ALP_DEEPX_INFERENCE_STATUS_DONE = 1u << 2, ALP_DEEPX_INFERENCE_STATUS_TIMEOUT = 1u << 3, ALP_DEEPX_INFERENCE_STATUS_TRANSPORT_ERR = 1u << 4, } alp_deepx_inference_status_t;",
+          "hash": "9eb7eaeaca03723c"
+        }
+      }
+    },
+    "alp/ext/nxp/storage.h": {
+      "functions": {
+        "alp_nxp_storage_otfad_provision": {
+          "hash": "fba3b8139815badd",
+          "signature": "alp_status_t alp_nxp_storage_otfad_provision(alp_storage_t *s, uint8_t window_id, const uint8_t *key, const uint8_t *counter);"
+        },
+        "alp_nxp_storage_otfad_set_window": {
+          "hash": "bd5a1b3e18f2f5d3",
+          "signature": "alp_status_t alp_nxp_storage_otfad_set_window(alp_storage_t *s, uint8_t window_id, uint32_t start_addr, uint32_t end_addr);"
+        }
+      },
+      "macros": {
+        "ALP_EXT_NXP_STORAGE_AVAILABLE": {
+          "hash": "a814acd2b79543a7",
+          "value": "1"
+        },
+        "ALP_NXP_STORAGE_OTFAD_WINDOW_COUNT": {
+          "hash": "9189b764c02da9b5",
+          "value": "4u"
+        }
+      },
+      "typedefs": {
+        "alp_nxp_storage_otfad_slot_t": {
+          "definition": "typedef enum { ALP_NXP_STORAGE_OTFAD_SLOT_0 = 0, ALP_NXP_STORAGE_OTFAD_SLOT_1 = 1, ALP_NXP_STORAGE_OTFAD_SLOT_2 = 2, ALP_NXP_STORAGE_OTFAD_SLOT_3 = 3, } alp_nxp_storage_otfad_slot_t;",
+          "hash": "c98f98b2f8d1b7d9"
+        }
+      }
+    },
     "alp/ext/renesas/camera.h": {
       "functions": {
         "alp_renesas_camera_isp_3a_window_set": {
@@ -6433,6 +6563,58 @@
         "x": {
           "definition": "typedef struct { uint16_t x;",
           "hash": "8c7531914be98d83"
+        }
+      }
+    },
+    "alp/ext/renesas/inference.h": {
+      "functions": {
+        "alp_renesas_inference_ai_sram_reserve": {
+          "hash": "29a47273e569d8c8",
+          "signature": "alp_status_t alp_renesas_inference_ai_sram_reserve(alp_inference_t *inf, uint32_t reserve_bytes);"
+        },
+        "alp_renesas_inference_get_status": {
+          "hash": "981843e3a902e2fa",
+          "signature": "alp_status_t alp_renesas_inference_get_status(alp_inference_t *inf, uint32_t *status_out);"
+        },
+        "alp_renesas_inference_pipeline_stage_pin": {
+          "hash": "4e40ace40cb7887e",
+          "signature": "alp_status_t alp_renesas_inference_pipeline_stage_pin(alp_inference_t *inf, uint32_t layer_index, alp_renesas_inference_stage_t stage);"
+        }
+      },
+      "macros": {
+        "ALP_EXT_RENESAS_INFERENCE_AVAILABLE": {
+          "hash": "8f559ca5adf1d8f5",
+          "value": "1"
+        }
+      },
+      "typedefs": {
+        "alp_renesas_inference_stage_t": {
+          "definition": "typedef enum { ALP_RENESAS_INFERENCE_STAGE_DRP = 0u, ALP_RENESAS_INFERENCE_STAGE_AI_MAC = 1u, ALP_RENESAS_INFERENCE_STAGE_AI_SRAM = 2u, ALP_RENESAS_INFERENCE_STAGE_DMA = 3u, } alp_renesas_inference_stage_t;",
+          "hash": "fe9221bcf0ac0f7d"
+        },
+        "alp_renesas_inference_status_t": {
+          "definition": "typedef enum { ALP_RENESAS_INFERENCE_STATUS_IDLE = 0u, ALP_RENESAS_INFERENCE_STATUS_ARMED = 1u << 0, ALP_RENESAS_INFERENCE_STATUS_RUNNING = 1u << 1, ALP_RENESAS_INFERENCE_STATUS_DONE = 1u << 2, ALP_RENESAS_INFERENCE_STATUS_TIMEOUT = 1u << 3, ALP_RENESAS_INFERENCE_STATUS_BUS_ERR = 1u << 4, } alp_renesas_inference_status_t;",
+          "hash": "2ea90804b3cd9101"
+        }
+      }
+    },
+    "alp/ext/renesas/power.h": {
+      "functions": {
+        "alp_renesas_power_supervisor_mode_set": {
+          "hash": "948389e3245ff208",
+          "signature": "alp_status_t alp_renesas_power_supervisor_mode_set(alp_power_t *handle, alp_renesas_power_supervisor_mode_t supervisor_mode);"
+        }
+      },
+      "macros": {
+        "ALP_EXT_RENESAS_POWER_AVAILABLE": {
+          "hash": "25e9777e156e70b1",
+          "value": "1"
+        }
+      },
+      "typedefs": {
+        "alp_renesas_power_supervisor_mode_t": {
+          "definition": "typedef uint8_t alp_renesas_power_supervisor_mode_t;",
+          "hash": "d917d3da9278a34a"
         }
       }
     },
@@ -6543,6 +6725,10 @@
     },
     "alp/i2s.h": {
       "functions": {
+        "alp_i2s_capabilities": {
+          "hash": "be6df5c993b1d0da",
+          "signature": "const alp_capabilities_t * alp_i2s_capabilities(const alp_i2s_t *i2s);"
+        },
         "alp_i2s_close": {
           "hash": "95e26939ec2f8b35",
           "signature": "void alp_i2s_close(alp_i2s_t *i2s);"
@@ -6590,6 +6776,10 @@
     },
     "alp/inference.h": {
       "functions": {
+        "alp_inference_capabilities": {
+          "hash": "281799219f19c29b",
+          "signature": "const alp_capabilities_t * alp_inference_capabilities(const alp_inference_t *inf);"
+        },
         "alp_inference_close": {
           "hash": "476fc2ef13a362ad",
           "signature": "void alp_inference_close(alp_inference_t *inf);"
@@ -6649,6 +6839,10 @@
     },
     "alp/iot.h": {
       "functions": {
+        "alp_mqtt_capabilities": {
+          "hash": "0a2c8f40a25a0f4a",
+          "signature": "const alp_capabilities_t * alp_mqtt_capabilities(const alp_mqtt_t *m);"
+        },
         "alp_mqtt_close": {
           "hash": "0ac8ff8b3605fe22",
           "signature": "void alp_mqtt_close(alp_mqtt_t *m);"
@@ -6672,6 +6866,10 @@
         "alp_mqtt_subscribe": {
           "hash": "b8479a63c6a41f12",
           "signature": "alp_status_t alp_mqtt_subscribe(alp_mqtt_t *m, const char *topic_filter, alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user);"
+        },
+        "alp_wifi_capabilities": {
+          "hash": "928cc4fd382e7d3d",
+          "signature": "const alp_capabilities_t * alp_wifi_capabilities(const alp_wifi_t *w);"
         },
         "alp_wifi_close": {
           "hash": "54a8c1b1f5700c8d",
@@ -6724,6 +6922,10 @@
     },
     "alp/mproc.h": {
       "functions": {
+        "alp_hwsem_capabilities": {
+          "hash": "37a6a928a5906e7b",
+          "signature": "const alp_capabilities_t * alp_hwsem_capabilities(const alp_hwsem_t *sem);"
+        },
         "alp_hwsem_close": {
           "hash": "47518fc58aae0b5f",
           "signature": "void alp_hwsem_close(alp_hwsem_t *sem);"
@@ -6744,6 +6946,10 @@
           "hash": "487aa9bd01cd2ae9",
           "signature": "alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem);"
         },
+        "alp_mbox_capabilities": {
+          "hash": "fbcc69bea5611a77",
+          "signature": "const alp_capabilities_t * alp_mbox_capabilities(const alp_mbox_t *mb);"
+        },
         "alp_mbox_close": {
           "hash": "6d1bbc72889a6ca9",
           "signature": "void alp_mbox_close(alp_mbox_t *mb);"
@@ -6759,6 +6965,10 @@
         "alp_mbox_set_callback": {
           "hash": "47b4010791d6990b",
           "signature": "alp_status_t alp_mbox_set_callback(alp_mbox_t *mb, alp_mbox_msg_cb_t cb, void *user);"
+        },
+        "alp_shmem_capabilities": {
+          "hash": "4dd2cd77b19f9c51",
+          "signature": "const alp_capabilities_t * alp_shmem_capabilities(const alp_shmem_t *s);"
         },
         "alp_shmem_close": {
           "hash": "8c6ab0d499f113be",
@@ -6815,6 +7025,10 @@
           "hash": "2c48785b3707b468",
           "signature": "void alp_delay_us(uint32_t us);"
         },
+        "alp_gpio_capabilities": {
+          "hash": "427845bade07b0c6",
+          "signature": "const alp_capabilities_t * alp_gpio_capabilities(const alp_gpio_t *pin);"
+        },
         "alp_gpio_close": {
           "hash": "bff6723b4416ce0b",
           "signature": "void alp_gpio_close(alp_gpio_t *pin);"
@@ -6843,6 +7057,10 @@
           "hash": "1ed2c1a2170d6399",
           "signature": "alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level);"
         },
+        "alp_i2c_capabilities": {
+          "hash": "24a89b8df3f55eb4",
+          "signature": "const alp_capabilities_t * alp_i2c_capabilities(const alp_i2c_t *bus);"
+        },
         "alp_i2c_close": {
           "hash": "37c43c93fb338484",
           "signature": "void alp_i2c_close(alp_i2c_t *bus);"
@@ -6867,6 +7085,10 @@
           "hash": "a15ddf9d11450877",
           "signature": "alp_status_t alp_last_error(void);"
         },
+        "alp_spi_capabilities": {
+          "hash": "e8ad25bb45d3ba91",
+          "signature": "const alp_capabilities_t * alp_spi_capabilities(const alp_spi_t *bus);"
+        },
         "alp_spi_close": {
           "hash": "7dbfaa8be9435a4a",
           "signature": "void alp_spi_close(alp_spi_t *bus);"
@@ -6886,6 +7108,10 @@
         "alp_spi_write": {
           "hash": "add1df22e2fbb139",
           "signature": "alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len);"
+        },
+        "alp_uart_capabilities": {
+          "hash": "e51cfb1268f534d4",
+          "signature": "const alp_capabilities_t * alp_uart_capabilities(const alp_uart_t *port);"
         },
         "alp_uart_close": {
           "hash": "d1aa431d5117c45d",
@@ -7177,6 +7403,10 @@
     },
     "alp/pwm.h": {
       "functions": {
+        "alp_pwm_capabilities": {
+          "hash": "6113598646f7e606",
+          "signature": "const alp_capabilities_t * alp_pwm_capabilities(const alp_pwm_t *pwm);"
+        },
         "alp_pwm_capture_close": {
           "hash": "28a6ed8173d3a045",
           "signature": "void alp_pwm_capture_close(alp_pwm_capture_t *cap);"
@@ -7257,6 +7487,10 @@
           "hash": "bf0cb5629f817367",
           "signature": "alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method, const void *req, size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms);"
         },
+        "alp_rpc_capabilities": {
+          "hash": "a640e9a33587fb20",
+          "signature": "const alp_capabilities_t * alp_rpc_capabilities(const alp_rpc_channel_t *ch);"
+        },
         "alp_rpc_close": {
           "hash": "dcf59935692075e0",
           "signature": "void alp_rpc_close(alp_rpc_channel_t *ch);"
@@ -7309,6 +7543,10 @@
     },
     "alp/rtc.h": {
       "functions": {
+        "alp_rtc_capabilities": {
+          "hash": "c83172e9b5c5ab28",
+          "signature": "const alp_capabilities_t * alp_rtc_capabilities(const alp_rtc_t *rtc);"
+        },
         "alp_rtc_close": {
           "hash": "3b53bd2693381efa",
           "signature": "void alp_rtc_close(alp_rtc_t *rtc);"
@@ -7340,6 +7578,10 @@
     },
     "alp/security.h": {
       "functions": {
+        "alp_aead_capabilities": {
+          "hash": "f356c7786143135b",
+          "signature": "const alp_capabilities_t * alp_aead_capabilities(const alp_aead_t *a);"
+        },
         "alp_aead_close": {
           "hash": "fd9bf2aab3dfc5e0",
           "signature": "void alp_aead_close(alp_aead_t *a);"
@@ -7355,6 +7597,10 @@
         "alp_aead_open": {
           "hash": "bec66b9478a06de3",
           "signature": "alp_aead_t * alp_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t key_len);"
+        },
+        "alp_hash_capabilities": {
+          "hash": "d2699d55d4ca8a69",
+          "signature": "const alp_capabilities_t * alp_hash_capabilities(const alp_hash_t *h);"
         },
         "alp_hash_close": {
           "hash": "3038e7f80bc7c87e",
@@ -7400,6 +7646,134 @@
     "alp/soc_caps.h": {
       "functions": {},
       "macros": {
+        "ALP_CAP_CAU": {
+          "hash": "9f4302620b16b573",
+          "value": "(ALP_SOC_CAU)"
+        },
+        "ALP_CAP_CRYPTOCELL": {
+          "hash": "d9e5836873835e81",
+          "value": "(ALP_SOC_CRYPTOCELL)"
+        },
+        "ALP_CAP_DAVE2D": {
+          "hash": "7c287d35d490bd93",
+          "value": "(ALP_SOC_DAVE2D)"
+        },
+        "ALP_CAP_DMA2D": {
+          "hash": "bd1b8ac6ea2c47d4",
+          "value": "(ALP_SOC_DMA2D)"
+        },
+        "ALP_CAP_EMMC_DMA": {
+          "hash": "7aea83817767d724",
+          "value": "(ALP_SOC_EMMC_DMA)"
+        },
+        "ALP_CAP_GPU2D": {
+          "hash": "ba53a01d7fbf30fc",
+          "value": "(ALP_SOC_GPU2D)"
+        },
+        "ALP_CAP_HELIUM_MVE": {
+          "hash": "5581405c3d20ae89",
+          "value": "(ALP_SOC_HELIUM_MVE)"
+        },
+        "ALP_CAP_HEXSPI_DMA": {
+          "hash": "9a3251edaaf99f62",
+          "value": "(ALP_SOC_HEXSPI_DMA)"
+        },
+        "ALP_CAP_HW_ADC": {
+          "hash": "1f872a36d423604e",
+          "value": "(ALP_SOC_ADC_COUNT > 0)"
+        },
+        "ALP_CAP_HW_CAN": {
+          "hash": "bae66d69374428a5",
+          "value": "(ALP_SOC_CAN_COUNT > 0)"
+        },
+        "ALP_CAP_HW_CAN_FD": {
+          "hash": "cc3adbe7dd495ed3",
+          "value": "(ALP_SOC_CAN_FD_SUPPORTED)"
+        },
+        "ALP_CAP_HW_DAC": {
+          "hash": "0f8836815d0d9436",
+          "value": "(ALP_SOC_DAC_COUNT > 0)"
+        },
+        "ALP_CAP_HW_ETHERNET": {
+          "hash": "c88b11fa82683c8a",
+          "value": "(ALP_SOC_ETHERNET_COUNT > 0)"
+        },
+        "ALP_CAP_HW_I2C": {
+          "hash": "135e7afb41a89369",
+          "value": "(ALP_SOC_I2C_COUNT > 0)"
+        },
+        "ALP_CAP_HW_I2S": {
+          "hash": "1aadee7172fb0900",
+          "value": "(ALP_SOC_I2S_COUNT > 0)"
+        },
+        "ALP_CAP_HW_MIPI_CSI": {
+          "hash": "d6b4fe2c839d101a",
+          "value": "(ALP_SOC_MIPI_CSI_COUNT > 0)"
+        },
+        "ALP_CAP_HW_MIPI_DSI": {
+          "hash": "55c4dc3ed342f364",
+          "value": "(ALP_SOC_MIPI_DSI_COUNT > 0)"
+        },
+        "ALP_CAP_HW_PDM": {
+          "hash": "9395da8274ec8fff",
+          "value": "(ALP_SOC_PDM_COUNT > 0)"
+        },
+        "ALP_CAP_HW_PWM": {
+          "hash": "bd2cbaec38281109",
+          "value": "(ALP_SOC_PWM_COUNT > 0)"
+        },
+        "ALP_CAP_HW_QENC": {
+          "hash": "8865ccf9d0849a55",
+          "value": "(ALP_SOC_QENC_COUNT > 0)"
+        },
+        "ALP_CAP_HW_RTC": {
+          "hash": "48a3b35d056b396b",
+          "value": "(ALP_SOC_RTC_COUNT > 0)"
+        },
+        "ALP_CAP_HW_SPI": {
+          "hash": "7e8032cd7bfcf8e3",
+          "value": "(ALP_SOC_SPI_COUNT > 0)"
+        },
+        "ALP_CAP_HW_TIMER": {
+          "hash": "33f4ea52f12bc0ab",
+          "value": "(ALP_SOC_TIMER_COUNT > 0)"
+        },
+        "ALP_CAP_HW_UART": {
+          "hash": "3d72dddf4d35920c",
+          "value": "(ALP_SOC_UART_COUNT > 0)"
+        },
+        "ALP_CAP_HW_USB": {
+          "hash": "c4fddec878153598",
+          "value": "(ALP_SOC_USB_COUNT > 0)"
+        },
+        "ALP_CAP_HW_WDT": {
+          "hash": "b811592e40e9f8f7",
+          "value": "(ALP_SOC_WDT_COUNT > 0)"
+        },
+        "ALP_CAP_INLINE_AES": {
+          "hash": "2485d38c457f2cc6",
+          "value": "(ALP_SOC_INLINE_AES)"
+        },
+        "ALP_CAP_NEON": {
+          "hash": "4294b4b5e2159a7f",
+          "value": "(ALP_SOC_NEON)"
+        },
+        "ALP_CAP_NPU_DRPAI": {
+          "hash": "7093de00f8a12ca4",
+          "value": "(ALP_SOC_DRP_AI)"
+        },
+        "ALP_CAP_QUADSPI_DMA": {
+          "hash": "776bb6d8731c2a11",
+          "value": "(ALP_SOC_QUADSPI_DMA)"
+        },
+        "ALP_CAP_XSPI_DMA": {
+          "hash": "dd0012dcc15f11e9",
+          "value": "(ALP_SOC_XSPI_DMA)"
+        },
+        "ALP_HAS": {
+          "hash": "14d66ec4232ed62c",
+          "value": "(cap) (ALP_CAP_##cap)"
+        },
         "ALP_SOC_ADC_COUNT": {
           "hash": "6a0b6d0b6de57454",
           "value": "UINT16_MAX"
@@ -7541,6 +7915,10 @@
     },
     "alp/storage.h": {
       "functions": {
+        "alp_storage_capabilities": {
+          "hash": "f625ea74c58af8da",
+          "signature": "const alp_capabilities_t * alp_storage_capabilities(const alp_storage_t *s);"
+        },
         "alp_storage_close": {
           "hash": "5d5e8e7dbc5bedfd",
           "signature": "void alp_storage_close(alp_storage_t *s);"
@@ -7658,6 +8036,10 @@
     },
     "alp/usb.h": {
       "functions": {
+        "alp_usb_capabilities": {
+          "hash": "80634bbc3c26e493",
+          "signature": "const alp_capabilities_t * alp_usb_capabilities(const alp_usb_dev_t *dev);"
+        },
         "alp_usb_device_close": {
           "hash": "a0d61c2498d34493",
           "signature": "void alp_usb_device_close(alp_usb_dev_t *dev);"
@@ -7721,6 +8103,10 @@
     },
     "alp/wdt.h": {
       "functions": {
+        "alp_wdt_capabilities": {
+          "hash": "e6da4a1100116ce2",
+          "signature": "const alp_capabilities_t * alp_wdt_capabilities(const alp_wdt_t *wdt);"
+        },
         "alp_wdt_close": {
           "hash": "40af7d03567c0c9a",
           "signature": "void alp_wdt_close(alp_wdt_t *wdt);"

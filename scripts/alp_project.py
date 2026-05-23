@@ -118,6 +118,54 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
+def _validate_and_load(path: Path) -> dict[str, Any]:
+    """Validate *path* with the rich diagnostic validator, then return a
+    plain ``dict`` for the downstream emitters.
+
+    If the validator finds errors, each one is rendered as a Rust-style
+    diagnostic block to *stderr* and the process exits with code 1.
+    On success the file is parsed a second time with ``yaml.safe_load``
+    so the rest of the emitter logic receives plain Python objects (no
+    ``__line__``/``__column__`` noise from the position-aware loader).
+    """
+    try:
+        from alp_cli.validator import validate_board_yaml
+        from alp_cli.diagnostic import render
+    except ImportError as _exc:
+        # alp_cli not installed: fall back to the legacy bare loader so
+        # existing workflows that haven't installed the dev extras keep
+        # working; they just won't get rich diagnostics.
+        import warnings
+        warnings.warn(
+            f"alp_project: alp_cli not importable ({_exc}); "
+            "falling back to plain YAML load (no rich diagnostics).",
+            stacklevel=2,
+        )
+        return _load_yaml(path)
+
+    if not path.is_file():
+        sys.exit(f"alp_project: file not found: {path}")
+
+    collector = validate_board_yaml(path)
+    if collector.has_errors():
+        source_text = path.read_text(encoding="utf-8")
+        for diag in collector:
+            print(render(diag, source_text=source_text), file=sys.stderr)
+        sys.exit(1)
+
+    # Re-parse for the emitter: the position-aware loader injects
+    # ``__line__`` / ``__column__`` / ``__keys__`` metadata that the
+    # downstream emitters do not expect.  A plain safe_load gives them
+    # clean dicts.
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        sys.exit(f"alp_project: failed to parse {path}: {e}")
+    if not isinstance(data, dict):
+        sys.exit(f"alp_project: {path} did not parse to a top-level mapping")
+    return data
+
+
 def _resolve_sku(sku: str, metadata_root: Path) -> dict[str, Any]:
     # Per-SKU preset lives at metadata/e1m_modules/<SKU>.yaml.
     preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
@@ -1650,7 +1698,7 @@ def main() -> int:
                      "ipc-contract-h"):
         return _run_v2_emit(args)
 
-    project = _load_yaml(args.input)
+    project = _validate_and_load(args.input)
 
     # composed-route-table only needs the SoM + board definitions; it
     # does not require the per-core slice machinery.
