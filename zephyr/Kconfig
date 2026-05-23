@@ -638,6 +638,40 @@ config ALP_SDK_POWER
 	  wake-handler + the supervisor re-init state machine) land in
 	  follow-up commits per issue #22.
 
+config ALP_SDK_POWER_PM_POLICY
+	bool "Compile the real Zephyr pm_policy_* power backend"
+	depends on ALP_SDK_POWER
+	depends on PM
+	default y
+	help
+	  Compile src/backends/power/zephyr_pm_policy.c, which uses
+	  Zephyr's pm_policy_state_lock_get / pm_policy_state_lock_put
+	  to translate alp_power_request_sleep into a constraint over
+	  the active per-SoC pm_state table.  Registered as
+	  silicon_ref="*" at priority 100 so it always wins over the
+	  zephyr_stub fallback (priority 0) on builds that link the PM
+	  subsystem.
+
+	  Off on builds without CONFIG_PM (where the pm_policy_* symbols
+	  vanish); the zephyr_stub at priority 0 keeps alp_power_open
+	  succeeding so application setup code keeps linking unchanged.
+
+config ALP_SDK_POWER_EXT_RENESAS
+	bool "Compile the Renesas V2N power vendor-extension body"
+	depends on ALP_SDK_POWER
+	depends on ALP_SDK_V2N_SUPERVISOR
+	default y if ALP_SOC_RENESAS_RZV2N_N44
+	help
+	  Compile src/backends/ext/renesas/power.c, which implements
+	  the alp_renesas_power_supervisor_mode_set vendor-extension
+	  surface declared in <alp/ext/renesas/power.h>.  Routes through
+	  the GD32G553 supervisor's CMD_POWER_MODE_SET opcode (0x28) via
+	  the existing v2n_supervisor singleton mutex; no new bus plumbing
+	  introduced.
+
+	  Off on non-V2N builds; the header alone (always installed) is
+	  enough for portable apps to compile-test against the symbol.
+
 config ALP_SDK_GPU2D
 	bool "Enable <alp/gpu2d.h> 2D graphics accelerator surface"
 	default y

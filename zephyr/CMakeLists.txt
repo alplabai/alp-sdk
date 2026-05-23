@@ -325,12 +325,19 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
 # CONFIG_ALP_SDK_POWER so customers can opt out on builds that
 # don't need sleep transitions.  Slice 7 -- registry migration:
 # replaces the legacy free-standing src/zephyr/power_zephyr.c with
-# the class dispatcher + wildcard stub backend.  Real backends
-# (Zephyr pm_policy_* on AEN, GD32G553 supervisor
-# CMD_POWER_MODE_SET on V2N) land per issue #22.
+# the class dispatcher + wildcard stub backend; the real Zephyr
+# pm_policy_* backend rides above the stub at priority 100 on
+# builds that link Zephyr's PM subsystem (gated on CONFIG_PM so
+# the pm_policy_state_lock_* symbols are visible).  V2N supervisor
+# CMD_POWER_MODE_SET routes through the Renesas vendor-ext body
+# whenever CONFIG_ALP_SDK_V2N_SUPERVISOR=y.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/power_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/zephyr_stub.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_PM_POLICY
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/zephyr_pm_policy.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_EXT_RENESAS
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/power.c)
 
 # Display class dispatcher + stub backend (Slice 8a -- registry
 # pattern).  Display has no legacy free-standing src/zephyr/*.c, so

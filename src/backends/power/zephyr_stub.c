@@ -22,6 +22,16 @@
  * land per the tracking issue below with their own silicon-specific
  * entries at higher priority than this wildcard.
  *
+ * @par Yocto / Linux path: deferred to slice #33.
+ *      The Yocto `/sys/power/state`-write + `/sys/class/rtc/rtcN/
+ *      wakealarm` path documented in <alp/power.h> is *not* served
+ *      by this stub.  Linux backends land in a dedicated slice per
+ *      the standing "NEVER touch src/yocto/*.c" guardrail; until
+ *      then customers building against ALP_OS=yocto see
+ *      ALP_ERR_NOT_IMPLEMENTED from request_sleep.  Open + wake-
+ *      source configuration still succeed so application setup
+ *      code keeps linking unchanged across both consumer paths.
+ *
  * @par Tracking: github.com/alplabai/alp-sdk/issues/22
  */
 
