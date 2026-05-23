@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-21",
+  "generated": "2026-05-23",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -6332,6 +6332,74 @@
       },
       "typedefs": {}
     },
+    "alp/ext/deepx/inference.h": {
+      "functions": {
+        "alp_deepx_inference_dram_tile_reserve": {
+          "hash": "5a70bdc2c7523a54",
+          "signature": "alp_status_t alp_deepx_inference_dram_tile_reserve(alp_inference_t *inf, uint32_t tile_bytes);"
+        },
+        "alp_deepx_inference_get_status": {
+          "hash": "b461f6c819b47450",
+          "signature": "alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, uint32_t *status_out);"
+        },
+        "alp_deepx_inference_slot_pin": {
+          "hash": "88c845fb54e20f21",
+          "signature": "alp_status_t alp_deepx_inference_slot_pin(alp_inference_t *inf, alp_deepx_inference_slot_t slot);"
+        }
+      },
+      "macros": {
+        "ALP_DEEPX_INFERENCE_SLOT_COUNT": {
+          "hash": "9ab5d9f7dd966afd",
+          "value": "4u"
+        },
+        "ALP_EXT_DEEPX_INFERENCE_AVAILABLE": {
+          "hash": "2e12530fe6ec1333",
+          "value": "1"
+        }
+      },
+      "typedefs": {
+        "alp_deepx_inference_slot_t": {
+          "definition": "typedef enum { ALP_DEEPX_INFERENCE_SLOT_0 = 0u, ALP_DEEPX_INFERENCE_SLOT_1 = 1u, ALP_DEEPX_INFERENCE_SLOT_2 = 2u, ALP_DEEPX_INFERENCE_SLOT_3 = 3u, } alp_deepx_inference_slot_t;",
+          "hash": "7ab2bf9f10d84737"
+        },
+        "alp_deepx_inference_status_t": {
+          "definition": "typedef enum { ALP_DEEPX_INFERENCE_STATUS_IDLE = 0u, ALP_DEEPX_INFERENCE_STATUS_ARMED = 1u << 0, ALP_DEEPX_INFERENCE_STATUS_RUNNING = 1u << 1, ALP_DEEPX_INFERENCE_STATUS_DONE = 1u << 2, ALP_DEEPX_INFERENCE_STATUS_TIMEOUT = 1u << 3, ALP_DEEPX_INFERENCE_STATUS_TRANSPORT_ERR = 1u << 4, } alp_deepx_inference_status_t;",
+          "hash": "9eb7eaeaca03723c"
+        }
+      }
+    },
+    "alp/ext/renesas/inference.h": {
+      "functions": {
+        "alp_renesas_inference_ai_sram_reserve": {
+          "hash": "29a47273e569d8c8",
+          "signature": "alp_status_t alp_renesas_inference_ai_sram_reserve(alp_inference_t *inf, uint32_t reserve_bytes);"
+        },
+        "alp_renesas_inference_get_status": {
+          "hash": "981843e3a902e2fa",
+          "signature": "alp_status_t alp_renesas_inference_get_status(alp_inference_t *inf, uint32_t *status_out);"
+        },
+        "alp_renesas_inference_pipeline_stage_pin": {
+          "hash": "4e40ace40cb7887e",
+          "signature": "alp_status_t alp_renesas_inference_pipeline_stage_pin(alp_inference_t *inf, uint32_t layer_index, alp_renesas_inference_stage_t stage);"
+        }
+      },
+      "macros": {
+        "ALP_EXT_RENESAS_INFERENCE_AVAILABLE": {
+          "hash": "8f559ca5adf1d8f5",
+          "value": "1"
+        }
+      },
+      "typedefs": {
+        "alp_renesas_inference_stage_t": {
+          "definition": "typedef enum { ALP_RENESAS_INFERENCE_STAGE_DRP = 0u, ALP_RENESAS_INFERENCE_STAGE_AI_MAC = 1u, ALP_RENESAS_INFERENCE_STAGE_AI_SRAM = 2u, ALP_RENESAS_INFERENCE_STAGE_DMA = 3u, } alp_renesas_inference_stage_t;",
+          "hash": "fe9221bcf0ac0f7d"
+        },
+        "alp_renesas_inference_status_t": {
+          "definition": "typedef enum { ALP_RENESAS_INFERENCE_STATUS_IDLE = 0u, ALP_RENESAS_INFERENCE_STATUS_ARMED = 1u << 0, ALP_RENESAS_INFERENCE_STATUS_RUNNING = 1u << 1, ALP_RENESAS_INFERENCE_STATUS_DONE = 1u << 2, ALP_RENESAS_INFERENCE_STATUS_TIMEOUT = 1u << 3, ALP_RENESAS_INFERENCE_STATUS_BUS_ERR = 1u << 4, } alp_renesas_inference_status_t;",
+          "hash": "2ea90804b3cd9101"
+        }
+      }
+    },
     "alp/gpu2d.h": {
       "functions": {
         "alp_gpu2d_blend": {
@@ -6482,6 +6550,10 @@
     },
     "alp/inference.h": {
       "functions": {
+        "alp_inference_capabilities": {
+          "hash": "281799219f19c29b",
+          "signature": "const alp_capabilities_t * alp_inference_capabilities(const alp_inference_t *inf);"
+        },
         "alp_inference_close": {
           "hash": "476fc2ef13a362ad",
           "signature": "void alp_inference_close(alp_inference_t *inf);"
