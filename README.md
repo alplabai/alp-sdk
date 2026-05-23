@@ -2,7 +2,7 @@
 
 > Write once, run on any E1M module.
 
-> ⚠️ **[UNTESTED] — `v0.5` status: paper-correct, no real-silicon verification yet.**
+> ⚠️ **[UNTESTED] — `v0.6` status: paper-correct, no real-silicon verification yet.**
 >
 > Every chip driver, library binding, peripheral wrapper, and
 > example app in this repo builds clean on `native_sim/native/64`
@@ -329,7 +329,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 | Peripherals | `peripheral.h` (GPIO/I²C/SPI/UART), `pwm.h`, `adc.h`, `counter.h`, `i2s.h`, `can.h`, `rtc.h`, `wdt.h`, `usb.h` |
 | Audio / camera / display | `audio.h` (PDM in + I²S out), `camera.h`, `gui.h` (LVGL) — chip drivers: SSD1306, SSD1331, OV5640, CAM_MUX, TAS2563, PDM mic |
 | Connectivity & security | `iot.h` (Wi-Fi/MQTT), `ble.h` (BLE 5.4), `security.h` (MbedTLS PSA Crypto), OPTIGA Trust M chip driver |
-| Inference dispatcher | `inference.h` — backend selector (auto / cpu / ethos_u / drpai / deepx_dx) + tensor-arena management.  `ethos_u` covers U55 (every Alif Ensemble SKU), U85 (E4 / E6 / E8 only -- Transformer-capable), and U65 (i.MX 93); the project loader picks per-NPU driver gates from the SoM's silicon ref. |
+| Inference dispatcher | `inference.h` — registry-backed backend selector + tensor-arena management.  Backends registered today: `tflm` (CPU reference kernels, portable), `ethos_u_aen` (Ethos-U on Alif Ensemble — U55 every SKU, U85 on E4/E6/E8 Transformer-capable), `ethos_u_n93` (Ethos-U U65 on i.MX 93), `drpai_v2n_stub` (DRP-AI3 on RZ/V2N — tracked by issue #58), `deepx_dxm1_stub` (DEEPX DX-M1 — tracked by issue #59), `sw_fallback` (NOSUPPORT floor).  Selector picks the highest-priority backend matching the SoM's silicon ref; exact match beats `*` wildcard at equal priority. |
 | Multi-proc / IPC | `mproc.h` — mailbox + shared memory + hardware semaphore |
 | Hardware info | `hw_info.h` — 128-byte EEPROM manifest + BOARD_ID ADC + `assert_matches_build()` |
 | Chip drivers | **80+** under `chips/` — LSM6DSO, BMI323, ICM-42670, BMP581, INA236, TMP112, RV-3028-C7, 24C128, CC3501E, TCAL9538, button-LED helper, … |
