@@ -59,26 +59,30 @@ static alp_status_t z_open(const alp_counter_config_t *cfg,
     if (cfg->counter_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
     const struct device *dev = _devs[cfg->counter_id];
     if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
-    st->dev = dev;
+    st->dev = (void *)dev;
     st->counter_id = cfg->counter_id;
     caps_out->flags = 0u;       /* Slice 4a: HW_ALARM cap flag deferred */
     return ALP_OK;
 }
 
 static alp_status_t z_start(alp_counter_backend_state_t *st) {
-    return _errno_to_alp(counter_start(st->dev));
+    const struct device *dev = (const struct device *)st->dev;
+    return _errno_to_alp(counter_start(dev));
 }
 
 static alp_status_t z_stop(alp_counter_backend_state_t *st) {
-    return _errno_to_alp(counter_stop(st->dev));
+    const struct device *dev = (const struct device *)st->dev;
+    return _errno_to_alp(counter_stop(dev));
 }
 
 static alp_status_t z_get_value(alp_counter_backend_state_t *st, uint32_t *ticks_out) {
-    return _errno_to_alp(counter_get_value(st->dev, ticks_out));
+    const struct device *dev = (const struct device *)st->dev;
+    return _errno_to_alp(counter_get_value(dev, ticks_out));
 }
 
 static alp_status_t z_us_to_ticks(alp_counter_backend_state_t *st, uint32_t us, uint32_t *ticks_out) {
-    *ticks_out = counter_us_to_ticks(st->dev, us);
+    const struct device *dev = (const struct device *)st->dev;
+    *ticks_out = counter_us_to_ticks(dev, us);
     return ALP_OK;
 }
 
@@ -86,21 +90,24 @@ static alp_status_t z_set_alarm(alp_counter_backend_state_t *st,
                                 uint32_t ticks_from_now,
                                 struct alp_counter *owner)
 {
+    const struct device *dev = (const struct device *)st->dev;
     struct counter_alarm_cfg acfg = {
         .callback  = _alarm_trampoline,
         .ticks     = ticks_from_now,
         .user_data = owner,                /* trampoline reaches alarm_cb via owner */
         .flags     = 0,
     };
-    return _errno_to_alp(counter_set_channel_alarm(st->dev, 0, &acfg));
+    return _errno_to_alp(counter_set_channel_alarm(dev, 0, &acfg));
 }
 
 static alp_status_t z_cancel_alarm(alp_counter_backend_state_t *st) {
-    return _errno_to_alp(counter_cancel_channel_alarm(st->dev, 0));
+    const struct device *dev = (const struct device *)st->dev;
+    return _errno_to_alp(counter_cancel_channel_alarm(dev, 0));
 }
 
 static void z_close(alp_counter_backend_state_t *st) {
-    (void)counter_stop(st->dev);
+    const struct device *dev = (const struct device *)st->dev;
+    (void)counter_stop(dev);
 }
 
 static const alp_counter_ops_t _ops = {
