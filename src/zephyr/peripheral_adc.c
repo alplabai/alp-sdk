@@ -86,6 +86,7 @@ static void bridge_stream_free_slot(uint8_t slot)
     bridge_streams_used &= (uint8_t) ~(1u << slot);
     k_mutex_unlock(&bridge_stream_lock);
 }
+#endif /* ALP_ADC_HAS_BRIDGE_PATH */
 
 
 /* One-shot ADC (alp_adc_open / read_raw / read_uv / close) is served by the

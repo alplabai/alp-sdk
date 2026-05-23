@@ -40,15 +40,14 @@
 
 /* The "alp_backend_classes" section's bounds.  The linker provides
  * these symbols when the section name is a valid C identifier. */
-/* Weak so the link succeeds on native_sim's NSI multi-stage link
- * (the host ld doesn't always emit the auto __start_/__stop_ symbols
- * for sections that aren't referenced in the active link stage's
- * inputs).  When the section is empty/absent both symbols resolve to
- * NULL and the walker degenerates to an empty range. */
-extern const alp_backend_class_range_t __start_alp_backend_classes[]
-    __attribute__((weak));
-extern const alp_backend_class_range_t __stop_alp_backend_classes[]
-    __attribute__((weak));
+/* Strong refs so GNU ld emits the auto-generated section-bound
+ * symbols (auto-emit triggers on a strong undefined reference to
+ * __start_<id> / __stop_<id> when the section name is a valid C
+ * identifier).  Each dispatcher's ALP_BACKEND_DEFINE_CLASS() drops
+ * a retained entry into "alp_backend_classes", so the section
+ * always has at least one entry on any non-trivial build. */
+extern const alp_backend_class_range_t __start_alp_backend_classes[];
+extern const alp_backend_class_range_t __stop_alp_backend_classes[];
 
 static bool is_wildcard(const alp_backend_t *be)
 {

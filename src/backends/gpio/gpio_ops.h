@@ -37,11 +37,11 @@ struct alp_gpio_ops {
                               alp_gpio_pull_t pull);
     alp_status_t (*write)(alp_gpio_backend_state_t *state, bool level);
     alp_status_t (*read)(alp_gpio_backend_state_t *state, bool *level);
-    alp_status_t (*irq_enable)(alp_gpio_backend_state_t *state,
+    alp_status_t (*enable_irq)(alp_gpio_backend_state_t *state,
                                alp_gpio_edge_t edge,
                                alp_gpio_cb_t cb,
                                void *user);
-    alp_status_t (*irq_disable)(alp_gpio_backend_state_t *state);
+    alp_status_t (*disable_irq)(alp_gpio_backend_state_t *state);
     void         (*close)(alp_gpio_backend_state_t *state);
 };
 

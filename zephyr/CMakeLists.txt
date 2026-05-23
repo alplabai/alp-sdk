@@ -53,55 +53,35 @@ if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_LITTLEFS)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_littlefs.c)
 endif()
 
-if(CONFIG_ALP_SDK_STORAGE_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/usb_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/usb/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_USB_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/usb/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/usb/sw_fallback.c)
 # BLE registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/ble_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_BLE_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/sw_fallback.c)
 # Wi-Fi registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/wifi_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_WIFI_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/sw_fallback.c)
 # MQTT registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/mqtt_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mqtt/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_MQTT_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mqtt/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mqtt/sw_fallback.c)
 # mproc registry sources.  The dispatcher owns three handle pools
 # (shmem + mbox + hwsem) keyed off the same class registry; the
 # portable Zephyr backend covers all three primitives via
@@ -109,14 +89,11 @@ endif()
 # fallback.  Dispatcher + Zephyr backend ship unconditionally;
 # sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/mproc_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/mproc_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_IPC_SERVICE
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_MPROC_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/sw_fallback.c)
 # Security registry sources.  The dispatcher owns two handle pools
 # (hash + AEAD) plus a cached ops pointer for the stateless
 # alp_random_bytes fast path; the portable Zephyr backend uses
@@ -125,14 +102,11 @@ endif()
 # backend ship unconditionally; sw_fallback gated on the
 # native_sim opt-in.
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/security_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/security_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_MBEDTLS
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_SECURITY_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/sw_fallback.c)
 # Audio registry sources.  The dispatcher owns two handle pools
 # (alp_audio_in_t + alp_audio_out_t) keyed off the same class
 # registry; the portable Zephyr backend wires DMIC input +
@@ -142,11 +116,7 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/audio_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/audio/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_AUDIO_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/audio/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/audio/sw_fallback.c)
 # RPC registry sources.  The dispatcher owns one alp_rpc_channel_t
 # pool keyed off the same class registry; the portable Zephyr
 # backend carries the ipc_service / RPMsg body + the per-channel
@@ -157,11 +127,7 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/rpc_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rpc/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_RPC_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rpc/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rpc/sw_fallback.c)
 # Inference class dispatcher + backends.
 # The dispatcher compiles unconditionally so apps that depend on
 # the <alp/inference.h> ABI always link cleanly; each backend
@@ -200,11 +166,7 @@ if(CONFIG_ALP_SDK_INFERENCE_BACKEND_DEEPX_DXM1)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/deepx_dxm1_stub.c)
 endif()
 
-if(CONFIG_ALP_SDK_INFERENCE_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/sw_fallback.c)
 # Camera real backends.  Gate each on its own Kconfig
 # opt-in so builds that don't need the Zephyr video subsystem or
 # the V2N N44 ISP skeleton don't pay their code size.  The
@@ -221,23 +183,20 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_DAC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_dac.c)
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/rtc_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/rtc_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_RTC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_RTC_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/sw_fallback.c)
-endif()
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/sw_fallback.c)
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/wdt_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/wdt_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_WATCHDOG
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wdt/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_WDT_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wdt/sw_fallback.c)
-endif()
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wdt/sw_fallback.c)
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/counter_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/counter_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_COUNTER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/counter/zephyr_drv.c)
 
 if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
@@ -245,12 +204,10 @@ if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/counter/gd32_bridge.c)
 endif()
 
-if(CONFIG_ALP_SDK_COUNTER_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/counter/sw_fallback.c)
-endif()
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/counter/sw_fallback.c)
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/qenc_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/qenc_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_GPIO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/zephyr_drv.c)
 
 if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
@@ -258,10 +215,7 @@ if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/gd32_bridge.c)
 endif()
 
-if(CONFIG_ALP_SDK_QENC_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/sw_fallback.c)
-endif()
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/sw_fallback.c)
 # TMU registry sources.  TMU is handle-less; the dispatcher caches
 # the selected backend's ops vtable on first call instead of owning
 # a handle pool.  Dispatcher + portable Zephyr/bridge backend ship
@@ -580,86 +534,65 @@ zephyr_library_sources(
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_I2C_SW_FALLBACK.
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/i2c_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/i2c_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_I2C
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_I2C_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/sw_fallback.c)
 # SPI class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_SPI_SW_FALLBACK.
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/spi_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/spi_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_SPI
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_SPI_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/sw_fallback.c)
 # UART class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_UART_SW_FALLBACK.
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/uart_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/uart_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_SERIAL
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_UART_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/sw_fallback.c)
 # GPIO class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_GPIO_SW_FALLBACK.
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpio_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpio_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_GPIO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_GPIO_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/sw_fallback.c)
 # PWM class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_PWM_SW_FALLBACK.
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/pwm_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/pwm_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_PWM
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_PWM_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/sw_fallback.c)
 # I2S class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_I2S_SW_FALLBACK.
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/i2s_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/i2s_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_I2S
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2s/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_I2S_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2s/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2s/sw_fallback.c)
 # CAN class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_CAN_SW_FALLBACK.
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/can_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/can_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_CAN
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/can/zephyr_drv.c)
 
-if(CONFIG_ALP_SDK_CAN_SW_FALLBACK)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/can/sw_fallback.c)
-endif()
-
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/can/sw_fallback.c)
 # ADC class dispatcher.  Owns the one-shot alp_adc_* API surface
 # (alp_adc_open / read_raw / read_uv / close / capabilities) and
 # routes through the backend registry.  Backends register under

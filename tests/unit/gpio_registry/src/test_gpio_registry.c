@@ -111,8 +111,8 @@ ZTEST(alp_gpio_registry, test_close_releases_handle)
 
 /* ---------- (f) sw_fallback round-trip + NOSUPPORT on irq_enable ---------- */
 
-extern const alp_backend_t __start_alp_backends_gpio[];
-extern const alp_backend_t __stop_alp_backends_gpio[];
+extern const alp_backend_t __start_alp_backends_gpio[] __attribute__((weak));
+extern const alp_backend_t __stop_alp_backends_gpio[] __attribute__((weak));
 
 static const alp_gpio_ops_t *_find_sw_fallback_ops(void)
 {
@@ -151,11 +151,11 @@ ZTEST(alp_gpio_registry, test_sw_fallback_round_trip)
     zassert_false(level);
 
     /* irq_enable returns NOSUPPORT (no real edge source to hook) */
-    zassert_equal(ops->irq_enable(st, ALP_GPIO_EDGE_RISING, NULL, NULL),
+    zassert_equal(ops->enable_irq(st, ALP_GPIO_EDGE_RISING, NULL, NULL),
                   ALP_ERR_NOSUPPORT);
 
     /* irq_disable is the paired no-op */
-    zassert_equal(ops->irq_disable(st), ALP_OK);
+    zassert_equal(ops->disable_irq(st), ALP_OK);
 
     /* close is a no-op; calling twice is safe */
     ops->close(st);

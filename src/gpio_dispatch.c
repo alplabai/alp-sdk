@@ -105,11 +105,11 @@ alp_status_t alp_gpio_irq_enable(alp_gpio_t *pin,
                                  void *user) {
     if (pin == NULL || !pin->in_use) return ALP_ERR_NOT_READY;
     if (edge == ALP_GPIO_EDGE_NONE || cb == NULL) return ALP_ERR_INVAL;
-    if (pin->state.ops->irq_enable == NULL) return ALP_ERR_NOSUPPORT;
+    if (pin->state.ops->enable_irq == NULL) return ALP_ERR_NOSUPPORT;
     pin->cb      = cb;
     pin->cb_user = user;
     pin->edge    = edge;
-    alp_status_t rc = pin->state.ops->irq_enable(&pin->state, edge, cb, user);
+    alp_status_t rc = pin->state.ops->enable_irq(&pin->state, edge, cb, user);
     if (rc != ALP_OK) {
         pin->cb      = NULL;
         pin->cb_user = NULL;
@@ -121,8 +121,8 @@ alp_status_t alp_gpio_irq_enable(alp_gpio_t *pin,
 alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin) {
     if (pin == NULL || !pin->in_use) return ALP_ERR_NOT_READY;
     if (pin->edge == ALP_GPIO_EDGE_NONE) return ALP_OK;
-    if (pin->state.ops->irq_disable == NULL) return ALP_ERR_NOSUPPORT;
-    alp_status_t rc = pin->state.ops->irq_disable(&pin->state);
+    if (pin->state.ops->disable_irq == NULL) return ALP_ERR_NOSUPPORT;
+    alp_status_t rc = pin->state.ops->disable_irq(&pin->state);
     pin->edge    = ALP_GPIO_EDGE_NONE;
     pin->cb      = NULL;
     pin->cb_user = NULL;
