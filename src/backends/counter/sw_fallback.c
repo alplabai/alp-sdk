@@ -80,7 +80,7 @@ static const alp_counter_ops_t _ops = {
 
 ALP_BACKEND_REGISTER(counter, sw_fallback, {
     .silicon_ref = "*",
-    .vendor      = "sw",
+    .vendor      = "sw_fallback",
     .base_caps   = 0u,
     .priority    = 0,
     .ops         = &_ops,

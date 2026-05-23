@@ -44,7 +44,7 @@ static const alp_wdt_ops_t _ops = {
 
 ALP_BACKEND_REGISTER(wdt, sw_fallback, {
     .silicon_ref = "*",
-    .vendor      = "sw",
+    .vendor      = "sw_fallback",
     .base_caps   = 0u,
     .priority    = 0,
     .ops         = &_ops,

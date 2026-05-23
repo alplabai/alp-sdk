@@ -662,7 +662,7 @@ static const alp_dsp_ops_t _ops = {
 
 ALP_BACKEND_REGISTER(dsp, sw_fallback, {
     .silicon_ref = "*",
-    .vendor      = "sw",
+    .vendor      = "sw_fallback",
     .base_caps   = 0u,
     .priority    = 0,
     .ops         = &_ops,

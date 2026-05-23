@@ -44,12 +44,20 @@ ZTEST_SUITE(alp_power_registry, NULL, NULL, NULL, NULL, NULL);
 ZTEST(alp_power_registry, test_pm_policy_picked_for_alif_e7)
 {
     /* Real Zephyr pm_policy backend (priority 100) wins over the
-     * wildcard stub (priority 0) on every silicon. */
+     * wildcard stub (priority 0) on every silicon -- when the build
+     * has CONFIG_PM available (the pm_policy backend's compile gate).
+     * On boards without HAS_PM (e.g. native_sim) only the stub
+     * registers; assert the stub-only contract instead. */
     const alp_backend_t *be =
         alp_backend_select("power", "alif:ensemble:e7");
     zassert_not_null(be);
-    zassert_equal(strcmp(be->vendor, "zephyr"), 0);
-    zassert_equal(be->priority, 100);
+    if (IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY)) {
+        zassert_equal(strcmp(be->vendor, "zephyr"), 0);
+        zassert_equal(be->priority, 100);
+    } else {
+        zassert_equal(strcmp(be->vendor, "stub"), 0);
+        zassert_equal(be->priority, 0);
+    }
 }
 
 ZTEST(alp_power_registry, test_pm_policy_picked_for_unknown_silicon)
@@ -57,8 +65,13 @@ ZTEST(alp_power_registry, test_pm_policy_picked_for_unknown_silicon)
     const alp_backend_t *be =
         alp_backend_select("power", "fictional:soc:zz");
     zassert_not_null(be);
-    zassert_equal(strcmp(be->vendor, "zephyr"), 0);
-    zassert_equal(be->priority, 100);
+    if (IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY)) {
+        zassert_equal(strcmp(be->vendor, "zephyr"), 0);
+        zassert_equal(be->priority, 100);
+    } else {
+        zassert_equal(strcmp(be->vendor, "stub"), 0);
+        zassert_equal(be->priority, 0);
+    }
 }
 
 ZTEST(alp_power_registry, test_select_returns_null_for_null_class)
@@ -133,6 +146,9 @@ ZTEST(alp_power_registry, test_power_request_sleep_with_timer_wakes)
      * parks on the semaphore, the timer fires, the locks rebalance
      * around the descent + ascent, and the call returns ALP_OK with
      * info filled.  Uses a tiny 10 ms wake so the test stays fast. */
+    if (!IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY)) {
+        ztest_test_skip();
+    }
     alp_power_t *h = alp_power_open();
     zassert_not_null(h);
     zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC),
@@ -172,6 +188,12 @@ ZTEST(alp_power_registry, test_renesas_vendor_ext_rejects_non_renesas_backend)
      * handle with NOT_PRESENT_ON_THIS_SOC BEFORE reaching for the
      * supervisor.  This is the "bypass to NOSUPPORT-but-validation-
      * passed" path the vendor-ext audit rule requires. */
+    if (!IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY)) {
+        /* On builds without pm_policy the stub backend rejects open
+         * for runtime modes, so the bypass-to-vendor-ext path can't
+         * be exercised here -- skip. */
+        ztest_test_skip();
+    }
     alp_power_t *h = alp_power_open();
     zassert_not_null(h);
 
@@ -191,9 +213,13 @@ ZTEST(alp_power_registry, test_renesas_vendor_ext_rejects_non_renesas_backend)
 
 ZTEST(alp_power_registry, test_backend_count_for_power)
 {
-    /* Two backends registered on this build: the wildcard stub and
-     * the real pm_policy backend.  The Renesas vendor-ext is NOT a
-     * power backend (it shadows the public alp_power_t handle but
-     * doesn't register into the registry); it earns no slot here. */
-    zassert_equal(alp_backend_count("power"), 2u);
+    /* Wildcard stub always registers; the real pm_policy backend
+     * registers only when CONFIG_PM is available (gated by the
+     * board's HAS_PM hidden Kconfig).  On native_sim HAS_PM is
+     * absent so only stub is registered.  The Renesas vendor-ext
+     * is NOT a power backend (it shadows the public alp_power_t
+     * handle but doesn't register into the registry); it earns no
+     * slot here. */
+    const size_t expected = IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY) ? 2u : 1u;
+    zassert_equal(alp_backend_count("power"), expected);
 }

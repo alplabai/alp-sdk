@@ -52,7 +52,7 @@ static const alp_adc_ops_t sw_ops = {
 
 ALP_BACKEND_REGISTER(adc, sw_fallback, {
     .silicon_ref = "*",
-    .vendor      = "sw",
+    .vendor      = "sw_fallback",
     .base_caps   = 0u,
     .priority    = 0,
     .ops         = &sw_ops,

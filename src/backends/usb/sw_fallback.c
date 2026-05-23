@@ -123,7 +123,7 @@ static const alp_usb_ops_t _ops = {
 
 ALP_BACKEND_REGISTER(usb, sw_fallback, {
     .silicon_ref = "*",
-    .vendor      = "sw",
+    .vendor      = "sw_fallback",
     .base_caps   = 0u,
     .priority    = 0,
     .ops         = &_ops,
