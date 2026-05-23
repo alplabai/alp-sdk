@@ -48,7 +48,7 @@ static alp_status_t z_open(const alp_qenc_config_t *cfg,
     if (cfg->encoder_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
     const struct device *dev = _devs[cfg->encoder_id];
     if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
-    st->dev = dev;
+    st->dev = (void *)dev;
     st->encoder_id = cfg->encoder_id;
     st->last_position = 0;
     caps_out->flags = 0u;
@@ -56,10 +56,11 @@ static alp_status_t z_open(const alp_qenc_config_t *cfg,
 }
 
 static alp_status_t z_get_position(alp_qenc_backend_state_t *st, int32_t *pos_out) {
-    int err = sensor_sample_fetch(st->dev);
+    const struct device *dev = (const struct device *)st->dev;
+    int err = sensor_sample_fetch(dev);
     if (err != 0) return _errno_to_alp(err);
     struct sensor_value v;
-    err = sensor_channel_get(st->dev, SENSOR_CHAN_ROTATION, &v);
+    err = sensor_channel_get(dev, SENSOR_CHAN_ROTATION, &v);
     if (err != 0) return _errno_to_alp(err);
     /* Sensor value: degrees in val1 + microdegrees in val2; accumulate
      * integer degrees as a position proxy.  Real pulse counts come via

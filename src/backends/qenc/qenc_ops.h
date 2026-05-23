@@ -10,7 +10,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <zephyr/device.h>
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
@@ -20,7 +19,11 @@
 typedef struct alp_qenc_ops alp_qenc_ops_t;
 
 typedef struct alp_qenc_backend_state {
-    const struct device  *dev;            /* Zephyr backend; NULL for bridge */
+    void                 *dev;            /* opaque backend device pointer
+                                           * (const struct device * on Zephyr;
+                                           * NULL for bridge; kept void* so the
+                                           * portable handle does not pull in
+                                           * <zephyr/device.h>) */
     uint32_t              encoder_id;
     int32_t               last_position;  /* monotonic accumulator */
     void                 *be_data;
