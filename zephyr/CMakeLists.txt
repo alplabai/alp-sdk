@@ -21,10 +21,18 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_uart.c
     # Camera class dispatcher + stub backend (Slice 5 -- registry
     # migration).  Replaces the legacy free-standing
-    # src/zephyr/camera_stub.c.  Real backends (Alif MIPI CSI-2,
-    # V2N camera-input) land per issue #20; ISP knobs per #21.
+    # src/zephyr/camera_stub.c.  The real Zephyr drivers/video/
+    # backend (priority 50) + V2N N44 ISP-aware backend
+    # (priority 100 on renesas:rzv2n:n44) ride above the wildcard
+    # stub via the opt-in Kconfigs below.  Vendor-ext bodies for
+    # the Mali-C55 (NOSUPPORT today) + V2N N44 ISP (ALP_OK
+    # skeleton) compile unconditionally so apps that #include the
+    # ext headers link cleanly regardless of which silicon they
+    # target.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/camera_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_stub.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/camera.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/camera.c
     # iot_zephyr.c replaces the v0.2 NOSUPPORT stub. The wrapper is
     # always compiled; the real wifi_mgmt + mqtt_client glue inside
     # is gated on CONFIG_ALP_SDK_IOT_WIFI / CONFIG_ALP_SDK_IOT_MQTT
@@ -67,6 +75,16 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_DRPAI
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_drpai.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_ethosu_n93.c)
+
+# Camera real backends (Slice 5).  Gate each on its own Kconfig
+# opt-in so builds that don't need the Zephyr video subsystem or
+# the V2N N44 ISP skeleton don't pay their code size.  The
+# wildcard stub stays unconditionally compiled (above) so
+# alp_camera_open keeps succeeding on every supported SoC.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_video.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/v2n_n44_isp.c)
 
 # v0.2 peripheral wrappers — opt-in per-class so apps that don't use
 # a given Zephyr subsystem don't link the wrapper.  Each defaults on
