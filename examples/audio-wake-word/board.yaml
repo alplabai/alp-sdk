@@ -23,9 +23,10 @@ cores:
   m55_he:
     app: ./src
     # TFLite Micro pulls in the CPU reference kernels; the AEN
-    # SoM preset's `capabilities:` block routes the Ethos-U55 driver
-    # shim on top via CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y +
-    # CONFIG_ALP_TFLM_ETHOS_U55=y -- no board.yaml selection needed.
+    # SoM preset's `capabilities:` block adds the Ethos-U55 backend
+    # via CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y +
+    # CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y -- no board.yaml
+    # selection needed.
     libraries:
       - tflite_micro
     inference:

@@ -169,16 +169,16 @@ silicon via `inference.npu_population[]` (and a fallback
 `capabilities.ethos_u55_count: 2`), so the loader emits:
 
 ```
-CONFIG_ALP_SDK_INFERENCE_TFLM=y
-CONFIG_ALP_SDK_INFERENCE_TFLM_HELIUM=y           # G-2: M55 Helium MVE kernels
-CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y
-CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U55=y           # G-1: per-variant U55 gate
+CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y
+CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y           # G-2: M55 Helium MVE kernels
+CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y
+CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y           # G-1: per-variant U55 gate
 ```
 
 …automatically, alongside the universal TFLM CPU fallback.
 For AEN801 (which carries the U85 too) the loader would also
-emit `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U85=y`; for N93 it
-emits `_U65=y` plus `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y`
+emit `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y`; for N93 it
+emits `_U65=y` plus `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y`
 (the i.MX 93 PHY shim).  Advanced readers: the emit logic
 lives in `scripts/alp_orchestrate.py` § *Per-variant Ethos-U
 selector* (G-1) and § *CPU-class TFLM kernel selector* (G-2).
@@ -233,7 +233,7 @@ cores:
 
 No backend pick needed in `board.yaml` — V2N101's SoM preset
 declares `capabilities.drp_ai: true`, so the loader emits
-`CONFIG_ALP_SDK_INFERENCE_DRPAI=y` automatically, alongside the
+`CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y` automatically, alongside the
 TFLM CPU fallback.  The app calls `alp_inference_open` with the
 same `.backend = ALP_INFERENCE_BACKEND_AUTO`, and the dispatcher
 routes to DRP-AI on V2N silicon, Ethos-U on AEN silicon, CPU

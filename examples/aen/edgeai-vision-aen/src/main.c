@@ -114,11 +114,11 @@ static int              stage_model_load(void)
 {
     printf("[edgeai] stage 3: model load\n");
     /* The SDK exposes a unified inference surface via <alp/inference.h>.
-     * On AEN-Zephyr (CONFIG_ALP_SDK_INFERENCE_TFLM=y +
-     * CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y) this opens a Vela-compiled
-     * MobileNetV2 with the Ethos-U op resolver wired in; on native_sim
-     * (no TFLM) the wrapper falls back to NOSUPPORT and the example
-     * keeps running with the model load skipped.
+     * On AEN-Zephyr (CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y +
+     * CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y) this opens a
+     * Vela-compiled MobileNetV2 with the Ethos-U op resolver wired in;
+     * on native_sim (no TFLM) the sw_fallback backend returns NOSUPPORT
+     * and the example keeps running with the model load skipped.
      *
      * The model bytes ship under models/ -- empty in the v0.2
      * scaffold, populated when the Vela toolchain run lands.  The

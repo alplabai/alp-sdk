@@ -81,6 +81,10 @@ typedef uint8_t alp_renesas_power_supervisor_mode_t;
  * @ref alp_power_request_sleep wraps the same machinery and is
  * the right call for most consumers).
  *
+ * @par Supported silicon: renesas:rzv2n:n44 (other Renesas V2N SoCs
+ * that ship the GD32G553 supervisor adopt this surface as they
+ * gain the corresponding ALP_SOC_RENESAS_RZV2N_* gate).
+ *
  * @param handle           Handle from @ref alp_power_open opened
  *                         against a Renesas V2N SoC.  Non-NULL.
  * @param supervisor_mode  Mode byte sent verbatim to the supervisor.

@@ -7,6 +7,71 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — Linker-section backend registry (Slices 0..7) (2026-05-23)
+
+Replaces the per-class `#if`-ladder dispatch that lived in
+`src/zephyr/peripheral_<class>.c` with a portable, linker-section
+backend registry. Every supported peripheral class (`adc`, `i2c`,
+`spi`, `uart`, `gpio`, `pwm`, `i2s`, `can`, `counter`, `qenc`, `rtc`,
+`wdt`, `usb`, `ble`, `wifi`, `mqtt`, `audio`, `mproc`, `rpc`,
+`security`, `dsp`, `tmu`, `storage`, `power`, `camera`, `inference`,
+`display`, `gpu2d`) now dispatches through a class-specific section
+walked by `alp_backend_select()` in `src/backend.c`.
+
+- **Class dispatchers** live at `src/<class>_dispatch.c` and own the
+  handle pool. They are OS-agnostic — no `<zephyr/...>` types in the
+  shared `<class>_ops.h` headers per issue #34's cleanup.
+- **Backends** live at `src/backends/<class>/<vendor>.c` and register
+  via `ALP_BACKEND_REGISTER(<class>, <vendor>, { … })`. Variants today:
+  - **Real Zephyr backends** (`zephyr_drv.c` / `zephyr_video.c` /
+    `zephyr_pm_policy.c` / `zephyr_flash.c` / `zephyr_littlefs.c`)
+  - **SW fallbacks** (`sw_fallback.c`) registered at `silicon_ref="*"`
+    priority 0 — universal floor.
+  - **Vendor-specific bridges** (`gd32_bridge.c` for adc/counter/qenc
+    on V2N) registered at `silicon_ref="renesas:rzv2n:n44"` priority
+    100.
+  - **NOT_IMPLEMENTED stubs** for backends whose vendor pack hasn't
+    landed yet (DRP-AI3 → issue #58, DEEPX DX-M1 → issue #59).
+- **Selector tiebreaker** (3 tiers, documented in `src/backend.c` +
+  `<alp/backend.h>`): (1) higher priority wins; (2) exact `silicon_ref`
+  beats `*` wildcard at equal priority; (3) alphabetic vendor at
+  same priority + match-type. Test coverage in
+  `tests/unit/backend_registry/src/test_registry.c` and
+  `tests/unit/backend_registry/src/test_bridge_selection.c`.
+- **Capability getters** added: `alp_<class>_capabilities()` for
+  every migrated class, returning the shared `alp_capabilities_t`
+  + `alp_instance_cap_t` flags populated by the backend's
+  `ops->probe()` at open time.
+- **Vendor extensions** (`<alp/ext/<vendor>/<class>.h>`) for the
+  silicon-specific surfaces that don't fit the portable API:
+  - `<alp/ext/alif/adc.h>` (oversampling, trigger source)
+  - `<alp/ext/alif/storage.h>` (OSPI SecAES — body NOSUPPORT until
+    Alif HAL pack)
+  - `<alp/ext/nxp/storage.h>` (FlexSPI OTFAD — body NOSUPPORT until
+    NXP pack)
+  - `<alp/ext/renesas/power.h>` (GD32 supervisor mode set via
+    `CMD_POWER_MODE_SET` opcode 0x28)
+  - `<alp/ext/renesas/camera.h>` (V2N N44 ISP fine-grained knobs)
+  - `<alp/ext/alif/camera.h>` (Mali-C55 — body NOSUPPORT until
+    Alif HAL Mali-C55 pack)
+  - `<alp/ext/renesas/inference.h>` (DRP-AI3 pipeline-stage knobs)
+  - `<alp/ext/deepx/inference.h>` (DX-M1 slot + tile management)
+- **Inference Kconfig ladder** retired. `CONFIG_ALP_SDK_INFERENCE_TFLM`
+  → `_BACKEND_TFLM`; `_DRPAI` → `_BACKEND_DRPAI_V2N`; `_ETHOS_U` →
+  `_BACKEND_ETHOS_U_AEN` / `_ETHOS_U_N93`; `_ETHOS_U_U55` →
+  `_ETHOS_U_VARIANT_U55` etc.; `_TFLM_NEON/HELIUM/REF` →
+  `_TFLM_KERNEL_NEON/HELIUM/REF`. Customer-facing
+  `ALP_INFERENCE_BACKEND_AUTO/CPU/ETHOS_U/DRPAI/DEEPX_DX` enum
+  unchanged.
+- **CI gates** (`scripts/check_stub_issues.py`, `_sw_fallback_tags.py`,
+  `_vendor_ext_tags.py`) enforce per-backend documentation
+  conventions (issue trackers on stubs, `@par Cost`/`Performance` on
+  SW fallbacks, `@par Supported silicon` on vendor extensions).
+- **Yocto-side migration** deferred to tracking issue #33.
+
+ADR / spec: `docs/architecture/backend-registry.md` +
+`docs/superpowers/specs/2026-05-21-backend-registry-design.md`.
+
 ### Added — OTA Zephyr-client provider-driven dispatch (ADR 0009 resolved) (2026-05-20)
 
 Lands the v0.6 follow-on to ADR 0009: `ota.provider:` is now a

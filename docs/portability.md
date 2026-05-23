@@ -158,8 +158,8 @@ the U55 line:
 - CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y
 + CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y
   CONFIG_ALP_SDK_CHIP_CC3501E=y
-  CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U55=y
-+ CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U85=y
+  CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y
++ CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y
   CONFIG_I2C=y
 ```
 
@@ -250,7 +250,7 @@ And, on the Linux/CMake side
 
 (DEEPX lives on the Linux PCIe path, not Zephyr.)
 
-The DRP-AI3 driver enable (`CONFIG_ALP_SDK_INFERENCE_DRPAI=y`) is
+The DRP-AI3 driver enable (`CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y`) is
 unchanged — both SKUs carry the same RZ/V2N silicon, so DRP-AI3 is
 present on both.  V2M101 lights up DEEPX *in addition*.
 

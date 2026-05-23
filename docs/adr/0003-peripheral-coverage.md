@@ -49,9 +49,13 @@ Deferred to a separate header (out of scope for v0.2's `<alp/*.h>`):
 Each new class:
 - Has a public header `<alp/<class>.h>` with `@brief` / `@param` /
   `@return` Doxygen on every function.
-- Has a Zephyr backend at `src/zephyr/peripheral_<class>.c` that
+- Has a portable class dispatcher at `src/<class>_dispatch.c` that
   resolves the studio-supplied `*_id` via the `alp-<class>N` DT
-  alias and forwards to Zephyr's matching driver class.
+  alias and routes through the backend registry (see
+  [`docs/architecture/backend-registry.md`](../architecture/backend-registry.md)).
+- Has at least one Zephyr backend at `src/backends/<class>/zephyr_drv.c`
+  registered via `ALP_BACKEND_REGISTER` that forwards to Zephyr's
+  matching driver class.
 - Has a Kconfig opt-in at `CONFIG_ALP_SDK_PERIPH_<CLASS>` that
   defaults `y if <ZEPHYR_SUBSYS>` so consumers don't pay code-size
   for classes they don't use.

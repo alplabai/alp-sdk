@@ -38,7 +38,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 RPC_SRC = REPO / "src" / "yocto" / "rpc_yocto.c"
 RPC_HDR = REPO / "include" / "alp" / "rpc.h"
-ZEPHYR_SRC = REPO / "src" / "zephyr" / "rpc_zephyr.c"
+ZEPHYR_SRC = REPO / "src" / "backends" / "rpc" / "zephyr_drv.c"
 
 
 # ---------------------------------------------------------------------
@@ -319,10 +319,10 @@ class TestRpcYoctoStructure:
     def test_correlation_strategy_matches_zephyr(
         self, rpc_source: str, zephyr_source: str
     ) -> None:
-        """The Zephyr backend (rpc_zephyr.c) uses per-channel
-        serialisation with a single call slot keyed on the method
-        name.  The Linux backend MUST follow the same model so the
-        two sides interop byte-for-byte.
+        """The Zephyr backend (src/backends/rpc/zephyr_drv.c) uses
+        per-channel serialisation with a single call slot keyed on
+        the method name.  The Linux backend MUST follow the same
+        model so the two sides interop byte-for-byte.
 
         We check that neither backend prepends a 32-bit correlation
         ID to the frame.  Both rely on the method-name echo from the
@@ -330,7 +330,7 @@ class TestRpcYoctoStructure:
         # Neither side should emit a correlation-ID symbol.
         for src, name in [
             (rpc_source, "rpc_yocto.c"),
-            (zephyr_source, "rpc_zephyr.c"),
+            (zephyr_source, "src/backends/rpc/zephyr_drv.c"),
         ]:
             assert "corr_id" not in src and "correlation_id" not in src, \
                 f"{name} appears to carry a correlation-ID field -- " \

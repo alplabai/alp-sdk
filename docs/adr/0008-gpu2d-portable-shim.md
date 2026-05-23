@@ -54,8 +54,9 @@ void         alp_gpu2d_close(alp_gpu2d_t *ctx);
 
 Backends:
 
-- **AEN-Zephyr** (`src/zephyr/gpu2d_zephyr.c`) -- wires to
-  Mali-D71 via Alif's vendor SDK.
+- **AEN-Zephyr** (`src/backends/gpu2d/zephyr_stub.c` today;
+  Mali-D71 real backend tracked by issue #24) -- wires to
+  Mali-D71 via Alif's vendor SDK once the real backend lands.
 - **V2N / V2N-M1 / i.MX 93 / other** -- return
   `ALP_ERR_NOSUPPORT` from `alp_gpu2d_open`.  Callers use
   `alp_last_error()` to diagnose + fall back to CPU
@@ -109,8 +110,9 @@ Backends:
 ## See also
 
 - [`<alp/gpu2d.h>`](../../include/alp/gpu2d.h) — the public API.
-- [`src/zephyr/gpu2d_zephyr.c`](../../src/zephyr/gpu2d_zephyr.c)
-  — AEN-Zephyr backend.
+- [`src/backends/gpu2d/zephyr_stub.c`](../../src/backends/gpu2d/zephyr_stub.c)
+  — AEN-Zephyr backend (stub today; Mali-D71 real backend
+  tracked by issue #24).
 - Internal AEN feature audit (private repo) — the report that
   flagged GPU2D as the headline gap.
 - [`docs/abi-markers.md`](../abi-markers.md) — explains why
