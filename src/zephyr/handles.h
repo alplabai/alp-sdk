@@ -130,45 +130,14 @@ struct alp_pwm {
 };
 
 /* ------------------------------------------------------------------ */
-/* ADC                                                                 */
+/* ADC -- struct alp_adc layout moved to src/backends/adc/adc_ops.h    */
+/*   (Slice 1 ADC-registry pilot, 2026-05-22).  Both the new           */
+/*   dispatcher and the per-vendor backends share that definition.     */
 /* ------------------------------------------------------------------ */
 
-struct alp_adc {
-    bool                  in_use;
-    uint32_t              channel_id;
-    const struct device  *dev;
-    uint8_t               channel;       /* hardware channel id */
-    uint8_t               resolution;
-    uint8_t               oversampling;
-    uint8_t               gain;          /* zephyr adc_gain encoded enum */
-    uint8_t               reference;     /* zephyr adc_reference encoded enum */
-    uint16_t              vref_mv;
-    uint16_t              acquisition_us;
-    int16_t               sample_buf;    /* room for one sample */
-};
+/* Counter -- struct alp_counter layout moved to src/backends/counter/counter_ops.h (Slice 4a, 2026-05-22) */
 
-/* ------------------------------------------------------------------ */
-/* Counter                                                             */
-/* ------------------------------------------------------------------ */
-
-struct alp_counter {
-    bool                       in_use;
-    uint32_t                   counter_id;
-    const struct device       *dev;
-    alp_counter_alarm_cb_t     alarm_cb;
-    void                      *alarm_user;
-};
-
-/* ------------------------------------------------------------------ */
-/* Quadrature encoder                                                  */
-/* ------------------------------------------------------------------ */
-
-struct alp_qenc {
-    bool                  in_use;
-    uint32_t              encoder_id;
-    const struct device  *dev;
-    int32_t               last_position;  /* monotonic accumulator */
-};
+/* QEnc -- struct alp_qenc layout moved to src/backends/qenc/qenc_ops.h (Slice 4a, 2026-05-22) */
 
 /* ------------------------------------------------------------------ */
 /* I2S                                                                 */
@@ -197,27 +166,9 @@ struct alp_can {
     bool                  started;
 };
 
-/* ------------------------------------------------------------------ */
-/* RTC                                                                 */
-/* ------------------------------------------------------------------ */
+/* RTC -- struct alp_rtc layout moved to src/backends/rtc/rtc_ops.h (Slice 4a, 2026-05-22) */
 
-struct alp_rtc {
-    bool                  in_use;
-    uint32_t              rtc_id;
-    const struct device  *dev;
-};
-
-/* ------------------------------------------------------------------ */
-/* Watchdog                                                            */
-/* ------------------------------------------------------------------ */
-
-struct alp_wdt {
-    bool                  in_use;
-    uint32_t              wdt_id;
-    const struct device  *dev;
-    int                   channel_id;     /* zephyr wdt_install_timeout return */
-    alp_wdt_config_t      cfg;
-};
+/* WDT -- struct alp_wdt layout moved to src/backends/wdt/wdt_ops.h (Slice 4a, 2026-05-22) */
 
 /* ------------------------------------------------------------------ */
 /* DAC                                                                 */
@@ -277,26 +228,20 @@ void                alp_z_gpio_pool_release(struct alp_gpio *h);
 struct alp_pwm     *alp_z_pwm_pool_acquire(void);
 void                alp_z_pwm_pool_release(struct alp_pwm *h);
 
-struct alp_adc     *alp_z_adc_pool_acquire(void);
-void                alp_z_adc_pool_release(struct alp_adc *h);
+/* alp_z_adc_pool_* removed in Slice 1 -- the new src/adc_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_adc layout. */
 
-struct alp_counter *alp_z_counter_pool_acquire(void);
-void                alp_z_counter_pool_release(struct alp_counter *h);
+/* alp_z_counter_pool_* removed in Slice 4a -- the new src/counter_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_counter layout. */
 
-struct alp_qenc    *alp_z_qenc_pool_acquire(void);
-void                alp_z_qenc_pool_release(struct alp_qenc *h);
+/* alp_z_qenc_pool_* removed in Slice 4a -- the new src/qenc_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_qenc layout. */
 
 struct alp_i2s     *alp_z_i2s_pool_acquire(void);
 void                alp_z_i2s_pool_release(struct alp_i2s *h);
 
 struct alp_can     *alp_z_can_pool_acquire(void);
 void                alp_z_can_pool_release(struct alp_can *h);
-
-struct alp_rtc     *alp_z_rtc_pool_acquire(void);
-void                alp_z_rtc_pool_release(struct alp_rtc *h);
-
-struct alp_wdt     *alp_z_wdt_pool_acquire(void);
-void                alp_z_wdt_pool_release(struct alp_wdt *h);
 
 struct alp_dac     *alp_z_dac_pool_acquire(void);
 void                alp_z_dac_pool_release(struct alp_dac *h);

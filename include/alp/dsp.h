@@ -83,6 +83,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "alp/cap_instance.h"
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -308,6 +309,22 @@ alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
  * @param[in] chain  Handle from @ref alp_dsp_chain_open, or NULL.
  */
 void alp_dsp_chain_close(alp_dsp_chain_t *chain);
+
+/**
+ * @brief Cached per-handle capability snapshot.
+ *
+ * Returns a pointer to the capability bitmask the backend registry
+ * recorded for @p chain at @ref alp_dsp_chain_open time.  The flags
+ * are SoC-specific (HW-FFT-present, Q31 fast-path, ...); use
+ * @ref alp_capabilities_has to test individual bits.
+ *
+ * @param[in] chain  Handle from @ref alp_dsp_chain_open, or NULL.
+ *
+ * @return Pointer to the cached capability struct, or NULL if
+ *         @p chain is NULL.  The pointer is valid until
+ *         @ref alp_dsp_chain_close.
+ */
+const alp_capabilities_t *alp_dsp_chain_capabilities(const alp_dsp_chain_t *chain);
 
 #ifdef __cplusplus
 }  /* extern "C" */

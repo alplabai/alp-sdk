@@ -1,0 +1,6 @@
+# 'som' is required at the top level.
+preset: e1m-evk
+cores:
+  m55_hp:
+    app: ./src
+    peripherals: []

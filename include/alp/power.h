@@ -59,6 +59,7 @@
 
 #include <stdint.h>
 
+#include "alp/cap_instance.h"
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -173,6 +174,14 @@ alp_status_t alp_power_request_sleep(alp_power_t *handle, alp_power_mode_t mode,
  * @param[in] handle  Handle from @ref alp_power_open, or NULL.
  */
 void alp_power_close(alp_power_t *handle);
+
+/**
+ * @brief Query the capabilities of an opened power handle.
+ *
+ * @param handle  Handle from @ref alp_power_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p handle is NULL.
+ */
+const alp_capabilities_t *alp_power_capabilities(const alp_power_t *handle);
 
 #ifdef __cplusplus
 }  /* extern "C" */

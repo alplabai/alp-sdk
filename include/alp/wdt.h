@@ -39,6 +39,8 @@
 
 #include <stdint.h>
 
+#include <alp/cap_instance.h>
+
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -105,6 +107,14 @@ alp_status_t alp_wdt_disable(alp_wdt_t *wdt);
 
 /** @brief Best-effort disable, then release the handle.  NULL is a no-op. */
 void         alp_wdt_close(alp_wdt_t *wdt);
+
+/**
+ * @brief Query the capabilities of an opened watchdog handle.
+ *
+ * @param wdt  Handle from @ref alp_wdt_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p wdt is NULL.
+ */
+const alp_capabilities_t *alp_wdt_capabilities(const alp_wdt_t *wdt);
 
 #ifdef __cplusplus
 }  /* extern "C" */

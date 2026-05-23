@@ -2,36 +2,19 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Zephyr backend for <alp/adc.h>.
+ * Streaming ADC backend for <alp/adc.h>.
  *
- * Channel resolution.  Each studio-resolved channel_id (0..7) maps to
- * the `alp-adcN` DT alias.  The alias must point at a node with
- * `io-channels` plus the Zephyr ADC channel-config properties
- * (`zephyr,resolution`, `zephyr,reference`, `zephyr,gain`,
- * `zephyr,acquisition-time`):
+ * Owns alp_adc_stream_open / _read / _close on Zephyr targets.
+ * V2N family (V2N + V2N-M1): routes through the GD32G553 supervisor
+ * MCU's DMA-backed stream slots.  Other SoMs: returns
+ * ALP_ERR_NOSUPPORT (a polling-thread software fallback is on the
+ * wave-2 roadmap).
  *
- *     adc_user0: adc_user_0 {
- *         io-channels = <&adc0 0>;
- *         zephyr,resolution  = <12>;
- *         zephyr,reference   = "ADC_REF_INTERNAL";
- *         zephyr,gain        = "ADC_GAIN_1";
- *         zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
- *         zephyr,vref-mv     = <3300>;
- *     };
- *     aliases { alp-adc0 = &adc_user0; };
- *
- * Capability validation.  The active SoC's documented ADC max
- * resolution is exposed by `<alp/soc_caps.h>` as
- * `ALP_SOC_ADC_MAX_RESOLUTION_BITS`.  Asking for a higher resolution
- * than the SoC supports returns NULL with last_error =
- * ALP_ERR_OUT_OF_RANGE — for example, a 16-bit request on an Alif E3
- * (12-bit hardware) is rejected before any I/O.
- *
- * Conditional spec construction.  ADC_DT_SPEC_GET fails to expand
- * when given DT_INVALID_NODE (it interrogates the node's properties
- * unconditionally), so we can't just COND_CODE_1 on alias existence.
- * Per-index #if blocks emit either ADC_DT_SPEC_GET or a NULL spec,
- * and the array is built from those.
+ * One-shot ADC (alp_adc_open / read_raw / read_uv / close) lives in
+ * the registry-based src/adc_dispatch.c + src/backends/adc/*.c as of
+ * the Slice 1 migration (2026-05-22).  This file shares no symbols
+ * with the dispatcher; both compile together under
+ * CONFIG_ALP_SDK_PERIPH_ADC.
  */
 
 #include <errno.h>
@@ -60,68 +43,10 @@
 #define ALP_ADC_HAS_BRIDGE_PATH 0
 #endif
 
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc0))
-#define ALP_ADC_SPEC_0_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc0))
-#else
-#define ALP_ADC_SPEC_0_INIT  {.dev = NULL}
-#endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc1))
-#define ALP_ADC_SPEC_1_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc1))
-#else
-#define ALP_ADC_SPEC_1_INIT  {.dev = NULL}
-#endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc2))
-#define ALP_ADC_SPEC_2_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc2))
-#else
-#define ALP_ADC_SPEC_2_INIT  {.dev = NULL}
-#endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc3))
-#define ALP_ADC_SPEC_3_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc3))
-#else
-#define ALP_ADC_SPEC_3_INIT  {.dev = NULL}
-#endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc4))
-#define ALP_ADC_SPEC_4_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc4))
-#else
-#define ALP_ADC_SPEC_4_INIT  {.dev = NULL}
-#endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc5))
-#define ALP_ADC_SPEC_5_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc5))
-#else
-#define ALP_ADC_SPEC_5_INIT  {.dev = NULL}
-#endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc6))
-#define ALP_ADC_SPEC_6_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc6))
-#else
-#define ALP_ADC_SPEC_6_INIT  {.dev = NULL}
-#endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc7))
-#define ALP_ADC_SPEC_7_INIT  ADC_DT_SPEC_GET(DT_ALIAS(alp_adc7))
-#else
-#define ALP_ADC_SPEC_7_INIT  {.dev = NULL}
-#endif
-
-static const struct adc_dt_spec alp_adcs[] = {
-    ALP_ADC_SPEC_0_INIT,
-    ALP_ADC_SPEC_1_INIT,
-    ALP_ADC_SPEC_2_INIT,
-    ALP_ADC_SPEC_3_INIT,
-    ALP_ADC_SPEC_4_INIT,
-    ALP_ADC_SPEC_5_INIT,
-    ALP_ADC_SPEC_6_INIT,
-    ALP_ADC_SPEC_7_INIT,
-};
-
-static alp_status_t errno_to_alp(int err) {
-    switch (err) {
-    case 0:           return ALP_OK;
-    case -EINVAL:     return ALP_ERR_INVAL;
-    case -EBUSY:      return ALP_ERR_BUSY;
-    case -ENOTSUP:
-    case -ENOSYS:     return ALP_ERR_NOSUPPORT;
-    default:          return ALP_ERR_IO;
-    }
-}
+/* DT spec table and errno_to_alp removed -- they were only used by
+ * the one-shot ADC path, which moved to src/backends/adc/alif_e7.c
+ * during the Slice 1 migration.  Streaming uses gd32g553_adc_stream_*
+ * directly with explicit alp_status_t returns. */
 
 #if ALP_ADC_HAS_BRIDGE_PATH
 /* Stream-slot bitmap.  The GD32G553 firmware exposes exactly
@@ -162,211 +87,13 @@ static void bridge_stream_free_slot(uint8_t slot)
     k_mutex_unlock(&bridge_stream_lock);
 }
 
-static alp_adc_t *bridge_open(const alp_adc_config_t *cfg) {
-    /* The bridge advertises a fixed 12-bit / ~3.3 V reference DAC;
-     * its ADC_READ replies are already mV-corrected, so the host
-     * presents the channel to callers as a 16-bit-resolution
-     * mV-encoded ADC and skips the Zephyr adc_raw_to_millivolts
-     * conversion. */
-    if (cfg->channel_id >= 8u) {
-        /* The E1M spec reserves 8 ADC channels and the bridge
-         * advertises exactly that many in gd32-io-mcu-map.tsv. */
-        alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
-        return NULL;
-    }
 
-    /* Probe the supervisor up-front so the first read doesn't surface
-     * the bus-open failure as a runtime error, AND -- when the caller
-     * asked for any v0.3 tuning knob -- push the configuration in
-     * before returning the handle.  Holding the mutex for the whole
-     * window keeps the probe + configure atomic from the supervisor's
-     * point of view. */
-    gd32g553_t *ctx = NULL;
-    alp_status_t s = alp_z_v2n_supervisor_acquire(&ctx);
-    if (s != ALP_OK) {
-        alp_z_set_last_error(s);
-        return NULL;
-    }
-    if (cfg->oversampling_ratio != 0u || cfg->sample_cycles != 0u || cfg->resolution_bits != 0u) {
-        s = gd32g553_adc_configure(ctx, (uint8_t)cfg->channel_id, cfg->oversampling_ratio,
-                                   cfg->sample_cycles, cfg->resolution_bits);
-        if (s != ALP_OK) {
-            alp_z_v2n_supervisor_release();
-            alp_z_set_last_error(s);
-            return NULL;
-        }
-    }
-    alp_z_v2n_supervisor_release();
+/* One-shot ADC (alp_adc_open / read_raw / read_uv / close) was lifted into
+ * the registry-based src/adc_dispatch.c + src/backends/adc/{alif_e7,gd32_bridge,sw_fallback}.c
+ * during the Slice 1 ADC-registry pilot (2026-05-22).  This file now hosts only the
+ * streaming ADC implementation (alp_adc_stream_*), which defers to Slice 1.x.
+ */
 
-    struct alp_adc *h = alp_z_adc_pool_acquire();
-    if (h == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOMEM);
-        return NULL;
-    }
-
-    h->channel_id = cfg->channel_id;
-    h->dev        = NULL;                      /* bridge sentinel */
-    h->channel    = (uint8_t)cfg->channel_id;  /* bridge-side index == E1M index */
-    h->resolution = 16u;                       /* mV fits in u16 across 3.3 V rails */
-    h->vref_mv    = 3300u;                     /* documentation only -- the
-                                                * mV value already encodes any
-                                                * reference / gain choice. */
-    return h;
-}
-#endif  /* ALP_ADC_HAS_BRIDGE_PATH */
-
-alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg) {
-    alp_z_clear_last_error();
-
-    if (cfg == NULL) {
-        alp_z_set_last_error(ALP_ERR_INVAL);
-        return NULL;
-    }
-    /* Top-level channel_id bound applies to both paths; keeping the
-     * ARRAY_SIZE reference here also stops -Werror=unused-const-variable
-     * from flagging alp_adcs[] when ALP_ADC_HAS_BRIDGE_PATH=1
-     * (`bridge_open` does its own < 8 check but doesn't touch the
-     * DT-spec array). */
-    if (cfg->channel_id >= ARRAY_SIZE(alp_adcs)) {
-        alp_z_set_last_error(ALP_ERR_INVAL);
-        return NULL;
-    }
-
-#if ALP_ADC_HAS_BRIDGE_PATH
-    return bridge_open(cfg);
-#else
-    /* Capability check — reject configs the active SoC's documented
-     * hardware can't honour.  This catches the canonical
-     * "16-bit ADC requested on a 12-bit SoC" case before any
-     * runtime I/O. */
-    if (cfg->resolution_bits != 0 &&
-        cfg->resolution_bits > ALP_SOC_ADC_MAX_RESOLUTION_BITS) {
-        alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
-        return NULL;
-    }
-    if (cfg->channel_id >= ALP_SOC_ADC_COUNT) {
-        alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
-        return NULL;
-    }
-
-    const struct adc_dt_spec *spec = &alp_adcs[cfg->channel_id];
-    if (spec->dev == NULL || !device_is_ready(spec->dev)) {
-        alp_z_set_last_error(ALP_ERR_NOT_READY);
-        return NULL;
-    }
-
-    /* Cross-check against the runtime device's DT-declared maximum.
-     * The SoC-cap macro is the documented limit; the DT spec is
-     * what's actually wired on this board. */
-    if (cfg->resolution_bits != 0 &&
-        cfg->resolution_bits > spec->resolution) {
-        alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
-        return NULL;
-    }
-
-    struct alp_adc *h = alp_z_adc_pool_acquire();
-    if (h == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOMEM);
-        return NULL;
-    }
-
-    h->channel_id = cfg->channel_id;
-    h->dev        = spec->dev;
-    h->channel    = spec->channel_id;
-    h->resolution = (cfg->resolution_bits != 0)
-                      ? cfg->resolution_bits
-                      : (uint8_t)spec->resolution;
-    h->vref_mv    = spec->vref_mv;
-
-    int err = adc_channel_setup_dt(spec);
-    if (err != 0) {
-        alp_z_set_last_error(errno_to_alp(err));
-        alp_z_adc_pool_release(h);
-        return NULL;
-    }
-    return h;
-#endif  /* ALP_ADC_HAS_BRIDGE_PATH */
-}
-
-static alp_status_t one_shot(struct alp_adc *h, int32_t *raw_out) {
-    struct adc_sequence seq = {
-        .channels    = BIT(h->channel),
-        .buffer      = &h->sample_buf,
-        .buffer_size = sizeof h->sample_buf,
-        .resolution  = h->resolution,
-    };
-    int err = adc_read(h->dev, &seq);
-    if (err != 0) return errno_to_alp(err);
-    *raw_out = (int32_t)h->sample_buf;
-    return ALP_OK;
-}
-
-#if ALP_ADC_HAS_BRIDGE_PATH
-static alp_status_t bridge_read_mv(struct alp_adc *h, uint16_t *mv_out) {
-    gd32g553_t *ctx = NULL;
-    alp_status_t s = alp_z_v2n_supervisor_acquire(&ctx);
-    if (s != ALP_OK) return s;
-    /* Ask for a single sample -- the firmware averages internally;
-     * callers that want N-sample averaging on the host side can
-     * issue a sequence of read_raw / read_uv calls. */
-    s = gd32g553_adc_read(ctx, h->channel, 1u, mv_out);
-    alp_z_v2n_supervisor_release();
-    return s;
-}
-#endif
-
-alp_status_t alp_adc_read_raw(alp_adc_t *adc, int32_t *raw_out) {
-    if (adc == NULL || !adc->in_use) return ALP_ERR_NOT_READY;
-    if (raw_out == NULL) return ALP_ERR_INVAL;
-#if ALP_ADC_HAS_BRIDGE_PATH
-    if (adc->dev == NULL) {
-        /* Bridge already reports mV; the V2N "raw" value is mV
-         * sign-extended into int32 -- there's no lower-level code
-         * the host can recover. */
-        uint16_t mv = 0u;
-        alp_status_t s = bridge_read_mv(adc, &mv);
-        if (s != ALP_OK) return s;
-        *raw_out = (int32_t)mv;
-        return ALP_OK;
-    }
-#endif
-    return one_shot(adc, raw_out);
-}
-
-alp_status_t alp_adc_read_uv(alp_adc_t *adc, int32_t *uv_out) {
-    if (adc == NULL || !adc->in_use) return ALP_ERR_NOT_READY;
-    if (uv_out == NULL) return ALP_ERR_INVAL;
-#if ALP_ADC_HAS_BRIDGE_PATH
-    if (adc->dev == NULL) {
-        uint16_t mv = 0u;
-        alp_status_t s = bridge_read_mv(adc, &mv);
-        if (s != ALP_OK) return s;
-        *uv_out = (int32_t)mv * 1000;
-        return ALP_OK;
-    }
-#endif
-
-    int32_t raw = 0;
-    alp_status_t s = one_shot(adc, &raw);
-    if (s != ALP_OK) return s;
-
-    int32_t mv = raw;
-    int err = adc_raw_to_millivolts(adc->vref_mv,
-                                    /* gain */ ADC_GAIN_1,
-                                    adc->resolution,
-                                    &mv);
-    if (err != 0) {
-        /* Fallback: raw passthrough as a μV proxy. */
-        *uv_out = raw;
-        return ALP_OK;
-    }
-    *uv_out = mv * 1000;
-    return ALP_OK;
-}
-
-void alp_adc_close(alp_adc_t *adc) {
-    alp_z_adc_pool_release(adc);
-}
 
 /* ====================================================================== */
 /* Streaming ADC -- DMA-backed continuous acquisition.                     */
