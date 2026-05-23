@@ -638,7 +638,6 @@ config ALP_SDK_POWER
 	  wake-handler + the supervisor re-init state machine) land in
 	  follow-up commits per issue #22.
 
-<<<<<<< HEAD
 config ALP_SDK_CAMERA_ZEPHYR_VIDEO
 	bool "Compile the real Zephyr drivers/video/ camera backend"
 	depends on VIDEO
@@ -683,7 +682,7 @@ config ALP_SDK_CAMERA_V2N_N44_ISP
 
 	  Off on non-V2N builds; the zephyr_video backend remains
 	  the default on every other supported SoC.
-=======
+
 config ALP_SDK_POWER_PM_POLICY
 	bool "Compile the real Zephyr pm_policy_* power backend"
 	depends on ALP_SDK_POWER
@@ -717,7 +716,6 @@ config ALP_SDK_POWER_EXT_RENESAS
 
 	  Off on non-V2N builds; the header alone (always installed) is
 	  enough for portable apps to compile-test against the symbol.
->>>>>>> origin/main
 
 config ALP_SDK_GPU2D
 	bool "Enable <alp/gpu2d.h> 2D graphics accelerator surface"
