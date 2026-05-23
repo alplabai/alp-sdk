@@ -12,16 +12,11 @@
  * what the generated init/usage code (and any hand-written application
  * code) calls into.
  *
- * Each peripheral handle is opaque.  The OS-pivoted backend
- * (src/zephyr, src/baremetal, src/yocto) materialises the struct and
- * routes through the vendor wrapper (vendors/alif, vendors/renesas-rzv2n).
+ * Each peripheral handle is opaque.  Backends are picked by the
+ * `<alp/backend.h>` registry mechanism; the Zephyr backends live
+ * under `src/backends/<peripheral>/` and the Yocto / baremetal
+ * backends fill in alongside their respective build trees.
  *
- * Zephyr backends for all four classes (I2C, SPI, GPIO, UART) ship
- * in `src/zephyr/peripheral_{i2c,spi,gpio,uart}.c`; the Yocto and
- * baremetal backends fill in alongside their respective build
- * trees.
- *
-
  * @par ABI status: [ABI-STABLE]
  *      v0.1 surface; locked across every release since v0.1.
  *      See docs/abi-markers.md for the convention.
@@ -33,6 +28,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+
+#include <alp/cap_instance.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -307,6 +304,14 @@ alp_status_t alp_i2c_write_read(alp_i2c_t *bus, uint8_t addr,
  */
 void alp_i2c_close(alp_i2c_t *bus);
 
+/**
+ * @brief Query the capabilities of an opened I2C bus handle.
+ *
+ * @param bus  Handle from @ref alp_i2c_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p bus is NULL.
+ */
+const alp_capabilities_t *alp_i2c_capabilities(const alp_i2c_t *bus);
+
 /* ------------------------------------------------------------------ */
 /* SPI                                                                 */
 /* ------------------------------------------------------------------ */
@@ -386,6 +391,14 @@ alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len);
  */
 void alp_spi_close(alp_spi_t *bus);
 
+/**
+ * @brief Query the capabilities of an opened SPI bus handle.
+ *
+ * @param bus  Handle from @ref alp_spi_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p bus is NULL.
+ */
+const alp_capabilities_t *alp_spi_capabilities(const alp_spi_t *bus);
+
 /* ------------------------------------------------------------------ */
 /* UART                                                                */
 /* ------------------------------------------------------------------ */
@@ -449,6 +462,14 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len,
  * @param[in] port  Handle from @ref alp_uart_open, or NULL.
  */
 void alp_uart_close(alp_uart_t *port);
+
+/**
+ * @brief Query the capabilities of an opened UART port handle.
+ *
+ * @param port  Handle from @ref alp_uart_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p port is NULL.
+ */
+const alp_capabilities_t *alp_uart_capabilities(const alp_uart_t *port);
 
 /* ------------------------------------------------------------------ */
 /* UART -- byte-granular RX ring buffer (optional)                     */

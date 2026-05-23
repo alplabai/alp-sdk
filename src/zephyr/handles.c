@@ -41,18 +41,11 @@
         k_mutex_unlock(&kind##_lock);                                      \
     }
 
-DEFINE_POOL(i2c,     CONFIG_ALP_SDK_MAX_I2C_HANDLES,     alp_i2c)
-DEFINE_POOL(spi,     CONFIG_ALP_SDK_MAX_SPI_HANDLES,     alp_spi)
-DEFINE_POOL(uart,    CONFIG_ALP_SDK_MAX_UART_HANDLES,    alp_uart)
 DEFINE_POOL(gpio,    CONFIG_ALP_SDK_MAX_GPIO_HANDLES,    alp_gpio)
 DEFINE_POOL(pwm,     CONFIG_ALP_SDK_MAX_PWM_HANDLES,     alp_pwm)
 DEFINE_POOL(adc,     CONFIG_ALP_SDK_MAX_ADC_HANDLES,     alp_adc)
-DEFINE_POOL(counter, CONFIG_ALP_SDK_MAX_COUNTER_HANDLES, alp_counter)
-DEFINE_POOL(qenc,    CONFIG_ALP_SDK_MAX_QENC_HANDLES,    alp_qenc)
 DEFINE_POOL(i2s,     CONFIG_ALP_SDK_MAX_I2S_HANDLES,     alp_i2s)
 DEFINE_POOL(can,     CONFIG_ALP_SDK_MAX_CAN_HANDLES,     alp_can)
-DEFINE_POOL(rtc,     CONFIG_ALP_SDK_MAX_RTC_HANDLES,     alp_rtc)
-DEFINE_POOL(wdt,     CONFIG_ALP_SDK_MAX_WDT_HANDLES,     alp_wdt)
 DEFINE_POOL(dac,     CONFIG_ALP_SDK_MAX_DAC_HANDLES,     alp_dac)
 DEFINE_POOL(adc_stream, CONFIG_ALP_SDK_MAX_ADC_STREAM_HANDLES, alp_adc_stream)
 

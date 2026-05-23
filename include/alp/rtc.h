@@ -36,6 +36,8 @@
 
 #include <stdint.h>
 
+#include <alp/cap_instance.h>
+
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -91,6 +93,14 @@ alp_status_t alp_rtc_get_time(alp_rtc_t *rtc, alp_rtc_time_t *time);
 
 /** @brief Release the handle.  Does not stop the RTC.  NULL is a no-op. */
 void         alp_rtc_close(alp_rtc_t *rtc);
+
+/**
+ * @brief Query the capabilities of an opened RTC handle.
+ *
+ * @param rtc  Handle from @ref alp_rtc_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p rtc is NULL.
+ */
+const alp_capabilities_t *alp_rtc_capabilities(const alp_rtc_t *rtc);
 
 #ifdef __cplusplus
 }  /* extern "C" */

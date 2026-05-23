@@ -108,7 +108,9 @@ class TestLoaderContract(unittest.TestCase):
 
     def test_unknown_sku_with_valid_pattern_fails_preset_lookup(self) -> None:
         """A SKU that matches the pattern but has no preset on disk
-        must produce a clear missing-preset error, not a schema error."""
+        must produce a clear error (either a rich ALP-B005 diagnostic
+        from the validator or a legacy 'no preset' message from the
+        orchestrator -- both are acceptable)."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
@@ -120,7 +122,11 @@ class TestLoaderContract(unittest.TestCase):
             """)
             rv = _run_loader(input_path=path)
             self.assertNotEqual(rv.returncode, 0)
-            self.assertIn("no preset", rv.stderr.lower())
+            lower = rv.stderr.lower()
+            self.assertTrue(
+                "no preset" in lower or "alp-b005" in lower,
+                msg=f"expected 'no preset' or 'ALP-B005' in stderr; got: {rv.stderr}",
+            )
 
     def test_inline_populated_flips_chip_kconfig(self) -> None:
         """An inline `populated:` block in a project's board.yaml
