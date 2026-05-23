@@ -522,62 +522,87 @@ config ALP_SDK_AUDIO_IN_SLAB_BLOCKS
 	  by the caller).  Four is a comfortable default; raise for
 	  apps that take longer than the block period to drain.
 
-# Inference (<alp/inference.h>) -- v0.2 deliverable, the wrapper
-# always compiles and falls back to ALP_ERR_NOSUPPORT when no
-# backend is enabled.
+# Inference (<alp/inference.h>) -- backend-registry-driven from
+# Slice 3.  The dispatcher (src/inference_dispatch.c) always
+# compiles and selects from the linker section populated by the
+# per-backend .c / .cpp files below.  Customers pick which
+# backends compile in via the per-backend Kconfigs; the
+# orchestrator emits the right set from the SoM preset's
+# inference.npu_population[] + the SoC JSON.
 
-config ALP_SDK_INFERENCE_TFLM
-	bool "TensorFlow Lite Micro backend for <alp/inference.h>"
+config ALP_SDK_INFERENCE_BACKEND_TFLM
+	bool "TensorFlow Lite Micro backend (portable, priority 50, silicon_ref=*)"
 	default n
 	depends on TENSORFLOW_LITE_MICRO && CPP
 	help
-	  Enable the TFLM-backed executor (src/zephyr/inference_tflm.cpp).
-	  Wraps tflite::MicroInterpreter + tflite::MicroMutableOpResolver
-	  for both CPU (reference kernels) and Ethos-U
-	  (CONFIG_ALP_SDK_INFERENCE_ETHOS_U) backends.  Pulls in TFLM via
-	  the upstream tflite-micro Zephyr module (see west.yml's
-	  name-allowlist).  When OFF, alp_inference_open() returns NULL
-	  with ALP_ERR_NOSUPPORT regardless of the backend selector.
+	  Compile src/backends/inference/tflm.cpp.  Wraps
+	  tflite::MicroInterpreter + tflite::MicroMutableOpResolver
+	  onto the inference ops vtable.  Registers at priority 50
+	  against silicon_ref="*" so it wins on any silicon unless a
+	  vendor-specific NPU backend (ETHOS_U_AEN / ETHOS_U_N93 /
+	  DRPAI_V2N / DEEPX_DXM1) registers at priority 100 on the
+	  matching silicon_ref.  Pulls in TFLM via the upstream
+	  tflite-micro Zephyr module (see west.yml's name-allowlist).
+	  Native_sim builds skip this (no TFLM module); the dispatcher
+	  falls back to sw_fallback.
 
-config ALP_SDK_INFERENCE_DRPAI
-	bool "Renesas DRP-AI3 backend for <alp/inference.h>"
+config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
+	bool "Ethos-U on Alif Ensemble (priority 100 on alif:ensemble:e*)"
 	default n
-	depends on SOC_SERIES_RZV2N || SOC_FAMILY_RENESAS_RZ
+	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
 	help
-	  Wires the alp_inference_drpai_* hooks (src/zephyr/inference_drpai.c)
-	  into the dispatcher.  Real impl bridges Renesas's DRP-AI
-	  translator runtime; v0.3 ships the dispatch routing only,
-	  v0.4 fills the bodies once the vendor pack lands in CI.
-	  When the v0.4 work completes this defaults y on V2N targets.
+	  Compile src/backends/inference/ethos_u_aen.cpp.  Registers
+	  the same TFLM ops table against the six AEN family
+	  silicon_refs (alif:ensemble:e3 / e4 / e5 / e6 / e7 / e8) at
+	  priority 100 so it wins over the portable tflm backend on
+	  AEN.  The Arm Ethos-U op resolver entry (AddEthosU) compiles
+	  into the TFLM body via the per-variant Kconfigs below.
 
-config ALP_SDK_INFERENCE_ETHOS_U
-	bool "Wire Arm Ethos-U op resolver (Vela-compiled models)"
-	default y if ALP_SDK_INFERENCE_TFLM && (SOC_SERIES_ENSEMBLE_E7 || ALP_SOC_NXP_IMX9_IMX93)
-	depends on ALP_SDK_INFERENCE_TFLM
+config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93
+	bool "Ethos-U on NXP i.MX 93 (priority 100 on nxp:imx9:imx93)"
+	default n
+	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
 	help
-	  Adds the AddEthosU() registration so Vela-compiled .tflite
-	  files can dispatch their custom ETHOS-U operator to the NPU.
-	  Covers Ethos-U55 on Alif Ensemble (AEN family) and Ethos-U65 on
-	  NXP i.MX 93's Cortex-M33.  Variant selection happens via
-	  ALP_SDK_INFERENCE_ETHOS_U_N93 (i.MX 93) -- the SDK source path
-	  is identical between U55 and U65; only the Vela compilation
-	  target + Arm driver build differ.  Off-target builds (CPU-only)
-	  must turn this off.
+	  Compile src/backends/inference/ethos_u_n93.cpp.  Registers
+	  the same TFLM ops table against silicon_ref="nxp:imx9:imx93"
+	  at priority 100 so it wins over the portable tflm backend on
+	  i.MX 93.
 
-config ALP_SDK_INFERENCE_ETHOS_U_N93
-	bool "Target the i.MX 93 Ethos-U65 (vs the AEN family's Ethos-U55)"
-	default y if ALP_SOC_NXP_IMX9_IMX93
-	depends on ALP_SDK_INFERENCE_ETHOS_U
+config ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N
+	bool "Renesas DRP-AI3 backend (NOT_IMPLEMENTED stub, priority 100 on V2N)"
+	default n
 	help
-	  Compile the i.MX 93 + Ethos-U65 per-variant config layer
-	  (src/zephyr/inference_ethosu_n93.c).  Anchors the v0.4 NPU
-	  attach hook + variant-name helper that downstream code uses
-	  to keep Vela target consistency.  Models compiled for U55
-	  do not run on U65 and vice versa; this flag plus the SoC
-	  choice above tells the build which Vela target the app
-	  expects.
+	  Compile src/backends/inference/drpai_v2n_stub.c.  Registers
+	  against silicon_ref="renesas:rzv2n:n44" at priority 100; every
+	  op returns ALP_ERR_NOT_IMPLEMENTED until the Renesas DRP-AI
+	  vendor pack lands.  Pinning the stub at higher priority than
+	  the portable tflm means V2N AUTO builds get a clear NOT_IMPLEMENTED
+	  signal rather than silently falling through to TFLM on the
+	  M-class core.  See github issue #58 for the v0.x landing.
 
-# Per-variant Ethos-U silicon switches.  Emitted by the orchestrator
+config ALP_SDK_INFERENCE_BACKEND_DEEPX_DXM1
+	bool "DEEPX DX-M1 backend (NOT_IMPLEMENTED stub, priority 100 on deepx:dx:m1)"
+	default n
+	help
+	  Compile src/backends/inference/deepx_dxm1_stub.c.  Registers
+	  against silicon_ref="deepx:dx:m1" at priority 100; every op
+	  returns ALP_ERR_NOT_IMPLEMENTED until the DEEPX SDK adapter
+	  lands.  See github issue #59 for the v0.x landing.  The
+	  Yocto-side DEEPX body lives at src/yocto/inference_deepx.cpp
+	  and is owned by the Yocto-registry-migration slice.
+
+config ALP_SDK_INFERENCE_SW_FALLBACK
+	bool "Software fallback (stateless NOSUPPORT stub, priority 0)"
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	help
+	  Compile src/backends/inference/sw_fallback.c.  Registered at
+	  priority 0 against silicon_ref="*" so it loses to every real
+	  backend; picked only when no other inference backend is
+	  linked in.  Useful for native_sim builds without
+	  CONFIG_TENSORFLOW_LITE_MICRO; open() succeeds with empty caps
+	  and every other op returns NOSUPPORT.
+
+# Per-variant Ethos-U kernel selectors.  Emitted by the orchestrator
 # (scripts/alp_orchestrate.py) from the SoM preset's
 # `inference.npu_population[]` block + the SoC JSON's
 # `capabilities.ethos_u{55,65,85}_count` fallback -- the customer
@@ -585,57 +610,54 @@ config ALP_SDK_INFERENCE_ETHOS_U_N93
 # Ethos-U variant (E4 / E6 / E8 = U55 pair + one U85) both switches
 # are =y so the upstream Arm Ethos-U driver compiles in the matching
 # kernel sets and the runtime dispatcher logs which variant ran the
-# model.  Orthogonal to ALP_SDK_INFERENCE_ETHOS_U_N93 above, which is
-# the NXP-side PHY / driver-shim selector (coexists on i.MX 93).
+# model.
 
-config ALP_SDK_INFERENCE_ETHOS_U_U55
+config ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55
 	bool "Compile against Arm Ethos-U55 NPU kernels"
-	depends on ALP_SDK_INFERENCE_ETHOS_U
+	depends on ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
 	help
-	  Selected by the orchestrator on SoMs whose silicon carries one
-	  or more Ethos-U55 instances (AEN family E3 / E4 / E5 / E6 / E7 /
-	  E8 all carry a pair; i.MX 93 does not).  The upstream Arm Ethos-U
-	  driver library is compiled with the U55-256 accelerator config so
-	  Vela-compiled U55 models dispatch.  Vela target on the build host
-	  must match: `--accelerator-config ethos-u55-256`.
+	  Selected by the orchestrator on SoMs whose silicon carries
+	  one or more Ethos-U55 instances (AEN family E3 / E4 / E5 /
+	  E6 / E7 / E8 all carry a pair).  The upstream Arm Ethos-U
+	  driver library is compiled with the U55-256 accelerator
+	  config so Vela-compiled U55 models dispatch.  Vela target on
+	  the build host must match: `--accelerator-config ethos-u55-256`.
 
-config ALP_SDK_INFERENCE_ETHOS_U_U65
+config ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65
 	bool "Compile against Arm Ethos-U65 NPU kernels"
-	depends on ALP_SDK_INFERENCE_ETHOS_U
+	depends on ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93
 	help
-	  Selected by the orchestrator on SoMs whose silicon carries one
-	  or more Ethos-U65 instances (NXP i.MX 93 today).  The upstream
+	  Selected by the orchestrator on i.MX 93 builds.  The upstream
 	  Arm Ethos-U driver library is compiled with the U65-256
 	  accelerator config.  Vela target: `--accelerator-config
-	  ethos-u65-256`.  Coexists with ALP_SDK_INFERENCE_ETHOS_U_N93 (the
-	  NXP-side PHY / driver-shim wiring).
+	  ethos-u65-256`.  Required by the ETHOS_U_N93 backend's
+	  compile-time consistency check.
 
-config ALP_SDK_INFERENCE_ETHOS_U_U85
+config ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85
 	bool "Compile against Arm Ethos-U85 NPU kernels (Generative AI)"
-	depends on ALP_SDK_INFERENCE_ETHOS_U
+	depends on ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
 	help
-	  Selected by the orchestrator on SoMs whose silicon carries one
-	  or more Ethos-U85 instances (Alif AEN E4 / E6 / E8; the U85 is
-	  paired with a Hyper-Generative subsystem and adds Transformer
-	  support on top of CNN / RNN).  The upstream Arm Ethos-U driver
-	  library is compiled with U85's TensorOptimized kernels + larger
-	  MAC array.  On U85-carrying SoMs both this AND
-	  ALP_SDK_INFERENCE_ETHOS_U_U55 are =y -- the two U55s alongside
-	  the U85 still need to run U55-compiled models.  Vela target:
+	  Selected by the orchestrator on SoMs whose silicon carries
+	  one or more Ethos-U85 instances (Alif AEN E4 / E6 / E8; the
+	  U85 is paired with a Hyper-Generative subsystem and adds
+	  Transformer support on top of CNN / RNN).  The upstream Arm
+	  Ethos-U driver library is compiled with U85's TensorOptimized
+	  kernels + larger MAC array.  On U85-carrying SoMs both this
+	  AND ETHOS_U_VARIANT_U55 are =y -- the two U55s alongside the
+	  U85 still need to run U55-compiled models.  Vela target:
 	  `--accelerator-config ethos-u85-256`.
 
 # Per-CPU-class TFLM kernel selectors.  Emitted by the orchestrator
-# (scripts/alp_orchestrate.py) from the SoC JSON's
-# `cores[<core_id>].vector_extension` for the slice being built --
-# the customer never picks one in board.yaml.  TFLM upstream ships
-# three kernel implementations (NEON / Helium MVE / scalar reference)
-# and the build picks the one matching the target CPU so we don't
-# pay the cost of compiling the wrong one.  Exactly one of these is
+# from the SoC JSON's cores[<core_id>].vector_extension for the
+# slice being built.  TFLM upstream ships three kernel
+# implementations (NEON / Helium MVE / scalar reference) and the
+# build picks the one matching the target CPU so we don't pay
+# the cost of compiling the wrong one.  Exactly one of these is
 # expected to be =y on any given slice.
 
-config ALP_SDK_INFERENCE_TFLM_NEON
+config ALP_SDK_INFERENCE_TFLM_KERNEL_NEON
 	bool "TFLM NEON-accelerated kernels (Cortex-A cluster)"
-	depends on ALP_SDK_INFERENCE_TFLM
+	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
 	help
 	  Emitted by the orchestrator for cortex-a* slices (A32 / A55).
 	  Selects upstream TFLM's NEON kernel implementation -- 64/128-bit
@@ -643,9 +665,9 @@ config ALP_SDK_INFERENCE_TFLM_NEON
 	  A32 cluster (E5 / E6 / E7 / E8), the V2N family's A55 cluster, and
 	  the i.MX 93's A55 cluster.
 
-config ALP_SDK_INFERENCE_TFLM_HELIUM
+config ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM
 	bool "TFLM Helium MVE-I kernels (Cortex-M55)"
-	depends on ALP_SDK_INFERENCE_TFLM
+	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
 	help
 	  Emitted by the orchestrator for cortex-m55 slices (ARMv8.1-M
 	  Helium vector extension).  Selects upstream TFLM's Helium kernel
@@ -653,9 +675,9 @@ config ALP_SDK_INFERENCE_TFLM_HELIUM
 	  2-4x faster on int8 convolutions than the reference kernels.
 	  Applies to every M55_HP / M55_HE slice across the AEN family.
 
-config ALP_SDK_INFERENCE_TFLM_REF
+config ALP_SDK_INFERENCE_TFLM_KERNEL_REF
 	bool "TFLM scalar reference kernels (baseline Cortex-M)"
-	depends on ALP_SDK_INFERENCE_TFLM
+	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
 	help
 	  Emitted by the orchestrator for baseline Cortex-M slices without
 	  Helium / DSP extensions (the V2N's m33_sm system-manager core,
