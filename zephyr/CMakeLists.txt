@@ -17,7 +17,9 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/delay_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/handles.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/last_error.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_gpio.c
+    # peripheral_gpio.c retired in Slice 2B -- migrated to
+    # src/backends/gpio/{zephyr_drv,sw_fallback}.c with the
+    # dispatcher in src/gpio_dispatch.c.  See the GPIO block below.
     # peripheral_uart.c retired in Slice 2A -- migrated to
     # src/backends/uart/{zephyr_drv,sw_fallback}.c with the
     # dispatcher in src/uart_dispatch.c.  See the UART block below.
@@ -243,14 +245,8 @@ endif()
 # v0.2 peripheral wrappers — opt-in per-class so apps that don't use
 # a given Zephyr subsystem don't link the wrapper.  Each defaults on
 # when its underlying Zephyr driver class is enabled.
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_PWM
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_pwm.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_DAC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_dac.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_I2S
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_i2s.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_CAN
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_can.c)
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/rtc_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/zephyr_drv.c)
@@ -640,6 +636,54 @@ zephyr_library_sources(
 if(CONFIG_ALP_SDK_UART_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/sw_fallback.c)
+endif()
+
+# GPIO class dispatcher + backends (Slice 2b migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_GPIO_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpio_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_GPIO_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/sw_fallback.c)
+endif()
+
+# PWM class dispatcher + backends (Slice 2b migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_PWM_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/pwm_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_PWM_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/pwm/sw_fallback.c)
+endif()
+
+# I2S class dispatcher + backends (Slice 2b migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_I2S_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/i2s_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2s/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_I2S_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2s/sw_fallback.c)
+endif()
+
+# CAN class dispatcher + backends (Slice 2b migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_CAN_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/can_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/can/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_CAN_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/can/sw_fallback.c)
 endif()
 
 # ADC class dispatcher.  Owns the one-shot alp_adc_* API surface

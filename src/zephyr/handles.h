@@ -104,30 +104,13 @@ struct alp_uart_rx_ringbuf {
 /* GPIO                                                                */
 /* ------------------------------------------------------------------ */
 
-struct alp_gpio {
-    bool                  in_use;
-    uint32_t              pin_id;
-    struct gpio_dt_spec   spec;
-    alp_gpio_dir_t        dir;
-    alp_gpio_pull_t       pull;
-    alp_gpio_edge_t       edge;
-    alp_gpio_cb_t         cb;
-    void                  *cb_user;
-    struct gpio_callback  zcb;
-};
+/* struct alp_gpio is defined in src/backends/gpio/gpio_ops.h.         */
 
 /* ------------------------------------------------------------------ */
 /* PWM                                                                 */
 /* ------------------------------------------------------------------ */
 
-struct alp_pwm {
-    bool                  in_use;
-    uint32_t              channel_id;
-    const struct device  *dev;
-    uint32_t              channel;       /* hardware channel within @ref dev */
-    uint32_t              period_ns;
-    uint32_t              flags;         /* zephyr pwm_flags_t */
-};
+/* struct alp_pwm is defined in src/backends/pwm/pwm_ops.h.            */
 
 /* ------------------------------------------------------------------ */
 /* ADC -- struct alp_adc layout moved to src/backends/adc/adc_ops.h    */
@@ -143,28 +126,13 @@ struct alp_pwm {
 /* I2S                                                                 */
 /* ------------------------------------------------------------------ */
 
-struct alp_i2s {
-    bool                  in_use;
-    uint32_t              bus_id;
-    const struct device  *dev;
-    alp_i2s_config_t      cfg;
-    struct k_mem_slab     mem_slab;
-    uint8_t              *slab_buf;       /* allocated lazily on first start */
-    size_t                slab_buf_bytes;
-    bool                  started;
-};
+/* struct alp_i2s is defined in src/backends/i2s/i2s_ops.h.             */
 
 /* ------------------------------------------------------------------ */
 /* CAN                                                                 */
 /* ------------------------------------------------------------------ */
 
-struct alp_can {
-    bool                  in_use;
-    uint32_t              bus_id;
-    const struct device  *dev;
-    alp_can_config_t      cfg;
-    bool                  started;
-};
+/* struct alp_can is defined in src/backends/can/can_ops.h.             */
 
 /* RTC -- struct alp_rtc layout moved to src/backends/rtc/rtc_ops.h (Slice 4a, 2026-05-22) */
 
@@ -222,14 +190,14 @@ struct alp_uart_rx_ringbuf *alp_z_uart_rx_ringbuf_pool_acquire(void);
 void                        alp_z_uart_rx_ringbuf_pool_release(struct alp_uart_rx_ringbuf *h);
 #endif
 
-struct alp_gpio    *alp_z_gpio_pool_acquire(void);
-void                alp_z_gpio_pool_release(struct alp_gpio *h);
-
-struct alp_pwm     *alp_z_pwm_pool_acquire(void);
-void                alp_z_pwm_pool_release(struct alp_pwm *h);
-
 /* alp_z_adc_pool_* removed in Slice 1 -- the new src/adc_dispatch.c
  * owns its own handle pool keyed on the registry's alp_adc layout. */
+
+/* alp_z_gpio_pool_* removed in Slice 2B -- the new src/gpio_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_gpio layout. */
+
+/* alp_z_pwm_pool_* removed in Slice 2B -- the new src/pwm_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_pwm layout. */
 
 /* alp_z_counter_pool_* removed in Slice 4a -- the new src/counter_dispatch.c
  * owns its own handle pool keyed on the registry's alp_counter layout. */
@@ -237,11 +205,17 @@ void                alp_z_pwm_pool_release(struct alp_pwm *h);
 /* alp_z_qenc_pool_* removed in Slice 4a -- the new src/qenc_dispatch.c
  * owns its own handle pool keyed on the registry's alp_qenc layout. */
 
-struct alp_i2s     *alp_z_i2s_pool_acquire(void);
-void                alp_z_i2s_pool_release(struct alp_i2s *h);
+/* alp_z_rtc_pool_* removed in Slice 4a -- the new src/rtc_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_rtc layout. */
 
-struct alp_can     *alp_z_can_pool_acquire(void);
-void                alp_z_can_pool_release(struct alp_can *h);
+/* alp_z_wdt_pool_* removed in Slice 4a -- the new src/wdt_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_wdt layout. */
+
+/* alp_z_i2s_pool_* removed in Slice 2B -- the new src/i2s_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_i2s layout. */
+
+/* alp_z_can_pool_* removed in Slice 2B -- the new src/can_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_can layout. */
 
 struct alp_dac     *alp_z_dac_pool_acquire(void);
 void                alp_z_dac_pool_release(struct alp_dac *h);
