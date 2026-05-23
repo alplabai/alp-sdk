@@ -7,6 +7,7 @@ project(test_backend_registry)
 target_sources(app PRIVATE
     src/test_capabilities.c
     src/test_registry.c
+    src/test_bridge_selection.c
     src/demo_class.c
     src/demo_backend_realhw.c
     src/demo_backend_sw.c
