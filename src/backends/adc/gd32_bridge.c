@@ -32,11 +32,11 @@
 
 #include "adc_ops.h"
 
-/* Internal SDK header — NOT customer-facing.  Provides
- *   alp_z_v2n_supervisor_acquire / _release
- *   gd32g553_adc_configure / gd32g553_adc_read
+/* Internal SDK headers — NOT customer-facing.  Provide:
+ *   alp_z_v2n_supervisor_acquire / _release  (via v2n_supervisor.h)
+ *   gd32g553_adc_configure / gd32g553_adc_read  (via chips/gd32g553.h)
  */
-#include "../../zephyr/handles.h"   /* For alp_z_v2n_supervisor_* */
+#include "v2n_supervisor.h"
 #include <alp/chips/gd32g553.h>
 
 typedef struct gd32_bridge_state {
