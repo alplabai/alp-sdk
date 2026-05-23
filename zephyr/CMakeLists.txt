@@ -75,20 +75,54 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93
 # when its underlying Zephyr driver class is enabled.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_PWM
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_pwm.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_COUNTER
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_counter.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_QENC
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_qenc.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_DAC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_dac.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_I2S
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_i2s.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_CAN
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_can.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_RTC
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_rtc.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_WDT
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_wdt.c)
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/rtc_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_RTC_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/sw_fallback.c)
+endif()
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/wdt_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wdt/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_WDT_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wdt/sw_fallback.c)
+endif()
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/counter_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/counter/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/counter/gd32_bridge.c)
+endif()
+
+if(CONFIG_ALP_SDK_COUNTER_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/counter/sw_fallback.c)
+endif()
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/qenc_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/gd32_bridge.c)
+endif()
+
+if(CONFIG_ALP_SDK_QENC_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/sw_fallback.c)
+endif()
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_TMU
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_tmu.c)
 
