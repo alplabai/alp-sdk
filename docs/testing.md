@@ -85,18 +85,18 @@ It does **not** prove:
 
 | Header                            | Local test(s)                                                                                                         | HIL gate (flips to ✅)                |
 |-----------------------------------|------------------------------------------------------------------------------------------------------------------------|---------------------------------------|
-| `<alp/peripheral.h>` — I²C        | `tests/yocto/peripheral_i2c.c` + `tests/zephyr/peripheral/` (`smoke`)                                                  | `nightly-aen-hil` + `hil-yocto`       |
-| `<alp/peripheral.h>` — SPI        | `tests/yocto/peripheral_spi.c` + `tests/zephyr/peripheral/`                                                            | `nightly-aen-hil` + `hil-yocto`       |
-| `<alp/peripheral.h>` — UART       | `tests/yocto/peripheral_uart.c` + `tests/zephyr/peripheral/` + `examples/uart-echo/`                                   | `nightly-aen-hil` + `hil-yocto`       |
-| `<alp/peripheral.h>` — UART RX ringbuf | `tests/zephyr/peripheral/` (`uart_rx_ringbuf` scenario) + `examples/uart-rx-ringbuf/`                              | `nightly-aen-hil`                     |
-| `<alp/peripheral.h>` — GPIO       | `tests/yocto/peripheral_gpio.c` + `tests/zephyr/peripheral/` + `examples/gpio-button-led/`                             | `nightly-aen-hil` + `hil-yocto`       |
-| `<alp/pwm.h>`                     | `tests/zephyr/peripheral/` (`caps_e3` scenario) + `examples/pwm-led-fade/`                                             | `nightly-aen-hil`                     |
-| `<alp/adc.h>`                     | `tests/zephyr/peripheral/` + `examples/adc-voltmeter/`                                                                 | `nightly-aen-hil`                     |
-| `<alp/counter.h>`                 | `tests/zephyr/peripheral/` + `examples/counter-alarm/` + `examples/qenc-readout/`                                      | `nightly-aen-hil`                     |
-| `<alp/i2s.h>`                     | `tests/zephyr/peripheral/` + `examples/i2s-tone/`                                                                      | `nightly-aen-hil`                     |
-| `<alp/can.h>`                     | `tests/zephyr/peripheral/` + `examples/can-loopback/`                                                                  | `nightly-aen-hil`                     |
-| `<alp/rtc.h>`                     | `tests/zephyr/peripheral/` + `examples/rtc-clock/`                                                                     | `nightly-aen-hil`                     |
-| `<alp/wdt.h>`                     | `tests/zephyr/peripheral/` + `examples/wdt-feed/`                                                                      | `nightly-aen-hil`                     |
+| `<alp/peripheral.h>` — I²C        | `tests/yocto/peripheral_i2c.c` + `tests/unit/i2c_registry/`                                                  | `nightly-aen-hil` + `hil-yocto`       |
+| `<alp/peripheral.h>` — SPI        | `tests/yocto/peripheral_spi.c` + `tests/unit/spi_registry/`                                                            | `nightly-aen-hil` + `hil-yocto`       |
+| `<alp/peripheral.h>` — UART       | `tests/yocto/peripheral_uart.c` + `tests/unit/uart_registry/` + `examples/uart-echo/`                                   | `nightly-aen-hil` + `hil-yocto`       |
+| `<alp/peripheral.h>` — UART RX ringbuf | `tests/unit/uart_registry/` (rx_ringbuf scenario) + `examples/uart-rx-ringbuf/`                              | `nightly-aen-hil`                     |
+| `<alp/peripheral.h>` — GPIO       | `tests/yocto/peripheral_gpio.c` + `tests/unit/gpio_registry/` + `examples/gpio-button-led/`                             | `nightly-aen-hil` + `hil-yocto`       |
+| `<alp/pwm.h>`                     | `tests/unit/pwm_registry/` + `examples/pwm-led-fade/`                                             | `nightly-aen-hil`                     |
+| `<alp/adc.h>`                     | `tests/unit/adc_registry/` + `examples/adc-voltmeter/`                                                                 | `nightly-aen-hil`                     |
+| `<alp/counter.h>`                 | `tests/unit/counter_registry/` + `tests/unit/qenc_registry/` + `examples/counter-alarm/` + `examples/qenc-readout/`                                      | `nightly-aen-hil`                     |
+| `<alp/i2s.h>`                     | `tests/unit/i2s_registry/` + `examples/i2s-tone/`                                                                      | `nightly-aen-hil`                     |
+| `<alp/can.h>`                     | `tests/unit/can_registry/` + `examples/can-loopback/`                                                                  | `nightly-aen-hil`                     |
+| `<alp/rtc.h>`                     | `tests/unit/rtc_registry/` + `examples/rtc-clock/`                                                                     | `nightly-aen-hil`                     |
+| `<alp/wdt.h>`                     | `tests/unit/wdt_registry/` + `examples/wdt-feed/`                                                                      | `nightly-aen-hil`                     |
 | `<alp/audio.h>` (Zephyr)          | `tests/zephyr/audio/` + `examples/audio-loopback/`                                                                     | `nightly-aen-hil`                     |
 | `<alp/audio.h>` (Yocto, ALSA)     | `tests/yocto/audio_alsa.c` — 11 failure paths                                                                          | `hil-yocto`                           |
 | `<alp/iot.h>` — MQTT cleartext    | `tests/yocto/iot_mqtt.c` (parse + open) + `tests/zephyr/iot/`                                                          | `hil-yocto` + `nightly-aen-hil`       |
@@ -159,7 +159,7 @@ cmake --build build/baremetal --parallel
 ```bash
 # LwRB UART RX ringbuf (feature-on compile + ZTEST run)
 twister --testsuite-root tests/zephyr -p native_sim/native/64 \
-    -T tests/zephyr/peripheral -s alp_sdk.peripheral.uart_rx_ringbuf
+    -T tests/unit/uart_registry -s alp_sdk.unit.uart_registry
 
 # nanopb mproc IPC framing
 twister --testsuite-root tests/zephyr -p native_sim/native/64 \

@@ -64,10 +64,10 @@ A release does **not** tag until every row gating it is `verified`.
 
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
-| AEN-Zephyr I²C real backend | `src/zephyr/peripheral_i2c.c` | ⏳ untested | LSM6DSO WHOAMI = 0x6C read back on real E1M EVK via nightly HIL | `nightly-aen-hil` first green run | v0.1 |
-| AEN-Zephyr SPI real backend | `src/zephyr/peripheral_spi.c` | ⏳ untested | SPI flash JEDEC-ID (0x9F READID) returns expected bytes on real EVK | `nightly-aen-hil` | v0.1 |
-| AEN-Zephyr UART real backend | `src/zephyr/peripheral_uart.c` | ⏳ untested | Loopback 1 KiB at 115200 8N1, zero byte loss | `nightly-aen-hil` | v0.1 |
-| AEN-Zephyr GPIO real backend | `src/zephyr/peripheral_gpio.c` | ⏳ untested | Button press observed via IRQ; LED toggle visible on EVK | `nightly-aen-hil` | v0.1 |
+| AEN-Zephyr I²C real backend | `src/backends/i2c/zephyr_drv.c` | ⏳ untested | LSM6DSO WHOAMI = 0x6C read back on real E1M EVK via nightly HIL | `nightly-aen-hil` first green run | v0.1 |
+| AEN-Zephyr SPI real backend | `src/backends/spi/zephyr_drv.c` | ⏳ untested | SPI flash JEDEC-ID (0x9F READID) returns expected bytes on real EVK | `nightly-aen-hil` | v0.1 |
+| AEN-Zephyr UART real backend | `src/backends/uart/zephyr_drv.c` | ⏳ untested | Loopback 1 KiB at 115200 8N1, zero byte loss | `nightly-aen-hil` | v0.1 |
+| AEN-Zephyr GPIO real backend | `src/backends/gpio/zephyr_drv.c` | ⏳ untested | Button press observed via IRQ; LED toggle visible on EVK | `nightly-aen-hil` | v0.1 |
 | `<alp/soc_caps.h>` generation pipeline | `scripts/gen_soc_caps.py` | ⏳ untested | Generated header round-trips against tracked-in-repo reference snapshot | `pr-generated-files.yml` | v0.1 |
 | ABI snapshot diff tool | `scripts/abi_snapshot.py` | ⏳ untested | Catches a deliberately injected breaking signature change | Manual diff test, recorded | v0.1 |
 
@@ -75,13 +75,13 @@ A release does **not** tag until every row gating it is `verified`.
 
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
-| `<alp/pwm.h>` AEN-Zephyr | `src/zephyr/peripheral_pwm.c` | ⏳ untested | LED dimmed to 25% / 50% / 75% observed via scope on EVK | HIL | v0.2 |
-| `<alp/adc.h>` AEN-Zephyr | `src/zephyr/peripheral_adc.c` | ⏳ untested | Reference voltage divider reads within ±2% of expected µV | HIL | v0.2 |
-| `<alp/counter.h>` + QEnc AEN-Zephyr | `src/zephyr/peripheral_counter.c` | ⏳ untested | Encoder ticks count up/down matching shaft direction | HIL | v0.2 |
-| `<alp/i2s.h>` AEN-Zephyr | `src/zephyr/peripheral_i2s.c` | ⏳ untested | 16 kHz 16-bit PDM-in captures known tone with FFT peak ±5 Hz | HIL | v0.2 |
-| `<alp/can.h>` AEN-Zephyr | `src/zephyr/peripheral_can.c` | ⏳ untested | CAN-FD frame sent + acknowledged against a second node | HIL | v0.2 |
-| `<alp/rtc.h>` AEN-Zephyr | `src/zephyr/peripheral_rtc.c` | ⏳ untested | Wall-clock advances 1 s ± kernel jitter over 60 s | HIL | v0.2 |
-| `<alp/wdt.h>` AEN-Zephyr | `src/zephyr/peripheral_wdt.c` | ⏳ untested | Watchdog reset observed when feed thread is starved | HIL | v0.2 |
+| `<alp/pwm.h>` AEN-Zephyr | `src/backends/pwm/zephyr_drv.c` | ⏳ untested | LED dimmed to 25% / 50% / 75% observed via scope on EVK | HIL | v0.2 |
+| `<alp/adc.h>` AEN-Zephyr | `src/backends/adc/zephyr_drv.c` | ⏳ untested | Reference voltage divider reads within ±2% of expected µV | HIL | v0.2 |
+| `<alp/counter.h>` + QEnc AEN-Zephyr | `src/backends/counter/zephyr_drv.c` | ⏳ untested | Encoder ticks count up/down matching shaft direction | HIL | v0.2 |
+| `<alp/i2s.h>` AEN-Zephyr | `src/backends/i2s/zephyr_drv.c` | ⏳ untested | 16 kHz 16-bit PDM-in captures known tone with FFT peak ±5 Hz | HIL | v0.2 |
+| `<alp/can.h>` AEN-Zephyr | `src/backends/can/zephyr_drv.c` | ⏳ untested | CAN-FD frame sent + acknowledged against a second node | HIL | v0.2 |
+| `<alp/rtc.h>` AEN-Zephyr | `src/backends/rtc/zephyr_drv.c` | ⏳ untested | Wall-clock advances 1 s ± kernel jitter over 60 s | HIL | v0.2 |
+| `<alp/wdt.h>` AEN-Zephyr | `src/backends/wdt/zephyr_drv.c` | ⏳ untested | Watchdog reset observed when feed thread is starved | HIL | v0.2 |
 | Real Wi-Fi station + MQTT on AEN-Zephyr | `src/zephyr/iot_zephyr.c` | ⏳ untested | Publish + subscribe roundtrip against a known broker | HIL | v0.2 |
 | EdgeAI vision reference app | `examples/aen/edgeai-vision-aen/` | ⏳ untested | ≥10 fps inference on real E1M EVK | HIL | v0.2 |
 
@@ -115,7 +115,7 @@ A release does **not** tag until every row gating it is `verified`.
 
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
-| AEN-Zephyr UART RX ring buffer (LwRB) | `src/zephyr/peripheral_uart.c` (RX ringbuf section) | 🟡 partial | IRQ-driven attach delivers a known 1 KiB burst into the caller's ring with zero byte loss over 10 consecutive bursts | `tests/zephyr/peripheral/` (NULL/INVAL failure paths) + `examples/uart-rx-ringbuf` (attach -> pop -> detach happy path on native_sim); **real-IRQ attach via `nightly-aen-hil`** | v0.4 |
+| AEN-Zephyr UART RX ring buffer (LwRB) | `src/backends/uart/zephyr_drv.c` (RX ringbuf section) | 🟡 partial | IRQ-driven attach delivers a known 1 KiB burst into the caller's ring with zero byte loss over 10 consecutive bursts | `tests/zephyr/peripheral/` (NULL/INVAL failure paths) + `examples/uart-rx-ringbuf` (attach -> pop -> detach happy path on native_sim); **real-IRQ attach via `nightly-aen-hil`** | v0.4 |
 | AEN-Zephyr `<alp/mproc.h>` IPC envelope framing (placeholder) | `src/common/proto/alp_mproc_frame.{h,c}` + `src/zephyr/mproc_zephyr.c` framing branches | 🟡 partial | A real M55-HP <-> M55-HE roundtrip echoes the wrapped envelope unchanged through `alp_mbox_send` -> peer -> `alp_mbox_msg_cb_t` | `tests/zephyr/mproc/` (9 framing ZTESTs cover encode/decode + the `alp_sdk.mproc.nanopb_framing` twister scenario compiles the framing branch in `alp_mbox_send`); **peer-firmware roundtrip via `nightly-aen-hil`** | v0.4 (placeholder), v0.4-final (real nanopb wire) |
 | Yocto I²C wrapper (i2c-dev) | `src/yocto/peripheral_i2c.c` | 🟡 partial | LSM6DSO WHOAMI = 0x6C reads back over real `/dev/i2c-N` on a Yocto target | `tests/yocto/peripheral_i2c.c` (failure paths only); **HIL via `hil-yocto`** | v0.4 |
 | Yocto SPI wrapper (spidev) | `src/yocto/peripheral_spi.c` | 🟡 partial | SPI flash JEDEC-ID via `/dev/spidev<bus>.<cs>` returns expected bytes | `tests/yocto/peripheral_spi.c`; **HIL via `hil-yocto`** | v0.4 |
