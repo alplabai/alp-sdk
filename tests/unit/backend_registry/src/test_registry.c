@@ -255,8 +255,7 @@ ZTEST(alp_registry, test_tiebreak_two_wildcards_alphabetic_vendor_wins)
     zassert_not_null(be);
     zassert_equal(be->priority, 100);
     zassert_equal(strcmp(be->vendor, "alif"), 0,
-                  "expected alif (alphabetic among wildcards), got %s",
-                  be->vendor);
+                  "expected alif (alphabetic among wildcards), got %s", be->vendor);
 }
 
 ZTEST(alp_registry, test_tiebreak_zero_matching_backends_returns_null)
@@ -264,7 +263,6 @@ ZTEST(alp_registry, test_tiebreak_zero_matching_backends_returns_null)
     /* Unknown class name -- the class-range table has no entry, the
      * selector falls through and returns NULL.  Exercises the
      * "no candidates at all" path independent of the tiebreaker. */
-    const alp_backend_t *be =
-        alp_backend_select("class_that_does_not_exist", "vendor:any:soc");
+    const alp_backend_t *be = alp_backend_select("class_that_does_not_exist", "vendor:any:soc");
     zassert_is_null(be);
 }
