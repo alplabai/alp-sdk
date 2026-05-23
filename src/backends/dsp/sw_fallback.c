@@ -2,21 +2,17 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Software DSP fallback.  Wildcard backend at priority 0 -- picked
- * unconditionally on every SoC in Slice 4d because no HW-DSP backend
- * is registered against the dsp class today (the V2N GD32G5 FFT/FAC
+ * unconditionally on every SoC because no HW-DSP backend is
+ * registered against the dsp class today (the V2N GD32G5 FFT/FAC
  * surfaces via wave-2's alp_adc_filter_t / alp_adc_spectrum_t in
  * <alp/adc.h>, not through this standalone class).  Future HW
  * backends at higher priority pre-empt this one transparently.
  *
- * Body lifted verbatim from the v0.3 src/common/dsp_chain.c.  The
- * legacy struct alp_dsp_chain (per-stage state + window samples +
- * FFT scratch) is now struct dsp_be, owned by the backend and reached
- * via state->be_data; the dispatcher's handle (in dsp_ops.h) is now
- * a thin wrapper.  alp_dsp_chain_open/_close/_apply_* are now
- * sw_open/_close/_apply_* ops; public entry points moved to
- * src/dsp_dispatch.c.  CMSIS-DSP gating (ALP_HAS_CMSIS_DSP -> arm_fir
- * / arm_rfft_fast; otherwise portable-C convolution + radix-2 FFT)
- * is preserved verbatim.
+ * Per-chain state (per-stage state + window samples + FFT scratch)
+ * is struct dsp_be, owned by the backend and reached via
+ * state->be_data; the dispatcher's handle (in dsp_ops.h) is a thin
+ * wrapper.  CMSIS-DSP gating: ALP_HAS_CMSIS_DSP -> arm_fir /
+ * arm_rfft_fast; otherwise portable-C convolution + radix-2 FFT.
  *
  * @par Cost: ROM varies with CMSIS-DSP linkage (8-30 KB).  RAM =
  *      sizeof(struct dsp_be) per backend slot = ~17 KB worst case

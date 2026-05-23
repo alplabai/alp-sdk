@@ -1,9 +1,8 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Portable Zephyr backend for the <alp/mproc.h> surface.  Lifts
- * the body of src/zephyr/mproc_zephyr.c (the legacy v0.7 wrapper)
- * into a registry-shaped backend that owns all three primitives:
+ * Portable Zephyr backend for the <alp/mproc.h> surface.  Owns all
+ * three primitives behind one registry entry:
  *
  *   - mbox:  Zephyr MBOX driver class (Alif's MHU controller is
  *            registered as a Zephyr mbox device on AEN).  The
@@ -26,7 +25,7 @@
  *            Zephyr image only -- cross-core / per-SoC HWSEM-block
  *            wiring (AEN HWSEM, ST HSEM, etc.) lands per-SoC in a
  *            follow-on track.  The single-core limitation is the
- *            documented v0.7 behaviour and stays here verbatim.
+ *            documented behaviour.
  *
  * Registers as silicon_ref="*" at priority 100 -- mirrors the
  * design spec Section 2 backend matrix (zephyr_drv wins on every

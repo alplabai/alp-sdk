@@ -1,11 +1,9 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Portable Zephyr backend for the <alp/security.h> surface.  Lifts
- * the body of src/zephyr/security_zephyr.c (the legacy v0.3 wrapper
- * over MbedTLS PSA Crypto) into a registry-shaped backend that owns
- * all three primitives -- hash, AEAD, random_bytes -- behind one ops
- * vtable.
+ * Portable Zephyr backend for the <alp/security.h> surface.  Wraps
+ * MbedTLS PSA Crypto and owns all three primitives -- hash, AEAD,
+ * random_bytes -- behind one ops vtable.
  *
  * PSA picks the active SoC's hardware accelerator transparently:
  *
@@ -34,10 +32,9 @@
  *   - struct hash_be (psa_hash_operation_t)
  *   - struct aead_be (psa_key_id_t)
  *
- * The legacy file's in-file g_hash_pool / g_aead_pool migrated to
- * the dispatcher (src/security_dispatch.c) which owns the public-
- * facing struct alp_hash / struct alp_aead pools; this backend
- * carries only the PSA-specific per-handle blobs.
+ * The dispatcher (src/security_dispatch.c) owns the public-facing
+ * struct alp_hash / struct alp_aead pools; this backend carries
+ * only the PSA-specific per-handle blobs.
  *
  * Registers as silicon_ref="*" at priority 100 -- mirrors the
  * mproc / TMU / USB / BLE / Wi-Fi / MQTT / RPC siblings.  Gated on

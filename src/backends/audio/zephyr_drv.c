@@ -1,28 +1,24 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Portable Zephyr backend for the <alp/audio.h> surface.  Lifts the
- * body of src/zephyr/audio_zephyr.c (the legacy v0.3 wrapper around
- * Zephyr's audio_dmic + alp_i2s_*) into a registry-shaped backend
- * that owns both directions -- input + output -- behind one ops
- * vtable.
+ * Portable Zephyr backend for the <alp/audio.h> surface.  Owns both
+ * directions -- input + output -- behind one ops vtable.
  *
  * Input half wraps Zephyr's `audio_dmic` API (CONFIG_AUDIO_DMIC) and
- * runs the legacy DSP chain (1st-order DC-block IIR) on every
- * delivered block before handing it to the caller.  Output half
- * delegates to alp_i2s_* (already a portable wrapper) and applies a
- * software volume scale on the way through so apps without a
- * separate codec gain pin still get a usable output volume.
+ * runs a DSP chain (1st-order DC-block IIR) on every delivered block
+ * before handing it to the caller.  Output half delegates to
+ * alp_i2s_* (already a portable wrapper) and applies a software
+ * volume scale on the way through so apps without a separate codec
+ * gain pin still get a usable output volume.
  *
  * Backend-owned state lives in module-static pools indexed via
  * state->be_data:
  *   - struct hw_in_be   (dmic device + k_mem_slab + DSP filter state)
  *   - struct hw_out_be  (alp_i2s_t handle + started flag + Q8.8 vol)
  *
- * The legacy file's in-file g_audio_in_pool / g_audio_out_pool
- * migrated to the dispatcher (src/audio_dispatch.c) which owns the
- * public-facing struct alp_audio_in / struct alp_audio_out pools;
- * this backend carries only the Zephyr-specific per-handle blobs.
+ * The dispatcher (src/audio_dispatch.c) owns the public-facing
+ * struct alp_audio_in / struct alp_audio_out pools; this backend
+ * carries only the Zephyr-specific per-handle blobs.
  *
  * The portable-HW-offload audit rule (memory/feedback_portable_hw_
  * offload_with_sw_fallback.md) is satisfied because the chip-

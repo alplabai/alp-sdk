@@ -2,8 +2,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * V2N counter backend routed through the GD32G553 supervisor MCU.
- * Lifted from the #if-ladder branches of the legacy peripheral_counter.c
- * during the Slice 4a registry migration.
  */
 
 #include <stdbool.h>

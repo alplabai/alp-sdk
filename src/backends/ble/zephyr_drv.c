@@ -2,11 +2,9 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Portable Zephyr BT-host backend for the <alp/ble.h> surface.
- * Lifts the body of src/zephyr/ble_zephyr.c (the legacy v0.3
- * wrapper) into a registry-shaped backend.  Registers as
- * silicon_ref="*" at priority 100 -- mirrors the design spec
- * Section 2 backend matrix (zephyr_drv wins on every SoC unless a
- * more specific backend registers).
+ * Registers as silicon_ref="*" at priority 100 -- mirrors the
+ * design spec Section 2 backend matrix (zephyr_drv wins on every
+ * SoC unless a more specific backend registers).
  *
  * V2N CC3501E note: the CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on
  * the AEN SoM is wired into Zephyr's DT as a

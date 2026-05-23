@@ -149,8 +149,7 @@ static alp_status_t z_set_period(alp_pwm_backend_state_t *st, uint32_t period_ns
     struct alp_pwm *h = CONTAINER_OF(st, struct alp_pwm, state);
     const struct device *dev = (const struct device *)st->dev;
     /* Dispatcher caches period_ns on ALP_OK return; reset duty to 0
-     * (mirrors legacy peripheral_pwm.c behaviour and the documented
-     * @ref alp_pwm_set_period contract). */
+     * per the documented @ref alp_pwm_set_period contract. */
     return _errno_to_alp(pwm_set(dev, h->channel,
                                  period_ns, 0u, h->flags));
 }

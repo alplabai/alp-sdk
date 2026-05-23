@@ -5,17 +5,12 @@
  * picks up every silicon_ref the build targets so apps that
  * #include <alp/power.h> link cleanly on every supported SoC.
  *
- * Behaviour differs from the Camera / Display / GPU2D stubs that
- * landed alongside this slice: stub_open returns ALP_OK so the
- * dispatcher hands the caller a real handle, and
- * stub_configure_wake_source accepts the bitmap silently.
- * request_sleep is the actual "not implemented" gate.  This mirrors
- * the legacy src/zephyr/power_zephyr.c contract -- open() ALWAYS
- * returned a valid pointer; the NOSUPPORT surfaced at sleep-request
- * time.  Preserving that lets existing customer wake-bitmap setup
- * code keep linking + running unchanged across the registry
- * migration; only the actual sleep call sees the NOT_IMPLEMENTED
- * status.
+ * Behaviour differs from the Camera / Display / GPU2D stubs:
+ * stub_open returns ALP_OK so the dispatcher hands the caller a
+ * real handle, and stub_configure_wake_source accepts the bitmap
+ * silently.  request_sleep is the actual "not implemented" gate.
+ * Customer wake-bitmap setup code links + runs unchanged; only the
+ * actual sleep call sees the NOT_IMPLEMENTED status.
  *
  * Real backends (Zephyr pm_policy_* + per-SoC pm_state tables on
  * AEN; GD32G553 supervisor CMD_POWER_MODE_SET opcode 0x28 on V2N)
@@ -50,9 +45,9 @@ static alp_status_t stub_open(alp_power_backend_state_t *state,
     (void)state;
     (void)caps_out;
     /* Successful open is required so the dispatcher hands the caller
-     * a handle -- the legacy power_zephyr.c::alp_power_open always
-     * returned a valid pointer.  The real "this feature isn't
-     * implemented" surface is at request_sleep below. */
+     * a handle; alp_power_open always returns a valid pointer.  The
+     * real "this feature isn't implemented" surface is at
+     * request_sleep below. */
     return ALP_OK;
 }
 
