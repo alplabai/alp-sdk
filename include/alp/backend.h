@@ -96,7 +96,14 @@ typedef struct alp_backend_class_range {
  * @brief Find the best backend registered for a class on the active SoC.
  *
  * Walks the per-class section, filters by silicon_ref exact match or
- * "*" wildcard, sorts by priority desc, returns the first hit.
+ * "*" wildcard, then picks the winner using the following tiebreaker
+ * (applied in order, see issue #30):
+ *
+ *   1. Higher `priority` wins.
+ *   2. At equal priority, an exact silicon_ref match beats "*" wildcard.
+ *   3. At equal priority and same match-type, the lower `vendor`
+ *      string (strcmp) wins.  Pins the choice deterministically
+ *      regardless of linker object order.
  *
  * @param class_name   The class identifier passed to ALP_BACKEND_REGISTER.
  * @param silicon_ref  Active SoC reference (e.g. "alif:ensemble:e7").
