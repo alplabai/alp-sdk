@@ -1,0 +1,9 @@
+som:
+  sku: E1M-AEN701
+preset: e1m-evk
+cores:
+  m55_hp:
+    app: ./src
+    peripherals: []
+diagnostics:
+  log_level: verbose   # not in enum: [debug, info, warn, error]
