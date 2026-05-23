@@ -441,8 +441,6 @@ config ALP_SDK_ADC_SW_FALLBACK
 	  only when no hardware backend matches the active SoC ref.
 	  Off by default on real silicon; default on for native_sim
 	  builds so examples compile without a real ADC peripheral.
-	  Compiled into the build only after Slice 1 Task 8 swaps the
-	  legacy peripheral_adc.c for the new dispatcher.
 
 config ALP_SDK_RTC_SW_FALLBACK
 	bool "Software RTC fallback (deterministic frozen clock)"
