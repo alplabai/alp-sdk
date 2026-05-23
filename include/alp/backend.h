@@ -82,8 +82,10 @@ typedef struct alp_backend_class_range {
  * to find the section for a class name.
  */
 #define ALP_BACKEND_DEFINE_CLASS(class)                                       \
-    extern const alp_backend_t __start_alp_backends_##class[];                \
-    extern const alp_backend_t __stop_alp_backends_##class[];                 \
+    extern const alp_backend_t __start_alp_backends_##class[]                 \
+        __attribute__((weak));                                                \
+    extern const alp_backend_t __stop_alp_backends_##class[]                  \
+        __attribute__((weak));                                                \
     static const alp_backend_class_range_t                                    \
         _alp_class_range_##class                                              \
         __attribute__((used, section("alp_backend_classes"))) = {             \
