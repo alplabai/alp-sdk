@@ -35,6 +35,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <zephyr/sys/util.h>  /* CONTAINER_OF */
+
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
 #include <alp/pwm.h>
