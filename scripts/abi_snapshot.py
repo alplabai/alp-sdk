@@ -81,13 +81,21 @@ def fingerprint(s: str) -> str:
 # Declaration extraction
 # ---------------------------------------------------------------------
 
-# Function-declaration line: "<rettype> <name>(<args>);" with optional
+# Function-declaration line: "<rettype> [*] <name>(<args>);" with optional
 # trailing attributes / modifiers.  Multi-line decls are unwrapped before
 # the regex runs.
+#
+# The optional (?P<stars>\*+)? group captures pointer return types such as
+# "const alp_backend_t *alp_backend_select(...)".  Without this group the
+# old regex required whitespace between the return type and the function
+# name, which a pointer-return declaration never provides (the '*' is
+# adjacent to the identifier with no intervening space).
 _FUNC_RE = re.compile(
     r"""
-    (?P<ret>(?:[A-Za-z_][\w*\s]*?))     # return type (greedy-up-to-name)
-    \s+
+    (?P<ret>[A-Za-z_][\w\s]*?)          # return type (no trailing '*')
+    \s*
+    (?P<stars>\*+)?                     # optional pointer stars (0–2)
+    \s*
     (?P<name>[A-Za-z_]\w*)              # function name
     \s*
     \(
@@ -196,6 +204,7 @@ def extract(header_path: Path) -> dict[str, dict[str, Any]]:
     functions: dict[str, dict[str, str]] = {}
     for m in _FUNC_RE.finditer(decls):
         ret = normalise(m["ret"])
+        stars = m.group("stars") or ""
         name = m["name"]
         args = normalise(m["args"])
         if not ret or ret in ("typedef", "return", "if", "while", "for", "switch"):
@@ -206,7 +215,8 @@ def extract(header_path: Path) -> dict[str, dict[str, Any]]:
         # return type contain a real type token.
         if re.fullmatch(r"[\w\s*]+", ret) is None:
             continue
-        sig = f"{ret} {name}({args});"
+        full_ret = (ret + " " + stars).strip() if stars else ret
+        sig = f"{full_ret} {name}({args});"
         functions[name] = {"signature": sig, "hash": fingerprint(sig)}
 
     return {"functions": functions, "typedefs": typedefs, "macros": macros}
