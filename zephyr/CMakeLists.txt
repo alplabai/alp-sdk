@@ -46,6 +46,49 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/rpc_zephyr.c
 )
 
+# Inference class dispatcher + backends (Slice 3 migration).
+# The dispatcher compiles unconditionally so apps that depend on
+# the <alp/inference.h> ABI always link cleanly; each backend
+# gates on its own Kconfig so builds that don't enable a path
+# don't pay its code size.  Vendor-ext bodies under
+# src/backends/ext/{renesas,deepx}/inference.c compile
+# unconditionally -- they only emit NOSUPPORT + parameter
+# validation today, so they pull zero vendor dependencies.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/inference_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/inference.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/deepx/inference.c)
+
+if(CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/tflm.cpp)
+endif()
+
+if(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/ethos_u_aen.cpp)
+endif()
+
+if(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/ethos_u_n93.cpp)
+endif()
+
+if(CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/drpai_v2n_stub.c)
+endif()
+
+if(CONFIG_ALP_SDK_INFERENCE_BACKEND_DEEPX_DXM1)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/deepx_dxm1_stub.c)
+endif()
+
+if(CONFIG_ALP_SDK_INFERENCE_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/sw_fallback.c)
+endif()
+
 # v0.2 peripheral wrappers — opt-in per-class so apps that don't use
 # a given Zephyr subsystem don't link the wrapper.  Each defaults on
 # when its underlying Zephyr driver class is enabled.
@@ -312,8 +355,10 @@ zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include)
 # never see new symbols pollute the include namespace.
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/src/common)
 zephyr_library_include_directories(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference
 )
 
 # nanopb placeholder framing for <alp/mproc.h> (v0.4 prep).  Always
