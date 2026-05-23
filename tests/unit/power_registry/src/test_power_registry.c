@@ -10,11 +10,12 @@
  *
  * The pm_policy backend wins selection for every silicon_ref since
  * both are wildcards and 100 > 0.  The Renesas vendor-ext body
- * (src/backends/ext/renesas/power.c) is NOT linked in this build
- * (it depends on ALP_SDK_V2N_SUPERVISOR which depends on the
- * GD32G553 chip-driver Kconfig); the vendor-ext header is still
- * compile-tested via inclusion, and the NOT_PRESENT_ON_THIS_SOC
- * gate is exercised through the alif:ensemble:e7 silicon_ref.
+ * (src/backends/ext/renesas/power.c) IS linked in this build
+ * (CONFIG_ALP_SDK_POWER_EXT_RENESAS=y in prj.conf) so the
+ * vendor-check gate runs against the *real* body -- not just the
+ * header.  The body's NOT_PRESENT_ON_THIS_SOC gate fires ahead of
+ * any GD32 supervisor traffic because the active backend on this
+ * build is vendor "zephyr", not "renesas".
  *
  * The test build pins CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y so the
  * dispatcher's `alp_backend_select("power", ALP_SOC_REF_STR)`
