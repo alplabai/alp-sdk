@@ -41,7 +41,8 @@
         k_mutex_unlock(&kind##_lock);                                      \
     }
 
-DEFINE_POOL(adc,     CONFIG_ALP_SDK_MAX_ADC_HANDLES,     alp_adc)
+/* DEFINE_POOL(adc, ...) removed in Slice 1 -- the new src/adc_dispatch.c
+ * owns its own handle pool keyed on the registry's alp_adc layout. */
 DEFINE_POOL(dac,     CONFIG_ALP_SDK_MAX_DAC_HANDLES,     alp_dac)
 DEFINE_POOL(adc_stream, CONFIG_ALP_SDK_MAX_ADC_STREAM_HANDLES, alp_adc_stream)
 
