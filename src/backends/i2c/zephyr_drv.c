@@ -65,7 +65,7 @@ static alp_status_t z_open(const alp_i2c_config_t *cfg,
     uint32_t flags = I2C_MODE_CONTROLLER | _alp_to_zephyr_bitrate_flags(cfg->bitrate_hz);
     int err = i2c_configure(dev, flags);
     if (err != 0) return _errno_to_alp(err);
-    st->dev    = dev;
+    st->dev    = (void *)dev;
     st->bus_id = cfg->bus_id;
     caps_out->flags = 0u;
     return ALP_OK;
@@ -74,20 +74,23 @@ static alp_status_t z_open(const alp_i2c_config_t *cfg,
 static alp_status_t z_write(alp_i2c_backend_state_t *st,
                             uint8_t addr,
                             const uint8_t *data, size_t len) {
-    return _errno_to_alp(i2c_write(st->dev, data, len, addr));
+    const struct device *dev = (const struct device *)st->dev;
+    return _errno_to_alp(i2c_write(dev, data, len, addr));
 }
 
 static alp_status_t z_read(alp_i2c_backend_state_t *st,
                            uint8_t addr,
                            uint8_t *data, size_t len) {
-    return _errno_to_alp(i2c_read(st->dev, data, len, addr));
+    const struct device *dev = (const struct device *)st->dev;
+    return _errno_to_alp(i2c_read(dev, data, len, addr));
 }
 
 static alp_status_t z_write_read(alp_i2c_backend_state_t *st,
                                  uint8_t addr,
                                  const uint8_t *wdata, size_t wlen,
                                  uint8_t *rdata, size_t rlen) {
-    return _errno_to_alp(i2c_write_read(st->dev, addr, wdata, wlen, rdata, rlen));
+    const struct device *dev = (const struct device *)st->dev;
+    return _errno_to_alp(i2c_write_read(dev, addr, wdata, wlen, rdata, rlen));
 }
 
 static const alp_i2c_ops_t _ops = {

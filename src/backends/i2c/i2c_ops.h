@@ -11,7 +11,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <zephyr/device.h>
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
@@ -20,7 +19,10 @@
 typedef struct alp_i2c_ops alp_i2c_ops_t;
 
 typedef struct alp_i2c_backend_state {
-    const struct device     *dev;        /* Zephyr backend device pointer */
+    void                    *dev;        /* opaque backend device pointer
+                                          * (const struct device * on Zephyr;
+                                          * kept void* so the portable handle
+                                          * does not pull in <zephyr/device.h>) */
     uint32_t                 bus_id;
     void                    *be_data;
     const alp_i2c_ops_t     *ops;
