@@ -545,7 +545,6 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backend.c
 )
 
-<<<<<<< HEAD
 # I2C class dispatcher + backends (Slice 2a migration).
 # The dispatcher and zephyr_drv backend compile unconditionally;
 # sw_fallback is gated on CONFIG_ALP_SDK_I2C_SW_FALLBACK.
