@@ -17,10 +17,10 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/delay_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/handles.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/last_error.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_i2c.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_spi.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_gpio.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_uart.c
+    # peripheral_uart.c retired in Slice 2A -- migrated to
+    # src/backends/uart/{zephyr_drv,sw_fallback}.c with the
+    # dispatcher in src/uart_dispatch.c.  See the UART block below.
     # Camera class dispatcher + stub backend (Slice 5 -- registry
     # migration).  Replaces the legacy free-standing
     # src/zephyr/camera_stub.c.  Real backends (Alif MIPI CSI-2,
@@ -544,6 +544,43 @@ zephyr_library_sources(
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backend.c
 )
+
+<<<<<<< HEAD
+# I2C class dispatcher + backends (Slice 2a migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_I2C_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/i2c_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_I2C_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/sw_fallback.c)
+endif()
+
+# SPI class dispatcher + backends (Slice 2a migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_SPI_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/spi_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_SPI_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/sw_fallback.c)
+endif()
+
+# UART class dispatcher + backends (Slice 2a migration).
+# The dispatcher and zephyr_drv backend compile unconditionally;
+# sw_fallback is gated on CONFIG_ALP_SDK_UART_SW_FALLBACK.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/uart_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_UART_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/sw_fallback.c)
+endif()
 
 # ADC class dispatcher.  Owns the one-shot alp_adc_* API surface
 # (alp_adc_open / read_raw / read_uv / close / capabilities) and
