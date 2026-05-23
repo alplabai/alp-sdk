@@ -48,8 +48,7 @@ static const struct device *const _devs[] = {
  * isn't compiled in (CONFIG_GPIO=n -- e.g. the gd32-bridge example
  * that uses SPI without a CS pin).  At runtime, callers must gate on
  * cfg->cs_pin_id != ALP_SPI_NO_CS to avoid touching the stub. */
-__attribute__((weak))
-bool alp_z_gpio_resolve(uint32_t pin_id, struct gpio_dt_spec *out)
+__attribute__((weak)) bool alp_z_gpio_resolve(uint32_t pin_id, struct gpio_dt_spec *out)
 {
     (void)pin_id;
     (void)out;

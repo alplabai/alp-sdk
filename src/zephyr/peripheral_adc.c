@@ -88,7 +88,6 @@ static void bridge_stream_free_slot(uint8_t slot)
 }
 #endif /* ALP_ADC_HAS_BRIDGE_PATH */
 
-
 /* One-shot ADC (alp_adc_open / read_raw / read_uv / close) is served by the
  * registry-based src/adc_dispatch.c +
  * src/backends/adc/{alif_e7,gd32_bridge,sw_fallback}.c.  This file hosts
