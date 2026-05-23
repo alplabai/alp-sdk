@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alp-sdk-cli"
+version = "0.6.0"
+description = "Command-line front-end for the ALP SDK"
+requires-python = ">=3.10"
+dependencies = [
+    "PyYAML>=6.0",
+    "jsonschema>=4.0",
+    "click>=8.1",
+    "questionary>=2.0",
+    "colorama>=0.4.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-snapshot>=0.9",
+    "pytest-mock>=3.10",
+]
+
+[project.scripts]
+alp = "alp_cli.main:cli"
+
+[tool.setuptools]
+package-dir = {"" = "scripts"}
+
+[tool.setuptools.packages.find]
+where = ["scripts"]
+include = ["alp_cli*"]

@@ -34,6 +34,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include <alp/cap_instance.h>
+
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -168,6 +170,14 @@ alp_status_t alp_counter_cancel_alarm(alp_counter_t *counter);
  */
 void         alp_counter_close(alp_counter_t *counter);
 
+/**
+ * @brief Query the capabilities of an opened counter handle.
+ *
+ * @param counter  Handle from @ref alp_counter_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p counter is NULL.
+ */
+const alp_capabilities_t *alp_counter_capabilities(const alp_counter_t *counter);
+
 /* ------------------------------------------------------------------ */
 /* Quadrature decoder (incremental rotary encoder)                     */
 /* ------------------------------------------------------------------ */
@@ -221,6 +231,14 @@ alp_status_t alp_qenc_reset_position(alp_qenc_t *enc);
  * @param[in] enc  Handle from @ref alp_qenc_open, or NULL.
  */
 void         alp_qenc_close(alp_qenc_t *enc);
+
+/**
+ * @brief Query the capabilities of an opened quadrature-encoder handle.
+ *
+ * @param enc  Handle from @ref alp_qenc_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p enc is NULL.
+ */
+const alp_capabilities_t *alp_qenc_capabilities(const alp_qenc_t *enc);
 
 #ifdef __cplusplus
 }  /* extern "C" */

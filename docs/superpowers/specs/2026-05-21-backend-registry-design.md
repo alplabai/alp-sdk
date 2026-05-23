@@ -179,6 +179,17 @@ alp_adc_t *h = alp_adc_open(&cfg);
 #endif
 ```
 
+### Vendor-ext audit rule (added 2026-05-22)
+
+A vendor-extension function earns its spot when **at least one** is true:
+
+1. The feature has no portable equivalent in Zephyr's driver classes, `<alp/X.h>`'s `cfg` struct, or any other portable surface (e.g. DRP-AI tensor layout, OSPI SecAES, ISP 3A windows).
+2. The same call needs to work on Yocto / baremetal where Zephyr's driver class doesn't apply, AND we want a single uniform call site across OS backends.
+
+When neither is true, the feature should be **promoted to portable**: add the field to `alp_<X>_config_t` (or the relevant portable surface) and have backends translate. Avoids redundant shims; keeps vendor-ext focused on genuinely silicon-specific reach-through.
+
+Example: `alp_alif_adc_set_oversampling` was dropped from Slice 1 because Zephyr's `adc_sequence.oversampling` already covers it portably, reachable via the existing `alp_adc_config_t.oversampling_ratio` field.
+
 ### `chips/<part>/` becomes strictly internal
 
 The `feedback_portable_peripheral_api` memory tightens: app code MUST go through `<alp/X>` and MAY use `<alp/ext/<vendor>/X>` for vendor knobs. `chips/<part>/` is reserved for SDK backends and dedicated bridge demos.

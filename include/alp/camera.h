@@ -21,6 +21,7 @@
 #define ALP_CAMERA_H
 
 #include <stdint.h>
+#include "alp/cap_instance.h"
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -127,6 +128,14 @@ alp_status_t alp_camera_release(alp_camera_t *c, alp_camera_frame_t *frame);
  * @param[in] c  Handle from @ref alp_camera_open, or NULL.
  */
 void alp_camera_close(alp_camera_t *c);
+
+/**
+ * @brief Query the capabilities of an opened camera handle.
+ *
+ * @param c  Handle from @ref alp_camera_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p c is NULL.
+ */
+const alp_capabilities_t *alp_camera_capabilities(const alp_camera_t *c);
 
 /* ================================================================== */
 /* ISP (Image Signal Processor) configuration                          */

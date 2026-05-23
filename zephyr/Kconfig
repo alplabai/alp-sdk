@@ -190,6 +190,46 @@ config ALP_SDK_MAX_ADC_STREAM_HANDLES
 	  exactly two concurrent stream slots (one per DMA controller);
 	  raise only if a future backend grows additional slots.
 
+config ALP_SDK_MAX_STORAGE_HANDLES
+	int "Maximum concurrent alp_storage_t handles"
+	default 4
+
+config ALP_SDK_STORAGE_ZEPHYR_FLASH
+	bool "Zephyr flash_area backend for <alp/storage.h>"
+	depends on ALP_SDK
+	default y if FLASH_MAP
+	default n
+	help
+	  Compiles src/backends/storage/zephyr_flash.c.  Routes the
+	  alp_storage_* surface through the <zephyr/storage/flash_map.h>
+	  API; the SoC pack supplies the fixed-partition DT entries that
+	  flash_area_open consumes.  instance_id maps directly to a
+	  flash-area ID.
+
+config ALP_SDK_STORAGE_ZEPHYR_LITTLEFS
+	bool "Zephyr littlefs backend for <alp/storage.h>"
+	depends on ALP_SDK
+	default y if FILE_SYSTEM_LITTLEFS
+	default n
+	help
+	  Compiles src/backends/storage/zephyr_littlefs.c.  Wraps a
+	  mounted FS_LITTLEFS instance as an offset-addressed
+	  alp_storage device under /lfs<N>/alp_storage.bin.  Loses to
+	  zephyr_flash on priority when both are present; pick the
+	  storage_kind explicitly to force one over the other.
+
+config ALP_SDK_STORAGE_SW_FALLBACK
+	bool "Software storage fallback (stateless stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a stateless storage backend that registers as a
+	  wildcard at priority 0.  Every op besides open returns
+	  ALP_ERR_NOSUPPORT.  For native_sim build / test only --
+	  production firmware MUST NOT rely on this since no real
+	  device is driven.
+
 config ALP_SDK_V2N_SUPERVISOR
 	bool "V2N supervisor singleton (GD32G553 bridge auto-init)"
 	default y if ALP_SOC_RENESAS_RZV2N_N44 && ALP_SDK_CHIP_GD32G553
@@ -389,23 +429,90 @@ config ALP_SDK_PERIPH_ADC
 	  an io-channels phandle and the standard ADC channel-config
 	  properties).
 
+config ALP_SDK_ADC_SW_FALLBACK
+	bool "Software ADC fallback (polled, deterministic saw wave)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles src/backends/adc/sw_fallback.c, which registers a
+	  wildcard ADC backend at priority 0 in the .alp_backends_adc
+	  linker section.  The registry selector picks this backend
+	  only when no hardware backend matches the active SoC ref.
+	  Off by default on real silicon; default on for native_sim
+	  builds so examples compile without a real ADC peripheral.
+	  Compiled into the build only after Slice 1 Task 8 swaps the
+	  legacy peripheral_adc.c for the new dispatcher.
+
+config ALP_SDK_RTC_SW_FALLBACK
+	bool "Software RTC fallback (deterministic frozen clock)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a software RTC backend that registers as a wildcard
+	  at priority 0.  Picked only when no hardware backend matches.
+	  Frozen-clock semantics -- ticks 1 s per get_time call from
+	  2026-01-01 00:00:00.  Tests use this; production firmware
+	  should keep it off.
+
+config ALP_SDK_WDT_SW_FALLBACK
+	bool "Software WDT fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op software watchdog backend that registers as
+	  a wildcard at priority 0.  For native_sim builds and tests
+	  only -- production firmware MUST NOT rely on this since it
+	  never actually resets the SoC.
+
+config ALP_SDK_COUNTER_SW_FALLBACK
+	bool "Software counter fallback (deterministic tick generator)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a deterministic software counter backend that
+	  registers as a wildcard at priority 0.  Alarms are not
+	  supported in this backend (alp_counter_set_alarm returns
+	  ALP_ERR_NOSUPPORT).  For native_sim build / test only.
+
+config ALP_SDK_QENC_SW_FALLBACK
+	bool "Software QEnc fallback (deterministic step counter)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a deterministic software quadrature-encoder backend
+	  that registers as a wildcard at priority 0.  get_position
+	  advances by +7 per call.  For native_sim build / test only.
+
 config ALP_SDK_PERIPH_COUNTER
 	bool "Enable <alp/counter.h> free-running counter wrapper"
 	default y if COUNTER
 	depends on COUNTER
 	help
-	  Compile src/zephyr/peripheral_counter.c.  Provides
-	  alp_counter_* on top of Zephyr's counter_* API.  Resolves
-	  counter_id via the alp-counter0..alp-counter3 DT aliases.
+	  Legacy gating Kconfig for the <alp/counter.h> surface.  After
+	  Slice 4a the dispatcher (src/counter_dispatch.c) and its
+	  Zephyr backend (src/backends/counter/zephyr_drv.c) are compiled
+	  unconditionally; this symbol is retained for backwards
+	  compatibility with older build configs but has no effect on
+	  what gets linked.  See ALP_SDK_COUNTER_SW_FALLBACK for the
+	  software-backend opt-in.
 
 config ALP_SDK_PERIPH_QENC
 	bool "Enable <alp/counter.h> quadrature-decoder wrapper"
 	default y if SENSOR
 	depends on SENSOR
 	help
-	  Compile src/zephyr/peripheral_qenc.c.  Provides alp_qenc_*
-	  on top of Zephyr's sensor_* API (SENSOR_CHAN_ROTATION).
-	  Resolves encoder_id via alp-qenc0..alp-qenc3 DT aliases.
+	  Legacy gating Kconfig for the quadrature-decoder half of the
+	  <alp/counter.h> surface.  After Slice 4a the dispatcher
+	  (src/qenc_dispatch.c) and its Zephyr backend
+	  (src/backends/qenc/zephyr_drv.c) are compiled unconditionally;
+	  this symbol is retained for backwards compatibility with older
+	  build configs but has no effect on what gets linked.  See
+	  ALP_SDK_QENC_SW_FALLBACK for the software-backend opt-in.
 
 config ALP_SDK_PERIPH_I2S
 	bool "Enable <alp/i2s.h> wrapper"
@@ -430,76 +537,124 @@ config ALP_SDK_PERIPH_RTC
 	default y if RTC
 	depends on RTC
 	help
-	  Compile src/zephyr/peripheral_rtc.c.  Provides alp_rtc_*
-	  on top of Zephyr's rtc_* API.
+	  Legacy gating Kconfig for the <alp/rtc.h> surface.  After
+	  Slice 4a the dispatcher (src/rtc_dispatch.c) and its
+	  Zephyr backend (src/backends/rtc/zephyr_drv.c) are compiled
+	  unconditionally; this symbol is retained for backwards
+	  compatibility with older build configs but has no effect on
+	  what gets linked.  See ALP_SDK_RTC_SW_FALLBACK for the
+	  software-backend opt-in.
 
 config ALP_SDK_PERIPH_WDT
 	bool "Enable <alp/wdt.h> wrapper"
 	default y if WATCHDOG
 	depends on WATCHDOG
 	help
-	  Compile src/zephyr/peripheral_wdt.c.  Provides alp_wdt_*
-	  on top of Zephyr's wdt_* API.
+	  Legacy gating Kconfig for the <alp/wdt.h> surface.  After
+	  Slice 4a the dispatcher (src/wdt_dispatch.c) and its
+	  Zephyr backend (src/backends/wdt/zephyr_drv.c) are compiled
+	  unconditionally; this symbol is retained for backwards
+	  compatibility with older build configs but has no effect on
+	  what gets linked.  See ALP_SDK_WDT_SW_FALLBACK for the
+	  software-backend opt-in.
 
 config ALP_SDK_PERIPH_TMU
 	bool "Enable <alp/tmu.h> wrapper (CORDIC math accelerator surface)"
 	default y
 	help
-	  Compile src/zephyr/peripheral_tmu.c.  Provides alp_tmu_sin /
-	  cos / tan / atan / atan2 / sqrt / log / exp / sinh / cosh /
-	  tanh / hypot on top of either the V2N supervisor's GD32G5
-	  TMU (CORDIC) accelerator (when CONFIG_ALP_SDK_V2N_SUPERVISOR=y)
-	  or libm directly (every other SoM).  The customer-facing
-	  header is SoM-agnostic; the V2N dispatch is internal.
+	  Compile the TMU registry sources -- src/tmu_dispatch.c plus
+	  src/backends/tmu/zephyr_drv.c (and, when
+	  ALP_SDK_TMU_SW_FALLBACK=y, src/backends/tmu/sw_fallback.c).
+	  Provides alp_tmu_sin / cos / tan / atan / atan2 / sqrt / log /
+	  exp / sinh / cosh / tanh / hypot on top of either the V2N
+	  supervisor's GD32G5 TMU (CORDIC) accelerator (when
+	  CONFIG_ALP_SDK_V2N_SUPERVISOR=y) or libm directly (every other
+	  SoM).  The customer-facing header is SoM-agnostic; the V2N
+	  dispatch is internal.
+
+	  After Slice 4d the dispatcher caches the selected backend's
+	  ops vtable on first call -- TMU is handle-less, so there is no
+	  per-call selector cost on the hot path.  See
+	  ALP_SDK_TMU_SW_FALLBACK for the software-backend opt-in.
+
+config ALP_SDK_TMU_SW_FALLBACK
+	bool "Software TMU fallback (libm)"
+	depends on ALP_SDK && ALP_SDK_PERIPH_TMU
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a libm-direct TMU backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test and for any SoM
+	  whose dedicated TMU backend is not linked into the build --
+	  every alp_tmu_* primitive then routes through sinf / cosf /
+	  ... and returns ALP_OK.  Marginal cost is ~24 bytes for the ops
+	  vtable when the rest of the firmware already pulls in libm.
 
 config ALP_SDK_DSP
 	bool "Enable <alp/dsp.h> standalone DSP-chain API"
 	default n
 	help
-	  Compile src/common/dsp_chain.c.  Provides the standalone
+	  Compile the DSP registry sources -- src/dsp_dispatch.c plus
+	  src/backends/dsp/sw_fallback.c.  Provides the standalone
 	  alp_dsp_chain_* surface for in-RAM FIR / IIR / window /
 	  FFT processing against int16 mV-scale buffers.  Uses
 	  CMSIS-DSP when ALP_HAS_CMSIS_DSP=1; otherwise falls back
 	  to a portable-C math kernel set (naive FIR convolution,
 	  direct-form-1 biquad cascade, radix-2 Cooley-Tukey FFT).
 
+	  Slice 4d migration: the legacy OS-agnostic body that lived at
+	  src/common/dsp_chain.c is now the sw_fallback backend.  There
+	  is no separate zephyr_drv backend today -- the V2N GD32G5
+	  HW-FFT surfaces via wave-2's alp_adc_filter_t /
+	  alp_adc_spectrum_t in <alp/adc.h>, not through this
+	  standalone class.  Future HW backends (V2N standalone-FFT,
+	  AEN once the wave-2 bridge stabilises) pre-empt the
+	  sw_fallback transparently when registered at higher priority.
+
 	  Static cost: ~30 KB for the chain pool (two concurrent
 	  chains sized to ALP_DSP_MAX_FIR_TAPS / IIR_SECTIONS /
 	  FFT_POINTS).  Pulls in math.h transcendentals (sinf, cosf,
 	  sqrtf, lrintf).  Off by default to keep tight firmware
-	  images lean.  The wave-2 bridge surfaces
-	  alp_adc_filter_t / alp_adc_spectrum_t (in <alp/adc.h>,
-	  landing v0.5.x) reuse the same chain machinery.
+	  images lean.
 
 config ALP_SDK_POWER
 	bool "Enable <alp/power.h> system-power-mode surface"
 	default y
 	help
-	  Compile src/zephyr/power_zephyr.c.  Provides the portable
+	  Compile src/power_dispatch.c + src/backends/power/zephyr_stub.c
+	  (Slice 7 -- registry migration).  Provides the portable
 	  alp_power_open / configure_wake_source / request_sleep /
 	  close surface that backends route either through Zephyr's
 	  pm_policy_* primitives (off-V2N) or through the GD32G553
 	  supervisor's CMD_POWER_MODE_SET opcode (0x28) on V2N.
 
-	  v0.5 ships the surface with NOSUPPORT-with-INVAL-pre-checks
-	  stubs so customers can wire portable sleep code today; the
-	  per-backend HAL bodies (Zephyr pm_state tables on AEN +
-	  the GD32 firmware-side wake-handler + the supervisor
-	  re-init state machine) land in follow-up commits.
+	  Slice 7 ships the surface on top of the backend registry with
+	  a wildcard stub backend: open() returns a valid handle and
+	  configure_wake_source() succeeds silently, but request_sleep()
+	  returns ALP_ERR_NOT_IMPLEMENTED.  The dispatcher still enforces
+	  the legacy INVAL pre-checks (RUN-mode, invalid enum,
+	  no-wake-source-and-no-timer).  The per-backend HAL bodies
+	  (Zephyr pm_state tables on AEN + the GD32 firmware-side
+	  wake-handler + the supervisor re-init state machine) land in
+	  follow-up commits per issue #22.
 
 config ALP_SDK_GPU2D
 	bool "Enable <alp/gpu2d.h> 2D graphics accelerator surface"
 	default y
 	help
-	  Compile src/zephyr/gpu2d_zephyr.c.  Provides the portable
+	  Compile src/gpu2d_dispatch.c + src/backends/gpu2d/zephyr_stub.c
+	  (Slice 8b -- registry migration).  Provides the portable
 	  alp_gpu2d_open / fill_rect / blit / blend / close surface
 	  that maps to vendor 2D-accelerator HALs (Alif D/AVE 2D on
 	  Ensemble, planned Vivante GC328 on i.MX 93).
 
-	  v0.5 ships NOSUPPORT-with-INVAL-pre-checks stubs so
-	  customers can write portable 2D-graphics code today; the
-	  per-vendor HAL bodies land once their packs stabilise as
-	  Zephyr modules.
+	  Slice 8b ships the surface on top of the backend registry
+	  with a wildcard stub backend: open() returns a valid handle
+	  and the dispatcher's surface-validation pre-checks (NULL
+	  pointer, zero dimensions, format range -> ALP_ERR_INVAL)
+	  still fire, but fill_rect / blit / blend return
+	  ALP_ERR_NOT_IMPLEMENTED.  Per-vendor HAL bodies land in
+	  follow-up commits per issue #24.
 
 	  Surfaces the headline gap the Alif Ensemble feature audit
 	  (internal AEN feature audit) called out: customers
@@ -516,21 +671,59 @@ config ALP_SDK_IOT_WIFI
 	default y if WIFI && NET_MGMT
 	depends on WIFI && NET_MGMT
 	help
-	  Enable the real wifi_mgmt-backed alp_wifi_* implementation.
+	  Gates the real Zephyr wifi_mgmt body inside
+	  src/backends/wifi/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  Wi-Fi-side op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4b the dispatcher (src/wifi_dispatch.c) and its
+	  Zephyr backend (src/backends/wifi/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_WIFI_SW_FALLBACK for the software-backend opt-in.
+
 	  Requires CONFIG_WIFI=y and a wifi-management subsystem (e.g.
-	  CONFIG_WIFI_NM_WPA_SUPPLICANT=y on AEN-Zephyr).  When OFF
-	  alp_wifi_open() returns NULL with alp_last_error() =
-	  ALP_ERR_NOSUPPORT.
+	  CONFIG_WIFI_NM_WPA_SUPPLICANT=y on AEN-Zephyr).
+
+config ALP_SDK_WIFI_SW_FALLBACK
+	bool "Software Wi-Fi fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op Wi-Fi backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test only -- no real
+	  radio exists, so open succeeds silently and connect returns
+	  ALP_ERR_NOT_IMPLEMENTED.
 
 config ALP_SDK_IOT_MQTT
 	bool "Real MQTT client via Zephyr mqtt_client"
 	default y if MQTT_LIB
 	depends on MQTT_LIB && NET_TCP
 	help
-	  Enable the real mqtt_client-backed alp_mqtt_* implementation.
-	  Requires CONFIG_MQTT_LIB=y + CONFIG_NET_TCP=y.  When OFF
-	  alp_mqtt_open() returns NULL with alp_last_error() =
-	  ALP_ERR_NOSUPPORT.
+	  Gates the real Zephyr mqtt_client body inside
+	  src/backends/mqtt/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  MQTT-side op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4b the dispatcher (src/mqtt_dispatch.c) and its
+	  Zephyr backend (src/backends/mqtt/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_MQTT_SW_FALLBACK for the software-backend opt-in.
+
+	  Requires CONFIG_MQTT_LIB=y + CONFIG_NET_TCP=y.
+
+config ALP_SDK_MQTT_SW_FALLBACK
+	bool "Software MQTT fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op MQTT backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test only -- no real
+	  broker is reachable, so open succeeds silently and every
+	  other op returns ALP_ERR_NOT_IMPLEMENTED.
 
 config ALP_SDK_MAX_WIFI_HANDLES
 	int "Maximum concurrent alp_wifi_t handles"
@@ -556,30 +749,59 @@ config ALP_SDK_MQTT_BUF_SIZE
 	  for v0.2's JSON-payload reference apps; raise for larger
 	  publish bodies or longer topic strings.
 
-# Audio (PDM input + I2S output) -- v0.2 deliverable.  When OFF the
-# wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT
-# contract.
+# Audio (PDM input + I2S output) -- v0.2 deliverable.  Slice 4d moved
+# both directions onto the backend registry: the dispatcher
+# (src/audio_dispatch.c) owns the alp_audio_in_t / alp_audio_out_t
+# pools and the portable Zephyr backend
+# (src/backends/audio/zephyr_drv.c) lifts the DMIC + alp_i2s_* body.
+# The two AUDIO_IN / _OUT Kconfigs below stay as per-direction body
+# gates -- when OFF, that direction's I/O ops return NOSUPPORT but
+# the registry entry still links so the dispatcher resolves.
 
 config ALP_SDK_AUDIO_IN
 	bool "Real PDM input via Zephyr audio_dmic"
 	default y if AUDIO_DMIC
 	depends on AUDIO_DMIC
 	help
-	  Enable the real audio_dmic-backed alp_audio_in_* implementation.
+	  Gates the input half of the body inside
+	  src/backends/audio/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but
+	  alp_audio_in_read / start / stop return ALP_ERR_NOSUPPORT.
+
 	  Resolves the studio-supplied peripheral_id via the alp-pdm0 /
 	  alp-pdm1 DT aliases.  Includes the ALP DSP chain (DC-block in
-	  v0.2; AGC + resample in v0.3).  When OFF alp_audio_in_open()
-	  returns NULL with alp_last_error() = ALP_ERR_NOSUPPORT.
+	  v0.2; AGC + resample in v0.3).
 
 config ALP_SDK_AUDIO_OUT
 	bool "Real I2S output via alp_i2s_*"
 	default y if I2S
 	depends on I2S
 	help
-	  Enable the real alp_i2s_*-backed alp_audio_out_* implementation.
+	  Gates the output half of the body inside
+	  src/backends/audio/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but
+	  alp_audio_out_start / stop / write return ALP_ERR_NOSUPPORT.
+
 	  Delegates straight to the v0.2 <alp/i2s.h> wrapper plus a
 	  software volume scale.  Reuses the alp_i2s_t handle pool.
-	  When OFF alp_audio_out_open() returns NULL with NOSUPPORT.
+
+config ALP_SDK_AUDIO_SW_FALLBACK
+	bool "Software audio fallback (silence source / null sink)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a stub audio backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test and for any
+	  build where Zephyr's audio_dmic / I2S driver classes are
+	  absent -- in_open / out_open succeed (the dispatcher hands
+	  out a handle) and the I/O ops return ALP_OK with degraded
+	  semantics: in_read zero-fills the caller's buffer (silence
+	  source), out_write discards (null sink), out_set_volume
+	  accepts any value.  NOT for production audio -- the
+	  wildcard exists for native_sim portability.  Real builds
+	  always link the priority-100 zephyr_drv backend which
+	  routes through audio_dmic + alp_i2s_*.
 
 config ALP_SDK_MAX_AUDIO_IN_HANDLES
 	int "Maximum concurrent alp_audio_in_t handles"
@@ -611,62 +833,87 @@ config ALP_SDK_AUDIO_IN_SLAB_BLOCKS
 	  by the caller).  Four is a comfortable default; raise for
 	  apps that take longer than the block period to drain.
 
-# Inference (<alp/inference.h>) -- v0.2 deliverable, the wrapper
-# always compiles and falls back to ALP_ERR_NOSUPPORT when no
-# backend is enabled.
+# Inference (<alp/inference.h>) -- backend-registry-driven from
+# Slice 3.  The dispatcher (src/inference_dispatch.c) always
+# compiles and selects from the linker section populated by the
+# per-backend .c / .cpp files below.  Customers pick which
+# backends compile in via the per-backend Kconfigs; the
+# orchestrator emits the right set from the SoM preset's
+# inference.npu_population[] + the SoC JSON.
 
-config ALP_SDK_INFERENCE_TFLM
-	bool "TensorFlow Lite Micro backend for <alp/inference.h>"
+config ALP_SDK_INFERENCE_BACKEND_TFLM
+	bool "TensorFlow Lite Micro backend (portable, priority 50, silicon_ref=*)"
 	default n
 	depends on TENSORFLOW_LITE_MICRO && CPP
 	help
-	  Enable the TFLM-backed executor (src/zephyr/inference_tflm.cpp).
-	  Wraps tflite::MicroInterpreter + tflite::MicroMutableOpResolver
-	  for both CPU (reference kernels) and Ethos-U
-	  (CONFIG_ALP_SDK_INFERENCE_ETHOS_U) backends.  Pulls in TFLM via
-	  the upstream tflite-micro Zephyr module (see west.yml's
-	  name-allowlist).  When OFF, alp_inference_open() returns NULL
-	  with ALP_ERR_NOSUPPORT regardless of the backend selector.
+	  Compile src/backends/inference/tflm.cpp.  Wraps
+	  tflite::MicroInterpreter + tflite::MicroMutableOpResolver
+	  onto the inference ops vtable.  Registers at priority 50
+	  against silicon_ref="*" so it wins on any silicon unless a
+	  vendor-specific NPU backend (ETHOS_U_AEN / ETHOS_U_N93 /
+	  DRPAI_V2N / DEEPX_DXM1) registers at priority 100 on the
+	  matching silicon_ref.  Pulls in TFLM via the upstream
+	  tflite-micro Zephyr module (see west.yml's name-allowlist).
+	  Native_sim builds skip this (no TFLM module); the dispatcher
+	  falls back to sw_fallback.
 
-config ALP_SDK_INFERENCE_DRPAI
-	bool "Renesas DRP-AI3 backend for <alp/inference.h>"
+config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
+	bool "Ethos-U on Alif Ensemble (priority 100 on alif:ensemble:e*)"
 	default n
-	depends on SOC_SERIES_RZV2N || SOC_FAMILY_RENESAS_RZ
+	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
 	help
-	  Wires the alp_inference_drpai_* hooks (src/zephyr/inference_drpai.c)
-	  into the dispatcher.  Real impl bridges Renesas's DRP-AI
-	  translator runtime; v0.3 ships the dispatch routing only,
-	  v0.4 fills the bodies once the vendor pack lands in CI.
-	  When the v0.4 work completes this defaults y on V2N targets.
+	  Compile src/backends/inference/ethos_u_aen.cpp.  Registers
+	  the same TFLM ops table against the six AEN family
+	  silicon_refs (alif:ensemble:e3 / e4 / e5 / e6 / e7 / e8) at
+	  priority 100 so it wins over the portable tflm backend on
+	  AEN.  The Arm Ethos-U op resolver entry (AddEthosU) compiles
+	  into the TFLM body via the per-variant Kconfigs below.
 
-config ALP_SDK_INFERENCE_ETHOS_U
-	bool "Wire Arm Ethos-U op resolver (Vela-compiled models)"
-	default y if ALP_SDK_INFERENCE_TFLM && (SOC_SERIES_ENSEMBLE_E7 || ALP_SOC_NXP_IMX9_IMX93)
-	depends on ALP_SDK_INFERENCE_TFLM
+config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93
+	bool "Ethos-U on NXP i.MX 93 (priority 100 on nxp:imx9:imx93)"
+	default n
+	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
 	help
-	  Adds the AddEthosU() registration so Vela-compiled .tflite
-	  files can dispatch their custom ETHOS-U operator to the NPU.
-	  Covers Ethos-U55 on Alif Ensemble (AEN family) and Ethos-U65 on
-	  NXP i.MX 93's Cortex-M33.  Variant selection happens via
-	  ALP_SDK_INFERENCE_ETHOS_U_N93 (i.MX 93) -- the SDK source path
-	  is identical between U55 and U65; only the Vela compilation
-	  target + Arm driver build differ.  Off-target builds (CPU-only)
-	  must turn this off.
+	  Compile src/backends/inference/ethos_u_n93.cpp.  Registers
+	  the same TFLM ops table against silicon_ref="nxp:imx9:imx93"
+	  at priority 100 so it wins over the portable tflm backend on
+	  i.MX 93.
 
-config ALP_SDK_INFERENCE_ETHOS_U_N93
-	bool "Target the i.MX 93 Ethos-U65 (vs the AEN family's Ethos-U55)"
-	default y if ALP_SOC_NXP_IMX9_IMX93
-	depends on ALP_SDK_INFERENCE_ETHOS_U
+config ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N
+	bool "Renesas DRP-AI3 backend (NOT_IMPLEMENTED stub, priority 100 on V2N)"
+	default n
 	help
-	  Compile the i.MX 93 + Ethos-U65 per-variant config layer
-	  (src/zephyr/inference_ethosu_n93.c).  Anchors the v0.4 NPU
-	  attach hook + variant-name helper that downstream code uses
-	  to keep Vela target consistency.  Models compiled for U55
-	  do not run on U65 and vice versa; this flag plus the SoC
-	  choice above tells the build which Vela target the app
-	  expects.
+	  Compile src/backends/inference/drpai_v2n_stub.c.  Registers
+	  against silicon_ref="renesas:rzv2n:n44" at priority 100; every
+	  op returns ALP_ERR_NOT_IMPLEMENTED until the Renesas DRP-AI
+	  vendor pack lands.  Pinning the stub at higher priority than
+	  the portable tflm means V2N AUTO builds get a clear NOT_IMPLEMENTED
+	  signal rather than silently falling through to TFLM on the
+	  M-class core.  See github issue #58 for the v0.x landing.
 
-# Per-variant Ethos-U silicon switches.  Emitted by the orchestrator
+config ALP_SDK_INFERENCE_BACKEND_DEEPX_DXM1
+	bool "DEEPX DX-M1 backend (NOT_IMPLEMENTED stub, priority 100 on deepx:dx:m1)"
+	default n
+	help
+	  Compile src/backends/inference/deepx_dxm1_stub.c.  Registers
+	  against silicon_ref="deepx:dx:m1" at priority 100; every op
+	  returns ALP_ERR_NOT_IMPLEMENTED until the DEEPX SDK adapter
+	  lands.  See github issue #59 for the v0.x landing.  The
+	  Yocto-side DEEPX body lives at src/yocto/inference_deepx.cpp
+	  and is owned by the Yocto-registry-migration slice.
+
+config ALP_SDK_INFERENCE_SW_FALLBACK
+	bool "Software fallback (stateless NOSUPPORT stub, priority 0)"
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	help
+	  Compile src/backends/inference/sw_fallback.c.  Registered at
+	  priority 0 against silicon_ref="*" so it loses to every real
+	  backend; picked only when no other inference backend is
+	  linked in.  Useful for native_sim builds without
+	  CONFIG_TENSORFLOW_LITE_MICRO; open() succeeds with empty caps
+	  and every other op returns NOSUPPORT.
+
+# Per-variant Ethos-U kernel selectors.  Emitted by the orchestrator
 # (scripts/alp_orchestrate.py) from the SoM preset's
 # `inference.npu_population[]` block + the SoC JSON's
 # `capabilities.ethos_u{55,65,85}_count` fallback -- the customer
@@ -674,57 +921,54 @@ config ALP_SDK_INFERENCE_ETHOS_U_N93
 # Ethos-U variant (E4 / E6 / E8 = U55 pair + one U85) both switches
 # are =y so the upstream Arm Ethos-U driver compiles in the matching
 # kernel sets and the runtime dispatcher logs which variant ran the
-# model.  Orthogonal to ALP_SDK_INFERENCE_ETHOS_U_N93 above, which is
-# the NXP-side PHY / driver-shim selector (coexists on i.MX 93).
+# model.
 
-config ALP_SDK_INFERENCE_ETHOS_U_U55
+config ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55
 	bool "Compile against Arm Ethos-U55 NPU kernels"
-	depends on ALP_SDK_INFERENCE_ETHOS_U
+	depends on ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
 	help
-	  Selected by the orchestrator on SoMs whose silicon carries one
-	  or more Ethos-U55 instances (AEN family E3 / E4 / E5 / E6 / E7 /
-	  E8 all carry a pair; i.MX 93 does not).  The upstream Arm Ethos-U
-	  driver library is compiled with the U55-256 accelerator config so
-	  Vela-compiled U55 models dispatch.  Vela target on the build host
-	  must match: `--accelerator-config ethos-u55-256`.
+	  Selected by the orchestrator on SoMs whose silicon carries
+	  one or more Ethos-U55 instances (AEN family E3 / E4 / E5 /
+	  E6 / E7 / E8 all carry a pair).  The upstream Arm Ethos-U
+	  driver library is compiled with the U55-256 accelerator
+	  config so Vela-compiled U55 models dispatch.  Vela target on
+	  the build host must match: `--accelerator-config ethos-u55-256`.
 
-config ALP_SDK_INFERENCE_ETHOS_U_U65
+config ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65
 	bool "Compile against Arm Ethos-U65 NPU kernels"
-	depends on ALP_SDK_INFERENCE_ETHOS_U
+	depends on ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93
 	help
-	  Selected by the orchestrator on SoMs whose silicon carries one
-	  or more Ethos-U65 instances (NXP i.MX 93 today).  The upstream
+	  Selected by the orchestrator on i.MX 93 builds.  The upstream
 	  Arm Ethos-U driver library is compiled with the U65-256
 	  accelerator config.  Vela target: `--accelerator-config
-	  ethos-u65-256`.  Coexists with ALP_SDK_INFERENCE_ETHOS_U_N93 (the
-	  NXP-side PHY / driver-shim wiring).
+	  ethos-u65-256`.  Required by the ETHOS_U_N93 backend's
+	  compile-time consistency check.
 
-config ALP_SDK_INFERENCE_ETHOS_U_U85
+config ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85
 	bool "Compile against Arm Ethos-U85 NPU kernels (Generative AI)"
-	depends on ALP_SDK_INFERENCE_ETHOS_U
+	depends on ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
 	help
-	  Selected by the orchestrator on SoMs whose silicon carries one
-	  or more Ethos-U85 instances (Alif AEN E4 / E6 / E8; the U85 is
-	  paired with a Hyper-Generative subsystem and adds Transformer
-	  support on top of CNN / RNN).  The upstream Arm Ethos-U driver
-	  library is compiled with U85's TensorOptimized kernels + larger
-	  MAC array.  On U85-carrying SoMs both this AND
-	  ALP_SDK_INFERENCE_ETHOS_U_U55 are =y -- the two U55s alongside
-	  the U85 still need to run U55-compiled models.  Vela target:
+	  Selected by the orchestrator on SoMs whose silicon carries
+	  one or more Ethos-U85 instances (Alif AEN E4 / E6 / E8; the
+	  U85 is paired with a Hyper-Generative subsystem and adds
+	  Transformer support on top of CNN / RNN).  The upstream Arm
+	  Ethos-U driver library is compiled with U85's TensorOptimized
+	  kernels + larger MAC array.  On U85-carrying SoMs both this
+	  AND ETHOS_U_VARIANT_U55 are =y -- the two U55s alongside the
+	  U85 still need to run U55-compiled models.  Vela target:
 	  `--accelerator-config ethos-u85-256`.
 
 # Per-CPU-class TFLM kernel selectors.  Emitted by the orchestrator
-# (scripts/alp_orchestrate.py) from the SoC JSON's
-# `cores[<core_id>].vector_extension` for the slice being built --
-# the customer never picks one in board.yaml.  TFLM upstream ships
-# three kernel implementations (NEON / Helium MVE / scalar reference)
-# and the build picks the one matching the target CPU so we don't
-# pay the cost of compiling the wrong one.  Exactly one of these is
+# from the SoC JSON's cores[<core_id>].vector_extension for the
+# slice being built.  TFLM upstream ships three kernel
+# implementations (NEON / Helium MVE / scalar reference) and the
+# build picks the one matching the target CPU so we don't pay
+# the cost of compiling the wrong one.  Exactly one of these is
 # expected to be =y on any given slice.
 
-config ALP_SDK_INFERENCE_TFLM_NEON
+config ALP_SDK_INFERENCE_TFLM_KERNEL_NEON
 	bool "TFLM NEON-accelerated kernels (Cortex-A cluster)"
-	depends on ALP_SDK_INFERENCE_TFLM
+	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
 	help
 	  Emitted by the orchestrator for cortex-a* slices (A32 / A55).
 	  Selects upstream TFLM's NEON kernel implementation -- 64/128-bit
@@ -732,9 +976,9 @@ config ALP_SDK_INFERENCE_TFLM_NEON
 	  A32 cluster (E5 / E6 / E7 / E8), the V2N family's A55 cluster, and
 	  the i.MX 93's A55 cluster.
 
-config ALP_SDK_INFERENCE_TFLM_HELIUM
+config ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM
 	bool "TFLM Helium MVE-I kernels (Cortex-M55)"
-	depends on ALP_SDK_INFERENCE_TFLM
+	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
 	help
 	  Emitted by the orchestrator for cortex-m55 slices (ARMv8.1-M
 	  Helium vector extension).  Selects upstream TFLM's Helium kernel
@@ -742,9 +986,9 @@ config ALP_SDK_INFERENCE_TFLM_HELIUM
 	  2-4x faster on int8 convolutions than the reference kernels.
 	  Applies to every M55_HP / M55_HE slice across the AEN family.
 
-config ALP_SDK_INFERENCE_TFLM_REF
+config ALP_SDK_INFERENCE_TFLM_KERNEL_REF
 	bool "TFLM scalar reference kernels (baseline Cortex-M)"
-	depends on ALP_SDK_INFERENCE_TFLM
+	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
 	help
 	  Emitted by the orchestrator for baseline Cortex-M slices without
 	  Helium / DSP extensions (the V2N's m33_sm system-manager core,
@@ -761,23 +1005,72 @@ config ALP_SDK_BLE
 	default y if BT
 	depends on BT
 	help
-	  Enables the wifi_mgmt + GATT-server peripheral path and the
-	  scan + connect central path on top of Zephyr's `bt` host
-	  stack.  Requires CONFIG_BT=y plus CONFIG_BT_PERIPHERAL=y
-	  and/or CONFIG_BT_CENTRAL=y for the matching role.  When OFF
-	  alp_ble_open() returns NULL with ALP_ERR_NOSUPPORT.
+	  Gates the real Zephyr bt-host body inside
+	  src/backends/ble/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  radio-side op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4b the dispatcher (src/ble_dispatch.c) and its
+	  Zephyr backend (src/backends/ble/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_BLE_SW_FALLBACK for the software-backend opt-in.
+
+	  Requires CONFIG_BT=y plus CONFIG_BT_PERIPHERAL=y and/or
+	  CONFIG_BT_CENTRAL=y for the matching role.
+
+config ALP_SDK_BLE_SW_FALLBACK
+	bool "Software BLE fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op BLE backend that registers as a wildcard at
+	  priority 0.  For native_sim build / test only -- no real
+	  controller exists, so open/advertise/scan succeed silently
+	  and connect/GATT ops return ALP_ERR_NOT_IMPLEMENTED.
 
 config ALP_SDK_SECURITY
 	bool "Real MbedTLS PSA Crypto for <alp/security.h>"
 	default y if MBEDTLS_PSA_CRYPTO_C
 	depends on MBEDTLS && MBEDTLS_PSA_CRYPTO_C
 	help
+	  Gates the real body inside src/backends/security/zephyr_drv.c.
+	  When OFF, the registry backend still links (so the dispatcher
+	  resolves) but every primitive's I/O op returns
+	  ALP_ERR_NOSUPPORT.
+
 	  Wires the alp_hash_* / alp_aead_* / alp_random_bytes
 	  surface onto MbedTLS's PSA Crypto API.  PSA picks the
 	  active SoC's hardware accelerator transparently when the
 	  vendor's driver layer registers it (Alif Ensemble crypto
-	  subsystem, Renesas RZ/V2N RSIP).  When OFF the wrapper
-	  falls back to NULL / NOSUPPORT.
+	  subsystem, Renesas RZ/V2N RSIP).
+
+	  After Slice 4d the dispatcher (src/security_dispatch.c) owns
+	  two handle pools (hash + AEAD) and caches the selected
+	  backend's ops vtable for the stateless alp_random_bytes fast
+	  path; the Zephyr backend (src/backends/security/zephyr_drv.c)
+	  is compiled unconditionally so the registry resolves on every
+	  build.  See ALP_SDK_SECURITY_SW_FALLBACK for the software-
+	  backend opt-in.
+
+config ALP_SDK_SECURITY_SW_FALLBACK
+	bool "Software security fallback (no-op / deterministic random)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a stub security backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test and for any build
+	  where MbedTLS / PSA Crypto is absent -- hash_open / aead_open
+	  succeed (the dispatcher hands out a handle) but hash_update /
+	  hash_finish / aead_encrypt / aead_decrypt all return
+	  ALP_ERR_NOT_IMPLEMENTED; random_bytes returns ALP_OK and fills
+	  the buffer with a deterministic counter+0xAA pattern.  NOT
+	  cryptographically random -- the wildcard exists for native_sim
+	  portability, not security.  Production builds always link the
+	  priority-100 zephyr_drv backend which routes through PSA
+	  Crypto's DRBG.
 
 config ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
 	bool "Feed the GD32 supervisor's TRNG into MbedTLS entropy on V2N"
@@ -785,7 +1078,7 @@ config ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
 	depends on ALP_SDK_V2N_SUPERVISOR && ALP_SDK_SECURITY
 	help
 	  Compile the mbedtls_hardware_poll() implementation in
-	  src/zephyr/security_zephyr.c that drains true-random bytes
+	  src/backends/security/zephyr_drv.c that drains true-random bytes
 	  from the GD32G553 supervisor's NIST SP800-90B pre-certified
 	  TRNG.  The mbedtls profile (metadata/library-profiles/mbedtls/
 	  mbedtls_config.h) sets MBEDTLS_NO_PLATFORM_ENTROPY, so
@@ -805,11 +1098,21 @@ config ALP_SDK_MPROC
 	default y if MBOX
 	depends on MBOX
 	help
-	  Wires the alp_mbox_* / alp_shmem_* / alp_hwsem_*
-	  primitives onto the Zephyr backend.  Per-surface state:
+	  Gates the real Zephyr-side body inside
+	  src/backends/mproc/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  primitive's I/O op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4c the dispatcher (src/mproc_dispatch.c) and its
+	  Zephyr backend (src/backends/mproc/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_MPROC_SW_FALLBACK for the software-backend opt-in.
+
+	  Per-surface state when ON:
 
 	    - mbox: Zephyr MBOX driver class (v0.4).  Alif's MHU is
-	      registered as a Zephyr mbox device on AEN; the wrapper
+	      registered as a Zephyr mbox device on AEN; the backend
 	      resolves alp_mbox_config.channel through the alp-mboxN
 	      DT aliases.
 	    - shmem: DT-anchored carve-outs (v0.7, commit 2e9deec).
@@ -824,6 +1127,20 @@ config ALP_SDK_MPROC
 
 	  Yocto + GD32 backends still return NULL / NOSUPPORT for
 	  shmem + hwsem; Yocto carries the mbox shim only.
+
+config ALP_SDK_MPROC_SW_FALLBACK
+	bool "Software mproc fallback (no-op stubs)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op mproc backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test only -- no real
+	  MHU / shared-memory carve-out / hwsem block exists, so
+	  shmem_open / mbox_open / hwsem_open succeed silently,
+	  hwsem_try_lock / lock / unlock are no-op ALP_OK, and
+	  shmem_view / mbox_send / mbox_set_callback return
+	  ALP_ERR_NOT_IMPLEMENTED.
 
 config ALP_SDK_MPROC_NANOPB_FRAMING
 	bool "Frame alp_mbox_send payloads through the IPC envelope"
@@ -861,29 +1178,61 @@ config ALP_SDK_RPC
 	default y if IPC_SERVICE_BACKEND_RPMSG
 	depends on IPC_SERVICE_BACKEND_RPMSG && OPENAMP
 	help
-	  Wires the alp_rpc_open / alp_rpc_subscribe / alp_rpc_send /
-	  alp_rpc_call surface onto Zephyr's subsys/ipc/ipc_service
-	  with the rpmsg backend.  The orchestrator (scripts/alp_orchestrate.py)
-	  generates <alp/system_ipc.h> + a per-board DT overlay under
-	  zephyr/boards/<sku>_<core>.overlay that wires up the carve-out,
-	  mailbox channel, and chosen { zephyr,ipc } node so customer
-	  code calls alp_rpc_open(&(alp_rpc_config_t){...}) without
-	  knowing the address layout.
+	  Gates the real Zephyr ipc_service / RPMsg body inside
+	  src/backends/rpc/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but every
+	  channel-side op returns ALP_ERR_NOSUPPORT.
 
-	  Off-builds compile rpc_zephyr.c to NOSUPPORT stubs so apps
-	  that don't opt in still link cleanly.  Heterogeneous projects
+	  After Slice 4c the dispatcher (src/rpc_dispatch.c) and its
+	  Zephyr backend (src/backends/rpc/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_RPC_SW_FALLBACK for the software-backend opt-in.
+
+	  The orchestrator (scripts/alp_orchestrate.py) generates
+	  <alp/system_ipc.h> + a per-board DT overlay under
+	  zephyr/boards/<sku>_<core>.overlay that wires up the
+	  carve-out, mailbox channel, and chosen { zephyr,ipc } node
+	  so customer code calls alp_rpc_open(&(alp_rpc_config_t){...})
+	  without knowing the address layout.  Heterogeneous projects
 	  (board.yaml v2 with an ipc[] block) flip this on automatically
 	  via the orchestrator-emitted per-core alp.conf.
 
+config ALP_SDK_RPC_SW_FALLBACK
+	bool "Software RPC fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op RPC backend that registers as a wildcard at
+	  priority 0.  For native_sim build / test only -- no real
+	  OpenAMP / RPMsg transport exists, so open / subscribe /
+	  unsubscribe / send all succeed silently and call returns
+	  ALP_ERR_TIMEOUT immediately (mirrors the documented header
+	  contract for a peer that fails to respond).
+
+config ALP_SDK_MAX_RPC_HANDLES
+	int "Maximum concurrent alp_rpc_channel_t handles (dispatcher pool)"
+	default 2
+	help
+	  Sizes the dispatcher's per-handle pool in src/rpc_dispatch.c.
+	  Default 2 covers the typical "control + telemetry" channel
+	  pair an M-class slice opens; raise for apps that segment more
+	  aggressively.  Separate from ALP_SDK_RPC_MAX_CHANNELS, which
+	  sizes the Zephyr backend's internal struct rpc_be pool (must
+	  be >= this value).
+
 config ALP_SDK_RPC_MAX_CHANNELS
-	int "Maximum concurrent alp_rpc_channel_t handles"
+	int "Maximum struct rpc_be slots in the Zephyr backend pool"
 	default 4
 	depends on ALP_SDK_RPC
 	help
-	  Each handle reserves one ipc_service endpoint + a method-
-	  subscribe table.  4 is plenty for the typical "control +
-	  telemetry" channel pair an M-class slice opens; raise for
-	  apps that segment more aggressively.
+	  Each backend slot reserves one ipc_service endpoint + a
+	  method-subscribe table + the per-channel TX scratch and
+	  sync-call slot.  4 covers the dispatcher's default pool of
+	  2 with comfortable headroom for transient reopen flows;
+	  raise alongside ALP_SDK_MAX_RPC_HANDLES if more handles are
+	  held concurrently.
 
 config ALP_SDK_RPC_SUBS_PER_CHANNEL
 	int "Maximum alp_rpc_subscribe registrations per channel"
@@ -911,18 +1260,40 @@ config ALP_SDK_USB
 	default y if USB_DEVICE_STACK
 	depends on USB_DEVICE_STACK
 	help
-	  Wires alp_usb_device_open / enable / disable on top of
-	  Zephyr's USB device stack.  Per-class endpoint
-	  read/write (CDC-ACM, MSC, HID) lands in v0.3.x once
-	  the per-class wrappers are wired.  Host role lands
-	  alongside the SoC's USB-host controller driver.
+	  Gates the real Zephyr USBD-stack body inside
+	  src/backends/usb/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but
+	  every device-side op returns ALP_ERR_NOSUPPORT.
+
+	  After Slice 4b the dispatcher (src/usb_dispatch.c) and its
+	  Zephyr backend (src/backends/usb/zephyr_drv.c) are compiled
+	  unconditionally; this symbol now gates only the body of the
+	  Zephyr backend, not what gets linked.  See
+	  ALP_SDK_USB_SW_FALLBACK for the software-backend opt-in.
+
+config ALP_SDK_USB_SW_FALLBACK
+	bool "Software USB fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op USB backend that registers as a wildcard at
+	  priority 0.  For native_sim build / test only.
 
 config ALP_SDK_MAX_USB_DEV_HANDLES
 	int "Maximum concurrent alp_usb_dev_t handles"
-	default 1
+	default 2
 	help
 	  USB device role is single-instance on every E1M-conformant
-	  SoM (one USB controller per module).
+	  SoM (one USB controller per module).  Default raised from
+	  1 to 2 in Slice 4b so unit tests and customer code can hold
+	  a transient second handle during reopen flows.
+
+config ALP_SDK_MAX_USB_HOST_HANDLES
+	int "Maximum concurrent alp_usb_host_t handles"
+	default 1
+	help
+	  USB host role is single-instance on every supported SoM.
 
 config ALP_SDK_MAX_SHMEM_HANDLES
 	int "Maximum concurrent alp_shmem_t handles"
@@ -956,11 +1327,32 @@ config ALP_SDK_MAX_AEAD_HANDLES
 	default 4
 
 config ALP_SDK_BLE_MAX_CONNS
-	int "Maximum concurrent alp_ble_conn_t handles"
+	int "Maximum concurrent alp_ble_conn_t handles (Zephyr backend pool)"
 	default 2
 	help
 	  Mirrors CONFIG_BT_MAX_CONN; raise both together if your app
-	  holds more than two simultaneous connections.
+	  holds more than two simultaneous connections.  Sizes the
+	  backend-internal pool inside src/backends/ble/zephyr_drv.c
+	  (struct ble_conn_be).  Pair with
+	  ALP_SDK_MAX_BLE_CONN_HANDLES which sizes the dispatcher's
+	  per-handle pool.
+
+config ALP_SDK_MAX_BLE_HANDLES
+	int "Maximum concurrent alp_ble_t handles (dispatcher pool)"
+	default 1
+	help
+	  BLE radio is a singleton on every E1M-conformant SoM (one
+	  controller per module).  Sizes the dispatcher's per-handle
+	  pool in src/ble_dispatch.c.
+
+config ALP_SDK_MAX_BLE_CONN_HANDLES
+	int "Maximum concurrent alp_ble_conn_t handles (dispatcher pool)"
+	default 4
+	help
+	  Sizes the dispatcher's per-connection handle pool in
+	  src/ble_dispatch.c.  Default chosen above
+	  ALP_SDK_BLE_MAX_CONNS so transient close/reopen flows do not
+	  starve.
 
 config ALP_SDK_MAX_INFERENCE_HANDLES
 	int "Maximum concurrent alp_inference_t handles"

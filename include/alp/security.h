@@ -43,6 +43,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "alp/cap_instance.h"
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -102,6 +103,19 @@ alp_status_t alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_c
 
 /** @brief Release without finalising.  Use after a partial computation. */
 void         alp_hash_close(alp_hash_t *h);
+
+/**
+ * @brief Per-instance capability descriptor for an opened hash context.
+ *
+ * Populated by the backend's open path; returned by-pointer so callers
+ * can inspect @c flags / etc. without a copy.  The pointer remains
+ * valid until @ref alp_hash_close or @ref alp_hash_finish releases the
+ * handle.
+ *
+ * @param[in] h  Open hash context, or NULL.
+ * @return Pointer to the cached capabilities, or NULL when @p h is NULL.
+ */
+const alp_capabilities_t *alp_hash_capabilities(const alp_hash_t *h);
 
 /* ------------------------------------------------------------------ */
 /* AEAD                                                                */
@@ -179,6 +193,21 @@ alp_status_t alp_aead_decrypt(alp_aead_t *a,
 
 /** @brief Release the AEAD context.  Wipes key material. */
 void         alp_aead_close(alp_aead_t *a);
+
+/**
+ * @brief Per-instance capability descriptor for an opened AEAD context.
+ *
+ * Populated by the backend's open path; returned by-pointer so callers
+ * can inspect @c flags / etc. without a copy.  The pointer remains
+ * valid until @ref alp_aead_close releases the handle.
+ *
+ * No matching getter exists for @ref alp_random_bytes — random is a
+ * stateless op with no handle to attach capabilities to.
+ *
+ * @param[in] a  Open AEAD context, or NULL.
+ * @return Pointer to the cached capabilities, or NULL when @p a is NULL.
+ */
+const alp_capabilities_t *alp_aead_capabilities(const alp_aead_t *a);
 
 /* ------------------------------------------------------------------ */
 /* TRNG                                                                */

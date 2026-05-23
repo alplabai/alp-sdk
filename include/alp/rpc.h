@@ -81,6 +81,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+#include "alp/cap_instance.h"
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -219,6 +220,14 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg);
  * @param[in] ch  Handle from @ref alp_rpc_open, or NULL (no-op).
  */
 void alp_rpc_close(alp_rpc_channel_t *ch);
+
+/**
+ * @brief Query the capabilities of an opened RPC channel.
+ *
+ * @param ch  Handle from @ref alp_rpc_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p ch is NULL.
+ */
+const alp_capabilities_t *alp_rpc_capabilities(const alp_rpc_channel_t *ch);
 
 /* ------------------------------------------------------------------ */
 /* Subscriptions                                                       */
