@@ -100,7 +100,7 @@ static alp_status_t z_open(const alp_uart_config_t *cfg,
         return _errno_to_alp(err);
     }
 
-    st->dev     = dev;
+    st->dev     = (void *)dev;
     st->port_id = cfg->port_id;
     caps_out->flags = 0u;
     return ALP_OK;
@@ -108,8 +108,9 @@ static alp_status_t z_open(const alp_uart_config_t *cfg,
 
 static alp_status_t z_write(alp_uart_backend_state_t *st,
                             const uint8_t *data, size_t len) {
+    const struct device *dev = (const struct device *)st->dev;
     for (size_t i = 0; i < len; i++) {
-        uart_poll_out(st->dev, data[i]);
+        uart_poll_out(dev, data[i]);
     }
     return ALP_OK;
 }
@@ -117,6 +118,7 @@ static alp_status_t z_write(alp_uart_backend_state_t *st,
 static alp_status_t z_read(alp_uart_backend_state_t *st,
                            uint8_t *data, size_t len,
                            uint32_t timeout_ms) {
+    const struct device *dev = (const struct device *)st->dev;
     const int64_t deadline = (timeout_ms == 0)
         ? INT64_MAX
         : k_uptime_get() + (int64_t)timeout_ms;
@@ -124,7 +126,7 @@ static alp_status_t z_read(alp_uart_backend_state_t *st,
     for (size_t i = 0; i < len; i++) {
         int err;
         do {
-            err = uart_poll_in(st->dev, &data[i]);
+            err = uart_poll_in(dev, &data[i]);
             if (err == -1 && k_uptime_get() >= deadline) {
                 return ALP_ERR_TIMEOUT;
             }
@@ -198,7 +200,8 @@ alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port,
     }
     /* IRQ-driven RX requires a real Zephyr device; the sw_fallback
      * backend leaves state.dev = NULL -- reject it cleanly. */
-    if (port->state.dev == NULL) {
+    const struct device *dev = (const struct device *)port->state.dev;
+    if (dev == NULL) {
         alp_z_set_last_error(ALP_ERR_NOSUPPORT);
         return NULL;
     }
@@ -212,16 +215,16 @@ alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port,
         alp_z_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
-    s->dev  = port->state.dev;
+    s->dev  = dev;
     s->port = port;
 
-    int err = uart_irq_callback_user_data_set(port->state.dev, alp_uart_rx_isr, s);
+    int err = uart_irq_callback_user_data_set(dev, alp_uart_rx_isr, s);
     if (err != 0) {
         alp_z_uart_rx_ringbuf_pool_release(s);
         alp_z_set_last_error(_errno_to_alp(err));
         return NULL;
     }
-    uart_irq_rx_enable(port->state.dev);
+    uart_irq_rx_enable(dev);
     return s;
 }
 
