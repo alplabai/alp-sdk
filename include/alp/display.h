@@ -26,6 +26,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "alp/cap_instance.h"
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -104,6 +105,14 @@ alp_status_t alp_display_clear(alp_display_t *d);
  * @param[in] d  Handle from @ref alp_display_open, or NULL.
  */
 void alp_display_close(alp_display_t *d);
+
+/**
+ * @brief Query the capabilities of an opened display handle.
+ *
+ * @param d  Handle from @ref alp_display_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p d is NULL.
+ */
+const alp_capabilities_t *alp_display_capabilities(const alp_display_t *d);
 
 #ifdef __cplusplus
 }
