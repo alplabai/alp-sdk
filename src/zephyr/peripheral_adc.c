@@ -88,10 +88,10 @@ static void bridge_stream_free_slot(uint8_t slot)
 }
 
 
-/* One-shot ADC (alp_adc_open / read_raw / read_uv / close) was lifted into
- * the registry-based src/adc_dispatch.c + src/backends/adc/{alif_e7,gd32_bridge,sw_fallback}.c
- * during the Slice 1 ADC-registry pilot (2026-05-22).  This file now hosts only the
- * streaming ADC implementation (alp_adc_stream_*), which defers to Slice 1.x.
+/* One-shot ADC (alp_adc_open / read_raw / read_uv / close) is served by the
+ * registry-based src/adc_dispatch.c +
+ * src/backends/adc/{alif_e7,gd32_bridge,sw_fallback}.c.  This file hosts
+ * only the streaming ADC implementation (alp_adc_stream_*).
  */
 
 
