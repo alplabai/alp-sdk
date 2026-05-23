@@ -1,28 +1,36 @@
 /*
- * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Zephyr backend for <alp/tmu.h>.
- *
- * Routes each portable alp_tmu_* primitive to either the V2N
- * GD32G5 TMU (CORDIC) accelerator via the supervisor singleton, or
- * to libm directly when no hardware accelerator is on the active
- * SoM.  The customer-facing header is SoM-agnostic; this file is the
- * only place the GD32 name appears.
+ * Portable Zephyr backend for the <alp/tmu.h> surface.  Routes each
+ * stateless math primitive to either the V2N GD32G5 TMU (CORDIC)
+ * accelerator via the supervisor singleton, or to libm directly
+ * when no hardware accelerator is on the active SoM.  The
+ * customer-facing header is SoM-agnostic; this file is the only
+ * place the GD32 name appears for TMU.
  *
  * Format selection on the bridge: the request payload carries the
  * format byte (Q31 vs IEEE-754 single).  This backend always uses
  * IEEE-754 single because the public surface is `float` and the
  * round-trip cost is one `memcpy`-style reinterpret each way.  The
  * GD32G5's TMU supports both natively; the choice is documented in
- * docs/gd32-bridge-protocol.md §3.x.
+ * docs/gd32-bridge-protocol.md s3.x.
+ *
+ * Registry shape: silicon_ref="*" / vendor="zephyr" / priority 100.
+ * Single wildcard backend covers every Zephyr-shaped SoM the SDK
+ * supports; the libm-vs-bridge split is internal -- a build with
+ * CONFIG_ALP_SDK_V2N_SUPERVISOR=y compiles the bridge path, every
+ * other build compiles the libm path.
  */
 
 #include <math.h>
+#include <stddef.h>
 #include <string.h>
 
-#include "alp/peripheral.h"
-#include "alp/tmu.h"
+#include <alp/backend.h>
+#include <alp/peripheral.h>
+#include <alp/tmu.h>
+
+#include "tmu_ops.h"
 
 #if defined(CONFIG_ALP_SDK_V2N_SUPERVISOR)
 #define ALP_TMU_HAS_BRIDGE_PATH 1
@@ -58,9 +66,9 @@ static float u32_to_f32_bits(uint32_t bits)
 }
 
 /* Shared bridge path: acquire supervisor, send one CMD_TMU_COMPUTE,
- * release.  All twelve TMU functions share this body -- the
- * per-function alp_tmu_* wrappers just pick the function id and
- * fold their inputs into u32 bits. */
+ * release.  All twelve TMU ops share this body -- the per-op static
+ * helpers below just pick the function id and fold their inputs
+ * into u32 bits. */
 static alp_status_t tmu_bridge_call(gd32g553_tmu_function_t function,
                                     float in_a, float in_b,
                                     float *out)
@@ -82,22 +90,14 @@ static alp_status_t tmu_bridge_call(gd32g553_tmu_function_t function,
 #endif
 
 /* ------------------------------------------------------------------ */
-/* libm fallback shims -- only compiled on non-bridge SoMs.            */
+/* Per-op static helpers.  The function pointers in the ops vtable    */
+/* point at these; the dispatcher walks ops->sin / cos / ...          */
+/* directly.  Each helper short-circuits NULL-out at the dispatcher   */
+/* layer already, so the body assumes a non-NULL out pointer.         */
 /* ------------------------------------------------------------------ */
 
-#if !ALP_TMU_HAS_BRIDGE_PATH
-/* Avoid one-line wrappers per function -- the per-call indirection
- * is what we'd inline anyway.  Each public function reaches libm
- * directly below. */
-#endif
-
-/* ------------------------------------------------------------------ */
-/* Public API                                                          */
-/* ------------------------------------------------------------------ */
-
-alp_status_t alp_tmu_sin(float in_a, float *out)
+static alp_status_t z_sin(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
 #if ALP_TMU_HAS_BRIDGE_PATH
     return tmu_bridge_call(GD32G553_TMU_FN_SIN, in_a, 0.0f, out);
 #else
@@ -106,9 +106,8 @@ alp_status_t alp_tmu_sin(float in_a, float *out)
 #endif
 }
 
-alp_status_t alp_tmu_cos(float in_a, float *out)
+static alp_status_t z_cos(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
 #if ALP_TMU_HAS_BRIDGE_PATH
     return tmu_bridge_call(GD32G553_TMU_FN_COS, in_a, 0.0f, out);
 #else
@@ -117,9 +116,8 @@ alp_status_t alp_tmu_cos(float in_a, float *out)
 #endif
 }
 
-alp_status_t alp_tmu_tan(float in_a, float *out)
+static alp_status_t z_tan(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
 #if ALP_TMU_HAS_BRIDGE_PATH
     return tmu_bridge_call(GD32G553_TMU_FN_TAN, in_a, 0.0f, out);
 #else
@@ -128,9 +126,8 @@ alp_status_t alp_tmu_tan(float in_a, float *out)
 #endif
 }
 
-alp_status_t alp_tmu_atan(float in_a, float *out)
+static alp_status_t z_atan(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
 #if ALP_TMU_HAS_BRIDGE_PATH
     return tmu_bridge_call(GD32G553_TMU_FN_ATAN, in_a, 0.0f, out);
 #else
@@ -139,9 +136,8 @@ alp_status_t alp_tmu_atan(float in_a, float *out)
 #endif
 }
 
-alp_status_t alp_tmu_atan2(float in_a, float in_b, float *out)
+static alp_status_t z_atan2(float in_a, float in_b, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
 #if ALP_TMU_HAS_BRIDGE_PATH
     return tmu_bridge_call(GD32G553_TMU_FN_ATAN2, in_a, in_b, out);
 #else
@@ -150,9 +146,8 @@ alp_status_t alp_tmu_atan2(float in_a, float in_b, float *out)
 #endif
 }
 
-alp_status_t alp_tmu_sqrt(float in_a, float *out)
+static alp_status_t z_sqrt(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
 #if ALP_TMU_HAS_BRIDGE_PATH
     return tmu_bridge_call(GD32G553_TMU_FN_SQRT, in_a, 0.0f, out);
 #else
@@ -161,9 +156,8 @@ alp_status_t alp_tmu_sqrt(float in_a, float *out)
 #endif
 }
 
-alp_status_t alp_tmu_log(float in_a, float *out)
+static alp_status_t z_log(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
 #if ALP_TMU_HAS_BRIDGE_PATH
     return tmu_bridge_call(GD32G553_TMU_FN_LOG, in_a, 0.0f, out);
 #else
@@ -172,9 +166,8 @@ alp_status_t alp_tmu_log(float in_a, float *out)
 #endif
 }
 
-alp_status_t alp_tmu_exp(float in_a, float *out)
+static alp_status_t z_exp(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
 #if ALP_TMU_HAS_BRIDGE_PATH
     return tmu_bridge_call(GD32G553_TMU_FN_EXP, in_a, 0.0f, out);
 #else
@@ -183,9 +176,8 @@ alp_status_t alp_tmu_exp(float in_a, float *out)
 #endif
 }
 
-alp_status_t alp_tmu_sinh(float in_a, float *out)
+static alp_status_t z_sinh(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
 #if ALP_TMU_HAS_BRIDGE_PATH
     return tmu_bridge_call(GD32G553_TMU_FN_SINH, in_a, 0.0f, out);
 #else
@@ -194,9 +186,8 @@ alp_status_t alp_tmu_sinh(float in_a, float *out)
 #endif
 }
 
-alp_status_t alp_tmu_cosh(float in_a, float *out)
+static alp_status_t z_cosh(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
 #if ALP_TMU_HAS_BRIDGE_PATH
     return tmu_bridge_call(GD32G553_TMU_FN_COSH, in_a, 0.0f, out);
 #else
@@ -205,9 +196,8 @@ alp_status_t alp_tmu_cosh(float in_a, float *out)
 #endif
 }
 
-alp_status_t alp_tmu_tanh(float in_a, float *out)
+static alp_status_t z_tanh(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
 #if ALP_TMU_HAS_BRIDGE_PATH
     return tmu_bridge_call(GD32G553_TMU_FN_TANH, in_a, 0.0f, out);
 #else
@@ -216,9 +206,8 @@ alp_status_t alp_tmu_tanh(float in_a, float *out)
 #endif
 }
 
-alp_status_t alp_tmu_hypot(float in_a, float in_b, float *out)
+static alp_status_t z_hypot(float in_a, float in_b, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
 #if ALP_TMU_HAS_BRIDGE_PATH
     return tmu_bridge_call(GD32G553_TMU_FN_HYPOT, in_a, in_b, out);
 #else
@@ -226,3 +215,29 @@ alp_status_t alp_tmu_hypot(float in_a, float in_b, float *out)
     return ALP_OK;
 #endif
 }
+
+/* ---------- Registration ---------- */
+
+static const alp_tmu_ops_t _ops = {
+    .sin   = z_sin,
+    .cos   = z_cos,
+    .tan   = z_tan,
+    .atan  = z_atan,
+    .atan2 = z_atan2,
+    .sqrt  = z_sqrt,
+    .log   = z_log,
+    .exp   = z_exp,
+    .sinh  = z_sinh,
+    .cosh  = z_cosh,
+    .tanh  = z_tanh,
+    .hypot = z_hypot,
+};
+
+ALP_BACKEND_REGISTER(tmu, zephyr_drv, {
+    .silicon_ref = "*",
+    .vendor      = "zephyr",
+    .base_caps   = 0u,
+    .priority    = 100,
+    .ops         = &_ops,
+    .probe       = NULL,
+});

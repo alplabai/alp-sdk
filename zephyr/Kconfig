@@ -433,31 +433,60 @@ config ALP_SDK_PERIPH_TMU
 	bool "Enable <alp/tmu.h> wrapper (CORDIC math accelerator surface)"
 	default y
 	help
-	  Compile src/zephyr/peripheral_tmu.c.  Provides alp_tmu_sin /
-	  cos / tan / atan / atan2 / sqrt / log / exp / sinh / cosh /
-	  tanh / hypot on top of either the V2N supervisor's GD32G5
-	  TMU (CORDIC) accelerator (when CONFIG_ALP_SDK_V2N_SUPERVISOR=y)
-	  or libm directly (every other SoM).  The customer-facing
-	  header is SoM-agnostic; the V2N dispatch is internal.
+	  Compile the TMU registry sources -- src/tmu_dispatch.c plus
+	  src/backends/tmu/zephyr_drv.c (and, when
+	  ALP_SDK_TMU_SW_FALLBACK=y, src/backends/tmu/sw_fallback.c).
+	  Provides alp_tmu_sin / cos / tan / atan / atan2 / sqrt / log /
+	  exp / sinh / cosh / tanh / hypot on top of either the V2N
+	  supervisor's GD32G5 TMU (CORDIC) accelerator (when
+	  CONFIG_ALP_SDK_V2N_SUPERVISOR=y) or libm directly (every other
+	  SoM).  The customer-facing header is SoM-agnostic; the V2N
+	  dispatch is internal.
+
+	  After Slice 4d the dispatcher caches the selected backend's
+	  ops vtable on first call -- TMU is handle-less, so there is no
+	  per-call selector cost on the hot path.  See
+	  ALP_SDK_TMU_SW_FALLBACK for the software-backend opt-in.
+
+config ALP_SDK_TMU_SW_FALLBACK
+	bool "Software TMU fallback (libm)"
+	depends on ALP_SDK && ALP_SDK_PERIPH_TMU
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a libm-direct TMU backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test and for any SoM
+	  whose dedicated TMU backend is not linked into the build --
+	  every alp_tmu_* primitive then routes through sinf / cosf /
+	  ... and returns ALP_OK.  Marginal cost is ~24 bytes for the ops
+	  vtable when the rest of the firmware already pulls in libm.
 
 config ALP_SDK_DSP
 	bool "Enable <alp/dsp.h> standalone DSP-chain API"
 	default n
 	help
-	  Compile src/common/dsp_chain.c.  Provides the standalone
+	  Compile the DSP registry sources -- src/dsp_dispatch.c plus
+	  src/backends/dsp/sw_fallback.c.  Provides the standalone
 	  alp_dsp_chain_* surface for in-RAM FIR / IIR / window /
 	  FFT processing against int16 mV-scale buffers.  Uses
 	  CMSIS-DSP when ALP_HAS_CMSIS_DSP=1; otherwise falls back
 	  to a portable-C math kernel set (naive FIR convolution,
 	  direct-form-1 biquad cascade, radix-2 Cooley-Tukey FFT).
 
+	  Slice 4d migration: the legacy OS-agnostic body that lived at
+	  src/common/dsp_chain.c is now the sw_fallback backend.  There
+	  is no separate zephyr_drv backend today -- the V2N GD32G5
+	  HW-FFT surfaces via wave-2's alp_adc_filter_t /
+	  alp_adc_spectrum_t in <alp/adc.h>, not through this
+	  standalone class.  Future HW backends (V2N standalone-FFT,
+	  AEN once the wave-2 bridge stabilises) pre-empt the
+	  sw_fallback transparently when registered at higher priority.
+
 	  Static cost: ~30 KB for the chain pool (two concurrent
 	  chains sized to ALP_DSP_MAX_FIR_TAPS / IIR_SECTIONS /
 	  FFT_POINTS).  Pulls in math.h transcendentals (sinf, cosf,
 	  sqrtf, lrintf).  Off by default to keep tight firmware
-	  images lean.  The wave-2 bridge surfaces
-	  alp_adc_filter_t / alp_adc_spectrum_t (in <alp/adc.h>,
-	  landing v0.5.x) reuse the same chain machinery.
+	  images lean.
 
 config ALP_SDK_POWER
 	bool "Enable <alp/power.h> system-power-mode surface"
@@ -591,30 +620,59 @@ config ALP_SDK_MQTT_BUF_SIZE
 	  for v0.2's JSON-payload reference apps; raise for larger
 	  publish bodies or longer topic strings.
 
-# Audio (PDM input + I2S output) -- v0.2 deliverable.  When OFF the
-# wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT
-# contract.
+# Audio (PDM input + I2S output) -- v0.2 deliverable.  Slice 4d moved
+# both directions onto the backend registry: the dispatcher
+# (src/audio_dispatch.c) owns the alp_audio_in_t / alp_audio_out_t
+# pools and the portable Zephyr backend
+# (src/backends/audio/zephyr_drv.c) lifts the DMIC + alp_i2s_* body.
+# The two AUDIO_IN / _OUT Kconfigs below stay as per-direction body
+# gates -- when OFF, that direction's I/O ops return NOSUPPORT but
+# the registry entry still links so the dispatcher resolves.
 
 config ALP_SDK_AUDIO_IN
 	bool "Real PDM input via Zephyr audio_dmic"
 	default y if AUDIO_DMIC
 	depends on AUDIO_DMIC
 	help
-	  Enable the real audio_dmic-backed alp_audio_in_* implementation.
+	  Gates the input half of the body inside
+	  src/backends/audio/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but
+	  alp_audio_in_read / start / stop return ALP_ERR_NOSUPPORT.
+
 	  Resolves the studio-supplied peripheral_id via the alp-pdm0 /
 	  alp-pdm1 DT aliases.  Includes the ALP DSP chain (DC-block in
-	  v0.2; AGC + resample in v0.3).  When OFF alp_audio_in_open()
-	  returns NULL with alp_last_error() = ALP_ERR_NOSUPPORT.
+	  v0.2; AGC + resample in v0.3).
 
 config ALP_SDK_AUDIO_OUT
 	bool "Real I2S output via alp_i2s_*"
 	default y if I2S
 	depends on I2S
 	help
-	  Enable the real alp_i2s_*-backed alp_audio_out_* implementation.
+	  Gates the output half of the body inside
+	  src/backends/audio/zephyr_drv.c.  When OFF, the registry
+	  backend still links (so the dispatcher resolves) but
+	  alp_audio_out_start / stop / write return ALP_ERR_NOSUPPORT.
+
 	  Delegates straight to the v0.2 <alp/i2s.h> wrapper plus a
 	  software volume scale.  Reuses the alp_i2s_t handle pool.
-	  When OFF alp_audio_out_open() returns NULL with NOSUPPORT.
+
+config ALP_SDK_AUDIO_SW_FALLBACK
+	bool "Software audio fallback (silence source / null sink)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a stub audio backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test and for any
+	  build where Zephyr's audio_dmic / I2S driver classes are
+	  absent -- in_open / out_open succeed (the dispatcher hands
+	  out a handle) and the I/O ops return ALP_OK with degraded
+	  semantics: in_read zero-fills the caller's buffer (silence
+	  source), out_write discards (null sink), out_set_volume
+	  accepts any value.  NOT for production audio -- the
+	  wildcard exists for native_sim portability.  Real builds
+	  always link the priority-100 zephyr_drv backend which
+	  routes through audio_dmic + alp_i2s_*.
 
 config ALP_SDK_MAX_AUDIO_IN_HANDLES
 	int "Maximum concurrent alp_audio_in_t handles"
@@ -826,12 +884,42 @@ config ALP_SDK_SECURITY
 	default y if MBEDTLS_PSA_CRYPTO_C
 	depends on MBEDTLS && MBEDTLS_PSA_CRYPTO_C
 	help
+	  Gates the real body inside src/backends/security/zephyr_drv.c.
+	  When OFF, the registry backend still links (so the dispatcher
+	  resolves) but every primitive's I/O op returns
+	  ALP_ERR_NOSUPPORT.
+
 	  Wires the alp_hash_* / alp_aead_* / alp_random_bytes
 	  surface onto MbedTLS's PSA Crypto API.  PSA picks the
 	  active SoC's hardware accelerator transparently when the
 	  vendor's driver layer registers it (Alif Ensemble crypto
-	  subsystem, Renesas RZ/V2N RSIP).  When OFF the wrapper
-	  falls back to NULL / NOSUPPORT.
+	  subsystem, Renesas RZ/V2N RSIP).
+
+	  After Slice 4d the dispatcher (src/security_dispatch.c) owns
+	  two handle pools (hash + AEAD) and caches the selected
+	  backend's ops vtable for the stateless alp_random_bytes fast
+	  path; the Zephyr backend (src/backends/security/zephyr_drv.c)
+	  is compiled unconditionally so the registry resolves on every
+	  build.  See ALP_SDK_SECURITY_SW_FALLBACK for the software-
+	  backend opt-in.
+
+config ALP_SDK_SECURITY_SW_FALLBACK
+	bool "Software security fallback (no-op / deterministic random)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a stub security backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test and for any build
+	  where MbedTLS / PSA Crypto is absent -- hash_open / aead_open
+	  succeed (the dispatcher hands out a handle) but hash_update /
+	  hash_finish / aead_encrypt / aead_decrypt all return
+	  ALP_ERR_NOT_IMPLEMENTED; random_bytes returns ALP_OK and fills
+	  the buffer with a deterministic counter+0xAA pattern.  NOT
+	  cryptographically random -- the wildcard exists for native_sim
+	  portability, not security.  Production builds always link the
+	  priority-100 zephyr_drv backend which routes through PSA
+	  Crypto's DRBG.
 
 config ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
 	bool "Feed the GD32 supervisor's TRNG into MbedTLS entropy on V2N"
@@ -839,7 +927,7 @@ config ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
 	depends on ALP_SDK_V2N_SUPERVISOR && ALP_SDK_SECURITY
 	help
 	  Compile the mbedtls_hardware_poll() implementation in
-	  src/zephyr/security_zephyr.c that drains true-random bytes
+	  src/backends/security/zephyr_drv.c that drains true-random bytes
 	  from the GD32G553 supervisor's NIST SP800-90B pre-certified
 	  TRNG.  The mbedtls profile (metadata/library-profiles/mbedtls/
 	  mbedtls_config.h) sets MBEDTLS_NO_PLATFORM_ENTROPY, so

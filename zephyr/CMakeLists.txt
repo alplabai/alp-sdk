@@ -31,10 +31,10 @@ zephyr_library_sources(
     # src/backends/wifi/{zephyr_drv,sw_fallback}.c and the MQTT half
     # to src/backends/mqtt/{zephyr_drv,sw_fallback}.c.  Both halves
     # now ship as registry-shaped backends; see the MQTT block below.
-    # audio_zephyr.c follows the same split: real DMIC + alp_i2s_*
-    # delegation behind CONFIG_ALP_SDK_AUDIO_IN / _OUT, NOSUPPORT
-    # contract elsewhere.
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/audio_zephyr.c
+    # audio_zephyr.c retired in Slice 4d -- both directions
+    # (alp_audio_in_t + alp_audio_out_t) migrated to
+    # src/backends/audio/{zephyr_drv,sw_fallback}.c with the
+    # dispatcher in src/audio_dispatch.c.  See the audio block below.
     # inference_zephyr.c carries the public-API glue + handle pool;
     # per-backend executors (TFLM C++ wrapper, DRP-AI, DEEPX) compile
     # in only when their CONFIG_ flag is on so the wrapper itself
@@ -42,7 +42,11 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_zephyr.c
     # Remaining v0.3 surfaces still on the stub contract -- swap in
     # their *_zephyr.c counterparts as they ship.
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/security_zephyr.c
+    # security_zephyr.c retired in Slice 4d -- all three primitives
+    # (hash + AEAD + random) migrated to
+    # src/backends/security/{zephyr_drv,sw_fallback}.c with the
+    # dispatcher in src/security_dispatch.c.  See the security block
+    # below.
     # mproc_zephyr.c retired in Slice 4c -- all three primitives
     # (shmem + mbox + hwsem) migrated to
     # src/backends/mproc/{zephyr_drv,sw_fallback}.c with the
@@ -114,6 +118,39 @@ zephyr_library_sources(
 if(CONFIG_ALP_SDK_MPROC_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/sw_fallback.c)
+endif()
+
+# Security registry sources -- replace the legacy
+# src/zephyr/security_zephyr.c from the v0.3 contract.  The dispatcher
+# owns two handle pools (hash + AEAD) plus a cached ops pointer for
+# the stateless alp_random_bytes fast path; the portable Zephyr
+# backend lifts the PSA Crypto body verbatim (PSA picks the active
+# SoC's HW accelerator transparently via MbedTLS's driver layer).
+# Dispatcher + Zephyr backend ship unconditionally; sw_fallback gated
+# on the native_sim opt-in.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/security_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_SECURITY_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/sw_fallback.c)
+endif()
+
+# Audio registry sources -- replace the legacy
+# src/zephyr/audio_zephyr.c from the v0.3 contract.  The dispatcher
+# owns two handle pools (alp_audio_in_t + alp_audio_out_t) keyed off
+# the same class registry; the portable Zephyr backend lifts the
+# DMIC input + alp_i2s_*-delegated output body verbatim.
+# Dispatcher + Zephyr backend ship unconditionally; sw_fallback
+# gated on the native_sim opt-in.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/audio_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/audio/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_AUDIO_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/audio/sw_fallback.c)
 endif()
 
 # RPC registry sources -- replace the legacy src/zephyr/rpc_zephyr.c
@@ -197,15 +234,37 @@ if(CONFIG_ALP_SDK_QENC_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/qenc/sw_fallback.c)
 endif()
+# TMU registry sources -- replace the legacy src/zephyr/peripheral_tmu.c
+# from the v0.4 contract.  TMU is handle-less; the dispatcher caches
+# the selected backend's ops vtable on first call instead of owning a
+# handle pool.  Dispatcher + portable Zephyr/bridge backend ship
+# unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_TMU
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_tmu.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/tmu_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/tmu/zephyr_drv.c)
 
-# Standalone DSP-chain API (<alp/dsp.h>).  Source lives in src/common
-# because it is OS-agnostic -- the math kernels are libm + CMSIS-DSP
-# only.  The wave-2 bridge surfaces (alp_adc_filter_t / spectrum_t in
-# <alp/adc.h>) compose on top of this same machinery once they land.
+if(CONFIG_ALP_SDK_PERIPH_TMU AND CONFIG_ALP_SDK_TMU_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/tmu/sw_fallback.c)
+endif()
+
+# DSP registry sources -- replace the legacy src/common/dsp_chain.c
+# from the v0.3 contract.  The dispatcher owns one alp_dsp_chain_t
+# pool keyed off the dsp class registry; the OS-agnostic CMSIS-DSP /
+# portable-radix-2 body now lives in src/backends/dsp/sw_fallback.c
+# (no separate zephyr_drv exists -- the V2N GD32G5 HW-FFT surfaces
+# via wave-2's alp_adc_filter_t / spectrum_t in <alp/adc.h>, not
+# through this standalone class, so the SW backend is the
+# unconditional production pick today).
+#
+# Dispatcher + sw_fallback ship unconditionally -- they ARE the
+# production code on every SoC in Slice 4d.  CONFIG_ALP_SDK_DSP is
+# retained as the opt-in feature gate; when off, neither file is
+# linked so the static cost (~17 KB pool slot) is paid only by apps
+# that use the chain API.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/dsp_chain.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/dsp_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dsp/sw_fallback.c)
 
 # System-power-mode surface (<alp/power.h>).  Wired behind
 # CONFIG_ALP_SDK_POWER so customers can opt out on builds that

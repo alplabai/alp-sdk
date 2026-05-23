@@ -47,6 +47,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "alp/cap_instance.h"
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -132,6 +133,19 @@ alp_status_t alp_audio_in_read(alp_audio_in_t *in,
  */
 void          alp_audio_in_close(alp_audio_in_t *in);
 
+/**
+ * @brief Return the per-instance capability descriptor cached at open() time.
+ *
+ * Populated by the selected backend's ops->in_open() and snapshotted on the
+ * handle so callers never see registry plumbing leak through.  Mirrors the
+ * sibling getters on the other v0.7 backend-registry surfaces.
+ *
+ * @param[in] in  Handle from @ref alp_audio_in_open, or NULL.
+ * @return Pointer to the cached descriptor, or NULL when @p in is NULL.
+ *         The pointer stays valid until @ref alp_audio_in_close is called.
+ */
+const alp_capabilities_t *alp_audio_in_capabilities(const alp_audio_in_t *in);
+
 /* ------------------------------------------------------------------ */
 /* Audio output (I²S DAC, line-out, headphone amp)                     */
 /* ------------------------------------------------------------------ */
@@ -198,6 +212,18 @@ alp_status_t alp_audio_out_set_volume(alp_audio_out_t *out, uint8_t vol);
  * @param[in] out  Handle from @ref alp_audio_out_open, or NULL.
  */
 void          alp_audio_out_close(alp_audio_out_t *out);
+
+/**
+ * @brief Return the per-instance capability descriptor cached at open() time.
+ *
+ * Mirrors @ref alp_audio_in_capabilities -- snapshotted by the selected
+ * backend's ops->out_open() on the handle.
+ *
+ * @param[in] out  Handle from @ref alp_audio_out_open, or NULL.
+ * @return Pointer to the cached descriptor, or NULL when @p out is NULL.
+ *         The pointer stays valid until @ref alp_audio_out_close is called.
+ */
+const alp_capabilities_t *alp_audio_out_capabilities(const alp_audio_out_t *out);
 
 #ifdef __cplusplus
 }  /* extern "C" */

@@ -1,29 +1,33 @@
 /*
- * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Portable standalone implementation of <alp/dsp.h>.
+ * Software DSP fallback.  Wildcard backend at priority 0 -- picked
+ * unconditionally on every SoC in Slice 4d because no HW-DSP backend
+ * is registered against the dsp class today (the V2N GD32G5 FFT/FAC
+ * surfaces via wave-2's alp_adc_filter_t / alp_adc_spectrum_t in
+ * <alp/adc.h>, not through this standalone class).  Future HW
+ * backends at higher priority pre-empt this one transparently.
  *
- * The chain pool is a fixed-size array of slot structs, no heap.
- * Validation on @ref alp_dsp_chain_open enforces:
- *   - 1..ALP_DSP_MAX_STAGES stages.
- *   - At most one FFT, and if present it must be terminal.
- *   - WINDOW (if any) must immediately precede FFT.
- *   - Per-stage bounds (n_taps / n_sections / n_points within
- *     ALP_DSP_MAX_*; FFT size power-of-two and within
- *     [ALP_DSP_MIN_FFT_POINTS, ALP_DSP_MAX_FFT_POINTS]).
+ * Body lifted verbatim from the v0.3 src/common/dsp_chain.c.  The
+ * legacy struct alp_dsp_chain (per-stage state + window samples +
+ * FFT scratch) is now struct dsp_be, owned by the backend and reached
+ * via state->be_data; the dispatcher's handle (in dsp_ops.h) is now
+ * a thin wrapper.  alp_dsp_chain_open/_close/_apply_* are now
+ * sw_open/_close/_apply_* ops; public entry points moved to
+ * src/dsp_dispatch.c.  CMSIS-DSP gating (ALP_HAS_CMSIS_DSP -> arm_fir
+ * / arm_rfft_fast; otherwise portable-C convolution + radix-2 FFT)
+ * is preserved verbatim.
  *
- * Math kernels (FIR / IIR / window / FFT) prefer CMSIS-DSP when
- * `ALP_HAS_CMSIS_DSP=1`.  Without it, a portable-C fallback runs:
- *   - FIR  -- naive O(N*M) convolution with per-chain state.
- *   - IIR  -- direct-form-1 biquad cascade.
- *   - WIN  -- window samples precomputed at chain-open time.
- *   - FFT  -- naive radix-2 Cooley-Tukey in O(N log N), in-place.
- *
- * The portable kernels are correct but slow: the bridge wave-2 path
- * (alp_adc_filter_t / alp_adc_spectrum_t in <alp/adc.h>, landing
- * v0.5.x) routes through the GD32G5's HW DSP block on V2N for the
- * hot path.
+ * @par Cost: ROM varies with CMSIS-DSP linkage (8-30 KB).  RAM =
+ *      sizeof(struct dsp_be) per backend slot = ~17 KB worst case
+ *      (per-stage state + ALP_DSP_MAX_FFT_POINTS * 2 floats scratch
+ *      + one window-sample buffer); two pool slots = ~34 KB static.
+ * @par Performance: CMSIS-DSP soft-FP on M-class cores with FPU; on
+ *      Cortex-M55 + Helium a future vendor backend will be ~5-10x
+ *      faster.  On Cortex-M33 / native_sim this is the best portable
+ *      path; for SoMs without a HW DSP block this stays production.
+ *      Portable-C path (ALP_HAS_CMSIS_DSP undefined) is O(N*M) FIR /
+ *      O(N) biquad / O(N log N) radix-2 -- correct but slow.
  */
 
 #include <math.h>
@@ -32,22 +36,12 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "alp/dsp.h"
-#include "alp/peripheral.h"
+#include <alp/backend.h>
+#include <alp/cap_instance.h>
+#include <alp/dsp.h>
+#include <alp/peripheral.h>
 
-/* Pick the right last-error setter for the active build mode.  See
- * src/common/alp_internal.h (non-Zephyr) and src/zephyr/last_error.c
- * (Zephyr TLS path). */
-#ifdef __ZEPHYR__
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
-#define DSP_SET_LAST_ERROR(s)  alp_z_set_last_error(s)
-#define DSP_CLEAR_LAST_ERROR() alp_z_clear_last_error()
-#else
-#include "alp_internal.h"
-#define DSP_SET_LAST_ERROR(s)  alp_internal_set_last_error(s)
-#define DSP_CLEAR_LAST_ERROR() alp_internal_set_last_error(ALP_OK)
-#endif
+#include "dsp_ops.h"
 
 #if defined(ALP_HAS_CMSIS_DSP) && (ALP_HAS_CMSIS_DSP == 1)
 #include <arm_math.h>
@@ -61,10 +55,8 @@ extern void alp_z_clear_last_error(void);
 #endif
 
 /* ================================================================== */
-/* Internal chain representation                                       */
+/* Internal stage + backend representation                             */
 /* ================================================================== */
-
-#define ALP_DSP_CHAIN_POOL_SIZE 2u
 
 typedef struct {
     alp_dsp_stage_kind_t kind;
@@ -93,7 +85,7 @@ typedef struct {
     } u;
 } dsp_stage_t;
 
-struct alp_dsp_chain {
+struct dsp_be {
     bool        in_use;
     bool        terminal_fft;
     uint8_t     n_stages;
@@ -108,7 +100,22 @@ struct alp_dsp_chain {
     float       fft_im[ALP_DSP_MAX_FFT_POINTS];
 };
 
-static struct alp_dsp_chain g_chain_pool[ALP_DSP_CHAIN_POOL_SIZE];
+/* Static backend-data pool.  Same shape + size as the legacy
+ * ALP_DSP_CHAIN_POOL_SIZE = 2; the dispatcher's pool is independent
+ * but defaults to the same count so the worst-case footprint is
+ * unchanged from the v0.3 build. */
+#define DSP_BE_POOL_SIZE 2u
+static struct dsp_be g_be_pool[DSP_BE_POOL_SIZE];
+
+static struct dsp_be *acquire_be_slot(void)
+{
+    for (size_t i = 0u; i < DSP_BE_POOL_SIZE; i++) {
+        if (!g_be_pool[i].in_use) {
+            return &g_be_pool[i];
+        }
+    }
+    return NULL;
+}
 
 /* ================================================================== */
 /* Helpers                                                             */
@@ -286,18 +293,8 @@ static void fft_radix2_inplace(float *re, float *im, uint16_t n)
 #endif
 
 /* ================================================================== */
-/* Chain validation + open                                             */
+/* Stage validation helpers                                            */
 /* ================================================================== */
-
-static struct alp_dsp_chain *acquire_slot(void)
-{
-    for (size_t i = 0u; i < ALP_DSP_CHAIN_POOL_SIZE; i++) {
-        if (!g_chain_pool[i].in_use) {
-            return &g_chain_pool[i];
-        }
-    }
-    return NULL;
-}
 
 static alp_status_t copy_fir_taps(const alp_dsp_fir_params_t *src,
                                   dsp_stage_t *dst)
@@ -398,13 +395,16 @@ static alp_status_t validate_window(const alp_dsp_window_params_t *src,
     }
 }
 
-alp_dsp_chain_t *alp_dsp_chain_open(const alp_dsp_stage_t *stages,
-                                    size_t n_stages)
+/* ================================================================== */
+/* Ops                                                                 */
+/* ================================================================== */
+
+static alp_status_t sw_open(const alp_dsp_stage_t *stages, size_t n_stages,
+                            alp_dsp_backend_state_t *state,
+                            alp_capabilities_t *caps_out)
 {
-    DSP_CLEAR_LAST_ERROR();
-    if (stages == NULL || n_stages == 0u || n_stages > ALP_DSP_MAX_STAGES) {
-        DSP_SET_LAST_ERROR(ALP_ERR_INVAL);
-        return NULL;
+    if (n_stages > ALP_DSP_MAX_STAGES) {
+        return ALP_ERR_INVAL;
     }
 
     /* Structural ordering check first: at most one FFT (terminal);
@@ -413,39 +413,35 @@ alp_dsp_chain_t *alp_dsp_chain_open(const alp_dsp_stage_t *stages,
     for (size_t i = 0u; i < n_stages; i++) {
         if (stages[i].kind == ALP_DSP_STAGE_FFT) {
             if (fft_idx >= 0) {
-                DSP_SET_LAST_ERROR(ALP_ERR_INVAL);
-                return NULL;
+                return ALP_ERR_INVAL;
             }
             fft_idx = (int)i;
         }
     }
     if (fft_idx >= 0 && fft_idx != (int)(n_stages - 1u)) {
-        DSP_SET_LAST_ERROR(ALP_ERR_INVAL);
-        return NULL;
+        return ALP_ERR_INVAL;
     }
     for (size_t i = 0u; i < n_stages; i++) {
         if (stages[i].kind == ALP_DSP_STAGE_WINDOW) {
             if (fft_idx < 0 || (int)i != fft_idx - 1) {
-                DSP_SET_LAST_ERROR(ALP_ERR_INVAL);
-                return NULL;
+                return ALP_ERR_INVAL;
             }
         }
     }
 
-    struct alp_dsp_chain *c = acquire_slot();
-    if (c == NULL) {
-        DSP_SET_LAST_ERROR(ALP_ERR_NOMEM);
-        return NULL;
+    struct dsp_be *be = acquire_be_slot();
+    if (be == NULL) {
+        return ALP_ERR_NOMEM;
     }
 
     /* Zero the slot fully so we don't carry over state from a prior
-     * open()/close() cycle.  Then copy in the new params. */
-    memset(c, 0, sizeof(*c));
-    c->n_stages     = (uint8_t)n_stages;
-    c->terminal_fft = (fft_idx >= 0);
+     * open() / close() cycle. */
+    memset(be, 0, sizeof(*be));
+    be->n_stages     = (uint8_t)n_stages;
+    be->terminal_fft = (fft_idx >= 0);
 
     for (size_t i = 0u; i < n_stages; i++) {
-        dsp_stage_t *dst = &c->stages[i];
+        dsp_stage_t *dst = &be->stages[i];
         dst->kind = stages[i].kind;
         alp_status_t s = ALP_OK;
         switch (stages[i].kind) {
@@ -466,49 +462,39 @@ alp_dsp_chain_t *alp_dsp_chain_open(const alp_dsp_stage_t *stages,
             break;
         }
         if (s != ALP_OK) {
-            DSP_SET_LAST_ERROR(s);
-            return NULL;
+            be->in_use = false; /* hand the slot back */
+            return s;
         }
     }
 
     /* Precompute window samples if WINDOW stage present (it precedes
      * FFT and uses FFT's n_points). */
-    if (c->terminal_fft && n_stages >= 2u &&
-        c->stages[n_stages - 2u].kind == ALP_DSP_STAGE_WINDOW) {
-        const uint16_t n = c->stages[n_stages - 1u].u.fft.n_points;
-        compute_window_samples(c->stages[n_stages - 2u].u.window.shape,
-                               n, c->window_samples);
-        c->window_ready = true;
+    if (be->terminal_fft && n_stages >= 2u &&
+        be->stages[n_stages - 2u].kind == ALP_DSP_STAGE_WINDOW) {
+        const uint16_t n = be->stages[n_stages - 1u].u.fft.n_points;
+        compute_window_samples(be->stages[n_stages - 2u].u.window.shape,
+                               n, be->window_samples);
+        be->window_ready = true;
     }
 
-    c->in_use = true;
-    return c;
+    be->in_use     = true;
+    state->be_data = be;
+    if (caps_out != NULL) {
+        caps_out->flags = 0u;
+    }
+    return ALP_OK;
 }
 
-void alp_dsp_chain_close(alp_dsp_chain_t *chain)
+static alp_status_t sw_apply_samples(alp_dsp_backend_state_t *state,
+                                     const int16_t *in_mv, size_t in_n,
+                                     int16_t *out_mv, size_t out_cap,
+                                     size_t *got)
 {
-    if (chain == NULL) return;
-    chain->in_use       = false;
-    chain->n_stages     = 0u;
-    chain->terminal_fft = false;
-    chain->window_ready = false;
-}
-
-/* ================================================================== */
-/* Apply (filter-terminated)                                           */
-/* ================================================================== */
-
-alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
-                                         const int16_t *in_mv,
-                                         size_t in_n,
-                                         int16_t *out_mv,
-                                         size_t out_cap,
-                                         size_t *got)
-{
-    if (chain == NULL || !chain->in_use || got == NULL) {
+    struct dsp_be *be = (struct dsp_be *)state->be_data;
+    if (be == NULL || !be->in_use) {
         return ALP_ERR_INVAL;
     }
-    if (chain->terminal_fft) {
+    if (be->terminal_fft) {
         return ALP_ERR_NOSUPPORT;
     }
     if ((in_mv == NULL && in_n > 0u) || (out_mv == NULL && out_cap > 0u)) {
@@ -528,11 +514,11 @@ alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
                                       ? (n - produced)
                                       : chunk_max;
         for (size_t i = 0u; i < this_chunk; i++) {
-            chain->fft_re[i] = (float)in_mv[produced + i];
+            be->fft_re[i] = (float)in_mv[produced + i];
         }
-        float *buf = chain->fft_re;
-        for (uint8_t st = 0u; st < chain->n_stages; st++) {
-            dsp_stage_t *s = &chain->stages[st];
+        float *buf = be->fft_re;
+        for (uint8_t st = 0u; st < be->n_stages; st++) {
+            dsp_stage_t *s = &be->stages[st];
             switch (s->kind) {
             case ALP_DSP_STAGE_FIR:
                 fir_apply(s, buf, this_chunk, buf);
@@ -555,28 +541,23 @@ alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
     return ALP_OK;
 }
 
-/* ================================================================== */
-/* Apply (FFT-terminated)                                              */
-/* ================================================================== */
-
-alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
-                                      const int16_t *in_mv,
-                                      size_t in_n,
-                                      float *out_bins,
-                                      size_t out_cap,
-                                      size_t *got)
+static alp_status_t sw_apply_bins(alp_dsp_backend_state_t *state,
+                                  const int16_t *in_mv, size_t in_n,
+                                  float *out_bins, size_t out_cap,
+                                  size_t *got)
 {
-    if (chain == NULL || !chain->in_use || got == NULL) {
+    struct dsp_be *be = (struct dsp_be *)state->be_data;
+    if (be == NULL || !be->in_use) {
         return ALP_ERR_INVAL;
     }
-    if (!chain->terminal_fft) {
+    if (!be->terminal_fft) {
         return ALP_ERR_NOSUPPORT;
     }
     if (in_mv == NULL || out_bins == NULL) {
         return ALP_ERR_INVAL;
     }
 
-    const dsp_stage_t *fft = &chain->stages[chain->n_stages - 1u];
+    const dsp_stage_t *fft = &be->stages[be->n_stages - 1u];
     const uint16_t      n  = fft->u.fft.n_points;
     if (in_n < (size_t)n) {
         return ALP_ERR_OUT_OF_RANGE;
@@ -590,26 +571,26 @@ alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
 
     /* Stage 0: load samples (mV -> float). */
     for (uint16_t i = 0u; i < n; i++) {
-        chain->fft_re[i] = (float)in_mv[i];
-        chain->fft_im[i] = 0.0f;
+        be->fft_re[i] = (float)in_mv[i];
+        be->fft_im[i] = 0.0f;
     }
 
     /* Run pre-FFT non-WINDOW stages over fft_re (in-place). */
-    for (uint8_t st = 0u; st < (chain->n_stages - 1u); st++) {
-        dsp_stage_t *s = &chain->stages[st];
+    for (uint8_t st = 0u; st < (be->n_stages - 1u); st++) {
+        dsp_stage_t *s = &be->stages[st];
         switch (s->kind) {
         case ALP_DSP_STAGE_FIR:
-            fir_apply(s, chain->fft_re, n, chain->fft_re);
+            fir_apply(s, be->fft_re, n, be->fft_re);
             break;
         case ALP_DSP_STAGE_IIR:
-            iir_apply(s, chain->fft_re, n, chain->fft_re);
+            iir_apply(s, be->fft_re, n, be->fft_re);
             break;
         case ALP_DSP_STAGE_WINDOW:
-            if (!chain->window_ready) {
+            if (!be->window_ready) {
                 return ALP_ERR_NOT_READY;
             }
             for (uint16_t i = 0u; i < n; i++) {
-                chain->fft_re[i] *= chain->window_samples[i];
+                be->fft_re[i] *= be->window_samples[i];
             }
             break;
         default:
@@ -628,37 +609,66 @@ alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
             return ALP_ERR_IO;
         }
         float scratch[ALP_DSP_MAX_FFT_POINTS];
-        arm_rfft_fast_f32(&inst, chain->fft_re, scratch, 0u);
+        arm_rfft_fast_f32(&inst, be->fft_re, scratch, 0u);
         /* Re-spread CMSIS's packed layout into our (re, im) arrays. */
-        chain->fft_re[0] = scratch[0];                      /* DC re   */
-        chain->fft_im[0] = 0.0f;                            /* DC im=0 */
-        chain->fft_re[n / 2u] = scratch[1];                 /* Nyquist */
-        chain->fft_im[n / 2u] = 0.0f;
+        be->fft_re[0] = scratch[0];                      /* DC re   */
+        be->fft_im[0] = 0.0f;                            /* DC im=0 */
+        be->fft_re[n / 2u] = scratch[1];                 /* Nyquist */
+        be->fft_im[n / 2u] = 0.0f;
         for (uint16_t k = 1u; k < n / 2u; k++) {
-            chain->fft_re[k] = scratch[2u * k];
-            chain->fft_im[k] = scratch[2u * k + 1u];
+            be->fft_re[k] = scratch[2u * k];
+            be->fft_im[k] = scratch[2u * k + 1u];
             /* Mirror conjugate for k = n - bin. */
-            chain->fft_re[n - k] = chain->fft_re[k];
-            chain->fft_im[n - k] = -chain->fft_im[k];
+            be->fft_re[n - k] = be->fft_re[k];
+            be->fft_im[n - k] = -be->fft_im[k];
         }
     }
 #else
-    fft_radix2_inplace(chain->fft_re, chain->fft_im, n);
+    fft_radix2_inplace(be->fft_re, be->fft_im, n);
 #endif
 
     if (fft->u.fft.output == ALP_DSP_FFT_OUTPUT_COMPLEX) {
         for (uint16_t k = 0u; k < n; k++) {
-            out_bins[2u * k]      = chain->fft_re[k];
-            out_bins[2u * k + 1u] = chain->fft_im[k];
+            out_bins[2u * k]      = be->fft_re[k];
+            out_bins[2u * k + 1u] = be->fft_im[k];
         }
         *got = (size_t)(2u * n);
     } else {
         for (uint16_t k = 0u; k < n; k++) {
-            const float re = chain->fft_re[k];
-            const float im = chain->fft_im[k];
+            const float re = be->fft_re[k];
+            const float im = be->fft_im[k];
             out_bins[k] = sqrtf(re * re + im * im);
         }
         *got = (size_t)n;
     }
     return ALP_OK;
 }
+
+static void sw_close(alp_dsp_backend_state_t *state)
+{
+    struct dsp_be *be = (struct dsp_be *)state->be_data;
+    if (be == NULL) return;
+    be->in_use       = false;
+    be->n_stages     = 0u;
+    be->terminal_fft = false;
+    be->window_ready = false;
+    state->be_data   = NULL;
+}
+
+/* ---------- Registration ---------- */
+
+static const alp_dsp_ops_t _ops = {
+    .open          = sw_open,
+    .apply_samples = sw_apply_samples,
+    .apply_bins    = sw_apply_bins,
+    .close         = sw_close,
+};
+
+ALP_BACKEND_REGISTER(dsp, sw_fallback, {
+    .silicon_ref = "*",
+    .vendor      = "sw",
+    .base_caps   = 0u,
+    .priority    = 0,
+    .ops         = &_ops,
+    .probe       = NULL,
+});

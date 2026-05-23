@@ -110,6 +110,10 @@
     },
     "alp/audio.h": {
       "functions": {
+        "alp_audio_in_capabilities": {
+          "hash": "f2f393b94963d89e",
+          "signature": "const alp_capabilities_t * alp_audio_in_capabilities(const alp_audio_in_t *in);"
+        },
         "alp_audio_in_close": {
           "hash": "dac60281393e8fc5",
           "signature": "void alp_audio_in_close(alp_audio_in_t *in);"
@@ -129,6 +133,10 @@
         "alp_audio_in_stop": {
           "hash": "8c939589c1ba114d",
           "signature": "alp_status_t alp_audio_in_stop(alp_audio_in_t *in);"
+        },
+        "alp_audio_out_capabilities": {
+          "hash": "7e26dc7ad4e1058e",
+          "signature": "const alp_capabilities_t * alp_audio_out_capabilities(const alp_audio_out_t *out);"
         },
         "alp_audio_out_close": {
           "hash": "9bf8d3aa01bec9b9",
@@ -5252,6 +5260,10 @@
           "hash": "0cf56ad70c03aad2",
           "signature": "alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain, const int16_t *in_mv, size_t in_n, int16_t *out_mv, size_t out_cap, size_t *got);"
         },
+        "alp_dsp_chain_capabilities": {
+          "hash": "48b0fe36389f6123",
+          "signature": "const alp_capabilities_t * alp_dsp_chain_capabilities(const alp_dsp_chain_t *chain);"
+        },
         "alp_dsp_chain_close": {
           "hash": "78d18aa7552747a3",
           "signature": "void alp_dsp_chain_close(alp_dsp_chain_t *chain);"
@@ -7322,6 +7334,10 @@
     },
     "alp/security.h": {
       "functions": {
+        "alp_aead_capabilities": {
+          "hash": "f356c7786143135b",
+          "signature": "const alp_capabilities_t * alp_aead_capabilities(const alp_aead_t *a);"
+        },
         "alp_aead_close": {
           "hash": "fd9bf2aab3dfc5e0",
           "signature": "void alp_aead_close(alp_aead_t *a);"
@@ -7337,6 +7353,10 @@
         "alp_aead_open": {
           "hash": "bec66b9478a06de3",
           "signature": "alp_aead_t * alp_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t key_len);"
+        },
+        "alp_hash_capabilities": {
+          "hash": "d2699d55d4ca8a69",
+          "signature": "const alp_capabilities_t * alp_hash_capabilities(const alp_hash_t *h);"
         },
         "alp_hash_close": {
           "hash": "3038e7f80bc7c87e",
