@@ -10,7 +10,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <zephyr/device.h>
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
@@ -20,9 +19,12 @@
 typedef struct alp_wdt_ops alp_wdt_ops_t;
 
 typedef struct alp_wdt_backend_state {
-    const struct device  *dev;
+    void                 *dev;                /* opaque backend device pointer
+                                               * (const struct device * on Zephyr;
+                                               * kept void* so the portable handle
+                                               * does not pull in <zephyr/device.h>) */
     uint32_t              wdt_id;
-    int                   channel_id;          /* Zephyr wdt_install_timeout return */
+    int                   channel_id;          /* wdt_install_timeout return code */
     alp_wdt_config_t      cfg;
     void                 *be_data;
     const alp_wdt_ops_t  *ops;

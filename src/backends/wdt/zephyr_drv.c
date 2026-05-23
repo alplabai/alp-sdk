@@ -48,7 +48,7 @@ static alp_status_t z_open(uint32_t wdt_id,
     if (wdt_id >= ALP_SOC_WDT_COUNT) return ALP_ERR_OUT_OF_RANGE;
     const struct device *dev = _devs[wdt_id];
     if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
-    st->dev = dev;
+    st->dev = (void *)dev;
     st->wdt_id = wdt_id;
     st->cfg = *cfg;
     struct wdt_timeout_cfg zcfg = {
@@ -70,16 +70,19 @@ static alp_status_t z_open(uint32_t wdt_id,
 }
 
 static alp_status_t z_feed(alp_wdt_backend_state_t *st) {
-    return _errno_to_alp(wdt_feed(st->dev, st->channel_id));
+    const struct device *dev = (const struct device *)st->dev;
+    return _errno_to_alp(wdt_feed(dev, st->channel_id));
 }
 
 static alp_status_t z_disable(alp_wdt_backend_state_t *st) {
-    return _errno_to_alp(wdt_disable(st->dev));
+    const struct device *dev = (const struct device *)st->dev;
+    return _errno_to_alp(wdt_disable(dev));
 }
 
 static void z_close(alp_wdt_backend_state_t *st) {
+    const struct device *dev = (const struct device *)st->dev;
     /* Most M-class watchdogs don't allow disable; ignore error. */
-    (void)wdt_disable(st->dev);
+    (void)wdt_disable(dev);
 }
 
 static const alp_wdt_ops_t _ops = {
