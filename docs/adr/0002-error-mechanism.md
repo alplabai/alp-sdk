@@ -111,5 +111,5 @@ single-source-of-truth path.
 - `scripts/gen_soc_caps.py` — the generator.
 - `include/alp/soc_caps.h` — the generated header.
 - `src/zephyr/last_error.c` — the thread-local store.
-- `src/zephyr/peripheral_adc.c` — the canonical example of
-  validation-at-open.
+- `src/adc_dispatch.c` — the canonical example of validation-at-open,
+  with backend-specific bodies in `src/backends/adc/`.

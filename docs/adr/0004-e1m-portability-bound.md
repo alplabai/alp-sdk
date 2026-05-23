@@ -56,8 +56,9 @@ responsibilities at each layer:
    the gap between `E1M_*_COUNT` and `ALP_SOC_*_COUNT`.
 
 4. **Driver array** — the upper bound declared by the SDK's
-   per-class backend (e.g. `peripheral_can.c` declares 6 entries).
-   Sized to the most expansive supported SoC; purely defensive.
+   per-class dispatcher (e.g. `src/can_dispatch.c`'s handle pool is
+   sized via `CONFIG_ALP_SDK_MAX_CAN_HANDLES`).  Sized to the most
+   expansive supported SoC; purely defensive.
 
 ## Alternatives
 
