@@ -620,17 +620,17 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         SoM caps drive the inference CONFIGs; board.yaml never asked."""
         rc, out, err = self._v2_zephyr_slice("E1M-AEN701", "m55_hp")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn("CONFIG_ALP_SDK_INFERENCE_TFLM=y", out)
-        self.assertIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_DRPAI=y", out)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", out)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y", out)
 
     def test_v2n101_zephyr_emits_tflm_plus_drpai(self) -> None:
         """E1M-V2N101 has DRP-AI3 on V2N silicon, no Ethos, no DEEPX."""
         rc, out, err = self._v2_zephyr_slice("E1M-V2N101", "m33_sm")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn("CONFIG_ALP_SDK_INFERENCE_TFLM=y", out)
-        self.assertIn("CONFIG_ALP_SDK_INFERENCE_DRPAI=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U=y", out)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", out)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y", out)
 
     def test_v2m101_zephyr_emits_tflm_plus_drpai(self) -> None:
         """E1M-V2M101 = V2N + DEEPX.  On Zephyr only DRPAI is wired
@@ -638,8 +638,8 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         emit path carries the concurrent-NPU plumbing."""
         rc, out, err = self._v2_zephyr_slice("E1M-V2M101", "m33_sm")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn("CONFIG_ALP_SDK_INFERENCE_TFLM=y", out)
-        self.assertIn("CONFIG_ALP_SDK_INFERENCE_DRPAI=y", out)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", out)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y", out)
 
     # --- G-1 + G-2 -- per-variant Ethos-U + per-CPU-class TFLM ------------
     #
@@ -656,70 +656,70 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         """E7 carries two U55s, no U85; only the U55 switch fires."""
         rc, out, err = self._v2_zephyr_slice("E1M-AEN701", "m55_hp")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U55=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U85=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U65=y", out)
+        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y", out)
 
     def test_aen801_emits_both_u55_and_u85(self) -> None:
         """E8 carries 2x U55 + 1x U85; BOTH variant switches must fire so
         the Arm Ethos-U driver compiles both kernel sets in."""
         rc, out, err = self._v2_zephyr_slice("E1M-AEN801", "m55_hp")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U55=y", out)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U85=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U65=y", out)
+        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
+        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y", out)
 
     def test_aen401_emits_both_u55_and_u85(self) -> None:
         """E4 same family pattern as E8: 2x U55 + 1x U85."""
         rc, out, err = self._v2_zephyr_slice("E1M-AEN401", "m55_hp")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U55=y", out)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U85=y", out)
+        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
+        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
 
     def test_nx9101_emits_u65_plus_n93(self) -> None:
         """i.MX 93 carries a single Ethos-U65; the new U65 switch and
         the legacy N93 PHY-side switch coexist (orthogonal selectors)."""
         rc, out, err = self._v2_zephyr_slice("E1M-NX9101", "m33")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U65=y", out)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U55=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U85=y", out)
+        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y", out)
+        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
 
     def test_v2n101_emits_no_ethos_variants(self) -> None:
         """V2N has no Ethos-U at all; none of the per-variant switches
         fire even though _DRPAI does."""
         rc, out, err = self._v2_zephyr_slice("E1M-V2N101", "m33_sm")
         self.assertEqual(rc, 0, msg=err)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U55=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U65=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U85=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
 
     def test_aen701_m55_emits_tflm_helium(self) -> None:
         """M55_HP on E7 -- ARMv8.1-M Helium -> the orchestrator must
         emit the HELIUM kernel selector (not NEON, not REF)."""
         rc, out, err = self._v2_zephyr_slice("E1M-AEN701", "m55_hp")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_TFLM_HELIUM=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_NEON=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_REF=y", out)
+        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_NEON=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y", out)
 
     def test_v2n101_m33_emits_tflm_ref(self) -> None:
         """M33_SM on V2N101 -- baseline ARMv8-M without Helium / DSP ->
         the orchestrator must fall back to the REF kernel selector."""
         rc, out, err = self._v2_zephyr_slice("E1M-V2N101", "m33_sm")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_TFLM_REF=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_NEON=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_HELIUM=y", out)
+        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_NEON=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y", out)
 
     def test_nx9101_m33_emits_tflm_ref(self) -> None:
         """M33 on i.MX 93 -- baseline ARMv8-M, single-precision FPU,
         no MVE -> REF."""
         rc, out, err = self._v2_zephyr_slice("E1M-NX9101", "m33")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_TFLM_REF=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_HELIUM=y", out)
+        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y", out)
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y", out)
 
     # --- cmake-args / Yocto emit: concurrent multi-NPU on V2M101 ------
 
