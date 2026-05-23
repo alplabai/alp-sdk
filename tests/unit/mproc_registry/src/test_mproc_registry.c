@@ -79,8 +79,7 @@ ZTEST(alp_mproc_registry, test_shmem_open_inval_on_null_args)
 {
     /* Dispatcher must reject NULL cfg / NULL cfg->name before
      * reaching the backend; alp_shmem_open returns NULL and the
-     * caller can inspect alp_last_error() for ALP_ERR_INVAL.  This
-     * mirrors the legacy v0.7 contract verbatim. */
+     * caller can inspect alp_last_error() for ALP_ERR_INVAL. */
     zassert_is_null(alp_shmem_open(NULL));
 
     alp_shmem_config_t bad = { .name = NULL, .size = 64, .cacheable = false };

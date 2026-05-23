@@ -93,7 +93,7 @@ ZTEST(alp_camera_registry, test_camera_capabilities_returns_null_for_null_handle
 ZTEST(alp_camera_registry, test_camera_configure_isp_rejects_null_isp)
 {
     /* Dispatcher's INVAL gate fires on NULL isp ahead of backend
-     * dispatch (preserves the legacy v0.5 stub contract verbatim). */
+     * dispatch. */
     zassert_equal(alp_camera_configure_isp(NULL, NULL), ALP_ERR_INVAL);
 }
 

@@ -6,8 +6,7 @@
  *   (a) selector / priority on the alif:ensemble:e7 pin
  *   (b) sw_fallback reachability via the registry count
  *   (c) configure_inline_aes input validation runs in the dispatcher
- *       ahead of backend dispatch (preserves the legacy storage_stub.c
- *       contract verbatim)
+ *       ahead of backend dispatch
  *   (d) alp_storage_capabilities(NULL) is safe
  *   (e) close releases handle; NULL inputs are idempotent
  *   (f) sw_fallback NOSUPPORT contract via direct ops-table dispatch
