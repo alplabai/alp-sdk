@@ -6406,6 +6406,42 @@
         }
       }
     },
+    "alp/ext/alif/camera.h": {
+      "functions": {
+        "alp_alif_camera_isp_3a_window_set": {
+          "hash": "3c4ca294d6018b30",
+          "signature": "alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t *camera, alp_alif_camera_3a_region_t region, const alp_alif_camera_rect_t *rect);"
+        },
+        "alp_alif_camera_isp_gain_table_load": {
+          "hash": "8ca88c9a2b7f1fc1",
+          "signature": "alp_status_t alp_alif_camera_isp_gain_table_load(alp_camera_t *camera, alp_alif_camera_channel_t channel, const uint16_t *table, uint16_t len);"
+        },
+        "alp_alif_camera_isp_lsc_lut_load": {
+          "hash": "a8d73885feeacfa0",
+          "signature": "alp_status_t alp_alif_camera_isp_lsc_lut_load(alp_camera_t *camera, const uint16_t *lut, uint16_t len);"
+        }
+      },
+      "macros": {
+        "ALP_EXT_ALIF_CAMERA_AVAILABLE": {
+          "hash": "3728c714159515c9",
+          "value": "1"
+        }
+      },
+      "typedefs": {
+        "alp_alif_camera_3a_region_t": {
+          "definition": "typedef enum { ALP_ALIF_CAMERA_3A_AE = 0, ALP_ALIF_CAMERA_3A_AWB = 1, ALP_ALIF_CAMERA_3A_AF = 2, } alp_alif_camera_3a_region_t;",
+          "hash": "e97055d8fcf8c5fa"
+        },
+        "alp_alif_camera_channel_t": {
+          "definition": "typedef enum { ALP_ALIF_CAMERA_CHANNEL_R = 0, ALP_ALIF_CAMERA_CHANNEL_GR = 1, ALP_ALIF_CAMERA_CHANNEL_GB = 2, ALP_ALIF_CAMERA_CHANNEL_B = 3, } alp_alif_camera_channel_t;",
+          "hash": "256809f761911cf5"
+        },
+        "x": {
+          "definition": "typedef struct { uint16_t x;",
+          "hash": "8c7531914be98d83"
+        }
+      }
+    },
     "alp/ext/alif/storage.h": {
       "functions": {
         "alp_alif_storage_secaes_get_status": {
@@ -6491,6 +6527,42 @@
         "alp_nxp_storage_otfad_slot_t": {
           "definition": "typedef enum { ALP_NXP_STORAGE_OTFAD_SLOT_0 = 0, ALP_NXP_STORAGE_OTFAD_SLOT_1 = 1, ALP_NXP_STORAGE_OTFAD_SLOT_2 = 2, ALP_NXP_STORAGE_OTFAD_SLOT_3 = 3, } alp_nxp_storage_otfad_slot_t;",
           "hash": "c98f98b2f8d1b7d9"
+        }
+      }
+    },
+    "alp/ext/renesas/camera.h": {
+      "functions": {
+        "alp_renesas_camera_isp_3a_window_set": {
+          "hash": "f34fee28e04b2aed",
+          "signature": "alp_status_t alp_renesas_camera_isp_3a_window_set(alp_camera_t *camera, alp_renesas_camera_3a_region_t region, const alp_renesas_camera_rect_t *rect);"
+        },
+        "alp_renesas_camera_isp_gain_table_load": {
+          "hash": "233dac7e280ed82d",
+          "signature": "alp_status_t alp_renesas_camera_isp_gain_table_load(alp_camera_t *camera, alp_renesas_camera_channel_t channel, const uint16_t *table, uint16_t len);"
+        },
+        "alp_renesas_camera_isp_lsc_lut_load": {
+          "hash": "467ed8487ec5ad0c",
+          "signature": "alp_status_t alp_renesas_camera_isp_lsc_lut_load(alp_camera_t *camera, const uint16_t *lut, uint16_t len);"
+        }
+      },
+      "macros": {
+        "ALP_EXT_RENESAS_CAMERA_AVAILABLE": {
+          "hash": "92c9ff6917a480c0",
+          "value": "1"
+        }
+      },
+      "typedefs": {
+        "alp_renesas_camera_3a_region_t": {
+          "definition": "typedef enum { ALP_RENESAS_CAMERA_3A_AE = 0, ALP_RENESAS_CAMERA_3A_AWB = 1, ALP_RENESAS_CAMERA_3A_AF = 2, } alp_renesas_camera_3a_region_t;",
+          "hash": "05d55ab1aed2736c"
+        },
+        "alp_renesas_camera_channel_t": {
+          "definition": "typedef enum { ALP_RENESAS_CAMERA_CHANNEL_R = 0, ALP_RENESAS_CAMERA_CHANNEL_GR = 1, ALP_RENESAS_CAMERA_CHANNEL_GB = 2, ALP_RENESAS_CAMERA_CHANNEL_B = 3, } alp_renesas_camera_channel_t;",
+          "hash": "688ee32d4339f33c"
+        },
+        "x": {
+          "definition": "typedef struct { uint16_t x;",
+          "hash": "8c7531914be98d83"
         }
       }
     },

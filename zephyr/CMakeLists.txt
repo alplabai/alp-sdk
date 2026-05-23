@@ -25,10 +25,35 @@ zephyr_library_sources(
     # dispatcher in src/uart_dispatch.c.  See the UART block below.
     # Camera class dispatcher + stub backend (Slice 5 -- registry
     # migration).  Replaces the legacy free-standing
-    # src/zephyr/camera_stub.c.  Real backends (Alif MIPI CSI-2,
-    # V2N camera-input) land per issue #20; ISP knobs per #21.
+    # src/zephyr/camera_stub.c.  The real Zephyr drivers/video/
+    # backend (priority 50) + V2N N44 ISP-aware backend
+    # (priority 100 on renesas:rzv2n:n44) ride above the wildcard
+    # stub via the opt-in Kconfigs below.  Vendor-ext bodies for
+    # the Mali-C55 (NOSUPPORT today) + V2N N44 ISP (ALP_OK
+    # skeleton) compile unconditionally so apps that #include the
+    # ext headers link cleanly regardless of which silicon they
+    # target.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/camera_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_stub.c
+<<<<<<< HEAD
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/camera.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/camera.c
+    # iot_zephyr.c replaces the v0.2 NOSUPPORT stub. The wrapper is
+    # always compiled; the real wifi_mgmt + mqtt_client glue inside
+    # is gated on CONFIG_ALP_SDK_IOT_WIFI / CONFIG_ALP_SDK_IOT_MQTT
+    # so host / native_sim builds without those subsystems still get
+    # the documented v0.1 NULL-with-NOSUPPORT contract.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/iot_zephyr.c
+    # audio_zephyr.c follows the same split: real DMIC + alp_i2s_*
+    # delegation behind CONFIG_ALP_SDK_AUDIO_IN / _OUT, NOSUPPORT
+    # contract elsewhere.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/audio_zephyr.c
+    # inference_zephyr.c carries the public-API glue + handle pool;
+    # per-backend executors (TFLM C++ wrapper, DRP-AI, DEEPX) compile
+    # in only when their CONFIG_ flag is on so the wrapper itself
+    # links cleanly under native_sim with no neural runtime present.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_zephyr.c
+=======
     # iot_zephyr.c retired in Slice 4b -- the Wi-Fi half migrated to
     # src/backends/wifi/{zephyr_drv,sw_fallback}.c and the MQTT half
     # to src/backends/mqtt/{zephyr_drv,sw_fallback}.c.  Both halves
@@ -42,6 +67,7 @@ zephyr_library_sources(
     # sw_fallback) migrated to src/backends/inference/*.{c,cpp} with
     # the dispatcher in src/inference_dispatch.c.  See the inference
     # block below.
+>>>>>>> origin/main
     # Remaining v0.3 surfaces still on the stub contract -- swap in
     # their *_zephyr.c counterparts as they ship.
     # security_zephyr.c retired in Slice 4d -- all three primitives
@@ -241,6 +267,16 @@ if(CONFIG_ALP_SDK_INFERENCE_SW_FALLBACK)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/sw_fallback.c)
 endif()
+
+# Camera real backends (Slice 5).  Gate each on its own Kconfig
+# opt-in so builds that don't need the Zephyr video subsystem or
+# the V2N N44 ISP skeleton don't pay their code size.  The
+# wildcard stub stays unconditionally compiled (above) so
+# alp_camera_open keeps succeeding on every supported SoC.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_video.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/v2n_n44_isp.c)
 
 # v0.2 peripheral wrappers — opt-in per-class so apps that don't use
 # a given Zephyr subsystem don't link the wrapper.  Each defaults on

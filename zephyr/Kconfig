@@ -638,6 +638,52 @@ config ALP_SDK_POWER
 	  wake-handler + the supervisor re-init state machine) land in
 	  follow-up commits per issue #22.
 
+<<<<<<< HEAD
+config ALP_SDK_CAMERA_ZEPHYR_VIDEO
+	bool "Compile the real Zephyr drivers/video/ camera backend"
+	depends on VIDEO
+	default y
+	help
+	  Compile src/backends/camera/zephyr_video.c, the portable
+	  camera backend that wraps Zephyr's drivers/video/ class
+	  (video_get_caps + video_set_format + video_buffer_alloc +
+	  video_enqueue / video_dequeue + video_stream_start / _stop)
+	  into the alp_camera_* vtable.  Registered at silicon_ref="*"
+	  priority 50 so it always wins over the zephyr_stub fallback
+	  (priority 0) on builds that link Zephyr's video subsystem;
+	  loses to vendor-specific real backends (V2N N44 ISP at
+	  priority 100 on its silicon_ref) where present.
+
+	  configure_isp returns ALP_ERR_NOSUPPORT -- the portable
+	  Zephyr video class has no in-line ISP surface; vendor
+	  backends ride on top to add the configure_isp op.
+
+	  Depends on CONFIG_VIDEO so the video_* symbols are visible
+	  at link time.
+
+config ALP_SDK_CAMERA_V2N_N44_ISP
+	bool "Compile the Renesas RZ/V2N N44 ISP-aware camera backend"
+	depends on VIDEO
+	default y if ALP_SOC_RENESAS_RZV2N_N44
+	help
+	  Compile src/backends/camera/v2n_n44_isp.c, the V2N N44
+	  ISP-aware camera backend.  Registered at
+	  silicon_ref="renesas:rzv2n:n44" priority 100 -- always
+	  wins selection over the wildcard zephyr_video + zephyr_stub
+	  on V2N silicon.
+
+	  Sensor pipeline (open / start / stop / capture / release /
+	  close) routes through the same Zephyr drivers/video/ API
+	  the portable zephyr_video backend uses; configure_isp
+	  validates + latches the requested config and returns
+	  ALP_OK -- the matching MMIO writes against the V2N N44
+	  ISP control registers land when the Renesas SoC port
+	  grows the ISP driver per the V2N Hardware User's Manual
+	  r01uh1003ej §18 "Image Signal Processor".
+
+	  Off on non-V2N builds; the zephyr_video backend remains
+	  the default on every other supported SoC.
+=======
 config ALP_SDK_POWER_PM_POLICY
 	bool "Compile the real Zephyr pm_policy_* power backend"
 	depends on ALP_SDK_POWER
@@ -671,6 +717,7 @@ config ALP_SDK_POWER_EXT_RENESAS
 
 	  Off on non-V2N builds; the header alone (always installed) is
 	  enough for portable apps to compile-test against the symbol.
+>>>>>>> origin/main
 
 config ALP_SDK_GPU2D
 	bool "Enable <alp/gpu2d.h> 2D graphics accelerator surface"
