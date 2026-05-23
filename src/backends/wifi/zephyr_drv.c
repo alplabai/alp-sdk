@@ -60,9 +60,10 @@ struct wifi_radio_be {
  * E1M-conformant SoM (one radio per module), so a single static
  * struct is the right shape.  The dispatcher's handle pool sizes
  * the customer-visible alp_wifi_t pool independently. */
+#if defined(CONFIG_ALP_SDK_IOT_WIFI)
+
 static struct wifi_radio_be _radio_be;
 
-#if defined(CONFIG_ALP_SDK_IOT_WIFI)
 static alp_status_t errno_to_alp(int err)
 {
     switch (err) {

@@ -123,6 +123,8 @@ struct rpc_be {
 #endif
 };
 
+#if defined(CONFIG_ALP_SDK_RPC)
+
 static struct rpc_be _be_pool[CONFIG_ALP_SDK_RPC_MAX_CHANNELS];
 
 static struct rpc_be *_be_alloc(void)
@@ -142,6 +144,8 @@ static void _be_free(struct rpc_be *be)
     if (be == NULL) return;
     be->in_use = false;
 }
+
+#endif /* CONFIG_ALP_SDK_RPC */
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */

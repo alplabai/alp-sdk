@@ -52,6 +52,8 @@ struct usb_dev_be {
 #define CONFIG_ALP_SDK_MAX_USB_DEV_HANDLES 2
 #endif
 
+#if defined(CONFIG_ALP_SDK_USB)
+
 static struct usb_dev_be _be_pool[CONFIG_ALP_SDK_MAX_USB_DEV_HANDLES];
 static bool              _be_pool_in_use[CONFIG_ALP_SDK_MAX_USB_DEV_HANDLES];
 
@@ -78,7 +80,7 @@ static void _be_free(struct usb_dev_be *p)
     }
 }
 
-#if defined(CONFIG_ALP_SDK_USB)
+
 static alp_status_t errno_to_alp(int err)
 {
     switch (err) {
