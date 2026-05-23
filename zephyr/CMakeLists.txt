@@ -35,11 +35,11 @@ zephyr_library_sources(
     # (alp_audio_in_t + alp_audio_out_t) migrated to
     # src/backends/audio/{zephyr_drv,sw_fallback}.c with the
     # dispatcher in src/audio_dispatch.c.  See the audio block below.
-    # inference_zephyr.c carries the public-API glue + handle pool;
-    # per-backend executors (TFLM C++ wrapper, DRP-AI, DEEPX) compile
-    # in only when their CONFIG_ flag is on so the wrapper itself
-    # links cleanly under native_sim with no neural runtime present.
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_zephyr.c
+    # inference_zephyr.c retired in Slice 3 -- per-backend executors
+    # (tflm, ethos_u_aen, ethos_u_n93, drpai_v2n_stub, deepx_dxm1_stub,
+    # sw_fallback) migrated to src/backends/inference/*.{c,cpp} with
+    # the dispatcher in src/inference_dispatch.c.  See the inference
+    # block below.
     # Remaining v0.3 surfaces still on the stub contract -- swap in
     # their *_zephyr.c counterparts as they ship.
     # security_zephyr.c retired in Slice 4d -- all three primitives
@@ -197,17 +197,48 @@ if(CONFIG_ALP_SDK_RPC_SW_FALLBACK)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rpc/sw_fallback.c)
 endif()
 
-# Per-backend inference executors -- compile only when the matching
-# Kconfig opt-in is set.  Each backend's .cpp / .c source file
-# defines the alp_inference_<backend>_* hooks that inference_zephyr.c
-# dispatches to; absent the CONFIG_, the dispatcher's switch returns
-# ALP_ERR_NOSUPPORT.
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_TFLM
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_tflm.cpp)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_DRPAI
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_drpai.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/inference_ethosu_n93.c)
+# Inference class dispatcher + backends (Slice 3 migration).
+# The dispatcher compiles unconditionally so apps that depend on
+# the <alp/inference.h> ABI always link cleanly; each backend
+# gates on its own Kconfig so builds that don't enable a path
+# don't pay its code size.  Vendor-ext bodies under
+# src/backends/ext/{renesas,deepx}/inference.c compile
+# unconditionally -- they only emit NOSUPPORT + parameter
+# validation today, so they pull zero vendor dependencies.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/inference_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/inference.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/deepx/inference.c)
+
+if(CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/tflm.cpp)
+endif()
+
+if(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/ethos_u_aen.cpp)
+endif()
+
+if(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/ethos_u_n93.cpp)
+endif()
+
+if(CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/drpai_v2n_stub.c)
+endif()
+
+if(CONFIG_ALP_SDK_INFERENCE_BACKEND_DEEPX_DXM1)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/deepx_dxm1_stub.c)
+endif()
+
+if(CONFIG_ALP_SDK_INFERENCE_SW_FALLBACK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/sw_fallback.c)
+endif()
 
 # v0.2 peripheral wrappers — opt-in per-class so apps that don't use
 # a given Zephyr subsystem don't link the wrapper.  Each defaults on
@@ -549,6 +580,7 @@ zephyr_library_include_directories(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference
 )
 
 # nanopb placeholder framing for <alp/mproc.h> (v0.4 prep).  Always
