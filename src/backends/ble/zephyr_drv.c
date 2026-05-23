@@ -65,6 +65,8 @@ struct ble_conn_be {
 #endif
 };
 
+#if defined(CONFIG_ALP_SDK_BLE)
+
 static struct ble_radio_be _radio_be;
 static struct ble_conn_be  _conn_be_pool[CONFIG_ALP_SDK_BLE_MAX_CONNS];
 static bool                _conn_be_in_use[CONFIG_ALP_SDK_BLE_MAX_CONNS];
@@ -84,12 +86,10 @@ static struct ble_conn_be *_conn_be_alloc(void)
 static void _conn_be_free(struct ble_conn_be *p)
 {
     if (p == NULL) return;
-#if defined(CONFIG_ALP_SDK_BLE)
     if (p->bt != NULL) {
         bt_conn_unref(p->bt);
         p->bt = NULL;
     }
-#endif
     for (size_t i = 0; i < ARRAY_SIZE(_conn_be_pool); ++i) {
         if (&_conn_be_pool[i] == p) {
             _conn_be_in_use[i] = false;
@@ -98,7 +98,6 @@ static void _conn_be_free(struct ble_conn_be *p)
     }
 }
 
-#if defined(CONFIG_ALP_SDK_BLE)
 static alp_status_t errno_to_alp(int err)
 {
     switch (err) {
