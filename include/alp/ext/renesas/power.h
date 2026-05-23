@@ -33,6 +33,15 @@ extern "C" {
 /** Compile-time presence marker -- used by example code to gate vendor calls. */
 #define ALP_EXT_RENESAS_POWER_AVAILABLE 1
 
+/** Supervisor-mode byte sent verbatim over CMD_POWER_MODE_SET.
+ *
+ *  Values 0..3 mirror @ref alp_power_mode_t; values 4..255 are the
+ *  supervisor-firmware extension space (see the function-level doc on
+ *  @ref alp_renesas_power_supervisor_mode_set for the mapping).  The
+ *  typedef exists to make the intent explicit at the call site -- the
+ *  raw uint8_t carries no hint that 4+ is reserved firmware-side. */
+typedef uint8_t alp_renesas_power_supervisor_mode_t;
+
 /**
  * @brief Send a low-level CMD_POWER_MODE_SET to the GD32G553 supervisor.
  *
@@ -83,8 +92,9 @@ extern "C" {
  *           not implement the requested mode;
  *         any error from the GD32 bridge transport.
  */
-alp_status_t alp_renesas_power_supervisor_mode_set(alp_power_t *handle,
-                                                   uint8_t      supervisor_mode);
+alp_status_t alp_renesas_power_supervisor_mode_set(
+    alp_power_t                         *handle,
+    alp_renesas_power_supervisor_mode_t  supervisor_mode);
 
 #ifdef __cplusplus
 }

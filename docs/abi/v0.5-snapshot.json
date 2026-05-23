@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-22",
+  "generated": "2026-05-23",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -6361,6 +6361,26 @@
         "alp_alif_adc_trigger_t": {
           "definition": "typedef enum { ALP_ALIF_ADC_TRIGGER_SOFTWARE = 0, ALP_ALIF_ADC_TRIGGER_TIMER0, ALP_ALIF_ADC_TRIGGER_TIMER1, ALP_ALIF_ADC_TRIGGER_TIMER2, ALP_ALIF_ADC_TRIGGER_TIMER3, ALP_ALIF_ADC_TRIGGER_EXT_PIN, } alp_alif_adc_trigger_t;",
           "hash": "3a9bdb7c129f9140"
+        }
+      }
+    },
+    "alp/ext/renesas/power.h": {
+      "functions": {
+        "alp_renesas_power_supervisor_mode_set": {
+          "hash": "948389e3245ff208",
+          "signature": "alp_status_t alp_renesas_power_supervisor_mode_set(alp_power_t *handle, alp_renesas_power_supervisor_mode_t supervisor_mode);"
+        }
+      },
+      "macros": {
+        "ALP_EXT_RENESAS_POWER_AVAILABLE": {
+          "hash": "25e9777e156e70b1",
+          "value": "1"
+        }
+      },
+      "typedefs": {
+        "alp_renesas_power_supervisor_mode_t": {
+          "definition": "typedef uint8_t alp_renesas_power_supervisor_mode_t;",
+          "hash": "d917d3da9278a34a"
         }
       }
     },

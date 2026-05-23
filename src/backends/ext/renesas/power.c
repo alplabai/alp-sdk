@@ -38,8 +38,9 @@
 #include "../../power/power_ops.h"
 #include "../../../zephyr/v2n_supervisor.h"
 
-alp_status_t alp_renesas_power_supervisor_mode_set(alp_power_t *handle,
-                                                   uint8_t      supervisor_mode)
+alp_status_t alp_renesas_power_supervisor_mode_set(
+    alp_power_t                         *handle,
+    alp_renesas_power_supervisor_mode_t  supervisor_mode)
 {
     if (handle == NULL) {
         return ALP_ERR_INVAL;
