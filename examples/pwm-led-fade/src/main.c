@@ -20,17 +20,20 @@
 #include <zephyr/kernel.h>
 
 #include "alp/pwm.h"
-#include "alp/e1m_pinout.h"
+
+/* EVK_PWM_LED_GREEN is a board-macro from the generated routes header
+ * (= E1M_PWM0); rebind it in board.yaml `pins:` to port to another board. */
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 #define PERIOD_NS    1000000u   /* 1 kHz */
 #define STEPS              50
 #define STEP_DELAY_MS      20
 
 int main(void) {
-    printf("[pwm] open E1M_PWM0 (period=%u ns)\n", PERIOD_NS);
+    printf("[pwm] open EVK_PWM_LED_GREEN (period=%u ns)\n", PERIOD_NS);
 
     alp_pwm_t *led = alp_pwm_open(&(alp_pwm_config_t){
-        .channel_id = E1M_PWM0,
+        .channel_id = EVK_PWM_LED_GREEN, /* = E1M_PWM0 */
         .period_ns  = PERIOD_NS,
         .polarity   = ALP_PWM_POLARITY_NORMAL,
     });

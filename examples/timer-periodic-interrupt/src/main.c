@@ -7,7 +7,7 @@
  *
  * Pattern:
  *
- *   1. Open a free-running counter + a GPIO output pin.
+ *   1. Open a free-running counter + a GPIO output pin for the LED.
  *   2. Schedule a one-shot alarm 100 ms in the future.
  *   3. When the alarm fires (in IRQ context), the callback:
  *        a. Flips a `volatile bool` flag.
@@ -35,22 +35,25 @@
  * publish to a network, or trigger anything beyond a single
  * register write.
  *
+ * The LED: the E1M-EVK has no dedicated GPIO LED, so we drive the
+ * red RGB pad (default function PWM3) as a plain digital GPIO via
+ * the parallel `EVK_PIN_LED_RED` index -- the e1m-spec "GPIO
+ * secondary" capability (see e1m_pinout.h "Pin-as-GPIO fallback").
+ *
  * What success looks like:
  *
  *   [timer] open counter=0
  *   [timer] start -> 0
  *   [timer] 100ms = N ticks (status=0)
- *   [timer] open LED on E1M_GPIO_IO1
+ *   [timer] open LED on EVK_PIN_LED_RED
  *   [timer] arming first alarm
  *   [timer] tick 0 fired @ N+0 ticks, LED -> 1
  *   [timer] tick 1 fired @ N+1 ticks, LED -> 0
- *   [timer] tick 2 fired @ N+2 ticks, LED -> 1
  *   ...
  *   [timer] done
  *
- * On the EVK, the LED on `E1M_GPIO_IO1` (USER_LED on the AEN
- * board) blinks at 5 Hz (200 ms period, 50% duty since we
- * toggle every 100 ms).
+ * On the EVK the RGB-red LED blinks at 5 Hz (200 ms period, 50%
+ * duty since we toggle every 100 ms).
  *
  * On the V2N supervisor backend the counter alarm callback
  * returns ALP_ERR_NOSUPPORT (the GD32 IO MCU has no interrupt
@@ -67,7 +70,7 @@
 
 #include "alp/peripheral.h"
 #include "alp/counter.h"
-#include "alp/e1m_pinout.h"
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 /* Alarm period.  100 ms gives a visible LED blink (5 Hz toggle)
  * that's easy to count by eye without being so slow that the
@@ -104,7 +107,7 @@ static volatile uint32_t g_last_tick_value = 0u;
  * counter pointer is set once during setup, then read by the
  * ISR -- no synchronisation needed.  100 ms ticks per call so
  * we accumulate the right number for periodicity. */
-static alp_counter_t *g_counter = NULL;
+static alp_counter_t *g_counter      = NULL;
 static uint32_t       g_period_ticks = 0u;
 
 /* ------------------------------------------------------------------
@@ -132,7 +135,8 @@ static void on_periodic_alarm(alp_counter_t *c, uint32_t ticks, void *user)
     (void)alp_counter_set_alarm(c, g_period_ticks, on_periodic_alarm, NULL);
 }
 
-int main(void) {
+int main(void)
+{
     printf("[timer] open counter=%u\n", E1M_COUNTER0);
 
     /* Open counter 0.  Channel choice matters less for this
@@ -149,8 +153,7 @@ int main(void) {
          *   * On native_sim there's no counter device by
          *     default -- alp_counter_open returns NULL with
          *     ALP_ERR_NOT_READY. */
-        printf("[timer] open counter failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[timer] open counter failed: alp_last_error=%d\n", (int)alp_last_error());
         printf("[timer] done\n");
         return 0;
     }
@@ -166,8 +169,7 @@ int main(void) {
      * Tick rate is hardware-specific; the SDK hides the
      * conversion so app code stays portable across SoMs. */
     s = alp_counter_us_to_ticks(c, ALARM_PERIOD_US, &g_period_ticks);
-    printf("[timer] %u us = %u ticks (status=%d)\n",
-           ALARM_PERIOD_US, g_period_ticks, (int)s);
+    printf("[timer] %u us = %u ticks (status=%d)\n", ALARM_PERIOD_US, g_period_ticks, (int)s);
     if (s != ALP_OK) {
         /* On the V2N supervisor backend this returns NOSUPPORT
          * because the bridge can't report the GD32 timer's tick
@@ -180,12 +182,13 @@ int main(void) {
         return 0;
     }
 
-    /* Open the user LED.  E1M_GPIO_IO1 is wired to USER_LED on
-     * the E1M-EVK board; on custom boards swap the index
-     * for whatever your LED maps to (or comment the GPIO out
-     * if you only need the timer half). */
-    printf("[timer] open LED on E1M_GPIO_IO1\n");
-    alp_gpio_t *led = alp_gpio_open(E1M_GPIO_IO1);
+    /* Open the user LED.  The EVK has no plain GPIO LED, so the
+     * indicator is the RGB-red pad (default function PWM3) claimed
+     * as a digital GPIO via EVK_PIN_LED_RED; on a board with a real
+     * GPIO LED, swap the index for whatever your LED maps to (or
+     * comment the GPIO out if you only need the timer half). */
+    printf("[timer] open LED on EVK_PIN_LED_RED\n");
+    alp_gpio_t *led = alp_gpio_open(EVK_PIN_LED_RED);
     if (led != NULL) {
         s = alp_gpio_configure(led, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
         if (s != ALP_OK) {
@@ -205,8 +208,7 @@ int main(void) {
     printf("[timer] arming first alarm\n");
     s = alp_counter_set_alarm(c, g_period_ticks, on_periodic_alarm, NULL);
     if (s != ALP_OK) {
-        printf("[timer] set_alarm -> %d (NOSUPPORT on V2N supervisor)\n",
-               (int)s);
+        printf("[timer] set_alarm -> %d (NOSUPPORT on V2N supervisor)\n", (int)s);
         if (led != NULL) alp_gpio_close(led);
         alp_counter_close(c);
         printf("[timer] done\n");
@@ -245,9 +247,9 @@ int main(void) {
          * volatile flag access this race is microsecond-narrow
          * but still exists.  For multi-core systems use
          * atomic_set / atomic_clear instead. */
-        g_tick_fired = false;
-        uint32_t tick_no       = g_tick_count;
-        uint32_t tick_value    = g_last_tick_value;
+        g_tick_fired        = false;
+        uint32_t tick_no    = g_tick_count;
+        uint32_t tick_value = g_last_tick_value;
 
         /* Toggle the LED.  alp_gpio_write IS safe from any
          * context; we run it from main thread for symmetry with
@@ -261,8 +263,8 @@ int main(void) {
          * fine.  Including the tick number, the counter value
          * at the moment the alarm fired, and the new LED state
          * gives a complete event trace. */
-        printf("[timer] tick %u fired @ %u ticks, LED -> %d\n",
-               tick_no, tick_value, (int)led_state);
+        printf("[timer] tick %u fired @ %u ticks, LED -> %d\n", tick_no, tick_value,
+               (int)led_state);
     }
 
     /* Clean teardown -- cancel any pending alarm, close the GPIO

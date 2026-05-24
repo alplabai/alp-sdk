@@ -513,7 +513,7 @@ Expected output:
 
 ```
 *** Booting Zephyr OS build v4.4.0 ***
-[gpio] init button=E1M_GPIO_IO0, led=E1M_GPIO_IO1
+[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
 [gpio] led=0 status=0
 ...
 [gpio] done

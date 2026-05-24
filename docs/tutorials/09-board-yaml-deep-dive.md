@@ -145,8 +145,8 @@ When `preset:` is set, you cannot ALSO carry inline
 
 ```yaml
 pins:
-  - { e1m: E1M_GPIO_IO4, macro: EVK_PIN_ENCODER_SW, doc: "user button" }
-  - { e1m: E1M_PWM3,     macro: EVK_PWM_LED_RED,    doc: "red status LED" }
+  - { e1m: E1M_GPIO_IO4,  macro: EVK_PIN_ENCODER_SW, doc: "user button" }
+  - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED,    doc: "red status LED (PWM3 pad driven as GPIO)" }
   - E1M_I2C0                                                       # bare form OK
 ```
 
@@ -173,13 +173,15 @@ and stale macro names error out at validate time.
 **board-static electrical facts** (`active_low`, `pull`,
 `debounce_ms`); it does NOT describe pin direction.
 
-Pin direction is a per-app runtime choice -- set at the
-`alp_gpio_open()` call site by the firmware:
+Pin direction is a per-app runtime choice -- set with
+`alp_gpio_configure()` after the one-argument `alp_gpio_open(pin_id)`:
 
 ```c
-alp_gpio_t *btn = alp_gpio_open(EVK_PIN_ENCODER_SW,
-                                ALP_GPIO_INPUT | ALP_GPIO_INT_EDGE_FALLING);
-alp_gpio_t *led = alp_gpio_open(EVK_PWM_LED_RED, ALP_GPIO_OUTPUT);
+alp_gpio_t *btn = alp_gpio_open(EVK_PIN_ENCODER_SW);
+alp_gpio_configure(btn, ALP_GPIO_INPUT, ALP_GPIO_PULL_UP);
+
+alp_gpio_t *led = alp_gpio_open(EVK_PIN_LED_RED);
+alp_gpio_configure(led, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 ```
 
 For peripheral use (UART / SPI / I²C / PWM / …) the

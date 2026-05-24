@@ -15,9 +15,9 @@ tree -- the headline showcase of every standard LVGL widget
 ## Hardware needed
 
 - An E1M-AEN-family SoM (E7 recommended for the SRAM headroom).
-- E1M-EVK board (or any board exposing SPI0 + two GPIOs).
+- E1M-EVK board (or any board exposing SPI1 + two GPIOs).
 - 240 x 320 ST7789 TFT panel wired to:
-  - SPI0 → display SCLK + MOSI + CS
+  - SPI1 → display SCLK + MOSI + CS
   - GPIO IO0 → D/C#
   - GPIO IO1 → RESET (optional; SW-reset works too)
   - 3V3 / GND from the board.

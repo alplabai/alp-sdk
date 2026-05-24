@@ -1,27 +1,31 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Portable HiL smoke for examples/gpio-button-led.  Works on every
-# E1M-conformant SoM -- the example uses E1M_GPIO_IO0 + IO1 which
-# the e1m-spec guarantees route on every variant.
+# HiL smoke for examples/gpio-button-led on the E1M-EVK.
+#
+# The EVK has no dedicated GPIO LED, so the example uses the E1M "GPIO
+# secondary" capability: the button is the encoder push switch
+# (E1M_GPIO_IO4, active-low) and the LED is the RGB-red PWM3 pad
+# claimed as a digital GPIO (E1M_GPIO_PWM3), both through the
+# <alp/blocks/button_led.h> helper.
 #
 # Hardware fixtures expected:
-#   - The board's BUTTON_LED helper populated at E1M_GPIO_IO0 (button)
-#     and E1M_GPIO_IO1 (LED).  E1M-EVK + E1M-X-EVK presets default
-#     `button_led: true`; custom boards need it declared.
+#   - E1M_GPIO_IO4 routed to the encoder push switch and the PWM3 pad
+#     (E1M_GPIO_PWM3) wired to the RGB-red LED, both via the e1m-evk
+#     preset's e1m_routes:.  The board DTS must mux the PWM3 pad to
+#     GPIO (pinctrl) for the LED half to drive.
 #
 # What this proves end-to-end:
-#   - alp_button_led_init() returns ALP_OK on real silicon.
-#   - alp_button_led_set() drives the LED pin (4 toggles visible
-#     on the board's LED).
-#   - alp_button_led_is_pressed() returns ALP_OK and a 0/1 value
-#     reflecting the button's actual state at sample time.
+#   - alp_button_led_init() returns ALP_OK on real silicon (both pads
+#     resolve through the positional alp,pin-array).
+#   - alp_button_led_set() drives the red LED (4 toggles visible).
+#   - alp_button_led_is_pressed() returns ALP_OK and a 0/1 value.
 #   - The example exits cleanly without a panic.
 
 schema_version: 1
 name: gpio-button-led
 description: |
-  Verifies GPIO read (button) + GPIO write (LED) end-to-end through
-  the <alp/blocks/button_led.h> helper.
+  Verifies GPIO button read + GPIO LED drive end-to-end on the E1M-EVK,
+  with the LED on the PWM3 pad claimed as a GPIO (E1M GPIO-secondary).
 
 example: examples/gpio-button-led
 
@@ -30,7 +34,7 @@ example: examples/gpio-button-led
 serial:
   duration_s: 10
   expect_contains:
-    - "[gpio] init button=E1M_GPIO_IO0, led=E1M_GPIO_IO1"
+    - "[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED"
     - "[gpio] led=1 status=0"     # at least one ALP_OK set
     - "[gpio] is_pressed -> status=0"
     - "[gpio] done"

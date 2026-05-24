@@ -10,6 +10,10 @@ som:
   sku: E1M-AEN701
 
 preset: e1m-evk
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_CAN0, macro: EVK_CAN_VEHICLE_BUS, doc: "TCAN1044A transceiver on header J9; loopback mode needs no external wiring" }
 cores:
   m55_hp:
     app: ./src

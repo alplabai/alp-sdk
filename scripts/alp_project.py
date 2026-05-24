@@ -831,6 +831,23 @@ _BUS_BUCKETS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+# Canonical E1M GPIO index order -- e1m_pinout.h "Devicetree / overlay
+# invariant".  The alp,pin-array `gpios` property MUST list these 52
+# entries in this exact order so the GPIO backend's positional resolve
+# (alp_z_gpio_resolve -> alp_pins[pin_id]) lands on the right pad,
+# including secondary-function pads opened as GPIO via E1M_GPIO_<class><N>
+# (PWM -> 26..33, ENC -> 34..41, ADC -> 42..49, DAC -> 50..51).
+def _e1m_gpio_canonical() -> list[str]:
+    """Return the 52 E1M_GPIO_<suffix> names in canonical index order."""
+    names: list[str] = [f"IO{n}" for n in range(26)]      # 0..25
+    names += [f"PWM{n}" for n in range(8)]                 # 26..33
+    for e in range(4):                                     # 34..41
+        names += [f"ENC{e}_X", f"ENC{e}_Y"]
+    names += [f"ADC{n}" for n in range(8)]                 # 42..49
+    names += ["DAC0", "DAC1"]                              # 50..51
+    return names
+
+
 def _strip_c_comments(text: str) -> str:
     """Strip /* ... */ and // ... comments from C source text."""
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
@@ -928,9 +945,9 @@ def _emit_dts_overlay(
     lines.append(" *")
     lines.append(" * Per-pad GPIO bank/index values are TBD pending the upstream")
     lines.append(" * alp_<board>_<som>.dts board file (alplabai/alp-zephyr-modules).")
-    lines.append(" * The alp,pin-array entries below preserve the EVK_PIN_* macro")
-    lines.append(" * ordering so customers can fill the gpio columns in place")
-    lines.append(" * without renumbering.")
+    lines.append(" * The alp,pin-array below is the full 52-entry positional map in")
+    lines.append(" * e1m_pinout.h canonical order; fill the <&gpioX Y FLAGS> columns")
+    lines.append(" * in place without renumbering (the positional index is the ABI).")
     lines.append(" */")
     lines.append("")
 
@@ -994,29 +1011,45 @@ def _emit_dts_overlay(
     lines.append("    };")
     lines.append("")
 
-    # alp,pin-array -- one entry per EVK_PIN_* / EVK_ARD_DIO* macro
-    # that resolves to E1M_GPIO_IO<N>.  Preserves macro ordering
-    # so the customer can fill in `<&gpioX Y FLAGS>` columns in place.
-    gpio_entries = macros.get("GPIO_IO", [])
-    if gpio_entries:
-        lines.append("    alp_pins: alp-pins {")
-        lines.append('        compatible = "alp,pin-array";')
-        lines.append("        /* The order MUST match the EVK_PIN_* / EVK_ARD_DIO* macro")
-        lines.append("         * declarations in the board header.  Each <&gpioX Y FLAGS>")
-        lines.append("         * triplet is TBD pending the upstream SoM board file.        */")
-        lines.append("        gpios =")
-        # Emit each gpio with a placeholder.  The trailing comma /
-        # semicolon goes on the last entry.
-        for i, (macro_name, idx) in enumerate(gpio_entries):
-            terminator = ";" if i == len(gpio_entries) - 1 else ","
-            # <&gpio0 IDX GPIO_ACTIVE_HIGH> placeholder; the comment
-            # carries the authoritative E1M IO index from the header.
-            lines.append(
-                f"            <&gpio0 0 GPIO_ACTIVE_HIGH>{terminator}"
-                f"  /* {macro_name} = E1M_GPIO_IO{idx} */"
-            )
-        lines.append("    };")
-        lines.append("")
+    # alp,pin-array -- the 52-entry positional GPIO map.  Order is fixed
+    # by e1m_pinout.h's "Devicetree / overlay invariant" so the GPIO
+    # backend's positional resolve (alp_pins[pin_id]) lands on the right
+    # pad, including secondary-function pads opened as GPIO via
+    # E1M_GPIO_<class><N>.  Every slot is present even when the board
+    # doesn't route it; <&gpioX Y FLAGS> triplets are TBD pending the
+    # upstream SoM board file.
+    io_by_idx = {idx: m for (m, idx) in macros.get("GPIO_IO", [])}
+    pwm_by_idx = {idx: m for (m, idx) in macros.get("PWM", [])}
+    canonical = _e1m_gpio_canonical()
+    lines.append("    alp_pins: alp-pins {")
+    lines.append('        compatible = "alp,pin-array";')
+    lines.append("        /* 52 entries in E1M canonical order (e1m_pinout.h).  Indices:")
+    lines.append("         *   0..25  IO0..IO25       26..33 PWM0..PWM7")
+    lines.append("         *   34..41 ENC0_X..ENC3_Y  42..49 ADC0..ADC7   50..51 DAC0..DAC1")
+    lines.append("         * Each <&gpioX Y FLAGS> triplet is TBD pending the upstream SoM")
+    lines.append("         * board file; unrouted pads keep their slot so indices stay")
+    lines.append("         * stable (alp_gpio_open of an unrouted pad returns NULL).      */")
+    lines.append("        gpios =")
+    for i, suffix in enumerate(canonical):
+        terminator = ";" if i == len(canonical) - 1 else ","
+        # Annotate IO / PWM slots with the board macro routed to that pad
+        # (parsed from the board header); other classes carry the bare
+        # E1M_GPIO_<suffix> so the customer knows which pad the slot is.
+        routed = ""
+        if suffix.startswith("IO"):
+            n = int(suffix[2:])
+            if n in io_by_idx:
+                routed = f"  routed: {io_by_idx[n]}"
+        elif suffix.startswith("PWM"):
+            n = int(suffix[3:])
+            if n in pwm_by_idx:
+                routed = f"  default fn: {pwm_by_idx[n]}"
+        lines.append(
+            f"            <&gpio0 0 GPIO_ACTIVE_HIGH>{terminator}"
+            f"  /* [{i:2d}] E1M_GPIO_{suffix}{routed} */"
+        )
+    lines.append("    };")
+    lines.append("")
 
     lines.append("};")
 

@@ -48,10 +48,11 @@ of `prj.conf` via `OVERLAY_CONFIG`.
 
 ```c
 #include "alp/peripheral.h"
+#include "alp/boards/alp_e1m_evk_routes.h"   /* EVK_PIN_* board macros */
 
 int main(void) {
-    alp_gpio_t *button = alp_gpio_open(/*pin_id*/ 0);
-    alp_gpio_t *led    = alp_gpio_open(/*pin_id*/ 1);
+    alp_gpio_t *button = alp_gpio_open(EVK_PIN_ENCODER_SW);
+    alp_gpio_t *led    = alp_gpio_open(EVK_PIN_LED_RED);
 
     alp_gpio_configure(button, ALP_GPIO_INPUT,  ALP_GPIO_PULL_UP);
     alp_gpio_configure(led,    ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);

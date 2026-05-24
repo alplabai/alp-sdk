@@ -10,6 +10,10 @@ som:
   sku: E1M-AEN701
 
 preset: e1m-evk
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_I2S0, macro: EVK_I2S_AUDIO_CODEC, doc: "I2S0 routed through the 74LVC157 mux to the TAS2563 amps (default)" }
 cores:
   m55_hp:
     app: ./src

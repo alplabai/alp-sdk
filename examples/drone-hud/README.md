@@ -32,7 +32,7 @@ on-board sensor chips.
   - LSM6DSO IMU breakout on I²C0 (already on the EVK).
   - uBlox NEO-M9N GNSS on UART0 (or any UART; edit `board.yaml`).
   - INA236 battery monitor on I²C0 (or any I²C bus).
-  - ST7789 240×320 TFT on SPI0 + 2 GPIOs.
+  - ST7789 240×320 TFT on SPI1 + 2 GPIOs.
 
 ## Build
 

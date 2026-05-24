@@ -20,7 +20,7 @@ bash scripts/bootstrap.sh                            # one-time: west + Python +
 export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
 west alp-build -b native_sim/native/64 examples/gpio-button-led
 west build -d build -t run
-# expect: [gpio] init button=E1M_GPIO_IO0, led=E1M_GPIO_IO1
+# expect: [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
 #          ...
 #          [gpio] done
 ```
@@ -193,7 +193,7 @@ Expected output:
 
 ```
 *** Booting Zephyr OS build v4.4.0 ***
-[gpio] init button=E1M_GPIO_IO0, led=E1M_GPIO_IO1
+[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
 [gpio] led=0 status=0
 [gpio] led=1 status=0
 [gpio] led=0 status=0

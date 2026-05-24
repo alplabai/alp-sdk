@@ -36,6 +36,11 @@
 #include "alp/audio.h"
 #include "alp/e1m_pinout.h"
 
+/* EVK_I2S_AUDIO_CODEC (= E1M_I2S0) is a board-macro from the generated
+ * routes header; the PDM mic stays on the raw E1M_PDM0 instance (no EVK
+ * route maps it).  Rebind the codec in board.yaml `pins:`. */
+#include "alp/boards/alp_e1m_evk_routes.h"
+
 /* Loop budget -- 50 blocks of 256 frames @ 16 kHz = ~0.8 s.
  * Long enough to hear a "loopback works" cue on a real board,
  * short enough that the example terminates and twister's
@@ -68,7 +73,7 @@ int            main(void)
     }
     printf("[audio]   alp_audio_in_open(PDM0)         ok\n");
 
-    cfg.peripheral_id    = E1M_I2S0;
+    cfg.peripheral_id    = EVK_I2S_AUDIO_CODEC;
     alp_audio_out_t *spk = alp_audio_out_open(&cfg);
     if (spk == NULL) {
         printf("[audio]   alp_audio_out_open              skip (no I2S, last_err=%d)\n",

@@ -10,6 +10,11 @@ som:
   sku: E1M-AEN701
 
 preset: e1m-evk
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+# The PDM mic uses the raw E1M_PDM0 instance (no EVK route maps it).
+pins:
+  - { e1m: E1M_I2S0, macro: EVK_I2S_AUDIO_CODEC, doc: "I2S0 to the TAS2563 codec (speaker / line out)" }
 cores:
   m55_hp:
     app: ./src

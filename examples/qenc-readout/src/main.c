@@ -2,8 +2,8 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * qenc-readout — open E1M_ENC0 and poll the accumulated
- * position for ~1 second.
+ * qenc-readout — open the EVK rotary encoder and poll the
+ * accumulated position for ~1 second.
  *
  * Quadrature encoders are the standard interface for rotary
  * controls (volume knobs, position dials, motor feedback).  Two
@@ -23,14 +23,18 @@
 
 #include "alp/counter.h"
 
+/* EVK_ENC_ROTARY is a board-macro from the generated routes header
+ * (= E1M_ENC0); rebind it in board.yaml `pins:` to port to another board. */
+#include "alp/boards/alp_e1m_evk_routes.h"
+
 int main(void) {
-    printf("[qenc] open E1M_ENC0\n");
+    printf("[qenc] open EVK_ENC_ROTARY\n");
 
     alp_qenc_t *enc = alp_qenc_open(&(alp_qenc_config_t){
-        /* encoder_id 0 = E1M_ENC0.  This is just an index into
-         * the alp-qenc<N> DT alias table; the SoC binds it to a
-         * specific QDEC peripheral. */
-        .encoder_id     = 0,
+        /* EVK_ENC_ROTARY = E1M_ENC0 = index 0 -- an index into the
+         * alp-qenc<N> DT alias table; the SoC binds it to a specific
+         * QDEC peripheral. */
+        .encoder_id = EVK_ENC_ROTARY,
         /* Mechanical resolution -- informational only at the
          * wrapper level.  24 PPR is typical for a Bourns PEC11R
          * panel-mount knob; AS5048A magnetic encoders are 14-bit

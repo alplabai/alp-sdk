@@ -116,8 +116,10 @@ DTS overlays for board wiring (`--emit dts-overlay`) and
 previously v0.4 gaps; both ship in v0.3.  The loader's `--emit dts-overlay` mode
 parses `include/alp/boards/<board>.h` and generates the bus
 aliases (`alp-i2c<N>`, `alp-spi<N>`, `alp-uart<N>`, `alp-pwm<N>`)
-plus a stub `alp,pin-array` with one entry per `EVK_PIN_*`
-macro.  Per-pad GPIO bank/index columns remain TBD until the
+plus a POSITIONAL `alp,pin-array` whose entry N is E1M pad N in the
+canonical `e1m_pinout.h` order (52 slots: IO0..25 = 0..25, PWM0..7 =
+26..33, ENC0_X..ENC3_Y = 34..41, ADC0..7 = 42..49, DAC0..1 = 50..51).
+Per-pad GPIO bank/index columns remain TBD until the
 upstream SoM board files land in `alplabai/alp-zephyr-modules`;
 the customer fills those in place without renumbering.
 
@@ -376,8 +378,8 @@ self-contained and grep-able.
 
 ```yaml
 pins:
-  - { e1m: E1M_GPIO_IO4, macro: EVK_PIN_ENCODER_SW, doc: "user button" }
-  - { e1m: E1M_PWM3,     macro: EVK_PWM_LED_RED,    doc: "red status LED" }
+  - { e1m: E1M_GPIO_IO4,  macro: EVK_PIN_ENCODER_SW, doc: "user button" }
+  - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED,    doc: "red status LED (PWM3 pad driven as GPIO)" }
   - E1M_I2C0                                                       # bare form OK
 ```
 
@@ -395,20 +397,23 @@ Each entry is either:
 The loader cross-checks every entry against the resolved board's
 `e1m_routes:` block: the `e1m` pad must exist, and when `macro:`
 is supplied it must match the board's macro for that pad
-(catches drift if the demo references `EVK_PWM_LED_RED` but the
+(catches drift if the demo references `EVK_PIN_LED_RED` but the
 preset moved it).  Bare-string and object entries can mix in the
 same list.
 
 #### Pin direction (NOT in `board.yaml`)
 
 Pin direction is **not** a board declaration.  It's a per-app
-runtime choice -- the firmware sets direction at the
-`alp_gpio_open()` call site:
+runtime choice -- the firmware sets direction with
+`alp_gpio_configure()` after opening the pin (the handle comes from
+the one-argument `alp_gpio_open(pin_id)`):
 
 ```c
-alp_gpio_t *btn = alp_gpio_open(EVK_PIN_ENCODER_SW,
-                                ALP_GPIO_INPUT | ALP_GPIO_INT_EDGE_FALLING);
-alp_gpio_t *led = alp_gpio_open(EVK_PWM_LED_RED, ALP_GPIO_OUTPUT);
+alp_gpio_t *btn = alp_gpio_open(EVK_PIN_ENCODER_SW);
+alp_gpio_configure(btn, ALP_GPIO_INPUT, ALP_GPIO_PULL_UP);
+
+alp_gpio_t *led = alp_gpio_open(EVK_PIN_LED_RED);
+alp_gpio_configure(led, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 ```
 
 For peripheral use (UART / SPI / I²C / PWM / …) the
