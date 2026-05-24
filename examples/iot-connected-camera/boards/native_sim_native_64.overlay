@@ -2,10 +2,28 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Host-build overlay for the IoT connected-camera skeleton.
- * Same shape as the EdgeAI skeleton's host overlay — one I²C bus,
- * two GPIOs.  Networking is simulated via Zephyr's net stack on
- * native_sim when v0.3 lands; v0.1 host build leaves it off.
+ * Host-build overlay for the IoT connected-camera skeleton.  One
+ * emulated I2C bus (SSD1306 status pane) plus the standard
+ * alp,pin-array.  Networking is simulated via Zephyr's net stack on
+ * native_sim when v0.3 lands; the v0.1 host build leaves it off.
+ *
+ * The alp,pin-array is POSITIONAL: alp_z_gpio_resolve(pin_id) indexes
+ * it by the E1M GPIO index, so entry N must be E1M pad N in the
+ * e1m_pinout.h canonical order (IO0..IO25 = 0..25, PWM0..PWM7 =
+ * 26..33, ...).  This demo touches two pads through the button_led
+ * block:
+ *   - index  4 = E1M_GPIO_IO4   -- capture trigger (encoder switch)
+ *   - index 29 = E1M_GPIO_PWM3  -- status LED, the RGB-red PWM pad
+ *                claimed as a plain GPIO (the e1m-spec "GPIO
+ *                secondary").
+ *
+ * Unlike the EVK-targeted demos, this app opens its pads by raw E1M
+ * IDs rather than EVK_* macros: its target carrier's pad routes are
+ * still TBD pending the schematic, so there is no board routes header
+ * to name them yet.
+ *
+ * (gpio-emul controllers cap at 32 pins; native_sim only needs the
+ * range this demo touches, indices 0..29.)
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>
@@ -34,12 +52,40 @@
         rising-edge;
         falling-edge;
         #gpio-cells = <2>;
-        ngpios = <8>;
+        ngpios = <32>;
     };
 
     alp_pins: alp-pins {
         compatible = "alp,pin-array";
-        gpios = <&gpio_emul0 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
-                <&gpio_emul0 1 GPIO_ACTIVE_HIGH>;
+        gpios = <&gpio_emul0  0 GPIO_ACTIVE_HIGH>,   /* [ 0] E1M_GPIO_IO0  */
+                <&gpio_emul0  1 GPIO_ACTIVE_HIGH>,   /* [ 1] E1M_GPIO_IO1  */
+                <&gpio_emul0  2 GPIO_ACTIVE_HIGH>,   /* [ 2] E1M_GPIO_IO2  */
+                <&gpio_emul0  3 GPIO_ACTIVE_HIGH>,   /* [ 3] E1M_GPIO_IO3  */
+                <&gpio_emul0  4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,  /* [ 4] E1M_GPIO_IO4 -- capture trigger */
+                <&gpio_emul0  5 GPIO_ACTIVE_HIGH>,   /* [ 5] E1M_GPIO_IO5  */
+                <&gpio_emul0  6 GPIO_ACTIVE_HIGH>,   /* [ 6] E1M_GPIO_IO6  */
+                <&gpio_emul0  7 GPIO_ACTIVE_HIGH>,   /* [ 7] E1M_GPIO_IO7  */
+                <&gpio_emul0  8 GPIO_ACTIVE_HIGH>,   /* [ 8] E1M_GPIO_IO8  */
+                <&gpio_emul0  9 GPIO_ACTIVE_HIGH>,   /* [ 9] E1M_GPIO_IO9  */
+                <&gpio_emul0 10 GPIO_ACTIVE_HIGH>,   /* [10] E1M_GPIO_IO10 */
+                <&gpio_emul0 11 GPIO_ACTIVE_HIGH>,   /* [11] E1M_GPIO_IO11 */
+                <&gpio_emul0 12 GPIO_ACTIVE_HIGH>,   /* [12] E1M_GPIO_IO12 */
+                <&gpio_emul0 13 GPIO_ACTIVE_HIGH>,   /* [13] E1M_GPIO_IO13 */
+                <&gpio_emul0 14 GPIO_ACTIVE_HIGH>,   /* [14] E1M_GPIO_IO14 */
+                <&gpio_emul0 15 GPIO_ACTIVE_HIGH>,   /* [15] E1M_GPIO_IO15 */
+                <&gpio_emul0 16 GPIO_ACTIVE_HIGH>,   /* [16] E1M_GPIO_IO16 */
+                <&gpio_emul0 17 GPIO_ACTIVE_HIGH>,   /* [17] E1M_GPIO_IO17 */
+                <&gpio_emul0 18 GPIO_ACTIVE_HIGH>,   /* [18] E1M_GPIO_IO18 */
+                <&gpio_emul0 19 GPIO_ACTIVE_HIGH>,   /* [19] E1M_GPIO_IO19 */
+                <&gpio_emul0 20 GPIO_ACTIVE_HIGH>,   /* [20] E1M_GPIO_IO20 */
+                <&gpio_emul0 21 GPIO_ACTIVE_HIGH>,   /* [21] E1M_GPIO_IO21 */
+                <&gpio_emul0 22 GPIO_ACTIVE_HIGH>,   /* [22] E1M_GPIO_IO22 */
+                <&gpio_emul0 23 GPIO_ACTIVE_HIGH>,   /* [23] E1M_GPIO_IO23 */
+                <&gpio_emul0 24 GPIO_ACTIVE_HIGH>,   /* [24] E1M_GPIO_IO24 */
+                <&gpio_emul0 25 GPIO_ACTIVE_HIGH>,   /* [25] E1M_GPIO_IO25 */
+                <&gpio_emul0 26 GPIO_ACTIVE_HIGH>,   /* [26] E1M_GPIO_PWM0 */
+                <&gpio_emul0 27 GPIO_ACTIVE_HIGH>,   /* [27] E1M_GPIO_PWM1 */
+                <&gpio_emul0 28 GPIO_ACTIVE_HIGH>,   /* [28] E1M_GPIO_PWM2 */
+                <&gpio_emul0 29 GPIO_ACTIVE_HIGH>;   /* [29] E1M_GPIO_PWM3 -- status LED (RGB-red pad as GPIO) */
     };
 };
