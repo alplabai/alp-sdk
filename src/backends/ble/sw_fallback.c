@@ -170,11 +170,12 @@ static const alp_ble_ops_t _ops = {
     .gatt_write            = sw_gatt_write,
 };
 
-ALP_BACKEND_REGISTER(ble, sw_fallback, {
-    .silicon_ref = "*",
-    .vendor      = "sw",
-    .base_caps   = 0u,
-    .priority    = 0,
-    .ops         = &_ops,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(ble, sw_fallback,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "sw_fallback",
+                         .base_caps   = 0u,
+                         .priority    = 0,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });

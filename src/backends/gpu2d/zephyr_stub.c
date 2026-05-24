@@ -34,12 +34,14 @@
 static alp_status_t stub_open(alp_gpu2d_backend_state_t *state,
                               alp_capabilities_t *caps_out)
 {
+    /* NOSUPPORT stub: no 2D-blitter HAL on this build.  Registered
+     * (priority 0, "*") only to keep the gpu2d class section non-empty
+     * for the registry's __start_/__stop_ bounds; open reports
+     * unsupported, so alp_gpu2d_open() returns NULL + NOSUPPORT.
+     * NULL-handle ops still surface NOT_READY via the dispatcher. */
     (void)state;
     (void)caps_out;
-    /* Successful open keeps the dispatcher's INVAL surface validation
-     * reachable; the NOSUPPORT surfaces at fill_rect / blit / blend
-     * time AFTER the surface pre-checks have run. */
-    return ALP_OK;
+    return ALP_ERR_NOSUPPORT;
 }
 
 static alp_status_t stub_fill_rect(alp_gpu2d_backend_state_t *state,

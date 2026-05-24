@@ -124,6 +124,14 @@ static const alp_security_ops_t *_get_ops(void)
 alp_hash_t *alp_hash_open(alp_hash_alg_t alg)
 {
     alp_z_clear_last_error();
+    /* Reject out-of-range algorithms before backend dispatch.  The
+     * three supported enum values are SHA256/384/512 (0..2); the
+     * cast via uint32_t dodges the -Wenum-compare-conditional
+     * warning when callers pass a sentinel like 0xFFFFu. */
+    if ((uint32_t)alg > (uint32_t)ALP_HASH_SHA512) {
+        alp_z_set_last_error(ALP_ERR_INVAL);
+        return NULL;
+    }
     const alp_backend_t *be = alp_backend_select("security", ALP_SOC_REF_STR);
     if (be == NULL) {
         alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);

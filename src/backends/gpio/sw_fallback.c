@@ -84,8 +84,8 @@ static const alp_gpio_ops_t _ops = {
     .configure   = sw_configure,
     .write       = sw_write,
     .read        = sw_read,
-    .irq_enable  = sw_irq_enable,
-    .irq_disable = sw_irq_disable,
+    .enable_irq  = sw_irq_enable,
+    .disable_irq = sw_irq_disable,
     .close       = sw_close,
 };
 

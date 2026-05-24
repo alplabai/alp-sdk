@@ -70,9 +70,17 @@ typedef struct alp_backend_class_range {
  *               unique within a class; appears in the symbol name.
  * @param ...    Brace-enclosed initializer for alp_backend_t.
  */
-#define ALP_BACKEND_REGISTER(class, name, ...)                              \
-    static const alp_backend_t _alp_be_##class##_##name                     \
-        __attribute__((used, section(".alp_backends_" #class))) = __VA_ARGS__
+/* The `used` attribute keeps the symbol through compile-time stripping;
+ * `retain` (GCC 11+) keeps it through linker `--gc-sections`.  Zephyr's
+ * native_sim builds enable --gc-sections aggressively and drop the
+ * registration without `retain`. */
+/* Section name MUST be a valid C identifier (no leading dot) so GNU
+ * ld auto-emits __start_alp_backends_<class> and __stop_<class>
+ * bound symbols.  `retain` keeps the entry through --gc-sections. */
+#define ALP_BACKEND_REGISTER(class, name, ...)                                                     \
+    static const alp_backend_t _alp_be_##class##_##name                                            \
+        __attribute__((used, retain, aligned(__alignof__(alp_backend_t)),                          \
+                       section("alp_backends_" #class))) = __VA_ARGS__
 
 /**
  * @brief Define the class-range table entry for a per-class section.
@@ -81,18 +89,21 @@ typedef struct alp_backend_class_range {
  * alp_<class>_open) instantiates this once.  Tells the selector how
  * to find the section for a class name.
  */
-#define ALP_BACKEND_DEFINE_CLASS(class)                                       \
-    extern const alp_backend_t __start_alp_backends_##class[]                 \
-        __attribute__((weak));                                                \
-    extern const alp_backend_t __stop_alp_backends_##class[]                  \
-        __attribute__((weak));                                                \
-    static const alp_backend_class_range_t                                    \
-        _alp_class_range_##class                                              \
-        __attribute__((used, section("alp_backend_classes"))) = {             \
-            .class_name = #class,                                             \
-            .start = __start_alp_backends_##class,                            \
-            .stop = __stop_alp_backends_##class,                              \
-        }
+#define ALP_BACKEND_DEFINE_CLASS(class)                                                            \
+    extern const alp_backend_t __start_alp_backends_##class[];                                     \
+    extern const alp_backend_t __stop_alp_backends_##class[];                                      \
+    /* aligned(__alignof__(struct alp_backend_class_range)) forces the
+     * entries to pack contiguously at the struct's natural alignment
+     * (8 bytes on LP64).  Without this the section min-alignment can
+     * exceed sizeof(struct), the linker inserts trailing pad between
+     * entries, and the walker `++c` reads garbage from the pad.  */                             \
+    static const alp_backend_class_range_t _alp_class_range_##class __attribute__((                \
+        used, retain, aligned(__alignof__(alp_backend_class_range_t)),                             \
+        section("alp_backend_classes"))) = {                                                       \
+        .class_name = #class,                                                                      \
+        .start      = __start_alp_backends_##class,                                                \
+        .stop       = __stop_alp_backends_##class,                                                 \
+    }
 
 /**
  * @brief Find the best backend registered for a class on the active SoC.

@@ -119,8 +119,8 @@ ZTEST(alp_i2s_registry, test_close_releases_handle)
 
 /* ---------- (f) sw_fallback round-trip + NOSUPPORT paths ------------------ */
 
-extern const alp_backend_t __start_alp_backends_i2s[];
-extern const alp_backend_t __stop_alp_backends_i2s[];
+extern const alp_backend_t  __start_alp_backends_i2s[] __attribute__((weak));
+extern const alp_backend_t  __stop_alp_backends_i2s[] __attribute__((weak));
 
 static const alp_i2s_ops_t *_find_sw_fallback_ops(void)
 {

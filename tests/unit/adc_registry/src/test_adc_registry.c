@@ -81,7 +81,7 @@ ZTEST(alp_adc_registry, test_sw_fallback_picked_for_unknown_silicon)
     const alp_backend_t *be =
         alp_backend_select("adc", "fictional:soc:zz");
     zassert_not_null(be);
-    zassert_equal(strcmp(be->vendor, "sw"), 0);
+    zassert_equal(strcmp(be->vendor, "sw_fallback"), 0);
     zassert_equal(be->priority, 0);
 }
 

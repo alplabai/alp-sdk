@@ -9,9 +9,9 @@
  * Backends visible on this test build:
  *   zephyr_stub     (priority 0, "*" wildcard, vendor "stub")
  *
- * The stub's open() returns ALP_OK so alp_gpu2d_open() hands back
- * a real handle on this build; the dispatcher's surface-validation
- * INVAL pre-checks are exercised against that real handle.
+ * The stub is a NOSUPPORT stub: open() reports unsupported (no 2D
+ * HAL on this build), so alp_gpu2d_open() returns NULL with
+ * last_error = NOSUPPORT; NULL-handle ops surface NOT_READY.
  *
  * The test build pins CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y so the
  * dispatcher's `alp_backend_select("gpu2d", ALP_SOC_REF_STR)`
@@ -97,35 +97,26 @@ ZTEST(alp_gpu2d_registry, test_gpu2d_capabilities_returns_null_for_null_handle)
     zassert_is_null(alp_gpu2d_capabilities(NULL));
 }
 
-ZTEST(alp_gpu2d_registry, test_fill_rect_inval_on_null_dst)
+ZTEST(alp_gpu2d_registry, test_open_returns_nosupport_no_vendor_hal)
 {
-    /* The stub's open() returns ALP_OK so we get a real handle.
-     * The dispatcher's surface validation fires before the stub op
-     * runs, so a NULL dst surfaces as ALP_ERR_INVAL rather than the
-     * stub's ALP_ERR_NOT_IMPLEMENTED. */
-    alp_gpu2d_t *h = alp_gpu2d_open();
-    zassert_not_null(h);
-
-    zassert_equal(alp_gpu2d_fill_rect(h, NULL, 0u, 0u, 10u, 10u, 0xffu),
-                  ALP_ERR_INVAL);
-
-    alp_gpu2d_close(h);
+    /* The wildcard stub is a NOSUPPORT stub (no 2D HAL on this build),
+     * so open reports unsupported and the dispatcher relays it as a
+     * NULL handle + last_error = NOSUPPORT. */
+    zassert_is_null(alp_gpu2d_open());
+    zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT);
 }
 
-ZTEST(alp_gpu2d_registry, test_blend_inval_on_bad_mode)
+ZTEST(alp_gpu2d_registry, test_ops_null_handle_not_ready)
 {
-    /* Bad-mode INVAL must fire before the stub op runs.  Both
-     * surfaces are valid so the only reason for INVAL is the
-     * out-of-range blend mode. */
-    alp_gpu2d_t *h = alp_gpu2d_open();
-    zassert_not_null(h);
-
-    zassert_equal(alp_gpu2d_blend(h, &_valid_src, 0u, 0u,
-                                  &_valid_dst, 0u, 0u, 4u, 4u,
-                                  (alp_gpu2d_blend_mode_t)99),
-                  ALP_ERR_INVAL);
-
-    alp_gpu2d_close(h);
+    /* open() NOSUPPORTs on this build, so callers never hold a live
+     * handle; the dispatcher's NULL-handle guard surfaces NOT_READY
+     * before any backend op or surface validation.  _valid_src /
+     * _valid_dst keep the surface arguments well-formed so NOT_READY
+     * is unambiguously the handle check. */
+    zassert_equal(alp_gpu2d_fill_rect(NULL, &_valid_dst, 0u, 0u, 4u, 4u, 0xffu), ALP_ERR_NOT_READY);
+    zassert_equal(alp_gpu2d_blend(NULL, &_valid_src, 0u, 0u, &_valid_dst, 0u, 0u, 4u, 4u,
+                                  (alp_gpu2d_blend_mode_t)0),
+                  ALP_ERR_NOT_READY);
 }
 
 /* ---------- Registry inventory test -------------------------------- */

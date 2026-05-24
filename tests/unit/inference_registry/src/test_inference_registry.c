@@ -118,11 +118,12 @@ ZTEST(alp_inference_registry, test_open_returns_null_on_null_model_data)
     zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 }
 
-ZTEST(alp_inference_registry, test_open_via_sw_fallback_succeeds)
+ZTEST(alp_inference_registry, test_open_via_sw_fallback_returns_nosupport)
 {
-    /* sw_fallback's open accepts any non-empty model_data + size,
-     * so we can open a handle to exercise the capabilities + close
-     * lifecycle without needing a real TFLM model. */
+    /* sw_fallback is a NOSUPPORT stub on native_sim (no inference
+     * engine linked): open reports unsupported and the dispatcher
+     * relays it as a NULL handle + last_error = NOSUPPORT.  Mirrors
+     * the inference.smoke zephyr contract. */
     uint8_t dummy_model[16] = {0};
     alp_inference_config_t cfg = {
         .model_data  = dummy_model,
@@ -132,24 +133,8 @@ ZTEST(alp_inference_registry, test_open_via_sw_fallback_succeeds)
         .arena_bytes = 0u,
         .arena       = NULL,
     };
-    alp_inference_t *inf = alp_inference_open(&cfg);
-    zassert_not_null(inf);
-
-    const alp_capabilities_t *caps = alp_inference_capabilities(inf);
-    zassert_not_null(caps);
-    zassert_equal(caps->flags, 0u);
-
-    /* sw_fallback returns 0 input/output count + NOSUPPORT on the
-     * tensor + invoke ops. */
-    zassert_equal(alp_inference_num_inputs(inf), 0u);
-    zassert_equal(alp_inference_num_outputs(inf), 0u);
-
-    alp_inference_tensor_t t = {0};
-    zassert_equal(alp_inference_get_input(inf, 0u, &t), ALP_ERR_NOSUPPORT);
-    zassert_equal(alp_inference_get_output(inf, 0u, &t), ALP_ERR_NOSUPPORT);
-    zassert_equal(alp_inference_invoke(inf), ALP_ERR_NOSUPPORT);
-
-    alp_inference_close(inf);
+    zassert_is_null(alp_inference_open(&cfg));
+    zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT);
 }
 
 ZTEST(alp_inference_registry, test_capabilities_returns_null_for_null_handle)
@@ -175,56 +160,10 @@ ZTEST(alp_inference_registry, test_get_input_on_null_returns_not_ready)
     zassert_equal(alp_inference_get_input(NULL, 0u, &t), ALP_ERR_NOT_READY);
 }
 
-ZTEST(alp_inference_registry, test_get_input_with_null_out_returns_inval)
-{
-    /* Open via sw_fallback so the handle is valid; the NULL out
-     * tensor is what's being exercised. */
-    uint8_t dummy_model[16] = {0};
-    alp_inference_config_t cfg = {
-        .model_data  = dummy_model,
-        .model_size  = sizeof(dummy_model),
-        .format      = ALP_INFERENCE_MODEL_TFLITE,
-        .backend     = ALP_INFERENCE_BACKEND_AUTO,
-        .arena_bytes = 0u,
-        .arena       = NULL,
-    };
-    alp_inference_t *inf = alp_inference_open(&cfg);
-    zassert_not_null(inf);
-    zassert_equal(alp_inference_get_input(inf, 0u, NULL), ALP_ERR_INVAL);
-    alp_inference_close(inf);
-}
-
-ZTEST(alp_inference_registry, test_pool_exhaustion_returns_nomem)
-{
-    /* The pool defaults to CONFIG_ALP_SDK_MAX_INFERENCE_HANDLES = 2.
-     * Open three handles back-to-back; the third should fail with
-     * ALP_ERR_NOMEM. */
-    uint8_t dummy_model[16] = {0};
-    alp_inference_config_t cfg = {
-        .model_data  = dummy_model,
-        .model_size  = sizeof(dummy_model),
-        .format      = ALP_INFERENCE_MODEL_TFLITE,
-        .backend     = ALP_INFERENCE_BACKEND_AUTO,
-        .arena_bytes = 0u,
-        .arena       = NULL,
-    };
-
-    alp_inference_t *h1 = alp_inference_open(&cfg);
-    zassert_not_null(h1);
-    alp_inference_t *h2 = alp_inference_open(&cfg);
-    zassert_not_null(h2);
-    alp_inference_t *h3 = alp_inference_open(&cfg);
-    zassert_is_null(h3);
-    zassert_equal(alp_last_error(), ALP_ERR_NOMEM);
-
-    alp_inference_close(h1);
-    alp_inference_close(h2);
-
-    /* Slot freed -- next open succeeds. */
-    alp_inference_t *h4 = alp_inference_open(&cfg);
-    zassert_not_null(h4);
-    alp_inference_close(h4);
-}
+/* The former open-success tests -- handle-based NULL-out INVAL and
+ * pool exhaustion -- are removed: sw_fallback's open is a NOSUPPORT
+ * stub on native_sim, so no live handle is ever returned.  NULL-handle
+ * arg validation is covered by test_{invoke,get_input}_on_null above. */
 
 /* ---------- Vendor-ext gate tests (Renesas) ------------------------- */
 

@@ -46,7 +46,7 @@ ZTEST(alp_dsp_registry, test_sw_fallback_picked_for_alif_e7)
     const alp_backend_t *be =
         alp_backend_select("dsp", "alif:ensemble:e7");
     zassert_not_null(be);
-    zassert_equal(strcmp(be->vendor, "sw"), 0);
+    zassert_equal(strcmp(be->vendor, "sw_fallback"), 0);
     zassert_equal(be->priority, 0);
 }
 
@@ -58,7 +58,7 @@ ZTEST(alp_dsp_registry, test_sw_fallback_picked_for_unknown_silicon)
     const alp_backend_t *be =
         alp_backend_select("dsp", "fictional:soc:zz");
     zassert_not_null(be);
-    zassert_equal(strcmp(be->vendor, "sw"), 0);
+    zassert_equal(strcmp(be->vendor, "sw_fallback"), 0);
     zassert_equal(be->priority, 0);
 }
 

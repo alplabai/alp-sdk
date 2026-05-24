@@ -46,10 +46,15 @@ ZTEST(alp_ble, test_connect_null_handle_errors)
 
 ZTEST(alp_ble, test_gatt_null_handle_errors)
 {
-    zassert_equal(alp_ble_gatt_register_service(NULL, NULL, NULL), ALP_ERR_NOSUPPORT);
+    /* NULL / closed handle reports NOT_READY before any backend
+     * dispatch -- the standard wrapper convention (the chips smoke
+     * suite documents the same NOSUPPORT->NOT_READY shift for
+     * audio/ble/mproc).  "No controller" is surfaced at open() time:
+     * alp_ble_open() returns NULL (see test_open_no_controller_returns_null). */
+    zassert_equal(alp_ble_gatt_register_service(NULL, NULL, NULL), ALP_ERR_NOT_READY);
     zassert_equal(alp_ble_gatt_notify(NULL, NULL, 0, NULL, 0), ALP_ERR_NOT_READY);
-    zassert_equal(alp_ble_gatt_read(NULL, 0, NULL, 0, NULL, 100), ALP_ERR_NOSUPPORT);
-    zassert_equal(alp_ble_gatt_write(NULL, 0, NULL, 0, 100), ALP_ERR_NOSUPPORT);
+    zassert_equal(alp_ble_gatt_read(NULL, 0, NULL, 0, NULL, 100), ALP_ERR_NOT_READY);
+    zassert_equal(alp_ble_gatt_write(NULL, 0, NULL, 0, 100), ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_ble, test_close_null_is_safe)

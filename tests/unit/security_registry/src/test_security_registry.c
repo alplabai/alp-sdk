@@ -40,25 +40,34 @@ ZTEST_SUITE(alp_security_registry, NULL, NULL, NULL, NULL, NULL);
 
 ZTEST(alp_security_registry, test_zephyr_drv_picked_over_sw_on_alif_e7)
 {
+    /* The zephyr_drv (PSA Crypto via MbedTLS) only compiles when
+     * CONFIG_MBEDTLS=y.  On native_sim the upstream Zephyr v4.4 /
+     * mbedtls 3.6 ssl_misc.h header is broken (see memory note
+     * reference_zephyr_ci_gotchas §8), so MBEDTLS is disabled in
+     * the test prj.conf.  In that case only sw_fallback is
+     * registered and the assertion shape flips. */
     const alp_backend_t *be =
         alp_backend_select("security", "alif:ensemble:e7");
     zassert_not_null(be);
-    zassert_equal(strcmp(be->vendor, "zephyr"), 0);
-    zassert_equal(be->priority, 100);
+    if (IS_ENABLED(CONFIG_MBEDTLS)) {
+        zassert_equal(strcmp(be->vendor, "zephyr"), 0);
+        zassert_equal(be->priority, 100);
+    } else {
+        zassert_equal(strcmp(be->vendor, "sw_fallback"), 0);
+    }
 }
 
 ZTEST(alp_security_registry, test_sw_fallback_picked_for_unknown_silicon)
 {
-    /* Both registered backends are wildcards; the higher-priority
-     * zephyr_drv would normally win.  This case still exercises the
-     * selector and asserts the sw_fallback is reachable on the test
-     * build via the registry's count.  Degraded pattern: only
-     * inventory is asserted, not the specific pick. */
+    /* sw_fallback is always reachable; zephyr_drv joins it when
+     * CONFIG_MBEDTLS=y -- on native_sim that's off (see note above)
+     * so only sw_fallback registers. */
     const alp_backend_t *be =
         alp_backend_select("security", "fictional:soc:zz");
     zassert_not_null(be);
     (void)be;
-    zassert_true(alp_backend_count("security") >= 2u);
+    const size_t expected_min = IS_ENABLED(CONFIG_MBEDTLS) ? 2u : 1u;
+    zassert_true(alp_backend_count("security") >= expected_min);
 }
 
 ZTEST(alp_security_registry, test_select_returns_null_for_null_class)
@@ -83,7 +92,12 @@ ZTEST(alp_security_registry, test_hash_open_returns_null_on_bad_alg)
      * and the NOSUPPORT path resolve to a NULL return from the
      * dispatcher, which is the contract this case asserts.  Cast
      * via uint32_t to dodge the -Wenum-compare-conditional warning
-     * on the larger sentinel value. */
+     * on the larger sentinel value.
+     *
+     * When MBEDTLS is OFF the sw_fallback wins selection -- it
+     * returns NOSUPPORT for every alg (no real hash implementation),
+     * which the dispatcher also relays as NULL, so the assertion
+     * holds under both build configurations. */
     alp_hash_alg_t bad = (alp_hash_alg_t)0xFFFFu;
     zassert_is_null(alp_hash_open(bad));
 }
@@ -102,7 +116,9 @@ ZTEST(alp_security_registry, test_hash_capabilities_returns_null_for_null_handle
 
 ZTEST(alp_security_registry, test_backend_count_for_security)
 {
-    /* zephyr_drv + sw_fallback registered on this build.
-     * No vendor-specific backends exist for security in Slice 4d. */
-    zassert_equal(alp_backend_count("security"), 2u);
+    /* sw_fallback always registers.  zephyr_drv joins it when
+     * CONFIG_MBEDTLS=y (real-silicon builds via TF-M); on native_sim
+     * MBEDTLS is disabled to dodge the upstream ssl_misc.h bug. */
+    const size_t expected = IS_ENABLED(CONFIG_MBEDTLS) ? 2u : 1u;
+    zassert_equal(alp_backend_count("security"), expected);
 }

@@ -221,8 +221,8 @@ static const alp_gpio_ops_t _ops = {
     .configure   = z_configure,
     .write       = z_write,
     .read        = z_read,
-    .irq_enable  = z_irq_enable,
-    .irq_disable = z_irq_disable,
+    .enable_irq  = z_irq_enable,
+    .disable_irq = z_irq_disable,
     .close       = z_close,
 };
 

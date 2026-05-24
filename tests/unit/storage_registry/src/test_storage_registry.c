@@ -151,8 +151,8 @@ ZTEST(alp_storage_registry, test_close_releases_handle)
 
 /* ---------- (f) sw_fallback NOSUPPORT contract via direct ops dispatch --- */
 
-extern const alp_backend_t __start_alp_backends_storage[];
-extern const alp_backend_t __stop_alp_backends_storage[];
+extern const alp_backend_t      __start_alp_backends_storage[] __attribute__((weak));
+extern const alp_backend_t      __stop_alp_backends_storage[] __attribute__((weak));
 
 static const alp_storage_ops_t *_find_sw_fallback_ops(void)
 {
