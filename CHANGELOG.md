@@ -22,6 +22,31 @@ so build invocations simply gain the category path segment.  (Past
 CHANGELOG entries keep their original flat paths -- they record the
 state at the time they were written.)
 
+### Changed — E1M-X pinout header synced to the full x-v1.0 connector (2026-05-24)
+
+`<alp/e1m_x_pinout.h>` was reconciled against the authoritative
+`alplabai/e1m-spec` `pinout/x-v1.json` (E1M-X **x-v1.0**), which already
+enumerates the entire ASS6880 LGA496 module connector. The earlier
+interim edit that added I2C2/I2C3 "pending upstream e1m-spec sync" is
+superseded — x-v1.0 already defines those pads, so the caveat is gone.
+No e1m-spec change was needed; the header was simply behind the spec.
+
+- Peripheral instance IDs now cover the full connector and are
+  formatting-normalised: `E1M_X_I2C0..3`, `E1M_X_SPI0..2`,
+  `E1M_X_CAN0..1`, `E1M_X_CSI0..3`, `E1M_X_DSI0..1`, `E1M_X_USB0..2`,
+  `E1M_X_PCIE0..1`.
+- New parallel-RGB-LCD class `E1M_X_LCD0` (pads `LCD_B0..LCD_B23` +
+  `LCD_HSYNC` + `LCD_VSYNC`; the connector has no separate PCLK/DE pad),
+  with count macro `E1M_X_LCD_COUNT` (1).
+- GPIO-secondary indices appended at index >= 62 for the new
+  single-ended digital pads (I2C2/3, SPI2, CAN1, and the LCD0 block);
+  `E1M_X_GPIO_COUNT` grows 62 -> 99.
+
+This extension is **additive and ABI-safe** — every pre-existing
+instance ID and GPIO index keeps its value. Differential pairs
+(CSI/DSI/PCIe/USB/ETH) are not GPIO-capable and are omitted from the
+GPIO index space.
+
 ### Added — Linker-section backend registry (Slices 0..7) (2026-05-23)
 
 Replaces the per-class `#if`-ladder dispatch that lived in

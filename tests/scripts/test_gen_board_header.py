@@ -24,6 +24,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "gen_board_header.py"
 EVK_OUT = REPO / "include" / "alp" / "boards" / "alp_e1m_evk_routes.h"
+XEVK_OUT = REPO / "include" / "alp" / "boards" / "alp_e1m_x_evk_routes.h"
 
 
 @pytest.fixture(scope="module")
@@ -187,3 +188,50 @@ def test_no_clash_with_existing_alp_e1m_evk_h(gen_module):
             f"{macro} unexpectedly appears in generated header -- "
             f"slice scope is gpio/buses/pwm only"
         )
+
+
+def test_emit_board_selects_e1m_x_pinout_for_x_routes(gen_module):
+    """A board whose routes reference the E1M_X_* namespace must pull
+    `<alp/e1m_x_pinout.h>`, not the 35x35 `<alp/e1m_pinout.h>`.  The
+    generator derives this from the route values themselves, so no
+    redundant per-board "which namespace" field is needed."""
+    x_doc = {
+        "name": "X-CARRIER",
+        "e1m_routes": {
+            "buses": [
+                {"e1m": "E1M_X_I2C0", "macro": "XC_I2C_MAIN",
+                 "doc": "Sensor bus."},
+            ],
+        },
+    }
+    out = gen_module.emit_board("X-CARRIER", x_doc)
+    assert out is not None
+    assert '#include "alp/e1m_x_pinout.h"' in out
+    assert '#include "alp/e1m_pinout.h"' not in out
+    assert "#define XC_I2C_MAIN" in out
+
+
+def test_real_xevk_header_uses_x_pinout_and_covers_macros(gen_module):
+    """The committed E1M-X-EVK YAML must generate a routes header that
+    pulls the E1M-X pinout namespace and defines the XEVK_* macros
+    hand-written X-EVK firmware relies on (mirrors the EVK coverage
+    smoke check, one form factor over)."""
+    rc = gen_module.main()
+    assert rc == 0
+    assert XEVK_OUT.exists(), "alp_e1m_x_evk_routes.h was not generated"
+    out = XEVK_OUT.read_text(encoding="utf-8")
+    assert '#include "alp/e1m_x_pinout.h"' in out
+    must_define = [
+        "XEVK_I2C_BUS_SENSORS",   # buses
+        "XEVK_UART_PORT_DEBUG",
+        "XEVK_PIN_LED_RED",       # GPIO (PWM pad as digital GPIO)
+        "XEVK_PIN_BMI323_INT1",
+        "XEVK_PWM_LED_RED",       # pwm
+        "XEVK_ADC_ARDUINO_A0",    # adc
+        "XEVK_CAN_BUS0",          # can
+        "XEVK_ENC_ROTARY",        # qenc
+    ]
+    for macro in must_define:
+        assert f"#define {macro}" in out, f"{macro} missing from X-EVK header"
+    # Routes must resolve to the E1M_X_* namespace.
+    assert "E1M_X_I2C0" in out and "E1M_X_GPIO_PWM5" in out

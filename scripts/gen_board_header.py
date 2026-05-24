@@ -60,6 +60,22 @@ def _board_slug(name: str) -> str:
     return name.lower().replace("-", "_")
 
 
+def _pinout_include(routes: dict[str, Any]) -> str:
+    """Pick the pinout header the generated routes header must pull.
+
+    E1M (35x35) and E1M-X (45x65) are deliberately separate pinout
+    namespaces (`<alp/e1m_pinout.h>` vs `<alp/e1m_x_pinout.h>`); a
+    board's routes live entirely in one.  Detect E1M-X by the
+    `E1M_X_` macro prefix so the generated header includes the
+    matching pad definitions.
+    """
+    for entries in routes.values():
+        for entry in entries or []:
+            if str(entry.get("e1m", "")).startswith("E1M_X_"):
+                return "alp/e1m_x_pinout.h"
+    return "alp/e1m_pinout.h"
+
+
 def _build_doc(entry: dict[str, Any]) -> str:
     """Compose a single-line Doxygen `@brief` for the entry."""
     parts: list[str] = []
@@ -104,6 +120,7 @@ def emit_board(name: str, doc: dict[str, Any]) -> str | None:
         return None
     slug = _board_slug(name)
     guard = f"ALP_BOARDS_{slug.upper()}_ROUTES_H"
+    pinout = _pinout_include(routes)
 
     lines: list[str] = [
         "/*",
@@ -127,7 +144,7 @@ def emit_board(name: str, doc: dict[str, Any]) -> str | None:
         f"#ifndef {guard}",
         f"#define {guard}",
         "",
-        "#include \"alp/e1m_pinout.h\"",
+        f"#include \"{pinout}\"",
         "",
         "/* This header is auto-generated; clang-format ignores it so the",
         " * generator's column-aligned `#define` blocks survive PR static",
