@@ -70,6 +70,11 @@ populated:
 #     macro:       <XEVK_* C-macro name to emit>
 #     doc:         "<one-line Doxygen `@brief`>"  (optional)
 #     active_low:  true                            (optional, documentation hint)
+#     board_alias: BOARD_<NAME>                    (optional) portable cross-EVK
+#                  alias; emitted in the generated header's BOARD_* block
+#                  (e1m-spec STANDARD.md §7.2 common set). The SAME board_alias
+#                  must be declared on every board exposing the role (enforced
+#                  by tests/scripts/test_board_alias_parity.py).
 #
 # SoM-side dispatch (the V2N GD32 IO-MCU bridge, etc.) lives in the
 # SoM preset's `pad_routes:` block, NOT here -- this board YAML is
@@ -125,41 +130,53 @@ e1m_routes:
         doc: "SDIO path-mux enable." }
     # --- Rotary encoder push switch ---
     - { e1m: E1M_X_GPIO_IO28, macro: XEVK_PIN_ENCODER_SW,  active_low: true,
+        board_alias: BOARD_PIN_ENCODER_SW,
         doc: "Rotary encoder (PEC12R-4222F) push switch; pull-up + RC debounce." }
     # --- IMU interrupt ---
     - { e1m: E1M_X_GPIO_IO32, macro: XEVK_PIN_BMI323_INT1,
+        board_alias: BOARD_PIN_BMI323_INT1,
         doc: "BMI323 INT1 (data-ready / motion / FIFO)." }
     # --- RGB LED pads driven as plain digital GPIOs (the GPIO-secondary
     #     of the PWM cluster -- same physical pads as the XEVK_PWM_LED_*
     #     entries in the `pwm:` section).  Open the PWM macro for
     #     brightness/fade, the GPIO macro for on/off; never both at once. ---
     - { e1m: E1M_X_GPIO_PWM5, macro: XEVK_PIN_LED_RED,
+        board_alias: BOARD_PIN_LED_RED,
         doc: "RGB LED red -- the PWM5 pad driven as a digital GPIO." }
     - { e1m: E1M_X_GPIO_PWM7, macro: XEVK_PIN_LED_GREEN,
+        board_alias: BOARD_PIN_LED_GREEN,
         doc: "RGB LED green -- the PWM7 pad driven as a digital GPIO." }
     - { e1m: E1M_X_GPIO_PWM6, macro: XEVK_PIN_LED_BLUE,
+        board_alias: BOARD_PIN_LED_BLUE,
         doc: "RGB LED blue -- the PWM6 pad driven as a digital GPIO." }
   buses:
     - { e1m: E1M_X_I2C0,  macro: XEVK_I2C_BUS_SENSORS,
+        board_alias: BOARD_I2C_SENSORS,
         doc: "On-board sensor + IO-expander + INA236 bus (ICM-42670, BMI323, BMP581, TCAL9538, INA236)." }
     - { e1m: E1M_X_I2C2,  macro: XEVK_I2C_BUS_DSI_CSI0,
         doc: "Display/camera control I2C bank 0 (DSI panel + CSI camera-side config)." }
     - { e1m: E1M_X_I2C3,  macro: XEVK_I2C_BUS_DSI_CSI1,
         doc: "Display/camera control I2C bank 1." }
     - { e1m: E1M_X_SPI1,  macro: XEVK_SPI_BUS_ARDUINO,
+        board_alias: BOARD_SPI_ARDUINO,
         doc: "Arduino UNO header SPI (level-shifted)." }
     - { e1m: E1M_X_UART0, macro: XEVK_UART_PORT_DEBUG,
+        board_alias: BOARD_UART_DEBUG,
         doc: "Console / debug UART." }
     - { e1m: E1M_X_UART1, macro: XEVK_UART_PORT_ARDUINO,
+        board_alias: BOARD_UART_ARDUINO,
         doc: "Arduino UNO header UART (D0/D1, level-shifted)." }
   pwm:
     - { e1m: E1M_X_PWM0, macro: XEVK_ARD_PWM0,
         doc: "Arduino UNO header PWM0 (level-shifted)." }
     - { e1m: E1M_X_PWM1, macro: XEVK_ARD_PWM1,
+        board_alias: BOARD_PWM_ARD1,
         doc: "Arduino UNO header PWM1." }
     - { e1m: E1M_X_PWM2, macro: XEVK_ARD_PWM2,
+        board_alias: BOARD_PWM_ARD2,
         doc: "Arduino UNO header PWM2." }
     - { e1m: E1M_X_PWM3, macro: XEVK_ARD_PWM3,
+        board_alias: BOARD_PWM_ARD3,
         doc: "Arduino UNO header PWM3." }
     - { e1m: E1M_X_PWM4, macro: XEVK_PWM_DISP2_BL,
         doc: "Display-2 backlight PWM (DISP2_BL_PWM)." }
@@ -174,19 +191,24 @@ e1m_routes:
         doc: "Arduino UNO header A0 analog input (ANA_S0)." }
   dac:
     - { e1m: E1M_X_DAC0, macro: XEVK_DAC0,
+        board_alias: BOARD_DAC0,
         doc: "DAC0 analog output." }
     - { e1m: E1M_X_DAC1, macro: XEVK_DAC1,
+        board_alias: BOARD_DAC1,
         doc: "DAC1 analog output." }
   i2s:
     - { e1m: E1M_X_I2S0, macro: XEVK_I2S_AUDIO,
+        board_alias: BOARD_I2S_AUDIO,
         doc: "TAS2563 smart-amp I2S (SCLK / WS / SDI / SDO)." }
   can:
     - { e1m: E1M_X_CAN0, macro: XEVK_CAN_BUS0,
+        board_alias: BOARD_CAN0,
         doc: "CAN0 via TCAN1044 transceiver (U51)." }
     - { e1m: E1M_X_CAN1, macro: XEVK_CAN_BUS1,
         doc: "CAN1 via TCAN1044 transceiver (U52)." }
   qenc:
     - { e1m: E1M_X_ENC0, macro: XEVK_ENC_ROTARY,
+        board_alias: BOARD_ENC_ROTARY,
         doc: "PEC12R-4222F rotary encoder: ENC0_X = A phase, ENC0_Y = B phase; push switch on XEVK_PIN_ENCODER_SW (E1M_X_GPIO_IO28).  ENC1-3 pads are broken out but unpopulated." }
 
 # Inference + display defaults a stock X-EVK app would pick.  Apps

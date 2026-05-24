@@ -119,6 +119,29 @@ extern "C" {
 
 #define EVK_ENC_ROTARY E1M_ENC0  /**< PEC12R-4222F-S0024 rotary encoder: ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4). */
 
+/* ------------------------------------------------------------------ */
+/* Portable cross-EVK aliases (e1m-spec STANDARD.md §7.2 common set). */
+/* Same BOARD_* names on every board; include via <alp/board.h>.       */
+/* ------------------------------------------------------------------ */
+
+#define BOARD_CAN0            EVK_CAN_VEHICLE_BUS
+#define BOARD_DAC0            EVK_DAC_ARDUINO_DAC0
+#define BOARD_DAC1            EVK_DAC_AUDIO_LINE_OUT
+#define BOARD_ENC_ROTARY      EVK_ENC_ROTARY
+#define BOARD_I2C_SENSORS     EVK_I2C_BUS_SENSORS
+#define BOARD_I2S_AUDIO       EVK_I2S_AUDIO_CODEC
+#define BOARD_PIN_BMI323_INT1 EVK_PIN_BMI323_INT1
+#define BOARD_PIN_ENCODER_SW  EVK_PIN_ENCODER_SW
+#define BOARD_PIN_LED_BLUE    EVK_PIN_LED_BLUE
+#define BOARD_PIN_LED_GREEN   EVK_PIN_LED_GREEN
+#define BOARD_PIN_LED_RED     EVK_PIN_LED_RED
+#define BOARD_PWM_ARD1        EVK_ARD_PWM1
+#define BOARD_PWM_ARD2        EVK_ARD_PWM2
+#define BOARD_PWM_ARD3        EVK_ARD_PWM3
+#define BOARD_SPI_ARDUINO     EVK_SPI_BUS_ARDUINO
+#define BOARD_UART_ARDUINO    EVK_UART_PORT_ARDUINO
+#define BOARD_UART_DEBUG      EVK_UART_PORT_DEBUG
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
