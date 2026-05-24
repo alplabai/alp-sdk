@@ -854,6 +854,196 @@
       },
       "typedefs": {}
     },
+    "alp/boards/alp_e1m_x_evk_routes.h": {
+      "functions": {},
+      "macros": {
+        "XEVK_ADC_ARDUINO_A0": {
+          "hash": "6383eac38e69c1ba",
+          "value": "E1M_X_ADC0"
+        },
+        "XEVK_ARD_PWM0": {
+          "hash": "90848d034d195f56",
+          "value": "E1M_X_PWM0"
+        },
+        "XEVK_ARD_PWM1": {
+          "hash": "5767d7296d4540ec",
+          "value": "E1M_X_PWM1"
+        },
+        "XEVK_ARD_PWM2": {
+          "hash": "55a958ef503c32c9",
+          "value": "E1M_X_PWM2"
+        },
+        "XEVK_ARD_PWM3": {
+          "hash": "4641669447a2610a",
+          "value": "E1M_X_PWM3"
+        },
+        "XEVK_CAN_BUS0": {
+          "hash": "f3552df7f8ad0182",
+          "value": "E1M_X_CAN0"
+        },
+        "XEVK_CAN_BUS1": {
+          "hash": "985925aa47f02fee",
+          "value": "E1M_X_CAN1"
+        },
+        "XEVK_DAC0": {
+          "hash": "51c00274aa495eba",
+          "value": "E1M_X_DAC0"
+        },
+        "XEVK_DAC1": {
+          "hash": "e16b97f440fb4d00",
+          "value": "E1M_X_DAC1"
+        },
+        "XEVK_ENC_ROTARY": {
+          "hash": "4e66f140871ff4f4",
+          "value": "E1M_X_ENC0"
+        },
+        "XEVK_I2C_BUS_DSI_CSI0": {
+          "hash": "ed996b9b44206374",
+          "value": "E1M_X_I2C2"
+        },
+        "XEVK_I2C_BUS_DSI_CSI1": {
+          "hash": "776762f5a3c1b0e5",
+          "value": "E1M_X_I2C3"
+        },
+        "XEVK_I2C_BUS_SENSORS": {
+          "hash": "862d23219949bb4c",
+          "value": "E1M_X_I2C0"
+        },
+        "XEVK_I2S_AUDIO": {
+          "hash": "5dbdb2d548cb1b0d",
+          "value": "E1M_X_I2S0"
+        },
+        "XEVK_PIN_BMI323_INT1": {
+          "hash": "c4af1a5001f31b0d",
+          "value": "E1M_X_GPIO_IO32"
+        },
+        "XEVK_PIN_CAM0_EN": {
+          "hash": "8c6dcea95c9f6487",
+          "value": "E1M_X_GPIO_IO18"
+        },
+        "XEVK_PIN_CAM0_MUX_SEL": {
+          "hash": "492c3e0ddbb88060",
+          "value": "E1M_X_GPIO_IO16"
+        },
+        "XEVK_PIN_CAM0_RST": {
+          "hash": "c8eb62f1977ce026",
+          "value": "E1M_X_GPIO_IO20"
+        },
+        "XEVK_PIN_CTP1_INT": {
+          "hash": "e061597459e58a5c",
+          "value": "E1M_X_GPIO_IO9"
+        },
+        "XEVK_PIN_CTP1_RST": {
+          "hash": "de9fda7784b6ec39",
+          "value": "E1M_X_GPIO_IO11"
+        },
+        "XEVK_PIN_CTP2_INT": {
+          "hash": "4d46a92c54f60c06",
+          "value": "E1M_X_GPIO_IO17"
+        },
+        "XEVK_PIN_CTP2_RST": {
+          "hash": "53ec6ce307ec3d17",
+          "value": "E1M_X_GPIO_IO19"
+        },
+        "XEVK_PIN_ENCODER_SW": {
+          "hash": "7ff3856c8cd24abb",
+          "value": "E1M_X_GPIO_IO28"
+        },
+        "XEVK_PIN_I2S_MUX_EN": {
+          "hash": "a70b11a7461fc4c4",
+          "value": "E1M_X_GPIO_IO4"
+        },
+        "XEVK_PIN_I2S_MUX_SEL": {
+          "hash": "51280f0b96d91ce8",
+          "value": "E1M_X_GPIO_IO5"
+        },
+        "XEVK_PIN_LCD1_PWR_EN": {
+          "hash": "13f00aac3e41005b",
+          "value": "E1M_X_GPIO_IO15"
+        },
+        "XEVK_PIN_LCD1_RST": {
+          "hash": "00cbd5c975fe9811",
+          "value": "E1M_X_GPIO_IO13"
+        },
+        "XEVK_PIN_LCD2_PWR_EN": {
+          "hash": "f6d053e6603c9353",
+          "value": "E1M_X_GPIO_IO22"
+        },
+        "XEVK_PIN_LCD2_RST": {
+          "hash": "b5a403c778138676",
+          "value": "E1M_X_GPIO_IO21"
+        },
+        "XEVK_PIN_LED_BLUE": {
+          "hash": "884652db63d85461",
+          "value": "E1M_X_GPIO_PWM6"
+        },
+        "XEVK_PIN_LED_GREEN": {
+          "hash": "6fa985f50b001221",
+          "value": "E1M_X_GPIO_PWM7"
+        },
+        "XEVK_PIN_LED_RED": {
+          "hash": "b7d694fec844f283",
+          "value": "E1M_X_GPIO_PWM5"
+        },
+        "XEVK_PIN_M2E_UART_WAKE": {
+          "hash": "cf6c2f4965f2d29d",
+          "value": "E1M_X_GPIO_IO6"
+        },
+        "XEVK_PIN_PCIE0_I2C_EN": {
+          "hash": "7ba4395db5b53725",
+          "value": "E1M_X_GPIO_IO2"
+        },
+        "XEVK_PIN_PCIE_MUX_PD": {
+          "hash": "51ee8bc818699f3e",
+          "value": "E1M_X_GPIO_IO0"
+        },
+        "XEVK_PIN_PCIE_MUX_SEL": {
+          "hash": "6fe0a32d4fb2b8fb",
+          "value": "E1M_X_GPIO_IO1"
+        },
+        "XEVK_PIN_SDIO_MUX_EN": {
+          "hash": "cf9141cec341222a",
+          "value": "E1M_X_GPIO_IO29"
+        },
+        "XEVK_PIN_SDIO_MUX_SEL": {
+          "hash": "197c39f46f26a0fb",
+          "value": "E1M_X_GPIO_IO27"
+        },
+        "XEVK_PIN_USB_MUX_SEL": {
+          "hash": "b81cd41a547d59c7",
+          "value": "E1M_X_GPIO_IO24"
+        },
+        "XEVK_PWM_DISP2_BL": {
+          "hash": "8357bd80442409e1",
+          "value": "E1M_X_PWM4"
+        },
+        "XEVK_PWM_LED_BLUE": {
+          "hash": "35ab92bb53f48769",
+          "value": "E1M_X_PWM6"
+        },
+        "XEVK_PWM_LED_GREEN": {
+          "hash": "56e3ab774e7064ff",
+          "value": "E1M_X_PWM7"
+        },
+        "XEVK_PWM_LED_RED": {
+          "hash": "aef4a58025f7d0ce",
+          "value": "E1M_X_PWM5"
+        },
+        "XEVK_SPI_BUS_ARDUINO": {
+          "hash": "eba872b593449f59",
+          "value": "E1M_X_SPI1"
+        },
+        "XEVK_UART_PORT_ARDUINO": {
+          "hash": "02a7b83dfd104053",
+          "value": "E1M_X_UART1"
+        },
+        "XEVK_UART_PORT_DEBUG": {
+          "hash": "10bdc837662c7bcf",
+          "value": "E1M_X_UART0"
+        }
+      },
+      "typedefs": {}
+    },
     "alp/camera.h": {
       "functions": {
         "alp_camera_capabilities": {
@@ -5899,9 +6089,13 @@
           "hash": "233c01d9152e2c96",
           "value": "0u"
         },
-        "E1M_X_CAN_COUNT": {
-          "hash": "e8e49c3a78d2daa4",
+        "E1M_X_CAN1": {
+          "hash": "dec16b2f570cdd49",
           "value": "1u"
+        },
+        "E1M_X_CAN_COUNT": {
+          "hash": "0b910695eb8a9a68",
+          "value": "2u"
         },
         "E1M_X_COUNTER0": {
           "hash": "a1cd9908fc69738d",
@@ -5923,9 +6117,21 @@
           "hash": "2d530a71f5e17500",
           "value": "0u"
         },
-        "E1M_X_CSI_COUNT": {
-          "hash": "d6062dd6fc9b026b",
+        "E1M_X_CSI1": {
+          "hash": "4a73584135e887e1",
           "value": "1u"
+        },
+        "E1M_X_CSI2": {
+          "hash": "d302b9c8e2ce9c0e",
+          "value": "2u"
+        },
+        "E1M_X_CSI3": {
+          "hash": "9420094cad9465c7",
+          "value": "3u"
+        },
+        "E1M_X_CSI_COUNT": {
+          "hash": "6e4dc1841d6f7b60",
+          "value": "4u"
         },
         "E1M_X_DAC0": {
           "hash": "1d9dfb715246c92f",
@@ -5943,9 +6149,13 @@
           "hash": "5d15e1f1f02803b7",
           "value": "0u"
         },
-        "E1M_X_DSI_COUNT": {
-          "hash": "282f87ff71037d53",
+        "E1M_X_DSI1": {
+          "hash": "c6dd39dd84e9af7d",
           "value": "1u"
+        },
+        "E1M_X_DSI_COUNT": {
+          "hash": "d8765392a07b2f8f",
+          "value": "2u"
         },
         "E1M_X_ENC0": {
           "hash": "8aa34d1af4aaa644",
@@ -6011,9 +6221,13 @@
           "hash": "7a8054640ce3cffa",
           "value": "59u"
         },
+        "E1M_X_GPIO_CAN1_L": {
+          "hash": "942f79ab110b4940",
+          "value": "72u"
+        },
         "E1M_X_GPIO_COUNT": {
-          "hash": "bd385b9140c68104",
-          "value": "62u"
+          "hash": "db581174d9f1a0b7",
+          "value": "99u"
         },
         "E1M_X_GPIO_DAC0": {
           "hash": "47626cd9bcbe9a2d",
@@ -6054,6 +6268,22 @@
         "E1M_X_GPIO_ENC3_Y": {
           "hash": "1446e6a61950f9cc",
           "value": "51u"
+        },
+        "E1M_X_GPIO_I2C2_SCL": {
+          "hash": "fac2728d44d23e5a",
+          "value": "63u"
+        },
+        "E1M_X_GPIO_I2C2_SDA": {
+          "hash": "1cb24e7ca2181c3a",
+          "value": "62u"
+        },
+        "E1M_X_GPIO_I2C3_SCL": {
+          "hash": "a36c9897c0a580e1",
+          "value": "65u"
+        },
+        "E1M_X_GPIO_I2C3_SDA": {
+          "hash": "863c9e2b25126a37",
+          "value": "64u"
         },
         "E1M_X_GPIO_IO0": {
           "hash": "6565819350a90256",
@@ -6203,6 +6433,110 @@
           "hash": "168b79e3ae76d575",
           "value": "36u"
         },
+        "E1M_X_GPIO_LCD_B0": {
+          "hash": "1e2f300e4e8e7406",
+          "value": "73u"
+        },
+        "E1M_X_GPIO_LCD_B1": {
+          "hash": "a0e3bf447235f363",
+          "value": "74u"
+        },
+        "E1M_X_GPIO_LCD_B10": {
+          "hash": "0bf96f03c5aa9f3c",
+          "value": "83u"
+        },
+        "E1M_X_GPIO_LCD_B11": {
+          "hash": "cedabef1cade4419",
+          "value": "84u"
+        },
+        "E1M_X_GPIO_LCD_B12": {
+          "hash": "2d6a2a7edb683781",
+          "value": "85u"
+        },
+        "E1M_X_GPIO_LCD_B13": {
+          "hash": "c41224591ad6cc12",
+          "value": "86u"
+        },
+        "E1M_X_GPIO_LCD_B14": {
+          "hash": "427826caf6702df2",
+          "value": "87u"
+        },
+        "E1M_X_GPIO_LCD_B15": {
+          "hash": "8a924bc9fa5577fe",
+          "value": "88u"
+        },
+        "E1M_X_GPIO_LCD_B16": {
+          "hash": "e5b1ede4a30033df",
+          "value": "89u"
+        },
+        "E1M_X_GPIO_LCD_B17": {
+          "hash": "7363253684057322",
+          "value": "90u"
+        },
+        "E1M_X_GPIO_LCD_B18": {
+          "hash": "e2368341dc1d242a",
+          "value": "91u"
+        },
+        "E1M_X_GPIO_LCD_B19": {
+          "hash": "5584550210870def",
+          "value": "92u"
+        },
+        "E1M_X_GPIO_LCD_B2": {
+          "hash": "6dd0a7d8c44528f3",
+          "value": "75u"
+        },
+        "E1M_X_GPIO_LCD_B20": {
+          "hash": "a7cc4ea368ec7c8b",
+          "value": "93u"
+        },
+        "E1M_X_GPIO_LCD_B21": {
+          "hash": "d77fcb585ac19ba3",
+          "value": "94u"
+        },
+        "E1M_X_GPIO_LCD_B22": {
+          "hash": "4d5d708a6742f261",
+          "value": "95u"
+        },
+        "E1M_X_GPIO_LCD_B23": {
+          "hash": "6be56be8142eddb0",
+          "value": "96u"
+        },
+        "E1M_X_GPIO_LCD_B3": {
+          "hash": "8dbcafffc186ae45",
+          "value": "76u"
+        },
+        "E1M_X_GPIO_LCD_B4": {
+          "hash": "73a5a6d9c78f02e4",
+          "value": "77u"
+        },
+        "E1M_X_GPIO_LCD_B5": {
+          "hash": "93ab0235afd397ad",
+          "value": "78u"
+        },
+        "E1M_X_GPIO_LCD_B6": {
+          "hash": "a8a1bd73ae51416e",
+          "value": "79u"
+        },
+        "E1M_X_GPIO_LCD_B7": {
+          "hash": "481db4ba919ca317",
+          "value": "80u"
+        },
+        "E1M_X_GPIO_LCD_B8": {
+          "hash": "fa35c4a435463a7b",
+          "value": "81u"
+        },
+        "E1M_X_GPIO_LCD_B9": {
+          "hash": "b9bdf42aea9b7af1",
+          "value": "82u"
+        },
+        "E1M_X_GPIO_LCD_HSYNC": {
+          "hash": "2214c5a0eb76ff0d",
+          "value": "97u"
+        },
+        "E1M_X_GPIO_LCD_VSYNC": {
+          "hash": "b7bd241bef177b53",
+          "value": "98u"
+        },
         "E1M_X_GPIO_PWM0": {
           "hash": "e27d0f0924ffb735",
           "value": "36u"
@@ -6235,6 +6569,26 @@
           "hash": "ed98d56aeeef7226",
           "value": "43u"
         },
+        "E1M_X_GPIO_SPI2_CS0": {
+          "hash": "420fcd79bca0e059",
+          "value": "69u"
+        },
+        "E1M_X_GPIO_SPI2_CS1": {
+          "hash": "af0d403c059023a2",
+          "value": "70u"
+        },
+        "E1M_X_GPIO_SPI2_MISO": {
+          "hash": "c5d36be2ef68fcdf",
+          "value": "66u"
+        },
+        "E1M_X_GPIO_SPI2_MOSI": {
+          "hash": "a049ed7a2748f1e1",
+          "value": "67u"
+        },
+        "E1M_X_GPIO_SPI2_SCLK": {
+          "hash": "400c4ca56c531323",
+          "value": "68u"
+        },
         "E1M_X_I2C0": {
           "hash": "da7dad3d19eeb9cd",
           "value": "0u"
@@ -6243,9 +6597,17 @@
           "hash": "c1c92d9d897666c5",
           "value": "1u"
         },
-        "E1M_X_I2C_COUNT": {
-          "hash": "5c0ba9e6d51b170d",
+        "E1M_X_I2C2": {
+          "hash": "b95ecfa88fe5a284",
           "value": "2u"
+        },
+        "E1M_X_I2C3": {
+          "hash": "533319e7be3a5a45",
+          "value": "3u"
+        },
+        "E1M_X_I2C_COUNT": {
+          "hash": "274788b0163d0c83",
+          "value": "4u"
         },
         "E1M_X_I2S0": {
           "hash": "4619c25d759599cb",
@@ -6271,6 +6633,14 @@
           "hash": "7166cbd30d4b4d06",
           "value": "0u"
         },
+        "E1M_X_LCD0": {
+          "hash": "4afe9ceff510ecda",
+          "value": "0u"
+        },
+        "E1M_X_LCD_COUNT": {
+          "hash": "28c43c3db7a48193",
+          "value": "1u"
+        },
         "E1M_X_PARCAM0": {
           "hash": "9f43f085597078d2",
           "value": "0u"
@@ -6283,9 +6653,13 @@
           "hash": "863464da0dabdeff",
           "value": "0u"
         },
-        "E1M_X_PCIE_COUNT": {
-          "hash": "58d003ce636eebdf",
+        "E1M_X_PCIE1": {
+          "hash": "572c3b5dfc8db530",
           "value": "1u"
+        },
+        "E1M_X_PCIE_COUNT": {
+          "hash": "8cfd392418a4a976",
+          "value": "2u"
         },
         "E1M_X_PDM0": {
           "hash": "6f50b3ffb2d6a57f",
@@ -6355,9 +6729,13 @@
           "hash": "8ae9d7138f2fdb5a",
           "value": "1u"
         },
-        "E1M_X_SPI_COUNT": {
-          "hash": "e80634e37c574967",
+        "E1M_X_SPI2": {
+          "hash": "2a30122a00c042a7",
           "value": "2u"
+        },
+        "E1M_X_SPI_COUNT": {
+          "hash": "422de31c1b9390fb",
+          "value": "3u"
         },
         "E1M_X_UART0": {
           "hash": "44d98fd910100aa2",
@@ -6375,6 +6753,10 @@
           "hash": "3b4ceab6904c3805",
           "value": "0u"
         },
+        "E1M_X_USB1": {
+          "hash": "61a60c548d4cc0bc",
+          "value": "1u"
+        },
         "E1M_X_USB2": {
           "hash": "02e6d22beb95675b",
           "value": "0u"
@@ -6384,8 +6766,8 @@
           "value": "1u"
         },
         "E1M_X_USB_COUNT": {
-          "hash": "6dd1c3a498374f43",
-          "value": "1u"
+          "hash": "045346c302280a1b",
+          "value": "2u"
         },
         "E1M_X_WDT0": {
           "hash": "228f6d4cd6f48303",
