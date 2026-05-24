@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-23",
+  "generated": "2026-05-24",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -766,6 +766,18 @@
         "EVK_PIN_I2S_MUX_SEL": {
           "hash": "611ae7921b4367e1",
           "value": "E1M_GPIO_IO13"
+        },
+        "EVK_PIN_LED_BLUE": {
+          "hash": "8855d587ac153091",
+          "value": "E1M_GPIO_PWM1"
+        },
+        "EVK_PIN_LED_GREEN": {
+          "hash": "d60608008fe98855",
+          "value": "E1M_GPIO_PWM0"
+        },
+        "EVK_PIN_LED_RED": {
+          "hash": "7d611c92a18b943d",
+          "value": "E1M_GPIO_PWM3"
         },
         "EVK_PIN_M2E_SDIO_WAKE": {
           "hash": "e5c4243a81590437",
