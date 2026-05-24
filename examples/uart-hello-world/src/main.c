@@ -8,7 +8,11 @@
  * monotonically-increasing counter every second.  Distinct from
  * examples/uart-echo (which is a bidirectional ping-pong) -- this
  * example is the producer-only variant most vendor SDKs ship as
- * their first tutorial.
+ * their first tutorial.  It deliberately keeps the raw E1M_UART0
+ * instance ID in view; examples/uart-echo opens the same port by its
+ * board-macro name (EVK_UART_PORT_DEBUG, from alp_e1m_evk_routes.h).
+ * Both styles are first-class -- the macro is just a board-named
+ * alias for the portable instance ID.
  *
  * Why does this exist when Zephyr already routes printf to its
  * console UART?  Two reasons:

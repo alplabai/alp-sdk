@@ -2,7 +2,7 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * uart-echo — read bytes from E1M_UART0 and write them back.
+ * uart-echo — read bytes from the console UART and write them back.
  *
  * In CI we don't actually feed input, so the example does a single
  * non-blocking read with a short timeout to exercise the read path
@@ -15,10 +15,14 @@
 #include <stdio.h>
 
 #include "alp/peripheral.h"
-#include "alp/e1m_pinout.h"
+
+/* EVK_UART_PORT_DEBUG is a board-macro from the generated routes
+ * header (= E1M_UART0); rebind it in board.yaml `pins:` to port this
+ * app to another board without touching the code below. */
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 int main(void) {
-    printf("[uart] open E1M_UART0 @ 115200 8N1\n");
+    printf("[uart] open EVK_UART_PORT_DEBUG @ 115200 8N1\n");
 
     /* The 8-N-1 framing is the lowest common denominator for serial
      * consoles -- 8 data bits, no parity, 1 stop bit.  Override
@@ -27,7 +31,7 @@ int main(void) {
      * 7-E-1, RS-485 buses with multidrop addressing use 9-bit
      * frames, etc.). */
     alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
-        .port_id   = E1M_UART0,
+        .port_id   = EVK_UART_PORT_DEBUG, /* = E1M_UART0 */
         .baudrate  = 115200,
         .data_bits = 8,
         .stop_bits = 1,

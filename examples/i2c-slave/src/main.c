@@ -45,7 +45,10 @@
 #include <zephyr/kernel.h>
 
 #include "alp/peripheral.h"
-#include "alp/e1m_pinout.h"
+
+/* EVK_I2C_BUS_SENSORS is a board-macro from the generated routes header
+ * (= E1M_I2C0); rebind it in board.yaml `pins:` to port to another board. */
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 /* ------------------------------------------------------------------
  * Local shim for the not-yet-shipped slave-mode API.
@@ -169,8 +172,7 @@ static alp_status_t on_master_read(uint8_t reg_addr,
 }
 
 int main(void) {
-    printf("[i2c-slave] open as slave @ 0x%02x on E1M_I2C0\n",
-           SLAVE_OWN_ADDR_7BIT);
+    printf("[i2c-slave] open as slave @ 0x%02x on EVK_I2C_BUS_SENSORS\n", SLAVE_OWN_ADDR_7BIT);
 
     /* Prime the register file so a master reading from address 0
      * sees recognisable bytes.  Real firmware would expose device
@@ -180,7 +182,7 @@ int main(void) {
     }
 
     alp_i2c_slave_t *s = alp_i2c_slave_open(&(alp_i2c_slave_config_t){
-        .bus_id        = E1M_I2C0,
+        .bus_id        = EVK_I2C_BUS_SENSORS, /* = E1M_I2C0 */
         .own_addr_7bit = SLAVE_OWN_ADDR_7BIT,
     });
     if (s == NULL) {

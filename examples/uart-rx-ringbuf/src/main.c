@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * uart-rx-ringbuf — exercise the opt-in LwRB-backed RX path on
- * E1M_UART0.
+ * the console UART (EVK_UART_PORT_DEBUG).
  *
  * The classic alp_uart_read() blocks the calling thread until at
  * least one byte arrives.  That's fine for command-line prompts but
@@ -43,7 +43,11 @@
 #include <zephyr/kernel.h>
 
 #include "alp/peripheral.h"
-#include "alp/e1m_pinout.h"
+
+/* EVK_UART_PORT_DEBUG is a board-macro from the generated routes
+ * header (= E1M_UART0); rebind it in board.yaml `pins:` to port this
+ * app to another board without touching the code below. */
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 /* Backing store for the ring.  64 bytes is enough for the CI run;
  * production apps size against the worst-case drain latency formula
@@ -52,14 +56,14 @@ static uint8_t rx_backing[64];
 
 int main(void)
 {
-    printf("[ringbuf] open E1M_UART0 @ 115200 8N1\n");
+    printf("[ringbuf] open EVK_UART_PORT_DEBUG @ 115200 8N1\n");
 
     /* The classic open() — no different from the uart-echo example.
      * The ringbuf is a *layer on top*, not a replacement.  Apps that
      * mix polled reads with ringbuf reads on the same handle work,
      * though the typical pattern is one or the other. */
     alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
-        .port_id   = E1M_UART0,
+        .port_id   = EVK_UART_PORT_DEBUG, /* = E1M_UART0 */
         .baudrate  = 115200,
         .data_bits = 8,
         .stop_bits = 1,

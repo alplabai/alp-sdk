@@ -2,7 +2,7 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * can-loopback — bring up E1M_CAN0 in loopback mode, send a
+ * can-loopback — bring up the EVK CAN bus in loopback mode, send a
  * frame, show that the rx callback receives it.
  *
  * Loopback mode is the canonical bring-up test for a CAN node:
@@ -22,7 +22,10 @@
 #include <zephyr/kernel.h>
 
 #include "alp/can.h"
-#include "alp/e1m_pinout.h"
+
+/* EVK_CAN_VEHICLE_BUS is a board-macro from the generated routes header
+ * (= E1M_CAN0); rebind it in board.yaml `pins:` to port to another board. */
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 /* Volatile because the rx callback runs from the CAN driver's RX
  * thread (Zephyr's `can_rx` worker) and the main loop polls. */
@@ -40,21 +43,21 @@ static void on_rx(const alp_can_frame_t *f, void *user) {
 }
 
 int main(void) {
-    printf("[can] open E1M_CAN0 @ 500 kbps loopback\n");
+    printf("[can] open EVK_CAN_VEHICLE_BUS @ 500 kbps loopback\n");
 
     alp_can_t *bus = alp_can_open(&(alp_can_config_t){
-        .bus_id              = E1M_CAN0,
+        .bus_id = EVK_CAN_VEHICLE_BUS, /* = E1M_CAN0 */
         /* 500 kbps is the most common automotive default; bump to
          * 1 Mbps for industrial buses or down to 125 kbps for long
          * cable runs. */
-        .bitrate_nominal_hz  = 500000,
+        .bitrate_nominal_hz = 500000,
         /* CLASSIC mode = ISO 11898-1, ≤ 8 byte payload.  Switch to
          * ALP_CAN_MODE_FD for ≤ 64 byte payload + bit-rate switch
          * (and set bitrate_data_hz appropriately). */
-        .mode                = ALP_CAN_MODE_CLASSIC,
+        .mode = ALP_CAN_MODE_CLASSIC,
         /* Loopback off the wire -- self-test only.  Set to false
          * once you're driving real CAN_H/CAN_L. */
-        .loopback            = true,
+        .loopback = true,
     });
     if (bus == NULL) {
         printf("[can] open failed: alp_last_error=%d\n",

@@ -2,8 +2,8 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * i2s-tone — stream a triangle wave to E1M_I2S0 as 16-bit
- * stereo PCM.  Demonstrates the full lifecycle: open / start /
+ * i2s-tone — stream a triangle wave to the EVK audio codec as
+ * 16-bit stereo PCM.  Demonstrates the full lifecycle: open / start /
  * write / stop / close.
  *
  * I²S is the standard digital audio bus -- a master clocks data
@@ -23,7 +23,10 @@
 #include <zephyr/kernel.h>
 
 #include "alp/i2s.h"
-#include "alp/e1m_pinout.h"
+
+/* EVK_I2S_AUDIO_CODEC is a board-macro from the generated routes header
+ * (= E1M_I2S0); rebind it in board.yaml `pins:` to port to another board. */
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 /* Sample rate.  48 kHz is the de-facto digital-audio standard;
  * 44.1 kHz is CD-era; 16 kHz is fine for voice / smart-speaker
@@ -43,21 +46,21 @@
 #define BLOCKS_TO_SEND 4u
 
 int main(void) {
-    printf("[i2s] open E1M_I2S0 @ 48 kHz s16 stereo TX\n");
+    printf("[i2s] open EVK_I2S_AUDIO_CODEC @ 48 kHz s16 stereo TX\n");
 
     alp_i2s_t *i2s = alp_i2s_open(&(alp_i2s_config_t){
-        .bus_id          = E1M_I2S0,
-        .sample_rate_hz  = SR,
-        .word_bits       = 16,                  /* 16/24/32 supported */
-        .channels        = 2,                   /* 1 = mono, 2 = stereo */
+        .bus_id         = EVK_I2S_AUDIO_CODEC, /* = E1M_I2S0 */
+        .sample_rate_hz = SR,
+        .word_bits      = 16, /* 16/24/32 supported */
+        .channels       = 2,  /* 1 = mono, 2 = stereo */
         /* Standard I²S framing.  Switch to PCM_SHORT / PCM_LONG
          * when interfacing with cellular / Bluetooth audio codecs
          * that use frame-sync pulses instead of long word-select. */
-        .format          = ALP_I2S_FMT_I2S,
+        .format = ALP_I2S_FMT_I2S,
         /* TX direction = "we generate samples, slave receives".  Use
          * RX for microphones / line-in, BOTH for full-duplex codecs. */
-        .direction       = ALP_I2S_DIR_TX,
-        .block_frames    = BLOCK_FRAMES,
+        .direction    = ALP_I2S_DIR_TX,
+        .block_frames = BLOCK_FRAMES,
     });
     if (i2s == NULL) {
         printf("[i2s] open failed: alp_last_error=%d\n",

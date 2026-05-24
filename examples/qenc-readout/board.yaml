@@ -13,7 +13,7 @@ preset: e1m-evk
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
-  - { e1m: E1M_GPIO_IO4, macro: EVK_PIN_ENCODER_SW, doc: "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce" }
+  - { e1m: E1M_ENC0, macro: EVK_ENC_ROTARY, doc: "PEC12R-4222F-S0024 rotary encoder (ENC0_X = A phase, ENC0_Y = B phase, 24 PPR); this demo reads the accumulated position" }
 cores:
   m55_hp:
     app: ./src
