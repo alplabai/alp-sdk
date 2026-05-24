@@ -66,6 +66,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `uart-rx-ringbuf`            | Byte-granular IRQ-driven RX into a ring buffer (no polling).             |
 | `pwm-led-fade`               | PWM channel open + sweep duty cycle.                                     |
 | `adc-voltmeter`              | Sample an ADC channel; convert raw → millivolts.                         |
+| `vendor-ext-composability`   | One ADC pad, three ways -- plain GPIO, portable ADC, then an *additive* Alif vendor extension. Proves `<alp/ext/...>` never locks a pad out of the portable surfaces. |
 | `dac-waveform`               | Generate a sine wave on `E1M_X_DAC0`. **(E1M-X; V2N today)**             |
 | `can-loopback`               | CAN(-FD) frame TX + self-reception via loopback mode.                    |
 | `qenc-readout`               | Quadrature-encoder pulse counter.                                        |

@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: vendor-ext-composability
+  description: |
+    Proves the <alp/ext/<vendor>> layer is additive: one pad
+    (E1M_ADC1) is exercised as a plain GPIO, as the portable
+    <alp/adc.h> peripheral, and with an Alif vendor extension on
+    the same handle.  native_sim runs Way 1 (GPIO) and gracefully
+    skips the ADC-controller-dependent Ways 2/3.
+
+tests:
+  alp_sdk.example.vendor_ext_composability:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - vendor-ext
+      - composability
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[flex\\] done"

@@ -1,0 +1,34 @@
+# board.yaml -- per-app project configuration for the
+# vendor-ext-composability example.
+#
+# Customer workflow: copy this directory, change `som.sku` to your
+# MPN, edit `preset:` if you fork the EVK, and `west build`.
+# CMakeLists.txt invokes scripts/alp_project.py at configure time and
+# layers the generated alp.conf over prj.conf via OVERLAY_CONFIG.
+
+som:
+  sku: E1M-AEN701          # Alif Ensemble E7 -- ships the <alp/ext/alif/adc.h>
+                            # vendor extension this demo layers in Way 3.
+
+preset: e1m-evk
+
+# E1M pads this app uses.  ADC1 is the star: the demo opens it three
+# ways (a plain GPIO via its GPIO-secondary E1M_GPIO_ADC1, the portable
+# <alp/adc.h> peripheral, then the Alif vendor-ext on the ADC handle).
+# Only the routed ADC role is named here; the GPIO-secondary is the
+# same pad and needs no separate route (see src/main.c).
+pins:
+  - { e1m: E1M_ADC1, macro: EVK_ADC_ARDUINO_A1, doc: "Arduino A1 analog input; opened as portable ADC + (on Alif) the vendor-ext trigger knob, and digitally via E1M_GPIO_ADC1" }
+
+cores:
+  m55_hp:
+    app: ./src
+    # Both subsystems are exercised: ADC for the portable + vendor-ext
+    # paths, GPIO for the pad-as-digital-output path.  The loader emits
+    # CONFIG_ADC=y + CONFIG_GPIO=y in alp.conf.
+    peripherals:
+      - adc
+      - gpio
+
+diagnostics:
+  log_level: info
