@@ -4,6 +4,7 @@ routes header — a name present on only one board would let a "both"
 example compile on one EVK and break on the other."""
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -44,3 +45,14 @@ def test_board_facade_selects_each_known_board() -> None:
     assert "ALP_BOARD_E1M_EVK" in text, "facade missing ALP_BOARD_E1M_EVK selector"
     assert "alp/boards/alp_e1m_evk_routes.h" in text, "facade missing e1m-evk routes include"
     assert "#error" in text, "facade must hard-error when no board selected"
+
+
+def test_schema_allows_board_alias_and_supported_boards() -> None:
+    schema = json.loads(
+        (REPO / "metadata" / "schemas" / "board.schema.json").read_text(encoding="utf-8")
+    )
+    # board_alias lives on the shared route entry def ($defs/route_entry);
+    # every route section $refs it via allOf, so one definition covers all.
+    assert "board_alias" in schema["$defs"]["route_entry"]["properties"]
+    # supported_boards is a top-level (per-project/example) field.
+    assert "supported_boards" in schema["properties"]
