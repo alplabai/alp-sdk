@@ -34,7 +34,7 @@ example: examples/gpio-button-led
 serial:
   duration_s: 10
   expect_contains:
-    - "[gpio] init button=E1M_GPIO_IO4, led=E1M_GPIO_PWM3"
+    - "[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED"
     - "[gpio] led=1 status=0"     # at least one ALP_OK set
     - "[gpio] is_pressed -> status=0"
     - "[gpio] done"

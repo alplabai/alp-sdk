@@ -5,31 +5,26 @@
  * gpio-button-led -- read a button and toggle an LED, both as plain
  * GPIO, through the <alp/blocks/button_led.h> helper.
  *
- * The interesting part is the LED.  E1M makes GPIO a *universal
- * secondary* on every digital pad (e1m-spec STANDARD.md "GPIO
- * secondary"), so a pad whose default function is PWM/ADC/etc. can be
- * claimed as a digital GPIO instead.  The E1M-EVK has no dedicated
- * GPIO LED -- its only user LEDs are the RGB cluster on the PWM pads --
- * so this demo drives the red LED's pad (PWM3) as a GPIO via the
- * parallel `E1M_GPIO_PWM3` index.  The button is the encoder push
- * switch on `E1M_GPIO_IO4` (active-low).
+ * This demo opens its pins by their BOARD-MACRO names rather than raw
+ * E1M indices: `EVK_PIN_ENCODER_SW` (the user button) and
+ * `EVK_PIN_LED_RED` (the status LED) come from the board's generated
+ * routes header, <alp/boards/alp_e1m_evk_routes.h>.  The loader emits
+ * one `#define EVK_<NAME> E1M_<...>` per `e1m_routes:` entry, so the
+ * macro is the readable, app-facing pin name -- copy this example to
+ * your own board, rebind those names in your board.yaml `pins:` block,
+ * and the code below is unchanged.
  *
- * The portable rule (e1m_pinout.h "Pin-as-GPIO fallback"): open a
- * pad's analog/timer function with its peripheral id (`E1M_PWM3` ->
- * alp_pwm_open), OR claim it as a digital GPIO with its
- * `E1M_GPIO_<class><N>` index (`E1M_GPIO_PWM3` -> alp_gpio_open).
- * Don't hold both handles against the same pad -- the silicon is
- * shared.
+ * The macros resolve to E1M instance IDs under the hood:
+ *   EVK_PIN_ENCODER_SW = E1M_GPIO_IO4   -- the encoder push switch.
+ *   EVK_PIN_LED_RED    = E1M_GPIO_PWM3  -- the RGB-red PWM pad claimed
+ *                                          as a digital GPIO (the
+ *                                          e1m-spec "GPIO secondary";
+ *                                          the EVK has no plain GPIO
+ *                                          LED, so the LED rides a PWM
+ *                                          pad driven as GPIO).
  *
- * native_sim has a GPIO-emul controller wired in boards/, so the
- * open / configure / read / write path runs and the harness latches
- * `done`:
- *
- *   [gpio] init button=E1M_GPIO_IO4, led=E1M_GPIO_PWM3 (PWM3 pad as GPIO)
- *   [gpio] led=0 status=0
- *   ...
- *   [gpio] is_pressed -> status=0 pressed=0
- *   [gpio] done
+ * native_sim wires a GPIO-emul controller in boards/, so the open /
+ * configure / read / write path runs and the harness latches `done`.
  */
 
 #include <stdio.h>
@@ -37,20 +32,18 @@
 #include <zephyr/kernel.h>
 
 #include "alp/blocks/button_led.h"
-#include "alp/e1m_pinout.h"
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 int main(void)
 {
-    printf("[gpio] init button=E1M_GPIO_IO4, led=E1M_GPIO_PWM3 "
-           "(PWM3 pad as GPIO)\n");
+    printf("[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED\n");
 
     alp_button_led_t bl;
-    alp_status_t     s =
-        alp_button_led_init(&bl, &(alp_button_led_config_t){
-                                     .button_pin_id = E1M_GPIO_IO4, /* encoder push switch */
-                                     .led_pin_id = E1M_GPIO_PWM3, /* RGB-red pad, claimed as GPIO */
-                                     .active_low_button = true,
-                                 });
+    alp_status_t     s = alp_button_led_init(&bl, &(alp_button_led_config_t){
+                                                      .button_pin_id     = EVK_PIN_ENCODER_SW,
+                                                      .led_pin_id        = EVK_PIN_LED_RED,
+                                                      .active_low_button = true,
+                                              });
     if (s != ALP_OK) {
         printf("[gpio] init failed: status=%d\n", (int)s);
         printf("[gpio] done\n");

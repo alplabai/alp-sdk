@@ -125,6 +125,16 @@ e1m_routes:
         doc: "Drive HIGH to power down all four PCIe lane muxes." }
     - { e1m: E1M_GPIO_IO23, macro: EVK_PIN_PCIE_MUX_SEL,
         doc: "Selects M-key vs E-key routing on the PCIe lane muxes." }
+    # RGB LED pads driven as digital GPIOs (the E1M GPIO-secondary of
+    # the PWM cluster).  Same physical pads as EVK_PWM_LED_* in the
+    # `pwm:` section -- open the PWM macro for brightness/fade, the GPIO
+    # macro for plain on/off.  Don't open both functions of a pad at once.
+    - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED,
+        doc: "RGB LED red -- the PWM3 pad driven as a digital GPIO." }
+    - { e1m: E1M_GPIO_PWM0, macro: EVK_PIN_LED_GREEN,
+        doc: "RGB LED green -- the PWM0 pad driven as a digital GPIO." }
+    - { e1m: E1M_GPIO_PWM1, macro: EVK_PIN_LED_BLUE,
+        doc: "RGB LED blue -- the PWM1 pad driven as a digital GPIO." }
   buses:
     - { e1m: E1M_I2C0,  macro: EVK_I2C_BUS_SENSORS,
         doc: "Shared sensor + IO-expander + INA236 bus." }

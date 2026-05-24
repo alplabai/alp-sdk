@@ -97,7 +97,7 @@
         "oneOf": [
           {
             "type": "string",
-            "pattern": "^E1M_(GPIO_IO[0-9]+|I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|I2S[0-9]+|CAN[0-9]+|ENC[0-9]+)$",
+            "pattern": "^E1M_(GPIO_(IO[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|ENC[0-9]+_[XY])|I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|I2S[0-9]+|CAN[0-9]+|ENC[0-9]+)$",
             "description": "Bare E1M pad name (loader looks up the matching macro + doc from the resolved board)."
           },
           {
@@ -105,7 +105,7 @@
             "additionalProperties": false,
             "required": ["e1m"],
             "properties": {
-              "e1m":   { "type": "string", "pattern": "^E1M_(GPIO_IO[0-9]+|I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|I2S[0-9]+|CAN[0-9]+|ENC[0-9]+)$" },
+              "e1m":   { "type": "string", "pattern": "^E1M_(GPIO_(IO[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|ENC[0-9]+_[XY])|I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|I2S[0-9]+|CAN[0-9]+|ENC[0-9]+)$" },
               "macro": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$", "description": "C macro the project's source references for this pad (must match the resolved board's `e1m_routes:` entry for the same pad)." },
               "doc":   { "type": "string", "description": "One-line human-readable label for this pad as the project uses it.  Optional; the loader falls back to the resolved board's `doc:` when omitted." }
             }
@@ -378,10 +378,11 @@
     },
     "route_entry_list_gpio": {
       "type": "array",
+      "description": "GPIO routes.  Accepts the IO pads (E1M_GPIO_IO<N>) and the GPIO-secondary index of any analog/timer pad (E1M_GPIO_PWM<N> / ADC<N> / DAC<N> / ENC<N>_<X|Y>).  Per the e1m-spec every digital pad has a universal GPIO secondary, so e.g. a PWM-pad LED driven as a plain digital GPIO is routed here via E1M_GPIO_PWM<N> (distinct from its E1M_PWM<N> entry in the `pwm:` section).",
       "items": {
         "allOf": [
           { "$ref": "#/$defs/route_entry" },
-          { "properties": { "e1m": { "pattern": "^E1M_GPIO_IO[0-9]+$" } } }
+          { "properties": { "e1m": { "pattern": "^E1M_GPIO_(IO[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|ENC[0-9]+_[XY])$" } } }
         ]
       }
     },

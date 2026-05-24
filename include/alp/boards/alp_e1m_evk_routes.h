@@ -52,6 +52,9 @@ extern "C" {
 #define EVK_PIN_SDIO_MUX_SEL   E1M_GPIO_IO21  /**< SDIO 74LVC157 S; 0 = M.2 E-key SDIO, 1 = microSD slot. */
 #define EVK_PIN_PCIE_MUX_PD    E1M_GPIO_IO22  /**< Drive HIGH to power down all four PCIe lane muxes. */
 #define EVK_PIN_PCIE_MUX_SEL   E1M_GPIO_IO23  /**< Selects M-key vs E-key routing on the PCIe lane muxes. */
+#define EVK_PIN_LED_RED        E1M_GPIO_PWM3  /**< RGB LED red -- the PWM3 pad driven as a digital GPIO. */
+#define EVK_PIN_LED_GREEN      E1M_GPIO_PWM0  /**< RGB LED green -- the PWM0 pad driven as a digital GPIO. */
+#define EVK_PIN_LED_BLUE       E1M_GPIO_PWM1  /**< RGB LED blue -- the PWM1 pad driven as a digital GPIO. */
 
 /* ------------------------------------------------------------------ */
 /* Bus assignments (E1M_I2C / I3C / SPI / UART -> board role) */

@@ -48,10 +48,11 @@
  * Every analog/timer-default pad has a parallel `E1M_GPIO_<class><N>`
  * GPIO index.  An app that doesn't need the ADC/PWM/QENC/DAC
  * function of a pad can claim it as a digital GPIO by opening the
- * matching `E1M_GPIO_<class><N>` index -- the backend disables the
- * analog/timer block on that pad before returning a usable GPIO
- * handle.  Don't hold both handles open against the same pad; the
- * silicon is shared.
+ * matching `E1M_GPIO_<class><N>` index -- the board's devicetree
+ * muxes that pad to its GPIO node, and the SDK's GPIO backend
+ * configures the pre-routed GPIO (it does not itself tear down the
+ * analog/timer block).  Don't route the same pad to both its
+ * analog/timer function and GPIO at once; the silicon is shared.
  *
  * @par ABI status: [ABI-STABLE]
  *      v0.1 + 2026-05-14 prefix-rename pre-v1.0; pinned by e1m-spec.
@@ -269,8 +270,10 @@ extern "C" {
 
 /* Single-ended ADC pads as GPIO indices (silkscreen ANA_S0..ANA_S7).
  * Default function is the analog input; opening these via
- * `alp_gpio_open()` reclaims them as digital GPIOs (the backend
- * disables the ADC channel on that pad first).  Indices 42..49.
+ * `alp_gpio_open()` uses them as digital GPIOs when the board's
+ * devicetree routes the pad's GPIO node (the backend configures the
+ * pre-routed GPIO; it does not itself disable the ADC channel).
+ * Indices 42..49.
  *
  * Note: the peripheral-instance ID `E1M_ADC<N>` (0..7) passed to
  * `alp_adc_open()` and the GPIO-index `E1M_GPIO_ADC<N>` (42..49)
