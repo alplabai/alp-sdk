@@ -117,7 +117,7 @@ against the SKU's `som.yaml` preset.
    ```
 
    Expected output on the UART: the
-   `[gpio] init button=E1M_GPIO_IO0, led=E1M_GPIO_IO1` banner
+   `[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED` banner
    from the SDK's first-build tutorial.
 
 ## 5. Peripheral sanity checks

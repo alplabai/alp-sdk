@@ -278,7 +278,7 @@ typedef enum {
 /*                                                                    */
 /* The EVK's schematic ties a few non-IO pads to GPIO functions.      */
 /* These can't ride the global `E1M_GPIO_IO*` namespace -- their  */
-/* pad indices live past the standard 42-entry GPIO array.  The       */
+/* pad indices live past the standard 52-entry GPIO array.  The       */
 /* board's `alp,pin-array` overlay extends the array with the       */
 /* extra entries (indices 42..N) and the macros below map a name to  */
 /* that overlay-defined index.                                        */
@@ -292,7 +292,7 @@ typedef enum {
 /* ================================================================== */
 
 /** Base index for EVK overlay-extended `alp,pin-array` entries.  Sits
- *  just past the 42 standard entries so it never collides. */
+ *  just past the 52 standard entries so it never collides. */
 #define EVK_PIN_OVERLAY_BASE E1M_GPIO_COUNT
 
 /** AUDIO_CLK pad (E1M Z2 / Alif P9_6) repurposed as the I/O

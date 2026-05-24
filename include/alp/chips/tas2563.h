@@ -33,7 +33,7 @@
  *     I2S TX feeds the amp's SDIN; the amp's SDOUT feeds back
  *     IV-sense data on the host's I2S RX)
  *   - fault-pin handling (open-drain IRQ_N on the EVK's
- *     `EVK_PIN_AMP_FAULT` -- routed through Alif GPIO with
+ *     `EVK_PIN_AMP_FAULT` -- routed through host SoC GPIO with
  *     internal pull-up).
  *
  * I2C addresses (TAS2563 Table 7-3):

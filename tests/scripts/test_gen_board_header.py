@@ -6,7 +6,7 @@ Covers:
 - the `active_low` flag appearing in the doc comment;
 - empty `e1m_routes` block returning None;
 - idempotency of the real `main()` against the committed
-  `metadata/boards/E1M-EVK/board.yaml`;
+  `metadata/boards/e1m-evk.yaml`;
 - macro-coverage smoke check (the generated EVK header must define
   every macro that hand-written firmware already uses).
 """
@@ -177,7 +177,8 @@ def test_no_clash_with_existing_alp_e1m_evk_h(gen_module):
         # INA236 tuning constants (slice deferred)
         "EVK_INA236_SHUNT_3V3_OHMS",
         "EVK_INA236_MAX_3V3_A",
-        # ADC channel macros (slice deferred -- ADC not in gpio/buses/pwm scope)
+        # ADC spellings not generated (the shipped ADC routes are
+        # EVK_ADC_ARDUINO_A1..A5 / EVK_ADC_MB_AN / EVK_ADC_VBAT_SENSE)
         "EVK_ARD_A0",
         "EVK_MB_ANA",
     ]
