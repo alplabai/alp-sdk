@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * spi-loopback — exercise alp_spi_open / alp_spi_transceive on
- * E1M_SPI1.
+ * EVK_SPI_BUS_ARDUINO.
  *
  * SPI is full-duplex: every byte you send out also clocks a byte
  * back from the slave.  alp_spi_transceive(tx, rx, len) does both
@@ -16,7 +16,7 @@
 #include <stdio.h>
 
 #include "alp/peripheral.h"
-#include "alp/e1m_pinout.h"
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 /* Sentinel meaning "no chip-select GPIO -- the controller manages
  * CS internally, or the device doesn't need one (e.g. shift
@@ -26,10 +26,10 @@
 
 int main(void)
 {
-    printf("[spi] open E1M_SPI1 @ 1 MHz mode 0\n");
+    printf("[spi] open EVK_SPI_BUS_ARDUINO @ 1 MHz mode 0\n");
 
     alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
-        .bus_id = E1M_SPI1,
+        .bus_id = EVK_SPI_BUS_ARDUINO,
         /* 1 MHz is the conservative default; SPI tolerates up to
          * tens of MHz on most controllers.  Bump after confirming
          * the slave's max clock and that wires are short. */

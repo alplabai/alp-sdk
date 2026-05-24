@@ -30,7 +30,7 @@
  *
  * What success looks like:
  *
- *   [spi-master] open E1M_SPI1 @ 1 MHz mode 0
+ *   [spi-master] open EVK_SPI_BUS_ARDUINO @ 1 MHz mode 0
  *   [spi-master] write -> 0
  *   [spi-master] transceive -> 0  rx={de,ad,be,ef}
  *   [spi-master] read -> 0  rx={..}
@@ -47,7 +47,7 @@
 #include <zephyr/kernel.h>
 
 #include "alp/peripheral.h"
-#include "alp/e1m_pinout.h"
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 /* Sentinel meaning "the SPI controller manages CS internally" --
  * the SDK's controller-managed-CS path picks the right pin from
@@ -76,11 +76,11 @@ static const uint8_t TX_PATTERN[] = { 0xAA, 0x55, 0xDE, 0xAD };
 
 int                  main(void)
 {
-    printf("[spi-master] open E1M_SPI1 @ 1 MHz mode 0\n");
+    printf("[spi-master] open EVK_SPI_BUS_ARDUINO @ 1 MHz mode 0\n");
 
     /* Open the SPI bus.  Configuration knobs in order:
      *
-     *   bus_id          -- portable instance, E1M_SPI1 here.
+     *   bus_id          -- portable instance, EVK_SPI_BUS_ARDUINO here.
      *   freq_hz         -- 1 MHz is the conservative default.
      *                       Bump after confirming the slave's max
      *                       clock and short wires.
@@ -93,7 +93,7 @@ int                  main(void)
      *                       manage it; otherwise the discrete
      *                       GPIO that drives /CS. */
     alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
-        .bus_id        = E1M_SPI1,
+        .bus_id        = EVK_SPI_BUS_ARDUINO,
         .freq_hz       = 1000000,
         .mode          = ALP_SPI_MODE_0,
         .bits_per_word = 8,

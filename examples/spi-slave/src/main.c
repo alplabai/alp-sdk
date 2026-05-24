@@ -47,7 +47,7 @@
 #include <zephyr/kernel.h>
 
 #include "alp/peripheral.h"
-#include "alp/e1m_pinout.h"
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 /* ------------------------------------------------------------------
  * Local shim for the not-yet-shipped slave-mode API.
@@ -182,13 +182,13 @@ static void on_eot(void *user)
 
 int main(void)
 {
-    printf("[spi-slave] open as slave on E1M_SPI1 (mode 0, 8 bits)\n");
+    printf("[spi-slave] open as slave on EVK_SPI_BUS_ARDUINO (mode 0, 8 bits)\n");
 
     alp_spi_slave_t *s = alp_spi_slave_open(&(alp_spi_slave_config_t){
-        .bus_id        = E1M_SPI1,
+        .bus_id        = EVK_SPI_BUS_ARDUINO,
         .mode          = ALP_SPI_MODE_0,
         .bits_per_word = 8,
-        .cs_pin_id     = 0u, /* E1M_SPI1 carries its own
+        .cs_pin_id     = 0u, /* EVK_SPI_BUS_ARDUINO carries its own
                                         * board-routed /CS line; a
                                         * discrete CS GPIO is only
                                         * needed when chaining extra

@@ -2,7 +2,7 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * adc-voltmeter — read E1M_ADC1 and print the result in µV.
+ * adc-voltmeter — read EVK_ADC_ARDUINO_A1 and print the result in µV.
  * Demonstrates the capability-validation contract by also trying
  * a deliberately-too-high resolution and showing the rejection.
  */
@@ -13,7 +13,7 @@
 
 #include "alp/adc.h"
 #include "alp/cap_instance.h"
-#include "alp/e1m_pinout.h"
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 /* Defensive include: the Alif vendor-extension header only exists when
  * the build sees CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7 (or similar).  __has_include
@@ -33,7 +33,7 @@ int main(void)
      *    through and we land on NOT_READY instead. */
     printf("[adc] capability check: requesting 100-bit resolution\n");
     alp_adc_t *bad = alp_adc_open(&(alp_adc_config_t){
-        .channel_id      = E1M_ADC1,
+        .channel_id      = EVK_ADC_ARDUINO_A1,
         .resolution_bits = 100, /* deliberately unreasonable */
         .reference       = ALP_ADC_REF_INTERNAL,
     });
@@ -46,9 +46,9 @@ int main(void)
     }
 
     /* 2. Real read at 12-bit resolution. */
-    printf("[adc] open E1M_ADC1 @ 12 bits\n");
+    printf("[adc] open EVK_ADC_ARDUINO_A1 @ 12 bits\n");
     alp_adc_t *adc = alp_adc_open(&(alp_adc_config_t){
-        .channel_id      = E1M_ADC1,
+        .channel_id      = EVK_ADC_ARDUINO_A1,
         .resolution_bits = 12,
         .reference       = ALP_ADC_REF_INTERNAL,
     });
