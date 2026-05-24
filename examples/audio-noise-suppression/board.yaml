@@ -25,6 +25,10 @@ preset: e1m-evk             # EVK preset routes I2S0 to the TAS2563
                             # + line/speaker out on the same chip)
                             # and populates tas2563 by default.
 
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_I2S0, macro: EVK_I2S_AUDIO_CODEC, doc: "I2S0 to the TAS2563 codec; the codec bridges mic-in (PDM) + speaker-out on one link" }
+
 # This demo stays on the M33-SM for deterministic audio cadence.
 # V2N's A55 cluster could host the Linux audio plumbing on top,
 # but the latency budget belongs on the M33.  Opt the A55 cluster

@@ -105,7 +105,9 @@
 
 #include "alp/audio.h"
 #include "alp/dsp.h"
-#include "alp/e1m_pinout.h"
+/* EVK_I2S_AUDIO_CODEC is a board-macro from the generated routes header
+ * (= E1M_I2S0); rebind it in board.yaml `pins:` to port to another board. */
+#include "alp/boards/alp_e1m_evk_routes.h"
 #include "alp/inference.h"
 #include "alp/peripheral.h"
 
@@ -322,7 +324,7 @@ int main(void)
      * preset documented in its peripheral map.  On native_sim
      * neither open() succeeds; the loop tolerates that. */
     alp_audio_config_t cfg = {
-        .peripheral_id    = E1M_I2S0,
+        .peripheral_id    = EVK_I2S_AUDIO_CODEC,
         .sample_rate_hz   = SR_HZ,
         .channels         = CHANNELS,
         .format           = ALP_AUDIO_FMT_S16_LE,

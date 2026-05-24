@@ -67,7 +67,10 @@
 #include <string.h>
 
 #include "alp/peripheral.h"
-#include "alp/e1m_pinout.h"
+
+/* EVK_I2C_BUS_SENSORS is a board-macro from the generated routes header
+ * (= E1M_I2C0); rebind it in board.yaml `pins:` to port to another board. */
+#include "alp/boards/alp_e1m_evk_routes.h"
 #include "alp/inference.h"
 #include "alp/chips/lsm6dso.h"
 
@@ -215,7 +218,7 @@ int main(void)
      * the chip's 1 MHz max.  Failure tolerated -- the loop falls
      * back to a zero-fill window so native_sim still runs. */
     alp_i2c_t *i2c = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id     = E1M_I2C0,
+        .bus_id     = EVK_I2C_BUS_SENSORS, /* = E1M_I2C0 */
         .bitrate_hz = 400000,
     });
     if (i2c == NULL) {
