@@ -21,7 +21,7 @@ SCRIPT = REPO / "scripts" / "alp_project.py"
 
 # E1M-AEN701 + E1M-EVK: the canonical reference combination.
 # board.yaml used by the gpio-button-led example.
-AEN701_EVK_BOARD = REPO / "examples" / "gpio-button-led" / "board.yaml"
+AEN701_EVK_BOARD = REPO / "examples" / "peripheral-io" / "gpio-button-led" / "board.yaml"
 
 # E1M-V2N101 + E1M-X-EVK: all-gd32_bridge pad_routes, no board
 # e1m_routes (X-EVK YAML has none yet), so all 32 SoM-declared

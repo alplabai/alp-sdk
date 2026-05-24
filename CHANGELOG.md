@@ -7,6 +7,21 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Changed — examples reorganised into category subdirectories (2026-05-24)
+
+The 43 flat top-level example folders now live under category
+subdirectories matching the `examples/README.md` functional index:
+`peripheral-io/`, `audio/`, `camera-vision/`, `ai/`, `connectivity/`,
+`display/`, `power-timing/`, `multicore/` (the `aen/` and `v2n/`
+platform groups already used this layout).  History is preserved via
+`git mv`; every `examples/<name>` reference -- per-example `west build`
+commands, the functional index, `.vscode` tasks, `scripts/bootstrap.sh`,
+CI workflows, docs -- is updated to `examples/<category>/<name>`.  No
+source or build-system changes: twister discovers examples recursively,
+so build invocations simply gain the category path segment.  (Past
+CHANGELOG entries keep their original flat paths -- they record the
+state at the time they were written.)
+
 ### Added — Linker-section backend registry (Slices 0..7) (2026-05-23)
 
 Replaces the per-class `#if`-ladder dispatch that lived in

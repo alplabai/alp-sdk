@@ -3,7 +3,7 @@
 # 01 -- First build: GPIO + LED
 
 The canonical "your first ALP-SDK build."  This tutorial walks
-through compiling `examples/gpio-button-led/` against the
+through compiling `examples/peripheral-io/gpio-button-led/` against the
 `alp_e1m_evk_aen` board, flashing it, and watching a button toggle
 an LED.  Time budget: 20 minutes.
 
@@ -18,7 +18,7 @@ an LED.  Time budget: 20 minutes.
 ## Step 1 -- Inspect the example
 
 ```
-examples/gpio-button-led/
+examples/peripheral-io/gpio-button-led/
 ├── CMakeLists.txt    # invokes scripts/alp_project.py + west
 ├── prj.conf          # mostly empty -- features come from board.yaml
 ├── board.yaml        # SoM SKU + board + OS + peripherals
@@ -76,7 +76,7 @@ Key contract every ALP peripheral call follows:
 ## Step 3 -- Build
 
 ```bash
-west alp-build -b alp_e1m_evk_aen examples/gpio-button-led
+west alp-build -b alp_e1m_evk_aen examples/peripheral-io/gpio-button-led
 ```
 
 If your west workspace doesn't recognise `alp-build`, that's the
@@ -84,10 +84,10 @@ SDK's pre-flight wrapper.  Fallback:
 
 ```bash
 python3 alp-sdk/scripts/alp_project.py \
-    --input examples/gpio-button-led/board.yaml \
+    --input examples/peripheral-io/gpio-button-led/board.yaml \
     --emit zephyr-conf > /tmp/alp.conf
 
-west build -b alp_e1m_evk_aen examples/gpio-button-led -- \
+west build -b alp_e1m_evk_aen examples/peripheral-io/gpio-button-led -- \
     -DOVERLAY_CONFIG=/tmp/alp.conf \
     -DEXTRA_ZEPHYR_MODULES=alp-sdk
 ```
@@ -112,7 +112,7 @@ LED goes dark.
 
 ## See also
 
-* [`examples/gpio-button-led/`](../../examples/gpio-button-led/)
+* [`examples/peripheral-io/gpio-button-led/`](../../examples/peripheral-io/gpio-button-led/)
 * [`docs/board-config.md`](../board-config.md) -- the `board.yaml`
   schema reference.
 * [`<alp/peripheral.h>`](../../include/alp/peripheral.h) -- API

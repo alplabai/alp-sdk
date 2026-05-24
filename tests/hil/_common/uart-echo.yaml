@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Portable HiL smoke for examples/uart-echo.  Works on every E1M-
+# Portable HiL smoke for examples/peripheral-io/uart-echo.  Works on every E1M-
 # conformant SoM (e1m-spec mandates 2x UART; E1M_UART0 always
 # present).
 #
@@ -24,7 +24,7 @@ description: |
   Confirms UART open / read-with-timeout / write end-to-end on the
   board's console UART.
 
-example: examples/uart-echo
+example: examples/peripheral-io/uart-echo
 
 serial:
   duration_s: 10

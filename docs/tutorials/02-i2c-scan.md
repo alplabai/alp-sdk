@@ -2,7 +2,7 @@
 
 # 02 -- I²C bus scan
 
-Walks `examples/i2c-scanner/` -- a 7-bit-address scan over an I²C
+Walks `examples/peripheral-io/i2c-scanner/` -- a 7-bit-address scan over an I²C
 bus that prints the addresses that ACK.  Useful for confirming on-
 module chip populations + smoke-testing a new board's I²C
 wiring.
@@ -71,6 +71,6 @@ mis-strapped -- compare against
 
 ## See also
 
-* [`examples/i2c-scanner/`](../../examples/i2c-scanner/)
+* [`examples/peripheral-io/i2c-scanner/`](../../examples/peripheral-io/i2c-scanner/)
 * [Tutorial 04 -- intra-family portability](04-cross-family-portability.md)
 * [Tutorial 08 -- runtime board detection](08-runtime-board-detection.md)

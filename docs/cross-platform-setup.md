@@ -498,7 +498,7 @@ This is the cross-platform end-to-end smoke test.
 ```bash
 # Linux / macOS / WSL:
 cd ../alp-workspace
-west alp-build -b native_sim/native/64 alp-sdk/examples/gpio-button-led
+west alp-build -b native_sim/native/64 alp-sdk/examples/peripheral-io/gpio-button-led
 west build -d build -t run
 ```
 

@@ -1,0 +1,63 @@
+# board.yaml -- rpmsg-aen
+#
+# Heterogeneous compute demo for E1M-AEN701 (Alif Ensemble E7).  The
+# E7 die carries a 2-core Cortex-A32 cluster plus 2 Cortex-M55 cores
+# (HP + HE).  This example wires:
+#
+#   * `a32_cluster` -- Yocto Linux consumer under `linux/`.
+#   * `m55_hp`      -- Zephyr producer under `m55_hp/` reading the
+#                       board's on-board LSM6DSO + BMP581 sensors
+#                       and publishing them over RPMsg.
+#   * `m55_he`      -- left at the SoM topology default (stock-shim
+#                       Zephyr image); the always-on M55-HE core
+#                       stays alive for future low-power offload
+#                       work but doesn't participate in this demo's
+#                       RPMsg channel.
+#
+# See docs/heterogeneous-builds.md for the full walk-through; the
+# `examples/multicore/rpmsg-v2n/` example is the canonical V2N counterpart of
+# this AEN setup.
+#
+# AEN memory_map values are still TBD in the SoM preset (per the
+# project memory note -- the user supplies authoritative values
+# later).  Schema validation is fine, but `west alp-build` will
+# refuse to allocate a carve-out until those numbers land.  This
+# example's structural files (board.yaml, READMEs, sources) are
+# correct in shape; the build is expected to fail with
+# `OrchestratorError: memory_map.base is TBD` until E1M-AEN701.yaml
+# carries hard addresses.
+
+som:
+  sku: E1M-AEN701
+  hw_rev: r1
+
+preset: e1m-evk             # LSM6DSO + BMP581 already populated by
+                            # the EVK preset defaults.
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
+cores:
+  a32_cluster:
+    app: ./linux
+    image: alp-image-edge
+    libraries: [mbedtls, nlohmann_json]
+  m55_hp:
+    app: ./m55_hp
+    peripherals: [i2c]
+    libraries: [cmsis_dsp]
+
+# Cross-core RPMsg carve-out.  The orchestrator allocates from
+# E1M-AEN701's `memory_map:` -- once the user supplies authoritative
+# AEN memory-map addresses, the carve-out lands in mram_main (the
+# only region accessible from all three cores; spec §6.8 flips to
+# cacheable: true on AEN by default because the M55 cache is on).
+ipc:
+  - kind: rpmsg
+    endpoints: [a32_cluster, m55_hp]
+    carve_out_kb: 256
+    name: alp_default_rpmsg
+    cacheable: true
+
+diagnostics:
+  log_level: info

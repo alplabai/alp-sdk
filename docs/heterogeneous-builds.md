@@ -55,7 +55,7 @@ the orchestrator uses them to route generated config and find source
 trees.
 
 ```
-examples/rpmsg-v2n/
+examples/multicore/rpmsg-v2n/
 ├── board.yaml                       (declares a55_cluster + m33_sm)
 ├── README.md
 ├── linux/                           (a55_cluster's app)
@@ -226,7 +226,7 @@ unblock.
 ## 6. Building
 
 ```bash
-west alp-build examples/rpmsg-v2n
+west alp-build examples/multicore/rpmsg-v2n
 ```
 
 The orchestrator:
@@ -281,7 +281,7 @@ The Yocto cold build takes hours; the Zephyr build takes seconds.
 When you're iterating on the M-side firmware, rebuild only that slice:
 
 ```bash
-west alp-build examples/rpmsg-v2n --core m33_sm
+west alp-build examples/multicore/rpmsg-v2n --core m33_sm
 ```
 
 The orchestrator skips the Yocto fan-out, re-uses the previous
@@ -463,7 +463,7 @@ path of the project as the build argument:
 
 ```bash
 # good
-west alp-build examples/rpmsg-v2n
+west alp-build examples/multicore/rpmsg-v2n
 ```
 
 The orchestrator writes `build/` next to the project's `board.yaml`.
@@ -479,7 +479,7 @@ The orchestrator writes `build/` next to the project's `board.yaml`.
 - **Low-level primitives:** [`include/alp/mproc.h`](../include/alp/mproc.h)
   is what `<alp/rpc.h>` sits on (shmem + mailbox + hwsem).  Reach
   for these only if you're building a custom framing layer.
-- **Advanced example:** `examples/heterogeneous-offload/` shows the
+- **Advanced example:** `examples/multicore/heterogeneous-offload/` shows the
   A-cluster delegating an FFT computation to the M peer over RPMsg —
   useful when you want CPU-vs-NPU-vs-M-class compute routing in one
   project.

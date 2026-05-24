@@ -217,7 +217,7 @@ Next steps:
   bash scripts/test-all.sh
 
   # Or jump straight into building an example:
-  west build -b native_sim/native/64 examples/uart-echo \\
+  west build -b native_sim/native/64 examples/peripheral-io/uart-echo \\
       -- -DEXTRA_ZEPHYR_MODULES=\$PWD
 
 References:

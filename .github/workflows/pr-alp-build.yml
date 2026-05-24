@@ -20,7 +20,7 @@
 # PR can flip these legs green without touching CI.
 #
 # v0.6 examples referenced below (`examples/rpmsg-<som-short>/`,
-# `examples/iot-connected-camera/`, `examples/gpio-button-led/`)
+# `examples/connectivity/iot-connected-camera/`, `examples/peripheral-io/gpio-button-led/`)
 # may not all exist yet; per-leg `hashFiles()` guards auto-skip
 # missing cells so partial Phase 4 progress doesn't break the
 # whole matrix.
@@ -112,8 +112,8 @@ jobs:
       #
       # Naming convention:
       #   heterogeneous-default -> examples/rpmsg-<som-short>/board.yaml
-      #   zephyr-only-slice     -> examples/gpio-button-led/board.yaml
-      #   yocto-only-slice      -> examples/iot-connected-camera/board.yaml
+      #   zephyr-only-slice     -> examples/peripheral-io/gpio-button-led/board.yaml
+      #   yocto-only-slice      -> examples/connectivity/iot-connected-camera/board.yaml
       - name: Resolve example path for this matrix cell
         id: pick
         run: |
@@ -133,10 +133,10 @@ jobs:
               example_path="examples/rpmsg-${som_short}"
               ;;
             zephyr-only-slice)
-              example_path="examples/gpio-button-led"
+              example_path="examples/peripheral-io/gpio-button-led"
               ;;
             yocto-only-slice)
-              example_path="examples/iot-connected-camera"
+              example_path="examples/connectivity/iot-connected-camera"
               ;;
           esac
           echo "example_path=${example_path}" >> "$GITHUB_OUTPUT"

@@ -335,7 +335,7 @@ The spec describes WHAT each migration delivers. Detailed HOW lives in per-slice
 - Old `src/zephyr/peripheral_adc.c` deleted; `<alp/adc.h>` internals reroute through selector
 - `alp_adc_capabilities()` getter shipped
 - First vendor extension: `<alp/ext/alif/adc.h>` with `set_oversampling` + `set_trigger_source`
-- `examples/adc-voltmeter` updated to use capability-gated DMA streaming
+- `examples/peripheral-io/adc-voltmeter` updated to use capability-gated DMA streaming
 - `CONFIG_ALP_SDK_ADC_SW_FALLBACK` Kconfig added
 
 ### Slice 2 — Core peripherals (parallel, 6 PRs)

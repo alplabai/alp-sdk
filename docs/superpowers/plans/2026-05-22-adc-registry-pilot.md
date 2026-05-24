@@ -46,7 +46,7 @@
 - `zephyr/CMakeLists.txt` — include new sources (`src/adc_dispatch.c`, `src/backends/adc/*.c` conditionally), drop `src/zephyr/peripheral_adc.c`, add `src/zephyr/peripheral_dac.c`.
 
 **Modify (example):**
-- `examples/adc-voltmeter/src/main.c` — add capability-gated teaching block.
+- `examples/peripheral-io/adc-voltmeter/src/main.c` — add capability-gated teaching block.
 
 **Modify (ABI):**
 - `docs/abi/v0.5-snapshot.json` — regenerate to include new public surface.
@@ -1320,15 +1320,15 @@ Supported silicon: tags on each function per the slice-0 CI gate."
 
 ---
 
-## Task 10: Update `examples/adc-voltmeter` with capability-gated teaching block
+## Task 10: Update `examples/peripheral-io/adc-voltmeter` with capability-gated teaching block
 
 **Files:**
-- Modify: `examples/adc-voltmeter/src/main.c`
+- Modify: `examples/peripheral-io/adc-voltmeter/src/main.c`
 
 - [ ] **Step 1: Inspect the existing example**
 
 ```bash
-cat examples/adc-voltmeter/src/main.c
+cat examples/peripheral-io/adc-voltmeter/src/main.c
 ```
 
 Find the line where `alp_adc_open(...)` returns; that's the insertion point for the new teaching block.
@@ -1372,7 +1372,7 @@ Also add to the includes at top of the file:
 - [ ] **Step 3: Smoke-build the example for native_sim**
 
 ```bash
-west twister -T examples/adc-voltmeter -p native_sim --inline-logs 2>&1 | tail -10
+west twister -T examples/peripheral-io/adc-voltmeter -p native_sim --inline-logs 2>&1 | tail -10
 ```
 
 If twister isn't on PATH locally, skip; CI validates.
@@ -1380,7 +1380,7 @@ If twister isn't on PATH locally, skip; CI validates.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add examples/adc-voltmeter/src/main.c
+git add examples/peripheral-io/adc-voltmeter/src/main.c
 git commit -m "examples(adc-voltmeter): teach capability + vendor-ext gating
 
 Shows the customer the two-level gating idiom: runtime

@@ -390,7 +390,7 @@ class TestValidatorPeripheralCheck(unittest.TestCase):
         (alif:ensemble:e7).  Schema + preset + hw_rev checks must all
         be green; the SoM preset's partial_hw_config flag means the
         validator exits 0 with a 'clean (with warnings)' tail."""
-        example = REPO / "examples" / "adc-voltmeter" / "board.yaml"
+        example = REPO / "examples" / "peripheral-io" / "adc-voltmeter" / "board.yaml"
         rv = subprocess.run(
             [sys.executable,
              str(REPO / "scripts" / "validate_board_yaml.py"),

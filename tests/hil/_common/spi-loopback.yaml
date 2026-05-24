@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Portable HiL smoke for examples/spi-loopback.  Works on every E1M-
+# Portable HiL smoke for examples/peripheral-io/spi-loopback.  Works on every E1M-
 # conformant SoM.
 #
 # Hardware fixtures expected:
@@ -19,7 +19,7 @@ name: spi-loopback
 description: |
   SPI open + full-duplex transceive against E1M_SPI1.
 
-example: examples/spi-loopback
+example: examples/peripheral-io/spi-loopback
 
 serial:
   duration_s: 10

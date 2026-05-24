@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Portable HiL smoke for examples/rtc-clock.  Works on every E1M-
+# Portable HiL smoke for examples/power-timing/rtc-clock.  Works on every E1M-
 # conformant SoM (every supported SoC has an on-die RTC; AEN /
 # V2N / V2M additionally ship an on-module RV-3028-C7).
 #
@@ -26,7 +26,7 @@ name: rtc-clock
 description: |
   Confirms the SoM's RTC sets, ticks while CPU sleeps, and reads back.
 
-example: examples/rtc-clock
+example: examples/power-timing/rtc-clock
 
 serial:
   duration_s: 10

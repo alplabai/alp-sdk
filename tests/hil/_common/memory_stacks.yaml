@@ -19,7 +19,7 @@
 #
 # (each <field>_kib value multiplied by 1024).  This spec confirms
 # the CONFIG_MAIN_STACK_SIZE line actually reaches the runtime --
-# the existing examples/hello-world app prints `K_THREAD_STACK_SIZEOF(...)`
+# the existing examples/peripheral-io/hello-world app prints `K_THREAD_STACK_SIZEOF(...)`
 # of the main thread on boot, so we read the value back out of the
 # serial trace and assert it matches the configured byte count.
 #
@@ -43,7 +43,7 @@ description: |
   configured CONFIG_MAIN_STACK_SIZE byte count appears in the
   example's boot trace, and no stack-overflow events fire under load.
 
-example: examples/hello-world
+example: examples/peripheral-io/hello-world
 
 serial:
   duration_s: 12

@@ -115,7 +115,7 @@ Direct build (without `west alp-build` orchestration):
 
 ```bash
 west build -b alif_e7_dk_rtss_he \
-    examples/gpio-button-led \
+    examples/peripheral-io/gpio-button-led \
     --sysbuild \
     --sysbuild-config alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
 ```

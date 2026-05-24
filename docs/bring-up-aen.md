@@ -112,7 +112,7 @@ against the SKU's `som.yaml` preset.
    flash a built image:
 
    ```bash
-   west alp-build -b alif_e7_dk_rtss_he examples/gpio-button-led
+   west alp-build -b alif_e7_dk_rtss_he examples/peripheral-io/gpio-button-led
    west flash
    ```
 

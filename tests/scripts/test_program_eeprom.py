@@ -99,7 +99,7 @@ class TestManifestLayout(unittest.TestCase):
             out = Path(td) / "eeprom.bin"
             rv = subprocess.run(
                 [sys.executable, str(TOOL),
-                 "--board-yaml", str(REPO / "examples" / "gpio-button-led" / "board.yaml"),
+                 "--board-yaml", str(REPO / "examples" / "peripheral-io" / "gpio-button-led" / "board.yaml"),
                  "--serial", "2026W19-0001",
                  "--mfg-date", "2026-05-11",
                  "--output", str(out)],

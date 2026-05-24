@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Portable HiL smoke for examples/adc-voltmeter.  Works on every E1M-
+# Portable HiL smoke for examples/peripheral-io/adc-voltmeter.  Works on every E1M-
 # conformant SoM (every variant exposes E1M_ADC1).
 #
 # What this proves end-to-end:
@@ -14,7 +14,7 @@ name: adc-voltmeter
 description: |
   ADC capability-rejection + 12-bit read against E1M_ADC1.
 
-example: examples/adc-voltmeter
+example: examples/peripheral-io/adc-voltmeter
 
 serial:
   duration_s: 10

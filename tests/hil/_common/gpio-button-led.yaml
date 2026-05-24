@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# HiL smoke for examples/gpio-button-led on the E1M-EVK.
+# HiL smoke for examples/peripheral-io/gpio-button-led on the E1M-EVK.
 #
 # The EVK has no dedicated GPIO LED, so the example uses the E1M "GPIO
 # secondary" capability: the button is the encoder push switch
@@ -27,7 +27,7 @@ description: |
   Verifies GPIO button read + GPIO LED drive end-to-end on the E1M-EVK,
   with the LED on the PWM3 pad claimed as a GPIO (E1M GPIO-secondary).
 
-example: examples/gpio-button-led
+example: examples/peripheral-io/gpio-button-led
 
 # board: inherited from the per-SoM _runner.yaml
 

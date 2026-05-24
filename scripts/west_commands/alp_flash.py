@@ -11,12 +11,12 @@ the backend registry; backends self-register on import.
 
 Customer flow:
 
-    west alp-build examples/rpmsg-v2n
-    west alp-image examples/rpmsg-v2n     # optional: pre-build bundle
-    west alp-flash examples/rpmsg-v2n     # respects boot_order
-    west alp-flash examples/rpmsg-v2n --dry-run            # just print
-    west alp-flash examples/rpmsg-v2n --core m33_sm        # one slice
-    west alp-flash examples/rpmsg-v2n --helper gd32_bridge # one helper
+    west alp-build examples/multicore/rpmsg-v2n
+    west alp-image examples/multicore/rpmsg-v2n     # optional: pre-build bundle
+    west alp-flash examples/multicore/rpmsg-v2n     # respects boot_order
+    west alp-flash examples/multicore/rpmsg-v2n --dry-run            # just print
+    west alp-flash examples/multicore/rpmsg-v2n --core m33_sm        # one slice
+    west alp-flash examples/multicore/rpmsg-v2n --helper gd32_bridge # one helper
 
 When a required tool is missing, the default behaviour is to fail the
 slice; pass ``--skip-missing-tools`` to convert those into warnings.

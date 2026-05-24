@@ -11,8 +11,8 @@ will be filled in.
 
 Customer flow (post-Phase-3):
 
-    west alp-build examples/rpmsg-v2n
-    west alp-renode examples/rpmsg-v2n      # boots in Renode
+    west alp-build examples/multicore/rpmsg-v2n
+    west alp-renode examples/multicore/rpmsg-v2n      # boots in Renode
 """
 
 from __future__ import annotations

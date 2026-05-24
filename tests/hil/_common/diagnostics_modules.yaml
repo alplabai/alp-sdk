@@ -51,7 +51,7 @@ description: |
   at runtime: a module set to `debug` emits debug-prefixed lines;
   a module set to `off` emits no lines at all on the serial trace.
 
-example: examples/iot-fleet-ota
+example: examples/connectivity/iot-fleet-ota
 
 serial:
   duration_s: 18

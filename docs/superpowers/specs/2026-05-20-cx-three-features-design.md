@@ -39,7 +39,7 @@ The three features in this spec close each gap. They share generators and valida
 2. Prompt 1 — SoM SKU: enumerated from `metadata/e1m_modules/*.yaml` (questionary `select`, searchable).
 3. Prompt 2 — board preset: enumerated from `metadata/boards/*.yaml`, filtered to those whose `hosts_som_families:` list contains the chosen SoM's family.
 4. Prompt 3 — starter peripherals (multi-select, may be empty): `uart`, `gpio`, `i2c`, `spi`, `pwm`. Each maps onto a stub `peripherals:` entry in the generated `board.yaml`.
-5. Scaffold: copy `examples/hello-world/` → `./<name>/`, rewrite `board.yaml` with wizard answers, add a one-line `README.md` pointing to the docs.
+5. Scaffold: copy `examples/peripheral-io/hello-world/` → `./<name>/`, rewrite `board.yaml` with wizard answers, add a one-line `README.md` pointing to the docs.
 6. Non-interactive flags: `--som`, `--preset`, `--peripherals` skip the corresponding prompt (so CI scripts can use `alp init` headless).
 
 ### `alp run` — build + run on native_sim
@@ -228,7 +228,7 @@ None. The capability set is determined entirely by the active SoC (selected by `
 
 ### Example update
 
-`examples/hello-world/src/main.c` gets a small teaching block:
+`examples/peripheral-io/hello-world/src/main.c` gets a small teaching block:
 
 ```c
 #if ALP_HAS(NPU_DRPAI)
@@ -279,6 +279,6 @@ All four are widely used and have stable APIs. Listed in `pyproject.toml` under 
 3. Feature 2 — validation passes (schema, cross-ref, compat) + fixtures + snapshot tests.
 4. Feature 3 — extend `gen_soc_caps.py` to emit `cap.h` + `cap.c`; add unit + generator tests.
 5. Feature 1 — wire `alp init` + `alp run` + CLI tests; update README.
-6. Update `examples/hello-world/src/main.c` with the capability-API teaching block.
+6. Update `examples/peripheral-io/hello-world/src/main.c` with the capability-API teaching block.
 
 The three features are mostly independent after step 2, so parallel-agent dispatch is viable from step 3 onward.

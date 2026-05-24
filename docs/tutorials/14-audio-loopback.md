@@ -21,7 +21,7 @@ mirrored in/out API + the DSP-chain hook.
 
 ## What you'll build
 
-The `examples/audio-loopback/` reference app, walked stage by
+The `examples/audio/audio-loopback/` reference app, walked stage by
 stage.  Loops the on-board PDM mic into the I²S DAC with the
 SDK's v0.2 DC-block DSP stage in the middle.  Real-silicon
 runs ~0.8 s of audio (50 blocks × 256 frames @ 16 kHz) then
@@ -98,7 +98,7 @@ Real apps would also drive the codec's analog gain pin via
 ### native_sim
 
 ```bash
-west build -b native_sim/native/64 examples/audio-loopback
+west build -b native_sim/native/64 examples/audio/audio-loopback
 west build -t run
 ```
 
@@ -117,7 +117,7 @@ NOSUPPORT fallback.
 ### Real silicon (AEN-Zephyr)
 
 ```bash
-west alp-build -b alif_e7_dk_rtss_he examples/audio-loopback
+west alp-build -b alif_e7_dk_rtss_he examples/audio/audio-loopback
 west flash
 ```
 
@@ -202,7 +202,7 @@ Build + run as a normal Yocto userspace binary.
 - [`<alp/audio.h>`](../../include/alp/audio.h) -- the public API.
 - [`<alp/dsp.h>`](../../include/alp/dsp.h) -- the DSP chain
   surface.
-- [`examples/audio-loopback/`](../../examples/audio-loopback/)
+- [`examples/audio/audio-loopback/`](../../examples/audio/audio-loopback/)
   -- the reference app this tutorial walks.
 - [ADR 0007](../adr/0007-wave2-dsp-pipeline-design.md) --
   rationale for the DSP-chain shape.
