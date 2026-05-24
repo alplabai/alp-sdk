@@ -37,7 +37,7 @@
  *
  * The LED: the E1M-EVK has no dedicated GPIO LED, so we drive the
  * red RGB pad (default function PWM3) as a plain digital GPIO via
- * the parallel `E1M_GPIO_PWM3` index -- the e1m-spec "GPIO
+ * the parallel `EVK_PIN_LED_RED` index -- the e1m-spec "GPIO
  * secondary" capability (see e1m_pinout.h "Pin-as-GPIO fallback").
  *
  * What success looks like:
@@ -45,7 +45,7 @@
  *   [timer] open counter=0
  *   [timer] start -> 0
  *   [timer] 100ms = N ticks (status=0)
- *   [timer] open LED on E1M_GPIO_PWM3
+ *   [timer] open LED on EVK_PIN_LED_RED
  *   [timer] arming first alarm
  *   [timer] tick 0 fired @ N+0 ticks, LED -> 1
  *   [timer] tick 1 fired @ N+1 ticks, LED -> 0
@@ -70,7 +70,7 @@
 
 #include "alp/peripheral.h"
 #include "alp/counter.h"
-#include "alp/e1m_pinout.h"
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 /* Alarm period.  100 ms gives a visible LED blink (5 Hz toggle)
  * that's easy to count by eye without being so slow that the
@@ -184,11 +184,11 @@ int main(void)
 
     /* Open the user LED.  The EVK has no plain GPIO LED, so the
      * indicator is the RGB-red pad (default function PWM3) claimed
-     * as a digital GPIO via E1M_GPIO_PWM3; on a board with a real
+     * as a digital GPIO via EVK_PIN_LED_RED; on a board with a real
      * GPIO LED, swap the index for whatever your LED maps to (or
      * comment the GPIO out if you only need the timer half). */
-    printf("[timer] open LED on E1M_GPIO_PWM3\n");
-    alp_gpio_t *led = alp_gpio_open(E1M_GPIO_PWM3);
+    printf("[timer] open LED on EVK_PIN_LED_RED\n");
+    alp_gpio_t *led = alp_gpio_open(EVK_PIN_LED_RED);
     if (led != NULL) {
         s = alp_gpio_configure(led, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
         if (s != ALP_OK) {
