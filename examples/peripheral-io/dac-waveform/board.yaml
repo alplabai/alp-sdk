@@ -1,17 +1,17 @@
 # board.yaml -- per-app project configuration for the
 # dac-waveform example.
 #
-# Generates a sine wave on DAC0 via the E1M-X GD32-bridged DAC.
-# Base E1M (35x35 mm) doesn't expose a DAC output pad; this example
-# targets E1M-X form-factor SoMs (V2N family) where the DAC is
-# physically routed to ANA_OUT0 / ANA_OUT1.
+# Generates a sine wave on DAC0, building for both EVKs:
+#   E1M EVK  -- drives the Alif Ensemble's native 2-channel DAC.
+#   E1M-X EVK -- drives the V2N's two DAC channels through the
+#                on-module GD32G553 supervisor bridge.
 #
 # The DAC is exposed through the same <alp/adc.h> header as ADCs --
 # both are "analog converters" from the SDK's perspective.  Hence
-# the `adc` entry in peripherals (no separate `dac` token).  On V2N
-# the SDK dispatches DAC writes through the on-module GD32G553
-# supervisor bridge automatically; customer code never sees the
-# dispatch.
+# the `adc` entry in peripherals (no separate `dac` token).  On
+# E1M-X / V2N the SDK dispatches DAC writes through the on-module
+# GD32G553 supervisor bridge automatically; customer code never
+# sees the dispatch.
 #
 # Customer workflow: copy this directory, change `som.sku` to
 # your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
@@ -22,6 +22,9 @@ som:
   sku: E1M-V2N101
 
 preset: e1m-x-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
 cores:
   # The A55 Linux cluster has nothing to do in this DAC example --
   # mark it `os: "off"` so the orchestrator doesn't spin up a Yocto
