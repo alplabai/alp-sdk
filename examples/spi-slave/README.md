@@ -42,7 +42,7 @@ application code keeps compiling against the upstream names.
 ## What this DOES show today
 
 ```
-[spi-slave] open as slave on E1M_SPI0 (mode 0, 8 bits)
+[spi-slave] open as slave on E1M_SPI1 (mode 0, 8 bits)
 [spi-slave] ALP SDK v0.6 does NOT support SPI slave mode
 [spi-slave]   <alp/peripheral.h> is master-only today
 [spi-slave]   Note: Zephyr's own SPI slave support is patchy too;

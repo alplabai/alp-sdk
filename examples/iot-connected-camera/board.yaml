@@ -11,14 +11,18 @@ som:
   sku: E1M-V2N101          # Renesas RZ/V2N -- DRP-AI3 on-die NPU
                             # plus Murata Wi-Fi 6 / BLE radio.
 
-preset: e1m-x-evk           # X-EVK preset's `populated:` is TBD
-                            # pending the user-supplied schematic;
-                            # the local UI + button this example uses
-                            # are listed in `chips:` below.
+preset: e1m-x-evk           # X-EVK preset's `populated:` is TBD pending
+                            # the user-supplied schematic, so this
+                            # example declares the chips it needs
+                            # locally.  The encoder-switch trigger (GPIO)
+                            # + RGB-red status LED (PWM) use the
+                            # E1M-standard pads; confirm the V2N routing
+                            # when the X-EVK schematic lands (no pins:
+                            # block until then -- routes are TBD).
 
 chips:
   - ssd1306                 # Mono OLED for the local status pane.
-  - button_led              # GPIO button + LED helper.
+  - button_led              # GPIO button + LED helper (LED rides the PWM3 pad as a GPIO).
 
 # Camera + IoT demo on the V2N's M33-SM.  Keep the A55 cluster off
 # until the Linux-side capture pipeline lands (post-v0.6 OTA-flagship

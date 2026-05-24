@@ -34,7 +34,9 @@ that's off by one bit.
 
 ## Wiring
 
-The E1M-EVK exposes `E1M_SPI0` on pads P21/P22/P23 (SCK/MOSI/MISO).
+The E1M-EVK routes `E1M_SPI1` to the Arduino UNO header SPI; the
+SoM bridges the bus internally, so app code just opens the E1M
+instance and never sees the physical termination.
 For this example:
 
 * No external slave required (you can verify by jumpering MOSI
@@ -64,7 +66,7 @@ west flash
 native_sim (no slave registered):
 
 ```
-[spi-master] open E1M_SPI0 @ 1 MHz mode 0
+[spi-master] open E1M_SPI1 @ 1 MHz mode 0
 [spi-master] write -> 0
 [spi-master] transceive -> 0  rx={00 00 00 00}
 [spi-master] read -> 0  rx={00 00 00 00}
@@ -74,7 +76,7 @@ native_sim (no slave registered):
 Real hardware with MOSI -> MISO loopback jumper:
 
 ```
-[spi-master] open E1M_SPI0 @ 1 MHz mode 0
+[spi-master] open E1M_SPI1 @ 1 MHz mode 0
 [spi-master] write -> 0
 [spi-master] transceive -> 0  rx={aa 55 de ad}
 [spi-master] read -> 0  rx={ff ff ff ff}
@@ -84,7 +86,7 @@ Real hardware with MOSI -> MISO loopback jumper:
 Real hardware with a register-mapped slave at 0x10:
 
 ```
-[spi-master] open E1M_SPI0 @ 1 MHz mode 0
+[spi-master] open E1M_SPI1 @ 1 MHz mode 0
 [spi-master] write -> 0
 [spi-master] transceive -> 0  rx={00 7a 5c 12}   <- slave's register echo
 [spi-master] read -> 0  rx={5c 12 ab cd}         <- streaming data
@@ -99,7 +101,7 @@ Real hardware with a register-mapped slave at 0x10:
 * **Different mode.**  Most chips want MODE_0, but check their
   datasheet's timing diagram.
 * **GPIO-driven CS.**  Replace `ALP_SPI_NO_CS` with a portable
-  GPIO id (e.g. `E1M_GPIO_IO0`).  The wrapper drives the pin
+  GPIO id routed on your board.  The wrapper drives the pin
   active-low around each transfer.
 * **Larger words.**  Set `.bits_per_word = 16` or `32` -- the
   wrapper packs / unpacks for you.

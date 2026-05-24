@@ -64,9 +64,13 @@ static int              stage_peripherals_init(void)
     s = lsm6dso_init(&g_imu, g_sensor_bus, LSM6DSO_I2C_ADDR_LOW);
     printf("[edgeai]   lsm6dso_init                  %s\n", (s == ALP_OK) ? "ok" : "skip (no IMU)");
 
+    /* User trigger + status LED via the button_led block.  The EVK
+     * has no plain GPIO LED, so the LED is the RGB-red pad (PWM3)
+     * claimed as a digital GPIO (E1M_GPIO_PWM3, the E1M "GPIO
+     * secondary"); the button is the encoder push switch (IO4). */
     s = alp_button_led_init(&g_trigger, &(alp_button_led_config_t){
-                                            .button_pin_id     = E1M_GPIO_IO0,
-                                            .led_pin_id        = E1M_GPIO_IO1,
+                                            .button_pin_id     = E1M_GPIO_IO4,
+                                            .led_pin_id        = E1M_GPIO_PWM3,
                                             .active_low_button = true,
                                         });
     printf("[edgeai]   alp_button_led_init           %s\n",
@@ -124,8 +128,8 @@ static int              stage_model_load(void)
      * scaffold, populated when the Vela toolchain run lands.  The
      * 16-byte placeholder below lets the open() call validate
      * input parameters today. */
-    static const uint8_t   s_placeholder[16] = {0xDE, 0xAD, 0xBE, 0xEF};
-    alp_inference_config_t cfg               = {0};
+    static const uint8_t   s_placeholder[16] = { 0xDE, 0xAD, 0xBE, 0xEF };
+    alp_inference_config_t cfg               = { 0 };
     cfg.model_data                           = s_placeholder;
     cfg.model_size                           = sizeof(s_placeholder);
     cfg.format                               = ALP_INFERENCE_MODEL_VELA;

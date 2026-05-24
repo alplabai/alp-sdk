@@ -4,7 +4,7 @@ sample:
   name: spi-master
   description: |
     Per-peripheral example for SPI master.  Send a known byte
-    pattern via write / transceive / read against E1M_SPI0.
+    pattern via write / transceive / read against E1M_SPI1.
     Contrasts with examples/spi-loopback (which exercises both
     ends on the same chip).
 

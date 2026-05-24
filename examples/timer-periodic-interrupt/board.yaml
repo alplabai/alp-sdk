@@ -17,6 +17,10 @@ som:
   sku: E1M-AEN701
 
 preset: e1m-evk
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_PWM3, macro: EVK_PWM_LED_RED, doc: "RGB LED red channel; driven as a digital GPIO via E1M_GPIO_PWM3 (E1M GPIO-secondary)" }
 cores:
   m55_hp:
     app: ./src

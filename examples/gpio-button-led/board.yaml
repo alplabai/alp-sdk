@@ -27,13 +27,16 @@ som:
   sku: E1M-AEN701          # Alif Ensemble E7 SoM
 
 preset: e1m-evk            # 35x35 EVK -- reference board.  The EVK
-                           # preset already populates `button_led:
-                           # true` for the on-board user button + LED.
+                           # routes the user button to the encoder
+                           # push switch (E1M_GPIO_IO4) and its only
+                           # user LEDs to the RGB cluster on PWM; this
+                           # demo claims the red channel's pad as a GPIO
+                           # (E1M_GPIO_PWM3, the E1M GPIO-secondary).
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
   - { e1m: E1M_GPIO_IO4, macro: EVK_PIN_ENCODER_SW, doc: "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce" }
-  - { e1m: E1M_PWM3, macro: EVK_PWM_LED_RED, doc: "RGB LED red channel" }
+  - { e1m: E1M_PWM3, macro: EVK_PWM_LED_RED, doc: "RGB LED red channel; driven as a digital GPIO via E1M_GPIO_PWM3 (E1M GPIO-secondary)" }
 
 # Single-core slice on AEN701: M55-HP runs the demo.  M55-HE inherits
 # the SoM topology default (stock-shim Zephyr image), keeping the
@@ -41,6 +44,10 @@ pins:
 cores:
   m55_hp:
     app: ./src
+    # Zephyr peripheral subsystems exercised by this example.  The
+    # loader translates each entry to CONFIG_<X>=y in alp.conf.
+    peripherals:
+      - gpio
 
 diagnostics:
   log_level: info

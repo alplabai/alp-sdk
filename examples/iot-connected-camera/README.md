@@ -82,7 +82,7 @@ You'll need a TLS CA bundle and (optionally) a client cert in
 |--------------------------------------------|-----------------|---------------------------------------|
 | `<alp/peripheral.h>` (i2c, gpio)           | full            | Init OLED + IMU + camera bus.         |
 | `<alp/chips/ssd1306.h>`                    | full            | Status overlay (until DSI panel + LVGL in v0.3). |
-| `<alp/blocks/button_led.h>`                | full            | Capture trigger / inference toggle.   |
+| `<alp/blocks/button_led.h>`                | full            | Capture trigger; LED on PWM3 pad as GPIO. |
 | `<alp/camera.h>`                           | header (stub)   | Frame capture — v0.2 wraps Zephyr `video_*`. |
 | `<alp/iot.h>` (Wi-Fi + MQTT)               | header (stub)   | Wi-Fi-station + MQTT publish — v0.3.  |
 | `<alp/gui.h>` (LVGL)                       | re-export       | Local UI in v0.3.                     |

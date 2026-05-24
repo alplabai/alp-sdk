@@ -30,7 +30,7 @@
  *
  * What success looks like:
  *
- *   [spi-master] open E1M_SPI0 @ 1 MHz mode 0
+ *   [spi-master] open E1M_SPI1 @ 1 MHz mode 0
  *   [spi-master] write -> 0
  *   [spi-master] transceive -> 0  rx={de,ad,be,ef}
  *   [spi-master] read -> 0  rx={..}
@@ -74,12 +74,13 @@
  * etc.). */
 static const uint8_t TX_PATTERN[] = { 0xAA, 0x55, 0xDE, 0xAD };
 
-int main(void) {
-    printf("[spi-master] open E1M_SPI0 @ 1 MHz mode 0\n");
+int                  main(void)
+{
+    printf("[spi-master] open E1M_SPI1 @ 1 MHz mode 0\n");
 
     /* Open the SPI bus.  Configuration knobs in order:
      *
-     *   bus_id          -- portable instance, E1M_SPI0 here.
+     *   bus_id          -- portable instance, E1M_SPI1 here.
      *   freq_hz         -- 1 MHz is the conservative default.
      *                       Bump after confirming the slave's max
      *                       clock and short wires.
@@ -92,7 +93,7 @@ int main(void) {
      *                       manage it; otherwise the discrete
      *                       GPIO that drives /CS. */
     alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
-        .bus_id        = E1M_SPI0,
+        .bus_id        = E1M_SPI1,
         .freq_hz       = 1000000,
         .mode          = ALP_SPI_MODE_0,
         .bits_per_word = 8,
@@ -106,8 +107,7 @@ int main(void) {
          *     (returns NOSUPPORT via alp_last_error).
          *   * On native_sim without the emul overlay we ship,
          *     the alias resolves to NULL. */
-        printf("[spi-master] open failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[spi-master] open failed: alp_last_error=%d\n", (int)alp_last_error());
         printf("[spi-master] done\n");
         return 0;
     }
@@ -127,10 +127,10 @@ int main(void) {
      * clock cycle.  This is the canonical "read register N"
      * pattern when the slave responds in-band (no separate
      * command/response phase). */
-    uint8_t rx_buf[sizeof TX_PATTERN] = {0};
+    uint8_t rx_buf[sizeof TX_PATTERN] = { 0 };
     s = alp_spi_transceive(bus, TX_PATTERN, rx_buf, sizeof TX_PATTERN);
-    printf("[spi-master] transceive -> %d  rx={%02x %02x %02x %02x}\n",
-           (int)s, rx_buf[0], rx_buf[1], rx_buf[2], rx_buf[3]);
+    printf("[spi-master] transceive -> %d  rx={%02x %02x %02x %02x}\n", (int)s, rx_buf[0],
+           rx_buf[1], rx_buf[2], rx_buf[3]);
 
     /* -------- 3.  Half-duplex read (RX only). --------
      *
@@ -140,10 +140,10 @@ int main(void) {
      * already streaming -- e.g. an ADC in continuous-conversion
      * mode, or a NAND-flash page read after the address has
      * already been clocked in. */
-    uint8_t in_buf[sizeof TX_PATTERN] = {0};
-    s = alp_spi_read(bus, in_buf, sizeof in_buf);
-    printf("[spi-master] read -> %d  rx={%02x %02x %02x %02x}\n",
-           (int)s, in_buf[0], in_buf[1], in_buf[2], in_buf[3]);
+    uint8_t in_buf[sizeof TX_PATTERN] = { 0 };
+    s                                 = alp_spi_read(bus, in_buf, sizeof in_buf);
+    printf("[spi-master] read -> %d  rx={%02x %02x %02x %02x}\n", (int)s, in_buf[0], in_buf[1],
+           in_buf[2], in_buf[3]);
 
     /* Clean shutdown.  CS line returns to its idle state (high
      * for active-low CS); SCK + MOSI go to whatever the
