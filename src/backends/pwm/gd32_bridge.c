@@ -37,7 +37,7 @@ typedef struct gd32_pwm_state {
 #define CONFIG_ALP_SDK_MAX_PWM_HANDLES 8
 #endif
 
-static gd32_pwm_state_t _state_pool[CONFIG_ALP_SDK_MAX_PWM_HANDLES];
+static gd32_pwm_state_t  _state_pool[CONFIG_ALP_SDK_MAX_PWM_HANDLES];
 
 static gd32_pwm_state_t *_alloc_state(void)
 {
@@ -51,10 +51,12 @@ static gd32_pwm_state_t *_alloc_state(void)
     return NULL;
 }
 
-static void _free_state(gd32_pwm_state_t *s) { s->in_use = false; }
+static void _free_state(gd32_pwm_state_t *s)
+{
+    s->in_use = false;
+}
 
-static alp_status_t br_open(const alp_pwm_config_t *cfg,
-                            alp_pwm_backend_state_t *st,
+static alp_status_t br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st,
                             alp_capabilities_t *caps_out)
 {
     /* E1M spec reserves 8 PWM channels; all map to GD32 timers.
@@ -76,14 +78,14 @@ static alp_status_t br_open(const alp_pwm_config_t *cfg,
     if (bs == NULL) {
         return ALP_ERR_NOMEM;
     }
-    bs->channel_id = (uint8_t)cfg->channel_id;
-    bs->period_ns  = cfg->period_ns;
-    bs->duty_ns    = 0u;
+    bs->channel_id  = (uint8_t)cfg->channel_id;
+    bs->period_ns   = cfg->period_ns;
+    bs->duty_ns     = 0u;
 
-    st->dev         = NULL;          /* bridge sentinel */
+    st->dev         = NULL; /* bridge sentinel */
     st->channel_id  = cfg->channel_id;
     st->be_data     = bs;
-    caps_out->flags = 0u;            /* no HW dead-time/break advertised via bridge */
+    caps_out->flags = 0u; /* no HW dead-time/break advertised via bridge */
     return ALP_OK;
 }
 
@@ -113,8 +115,7 @@ static alp_status_t br_set_period(alp_pwm_backend_state_t *st, uint32_t period_n
     return s;
 }
 
-static alp_status_t br_configure(alp_pwm_backend_state_t *st,
-                                 alp_pwm_align_t align_mode,
+static alp_status_t br_configure(alp_pwm_backend_state_t *st, alp_pwm_align_t align_mode,
                                  uint32_t dead_time_ns, uint8_t break_cfg)
 {
     gd32_pwm_state_t *bs = (gd32_pwm_state_t *)st->be_data;
@@ -124,9 +125,8 @@ static alp_status_t br_configure(alp_pwm_backend_state_t *st,
     if (s != ALP_OK) return s;
     /* alp_pwm_align_t and gd32g553_pwm_align_t share the same 0..3
      * EDGE / CENTER_{UP,DOWN,BOTH} ordering. */
-    s = gd32g553_pwm_configure(ctx, bs->channel_id,
-                               (gd32g553_pwm_align_t)align_mode,
-                               dead_time_ns, break_cfg);
+    s = gd32g553_pwm_configure(ctx, bs->channel_id, (gd32g553_pwm_align_t)align_mode, dead_time_ns,
+                               break_cfg);
     alp_z_v2n_supervisor_release();
     return s;
 }
@@ -144,8 +144,7 @@ static alp_status_t br_single_pulse(alp_pwm_backend_state_t *st, uint32_t pulse_
 }
 
 static alp_status_t br_capture_open(const alp_pwm_capture_config_t *cfg,
-                                    alp_pwm_backend_state_t *st,
-                                    alp_capabilities_t *caps_out)
+                                    alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
     /* PWM input-capture over the bridge is not wired in v0.7.  Report
      * unsupported (the general peripheral suite asserts NOSUPPORT for
@@ -158,8 +157,8 @@ static alp_status_t br_capture_open(const alp_pwm_capture_config_t *cfg,
     return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t br_capture_read(alp_pwm_backend_state_t *st,
-                                    uint32_t *period_ns_out, uint32_t *pulse_ns_out)
+static alp_status_t br_capture_read(alp_pwm_backend_state_t *st, uint32_t *period_ns_out,
+                                    uint32_t *pulse_ns_out)
 {
     gd32_pwm_state_t *bs = (gd32_pwm_state_t *)st->be_data;
     if (bs == NULL) return ALP_ERR_NOT_READY;
@@ -204,11 +203,12 @@ static const alp_pwm_ops_t _ops = {
     .close         = br_close,
 };
 
-ALP_BACKEND_REGISTER(pwm, gd32_bridge, {
-    .silicon_ref = "renesas:rzv2n:n44",
-    .vendor      = "renesas",       /* SoC vendor, not the bridge chip */
-    .base_caps   = 0u,
-    .priority    = 100,
-    .ops         = &_ops,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(pwm, gd32_bridge,
+                     {
+                         .silicon_ref = "renesas:rzv2n:n44",
+                         .vendor      = "renesas", /* SoC vendor, not the bridge chip */
+                         .base_caps   = 0u,
+                         .priority    = 100,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });
