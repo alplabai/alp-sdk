@@ -5,47 +5,218 @@
 # EVK) or carries the same fields inline at the top level (for
 # custom boards).  See docs/board-config.md.
 #
-# Reference board for E1M-X V2N and E1M-X V2N-M1 SoM families.
-# Authoritative wiring lives in the board-specific board header
-# (planned: include/alp/boards/alp_e1m_x_evk.h, lands alongside the
-# v0.4 Yocto first-class work).
+# Reference board for the renesas-rzv2n SoM family (E1M-V2N /
+# E1M-V2M SKUs).  The
+# `e1m_routes:` block below is the single source of truth for the
+# XEVK_* macros hand-written firmware uses; `scripts/gen_board_header.py`
+# produces `include/alp/boards/alp_e1m_x_evk_routes.h` from it.  That
+# generated header pulls `<alp/e1m_x_pinout.h>` (the 45x65 namespace),
+# NOT the 35x35 `<alp/e1m_pinout.h>` -- E1M and E1M-X are deliberately
+# separate pinout namespaces, so X-EVK firmware is not source-portable
+# to the E1M EVK and vice-versa.
 #
-# Per the project memory note, the populated chip list below stays
-# minimal until the user supplies the authoritative HW config for
-# the E1M-X-EVK.  Until then this file's role is to give
-# `preset: e1m-x-evk` a known schema landing point.
+# Routing below is derived from the E1M-X EVK module-connector pinout.
+# Pad polarities (`active_low`) follow standard convention
+# (resets/buttons active-low) and the board_id + hw-revision specifics
+# remain TBD until the authoritative HW writeup lands -- see `status:`.
 
 name: E1M-X-EVK
 display_name: "E1M-X Development Board (45x65 board)"
 hosts_som_families: [renesas-rzv2n]
 
-# TBD pending user HW config.  The E1M-X board is richer than
-# the 35x35 EVK (Arduino UNO + mikroBUS click + M.2 E-key + PCIe
-# x4 slot) but the exact chip-driver enable list depends on the
-# user-supplied schematic.
-populated: {}
+# Standard population -- parts confirmed present on the EVK BOM.
+# Each `true` becomes CONFIG_ALP_SDK_CHIP_<NAME>=y at build time;
+# flip an entry to `false` in your board.yaml for a DNI variant.
+populated:
+  # IMUs (no LSM6DSO on the X-EVK; ICM-42670 + BMI323 only).
+  icm42670:                 true                # U12 ICM-42670-P
+  bmi323:                   true                # U13 BMI323 (INT1 on XEVK_PIN_BMI323_INT1)
+  lsm6dso:                  false               # not populated on the X-EVK
 
+  # Environmental
+  bmp581:                   true                # U14 BMP581
+  bme280:                   false
+  lis2dw12:                 false
+
+  # Displays -- the X-EVK drives MIPI-DSI panels, not the EVK's I2C/SPI OLEDs.
+  ssd1306:                  false
+  ssd1331:                  false
+
+  # Camera -- dedicated CSI connectors (CAM0/CAM1); no on-board PI3WVR626 mux.
+  ov5640:                   false
+  cam_mux_pi3wvr626:        false
+
+  # Audio
+  pdm_mic:                  true                # U19/U20/U25/U26 MP34DT05 (4x PDM mics)
+  tas2563:                  true                # U27/U28 TAS2563 (2x smart-amp)
+
+  # I/O expander
+  tcal9538:                 true                # U35/U37 TCAL9538 (2x)
+
+  # Power instrumentation
+  ina236:                   true                # U21/U30/U31/U32/U34 INA236 (5x current monitors)
+
+  # SDK-level block helpers (rotary encoder + RGB LED).
+  button_led:               true                # E1 PEC12R-4222F encoder + RGB LED
+
+# E1M-X-pad -> board-feature routing.  Each entry binds an E1M-X pad
+# or peripheral instance (E1M_X_*) to a board-side macro name.  The
+# generator reads this block and produces
+# `include/alp/boards/alp_e1m_x_evk_routes.h` with one
+# `#define XEVK_<NAME> E1M_X_<...>` line per entry.
+#
+# Entry schema:
+#   - e1m:         <E1M_X_GPIO_IO<N> | E1M_X_PWM<N> | E1M_X_<bus><N> ...>
+#     macro:       <XEVK_* C-macro name to emit>
+#     doc:         "<one-line Doxygen `@brief`>"  (optional)
+#     active_low:  true                            (optional, documentation hint)
+#
+# SoM-side dispatch (the V2N GD32 IO-MCU bridge, etc.) lives in the
+# SoM preset's `pad_routes:` block, NOT here -- this board YAML is
+# SoM-agnostic.
+e1m_routes:
+  gpio:
+    # --- PCIe x4 slot: lane-mux + I2C control ---
+    - { e1m: E1M_X_GPIO_IO0,  macro: XEVK_PIN_PCIE_MUX_PD,
+        doc: "Drive HIGH to power down the PCIe lane mux." }
+    - { e1m: E1M_X_GPIO_IO1,  macro: XEVK_PIN_PCIE_MUX_SEL,
+        doc: "PCIe lane-mux routing select." }
+    - { e1m: E1M_X_GPIO_IO2,  macro: XEVK_PIN_PCIE0_I2C_EN,
+        doc: "Drive high to enable the I2C mux to the PCIe slot." }
+    # --- I2S audio path mux ---
+    - { e1m: E1M_X_GPIO_IO4,  macro: XEVK_PIN_I2S_MUX_EN,
+        doc: "I2S path-mux enable." }
+    - { e1m: E1M_X_GPIO_IO5,  macro: XEVK_PIN_I2S_MUX_SEL,
+        doc: "I2S path-mux select (TAS2563 amps vs. external I2S)." }
+    # --- M.2 E-key ---
+    - { e1m: E1M_X_GPIO_IO6,  macro: XEVK_PIN_M2E_UART_WAKE, active_low: true,
+        doc: "M.2 E-key UART-path wake (active-low)." }
+    # --- Capacitive touch panels (on the two DSI displays) ---
+    - { e1m: E1M_X_GPIO_IO9,  macro: XEVK_PIN_CTP1_INT,
+        doc: "Capacitive touch panel 1 interrupt (display 1)." }
+    - { e1m: E1M_X_GPIO_IO11, macro: XEVK_PIN_CTP1_RST, active_low: true,
+        doc: "Capacitive touch panel 1 reset (active-low)." }
+    - { e1m: E1M_X_GPIO_IO17, macro: XEVK_PIN_CTP2_INT,
+        doc: "Capacitive touch panel 2 interrupt (display 2)." }
+    - { e1m: E1M_X_GPIO_IO19, macro: XEVK_PIN_CTP2_RST, active_low: true,
+        doc: "Capacitive touch panel 2 reset (active-low)." }
+    # --- MIPI-DSI display panels ---
+    - { e1m: E1M_X_GPIO_IO13, macro: XEVK_PIN_LCD1_RST,    active_low: true,
+        doc: "DSI display panel 1 reset (active-low)." }
+    - { e1m: E1M_X_GPIO_IO15, macro: XEVK_PIN_LCD1_PWR_EN,
+        doc: "DSI display panel 1 power enable." }
+    - { e1m: E1M_X_GPIO_IO21, macro: XEVK_PIN_LCD2_RST,    active_low: true,
+        doc: "DSI display panel 2 reset (active-low)." }
+    - { e1m: E1M_X_GPIO_IO22, macro: XEVK_PIN_LCD2_PWR_EN,
+        doc: "DSI display panel 2 power enable." }
+    # --- CSI camera 0 ---
+    - { e1m: E1M_X_GPIO_IO16, macro: XEVK_PIN_CAM0_MUX_SEL,
+        doc: "Camera-0 source/lane mux select." }
+    - { e1m: E1M_X_GPIO_IO18, macro: XEVK_PIN_CAM0_EN,
+        doc: "Camera-0 power enable." }
+    - { e1m: E1M_X_GPIO_IO20, macro: XEVK_PIN_CAM0_RST,    active_low: true,
+        doc: "Camera-0 reset (active-low)." }
+    # --- USB / SD-card path muxes ---
+    - { e1m: E1M_X_GPIO_IO24, macro: XEVK_PIN_USB_MUX_SEL,
+        doc: "USB path-mux select." }
+    - { e1m: E1M_X_GPIO_IO27, macro: XEVK_PIN_SDIO_MUX_SEL,
+        doc: "SDIO path-mux select." }
+    - { e1m: E1M_X_GPIO_IO29, macro: XEVK_PIN_SDIO_MUX_EN,
+        doc: "SDIO path-mux enable." }
+    # --- Rotary encoder push switch ---
+    - { e1m: E1M_X_GPIO_IO28, macro: XEVK_PIN_ENCODER_SW,  active_low: true,
+        doc: "Rotary encoder (PEC12R-4222F) push switch; pull-up + RC debounce." }
+    # --- IMU interrupt ---
+    - { e1m: E1M_X_GPIO_IO32, macro: XEVK_PIN_BMI323_INT1,
+        doc: "BMI323 INT1 (data-ready / motion / FIFO)." }
+    # --- RGB LED pads driven as plain digital GPIOs (the GPIO-secondary
+    #     of the PWM cluster -- same physical pads as the XEVK_PWM_LED_*
+    #     entries in the `pwm:` section).  Open the PWM macro for
+    #     brightness/fade, the GPIO macro for on/off; never both at once. ---
+    - { e1m: E1M_X_GPIO_PWM5, macro: XEVK_PIN_LED_RED,
+        doc: "RGB LED red -- the PWM5 pad driven as a digital GPIO." }
+    - { e1m: E1M_X_GPIO_PWM7, macro: XEVK_PIN_LED_GREEN,
+        doc: "RGB LED green -- the PWM7 pad driven as a digital GPIO." }
+    - { e1m: E1M_X_GPIO_PWM6, macro: XEVK_PIN_LED_BLUE,
+        doc: "RGB LED blue -- the PWM6 pad driven as a digital GPIO." }
+  buses:
+    - { e1m: E1M_X_I2C0,  macro: XEVK_I2C_BUS_SENSORS,
+        doc: "On-board sensor + IO-expander + INA236 bus (ICM-42670, BMI323, BMP581, TCAL9538, INA236)." }
+    - { e1m: E1M_X_I2C2,  macro: XEVK_I2C_BUS_DSI_CSI0,
+        doc: "Display/camera control I2C bank 0 (DSI panel + CSI camera-side config)." }
+    - { e1m: E1M_X_I2C3,  macro: XEVK_I2C_BUS_DSI_CSI1,
+        doc: "Display/camera control I2C bank 1." }
+    - { e1m: E1M_X_SPI1,  macro: XEVK_SPI_BUS_ARDUINO,
+        doc: "Arduino UNO header SPI (level-shifted)." }
+    - { e1m: E1M_X_UART0, macro: XEVK_UART_PORT_DEBUG,
+        doc: "Console / debug UART." }
+    - { e1m: E1M_X_UART1, macro: XEVK_UART_PORT_ARDUINO,
+        doc: "Arduino UNO header UART (D0/D1, level-shifted)." }
+  pwm:
+    - { e1m: E1M_X_PWM0, macro: XEVK_ARD_PWM0,
+        doc: "Arduino UNO header PWM0 (level-shifted)." }
+    - { e1m: E1M_X_PWM1, macro: XEVK_ARD_PWM1,
+        doc: "Arduino UNO header PWM1." }
+    - { e1m: E1M_X_PWM2, macro: XEVK_ARD_PWM2,
+        doc: "Arduino UNO header PWM2." }
+    - { e1m: E1M_X_PWM3, macro: XEVK_ARD_PWM3,
+        doc: "Arduino UNO header PWM3." }
+    - { e1m: E1M_X_PWM4, macro: XEVK_PWM_DISP2_BL,
+        doc: "Display-2 backlight PWM (DISP2_BL_PWM)." }
+    - { e1m: E1M_X_PWM5, macro: XEVK_PWM_LED_RED,
+        doc: "RGB LED red channel (GPIO-secondary = XEVK_PIN_LED_RED)." }
+    - { e1m: E1M_X_PWM6, macro: XEVK_PWM_LED_BLUE,
+        doc: "RGB LED blue channel (GPIO-secondary = XEVK_PIN_LED_BLUE)." }
+    - { e1m: E1M_X_PWM7, macro: XEVK_PWM_LED_GREEN,
+        doc: "RGB LED green channel (GPIO-secondary = XEVK_PIN_LED_GREEN)." }
+  adc:
+    - { e1m: E1M_X_ADC0, macro: XEVK_ADC_ARDUINO_A0,
+        doc: "Arduino UNO header A0 analog input (ANA_S0)." }
+  dac:
+    - { e1m: E1M_X_DAC0, macro: XEVK_DAC0,
+        doc: "DAC0 analog output." }
+    - { e1m: E1M_X_DAC1, macro: XEVK_DAC1,
+        doc: "DAC1 analog output." }
+  i2s:
+    - { e1m: E1M_X_I2S0, macro: XEVK_I2S_AUDIO,
+        doc: "TAS2563 smart-amp I2S (SCLK / WS / SDI / SDO)." }
+  can:
+    - { e1m: E1M_X_CAN0, macro: XEVK_CAN_BUS0,
+        doc: "CAN0 via TCAN1044 transceiver (U51)." }
+    - { e1m: E1M_X_CAN1, macro: XEVK_CAN_BUS1,
+        doc: "CAN1 via TCAN1044 transceiver (U52)." }
+  qenc:
+    - { e1m: E1M_X_ENC0, macro: XEVK_ENC_ROTARY,
+        doc: "PEC12R-4222F rotary encoder: ENC0_X = A phase, ENC0_Y = B phase; push switch on XEVK_PIN_ENCODER_SW (E1M_X_GPIO_IO28).  ENC1-3 pads are broken out but unpopulated." }
+
+# Inference + display defaults a stock X-EVK app would pick.  Apps
+# override in their board.yaml as needed.
 defaults:
-  display:                  null
-  primary_imu:              null
+  display:                  null                # MIPI-DSI panel -- no I2C/SPI display-chip driver
+  primary_imu:              icm42670            # canonical (BMI323 is the alternate)
 
-# Hardware revisions.  Same ADC + resistor-divider scheme as the
-# E1M-EVK (see metadata/boards/E1M-EVK/board.yaml for the
-# rationale + math).  All concrete values TBD until the user-
-# supplied X-EVK schematic lands.
+# Hardware revisions.  Same ADC + resistor-divider BOARD_ID scheme
+# as the E1M-EVK (see metadata/boards/e1m-evk.yaml for the math);
+# the concrete channel + divider values are TBD until the
+# authoritative X-EVK schematic writeup lands.
 default_hw_rev:             r1
 
 hw_revisions:
   r1:
     min_sdk_version: "0.3.0"
     max_sdk_version: ~
-    status: tbd
+    status: preliminary
     board_id:
       adc_channel:    TBD
-      # Resistor values + expected_mv + bin_radius_mv live in
-      # the private alp-sdk-internal repo (see E1M-EVK board.yaml
-      # for the same split rationale).
+      # Divider resistor values + per-rev expected_mv + bin_radius_mv
+      # live in the private alp-sdk-internal repo per the public/private
+      # split policy (see the E1M-EVK board.yaml for the rationale).
+    notes: |
+      E1M-X Development Board (45x65).  The `e1m_routes:` block is
+      derived from the EVK module-connector pinout; macro names and
+      pad polarities are pending ratification against the
+      authoritative HW writeup.
 
 status:
-  preliminary:              true                # populated list incomplete
-  partial_hw_config:        true                # awaiting user HW writeup
+  preliminary:              true                # routes connector-derived, pending HW-writeup ratification
+  partial_hw_config:        true                # board_id ADC channel + a few control pads (CAN_STBY, CAM1_RST) still TBD
