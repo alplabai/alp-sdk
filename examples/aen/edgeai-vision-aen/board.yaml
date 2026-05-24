@@ -14,13 +14,14 @@ som:
 preset: e1m-evk            # EVK preset populates lsm6dso + ssd1306 on
                            # I2C0; this demo adds an encoder-switch
                            # trigger (GPIO) + an RGB-red status LED
-                           # (PWM) from the routes below.
+                           # (the PWM3 pad as a GPIO) from the routes
+                           # below.
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
-  - { e1m: E1M_I2C0,     macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander bus (LSM6DSO + SSD1306)" }
-  - { e1m: E1M_GPIO_IO4, macro: EVK_PIN_ENCODER_SW,  doc: "Rotary encoder push switch (trigger), active-low" }
-  - { e1m: E1M_PWM3,     macro: EVK_PWM_LED_RED,     doc: "RGB LED red channel (status indicator); driven as a digital GPIO via E1M_GPIO_PWM3" }
+  - { e1m: E1M_I2C0,      macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander bus (LSM6DSO + SSD1306)" }
+  - { e1m: E1M_GPIO_IO4,  macro: EVK_PIN_ENCODER_SW,  doc: "Rotary encoder push switch (trigger), active-low" }
+  - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED,     doc: "RGB LED red (status indicator) -- the PWM3 pad opened as a digital GPIO via the EVK_PIN_LED_RED macro" }
 
 # Single-OS app: the M55-HP core runs the vision pipeline + dispatches
 # to the NPU bonded to it via topology.  M55-HE keeps the SoM

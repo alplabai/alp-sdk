@@ -23,12 +23,20 @@
 #include <zephyr/kernel.h>
 
 #include "alp/peripheral.h"
-#include "alp/e1m_pinout.h"
 #include "alp/chips/lsm6dso.h"
 #include "alp/chips/ssd1306.h"
 #include "alp/blocks/button_led.h"
 #include "alp/camera.h"
 #include "alp/inference.h"
+
+/* Pins/buses are opened by their BOARD-MACRO names (EVK_I2C_BUS_SENSORS,
+ * EVK_PIN_ENCODER_SW, EVK_PIN_LED_RED) rather than raw E1M instance IDs.
+ * The macros come from the board's generated routes header (one
+ * `#define EVK_<NAME> E1M_<...>` per `e1m_routes:` entry in
+ * metadata/boards/e1m-evk.yaml); they are the customer's readable,
+ * rebindable pin names.  Port this app to your own board by editing
+ * that board's `pins:` block -- the code below stays unchanged. */
+#include "alp/boards/alp_e1m_evk_routes.h"
 
 /* ------------------------------------------------------------------ */
 /* Pipeline stage 1 — peripherals                                      */
@@ -44,14 +52,14 @@ static int              stage_peripherals_init(void)
     printf("[edgeai] stage 1: peripherals\n");
 
     g_sensor_bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id     = E1M_I2C0,
+        .bus_id     = EVK_I2C_BUS_SENSORS, /* = E1M_I2C0: shared sensor + IO-expander bus */
         .bitrate_hz = 400000,
     });
     if (g_sensor_bus == NULL) {
-        printf("[edgeai]   alp_i2c_open(I2C0) failed\n");
+        printf("[edgeai]   alp_i2c_open(SENSORS) failed\n");
         return -1;
     }
-    printf("[edgeai]   alp_i2c_open(I2C0)            ok\n");
+    printf("[edgeai]   alp_i2c_open(SENSORS)         ok\n");
 
     /* SSD1306 status overlay.  On a real EVK the panel sits behind
      * level shifters on a separate I²C bus (DSI_I2C), wired through
@@ -64,13 +72,14 @@ static int              stage_peripherals_init(void)
     s = lsm6dso_init(&g_imu, g_sensor_bus, LSM6DSO_I2C_ADDR_LOW);
     printf("[edgeai]   lsm6dso_init                  %s\n", (s == ALP_OK) ? "ok" : "skip (no IMU)");
 
-    /* User trigger + status LED via the button_led block.  The EVK
-     * has no plain GPIO LED, so the LED is the RGB-red pad (PWM3)
-     * claimed as a digital GPIO (E1M_GPIO_PWM3, the E1M "GPIO
-     * secondary"); the button is the encoder push switch (IO4). */
+    /* User trigger + status LED via the button_led block, both opened
+     * by board-macro name.  The EVK has no plain GPIO LED, so
+     * EVK_PIN_LED_RED resolves to the RGB-red pad driven as a digital
+     * GPIO (E1M_GPIO_PWM3, the e1m-spec "GPIO secondary"); the trigger
+     * is the encoder push switch, EVK_PIN_ENCODER_SW (E1M_GPIO_IO4). */
     s = alp_button_led_init(&g_trigger, &(alp_button_led_config_t){
-                                            .button_pin_id     = E1M_GPIO_IO4,
-                                            .led_pin_id        = E1M_GPIO_PWM3,
+                                            .button_pin_id     = EVK_PIN_ENCODER_SW,
+                                            .led_pin_id        = EVK_PIN_LED_RED,
                                             .active_low_button = true,
                                         });
     printf("[edgeai]   alp_button_led_init           %s\n",
