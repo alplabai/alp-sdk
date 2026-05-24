@@ -86,7 +86,7 @@ Concretely:
   `OVERLAY_CONFIG` cmake variable.  `rsource` is NOT valid in a
   `.conf` file (it is a Kconfig-source directive only) -- the
   earlier "single `rsource` line" pattern in this doc was wrong;
-  see the worked example at `examples/gpio-button-led/CMakeLists.txt`
+  see the worked example at `examples/peripheral-io/gpio-button-led/CMakeLists.txt`
   for the correct wiring.
 - **Don't pass extra `-D` flags to `cmake` for SDK options.**  The
   loader emits the right set; passing extra flags risks divergence

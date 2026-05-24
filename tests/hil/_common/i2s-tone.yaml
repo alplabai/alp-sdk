@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Portable HiL smoke for examples/i2s-tone.  Works on every E1M-
+# Portable HiL smoke for examples/audio/i2s-tone.  Works on every E1M-
 # conformant SoM (e1m-spec mandates 2x I2S).
 #
 # Hardware fixtures expected:
@@ -21,7 +21,7 @@ name: i2s-tone
 description: |
   I2S open + 4-block triangle-wave write against E1M_I2S0.
 
-example: examples/i2s-tone
+example: examples/audio/i2s-tone
 
 serial:
   duration_s: 10

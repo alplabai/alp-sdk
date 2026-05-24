@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Portable HiL smoke for examples/i2c-scanner.  Works on every E1M-
+# Portable HiL smoke for examples/peripheral-io/i2c-scanner.  Works on every E1M-
 # conformant SoM (e1m-spec mandates 2x I2C; E1M_I2C0 always present).
 #
 # Hardware fixtures expected:
@@ -26,7 +26,7 @@ description: |
   Confirms the I2C bus on E1M_I2C0 reaches at least one populated
   device on the board.
 
-example: examples/i2c-scanner
+example: examples/peripheral-io/i2c-scanner
 
 serial:
   duration_s: 15

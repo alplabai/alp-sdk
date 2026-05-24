@@ -47,7 +47,7 @@ defaults:
 _MIN_SPEC = """
 schema_version: 1
 name: smoke
-example: examples/gpio-button-led
+example: examples/peripheral-io/gpio-button-led
 serial:
   expect_contains:
     - "init ok"
@@ -113,7 +113,7 @@ def test_parse_spec_missing_example_fails(tmp_path: Path) -> None:
     """The `example:` path must exist on disk."""
     d = _make_spec_dir(tmp_path)
     _write(d / "smoke.yaml", _MIN_SPEC.replace(
-        "examples/gpio-button-led", "examples/no-such-example"))
+        "examples/peripheral-io/gpio-button-led", "examples/no-such-example"))
     with pytest.raises(run_smoke.SpecError) as e:
         run_smoke.parse_spec(d / "smoke.yaml")
     assert "does not exist" in str(e.value)
@@ -125,7 +125,7 @@ def test_parse_spec_missing_expect_contains_fails(tmp_path: Path) -> None:
     _write(d / "smoke.yaml", """
         schema_version: 1
         name: smoke
-        example: examples/gpio-button-led
+        example: examples/peripheral-io/gpio-button-led
         serial:
           duration_s: 10
     """)
@@ -280,7 +280,7 @@ def test_assert_multiple_failures_accumulate(tmp_path: Path) -> None:
     _write(d / "smoke.yaml", """
         schema_version: 1
         name: smoke
-        example: examples/gpio-button-led
+        example: examples/peripheral-io/gpio-button-led
         serial:
           duration_s: 10
           expect_contains:

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Portable HiL smoke for examples/qenc-readout.  Works on every E1M-
+# Portable HiL smoke for examples/peripheral-io/qenc-readout.  Works on every E1M-
 # conformant SoM (e1m-spec mandates 4x quadrature decoder).
 #
 # Hardware fixtures expected:
@@ -19,7 +19,7 @@ name: qenc-readout
 description: |
   Quadrature-decoder open + position polling against E1M_ENC0.
 
-example: examples/qenc-readout
+example: examples/peripheral-io/qenc-readout
 
 serial:
   duration_s: 12      # 1 s of polling + setup overhead

@@ -22,7 +22,7 @@ v0.4-prep nanopb framing.
 peer firmware is built).
 
 > Companion example:
-> [`examples/mproc-mailbox/`](../../examples/mproc-mailbox/) --
+> [`examples/multicore/mproc-mailbox/`](../../examples/multicore/mproc-mailbox/) --
 > the HP-side firmware this tutorial walks through.  The peer-
 > side (HE) firmware lands alongside the v0.4 dual-image build
 > flow in `alplabai/alp-zephyr-modules`.
@@ -106,7 +106,7 @@ alp_hwsem_give(sem);
 
 ## 2. The HP-side application
 
-From `examples/mproc-mailbox/src/main.c`:
+From `examples/multicore/mproc-mailbox/src/main.c`:
 
 ```c
 alp_shmem_t *shmem = alp_shmem_open(0u);
@@ -141,7 +141,7 @@ printf("HE echoed: %s\n", echo_buf);
 
 ## 3. The HE-side peer (sketch -- v0.4 dual-image)
 
-The peer firmware lives at `examples/mproc-mailbox/peer/src/main.c`
+The peer firmware lives at `examples/multicore/mproc-mailbox/peer/src/main.c`
 (TBD until the dual-image build flow lands).  Pattern:
 
 ```c
@@ -212,11 +212,11 @@ above doesn't change; the framing is transparent inside
 
 ```bash
 # HP-side:
-west alp-build -b alif_e7_dk_rtss_he examples/mproc-mailbox
+west alp-build -b alif_e7_dk_rtss_he examples/multicore/mproc-mailbox
 # Outputs build/zephyr/zephyr.bin for HP.
 
 # HE-side (TBD, dual-image flow):
-# west alp-build -b alif_e7_dk_rtss_he examples/mproc-mailbox \
+# west alp-build -b alif_e7_dk_rtss_he examples/multicore/mproc-mailbox \
 #     --sysbuild --domain m55-he
 # Outputs build/m55-he/zephyr/zephyr.bin for HE.
 
@@ -255,7 +255,7 @@ silicon.
 ## See also
 
 - [`<alp/mproc.h>`](../../include/alp/mproc.h) -- the public API.
-- [`examples/mproc-mailbox/`](../../examples/mproc-mailbox/) --
+- [`examples/multicore/mproc-mailbox/`](../../examples/multicore/mproc-mailbox/) --
   the reference app (HP-side; HE-side TBD with v0.4 dual-
   image).
 - [`tests/fuzz/mproc_frame_fuzz.c`](../../tests/fuzz/mproc_frame_fuzz.c)

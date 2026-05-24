@@ -18,7 +18,7 @@ git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
 bash scripts/bootstrap.sh                            # one-time: west + Python + apt hints
 export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
-west alp-build -b native_sim/native/64 examples/gpio-button-led
+west alp-build -b native_sim/native/64 examples/peripheral-io/gpio-button-led
 west build -d build -t run
 # expect: [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
 #          ...
@@ -153,7 +153,7 @@ fragments, DTS overlays, and the build-time hw_info header.  The
 
 ```bash
 cd alp-workspace
-west alp-build -b native_sim/native/64 alp-sdk/examples/gpio-button-led
+west alp-build -b native_sim/native/64 alp-sdk/examples/peripheral-io/gpio-button-led
 ```
 
 What the flags mean:
@@ -163,7 +163,7 @@ What the flags mean:
   macOS / WSL.  (Native Windows: use `west alp-build -b native_sim/native/32`
   with the MSVC-compatible toolchain, or run the 64-bit variant
   through WSL.)
-- `alp-sdk/examples/gpio-button-led` — the application directory.
+- `alp-sdk/examples/peripheral-io/gpio-button-led` — the application directory.
   Each example under `examples/` ships a `board.yaml` + an empty
   `prj.conf` + a CMakeLists.txt that invokes the loader at
   configure time.  See [`docs/board-config.md`](board-config.md)
@@ -208,7 +208,7 @@ press state.
 
 ## 5. Read the example
 
-Open `alp-sdk/examples/gpio-button-led/src/main.c`.  Every
+Open `alp-sdk/examples/peripheral-io/gpio-button-led/src/main.c`.  Every
 example app is annotated as teaching material — the comments
 spell out:
 
@@ -251,7 +251,7 @@ files (`alp_e1m_evk_aen` for the AEN family, `alp_e1m_evk_v2n`
 for V2N), build with that as the `-b` target:
 
 ```bash
-west build -b alp_e1m_evk_aen alp-sdk/examples/gpio-button-led
+west build -b alp_e1m_evk_aen alp-sdk/examples/peripheral-io/gpio-button-led
 west flash
 ```
 
@@ -416,7 +416,7 @@ Key tasks (Command Palette → **Tasks: Run Task**):
 - **End-to-end reference apps**:
   [`examples/aen/edgeai-vision-aen/`](../examples/aen/edgeai-vision-aen/)
   (camera → Ethos-U inference → display) and
-  [`examples/iot-connected-camera/`](../examples/iot-connected-camera/)
+  [`examples/connectivity/iot-connected-camera/`](../examples/connectivity/iot-connected-camera/)
   (camera → DRP-AI → MQTT publish).  Both use the same board.yaml
   workflow at a larger scale.
 - **Hardware identification + production-test**:

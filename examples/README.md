@@ -11,7 +11,7 @@ project, and modify.
 
 ```bash
 cd alp-workspace
-west alp-build alp-sdk/examples/<name>
+west alp-build alp-sdk/examples/<category>/<name>   # e.g. examples/peripheral-io/gpio-button-led
 ```
 
 `west alp-build` reads the example's `board.yaml` v2, resolves the
@@ -46,6 +46,11 @@ marks the ones locked to specific silicon:
 Many v0.5--v0.6 examples are still `[UNTESTED]` -- they build on
 `native_sim/native/64` and cross-compile, but await hardware-in-the-
 loop bring-up.  Each example's own `README.md` carries its status.
+
+Examples are grouped on disk into category subdirectories matching the
+section headings below -- e.g. Peripheral I/O lives under
+`examples/peripheral-io/`, Audio under `examples/audio/`, and so on.
+(The `v2n/` and `aen/` platform groups predate this layout.)
 
 ### Peripheral I/O
 

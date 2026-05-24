@@ -103,9 +103,9 @@ target is the same field you edit to change targets.
 This is the cleanest case — two SKUs in the same family, with
 different silicon tiers (E7 → E8) but compatible board shapes
 and identical app-facing pinout.  We'll walk through it using the
-canonical `examples/i2c-scanner/` example.
+canonical `examples/peripheral-io/i2c-scanner/` example.
 
-**Starting `examples/i2c-scanner/board.yaml`:**
+**Starting `examples/peripheral-io/i2c-scanner/board.yaml`:**
 
 ```yaml
 som:
@@ -143,7 +143,7 @@ diagnostics:
 
 ```bash
 python scripts/alp_project.py \
-    --input examples/i2c-scanner/board.yaml \
+    --input examples/peripheral-io/i2c-scanner/board.yaml \
     --core m55_hp \
     --emit zephyr-conf
 ```
@@ -181,7 +181,7 @@ the U55 dispatch on the same SoM.
 **Build:**
 
 ```bash
-west build -b alp_e1m_aen801_m55_hp examples/i2c-scanner
+west build -b alp_e1m_aen801_m55_hp examples/peripheral-io/i2c-scanner
 ```
 
 **Flash:** the `west flash` step is unchanged from any other AEN
@@ -191,7 +191,7 @@ incantation, USB-DFU fallback, and the `west alp-flash` wrapper
 for multi-image SoMs.
 
 That is the swap test.  No source change.  The `main.c` from
-`examples/i2c-scanner/src/main.c` opens `E1M_I2C0` via
+`examples/peripheral-io/i2c-scanner/src/main.c` opens `E1M_I2C0` via
 `alp_i2c_open()`, gets a real handle on both SKUs, scans the
 bus.  Same code, same diagnostic output, the SDK just routed
 through a different SoC under the hood.

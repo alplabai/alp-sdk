@@ -53,7 +53,7 @@ description: |
   device enters the declared sleep_mode, and a declared UART wake
   source brings it back without a fault.
 
-example: examples/uart-echo
+example: examples/peripheral-io/uart-echo
 
 serial:
   duration_s: 20

@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE_DIR = REPO_ROOT / "examples" / "hello-world"
+TEMPLATE_DIR = REPO_ROOT / "examples" / "peripheral-io" / "hello-world"
 SOM_DIR = REPO_ROOT / "metadata" / "e1m_modules"
 PRESET_DIR = REPO_ROOT / "metadata" / "boards"
 STARTER_PERIPHERALS = ("uart", "gpio", "i2c", "spi", "pwm")

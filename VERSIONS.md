@@ -298,7 +298,7 @@ handles that handoff in v0.4.
 
 ### IoT reference application
 
-`examples/iot-connected-camera/` — connected-camera reference: V2N
+`examples/connectivity/iot-connected-camera/` — connected-camera reference: V2N
 captures → on-device classifier → MQTT/TLS publish to a broker,
 local LVGL UI showing the live classification.  This is the original
 roadmap's "IoT Application Example" deliverable.

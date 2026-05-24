@@ -41,7 +41,7 @@ description: |
   signature type matches the declared algorithm, and the application
   boots cleanly after the handoff.
 
-example: examples/iot-fleet-ota
+example: examples/connectivity/iot-fleet-ota
 
 serial:
   duration_s: 25

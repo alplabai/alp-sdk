@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Portable HiL smoke for examples/counter-alarm.  Works on every E1M-
+# Portable HiL smoke for examples/power-timing/counter-alarm.  Works on every E1M-
 # conformant SoM (every supported SoC has at least one 32-bit timer
 # the alp-counter0 alias targets).
 #
@@ -17,7 +17,7 @@ name: counter-alarm
 description: |
   Counter open + 100 ms one-shot alarm dispatch.
 
-example: examples/counter-alarm
+example: examples/power-timing/counter-alarm
 
 serial:
   duration_s: 10

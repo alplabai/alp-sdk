@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Portable HiL smoke for examples/pwm-led-fade.  Works on every E1M-
+# Portable HiL smoke for examples/peripheral-io/pwm-led-fade.  Works on every E1M-
 # conformant SoM -- the example targets E1M_PWM0 which the spec
 # guarantees every SoM routes.
 #
@@ -14,7 +14,7 @@ name: pwm-led-fade
 description: |
   PWM open / set_duty sweep across E1M_PWM0.
 
-example: examples/pwm-led-fade
+example: examples/peripheral-io/pwm-led-fade
 
 serial:
   duration_s: 15

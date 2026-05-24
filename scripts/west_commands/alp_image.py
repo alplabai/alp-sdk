@@ -11,8 +11,8 @@ is finalised.
 
 Customer flow:
 
-    west alp-build examples/rpmsg-v2n      # produces system-manifest
-    west alp-image examples/rpmsg-v2n      # produces image-bundle/
+    west alp-build examples/multicore/rpmsg-v2n      # produces system-manifest
+    west alp-image examples/multicore/rpmsg-v2n      # produces image-bundle/
 
 The bundle layout:
 

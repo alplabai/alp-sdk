@@ -121,7 +121,7 @@
             "command": "west",
             "args": [
                 "build", "-b", "native_sim/native/64",
-                "${workspaceFolder}/examples/iot-connected-camera",
+                "${workspaceFolder}/examples/connectivity/iot-connected-camera",
                 "-d", "${workspaceFolder}/build/iot-connected-camera",
                 "--", "-DEXTRA_ZEPHYR_MODULES=${workspaceFolder}"
             ],

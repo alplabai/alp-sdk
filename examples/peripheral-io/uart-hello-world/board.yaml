@@ -1,0 +1,33 @@
+# board.yaml -- per-app project configuration for the
+# uart-hello-world example.
+#
+# The canonical "printf via UART" walkthrough: open a UART port
+# with alp_uart_open(), send a greeting + counter every second,
+# show error handling.  Distinct from examples/peripheral-io/uart-echo (which is
+# a bidirectional ping-pong) -- this example is the producer-only
+# variant most vendor SDKs ship as their first tutorial.
+#
+# Customer workflow: copy this directory, change `som.sku` to
+# your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
+# and `west build`.  CMakeLists.txt invokes
+# scripts/alp_project.py at configure time + layers the
+# generated alp.conf over prj.conf via OVERLAY_CONFIG.
+som:
+  sku: E1M-AEN701
+
+preset: e1m-evk
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+pins:
+  - { e1m: E1M_UART0, macro: EVK_UART_PORT_DEBUG, doc: "Console UART exposed on the JTAG/SWD-side debug header" }
+cores:
+  m55_hp:
+    app: ./src
+    # Zephyr peripheral subsystem exercised by this example.  The
+    # loader translates the entry to CONFIG_SERIAL=y in alp.conf,
+    # which also activates the SDK's `alp_uart_*` wrapper layer.
+    peripherals:
+      - uart
+
+diagnostics:
+  log_level: info

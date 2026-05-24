@@ -480,12 +480,12 @@ If a failure appears:
 The portability promise: *the same example source, the same
 `board.yaml` shape, builds against the new SoM with one field
 edited.*  Pick the simplest portable example as the swap-test
-victim — `examples/i2c-scanner/` works because it touches only
+victim — `examples/peripheral-io/i2c-scanner/` works because it touches only
 `<alp/peripheral.h>` and has no SoM-specific code paths.
 
 ### 1. Copy the example
 
-Create `examples/i2c-scanner-aen901/` as a sibling, copying the
+Create `examples/peripheral-io/i2c-scanner-aen901/` as a sibling, copying the
 content verbatim.  (For a full smoke-test you can keep the
 existing directory and just patch its `board.yaml` in-place; the
 sibling form is easier to revert.)
@@ -520,7 +520,7 @@ diagnostics:
 
 ```bash
 python scripts/alp_project.py \
-    --input examples/i2c-scanner-aen901/board.yaml \
+    --input examples/peripheral-io/i2c-scanner-aen901/board.yaml \
     --core m55_hp \
     --emit zephyr-conf
 ```
@@ -560,7 +560,7 @@ is green.
 
 ```bash
 python scripts/alp_project.py \
-    --input examples/i2c-scanner-aen901/board.yaml \
+    --input examples/peripheral-io/i2c-scanner-aen901/board.yaml \
     --core m55_hp \
     --emit cmake-args
 ```
@@ -584,7 +584,7 @@ Generating Zephyr board files (`<board>.dts`, `<board>.yaml`,
 
 ```bash
 python scripts/alp_project.py \
-    --input examples/i2c-scanner-aen901/board.yaml \
+    --input examples/peripheral-io/i2c-scanner-aen901/board.yaml \
     --core m55_hp \
     --emit zephyr-board \
     --output build/boards/alp_e1m_aen901_m55_hp/
@@ -596,7 +596,7 @@ Then:
 west build \
     -b alp_e1m_aen901_m55_hp \
     --board-root build/boards \
-    examples/i2c-scanner-aen901
+    examples/peripheral-io/i2c-scanner-aen901
 ```
 
 > **Future work flag.**  The `--emit zephyr-board` emitter is on the

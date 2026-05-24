@@ -7,8 +7,8 @@ self-contained so removing them is enough).
 
 Customer flow:
 
-    west alp-clean examples/rpmsg-v2n
-    west alp-clean examples/rpmsg-v2n --dry-run    # list, don't delete
+    west alp-clean examples/multicore/rpmsg-v2n
+    west alp-clean examples/multicore/rpmsg-v2n --dry-run    # list, don't delete
 """
 
 from __future__ import annotations

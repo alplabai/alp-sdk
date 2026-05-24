@@ -67,8 +67,8 @@ SKUs: `E1M-AEN301`, `E1M-AEN401`, `E1M-AEN501`, `E1M-AEN601`,
 only; treat as best-effort).
 
 Pick a canonical portable example as the swap-test subject.  Good
-candidates: `examples/i2c-scanner`, `examples/gpio-button-led`,
-`examples/pwm-led-fade`.  Pick one that exercises a portable
+candidates: `examples/peripheral-io/i2c-scanner`, `examples/peripheral-io/gpio-button-led`,
+`examples/peripheral-io/pwm-led-fade`.  Pick one that exercises a portable
 peripheral surface only (no NPU, no DEEPX, no GD32-extension features).
 
 For each SKU:
@@ -104,7 +104,7 @@ SKUs: `E1M-V2N101`, `E1M-V2N102`, `E1M-V2M101`, `E1M-V2M102`.
 All four share `silicon: renesas:rzv2n:n44`.  Swap-test subject
 should exercise GD32-bridged peripherals (PWM / ADC / DAC routed
 through the on-module IO MCU).  Good candidates:
-`examples/adc-voltmeter`, `examples/pwm-led-fade`,
+`examples/peripheral-io/adc-voltmeter`, `examples/peripheral-io/pwm-led-fade`,
 `examples/v2n/v2n-pwm-fan-control`.
 
 For each SKU:
@@ -205,13 +205,13 @@ loudly rather than dispatching the wrong align mode at runtime.
 
 ### C.4 — Comment-density boost on thin examples
 
-- `examples/rpmsg-imx93/m33/src/main.c` is at ~14% comments (target
+- `examples/multicore/rpmsg-imx93/m33/src/main.c` is at ~14% comments (target
   ~50% per `[[examples-are-documentation]]`)
-- `examples/drone-autopilot/src/main.c` is at ~20% (especially the
+- `examples/peripheral-io/drone-autopilot/src/main.c` is at ~20% (especially the
   main() body, lines 75–184)
 
 Boost both to ~50% by adding pedagogical prose around each call.
-The `examples/rpmsg-v2n/m33_sm/src/main.c` is the gold standard —
+The `examples/multicore/rpmsg-v2n/m33_sm/src/main.c` is the gold standard —
 mirror its density + style.
 
 ### C.5 — Chip-driver "stub register table" header notes

@@ -271,7 +271,7 @@ west alp-build -b <renesas_rzv2n_board> alp-sdk/examples/v2n/v2n-gd32-bridge-pin
 west build -d build -t flash
 
 # AEN (Alif Ensemble)
-west alp-build -b <alif_ensemble_board> alp-sdk/examples/gpio-button-led
+west alp-build -b <alif_ensemble_board> alp-sdk/examples/peripheral-io/gpio-button-led
 west build -d build -t flash
 ```
 

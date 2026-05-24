@@ -8,7 +8,7 @@ a scope.
 ## What it shows
 
 1. The canonical `alp_pwm_open` + `alp_pwm_set_duty` + `alp_pwm_close`
-   usage pattern -- same call sequence as `examples/pwm-led-fade/`,
+   usage pattern -- same call sequence as `examples/peripheral-io/pwm-led-fade/`,
    just with a fan curve instead of a sinusoidal sweep.
 2. The portable `E1M_PWM0..PWM7` instance IDs from
    [`<alp/e1m_pinout.h>`](../../../include/alp/e1m_pinout.h) -- the
@@ -59,5 +59,5 @@ across the full ramp is straightforward.
 * [`<alp/pwm.h>`](../../../include/alp/pwm.h) -- portable PWM surface.
 * [`<alp/e1m_pinout.h>`](../../../include/alp/e1m_pinout.h) -- the
   E1M-standard `E1M_PWM*` instance IDs.
-* [`examples/pwm-led-fade/`](../pwm-led-fade/) -- companion
+* [`examples/peripheral-io/pwm-led-fade/`](../pwm-led-fade/) -- companion
   example using the same API on a single LED.

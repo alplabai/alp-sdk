@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Portable HiL smoke for examples/can-loopback.  Works on every E1M-
+# Portable HiL smoke for examples/peripheral-io/can-loopback.  Works on every E1M-
 # conformant SoM (e1m-spec mandates 1x CAN-FD).
 #
 # Loopback mode means no transceiver wiring needed -- the controller
@@ -20,7 +20,7 @@ name: can-loopback
 description: |
   CAN controller loopback: send -> rx callback within 200 ms.
 
-example: examples/can-loopback
+example: examples/peripheral-io/can-loopback
 
 serial:
   duration_s: 10

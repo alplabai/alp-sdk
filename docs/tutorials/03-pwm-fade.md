@@ -2,7 +2,7 @@
 
 # 03 -- PWM fade
 
-Walks `examples/pwm-led-fade/`.  A PWM channel ramps its duty cycle
+Walks `examples/peripheral-io/pwm-led-fade/`.  A PWM channel ramps its duty cycle
 from 0 to 100 % and back -- the LED visibly fades up + down.  This
 is the "I can control analog brightness" smoke test for the PWM
 wrapper.

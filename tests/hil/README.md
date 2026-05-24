@@ -111,7 +111,7 @@ name: gpio-button-led
 description: Verifies GPIO read (button) + GPIO write (LED) end-to-end.
 
 # The example to build and flash.  Paths are repo-relative.
-example: examples/gpio-button-led
+example: examples/peripheral-io/gpio-button-led
 
 # Zephyr board target.  When omitted, defaults to the per-directory
 # default declared in <dir>/_runner.yaml.

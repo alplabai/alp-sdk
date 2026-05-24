@@ -11,13 +11,13 @@ scripts/alp_orchestrate.py.
 Customer flow (per spec §5.4):
 
     # Default -- build every non-off slice declared in board.yaml:
-    west alp-build examples/rpmsg-v2n
+    west alp-build examples/multicore/rpmsg-v2n
 
     # Iterate on one slice only (skips Yocto's hour-long rebuild):
-    west alp-build examples/rpmsg-v2n --core m33_sm
+    west alp-build examples/multicore/rpmsg-v2n --core m33_sm
 
     # Force a sequential dispatch (easier to read on Windows):
-    west alp-build examples/rpmsg-v2n --no-parallel
+    west alp-build examples/multicore/rpmsg-v2n --no-parallel
 
 The orchestrator writes:
 

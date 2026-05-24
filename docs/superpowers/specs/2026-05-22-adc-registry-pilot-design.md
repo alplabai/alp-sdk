@@ -44,7 +44,7 @@ src/
 
 tests/unit/adc_registry/  (new: ztest harness, eight cases)
 
-examples/adc-voltmeter/   (touched: capability-gated teaching block)
+examples/peripheral-io/adc-voltmeter/   (touched: capability-gated teaching block)
 
 zephyr/Kconfig            (modified: CONFIG_ALP_SDK_ADC_SW_FALLBACK)
 zephyr/CMakeLists.txt     (modified: include new src/backends/adc/* + adc_dispatch.c)
@@ -270,7 +270,7 @@ Eight ztest cases under twister on native_sim:
 
 **Test-only silicon_ref override:** the unit test compiles a shim that calls `alp_backend_select("adc", "<test ref>")` directly, bypassing `ALP_SOC_REF_STR`. Avoids per-test Kconfig fragments.
 
-### `examples/adc-voltmeter` update
+### `examples/peripheral-io/adc-voltmeter` update
 
 The existing example reads a channel and prints µV. Add a capability-gated teaching block:
 
@@ -338,5 +338,5 @@ Builds on every SoM. Customer reading the example learns both gating mechanisms 
 - Architecture spec: `docs/superpowers/specs/2026-05-21-backend-registry-design.md` Section 6 → Slice 1
 - Foundation PR: #17 (`feat/backend-registry-foundation`)
 - Existing ADC implementation: `src/zephyr/peripheral_adc.c` (888 lines, to be replaced)
-- Existing example: `examples/adc-voltmeter/src/main.c`
+- Existing example: `examples/peripheral-io/adc-voltmeter/src/main.c`
 - Memory: `feedback_portable_peripheral_api`, `project_gd32_bridge_hybrid_spi_i2c`, `feedback_portable_hw_offload_with_sw_fallback`

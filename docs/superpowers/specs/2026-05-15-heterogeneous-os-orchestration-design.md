@@ -337,10 +337,10 @@ build/
 
 ```bash
 # Default — build everything board.yaml declares:
-west alp-build examples/rpmsg-v2n
+west alp-build examples/multicore/rpmsg-v2n
 
 # Iterate on one slice only (skips Yocto's hour-long rebuild):
-west alp-build examples/rpmsg-v2n --core m33_sm
+west alp-build examples/multicore/rpmsg-v2n --core m33_sm
 
 # Bundle for flashing or OTA:
 west alp-image     # → build/image-bundle/alp-system.zip + .swu (Mender)
@@ -581,11 +581,11 @@ before the next opens.
 ### Phase 4 — Rewrite the world
 
 - Convert every `board.yaml` in the repo (~32 files) to v2.
-- Rename `examples/mproc-dual-os-yocto-zephyr/` → `examples/rpmsg-v2n/`,
+- Rename `examples/mproc-dual-os-yocto-zephyr/` → `examples/multicore/rpmsg-v2n/`,
   delete the 13-line workaround comment, restructure into `linux/` + `m33_sm/`
   sub-directories.
-- Add `examples/rpmsg-aen/` (A32 + M55-HP heterogeneous), `examples/rpmsg-imx93/`,
-  `examples/heterogeneous-offload/` (A-cluster delegates FFT to M peer).
+- Add `examples/multicore/rpmsg-aen/` (A32 + M55-HP heterogeneous), `examples/multicore/rpmsg-imx93/`,
+  `examples/multicore/heterogeneous-offload/` (A-cluster delegates FFT to M peer).
 - **Delete** `yocto/meta-alp/`. Move any unique content into `meta-alp-sdk/`
   before deletion (verify nothing else is lost).
 - Update `src/yocto/` references in the codebase if any point at the old layer.
@@ -623,7 +623,7 @@ Heterogeneous examples gain per-core sub-directories named after the
 `cores:` keys.
 
 ```
-examples/rpmsg-v2n/
+examples/multicore/rpmsg-v2n/
 ├── board.yaml                       (v2; declares a55_cluster + m33_sm)
 ├── README.md
 ├── linux/                           (a55_cluster's app)
@@ -640,10 +640,10 @@ their `board.yaml`. The dual-OS framing is opt-in per project.
 
 | Path | Topology |
 |---|---|
-| `examples/rpmsg-v2n/` | V2N — A55 Yocto consumer + M33-SM Zephyr producer |
-| `examples/rpmsg-aen/` (new) | AEN E7 — A32 Yocto + M55-HP Zephyr |
-| `examples/rpmsg-imx93/` (new) | iMX93 — A55 Yocto + M33 Zephyr |
-| `examples/heterogeneous-offload/` (new) | A-cluster delegates FFT to M peer over RPMsg |
+| `examples/multicore/rpmsg-v2n/` | V2N — A55 Yocto consumer + M33-SM Zephyr producer |
+| `examples/multicore/rpmsg-aen/` (new) | AEN E7 — A32 Yocto + M55-HP Zephyr |
+| `examples/multicore/rpmsg-imx93/` (new) | iMX93 — A55 Yocto + M33 Zephyr |
+| `examples/multicore/heterogeneous-offload/` (new) | A-cluster delegates FFT to M peer over RPMsg |
 
 ---
 
@@ -690,7 +690,7 @@ their `board.yaml`. The dual-OS framing is opt-in per project.
 This design is delivered when:
 
 - [ ] Every `board.yaml` in the repo is v2 and validates against the new schema.
-- [ ] `west alp-build examples/rpmsg-v2n` produces a non-trivial
+- [ ] `west alp-build examples/multicore/rpmsg-v2n` produces a non-trivial
       `system-manifest.yaml` with both `a55_cluster-yocto` and
       `m33_sm-zephyr` slices present and `status: ok`.
 - [ ] `west alp-renode` boots the V2N system manifest, completes the RPMsg

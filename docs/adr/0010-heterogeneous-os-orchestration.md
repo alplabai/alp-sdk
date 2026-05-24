@@ -61,7 +61,7 @@ Full design at `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration
   iMX93) ship out-of-the-box with both halves built from one declarative
   file.  The 13-line apology comment in the old
   `examples/mproc-dual-os-yocto-zephyr/board.yaml` is deleted; that
-  example is renamed to `examples/rpmsg-v2n/` and becomes the reference
+  example is renamed to `examples/multicore/rpmsg-v2n/` and becomes the reference
   for how the schema *expects* to be used.
 - **One declarative file drives the whole system.**  The customer's
   `board.yaml` plus the SoM preset is the single source of truth.  Cross-
@@ -101,7 +101,7 @@ Full design at `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration
   means thinking in terms of a system topology, not a single firmware
   image.  Mitigated by the new
   [`docs/heterogeneous-builds.md`](../heterogeneous-builds.md) walkthrough
-  + the `examples/rpmsg-v2n/` reference layout.
+  + the `examples/multicore/rpmsg-v2n/` reference layout.
 
 ### Neutral
 

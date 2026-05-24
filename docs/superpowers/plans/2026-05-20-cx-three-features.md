@@ -48,7 +48,7 @@
 **Modify:**
 - `scripts/gen_soc_caps.py` — emit `ALP_HAS()` macro layer + write `include/alp/cap.h` and `src/cap.c`.
 - `scripts/alp_project.py` — route validation through `alp_cli.validator`; keep external CLI compatible.
-- `examples/hello-world/src/main.c` — add `ALP_HAS` + `alp_has` teaching block.
+- `examples/peripheral-io/hello-world/src/main.c` — add `ALP_HAS` + `alp_has` teaching block.
 - `README.md` — quickstart with `pip install -e .` → `alp init` → `alp run`.
 
 ---
@@ -1331,7 +1331,7 @@ Expected: PASS.
 - [ ] **Step 4: Smoke test the happy path**
 
 ```bash
-python scripts/alp_project.py --input examples/hello-world/board.yaml --emit zephyr-conf
+python scripts/alp_project.py --input examples/peripheral-io/hello-world/board.yaml --emit zephyr-conf
 ```
 Expected: emits the Kconfig fragment to stdout, exit code 0 (no diagnostics).
 
@@ -1774,11 +1774,11 @@ git commit -m "test(cap): Ztest unit test for alp_has + alp_cap_name"
 ### Task 2.4: Update hello-world example with capability teaching block
 
 **Files:**
-- Modify: `examples/hello-world/src/main.c`
+- Modify: `examples/peripheral-io/hello-world/src/main.c`
 
 - [ ] **Step 1: Add the teaching block**
 
-Open `examples/hello-world/src/main.c`. Above the existing `printf("[hello] done\n");` line, insert:
+Open `examples/peripheral-io/hello-world/src/main.c`. Above the existing `printf("[hello] done\n");` line, insert:
 
 ```c
     /* Capability-API teaching block.
@@ -1814,14 +1814,14 @@ At the top of the file, add the includes (near the existing `#include <zephyr/ke
 - [ ] **Step 2: Build + twister-run the example to confirm**
 
 ```bash
-west twister -T examples/hello-world -p native_sim --inline-logs
+west twister -T examples/peripheral-io/hello-world -p native_sim --inline-logs
 ```
 Expected: PASS, console contains the two new lines.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add examples/hello-world/src/main.c
+git add examples/peripheral-io/hello-world/src/main.c
 git commit -m "examples(hello-world): teach ALP_HAS + alp_has via printable branches"
 ```
 
@@ -2216,7 +2216,7 @@ Expected: both new tests PASS.
 - [ ] **Step 4: Smoke-test on the hello-world example**
 
 ```bash
-cd examples/hello-world && alp run
+cd examples/peripheral-io/hello-world && alp run
 ```
 Expected: native_sim build runs, prints `[hello] tick 0`…`[hello] done`, exit 0.
 

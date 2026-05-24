@@ -57,7 +57,7 @@ at `src/security/optiga_trust_m_bridge.c`.
   affect the SDK propagate through
   [`docs/security-advisories.md`](security-advisories.md).
 - **Customer application code** -- variants of
-  `examples/production-deployment/` that customers ship to
+  `examples/connectivity/production-deployment/` that customers ship to
   production carry their own audit scope.
 - **alp-studio** -- separate repo, separate audit cycle.
 

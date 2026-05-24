@@ -110,7 +110,7 @@ Pick your SoM and start with its one-pager:
 
 | SoM family       | One-pager                                                   | Bring-up doc                                                | Reference examples                              |
 |------------------|-------------------------------------------------------------|-------------------------------------------------------------|-------------------------------------------------|
-| E1M-AEN          | [`docs/soms/aen.md`](docs/soms/aen.md)                      | [`docs/getting-started.md`](docs/getting-started.md) §4..5  | `examples/gpio-button-led`, `i2c-scanner`, `rtc-clock`, `hello-world` |
+| E1M-AEN          | [`docs/soms/aen.md`](docs/soms/aen.md)                      | [`docs/getting-started.md`](docs/getting-started.md) §4..5  | `examples/peripheral-io/gpio-button-led`, `i2c-scanner`, `rtc-clock`, `hello-world` |
 | E1M-X V2N        | [`docs/soms/v2n.md`](docs/soms/v2n.md)                      | [`docs/bring-up-v2n.md`](docs/bring-up-v2n.md)              | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual`, `dac-waveform` |
 | E1M-X V2N-M1     | [`docs/soms/v2n-m1.md`](docs/soms/v2n-m1.md)                | [`docs/bring-up-v2n-m1.md`](docs/bring-up-v2n-m1.md)        | DEEPX bring-up delta on top of V2N             |
 | E1M-N93 (i.MX93) | [`docs/soms/imx93.md`](docs/soms/imx93.md)                  | [`docs/getting-started.md`](docs/getting-started.md) §4..5  | same cross-family examples as AEN              |
@@ -167,7 +167,7 @@ each Zephyr slice gets a Kconfig fragment layered onto its own
 `prj.conf` via `OVERLAY_CONFIG`; each Yocto slice gets a
 `local.conf` snippet consumed by bitbake.  Inside each
 `cores.<id>` block every field except `os:` + `app:` is optional;
-the [`gpio-button-led` example](examples/gpio-button-led/) for
+the [`gpio-button-led` example](examples/peripheral-io/gpio-button-led/) for
 instance skips `peripherals:` entirely and uses `populated:
 button_led: true` to pull the chip driver in.
 
@@ -529,7 +529,7 @@ ctest --test-dir build --output-on-failure
 # Zephyr (heterogeneous slice, v0.6 pre-release flow)
 west init -m https://github.com/alplabai/alp-sdk --mr main alp-ws
 cd alp-ws && west update
-west alp-build examples/rpmsg-v2n
+west alp-build examples/multicore/rpmsg-v2n
 ```
 
 ## Repository layout

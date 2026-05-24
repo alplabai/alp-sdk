@@ -338,25 +338,25 @@ def test_per_key_merge_yocto_a_cluster(tmp_path: Path) -> None:
     "example_path,expected",
     [
         # Single-OS AEN examples -- post-strip, just `app: ./src` on m55_hp.
-        ("examples/audio-loopback/board.yaml",
+        ("examples/audio/audio-loopback/board.yaml",
          {"m55_hp": "zephyr", "m55_he": "zephyr"}),
-        ("examples/i2c-scanner/board.yaml",
+        ("examples/peripheral-io/i2c-scanner/board.yaml",
          {"m55_hp": "zephyr", "m55_he": "zephyr"}),
         # Heterogeneous-offload: both `os:` lines stripped; both
         # should resolve from topology.
-        ("examples/heterogeneous-offload/board.yaml",
+        ("examples/multicore/heterogeneous-offload/board.yaml",
          {"a55_cluster": "yocto", "m33_sm": "zephyr"}),
         # rpmsg-imx93: both lines stripped on the NX9 m33 (no _sm).
-        ("examples/rpmsg-imx93/board.yaml",
+        ("examples/multicore/rpmsg-imx93/board.yaml",
          {"a55_cluster": "yocto", "m33": "zephyr"}),
         # rpmsg-aen: A32 + M55-HP both stripped.
-        ("examples/rpmsg-aen/board.yaml",
+        ("examples/multicore/rpmsg-aen/board.yaml",
          {"a32_cluster": "yocto", "m55_hp": "zephyr"}),
         # rpmsg-v2n: A55 + M33-SM stripped.
-        ("examples/rpmsg-v2n/board.yaml",
+        ("examples/multicore/rpmsg-v2n/board.yaml",
          {"a55_cluster": "yocto", "m33_sm": "zephyr"}),
         # ai-object-detection-realtime: A55 explicit off + M33-SM stripped.
-        ("examples/ai-object-detection-realtime/board.yaml",
+        ("examples/camera-vision/ai-object-detection-realtime/board.yaml",
          {"a55_cluster": "off", "m33_sm": "zephyr"}),
     ],
 )
