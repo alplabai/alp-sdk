@@ -7,19 +7,43 @@ sample:
     ALP SDK <alp/peripheral.h> surface is master-only; this
     example documents the API gap, stakes out the proposed
     slave-mode shape, and exits with the NOSUPPORT diagnostic.
+    Builds on both EVKs: E1M EVK uses E1M_I2C0 via BOARD_I2C_SENSORS;
+    E1M-X EVK uses E1M_X_I2C0.
 
 tests:
-  alp_sdk.example.i2c_slave:
+  alp_sdk.example.i2c_slave.e1m_x_evk:
     platform_allow:
       - native_sim
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     tags:
       - alp-sdk
       - example
       - i2c
       - api-gap
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[i2c-slave\\] done"
+  alp_sdk.example.i2c_slave.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - i2c
+      - api-gap
+      - aen
     harness: console
     harness_config:
         type: one_line
