@@ -424,12 +424,14 @@ git commit -m "refactor(examples): dac-waveform builds on both EVKs via BOARD_DA
 
 ---
 
-## Task 5: `alp_project.py` emits `ALP_BOARD_<SLUG>` from the preset
+## Task 5: emit `ALP_BOARD_<SLUG>` from the preset (in `alp_orchestrate.py`)
 
 So west / real-silicon / non-twister builds get the board define automatically (no per-testcase `extra_args`).
 
+> **Implementation note (as built):** `alp_project.py`'s `--emit` modes delegate to `scripts/alp_orchestrate.py`; the define is emitted there — `_slice_cmake_args` → `-DALP_BOARD_<slug>`, `_slice_alp_conf` → `CONFIG_COMPILER_OPT="-DALP_BOARD_<slug>"`. "alp_project.py" in the steps below means that delegation chain; the committed change touched `scripts/alp_orchestrate.py` + `tests/scripts/test_alp_project.py`.
+
 **Files:**
-- Modify: `scripts/alp_project.py` (the conf/define emit path)
+- Modify: `scripts/alp_orchestrate.py` (`_slice_cmake_args` + `_slice_alp_conf` — the per-slice emit path that `alp_project.py --emit` delegates to)
 - Test: `tests/scripts/test_alp_project.py` (add a case)
 
 - [ ] **Step 1: Locate the emit point + write the failing test**

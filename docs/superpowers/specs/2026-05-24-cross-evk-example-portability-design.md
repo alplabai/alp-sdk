@@ -130,7 +130,7 @@ names. They never name a form-factor pinout header or an `EVK_*` /
 
 ### 3. `ALP_BOARD_<SLUG>` build define
 
-`scripts/alp_project.py` emits a compile define from the example's
+`scripts/alp_orchestrate.py` (via `alp_project.py --emit`) emits a compile define from the example's
 `board.yaml` preset — `-DALP_BOARD_E1M_EVK` for `preset: e1m-evk`,
 `-DALP_BOARD_E1M_X_EVK` for `preset: e1m-x-evk` (slug derived from the
 preset name, mirroring `gen_board_header.py`'s `_board_slug`). This is
@@ -215,7 +215,8 @@ snapshot grows by the new `BOARD_*` macros (additive, ABI-safe pre-1.0).
 - `include/alp/board.h` — new facade (hand-written).
 - `scripts/gen_board_header.py` — emit the `BOARD_*` alias block + the
   role→`BOARD_*` table; regenerates both `*_routes.h` headers.
-- `scripts/alp_project.py` — emit `-DALP_BOARD_<SLUG>` from the preset.
+- `scripts/alp_orchestrate.py` — emit `-DALP_BOARD_<SLUG>` from the preset
+  (`_slice_cmake_args` + `_slice_alp_conf`; surfaced via `alp_project.py --emit`).
 - `metadata/schemas/board.schema.json` — allow `supported_boards:`.
 - `examples/*/board.yaml` — add `supported_boards:` where cross-EVK.
 - `examples/*/src/main.c` — reclassified `both` demos switch to
