@@ -164,8 +164,10 @@ e1m_routes:
         doc: "Arduino UNO header UART (D0/D1); CK_RXD = UART1_TX, CK_TXD = UART1_RX." }
   pwm:
     - { e1m: E1M_PWM0, macro: EVK_PWM_LED_GREEN,
+        board_alias: BOARD_PWM_LED_GREEN,
         doc: "RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B)." }
     - { e1m: E1M_PWM1, macro: EVK_PWM_LED_BLUE,
+        board_alias: BOARD_PWM_LED_BLUE,
         doc: "RGB LED blue channel." }
     - { e1m: E1M_PWM1, macro: EVK_ARD_PWM1,
         board_alias: BOARD_PWM_ARD1,
@@ -173,6 +175,7 @@ e1m_routes:
     - { e1m: E1M_PWM2, macro: EVK_ARD_PWM4,
         doc: "Arduino header CK_PWM4 = E1M_PWM2." }
     - { e1m: E1M_PWM3, macro: EVK_PWM_LED_RED,
+        board_alias: BOARD_PWM_LED_RED,
         doc: "RGB LED red channel." }
     - { e1m: E1M_PWM4, macro: EVK_ARD_PWM2,
         board_alias: BOARD_PWM_ARD2,

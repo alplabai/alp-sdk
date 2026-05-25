@@ -181,10 +181,13 @@ e1m_routes:
     - { e1m: E1M_X_PWM4, macro: XEVK_PWM_DISP2_BL,
         doc: "Display-2 backlight PWM (DISP2_BL_PWM)." }
     - { e1m: E1M_X_PWM5, macro: XEVK_PWM_LED_RED,
+        board_alias: BOARD_PWM_LED_RED,
         doc: "RGB LED red channel (GPIO-secondary = XEVK_PIN_LED_RED)." }
     - { e1m: E1M_X_PWM6, macro: XEVK_PWM_LED_BLUE,
+        board_alias: BOARD_PWM_LED_BLUE,
         doc: "RGB LED blue channel (GPIO-secondary = XEVK_PIN_LED_BLUE)." }
     - { e1m: E1M_X_PWM7, macro: XEVK_PWM_LED_GREEN,
+        board_alias: BOARD_PWM_LED_GREEN,
         doc: "RGB LED green channel (GPIO-secondary = XEVK_PIN_LED_GREEN)." }
   adc:
     - { e1m: E1M_X_ADC0, macro: XEVK_ADC_ARDUINO_A0,
