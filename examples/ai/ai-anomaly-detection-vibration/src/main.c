@@ -41,7 +41,8 @@
  * ICM-42670-P vs LSM6DSO for this demo:
  *   - Same 6-axis accel + gyro, I2C + SPI interface.
  *   - ODR closest to LSM6DSO's 833 Hz is ICM42670_ODR_800_HZ (800 Hz).
- *   - FS_2G sensitivity: ICM-42670 = 2048 LSB/g (vs 16384 on LSM6DSO).
+ *   - FS_2G sensitivity: both chips are 16384 LSB/g at ±2 g (datasheet
+ *     DS-000451 table 3 for ICM-42670; AN5192 table 2 for LSM6DSO).
  *   - API shape: icm42670_init / icm42670_set_accel / icm42670_read_accel
  *     / icm42670_deinit -- same lifecycle pattern as the LSM6DSO driver.
  *
@@ -119,7 +120,7 @@ LOG_MODULE_REGISTER(anomaly, LOG_LEVEL_INF);
  */
 #define WINDOW_SAMPLES   256u
 #define IMU_ODR          ICM42670_ODR_800_HZ
-#define IMU_FS           ICM42670_ACCEL_FS_2G   /* 2048 LSB / g */
+#define IMU_FS           ICM42670_ACCEL_FS_2G   /* 16384 LSB / g at ±2 g */
 
 /* I2C address of the ICM-42670 on the E1M EVK (AP_AD0 = high → 0x69).
  * Override by redefining this before including the header if your
@@ -152,15 +153,14 @@ static uint8_t s_arena[128 * 1024] __aligned(16);
 
 /* ───────── Sample-loop helpers ───────── */
 
-/* Raw int16 LSB to float "g".  ICM-42670 at FS_2G: 2048 LSB per g
- * (datasheet DS-000451, table 3.  Note: the LSM6DSO at FS_2G uses
- * 16384 LSB/g -- a different sensitivity; this constant must match
- * the chip being used.)
+/* Raw int16 LSB to float "g".  Both the ICM-42670 and the LSM6DSO
+ * have identical ±2 g full-scale sensitivity: 16384 LSB/g
+ * (ICM-42670: datasheet DS-000451 table 3; LSM6DSO: AN5192 table 2).
  * We compute the magnitude in g because the anomaly model was trained
  * against g-magnitude features in the v0.5 reference pipeline. */
 static inline float accel_magnitude_g(const icm42670_axes_t *a)
 {
-    const float lsb_per_g = 2048.0f;   /* ICM-42670 FS_2G sensitivity */
+    const float lsb_per_g = 16384.0f;  /* ICM-42670 FS_2G sensitivity (= LSM6DSO FS_2G) */
     const float fx = (float)a->x / lsb_per_g;
     const float fy = (float)a->y / lsb_per_g;
     const float fz = (float)a->z / lsb_per_g;

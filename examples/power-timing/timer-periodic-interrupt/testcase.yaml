@@ -5,12 +5,17 @@ sample:
   description: |
     Per-peripheral example for Counter (timer) + GPIO.  Schedules
     a re-arming alarm every 100 ms; ISR sets a flag, main thread
-    drains the flag and toggles the user LED.  Demonstrates the
-    recommended ISR-safety pattern (no printf from ISR -- defer
-    via a flag).
+    drains the flag and toggles the user LED via BOARD_PIN_LED_RED.
+    Demonstrates the recommended ISR-safety pattern (no printf from
+    ISR -- defer via a flag).  Builds for both E1M EVK and E1M-X EVK.
+    The counter-alarm ISR path works on AEN and native_sim; on V2N
+    (E1M-X EVK) the GD32 IO MCU has no host IRQ line so set_alarm
+    returns NOSUPPORT and the example exits with a diagnostic.
 
 tests:
-  alp_sdk.example.timer_periodic_interrupt:
+  alp_sdk.example.timer_periodic_interrupt.e1m_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
       - native_sim
       - native_sim/native/64
@@ -21,6 +26,27 @@ tests:
       - example
       - counter
       - gpio
+      - aen
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[timer\\] done"
+
+  alp_sdk.example.timer_periodic_interrupt.e1m_x_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - counter
+      - gpio
+      - v2n
     harness: console
     harness_config:
         type: one_line

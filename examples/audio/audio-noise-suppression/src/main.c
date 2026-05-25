@@ -321,12 +321,12 @@ int main(void)
 
     /* ── Open mic + speaker on the same I2S link ───────────
      *
-     * The TAS2563 codec on the EVK exposes both directions on
-     * I2S0 (the codec handles the PDM-to-I2S conversion on its
-     * own pins).  BOARD_I2S_AUDIO resolves to the audio codec
-     * I2S bus on whichever EVK is targeted (E1M_I2S0 on AEN,
-     * E1M_X_I2S0 on V2N).  On native_sim neither open() succeeds;
-     * the loop tolerates that. */
+     * The TAS2563 codec on both EVKs exposes both directions on
+     * their respective I2S bus (the codec handles the PDM-to-I2S
+     * conversion on its own pins).  BOARD_I2S_AUDIO resolves to
+     * the audio codec I2S bus on whichever EVK is targeted
+     * (E1M_I2S0 on AEN, E1M_X_I2S0 on V2N).  On native_sim
+     * neither open() succeeds; the loop tolerates that. */
     alp_audio_config_t cfg = {
         .peripheral_id    = BOARD_I2S_AUDIO, /* E1M EVK: E1M_I2S0; E1M-X EVK: E1M_X_I2S0 */
         .sample_rate_hz   = SR_HZ,

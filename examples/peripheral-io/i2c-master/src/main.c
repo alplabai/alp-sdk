@@ -19,7 +19,7 @@
  *
  * What success looks like (real hardware):
  *
- *   [i2c-master] open EVK_I2C_BUS_SENSORS @ 400 kHz
+ *   [i2c-master] open BOARD_I2C_SENSORS @ 400 kHz
  *   [i2c-master] tmp112_init @ 0x48 -> 0 (OK)
  *   [i2c-master] sample 0: 23.625 degC
  *   [i2c-master] sample 1: 23.687 degC

@@ -5,8 +5,8 @@ sample:
   description: |
     Per-peripheral example for <alp/wdt.h>.  Installs a 5 second
     watchdog timeout and demonstrates the feed loop.  Builds for
-    both E1M EVK and E1M-X EVK via the cross-EVK BOARD_* alias
-    layer.
+    both E1M EVK and E1M-X EVK: no board-specific pins are used
+    (board-agnostic).
 
 tests:
   alp_sdk.example.wdt_feed.e1m_evk:

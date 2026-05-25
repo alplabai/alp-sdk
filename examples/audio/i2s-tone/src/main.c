@@ -2,9 +2,10 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * i2s-tone — stream a triangle wave to the EVK audio codec as
- * 16-bit stereo PCM.  Demonstrates the full lifecycle: open / start /
- * write / stop / close.
+ * i2s-tone — stream a triangle wave to the selected EVK's audio
+ * codec as 16-bit stereo PCM.  Demonstrates the full lifecycle:
+ * open / start / write / stop / close.  Builds on both EVKs via
+ * the BOARD_I2S_AUDIO alias.
  *
  * I²S is the standard digital audio bus -- a master clocks data
  * to a slave at a fixed sample rate, the slave (DAC, codec)

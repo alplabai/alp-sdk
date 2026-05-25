@@ -12,10 +12,13 @@ sample:
 common:
   tags: ai inference industrial predictive-maintenance marketing showcase
 tests:
-  alp_sdk.examples.anomaly_detection.e1m_evk:
+  alp_sdk.example.ai_anomaly_detection_vibration.e1m_evk:
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
+      - native_sim/native/64
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+    integration_platforms:
       - native_sim/native/64
     tags:
       - alp-sdk
@@ -30,10 +33,12 @@ tests:
       regex:
         - "\\[anomaly\\] done"
 
-  alp_sdk.examples.anomaly_detection.e1m_x_evk:
+  alp_sdk.example.ai_anomaly_detection_vibration.e1m_x_evk:
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     platform_allow:
+      - native_sim/native/64
+    integration_platforms:
       - native_sim/native/64
     tags:
       - alp-sdk

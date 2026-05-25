@@ -5,6 +5,13 @@
  * timer-periodic-interrupt -- the canonical "periodic ISR plus
  * main-thread coordination" example.
  *
+ * Builds for BOTH E1M EVK (AEN) and E1M-X EVK (V2N) via the
+ * portable <alp/board.h> BOARD_* alias layer.  Counter 0 maps to
+ * the alp-counter0 DT alias on both board presets.  The ISR path
+ * works on AEN and native_sim; on V2N the GD32 IO MCU has no
+ * interrupt line back to the Renesas host, so set_alarm returns
+ * ALP_ERR_NOSUPPORT and the example prints the diagnostic and exits.
+ *
  * Pattern:
  *
  *   1. Open a free-running counter + a GPIO output pin for the LED.
@@ -35,17 +42,18 @@
  * publish to a network, or trigger anything beyond a single
  * register write.
  *
- * The LED: the E1M-EVK has no dedicated GPIO LED, so we drive the
- * red RGB pad (default function PWM3) as a plain digital GPIO via
- * the parallel `EVK_PIN_LED_RED` index -- the e1m-spec "GPIO
- * secondary" capability (see e1m_pinout.h "Pin-as-GPIO fallback").
+ * The LED: BOARD_PIN_LED_RED resolves to the board-specific
+ * indicator pad (on the E1M EVK this is the red RGB pad, default
+ * function PWM3, claimed as a digital GPIO via the e1m-spec
+ * "GPIO secondary" capability; on the E1M-X EVK it resolves to
+ * the equivalent carrier pad).
  *
  * What success looks like:
  *
  *   [timer] open counter=0
  *   [timer] start -> 0
  *   [timer] 100ms = N ticks (status=0)
- *   [timer] open LED on EVK_PIN_LED_RED
+ *   [timer] open LED on BOARD_PIN_LED_RED
  *   [timer] arming first alarm
  *   [timer] tick 0 fired @ N+0 ticks, LED -> 1
  *   [timer] tick 1 fired @ N+1 ticks, LED -> 0
@@ -70,7 +78,7 @@
 
 #include "alp/peripheral.h"
 #include "alp/counter.h"
-#include "alp/boards/alp_e1m_evk_routes.h"
+#include "alp/board.h"
 
 /* Alarm period.  100 ms gives a visible LED blink (5 Hz toggle)
  * that's easy to count by eye without being so slow that the
@@ -137,14 +145,15 @@ static void on_periodic_alarm(alp_counter_t *c, uint32_t ticks, void *user)
 
 int main(void)
 {
-    printf("[timer] open counter=%u\n", E1M_COUNTER0);
+    printf("[timer] open counter=0\n");
 
     /* Open counter 0.  Channel choice matters less for this
      * example than for hardware-PWM-tied timer usage; counter 0
      * is conventionally the "general purpose" timer in
-     * E1M-conformant SoMs. */
+     * E1M-conformant SoMs.  Both EVK presets expose counter 0
+     * via the alp-counter0 DT alias. */
     alp_counter_t *c = alp_counter_open(&(alp_counter_config_t){
-        .counter_id = E1M_COUNTER0,
+        .counter_id = 0,
     });
     if (c == NULL) {
         /* Likely causes:
@@ -182,13 +191,13 @@ int main(void)
         return 0;
     }
 
-    /* Open the user LED.  The EVK has no plain GPIO LED, so the
-     * indicator is the RGB-red pad (default function PWM3) claimed
-     * as a digital GPIO via EVK_PIN_LED_RED; on a board with a real
-     * GPIO LED, swap the index for whatever your LED maps to (or
-     * comment the GPIO out if you only need the timer half). */
-    printf("[timer] open LED on EVK_PIN_LED_RED\n");
-    alp_gpio_t *led = alp_gpio_open(EVK_PIN_LED_RED);
+    /* Open the user LED via the portable BOARD_PIN_LED_RED alias.
+     * On the E1M EVK this resolves to the red RGB pad (default
+     * function PWM3) claimed as a digital GPIO; on the E1M-X EVK
+     * it resolves to the equivalent carrier indicator pad.  On a
+     * custom board, rebind in board.yaml `pins:`. */
+    printf("[timer] open LED on BOARD_PIN_LED_RED\n");
+    alp_gpio_t *led = alp_gpio_open(BOARD_PIN_LED_RED);
     if (led != NULL) {
         s = alp_gpio_configure(led, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
         if (s != ALP_OK) {
