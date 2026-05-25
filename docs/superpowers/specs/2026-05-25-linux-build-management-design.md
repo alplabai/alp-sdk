@@ -9,7 +9,7 @@
 alp-sdk is Zephyr/west-first; the Linux/Yocto side is more built-out than "forgotten" — `meta-alp-sdk` ships `libalp_sdk.so` (the portable `<alp/*>` API on A55 Linux), `alp-chips`, heterogeneous IPC (`alp-remoteproc` + `alp-dts-reservations`), a reference image (`alp-image-edge`: ROS 2 + DEEPX + Mender OTA), machines for V2N/V2M/i.MX93, and per-MACHINE inference-runtime wiring — and `alp_orchestrate.py` already resolves `board.yaml` into per-core slices and emits per-MACHINE bitbake invocations. But three gaps put it below the Variscite/Toradex "one proven, turnkey path" norm:
 
 1. **Unproven.** `meta-alp-sdk/README.md` is self-described `[UNTESTED]` — "v0.6 paper-correct, no full image bake executed."
-2. **Inconsistent build narratives.** The README targets **AI SDK 7.10 / Scarthgap 5.0.11 / `bitbake-layers` / free download**; this branch's `build-yocto-v2n.md` + bbappends target **AI SDK 6.30 / linux-renesas 6.1-cip43 / kas / gated**. They disagree on version, Yocto release, orchestration tool, and gating. `kas/e1m-v2n.yml` is effectively a third orchestration layer.
+2. **Doc version confusion (not a real conflict).** The README names **AI SDK 7.10** + `bitbake-layers`; the branch's `build-yocto-v2n.md` + bbappends name **BSP 6.3 (`RTK0EF0189F06300SJ` / linux-renesas 6.1-cip43)** + kas. These are **two version axes** — the AI-SDK *platform* (7.1) vs the Yocto *BSP* (6.3) — that each doc named in isolation, reading as a conflict. The fix is to state *both* everywhere; the orchestration choice (kas vs `bitbake-layers`) still needs converging.
 3. **Not unified / not easy.** No single front door; a customer faces kas-vs-bitbake-layers-vs-west and per-vendor BSP mechanics.
 
 ## 2. Goals
@@ -19,7 +19,7 @@ alp-sdk is Zephyr/west-first; the Linux/Yocto side is more built-out than "forgo
 
 ## 3. Decisions (locked in brainstorm)
 
-- **Canonical BSP = AI SDK 7.10 / Scarthgap 5.0.11** (the README's target; free download, package `RTK0EF0045Z94001AZJ-v1.0.3`). The 6.30 / 6.1-cip43 target is the bench's *old* target and is retired (no legacy-compat — there are no active customers): `build-yocto-v2n.md` is rewritten to 7.10, `kas/e1m-v2n.yml` is dropped, and the bbappend SRCREVs + DT patches retarget to 7.10's kernel.
+- **Canonical target = AI SDK platform 7.1 on BSP 6.3** (`RTK0EF0189F06300SJ`, linux-renesas 6.1-cip43, kernel SHA 6717c06c). These are two axes, **not** competing BSPs — 7.1 is the AI-SDK/platform umbrella, 6.3 is the Yocto BSP beneath it — so the branch's **original BSP target was already correct**, and its DT patches (generated at 6.3 / 6717c06c) **stay as-is, no regen**. Reconciliation = make the docs name *both* axes (platform 7.1 / BSP 6.3) consistently, and drop `kas/e1m-v2n.yml` in favour of the README's `bitbake-layers` flow (no legacy-compat — no active customers).
 - **Approach = a unified `alp build` front-end with a per-vendor BSP-provider seam.** Chosen over kas-everywhere (fights Renesas's tarball/TEMPLATECONF model; unifies Linux only) and over raw bitbake-layers (not unified).
 - **Phased:** prove the native 7.10 flow first (no new tooling), then wrap it.
 
@@ -76,8 +76,8 @@ alp build → load board.yaml → orchestrator.resolve() → slices[]
 ## 7. Phasing
 
 **Phase 1 — Prove one path (no new tooling).**
-1. Reconcile the narrative → 7.10 canonical: make `meta-alp-sdk/README.md`'s 7.10 `bitbake-layers` flow the single source of truth — validating/correcting it as the bake reveals issues (it is itself currently `[UNTESTED]`) — fold/retire `build-yocto-v2n.md` into it, and drop `kas/e1m-v2n.yml`.
-2. Retarget kernel artifacts to 7.10: regenerate DT patches 0006–0013 against 7.10's rzv2n kernel (deltas carry; line-context + SRCREV change); retarget the `linux-renesas` bbappend SRCREV + the `tas2563-audio.cfg` wiring.
+1. Reconcile docs: make the README's `bitbake-layers` flow the single source of truth — naming **both** axes (platform 7.1 / BSP 6.3) — fold/retire `build-yocto-v2n.md` into it, drop `kas/e1m-v2n.yml`. (The README is itself `[UNTESTED]`; validate/correct it as the bake reveals issues.)
+2. Verify (don't regen) the DT artifacts: patches 0006–0013 are already at BSP 6.3 (6.1-cip43 / SHA 6717c06c), so just confirm they still apply against the downloaded 6.3 BSP's rzv2n kernel + the `linux-renesas` bbappend SRCREV matches.
 3. Green bake: `MACHINE=e1m-v2n101-a55 bitbake alp-image-edge` on 7.10 (WSL + downloaded BSP); fix recipe/layer/bbappend breakage. Audio stays off (patch 0010) → still green.
 - **Exit:** one documented command boots `alp-image-edge` on V2N101/7.10 (HiL-validated); the README↔doc contradiction is gone.
 
@@ -121,6 +121,6 @@ Unit + parse-gate run everywhere cheaply; the expensive bake gates on HiL — ma
 
 ## 11. Open questions / risks
 
-- **7.10's exact kernel version** (for the DT-patch regen) is unknown until the BSP is in hand (bench) — the patch deltas carry, but line-context + SRCREV must be re-derived.
+- **Resolved:** the BSP is **6.3** (linux-renesas 6.1-cip43, SHA 6717c06c); the branch's DT patches are already against it → no regen, just verify they apply against the downloaded 6.3 BSP. (The AI-SDK *platform* is 7.1 — a separate axis.) Optional add-on packages (ISP/camera, ROS2, Multi-OS/OpenAMP) come as separate Renesas downloads layered on top.
 - **V2N silicon support** may live only in the 7.10 tarball, not upstream `meta-renesas` (per the README) — the provider must use the tarball, not a git pin, for `meta-renesas`.
 - **TEMPLATECONF replication risk** — the provider *applies* Renesas's TEMPLATECONF (vlp-v4-conf) rather than re-encoding it, to stay robust across BSP updates.

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make AI SDK 7.10 / Scarthgap the single canonical Linux build path for the V2N carrier, prove it with one green `bitbake alp-image-edge`, and delete the conflicting 6.30/kas narrative.
+**Goal:** Make the **AI SDK platform 7.1 on BSP 6.3** (`RTK0EF0189F06300SJ` / linux-renesas 6.1-cip43, SHA 6717c06c — already HW-tested for ethernet + PMIC) the documented, reproducible Linux build path for the V2N carrier, prove it with one green `bitbake alp-image-edge`, and converge the docs' version language + drop kas.
 
-**Architecture:** No new tooling. Retarget the existing `meta-alp-sdk` carrier artifacts (DT patches 0006–0013, `linux-renesas` bbappend) from AI SDK 6.30 / linux-renesas 6.1-cip43 to AI SDK 7.10 / Scarthgap 5.0.11, and converge the build docs onto `meta-alp-sdk/README.md`'s 7.10 `bitbake-layers` flow.
+**Architecture:** No new tooling and **no retarget** — the `meta-alp-sdk` carrier artifacts (DT patches 0006–0013, `linux-renesas` bbappend) are already at BSP 6.3 (the tested target). Phase 1 converges the docs' version language (platform 7.1 / BSP 6.3) onto `meta-alp-sdk/README.md`'s `bitbake-layers` flow and proves the bake reproducibly. (Platform 7.1 and BSP 6.3 are two version axes, not competing targets.)
 
 **Tech Stack:** Yocto (Scarthgap 5.0.11), Renesas RZ/V AI SDK 7.10, bitbake/bitbake-layers, devicetree (dtc), `git format-patch`.
 
@@ -65,9 +65,9 @@ Follows `meta-alp-sdk/README.md` §"Build steps". No repo diffs.
 
 ---
 
-### Task 3 🔧 — Regenerate DT patches 0006–0013 against the 7.10 rzv2n dts
+### Task 3 🔧 — Verify DT patches 0006–0013 apply against the 6.3 BSP (NO regen)
 
-The carrier *deltas* are unchanged; only patch line-context + the kernel SRCREV differ vs the 6.30 kernel. Exact diffs are derived here against the 7.10 tree.
+The patches are already at BSP 6.3 (linux-renesas 6.1-cip43, SHA 6717c06c) and were **HW-tested there** (ethernet PHY swap + PMIC disable validated on the bench). So this is a *confirmation*, not a regen — `git apply --check` each patch against the downloaded 6.3 BSP kernel; only re-fit a hunk if the BSP point-rev drifted. The delta table below is reference only.
 
 **Delta reference (what each patch must still express):**
 | Patch | Delta |
