@@ -716,6 +716,18 @@
           "hash": "86260709405d4ea7",
           "value": "EVK_ARD_PWM3"
         },
+        "BOARD_PWM_LED_BLUE": {
+          "hash": "a701aae518999337",
+          "value": "EVK_PWM_LED_BLUE"
+        },
+        "BOARD_PWM_LED_GREEN": {
+          "hash": "9eec37182389326a",
+          "value": "EVK_PWM_LED_GREEN"
+        },
+        "BOARD_PWM_LED_RED": {
+          "hash": "3887b6a03ddad07b",
+          "value": "EVK_PWM_LED_RED"
+        },
         "BOARD_SPI_ARDUINO": {
           "hash": "07f6eff5b99ed57c",
           "value": "EVK_SPI_BUS_ARDUINO"
@@ -985,6 +997,18 @@
         "BOARD_PWM_ARD3": {
           "hash": "db06f436763304bd",
           "value": "XEVK_ARD_PWM3"
+        },
+        "BOARD_PWM_LED_BLUE": {
+          "hash": "413216ceb7c4c84b",
+          "value": "XEVK_PWM_LED_BLUE"
+        },
+        "BOARD_PWM_LED_GREEN": {
+          "hash": "79cc0c0c10251415",
+          "value": "XEVK_PWM_LED_GREEN"
+        },
+        "BOARD_PWM_LED_RED": {
+          "hash": "0ee0bbf966a7e636",
+          "value": "XEVK_PWM_LED_RED"
         },
         "BOARD_SPI_ARDUINO": {
           "hash": "3295e147bfa96cf3",
