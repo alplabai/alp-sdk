@@ -1,0 +1,48 @@
+From 067f19ccc3a33fa4019b61a5df8f815adad373ee Mon Sep 17 00:00:00 2001
+From: x <x@x.com>
+Date: Mon, 25 May 2026 14:35:06 +0200
+Subject: [PATCH] arm64: dts: renesas: rzv2n-evk: set eth PHY MDIO addr to 2 on
+ e1m-x
+
+The RTL8211F-VD PHYs on the e1m-x carrier latch MDIO address 0 (with a
+mirror alias at 2) because the PHYAD straps share pins with the MAC RGMII
+outputs and lose the strap-vs-MAC contention at reset. At address 0 the
+kernel's phy_poll_reset times out (-110, cannot attach); address 2 is the
+clean unicast alias where both PHYs attach as stmmac-N:02. The EVK dts
+hard-codes reg = <0> (its KSZ9131); move phy0/phy1 to reg = <2> so the
+Realtek PHYs attach on this board.
+
+Signed-off-by: Caner <alpcaner92@gmail.com>
+---
+ .../dts/renesas/r9a09g056n48-rzv2n-evk.dts     | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts b/arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts
+index 88c2383b9071..be87e3daafe9 100644
+--- a/arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts
++++ b/arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts
+@@ -1626,3 +1626,21 @@ usb-ovc-disable-hog {
+ 		line-name = "usb_ovc_disable";
+ 	};
+ };
++
++/*
++ * ALP e1m-x / v2n-m1: both RTL8211F-VD PHYs latch MDIO address 0 with a
++ * mirror alias at address 2 (the PHYAD straps share pins with the MAC RGMII
++ * RXD3/RXC/RXCTL, so the MAC push-pull outputs contend the weak strap pulls
++ * during the reset-latch window). Address 0 is the broadcast-ish alias where
++ * phy_poll_reset times out (-110, "Cannot attach to PHY"); the clean unicast
++ * alias is address 2, where both PHYs attach as stmmac-N:02 with the RTL8211F
++ * driver. The EVK dts hard-codes reg = <0> (its KSZ9131); move both phy nodes
++ * to reg = <2>.
++ */
++&phy0 {
++	reg = <2>;
++};
++
++&phy1 {
++	reg = <2>;
++};
+-- 
+2.34.1
+

@@ -1,0 +1,46 @@
+From d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0 Mon Sep 17 00:00:00 2001
+From: Caner <alpcaner92@gmail.com>
+Date: Fri, 22 May 2026 12:00:00 +0200
+Subject: [PATCH] arm64: dts: renesas: rzv2n-evk: correct eth PHY ID to
+ RTL_8211FVD
+
+Empirical MDIO scan on the e1m-x carrier reports PHY ID 0x001cc878
+on both ports, not 0x001cc916. Per drivers/net/phy/realtek.c that ID
+matches RTL_8211FVD_PHYID -- the RTL8211F-VD variant (which the alp-sdk
+peripheral-map labels "RTL8211FDI").
+
+Patch 0008's ethernet-phy-id001c.c916 was technically wrong but worked
+in practice because the ieee802.3-c22 fallback + Realtek driver's
+vendor-mask matching still bound the right driver. This patch corrects
+the explicit compatible to the actual chip ID. No behavior change.
+
+Signed-off-by: Caner <alpcaner92@gmail.com>
+---
+ .../boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts    | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts b/arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts
+index 1234567..2345678 100644
+--- a/arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts
++++ b/arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts
+@@ -617,7 +617,7 @@
+
+ &mdio0 {
+ 	phy0: ethernet-phy@0 {
+-		compatible = "ethernet-phy-id001c.c916", "ethernet-phy-ieee802.3-c22";
++		compatible = "ethernet-phy-id001c.c878", "ethernet-phy-ieee802.3-c22";
+ 		reg = <0>;
+ 		rxc-skew-psec = <0>;
+ 		txc-skew-psec = <0>;
+@@ -636,7 +636,7 @@
+
+ &mdio1 {
+ 	phy1: ethernet-phy@1 {
+-		compatible = "ethernet-phy-id001c.c916", "ethernet-phy-ieee802.3-c22";
++		compatible = "ethernet-phy-id001c.c878", "ethernet-phy-ieee802.3-c22";
+ 		reg = <0>;
+ 		rxc-skew-psec = <0>;
+ 		txc-skew-psec = <0>;
+--
+2.34.1
+
