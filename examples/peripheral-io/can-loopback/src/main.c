@@ -2,7 +2,7 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * can-loopback — bring up the EVK CAN bus in loopback mode, send a
+ * can-loopback — bring up the CAN bus in loopback mode, send a
  * frame, show that the rx callback receives it.
  *
  * Loopback mode is the canonical bring-up test for a CAN node:
@@ -14,6 +14,10 @@
  *   - The RX path decodes frames correctly.
  *   - Filters / callbacks dispatch.
  * Move to bus mode (loopback=false) only after this works.
+ *
+ * Runs on both EVKs: BOARD_CAN0 (from <alp/board.h>) resolves to
+ * E1M_CAN0 on E1M EVK (TCAN1044A transceiver, header J9) and
+ * E1M_X_CAN0 on E1M-X EVK (TCAN1044 transceiver U51).
  */
 
 #include <stdio.h>
@@ -23,9 +27,9 @@
 
 #include "alp/can.h"
 
-/* EVK_CAN_VEHICLE_BUS is a board-macro from the generated routes header
- * (= E1M_CAN0); rebind it in board.yaml `pins:` to port to another board. */
-#include "alp/boards/alp_e1m_evk_routes.h"
+/* BOARD_CAN0 is the portable alias from <alp/board.h>
+ * (E1M_CAN0 on E1M EVK; E1M_X_CAN0 on E1M-X EVK). */
+#include "alp/board.h"
 
 /* Volatile because the rx callback runs from the CAN driver's RX
  * thread (Zephyr's `can_rx` worker) and the main loop polls. */
@@ -43,10 +47,10 @@ static void on_rx(const alp_can_frame_t *f, void *user) {
 }
 
 int main(void) {
-    printf("[can] open EVK_CAN_VEHICLE_BUS @ 500 kbps loopback\n");
+    printf("[can] open BOARD_CAN0 @ 500 kbps loopback\n");
 
     alp_can_t *bus = alp_can_open(&(alp_can_config_t){
-        .bus_id = EVK_CAN_VEHICLE_BUS, /* = E1M_CAN0 */
+        .bus_id = BOARD_CAN0, /* E1M_CAN0 on E1M EVK; E1M_X_CAN0 on E1M-X EVK */
         /* 500 kbps is the most common automotive default; bump to
          * 1 Mbps for industrial buses or down to 125 kbps for long
          * cable runs. */

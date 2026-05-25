@@ -3,20 +3,43 @@
 sample:
   name: can-loopback
   description: |
-    Per-peripheral example for <alp/can.h>.  Brings up CAN0 in
+    Per-peripheral example for <alp/can.h>.  Brings up BOARD_CAN0 in
     loopback mode, sends a frame, demonstrates the rx callback.
+    Builds on both EVKs: E1M EVK uses E1M_CAN0 (TCAN1044A, header J9);
+    E1M-X EVK uses E1M_X_CAN0 (TCAN1044 U51).
 
 tests:
-  alp_sdk.example.can_loopback:
+  alp_sdk.example.can_loopback.e1m_x_evk:
     platform_allow:
       - native_sim
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     tags:
       - alp-sdk
       - example
       - can
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[can\\] done"
+  alp_sdk.example.can_loopback.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - can
+      - aen
     harness: console
     harness_config:
         type: one_line
