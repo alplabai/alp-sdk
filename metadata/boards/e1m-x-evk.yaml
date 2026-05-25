@@ -84,10 +84,10 @@ e1m_routes:
     - { e1m: E1M_X_GPIO_IO2,  macro: XEVK_PIN_PCIE0_I2C_EN,
         doc: "Drive high to enable the I2C mux to the PCIe slot." }
     # --- I2S audio path mux ---
-    - { e1m: E1M_X_GPIO_IO4,  macro: XEVK_PIN_I2S_MUX_EN,
-        doc: "I2S path-mux enable." }
+    - { e1m: E1M_X_GPIO_IO4,  macro: XEVK_PIN_I2S_MUX_EN, active_low: true,
+        doc: "I2S path-mux (TMUX1574 U46) enable -- active-low; drive LOW to enable." }
     - { e1m: E1M_X_GPIO_IO5,  macro: XEVK_PIN_I2S_MUX_SEL,
-        doc: "I2S path-mux select (TAS2563 amps vs. external I2S)." }
+        doc: "I2S path-mux (TMUX1574 U46) select: LOW = TAS2563 amps (A side), HIGH = M.2 E-key I2S (B side)." }
     # --- M.2 E-key ---
     - { e1m: E1M_X_GPIO_IO6,  macro: XEVK_PIN_M2E_UART_WAKE, active_low: true,
         doc: "M.2 E-key UART-path wake (active-low)." }
@@ -189,6 +189,37 @@ e1m_routes:
     - { e1m: E1M_X_ENC0, macro: XEVK_ENC_ROTARY,
         doc: "PEC12R-4222F rotary encoder: ENC0_X = A phase, ENC0_Y = B phase; push switch on XEVK_PIN_ENCODER_SW (E1M_X_GPIO_IO28).  ENC1-3 pads are broken out but unpopulated." }
 
+# Audio -- 2x TAS2563 boosted class-D smart-amp (U27/U28) on E1M_X_I2C0 +
+# E1M_X_I2S0.  Scripts that emit the Linux DT (rcar_sound + audio-graph-card)
+# read this block; device-instance facts here are mined from the board
+# netlist (2026-05).  The E1M-IO -> SoC (RIIC / SSI / GPIO) mapping is
+# resolved SoM-side, not here.
+#
+# NB: the stock RZ/V2N EVK codec (DA7212) is NOT populated on this carrier.
+# The audio DT keeps &da7212 disabled and builds a fresh TAS2563 audio-
+# graph-card -- it does NOT re-enable the EVK's da7212-based sound_card.
+audio:
+  codecs:
+    # Stereo pair: U27 = LEFT, U28 = RIGHT, sharing one I2C bus + one I2S.
+    - { chip: tas2563, designator: U27, channel: left,  i2c_bus: E1M_X_I2C0, i2c_address: "0x4D" }   # AD0: 10k -> GND
+    - { chip: tas2563, designator: U28, channel: right, i2c_bus: E1M_X_I2C0, i2c_address: "0x4E" }   # AD0: 10k -> VIO
+  i2s_bus: E1M_X_I2S0              # SCLK / WS / SDI / SDO; codecs are bit-clock + frame slaves
+  mclk:
+    source:  e1m_audio_clk        # E1M AUDIO_CLK (SoM ADG); wired to the TAS MCLK on the current PCB rev
+    rate_hz: 12288000             # 256 x 48 kHz (default -- confirm against the ADG / clock-gen setup)
+  # I2S path-mux (TI TMUX1574, U46): SoC I2S0 -> TAS amps (A side) or the
+  # M.2 E-key slot (B side).  Both control lines active-low; drive LOW for the amps.
+  path_mux:
+    part:   tmux1574
+    enable: { macro: XEVK_PIN_I2S_MUX_EN,  e1m: E1M_X_GPIO_IO4, active_low: true }
+    select: { macro: XEVK_PIN_I2S_MUX_SEL, e1m: E1M_X_GPIO_IO5, amps_level: low }
+  # Shared amp control lines (both U27 + U28).  Wired to E1M IOs on the
+  # current PCB iteration -- exact E1M pads pending (maintainer assigning).
+  # Amp control on the otherwise-unused E1M_X_I2S1 pads, driven as plain
+  # GPIO (Linux DT pinmuxes them to GPIO, not SSI).  Wired on current PCB rev.
+  shutdown:  { net: AMP.ENABLE, e1m: E1M_X_I2S1_SCLK, active_low: true }   # \SD_N -> codec shutdown-gpios (GPIO out)
+  fault_irq: { net: AMP.FAULT,  e1m: E1M_X_I2S1_SDI,  active_low: true }   # IRQ_N -> fault interrupt (GPIO in); confirm SDI is I2S1 (NOT the live I2S0 audio data line)
+
 # Inference + display defaults a stock X-EVK app would pick.  Apps
 # override in their board.yaml as needed.
 defaults:
@@ -207,10 +238,12 @@ hw_revisions:
     max_sdk_version: ~
     status: preliminary
     board_id:
-      adc_channel:    TBD
+      adc_channel:    E1M_X_ADC7        # ANA_S7, E1M-X connector pin B14; read via the SoM (GD32-bridged on V2N) -- SoM-internal
       # Divider resistor values + per-rev expected_mv + bin_radius_mv
       # live in the private alp-sdk-internal repo per the public/private
       # split policy (see the E1M-EVK board.yaml for the rationale).
+      # The divider + this ANA_S7 routing land in the NEW PCB order
+      # (2026-05); the initial bring-up board predates it.
     notes: |
       E1M-X Development Board (45x65).  The `e1m_routes:` block is
       derived from the EVK module-connector pinout; macro names and
@@ -219,4 +252,4 @@ hw_revisions:
 
 status:
   preliminary:              true                # routes connector-derived, pending HW-writeup ratification
-  partial_hw_config:        true                # board_id ADC channel + a few control pads (CAN_STBY, CAM1_RST) still TBD
+  partial_hw_config:        true                # board_id ADC = ANA_S7 (E1M_X_ADC7) now assigned; a few control pads (CAN_STBY, CAM1_RST) still TBD

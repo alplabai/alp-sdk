@@ -42,4 +42,22 @@ SRC_URI:append:e1m-v2n101 = " \
     file://0011-arm64-dts-renesas-rzv2n-evk-disable-unrouted-RIIC3-6-7-on-e1m-x.patch \
     file://0012-arm64-dts-renesas-rzv2n-evk-disable-USB-OVC-pins-on-e1m-x.patch \
     file://0013-arm64-dts-renesas-rzv2n-evk-set-eth-phy-mdio-addr-to-2-on-e1m-x.patch \
+    file://tas2563-audio.cfg \
 "
+
+# Kernel config fragment for the carrier's TAS2563 smart-amp codec.  The
+# mainline ASoC `tas2562` driver covers the TAS2563 and is NOT in the
+# linux-renesas 6.1-cip43 defconfig, so merge CONFIG_SND_SOC_TAS2562=y in.
+# Paired with DT patch 0010 (ti,tas2563 codec + audio-graph-card).
+#
+# STATUS: UNVALIDATED through bitbake -- confirm the linux-renesas config
+# flow during the build pass.  merge_config.sh is the canonical kernel
+# fragment merger; if linux-renesas is kernel-yocto based, the .cfg in
+# SRC_URI is already merged and this append is a harmless no-op.
+do_configure:append:e1m-v2n101() {
+    if [ -f "${WORKDIR}/tas2563-audio.cfg" ]; then
+        "${S}/scripts/kconfig/merge_config.sh" -m -O "${B}" \
+            "${B}/.config" "${WORKDIR}/tas2563-audio.cfg"
+        oe_runmake -C "${S}" O="${B}" olddefconfig
+    fi
+}
