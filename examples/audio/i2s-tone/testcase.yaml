@@ -3,11 +3,15 @@
 sample:
   name: i2s-tone
   description: |
-    Per-peripheral example for <alp/i2s.h>.  Generates a 1 kHz sine
-    and streams it as 16-bit stereo PCM.
+    Per-peripheral example for <alp/i2s.h>.  Generates a 1 kHz
+    triangle wave and streams it as 16-bit stereo PCM.  Uses
+    BOARD_I2S_AUDIO for portability across E1M EVK (AEN) and
+    E1M-X EVK (V2N).
 
 tests:
-  alp_sdk.example.i2s_tone:
+  alp_sdk.example.i2s_tone.e1m_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
       - native_sim
       - native_sim/native/64
@@ -17,6 +21,26 @@ tests:
       - alp-sdk
       - example
       - i2s
+      - aen
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[i2s\\] done"
+
+  alp_sdk.example.i2s_tone.e1m_x_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - i2s
+      - v2n
     harness: console
     harness_config:
         type: one_line

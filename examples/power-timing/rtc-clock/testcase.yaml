@@ -5,9 +5,13 @@ sample:
   description: |
     Per-peripheral example for <alp/rtc.h>.  Demonstrates set/get
     round-trip with the human-readable alp_rtc_time_t struct.
+    Builds for both E1M EVK and E1M-X EVK via the cross-EVK
+    BOARD_* alias layer.
 
 tests:
-  alp_sdk.example.rtc_clock:
+  alp_sdk.example.rtc_clock.e1m_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
       - native_sim
       - native_sim/native/64
@@ -17,6 +21,26 @@ tests:
       - alp-sdk
       - example
       - rtc
+      - aen
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[rtc\\] done"
+
+  alp_sdk.example.rtc_clock.e1m_x_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - rtc
+      - v2n
     harness: console
     harness_config:
         type: one_line

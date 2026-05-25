@@ -8,8 +8,9 @@
  * Predictive-maintenance edge-AI demo on E1M-AEN (or V2N).
  *
  *   ┌──────────────────┐   I2C0   ┌────────────────────────┐
- *   │ E1M-AEN701 SoM   │ ◀────────│ LSM6DSO 6-axis IMU     │
- *   │ + Cortex-M55 HP  │  (0x6A)  │ (EVK-populated)        │
+ *   │ E1M SoM          │ ◀────────│ ICM-42670 6-axis IMU   │
+ *   │ + Cortex-M55 HP  │  (0x68   │ (populated on BOTH     │
+ *   │   or M33 SM      │   or 69) │  E1M EVK + E1M-X EVK)  │
  *   └────────┬─────────┘          └────────────────────────┘
  *            │  256-sample sliding window of accel-mag values
  *            ▼
@@ -27,6 +28,29 @@
  *           │ printk   │  -- one line per window, log line
  *           │ dashboard│     becomes the customer's input for
  *           └──────────┘     their MQTT / OPC-UA gateway.
+ *
+ *
+ * ── Why the ICM-42670 instead of the LSM6DSO ──────────────────
+ *
+ * The ICM-42670-P is populated on BOTH the E1M EVK (35x35 mm, AEN
+ * family) and the E1M-X EVK (45x65 mm, V2N family).  The LSM6DSO
+ * is fitted only on the E1M EVK.  Since this demo targets both
+ * EVKs via BOARD_I2C_SENSORS and the portable <alp/board.h> layer,
+ * we use the ICM-42670 driver for cross-EVK portability.
+ *
+ * ICM-42670-P vs LSM6DSO for this demo:
+ *   - Same 6-axis accel + gyro, I2C + SPI interface.
+ *   - ODR closest to LSM6DSO's 833 Hz is ICM42670_ODR_800_HZ (800 Hz).
+ *   - FS_2G sensitivity: ICM-42670 = 2048 LSB/g (vs 16384 on LSM6DSO).
+ *   - API shape: icm42670_init / icm42670_set_accel / icm42670_read_accel
+ *     / icm42670_deinit -- same lifecycle pattern as the LSM6DSO driver.
+ *
+ * EVK I2C address:
+ *   E1M EVK (UG-E1M-001):  AP_AD0 = high  → 0x69
+ *   E1M-X EVK:             AP_AD0 default → 0x68 (check your carrier)
+ *   This example uses ICM42670_I2C_ADDR_HIGH (0x69) to match the
+ *   E1M EVK strap.  Override by redefining IMU_I2C_ADDR if your
+ *   carrier wires AD0 low.
  *
  *
  * ── Why this demo matters ────────────────────────────────────
@@ -52,7 +76,7 @@
  *   Vela-compiled `.tflite` into `models/` and point the loader
  *   at it.  The placeholder model bytes here let the framing
  *   path compile + run on native_sim and HiL.
- * - The native_sim build can't talk to a real LSM6DSO, so the
+ * - The native_sim build can't talk to a real ICM-42670, so the
  *   IMU open returns NOSUPPORT; the loop fills the window with
  *   zeros and the framing path still exercises end-to-end.
  * - The "dashboard" is a single printf line per window.  Real
@@ -68,29 +92,41 @@
 
 #include "alp/peripheral.h"
 
-/* EVK_I2C_BUS_SENSORS is a board-macro from the generated routes header
- * (= E1M_I2C0); rebind it in board.yaml `pins:` to port to another board. */
-#include "alp/boards/alp_e1m_evk_routes.h"
+/* BOARD_I2C_SENSORS is a portable alias that resolves to the shared
+ * sensor I2C bus on whichever EVK is being targeted:
+ *   E1M EVK  (AEN)  → E1M_I2C0
+ *   E1M-X EVK (V2N) → E1M_X_I2C0
+ * Include via <alp/board.h>; ALP_BOARD_* is emitted by the build
+ * system from the board.yaml preset. */
+#include "alp/board.h"
 #include "alp/inference.h"
-#include "alp/chips/lsm6dso.h"
+#include "alp/chips/icm42670.h"
 
 LOG_MODULE_REGISTER(anomaly, LOG_LEVEL_INF);
 
 /* ───────── Sliding-window sizing ─────────
  *
- * 256 samples at the LSM6DSO's 833 Hz ODR is ~308 ms of vibration
- * history per window -- long enough to span the dominant
- * mechanical resonance of a typical small AC motor / pump, short
- * enough that an anomalous transient still gets caught inside
- * one window rather than averaged out across two.
+ * 256 samples at the ICM-42670's 800 Hz ODR is ~320 ms of vibration
+ * history per window -- long enough to span the dominant mechanical
+ * resonance of a typical small AC motor / pump, short enough that an
+ * anomalous transient still gets caught inside one window.
  *
- * Real anomaly models retrain to whatever window length their
- * customer's bench-recorded "healthy" data was captured at; we
- * bake 256 in here as the §D.lib starting point.
+ * The original demo used the LSM6DSO at 833 Hz ODR; the ICM-42670's
+ * nearest standard rate is 800 Hz (ICM42670_ODR_800_HZ).  The ~4%
+ * difference in window duration (320 ms vs 308 ms) doesn't affect the
+ * framing logic but matters when retraining: rebuild your anomaly
+ * model with data sampled at 800 Hz to get accurate score calibration.
  */
 #define WINDOW_SAMPLES   256u
-#define IMU_ODR          LSM6DSO_ODR_833_HZ
-#define IMU_FS           LSM6DSO_ACCEL_FS_2G   /* 16384 LSB / g */
+#define IMU_ODR          ICM42670_ODR_800_HZ
+#define IMU_FS           ICM42670_ACCEL_FS_2G   /* 2048 LSB / g */
+
+/* I2C address of the ICM-42670 on the E1M EVK (AP_AD0 = high → 0x69).
+ * Override by redefining this before including the header if your
+ * carrier board wires AD0 low (→ ICM42670_I2C_ADDR_LOW = 0x68). */
+#ifndef IMU_I2C_ADDR
+#define IMU_I2C_ADDR ICM42670_I2C_ADDR_HIGH
+#endif
 
 /* Per-sample magnitude buffer -- the input the 1D-CNN expects.
  * Storing magnitudes (not raw x/y/z triples) gives the model an
@@ -116,13 +152,15 @@ static uint8_t s_arena[128 * 1024] __aligned(16);
 
 /* ───────── Sample-loop helpers ───────── */
 
-/* Raw int16 LSB to float "g".  At FS_2G the chip emits 16384 LSB
- * per g (datasheet table 3).  We compute the magnitude in g
- * because the anomaly model was trained against g-magnitude
- * features in the v0.5 reference pipeline. */
-static inline float accel_magnitude_g(const lsm6dso_axes_t *a)
+/* Raw int16 LSB to float "g".  ICM-42670 at FS_2G: 2048 LSB per g
+ * (datasheet DS-000451, table 3.  Note: the LSM6DSO at FS_2G uses
+ * 16384 LSB/g -- a different sensitivity; this constant must match
+ * the chip being used.)
+ * We compute the magnitude in g because the anomaly model was trained
+ * against g-magnitude features in the v0.5 reference pipeline. */
+static inline float accel_magnitude_g(const icm42670_axes_t *a)
 {
-    const float lsb_per_g = 16384.0f;
+    const float lsb_per_g = 2048.0f;   /* ICM-42670 FS_2G sensitivity */
     const float fx = (float)a->x / lsb_per_g;
     const float fy = (float)a->y / lsb_per_g;
     const float fz = (float)a->z / lsb_per_g;
@@ -132,25 +170,24 @@ static inline float accel_magnitude_g(const lsm6dso_axes_t *a)
 /* Fill the window from the IMU.  When the IMU handle is NULL --
  * native_sim or a missing chip -- we zero-fill so the framing
  * path still runs; the customer sees a flat anomaly score that
- * confirms the model is being invoked even without a real
- * sensor. */
-static void fill_window(lsm6dso_t *imu, float *out, size_t n)
+ * confirms the model is being invoked even without a real sensor. */
+static void fill_window(icm42670_t *imu, float *out, size_t n)
 {
     if (imu == NULL) {
         memset(out, 0, n * sizeof(*out));
         return;
     }
     for (size_t i = 0; i < n; i++) {
-        lsm6dso_axes_t a = {0};
-        if (lsm6dso_read_accel(imu, &a) != ALP_OK) {
+        icm42670_axes_t a = {0};
+        if (icm42670_read_accel(imu, &a) != ALP_OK) {
             out[i] = 0.0f;
             continue;
         }
         out[i] = accel_magnitude_g(&a);
-        /* Pace the loop at the chip's 833 Hz ODR.  Real
-         * deployments wire the LSM6DSO INT1 line to a GPIO IRQ
+        /* Pace the loop at the chip's 800 Hz ODR.  Real
+         * deployments wire the ICM-42670 INT1 line to a GPIO IRQ
          * for jitter-free sample-ready dispatch; v0.5 polls. */
-        k_usleep(1200);
+        k_usleep(1250);
     }
 }
 
@@ -211,30 +248,30 @@ static float read_anomaly_score(alp_inference_t *inf)
 
 int main(void)
 {
-    printf("[anomaly] alp-sdk vibration anomaly detection demo\n");
+    printf("[anomaly] alp-sdk vibration anomaly detection demo (ICM-42670)\n");
 
-    /* I2C bring-up.  E1M-EVK routes I2C0 to the LSM6DSO at 0x6A
-     * (SA0 pulled low on the EVK).  400 kHz is comfortable for
-     * the chip's 1 MHz max.  Failure tolerated -- the loop falls
-     * back to a zero-fill window so native_sim still runs. */
+    /* I2C bring-up.  BOARD_I2C_SENSORS resolves to the on-board sensor
+     * bus on whichever EVK is being targeted.  400 kHz is comfortable
+     * for the ICM-42670's 1 MHz max.  Failure tolerated -- the loop
+     * falls back to a zero-fill window so native_sim still runs. */
     alp_i2c_t *i2c = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id     = EVK_I2C_BUS_SENSORS, /* = E1M_I2C0 */
+        .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
         .bitrate_hz = 400000,
     });
     if (i2c == NULL) {
-        printf("[anomaly] I2C0 open failed -- running with synthetic window\n");
+        printf("[anomaly] I2C open failed -- running with synthetic window\n");
     }
 
-    /* IMU bring-up.  WHO_AM_I check happens inside lsm6dso_init;
+    /* IMU bring-up.  WHO_AM_I check happens inside icm42670_init;
      * we treat failure as "no IMU" and carry on. */
-    lsm6dso_t imu = {0};
-    lsm6dso_t *imu_p = NULL;
+    icm42670_t imu = {0};
+    icm42670_t *imu_p = NULL;
     if (i2c != NULL) {
-        if (lsm6dso_init(&imu, i2c, LSM6DSO_I2C_ADDR_LOW) == ALP_OK) {
-            (void)lsm6dso_set_accel(&imu, IMU_ODR, IMU_FS);
+        if (icm42670_init(&imu, i2c, IMU_I2C_ADDR) == ALP_OK) {
+            (void)icm42670_set_accel(&imu, IMU_ODR, IMU_FS);
             imu_p = &imu;
         } else {
-            printf("[anomaly] LSM6DSO WHO_AM_I failed -- synthetic window\n");
+            printf("[anomaly] ICM-42670 WHO_AM_I failed -- synthetic window\n");
         }
     }
 
@@ -256,7 +293,7 @@ int main(void)
     }
 
     /* Steady-state loop -- one inference per window.  On HiL the
-     * window-fill blocks at the 833 Hz ODR (~308 ms per pass); on
+     * window-fill blocks at the 800 Hz ODR (~320 ms per pass); on
      * native_sim it returns instantly and we exit after one
      * iteration so the twister harness sees a clean "done". */
     for (int iter = 0; iter < 4; iter++) {
@@ -282,7 +319,7 @@ int main(void)
     }
 
     alp_inference_close(inf);
-    if (imu_p) lsm6dso_deinit(imu_p);
+    if (imu_p) icm42670_deinit(imu_p);
     alp_i2c_close(i2c);
 
     printf("[anomaly] done\n");
