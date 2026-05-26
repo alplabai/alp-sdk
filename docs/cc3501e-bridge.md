@@ -147,9 +147,18 @@ client refuses to talk to a firmware whose
 `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the
 compile-time expectation.
 
-## Firmware bootstrap (for `alplabai/cc3501e-firmware`)
+## Firmware: pre-flashed by ALP; rebuild is optional
 
-When that repo is created, it should:
+**The CC3501E ships pre-flashed by ALP** with the bridge firmware — for
+normal use the customer flashes and configures nothing; the device boots
+the bridge and the Alif-side `<alp/...>` calls work out of the box.  A
+version-pinned prebuilt blob also lives at
+`firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` for field re-flash.
+
+Rebuilding or customizing the firmware is an **optional, advanced path**
+— only then do you need TI's SDK (which you download yourself; alp-sdk
+does not redistribute it).  The future `alplabai/cc3501e-firmware` repo
+would:
 
 1. Vendor TI's SimpleLink CC33xx SDK as a git submodule.  Obtain it
    from TI under TI's own licence — the SimpleLink Wi-Fi SDK bundle
