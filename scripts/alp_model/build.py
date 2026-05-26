@@ -18,6 +18,7 @@ from .adapters.deepx import DeepxAdapter
 from .manifest import Manifest, Target, Coverage
 from .package import write_package
 from .targets import resolve_targets
+from .tensorio import extract_io
 
 # Default adapter registry. Each is detect-and-skip (is_available() False when
 # its tool is absent); vela (ethos_u) skips on hosts without the ethos-u-vela package.
@@ -67,8 +68,9 @@ def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
         detail = "; ".join(f"{c.backend}:{c.status} ({c.reason})" for c in coverage)
         raise ValueError(f"no blob compiled for model '{name}' (.{src_fmt}); coverage: {detail}")
 
+    inputs, outputs = extract_io(source)
     mft = Manifest(name=name, src_sha=hashlib.sha256(source.read_bytes()).digest(),
-                   inputs=[], outputs=[],        # tensor-I/O extraction wired in Task 6
+                   inputs=inputs, outputs=outputs,
                    targets=targets, coverage=coverage)
     out_path = out_dir / f"{name}.alpmodel"
     out_path.write_bytes(write_package(mft, blobs))
