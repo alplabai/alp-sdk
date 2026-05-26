@@ -167,7 +167,7 @@ Internally:
 | ADR 0006 (this)                            | `docs/adr/0006-secure-boot-secure-ota.md` -- ✅ landed |
 | `alp_ota_*` surface in `<alp/iot.h>`       | `include/alp/iot.h` -- v0.4                            |
 | MCUboot integration (AEN, N93-RTcore)      | `src/zephyr/ota_mcuboot.c` -- v0.4                     |
-| RAUC integration (N93-Linux, V2N, V2N-M1)  | `src/yocto/ota_rauc.cpp` + RAUC config in meta-alp -- v0.4 |
+| RAUC integration (N93-Linux, V2N, V2N-M1)  | `src/yocto/ota_rauc.cpp` + RAUC config in meta-alp-sdk -- v0.4 |
 | Per-SoM signing wrappers                   | `vendors/<vendor>/tools/sign.py` -- v0.4               |
 | `west sign` hook                           | Zephyr module hook -- v0.4                             |
 | Provisioning walkthrough                   | `docs/secure-boot-provisioning.md` -- v0.4             |
