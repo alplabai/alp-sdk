@@ -33,3 +33,21 @@ def test_resolve_targets_for_v2n101_yields_drpai_plus_cpu():
     drp = next(s for s in specs if s.backend == "drpai")
     assert drp.silicon_ref == "renesas:rzv2n:n44"
     assert drp.accel_config == ""              # drpai has no vela-style accel-config
+
+
+def test_resolve_targets_for_v2m101_folds_in_on_module_deepx():
+    # E1M-V2M101 -> host renesas:rzv2n:n44 (drpai) + on-module DEEPX DX-M1
+    # (deepx:dx:m1, found via variants[].alp_module_skus) + cpu.
+    specs = resolve_targets("E1M-V2M101", metadata_root=_META)
+    by = {(s.backend, s.silicon_ref) for s in specs}
+    assert ("drpai", "renesas:rzv2n:n44") in by
+    assert ("deepx_dxm1", "deepx:dx:m1") in by          # discrete accelerator folded in
+    assert ("cpu", "*") in by
+    deepx = next(s for s in specs if s.backend == "deepx_dxm1")
+    assert deepx.accel_config == ""
+
+
+def test_resolve_targets_v2n101_has_no_discrete_deepx():
+    # regression: V2N101 has no on-module DEEPX, must NOT gain a deepx target
+    specs = resolve_targets("E1M-V2N101", metadata_root=_META)
+    assert all(s.backend != "deepx_dxm1" for s in specs)
