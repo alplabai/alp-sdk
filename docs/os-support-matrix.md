@@ -170,6 +170,25 @@ across backends -- the currently-defined gates are `I2C`, `SPI`,
 `UART`, `GPIO`, `MQTT`, `AUDIO_IN`, `AUDIO_OUT`, `SECURITY`, and
 `UART_RX_RINGBUF`.
 
+## v0.5+ surfaces (listed for completeness — surface-only / untested)
+
+These `<alp/*>` surfaces landed (public header + a backend or SW
+fallback) after the v0.4-prep cut.  They are listed here so the matrix
+is complete; **none has per-SoM HIL verification yet** — treat every row
+as surface-only / untested until the matching [`test-plan.md`](test-plan.md)
+row flips.  They are deliberately **not** broken out per-core × per-SoM:
+asserting a status in each of the 11 cells would overclaim coverage that
+hasn't been measured.
+
+| Surface | Header(s) | Cores / backing | Status |
+|---------|-----------|-----------------|--------|
+| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr) + A (Yocto); registry over `tflm` / `ethos_u` / `drpai` / `deepx` | surface + backend registry present; per-NPU dispatch **untested** |
+| DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
+| Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
+| 2D graphics | `gpu2d.h` | M (Alif Dave2D / GPU2D) + SW fallback | surface present; **untested** |
+| Power management | `power.h` | M (Zephyr `pm_*`) + A | surface present; **untested** |
+| Heterogeneous RPC | `rpc.h` (+ generated `system_ipc.h`) | A↔M over RPMsg / OpenAMP | surface + scaffold; **untested** |
+
 ## CMSIS-DSP per-SoM validation
 
 ALP SDK does not re-export CMSIS-DSP -- application code includes
