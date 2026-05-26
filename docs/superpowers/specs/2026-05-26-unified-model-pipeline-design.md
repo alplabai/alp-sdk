@@ -287,7 +287,7 @@ All host-runnable gates wired into the existing twister/native_sim + pytest setu
 ## 12. Open questions / future work
 
 - **Backend id spelling** — *resolved 2026-05-26:* canonical is `deepx_dxm1`; the `ALP_INFERENCE_BACKEND_DEEPX_DX` enum is renamed to `ALP_INFERENCE_BACKEND_DEEPX_DXM1` in Stage 1.
-- **On-device manifest encoding** — CBOR is the default; confirm its MCU footprint in Stage 1 and fall back to a hand-rolled packed TLV only if CBOR proves too heavy.
+- **On-device manifest encoding** — *resolved 2026-05-26:* **CBOR** (`zcbor` on-device, a Python CBOR lib on host; JSON kept as the canonical tooling form). Chosen for extensibility + alignment with the Zephyr/SUIT/MCUboot firmware-manifest lane (`zcbor`) and a future **COSE-signing** path that matches the SDK's secure-boot/OTA trust model.
 - **`.alpmodel` container framing** — exact header layout + whether blob sections are aligned for `mmap` on Linux.
 - **Pluggable remote-compile adapter** — leave the `CompilerAdapter` seam so a CI/remote builder holding licensed toolchains can produce complete packages later (deferred).
 - **Quantization / calibration** — explicitly out of v1; revisit if a generic PTQ front-end is wanted.
