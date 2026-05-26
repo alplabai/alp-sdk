@@ -12,6 +12,15 @@ The **wire protocol** is specified in
 covers the **firmware-tree** side -- where the source lives, how to
 build it, how to flash it, and what state the implementation is in.
 
+> **Pre-flashed by ALP; rebuild is optional and fully open.** The
+> GD32G553 ships flashed by ALP with the bridge firmware, so for normal
+> use the customer does nothing — the Renesas host talks to a working
+> supervisor out of the box.  Unlike the CC3501E (whose optional rebuild
+> needs TI's gated SDK), the GD32 firmware is **not secret**: the source
+> lives in this repo (`firmware/gd32-bridge/`) and the GigaDevice library
+> is a public submodule, so rebuilding or customizing needs no gated
+> download — see **Build** below.
+
 ## At a glance
 
 | Aspect              | Today (2026-05-12)                                                                |
