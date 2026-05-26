@@ -65,3 +65,20 @@ def test_build_model_records_unavailable_tool_as_skip(tmp_path):
                      if c.backend == "ethos_u" and c.status == "skipped"]
     assert len(ethos_u_skips) == 2                      # both u55 accel-config variants
     assert all("not installed" in c.reason for c in ethos_u_skips)
+
+
+def test_build_model_v2m101_records_drpai_and_deepx_skips(tmp_path, monkeypatch):
+    # With the default registry, V2M101 has drpai (host) + deepx_dxm1 (on-module) targets;
+    # both proprietary tools are absent -> coverage skips; cpu still compiles.
+    monkeypatch.delenv("ALP_DRPAI_TVM_HOME", raising=False)
+    monkeypatch.delenv("ALP_DEEPX_SDK_HOME", raising=False)
+    monkeypatch.setattr("alp_model.adapters.deepx.shutil.which", lambda n: None)
+    src = tmp_path / "m.tflite"
+    src.write_bytes(b"TFL3-DUMMY")
+    out = build_model(sku="E1M-V2M101", name="demo", source=src,
+                      out_dir=tmp_path, metadata_root=_META)   # default registry
+    mft, _ = read_package(out.read_bytes())
+    skipped = {c.backend for c in mft.coverage if c.status == "skipped"}
+    assert "drpai" in skipped
+    assert "deepx_dxm1" in skipped              # resolver folded it in (Task 1)
+    assert any(t.backend == "cpu" for t in mft.targets)

@@ -12,13 +12,15 @@ from pathlib import Path
 
 from .adapters import CompilerAdapter
 from .adapters.cpu import CpuAdapter
+from .adapters.drpai import DrpaiAdapter
+from .adapters.deepx import DeepxAdapter
 from .manifest import Manifest, Target, Coverage
 from .package import write_package
 from .targets import resolve_targets
 
-# Default adapter registry. vela (ethos_u) + drpai/deepx are added in later
-# 1b-ii tasks; each is detect-and-skip (is_available() False when its tool is absent).
-_ADAPTERS: list[CompilerAdapter] = [CpuAdapter()]
+# Default adapter registry. vela (ethos_u) is added in Task 5;
+# drpai/deepx are detect-and-skip (is_available() False when their tool is absent).
+_ADAPTERS: list[CompilerAdapter] = [CpuAdapter(), DrpaiAdapter(), DeepxAdapter()]
 
 
 def _src_format(source: Path) -> str:
