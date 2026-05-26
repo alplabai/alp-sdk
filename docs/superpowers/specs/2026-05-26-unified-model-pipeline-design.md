@@ -138,7 +138,7 @@ A `.alpmodel` is a **self-describing binary container** with one tiny reader usa
 
 - `model.inputs/outputs` mirror the existing `alp_inference_tensor_t` shape (dtype/rank/shape[4]/scale/zero_point) so the runtime types map 1:1. Backend-independent.
 - `targets[].silicon_ref` uses the **same string the registry selects on** (`alp_backend_select`), `"*"` for portable blobs.
-- `backend` ids use the **metadata/preset vocabulary** (`ethos_u`, `drpai`, `deepx_dxm1`, `cpu`); the runtime maps to `alp_inference_backend_t` (note the small `deepx_dxm1` ↔ `DEEPX_DX` naming reconciliation — pick one canonical spelling during Stage 1).
+- `backend` ids use the **metadata/preset vocabulary** (`ethos_u`, `drpai`, `deepx_dxm1`, `cpu`) — **`deepx_dxm1` is canonical** (decided 2026-05-26). The runtime maps to `alp_inference_backend_t`, and the enum `ALP_INFERENCE_BACKEND_DEEPX_DX` is renamed to `ALP_INFERENCE_BACKEND_DEEPX_DXM1` in Stage 1 (clean rename — no active customers, no compat shim).
 - `targets[].arena_bytes` closes the "size it empirically" gap — the loader can size automatically.
 - `targets[].requires` is the blob's **capability envelope** — peak SRAM, op-features, and (via `accel_config`) the bound NPU variant. The loader admits a blob only if the device NPU **provides** it, so a model compiled for Ethos-U85 is never mis-selected onto a small U55. **This is the capability differentiator.**
 - `coverage[]` makes a partial package **explicit**, distinguishing `skipped` (compiler tool absent) from `incompatible` (the model doesn't fit that NPU variant — too big / unsupported ops on a small core).
@@ -286,7 +286,7 @@ All host-runnable gates wired into the existing twister/native_sim + pytest setu
 
 ## 12. Open questions / future work
 
-- **Backend id spelling** — reconcile `deepx_dxm1` (metadata) vs `ALP_INFERENCE_BACKEND_DEEPX_DX` (enum). Pick one canonical manifest spelling in Stage 1.
+- **Backend id spelling** — *resolved 2026-05-26:* canonical is `deepx_dxm1`; the `ALP_INFERENCE_BACKEND_DEEPX_DX` enum is renamed to `ALP_INFERENCE_BACKEND_DEEPX_DXM1` in Stage 1.
 - **On-device manifest encoding** — CBOR is the default; confirm its MCU footprint in Stage 1 and fall back to a hand-rolled packed TLV only if CBOR proves too heavy.
 - **`.alpmodel` container framing** — exact header layout + whether blob sections are aligned for `mmap` on Linux.
 - **Pluggable remote-compile adapter** — leave the `CompilerAdapter` seam so a CI/remote builder holding licensed toolchains can produce complete packages later (deferred).
