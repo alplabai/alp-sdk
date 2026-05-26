@@ -17,8 +17,7 @@ Each entry is either:
 - **considered, deferred** — kept here so future contributors
   don't re-evaluate from scratch.
 
-Per [feedback memory "No zero-value re-export headers"](../memory),
-the SDK does NOT ship `<alp/foo.h>` wrappers around upstream
+By policy, the SDK does NOT ship `<alp/foo.h>` wrappers around upstream
 libraries unless the wrapper genuinely adds portability /
 defaults / type-shim value.
 

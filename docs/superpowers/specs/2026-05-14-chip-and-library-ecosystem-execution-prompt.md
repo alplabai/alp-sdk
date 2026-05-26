@@ -9,7 +9,7 @@
 You're executing the chip + library ecosystem expansion for the
 alp-sdk repo (github.com/alplabai/alp-sdk).  Branch: main.
 The full design is in
-[`docs/superpowers/specs/2026-05-14-chip-and-library-ecosystem-design.md`](docs/superpowers/specs/2026-05-14-chip-and-library-ecosystem-design.md).
+[`2026-05-14-chip-and-library-ecosystem-design.md`](2026-05-14-chip-and-library-ecosystem-design.md).
 Read it first.
 
 ## What lands in this work

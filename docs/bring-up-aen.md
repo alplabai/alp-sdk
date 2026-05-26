@@ -133,7 +133,7 @@ console:
 
 | Slave | 7-bit addr | What |
 |-------|------------|------|
-| TCAL9538 | `0x70` | GPIO expander |
+| TCAL9538 | `0x72` | GPIO expander |
 | 24C128 | `0x50` | EEPROM (manifest) |
 | TMP112 | `0x48` | Thermometer (optional) |
 | BMP581 | `0x47` | Barometer (optional) |

@@ -139,8 +139,8 @@ need v0.4 fall back cleanly to the v0.3 state above.
 | **IoT — MQTT TLS** (`mqtts://`)      | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) | planned |
 | **IoT — Wi-Fi station** (`<alp/iot.h>`) | stub (system-config via wpa_supplicant/NM) | stub (system-config via wpa_supplicant/NM) | stub | planned |
 | **Audio** (`<alp/audio.h>`)          | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) | planned |
-| **Security** (`<alp/security.h>`)    | code complete (KATs green; meta-alp image build pending) — OpenSSL `EVP_*` | code complete (KATs green; meta-alp image build pending) — OpenSSL `EVP_*` | code complete (KATs green) | planned |
-| **Mender OTA (meta-alp opt-in)**     | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) | planned |
+| **Security** (`<alp/security.h>`)    | code complete (KATs green; meta-alp-sdk build mechanics verified 2026-05-26, full bake pending) — OpenSSL `EVP_*` | code complete (KATs green; meta-alp-sdk build mechanics verified 2026-05-26, full bake pending) — OpenSSL `EVP_*` | code complete (KATs green) | planned |
+| **Mender OTA (meta-alp-sdk opt-in)**     | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) | planned |
 
 ### Cortex-M (Zephyr)
 
@@ -158,7 +158,7 @@ need v0.4 fall back cleanly to the v0.3 state above.
 | **Security** (`<alp/security.h>`)    | surface declared (impl v0.3) | surface declared (impl v0.3) | surface declared (impl v0.3) | surface declared (impl v0.3) | stub | stub | stub |
 | **mproc IPC framing** (`<alp/mproc.h>`) | code complete (untested) — placeholder 12-byte envelope; replaced by nanopb-generated codec in v0.4-final | code complete (untested) — placeholder 12-byte envelope | code complete (untested) | code complete (untested) | stub | stub | stub |
 | **MCUboot secure-boot scaffolding**  | sysbuild profile + dev-key generator + `docs/secure-boot.md` (compile-verification gates on `alp_e1m_evk_aen` board file) | sysbuild profile + dev-key generator + `docs/secure-boot.md` | sysbuild profile + dev-key generator + `docs/secure-boot.md` | sysbuild profile + dev-key generator + `docs/secure-boot.md` | stub | stub | stub |
-| **Mender OTA (meta-alp opt-in)**     | doc-only (`mender-mcu-client` vs Hawkbit decision pending) | doc-only | doc-only | doc-only | n/a | n/a | n/a |
+| **Mender OTA (meta-alp-sdk opt-in)**     | doc-only (`mender-mcu-client` vs Hawkbit decision pending) | doc-only | doc-only | doc-only | n/a | n/a | n/a |
 
 The Yocto MQTT / audio / security backends are each conditional on
 their own `pkg_check_modules` check (`libmosquitto`, `alsa`,
@@ -169,6 +169,25 @@ on the sysroot keep the NOSUPPORT stubs.  Per-class
 across backends -- the currently-defined gates are `I2C`, `SPI`,
 `UART`, `GPIO`, `MQTT`, `AUDIO_IN`, `AUDIO_OUT`, `SECURITY`, and
 `UART_RX_RINGBUF`.
+
+## v0.5+ surfaces (listed for completeness — surface-only / untested)
+
+These `<alp/*>` surfaces landed (public header + a backend or SW
+fallback) after the v0.4-prep cut.  They are listed here so the matrix
+is complete; **none has per-SoM HIL verification yet** — treat every row
+as surface-only / untested until the matching [`test-plan.md`](test-plan.md)
+row flips.  They are deliberately **not** broken out per-core × per-SoM:
+asserting a status in each of the 11 cells would overclaim coverage that
+hasn't been measured.
+
+| Surface | Header(s) | Cores / backing | Status |
+|---------|-----------|-----------------|--------|
+| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr) + A (Yocto); registry over `tflm` / `ethos_u` / `drpai` / `deepx` | surface + backend registry present; per-NPU dispatch **untested** |
+| DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
+| Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
+| 2D graphics | `gpu2d.h` | M (Alif Dave2D / GPU2D) + SW fallback | surface present; **untested** |
+| Power management | `power.h` | M (Zephyr `pm_*`) + A | surface present; **untested** |
+| Heterogeneous RPC | `rpc.h` (+ generated `system_ipc.h`) | A↔M over RPMsg / OpenAMP | surface + scaffold; **untested** |
 
 ## CMSIS-DSP per-SoM validation
 

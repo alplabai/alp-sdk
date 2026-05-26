@@ -14,7 +14,7 @@ USB-UART adapter, and a 1 Gb Ethernet link partner.
 > **Yocto-first family.**  Unlike the AEN family (Zephyr / bare-
 > metal), the N93 family targets **Yocto Linux** as its primary
 > OS.  The Cortex-M33 side runs Zephyr as a co-processor; the
-> Cortex-A55s run a Linux kernel built from `meta-alp`.  This
+> Cortex-A55s run a Linux kernel built from `meta-alp-sdk`.  This
 > bring-up walks the A55 boot first; M33 attach lands in §5.
 
 ## 0. Pre-flight
@@ -38,7 +38,7 @@ Inventory check before powering anything:
 ## 1. First-power smoke test
 
 1. Insert a microSD card flashed with a `core-image-minimal`
-   built from `meta-alp` (see §3 below for the build).
+   built from `meta-alp-sdk` (see §3 below for the build).
 2. Connect a current-limited bench supply (1.5 A limit) to V_IN.
 3. Power on; watch the supply.  Steady-state current with
    Yocto idle at the login prompt: **~280..400 mA**.
@@ -57,7 +57,7 @@ Check the PMIC's `INT_STATUS` register over BRD_I2C; the
 1. Wire USB-UART to UART1 on the board (silkscreen
    `USB_UART_TXD` / `_RXD`).  Standard 115200 8N1.
 2. Open a terminal.
-3. Insert the microSD with the `meta-alp` image and power on.
+3. Insert the microSD with the `meta-alp-sdk` image and power on.
 
 Expected output within ~5 s:
 
@@ -70,7 +70,7 @@ Booting Linux on physical CPU 0x0000000000 [0x412fd050]
 Linux version 6.6.x (alp@alp-build)
 ...
 Welcome to ALP Yocto (kirkstone, branch ...)
-e1m-n93 login:
+e1m-nx9101-a55 login:
 ```
 
 Login as `root` (no password on the bring-up image).  If you
@@ -99,7 +99,7 @@ bitbake-layers add-layer ../meta-imx/meta-ml
 bitbake-layers add-layer ../meta-alp-sdk
 
 # In conf/local.conf:
-echo 'MACHINE = "e1m-n93"' >> conf/local.conf
+echo 'MACHINE = "e1m-nx9101-a55"' >> conf/local.conf
 echo 'DISTRO  = "alp-distro"' >> conf/local.conf
 
 # Build (45-90 min the first time; warm cache: 5-10 min).
@@ -107,11 +107,11 @@ bitbake core-image-minimal
 ```
 
 The output image lands at
-`tmp/deploy/images/e1m-n93/core-image-minimal-e1m-n93.wic`.
+`tmp/deploy/images/e1m-nx9101-a55/core-image-minimal-e1m-nx9101-a55.wic`.
 Flash to microSD:
 
 ```bash
-sudo dd if=tmp/deploy/images/e1m-n93/core-image-minimal-e1m-n93.wic \
+sudo dd if=tmp/deploy/images/e1m-nx9101-a55/core-image-minimal-e1m-nx9101-a55.wic \
         of=/dev/sdX bs=4M conv=fsync
 ```
 

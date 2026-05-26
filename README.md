@@ -327,11 +327,13 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 | Group | Headers + chip drivers |
 |---|---|
 | Peripherals | `peripheral.h` (GPIO/I²C/SPI/UART), `pwm.h`, `adc.h`, `counter.h`, `i2s.h`, `can.h`, `rtc.h`, `wdt.h`, `usb.h` |
-| Audio / camera / display | `audio.h` (PDM in + I²S out), `camera.h`, `gui.h` (LVGL) — chip drivers: SSD1306, SSD1331, OV5640, CAM_MUX, TAS2563, PDM mic |
-| Connectivity & security | `iot.h` (Wi-Fi/MQTT), `ble.h` (BLE 5.4), `security.h` (MbedTLS PSA Crypto), OPTIGA Trust M chip driver |
+| Audio / camera / display | `audio.h` (PDM in + I²S out), `camera.h`, `gui.h` (LVGL), `display.h` (panels) — chip drivers: SSD1306, SSD1331, ST7789, OV5640, CAM_MUX, TAS2563, PDM mic |
+| Connectivity & security | `iot.h` (Wi-Fi/MQTT), `ble.h` (BLE 5.4), `security.h` (MbedTLS PSA Crypto), `storage.h` (LittleFS), OPTIGA Trust M chip driver |
+| DSP / graphics / power | `dsp.h` (FFT / FAC / IIR chain), `tmu.h` (trig-/math-unit offload), `gpu2d.h` (2D blit/fill), `power.h` (sleep + wake sources) — HW-accelerated where the SoC provides it, SW fallback (CMSIS-DSP / libm / Zephyr PM) otherwise |
 | Inference dispatcher | `inference.h` — registry-backed backend selector + tensor-arena management.  Backends registered today: `tflm` (CPU reference kernels, portable), `ethos_u_aen` (Ethos-U on Alif Ensemble — U55 every SKU, U85 on E4/E6/E8 Transformer-capable), `ethos_u_n93` (Ethos-U U65 on i.MX 93), `drpai_v2n_stub` (DRP-AI3 on RZ/V2N — tracked by issue #58), `deepx_dxm1_stub` (DEEPX DX-M1 — tracked by issue #59), `sw_fallback` (NOSUPPORT floor).  Selector picks the highest-priority backend matching the SoM's silicon ref; exact match beats `*` wildcard at equal priority. |
-| Multi-proc / IPC | `mproc.h` — mailbox + shared memory + hardware semaphore |
+| Multi-proc / IPC | `mproc.h` (mailbox + shared memory + hardware semaphore) + `rpc.h` (framed RPC over RPMsg / OpenAMP) — the heterogeneous Zephyr↔Yocto path |
 | Hardware info | `hw_info.h` — 128-byte EEPROM manifest + BOARD_ID ADC + `assert_matches_build()` |
+| Vendor escape hatches | `ext/<vendor>/…` — Alif / Renesas / NXP / DEEPX surfaces for capabilities the portable `<alp/*>` API can't express (camera, inference, ADC, storage, power) |
 | Chip drivers | **80+** under `chips/` — LSM6DSO, BMI323, ICM-42670, BMP581, INA236, TMP112, RV-3028-C7, 24C128, CC3501E, TCAL9538, button-LED helper, … |
 | User libraries (via `libraries:` in board.yaml) | ETL · fmt · nlohmann_json · doctest · LVGL · MbedTLS · CMSIS-DSP · LittleFS |
 
@@ -389,6 +391,9 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   │               │    │  ─ LVGL               ─ BOARD_ID ADC    chain (FFT │
   │               │    │  ─ GPU2D / Dave2D     ─ <alp/hw_info>   FAC, IIR)  │
   │               │    │                                       ─ alp/power  │
+  │               │    │  Storage  ─ <alp/storage.h> (LittleFS)             │
+  │               │    │  Math/DSP ─ <alp/tmu.h> trig + math offload        │
+  │               │    │  Vendor   ─ <alp/ext/{alif,renesas,nxp,deepx}>     │
   │               │    │                                                    │
   │               │    │  Heterogeneous IPC   (v0.6 NEW)                    │
   │               │    │  ─ <alp/rpc.h>       framed RPMsg over OpenAMP     │
@@ -436,16 +441,20 @@ All consumer-facing headers live under `include/alp/`:
 |----------------------|--------------------------------------------|
 | `alp/peripheral.h`   | I²C, SPI, GPIO, UART                       |
 | `alp/pwm.h` / `adc.h` / `counter.h` / `i2s.h` / `can.h` / `rtc.h` / `wdt.h` / `usb.h` | one peripheral class per header |
-| `alp/camera.h` / `gui.h`             | camera + LVGL re-export      |
-| `alp/iot.h`          | Wi-Fi station + MQTT                       |
-| `alp/audio.h`        | PDM in / I²S out                           |
-| `alp/ble.h`          | BLE peripheral + central                   |
+| `alp/camera.h` / `gui.h` / `display.h` | camera · LVGL re-export · display-panel driver |
+| `alp/audio.h`        | PDM in / I²S out (+ smart-amp codecs, e.g. TAS2563) |
+| `alp/iot.h` / `ble.h` | Wi-Fi station + MQTT · BLE 5.4 peripheral + central |
 | `alp/security.h`     | MbedTLS PSA Crypto (hash / AEAD / TRNG)    |
-| `alp/mproc.h`        | Multi-proc IPC (mailbox / shared mem / hwsem) |
-| `alp/inference.h`    | Inference dispatcher (TFLM / Ethos-U / DRP-AI / DEEPX) |
+| `alp/storage.h`      | Block + filesystem storage (LittleFS)      |
+| `alp/inference.h` / `backend.h` | Inference dispatcher + the backend-registry seam (TFLM / Ethos-U / DRP-AI3 / DEEPX) |
+| `alp/dsp.h` / `tmu.h` | DSP chain (FFT / FAC / IIR) + trig-/math-unit offload — HW-accelerated where present, SW fallback (CMSIS-DSP / libm) otherwise |
+| `alp/gpu2d.h`        | Portable 2D-GPU blit/fill shim (Dave2D / GPU2D; SW fallback) |
+| `alp/power.h`        | Low-power: sleep modes + wake-source management |
+| `alp/mproc.h` / `rpc.h` | Heterogeneous IPC — mailbox / shared mem / hwsem + framed RPC over RPMsg (OpenAMP) |
 | `alp/hw_info.h`      | EEPROM manifest + BOARD_ID ADC             |
 | `alp/soc_caps.h`     | (generated) active-SoC capability constants |
-| `alp/e1m_pinout.h`   | E1M-spec instance IDs + portability bounds |
+| `alp/e1m_pinout.h` / `e1m_x_pinout.h` | E1M + E1M-X instance IDs + portability bounds (separate namespaces) |
+| `alp/ext/<vendor>/…`  | Vendor escape-hatch extensions (Alif / Renesas / NXP / DEEPX) for capabilities the portable API can't express |
 | `alp/boards/<board>.h` | Board-feature names (e.g. EVK pin map) |
 | `chips/<part>/`      | **80+** chip drivers, opt-in via `board.yaml` `populated:` |
 
@@ -545,7 +554,7 @@ alp-sdk/
 ├── examples/        # reference apps (cross-family + examples/aen/ + examples/v2n/)
 ├── docs/            # architecture, board-config, ADRs, test-plan, …
 ├── tests/           # smoke + Twister + fuzz + bench + scripts
-├── yocto/meta-alp/  # Yocto layer + machine confs
+├── meta-alp-sdk/    # Yocto layer + machine confs
 ├── firmware/        # cc3501e/ + gd32-bridge/ on-module-MCU firmware
 ├── zephyr/          # Zephyr-module entry: Kconfig, module.yml, dts/bindings/, sysbuild/aen/
 ├── (build/)         # local build outputs — gitignored.  Yocto, Zephyr, and plain-CMake all land here (e.g. build/yocto-2b/, build/zephyr/, build/<example>/).

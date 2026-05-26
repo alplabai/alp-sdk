@@ -56,7 +56,7 @@ and security-audit-plan layers.
   would mean re-validating every secure-side example against the
   cross-core flow.
 - **OPTIGA bridge stays 1-hop.**  The PSA <-> OPTIGA bridge driver at
-  `src/security/optiga_trust_m_bridge.c` calls into OPTIGA via the
+  `chips/optiga_trust_m/optiga_trust_m.c` calls into OPTIGA via the
   M55-HP's I2C peripheral directly from the secure side; no cross-
   core RPC.
 

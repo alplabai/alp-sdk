@@ -137,7 +137,7 @@ Pre-`board.yaml` the user had to track configuration across:
 |------|-----------------|
 | `prj.conf` (Zephyr) | `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y` + Kconfig knobs |
 | cmake configure args | `-DALP_OS=baremetal -DALP_SOM=aen` |
-| `local.conf` (Yocto) | `MACHINE=e1m-x-v2n-m1` + IMAGE_INSTALL |
+| `local.conf` (Yocto) | `MACHINE=e1m-v2m101-a55` + IMAGE_INSTALL |
 | Per-component cmake / Kconfig flags | `CONFIG_ALP_SDK_CHIP_LSM6DSO=y`, ... |
 | Vendor-library opt-in flags | `CONFIG_ALP_SDK_USE_LWRB=y`, ... |
 

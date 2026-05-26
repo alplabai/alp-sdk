@@ -46,6 +46,11 @@
       "additionalProperties": true,
       "description": "Reference-design app defaults (e.g. canonical display chip, primary IMU)."
     },
+    "audio": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Carrier audio path (codecs + I2S bus + MCLK + I2S path-mux + amp control GPIOs) the Linux DT / audio-graph-card is generated from.  Captures device-instance facts (I2C addresses, L/R channel, mux + shutdown/IRQ GPIO macros) beyond the E1M-pad routing in e1m_routes."
+    },
     "default_hw_rev": {
       "type": "string",
       "pattern": "^[a-z0-9_-]+$"

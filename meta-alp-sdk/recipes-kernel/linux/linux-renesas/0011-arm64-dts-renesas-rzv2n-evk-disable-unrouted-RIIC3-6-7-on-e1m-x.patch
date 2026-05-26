@@ -1,0 +1,44 @@
+From d878d6019786d61f78f6fc611c05a87fbacbbcd8 Mon Sep 17 00:00:00 2001
+From: Caner <alpcaner92@gmail.com>
+Date: Mon, 25 May 2026 14:28:06 +0200
+Subject: [PATCH 2/3] arm64: dts: renesas: rzv2n-evk: disable unrouted
+ RIIC3/6/7 on e1m-x
+
+Per alp-sdk renesas-peripheral-map.tsv only RIIC0/1/2/8 are pinned out on
+the v2n-m1 SoM. RIIC3/6/7 are not bonded out, so the enabled-but-unrouted
+controllers just throw 'i2c i2c-N: SCL is stuck low' on access. Disable them.
+
+Signed-off-by: Caner <alpcaner92@gmail.com>
+---
+ .../dts/renesas/r9a09g056n48-rzv2n-evk.dts     | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts b/arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts
+index 0a6c9b84a945..d45776c5ccdc 100644
+--- a/arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts
++++ b/arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts
+@@ -1579,3 +1579,21 @@ &rcar_sound {
+ &sound_card {
+ 	status = "disabled";
+ };
++
++/*
++ * ALP e1m-x / v2n-m1: only RIIC0/1/2/8 are bonded out on the SoM
++ * (alp-sdk metadata/e1m_modules/v2n/renesas-peripheral-map.tsv). RIIC3/6/7
++ * have no pads on this module, so leaving the controllers enabled only
++ * produces "i2c i2c-N: SCL is stuck low" on access. Disable them.
++ */
++&i2c3 {
++	status = "disabled";
++};
++
++&i2c6 {
++	status = "disabled";
++};
++
++&i2c7 {
++	status = "disabled";
++};
+-- 
+2.34.1
+

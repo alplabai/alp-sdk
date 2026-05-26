@@ -167,9 +167,9 @@ sudo dd if=tmp/deploy/images/e1m-v2n101-a55/alp-image-edge-e1m-v2n101-a55.wic \
         of=/dev/sdX bs=4M conv=fsync
 
 # Boot the module, login, drop the cert + binary, run:
-scp build/myapp root@e1m-v2n.local:/usr/bin/
-scp broker.crt root@e1m-v2n.local:/etc/alp/
-ssh root@e1m-v2n.local /usr/bin/myapp
+scp build/myapp root@e1m-v2n101-a55.local:/usr/bin/
+scp broker.crt root@e1m-v2n101-a55.local:/etc/alp/
+ssh root@e1m-v2n101-a55.local /usr/bin/myapp
 ```
 
 Expected output (on the device):

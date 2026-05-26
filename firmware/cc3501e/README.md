@@ -6,9 +6,9 @@ The CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on the E1M-AEN module runs
 its own firmware, built and released from a separate repository
 **`alplabai/cc3501e-firmware`** (per [ADR
 0005](../../docs/adr/0005-alp-sdk-vs-alp-studio-boundary.md)'s
-dual-use acid test — it ships TI SimpleLink CC33xx SDK, licenses
-differently, releases on its own cadence, and most alp-sdk
-consumers never rebuild it).
+dual-use acid test — it vendors TI's BSD-3 SimpleLink
+SDK, releases on its own cadence, and most alp-sdk consumers never
+rebuild it).
 
 This directory is the **alp-sdk side of that boundary** — what you
 need from this repo when working on the firmware or when shipping
@@ -23,6 +23,7 @@ a binary alongside an alp-sdk release.
 | `prebuilt/CHANGELOG.md`           | Per-release notes for the prebuilt binaries.  Cross-references the firmware repo's release tag. |
 | `flash.py`                        | Vendor-neutral flashing helper.  Talks to the CC3501E via the Alif over SPI1 (using `chips/cc3501e/` from this repo) and writes the binary to the CC3501E's internal flash. |
 | `protocol-version.txt`            | The wire-protocol version this alp-sdk release expects.  Must match `ALP_CC3501E_PROTOCOL_VERSION` in `<alp/protocol/cc3501e.h>`. |
+| `firmware-version.txt`            | The firmware **release** version — its own semver, tracked independently of the protocol version.  Names the prebuilt blob (`cc3501e-vX.Y.Z.bin`) + the firmware repo's release tag; the device reports it as `fw_version` via `GET_VERSION` / `GET_DIAG_INFO`. |
 
 ## Source-of-truth contract
 
@@ -47,13 +48,11 @@ release.
 ## Bootstrap checklist (when `alplabai/cc3501e-firmware` is created)
 
 1. **Empty repo + license**: Apache-2.0 (matches alp-sdk).
-2. **Vendor SimpleLink CC33xx SDK** as a git submodule under
-   `vendor/simplelink-cc33xx/`.  Pin to a specific TI release tag.
-   Canonical download: TI Resource Explorer →
-   [SimpleLink Wi-Fi SDK](https://dev.ti.com/tirex/explore/node?node=A__AEIJm0rwIeU.2P1OBWwlaA__com.ti.SIMPLELINK_WIFI_SDK__ZlChU-m__LATEST)
-   (the same SDK covers CC3300/CC3301/CC3501; pick the CC3501-targeted
-   build/sample set).  TI.com login + BSD-3 + restricted-use
-   click-through accept required before the archive downloads.
+2. **Vendor TI's BSD-3-licensed SimpleLink Wi-Fi SDK** as a git
+   submodule under `vendor/simplelink-cc33xx/`, pinned to a specific TI
+   release tag.  The same SDK covers CC3300/CC3301/CC3501 — pick the
+   CC3501-targeted build/sample set.  It is open-source-licensed
+   (BSD-3); obtain it from TI.  alp-sdk does not redistribute it.
 3. **Toolchain**: `ticlang` (TI's LLVM fork) preferred over CCS
    Studio — works in CI without GUI.  Pin version in `.ti-cgt`.
 4. **Wire protocol mirror**: copy
@@ -76,10 +75,13 @@ release.
    the appropriate `WIFI_GPIO_WRITE` (or a dedicated camera
    command if we add one).
 10. **Release process**:
-    - Tag `vX.Y.Z`; CI builds + signs the binary.
-    - Drop the signed binary, signature, and SHA-256 into
-      this directory's `prebuilt/` via a PR to alp-sdk.
-    - Update `protocol-version.txt` if the protocol bumped.
+    - Bump `firmware-version.txt` to the release semver and tag
+      `vX.Y.Z` to match; CI builds + signs the binary.
+    - Drop the signed binary, signature, and SHA-256 into this
+      directory's `prebuilt/` via a PR to alp-sdk
+      (named `cc3501e-v<firmware-version>.bin`).
+    - Bump `protocol-version.txt` ONLY if the wire protocol changed —
+      it moves independently of the firmware version.
     - Update `prebuilt/CHANGELOG.md`.
 
 ## Flashing (consumer-side)
@@ -105,10 +107,11 @@ committing the image to internal flash.
 
 Per [ADR 0005](../../docs/adr/0005-alp-sdk-vs-alp-studio-boundary.md):
 
-- **Different licenses**: alp-sdk is Apache-2.0 clean.  The
-  CC3501E firmware vendors TI's SimpleLink SDK, which carries a
-  TI BSD-3 + restricted-use clause.  Keeping them separate keeps
-  the alp-sdk license story clean.
+- **Separate vendor dependency**: alp-sdk is Apache-2.0 clean; the
+  CC3501E firmware vendors TI's SimpleLink SDK (BSD-3, open-source).
+  Keeping it in its own repo keeps alp-sdk's dependency story simple —
+  it is not a secrecy or licence-gating concern (the firmware itself is
+  open, like the GD32 bridge).
 - **Different release cadence**: alp-sdk lands daily; the
   firmware lands per-feature (weeks).
 - **Different audience**: 99 % of alp-sdk consumers never touch

@@ -12,6 +12,15 @@ The **wire protocol** is specified in
 covers the **firmware-tree** side -- where the source lives, how to
 build it, how to flash it, and what state the implementation is in.
 
+> **Pre-flashed by ALP; rebuild is optional and fully open.** The
+> GD32G553 ships flashed by ALP with the bridge firmware, so for normal
+> use the customer does nothing — the Renesas host talks to a working
+> supervisor out of the box.  Like the CC3501E bridge, the GD32 firmware is
+> **open**: the source lives in this repo (`firmware/gd32-bridge/`) and
+> the GigaDevice library
+> is a public submodule, so rebuilding or customizing needs no gated
+> download — see **Build** below.
+
 ## At a glance
 
 | Aspect              | Today (2026-05-12)                                                                |
@@ -25,6 +34,18 @@ build it, how to flash it, and what state the implementation is in.
 | Datasheet           | GD32G553 datasheet + user manual (held in the vendor datasheet) |
 | Flash size on chip  | 512 KB (per datasheet)                                                            |
 | RAM size on chip    | 128 KB                                                                            |
+
+## Versioning
+
+Three independent version axes — track them separately:
+
+| Axis | Where | Bumps when |
+|------|-------|-----------|
+| **Firmware release** | `firmware-version.txt` (semver, baked in via CMake) | each firmware release — names the tag + prebuilt blob; the device surfaces it through `GET_BUILD_ID` as `<ver>+<sha>` |
+| **Wire protocol** | `PROTOCOL_VERSION_*` in `src/protocol.h` (host: `<alp/chips/gd32g553.h>`) | the wire format changes; `GET_VERSION` returns it and the host refuses a mismatched MAJOR |
+| **Build-id** | git short-SHA in the `GET_BUILD_ID` reply | every build — pins the exact source behind a release |
+
+A firmware release can ship without a protocol bump, and vice-versa.
 
 ## Build
 
