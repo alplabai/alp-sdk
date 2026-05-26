@@ -37,7 +37,7 @@ extern "C" {
 
 /** Pixel format shared by the display and camera APIs. */
 typedef enum {
-    ALP_PIXFMT_MONO_VLSB = 0,   /**< 1 bpp, vertical bytes (SSD1306 native). */
+    ALP_PIXFMT_MONO_VLSB = 0, /**< 1 bpp, vertical bytes (SSD1306 native). */
     ALP_PIXFMT_RGB565    = 1,
     ALP_PIXFMT_RGB888    = 2,
     ALP_PIXFMT_ARGB8888  = 3
@@ -45,17 +45,20 @@ typedef enum {
 
 /** Status codes returned by ALP peripheral functions. */
 typedef enum {
-    ALP_OK              = 0,
-    ALP_ERR_INVAL       = -1,   /**< Invalid argument. */
-    ALP_ERR_NOT_READY   = -2,   /**< Peripheral not initialised. */
-    ALP_ERR_BUSY        = -3,   /**< Peripheral busy. */
-    ALP_ERR_TIMEOUT     = -4,   /**< Transfer timed out. */
-    ALP_ERR_IO          = -5,   /**< Bus / line error. */
-    ALP_ERR_NOSUPPORT   = -6,   /**< Backend lacks this feature. */
-    ALP_ERR_NOMEM       = -7,   /**< Allocation failure. */
-    ALP_ERR_OUT_OF_RANGE = -8,                    /**< Config exceeds the SoC's documented hardware caps. */
-    ALP_ERR_NOT_PRESENT_ON_THIS_SOC = -9,         /**< Hardware does not exist on this silicon (silicon-absent). Paired with ALP_BACKEND_AVAILABLE() == 0 at compile time. */
-    ALP_ERR_NOT_IMPLEMENTED = -10                 /**< Backend exists for this silicon but the implementation is a tracked stub (planned, not yet wired). Consult the linked @par Tracking: GitHub issue on the stub backend. */
+    ALP_OK               = 0,
+    ALP_ERR_INVAL        = -1, /**< Invalid argument. */
+    ALP_ERR_NOT_READY    = -2, /**< Peripheral not initialised. */
+    ALP_ERR_BUSY         = -3, /**< Peripheral busy. */
+    ALP_ERR_TIMEOUT      = -4, /**< Transfer timed out. */
+    ALP_ERR_IO           = -5, /**< Bus / line error. */
+    ALP_ERR_NOSUPPORT    = -6, /**< Backend lacks this feature. */
+    ALP_ERR_NOMEM        = -7, /**< Allocation failure. */
+    ALP_ERR_OUT_OF_RANGE = -8, /**< Config exceeds the SoC's documented hardware caps. */
+    ALP_ERR_NOT_PRESENT_ON_THIS_SOC =
+        -9, /**< Hardware does not exist on this silicon (silicon-absent). Paired with ALP_BACKEND_AVAILABLE() == 0 at compile time. */
+    ALP_ERR_NOT_IMPLEMENTED =
+        -10, /**< Backend exists for this silicon but the implementation is a tracked stub (planned, not yet wired). Consult the linked @par Tracking: GitHub issue on the stub backend. */
+    ALP_ERR_VERSION = -11 /**< Format/container version is newer than this reader supports. */
 } alp_status_t;
 
 /**
@@ -121,24 +124,21 @@ void alp_delay_ms(uint32_t ms);
 /* ------------------------------------------------------------------ */
 
 /** Pin direction. */
-typedef enum {
-    ALP_GPIO_INPUT      = 0,
-    ALP_GPIO_OUTPUT     = 1
-} alp_gpio_dir_t;
+typedef enum { ALP_GPIO_INPUT = 0, ALP_GPIO_OUTPUT = 1 } alp_gpio_dir_t;
 
 /** Pin pull configuration. */
 typedef enum {
-    ALP_GPIO_PULL_NONE  = 0,
-    ALP_GPIO_PULL_UP    = 1,
-    ALP_GPIO_PULL_DOWN  = 2
+    ALP_GPIO_PULL_NONE = 0,
+    ALP_GPIO_PULL_UP   = 1,
+    ALP_GPIO_PULL_DOWN = 2
 } alp_gpio_pull_t;
 
 /** Edge for interrupt-on-change. */
 typedef enum {
-    ALP_GPIO_EDGE_NONE      = 0,
-    ALP_GPIO_EDGE_RISING    = 1,
-    ALP_GPIO_EDGE_FALLING   = 2,
-    ALP_GPIO_EDGE_BOTH      = 3
+    ALP_GPIO_EDGE_NONE    = 0,
+    ALP_GPIO_EDGE_RISING  = 1,
+    ALP_GPIO_EDGE_FALLING = 2,
+    ALP_GPIO_EDGE_BOTH    = 3
 } alp_gpio_edge_t;
 
 typedef struct alp_gpio alp_gpio_t;
@@ -165,9 +165,7 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_gpio_configure(alp_gpio_t *pin,
-                                alp_gpio_dir_t dir,
-                                alp_gpio_pull_t pull);
+alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pull_t pull);
 
 /**
  * @brief Drive an output pin to @p level.
@@ -206,9 +204,7 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_gpio_irq_enable(alp_gpio_t *pin,
-                                 alp_gpio_edge_t edge,
-                                 alp_gpio_cb_t cb,
+alp_status_t alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb,
                                  void *user);
 
 /**
@@ -242,8 +238,8 @@ const alp_capabilities_t *alp_gpio_capabilities(const alp_gpio_t *pin);
 typedef struct alp_i2c alp_i2c_t;
 
 typedef struct {
-    uint32_t bus_id;        /**< Studio-resolved bus instance id. */
-    uint32_t bitrate_hz;    /**< 100k / 400k / 1M typical. */
+    uint32_t bus_id;     /**< Studio-resolved bus instance id. */
+    uint32_t bitrate_hz; /**< 100k / 400k / 1M typical. */
 } alp_i2c_config_t;
 
 /**
@@ -268,8 +264,7 @@ alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_IO (NACK / bus fault) / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr,
-                           const uint8_t *data, size_t len);
+alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, size_t len);
 
 /**
  * @brief 7-bit-address blocking read.
@@ -282,8 +277,7 @@ alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr,
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr,
-                          uint8_t *data, size_t len);
+alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t len);
 
 /**
  * @brief Write-then-read (typical register read pattern).
@@ -301,8 +295,7 @@ alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr,
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_i2c_write_read(alp_i2c_t *bus, uint8_t addr,
-                                const uint8_t *wdata, size_t wlen,
+alp_status_t alp_i2c_write_read(alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen,
                                 uint8_t *rdata, size_t rlen);
 
 /**
@@ -327,18 +320,18 @@ const alp_capabilities_t *alp_i2c_capabilities(const alp_i2c_t *bus);
 typedef struct alp_spi alp_spi_t;
 
 typedef enum {
-    ALP_SPI_MODE_0 = 0,     /**< CPOL=0, CPHA=0 */
-    ALP_SPI_MODE_1 = 1,     /**< CPOL=0, CPHA=1 */
-    ALP_SPI_MODE_2 = 2,     /**< CPOL=1, CPHA=0 */
-    ALP_SPI_MODE_3 = 3      /**< CPOL=1, CPHA=1 */
+    ALP_SPI_MODE_0 = 0, /**< CPOL=0, CPHA=0 */
+    ALP_SPI_MODE_1 = 1, /**< CPOL=0, CPHA=1 */
+    ALP_SPI_MODE_2 = 2, /**< CPOL=1, CPHA=0 */
+    ALP_SPI_MODE_3 = 3  /**< CPOL=1, CPHA=1 */
 } alp_spi_mode_t;
 
 typedef struct {
-    uint32_t bus_id;
-    uint32_t freq_hz;
+    uint32_t       bus_id;
+    uint32_t       freq_hz;
     alp_spi_mode_t mode;
-    uint8_t  bits_per_word; /**< Usually 8. */
-    uint32_t cs_pin_id;     /**< Studio-resolved chip-select pin. */
+    uint8_t        bits_per_word; /**< Usually 8. */
+    uint32_t       cs_pin_id;     /**< Studio-resolved chip-select pin. */
 } alp_spi_config_t;
 
 /**
@@ -364,9 +357,7 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_spi_transceive(alp_spi_t *bus,
-                                const uint8_t *tx, uint8_t *rx,
-                                size_t len);
+alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len);
 
 /**
  * @brief Half-duplex SPI write (no MISO read).
@@ -420,10 +411,10 @@ typedef enum {
 } alp_uart_parity_t;
 
 typedef struct {
-    uint32_t port_id;
-    uint32_t baudrate;
-    uint8_t  data_bits;     /**< Usually 8. */
-    uint8_t  stop_bits;     /**< 1 or 2. */
+    uint32_t          port_id;
+    uint32_t          baudrate;
+    uint8_t           data_bits; /**< Usually 8. */
+    uint8_t           stop_bits; /**< 1 or 2. */
     alp_uart_parity_t parity;
 } alp_uart_config_t;
 
@@ -461,8 +452,7 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len,
-                           uint32_t timeout_ms);
+alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms);
 
 /**
  * @brief Release the UART port handle.  Idempotent on NULL.
@@ -515,9 +505,8 @@ typedef struct alp_uart_rx_ringbuf alp_uart_rx_ringbuf_t;
  *         Returns NULL + ALP_ERR_NOSUPPORT on builds without
  *         CONFIG_ALP_SDK_UART_RX_RINGBUF.
  */
-alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port,
-                                                  uint8_t    *backing,
-                                                  size_t      backing_size);
+alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing,
+                                                  size_t backing_size);
 
 /**
  * @brief Pop up to @p max_len bytes out of the ring.
@@ -533,8 +522,7 @@ alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port,
  * @return ALP_OK on success.  ALP_ERR_NOT_READY if @p rb is NULL or
  *         detached.  ALP_ERR_INVAL if @p out is NULL with @p max_len > 0.
  */
-alp_status_t alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb,
-                                     uint8_t *out, size_t max_len,
+alp_status_t alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len,
                                      size_t *got);
 
 /**
@@ -560,7 +548,7 @@ size_t alp_uart_rx_ringbuf_count(const alp_uart_rx_ringbuf_t *rb);
 void alp_uart_rx_ringbuf_detach(alp_uart_rx_ringbuf_t *rb);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_PERIPHERAL_H */
+#endif /* ALP_PERIPHERAL_H */
