@@ -35,6 +35,18 @@ build it, how to flash it, and what state the implementation is in.
 | Flash size on chip  | 512 KB (per datasheet)                                                            |
 | RAM size on chip    | 128 KB                                                                            |
 
+## Versioning
+
+Three independent version axes — track them separately:
+
+| Axis | Where | Bumps when |
+|------|-------|-----------|
+| **Firmware release** | `firmware-version.txt` (semver, baked in via CMake) | each firmware release — names the tag + prebuilt blob; the device surfaces it through `GET_BUILD_ID` as `<ver>+<sha>` |
+| **Wire protocol** | `PROTOCOL_VERSION_*` in `src/protocol.h` (host: `<alp/chips/gd32g553.h>`) | the wire format changes; `GET_VERSION` returns it and the host refuses a mismatched MAJOR |
+| **Build-id** | git short-SHA in the `GET_BUILD_ID` reply | every build — pins the exact source behind a release |
+
+A firmware release can ship without a protocol bump, and vice-versa.
+
 ## Build
 
 ```bash

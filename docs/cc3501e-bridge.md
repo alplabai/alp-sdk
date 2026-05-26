@@ -181,6 +181,20 @@ TI's **BSD-3-licensed** SimpleLink Wi-Fi SDK.  The future
    utility if one is available) on USB or via a JTAG probe
    wired to the CC3501E's debug pads.
 
+## Versioning
+
+Three independent version axes (same model as the GD32 bridge) — track
+them separately:
+
+| Axis | Where | Bumps when |
+|------|-------|-----------|
+| **Firmware release** | `firmware/cc3501e/firmware-version.txt` (semver) | each firmware release — names the tag + the `cc3501e-vX.Y.Z.bin` prebuilt blob; the device reports it as `fw_version` via `GET_VERSION` / `GET_DIAG_INFO` |
+| **Wire protocol** | `ALP_CC3501E_PROTOCOL_VERSION` (`<alp/protocol/cc3501e.h>`) + `firmware/cc3501e/protocol-version.txt` | the wire format changes; the host refuses a mismatched version |
+| **Build / signature** | the signed binary's `.sha256` in `prebuilt/` | every build — pins the exact image |
+
+The firmware version moves on its own cadence — a release can ship
+without a protocol bump, and vice-versa.
+
 ## Firmware-side GPIO behaviour contract
 
 The EVK schematic walkthrough surfaced specific behaviours the

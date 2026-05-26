@@ -27,6 +27,11 @@
 #define GD32_BRIDGE_ADC_MAX_SAMPLES      8u
 #define GD32_BRIDGE_BUILD_ID_LEN         20u
 
+/* WIRE-PROTOCOL version (compatibility gate) -- GET_VERSION returns this
+ * triple and the host driver refuses a mismatched MAJOR.  This is NOT
+ * the firmware *release* version: that is its own semver in
+ * firmware-version.txt, surfaced via GET_BUILD_ID ("<ver>+<sha>").  The
+ * two axes move independently. */
 #define PROTOCOL_VERSION_MAJOR           0u
 #define PROTOCOL_VERSION_MINOR           5u
 #define PROTOCOL_VERSION_PATCH           0u

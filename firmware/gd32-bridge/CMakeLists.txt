@@ -143,10 +143,21 @@ if(BRIDGE_HAL_BACKEND STREQUAL "gd32")
 endif()
 
 # ----------------------------------------------------------------- #
-# Build-id stamping (truncated SHA-1 of the ELF).                    #
+# Firmware release version + build-id stamping.                      #
 # ----------------------------------------------------------------- #
 
-# TODO: post-link hook that computes sha1(.elf) and patches the
-# linker-emitted build-id constant.  Until that lands the firmware
-# reports the placeholder string '0000000000000000abcd' to keep the
-# GET_BUILD_ID frame structurally valid.
+# Firmware *release* version -- its own semver, tracked independently of
+# the wire PROTOCOL_VERSION (src/protocol.h) and of the SDK version.
+# Source of truth: firmware-version.txt.  Bump it per firmware release,
+# tag to match, and name the prebuilt blob `gd32-bridge-v<ver>.bin`.
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/firmware-version.txt GD32_BRIDGE_FW_VERSION LIMIT_COUNT 1)
+target_compile_definitions(gd32-bridge PRIVATE GD32_BRIDGE_FW_VERSION="${GD32_BRIDGE_FW_VERSION}")
+message(STATUS "gd32-bridge firmware version: ${GD32_BRIDGE_FW_VERSION}")
+
+# GET_BUILD_ID reports "<fw-version>+<short-sha>" (e.g. "0.1.0+abc1234",
+# <= GD32_BRIDGE_BUILD_ID_LEN = 20 chars): the firmware release version
+# plus the exact build behind it.
+# TODO: post-link hook that computes the short SHA of the .elf and
+# patches the linker-emitted build-id constant.  Until that lands the
+# firmware reports "<fw-version>+0000000" to keep the GET_BUILD_ID frame
+# structurally valid.
