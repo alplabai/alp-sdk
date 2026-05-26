@@ -8,12 +8,12 @@ MANIFEST_SCHEMA_VERSION = 1
 
 _TENSOR_KEYS = {"dtype", "rank", "shape", "scale", "zp"}
 _TARGET_KEYS = {"backend", "silicon_ref", "blob_format", "accel_config",
-                "arena", "requires", "blob"}
+                "arena", "requires", "blob", "compiler_version"}
 _COV_KEYS = {"backend", "accel_config", "status", "reason"}
 
 
 def _pick(d: dict, keys: set) -> dict:
-    return {k: d[k] for k in keys}              # drop unknown keys -> forward-compatible
+    return {k: d[k] for k in keys if k in d}   # drop unknown keys + tolerate missing-known
 
 
 def _json_default(d: dict) -> dict:
@@ -40,6 +40,7 @@ class Target:
     arena: int
     requires: dict[str, object]  # {"sram_kib": int, "op_features": list[str]}
     blob: int               # index into the package blob table
+    compiler_version: str = ""   # e.g. "vela 4.1.0" | "passthrough"; "" when unknown
 
 
 @dataclass

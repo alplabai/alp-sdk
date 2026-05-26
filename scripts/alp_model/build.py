@@ -57,7 +57,7 @@ def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
             blob_format=blob.format, accel_config=spec.accel_config,
             arena=blob.arena_bytes,
             requires={"sram_kib": blob.req_sram_kib, "op_features": []},
-            blob=len(blobs)))
+            blob=len(blobs), compiler_version=blob.compiler_version))
         blobs.append(blob.payload)
 
     if not blobs:

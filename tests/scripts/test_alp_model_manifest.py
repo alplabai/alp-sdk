@@ -55,3 +55,23 @@ def test_cbor_decode_tolerates_unknown_keys():
     doc["targets"][0]["future_target_field"] = "x"
     extended = cbor2.dumps(doc)
     assert Manifest.from_cbor(extended) == m      # unknown keys dropped, rest intact
+
+
+def test_target_compiler_version_is_carried_through_cbor():
+    tgt = Target(backend="ethos_u", silicon_ref="alif:ensemble:e8",
+                 blob_format="vela_tflite", accel_config="ethos-u85-256",
+                 arena=1024, requires={"sram_kib": 64, "op_features": []},
+                 blob=0, compiler_version="vela 4.1.0")
+    m = Manifest(name="m", src_sha=bytes(32), targets=[tgt])
+    assert cbor2.loads(m.to_cbor())["targets"][0]["compiler_version"] == "vela 4.1.0"
+    assert Manifest.from_cbor(m.to_cbor()).targets[0].compiler_version == "vela 4.1.0"
+
+
+def test_missing_compiler_version_decodes_to_empty_default():
+    tgt = Target(backend="cpu", silicon_ref="*", blob_format="tflite", accel_config="",
+                 arena=0, requires={"sram_kib": 0, "op_features": []}, blob=0)
+    m = Manifest(name="m", src_sha=bytes(32), targets=[tgt])
+    doc = cbor2.loads(m.to_cbor())
+    doc["targets"][0].pop("compiler_version")     # simulate a writer that omitted it
+    decoded = Manifest.from_cbor(cbor2.dumps(doc))
+    assert decoded.targets[0].compiler_version == ""
