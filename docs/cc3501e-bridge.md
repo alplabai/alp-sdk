@@ -155,15 +155,15 @@ the bridge and the Alif-side `<alp/...>` calls work out of the box.  A
 version-pinned prebuilt blob also lives at
 `firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` for field re-flash.
 
-Rebuilding or customizing the firmware is an **optional, advanced path**
-— only then do you need TI's SDK (which you download yourself; alp-sdk
-does not redistribute it).  The future `alplabai/cc3501e-firmware` repo
-would:
+Rebuilding or customizing the firmware is **optional and open** — the
+bridge firmware source is ALP's (public, like the GD32 bridge), built on
+TI's **BSD-3-licensed** SimpleLink Wi-Fi SDK.  The future
+`alplabai/cc3501e-firmware` repo would:
 
-1. Vendor TI's SimpleLink CC33xx SDK as a git submodule.  Obtain it
-   from TI under TI's own licence — the SimpleLink Wi-Fi SDK bundle
-   covers the CC33xx family, and the CC3501E ships in it alongside the
-   CC3300/CC3301 line.  alp-sdk does not redistribute the TI SDK.
+1. Vendor TI's **BSD-3-licensed** SimpleLink Wi-Fi SDK as a git
+   submodule — it covers the CC33xx family, and the CC3501E ships in it
+   alongside the CC3300/CC3301 line.  Open-source-licensed, so it can be
+   tracked as a public submodule, same as the GD32 GigaDevice library.
 2. Build with TI Code Composer Studio or the open `ticlang`
    toolchain.
 3. Implement the SPI-slave parser against this repo's
