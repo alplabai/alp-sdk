@@ -26,7 +26,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 SRC_URI = " \
     file://alp-remoteproc.service \
-    file://files/alp-remoteproc-start.sh \
+    file://alp-remoteproc-start.sh \
 "
 
 S = "${WORKDIR}"
@@ -42,7 +42,7 @@ do_install() {
         ${D}${systemd_unitdir}/system/alp-remoteproc.service
 
     install -d ${D}${bindir}
-    install -m 0755 ${WORKDIR}/files/alp-remoteproc-start.sh \
+    install -m 0755 ${WORKDIR}/alp-remoteproc-start.sh \
         ${D}${bindir}/alp-remoteproc-start.sh
 }
 
