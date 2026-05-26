@@ -22,3 +22,14 @@ def test_resolve_targets_dedupes_identical_accel_configs():
     specs = resolve_targets("E1M-AEN701", metadata_root=_META)
     ethos = [s for s in specs if s.backend == "ethos_u"]
     assert len(ethos) == 2                                     # one per distinct accel_config
+
+
+def test_resolve_targets_for_v2n101_yields_drpai_plus_cpu():
+    # E1M-V2N101 -> renesas:rzv2n:n44 -> DRP-AI NPU + cpu
+    specs = resolve_targets("E1M-V2N101", metadata_root=_META)
+    backends = {s.backend for s in specs}
+    assert "drpai" in backends
+    assert "cpu" in backends
+    drp = next(s for s in specs if s.backend == "drpai")
+    assert drp.silicon_ref == "renesas:rzv2n:n44"
+    assert drp.accel_config == ""              # drpai has no vela-style accel-config

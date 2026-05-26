@@ -18,7 +18,7 @@ class TargetSpec:
 def _npu_backend(npu_type: str, subtype: str) -> str | None:
     if npu_type.startswith("ethos-u"):
         return "ethos_u"
-    if "drp" in subtype:                    # renesas "ai-mac+drp"
+    if "drp" in npu_type or "drp" in subtype:   # renesas DRP-AI (type "drp-ai" or subtype "ai-mac+drp")
         return "drpai"
     if npu_type.startswith("dx") or "deepx" in npu_type:
         return "deepx_dxm1"
