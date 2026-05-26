@@ -319,7 +319,10 @@ not others.
 | Audio            | `alp/audio.h`        | Zephyr `audio_dmic` + `i2s_*` chains; ALSA `snd_pcm_*` on Yocto.| v0.1 surface; Zephyr backend v0.2; Yocto ALSA backend code complete v0.4-prep (`pkg_check_modules(alsa)`-gated), real capture/playback gates on `hil-yocto` |
 | BLE              | `alp/ble.h`          | Zephyr `bt` host stack (peripheral + central + GATT).           | v0.1 surface; impl v0.3 |
 | Security         | `alp/security.h`     | MbedTLS PSA Crypto API (Zephyr) + OpenSSL `EVP_*` (Yocto).      | v0.1 surface; Yocto OpenSSL backend (SHA-256/384/512, AES-128/256-GCM, ChaCha20-Poly1305, `alp_random_bytes`) code complete v0.4-prep with KATs green at `tests/yocto/security_openssl.c`; Zephyr MbedTLS impl v0.3 |
-| Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions; placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` (replaced by nanopb-generated codec in v0.4-final). | v0.1 surface; framing scaffolding v0.4-prep; full impl v0.3+ |
+| Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions, plus framed RPC over RPMsg / OpenAMP (`rpc.h`, opened with the generated `system_ipc.h`); placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` (replaced by nanopb-generated codec in v0.4-final). | v0.1 surface; framing scaffolding v0.4-prep; full impl v0.3+ |
+| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam.  Backends: `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `drpai_v2n_stub` (DRP-AI3), `deepx_dxm1_stub` (DEEPX DX-M1), `sw_fallback`.  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry; per-NPU impls gate on HiL |
+| Storage          | `alp/storage.h`      | Block + filesystem (LittleFS) on Zephyr; standard FS on Yocto.  | v0.5 surface |
+| 2D graphics      | `alp/gpu2d.h`        | Portable blit/fill shim (Alif Dave2D / GPU2D); SW fallback.     | v0.5 surface; see [ADR 0008](adr/0008-gpu2d-portable-shim.md) |
 
 ### Peripherals: how a block resolves to a backend
 
