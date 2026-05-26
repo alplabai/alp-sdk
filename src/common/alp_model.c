@@ -85,12 +85,15 @@ alp_status_t alp_model_parse(const uint8_t *data, size_t size, alp_model_t *out)
     uint32_t tbl_off = rd_u32(data + 16), blob_count = rd_u32(data + 20);
     if ((size_t)mft_off + mft_len > size) return ALP_ERR_INVAL;
 
+    if ((size_t)tbl_off + (size_t)blob_count * 8u > size) return ALP_ERR_INVAL;
+
     uint32_t idx[ALP_MODEL_MAX_TARGETS] = {0};
-    /* Backup-state budget = n_states - 2.  The manifest nests up to
-     * four levels deep on the decode path (top map -> targets list ->
-     * target map -> requires map) and zcbor_any_skip() of the
-     * inputs/outputs lists (list -> map -> shape list) needs the same
-     * depth, so 8 states (6 backups) covers both with margin. */
+    /* Backup-state budget = n_states - 2.  The depth (8 states ~= 6
+     * backups) covers the explicit decode nesting on this path: top map
+     * -> targets list -> target map -> requires map = 4 backups, the
+     * rest is margin.  zcbor_any_skip() draws nothing from the backup
+     * budget: it uses a local state copy plus C recursion, not the
+     * zs[] backup array. */
     zcbor_state_t zs[8];
     zcbor_new_decode_state(zs, 8, data + mft_off, mft_len, 1, NULL, 0);
 
@@ -121,9 +124,10 @@ alp_status_t alp_model_parse(const uint8_t *data, size_t size, alp_model_t *out)
     for (uint32_t i = 0; i < out->n_targets; i++) {
         uint32_t bi = idx[i];
         if (bi >= blob_count) return ALP_ERR_INVAL;
-        uint32_t boff = rd_u32(data + tbl_off + bi * 8);
-        uint32_t blen = rd_u32(data + tbl_off + bi * 8 + 4);
-        if ((size_t)boff + blen > size) return ALP_ERR_INVAL;
+        size_t e = (size_t)tbl_off + (size_t)bi * 8u;   /* in-bounds via the table check above */
+        uint32_t boff = rd_u32(data + e);
+        uint32_t blen = rd_u32(data + e + 4);
+        if ((size_t)boff + (size_t)blen > size) return ALP_ERR_INVAL;
         out->targets[i].blob = data + boff;
         out->targets[i].blob_len = blen;
     }
