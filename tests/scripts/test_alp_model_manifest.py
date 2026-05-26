@@ -1,3 +1,4 @@
+"""Tests for alp_model.manifest round-trip serialisation."""
 from alp_model.manifest import Tensor, Target, Coverage, Manifest
 
 

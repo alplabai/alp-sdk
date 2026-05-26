@@ -21,12 +21,14 @@ class Target:
     blob_format: str        # vela_tflite | drpai_dir | dxnn | tflite
     accel_config: str       # "" when N/A
     arena: int
-    requires: dict          # {"sram_kib": int, "op_features": list[str]}
+    requires: dict[str, object]  # {"sram_kib": int, "op_features": list[str]}
     blob: int               # index into the package blob table
 
 
 @dataclass
 class Coverage:
+    """A backend the package did NOT include a blob for, and why."""
+
     backend: str
     accel_config: str
     status: str             # compiled | skipped | incompatible
@@ -55,9 +57,12 @@ class Manifest:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Manifest":
+        v = d.get("v", MANIFEST_SCHEMA_VERSION)
+        if v != MANIFEST_SCHEMA_VERSION:
+            raise ValueError(f"unsupported manifest version {v!r}; expected {MANIFEST_SCHEMA_VERSION}")
         return cls(
             name=d["name"],
-            src_sha=d["src_sha"],
+            src_sha=d["src_sha"],  # raw bytes pass-through; JSON/text callers must decode to bytes first
             inputs=[Tensor(**t) for t in d.get("inputs", [])],
             outputs=[Tensor(**t) for t in d.get("outputs", [])],
             targets=[Target(**t) for t in d.get("targets", [])],
