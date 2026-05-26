@@ -72,21 +72,28 @@ AEN A32-class MACHINEs are deferred to v0.7 (Phase 5 CI gate).
 
 ## How customers consume it
 
-### V2N / V2N-M1 — via the Renesas RZ/V2N AI SDK 7.10 BSP
+### V2N / V2N-M1 — via the Renesas RZ/V2N AI SDK (platform 7.1 / BSP v6.30)
 
-Renesas distributes the **RZ/V2N AI SDK** (v7.10,
-<https://renesas-rz.github.io/rzv_ai_sdk/7.10/>) as a single
-downloadable package on the *My Renesas* portal — free signup, no
-NDA for the standard build.  The package ID is
-**`RTK0EF0045Z94001AZJ-v1.0.3.zip`** (per the
-[*RZ/V2N Group Handbook*](https://www.renesas.com/en/document/oth/rzv2n-group-handbook),
-item #18).
+Renesas distributes the **RZ/V2N AI SDK** through their own portal
+(start at the public [RZ/V2N product
+page](https://www.renesas.com/en/products/rz-v2n) under *Software &
+Tools*).  Mind the two version axes: the **AI SDK platform is 7.1**,
+while the **BSP it rides on is v6.30** (= linux-renesas
+`6.1.141-cip43`) -- v6.30 is the revision this carrier was
+bring-up-tested against.
 
-The zip contains a `rzv2n_ai-sdk_yocto_recipe_*.tar.gz` tarball
-that, when extracted, gives you the following pre-arranged set of
-meta-layers (each is a git checkout pinned to the v7.10 release;
-the tarball model is canonical because V2N silicon support may not
-yet be on the corresponding `meta-renesas` upstream branch):
+The AI SDK comes as two downloads -- an apps/binary package and a
+**Source Code** package.  To *build* an image you need the Source
+Code package, because that is the one carrying the
+`rzv2n_ai-sdk_yocto_recipe_*.tar.gz` tarball.  Extracting it gives
+the pre-arranged set of meta-layers below (each a git checkout
+pinned to the BSP v6.30 release; the tarball model is canonical
+because V2N silicon support may not yet be on the corresponding
+`meta-renesas` upstream branch):
+
+> **alp-sdk does not redistribute the Renesas BSP or AI SDK.** Fetch
+> them from Renesas under your own account and licence; this repo
+> ships only the `meta-alp-sdk` overlay that layers on top.
 
 | Layer                                          | Source repo                                                                    | Role                                                       |
 |------------------------------------------------|--------------------------------------------------------------------------------|------------------------------------------------------------|
@@ -113,9 +120,10 @@ MACHINE.
 ### Build steps
 
 ```bash
-# 1. Download the BSP zip from My Renesas (free signup required).
-#    File: RTK0EF0045Z94001AZJ-v1.0.3.zip
-unzip RTK0EF0045Z94001AZJ-v1.0.3.zip
+# 1. Obtain the AI SDK *Source Code* package from Renesas (under your
+#    own Renesas account + licence -- alp-sdk does not redistribute
+#    it).  Choose the Source Code download, NOT the apps/binary one.
+unzip <rzv2n-ai-sdk-source-code>.zip
 cd <extracted_dir>
 
 # 2. Extract the recipe tarball; produces poky/, meta-arm/,
@@ -293,7 +301,7 @@ upstream releases.  v0.7 V2N HiL is the verification gate.
 
 - [*RZ/V2N Group Handbook*](https://www.renesas.com/en/document/oth/rzv2n-group-handbook)
   — Renesas's master index of V2N collateral.
-- [RZ/V AI SDK 7.10 docs](https://renesas-rz.github.io/rzv_ai_sdk/7.10/)
+- [RZ/V2N product page (AI SDK + BSP downloads)](https://www.renesas.com/en/products/rz-v2n)
   — Software overview + getting-started + how-to-build.
 - [`vendors/deepx-dxm1/README.md`](../vendors/deepx-dxm1/README.md)
   — DEEPX DX-M1 integration notes (covers V2M101 / V2M102).

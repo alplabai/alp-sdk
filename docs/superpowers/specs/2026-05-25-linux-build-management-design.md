@@ -1,6 +1,6 @@
 # Unified Linux build management for alp-sdk
 
-**Status:** Design approved 2026-05-25 (brainstorm). Awaiting spec review → implementation plan.
+**Status:** Design approved 2026-05-25. **Phase 1 validated 2026-05-26** — `core-image-minimal` baked on WSL (BSP v6.30, bitbake-layers); kas retired; docs reconciled to "platform 7.1 / BSP v6.30". Phase 2 (`alp build` front-end) pending.
 **Branch context:** raised on `feat/e1m-x-v2n-carrier-bringup`; this design is broader than the carrier bring-up and may warrant its own branch at implementation time.
 **Affects:** `docs/build-yocto-v2n.md`, `kas/e1m-v2n.yml`, `meta-alp-sdk/README.md` (BSP-version reconciliation), `scripts/alp_cli/`, `scripts/alp_orchestrate.py`.
 
@@ -9,7 +9,7 @@
 alp-sdk is Zephyr/west-first; the Linux/Yocto side is more built-out than "forgotten" — `meta-alp-sdk` ships `libalp_sdk.so` (the portable `<alp/*>` API on A55 Linux), `alp-chips`, heterogeneous IPC (`alp-remoteproc` + `alp-dts-reservations`), a reference image (`alp-image-edge`: ROS 2 + DEEPX + Mender OTA), machines for V2N/V2M/i.MX93, and per-MACHINE inference-runtime wiring — and `alp_orchestrate.py` already resolves `board.yaml` into per-core slices and emits per-MACHINE bitbake invocations. But three gaps put it below the Variscite/Toradex "one proven, turnkey path" norm:
 
 1. **Unproven.** `meta-alp-sdk/README.md` is self-described `[UNTESTED]` — "v0.6 paper-correct, no full image bake executed."
-2. **Doc version confusion (not a real conflict).** The README names **AI SDK 7.10** + `bitbake-layers`; the branch's `build-yocto-v2n.md` + bbappends name **BSP 6.3 (`RTK0EF0189F06300SJ` / linux-renesas 6.1-cip43)** + kas. These are **two version axes** — the AI-SDK *platform* (7.1) vs the Yocto *BSP* (6.3) — that each doc named in isolation, reading as a conflict. The fix is to state *both* everywhere; the orchestration choice (kas vs `bitbake-layers`) still needs converging.
+2. **Doc version confusion (not a real conflict).** The README names **AI SDK 7.10** + `bitbake-layers`; the branch's `build-yocto-v2n.md` + bbappends name **BSP 6.3 (`RTK0EF0189F06300SJ` / linux-renesas 6.1-cip43)** + kas. These are **two version axes** — the AI-SDK *platform* (7.1) vs the Yocto *BSP* (v6.30) — that each doc named in isolation, reading as a conflict. *(Resolved 2026-05-26: every doc now states both axes; kas is retired in favour of the `bitbake-layers` flow.)*
 3. **Not unified / not easy.** No single front door; a customer faces kas-vs-bitbake-layers-vs-west and per-vendor BSP mechanics.
 
 ## 2. Goals
@@ -21,7 +21,7 @@ alp-sdk is Zephyr/west-first; the Linux/Yocto side is more built-out than "forgo
 
 - **Canonical target = AI SDK platform 7.1 on BSP 6.3** (`RTK0EF0189F06300SJ`, linux-renesas 6.1-cip43, kernel SHA 6717c06c). These are two axes, **not** competing BSPs — 7.1 is the AI-SDK/platform umbrella, 6.3 is the Yocto BSP beneath it — so the branch's **original BSP target was already correct**, and its DT patches (generated at 6.3 / 6717c06c) **stay as-is, no regen**. Reconciliation = make the docs name *both* axes (platform 7.1 / BSP 6.3) consistently, and drop `kas/e1m-v2n.yml` in favour of the README's `bitbake-layers` flow (no legacy-compat — no active customers).
 - **Approach = a unified `alp build` front-end with a per-vendor BSP-provider seam.** Chosen over kas-everywhere (fights Renesas's tarball/TEMPLATECONF model; unifies Linux only) and over raw bitbake-layers (not unified).
-- **Phased:** prove the native 7.10 flow first (no new tooling), then wrap it.
+- **Phased:** prove the native BSP v6.30 flow first (no new tooling), then wrap it.
 
 ## 4. Architecture
 
@@ -37,7 +37,7 @@ board.yaml ──► alp_orchestrate.py (resolve) ──► build graph (per-cor
                                                                  │
                                        ┌─────────────────────────┼──────────────┐
                                  renesas_rzv2n              nxp_imx93        (future)
-                                 (AI SDK 7.10 tarball,      (meta-imx +
+                                 (AI SDK BSP v6.30 tarball, (meta-imx +
                                   TEMPLATECONF/vlp-v4,       meta-freescale)
                                   bitbake-layers)
                                                        ──► bitbake alp-image-edge
@@ -53,7 +53,7 @@ Each unit is independently testable; only `bake()` needs real Linux + BSP.
 - **`alp build` subcommand** — customer entry: `alp build [-C <project>] [--core ID] [--machine M]`. Resolves `board.yaml`, builds the dispatch graph, runs builders, prints artifact paths. *Depends on:* orchestrator + dispatcher.
 - **Dispatcher** — pure routing: slice → builder by `slice.os`. *Depends on:* builders + provider registry. Testable with zero bitbake.
 - **`BspProvider` interface + registry** — the vendor seam: `validate(bsp_root)`, `prepare(bsp_root, manifest) → BuildEnv`, `bake(env, machine, image) → Artifacts`. Registry maps SoM-preset `family:` → provider. A new SoC family = one new provider.
-- **`RenesasRzv2nProvider`** — encodes the Phase-1-proven 7.10 flow (extract BSP, apply TEMPLATECONF, `bitbake-layers add-layer` the canonical set, `bitbake <image>`). Covers V2N; V2M adds `meta-deepx-m1`.
+- **`RenesasRzv2nProvider`** — encodes the Phase-1-proven BSP v6.30 flow (extract BSP, apply TEMPLATECONF, `bitbake-layers add-layer` the canonical set, `bitbake <image>`). Covers V2N; V2M adds `meta-deepx-m1`.
 - **`NxpImx93Provider`** — meta-imx / meta-freescale flow for `e1m-nx9101`.
 - **`ZephyrBuilder`** — wraps `west build` for M-core slices (orchestrator already emits the board/invocation).
 - **BSP locator** — resolves + validates the external BSP; actionable missing-BSP error.
@@ -78,8 +78,8 @@ alp build → load board.yaml → orchestrator.resolve() → slices[]
 **Phase 1 — Prove one path (no new tooling).**
 1. Reconcile docs: make the README's `bitbake-layers` flow the single source of truth — naming **both** axes (platform 7.1 / BSP 6.3) — fold/retire `build-yocto-v2n.md` into it, drop `kas/e1m-v2n.yml`. (The README is itself `[UNTESTED]`; validate/correct it as the bake reveals issues.)
 2. Verify (don't regen) the DT artifacts: patches 0006–0013 are already at BSP 6.3 (6.1-cip43 / SHA 6717c06c), so just confirm they still apply against the downloaded 6.3 BSP's rzv2n kernel + the `linux-renesas` bbappend SRCREV matches.
-3. Green bake: `MACHINE=e1m-v2n101-a55 bitbake alp-image-edge` on 7.10 (WSL + downloaded BSP); fix recipe/layer/bbappend breakage. Audio stays off (patch 0010) → still green.
-- **Exit:** one documented command boots `alp-image-edge` on V2N101/7.10 (HiL-validated); the README↔doc contradiction is gone.
+3. Green bake: `MACHINE=e1m-v2n101-a55 bitbake alp-image-edge` on BSP v6.30 (WSL + downloaded BSP); fix recipe/layer/bbappend breakage. Audio stays off (patch 0010) → still green.
+- **Exit:** one documented command boots `alp-image-edge` on V2N101 / BSP v6.30 (HiL-validated); the README↔doc contradiction is gone.
 
 **Phase 2 — Easy + unified (`alp build`).**
 1. `alp build` CLI + dispatcher (extends `alp_orchestrate.py`).
@@ -89,11 +89,11 @@ alp build → load board.yaml → orchestrator.resolve() → slices[]
 5. Heterogeneous unification — one `alp build` drives M-core Zephyr (west) + A-core Yocto from one `board.yaml`.
 - **Exit:** `alp build` (any supported SoM) builds Zephyr + Yocto from `board.yaml`; V2N + i.MX93 green; reproducible.
 
-**Sequencing:** Phase 1 strictly precedes Phase 2 (prove, then automate). V2M (DEEPX) rides the `renesas_rzv2n` provider + `meta-deepx-m1` as a small Phase-2 add. Phase 1 needs the 7.10 BSP + WSL/bench.
+**Sequencing:** Phase 1 strictly precedes Phase 2 (prove, then automate). V2M (DEEPX) rides the `renesas_rzv2n` provider + `meta-deepx-m1` as a small Phase-2 add. Phase 1 needs the BSP v6.30 + WSL/bench.
 
 ## 8. Error handling — fail fast + actionable, never silent
 
-- **BSP missing / wrong version** → fail before any bake; print what to download (`RTK0EF0045Z94001AZJ-v1.0.3.zip`, free signup), how to extract, where to point `ALP_RZV2N_BSP`.
+- **BSP missing / wrong version** → fail before any bake; print what to download (the AI SDK **Source Code** package `RTK0EF0189F06300SJ_linux-src.zip`, fetched from the customer's own Renesas account), how to extract, where to point `ALP_RZV2N_BSP`.
 - **Host not Linux** → Yocto needs Linux/WSL2 (Zephyr slices still build on Windows). **Host deps missing** → preflight names them.
 - **bitbake / layer failure** → surface the exit + log path, never swallow; dispatcher reports which slice failed (partial success allowed: e.g. Zephyr built, Yocto failed).
 - **Layer / TEMPLATECONF mismatch** → after `prepare()`, validate the manifest's canonical layer set is present; name any missing layer + its source.
@@ -110,17 +110,17 @@ Unit + parse-gate run everywhere cheaply; the expensive bake gates on HiL — ma
 
 ## 10. Scope / non-goals
 
-**In scope:** the `alp build` front-end + BSP-provider seam; V2N (Phase 1) then i.MX93 + V2M (Phase 2); the 7.10 doc reconciliation; the reproducibility manifest.
+**In scope:** the `alp build` front-end + BSP-provider seam; V2N (Phase 1) then i.MX93 + V2M (Phase 2); the platform-7.1/BSP-v6.30 doc reconciliation; the reproducibility manifest.
 
 **Non-goals (explicit):**
 - The **Mender server** side (separate repo/owner) — device-side only.
 - The **TAS2563 audio DT** patch — a separate bench task on the new PCB order (carrier bring-up workstream, not this spec).
 - **Generating the Yocto machine confs + carrier DT from metadata** — they stay hand-authored in `meta-alp-sdk` (normal BSP practice); a metadata-driven Yocto-machine generator is a possible *future* spec, not this one.
 - **AEN A32-class Linux** (deferred to v0.7) and the **Ubuntu backend** (deferred past v1.0).
-- Re-architecting the existing `meta-alp-sdk` recipes beyond the 7.10 retarget.
+- Re-architecting the existing `meta-alp-sdk` recipes beyond the BSP v6.30 alignment.
 
 ## 11. Open questions / risks
 
 - **Resolved:** the BSP is **6.3** (linux-renesas 6.1-cip43, SHA 6717c06c); the branch's DT patches are already against it → no regen, just verify they apply against the downloaded 6.3 BSP. (The AI-SDK *platform* is 7.1 — a separate axis.) Optional add-on packages (ISP/camera, ROS2, Multi-OS/OpenAMP) come as separate Renesas downloads layered on top.
-- **V2N silicon support** may live only in the 7.10 tarball, not upstream `meta-renesas` (per the README) — the provider must use the tarball, not a git pin, for `meta-renesas`.
+- **V2N silicon support** may live only in the BSP v6.30 tarball, not upstream `meta-renesas` (per the README) — the provider must use the tarball, not a git pin, for `meta-renesas`.
 - **TEMPLATECONF replication risk** — the provider *applies* Renesas's TEMPLATECONF (vlp-v4-conf) rather than re-encoding it, to stay robust across BSP updates.

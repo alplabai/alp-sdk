@@ -87,15 +87,16 @@ SoM column in `docs/os-support-matrix.md` has somewhere to point.
 
 ## Yocto BSP integration
 
-The V2N + V2N-M1 Yocto build is rooted on the **Renesas RZ/V2N AI
-SDK 7.10** -- a free download from My Renesas, no NDA for the
-standard build path.  Setup recipe (extract tarball, add the four
-`meta-rz-features/*` sublayers, build `core-image-weston` against
-`MACHINE=rzv2n-evk`) lives in
-[`yocto/meta-alp/README.md`](../../yocto/meta-alp/README.md).
-`meta-alp`'s `e1m-x-v2n.conf` inherits from Renesas's stock
-`rzv2n-evk` MACHINE; board deltas are TBD per the user-supplied
-HW config writeup.
+The V2N + V2N-M1 Yocto build rides on the **Renesas RZ/V2N AI SDK
+(platform 7.1) on BSP v6.30** (`RTK0EF0189F06300SJ`, linux-renesas
+6.1.141-cip43) -- obtained from Renesas under your own account and
+licence; alp-sdk does not redistribute it.  The full build flow
+(extract the Source Code package, `bitbake-layers add-layer` the
+canonical set, build against the carrier MACHINE) lives in
+[`meta-alp-sdk/README.md`](../../meta-alp-sdk/README.md).
+`meta-alp-sdk`'s `e1m-v2n101-a55.conf` derives from Renesas's stock
+`rzv2n-evk` MACHINE; carrier deltas land via the DT patches in
+`meta-alp-sdk/recipes-kernel/linux/`.
 
 ## DRP-AI inference toolchain
 
@@ -109,7 +110,7 @@ different licenses.
   [`vendors/renesas-rzv2n/rzv_drp-ai_tvm/`](rzv_drp-ai_tvm/);
   upstream <https://github.com/renesas-rz/rzv_drp-ai_tvm>.
 - **Runtime (`libdrpai`)** -- runs on the V2N, shipped by the
-  `meta-rz-drpai` sublayer in the Renesas AI SDK 7.10 BSP.  The
+  `meta-rz-drpai` sublayer in the Renesas AI SDK BSP v6.30.  The
   alp-sdk's `<alp/inference.h>` Yocto backend (planned for v0.4)
   links against this via the target sysroot; no separate
   per-app pkg-config plumbing.

@@ -9,7 +9,7 @@
 # They patch the in-tree r9a09g056n48-rzv2n-evk.dts so the dtb the
 # shipped bootloader already loads (renesas/r9a09g056n48-rzv2n-evk.dtb)
 # becomes the e1m-x carrier dtb. Validated end-to-end on hardware
-# (RZ/V2N r9a09g056n48, linux-renesas 6.1-cip43 @ AI SDK 6.30, kernel
+# (RZ/V2N r9a09g056n48, linux-renesas 6.1.141-cip43 @ AI SDK platform 7.1 / BSP v6.30, kernel
 # SHA 6717c06c): model/compatible, EVK-only peripheral disables,
 # RTL8211F-VD PHYs at MDIO addr 2, RIIC3/6/7 disabled, EVK audio off,
 # USB OVC pins disabled (USB2.0 host kept working).

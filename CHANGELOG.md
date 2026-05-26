@@ -5711,12 +5711,12 @@ Deferred from this batch:
 
 ### Changed
 
-- `yocto/meta-alp/` rebased on the **Renesas RZ/V2N AI SDK 7.10**
-  BSP.  Earlier README + layer.conf referenced `meta-renesas-rz`
-  (no such repo); the canonical layer is `meta-renesas` at
-  <https://github.com/renesas-rz/meta-renesas>, distributed via
-  the AI SDK 7.10 tarball (`RTK0EF0045Z94001AZJ-v1.0.3.zip` on
-  My Renesas -- free signup, no NDA for the standard build).
+- `yocto/meta-alp/` rebased on the **Renesas RZ/V2N AI SDK
+  (platform 7.1) on BSP v6.30**.  Earlier README + layer.conf
+  referenced `meta-renesas-rz` (no such repo); the canonical layer
+  is `meta-renesas` at <https://github.com/renesas-rz/meta-renesas>,
+  distributed via the AI SDK Source Code package (fetched from
+  Renesas under your own account; alp-sdk does not redistribute it).
   meta-alp now `LAYERRECOMMENDS` `meta-renesas` plus the four
   `meta-rz-features/*` sublayers (`meta-rz-graphics`,
   `meta-rz-drpai`, `meta-rz-opencva`, `meta-rz-codecs`) +

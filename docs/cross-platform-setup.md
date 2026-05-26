@@ -126,8 +126,8 @@ sudo apt install -y \
     python3-distutils python3-jinja2 \
     iputils-ping libegl1-mesa libsdl1.2-dev xterm zstd liblz4-tool
 
-# kas as the front-end (recommended for repro builds).
-pip3 install --user kas
+# Yocto build uses meta-alp-sdk's bitbake-layers flow
+# (see meta-alp-sdk/README.md) -- no kas/front-end needed.
 ```
 
 ### 2.5 west workspace

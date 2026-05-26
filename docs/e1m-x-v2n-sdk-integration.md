@@ -1,9 +1,9 @@
 # E1M-X-EVK + V2N-M1 — making alp-sdk the single source of truth
 
-Status of landing the bench-validated RZ/V2N (r9a09g056n48, AI SDK 6.30,
-linux-renesas 6.1-cip43) carrier bring-up into alp-sdk so a clean
-checkout reproduces a working board. Branch:
-`feat/e1m-x-v2n-carrier-bringup`. Nothing here is committed/pushed yet.
+Status of landing the bench-validated RZ/V2N (r9a09g056n48; AI SDK
+platform 7.1 / BSP v6.30, linux-renesas 6.1.141-cip43) carrier bring-up
+into alp-sdk so a clean checkout reproduces a working board. Branch:
+`feat/e1m-x-v2n-carrier-bringup`.
 
 ## Provisioning model (decided)
 
@@ -17,7 +17,10 @@ checkout reproduces a working board. Branch:
   in **alp-sdk-internal** (same reason
   the SDK never bundled the Renesas BSP / NXP / DEEPX bits). Nothing in
   BL2/FIP is secret; this is purely redistribution-rights alignment.
-- **Yocto orchestration = kas** (`kas/e1m-v2n.yml`).
+- **Yocto orchestration = bitbake-layers** per
+  [`meta-alp-sdk/README.md`](../meta-alp-sdk/README.md) (kas retired):
+  the carrier image bakes from the BSP v6.30 Source Code package + the
+  meta-alp-sdk overlay.
 
 ## Gap status
 
@@ -25,9 +28,9 @@ checkout reproduces a working board. Branch:
 |---|-----|-------|-------|
 | 1 | Carrier device tree | **Staged, HW-validated content** | `meta-alp-sdk/recipes-kernel/linux/` (8 patches 0006–0013 + `linux-renesas_%.bbappend`); machine confs updated |
 | 2 | Bootloader (alp DDR in BL2) | **Recipe + binary + DDR.c → alp-sdk-internal** | not in public alp-sdk (licensing) |
-| 3 | Metadata values | **BLOCKED — needs ALP data** | `metadata/boards/e1m-x-evk.yaml` + V2N SoM YAML |
+| 3 | Metadata values | **Audio + board_id captured**; DT patch 0010 (audio-on) + HW wiring pending | `metadata/boards/e1m-x-evk.yaml` |
 | 4 | Errata | **Done** | `docs/errata-e1m-x-v2n.md` |
-| 5 | Yocto build manifest | **Scaffold (needs BSP source + SHA pins)** | `kas/e1m-v2n.yml` |
+| 5 | Yocto build flow | **WSL-baked 2026-05-26** (core-image-minimal, bitbake-layers); full alp-image-edge pending | `meta-alp-sdk/README.md` |
 
 ## What's validated vs not
 
@@ -36,25 +39,27 @@ checkout reproduces a working board. Branch:
   RIIC3/6/7 off, audio off, USB-OVC off / USB2.0 kept), and the alp DDR
   in BL2 (DDR 7.9 GiB, boots). The 0006–0013 patches were also dtc-clean
   rebuilt from source.
-- **NOT yet run through bitbake** (authored from the recipe mechanics,
-  needs an ALP build pass): the `linux-renesas` bbappend and the kas
-  manifest. Check the SRC_URI override key (`e1m-v2n101`) against your
-  MACHINEOVERRIDES and the patch apply against the pinned linux-renesas
-  SRCREV (generated at kernel SHA 6717c06c). (The TF-A DDR-injection
-  bbappend + its DDR overwrite ordering live in alp-sdk-internal.)
+- **WSL-baked 2026-05-26** (bitbake-layers, BSP v6.30): DT patches
+  0006-0013 apply cleanly to linux-renesas 6.1.141-cip43 (SHA 6717c06c —
+  the exact kernel the BSP ships, so no regen), and `core-image-minimal`
+  bakes a `.wic.gz` + the carrier dtb for `MACHINE=e1m-v2n101-a55`. A few
+  overlay fixes the bake surfaced are staged separately pending bench
+  confirmation; a full `alp-image-edge` bake + on-bench boot are the
+  remaining steps. (The TF-A DDR-injection bbappend + its DDR overwrite
+  ordering live in alp-sdk-internal.)
 
-## Remaining data needed from ALP (gap 3)
+## Audio + board_id (gap 3) — captured
 
-To fill the carrier/SoM metadata (you mentioned this may already be in
-alp-sdk-internal — if so, just point me at it):
+The carrier audio + board-rev data has landed in
+`metadata/boards/e1m-x-evk.yaml` (`audio:` block + `board_id`): the two
+TAS2563 amps on `E1M_X_I2C0`, I2S on `E1M_X_I2S0`, the TMUX1574 path
+mux, the `\SD_N` / `IRQ_N` control lines on E1M IOs, and `board_id` on
+`E1M_X_ADC7`.
 
-- **TAS2563 ×2 (U27/U28):** I2C control bus + 7-bit address per amp;
-  SSI/I2S instance + channel; shutdown/IRQ GPIO; MCLK source. (Then the
-  audio can be re-enabled as a `ti,tas2563` codec + audio-graph-card,
-  with a `CONFIG_SND_SOC_TAS2562=y` cfg fragment — replacing DT
-  patch 0010's "audio off".)
-- **board_id:** ADC channel + resistor-divider values + per-rev
-  expected mV / bin radius.
+Still pending: convert DT patch 0010 from "audio off" to a `ti,tas2563`
+codec + audio-graph-card (the `CONFIG_SND_SOC_TAS2562=y` fragment is
+already in `meta-alp-sdk/recipes-kernel/linux/`), plus the on-board
+control-line wiring on the current PCB rev.
 
 ## Follow-ups (not blockers)
 

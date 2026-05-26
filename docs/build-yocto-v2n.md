@@ -1,8 +1,10 @@
-# Building the V2N Linux image (Yocto / kas)
+# Building & deploying the V2N Linux image (Yocto)
 
 How a customer builds and deploys the **kernel + root filesystem** for
 the E1M-V2N101 / E1M-V2N102 SoM on the E1M-X-EVK (or a pin-compatible
-custom carrier).
+custom carrier).  The build itself is the `bitbake-layers` flow in
+[`../meta-alp-sdk/README.md`](../meta-alp-sdk/README.md); this page adds
+the V2N-specific BSP, deploy, and on-board verification detail.
 
 > **Bootloader is production-flashed by ALP.** Every SoM ships with BL2
 > (alp LPDDR4X DDR init) + FIP already on the on-module xSPI, so it
@@ -14,29 +16,28 @@ custom carrier).
 ## 1. Prerequisites
 
 - Linux host (or WSL2 Ubuntu 22.04), ~60 GB free, 8+ GB RAM.
-- `kas` (`pip install kas`) and the usual Yocto host deps
+- The usual Yocto host deps
   (`gawk wget git diffstat unzip build-essential chrpath cpio …`).
-- **The Renesas RZ/V2N AI-SDK BSP** (license-gated). Download the
-  release that matches this SDK — **AI SDK 6.30 (`RTK0EF0189F06300SJ`),
-  linux-renesas 6.1-cip43** — from your Renesas account and extract it.
-  This carries `meta-renesas` + `meta-rz-features/*` and is **not**
-  redistributable on public git, so kas references it from a path /
-  internal mirror rather than cloning it.
+- **The Renesas RZ/V2N AI SDK BSP** (license-gated) — **AI SDK
+  platform 7.1 on BSP v6.30 (`RTK0EF0189F06300SJ`, linux-renesas
+  6.1.141-cip43)**.  Fetch the **Source Code** package
+  (`RTK0EF0189F06300SJ_linux-src.zip`) from your Renesas account and
+  extract it; it carries `meta-renesas` + `meta-rz-features/*`.  alp-sdk
+  does **not** redistribute it.
 
-## 2. Point kas at the BSP
+## 2. Assemble the layers
 
-Edit [`../kas/e1m-v2n.yml`](../kas/e1m-v2n.yml):
-
-- Set the `meta-renesas` repo to your extracted BSP (`path:` for a
-  local checkout, or your internal git mirror + `commit:`).
-- Pin the `commit:` SHAs on the public layers (poky / meta-openembedded
-  / meta-ros) to the revisions your BSP release was validated against.
+Follow [`../meta-alp-sdk/README.md`](../meta-alp-sdk/README.md): extract
+the Source Code package's recipe tarball, `source oe-init-build-env`,
+then `bitbake-layers add-layer` the Renesas feature sublayers +
+`meta-alp-sdk` (and `meta-deepx-m1` for V2N-M1).  `meta-renesas` comes
+from the extracted BSP, not a public clone.
 
 ## 3. Build
 
 ```bash
-kas build kas/e1m-v2n.yml          # MACHINE=e1m-v2n101-a55, target alp-image-edge
-# (V2N102: set machine: e1m-v2n102-a55 in the kas file or override)
+MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
+# (V2N102: MACHINE=e1m-v2n102-a55;  V2N-M1: e1m-v2m101-a55 / e1m-v2m102-a55)
 ```
 
 Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
@@ -81,5 +82,7 @@ pair-mirror cable links at 100M.)
 - Audio is currently **disabled** in the DT (no DA7212 on the carrier);
   it returns once the TAS2563 routing lands (see the integration doc,
   gap 3).
-- This build path is **scaffolded, not yet CI-validated** — the kas
-  manifest + bbappends need one green bitbake pass; flagged inline.
+- **Validation:** `core-image-minimal` baked clean on WSL (BSP v6.30,
+  bitbake-layers) 2026-05-26 — DT patches apply, carrier dtb + `.wic.gz`
+  produced.  A full `alp-image-edge` bake + on-bench boot are the
+  remaining gates.

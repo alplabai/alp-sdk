@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3, click (existing `alp` CLI), pytest + `unittest.mock`, pyyaml. Reuses `scripts/alp_orchestrate.py` (`load_board_yaml`, `Slice`, `BoardProject`).
 
-**Environment legend:** 🖥️ DEV-BOX (Tasks 0–7, all unit-tested with mocked bitbake) · 🔧 BENCH (Task 8 integration bake only). Depends on Phase-1 having proven the native 7.10 flow.
+**Environment legend:** 🖥️ DEV-BOX (Tasks 0–7, all unit-tested with mocked bitbake) · 🔧 BENCH (Task 8 integration bake only). Depends on Phase-1 having proven the native BSP v6.30 flow.
 
 **File structure:**
 - Create: `scripts/alp_cli/bsp/{__init__.py,manifest.py,locate.py,base.py,renesas_rzv2n.py,nxp_imx93.py}`, `scripts/alp_cli/zephyr_build.py`, `scripts/alp_cli/build.py`
@@ -31,7 +31,7 @@
 - [ ] **Step 1: Write `metadata/bsp/renesas-rzv2n.yaml`:**
 ```yaml
 family: renesas-rzv2n
-bsp: { package_id: RTK0EF0045Z94001AZJ, version: v1.0.3, ai_sdk: "7.10", yocto: scarthgap-5.0.11 }
+bsp: { package_id: RTK0EF0189F06300SJ, version: v6.30, ai_sdk: "7.1", yocto: scarthgap-5.0.11 }
 templateconf: meta-renesas/meta-rz-distro/conf/templates/vlp-v4-conf
 machine_pattern: "e1m-{sku}-a55"
 layers:
@@ -50,7 +50,7 @@ from alp_cli.bsp.manifest import load_bsp_manifest
 def test_loads_renesas_manifest():
     m = load_bsp_manifest("renesas-rzv2n")
     assert m.family == "renesas-rzv2n"
-    assert m.package_id == "RTK0EF0045Z94001AZJ"
+    assert m.package_id == "RTK0EF0189F06300SJ"
     assert "alp-sdk/meta-alp-sdk" in m.layers
     assert m.machine_pattern.format(sku="v2n101") == "e1m-v2n101-a55"
 ```
@@ -98,7 +98,7 @@ def test_missing_bsp_raises_actionable(monkeypatch):
     monkeypatch.delenv("ALP_RZV2N_BSP", raising=False)
     with pytest.raises(BspNotFound) as e:
         locate_bsp("renesas-rzv2n", cli_path=None, config={})
-    assert "RTK0EF0045Z94001AZJ" in str(e.value)   # tells the user what to download
+    assert "RTK0EF0189F06300SJ" in str(e.value)   # tells the user what to download
 ```
 - [ ] **Step 2: Run → FAIL.**
 - [ ] **Step 3: Implement `locate.py`** (precedence: `--bsp` > env > `~/.alp/bsp.toml`; missing → actionable error naming the package):
@@ -107,7 +107,7 @@ import os
 from pathlib import Path
 
 _ENV = {"renesas-rzv2n": "ALP_RZV2N_BSP", "nxp-imx93": "ALP_IMX93_BSP"}
-_PKG = {"renesas-rzv2n": "RTK0EF0045Z94001AZJ-v1.0.3.zip (My Renesas, free signup)",
+_PKG = {"renesas-rzv2n": "the AI SDK Source Code package RTK0EF0189F06300SJ_linux-src.zip (from your Renesas account)",
         "nxp-imx93": "the NXP meta-imx release matching your board"}
 
 class BspNotFound(RuntimeError):

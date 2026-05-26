@@ -545,7 +545,7 @@ alp-sdk/
 ├── examples/        # reference apps (cross-family + examples/aen/ + examples/v2n/)
 ├── docs/            # architecture, board-config, ADRs, test-plan, …
 ├── tests/           # smoke + Twister + fuzz + bench + scripts
-├── yocto/meta-alp/  # Yocto layer + machine confs
+├── meta-alp-sdk/    # Yocto layer + machine confs
 ├── firmware/        # cc3501e/ + gd32-bridge/ on-module-MCU firmware
 ├── zephyr/          # Zephyr-module entry: Kconfig, module.yml, dts/bindings/, sysbuild/aen/
 ├── (build/)         # local build outputs — gitignored.  Yocto, Zephyr, and plain-CMake all land here (e.g. build/yocto-2b/, build/zephyr/, build/<example>/).
