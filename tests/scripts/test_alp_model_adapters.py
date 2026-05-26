@@ -1,5 +1,6 @@
 # tests/scripts/test_alp_model_adapters.py
 """Compiler adapters: interface + CPU passthrough."""
+import shutil
 import pytest
 from pathlib import Path
 from alp_model.adapters import CompilerAdapter, Blob
@@ -7,6 +8,8 @@ from alp_model.adapters.cpu import CpuAdapter
 from alp_model.adapters.drpai import DrpaiAdapter
 from alp_model.adapters.deepx import DeepxAdapter
 from alp_model.adapters.ethos_u import VelaAdapter, _parse_vela_summary
+
+_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_cpu_adapter_is_a_compiler_adapter():
@@ -135,3 +138,13 @@ def test_parse_vela_summary_extracts_sram_and_arena(tmp_path):
 
 def test_parse_vela_summary_absent_returns_zeros(tmp_path):
     assert _parse_vela_summary(tmp_path, "missing") == (0, 0)
+
+
+@pytest.mark.skipif(shutil.which("vela") is None, reason="vela (ethos-u-vela) not installed")
+def test_vela_real_compile_of_tiny_fixture(tmp_path):
+    src = tmp_path / "tiny.tflite"
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite", src)
+    blob = VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path)
+    assert blob.format == "vela_tflite"
+    assert blob.payload[4:8] == b"TFL3"        # vela emits a .tflite flatbuffer
+    assert blob.compiler_version.startswith("vela")
