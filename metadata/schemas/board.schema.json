@@ -341,6 +341,22 @@
       "type": "object",
       "additionalProperties": true,
       "description": "App-specific feature configuration that doesn't map cleanly onto the strict-typed blocks above.  Free-form map; the loader passes structured entries through to the right backend."
+    },
+
+    "models": {
+      "type": "array",
+      "description": "AI models to compile + package into .alpmodel (silicon-agnostic; backends derived from som.sku).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "source"],
+        "properties": {
+          "name":   { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
+          "source": { "type": "string", "description": "Path (relative to board.yaml) to the .onnx or .tflite source model." },
+          "spec":   { "type": "string", "description": "Optional $ref to an external model spec for large/shared models." },
+          "inputs": { "type": "array", "description": "Optional app-side input hints (e.g. layout)." }
+        }
+      }
     }
   },
 
