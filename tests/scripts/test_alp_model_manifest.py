@@ -26,3 +26,16 @@ def test_manifest_roundtrips_through_dict():
     m = _sample()
     assert Manifest.from_dict(m.to_dict()) == m
     assert m.to_dict()["targets"][0]["backend"] == "ethos_u"
+
+
+import json
+
+
+def test_manifest_json_is_human_readable_and_roundtrips():
+    m = _sample()
+    text = m.to_json()
+    doc = json.loads(text)                       # valid JSON
+    assert doc["name"] == "person_detect"
+    assert doc["src_sha"] == "00010203" + "0405060708090a0b0c0d0e0f" + \
+        "101112131415161718191a1b1c1d1e1f"       # hex-encoded bytes
+    assert Manifest.from_json(text) == m

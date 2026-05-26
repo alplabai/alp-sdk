@@ -1,8 +1,15 @@
 """Manifest data model for .alpmodel packages (canonical Python form)."""
 from __future__ import annotations
+import json as _json
 from dataclasses import dataclass, field, asdict
 
 MANIFEST_SCHEMA_VERSION = 1
+
+
+def _json_default(d: dict) -> dict:
+    out = dict(d)
+    out["src_sha"] = d["src_sha"].hex()          # bytes -> hex string for JSON
+    return out
 
 
 @dataclass
@@ -68,3 +75,12 @@ class Manifest:
             targets=[Target(**t) for t in d.get("targets", [])],
             coverage=[Coverage(**c) for c in d.get("coverage", [])],
         )
+
+    def to_json(self) -> str:
+        return _json.dumps(_json_default(self.to_dict()), indent=2)
+
+    @classmethod
+    def from_json(cls, text: str) -> "Manifest":
+        d = _json.loads(text)
+        d["src_sha"] = bytes.fromhex(d["src_sha"])
+        return cls.from_dict(d)
