@@ -1,3 +1,4 @@
+import pytest
 from alp_model.manifest import Manifest, Target
 from alp_model.package import write_package, read_package, MAGIC
 
@@ -18,3 +19,17 @@ def test_package_roundtrips_manifest_and_blobs():
     mft, got_blobs = read_package(raw)
     assert mft == _mft()
     assert got_blobs == blobs                    # retrieved by table order == blob index
+
+
+def test_bad_magic_rejected():
+    raw = bytearray(write_package(_mft(), [b"x", b"y"]))
+    raw[0] = ord("Z")
+    with pytest.raises(ValueError, match="bad magic"):
+        read_package(bytes(raw))
+
+
+def test_unsupported_version_rejected():
+    raw = bytearray(write_package(_mft(), [b"x", b"y"]))
+    raw[4] = 99                                   # container_v low byte
+    with pytest.raises(ValueError, match="unsupported container version"):
+        read_package(bytes(raw))
