@@ -94,7 +94,7 @@ Flaky HIL tests have to be quarantined explicitly — there is no
 ## Future runners
 
 - `hil-yocto` — E1M-X EVK + E1M-V2N101 OR E1M EVK + E1M-N93 SoM
-  running a `meta-alp`-built Yocto image.  Gates every 🟡 row in
+  running a `meta-alp-sdk`-built Yocto image.  Gates every 🟡 row in
   `docs/test-plan.md`'s Yocto section -- the Yocto core-4
   peripherals, MQTT cleartext + TLS, ALSA audio, OpenSSL security
   backend, GPIO IRQ dispatcher, and Mender OTA wiring all flip
@@ -102,8 +102,8 @@ Flaky HIL tests have to be quarantined explicitly — there is no
   mirrors the `hil-aen` contract above, plus:
   - **Hardware:** a representative Yocto SoM (V2N or i.MX 93) on
     the matching EVK, networked to the runner host over Ethernet.
-  - **Image:** built from `meta-alp`'s `core-image-weston` recipe
-    with the Mender opt-in enabled (`require conf/distro/include/mender.inc`)
+  - **Image:** `core-image-weston` with `meta-alp-sdk` layered and the
+    Mender opt-in enabled (`require conf/distro/include/mender.inc`)
     for OTA roundtrip tests.
   - **Probes:** Saleae Logic Pro / equivalent for signal capture
     (I²S tone FFT, GPIO edge timing).

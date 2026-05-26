@@ -553,4 +553,4 @@ preset; exit 3 = hw_rev incompatible with SDK version.
   point.
 - Tutorial [12: Mender OTA on Yocto](12-mender-ota.md) (TBD)
   for how `board.yaml`'s OTA-config block threads through to
-  meta-alp.
+  meta-alp-sdk.

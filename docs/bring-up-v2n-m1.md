@@ -92,7 +92,7 @@ ROM has executed and PCIe link training can start.
 ### 4. Hand off to Linux
 
 If the SoM is running Yocto with the `meta-deepx-m1` layer wired
-into `e1m-x-v2n-m1.conf`:
+into `e1m-v2m101-a55.conf`:
 
 * `dx_rt_npu_linux_driver` opens the PCIe device at `lspci`-time.
 * `dxrt_init()` from user-space succeeds; load a `.dxnn` model

@@ -13,7 +13,7 @@ on three external relationships landing:
    Alif Ensemble HAL, NXP MCUXpresso).
 2. `alplabai/alp-zephyr-modules` repo public release with the
    board-file definitions for every E1M-* SoM in the matrix.
-3. OpenEmbedded layerindex registration for `meta-alp`.
+3. OpenEmbedded layerindex registration for `meta-alp-sdk`.
 
 None of these are SDK source-tree changes; they're meta-work
 that gates the customer onramp.  This doc tracks the open
@@ -378,16 +378,16 @@ E1M-* SoM out of the box.
 **Next action**: Coordinate public release with the v1.0
 SDK tag.
 
-## OpenEmbedded layerindex (meta-alp)
+## OpenEmbedded layerindex (meta-alp-sdk)
 
 **Surface impact**: Customer Yocto integration.  Today
-customers add `meta-alp` via a layers.conf edit; once
-registered, `bitbake-layers add-layer meta-alp` finds it
+customers add `meta-alp-sdk` via a layers.conf edit; once
+registered, `bitbake-layers add-layer meta-alp-sdk` finds it
 through the standard layer-fetcher path.
 
 **Open items**:
 
-- 📋 **Submit `meta-alp` to layerindex.**  One-time
+- 📋 **Submit `meta-alp-sdk` to layerindex.**  One-time
   submission; gates on the public-release version of the
   layer being stable (i.e. after v1.0).
 

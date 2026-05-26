@@ -583,7 +583,7 @@ CONFIG_ALP_SDK_CHIP_LSM6DSO=y
 
 ### Yocto consumption (v0.4+)
 
-The Yocto path is symmetric: `meta-alp` ships a recipe that builds
+The Yocto path is symmetric: `meta-alp-sdk` ships a recipe that builds
 the SDK's `src/yocto/` backend as a shared library, exposes the
 public headers under `/usr/include/alp/`, and wires `pkg-config`
 data so application recipes can `inherit pkgconfig` and depend on

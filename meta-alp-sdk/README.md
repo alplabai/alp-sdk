@@ -2,9 +2,12 @@
 
 # meta-alp-sdk
 
-> **`[UNTESTED]` -- v0.6 paper-correct.** Recipes parse cleanly against
-> meta-renesas (rzv2n) v3.1 and meta-imx (kirkstone+) but no full
-> image bake has been executed.  Real bring-up gates on v0.7 V2N HiL.
+> **Build-validated (partial), 2026-05-26.** The BSP v6.30
+> `bitbake-layers` flow below was exercised on WSL: the carrier DT
+> patches apply to linux-renesas 6.1.141-cip43 and `core-image-minimal`
+> produces the kernel `Image` + carrier dtb + `.wic.gz`.  A full
+> `alp-image-edge` bake and on-bench boot are the remaining gates; the
+> i.MX 93 path is still paper-correct (gates on v0.7 HiL).
 
 Yocto layer that packages the **ALP SDK** runtime, on-board chip
 drivers, edge-AI examples, and reference ROS 2 nodes for the
@@ -134,12 +137,19 @@ tar zxvf src_setup/rzv2n_ai-sdk_yocto_recipe_*.tar.gz
 TEMPLATECONF=$PWD/meta-renesas/meta-rz-distro/conf/templates/vlp-v4-conf/ \
     source poky/oe-init-build-env build
 
-# 4. Add the Renesas feature sublayers + meta-ros2-humble:
+# 4. Add the Renesas feature sublayers:
 bitbake-layers add-layer ../meta-rz-features/meta-rz-graphics
 bitbake-layers add-layer ../meta-rz-features/meta-rz-drpai
 bitbake-layers add-layer ../meta-rz-features/meta-rz-opencva
 bitbake-layers add-layer ../meta-rz-features/meta-rz-codecs
 bitbake-layers add-layer ../meta-econsys
+
+# 4b. ROS 2 layer -- ONLY for images that ship the alp-sdk ROS nodes
+#     (e.g. alp-image-edge).  meta-ros2-humble is a LAYERRECOMMENDS, not
+#     a hard dep: for a lean image (e.g. core-image-minimal) skip this
+#     step and BBMASK the ROS recipes.  It is not in the BSP tarball, so
+#     clone it from upstream meta-ros first:
+git clone -b scarthgap https://github.com/ros/meta-ros ../meta-ros
 bitbake-layers add-layer ../meta-ros/meta-ros2-humble
 
 # 5. Add meta-alp-sdk:
@@ -159,8 +169,10 @@ MACHINE = "e1m-v2m101-a55"     # V2N + DEEPX
 bitbake alp-image-edge
 ```
 
-The resulting `alp-image-edge-e1m-v2m101-a55.wic` flashes onto the
-SoM's eMMC via the standard Renesas flash-writer tooling.
+The resulting `alp-image-edge-<machine>.wic[.gz]` is the kernel +
+rootfs (the bootloader is production-flashed by ALP).  See
+[`../docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md) for the
+deploy + on-board verification steps.
 
 ### i.MX 93 — via meta-imx
 
@@ -283,8 +295,6 @@ such in the matching recipes' `LICENSE` field.
   acknowledgement closes the legal review per
   [`docs/vendor-partnerships.md`](../docs/vendor-partnerships.md)
   §C.31.
-- `drp-ai-tvm_*.bb` (Renesas DRP-AI runtime) lands alongside
-  meta-renesas-rz-features.
 - AEN A32-class MACHINE (v0.7).
 - `alp-image-edge.bb`'s minimal package set is documentary; the
   v1.0 sysbuild matrix in `docs/test-plan.md` adds the BLE
@@ -292,10 +302,11 @@ such in the matching recipes' `LICENSE` field.
 
 ## Verification status
 
-`[UNTESTED]`.  Recipe metadata parses but no full image bake
-has been done yet — the recipes pin tags + checksums from the
-maintainer's local notes that need re-validation against
-upstream releases.  v0.7 V2N HiL is the verification gate.
+**Partial.** `core-image-minimal` baked on the BSP v6.30 flow (WSL,
+2026-05-26): the carrier DT patches apply and the kernel + carrier dtb
++ image build.  Still pending: a full `alp-image-edge` bake (ROS 2 +
+DEEPX + Mender recipes) and on-bench boot — the v0.7 V2N HiL gate.  The
+i.MX 93 path remains unbaked.
 
 ## See also
 

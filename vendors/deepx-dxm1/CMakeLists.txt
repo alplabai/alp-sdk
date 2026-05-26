@@ -7,8 +7,8 @@
 # otherwise).
 #
 # Pulled in only when the Yocto backend's CMake sets
-# ALP_SDK_USE_DEEPX_DXM1=ON.  The Yocto recipe alp-sdk-runtime in
-# meta-alp drives that for the e1m-x-v2n-m1 MACHINE.
+# ALP_SDK_USE_DEEPX_DXM1=ON.  The Yocto recipe alp-sdk in
+# meta-alp-sdk drives that for the e1m-v2m101-a55 MACHINE.
 
 if(NOT TARGET alp_sdk)
     message(FATAL_ERROR
