@@ -7,6 +7,34 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — per-bridge firmware release versions (2026-05-26)
+
+The on-module **GD32** and **CC3501E** bridge firmwares each gained an
+independent **firmware release version** (`firmware/<mcu>/firmware-version.txt`,
+semver), tracked separately from the wire-protocol version and the
+build-id so a fielded device's firmware is trackable on its own.  The
+GD32 build embeds it (`GD32_BRIDGE_FW_VERSION`, surfaced via `GET_BUILD_ID`
+as `<ver>+<sha>`); the CC3501E reports it as `fw_version` via `GET_VERSION`
+and names its prebuilt blob from it.  The three-axis model (firmware
+release / wire protocol / build-id) is documented in
+`docs/gd32-bridge.md` + `docs/cc3501e-bridge.md`.
+
+### Changed — V2N Linux build + bridge docs reconciled to validated reality (2026-05-26)
+
+The Renesas RZ/V2N Linux docs were reconciled to the WSL-validated build:
+the Yocto path is the **`bitbake-layers`** flow in `meta-alp-sdk/README.md`
+(kas retired, `kas/e1m-v2n.yml` removed); the version framing is **AI SDK
+platform 7.1 / BSP v6.30** (linux-renesas 6.1.141-cip43) throughout; and
+the layer is `meta-alp-sdk` (the deleted `yocto/meta-alp/` name was
+scrubbed from live docs).  The shipped-but-undocumented `<alp/*>` surfaces
+(`storage`, `dsp`, `tmu`, `power`, `rpc`, `gpu2d`, `backend`,
+`e1m_x_pinout`, `ext/<vendor>`) are now reflected in the README stack
+graph + Public API table, `docs/architecture.md`, and
+`docs/os-support-matrix.md`.  The pre-flash provisioning model (V2N
+bootloader / CC3501E / GD32 — both MCU bridge firmwares open) is
+documented, and login-gated vendor download links were removed from
+public docs.
+
 ### Changed — examples reorganised into category subdirectories (2026-05-24)
 
 The 43 flat top-level example folders now live under category
