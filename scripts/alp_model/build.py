@@ -25,6 +25,7 @@ def build_model(*, sku: str, name: str, source: Path,
     src_fmt = _src_format(source)
     adapters = {a.backend: a for a in _ADAPTERS if a.is_available()}
 
+    out_dir.mkdir(parents=True, exist_ok=True)
     targets: list[Target] = []
     coverage: list[Coverage] = []
     blobs: list[bytes] = []
@@ -51,7 +52,6 @@ def build_model(*, sku: str, name: str, source: Path,
     mft = Manifest(name=name, src_sha=hashlib.sha256(source.read_bytes()).digest(),
                    inputs=[], outputs=[],        # tensor-I/O extraction is 1b-ii
                    targets=targets, coverage=coverage)
-    out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{name}.alpmodel"
     out_path.write_bytes(write_package(mft, blobs))
     return out_path

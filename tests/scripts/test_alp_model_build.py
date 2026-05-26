@@ -20,4 +20,6 @@ def test_build_model_writes_alpmodel_with_cpu_blob_and_coverage(tmp_path):
     assert len(cpu) == 1
     assert blobs[cpu[0].blob] == b"TFL3-DUMMY"
     # Ethos-U targets recorded as coverage skips (no vela adapter in 1b-i).
-    assert any(c.backend == "ethos_u" and c.status == "skipped" for c in mft.coverage)
+    ethos_u_skips = [c for c in mft.coverage if c.backend == "ethos_u" and c.status == "skipped"]
+    assert len(ethos_u_skips) == 2
+    assert {c.accel_config for c in ethos_u_skips} == {"ethos-u55-256", "ethos-u55-128"}
