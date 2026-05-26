@@ -522,6 +522,13 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/cap_helpers.c
 )
 
+# .alpmodel package reader (<alp/model.h>).  OS-agnostic read-side
+# parser (24-byte header + zcbor manifest decode + blob table).
+# Gated on CONFIG_ALP_SDK_MODEL_READER, which selects ZCBOR.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MODEL_READER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/alp_model.c
+)
+
 # Backend registry selector (<alp/backend.h>).  Walks the per-class
 # linker sections emitted by ALP_BACKEND_REGISTER + ALP_BACKEND_DEFINE_CLASS
 # to find the best-matching backend for the active silicon_ref.
