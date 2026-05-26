@@ -21,6 +21,11 @@ dev = [
     "pytest-snapshot>=0.9",
     "pytest-mock>=3.10",
 ]
+model-compile = [
+    "ethos-u-vela>=3.9",
+    "tflite>=2.10",
+    "flatbuffers>=23.1.21",
+]
 
 [project.scripts]
 alp = "alp_cli.main:cli"
