@@ -1,9 +1,19 @@
 """Manifest data model for .alpmodel packages (canonical Python form)."""
 from __future__ import annotations
 import json as _json
+import cbor2 as _cbor2
 from dataclasses import dataclass, field, asdict
 
 MANIFEST_SCHEMA_VERSION = 1
+
+_TENSOR_KEYS = {"dtype", "rank", "shape", "scale", "zp"}
+_TARGET_KEYS = {"backend", "silicon_ref", "blob_format", "accel_config",
+                "arena", "requires", "blob"}
+_COV_KEYS = {"backend", "accel_config", "status", "reason"}
+
+
+def _pick(d: dict, keys: set) -> dict:
+    return {k: d[k] for k in keys}              # drop unknown keys -> forward-compatible
 
 
 def _json_default(d: dict) -> dict:
@@ -84,3 +94,18 @@ class Manifest:
         d = _json.loads(text)
         d["src_sha"] = bytes.fromhex(d["src_sha"])
         return cls.from_dict(d)
+
+    def to_cbor(self) -> bytes:
+        return _cbor2.dumps(self.to_dict())
+
+    @classmethod
+    def from_cbor(cls, blob: bytes) -> "Manifest":
+        d = _cbor2.loads(blob)
+        return cls(
+            name=d["name"],
+            src_sha=bytes(d["src_sha"]),
+            inputs=[Tensor(**_pick(t, _TENSOR_KEYS)) for t in d.get("inputs", [])],
+            outputs=[Tensor(**_pick(t, _TENSOR_KEYS)) for t in d.get("outputs", [])],
+            targets=[Target(**_pick(t, _TARGET_KEYS)) for t in d.get("targets", [])],
+            coverage=[Coverage(**_pick(c, _COV_KEYS)) for c in d.get("coverage", [])],
+        )

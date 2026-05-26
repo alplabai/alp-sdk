@@ -1,4 +1,6 @@
 """Tests for alp_model.manifest round-trip serialisation."""
+import json
+import cbor2
 from alp_model.manifest import Tensor, Target, Coverage, Manifest
 
 
@@ -28,9 +30,6 @@ def test_manifest_roundtrips_through_dict():
     assert m.to_dict()["targets"][0]["backend"] == "ethos_u"
 
 
-import json
-
-
 def test_manifest_json_is_human_readable_and_roundtrips():
     m = _sample()
     text = m.to_json()
@@ -39,3 +38,20 @@ def test_manifest_json_is_human_readable_and_roundtrips():
     assert doc["src_sha"] == "00010203" + "0405060708090a0b0c0d0e0f" + \
         "101112131415161718191a1b1c1d1e1f"       # hex-encoded bytes
     assert Manifest.from_json(text) == m
+
+
+def test_manifest_cbor_roundtrips():
+    m = _sample()
+    blob = m.to_cbor()
+    assert isinstance(blob, (bytes, bytearray))
+    assert Manifest.from_cbor(blob) == m
+
+
+def test_cbor_decode_tolerates_unknown_keys():
+    # extensibility: a future writer adds a key the current reader ignores
+    m = _sample()
+    doc = cbor2.loads(m.to_cbor())
+    doc["future_field"] = 123
+    doc["targets"][0]["future_target_field"] = "x"
+    extended = cbor2.dumps(doc)
+    assert Manifest.from_cbor(extended) == m      # unknown keys dropped, rest intact
