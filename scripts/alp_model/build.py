@@ -1,5 +1,11 @@
 # scripts/alp_model/build.py
-"""Build driver: SKU + source model -> .alpmodel package (compile-what's-available)."""
+"""Build driver: SKU + source model -> .alpmodel package (compile-what's-available).
+
+Resolves the SoM's targets, runs each *available* compiler adapter, and assembles
+the package. A backend whose adapter is missing, or whose tool is not installed,
+is recorded as a `coverage` skip; a source format no adapter accepts is
+`incompatible`. If *no* blob is produced the build fails loudly -- an .alpmodel
+with zero runnable blobs is broken."""
 from __future__ import annotations
 import hashlib
 from pathlib import Path
@@ -10,8 +16,8 @@ from .manifest import Manifest, Target, Coverage
 from .package import write_package
 from .targets import resolve_targets
 
-# 1b-i: only the CPU adapter is wired. vela (ethos_u) + drpai/deepx land in 1b-ii;
-# until then their targets are recorded as coverage skips.
+# Default adapter registry. vela (ethos_u) + drpai/deepx are added in later
+# 1b-ii tasks; each is detect-and-skip (is_available() False when its tool is absent).
 _ADAPTERS: list[CompilerAdapter] = [CpuAdapter()]
 
 
@@ -19,26 +25,31 @@ def _src_format(source: Path) -> str:
     return source.suffix.lstrip(".").lower()        # "tflite" | "onnx"
 
 
-def build_model(*, sku: str, name: str, source: Path,
-                out_dir: Path, metadata_root: Path) -> Path:
+def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
+                metadata_root: Path,
+                adapters: list[CompilerAdapter] | None = None) -> Path:
+    registry = list(_ADAPTERS if adapters is None else adapters)
+    by_backend = {a.backend: a for a in registry}
     specs = resolve_targets(sku, metadata_root=metadata_root)
     src_fmt = _src_format(source)
-    adapters = {a.backend: a for a in _ADAPTERS if a.is_available()}
 
     out_dir.mkdir(parents=True, exist_ok=True)
     targets: list[Target] = []
     coverage: list[Coverage] = []
     blobs: list[bytes] = []
     for spec in specs:
-        adapter = adapters.get(spec.backend)
+        adapter = by_backend.get(spec.backend)
         if adapter is None:
-            coverage.append(Coverage(backend=spec.backend, accel_config=spec.accel_config,
-                                     status="skipped", reason="no adapter available (1b-i)"))
+            coverage.append(Coverage(spec.backend, spec.accel_config, "skipped",
+                                     f"no compiler adapter for {spec.backend}"))
+            continue
+        if not adapter.is_available():
+            coverage.append(Coverage(spec.backend, spec.accel_config, "skipped",
+                                     f"{spec.backend} compiler not installed"))
             continue
         if not adapter.accepts(src_fmt):
-            coverage.append(Coverage(backend=spec.backend, accel_config=spec.accel_config,
-                                     status="incompatible",
-                                     reason=f"{spec.backend} does not accept .{src_fmt}"))
+            coverage.append(Coverage(spec.backend, spec.accel_config, "incompatible",
+                                     f"{spec.backend} does not accept .{src_fmt}"))
             continue
         blob = adapter.compile(source, accel_config=spec.accel_config, out_dir=out_dir)
         targets.append(Target(
@@ -49,8 +60,12 @@ def build_model(*, sku: str, name: str, source: Path,
             blob=len(blobs)))
         blobs.append(blob.payload)
 
+    if not blobs:
+        detail = "; ".join(f"{c.backend}:{c.status} ({c.reason})" for c in coverage)
+        raise ValueError(f"no blob compiled for model '{name}' (.{src_fmt}); coverage: {detail}")
+
     mft = Manifest(name=name, src_sha=hashlib.sha256(source.read_bytes()).digest(),
-                   inputs=[], outputs=[],        # tensor-I/O extraction is 1b-ii
+                   inputs=[], outputs=[],        # tensor-I/O extraction wired in Task 6
                    targets=targets, coverage=coverage)
     out_path = out_dir / f"{name}.alpmodel"
     out_path.write_bytes(write_package(mft, blobs))
