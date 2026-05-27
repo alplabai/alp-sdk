@@ -53,7 +53,7 @@ Backend selection:
 | `_AUTO` | Picks per SoM: Ethos-U on AEN/N93, DRP-AI on V2N, DEEPX on V2M, CPU fallback otherwise. |
 | `_ETHOS_U` | AEN (E3..E8 with Ethos-U55 + E4/E6/E8 with Ethos-U85) + N93 (Ethos-U65). |
 | `_DRPAI` | V2N + V2M (DRP-AI3). |
-| `_DEEPX_DX` | V2M101 / V2M102 (DEEPX DX-M1 on a PCIe-like link). |
+| `_DEEPX_DXM1` | V2M101 / V2M102 (DEEPX DX-M1 on a PCIe-like link). |
 | `_CPU` | TFLM reference / Helium / NEON kernels; always available. |
 
 The `ETHOS_U` token is a single customer-facing handle that

@@ -650,7 +650,9 @@ for the full rationale and edge-case guidance.
 - **Not a HAL.** Vendor HALs are wrapped, not replaced.
 - **Not a board-file collection.** Zephyr boards live in
   `alp-zephyr-modules`.
-- **Not the studio.** Chat, allocator, model pipeline, and fab routing
-  stay in alp-studio.
+- **Not the studio.** Chat, allocator, the model-training pipeline, and
+  fab routing stay in alp-studio.  (The SDK *does* own the on-device
+  `.alpmodel` compile/package/load pipeline — `alp model build` +
+  `alp_inference_open_alpmodel()` — which the studio builds on.)
 - **Not LVGL itself.** Upstream LVGL is included; we ship a config and
   integration only.

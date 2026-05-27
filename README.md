@@ -373,7 +373,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   │   (v0.6)      │    │  alp_orchestrate.py (fan-out + system-manifest)    │
   │               │    │  west alp-build / alp-image / alp-flash / alp-clean│
   │               │    │  validate_board_yaml.py  ·  VS Code extension      │
-  │               │    │  program_eeprom.py  ·  per-OS dependency bootstrap │
+  │               │    │  alp model build (.alpmodel)  ·  program_eeprom.py │
   └───────────────┘    └────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────┐
