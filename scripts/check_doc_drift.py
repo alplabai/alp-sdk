@@ -196,7 +196,10 @@ def find_index_gaps(root: pathlib.Path) -> list[str]:
     index = docs / "README.md"
     if not index.is_file():
         return []
-    linked = set(re.findall(r"[A-Za-z0-9_-]+\.md",
+    # Include '.' in the filename class so dotted stems like
+    # `v1.0-readiness.md` match (a bare [A-Za-z0-9_-]+ stops at the dot
+    # and mis-extracts "0-readiness.md").
+    linked = set(re.findall(r"[A-Za-z0-9_.-]+\.md",
                             index.read_text(encoding="utf-8")))
     gaps: list[str] = []
     for md in sorted(docs.glob("*.md")):

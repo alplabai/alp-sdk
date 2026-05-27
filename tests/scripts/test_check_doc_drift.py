@@ -117,6 +117,14 @@ def test_index_complete_passes(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
+def test_dotted_filename_indexed_passes(tmp_path):
+    # A dotted stem (v1.0-readiness.md) linked in the index must be
+    # recognised -- the link-extraction regex must include '.'.
+    _scaffold(tmp_path, docs={"v1.0-readiness.md": "fine\n"})
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
 def test_subdir_doc_not_required_in_index(tmp_path):
     # Only top-level docs/*.md must be indexed; subdir docs are not.
     _scaffold(tmp_path, docs={"soms/v2n.md": "fine\n"})
