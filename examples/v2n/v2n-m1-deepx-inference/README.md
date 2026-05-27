@@ -27,7 +27,7 @@ customer-only licence -- see
    Renesas `PA6` `M1_RESET` release into one
    `deepx_dxm1_bring_up()` call.
 3. **Inference handle open via the portable `<alp/inference.h>`
-   surface.**  `backend = ALP_INFERENCE_BACKEND_DEEPX_DX` +
+   surface.**  `backend = ALP_INFERENCE_BACKEND_DEEPX_DXM1` +
    `format = ALP_INFERENCE_MODEL_DXNN`.  Under the hood the
    SDK dispatches to the DEEPX `dx_rt` runtime via header
    bindings; the runtime itself is pulled in by the customer

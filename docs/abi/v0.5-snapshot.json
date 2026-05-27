@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-24",
+  "generated": "2026-05-27",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -7201,13 +7201,17 @@
         "alp_inference_open": {
           "hash": "176980d6c3627f80",
           "signature": "alp_inference_t * alp_inference_open(const alp_inference_config_t *cfg);"
+        },
+        "alp_inference_open_alpmodel": {
+          "hash": "b630c05efb03a9f9",
+          "signature": "alp_inference_t * alp_inference_open_alpmodel(const alp_model_open_opts_t *opts);"
         }
       },
       "macros": {},
       "typedefs": {
         "alp_inference_backend_t": {
-          "definition": "typedef enum { ALP_INFERENCE_BACKEND_AUTO = 0, ALP_INFERENCE_BACKEND_CPU = 1, ALP_INFERENCE_BACKEND_ETHOS_U = 2, ALP_INFERENCE_BACKEND_DRPAI = 3, ALP_INFERENCE_BACKEND_DEEPX_DX = 4 } alp_inference_backend_t;",
-          "hash": "04fb75226b383e41"
+          "definition": "typedef enum { ALP_INFERENCE_BACKEND_AUTO = 0, ALP_INFERENCE_BACKEND_CPU = 1, ALP_INFERENCE_BACKEND_ETHOS_U = 2, ALP_INFERENCE_BACKEND_DRPAI = 3, ALP_INFERENCE_BACKEND_DEEPX_DXM1 = 4 } alp_inference_backend_t;",
+          "hash": "39aad73f1220b0b4"
         },
         "alp_inference_dtype_t": {
           "definition": "typedef enum { ALP_INFERENCE_DTYPE_F32 = 0, ALP_INFERENCE_DTYPE_F16 = 1, ALP_INFERENCE_DTYPE_INT8 = 2, ALP_INFERENCE_DTYPE_UINT8 = 3, ALP_INFERENCE_DTYPE_INT16 = 4, ALP_INFERENCE_DTYPE_INT32 = 5 } alp_inference_dtype_t;",
@@ -7224,6 +7228,10 @@
         "model_size": {
           "definition": "typedef struct { const void *model_data; size_t model_size;",
           "hash": "51b78f8e3d9ba0d1"
+        },
+        "size": {
+          "definition": "typedef struct { const void *data; size_t size;",
+          "hash": "97167131422960af"
         },
         "size_bytes": {
           "definition": "typedef struct { void *data; size_t size_bytes;",
@@ -7311,6 +7319,42 @@
         "keepalive_s": {
           "definition": "typedef struct { const char *broker_uri; const char *client_id; const char *username; const char *password; uint16_t keepalive_s;",
           "hash": "a7e99fc7d2affff5"
+        }
+      }
+    },
+    "alp/model.h": {
+      "functions": {
+        "alp_model_parse": {
+          "hash": "2f6a2daa899bea6a",
+          "signature": "alp_status_t alp_model_parse(const uint8_t *data, size_t size, alp_model_t *out);"
+        }
+      },
+      "macros": {
+        "ALP_MODEL_CONTAINER_V": {
+          "hash": "fccd02fa26c3221c",
+          "value": "1u"
+        },
+        "ALP_MODEL_MAGIC": {
+          "hash": "183f18166efcf711",
+          "value": "\"ALPM\""
+        },
+        "ALP_MODEL_MAX_TARGETS": {
+          "hash": "51bfdf8a922cd883",
+          "value": "8u"
+        },
+        "ALP_MODEL_STR_MAX": {
+          "hash": "9ee336e451079dbf",
+          "value": "32u"
+        }
+      },
+      "typedefs": {
+        "arena_bytes": {
+          "definition": "typedef struct { char backend[ALP_MODEL_STR_MAX]; char silicon_ref[ALP_MODEL_STR_MAX]; char blob_format[ALP_MODEL_STR_MAX]; char accel_config[ALP_MODEL_STR_MAX]; uint32_t arena_bytes;",
+          "hash": "b13afabbcc0620ee"
+        },
+        "size": {
+          "definition": "typedef struct { const uint8_t *data; size_t size;",
+          "hash": "0dc495449d626d06"
         }
       }
     },
@@ -7579,8 +7623,8 @@
           "hash": "3d4c6b8b6611f2e7"
         },
         "alp_status_t": {
-          "definition": "typedef enum { ALP_OK = 0, ALP_ERR_INVAL = -1, ALP_ERR_NOT_READY = -2, ALP_ERR_BUSY = -3, ALP_ERR_TIMEOUT = -4, ALP_ERR_IO = -5, ALP_ERR_NOSUPPORT = -6, ALP_ERR_NOMEM = -7, ALP_ERR_OUT_OF_RANGE = -8, ALP_ERR_NOT_PRESENT_ON_THIS_SOC = -9, ALP_ERR_NOT_IMPLEMENTED = -10 } alp_status_t;",
-          "hash": "aea8362fc383ca21"
+          "definition": "typedef enum { ALP_OK = 0, ALP_ERR_INVAL = -1, ALP_ERR_NOT_READY = -2, ALP_ERR_BUSY = -3, ALP_ERR_TIMEOUT = -4, ALP_ERR_IO = -5, ALP_ERR_NOSUPPORT = -6, ALP_ERR_NOMEM = -7, ALP_ERR_OUT_OF_RANGE = -8, ALP_ERR_NOT_PRESENT_ON_THIS_SOC = -9, ALP_ERR_NOT_IMPLEMENTED = -10, ALP_ERR_VERSION = -11, ALP_ERR_NO_BACKEND = -12, ALP_ERR_NO_FIT = -13, ALP_ERR_NOT_FOUND = -14 } alp_status_t;",
+          "hash": "43d2d7d5e23eaf2c"
         },
         "alp_uart_parity_t": {
           "definition": "typedef enum { ALP_UART_PARITY_NONE = 0, ALP_UART_PARITY_EVEN = 1, ALP_UART_PARITY_ODD = 2 } alp_uart_parity_t;",
@@ -8254,6 +8298,10 @@
         },
         "ALP_SOC_NEON": {
           "hash": "63f438f0ee2e4669",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_NPU_ARENA_SRAM_KIB": {
+          "hash": "161006f809f7deca",
           "value": "UINT16_MAX"
         },
         "ALP_SOC_PDM_COUNT": {

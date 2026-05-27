@@ -17,7 +17,7 @@
  *                                     comes first on V2N-M1 builds
  *                                     because that's the SoM's reason
  *                                     for shipping a companion NPU.
- *   ALP_INFERENCE_BACKEND_DEEPX_DX -> DEEPX DX-M1 (proprietary).  Real
+ *   ALP_INFERENCE_BACKEND_DEEPX_DXM1 -> DEEPX DX-M1 (proprietary).  Real
  *                                     dispatch lands in v0.4 once
  *                                     deepx-dxm1-host-sdk is on the
  *                                     sysroot; v0.3 wires routing only.
@@ -121,7 +121,7 @@ void         alp_inference_deepx_close(struct alp_inference *h);
 static alp_inference_backend_t resolve_auto(void)
 {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    return ALP_INFERENCE_BACKEND_DEEPX_DX;
+    return ALP_INFERENCE_BACKEND_DEEPX_DXM1;
 #else
     return ALP_INFERENCE_BACKEND_AUTO; /* signals "nothing available" */
 #endif
@@ -171,7 +171,7 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
     alp_status_t rc = ALP_ERR_NOSUPPORT;
     switch (backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DX:
+    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         rc = alp_inference_deepx_open(h, cfg);
         break;
 #endif
@@ -193,7 +193,7 @@ size_t alp_inference_num_inputs(alp_inference_t *inf)
     if (inf == NULL || !inf->in_use) return 0u;
     switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DX:
+    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         return alp_inference_deepx_num_inputs(inf);
 #endif
     default:
@@ -206,7 +206,7 @@ size_t alp_inference_num_outputs(alp_inference_t *inf)
     if (inf == NULL || !inf->in_use) return 0u;
     switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DX:
+    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         return alp_inference_deepx_num_outputs(inf);
 #endif
     default:
@@ -222,7 +222,7 @@ alp_status_t alp_inference_get_input(alp_inference_t *inf, size_t index,
     *out = (alp_inference_tensor_t){0};
     switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DX:
+    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         return alp_inference_deepx_get_input(inf, index, out);
 #endif
     default:
@@ -238,7 +238,7 @@ alp_status_t alp_inference_get_output(alp_inference_t *inf, size_t index,
     *out = (alp_inference_tensor_t){0};
     switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DX:
+    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         return alp_inference_deepx_get_output(inf, index, out);
 #endif
     default:
@@ -251,7 +251,7 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
     if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
     switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DX:
+    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         return alp_inference_deepx_invoke(inf);
 #endif
     default:
@@ -264,7 +264,7 @@ void alp_inference_close(alp_inference_t *inf)
     if (inf == NULL || !inf->in_use) return;
     switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DX:
+    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         alp_inference_deepx_close(inf);
         break;
 #endif

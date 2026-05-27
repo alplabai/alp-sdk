@@ -116,6 +116,11 @@
       "type": "integer",
       "description": "Maximum on-die SRAM in KB across all variants. Per-variant overrides go into variants[].sram_kb."
     },
+    "inference_arena_sram_kib": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Usable SRAM budget (KiB) for an NPU tensor arena on this SoC. The .alpmodel loader admits a blob only if its requires.sram_kib <= this budget. 0 = unknown/unbounded (fit-check skips). This is integration/partition-dependent silicon data; author per-SoC before production."
+    },
     "tcm_kb": {
       "type": "integer",
       "description": "Maximum tightly-coupled memory in KB (informative; per-core TCM lives in cores[].tcm_kb)."

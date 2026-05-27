@@ -26,7 +26,7 @@ DeepxDispatcher::DeepxDispatcher(rclcpp::Node &parent) : parent_(parent) {
 
     // Open the inference backend.  AUTO -> the SDK picks the
     // highest-priority backend the active SoM populates:
-    //   V2M101 / V2M102 -> ALP_INFERENCE_BACKEND_DEEPX_DX
+    //   V2M101 / V2M102 -> ALP_INFERENCE_BACKEND_DEEPX_DXM1
     //   V2N101 / V2N102 -> ALP_INFERENCE_BACKEND_DRPAI
     //   Anything else / no NPU -> ALP_INFERENCE_BACKEND_CPU
     inf_ = alp_inference_open(&(const alp_inference_config_t){
@@ -62,7 +62,7 @@ DeepxDispatcher::~DeepxDispatcher() {
 
 const char *DeepxDispatcher::backend_name() const {
     switch (backend_) {
-        case ALP_INFERENCE_BACKEND_DEEPX_DX: return "deepx_dx";
+        case ALP_INFERENCE_BACKEND_DEEPX_DXM1: return "deepx_dxm1";
         case ALP_INFERENCE_BACKEND_DRPAI:    return "drpai";
         case ALP_INFERENCE_BACKEND_ETHOS_U:  return "ethos_u";
         case ALP_INFERENCE_BACKEND_CPU:      return "cpu";

@@ -23,7 +23,7 @@ public:
     explicit DeepxDispatcher(rclcpp::Node &parent);
     ~DeepxDispatcher();
 
-    /// Returns "deepx_dx" / "drpai" / "cpu" / "stub" depending on
+    /// Returns "deepx_dxm1" / "drpai" / "cpu" / "stub" depending on
     /// which backend the AUTO selector resolved to at startup.
     const char *backend_name() const;
 

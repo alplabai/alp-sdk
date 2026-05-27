@@ -16,7 +16,7 @@
 #
 # v0.3 carve-out: the inference dispatcher (inference_yocto.c) is the
 # first real Yocto-side surface.  It overrides stub_backend.c's
-# inference symbols and routes ALP_INFERENCE_BACKEND_DEEPX_DX through
+# inference symbols and routes ALP_INFERENCE_BACKEND_DEEPX_DXM1 through
 # the DEEPX DX-M1 backend hook when ALP_SDK_USE_DEEPX_DXM1=ON.  The
 # routing is exercised today; the real dxnn_* call sites in
 # inference_deepx.cpp fill in v0.4 once the deepx-dxm1-host-sdk Yocto
@@ -39,6 +39,8 @@ compiles without the SDK installed)."
 target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub_backend.c
     ${CMAKE_CURRENT_SOURCE_DIR}/inference_yocto.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/alp_model_loader.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/inference/alp_model_select.c
 )
 
 # Stop stub_backend.c from emitting its own alp_inference_* symbols --

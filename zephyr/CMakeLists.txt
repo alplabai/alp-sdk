@@ -527,6 +527,8 @@ zephyr_library_sources(
 # Gated on CONFIG_ALP_SDK_MODEL_READER, which selects ZCBOR.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MODEL_READER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/alp_model.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/alp_model_loader.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/alp_model_select.c
 )
 
 # Backend registry selector (<alp/backend.h>).  Walks the per-class

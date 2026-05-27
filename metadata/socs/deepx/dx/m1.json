@@ -30,6 +30,7 @@
       "supports": ["CNN"]
     }
   ],
+  "inference_arena_sram_kib": 0,
   "peripherals": {
     "pcie_gen3": 1,
     "usb_2_otg": 1,
