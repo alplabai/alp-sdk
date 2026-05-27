@@ -38,3 +38,13 @@ def test_extract_io_parses_tiny_fixture():
     assert outs[0].dtype == "int8" and outs[0].rank == 2 and outs[0].shape == [1, 2]
     assert outs[0].zp == 2
     assert outs[0].scale == pytest.approx(0.004, rel=1e-5)
+
+
+def test_extract_io_honors_raw_bytes_without_reading_file(tmp_path):
+    # raw= lets build_model pass already-read bytes (read source once). The .tflite
+    # path here does NOT exist on disk, so a non-empty result proves raw was used.
+    pytest.importorskip("tflite")
+    raw = _FIXTURE.read_bytes()
+    ins, outs = extract_io(tmp_path / "does-not-exist.tflite", raw=raw)
+    assert len(ins) == 1 and ins[0].shape == [1, 4]
+    assert len(outs) == 1 and outs[0].shape == [1, 2]

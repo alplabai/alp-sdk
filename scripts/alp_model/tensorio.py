@@ -11,14 +11,18 @@ from pathlib import Path
 from .manifest import Tensor
 
 
-def extract_io(source: Path) -> tuple[list[Tensor], list[Tensor]]:
+def extract_io(source: Path, *, raw: bytes | None = None) -> tuple[list[Tensor], list[Tensor]]:
     if source.suffix.lower() != ".tflite":
         return [], []                       # ONNX I/O extraction is a later follow-up
     try:
         import tflite
     except ImportError:
         return [], []                       # parser not installed -> skip
-    raw = source.read_bytes()               # an OSError here is a real failure, not a parse problem
+    # Reuse the caller's already-read bytes when provided (build_model reads the
+    # source once for the manifest sha); an OSError on our own read is a real
+    # failure, not a parse problem.
+    if raw is None:
+        raw = source.read_bytes()
     try:
         model = tflite.Model.GetRootAs(raw, 0)
         if model.SubgraphsLength() == 0:
