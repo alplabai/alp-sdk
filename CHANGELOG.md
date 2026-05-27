@@ -7,6 +7,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — doc-drift CI gate (2026-05-27)
+
+`scripts/check_doc_drift.py` + `.github/workflows/pr-doc-drift.yml`: an
+objective gate that fails when (a) a customer doc references an `ALP_*` / `alp_*`
+identifier that exists in **no** SDK source layer (public + internal headers,
+Kconfig, CMake, generators, schemas, Yocto), or (b) a top-level `docs/*.md` is
+not linked from the `docs/README.md` index.  "Known" identifiers are harvested
+from the real sources (not a hand-kept allowlist), so the gate stays
+low-maintenance and free of build-identifier false positives.  Runnable locally
+(`python scripts/check_doc_drift.py`); wired into the local-CI cheat sheet.
+Catches exactly the stale-reference class the `.alpmodel` / `DEEPX_DX →
+DEEPX_DXM1` rename left behind.
+
 ### Added — portable `.alpmodel` model pipeline (Stages 1a–1c, 2026-05-26..27)
 
 End-to-end AI-model pipeline so one model is portable across NPU back-ends.

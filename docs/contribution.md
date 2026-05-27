@@ -52,7 +52,8 @@ signatures), if you have one.
 - C99-compatible.  Doxygen comments on every public function, type,
   and macro.
 - All public symbols use the **`alp_` prefix**: `alp_i2c_t`,
-  `alp_spi_open()`, `alp_display_blit()`, `alp_iot_*`, …
+  `alp_spi_open()`, `alp_display_blit()`, the `<alp/iot.h>`
+  Wi-Fi + MQTT surface (`alp_wifi_open()`, `alp_mqtt_publish()`), …
 - Lowercase, snake_case.
 - Opaque types (forward-declared structs returned as pointers)
   unless there's a strong reason to expose layout.

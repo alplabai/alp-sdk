@@ -60,14 +60,18 @@ of cache-coherent shared SRAM + a hardware semaphore.
 
 A hardware FIFO that delivers a small fixed-size message from
 one core to another with a wake-up IRQ.  AEN E7 has two
-mailboxes (MHU0 + MHU1); the SDK opens MBOX0 for the HP↔HE
-control channel.
+mailboxes (MHU0 + MHU1); the SDK opens MBOX channel 0 for the
+HP↔HE control channel.  Sends are explicit; **receives arrive
+via a registered callback** -- there is no blocking
+`*_recv` call.
 
 ```c
-alp_mbox_t *mbox = alp_mbox_open(0u);     // MBOX0
-alp_mbox_send(mbox, payload, payload_len);  // wakes peer
-size_t got;
-alp_mbox_recv(mbox, reply, sizeof(reply), &got, /*timeout_ms*/ 1000);
+alp_mbox_t *mbox = alp_mbox_open(&(alp_mbox_config_t){
+    .channel = 0u,                 // MBOX channel 0
+    .peer    = ALP_CORE_M55_HE,    // counterpart core
+});
+alp_mbox_set_callback(mbox, on_peer_msg, NULL);  // inbound -> on_peer_msg()
+alp_mbox_send(mbox, payload, payload_len, /*timeout_ms*/ 1000);  // wakes peer
 ```
 
 Payload size: 32 bytes per message (AEN MHU limit).  For
@@ -77,14 +81,23 @@ mailbox + put the actual bytes in shared SRAM.
 ### Shared memory (`alp_shmem_*`)
 
 A region of cache-coherent SRAM both cores can read/write.
-Cache flush + invalidate is the backend's responsibility
-inside `alp_shmem_write_at` / `_read_at` -- the caller doesn't
-issue DSB / barrier instructions.
+@ref alp_shmem_view hands back the mapped base pointer + size;
+the caller reads and writes through that pointer directly
+(`memcpy`, struct stores).  Opening the region non-cacheable
+(`.cacheable = false`) lets the backend keep the two cores
+coherent without the caller issuing DSB / barrier instructions.
 
 ```c
-alp_shmem_t *shmem = alp_shmem_open(0u);   // region 0
-alp_shmem_write_at(shmem, /*offset*/ 0u, payload, payload_len);
-alp_shmem_read_at(shmem, /*offset*/ 0u, buffer, buf_len);
+alp_shmem_t *shmem = alp_shmem_open(&(alp_shmem_config_t){
+    .name      = "alp_shmem0",     // DT-anchored region label
+    .size      = 4096u,
+    .cacheable = false,
+});
+void  *base = NULL;
+size_t size = 0u;
+alp_shmem_view(shmem, &base, &size);       // map it once
+memcpy(base, payload, payload_len);        // core A writes
+/* ... peer reads the same bytes through its own view ... */
 ```
 
 Region size + layout is configured in devicetree; default
@@ -99,44 +112,65 @@ region concurrently.
 
 ```c
 alp_hwsem_t *sem = alp_hwsem_open(0u);
-alp_hwsem_take(sem, /*timeout_ms*/ 100);
+alp_hwsem_lock(sem, /*timeout_ms*/ 100);   // or alp_hwsem_try_lock(sem)
 // critical section: modify shared structure
-alp_hwsem_give(sem);
+alp_hwsem_unlock(sem);
 ```
 
 ## 2. The HP-side application
 
 From `examples/multicore/mproc-mailbox/src/main.c`:
 
+The reply arrives asynchronously, so HP registers a callback
+before it sends.  The callback decodes the peer's (offset,
+length) tuple and reads the echoed bytes straight out of the
+shared region's mapped base pointer.
+
 ```c
-alp_shmem_t *shmem = alp_shmem_open(0u);
-alp_mbox_t  *mbox  = alp_mbox_open(0u);
+static uint8_t *shmem_base;        /* set once from alp_shmem_view() */
 
-const char *payload = "hello-from-HP";
-const size_t plen   = strlen(payload);
+/* Inbound-mailbox callback: HE has replied. */
+static void on_peer_msg(uint32_t channel, const void *data, size_t len,
+                        void *user) {
+    (void)channel; (void)len; (void)user;
+    const uint8_t *reply = data;
+    uint32_t echo_off = u32_le(reply);
+    uint32_t echo_len = u32_le(reply + 4);
 
-/* 1. Stage in shmem. */
-alp_shmem_write_at(shmem, 0u, payload, plen);
+    char echo_buf[64];
+    memcpy(echo_buf, shmem_base + echo_off, echo_len);  /* read echoed data */
+    echo_buf[echo_len] = '\0';
+    printf("HE echoed: %s\n", echo_buf);
+}
 
-/* 2. Notify peer with the (offset, length) tuple. */
-uint8_t mbox_msg[8] = {
-    0,0,0,0,            // offset = 0 (LE u32)
-    plen,0,0,0,         // length = plen
-};
-alp_mbox_send(mbox, mbox_msg, sizeof(mbox_msg));
+int main(void) {
+    alp_shmem_t *shmem = alp_shmem_open(&(alp_shmem_config_t){
+        .name = "alp_shmem0", .size = 4096u, .cacheable = false,
+    });
+    alp_mbox_t  *mbox  = alp_mbox_open(&(alp_mbox_config_t){
+        .channel = 0u, .peer = ALP_CORE_M55_HE,
+    });
 
-/* 3. Wait for the reply tuple. */
-uint8_t reply[8];
-size_t  reply_len;
-alp_mbox_recv(mbox, reply, sizeof(reply), &reply_len, 1000);
+    size_t shmem_size = 0u;
+    alp_shmem_view(shmem, (void **)&shmem_base, &shmem_size);
+    alp_mbox_set_callback(mbox, on_peer_msg, NULL);
 
-/* 4. Decode the reply tuple + read the echoed data. */
-uint32_t echo_off = u32_le(reply);
-uint32_t echo_len = u32_le(reply + 4);
-char echo_buf[64];
-alp_shmem_read_at(shmem, echo_off, echo_buf, echo_len);
-echo_buf[echo_len] = '\0';
-printf("HE echoed: %s\n", echo_buf);
+    const char *payload = "hello-from-HP";
+    const size_t plen   = strlen(payload);
+
+    /* 1. Stage in shmem (write through the mapped base pointer). */
+    memcpy(shmem_base + 0u, payload, plen);
+
+    /* 2. Notify peer with the (offset, length) tuple. */
+    uint8_t mbox_msg[8] = {
+        0,0,0,0,            // offset = 0 (LE u32)
+        plen,0,0,0,         // length = plen
+    };
+    alp_mbox_send(mbox, mbox_msg, sizeof(mbox_msg), /*timeout_ms*/ 1000);
+
+    /* 3. on_peer_msg() fires from the mailbox thread when HE replies. */
+    for (;;) { k_msleep(100); }
+}
 ```
 
 ## 3. The HE-side peer (sketch -- v0.4 dual-image)
@@ -144,35 +178,53 @@ printf("HE echoed: %s\n", echo_buf);
 The peer firmware lives at `examples/multicore/mproc-mailbox/peer/src/main.c`
 (TBD until the dual-image build flow lands).  Pattern:
 
+The peer is symmetric: it opens the same region + channel and
+does its echo work from the inbound-mailbox callback.
+
 ```c
-alp_shmem_t *shmem = alp_shmem_open(0u);
-alp_mbox_t  *mbox  = alp_mbox_open(0u);
+static uint8_t *shmem_base;
+static alp_mbox_t *mbox;
 
-while (1) {
-    uint8_t msg[8];
-    size_t  got;
-    if (alp_mbox_recv(mbox, msg, sizeof(msg), &got, K_FOREVER) != ALP_OK)
-        continue;
-
-    /* Read incoming data. */
+/* Inbound: HP has staged a payload + sent its (offset, length) tuple. */
+static void on_hp_msg(uint32_t channel, const void *data, size_t len,
+                      void *user) {
+    (void)channel; (void)len; (void)user;
+    const uint8_t *msg = data;
     uint32_t in_off = u32_le(msg);
     uint32_t in_len = u32_le(msg + 4);
+
+    /* Read incoming data through the mapped base pointer. */
     char buf[64];
-    alp_shmem_read_at(shmem, in_off, buf, in_len);
+    memcpy(buf, shmem_base + in_off, in_len);
 
     /* Build the echo: "echo: " + payload. */
     char out[64];
     int n = snprintf(out, sizeof(out), "echo: %.*s", (int)in_len, buf);
 
     /* Write back at offset 64 to avoid colliding with HP's data. */
-    alp_shmem_write_at(shmem, 64u, out, n);
+    memcpy(shmem_base + 64u, out, n);
 
     /* Reply with the (offset, length) tuple. */
     uint8_t reply[8] = {
         64, 0, 0, 0,
         n,  0, 0, 0,
     };
-    alp_mbox_send(mbox, reply, sizeof(reply));
+    alp_mbox_send(mbox, reply, sizeof(reply), /*timeout_ms*/ 1000);
+}
+
+int main(void) {
+    alp_shmem_t *shmem = alp_shmem_open(&(alp_shmem_config_t){
+        .name = "alp_shmem0", .size = 4096u, .cacheable = false,
+    });
+    mbox = alp_mbox_open(&(alp_mbox_config_t){
+        .channel = 0u, .peer = ALP_CORE_M55_HP,
+    });
+
+    size_t shmem_size = 0u;
+    alp_shmem_view(shmem, (void **)&shmem_base, &shmem_size);
+    alp_mbox_set_callback(mbox, on_hp_msg, NULL);
+
+    for (;;) { k_msleep(100); }  /* echo work happens in on_hp_msg() */
 }
 ```
 
@@ -194,7 +246,7 @@ ipc:
   - kind: raw_shmem
     endpoints: [m55_hp, m55_he]
     carve_out_kb: 64
-    name: alp_mproc_he_offload
+    name: he_offload                # -> ALP_IPC_<NAME>_ADDR / _SIZE / ... macros
 
 features:
   ipc:

@@ -85,7 +85,7 @@ export ZEPHYR_BASE="$PWD/zephyr"
 west zephyr-export
 ```
 
-### Compile error: `'alp_xxx_t' undeclared`
+### Compile error: `'alp_<thing>_t' undeclared`
 
 You haven't included the right header.  Check the chip's manifest
 at `metadata/chips/<chip>.yaml` for the canonical header path:

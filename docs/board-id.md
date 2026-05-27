@@ -133,12 +133,15 @@ static alp_status_t adc_cross_check(const alp_hw_info_eeprom_t *manifest,
 
 To make this real, `scripts/alp_project.py` needs to emit a
 per-family generated header listing `expected_mv / bin_radius_mv`
-per `hw_rev`.  The header would look like:
+per `hw_rev`.  This is a SoM-internal generated table -- not part
+of the public `<alp/*>` API -- so the type and array names below
+are illustrative of what the generator would emit, not symbols a
+customer calls:
 
 ```c
 /* AUTO-GENERATED from metadata/e1m_modules/v2n/hw-revisions.yaml */
-typedef struct { const char *hw_rev; uint16_t mv; uint16_t radius; } alp_hwrev_bin_t;
-static const alp_hwrev_bin_t alp_v2n_hwrev_bins[] = {
+typedef struct { const char *hw_rev; uint16_t mv; uint16_t radius; } hwrev_bin_t;
+static const hwrev_bin_t v2n_hwrev_bins[] = {
     { "r1", 100, 50 },
     { "r2", 300, 50 },
     /* ... 8 bins total ... */

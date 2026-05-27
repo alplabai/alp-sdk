@@ -631,9 +631,17 @@ flows from `board.yaml`:
 ```cmake
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+# Point ALP_SDK_ROOT at your alp-sdk checkout (env override, else a
+# tree-relative fallback -- mirrors the examples/*/CMakeLists.txt pattern).
+if(DEFINED ENV{ALP_SDK_ROOT})
+    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
+else()
+    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../.. ABSOLUTE)
+endif()
+
 set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_PATH}/scripts/alp_project.py
+    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
             --input ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
             --emit zephyr-conf
             --output ${_alp_generated}
