@@ -61,6 +61,7 @@
     }
   ],
   "soc_ram_kb": 13824,
+  "inference_arena_sram_kib": 0,
   "soc_flash_mb": 5.5,
   "always_on_sram_kb": 4,
   "peripherals": {
