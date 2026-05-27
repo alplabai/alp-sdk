@@ -20,6 +20,21 @@ low-maintenance and free of build-identifier false positives.  Runnable locally
 Catches exactly the stale-reference class the `.alpmodel` / `DEEPX_DX →
 DEEPX_DXM1` rename left behind.
 
+### Added — `.alpmodel` Stage 2 compile-config plumbing (2026-05-27)
+
+Board.yaml `models[].compile:` block threads per-backend compile configuration
+(DRP-AI spec path, DEEPX JSON config + calibration dir) from `board.yaml` into
+`alp model build`.  Backends that need a per-model config (`drpai`, `deepx_dxm1`)
+record a `coverage: skipped ("no compile config")` entry when no block is
+supplied — instead of silently skipping on toolchain-absent check alone.  The
+`compile:` block is validated by `metadata/schemas/board.schema.json`
+(`additionalProperties: false`; `deepx_dxm1` requires both `config:` and
+`calibration:`; `drpai` requires `spec:`; unknown backend keys are rejected).
+All path values are resolved relative to the `board.yaml` file before being
+passed to the adapter.  No vendor tools required; fully testable on any host.
+Real `DeepxAdapter.compile()` + `DrpaiAdapter.compile()` land in Stage 2
+(gated on `dxcom` wheel + DRP-AI TVM install; tracked by issues #58/#59).
+
 ### Added — portable `.alpmodel` model pipeline (Stages 1a–1c, 2026-05-26..27)
 
 End-to-end AI-model pipeline so one model is portable across NPU back-ends.
