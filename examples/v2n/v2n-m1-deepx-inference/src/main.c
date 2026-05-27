@@ -88,7 +88,7 @@ int main(void)
         .model_size  = sizeof k_placeholder_model,
         .format      = ALP_INFERENCE_MODEL_DXNN,
         .backend     = ALP_INFERENCE_BACKEND_DEEPX_DXM1,
-        .arena_bytes = 0u,  /* let the backend pick */
+        .arena_bytes = 0u, /* let the backend pick */
         .arena       = NULL,
     };
     alp_inference_t *inf = alp_inference_open(&cfg);
