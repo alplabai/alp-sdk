@@ -65,7 +65,7 @@ alp_status_t alp_model_select(const alp_model_t *m, const alp_model_select_env_t
     }
 
     int  best = -1, cpu = -1;
-    bool any_backend = false, any_fit = false;
+    bool any_backend = false;
 
     for (uint32_t i = 0; i < m->n_targets; ++i) {
         const alp_model_target_t *t  = &m->targets[i];
@@ -92,7 +92,6 @@ alp_status_t alp_model_select(const alp_model_t *m, const alp_model_select_env_t
         if (!_fits(t, env)) {
             continue;
         }
-        any_fit = true;
 
         if (best < 0) {
             best = (int)i;
@@ -124,8 +123,13 @@ alp_status_t alp_model_select(const alp_model_t *m, const alp_model_select_env_t
         }
     }
 
-    if (best < 0) {
-        best = cpu; /* CPU fallback */
+    /* CPU fallback applies only to AUTO (or an explicit CPU request).  An
+     * explicit NPU request that was available but did not fit must surface
+     * NO_FIT -- not silently run on CPU (spec: an explicit backend forces a
+     * specific NPU). */
+    if (best < 0 &&
+        (requested == ALP_INFERENCE_BACKEND_AUTO || requested == ALP_INFERENCE_BACKEND_CPU)) {
+        best = cpu;
     }
     if (best < 0) {
         return any_backend ? ALP_ERR_NO_FIT : ALP_ERR_NO_BACKEND;
