@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Doc-drift gate: fails a PR when customer docs reference SDK
+# identifiers that no longer exist in any SDK source layer (public +
+# internal headers, Kconfig, CMake, generators, schemas, Yocto), or
+# when a top-level docs/*.md isn't linked from the docs index.  Mirrors
+# scripts/check_doc_drift.py, which is runnable locally (see the
+# running-local-ci skill + docs/local-ci.md).
+name: pr-doc-drift
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'docs/**'
+      - 'include/**'
+      - 'scripts/check_doc_drift.py'
+      - '.github/workflows/pr-doc-drift.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'docs/**'
+      - 'include/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  doc-drift:
+    name: doc-drift · symbols + index
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Doc-drift check (dead symbols + docs index)
+        run: python3 scripts/check_doc_drift.py
