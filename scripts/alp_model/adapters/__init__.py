@@ -9,7 +9,7 @@ from pathlib import Path
 @dataclass
 class Blob:
     """One compiled artifact + the manifest metadata the writer needs."""
-    format: str                 # vela_tflite | tflite | drpai_dir | dxnn
+    format: str                 # vela_tflite | tflite | drpai_dir | deepx_dir | dxnn
     payload: bytes
     arena_bytes: int = 0
     compiler_version: str = ""

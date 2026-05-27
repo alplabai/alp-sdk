@@ -32,8 +32,16 @@ supplied — instead of silently skipping on toolchain-absent check alone.  The
 `calibration:`; `drpai` requires `spec:`; unknown backend keys are rejected).
 All path values are resolved relative to the `board.yaml` file before being
 passed to the adapter.  No vendor tools required; fully testable on any host.
-Real `DeepxAdapter.compile()` + `DrpaiAdapter.compile()` land in Stage 2
-(gated on `dxcom` wheel + DRP-AI TVM install; tracked by issues #58/#59).
+Real `DeepxAdapter.compile()` is now implemented: it shells out
+`dxcom -m <onnx> -c <config.json> -o <dir>` (confirmed against the licensed
+`dx-com` 2.3.0 wheel — `-o` is a directory, so the artifact is packaged as a tar,
+`blob_format: deepx_dir`; calibration is referenced from the JSON config, not a
+CLI flag), and is covered by a mocked shell-out test plus a real-tool version
+smoke gated behind `which("dxcom")`.  An end-to-end real-compile test
+additionally needs a DEEPX sample (ONNX + config + calibration).
+`DrpaiAdapter.compile()` (open DRP-AI TVM) and the Yocto `dx_rt` / DRP-AI runtime
+backends remain Stage 2 (gated on the DRP-AI TVM build / licensed `dx_rt` SDK +
+bench silicon; tracked by issues #58/#59).
 
 ### Added — portable `.alpmodel` model pipeline (Stages 1a–1c, 2026-05-26..27)
 
