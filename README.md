@@ -351,72 +351,75 @@ Alif Ensemble · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1.
 E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference boards · vendor HALs.
 
 ```text
-  ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐
-  │ E1M™ — Scalable AI Smarter Edge                                                          ⚡ Alp Lab │
-  └─────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+  │ E1M™ — Scalable AI Smarter Edge                                                   ⚡ Alp Lab │
+  └─────────────────────────────────────────────────────────────────────────────────────────────┘
 
-  ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────────────┐
-  │ AI Models &   │ ─► │  Train (off-device):  TensorFlow · PyTorch  →  .tflite / .onnx                 │
-  │ Pipeline      │    │                                                                                │
-  │               │    │  Compile (host):  alp model build  →  one fat .alpmodel package                │
-  │               │    │     per-backend blobs:  Vela (Ethos-U) · DRP-AI · dxcom (DEEPX) · CPU/TFLM     │
-  │               │    │                                                                                │
-  │               │    │  Model families:  classification · detection (YOLO v5/v8) · segmentation ·     │
-  │               │    │                   keyword-spotting · pose                                      │
-  │               │    │                                                                                │
-  │               │    │  →  the .alpmodel is loaded & dispatched at RUNTIME by the SDK (Inference ↓)   │
-  └───────────────┘    └────────────────────────────────────────────────────────────────────────────────┘
+  ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
+  │ AI Models &   │ ─► │  Train (off-device):  TensorFlow · PyTorch  →  .tflite / .onnx         │
+  │ Pipeline      │    │                                                                        │
+  │               │    │  Compile (host):  alp model build  →  one fat .alpmodel package        │
+  │               │    │     per-backend blobs:  Vela (Ethos-U) · DRP-AI · dxcom · CPU/TFLM     │
+  │               │    │                                                                        │
+  │               │    │  Model families:  classification · detection (YOLO v5/v8) ·            │
+  │               │    │                   segmentation · keyword-spotting · pose               │
+  │               │    │                                                                        │
+  │               │    │  →  the .alpmodel runs at RUNTIME via the SDK's Inference block ↓      │
+  └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
-  ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────────────┐
-  │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate.py              │
-  │ (v0.6)        │    │  west alp-build / alp-image / alp-flash / alp-clean · VS Code extension        │
-  │               │    │  validate_board_yaml.py · alp model build (.alpmodel) · program_eeprom.py      │
-  └───────────────┘    └────────────────────────────────────────────────────────────────────────────────┘
+  ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
+  │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate.py      │
+  │ (v0.6)        │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
+  │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
+  │               │    │  alp model build  →  .alpmodel   (the model-compile front-end)         │
+  └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
-  ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────────────┐
-  │ Alp SDK       │ ─► │  Peripherals                Audio                     Camera                   │
-  │ <alp/*.h>     │    │  ─ GPIO / I²C / SPI         ─ PDM in (mics)           ─ OV5640                 │
-  │               │    │  ─ UART / PWM / ADC         ─ I²S out + amp           ─ CAM_MUX                │
-  │               │    │  ─ CAN / RTC / WDT / USB    ─ TAS2563                                          │
-  │               │    │                                                                                │
-  │               │    │  Inference  ──  the .alpmodel runtime: this is where on-device AI runs         │
-  │               │    │  ─ alp_inference_open_alpmodel()  loads the fat .alpmodel package              │
-  │               │    │  ─ selects the matching blob:  silicon-ref + SRAM-fit + preferred_backend      │
-  │               │    │  ─ dispatches →  Ethos-U · DRP-AI3 · DEEPX DX-M1 · CPU / TFLM                  │
-  │               │    │                                                                                │
-  │               │    │  IoT / BLE                  Security                  Storage                  │
-  │               │    │  ─ Wi-Fi 6 · MQTT           ─ MbedTLS PSA Crypto      ─ LittleFS               │
-  │               │    │  ─ BLE 5.4                  ─ OPTIGA Trust M          ─ <alp/storage.h>        │
-  │               │    │                                                                                │
-  │               │    │  Display / GUI              HW Info                   DSP / Power              │
-  │               │    │  ─ SSD1306 / 1331           ─ EEPROM manifest         ─ alp_dsp_* FFT/FAC/IIR  │
-  │               │    │  ─ LVGL · GPU2D/Dave2D      ─ BOARD_ID ADC            ─ <alp/tmu.h>, alp/power │
-  │               │    │                                                                                │
-  │               │    │  Heterogeneous IPC (v0.6):  <alp/rpc.h> · <alp/system_ipc.h> · <alp/mproc.h>   │
-  │               │    │     framed RPMsg / OpenAMP · auto endpoint IDs · mailbox / shmem / hwsem       │
-  │               │    │  Vendor escape hatches:  <alp/ext/{alif, renesas, nxp, deepx}>                 │
-  │               │    │                                                                                │
-  │               │    │  ── 80+ Tier-1 chip drivers: lsm6dso, bmi323, bmp581, icm42670, ina236,        │
-  │               │    │        tmp112, tcal9538, rv3028c7, 24c128, cc3501e, ssd13xx, … + community     │
-  │               │    │  ── User libraries (board.yaml libraries:):  ETL · fmt · nlohmann_json ·       │
-  │               │    │        doctest · LVGL · MbedTLS · CMSIS-DSP · LittleFS                         │
-  └───────────────┘    └────────────────────────────────────────────────────────────────────────────────┘
+  ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
+  │ Alp SDK       │ ─► │  Peripherals             Audio                  Camera                 │
+  │ <alp/*.h>     │    │  ─ GPIO / I²C / SPI      ─ PDM in (mics)        ─ OV5640               │
+  │               │    │  ─ UART / PWM / ADC      ─ I²S out + amp        ─ CAM_MUX              │
+  │               │    │  ─ CAN / RTC / WDT / USB ─ TAS2563                                     │
+  │               │    │                                                                        │
+  │               │    │  Inference  ──  the .alpmodel runtime (where on-device AI runs)        │
+  │               │    │  ─ alp_inference_open_alpmodel()  loads the fat .alpmodel              │
+  │               │    │  ─ selects the blob: silicon-ref + SRAM-fit + preferred_backend        │
+  │               │    │  ─ dispatches →  Ethos-U · DRP-AI3 · DEEPX DX-M1 · CPU / TFLM          │
+  │               │    │                                                                        │
+  │               │    │  IoT / BLE               Security               Storage                │
+  │               │    │  ─ Wi-Fi 6 · MQTT        ─ MbedTLS PSA Crypto   ─ LittleFS             │
+  │               │    │  ─ BLE 5.4               ─ OPTIGA Trust M       ─ <alp/storage.h>      │
+  │               │    │                                                                        │
+  │               │    │  Display / GUI           HW Info                DSP / Power            │
+  │               │    │  ─ SSD1306 / 1331        ─ EEPROM manifest      ─ alp_dsp_* FFT/FAC/IIR│
+  │               │    │  ─ LVGL · GPU2D/Dave2D   ─ BOARD_ID ADC         ─ <alp/tmu.h> · power  │
+  │               │    │                                                                        │
+  │               │    │  Heterogeneous IPC:  <alp/rpc.h> · <alp/system_ipc.h> · <alp/mproc.h>  │
+  │               │    │     framed RPMsg/OpenAMP · auto endpoint IDs · mailbox/shmem/hwsem     │
+  │               │    │  Vendor escape hatches:  <alp/ext/{alif, renesas, nxp, deepx}>         │
+  │               │    │                                                                        │
+  │               │    │  ── 80+ Tier-1 chip drivers + Tier-2 community repo:                   │
+  │               │    │        lsm6dso, bmi323, bmp581, icm42670, ina236, tmp112,              │
+  │               │    │        tcal9538, rv3028c7, 24c128, cc3501e, ssd13xx, …                 │
+  │               │    │  ── User libraries (board.yaml libraries:):                            │
+  │               │    │        ETL · fmt · nlohmann_json · doctest · LVGL · MbedTLS ·          │
+  │               │    │        CMSIS-DSP · LittleFS                                            │
+  └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
-  ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────────────┐
-  │ OS            │ ─► │  Zephyr (M-class cores) · Yocto (A-class cores) · Bare-metal (no-RTOS)         │
-  │ (per-core     │    │  heterogeneous = peers on the same SoM (selected per-core in cores:)           │
-  │  slice)       │    │                                                                                │
-  └───────────────┘    └────────────────────────────────────────────────────────────────────────────────┘
+  ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
+  │ OS            │ ─► │  Zephyr (M-class cores) · Yocto (A-class cores) · Bare-metal           │
+  │ (per-core     │    │  heterogeneous = peers on the same SoM (per-core in cores:)            │
+  │  slice)       │    │                                                                        │
+  └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
-  ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────────────┐
-  │ Vendor SDK    │ ─► │  Alif Ensemble (AEN) · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1              │
-  │               │    │  NPU runtimes the SDK dispatches into:  Ethos-U/Vela · DRP-AI · DEEPX dx_rt    │
-  └───────────────┘    └────────────────────────────────────────────────────────────────────────────────┘
+  ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
+  │ Vendor SDK    │ ─► │  Alif Ensemble (AEN) · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1      │
+  │               │    │  NPU runtimes dispatched into: Ethos-U/Vela · DRP-AI · DEEPX dx_rt     │
+  └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
-  ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────────────┐
-  │ HW + HAL      │ ─► │  E1M (35×35 mm) + E1M-X (45×65 mm) SoMs  ·  NPU silicon                        │
-  │               │    │  E1M-EVK / E1M-X-EVK reference boards  +  vendor HALs                          │
-  └───────────────┘    └────────────────────────────────────────────────────────────────────────────────┘
+  ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
+  │ HW + HAL      │ ─► │  E1M (35×35 mm) + E1M-X (45×65 mm) SoMs  ·  NPU silicon                │
+  │               │    │  E1M-EVK / E1M-X-EVK reference boards  +  vendor HALs                  │
+  └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for the per-library
