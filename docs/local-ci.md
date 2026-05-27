@@ -179,6 +179,9 @@ python -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('metada
 
 # Loader smoke
 pytest tests/scripts/ -q
+
+# Doc drift: dead SDK-symbol refs in docs + docs-index integrity
+python scripts/check_doc_drift.py
 ```
 
 These run in seconds and catch 80% of the regressions that
