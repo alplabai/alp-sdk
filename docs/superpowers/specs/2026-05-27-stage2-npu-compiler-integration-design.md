@@ -47,7 +47,7 @@ models:
 
 `build_model` passes the matching `compile.<backend>` block to the adapter. Backends without a block fall to a `coverage: skipped` ("no compile config") rather than guessing.
 
-**Blob shape (TBD against a real compile):** both compilers emit **directories**, so the `.alpmodel` blob is likely a **tar of the output dir** (as the spec already anticipates for `drpai_dir`). DEEPX's exact output (single `.dxnn` vs a dir) must be confirmed from a real `dxcom` run; the manifest `blob_format` is `drpai_dir` / `dxnn` accordingly (extend with `deepx_dir` if needed).
+**Blob shape — CONFIRMED for DEEPX (real `dxcom` 2.3.0 run, 2026-05-27):** `dxcom -o <dir>` writes a *single* canonical artifact `<model_stem>.dxnn` (a self-describing flatbuffer: magic `DXNN` + a JSON header; `error.log` is the only other file, and `compiler.log` appears only with `--gen_log`). So the `.alpmodel` DEEPX blob is that **single `.dxnn` file's raw bytes**, `blob_format` **`dxnn`** — NOT a tar of the dir. The on-device `dx_rt` loads a `.dxnn` flatbuffer directly, and `alp_model_select`'s `_fmt_enum` already maps `"dxnn"` → `ALP_INFERENCE_MODEL_DXNN` (an over-wrapped tar would fall through to the `TFLITE` default and mis-decode). dxcom also requires **>15 GB host RAM** (aborts in PREPARE with `RamSizeError` below ~15 GiB). DRP-AI's Runtime-Model-Data is still a **directory** → `drpai_dir` (tar), TBD against a real TVM build.
 
 ## 4. Runtime side — `src/yocto/`
 
@@ -61,19 +61,19 @@ models:
 |---|---|
 | DeepxAdapter / DrpaiAdapter **probes + ONNX accept + docs** | **DONE** (this branch) — grounded, no tools needed. |
 | `models:` compile-config/calibration **plumbing** | Doable now (schema + build_model + adapter signature) — pure host Python. |
-| Real `DeepxAdapter.compile()` (dxcom) | **DONE (2026-05-27)** — implemented + validated against the real `dx-com` 2.3.0 wheel in a WSL py3.12 venv. Confirmed CLI `dxcom -m <onnx> -c <config.json> -o <OUTPUT_DIR>` (a directory → `blob_format: deepx_dir`, tar the dir); calibration is referenced from the JSON config (no CLI flag); version banner "DX-COM (DEEPX Compiler) 2.3.0". Covered by a mocked shell-out test + a `which("dxcom")` version smoke (passes against the real wheel). A full end-to-end real-compile test still needs a DEEPX sample (ONNX + config + calibration). |
+| Real `DeepxAdapter.compile()` (dxcom) | **DONE (2026-05-27)** — implemented + validated against the real `dx-com` 2.3.0 wheel in a WSL py3.12 venv. Confirmed CLI `dxcom -m <onnx> -c <config.json> -o <OUTPUT_DIR>`; the `-o` dir holds a single `<stem>.dxnn` → `blob_format: dxnn` (raw bytes, not a tar); calibration is referenced from the JSON config (no CLI flag); version banner "DX-COM (DEEPX Compiler) 2.3.0". **End-to-end real-compile DONE**: a tiny ONNX fixture (public, `test_deepx_real_compile_of_tiny_fixture`) + a real **yolo11n** (alp-sdk-internal, `test_deepx_yolo_internal.py`) both compile to a valid `.dxnn`; gated on `dxcom` + >15 GiB RAM. |
 | Real `DrpaiAdapter.compile()` (TVM) | Needs the **open DRP-AI TVM toolchain built** (source/Docker) + a sample ONNX. |
 | `dx_rt` / DRP-AI TVM **runtime backends** | Needs the **licensed dx_rt SDK** (DEEPX) + runtime libs + **bench DX-M1 / RZ-V2N silicon**. |
 
 ## 6. Build order (Stage-2 cycle)
 
 1. **Compile-config plumbing** (`models: compile:` schema + `build_model` + adapter `compile(..., opts)` signature) — host Python, no tools, fully testable.
-2. **Real `DeepxAdapter.compile()`** — **DONE (2026-05-27).** Installed the `dx-com` 2.3.0 wheel in a WSL py3.12 venv; confirmed `dxcom --help` (`-m`/`-c`/`-o`, `-o` is a dir); implemented the shell-out (tar the output dir, `blob_format: deepx_dir`); mocked test + `which("dxcom")` version smoke (mirrors the VelaAdapter pattern). Remaining: a full end-to-end real-compile test needs a DEEPX sample (ONNX + config + calibration).
+2. **Real `DeepxAdapter.compile()`** — **DONE (2026-05-27).** Installed the `dx-com` 2.3.0 wheel in a WSL py3.12 venv; confirmed `dxcom --help` (`-m`/`-c`/`-o`, `-o` is a dir); implemented the shell-out, extracting the single `<stem>.dxnn` (`blob_format: dxnn`, raw bytes); mocked test + a real-tool e2e (tiny ONNX fixture public + real yolo11n in alp-sdk-internal) + a `which("dxcom")` version smoke (mirrors the VelaAdapter pattern). Confirmed: `dxcom -o` emits one `<stem>.dxnn`; needs >15 GiB host RAM.
 3. **Real `DrpaiAdapter.compile()`** — build the open DRP-AI TVM toolchain, same pattern.
 4. **Yocto runtime backends** (`inference_deepx.cpp` real via dx_rt; new `inference_drpai.cpp`) + the `meta-alp` PCIe-driver / runtime-lib recipes — **bench-gated**.
 
 ## 7. Open questions
-- ~~Exact `dxcom` output structure (dir vs single `.dxnn`)~~ → **RESOLVED**: `dxcom -o` is a **directory** → `blob_format: deepx_dir`, tar the dir. The exact filenames inside (e.g. a `.dxnn` + metadata) await a real compile but don't change the tar-the-dir decision. The DRP-AI Runtime-Model-Data layout is still TBD (gated on the TVM build).
+- ~~Exact `dxcom` output structure (dir vs single `.dxnn`)~~ → **RESOLVED (real compile, 2026-05-27)**: `dxcom -o <dir>` emits a *single* `<stem>.dxnn` flatbuffer (magic `DXNN`) + an optional `compiler.log` (`--gen_log` only) → `blob_format` **`dxnn`**, raw bytes (the adapter extracts the lone `.dxnn`; it does NOT tar). Verified on a tiny CNN and a real yolo11n. The DRP-AI Runtime-Model-Data layout is still TBD (gated on the TVM build).
 - The DRP-AI TVM compile **entry command** (Python script under the repo) → confirm from `rzv_drp-ai_tvm/tutorials/`.
 - The `models: compile:` schema shape (per-backend block vs generic `compile_opts`) → decide in step 1.
 - `dx_rt` C++ API surface → needs the licensed DEEPX SDK docs.

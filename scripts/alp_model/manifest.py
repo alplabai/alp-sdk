@@ -35,7 +35,7 @@ class Tensor:
 class Target:
     backend: str            # cpu | ethos_u | drpai | deepx_dxm1
     silicon_ref: str        # e.g. "alif:ensemble:e8" or "*"
-    blob_format: str        # vela_tflite | drpai_dir | deepx_dir | dxnn | tflite
+    blob_format: str        # vela_tflite | drpai_dir | dxnn | tflite
     accel_config: str       # "" when N/A
     arena: int
     requires: dict[str, object]  # {"sram_kib": int, "op_features": list[str]}

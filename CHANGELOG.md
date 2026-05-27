@@ -33,12 +33,15 @@ supplied — instead of silently skipping on toolchain-absent check alone.  The
 All path values are resolved relative to the `board.yaml` file before being
 passed to the adapter.  No vendor tools required; fully testable on any host.
 Real `DeepxAdapter.compile()` is now implemented: it shells out
-`dxcom -m <onnx> -c <config.json> -o <dir>` (confirmed against the licensed
-`dx-com` 2.3.0 wheel — `-o` is a directory, so the artifact is packaged as a tar,
-`blob_format: deepx_dir`; calibration is referenced from the JSON config, not a
-CLI flag), and is covered by a mocked shell-out test plus a real-tool version
-smoke gated behind `which("dxcom")`.  An end-to-end real-compile test
-additionally needs a DEEPX sample (ONNX + config + calibration).
+`dxcom -m <onnx> -c <config.json> -o <dir>` and returns the single `<stem>.dxnn`
+the compile produces (`blob_format: dxnn`, raw bytes — matching the device-side
+`ALP_INFERENCE_MODEL_DXNN`).  Confirmed against the licensed `dx-com` 2.3.0 wheel
+by a real compile of both a tiny CNN and a real **yolo11n** object detector: the
+`-o` dir holds one `<stem>.dxnn` flatbuffer (`compiler.log` only with
+`--gen_log`); calibration is referenced from the JSON config, not a CLI flag;
+dxcom needs >15 GiB host RAM.  Covered by a mocked shell-out test, a
+`which("dxcom")` version smoke, and skipif-gated end-to-end real-compile tests —
+a hermetic tiny ONNX fixture (public) plus the real yolo11n (alp-sdk-internal).
 `DrpaiAdapter.compile()` (open DRP-AI TVM) and the Yocto `dx_rt` / DRP-AI runtime
 backends remain Stage 2 (gated on the DRP-AI TVM build / licensed `dx_rt` SDK +
 bench silicon; tracked by issues #58/#59).

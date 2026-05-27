@@ -37,7 +37,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -117,14 +119,48 @@ def _is_excluded(path: Path, excludes: tuple[str, ...]) -> bool:
     return False
 
 
+def _git_tracked_markdown(root: Path) -> list[Path] | None:
+    """Fast path: git-tracked ``*.md`` under `root` via ``git ls-files``.
+
+    Returns None when `root` is not a git work tree or git is unavailable, so
+    callers fall back to a filesystem walk."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--", "*.md"],
+            capture_output=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    rels = proc.stdout.decode("utf-8", "surrogateescape").split("\0")
+    return [root / r for r in rels if r]
+
+
 def discover_markdown(root: Path, excludes: tuple[str, ...]) -> list[Path]:
-    """Walk `root` recursively, return all .md files outside `excludes`."""
-    result: list[Path] = []
-    for p in root.rglob("*.md"):
-        rel = p.relative_to(root)
-        if _is_excluded(rel, excludes):
-            continue
-        result.append(p)
+    """Return all .md files under `root` outside `excludes`.
+
+    Prefers ``git ls-files`` -- the linter only checks *tracked* docs, and
+    walking the working tree (especially ``.git/`` + ``vendors/``) over a
+    9p/WSL mount took >10 min, which looked like the whole pytest suite
+    hanging; reading the git index is ~instant.  Falls back to an ``os.walk``
+    that prunes excluded dirs in place when `root` is not a git work tree with
+    tracked markdown (e.g. the unit tests' tmp dirs).  Either way the result is
+    filtered through `_is_excluded` so the exclude semantics are identical."""
+    tracked = _git_tracked_markdown(root)
+    if tracked:
+        candidates: list[Path] = tracked
+    else:
+        candidates = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            here = Path(dirpath)
+            # Drop excluded subdirs in place so os.walk won't descend into them.
+            dirnames[:] = [
+                d for d in dirnames
+                if not _is_excluded((here / d).relative_to(root), excludes)
+            ]
+            candidates.extend(here / fn for fn in filenames if fn.endswith(".md"))
+    result = [p for p in candidates if not _is_excluded(p.relative_to(root), excludes)]
     result.sort()
     return result
 
