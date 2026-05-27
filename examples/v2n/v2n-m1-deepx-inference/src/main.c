@@ -21,7 +21,7 @@
  *      `chips/deepx_dxm1/` host driver's `bring_up` sequencer.
  *   4. Wait for the PCIe link-up event.
  *   5. Open an inference handle through `<alp/inference.h>` with
- *      `backend = ALP_INFERENCE_BACKEND_DEEPX_DX` -- the
+ *      `backend = ALP_INFERENCE_BACKEND_DEEPX_DXM1` -- the
  *      Renesas-side Linux PCIe driver + the DEEPX runtime (both
  *      pulled in by the customer from `github.com/DEEPX-AI` per
  *      the §C.31 / §C.33 vendor-partnership trackers) handle the
@@ -87,7 +87,7 @@ int main(void)
         .model_data  = k_placeholder_model,
         .model_size  = sizeof k_placeholder_model,
         .format      = ALP_INFERENCE_MODEL_DXNN,
-        .backend     = ALP_INFERENCE_BACKEND_DEEPX_DX,
+        .backend     = ALP_INFERENCE_BACKEND_DEEPX_DXM1,
         .arena_bytes = 0u,  /* let the backend pick */
         .arena       = NULL,
     };

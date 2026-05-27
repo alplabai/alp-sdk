@@ -16,7 +16,7 @@
 #
 # v0.3 carve-out: the inference dispatcher (inference_yocto.c) is the
 # first real Yocto-side surface.  It overrides stub_backend.c's
-# inference symbols and routes ALP_INFERENCE_BACKEND_DEEPX_DX through
+# inference symbols and routes ALP_INFERENCE_BACKEND_DEEPX_DXM1 through
 # the DEEPX DX-M1 backend hook when ALP_SDK_USE_DEEPX_DXM1=ON.  The
 # routing is exercised today; the real dxnn_* call sites in
 # inference_deepx.cpp fill in v0.4 once the deepx-dxm1-host-sdk Yocto

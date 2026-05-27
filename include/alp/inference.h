@@ -76,7 +76,7 @@ typedef enum {
     ALP_INFERENCE_BACKEND_CPU      = 1,    /**< TFLM reference kernels. */
     ALP_INFERENCE_BACKEND_ETHOS_U  = 2,    /**< Arm Ethos-U via Vela (U55 / U65 / U85). */
     ALP_INFERENCE_BACKEND_DRPAI    = 3,    /**< Renesas DRP-AI3. */
-    ALP_INFERENCE_BACKEND_DEEPX_DX = 4     /**< DEEPX DX-M1. */
+    ALP_INFERENCE_BACKEND_DEEPX_DXM1 = 4   /**< DEEPX DX-M1 (canonical id; matches the .alpmodel `deepx_dxm1` backend string). */
 } alp_inference_backend_t;
 
 /** Model format.  Each backend supports a subset; AUTO picks based
