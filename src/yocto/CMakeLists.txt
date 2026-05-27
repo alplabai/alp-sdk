@@ -39,6 +39,8 @@ compiles without the SDK installed)."
 target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub_backend.c
     ${CMAKE_CURRENT_SOURCE_DIR}/inference_yocto.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/alp_model_loader.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/inference/alp_model_select.c
 )
 
 # Stop stub_backend.c from emitting its own alp_inference_* symbols --
