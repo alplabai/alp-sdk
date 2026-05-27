@@ -68,8 +68,9 @@ def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
         detail = "; ".join(f"{c.backend}:{c.status} ({c.reason})" for c in coverage)
         raise ValueError(f"no blob compiled for model '{name}' (.{src_fmt}); coverage: {detail}")
 
-    inputs, outputs = extract_io(source)
-    mft = Manifest(name=name, src_sha=hashlib.sha256(source.read_bytes()).digest(),
+    src_bytes = source.read_bytes()          # read once: shared by the sha + tensor-I/O
+    inputs, outputs = extract_io(source, raw=src_bytes)
+    mft = Manifest(name=name, src_sha=hashlib.sha256(src_bytes).digest(),
                    inputs=inputs, outputs=outputs,
                    targets=targets, coverage=coverage)
     out_path = out_dir / f"{name}.alpmodel"

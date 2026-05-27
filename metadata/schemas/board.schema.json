@@ -352,7 +352,7 @@
         "required": ["name", "source"],
         "properties": {
           "name":   { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
-          "source": { "type": "string", "description": "Path (relative to board.yaml) to the .onnx or .tflite source model." },
+          "source": { "type": "string", "description": "Path (relative to board.yaml) to the source model. `.tflite` compiles for CPU (TFLM) + Ethos-U (Vela) out of the box; `.onnx` requires a vendor toolchain (DRP-AI / DEEPX) on the build host and is otherwise recorded as a coverage skip." },
           "spec":   { "type": "string", "description": "Optional $ref to an external model spec for large/shared models." },
           "inputs": { "type": "array", "description": "Optional app-side input hints (e.g. layout)." }
         }

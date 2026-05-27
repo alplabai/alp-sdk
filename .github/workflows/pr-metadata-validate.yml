@@ -61,7 +61,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install Python deps
-        run: pip install -e ".[dev]"
+        # model-io adds tflite + flatbuffers so the .alpmodel tensor-I/O
+        # tests run here (they importorskip otherwise); cbor2 is a base dep.
+        run: pip install -e ".[dev,model-io]"
 
       - name: Validate every SoC file against the v1 schema
         run: python3 scripts/validate_metadata.py
