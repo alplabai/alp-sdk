@@ -61,7 +61,7 @@ models:
 |---|---|
 | DeepxAdapter / DrpaiAdapter **probes + ONNX accept + docs** | **DONE** (this branch) — grounded, no tools needed. |
 | `models:` compile-config/calibration **plumbing** | Doable now (schema + build_model + adapter signature) — pure host Python. |
-| Real `DeepxAdapter.compile()` (dxcom) | Needs the **licensed `dx-com` wheel installed** (in WSL; it's in Downloads) + a sample ONNX + config + calibration. |
+| Real `DeepxAdapter.compile()` (dxcom) | Needs the **licensed `dx-com` wheel installed** (host/WSL, Linux py3.8–3.12) + a sample ONNX + config + calibration. |
 | Real `DrpaiAdapter.compile()` (TVM) | Needs the **open DRP-AI TVM toolchain built** (source/Docker) + a sample ONNX. |
 | `dx_rt` / DRP-AI TVM **runtime backends** | Needs the **licensed dx_rt SDK** (DEEPX) + runtime libs + **bench DX-M1 / RZ-V2N silicon**. |
 
