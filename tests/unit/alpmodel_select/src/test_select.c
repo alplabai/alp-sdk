@@ -199,3 +199,25 @@ ZTEST(alp_model_select, test_null_env_and_out_return_inval)
     zassert_equal(alp_model_select(&m, NULL, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_ERR_INVAL);
     zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, NULL), ALP_ERR_INVAL);
 }
+
+ZTEST(alp_model_select, test_explicit_cpu_request)
+{
+    /* Explicit CPU: picks the cpu blob directly; with no cpu blob the
+     * deliberate asymmetry is NO_BACKEND (not NOT_FOUND, which is reserved
+     * for an absent explicitly-requested NPU). */
+    static const uint8_t b0[4] = { 1 }, b1[4] = { 2 };
+    alp_model_t          m = { 0 };
+    m.n_targets            = 2;
+    m.targets[0]           = T("ethos_u", "alif:ensemble:e7", "vela_tflite", 0, 0, b0, 4);
+    m.targets[1]           = T("cpu", "*", "tflite", 0, 0, b1, 4);
+    const char               *avail[] = { "alif:ensemble:e7" };
+    alp_model_select_env_t    env     = { .soc_ref         = "alif:ensemble:e7",
+                                          .avail_silicon   = avail,
+                                          .n_avail_silicon = 1 };
+    alp_model_select_result_t r       = { 0 };
+    zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_CPU, &r), ALP_OK);
+    zassert_equal(r.backend, ALP_INFERENCE_BACKEND_CPU);
+
+    m.n_targets = 1; /* drop the cpu blob -> only ethos_u remains */
+    zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_CPU, &r), ALP_ERR_NO_BACKEND);
+}

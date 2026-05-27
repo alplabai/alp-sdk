@@ -11,7 +11,8 @@
 #include "alp/peripheral.h"
 
 /** Device facts the selection runs against (injectable so the algorithm
- *  is unit-tested without a live SoC). */
+ *  is unit-tested without a live SoC).  @c avail_silicon must be non-NULL
+ *  when @c n_avail_silicon > 0. */
 typedef struct {
     const char        *soc_ref;       /* ALP_SOC_REF_STR */
     const char *const *avail_silicon; /* silicon refs runnable on this build
