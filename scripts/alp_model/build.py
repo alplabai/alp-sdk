@@ -31,11 +31,13 @@ def _src_format(source: Path) -> str:
 
 def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
                 metadata_root: Path,
-                adapters: list[CompilerAdapter] | None = None) -> Path:
+                adapters: list[CompilerAdapter] | None = None,
+                compile_opts: dict[str, dict] | None = None) -> Path:
     registry = list(_ADAPTERS if adapters is None else adapters)
     by_backend = {a.backend: a for a in registry}
     specs = resolve_targets(sku, metadata_root=metadata_root)
     src_fmt = _src_format(source)
+    opts_by_backend = compile_opts or {}
 
     out_dir.mkdir(parents=True, exist_ok=True)
     targets: list[Target] = []
@@ -47,6 +49,12 @@ def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
             coverage.append(Coverage(spec.backend, spec.accel_config, "skipped",
                                      f"no compiler adapter for {spec.backend}"))
             continue
+        backend_opts = opts_by_backend.get(spec.backend)
+        if adapter.requires_compile_opts and not backend_opts:
+            coverage.append(Coverage(spec.backend, spec.accel_config, "skipped",
+                                     f"no compile config for {spec.backend} "
+                                     f"(add models[].compile.{spec.backend} to board.yaml)"))
+            continue
         if not adapter.is_available():
             coverage.append(Coverage(spec.backend, spec.accel_config, "skipped",
                                      f"{spec.backend} compiler not installed"))
@@ -55,7 +63,7 @@ def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
             coverage.append(Coverage(spec.backend, spec.accel_config, "incompatible",
                                      f"{spec.backend} does not accept .{src_fmt}"))
             continue
-        blob = adapter.compile(source, accel_config=spec.accel_config, out_dir=out_dir)
+        blob = adapter.compile(source, accel_config=spec.accel_config, out_dir=out_dir, opts=backend_opts)
         targets.append(Target(
             backend=spec.backend, silicon_ref=spec.silicon_ref,
             blob_format=blob.format, accel_config=spec.accel_config,

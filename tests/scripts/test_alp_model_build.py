@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from alp_model.adapters import CompilerAdapter
+from alp_model.adapters import CompilerAdapter, Blob
 from alp_model.adapters.cpu import CpuAdapter
 from alp_model.build import build_model
 from alp_model.package import read_package
@@ -69,7 +69,8 @@ def test_build_model_records_unavailable_tool_as_skip(tmp_path):
 
 def test_build_model_v2m101_records_drpai_and_deepx_skips(tmp_path, monkeypatch):
     # With the default registry, V2M101 has drpai (host) + deepx_dxm1 (on-module) targets;
-    # both proprietary tools are absent -> coverage skips; cpu still compiles.
+    # both require compile opts which aren't provided -> "no compile config" skips;
+    # cpu still compiles.
     monkeypatch.delenv("ALP_DRPAI_TVM_HOME", raising=False)
     monkeypatch.delenv("ALP_DEEPX_SDK_HOME", raising=False)
     monkeypatch.setattr("alp_model.adapters.deepx.shutil.which", lambda n: None)
@@ -82,3 +83,39 @@ def test_build_model_v2m101_records_drpai_and_deepx_skips(tmp_path, monkeypatch)
     assert "drpai" in skipped
     assert "deepx_dxm1" in skipped              # resolver folded it in (Task 1)
     assert any(t.backend == "cpu" for t in mft.targets)
+
+
+def test_build_model_skips_backend_missing_compile_config(tmp_path):
+    # An adapter that requires compile opts + none provided -> coverage skip, compile() never called.
+    # Use V2M101 (has drpai target); tflite source so CpuAdapter produces a blob.
+    class _NeedsOpts(CompilerAdapter):
+        backend = "drpai"
+        requires_compile_opts = True
+        def is_available(self): return True
+        def accepts(self, src_format): return src_format == "tflite"
+        def compile(self, source, *, accel_config, out_dir, opts=None):
+            raise AssertionError("must not compile without opts")
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    out = build_model(sku="E1M-V2M101", name="demo", source=src, out_dir=tmp_path,
+                      metadata_root=_META, adapters=[CpuAdapter(), _NeedsOpts()])
+    mft, _ = read_package(out.read_bytes())
+    skips = [c for c in mft.coverage if c.backend == "drpai"]
+    assert skips and all(c.status == "skipped" and "no compile config" in c.reason for c in skips)
+
+
+def test_build_model_passes_compile_opts_to_adapter(tmp_path):
+    # Use V2M101 (has drpai target); tflite source so CpuAdapter also produces a blob.
+    seen = {}
+    class _Capture(CompilerAdapter):
+        backend = "drpai"
+        requires_compile_opts = True
+        def is_available(self): return True
+        def accepts(self, src_format): return src_format == "tflite"
+        def compile(self, source, *, accel_config, out_dir, opts=None):
+            seen["opts"] = opts
+            return Blob(format="drpai_dir", payload=b"RT", arena_bytes=0)
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    build_model(sku="E1M-V2M101", name="demo", source=src, out_dir=tmp_path,
+                metadata_root=_META, adapters=[CpuAdapter(), _Capture()],
+                compile_opts={"drpai": {"spec": "/abs/p.yaml"}})
+    assert seen["opts"] == {"spec": "/abs/p.yaml"}
