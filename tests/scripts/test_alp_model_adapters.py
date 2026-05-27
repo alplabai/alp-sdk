@@ -189,9 +189,10 @@ def test_deepx_compile_rejects_missing_config(tmp_path):
                                opts={"calibration": "calib/"})
 
 
-def test_deepx_compile_invokes_dxcom_and_tars_output_dir(tmp_path, monkeypatch):
-    import io
-    import tarfile
+def test_deepx_compile_invokes_dxcom_and_returns_dxnn(tmp_path, monkeypatch):
+    # A successful dxcom compile writes a single <stem>.dxnn into the -o dir; the
+    # adapter returns its raw bytes (blob_format 'dxnn'), NOT a tar of the dir --
+    # 'dxnn' is what the device _fmt_enum maps to ALP_INFERENCE_MODEL_DXNN.
     src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
     cfg = tmp_path / "m.deepx.json"; cfg.write_text("{}", encoding="utf-8")
     seen = {}
@@ -206,8 +207,8 @@ def test_deepx_compile_invokes_dxcom_and_tars_output_dir(tmp_path, monkeypatch):
         seen["cmd"] = cmd                            # the compile invocation
         out = Path(cmd[cmd.index("-o") + 1])         # dxcom writes into the -o dir
         out.mkdir(parents=True, exist_ok=True)
-        (out / "model.dxnn").write_bytes(b"DXNN-BLOB")
-        (out / "meta.json").write_text("{}", encoding="utf-8")
+        (out / f"{src.stem}.dxnn").write_bytes(b"DXNN\x08\x00\x00\x00{}")   # canonical artifact
+        (out / "compiler.log").write_text("ok", encoding="utf-8")          # stray log to ignore
 
         class _C:
             returncode = 0
@@ -221,17 +222,103 @@ def test_deepx_compile_invokes_dxcom_and_tars_output_dir(tmp_path, monkeypatch):
     assert seen["cmd"][:3] == ["dxcom", "-m", str(src)]
     assert "-c" in seen["cmd"] and str(cfg) in seen["cmd"]
     assert "-o" in seen["cmd"]
-    assert blob.format == "deepx_dir"
+    assert blob.format == "dxnn"
+    assert blob.payload.startswith(b"DXNN")          # raw .dxnn flatbuffer, not a tar
     assert blob.compiler_version == "DX-COM 2.3.0"
-    names = tarfile.open(fileobj=io.BytesIO(blob.payload)).getnames()
-    assert "model.dxnn" in names and "meta.json" in names
+
+
+def test_deepx_compile_raises_when_no_dxnn_produced(tmp_path, monkeypatch):
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
+    cfg = tmp_path / "m.deepx.json"; cfg.write_text("{}", encoding="utf-8")
+
+    def fake_run(cmd, capture_output, text, timeout):
+        if "-v" in cmd:
+            class _V:
+                returncode = 0
+                stdout = "DX-COM (DEEPX Compiler) 2.3.0"
+                stderr = ""
+            return _V()
+        Path(cmd[cmd.index("-o") + 1]).mkdir(parents=True, exist_ok=True)   # "succeeds", no .dxnn
+
+        class _C:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return _C()
+
+    monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", fake_run)
+    with pytest.raises(RuntimeError, match="no .dxnn"):
+        DeepxAdapter().compile(src, accel_config="", out_dir=tmp_path, opts={"config": str(cfg)})
 
 
 @pytest.mark.skipif(shutil.which("dxcom") is None, reason="dxcom (dx-com wheel) not installed")
 def test_deepx_real_dxcom_version_smoke():
     # Against the REAL installed dx-com wheel (e.g. a WSL venv): the adapter's
-    # version probe reads dxcom's banner. A full real-compile test additionally
-    # needs a sample ONNX + config + calibration (DEEPX-provided) -- a follow-up.
+    # version probe reads dxcom's banner. The full real-compile e2e lives in
+    # test_deepx_real_compile_of_tiny_fixture (public) + the alp-sdk-internal
+    # yolo11n test.
     from alp_model.adapters.deepx import _dxcom_version
     v = _dxcom_version()
     assert v.startswith("DX-COM") and "2.3" in v
+
+
+def _host_mem_avail_gib() -> float:
+    """Available host RAM in GiB (Linux /proc/meminfo); 0.0 if unknown."""
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / (1024 * 1024)
+    except OSError:
+        pass
+    return 0.0
+
+
+# dx-com 2.3.0 aborts in PREPARE with a RamSizeError below ~15 GiB host RAM.
+_DXCOM_MIN_RAM_GIB = 15.5
+
+
+@pytest.mark.skipif(shutil.which("dxcom") is None, reason="dxcom (dx-com wheel) not installed")
+@pytest.mark.skipif(_host_mem_avail_gib() < _DXCOM_MIN_RAM_GIB,
+                    reason="dxcom needs >15 GiB host RAM (raise WSL via .wslconfig)")
+def test_deepx_real_compile_of_tiny_fixture(tmp_path):
+    """Compile the committed tiny ONNX with the REAL dxcom -> a single .dxnn.
+
+    Runs only where the licensed dx-com wheel is installed (e.g. a WSL py3.12
+    venv: `~/dxcom-venv/bin/python -m pytest tests/scripts/test_alp_model_adapters.py`)
+    AND host RAM clears dxcom's ~15 GiB floor; skips otherwise (always in cloud
+    CI). Mirrors test_vela_real_compile_of_tiny_fixture. The real-yolo11n
+    counterpart lives in tests/scripts/test_deepx_yolo_internal.py (gated on the
+    alp-sdk-internal sibling)."""
+    import json
+    import numpy as np
+    from PIL import Image          # Pillow ships as a dx-com wheel dependency
+
+    onnx = _ROOT / "tests/fixtures/models/tiny_cnn.onnx"
+    calib = tmp_path / "calib"
+    calib.mkdir()
+    rng = np.random.default_rng(0)
+    for i in range(4):
+        Image.fromarray(rng.integers(0, 256, (224, 224, 3), dtype=np.uint8)).save(calib / f"{i}.png")
+
+    cfg = tmp_path / "tiny.json"
+    cfg.write_text(json.dumps({
+        "inputs": {"input": [1, 3, 224, 224]},
+        "calibration_method": "minmax",
+        "calibration_num": 4,
+        "default_loader": {
+            "dataset_path": str(calib),
+            "file_extensions": ["png"],
+            "preprocessings": [
+                {"resize": {"width": 224, "height": 224}},
+                {"normalize": {"mean": [0, 0, 0], "std": [255, 255, 255]}},
+                {"transpose": {"axis": [2, 0, 1]}},      # HWC->CHW for the NCHW model
+            ],
+        },
+    }), encoding="utf-8")
+
+    blob = DeepxAdapter().compile(onnx, accel_config="", out_dir=tmp_path,
+                                  opts={"config": str(cfg)})
+    assert blob.format == "dxnn"
+    assert blob.payload[:4] == b"DXNN"        # self-describing .dxnn flatbuffer magic
+    assert blob.compiler_version.startswith("DX-COM")

@@ -3,25 +3,30 @@
 
 DEEPX's compiler is the proprietary, license-gated `dx-com` Python wheel
 (console script `dxcom`; `dx-com` 2.3.0 verified -- Linux x86_64, CPython 3.12,
-ONNX frontend, Target Hardware: M1). It compiles an ONNX model into DEEPX NPU
-model data:
+ONNX frontend, Target Hardware: M1). It compiles an ONNX model into a DEEPX NPU
+model binary:
     dxcom -m <model.onnx> -c <config.json> -o <output_dir>
 with a per-model JSON config (the calibration dataset is referenced from inside
 that config -- `dxcom` has no separate calibration CLI flag). `-o` is a
-*directory*, so the compiled artifact is packaged as a tar (`blob_format`
-`deepx_dir`). The wheel is not redistributable, so it is NOT bundled;
-is_available() is True only when `dxcom` is on PATH or ALP_DEEPX_SDK_HOME points
-at an install. The per-model config + calibration come from board.yaml
-`models[].compile.deepx_dxm1` (threaded in as `opts`). The dx_rt A55/PCIe
-*runtime* backend (`src/yocto/inference_deepx.cpp`) is Stage 2 step 4
-(bench-gated)."""
+*directory*, but a successful compile writes exactly one canonical artifact into
+it: ``<model_stem>.dxnn`` -- a self-describing flatbuffer (magic ``DXNN`` + a
+JSON header). That single ``.dxnn`` is what the on-device `dx_rt` runtime loads,
+so the adapter returns its raw bytes with `blob_format` ``dxnn`` (matching the
+device-side ALP_INFERENCE_MODEL_DXNN that `alp_model_select` decodes), NOT a tar
+of the directory. (Confirmed against a real `dxcom` 2.3.0 run, 2026-05-27: a
+tiny CNN and a real yolo11n both emit a single ``<stem>.dxnn``; `compiler.log`
+only appears with `--gen_log`. dxcom also requires >15 GB host RAM.)
+
+The wheel is not redistributable, so it is NOT bundled; is_available() is True
+only when `dxcom` is on PATH or ALP_DEEPX_SDK_HOME points at an install. The
+per-model config + calibration come from board.yaml `models[].compile.deepx_dxm1`
+(threaded in as `opts`). The dx_rt A55/PCIe *runtime* backend
+(`src/yocto/inference_deepx.cpp`) is Stage 2 step 4 (bench-gated)."""
 from __future__ import annotations
-import io
 import os
 import re
 import shutil
 import subprocess
-import tarfile
 from pathlib import Path
 from . import CompilerAdapter, Blob
 
@@ -38,15 +43,6 @@ def _dxcom_version() -> str:
         return "dxcom"
     m = re.search(r"DX-COM[^\d]*(\d+\.\d+\.\d+)", proc.stdout + proc.stderr)
     return f"DX-COM {m.group(1)}" if m else "dxcom"
-
-
-def _tar_dir(d: Path) -> bytes:
-    """Pack a directory tree into tar bytes (the .alpmodel blob for a dir output)."""
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w") as tar:
-        for path in sorted(p for p in d.rglob("*") if p.is_file()):
-            tar.add(path, arcname=path.relative_to(d).as_posix())
-    return buf.getvalue()
 
 
 class DeepxAdapter(CompilerAdapter):
@@ -78,7 +74,11 @@ class DeepxAdapter(CompilerAdapter):
             raise RuntimeError(f"dxcom timed out after {exc.timeout}s") from exc
         if proc.returncode != 0:
             raise RuntimeError(f"dxcom failed: {proc.stderr.strip() or proc.stdout.strip()}")
-        if not any(p.is_file() for p in dst.rglob("*")):
-            raise RuntimeError(f"dxcom produced no output in {dst}")
-        return Blob(format="deepx_dir", payload=_tar_dir(dst),
+        artifacts = sorted(dst.glob("*.dxnn"))
+        if not artifacts:
+            raise RuntimeError(f"dxcom produced no .dxnn in {dst}")
+        # A single-input compile emits exactly one <stem>.dxnn; prefer the
+        # model-stem-named artifact if dxcom ever emits more than one.
+        canonical = next((p for p in artifacts if p.stem == source.stem), artifacts[0])
+        return Blob(format="dxnn", payload=canonical.read_bytes(),
                     compiler_version=_dxcom_version())
