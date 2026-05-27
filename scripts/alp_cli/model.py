@@ -11,6 +11,18 @@ from alp_model.build import build_model
 _DEFAULT_META = Path(__file__).resolve().parents[2] / "metadata"
 
 
+def _resolve_compile(block: dict | None, base: Path) -> dict | None:
+    """Resolve every path value in each per-backend compile block to an absolute
+    path relative to the board.yaml dir (all current opts values are paths)."""
+    if not block:
+        return None
+    return {
+        backend: {k: str((base / v).resolve()) if isinstance(v, str) else v
+                  for k, v in (opts or {}).items()}
+        for backend, opts in block.items()
+    }
+
+
 @click.group(name="model", help="AI model compilation & packaging.")
 def model_group() -> None:
     pass
@@ -34,5 +46,6 @@ def build_cmd(board_path: Path, out_dir: Path, metadata_root: Path) -> None:
     for m in models:
         source = (base / m["source"]).resolve()
         out = build_model(sku=sku, name=m["name"], source=source,
-                          out_dir=out_dir, metadata_root=metadata_root)
+                          out_dir=out_dir, metadata_root=metadata_root,
+                          compile_opts=_resolve_compile(m.get("compile"), base))
         click.echo(f"built {out}")

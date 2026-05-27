@@ -54,7 +54,8 @@ def test_deepx_adapter_detect_and_skip(monkeypatch):
     assert a.backend == "deepx_dxm1"
     assert a.is_available() is False
     assert a.accepts("onnx") and not a.accepts("tflite") and not a.accepts("pt")
-    with pytest.raises(NotImplementedError):
+    # compile() is real now (Stage 2); with no per-model config it raises RuntimeError.
+    with pytest.raises(RuntimeError, match="config"):
         a.compile(Path("x.onnx"), accel_config="", out_dir=Path("."))
 
 
@@ -148,3 +149,89 @@ def test_vela_real_compile_of_tiny_fixture(tmp_path):
     assert blob.format == "vela_tflite"
     assert blob.payload[4:8] == b"TFL3"        # vela emits a .tflite flatbuffer
     assert blob.compiler_version.startswith("vela")
+
+
+def test_cpu_and_vela_do_not_require_compile_opts():
+    assert CpuAdapter().requires_compile_opts is False
+    assert VelaAdapter().requires_compile_opts is False
+
+
+def test_drpai_and_deepx_require_compile_opts():
+    assert DrpaiAdapter().requires_compile_opts is True
+    assert DeepxAdapter().requires_compile_opts is True
+
+
+def test_cpu_compile_accepts_opts_kwarg(tmp_path):
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    blob = CpuAdapter().compile(src, accel_config="", out_dir=tmp_path, opts=None)
+    assert blob.payload == b"TFL3-X"
+
+
+def test_vela_compile_accepts_opts_kwarg(tmp_path, monkeypatch):
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    def fake_run(cmd, capture_output, text, timeout):
+        (tmp_path / "m_vela.tflite").write_bytes(b"VELA-OUT")
+        class _R: returncode = 0; stdout = ""; stderr = ""
+        return _R()
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run", fake_run)
+    blob = VelaAdapter().compile(src, accel_config="ethos-u55-128",
+                                 out_dir=tmp_path, opts={"ignored": True})
+    assert blob.payload == b"VELA-OUT"
+
+
+# --- DEEPX dxcom compile (Stage 2 step 2) ---------------------------------
+
+def test_deepx_compile_rejects_missing_config(tmp_path):
+    # opts present but no `config` key -> RuntimeError (dxcom needs -c).
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX")
+    with pytest.raises(RuntimeError, match="config"):
+        DeepxAdapter().compile(src, accel_config="", out_dir=tmp_path,
+                               opts={"calibration": "calib/"})
+
+
+def test_deepx_compile_invokes_dxcom_and_tars_output_dir(tmp_path, monkeypatch):
+    import io
+    import tarfile
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
+    cfg = tmp_path / "m.deepx.json"; cfg.write_text("{}", encoding="utf-8")
+    seen = {}
+
+    def fake_run(cmd, capture_output, text, timeout):
+        if "-v" in cmd:                              # _dxcom_version() probe
+            class _V:
+                returncode = 0
+                stdout = "DX-COM (DEEPX Compiler) 2.3.0\nTarget Hardware: M1"
+                stderr = ""
+            return _V()
+        seen["cmd"] = cmd                            # the compile invocation
+        out = Path(cmd[cmd.index("-o") + 1])         # dxcom writes into the -o dir
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "model.dxnn").write_bytes(b"DXNN-BLOB")
+        (out / "meta.json").write_text("{}", encoding="utf-8")
+
+        class _C:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return _C()
+
+    monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", fake_run)
+    blob = DeepxAdapter().compile(src, accel_config="", out_dir=tmp_path,
+                                  opts={"config": str(cfg)})
+    assert seen["cmd"][:3] == ["dxcom", "-m", str(src)]
+    assert "-c" in seen["cmd"] and str(cfg) in seen["cmd"]
+    assert "-o" in seen["cmd"]
+    assert blob.format == "deepx_dir"
+    assert blob.compiler_version == "DX-COM 2.3.0"
+    names = tarfile.open(fileobj=io.BytesIO(blob.payload)).getnames()
+    assert "model.dxnn" in names and "meta.json" in names
+
+
+@pytest.mark.skipif(shutil.which("dxcom") is None, reason="dxcom (dx-com wheel) not installed")
+def test_deepx_real_dxcom_version_smoke():
+    # Against the REAL installed dx-com wheel (e.g. a WSL venv): the adapter's
+    # version probe reads dxcom's banner. A full real-compile test additionally
+    # needs a sample ONNX + config + calibration (DEEPX-provided) -- a follow-up.
+    from alp_model.adapters.deepx import _dxcom_version
+    v = _dxcom_version()
+    assert v.startswith("DX-COM") and "2.3" in v

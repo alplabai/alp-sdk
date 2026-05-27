@@ -61,19 +61,19 @@ models:
 |---|---|
 | DeepxAdapter / DrpaiAdapter **probes + ONNX accept + docs** | **DONE** (this branch) — grounded, no tools needed. |
 | `models:` compile-config/calibration **plumbing** | Doable now (schema + build_model + adapter signature) — pure host Python. |
-| Real `DeepxAdapter.compile()` (dxcom) | Needs the **licensed `dx-com` wheel installed** (host/WSL, Linux py3.8–3.12) + a sample ONNX + config + calibration. |
+| Real `DeepxAdapter.compile()` (dxcom) | **DONE (2026-05-27)** — implemented + validated against the real `dx-com` 2.3.0 wheel in a WSL py3.12 venv. Confirmed CLI `dxcom -m <onnx> -c <config.json> -o <OUTPUT_DIR>` (a directory → `blob_format: deepx_dir`, tar the dir); calibration is referenced from the JSON config (no CLI flag); version banner "DX-COM (DEEPX Compiler) 2.3.0". Covered by a mocked shell-out test + a `which("dxcom")` version smoke (passes against the real wheel). A full end-to-end real-compile test still needs a DEEPX sample (ONNX + config + calibration). |
 | Real `DrpaiAdapter.compile()` (TVM) | Needs the **open DRP-AI TVM toolchain built** (source/Docker) + a sample ONNX. |
 | `dx_rt` / DRP-AI TVM **runtime backends** | Needs the **licensed dx_rt SDK** (DEEPX) + runtime libs + **bench DX-M1 / RZ-V2N silicon**. |
 
 ## 6. Build order (Stage-2 cycle)
 
 1. **Compile-config plumbing** (`models: compile:` schema + `build_model` + adapter `compile(..., opts)` signature) — host Python, no tools, fully testable.
-2. **Real `DeepxAdapter.compile()`** — install the `dx-com` wheel in WSL, confirm `dxcom --help` + the output structure, implement the shell-out (skip-gated + a real test behind `which("dxcom")`), settle `blob_format`. Mirror the VelaAdapter mocked-test + skipif-real-test pattern.
+2. **Real `DeepxAdapter.compile()`** — **DONE (2026-05-27).** Installed the `dx-com` 2.3.0 wheel in a WSL py3.12 venv; confirmed `dxcom --help` (`-m`/`-c`/`-o`, `-o` is a dir); implemented the shell-out (tar the output dir, `blob_format: deepx_dir`); mocked test + `which("dxcom")` version smoke (mirrors the VelaAdapter pattern). Remaining: a full end-to-end real-compile test needs a DEEPX sample (ONNX + config + calibration).
 3. **Real `DrpaiAdapter.compile()`** — build the open DRP-AI TVM toolchain, same pattern.
 4. **Yocto runtime backends** (`inference_deepx.cpp` real via dx_rt; new `inference_drpai.cpp`) + the `meta-alp` PCIe-driver / runtime-lib recipes — **bench-gated**.
 
 ## 7. Open questions
-- Exact `dxcom` output structure (dir vs single `.dxnn`) + the DRP-AI Runtime-Model-Data layout → confirm from real compiles; fixes the `blob_format` + tar decision.
+- ~~Exact `dxcom` output structure (dir vs single `.dxnn`)~~ → **RESOLVED**: `dxcom -o` is a **directory** → `blob_format: deepx_dir`, tar the dir. The exact filenames inside (e.g. a `.dxnn` + metadata) await a real compile but don't change the tar-the-dir decision. The DRP-AI Runtime-Model-Data layout is still TBD (gated on the TVM build).
 - The DRP-AI TVM compile **entry command** (Python script under the repo) → confirm from `rzv_drp-ai_tvm/tutorials/`.
 - The `models: compile:` schema shape (per-backend block vs generic `compile_opts`) → decide in step 1.
 - `dx_rt` C++ API surface → needs the licensed DEEPX SDK docs.

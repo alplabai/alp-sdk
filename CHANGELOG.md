@@ -20,6 +20,29 @@ low-maintenance and free of build-identifier false positives.  Runnable locally
 Catches exactly the stale-reference class the `.alpmodel` / `DEEPX_DX →
 DEEPX_DXM1` rename left behind.
 
+### Added — `.alpmodel` Stage 2 compile-config plumbing (2026-05-27)
+
+Board.yaml `models[].compile:` block threads per-backend compile configuration
+(DRP-AI spec path, DEEPX JSON config + calibration dir) from `board.yaml` into
+`alp model build`.  Backends that need a per-model config (`drpai`, `deepx_dxm1`)
+record a `coverage: skipped ("no compile config")` entry when no block is
+supplied — instead of silently skipping on toolchain-absent check alone.  The
+`compile:` block is validated by `metadata/schemas/board.schema.json`
+(`additionalProperties: false`; `deepx_dxm1` requires both `config:` and
+`calibration:`; `drpai` requires `spec:`; unknown backend keys are rejected).
+All path values are resolved relative to the `board.yaml` file before being
+passed to the adapter.  No vendor tools required; fully testable on any host.
+Real `DeepxAdapter.compile()` is now implemented: it shells out
+`dxcom -m <onnx> -c <config.json> -o <dir>` (confirmed against the licensed
+`dx-com` 2.3.0 wheel — `-o` is a directory, so the artifact is packaged as a tar,
+`blob_format: deepx_dir`; calibration is referenced from the JSON config, not a
+CLI flag), and is covered by a mocked shell-out test plus a real-tool version
+smoke gated behind `which("dxcom")`.  An end-to-end real-compile test
+additionally needs a DEEPX sample (ONNX + config + calibration).
+`DrpaiAdapter.compile()` (open DRP-AI TVM) and the Yocto `dx_rt` / DRP-AI runtime
+backends remain Stage 2 (gated on the DRP-AI TVM build / licensed `dx_rt` SDK +
+bench silicon; tracked by issues #58/#59).
+
 ### Added — portable `.alpmodel` model pipeline (Stages 1a–1c, 2026-05-26..27)
 
 End-to-end AI-model pipeline so one model is portable across NPU back-ends.
