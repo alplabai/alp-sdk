@@ -25,14 +25,27 @@ extern void      alp_internal_set_last_error(alp_status_t s);
  * are added when their backend is compiled in. */
 static const char *_avail_silicon[] = {
     ALP_SOC_REF_STR,
-#if defined(CONFIG_ALP_SDK_USE_DEEPX_DXM1)
+/* The on-module DEEPX DX-M1 (V2N-M1) becomes selectable when its backend
+     * is compiled in -- via the Zephyr Kconfig or the Yocto CMake option. */
+#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_DEEPX_DXM1) || defined(ALP_SDK_USE_DEEPX_DXM1)
     "deepx:dx:m1",
 #endif
 };
 
 alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts)
 {
-    if (opts == NULL || opts->data == NULL || opts->size == 0u) {
+    if (opts == NULL) {
+        SET_ERR(ALP_ERR_INVAL);
+        return NULL;
+    }
+    if (opts->data == NULL) {
+        /* path-based load (opts->path) is not implemented yet; surface a
+         * diagnosable NOSUPPORT rather than an INVAL that looks like a
+         * malformed opts struct. */
+        SET_ERR(ALP_ERR_NOSUPPORT);
+        return NULL;
+    }
+    if (opts->size == 0u) {
         SET_ERR(ALP_ERR_INVAL);
         return NULL;
     }
