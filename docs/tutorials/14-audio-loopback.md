@@ -78,10 +78,10 @@ What's happening:
 - `alp_audio_out_write` queues the block for DMA-driven
   playback.  Returns OK as soon as the block is queued; the
   DMA does the actual push.
-- DSP runs inside `alp_audio_in_read` -- the DC-block stage
-  is applied to the block before it lands in `pcm`.  See
-  `<alp/dsp.h>` for the chain config API; default chain is
-  DC-block only.
+- The audio backend's built-in DC-block runs inside
+  `alp_audio_in_read`, so the block is already DC-corrected
+  when it lands in `pcm`.  For extra filtering, run the block
+  through a standalone `<alp/dsp.h>` chain (see section 5).
 
 ## 3. Software volume
 
@@ -137,25 +137,41 @@ speaker.
 
 ## 5. Adding DSP stages
 
-To swap the default DC-block for a multi-stage chain (DC-block
-+ low-pass filter + AGC):
+`<alp/dsp.h>` exposes a **standalone** chain: build it from a
+list of @ref alp_dsp_stage_t descriptors, then run captured
+sample blocks through it.  The stage kinds are
+`ALP_DSP_STAGE_FIR`, `ALP_DSP_STAGE_IIR`, `ALP_DSP_STAGE_WINDOW`,
+and `ALP_DSP_STAGE_FFT`.  A DC-block + low-pass voice band is a
+single-section biquad IIR (high-pass at ~80 Hz) followed by an
+FIR low-pass -- both run on the captured samples:
 
 ```c
 #include "alp/dsp.h"
 
+/* coeffs are b0,b1,b2,a1,a2 per biquad section; lpf_taps is an FIR kernel */
 alp_dsp_stage_t stages[] = {
-    { .kind = ALP_DSP_STAGE_DC_BLOCK },
+    { .kind = ALP_DSP_STAGE_IIR,
+      .u.iir = { .coeff_format = ALP_DSP_COEFF_FORMAT_F32,
+                 .n_sections = 1u, .coeffs = hpf_biquad } },
     { .kind = ALP_DSP_STAGE_FIR,
-      .fir  = { .coeffs = lpf_taps, .n_taps = 32 } },
-    { .kind = ALP_DSP_STAGE_AGC,
-      .agc  = { .target_dbfs = -12, .attack_ms = 50 } },
+      .u.fir = { .coeff_format = ALP_DSP_COEFF_FORMAT_F32,
+                 .n_taps = 32u, .taps = lpf_taps } },
 };
-alp_dsp_chain_t *chain = alp_dsp_chain_open(stages, 3);
-
-alp_audio_in_attach_chain(mic, chain);
+alp_dsp_chain_t *chain = alp_dsp_chain_open(stages, 2u);
 ```
 
-The chain runs inside the `alp_audio_in_read` block path.
+The chain is applied to each captured block (it does not attach
+to the stream itself): read with @ref alp_audio_in_read, then
+filter the buffer in place before pushing it to the DAC.
+
+```c
+int16_t buf[256];
+size_t  got = 0u, out_n = 0u;
+alp_audio_in_read(mic, buf, 256u, &got, 100u);
+alp_dsp_chain_apply_samples(chain, buf, got, buf, 256u, &out_n);
+alp_audio_out_write(spk, buf, out_n, NULL, 100u);
+```
+
 CMSIS-DSP backend handles the FIR + biquad math when
 `ALP_HAS_CMSIS_DSP=1`; portable-C fallback always available.
 
