@@ -58,7 +58,10 @@ typedef enum {
         -9, /**< Hardware does not exist on this silicon (silicon-absent). Paired with ALP_BACKEND_AVAILABLE() == 0 at compile time. */
     ALP_ERR_NOT_IMPLEMENTED =
         -10, /**< Backend exists for this silicon but the implementation is a tracked stub (planned, not yet wired). Consult the linked @par Tracking: GitHub issue on the stub backend. */
-    ALP_ERR_VERSION = -11 /**< Format/container version is newer than this reader supports. */
+    ALP_ERR_VERSION    = -11, /**< Format/container version is newer than this reader supports. */
+    ALP_ERR_NO_BACKEND = -12, /**< .alpmodel has no blob for any backend available on this SoM (and no CPU fallback). */
+    ALP_ERR_NO_FIT     = -13, /**< A backend matched but no blob fits the device NPU envelope (e.g. arena SRAM too small), and no CPU fallback. */
+    ALP_ERR_NOT_FOUND  = -14  /**< An explicitly-requested backend is absent from the package. */
 } alp_status_t;
 
 /**
