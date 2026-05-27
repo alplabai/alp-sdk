@@ -20,6 +20,7 @@ from . import CompilerAdapter, Blob
 
 class DeepxAdapter(CompilerAdapter):
     backend = "deepx_dxm1"
+    requires_compile_opts = True
 
     def is_available(self) -> bool:
         if shutil.which("dxcom"):            # the dx-com wheel's console script
@@ -30,5 +31,5 @@ class DeepxAdapter(CompilerAdapter):
     def accepts(self, src_format: str) -> bool:
         return src_format == "onnx"          # dxcom is an ONNX frontend
 
-    def compile(self, source: Path, *, accel_config: str, out_dir: Path) -> Blob:
+    def compile(self, source: Path, *, accel_config: str, out_dir: Path, opts: dict | None = None) -> Blob:
         raise NotImplementedError("real DEEPX (dxcom) compile lands in Stage 2")

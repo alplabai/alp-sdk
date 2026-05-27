@@ -17,6 +17,7 @@ from . import CompilerAdapter, Blob
 
 class DrpaiAdapter(CompilerAdapter):
     backend = "drpai"
+    requires_compile_opts = True
 
     def is_available(self) -> bool:
         root = os.environ.get("ALP_DRPAI_TVM_HOME")
@@ -25,5 +26,5 @@ class DrpaiAdapter(CompilerAdapter):
     def accepts(self, src_format: str) -> bool:
         return src_format == "onnx"          # DRP-AI TVM ingests ONNX
 
-    def compile(self, source: Path, *, accel_config: str, out_dir: Path) -> Blob:
+    def compile(self, source: Path, *, accel_config: str, out_dir: Path, opts: dict | None = None) -> Blob:
         raise NotImplementedError("real DRP-AI (TVM) compile lands in Stage 2")

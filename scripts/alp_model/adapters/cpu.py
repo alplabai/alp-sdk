@@ -14,7 +14,7 @@ class CpuAdapter(CompilerAdapter):
     def accepts(self, src_format: str) -> bool:
         return src_format == "tflite"
 
-    def compile(self, source: Path, *, accel_config: str, out_dir: Path) -> Blob:
+    def compile(self, source: Path, *, accel_config: str, out_dir: Path, opts: dict | None = None) -> Blob:
         payload = source.read_bytes()
         return Blob(format="tflite", payload=payload, arena_bytes=0,
                     compiler_version="passthrough")

@@ -148,3 +148,31 @@ def test_vela_real_compile_of_tiny_fixture(tmp_path):
     assert blob.format == "vela_tflite"
     assert blob.payload[4:8] == b"TFL3"        # vela emits a .tflite flatbuffer
     assert blob.compiler_version.startswith("vela")
+
+
+def test_cpu_and_vela_do_not_require_compile_opts():
+    assert CpuAdapter().requires_compile_opts is False
+    assert VelaAdapter().requires_compile_opts is False
+
+
+def test_drpai_and_deepx_require_compile_opts():
+    assert DrpaiAdapter().requires_compile_opts is True
+    assert DeepxAdapter().requires_compile_opts is True
+
+
+def test_cpu_compile_accepts_opts_kwarg(tmp_path):
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    blob = CpuAdapter().compile(src, accel_config="", out_dir=tmp_path, opts=None)
+    assert blob.payload == b"TFL3-X"
+
+
+def test_vela_compile_accepts_opts_kwarg(tmp_path, monkeypatch):
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    def fake_run(cmd, capture_output, text, timeout):
+        (tmp_path / "m_vela.tflite").write_bytes(b"VELA-OUT")
+        class _R: returncode = 0; stdout = ""; stderr = ""
+        return _R()
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run", fake_run)
+    blob = VelaAdapter().compile(src, accel_config="ethos-u55-128",
+                                 out_dir=tmp_path, opts={"ignored": True})
+    assert blob.payload == b"VELA-OUT"

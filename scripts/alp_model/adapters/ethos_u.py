@@ -60,7 +60,7 @@ class VelaAdapter(CompilerAdapter):
     def accepts(self, src_format: str) -> bool:
         return src_format == "tflite"
 
-    def compile(self, source: Path, *, accel_config: str, out_dir: Path) -> Blob:
+    def compile(self, source: Path, *, accel_config: str, out_dir: Path, opts: dict | None = None) -> Blob:
         out_dir.mkdir(parents=True, exist_ok=True)
         cmd = ["vela", str(source), "--accelerator-config", accel_config,
                "--output-dir", str(out_dir)]
