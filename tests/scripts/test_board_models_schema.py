@@ -25,3 +25,25 @@ def test_model_entry_rejects_backend_field():
     # silicon-determined: a customer must NOT pin a backend in board.yaml
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate([{"name": "p", "source": "m.tflite", "backend": "ethos_u"}], _MODELS_SCHEMA)
+
+
+def test_models_compile_block_validates():
+    jsonschema.validate([{
+        "name": "person_detect", "source": "models/p.onnx",
+        "compile": {
+            "deepx_dxm1": {"config": "models/p.deepx.json", "calibration": "models/calib/"},
+            "drpai": {"spec": "models/p.drpai.yaml"},
+        },
+    }], _MODELS_SCHEMA)
+
+
+def test_models_compile_rejects_unknown_backend_key():
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate([{"name": "p", "source": "m.onnx",
+                              "compile": {"vela": {"x": 1}}}], _MODELS_SCHEMA)
+
+
+def test_models_compile_deepx_requires_config_and_calibration():
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate([{"name": "p", "source": "m.onnx",
+                              "compile": {"deepx_dxm1": {"config": "c.json"}}}], _MODELS_SCHEMA)

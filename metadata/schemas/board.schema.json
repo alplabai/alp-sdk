@@ -354,7 +354,31 @@
           "name":   { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
           "source": { "type": "string", "description": "Path (relative to board.yaml) to the source model. `.tflite` compiles for CPU (TFLM) + Ethos-U (Vela) out of the box; `.onnx` requires a vendor toolchain (DRP-AI / DEEPX) on the build host and is otherwise recorded as a coverage skip." },
           "spec":   { "type": "string", "description": "Optional $ref to an external model spec for large/shared models." },
-          "inputs": { "type": "array", "description": "Optional app-side input hints (e.g. layout)." }
+          "inputs": { "type": "array", "description": "Optional app-side input hints (e.g. layout)." },
+          "compile": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Per-backend compile configuration for NPU toolchains that need a per-model config + calibration the SDK cannot derive (DRP-AI, DEEPX). Keys are backend ids; a backend with no block here is recorded as a coverage skip (\"no compile config\") rather than guessed. Paths are relative to this board.yaml.",
+            "properties": {
+              "deepx_dxm1": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["config", "calibration"],
+                "properties": {
+                  "config":      { "type": "string", "description": "Path to the dxcom JSON config (per-model quantization/compile settings)." },
+                  "calibration": { "type": "string", "description": "Path to the calibration dataset directory for post-training quantization." }
+                }
+              },
+              "drpai": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["spec"],
+                "properties": {
+                  "spec": { "type": "string", "description": "Path to the DRP-AI TVM compile spec (model input/quant configuration)." }
+                }
+              }
+            }
+          }
         }
       }
     }
