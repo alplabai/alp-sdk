@@ -206,7 +206,7 @@ each machine pulls the matching userspace runtime via the
 
 Customer apps pick the active backend per-handle at runtime via
 `alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or
-an explicit `ETHOS_U / DRPAI / DEEPX_DX` value for benchmarking).
+an explicit `ETHOS_U / DRPAI / DEEPX_DXM1` value for benchmarking).
 There is NO build-time pin -- silicon is the source of truth.
 
 ### DRP-AI userspace headers

@@ -33,7 +33,7 @@ Real `do_compile` against the DEEPX runtime arrives in the v0.4
 cycle, gated behind the CMake option `ALP_SDK_USE_DEEPX_DXM1=ON`.
 When ON the backend hook calls `dxnn_*` entry points for real;
 when OFF (the default) the SDK dispatcher's auto-resolve skips
-DEEPX_DX and the V2N-M1 host falls back to CPU.
+DEEPX_DXM1 and the V2N-M1 host falls back to CPU.
 
 ## Where to get the DEEPX software
 
