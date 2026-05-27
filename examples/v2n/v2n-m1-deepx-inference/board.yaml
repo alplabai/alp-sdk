@@ -18,7 +18,7 @@ cores:
     # block (drp_ai: true + deepx_dx: true).  DEEPX dispatches via the
     # Linux PCIe driver -- under Zephyr the dispatcher emits a
     # NOSUPPORT-stub.  Real DEEPX inference happens on the customer's
-    # Yocto image via dx_rt; alp_inference_open(.backend=DEEPX_DX, ...)
+    # Yocto image via dx_rt; alp_inference_open(.backend=DEEPX_DXM1, ...)
     # picks it per-handle.
 
 chips:

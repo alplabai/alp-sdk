@@ -182,7 +182,7 @@ hasn't been measured.
 
 | Surface | Header(s) | Cores / backing | Status |
 |---------|-----------|-----------------|--------|
-| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr) + A (Yocto); registry over `tflm` / `ethos_u` / `drpai` / `deepx` | surface + backend registry present; per-NPU dispatch **untested** |
+| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr) + A (Yocto); registry over `tflm` / `ethos_u` / `drpai` / `deepx_dxm1` | surface + backend registry present; per-NPU dispatch **untested** |
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
 | 2D graphics | `gpu2d.h` | M (Alif Dave2D / GPU2D) + SW fallback | surface present; **untested** |
