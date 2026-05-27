@@ -138,6 +138,9 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
     harvest_tree(root / "scripts", "*.py")
     # Config schemas -- board.yaml field names.
     harvest_tree(root / "metadata" / "schemas", "*.json")
+    # Yocto layer -- MACHINE / image variables (ALP_BOOT_DEVICE, ...).
+    for pat in ("*.conf", "*.bb", "*.bbappend", "*.inc"):
+        harvest_tree(root / "meta-alp-sdk", pat)
     return symbols
 
 

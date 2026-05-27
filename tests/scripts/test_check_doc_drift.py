@@ -150,3 +150,13 @@ def test_forward_looking_plan_doc_excluded(tmp_path):
     _scaffold(tmp_path, docs={"cc3501e-integration-plan.md": "proposed `alp_sdio_open`\n"})
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_yocto_machine_var_is_known(tmp_path):
+    # A Yocto MACHINE variable defined in meta-alp-sdk is a real identifier.
+    _scaffold(tmp_path, docs={"build-yocto-v2n.md": "Set `ALP_BOOT_DEVICE`.\n"})
+    conf = tmp_path / "meta-alp-sdk" / "conf" / "machine"
+    conf.mkdir(parents=True)
+    (conf / "e1m.conf").write_text('ALP_BOOT_DEVICE = "mmc"\n', encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
