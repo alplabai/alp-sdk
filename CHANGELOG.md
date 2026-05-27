@@ -7,6 +7,22 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — portable `.alpmodel` model pipeline (Stages 1a–1c, 2026-05-26..27)
+
+End-to-end AI-model pipeline so one model is portable across NPU back-ends.
+**Host side:** `alp model build` (`scripts/alp_model/`) compiles a source model
+for every backend the SoM declares into a **fat multi-backend `.alpmodel`**
+package (CBOR manifest + per-backend blobs + a capability `requires` envelope).
+**On-device:** `alp_inference_open_alpmodel()` + a pure selection engine
+(`src/backends/inference/alp_model_select.*`) picks the matching blob by
+silicon-ref + SRAM-fit (`ALP_SOC_NPU_ARENA_SRAM_KIB`) + `preferred_backend`
+tiebreak — `ALP_ERR_NO_FIT` / `ALP_ERR_NO_BACKEND` / `ALP_ERR_NOT_FOUND`
+otherwise — then delegates to the existing backend registry.  On-device reader
+gated behind `CONFIG_ALP_SDK_MODEL_READER`.  Renamed the backend enum
+`ALP_INFERENCE_BACKEND_DEEPX_DX` → `…DEEPX_DXM1`.  Real proprietary DRP-AI /
+DEEPX compiles + Yocto runtime backends = Stage 2 (gated on licensed tools +
+bench; tracked by issues #58/#59).
+
 ### Added — per-bridge firmware release versions (2026-05-26)
 
 The on-module **GD32** and **CC3501E** bridge firmwares each gained an
