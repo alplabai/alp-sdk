@@ -41,7 +41,7 @@ def test_drpai_adapter_detect_and_skip(monkeypatch):
     assert issubclass(DrpaiAdapter, CompilerAdapter)
     assert a.backend == "drpai"
     assert a.is_available() is False
-    assert a.accepts("onnx") and a.accepts("tflite") and not a.accepts("pt")
+    assert a.accepts("onnx") and not a.accepts("tflite") and not a.accepts("pt")
     with pytest.raises(NotImplementedError):
         a.compile(Path("x.onnx"), accel_config="", out_dir=Path("."))
 
@@ -53,9 +53,9 @@ def test_deepx_adapter_detect_and_skip(monkeypatch):
     assert issubclass(DeepxAdapter, CompilerAdapter)
     assert a.backend == "deepx_dxm1"
     assert a.is_available() is False
-    assert a.accepts("tflite") and a.accepts("onnx") and not a.accepts("pt")
+    assert a.accepts("onnx") and not a.accepts("tflite") and not a.accepts("pt")
     with pytest.raises(NotImplementedError):
-        a.compile(Path("x.tflite"), accel_config="", out_dir=Path("."))
+        a.compile(Path("x.onnx"), accel_config="", out_dir=Path("."))
 
 
 def test_vela_adapter_backend_and_accepts():
