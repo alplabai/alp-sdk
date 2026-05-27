@@ -178,9 +178,18 @@ if (alp_hw_info_assert_matches_build(&info,
 }
 ```
 
-The macro reads the build's compile-time `ALP_SDK_SOM_SKU` +
-`ALP_SDK_SOM_HW_REV` (emitted by `scripts/alp_project.py` from
-`board.yaml`) and compares against the runtime manifest.  Saves
+For the common "this firmware was built for exactly this SKU"
+check, pass the build's compile-time `ALP_HW_BUILD_SOM_SKU` +
+`ALP_HW_BUILD_SOM_HW_REV` (emitted by `scripts/alp_project.py`
+from `board.yaml`) as the expected values:
+
+```c
+alp_hw_info_assert_matches_build(&info,
+                                 ALP_HW_BUILD_SOM_SKU,
+                                 ALP_HW_BUILD_SOM_HW_REV);
+```
+
+It compares them against the runtime manifest.  Saves
 debug time for "why isn't this image booting" -- it's usually
 SKU mismatch when the build target was changed but the binary
 wasn't reflashed.
@@ -199,10 +208,14 @@ a dedicated ADC channel:
 
 The firmware at boot reads the ADC + bins to a rev; if the
 binned rev disagrees with the EEPROM's `hw_rev`, that's a
-hard fault (mismatched manifest vs hardware).
+hard fault (mismatched manifest vs hardware).  This cross-check
+is built into `alp_hw_info_read` itself -- it returns
+`ALP_ERR_IO` (rather than `ALP_OK`) when the BOARD_ID divider
+reading doesn't match the manifest's `hw_rev`:
 
 ```c
-if (alp_hw_info_verify_board_id_adc(&info) != ALP_OK) {
+alp_hw_info_t info;
+if (alp_hw_info_read(&info) == ALP_ERR_IO) {
     /* EEPROM says r1 but the divider reads as r2 -- somebody
      * mis-programmed the manifest or mis-stuffed the board. */
     k_panic();

@@ -77,7 +77,7 @@ SKUs only.  See [`docs/soms/v2n-m1.md`](soms/v2n-m1.md).
 
 **DRP-AI3** -- Renesas's on-die NPU on the RZ/V2N silicon, exposed
 through the SDK's `<alp/inference.h>` dispatcher when
-`ALP_SDK_INFERENCE_DRPAI=y`.
+`ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y`.
 
 **DSP chain** -- A composable pipeline of filter / window / FFT
 stages under `<alp/dsp.h>` (standalone) and

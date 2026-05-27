@@ -32,7 +32,7 @@ follow-up work.
 ## Per-peripheral breakdown inside `peripheral/`
 
 `tests/zephyr/peripheral/src/` was a single `main.c` (902 LOC) with one
-`ZTEST_SUITE(alp_peripheral, ...)` and 82 ZTESTs; split per peripheral
+peripheral-wide `ZTEST_SUITE` and 82 ZTESTs; split per peripheral
 in §C.16.  Every `*.c` sibling now registers its ZTESTs against the
 same suite.  Counts by `<alp/X.h>` surface (matched on `test_<peri>_`
 prefix):

@@ -53,7 +53,7 @@ not in this repo).
 | Module enable     | Header P12 (short to disable) | Drives `MODULE_EN` low → SoM stays off.           |
 | Antenna           | U.FL connector                | The on-module Wi-Fi 6 + BLE 5.4 combo connects here. |
 
-## I²C bus map (`alp_i2c0`)
+## I²C bus map (`alp-i2c0`)
 
 The EVK shares **one I²C bus** (`I2C0.SCL` / `I2C0.SDA`, pulled up
 4.7 kΩ to `+VIO`) across the on-board sensors, two TCAL9538 I/O
@@ -82,7 +82,7 @@ schematic (UG-E1M-001) and exposed as `EVK_I2C_ADDR_*` macros in
 > I²C bus switch — addressless, controlled via dedicated pins
 > (`PCIE0_I2C.EN` from E1M `IO10`, `PCIE0_I2C.SEL` from the PCIe
 > TCAL9538).  When the mux is disabled, the downstream PCIe-side
-> I²C bus is isolated from `alp_i2c0` entirely.
+> I²C bus is isolated from `alp-i2c0` entirely.
 
 The I²C bus is shared between **sensors and current monitors** — when
 profiling power, code that reads ICM-42670-P at high rate will
@@ -196,9 +196,9 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 ## What this means for the SDK
 
 - v0.1 ships an **EVK overlay** under `tests/zephyr/peripheral/boards/`
-  that wires `alp_i2c0`, the `alp,pin-array` (rotary encoder, RGB
-  LED, IO_EXP.INT), and `alp_uart0` to EVK pins via the SoM's
-  pinmux.  It targets `alp_e1m_evk_aen` (AEN-family build); V2N
+  that wires the `alp-i2c0` alias, the `alp,pin-array` (rotary encoder,
+  RGB LED, IO_EXP.INT), and the `alp-uart0` alias to EVK pins via the
+  SoM's pinmux.  It targets `alp_e1m_evk_aen` (AEN-family build); V2N
   builds add their own overlay in v0.2.
 - v0.1 does **not** ship full board-level sensor drivers.  The
   ICM-42670-P / BMI323 / BMP581 / TCAL9538 drivers land as part of

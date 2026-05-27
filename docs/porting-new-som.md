@@ -543,14 +543,15 @@ CONFIG_ALP_PERIPHERAL_I2C=y
 The `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E9=y` line is the headline
 result — the loader successfully resolved the new SoM through the
 new SoC JSON.  Once `scripts/alp_project.py` is wired to mint
-`CONFIG_ALP_SOC_ALIF_ENSEMBLE_E9` for the new ref (one row in the
+`CONFIG_ALP_SOC_<NEW_REF>` for the new ref (one row in the
 `_SILICON_TO_KCONFIG` table at the top of that file) the swap-test
-is green.
+is green.  (The existing Alif rows run `ALP_SOC_ALIF_ENSEMBLE_E3`
+through `E8`; a brand-new SoC adds its own `ALP_SOC_*` token.)
 
 > **Caveat (current state, 2026-05-18).**  The
 > `_SILICON_TO_KCONFIG` dictionary in `scripts/alp_project.py` is
 > baked inline; adding a new SoC ref means adding one line there
-> AND a matching `config ALP_SOC_ALIF_ENSEMBLE_E9` stanza in
+> AND a matching `config ALP_SOC_<NEW_REF>` stanza in
 > `zephyr/Kconfig`.  Until those two rows land, the loader will
 > emit a blank Kconfig fragment for the new SoC; this is
 > expected, and is the only code-touching step in the otherwise
