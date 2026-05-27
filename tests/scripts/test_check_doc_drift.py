@@ -122,3 +122,31 @@ def test_subdir_doc_not_required_in_index(tmp_path):
     _scaffold(tmp_path, docs={"soms/v2n.md": "fine\n"})
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_kconfig_symbol_is_known(tmp_path):
+    # A symbol defined only in Kconfig (not a header) is real, not drift.
+    _scaffold(tmp_path, docs={"glossary.md": "Enable `ALP_SDK_FANCY_BACKEND`.\n"})
+    (tmp_path / "zephyr").mkdir()
+    (tmp_path / "zephyr" / "Kconfig").write_text(
+        "config ALP_SDK_FANCY_BACKEND\n\tbool\n", encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_generator_emitted_symbol_is_known(tmp_path):
+    # A board-name / CMake-helper emitted by scripts/alp_project.py is real.
+    _scaffold(tmp_path, docs={"board-config.md": "CMake calls `alp_hw_info_build`.\n"})
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "alp_project.py").write_text(
+        "BOARD_FN = 'alp_hw_info_build'\n", encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_forward_looking_plan_doc_excluded(tmp_path):
+    # cc3501e-integration-plan.md documents a proposed API by intent;
+    # a "dead" symbol there must NOT fail the scan.  (It is still index-linked.)
+    _scaffold(tmp_path, docs={"cc3501e-integration-plan.md": "proposed `alp_sdio_open`\n"})
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr

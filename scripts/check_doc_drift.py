@@ -10,16 +10,27 @@ Two independent checks:
 
   (a) Dead-symbol references.  Every `ALP_[A-Z0-9_]+` and
       `alp_[a-z0-9_]+` token mentioned in a customer doc must exist as
-      a token somewhere under include/alp/**/*.h.  A token that appears
-      in the docs but in NO public header is "dead" -- almost always a
-      rename the docs missed (e.g. the DEEPX_DX -> DEEPX_DXM1 /
-      .alpmodel migration left ALP_..._DEEPX_DX references behind).
+      a token in one of the SDK's authoritative sources of truth:
+        * C-API public headers    include/**/*.h
+        * Kconfig config symbols   zephyr/Kconfig[.alp-libraries]
+        * generated identifiers    scripts/alp_project.py + scripts/gen_*.py
+          (board target names like alp_e1m_evk_*, the alp_hw_info_build
+           CMake helper, ALP_HW_BUILD_* / ALP_SOC_* macros)
+      A token that appears in the docs but in NONE of these is "dead" --
+      almost always a rename the docs missed (e.g. the DEEPX_DX ->
+      DEEPX_DXM1 / .alpmodel migration left ALP_..._DEEPX_DX behind).
+      Harvesting from the real sources (rather than a hand-kept
+      allowlist) keeps the gate low-maintenance and free of
+      build-identifier false positives.
 
       Scanned surfaces (customer-facing only):
         README.md, docs/*.md (top-level), docs/tutorials/**,
         docs/soms/**, docs/boards/**
-      Deliberately NOT scanned (historical / generated / internal):
-        CHANGELOG.md, docs/superpowers/**, docs/abi/**, docs/adr/**
+      Deliberately NOT scanned:
+        * historical / generated / internal: CHANGELOG.md,
+          docs/superpowers/**, docs/abi/**, docs/adr/**
+        * forward-looking design/proposal docs that document not-yet-
+          shipped APIs by intent (see _SCAN_EXCLUDE_DOCS)
 
   (b) Docs-index integrity.  Every top-level docs/*.md (except
       README.md itself) must be linked from docs/README.md.  This is
@@ -45,29 +56,88 @@ from typing import Optional
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-# Tokens that look like dead symbols but are legitimately absent from
-# include/alp/**/*.h.  Keep this list SHORT and justify every entry --
-# a growing allowlist usually means the gate is catching real drift
-# that belongs fixed in the docs instead.
-_ALLOWLIST: set[str] = set()
-# (populated during the run-and-fix phase with justified entries)
+# Last-resort allowlist for tokens that are deliberately not real
+# symbols -- e.g. illustrative placeholders in docs.  Real identifiers
+# come from collect_known_symbols(); a growing allowlist usually means
+# the gate is catching genuine drift that belongs fixed in the docs
+# instead.  Justify every entry.
+_ALLOWLIST: set[str] = {
+    # The canonical ABI symbol-versioning *example* in release-policy.md
+    # ("alp_foo" gets a "@2" version node -> alp_foo_v2): not real APIs.
+    "alp_foo",
+    "alp_foo_v2",
+}
 
 # Identifier shapes we treat as SDK symbols.
 _SYMBOL_RE = re.compile(r"\b(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b")
 
+# Generated Zephyr board target names (alp_e1m_*, alp_e1m_x_*).  These are
+# derived from SoM SKUs by scripts/alp_project.py at build time, so no
+# static list exists to harvest -- match the naming convention instead.
+# Lowercase alp_e1m_* is exclusively board names (the C-API uses the
+# unprefixed E1M_* / ALP_E1M_* macro families), so this is unambiguous.
+_BOARD_NAME_RE = re.compile(r"alp_e1m_[a-z0-9_]+$")
+
 # docs/ subdirectories scanned recursively for dead symbols.
 _DOC_SUBDIRS = ("tutorials", "soms", "boards")
 
+# Top-level docs/*.md that are forward-looking design / proposal docs:
+# they document APIs that don't exist yet *by intent*, so they are
+# excluded from the dead-symbol scan (like docs/superpowers/).  They
+# REMAIN required in the docs index (check b) -- they are real docs.
+_SCAN_EXCLUDE_DOCS = {
+    "cc3501e-integration-plan.md",   # CC3501E integration *plan* (proposed API)
+    "v0.6-tbd-and-assumptions.md",   # in-flight v0.6 TBDs / assumptions
+}
 
-def collect_header_symbols(include_root: pathlib.Path) -> set[str]:
-    """Return every ALP_*/alp_* token appearing anywhere under
-    include_root/**/*.h.  Existence in ANY header = the symbol is real."""
+
+def collect_known_symbols(root: pathlib.Path) -> set[str]:
+    """Return every ALP_*/alp_* token that appears in ANY of the SDK's
+    authoritative source layers.  An identifier is real (not drift) if it
+    exists in any of these -- a doc reference present in NO source layer
+    is what we flag.  Tests and docs are deliberately NOT sources of truth.
+
+    Source layers harvested (each bounded to a specific directory -- never
+    a whole-tree walk, so this stays fast and skips build artefacts):
+      * C-API headers           include/**/*.h, src/**/*.h
+      * Kconfig config symbols   zephyr/Kconfig[.alp-libraries]
+      * CMake options / helpers  CMakeLists.txt, src/**/CMakeLists.txt,
+                                 cmake/**/*.cmake  (ALP_OS, ALP_SDK*,
+                                 alp_hw_info_build, ...)
+      * generators / tooling     scripts/**/*.py  (board names,
+                                 ALP_HW_BUILD_* / ALP_SOC_* macros,
+                                 board.yaml field identifiers)
+      * config schemas           metadata/schemas/*.json (board.yaml fields)
+    """
     symbols: set[str] = set()
-    if not include_root.is_dir():
-        return symbols
-    for header in include_root.rglob("*.h"):
-        text = header.read_text(encoding="utf-8", errors="replace")
+
+    def harvest(path: pathlib.Path) -> None:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return
         symbols.update(m.group(1) for m in _SYMBOL_RE.finditer(text))
+
+    def harvest_tree(base: pathlib.Path, pattern: str) -> None:
+        if base.is_dir():
+            for path in base.rglob(pattern):
+                harvest(path)
+
+    # C-API: public + internal headers.
+    harvest_tree(root / "include", "*.h")
+    harvest_tree(root / "src", "*.h")
+    # Kconfig config namespace (ALP_SDK_*).
+    for kconfig in ("zephyr/Kconfig", "zephyr/Kconfig.alp-libraries"):
+        harvest(root / kconfig)
+    # CMake options / helper functions (ALP_OS, ALP_SDK*, alp_hw_info_build).
+    harvest(root / "CMakeLists.txt")
+    harvest_tree(root / "src", "CMakeLists.txt")
+    harvest_tree(root / "cmake", "*.cmake")
+    # Generators / orchestrator / project tooling -- emit board target
+    # names, ALP_HW_BUILD_* / ALP_SOC_* macros, board.yaml field identifiers.
+    harvest_tree(root / "scripts", "*.py")
+    # Config schemas -- board.yaml field names.
+    harvest_tree(root / "metadata" / "schemas", "*.json")
     return symbols
 
 
@@ -79,7 +149,8 @@ def doc_files_for_symbol_scan(root: pathlib.Path) -> list[pathlib.Path]:
         out.append(readme)
     docs = root / "docs"
     if docs.is_dir():
-        out.extend(sorted(docs.glob("*.md")))           # top-level only
+        out.extend(sorted(p for p in docs.glob("*.md")  # top-level only
+                          if p.name not in _SCAN_EXCLUDE_DOCS))
         for sub in _DOC_SUBDIRS:
             d = docs / sub
             if d.is_dir():
@@ -88,10 +159,13 @@ def doc_files_for_symbol_scan(root: pathlib.Path) -> list[pathlib.Path]:
 
 
 def _is_known(tok: str, known: set[str], allow: set[str]) -> bool:
-    """A token is real if it is a known header symbol, allowlisted, or --
-    for trailing-underscore family/wildcard references like `ALP_E1M_*`
-    (token captured as `ALP_E1M_`) -- a prefix of some real symbol."""
+    """A token is real if it is a known symbol, allowlisted, a generated
+    board target name (alp_e1m_*), or -- for trailing-underscore
+    family/wildcard references like `ALP_E1M_*` (token captured as
+    `ALP_E1M_`) -- a prefix of some real symbol."""
     if tok in known or tok in allow:
+        return True
+    if _BOARD_NAME_RE.match(tok):
         return True
     if tok.endswith("_"):
         return any(s.startswith(tok) for s in known)
@@ -144,13 +218,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     root = pathlib.Path(args.root).resolve()
     allow = _ALLOWLIST | set(args.allow)
 
-    known = collect_header_symbols(root / "include" / "alp")
+    known = collect_known_symbols(root)
     dead = find_dead_symbols(root, known, allow)
     gaps = find_index_gaps(root)
 
     if dead:
         print("Dead SDK-symbol references "
-              "(token not found in include/alp/**/*.h):", file=sys.stderr)
+              "(token not found in headers / Kconfig / generators):",
+              file=sys.stderr)
         for rel, line_no, tok in dead:
             print(f"  {rel}:{line_no}  {tok}", file=sys.stderr)
     if gaps:
