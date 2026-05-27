@@ -18,9 +18,9 @@ def _manifest() -> Manifest:
         outputs=[Tensor("int8", 2, [1, 2], 0.004, 0)],
         targets=[
             Target("ethos_u", "alif:ensemble:e8", "vela_tflite", "ethos-u85-256",
-                   65536, {"sram_kib": 256, "op_features": []}, 0),
+                   65536, {"sram_kib": 256, "op_features": []}, 0, compiler_version="vela 4.1.0"),
             Target("cpu", "*", "tflite", "", 131072,
-                   {"sram_kib": 0, "op_features": []}, 1),
+                   {"sram_kib": 0, "op_features": []}, 1, compiler_version="passthrough"),
         ],
         coverage=[Coverage("deepx_dxm1", "", "skipped", "dx-compiler not found")],
     )
