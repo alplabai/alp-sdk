@@ -288,7 +288,7 @@ alp_inference_t *m_vision = alp_inference_open(&(alp_inference_config_t){
     .model_data  = vision_dxnn,
     .model_size  = sizeof(vision_dxnn),
     .format      = ALP_INFERENCE_MODEL_DXNN,
-    .backend     = ALP_INFERENCE_BACKEND_DEEPX_DX,   // dispatch to DEEPX
+    .backend     = ALP_INFERENCE_BACKEND_DEEPX_DXM1,   // dispatch to DEEPX
     .arena_bytes = 256 * 1024,
 });
 
