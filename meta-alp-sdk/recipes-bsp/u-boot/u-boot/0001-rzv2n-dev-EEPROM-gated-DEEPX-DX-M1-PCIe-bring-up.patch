@@ -1,0 +1,198 @@
+From 10d1d1d6412013e8a532b834fd0541d55be9b9e5 Mon Sep 17 00:00:00 2001
+From: Caner <alpcaner92@gmail.com>
+Date: Thu, 28 May 2026 17:58:21 +0200
+Subject: [PATCH] rzv2n-dev: EEPROM-gated DEEPX DX-M1 PCIe bring-up
+
+The V2N-M1 SoM (E1M-V2M1xx) wires the on-module DEEPX DX-M1 behind two
+passive PI3DBS12212A PCIe muxes (PD=P80, SEL=P95) and an active-low reset
+M1_RESET (PA6). The A55 Linux PCIe RC (rzg3s-pcie-host) trains the link in
+its builtin probe (~1.7s) with no gpio/reset hook, so Linux gpio-hogs apply
+too late and the RC times out (-ETIMEDOUT) into a powered-down mux. Boot is
+A55-only, so the mux/reset must be set in U-Boot.
+
+board_late_init() reads the on-module hardware-info manifest from the RIIC0
+24C128 EEPROM (0x50), validates magic/schema/CRC32, and only enables the
+DEEPX path when the manifest reports family "v2n-m1" -- so the same image
+is safe on a non-DEEPX V2N SoM. RIIC0 (P30/P31) pinmux is added to s_init
+and the i2c0 node is enabled in the EVK dts.
+---
+ arch/arm/dts/rzv2n-evk.dts          |   8 ++
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 113 ++++++++++++++++++++++++++++
+ 2 files changed, 121 insertions(+)
+
+diff --git a/arch/arm/dts/rzv2n-evk.dts b/arch/arm/dts/rzv2n-evk.dts
+index 31ca524f..f28f9070 100644
+--- a/arch/arm/dts/rzv2n-evk.dts
++++ b/arch/arm/dts/rzv2n-evk.dts
+@@ -26,6 +26,7 @@
+ 		serial0 = &scif0;
+ 		mmc0 = &sdhi0;
+ 		mmc1 = &sdhi1;
++		i2c0 = &i2c0;
+ 		i2c3 = &i2c3;
+ 		i2c6 = &i2c6;
+ 		i2c7 = &i2c7;
+@@ -105,6 +106,13 @@
+ 	status = "okay";
+ };
+ 
++/* ALP on-module EEPROM bus (RIIC0 / E1M_I2C0). Pinmux for P30/P31 is set
++ * in board s_init(); read in board_late_init() to identify the SoM. */
++&i2c0 {
++	clock-frequency = <100000>;
++	status = "okay";
++};
++
+ &i2c3 {
+ 	status = "okay";
+ };
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index 9ccf997f..b3e1ba1a 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -25,6 +25,8 @@
+ #include <i2c.h>
+ #include <mmc.h>
+ #include <linux/delay.h>
++#include <u-boot/crc.h>
++#include <asm/unaligned.h>
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
+@@ -50,6 +52,9 @@ DECLARE_GLOBAL_DATA_PTR;
+ 
+ #define	PMC_20				(PFC_BASE + 0x0220)
+ #define	PFC_20				(PFC_BASE + 0x0480)
++/* Port 3 (P3x) -- ALP RIIC0 (E1M_I2C0) on-module EEPROM bus. */
++#define	PMC_23				(PFC_BASE + 0x0223)
++#define	PFC_23				(PFC_BASE + 0x048C)
+ #define PFC_PWPR                        (PFC_BASE + 0x3C04)
+ 
+ #define ICU_IPTSR_REG			0x10400060
+@@ -112,6 +117,11 @@ void s_init(void)
+ 	*(volatile u32 *)PFC_20  = (*(volatile u32 *)PFC_20 & 0x00FFFFFF) | (0x01 << 28) | (0x01 << 24);
+ 	*(volatile u8 *)PMC_20   |= (0x03) << 6;	/* P07,P06 multiplexed function	*/
+ 
++	/* I2C0 (RIIC0) on P30/P31 -- ALP on-module EEPROM bus (E1M_I2C0),
++	 * read in board_late_init() to identify the SoM. Func.1 = RIIC0. */
++	*(volatile u32 *)PFC_23  = (*(volatile u32 *)PFC_23 & ~0xFFu) | (0x01 << 4) | (0x01 << 0);
++	*(volatile u8 *)PMC_23   |= (0x03) << 0;	/* P30,P31 multiplexed function	*/
++
+ 	*(volatile u32 *)CPG_CLKON_9 = 0x00080008;
+ 	*(volatile u32 *)CPG_RST_10  = 0x00010001;
+ 
+@@ -250,8 +260,111 @@ static void board_usb_init(void)
+ 	(*(volatile u32 *)(USB20_BASE + HcRhDescriptorA)) |= (0x1u << 12);
+ }
+ 
++/*
++ * ALP V2N-M1 (E1M-V2M1xx): bring up the on-module DEEPX DX-M1 before the
++ * A55 Linux PCIe root complex probes.  The DX-M1 sits behind two passive
++ * PI3DBS12212A PCIe muxes (PD=P80, SEL=P95) and an active-low reset
++ * M1_RESET (PA6).  The kernel's PCIe RC (rzg3s-pcie-host) trains the link
++ * in its builtin probe (~1.7s) with no gpio/reset hook, so the mux/reset
++ * MUST be set in firmware -- Linux gpio-hogs apply ~100ms too late and the
++ * RC times out (-ETIMEDOUT) into a powered-down mux.  Boot is A55-only, so
++ * U-Boot is the only stage that runs before the RC.
++ *
++ * This is gated on the on-module EEPROM manifest (EEPROM-MANIFEST-SPEC.md):
++ * only modules whose manifest reports family "v2n-m1" get the DEEPX path
++ * enabled, so the same firmware is safe on a non-DEEPX V2N SoM.
++ */
++
++/*
++ * RZ/V2N PFC GPIO output.  bank == port number (P0..PB = 0..11); the
++ * PMC/PM/P registers need no PWPR unlock (only PFC function-select does) --
++ * mirrors drivers/gpio/gpio-rzv2n.c. P80=bank8/pin0, P95=bank9/pin5,
++ * PA6=bank10/pin6.
++ */
++#define ALP_PFC_P(n)		((void *)(uintptr_t)(PFC_BASE + 0x0020 + (n)))		/* data, 8-bit */
++#define ALP_PFC_PM(n)		((void *)(uintptr_t)(PFC_BASE + 0x0140 + (n) * 2))	/* mode, 16-bit */
++#define ALP_PFC_PMC(n)		((void *)(uintptr_t)(PFC_BASE + 0x0220 + (n)))		/* mode ctrl, 8-bit */
++#define ALP_PM_OUTPUT		0x2
++
++static void alp_gpio_output(unsigned int bank, unsigned int pin, int value)
++{
++	u16 pm;
++
++	if (value)
++		setbits_8(ALP_PFC_P(bank), BIT(pin));
++	else
++		clrbits_8(ALP_PFC_P(bank), BIT(pin));
++
++	clrbits_8(ALP_PFC_PMC(bank), BIT(pin));		/* GPIO mode */
++
++	pm = readw(ALP_PFC_PM(bank));
++	pm &= ~(0x3 << (pin * 2));
++	pm |= (ALP_PM_OUTPUT << (pin * 2));
++	writew(pm, ALP_PFC_PM(bank));
++}
++
++/* On-module hardware-info manifest -- 128 bytes at offset 0 of the RIIC0
++ * 24C128 @ 0x50, little-endian (see EEPROM-MANIFEST-SPEC.md). */
++#define ALP_EEPROM_I2C_BUS	0
++#define ALP_EEPROM_I2C_ADDR	0x50
++#define ALP_HW_INFO_MAGIC	0x414C5048	/* "ALPH" little-endian */
++#define ALP_HW_INFO_SCHEMA	1
++
++static bool alp_som_is_v2n_m1(void)
++{
++	struct udevice *dev;
++	u8 buf[128];
++	char family[17];
++	int ret;
++
++	ret = i2c_get_chip_for_busnum(ALP_EEPROM_I2C_BUS, ALP_EEPROM_I2C_ADDR,
++				      2, &dev);
++	if (ret) {
++		printf("ALP: on-module EEPROM not reachable on RIIC0 (%d)\n", ret);
++		return false;
++	}
++
++	ret = dm_i2c_read(dev, 0x0000, buf, sizeof(buf));
++	if (ret) {
++		printf("ALP: on-module EEPROM read failed (%d)\n", ret);
++		return false;
++	}
++
++	if (get_unaligned_le32(&buf[0x00]) != ALP_HW_INFO_MAGIC ||
++	    get_unaligned_le32(&buf[0x04]) != ALP_HW_INFO_SCHEMA) {
++		printf("ALP: no valid SoM manifest in EEPROM\n");
++		return false;
++	}
++
++	if (crc32(0, buf, 0x7C) != get_unaligned_le32(&buf[0x7C])) {
++		printf("ALP: SoM manifest CRC mismatch\n");
++		return false;
++	}
++
++	memcpy(family, &buf[0x08], 16);
++	family[16] = '\0';
++	printf("ALP: SoM family \"%s\" sku \"%.24s\"\n", family, &buf[0x18]);
++
++	return strcmp(family, "v2n-m1") == 0;
++}
++
++static void alp_deepx_pcie_bringup(void)
++{
++	/* PI3DBS12212A: P80 PD high = enable mux, P95 SEL low = DEEPX path_0. */
++	alp_gpio_output(8, 0, 1);
++	alp_gpio_output(9, 5, 0);
++	mdelay(1);				/* let the mux outputs settle */
++	/* M1_RESET (PA6) high = release the DX-M1 (active-low). */
++	alp_gpio_output(10, 6, 1);
++
++	printf("ALP: DEEPX DX-M1 PCIe path enabled (mux on, reset released)\n");
++}
++
+ int board_late_init(void)
+ {
++	if (alp_som_is_v2n_m1())
++		alp_deepx_pcie_bringup();
++
+ 	return 0;
+ }
+ 
+-- 
+2.38.1.windows.1
+
