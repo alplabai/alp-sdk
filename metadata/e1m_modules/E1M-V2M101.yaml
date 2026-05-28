@@ -7,7 +7,7 @@
 schema_version: 1
 
 sku: E1M-V2M101
-family: renesas-rzv2n
+family: renesas-rzv2n-deepx
 silicon: renesas:rzv2n:n44
 silicon_variant: R9A09G056N44GBG         # see metadata/socs/renesas/rzv2n/n44.json variants[]
 
