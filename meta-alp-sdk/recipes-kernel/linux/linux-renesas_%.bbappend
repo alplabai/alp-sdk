@@ -48,7 +48,9 @@ SRC_URI:append:e1m-v2n101 = " \
 # Kernel config fragment for the carrier's TAS2563 smart-amp codec.  The
 # mainline ASoC `tas2562` driver covers the TAS2563 and is NOT in the
 # linux-renesas 6.1-cip43 defconfig, so merge CONFIG_SND_SOC_TAS2562=y in.
-# Paired with DT patch 0010 (ti,tas2563 codec + audio-graph-card).
+# Pre-stages the driver: DT patch 0010 only DISABLES the EVK DA7212 audio
+# graph; the ti,tas2563 codec nodes + audio-graph-card land in a follow-up
+# patch (0014, not yet merged), at which point this driver gets a consumer.
 #
 # STATUS: UNVALIDATED through bitbake -- confirm the linux-renesas config
 # flow during the build pass.  merge_config.sh is the canonical kernel
