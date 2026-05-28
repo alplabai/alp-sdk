@@ -1,0 +1,50 @@
+# ALP SDK chip manifest: TI TAS2563 smart Class-D speaker amp.
+schema_version:   1
+chip_id:          tas2563
+driver_status:    partial
+display_name:     "TI TAS2563 mono digital-input Class-D smart amp (I2C ctrl + I2S data, I/V sense)"
+vendor:           ti
+mpn_population:
+  - "TAS2563RPP"
+
+datasheet:
+  primary:        "TI TAS2563 datasheet SLASEU1 (mono digital-input Class-D audio amplifier with speaker I/V sense)"
+
+bus:              i2c
+i2c:
+  # Strap-selected 7-bit address (AD0/SPICLK pin). Which address(es) a
+  # given board actually straps -- and which control bus the part sits
+  # on -- is board population, recorded in the board yaml, NOT here.
+  addresses:
+    - { addr_7bit: 0x4C, scope: "AD0/SPICLK = GND (direct)" }
+    - { addr_7bit: 0x4D, scope: "AD0/SPICLK = 10k to GND" }
+    - { addr_7bit: 0x4E, scope: "AD0/SPICLK = 10k to VDD" }
+    - { addr_7bit: 0x4F, scope: "AD0/SPICLK = VDD (direct)" }
+    - { addr_7bit: 0x48, scope: "global broadcast (write-only)" }
+  max_clock_hz:   1000000
+
+audio:
+  channels:       1                 # mono Class-D amp; stereo = two parts
+  bitdepth_max:   24
+  features:       [mono_speaker_amp, class_d, iv_sense, i2s_input, onchip_dsp]
+
+peripherals:
+  i2s:            ["sdin (audio data)"]
+  gpio:
+    # Chip control pins; the SoC/expander net each binds to is board-
+    # specific (see the board yaml), not part of the chip manifest.
+    - "sd_n (AMP.ENABLE: active-high enable; drive low for HW shutdown)"
+    - "irq_n (fault/IRQ, open-drain w/ internal pull-up; optional)"
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_TAS2563
+  baremetal:      ALP_SDK_CHIP_TAS2563
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    null_arg_guard
