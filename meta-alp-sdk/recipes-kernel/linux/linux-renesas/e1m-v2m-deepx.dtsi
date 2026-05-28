@@ -29,6 +29,8 @@
  * (PCIE_MODE_SEL=0); keep it on for V2M and add the carrier dma-ranges. */
 &pcie0 {
 	dma-ranges = <0x42000000 0 0x48000000 0 0x48000000 0x1 0xf8000000>;
+	/* DEEPX DX-M1 is wired x2 on V2N-M1 (SoC dtsi default is x4). */
+	num-lanes = <2>;
 	status = "okay";
 };
 

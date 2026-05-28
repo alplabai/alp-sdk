@@ -31,6 +31,7 @@
 		i2c7 = &i2c7;
 		i2c8 = &i2c8;
 		mmc0 = &sdhi0;
+		mmc1 = &sdhi1;
 		serial0 = &scif;
 	};
 
@@ -49,6 +50,17 @@
 			label = "NMI";
 			wakeup-source;
 		};
+	};
+
+	/* Carrier microSD (SDHI1) VccQ level-shifter. */
+	vqmmc_sdhi1: regulator-vqmmc-sdhi1 {
+		compatible = "regulator-gpio";
+		regulator-name = "SDHI1 VqmmC";
+		gpios = <&pinctrl RZV2N_GPIO(A, 2) GPIO_ACTIVE_HIGH>;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <3300000>;
+		gpios-states = <0>;
+		states = <3300000 0>, <1800000 1>;
 	};
 };
 
@@ -69,6 +81,20 @@
 };
 
 &wdt1 {
+	status = "okay";
+};
+
+/* Carrier microSD slot (SDHI1). The bench dev image roots from this card
+ * (root=/dev/mmcblk1p2); on-module eMMC (SDHI0) is the production boot. */
+&sdhi1 {
+	pinctrl-0 = <&sdhi1_pins>;
+	pinctrl-1 = <&sdhi1_pins>;
+	pinctrl-names = "default", "state_uhs";
+	vmmc-supply = <&reg_3p3v>;
+	vqmmc-supply = <&vqmmc_sdhi1>;
+	bus-width = <4>;
+	sd-uhs-sdr50;
+	sd-uhs-sdr104;
 	status = "okay";
 };
 
@@ -97,7 +123,8 @@
 &i2c0 {
 	pinctrl-0 = <&i2c0_pins>;
 	pinctrl-names = "default";
-	clock-frequency = <400000>;
+	/* 100 kHz: on-module EEPROM bus on internal pull-ups (weak ~50k). */
+	clock-frequency = <100000>;
 	status = "okay";
 };
 
@@ -192,14 +219,19 @@
 		output-enable;
 	};
 
+	/* Unlike the Renesas EVK (external pull-ups on RIIC0/1), the ALP
+	 * board has none on RIIC0 (on-module EEPROM bus), RIIC1, or RIIC8
+	 * (BRD_I2C); enable the SoC internal pull-ups so SCL/SDA idle high. */
 	i2c0_pins: i2c0 {
 		pinmux = <RZV2N_PORT_PINMUX(3, 0, 1)>, /* I2C0_SDA */
 			 <RZV2N_PORT_PINMUX(3, 1, 1)>; /* I2C0_SCL */
+		bias-pull-up;
 	};
 
 	i2c1_pins: i2c1 {
 		pinmux = <RZV2N_PORT_PINMUX(3, 2, 1)>, /* I2C1_SDA */
 			 <RZV2N_PORT_PINMUX(3, 3, 1)>; /* I2C1_SCL */
+		bias-pull-up;
 	};
 
 	i2c6_pins: i2c6 {
@@ -217,11 +249,28 @@
 	i2c8_pins: i2c8 {
 		pinmux = <RZV2N_PORT_PINMUX(0, 6, 1)>, /* I2C8_SDA */
 			 <RZV2N_PORT_PINMUX(0, 7, 1)>; /* I2C8_SCL */
+		bias-pull-up;
 	};
 
 	scif_pins: scif {
 		pins = "SCIF_TXD", "SCIF_RXD";
 		renesas,output-impedance = <1>;
+	};
+
+	/* SD1 CLK/CMD/DAT are dedicated (hardwired) balls on the carrier and
+	 * don't need pin config; only the card-detect line is muxed here. */
+	sdhi1_pins: sd1 {
+		sd1-cd {
+			pinmux = <RZV2N_PORT_PINMUX(9, 4, 14)>; /* SD1_CD */
+		};
+	};
+
+	/* microSD slot power enable. */
+	sd1-pwr-en-hog {
+		gpio-hog;
+		gpios = <RZV2N_GPIO(A, 3) GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "sd1_pwr_en";
 	};
 
 	usb20_pins: usb20 {
