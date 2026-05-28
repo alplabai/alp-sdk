@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * ALP E1M-V2M101 SoM on the E1M-X-EVK carrier
+ * (Renesas RZ/V2N + on-module DEEPX DX-M1 NPU over PCIe).
+ * Composition: SoC dtsi (via SoM) -> SoM dtsi -> carrier dtsi -> DEEPX.
+ * Builds to renesas/e1m-v2m101-x-evk.dtb.
+ * STATUS: UNVALIDATED — first DEEPX PCIe bring-up; verify on the bench.
+ */
+
+/dts-v1/;
+
+#include "e1m-v2n-som.dtsi"
+#include "e1m-x-evk.dtsi"
+#include "e1m-v2m-deepx.dtsi"
+
+/ {
+	model = "ALP E1M-V2M101 on E1M-X-EVK (RZ/V2N + DEEPX DX-M1)";
+	compatible = "alp,e1m-v2m101-x-evk",
+		     "renesas,r9a09g056n48", "renesas,r9a09g056";
+
+	memory@48000000 {
+		device_type = "memory";
+		/* First 128 MB reserved for the secure area. Size must match
+		 * the BL2 DDR config. VERIFY per SKU (V2M101 vs V2M102). */
+		reg = <0x0 0x48000000 0x1 0xf8000000>;
+	};
+};

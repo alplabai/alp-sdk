@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * ALP E1M-V2N101 SoM on the E1M-X-EVK carrier (Renesas RZ/V2N, no DEEPX).
+ * Composition: SoC dtsi (via SoM) -> SoM dtsi -> carrier dtsi.
+ * Builds to renesas/e1m-v2n101-x-evk.dtb.
+ * STATUS: UNVALIDATED through dtc/bitbake.
+ */
+
+/dts-v1/;
+
+#include "e1m-v2n-som.dtsi"
+#include "e1m-x-evk.dtsi"
+
+/ {
+	model = "ALP E1M-V2N101 on E1M-X-EVK (RZ/V2N r9a09g056n48)";
+	compatible = "alp,e1m-v2n101-x-evk",
+		     "renesas,r9a09g056n48", "renesas,r9a09g056";
+
+	memory@48000000 {
+		device_type = "memory";
+		/* First 128 MB reserved for the secure area. Size must match
+		 * the BL2 DDR config. VERIFY per SKU (V2N101 vs V2N102). */
+		reg = <0x0 0x48000000 0x1 0xf8000000>;
+	};
+};
+
+/*
+ * V2N base: no on-module DEEPX, and the X-EVK carrier exposes no PCIe
+ * endpoint, so disable the root complex to avoid the boot-time link
+ * -ETIMEDOUT. (V2M re-enables it for the DX-M1 — see e1m-v2m-deepx.dtsi.)
+ */
+&pcie0 {
+	status = "disabled";
+};

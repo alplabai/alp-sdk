@@ -1,0 +1,59 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * ALP E1M-V2N-M1 (V2M) DEEPX DX-M1 NPU enablement — V2M boards only.
+ *
+ * The DX-M1 NPU sits on the RZ/V2N PCIe lane behind two passive
+ * Diodes PI3DBS12212A diff muxes (TX + RX pair, shared control). Route
+ * them to the on-module DEEPX path and release the NPU reset so the PCIe
+ * root complex enumerates the DX-M1 at boot.
+ *
+ *   M1_RESET     = PA6  (active-low: drive HIGH to release)
+ *   PCIe.MUX_PD  = P80  (HIGH = muxes enabled)
+ *   PCIe.MUX_SEL = P95  (LOW  = path_0 = DEEPX; HIGH = E1M edge)
+ *
+ * Source: alp-sdk include/alp/chips/{deepx_dxm1,pi3dbs12212}.h +
+ * alp-sdk-internal metadata/e1m_modules/v2n-m1/. gpio-hogs apply at
+ * pinctrl probe (before the PCIe controller), which is the order the
+ * link needs.
+ *
+ * Rails: the current SoM rev powers the DEEPX rails from the old
+ * standalone buck (always-on) — no sequencing needed. The target rev
+ * moves them to DA9292 ch3+ch4 + three BRD_I2C TPS628640 bucks (enable
+ * in U-Boot / PMIC DT then).
+ *
+ * STATUS: UNVALIDATED — first DEEPX PCIe bring-up; verify on the bench
+ * (lspci shows the DX-M1, dxrt_init succeeds).
+ */
+
+/* The base SoC dts enables pcie0 as root complex by default
+ * (PCIE_MODE_SEL=0); keep it on for V2M and add the carrier dma-ranges. */
+&pcie0 {
+	dma-ranges = <0x42000000 0 0x48000000 0 0x48000000 0x1 0xf8000000>;
+	status = "okay";
+};
+
+&pinctrl {
+	/* P80 = PCIe.MUX_PD: HIGH enables the PI3DBS12212A muxes. */
+	deepx-pcie-mux-pd-hog {
+		gpio-hog;
+		gpios = <RZV2N_GPIO(8, 0) GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "deepx_pcie_mux_pd";
+	};
+
+	/* P95 = PCIe.MUX_SEL: LOW selects path_0 = DEEPX. */
+	deepx-pcie-mux-sel-hog {
+		gpio-hog;
+		gpios = <RZV2N_GPIO(9, 5) GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "deepx_pcie_mux_sel";
+	};
+
+	/* PA6 = M1_RESET (active-low): HIGH releases the DX-M1. */
+	deepx-m1-reset-release-hog {
+		gpio-hog;
+		gpios = <RZV2N_GPIO(A, 6) GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "deepx_m1_reset";
+	};
+};
