@@ -16,12 +16,12 @@
  * reply, stages the reply envelope, and (re-)enables the TX FIFO
  * so the host's next-transaction reads get the reply bytes.
  *
- * THIS FILE is a SCAFFOLD.  The byte-level GigaDevice firmware
- * library hookups (SPI1 init, ISR wiring, TX FIFO management) are
- * marked with TODO blocks; today the file compiles standalone and
- * can be exercised against a unit-test mock that feeds the
- * receive-byte path directly via the spi_slave_rx_byte() entry
- * point.
+ * THIS FILE is SILICON-FREE: framing, CRC, staging and the
+ * protocol_dispatch() hand-off only.  The byte-level GigaDevice
+ * hookups (SPI1 slave init, CS-EXTI, ISR wiring) live in the gd32
+ * backend at hal/transport_hw_gd32.c and drive the spi_slave_*()
+ * seams below; the stub backend leaves the bring-up hook a no-op so a
+ * unit-test mock can feed the same seams directly.
  */
 
 #include <stdbool.h>

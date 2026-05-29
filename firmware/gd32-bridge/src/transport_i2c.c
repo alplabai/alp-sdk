@@ -16,11 +16,12 @@
  * (holds SCL low) just long enough to run protocol_dispatch() before
  * clocking out the reply bytes.
  *
- * THIS FILE is a SCAFFOLD.  The byte-level GigaDevice firmware
- * library hookups (I2C0 init, slave-address ACK, clock-stretching)
- * are marked TODO; today the file compiles standalone and exercises
- * the protocol-dispatch path via the i2c_slave_rx_byte() /
- * i2c_slave_repeated_start() entry points.
+ * THIS FILE is SILICON-FREE: framing, CRC, staging and the
+ * protocol_dispatch() hand-off only.  The byte-level GigaDevice
+ * hookups (I2C0 slave init, address ACK, clock-stretching, ISR wiring)
+ * live in the gd32 backend at hal/transport_hw_gd32.c and drive the
+ * i2c_slave_*() seams below; the stub backend leaves the bring-up hook
+ * a no-op so a unit-test mock can feed the same seams directly.
  */
 
 #include <stdbool.h>

@@ -55,12 +55,14 @@ in the development case is done with an external SWD probe on
 upgrades from the V2N host once the application-bootloader path
 lands are documented in [`../docs/gd32-bridge-protocol.md`](../docs/gd32-bridge-protocol.md) §10.
 
-> **Status (2026-05-12):** The toolchain config, HAL shim, and
-> per-feature handler bodies that need the GigaDevice firmware
-> library are scaffolded but **not yet implemented**.  PING and
-> GET_VERSION are wired end-to-end with no HW dependency so the
-> protocol round-trip can be smoke-tested against the host driver
-> over a logic analyser stub before the GigaDevice library lands.
+> **Status:** Both backends build clean.  The gd32 backend drives the
+> real peripheral HAL (`hal/bridge_hw_gd32.c`) and the **SPI1 + I2C0
+> slave transports** (`hal/transport_hw_gd32.c`).  Remaining gaps
+> (ADC DSP-chain upload, `POWER_MODE_SET`, OTA) degrade to
+> `STATUS_NOSUPPORT`.  Byte-level interrupt timing needs on-silicon
+> validation; flash externally (host-driven SWD reflash is not wired in
+> the current HW revision).  The stub backend stays HW-free for host
+> protocol round-trip tests.
 
 ## Protocol majorset
 
