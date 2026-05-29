@@ -45,7 +45,14 @@ set(GD32_BRIDGE_SOURCES
     src/transport_spi.c
     src/transport_i2c.c
     src/bootloader/bootloader.c
+    src/ota.c
 )
+
+# OTA self-flashing is gated: only -DBRIDGE_OTA_PARTITIONED=ON (paired with
+# the partitioned bootloader layout + slot-linked app) arms the destructive
+# flash path.  Default OFF -> ota_dispatch() returns STATUS_NOSUPPORT and the
+# full-flash image can't brick itself.  HIL-REQUIRED before enabling.
+option(BRIDGE_OTA_PARTITIONED "Arm the OTA Path-A flash path (HIL-gated)" OFF)
 
 if(BRIDGE_HAL_BACKEND STREQUAL "stub")
     list(APPEND GD32_BRIDGE_SOURCES hal/bridge_hw_stub.c)
@@ -58,6 +65,7 @@ elseif(BRIDGE_HAL_BACKEND STREQUAL "gd32")
     list(APPEND GD32_BRIDGE_SOURCES
         hal/bridge_hw_gd32.c
         hal/transport_hw_gd32.c
+        hal/fmc_ota.c
         hal/gd32_libc_stubs.c
     )
     # Pull in the GigaDevice firmware-library wrapper.  Its CMakeLists
@@ -94,6 +102,11 @@ target_include_directories(gd32-bridge PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/hal
 )
+
+if(BRIDGE_OTA_PARTITIONED)
+    target_compile_definitions(gd32-bridge PRIVATE BRIDGE_OTA_PARTITIONED=1)
+    message(STATUS "gd32-bridge: OTA Path-A flash path ARMED (BRIDGE_OTA_PARTITIONED) -- HIL-required")
+endif()
 
 if(BRIDGE_HAL_BACKEND STREQUAL "gd32")
     target_link_libraries(gd32-bridge PRIVATE gd32_firmware_library)

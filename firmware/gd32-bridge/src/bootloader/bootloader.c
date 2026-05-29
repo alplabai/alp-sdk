@@ -2,11 +2,15 @@
  * Copyright 2026 ALP Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * gd32-bridge application bootloader -- scaffold.  Every handler
- * returns STATUS_NOSUPPORT until the real implementation lands.
+ * gd32-bridge application bootloader -- OTA opcode entry.  Routes the
+ * reserved 0xF0..0xFF range into the Path-A state machine (src/ota.c),
+ * which is safe-by-default: no flash writes unless built with
+ * -DBRIDGE_OTA_PARTITIONED on a backend with real FMC support, otherwise
+ * it returns STATUS_NOSUPPORT.
  */
 
 #include "bootloader.h"
+#include "../ota.h"
 
 gd32_bridge_status_t bl_dispatch_ota(uint8_t cmd,
                                      const uint8_t *req_payload,
@@ -15,23 +19,6 @@ gd32_bridge_status_t bl_dispatch_ota(uint8_t cmd,
                                      size_t reply_payload_cap,
                                      size_t *reply_payload_len)
 {
-    (void)req_payload;
-    (void)req_payload_len;
-    (void)reply_payload;
-    (void)reply_payload_cap;
-
-    *reply_payload_len = 0u;
-
-    switch (cmd) {
-    case CMD_OTA_BEGIN:
-    case CMD_OTA_WRITE_CHUNK:
-    case CMD_OTA_VERIFY:
-    case CMD_OTA_COMMIT:
-    case CMD_OTA_ROLLBACK:
-    case CMD_OTA_GET_STATE:
-    case CMD_OTA_ABORT:
-        return STATUS_NOSUPPORT;
-    default:
-        return STATUS_NOSUPPORT;
-    }
+    return ota_dispatch(cmd, req_payload, req_payload_len,
+                        reply_payload, reply_payload_cap, reply_payload_len);
 }
