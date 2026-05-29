@@ -164,10 +164,21 @@ void bridge_transport_i2c_hw_init(void)
     rcu_periph_clock_enable(BRIDGE_I2C_RCU);
     i2c_gpio_init();
 
-    i2c_timing_config(BRIDGE_I2C_PERIPH,
-                      BRIDGE_I2C_TIMING_PSC,
-                      BRIDGE_I2C_TIMING_SCL_DELY,
-                      BRIDGE_I2C_TIMING_SDA_DELY);
+    /* Compute the I2C timing from the live APB1 kernel clock (set as the
+     * I2C source just above) so it tracks whatever SystemInit configured
+     * -- the GD32G553 core/APB clock has historically been ambiguous.
+     * For a SLAVE only the prescaler + data setup (SCLDEL) + data hold
+     * (SDADEL) matter; the SCL high/low periods (the 400 kHz bus rate)
+     * are driven by the master, not us.  Target a ~8 MHz timing tick;
+     * SCLDEL=2 / SDADEL=1 then give Fast-mode setup/hold, with the analog
+     * filter on for Fm (400 kHz) spike suppression. */
+    uint32_t apb1_hz = rcu_clock_freq_get(CK_APB1);
+    uint32_t psc     = apb1_hz / 8000000u;   /* tick ~= (psc+1)/apb1 */
+    if (psc > 0u)  { psc -= 1u; }
+    if (psc > 15u) { psc = 15u; }            /* TIMING_PSC is a 4-bit field */
+    i2c_timing_config(BRIDGE_I2C_PERIPH, psc, 2u /*scl_dely*/, 1u /*sda_dely*/);
+    i2c_analog_noise_filter_enable(BRIDGE_I2C_PERIPH);
+
     i2c_address_config(BRIDGE_I2C_PERIPH,
                        (uint32_t)GD32_BRIDGE_DEFAULT_I2C_ADDR << 1,
                        I2C_ADDFORMAT_7BITS);

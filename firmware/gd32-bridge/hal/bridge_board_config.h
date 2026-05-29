@@ -17,12 +17,11 @@
  * PA15 = I2C0_SCL, PB9 = I2C0_SDA.  AF numbers follow the GD32G5 scheme
  * (SPI→AF5, I2C→AF4), matching the vendor SPI/I2C driver examples.
  *
- * ┌──────────────────────────────────────────────────────────────┐
- * │ ONE value still needs final calibration: the I2C timing fields │
- * │ depend on the final APB1 clock — see the #warning below.       │
- * │ Validate transport timing on real silicon (host-driven SWD     │
- * │ reflash is not wired in this HW revision; flash externally).    │
- * └──────────────────────────────────────────────────────────────┘
+ * I2C timing is derived at runtime from the live APB1 clock (in
+ * bridge_transport_i2c_hw_init), so there are no unconfirmed silicon
+ * facts left here.  Byte-level interrupt timing (SPI reply preload, I2C
+ * clock-stretch window) still wants on-silicon validation — flash
+ * externally (host-driven SWD reflash is not wired in this HW revision).
  */
 #ifndef GD32_BRIDGE_BOARD_CONFIG_H
 #define GD32_BRIDGE_BOARD_CONFIG_H
@@ -87,17 +86,10 @@
  * Datasheet lists I2C0_SCL on PA15 and I2C0_SDA on PB9. */
 #define BRIDGE_I2C_GPIO_AF         GPIO_AF_4
 
-/* I2C timing register fields (psc, scl_dely, sda_dely) passed to
- * i2c_timing_config().  Borrowed from the vendor interrupt-slave
- * example; they encode setup/hold timing relative to the I2C input
- * clock (APB1 here) and MUST be recomputed for the final APB1
- * frequency + target bus speed.  Flagged TBD. */
-#define BRIDGE_I2C_TIMING_PSC      0x3u
-#define BRIDGE_I2C_TIMING_SCL_DELY 0xAu
-#define BRIDGE_I2C_TIMING_SDA_DELY 0x0u
-#if defined(BRIDGE_WARN_UNCONFIRMED)
-#  warning "BRIDGE_I2C_TIMING_* are vendor-example placeholders; recompute for the final APB1 clock + target bus speed before bench bring-up."
-#endif
+/* I2C timing (PSC / SCLDEL / SDADEL) is computed at runtime in
+ * bridge_transport_i2c_hw_init() from the live APB1 kernel clock, so it
+ * needs no static value here.  Slave timing only needs setup/hold +
+ * prescaler; the 400 kHz bus rate is the master's SCLH/SCLL, not ours. */
 
 /* NVIC priorities (preemption, sub).  Transport ISRs sit above the
  * SysTick PMIC poll; SPI (point-to-point, latency-sensitive) above I2C. */
