@@ -54,6 +54,7 @@ elseif(BRIDGE_HAL_BACKEND STREQUAL "gd32")
     # that pulls in `__libc_init_array`.
     list(APPEND GD32_BRIDGE_SOURCES
         hal/bridge_hw_gd32.c
+        hal/transport_hw_gd32.c
         hal/gd32_libc_stubs.c
     )
     # Pull in the GigaDevice firmware-library wrapper.  Its CMakeLists

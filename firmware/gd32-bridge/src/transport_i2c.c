@@ -28,6 +28,12 @@
 #include <string.h>
 
 #include "protocol.h"
+#include "transport.h"
+
+/* Weak default: the stub backend links this no-op so it needs no vendor
+ * library.  The gd32 backend's hal/transport_hw_gd32.c overrides it with
+ * the real I2C0 slave bring-up. */
+__attribute__((weak)) void bridge_transport_i2c_hw_init(void) { }
 
 #define I2C_MAX_WRITE_BYTES (1u /* reg */ + 1u /* CMD */ + GD32_BRIDGE_MAX_PAYLOAD_BYTES + 2u /* CRC */)
 #define I2C_MAX_READ_BYTES  (1u /* STATUS */ + GD32_BRIDGE_MAX_PAYLOAD_BYTES + 2u /* CRC */)
@@ -143,8 +149,8 @@ void transport_i2c_init(void)
     i2c_tx_len          = 0u;
     i2c_tx_cursor       = 0u;
     pending_reply_valid = false;
-    /* TODO: GigaDevice firmware library init for I2C0 slave mode on
-     *       PA15/PB9, slave address GD32_BRIDGE_DEFAULT_I2C_ADDR.
-     *       Hook the START/STOP/byte-received/byte-transmit interrupts
-     *       to the i2c_slave_* entry points above. */
+    /* I2C0 slave bring-up (PA15/PB9, addr GD32_BRIDGE_DEFAULT_I2C_ADDR)
+     * lives in the gd32 HAL backend (hal/transport_hw_gd32.c); the stub
+     * backend's weak no-op keeps this hardware-free for host tests. */
+    bridge_transport_i2c_hw_init();
 }

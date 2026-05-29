@@ -24,6 +24,9 @@
 
 #define GD32_BRIDGE_SOF                  0xA5u
 #define GD32_BRIDGE_I2C_REG_CMD          0x00u
+/* Default 7-bit I2C slave address (host: GD32G553_BRIDGE_DEFAULT_I2C_ADDR;
+ * metadata/chips/gd32g553.yaml default_address_7bit). */
+#define GD32_BRIDGE_DEFAULT_I2C_ADDR     0x70u
 #define GD32_BRIDGE_ADC_MAX_SAMPLES      8u
 #define GD32_BRIDGE_BUILD_ID_LEN         20u
 

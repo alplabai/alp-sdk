@@ -29,6 +29,12 @@
 #include <string.h>
 
 #include "protocol.h"
+#include "transport.h"
+
+/* Weak default: the stub backend links this no-op so it needs no vendor
+ * library.  The gd32 backend's hal/transport_hw_gd32.c overrides it with
+ * the real SPI1 slave + CS-EXTI bring-up. */
+__attribute__((weak)) void bridge_transport_spi_hw_init(void) { }
 
 /* Maximum SPI envelope = SOF + (CMD or STATUS) + PAYLOAD + CRC. */
 #define SPI_MAX_FRAME_BYTES (1u + 1u + GD32_BRIDGE_MAX_PAYLOAD_BYTES + 2u)
@@ -136,8 +142,8 @@ void transport_spi_init(void)
     spi_rx_len    = 0u;
     spi_tx_len    = 0u;
     spi_tx_cursor = 0u;
-    /* TODO: GigaDevice firmware library init for SPI1 slave mode
-     *       on PA8/PA9/PA10/PB15.  Hook the falling-CS + per-byte
-     *       receive + TX-FIFO-empty interrupts to the spi_slave_*
-     *       entry points above. */
+    /* SPI1 slave + CS-EXTI bring-up lives in the gd32 HAL backend
+     * (hal/transport_hw_gd32.c); the stub backend's weak no-op keeps
+     * this hardware-free for host-side protocol tests. */
+    bridge_transport_spi_hw_init();
 }
