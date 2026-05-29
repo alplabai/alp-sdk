@@ -191,8 +191,10 @@
 };
 
 &usb2_phy0 {
-	pinctrl-0 = <&usb20_pins>;
-	pinctrl-names = "default";
+	/* USB2.0 VBUS is always-on (hardwired) on the E1M-X carrier, so no
+	 * VBUS GPIO/pinmux is needed. The old usb20_pins hogged P95 (func 14),
+	 * which is the DEEPX PCIe mux-sel on V2M and MUST stay a GPIO — the
+	 * pinctrl claim collided with the deepx-pcie-mux-sel hog. Dropped. */
 	vbus-supply = <&usb2_phy0_vbus_otg>;
 	status = "okay";
 };
@@ -273,11 +275,8 @@
 		line-name = "sd1_pwr_en";
 	};
 
-	usb20_pins: usb20 {
-		vbus {
-			pinmux = <RZV2N_PORT_PINMUX(9, 5, 14)>; /* VBUS */
-		};
-	};
+	/* No usb20 (USB2.0 VBUS) pinmux: VBUS is always-on (hardwired) on this
+	 * carrier, and P95 is the DEEPX PCIe mux-sel on V2M (kept as GPIO). */
 
 	usb30_pins: usb30 {
 		vbus {

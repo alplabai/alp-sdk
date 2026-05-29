@@ -8,7 +8,7 @@
  * root complex enumerates the DX-M1 at boot.
  *
  *   M1_RESET     = PA6  (active-low: drive HIGH to release)
- *   PCIe.MUX_PD  = P80  (HIGH = muxes enabled)
+ *   PCIe.MUX_PD  = P80  (LOW = muxes enabled; PD is active-low)
  *   PCIe.MUX_SEL = P95  (LOW  = path_0 = DEEPX; HIGH = E1M edge)
  *
  * Source: alp-sdk include/alp/chips/{deepx_dxm1,pi3dbs12212}.h +
@@ -35,11 +35,13 @@
 };
 
 &pinctrl {
-	/* P80 = PCIe.MUX_PD: HIGH enables the PI3DBS12212A muxes. */
+	/* P80 = PCIe.MUX_PD: LOW enables the PI3DBS12212A muxes (PD active-low).
+	 * U-Boot sets this before the RC probes; this hog must match (drive LOW)
+	 * or it would re-disable the mux ~93ms after the link trains. */
 	deepx-pcie-mux-pd-hog {
 		gpio-hog;
 		gpios = <RZV2N_GPIO(8, 0) GPIO_ACTIVE_HIGH>;
-		output-high;
+		output-low;
 		line-name = "deepx_pcie_mux_pd";
 	};
 
