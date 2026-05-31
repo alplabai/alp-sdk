@@ -156,7 +156,17 @@ alp_status_t alp_hw_info_read(alp_hw_info_t *out)
     memset(&manifest, 0, sizeof(manifest));
 
     alp_status_t s = read_manifest(&manifest);
-    if (s != ALP_OK) return s == ALP_ERR_NOSUPPORT ? ALP_ERR_NOT_READY : s;
+    if (s != ALP_OK) {
+        /* The I2C backend maps a transport -ENOSYS/-ENOTSUP to
+         * ALP_ERR_NOSUPPORT, and eeprom_24c128_read() propagates it
+         * raw.  In THIS (#else) branch the EEPROM bus IS configured, so
+         * that means the device is unreachable, not "no hw_info path" --
+         * remap to NOT_READY so NOSUPPORT stays reserved for the
+         * bus-not-configured case above.  Not dead code: the read step
+         * can surface NOSUPPORT even though init() normalises to
+         * NOT_READY. */
+        return s == ALP_ERR_NOSUPPORT ? ALP_ERR_NOT_READY : s;
+    }
 
     /* Validate + populate.  Board-side BOARD_ID decode is a future
      * addition (board.yaml -> generated header). */
