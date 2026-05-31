@@ -170,15 +170,16 @@ typedef struct alp_hw_info_t {
  *                  zero/empty.  Never written when the call fails
  *                  with @ref ALP_ERR_INVAL.
  *
- * @return  @ref ALP_OK on full read + EEPROM/ADC agreement.
+ * @return  @ref ALP_OK on a valid, fully populated manifest.
  *          @ref ALP_ERR_INVAL when @p out is NULL.
  *          @ref ALP_ERR_NOT_READY when no EEPROM is reachable
  *                                 (bus error, missing chip).
- *          @ref ALP_ERR_IO when the EEPROM is reachable but the
- *                          manifest is corrupt (bad magic /
- *                          schema_version / CRC) OR the EEPROM
- *                          hw_rev disagrees with the BOARD_ID
- *                          ADC reading.
+ *          @ref ALP_ERR_NOT_PROVISIONED when the EEPROM reads back
+ *                                       with no ALPH magic (blank /
+ *                                       erased module, not yet
+ *                                       programmed by the factory tool).
+ *          @ref ALP_ERR_IO when magic is present but the manifest is
+ *                          corrupt (bad schema_version or CRC32).
  *          @ref ALP_ERR_NOSUPPORT in v0.3 -- the runtime impl
  *          lands in v0.3.x.
  */

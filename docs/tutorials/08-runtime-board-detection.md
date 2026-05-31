@@ -38,12 +38,12 @@ if (s == ALP_OK) {
 
 Return codes:
 
-| Return                | Meaning                                          |
-|-----------------------|--------------------------------------------------|
-| `ALP_OK`              | Full read + BOARD_ID agreement                   |
-| `ALP_ERR_NOT_READY`   | EEPROM not reachable (bus error / missing chip)  |
-| `ALP_ERR_IO`          | EEPROM reachable but manifest corrupt OR        |
-|                       | EEPROM says one hw_rev, BOARD_ID says another   |
+| Return                    | Meaning                                               |
+|---------------------------|-------------------------------------------------------|
+| `ALP_OK`                  | Valid manifest, all fields populated                  |
+| `ALP_ERR_NOT_READY`       | EEPROM not reachable (bus error / missing chip)       |
+| `ALP_ERR_NOT_PROVISIONED` | EEPROM blank / erased — module not yet factory-programmed |
+| `ALP_ERR_IO`              | EEPROM readable but manifest corrupt (bad schema / CRC) |
 
 ## Asserting against the build
 
