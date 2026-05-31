@@ -3,10 +3,10 @@
 # carrier dtsi -> per-board dts -> named dtb), NOT as a patch pile against
 # the EVK reference dts.
 #
-#   e1m-v2n-som.dtsi    on-module V2N: RTL8211F-VD PHYs @ MDIO 2, eMMC,
-#                       xSPI NOR, DRP-AI reserved memory, core rails.
-#   e1m-v2m-deepx.dtsi  V2M delta: DEEPX DX-M1 PCIe + PI3DBS12212 mux +
-#                       M1_RESET release (gpio-hogs).
+#   e1m-v2n-som.dtsi    on-module V2N: dual GbE PHYs, eMMC, xSPI NOR,
+#                       DRP-AI reserved memory, core rails.
+#   e1m-v2m-deepx.dtsi  V2M delta: DEEPX DXM1 NPU on PCIe + the on-module
+#                       lane mux + NPU reset release (gpio-hogs).
 #   e1m-x-evk.dtsi      E1M-X-EVK carrier: eth/i2c/usb/console enables,
 #                       USB-OVC hog. (Cameras/DSI/audio/CAN are TODO.)
 #   e1m-v2n101-x-evk.dts / e1m-v2m101-x-evk.dts  product boards.
@@ -26,6 +26,20 @@
 # `bitbake virtual/kernel` per MACHINE and fix any dtc errors; the dts
 # files carry inline VERIFY notes (memory size per SKU, DEEPX bench
 # checks).
+#
+# KERNEL-VERSION SCOPE: these board dts/dtsi were generated against the
+# linux-renesas tree at kernel SHA 6717c06 (Renesas RZ/V SDK platform 7.1
+# / BSP v6.30, linux 6.1.x). They #include the SoC dtsi r9a09g056.dtsi and
+# use BSP-specific bindings (renesas,mmngr, RZV2N_PORT_PINMUX, etc.), so
+# they are NOT portable across linux-renesas major versions. This append
+# uses the `%` wildcard, which would also match a future incompatible
+# linux-renesas PV.
+# FLAG / TODO: scope this filename to the exact kernel PV (rename to
+# linux-renesas_6.1.%.bbappend) once the linux-renesas recipe PV provided
+# by the meta-renesas release in bblayers.conf is confirmed. Not renamed
+# here because the exact PV string is not asserted in this layer; pinning
+# the SRCREV the series was generated against (6717c06) and adding a
+# COMPATIBLE check is the interim guard.
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 

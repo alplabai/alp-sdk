@@ -124,11 +124,10 @@
 };
 
 /*
- * Dual on-module Realtek RTL8211F-VD GbE PHYs.
- * The PHYAD straps share pins with the MAC RGMII outputs and lose the
- * strap-vs-MAC contention at reset, so each PHY latches address 0 with a
- * clean mirror alias at address 2 — use 2 (at 0, phy_poll_reset times out
- * -110). PHY ID 001c.c878 = RTL8211F-VD.
+ * Dual on-module GbE PHYs. Each PHY is addressed at MDIO address 2 on its
+ * bus (the on-module wiring makes address 2 the reliable address; address
+ * 0 does not respond to phy_poll_reset). The compatible string carries the
+ * PHY's IEEE OUI/model so the matching mainline driver binds.
  */
 &mdio0 {
 	phy0: ethernet-phy@2 {

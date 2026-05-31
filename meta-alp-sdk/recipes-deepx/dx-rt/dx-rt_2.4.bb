@@ -8,26 +8,50 @@
 
 SUMMARY = "DEEPX DX-M1 host runtime + Linux kernel driver"
 DESCRIPTION = "Userspace dx_rt + kernel module that talks to the \
-               DEEPX DX-M1 NPU over PCIe.  Pairs with the v0.5 \
-               alp-sdk inference dispatcher when AUTO selects \
-               ALP_INFERENCE_BACKEND_DEEPX_DX on V2N-M1."
+               DEEPX DX-M1 NPU over PCIe.  Pairs with the alp-sdk \
+               inference dispatcher when AUTO selects the \
+               DEEPX_DXM1 backend on V2N-M1 (V2M)."
 HOMEPAGE = "https://github.com/DEEPX-AI"
 
 LICENSE = "LicenseRef-DEEPX-source-visible"
+# NOTE: no real LICENSE file + checksum can be shipped here -- the DEEPX
+# runtime is license-gated and is NOT redistributed in this public layer.
+# The all-zero md5 below is a deliberate placeholder paired with the
+# do_fetch bb.fatal stub; it never gets exercised because the recipe is
+# blacklisted. Supply the real LIC_FILES_CHKSUM (against the LICENSE that
+# ships with the customer's licensed DEEPX SDK) when un-gating.
 LIC_FILES_CHKSUM = "file://LICENSE;md5=00000000000000000000000000000000"
 
-# Customer-private source tree.  Upstream:
-#   git://github.com/DEEPX-AI/dx_rt.git
-# but it requires authenticated access; the standard pattern is
-# to mirror locally + drop a tar into DL_DIR.
-SRC_URI = "${SP_MIRROR}/dx_rt-2.4.0.tar.gz"
-SRC_URI[sha256sum] = "00000000000000000000000000000000000000000000000000000000000000000"
+# UNBUILDABLE by design: this recipe has no resolvable source, no real
+# sha256, and no shippable LICENSE. DEEPX dx_rt is license-gated and is
+# NOT redistributed in this public layer. Removing the blacklist requires
+# a per-customer DEEPX agreement + a real source mirror, sha256, and
+# LICENSE file. See docs/vendor-partnerships.md and the alp-sdk-internal
+# repo for the licensed-vendor file placement.
+PNBLACKLIST[dx-rt] ?= "DEEPX dx_rt is license-gated and not redistributed in the public meta-alp-sdk layer; provide a real source mirror + sha256 + LICENSE and clear this blacklist (see comments in this recipe)."
+EXCLUDE_FROM_WORLD = "1"
 
+# Customer-private source tree.  Upstream is DEEPX's github.com/DEEPX-AI
+# dx_rt, which requires authenticated/licensed access; the standard
+# pattern is to mirror locally + drop a tar into DL_DIR. No public URL or
+# checksum is asserted here -- the do_fetch stub below hard-fails first.
+SRC_URI = ""
 PV = "2.4.0"
 
 S = "${WORKDIR}/dx_rt-${PV}"
 
 inherit module cmake
+
+# Hard stop: refuse to fetch/build until a real licensed source + LICENSE
+# + sha256 are wired in. This guards against the placeholder values ever
+# being treated as buildable.
+python do_fetch() {
+    bb.fatal("dx-rt is license-gated and unbuildable in the public "
+             "meta-alp-sdk layer: no redistributable DEEPX dx_rt source, "
+             "sha256, or LICENSE is shipped. Obtain dx_rt under a DEEPX "
+             "license, mirror it, set SRC_URI + SRC_URI[sha256sum] + a "
+             "real LIC_FILES_CHKSUM, then clear PNBLACKLIST[dx-rt].")
+}
 
 EXTRA_OECMAKE = "-DDX_RT_TARGET=DXM1 -DDX_RT_BUILD_DRIVER=ON"
 
