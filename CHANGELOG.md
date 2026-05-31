@@ -4697,10 +4697,10 @@ Deferred from this batch:
     `ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT` (hex, range 0x50..0x57)
     `ALP_SDK_HW_INFO_EEPROM_OFFSET` (int, default 0)
     `ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ` (int, default 400000)
-  BOARD_ID ADC cross-check remains a no-op stub (`adc_cross_check`)
-  pending the per-family generated header that maps `hw_rev` strings
-  to expected mV bins (depends on `scripts/alp_project.py` emitting
-  a runtime-readable digest of `metadata/e1m_modules/<family>/hw-revisions.yaml`).
+  The EEPROM manifest is the single authoritative source of the SoM
+  hardware revision; there is no SoM-side ADC cross-check (the earlier
+  no-op `adc_cross_check` stub was removed). A blank manifest returns
+  `ALP_ERR_NOT_PROVISIONED`; a corrupt one returns `ALP_ERR_IO`.
 
 - **`chips/pi3dbs12212/` Diodes PI3DBS12212A PCIe mux driver (2026-05-12).**
   GPIO-only control surface for the two passive 12 Gbps
