@@ -7,6 +7,16 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — `ALP_ERR_NOT_PROVISIONED` status code (2026-05-31)
+
+New `alp_status_t` enumerator `ALP_ERR_NOT_PROVISIONED` (= -15) in
+`<alp/peripheral.h>`.  Returned when the on-module EEPROM manifest is blank
+(all-0xFF or all-0x00) — i.e. the module has not yet been through the factory
+provisioning tool.  Distinct from `ALP_ERR_IO` (= -5), which covers a CRC
+mismatch or corrupted manifest on an otherwise-reachable EEPROM.  Callers that
+previously conflated the two conditions can now present a clearer diagnostic
+("unprogrammed" vs "corrupted").
+
 ### Added — doc-drift CI gate (2026-05-27)
 
 `scripts/check_doc_drift.py` + `.github/workflows/pr-doc-drift.yml`: an
