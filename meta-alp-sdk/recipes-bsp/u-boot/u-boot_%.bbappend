@@ -13,12 +13,12 @@
 # on-module hardware-info manifest from the RIIC0 24C128 EEPROM (0x50),
 # validates magic + schema_version + CRC32 (EEPROM-MANIFEST-SPEC.md), and
 # ONLY when the manifest reports family "v2n-m1" sets, before bootcmd:
-#     P80 = high  -> enable the PI3DBS12212A muxes
+#     P80 = low   -> enable the PI3DBS12212A muxes (PD active-low)
 #     P95 = low   -> route PCIe to the DEEPX path (path_0)
 #     PA6 = high  -> release M1_RESET (active-low)
 # So the same U-Boot is safe on a non-DEEPX V2N SoM (no manifest match ->
 # DEEPX path left untouched). RIIC0 (P30/P31) pinmux is added to s_init and
-# the i2c0 node enabled in rzv2n-evk.dts. (Pair with the kernel dtb's pcie
+# the i2c0 node enabled in rzv2n-dev.dts. (Pair with the kernel dtb's pcie
 # num-lanes=2.) DEEPX rails are always-on (current SoM rev's standalone
 # buck), so no rail sequencing is needed.
 #

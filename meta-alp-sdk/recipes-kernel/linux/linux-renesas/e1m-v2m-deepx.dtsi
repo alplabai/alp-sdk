@@ -9,8 +9,19 @@
  * the link needs. Power sequencing for the NPU rails is handled on-module
  * (in U-Boot / PMIC DT), not here.
  *
- * The portable view of these chips lives in alp-sdk's <alp/chips/...>
- * headers; detailed on-module integration stays in alp-sdk-internal.
+ *   M1_RESET     = PA6  (active-low: drive HIGH to release)
+ *   PCIe.MUX_PD  = P80  (LOW = muxes enabled; PD is active-low)
+ *   PCIe.MUX_SEL = P95  (LOW  = path_0 = DEEPX; HIGH = E1M edge)
+ *
+ * Source: alp-sdk include/alp/chips/{deepx_dxm1,pi3dbs12212}.h +
+ * alp-sdk-internal metadata/e1m_modules/v2n-m1/. gpio-hogs apply at
+ * pinctrl probe (before the PCIe controller), which is the order the
+ * link needs.
+ *
+ * Rails: the current SoM rev powers the DEEPX rails from the old
+ * standalone buck (always-on) — no sequencing needed. The target rev
+ * moves them to DA9292 ch3+ch4 + three BRD_I2C TPS628640 bucks (enable
+ * in U-Boot / PMIC DT then).
  *
  * STATUS: UNVALIDATED — first DEEPX PCIe bring-up; verify on the bench
  * (lspci shows the NPU, dxrt_init succeeds).
@@ -26,11 +37,13 @@
 };
 
 &pinctrl {
-	/* PCIe lane-mux power-down control: HIGH enables the on-module mux. */
+	/* P80 = PCIe.MUX_PD: LOW enables the PI3DBS12212A muxes (PD active-low).
+	 * U-Boot sets this before the RC probes; this hog must match (drive LOW)
+	 * or it would re-disable the mux ~93ms after the link trains. */
 	deepx-pcie-mux-pd-hog {
 		gpio-hog;
 		gpios = <RZV2N_GPIO(8, 0) GPIO_ACTIVE_HIGH>;
-		output-high;
+		output-low;
 		line-name = "deepx_pcie_mux_pd";
 	};
 
