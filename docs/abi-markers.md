@@ -63,7 +63,7 @@ the PR for experimental symbols.
 | `ble.h`               | `[ABI-STABLE]`     | v0.2 decl + v0.3 impl; advertise + connect + GATT-read shape stable. |
 | `inference.h`         | `[ABI-STABLE]`     | v0.3 dispatcher (auto/cpu/ethos_u/drpai/deepx_dxm1); v0.5 adds `alp_inference_open_alpmodel()` + the `.alpmodel` loader/selection engine. |
 | `mproc.h`             | `[ABI-STABLE]`     | v0.3 mailbox + shmem + hwsem.                                     |
-| `hw_info.h`           | `[ABI-STABLE]`     | v0.3 EEPROM manifest + BOARD_ID ADC.                              |
+| `hw_info.h`           | `[ABI-STABLE]`     | v0.3 EEPROM manifest (sole SoM-rev source); `som_board_id_mv` removed pre-1.0 (no-legacy-compat). |
 | `e1m_pinout.h`        | `[ABI-STABLE]`     | v0.1 portable instance IDs (`E1M_I2C0`, etc.); pinned by e1m-spec. |
 | `soc_caps.h`          | `[ABI-STABLE]`     | v0.1 generated; capability constants.                              |
 | `gui.h`               | `[ABI-STABLE]`     | v0.2 LVGL re-export shim.                                          |

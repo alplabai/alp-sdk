@@ -63,7 +63,9 @@ typedef enum {
         -12, /**< .alpmodel has no blob for any backend available on this SoM (and no CPU fallback). */
     ALP_ERR_NO_FIT =
         -13, /**< A backend matched but no blob fits the device NPU envelope (e.g. arena SRAM too small), and no CPU fallback. */
-    ALP_ERR_NOT_FOUND = -14 /**< An explicitly-requested backend is absent from the package. */
+    ALP_ERR_NOT_FOUND = -14, /**< An explicitly-requested backend is absent from the package. */
+    ALP_ERR_NOT_PROVISIONED =
+        -15 /**< Hardware identity store (e.g. the on-module EEPROM manifest) is blank / unprogrammed -- the module has not been provisioned by the factory tool yet. */
 } alp_status_t;
 
 /**
