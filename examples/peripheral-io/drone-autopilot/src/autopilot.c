@@ -289,6 +289,15 @@ void autopilot_nav_loop(autopilot_state_t *s)
     }
 }
 
+/* Re-export the SBUS RC UART handle.  The handle is owned here
+ * (opened in autopilot_init); main.c's rc_loop pulls frame bytes
+ * through this accessor so the framing/orchestration stays in
+ * main.c while the bus ownership stays with the sensors. */
+alp_uart_t *autopilot_rc_uart(void)
+{
+    return s_rc_uart;
+}
+
 void autopilot_emit_motors(const autopilot_state_t *s)
 {
     for (int i = 0; i < AUTOPILOT_N_MOTORS; i++) {

@@ -272,10 +272,12 @@ cannot interleave a partial state.
 
 PWM channel ids are an **opaque enum** assigned by the GD32 firmware.
 Mapping to GD32 timer + GTIOC pad lives in the firmware's
-`pwm_channel_map[]`.  Where the V2N module exposes both a Renesas
-PWM route and a GD32 PWM route for the same E1M signal (E1M PWM6 +
-PWM7 since the 2026-05-11 schematic revision), the **GD32 path is the
-authoritative one** for the V2N base SoM.
+`pwm_channel_map[]`.  On the V2N base SoM **all eight** E1M PWM
+channels (PWM0–PWM7) are driven by the GD32 IO MCU — the Renesas
+drives none.  See `pwm_routing` in
+[`metadata/chips/gd32g553.yaml`](../metadata/chips/gd32g553.yaml)
+for the per-channel `e1m` → GD32 timer + pad map (the single source
+of truth).
 
 ### 3.3 ADC samples
 

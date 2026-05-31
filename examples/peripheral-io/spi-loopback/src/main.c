@@ -22,7 +22,6 @@
  * CS internally, or the device doesn't need one (e.g. shift
  * register chains).  Defined locally to keep the example
  * self-contained; real apps include this from <alp/peripheral.h>. */
-#define ALP_SPI_NO_CS 0xFFFFFFFFu
 
 int main(void)
 {

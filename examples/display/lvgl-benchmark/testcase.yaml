@@ -13,6 +13,10 @@ tests:
   alp_sdk.examples.lvgl_benchmark.native_sim:
     platform_allow: native_sim/native/64
     build_only: true
+    # native_sim has no real panel -- bind the dummy display via the
+    # per-example overlay so the dummy-panel knob never reaches the
+    # real-silicon build.
+    extra_args: EXTRA_CONF_FILE=native_sim.conf
   alp_sdk.examples.lvgl_benchmark.aen:
     platform_allow:
       - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp

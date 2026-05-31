@@ -1,0 +1,50 @@
+# Alp SDK chip manifest: TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor.
+#
+# On-module wireless coprocessor on the E1M-AEN family.  The Alif
+# host drives it over the inter-chip SPI1 control protocol; see
+# chips/cc3501e/, include/alp/chips/cc3501e.h, the wire protocol in
+# include/alp/protocol/cc3501e.h, and docs/cc3501e-bridge.md.
+schema_version:   1
+chip_id:          cc3501e
+driver_status:    partial          # call shape + framing; reset()
+                                   # returns NOSUPPORT until the EVK
+                                   # overlay declares the WIFI.EN /
+                                   # NRST pins as alp_gpio_* lines.
+display_name:     "TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor"
+vendor:           ti
+mpn_population:
+  - "CC3501E"
+
+datasheet:
+  primary:        "TI SWRU626"     # CC3501E technical reference manual
+
+bus:              spi              # inter-chip SPI1 host-control protocol
+spi:
+  interface:      SPI1             # E1M_SPI1 inter-chip bus
+  mode:           [0]
+  word_bits:      8
+  max_clock_hz:   8000000          # current default per the header lifecycle
+                                   # example; SWRU626 §18 allows higher --
+                                   # final value pending signal-integrity sweep.
+
+signals:
+  # Side-channel control lines the Alif drives via alp_gpio_*.  The
+  # exact E1M-AEN pad routes are baked from
+  # metadata/e1m_modules/aen/inter-chip.tsv; left here as roles only.
+  - { name: WIFI_EN,     direction: output, role: "wireless subsystem enable", route: TBD }
+  - { name: E_WIFI_NRST, direction: output, role: "active-low hardware reset", route: TBD }
+
+protocol:
+  header:         "include/alp/protocol/cc3501e.h"
+  doc:            "docs/cc3501e-bridge.md"
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_CC3501E
+  baremetal:      ALP_SDK_CHIP_CC3501E
+
+families:
+  - aen
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard

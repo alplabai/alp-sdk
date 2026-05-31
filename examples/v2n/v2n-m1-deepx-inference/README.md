@@ -68,8 +68,8 @@ west flash
 ```
 
 Replace `k_placeholder_model` in `src/main.c` with your own
-DXNN-compiled model (use DEEPX's `dx-compiler` toolchain to
-produce a `.dxnn` file from a TFLite source) before flashing.
+DXNN-compiled model (use DEEPX's `dxcom` host compiler to produce
+a `.dxnn` file from an ONNX source) before flashing.
 
 ## Verification
 

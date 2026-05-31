@@ -4,15 +4,19 @@ sample:
   name: lvgl-music-player
   description: |
     Wraps upstream lv_demo_music() (album carousel + time slider
-    + equaliser) on ST7789, paired with the WM8960 codec wiring
-    for the audio side.  native_sim stubs the codec path; AEN
-    target verifies the cross-compile.
+    + equaliser) on ST7789.  Display-only UI demo -- no audio path
+    (lv_demo_music() only animates).  native_sim builds the UI
+    against the dummy display; AEN target verifies the cross-compile.
 common:
-  tags: lvgl audio demo example codec
+  tags: lvgl demo example display
 tests:
   alp_sdk.examples.lvgl_music_player.native_sim:
     platform_allow: native_sim/native/64
     build_only: true
+    # native_sim has no real panel -- bind the dummy display via the
+    # per-example overlay so the dummy-panel knob never reaches the
+    # real-silicon build.
+    extra_args: EXTRA_CONF_FILE=native_sim.conf
   alp_sdk.examples.lvgl_music_player.aen:
     platform_allow:
       - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp

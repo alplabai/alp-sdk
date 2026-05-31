@@ -676,8 +676,8 @@ and it deserves the most attention before v0.4.
 | Reset cause                       | Reset level         | Affects host? |
 |-----------------------------------|---------------------|---------------|
 | RSTN pin OR POR                   | Power-On Reset      | Yes — `cc3501e_reset()` |
-| RVML / RVMH (rail voltage monitor)| Power-On Reset      | Yes — uncatchable from host |
-| Brownout detection (VDDMAIN ~1.6 V)| Device AON Reset   | Yes — uncatchable, but firmware can report on next PING |
+| RVML / RVMH (rail voltage monitor, ~1.3 V)| Power-On Reset | Yes — uncatchable from host |
+| Brownout detection (VDDMAIN < 1.71 V)| Device AON Reset | Yes — uncatchable, but firmware can report on next PING |
 | M33 watchdog                      | Device AON Reset    | Indirectly — firmware should report reset cause on first PING reply |
 | M33 self-reset (`CMD_RESET`)      | Device AON Reset    | Yes — already in v1 protocol as opcode `0x02` |
 | Debug-subsystem reset             | Debug-aware path    | Yes — flash.py / dev path |

@@ -56,7 +56,7 @@ inference:
   preferred_backend:    deepx_dxm1
 
 capabilities:
-  deepx_dx:             true       # DEEPX DX-M1 NPU on-module via PCIe.
+  deepx_dxm1:           true       # DEEPX DX-M1 NPU on-module via PCIe.
   cau:                  true       # GD32G553 supervisor's CAU accessible via bridge.
   optiga_trust_m:       true
   quadspi_dma:          true       # GD32-side QuadSPI accessible via bridge.

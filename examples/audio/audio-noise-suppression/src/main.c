@@ -157,6 +157,17 @@ static int16_t s_pcm_out[BLOCK_FRAMES * CHANNELS];
  * <alp/dsp.h> for the contract. */
 static float s_bin_mag[FFT_POINTS];
 
+/* FFT input staging buffer.  alp_dsp_chain_apply_bins() consumes
+ * EXACTLY FFT_POINTS (256) samples and returns ALP_ERR_OUT_OF_RANGE
+ * if handed fewer.  A mic block is only BLOCK_FRAMES (240) samples,
+ * so we accumulate consecutive blocks here until we have a full
+ * 256-sample frame, then run the FFT once and carry the remainder
+ * forward.  (A production denoiser uses 50%-overlap framing; this is
+ * the simplest contiguous-fill scheme that keeps the FFT size and
+ * the input length in agreement.) */
+static int16_t s_fft_in[FFT_POINTS];
+static size_t  s_fft_fill;   /* samples currently staged in s_fft_in */
+
 /* ── DSP chain: Hann window + 256-pt FFT ───────────────────────
  *
  * Two stages:
@@ -276,18 +287,49 @@ static void process_one_block(void)
         memset(s_pcm_in, 0, sizeof(s_pcm_in));
     }
 
-    /* 2. DSP preprocess (window + FFT -> magnitude bins). */
+    /* 2. DSP preprocess (window + FFT -> magnitude bins).
+     *
+     * Stage the mic block into the FFT input buffer.  The FFT needs a
+     * full FFT_POINTS (256) frame; one mic block is only BLOCK_FRAMES
+     * (240).  Append, and only run the chain once we have >= 256
+     * staged samples -- otherwise apply_bins() would return
+     * ALP_ERR_OUT_OF_RANGE on every short block. */
+    bool fft_ran = false;
     if (g_state.dsp_ok) {
-        size_t got = 0;
-        (void)alp_dsp_chain_apply_bins(g_state.dsp,
-                                       s_pcm_in, BLOCK_FRAMES,
-                                       s_bin_mag, FFT_POINTS, &got);
+        size_t take = BLOCK_FRAMES;
+        if (s_fft_fill + take > FFT_POINTS) {
+            take = FFT_POINTS - s_fft_fill;
+        }
+        memcpy(&s_fft_in[s_fft_fill], s_pcm_in, take * sizeof(int16_t));
+        s_fft_fill += take;
+
+        if (s_fft_fill >= FFT_POINTS) {
+            size_t got = 0;
+            alp_status_t st =
+                alp_dsp_chain_apply_bins(g_state.dsp,
+                                         s_fft_in, FFT_POINTS,
+                                         s_bin_mag, FFT_POINTS, &got);
+            if (st != ALP_OK) {
+                LOG_WRN("dsp apply_bins failed: st=%d (block %u)",
+                        (int)st, (unsigned)g_state.blocks_run);
+            } else {
+                fft_ran = true;
+            }
+            /* Carry the leftover tail of this block (the samples that
+             * didn't fit before the FFT fired) to the front of the
+             * next frame. */
+            size_t leftover = BLOCK_FRAMES - take;
+            if (leftover > FFT_POINTS) leftover = FFT_POINTS;
+            memmove(s_fft_in, &s_pcm_in[take], leftover * sizeof(int16_t));
+            s_fft_fill = leftover;
+        }
     }
 
     /* 3. Inference (per-bin gain mask).  The output tensor is the
      *    mask itself in the trained model; v0.5 just invokes for
-     *    framing-path correctness. */
-    if (g_state.inf_ok) {
+     *    framing-path correctness.  Only run when a fresh spectrum
+     *    was produced this block. */
+    if (g_state.inf_ok && fft_ran) {
         push_bins_into_model(g_state.inf, s_bin_mag, FFT_POINTS);
         (void)alp_inference_invoke(g_state.inf);
         /* TODO(v0.6): alp_inference_get_output() -> gain mask ->

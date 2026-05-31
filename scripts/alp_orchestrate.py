@@ -3204,7 +3204,7 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
         lines.append(f"-DALP_TOOLCHAIN={slice_.toolchain}")
     if capabilities.get("drp_ai"):
         lines.append("-DALP_SDK_USE_DRPAI=ON")
-    if capabilities.get("deepx_dx"):
+    if capabilities.get("deepx_dxm1"):
         lines.append("-DALP_SDK_USE_DEEPX_DXM1=ON")
     return "\n".join(lines) + "\n"
 

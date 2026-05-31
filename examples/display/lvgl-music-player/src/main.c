@@ -9,26 +9,19 @@
  * LVGL's bundled demos.  Renders an album-art carousel, time
  * slider, track list, and a real-time equaliser visualiser.
  *
+ * This is a DISPLAY-ONLY demo.  lv_demo_music() animates the
+ * progress bar + equaliser bands on its own timer; it does not
+ * decode or play any audio, and this file makes no alp_i2s_* or
+ * codec calls.  A real audio output path (codec over I²S + an MP3
+ * decoder) is out of scope -- the point here is the LVGL UI.
+ *
  *
  * ── Hardware wiring (E1M-EVK reference) ────────────────────────
  *
- *   ┌──────────────────┐   SPI0     ┌────────────────────┐
+ *   ┌──────────────────┐   SPI      ┌────────────────────┐
  *   │  E1M-AEN701 SoM  │ ─────────▶ │ ST7789 240×320 TFT │
- *   │ + Cortex-M55 HE  │   GPIO     │  (display)         │
+ *   │ + Cortex-M55 HP  │   GPIO     │  (display)         │
  *   └──────────────────┘            └────────────────────┘
- *           │
- *           │  I²C0 + I²S0
- *           ▼
- *   ┌────────────────────┐   line-out   ┌────────┐
- *   │ Wolfson WM8960     │ ───────────▶ │ headphone │
- *   │ codec              │              │  out      │
- *   └────────────────────┘              └────────┘
- *
- * The demo's UI itself doesn't drive audio -- it only animates the
- * progress bar + equaliser.  Wiring the actual MP3 decode is left
- * to the `audio` task in main(); we kick off the player but stub
- * the I²S frames to silence so the example builds clean on
- * native_sim too.
  */
 
 #include <zephyr/kernel.h>
@@ -59,13 +52,9 @@ int main(void)
 
     display_blanking_off(display);
 
-    /*
-     * TODO(audio): wire the decoded PCM frames from minimp3 into
-     * alp_i2s_write(...).  For native_sim the codec is absent --
-     * we just animate the UI and hand silence to the I²S sink.
-     * Real codec bring-up gates on the v1.0 HiL sweep.
-     */
-
+    /* lv_demo_music() owns its own animation timer; from here on
+     * main just pumps the LVGL task handler.  No audio path -- this
+     * is a UI-only demo (see the file header). */
     while (1) {
         const uint32_t sleep_ms = lv_task_handler();
         k_msleep(MIN(sleep_ms, 10u));

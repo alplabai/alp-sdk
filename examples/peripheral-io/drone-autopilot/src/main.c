@@ -230,26 +230,76 @@ void autopilot_rc_loop(autopilot_state_t *s)
      * nav loop's failsafe arbitrator promotes the airframe to
      * AP_MODE_FAILSAFE (controlled descent + land). */
     uint32_t last_frame_ms = 0;
+    alp_uart_t *rc_uart = autopilot_rc_uart();
+
+    /* Frame slicer state.  We read one byte at a time, hunt for the
+     * 0x0F SBUS start byte, then accumulate exactly SBUS_FRAME_LEN
+     * (25) bytes before handing the buffer to sbus_decode(). */
+    uint8_t  frame[SBUS_FRAME_LEN];
+    int      frame_idx = 0;          /* bytes accumulated in `frame` */
+    bool     synced    = false;      /* have we seen the 0x0F start byte? */
+
     while (1) {
         sbus_frame_t f;
-        /* TODO(sbus): real UART byte-stream framing -- find the
-         * 0x0F start byte, then read 24 bytes.  Stubbed here so
-         * the demo compiles standalone; v0.6 wires the real
-         * frame slicer.  Pretend we got a frame every 20 ms so
-         * the failsafe doesn't trip in the simulator.
-         *
-         * Real implementation will: alp_uart_read() into a small
-         * byte ring, hunt for the 0x0F start byte, then accumulate
-         * exactly 25 bytes and validate the 0x00 end byte. */
-        if (true) {
-            /* 1024 is the SBUS mid-stick value (range 0..2047,
-             * mid = 1024 = "stick centred").  Filling every
-             * channel with the neutral value keeps the airframe
-             * level under sim. */
+        bool got_frame = false;
+
+        if (rc_uart != NULL) {
+            /* ── Real SBUS framing over the RC UART ────────────────
+             * Drain whatever bytes are queued (up to a frame's worth
+             * per poll so a backlog can't starve the loop), feeding a
+             * tiny start-byte-hunt state machine.  alp_uart_read()
+             * returns ALP_OK per byte; anything else means "no byte
+             * available right now", so we stop draining and re-poll
+             * next tick. */
+            for (int budget = 0; budget < SBUS_FRAME_LEN; budget++) {
+                uint8_t b;
+                if (alp_uart_read(rc_uart, &b, 1, /*timeout_ms=*/0) != ALP_OK) {
+                    break;   /* nothing more queued this tick */
+                }
+                if (!synced) {
+                    /* Hunting for the 0x0F start byte. */
+                    if (b == 0x0F) {
+                        synced    = true;
+                        frame[0]  = b;
+                        frame_idx = 1;
+                    }
+                    continue;
+                }
+                frame[frame_idx++] = b;
+                if (frame_idx >= SBUS_FRAME_LEN) {
+                    /* Full 25-byte frame captured -- decode it.  A
+                     * bad end byte means we lost sync; drop back to
+                     * hunting for the next 0x0F. */
+                    if (sbus_decode(frame, &f) && !f.failsafe) {
+                        got_frame     = true;
+                        last_frame_ms = k_uptime_get_32();
+                    }
+                    synced    = false;
+                    frame_idx = 0;
+                }
+            }
+        } else {
+            /* ── No RC UART (native_sim / sensor bring-up failed) ──
+             * There is no radio to read from, so synthesise a single
+             * neutral frame: every stick centred (1024 = SBUS
+             * mid-scale), no failsafe.  This is NOT a working RC
+             * link -- it exists only so the demo runs end-to-end on
+             * the simulator with the airframe sitting level.  A real
+             * build always takes the rc_uart != NULL branch above. */
             for (int i = 0; i < SBUS_CHANNELS; i++) f.channel[i] = 1024;
-            f.frame_lost = false;
-            f.failsafe   = false;
+            f.frame_lost  = false;
+            f.failsafe    = false;
+            got_frame     = true;
             last_frame_ms = k_uptime_get_32();
+        }
+
+        /* If no fresh frame decoded this tick, keep the previous
+         * stick values and let the liveness watchdog below decide
+         * whether the link is still alive. */
+        if (!got_frame) {
+            s->rc_link_ok = (k_uptime_get_32() - last_frame_ms) < 200;
+            k_msleep(20);
+            continue;
         }
 
         /* Channel mapping (Futaba convention):

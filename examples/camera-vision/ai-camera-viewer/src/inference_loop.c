@@ -27,10 +27,8 @@
 #include <string.h>
 
 #include "alp/peripheral.h"
-#include "alp/e1m_pinout.h"
 #include "alp/camera.h"
 #include "alp/inference.h"
-#include "alp/chips/ov5640.h"
 
 #include "inference_loop.h"
 

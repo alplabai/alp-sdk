@@ -8,7 +8,7 @@
 som:
   sku: E1M-V2M101  # V2N-M1 variant with DEEPX DX-M1 NPU
 
-preset: e1m-evk
+preset: e1m-x-evk
 cores:
   a55_cluster:
     os: "off"

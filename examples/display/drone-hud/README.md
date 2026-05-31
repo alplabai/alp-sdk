@@ -14,16 +14,22 @@ on-board sensor chips.
   INA236 battery monitor, ST7789 TFT) through the portable
   `<alp/*>` surfaces.  Zero vendor-specific symbols in the app
   code.
-- The **`madgwick_ahrs`** library fuses raw IMU samples into a
-  stable attitude estimate.  Loader-emitted `CONFIG_ALP_MADGWICK_FPU=y`
-  on AEN; the `tmu_cordic` CORDIC path fires on V2N once the
-  GD32-bridge build lands.
+- Attitude is a **placeholder**, not real fusion.  `board.yaml`
+  declares the **`madgwick_ahrs`** library, but `update_attitude()`
+  in `sensors.c` is currently a bare gyro Euler integrator: it
+  discards the accelerometer and so **drifts** without a gravity
+  reference.  It only exists to animate the HUD.  Wiring the real
+  Madgwick fuse (into a stable quaternion, with the loader-emitted
+  `CONFIG_ALP_MADGWICK_FPU=y` on AEN / the `tmu_cordic` path on V2N)
+  is the v0.6 work.
 - **LVGL** composes the attitude indicator, GPS readout, battery
   telemetry, and flight mode into a coherent HUD layout.
-- **Three threads**: render (main, 30 fps), IMU+AHRS (100 Hz),
-  slow telemetry (5 Hz).  No locks needed -- the
-  `drone_telemetry_t` struct is single-writer/single-reader per
-  field.
+- **Three threads**: render (main, 30 fps), IMU sample (100 Hz),
+  slow telemetry (5 Hz).  Each `drone_telemetry_t` field is
+  single-writer/single-reader and main renders from a once-per-frame
+  copy of the struct.  That copy is a plain (non-atomic) assignment,
+  so it can in principle catch a torn field -- harmless for a
+  display-only HUD; a control loop would add a mutex/seqlock.
 
 ## Hardware needed
 

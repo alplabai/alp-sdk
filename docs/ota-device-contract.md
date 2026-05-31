@@ -27,15 +27,21 @@ the GD32 application bootloader does, once the bootloader exists.
 The server side (Hakan's repo) hands the device an artifact
 (`.mender` tarball) over HTTPS.  The device must:
 
-1. **Authenticate.** Server-provided artifact must be signed with
-   an ECDSA-P256 key that chains back to the OPTIGA Trust M's
-   provisioned trust root.  See [`docs/secure-boot.md`](secure-boot.md)
-   for the trust model.
+1. **Authenticate.** The server-provided `.mender` artifact must be
+   signed with an ECDSA-P256 key whose signing half is held in the
+   build/sign side's OPTIGA Trust M (see
+   [`docs/secure-boot.md`](secure-boot.md) for the trust model).  On
+   the device, the verification anchor is the matching **Mender
+   artifact-verify public key provisioned into the rootfs** (the
+   `/etc/mender/` verify key / `server.crt` written at build time) —
+   the device does *not* invoke a secure element for per-artifact
+   verification.
 2. **Stage.** Mender writes the new root-FS image to the inactive
    A/B slot on eMMC.  The active slot keeps running.
-3. **Verify.** Mender computes SHA-256 over the staged slot, asks
-   the OPTIGA Trust M to verify the signature against the trusted
-   root, refuses to commit on a mismatch.
+3. **Verify.** The mender-client verifies the artifact's ECDSA-P256
+   signature against that provisioned rootfs public key (the same
+   anchor as [`docs/ota.md`](ota.md)) and refuses to commit on a
+   mismatch.
 4. **Commit + reset.** Mender flips the bootloader's A/B selector,
    issues a reset.
 5. **Confirm health post-reset.** Within `MENDER_INVENTORY_INTERVAL`

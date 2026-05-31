@@ -62,8 +62,8 @@ Per UG Table 7-4, the ROM's first-stage bootloader keys off the
 | Reset cause                       | What the ROM does next                      |
 |-----------------------------------|---------------------------------------------|
 | Reset pin OR POR                  | Cold-boot, full Chain-of-Trust auth         |
-| RVML / RVMH (rail voltage monitor)| Cold-boot                                   |
-| Brown-out (VDDMAIN ~1.3 V trip)   | Cold-boot                                   |
+| RVML / RVMH (rail voltage monitor, ~1.3 V) | Cold-boot                          |
+| Brown-out (VDDMAIN < 1.71 V trip, SWRU626 §7.1.4) | Cold-boot                   |
 | M33 WDT                           | Warm-boot (watchdog-recovery flow)          |
 | Self-reset by M33                 | Warm-boot                                   |
 | Debug-subsystem reset             | Boot into debug-aware path                  |
