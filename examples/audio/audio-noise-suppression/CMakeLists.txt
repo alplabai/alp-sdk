@@ -18,18 +18,22 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # The audio loop is mic-in (TAS2563 over I2S) -> <alp/dsp.h>
 # preprocess (FFT bin -> noise-floor estimate) -> <alp/inference.h>
 # denoiser -> speaker-out (TAS2563 over the same I2S link).
+# Emit into a generated/ subdir so the file escapes Zephyr's
+# ${APPLICATION_BINARY_DIR}/*.conf GLOB, and APPEND (don't overwrite)
+# OVERLAY_CONFIG so the per-example native_sim.conf can also layer in.
+set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
 execute_process(
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py
             --input  ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --output ${CMAKE_CURRENT_BINARY_DIR}/alp.conf
+            --output ${_alp_generated}
             --emit zephyr-conf
     RESULT_VARIABLE rc
 )
 if(NOT rc EQUAL 0)
     message(FATAL_ERROR "alp_project.py failed (rc=${rc})")
 endif()
-set(OVERLAY_CONFIG ${CMAKE_CURRENT_BINARY_DIR}/alp.conf)
+list(APPEND OVERLAY_CONFIG ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(audio_noise_suppression LANGUAGES C)

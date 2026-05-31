@@ -13,10 +13,17 @@
  *
  * Showcases the v0.5 SDK story end-to-end: one app drives four
  * different chips through the portable `<alp/...>` peripheral
- * surfaces, the `madgwick_ahrs` library fuses raw IMU samples
- * into a stable quaternion, and LVGL composes the result into
- * an artificial-horizon HUD that wouldn't look out of place on
- * a commercial flight controller.
+ * surfaces and LVGL composes the result into an artificial-horizon
+ * HUD that wouldn't look out of place on a commercial flight
+ * controller.
+ *
+ * Attitude is a PLACEHOLDER, not real fusion.  board.yaml declares
+ * the `madgwick_ahrs` library, but update_attitude() in sensors.c is
+ * a bare gyro Euler integrator: it discards the accelerometer and
+ * therefore DRIFTS without bound (no gravity reference to correct
+ * against).  It exists only to give the HUD something to animate.
+ * The real Madgwick AHRS fuse into a stable quaternion is the v0.6
+ * port -- do not present this as working attitude estimation.
  *
  *
  * ── Thread architecture ────────────────────────────────────────
@@ -29,9 +36,15 @@
  * keeps the LVGL renderer waiting.  The IMU thread runs at a
  * higher priority than main so attitude updates land on time.
  *
- * Shared state is the `drone_telemetry_t` struct in sensors.h --
- * single-writer + single-reader per field, so a plain volatile
- * snapshot read from main is correct without locks.
+ * Shared state is the `drone_telemetry_t` struct in sensors.h.
+ * Each field has a single writer (one sensor thread) and a single
+ * reader (main), and main copies the whole struct once per frame
+ * before reading it.  Note this copy is NOT atomic and the struct
+ * is NOT volatile, so a frame can in principle catch a half-updated
+ * field (a torn read) -- harmless here because the values are only
+ * drawn on a HUD, not used for control.  A control loop would guard
+ * the snapshot with a mutex or a seqlock; this demo deliberately
+ * does not, to keep the render path lock-free and simple.
  *
  *
  * ── What "verified" would mean ─────────────────────────────────
@@ -123,9 +136,12 @@ int main(void)
     k_thread_name_set(&telem_thread, "slow_telem");
 
     /* Main loop: drain the LVGL task queue + refresh the on-screen
-     * widgets from the shared telemetry snapshot.  We snapshot
-     * the struct once per frame so a partial sensor update mid-
-     * render doesn't show a torn value. */
+     * widgets from the shared telemetry snapshot.  We copy the
+     * struct once per frame and render from the copy so a field
+     * can't change underneath a single hud_ui_apply_telemetry()
+     * pass.  The copy itself is a plain (non-atomic) struct
+     * assignment, so it can still straddle a concurrent writer --
+     * acceptable for a display-only HUD (see the file header). */
     while (1) {
         drone_telemetry_t snapshot = g_telem;
         hud_ui_apply_telemetry(&snapshot);

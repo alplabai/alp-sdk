@@ -1,0 +1,14 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * native_sim has no DAC controller and no GD32 supervisor bridge.
+ * The alp-dac0 alias resolves to a NULL spec, so alp_dac_open()
+ * returns NULL with last_error = ALP_ERR_NOT_READY and the example
+ * prints its diagnostic + "[dac] done" and exits.  This overlay
+ * exists so the build resolves cleanly on native_sim/native/64 the
+ * same way the sibling adc-voltmeter example does (the DAC is the
+ * output half of the same <alp/adc.h> analog-converter surface).
+ *
+ * Auto-loaded by Zephyr when building for native_sim/native/64.
+ */

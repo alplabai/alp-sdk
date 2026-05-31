@@ -74,11 +74,12 @@ The demo ships without a model file (avoiding the binary-blob
 license question).  To run a real YOLOv8-tiny:
 
 ```
-# 1. Compile your .tflite for DEEPX DX-M1 with the DEEPX SDK:
-dx_compiler --target dx-m1 --output yolov8n.dxnn yolov8n.tflite
+# 1. Compile your ONNX model for DEEPX DX-M1 with the dxcom
+#    host compiler (ONNX input + a JSON config + calibration data):
+dxcom -m yolov8n.onnx -c yolov8n_config.json -o out/
 
-# 2. Convert to a C header:
-xxd -i yolov8n.dxnn > models/yolov8n_dxnn.h
+# 2. Convert the produced .dxnn to a C header:
+xxd -i out/yolov8n.dxnn > models/yolov8n_dxnn.h
 
 # 3. Replace the s_model[] placeholder in src/main.c:
 #    #include "models/yolov8n_dxnn.h"

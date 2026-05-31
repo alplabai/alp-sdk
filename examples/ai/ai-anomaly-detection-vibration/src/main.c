@@ -52,9 +52,15 @@
  *   Vela-compiled `.tflite` into `models/` and point the loader
  *   at it.  The placeholder model bytes here let the framing
  *   path compile + run on native_sim and HiL.
- * - The native_sim build can't talk to a real LSM6DSO, so the
- *   IMU open returns NOSUPPORT; the loop fills the window with
- *   zeros and the framing path still exercises end-to-end.
+ * - The native_sim build can't talk to a real LSM6DSO, so the IMU
+ *   open returns NOSUPPORT and the loop fills the window with a
+ *   SYNTHESIZED deterministic vibration signal (healthy sinusoid +
+ *   an injected fault transient on alternate windows) instead of
+ *   zeros, so the score is meaningful rather than a flat 0.0000.
+ * - With the 1-byte stub model the real inference output is empty,
+ *   so the demo falls back to a transparent crest-factor heuristic
+ *   and labels each line src=model|heuristic so the score is never
+ *   presented as something it isn't.  A real model replaces both.
  * - The "dashboard" is a single printf line per window.  Real
  *   integrations forward the score via <alp/iot.h> MQTT or a
  *   field-bus (OPC-UA / Modbus / EtherCAT).
@@ -129,15 +135,50 @@ static inline float accel_magnitude_g(const lsm6dso_axes_t *a)
     return sqrtf(fx * fx + fy * fy + fz * fz);
 }
 
+/* Synthesize a deterministic vibration window when no IMU is
+ * present (native_sim / missing chip).  A flat zero-fill would make
+ * every score read 0.0000 and teach the reader nothing, so instead
+ * we generate a repeatable signal: a 1 g baseline plus a dominant
+ * sinusoid (the motor's running vibration), and -- on a fixed subset
+ * of windows -- an injected high-amplitude transient (a simulated
+ * bearing-fault "knock").  `iter` selects healthy vs faulty windows
+ * so the demo shows the score moving between the two.
+ *
+ * This is SIMULATED sensor data, not a recording; it exists so the
+ * pipeline produces a meaningful, varying score offline.  On real
+ * silicon fill_window() reads the actual LSM6DSO instead. */
+static void synthesize_window(float *out, size_t n, int iter)
+{
+    /* Every 2nd window carries the injected fault transient. */
+    const bool faulty = (iter % 2) == 1;
+    for (size_t i = 0; i < n; i++) {
+        /* ~1 g gravity baseline + a 60 Hz-ish running sinusoid
+         * (period chosen against the 256-sample window for a clean
+         * repeat). */
+        float v = 1.0f + 0.15f * sinf((2.0f * 3.14159265f * 8.0f * (float)i) / (float)n);
+        if (faulty) {
+            /* Injected impulsive transient: a decaying knock part-way
+             * through the window.  Big enough to dominate the crest
+             * factor / RMS so a vibration-anomaly model (or the
+             * heuristic fallback below) flags it. */
+            if (i >= n / 3 && i < n / 3 + 16) {
+                float k = (float)(i - n / 3);
+                v += 1.2f * expf(-k / 4.0f);
+            }
+        }
+        out[i] = v;
+    }
+}
+
 /* Fill the window from the IMU.  When the IMU handle is NULL --
- * native_sim or a missing chip -- we zero-fill so the framing
- * path still runs; the customer sees a flat anomaly score that
- * confirms the model is being invoked even without a real
- * sensor. */
-static void fill_window(lsm6dso_t *imu, float *out, size_t n)
+ * native_sim or a missing chip -- we fall back to a synthesized
+ * deterministic waveform (see synthesize_window) so the framing
+ * path still runs AND the score is meaningful rather than a flat
+ * zero. */
+static void fill_window(lsm6dso_t *imu, float *out, size_t n, int iter)
 {
     if (imu == NULL) {
-        memset(out, 0, n * sizeof(*out));
+        synthesize_window(out, n, iter);
         return;
     }
     for (size_t i = 0; i < n; i++) {
@@ -209,6 +250,32 @@ static float read_anomaly_score(alp_inference_t *inf)
     return 0.0f;
 }
 
+/* Transparent heuristic anomaly score, used ONLY when the real
+ * inference backend produced nothing usable (the v0.5 stub model, or
+ * native_sim with no NPU).  This is NOT the trained model -- it's a
+ * simple crest-factor measure (peak / RMS): a clean sinusoid sits
+ * near ~1.4, while an impulsive bearing-fault transient pushes it
+ * higher.  Normalised so a healthy window lands near 0 and a faulty
+ * one well above it, giving the demo a meaningful, varying score
+ * offline.  A real deployment ignores this entirely and uses the
+ * model output from read_anomaly_score(). */
+static float heuristic_anomaly_score(const float *win, size_t n)
+{
+    if (n == 0) return 0.0f;
+    float sumsq = 0.0f;
+    float peak  = 0.0f;
+    for (size_t i = 0; i < n; i++) {
+        float a = fabsf(win[i]);
+        sumsq += win[i] * win[i];
+        if (a > peak) peak = a;
+    }
+    float rms = sqrtf(sumsq / (float)n);
+    if (rms <= 0.0f) return 0.0f;
+    float crest = peak / rms;          /* ~1.41 for a pure sinusoid. */
+    float score = crest - 1.41f;       /* clean window -> ~0. */
+    return score < 0.0f ? 0.0f : score;
+}
+
 int main(void)
 {
     printf("[anomaly] alp-sdk vibration anomaly detection demo\n");
@@ -260,25 +327,41 @@ int main(void)
      * native_sim it returns instantly and we exit after one
      * iteration so the twister harness sees a clean "done". */
     for (int iter = 0; iter < 4; iter++) {
-        fill_window(imu_p, s_window, WINDOW_SAMPLES);
+        fill_window(imu_p, s_window, WINDOW_SAMPLES, iter);
 
+        /* Try the real model first.  read_anomaly_score() returns 0
+         * when the backend is the v0.5 stub (rank-0 output) or no
+         * NPU is present -- in that case fall back to the transparent
+         * crest-factor heuristic so the demo still shows a meaningful,
+         * varying score offline.  `from_model` tells the reader which
+         * path produced the number. */
         float score = 0.0f;
+        bool  from_model = false;
         if (inf != NULL) {
             copy_window_into_input(inf, s_window, WINDOW_SAMPLES);
             if (alp_inference_invoke(inf) == ALP_OK) {
                 score = read_anomaly_score(inf);
+                from_model = (score != 0.0f);
             }
+        }
+        if (!from_model) {
+            score = heuristic_anomaly_score(s_window, WINDOW_SAMPLES);
         }
 
         /* Dashboard line -- one row per window.  Threshold +
          * hysteresis logic for "raise an alarm" is the
          * application owner's call; v0.5 just publishes the raw
-         * score so the customer can plot it and pick a cutoff. */
-        printf("[anomaly] window=%d score=%.4f\n", iter, (double)score);
+         * score so the customer can plot it and pick a cutoff.
+         * `src` flags whether the score came from the trained model
+         * or the heuristic fallback so the log is never misleading. */
+        printf("[anomaly] window=%d score=%.4f src=%s\n",
+               iter, (double)score, from_model ? "model" : "heuristic");
 
-#ifdef CONFIG_BOARD_NATIVE_SIM
-        if (iter == 0) break;  /* one iteration is enough for framing test */
-#endif
+        /* On native_sim fill_window() returns instantly (synthesized,
+         * no IMU pacing), so running all four windows is cheap and
+         * lets the reader see the score alternate between the healthy
+         * and injected-fault windows.  On HiL each pass blocks ~308 ms
+         * at the 833 Hz ODR. */
     }
 
     alp_inference_close(inf);

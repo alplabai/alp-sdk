@@ -16,26 +16,49 @@
  *     - wake on RTC alarm | GPIO IRQ | UART console
  *   }
  *
- * On native_sim this is a framing test: every stage reaches its
- * <alp/peripheral.h> open() call and produces console output.
- * The actual deep-sleep transitions are PM-subsystem operations
- * that only meaningfully run on real silicon.
+ * What this source actually does
+ * ==============================
+ *
+ * This file is a *framing* demo, NOT a working sensor driver.  It
+ * prints the duty-cycle narrative above so you can see the wake-
+ * source / sleep-policy shape on any host, including native_sim --
+ * but it does NOT open the BME280, push a host channel, or enter a
+ * real PM sleep state.  Those are real-silicon PM-subsystem +
+ * peripheral operations; wiring them here would not run on
+ * native_sim (no I2C sensor, no deep-sleep transition).
+ *
+ * The teaching point is the DECLARATIVE side: the `power:` block in
+ * board.yaml drives the generated CONFIG_PM_* set (see README), and
+ * the sample cadence is an app concern -- represented here by the
+ * RTC_TICK_S macro below.  A production node replaces the printf
+ * bodies with the real alp_* sensor + PM calls; the policy stays in
+ * board.yaml unchanged.
  */
 
 #include <stdio.h>
 
 #include <zephyr/kernel.h>
 
+/* Steady-state RTC wake cadence, in seconds.  This is the app-level
+ * sample period: board.yaml declares "RTC is a wake source," and the
+ * app decides how often to fire.  Edit this to reship a different
+ * cadence (a production node also programs the platform counter's
+ * alarm channel to match -- not done in this framing demo). */
+#define RTC_TICK_S 60
+
 int main(void)
 {
     printf("[pm] power-managed-sensor (AEN301 / M55-HE)\n");
-    printf("[pm] wake sources: rtc(60s) | gpio_int(IMU/user) | "
-           "uart(console)\n");
+    printf("[pm] wake sources: rtc(%ds) | gpio_int(IMU/user) | "
+           "uart(console)\n", RTC_TICK_S);
     printf("[pm] sleep policy: deep -- see board.yaml "
            "cores.m55_he.power:\n");
 
-    /* Three wake-stage announcements -- the loop on real silicon
-     * repeats these forever; native_sim runs them once and exits. */
+    /* Three wake-stage announcements.  These are printf framing
+     * only -- the "sample acquired / push" lines mark where a real
+     * node would call its alp_* sensor + host-channel APIs.  On real
+     * silicon the loop repeats forever; this framing demo runs the
+     * stages once and exits. */
     const char *stages[] = {
         "rtc",      /* periodic sample (60 s) */
         "gpio_int", /* IMU motion event / user button */

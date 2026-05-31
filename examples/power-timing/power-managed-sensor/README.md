@@ -136,8 +136,10 @@ not by static leakage.
 The RTC tick period is an app concern -- `board.yaml` says
 "RTC is a wake source," not "wake every 60 s." Customers
 shipping a different cadence edit the `RTC_TICK_S` macro in
-`src/main.c` (and possibly the alarm channel for the platform's
-counter device). The `power:` block stays the same.
+`src/main.c` (and, in a production node, the alarm channel for
+the platform's counter device -- this framing demo only prints
+the cadence, it doesn't program a counter). The `power:` block
+stays the same.
 
 ## Reference
 

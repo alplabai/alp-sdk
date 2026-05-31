@@ -11,6 +11,10 @@ tests:
   alp_sdk.examples.v2n.emmc_block_stat.native_sim:
     platform_allow:
       - native_sim/native/64
+    # native_sim has no SDHC controller -- this overlay swaps the
+    # real MMC/SDMMC stack for the in-RAM disk driver so the build
+    # links (real V2N keeps the eMMC stack from prj.conf).
+    extra_args: EXTRA_CONF_FILE=generated/native_sim.conf
     tags:
       - alp-sdk
       - example

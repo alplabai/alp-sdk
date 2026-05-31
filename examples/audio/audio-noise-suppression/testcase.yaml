@@ -13,6 +13,10 @@ tests:
   alp_sdk.examples.audio_noise_suppression.native_sim:
     platform_allow:
       - native_sim/native/64
+    # native_sim has no I2S controller / NPU -- this overlay keeps the
+    # build host-only (DSP runs the CMSIS-DSP/C fallback; audio opens
+    # return NULL and the loop tolerates it).
+    extra_args: EXTRA_CONF_FILE=native_sim.conf
     tags:
       - alp-sdk
       - example
