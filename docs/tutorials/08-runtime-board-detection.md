@@ -11,19 +11,20 @@
 This tutorial walks `examples/v2n/v2n-board-id-readout/` and explains
 the underlying data flow.
 
-## The two information sources
+## Where the identity comes from
 
-1. **EEPROM manifest.**  Every SoM has an on-module 24C128 EEPROM
-   programmed at production-test time with a 128-byte manifest
-   (`alp_hw_info_eeprom_t` -- see hw_info.h).  Magic word, schema
-   version, CRC32-protected.  Authoritative for the SKU + serial.
+1. **EEPROM manifest (authoritative).**  Every SoM has an on-module
+   24C128 EEPROM programmed at production-test time with a 128-byte
+   manifest (`alp_hw_info_eeprom_t` -- see hw_info.h).  Magic word,
+   schema version, CRC32-protected.  It is the **single authoritative
+   source** of the SoM's SKU, hardware revision, serial, and mfg date.
+   The EEPROM travels with the SoM, so it *is* the module's identity
+   -- there is no SoM-side ADC cross-check.
 
-2. **BOARD_ID ADC.**  Each board revision has a resistor divider
-   tied to an ADC channel; the firmware reads the divider voltage
-   + cross-references against the family's
-   `board_id_mv` table in `hw-revisions.yaml`.  Authoritative for the
-   hardware revision -- catches "someone relabelled the SoM
-   sticker but the resistor says otherwise."
+2. **Carrier-side BOARD_ID (separate, optional).**  A carrier/EVK may
+   encode its own revision on a board-side resistor divider, surfaced
+   as `board_hw_rev` / `board_id_mv`.  That is independent of the SoM
+   revision and is not what identifies the module.
 
 ## Reading the manifest
 
@@ -73,16 +74,16 @@ single-source-of-truth for "what was this firmware intended for?"
 ## What this catches in the field
 
 * A unit relabelled or swapped post-production -- caught by the
-  manifest read + assert.
-* A SoM in the wrong board -- the board's BOARD_ID ADC will
-  read a value the firmware doesn't expect.
-* A schematic respin between hw_rev r1 and r2 where pin moves
-  matter -- caught by the SoM-side BOARD_ID ADC + the
-  `hw-revisions.yaml`'s min_sdk_version gate.
+  manifest read + `alp_hw_info_assert_matches_build`.
+* A blank or corrupt module -- surfaced distinctly as
+  `ALP_ERR_NOT_PROVISIONED` (never provisioned) vs `ALP_ERR_IO`
+  (corrupt manifest), so production test can triage.
+* A schematic respin between hw_rev r1 and r2 -- the manifest's
+  `hw_rev` drives the `hw-revisions.yaml` `min_sdk_version` gate.
 
 ## See also
 
 * [`examples/v2n/v2n-board-id-readout/`](../../examples/v2n/v2n-board-id-readout/)
 * [`<alp/hw_info.h>`](../../include/alp/hw_info.h)
-* [`docs/board-id.md`](../board-id.md) -- the BOARD_ID ADC table
-  design.
+* [`docs/board-id.md`](../board-id.md) -- the SoM EEPROM manifest
+  identification design.

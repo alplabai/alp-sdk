@@ -158,10 +158,10 @@ typedef struct alp_hw_info_t {
  *          @ref ALP_ERR_NOT_PROVISIONED when the EEPROM reads back
  *                                       blank/unprogrammed (no ALPH magic).
  *          @ref ALP_ERR_IO when the manifest is corrupt (magic present
- *                          but bad schema_version / CRC) OR the EEPROM
- *                          bus read faults (NAK / line error).
+ *                          but bad schema_version / CRC).
  *          @ref ALP_ERR_NOT_READY when the EEPROM/I2C layer reports the
- *                                 device is unavailable.
+ *                                 device is unavailable (NAK, bus fault,
+ *                                 missing chip).
  *          @ref ALP_ERR_NOSUPPORT when no EEPROM bus is configured
  *                                 (CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID
  *                                 unset / < 0).
