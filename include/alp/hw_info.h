@@ -9,30 +9,22 @@
  *        board's identifiers at boot and assert they match the
  *        firmware build.
  *
- * The SDK identifies the assembled hardware via two independent
- * surfaces (see `docs/cc3501e-bridge.md` "Boot model" and
- * `docs/board-config.md` "Hardware revision tracking" for the
- * full design):
+ * The SoM hardware revision is identified by ONE authoritative
+ * surface:
  *
- *   1. **BOARD_ID ADC + resistor divider** -- one ADC pin per
- *      board (SoM-side and board-side) fed by a 1.8 V resistor
- *      divider.  Encodes the coarse rev string (r1, r2, ...).
- *      Per-rev resistor + nominal mV values live in
- *      `metadata/e1m_modules/<family>/hw-revisions.yaml` and the
- *      board's `board.yaml`.
+ *   **On-module EEPROM manifest** -- a fixed-layout 128-byte block
+ *   at offset 0x0000 of the SoM's on-module 24C128.  Carries the
+ *   exact MPN string, hw_rev, factory serial number, and
+ *   manufacturing date.  Programmed at production-test time by
+ *   `scripts/program_eeprom.py`; read + integrity-checked (magic +
+ *   schema_version + CRC32) by the SDK at boot.  The EEPROM travels
+ *   with the SoM, so it IS the module's identity -- there is no
+ *   ADC resistor-divider cross-check on the SoM side.
  *
- *   2. **On-module EEPROM manifest** -- a fixed-layout 128-byte
- *      block at offset 0x0000 of the SoM's on-module 24C128 (AEN
- *      family populates one by default).  Carries the exact MPN
- *      string, hw_rev, factory serial number, and manufacturing
- *      date.  Programmed at production test time by
- *      `scripts/program_eeprom.py`; read by the SDK at boot.
- *
- * The two are cross-checked: the EEPROM's `hw_rev` must agree
- * with the rev the ADC voltage decodes to.  If they disagree
- * (production-line error, swapped components) the read fails
- * loudly so the boot path can halt before the firmware brings up
- * anything that depends on the wrong hardware.
+ * Carrier boards may still encode their own revision on a board-side
+ * BOARD_ID resistor divider (see `board_hw_rev` / `board_id_mv`
+ * below); that is a separate, board-side path and is independent of
+ * the SoM revision.
  *
  * Typical app usage (place this early in `main()`):
  *
@@ -40,7 +32,8 @@
  * alp_hw_info_t info;
  * alp_status_t  s = alp_hw_info_read(&info);
  * if (s != ALP_OK) {
- *     // EEPROM unprogrammed, corrupted, or ADC mismatch.
+ *     // EEPROM unprogrammed (NOT_PROVISIONED), corrupted (IO),
+ *     // unreachable (NOT_READY), or no bus configured (NOSUPPORT).
  *     // Decide app policy: halt, degrade, log + continue, ...
  * }
  * s = alp_hw_info_assert_matches_build(&info,
@@ -56,14 +49,13 @@
  * from `board.yaml` (v0.3.x deliverable).  Until that lands,
  * apps pass NULL to skip the matching field.
  *
- * v0.3 ships the API contract only; the runtime EEPROM + ADC
- * read paths land in v0.3.x once the per-family BOARD_ID ADC
- * channels are filled in by the user-supplied HW writeups.  Until
- * then both entry points return @ref ALP_ERR_NOSUPPORT and the
- * out-struct is zero-filled.
+ * The runtime EEPROM read path is implemented.  On a build with no
+ * EEPROM bus configured (CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID
+ * unset / < 0) both entry points return @ref ALP_ERR_NOSUPPORT and
+ * the out-struct is zero-filled.
  *
  * @par ABI status: [ABI-STABLE]
- *      v0.3 EEPROM manifest + BOARD_ID ADC.
+ *      v0.3 EEPROM manifest.
  *      See docs/abi-markers.md for the convention.
  */
 
@@ -123,10 +115,10 @@ typedef struct alp_hw_info_eeprom_t {
 /**
  * @brief Combined runtime board info as returned by @ref alp_hw_info_read.
  *
- * Populated from BOTH the EEPROM manifest (authoritative MPN +
- * serial + dates) and the BOARD_ID ADC readings (cross-check on
- * hw_rev).  Board-side fields stay zero/empty when no board
- * is declared in `board.yaml` or no board-side BOARD_ID ADC
+ * The SoM fields come from the on-module EEPROM manifest (the
+ * authoritative SoM identity).  The board-side fields are decoded
+ * from the board preset's BOARD_ID path and stay zero/empty when no
+ * board is declared in `board.yaml` or no board-side BOARD_ID ADC
  * channel is wired.
  */
 typedef struct alp_hw_info_t {
@@ -138,8 +130,6 @@ typedef struct alp_hw_info_t {
     uint16_t som_mfg_year;
     uint8_t  som_mfg_month;
     uint8_t  som_mfg_day;
-    /** Measured SoM BOARD_ID ADC reading, mV.  0 when not read. */
-    uint32_t som_board_id_mv;
 
     /* Board identifiers -- decoded from the board-side BOARD_ID
      * ADC + the board preset's hw_revisions table.  No EEPROM
@@ -153,35 +143,28 @@ typedef struct alp_hw_info_t {
 /**
  * @brief Read the assembled hardware's identifiers at boot.
  *
- * Reads, in order:
- *
- *   -# The on-module EEPROM manifest (24C128 on the AEN family)
- *      and validates @ref ALP_HW_INFO_MAGIC + schema_version +
- *      CRC32 over the manifest bytes.
- *   -# The SoM-side BOARD_ID ADC channel + cross-checks the mV
- *      reading against the hw_rev row in the family's
- *      hw-revisions table (so a swapped or relabelled module
- *      surfaces here).
- *   -# The board-side BOARD_ID ADC channel (when the board
- *      preset declares one) and decodes the board hw_rev.
+ * Reads + integrity-checks the on-module EEPROM manifest (magic +
+ * schema_version + CRC32) and copies the SoM identifiers out.  The
+ * manifest is the sole source of the SoM hardware revision.  (A
+ * board-side BOARD_ID decode is a future addition.)
  *
  * @param[out] out  Populated with whatever could be read.  Fields
  *                  unavailable on the running build stay
  *                  zero/empty.  Never written when the call fails
  *                  with @ref ALP_ERR_INVAL.
  *
- * @return  @ref ALP_OK on a valid, fully populated manifest.
+ * @return  @ref ALP_OK on a valid manifest read.
  *          @ref ALP_ERR_INVAL when @p out is NULL.
- *          @ref ALP_ERR_NOT_READY when no EEPROM is reachable
- *                                 (bus error, missing chip).
  *          @ref ALP_ERR_NOT_PROVISIONED when the EEPROM reads back
- *                                       with no ALPH magic (blank /
- *                                       erased module, not yet
- *                                       programmed by the factory tool).
- *          @ref ALP_ERR_IO when magic is present but the manifest is
- *                          corrupt (bad schema_version or CRC32).
- *          @ref ALP_ERR_NOSUPPORT in v0.3 -- the runtime impl
- *          lands in v0.3.x.
+ *                                       blank/unprogrammed (no ALPH magic).
+ *          @ref ALP_ERR_IO when the manifest is corrupt (magic present
+ *                          but bad schema_version / CRC) OR the EEPROM
+ *                          bus read faults (NAK / line error).
+ *          @ref ALP_ERR_NOT_READY when the EEPROM/I2C layer reports the
+ *                                 device is unavailable.
+ *          @ref ALP_ERR_NOSUPPORT when no EEPROM bus is configured
+ *                                 (CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID
+ *                                 unset / < 0).
  */
 alp_status_t alp_hw_info_read(alp_hw_info_t *out);
 
