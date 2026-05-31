@@ -31,7 +31,7 @@ for the SKU breakdown:
 - **E1M-X V2N family** — `E1M-V2N101`, `E1M-V2N102` (Renesas RZ/V2N):
   A55 cluster + M33-SM.
 - **E1M-X V2N-M1 family** — `E1M-V2M101`, `E1M-V2M102` (RZ/V2N +
-  DeepX DX-M1): same topology as V2N.
+  DEEPX DX-M1): same topology as V2N.
 - **E1M-N93 family** — iMX93: A55 cluster + M33.
 
 Because the per-core matrix is 11 columns wide, the per-version

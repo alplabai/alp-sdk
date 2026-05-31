@@ -9,7 +9,7 @@ Camera variant).
 | Family             | SKUs                          | Renesas part            | LPDDR4X         | eMMC                       | Companion accelerator   |
 |--------------------|-------------------------------|-------------------------|-----------------|----------------------------|--------------------------|
 | **E1M-X V2N**      | `E1M-V2N101`, `E1M-V2N102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit    | —                        |
-| **E1M-X V2N-M1**   | `E1M-V2M101`, `E1M-V2M102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit    | DeepX DX-M1 (25 TOPS)    |
+| **E1M-X V2N-M1**   | `E1M-V2M101`, `E1M-V2M102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit    | DEEPX DX-M1 (25 TOPS)    |
 
 Authoritative per-SKU detail and the silicon stack live in
 [`e1m-spec` Annex A.2 / A.3](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#a2-e1m-x-v2n-family-renesas-rzv2n).
@@ -41,7 +41,7 @@ versus the standard's max are:
 - **PCIe** — V2N silicon supports PCIe 3.0 ×2 lanes.  E1M-X exposes
   4 lanes per controller; lanes 2 and 3 of `PCIE0_*` (and all of
   `PCIE1_*`) are NC on this family.
-- **PCIe sharing on V2N-M1** — the on-module DeepX DX-M1 sits behind
+- **PCIe sharing on V2N-M1** — the on-module DEEPX DX-M1 sits behind
   `PCIE0` internally, so external `PCIE0_*` is functionally a bridge
   share, not an independent ×4.
 - **Ethernet** — both `ETH0_*` and `ETH1_*` are routed and each goes
@@ -74,7 +74,7 @@ V2N-M1 adds:
 
 | Role | Part |
 |---|---|
-| Companion AI accelerator | DeepX `DX-M1` (PCIe-attached, 25 TOPS) |
+| Companion AI accelerator | DEEPX `DX-M1` (PCIe-attached, 25 TOPS) |
 | DX-M1 memory | 2 × LPDDR5X |
 | DX-M1 storage | SPI NAND flash |
 

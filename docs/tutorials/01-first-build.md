@@ -2,7 +2,7 @@
 
 # 01 -- First build: GPIO + LED
 
-The canonical "your first ALP-SDK build."  This tutorial walks
+The canonical "your first Alp SDK build."  This tutorial walks
 through compiling `examples/peripheral-io/gpio-button-led/` against the
 `alp_e1m_evk_aen` board, flashing it, and watching a button toggle
 an LED.  Time budget: 20 minutes.

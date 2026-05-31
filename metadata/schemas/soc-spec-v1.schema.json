@@ -270,7 +270,7 @@
         "gops":            { "type": "number", "description": "Giga ops per second.  Provide either gops or tops (= gops × 1000)." },
         "tops":            { "type": "number", "description": "Tera ops per second.  Provide either gops or tops." },
         "supports":        { "type": "array", "items": { "type": "string" } },
-        "external":        { "type": "boolean", "description": "true when the accelerator is a separate IC (e.g. DeepX DX-M1)." }
+        "external":        { "type": "boolean", "description": "true when the accelerator is a separate IC (e.g. DEEPX DX-M1)." }
       }
     },
 

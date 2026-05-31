@@ -9,7 +9,7 @@
 # allocation logic decoupled from per-SoC GPIO controller numbering.
 
 description: |
-  ALP-SDK pin array.  Used internally by src/zephyr/peripheral_gpio.c
+  Alp SDK pin array.  Used internally by src/zephyr/peripheral_gpio.c
   to translate a studio-resolved pin_id into a Zephyr gpio_dt_spec.
 
   Example:

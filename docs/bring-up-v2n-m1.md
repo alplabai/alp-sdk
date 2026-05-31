@@ -100,7 +100,7 @@ into `e1m-v2m101-a55.conf`:
 
 If the kernel comes up but `dxrt_init()` returns an error, see the
 upstream DEEPX troubleshooting docs at
-[`github.com/DeepX-AI/dx_rt`](https://github.com/DeepX-AI/dx_rt).
+[`github.com/DEEPX-AI/dx_rt`](https://github.com/DEEPX-AI/dx_rt).
 
 ## Bring-up regression checks
 

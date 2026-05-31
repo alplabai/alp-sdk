@@ -4613,7 +4613,7 @@ Deferred from this batch:
   on V2N base).  Sequences M1_RESET (Renesas `PA6`) + the two
   passive PCIe muxes (via `chips/pi3dbs12212/`) before the Linux
   kernel driver (`dx_rt_npu_linux_driver` from upstream
-  `github.com/DeepX-AI/`) opens the PCIe device.  `vendors/deepx-dxm1/README.md`
+  `github.com/DEEPX-AI/`) opens the PCIe device.  `vendors/deepx-dxm1/README.md`
   carries the upstream-repo + Yocto layer cross-link.
   `deepx_dxm1_bring_up()` is the one-call API that runs the
   three-step rail / mux / reset sequence; rail bring-up itself is
