@@ -55,7 +55,8 @@ static uint8_t  s_state    = OTA_ST_IDLE;
 static uint8_t  s_inactive = OTA_SLOT_B;
 static uint32_t s_img_len;
 static uint32_t s_last_off;
-static uint32_t s_fw_version;
+static uint32_t s_expected_crc;   /* from OTA_BEGIN (host supplies CRC up front) */
+static uint32_t s_img_crc;        /* computed at OTA_VERIFY, reused at COMMIT */
 static uint8_t  s_err;
 
 static uint32_t rd_u32(const uint8_t *p)
@@ -140,9 +141,10 @@ static uint8_t active_slot_now(void)
 static gd32_bridge_status_t h_begin(const uint8_t *req, size_t len,
                                     uint8_t *reply, size_t cap, size_t *rlen)
 {
+    /* Host OTA_BEGIN req: size:u32, expected_crc32:u32. */
     if (len < 8u) { return STATUS_INVAL; }
-    s_img_len    = rd_u32(&req[0]);
-    s_fw_version = rd_u32(&req[4]);
+    s_img_len      = rd_u32(&req[0]);
+    s_expected_crc = rd_u32(&req[4]);
     if (s_img_len == 0u || s_img_len > OTA_SLOT_SIZE) {
         s_state = OTA_ST_ERROR; s_err = 1u; return STATUS_OUT_OF_RANGE;
     }
@@ -153,16 +155,21 @@ static gd32_bridge_status_t h_begin(const uint8_t *req, size_t len,
     }
     s_last_off = 0u;
     s_state    = OTA_ST_READY;
-    if (cap >= 2u) {
-        reply[0] = s_inactive;
-        reply[1] = (uint8_t)(GD32_BRIDGE_MAX_PAYLOAD_BYTES - 4u); /* offset hdr */
-        *rlen = 2u;
+    /* Host OTA_BEGIN reply: chunk_max:u16 (LE), target_slot:u8. */
+    if (cap >= 3u) {
+        const uint16_t chunk_max = (uint16_t)(GD32_BRIDGE_MAX_PAYLOAD_BYTES - 4u);
+        reply[0] = (uint8_t)(chunk_max & 0xFFu);
+        reply[1] = (uint8_t)(chunk_max >> 8);
+        reply[2] = s_inactive;
+        *rlen = 3u;
     }
     return STATUS_OK;
 }
 
-static gd32_bridge_status_t h_write(const uint8_t *req, size_t len)
+static gd32_bridge_status_t h_write(const uint8_t *req, size_t len,
+                                    uint8_t *reply, size_t cap, size_t *rlen)
 {
+    /* Host OTA_WRITE_CHUNK req: offset:u32, data[].  Reply: received_bytes:u32. */
     if (len < 4u) { return STATUS_INVAL; }
     const uint32_t off  = rd_u32(&req[0]);
     const size_t   dlen = len - 4u;
@@ -173,65 +180,79 @@ static gd32_bridge_status_t h_write(const uint8_t *req, size_t len)
     if (!ota_fmc_program(ota_slot_base(s_inactive) + off, &req[4], dlen)) {
         s_state = OTA_ST_ERROR; s_err = 4u; return STATUS_IO;
     }
-    s_last_off = off + (uint32_t)dlen;
-    s_state    = OTA_ST_READY;
+    if (off + (uint32_t)dlen > s_last_off) {
+        s_last_off = off + (uint32_t)dlen;   /* cumulative high-water = received bytes */
+    }
+    s_state = OTA_ST_READY;
+    if (cap >= 4u) { wr_u32(&reply[0], s_last_off); *rlen = 4u; }
     return STATUS_OK;
 }
 
-static gd32_bridge_status_t h_verify(const uint8_t *req, size_t len,
-                                     uint8_t *reply, size_t cap, size_t *rlen)
+static gd32_bridge_status_t h_verify(uint8_t *reply, size_t cap, size_t *rlen)
 {
-    if (len < 4u) { return STATUS_INVAL; }
-    const uint32_t want = rd_u32(&req[0]);
-    const uint32_t got  = ota_crc32(0u,
-                                    (const uint8_t *)ota_slot_base(s_inactive),
-                                    s_img_len);
-    const bool ok = (got == want);
+    /* Host OTA_VERIFY req: empty (CRC was supplied at BEGIN).
+     * Reply: computed_crc32:u32, verified:u8. */
+    s_img_crc = ota_crc32(0u, (const uint8_t *)ota_slot_base(s_inactive), s_img_len);
+    const bool ok = (s_img_crc == s_expected_crc);
     s_state = ok ? OTA_ST_VERIFIED : OTA_ST_ERROR;
     if (!ok) { s_err = 5u; }
-    if (cap >= 1u) { reply[0] = ok ? 0u : 1u; *rlen = 1u; }
-    s_img_len = s_img_len; /* retained for commit's metadata */
+    if (cap >= 5u) {
+        wr_u32(&reply[0], s_img_crc);
+        reply[4] = ok ? 1u : 0u;
+        *rlen = 5u;
+    }
     return STATUS_OK;
 }
 
 static gd32_bridge_status_t h_commit(void)
 {
     if (s_state != OTA_ST_VERIFIED) { return STATUS_NOT_READY; }
-    const uint32_t crc = ota_crc32(0u,
-                                   (const uint8_t *)ota_slot_base(s_inactive),
-                                   s_img_len);
-    if (!meta_commit(s_inactive, s_fw_version, s_img_len, crc)) {
+    if (!meta_commit(s_inactive, 0u /* fw_ver: host BEGIN carries no version */,
+                     s_img_len, s_img_crc)) {
         s_state = OTA_ST_ERROR; s_err = 6u; return STATUS_IO;
     }
     ota_system_reset();           /* no return on real silicon */
     return STATUS_OK;
 }
 
-static gd32_bridge_status_t h_rollback(uint8_t *reply, size_t cap, size_t *rlen)
+static gd32_bridge_status_t h_rollback(void)
 {
+    /* Host OTA_ROLLBACK: no payload either direction (status only). */
     ota_meta_record_t cur;
     uint32_t which;
     if (!meta_current(&cur, &which)) { return STATUS_INVAL; }
     const uint8_t other = (cur.active_slot == OTA_SLOT_A) ? OTA_SLOT_B : OTA_SLOT_A;
     if ((cur.slot_valid & (uint8_t)(1u << other)) == 0u) {
-        if (cap >= 1u) { reply[0] = 1u; *rlen = 1u; }
         return STATUS_INVAL;                 /* no valid fallback slot */
     }
-    if (!meta_commit(other, 0u, 0u, 0u)) {   /* flip active; keep slot data */
+    /* Flip active to `other`; its slot image is untouched.  The bootloader
+     * re-validates the target slot from its own image header, so the
+     * metadata img_len/crc carried here are not load-bearing for the flip. */
+    if (!meta_commit(other, 0u, 0u, 0u)) {
         return STATUS_IO;
     }
-    if (cap >= 1u) { reply[0] = 0u; *rlen = 1u; }
     ota_system_reset();
     return STATUS_OK;
 }
 
 static gd32_bridge_status_t h_get_state(uint8_t *reply, size_t cap, size_t *rlen)
 {
-    if (cap >= 6u) {
+    /* Host OTA_GET_STATE reply: state:u8, active:u8, pending:u8, boot_count:u16 (LE).
+     * `boot_count` is mapped to the metadata update counter (generation). */
+    ota_meta_record_t cur;
+    uint32_t which;
+    uint8_t  active = OTA_SLOT_A;
+    uint16_t gen    = 0u;
+    if (meta_current(&cur, &which)) { active = cur.active_slot; gen = (uint16_t)cur.counter; }
+    const bool in_progress = (s_state == OTA_ST_READY || s_state == OTA_ST_BUSY ||
+                              s_state == OTA_ST_VERIFIED);
+    if (cap >= 5u) {
         reply[0] = s_state;
-        wr_u32(&reply[1], s_last_off);
-        reply[5] = s_err;
-        *rlen = 6u;
+        reply[1] = active;
+        reply[2] = in_progress ? s_inactive : 0xFFu;   /* 0xFF = none pending */
+        reply[3] = (uint8_t)(gen & 0xFFu);
+        reply[4] = (uint8_t)(gen >> 8);
+        *rlen = 5u;
     }
     return STATUS_OK;
 }
@@ -252,14 +273,14 @@ gd32_bridge_status_t ota_dispatch(uint8_t cmd,
         return h_begin(req_payload, req_payload_len,
                        reply_payload, reply_payload_cap, reply_payload_len);
     case CMD_OTA_WRITE_CHUNK:
-        return h_write(req_payload, req_payload_len);
+        return h_write(req_payload, req_payload_len,
+                       reply_payload, reply_payload_cap, reply_payload_len);
     case CMD_OTA_VERIFY:
-        return h_verify(req_payload, req_payload_len,
-                        reply_payload, reply_payload_cap, reply_payload_len);
+        return h_verify(reply_payload, reply_payload_cap, reply_payload_len);
     case CMD_OTA_COMMIT:
         return h_commit();
     case CMD_OTA_ROLLBACK:
-        return h_rollback(reply_payload, reply_payload_cap, reply_payload_len);
+        return h_rollback();
     case CMD_OTA_GET_STATE:
         return h_get_state(reply_payload, reply_payload_cap, reply_payload_len);
     case CMD_OTA_ABORT:
