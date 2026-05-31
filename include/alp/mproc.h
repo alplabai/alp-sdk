@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file mproc.h
- * @brief ALP SDK multi-processor IPC primitives.
+ * @brief Alp SDK multi-processor IPC primitives.
  *
  * v0.3 deliverable; v0.7 wires the Zephyr backend.  As of v0.7 the
  * Zephyr backend implements all three primitives (mailbox, shared
@@ -82,7 +82,7 @@ extern "C" {
  *
  *  Names mirror the canonical core_ids used in each SoM preset's
  *  `topology:` block at `metadata/e1m_modules/E1M-<MPN>.yaml`.  The
- *  integer assignments are stable across ALP SDK releases: adding a
+ *  integer assignments are stable across Alp SDK releases: adding a
  *  new SoM appends entries with fresh integer values; it never
  *  re-numbers existing ones.  The coverage test in
  *  `tests/scripts/test_core_id_enum_coverage.py` enforces that every

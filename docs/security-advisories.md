@@ -1,6 +1,6 @@
 # Security advisories
 
-How to report a security vulnerability in the ALP SDK + how we
+How to report a security vulnerability in the Alp SDK + how we
 handle reports + how customers find out about embargoed fixes.
 
 ## Reporting a vulnerability
@@ -20,7 +20,7 @@ the report is visible only to you + the SDK maintainers.
 
 ## What we treat as a vulnerability
 
-The ALP SDK is a unification layer over vendor SDKs.  Issues we
+The Alp SDK is a unification layer over vendor SDKs.  Issues we
 treat as security advisories:
 
 | Category | Examples |

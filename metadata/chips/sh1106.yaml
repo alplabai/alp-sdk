@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Sino Wealth SH1106 128x64 OLED (I2C).
+# Alp SDK chip manifest: Sino Wealth SH1106 128x64 OLED (I2C).
 schema_version:   1
 chip_id:          sh1106
 driver_status:    complete         # init + clear + draw + display + deinit.

@@ -1,6 +1,6 @@
-# ALP SDK Architecture
+# Alp SDK Architecture
 
-The ALP SDK is the **unification software layer** for ALP Lab edge AI
+The Alp SDK is the **unification software layer** for Alp Lab edge AI
 modules built on the **E1M open-standard form factor**. It provides
 application developers a single C/C++ API that works across every
 E1M-* SoM variant — present and future — by wrapping each vendor's
@@ -14,7 +14,7 @@ SDK on top of ARM CMSIS.
 ├─────────────────────────────────────────────────────────────┤
 │  Zephyr RTOS  /  Yocto Linux  /  Bare Metal                 │  ← OS, picked per variant
 ├─────────────────────────────────────────────────────────────┤
-│  ALP SDK                                                    │  ← THIS REPO
+│  Alp SDK                                                    │  ← THIS REPO
 │    Libraries:  GUI/LVGL · Display · Camera · DSP ·          │
 │                IoT · Peripherals                            │
 │    Vendor wrappers:  Alif HAL · Renesas RZ · ...            │
@@ -331,7 +331,7 @@ its manifest (`interfaces.provides`).  The studio's deterministic pin
 allocator reads the per-SoM pad routes from this repo (the
 `pad_routes:` block under `metadata/e1m_modules/<SKU>.yaml`), picks
 peripheral instances per block, and emits codegen that calls into
-`<alp/peripheral.h>`.  Block-side driver C files include ALP SDK
+`<alp/peripheral.h>`.  Block-side driver C files include Alp SDK
 headers and consume `alp_i2c_t`, `alp_gpio_t`, etc.
 
 The SDK's job is to take the resolved instance identifier (the

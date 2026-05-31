@@ -1,6 +1,6 @@
 # Release policy
 
-How the ALP SDK ships versions, what we promise post-1.0, and how
+How the Alp SDK ships versions, what we promise post-1.0, and how
 deprecations work.
 
 This doc is paired with [`VERSIONS.md`](../VERSIONS.md) (the

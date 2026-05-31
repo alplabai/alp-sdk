@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file iot.h
- * @brief ALP SDK IoT abstraction (Wi-Fi-station + MQTT in v0.1).
+ * @brief Alp SDK IoT abstraction (Wi-Fi-station + MQTT in v0.1).
  *
  * Backends:
  *   - Zephyr   : wraps net_*, MQTT client API.

@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * nlohmann/json configuration header for the ALP SDK's embedded
+ * nlohmann/json configuration header for the Alp SDK's embedded
  * targets.
  *
  * nlohmann/json (https://github.com/nlohmann/json) is heavier than

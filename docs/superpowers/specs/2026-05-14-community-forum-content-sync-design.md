@@ -24,7 +24,7 @@ GitHub-OAuth contributor linking, theming, automation.
 
 - 4 real users, 37 topics, 51 posts, 0 tags.
 - 16 categories already structured (3 trees: `E1M Hardware/*`,
-  `ALP SDK/*`, plus flat top-level).
+  `Alp SDK/*`, plus flat top-level).
 - Most existing topics were seeded on 2026-04-04 and have no tags;
   three duplicate "Welcome to Alp Lab Community!" topics exist
   (2026-04-26, 2026-05-09, 2026-05-14).
@@ -48,7 +48,7 @@ GitHub-OAuth contributor linking, theming, automation.
 
 2. **Pinned getting-started index topics**, one per relevant
    category, each linking to the canonical repo doc(s):
-   - `ALP SDK > Getting Started` (id 15): link the SDK's
+   - `Alp SDK > Getting Started` (id 15): link the SDK's
      `docs/firmware-quickstart.md`, `docs/getting-started.md`,
      `docs/glossary.md`, `docs/troubleshooting.md`.
    - `E1M Hardware > E1M-AEN` (id 11): link the AEN one-pager,

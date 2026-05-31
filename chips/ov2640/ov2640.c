@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * OmniVision OV2640 2 MP CMOS image sensor driver (SCCB/I²C side).

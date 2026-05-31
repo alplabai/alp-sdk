@@ -1,6 +1,6 @@
 # Cross-platform developer setup
 
-The ALP SDK supports development on **Linux, macOS, native
+The Alp SDK supports development on **Linux, macOS, native
 Windows, and Windows + WSL2**.  The Zephyr-on-M-class workflow
 (`board.yaml` → `west build` → flash) is first-class on every
 host OS — same source tree, same `west.yml`, same metadata,

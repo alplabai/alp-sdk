@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file rtc.h
- * @brief ALP SDK real-time-clock abstraction.
+ * @brief Alp SDK real-time-clock abstraction.
  *
  * Wraps the SoC's wall-clock RTC.  Time is exchanged in a struct
  * shaped after `struct tm` so apps can format-print without an extra

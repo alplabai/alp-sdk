@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Cross-backend internal helpers for the ALP SDK.  Not part of the
+ * Cross-backend internal helpers for the Alp SDK.  Not part of the
  * public surface -- application code must use the <alp/...> public
  * headers instead.
  *

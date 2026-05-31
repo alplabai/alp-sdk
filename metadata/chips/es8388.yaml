@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Everest Semi ES8388 stereo audio codec.
+# Alp SDK chip manifest: Everest Semi ES8388 stereo audio codec.
 schema_version:   1
 chip_id:          es8388
 driver_status:    stub

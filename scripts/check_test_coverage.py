@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 ALP Lab AB
+# Copyright 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 """
 Test-coverage audit: walk every public header in include/alp/, list

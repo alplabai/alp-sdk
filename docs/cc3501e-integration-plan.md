@@ -852,7 +852,7 @@ External flash:
 3. **Wireless Connectivity image** — TI-signed FW that the M33 pushes
    to the wireless subsystem when Wi-Fi/BLE is enabled.
 4. **Vendor image** — MCUboot-formatted (§10.3.2), signed with the
-   vendor (ALP Lab) private key. The OTP-burned vendor root-of-trust
+   vendor (Alp Lab) private key. The OTP-burned vendor root-of-trust
    is the hash of the public key.
 
 #### 3.11.2 Initial programming + reprogramming (§10.4.3, §10.4.4)

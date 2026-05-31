@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Internal opaque-handle definitions for the Zephyr ALP SDK backend.
+ * Internal opaque-handle definitions for the Zephyr Alp SDK backend.
  * Not part of the public surface — application code must include
  * <alp/peripheral.h>, <alp/pwm.h>, etc. instead.
  */

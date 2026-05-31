@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Trinamic TMC2209 silent stepper driver.
+# Alp SDK chip manifest: Trinamic TMC2209 silent stepper driver.
 schema_version:   1
 chip_id:          tmc2209
 driver_status:    stub

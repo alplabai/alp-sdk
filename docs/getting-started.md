@@ -1,4 +1,4 @@
-# Getting started with the ALP SDK
+# Getting started with the Alp SDK
 
 This walkthrough takes you from "git clone" to a working
 `gpio-button-led` build under `native_sim`, then onto real

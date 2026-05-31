@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file audio.h
- * @brief ALP SDK audio abstraction (PDM input + I²S output).
+ * @brief Alp SDK audio abstraction (PDM input + I²S output).
  *
  * Real implementation lives in `src/zephyr/audio_zephyr.c` (input
  * path via Zephyr `audio_dmic` behind `CONFIG_ALP_SDK_AUDIO_IN`,

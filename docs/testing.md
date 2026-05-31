@@ -1,4 +1,4 @@
-# Testing the ALP SDK
+# Testing the Alp SDK
 
 How to verify everything works, from a fresh clone, without touching
 hardware.  Coverage map per `<alp/...>` header below.

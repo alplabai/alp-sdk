@@ -1,4 +1,4 @@
-# board.yaml -- ALP SDK project configuration.
+# board.yaml -- Alp SDK project configuration.
 #
 # Copy this template to your application root and edit the values
 # for your board.  scripts/alp_orchestrate.py reads this file,

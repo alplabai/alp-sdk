@@ -68,7 +68,7 @@ def _scaffold(dest: Path, som: str, preset: str, peripherals: list[str]) -> None
     )
 
 
-@click.command(name="init", help="Scaffold a new ALP SDK project.")
+@click.command(name="init", help="Scaffold a new Alp SDK project.")
 @click.argument("name", type=str)
 @click.option("--som", default=None, help="SoM SKU (e.g. E1M-AEN701).")
 @click.option("--preset", default=None, help="Board preset (e.g. e1m-evk).")

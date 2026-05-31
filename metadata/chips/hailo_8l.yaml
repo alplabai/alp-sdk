@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Hailo-8L 13 TOPS NPU (M.2 PCIe).
+# Alp SDK chip manifest: Hailo-8L 13 TOPS NPU (M.2 PCIe).
 schema_version:   1
 chip_id:          hailo_8l
 driver_status:    stub             # host-side GPIO sequence only; PCIe + runtime on Linux.

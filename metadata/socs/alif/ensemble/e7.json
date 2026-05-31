@@ -191,6 +191,6 @@
     "E7 adds 2× Cortex-A32 Application Processor cores vs E3 (otherwise same RT/NPU topology).",
     "Watchdog count is 4 on E7 (vs 2 on E3); active dynamic consumption is 29 µA/MHz (vs 27 on E3).",
     "Operating temperature is 'Standard' grade (-40 / +75 ambient) vs E3 'Extended' (-40 / +85).",
-    "AE722F80F55D5LS is the variant ALP Lab uses on the E1M-AEN701 module SKU."
+    "AE722F80F55D5LS is the variant Alp Lab uses on the E1M-AEN701 module SKU."
   ]
 }

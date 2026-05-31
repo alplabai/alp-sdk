@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: ADI MAX31855 K-type thermocouple-to-digital.
+# Alp SDK chip manifest: ADI MAX31855 K-type thermocouple-to-digital.
 schema_version:   1
 chip_id:          max31855
 driver_status:    complete

@@ -1,6 +1,6 @@
-# ALP SDK Versions
+# Alp SDK Versions
 
-Living roadmap for the ALP SDK.  Each version below lists what ships,
+Living roadmap for the Alp SDK.  Each version below lists what ships,
 what's stubbed, and the acceptance bar.  When a version is tagged the
 "Status" cell flips to `released`; CHANGELOG.md captures the bump.
 
@@ -132,7 +132,7 @@ Real datasheet extraction:
 - `alif:ensemble:e8` — `Alif E8 Datasheet 0.51.pdf` (preliminary)
 
 Preliminary stubs (`pending_alif_datasheet: true`):
-- `alif:ensemble:e4`, `e5`, `e6` — derived from ALP Lab E1M-AEN
+- `alif:ensemble:e4`, `e5`, `e6` — derived from Alp Lab E1M-AEN
   module datasheet draft + Ensemble family pattern.  Each stub
   carries the canonical Alif part number that backs the
   corresponding E1M-AEN module SKU.
@@ -222,7 +222,7 @@ more sensors) and add a second SoM family.
 - `renesas:rzv2n:n44` (`metadata/socs/renesas/rzv2n/n44.json`) —
   shipped early in v0.1 alongside the V2N silicon datasheet
   ingest; covers all 8 RZ/V2N + RZ/V2NP orderable SKUs in one
-  file.  ALP Lab's `R9A09G056N44GBG#AC0` default is recorded.
+  file.  Alp Lab's `R9A09G056N44GBG#AC0` default is recorded.
 - `deepx:dx:m1` (`metadata/socs/deepx/dx/m1.json`) — the DEEPX
   DX-M1 companion accelerator behind PCIe on V2N-M1 SoMs.
   25 TOPS @ 1.0 GHz, FC-BGA 625-ball.

@@ -3,7 +3,7 @@
   <name>alp_perception</name>
   <version>0.5.0</version>
   <description>
-    ALP SDK ROS 2 perception node for V2N + V2N-M1 (DEEPX DX-M1).
+    Alp SDK ROS 2 perception node for V2N + V2N-M1 (DEEPX DX-M1).
     Publishes camera frames, IMU, GNSS, battery, and DEEPX-
     accelerated object detections.  Subscribes to control
     commands.  Lives on top of the alp-sdk runtime so the same

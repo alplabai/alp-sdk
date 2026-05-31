@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * uart-echo — read bytes from the console UART and write them back.

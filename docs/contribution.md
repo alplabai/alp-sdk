@@ -1,6 +1,6 @@
-# Contributing to ALP SDK
+# Contributing to Alp SDK
 
-Canonical contributor documentation for the ALP SDK.  The shorter
+Canonical contributor documentation for the Alp SDK.  The shorter
 [`/CONTRIBUTING.md`](../CONTRIBUTING.md) at the repo root is the
 GitHub-auto-discovered entry point and points back here.
 

@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * doctest configuration header for the ALP SDK's embedded targets.
+ * doctest configuration header for the Alp SDK's embedded targets.
  *
  * doctest (https://github.com/doctest/doctest) is a single-header
  * C++ test framework.  Apps using it under board.yaml's

@@ -603,7 +603,7 @@ git commit -m "feat(alp_model): committed .alpmodel test fixture + C byte array"
 
 ```c
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 /**
@@ -697,7 +697,7 @@ git commit -m "feat(alp_model): C reader public API (alp/model.h)"
 
 ```c
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "alp/model.h"

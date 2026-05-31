@@ -1,6 +1,6 @@
 {
     "//": [
-        "VS Code tasks for the ALP SDK.  Two flavours:",
+        "VS Code tasks for the Alp SDK.  Two flavours:",
         "  1. Zephyr-module flow (`west build`) for ztests + examples.",
         "     Requires a Zephyr workspace with this repo loaded as a",
         "     module via `EXTRA_ZEPHYR_MODULES` or west.yml.",

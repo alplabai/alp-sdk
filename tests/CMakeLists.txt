@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# ALP SDK test suite.
+# Alp SDK test suite.
 #
 # Unity for plain-CMake / bare-metal builds; ztest under Zephyr.
 # v0.1: scaffolded; concrete tests land with each peripheral wrapper.

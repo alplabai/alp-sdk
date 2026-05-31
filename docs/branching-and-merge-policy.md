@@ -1,7 +1,7 @@
 # Branching and merge policy
 
 Concrete rules for branches, PRs, merges, pushes, and tags in the
-ALP SDK repo.  This doc pairs with:
+Alp SDK repo.  This doc pairs with:
 
 - [`docs/release-policy.md`](release-policy.md) — what gets
   released when (SemVer + LTS).

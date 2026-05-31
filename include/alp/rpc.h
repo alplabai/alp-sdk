@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file rpc.h
- * @brief ALP SDK framed RPC over OpenAMP / RPMsg.
+ * @brief Alp SDK framed RPC over OpenAMP / RPMsg.
  *
  * v0.6 deliverable -- this header is the high-level surface customers
  * call from per-core app slices in a heterogeneous board.yaml

@@ -20,7 +20,7 @@
  *      DX-M1 today is shipped only on the V2N-M1 add-on; vendor
  *      packs may extend this list as DEEPX adds family members.
  *
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * @par ABI status: [ABI-EXPERIMENTAL]

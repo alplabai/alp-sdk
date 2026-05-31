@@ -22,7 +22,7 @@
  *      packs may extend this list when V2M / V2L variants gain
  *      DRP-AI3 silicon.
  *
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * @par ABI status: [ABI-EXPERIMENTAL]

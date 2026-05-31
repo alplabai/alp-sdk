@@ -1,6 +1,6 @@
 # vendor-ext-composability
 
-One pad, three ways -- a proof that the ALP SDK's vendor-extension
+One pad, three ways -- a proof that the Alp SDK's vendor-extension
 layer (`<alp/ext/<vendor>/...>`) is **additive, never exclusive**.
 
 Claiming a vendor-specific feature on a pad does *not* lock that pad

@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file security.h
- * @brief ALP SDK cryptography surface (re-export of MbedTLS + HW-accelerator hooks).
+ * @brief Alp SDK cryptography surface (re-export of MbedTLS + HW-accelerator hooks).
  *
  * v0.3 deliverable.  v0.1 ships only the public surface; every entry
  * point returns ALP_ERR_NOSUPPORT.

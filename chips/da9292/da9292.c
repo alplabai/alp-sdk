@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * Renesas DA9292 multi-phase buck PMIC driver.  See

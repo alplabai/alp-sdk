@@ -1,6 +1,6 @@
 # hello-world
 
-The canonical "first program" for the ALP SDK.  No peripherals,
+The canonical "first program" for the Alp SDK.  No peripherals,
 no chips, no board-specific wiring -- just a periodic `printf`
 loop so you can confirm the toolchain, flash flow, and log
 console are wired correctly before chasing harder bugs.
@@ -73,7 +73,7 @@ LPT)").
 ## Expected output
 
 ```
-[hello] ALP SDK hello-world starting
+[hello] Alp SDK hello-world starting
 [hello] tick 0
 [hello] tick 1
 [hello] tick 2

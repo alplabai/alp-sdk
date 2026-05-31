@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the ALP SDK are documented here.  Format follows
+All notable changes to the Alp SDK are documented here.  Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
@@ -1847,7 +1847,7 @@ docs/abi/v0.5-snapshot.json`.
   utilities (`abi_snapshot.py`, `validate_metadata.py`,
   `validate_board_yaml.py`, `check_pin_conflicts.py`, etc.).
   Folding the single-file directory into `scripts/` removes one
-  top-level entry and makes the "ALP SDK has one place for
+  top-level entry and makes the "Alp SDK has one place for
   helper scripts" rule unambiguous.  Files touched: `README.md`,
   `docs/board-id.md`, `docs/bring-up-v2n.md`,
   `docs/getting-started.md`, `docs/test-plan.md`,
@@ -3177,7 +3177,7 @@ Deferred from this batch:
 
 - **`PLAN.md` deleted from the public repo.**  It was an
   internal product / engineering planning document
-  ("ALP SDK — Product + Engineering Plan", 583 lines, last
+  ("Alp SDK — Product + Engineering Plan", 583 lines, last
   revised 2026-05-11) that duplicated forward-looking
   positioning already captured in [`VERSIONS.md`](VERSIONS.md)
   and pillar-level architecture text already in the customer
@@ -5908,7 +5908,7 @@ Deferred from this batch:
 - `<alp/math.h>` and `<alp/signal.h>` deleted.  They were thin
   re-exports of CMSIS-DSP that added zero value over a direct
   `#include "arm_math.h"`.  Application code now includes
-  CMSIS-DSP directly; ALP SDK internals (e.g. inside
+  CMSIS-DSP directly; Alp SDK internals (e.g. inside
   `<alp/audio.h>`) may still pull CMSIS-DSP in via the
   build-time `ALP_HAS_CMSIS_DSP` option.  Documented stance
   in `docs/architecture.md` + `VERSIONS.md` +
@@ -5931,7 +5931,7 @@ Deferred from this batch:
   `e3.json` and `e7.json` (released, real datasheet),
   `e8.json` (preliminary, datasheet v0.51), and
   `e4.json` / `e5.json` / `e6.json` (preliminary stubs derived from
-  the ALP Lab E1M-AEN module datasheet draft + family pattern).
+  the Alp Lab E1M-AEN module datasheet draft + family pattern).
 - Documentation: `README.md`, `docs/architecture.md`,
   `docs/os-support-matrix.md`, `docs/porting-new-som.md`,
   `vendors/alif/README.md`, `vendors/renesas-rzv2n/README.md`.
@@ -6002,7 +6002,7 @@ Deferred from this batch:
   topology, 1.5 MB on-chip SRAM (ECC), full peripheral inventory
   (2× GbE, USB 3.2 Gen2, PCIe Gen3, 6× CAN-FD, 9× I²C, 24× ADC,
   …), 840-pin FCBGA, and all 8 orderable RZ/V2N + RZ/V2NP SKUs
-  (N41–N48) including the ALP Lab default `R9A09G056N44GBG#AC0`.
+  (N41–N48) including the Alp Lab default `R9A09G056N44GBG#AC0`.
 - **DEEPX DX-M1 companion accelerator metadata** at
   `metadata/socs/deepx/dx/m1.json` — extracted from DEEPX
   Commercial Datasheet v1.0 (June 2025).  25 TOPS @ 1.0 GHz INT8
@@ -6253,7 +6253,7 @@ Deferred from this batch:
   `docs/adr/` directory with the ADR template plus three accepted
   records:
   - [ADR 0001](docs/adr/0001-wrapper-on-top-of-zephyr.md) — why
-    ALP SDK wraps Zephyr (and why the wrapper stays thin).
+    Alp SDK wraps Zephyr (and why the wrapper stays thin).
   - [ADR 0002](docs/adr/0002-error-mechanism.md) —
     `alp_last_error()` + compile-time SoC capability validation.
   - [ADR 0003](docs/adr/0003-peripheral-coverage.md) — wrap 12

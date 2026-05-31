@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * Standalone unit tests for <alp/dsp.h> running under native_sim.

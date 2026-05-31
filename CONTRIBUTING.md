@@ -1,12 +1,12 @@
 @page contributing_index Contributing
 
-# Contributing to ALP SDK
+# Contributing to Alp SDK
 
 Canonical contributor guide: [`docs/contribution.md`](docs/contribution.md).
 This file is the GitHub-auto-discovered short version.
 
-Thanks for considering a contribution.  The ALP SDK is the unification
-software layer for ALP Lab's E1M edge AI modules; keeping it small,
+Thanks for considering a contribution.  The Alp SDK is the unification
+software layer for Alp Lab's E1M edge AI modules; keeping it small,
 predictable, and OS-pivoted is the whole point.
 
 ## Where to ask things
@@ -126,7 +126,7 @@ for the formatting rules.
 
 ## Team
 
-The ALP SDK is built and maintained by [Alp Lab](https://alplab.ai).
+The Alp SDK is built and maintained by [Alp Lab](https://alplab.ai).
 
 | Contributor          | GitHub                                                   | Role                          |
 |----------------------|----------------------------------------------------------|-------------------------------|

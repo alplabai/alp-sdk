@@ -1,7 +1,7 @@
-# Threat model — ALP SDK consumer surface
+# Threat model — Alp SDK consumer surface
 
 A v1.0-prep threat model for the consumer-facing surface of the
-ALP SDK.  Identifies trust boundaries, asset classes, primary
+Alp SDK.  Identifies trust boundaries, asset classes, primary
 adversaries, and the mitigation we ship against each.
 
 > **Scope.** This doc covers the SDK's public surface (`<alp/*.h>`,
@@ -25,7 +25,7 @@ adversaries, and the mitigation we ship against each.
         └──────────────────────┬──────────────────────────────┘
                                │  <alp/*.h> API
         ┌──────────────────────▼──────────────────────────────┐
-        │  ALP SDK -- public surface + loader (TRUSTED)        │
+        │  Alp SDK -- public surface + loader (TRUSTED)        │
         │  Schema validation, capability checks, last-error    │
         └──────────────────────┬──────────────────────────────┘
                                │  OS-pivoted backend dispatch
@@ -199,7 +199,7 @@ defend (e.g. `<alp/e1m_pinout.h>` is just constants) marked n/a.
 
 - **Side-channel attacks** (DPA, EMA, timing).  Out of scope
   for v1.0; the OPTIGA Trust M is the trust anchor for
-  side-channel-resistant operations.  ALP SDK does not
+  side-channel-resistant operations.  Alp SDK does not
   implement constant-time crypto -- it dispatches to MbedTLS
   PSA / OPTIGA.
 - **Rowhammer-style fault attacks** -- silicon-level; not our

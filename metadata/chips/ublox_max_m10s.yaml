@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: u-blox MAX-M10S small-footprint GNSS.
+# Alp SDK chip manifest: u-blox MAX-M10S small-footprint GNSS.
 schema_version:   1
 chip_id:          ublox_max_m10s
 driver_status:    complete

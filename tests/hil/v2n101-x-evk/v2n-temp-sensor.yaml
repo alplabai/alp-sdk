@@ -18,7 +18,7 @@ example: examples/v2n/v2n-temp-sensor
 serial:
   duration_s: 15
   expect_contains:
-    - "ALP SDK"
+    - "Alp SDK"
     - "tmp112"             # case-insensitive match (the example logs in lowercase)
   expect_absent:
     - "PANIC"

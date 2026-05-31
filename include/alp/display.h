@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file display.h
- * @brief ALP SDK display abstraction.
+ * @brief Alp SDK display abstraction.
  *
  * v0.1: thin wrapper around the underlying OS display layer.  On
  * Zephyr this routes through Zephyr's `display_*` driver API so

@@ -20,7 +20,7 @@ Two distinct pieces, easy to confuse:
 | **RUHMI compiler** (this anchor)               | Host (build)  | <https://github.com/renesas-rz/rzv_drp-ai_tvm>, Apache-2.0. |
 | **DRP-AI runtime** (`libdrpai`, ioctls)        | Target (V2N)  | `meta-rz-drpai` sublayer of Renesas's BSP -- see `meta-alp-sdk/README.md`. |
 
-The ALP SDK's `<alp/inference.h>` Yocto backend links against the
+The Alp SDK's `<alp/inference.h>` Yocto backend links against the
 *runtime*; it never invokes the *compiler*.  Model authors run
 RUHMI on their workstation and ship the compiled output as a
 model asset alongside their app.

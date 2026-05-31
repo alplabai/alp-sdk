@@ -26,7 +26,7 @@ example: examples/v2n/v2n-gd32-bridge-ping
 serial:
   duration_s: 20
   expect_contains:
-    - "ALP SDK"
+    - "Alp SDK"
     - "[bridge]"           # the example logs under this prefix
   expect_absent:
     - "PANIC"

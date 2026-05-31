@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: ams AS5048A/B magnetic rotary encoder.
+# Alp SDK chip manifest: ams AS5048A/B magnetic rotary encoder.
 schema_version:   1
 chip_id:          as5048a_b
 driver_status:    complete         # AS5048B I2C side.  AS5048A SPI variant pending.

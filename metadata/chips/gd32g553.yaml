@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: GigaDevice GD32G553MEY7TR supervisor MCU.
+# Alp SDK chip manifest: GigaDevice GD32G553MEY7TR supervisor MCU.
 #
 # Acts as the V2N module's companion / IO MCU.  Host-side driver
 # reaches it over the hybrid SPI + I2C bridge defined in

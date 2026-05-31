@@ -2,7 +2,7 @@
 
 # Tutorial 09: `board.yaml` deep dive
 
-**Target audience:** developers who've shipped one ALP SDK build
+**Target audience:** developers who've shipped one Alp SDK build
 and want to understand every knob in `board.yaml`, including
 the custom-board flow.
 

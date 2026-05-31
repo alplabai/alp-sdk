@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Yocto / Linux backend for the ALP SDK.
+# Yocto / Linux backend for the Alp SDK.
 #
 # v0.1: stub backend.  Every alp_*_open returns NULL with
 # ALP_ERR_NOSUPPORT -- apps targeting Yocto get a link-complete

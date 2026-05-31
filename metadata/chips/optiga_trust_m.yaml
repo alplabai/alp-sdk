@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Infineon OPTIGA Trust M secure element.
+# Alp SDK chip manifest: Infineon OPTIGA Trust M secure element.
 schema_version:   1
 chip_id:          optiga_trust_m
 driver_status:    partial          # OPEN_APPLICATION + product-info + raw APDU send.

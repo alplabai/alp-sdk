@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file inference.h
- * @brief ALP SDK unified ML inference abstraction.
+ * @brief Alp SDK unified ML inference abstraction.
  *
  * Lifts compiled-model loaders + dispatch into a single uniform
  * surface so apps don't need to know which NPU is bonded out on

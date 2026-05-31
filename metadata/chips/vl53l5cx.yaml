@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: ST VL53L5CX multi-zone ToF ranger (I2C).
+# Alp SDK chip manifest: ST VL53L5CX multi-zone ToF ranger (I2C).
 schema_version:   1
 chip_id:          vl53l5cx
 driver_status:    stub

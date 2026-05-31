@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Ilitek ILI9488 SPI TFT 320x480.
+# Alp SDK chip manifest: Ilitek ILI9488 SPI TFT 320x480.
 schema_version:   1
 chip_id:          ili9488
 driver_status:    partial

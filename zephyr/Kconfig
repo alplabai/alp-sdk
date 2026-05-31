@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-# ALP SDK Kconfig fragment exposed to Zephyr applications.
+# Alp SDK Kconfig fragment exposed to Zephyr applications.
 
 config ALP_SDK
-	bool "ALP SDK"
+	bool "Alp SDK"
 	help
-	  Enable the ALP SDK on Zephyr.  When set, the SDK's Zephyr
+	  Enable the Alp SDK on Zephyr.  When set, the SDK's Zephyr
 	  backend is compiled and <alp/...> headers are added to the
 	  application include path.
 
@@ -1511,7 +1511,7 @@ config ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ
 # drivers.  The button_led / pdm_mic helpers are the exception
 # (generic block utilities, alp_-prefixed).
 
-menu "ALP SDK chip drivers"
+menu "Alp SDK chip drivers"
 
 config ALP_SDK_CHIP_LSM6DSO
 	bool "STMicroelectronics LSM6DSO 6-axis IMU driver"
@@ -2227,7 +2227,7 @@ config ALP_SDK_CHIP_ES8388
 	  Compile chips/es8388/es8388.c.  China-domestic cost-sensitive
 	  codec; same shape as WM8960.
 
-endmenu # "ALP SDK chip drivers"
+endmenu # "Alp SDK chip drivers"
 
 # §D.lib.loader -- per-library HW-accelerator Kconfig knobs declared
 # in a sibling file so the chip-driver menu above stays focused on

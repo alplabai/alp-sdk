@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -37,7 +37,7 @@
  *
  * @par MDIO abstraction
  *
- * The ALP SDK's `<alp/peripheral.h>` surface does **not** declare an
+ * The Alp SDK's `<alp/peripheral.h>` surface does **not** declare an
  * MDIO API today.  Rather than couple this driver to Zephyr's
  * `<zephyr/drivers/mdio.h>` (Renesas-style host controller), the
  * driver takes **caller-supplied read/write callbacks**:

@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: GalaxyCore GC2145 2 MP DVP camera.
+# Alp SDK chip manifest: GalaxyCore GC2145 2 MP DVP camera.
 schema_version:   1
 chip_id:          gc2145
 driver_status:    stub

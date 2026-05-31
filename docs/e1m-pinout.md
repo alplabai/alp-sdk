@@ -1,6 +1,6 @@
 # E1M pinout — and how the SDK consumes it
 
-The ALP SDK **does not duplicate** the E1M pinout.  The standard
+The Alp SDK **does not duplicate** the E1M pinout.  The standard
 lives in [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
 and the SDK only sees opaque integers (`bus_id`, `pin_id`,
 `port_id`) that have already been resolved through a chain of
@@ -49,7 +49,7 @@ below.)
                               │ opaque integer N
                               ▼
 +----------------------------------------------------------------+
-|  ALP SDK — THIS REPO                                           |
+|  Alp SDK — THIS REPO                                           |
 |    alp_i2c_open(&cfg) resolves cfg.bus_id to a Zephyr          |
 |    device pointer (zephyr backend) or a vendor HAL handle      |
 |    (baremetal / yocto backends).                                |

@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Sony IMX477 12.3 MP MIPI CSI-2 (RPi HQ Camera).
+# Alp SDK chip manifest: Sony IMX477 12.3 MP MIPI CSI-2 (RPi HQ Camera).
 schema_version:   1
 chip_id:          imx477
 driver_status:    stub

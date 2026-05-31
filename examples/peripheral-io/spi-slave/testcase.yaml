@@ -4,7 +4,7 @@ sample:
   name: spi-slave
   description: |
     Per-peripheral example for SPI slave mode.  As of v0.6 the
-    ALP SDK <alp/peripheral.h> surface is master-only; this
+    Alp SDK <alp/peripheral.h> surface is master-only; this
     example documents the API gap, stakes out the proposed
     slave-mode shape, and exits with the NOSUPPORT diagnostic.
 

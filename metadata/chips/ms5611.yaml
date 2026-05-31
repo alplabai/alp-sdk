@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: TE Connectivity MS5611 barometer.
+# Alp SDK chip manifest: TE Connectivity MS5611 barometer.
 schema_version:   1
 chip_id:          ms5611
 driver_status:    partial          # PROM read + reset; conversion/compensation later.

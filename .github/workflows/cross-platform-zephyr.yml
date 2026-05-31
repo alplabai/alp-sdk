@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Cross-platform Zephyr-on-M smoke gate for the ALP SDK.
+# Cross-platform Zephyr-on-M smoke gate for the Alp SDK.
 #
 # Per ADR 0012 (docs/adr/0012-cross-platform-developer-host.md)
 # the Zephyr-on-M-class developer workflow is first-class on

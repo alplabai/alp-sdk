@@ -26,7 +26,7 @@
 # per-BSP layer concern handled by Phase 4 (Wave 4 owns the per-
 # example board.yaml + BSP integration).
 
-SUMMARY = "ALP SDK heterogeneous-IPC carve-out DTS reservations"
+SUMMARY = "Alp SDK heterogeneous-IPC carve-out DTS reservations"
 DESCRIPTION = "Bridges the orchestrator-emitted dts-reservations.dtsi \
                from build/generated into the Yocto kernel DT pipeline \
                so the Linux + Zephyr sides see identical alp_default_rpmsg \

@@ -108,7 +108,7 @@
     }
   ],
   "notes": [
-    "STUB — derived from ALP Lab E1M-AEN datasheet draft (Table 1: '2× M55, 1× A32 800 MHz, 2× U55, 5.5MB MRAM, up to 13.5MB SRAM, 2× OSPI'; Table 11: AEN501 → AE512F80F55D5LS).",
+    "STUB — derived from Alp Lab E1M-AEN datasheet draft (Table 1: '2× M55, 1× A32 800 MHz, 2× U55, 5.5MB MRAM, up to 13.5MB SRAM, 2× OSPI'; Table 11: AEN501 → AE512F80F55D5LS).",
     "E5 silicon datasheet from Alif is STILL not on file as of 2026-05-11 -- E3 (v2.8), E4 (v1.0), E6 (v1.0), E7 (v2.9), and E8 (v1.0) have all been published; E5 alone remains pending.  Replace this stub when ADTS00xx for E5 is published.",
     "Topology assumed identical to E7 with one of the two Cortex-A32 cores depopulated.  NPU and external-memory interfaces match E7 (OctalSPI, U55+U55).",
     "Peripheral counts left empty until the Alif datasheet confirms -- most likely identical to E7 but do not assume.",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-HiL smoke-test runner for the ALP SDK.
+HiL smoke-test runner for the Alp SDK.
 
 Drives one or more YAML smoke specs against attached hardware:
 
@@ -397,7 +397,7 @@ def _print_summary(results: list[SmokeResult]) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="HiL smoke-test runner for the ALP SDK.",
+        description="HiL smoke-test runner for the Alp SDK.",
     )
     parser.add_argument(
         "target", type=Path,

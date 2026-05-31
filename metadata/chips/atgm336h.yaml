@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: AllyStar ATGM336H cost-optimised GNSS.
+# Alp SDK chip manifest: AllyStar ATGM336H cost-optimised GNSS.
 schema_version:   1
 chip_id:          atgm336h
 driver_status:    complete

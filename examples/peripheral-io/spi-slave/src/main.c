@@ -1,15 +1,15 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * spi-slave -- demonstrate the SHAPE of SPI slave-mode application
- * code on the ALP SDK.
+ * code on the Alp SDK.
  *
  * ============================================================
  *   SDK GAP NOTICE -- READ THIS BEFORE COPYING THE EXAMPLE
  * ============================================================
  *
- * As of v0.6 the ALP SDK's <alp/peripheral.h> SPI surface is
+ * As of v0.6 the Alp SDK's <alp/peripheral.h> SPI surface is
  * MASTER-ONLY.  There is no `alp_spi_open_slave()` /
  * `alp_spi_slave_register()` / equivalent yet.  This example
  * exists to:
@@ -198,7 +198,7 @@ int main(void)
         /* Today this branch ALWAYS fires because the shim returns
          * NULL.  Customers reading the console see why their build
          * succeeds but the slave doesn't respond. */
-        printf("[spi-slave] ALP SDK v0.6 does NOT support SPI slave mode\n");
+        printf("[spi-slave] Alp SDK v0.6 does NOT support SPI slave mode\n");
         printf("[spi-slave]   <alp/peripheral.h> is master-only today\n");
         printf("[spi-slave]   Note: Zephyr's own SPI slave support is patchy too;\n");
         printf("[spi-slave]         some SoC drivers don't implement spi_slave_register.\n");

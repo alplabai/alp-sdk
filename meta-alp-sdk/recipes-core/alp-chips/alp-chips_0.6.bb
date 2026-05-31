@@ -12,7 +12,7 @@
 # <alp/peripheral.h> which alp-sdk resolves to Linux V4L2 /
 # I2C-dev / spidev / GPIO-cdev backends on the Yocto side.
 
-SUMMARY     = "ALP SDK on-board chip-driver collection"
+SUMMARY     = "Alp SDK on-board chip-driver collection"
 DESCRIPTION = "Static library of ALP-curated drivers for chips populated \
 on the E1M and E1M-X EVKs and modules.  Pairs with libalp_sdk.so."
 HOMEPAGE    = "https://github.com/alplabai/alp-sdk"

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Pull-request twister gate for the ALP SDK.
+# Pull-request twister gate for the Alp SDK.
 #
 # Runs the full ztest + example suite under native_sim/native/64
 # on every PR.  The Zephyr workspace is set up via the
@@ -95,7 +95,7 @@ jobs:
       # jsonschema in addition to PyYAML (already pulled in by
       # Zephyr's requirements-base.txt).  Install it after the
       # Zephyr deps so version pins don't override.
-      - name: pip install ALP SDK Python deps
+      - name: pip install Alp SDK Python deps
         run: |
           pip3 install jsonschema
 

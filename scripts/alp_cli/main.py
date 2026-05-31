@@ -11,10 +11,10 @@ from alp_cli.run import run_cmd
 from alp_cli.validate import validate_cmd
 
 
-@click.group(help="ALP SDK command-line interface.")
+@click.group(help="Alp SDK command-line interface.")
 @click.version_option(__version__, prog_name="alp")
 def cli() -> None:
-    """ALP SDK command-line interface."""
+    """Alp SDK command-line interface."""
 
 
 cli.add_command(init_cmd)

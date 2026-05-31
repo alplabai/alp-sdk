@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: ADI MAX31865 RTD-to-digital converter.
+# Alp SDK chip manifest: ADI MAX31865 RTD-to-digital converter.
 schema_version:   1
 chip_id:          max31865
 driver_status:    complete

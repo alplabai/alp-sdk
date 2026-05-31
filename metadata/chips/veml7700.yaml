@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Vishay VEML7700 ambient-light sensor.
+# Alp SDK chip manifest: Vishay VEML7700 ambient-light sensor.
 schema_version:   1
 chip_id:          veml7700
 driver_status:    complete

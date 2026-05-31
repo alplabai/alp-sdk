@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * uart-hello-world -- the canonical "printf via UART" walkthrough.
@@ -63,7 +63,7 @@
  * and the size is fixed at build time.  Note the explicit "\r\n"
  * line-ending -- serial terminals expect CR+LF (most don't
  * implement bare-LF auto-CR like a stdout). */
-static const uint8_t HELLO_GREETING[] = "ALP SDK uart-hello-world\r\n";
+static const uint8_t HELLO_GREETING[] = "Alp SDK uart-hello-world\r\n";
 
 int main(void) {
     printf("[uart-hello] open E1M_UART0 @ 115200 8N1\n");

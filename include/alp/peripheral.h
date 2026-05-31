@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file peripheral.h
- * @brief ALP SDK peripheral abstraction (I2C, SPI, GPIO, UART).
+ * @brief Alp SDK peripheral abstraction (I2C, SPI, GPIO, UART).
  *
  * Thin C99 surface that the alp-studio pin allocator targets.  The studio
  * picks a peripheral instance per block at codegen time; this header is

@@ -11,7 +11,7 @@
 # Zephyr SDK, the Python bits) that get you the same workspace
 # without bash.
 #
-# Fresh-clone bootstrap for the ALP SDK.  Sets up a Zephyr workspace
+# Fresh-clone bootstrap for the Alp SDK.  Sets up a Zephyr workspace
 # beside the alp-sdk checkout, installs Python deps, and prints the
 # apt/brew commands for the optional native libraries the Yocto-side
 # backends need (libmosquitto, libasound2, libssl).

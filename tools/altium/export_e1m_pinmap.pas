@@ -3,7 +3,7 @@
 
   ONE reusable exporter.  Run it on ANY board project (E1M-EVK,
   E1M-X-EVK, a SoM project, ...) to pull GROUND-TRUTH data out of the
-  schematics so ALP SDK board metadata can be DERIVED rather than
+  schematics so Alp SDK board metadata can be DERIVED rather than
   hand-transcribed.  One run writes two CSVs next to each other:
 
     <base>_pinmap.csv      Net, Designator, PinNumber, PinName

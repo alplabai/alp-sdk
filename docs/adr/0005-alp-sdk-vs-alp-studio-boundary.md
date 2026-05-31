@@ -5,7 +5,7 @@ Date: 2026-05-10
 
 ## Context
 
-ALP Lab ships two adjacent open-source repositories that together
+Alp Lab ships two adjacent open-source repositories that together
 power the E1M™ developer experience:
 
 - [`alplabai/alp-sdk`](https://github.com/alplabai/alp-sdk) — this

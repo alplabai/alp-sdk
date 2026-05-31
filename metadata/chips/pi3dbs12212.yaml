@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Diodes Inc PI3DBS12212A 2:1 differential mux.
+# Alp SDK chip manifest: Diodes Inc PI3DBS12212A 2:1 differential mux.
 schema_version:   1
 chip_id:          pi3dbs12212
 driver_status:    complete

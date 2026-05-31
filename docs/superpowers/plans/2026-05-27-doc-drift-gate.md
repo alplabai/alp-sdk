@@ -12,7 +12,7 @@
 
 ## File Structure
 
-- **Create** `scripts/check_doc_drift.py` — the gate. One responsibility: detect doc drift. Mirrors the house style of `scripts/check_doxygen_coverage.py` (shebang, `Copyright 2026 ALP Lab AB` / `SPDX-License-Identifier: Apache-2.0` header, module docstring, `ROOT = pathlib.Path(__file__).resolve().parent.parent`, `main(argv) -> int`, `sys.exit(main())`).
+- **Create** `scripts/check_doc_drift.py` — the gate. One responsibility: detect doc drift. Mirrors the house style of `scripts/check_doxygen_coverage.py` (shebang, `Copyright 2026 Alp Lab AB` / `SPDX-License-Identifier: Apache-2.0` header, module docstring, `ROOT = pathlib.Path(__file__).resolve().parent.parent`, `main(argv) -> int`, `sys.exit(main())`).
 - **Create** `tests/scripts/test_check_doc_drift.py` — unit tests. Invokes the script via `subprocess.run([sys.executable, SCRIPT, "--root", tmp_path, ...])`, exactly like `test_check_sw_fallback_tags.py`.
 - **Create** `.github/workflows/pr-doc-drift.yml` — CI gate. Mirrors `pr-doxygen.yml` structure.
 - **Modify** `.claude/skills/running-local-ci/SKILL.md` — add the gate to the gate map + the change→gate table + minimal pre-push (this file is gitignored/local; no CI runs on it).
@@ -167,7 +167,7 @@ Expected: FAIL/ERROR — `scripts/check_doc_drift.py` does not exist yet.
 
 ```python
 #!/usr/bin/env python3
-# Copyright 2026 ALP Lab AB
+# Copyright 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 """
 Doc-drift gate -- fails (exit 1) when customer-facing documentation

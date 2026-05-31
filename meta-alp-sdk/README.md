@@ -9,7 +9,7 @@
 > `alp-image-edge` bake and on-bench boot are the remaining gates; the
 > i.MX 93 path is still paper-correct (gates on v0.7 HiL).
 
-Yocto layer that packages the **ALP SDK** runtime, on-board chip
+Yocto layer that packages the **Alp SDK** runtime, on-board chip
 drivers, edge-AI examples, and reference ROS 2 nodes for the
 V2N / V2N-M1 / i.MX 93 Linux side of every supported E1M SoM.
 

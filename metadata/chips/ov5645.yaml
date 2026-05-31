@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: OmniVision OV5645 5 MP MIPI CSI-2 camera.
+# Alp SDK chip manifest: OmniVision OV5645 5 MP MIPI CSI-2 camera.
 schema_version:   1
 chip_id:          ov5645
 driver_status:    stub             # SCCB chip-ID; MIPI lane bring-up TBD.

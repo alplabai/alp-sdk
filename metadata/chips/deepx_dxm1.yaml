@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: DEEPX DX-M1 NPU host-side bring-up sequencer.
+# Alp SDK chip manifest: DEEPX DX-M1 NPU host-side bring-up sequencer.
 #
 # This entry covers the alp-sdk-side GLUE -- the host code in
 # chips/deepx_dxm1/ that sequences M1_RESET + the PCIe muxes before

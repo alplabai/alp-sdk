@@ -8,7 +8,7 @@ sits behind PCIe on the **E1M-X V2N-M1** SoM family.
 The DX-M1 is a 25-TOPS @ 1.0 GHz DXNN accelerator in an FC-BGA
 625-ball package, paired with 2 × LPDDR5X and a SPI NAND boot flash,
 all on-module.  The host RZ/V2N's PCIe Root Complex enumerates the
-DX-M1 as a single device on `PCIE0`; the ALP SDK's
+DX-M1 as a single device on `PCIE0`; the Alp SDK's
 `<alp/inference.h>` backend talks to it via the DEEPX user-space
 runtime on Linux (Yocto first-class target).
 

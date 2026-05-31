@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Bare-metal backend for the ALP SDK.
+# Bare-metal backend for the Alp SDK.
 #
 # Source layout:
 #   - src/common/stub_backend.c provides every public alp_* symbol

@@ -1,6 +1,6 @@
 # Recommended third-party libraries
 
-ALP SDK is intentionally small — it wraps peripherals, ships chip
+Alp SDK is intentionally small — it wraps peripherals, ships chip
 drivers, and routes inference / IoT through vendor backends.
 Anything beyond that scope (ring buffers, RTOS-agnostic data
 structures, embedded protobuf, embedded JSON, modern formatting,

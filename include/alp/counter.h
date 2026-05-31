@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file counter.h
- * @brief ALP SDK counter / timer + quadrature-encoder abstraction.
+ * @brief Alp SDK counter / timer + quadrature-encoder abstraction.
  *
  * Two related concepts share this header because they map to the same
  * underlying SoC timer hardware on most E1M targets:

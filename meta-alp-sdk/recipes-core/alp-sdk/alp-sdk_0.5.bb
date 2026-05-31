@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Builds + installs the ALP SDK runtime (libalp_sdk.so + the
+# Builds + installs the Alp SDK runtime (libalp_sdk.so + the
 # `<alp/*>` headers) onto the target rootfs.
 
-SUMMARY = "ALP SDK runtime for V2N + V2N-M1 SoMs"
+SUMMARY = "Alp SDK runtime for V2N + V2N-M1 SoMs"
 DESCRIPTION = "Cross-platform peripheral + inference + IoT API \
                for the E1M open-standard SoM family.  Provides \
                libalp_sdk.so + <alp/*> headers used by every \
-               higher-layer ALP Lab application."
+               higher-layer Alp Lab application."
 HOMEPAGE = "https://github.com/alplabai/alp-sdk"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327"

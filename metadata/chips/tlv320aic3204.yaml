@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: TI TLV320AIC3204 premium stereo codec.
+# Alp SDK chip manifest: TI TLV320AIC3204 premium stereo codec.
 schema_version:   1
 chip_id:          tlv320aic3204
 driver_status:    stub

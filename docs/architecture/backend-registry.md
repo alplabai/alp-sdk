@@ -1,6 +1,6 @@
 # Backend Registry Architecture
 
-The ALP SDK dispatches every peripheral call through a linker-section
+The Alp SDK dispatches every peripheral call through a linker-section
 backend registry. This page tells you how to add a backend for a new
 silicon family without editing existing files.
 
