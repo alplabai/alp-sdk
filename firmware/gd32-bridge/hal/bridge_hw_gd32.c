@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * GD32G5x3 backend for the bridge HAL.  Selected by setting
@@ -592,6 +592,14 @@ static const gd32_dac_ch_t dac_channels[] = {
  * I2C-master poll, SysTick, etc.). */
 void bridge_hw_init(void)
 {
+#if defined(BRIDGE_OTA_PARTITIONED) && defined(BRIDGE_APP_SLOT_BASE)
+    /* OTA Path-A: the app runs from a flash slot, not 0x08000000, so move
+     * the vector table off the vendor SystemInit default before any NVIC
+     * use.  Runs first (main calls bridge_hw_init before the transports
+     * enable interrupts). */
+    SCB->VTOR = (uint32_t)(BRIDGE_APP_SLOT_BASE);
+#endif
+
     /* Enable AHB2 clocks for every GPIO port the pad map references.
      * The chip's RCU keeps unused GPIO ports clock-gated to save
      * power; we enable A..F unconditionally because the E1M IO map

@@ -5,34 +5,23 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * Linker script for the GD32G553MEY7TR on E1M-X V2N.  Memory layout:
- * 512 KB main flash (0x08000000), 96 KB SRAM (0x20000000) plus 32 KB
- * TCMSRAM (0x10000000) -- matches GD's `gd32g553_xE_flash.ld` reference
- * from the GD32G5x3 firmware library at
- * `Firmware/CMSIS/GD/GD32G5x3/Source/GCC/Ld/`.
+ * Linker template for a slot-relocated gd32-bridge application (OTA Path A).
+ * CMake configures @APP_SLOT_BASE@ / @APP_SLOT_LEN@ per slot (A: 0x0800A000,
+ * B: 0x08045000; 236 KB each). The app sets SCB->VTOR to its slot base at
+ * boot (bridge_hw_init), since the vendor SystemInit defaults VTOR to
+ * 0x08000000.
  *
- * Differences vs the vendor reference:
+ * `.ramfunc` is folded into `.data` so the vendor Reset_Handler's .data
+ * copy relocates it to RAM — required because the FMC erase/program loop
+ * (hal/fmc_ota.c, OTA_RAMFUNC) cannot execute from the single flash bank
+ * it is erasing.
  *
- *   * Empty weak `_init` / `_fini` symbols are emitted via the C
- *     translation unit `hal/gd32_libc_stubs.c` rather than the linker
- *     script (PROVIDE inside SECTIONS doesn't synthesise a real `bx lr`
- *     stub, only an address label that would alias the next instruction
- *     in `.text`).  newlib's `__libc_init_array` calls both; with
- *     `-nostartfiles` the toolchain's `crti.o` (which normally supplies
- *     these symbols) is dropped from the link.
- *
- *   * SPDX-License-Identifier tag (vendor file uses prose attribution
- *     only).
- *
- * The vendor file's structure -- section ordering, alignment rules,
- * `__stack_size` / `__heap_size` defaults, GROUP() of newlib archives --
- * is preserved verbatim so the runtime semantics match anything built
- * against the vendor's own template projects.
+ * HIL-REQUIRED: not validated on silicon.
  */
 
 MEMORY
 {
-    FLASH    (rx)  : ORIGIN = 0x08000000, LENGTH = 512K
+    FLASH    (rx)  : ORIGIN = @APP_SLOT_BASE@, LENGTH = @APP_SLOT_LEN@
     RAM      (xrw) : ORIGIN = 0x20000000, LENGTH = 96K
     TCMSRAM  (xrw) : ORIGIN = 0x10000000, LENGTH = 32K
 }
@@ -44,16 +33,6 @@ SECTIONS
     __stack_size = DEFINED(__stack_size) ? __stack_size : 2K;
     __heap_size  = DEFINED(__heap_size)  ? __heap_size  : 1K;
 
-    /* Cortex-M vector table.  First word is the initial stack-pointer
-     * value, second word is the Reset_Handler address.  The vendor's
-     * `startup_gd32g5x3.S` emits the table into `.vectors`.
-     *
-     * The vendor reference LD additionally emits `__Vectors_End` /
-     * `__Vectors_Size` symbols derived from the assembly-side
-     * `__gVectors` label.  We omit those here so the same LD links
-     * the stub backend (which never pulls in `startup_gd32g5x3.S`
-     * and therefore has no `__gVectors` to subtract from).  Nothing
-     * in the firmware tree consumes the diagnostic symbols. */
     .vectors :
     {
         . = ALIGN(4);
@@ -83,22 +62,14 @@ SECTIONS
         . = ALIGN(4);
     } > FLASH
 
-    .ARM.extab :
-    {
-        *(.ARM.extab* .gnu.linkonce.armextab.*)
-    } > FLASH
-
+    .ARM.extab :   { *(.ARM.extab* .gnu.linkonce.armextab.*) } > FLASH
     .ARM :
     {
         __exidx_start = .;
         *(.ARM.exidx*)
         __exidx_end = .;
     } > FLASH
-
-    .ARM.attributes :
-    {
-        *(.ARM.attributes)
-    } > FLASH
+    .ARM.attributes : { *(.ARM.attributes) } > FLASH
 
     .preinit_array :
     {
@@ -123,10 +94,6 @@ SECTIONS
         PROVIDE_HIDDEN (__fini_array_end = .);
     } > FLASH
 
-    /* `.data`: initialised globals.  Lives in RAM at runtime but is
-     * loaded from FLASH at startup; `_sidata` is the load address in
-     * FLASH, `_sdata` / `_edata` mark the runtime extent in RAM.
-     * Reset_Handler copies the region byte-by-byte. */
     _sidata = LOADADDR(.data);
     .data :
     {
@@ -134,6 +101,11 @@ SECTIONS
         _sdata = .;
         *(.data)
         *(.data*)
+        /* RAM-resident FMC routine (hal/fmc_ota.c) — copied to RAM with
+         * .data by the vendor Reset_Handler. */
+        . = ALIGN(4);
+        *(.ramfunc)
+        *(.ramfunc*)
         . = ALIGN(4);
         _edata = .;
     } > RAM AT > FLASH

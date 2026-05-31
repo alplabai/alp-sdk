@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * gd32-bridge OTA — Path A state machine.  See ota.h + ota_layout.h and
@@ -21,21 +21,9 @@
 
 #include "ota.h"
 #include "ota_layout.h"
+#include "crc32.h"
 #include "fmc_ota.h"
 #include "bootloader/bootloader.h"   /* CMD_OTA_* */
-
-/* ---- CRC-32 (IEEE, reflected; single-call use, seed 0) ---------------- */
-uint32_t ota_crc32(uint32_t crc, const uint8_t *data, size_t len)
-{
-    crc ^= 0xFFFFFFFFu;
-    for (size_t i = 0u; i < len; i++) {
-        crc ^= data[i];
-        for (int b = 0; b < 8; b++) {
-            crc = (crc >> 1) ^ (0xEDB88820u & (uint32_t)(-(int32_t)(crc & 1u)));
-        }
-    }
-    return crc ^ 0xFFFFFFFFu;
-}
 
 /* ---- Weak flash seam (overridden by hal/fmc_ota.c on the gd32 backend) - */
 __attribute__((weak)) bool ota_fmc_supported(void) { return false; }

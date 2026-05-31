@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * gd32-bridge OTA — Path A state machine (application bootloader over the
@@ -16,10 +16,6 @@
 #include <stdint.h>
 
 #include "protocol.h"
-
-/* CRC-32 (IEEE 802.3, reflected, init 0xFFFFFFFF, xorout 0xFFFFFFFF).
- * Seed the first call with 0u; matches the host-side image CRC. */
-uint32_t ota_crc32(uint32_t crc, const uint8_t *data, size_t len);
 
 /* OTA opcode handler (cmd in 0xF0..0xFF). */
 gd32_bridge_status_t ota_dispatch(uint8_t cmd,
