@@ -1,6 +1,6 @@
 # Glossary
 
-Terms a firmware engineer will encounter in the ALP SDK and
+Terms a firmware engineer will encounter in the Alp SDK and
 in E1M-X module documentation.
 
 ## A-D
@@ -8,7 +8,7 @@ in E1M-X module documentation.
 **ADC** -- Analog-to-Digital Converter.  The SDK's `<alp/adc.h>`
 abstracts the SoC's ADC peripheral.
 
-**AEN** -- ALP Lab module family based on **Alif Ensemble**
+**AEN** -- Alp Lab module family based on **Alif Ensemble**
 silicon (E3..E8).  See [`docs/soms/aen.md`](soms/aen.md).
 
 **alp-studio** -- An optional consumer that sits on top of alp-sdk:
@@ -92,7 +92,7 @@ families ship in this size.
 
 **E1M-X** -- 45 × 65 mm SoM form factor (496 pads).  V2N family.
 
-**EVK** -- Evaluation Kit.  The reference board ALP Lab ships for
+**EVK** -- Evaluation Kit.  The reference board Alp Lab ships for
 bring-up.  Two flavours: E1M-EVK (35 × 35) and E1M-X-EVK (45 × 65).
 
 **Ethos-U** -- Arm's micro-NPU IP.  AEN modules carry Ethos-U55;

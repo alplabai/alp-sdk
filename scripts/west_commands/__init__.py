@@ -1,4 +1,4 @@
-"""ALP SDK west extension commands.
+"""Alp SDK west extension commands.
 
 Registered subcommands (each subclasses `west.commands.WestCommand`
 in its own file):

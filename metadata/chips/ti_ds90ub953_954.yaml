@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: TI DS90UB953 + DS90UB954 FPD-Link III SerDes.
+# Alp SDK chip manifest: TI DS90UB953 + DS90UB954 FPD-Link III SerDes.
 schema_version:   1
 chip_id:          ti_ds90ub953_954
 driver_status:    stub

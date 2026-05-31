@@ -1,15 +1,15 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * i2c-slave -- demonstrate the SHAPE of I2C slave-mode application
- * code on the ALP SDK.
+ * code on the Alp SDK.
  *
  * ============================================================
  *   SDK GAP NOTICE -- READ THIS BEFORE COPYING THE EXAMPLE
  * ============================================================
  *
- * As of v0.6 the ALP SDK's <alp/peripheral.h> I2C surface is
+ * As of v0.6 the Alp SDK's <alp/peripheral.h> I2C surface is
  * MASTER-ONLY.  There is no `alp_i2c_open_slave()` /
  * `alp_i2c_slave_register_callbacks()` / equivalent yet.  This
  * example exists to:
@@ -191,7 +191,7 @@ int main(void) {
          * slave-mode support so customers reading the console
          * output understand why their `west build` succeeded but
          * the device doesn't respond to a master probe. */
-        printf("[i2c-slave] ALP SDK v0.6 does NOT support I2C slave mode\n");
+        printf("[i2c-slave] Alp SDK v0.6 does NOT support I2C slave mode\n");
         printf("[i2c-slave]   <alp/peripheral.h> is master-only today\n");
         printf("[i2c-slave]   tracking: v0.7 API surface addition\n");
         printf("[i2c-slave] done\n");

@@ -1,11 +1,11 @@
-# ALP SDK chip manifest: bit-bang SWD controller for the GD32G553.
+# Alp SDK chip manifest: bit-bang SWD controller for the GD32G553.
 schema_version:   1
 chip_id:          gd32_swd
 driver_status:    partial          # Packet layer + DPIDR + halt + FMC erase/write/verify
                                    # all coded.  V2N pad assignments resolved (P70/P71/P74).
                                    # Flips to "complete" once exercised on real silicon.
 display_name:     "Bit-banged SWD controller (GD32G553 target, V2N host-driven)"
-vendor:           alplab           # Implementation owned by ALP Lab; the underlying SWD
+vendor:           alplab           # Implementation owned by Alp Lab; the underlying SWD
                                    # protocol is Arm Coresight (Arm DDI 0316C).
 mpn_population:
   - "N/A (host-side software; no on-module silicon)"

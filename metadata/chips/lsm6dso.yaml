@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: STMicroelectronics LSM6DSO 6-axis IMU.
+# Alp SDK chip manifest: STMicroelectronics LSM6DSO 6-axis IMU.
 schema_version:   1
 chip_id:          lsm6dso
 driver_status:    partial          # init + accel/gyro/temp read.

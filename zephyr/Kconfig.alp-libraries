@@ -14,7 +14,7 @@
 
 # v0.5 §D.lib.loader -- per-library HW-accelerator Kconfig knobs.
 
-menu "ALP SDK per-library HW-accelerator wiring"
+menu "Alp SDK per-library HW-accelerator wiring"
 
 # ----------------------------------------------------------------------
 # tflite_micro
@@ -314,7 +314,7 @@ config ALP_LITTLEFS_SYNC_IO
 	bool "littlefs sync I/O (SW fallback)"
 	default y
 
-endmenu  # "ALP SDK per-library HW-accelerator wiring"
+endmenu  # "Alp SDK per-library HW-accelerator wiring"
 
 # ----------------------------------------------------------------------
 # .alpmodel package reader (<alp/model.h>)

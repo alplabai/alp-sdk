@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: InvenSense ICS-43434 MEMS microphone.
+# Alp SDK chip manifest: InvenSense ICS-43434 MEMS microphone.
 schema_version:   1
 chip_id:          ics_43434
 driver_status:    complete

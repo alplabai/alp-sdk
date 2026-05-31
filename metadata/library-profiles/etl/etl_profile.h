@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * etl_profile.h for the ALP SDK's embedded targets.
+ * etl_profile.h for the Alp SDK's embedded targets.
  *
  * ETL (https://github.com/ETLCPP/etl) reads etl_profile.h from
  * the include path BEFORE its own defaults.  This file is what

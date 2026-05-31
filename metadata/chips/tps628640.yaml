@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: TI TPS628640 single-channel buck (multi-instance).
+# Alp SDK chip manifest: TI TPS628640 single-channel buck (multi-instance).
 schema_version:   1
 chip_id:          tps628640
 driver_status:    complete            # init + VOUT1/2 r/w + STATUS read +

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# CODEOWNERS for the ALP SDK.
+# CODEOWNERS for the Alp SDK.
 #
 # GitHub auto-requests reviews from owners listed here whenever a PR
 # touches matching paths.  Maintainers listed below MUST review +

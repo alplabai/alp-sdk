@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Solomon Systech SSD1306 monochrome OLED controller.
+# Alp SDK chip manifest: Solomon Systech SSD1306 monochrome OLED controller.
 schema_version:   1
 chip_id:          ssd1306
 driver_status:    partial          # init + raw-pixel-write; full <alp/display.h> backend lands in v0.6.

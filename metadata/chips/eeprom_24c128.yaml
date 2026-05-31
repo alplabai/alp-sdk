@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: 24Cxx-class 128-Kbit I2C EEPROM.
+# Alp SDK chip manifest: 24Cxx-class 128-Kbit I2C EEPROM.
 schema_version:   1
 chip_id:          eeprom_24c128
 driver_status:    complete         # init / read / write / page-aligned splitting.

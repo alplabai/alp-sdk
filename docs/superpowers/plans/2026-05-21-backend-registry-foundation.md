@@ -144,7 +144,7 @@ Create `include/alp/cap_instance.h`:
  * Populated by each backend's ops->probe() at open time, cached
  * in the handle, returned by alp_<class>_capabilities().
  *
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
@@ -311,7 +311,7 @@ Create `include/alp/backend.h`:
  * See docs/architecture/backend-registry.md for the design
  * narrative.
  *
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
@@ -1535,7 +1535,7 @@ Create `docs/architecture/backend-registry.md`:
 ```markdown
 # Backend Registry Architecture
 
-The ALP SDK dispatches every peripheral call through a linker-section
+The Alp SDK dispatches every peripheral call through a linker-section
 backend registry. This page tells you how to add a backend for a new
 silicon family without editing existing files.
 

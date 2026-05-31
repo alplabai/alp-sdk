@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: ST VL53L1X time-of-flight ranger (I2C).
+# Alp SDK chip manifest: ST VL53L1X time-of-flight ranger (I2C).
 schema_version:   1
 chip_id:          vl53l1x
 driver_status:    stub

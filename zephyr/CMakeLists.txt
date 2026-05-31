@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Zephyr-module entry point for the ALP SDK.
+# Zephyr-module entry point for the Alp SDK.
 #
 # Loaded by Zephyr's build via zephyr/module.yml when CONFIG_ALP_SDK=y.
 # Plain-CMake (add_subdirectory) consumers don't reach this file —

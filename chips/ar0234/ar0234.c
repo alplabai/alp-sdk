@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * onsemi AR0234CS 1080p global-shutter MIPI CSI-2 driver (SCCB).

@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Tiny header-only microbench harness for the ALP SDK.  See
+ * Tiny header-only microbench harness for the Alp SDK.  See
  * tests/bench/README.md for the rationale.  No external dependencies --
  * timing comes from clock_gettime on POSIX, k_uptime_ticks on Zephyr.
  *

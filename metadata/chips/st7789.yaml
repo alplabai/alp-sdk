@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Sitronix ST7789V SPI TFT display controller.
+# Alp SDK chip manifest: Sitronix ST7789V SPI TFT display controller.
 schema_version:   1
 chip_id:          st7789
 driver_status:    partial          # init + window + write_pixels; full fb opt-in via gfx_compat.

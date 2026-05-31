@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: OmniVision OV9281 1 MP global-shutter mono.
+# Alp SDK chip manifest: OmniVision OV9281 1 MP global-shutter mono.
 schema_version:   1
 chip_id:          ov9281
 driver_status:    stub

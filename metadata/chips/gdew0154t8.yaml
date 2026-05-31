@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: GoodDisplay GDEW0154T8 1.54" e-paper (SPI).
+# Alp SDK chip manifest: GoodDisplay GDEW0154T8 1.54" e-paper (SPI).
 schema_version:   1
 chip_id:          gdew0154t8
 driver_status:    stub

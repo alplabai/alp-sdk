@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file power.h
- * @brief ALP SDK low-power-mode abstraction.
+ * @brief Alp SDK low-power-mode abstraction.
  *
  * The E1M standard reserves four logical power modes -- RUN,
  * SLEEP, DEEP_SLEEP, and STANDBY -- mapped per SoC by the

@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * Copyright (c) 2009-2020 Arm Limited. All rights reserved.
  * Copyright (c) 2026, GigaDevice Semiconductor Inc.
  *

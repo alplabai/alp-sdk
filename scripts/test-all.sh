@@ -12,7 +12,7 @@
 # just a one-shot wrapper.  See docs/cross-platform-setup.md
 # section 4 for native PowerShell equivalents.
 #
-# Single-command verifier for the ALP SDK.  Runs every test surface
+# Single-command verifier for the Alp SDK.  Runs every test surface
 # the project has locally-runnable (no HIL):
 #
 #   1. Plain-CMake / Yocto build + ctest

@@ -1,4 +1,4 @@
-# tests/bench/ -- ALP SDK microbenchmarks
+# tests/bench/ -- Alp SDK microbenchmarks
 
 Scaffolding for the v1.0 performance baseline.  Each public API
 class in `<alp/...>` gets a small microbenchmark suite that prints

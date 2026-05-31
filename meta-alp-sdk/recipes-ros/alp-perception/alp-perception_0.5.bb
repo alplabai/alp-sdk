@@ -8,9 +8,9 @@ inherit ros_distro_humble
 inherit ros_superflore_generated
 inherit ament_cmake
 
-SUMMARY = "ALP SDK ROS 2 perception node for V2N + V2N-M1"
+SUMMARY = "Alp SDK ROS 2 perception node for V2N + V2N-M1"
 DESCRIPTION = "Publishes IMU / GNSS / battery / camera / \
-               object-detection topics from the ALP SDK chip \
+               object-detection topics from the Alp SDK chip \
                drivers.  Runs DEEPX inference on V2N-M1; DRP-AI \
                on V2N (no DEEPX).  Same source for both."
 HOMEPAGE = "https://github.com/alplabai/alp-sdk"

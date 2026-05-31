@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * MbedTLS configuration header for the ALP SDK's embedded targets.
+ * MbedTLS configuration header for the Alp SDK's embedded targets.
  *
  * MbedTLS has ~400 compile-time switches in mbedtls_config.h
  * controlling cipher / KDF / TLS feature presence.  This profile

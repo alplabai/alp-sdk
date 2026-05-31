@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Avia Semi HX711 24-bit load-cell ADC.
+# Alp SDK chip manifest: Avia Semi HX711 24-bit load-cell ADC.
 schema_version:   1
 chip_id:          hx711
 driver_status:    complete         # bit-banged read + gain selection.

@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * OmniVision OV5645 5 MP MIPI CSI-2 image sensor driver (SCCB side).

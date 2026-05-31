@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Allegro A4988 stepper driver.
+# Alp SDK chip manifest: Allegro A4988 stepper driver.
 schema_version:   1
 chip_id:          a4988
 driver_status:    complete

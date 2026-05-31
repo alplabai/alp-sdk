@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: u-blox SARA-R5 LTE-M module.
+# Alp SDK chip manifest: u-blox SARA-R5 LTE-M module.
 schema_version:   1
 chip_id:          ublox_sara_r5
 driver_status:    stub

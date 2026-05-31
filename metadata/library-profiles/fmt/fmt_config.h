@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * fmt configuration header for the ALP SDK's embedded targets.
+ * fmt configuration header for the Alp SDK's embedded targets.
  *
  * fmt (https://github.com/fmtlib/fmt) reads compile-time defines
  * before its core headers.  Consumers using fmt under board.yaml's

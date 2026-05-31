@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: OmniVision OV7670 VGA DVP camera.
+# Alp SDK chip manifest: OmniVision OV7670 VGA DVP camera.
 schema_version:   1
 chip_id:          ov7670
 driver_status:    stub

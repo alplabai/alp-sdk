@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Quectel BG95 LTE-M / NB-IoT module.
+# Alp SDK chip manifest: Quectel BG95 LTE-M / NB-IoT module.
 schema_version:   1
 chip_id:          quectel_bg95
 driver_status:    stub             # AT command shell only.

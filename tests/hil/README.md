@@ -124,7 +124,7 @@ serial:
   duration_s: 15
   baud:       115200
   expect_contains:
-    - "ALP SDK"
+    - "Alp SDK"
     - "alp_gpio_open ok"
     - "button=PRESSED"
     - "led=ON"

@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: ADI (Maxim) MAX9295/MAX9296 GMSL2 SerDes.
+# Alp SDK chip manifest: ADI (Maxim) MAX9295/MAX9296 GMSL2 SerDes.
 schema_version:   1
 chip_id:          maxim_max9295_9296
 driver_status:    stub

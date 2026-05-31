@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file ble.h
- * @brief ALP SDK Bluetooth Low Energy abstraction (peripheral + central).
+ * @brief Alp SDK Bluetooth Low Energy abstraction (peripheral + central).
  *
  * v0.3 deliverable.  v0.1 ships only the public surface; every entry
  * point returns ALP_ERR_NOSUPPORT and `*_open()` returns NULL.

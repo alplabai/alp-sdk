@@ -4,7 +4,7 @@
 Lint repo content for Linux-only idioms in customer-facing surfaces.
 
 Per ADR 0012 (docs/adr/0012-cross-platform-developer-host.md) the
-ALP SDK promises Win + Mac + Linux as first-class developer hosts
+Alp SDK promises Win + Mac + Linux as first-class developer hosts
 for the Zephyr-on-M-class workflow.  This script mechanically
 enforces that promise by flagging Linux-only idioms that creep
 into docs, scripts, examples, and tests.

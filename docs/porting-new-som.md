@@ -1,4 +1,4 @@
-# Porting a new E1M SoM to the ALP SDK
+# Porting a new E1M SoM to the Alp SDK
 
 > **30-minute target.**  This guide walks through every step required
 > to add a hypothetical 7th AEN-family SKU — **E1M-AEN901**, a
@@ -10,7 +10,7 @@
 
 ## 1. Introduction
 
-"Porting a new SoM" in the ALP SDK means *adding one row of
+"Porting a new SoM" in the Alp SDK means *adding one row of
 machine-readable metadata*.  It is **not**:
 
 - *adding a new chip driver* — that lands under `chips/<part>/` and

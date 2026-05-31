@@ -26,7 +26,7 @@ CPUs:
 | Renesas internal **Cortex-M33** @ 200 MHz | inside `R9A09G056N44GBG#AC0`     | Application-level real-time work (paired with the four A55 cores via the IPC). |
 | GigaDevice **GD32G553** @ 216 MHz         | separate IC on the SoM           | Supervisory: PMIC sequencing alongside `DA9292`, on-module supervisory I/O, low-power-state orchestration. |
 
-The ALP SDK's V2N backend talks to the **Renesas internal M33**
+The Alp SDK's V2N backend talks to the **Renesas internal M33**
 through the standard Zephyr / Yocto path; the supervisor `GD32G553`
 runs SoM-internal firmware and is not directly addressable from
 application code.  Porting docs that mention "the M33" need to be

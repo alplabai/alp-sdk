@@ -1,4 +1,4 @@
-// Copyright 2026 ALP Lab AB
+// Copyright 2026 Alp Lab AB
 // SPDX-License-Identifier: Apache-2.0
 //
 // SensorPublishers: 50 Hz IMU + 1 Hz GNSS + 1 Hz battery monitor

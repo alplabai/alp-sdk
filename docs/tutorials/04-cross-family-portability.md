@@ -2,7 +2,7 @@
 
 # 04 -- Intra-family portability (and the form-factor split)
 
-The load-bearing customer promise of the ALP SDK:
+The load-bearing customer promise of the Alp SDK:
 
 > Change `som.sku:` in `board.yaml`, rebuild, ship -- **within a
 > SoM family**.

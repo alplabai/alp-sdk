@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * InvenSense ICS-43434 MEMS mic driver.  See <alp/chips/ics_43434.h>.

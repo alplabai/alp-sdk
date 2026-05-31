@@ -4,7 +4,7 @@
 > silicon yet.**
 
 This page is the single source of truth for "what's been silicon-
-verified in the ALP SDK as of today".  It complements:
+verified in the Alp SDK as of today".  It complements:
 
 - `metadata/chips/<name>.yaml` -- per-chip `verification:` block.
 - `metadata/library-profiles/<name>/hw-backends.yaml` -- per-

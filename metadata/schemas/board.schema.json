@@ -137,7 +137,7 @@
           "type": "string",
           "enum": ["error", "warn", "info", "debug", "trace"],
           "default": "info",
-          "description": "Default log level for every ALP SDK module that does not appear in `modules:` below."
+          "description": "Default log level for every Alp SDK module that does not appear in `modules:` below."
         },
         "modules": {
           "type": "object",
@@ -145,7 +145,7 @@
             "type": "string",
             "enum": ["error", "warn", "info", "debug", "trace", "off"]
           },
-          "description": "Per-module log-level overrides.  Keys match ALP SDK module names (e.g. `alp_iot`, `alp_inference`, `alp_audio`, `alp_security`, `alp_gpio`, ...).  Each value is the same log-level enum as the top-level `log_level`, plus `off` to silence the module entirely.  The loader emits CONFIG_<MODULE>_LOG_LEVEL_<LEVEL>=y per entry into the generated alp.conf."
+          "description": "Per-module log-level overrides.  Keys match Alp SDK module names (e.g. `alp_iot`, `alp_inference`, `alp_audio`, `alp_security`, `alp_gpio`, ...).  Each value is the same log-level enum as the top-level `log_level`, plus `off` to silence the module entirely.  The loader emits CONFIG_<MODULE>_LOG_LEVEL_<LEVEL>=y per entry into the generated alp.conf."
         }
       }
     },

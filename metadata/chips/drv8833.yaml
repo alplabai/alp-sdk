@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: TI DRV8833 dual H-bridge brushed-DC driver.
+# Alp SDK chip manifest: TI DRV8833 dual H-bridge brushed-DC driver.
 schema_version:   1
 chip_id:          drv8833
 driver_status:    complete         # init + per-channel duty + sleep gate.

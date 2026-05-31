@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# tests/fuzz/ -- libFuzzer harnesses for the ALP SDK parser surfaces.
+# tests/fuzz/ -- libFuzzer harnesses for the Alp SDK parser surfaces.
 # Opt-in via ALP_BUILD_FUZZ=ON at the top-level cmake configure;
 # requires clang (GCC has no -fsanitize=fuzzer).  See tests/fuzz/README.md
 # for the design + how to add new harnesses.

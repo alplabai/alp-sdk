@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * Fake LSM6DSO i2c-emul target.  Pre-populates WHO_AM_I = 0x6C and

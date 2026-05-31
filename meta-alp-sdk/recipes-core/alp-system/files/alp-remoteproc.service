@@ -1,5 +1,5 @@
 [Unit]
-Description=ALP SDK remoteproc lifecycle for heterogeneous IPC
+Description=Alp SDK remoteproc lifecycle for heterogeneous IPC
 Documentation=https://github.com/alplabai/alp-sdk
 After=local-fs.target
 Before=multi-user.target

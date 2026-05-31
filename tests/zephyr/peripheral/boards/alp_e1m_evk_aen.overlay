@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Overlay for running the ALP SDK peripheral ztest on the
+ * Overlay for running the Alp SDK peripheral ztest on the
  * E1M EVK (UG-E1M-001) populated with an E1M-AEN family SoM.
  *
  * Wires the studio-resolved peripheral aliases to the EVK

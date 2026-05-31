@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Realtek RTL8211FDI(-VD)-CG Ethernet PHY.
+# Alp SDK chip manifest: Realtek RTL8211FDI(-VD)-CG Ethernet PHY.
 schema_version:   1
 chip_id:          rtl8211fdi
 driver_status:    partial          # init/probe/reset/link/WoL implemented;

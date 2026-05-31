@@ -18,7 +18,7 @@
  *      (Other FlexSPI-OTFAD parts -- RT10xx, RT106x, RT117x --
  *      may be added in a follow-up release once tested.)
  *
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * @par ABI status: [ABI-EXPERIMENTAL]

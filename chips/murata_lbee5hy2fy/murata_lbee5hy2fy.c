@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * Murata LBEE5HY2FY-922 thin GPIO surface.  See <alp/chips/murata_lbee5hy2fy.h>

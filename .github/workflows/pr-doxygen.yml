@@ -64,7 +64,7 @@ jobs:
             # single-quoted (no shell expansion of $(...) and friends).
             ALP_PROJECT_NUMBER="$(git describe --tags --always 2>/dev/null || echo 0.1.0-pre)"
             cat > Doxyfile <<EOF
-          PROJECT_NAME           = "ALP SDK"
+          PROJECT_NAME           = "Alp SDK"
           PROJECT_NUMBER         = "${ALP_PROJECT_NUMBER}"
           OUTPUT_DIRECTORY       = doxygen-out
           INPUT                  = include/alp

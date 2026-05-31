@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file i2s.h
- * @brief ALP SDK I²S / SAI bus abstraction.
+ * @brief Alp SDK I²S / SAI bus abstraction.
  *
  * The audio-data bus underneath `<alp/audio.h>` and the PDM helper in
  * `<alp/blocks/pdm_mic.h>`.  Apps that want to talk directly to a DAC,

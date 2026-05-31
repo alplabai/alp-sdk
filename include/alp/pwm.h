@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file pwm.h
- * @brief ALP SDK pulse-width-modulation abstraction.
+ * @brief Alp SDK pulse-width-modulation abstraction.
  *
  * The E1M standard reserves eight PWM channels (`PWM0..PWM7` in
  * `<alp/e1m_pinout.h>`).  Every E1M-conformant SoM routes them; the

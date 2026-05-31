@@ -1,9 +1,9 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * Stub of the DEEPX DX-M1 host-SDK header.  Declares only the
- * minimum surface the ALP SDK's backend hook
+ * minimum surface the Alp SDK's backend hook
  * (src/yocto/inference_deepx.cpp) references, so the dispatcher
  * path compiles on hosts that do not have the proprietary DEEPX
  * runtime installed.

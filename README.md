@@ -1,4 +1,4 @@
-# ALP SDK — Unification SDK for E1M Edge AI Modules
+# Alp SDK — Unification SDK for E1M Edge AI Modules
 
 > Write once, run on any E1M module.
 
@@ -18,7 +18,7 @@
 > their own bring-up time accordingly.  Verification rolls out
 > per-SKU + per-chip from v0.6 onward.
 
-The **ALP SDK** is the unification software layer for ALP Lab edge AI
+The **Alp SDK** is the unification software layer for Alp Lab edge AI
 modules built on the **E1M open-standard form factor**.  It provides
 application developers a single C/C++ API that works across every
 E1M-* SoM variant — present and future — by wrapping each vendor's
@@ -564,4 +564,4 @@ the `board.yaml` schema reference.
 
 Apache License 2.0 — see [`LICENSE`](LICENSE).
 
-Copyright 2026 ALP Lab AB.
+Copyright 2026 Alp Lab AB.

@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: TI INA236 power monitor.
+# Alp SDK chip manifest: TI INA236 power monitor.
 schema_version:   1
 chip_id:          ina236
 driver_status:    partial

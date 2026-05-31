@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * <alp/i2s.h> -- I2S wrapper tests.  §C.16 split + §C.22 thin-spot

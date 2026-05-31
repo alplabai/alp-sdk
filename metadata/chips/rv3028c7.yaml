@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Micro Crystal RV-3028-C7 low-power RTC.
+# Alp SDK chip manifest: Micro Crystal RV-3028-C7 low-power RTC.
 schema_version:   1
 chip_id:          rv3028c7
 driver_status:    complete         # init / get-set time / alarm + match / multi-source dispatcher / CLKOUT routing.

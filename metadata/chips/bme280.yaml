@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Bosch BME280 T/H/P environment sensor.
+# Alp SDK chip manifest: Bosch BME280 T/H/P environment sensor.
 schema_version:   1
 chip_id:          bme280
 driver_status:    partial          # init + sampling + raw read + canonical compensation.

@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: ams TSL2591 light sensor.
+# Alp SDK chip manifest: ams TSL2591 light sensor.
 schema_version:   1
 chip_id:          tsl2591
 driver_status:    complete

@@ -1,6 +1,6 @@
 # Board identification — SoM EEPROM manifest + BOARD_ID ADC
 
-Two-stage boot-time identification flow that the ALP SDK uses to
+Two-stage boot-time identification flow that the Alp SDK uses to
 confirm what hardware the firmware is running on:
 
 1. **EEPROM manifest** -- 128-byte programmed-once data block in

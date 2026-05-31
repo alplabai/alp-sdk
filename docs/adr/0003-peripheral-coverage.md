@@ -117,7 +117,7 @@ per-class headers.**  Rejected because:
 
 ## See also
 
-- `docs/architecture.md` — "ALP SDK libraries" table reflects the
+- `docs/architecture.md` — "Alp SDK libraries" table reflects the
   expanded surface.
 - `VERSIONS.md` — v0.2 delivery row for "richer blocks + V2N
   intro" lists this as a deliverable.

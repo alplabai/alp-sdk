@@ -6,7 +6,7 @@ Amended: 2026-05-11 (see "Amendment" section at the bottom)
 
 ## Context
 
-ALP SDK targets connected, AI-enabled edge devices.  Every shipped
+Alp SDK targets connected, AI-enabled edge devices.  Every shipped
 product needs:
 
 1. **Secure boot** — the SoC verifies a cryptographic signature on

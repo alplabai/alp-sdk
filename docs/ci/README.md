@@ -2,7 +2,7 @@
 
 # docs/ci/
 
-CI policy + auxiliary documentation for the ALP SDK.
+CI policy + auxiliary documentation for the Alp SDK.
 
 The actual GitHub Actions workflow files live at
 [`/.github/workflows/`](../../.github/workflows/) (where GitHub

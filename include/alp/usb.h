@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file usb.h
- * @brief ALP SDK USB abstraction (device and host).
+ * @brief Alp SDK USB abstraction (device and host).
  *
  * v0.3 deliverable.  v0.1 ships the public surface as a stub;
  * every entry point returns ALP_ERR_NOSUPPORT and `*_open` returns

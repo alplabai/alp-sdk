@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: onsemi AR0234CS 1080p global-shutter MIPI CSI-2.
+# Alp SDK chip manifest: onsemi AR0234CS 1080p global-shutter MIPI CSI-2.
 schema_version:   1
 chip_id:          ar0234
 driver_status:    stub

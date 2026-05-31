@@ -81,7 +81,7 @@ Create `src/zephyr/peripheral_dac.c` with this skeleton at the top; then COPY th
 
 ```c
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * DAC peripheral implementation -- extracted from the legacy
@@ -1223,7 +1223,7 @@ Create `include/alp/ext/alif/adc.h`:
  * @par Supported silicon: alif:ensemble:e7
  *      (E3 / E5 / E8 land in a v0.7.x follow-up.)
  *
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * @par ABI status: [ABI-EXPERIMENTAL]

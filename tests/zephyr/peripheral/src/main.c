@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Smoke tests for the Zephyr ALP SDK backend (peripheral.h).
+ * Smoke tests for the Zephyr Alp SDK backend (peripheral.h).
  * Runs under native_sim with Zephyr's emulated I2C/SPI/GPIO drivers.
  *
  * The 902-line monolith that originally lived here was split per

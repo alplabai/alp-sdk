@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file storage.h
- * @brief ALP SDK persistent-storage abstraction (QSPI / OSPI / SD).
+ * @brief Alp SDK persistent-storage abstraction (QSPI / OSPI / SD).
  *
  * v0.4 deliverable.  v0.1 ships the public surface as a stub;
  * every entry point returns ALP_ERR_NOSUPPORT and `*_open` returns

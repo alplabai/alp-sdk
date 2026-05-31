@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Shared stub backend for the ALP SDK.
+ * Shared stub backend for the Alp SDK.
  *
  * Every public `alp_*` function in the SDK has a default
  * NOSUPPORT implementation here.  Backends that do real work

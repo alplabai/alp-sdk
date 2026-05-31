@@ -1,11 +1,11 @@
 # i2c-slave
 
 Demonstrate the *shape* of I2C slave-mode application code on the
-ALP SDK.
+Alp SDK.
 
 ## SDK gap notice
 
-**As of v0.6 the ALP SDK does NOT support I2C slave mode through
+**As of v0.6 the Alp SDK does NOT support I2C slave mode through
 `<alp/peripheral.h>`.**  The header exposes master-only calls
 (`alp_i2c_open`, `alp_i2c_write`, `alp_i2c_read`,
 `alp_i2c_write_read`).  Slave-mode support is planned for v0.7.
@@ -39,7 +39,7 @@ application code keeps compiling against the upstream names.
 
 ```
 [i2c-slave] open as slave @ 0x42 on E1M_I2C0
-[i2c-slave] ALP SDK v0.6 does NOT support I2C slave mode
+[i2c-slave] Alp SDK v0.6 does NOT support I2C slave mode
 [i2c-slave]   <alp/peripheral.h> is master-only today
 [i2c-slave]   tracking: v0.7 API surface addition
 [i2c-slave] done

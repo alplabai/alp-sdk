@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file wdt.h
- * @brief ALP SDK watchdog abstraction.
+ * @brief Alp SDK watchdog abstraction.
  *
  * Backends:
  *   - Zephyr   : `wdt_*` driver class.

@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * hello-world -- the canonical "first program" for the ALP SDK.
+ * hello-world -- the canonical "first program" for the Alp SDK.
  *
  * No peripherals, no chips, no board-specific wiring.  Just the
  * boot path + a periodic printf loop so customers can confirm
@@ -11,7 +11,7 @@
  *
  * What success looks like:
  *
- *   [hello] ALP SDK hello-world starting
+ *   [hello] Alp SDK hello-world starting
  *   [hello] tick 0
  *   [hello] tick 1
  *   ...
@@ -57,7 +57,7 @@ int main(void) {
      * console is decoded correctly.  If THIS line is missing,
      * the toolchain / flash flow / console-cable is the suspect,
      * not the SDK. */
-    printf("[hello] ALP SDK hello-world starting\n");
+    printf("[hello] Alp SDK hello-world starting\n");
 
     /* Periodic loop -- prints a monotonically-increasing tick every
      * HELLO_TICK_PERIOD_MS so the customer can see the app is alive

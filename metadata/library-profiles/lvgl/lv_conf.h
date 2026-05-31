@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * lv_conf.h for the ALP SDK's embedded targets.
+ * lv_conf.h for the Alp SDK's embedded targets.
  *
  * LVGL (https://github.com/lvgl/lvgl) requires an lv_conf.h on
  * the include path -- the upstream lib pulls in unset macros'

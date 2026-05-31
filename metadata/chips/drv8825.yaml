@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: TI DRV8825 bipolar stepper driver.
+# Alp SDK chip manifest: TI DRV8825 bipolar stepper driver.
 schema_version:   1
 chip_id:          drv8825
 driver_status:    complete

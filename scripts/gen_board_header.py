@@ -124,7 +124,7 @@ def emit_board(name: str, doc: dict[str, Any]) -> str | None:
 
     lines: list[str] = [
         "/*",
-        " * Copyright 2026 ALP Lab AB",
+        " * Copyright 2026 Alp Lab AB",
         " * SPDX-License-Identifier: Apache-2.0",
         " *",
         f" * Auto-generated from metadata/boards/{slug.replace('_', '-')}.yaml",

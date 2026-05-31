@@ -1,4 +1,4 @@
-# OTA on ALP SDK
+# OTA on Alp SDK
 
 Secure over-the-air firmware update is a v0.4 deliverable for
 every supported SoM family.  The mechanism differs per OS
