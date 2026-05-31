@@ -78,6 +78,9 @@ alp-sdk/
 │   ├── blocks/                      # <alp/blocks/<name>.h> for SDK-level block helpers
 │   └── boards/                      # GENERATED: per-board route headers
 ├── src/
+│   ├── <class>_dispatch.c           # per-peripheral-class dispatcher (i2c_dispatch.c, …)
+│   ├── backend.c                    # backend selector (alp_backend_select, registry walk)
+│   ├── backends/<class>/<impl>.c    # registered backends (zephyr_drv.c, sw_fallback.c, vendor HAL)
 │   ├── common/                      # OS-agnostic helpers (bit ops, ring buffers, status->str)
 │   ├── zephyr/                      # Zephyr-backed implementation
 │   ├── baremetal/                   # bare-metal implementation
@@ -94,7 +97,9 @@ alp-sdk/
 │   └── README.md                    # block-vs-chip rationale (`alp_` prefix vs chip-natural name)
 ├── vendors/
 │   ├── alif/                        # Alif HAL bindings (Ensemble)
-│   └── renesas-rzv2n/               # Renesas FSP bindings (RZ/V2N)
+│   ├── renesas-rzv2n/               # Renesas FSP bindings (RZ/V2N)
+│   ├── nxp-imx93/                   # NXP i.MX 93 vendor bindings
+│   └── deepx-dxm1/                  # DEEPX DX-M1 NPU runtime bindings
 ├── metadata/                        # ALL HW + LIBRARY METADATA — single source of truth
 │   ├── schemas/                     # JSON Schemas (board, board-preset, soc-spec-v1, …)
 │   ├── socs/<vendor>/<family>/<part>.json   # silicon datasheets (peripheral counts, caps)
@@ -335,25 +340,36 @@ peripheral instances per block, and emits codegen that calls into
 headers and consume `alp_i2c_t`, `alp_gpio_t`, etc.
 
 The SDK's job is to take the resolved instance identifier (the
-`bus_id`/`pin_id` field) and bind to the right vendor driver, picking
-the right backend dir at build time:
+`bus_id`/`pin_id` field) and bind to the right backend.  Binding is
+**runtime-resolved through a registry**, not a build-time directory
+swap.  Each peripheral class has a dispatcher in `src/<class>_dispatch.c`
+(e.g. `src/i2c_dispatch.c`).  Backends live under
+`src/backends/<class>/` — named by role (`zephyr_drv.c`,
+`sw_fallback.c`) or vendor, not `vendors/<som>/<class>.c`.  Each
+backend self-registers via `ALP_BACKEND_REGISTER(...)` (in
+`<alp/backend.h>`), which drops a descriptor (vendor, class,
+`silicon_ref`, priority, ops vtable) into a per-class linker section.
 
 ```
 alp_i2c_open(cfg)
         │
         ▼
-   src/<os>/i2c.c             # picks the OS path
-        │
+   src/i2c_dispatch.c                 # class dispatcher
+        │  alp_backend_select("i2c", silicon_ref)   (src/backend.c)
         ▼
-   vendors/<som>/i2c.c        # picks the vendor HAL call
-        │
+   src/backends/i2c/<impl>.c          # best-match registered backend
+        │  (zephyr_drv.c / sw_fallback.c / vendor HAL)
         ▼
-   vendor HAL  →  CMSIS  →  silicon
+   vendor HAL / Zephyr driver  →  silicon
 ```
 
-`src/common/` holds the OS-agnostic glue (status-code translation,
-parameter validation, opaque-handle allocation), so each OS backend
-stays small.
+`alp_backend_select()` (in `src/backend.c`) walks the class's
+registry section and picks the best match for the active
+`silicon_ref` by priority, then exact-vs-wildcard, then vendor
+strcmp (link-order-independent; see the tiebreaker comment in
+`src/backend.c`).  `src/common/` holds the OS-agnostic glue
+(status-code translation, parameter validation, opaque-handle
+allocation), so each backend stays small.
 
 ## Versioning
 

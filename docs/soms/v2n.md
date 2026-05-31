@@ -22,7 +22,7 @@ Both SKUs share the same silicon + PCB.  Pick by memory budget.
 | Application SoC         | Renesas RZ/V2N (R9A09G056N44) | -- | (vendor HAL)                                  |
 | Companion supervisor MCU| GigaDevice GD32G553MEY7TR  | SPI + I2C bridge | [`<alp/chips/gd32g553.h>`](../../include/alp/chips/gd32g553.h) |
 | Primary PMIC            | Qorvo ACT88760-120.E1      | I2C `0x25/0x26`  | [`<alp/chips/act8760.h>`](../../include/alp/chips/act8760.h) |
-| Secondary PMIC          | Renesas DA9292             | I2C `0x1C`       | [`<alp/chips/da9292.h>`](../../include/alp/chips/da9292.h) |
+| Secondary PMIC          | Renesas DA9292             | I2C `0x1E`       | [`<alp/chips/da9292.h>`](../../include/alp/chips/da9292.h) |
 | Optional buck (LPDDR4X) | TI TPS628640 (1×, optional)| I2C `0x4D`       | [`<alp/chips/tps628640.h>`](../../include/alp/chips/tps628640.h) |
 | Clock generator         | Renesas / IDT 5L35023B     | I2C `0x68`       | [`<alp/chips/clk_5l35023b.h>`](../../include/alp/chips/clk_5l35023b.h) |
 | RTC                     | Micro Crystal RV-3028-C7   | I2C `0x52`       | [`<alp/chips/rv3028c7.h>`](../../include/alp/chips/rv3028c7.h) |
@@ -76,9 +76,9 @@ Two-stage SoM-ID flow:
 1. **EEPROM manifest** -- 128-byte block at offset 0 of the
    on-module 24C128 EEPROM carrying family / SKU / hw_rev /
    serial / mfg date.  Read via `alp_hw_info_read()`.
-2. **BOARD_ID ADC** -- per-rev resistor divider on ADC2_CH7
-   (stubbed; pending the per-family generated header from
-   `scripts/alp_project.py`).
+2. **BOARD_ID ADC** -- per-rev resistor divider on a SoM-internal
+   ADC channel (exact channel TBD; stubbed, pending the per-family
+   generated header from `scripts/alp_project.py`).
 
 Full procedure: [`docs/board-id.md`](../board-id.md).
 Example: [`examples/v2n/v2n-board-id-readout/`](../../examples/v2n/v2n-board-id-readout/).

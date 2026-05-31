@@ -39,17 +39,19 @@ the OS".
 
 | Workflow | Linux | macOS | Win native | Win + WSL2 |
 |---|---|---|---|---|
-| **Zephyr-on-M (`native_sim`)** — examples, ztests, day-to-day iteration | yes | yes | yes | yes (via WSL) |
+| **Zephyr-on-M (`native_sim`)** — examples, ztests, day-to-day iteration | yes | yes | no (use WSL2) | yes (via WSL) |
 | **Zephyr-on-M (real silicon)** — `west build` + `west flash` against EVK | yes | yes | yes | yes (via WSL) |
 | **Yocto-on-A (`bitbake`)** — full Linux userland image build | yes | no | no | yes |
 | **Heterogeneous orchestrator (`west alp-build` fanning out across cores)** | yes | yes (Zephyr halves only) | yes (Zephyr halves only) | yes |
 
-Read: a Mac or Windows user can do everything **except** build
-the Yocto half on the host directly.  For Mac users this means
-"use a Linux VM if you need Yocto"; for Windows users it means
-"use WSL2 for the Yocto half, native PowerShell for the Zephyr
-half" — switching is `cd {project}` from PowerShell into the WSL
-filesystem (`\\wsl$\Ubuntu-22.04\home\{user}\...`).
+Read: a Mac user can do everything on the host **except** build
+the Yocto half (use a Linux VM for that).  A Windows user runs the
+cross-compiled real-silicon `west build` natively in PowerShell,
+but **both** the `native_sim` simulator target and the Yocto half
+need WSL2 — upstream Zephyr's `native_sim` is Linux/macOS only and
+has no native-Windows target.  Switching is `cd {project}` from
+PowerShell into the WSL filesystem
+(`\\wsl$\Ubuntu-22.04\home\{user}\...`).
 
 ADR [0012](adr/0012-cross-platform-developer-host.md) is the
 load-bearing decision behind this matrix.  ADR
@@ -335,19 +337,17 @@ west zephyr-export
 $env:ZEPHYR_BASE = "$PWD\zephyr"
 ```
 
-### 4.6 Native_sim on Windows — 32-bit note
+### 4.6 Native_sim on Windows — use WSL2
 
 Zephyr's `native_sim` Posix target builds as a **native Linux
-process** by default.  On Windows, the recommended invocation is
-`native_sim/native/32` with the MSVC-compatible Mingw toolchain,
-or run the 64-bit variant inside WSL2.  See
-[`docs/getting-started.md`](getting-started.md) §4 for the
-toolchain-pick caveat.
+process**.  Upstream Zephyr supports `native_sim` on Linux and
+macOS only — there is no native-Windows `native_sim` target.  On
+Windows, run `native_sim/native/64` inside WSL2 (Ubuntu); see
+[`docs/local-ci.md`](local-ci.md) "Path A — WSL2".
 
-For typical example builds and cross-compiled real-silicon builds
-(`west build -b alp_e1m_evk_aen ...`), this distinction does not
-apply — only the host-side `native_sim` simulator target is
-affected.
+Cross-compiled real-silicon builds (`west build -b alp_e1m_evk_aen
+...`) run fine in native PowerShell — only the host-side
+`native_sim` simulator target requires WSL2.
 
 ---
 
@@ -496,16 +496,10 @@ lint is soft initially.
 This is the cross-platform end-to-end smoke test.
 
 ```bash
-# Linux / macOS / WSL:
+# Linux / macOS / WSL2 (native_sim is Linux/macOS only; on Windows
+# run this inside WSL2 — there is no native-Windows native_sim target):
 cd ../alp-workspace
 west alp-build -b native_sim/native/64 alp-sdk/examples/peripheral-io/gpio-button-led
-west build -d build -t run
-```
-
-```powershell
-# Windows native (PowerShell):
-cd ..\alp-workspace
-west alp-build -b native_sim/native/32 alp-sdk\examples\gpio-button-led
 west build -d build -t run
 ```
 
