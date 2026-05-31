@@ -261,6 +261,9 @@ jobs:
       - name: Gate — sw_fallback.c files carry Cost + Performance tags
         run: python3 scripts/check_sw_fallback_tags.py
 
+      - name: Gate — chip driver <-> metadata manifest parity
+        run: python3 scripts/check_chip_manifest_parity.py
+
       # Validate every HiL smoke spec under tests/hil/ parses against
       # its board's _runner.yaml.  Cheap host-side check (no hardware
       # needed); catches a spec that references a deleted example,

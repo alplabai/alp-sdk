@@ -56,7 +56,6 @@
  *
  * Defined locally to keep the example self-contained; future
  * <alp/peripheral.h> revisions may export this as a named constant. */
-#define ALP_SPI_NO_CS 0xFFFFFFFFu
 
 /* Test pattern.
  *

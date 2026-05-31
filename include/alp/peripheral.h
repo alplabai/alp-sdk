@@ -331,12 +331,20 @@ typedef enum {
     ALP_SPI_MODE_3 = 3  /**< CPOL=1, CPHA=1 */
 } alp_spi_mode_t;
 
+/**
+ * @brief @ref alp_spi_config_t.cs_pin_id sentinel: no controller-driven
+ *        chip-select (single-device bus, or CS handled externally / in
+ *        software by the application).
+ */
+#define ALP_SPI_NO_CS 0xFFFFFFFFu
+
 typedef struct {
     uint32_t       bus_id;
     uint32_t       freq_hz;
     alp_spi_mode_t mode;
     uint8_t        bits_per_word; /**< Usually 8. */
-    uint32_t       cs_pin_id;     /**< Studio-resolved chip-select pin. */
+    uint32_t       cs_pin_id;     /**< Studio-resolved chip-select pin, or
+                                   *   @ref ALP_SPI_NO_CS for none. */
 } alp_spi_config_t;
 
 /**
