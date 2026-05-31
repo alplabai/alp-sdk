@@ -25,6 +25,7 @@
 #define GD32_BRIDGE_TRANSPORT_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* ---- lifecycle (called from main.c) ---------------------------- */
@@ -40,6 +41,15 @@ void    spi_slave_cs_low(void);        /* CS falling edge: reset RX staging   */
 void    spi_slave_rx_byte(uint8_t b);  /* one received byte (per SPI RBNE)     */
 void    spi_slave_cs_high(void);       /* CS rising edge: decode + dispatch    */
 uint8_t spi_slave_tx_next_byte(void);  /* next reply byte (per SPI TBE), 0xFF idle */
+
+/* ---- SPI slave DMA seams (used by the gd32 HAL instead of the byte
+ *      seams above): the HW layer points the RX/TX DMA channels at these
+ *      buffers and calls spi_slave_dma_frame_done() at CS-rising. The
+ *      TX buffer is the full frame, padded with 0xFF past the staged reply.
+ *      The byte seams remain for host unit tests + the stub backend. ---- */
+uint8_t *spi_slave_rx_dma_buf(size_t *cap);    /* RX DMA destination + capacity */
+uint8_t *spi_slave_tx_dma_buf(size_t *len);    /* TX DMA source (padded) + length */
+void     spi_slave_dma_frame_done(size_t rx_count); /* decode rx_count bytes, stage reply */
 
 /* ---- I2C slave seams (defined in transport_i2c.c) -------------- */
 void    i2c_slave_write_start(void);   /* START + addressed write: reset RX    */

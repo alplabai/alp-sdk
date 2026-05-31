@@ -19,9 +19,10 @@
  *
  * I2C timing is derived at runtime from the live APB1 clock (in
  * bridge_transport_i2c_hw_init), so there are no unconfirmed silicon
- * facts left here.  Byte-level interrupt timing (SPI reply preload, I2C
- * clock-stretch window) still wants on-silicon validation — flash
- * externally (host-driven SWD reflash is not wired in this HW revision).
+ * facts left here.  SPI runs on RX+TX DMA (armed per transaction from the
+ * CS-EXTI); the on-silicon validation point is the master's CS-to-first-SCK
+ * setup vs the EXTI+DMA-arm latency, plus the I2C clock-stretch window.
+ * Flash externally (host-driven SWD reflash is not wired in this HW revision).
  */
 #ifndef GD32_BRIDGE_BOARD_CONFIG_H
 #define GD32_BRIDGE_BOARD_CONFIG_H
@@ -57,6 +58,16 @@
 #define BRIDGE_SPI_CS_EXTI_PIN     EXTI_SOURCE_PIN8
 #define BRIDGE_SPI_CS_EXTI_IRQN    EXTI5_9_IRQn
 #define BRIDGE_SPI_CS_EXTI_HANDLER EXTI5_9_IRQHandler
+
+/* SPI1 slave DMA: RX + TX on DMA0 (CH0 is reserved by the ADC stream-0
+ * path in bridge_hw_gd32.c; CH1/CH2 are free).  DMAMUX requests route the
+ * channels to SPI1 RX/TX.  Re-armed per transaction from the CS-EXTI. */
+#define BRIDGE_SPI_DMA             DMA0
+#define BRIDGE_SPI_DMA_RCU         RCU_DMA0
+#define BRIDGE_SPI_RX_DMA_CH       DMA_CH1
+#define BRIDGE_SPI_TX_DMA_CH       DMA_CH2
+#define BRIDGE_SPI_RX_DMA_REQ      DMA_REQUEST_SPI1_RX
+#define BRIDGE_SPI_TX_DMA_REQ      DMA_REQUEST_SPI1_TX
 
 /* SPI1 alternate function = AF5 (GD32G5 AF scheme; vendor SPI examples).
  * The datasheet lists SPI1 NSS/SCK/MISO/MOSI on PA8/PA9/PA10/PB15

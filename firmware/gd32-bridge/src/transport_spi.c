@@ -64,6 +64,11 @@ static void stage_reply(uint8_t status, const uint8_t *payload, size_t payload_l
     spi_tx_buf[crc_covered + 1u] = (uint8_t)((crc >> 8) & 0xFFu);
     spi_tx_len    = crc_covered + 2u;
     spi_tx_cursor = 0u;
+    /* Pad the rest of the frame with the idle byte so a fixed-length TX
+     * DMA (and the byte-seam path past the reply) clocks out 0xFF. */
+    if (spi_tx_len < sizeof spi_tx_buf) {
+        memset(&spi_tx_buf[spi_tx_len], 0xFFu, sizeof spi_tx_buf - spi_tx_len);
+    }
 }
 
 /* For early-error replies that don't have a CMD context yet, fall
@@ -137,12 +142,35 @@ uint8_t spi_slave_tx_next_byte(void)
     return 0xFFu;
 }
 
+/* ---- DMA seams (gd32 HAL points the SPI1 RX/TX channels here) ---- */
+
+uint8_t *spi_slave_rx_dma_buf(size_t *cap)
+{
+    *cap = sizeof spi_rx_buf;
+    return spi_rx_buf;
+}
+
+uint8_t *spi_slave_tx_dma_buf(size_t *len)
+{
+    *len = sizeof spi_tx_buf;   /* full frame: staged reply + 0xFF padding */
+    return spi_tx_buf;
+}
+
+/* CS rising-edge under DMA: `rx_count` bytes landed via RX DMA. Decode +
+ * dispatch (stages the reply, padded, into spi_tx_buf for the next frame). */
+void spi_slave_dma_frame_done(size_t rx_count)
+{
+    spi_rx_len = (rx_count <= sizeof spi_rx_buf) ? rx_count : sizeof spi_rx_buf;
+    decode_and_dispatch();
+}
+
 void transport_spi_init(void)
 {
     spi_rx_len    = 0u;
     spi_tx_len    = 0u;
     spi_tx_cursor = 0u;
-    /* SPI1 slave + CS-EXTI bring-up lives in the gd32 HAL backend
+    memset(spi_tx_buf, 0xFFu, sizeof spi_tx_buf);  /* idle until a reply is staged */
+    /* SPI1 slave + CS-EXTI + DMA bring-up lives in the gd32 HAL backend
      * (hal/transport_hw_gd32.c); the stub backend's weak no-op keeps
      * this hardware-free for host-side protocol tests. */
     bridge_transport_spi_hw_init();
