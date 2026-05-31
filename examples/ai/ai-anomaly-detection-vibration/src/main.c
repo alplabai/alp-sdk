@@ -41,7 +41,7 @@
  *      microamp average when the inference path is clock-gated
  *      between windows.  Battery-powered nodes run for months.
  *   3. "Does the same source target V2N for the AI-PLC story?"
- *      -- yes, flip `som.sku` in board.yaml to E1M-V2N201; the
+ *      -- yes, flip `som.sku` in board.yaml to E1M-V2M101; the
  *      §D.lib loader routes ALP_INFERENCE_BACKEND_AUTO to the
  *      DEEPX DX-M1 driver shim.
  *

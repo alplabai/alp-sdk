@@ -34,7 +34,7 @@ Manufacturer values come straight from the schematic.
 3. Pick **`ExportAll`**, Run.
 4. At the prompt, set the output base path — **rename per board**
    (e.g. `…\xevk`, `…\e1m_evk`, `…\v2n`). Default base:
-   `C:\Users\caner\AppData\Local\Temp\board`.
+   `%TEMP%\board`.
 5. Send both CSVs over.
 
 Uses the Document-Manager API on the flattened document; builds output in
