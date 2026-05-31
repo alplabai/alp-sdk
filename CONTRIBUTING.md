@@ -70,6 +70,23 @@ For the full branching topology, merge methods, PR gates,
 backport flow, and branch-protection settings, see
 [`docs/branching-and-merge-policy.md`](docs/branching-and-merge-policy.md).
 
+### Sign your work (Developer Certificate of Origin)
+
+Contributions are accepted under the project's Apache-2.0 license (see
+[`LICENSE`](LICENSE) / [`NOTICE`](NOTICE)).  To certify that you wrote the
+patch — or otherwise have the right to submit it under that license — **sign
+off every commit** per the
+[Developer Certificate of Origin 1.1](https://developercertificate.org):
+
+```bash
+git commit -s -m "your message"
+```
+
+This appends a `Signed-off-by: Your Name <you@example.com>` line from your
+`git config user.name` / `user.email`.  Commits without a sign-off may be
+asked to amend.  No separate CLA is required.  (Trademark use is governed
+separately — see [`TRADEMARKS.md`](TRADEMARKS.md).)
+
 ### Code style
 
 - Public headers are **C99-compatible** with Doxygen comments.
