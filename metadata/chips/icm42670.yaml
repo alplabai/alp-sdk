@@ -1,0 +1,38 @@
+# Alp SDK chip manifest: TDK InvenSense ICM-42670-P 6-axis IMU.
+schema_version:   1
+chip_id:          icm42670
+driver_status:    partial          # init + accel/gyro/temp read.
+display_name:     "TDK InvenSense ICM-42670-P 6-axis IMU"
+vendor:           invensense
+mpn_population:
+  - "ICM-42670-P"
+
+datasheet:
+  primary:        "TDK InvenSense ICM-42670-P datasheet (DS-000451)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x68, scope: "AP_AD0 = GND (default)" }
+    - { addr_7bit: 0x69, scope: "AP_AD0 = VDDIO" }
+  max_clock_hz:   TBD              # driver leaves bus speed to the platform; verify against DS-000451.
+
+sensor:
+  axes:            6
+  who_am_i:        0x67            # WHO_AM_I (reg 0x75); ICM42670_WHO_AM_I_VAL.
+  ranges_g:        [2, 4, 8, 16]
+  ranges_dps:      [250, 500, 1000, 2000]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_ICM42670
+  baremetal:      ALP_SDK_CHIP_ICM42670
+  yocto:          icm42670         # meta-alp-sdk PACKAGECONFIG[icm42670]
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard
