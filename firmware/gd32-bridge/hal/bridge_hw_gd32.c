@@ -1007,6 +1007,12 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
     init.periph_width = DMA_PERIPHERAL_WIDTH_16BIT;
     init.memory_width = DMA_MEMORY_WIDTH_16BIT;
     init.priority     = DMA_PRIORITY_MEDIUM;
+    /* DMAMUX request: route the channel to this ADC instance.  Without
+     * this the request id is left uninitialised and the channel triggers
+     * on the wrong (or no) source. */
+    init.request      = (ch->periph == ADC1) ? DMA_REQUEST_ADC1 :
+                        (ch->periph == ADC2) ? DMA_REQUEST_ADC2 :
+                        (ch->periph == ADC3) ? DMA_REQUEST_ADC3 : DMA_REQUEST_ADC0;
     dma_init(s->dma_periph, (dma_channel_enum)s->dma_channel, &init);
 
     /* Circular mode -- DMA reloads `number` after each cycle so the
