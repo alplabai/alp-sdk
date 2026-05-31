@@ -50,7 +50,8 @@ int main(void)
 {
     printf("[pm] power-managed-sensor (AEN301 / M55-HE)\n");
     printf("[pm] wake sources: rtc(%ds) | gpio_int(IMU/user) | "
-           "uart(console)\n", RTC_TICK_S);
+           "uart(console)\n",
+           RTC_TICK_S);
     printf("[pm] sleep policy: deep -- see board.yaml "
            "cores.m55_he.power:\n");
 

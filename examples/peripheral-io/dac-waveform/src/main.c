@@ -38,8 +38,8 @@
 
 #include <zephyr/kernel.h>
 
-#include "alp/adc.h"               /* alp_dac_* lives in adc.h */
-#include "alp/board.h"             /* BOARD_DAC0 -> the selected EVK's DAC0 pad */
+#include "alp/adc.h"   /* alp_dac_* lives in adc.h */
+#include "alp/board.h" /* BOARD_DAC0 -> the selected EVK's DAC0 pad */
 
 /* ------------------------------------------------------------------
  * Waveform parameters.  Tweak these for your application.
@@ -91,10 +91,9 @@
  *       print(int(round(v * 32767)))
  * ------------------------------------------------------------------ */
 static const int16_t SINE_LUT_Q15[SINE_SAMPLES] = {
-        0,   6393,  12539,  18204,  23170,  27245,  30273,  32137,
-    32767,  32137,  30273,  27245,  23170,  18204,  12539,   6393,
-        0,  -6393, -12539, -18204, -23170, -27245, -30273, -32137,
-   -32767, -32137, -30273, -27245, -23170, -18204, -12539,  -6393,
+    0,      6393,   12539,  18204,  23170,  27245,  30273,  32137,  32767,  32137,  30273,
+    27245,  23170,  18204,  12539,  6393,   0,      -6393,  -12539, -18204, -23170, -27245,
+    -30273, -32137, -32767, -32137, -30273, -27245, -23170, -18204, -12539, -6393,
 };
 
 /* ------------------------------------------------------------------
@@ -116,7 +115,8 @@ static uint16_t lut_to_mv(int16_t q15)
     return (uint16_t)mv;
 }
 
-int main(void) {
+int main(void)
+{
     printf("[dac] open BOARD_DAC0 (initial %u mV)\n", SINE_DC_OFFSET_MV);
 
     /* Open the DAC at the centre voltage.  The wrapper rounds to
@@ -147,8 +147,8 @@ int main(void) {
         return 0;
     }
 
-    printf("[dac] generating sine: freq=%u Hz, mean=%u mV, ampl=%u mV\n",
-           SINE_FREQ_HZ, SINE_DC_OFFSET_MV, SINE_AMPLITUDE_MV);
+    printf("[dac] generating sine: freq=%u Hz, mean=%u mV, ampl=%u mV\n", SINE_FREQ_HZ,
+           SINE_DC_OFFSET_MV, SINE_AMPLITUDE_MV);
 
     /* Per-sample delay.  SINE_SAMPLES * delay_us = 1 / freq_hz.
      *
@@ -157,14 +157,13 @@ int main(void) {
      * At 100 Hz * 32 samples = 3200 Hz sample rate -> 312.5 us /
      * sample.  alp_delay_us takes an integer micro count; round
      * DOWN to keep the worst-case frequency above target. */
-    const uint32_t sample_delay_us =
-        (uint32_t)(1000000u / (SINE_FREQ_HZ * SINE_SAMPLES));
+    const uint32_t sample_delay_us = (uint32_t)(1000000u / (SINE_FREQ_HZ * SINE_SAMPLES));
 
     /* Generate CYCLES_TO_GENERATE complete cycles, then exit.
      * Real firmware would loop forever (or until a control event
      * trips a flag). */
     for (uint32_t cycle = 0; cycle < CYCLES_TO_GENERATE; cycle++) {
-        uint16_t peak = 0;
+        uint16_t peak   = 0;
         uint16_t trough = 0xFFFF;
 
         /* Walk the LUT once per cycle.  alp_dac_write_mv blocks
@@ -173,8 +172,8 @@ int main(void) {
          * (~10-100 us); on E1M / Alif the native DAC register write
          * is sub-microsecond. */
         for (uint32_t i = 0; i < SINE_SAMPLES; i++) {
-            uint16_t mv = lut_to_mv(SINE_LUT_Q15[i]);
-            alp_status_t s = alp_dac_write_mv(dac, mv);
+            uint16_t     mv = lut_to_mv(SINE_LUT_Q15[i]);
+            alp_status_t s  = alp_dac_write_mv(dac, mv);
             if (s != ALP_OK) {
                 /* Write failures are rare; on E1M-X / V2N usually
                  * a transient supervisor-busy.  Log and continue;
@@ -182,12 +181,11 @@ int main(void) {
                 printf("[dac] write_mv(%u) -> %d\n", mv, (int)s);
                 break;
             }
-            if (mv > peak)   peak   = mv;
+            if (mv > peak) peak = mv;
             if (mv < trough) trough = mv;
             alp_delay_us(sample_delay_us);
         }
-        printf("[dac] cycle %u: peak=%u mV trough=%u mV\n",
-               cycle, peak, trough);
+        printf("[dac] cycle %u: peak=%u mV trough=%u mV\n", cycle, peak, trough);
     }
 
     /* Park the DAC at mid-rail before closing -- some downstream

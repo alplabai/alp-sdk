@@ -23,7 +23,8 @@
  * without touching the code below. */
 #include "alp/board.h"
 
-int main(void) {
+int main(void)
+{
     printf("[uart] open BOARD_UART_DEBUG @ 115200 8N1\n");
 
     /* The 8-N-1 framing is the lowest common denominator for serial
@@ -44,8 +45,7 @@ int main(void) {
          * On native_sim with the overlay we ship, the alias maps
          * to the host-stdin/stdout virtual UART so this branch
          * isn't taken. */
-        printf("[uart] open failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[uart] open failed: alp_last_error=%d\n", (int)alp_last_error());
         printf("[uart] done\n");
         return 0;
     }
@@ -54,7 +54,7 @@ int main(void) {
      * terminal but short enough that CI doesn't stall.  The byte
      * value is meaningful only when status==ALP_OK; otherwise the
      * caller must treat it as unspecified. */
-    uint8_t b = 0;
+    uint8_t      b = 0;
     alp_status_t s = alp_uart_read(u, &b, 1, 50);
     printf("[uart] read -> status=%d byte=0x%02x\n", (int)s, b);
 
@@ -62,7 +62,7 @@ int main(void) {
      * real hardware sees output.  alp_uart_write blocks until the
      * full buffer is sent or the driver returns an error. */
     static const uint8_t hello[] = "[uart] hello\r\n";
-    s = alp_uart_write(u, hello, sizeof hello - 1);
+    s                            = alp_uart_write(u, hello, sizeof hello - 1);
     printf("[uart] write -> %d\n", (int)s);
 
     /* Close releases the handle but does NOT power down the

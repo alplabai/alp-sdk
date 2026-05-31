@@ -37,20 +37,21 @@
  * 44.1 kHz is CD-era; 16 kHz is fine for voice / smart-speaker
  * inference.  Pick to match the codec on the other end of the
  * bus. */
-#define SR             48000u
+#define SR 48000u
 
 /* Frames per DMA block.  256 frames @ 48 kHz = ~5.3 ms of audio
  * per block.  Smaller blocks reduce latency at the cost of more
  * DMA setup overhead; bigger blocks amortise the overhead but
  * delay underrun detection.  256 is the conventional default. */
-#define BLOCK_FRAMES   256u
+#define BLOCK_FRAMES 256u
 
 /* Push four blocks (~21 ms total) for the demo.  Real apps would
  * stream continuously from a producer thread (decoder / mic
  * pipeline / ML inference engine). */
 #define BLOCKS_TO_SEND 4u
 
-int main(void) {
+int main(void)
+{
     printf("[i2s] open BOARD_I2S_AUDIO @ 48 kHz s16 stereo TX\n");
 
     alp_i2s_t *i2s = alp_i2s_open(&(alp_i2s_config_t){
@@ -68,8 +69,7 @@ int main(void) {
         .block_frames = BLOCK_FRAMES,
     });
     if (i2s == NULL) {
-        printf("[i2s] open failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[i2s] open failed: alp_last_error=%d\n", (int)alp_last_error());
         printf("[i2s] done\n");
         return 0;
     }
@@ -89,18 +89,17 @@ int main(void) {
      * AMP = 16384 = ½ of int16_t max range -- comfortable level
      * that won't clip the codec or wreck a listener's eardrums on
      * accidental full output. */
-    static int16_t block[BLOCK_FRAMES * 2];   /* L,R interleaved */
+    static int16_t block[BLOCK_FRAMES * 2]; /* L,R interleaved */
     enum { PERIOD = 48 };
     enum { AMP = 16384 };
     for (uint32_t i = 0; i < BLOCK_FRAMES; i++) {
         uint32_t p = i % PERIOD;
         /* Two halves of a triangle: rising for [0..P/2), falling
          * for [P/2..P).  Output ranges from -AMP to +AMP. */
-        int32_t v = (p < PERIOD / 2)
-            ? ((int32_t)p * (4 * AMP) / PERIOD - AMP)
-            : (3 * AMP - (int32_t)p * (4 * AMP) / PERIOD);
-        block[i * 2 + 0] = (int16_t)v;     /* L channel */
-        block[i * 2 + 1] = (int16_t)v;     /* R channel (mono content) */
+        int32_t v        = (p < PERIOD / 2) ? ((int32_t)p * (4 * AMP) / PERIOD - AMP)
+                                            : (3 * AMP - (int32_t)p * (4 * AMP) / PERIOD);
+        block[i * 2 + 0] = (int16_t)v; /* L channel */
+        block[i * 2 + 1] = (int16_t)v; /* R channel (mono content) */
     }
 
     /* Stream BLOCKS_TO_SEND × BLOCK_FRAMES samples.  Each write()

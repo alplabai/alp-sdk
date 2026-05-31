@@ -27,11 +27,12 @@
  * (E1M_PWM0 on E1M EVK; E1M_X_PWM7 on E1M-X EVK). */
 #include "alp/board.h"
 
-#define PERIOD_NS    1000000u   /* 1 kHz */
-#define STEPS              50
-#define STEP_DELAY_MS      20
+#define PERIOD_NS 1000000u /* 1 kHz */
+#define STEPS 50
+#define STEP_DELAY_MS 20
 
-int main(void) {
+int main(void)
+{
     printf("[pwm] open BOARD_PWM_LED_GREEN (period=%u ns)\n", PERIOD_NS);
 
     alp_pwm_t *led = alp_pwm_open(&(alp_pwm_config_t){
@@ -50,9 +51,9 @@ int main(void) {
     /* Linear duty sweep up + down, one full cycle. */
     for (int dir = 0; dir < 2; dir++) {
         for (int i = 0; i <= STEPS; i++) {
-            uint32_t step  = (dir == 0) ? (uint32_t)i : (uint32_t)(STEPS - i);
-            uint32_t pulse = (PERIOD_NS / STEPS) * step;
-            alp_status_t s = alp_pwm_set_duty(led, pulse);
+            uint32_t     step  = (dir == 0) ? (uint32_t)i : (uint32_t)(STEPS - i);
+            uint32_t     pulse = (PERIOD_NS / STEPS) * step;
+            alp_status_t s     = alp_pwm_set_duty(led, pulse);
             if (s != ALP_OK) {
                 printf("[pwm] set_duty(%u) -> %d\n", pulse, (int)s);
                 goto out;

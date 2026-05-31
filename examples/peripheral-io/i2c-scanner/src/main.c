@@ -16,7 +16,8 @@
  * Rebind it in board.yaml `pins:` to port to another board. */
 #include "alp/board.h"
 
-int main(void) {
+int main(void)
+{
     printf("[i2c] open BOARD_I2C_SENSORS @ 100 kHz\n");
 
     alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
@@ -24,8 +25,7 @@ int main(void) {
         .bitrate_hz = 100000,
     });
     if (bus == NULL) {
-        printf("[i2c] open failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[i2c] open failed: alp_last_error=%d\n", (int)alp_last_error());
         printf("[i2c] done\n");
         return 0;
     }

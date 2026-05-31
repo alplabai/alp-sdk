@@ -31,7 +31,8 @@
  * (E1M_ENC0 on E1M EVK; E1M_X_ENC0 on E1M-X EVK). */
 #include "alp/board.h"
 
-int main(void) {
+int main(void)
+{
     printf("[qenc] open BOARD_ENC_ROTARY\n");
 
     alp_qenc_t *enc = alp_qenc_open(&(alp_qenc_config_t){
@@ -47,8 +48,7 @@ int main(void) {
         .pulses_per_rev = 24,
     });
     if (enc == NULL) {
-        printf("[qenc] open failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[qenc] open failed: alp_last_error=%d\n", (int)alp_last_error());
         printf("[qenc] done\n");
         return 0;
     }
@@ -66,9 +66,8 @@ int main(void) {
      * Polling is simplest for a demo. */
     for (int i = 0; i < 10; i++) {
         int32_t pos = 0;
-        s = alp_qenc_get_position(enc, &pos);
-        printf("[qenc] t=%d ms  status=%d  pos=%d\n",
-               (i + 1) * 100, (int)s, (int)pos);
+        s           = alp_qenc_get_position(enc, &pos);
+        printf("[qenc] t=%d ms  status=%d  pos=%d\n", (i + 1) * 100, (int)s, (int)pos);
         k_msleep(100);
     }
 

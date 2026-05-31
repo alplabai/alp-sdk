@@ -44,12 +44,12 @@ static autopilot_state_t g_state;
 /* 4 KiB per loop is generous for the cascaded PID + small ring buffers;
  * Madgwick + the mixer keep their state in g_state, not on the stack. */
 #define STACK_SIZE 4096
-K_THREAD_STACK_DEFINE(stk_rate,    STACK_SIZE);
-K_THREAD_STACK_DEFINE(stk_atti,    STACK_SIZE);
-K_THREAD_STACK_DEFINE(stk_nav,     STACK_SIZE);
-K_THREAD_STACK_DEFINE(stk_rc,      STACK_SIZE);
-K_THREAD_STACK_DEFINE(stk_mav_tx,  STACK_SIZE);
-K_THREAD_STACK_DEFINE(stk_mav_rx,  STACK_SIZE);
+K_THREAD_STACK_DEFINE(stk_rate, STACK_SIZE);
+K_THREAD_STACK_DEFINE(stk_atti, STACK_SIZE);
+K_THREAD_STACK_DEFINE(stk_nav, STACK_SIZE);
+K_THREAD_STACK_DEFINE(stk_rc, STACK_SIZE);
+K_THREAD_STACK_DEFINE(stk_mav_tx, STACK_SIZE);
+K_THREAD_STACK_DEFINE(stk_mav_rx, STACK_SIZE);
 
 /* Thread control blocks live alongside their stacks so the scheduler
  * can find them; each one binds to exactly one of the loops below. */
@@ -60,28 +60,46 @@ static struct k_thread t_rate, t_atti, t_nav, t_rc, t_mav_tx, t_mav_rx;
  * loop gets a thin shim that forwards into the strongly-typed loop
  * function with the shared g_state pointer.  Keeping them tiny keeps
  * the call site obvious to the reviewer. */
-static void rate_entry(void *p1, void *p2, void *p3) {
-    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
+static void rate_entry(void *p1, void *p2, void *p3)
+{
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
     autopilot_rate_loop(&g_state);
 }
-static void atti_entry(void *p1, void *p2, void *p3) {
-    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
+static void atti_entry(void *p1, void *p2, void *p3)
+{
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
     autopilot_attitude_loop(&g_state);
 }
-static void nav_entry(void *p1, void *p2, void *p3) {
-    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
+static void nav_entry(void *p1, void *p2, void *p3)
+{
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
     autopilot_nav_loop(&g_state);
 }
-static void rc_entry(void *p1, void *p2, void *p3) {
-    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
+static void rc_entry(void *p1, void *p2, void *p3)
+{
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
     autopilot_rc_loop(&g_state);
 }
-static void mav_tx_entry(void *p1, void *p2, void *p3) {
-    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
+static void mav_tx_entry(void *p1, void *p2, void *p3)
+{
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
     alp_mavlink_telem_loop(&g_state);
 }
-static void mav_rx_entry(void *p1, void *p2, void *p3) {
-    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
+static void mav_rx_entry(void *p1, void *p2, void *p3)
+{
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
     alp_mavlink_rx_loop(&g_state);
 }
 
@@ -121,23 +139,20 @@ int main(void)
      * -> ESC PWMs.  Highest priority of any application thread.  If
      * this ever stops getting CPU time, the failsafe in nav_loop
      * will cut throttle on the next 40 ms tick (defence in depth). */
-    k_thread_create(&t_rate, stk_rate, K_THREAD_STACK_SIZEOF(stk_rate),
-                    rate_entry, NULL, NULL, NULL,
-                    K_PRIO_PREEMPT(1), 0, K_NO_WAIT);
+    k_thread_create(&t_rate, stk_rate, K_THREAD_STACK_SIZEOF(stk_rate), rate_entry, NULL, NULL,
+                    NULL, K_PRIO_PREEMPT(1), 0, K_NO_WAIT);
     k_thread_name_set(&t_rate, "rate_loop");
 
     /* prio 2: 250 Hz attitude loop -- accel+gyro -> Madgwick fuse
      * -> attitude PID -> rate setpoints.  Feeds the rate loop above. */
-    k_thread_create(&t_atti, stk_atti, K_THREAD_STACK_SIZEOF(stk_atti),
-                    atti_entry, NULL, NULL, NULL,
-                    K_PRIO_PREEMPT(2), 0, K_NO_WAIT);
+    k_thread_create(&t_atti, stk_atti, K_THREAD_STACK_SIZEOF(stk_atti), atti_entry, NULL, NULL,
+                    NULL, K_PRIO_PREEMPT(2), 0, K_NO_WAIT);
     k_thread_name_set(&t_atti, "atti_loop");
 
     /* prio 3: 50 Hz SBUS RC receiver -- UART read of the 25-byte
      * SBUS frame from the radio.  Writes stick + mode + rc_link_ok
      * into g_state for the inner loops to consume. */
-    k_thread_create(&t_rc, stk_rc, K_THREAD_STACK_SIZEOF(stk_rc),
-                    rc_entry, NULL, NULL, NULL,
+    k_thread_create(&t_rc, stk_rc, K_THREAD_STACK_SIZEOF(stk_rc), rc_entry, NULL, NULL, NULL,
                     K_PRIO_PREEMPT(3), 0, K_NO_WAIT);
     k_thread_name_set(&t_rc, "rc_recv");
 
@@ -145,8 +160,7 @@ int main(void)
      * Lower frequency because GNSS solutions only refresh ~10 Hz and
      * altitude smoothing benefits from longer windows.  Also owns the
      * failsafe arbitration (RC-loss, battery-critical, etc.). */
-    k_thread_create(&t_nav, stk_nav, K_THREAD_STACK_SIZEOF(stk_nav),
-                    nav_entry, NULL, NULL, NULL,
+    k_thread_create(&t_nav, stk_nav, K_THREAD_STACK_SIZEOF(stk_nav), nav_entry, NULL, NULL, NULL,
                     K_PRIO_PREEMPT(4), 0, K_NO_WAIT);
     k_thread_name_set(&t_nav, "nav_loop");
 
@@ -165,20 +179,16 @@ int main(void)
         /* prio 5: 10 Hz outbound telemetry -- packs HEARTBEAT,
          * ATTITUDE, GLOBAL_POSITION_INT, BATTERY_STATUS frames from
          * g_state and writes them to the GCS UART. */
-        k_thread_create(&t_mav_tx, stk_mav_tx,
-                        K_THREAD_STACK_SIZEOF(stk_mav_tx),
-                        mav_tx_entry, NULL, NULL, NULL,
-                        K_PRIO_PREEMPT(5), 0, K_NO_WAIT);
+        k_thread_create(&t_mav_tx, stk_mav_tx, K_THREAD_STACK_SIZEOF(stk_mav_tx), mav_tx_entry,
+                        NULL, NULL, NULL, K_PRIO_PREEMPT(5), 0, K_NO_WAIT);
         k_thread_name_set(&t_mav_tx, "mav_tx");
 
         /* prio 5: inbound MAVLink parser -- blocks in UART read,
          * dispatches MAV_CMD_* into the autopilot (e.g. arm/disarm
          * from QGC, waypoint upload, parameter set).  Same priority
          * as TX because neither is timing-critical. */
-        k_thread_create(&t_mav_rx, stk_mav_rx,
-                        K_THREAD_STACK_SIZEOF(stk_mav_rx),
-                        mav_rx_entry, NULL, NULL, NULL,
-                        K_PRIO_PREEMPT(5), 0, K_NO_WAIT);
+        k_thread_create(&t_mav_rx, stk_mav_rx, K_THREAD_STACK_SIZEOF(stk_mav_rx), mav_rx_entry,
+                        NULL, NULL, NULL, K_PRIO_PREEMPT(5), 0, K_NO_WAIT);
         k_thread_name_set(&t_mav_rx, "mav_rx");
     }
 
@@ -192,9 +202,8 @@ int main(void)
      * thread Zephyr spawned).  This loop never returns; the four
      * spawned loops run forever. */
     while (1) {
-        LOG_INF("mode=%d arm=%d roll=%.1f pitch=%.1f alt=%.1fm bat=%.2fV",
-                (int)g_state.mode, (int)g_state.armed,
-                (double)g_state.roll, (double)g_state.pitch,
+        LOG_INF("mode=%d arm=%d roll=%.1f pitch=%.1f alt=%.1fm bat=%.2fV", (int)g_state.mode,
+                (int)g_state.armed, (double)g_state.roll, (double)g_state.pitch,
                 (double)g_state.altitude_m, (double)g_state.battery_v);
         k_msleep(1000);
     }
@@ -218,9 +227,9 @@ int main(void)
 
 /* Re-exported from autopilot.c -- the UART was opened during
  * autopilot_init() and the handle is owned over there. */
-extern alp_uart_t *autopilot_rc_uart(void);   /* defined in autopilot.c */
+extern alp_uart_t *autopilot_rc_uart(void); /* defined in autopilot.c */
 
-void autopilot_rc_loop(autopilot_state_t *s)
+void               autopilot_rc_loop(autopilot_state_t *s)
 {
     /* The autopilot owns the UART handle; we pull frame bytes via
      * a small re-export to keep this file pure-orchestration.
@@ -229,19 +238,19 @@ void autopilot_rc_loop(autopilot_state_t *s)
      * 200 ms without a fresh frame, rc_link_ok flips false and the
      * nav loop's failsafe arbitrator promotes the airframe to
      * AP_MODE_FAILSAFE (controlled descent + land). */
-    uint32_t last_frame_ms = 0;
-    alp_uart_t *rc_uart = autopilot_rc_uart();
+    uint32_t    last_frame_ms = 0;
+    alp_uart_t *rc_uart       = autopilot_rc_uart();
 
     /* Frame slicer state.  We read one byte at a time, hunt for the
      * 0x0F SBUS start byte, then accumulate exactly SBUS_FRAME_LEN
      * (25) bytes before handing the buffer to sbus_decode(). */
-    uint8_t  frame[SBUS_FRAME_LEN];
-    int      frame_idx = 0;          /* bytes accumulated in `frame` */
-    bool     synced    = false;      /* have we seen the 0x0F start byte? */
+    uint8_t frame[SBUS_FRAME_LEN];
+    int     frame_idx = 0;     /* bytes accumulated in `frame` */
+    bool    synced    = false; /* have we seen the 0x0F start byte? */
 
     while (1) {
         sbus_frame_t f;
-        bool got_frame = false;
+        bool         got_frame = false;
 
         if (rc_uart != NULL) {
             /* ── Real SBUS framing over the RC UART ────────────────
@@ -254,7 +263,7 @@ void autopilot_rc_loop(autopilot_state_t *s)
             for (int budget = 0; budget < SBUS_FRAME_LEN; budget++) {
                 uint8_t b;
                 if (alp_uart_read(rc_uart, &b, 1, /*timeout_ms=*/0) != ALP_OK) {
-                    break;   /* nothing more queued this tick */
+                    break; /* nothing more queued this tick */
                 }
                 if (!synced) {
                     /* Hunting for the 0x0F start byte. */
@@ -286,7 +295,8 @@ void autopilot_rc_loop(autopilot_state_t *s)
              * link -- it exists only so the demo runs end-to-end on
              * the simulator with the airframe sitting level.  A real
              * build always takes the rc_uart != NULL branch above. */
-            for (int i = 0; i < SBUS_CHANNELS; i++) f.channel[i] = 1024;
+            for (int i = 0; i < SBUS_CHANNELS; i++)
+                f.channel[i] = 1024;
             f.frame_lost  = false;
             f.failsafe    = false;
             got_frame     = true;
@@ -321,12 +331,15 @@ void autopilot_rc_loop(autopilot_state_t *s)
          * The three-position switch on most RC transmitters maps to
          * roughly {300, 1024, 1700} in SBUS counts, so the 600/1400
          * thresholds give comfortable hysteresis around each detent. */
-        if      (f.channel[4] < 600)  s->mode = AP_MODE_MANUAL;
-        else if (f.channel[4] < 1400) s->mode = AP_MODE_STABILISE;
-        else                          s->mode = AP_MODE_GPS_HOLD;
+        if (f.channel[4] < 600)
+            s->mode = AP_MODE_MANUAL;
+        else if (f.channel[4] < 1400)
+            s->mode = AP_MODE_STABILISE;
+        else
+            s->mode = AP_MODE_GPS_HOLD;
         /* ch6 is the dedicated RTH (return-to-home) trip -- a 2-pos
          * switch the pilot can hit to override whatever ch5 says. */
-        if (f.channel[5] > 1400)      s->mode = AP_MODE_RTH;
+        if (f.channel[5] > 1400) s->mode = AP_MODE_RTH;
 
         /* Arming -- ch7 high + throttle low.
          *

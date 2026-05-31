@@ -124,9 +124,9 @@ LOG_MODULE_REGISTER(anomaly, LOG_LEVEL_INF);
  * framing logic but matters when retraining: rebuild your anomaly
  * model with data sampled at 800 Hz to get accurate score calibration.
  */
-#define WINDOW_SAMPLES   256u
-#define IMU_ODR          ICM42670_ODR_800_HZ
-#define IMU_FS           ICM42670_ACCEL_FS_2G   /* 16384 LSB / g at ±2 g */
+#define WINDOW_SAMPLES 256u
+#define IMU_ODR ICM42670_ODR_800_HZ
+#define IMU_FS ICM42670_ACCEL_FS_2G /* 16384 LSB / g at ±2 g */
 
 /* I2C address of the ICM-42670 on the E1M EVK (AP_AD0 = high → 0x69).
  * Override by redefining this before including the header if your
@@ -166,10 +166,10 @@ static uint8_t s_arena[128 * 1024] __aligned(16);
  * against g-magnitude features in the v0.5 reference pipeline. */
 static inline float accel_magnitude_g(const icm42670_axes_t *a)
 {
-    const float lsb_per_g = 16384.0f;  /* ICM-42670 FS_2G sensitivity (= LSM6DSO FS_2G) */
-    const float fx = (float)a->x / lsb_per_g;
-    const float fy = (float)a->y / lsb_per_g;
-    const float fz = (float)a->z / lsb_per_g;
+    const float lsb_per_g = 16384.0f; /* ICM-42670 FS_2G sensitivity (= LSM6DSO FS_2G) */
+    const float fx        = (float)a->x / lsb_per_g;
+    const float fy        = (float)a->y / lsb_per_g;
+    const float fz        = (float)a->z / lsb_per_g;
     return sqrtf(fx * fx + fy * fy + fz * fz);
 }
 
@@ -220,7 +220,7 @@ static void fill_window(icm42670_t *imu, float *out, size_t n, int iter)
         return;
     }
     for (size_t i = 0; i < n; i++) {
-        icm42670_axes_t a = {0};
+        icm42670_axes_t a = { 0 };
         if (icm42670_read_accel(imu, &a) != ALP_OK) {
             out[i] = 0.0f;
             continue;
@@ -240,25 +240,25 @@ static void fill_window(icm42670_t *imu, float *out, size_t n, int iter)
  * the window -- v0.5 stub backend returns rank-0 tensors. */
 static void copy_window_into_input(alp_inference_t *inf, const float *win, size_t n)
 {
-    alp_inference_tensor_t in = {0};
+    alp_inference_tensor_t in = { 0 };
     if (alp_inference_get_input(inf, 0, &in) != ALP_OK) {
         return;
     }
     if (in.data == NULL || in.size_bytes == 0) {
-        return;  /* Stub backend; nothing to fill. */
+        return; /* Stub backend; nothing to fill. */
     }
     if (in.dtype == ALP_INFERENCE_DTYPE_F32) {
         size_t bytes = n * sizeof(float);
         if (bytes > in.size_bytes) bytes = in.size_bytes;
         memcpy(in.data, win, bytes);
     } else if (in.dtype == ALP_INFERENCE_DTYPE_INT8) {
-        int8_t *q = (int8_t *)in.data;
-        size_t cap = (in.size_bytes < n) ? in.size_bytes : n;
+        int8_t *q   = (int8_t *)in.data;
+        size_t  cap = (in.size_bytes < n) ? in.size_bytes : n;
         for (size_t i = 0; i < cap; i++) {
             /* y = round(x / scale) + zero_point, clamp to int8. */
-            float v = win[i] / (in.scale > 0.0f ? in.scale : 1.0f);
+            float   v  = win[i] / (in.scale > 0.0f ? in.scale : 1.0f);
             int32_t qv = (int32_t)(v + 0.5f) + in.zero_point;
-            if (qv >  127) qv =  127;
+            if (qv > 127) qv = 127;
             if (qv < -128) qv = -128;
             q[i] = (int8_t)qv;
         }
@@ -272,7 +272,7 @@ static void copy_window_into_input(alp_inference_t *inf, const float *win, size_
  * de-quantise if the model emits int8. */
 static float read_anomaly_score(alp_inference_t *inf)
 {
-    alp_inference_tensor_t out = {0};
+    alp_inference_tensor_t out = { 0 };
     if (alp_inference_get_output(inf, 0, &out) != ALP_OK || out.data == NULL) {
         return 0.0f;
     }
@@ -309,8 +309,8 @@ static float heuristic_anomaly_score(const float *win, size_t n)
     }
     float rms = sqrtf(sumsq / (float)n);
     if (rms <= 0.0f) return 0.0f;
-    float crest = peak / rms;          /* ~1.41 for a pure sinusoid. */
-    float score = crest - 1.41f;       /* clean window -> ~0. */
+    float crest = peak / rms;    /* ~1.41 for a pure sinusoid. */
+    float score = crest - 1.41f; /* clean window -> ~0. */
     return score < 0.0f ? 0.0f : score;
 }
 
@@ -332,7 +332,7 @@ int main(void)
 
     /* IMU bring-up.  WHO_AM_I check happens inside icm42670_init;
      * we treat failure as "no IMU" and carry on. */
-    icm42670_t imu = {0};
+    icm42670_t  imu   = { 0 };
     icm42670_t *imu_p = NULL;
     if (i2c != NULL) {
         if (icm42670_init(&imu, i2c, IMU_I2C_ADDR) == ALP_OK) {
@@ -373,12 +373,12 @@ int main(void)
          * crest-factor heuristic so the demo still shows a meaningful,
          * varying score offline.  `from_model` tells the reader which
          * path produced the number. */
-        float score = 0.0f;
+        float score      = 0.0f;
         bool  from_model = false;
         if (inf != NULL) {
             copy_window_into_input(inf, s_window, WINDOW_SAMPLES);
             if (alp_inference_invoke(inf) == ALP_OK) {
-                score = read_anomaly_score(inf);
+                score      = read_anomaly_score(inf);
                 from_model = (score != 0.0f);
             }
         }
@@ -392,8 +392,8 @@ int main(void)
          * score so the customer can plot it and pick a cutoff.
          * `src` flags whether the score came from the trained model
          * or the heuristic fallback so the log is never misleading. */
-        printf("[anomaly] window=%d score=%.4f src=%s\n",
-               iter, (double)score, from_model ? "model" : "heuristic");
+        printf("[anomaly] window=%d score=%.4f src=%s\n", iter, (double)score,
+               from_model ? "model" : "heuristic");
 
         /* On native_sim fill_window() returns instantly (synthesized,
          * no IMU pacing), so running all four windows is cheap and

@@ -80,9 +80,11 @@ static drone_telemetry_t g_telem;
 K_THREAD_STACK_DEFINE(imu_stack, 4096);
 static struct k_thread imu_thread;
 
-static void imu_entry(void *p1, void *p2, void *p3)
+static void            imu_entry(void *p1, void *p2, void *p3)
 {
-    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
     drone_sensors_run_imu_loop(&g_telem);
 }
 
@@ -92,9 +94,11 @@ static void imu_entry(void *p1, void *p2, void *p3)
 K_THREAD_STACK_DEFINE(telem_stack, 4096);
 static struct k_thread telem_thread;
 
-static void telem_entry(void *p1, void *p2, void *p3)
+static void            telem_entry(void *p1, void *p2, void *p3)
 {
-    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
     drone_sensors_run_slow_loop(&g_telem);
 }
 
@@ -116,23 +120,21 @@ int main(void)
         return 1;
     }
     lv_init();
-    hud_ui_build();             /* Construct the HUD layout once. */
+    hud_ui_build(); /* Construct the HUD layout once. */
     display_blanking_off(display);
 
     /* Spawn the sensor threads after the UI is built so the first
      * frame doesn't show garbage values. */
-    k_thread_create(&imu_thread, imu_stack, K_THREAD_STACK_SIZEOF(imu_stack),
-                    imu_entry, NULL, NULL, NULL,
+    k_thread_create(&imu_thread, imu_stack, K_THREAD_STACK_SIZEOF(imu_stack), imu_entry, NULL, NULL,
+                    NULL,
                     /* priority */ K_PRIO_PREEMPT(2),
-                    /* options  */ 0,
-                    K_NO_WAIT);
+                    /* options  */ 0, K_NO_WAIT);
     k_thread_name_set(&imu_thread, "imu_loop");
 
-    k_thread_create(&telem_thread, telem_stack, K_THREAD_STACK_SIZEOF(telem_stack),
-                    telem_entry, NULL, NULL, NULL,
+    k_thread_create(&telem_thread, telem_stack, K_THREAD_STACK_SIZEOF(telem_stack), telem_entry,
+                    NULL, NULL, NULL,
                     /* priority */ K_PRIO_PREEMPT(6),
-                    /* options  */ 0,
-                    K_NO_WAIT);
+                    /* options  */ 0, K_NO_WAIT);
     k_thread_name_set(&telem_thread, "slow_telem");
 
     /* Main loop: drain the LVGL task queue + refresh the on-screen

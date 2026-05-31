@@ -56,7 +56,7 @@
  * in the header comment above. */
 static uint8_t rx_backing[64];
 
-int main(void)
+int            main(void)
 {
     printf("[ringbuf] open BOARD_UART_DEBUG @ 115200 8N1\n");
 
@@ -72,8 +72,7 @@ int main(void)
         .parity    = ALP_UART_PARITY_NONE,
     });
     if (u == NULL) {
-        printf("[ringbuf] open failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[ringbuf] open failed: alp_last_error=%d\n", (int)alp_last_error());
         printf("[ringbuf] done\n");
         return 0;
     }
@@ -84,16 +83,14 @@ int main(void)
      * and lets the buffer live in a specific region (e.g. DTCM /
      * tightly-coupled SRAM on Cortex-M55 for lowest IRQ-to-consumer
      * latency). */
-    alp_uart_rx_ringbuf_t *rb = alp_uart_rx_ringbuf_attach(
-        u, rx_backing, sizeof(rx_backing));
+    alp_uart_rx_ringbuf_t *rb = alp_uart_rx_ringbuf_attach(u, rx_backing, sizeof(rx_backing));
     if (rb == NULL) {
         /* On builds without CONFIG_ALP_SDK_UART_RX_RINGBUF the
          * attach helper returns NULL with ALP_ERR_NOSUPPORT.  The
          * example's prj.conf flips that config on so we shouldn't
          * see this in CI -- but real-world apps should still
          * defend against it. */
-        printf("[ringbuf] attach failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[ringbuf] attach failed: alp_last_error=%d\n", (int)alp_last_error());
         alp_uart_close(u);
         printf("[ringbuf] done\n");
         return 0;
@@ -114,11 +111,11 @@ int main(void)
      * is empty, got=0 and we move on.  This is the pattern apps
      * follow at every wakeup -- pop opportunistically, never block
      * waiting for the ring. */
-    uint8_t scratch[32];
-    size_t  got = 0;
-    alp_status_t s = alp_uart_rx_ringbuf_pop(rb, scratch, sizeof(scratch), &got);
-    printf("[ringbuf] pop -> status=%d got=%zu count_remaining=%zu\n",
-           (int)s, got, alp_uart_rx_ringbuf_count(rb));
+    uint8_t      scratch[32];
+    size_t       got = 0;
+    alp_status_t s   = alp_uart_rx_ringbuf_pop(rb, scratch, sizeof(scratch), &got);
+    printf("[ringbuf] pop -> status=%d got=%zu count_remaining=%zu\n", (int)s, got,
+           alp_uart_rx_ringbuf_count(rb));
 
     /* Detach when the ringbuf is no longer needed.  Disables the
      * IRQ-driven RX path so the underlying alp_uart_t reverts to
