@@ -10,8 +10,13 @@ som:
   sku: E1M-AEN701
 
 preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
 
-# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+# E1M pads this app uses (resolved via BOARD_I2S_AUDIO at build time).
+# E1M EVK:   E1M_I2S0  (74LVC157 mux → TAS2563 amps, default)
+# E1M-X EVK: E1M_X_I2S0 (TAS2563 smart-amp I2S)
 pins:
   - { e1m: E1M_I2S0, macro: EVK_I2S_AUDIO_CODEC, doc: "I2S0 routed through the 74LVC157 mux to the TAS2563 amps (default)" }
 cores:

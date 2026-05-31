@@ -116,6 +116,32 @@ extern "C" {
 
 #define XEVK_ENC_ROTARY E1M_X_ENC0  /**< PEC12R-4222F rotary encoder: ENC0_X = A phase, ENC0_Y = B phase; push switch on XEVK_PIN_ENCODER_SW (E1M_X_GPIO_IO28).  ENC1-3 pads are broken out but unpopulated. */
 
+/* ------------------------------------------------------------------ */
+/* Portable cross-EVK aliases (e1m-spec STANDARD.md §7.2 common set). */
+/* Same BOARD_* names on every board; include via <alp/board.h>.       */
+/* ------------------------------------------------------------------ */
+
+#define BOARD_CAN0            XEVK_CAN_BUS0
+#define BOARD_DAC0            XEVK_DAC0
+#define BOARD_DAC1            XEVK_DAC1
+#define BOARD_ENC_ROTARY      XEVK_ENC_ROTARY
+#define BOARD_I2C_SENSORS     XEVK_I2C_BUS_SENSORS
+#define BOARD_I2S_AUDIO       XEVK_I2S_AUDIO
+#define BOARD_PIN_BMI323_INT1 XEVK_PIN_BMI323_INT1
+#define BOARD_PIN_ENCODER_SW  XEVK_PIN_ENCODER_SW
+#define BOARD_PIN_LED_BLUE    XEVK_PIN_LED_BLUE
+#define BOARD_PIN_LED_GREEN   XEVK_PIN_LED_GREEN
+#define BOARD_PIN_LED_RED     XEVK_PIN_LED_RED
+#define BOARD_PWM_ARD1        XEVK_ARD_PWM1
+#define BOARD_PWM_ARD2        XEVK_ARD_PWM2
+#define BOARD_PWM_ARD3        XEVK_ARD_PWM3
+#define BOARD_PWM_LED_BLUE    XEVK_PWM_LED_BLUE
+#define BOARD_PWM_LED_GREEN   XEVK_PWM_LED_GREEN
+#define BOARD_PWM_LED_RED     XEVK_PWM_LED_RED
+#define BOARD_SPI_ARDUINO     XEVK_SPI_BUS_ARDUINO
+#define BOARD_UART_ARDUINO    XEVK_UART_PORT_ARDUINO
+#define BOARD_UART_DEBUG      XEVK_UART_PORT_DEBUG
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

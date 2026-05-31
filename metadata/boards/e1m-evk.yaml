@@ -83,6 +83,11 @@ populated:
 #     macro:       <EVK_* C-macro name to emit>
 #     doc:         "<one-line Doxygen `@brief` text>"  (optional)
 #     active_low:  true                                  (optional)
+#     board_alias: BOARD_<NAME>                          (optional) portable
+#                  cross-EVK alias; emitted in the generated header's BOARD_*
+#                  block (e1m-spec STANDARD.md §7.2 common set). The SAME
+#                  board_alias must be declared on every board exposing the
+#                  role (enforced by tests/scripts/test_board_alias_parity.py).
 #
 # SoM-side dispatch (which pad reaches the host SoC directly vs. via
 # an on-module mediator like the CC3501E) lives in the SoM preset's
@@ -92,6 +97,7 @@ e1m_routes:
     - { e1m: E1M_GPIO_IO2,  macro: EVK_PIN_CAM_MUX_SEL,
         doc: "PI3WVR626 SEL pin; see `evk_cam_select_*` enum + chips/cam_mux_pi3wvr626." }
     - { e1m: E1M_GPIO_IO4,  macro: EVK_PIN_ENCODER_SW,    active_low: true,
+        board_alias: BOARD_PIN_ENCODER_SW,
         doc: "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce." }
     - { e1m: E1M_GPIO_IO5,  macro: EVK_PIN_CAM_RST,       active_low: true,
         doc: "Camera reset (active-low)." }
@@ -108,6 +114,7 @@ e1m_routes:
     - { e1m: E1M_GPIO_IO13, macro: EVK_PIN_I2S_MUX_SEL,
         doc: "I2S0 74LVC157 S; 0 = TAS2563 amps, 1 = M.2 E-key I2S." }
     - { e1m: E1M_GPIO_IO15, macro: EVK_PIN_BMI323_INT1,
+        board_alias: BOARD_PIN_BMI323_INT1,
         doc: "BMI323 INT1 (data-ready / motion / FIFO); CC3501E GPIO14." }
     - { e1m: E1M_GPIO_IO16, macro: EVK_PIN_W_DISABLE2,    active_low: true,
         doc: "Bluetooth disable (open-drain, active-low) on M.2 E-key." }
@@ -130,38 +137,51 @@ e1m_routes:
     # `pwm:` section -- open the PWM macro for brightness/fade, the GPIO
     # macro for plain on/off.  Don't open both functions of a pad at once.
     - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED,
+        board_alias: BOARD_PIN_LED_RED,
         doc: "RGB LED red -- the PWM3 pad driven as a digital GPIO." }
     - { e1m: E1M_GPIO_PWM0, macro: EVK_PIN_LED_GREEN,
+        board_alias: BOARD_PIN_LED_GREEN,
         doc: "RGB LED green -- the PWM0 pad driven as a digital GPIO." }
     - { e1m: E1M_GPIO_PWM1, macro: EVK_PIN_LED_BLUE,
+        board_alias: BOARD_PIN_LED_BLUE,
         doc: "RGB LED blue -- the PWM1 pad driven as a digital GPIO." }
   buses:
     - { e1m: E1M_I2C0,  macro: EVK_I2C_BUS_SENSORS,
+        board_alias: BOARD_I2C_SENSORS,
         doc: "Shared sensor + IO-expander + INA236 bus." }
     - { e1m: E1M_I2C1,  macro: EVK_I2C_BUS_DSI_CSI,
         doc: "Display + camera control I2C (touch panel, camera-side I2C config)." }
     - { e1m: E1M_I3C0,  macro: EVK_I2C_BUS_ARDUINO,
         doc: "Arduino UNO header I2C ride on I3C0 (I3C is backwards-compatible with classic I2C)." }
     - { e1m: E1M_SPI1,  macro: EVK_SPI_BUS_ARDUINO,
+        board_alias: BOARD_SPI_ARDUINO,
         doc: "Arduino UNO header SPI; terminates on the on-module CC3501E, not the main SoC." }
     - { e1m: E1M_UART0, macro: EVK_UART_PORT_DEBUG,
+        board_alias: BOARD_UART_DEBUG,
         doc: "Console UART exposed on the JTAG/SWD-side debug header." }
     - { e1m: E1M_UART1, macro: EVK_UART_PORT_ARDUINO,
+        board_alias: BOARD_UART_ARDUINO,
         doc: "Arduino UNO header UART (D0/D1); CK_RXD = UART1_TX, CK_TXD = UART1_RX." }
   pwm:
     - { e1m: E1M_PWM0, macro: EVK_PWM_LED_GREEN,
+        board_alias: BOARD_PWM_LED_GREEN,
         doc: "RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B)." }
     - { e1m: E1M_PWM1, macro: EVK_PWM_LED_BLUE,
+        board_alias: BOARD_PWM_LED_BLUE,
         doc: "RGB LED blue channel." }
     - { e1m: E1M_PWM1, macro: EVK_ARD_PWM1,
+        board_alias: BOARD_PWM_ARD1,
         doc: "Arduino header CK_PWM1; shares E1M_PWM1 with LED_BLUE." }
     - { e1m: E1M_PWM2, macro: EVK_ARD_PWM4,
         doc: "Arduino header CK_PWM4 = E1M_PWM2." }
     - { e1m: E1M_PWM3, macro: EVK_PWM_LED_RED,
+        board_alias: BOARD_PWM_LED_RED,
         doc: "RGB LED red channel." }
     - { e1m: E1M_PWM4, macro: EVK_ARD_PWM2,
+        board_alias: BOARD_PWM_ARD2,
         doc: "Arduino header CK_PWM2 = E1M_PWM4." }
     - { e1m: E1M_PWM5, macro: EVK_ARD_PWM3,
+        board_alias: BOARD_PWM_ARD3,
         doc: "Arduino header CK_PWM3 = E1M_PWM5." }
     - { e1m: E1M_PWM6, macro: EVK_MB_PWM,
         doc: "mikroBUS PWM pin." }
@@ -184,19 +204,24 @@ e1m_routes:
         doc: "Battery voltage divider (4:1 resistor scale) for power-monitor demos." }
   dac:
     - { e1m: E1M_DAC0, macro: EVK_DAC_ARDUINO_DAC0,
+        board_alias: BOARD_DAC0,
         doc: "Arduino-shield-style DAC0 output exposed on header J3." }
     - { e1m: E1M_DAC1, macro: EVK_DAC_AUDIO_LINE_OUT,
+        board_alias: BOARD_DAC1,
         doc: "Auxiliary line-level audio output (analog, sums with TAS2563 mix)." }
   i2s:
     - { e1m: E1M_I2S0, macro: EVK_I2S_AUDIO_CODEC,
+        board_alias: BOARD_I2S_AUDIO,
         doc: "Routed through the 74LVC157 mux to either the TAS2563 amps (default) or the M.2 E-key I2S; see EVK_PIN_I2S_MUX_SEL." }
     - { e1m: E1M_I2S1, macro: EVK_I2S_PDM_MIC,
         doc: "PDM mic capture (4x MP34DT05 mics)." }
   can:
     - { e1m: E1M_CAN0, macro: EVK_CAN_VEHICLE_BUS,
+        board_alias: BOARD_CAN0,
         doc: "TCAN1044A transceiver on header J9; termination via jumpers JP1-JP4." }
   qenc:
     - { e1m: E1M_ENC0, macro: EVK_ENC_ROTARY,
+        board_alias: BOARD_ENC_ROTARY,
         doc: "PEC12R-4222F-S0024 rotary encoder: ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4)." }
 
 # Inference + display defaults a stock EVK app would pick.  Apps

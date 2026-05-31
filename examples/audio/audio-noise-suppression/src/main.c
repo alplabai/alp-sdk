@@ -105,9 +105,13 @@
 
 #include "alp/audio.h"
 #include "alp/dsp.h"
-/* EVK_I2S_AUDIO_CODEC is a board-macro from the generated routes header
- * (= E1M_I2S0); rebind it in board.yaml `pins:` to port to another board. */
-#include "alp/boards/alp_e1m_evk_routes.h"
+/* BOARD_I2S_AUDIO is a portable alias that resolves to the on-board
+ * audio codec I2S bus on whichever EVK is being targeted:
+ *   E1M EVK  (AEN)  → E1M_I2S0  (TAS2563 amps via 74LVC157 mux)
+ *   E1M-X EVK (V2N) → E1M_X_I2S0 (TAS2563 smart-amp I2S)
+ * Include via <alp/board.h>; ALP_BOARD_* is emitted by the build
+ * system from the board.yaml preset. */
+#include "alp/board.h"
 #include "alp/inference.h"
 #include "alp/peripheral.h"
 
@@ -359,14 +363,14 @@ int main(void)
 
     /* ── Open mic + speaker on the same I2S link ───────────
      *
-     * The TAS2563 codec on the EVK exposes both directions on
-     * I2S0 (the codec handles the PDM-to-I2S conversion on its
-     * own pins).  E1M_I2S0 is the portable bus ID; the §D.lib
-     * loader wires it to whichever physical I2S instance the SoM
-     * preset documented in its peripheral map.  On native_sim
+     * The TAS2563 codec on both EVKs exposes both directions on
+     * their respective I2S bus (the codec handles the PDM-to-I2S
+     * conversion on its own pins).  BOARD_I2S_AUDIO resolves to
+     * the audio codec I2S bus on whichever EVK is targeted
+     * (E1M_I2S0 on AEN, E1M_X_I2S0 on V2N).  On native_sim
      * neither open() succeeds; the loop tolerates that. */
     alp_audio_config_t cfg = {
-        .peripheral_id    = EVK_I2S_AUDIO_CODEC,
+        .peripheral_id    = BOARD_I2S_AUDIO, /* E1M EVK: E1M_I2S0; E1M-X EVK: E1M_X_I2S0 */
         .sample_rate_hz   = SR_HZ,
         .channels         = CHANNELS,
         .format           = ALP_AUDIO_FMT_S16_LE,

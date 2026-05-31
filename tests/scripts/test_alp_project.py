@@ -808,5 +808,148 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
 
 
+class TestAlpBoardDefineEmit(unittest.TestCase):
+    """ALP_BOARD_<SLUG> compile define is emitted automatically from
+    the board preset name -- the build-system hook that makes
+    <alp/board.h> resolve on real/west/native builds without
+    per-testcase extra_args.
+
+    Tests are named so `-k alp_board` selects the entire class.
+
+    Slug derivation: board_name.lower().replace("-", "_").upper()
+      "E1M-X-EVK" -> "E1M_X_EVK" -> define ALP_BOARD_E1M_X_EVK
+      "E1M-EVK"   -> "E1M_EVK"   -> define ALP_BOARD_E1M_EVK
+    """
+
+    def _cmake_args(self, sku: str, preset: str, core: str, os_: str) -> tuple[int, str, str]:
+        """Run --emit cmake-args for a board.yaml with a named preset."""
+        body = f"""
+            preset: {preset}
+            som:
+              sku: {sku}
+            cores:
+              {core}:
+                os: {os_}
+                app: ./src
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), body)
+            rv = subprocess.run(
+                [sys.executable, str(LOADER),
+                 "--input", str(path),
+                 "--emit", "cmake-args",
+                 "--core", core],
+                capture_output=True, text=True, check=False,
+            )
+        return rv.returncode, rv.stdout, rv.stderr
+
+    def _zephyr_conf(self, sku: str, preset: str, core: str) -> tuple[int, str, str]:
+        """Run --emit zephyr-conf for a board.yaml with a named preset."""
+        body = f"""
+            preset: {preset}
+            som:
+              sku: {sku}
+            cores:
+              {core}:
+                os: zephyr
+                app: ./src
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), body)
+            rv = subprocess.run(
+                [sys.executable, str(LOADER),
+                 "--input", str(path),
+                 "--emit", "zephyr-conf",
+                 "--core", core],
+                capture_output=True, text=True, check=False,
+            )
+        return rv.returncode, rv.stdout, rv.stderr
+
+    # --- cmake-args path ---
+
+    def test_alp_board_cmake_args_e1m_x_evk(self) -> None:
+        """cmake-args for preset e1m-x-evk must emit -DALP_BOARD_E1M_X_EVK."""
+        rc, out, err = self._cmake_args(
+            "E1M-V2N101", "e1m-x-evk", "a55_cluster", "baremetal")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIn("-DALP_BOARD_E1M_X_EVK", out,
+                      msg=f"ALP_BOARD_E1M_X_EVK missing from cmake-args:\n{out}")
+
+    def test_alp_board_cmake_args_e1m_evk(self) -> None:
+        """cmake-args for preset e1m-evk must emit -DALP_BOARD_E1M_EVK."""
+        rc, out, err = self._cmake_args(
+            "E1M-AEN701", "e1m-evk", "a32_cluster", "baremetal")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIn("-DALP_BOARD_E1M_EVK", out,
+                      msg=f"ALP_BOARD_E1M_EVK missing from cmake-args:\n{out}")
+
+    def test_alp_board_cmake_args_no_define_without_preset_name(self) -> None:
+        """cmake-args for an inline board (no preset name) must NOT emit
+        any ALP_BOARD_* define -- the guard is `if project.board_name`."""
+        body = """
+            som:
+              sku: E1M-AEN701
+            cores:
+              m55_hp:
+                os: baremetal
+                app: ./src
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), body)
+            rv = subprocess.run(
+                [sys.executable, str(LOADER),
+                 "--input", str(path),
+                 "--emit", "cmake-args",
+                 "--core", "m55_hp"],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        self.assertNotIn("ALP_BOARD_", rv.stdout,
+                         msg="ALP_BOARD_* must not appear for a nameless board")
+
+    # --- zephyr-conf path ---
+
+    def test_alp_board_zephyr_conf_e1m_evk(self) -> None:
+        """zephyr-conf for preset e1m-evk must include ALP_BOARD_E1M_EVK in
+        CONFIG_COMPILER_OPT so the facade resolves on every Zephyr build."""
+        rc, out, err = self._zephyr_conf(
+            "E1M-AEN701", "e1m-evk", "m55_hp")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIn('CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"', out,
+                      msg=f"exact CONFIG_COMPILER_OPT line missing from zephyr-conf:\n{out}")
+
+    def test_alp_board_zephyr_conf_e1m_x_evk(self) -> None:
+        """zephyr-conf for preset e1m-x-evk must include ALP_BOARD_E1M_X_EVK."""
+        rc, out, err = self._zephyr_conf(
+            "E1M-V2N101", "e1m-x-evk", "m33_sm")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertIn('CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"', out,
+                      msg=f"exact CONFIG_COMPILER_OPT line missing from zephyr-conf:\n{out}")
+
+    def test_alp_board_zephyr_conf_no_define_without_preset_name(self) -> None:
+        """zephyr-conf for an inline board (no preset name) must NOT emit
+        CONFIG_COMPILER_OPT with ALP_BOARD_* -- guarded on board_name."""
+        body = """
+            som:
+              sku: E1M-AEN701
+            cores:
+              m55_hp:
+                os: zephyr
+                app: ./src
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), body)
+            rv = subprocess.run(
+                [sys.executable, str(LOADER),
+                 "--input", str(path),
+                 "--emit", "zephyr-conf",
+                 "--core", "m55_hp"],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        self.assertNotIn("ALP_BOARD_", rv.stdout,
+                         msg="ALP_BOARD_* must not appear for a nameless board")
+
+
 if __name__ == "__main__":
     unittest.main()

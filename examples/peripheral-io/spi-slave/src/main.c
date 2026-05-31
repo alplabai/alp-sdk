@@ -38,6 +38,9 @@
  * a byte from our TX buffer onto MISO and a byte from MOSI into
  * our RX callback.
  *
+ *
+ * Runs on both EVKs: BOARD_SPI_ARDUINO (from <alp/board.h>) resolves
+ * to E1M_SPI1 on E1M EVK and E1M_X_SPI1 on E1M-X EVK.
  * ============================================================
  */
 
@@ -47,7 +50,7 @@
 #include <zephyr/kernel.h>
 
 #include "alp/peripheral.h"
-#include "alp/boards/alp_e1m_evk_routes.h"
+#include "alp/board.h"
 
 /* ------------------------------------------------------------------
  * Local shim for the not-yet-shipped slave-mode API.
@@ -63,7 +66,7 @@ typedef struct alp_spi_slave_shim alp_spi_slave_t;
 
 /** Proposed: slave configuration. */
 typedef struct {
-    uint32_t       bus_id;        /**< E1M_SPIn bus to claim. */
+    uint32_t       bus_id;        /**< BOARD_SPI_ARDUINO (or any SPI bus id) to claim. */
     alp_spi_mode_t mode;          /**< CPOL/CPHA -- must match master. */
     uint8_t        bits_per_word; /**< Usually 8 -- must match master. */
     uint32_t       cs_pin_id;     /**< /CS pin the master will assert. */
@@ -182,13 +185,13 @@ static void on_eot(void *user)
 
 int main(void)
 {
-    printf("[spi-slave] open as slave on EVK_SPI_BUS_ARDUINO (mode 0, 8 bits)\n");
+    printf("[spi-slave] open as slave on BOARD_SPI_ARDUINO (mode 0, 8 bits)\n");
 
     alp_spi_slave_t *s = alp_spi_slave_open(&(alp_spi_slave_config_t){
-        .bus_id        = EVK_SPI_BUS_ARDUINO,
+        .bus_id        = BOARD_SPI_ARDUINO,
         .mode          = ALP_SPI_MODE_0,
         .bits_per_word = 8,
-        .cs_pin_id     = 0u, /* EVK_SPI_BUS_ARDUINO carries its own
+        .cs_pin_id     = 0u, /* BOARD_SPI_ARDUINO carries its own
                                         * board-routed /CS line; a
                                         * discrete CS GPIO is only
                                         * needed when chaining extra

@@ -86,6 +86,33 @@ def _build_doc(entry: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _emit_board_aliases(routes: dict[str, Any]) -> list[str]:
+    """Emit portable BOARD_* aliases for every entry carrying a
+    `board_alias:` (the e1m-spec §7.2 common roles).  Same BOARD_* name
+    on every board -> a board-agnostic example resolves per built board."""
+    pairs: list[tuple[str, str]] = []
+    for entries in routes.values():
+        for entry in entries or []:
+            alias = entry.get("board_alias")
+            if alias:
+                pairs.append((alias, entry["macro"]))
+    if not pairs:
+        return []
+    pairs.sort()
+    widest = max(len(a) for a, _ in pairs)
+    out = [
+        "/* ------------------------------------------------------------------ */",
+        "/* Portable cross-EVK aliases (e1m-spec STANDARD.md §7.2 common set). */",
+        "/* Same BOARD_* names on every board; include via <alp/board.h>.       */",
+        "/* ------------------------------------------------------------------ */",
+        "",
+    ]
+    for alias, macro in pairs:
+        out.append(f"#define {alias:<{widest}} {macro}")
+    out.append("")
+    return out
+
+
 def _emit_section(title: str, entries: list[dict[str, Any]]) -> list[str]:
     out: list[str] = [
         "/* ------------------------------------------------------------------ */",
@@ -161,6 +188,8 @@ def emit_board(name: str, doc: dict[str, Any]) -> str | None:
         entries = routes.get(section_key) or []
         if entries:
             lines.extend(_emit_section(section_title, entries))
+
+    lines.extend(_emit_board_aliases(routes))
 
     lines.extend([
         "#ifdef __cplusplus",

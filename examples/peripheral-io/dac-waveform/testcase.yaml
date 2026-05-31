@@ -4,20 +4,37 @@ sample:
   name: dac-waveform
   description: |
     Per-peripheral example for DAC.  Generates a sine wave on
-    E1M_X_DAC0 (V2N family GD32-bridged output).  Walks a 32-point
-    sine LUT at a configurable sample rate.  build_only on
-    native_sim -- no DAC controller available.
+    BOARD_DAC0.  Builds for both EVKs: E1M EVK uses the Alif
+    Ensemble's native DAC; E1M-X EVK uses the V2N GD32-bridged
+    output.  Walks a 32-point sine LUT at a configurable sample
+    rate.  build_only on native_sim -- no DAC controller available.
 
 tests:
-  alp_sdk.example.dac_waveform:
+  alp_sdk.example.dac_waveform.e1m_x_evk:
     platform_allow:
       - native_sim
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     tags:
       - alp-sdk
       - example
       - dac
       - v2n
+    build_only: true
+  alp_sdk.example.dac_waveform.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - dac
+      - aen
     build_only: true

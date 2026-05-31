@@ -2,8 +2,8 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * qenc-readout — open the EVK rotary encoder and poll the
- * accumulated position for ~1 second.
+ * qenc-readout — open the rotary encoder and poll the accumulated
+ * position for ~1 second.
  *
  * Quadrature encoders are the standard interface for rotary
  * controls (volume knobs, position dials, motor feedback).  Two
@@ -15,6 +15,10 @@
  * as a complementary pad pair (ENCn_X / ENCn_Y).  Apps that only
  * use E1M_ENCn for n < E1M_ENC_COUNT (= 4) stay portable
  * across every E1M-conformant SoM.
+ *
+ * Runs on both EVKs: BOARD_ENC_ROTARY (from <alp/board.h>) resolves
+ * to E1M_ENC0 on E1M EVK (PEC12R-4222F-S0024, 24 PPR) and
+ * E1M_X_ENC0 on E1M-X EVK (PEC12R-4222F, same form factor).
  */
 
 #include <stdio.h>
@@ -23,18 +27,18 @@
 
 #include "alp/counter.h"
 
-/* EVK_ENC_ROTARY is a board-macro from the generated routes header
- * (= E1M_ENC0); rebind it in board.yaml `pins:` to port to another board. */
-#include "alp/boards/alp_e1m_evk_routes.h"
+/* BOARD_ENC_ROTARY is the portable alias from <alp/board.h>
+ * (E1M_ENC0 on E1M EVK; E1M_X_ENC0 on E1M-X EVK). */
+#include "alp/board.h"
 
 int main(void) {
-    printf("[qenc] open EVK_ENC_ROTARY\n");
+    printf("[qenc] open BOARD_ENC_ROTARY\n");
 
     alp_qenc_t *enc = alp_qenc_open(&(alp_qenc_config_t){
-        /* EVK_ENC_ROTARY = E1M_ENC0 = index 0 -- an index into the
-         * alp-qenc<N> DT alias table; the SoC binds it to a specific
-         * QDEC peripheral. */
-        .encoder_id = EVK_ENC_ROTARY,
+        /* BOARD_ENC_ROTARY resolves to E1M_ENC0 on E1M EVK and
+         * E1M_X_ENC0 on E1M-X EVK -- an index into the alp-qenc<N>
+         * DT alias table; the SoC binds it to a specific QDEC peripheral. */
+        .encoder_id = BOARD_ENC_ROTARY,
         /* Mechanical resolution -- informational only at the
          * wrapper level.  24 PPR is typical for a Bourns PEC11R
          * panel-mount knob; AS5048A magnetic encoders are 14-bit

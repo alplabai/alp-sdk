@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-27",
+  "generated": "2026-05-31",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -413,6 +413,11 @@
         }
       }
     },
+    "alp/board.h": {
+      "functions": {},
+      "macros": {},
+      "typedefs": {}
+    },
     "alp/boards/alp_e1m_evk.h": {
       "functions": {},
       "macros": {
@@ -655,6 +660,86 @@
     "alp/boards/alp_e1m_evk_routes.h": {
       "functions": {},
       "macros": {
+        "BOARD_CAN0": {
+          "hash": "99261e5f6a128599",
+          "value": "EVK_CAN_VEHICLE_BUS"
+        },
+        "BOARD_DAC0": {
+          "hash": "622bdd9ccbfce5fb",
+          "value": "EVK_DAC_ARDUINO_DAC0"
+        },
+        "BOARD_DAC1": {
+          "hash": "50af66e8c5b6b08c",
+          "value": "EVK_DAC_AUDIO_LINE_OUT"
+        },
+        "BOARD_ENC_ROTARY": {
+          "hash": "2c2fedfb621d05eb",
+          "value": "EVK_ENC_ROTARY"
+        },
+        "BOARD_I2C_SENSORS": {
+          "hash": "a01fc0f8caefe3ab",
+          "value": "EVK_I2C_BUS_SENSORS"
+        },
+        "BOARD_I2S_AUDIO": {
+          "hash": "d4502c849ef2d487",
+          "value": "EVK_I2S_AUDIO_CODEC"
+        },
+        "BOARD_PIN_BMI323_INT1": {
+          "hash": "71f7cf4b47e5844f",
+          "value": "EVK_PIN_BMI323_INT1"
+        },
+        "BOARD_PIN_ENCODER_SW": {
+          "hash": "6b3951abd0a538a3",
+          "value": "EVK_PIN_ENCODER_SW"
+        },
+        "BOARD_PIN_LED_BLUE": {
+          "hash": "b224d05006f662d5",
+          "value": "EVK_PIN_LED_BLUE"
+        },
+        "BOARD_PIN_LED_GREEN": {
+          "hash": "7eefb5cab8da37b1",
+          "value": "EVK_PIN_LED_GREEN"
+        },
+        "BOARD_PIN_LED_RED": {
+          "hash": "7f6b161546668cd0",
+          "value": "EVK_PIN_LED_RED"
+        },
+        "BOARD_PWM_ARD1": {
+          "hash": "e73f6b85a5cd9d52",
+          "value": "EVK_ARD_PWM1"
+        },
+        "BOARD_PWM_ARD2": {
+          "hash": "6ab99c7fc2ecb82b",
+          "value": "EVK_ARD_PWM2"
+        },
+        "BOARD_PWM_ARD3": {
+          "hash": "86260709405d4ea7",
+          "value": "EVK_ARD_PWM3"
+        },
+        "BOARD_PWM_LED_BLUE": {
+          "hash": "a701aae518999337",
+          "value": "EVK_PWM_LED_BLUE"
+        },
+        "BOARD_PWM_LED_GREEN": {
+          "hash": "9eec37182389326a",
+          "value": "EVK_PWM_LED_GREEN"
+        },
+        "BOARD_PWM_LED_RED": {
+          "hash": "3887b6a03ddad07b",
+          "value": "EVK_PWM_LED_RED"
+        },
+        "BOARD_SPI_ARDUINO": {
+          "hash": "07f6eff5b99ed57c",
+          "value": "EVK_SPI_BUS_ARDUINO"
+        },
+        "BOARD_UART_ARDUINO": {
+          "hash": "61f86877e7fa7dec",
+          "value": "EVK_UART_PORT_ARDUINO"
+        },
+        "BOARD_UART_DEBUG": {
+          "hash": "86d0a8bbfad74393",
+          "value": "EVK_UART_PORT_DEBUG"
+        },
         "EVK_ADC_ARDUINO_A1": {
           "hash": "66218ed769d9ba28",
           "value": "E1M_ADC1"
@@ -857,6 +942,86 @@
     "alp/boards/alp_e1m_x_evk_routes.h": {
       "functions": {},
       "macros": {
+        "BOARD_CAN0": {
+          "hash": "b96f3a68213927d0",
+          "value": "XEVK_CAN_BUS0"
+        },
+        "BOARD_DAC0": {
+          "hash": "e67eca8c25d22955",
+          "value": "XEVK_DAC0"
+        },
+        "BOARD_DAC1": {
+          "hash": "dd4184f301ec6d1f",
+          "value": "XEVK_DAC1"
+        },
+        "BOARD_ENC_ROTARY": {
+          "hash": "82920f370ddcb1ea",
+          "value": "XEVK_ENC_ROTARY"
+        },
+        "BOARD_I2C_SENSORS": {
+          "hash": "bbc04581e1478e9d",
+          "value": "XEVK_I2C_BUS_SENSORS"
+        },
+        "BOARD_I2S_AUDIO": {
+          "hash": "b0dd7332f22cd7a8",
+          "value": "XEVK_I2S_AUDIO"
+        },
+        "BOARD_PIN_BMI323_INT1": {
+          "hash": "bf9fbc643887c33d",
+          "value": "XEVK_PIN_BMI323_INT1"
+        },
+        "BOARD_PIN_ENCODER_SW": {
+          "hash": "940e184bb3a23a00",
+          "value": "XEVK_PIN_ENCODER_SW"
+        },
+        "BOARD_PIN_LED_BLUE": {
+          "hash": "e1d739f4862a2a33",
+          "value": "XEVK_PIN_LED_BLUE"
+        },
+        "BOARD_PIN_LED_GREEN": {
+          "hash": "b5351b4721933f7f",
+          "value": "XEVK_PIN_LED_GREEN"
+        },
+        "BOARD_PIN_LED_RED": {
+          "hash": "07fe1ede48c9e930",
+          "value": "XEVK_PIN_LED_RED"
+        },
+        "BOARD_PWM_ARD1": {
+          "hash": "d7af141754225e78",
+          "value": "XEVK_ARD_PWM1"
+        },
+        "BOARD_PWM_ARD2": {
+          "hash": "f9c4a61d38bc26b7",
+          "value": "XEVK_ARD_PWM2"
+        },
+        "BOARD_PWM_ARD3": {
+          "hash": "db06f436763304bd",
+          "value": "XEVK_ARD_PWM3"
+        },
+        "BOARD_PWM_LED_BLUE": {
+          "hash": "413216ceb7c4c84b",
+          "value": "XEVK_PWM_LED_BLUE"
+        },
+        "BOARD_PWM_LED_GREEN": {
+          "hash": "79cc0c0c10251415",
+          "value": "XEVK_PWM_LED_GREEN"
+        },
+        "BOARD_PWM_LED_RED": {
+          "hash": "0ee0bbf966a7e636",
+          "value": "XEVK_PWM_LED_RED"
+        },
+        "BOARD_SPI_ARDUINO": {
+          "hash": "3295e147bfa96cf3",
+          "value": "XEVK_SPI_BUS_ARDUINO"
+        },
+        "BOARD_UART_ARDUINO": {
+          "hash": "c1520e0a53455053",
+          "value": "XEVK_UART_PORT_ARDUINO"
+        },
+        "BOARD_UART_DEBUG": {
+          "hash": "1c7d3f3a6b23b7a1",
+          "value": "XEVK_UART_PORT_DEBUG"
+        },
         "XEVK_ADC_ARDUINO_A0": {
           "hash": "6383eac38e69c1ba",
           "value": "E1M_X_ADC0"
@@ -7584,7 +7749,12 @@
           "signature": "alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_SPI_NO_CS": {
+          "hash": "e4997898b273a23e",
+          "value": "0xFFFFFFFFu"
+        }
+      },
       "typedefs": {
         "alp_gpio_cb_t": {
           "definition": "typedef void (*alp_gpio_cb_t)(alp_gpio_t *pin, void *user);",

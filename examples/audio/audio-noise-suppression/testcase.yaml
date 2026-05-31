@@ -6,11 +6,14 @@ sample:
     Real-time noise suppression demo for headsets / hearables /
     conferencing.  TAS2563 mic -> <alp/dsp.h> Hann+FFT spectrum ->
     <alp/inference.h> RNNoise-style denoiser -> TAS2563 speaker,
-    ~10 ms end-to-end latency target.  Targets V2N (and V2H by
-    SKU flip); native_sim exercises the framing path.
+    ~10 ms end-to-end latency target.  Uses BOARD_I2S_AUDIO for
+    portability across E1M EVK (AEN) and E1M-X EVK (V2N);
+    native_sim exercises the framing path.
 
 tests:
-  alp_sdk.examples.audio_noise_suppression.native_sim:
+  alp_sdk.examples.audio_noise_suppression.e1m_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
       - native_sim/native/64
     # native_sim has no I2S controller / NPU -- this overlay keeps the
@@ -23,6 +26,7 @@ tests:
       - audio
       - dsp
       - ai
+      - aen
     build_only: true
     harness: console
     harness_config:
@@ -30,8 +34,10 @@ tests:
       regex:
         - "\\[ns\\] done"
 
-  alp_sdk.examples.audio_noise_suppression.v2n:
-    # Build-only until the alp_e1m_evk_v2n Zephyr board file lands
+  alp_sdk.examples.audio_noise_suppression.e1m_x_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+    # Build-only until the alp_e1m_x_evk Zephyr board file lands
     # in alplabai/alp-zephyr-modules.  Twister rejects unknown
     # platforms in platform_allow, so we list the upstream Renesas
     # RZ/V2N EVK as a stand-in target -- the source compiles

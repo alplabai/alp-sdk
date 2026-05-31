@@ -4,22 +4,46 @@ sample:
   name: spi-slave
   description: |
     Per-peripheral example for SPI slave mode.  As of v0.6 the
-    Alp SDK <alp/peripheral.h> surface is master-only; this
-    example documents the API gap, stakes out the proposed
-    slave-mode shape, and exits with the NOSUPPORT diagnostic.
+    Alp SDK <alp/peripheral.h> surface is master-only; this example
+    documents the API gap, stakes out the proposed slave-mode shape,
+    and exits with the NOSUPPORT diagnostic.  Builds on both EVKs:
+    BOARD_SPI_ARDUINO resolves to E1M_SPI1 on E1M EVK and E1M_X_SPI1
+    on E1M-X EVK.
 
 tests:
-  alp_sdk.example.spi_slave:
+  alp_sdk.example.spi_slave.e1m_x_evk:
     platform_allow:
       - native_sim
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     tags:
       - alp-sdk
       - example
       - spi
       - api-gap
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[spi-slave\\] done"
+  alp_sdk.example.spi_slave.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - spi
+      - api-gap
+      - aen
     harness: console
     harness_config:
         type: one_line

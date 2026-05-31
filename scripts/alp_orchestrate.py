@@ -443,6 +443,15 @@ def _available_presets(metadata_root: Path) -> list[str]:
     return [p.stem for p in boards_dir.glob("*.yaml")]
 
 
+def _board_define_slug(name: str) -> str:
+    """'E1M-X-EVK' -> 'E1M_X_EVK': the ALP_BOARD_* compile-define suffix.
+
+    Mirrors gen_board_header._board_slug (lower + '-'->'_') then uppercases
+    for the C macro. Used by <alp/board.h>'s board-selection facade.
+    """
+    return name.lower().replace("-", "_").upper()
+
+
 def _synthesize_inline_board(project: dict[str, Any]) -> dict[str, Any]:
     """Build a board-shaped dict from a project's inline top-level fields.
 
@@ -2562,6 +2571,26 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append(f"CONFIG_{kconfig}=y")
         lines.append("")
 
+    # Cross-EVK board facade selector (<alp/board.h>).
+    # Emitted only when the project resolves to a named board preset
+    # (e.g. `preset: e1m-x-evk` -> board_name "E1M-X-EVK").
+    # CONFIG_COMPILER_OPT passes the define into every source file the
+    # Zephyr build compiles, so the facade header can resolve the
+    # correct EVK-specific BOARD_* aliases without per-app prj.conf
+    # entries or extra_args.  Inline boards (no preset/name) skip this;
+    # native_sim testcases that do need the define set it via extra_args.
+    if project.board_name:
+        # Cross-EVK board facade selector for <alp/board.h>.  NOTE:
+        # CONFIG_COMPILER_OPT is a single-value Kconfig string (last write
+        # wins, not additive) -- an app must NOT also set it in prj.conf or
+        # this -D is silently dropped; pass extra defines another way.
+        lines.append("# Cross-EVK board facade selector (<alp/board.h>);"
+                     " CONFIG_COMPILER_OPT is single-value (do not also set in prj.conf).")
+        lines.append(
+            f'CONFIG_COMPILER_OPT="-DALP_BOARD_{_board_define_slug(project.board_name)}"'
+        )
+        lines.append("")
+
     # ----------------------------------------------------------------
     # SoM-intrinsic chip drivers — derived from on_module: + helper_firmware:
     # in the SoM preset.  These are NOT declared by the customer; they
@@ -3200,6 +3229,14 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
     lines.append(f"-DALP_SOM_SKU={project.sku}")
     lines.append(f"-DALP_SOM_FAMILY={family}")
     lines.append(f"-DALP_CORE_ID={slice_.core_id}")
+    # Cross-EVK board facade selector (<alp/board.h>).
+    # Emitted only when the project resolves to a named board preset
+    # (e.g. `preset: e1m-x-evk` -> board_name "E1M-X-EVK").
+    # Inline boards with no preset/name skip this; the facade defaults
+    # to an #error forcing the builder to set it explicitly (e.g. via
+    # extra_args for native_sim testcases).
+    if project.board_name:
+        lines.append(f"-DALP_BOARD_{_board_define_slug(project.board_name)}")
     if slice_.toolchain:
         lines.append(f"-DALP_TOOLCHAIN={slice_.toolchain}")
     if capabilities.get("drp_ai"):

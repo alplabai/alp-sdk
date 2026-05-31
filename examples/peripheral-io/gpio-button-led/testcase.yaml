@@ -5,20 +5,43 @@ sample:
   description: |
     Per-peripheral example for the GPIO surface via the
     <alp/blocks/button_led.h> block.  Button = encoder switch
-    (E1M_GPIO_IO4); LED = the RGB-red PWM3 pad claimed as a GPIO
-    (E1M_GPIO_PWM3, the E1M "GPIO secondary").
+    (BOARD_PIN_ENCODER_SW); LED = the RGB-red PWM pad claimed as a
+    GPIO (BOARD_PIN_LED_RED).  Builds on both EVKs: E1M EVK uses
+    E1M_GPIO_IO4 + E1M_GPIO_PWM3; E1M-X EVK uses E1M_X_GPIO_IO28
+    + E1M_X_GPIO_PWM5.
 
 tests:
-  alp_sdk.example.gpio_button_led:
+  alp_sdk.example.gpio_button_led.e1m_x_evk:
     platform_allow:
       - native_sim
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     tags:
       - alp-sdk
       - example
       - gpio
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[gpio\\] done"
+  alp_sdk.example.gpio_button_led.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - gpio
+      - aen
     harness: console
     harness_config:
         type: one_line

@@ -5,23 +5,22 @@
  * gpio-button-led -- read a button and toggle an LED, both as plain
  * GPIO, through the <alp/blocks/button_led.h> helper.
  *
- * This demo opens its pins by their BOARD-MACRO names rather than raw
- * E1M indices: `EVK_PIN_ENCODER_SW` (the user button) and
- * `EVK_PIN_LED_RED` (the status LED) come from the board's generated
- * routes header, <alp/boards/alp_e1m_evk_routes.h>.  The loader emits
- * one `#define EVK_<NAME> E1M_<...>` per `e1m_routes:` entry, so the
- * macro is the readable, app-facing pin name -- copy this example to
- * your own board, rebind those names in your board.yaml `pins:` block,
- * and the code below is unchanged.
+ * This demo opens its pins by portable BOARD_* alias names from
+ * <alp/board.h>: `BOARD_PIN_ENCODER_SW` (the user button) and
+ * `BOARD_PIN_LED_RED` (the status LED).  The facade selects the active
+ * board's generated routes header at compile time via ALP_BOARD_<SLUG>,
+ * so the same source builds for both EVKs without changes.
  *
- * The macros resolve to E1M instance IDs under the hood:
- *   EVK_PIN_ENCODER_SW = E1M_GPIO_IO4   -- the encoder push switch.
- *   EVK_PIN_LED_RED    = E1M_GPIO_PWM3  -- the RGB-red PWM pad claimed
- *                                          as a digital GPIO (the
- *                                          e1m-spec "GPIO secondary";
- *                                          the EVK has no plain GPIO
- *                                          LED, so the LED rides a PWM
- *                                          pad driven as GPIO).
+ * Per-board resolution:
+ *   E1M EVK:
+ *     BOARD_PIN_ENCODER_SW = EVK_PIN_ENCODER_SW  = E1M_GPIO_IO4
+ *     BOARD_PIN_LED_RED    = EVK_PIN_LED_RED      = E1M_GPIO_PWM3
+ *       (the RGB-red PWM pad claimed as a digital GPIO; the E1M EVK
+ *       has no plain GPIO LED, so the LED rides a PWM pad as GPIO)
+ *   E1M-X EVK:
+ *     BOARD_PIN_ENCODER_SW = XEVK_PIN_ENCODER_SW = E1M_X_GPIO_IO28
+ *     BOARD_PIN_LED_RED    = XEVK_PIN_LED_RED     = E1M_X_GPIO_PWM5
+ *       (similarly the X EVK's RGB-red PWM pad driven as GPIO)
  *
  * native_sim wires a GPIO-emul controller in boards/, so the open /
  * configure / read / write path runs and the harness latches `done`.
@@ -32,16 +31,16 @@
 #include <zephyr/kernel.h>
 
 #include "alp/blocks/button_led.h"
-#include "alp/boards/alp_e1m_evk_routes.h"
+#include "alp/board.h"
 
 int main(void)
 {
-    printf("[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED\n");
+    printf("[gpio] init button=BOARD_PIN_ENCODER_SW, led=BOARD_PIN_LED_RED\n");
 
     alp_button_led_t bl;
     alp_status_t     s = alp_button_led_init(&bl, &(alp_button_led_config_t){
-                                                      .button_pin_id     = EVK_PIN_ENCODER_SW,
-                                                      .led_pin_id        = EVK_PIN_LED_RED,
+                                                      .button_pin_id     = BOARD_PIN_ENCODER_SW,
+                                                      .led_pin_id        = BOARD_PIN_LED_RED,
                                                       .active_low_button = true,
                                               });
     if (s != ALP_OK) {

@@ -32,6 +32,9 @@ preset: e1m-evk            # 35x35 EVK -- reference board.  The EVK
                            # user LEDs to the RGB cluster on PWM; this
                            # demo claims the red channel's pad as a GPIO
                            # (E1M_GPIO_PWM3, the E1M GPIO-secondary).
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:

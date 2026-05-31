@@ -4,19 +4,41 @@ sample:
   name: qenc-readout
   description: |
     Per-peripheral example for the quadrature-decoder side of
-    <alp/counter.h>.  Polls E1M_ENC0's accumulated position.
+    <alp/counter.h>.  Polls BOARD_ENC_ROTARY's accumulated position.
+    Builds on both EVKs: E1M EVK uses E1M_ENC0; E1M-X EVK uses E1M_X_ENC0.
 
 tests:
-  alp_sdk.example.qenc_readout:
+  alp_sdk.example.qenc_readout.e1m_x_evk:
     platform_allow:
       - native_sim
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     tags:
       - alp-sdk
       - example
       - qenc
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[qenc\\] done"
+  alp_sdk.example.qenc_readout.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - qenc
+      - aen
     harness: console
     harness_config:
         type: one_line

@@ -19,7 +19,7 @@
  *
  * What success looks like (real hardware):
  *
- *   [i2c-master] open EVK_I2C_BUS_SENSORS @ 400 kHz
+ *   [i2c-master] open BOARD_I2C_SENSORS @ 400 kHz
  *   [i2c-master] tmp112_init @ 0x48 -> 0 (OK)
  *   [i2c-master] sample 0: 23.625 degC
  *   [i2c-master] sample 1: 23.687 degC
@@ -39,9 +39,11 @@
 #include "alp/peripheral.h"
 #include "alp/chips/tmp112.h"
 
-/* EVK_I2C_BUS_SENSORS is a board-macro from the generated routes header
- * (= E1M_I2C0); rebind it in board.yaml `pins:` to port to another board. */
-#include "alp/boards/alp_e1m_evk_routes.h"
+/* BOARD_I2C_SENSORS is a portable cross-EVK alias from <alp/board.h>:
+ *   E1M EVK  -> EVK_I2C_BUS_SENSORS  -> E1M_I2C0
+ *   E1M-X EVK -> XEVK_I2C_BUS_SENSORS -> E1M_X_I2C0
+ * Rebind it in board.yaml `pins:` to port to another board. */
+#include "alp/board.h"
 
 /* TMP112 7-bit I2C address with ADD0 = GND (the strap the AEN
  * SoM uses by default).  V2N's TMP112 sits at 0x40 because the
@@ -62,7 +64,7 @@
 #define SAMPLE_PERIOD_MS 1000u
 
 int main(void) {
-    printf("[i2c-master] open EVK_I2C_BUS_SENSORS @ 400 kHz\n");
+    printf("[i2c-master] open BOARD_I2C_SENSORS @ 400 kHz\n");
 
     /* Open the bus at 400 kHz (I2C Fast-mode).  TMP112 supports up
      * to 400 kHz per its datasheet; the SDK rounds DOWN to the
@@ -70,7 +72,7 @@ int main(void) {
      * baseline for unknown devices; 1 MHz (Fast-mode Plus) needs
      * confirmation in the chip's datasheet and short bus traces. */
     alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id     = EVK_I2C_BUS_SENSORS, /* = E1M_I2C0 */
+        .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
         .bitrate_hz = 400000,
     });
     if (bus == NULL) {
