@@ -95,6 +95,7 @@ ZTEST(alp_hw_info, test_classify_valid_returns_ok)
     zassert_str_equal(info.som_family, "v2n");
     zassert_str_equal(info.som_sku, "E1M-V2N101");
     zassert_str_equal(info.som_hw_rev, "r1");
+    zassert_str_equal(info.som_serial, "ALP-V2N101-26W19-00042");
     zassert_equal(info.som_mfg_year, 2026);
     zassert_equal(info.som_mfg_month, 5);
     zassert_equal(info.som_mfg_day, 9);
@@ -124,7 +125,9 @@ ZTEST(alp_hw_info, test_classify_bad_schema_returns_io)
     alp_hw_info_eeprom_t m;
     make_valid_manifest(&m);
     m.schema_version = 99u; /* magic OK, body wrong */
-    m.crc32          = alp_hw_info_crc32((const uint8_t *)&m, sizeof(m) - sizeof(m.crc32));
+    /* Recompute a *valid* CRC so this proves the schema check trips
+     * first (before CRC) -- a good checksum must not rescue a bad schema. */
+    m.crc32 = alp_hw_info_crc32((const uint8_t *)&m, sizeof(m) - sizeof(m.crc32));
     alp_hw_info_t info;
     memset(&info, 0, sizeof(info));
     zassert_equal(alp_hw_info_classify_manifest(&m, &info), ALP_ERR_IO);
