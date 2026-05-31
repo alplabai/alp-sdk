@@ -114,14 +114,16 @@ and continue, or halt boot, depending on safety requirements.
 
 ## BOARD_ID ADC cross-check (TODO)
 
-Each SoM family carries a resistor divider tied to a single SoM-internal
-ADC channel; the divider voltage encodes the hardware revision.
-[`metadata/e1m_modules/v2n/hw-revisions.yaml`](../metadata/e1m_modules/v2n/hw-revisions.yaml)
-enumerates the V2N revisions (`r1`–`r8`) but does **not** yet carry
-the divider bin voltages or the ADC channel assignment — those are
-**TBD** and SoM-internal.  The bin/channel table described below is
-illustrative of what the generator will emit; it does not exist in
-the YAML today.
+Each SoM family carries a resistor divider tied to a single ADC channel;
+the divider voltage encodes the hardware revision.  On V2N the divider is
+sensed on **ADC2_CH7** (a SoM-internal channel — the SoM owns revision
+detection and manages its ADC channels internally; a carrier never wires
+this).  [`metadata/e1m_modules/v2n/hw-revisions.yaml`](../metadata/e1m_modules/v2n/hw-revisions.yaml)
+enumerates the V2N revisions (`r1`–`r8`); the per-bin divider threshold
+voltages are **SoM-internal** and intentionally not published here (they
+live with the SoM, alongside the schematic detail), so the public YAML
+carries the revision ids but not the bin millivolts.  The bin table below
+is illustrative of the SoM-internal generated form.
 
 Today's hook in [`src/zephyr/hw_info_zephyr.c`](../src/zephyr/hw_info_zephyr.c):
 
@@ -167,11 +169,11 @@ across resistor tolerance + ADC quantisation).
 * **EEPROM**: Onsemi `N24S128C4DYT3G` on `E1M_I2C0` (Renesas RIIC0,
   `P31`/`P30`).  Alternate footprint `M24128-BFMH6TG` (STMicro) is
   pin-compatible; not assembled by default.
-* **BOARD_ID ADC**: a SoM-internal ADC channel on the Renesas
-  RZ/V2N — the exact channel and the per-rev divider bin voltages
-  are **TBD** and not yet recorded in
+* **BOARD_ID ADC**: **ADC2_CH7** on the Renesas RZ/V2N (a SoM-internal
+  channel; the SoM owns rev detection).  The per-rev divider bin voltages
+  are SoM-internal and not published in
   [`metadata/e1m_modules/v2n/hw-revisions.yaml`](../metadata/e1m_modules/v2n/hw-revisions.yaml)
-  (which today lists only the revision ids `r1`–`r8`).
+  (which lists the revision ids `r1`–`r8`); the SoM holds the bin table.
 * **Kconfig**: enable `CONFIG_ALP_SDK_HW_INFO=y`, set
   `CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` to the bus id matching
   E1M_I2C0 in the studio-generated DT alias.

@@ -76,9 +76,9 @@ Two-stage SoM-ID flow:
 1. **EEPROM manifest** -- 128-byte block at offset 0 of the
    on-module 24C128 EEPROM carrying family / SKU / hw_rev /
    serial / mfg date.  Read via `alp_hw_info_read()`.
-2. **BOARD_ID ADC** -- per-rev resistor divider on a SoM-internal
-   ADC channel (exact channel TBD; stubbed, pending the per-family
-   generated header from `scripts/alp_project.py`).
+2. **BOARD_ID ADC** -- per-rev resistor divider on **ADC2_CH7**
+   (SoM-internal channel; the SoM owns rev detection). The per-bin
+   threshold voltages are SoM-internal (not published here).
 
 Full procedure: [`docs/board-id.md`](../board-id.md).
 Example: [`examples/v2n/v2n-board-id-readout/`](../../examples/v2n/v2n-board-id-readout/).
