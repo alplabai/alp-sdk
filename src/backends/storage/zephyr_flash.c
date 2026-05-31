@@ -22,6 +22,7 @@
 #include <errno.h>
 
 #include <zephyr/device.h>
+#include <zephyr/drivers/flash.h>
 #include <zephyr/storage/flash_map.h>
 #include <zephyr/sys/util.h>
 
@@ -32,51 +33,61 @@
 
 #include "storage_ops.h"
 
-static alp_status_t _errno_to_alp(int err) {
+static alp_status_t _errno_to_alp(int err)
+{
     switch (err) {
-    case 0:           return ALP_OK;
-    case -EINVAL:     return ALP_ERR_INVAL;
-    case -EBUSY:      return ALP_ERR_BUSY;
-    case -ETIMEDOUT:  return ALP_ERR_TIMEOUT;
-    case -EIO:        return ALP_ERR_IO;
+    case 0:
+        return ALP_OK;
+    case -EINVAL:
+        return ALP_ERR_INVAL;
+    case -EBUSY:
+        return ALP_ERR_BUSY;
+    case -ETIMEDOUT:
+        return ALP_ERR_TIMEOUT;
+    case -EIO:
+        return ALP_ERR_IO;
     case -ENODEV:
-    case -ENOENT:     return ALP_ERR_NOT_READY;
+    case -ENOENT:
+        return ALP_ERR_NOT_READY;
     case -ENOTSUP:
-    case -ENOSYS:     return ALP_ERR_NOSUPPORT;
-    case -ERANGE:     return ALP_ERR_OUT_OF_RANGE;
-    default:          return ALP_ERR_IO;
+    case -ENOSYS:
+        return ALP_ERR_NOSUPPORT;
+    case -ERANGE:
+        return ALP_ERR_OUT_OF_RANGE;
+    default:
+        return ALP_ERR_IO;
     }
 }
 
-static alp_status_t z_open(const alp_storage_config_t *cfg,
-                           alp_storage_backend_state_t *st,
-                           alp_capabilities_t *caps_out) {
+static alp_status_t z_open(const alp_storage_config_t *cfg, alp_storage_backend_state_t *st,
+                           alp_capabilities_t *caps_out)
+{
     /* SD/MMC isn't a flash_area abstraction -- defer to a different
      * backend.  Returning NOSUPPORT lets the dispatcher's selector
      * fall through to the next match. */
     if (cfg->kind == ALP_STORAGE_KIND_SD_MMC) return ALP_ERR_NOSUPPORT;
 
-    const struct flash_area *fa = NULL;
-    int err = flash_area_open(cfg->instance_id, &fa);
+    const struct flash_area *fa  = NULL;
+    int                      err = flash_area_open(cfg->instance_id, &fa);
     if (err != 0 || fa == NULL) {
         return _errno_to_alp(err);
     }
-    st->dev     = (void *)fa;
+    st->dev         = (void *)fa;
     caps_out->flags = 0u;
     return ALP_OK;
 }
 
-static alp_status_t z_get_info(alp_storage_backend_state_t *st,
-                               alp_storage_info_t *info) {
+static alp_status_t z_get_info(alp_storage_backend_state_t *st, alp_storage_info_t *info)
+{
     const struct flash_area *fa = (const struct flash_area *)st->dev;
     if (fa == NULL) return ALP_ERR_NOT_READY;
     /* Erase size from the underlying flash device.  Zephyr exposes
      * the unit via flash_get_write_block_size / flash_params; for
      * v0.6 we report fa_size as both total and erase granule when
      * the device API is opaque.  Real-silicon backends override. */
-    info->total_bytes = fa->fa_size;
-    info->block_size  = 1u;
-    info->erase_size  = 1u;
+    info->total_bytes        = fa->fa_size;
+    info->block_size         = 1u;
+    info->erase_size         = 1u;
     const struct device *dev = flash_area_get_device(fa);
     if (dev != NULL) {
         info->block_size = flash_get_write_block_size(dev);
@@ -84,8 +95,8 @@ static alp_status_t z_get_info(alp_storage_backend_state_t *st,
     return ALP_OK;
 }
 
-static alp_status_t z_read(alp_storage_backend_state_t *st,
-                           uint64_t offset, void *data, size_t len) {
+static alp_status_t z_read(alp_storage_backend_state_t *st, uint64_t offset, void *data, size_t len)
+{
     const struct flash_area *fa = (const struct flash_area *)st->dev;
     if (fa == NULL) return ALP_ERR_NOT_READY;
     if (offset + len > fa->fa_size) return ALP_ERR_OUT_OF_RANGE;
@@ -93,8 +104,9 @@ static alp_status_t z_read(alp_storage_backend_state_t *st,
     return _errno_to_alp(err);
 }
 
-static alp_status_t z_write(alp_storage_backend_state_t *st,
-                            uint64_t offset, const void *data, size_t len) {
+static alp_status_t z_write(alp_storage_backend_state_t *st, uint64_t offset, const void *data,
+                            size_t len)
+{
     const struct flash_area *fa = (const struct flash_area *)st->dev;
     if (fa == NULL) return ALP_ERR_NOT_READY;
     if (offset + len > fa->fa_size) return ALP_ERR_OUT_OF_RANGE;
@@ -102,8 +114,8 @@ static alp_status_t z_write(alp_storage_backend_state_t *st,
     return _errno_to_alp(err);
 }
 
-static alp_status_t z_erase(alp_storage_backend_state_t *st,
-                            uint64_t offset, uint64_t len) {
+static alp_status_t z_erase(alp_storage_backend_state_t *st, uint64_t offset, uint64_t len)
+{
     const struct flash_area *fa = (const struct flash_area *)st->dev;
     if (fa == NULL) return ALP_ERR_NOT_READY;
     if (offset + len > fa->fa_size) return ALP_ERR_OUT_OF_RANGE;
@@ -111,23 +123,27 @@ static alp_status_t z_erase(alp_storage_backend_state_t *st,
     return _errno_to_alp(err);
 }
 
-static alp_status_t z_sync(alp_storage_backend_state_t *st) {
+static alp_status_t z_sync(alp_storage_backend_state_t *st)
+{
     (void)st;
     /* flash_area writes are synchronous on every Zephyr-supported
      * controller; explicit flush is unnecessary. */
     return ALP_OK;
 }
 
-static alp_status_t z_configure_inline_aes(alp_storage_backend_state_t *st,
-                                           const alp_storage_aes_config_t *cfg) {
-    (void)st; (void)cfg;
+static alp_status_t z_configure_inline_aes(alp_storage_backend_state_t    *st,
+                                           const alp_storage_aes_config_t *cfg)
+{
+    (void)st;
+    (void)cfg;
     /* Plain Zephyr flash has no inline-AES path -- vendor packs
      * (Alif SecAES, NXP OTFAD) register dedicated backends that
      * win on priority and implement this op. */
     return ALP_ERR_NOSUPPORT;
 }
 
-static void z_close(alp_storage_backend_state_t *st) {
+static void z_close(alp_storage_backend_state_t *st)
+{
     if (st->dev != NULL) {
         flash_area_close((const struct flash_area *)st->dev);
         st->dev = NULL;
@@ -145,11 +161,12 @@ static const alp_storage_ops_t _ops = {
     .close                = z_close,
 };
 
-ALP_BACKEND_REGISTER(storage, zephyr_flash, {
-    .silicon_ref = "*",
-    .vendor      = "zephyr",
-    .base_caps   = 0u,
-    .priority    = 100,
-    .ops         = &_ops,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(storage, zephyr_flash,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "zephyr",
+                         .base_caps   = 0u,
+                         .priority    = 100,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });

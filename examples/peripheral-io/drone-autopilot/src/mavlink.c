@@ -337,12 +337,13 @@ int alp_mavlink_init(uint8_t sysid, uint8_t compid)
      *
      * Opening UART0 here therefore COLLIDES with the GNSS link --
      * two drivers claiming the same port.  This is left deliberately
-     * visible (the #warning below fires at build time) rather than
-     * silently papered over: a real flight build must route the GCS
-     * SiK radio to a dedicated port (board-specific, TBD pinout) and
-     * point this open() at that port instead.  Do not ship as-is. */
-#warning                                                                                           \
-    "drone-autopilot: MAVLink GCS shares E1M_UART0 with the GNSS link -- route to a dedicated UART before flight (no free third port in v0.5)."
+     * visible (a LOG_WRN fires at runtime) rather than silently
+     * papered over: a real flight build must route the GCS SiK radio
+     * to a dedicated port (board-specific, TBD pinout) and point this
+     * open() at that port instead.  Do not ship as-is. */
+    LOG_WRN("drone-autopilot: MAVLink GCS shares E1M_UART0 with the GNSS "
+            "link -- route to a dedicated UART before flight (no free "
+            "third port in v0.5).");
     s_uart = alp_uart_open(&(alp_uart_config_t){
         .port_id  = E1M_UART0,
         .baudrate = 57600,
