@@ -117,10 +117,14 @@ it but do not claim it done.
 
 ### 3. Flash tooling (J-Link primary)
 
-- **Primary probe: J-Link** (confirmed on the bench). The robust GD32G5 path is
-  SEGGER's own tooling — `JLinkExe -device GD32G553xE` (or J-Flash) — which has
+- **Primary probe: J-Link** (confirmed on the bench), connected **directly to
+  the GD32's own SWD header** (`PA13`/`PA14`/NRST). The V2N host is **not** in
+  the flashing loop: the host-driven SWD path (Renesas `P70`/`P71`→GD32, the
+  `chips/gd32_swd/` idea) is **not wired on this HW revision**. The robust
+  GD32G5 path is SEGGER's own tooling — `JLinkExe -device GD32G553xE` — which has
   built-in GD32G553 flash support and **sidesteps the open question of whether
-  mainline OpenOCD can flash GD32G5** (it likely cannot stock).
+  mainline OpenOCD can flash GD32G5** (it likely cannot stock). The flash
+  backend is the generic **`swd_probe`** (an external-SWD-probe backend).
 - **Extend `scripts/flash_backends/swd_v2n_host.py`** with a direct J-Link path
   alongside its existing `openocd` / `pyocd` options, keeping the same backend
   name + `flash_args` contract so `west alp-flash --helper gd32_bridge` is
@@ -199,7 +203,8 @@ it but do not claim it done.
 | Path | Action |
 | --- | --- |
 | `firmware/gd32-bridge/**` | Integrated from `feat/gd32-transport-bringup` (merge, no logic edits) |
-| `scripts/flash_backends/swd_v2n_host.py` | **Extend** — add a direct J-Link (`JLinkExe`) path; keep backend name + contract |
+| `scripts/flash_backends/swd_probe.py` | **Rename** `swd_v2n_host.py`→`swd_probe.py` (method key + class) **and extend** with a direct J-Link (`JLinkExe`) path |
+| SoM presets ×4 + preset schema + tests + `alp_flash` comment + `v0.6-tbd` | Update `flash_method` `swd_v2n_host`→`swd_probe`; also fix the `gd32_bridge` `firmware_path` (`gd32_bridge.bin`→`gd32-bridge.bin`) |
 | `scripts/openocd/` | **New** — alternative-probe (CMSIS-DAP / ST-Link / OpenOCD) configs |
 | `docs/gd32-flashing.md` | **New** — the public flashing SOP |
 | `docs/gd32-bridge.md`, `firmware/gd32-bridge/README.md`, `docs/firmware-quickstart.md` | Cross-link the SOP |
