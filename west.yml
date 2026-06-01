@@ -319,7 +319,7 @@ manifest:
     #       (a) enable this group + set EXTRA_ZEPHYR_MODULES to
     #           the cloned sdk-alif path, or
     #       (b) use sdk-alif itself as the workspace topdir (which
-    #           replaces our Zephyr v3.7 pin with zephyr_alif's
+    #           replaces our Zephyr v4.4 pin with zephyr_alif's
     #           Alif-patched Zephyr fork).
     #     Customers with their own AEN board overlay don't
     #     need sdk-alif -- the top-level hal_alif direct import
