@@ -41,6 +41,7 @@ from flash_backends.cc3501e_usb_bootloader import (  # noqa: E402
 )
 from flash_backends.swd_probe import (             # noqa: E402
     SwdProbeFlash,
+    _jlink_commander_script,
 )
 from flash_backends.yocto_wic import (             # noqa: E402
     YoctoWicFlash,
@@ -400,11 +401,60 @@ def test_swd_probe_missing_both_tools() -> None:
 def test_swd_probe_requires_interface_and_target() -> None:
     backend = SwdProbeFlash()
     with patch("flash_backends.swd_probe.shutil.which",
-               return_value="/usr/bin/openocd"), \
+               side_effect=lambda t: "/usr/bin/openocd"
+               if t == "openocd" else None), \
          patch("flash_backends.swd_probe.subprocess.run") as run_mock:
-        result = backend.flash(_ctx({}))    # no interface / target
+        result = backend.flash(_ctx({}))
     assert result.ok is False
     assert run_mock.call_count == 0
+
+
+def test_swd_probe_prefers_jlink_when_present() -> None:
+    backend = SwdProbeFlash()
+    artefact = "/tmp/gd32-bridge.hex"
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: f"/usr/bin/{t}"
+               if t in ("JLinkExe", "openocd") else None), \
+         patch("flash_backends.swd_probe.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"base": "0x08000000"}, dry_run=True, artefact=artefact))
+    assert result.ok is True
+    assert run_mock.call_count == 0
+    assert result.command[0].endswith("JLinkExe")
+    assert "-device" in result.command and "GD32G553MEY7TR" in result.command
+    assert "SWD" in " ".join(result.command)
+    assert "loadfile" in result.message
+    assert "gd32-bridge.hex" in result.message
+
+
+def test_swd_probe_jlink_happy_path() -> None:
+    backend = SwdProbeFlash()
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: "/usr/bin/JLinkExe"
+               if t == "JLinkExe" else None), \
+         patch("flash_backends.swd_probe.subprocess.run",
+               return_value=_proc(rc=0)) as run_mock:
+        result = backend.flash(_ctx(
+            {"jlink_device": "GD32G553MEY7TR"}, artefact="/tmp/gd32-bridge.hex"))
+    assert result.ok is True
+    assert run_mock.call_count == 1
+    assert run_mock.call_args[0][0][0].endswith("JLinkExe")
+
+
+def test_jlink_commander_script_hex_uses_loadfile() -> None:
+    script = _jlink_commander_script(Path("/tmp/gd32-bridge.hex"),
+                                     "0x08000000", do_reset=True)
+    assert "loadfile" in script
+    assert "gd32-bridge.hex" in script
+    assert "g" in script.split()
+    assert script.strip().endswith("qc")
+
+
+def test_jlink_commander_script_bin_uses_loadbin_with_base() -> None:
+    script = _jlink_commander_script(Path("/tmp/gd32-bridge.bin"),
+                                     "0x08000000", do_reset=True)
+    assert "loadbin" in script
+    assert "0x08000000" in script
 
 
 # ---------------------------------------------------------------------
