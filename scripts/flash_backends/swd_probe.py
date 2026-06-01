@@ -1,20 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-swd_v2n_host -- flash the GD32G553 supervisor MCU via the V2N host's
-SWD pins.
+swd_probe -- flash a Cortex-M target over SWD with an external probe.
 
-On E1M-V2N101 the V2N drives SWDIO=P70, SWCLK=P71, NRST=P74 to the
-GD32 (see project memory: "V2N→GD32 SWD + NRST assigned").  This
-backend wraps either ``openocd`` (preferred -- the alp-sdk ships an
-OpenOCD interface config under scripts/openocd/cmsis-dap.cfg) or
-``pyocd`` as a fallback for hosts without OpenOCD.
+Used for the GD32G553 supervisor on E1M-X boards: the probe connects
+to the GD32's SWD header (SWDIO=PA13, SWCLK=PA14, NRST) and programs
+it directly (see metadata/chips/gd32g553.yaml).
 
 flash_args contract:
   interface  str    OpenOCD interface ID -- "cmsis-dap" | "jlink" |
-                    "stlink".  REQUIRED.
+                    "stlink".  REQUIRED for openocd/pyocd path.
   target     str    OpenOCD target ID -- usually "gd32g553" or a
                     nested family name resolved from the SoM preset.
-                    REQUIRED.
+                    REQUIRED for openocd/pyocd path.
   base       str?   Flash base address as a hex string ("0x08000000").
                     Defaults to "0x08000000" (GD32G553 main flash).
   reset      bool   Issue ``reset run`` after programming.  Defaults
@@ -37,10 +34,10 @@ from . import FlashBackend, FlashContext, FlashResult, register
 _DEFAULT_BASE = "0x08000000"
 
 
-class SwdV2nHostFlash:
+class SwdProbeFlash:
     """OpenOCD-via-CMSIS-DAP / pyocd wrapper for the GD32G553."""
 
-    name: str = "swd_v2n_host"
+    name: str = "swd_probe"
     requires: list[str] = ["openocd", "pyocd"]
 
     def flash(self, ctx: FlashContext) -> FlashResult:
@@ -56,7 +53,7 @@ class SwdV2nHostFlash:
             return FlashResult(
                 ok=False,
                 elapsed_s=time.monotonic() - start,
-                message=("swd_v2n_host: flash_args.interface and "
+                message=("swd_probe: flash_args.interface and "
                          "flash_args.target are required (e.g. "
                          "interface=cmsis-dap, target=gd32g553)."),
             )
@@ -94,7 +91,7 @@ class SwdV2nHostFlash:
             return FlashResult(
                 ok=False,
                 elapsed_s=time.monotonic() - start,
-                message=("swd_v2n_host: neither `openocd` nor `pyocd` is "
+                message=("swd_probe: neither `openocd` nor `pyocd` is "
                          "on PATH; install openocd (preferred) via "
                          "`apt install openocd` / `brew install openocd` "
                          "or `pip install pyocd`."),
@@ -104,7 +101,7 @@ class SwdV2nHostFlash:
             return FlashResult(
                 ok=True,
                 elapsed_s=time.monotonic() - start,
-                message=f"swd_v2n_host[{ctx.core_id}]: would run "
+                message=f"swd_probe[{ctx.core_id}]: would run "
                         f"{' '.join(cmd)} (dry-run)",
                 command=list(cmd),
             )
@@ -116,7 +113,7 @@ class SwdV2nHostFlash:
             return FlashResult(
                 ok=True,
                 elapsed_s=elapsed,
-                message=f"swd_v2n_host[{ctx.core_id}]: GD32G553 flashed "
+                message=f"swd_probe[{ctx.core_id}]: GD32G553 flashed "
                         f"@ {base} in {elapsed:.1f}s",
                 command=list(cmd),
             )
@@ -125,13 +122,13 @@ class SwdV2nHostFlash:
         return FlashResult(
             ok=False,
             elapsed_s=elapsed,
-            message=(f"swd_v2n_host[{ctx.core_id}]: exited "
+            message=(f"swd_probe[{ctx.core_id}]: exited "
                      f"rc={proc.returncode} -- {tail_msg}"),
             command=list(cmd),
         )
 
 
-_INST = SwdV2nHostFlash()
+_INST = SwdProbeFlash()
 register(_INST)
 
 BACKEND: FlashBackend = _INST

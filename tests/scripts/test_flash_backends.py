@@ -39,8 +39,8 @@ from flash_backends.baremetal_cmake_flash import (  # noqa: E402
 from flash_backends.cc3501e_usb_bootloader import (  # noqa: E402
     Cc3501eUsbBootloaderFlash,
 )
-from flash_backends.swd_v2n_host import (          # noqa: E402
-    SwdV2nHostFlash,
+from flash_backends.swd_probe import (             # noqa: E402
+    SwdProbeFlash,
 )
 from flash_backends.yocto_wic import (             # noqa: E402
     YoctoWicFlash,
@@ -85,7 +85,7 @@ def test_registry_has_all_canonical_backends() -> None:
         "yocto_wic",                    # alias
         "zephyr_west_flash",
         "baremetal_cmake_flash",
-        "swd_v2n_host",
+        "swd_probe",
         "cc3501e_usb_bootloader",
     }
     assert expected.issubset(set(REGISTRY.keys())), \
@@ -319,17 +319,17 @@ def test_baremetal_cmake_flash_missing_tool() -> None:
 
 
 # ---------------------------------------------------------------------
-# 5. SwdV2nHostFlash
+# 5. SwdProbeFlash
 # ---------------------------------------------------------------------
 
 
-def test_swd_v2n_host_dry_run_uses_openocd() -> None:
-    backend = SwdV2nHostFlash()
+def test_swd_probe_dry_run_uses_openocd() -> None:
+    backend = SwdProbeFlash()
     artefact = "/tmp/gd32_bridge.bin"
-    with patch("flash_backends.swd_v2n_host.shutil.which",
+    with patch("flash_backends.swd_probe.shutil.which",
                side_effect=lambda t: f"/usr/bin/{t}" if t == "openocd"
                else None), \
-         patch("flash_backends.swd_v2n_host.subprocess.run") as run_mock:
+         patch("flash_backends.swd_probe.subprocess.run") as run_mock:
         result = backend.flash(_ctx(
             {
                 "interface": "cmsis-dap",
@@ -351,12 +351,12 @@ def test_swd_v2n_host_dry_run_uses_openocd() -> None:
     assert str(Path(artefact)) in joined
 
 
-def test_swd_v2n_host_happy_path_openocd_call() -> None:
-    backend = SwdV2nHostFlash()
-    with patch("flash_backends.swd_v2n_host.shutil.which",
+def test_swd_probe_happy_path_openocd_call() -> None:
+    backend = SwdProbeFlash()
+    with patch("flash_backends.swd_probe.shutil.which",
                side_effect=lambda t: f"/usr/bin/{t}" if t == "openocd"
                else None), \
-         patch("flash_backends.swd_v2n_host.subprocess.run",
+         patch("flash_backends.swd_probe.subprocess.run",
                return_value=_proc(rc=0)) as run_mock:
         result = backend.flash(_ctx(
             {"interface": "cmsis-dap", "target": "gd32g553"},
@@ -366,12 +366,12 @@ def test_swd_v2n_host_happy_path_openocd_call() -> None:
     assert run_mock.call_count == 1
 
 
-def test_swd_v2n_host_falls_back_to_pyocd() -> None:
-    backend = SwdV2nHostFlash()
-    with patch("flash_backends.swd_v2n_host.shutil.which",
+def test_swd_probe_falls_back_to_pyocd() -> None:
+    backend = SwdProbeFlash()
+    with patch("flash_backends.swd_probe.shutil.which",
                side_effect=lambda t: "/usr/bin/pyocd"
                if t == "pyocd" else None), \
-         patch("flash_backends.swd_v2n_host.subprocess.run",
+         patch("flash_backends.swd_probe.subprocess.run",
                return_value=_proc(rc=0)) as run_mock:
         result = backend.flash(_ctx(
             {"interface": "cmsis-dap", "target": "gd32g553"},
@@ -383,11 +383,11 @@ def test_swd_v2n_host_falls_back_to_pyocd() -> None:
     assert "flash" in invoked
 
 
-def test_swd_v2n_host_missing_both_tools() -> None:
-    backend = SwdV2nHostFlash()
-    with patch("flash_backends.swd_v2n_host.shutil.which",
+def test_swd_probe_missing_both_tools() -> None:
+    backend = SwdProbeFlash()
+    with patch("flash_backends.swd_probe.shutil.which",
                return_value=None), \
-         patch("flash_backends.swd_v2n_host.subprocess.run") as run_mock:
+         patch("flash_backends.swd_probe.subprocess.run") as run_mock:
         result = backend.flash(_ctx(
             {"interface": "cmsis-dap", "target": "gd32g553"},
         ))
@@ -397,11 +397,11 @@ def test_swd_v2n_host_missing_both_tools() -> None:
     assert "openocd" in msg or "pyocd" in msg
 
 
-def test_swd_v2n_host_requires_interface_and_target() -> None:
-    backend = SwdV2nHostFlash()
-    with patch("flash_backends.swd_v2n_host.shutil.which",
+def test_swd_probe_requires_interface_and_target() -> None:
+    backend = SwdProbeFlash()
+    with patch("flash_backends.swd_probe.shutil.which",
                return_value="/usr/bin/openocd"), \
-         patch("flash_backends.swd_v2n_host.subprocess.run") as run_mock:
+         patch("flash_backends.swd_probe.subprocess.run") as run_mock:
         result = backend.flash(_ctx({}))    # no interface / target
     assert result.ok is False
     assert run_mock.call_count == 0
@@ -511,7 +511,7 @@ _HAPPY_MANIFEST = {
             "name":          "gd32_bridge",
             "chip":          "gd32g553",
             "firmware_path": "firmware/gd32-bridge/build/gd32_bridge.bin",
-            "flash_method":  "swd_v2n_host",
+            "flash_method":  "swd_probe",
             "flash_args":    {
                 "interface": "cmsis-dap",
                 "target":    "gd32g553",
@@ -558,7 +558,7 @@ def test_alp_flash_dispatch_dry_run_walks_all_entries(tmp_path) -> None:
 
     with patch.object(YoctoWicFlash,        "flash", fake_flash), \
          patch.object(ZephyrWestFlash,      "flash", fake_flash), \
-         patch.object(SwdV2nHostFlash,      "flash", fake_flash), \
+         patch.object(SwdProbeFlash,        "flash", fake_flash), \
          patch.object(BaremetalCmakeFlash,  "flash", fake_flash), \
          patch.object(Cc3501eUsbBootloaderFlash, "flash", fake_flash), \
          patch("alp_flash.shutil.which", return_value="/usr/bin/x"):
@@ -586,7 +586,7 @@ def test_alp_flash_dispatch_filters_by_core(tmp_path) -> None:
 
     with patch.object(YoctoWicFlash,        "flash", fake_flash), \
          patch.object(ZephyrWestFlash,      "flash", fake_flash), \
-         patch.object(SwdV2nHostFlash,      "flash", fake_flash), \
+         patch.object(SwdProbeFlash,        "flash", fake_flash), \
          patch.object(BaremetalCmakeFlash,  "flash", fake_flash), \
          patch.object(Cc3501eUsbBootloaderFlash, "flash", fake_flash), \
          patch("alp_flash.shutil.which", return_value="/usr/bin/x"):
@@ -612,7 +612,7 @@ def test_alp_flash_dispatch_filters_by_helper(tmp_path) -> None:
 
     with patch.object(YoctoWicFlash,        "flash", fake_flash), \
          patch.object(ZephyrWestFlash,      "flash", fake_flash), \
-         patch.object(SwdV2nHostFlash,      "flash", fake_flash), \
+         patch.object(SwdProbeFlash,        "flash", fake_flash), \
          patch.object(BaremetalCmakeFlash,  "flash", fake_flash), \
          patch.object(Cc3501eUsbBootloaderFlash, "flash", fake_flash), \
          patch("alp_flash.shutil.which", return_value="/usr/bin/x"):
@@ -639,7 +639,7 @@ def test_alp_flash_dispatch_skip_missing_tools(tmp_path) -> None:
 
     with patch.object(YoctoWicFlash,        "flash", fake_flash), \
          patch.object(ZephyrWestFlash,      "flash", fake_flash), \
-         patch.object(SwdV2nHostFlash,      "flash", fake_flash), \
+         patch.object(SwdProbeFlash,        "flash", fake_flash), \
          patch.object(BaremetalCmakeFlash,  "flash", fake_flash), \
          patch.object(Cc3501eUsbBootloaderFlash, "flash", fake_flash), \
          patch("alp_flash.shutil.which", return_value=None):

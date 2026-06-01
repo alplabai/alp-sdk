@@ -461,7 +461,7 @@ def test_emit_system_manifest_round_trip(tmp_path: Path) -> None:
     gd32 = next(h for h in parsed["helper_mcus"]
                 if h["name"] == "gd32_bridge")
     assert gd32["chip"] == "gd32g553"
-    assert gd32["flash_method"] == "swd_v2n_host"
+    assert gd32["flash_method"] == "swd_probe"
 
 
 # ---------------------------------------------------------------------
@@ -639,8 +639,8 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     gd32 = by_name["gd32_bridge"]
     assert gd32["chip"] == "gd32g553"
     assert gd32["firmware_path"] == \
-        "firmware/gd32-bridge/build/gd32_bridge.bin"
-    assert gd32["flash_method"] == "swd_v2n_host"
+        "firmware/gd32-bridge/build/gd32/gd32-bridge.bin"
+    assert gd32["flash_method"] == "swd_probe"
     assert isinstance(gd32["flash_args"], dict)
     assert gd32["flash_args"]["target"] == "gd32g553"
 
@@ -827,8 +827,8 @@ _SYNTHETIC_V2N_WITH_ON_MODULE = """\
     helper_firmware:
       - name: gd32_bridge
         chip: gd32g553
-        firmware_path: firmware/gd32-bridge/build/gd32_bridge.bin
-        flash_method:  swd_v2n_host
+        firmware_path: firmware/gd32-bridge/build/gd32/gd32-bridge.bin
+        flash_method:  swd_probe
         flash_args:
           interface: cmsis-dap
           target: gd32g553
