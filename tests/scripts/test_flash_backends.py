@@ -457,6 +457,34 @@ def test_jlink_commander_script_bin_uses_loadbin_with_base() -> None:
     assert "0x08000000" in script
 
 
+def test_swd_probe_jlink_failure_returns_error_result() -> None:
+    backend = SwdProbeFlash()
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: "/usr/bin/JLinkExe"
+               if t == "JLinkExe" else None), \
+         patch("flash_backends.swd_probe.subprocess.run",
+               return_value=_proc(rc=1, stderr="Cannot connect to target")):
+        result = backend.flash(_ctx(artefact="/tmp/gd32-bridge.hex"))
+    assert result.ok is False
+    assert "J-Link exited" in result.message
+
+
+def test_swd_probe_use_openocd_skips_jlink() -> None:
+    backend = SwdProbeFlash()
+    # Both J-Link and openocd present, but use_openocd forces openocd.
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: f"/usr/bin/{t}"
+               if t in ("JLinkExe", "openocd") else None), \
+         patch("flash_backends.swd_probe.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"use_openocd": True, "interface": "cmsis-dap", "target": "gd32g553"},
+            dry_run=True))
+    assert result.ok is True
+    assert run_mock.call_count == 0
+    assert result.command[0].endswith("openocd")
+    assert "JLinkExe" not in " ".join(result.command)
+
+
 # ---------------------------------------------------------------------
 # 6. Cc3501eUsbBootloaderFlash
 # ---------------------------------------------------------------------
@@ -560,7 +588,7 @@ _HAPPY_MANIFEST = {
         {
             "name":          "gd32_bridge",
             "chip":          "gd32g553",
-            "firmware_path": "firmware/gd32-bridge/build/gd32_bridge.bin",
+            "firmware_path": "firmware/gd32-bridge/build/gd32/gd32-bridge.bin",
             "flash_method":  "swd_probe",
             "flash_args":    {
                 "interface": "cmsis-dap",

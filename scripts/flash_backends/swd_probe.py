@@ -39,7 +39,7 @@ from . import FlashBackend, FlashContext, FlashResult, register
 _DEFAULT_BASE = "0x08000000"
 _DEFAULT_JLINK_DEVICE = "GD32G553MEY7TR"
 _DEFAULT_JLINK_SPEED = 4000
-_JLINK_BINARIES = ("JLinkExe", "JLink")     # Linux/macOS, then Windows
+_JLINK_BINARIES = ("JLinkExe", "JLink")     # "JLinkExe" on Linux/macOS, "JLink" on Windows -- try both
 
 
 def _jlink_commander_script(artefact: Path, base: str, do_reset: bool) -> str:
