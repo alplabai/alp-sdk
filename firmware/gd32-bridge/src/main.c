@@ -16,20 +16,18 @@
  * the DA9292 PMIC's PMC_STATUS_00 over I2C-master so the cached
  * value served by CMD_DA9292_STATUS_FORWARD stays fresh.
  *
- * Scaffold today: the bridge_hw_* HAL is stubbed; only PING,
- * GET_VERSION, GET_BUILD_ID, and RESET_REASON round-trip without
- * NOSUPPORT.  The HAL implementation against the GigaDevice
- * firmware library lands in a follow-up.
+ * Backends: BRIDGE_HAL_BACKEND=gd32 drives real silicon (peripheral
+ * HAL in hal/bridge_hw_gd32.c, SPI1 + I2C0 slave transports in
+ * hal/transport_hw_gd32.c).  BRIDGE_HAL_BACKEND=stub keeps everything
+ * hardware-free for host-side protocol tests: PING / GET_VERSION /
+ * GET_BUILD_ID / RESET_REASON round-trip and HW-touching ops return
+ * NOSUPPORT.
  */
 
 #include <stdint.h>
 
 #include "protocol.h"
-
-/* Forward declarations of the per-transport init helpers (no public
- * headers for the transports -- main.c is the only caller). */
-void transport_spi_init(void);
-void transport_i2c_init(void);
+#include "transport.h"
 
 /* Optional weak hooks the HAL layer can override.  Defaults to a
  * busy WFI loop -- behaviour-equivalent to a no-op for the

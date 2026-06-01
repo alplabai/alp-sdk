@@ -11,9 +11,11 @@
 #
 # The output binary lives at build/gd32-bridge.elf (+ .hex + .bin).
 #
-# Status (2026-05-12): the toolchain file + HAL stub + protocol layer
-# compile standalone; the GigaDevice firmware library hook-up at
-# `vendors/gd32_firmware_library/` is TBD.
+# Status: both backends build clean (arm-none-eabi-gcc 13.x).  The gd32
+# backend links the GigaDevice firmware library at
+# `vendors/gd32_firmware_library/` and drives the peripheral HAL plus the
+# SPI1 + I2C0 slave transports; remaining HAL gaps (DSP chain upload,
+# POWER_MODE_SET) and OTA degrade to STATUS_NOSUPPORT.
 
 cmake_minimum_required(VERSION 3.20)
 project(gd32-bridge LANGUAGES C ASM)
@@ -28,8 +30,9 @@ project(gd32-bridge LANGUAGES C ASM)
 #                  HW-touching opcode reports BRIDGE_HW_ERR_NOTIMPL.
 #                  Useful for protocol round-trip testing in
 #                  hardware-less unit-test environments.
-#   * gd32      -- builds against hal/bridge_hw_gd32.c; requires the
-#                  GigaDevice firmware library (TBD location).
+#   * gd32      -- builds against hal/bridge_hw_gd32.c +
+#                  hal/transport_hw_gd32.c; requires the GigaDevice
+#                  firmware library at vendors/gd32_firmware_library/.
 set(BRIDGE_HAL_BACKEND "stub" CACHE STRING "Bridge HAL backend (stub | gd32)")
 
 # ----------------------------------------------------------------- #
@@ -54,6 +57,7 @@ elseif(BRIDGE_HAL_BACKEND STREQUAL "gd32")
     # that pulls in `__libc_init_array`.
     list(APPEND GD32_BRIDGE_SOURCES
         hal/bridge_hw_gd32.c
+        hal/transport_hw_gd32.c
         hal/gd32_libc_stubs.c
     )
     # Pull in the GigaDevice firmware-library wrapper.  Its CMakeLists

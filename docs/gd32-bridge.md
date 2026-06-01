@@ -30,7 +30,7 @@ build it, how to flash it, and what state the implementation is in.
 | Build system        | CMake (separate from the Zephyr-side `west build`)                                |
 | HAL                 | Stub default; `BRIDGE_HAL_BACKEND=gd32` consumes the GigaDevice firmware library via the [`alplabai/gd32g5x3-firmware-library`](https://github.com/alplabai/gd32g5x3-firmware-library) submodule at `vendors/gd32_firmware_library/upstream/` (run `git submodule update --init` once after cloning) |
 | Protocol coverage   | `PING`, `GET_VERSION`, `GET_BUILD_ID` working end-to-end without HW dependency    |
-| Transport coverage  | SPI slave + I2C slave scaffolded; HAL hookups marked TODO                         |
+| Transport coverage  | SPI1 slave + I2C0 slave implemented in `hal/transport_hw_gd32.c` (gd32 backend); on-silicon timing validation pending |
 | Datasheet           | GD32G553 datasheet + user manual (held in the vendor datasheet) |
 | Flash size on chip  | 512 KB (per datasheet)                                                            |
 | RAM size on chip    | 128 KB                                                                            |
