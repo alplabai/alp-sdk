@@ -53,6 +53,17 @@ if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_LITTLEFS)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_littlefs.c)
 endif()
 
+# Renesas RZ SPI_B (RSPI) controller driver -- carried here (not upstream
+# Zephyr) so it survives a `west update`.  Upstream Zephyr ships no driver
+# for the SPI_B IP the rzv FSP serves; this one wraps FSP r_spi_b and adds
+# the RZ/V2N CM33 INTSEL selectable-interrupt routing.  Needs Zephyr's
+# private drivers/spi/spi_context.h on the include path.
+if(CONFIG_SPI_RENESAS_RZ_SPI_B)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/spi_renesas_rz_spi_b.c)
+    zephyr_library_include_directories(${ZEPHYR_BASE}/drivers/spi)
+endif()
+
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.

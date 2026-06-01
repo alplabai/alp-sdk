@@ -162,6 +162,10 @@ manifest:
           - hal_renesas
           - hal_nxp
           - cmsis
+          # cmsis_6 provides cmsis_core.h for Cortex-M targets on Zephyr
+          # v4.4 (the legacy `cmsis` module now serves Cortex-A/R only).
+          # Required by the RZ/V2N + i.MX93 M33/M-class cores.
+          - cmsis_6
           - cmsis-dsp
           - lvgl
           - mbedtls

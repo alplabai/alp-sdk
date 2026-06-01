@@ -1,0 +1,84 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-V2M101 (RZ/V2N R9A09G056-N44 + DEEPX DX-M1) Cortex-M33 system-manager.
+ *
+ * Reuses the upstream RZ/V2N SoC devicetree + the EVK SCI_UART0 console and
+ * adds the on-module GD32G553 supervisor links:
+ *   - SPI_B ch1 (alias alp-spi1): P76 MOSI / P77 MISO / P96 RSPCK / P97 SSL
+ *   - RIIC8 / BRD_I2C (alias alp-i2c0): P06 SDA / P07 SCL  (GD32 slave @ 0x70)
+ *
+ * The on-module silicon is the n44 variant; Zephyr only models the n48gbg
+ * SoC, which is devicetree-identical for the M33 + SPI/I2C peripherals
+ * (the n44/n48 delta is GPU/ISP/crypto fusing only).
+ */
+
+/dts-v1/;
+
+#include <zephyr/dt-bindings/i2c/i2c.h>
+#include <arm/renesas/rz/rzv/r9a09g056.dtsi>
+#include "alp_e1m_v2m101_m33_sm-pinctrl.dtsi"
+
+/ {
+	model = "Alp E1M-V2M101 Cortex-M33 system manager";
+	compatible = "alp,e1m-v2m101-m33-sm";
+
+	chosen {
+		zephyr,sram = &sram;
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+	};
+
+	aliases {
+		alp-spi1 = &spi1;
+		alp-i2c0 = &i2c8;
+	};
+
+	sram: memory@8003000 {
+		compatible = "mmio-sram";
+		reg = <0x08003000 0xfbfff>;
+	};
+};
+
+&sci0 {
+	pinctrl-0 = <&sci0_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	uart0: uart {
+		current-speed = <115200>;
+		status = "okay";
+	};
+};
+
+/*
+ * SPI_B ch1 (renesas,rz-spi-b) for the GD32 supervisor fast path.
+ * Defined here (under /soc) rather than in the upstream RZ/V2N SoC
+ * dtsi so the deliverable survives a `west update` of the Zephyr tree.
+ * Register base 0x42800400 = the CM33 view of SPI_B ch1; rxi/txi use
+ * free INTC SELECT slots 456/457; tei(=SPCEND1)/eri(=SPEI1) = 110/109
+ * (fixed CM33 vectors).  clk-src = 1 selects PCLK (P4CLK).
+ */
+&{/soc} {
+	spi1: spi@42800400 {
+		compatible = "renesas,rz-spi-b";
+		reg = <0x42800400 0x400>;
+		channel = <1>;
+		clk-src = <1>;
+		interrupts = <456 1>, <457 1>, <110 1>, <109 1>;
+		interrupt-names = "rxi", "txi", "tei", "eri";
+		pinctrl-0 = <&spi1_pins>;
+		pinctrl-names = "default";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+	};
+};
+
+&i2c8 {
+	pinctrl-0 = <&i2c8_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	status = "okay";
+};

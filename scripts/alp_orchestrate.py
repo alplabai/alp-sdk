@@ -3303,7 +3303,7 @@ def _slice_command(
         return [
             "west", "build",
             "-b", slice_.board,
-            str(_resolve_app_path(slice_.app)),
+            str(_zephyr_app_dir(slice_.app)),
         ]
     if slice_.os == "yocto":
         target = slice_.image or slice_.app
@@ -3324,6 +3324,29 @@ def _resolve_app_path(app: str) -> Path:
     if p.is_absolute():
         return p
     return (Path.cwd() / p).resolve()
+
+
+def _zephyr_app_dir(app: str) -> Path:
+    """Resolve a Zephyr slice's `app:` to the directory holding the
+    application `CMakeLists.txt` (what `west build` needs).
+
+    Two example conventions are supported:
+
+      * multicore examples point `app:` straight at a self-contained
+        Zephyr app directory (e.g. ``./m33_sm`` -- carries its own
+        CMakeLists.txt + prj.conf); used verbatim.
+      * single-core examples keep one CMakeLists.txt at the example
+        root and point `app:` at the sources subdir (e.g. ``./src`` with
+        ``target_sources(app PRIVATE src/main.c)``).  The sources dir has
+        no CMakeLists.txt of its own, so fall back to its parent (the
+        example root) which does.
+    """
+    p = _resolve_app_path(app)
+    if (p / "CMakeLists.txt").is_file():
+        return p
+    if (p.parent / "CMakeLists.txt").is_file():
+        return p.parent
+    return p
 
 
 # ---------------------------------------------------------------------

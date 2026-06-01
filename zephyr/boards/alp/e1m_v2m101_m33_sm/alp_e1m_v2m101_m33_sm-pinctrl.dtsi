@@ -1,0 +1,35 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pinctrl/renesas/pinctrl-rzv2n.h>
+
+&pinctrl {
+	/* SCI_UART0 console: P50 TXD / P51 RXD */
+	sci0_pins: sci0 {
+		sci0-pinmux {
+			pinmux = <RZV_PINMUX(PORT_05, 0, 1)>, /* TXD */
+				 <RZV_PINMUX(PORT_05, 1, 1)>; /* RXD */
+		};
+	};
+
+	/* GD32G553 SPI fast path on SPI_B ch1 (RSPI alternate func 5) */
+	spi1_pins: spi1 {
+		spi1-pinmux {
+			pinmux = <RZV_PINMUX(PORT_07, 6, 5)>, /* MOSI  P76 */
+				 <RZV_PINMUX(PORT_07, 7, 5)>, /* MISO  P77 */
+				 <RZV_PINMUX(PORT_09, 6, 5)>, /* RSPCK P96 */
+				 <RZV_PINMUX(PORT_09, 7, 5)>; /* SSL   P97 */
+		};
+	};
+
+	/* BRD_I2C (RIIC8): on-module GD32G553 I2C slave @ 0x70 */
+	i2c8_pins: i2c8 {
+		i2c8-pinmux {
+			pinmux = <RZV_PINMUX(PORT_00, 6, 1)>, /* SDA P06 */
+				 <RZV_PINMUX(PORT_00, 7, 1)>; /* SCL P07 */
+		};
+	};
+};

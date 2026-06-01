@@ -89,6 +89,50 @@ config ALP_SDK_SPI_SW_FALLBACK
 	  For native_sim build / test only -- production firmware MUST NOT
 	  rely on this since no real device is driven.
 
+# Renesas RZ SPI_B (RSPI) controller driver -- carried in the alp-sdk
+# module (NOT upstream Zephyr) so it survives a `west update` of the
+# Zephyr tree.  Drives the new-generation RZ SPI_B IP (RZ/V2N, ...) via
+# the FSP r_spi_b module; backs the on-module GD32 supervisor SPI fast
+# path.  Driver source: zephyr/drivers/spi/spi_renesas_rz_spi_b.c;
+# binding: zephyr/dts/bindings/spi/renesas,rz-spi-b.yaml.
+config SPI_RENESAS_RZ_SPI_B
+	bool "Renesas RZ SPI_B (RSPI)"
+	default y
+	depends on DT_HAS_RENESAS_RZ_SPI_B_ENABLED
+	select USE_RZ_FSP_SPI_B
+	select PINCTRL
+	help
+	  Enable the Renesas RZ SPI_B (RSPI) driver for the new-generation RZ
+	  MPUs (RZ/V2N, RZ/V2H, ...), which replace the classic RSPI with the
+	  SPI_B IP served by the FSP r_spi_b module.  The upstream
+	  `renesas,rz-spi` driver targets the classic `r_spi` the rzv FSP does
+	  not ship, so this dedicated `renesas,rz-spi-b` driver is required.
+
+config SPI_RENESAS_RZ_SPI_B_INTERRUPT
+	bool "RZ SPI_B interrupt-driven transfers"
+	default y
+	depends on SPI_RENESAS_RZ_SPI_B
+	help
+	  Use the FSP r_spi_b interrupt-driven transfer path (rxi/txi/tei/eri).
+	  When disabled, the driver falls back to polled PIO transfers.
+
+config SPI_RENESAS_RZ_SPI_B_USE_HW_SS
+	bool "RZ SPI_B hardware slave select"
+	default y
+	depends on SPI_RENESAS_RZ_SPI_B
+	help
+	  Drive the chip select with the SPI_B SSL output instead of a GPIO.
+
+config USE_RZ_FSP_SPI_B
+	bool
+	help
+	  Compile the FSP r_spi_b module source (selected by
+	  SPI_RENESAS_RZ_SPI_B).  The HAL build (modules/hal/renesas/drivers/
+	  rz/CMakeLists.txt) gates rzv/r_spi_b/r_spi_b.c on this symbol, but
+	  upstream Zephyr v4.4's zephyr/modules/Kconfig.renesas never defines
+	  it (it defines the sibling USE_RZ_FSP_{SPI,RSPI_SPI,RIIC_MASTER});
+	  define it here so the deliverable doesn't depend on patching Zephyr.
+
 config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4

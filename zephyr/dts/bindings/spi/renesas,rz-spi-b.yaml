@@ -1,0 +1,52 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Renesas RZ SPI_B (RSPI) controller (new-generation RZ MPUs: RZ/V2N, RZ/V2H).
+
+  Example:
+
+    &spi1 {
+        compatible = "renesas,rz-spi-b";
+        reg = <0x42800400 0x400>;
+        channel = <1>;
+        clk-src = <1>;
+        interrupts = <456 1>, <457 1>, <110 1>, <109 1>;
+        interrupt-names = "rxi", "txi", "tei", "eri";
+        pinctrl-0 = <&spi1_pins>;
+        pinctrl-names = "default";
+        status = "okay";
+    };
+
+compatible: "renesas,rz-spi-b"
+
+include: [spi-controller.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  channel:
+    type: int
+    required: true
+
+  clk-src:
+    type: int
+    required: true
+    enum: [0, 1]
+    description: |
+      Communication clock source used for the bitrate calculation:
+        - 0: SCISPICLK
+        - 1: PCLK (P4CLK on RZ/V2N)
+
+  interrupts:
+    required: true
+
+  interrupt-names:
+    required: true
+
+  pinctrl-0:
+    required: true
+
+  pinctrl-names:
+    required: true
