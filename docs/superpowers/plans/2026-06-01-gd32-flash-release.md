@@ -6,7 +6,7 @@
 
 **Architecture:** Merge `feat/gd32-transport-bringup` into the working branch `feat/gd32-flash-release` (already created off `dev`, carries the approved spec). Rebuild the `gd32` backend to fold in the real SPI1+I2C0 transports → `gd32-bridge.hex/.bin` (full-flash @ `0x08000000`, OTA inert). Rename the misnamed `swd_v2n_host` flash backend to the generic `swd_probe` and extend it with a SEGGER J-Link path (primary; OpenOCD/pyOCD fallback). Write `docs/gd32-flashing.md` and cross-link it. The physical flash + silicon verification is a bench step the SOP prepares but does not perform here.
 
-**Tech Stack:** arm-none-eabi-gcc 13.3 + CMake (firmware), Python 3.11 + pytest (flash backends/tests), SEGGER J-Link (`JLinkExe -device GD32G553xE`), OpenOCD/pyOCD (alternative), Markdown (docs).
+**Tech Stack:** arm-none-eabi-gcc 13.3 + CMake (firmware), Python 3.11 + pytest (flash backends/tests), SEGGER J-Link **≥ V9.46** (`JLink -device GD32G553MEY7TR`; V7.96b lacks the part), OpenOCD/pyOCD (alternative), Markdown (docs).
 
 **Reference spec:** `docs/superpowers/specs/2026-06-01-gd32-flash-release-design.md`
 
@@ -219,7 +219,7 @@ def test_swd_probe_prefers_jlink_when_present() -> None:
     assert result.ok is True
     assert run_mock.call_count == 0
     assert result.command[0].endswith("JLinkExe")
-    assert "-device" in result.command and "GD32G553xE" in result.command
+    assert "-device" in result.command and "GD32G553MEY7TR" in result.command
     assert "SWD" in " ".join(result.command)
     assert "loadfile" in result.message
     assert "gd32-bridge.hex" in result.message
@@ -233,7 +233,7 @@ def test_swd_probe_jlink_happy_path() -> None:
          patch("flash_backends.swd_probe.subprocess.run",
                return_value=_proc(rc=0)) as run_mock:
         result = backend.flash(_ctx(
-            {"jlink_device": "GD32G553xE"}, artefact="/tmp/gd32-bridge.hex"))
+            {"jlink_device": "GD32G553MEY7TR"}, artefact="/tmp/gd32-bridge.hex"))
     assert result.ok is True
     assert run_mock.call_count == 1
     assert run_mock.call_args[0][0][0].endswith("JLinkExe")
@@ -319,7 +319,7 @@ from . import FlashBackend, FlashContext, FlashResult, register
 
 
 _DEFAULT_BASE = "0x08000000"
-_DEFAULT_JLINK_DEVICE = "GD32G553xE"
+_DEFAULT_JLINK_DEVICE = "GD32G553MEY7TR"
 _DEFAULT_JLINK_SPEED = 4000
 _JLINK_BINARIES = ("JLinkExe", "JLink")     # Linux/macOS, then Windows
 
@@ -681,8 +681,8 @@ r
 g
 qc
 EOF
-JLinkExe -device GD32G553xE -if SWD -speed 4000 -AutoConnect 1 \
-         -ExitOnError 1 -NoGui 1 -CommanderScript /tmp/flash.jlink
+JLink -device GD32G553MEY7TR -if SWD -speed 4000 -AutoConnect 1 \
+      -ExitOnError 1 -NoGui 1 -CommanderScript /tmp/flash.jlink
 ```
 
 **Alternative — OpenOCD** (CMSIS-DAP/ST-Link; **requires a GD32G5-aware OpenOCD

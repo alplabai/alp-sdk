@@ -121,7 +121,7 @@ it but do not claim it done.
   the GD32's own SWD header** (`PA13`/`PA14`/NRST). The V2N host is **not** in
   the flashing loop: the host-driven SWD path (Renesas `P70`/`P71`→GD32, the
   `chips/gd32_swd/` idea) is **not wired on this HW revision**. The robust
-  GD32G5 path is SEGGER's own tooling — `JLinkExe -device GD32G553xE` — which has
+  GD32G5 path is SEGGER's own tooling — `JLinkExe -device GD32G553MEY7TR` — which has
   built-in GD32G553 flash support and **sidesteps the open question of whether
   mainline OpenOCD can flash GD32G5** (it likely cannot stock). The flash
   backend is the generic **`swd_probe`** (an external-SWD-probe backend).
@@ -151,7 +151,7 @@ it but do not claim it done.
   3. **Wire** — GD32 programming header (`SWDIO PA13` / `SWCLK PA14` / `NRST`),
      probe connections, target power.
   4. **Flash** — both `west alp-flash <app> --helper gd32_bridge` and a
-     standalone one-liner (`JLinkExe -device GD32G553xE`, or `openocd`) at base
+     standalone one-liner (`JLinkExe -device GD32G553MEY7TR`, or `openocd`) at base
      `0x08000000`.
   5. **Verify** — read IDCODE (expect `0x6BA02477`); then host-side
      `PING` / `GET_VERSION` via `examples/v2n/v2n-gd32-bridge-ping`.
@@ -189,7 +189,7 @@ it but do not claim it done.
 - **A1 — gcc 13.3 vs CI 10.3.** Assumed clean (no `-Werror`); verified in
   step #1. Mitigation: surface/triage any new warnings; fix compile errors
   before proceeding.
-- **A2 — Flashing path.** Primary is **J-Link** (`-device GD32G553xE`), which
+- **A2 — Flashing path.** Primary is **J-Link** (`-device GD32G553MEY7TR`), which
   has established GD32G553 flash support, so OpenOCD's uncertain GD32G5 support
   is demoted to the *alternative* path only. The flash command is
   **bench-validated** (no probe/tools on this workstation), not proven here.
