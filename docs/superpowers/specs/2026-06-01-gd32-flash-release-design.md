@@ -115,32 +115,40 @@ it but do not claim it done.
   compile clean on 13.3, fixing that is the first execution task, ahead of
   tooling/docs.
 
-### 3. Flash tooling (OpenOCD / SWD)
+### 3. Flash tooling (J-Link primary)
 
-- **Resolve the toolchain story first** (a short web/research pass, since
-  GD32G5 flash support is version-dependent): mainline OpenOCD vs GigaDevice's
-  GD-Link OpenOCD fork vs **J-Link** (`-device GD32G553xE`, first-class GD32G5
-  support) vs a pyOCD CMSIS pack. Pick a **primary** (expected: J-Link) and
-  document the alternatives.
-- Add **`scripts/openocd/`** containing the interface config(s) the backend
-  names (`cmsis-dap.cfg`, and `jlink.cfg` if J-Link is primary) and a
-  **working GD32G553 target + flash-bank config**, so the command
-  `swd_v2n_host.py` emits is actually runnable.
-- Keep `swd_v2n_host.py`'s contract; extend only if the primary probe needs a
-  path it doesn't already support (e.g. a direct `JLinkExe` invocation).
-- Everything not runnable on this workstation (`openocd`/`pyocd`/probe absent)
-  is labelled **"bench-validated"** in the doc, not asserted working.
+- **Primary probe: J-Link** (confirmed on the bench). The robust GD32G5 path is
+  SEGGER's own tooling — `JLinkExe -device GD32G553xE` (or J-Flash) — which has
+  built-in GD32G553 flash support and **sidesteps the open question of whether
+  mainline OpenOCD can flash GD32G5** (it likely cannot stock).
+- **Extend `scripts/flash_backends/swd_v2n_host.py`** with a direct J-Link path
+  alongside its existing `openocd` / `pyocd` options, keeping the same backend
+  name + `flash_args` contract so `west alp-flash --helper gd32_bridge` is
+  unchanged. The backend prefers `JLinkExe` when present, falling back to
+  `openocd` / `pyocd`; `requires` becomes any-of `["JLinkExe", "openocd",
+  "pyocd"]`. The J-Link path programs the image at base `0x08000000` and
+  resets-and-runs (a small generated J-Link command script).
+- **Alternative path (documented, not primary):** add **`scripts/openocd/`**
+  with the interface config(s) the backend names (`cmsis-dap.cfg`, `jlink.cfg`)
+  plus a GD32G553 target/flash-bank config, for CMSIS-DAP / ST-Link / OpenOCD
+  users. The uncertain OpenOCD GD32G5 flash-driver support now affects only
+  this alternative, **not** the critical path.
+- Nothing here is runnable on this workstation (`JLinkExe` / `openocd` / `pyocd`
+  + probe all absent), so the flash path is **bench-validated**, not asserted
+  working — though J-Link's GD32G553 device support is well-established.
 
 ### 4. Public flashing SOP + internal mirror
 
 - New **`docs/gd32-flashing.md`** — the missing single SOP:
   1. **Prereqs** — `arm-none-eabi-gcc 13.x`, `cmake`, submodule init, a SWD
-     probe (primary recommendation + alternatives).
+     probe (**J-Link** primary + SEGGER J-Link software; CMSIS-DAP / ST-Link
+     alternative).
   2. **Build** — exact `gd32`-backend commands → `gd32-bridge.hex`.
   3. **Wire** — GD32 programming header (`SWDIO PA13` / `SWCLK PA14` / `NRST`),
      probe connections, target power.
   4. **Flash** — both `west alp-flash <app> --helper gd32_bridge` and a
-     standalone one-liner (`openocd`/`JLink`) at base `0x08000000`.
+     standalone one-liner (`JLinkExe -device GD32G553xE`, or `openocd`) at base
+     `0x08000000`.
   5. **Verify** — read IDCODE (expect `0x6BA02477`); then host-side
      `PING` / `GET_VERSION` via `examples/v2n/v2n-gd32-bridge-ping`.
   6. **Gotchas/recovery** — first-silicon expectations; the board-config's
@@ -162,7 +170,8 @@ it but do not claim it done.
 - `python3 firmware/gd32-bridge/tests/gen_protocol_vectors.py --check` passes
   (protocol layer unchanged / consistent).
 - `python3 scripts/west_commands/alp_flash.py <app> --helper gd32_bridge
-  --dry-run` prints the expected flash command against the new OpenOCD config.
+  --dry-run` prints the expected flash command against the extended backend
+  (J-Link path).
 - Markdown links in the new/edited docs resolve.
 
 **Bench-only (documented for handoff, NOT done this round):**
@@ -176,9 +185,10 @@ it but do not claim it done.
 - **A1 — gcc 13.3 vs CI 10.3.** Assumed clean (no `-Werror`); verified in
   step #1. Mitigation: surface/triage any new warnings; fix compile errors
   before proceeding.
-- **A2 — OpenOCD GD32G5 support.** Assumed mainline lacks a stock
-  `target/gd32g553.cfg`; resolved by the section-3 research pass. The flash
-  command is **bench-validated**, not proven here.
+- **A2 — Flashing path.** Primary is **J-Link** (`-device GD32G553xE`), which
+  has established GD32G553 flash support, so OpenOCD's uncertain GD32G5 support
+  is demoted to the *alternative* path only. The flash command is
+  **bench-validated** (no probe/tools on this workstation), not proven here.
 - **A3 — Merge is clean.** Assumed `dev` did not touch `firmware/gd32-bridge/`
   meaningfully since `0977435`; verified by the pre-merge conflict-surface diff.
 - **A4 — Firmware is paper-correct only.** v0.1.0 is a **candidate**; "verified
@@ -189,8 +199,8 @@ it but do not claim it done.
 | Path | Action |
 | --- | --- |
 | `firmware/gd32-bridge/**` | Integrated from `feat/gd32-transport-bringup` (merge, no logic edits) |
-| `scripts/openocd/` | **New** — interface + GD32G553 target/flash configs |
-| `scripts/flash_backends/swd_v2n_host.py` | Extend only if primary probe needs it |
+| `scripts/flash_backends/swd_v2n_host.py` | **Extend** — add a direct J-Link (`JLinkExe`) path; keep backend name + contract |
+| `scripts/openocd/` | **New** — alternative-probe (CMSIS-DAP / ST-Link / OpenOCD) configs |
 | `docs/gd32-flashing.md` | **New** — the public flashing SOP |
 | `docs/gd32-bridge.md`, `firmware/gd32-bridge/README.md`, `docs/firmware-quickstart.md` | Cross-link the SOP |
 | (build output) | `gd32-bridge.hex/.bin` checksummed; CI artifact relied on for distribution |
