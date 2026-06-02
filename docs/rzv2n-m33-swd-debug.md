@@ -20,16 +20,23 @@ RZ/V2N M33 port + FSP BSP) on the TF-A-released **secure** state. Only the SWD c
 (SRAM0 + core regs are off-limits to Linux).
 
 ## 0. Connect & halt
-The CM33 is reached through the **SoC debug port** (the RZ/V2N JTAG/SWD — **not** the GD32's
-J-Link port), selecting the CM33 access-port.
-- J-Link device: try the RZ/V2N CM33 part (`R9A09G056xx_CM33` / closest); else generic
-  `Cortex-M33` (may need a JLinkScript to select the CM33 AP). `-if SWD`.
-- **Attach to the running core — do NOT "connect under reset"** (we want its live faulted state).
-- `J-Link> halt`
+**One JTAG/SWD port serves BOTH the CA55 and the CM33** (a single SoC DAP with multiple
+access-ports), and the **A55 is running Linux** on it. Two hard rules follow:
+- **NEVER connect-under-reset** — it resets the whole SoC, kills the running A55/Linux, AND
+  destroys the faulted CM33 state you came to read. **Attach to the running target only.**
+- **Select the CM33 access-port explicitly** — the DAP's primary is the A55, so a plain connect
+  halts Linux, not the CM33. Use the RZ/V2N CM33 device (`R9A09G056xx_CM33` / closest) so J-Link
+  targets the CM33 AP; with a generic `Cortex-M33` you must point it at the CM33 AP
+  (`-CoreIndex` / a JLinkScript). (`-if SWD`. This is the SoC debug header — NOT the GD32's
+  J-Link port, which is a separate on-module chip on the *other* emulator.)
+- `J-Link> halt`   — halts the CM33 only; the A55 keeps running Linux.
 - `J-Link> regs`   → note **PC, MSP, PSP, LR, xPSR**, and the **security state** if shown.
 
-If attach fails: the core may be in lockup/WFI — connecting without reset and retrying
-`halt` usually still latches it.
+**Secure-debug gate:** the CM33 runs *secure*, so halting/reading its secure state needs SPIDEN
+(secure invasive debug) — usually open on dev silicon. If `halt` is refused, or PC/CFSR read back
+as `0x00000000` / `0xFFFFFFFF` / access-denied, secure debug is gated (a SoC debug-authentication /
+TF-A / fuse issue, not your read). If attach merely fails, the core may be in lockup/WFI — retry
+`halt`, still without reset.
 
 ## 1. Core fault registers  (`mem32 <addr> 1`)
 | Register | Addr | Meaning |
