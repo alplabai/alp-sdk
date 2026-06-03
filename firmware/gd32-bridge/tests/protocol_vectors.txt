@@ -113,3 +113,33 @@ spi_adc_dsp_chain_open_probe_request = A537B930
 spi_adc_dsp_stage_push_window_hann_request = A53800000200000400010000000420
 # SOF | CMD=0x39 | chain_id=0 | stream_id=0 | CRC -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT until the wave-2 HAL body lands.
 spi_adc_dsp_chain_bind_probe_request = A539000089C7
+
+# ---------------------------------------------------------------------
+# §11. OTA Path-A opcodes (0xF0..0xF6) -- in-system upgrade over the
+#       bridge (docs/gd32-bridge-protocol.md §10 Path A).  Unarmed
+#       firmware replies STATUS_NOSUPPORT to every OTA opcode.
+# ---------------------------------------------------------------------
+# SOF | CMD=0xF0 | size=41976 (LE 0x0000A3F8) | expected_crc32=0xDEADBEEF (LE) | CRC
+spi_ota_begin_request          = A5F0F8A30000EFBEADDE50A8
+# SOF | STATUS=0x00 | chunk_max=61 (LE 0x003D) | target_slot=B(1) | CRC -- 61 = MAX_PAYLOAD(65) - 4-byte WRITE_CHUNK offset header
+spi_ota_begin_reply_slot_b     = A5003D00018FEA
+# SOF | CMD=0xF1 | offset=0 (LE) | data=01..08 (one FMC doubleword) | CRC -- offsets pace on 8-byte boundaries
+spi_ota_write_chunk_off0_8b_request = A5F1000000000102030405060708027C
+# SOF | STATUS=0x00 | received_bytes=8 (LE, cumulative high-water) | CRC
+spi_ota_write_chunk_reply_8b   = A5000800000029FA
+# SOF | CMD=0xF2 | (no payload -- CRC was supplied at BEGIN) | CRC
+spi_ota_verify_request         = A5F230D9
+# SOF | STATUS=0x00 | computed_crc32=0xDEADBEEF (LE) | verified=1 | CRC
+spi_ota_verify_reply_match     = A500EFBEADDE0199DC
+# SOF | CMD=0xF3 | (no payload; firmware resets on success) | CRC
+spi_ota_commit_request         = A5F320F8
+# SOF | CMD=0xF4 | (no payload; firmware resets on success) | CRC
+spi_ota_rollback_request       = A5F4501F
+# SOF | CMD=0xF5 | (no payload) | CRC
+spi_ota_get_state_request      = A5F5403E
+# SOF | STATUS=0x00 | state=READY(1) | active=A(0) | pending=B(1) | boot_count=1 (LE, metadata generation) | CRC -- pending=0xFF when no session is open
+spi_ota_get_state_reply_ready  = A5000100010100E336
+# SOF | CMD=0xF6 | (no payload) | CRC
+spi_ota_abort_request          = A5F6705D
+# SOF | STATUS=0x02 (NOT_READY) | CRC -- WRITE_CHUNK / VERIFY without a BEGIN-opened session, or COMMIT before VERIFY
+spi_ota_reply_not_ready        = A502DFC6

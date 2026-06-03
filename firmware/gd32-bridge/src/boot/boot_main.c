@@ -52,14 +52,19 @@ static bool meta_current(ota_meta_record_t *out)
 
 static bool active_slot_valid(const ota_meta_record_t *m)
 {
-    if ((m->slot_valid & (uint8_t)(1u << m->active_slot)) == 0u) {
+    const uint8_t slot = m->active_slot;
+    if (slot > OTA_SLOT_B) {           /* defensive: slot indexes [2] arrays */
         return false;
     }
-    if (m->img_len == 0u || m->img_len > OTA_SLOT_SIZE) {
+    const uint32_t len = m->img_len[slot];
+    if ((m->slot_valid & (uint8_t)(1u << slot)) == 0u) {
         return false;
     }
-    const uint32_t base = ota_slot_base(m->active_slot);
-    return ota_crc32(0u, (const uint8_t *)base, m->img_len) == m->img_crc32;
+    if (len == 0u || len > OTA_SLOT_SIZE) {
+        return false;
+    }
+    const uint32_t base = ota_slot_base(slot);
+    return ota_crc32(0u, (const uint8_t *)base, len) == m->img_crc32[slot];
 }
 
 static void jump_to_slot(uint32_t slot_base)

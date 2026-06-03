@@ -9,10 +9,21 @@
  * HIL-REQUIRED: in the partitioned build the erase/program inner loop must
  * execute from RAM — on single-bank flash the FMC stalls the bus, so a
  * routine fetched from the bank being erased faults.  The OTA_RAMFUNC
- * attribute places these in `.ramfunc` (which the partitioned bootloader
- * linker must provide); the default full-flash build leaves the attribute
+ * attribute places these in `.ramfunc` (which the partitioned app linker
+ * folds into .data); the default full-flash build leaves the attribute
  * empty (OTA is inert there, so the loop never runs). Not yet validated on
  * silicon — flash externally only.
+ *
+ * The RAMFUNC bodies are deliberately SELF-CONTAINED register-level
+ * mirrors of the vendor fmc_page_erase / fmc_doubleword_program
+ * (gd32g5x3_fmc.c) rather than wrappers calling them: the vendor
+ * routines — including their fmc_ready_wait poll loop — live in flash,
+ * so a thin RAM shim around them would re-enter flash for the entire
+ * FMC busy window and defeat the .ramfunc guarantee.  Everything
+ * fetched between setting START/PG and BUSY clearing (code AND literal
+ * pools, which GCC emits into the function's own section) must be
+ * RAM-resident.  FMC_STAT/FMC_CTL accesses are peripheral-bus reads,
+ * not flash reads — polling them from RAM is safe while FMC is busy.
  */
 
 #include <string.h>
@@ -28,12 +39,60 @@
 #define OTA_RAMFUNC
 #endif
 
+/* Vendor-private bit offset of FMC_CTL.PNSEL (gd32g5x3_fmc.c
+ * CTL_PNSEL_OFFSET); the public header only exposes the BITS(3,10) mask. */
+#define OTA_FMC_CTL_PNSEL_OFFSET 3u
+
 bool ota_fmc_supported(void) { return true; }
+
+/* RAM-safe FMC state decode (vendor fmc_state_get, inlined so the
+ * RAMFUNC callers never branch to a flash-resident helper while the
+ * FMC is busy).  Decode order mirrors the vendor exactly. */
+__attribute__((always_inline)) static inline fmc_state_enum ota_fmc_state_now(void)
+{
+    if ((FMC_STAT & FMC_STAT_BUSY) != 0u)   { return FMC_BUSY; }
+    if ((FMC_STAT & FMC_STAT_WPERR) != 0u)  { return FMC_WPERR; }
+    if ((FMC_STAT & FMC_STAT_PGERR) != 0u)  { return FMC_PGERR; }
+    if ((FMC_STAT & FMC_STAT_PGSERR) != 0u) { return FMC_PGSERR; }
+    if ((FMC_STAT & FMC_STAT_PGAERR) != 0u) { return FMC_PGAERR; }
+    if ((FMC_STAT & FMC_STAT_RPERR) != 0u)  { return FMC_RPERR; }
+    if ((FMC_STAT & FMC_STAT_PGMERR) != 0u) { return FMC_PGMERR; }
+    if ((FMC_STAT & FMC_STAT_OBERR) != 0u)  { return FMC_OBERR; }
+    return FMC_READY;
+}
+
+/* RAM-safe fmc_ready_wait (vendor decode + timeout, inlined). */
+__attribute__((always_inline)) static inline fmc_state_enum ota_fmc_wait_ready(uint32_t timeout)
+{
+    fmc_state_enum st;
+    do {
+        st = ota_fmc_state_now();
+        timeout--;
+    } while ((st == FMC_BUSY) && (timeout != 0u));
+    return (st == FMC_BUSY) ? FMC_TOERR : st;
+}
 
 OTA_RAMFUNC static fmc_state_enum erase_one_page(uint32_t addr)
 {
     const uint32_t page = (addr - OTA_BOOTLOADER_BASE) / OTA_PAGE_SIZE;
-    return fmc_page_erase(FMC_BANK0, page);
+
+    fmc_state_enum st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
+    if (st != FMC_READY) {
+        return st;
+    }
+    /* Bootloader + metadata + both slots all live in bank 0; the vendor
+     * FMC_BANK0 arm clears BKSEL in both single- and dual-bank modes. */
+    FMC_CTL &= ~FMC_CTL_BKSEL;
+    FMC_CTL &= ~FMC_CTL_PNSEL;
+    FMC_CTL |= page << OTA_FMC_CTL_PNSEL_OFFSET;
+    FMC_CTL |= FMC_CTL_PER;
+    FMC_CTL |= FMC_CTL_START;
+
+    st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
+
+    FMC_CTL &= ~FMC_CTL_PER;
+    FMC_CTL &= ~FMC_CTL_PNSEL;
+    return st;
 }
 
 bool ota_fmc_erase_range(uint32_t base, uint32_t len)
@@ -52,7 +111,19 @@ bool ota_fmc_erase_range(uint32_t base, uint32_t len)
 
 OTA_RAMFUNC static fmc_state_enum program_one_dword(uint32_t addr, uint64_t dw)
 {
-    return fmc_doubleword_program(addr, dw);
+    fmc_state_enum st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
+    if (st != FMC_READY) {
+        return st;
+    }
+    FMC_CTL |= FMC_CTL_PG;
+    REG32(addr)      = (uint32_t)(dw & 0xFFFFFFFFu);
+    __ISB();
+    REG32(addr + 4u) = (uint32_t)(dw >> 32);
+
+    st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
+
+    FMC_CTL &= ~FMC_CTL_PG;
+    return st;
 }
 
 bool ota_fmc_program(uint32_t addr, const uint8_t *data, size_t len)

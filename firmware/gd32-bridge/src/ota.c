@@ -87,32 +87,36 @@ static bool meta_current(ota_meta_record_t *out, uint32_t *which_addr)
 }
 
 /* Write a fresh record to the *other* meta page (alternating), so a
- * power-fail mid-write leaves the previous record intact. */
-static bool meta_commit(uint8_t active_slot, uint32_t fw_ver,
-                        uint32_t img_len, uint32_t img_crc)
+ * power-fail mid-write leaves the previous record intact.  The per-slot
+ * image descriptors carry forward from the current record; only the new
+ * active slot's entry is rewritten (and only when `update_entry` -- a
+ * ROLLBACK flips `active_slot` without touching the descriptors, so the
+ * rolled-to slot keeps the len/CRC recorded when it was last written). */
+static bool meta_commit(uint8_t active_slot, bool update_entry,
+                        uint32_t fw_ver, uint32_t img_len, uint32_t img_crc)
 {
+    ota_meta_record_t rec;
     ota_meta_record_t cur;
-    uint32_t which = 0u, counter = 0u;
-    uint8_t  valid = 0u;
+    uint32_t which  = 0u;
     uint32_t target = OTA_META_REC0;
+    memset(&rec, 0, sizeof rec);
     if (meta_current(&cur, &which)) {
-        counter = cur.counter;
-        valid   = cur.slot_valid;
-        target  = (which == OTA_META_REC0) ? OTA_META_REC1 : OTA_META_REC0;
+        rec    = cur;                /* counter + slot_valid + per-slot table */
+        target = (which == OTA_META_REC0) ? OTA_META_REC1 : OTA_META_REC0;
     }
     if (!ota_fmc_erase_range(target, OTA_PAGE_SIZE)) {
         return false;
     }
-    ota_meta_record_t rec;
-    memset(&rec, 0, sizeof rec);
     rec.magic          = OTA_META_MAGIC;
     rec.struct_version = OTA_META_STRUCT_VER;
-    rec.counter        = counter + 1u;
+    rec.counter       += 1u;
     rec.active_slot    = active_slot;
-    rec.slot_valid     = (uint8_t)(valid | (uint8_t)(1u << active_slot));
-    rec.fw_version     = fw_ver;
-    rec.img_len        = img_len;
-    rec.img_crc32      = img_crc;
+    rec.slot_valid    |= (uint8_t)(1u << active_slot);
+    if (update_entry) {
+        rec.fw_version[active_slot] = fw_ver;
+        rec.img_len[active_slot]    = img_len;
+        rec.img_crc32[active_slot]  = img_crc;
+    }
     rec.rec_crc32      = ota_crc32(0u, (const uint8_t *)&rec,
                                    offsetof(ota_meta_record_t, rec_crc32));
     return ota_fmc_program(target, (const uint8_t *)&rec, sizeof rec);
@@ -158,6 +162,12 @@ static gd32_bridge_status_t h_write(const uint8_t *req, size_t len,
                                     uint8_t *reply, size_t cap, size_t *rlen)
 {
     /* Host OTA_WRITE_CHUNK req: offset:u32, data[].  Reply: received_bytes:u32. */
+    if (s_state != OTA_ST_READY) {
+        /* No BEGIN-opened session: the inactive slot is not erased and
+         * s_img_len/s_expected_crc are unset -- programming here would
+         * corrupt the slot.  Host must (re-)issue OTA_BEGIN. */
+        return STATUS_NOT_READY;
+    }
     if (len < 4u) { return STATUS_INVAL; }
     const uint32_t off  = rd_u32(&req[0]);
     const size_t   dlen = len - 4u;
@@ -180,6 +190,13 @@ static gd32_bridge_status_t h_verify(uint8_t *reply, size_t cap, size_t *rlen)
 {
     /* Host OTA_VERIFY req: empty (CRC was supplied at BEGIN).
      * Reply: computed_crc32:u32, verified:u8. */
+    if (s_state != OTA_ST_READY) {
+        /* Without a BEGIN-opened session s_img_len is 0: CRC over zero
+         * bytes would "verify" trivially and a subsequent COMMIT would
+         * write img_len=0 metadata that no bootloader accepts -- a
+         * protocol-misuse brick.  Refuse instead. */
+        return STATUS_NOT_READY;
+    }
     s_img_crc = ota_crc32(0u, (const uint8_t *)ota_slot_base(s_inactive), s_img_len);
     const bool ok = (s_img_crc == s_expected_crc);
     s_state = ok ? OTA_ST_VERIFIED : OTA_ST_ERROR;
@@ -195,7 +212,8 @@ static gd32_bridge_status_t h_verify(uint8_t *reply, size_t cap, size_t *rlen)
 static gd32_bridge_status_t h_commit(void)
 {
     if (s_state != OTA_ST_VERIFIED) { return STATUS_NOT_READY; }
-    if (!meta_commit(s_inactive, 0u /* fw_ver: host BEGIN carries no version */,
+    if (!meta_commit(s_inactive, true,
+                     0u /* fw_ver: host BEGIN carries no version */,
                      s_img_len, s_img_crc)) {
         s_state = OTA_ST_ERROR; s_err = 6u; return STATUS_IO;
     }
@@ -210,13 +228,14 @@ static gd32_bridge_status_t h_rollback(void)
     uint32_t which;
     if (!meta_current(&cur, &which)) { return STATUS_INVAL; }
     const uint8_t other = (cur.active_slot == OTA_SLOT_A) ? OTA_SLOT_B : OTA_SLOT_A;
-    if ((cur.slot_valid & (uint8_t)(1u << other)) == 0u) {
+    if ((cur.slot_valid & (uint8_t)(1u << other)) == 0u ||
+        cur.img_len[other] == 0u || cur.img_len[other] > OTA_SLOT_SIZE) {
         return STATUS_INVAL;                 /* no valid fallback slot */
     }
-    /* Flip active to `other`; its slot image is untouched.  The bootloader
-     * re-validates the target slot from its own image header, so the
-     * metadata img_len/crc carried here are not load-bearing for the flip. */
-    if (!meta_commit(other, 0u, 0u, 0u)) {
+    /* Flip active to `other` WITHOUT touching the per-slot descriptors
+     * (update_entry=false): the bootloader validates the rolled-to slot
+     * against the len/CRC recorded when that slot was last committed. */
+    if (!meta_commit(other, false, 0u, 0u, 0u)) {
         return STATUS_IO;
     }
     ota_system_reset();

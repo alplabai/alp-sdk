@@ -61,9 +61,16 @@ typedef struct {
 } ota_img_header_t;
 
 /* A/B metadata record — the bootloader picks the highest `counter` with a
- * valid `rec_crc32`, then boots `active_slot` if its image header verifies. */
+ * valid `rec_crc32`, then boots `active_slot` if the slot's metadata-recorded
+ * CRC verifies over the slot contents.
+ *
+ * The image descriptors are PER-SLOT (struct v2): a ROLLBACK only flips
+ * `active_slot` and must leave the rolled-to slot's len/CRC intact for the
+ * bootloader to validate against — a single active-slot descriptor (v1)
+ * left rollback with nothing valid to write, bricking the part on the
+ * next boot. */
 #define OTA_META_MAGIC         0x4F544D31u           /* "OTM1" */
-#define OTA_META_STRUCT_VER    1u
+#define OTA_META_STRUCT_VER    2u
 
 typedef struct {
     uint32_t magic;            /* OTA_META_MAGIC */
@@ -72,9 +79,9 @@ typedef struct {
     uint8_t  active_slot;      /* OTA_SLOT_A | OTA_SLOT_B */
     uint8_t  slot_valid;       /* bit0 = slot A valid, bit1 = slot B valid */
     uint8_t  _pad[2];
-    uint32_t fw_version;       /* version of the active slot */
-    uint32_t img_len;          /* length of the active slot image */
-    uint32_t img_crc32;        /* CRC-32 of the active slot image */
+    uint32_t fw_version[2];    /* per-slot firmware semver (A, B); 0 = unknown */
+    uint32_t img_len[2];       /* per-slot image length (A, B) */
+    uint32_t img_crc32[2];     /* per-slot image CRC-32 (A, B) */
     uint32_t rec_crc32;        /* CRC-32 over this record excluding this field */
 } ota_meta_record_t;
 
