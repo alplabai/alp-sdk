@@ -133,6 +133,41 @@ config USE_RZ_FSP_SPI_B
 	  it (it defines the sibling USE_RZ_FSP_{SPI,RSPI_SPI,RIIC_MASTER});
 	  define it here so the deliverable doesn't depend on patching Zephyr.
 
+# Renesas RZ SCI-B Simple-SPI driver -- an SCI channel in clock-synchronous
+# "Simple SPI" mode.  Drives the on-module GD32 supervisor SPI fast path, which
+# the board wires to SCI7 (P76/P77/P96/P97 = MOSI7/MISO7/SCK7/SS7), NOT the
+# dedicated SPI_B IP.  The rzv FSP ships no SCI-SPI module, so the FSP
+# r_sci_b_spi module is vendored from RA into this SDK
+# (zephyr/drivers/spi/r_sci_b_spi/) and gated by USE_RZ_FSP_SCI_B_SPI.
+# Driver: zephyr/drivers/spi/spi_renesas_rz_sci_b.c;
+# binding: zephyr/dts/bindings/spi/renesas,rz-sci-b-spi.yaml.
+config SPI_RENESAS_RZ_SCI_B
+	bool "Renesas RZ SCI-B Simple-SPI"
+	default y
+	depends on DT_HAS_RENESAS_RZ_SCI_B_SPI_ENABLED
+	select USE_RZ_FSP_SCI_B_SPI
+	select PINCTRL
+	select GPIO
+	help
+	  Enable the Renesas RZ SCI-B Simple-SPI driver for the new-generation RZ
+	  MPUs (RZ/V2N, ...).  An SCI channel runs in clock-synchronous Simple-SPI
+	  mode via the FSP r_sci_b_spi module (vendored from RA -- see
+	  USE_RZ_FSP_SCI_B_SPI).  The driver is interrupt-driven and master-only on
+	  this port; master mode has no hardware slave-select, so the chip-select is
+	  a GPIO (cs-gpios) -- GPIO is selected here because the driver cannot frame
+	  a transfer without it.
+
+config USE_RZ_FSP_SCI_B_SPI
+	bool
+	help
+	  Compile the vendored FSP r_sci_b_spi module
+	  (zephyr/drivers/spi/r_sci_b_spi/r_sci_b_spi.c), selected by
+	  SPI_RENESAS_RZ_SCI_B.  The rzv FSP HAL ships only r_sci_b_uart / r_spi_b /
+	  r_rspi, so -- unlike USE_RZ_FSP_SPI_B, which gates an existing HAL source
+	  -- this symbol gates a BSD-3 FSP source carried inside this SDK (the RA
+	  r_sci_b_spi.c, near-identical -- one documented one-line deviation -- with
+	  an RZ cfg shim in r_sci_b_spi_cfg.h).
+
 config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4

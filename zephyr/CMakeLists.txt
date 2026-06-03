@@ -64,6 +64,27 @@ if(CONFIG_SPI_RENESAS_RZ_SPI_B)
     zephyr_library_include_directories(${ZEPHYR_BASE}/drivers/spi)
 endif()
 
+# Renesas RZ SCI-B Simple-SPI controller driver + vendored FSP module.
+# The on-module GD32 supervisor SPI fast path is wired to SCI7 (P76/P77/P96/P97
+# = MOSI7/MISO7/SCK7/SS7), an SCI channel in clock-synchronous Simple-SPI mode,
+# NOT the dedicated SPI_B IP.  Unlike SPI_B, the rzv FSP ships no SCI-SPI module,
+# so the FSP r_sci_b_spi.c (BSD-3, near-identical to the RA source -- one
+# documented one-line deviation -- with an RZ cfg shim) is carried here under
+# zephyr/drivers/spi/r_sci_b_spi/ and gated by
+# USE_RZ_FSP_SCI_B_SPI.  Both the glue driver and the FSP module need Zephyr's
+# private drivers/spi/spi_context.h on the include path.
+if(CONFIG_SPI_RENESAS_RZ_SCI_B)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/spi_renesas_rz_sci_b.c)
+    zephyr_library_include_directories(${ZEPHYR_BASE}/drivers/spi)
+endif()
+if(CONFIG_USE_RZ_FSP_SCI_B_SPI)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/r_sci_b_spi/r_sci_b_spi.c)
+    zephyr_library_include_directories(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/r_sci_b_spi)
+endif()
+
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
