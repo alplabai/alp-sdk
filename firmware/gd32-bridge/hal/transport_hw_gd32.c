@@ -17,15 +17,26 @@
  * hal/bridge_board_config.h (see the warnings there).  Define
  * BRIDGE_WARN_UNCONFIRMED at compile time to surface them as #warnings.
  *
- * ── SPI model ──────────────────────────────────────────────────────
- * SPI1 slave, mode 0, MSB-first, 8-bit, hardware NSS.  The peripheral
- * gives no CS-edge interrupt, so CS (PA8) is also mirrored onto EXTI8
- * (both edges).  Full-duplex: every byte the master clocks in raises
- * RBNE; we read it into the RX seam and immediately load the next reply
- * byte for the byte that follows.  The first reply byte is preloaded on
- * the CS falling edge.  Request and reply ride separate CS transactions
- * (see ../src/transport_spi.c) — the reply staged at CS-rising is
- * clocked out by the host's next transaction.
+ * ── SPI model (DMA, 25 MHz) ────────────────────────────────────────
+ * SPI1 slave, mode 0, MSB-first, 8-bit frames, hardware NSS.  The link
+ * runs at 25 MHz SCK (datasheet slave max 27 MHz): a byte lands every
+ * 320 ns, far inside interrupt latency, so the data path is pure DMA --
+ * RX DMA captures every clocked byte into a staging buffer and TX DMA
+ * streams the staged reply out (the TBE request prefills the TX FIFO
+ * the moment the channel is armed, replacing the old CS-falling
+ * preload).  The only SPI-side interrupt left is the CS (PA8) edge pair
+ * on EXTI8, which frames transactions:
+ *
+ *   CS falling: reset the portable RX staging (spi_slave_cs_low).
+ *   CS rising:  read the RX residue (count = buffer - DMA remaining),
+ *               flush + re-init the peripheral (RCU reset -- the only
+ *               reliable FIFO flush), feed the received bytes through
+ *               the byte seams, decode + stage the reply, then re-arm
+ *               RX DMA (full buffer) and TX DMA (exact reply length).
+ *
+ * Request and reply ride separate CS transactions (../src/transport_spi.c);
+ * the portable framing/CRC layer is untouched -- DMA is a drop-in
+ * replacement for the per-byte RBNE interrupt at the seam boundary.
  *
  * ── I2C model ──────────────────────────────────────────────────────
  * I2C0 slave at GD32_BRIDGE_DEFAULT_I2C_ADDR.  Write phase accumulates
@@ -53,9 +64,13 @@
 
 static void spi_gpio_init(void)
 {
-    /* SCK / MISO / MOSI / NSS all to alternate-function, push-pull,
-     * high speed.  NSS stays in AF for the SPI hardware-NSS input; EXTI
-     * taps the same pin's input level for CS-edge detection. */
+    /* SCK / MISO / MOSI / NSS all to alternate-function, push-pull.
+     * 85 MHz drive class: at 25 MHz SCK the slave's MISO must be valid
+     * within tV(SO)=9 ns of the sampling edge -- GigaDevice's own SPI DMA
+     * examples use the 85 MHz class for exactly this reason (only MISO is
+     * GD32-driven; the inputs' speed class is then a don't-care, set
+     * uniformly for consistency).  NSS stays in AF for the SPI
+     * hardware-NSS input; EXTI taps the same pin for CS-edge detection. */
     const uint32_t af = BRIDGE_SPI_GPIO_AF;
 
     gpio_mode_set(BRIDGE_SPI_SCK_PORT,  GPIO_MODE_AF, GPIO_PUPD_NONE, BRIDGE_SPI_SCK_PIN);
@@ -63,15 +78,104 @@ static void spi_gpio_init(void)
     gpio_mode_set(BRIDGE_SPI_MOSI_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, BRIDGE_SPI_MOSI_PIN);
     gpio_mode_set(BRIDGE_SPI_NSS_PORT,  GPIO_MODE_AF, GPIO_PUPD_PULLUP, BRIDGE_SPI_NSS_PIN);
 
-    gpio_output_options_set(BRIDGE_SPI_SCK_PORT,  GPIO_OTYPE_PP, GPIO_OSPEED_60MHZ, BRIDGE_SPI_SCK_PIN);
-    gpio_output_options_set(BRIDGE_SPI_MISO_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_60MHZ, BRIDGE_SPI_MISO_PIN);
-    gpio_output_options_set(BRIDGE_SPI_MOSI_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_60MHZ, BRIDGE_SPI_MOSI_PIN);
-    gpio_output_options_set(BRIDGE_SPI_NSS_PORT,  GPIO_OTYPE_PP, GPIO_OSPEED_60MHZ, BRIDGE_SPI_NSS_PIN);
+    gpio_output_options_set(BRIDGE_SPI_SCK_PORT,  GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ, BRIDGE_SPI_SCK_PIN);
+    gpio_output_options_set(BRIDGE_SPI_MISO_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ, BRIDGE_SPI_MISO_PIN);
+    gpio_output_options_set(BRIDGE_SPI_MOSI_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ, BRIDGE_SPI_MOSI_PIN);
+    gpio_output_options_set(BRIDGE_SPI_NSS_PORT,  GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ, BRIDGE_SPI_NSS_PIN);
 
     gpio_af_set(BRIDGE_SPI_SCK_PORT,  af, BRIDGE_SPI_SCK_PIN);
     gpio_af_set(BRIDGE_SPI_MISO_PORT, af, BRIDGE_SPI_MISO_PIN);
     gpio_af_set(BRIDGE_SPI_MOSI_PORT, af, BRIDGE_SPI_MOSI_PIN);
     gpio_af_set(BRIDGE_SPI_NSS_PORT,  af, BRIDGE_SPI_NSS_PIN);
+}
+
+/* ── SPI slave DMA plumbing ─────────────────────────────────────────── */
+
+/* HAL-side DMA staging.  RX captures up to one max wire envelope
+ * (1 SOF + 1 CMD/STATUS + 65 payload + 2 CRC = 69 B; padded for margin --
+ * anything the master over-clocks beyond this simply stops being captured
+ * and the CRC check fails loud).  TX holds the staged reply drained from
+ * the portable seams at decode time so the DMA has a stable flat buffer. */
+#define BRIDGE_SPI_DMA_BUF_LEN 72u
+static uint8_t spi_rx_dma_buf[BRIDGE_SPI_DMA_BUF_LEN];
+static uint8_t spi_tx_dma_buf[BRIDGE_SPI_DMA_BUF_LEN];
+
+/* One-time channel configuration (clocks, DMAMUX routing, widths).  The
+ * per-transaction address/count reloads live in the arm helpers below;
+ * everything here survives both the per-transaction SPI RCU reset (DMA and
+ * DMAMUX are separate peripherals) and channel disable/enable cycles. */
+static void spi_dma_init(void)
+{
+    dma_parameter_struct d;
+
+    rcu_periph_clock_enable(BRIDGE_SPI_DMA_RCU);
+    rcu_periph_clock_enable(RCU_DMAMUX);
+
+    /* RX: SPI1 DATA -> spi_rx_dma_buf, byte-by-byte (BYTEN makes one 8-bit
+     * peripheral access == one frame), memory incrementing. */
+    dma_deinit(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH);
+    dma_struct_para_init(&d);
+    d.request      = BRIDGE_SPI_RX_DMA_REQ;
+    d.direction    = DMA_PERIPHERAL_TO_MEMORY;
+    d.periph_addr  = (uint32_t)&SPI_DATA(BRIDGE_SPI_PERIPH);
+    d.periph_inc   = DMA_PERIPH_INCREASE_DISABLE;
+    d.periph_width = DMA_PERIPHERAL_WIDTH_8BIT;
+    d.memory_addr  = (uint32_t)spi_rx_dma_buf;
+    d.memory_inc   = DMA_MEMORY_INCREASE_ENABLE;
+    d.memory_width = DMA_MEMORY_WIDTH_8BIT;
+    d.number       = BRIDGE_SPI_DMA_BUF_LEN;
+    d.priority     = DMA_PRIORITY_ULTRA_HIGH;
+    dma_init(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH, &d);
+    dma_circulation_disable(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH);
+    dma_memory_to_memory_disable(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH);
+    dmamux_synchronization_disable(DMAMUX_MULTIPLEXER_CH3);
+
+    /* TX: spi_tx_dma_buf -> SPI1 DATA.  Armed per-reply with the exact
+     * staged length; the SPI's TBE request prefills the TX FIFO the moment
+     * the channel enables, so the first reply byte is ready before CS. */
+    dma_deinit(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH);
+    dma_struct_para_init(&d);
+    d.request      = BRIDGE_SPI_TX_DMA_REQ;
+    d.direction    = DMA_MEMORY_TO_PERIPHERAL;
+    d.periph_addr  = (uint32_t)&SPI_DATA(BRIDGE_SPI_PERIPH);
+    d.periph_inc   = DMA_PERIPH_INCREASE_DISABLE;
+    d.periph_width = DMA_PERIPHERAL_WIDTH_8BIT;
+    d.memory_addr  = (uint32_t)spi_tx_dma_buf;
+    d.memory_inc   = DMA_MEMORY_INCREASE_ENABLE;
+    d.memory_width = DMA_MEMORY_WIDTH_8BIT;
+    d.number       = 0;
+    d.priority     = DMA_PRIORITY_ULTRA_HIGH;
+    dma_init(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH, &d);
+    dma_circulation_disable(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH);
+    dma_memory_to_memory_disable(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH);
+    dmamux_synchronization_disable(DMAMUX_MULTIPLEXER_CH2);
+}
+
+/* Re-arm RX for a fresh transaction: full staging buffer.  CHCNT may only
+ * be written while the channel is disabled. */
+static void spi_dma_arm_rx(void)
+{
+    dma_channel_disable(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH);
+    dma_memory_address_config(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH,
+                              (uint32_t)spi_rx_dma_buf);
+    dma_transfer_number_config(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH,
+                               BRIDGE_SPI_DMA_BUF_LEN);
+    dma_channel_enable(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH);
+}
+
+/* Arm TX with exactly the staged reply (never more: the GD32 SPI has no
+ * TX-underrun error and no FIFO flush, so over-queued bytes would stick --
+ * the same invariant the old per-byte path enforced via tx_pending()). */
+static void spi_dma_arm_tx(uint32_t len)
+{
+    dma_channel_disable(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH);
+    if (len == 0u) {
+        return;
+    }
+    dma_memory_address_config(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH,
+                              (uint32_t)spi_tx_dma_buf);
+    dma_transfer_number_config(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH, len);
+    dma_channel_enable(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH);
 }
 
 static void spi_cs_exti_init(void)
@@ -114,10 +218,15 @@ static void bridge_spi_periph_config(void)
      * per-transaction RCU_SPI1RST reset (CS-rising handler) clears BYTEN. */
     spi_fifo_access_size_config(BRIDGE_SPI_PERIPH, SPI_BYTE_ACCESS);
 
-    /* RX-driven: TX is fed from the RBNE handler (no TBE interrupt, so
-     * the peripheral never spins on an empty TX buffer at idle). */
-    spi_interrupt_enable(BRIDGE_SPI_PERIPH, SPI_INT_RBNE);
-    spi_interrupt_enable(BRIDGE_SPI_PERIPH, SPI_INT_ERR);
+    /* DMA-driven data path: no SPI data interrupts at all (at 25 MHz a byte
+     * lands every 320 ns -- interrupt service cannot keep up).  Raise the DMA
+     * request lines for both directions; the actual flow is gated by the DMA
+     * channel enables (the arm helpers), so a raised TBE request with the TX
+     * channel disabled moves nothing.  Both CTL1 bits are cleared by the
+     * per-transaction RCU_SPI1RST flush, so they are re-applied here, exactly
+     * like BYTEN above. */
+    spi_dma_enable(BRIDGE_SPI_PERIPH, SPI_DMA_RECEIVE);
+    spi_dma_enable(BRIDGE_SPI_PERIPH, SPI_DMA_TRANSMIT);
     spi_enable(BRIDGE_SPI_PERIPH);
 }
 
@@ -125,36 +234,13 @@ void bridge_transport_spi_hw_init(void)
 {
     rcu_periph_clock_enable(BRIDGE_SPI_RCU);
     spi_gpio_init();
-    nvic_irq_enable(BRIDGE_SPI_IRQN, BRIDGE_SPI_IRQ_PRIO, BRIDGE_SPI_IRQ_SUBPRIO);
+    spi_dma_init();
     bridge_spi_periph_config();
+    spi_dma_arm_rx();
+    /* No TX arm yet: nothing is staged until the first request decodes.
+     * No SPI NVIC interrupt either -- the DMA channels carry the data and
+     * the CS EXTI below carries the framing. */
     spi_cs_exti_init();
-}
-
-/* SPI1 data interrupt: one RX byte per clocked frame; load the next
- * reply byte so it is ready for the byte the master clocks next. */
-void BRIDGE_SPI_IRQ_HANDLER(void)
-{
-    /* Drain the RX FIFO one frame per RBNE.  With byte-access set (see
-     * bridge_spi_periph_config) each spi_data_receive() pops exactly one
-     * received byte; for every byte taken in, feed exactly one reply byte back
-     * so TX stays frame-aligned with RX.  Feed ONLY while the staged reply has
-     * bytes left: the GD32 SPI has no TX-underrun error and no FIFO flush, so
-     * any byte queued beyond the reply is never clocked out and accumulates
-     * until the TX FIFO is FULL (STAT.TXLVL=0b11) -- the reply then sits behind
-     * that stale backlog and the host reads garbage -> reply CRC fails. */
-    int rbne_guard = 72;
-    while ((RESET != spi_interrupt_flag_get(BRIDGE_SPI_PERIPH, SPI_INT_FLAG_RBNE)) &&
-           (rbne_guard-- > 0)) {
-        spi_slave_rx_byte((uint8_t)spi_data_receive(BRIDGE_SPI_PERIPH));
-        if (spi_slave_tx_pending()) {
-            spi_data_transmit(BRIDGE_SPI_PERIPH, (uint16_t)spi_slave_tx_next_byte());
-        }
-    }
-    /* Drain any error condition (overrun etc.): reading DATA+STAT in the
-     * RBNE path clears RX overrun; nothing else to do for a slave. */
-    if (RESET != spi_interrupt_flag_get(BRIDGE_SPI_PERIPH, SPI_INT_FLAG_RXORERR)) {
-        (void)spi_data_receive(BRIDGE_SPI_PERIPH);
-    }
 }
 
 /* CS edge: PA8 on EXTI8.  Falling = select (reset RX, preload the staged
@@ -164,36 +250,55 @@ void BRIDGE_SPI_CS_EXTI_HANDLER(void)
     if (RESET != exti_interrupt_flag_get(BRIDGE_SPI_CS_EXTI_LINE)) {
         exti_interrupt_flag_clear(BRIDGE_SPI_CS_EXTI_LINE);
         if (RESET == gpio_input_bit_get(BRIDGE_SPI_NSS_PORT, BRIDGE_SPI_NSS_PIN)) {
-            /* CS asserted (active-low): reset RX and preload the first reply
-             * BYTE so it is in the TX shift register before the first SCK.  With
-             * byte-access (see bridge_spi_periph_config) a single spi_data_transmit
-             * queues exactly one frame -- no phantom second byte to shift the
-             * reply.  Guard on spi_slave_tx_pending() so nothing is queued when no
-             * reply is staged (the GD32 SPI has no TX-underrun error and no FIFO
-             * flush, so an over-queued byte would stick and mis-align later
-             * replies).  The rest of the reply is fed one byte per RBNE by the
-             * handler above -- which keeps up at the supported SCK (the SCI
-             * master, lacking DMA, caps the link well below the refill-lag rate). */
+            /* CS asserted (active-low): reset the portable RX staging.  No
+             * preload needed anymore -- the TX DMA armed at the previous
+             * CS-rising has already prefilled the SPI TX FIFO with the head
+             * of the staged reply (TBE requests are served the moment the
+             * channel enables), so the first SCK finds valid data waiting. */
             spi_slave_cs_low();
-            if (spi_slave_tx_pending()) {
-                spi_data_transmit(BRIDGE_SPI_PERIPH, (uint16_t)spi_slave_tx_next_byte());
-            }
         } else {
-            /* CS released: end of transaction.  FLUSH + re-arm the SPI peripheral
-             * FIRST (RCU reset + re-config), THEN decode -- the order matters: the
-             * decode (CRC + protocol_dispatch) is the heavy part, and doing it
-             * before the reset leaves the peripheral in its post-transaction state
-             * for that whole window; if the host opens the next transaction during
-             * it, frames are mishandled.  Resetting first re-arms the slave
-             * immediately; the reply is staged in software (spi_tx_buf), survives
-             * the reset, and is re-preloaded on the next CS-low.  The reset also
-             * drops any residual FIFO bytes from a partially-clocked transaction.
-             * spi_slave_cs_high() decodes only a real request (leading SOF); a
-             * reply-drain transaction leaves the staged reply untouched. */
+            /* CS released: end of transaction.
+             *
+             * 1. Snapshot the RX residue FIRST: bytes captured by RX DMA =
+             *    buffer length minus the remaining transfer count.
+             * 2. Quiesce both DMA channels, then FLUSH + re-init the SPI via
+             *    the RCU reset (the only reliable FIFO flush; it also clears
+             *    BYTEN/DMAREN/DMATEN, which bridge_spi_periph_config
+             *    re-applies) so the peripheral is reception-ready while the
+             *    heavier decode below runs.
+             * 3. Feed the captured bytes through the byte seams and decode
+             *    (spi_slave_cs_high stages the reply; the all-0x00 reply-
+             *    drain gate in the portable layer is unchanged).
+             * 4. Drain the staged reply into the flat TX DMA buffer and
+             *    re-arm: RX for a full buffer, TX for exactly the reply.
+             *
+             * Budget: steps 1-4 are register writes + CRC over <=69 B at
+             * 216 MHz -- single-digit microseconds, well inside the master's
+             * inter-transaction gap (its CS setup window alone is 60 us). */
+            uint32_t remaining = dma_transfer_number_get(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH);
+            uint32_t received  = (remaining <= BRIDGE_SPI_DMA_BUF_LEN)
+                                     ? (BRIDGE_SPI_DMA_BUF_LEN - remaining)
+                                     : 0u;
+
+            dma_channel_disable(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH);
+            dma_channel_disable(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH);
+
             rcu_periph_reset_enable(RCU_SPI1RST);
             rcu_periph_reset_disable(RCU_SPI1RST);
             bridge_spi_periph_config();
+
+            for (uint32_t i = 0; i < received; i++) {
+                spi_slave_rx_byte(spi_rx_dma_buf[i]);
+            }
             spi_slave_cs_high();
+
+            uint32_t reply_len = 0;
+            while (spi_slave_tx_pending() && (reply_len < BRIDGE_SPI_DMA_BUF_LEN)) {
+                spi_tx_dma_buf[reply_len++] = spi_slave_tx_next_byte();
+            }
+
+            spi_dma_arm_rx();
+            spi_dma_arm_tx(reply_len);
         }
     }
 }
