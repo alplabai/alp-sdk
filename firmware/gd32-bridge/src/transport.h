@@ -40,6 +40,7 @@ void    spi_slave_cs_low(void);        /* CS falling edge: reset RX staging   */
 void    spi_slave_rx_byte(uint8_t b);  /* one received byte (per SPI RBNE)     */
 void    spi_slave_cs_high(void);       /* CS rising edge: decode + dispatch    */
 uint8_t spi_slave_tx_next_byte(void);  /* next reply byte (per SPI TBE), 0xFF idle */
+bool    spi_slave_tx_pending(void);    /* true while staged reply has bytes left   */
 
 /* ---- I2C slave seams (defined in transport_i2c.c) -------------- */
 void    i2c_slave_write_start(void);   /* START + addressed write: reset RX    */

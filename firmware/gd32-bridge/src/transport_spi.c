@@ -137,6 +137,16 @@ uint8_t spi_slave_tx_next_byte(void)
     return 0xFFu;
 }
 
+/* True while the staged reply still has unsent bytes.  The gd32 backend
+ * gates every TX-FIFO write on this so it queues EXACTLY the reply and never
+ * idle/padding bytes -- the GD32 SPI has no TX-underrun error and no FIFO
+ * flush, so any over-queued byte sticks in the TX FIFO and shoves later
+ * replies out of byte-alignment. */
+bool spi_slave_tx_pending(void)
+{
+    return spi_tx_cursor < spi_tx_len;
+}
+
 void transport_spi_init(void)
 {
     spi_rx_len    = 0u;

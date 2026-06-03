@@ -83,11 +83,13 @@ static void spi_cs_exti_init(void)
     nvic_irq_enable(BRIDGE_SPI_CS_EXTI_IRQN, BRIDGE_CS_IRQ_PRIO, BRIDGE_CS_IRQ_SUBPRIO);
 }
 
-void bridge_transport_spi_hw_init(void)
+/* (Re)configure the SPI1 slave peripheral: mode-0, 8-bit, hardware-NSS,
+ * full-duplex, RX + error interrupts on.  Called at init AND as the per-
+ * transaction FIFO flush (after a peripheral reset -- see the CS-rising
+ * handler).  GPIO/EXTI/NVIC are set up once and survive a peripheral reset, so
+ * they stay in bridge_transport_spi_hw_init(). */
+static void bridge_spi_periph_config(void)
 {
-    rcu_periph_clock_enable(BRIDGE_SPI_RCU);
-    spi_gpio_init();
-
     spi_parameter_struct sp;
     spi_struct_para_init(&sp);
     sp.device_mode          = SPI_SLAVE;
@@ -102,9 +104,15 @@ void bridge_transport_spi_hw_init(void)
      * the peripheral never spins on an empty TX buffer at idle). */
     spi_interrupt_enable(BRIDGE_SPI_PERIPH, SPI_INT_RBNE);
     spi_interrupt_enable(BRIDGE_SPI_PERIPH, SPI_INT_ERR);
-    nvic_irq_enable(BRIDGE_SPI_IRQN, BRIDGE_SPI_IRQ_PRIO, BRIDGE_SPI_IRQ_SUBPRIO);
-
     spi_enable(BRIDGE_SPI_PERIPH);
+}
+
+void bridge_transport_spi_hw_init(void)
+{
+    rcu_periph_clock_enable(BRIDGE_SPI_RCU);
+    spi_gpio_init();
+    nvic_irq_enable(BRIDGE_SPI_IRQN, BRIDGE_SPI_IRQ_PRIO, BRIDGE_SPI_IRQ_SUBPRIO);
+    bridge_spi_periph_config();
     spi_cs_exti_init();
 }
 
@@ -112,10 +120,34 @@ void bridge_transport_spi_hw_init(void)
  * reply byte so it is ready for the byte the master clocks next. */
 void BRIDGE_SPI_IRQ_HANDLER(void)
 {
-    if (RESET != spi_interrupt_flag_get(BRIDGE_SPI_PERIPH, SPI_INT_FLAG_RBNE)) {
-        const uint8_t rx = (uint8_t)spi_data_receive(BRIDGE_SPI_PERIPH);
-        spi_slave_rx_byte(rx);
-        spi_data_transmit(BRIDGE_SPI_PERIPH, spi_slave_tx_next_byte());
+    /* Drain the ENTIRE RX FIFO each interrupt and keep BOTH packed bytes.
+     * The GD32 SPI DATA register is 16-bit and the RX FIFO packs two 8-bit
+     * frames per entry; one spi_data_receive() (16-bit) consumes one entry =
+     * TWO received bytes (LE: first byte in [7:0], second in [15:8]).  The old
+     * `(uint8_t)spi_data_receive()` threw away the high byte -> only the low
+     * byte of each pair survived, so the [A5 00 84 FF] PING arrived as [A5 84]
+     * (the low bytes of the LE words 0x00A5, 0xFF84), independent of SCK rate.
+     * Unpack BOTH bytes per read, and feed two reply bytes back per write so
+     * TX stays byte-aligned.  (A plain 8-bit DATA access does NOT advance the
+     * FIFO on this part -- it jams; the 16-bit access is required.) */
+    int rbne_guard = 72;
+    while ((RESET != spi_interrupt_flag_get(BRIDGE_SPI_PERIPH, SPI_INT_FLAG_RBNE)) &&
+           (rbne_guard-- > 0)) {
+        const uint16_t w = (uint16_t)spi_data_receive(BRIDGE_SPI_PERIPH);
+        spi_slave_rx_byte((uint8_t)(w & 0xFFu));
+        spi_slave_rx_byte((uint8_t)((w >> 8) & 0xFFu));
+        /* Feed reply bytes ONLY while the staged reply has bytes left.  The
+         * GD32 SPI has no TX-underrun error and no FIFO flush, so any byte
+         * queued beyond the reply (idle padding, or a pair queued one ahead
+         * of the master) is never clocked out and accumulates until the TX
+         * FIFO is FULL (STAT.TXLVL=0b11) -- the reply then sits behind that
+         * stale backlog and the host reads garbage -> reply CRC fails. */
+        if (spi_slave_tx_pending()) {
+            const uint8_t t0 = spi_slave_tx_next_byte();
+            const uint8_t t1 = spi_slave_tx_pending() ? spi_slave_tx_next_byte()
+                                                      : 0xFFu;
+            spi_data_transmit(BRIDGE_SPI_PERIPH, (uint16_t)(t0 | ((uint16_t)t1 << 8)));
+        }
     }
     /* Drain any error condition (overrun etc.): reading DATA+STAT in the
      * RBNE path clears RX overrun; nothing else to do for a slave. */
@@ -124,19 +156,47 @@ void BRIDGE_SPI_IRQ_HANDLER(void)
     }
 }
 
-/* CS edge: PA8 on EXTI8.  Falling = select (reset RX, preload first
- * reply byte); rising = end of transaction (decode + stage reply). */
+/* CS edge: PA8 on EXTI8.  Falling = select (reset RX, preload the staged
+ * reply); rising = end of transaction (decode + stage the next reply). */
 void BRIDGE_SPI_CS_EXTI_HANDLER(void)
 {
     if (RESET != exti_interrupt_flag_get(BRIDGE_SPI_CS_EXTI_LINE)) {
         exti_interrupt_flag_clear(BRIDGE_SPI_CS_EXTI_LINE);
         if (RESET == gpio_input_bit_get(BRIDGE_SPI_NSS_PORT, BRIDGE_SPI_NSS_PIN)) {
-            /* CS asserted (active-low). */
+            /* CS asserted (active-low): reset RX and preload the first reply
+             * FRAME so it is in the TX shift register before the first SCK.  Pack
+             * TWO bytes (the DATA register is 16-bit, half-word access): a single-
+             * byte write queues [byte,0x00] and the spurious 0x00 shifts the reply
+             * (PING [A5 00 84 FF] -> host sees [A5 00 00 84]).  Guard on
+             * spi_slave_tx_pending() so nothing is queued when no reply is staged
+             * (the GD32 SPI has no TX-underrun error and no FIFO flush, so an
+             * over-queued byte would stick and mis-align later replies).  The rest
+             * of the reply is fed by the guarded RBNE handler above -- which keeps
+             * up byte-by-byte at the supported SCK (the SCI master, lacking DMA,
+             * caps the link well below the rate where this refill would lag). */
             spi_slave_cs_low();
-            spi_data_transmit(BRIDGE_SPI_PERIPH, spi_slave_tx_next_byte());
+            if (spi_slave_tx_pending()) {
+                const uint8_t p0 = spi_slave_tx_next_byte();
+                const uint8_t p1 = spi_slave_tx_pending() ? spi_slave_tx_next_byte()
+                                                          : 0xFFu;
+                spi_data_transmit(BRIDGE_SPI_PERIPH,
+                                  (uint16_t)(p0 | ((uint16_t)p1 << 8)));
+            }
         } else {
-            /* CS released. */
+            /* CS released: end of transaction -- decode + stage the reply,
+             * then FLUSH the SPI FIFOs via a peripheral reset.  The 16-bit
+             * FIFO packs two 8-bit frames per entry and cannot cleanly handle
+             * an odd-length transaction (e.g. the 7-byte GET_VERSION reply):
+             * it leaves a half-entry in BOTH FIFOs that offsets every later
+             * transaction by one byte, so requests stop decoding and replies
+             * mis-align.  The GD32 SPI has no flush bit and spi_disable does
+             * NOT clear the FIFOs, so a peripheral reset is the only reliable
+             * flush.  NSS is high (idle) here; the staged reply lives in
+             * software (spi_tx_buf) and is re-preloaded on the next CS-low. */
             spi_slave_cs_high();
+            rcu_periph_reset_enable(RCU_SPI1RST);
+            rcu_periph_reset_disable(RCU_SPI1RST);
+            bridge_spi_periph_config();
         }
     }
 }
