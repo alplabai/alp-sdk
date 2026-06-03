@@ -78,9 +78,33 @@ static void stage_error_reply(uint8_t status)
  * see spi_slave_cs_high() which fires on CS de-assert. */
 static void decode_and_dispatch(void)
 {
-    /* Minimum envelope: SOF + CMD + 0-byte payload + CRC = 4 bytes. */
+    /* Empty transaction (CS toggled with no clocked bytes): nothing to do. */
+    if (spi_rx_len == 0u) { return; }
+
+    /* Request and reply ride SEPARATE CS transactions.  When the host reads a
+     * staged reply it clocks DUMMY bytes into us -- the RZ SCI master, lacking a
+     * TX buffer on a read, drives 0x00 -- so a reply-drain transaction lands as
+     * an all-0x00 buffer (leading byte 0x00, never SOF).  Leave the staged reply
+     * intact for the host to finish reading and do NOT decode.
+     *
+     * Distinguish that benign drain from a CORRUPTED request: a transaction that
+     * does not begin with SOF but is NOT the all-0x00 dummy pattern is a mangled
+     * request (e.g. a dropped leading SOF from the CS/RBNE edge race).  Fail
+     * LOUD with STATUS_IO so the host re-syncs and retries -- otherwise the host
+     * would read back the PREVIOUS transaction's stale-but-CRC-valid reply,
+     * which for the byte-identical PING masquerades as a fresh success and hides
+     * the dropped request. */
+    if (spi_rx_buf[0] != GD32_BRIDGE_SOF) {
+        for (size_t i = 0u; i < spi_rx_len; i++) {
+            if (spi_rx_buf[i] != 0u) { stage_error_reply(STATUS_IO); return; }
+        }
+        return; /* all-0x00: reply-drain -- preserve the staged reply */
+    }
+
+    /* A request addressed to us (leading SOF) but too short to hold even an
+     * empty envelope (SOF + CMD + 0-byte payload + CRC = 4 bytes) is a genuine
+     * framing error -> STATUS_IO so the host re-syncs. */
     if (spi_rx_len < 4u) { stage_error_reply(STATUS_IO); return; }
-    if (spi_rx_buf[0] != GD32_BRIDGE_SOF) { stage_error_reply(STATUS_IO); return; }
 
     const size_t payload_len   = spi_rx_len - 4u; /* SOF + CMD + .. + CRC(2) */
     const uint16_t got_crc     = (uint16_t)spi_rx_buf[2u + payload_len]

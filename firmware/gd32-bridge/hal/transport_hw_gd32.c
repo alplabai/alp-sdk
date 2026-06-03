@@ -100,6 +100,20 @@ static void bridge_spi_periph_config(void)
     sp.clock_polarity_phase = SPI_CK_PL_LOW_PH_1EDGE;   /* mode 0 */
     spi_init(BRIDGE_SPI_PERIPH, &sp);
 
+    /* Byte-access the FIFO so one CPU access == one 8-bit frame.  At reset the
+     * GD32 SPI FIFO is in HALF-WORD access (BYTEN=0): a 16-bit spi_data_receive()
+     * then pops TWO frames per call, which the old reply path tried to unpack --
+     * but on an odd-length residue (any non-even frame count, e.g. the 4-byte
+     * PING split across interrupts, or the 7-byte GET_VERSION reply) the second
+     * half was a phantom 0x00 that shifted the request -> CRC fail -> STATUS_IO.
+     * GigaDevice's own SPI slave examples (Examples/SPI/.../slave_*) use
+     * SPI_BYTE_ACCESS + one spi_data_receive()/spi_data_transmit() per frame;
+     * the SPL routes byte access to the 8-bit DATA alias (gd32g5x3_spi.c), so a
+     * byte access DOES advance the FIFO -- the stale "8-bit jams / 16-bit
+     * required" note was wrong.  Re-applied here on every (re)config because the
+     * per-transaction RCU_SPI1RST reset (CS-rising handler) clears BYTEN. */
+    spi_fifo_access_size_config(BRIDGE_SPI_PERIPH, SPI_BYTE_ACCESS);
+
     /* RX-driven: TX is fed from the RBNE handler (no TBE interrupt, so
      * the peripheral never spins on an empty TX buffer at idle). */
     spi_interrupt_enable(BRIDGE_SPI_PERIPH, SPI_INT_RBNE);
@@ -120,33 +134,20 @@ void bridge_transport_spi_hw_init(void)
  * reply byte so it is ready for the byte the master clocks next. */
 void BRIDGE_SPI_IRQ_HANDLER(void)
 {
-    /* Drain the ENTIRE RX FIFO each interrupt and keep BOTH packed bytes.
-     * The GD32 SPI DATA register is 16-bit and the RX FIFO packs two 8-bit
-     * frames per entry; one spi_data_receive() (16-bit) consumes one entry =
-     * TWO received bytes (LE: first byte in [7:0], second in [15:8]).  The old
-     * `(uint8_t)spi_data_receive()` threw away the high byte -> only the low
-     * byte of each pair survived, so the [A5 00 84 FF] PING arrived as [A5 84]
-     * (the low bytes of the LE words 0x00A5, 0xFF84), independent of SCK rate.
-     * Unpack BOTH bytes per read, and feed two reply bytes back per write so
-     * TX stays byte-aligned.  (A plain 8-bit DATA access does NOT advance the
-     * FIFO on this part -- it jams; the 16-bit access is required.) */
+    /* Drain the RX FIFO one frame per RBNE.  With byte-access set (see
+     * bridge_spi_periph_config) each spi_data_receive() pops exactly one
+     * received byte; for every byte taken in, feed exactly one reply byte back
+     * so TX stays frame-aligned with RX.  Feed ONLY while the staged reply has
+     * bytes left: the GD32 SPI has no TX-underrun error and no FIFO flush, so
+     * any byte queued beyond the reply is never clocked out and accumulates
+     * until the TX FIFO is FULL (STAT.TXLVL=0b11) -- the reply then sits behind
+     * that stale backlog and the host reads garbage -> reply CRC fails. */
     int rbne_guard = 72;
     while ((RESET != spi_interrupt_flag_get(BRIDGE_SPI_PERIPH, SPI_INT_FLAG_RBNE)) &&
            (rbne_guard-- > 0)) {
-        const uint16_t w = (uint16_t)spi_data_receive(BRIDGE_SPI_PERIPH);
-        spi_slave_rx_byte((uint8_t)(w & 0xFFu));
-        spi_slave_rx_byte((uint8_t)((w >> 8) & 0xFFu));
-        /* Feed reply bytes ONLY while the staged reply has bytes left.  The
-         * GD32 SPI has no TX-underrun error and no FIFO flush, so any byte
-         * queued beyond the reply (idle padding, or a pair queued one ahead
-         * of the master) is never clocked out and accumulates until the TX
-         * FIFO is FULL (STAT.TXLVL=0b11) -- the reply then sits behind that
-         * stale backlog and the host reads garbage -> reply CRC fails. */
+        spi_slave_rx_byte((uint8_t)spi_data_receive(BRIDGE_SPI_PERIPH));
         if (spi_slave_tx_pending()) {
-            const uint8_t t0 = spi_slave_tx_next_byte();
-            const uint8_t t1 = spi_slave_tx_pending() ? spi_slave_tx_next_byte()
-                                                      : 0xFFu;
-            spi_data_transmit(BRIDGE_SPI_PERIPH, (uint16_t)(t0 | ((uint16_t)t1 << 8)));
+            spi_data_transmit(BRIDGE_SPI_PERIPH, (uint16_t)spi_slave_tx_next_byte());
         }
     }
     /* Drain any error condition (overrun etc.): reading DATA+STAT in the
@@ -164,39 +165,35 @@ void BRIDGE_SPI_CS_EXTI_HANDLER(void)
         exti_interrupt_flag_clear(BRIDGE_SPI_CS_EXTI_LINE);
         if (RESET == gpio_input_bit_get(BRIDGE_SPI_NSS_PORT, BRIDGE_SPI_NSS_PIN)) {
             /* CS asserted (active-low): reset RX and preload the first reply
-             * FRAME so it is in the TX shift register before the first SCK.  Pack
-             * TWO bytes (the DATA register is 16-bit, half-word access): a single-
-             * byte write queues [byte,0x00] and the spurious 0x00 shifts the reply
-             * (PING [A5 00 84 FF] -> host sees [A5 00 00 84]).  Guard on
-             * spi_slave_tx_pending() so nothing is queued when no reply is staged
-             * (the GD32 SPI has no TX-underrun error and no FIFO flush, so an
-             * over-queued byte would stick and mis-align later replies).  The rest
-             * of the reply is fed by the guarded RBNE handler above -- which keeps
-             * up byte-by-byte at the supported SCK (the SCI master, lacking DMA,
-             * caps the link well below the rate where this refill would lag). */
+             * BYTE so it is in the TX shift register before the first SCK.  With
+             * byte-access (see bridge_spi_periph_config) a single spi_data_transmit
+             * queues exactly one frame -- no phantom second byte to shift the
+             * reply.  Guard on spi_slave_tx_pending() so nothing is queued when no
+             * reply is staged (the GD32 SPI has no TX-underrun error and no FIFO
+             * flush, so an over-queued byte would stick and mis-align later
+             * replies).  The rest of the reply is fed one byte per RBNE by the
+             * handler above -- which keeps up at the supported SCK (the SCI
+             * master, lacking DMA, caps the link well below the refill-lag rate). */
             spi_slave_cs_low();
             if (spi_slave_tx_pending()) {
-                const uint8_t p0 = spi_slave_tx_next_byte();
-                const uint8_t p1 = spi_slave_tx_pending() ? spi_slave_tx_next_byte()
-                                                          : 0xFFu;
-                spi_data_transmit(BRIDGE_SPI_PERIPH,
-                                  (uint16_t)(p0 | ((uint16_t)p1 << 8)));
+                spi_data_transmit(BRIDGE_SPI_PERIPH, (uint16_t)spi_slave_tx_next_byte());
             }
         } else {
-            /* CS released: end of transaction -- decode + stage the reply,
-             * then FLUSH the SPI FIFOs via a peripheral reset.  The 16-bit
-             * FIFO packs two 8-bit frames per entry and cannot cleanly handle
-             * an odd-length transaction (e.g. the 7-byte GET_VERSION reply):
-             * it leaves a half-entry in BOTH FIFOs that offsets every later
-             * transaction by one byte, so requests stop decoding and replies
-             * mis-align.  The GD32 SPI has no flush bit and spi_disable does
-             * NOT clear the FIFOs, so a peripheral reset is the only reliable
-             * flush.  NSS is high (idle) here; the staged reply lives in
-             * software (spi_tx_buf) and is re-preloaded on the next CS-low. */
-            spi_slave_cs_high();
+            /* CS released: end of transaction.  FLUSH + re-arm the SPI peripheral
+             * FIRST (RCU reset + re-config), THEN decode -- the order matters: the
+             * decode (CRC + protocol_dispatch) is the heavy part, and doing it
+             * before the reset leaves the peripheral in its post-transaction state
+             * for that whole window; if the host opens the next transaction during
+             * it, frames are mishandled.  Resetting first re-arms the slave
+             * immediately; the reply is staged in software (spi_tx_buf), survives
+             * the reset, and is re-preloaded on the next CS-low.  The reset also
+             * drops any residual FIFO bytes from a partially-clocked transaction.
+             * spi_slave_cs_high() decodes only a real request (leading SOF); a
+             * reply-drain transaction leaves the staged reply untouched. */
             rcu_periph_reset_enable(RCU_SPI1RST);
             rcu_periph_reset_disable(RCU_SPI1RST);
             bridge_spi_periph_config();
+            spi_slave_cs_high();
         }
     }
 }
