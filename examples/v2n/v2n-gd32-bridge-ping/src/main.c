@@ -47,22 +47,23 @@ int main(void) {
     alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
         .bus_id        = 1u,
         /*
-         * 1 MHz baseline.  The SPI clock is bounded by the CM33 MASTER, not the
-         * GD32: the GD32G553xx datasheet (Rev2.0, Table 4-49) allows fSCK up to
-         * 27 MHz, yet the RZ SCI7 master here runs WITHOUT DMA, so the FSP
-         * services every byte from the rxi/txi ISR.  Above ~5-8 MHz (byte
-         * <~1.5 us) the ISR cannot keep up and R_SCI_B_SPI_Read/Write eventually
-         * returns FSP_ERR_IN_USE (observed on silicon at 25 MHz: init stuck
-         * retrying).  The SCI-B FIFO that would fix this is only usable with a
-         * DTC/DMAC transfer interface (r_sci_b_spi.c:131), not wired up here.
-         * RAISING THE CLOCK toward the GD32's 27 MHz is a dedicated follow-up:
-         * add a DTC transfer interface (p_transfer_tx/rx) + enable the FIFO on
-         * the CM33 SCI7, with matching RX/TX DMA on the GD32 slave.  Until then
-         * 1 MHz (8 us/byte) is the safe validated rate.  (NB: the historical
-         * "1 MHz required or frames corrupt" claim was wrong -- that [A5 84]
-         * corruption was the GD32 16-bit-FIFO unpack bug, since fixed.)
+         * 25 MHz fast path.  The GD32 SLAVE streams through its DMA0 CH2/CH3
+         * (RX capture + staged-reply arming framed by the CS EXTI, see
+         * transport_hw_gd32.c) -- mandatory at 25 MHz, a slave cannot pace
+         * SCK.  The CM33 MASTER uses the driver's zero-interrupt POLLED
+         * engine (spi_renesas_rz_sci_b.c): the master paces SCK, so polling
+         * is robust by construction and costs only tens of microseconds per
+         * <=69-byte transaction; the MCPU-DMAC fast path is preserved in the
+         * driver but silicon-blocked (ALP_V2N_SCI7_DMAC notes).  25 MHz is an
+         * exact P5CLK/4 divide on the SCI (CCR2 cks=0/bgdm=1/brr=1) and sits
+         * inside the GD32 slave's 27 MHz datasheet ceiling (Rev2.0 Table
+         * 4-49) with slave timing margins met (tV(SO)=9 ns vs the 20 ns
+         * half-period; MISO pad raised to the 85 MHz class).  The wire stays
+         * 8-bit frames -- the SCI Simple-SPI IP is 8-bit-only by design
+         * (r_sci_b_spi.c:226) -- so the speed-up is the 25x clock plus
+         * zero per-byte interrupt work, not wider frames.
          */
-        .freq_hz       = 1000000u,
+        .freq_hz       = 25000000u,
         .mode          = ALP_SPI_MODE_0,
         .bits_per_word = 8u,
         .cs_pin_id     = 0u, /* studio-resolved */
