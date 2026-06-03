@@ -15,13 +15,21 @@
 		};
 	};
 
-	/* GD32G553 SPI fast path on SPI_B ch1 (RSPI alternate func 5) */
-	spi1_pins: spi1 {
-		spi1-pinmux {
-			pinmux = <RZV_PINMUX(PORT_07, 6, 5)>, /* MOSI  P76 */
-				 <RZV_PINMUX(PORT_07, 7, 5)>, /* MISO  P77 */
-				 <RZV_PINMUX(PORT_09, 6, 5)>, /* RSPCK P96 */
-				 <RZV_PINMUX(PORT_09, 7, 5)>; /* SSL   P97 */
+	/*
+	 * GD32G553 SPI fast path on SCI channel 7 (clock-synchronous Simple-SPI).
+	 * Per the RZ/V2N PFC (Table 1.2-3): P76 = TXD7_MOSI7 (func1), P77 =
+	 * RXD7_MISO7 (func1), P96 = SCK7 (func2).  Calibrated against the known-good
+	 * console pin P50 = TXD0 (func1) and the P52 TXD1/SCK0/DE0/CTS0N column run.
+	 *
+	 * P97 (SS7) is deliberately NOT muxed here: master Simple-SPI has no
+	 * hardware slave-select, so P97 is driven as a GPIO chip-select (gpio9 pin 7;
+	 * see cs-gpios in the board dts).  Leaving it out keeps it in GPIO mode.
+	 */
+	sci7_spi_pins: sci7_spi {
+		sci7-spi-pinmux {
+			pinmux = <RZV_PINMUX(PORT_07, 6, 1)>, /* MOSI7 P76 */
+				 <RZV_PINMUX(PORT_07, 7, 1)>, /* MISO7 P77 */
+				 <RZV_PINMUX(PORT_09, 6, 2)>; /* SCK7  P96 */
 		};
 	};
 
