@@ -39,8 +39,24 @@ file(GLOB _GD32_STDPER_SOURCES
 # startup_gd32g5x3.S (no `_gd32g553.S` -- the suffix matches the
 # silicon family, not the specific MPN).  system_gd32g5x3.c carries
 # SystemInit().
+#
+# system_gd32g5x3.c is taken from an alp-sdk OVERRIDE (overrides/) instead of the
+# submodule copy: the stock file selects the 216M-PLL-HXTAL clock, but on the
+# E1M-V2M101 SoM the GD32 HXTAL (5L35023B SE2) never starts, so SystemInit()
+# hangs forever before main().  The override selects 216M-PLL-IRC8M; keeping it
+# here leaves the submodule pristine (clean `git submodule update` diffs),
+# mirroring the vendored FSP r_sci_b_spi module on the Zephyr side.  Drop or
+# refresh the override if the submodule is bumped or SE2 is brought up.
+set(_GD32_SYSTEM_OVERRIDE ${CMAKE_CURRENT_SOURCE_DIR}/overrides/system_gd32g5x3.c)
+if(EXISTS ${_GD32_SYSTEM_OVERRIDE})
+    set(_GD32_SYSTEM_C ${_GD32_SYSTEM_OVERRIDE})
+    message(STATUS "vendors/gd32_firmware_library: using alp-sdk clock override "
+                   "(216M-PLL-IRC8M; submodule kept pristine)")
+else()
+    set(_GD32_SYSTEM_C ${_GD32_CMSIS}/GD/GD32G5x3/Source/system_gd32g5x3.c)
+endif()
 set(_GD32_SYSTEM_SOURCES
-    ${_GD32_CMSIS}/GD/GD32G5x3/Source/system_gd32g5x3.c
+    ${_GD32_SYSTEM_C}
     ${_GD32_CMSIS}/GD/GD32G5x3/Source/GCC/startup_gd32g5x3.S)
 
 add_library(gd32_firmware_library STATIC
