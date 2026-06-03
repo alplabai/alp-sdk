@@ -596,6 +596,14 @@ static const gd32_dac_ch_t dac_channels[] = {
  * connections -- SysTick, etc.). */
 void bridge_hw_init(void)
 {
+#if defined(BRIDGE_OTA_PARTITIONED) && defined(BRIDGE_APP_SLOT_BASE)
+    /* OTA Path-A: the app runs from a flash slot, not 0x08000000, so move
+     * the vector table off the vendor SystemInit default before any NVIC
+     * use.  Runs first (main calls bridge_hw_init before the transports
+     * enable interrupts). */
+    SCB->VTOR = (uint32_t)(BRIDGE_APP_SLOT_BASE);
+#endif
+
     /* Enable AHB2 clocks for every GPIO port the pad map references.
      * The chip's RCU keeps unused GPIO ports clock-gated to save
      * power; we enable A..F unconditionally because the E1M IO map
@@ -1014,6 +1022,12 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
     init.periph_width = DMA_PERIPHERAL_WIDTH_16BIT;
     init.memory_width = DMA_MEMORY_WIDTH_16BIT;
     init.priority     = DMA_PRIORITY_MEDIUM;
+    /* DMAMUX request: route the channel to this ADC instance.  Without
+     * this the request id is left uninitialised and the channel triggers
+     * on the wrong (or no) source. */
+    init.request      = (ch->periph == ADC1) ? DMA_REQUEST_ADC1 :
+                        (ch->periph == ADC2) ? DMA_REQUEST_ADC2 :
+                        (ch->periph == ADC3) ? DMA_REQUEST_ADC3 : DMA_REQUEST_ADC0;
     dma_init(s->dma_periph, (dma_channel_enum)s->dma_channel, &init);
 
     /* Circular mode -- DMA reloads `number` after each cycle so the

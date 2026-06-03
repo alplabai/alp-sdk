@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * gd32-bridge firmware: board/silicon configuration for the transport
@@ -19,9 +19,10 @@
  *
  * I2C timing is derived at runtime from the live APB1 clock (in
  * bridge_transport_i2c_hw_init), so there are no unconfirmed silicon
- * facts left here.  Byte-level interrupt timing (SPI reply preload, I2C
- * clock-stretch window) still wants on-silicon validation — flash
- * externally (host-driven SWD reflash is not wired in this HW revision).
+ * facts left here.  SPI runs on RX+TX DMA (armed per transaction from the
+ * CS-EXTI); the on-silicon validation point is the master's CS-to-first-SCK
+ * setup vs the EXTI+DMA-arm latency, plus the I2C clock-stretch window.
+ * Flash externally (host-driven SWD reflash is not wired in this HW revision).
  */
 #ifndef GD32_BRIDGE_BOARD_CONFIG_H
 #define GD32_BRIDGE_BOARD_CONFIG_H

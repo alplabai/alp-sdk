@@ -45,7 +45,15 @@ set(GD32_BRIDGE_SOURCES
     src/transport_spi.c
     src/transport_i2c.c
     src/bootloader/bootloader.c
+    src/ota.c
+    src/crc32.c
 )
+
+# OTA self-flashing is gated: only -DBRIDGE_OTA_PARTITIONED=ON (paired with
+# the partitioned bootloader layout + slot-linked app) arms the destructive
+# flash path.  Default OFF -> ota_dispatch() returns STATUS_NOSUPPORT and the
+# full-flash image can't brick itself.  HIL-REQUIRED before enabling.
+option(BRIDGE_OTA_PARTITIONED "Arm the OTA Path-A flash path (HIL-gated)" OFF)
 
 if(BRIDGE_HAL_BACKEND STREQUAL "stub")
     list(APPEND GD32_BRIDGE_SOURCES hal/bridge_hw_stub.c)
@@ -58,6 +66,7 @@ elseif(BRIDGE_HAL_BACKEND STREQUAL "gd32")
     list(APPEND GD32_BRIDGE_SOURCES
         hal/bridge_hw_gd32.c
         hal/transport_hw_gd32.c
+        hal/fmc_ota.c
         hal/gd32_libc_stubs.c
     )
     # Pull in the GigaDevice firmware-library wrapper.  Its CMakeLists
@@ -88,80 +97,71 @@ else()
     message(FATAL_ERROR "Unknown BRIDGE_HAL_BACKEND='${BRIDGE_HAL_BACKEND}' (expected: stub | gd32).")
 endif()
 
-add_executable(gd32-bridge ${GD32_BRIDGE_SOURCES})
-
-target_include_directories(gd32-bridge PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/hal
-)
-
-if(BRIDGE_HAL_BACKEND STREQUAL "gd32")
-    target_link_libraries(gd32-bridge PRIVATE gd32_firmware_library)
-endif()
-
-# Cortex-M33 + thumb + soft-float (no FPU on GD32G5 baseline; revisit
-# if the part variant has the FPU enabled and the linker / runtime
-# wants to use it).
-target_compile_options(gd32-bridge PRIVATE
-    -mcpu=cortex-m33
-    -mthumb
-    -mfloat-abi=soft
-    -ffunction-sections
-    -fdata-sections
-    -Wall -Wextra -Wshadow -Wpedantic
-)
-target_link_options(gd32-bridge PRIVATE
-    -mcpu=cortex-m33
-    -mthumb
-    -mfloat-abi=soft
-    -Wl,--gc-sections
-    -nostartfiles
-    -T${CMAKE_SOURCE_DIR}/toolchain/gd32g553_flash.ld
-)
-
-# Emit .hex + .bin for the maintainer's flasher of choice.
-#
-# Use literal paths rather than $<TARGET_FILE:gd32-bridge> generator
-# expressions -- on the CI runner's CMake 3.31 + arm-none-eabi-gcc
-# 13.2 + Generic-system toolchain combo, $<TARGET_FILE:gd32-bridge>
-# fails the GENERATE step with "No target gd32-bridge" even after
-# the configure-time get_target_property() above confirms the target
-# is registered as EXECUTABLE.  The target_file generator expression
-# evidently can't resolve for executables on CMAKE_SYSTEM_NAME=Generic
-# without a CMAKE_EXECUTABLE_SUFFIX hint; pre-computing the path
-# sidesteps it entirely.
-#
-# Gate on BRIDGE_HAL_BACKEND=gd32 because the stub backend doesn't
-# ship a startup file (no Reset_Handler symbol), so the linker
-# emits an empty binary with no sections.  objcopy refuses to
-# process a sectionless file and the build fails.  The stub backend
-# is for protocol-layer compile validation only -- the .elf isn't
-# runnable, so .hex/.bin emission is a no-op for it.
-if(BRIDGE_HAL_BACKEND STREQUAL "gd32")
-    set(_GD32_BRIDGE_BIN ${CMAKE_BINARY_DIR}/gd32-bridge)
-    add_custom_command(TARGET gd32-bridge POST_BUILD
-        COMMAND ${CMAKE_OBJCOPY} -O ihex   ${_GD32_BRIDGE_BIN} ${_GD32_BRIDGE_BIN}.hex
-        COMMAND ${CMAKE_OBJCOPY} -O binary ${_GD32_BRIDGE_BIN} ${_GD32_BRIDGE_BIN}.bin
-        BYPRODUCTS ${_GD32_BRIDGE_BIN}.hex ${_GD32_BRIDGE_BIN}.bin
-    )
-endif()
-
-# ----------------------------------------------------------------- #
-# Firmware release version + build-id stamping.                      #
-# ----------------------------------------------------------------- #
-
-# Firmware *release* version -- its own semver, tracked independently of
-# the wire PROTOCOL_VERSION (src/protocol.h) and of the SDK version.
-# Source of truth: firmware-version.txt.  Bump it per firmware release,
-# tag to match, and name the prebuilt blob `gd32-bridge-v<ver>.bin`.
+# Firmware *release* version (own semver; source of truth firmware-version.txt).
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/firmware-version.txt GD32_BRIDGE_FW_VERSION LIMIT_COUNT 1)
-target_compile_definitions(gd32-bridge PRIVATE GD32_BRIDGE_FW_VERSION="${GD32_BRIDGE_FW_VERSION}")
 message(STATUS "gd32-bridge firmware version: ${GD32_BRIDGE_FW_VERSION}")
 
-# GET_BUILD_ID reports "<fw-version>+<short-sha>" (e.g. "0.1.0+abc1234",
-# <= GD32_BRIDGE_BUILD_ID_LEN = 20 chars): the firmware release version
-# plus the exact build behind it.
-# TODO: post-link hook that computes the short SHA of the .elf and
-# patches the linker-emitted build-id constant.  Until that lands the
-# firmware reports "<fw-version>+0000000" to keep the GET_BUILD_ID frame
-# structurally valid.
+# Common per-target config: Cortex-M33 + thumb + soft-float, the version
+# define, includes, the vendor lib + .hex/.bin emission (gd32 backend only;
+# the stub backend has no Reset_Handler so objcopy of a sectionless ELF
+# fails).  Literal output paths sidestep a $<TARGET_FILE:> GENERATE-step
+# failure on Generic-system toolchains.
+function(gd32_firmware_target tgt linker_script)
+    target_include_directories(${tgt} PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/hal)
+    target_compile_definitions(${tgt} PRIVATE GD32_BRIDGE_FW_VERSION="${GD32_BRIDGE_FW_VERSION}")
+    target_compile_options(${tgt} PRIVATE
+        -mcpu=cortex-m33 -mthumb -mfloat-abi=soft
+        -ffunction-sections -fdata-sections
+        -Wall -Wextra -Wshadow -Wpedantic)
+    target_link_options(${tgt} PRIVATE
+        -mcpu=cortex-m33 -mthumb -mfloat-abi=soft
+        -Wl,--gc-sections -nostartfiles -T${linker_script})
+    if(BRIDGE_HAL_BACKEND STREQUAL "gd32")
+        target_link_libraries(${tgt} PRIVATE gd32_firmware_library)
+        set(_bin ${CMAKE_BINARY_DIR}/${tgt})
+        add_custom_command(TARGET ${tgt} POST_BUILD
+            COMMAND ${CMAKE_OBJCOPY} -O ihex   ${_bin} ${_bin}.hex
+            COMMAND ${CMAKE_OBJCOPY} -O binary ${_bin} ${_bin}.bin
+            BYPRODUCTS ${_bin}.hex ${_bin}.bin)
+    endif()
+endfunction()
+
+if(NOT BRIDGE_OTA_PARTITIONED)
+    # Default: a single full-flash image (linked at 0x08000000).  OTA is
+    # inert (ota_dispatch -> STATUS_NOSUPPORT); this is the bench/test image.
+    add_executable(gd32-bridge ${GD32_BRIDGE_SOURCES})
+    gd32_firmware_target(gd32-bridge ${CMAKE_SOURCE_DIR}/toolchain/gd32g553_flash.ld)
+else()
+    # OTA Path-A armed: a bootloader at flash base + the app linked for each
+    # A/B slot (vector table relocated via SCB->VTOR at boot).  HIL-REQUIRED:
+    # the boot/validate/jump + slot-relocation are NOT validated on silicon
+    # (a bug bricks the part -- no host SWD reflash this HW rev).
+    if(NOT BRIDGE_HAL_BACKEND STREQUAL "gd32")
+        message(FATAL_ERROR "BRIDGE_OTA_PARTITIONED requires BRIDGE_HAL_BACKEND=gd32.")
+    endif()
+    message(STATUS "gd32-bridge: OTA Path-A ARMED (bootloader + A/B slots) -- HIL-required, do not field-flash unvalidated")
+
+    set(APP_SLOT_LEN 0x0003B000)   # 236 KB per slot (ota_layout.h)
+    set(APP_SLOT_BASE 0x0800A000)  # slot A
+    configure_file(${CMAKE_SOURCE_DIR}/toolchain/gd32g553_app_slot.ld.in
+                   ${CMAKE_BINARY_DIR}/gd32g553_slot_a.ld @ONLY)
+    set(APP_SLOT_BASE 0x08045000)  # slot B
+    configure_file(${CMAKE_SOURCE_DIR}/toolchain/gd32g553_app_slot.ld.in
+                   ${CMAKE_BINARY_DIR}/gd32g553_slot_b.ld @ONLY)
+
+    add_executable(gd32-bridge-slot-a ${GD32_BRIDGE_SOURCES})
+    gd32_firmware_target(gd32-bridge-slot-a ${CMAKE_BINARY_DIR}/gd32g553_slot_a.ld)
+    target_compile_definitions(gd32-bridge-slot-a PRIVATE
+        BRIDGE_OTA_PARTITIONED=1 BRIDGE_APP_SLOT_BASE=0x0800A000u)
+
+    add_executable(gd32-bridge-slot-b ${GD32_BRIDGE_SOURCES})
+    gd32_firmware_target(gd32-bridge-slot-b ${CMAKE_BINARY_DIR}/gd32g553_slot_b.ld)
+    target_compile_definitions(gd32-bridge-slot-b PRIVATE
+        BRIDGE_OTA_PARTITIONED=1 BRIDGE_APP_SLOT_BASE=0x08045000u)
+
+    add_executable(gd32-bootloader src/boot/boot_main.c src/crc32.c hal/gd32_libc_stubs.c)
+    gd32_firmware_target(gd32-bootloader ${CMAKE_SOURCE_DIR}/toolchain/gd32g553_bootloader.ld)
+endif()
+
+# GET_BUILD_ID reports "<fw-version>+<short-sha>"; the post-link SHA hook is
+# still TODO (firmware reports "<fw-version>+0000000" until then).
