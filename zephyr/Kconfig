@@ -1869,8 +1869,9 @@ config ALP_SDK_CHIP_GD32G553
 	  over the hybrid SPI + I2C bridge documented in
 	  docs/gd32-bridge-protocol.md.  Exposes PING, GET_VERSION,
 	  GET_BUILD_ID, RESET_REASON, GPIO_READ/WRITE, PWM_SET/GET,
-	  ADC_READ, and DA9292_STATUS_FORWARD on top of either bus
-	  (or both at once with per-call routing).  The firmware
+	  ADC_READ, and DA9292_STATUS_FORWARD (GD32-observed DA9292
+	  INT/TW fault pins, not an I2C PMIC register read) on top of
+	  either bus (or both at once with per-call routing).  The firmware
 	  counterpart lives in firmware/gd32-bridge/ as a separate compile
 	  artifact.
 

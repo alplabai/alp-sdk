@@ -7,6 +7,22 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Changed — DA9292_STATUS_FORWARD semantics re-spec (2026-06-03)
+
+Docs/comments re-spec of the `DA9292_STATUS_FORWARD` (opcode `0x40`)
+surface to match the wiring: the GD32 supervisor has **no I2C path** to
+the DA9292 PMIC — its only DA9292 connections are the input signal pins
+`DA9292_INT` (P37, active-low) and `DA9292_TW` (P36).  The forwarded byte
+is GD32-observed fault-pin state (bit0 = INT asserted, bit1 = TW asserted,
+bits 2-6 reserved, `0xFF` = "no sample taken yet" sentinel), **not** a
+cached `PMC_STATUS_00` register snapshot.  Removed all "cached PMC_STATUS_00
+/ periodic I2C-master poll / ≤ 20 ms cache age" language from the host
+header, firmware comments, protocol spec, tutorials, and the bridge-ping
+example.  Register-level PMIC status is read by the CM33/host over BRD_I2C
+via the `chips/da9292` driver (`da9292_get_status()`).  Documentation-only;
+the C signature and wire envelope are unchanged.  Firmware pin-sampling
+implementation to follow (current firmware always returns `0xFF`).
+
 ### Added — doc-drift CI gate (2026-05-27)
 
 `scripts/check_doc_drift.py` + `.github/workflows/pr-doc-drift.yml`: an

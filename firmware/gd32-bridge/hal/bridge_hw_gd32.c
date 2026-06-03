@@ -94,7 +94,10 @@
  *                               timer also honours wake_after_ms.
  *                               UART_RX / USB / ETH_LINK reject as
  *                               NOSUPPORT (no HW path on GD32G5).
- *   17. DA9292 status poll   -- I2C-master periodic poll cached value.
+ *   17. DA9292 fault forward -- sample DA9292_INT(P37)/DA9292_TW(P36)
+ *                               input pins on a SysTick cadence and
+ *                               pack into fault flags.  The GD32 has
+ *                               no I2C path to the DA9292 (pins only).
  *   18. ADC_DSP_*            -- DONE (§C.15d + §C.24): chain_open +
  *                               stage_push implemented as a 4-chain
  *                               pool with per-stage chunk reassembly
@@ -588,8 +591,9 @@ static const gd32_dac_ch_t dac_channels[] = {
 
 /* Called once on entry to main() before the transport ISRs come
  * online.  Future commits also wire up the remaining peripherals
- * the bridge uses (TMU, ADC0..ADC3, DAC, TIMER0/7/19, the DA9292
- * I2C-master poll, SysTick, etc.). */
+ * the bridge uses (TMU, ADC0..ADC3, DAC, TIMER0/7/19, the DA9292_INT
+ * (P37)/DA9292_TW (P36) input pins -- the GD32's only DA9292
+ * connections -- SysTick, etc.). */
 void bridge_hw_init(void)
 {
     /* Enable AHB2 clocks for every GPIO port the pad map references.
@@ -707,9 +711,12 @@ void bridge_hw_init(void)
 }
 
 /* Called from the SysTick handler (or the main loop's idle path)
- * on a fixed cadence.  Future real implementation will re-poll the
- * DA9292's PMC_STATUS_00 over I2C-master and update the cached
- * byte returned by bridge_hw_da9292_status_cached(). */
+ * on a fixed cadence.  Future real implementation will sample the
+ * DA9292_INT(P37)/DA9292_TW(P36) GPIO inputs and update the fault-
+ * flag byte returned by bridge_hw_da9292_status_cached().  The GD32
+ * has no I2C path to the DA9292, so this never reads a PMIC register
+ * -- pin state only.  Pin sampling lands in a future firmware
+ * release; current firmware leaves this a no-op. */
 void bridge_hw_tick(void)
 {
     /* No-op today. */
@@ -1294,7 +1301,7 @@ int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks)
 
 uint8_t bridge_hw_da9292_status_cached(void)
 {
-    return 0xFFu; /* "no PMIC poll has populated the cache yet" sentinel */
+    return 0xFFu; /* "no DA9292 pin sample taken yet" sentinel */
 }
 
 /* ----------------------------------------------------------------- */

@@ -150,7 +150,7 @@ The V2N module's companion GD32G553 supervisor MCU owns every
 E1M-standard analog + counter peripheral plus a fleet of side-channel
 GPIOs: all eight PWM channels, the eight-channel ADC bank, both DAC
 outputs, the four quadrature encoders, the Wi-Fi/BT REG_ON pins, the
-OPTIGA reset, and the cached DA9292 PMIC status forwarder (per the
+OPTIGA reset, and the DA9292 INT/TW fault-pin forwarder (per the
 2026-05-12 schematic decision).  Reach it via
 [`<alp/chips/gd32g553.h>`](../include/alp/chips/gd32g553.h) over
 SPI (fast path) or I2C (management path):
