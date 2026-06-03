@@ -83,6 +83,16 @@ if(CONFIG_USE_RZ_FSP_SCI_B_SPI)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/r_sci_b_spi/r_sci_b_spi.c)
     zephyr_library_include_directories(
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/r_sci_b_spi)
+    # SCI7 DMA fast path: the rzv FSP DMAC-B transfer driver.  hal_renesas
+    # ships it for rzv2n (src/rzv/r_dmac_b + the SCI7 RXI/TXI trigger events in
+    # bsp/mcu/rzv2n/bsp_dmac.h) but its rzv CMake does not compile it and the
+    # rzv2n devicetree has no dmac node, so the glue driver hand-instantiates
+    # the transfer_instance_t pair and we build the FSP module here.  Its
+    # r_dmac_b_cfg.h shim lives in the r_sci_b_spi include dir above.
+    zephyr_library_sources(
+        ${ZEPHYR_HAL_RENESAS_MODULE_DIR}/drivers/rz/fsp/src/rzv/r_dmac_b/r_dmac_b.c)
+    zephyr_library_include_directories(
+        ${ZEPHYR_HAL_RENESAS_MODULE_DIR}/drivers/rz/fsp/inc/instances/rzv)
 endif()
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)

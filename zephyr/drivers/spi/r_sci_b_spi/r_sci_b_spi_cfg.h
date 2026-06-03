@@ -19,10 +19,20 @@
 extern "C" {
 #endif
 
-/* PIO / interrupt-driven only on this port -- no DTC/DMAC fast path.  This
- * gates out every `#if SCI_B_SPI_CFG_DMA_SUPPORT_ENABLE == 1` block in the
- * module body (the transfer_instance_t / DMAC plumbing), so the port pulls no
- * r_dtc / r_dmac dependency. */
+/* DMA fast path DISABLED -- silicon-blocked (2026-06-03, scope-confirmed).
+ * The RZ/V2N MCPU DMAC (DMAC0, rzv FSP r_dmac_b) + SCI7 pairing was fully
+ * brought up (trigger routed in ICU DM4SEL0, CCR0.TE+TIE armed, CSR.TDRE
+ * high) yet the DMAC channel never streams: it moves at most one beat per
+ * arm and parks with CHSTAT.SUS=1 / EN never observed high, across ack
+ * modes (MASK_DACK / BUS_CYCLE) and detection modes (edge / high-level) --
+ * an FSP/IP integration gap to raise with Renesas.  The full plumbing is
+ * preserved behind ALP_V2N_SCI7_DMAC in spi_renesas_rz_sci_b.c; the 25 MHz
+ * production path is the driver's zero-interrupt polled engine instead
+ * (master-paced SCK makes polling robust by construction).
+ * NOTE if re-enabled: the DMA-gated blocks in r_sci_b_spi.c carry documented
+ * RZ-port edits -- the rzv BSP overrides transfer_info_t
+ * (BSP_OVERRIDE_TRANSFER_INFO_T) with discrete members instead of the RA
+ * packed transfer_settings_word. */
 #define SCI_B_SPI_CFG_DMA_SUPPORT_ENABLE    (0)
 #define SCI_B_SPI_CFG_PARAM_CHECKING_ENABLE (BSP_CFG_PARAM_CHECKING_ENABLE)
 #define SCI_B_SPI_CFG_FIFO_SUPPORT          (0)

@@ -134,11 +134,64 @@ LOG_MODULE_REGISTER(rz_sci_b_spi, CONFIG_SPI_LOG_LEVEL);
 
 #include "spi_context.h"
 
+/* ── SCI7 25 MHz data path: zero-interrupt POLLED engine ─────────────────────
+ * The SCI Simple-SPI master is byte-per-event with a 1-deep TDR/RDR.
+ * Interrupt-per-byte tops out around 5-8 MHz (IRQ entry/exit latency), and
+ * the DMAC fast path is silicon-blocked (see ALP_V2N_SCI7_DMAC below), so the
+ * 25 MHz link uses a tight TDRE/RDRF-polled loop instead: at 25 MHz a frame
+ * is 320 ns while a CSR poll + TDR/RDR access pair is well under that on the
+ * 200 MHz CM33, and -- decisively -- the MASTER paces SCK (the SCI only
+ * clocks while TDR is fed), so a late poll merely stretches the inter-byte
+ * gap; the GD32 slave's DMA capture is indifferent to gaps.  Frames are
+ * <= 69 bytes, so worst-case CPU time is tens of microseconds per
+ * transaction at the example's Hz-rate cadence -- negligible for the
+ * supervisor link, with zero per-byte interrupts. */
+#define ALP_V2N_POLL_GUARD 100000u /* per-flag spin bound (~ms at 25 MHz) */
+
+/* ── SCI7 DMA fast path: PRESERVED BUT DISABLED (silicon-blocked) ────────────
+ * Set to 1 (plus SCI_B_SPI_CFG_DMA_SUPPORT_ENABLE=1 in r_sci_b_spi_cfg.h) to
+ * re-wire the FSP transfer interface to the RZ/V2N MCPU DMAC (DMAC0) via the
+ * rzv FSP r_dmac_b.  Bring-up findings 2026-06-03 (scope + ICU/DMAC
+ * register post-mortems via A55 /dev/mem):
+ *   - DM4SEL0 correctly routes trigger 168 (SCI7 TXI; the bsp_dmac.h enum
+ *     values are the right DkRQ_SEL numbers -- the HW manual Table 4.6-23
+ *     column 203/205 routes NOTHING),
+ *   - with CCR0.TE+TIE armed and CSR.TDRE high the channel still never
+ *     streams: at most one beat per arm, CHSTAT parks at RQST(+SUS),
+ *     EN never reads 1 -- identical across ack modes (MASK_DACK_OUTPUT,
+ *     BUS_CYCLE) and detection modes (edge, HIGH_LEVEL),
+ *   - net: zero SCK on the wire.  FSP r_dmac_b + r_sci_b_spi pairing is
+ *     unvalidated by the vendor on this SoC; raise with Renesas before
+ *     re-enabling.  DMAC0 ch0/ch1, NVIC 89/90; kernel AMP patch already
+ *     holds the DMAC0 clocks. */
+#ifndef ALP_V2N_SCI7_DMAC
+#define ALP_V2N_SCI7_DMAC 0
+#endif
+
+#if ALP_V2N_SCI7_DMAC
+#include "r_dmac_b.h"
+#endif
+
 /* FSP r_sci_b_spi interrupt service routines (vendored module). */
 extern void sci_b_spi_rxi_isr(void);
 extern void sci_b_spi_txi_isr(void);
 extern void sci_b_spi_tei_isr(void);
 extern void sci_b_spi_eri_isr(void);
+
+#if ALP_V2N_SCI7_DMAC
+/* FSP r_dmac_b transfer-end ISR + the r_sci_b_spi DMA completion hooks the
+ * DMAC callbacks MUST invoke (they arm CCR0.TEIE so tei fires
+ * SPI_EVENT_TRANSFER_COMPLETE; the FSP does not auto-wire them). */
+extern void dmac_b_int_isr(void);
+extern void sci_b_spi_rx_dmac_callback(sci_b_spi_instance_ctrl_t const * const p_ctrl);
+extern void sci_b_spi_tx_dmac_callback(sci_b_spi_instance_ctrl_t const * const p_ctrl);
+
+#define ALP_V2N_SCI7_DMAC_UNIT  0 /* DMAC0 = MCPU (CM33) DMAC            */
+#define ALP_V2N_SCI7_DMAC_RX_CH 0 /* DMAINT0 -> NVIC 89                   */
+#define ALP_V2N_SCI7_DMAC_TX_CH 1 /* DMAINT1 -> NVIC 90                   */
+#define ALP_V2N_DMAC_TRIGGER_SCI7_RXI DMAC_TRIGGER_EVENT_SCI7_RXI
+#define ALP_V2N_DMAC_TRIGGER_SCI7_TXI DMAC_TRIGGER_EVENT_SCI7_TXI
+#endif /* ALP_V2N_SCI7_DMAC */
 
 struct rz_sci_b_spi_config {
 	const struct pinctrl_dev_config *pcfg;
@@ -248,6 +301,28 @@ static void rz_sci_b_spi_callback(spi_callback_args_t *p_args)
 		break;
 	}
 }
+
+#if ALP_V2N_SCI7_DMAC
+/* DMAC completion bridges: the r_dmac_b channel-end ISR calls these (via the
+ * extended cfg p_callback); they forward to the r_sci_b_spi DMA hooks that
+ * disarm TIE/RIE and arm TEIE, after which the SCI tei ISR raises
+ * SPI_EVENT_TRANSFER_COMPLETE through the normal callback path. */
+static void rz_sci_b_spi_rx_dmac_cb(dmac_b_callback_args_t *p_args)
+{
+	const struct device *dev = p_args->p_context;
+	struct rz_sci_b_spi_data *data = dev->data;
+
+	sci_b_spi_rx_dmac_callback(&data->fsp_ctrl);
+}
+
+static void rz_sci_b_spi_tx_dmac_cb(dmac_b_callback_args_t *p_args)
+{
+	const struct device *dev = p_args->p_context;
+	struct rz_sci_b_spi_data *data = dev->data;
+
+	sci_b_spi_tx_dmac_callback(&data->fsp_ctrl);
+}
+#endif /* ALP_V2N_SCI7_DMAC */
 
 static int rz_sci_b_spi_configure(const struct device *dev, const struct spi_config *config)
 {
@@ -389,6 +464,20 @@ static void rz_sci_b_spi_recover(struct rz_sci_b_spi_data *data)
 		return;
 	}
 
+#if ALP_V2N_SCI7_DMAC
+	/* Quiesce the DMAC channels FIRST so no further RDR/TDR traffic lands
+	 * while the SCI is being cleaned up; an armed channel left over from the
+	 * failed transfer must not fire into the next one.  The next transfer's
+	 * reconfigure()/reset() re-arms them from scratch.  (Outside the
+	 * irq_lock: R_DMAC_B_Disable contains short register-wait spins.) */
+	if (data->fsp_cfg.p_transfer_rx != NULL) {
+		(void)R_DMAC_B_Disable(data->fsp_cfg.p_transfer_rx->p_ctrl);
+	}
+	if (data->fsp_cfg.p_transfer_tx != NULL) {
+		(void)R_DMAC_B_Disable(data->fsp_cfg.p_transfer_tx->p_ctrl);
+	}
+#endif /* ALP_V2N_SCI7_DMAC */
+
 	key = irq_lock();
 
 	p_reg->CCR0 &= (uint32_t)~(R_SCI_B0_CCR0_TE_Msk | R_SCI_B0_CCR0_RE_Msk |
@@ -406,12 +495,79 @@ static void rz_sci_b_spi_recover(struct rz_sci_b_spi_data *data)
 	irq_unlock(key);
 }
 
+/*
+ * Zero-interrupt polled full-duplex engine (the 25 MHz production path; see
+ * the data-path note at the top of the file).  Walks the whole spi_context
+ * buffer set frame by frame: feed TDR on TDRE, collect RDR on RDRF (the SCI
+ * auto-clears both flags on the data-register access, exactly as the FSP's
+ * own ISRs rely on).  The configure() step has already programmed the bit
+ * rate (CCR2) and frame format (CCR3) via R_SCI_B_SPI_Open; this engine only
+ * drives TE/RE around the transaction, so rz_sci_b_spi_recover() remains
+ * valid for any error exit.  Synchronous by design -- with master-paced SCK
+ * the whole worst-case frame (69 B) is ~25 us of wall time at 25 MHz.
+ */
+static int rz_sci_b_spi_xfer_polled(struct rz_sci_b_spi_data *data)
+{
+	R_SCI_B0_Type *p_reg = data->fsp_ctrl.p_reg;
+	struct spi_context *ctx = &data->ctx;
+	uint32_t guard;
+
+	/* Engage the transceiver.  TE+RE together: the FSP warns RE-without-TE
+	 * free-runs SCK, and TE-only would discard the (full-duplex) returns. */
+	p_reg->CCR0 |= (R_SCI_B0_CCR0_TE_Msk | R_SCI_B0_CCR0_RE_Msk);
+
+	while (spi_context_tx_on(ctx) || spi_context_rx_on(ctx)) {
+		const uint8_t out = spi_context_tx_buf_on(ctx) ? *ctx->tx_buf : 0x00U;
+		uint8_t in;
+
+		guard = ALP_V2N_POLL_GUARD;
+		while (!(p_reg->CSR & R_SCI_B0_CSR_TDRE_Msk)) {
+			if (--guard == 0U) {
+				goto stalled;
+			}
+		}
+		p_reg->TDR = (0xFFFFFF00UL | out);
+
+		guard = ALP_V2N_POLL_GUARD;
+		while (!(p_reg->CSR & R_SCI_B0_CSR_RDRF_Msk)) {
+			if (--guard == 0U) {
+				goto stalled;
+			}
+		}
+		in = (uint8_t)(p_reg->RDR & 0xFFU);
+
+		if (spi_context_rx_buf_on(ctx)) {
+			*ctx->rx_buf = in;
+		}
+		spi_context_update_tx(ctx, 1, 1);
+		spi_context_update_rx(ctx, 1, 1);
+	}
+
+	/* Let the final frame drain out of the shifter before dropping TE --
+	 * deasserting CS mid-shift would truncate the slave's last byte. */
+	guard = ALP_V2N_POLL_GUARD;
+	while (!(p_reg->CSR & R_SCI_B0_CSR_TEND_Msk)) {
+		if (--guard == 0U) {
+			goto stalled;
+		}
+	}
+
+	p_reg->CCR0 &= (uint32_t)~(R_SCI_B0_CCR0_TE_Msk | R_SCI_B0_CCR0_RE_Msk);
+
+	return 0;
+
+stalled:
+	/* A wedged flag (clock loss, gate closure mid-transfer) -- clean the
+	 * controller so the next attempt re-arms; the protocol layer retries. */
+	rz_sci_b_spi_recover(data);
+	return -EIO;
+}
+
 static int transceive(const struct device *dev, const struct spi_config *config,
 		      const struct spi_buf_set *tx_bufs, const struct spi_buf_set *rx_bufs,
 		      bool asynchronous, spi_callback_t cb, void *userdata)
 {
 	struct rz_sci_b_spi_data *data = dev->data;
-	fsp_err_t fsp_err;
 	int ret;
 
 	if (!tx_bufs && !rx_bufs) {
@@ -440,38 +596,15 @@ static int transceive(const struct device *dev, const struct spi_config *config,
 	spi_context_cs_control(&data->ctx, true);
 	alp_v2n_cs_assert();
 
-	data->data_len = spi_context_max_continuous_chunk(&data->ctx);
+	ret = rz_sci_b_spi_xfer_polled(data);
 
-	if (data->ctx.rx_buf == NULL) {
-		fsp_err = R_SCI_B_SPI_Write(&data->fsp_ctrl, data->ctx.tx_buf, data->data_len,
-					    SPI_BIT_WIDTH_8_BITS);
-	} else if (data->ctx.tx_buf == NULL) {
-		fsp_err = R_SCI_B_SPI_Read(&data->fsp_ctrl, data->ctx.rx_buf, data->data_len,
-					   SPI_BIT_WIDTH_8_BITS);
-	} else {
-		fsp_err = R_SCI_B_SPI_WriteRead(&data->fsp_ctrl, data->ctx.tx_buf, data->ctx.rx_buf,
-						data->data_len, SPI_BIT_WIDTH_8_BITS);
-	}
+	spi_context_cs_control(&data->ctx, false);
+	alp_v2n_cs_deassert();
 
-	if (fsp_err != FSP_SUCCESS) {
-		spi_context_cs_control(&data->ctx, false);
-		alp_v2n_cs_deassert();
-		/* FSP_ERR_IN_USE here means a prior error left TE/RE latched;
-		 * clear them so the NEXT ping is not rejected too. */
-		rz_sci_b_spi_recover(data);
-		ret = -EIO;
-		goto end;
-	}
-
-	ret = spi_context_wait_for_completion(&data->ctx);
-
-	if (ret < 0) {
-		/* A bus error (-EIO via the FSP error callback) or a completion
-		 * timeout (-ETIMEDOUT; the master-mode wait is bounded by
-		 * CONFIG_SPI_COMPLETION_TIMEOUT_TOLERANCE) leaves the controller
-		 * wedged with TE/RE latched.  Recover so the next ping re-arms
-		 * cleanly instead of returning FSP_ERR_IN_USE forever. */
-		rz_sci_b_spi_recover(data);
+	if (asynchronous) {
+		/* The engine is synchronous; satisfy the async contract by
+		 * completing immediately (fires the user callback). */
+		spi_context_complete(&data->ctx, dev, ret);
 	}
 
 #ifdef CONFIG_SPI_SLAVE
@@ -582,6 +715,21 @@ static int rz_sci_b_spi_init(const struct device *dev)
 		irq_enable(DT_IRQ_BY_NAME(SCI_NODE(n), irq_name, irq));                            \
 	} while (0)
 
+#if ALP_V2N_SCI7_DMAC
+/* DMAC0 channel-end vectors (CM33 NVIC 89+ch).  The FSP enables them
+ * (R_BSP_IrqCfgEnable in the DMAC enable path) and resolves the channel
+ * ctrl in dmac_b_int_isr via the registered ISR context. */
+#define RZ_SCI_B_SPI_DMAC_CONNECT(n)                                                               \
+	IRQ_CONNECT(DMAC_B0_DMAINT0_IRQn + ALP_V2N_SCI7_DMAC_RX_CH,                                \
+		    DT_IRQ_BY_NAME(SCI_NODE(n), rxi, priority), dmac_b_int_isr,                    \
+		    DEVICE_DT_INST_GET(n), 0);                                                     \
+	IRQ_CONNECT(DMAC_B0_DMAINT0_IRQn + ALP_V2N_SCI7_DMAC_TX_CH,                                \
+		    DT_IRQ_BY_NAME(SCI_NODE(n), txi, priority), dmac_b_int_isr,                    \
+		    DEVICE_DT_INST_GET(n), 0);
+#else
+#define RZ_SCI_B_SPI_DMAC_CONNECT(n)
+#endif /* ALP_V2N_SCI7_DMAC */
+
 #define RZ_SCI_B_SPI_CONFIG_FUNC(n)                                                                \
 	RZ_SCI_B_SPI_CONNECT_IRQ_EVENT(n, rxi, RXI);                                               \
 	RZ_SCI_B_SPI_CONNECT_IRQ_EVENT(n, txi, TXI);                                               \
@@ -590,10 +738,96 @@ static int rz_sci_b_spi_init(const struct device *dev)
 	RZ_SCI_B_SPI_IRQ_CONNECT(n, rxi, sci_b_spi_rxi_isr);                                       \
 	RZ_SCI_B_SPI_IRQ_CONNECT(n, txi, sci_b_spi_txi_isr);                                       \
 	RZ_SCI_B_SPI_IRQ_CONNECT(n, tei, sci_b_spi_tei_isr);                                       \
-	RZ_SCI_B_SPI_IRQ_CONNECT(n, eri, sci_b_spi_eri_isr);
+	RZ_SCI_B_SPI_IRQ_CONNECT(n, eri, sci_b_spi_eri_isr);                                       \
+	RZ_SCI_B_SPI_DMAC_CONNECT(n)
+
+#if ALP_V2N_SCI7_DMAC
+/* Per-instance DMAC0 transfer pair (RX then TX).  transfer_info_t stays
+ * mutable (the FSP SCI module rewrites src/dest/length per transfer); the
+ * cfg/extended-cfg/instance structs are const.  The channel-end NVIC vector
+ * is enabled by the FSP itself (R_BSP_IrqCfgEnable inside the DMAC enable
+ * path, which also registers the ISR context); the glue only IRQ_CONNECTs. */
+#define RZ_SCI_B_SPI_DMAC_DEFINE(n, dir, ch, trigger, reqdir, cb)                                  \
+	static dmac_b_instance_ctrl_t rz_sci_b_spi_##dir##_dmac_ctrl_##n;                          \
+	static transfer_info_t rz_sci_b_spi_##dir##_dmac_info_##n;                                 \
+	static const dmac_b_extended_cfg_t rz_sci_b_spi_##dir##_dmac_ext_##n = {                   \
+		.unit = ALP_V2N_SCI7_DMAC_UNIT,                                                    \
+		.channel = (ch),                                                                   \
+		.dmac_int_irq = (IRQn_Type)(DMAC_B0_DMAINT0_IRQn + (ch)),                          \
+		.dmac_int_ipl = DT_IRQ_BY_NAME(SCI_NODE(n), rxi, priority),                        \
+		.activation_source = (trigger),                                                    \
+		/* BUS_CYCLE ack: the on-chip TDRE/RDRF requests are flow-controlled               \
+		 * by the data-register access itself -- the bus cycle IS the                      \
+		 * acknowledge.  With the DACK masked instead, the level request is                \
+		 * never acknowledged and the channel parks SUSPENDED after its                    \
+		 * first beat (CHSTAT.SUS=1, scope-confirmed zero SCK, 2026-06-03).                \
+		 * Matches the Linux rz-dmac convention for peripheral slaves. */                  \
+		.ack_mode = DMAC_B_ACK_MODE_BUS_CYCLE_MODE,                                        \
+		/* external pin mode is don't-care for internal (peripheral)                       \
+		 * triggers.  internal_detection MUST be HIGH_LEVEL (CHCFG                         \
+		 * LVL|HIEN): the SCI TDRE/RDRF requests are level lines, and the                  \
+		 * FSP arms the transfer BEFORE start_transfer() sets CCR0.TE --                   \
+		 * with edge/no detection the only TDRE edge is consumed while                     \
+		 * TE=0 (one byte vanishes into a non-transmitting TDR) and no new                 \
+		 * edge ever comes, freezing the stream at CRSA=N0SA+1 with zero                   \
+		 * SCK (seen on silicon 2026-06-03, scope-confirmed).  Level                       \
+		 * detection re-fires as long as the line is active.  This matches                 \
+		 * the Linux rz-dmac convention for on-chip peripheral requests. */                \
+		.external_detection_mode = DMAC_B_EXTERNAL_DETECTION_LOW_LEVEL,                    \
+		.internal_detection_mode = DMAC_B_INTERNAL_DETECTION_HIGH_LEVEL,                   \
+		.activation_request_source_select = (reqdir),                                      \
+		.dmac_mode = DMAC_B_MODE_SELECT_REGISTER,                                          \
+		.continuous_setting = DMAC_B_CONTINUOUS_SETTING_TRANSFER_ONCE,                     \
+		.transfer_interval = 0,                                                            \
+		.channel_scheduling = DMAC_B_CHANNEL_SCHEDULING_FIXED,                             \
+		.p_callback = (cb),                                                                \
+		.p_context = (void *)DEVICE_DT_INST_GET(n),                                        \
+	};                                                                                         \
+	static const transfer_cfg_t rz_sci_b_spi_##dir##_dmac_cfg_##n = {                          \
+		.p_info = &rz_sci_b_spi_##dir##_dmac_info_##n,                                     \
+		.p_extend = &rz_sci_b_spi_##dir##_dmac_ext_##n,                                    \
+	};                                                                                         \
+	static const transfer_instance_t rz_sci_b_spi_##dir##_transfer_##n = {                     \
+		.p_ctrl = &rz_sci_b_spi_##dir##_dmac_ctrl_##n,                                     \
+		.p_cfg = &rz_sci_b_spi_##dir##_dmac_cfg_##n,                                       \
+		.p_api = &g_transfer_on_dmac_b,                                                    \
+	};
+
+#define RZ_SCI_B_SPI_DMAC_PAIR(n)                                                                  \
+	RZ_SCI_B_SPI_DMAC_DEFINE(n, rx, ALP_V2N_SCI7_DMAC_RX_CH,                                   \
+				 ALP_V2N_DMAC_TRIGGER_SCI7_RXI,                                    \
+				 DMAC_B_REQUEST_DIRECTION_DESTINATION_MODULE,                      \
+				 rz_sci_b_spi_rx_dmac_cb)                                          \
+	RZ_SCI_B_SPI_DMAC_DEFINE(n, tx, ALP_V2N_SCI7_DMAC_TX_CH,                                   \
+				 ALP_V2N_DMAC_TRIGGER_SCI7_TXI,                                    \
+				 DMAC_B_REQUEST_DIRECTION_SOURCE_MODULE,                           \
+				 rz_sci_b_spi_tx_dmac_cb)
+#define RZ_SCI_B_SPI_TRANSFER_TX(n) (&rz_sci_b_spi_tx_transfer_##n)
+#define RZ_SCI_B_SPI_TRANSFER_RX(n) (&rz_sci_b_spi_rx_transfer_##n)
+/* DMA mode: rxi/txi stay OFF the NVIC (-1; allowed by the FSP asserts when
+ * transfers are supplied) -- on this SoC the SCI events fan out to BOTH the
+ * DMAC trigger mux and the NVIC, and the RA-derived rxi/txi ISRs declare the
+ * transfer done early (tx_count pre-set == count arms TEIE on the first
+ * TDR-empty), truncating frames. */
+#define RZ_SCI_B_SPI_RXI_IRQ(n) ((IRQn_Type)-1)
+#define RZ_SCI_B_SPI_TXI_IRQ(n) ((IRQn_Type)-1)
+#else
+#define RZ_SCI_B_SPI_DMAC_PAIR(n)
+#define RZ_SCI_B_SPI_TRANSFER_TX(n) NULL
+#define RZ_SCI_B_SPI_TRANSFER_RX(n) NULL
+/* Polled engine: the FSP interrupt machinery is configured (the asserts
+ * require valid rxi/txi vectors when no transfers are supplied) but never
+ * armed -- the polled engine drives TE/RE itself and the FSP Write/Read
+ * entry points are not used, so TIE/RIE never set and these ISRs stay
+ * silent. */
+#define RZ_SCI_B_SPI_RXI_IRQ(n) DT_IRQ_BY_NAME(SCI_NODE(n), rxi, irq)
+#define RZ_SCI_B_SPI_TXI_IRQ(n) DT_IRQ_BY_NAME(SCI_NODE(n), txi, irq)
+#endif /* ALP_V2N_SCI7_DMAC */
 
 #define RZ_SCI_B_SPI_INIT(n)                                                                       \
 	PINCTRL_DT_DEFINE(SCI_NODE(n));                                                            \
+                                                                                                   \
+	RZ_SCI_B_SPI_DMAC_PAIR(n)                                                                  \
                                                                                                    \
 	static const struct rz_sci_b_spi_config rz_sci_b_spi_config_##n = {                        \
 		.pcfg = PINCTRL_DT_DEV_CONFIG_GET(SCI_NODE(n)),                                    \
@@ -606,16 +840,16 @@ static int rz_sci_b_spi_init(const struct device *dev)
 		.fsp_cfg =                                                                         \
 			{                                                                          \
 				.channel = DT_PROP(SCI_NODE(n), channel),                          \
-				.rxi_irq = DT_IRQ_BY_NAME(SCI_NODE(n), rxi, irq),                  \
+				.rxi_irq = RZ_SCI_B_SPI_RXI_IRQ(n),                                \
 				.rxi_ipl = DT_IRQ_BY_NAME(SCI_NODE(n), rxi, priority),             \
-				.txi_irq = DT_IRQ_BY_NAME(SCI_NODE(n), txi, irq),                  \
+				.txi_irq = RZ_SCI_B_SPI_TXI_IRQ(n),                                \
 				.txi_ipl = DT_IRQ_BY_NAME(SCI_NODE(n), txi, priority),             \
 				.tei_irq = DT_IRQ_BY_NAME(SCI_NODE(n), tei, irq),                  \
 				.tei_ipl = DT_IRQ_BY_NAME(SCI_NODE(n), tei, priority),             \
 				.eri_irq = DT_IRQ_BY_NAME(SCI_NODE(n), eri, irq),                  \
 				.eri_ipl = DT_IRQ_BY_NAME(SCI_NODE(n), eri, priority),             \
-				.p_transfer_tx = NULL,                                             \
-				.p_transfer_rx = NULL,                                             \
+				.p_transfer_tx = RZ_SCI_B_SPI_TRANSFER_TX(n),                      \
+				.p_transfer_rx = RZ_SCI_B_SPI_TRANSFER_RX(n),                      \
 			},                                                                         \
 	};                                                                                         \
                                                                                                    \

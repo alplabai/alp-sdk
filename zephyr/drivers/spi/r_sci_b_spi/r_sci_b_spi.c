@@ -15,13 +15,14 @@
  * Macro definitions
  **********************************************************************************************************************/
 
-#define SCI_B_SPI_PRV_DMA_RX_TRANSFER_SETTINGS    ((TRANSFER_MODE_NORMAL << 30U) | (TRANSFER_SIZE_1_BYTE << 28U) | \
-                                                   (TRANSFER_ADDR_MODE_FIXED << 26U) | (TRANSFER_IRQ_END << 21U) | \
-                                                   (TRANSFER_ADDR_MODE_INCREMENTED << 18U))
-
-#define SCI_B_SPI_PRV_DMA_TX_TRANSFER_SETTINGS    ((TRANSFER_MODE_NORMAL << 30U) | (TRANSFER_SIZE_1_BYTE << 28U) |       \
-                                                   (TRANSFER_ADDR_MODE_INCREMENTED << 26U) | (TRANSFER_IRQ_END << 21U) | \
-                                                   (TRANSFER_ADDR_MODE_FIXED << 18U))
+/* RZ-port deviation (documented): the RA source packs the transfer settings
+ * into transfer_info_t.transfer_settings_word with the two macros below.  The
+ * rzv BSP overrides transfer_info_t (BSP_OVERRIDE_TRANSFER_INFO_T in
+ * bsp_override.h) with DISCRETE members (mode / src_size / dest_size /
+ * src_addr_mode / dest_addr_mode / next1) and no packed word, which is what
+ * the rzv r_dmac_b transfer driver consumes.  r_sci_b_spi_transfer_config()
+ * and r_sci_b_spi_write_read_common() below therefore set the discrete
+ * members directly instead of using these macros. */
 
 #define SCI_B_SPI_PRV_CLK_MAX_N                   (0xFFU)
 #define SCI_B_SPI_PRV_CLK_MAX_n                   (3U)
@@ -715,9 +716,18 @@ static fsp_err_t r_sci_b_spi_transfer_config (sci_b_spi_instance_ctrl_t * const 
 
     if (NULL != p_cfg->p_transfer_rx)
     {
-        /* Set the initial configuration for the rx transfer instance. */
+        /* Set the initial configuration for the rx transfer instance.
+         * RZ-port deviation: discrete rzv transfer_info_t members in place of
+         * the RA packed transfer_settings_word (see macro note at the top). */
         transfer_instance_t const * p_transfer = p_cfg->p_transfer_rx;
-        p_transfer->p_cfg->p_info->transfer_settings_word = SCI_B_SPI_PRV_DMA_RX_TRANSFER_SETTINGS;
+        p_transfer->p_cfg->p_info->mode           = TRANSFER_MODE_NORMAL;
+        p_transfer->p_cfg->p_info->src_size       = TRANSFER_SIZE_1_BYTE;
+        p_transfer->p_cfg->p_info->dest_size      = TRANSFER_SIZE_1_BYTE;
+        p_transfer->p_cfg->p_info->src_addr_mode  = TRANSFER_ADDR_MODE_FIXED;
+        p_transfer->p_cfg->p_info->dest_addr_mode = TRANSFER_ADDR_MODE_INCREMENTED;
+        p_transfer->p_cfg->p_info->p_next1_src    = NULL;
+        p_transfer->p_cfg->p_info->p_next1_dest   = NULL;
+        p_transfer->p_cfg->p_info->next1_length   = 1;
         p_transfer->p_cfg->p_info->p_src = (void *) &p_ctrl->p_reg->RDR;
 
         /* Open the transfer instance. */
@@ -727,10 +737,18 @@ static fsp_err_t r_sci_b_spi_transfer_config (sci_b_spi_instance_ctrl_t * const 
 
     if (NULL != p_cfg->p_transfer_tx)
     {
-        /* Set the initial configuration for the tx transfer instance. */
+        /* Set the initial configuration for the tx transfer instance.
+         * RZ-port deviation: discrete rzv transfer_info_t members (see above). */
         transfer_instance_t const * p_transfer = p_cfg->p_transfer_tx;
-        p_transfer->p_cfg->p_info->transfer_settings_word = SCI_B_SPI_PRV_DMA_TX_TRANSFER_SETTINGS;
-        p_transfer->p_cfg->p_info->p_dest                 = (void *) &p_ctrl->p_reg->TDR;
+        p_transfer->p_cfg->p_info->mode           = TRANSFER_MODE_NORMAL;
+        p_transfer->p_cfg->p_info->src_size       = TRANSFER_SIZE_1_BYTE;
+        p_transfer->p_cfg->p_info->dest_size      = TRANSFER_SIZE_1_BYTE;
+        p_transfer->p_cfg->p_info->src_addr_mode  = TRANSFER_ADDR_MODE_INCREMENTED;
+        p_transfer->p_cfg->p_info->dest_addr_mode = TRANSFER_ADDR_MODE_FIXED;
+        p_transfer->p_cfg->p_info->p_next1_src    = NULL;
+        p_transfer->p_cfg->p_info->p_next1_dest   = NULL;
+        p_transfer->p_cfg->p_info->next1_length   = 1;
+        p_transfer->p_cfg->p_info->p_dest         = (void *) &p_ctrl->p_reg->TDR;
 
         /* Open the transfer instance. */
         err = p_transfer->p_api->open(p_transfer->p_ctrl, p_transfer->p_cfg);
@@ -818,21 +836,23 @@ static fsp_err_t r_sci_b_spi_write_read_common (sci_b_spi_instance_ctrl_t * cons
 #if SCI_B_SPI_CFG_DMA_SUPPORT_ENABLE == 1
     if (p_ctrl->p_cfg->p_transfer_tx)
     {
-        /* Configure the tx transfer instance. */
+        /* Configure the tx transfer instance.
+         * RZ-port deviation: discrete rzv transfer_info_t members; length is
+         * a uint32_t on rzv (no uint16_t narrowing needed). */
         p_ctrl->tx_count = length;
         transfer_instance_t const * p_transfer = p_ctrl->p_cfg->p_transfer_tx;
-        p_transfer->p_cfg->p_info->length = (uint16_t) length;
+        p_transfer->p_cfg->p_info->length = length;
 
         if (NULL == p_src)
         {
             /* If the source is NULL transmit using a dummy value using FIXED mode. */
             static uint8_t tx_dummy = 0;
-            p_transfer->p_cfg->p_info->transfer_settings_word_b.src_addr_mode = TRANSFER_ADDR_MODE_FIXED;
+            p_transfer->p_cfg->p_info->src_addr_mode = TRANSFER_ADDR_MODE_FIXED;
             p_transfer->p_cfg->p_info->p_src = &tx_dummy;
         }
         else
         {
-            p_transfer->p_cfg->p_info->transfer_settings_word_b.src_addr_mode = TRANSFER_ADDR_MODE_INCREMENTED;
+            p_transfer->p_cfg->p_info->src_addr_mode = TRANSFER_ADDR_MODE_INCREMENTED;
             p_transfer->p_cfg->p_info->p_src = p_src;
         }
 
