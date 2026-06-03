@@ -1,0 +1,92 @@
+From: Caner Alp <caner.alp@alpelectronix.com>
+Date: Wed, 3 Jun 2026 20:00:00 +0200
+Subject: [PATCH] clk: renesas: r9a09g056: keep CM33-owned RSCI7/RIIC8 clocks
+ and MSTOP gates on
+
+AMP clock-ownership fix for the ALP E1M V2N SoM: RSCI7 (SCI7 Simple-SPI)
+and RIIC8 drive the on-module GD32G553 supervisor MCU from the Cortex-M33
+system manager, not from Linux.
+
+The rzv2h-cpg driver couples each module clock to its CPG BUS_MSTOP bits:
+disabling the clock also asserts the module-stop, which gates *register
+access* to the peripheral.  At late init, clk_disable_unused walks every
+module clock with no Linux consumer -- including RSCI7/RIIC8, which Linux
+never uses -- turns the clocks off and asserts their MSTOP bits.  The
+CM33, mid-operation on SCI7 at that moment, bus-faults on its next
+register access and is dead until the next power cycle.  (Verified on
+silicon: at the U-Boot prompt all gates are still open exactly as BL2
+released them; they close during Linux boot, at the unused-clock sweep.)
+
+The CM33 cannot help itself: it can write its own CPG CLKON view, but the
+BUS_MSTOP registers are not writable from the CM33 master, so only the
+A55 side can keep the bus gates open.
+
+Mark all five rsci_7_* module clocks and riic_8_ckm DEF_MOD_CRITICAL:
+
+  - CLK_IS_CRITICAL keeps the clocks enabled forever, so the unused-clock
+    sweep skips them and never asserts their MSTOP bits;
+  - the driver's critical-clock registration path seeds the MSTOP
+    refcount, (re-)releasing the gates early in boot;
+  - every sharer of BUS_MSTOP(11, BIT(10)) is marked, so the per-bit
+    refcount can never drop to zero through a non-critical sibling.
+
+Silicon-validated 2026-06-03 on E1M-V2M101 (RZ/V2N + GD32G553): across
+two cold power cycles and a warm reboot, with zero manual intervention,
+CLKON_8 keeps bits 0-4 set and BUS11_MSTOP bit 10 released through and
+beyond clk_disable_unused (the rest of BUS11 reads stopped, as expected),
+and the CM33<->GD32 SPI link runs uninterrupted from ~2 s after power-on.
+
+Upstream-relevance: generic RZ/V2N + remote-core peripheral ownership;
+candidates for a DT-driven (e.g. critical-clocks) representation later.
+
+Signed-off-by: Caner Alp <caner.alp@alpelectronix.com>
+---
+ drivers/clk/renesas/r9a09g056-cpg.c | 22 ++++++++++++++++------
+ 1 file changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/clk/renesas/r9a09g056-cpg.c b/drivers/clk/renesas/r9a09g056-cpg.c
+index ca6129245a4d..64dc9fa692be 100644
+--- a/drivers/clk/renesas/r9a09g056-cpg.c
++++ b/drivers/clk/renesas/r9a09g056-cpg.c
+@@ -452,15 +452,25 @@ static const struct rzv2h_mod_clk r9a09g056_mod_clks[] __initconst = {
+ 						BUS_MSTOP(11, BIT(9))),
+ 	DEF_MOD("rsci_6_ps_ps1_n",		CLK_PLLCLN_DIV64, 7, 15, 3, 31,
+ 						BUS_MSTOP(11, BIT(9))),
+-	DEF_MOD("rsci_7_pclk",			CLK_PLLCM33_DIV16, 8, 0, 4, 0,
++	/*
++	 * ALP E1M-V2M101 AMP clock ownership: RSCI7 (and RIIC8 below) belong to
++	 * the Cortex-M33 system manager, which drives the on-module GD32G553
++	 * supervisor over SCI7 Simple-SPI (and I2C8).  The CM33 cannot release
++	 * the CPG BUS_MSTOP gates itself, so if Linux disables these unused-
++	 * by-Linux clocks (clk_disable_unused), the coupled MSTOP assertion
++	 * bus-faults the CM33 mid-operation.  CRITICAL keeps clock + MSTOP
++	 * held for the remote core.  All sharers of the MSTOP bit are marked
++	 * so the refcount can never drop to zero.
++	 */
++	DEF_MOD_CRITICAL("rsci_7_pclk",			CLK_PLLCM33_DIV16, 8, 0, 4, 0,
+ 						BUS_MSTOP(11, BIT(10))),
+-	DEF_MOD("rsci_7_tclk",			CLK_PLLCM33_DIV16, 8, 1, 4, 1,
++	DEF_MOD_CRITICAL("rsci_7_tclk",			CLK_PLLCM33_DIV16, 8, 1, 4, 1,
+ 						BUS_MSTOP(11, BIT(10))),
+-	DEF_MOD("rsci_7_ps_ps3_n",		CLK_PLLCLN_DIV1024, 8, 2, 4, 2,
++	DEF_MOD_CRITICAL("rsci_7_ps_ps3_n",		CLK_PLLCLN_DIV1024, 8, 2, 4, 2,
+ 						BUS_MSTOP(11, BIT(10))),
+-	DEF_MOD("rsci_7_ps_ps2_n",		CLK_PLLCLN_DIV256, 8, 3, 4, 3,
++	DEF_MOD_CRITICAL("rsci_7_ps_ps2_n",		CLK_PLLCLN_DIV256, 8, 3, 4, 3,
+ 						BUS_MSTOP(11, BIT(10))),
+-	DEF_MOD("rsci_7_ps_ps1_n",		CLK_PLLCLN_DIV64, 8, 4, 4, 4,
++	DEF_MOD_CRITICAL("rsci_7_ps_ps1_n",		CLK_PLLCLN_DIV64, 8, 4, 4, 4,
+ 						BUS_MSTOP(11, BIT(10))),
+ 	DEF_MOD("rsci_8_pclk",			CLK_PLLCM33_DIV16, 8, 5, 4, 5,
+ 						BUS_MSTOP(11, BIT(11))),
+@@ -490,7 +500,7 @@ static const struct rzv2h_mod_clk r9a09g056_mod_clks[] __initconst = {
+ 						BUS_MSTOP(10, BIT(15))),
+ 	DEF_MOD("i3c_0_tclk",			CLK_PLLCLN_DIV8, 9, 2, 4, 18,
+ 						BUS_MSTOP(10, BIT(15))),
+-	DEF_MOD("riic_8_ckm",			CLK_PLLCM33_DIV16, 9, 3, 4, 19,
++	DEF_MOD_CRITICAL("riic_8_ckm",			CLK_PLLCM33_DIV16, 9, 3, 4, 19,
+ 						BUS_MSTOP(3, BIT(13))),
+ 	DEF_MOD("riic_0_ckm",			CLK_PLLCLN_DIV16, 9, 4, 4, 20,
+ 						BUS_MSTOP(1, BIT(1))),
+--
+2.43.0
