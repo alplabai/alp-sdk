@@ -61,6 +61,21 @@
  * P29 (port-9 output-data register, offset 0x09) = 0x40410029.
  * NOTE: board-specific bring-up shim for the gd32 bridge; the durable fix is
  * the gpio_rz/IDAU output path + dropping the Linux SD1_CD pin claim. */
+/* CS OWNERSHIP (silicon-resolved 2026-06-03): the direct latch below is THE
+ * chip-select owner on RZ/V2N.  Setting this to 0 routes CS through the
+ * standard spi_context GPIO path (gpio_rz) instead and skips the
+ * per-transceive pin re-own -- tested on silicon WITH the carrier P94/SD1_CD
+ * clobber fix deployed, and it FAILS: zero bytes reach the GD32.  Root cause:
+ * the gpio_rz configure/output path leaves PM9's P97 field in the high-only
+ * drive mode (0b01; empirically swept -- the pad needs 0b11), and the alp SPI
+ * backend's gpio_pin_configure_dt() at alp_spi_open() re-applies that broken
+ * mode even with Linux's port-9 clobber gone -- which is also why the
+ * per-transceive alp_v2n_pins_assert() below must stay.  Re-test with 0 only
+ * after the gpio_rz output path is fixed for this pad. */
+#ifndef ALP_V2N_DIRECT_CS_SHIM
+#define ALP_V2N_DIRECT_CS_SHIM 1
+#endif
+
 #define ALP_V2N_P9_LATCH 0x40410029u
 #define ALP_V2N_CS_MASK  (1u << 7)
 /* The GD32 detects CS via PA8->EXTI8: its falling-edge ISR resets the RX
@@ -73,13 +88,17 @@
 #define ALP_V2N_CS_HOLD_US  30
 static ALWAYS_INLINE void alp_v2n_cs_assert(void)
 {
+#if ALP_V2N_DIRECT_CS_SHIM
 	sys_write8(sys_read8(ALP_V2N_P9_LATCH) & (uint8_t)~ALP_V2N_CS_MASK, ALP_V2N_P9_LATCH);
 	k_busy_wait(ALP_V2N_CS_SETUP_US);
+#endif
 }
 static ALWAYS_INLINE void alp_v2n_cs_deassert(void)
 {
+#if ALP_V2N_DIRECT_CS_SHIM
 	k_busy_wait(ALP_V2N_CS_HOLD_US);
 	sys_write8(sys_read8(ALP_V2N_P9_LATCH) | ALP_V2N_CS_MASK, ALP_V2N_P9_LATCH);
+#endif
 }
 
 /* ── RZ/V2N CM33 pin-ownership: hold P96(SCK7)/P97(CS) against the AMP clobber ──
@@ -218,11 +237,14 @@ static void rz_sci_b_spi_callback(spi_callback_args_t *p_args)
 	case SPI_EVENT_ERR_OVERRUN:
 	case SPI_EVENT_ERR_FRAMING:
 	case SPI_EVENT_ERR_MODE_UNDERRUN:
+	default:
+		/* Any unrecognised FSP event during a transfer is an error too:
+		 * complete with -EIO (the waiter recovers via
+		 * rz_sci_b_spi_recover()) instead of leaving the caller to ride
+		 * out the completion timeout with CS still asserted. */
 		spi_context_cs_control(&data->ctx, false);
 		alp_v2n_cs_deassert();
 		spi_context_complete(&data->ctx, dev, -EIO);
-		break;
-	default:
 		break;
 	}
 }
@@ -410,9 +432,11 @@ static int transceive(const struct device *dev, const struct spi_config *config,
 		goto end;
 	}
 
+#if ALP_V2N_DIRECT_CS_SHIM
 	/* Re-own SCK7/CS right before the transaction -- beats any Linux port-9
 	 * clobber that landed since init (the bench poke re-asserted continuously). */
 	alp_v2n_pins_assert();
+#endif
 	spi_context_cs_control(&data->ctx, true);
 	alp_v2n_cs_assert();
 

@@ -134,7 +134,13 @@ static alp_status_t z_open(const alp_spi_config_t *cfg,
         }
         gpio_pin_configure_dt(&s->cs_spec, GPIO_OUTPUT_INACTIVE);
         s->cs_ctrl.gpio  = s->cs_spec;
-        s->cs_ctrl.delay = 0;
+        /* CS setup/hold window: spi_context busy-waits this long after
+         * asserting and before deasserting CS.  Slaves that frame
+         * transactions on CS edges in software (e.g. the GD32 bridge's
+         * NSS->EXTI preload/decode ISRs) need the first/last SCK held off
+         * while their edge handler runs; 60 us is validated on silicon for
+         * the GD32 link at 1 MHz and is negligible at our transfer sizes. */
+        s->cs_ctrl.delay = 60;
         s->zspi_cfg.cs   = s->cs_ctrl;
         s->cs_present    = true;
     }

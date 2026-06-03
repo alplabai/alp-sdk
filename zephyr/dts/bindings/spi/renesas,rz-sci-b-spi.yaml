@@ -32,3 +32,13 @@ description: |
 compatible: "renesas,rz-sci-b-spi"
 
 include: [spi-controller.yaml]
+
+properties:
+  cs-gpios:
+    required: true
+    description: |
+      Chip-select GPIO(s).  REQUIRED on this controller: the SCI in master
+      Simple-SPI mode has no hardware slave-select at all (CCR0.SSE is a
+      slave-mode feature), so without a GPIO CS the peripheral cannot frame
+      transactions and slaves that latch on CS edges (e.g. the GD32 bridge's
+      NSS/EXTI) never synchronize.  Omitting it is always a board-porting bug.
