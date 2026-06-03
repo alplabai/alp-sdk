@@ -1,7 +1,10 @@
-From: Caner Alp <caner.alp@alpelectronix.com>
+From: Alp Lab AB
 Date: Wed, 3 Jun 2026 20:00:00 +0200
 Subject: [PATCH] clk: renesas: r9a09g056: keep CM33-owned RSCI7/RIIC8 clocks
  and MSTOP gates on
+
+Copyright (c) 2026 Alp Lab AB
+SPDX-License-Identifier: GPL-2.0
 
 AMP clock-ownership fix for the ALP E1M V2N SoM: RSCI7 (SCI7 Simple-SPI)
 and RIIC8 drive the on-module GD32G553 supervisor MCU from the Cortex-M33
@@ -36,10 +39,11 @@ CLKON_8 keeps bits 0-4 set and BUS11_MSTOP bit 10 released through and
 beyond clk_disable_unused (the rest of BUS11 reads stopped, as expected),
 and the CM33<->GD32 SPI link runs uninterrupted from ~2 s after power-on.
 
-Upstream-relevance: generic RZ/V2N + remote-core peripheral ownership;
-candidates for a DT-driven (e.g. critical-clocks) representation later.
+Upstream-Status: Inappropriate [board-specific AMP ownership policy; a
+DT-driven (e.g. critical-clocks) representation would be the upstreamable
+form later]
 
-Signed-off-by: Caner Alp <caner.alp@alpelectronix.com>
+Signed-off-by: Alp Lab AB
 ---
  drivers/clk/renesas/r9a09g056-cpg.c | 22 ++++++++++++++++------
  1 file changed, 16 insertions(+), 6 deletions(-)
