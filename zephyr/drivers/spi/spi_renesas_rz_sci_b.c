@@ -325,6 +325,65 @@ static int rz_sci_b_spi_configure(const struct device *dev, const struct spi_con
 	return 0;
 }
 
+/*
+ * Recover a wedged SCI-SPI controller after a transfer error or timeout.
+ *
+ * The FSP error ISR (sci_b_spi_eri_isr) clears only TIE/RIE/TEIE on a bus
+ * error -- it leaves CCR0.TE and RE SET, and because it also clears TEIE the
+ * transmit-end ISR (sci_b_spi_tei_isr, the sole place TE/RE are cleared) never
+ * fires.  TE/RE then stay latched, so r_sci_b_spi_write_read_common()'s
+ * "TE and RE must be zero" guard (r_sci_b_spi.c:809) rejects every subsequent
+ * transfer with FSP_ERR_IN_USE -> -EIO forever: CS/SCK stop toggling after the
+ * first failure and the link is dead until reboot.
+ *
+ * Recovery has to restore the channel to the same clean state R_SCI_B_SPI_Open's
+ * hw_config leaves it in -- because configure() keeps the cached spi_config and
+ * fast-returns, hw_config never re-runs, so recover() is the ONLY place that
+ * re-cleans the RX path between transfers.  It therefore:
+ *   - clears TE/RE AND every transfer-interrupt enable (TIE/RIE/TEIE) under
+ *     irq_lock, so the read-modify-write can't race the rxi/txi/tei ISRs and no
+ *     stray ISR is left armed (matters on the -ETIMEDOUT path, where the
+ *     transfer may still be nominally live);
+ *   - drains RDR and clears the receive-data-ready + error status (RDRFC/ORERC/
+ *     FERC/PERC); the error being recovered is an RX overrun, so a stale byte
+ *     sits in RDR with RDRF latched -- left in place it shifts the very next
+ *     transfer by one frame (CRC fail -> STATUS_IO, the symptom this fix kills);
+ *   - zeroes the FSP transfer counters so a rxi that was already latched cannot
+ *     write a late byte into the previous caller's buffer via the stale p_dest
+ *     (write_read_common re-inits count/tx/rx/p_src/p_dest on the next call).
+ *
+ * It deliberately does NOT Close()/re-Open(): R_SCI_B_SPI_Close() calls
+ * R_BSP_MODULE_STOP(FSP_IP_SCI, channel), and on RZ/V2N re-starting SCI7's
+ * module clock from the CM33 is unreliable (the A55 owns the CPG module-stop
+ * gate), so a Close could leave SCI7 unreachable.  The channel stays open; the
+ * next transfer simply re-arms TE/RE via r_sci_b_spi_start_transfer().
+ */
+static void rz_sci_b_spi_recover(struct rz_sci_b_spi_data *data)
+{
+	R_SCI_B0_Type *p_reg = data->fsp_ctrl.p_reg;
+	unsigned int key;
+
+	if (data->fsp_ctrl.open == 0) {
+		return;
+	}
+
+	key = irq_lock();
+
+	p_reg->CCR0 &= (uint32_t)~(R_SCI_B0_CCR0_TE_Msk | R_SCI_B0_CCR0_RE_Msk |
+				   R_SCI_B0_CCR0_TIE_Msk | R_SCI_B0_CCR0_RIE_Msk |
+				   R_SCI_B0_CCR0_TEIE_Msk);
+
+	(void)p_reg->RDR;
+	p_reg->CFCLR = R_SCI_B0_CFCLR_RDRFC_Msk | R_SCI_B0_CFCLR_ORERC_Msk |
+		       R_SCI_B0_CFCLR_FERC_Msk | R_SCI_B0_CFCLR_PERC_Msk;
+
+	data->fsp_ctrl.count = 0U;
+	data->fsp_ctrl.rx_count = 0U;
+	data->fsp_ctrl.tx_count = 0U;
+
+	irq_unlock(key);
+}
+
 static int transceive(const struct device *dev, const struct spi_config *config,
 		      const struct spi_buf_set *tx_bufs, const struct spi_buf_set *rx_bufs,
 		      bool asynchronous, spi_callback_t cb, void *userdata)
@@ -373,11 +432,23 @@ static int transceive(const struct device *dev, const struct spi_config *config,
 	if (fsp_err != FSP_SUCCESS) {
 		spi_context_cs_control(&data->ctx, false);
 		alp_v2n_cs_deassert();
+		/* FSP_ERR_IN_USE here means a prior error left TE/RE latched;
+		 * clear them so the NEXT ping is not rejected too. */
+		rz_sci_b_spi_recover(data);
 		ret = -EIO;
 		goto end;
 	}
 
 	ret = spi_context_wait_for_completion(&data->ctx);
+
+	if (ret < 0) {
+		/* A bus error (-EIO via the FSP error callback) or a completion
+		 * timeout (-ETIMEDOUT; the master-mode wait is bounded by
+		 * CONFIG_SPI_COMPLETION_TIMEOUT_TOLERANCE) leaves the controller
+		 * wedged with TE/RE latched.  Recover so the next ping re-arms
+		 * cleanly instead of returning FSP_ERR_IN_USE forever. */
+		rz_sci_b_spi_recover(data);
+	}
 
 #ifdef CONFIG_SPI_SLAVE
 	if (spi_context_is_slave(&data->ctx) && !ret) {
