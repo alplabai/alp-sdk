@@ -88,17 +88,22 @@ branch-protection settings are in
 
 | Branch                  | Purpose                                          | Push policy             |
 |-------------------------|--------------------------------------------------|-------------------------|
-| `main`                  | Pre-release development; next minor target.      | PR only; branch-protected. |
+| `main`                  | Tested, releasable baseline; tags are cut here.  | PR only; branch-protected. |
+| `dev`                   | Shared integration branch for untested work; promoted to `main` at the release gate (after bench/HW/CI). | PR only. |
 | `release/v1.0`          | LTS; cherry-picks of security + critical fixes.  | PR only; signed commits required. |
 | `release/v1.1`, ...     | Next minors after they ship; same LTS rules if promoted. | PR only; signed commits required. |
-| Feature branches        | `<gh-username>/<feature>`; merged into `main` via PR. | OK on contributor forks. |
+| Feature branches        | `feat/<topic>` / `fix/<topic>` / `docs/<topic>`; branch off `dev`, merged back into `dev` via PR (`--no-ff`). | OK on contributor forks/branches. |
 
-Tags on `release/v1.0` are `v1.0.0`, `v1.0.1`, ... — incremented
-on each LTS-branch release.
+Tags on `main` are `v0.5.0`, `v1.0.0`, ... — cut on `main` once
+`dev` has been promoted through the release gate.  Tags on
+`release/v1.0` are `v1.0.0`, `v1.0.1`, ... — incremented on each
+LTS-branch release.
 
 ## Release-cut procedure
 
-Codified in `.github/workflows/release.yml` + `scripts/bump_version.py`:
+Codified in `.github/workflows/release.yml` + `scripts/bump_version.py`.
+The cut happens on `main`, and only after `dev` has been promoted to
+`main` through the release gate (bench / hardware / CI passed):
 
 1. Validate the verification ledger -- every row in
    `docs/test-plan.md` for the target version must be `✅` or `n/a`.

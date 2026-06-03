@@ -93,14 +93,16 @@ int main(void) {
         printf("[gd32-bridge-ping] get_build_id -> %d\n", (int)s);
     }
 
-    /* Read the cached DA9292 status byte (which the GD32 polls
-     * periodically on its own loop).  Sub-millisecond on the host
-     * side -- the firmware never has to contend with the PMIC over
-     * the same I2C bus. */
+    /* Read the GD32-sampled DA9292 INT/TW fault-pin byte (bit0 = INT
+     * asserted, bit1 = TW asserted, 0xFF = not sampled yet).  The
+     * GD32 has no I2C path to the DA9292 -- this is pin-state
+     * forwarding only.  For register-level PMIC status (PMC_STATUS_00
+     * etc.) read the DA9292 over BRD_I2C via da9292_get_status(). */
     uint8_t pmic_status = 0u;
     s = gd32g553_da9292_status_forward(&ctx, &pmic_status);
     if (s == ALP_OK) {
-        printf("[gd32-bridge-ping] DA9292 cached status: 0x%02X\n",
+        /* 0xFF = "no sample taken yet" (current firmware). */
+        printf("[gd32-bridge-ping] DA9292 fault-pin state: 0x%02X\n",
                pmic_status);
     } else {
         printf("[gd32-bridge-ping] da9292 status forward -> %d "

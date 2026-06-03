@@ -4,8 +4,8 @@ The **GD32 bridge** is the firmware that runs on the GigaDevice
 GD32G553MEY7TR companion MCU on every E1M-X V2N / V2N-M1 SoM.  It
 gives the Renesas RZ/V2N host a uniform on-module supervisor surface
 (GPIO fan-out, eight PWM channels, the ADC bank that doesn't fit on
-the Renesas pinmux, the DA9292 status cache, …) over either of two
-parallel buses.
+the Renesas pinmux, the DA9292 INT/TW fault-pin forward, …) over
+either of two parallel buses.
 
 The **wire protocol** is specified in
 [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md); this doc

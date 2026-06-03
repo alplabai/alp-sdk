@@ -24,7 +24,13 @@ signatures), if you have one.
 
 ### Submitting code
 
-1. Fork and branch from `main`: `git checkout -b feat/peripherals/whatever`.
+1. Fork and branch from `dev`: `git checkout -b feat/peripherals/whatever`.
+   Feature / fix / doc branches branch off `dev` and merge back into
+   `dev` via PR (`--no-ff`).  Use a type prefix (`feat/`, `fix/`,
+   `docs/`, ...).  `dev` is the shared integration branch; `main` is
+   the tested, releasable baseline that `dev` is promoted to at the
+   release gate.  See
+   [`docs/branching-and-merge-policy.md`](branching-and-merge-policy.md).
 2. Keep changes scoped to one library or one SoM at a time.
 3. Add or update tests under `tests/`.  Every public function must
    have at least one Unity / ztest test (the v0.1 quality bar).
