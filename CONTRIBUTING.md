@@ -40,7 +40,11 @@ signatures), if you have one in mind.
 
 ### Submitting code
 
-1. Fork the repo and branch from `main`: `git checkout -b feature/my-feature`.
+1. Fork the repo and branch from `dev`: `git checkout -b feat/my-feature`.
+   Feature branches branch off `dev` and merge back into `dev` via PR
+   (`--no-ff`); use a type prefix (`feat/`, `fix/`, `docs/`, ...).
+   `dev` is the shared integration branch; `main` is the tested,
+   releasable baseline `dev` is promoted to at the release gate.
 2. Keep changes scoped to one library or one SoM at a time.
 3. Add or update tests under `tests/`.  Every public function must
    have at least one Unity / ztest test.
