@@ -10,9 +10,9 @@
  * file's protocol_dispatch().
  *
  * Handlers that need actual hardware (PWM channel programming, ADC
- * sampling, GPIO output, DA9292 I2C poll) currently call into the
- * `bridge_hw_*` HAL shims declared in hal/.  The HAL is a separate
- * compile unit and will be implemented against the GigaDevice
+ * sampling, GPIO output, DA9292 INT/TW pin sampling) currently call
+ * into the `bridge_hw_*` HAL shims declared in hal/.  The HAL is a
+ * separate compile unit and will be implemented against the GigaDevice
  * firmware library in a follow-up commit.  Today those shims return
  * STATUS_NOSUPPORT so the protocol round-trip is exercisable
  * end-to-end (PING + GET_VERSION + GET_BUILD_ID work without any

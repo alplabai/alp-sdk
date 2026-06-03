@@ -248,7 +248,8 @@ typedef enum {
  * Return:  STATUS_OK on success; STATUS_NOSUPPORT for unknown
  *          opcodes; STATUS_INVAL on bad payload lengths /
  *          out-of-range args; STATUS_TIMEOUT / STATUS_IO for
- *          downstream bus errors (e.g. DA9292 polling failures).
+ *          downstream peripheral errors (e.g. an ADC or timer
+ *          peripheral fault).
  */
 gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
                                        const uint8_t *req_payload,

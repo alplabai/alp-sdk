@@ -55,7 +55,7 @@ byte; their numeric encoding is:
 | `0x20` | `PWM_SET`             | `channel:u8 reserved:u8 period_ns:u32 duty_ns:u32` | _empty_                                            |
 | `0x21` | `PWM_GET`             | `channel:u8`                                       | `period_ns:u32 duty_ns:u32`                        |
 | `0x30` | `ADC_READ`            | `channel:u8 samples:u8`                            | `mv[samples]:u16` (millivolt, raw averaged)        |
-| `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_status:u8` (latest cached PMC_STATUS_00)   |
+| `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (GD32-sampled DA9292 INT/TW pin states) |
 | `0x50` | `DAC_SET`             | `channel:u8 reserved:u8 value_mv:u16`              | _empty_                                            |
 | `0x51` | `DAC_GET`             | `channel:u8`                                       | `value_mv:u16`                                     |
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
@@ -294,14 +294,29 @@ for telemetry purposes.
 
 ### 3.4 DA9292 status forward
 
-The GD32 keeps a **cached** copy of the DA9292's PMC_STATUS_00 byte
-populated by periodic I2C polls on its own loop.  The host receives
-the most recent cached value with sub-millisecond latency and never
-has to contend with the PMIC over the same I2C bus.  Cache age is
-firmware-implementation-defined (currently ≤ 20 ms).
+The GD32 has **no I2C path** to the DA9292; its only DA9292
+connections are the two fault signal pins `DA9292_INT` (P37,
+active-low) and `DA9292_TW` (P36), both GD32-side inputs.  The
+forwarded byte therefore carries **GD32-observed pin state**, not a
+PMIC register snapshot:
 
-The cached byte uses the same bit layout as the on-chip register
-(`DA9292_STATUS00_CH1_PG = bit 0`, …) — see `<alp/chips/da9292.h>`.
+| Bit   | Meaning                                       |
+|-------|-----------------------------------------------|
+| 0     | `DA9292_INT` asserted (P37, active-low)        |
+| 1     | `DA9292_TW` asserted (P36)                     |
+| 2–6   | reserved (0)                                   |
+| —     | `0xFF` = "no sample taken yet" sentinel        |
+
+Pin sampling lands in a future firmware release; current firmware
+always returns `0xFF`.
+
+This byte is **not** `PMC_STATUS_00` and does not mirror its bit
+layout.  For register-level PMIC status (`PMC_STATUS_00` etc.) the
+host reads the DA9292 directly over `BRD_I2C` from the CM33 via
+`da9292_get_status()` in the `chips/da9292` driver — see
+`<alp/chips/da9292.h>`.  In short: the GD32 provides a fast
+fault-pin forward over the bridge; the CM33 `da9292` driver provides
+full register read/decode + event clear.
 
 ### 3.5 DAC outputs (`v0.2+`)
 
@@ -650,9 +665,9 @@ byte is naturally unsigned and human-readable on a logic analyser:
 |---------------|-------------------------|--------------------------------------------------------|
 | `0x00`        | `ALP_OK`                | Command executed successfully.                         |
 | `0x01`        | `ALP_ERR_INVAL`         | Bad arguments (e.g. channel out of range).             |
-| `0x02`        | `ALP_ERR_NOT_READY`     | Sub-resource (PWM, ADC, DA9292 link) not initialised.  |
+| `0x02`        | `ALP_ERR_NOT_READY`     | Sub-resource (PWM, ADC peripheral) not initialised.    |
 | `0x03`        | `ALP_ERR_BUSY`          | Firmware busy servicing a long-running operation.      |
-| `0x04`        | `ALP_ERR_TIMEOUT`       | Sub-bus operation timed out (e.g. PMIC I2C).           |
+| `0x04`        | `ALP_ERR_TIMEOUT`       | Sub-bus operation timed out (e.g. ADC/timer peripheral).|
 | `0x05`        | `ALP_ERR_IO`            | CRC failure or transport-layer error.                  |
 | `0x06`        | `ALP_ERR_NOSUPPORT`     | Opcode unknown to this firmware build.                 |
 | `0x07`        | `ALP_ERR_NOMEM`         | Reserved.                                              |
@@ -771,9 +786,12 @@ header.
   [`docs/ota.md`](ota.md) +
   [`docs/ota-device-contract.md`](ota-device-contract.md); Hakan
   owns the server side.
-* PMC events / PMIC alarms — the GD32 monitors but does not relay
-  asynchronously over the bridge; the host polls via
-  `DA9292_STATUS_FORWARD` when it wants the cached value.
+* DA9292 fault pins / PMIC alarms — the GD32 monitors the
+  `DA9292_INT`/`DA9292_TW` pins (not PMIC register events) but does
+  not relay asynchronously over the bridge; the host reads the latest
+  sampled pin state via `DA9292_STATUS_FORWARD`, or reads full PMIC
+  register status directly over `BRD_I2C` from the CM33 via the
+  `chips/da9292` driver.
 * Streaming workloads (audio, video) — not in scope; use the
   Renesas direct peripherals for those.
 

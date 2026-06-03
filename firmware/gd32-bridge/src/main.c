@@ -12,9 +12,14 @@
  * the transport.
  *
  * The main loop has no work of its own; it sleeps in WFI() so the
- * Cortex-M33 idles between interrupts.  A periodic SysTick polls
- * the DA9292 PMIC's PMC_STATUS_00 over I2C-master so the cached
- * value served by CMD_DA9292_STATUS_FORWARD stays fresh.
+ * Cortex-M33 idles between interrupts.  A periodic SysTick samples
+ * the DA9292_INT(P37)/DA9292_TW(P36) input pins -- the GD32's only
+ * DA9292 connections -- so the fault-flag value served by
+ * CMD_DA9292_STATUS_FORWARD stays fresh.  The GD32 has no I2C path to
+ * the DA9292; register-level PMIC status (PMC_STATUS_00 etc.) is read
+ * by the host over BRD_I2C via the chips/da9292 driver.  Pin sampling
+ * lands in a future firmware release; current firmware always returns
+ * the 0xFF "no sample taken yet" sentinel.
  *
  * Scaffold today: the bridge_hw_* HAL is stubbed; only PING,
  * GET_VERSION, GET_BUILD_ID, and RESET_REASON round-trip without
@@ -34,7 +39,7 @@ void transport_i2c_init(void);
 /* Optional weak hooks the HAL layer can override.  Defaults to a
  * busy WFI loop -- behaviour-equivalent to a no-op for the
  * scaffold; the real HAL replaces this with a SysTick callback
- * that re-polls the PMIC. */
+ * that samples the DA9292_INT/DA9292_TW input pins. */
 __attribute__((weak)) void bridge_hw_init(void) { }
 __attribute__((weak)) void bridge_hw_tick(void) { }
 
@@ -50,8 +55,9 @@ int main(void)
     transport_spi_init();
     transport_i2c_init();
 
-    /* The SysTick / TIM-based periodic refresh of the cached DA9292
-     * status lives inside bridge_hw_tick(); main loop just yields. */
+    /* The SysTick / TIM-based periodic refresh of the DA9292 INT/TW
+     * pin-state forward lives inside bridge_hw_tick(); main loop just
+     * yields. */
     for (;;) {
         __WFI();
         bridge_hw_tick();

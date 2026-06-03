@@ -4,7 +4,7 @@
  *
  * Hardware-abstraction shim consumed by firmware/gd32-bridge/src/protocol.c.
  * Each function maps an opcode-level operation onto the GigaDevice
- * firmware library (timer / GPIO / ADC / I2C-master / etc.).
+ * firmware library (timer / GPIO / ADC / DAC / etc.).
  *
  * The default implementations in hal/bridge_hw_stub.c return
  * BRIDGE_HW_ERR_NOTIMPL so the protocol round-trip can be smoke-tested
@@ -184,9 +184,18 @@ int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks);
 /* DA9292 forward                                                    */
 /* --------------------------------------------------------------- */
 
-/* Returns the most recent cached snapshot of the DA9292's
- * PMC_STATUS_00 byte.  Refreshed by a periodic I2C-master poll on
- * the GD32 side (see hal/bridge_hw_gd32.c). */
+/* Returns the GD32-observed DA9292 fault-pin state, packed as fault
+ * flags from the GD32's two DA9292 signal pins:
+ *   bit0 = DA9292_INT asserted (P37, active-low)
+ *   bit1 = DA9292_TW  asserted (P36)
+ *   bits 2-6 reserved (0)
+ *   0xFF = "no sample taken yet" sentinel
+ * The GD32 has NO I2C path to the DA9292, so this is pin sampling
+ * only -- no PMIC register read and no I2C-master poll.  Pin sampling
+ * lands in a future firmware release; current firmware always returns
+ * 0xFF (see hal/bridge_hw_gd32.c).  Register-level PMIC status
+ * (PMC_STATUS_00 etc.) is read by the host over BRD_I2C via the
+ * chips/da9292 driver, not here. */
 uint8_t bridge_hw_da9292_status_cached(void);
 
 /* --------------------------------------------------------------- */
