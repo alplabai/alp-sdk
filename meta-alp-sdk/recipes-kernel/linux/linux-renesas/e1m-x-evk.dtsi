@@ -260,11 +260,18 @@
 	};
 
 	/* SD1 CLK/CMD/DAT are dedicated (hardwired) balls on the carrier and
-	 * don't need pin config; only the card-detect line is muxed here. */
+	 * don't need pin config.
+	 *
+	 * SD1_CD (card-detect) on P94 is DELIBERATELY NOT muxed here: P94 shares
+	 * the port-9 PMC9/PM9 control registers with P96 (SCK7) and P97 (CS) of the
+	 * on-module GD32 supervisor SPI, which the CM33 owns across the AMP split.
+	 * Linux's boot-time byte/half-word write to mux SD1_CD wiped the CM33's
+	 * P96/P97 bits (no SCK / no CS framing) -- the on-silicon root cause that
+	 * the bench /dev/mem poke worked around.  Dropping the SD1_CD claim removes
+	 * the clobber at the source so the CM33's own pin setup sticks.  (If carrier
+	 * microSD hot-plug detect is needed later, route it to a non-port-9 pin or
+	 * mark &sdhi1 broken-cd/non-removable.) */
 	sdhi1_pins: sd1 {
-		sd1-cd {
-			pinmux = <RZV2N_PORT_PINMUX(9, 4, 14)>; /* SD1_CD */
-		};
 	};
 
 	/* microSD slot power enable. */
