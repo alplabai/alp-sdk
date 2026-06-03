@@ -122,6 +122,22 @@ int main(void) {
     for (uint32_t i = 0u;; ++i) {
         s = gd32g553_ping_via(&ctx, GD32G553_TRANSPORT_SPI);
         printf("[gd32-bridge-ping] SPI ping #%u -> %d\n", i, (int)s);
+
+        /* Odd-length soak: every 8th cycle also re-read the firmware version.
+         * GET_VERSION's reply envelope is 7 bytes (SOF | STATUS | major | minor
+         * | patch | CRC16) -- an ODD frame count that stresses the GD32 reply
+         * FIFO's residue handling (the failure class the byte-access reply-path
+         * fix addresses; a half-entry left in a half-word FIFO desyncs every
+         * later transaction).  A desync would corrupt the returned version or
+         * wedge the link, so logging it lets a console-attached run confirm the
+         * 7-byte path stays byte-aligned alongside the 4-byte PING. */
+        if ((i % 8u) == 0u) {
+            gd32g553_version_t v = {0};
+            alp_status_t vs = gd32g553_get_version(&ctx, &v);
+            printf("[gd32-bridge-ping] SPI get_version #%u -> %d (v%u.%u.%u)\n",
+                   i, (int)vs, v.major, v.minor, v.patch);
+        }
+
         k_msleep(500);
     }
     /* not reached */
