@@ -100,6 +100,13 @@ endif()
 # Firmware *release* version (own semver; source of truth firmware-version.txt).
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/firmware-version.txt GD32_BRIDGE_FW_VERSION LIMIT_COUNT 1)
 message(STATUS "gd32-bridge firmware version: ${GD32_BRIDGE_FW_VERSION}")
+# Re-run the configure step whenever the version file changes -- without
+# this, an incremental `cmake --build` after a version bump keeps baking
+# the STALE build-id (bench-caught 2026-06-04: an OTA bench upgrade check
+# failed because the freshly built slot image still reported the old
+# version).
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${CMAKE_CURRENT_SOURCE_DIR}/firmware-version.txt)
 
 # GET_BUILD_ID payload: "<fw-version>+<sha>" padded to exactly 20 chars
 # (protocol.c _Static_asserts the literal length).  The post-link SHA hook

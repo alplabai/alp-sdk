@@ -25,8 +25,9 @@
  * BRD_I2C via the `chips/da9292` driver.  Host code reaches the
  * supervisor over a **hybrid** transport:
  *
- *   - **SPI fast path** (Renesas RSPI master / GD32 slave on the GD32's
- *     `PA8`/`PA9`/`PA10`/`PB15` pads) -- low-latency, dedicated link.
+ *   - **SPI fast path** (Renesas SCI7 Simple-SPI master / GD32 slave on
+ *     the GD32's `PA8`/`PA9`/`PA10`/`PB15` pads) -- low-latency,
+ *     dedicated link.
  *   - **I2C management path** on BRD_I2C (Renesas RIIC8 master / GD32
  *     slave on the GD32's `PA15`/`PB9` pads at I2C address `0x70` by
  *     default) -- shares the bus with PMICs, RTC, OPTIGA, telemetry

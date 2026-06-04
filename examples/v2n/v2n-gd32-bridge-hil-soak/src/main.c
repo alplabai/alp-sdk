@@ -635,7 +635,9 @@ int main(void)
         .freq_hz       = 25000000u,
         .mode          = ALP_SPI_MODE_0,
         .bits_per_word = 8u,
-        .cs_pin_id     = 0u, /* studio-resolved */
+        .cs_pin_id     = ALP_SPI_NO_CS, /* CS is owned by the platform SPI
+                                         * driver on this SoM (P97 direct
+                                         * latch) -- see v2n-gd32-bridge-ping */
     });
     if (spi == NULL) {
         printf("[hil-soak] alp_spi_open failed: err=%d -- cannot soak\n", (int)alp_last_error());

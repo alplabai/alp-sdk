@@ -55,7 +55,7 @@ __attribute__((weak)) bool alp_z_gpio_resolve(uint32_t pin_id, struct gpio_dt_sp
     return false;
 }
 
-#define ALP_SPI_NO_CS  0xFFFFFFFFu
+/* ALP_SPI_NO_CS comes from <alp/peripheral.h>. */
 
 #ifndef CONFIG_ALP_SDK_MAX_SPI_HANDLES
 #define CONFIG_ALP_SDK_MAX_SPI_HANDLES 4
@@ -137,10 +137,14 @@ static alp_status_t z_open(const alp_spi_config_t *cfg,
         /* CS setup/hold window: spi_context busy-waits this long after
          * asserting and before deasserting CS.  Slaves that frame
          * transactions on CS edges in software (e.g. the GD32 bridge's
-         * NSS->EXTI preload/decode ISRs) need the first/last SCK held off
-         * while their edge handler runs; 60 us is validated on silicon for
-         * the GD32 link at 1 MHz and is negligible at our transfer sizes. */
-        s->cs_ctrl.delay = 60;
+         * NSS->EXTI preload/decode ISRs) need the first/last SCK held
+         * off while their edge handler runs.  The GD32 link sizes its
+         * own windows in the SCI-B driver's direct-CS shim
+         * (ALP_V2N_CS_SETUP_US/HOLD_US, bench-validated 2026-06-04);
+         * this generic gpio-CS path only needs to outlast ordinary
+         * slave CS-edge latching -- 2 us is ample (the previous 60 us
+         * was the GD32 bring-up value stacking on top of the shim's). */
+        s->cs_ctrl.delay = 2;
         s->zspi_cfg.cs   = s->cs_ctrl;
         s->cs_present    = true;
     }

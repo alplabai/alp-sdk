@@ -864,12 +864,22 @@ static fsp_err_t r_sci_b_spi_write_read_common (sci_b_spi_instance_ctrl_t * cons
     /* The rx transfer instance is not used if p_dest is NULL. */
     if ((NULL != p_ctrl->p_cfg->p_transfer_rx) && (NULL != p_dest))
     {
-        /* Configure the rx transfer instance. */
+        /* Configure the rx transfer instance.
+         * RZ-port deviation: the upstream RA source arms RX with
+         * p_api->reset(), but the rzv r_dmac_b leaves R_DMAC_B_Reset a
+         * stub returning FSP_ERR_UNSUPPORTED, so every Read failed here
+         * before generating a single SCK edge (silicon 2026-06-04; Write
+         * worked because the TX arm above uses reconfigure()).  Arm RX
+         * the same way as TX: refresh the discrete transfer_info members
+         * (p_src stays the RDR address set at open) and reconfigure(). */
         p_ctrl->rx_count = length;
         transfer_instance_t const * p_transfer = p_ctrl->p_cfg->p_transfer_rx;
+        p_transfer->p_cfg->p_info->length = length;
+        p_transfer->p_cfg->p_info->p_src  = (void const *) &p_ctrl->p_reg->RDR;
+        p_transfer->p_cfg->p_info->p_dest = p_dest;
 
         /* Enable the transfer instance. */
-        fsp_err_t err = p_transfer->p_api->reset(p_transfer->p_ctrl, NULL, p_dest, (uint16_t) length);
+        fsp_err_t err = p_transfer->p_api->reconfigure(p_transfer->p_ctrl, p_transfer->p_cfg->p_info);
         FSP_ERROR_RETURN(FSP_SUCCESS == err, err);
     }
 #endif

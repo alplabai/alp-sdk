@@ -19,21 +19,32 @@
 extern "C" {
 #endif
 
-/* DMA fast path DISABLED -- silicon-blocked (2026-06-03, scope-confirmed).
- * The RZ/V2N MCPU DMAC (DMAC0, rzv FSP r_dmac_b) + SCI7 pairing was fully
- * brought up (trigger routed in ICU DM4SEL0, CCR0.TE+TIE armed, CSR.TDRE
- * high) yet the DMAC channel never streams: it moves at most one beat per
- * arm and parks with CHSTAT.SUS=1 / EN never observed high, across ack
- * modes (MASK_DACK / BUS_CYCLE) and detection modes (edge / high-level) --
- * an FSP/IP integration gap to raise with Renesas.  The full plumbing is
- * preserved behind ALP_V2N_SCI7_DMAC in spi_renesas_rz_sci_b.c; the 25 MHz
- * production path is the driver's zero-interrupt polled engine instead
- * (master-paced SCK makes polling robust by construction).
- * NOTE if re-enabled: the DMA-gated blocks in r_sci_b_spi.c carry documented
- * RZ-port edits -- the rzv BSP overrides transfer_info_t
+/* DMA fast path -- follows the glue driver's ALP_V2N_SCI7_DMAC gate (one
+ * build-level switch flips both TUs; pass -DALP_V2N_SCI7_DMAC=1 via
+ * EXTRA_CFLAGS).  Bench state 2026-06-04 (vendor-config round): with the
+ * e2-studio FSP generator's configuration (MASK_DACK_OUTPUT +
+ * NO_DETECTION + SOURCE_MODULE both directions + unused DREQ/DACK/TEND
+ * pins -- the 2026-06-03 sweep had REQD inverted on RX and the pin fields
+ * zero-initialised to PIN0) the DMAC genuinely STREAMS: full request +
+ * reply transactions complete end-to-end through the FSP machinery
+ * including the channel-end interrupts and the TEND completion (the GD32
+ * received intact frames; the old "parks CHSTAT.SUS after one beat"
+ * behaviour is gone).  Remaining blocker: after initial success the TX
+ * channel intermittently parks CHSTAT.ER (AXI bus error) one beat into a
+ * TDR write through the 0x128xxxxx convert window, while RX reads through
+ * the same window keep completing -- a bus-master security/Master-MPU
+ * attribution lead (BL2-programmed SYS master-access controls), not a
+ * channel-config one.  Park: default-off until that is root-caused on the
+ * bench; the 25 MHz production path is the polled FIFO engine.
+ * NOTE: the DMA-gated blocks in r_sci_b_spi.c carry documented RZ-port
+ * edits -- the rzv BSP overrides transfer_info_t
  * (BSP_OVERRIDE_TRANSFER_INFO_T) with discrete members instead of the RA
- * packed transfer_settings_word. */
-#define SCI_B_SPI_CFG_DMA_SUPPORT_ENABLE    (0)
+ * packed transfer_settings_word, and the RX arm uses reconfigure()
+ * because the rzv R_DMAC_B_Reset is an FSP_ERR_UNSUPPORTED stub. */
+#ifndef ALP_V2N_SCI7_DMAC
+#define ALP_V2N_SCI7_DMAC                   0
+#endif
+#define SCI_B_SPI_CFG_DMA_SUPPORT_ENABLE    (ALP_V2N_SCI7_DMAC)
 #define SCI_B_SPI_CFG_PARAM_CHECKING_ENABLE (BSP_CFG_PARAM_CHECKING_ENABLE)
 #define SCI_B_SPI_CFG_FIFO_SUPPORT          (0)
 

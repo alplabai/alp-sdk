@@ -244,18 +244,35 @@ void bridge_transport_spi_hw_init(void)
 }
 
 /* CS edge: PA8 on EXTI8.  Falling = select (reset RX, preload the staged
- * reply); rising = end of transaction (decode + stage the next reply). */
+ * reply); rising = end of transaction (decode + stage the next reply).
+ *
+ * LEVEL-AWARE RECONCILIATION: EXTI pending bits coalesce, so when the
+ * host paces tightly a whole CS pulse can land while this handler is
+ * still busy and only ONE invocation fires -- the branch below then
+ * runs whichever path matches the CURRENT pin level, and the missed
+ * edge's work must not leave stale state behind.  Two rules deliver
+ * that: (1) the rising path is SELF-CONTAINED -- it resets the
+ * portable staging itself before feeding bytes, so a missed falling
+ * edge cannot concatenate the previous frame into this decode (the
+ * zero-extension/merge corruption class, silicon-caught 2026-06-04);
+ * (2) the falling path (re)arms RX idempotently, so a missed rising
+ * edge cannot leave the new transaction capturing into a stale DMA
+ * window.  A swallowed edge still loses at most that one transaction
+ * -- the host driver's reply re-read / retry recovers it. */
 void BRIDGE_SPI_CS_EXTI_HANDLER(void)
 {
     if (RESET != exti_interrupt_flag_get(BRIDGE_SPI_CS_EXTI_LINE)) {
         exti_interrupt_flag_clear(BRIDGE_SPI_CS_EXTI_LINE);
         if (RESET == gpio_input_bit_get(BRIDGE_SPI_NSS_PORT, BRIDGE_SPI_NSS_PIN)) {
-            /* CS asserted (active-low): reset the portable RX staging.  No
-             * preload needed anymore -- the TX DMA armed at the previous
-             * CS-rising has already prefilled the SPI TX FIFO with the head
-             * of the staged reply (TBE requests are served the moment the
-             * channel enables), so the first SCK finds valid data waiting. */
+            /* CS asserted (active-low): reset the portable RX staging and
+             * make sure RX capture is armed for THIS transaction even if
+             * the previous rising edge was swallowed (re-arming an armed
+             * channel just reloads its count -- idempotent, and CS-fall +
+             * the master's setup window leaves time before the first SCK).
+             * The TX DMA armed at the previous CS-rising stays untouched:
+             * it holds the staged reply this transaction may be reading. */
             spi_slave_cs_low();
+            spi_dma_arm_rx();
         } else {
             /* CS released: end of transaction.
              *
@@ -287,6 +304,10 @@ void BRIDGE_SPI_CS_EXTI_HANDLER(void)
             rcu_periph_reset_disable(RCU_SPI1RST);
             bridge_spi_periph_config();
 
+            /* Self-contained decode: reset the portable staging FIRST so a
+             * swallowed falling edge cannot prepend the previous frame's
+             * bytes to this one (see the handler comment). */
+            spi_slave_cs_low();
             for (uint32_t i = 0; i < received; i++) {
                 spi_slave_rx_byte(spi_rx_dma_buf[i]);
             }

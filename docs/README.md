@@ -55,6 +55,10 @@ into the topic-specific docs.
   into alp-sdk as the single source of truth.
 - [errata-e1m-x-v2n.md](errata-e1m-x-v2n.md) — hardware findings
   from E1M-X-EVK + V2N-M1 bench bring-up (with software workarounds).
+- [rzv2n-m33-swd-debug.md](rzv2n-m33-swd-debug.md) — attaching to
+  the V2N CM33 over the DAP (J-Link), status-block reads, gotchas.
+- [rzv2n-m33-secure-boot.md](rzv2n-m33-secure-boot.md) — the CM33
+  image's place in the V2N secure-boot chain.
 
 ## Build & integration
 
@@ -63,6 +67,10 @@ into the topic-specific docs.
 - [gd32-bridge.md](gd32-bridge.md) +
   [gd32-bridge-protocol.md](gd32-bridge-protocol.md) — V2N's
   on-module IO MCU.
+- [gd32-link-sci7-next-rev.md](gd32-link-sci7-next-rev.md) —
+  SCI7 is the bridge link's permanent transport (RSPI reroute
+  rejected); hardening plan: DMAC data path, sequence echo, GD32
+  ADC/rising-path latency.
 - [cc3501e-bridge.md](cc3501e-bridge.md) — AEN's on-module Wi-Fi
   coprocessor.
 - [cc3501e-integration-plan.md](cc3501e-integration-plan.md) —

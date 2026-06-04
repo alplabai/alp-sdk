@@ -78,8 +78,27 @@ static void stage_error_reply(uint8_t status)
  * see spi_slave_cs_high() which fires on CS de-assert. */
 static void decode_and_dispatch(void)
 {
-    /* Empty transaction (CS toggled with no clocked bytes): nothing to do. */
-    if (spi_rx_len == 0u) { return; }
+    /* Empty transaction: CS toggled with no captured bytes.  Not only the
+     * idle case -- when a host read collides with this handler still
+     * running (EXTI edges coalesce), the read's bytes hit the mid-reset
+     * SPI and are lost, landing here with rx_len == 0.  Rewind so the
+     * backend's unconditional re-drain re-arms the staged reply; without
+     * this the spent cursor disarms TX and the host's NEXT re-read is a
+     * guaranteed second miss (silicon 2026-06-04: ADC_READ paid a double
+     * miss cycle whenever its first read raced the conversion burst).
+     *
+     * Residual hazard (accepted, next-rev item): if a REQUEST is ever
+     * lost whole (all its bytes inside the reset window -- needs the
+     * host to clock a full frame within ~5 us of the previous rising
+     * edge, which the host's staging gap makes pathological), the
+     * re-armed previous reply is CRC-valid stale data for a same-opcode
+     * re-read.  A partial loss stays loud (non-SOF -> STATUS_IO).  The
+     * clean kill is a sequence echo in the STATUS byte -- queued for the
+     * next wire-protocol rev (docs/gd32-link-sci7-next-rev.md). */
+    if (spi_rx_len == 0u) {
+        spi_tx_cursor = 0u;
+        return;
+    }
 
     /* Request and reply ride SEPARATE CS transactions.  When the host reads a
      * staged reply it clocks DUMMY bytes into us -- the RZ SCI master, lacking a
@@ -98,7 +117,21 @@ static void decode_and_dispatch(void)
         for (size_t i = 0u; i < spi_rx_len; i++) {
             if (spi_rx_buf[i] != 0u) { stage_error_reply(STATUS_IO); return; }
         }
-        return; /* all-0x00: reply-drain -- preserve the staged reply */
+        /* All-0x00: reply-drain.  REWIND the cursor, don't just keep the
+         * buffer: the gd32 backend consumes the staged reply through
+         * spi_slave_tx_next_byte() at stage time (drains it into its TX
+         * DMA buffer), so by the time a drain transaction lands here the
+         * cursor is already spent -- and a spent cursor makes the
+         * backend's re-arm see an empty reply (tx_pending() false ->
+         * zero-length TX arm -> every host re-read clocks 0x00 forever).
+         * Caught on silicon 2026-06-04: a host reply-read that lands
+         * before a slow handler (ADC burst ~60 us) finishes staging
+         * wedged that command class at 255-of-256 failures, cursor 21/21
+         * with the correct reply intact in the buffer.  Rewinding makes
+         * the re-arm idempotent: every drain re-stages the same reply,
+         * so the host's re-read schedule converges as documented. */
+        spi_tx_cursor = 0u;
+        return;
     }
 
     /* A request addressed to us (leading SOF) but too short to hold even an

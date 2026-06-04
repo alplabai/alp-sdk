@@ -157,9 +157,10 @@ SPI (fast path) or I2C (management path):
 
 ```c
 alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
-    .bus_id = 1u, .freq_hz = 10000000u,
+    .bus_id = 1u, .freq_hz = 25000000u,
     .mode = ALP_SPI_MODE_0, .bits_per_word = 8u,
-    .cs_pin_id = 0u,
+    /* The platform SPI driver owns the chip-select on this SoM. */
+    .cs_pin_id = ALP_SPI_NO_CS,
 });
 alp_i2c_t *brd_i2c = alp_i2c_open(&(alp_i2c_config_t){
     .bus_id = 0u, .bitrate_hz = 400000u,

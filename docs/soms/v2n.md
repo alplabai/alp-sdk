@@ -46,9 +46,9 @@ peripherals (eight PWM channels, dual ADC + DAC bank, the Wi-Fi/BT
 REG_ON pins, OPTIGA reset, 18 IO routes to the E1M edge).  The
 host driver speaks both transports:
 
-* **SPI fast path** -- Renesas RSPI master on `P76/P77/P96/P97`
-  ↔ GD32 slave on `PA8/9/10/PB15`.  Use for high-frequency
-  telemetry + PWM updates.
+* **SPI fast path** -- Renesas SCI7 Simple-SPI master on
+  `P76/P77/P96/P97` ↔ GD32 slave on `PA8/9/10/PB15`.  Use for
+  high-frequency telemetry + PWM updates.
 * **I2C management path** -- on BRD_I2C (`P07/P06`), GD32 at
   7-bit `0x70`.  Use when you're already on BRD_I2C for the
   PMIC fleet.

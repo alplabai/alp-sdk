@@ -83,20 +83,66 @@
  * decodes.  Give those ISRs a setup window after CS-assert (before the first
  * SCK) and a hold window before CS-deassert (so the final byte is latched and
  * the reply is staged) -- without them the first RBNE bytes race the EXTI8 ISR
- * and are dropped/misaligned (seen on silicon as a 2-of-4-byte, A5-84 capture). */
-#define ALP_V2N_CS_SETUP_US 60
-#define ALP_V2N_CS_HOLD_US  30
+ * and are dropped/misaligned (seen on silicon as a 2-of-4-byte, A5-84 capture).
+ *
+ * Sizing: the slave's CS-EXTI work is ~0.2-1 us (EXTI dispatch + DMA re-arm
+ * register writes at 216 MHz).  Bring-up used 60/30 us of paranoia; the
+ * 2026-06-04 bench ladder (link-bench latency suite + soak regression)
+ * walked 10/5 us then 3/2 us -- still ~2-3x the estimated floor.  SLOW
+ * HANDLERS (ADC conversion, TRNG conditioning, OTA FMC programming) are not
+ * these gaps' job: the gd32g553 host driver's reply re-read schedule covers
+ * them.
+ *
+ * Timing source: a raw SysTick down-counter spin, NOT k_busy_wait().  The
+ * link-bench calibration probe measured k_busy_wait(10) at ~15 us on this
+ * platform -- its k_cycle_get_32() poll (irq-locked 64-bit SysTick
+ * accumulation) is microseconds-coarse, so every call overshoots by about
+ * one poll period.  Four such waits per transaction made the kernel's own
+ * spin half the link's fixed overhead.  SysTick is the kernel timebase, so
+ * it is guaranteed to be running whenever a transfer executes; one VAL read
+ * costs tens of nanoseconds, giving sub-100 ns spin granularity.  Spins
+ * here are well under the reload period, so at most one wrap can land
+ * mid-spin -- the modular (last - now) % reload delta handles it.  Under
+ * TICKLESS_KERNEL the timer driver reprograms LOAD dynamically, so a tick
+ * ISR landing mid-spin can distort one delta; per-sample deltas are
+ * therefore capped, which biases ONLY toward a longer spin (the windows
+ * are minimums -- running long is always safe, running short is not). */
+#define ALP_V2N_CS_SETUP_US 3
+#define ALP_V2N_CS_HOLD_US  2
+#define ALP_V2N_CYC_PER_US  (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC / 1000000U)
+static ALWAYS_INLINE void alp_v2n_spin_us(uint32_t us)
+{
+	const uint32_t reload = SysTick->LOAD + 1U;
+	const uint32_t target = us * ALP_V2N_CYC_PER_US;
+	uint32_t last = SysTick->VAL;
+	uint32_t elapsed = 0U;
+
+	while (elapsed < target) {
+		const uint32_t now = SysTick->VAL;
+		/* Down-counter: delta = (last - now) mod reload. */
+		uint32_t d = (last >= now) ? (last - now) : (last + reload - now);
+
+		/* Poll-to-poll is tens of cycles; anything bigger is an ISR
+		 * or a tickless LOAD rewrite mid-spin -- count at most 1 us
+		 * of it so a distorted sample cannot cut the window short. */
+		if (d > ALP_V2N_CYC_PER_US) {
+			d = ALP_V2N_CYC_PER_US;
+		}
+		elapsed += d;
+		last = now;
+	}
+}
 static ALWAYS_INLINE void alp_v2n_cs_assert(void)
 {
 #if ALP_V2N_DIRECT_CS_SHIM
 	sys_write8(sys_read8(ALP_V2N_P9_LATCH) & (uint8_t)~ALP_V2N_CS_MASK, ALP_V2N_P9_LATCH);
-	k_busy_wait(ALP_V2N_CS_SETUP_US);
+	alp_v2n_spin_us(ALP_V2N_CS_SETUP_US);
 #endif
 }
 static ALWAYS_INLINE void alp_v2n_cs_deassert(void)
 {
 #if ALP_V2N_DIRECT_CS_SHIM
-	k_busy_wait(ALP_V2N_CS_HOLD_US);
+	alp_v2n_spin_us(ALP_V2N_CS_HOLD_US);
 	sys_write8(sys_read8(ALP_V2N_P9_LATCH) | ALP_V2N_CS_MASK, ALP_V2N_P9_LATCH);
 #endif
 }
@@ -135,18 +181,34 @@ LOG_MODULE_REGISTER(rz_sci_b_spi, CONFIG_SPI_LOG_LEVEL);
 #include "spi_context.h"
 
 /* ── SCI7 25 MHz data path: zero-interrupt POLLED engine ─────────────────────
- * The SCI Simple-SPI master is byte-per-event with a 1-deep TDR/RDR.
  * Interrupt-per-byte tops out around 5-8 MHz (IRQ entry/exit latency), and
  * the DMAC fast path is silicon-blocked (see ALP_V2N_SCI7_DMAC below), so the
- * 25 MHz link uses a tight TDRE/RDRF-polled loop instead: at 25 MHz a frame
- * is 320 ns while a CSR poll + TDR/RDR access pair is well under that on the
- * 200 MHz CM33, and -- decisively -- the MASTER paces SCK (the SCI only
- * clocks while TDR is fed), so a late poll merely stretches the inter-byte
- * gap; the GD32 slave's DMA capture is indifferent to gaps.  Frames are
- * <= 69 bytes, so worst-case CPU time is tens of microseconds per
- * transaction at the example's Hz-rate cadence -- negligible for the
- * supervisor link, with zero per-byte interrupts. */
+ * 25 MHz link uses a polled engine.  Polling the per-byte flags (TDRE/RDRF)
+ * serializes to one byte in flight -- ~10+ peripheral-register round-trips at
+ * ~341 ns each per byte, i.e. ~5 us of wire dead time between 320 ns bytes
+ * (scope + bus-probe measured 2026-06-04).  The engine therefore runs the
+ * SCI's 32-deep FIFOs (CCR3.FM, armed in configure()) with a credit-bound
+ * burst loop sized off the FIFO fill counters, keeping SCK dense; the MASTER
+ * paces SCK (the SCI only clocks while the TX FIFO has data), so a late
+ * burst merely stretches a gap -- the GD32 slave's DMA capture is
+ * indifferent.  Frames are <= 69 bytes, so worst-case CPU time stays tens of
+ * microseconds per transaction, with zero per-byte interrupts. */
 #define ALP_V2N_POLL_GUARD 100000u /* per-flag spin bound (~ms at 25 MHz) */
+
+/* ── SCI FIFO geometry (RZ/V2N RSCI) ─────────────────────────────────────────
+ * Every SCI channel on this SoC has 32-deep TX/RX FIFOs (vendor BSP:
+ * BSP_FEATURE_SCI_UART_FIFO_DEPTH = 32, FIFO_CHANNELS = 0x3FF; the FRSR.R /
+ * FTSR.T fill counters are 6-bit, FCR triggers 5-bit).  The polled engine
+ * caps bytes in flight at DEPTH-1: every outstanding byte is in the TX FIFO,
+ * the shifter, or the RX FIFO, so with at most 31 outstanding neither FIFO
+ * can overflow -- no per-write TDRE check and no RX overrun, by construction.
+ * FCR trigger levels are immaterial to the engine (it batches on the FRSR.R
+ * fill count, not RDRF/TDRE) -- written as 0 so the flags keep their plainest
+ * meaning (TDRE = TX FIFO empty, RDRF = RX non-empty) for debug reads. */
+#define ALP_V2N_SCI_FIFO_DEPTH  32u
+#define ALP_V2N_SCI_FIFO_CREDIT (ALP_V2N_SCI_FIFO_DEPTH - 1u)
+#define ALP_V2N_SCI_FCR_TRIGGERS                                                                   \
+	((0U << R_SCI_B0_FCR_TTRG_Pos) | (0U << R_SCI_B0_FCR_RTRG_Pos))
 
 /* ── SCI7 DMA fast path: PRESERVED BUT DISABLED (silicon-blocked) ────────────
  * Set to 1 (plus SCI_B_SPI_CFG_DMA_SUPPORT_ENABLE=1 in r_sci_b_spi_cfg.h) to
@@ -210,6 +272,27 @@ static bool rz_sci_b_spi_transfer_ongoing(struct rz_sci_b_spi_data *data)
 	return (spi_context_tx_on(&data->ctx) || spi_context_rx_on(&data->ctx));
 }
 
+/* Per-transaction chip-select.  With the direct latch shim active the shim
+ * is THE CS owner (see the block comment at the top): the spi_context GPIO
+ * path cannot reach the P97 pad on this silicon, and its per-edge
+ * k_busy_wait(cs.delay) calls cost ~14 us of dead time per transaction
+ * (k_busy_wait overshoot included; link-bench probe 2026-06-04), so it is
+ * skipped entirely rather than stacked on top.  Without the shim, the
+ * standard spi_context path applies unchanged. */
+static ALWAYS_INLINE void rz_sci_b_spi_cs_set(struct rz_sci_b_spi_data *data, bool assert_cs)
+{
+#if ALP_V2N_DIRECT_CS_SHIM
+	ARG_UNUSED(data);
+	if (assert_cs) {
+		alp_v2n_cs_assert();
+	} else {
+		alp_v2n_cs_deassert();
+	}
+#else
+	spi_context_cs_control(&data->ctx, assert_cs);
+#endif
+}
+
 /*
  * Kick the FSP for the next contiguous chunk when the spi_context still has
  * buffers left after a TRANSFER_COMPLETE (the FSP transfers one flat chunk at
@@ -235,8 +318,7 @@ static void rz_sci_b_spi_retransmit(const struct device *dev)
 
 	if (fsp_err != FSP_SUCCESS) {
 		LOG_ERR("SCI-SPI continue transfer error: %d", fsp_err);
-		spi_context_cs_control(&data->ctx, false);
-		alp_v2n_cs_deassert();
+		rz_sci_b_spi_cs_set(data, false);
 		spi_context_complete(&data->ctx, dev, -EIO);
 	}
 }
@@ -280,8 +362,7 @@ static void rz_sci_b_spi_callback(spi_callback_args_t *p_args)
 			}
 		}
 #endif /* CONFIG_SPI_SLAVE */
-		spi_context_cs_control(&data->ctx, false);
-		alp_v2n_cs_deassert();
+		rz_sci_b_spi_cs_set(data, false);
 		spi_context_complete(&data->ctx, dev, 0);
 		break;
 	case SPI_EVENT_ERR_MODE_FAULT:
@@ -295,8 +376,7 @@ static void rz_sci_b_spi_callback(spi_callback_args_t *p_args)
 		 * complete with -EIO (the waiter recovers via
 		 * rz_sci_b_spi_recover()) instead of leaving the caller to ride
 		 * out the completion timeout with CS still asserted. */
-		spi_context_cs_control(&data->ctx, false);
-		alp_v2n_cs_deassert();
+		rz_sci_b_spi_cs_set(data, false);
 		spi_context_complete(&data->ctx, dev, -EIO);
 		break;
 	}
@@ -417,6 +497,37 @@ static int rz_sci_b_spi_configure(const struct device *dev, const struct spi_con
 		return -EINVAL;
 	}
 
+#if !ALP_V2N_SCI7_DMAC
+	/* Arm the SCI's 32-deep FIFOs for the polled engine.  The vendored FSP
+	 * gates FIFO mode (CCR3.FM) behind its DMA transfer interfaces
+	 * (SCI_B_SPI_CFG_FIFO_SUPPORT + a p_transfer_tx/rx param check), so
+	 * its Open leaves FM = 0 here -- but the IP supports FIFO in
+	 * Simple-SPI regardless, and the polled engine NEEDS it: without a
+	 * FIFO the receiver must drain RDR within one byte-time (320 ns at
+	 * 25 MHz) to avoid overrun, which forces a serialized
+	 * one-byte-in-flight walk whose register round-trips cost ~5 us of
+	 * wire dead time per byte (scope + bus-probe measured 2026-06-04: one
+	 * SCI7 register access = ~341 ns).  With the FIFOs absorbing
+	 * wire-rate bursts the engine keeps up to 31 bytes in flight and the
+	 * wire runs dense (see rz_sci_b_spi_xfer_polled).
+	 *
+	 * Sequence per the FSP's own FIFO arming (r_sci_b_spi_hw_config): FM
+	 * is set while TE/RE are off (Open left CCR0 = 0; the engine toggles
+	 * them per transaction), and the FIFO-reset strobes MUST be re-issued
+	 * AFTER FM is set.
+	 *
+	 * DMA mode runs WITHOUT FIFO mode (vendor generator parity: the
+	 * e2-studio SCI+DMAC reference leaves FM = 0; the DMAC's per-byte
+	 * TDRE/RDRF requests pace the wire instead). */
+	{
+		R_SCI_B0_Type *p_reg = data->fsp_ctrl.p_reg;
+
+		p_reg->CCR3_b.FM = 1U;
+		p_reg->FCR = ALP_V2N_SCI_FCR_TRIGGERS | R_SCI_B0_FCR_TFRST_Msk |
+			     R_SCI_B0_FCR_RFRST_Msk;
+	}
+#endif /* !ALP_V2N_SCI7_DMAC */
+
 	data->ctx.config = config;
 
 	return 0;
@@ -441,10 +552,13 @@ static int rz_sci_b_spi_configure(const struct device *dev, const struct spi_con
  *     irq_lock, so the read-modify-write can't race the rxi/txi/tei ISRs and no
  *     stray ISR is left armed (matters on the -ETIMEDOUT path, where the
  *     transfer may still be nominally live);
- *   - drains RDR and clears the receive-data-ready + error status (RDRFC/ORERC/
- *     FERC/PERC); the error being recovered is an RX overrun, so a stale byte
- *     sits in RDR with RDRF latched -- left in place it shifts the very next
- *     transfer by one frame (CRC fail -> STATUS_IO, the symptom this fix kills);
+ *   - flushes both FIFOs (TFRST/RFRST) and clears the receive-data-ready +
+ *     error status (RDRFC/ORERC/FERC/PERC); stale bytes left in the RX FIFO
+ *     would shift the very next transfer by as many frames (CRC fail ->
+ *     STATUS_IO, the symptom this fix kills);
+ *   - sequences the TE clear through the FIFO-mode TEND anomaly workaround
+ *     (TX-FIFO reset + FM drop first), then re-arms FIFO mode, so a stall
+ *     exit cannot wedge the transmitter for the retry that follows;
  *   - zeroes the FSP transfer counters so a rxi that was already latched cannot
  *     write a late byte into the previous caller's buffer via the stale p_dest
  *     (write_read_common re-inits count/tx/rx/p_src/p_dest on the next call).
@@ -480,13 +594,43 @@ static void rz_sci_b_spi_recover(struct rz_sci_b_spi_data *data)
 
 	key = irq_lock();
 
-	p_reg->CCR0 &= (uint32_t)~(R_SCI_B0_CCR0_TE_Msk | R_SCI_B0_CCR0_RE_Msk |
-				   R_SCI_B0_CCR0_TIE_Msk | R_SCI_B0_CCR0_RIE_Msk |
-				   R_SCI_B0_CCR0_TEIE_Msk);
+	/* FIFO-mode state is read at runtime so this recovery is correct for
+	 * both engines (polled = FM set in configure(); DMA mode runs FM=0). */
+	const uint32_t fifo_mode = p_reg->CCR3 & R_SCI_B0_CCR3_FM_Msk;
+
+	/* Stop reception and every transfer-interrupt enable, but keep TE for
+	 * a moment: in FIFO mode, clearing TE while TEND = 0 leaves the
+	 * transmitter abnormal on its next enable (vendor note in
+	 * R_SCI_B_SPI_Close).  Resetting the TX FIFO and dropping CCR3.FM
+	 * forces TEND back to 1, after which the TE clear is safe -- the
+	 * same order the FSP's own FIFO-mode Close uses. */
+	p_reg->CCR0 &= (uint32_t)~(R_SCI_B0_CCR0_RE_Msk | R_SCI_B0_CCR0_TIE_Msk |
+				   R_SCI_B0_CCR0_RIE_Msk | R_SCI_B0_CCR0_TEIE_Msk);
+	if (fifo_mode) {
+		p_reg->FCR = ALP_V2N_SCI_FCR_TRIGGERS | R_SCI_B0_FCR_TFRST_Msk |
+			     R_SCI_B0_FCR_RFRST_Msk;
+		p_reg->CCR3 &= (uint32_t)~R_SCI_B0_CCR3_FM_Msk;
+	}
+	p_reg->CCR0 &= (uint32_t)~R_SCI_B0_CCR0_TE_Msk;
 
 	(void)p_reg->RDR;
 	p_reg->CFCLR = R_SCI_B0_CFCLR_RDRFC_Msk | R_SCI_B0_CFCLR_ORERC_Msk |
 		       R_SCI_B0_CFCLR_FERC_Msk | R_SCI_B0_CFCLR_PERC_Msk;
+
+	/* Wait for the internal communication state to settle after the TE/RE
+	 * drop (the FSP does the same CESR wait between CCR0 = 0 and the CCR3
+	 * write in hw_config; bounded -- a few TCLK cycles normally). */
+	for (uint32_t settle = ALP_V2N_POLL_GUARD; (p_reg->CESR != 0U) && (settle != 0U);
+	     settle--) {
+	}
+
+	/* Re-arm FIFO mode for the next transfer; the FIFO-reset strobes must
+	 * be re-issued after FM is set (same order as configure()). */
+	if (fifo_mode) {
+		p_reg->CCR3 |= R_SCI_B0_CCR3_FM_Msk;
+		p_reg->FCR = ALP_V2N_SCI_FCR_TRIGGERS | R_SCI_B0_FCR_TFRST_Msk |
+			     R_SCI_B0_FCR_RFRST_Msk;
+	}
 
 	data->fsp_ctrl.count = 0U;
 	data->fsp_ctrl.rx_count = 0U;
@@ -495,16 +639,18 @@ static void rz_sci_b_spi_recover(struct rz_sci_b_spi_data *data)
 	irq_unlock(key);
 }
 
+#if !ALP_V2N_SCI7_DMAC
 /*
  * Zero-interrupt polled full-duplex engine (the 25 MHz production path; see
  * the data-path note at the top of the file).  Walks the whole spi_context
- * buffer set frame by frame: feed TDR on TDRE, collect RDR on RDRF (the SCI
- * auto-clears both flags on the data-register access, exactly as the FSP's
- * own ISRs rely on).  The configure() step has already programmed the bit
- * rate (CCR2) and frame format (CCR3) via R_SCI_B_SPI_Open; this engine only
- * drives TE/RE around the transaction, so rz_sci_b_spi_recover() remains
- * valid for any error exit.  Synchronous by design -- with master-paced SCK
- * the whole worst-case frame (69 B) is ~25 us of wall time at 25 MHz.
+ * buffer set in FIFO-credit bursts: fill the 32-deep TX FIFO up to the
+ * 31-byte in-flight credit, then drain the RX FIFO by its FRSR.R fill count
+ * (see the burst-sizing/overrun proof at the loop).  The configure() step
+ * has already programmed the bit rate (CCR2), frame format + FIFO mode
+ * (CCR3) and FIFO triggers (FCR); this engine only drives TE/RE around the
+ * transaction, so rz_sci_b_spi_recover() remains valid for any error exit.
+ * Synchronous by design -- a worst-case frame (69 B) is ~22 us of wire time
+ * at 25 MHz and the engine's burst overhead adds little on the 200 MHz CM33.
  */
 static int rz_sci_b_spi_xfer_polled(struct rz_sci_b_spi_data *data)
 {
@@ -516,31 +662,88 @@ static int rz_sci_b_spi_xfer_polled(struct rz_sci_b_spi_data *data)
 	 * free-runs SCK, and TE-only would discard the (full-duplex) returns. */
 	p_reg->CCR0 |= (R_SCI_B0_CCR0_TE_Msk | R_SCI_B0_CCR0_RE_Msk);
 
-	while (spi_context_tx_on(ctx) || spi_context_rx_on(ctx)) {
-		const uint8_t out = spi_context_tx_buf_on(ctx) ? *ctx->tx_buf : 0x00U;
-		uint8_t in;
+	/* FIFO-credit engine: keep up to (depth - 1) = 31 bytes in flight so
+	 * the shifter never starves between bytes -- SCK then runs in dense
+	 * bursts instead of one isolated byte every ~5 us (the cost of the
+	 * old serialized one-in-flight walk: ~10+ register round-trips at
+	 * ~341 ns each per byte).  The credit cap is the whole overrun/
+	 * overflow proof: every outstanding byte (sent - recvd) is in the TX
+	 * FIFO, the shifter, or the RX FIFO, so with at most 31 outstanding
+	 * and both FIFOs 32 deep neither can overflow -- which is also why
+	 * there is NO per-write TDRE/room check: the credit bound implies TX
+	 * FIFO room.  Bursts are sized once from the FRSR.R fill count (one
+	 * ~341 ns status read amortized over the burst) and the data loops
+	 * then touch only TDR/RDR, so the per-byte cost approaches the
+	 * 320 ns wire time instead of the flag-polled ~5 us.
+	 *
+	 * TX and RX walk the spi_context independently (sent/recvd) one
+	 * contiguous chunk at a time, preserving the existing semantics:
+	 * missing/NOP TX buffer clocks 0x00 filler, missing RX buffer
+	 * discards (reads still drain the FIFO). */
+	const size_t n_tx = spi_context_total_tx_len(ctx);
+	const size_t n_rx = spi_context_total_rx_len(ctx);
+	const size_t n = MAX(n_tx, n_rx);
+	size_t sent = 0;
+	size_t recvd = 0;
 
-		guard = ALP_V2N_POLL_GUARD;
-		while (!(p_reg->CSR & R_SCI_B0_CSR_TDRE_Msk)) {
-			if (--guard == 0U) {
-				goto stalled;
+	guard = ALP_V2N_POLL_GUARD;
+	while (recvd < n) {
+		/* TX burst: as much as remains, bounded by the in-flight
+		 * credit and the current contiguous spi_context chunk. */
+		size_t burst = MIN(n - sent, ALP_V2N_SCI_FIFO_CREDIT - (sent - recvd));
+
+		if ((burst > 0) && spi_context_tx_on(ctx)) {
+			const uint8_t *src = ctx->tx_buf;
+
+			burst = MIN(burst, ctx->tx_len);
+			if (src != NULL) {
+				for (size_t i = 0; i < burst; i++) {
+					p_reg->TDR = (0xFFFFFF00UL | src[i]);
+				}
+			} else {
+				for (size_t i = 0; i < burst; i++) {
+					p_reg->TDR = 0xFFFFFF00UL; /* NOP chunk */
+				}
+			}
+			spi_context_update_tx(ctx, 1, burst);
+		} else {
+			for (size_t i = 0; i < burst; i++) {
+				p_reg->TDR = 0xFFFFFF00UL; /* past TX set: filler */
 			}
 		}
-		p_reg->TDR = (0xFFFFFF00UL | out);
+		sent += burst;
 
-		guard = ALP_V2N_POLL_GUARD;
-		while (!(p_reg->CSR & R_SCI_B0_CSR_RDRF_Msk)) {
-			if (--guard == 0U) {
-				goto stalled;
+		/* RX burst: drain what the RX FIFO reports, bounded by the
+		 * outstanding count and the current contiguous chunk. */
+		size_t take = (p_reg->FRSR & R_SCI_B0_FRSR_R_Msk) >> R_SCI_B0_FRSR_R_Pos;
+
+		take = MIN(take, sent - recvd);
+		if ((take > 0) && spi_context_rx_on(ctx)) {
+			uint8_t *dst = ctx->rx_buf;
+
+			take = MIN(take, ctx->rx_len);
+			if (dst != NULL) {
+				for (size_t i = 0; i < take; i++) {
+					dst[i] = (uint8_t)(p_reg->RDR & 0xFFU);
+				}
+			} else {
+				for (size_t i = 0; i < take; i++) {
+					(void)p_reg->RDR; /* NOP chunk */
+				}
+			}
+			spi_context_update_rx(ctx, 1, take);
+		} else {
+			for (size_t i = 0; i < take; i++) {
+				(void)p_reg->RDR; /* past RX set: discard */
 			}
 		}
-		in = (uint8_t)(p_reg->RDR & 0xFFU);
+		recvd += take;
 
-		if (spi_context_rx_buf_on(ctx)) {
-			*ctx->rx_buf = in;
+		if ((burst | take) != 0U) {
+			guard = ALP_V2N_POLL_GUARD;
+		} else if (--guard == 0U) {
+			goto stalled;
 		}
-		spi_context_update_tx(ctx, 1, 1);
-		spi_context_update_rx(ctx, 1, 1);
 	}
 
 	/* Let the final frame drain out of the shifter before dropping TE --
@@ -562,6 +765,41 @@ stalled:
 	rz_sci_b_spi_recover(data);
 	return -EIO;
 }
+#endif /* !ALP_V2N_SCI7_DMAC */
+
+#if ALP_V2N_SCI7_DMAC
+/*
+ * Start one FSP-driven (DMAC) transfer chunk.  Completion arrives through
+ * rz_sci_b_spi_callback: SPI_EVENT_TRANSFER_COMPLETE either kicks the next
+ * contiguous chunk (rz_sci_b_spi_retransmit) or drops CS and completes the
+ * spi_context; error events complete with -EIO.  The synchronous caller
+ * parks in spi_context_wait_for_completion().
+ */
+static int rz_sci_b_spi_xfer_fsp_start(struct rz_sci_b_spi_data *data)
+{
+	fsp_err_t fsp_err;
+
+	data->data_len = spi_context_max_continuous_chunk(&data->ctx);
+
+	if (data->ctx.rx_buf == NULL) {
+		fsp_err = R_SCI_B_SPI_Write(&data->fsp_ctrl, data->ctx.tx_buf, data->data_len,
+					    SPI_BIT_WIDTH_8_BITS);
+	} else if (data->ctx.tx_buf == NULL) {
+		fsp_err = R_SCI_B_SPI_Read(&data->fsp_ctrl, data->ctx.rx_buf, data->data_len,
+					   SPI_BIT_WIDTH_8_BITS);
+	} else {
+		fsp_err = R_SCI_B_SPI_WriteRead(&data->fsp_ctrl, data->ctx.tx_buf,
+						data->ctx.rx_buf, data->data_len,
+						SPI_BIT_WIDTH_8_BITS);
+	}
+
+	if (fsp_err != FSP_SUCCESS) {
+		LOG_ERR("SCI-SPI FSP transfer start error: %d", fsp_err);
+		return -EIO;
+	}
+	return 0;
+}
+#endif /* ALP_V2N_SCI7_DMAC */
 
 static int transceive(const struct device *dev, const struct spi_config *config,
 		      const struct spi_buf_set *tx_bufs, const struct spi_buf_set *rx_bufs,
@@ -593,19 +831,35 @@ static int transceive(const struct device *dev, const struct spi_config *config,
 	 * clobber that landed since init (the bench poke re-asserted continuously). */
 	alp_v2n_pins_assert();
 #endif
-	spi_context_cs_control(&data->ctx, true);
-	alp_v2n_cs_assert();
+	rz_sci_b_spi_cs_set(data, true);
 
+#if ALP_V2N_SCI7_DMAC
+	/* DMAC data path: the FSP streams the chunk; the event callback drops
+	 * CS and completes the context (asynchronous callers return here and
+	 * get their callback from that path). */
+	ret = rz_sci_b_spi_xfer_fsp_start(data);
+	if (ret != 0) {
+		rz_sci_b_spi_cs_set(data, false);
+	} else if (!asynchronous) {
+		ret = spi_context_wait_for_completion(&data->ctx);
+		if (ret != 0) {
+			/* Timeout: the callback never fired -- quiesce the
+			 * channel + controller and drop CS ourselves. */
+			rz_sci_b_spi_recover(data);
+			rz_sci_b_spi_cs_set(data, false);
+		}
+	}
+#else
 	ret = rz_sci_b_spi_xfer_polled(data);
 
-	spi_context_cs_control(&data->ctx, false);
-	alp_v2n_cs_deassert();
+	rz_sci_b_spi_cs_set(data, false);
 
 	if (asynchronous) {
 		/* The engine is synchronous; satisfy the async contract by
 		 * completing immediately (fires the user callback). */
 		spi_context_complete(&data->ctx, dev, ret);
 	}
+#endif /* ALP_V2N_SCI7_DMAC */
 
 #ifdef CONFIG_SPI_SLAVE
 	if (spi_context_is_slave(&data->ctx) && !ret) {
@@ -756,25 +1010,29 @@ static int rz_sci_b_spi_init(const struct device *dev)
 		.dmac_int_irq = (IRQn_Type)(DMAC_B0_DMAINT0_IRQn + (ch)),                          \
 		.dmac_int_ipl = DT_IRQ_BY_NAME(SCI_NODE(n), rxi, priority),                        \
 		.activation_source = (trigger),                                                    \
-		/* BUS_CYCLE ack: the on-chip TDRE/RDRF requests are flow-controlled               \
-		 * by the data-register access itself -- the bus cycle IS the                      \
-		 * acknowledge.  With the DACK masked instead, the level request is                \
-		 * never acknowledged and the channel parks SUSPENDED after its                    \
-		 * first beat (CHSTAT.SUS=1, scope-confirmed zero SCK, 2026-06-03).                \
-		 * Matches the Linux rz-dmac convention for peripheral slaves. */                  \
-		.ack_mode = DMAC_B_ACK_MODE_BUS_CYCLE_MODE,                                        \
-		/* external pin mode is don't-care for internal (peripheral)                       \
-		 * triggers.  internal_detection MUST be HIGH_LEVEL (CHCFG                         \
-		 * LVL|HIEN): the SCI TDRE/RDRF requests are level lines, and the                  \
-		 * FSP arms the transfer BEFORE start_transfer() sets CCR0.TE --                   \
-		 * with edge/no detection the only TDRE edge is consumed while                     \
-		 * TE=0 (one byte vanishes into a non-transmitting TDR) and no new                 \
-		 * edge ever comes, freezing the stream at CRSA=N0SA+1 with zero                   \
-		 * SCK (seen on silicon 2026-06-03, scope-confirmed).  Level                       \
-		 * detection re-fires as long as the line is active.  This matches                 \
-		 * the Linux rz-dmac convention for on-chip peripheral requests. */                \
+		/* VENDOR GROUND TRUTH (e2 studio FSP generator, SCI-SPI + DMAC-B                  \
+		 * pairing for this SoC family, obtained 2026-06-04): ack_mode =                   \
+		 * MASK_DACK_OUTPUT, internal_detection = NO_DETECTION, request                    \
+		 * direction = SOURCE_MODULE for BOTH channels (the SCI is the                     \
+		 * requesting module on receive too), dreq/ack/tend pins =                         \
+		 * NO_INPUT/NO_OUTPUT.  Our 2026-06-03 bring-up sweeps never                       \
+		 * tested this exact combination -- each axis was varied from a                    \
+		 * different base (BUS_CYCLE ack came from the Linux rz-dmac                       \
+		 * convention after MASK_DACK appeared to park SUSPENDED,                          \
+		 * HIGH_LEVEL detection from the armed-before-TE edge-consumption                  \
+		 * trap, RX had DESTINATION_MODULE, i.e. REQD backwards per the                    \
+		 * vendor, and the pin fields were LEFT ZERO-INITIALISED = PIN0,                   \
+		 * which makes the FSP program the INTC external-DREQ routing for                  \
+		 * pin 0 on top of the internal trigger).  The config below now                    \
+		 * mirrors the generator; UNVALIDATED on our silicon -- bench the                  \
+		 * gate before shipping it enabled, and only then revisit the                      \
+		 * Renesas ticket (its premise changed). */                                        \
+		.ack_mode = DMAC_B_ACK_MODE_MASK_DACK_OUTPUT,                                      \
+		.dreq_input_pin = DMAC_B_EXTERNAL_INPUT_PIN_NO_INPUT,                              \
+		.ack_output_pin = DMAC_B_EXTERNAL_OUTPUT_PIN_NO_OUTPUT,                            \
+		.tend_output_pin = DMAC_B_EXTERNAL_OUTPUT_PIN_NO_OUTPUT,                           \
 		.external_detection_mode = DMAC_B_EXTERNAL_DETECTION_LOW_LEVEL,                    \
-		.internal_detection_mode = DMAC_B_INTERNAL_DETECTION_HIGH_LEVEL,                   \
+		.internal_detection_mode = DMAC_B_INTERNAL_DETECTION_NO_DETECTION,                 \
 		.activation_request_source_select = (reqdir),                                      \
 		.dmac_mode = DMAC_B_MODE_SELECT_REGISTER,                                          \
 		.continuous_setting = DMAC_B_CONTINUOUS_SETTING_TRANSFER_ONCE,                     \
@@ -793,10 +1051,13 @@ static int rz_sci_b_spi_init(const struct device *dev)
 		.p_api = &g_transfer_on_dmac_b,                                                    \
 	};
 
+/* Request direction is SOURCE_MODULE for BOTH directions -- per the
+ * vendor generator the on-chip SCI is the requesting module whether it
+ * is the transfer source (RX: SCI -> memory) or destination (TX). */
 #define RZ_SCI_B_SPI_DMAC_PAIR(n)                                                                  \
 	RZ_SCI_B_SPI_DMAC_DEFINE(n, rx, ALP_V2N_SCI7_DMAC_RX_CH,                                   \
 				 ALP_V2N_DMAC_TRIGGER_SCI7_RXI,                                    \
-				 DMAC_B_REQUEST_DIRECTION_DESTINATION_MODULE,                      \
+				 DMAC_B_REQUEST_DIRECTION_SOURCE_MODULE,                           \
 				 rz_sci_b_spi_rx_dmac_cb)                                          \
 	RZ_SCI_B_SPI_DMAC_DEFINE(n, tx, ALP_V2N_SCI7_DMAC_TX_CH,                                   \
 				 ALP_V2N_DMAC_TRIGGER_SCI7_TXI,                                    \
