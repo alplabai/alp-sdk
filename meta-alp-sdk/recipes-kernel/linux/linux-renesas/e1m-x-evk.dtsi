@@ -14,7 +14,12 @@
  * TODO (carrier features to port once exercised on the bench):
  *   - Audio: TAS2563 smart-amp pair on I2C0 @0x4D/0x4E, I2S0 -> SSI1
  *     (rcar_sound audio-graph). See chips/tas2563 + issue #25.
- *   - 2x MIPI-DSI displays + capacitive touch.
+ *   - Display 1 (J6): ported -- rk055hdmipi4ma0 panel on dsi0 (see below).
+ *     Display 2 (J28) is permanently unavailable: it requires DSI1 lane
+ *     set, which the V2N/V2M family does not populate.
+ *     Touch (GT911 on the panel FFC): DEFERRED -- its I2C bus
+ *     (DSI1_CSI_I2C) terminates on the GD32 IO-MCU bridge; Linux has no
+ *     direct path until the bridge gains an I2C-master proxy.
  *   - 2x MIPI-CSI cameras.
  *   - CAN-FD (TCAN1044 x2).
  */
@@ -101,6 +106,58 @@
 &gpu {
 	status = "okay";
 	mali-supply = <&reg_0p8v>;
+};
+
+/* Display 1 (J6): RK055HDMIPI4MA0 720x1280 MIPI-DSI panel.
+ * The V2N's single DSI feeds the connector DSI0 lane set -> J6 directly
+ * (no bridge/mux on this carrier). Display 2 (J28) sits on the DSI1
+ * lane set, which the V2N family does not populate -- permanently
+ * unavailable on V2N/V2M.
+ * Panel rails (+5V/+3V3/+L1_VIO) are always-on; LCD1_PWR_EN (IO15) is
+ * pulled high on the carrier and IO15 is unrouted on V2N -- no power
+ * GPIO needed. Panel reset = E1M IO13 -> GD32 PF1 = bridge gpio line 5.
+ * Touch (GT911 on the panel FFC) is NOT wired here: its bus
+ * (DSI1_CSI_I2C = E1M I2C3) terminates on the GD32 IO-MCU (the
+ * bridge's secondary I2C transport), so Linux has no path to it until
+ * the bridge gains an I2C-master proxy. Tracked as a follow-up; the
+ * goodix polled-mode patch already ships dormant for that stack.
+ */
+&du {
+	status = "okay";
+};
+
+&dsi0 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	panel@0 {
+		compatible = "rocktech,rk055hdmipi4ma0";
+		reg = <0>;
+		reset-gpios = <&gd32_gpio 5 GPIO_ACTIVE_LOW>;
+		vcc-supply = <&reg_3p3v>;
+		iovcc-supply = <&reg_3p3v>;
+		backlight = <&backlight>;
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&dsi0_out>;
+			};
+		};
+	};
+
+	/* port@1 merges with the SoC dtsi's existing dsi0/ports/port@1
+	 * node (which carries the dsi0_out label).  The label is NOT
+	 * re-declared here to avoid a duplicate-label dtc error; the
+	 * panel_in remote-endpoint above resolves via the SoC label. */
+	ports {
+		port@1 {
+			endpoint {
+				remote-endpoint = <&panel_in>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
 };
 
 /* Dual GbE — MACs on the carrier RJ45s; PHYs are on-module (SoM dtsi). */
