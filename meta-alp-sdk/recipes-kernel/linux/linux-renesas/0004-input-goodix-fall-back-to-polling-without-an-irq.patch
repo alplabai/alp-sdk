@@ -42,14 +42,22 @@ Upstream-Status: Pending [generic improvement; no SoM-specific code]
 
 Signed-off-by: Alp Lab AB
 ---
- drivers/input/touchscreen/goodix.c | 38 ++++++++++++++++++++++++------
- 1 file changed, 31 insertions(+), 7 deletions(-)
+ drivers/input/touchscreen/goodix.c | 39 ++++++++++++++++++++++++------
+ 1 file changed, 32 insertions(+), 7 deletions(-)
 
 diff --git a/drivers/input/touchscreen/goodix.c b/drivers/input/touchscreen/goodix.c
-index 6de64b3f900f..f7f185d1d1ed 100644
+index 6de64b3f900f..3db0f0eaac81 100644
 --- a/drivers/input/touchscreen/goodix.c
 +++ b/drivers/input/touchscreen/goodix.c
-@@ -513,6 +513,14 @@ static irqreturn_t goodix_ts_irq_handler(int irq, void *dev_id)
+@@ -43,6 +43,7 @@
+ #define GOODIX_BUFFER_STATUS_READY	BIT(7)
+ #define GOODIX_HAVE_KEY			BIT(4)
+ #define GOODIX_BUFFER_STATUS_TIMEOUT	20
++#define GOODIX_POLL_INTERVAL_MS		17	/* ~59 Hz, matches GT911 report rate */
+
+ #define RESOLUTION_LOC		1
+ #define MAX_CONTACTS_LOC	5
+@@ -513,6 +514,14 @@ static irqreturn_t goodix_ts_irq_handler(int irq, void *dev_id)
  	return IRQ_HANDLED;
  }
 
@@ -64,26 +72,26 @@ index 6de64b3f900f..f7f185d1d1ed 100644
  static void goodix_free_irq(struct goodix_ts_data *ts)
  {
  	devm_free_irq(&ts->client->dev, ts->client->irq, ts);
-@@ -1237,6 +1245,18 @@ static int goodix_configure_dev(struct goodix_ts_data *ts)
+@@ -1237,6 +1246,18 @@ static int goodix_configure_dev(struct goodix_ts_data *ts)
  		return error;
  	}
 
 +	input_set_drvdata(ts->input_dev, ts);
 +
-+	if (!ts->client->irq) {
++	if (ts->client->irq <= 0) {
 +		error = input_setup_polling(ts->input_dev, goodix_ts_poll);
 +		if (error) {
 +			dev_err(&ts->client->dev,
 +				"could not set up polling: %d\n", error);
 +			return error;
 +		}
-+		input_set_poll_interval(ts->input_dev, 17); /* ~60 Hz */
++		input_set_poll_interval(ts->input_dev, GOODIX_POLL_INTERVAL_MS);
 +	}
 +
  	error = input_register_device(ts->input_dev);
  	if (error) {
  		dev_err(&ts->client->dev,
-@@ -1255,11 +1275,13 @@ static int goodix_configure_dev(struct goodix_ts_data *ts)
+@@ -1255,11 +1276,13 @@ static int goodix_configure_dev(struct goodix_ts_data *ts)
  	if (error)
  		return error;
 
@@ -102,7 +110,7 @@ index 6de64b3f900f..f7f185d1d1ed 100644
  	}
 
  	return 0;
-@@ -1441,7 +1463,8 @@ static int __maybe_unused goodix_suspend(struct device *dev)
+@@ -1441,7 +1464,8 @@ static int __maybe_unused goodix_suspend(struct device *dev)
 
  	/* We need gpio pins to suspend/resume */
  	if (ts->irq_pin_access_method == IRQ_PIN_ACCESS_NONE) {
@@ -112,7 +120,7 @@ index 6de64b3f900f..f7f185d1d1ed 100644
  		return 0;
  	}
 
-@@ -1485,7 +1508,8 @@ static int __maybe_unused goodix_resume(struct device *dev)
+@@ -1485,7 +1509,8 @@ static int __maybe_unused goodix_resume(struct device *dev)
  	int error;
 
  	if (ts->irq_pin_access_method == IRQ_PIN_ACCESS_NONE) {
