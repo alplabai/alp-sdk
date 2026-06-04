@@ -1,0 +1,302 @@
+From: Alp Lab AB
+Date: Thu, 4 Jun 2026 14:33:20 +0200
+Subject: [PATCH] gpio: add Alp Lab GD32 bridge expander driver
+
+Copyright (c) 2026 Alp Lab AB
+SPDX-License-Identifier: GPL-2.0
+
+New driver for the GPIO expander provided by the GD32G553 IO-MCU on
+Alp Lab V2N-family SoMs (E1M V2N101/V2N102). The MCU acts as a
+supervisor bridge between the RZ/V2N SoC and a set of E1M IO pads;
+its I2C slave (BRD_I2C @ 0x70, Linux i2c8) is the transport used here.
+
+Wire format (bridge protocol v0.6):
+  - Write: [reg 0x00][cmd][payload][CRC-16/CCITT-FALSE lo][hi]
+  - Read:  [status][payload][CRC-16/CCITT-FALSE lo][hi] (no SOF on I2C)
+  - The slave clock-stretches until the reply is ready.
+
+Sticky-output caveat: CMD_GPIO_WRITE promotes a pad to push-pull
+output permanently (until GD32 reset). direction_input() returns
+-EPERM on a line that has ever been written; this matches the
+bridge firmware hardware model.
+
+Probe-defer rationale: if the GD32 is unflashed or held in reset,
+the PING handshake will NAK; returning -EPROBE_DEFER allows the
+kernel to retry once the bridge comes up, rather than hard-failing
+the panel and touch drivers that depend on these GPIO lines.
+
+Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
+
+Signed-off-by: Alp Lab AB
+---
+ drivers/gpio/Kconfig            |   9 ++
+ drivers/gpio/Makefile           |   1 +
+ drivers/gpio/gpio-gd32-bridge.c | 227 ++++++++++++++++++++++++++++++++
+ 3 files changed, 237 insertions(+)
+ create mode 100644 drivers/gpio/gpio-gd32-bridge.c
+
+diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
+index 74d8b949ce36..eefc447b2148 100644
+--- a/drivers/gpio/Kconfig
++++ b/drivers/gpio/Kconfig
+@@ -1009,6 +1009,15 @@ config GPIO_ADNP
+ 	  enough to represent all pins, but the driver will assume a
+ 	  register layout for 64 pins (8 registers).
+ 
++config GPIO_GD32_BRIDGE
++	tristate "Alp Lab GD32 IO-MCU bridge GPIO expander"
++	depends on I2C && OF
++	select CRC_ITU_T
++	help
++	  GPIO support for E1M IO pads routed through the GD32G553
++	  supervisor MCU on Alp Lab V2N-family SoMs, accessed over the
++	  bridge's I2C slave interface.
++
+ config GPIO_GW_PLD
+ 	tristate "Gateworks PLD GPIO Expander"
+ 	depends on OF_GPIO
+diff --git a/drivers/gpio/Makefile b/drivers/gpio/Makefile
+index e331e951ef2e..3ba5cc2f2193 100644
+--- a/drivers/gpio/Makefile
++++ b/drivers/gpio/Makefile
+@@ -59,6 +59,7 @@ obj-$(CONFIG_GPIO_EP93XX)		+= gpio-ep93xx.o
+ obj-$(CONFIG_GPIO_EXAR)			+= gpio-exar.o
+ obj-$(CONFIG_GPIO_F7188X)		+= gpio-f7188x.o
+ obj-$(CONFIG_GPIO_FTGPIO010)		+= gpio-ftgpio010.o
++obj-$(CONFIG_GPIO_GD32_BRIDGE)		+= gpio-gd32-bridge.o
+ obj-$(CONFIG_GPIO_GE_FPGA)		+= gpio-ge.o
+ obj-$(CONFIG_GPIO_GPIO_MM)		+= gpio-gpio-mm.o
+ obj-$(CONFIG_GPIO_GRGPIO)		+= gpio-grgpio.o
+diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
+new file mode 100644
+index 000000000000..afa62b92f82e
+--- /dev/null
++++ b/drivers/gpio/gpio-gd32-bridge.c
+@@ -0,0 +1,227 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
++ *
++ * The E1M V2N-family SoM routes a set of E1M IO pads through a GD32G553
++ * supervisor MCU. This driver exposes the bridge's logical GPIO map as a
++ * Linux gpiochip over the bridge's I2C slave (BRD_I2C @ 0x70) using the
++ * bridge wire protocol CMD_GPIO_READ/CMD_GPIO_WRITE.
++ *
++ * Wire notes (bridge protocol v0.6):
++ *  - write:  [reg 0x00][cmd][payload][crc16 lo][crc16 hi]
++ *  - read:   [status][payload][crc16 lo][crc16 hi]   (no SOF on I2C)
++ *  - CRC-16/CCITT-FALSE over cmd|payload (write) / status|payload (read).
++ *  - Reply length is opcode-derived; the slave clock-stretches until ready.
++ *  - GPIO_WRITE auto-promotes a pad to push-pull output, sticky until the
++ *    GD32 resets; there is no demote-to-input. direction_input() is
++ *    therefore only honoured for never-written lines.
++ *
++ * Copyright (c) 2026 Alp Lab AB
++ */
++
++#include <asm/unaligned.h>
++#include <linux/crc-itu-t.h>
++#include <linux/gpio/driver.h>
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++
++#define GD32_REG_CMD		0x00
++#define GD32_CMD_PING		0x00
++#define GD32_CMD_GET_VERSION	0x01
++#define GD32_CMD_GPIO_READ	0x10
++#define GD32_CMD_GPIO_WRITE	0x11
++#define GD32_STATUS_OK		0x00
++
++#define GD32_NGPIO		18
++
++static const char * const gd32_bridge_gpio_names[GD32_NGPIO] = {
++	"IO8/PB10",  "IO9/PA7",   "IO10/PA12", "IO11/PB0",  "IO12/PC1",
++	"IO13/PF1",  "IO14/PB5",  "IO16/PC0",  "IO24/PC14", "IO25/PC15",
++	"IO27/PB11", "IO28/PC2",  "IO29/PD11", "IO30/PD10", "IO31/PE12",
++	"IO32/PD2",  "IO34/PD8",  "IO35/PD1",
++};
++
++struct gd32_bridge_gpio {
++	struct i2c_client *client;
++	struct gpio_chip chip;
++	struct mutex lock;		/* serialize cmd/reply pairs */
++	u32 output_mask;		/* lines promoted to output (sticky) */
++	u32 output_vals;		/* last driven levels */
++};
++
++static int gd32_bridge_xfer(struct gd32_bridge_gpio *gd32, u8 cmd,
++			    const u8 *req, unsigned int req_len,
++			    u8 *rsp, unsigned int rsp_len)
++{
++	struct i2c_client *cl = gd32->client;
++	u8 wbuf[2 + 8 + 2];	/* reg + cmd + max payload + crc */
++	u8 rbuf[1 + 4 + 2];	/* status + max payload + crc */
++	unsigned int wlen = 2 + req_len + 2;
++	unsigned int rlen = 1 + rsp_len + 2;
++	struct i2c_msg msgs[2];
++	u16 crc;
++	int ret;
++
++	if (WARN_ON(req_len > 8 || rsp_len > 4))
++		return -EINVAL;
++
++	wbuf[0] = GD32_REG_CMD;
++	wbuf[1] = cmd;
++	memcpy(&wbuf[2], req, req_len);
++	crc = crc_itu_t(0xFFFF, &wbuf[1], 1 + req_len);
++	wbuf[2 + req_len] = crc & 0xFF;
++	wbuf[3 + req_len] = crc >> 8;
++
++	msgs[0].addr  = cl->addr;
++	msgs[0].flags = 0;
++	msgs[0].len   = wlen;
++	msgs[0].buf   = wbuf;
++	msgs[1].addr  = cl->addr;
++	msgs[1].flags = I2C_M_RD;
++	msgs[1].len   = rlen;
++	msgs[1].buf   = rbuf;
++
++	mutex_lock(&gd32->lock);
++	ret = i2c_transfer(cl->adapter, msgs, 2);
++	mutex_unlock(&gd32->lock);
++	if (ret < 0)
++		return ret;
++	if (ret != 2)
++		return -EIO;
++
++	crc = crc_itu_t(0xFFFF, rbuf, 1 + rsp_len);
++	if (rbuf[1 + rsp_len] != (crc & 0xFF) ||
++	    rbuf[2 + rsp_len] != (crc >> 8))
++		return -EBADMSG;
++	if (rbuf[0] != GD32_STATUS_OK)
++		return -EIO;
++	if (rsp_len)
++		memcpy(rsp, &rbuf[1], rsp_len);
++	return 0;
++}
++
++static int gd32_bridge_gpio_get(struct gpio_chip *chip, unsigned int offset)
++{
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
++	u8 req[4], rsp[4];
++	u32 mask = BIT(offset), levels;
++	int ret;
++
++	put_unaligned_le32(mask, req);
++	ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_READ, req, 4, rsp, 4);
++	if (ret)
++		return ret;
++	levels = get_unaligned_le32(rsp);
++	return !!(levels & mask);
++}
++
++static void gd32_bridge_gpio_set(struct gpio_chip *chip, unsigned int offset,
++				 int value)
++{
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
++	u8 req[8];
++	u32 mask = BIT(offset);
++
++	put_unaligned_le32(mask, &req[0]);
++	put_unaligned_le32(value ? mask : 0, &req[4]);
++	if (!gd32_bridge_xfer(gd32, GD32_CMD_GPIO_WRITE, req, 8, NULL, 0)) {
++		gd32->output_mask |= mask;
++		if (value)
++			gd32->output_vals |= mask;
++		else
++			gd32->output_vals &= ~mask;
++	}
++}
++
++static int gd32_bridge_gpio_dir_out(struct gpio_chip *chip,
++				    unsigned int offset, int value)
++{
++	/* The bridge promotes a pad to output on first write. */
++	gd32_bridge_gpio_set(chip, offset, value);
++	return 0;
++}
++
++static int gd32_bridge_gpio_dir_in(struct gpio_chip *chip, unsigned int offset)
++{
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
++
++	/* Sticky promotion: once written, a pad cannot return to input. */
++	if (gd32->output_mask & BIT(offset))
++		return -EPERM;
++	return 0;	/* boot default is already input + pull-up */
++}
++
++static int gd32_bridge_gpio_get_dir(struct gpio_chip *chip,
++				    unsigned int offset)
++{
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
++
++	return (gd32->output_mask & BIT(offset)) ? GPIO_LINE_DIRECTION_OUT
++						 : GPIO_LINE_DIRECTION_IN;
++}
++
++static int gd32_bridge_gpio_probe(struct i2c_client *client)
++{
++	struct gd32_bridge_gpio *gd32;
++	u8 ver[3];
++	int ret;
++
++	gd32 = devm_kzalloc(&client->dev, sizeof(*gd32), GFP_KERNEL);
++	if (!gd32)
++		return -ENOMEM;
++
++	gd32->client = client;
++	mutex_init(&gd32->lock);
++
++	/* Probe handshake: PING, then version gate (wire major must be 0). */
++	ret = gd32_bridge_xfer(gd32, GD32_CMD_PING, NULL, 0, NULL, 0);
++	if (ret)
++		return dev_err_probe(&client->dev, -EPROBE_DEFER,
++				     "bridge not answering (%d)\n", ret);
++	ret = gd32_bridge_xfer(gd32, GD32_CMD_GET_VERSION, NULL, 0, ver, 3);
++	if (ret)
++		return dev_err_probe(&client->dev, ret, "GET_VERSION failed\n");
++	if (ver[0] != 0)
++		return dev_err_probe(&client->dev, -ENODEV,
++				     "unsupported bridge protocol %u.%u.%u\n",
++				     ver[0], ver[1], ver[2]);
++	dev_info(&client->dev, "GD32 bridge protocol %u.%u.%u\n",
++		 ver[0], ver[1], ver[2]);
++
++	gd32->chip.label	  = "gd32-bridge-gpio";
++	gd32->chip.parent	  = &client->dev;
++	gd32->chip.owner	  = THIS_MODULE;
++	gd32->chip.base		  = -1;
++	gd32->chip.ngpio	  = GD32_NGPIO;
++	gd32->chip.names	  = gd32_bridge_gpio_names;
++	gd32->chip.get		  = gd32_bridge_gpio_get;
++	gd32->chip.set		  = gd32_bridge_gpio_set;
++	gd32->chip.direction_output = gd32_bridge_gpio_dir_out;
++	gd32->chip.direction_input  = gd32_bridge_gpio_dir_in;
++	gd32->chip.get_direction    = gd32_bridge_gpio_get_dir;
++	gd32->chip.can_sleep	  = true;
++
++	i2c_set_clientdata(client, gd32);
++	return devm_gpiochip_add_data(&client->dev, &gd32->chip, gd32);
++}
++
++static const struct of_device_id gd32_bridge_gpio_of_match[] = {
++	{ .compatible = "alplab,gd32-bridge-gpio" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, gd32_bridge_gpio_of_match);
++
++static struct i2c_driver gd32_bridge_gpio_driver = {
++	.driver = {
++		.name = "gpio-gd32-bridge",
++		.of_match_table = gd32_bridge_gpio_of_match,
++	},
++	.probe_new = gd32_bridge_gpio_probe,
++};
++module_i2c_driver(gd32_bridge_gpio_driver);
++
++MODULE_AUTHOR("Alp Lab AB");
++MODULE_DESCRIPTION("GPIO driver for the Alp Lab GD32 IO-MCU bridge");
++MODULE_LICENSE("GPL");
