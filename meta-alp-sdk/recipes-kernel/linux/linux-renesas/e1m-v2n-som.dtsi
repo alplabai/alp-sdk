@@ -121,6 +121,26 @@
 		regulator-boot-on;
 		regulator-always-on;
 	};
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&gpt1_2 0 200000>;
+		power-supply = <&reg_3p3v>;
+		brightness-levels = <0 4 8 16 32 64 128 255>;
+		default-brightness-level = <6>;
+	};
+};
+
+/* Display backlight: the LED boost driver lives ON the SoM (BL_LED_A/K
+ * to the module edge pads B55/A55); Renesas PA5 = BL_PWM drives its
+ * CNTRL input. PA5 func 9 = GTIOC10B = GPT1 channel 2, B-side output
+ * (hence channel_B). 5 kHz PWM.
+ */
+&gpt1_2 {
+	pinctrl-0 = <&backlight_pwm_pins>;
+	pinctrl-names = "default";
+	channel = "channel_B";
+	status = "okay";
 };
 
 /*
@@ -157,6 +177,22 @@
 	non-removable;
 	fixed-emmc-driver-type = <1>;
 	status = "okay";
+};
+
+/* GD32G553 supervisor MCU bridge -- I2C slave transport on BRD_I2C.
+ * Exposes the GD32-routed E1M IO pads (logical bridge map, 18 lines)
+ * as a Linux gpiochip: line 5 = IO13/LCD1_RST, line 3 = IO11/CTP1_RST,
+ * line 1 = IO9/CTP1_INT (input only -- the GT911 drives it).
+ * Same physical chip as the CM33's SCI7 SPI link peer; Linux only
+ * issues short GPIO frames here.
+ */
+&i2c8 {
+	gd32_gpio: gpio@70 {
+		compatible = "alplab,gd32-bridge-gpio";
+		reg = <0x70>;
+		gpio-controller;
+		#gpio-cells = <2>;
+	};
 };
 
 /* On-module xSPI NOR. */
@@ -225,5 +261,9 @@
 			pins = "XSPI0_IO0", "XSPI0_IO1", "XSPI0_IO2", "XSPI0_IO3";
 			renesas,output-impedance = <3>;
 		};
+	};
+
+	backlight_pwm_pins: backlight-pwm {
+		pinmux = <RZV2N_PORT_PINMUX(A, 5, 9)>; /* PA5 func 9 = GTIOC10B -> on-SoM backlight boost CNTRL */
 	};
 };
