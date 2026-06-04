@@ -12,34 +12,31 @@
  * the transport.
  *
  * The main loop has no work of its own; it sleeps in WFI() so the
- * Cortex-M33 idles between interrupts.  A periodic SysTick samples
- * the DA9292_INT(P37)/DA9292_TW(P36) input pins -- the GD32's only
- * DA9292 connections -- so the fault-flag value served by
- * CMD_DA9292_STATUS_FORWARD stays fresh.  The GD32 has no I2C path to
- * the DA9292; register-level PMIC status (PMC_STATUS_00 etc.) is read
- * by the host over BRD_I2C via the chips/da9292 driver.  Pin sampling
- * lands in a future firmware release; current firmware always returns
- * the 0xFF "no sample taken yet" sentinel.
+ * Cortex-M33 idles between interrupts.  bridge_hw_tick() runs on the
+ * wakeups as a periodic housekeeping hook; it is a no-op on this SoM
+ * revision -- the DA9292 fault nets (DA9292_INT/DA9292_TW) reach only
+ * the Renesas (P37/P36), the GD32 has no pin to sample and no I2C
+ * path to the PMIC, so CMD_DA9292_STATUS_FORWARD serves the 0xFF
+ * "no sample" sentinel.  Register-level PMIC status (PMC_STATUS_00
+ * etc.) is read by the host over BRD_I2C via the chips/da9292 driver.
  *
- * Scaffold today: the bridge_hw_* HAL is stubbed; only PING,
- * GET_VERSION, GET_BUILD_ID, and RESET_REASON round-trip without
- * NOSUPPORT.  The HAL implementation against the GigaDevice
- * firmware library lands in a follow-up.
+ * Backends: BRIDGE_HAL_BACKEND=gd32 drives real silicon (peripheral
+ * HAL in hal/bridge_hw_gd32.c, SPI1 + I2C0 slave transports in
+ * hal/transport_hw_gd32.c).  BRIDGE_HAL_BACKEND=stub keeps everything
+ * hardware-free for host-side protocol tests: PING / GET_VERSION /
+ * GET_BUILD_ID / RESET_REASON round-trip and HW-touching ops return
+ * NOSUPPORT.
  */
 
 #include <stdint.h>
 
 #include "protocol.h"
-
-/* Forward declarations of the per-transport init helpers (no public
- * headers for the transports -- main.c is the only caller). */
-void transport_spi_init(void);
-void transport_i2c_init(void);
+#include "transport.h"
 
 /* Optional weak hooks the HAL layer can override.  Defaults to a
  * busy WFI loop -- behaviour-equivalent to a no-op for the
- * scaffold; the real HAL replaces this with a SysTick callback
- * that samples the DA9292_INT/DA9292_TW input pins. */
+ * scaffold; the real HAL overrides these for peripheral bring-up
+ * and periodic housekeeping. */
 __attribute__((weak)) void bridge_hw_init(void) { }
 __attribute__((weak)) void bridge_hw_tick(void) { }
 
@@ -55,9 +52,8 @@ int main(void)
     transport_spi_init();
     transport_i2c_init();
 
-    /* The SysTick / TIM-based periodic refresh of the DA9292 INT/TW
-     * pin-state forward lives inside bridge_hw_tick(); main loop just
-     * yields. */
+    /* Periodic housekeeping lives inside bridge_hw_tick() (a no-op on
+     * this SoM rev); the main loop just yields. */
     for (;;) {
         __WFI();
         bridge_hw_tick();

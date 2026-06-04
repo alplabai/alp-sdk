@@ -7,21 +7,53 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
-### Changed — DA9292_STATUS_FORWARD semantics re-spec (2026-06-03)
+### Changed — gd32-bridge protocol v0.6 + OTA Path-A real, silicon-validated (2026-06-04)
+
+Wire MINOR bump `PROTOCOL_VERSION` 0.5.0 → 0.6.0 (`firmware/gd32-bridge/
+src/protocol.h`, host mirror in `<alp/chips/gd32g553.h>` in lock-step):
+`OTA_WRITE_CHUNK`'s request payload is now length-checked
+(`offset:u32 len:u8 data[len]`), closing a silicon-caught wire hole —
+a slave re-capture merged with the next transaction's zero filler still
+passes the span CRC whenever the frame's own CRC-16/CCITT-FALSE is
+byte-palindromic (self-consumption to `0x0000`; ~1 chunk in 256), which
+inflated the payload length and double-programmed the ECC flash.  A
+len/span mismatch now answers `STATUS_INVAL` without touching the
+session; `OTA_BEGIN`'s `chunk_max` drops 61 → 60.  **Pre-1.0 the host
+and firmware must ship in lock-step including MINOR** — the handshake
+gates on MAJOR only.
+
+The OTA `0xF0..0xF6` range also went from scaffold to **real Path-A,
+silicon-validated end-to-end** (stream → verify → commit → boot slot B →
+rollback → boot slot A, proven by wire build-id reads + the A/B metadata
+generation history): RAM-resident dual-bank FMC backend
+(`hal/fmc_ota.c`, OBCTL.DBS-aware paging + sticky-PGERR clearing),
+struct-v2 per-slot metadata (rollback no longer bricks), WRITE/VERIFY
+session gates, replay dedupe, PRIMASK bootloader-handoff fix, corrected
+CRC-32 polynomial (`0xEDB88320`), real `GET_BUILD_ID` content
+(`<fw-version>+<sha-placeholder>`), and host OTA state/slot enum values
+aligned to the firmware wire (`GD32G553_OTA_SLOT_A=0/B=1/NONE=0xFF`;
+`READY/BUSY/VERIFIED/ERROR`).  New `tools/gen_ota_metadata.py` factory
+provisioning helper; new `examples/v2n/v2n-gd32-bridge-hil-soak`
+full-command-set pass/fail soak (which caught five pre-existing HAL
+defects on first silicon exercise — quarantined in its table with
+notes).  Protocol vectors regenerated (`--check` green).
+
+### Changed — DA9292_STATUS_FORWARD semantics re-spec (2026-06-03; corrected 2026-06-04)
 
 Docs/comments re-spec of the `DA9292_STATUS_FORWARD` (opcode `0x40`)
 surface to match the wiring: the GD32 supervisor has **no I2C path** to
-the DA9292 PMIC — its only DA9292 connections are the input signal pins
-`DA9292_INT` (P37, active-low) and `DA9292_TW` (P36).  The forwarded byte
-is GD32-observed fault-pin state (bit0 = INT asserted, bit1 = TW asserted,
-bits 2-6 reserved, `0xFF` = "no sample taken yet" sentinel), **not** a
-cached `PMC_STATUS_00` register snapshot.  Removed all "cached PMC_STATUS_00
-/ periodic I2C-master poll / ≤ 20 ms cache age" language from the host
-header, firmware comments, protocol spec, tutorials, and the bridge-ping
-example.  Register-level PMIC status is read by the CM33/host over BRD_I2C
-via the `chips/da9292` driver (`da9292_get_status()`).  Documentation-only;
-the C signature and wire envelope are unchanged.  Firmware pin-sampling
-implementation to follow (current firmware always returns `0xFF`).
+the DA9292 PMIC.  2026-06-04 schematic verification went further: on the
+current SoM revision the DA9292 fault nets reach **only the Renesas**
+(`DA9292_INT` → P37, `DA9292_TW` → P36) — the GD32 has no connection to
+them at all, so the forwarded byte is **always the `0xFF` "no sample"
+sentinel** on this hardware; the bit0 = INT / bit1 = TW packing is
+reserved for a future HW rev that mirrors the nets onto GD32 inputs.
+Removed all "cached PMC_STATUS_00 / periodic I2C-master poll / ≤ 20 ms
+cache age" language from the host header, firmware comments, protocol
+spec, tutorials, and the bridge-ping example.  The host observes the
+fault pins directly via the new `da9292_get_fault_pins()` (same bit
+packing) and reads register-level PMIC status over BRD_I2C via
+`da9292_get_status()` — both in the `chips/da9292` driver.
 
 ### Added — doc-drift CI gate (2026-05-27)
 

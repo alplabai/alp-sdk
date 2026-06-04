@@ -16,12 +16,14 @@
  * The GD32G553 is the V2N module's general-purpose supervisor MCU.
  * It owns a fleet of pads that don't fit on the Renesas RZ/V2N pinout
  * (notably two of the eight E1M PWM channels post-2026-05-11 schematic
- * revision, several E1M I2C management lines, and the DA9292 fault-pin
- * forwarder -- the GD32 only observes the DA9292's DA9292_INT/DA9292_TW
- * signal pins, it does NOT cache a PMIC register snapshot and has no
- * I2C path to the PMIC; register-level PMIC status is read by the
- * CM33/host over BRD_I2C via the `chips/da9292` driver).  Host code
- * reaches the supervisor over a **hybrid** transport:
+ * revision and several E1M I2C management lines).  The DA9292 fault
+ * pins do NOT reach the GD32 on the current SoM revision -- the
+ * DA9292_INT/DA9292_TW nets land only on Renesas P37/P36, so the
+ * 0x40 forwarder answers the 0xFF sentinel (see
+ * gd32g553_da9292_status_forward); the GD32 also has no I2C path to
+ * the PMIC, whose register-level status is read by the CM33/host over
+ * BRD_I2C via the `chips/da9292` driver.  Host code reaches the
+ * supervisor over a **hybrid** transport:
  *
  *   - **SPI fast path** (Renesas RSPI master / GD32 slave on the GD32's
  *     `PA8`/`PA9`/`PA10`/`PB15` pads) -- low-latency, dedicated link.
@@ -398,21 +400,24 @@ alp_status_t gd32g553_pwm_get(gd32g553_t *ctx, uint8_t channel,
 alp_status_t gd32g553_adc_read(gd32g553_t *ctx, uint8_t channel,
                                uint8_t samples, uint16_t *mv);
 
-/** @brief Read the GD32-observed DA9292 fault-pin state.
+/** @brief Read the bridge's DA9292 fault-pin forward byte.
  *
- *  Opcode `0x40` (DA9292_STATUS_FORWARD) returns a single byte built
- *  from the GD32's two DA9292 signal pins:
- *    - bit0 = DA9292_INT asserted (P37, active-low)
- *    - bit1 = DA9292_TW  asserted (P36)
+ *  Opcode `0x40` (DA9292_STATUS_FORWARD).  On the **current SoM
+ *  revision this always returns `0xFF`**: the DA9292_INT/DA9292_TW
+ *  fault nets land only on Renesas pads P37/P36 -- the GD32 has no
+ *  connection to them (schematic-verified 2026-06-04) and no I2C path
+ *  to the PMIC.  The byte packing is reserved for a future HW rev
+ *  that mirrors the fault nets onto GD32 inputs:
+ *    - bit0 = DA9292_INT asserted (active-low net)
+ *    - bit1 = DA9292_TW  asserted (active-low net)
  *    - bits 2-6 reserved (0)
- *    - `0xFF` = "no sample taken yet" sentinel
+ *    - `0xFF` = "no sample available" sentinel
  *
- *  The GD32 has NO I2C path to the DA9292; this is pin-state
- *  forwarding only, not a PMIC register read.  Pin sampling lands in
- *  a future firmware release; current firmware always returns `0xFF`.
- *  For register-level PMIC status (PMC_STATUS_00 etc.) the host reads
- *  the DA9292 directly over BRD_I2C via @ref da9292_get_status in the
- *  `chips/da9292` driver. */
+ *  On today's hardware use @ref da9292_get_fault_pins (CM33 reads
+ *  P37/P36 directly, same packing) for live fault-pin state, and
+ *  @ref da9292_get_status for register-level PMIC status
+ *  (PMC_STATUS_00 etc.) over BRD_I2C -- both in the `chips/da9292`
+ *  driver. */
 alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status);
 
 /** @brief Program a DAC channel's output voltage in millivolts.
@@ -895,39 +900,51 @@ alp_status_t gd32g553_adc_dsp_chain_bind(gd32g553_t *ctx, uint8_t chain_id, uint
 /* ------------------------------------------------------------------ */
 /* OTA -- in-system upgrade of the bridge firmware                    */
 /*                                                                    */
-/* Opcodes 0xF0..0xF6 are reserved by the bridge protocol             */
-/* (docs/gd32-bridge-protocol.md §10) for the application-bootloader  */
-/* upgrade path.  Scaffolds today: the firmware-side handler set      */
-/* compiles + dispatches but every body except CMD_OTA_GET_STATE      */
-/* replies with STATUS_NOSUPPORT until the FMC integration lands.     */
-/* The host helpers below match that contract: every call returns     */
-/* ALP_ERR_NOSUPPORT against current-firmware bridges, and ALP_OK     */
-/* once the firmware-side bodies ship.  GET_STATE is the exception -- */
-/* it answers concretely today so customer telemetry can already      */
-/* read the OTA state machine.                                        */
+/* Opcodes 0xF0..0xF6 implement the Path-A application-bootloader     */
+/* upgrade (docs/gd32-bridge-protocol.md §10): BEGIN announces        */
+/* size+CRC and erases the inactive slot, WRITE_CHUNK streams the     */
+/* image, VERIFY CRC-checks it, COMMIT flips the A/B metadata and     */
+/* resets into the new slot, ROLLBACK flips back.  The firmware side  */
+/* is SAFE-BY-DEFAULT: only a -DBRIDGE_OTA_PARTITIONED build (paired  */
+/* with the bootloader + slot-linked apps) arms the flash path;       */
+/* default builds answer STATUS_NOSUPPORT to the whole range, which   */
+/* these helpers surface as ALP_ERR_NOSUPPORT.                        */
+/*                                                                    */
+/* Transaction note: BEGIN (slot erase), VERIFY (full-image CRC) and  */
+/* COMMIT/ROLLBACK (reset before the reply is drained) block the      */
+/* bridge long enough that the reply transaction can miss -- treat    */
+/* ALP_ERR_IO from those as "issued, confirm via GET_STATE" (or, for  */
+/* COMMIT/ROLLBACK, by re-initialising against the rebooted bridge).  */
 /* ------------------------------------------------------------------ */
 
-/** OTA state-machine snapshot returned by @ref gd32g553_ota_get_state. */
+/** OTA state-machine snapshot returned by @ref gd32g553_ota_get_state.
+ *  Values are the WIRE encoding from the firmware state machine
+ *  (firmware/gd32-bridge/src/ota.c) -- keep numerically identical. */
 typedef enum {
-    GD32G553_OTA_STATE_IDLE           = 0, /**< No upgrade in progress. */
-    GD32G553_OTA_STATE_RECEIVING      = 1, /**< Between BEGIN and last chunk. */
-    GD32G553_OTA_STATE_VERIFIED       = 2, /**< VERIFY succeeded. */
-    GD32G553_OTA_STATE_PENDING_COMMIT = 3, /**< Metadata flip queued. */
-    GD32G553_OTA_STATE_FAULT          = 4, /**< Aborted; staging slot dirty. */
+    GD32G553_OTA_STATE_IDLE     = 0, /**< No upgrade session open. */
+    GD32G553_OTA_STATE_READY    = 1, /**< Session open; accepting chunks. */
+    GD32G553_OTA_STATE_BUSY     = 2, /**< Transient: FMC erase/program in flight. */
+    GD32G553_OTA_STATE_VERIFIED = 3, /**< VERIFY matched; COMMIT allowed. */
+    GD32G553_OTA_STATE_ERROR    = 4, /**< Failed; re-BEGIN to restart. */
 } gd32g553_ota_state_t;
 
-/** Slot id mirrors the firmware's bl_slot_id_t. */
+/** Slot id -- the WIRE encoding from the firmware's A/B metadata
+ *  (firmware/gd32-bridge/src/ota_layout.h OTA_SLOT_A/B); 0xFF is the
+ *  GET_STATE "no pending slot" sentinel. */
 typedef enum {
-    GD32G553_OTA_SLOT_INVALID = 0u,
-    GD32G553_OTA_SLOT_A       = 1u,
-    GD32G553_OTA_SLOT_B       = 2u,
+    GD32G553_OTA_SLOT_A    = 0u,
+    GD32G553_OTA_SLOT_B    = 1u,
+    GD32G553_OTA_SLOT_NONE = 0xFFu, /**< No slot (e.g. nothing pending). */
 } gd32g553_ota_slot_t;
 
 /** Read-only telemetry of the OTA state machine. */
 typedef struct {
     gd32g553_ota_state_t state;        /**< @ref gd32g553_ota_state_t. */
     gd32g553_ota_slot_t  active_slot;  /**< Slot the bridge is currently running. */
-    gd32g553_ota_slot_t  pending_slot; /**< Slot queued for next-boot commit; INVALID if none. */
+    gd32g553_ota_slot_t  pending_slot; /**< Staging slot of the in-progress
+                                        *   session (not committed until
+                                        *   COMMIT); NONE when no session
+                                        *   is open. */
     uint16_t             boot_count;   /**< Monotonic boot counter from the metadata page. */
 } gd32g553_ota_state_info_t;
 
@@ -956,9 +973,18 @@ alp_status_t gd32g553_ota_begin(gd32g553_t *ctx,
 /**
  * @brief Write one chunk of the payload at @p offset.
  *
- * Chunks may be re-sent (same offset, same data) safely -- the
- * firmware re-writes the destination region without an erase.  Chunks
- * arriving out of order are also safe because the offset is absolute.
+ * Wire payload (protocol v0.6): `offset:u32 len:u8 data[len]` -- the
+ * explicit length byte lets the firmware reject transaction-merged
+ * captures regardless of CRC coincidences (the span CRC alone cannot:
+ * a frame whose CRC is byte-palindromic self-validates when
+ * zero-extended).
+ *
+ * Re-sends of an already-written chunk are deduplicated: the firmware
+ * compares the bytes against flash and acks without re-programming
+ * (the ECC flash cannot program a doubleword twice, even with
+ * identical data).  Stream chunks contiguously upward from offset 0;
+ * a chunk that PARTIALLY overlaps written data fails with an I/O
+ * error and poisons the session (re-BEGIN to recover).
  *
  * @param ctx             GD32G553 bridge context (must be initialised first).
  * @param offset          Absolute byte offset of this chunk within the

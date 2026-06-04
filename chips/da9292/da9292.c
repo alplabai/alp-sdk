@@ -14,33 +14,33 @@
 #include "alp/chips/da9292.h"
 
 /* Register map (datasheet Table 12, page 34). */
-#define DA9292_REG_PMC_STATUS_00   0x00u
-#define DA9292_REG_PMC_STATUS_01   0x01u
-#define DA9292_REG_PMC_EVENT_00    0x02u
-#define DA9292_REG_PMC_EVENT_01    0x03u
-#define DA9292_REG_PMC_MASK_00     0x04u
-#define DA9292_REG_PMC_MASK_01     0x05u
-#define DA9292_REG_PMC_CTRL_00     0x06u
-#define DA9292_REG_PMC_CTRL_01     0x07u  /* CHx_EN / CHx_VSEL / VSTEP / DIS_PD */
-#define DA9292_REG_PMC_CTRL_02     0x08u
-#define DA9292_REG_PMC_CTRL_03     0x09u
-#define DA9292_REG_PMC_VOUT_CH1_00 0x0Au  /* CH1 VSEL=0 setpoint (LO range) */
-#define DA9292_REG_PMC_VOUT_CH1_01 0x0Bu  /* CH1 VSEL=1 retention */
-#define DA9292_REG_PMC_VOUT_CH2_00 0x0Cu  /* CH2 VSEL=0 */
-#define DA9292_REG_PMC_VOUT_CH2_01 0x0Du  /* CH2 VSEL=1 */
-#define DA9292_REG_PMC_DEV_ID      0x19u
-#define DA9292_REG_PMC_REV_ID      0x1Au
-#define DA9292_REG_PMC_CFG_REV     0x1Bu
+#define DA9292_REG_PMC_STATUS_00 0x00u
+#define DA9292_REG_PMC_STATUS_01 0x01u
+#define DA9292_REG_PMC_EVENT_00 0x02u
+#define DA9292_REG_PMC_EVENT_01 0x03u
+#define DA9292_REG_PMC_MASK_00 0x04u
+#define DA9292_REG_PMC_MASK_01 0x05u
+#define DA9292_REG_PMC_CTRL_00 0x06u
+#define DA9292_REG_PMC_CTRL_01 0x07u /* CHx_EN / CHx_VSEL / VSTEP / DIS_PD */
+#define DA9292_REG_PMC_CTRL_02 0x08u
+#define DA9292_REG_PMC_CTRL_03 0x09u
+#define DA9292_REG_PMC_VOUT_CH1_00 0x0Au /* CH1 VSEL=0 setpoint (LO range) */
+#define DA9292_REG_PMC_VOUT_CH1_01 0x0Bu /* CH1 VSEL=1 retention */
+#define DA9292_REG_PMC_VOUT_CH2_00 0x0Cu /* CH2 VSEL=0 */
+#define DA9292_REG_PMC_VOUT_CH2_01 0x0Du /* CH2 VSEL=1 */
+#define DA9292_REG_PMC_DEV_ID 0x19u
+#define DA9292_REG_PMC_REV_ID 0x1Au
+#define DA9292_REG_PMC_CFG_REV 0x1Bu
 
 /* PMC_CTRL_01 bit positions (datasheet Table 21, page 40-41). */
-#define DA9292_CTRL01_CH2_VSTEP   (1u << 7)
-#define DA9292_CTRL01_CH1_VSTEP   (1u << 6)
-#define DA9292_CTRL01_CH2_DIS_PD  (1u << 5)
-#define DA9292_CTRL01_CH1_DIS_PD  (1u << 4)
-#define DA9292_CTRL01_CH2_VSEL    (1u << 3)
-#define DA9292_CTRL01_CH1_VSEL    (1u << 2)
-#define DA9292_CTRL01_CH2_EN      (1u << 1)
-#define DA9292_CTRL01_CH1_EN      (1u << 0)
+#define DA9292_CTRL01_CH2_VSTEP (1u << 7)
+#define DA9292_CTRL01_CH1_VSTEP (1u << 6)
+#define DA9292_CTRL01_CH2_DIS_PD (1u << 5)
+#define DA9292_CTRL01_CH1_DIS_PD (1u << 4)
+#define DA9292_CTRL01_CH2_VSEL (1u << 3)
+#define DA9292_CTRL01_CH1_VSEL (1u << 2)
+#define DA9292_CTRL01_CH2_EN (1u << 1)
+#define DA9292_CTRL01_CH1_EN (1u << 0)
 
 /* PMC_STATUS_00 bit layout (datasheet Table 14).
  *
@@ -66,7 +66,7 @@
  * TEMP_CRIT [1], VIN_UVLO [0]. */
 #define DA9292_STATUS01_TEMP_WARN (1u << 2)
 #define DA9292_STATUS01_TEMP_CRIT (1u << 1)
-#define DA9292_STATUS01_VIN_UVLO  (1u << 0)
+#define DA9292_STATUS01_VIN_UVLO (1u << 0)
 
 /* PMC_EVENT_00 / 01 bit layout per datasheet Tables 16-17.  Same
  * layout as STATUS but the access type is RWC1 (write-1-to-clear). */
@@ -80,16 +80,16 @@
 #define DA9292_EVENT00_CH1_PG (1u << 0)
 #define DA9292_EVENT01_TEMP_WARN (1u << 2)
 #define DA9292_EVENT01_TEMP_CRIT (1u << 1)
-#define DA9292_EVENT01_VIN_UVLO  (1u << 0)
+#define DA9292_EVENT01_VIN_UVLO (1u << 0)
 
 /* VSTEP=0 (5 mV step) encoding:
  *   register byte = 0x3C + (mV - 300) / 5
  *   minimum = 0x3C (0.300 V); maximum = 0xFF (1.275 V); 0x00..0x3B reserved.
  * Reset default is 0xA3 = 0.815 V. */
 #define DA9292_VSET_LO_BASE_BYTE 0x3Cu
-#define DA9292_VSET_LO_MIN_MV    300u
-#define DA9292_VSET_LO_MAX_MV    1275u
-#define DA9292_VSET_LO_STEP_MV   5u
+#define DA9292_VSET_LO_MIN_MV 300u
+#define DA9292_VSET_LO_MAX_MV 1275u
+#define DA9292_VSET_LO_STEP_MV 5u
 
 static uint8_t vout_reg_for(da9292_channel_t ch)
 {
@@ -108,7 +108,7 @@ static alp_status_t reg_read(da9292_t *ctx, uint8_t reg, uint8_t *val)
 
 static alp_status_t reg_write(da9292_t *ctx, uint8_t reg, uint8_t val)
 {
-    uint8_t buf[2] = {reg, val};
+    uint8_t buf[2] = { reg, val };
     return alp_i2c_write(ctx->bus, ctx->addr, buf, sizeof(buf));
 }
 
@@ -129,12 +129,12 @@ alp_status_t da9292_init(da9292_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
     alp_status_t s      = reg_read(ctx, DA9292_REG_PMC_DEV_ID, &dev_id);
     if (s != ALP_OK) return ALP_ERR_NOT_READY;
     if (dev_id == 0x00 || dev_id == 0xFF) return ALP_ERR_NOT_READY;
-    ctx->dev_id = dev_id;
+    ctx->dev_id    = dev_id;
 
     uint8_t rev_id = 0;
     s              = reg_read(ctx, DA9292_REG_PMC_REV_ID, &rev_id);
     if (s != ALP_OK) return s;
-    ctx->rev_id = rev_id;
+    ctx->rev_id      = rev_id;
 
     ctx->initialised = true;
     return ALP_OK;
@@ -164,19 +164,19 @@ alp_status_t da9292_get_status(da9292_t *ctx, da9292_status_t *out)
     s = reg_read(ctx, DA9292_REG_PMC_STATUS_01, &s01);
     if (s != ALP_OK) return s;
 
-    out->raw_00     = s00;
-    out->raw_01     = s01;
-    out->ch1_oc     = (s00 & DA9292_STATUS00_CH1_OC) != 0;
-    out->ch2_oc     = (s00 & DA9292_STATUS00_CH2_OC) != 0;
-    out->ch1_ov     = (s00 & DA9292_STATUS00_CH1_OV) != 0;
-    out->ch2_ov     = (s00 & DA9292_STATUS00_CH2_OV) != 0;
-    out->ch1_uv     = (s00 & DA9292_STATUS00_CH1_UV) != 0;
-    out->ch2_uv     = (s00 & DA9292_STATUS00_CH2_UV) != 0;
-    out->ch1_pg     = (s00 & DA9292_STATUS00_CH1_PG) != 0;
-    out->ch2_pg     = (s00 & DA9292_STATUS00_CH2_PG) != 0;
-    out->temp_warn  = (s01 & DA9292_STATUS01_TEMP_WARN) != 0;
-    out->temp_crit  = (s01 & DA9292_STATUS01_TEMP_CRIT) != 0;
-    out->vin_uvlo   = (s01 & DA9292_STATUS01_VIN_UVLO) != 0;
+    out->raw_00    = s00;
+    out->raw_01    = s01;
+    out->ch1_oc    = (s00 & DA9292_STATUS00_CH1_OC) != 0;
+    out->ch2_oc    = (s00 & DA9292_STATUS00_CH2_OC) != 0;
+    out->ch1_ov    = (s00 & DA9292_STATUS00_CH1_OV) != 0;
+    out->ch2_ov    = (s00 & DA9292_STATUS00_CH2_OV) != 0;
+    out->ch1_uv    = (s00 & DA9292_STATUS00_CH1_UV) != 0;
+    out->ch2_uv    = (s00 & DA9292_STATUS00_CH2_UV) != 0;
+    out->ch1_pg    = (s00 & DA9292_STATUS00_CH1_PG) != 0;
+    out->ch2_pg    = (s00 & DA9292_STATUS00_CH2_PG) != 0;
+    out->temp_warn = (s01 & DA9292_STATUS01_TEMP_WARN) != 0;
+    out->temp_crit = (s01 & DA9292_STATUS01_TEMP_CRIT) != 0;
+    out->vin_uvlo  = (s01 & DA9292_STATUS01_VIN_UVLO) != 0;
     return ALP_OK;
 }
 
@@ -204,8 +204,40 @@ alp_status_t da9292_read_and_clear_events(da9292_t *ctx, da9292_events_t *out)
     out->e_vin_uvlo  = (e01 & DA9292_EVENT01_VIN_UVLO) != 0;
 
     /* Write-1-to-clear: echo the latched bits back to drop them. */
-    if (e00 != 0) { s = reg_write(ctx, DA9292_REG_PMC_EVENT_00, e00); if (s != ALP_OK) return s; }
-    if (e01 != 0) { s = reg_write(ctx, DA9292_REG_PMC_EVENT_01, e01); if (s != ALP_OK) return s; }
+    if (e00 != 0) {
+        s = reg_write(ctx, DA9292_REG_PMC_EVENT_00, e00);
+        if (s != ALP_OK) return s;
+    }
+    if (e01 != 0) {
+        s = reg_write(ctx, DA9292_REG_PMC_EVENT_01, e01);
+        if (s != ALP_OK) return s;
+    }
+    return ALP_OK;
+}
+
+alp_status_t da9292_get_fault_pins(alp_gpio_t *int_n, alp_gpio_t *tw_n, uint8_t *flags)
+{
+    if (flags == NULL) return ALP_ERR_INVAL;
+
+    /* Both fault outputs are open-drain ACTIVE-LOW (INT_N / TW_N):
+     * asserted = pin reads low.  Packing mirrors the GD32 bridge's
+     * DA9292_STATUS_FORWARD reply byte (bit0 = INT, bit1 = TW) so the
+     * two paths stay drop-in compatible.  A NULL pin reports its bit
+     * deasserted -- the caller's board may wire only one of the two. */
+    uint8_t packed = 0u;
+    bool    level;
+
+    if (int_n != NULL) {
+        alp_status_t s = alp_gpio_read(int_n, &level);
+        if (s != ALP_OK) return s;
+        if (!level) packed |= 0x01u;
+    }
+    if (tw_n != NULL) {
+        alp_status_t s = alp_gpio_read(tw_n, &level);
+        if (s != ALP_OK) return s;
+        if (!level) packed |= 0x02u;
+    }
+    *flags = packed;
     return ALP_OK;
 }
 
@@ -219,8 +251,10 @@ alp_status_t da9292_set_enable(da9292_t *ctx, da9292_channel_t ch, bool enable)
     if (s != ALP_OK) return s;
 
     uint8_t en = en_bit_for(ch);
-    if (enable) ctrl |= en;
-    else        ctrl &= (uint8_t)~en;
+    if (enable)
+        ctrl |= en;
+    else
+        ctrl &= (uint8_t)~en;
 
     return reg_write(ctx, DA9292_REG_PMC_CTRL_01, ctrl);
 }
@@ -234,7 +268,7 @@ alp_status_t da9292_set_voltage_mv(da9292_t *ctx, da9292_channel_t ch, uint16_t 
     /* Round to 5 mV grid. */
     uint16_t mv_q = mv - ((mv - DA9292_VSET_LO_MIN_MV) % DA9292_VSET_LO_STEP_MV);
     uint8_t  byte = (uint8_t)(DA9292_VSET_LO_BASE_BYTE +
-                              (mv_q - DA9292_VSET_LO_MIN_MV) / DA9292_VSET_LO_STEP_MV);
+                             (mv_q - DA9292_VSET_LO_MIN_MV) / DA9292_VSET_LO_STEP_MV);
     return reg_write(ctx, vout_reg_for(ch), byte);
 }
 
@@ -283,11 +317,10 @@ alp_status_t da9292_v2n_m1_enable_deepx_rail(da9292_t *ctx, uint32_t timeout_us)
      * is only writable while CH2_EN=0, which `da9292_v2n_base_init`
      * (the caller's first step) guarantees.  Defensive: re-clear
      * CH2_EN here in case the caller skipped base_init. */
-    uint8_t ctrl = 0;
-    alp_status_t s = reg_read(ctx, DA9292_REG_PMC_CTRL_01, &ctrl);
+    uint8_t      ctrl = 0;
+    alp_status_t s    = reg_read(ctx, DA9292_REG_PMC_CTRL_01, &ctrl);
     if (s != ALP_OK) return s;
-    const uint8_t ctrl_new = (uint8_t)(ctrl & ~(DA9292_CTRL01_CH2_EN |
-                                                DA9292_CTRL01_CH2_VSTEP));
+    const uint8_t ctrl_new = (uint8_t)(ctrl & ~(DA9292_CTRL01_CH2_EN | DA9292_CTRL01_CH2_VSTEP));
     if (ctrl_new != ctrl) {
         s = reg_write(ctx, DA9292_REG_PMC_CTRL_01, ctrl_new);
         if (s != ALP_OK) return s;
@@ -321,7 +354,7 @@ alp_status_t da9292_v2n_m1_enable_deepx_rail(da9292_t *ctx, uint32_t timeout_us)
     const uint32_t poll_us = 100u;
     uint32_t       waited  = 0;
     while (waited <= timeout_us) {
-        da9292_status_t st = {0};
+        da9292_status_t st = { 0 };
         s                  = da9292_get_status(ctx, &st);
         if (s != ALP_OK) return s;
         if (st.ch2_pg) return ALP_OK;

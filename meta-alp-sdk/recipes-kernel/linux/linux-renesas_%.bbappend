@@ -49,7 +49,17 @@ SRC_URI:append = " \
     file://e1m-v2m-deepx.dtsi \
     file://e1m-v2n101-x-evk.dts \
     file://e1m-v2m101-x-evk.dts \
+    file://0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-RIIC8-on.patch \
 "
+
+# AMP clock ownership: RSCI7 + RIIC8 belong to the Cortex-M33 system
+# manager (GD32 supervisor link).  Without this patch, Linux's
+# clk_disable_unused turns their module clocks off AND asserts the coupled
+# CPG BUS_MSTOP bits (the rzv2h-cpg driver ties the two together), which
+# bus-faults the CM33 mid-operation ~15 s into every boot.  The patch
+# marks the six clocks DEF_MOD_CRITICAL so both gates stay held for the
+# remote core.  Silicon-validated 2026-06-03 (two cold cycles + warm
+# reboot, link autonomous from ~2 s after power-on, no intervention).
 
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the

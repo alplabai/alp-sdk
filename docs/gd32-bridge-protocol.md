@@ -55,7 +55,7 @@ byte; their numeric encoding is:
 | `0x20` | `PWM_SET`             | `channel:u8 reserved:u8 period_ns:u32 duty_ns:u32` | _empty_                                            |
 | `0x21` | `PWM_GET`             | `channel:u8`                                       | `period_ns:u32 duty_ns:u32`                        |
 | `0x30` | `ADC_READ`            | `channel:u8 samples:u8`                            | `mv[samples]:u16` (millivolt, raw averaged)        |
-| `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (GD32-sampled DA9292 INT/TW pin states) |
+| `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (always `0xFF` on this HW rev — see §3.4) |
 | `0x50` | `DAC_SET`             | `channel:u8 reserved:u8 value_mv:u16`              | _empty_                                            |
 | `0x51` | `DAC_GET`             | `channel:u8`                                       | `value_mv:u16`                                     |
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
@@ -294,29 +294,33 @@ for telemetry purposes.
 
 ### 3.4 DA9292 status forward
 
-The GD32 has **no I2C path** to the DA9292; its only DA9292
-connections are the two fault signal pins `DA9292_INT` (P37,
-active-low) and `DA9292_TW` (P36), both GD32-side inputs.  The
-forwarded byte therefore carries **GD32-observed pin state**, not a
-PMIC register snapshot:
+The GD32 has **no I2C path** to the DA9292, and on the **current SoM
+revision it has no wiring to the DA9292 fault pins either**
+(schematic-verified 2026-06-04: the `DA9292_INT` / `DA9292_TW` nets
+land only on Renesas pads `P37` / `P36`; the GD32 schematic page
+carries no DA9292 net).  Firmware on this revision therefore
+**always returns the `0xFF` "no sample" sentinel**.
 
-| Bit   | Meaning                                       |
-|-------|-----------------------------------------------|
-| 0     | `DA9292_INT` asserted (P37, active-low)        |
-| 1     | `DA9292_TW` asserted (P36)                     |
+The reply packing below is reserved for a future HW revision that
+mirrors the fault nets onto GD32 inputs:
+
+| Bit   | Meaning                                        |
+|-------|------------------------------------------------|
+| 0     | `DA9292_INT` asserted (active-low net)         |
+| 1     | `DA9292_TW` asserted (active-low net)          |
 | 2–6   | reserved (0)                                   |
-| —     | `0xFF` = "no sample taken yet" sentinel        |
+| —     | `0xFF` = "no sample available" sentinel        |
 
-Pin sampling lands in a future firmware release; current firmware
-always returns `0xFF`.
-
-This byte is **not** `PMC_STATUS_00` and does not mirror its bit
-layout.  For register-level PMIC status (`PMC_STATUS_00` etc.) the
-host reads the DA9292 directly over `BRD_I2C` from the CM33 via
-`da9292_get_status()` in the `chips/da9292` driver — see
-`<alp/chips/da9292.h>`.  In short: the GD32 provides a fast
-fault-pin forward over the bridge; the CM33 `da9292` driver provides
-full register read/decode + event clear.
+On today's hardware the host observes the fault pins **directly**:
+`DA9292_INT` (Renesas `P37`) and `DA9292_TW` (Renesas `P36`) are
+CM33-readable GPIO inputs — `da9292_get_fault_pins()` in the
+`chips/da9292` driver packs them with the same bit layout, so host
+code written against this byte works unchanged when a future HW rev
+lets the bridge serve it.  This byte is **not** `PMC_STATUS_00` and
+does not mirror its bit layout.  For register-level PMIC status
+(`PMC_STATUS_00` etc.) the host reads the DA9292 directly over
+`BRD_I2C` from the CM33 via `da9292_get_status()` in the
+`chips/da9292` driver — see `<alp/chips/da9292.h>`.
 
 ### 3.5 DAC outputs (`v0.2+`)
 
@@ -711,6 +715,11 @@ caller wants liveness confirmation.
 
 Until the bridge fleet ships in production, `major` stays at `0`
 and the host driver insists on **exact** major-number match.
+**Pre-1.0 the host and firmware additionally ship in lock-step
+including `minor`**: a pre-production minor may revise a
+pre-production opcode's payload (v0.6 did this to `OTA_WRITE_CHUNK`),
+and the major-only handshake cannot detect that — do not mix a v0.5
+host with v0.6 firmware or vice versa.
 
 ## 9. Reference vectors
 
@@ -730,7 +739,7 @@ that file so the two implementations cannot diverge.
 
 ## 10. Field upgrades of the bridge firmware
 
-> **Status: design committed; implementation pending.**
+> **Status: Path A implemented (gated, HIL-pending); Path B scaffolded.**
 
 Two upgrade paths.  Per the V2N hardware decision (2026-05-12),
 the board routes `GD32_SWDIO` + `GD32_SWCLK` + `GD32_NRST` from
@@ -741,17 +750,54 @@ USART-only (User Manual Rev1.2 §1.4).
 **Path A — Application bootloader over the bridge (preferred
 normal upgrade path).**
 
-* Lives in the first N KiB of GD32 flash, never overwritten by a
-  field upgrade.
-* Implements an additional set of bridge opcodes (`OTA_BEGIN` /
-  `OTA_WRITE_CHUNK` / `OTA_VERIFY` / `OTA_COMMIT` / `OTA_ROLLBACK`,
-  numerically **reserved at `0xF0..0xFF`** in this protocol for the
-  next minor revision).
-* Keeps two **slots** in upper flash; the active slot runs at boot
-  while the inactive slot receives the upgrade.  Roll-back is a
-  metadata flip + reset.
+* A 32 KB bootloader lives at the base of GD32 flash, never
+  overwritten by a field upgrade; two 236 KB **slots** sit in upper
+  flash with an A/B metadata pair between them.  The active slot
+  runs at boot while the inactive slot receives the upgrade;
+  roll-back is a metadata flip + reset.  Destructive flashing is
+  armed only in `-DBRIDGE_OTA_PARTITIONED` firmware builds — the
+  default build answers `STATUS_NOSUPPORT` to the whole range.
 * Uses the same SPI / I2C transport as the rest of the protocol --
   no extra wiring beyond what is already in place.
+
+Wire contract (host mirrors in `<alp/chips/gd32g553.h>`,
+firmware in `firmware/gd32-bridge/src/ota.c`):
+
+| Op | Name | Request payload | Reply payload |
+|------|------|----------------|---------------|
+| `0xF0` | `OTA_BEGIN` | `size:u32 expected_crc32:u32` | `chunk_max:u16 target_slot:u8` |
+| `0xF1` | `OTA_WRITE_CHUNK` | `offset:u32 len:u8 data[len]` | `received_bytes:u32` (high-water) |
+| `0xF2` | `OTA_VERIFY` | _empty_ | `computed_crc32:u32 verified:u8` |
+| `0xF3` | `OTA_COMMIT` | _empty_ | _empty_ (resets on success) |
+| `0xF4` | `OTA_ROLLBACK` | _empty_ | _empty_ (resets on success) |
+| `0xF5` | `OTA_GET_STATE` | _empty_ | `state:u8 active:u8 pending:u8 boot_count:u16` |
+| `0xF6` | `OTA_ABORT` | _empty_ | _empty_ |
+
+Value encodings: `state` = 0 IDLE / 1 READY / 2 BUSY / 3 VERIFIED /
+4 ERROR; slot bytes = 0 A / 1 B / `0xFF` none-pending.  `WRITE_CHUNK`
+offsets must land on 8-byte (FMC doubleword) boundaries; the image
+CRC-32 is IEEE 802.3 reflected (zlib-compatible).  `WRITE_CHUNK` and
+`VERIFY` without a BEGIN-opened session answer `STATUS_NOT_READY`
+(0x02), as does `COMMIT` before a successful `VERIFY`.
+
+`WRITE_CHUNK`'s explicit `len` byte (v0.6) is load-bearing, not
+redundant: the slave can capture a request merged with the following
+transaction's zero filler (its FMC program window swallows CS edges),
+and for a frame whose CRC happens to be byte-palindromic the
+zero-extended span still passes the span CRC (CRC-CCITT-FALSE
+self-consumption: message + own CRC + zeros hashes to `0x0000` —
+silicon-caught 2026-06-04 at the first such chunk of a real image).
+A `len`-vs-span mismatch answers `STATUS_INVAL` without disturbing
+the session.  Re-sent chunks below the high-water mark are
+deduplicated against flash (identical → OK without re-programming;
+different → `STATUS_IO`): the ECC flash cannot program a doubleword
+twice even with identical data.
+
+Because BEGIN's slot erase, VERIFY's full-image CRC, and
+COMMIT/ROLLBACK's reset run inside the request transaction, their
+reply transaction can miss — hosts treat an I/O error there as
+"issued" and confirm via `OTA_GET_STATE` (or by re-initialising
+against the rebooted bridge after COMMIT/ROLLBACK).
 
 **Path B — Host-driven SWD bit-bang (universal recovery).**
 
@@ -786,12 +832,12 @@ header.
   [`docs/ota.md`](ota.md) +
   [`docs/ota-device-contract.md`](ota-device-contract.md); Hakan
   owns the server side.
-* DA9292 fault pins / PMIC alarms — the GD32 monitors the
-  `DA9292_INT`/`DA9292_TW` pins (not PMIC register events) but does
-  not relay asynchronously over the bridge; the host reads the latest
-  sampled pin state via `DA9292_STATUS_FORWARD`, or reads full PMIC
-  register status directly over `BRD_I2C` from the CM33 via the
-  `chips/da9292` driver.
+* DA9292 fault pins / PMIC alarms — on the current SoM revision the
+  `DA9292_INT`/`DA9292_TW` nets reach only the Renesas (P37/P36), so
+  the host reads the pin state directly (`da9292_get_fault_pins()`)
+  and full PMIC register status over `BRD_I2C` from the CM33 via the
+  `chips/da9292` driver; `DA9292_STATUS_FORWARD` answers `0xFF` until
+  a HW rev wires the nets to the GD32 (see §3.4).
 * Streaming workloads (audio, video) — not in scope; use the
   Renesas direct peripherals for those.
 

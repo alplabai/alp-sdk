@@ -184,18 +184,19 @@ int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks);
 /* DA9292 forward                                                    */
 /* --------------------------------------------------------------- */
 
-/* Returns the GD32-observed DA9292 fault-pin state, packed as fault
- * flags from the GD32's two DA9292 signal pins:
- *   bit0 = DA9292_INT asserted (P37, active-low)
- *   bit1 = DA9292_TW  asserted (P36)
+/* Returns the DA9292 fault-pin state byte:
+ *   bit0 = DA9292_INT asserted (active-low net)
+ *   bit1 = DA9292_TW  asserted (active-low net)
  *   bits 2-6 reserved (0)
- *   0xFF = "no sample taken yet" sentinel
- * The GD32 has NO I2C path to the DA9292, so this is pin sampling
- * only -- no PMIC register read and no I2C-master poll.  Pin sampling
- * lands in a future firmware release; current firmware always returns
- * 0xFF (see hal/bridge_hw_gd32.c).  Register-level PMIC status
- * (PMC_STATUS_00 etc.) is read by the host over BRD_I2C via the
- * chips/da9292 driver, not here. */
+ *   0xFF = "no sample available" sentinel
+ * The CURRENT SoM revision wires the DA9292 fault nets only to the
+ * Renesas (P37/P36) -- the GD32 has no connection to them (and no I2C
+ * path to the PMIC), so this returns the 0xFF sentinel unconditionally
+ * (schematic-verified 2026-06-04).  The packing is reserved for a
+ * future HW rev that mirrors the nets onto GD32 inputs.  Today the
+ * host samples the pins directly (chips/da9292 da9292_get_fault_pins(),
+ * same packing) and reads PMC_STATUS_00 etc. over BRD_I2C via
+ * chips/da9292. */
 uint8_t bridge_hw_da9292_status_cached(void);
 
 /* --------------------------------------------------------------- */

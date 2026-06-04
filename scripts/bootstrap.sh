@@ -24,7 +24,7 @@
 #     ├── alp-sdk/                  (this repo)
 #     └── zephyrproject/
 #         ├── .west/
-#         ├── zephyr/               (v3.7.0 LTS pin from west.yml)
+#         ├── zephyr/               (v4.4.0 pin -- keep in sync with west.yml)
 #         └── modules/
 #
 # Usage:
@@ -48,7 +48,9 @@ PARENT_DIR="$(cd "${REPO_ROOT}/.." && pwd)"
 # Zephyr workspace lives one level up from the alp-sdk checkout so
 # alp-sdk itself never gets relocated by `west init`.
 WORKSPACE_DIR="${PARENT_DIR}/zephyrproject"
-ZEPHYR_VERSION="v3.7.0"
+# Keep in sync with the Zephyr `revision:` pin in the alp-sdk west.yml
+# (bumped v3.7.0 LTS -> v4.4.0 in v0.5).
+ZEPHYR_VERSION="v4.4.0"
 
 # -------- Flag parsing --------------------------------------------------------
 
@@ -142,6 +144,12 @@ if [ "${DO_WEST}" -eq 1 ]; then
     ( cd "${WORKSPACE_DIR}" && west update --narrow -o=--depth=1 ) \
         || die "west update failed"
     ( cd "${WORKSPACE_DIR}" && west zephyr-export ) || true
+
+    # NOTE: this does NOT install the Zephyr SDK (the cross toolchains).
+    # Real-silicon targets (e.g. the V2N M33-SM) require it -- run
+    # `west sdk install` from "${WORKSPACE_DIR}" once after this step.
+    # native_sim smoke builds use host gcc (ZEPHYR_TOOLCHAIN_VARIANT=host)
+    # and don't need the SDK.
 else
     info "Skipping west setup (--no-west)"
 fi

@@ -16,12 +16,12 @@
  * reply, stages the reply envelope, and (re-)enables the TX FIFO
  * so the host's next-transaction reads get the reply bytes.
  *
- * THIS FILE is a SCAFFOLD.  The byte-level GigaDevice firmware
- * library hookups (SPI1 init, ISR wiring, TX FIFO management) are
- * marked with TODO blocks; today the file compiles standalone and
- * can be exercised against a unit-test mock that feeds the
- * receive-byte path directly via the spi_slave_rx_byte() entry
- * point.
+ * THIS FILE is SILICON-FREE: framing, CRC, staging and the
+ * protocol_dispatch() hand-off only.  The byte-level GigaDevice
+ * hookups (SPI1 slave init, CS-EXTI, ISR wiring) live in the gd32
+ * backend at hal/transport_hw_gd32.c and drive the spi_slave_*()
+ * seams below; the stub backend leaves the bring-up hook a no-op so a
+ * unit-test mock can feed the same seams directly.
  */
 
 #include <stdbool.h>
@@ -29,6 +29,12 @@
 #include <string.h>
 
 #include "protocol.h"
+#include "transport.h"
+
+/* Weak default: the stub backend links this no-op so it needs no vendor
+ * library.  The gd32 backend's hal/transport_hw_gd32.c overrides it with
+ * the real SPI1 slave + CS-EXTI bring-up. */
+__attribute__((weak)) void bridge_transport_spi_hw_init(void) { }
 
 /* Maximum SPI envelope = SOF + (CMD or STATUS) + PAYLOAD + CRC. */
 #define SPI_MAX_FRAME_BYTES (1u + 1u + GD32_BRIDGE_MAX_PAYLOAD_BYTES + 2u)
@@ -72,9 +78,33 @@ static void stage_error_reply(uint8_t status)
  * see spi_slave_cs_high() which fires on CS de-assert. */
 static void decode_and_dispatch(void)
 {
-    /* Minimum envelope: SOF + CMD + 0-byte payload + CRC = 4 bytes. */
+    /* Empty transaction (CS toggled with no clocked bytes): nothing to do. */
+    if (spi_rx_len == 0u) { return; }
+
+    /* Request and reply ride SEPARATE CS transactions.  When the host reads a
+     * staged reply it clocks DUMMY bytes into us -- the RZ SCI master, lacking a
+     * TX buffer on a read, drives 0x00 -- so a reply-drain transaction lands as
+     * an all-0x00 buffer (leading byte 0x00, never SOF).  Leave the staged reply
+     * intact for the host to finish reading and do NOT decode.
+     *
+     * Distinguish that benign drain from a CORRUPTED request: a transaction that
+     * does not begin with SOF but is NOT the all-0x00 dummy pattern is a mangled
+     * request (e.g. a dropped leading SOF from the CS/RBNE edge race).  Fail
+     * LOUD with STATUS_IO so the host re-syncs and retries -- otherwise the host
+     * would read back the PREVIOUS transaction's stale-but-CRC-valid reply,
+     * which for the byte-identical PING masquerades as a fresh success and hides
+     * the dropped request. */
+    if (spi_rx_buf[0] != GD32_BRIDGE_SOF) {
+        for (size_t i = 0u; i < spi_rx_len; i++) {
+            if (spi_rx_buf[i] != 0u) { stage_error_reply(STATUS_IO); return; }
+        }
+        return; /* all-0x00: reply-drain -- preserve the staged reply */
+    }
+
+    /* A request addressed to us (leading SOF) but too short to hold even an
+     * empty envelope (SOF + CMD + 0-byte payload + CRC = 4 bytes) is a genuine
+     * framing error -> STATUS_IO so the host re-syncs. */
     if (spi_rx_len < 4u) { stage_error_reply(STATUS_IO); return; }
-    if (spi_rx_buf[0] != GD32_BRIDGE_SOF) { stage_error_reply(STATUS_IO); return; }
 
     const size_t payload_len   = spi_rx_len - 4u; /* SOF + CMD + .. + CRC(2) */
     const uint16_t got_crc     = (uint16_t)spi_rx_buf[2u + payload_len]
@@ -131,13 +161,23 @@ uint8_t spi_slave_tx_next_byte(void)
     return 0xFFu;
 }
 
+/* True while the staged reply still has unsent bytes.  The gd32 backend
+ * gates every TX-FIFO write on this so it queues EXACTLY the reply and never
+ * idle/padding bytes -- the GD32 SPI has no TX-underrun error and no FIFO
+ * flush, so any over-queued byte sticks in the TX FIFO and shoves later
+ * replies out of byte-alignment. */
+bool spi_slave_tx_pending(void)
+{
+    return spi_tx_cursor < spi_tx_len;
+}
+
 void transport_spi_init(void)
 {
     spi_rx_len    = 0u;
     spi_tx_len    = 0u;
     spi_tx_cursor = 0u;
-    /* TODO: GigaDevice firmware library init for SPI1 slave mode
-     *       on PA8/PA9/PA10/PB15.  Hook the falling-CS + per-byte
-     *       receive + TX-FIFO-empty interrupts to the spi_slave_*
-     *       entry points above. */
+    /* SPI1 slave + CS-EXTI bring-up lives in the gd32 HAL backend
+     * (hal/transport_hw_gd32.c); the stub backend's weak no-op keeps
+     * this hardware-free for host-side protocol tests. */
+    bridge_transport_spi_hw_init();
 }

@@ -53,6 +53,48 @@ if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_LITTLEFS)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_littlefs.c)
 endif()
 
+# Renesas RZ SPI_B (RSPI) controller driver -- carried here (not upstream
+# Zephyr) so it survives a `west update`.  Upstream Zephyr ships no driver
+# for the SPI_B IP the rzv FSP serves; this one wraps FSP r_spi_b and adds
+# the RZ/V2N CM33 INTSEL selectable-interrupt routing.  Needs Zephyr's
+# private drivers/spi/spi_context.h on the include path.
+if(CONFIG_SPI_RENESAS_RZ_SPI_B)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/spi_renesas_rz_spi_b.c)
+    zephyr_library_include_directories(${ZEPHYR_BASE}/drivers/spi)
+endif()
+
+# Renesas RZ SCI-B Simple-SPI controller driver + vendored FSP module.
+# The on-module GD32 supervisor SPI fast path is wired to SCI7 (P76/P77/P96/P97
+# = MOSI7/MISO7/SCK7/SS7), an SCI channel in clock-synchronous Simple-SPI mode,
+# NOT the dedicated SPI_B IP.  Unlike SPI_B, the rzv FSP ships no SCI-SPI module,
+# so the FSP r_sci_b_spi.c (BSD-3, near-identical to the RA source -- one
+# documented one-line deviation -- with an RZ cfg shim) is carried here under
+# zephyr/drivers/spi/r_sci_b_spi/ and gated by
+# USE_RZ_FSP_SCI_B_SPI.  Both the glue driver and the FSP module need Zephyr's
+# private drivers/spi/spi_context.h on the include path.
+if(CONFIG_SPI_RENESAS_RZ_SCI_B)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/spi_renesas_rz_sci_b.c)
+    zephyr_library_include_directories(${ZEPHYR_BASE}/drivers/spi)
+endif()
+if(CONFIG_USE_RZ_FSP_SCI_B_SPI)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/r_sci_b_spi/r_sci_b_spi.c)
+    zephyr_library_include_directories(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/r_sci_b_spi)
+    # SCI7 DMA fast path: the rzv FSP DMAC-B transfer driver.  hal_renesas
+    # ships it for rzv2n (src/rzv/r_dmac_b + the SCI7 RXI/TXI trigger events in
+    # bsp/mcu/rzv2n/bsp_dmac.h) but its rzv CMake does not compile it and the
+    # rzv2n devicetree has no dmac node, so the glue driver hand-instantiates
+    # the transfer_instance_t pair and we build the FSP module here.  Its
+    # r_dmac_b_cfg.h shim lives in the r_sci_b_spi include dir above.
+    zephyr_library_sources(
+        ${ZEPHYR_HAL_RENESAS_MODULE_DIR}/drivers/rz/fsp/src/rzv/r_dmac_b/r_dmac_b.c)
+    zephyr_library_include_directories(
+        ${ZEPHYR_HAL_RENESAS_MODULE_DIR}/drivers/rz/fsp/inc/instances/rzv)
+endif()
+
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.

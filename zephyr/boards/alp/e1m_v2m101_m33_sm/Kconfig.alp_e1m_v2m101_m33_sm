@@ -1,0 +1,5 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_ALP_E1M_V2M101_M33_SM
+	select SOC_R9A09G056N48GBG_CM33
