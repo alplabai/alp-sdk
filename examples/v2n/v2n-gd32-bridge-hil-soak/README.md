@@ -33,7 +33,7 @@ on ADC) remain their own HIL-PLAN rows.
 | timer_sync | 0x27 | link TIMER0→TIMER7 (restart) then unlink |
 | power_mode | 0x28 | mode 0 ("run") — the documented no-op request |
 | da9292_sentinel | 0x40 | **must** answer `0xFF` (no DA9292 net reaches the GD32 this HW rev) |
-| ota_unarmed | 0xF5 | **must** answer NOSUPPORT (bench image is the unarmed build) |
+| ota_get_state | 0xF5 | NOSUPPORT (unarmed build) or a sane state snapshot (armed build) |
 
 One-shot at boot (not per-cycle): `adc_dsp_chain_open` probe — the
 4-chain pool has no close opcode yet, so looping it would exhaust the

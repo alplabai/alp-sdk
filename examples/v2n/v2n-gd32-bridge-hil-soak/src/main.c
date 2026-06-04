@@ -370,18 +370,29 @@ static bool t_da9292_sentinel(soak_stat_t *st)
     return true;
 }
 
-/* 0xF5 OTA_GET_STATE -- the bench soak image is the UNARMED build
- * (no -DBRIDGE_OTA_PARTITIONED), whose whole OTA range answers
- * STATUS_NOSUPPORT.  Asserting that proves the 0xF0.. dispatch range
- * routes correctly without arming anything destructive.  (The armed
- * OTA flow has its own dedicated bench procedure.) */
-static bool t_ota_unarmed(soak_stat_t *st)
+/* 0xF5 OTA_GET_STATE -- proves the 0xF0.. dispatch range routes
+ * correctly without arming anything destructive.  Both deployments
+ * pass: the UNARMED build answers NOSUPPORT for the whole OTA range;
+ * the ARMED (partitioned) build answers a concrete, sane state
+ * snapshot.  Anything else is a dispatch fault.  (The armed OTA
+ * flow itself has its own dedicated bench procedure.) */
+static bool t_ota_get_state(soak_stat_t *st)
 {
     gd32g553_ota_state_info_t info;
     const alp_status_t s = gd32g553_ota_get_state(&ctx, &info);
-    if (s != ALP_ERR_NOSUPPORT) {
+    if (s == ALP_ERR_NOSUPPORT) {
+        return true;                      /* unarmed build: documented reply */
+    }
+    if (s != ALP_OK) {
         st->last_status = (int)s;
-        SOAK_FAIL(st, "status=%d (unarmed firmware must answer NOSUPPORT)", (int)s);
+        SOAK_FAIL(st, "status=%d (want OK or NOSUPPORT)", (int)s);
+        return false;
+    }
+    if (info.state > GD32G553_OTA_STATE_ERROR ||
+        (info.active_slot != GD32G553_OTA_SLOT_A &&
+         info.active_slot != GD32G553_OTA_SLOT_B)) {
+        SOAK_FAIL(st, "armed build, insane snapshot: state=%d active=%d",
+                  (int)info.state, (int)info.active_slot);
         return false;
     }
     return true;
@@ -416,7 +427,7 @@ static struct {
     { { "timer_sync",       0, 0, 0 }, t_timer_sync       },
     { { "power_mode",       0, 0, 0 }, t_power_mode       },
     { { "da9292_sentinel",  0, 0, 0 }, t_da9292_sentinel  },
-    { { "ota_unarmed",      0, 0, 0 }, t_ota_unarmed      },
+    { { "ota_get_state",    0, 0, 0 }, t_ota_get_state    },
 };
 
 #define SOAK_TEST_COUNT (sizeof tests / sizeof tests[0])
