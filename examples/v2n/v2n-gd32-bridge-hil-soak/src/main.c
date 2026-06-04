@@ -590,6 +590,15 @@ static bool t_ota_get_state(soak_stat_t *st)
 /*     rebuilds on the next call -- the recovery is silicon-validated  */
 /*     (functional tier 26/26).  t_trng retries once to absorb a       */
 /*     fault-recover cycle landing mid-test.                           */
+/*   - adc_stream UN-QUARANTINED for the supervised third pass: its    */
+/*     "destructive poison" diagnosis also predates the transport +    */
+/*     masked-status fixes, and the DMA bandwidth story never held     */
+/*     (continuous-mode ADC at ~150 kSPS x 16-bit is ~300 KB/s on a    */
+/*     216 MHz AHB, with the SPI channels at higher arbitration        */
+/*     priority).  Firmware hardening landed first: stale-EOC clear    */
+/*     before the DMA request unmasks, defined dma_parameter_struct    */
+/*     init, boot-time ADC calibration.  If the link still rots, the   */
+/*     row goes back under quarantine with fresh register evidence.    */
 /* ------------------------------------------------------------------ */
 
 typedef bool (*soak_fn_t)(soak_stat_t *st);
@@ -608,7 +617,7 @@ static struct {
     { { "pwm_single_pulse", 0, 0, 0 }, t_pwm_single_pulse, false },
     { { "pwm_capture", 0, 0, 0 }, t_pwm_capture, false },
     { { "adc_read", 0, 0, 0 }, t_adc_read, false },
-    { { "adc_stream", 0, 0, 0 }, t_adc_stream, true },
+    { { "adc_stream", 0, 0, 0 }, t_adc_stream, false },
     { { "dac", 0, 0, 0 }, t_dac, false },
     { { "qenc", 0, 0, 0 }, t_qenc, false },
     { { "counter", 0, 0, 0 }, t_counter, false },

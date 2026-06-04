@@ -422,6 +422,16 @@ static void     adc_periph_init(uint32_t periph)
     adc_channel_length_config(periph, ADC_ROUTINE_CHANNEL, 1u);
     adc_external_trigger_config(periph, ADC_ROUTINE_CHANNEL, EXTERNAL_TRIGGER_DISABLE);
     adc_enable(periph);
+
+    /* Stabilisation + calibration.  The datasheet wants tSTAB after
+     * ADCON before calibrating; a generous spin costs microseconds in
+     * this boot-only path.  adc_calibration_enable() then self-blocks
+     * on RSTCLB/CLB until the hardware finishes -- without it the
+     * converter runs uncalibrated for the whole session (linearity
+     * offsets land directly in every reported millivolt). */
+    for (volatile uint32_t stab = 0u; stab < 4096u; ++stab) {
+    }
+    adc_calibration_enable(periph);
 }
 
 /* ----------------------------------------------------------------- */
@@ -548,12 +558,10 @@ static const gd32_pwm_ch_t pwm_channels[] = {
 #define PWM_TIMER_TICK_NS 1000u         /* 1 us per timer tick      */
 #define PWM_TIMER_ARR_MAX 0xFFFFu       /* 16-bit auto-reload limit */
 
-/* Last-set cache for bridge_hw_pwm_get.  Reading back the timer's
- * compare register would also work but the caller is interested in
- * "what did I ask for", not "what does the rounded-to-1us value
- * round-trip to". */
-static uint32_t pwm_period_ns_cache[PWM_CHANNEL_COUNT];
-static uint32_t pwm_duty_ns_cache[PWM_CHANNEL_COUNT];
+/* No read-back cache: bridge_hw_pwm_get reads CAR/CHxCV straight from
+ * the timer so the host sees what the silicon is actually generating,
+ * never a software echo of its own request (silicon lesson 2026-06-04:
+ * a cache echo "verified" PWM for weeks while the pads were idle). */
 
 /* Per-timer init.  Called once per peripheral from bridge_hw_init();
  * Advanced timers need timer_primary_output_config(ENABLE) before any
@@ -919,11 +927,6 @@ int bridge_hw_pwm_set(uint8_t channel, uint32_t period_ns, uint32_t duty_ns)
      * the same timer -- the contract documents this constraint. */
     timer_autoreload_value_config(ch->periph, (uint32_t)(period_us - 1u));
     timer_channel_output_pulse_value_config(ch->periph, ch->channel, duty_us);
-
-    /* Cache the host's request for read-back.  The HW reality is
-     * shared-period; the cache keeps per-channel intent. */
-    pwm_period_ns_cache[channel] = period_ns;
-    pwm_duty_ns_cache[channel]   = duty_ns;
     return BRIDGE_HW_OK;
 }
 
@@ -933,8 +936,22 @@ int bridge_hw_pwm_get(uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns)
     *period_ns = 0u;
     *duty_ns   = 0u;
     if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
-    *period_ns = pwm_period_ns_cache[channel];
-    *duty_ns   = pwm_duty_ns_cache[channel];
+
+    const gd32_pwm_ch_t *ch = &pwm_channels[channel];
+
+    /* Hardware read-back: convert the live CAR/CHxCV ticks to ns at
+     * the fixed 1 us tick.  This reports what the pad is actually
+     * doing -- including the shared-period reality (one ARR per
+     * timer: a PWM_SET on a sibling channel moves this channel's
+     * reported period too) and the boot default (65.536 ms period,
+     * 0 duty) before the first PWM_SET.  CHxCV can legitimately read
+     * ARR + 1 (single-pulse programs compare past the period for a
+     * full-width pulse); clamp so duty never reports > period. */
+    const uint32_t car = TIMER_CAR(ch->periph) & PWM_TIMER_ARR_MAX;
+    uint32_t       cv  = timer_channel_capture_value_register_read(ch->periph, ch->channel);
+    if (cv > car + 1u) cv = car + 1u;
+    *period_ns = (car + 1u) * PWM_TIMER_TICK_NS;
+    *duty_ns   = cv * PWM_TIMER_TICK_NS;
     return BRIDGE_HW_OK;
 }
 
@@ -954,15 +971,33 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
      * survives across reads. */
     adc_routine_channel_config(ch->periph, 0u, ch->channel, adc_sample_cycles_cache[channel]);
 
+    /* A stale EOC (e.g. the in-flight conversion that completes after
+     * a stream END drops continuous mode) would satisfy the first poll
+     * instantly and serve OLD data as sample 1 -- clear it so every
+     * EOC we consume belongs to a conversion WE triggered. */
+    adc_flag_clear(ch->periph, ADC_FLAG_EOC);
+
     /* Take `samples` consecutive conversions, software-triggered per
-     * sample.  Polled EOC.  No timeout -- if the ADC is wedged the
-     * SysTick watchdog (when it ships) catches it; in the steady-state
-     * a 12-bit conversion at HCLK/6 finishes in ~6 us so the spin is
-     * brief. */
+     * sample.  Polled EOC with a HARD BOUND: this body runs inside the
+     * CS-EXTI handler, and an unbounded spin on a wedged ADC took the
+     * WHOLE LINK down with it (silicon 2026-06-04: after an adc_stream
+     * cycle the next read's EOC never came; the handler never returned,
+     * the SPI RX DMA was never re-armed -- captured live with CH3
+     * frozen disabled at CNT=66 -- and every subsequent command on
+     * every surface failed).  A healthy conversion is ~6.3 us; the
+     * ~100k-iteration bound is the abort latch, and on timeout the
+     * peripheral is re-initialised (deinit + reconfig + recalibrate)
+     * so the NEXT read starts from a clean converter -- same
+     * self-healing shape as the TRNG fault path. */
     for (uint8_t i = 0; i < samples; ++i) {
         adc_software_trigger_enable(ch->periph, ADC_ROUTINE_CHANNEL);
-        while (!adc_flag_get(ch->periph, ADC_FLAG_EOC)) {
-            /* spin */
+        uint32_t to = 100000u;
+        while (!adc_flag_get(ch->periph, ADC_FLAG_EOC) && --to) {
+            /* spin, bounded */
+        }
+        if (to == 0u) {
+            adc_periph_init(ch->periph);
+            return BRIDGE_HW_ERR_IO;
         }
         adc_flag_clear(ch->periph, ADC_FLAG_EOC);
         uint32_t code = adc_routine_data_read(ch->periph);
@@ -1078,6 +1113,7 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
     dma_deinit(s->dma_periph, (dma_channel_enum)s->dma_channel);
 
     dma_parameter_struct init;
+    dma_struct_para_init(&init); /* all fields defined before the explicit set */
     init.periph_addr  = (uint32_t)(uintptr_t)&ADC_RDATA(ch->periph);
     init.memory_addr  = (uint32_t)(uintptr_t)s->ring;
     init.direction    = DMA_PERIPHERAL_TO_MEMORY;
@@ -1111,6 +1147,13 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
     (void)sample_rate_hz; /* aspirational; see comment above */
     adc_routine_channel_config(ch->periph, 0u, ch->channel, adc_sample_cycles_cache[channel]);
     adc_special_function_config(ch->periph, ADC_CONTINUOUS_MODE, ENABLE);
+
+    /* Clear any End-Of-Conversion left by a prior single-shot
+     * bridge_hw_adc_read on this peripheral BEFORE the DMA request
+     * line is enabled -- a stale EOC otherwise fires one spurious DMA
+     * beat the moment the request unmasks, depositing a phantom
+     * zeroth sample and desynchronising the ring cursor. */
+    adc_flag_clear(ch->periph, ADC_FLAG_EOC);
     adc_dma_mode_enable(ch->periph);
 
     dma_channel_enable(s->dma_periph, (dma_channel_enum)s->dma_channel);
@@ -1176,6 +1219,18 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
     adc_special_function_config(ch->periph, ADC_CONTINUOUS_MODE, DISABLE);
     adc_dma_mode_disable(ch->periph);
     dma_channel_disable(s->dma_periph, (dma_channel_enum)s->dma_channel);
+
+    /* Continuous mode always has a conversion IN FLIGHT when CONT
+     * drops.  Dwell past one conversion time (~6.3 us healthy; the
+     * spin below is comfortably longer) so it lands, then clear EOC
+     * unconditionally -- whether the last EOC went to the DMA or is
+     * still latched, the converter must idle CLEAN.  A leftover
+     * conversion/EOC straddling into the next single-shot read on the
+     * same peripheral is what started the 2026-06-04 link-rot chain. */
+    for (volatile uint32_t settle = 0u; settle < 8192u; ++settle) {
+        /* fixed dwell, ~tens of microseconds */
+    }
+    adc_flag_clear(ch->periph, ADC_FLAG_EOC);
 
     s->in_use    = false;
     s->dsp_bound = false;
@@ -1307,7 +1362,7 @@ int bridge_hw_tmu_compute(uint8_t function, uint8_t format, uint32_t in_a, uint3
             a = f32_to_bits(bits_to_f32(in_a) / 3.14159265358979f);
             b = f32_to_bits(1.0f); /* IEEE-754 unit modulus */
         } else {
-            b = 0x7FFFFFFFu;       /* Q31 ~1.0 */
+            b = 0x7FFFFFFFu; /* Q31 ~1.0 */
         }
     }
 
@@ -1678,10 +1733,9 @@ int bridge_hw_pwm_single_pulse(uint8_t channel, uint32_t pulse_ns)
     timer_single_pulse_mode_config(ch->periph, TIMER_SP_MODE_SINGLE);
     timer_enable(ch->periph);
 
-    /* Update the cache so a follow-up bridge_hw_pwm_get reports the
-     * one-pulse setpoint accurately.  Duty == period for a one-shot. */
-    pwm_period_ns_cache[channel] = pulse_us * PWM_TIMER_TICK_NS;
-    pwm_duty_ns_cache[channel]   = pulse_us * PWM_TIMER_TICK_NS;
+    /* A follow-up bridge_hw_pwm_get reads CAR/CHxCV directly and
+     * reports duty == period for the one-shot (compare sits past the
+     * period so the pulse spans the full window). */
     return BRIDGE_HW_OK;
 }
 

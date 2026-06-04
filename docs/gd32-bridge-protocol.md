@@ -362,10 +362,15 @@ On V2N every E1M PWM channel maps to a TIMER0 / TIMER7 channel
 (see `metadata/chips/gd32g553.yaml` `pwm_routing:` for the table).
 Both timers are 16-bit advanced timers running at the 240 MHz core
 clock, so the achievable resolution is ~4.16 ns LSB and the longest
-single-counter period is ~273 us.  `CMD_PWM_GET` always reports
-what the firmware actually programmed after rounding -- callers
-that need exact frequency confirmation should read back rather than
-recompute.
+single-counter period is ~273 us.  `CMD_PWM_GET` reads the live
+timer registers (auto-reload + compare) and converts ticks back to
+nanoseconds -- it reports what the pad is actually generating, never
+an echo of the request.  Two consequences of the hardware truth:
+the period is shared per timer (a `PWM_SET` on a sibling channel of
+the same timer moves this channel's reported period too), and before
+the first `PWM_SET` a channel reports the boot default (65.536 ms
+period, 0 duty).  Callers that need exact frequency confirmation
+should read back rather than recompute.
 
 ### 3.9 ADC configure (`v0.3+`)
 

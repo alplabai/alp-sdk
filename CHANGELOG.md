@@ -7,6 +7,40 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Fixed — gd32-bridge v0.2.3: honest PWM read-back + ISR-bounded ADC waits (2026-06-04)
+
+* **`PWM_GET` reads the silicon, not a cache** (`hal/bridge_hw_gd32.c`).
+  `bridge_hw_pwm_get` answered from a last-request software cache, so a
+  host could "verify" a PWM that never reached the pad — exactly what
+  happened on the bench: every PWM pass to date was the firmware echoing
+  the host's own request (maintainer's scope showed no signal ever).
+  The handler now reads the live `CAR`/`CHxCV` registers back and
+  converts ticks to ns, honouring the read-back contract
+  `docs/gd32-bridge-protocol.md` §3.8 always documented.  Consequences
+  now stated in the doc + `hal/bridge_hw.h`: per-timer shared period is
+  visible in the read-back, and a never-set channel reports the boot
+  default (65.536 ms / 0) instead of zeros.  The PWM **output stage
+  itself was proven good** by driving `TIMER7` `CAR`/`CH3CV` over SWD
+  and watching PD0 toggle — the "dead PWM" was the cache echo masking
+  the fact that nothing on the bench was driving the channel.
+* **Unbounded waits removed from the CS-EXTI handler path**
+  (`hal/bridge_hw_gd32.c`).  `bridge_hw_adc_read`'s EOC poll could spin
+  forever inside the CS interrupt handler; one wedged conversion froze
+  the handler, SPI RX DMA never re-armed, and the whole link rotted
+  (caught live on SWD: DMA0 CH3 `CHEN=0`, count frozen mid-frame).  The
+  poll is now bounded (timeout → ADC re-init + `BRIDGE_HW_ERR_IO`);
+  `adc_stream_begin` pre-clears stale EOC + re-inits the DMA param
+  struct, `adc_stream_end` adds a settle dwell + unconditional EOC
+  clear, and `adc_periph_init` gains a stabilization spin + explicit
+  calibration.  Soak-validated: 18/18 active rows clean for 410+
+  cycles with `adc_stream` active alongside (its own zero-sample
+  failure is still open, tracked separately).
+* HiL soak: every remaining quarantine row re-activated (`qenc` is
+  status-only — floating A/B inputs free-run; `trng` retries once per
+  the documented recovery cycle).
+* `firmware-version.txt` 0.2.1 → **0.2.3** (0.2.2 was consumed by the
+  OTA bench as the slot-B upgrade-test image version).
+
 ### Added — full-bridge functional tier + math/TRNG silicon fixes (2026-06-04)
 
 New `examples/v2n/v2n-gd32-bridge-functional`: single-pass, VALUE-asserting
