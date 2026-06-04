@@ -20,7 +20,7 @@ the framing layer differs.
 
 | Property              | SPI (fast path)                                                            | I2C (management path)                          |
 |-----------------------|----------------------------------------------------------------------------|------------------------------------------------|
-| Master                | Renesas RZ/V2N RSPI                                                        | Renesas RZ/V2N RIIC8 (BRD_I2C master)          |
+| Master                | Renesas RZ/V2N SCI7 (Simple-SPI mode)                                      | Renesas RZ/V2N RIIC8 (BRD_I2C master)          |
 | Slave                 | GD32G553 SPI peripheral                                                    | GD32G553 I2C peripheral                        |
 | Renesas pads          | `P76` MOSI, `P77` MISO, `P96` SCLK, `P97` CS                               | `P07` SCL, `P06` SDA                           |
 | GD32 pads             | `PB15` MOSI, `PA10` MISO, `PA9` SCLK, `PA8` CS                             | `PA15` SCL, `PB9` SDA (GD32 = bus slave)       |
@@ -556,15 +556,22 @@ SPI uses a **two-transaction** pattern:
 1. **Request transaction.**  Host asserts CS, clocks the request
    envelope out, deasserts CS.  This is a single half-duplex write
    (no useful data on MISO).
-2. **Inter-transaction gap.**  Host-side overhead between the two
-   bus calls is typically ≥ tens of microseconds — enough for the
-   GD32 ISR to decode the request, run the handler, and stage the
-   reply envelope in its TX FIFO.  Hosts that operate with a much
-   faster bus driver (e.g. DMA-backed back-to-back transactions
-   under 1 µs) MUST insert an explicit busy-wait of at least
-   100 µs before issuing the read.
-3. **Reply transaction.**  Host asserts CS, clocks 0xFF bytes out,
-   reads the reply envelope on MISO, deasserts CS.
+2. **Inter-transaction gap.**  The GD32's CS-rising handler decodes
+   the request, runs the handler, and stages the reply; until that
+   completes, a reply read clocks idle bytes.  Hosts MUST handle
+   this with a **reply re-read schedule**: on SOF/CRC mismatch,
+   re-issue the reply transaction after a short backoff (the
+   `gd32g553` host driver ladders 25 µs → 1.6 ms, bounding the
+   total wait at ~3.2 ms).  Re-reading is always safe: a drain
+   transaction (all-`0x00` capture) never re-dispatches, and the
+   slave **rewinds and re-arms the staged reply on every drain**
+   (firmware ≥ v0.2.1; silicon-validated 2026-06-04), so the
+   schedule converges as soon as the handler finishes.  A fixed
+   ≥ 100 µs pre-read wait also works but wastes latency on the
+   fast (sub-10 µs) handlers.
+3. **Reply transaction.**  Host asserts CS, clocks filler bytes out
+   (`0x00`; an all-`0x00` capture is what the slave classifies as a
+   reply-drain), reads the reply envelope on MISO, deasserts CS.
 
 The pattern is **half-duplex** on each transaction (request: host
 talks; reply: GD32 talks).  Single-CS full-duplex is not used
@@ -574,11 +581,12 @@ single-CS variant with fixed inter-phase padding bytes for
 latency-critical use cases.
 
 If the GD32 ISR has not finished staging the reply by the time the
-host begins the reply transaction, the host reads the **stale**
-contents of the GD32's TX FIFO (typically `0xFF` or the previous
-reply's CRC).  The CRC check then fails and the driver returns
-`ALP_ERR_IO` — callers can retry safely because the request side has
-already executed (commands are idempotent except for `GPIO_WRITE` /
+host begins the reply transaction, the host reads idle bytes
+(`0x00`) or a partially armed reply.  The CRC check then fails and
+the driver re-reads per the schedule above; only after the schedule
+is exhausted does it return `ALP_ERR_IO`.  Even then, callers can
+retry the whole command safely because the request side has already
+executed (commands are idempotent except for `GPIO_WRITE` /
 `PWM_SET`, where the host knows the desired final state and writing
 the same value twice is benign).
 

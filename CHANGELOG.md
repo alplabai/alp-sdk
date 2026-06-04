@@ -7,6 +7,79 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Changed — 25 MHz link: SCI-B FIFO burst engine + reply re-read made real (2026-06-04)
+
+The GD32↔CM33 SPI link's wire density and per-command latency were
+rebuilt around silicon measurements (scope + CM33 bus/timer probes: one
+SCI7 register access ≈ 341 ns; `k_busy_wait(10)` ≈ 15 µs measured):
+
+* **CM33 SCI-B driver** (`zephyr/drivers/spi/spi_renesas_rz_sci_b.c`):
+  the polled engine now runs the SCI's 32-deep FIFOs (`CCR3.FM`, armed
+  outside the FSP whose FIFO path is DMA-gated) with a credit-bound
+  burst loop sized off the `FRSR.R` fill counter — at most 31 bytes in
+  flight, which provably bounds both FIFO occupancies, so there is no
+  per-byte flag poll at all.  Inter-byte wire gaps drop from ~5 µs
+  (serialized one-in-flight walk) to wire-rate bursts, scope-confirmed
+  at 25 MHz.  CS setup/hold windows laddered 60/30 → 3/2 µs and moved
+  off `k_busy_wait` onto a raw SysTick spin (the kernel's
+  `k_cycle_get_32` poll is µs-coarse, overshooting every wait by ~50%;
+  delta-capped so tickless LOAD rewrites can only lengthen a window);
+  the dead `spi_context` gpio-CS path is skipped entirely under the
+  direct-latch shim (single CS owner).  `recover()` is FIFO-aware
+  (flush + the FIFO-mode TEND-anomaly-safe TE clearing per the
+  vendor's own Close sequence).  The `ALP_V2N_SCI7_DMAC` DMA path was
+  re-baselined against the e2-studio FSP generator's SCI+DMAC pairing
+  (ack `MASK_DACK_OUTPUT`, `NO_DETECTION`, request direction
+  `SOURCE_MODULE` both ways, DREQ/DACK/TEND pins explicitly unused —
+  our sweep had REQD inverted on RX and the pin fields zero-initialised
+  to PIN0) and wired end-to-end (`transceive()` FSP branch, cfg gate
+  follows the same switch, RX arm moved off the rzv `R_DMAC_B_Reset`
+  stub onto `reconfigure()`).  Benched: the DMAC now **streams**
+  complete transactions (the old parks-after-one-beat diagnosis is
+  dead); remaining blocker is an intermittent `CHSTAT.ER` AXI fault on
+  TDR writes through the convert window — bus-master security lead,
+  see `docs/gd32-link-sci7-next-rev.md`.  Gate stays default-off; the
+  polled FIFO engine is the production path.
+* **gd32-bridge firmware v0.2.1**: a reply-drain transaction now
+  **rewinds the staged-reply cursor** before re-arming TX DMA, and an
+  EMPTY transaction (CS pulse whose bytes were lost to edge coalescing
+  mid-handler) does the same (`src/transport_spi.c`).  Previously the
+  gd32 backend's stage-time drain left the cursor spent, so a host
+  reply read landing before a slow handler (ADC burst ≈ 18-20 µs per
+  sample) finished staging disarmed the reply permanently — caught
+  live on SWD as 255-of-256 failures with the correct reply intact in
+  the buffer and the TX DMA count frozen mid-prefill; the empty-path
+  variant turned one collision miss into a guaranteed double miss.
+  With the rewind, every drain re-stages the same reply and the host's
+  re-read schedule converges.  New
+  `tests/unit/gd32_bridge_transport` pins the seam contract (6 cases,
+  linked against the production transport + dispatcher).
+* **Host driver** (`chips/gd32g553/gd32g553.c`): replies are read
+  after an opcode-aware staging gap (35 µs base + 8 µs/sample for
+  `ADC_READ` — the measured optimum against the slave's ~18-20
+  µs/sample conversion cost) and re-read down a short-first backoff
+  ladder (25 µs → 1.6 ms, ~3.2 ms bound) instead of the flat 250 µs
+  schedule.  V2N link consumers (bridge examples, quickstart snippet)
+  now pass `ALP_SPI_NO_CS` — the platform SPI driver owns the CS pad;
+  routing it through the generic gpio-CS path double-drove P97.
+* `docs/gd32-bridge-protocol.md` §4.1 now specifies the re-read
+  schedule as the host contract (the fixed ≥ 100 µs pre-read wait
+  remains a valid but slower alternative).  The link's transport is
+  SCI7 **permanently** (an RSPI reroute was rejected — pads committed
+  elsewhere); `docs/gd32-link-sci7-next-rev.md` replaces the RSPI
+  migration plan, and stale "RSPI master" wording was corrected across
+  the docs/headers.  `firmware/gd32-bridge/CMakeLists.txt` now re-runs
+  configure when `firmware-version.txt` changes (incremental builds
+  used to bake a stale `GET_BUILD_ID`).
+
+Measured on the bench (256-op averages, 25 MHz, errors 0/256 across
+the board), before → after: ping 130 → 120 µs, get_version 151 →
+133 µs, gpio_read 2680 µs at 255/256 FAILING → 153 µs/0 errors,
+adc_read(4) 2789 µs at 254/256 failing → 196 µs/0, adc_read(8)
+3428 µs at 256/256 failing → 261 µs/0.  Raw transaction floor 49 →
+27 µs; marginal wire cost ≈ 0.85 µs/byte (engine-bound; true wire
+rate stays the DMAC path's job).
+
 ### Changed — gd32-bridge protocol v0.6 + OTA Path-A real, silicon-validated (2026-06-04)
 
 Wire MINOR bump `PROTOCOL_VERSION` 0.5.0 → 0.6.0 (`firmware/gd32-bridge/

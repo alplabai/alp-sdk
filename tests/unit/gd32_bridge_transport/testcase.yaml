@@ -1,0 +1,13 @@
+tests:
+  alp.unit.gd32_bridge_transport:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp
+      - gd32-bridge
+      - transport
+      - unit

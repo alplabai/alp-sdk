@@ -66,6 +66,11 @@ _ALLOWLIST: set[str] = {
     # ("alp_foo" gets a "@2" version node -> alp_foo_v2): not real APIs.
     "alp_foo",
     "alp_foo_v2",
+    # Driver-internal compile gate in zephyr/drivers/spi/spi_renesas_rz_sci_b.c
+    # (the parked SCI7 DMAC fast path), referenced by the SCI7 next-rev plan.
+    # Real identifier; zephyr/drivers .c files are deliberately outside the
+    # scanned API surfaces.
+    "ALP_V2N_SCI7_DMAC",
 }
 
 # Identifier shapes we treat as SDK symbols.

@@ -41,9 +41,9 @@ int main(void) {
      * (see the bench handoff), so opening RIIC8 first would only add a second
      * CM33-owned peripheral to bring up with no benefit to the SPI test. */
 
-    /* Open the GD32 SPI fast path.  The Renesas RSPI master sits at
-     * P76/77/96/97 (MOSI/MISO/SCLK/CS) -- alp-studio resolves the
-     * bus + CS pin from the SoM's gd32-io-mcu-map.tsv. */
+    /* Open the GD32 SPI fast path.  The Renesas SCI7 Simple-SPI master
+     * sits at P76/77/96/97 (MOSI/MISO/SCLK/CS) -- alp-studio resolves
+     * the bus from the SoM's gd32-io-mcu-map.tsv. */
     alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
         .bus_id        = 1u,
         /*
@@ -66,7 +66,12 @@ int main(void) {
         .freq_hz       = 25000000u,
         .mode          = ALP_SPI_MODE_0,
         .bits_per_word = 8u,
-        .cs_pin_id     = 0u, /* studio-resolved */
+        /* No SDK-driven chip-select: on this SoM the platform SPI driver
+         * owns the CS pad itself (P97 direct-latch, framed around every
+         * transaction for the GD32's CS-EXTI).  Passing a pin id here
+         * would ALSO route CS through the generic GPIO path -- a second,
+         * conflicting owner for the same pad. */
+        .cs_pin_id     = ALP_SPI_NO_CS,
     });
     if (spi == NULL) {
         printf("[gd32-bridge-ping] alp_spi_open failed: err=%d "

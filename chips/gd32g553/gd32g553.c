@@ -109,6 +109,62 @@ static alp_status_t status_from_wire(uint8_t s)
 /* Transport: SPI                                                     */
 /* ----------------------------------------------------------------- */
 
+/* Reply re-read schedule.  The slave stages the reply inside the
+ * REQUEST transaction's CS-rising handler; for slow handlers (ADC
+ * conversion ~7 us/sample, TRNG conditioning, OTA FMC programming
+ * ~70-140 us/chunk) the host's first reply read can land before the
+ * reply is armed and clock idle/stale bytes instead.  Such a miss
+ * does NOT consume the staged reply -- the slave's drain path rewinds
+ * its staging cursor and re-arms the TX DMA on every CS cycle
+ * (firmware >= v0.2.1; silicon-validated 2026-06-04) -- so re-READING
+ * is always safe (no re-dispatch, no side effects).
+ *
+ * The schedule has two parts:
+ *
+ * 1. A fixed STAGING GAP before the first read.  The slave's CS-rising
+ *    handler re-initialises its SPI peripheral (RCU flush), decodes,
+ *    dispatches and re-arms both DMA channels before the reply exists
+ *    -- a floor of a few tens of microseconds even for trivial
+ *    handlers (bench 2026-06-04: at a ~15 us effective gap even
+ *    GET_VERSION missed its first read every time, and each miss
+ *    costs a wasted drain transaction plus a ladder wait, which is
+ *    strictly worse than waiting out the floor).  35 us covers the
+ *    rising path + trivial handlers; commands with real work fall
+ *    through to the ladder.
+ *
+ * 2. A short-first backoff ladder between re-reads: cheap early
+ *    retries keep ADC-burst-class handlers near the wire floor; the
+ *    geometric tail covers OTA flash programming, bounding the total
+ *    wait at ~3.2 ms. */
+#define GD32G553_REPLY_STAGING_GAP_US 35u
+static const uint16_t gd32g553_reply_retry_us[] = { 25u, 50u, 100u, 200u, 400u, 800u, 1600u };
+#define GD32G553_REPLY_READ_TRIES                                                                  \
+    (1u + (sizeof(gd32g553_reply_retry_us) / sizeof(gd32g553_reply_retry_us[0])))
+
+/* Staging gap for one command.  ADC conversions run inside the request's
+ * CS-rising handler at ~18-20 us per SAMPLE on top of the base rising
+ * path (bench-bracketed 2026-06-04 from the miss boundary at two sample
+ * counts and three gap sizes) -- too slow for the host to wait out in
+ * full (chasing it with a sized-to-cover gap measured WORSE than letting
+ * the ladder's first rung catch the tail, because the oversized gap is
+ * paid even when conversions finish early).  The 8 us/sample partial
+ * cover is the measured optimum: it keeps the first read out of the
+ * conversion burst's COLLISION window (a read racing the burst can be
+ * swallowed whole by coalesced CS edges, turning one miss into two:
+ * 356 us avg vs 196 us) while the ladder absorbs the remainder.  The
+ * real fix for ADC reply latency is slave-side (sampling-time config),
+ * tracked for the next firmware rev. */
+static uint32_t reply_staging_gap_us(uint8_t cmd, const uint8_t *req_payload,
+                                     size_t req_payload_len)
+{
+    uint32_t gap = GD32G553_REPLY_STAGING_GAP_US;
+
+    if (cmd == GD32G553_CMD_ADC_READ && req_payload != NULL && req_payload_len >= 2u) {
+        gap += 8u * (uint32_t)req_payload[1];
+    }
+    return gap;
+}
+
 static alp_status_t spi_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_payload,
                              size_t req_payload_len, uint8_t *reply_payload,
                              size_t reply_payload_len)
@@ -132,21 +188,38 @@ static alp_status_t spi_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_pa
     alp_status_t s             = alp_spi_write(ctx->spi, req, crc_covered + 2u);
     if (s != ALP_OK) return s;
 
+    /* Let the slave's CS-rising handler stage the reply before the first
+     * read (see the schedule comment above) -- cheaper than eating a
+     * wasted drain transaction + a ladder wait on every command. */
+    alp_delay_us(reply_staging_gap_us(cmd, req_payload, req_payload_len));
+
     /* Reply envelope: SOF | STATUS | PAYLOAD | CRC(SOF..PAYLOAD).
-     * Total bytes the host must clock = 1 + 1 + reply_payload_len + 2. */
+     * Total bytes the host must clock = 1 + 1 + reply_payload_len + 2.
+     * Read with the re-read schedule above: a too-early read is a
+     * harmless miss, not a failure. */
     uint8_t      reply[GD32G553_MAX_SPI_FRAME_BYTES];
     const size_t reply_len = 2u + reply_payload_len + 2u;
     if (reply_len > sizeof(reply)) return ALP_ERR_INVAL;
 
-    s = alp_spi_read(ctx->spi, reply, reply_len);
-    if (s != ALP_OK) return s;
+    bool reply_ok = false;
+    for (unsigned attempt = 0u; attempt < GD32G553_REPLY_READ_TRIES; ++attempt) {
+        s = alp_spi_read(ctx->spi, reply, reply_len);
+        if (s != ALP_OK) return s; /* transport-level error: fail loud */
 
-    if (reply[0] != GD32G553_BRIDGE_SOF) return ALP_ERR_IO;
-
-    const uint16_t expect_crc = crc16_ccitt_false(reply, 2u + reply_payload_len);
-    const uint16_t got_crc =
-        (uint16_t)reply[2u + reply_payload_len] | (uint16_t)reply[2u + reply_payload_len + 1u] << 8;
-    if (got_crc != expect_crc) return ALP_ERR_IO;
+        if (reply[0] == GD32G553_BRIDGE_SOF) {
+            const uint16_t expect_crc = crc16_ccitt_false(reply, 2u + reply_payload_len);
+            const uint16_t got_crc    = (uint16_t)reply[2u + reply_payload_len] |
+                                     (uint16_t)reply[2u + reply_payload_len + 1u] << 8;
+            if (got_crc == expect_crc) {
+                reply_ok = true;
+                break;
+            }
+        }
+        if (attempt + 1u < GD32G553_REPLY_READ_TRIES) {
+            alp_delay_us(gd32g553_reply_retry_us[attempt]);
+        }
+    }
+    if (!reply_ok) return ALP_ERR_IO;
 
     const alp_status_t firmware_status = status_from_wire(reply[1]);
     if (firmware_status != ALP_OK) return firmware_status;
