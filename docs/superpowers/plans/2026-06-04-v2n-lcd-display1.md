@@ -6,7 +6,7 @@
 
 **Architecture:** DRM/KMS on the BSP's built-in rz-du DU + DSI host; backported `panel-himax-hx8394` with a new `rocktech,rk055hdmipi4ma0` desc; a new `gpio-gd32-bridge` I2C gpiochip exposes the GD32-owned sideband (panel/touch reset) to Linux; backlight is a native GPT PWM on PA5; touch is the stock goodix driver plus a polled-mode fallback patch.
 
-**Tech Stack:** linux-renesas 6.1.141-cip43 (kernel worktree `/home/caner/projects/rzv2n/kbuild-cip43` in WSL `Ubuntu-22.04`), meta-alp-sdk bbappend patch/cfg/dtsi delivery, LVGL 9.1 (meta-oe, DRM backend), bench = V2N on COM24 (new DCS-capable silicon).
+**Tech Stack:** linux-renesas 6.1.141-cip43 (kernel worktree `~/projects/rzv2n/kbuild-cip43` in WSL `Ubuntu-22.04`), meta-alp-sdk bbappend patch/cfg/dtsi delivery, LVGL 9.1 (meta-oe, DRM backend), bench = V2N on COM24 (new DCS-capable silicon).
 
 **Spec:** `docs/superpowers/specs/2026-06-04-v2n-lcd-display1-design.md` (approved 2026-06-04).
 
@@ -88,7 +88,7 @@ Expected GET_VERSION: 6 bytes, `0x00` then `00 06 00`-ish (protocol 0.6.x), then
 - Modify (kernel tree): `drivers/gpu/drm/panel/Kconfig`, `drivers/gpu/drm/panel/Makefile`
 - Create (worktree): `meta-alp-sdk/recipes-kernel/linux/linux-renesas/0002-drm-panel-add-himax-hx8394-with-rocktech-rk055hdmipi.patch`
 
-All kernel-tree commands run via: `wsl -d Ubuntu-22.04 -e bash -lc 'cd /home/caner/projects/rzv2n/kbuild-cip43 && <cmd>'`. The kernel worktree is at SHA 6717c06c — keep it clean apart from our staged work (`git stash` anything unrelated first; check `git status`).
+All kernel-tree commands run via: `wsl -d Ubuntu-22.04 -e bash -lc 'cd ~/projects/rzv2n/kbuild-cip43 && <cmd>'`. The kernel worktree is at SHA 6717c06c — keep it clean apart from our staged work (`git stash` anything unrelated first; check `git status`).
 
 - [ ] **Step 1.1: Verify the two open flags.**
 
@@ -228,7 +228,7 @@ obj-$(CONFIG_DRM_PANEL_HIMAX_HX8394) += panel-himax-hx8394.o
 - [ ] **Step 1.5: Compile-test in the kernel tree** (failing-then-passing is the TDD beat here — the first build catches API drift):
 
 ```bash
-wsl -d Ubuntu-22.04 -e bash -lc 'cd /home/caner/projects/rzv2n/kbuild-cip43 && \
+wsl -d Ubuntu-22.04 -e bash -lc 'cd ~/projects/rzv2n/kbuild-cip43 && \
   ./scripts/config --enable CONFIG_BACKLIGHT_CLASS_DEVICE --enable CONFIG_BACKLIGHT_PWM --enable CONFIG_DRM_PANEL_HIMAX_HX8394 --enable CONFIG_TOUCHSCREEN_GOODIX --enable CONFIG_INPUT_TOUCHSCREEN --enable CONFIG_CRC_ITU_T && \
   make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig && \
   make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) drivers/gpu/drm/panel/panel-himax-hx8394.o'
@@ -507,7 +507,7 @@ obj-$(CONFIG_GPIO_GD32_BRIDGE) += gpio-gd32-bridge.o
 - [ ] **Step 2.3: Compile-test:**
 
 ```bash
-wsl -d Ubuntu-22.04 -e bash -lc 'cd /home/caner/projects/rzv2n/kbuild-cip43 && \
+wsl -d Ubuntu-22.04 -e bash -lc 'cd ~/projects/rzv2n/kbuild-cip43 && \
   ./scripts/config --enable CONFIG_GPIO_GD32_BRIDGE && \
   make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig && \
   make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) drivers/gpio/gpio-gd32-bridge.o'
@@ -562,7 +562,7 @@ static void goodix_ts_poll(struct input_dev *input)
 - [ ] **Step 3.2: Compile-test:**
 
 ```bash
-wsl -d Ubuntu-22.04 -e bash -lc 'cd /home/caner/projects/rzv2n/kbuild-cip43 && \
+wsl -d Ubuntu-22.04 -e bash -lc 'cd ~/projects/rzv2n/kbuild-cip43 && \
   make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) drivers/input/touchscreen/goodix.o'
 ```
 Expected: clean compile.
@@ -675,8 +675,8 @@ At file scope:
 - [ ] **Step 5.3: Build the dtb** (the dtsi files install into the kernel tree; replicate that manually for the compile gate):
 
 ```bash
-wsl -d Ubuntu-22.04 -e bash -lc 'cp "/mnt/e/GitHub/alp-sdk/.claude/worktrees/v2n-lcd-display1/meta-alp-sdk/recipes-kernel/linux/linux-renesas/"*.dts* /home/caner/projects/rzv2n/kbuild-cip43/arch/arm64/boot/dts/renesas/ && \
-  cd /home/caner/projects/rzv2n/kbuild-cip43 && \
+wsl -d Ubuntu-22.04 -e bash -lc 'cp "/mnt/e/GitHub/alp-sdk/.claude/worktrees/v2n-lcd-display1/meta-alp-sdk/recipes-kernel/linux/linux-renesas/"*.dts* ~/projects/rzv2n/kbuild-cip43/arch/arm64/boot/dts/renesas/ && \
+  cd ~/projects/rzv2n/kbuild-cip43 && \
   make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- renesas/e1m-v2n101-x-evk.dtb renesas/e1m-v2m101-x-evk.dtb'
 ```
 Expected: both dtbs build with no warnings about the new nodes.
@@ -751,7 +751,7 @@ Notes: `reg_3p3v` is the SoM dtsi fixed rail (always-on; matches the carrier's s
 
 - [ ] **Step 6.4: Boot-smoke the V2N dtb in QEMU? No** — there is no QEMU model for this SoC; the compile + OF-graph check is the pre-bench gate. Verify decompile looks right:
 ```bash
-wsl -d Ubuntu-22.04 -e bash -lc 'cd /home/caner/projects/rzv2n/kbuild-cip43 && dtc -I dtb -O dts arch/arm64/boot/dts/renesas/e1m-v2n101-x-evk.dtb 2>/dev/null | grep -A4 "panel@0\|gpio@70" | head -30'
+wsl -d Ubuntu-22.04 -e bash -lc 'cd ~/projects/rzv2n/kbuild-cip43 && dtc -I dtb -O dts arch/arm64/boot/dts/renesas/e1m-v2n101-x-evk.dtb 2>/dev/null | grep -A4 "panel@0\|gpio@70" | head -30'
 ```
 Expected: the panel and gpio@70 nodes appear with the properties above.
 

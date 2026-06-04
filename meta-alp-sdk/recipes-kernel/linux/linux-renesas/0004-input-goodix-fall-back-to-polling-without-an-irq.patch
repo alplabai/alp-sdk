@@ -1,5 +1,4 @@
 From: Alp Lab AB
-From: x <x@x.com>
 Date: Thu, 4 Jun 2026 15:47:10 +0200
 Subject: [PATCH] input: goodix - fall back to polling when no IRQ is wired
 MIME-Version: 1.0
