@@ -360,9 +360,10 @@ is empty.
 
 On V2N every E1M PWM channel maps to a TIMER0 / TIMER7 channel
 (see `metadata/chips/gd32g553.yaml` `pwm_routing:` for the table).
-Both timers are 16-bit advanced timers running at the 240 MHz core
-clock, so the achievable resolution is ~4.16 ns LSB and the longest
-single-counter period is ~273 us.  `CMD_PWM_GET` reads the live
+Both timers are 16-bit advanced timers running at the 216 MHz
+CK_TIMER (= CK_APB at DIV1 = the core clock; this part has no
+separate timer PLL), so the achievable resolution is ~4.63 ns LSB
+and the longest single-counter period is ~303 us.  `CMD_PWM_GET` reads the live
 timer registers (auto-reload + compare) and converts ticks back to
 nanoseconds -- it reports what the pad is actually generating, never
 an echo of the request.  Two consequences of the hardware truth:
@@ -404,10 +405,28 @@ a firmware-side ring buffer at the requested `sample_rate_hz`.
 Two streams supported concurrently -- stream 0 binds to GD32 DMA0,
 stream 1 binds to DMA1, so they can run truly in parallel against
 different channels at different rates.  Calling `STREAM_BEGIN` on a
-stream slot that's already active replies with `STATUS_BUSY`.
+stream slot that's already active replies with `STATUS_INVAL` (the
+slot must be `STREAM_END`ed first).
 Request payload is 7 bytes:
 `stream_id:u8 channel:u8 reserved:u8 sample_rate_hz:u32`;
 reply empty.
+
+The sample rate is a real hardware contract (fw `v0.2.4+`): a
+dedicated pacing timer per stream (update-event TRGO routed to the
+converter's routine trigger) starts exactly one conversion per
+period.  Accepted range is 1 Hz..100 kHz -- 0 answers
+`STATUS_INVAL`, above the cap answers `STATUS_OUT_OF_RANGE`.  The
+rate quantises to the pacer tick (1 us at 16 Hz and above, 100 us
+below 16 Hz), truncating: e.g. 300 Hz runs at 1 MHz/3333 ticks =
+300.03 Hz.  A rate whose period is shorter than the channel's
+configured sample-and-hold time degrades gracefully -- the silicon
+ignores trigger edges that land mid-conversion, so the stream runs
+at the channel's achievable rate instead of corrupting data.  Two
+constraints fall out of the silicon's converter-level trigger
+routing: only one stream may run per ADC converter at a time (a
+second `BEGIN` whose channel shares the first stream's converter
+answers `STATUS_INVAL`), and `STREAM_END` restores the converter's
+single-shot state for subsequent `ADC_READ` calls.
 
 `ADC_STREAM_READ` drains up to `max_samples` samples from the
 named stream's ring.  The wire envelope is fixed-length (host

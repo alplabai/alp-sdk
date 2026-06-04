@@ -172,7 +172,7 @@ static bool t_gpio(soak_stat_t *st)
 
 /* 0x20/0x21 PWM_SET + PWM_GET readback.  1 kHz / 25 % on PWM0
  * (TIMER0_MCH0, GD32 pad PA11 -> an unloaded E1M edge pin on the
- * bench).  The firmware rounds to its ~4.16 ns tick, so the readback
+ * bench).  The firmware rounds to its ~4.63 ns tick, so the readback
  * compare allows 1 % -- far above rounding, far below a real bug.
  * Duty returns to 0 afterwards so the pad idles low between cycles. */
 static bool t_pwm_set_get(soak_stat_t *st)
@@ -265,11 +265,19 @@ static bool t_adc_read(soak_stat_t *st)
     return true;
 }
 
-/* 0x33/0x34/0x35 ADC stream -- THE regression test for the
- * stream-DMA DMAMUX fix (dma_parameter_struct.request was never set,
- * so the channel triggered off a garbage request id and the ring
- * never filled).  1 kHz for ~50 ms must yield a full 32-sample read;
- * zero samples here means the DMA regressed. */
+/* 0x33/0x34/0x35 ADC stream -- THE regression test for the stream
+ * data path (v0.2.4 root causes: CTL1.DDM never set so the ADC
+ * stopped issuing DMA requests after one run; CTL1 programmed on a
+ * running converter; pacing timer absent so `sample_rate_hz` was
+ * silently ignored).  Two reads make the assertion HONEST:
+ *
+ *   read 1 after 50 ms @ 1 kHz: ~50 samples accumulated, so a
+ *     paced stream MUST return exactly the 32-sample cap.
+ *   read 2 immediately after: only the ~18 paced leftovers (plus a
+ *     few ms of sleep-overshoot + link latency) remain.  A
+ *     free-running stream that ignores the rate would have lapped
+ *     the ring and answer 32 again; a dead stream answers 0.
+ *     1..30 proves the pacing timer is real.                    */
 static bool t_adc_stream(soak_stat_t *st)
 {
     alp_status_t s = gd32g553_adc_stream_begin(&ctx, 0u, 0u, 1000u);
@@ -282,8 +290,11 @@ static bool t_adc_stream(soak_stat_t *st)
     k_msleep(50); /* ~50 samples into the 1024-deep ring at 1 kHz */
 
     uint8_t  got             = 0;
+    uint8_t  got2            = 0;
     uint16_t mv[32]          = { 0 };
     s                        = gd32g553_adc_stream_read(&ctx, 0u, 32u, &got, mv);
+    const alp_status_t s_r2  = gd32g553_adc_stream_read(&ctx, 0u, 32u, &got2, mv);
+
     const alp_status_t s_end = gd32g553_adc_stream_end(&ctx, 0u);
 
     if (s != ALP_OK) {
@@ -291,9 +302,19 @@ static bool t_adc_stream(soak_stat_t *st)
         SOAK_FAIL(st, "read status=%d", (int)s);
         return false;
     }
-    if (got == 0u) {
-        SOAK_FAIL(st,
-                  "0 samples after 50 ms @1 kHz -- stream DMA not filling (DMAMUX request id?)");
+    if (got != 32u) {
+        SOAK_FAIL(st, "read1 got=%u (want 32: ~50 paced samples after 50 ms @1 kHz)",
+                  (unsigned)got);
+        return false;
+    }
+    if (s_r2 != ALP_OK) {
+        st->last_status = (int)s_r2;
+        SOAK_FAIL(st, "read2 status=%d", (int)s_r2);
+        return false;
+    }
+    if (got2 == 0u || got2 > 30u) {
+        SOAK_FAIL(st, "read2 got=%u (want 1..30: paced leftovers; 32 = rate ignored/free-run)",
+                  (unsigned)got2);
         return false;
     }
     if (s_end != ALP_OK) {

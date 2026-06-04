@@ -212,7 +212,7 @@ static bool trng_ready   = false;
 
 /* Coarse timeout for the PLL stable + TRNG DRDY polls.  Roughly
  * 100k iterations of `trng_flag_get` -- about half a millisecond
- * at the GD32G553's 240 MHz core clock when the TRNG is healthy
+ * at the GD32G553's 216 MHz core clock when the TRNG is healthy
  * (DRDY trips in dozens of cycles, so the timeout is the abort
  * latch, not the typical-case bound). */
 #define TRNG_INIT_TIMEOUT 100000u
@@ -333,7 +333,7 @@ static const tmu_dispatch_t tmu_dispatch[] = {
 #define TMU_DISPATCH_COUNT (sizeof(tmu_dispatch) / sizeof(tmu_dispatch[0]))
 
 /* Timeout for the TMU END flag poll.  TMU operations complete in
- * tens of cycles at 240 MHz; the bound is the abort latch for a
+ * tens of cycles at 216 MHz; the bound is the abort latch for a
  * misconfigured op rather than the typical-case wait. */
 #define TMU_COMPUTE_TIMEOUT 65535u
 
@@ -403,8 +403,8 @@ static const gd32_adc_ch_t adc_channels_map[] = {
  * the most conservative setting in the vendor's range -- gives the
  * external source plenty of settling time for a high-impedance
  * input divider, at the cost of slower conversion (~1 us per
- * sample at ADC_CLK_SYNC_HCLK_DIV6 with HCLK=240 MHz: 240 ADCCK
- * sample + 12.5 ADCCK conversion ~= 6.3 us). */
+ * sample at ADC_CLK_SYNC_HCLK_DIV6 with HCLK=216 MHz: 240 ADCCK
+ * sample + 12.5 ADCCK conversion ~= 7.0 us). */
 #define ADC_DEFAULT_SAMPLE_CYCLES 240u
 
 /* Per-channel sticky sample-cycle override applied by
@@ -545,16 +545,21 @@ static const gd32_pwm_ch_t pwm_channels[] = {
 };
 #define PWM_CHANNEL_COUNT (sizeof(pwm_channels) / sizeof(pwm_channels[0]))
 
-/* TIMER core clock.  GD32G553's stock SystemInit() clocks the
- * advanced timers from the APB-derived TIMER clock; on the chip's
- * default 240 MHz config that's 240 MHz at the timer counter input.
- * 1 ns LSB resolution would need a 240x faster counter; we instead
- * round period_ns + duty_ns to the nearest 1 us cycle by fixing the
- * prescaler at (240 - 1) so the counter ticks at 1 MHz.  ARR is
- * then `period_us - 1`, fitting in 16 bits for periods up to ~65 ms
- * which covers every realistic control PWM frequency (>=15 Hz). */
-#define PWM_TIMER_CLK_HZ 240000000u
-#define PWM_TIMER_PRESCALER (240u - 1u) /* 240 MHz -> 1 MHz tick    */
+/* TIMER core clock.  This SoM's SystemInit override runs SYSCLK at
+ * 216 MHz (216M-PLL-IRC8M -- see vendors/gd32_firmware_library/
+ * overrides/system_gd32g5x3.c) with APB1/APB2 at DIV1, so CK_TIMER =
+ * 216 MHz at every timer counter input.  GigaDevice's own PWM
+ * example states the same base ("TIMER0 frequency is fixed to
+ * 216MHz").  NOTE 2026-06-04: this was wrongly coded as 240 MHz
+ * through v0.2.3 -- every PWM period was ~11 % long (a commanded
+ * 1 kHz physically ran ~900 Hz).  1 ns LSB resolution would need a
+ * faster counter; we instead round period_ns + duty_ns to the
+ * nearest 1 us cycle by fixing the prescaler at (216 - 1) so the
+ * counter ticks at exactly 1 MHz.  ARR is then `period_us - 1`,
+ * fitting in 16 bits for periods up to ~65 ms which covers every
+ * realistic control PWM frequency (>=15 Hz). */
+#define PWM_TIMER_CLK_HZ 216000000u
+#define PWM_TIMER_PRESCALER (216u - 1u) /* 216 MHz -> 1 MHz tick    */
 #define PWM_TIMER_TICK_NS 1000u         /* 1 us per timer tick      */
 #define PWM_TIMER_ARR_MAX 0xFFFFu       /* 16-bit auto-reload limit */
 
@@ -731,7 +736,7 @@ void bridge_hw_init(void)
     /* Free-running counter: enable the Cortex-M33 DWT cycle counter.
      * TRCENA in CoreDebug->DEMCR gates the entire DWT/ITM trace block;
      * setting CYCCNTENA in DWT->CTRL starts the 32-bit free-running
-     * counter at the core clock rate (240 MHz on the GD32G553 in the
+     * counter at the core clock rate (216 MHz on the GD32G553 in the
      * stock clock config -> ~17.9 s wrap, ~4.16 ns LSB).  The counter
      * is the source for bridge_hw_counter_read(). */
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
@@ -1066,11 +1071,25 @@ int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio, uint16_t
 #define BRIDGE_ADC_STREAM_RING_SAMPLES 1024u
 #define BRIDGE_ADC_STREAM_COUNT 2u
 
+/* Honest sample-rate contract: the requested rate is realised by a
+ * dedicated pacing timer (below), not ignored.  100 kHz cap = the
+ * ring's documented design point (fills in ~10 ms); 0 is INVAL at
+ * the call site, anything above the cap is RANGE. */
+#define BRIDGE_ADC_STREAM_RATE_MAX_HZ 100000u
+
+/* Pacing-timer clock.  TIMER5/6 are APB1 basic timers; with APB1 at
+ * DIV1 they tick at the full 216 MHz core clock (same base the PWM
+ * timers use -- see PWM_TIMER_CLK_HZ).  The silicon validation
+ * cross-checks this constant: a wrong base shows up directly as a
+ * got-count mismatch over a timed dwell. */
+#define BRIDGE_ADC_PACE_CLK_HZ 216000000u
+
 typedef struct {
     bool     in_use;
     uint8_t  channel;     /* ADC channel index this stream watches */
     uint32_t dma_periph;  /* DMA0 or DMA1                          */
     uint8_t  dma_channel; /* dma_channel_enum value                */
+    uint32_t pace_timer;  /* TIMER5 (stream 0) or TIMER6 (stream 1) */
     uint16_t ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
     uint16_t read_idx; /* host's consumer cursor                */
     uint8_t  dsp_chain_id;
@@ -1078,6 +1097,15 @@ typedef struct {
 } adc_stream_state_t;
 
 static adc_stream_state_t adc_streams[BRIDGE_ADC_STREAM_COUNT];
+
+/* TRIGSEL route target for an ADC peripheral's routine-group trigger. */
+static trigsel_periph_enum adc_stream_routrg(uint32_t adc_periph)
+{
+    if (adc_periph == ADC1) return TRIGSEL_OUTPUT_ADC1_ROUTRG;
+    if (adc_periph == ADC2) return TRIGSEL_OUTPUT_ADC2_ROUTRG;
+    if (adc_periph == ADC3) return TRIGSEL_OUTPUT_ADC3_ROUTRG;
+    return TRIGSEL_OUTPUT_ADC0_ROUTRG;
+}
 
 /* DMA write-cursor read.  The DMA channel counter counts DOWN from
  * the configured transfer length; converting to a write index uses
@@ -1096,11 +1124,23 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
     if (stream_id >= BRIDGE_ADC_STREAM_COUNT) return BRIDGE_HW_ERR_RANGE;
     if (channel >= ADC_CHANNEL_MAP_COUNT) return BRIDGE_HW_ERR_RANGE;
     if (sample_rate_hz == 0u) return BRIDGE_HW_ERR_INVAL;
+    if (sample_rate_hz > BRIDGE_ADC_STREAM_RATE_MAX_HZ) return BRIDGE_HW_ERR_RANGE;
 
     adc_stream_state_t *s = &adc_streams[stream_id];
     if (s->in_use) return BRIDGE_HW_ERR_INVAL; /* stream already running */
 
     const gd32_adc_ch_t *ch = &adc_channels_map[channel];
+
+    /* One stream per ADC converter: both streams sharing a peripheral
+     * would fight over routine rank 0 AND the TRIGSEL routine-trigger
+     * route -- the second begin would silently re-pace and re-point
+     * the first.  Refuse honestly instead. */
+    for (uint8_t i = 0u; i < BRIDGE_ADC_STREAM_COUNT; ++i) {
+        if (i != stream_id && adc_streams[i].in_use &&
+            adc_channels_map[adc_streams[i].channel].periph == ch->periph) {
+            return BRIDGE_HW_ERR_INVAL;
+        }
+    }
 
     /* Stream 0 -> DMA0, stream 1 -> DMA1.  Channel 0 of each DMA
      * controller is the first free slot in the GD32G5x3 dma_channel
@@ -1108,7 +1148,14 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
      * are not a concern. */
     s->dma_periph  = (stream_id == 0u) ? DMA0 : DMA1;
     s->dma_channel = (uint8_t)DMA_CH0;
+    s->pace_timer  = (stream_id == 0u) ? TIMER5 : TIMER6;
 
+    /* The DMAMUX request routing dma_init() writes below lands on a
+     * clock-gated register unless the mux clock is up.  The SPI
+     * transport happens to enable it first at boot today -- own the
+     * dependency here instead of relying on bring-up order (silicon
+     * 2026-06-04 audit: an I2C-only build would stream zero samples). */
+    rcu_periph_clock_enable(RCU_DMAMUX);
     rcu_periph_clock_enable((stream_id == 0u) ? RCU_DMA0 : RCU_DMA1);
     dma_deinit(s->dma_periph, (dma_channel_enum)s->dma_channel);
 
@@ -1138,29 +1185,71 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
      * peripheral-to-ring pipeline with no firmware in the hot path. */
     dma_circulation_enable(s->dma_periph, (dma_channel_enum)s->dma_channel);
 
-    /* Set up the ADC routine slot for this channel + tell the ADC to
-     * issue a DMA request on every conversion completion.  Continuous
-     * mode means the ADC self-triggers after each conversion; the
-     * resulting sample rate is HCLK / 6 / sample_cycles -- the
-     * `sample_rate_hz` argument is currently an aspirational hint that
-     * a future commit will translate to a sample-cycle override. */
-    (void)sample_rate_hz; /* aspirational; see comment above */
+    /* Reconfigure the converter for streaming with ADCON CLEAR, in
+     * the vendor's proven order (Examples/ADC/ADC0_routine_channel_
+     * with_DMA): mode + trigger + DMA controls all land BEFORE the
+     * enable.  Programming CTL1 on an already-running converter is
+     * exactly how the v0.2.3 stream silently produced zero samples.
+     * Calibration is NOT redone here: an ADCON toggle preserves the
+     * boot calibration from adc_periph_init, and recalibrating would
+     * be an unbounded vendor spin inside the CS-EXTI handler. */
+    adc_disable(ch->periph);
     adc_routine_channel_config(ch->periph, 0u, ch->channel, adc_sample_cycles_cache[channel]);
-    adc_special_function_config(ch->periph, ADC_CONTINUOUS_MODE, ENABLE);
+
+    /* Each pacing-timer TRGO edge starts exactly ONE routine
+     * conversion -- the honest realisation of `sample_rate_hz`.  No
+     * continuous mode: the silicon ignores trigger edges that land
+     * mid-conversion, so an over-asked rate degrades to the channel's
+     * achievable rate instead of corrupting the ring. */
+    adc_external_trigger_config(ch->periph, ADC_ROUTINE_CHANNEL, EXTERNAL_TRIGGER_RISING);
+
+    /* THE v0.2.3 got==0 root cause: CTL1.DMA alone stops issuing
+     * requests after one DMA run.  CTL1.DDM (request-after-last) keeps
+     * the request line live so the circular channel refills forever --
+     * the vendor reference enables BOTH, in this order. */
+    adc_dma_request_after_last_enable(ch->periph);
+    adc_dma_mode_enable(ch->periph);
 
     /* Clear any End-Of-Conversion left by a prior single-shot
-     * bridge_hw_adc_read on this peripheral BEFORE the DMA request
-     * line is enabled -- a stale EOC otherwise fires one spurious DMA
+     * bridge_hw_adc_read on this peripheral BEFORE the converter
+     * re-enables -- a stale EOC otherwise fires one spurious DMA
      * beat the moment the request unmasks, depositing a phantom
      * zeroth sample and desynchronising the ring cursor. */
     adc_flag_clear(ch->periph, ADC_FLAG_EOC);
-    adc_dma_mode_enable(ch->periph);
+    adc_enable(ch->periph);
+    for (volatile uint32_t stab = 0u; stab < 4096u; ++stab) {
+        /* tSTAB dwell after ADCON, same bound adc_periph_init uses */
+    }
 
     dma_channel_enable(s->dma_periph, (dma_channel_enum)s->dma_channel);
 
-    /* Software-trigger the first conversion.  In continuous mode the
-     * ADC will re-trigger itself after this. */
-    adc_software_trigger_enable(ch->periph, ADC_ROUTINE_CHANNEL);
+    /* Route the pacing timer's update-event TRGO0 to this converter's
+     * routine trigger, then run the timer at the requested rate.  Two
+     * prescaler regimes keep the 16-bit period in range: a 1 MHz tick
+     * covers 16 Hz..100 kHz exactly where it matters; below 16 Hz a
+     * 10 kHz tick stretches to 1 Hz.  Division truncates -- worst-case
+     * quantisation is one tick (documented in the protocol spec). */
+    rcu_periph_clock_enable(RCU_TRIGSEL);
+    trigsel_init(adc_stream_routrg(ch->periph),
+                 (stream_id == 0u) ? TRIGSEL_INPUT_TIMER5_TRGO0 : TRIGSEL_INPUT_TIMER6_TRGO0);
+
+    rcu_periph_clock_enable((stream_id == 0u) ? RCU_TIMER5 : RCU_TIMER6);
+    timer_deinit(s->pace_timer);
+    uint32_t psc, period_ticks;
+    if (sample_rate_hz >= 16u) {
+        psc          = (BRIDGE_ADC_PACE_CLK_HZ / 1000000u) - 1u; /* 1 MHz tick  */
+        period_ticks = 1000000u / sample_rate_hz;                /* 10..62500   */
+    } else {
+        psc          = (BRIDGE_ADC_PACE_CLK_HZ / 10000u) - 1u; /* 10 kHz tick */
+        period_ticks = 10000u / sample_rate_hz;                /* 667..10000  */
+    }
+    timer_parameter_struct tp;
+    timer_struct_para_init(&tp);
+    tp.prescaler = (uint16_t)psc;
+    tp.period    = period_ticks - 1u;
+    timer_init(s->pace_timer, &tp);
+    timer_master_output0_trigger_source_select(s->pace_timer, TIMER_TRI_OUT0_SRC_UPDATE);
+    timer_enable(s->pace_timer);
 
     s->in_use       = true;
     s->channel      = channel;
@@ -1212,25 +1301,34 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
     adc_stream_state_t *s = &adc_streams[stream_id];
     if (!s->in_use) return BRIDGE_HW_OK; /* idempotent */
 
-    /* Stop the ADC's self-trigger first, then disarm the DMA -- the
-     * other order can leave one in-flight transfer landing after the
+    /* Stop the trigger SOURCE first (pacing timer), then disarm the
+     * ADC's DMA request generation, then the DMA channel -- the other
+     * order can leave one in-flight transfer landing after the
      * channel is disabled. */
     const gd32_adc_ch_t *ch = &adc_channels_map[s->channel];
-    adc_special_function_config(ch->periph, ADC_CONTINUOUS_MODE, DISABLE);
+    timer_disable(s->pace_timer);
+    timer_deinit(s->pace_timer);
+    adc_dma_request_after_last_disable(ch->periph);
     adc_dma_mode_disable(ch->periph);
     dma_channel_disable(s->dma_periph, (dma_channel_enum)s->dma_channel);
 
-    /* Continuous mode always has a conversion IN FLIGHT when CONT
-     * drops.  Dwell past one conversion time (~6.3 us healthy; the
-     * spin below is comfortably longer) so it lands, then clear EOC
-     * unconditionally -- whether the last EOC went to the DMA or is
-     * still latched, the converter must idle CLEAN.  A leftover
+    /* A trigger edge may have started a conversion just before the
+     * timer stopped.  Dwell past one conversion time (~6.3 us healthy;
+     * the spin below is comfortably longer) so it lands, then clear
+     * EOC unconditionally -- whether the last EOC went to the DMA or
+     * is still latched, the converter must idle CLEAN.  A leftover
      * conversion/EOC straddling into the next single-shot read on the
      * same peripheral is what started the 2026-06-04 link-rot chain. */
     for (volatile uint32_t settle = 0u; settle < 8192u; ++settle) {
         /* fixed dwell, ~tens of microseconds */
     }
-    adc_flag_clear(ch->periph, ADC_FLAG_EOC);
+
+    /* Full single-shot restore: deinit + reconfigure + recalibrate.
+     * This puts EXTERNAL_TRIGGER_DISABLE, routine length 1 and the
+     * boot calibration back so a following bridge_hw_adc_read sees
+     * the exact converter state adc_periph_init promised it -- the
+     * same self-heal shape the read path's timeout branch uses. */
+    adc_periph_init(ch->periph);
 
     s->in_use    = false;
     s->dsp_bound = false;
@@ -1489,7 +1587,7 @@ int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks)
     *ticks = 0u;
     /* Single free-running counter exposed today; future revisions can
      * carve out additional ids for derived (slower) tick bases.  The
-     * DWT counter ticks at the core clock (240 MHz on GD32G553),
+     * DWT counter ticks at the core clock (216 MHz on GD32G553),
      * wraps every ~17.9 s, and is monotonically non-decreasing across
      * reads -- the host can compute deltas without watching for
      * mid-read consistency since the register is atomic. */
@@ -1678,8 +1776,8 @@ int bridge_hw_pwm_capture_read(uint8_t channel, uint32_t *period_ns, uint32_t *p
     if (!s->have_period) return BRIDGE_HW_ERR_NOTIMPL; /* ring empty */
 
     /* Convert ticks back to nanoseconds.  The PWM timers run at the
-     * 1 us tick configured by pwm_timer_init (prescaler 240-1 against
-     * the 240 MHz timer clock); the bridge_hw.h doc-comment's
+     * 1 us tick configured by pwm_timer_init (prescaler 216-1 against
+     * the 216 MHz timer clock); the bridge_hw.h doc-comment's
      * "~4.16 ns LSB" refers to the unscaled core clock used by the
      * counter peripheral, not the prescaled PWM tick used here. */
     *period_ns      = s->period_ticks * PWM_TIMER_TICK_NS;

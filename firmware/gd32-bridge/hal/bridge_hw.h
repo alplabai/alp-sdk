@@ -119,11 +119,18 @@ int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio,
  * concurrently (`stream_id` selects which one) -- the firmware
  * binds stream 0 to DMA0 and stream 1 to DMA1 per the chip's two-DMA
  * controller setup.  STREAM_BEGIN starts the firmware's ring buffer
- * at the requested sample_rate_hz; STREAM_READ drains up to
- * `max_samples` samples (firmware caps at
- * GD32_BRIDGE_ADC_STREAM_READ_MAX); STREAM_END stops the DMA and
- * flushes the ring.  Buffer overruns are returned as STATUS_BUSY on
- * subsequent STREAM_READ. */
+ * at the requested sample_rate_hz -- realised by a dedicated pacing
+ * timer (stream 0: TIMER5, stream 1: TIMER6) whose update-event TRGO
+ * triggers one conversion per period via TRIGSEL, so the rate is a
+ * REAL hardware contract: 1 Hz..100 kHz, quantised to the timer tick
+ * (1 us at >=16 Hz, 100 us below), BRIDGE_HW_ERR_RANGE above the
+ * cap.  One stream per ADC converter -- a second BEGIN on a channel
+ * sharing the first stream's ADC answers BRIDGE_HW_ERR_INVAL.
+ * STREAM_READ drains up to `max_samples` samples (firmware caps at
+ * GD32_BRIDGE_ADC_STREAM_READ_MAX); STREAM_END stops the pacing
+ * timer + DMA and restores the converter's single-shot state.
+ * Buffer overruns are returned as STATUS_BUSY on subsequent
+ * STREAM_READ. */
 int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel,
                                uint32_t sample_rate_hz);
 int bridge_hw_adc_stream_read(uint8_t stream_id, uint8_t max_samples,
@@ -227,7 +234,7 @@ int bridge_hw_pwm_capture_begin(uint8_t channel, uint8_t edge);
 
 /* Read one (period_ns, pulse_width_ns) tuple from the @p channel's
  * capture ring.  Both outputs are in nanoseconds against the GD32
- * core clock (~4.16 ns LSB at 240 MHz).  BRIDGE_HW_ERR_NOTIMPL if the
+ * core clock (~4.63 ns LSB at 216 MHz).  BRIDGE_HW_ERR_NOTIMPL if the
  * ring is empty (host should poll); BRIDGE_HW_ERR_INVAL if the
  * channel is not currently in capture mode. */
 int bridge_hw_pwm_capture_read(uint8_t channel, uint32_t *period_ns, uint32_t *pulse_width_ns);
