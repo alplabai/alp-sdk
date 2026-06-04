@@ -38,7 +38,8 @@
 - NXP init table (translate from BSD-3 `fsl_hx8394.c`; byte-identical in Zephyr — do NOT copy Apache code): `0xB9 FF 83 94 (SETEXTC, FIRST); 0xBA 61 03 68 6B B2 C0 (SETMIPI, SECOND); 0x36 02; 0xB1 48 12 72 09 32 54 71 71 57 47; 0xB2 00 80 64 0C 0D 2F; 0xB4 73 74 73 74 73 74 01 0C 86 75 00 3F 73 74 73 74 73 74 01 0C 86; 0xD3 …(33B); 0xD5 …(44B); 0xD6 …(44B); 0xB6 92 92; 0xE0 …(58B); 0xC0 1F 31; 0xCC 03; 0xD4 02; 0xBD 02; 0xD8 FF×12; 0xBD 00; 0xBD 01; 0xB1 00; 0xBD 00; 0xBF 40 81 50 00 1A FC 01; 0xC6 ED; 0x35 00` (full byte runs in Task 2 code). Then exit_sleep (120 ms) + display_on — the mainline driver's enable() already does that. SETEXTC must be first (unlocks manufacturer registers); SETMIPI must be second (lane config); without SETEXTC the entire init is silently ignored.
 - Verify flag: confirm `MIPI_DSI_FMT_RGB565` exists in 6.1 `drm_mipi_dsi.h` and which `MIPI_DSI_MODE_VIDEO*` flags `rzg2l_mipi_dsi.c` accepts (SETEXTC+SETMIPI ordering is resolved — verified against NXP HX8394_Init).
 
-**Touch** (6.1 `goodix.c`): driver present, `CONFIG_TOUCHSCREEN_GOODIX` not set. IRQ hard-required at `goodix_configure_dev()`:1257-1264 via `goodix_request_irq()`:521-526. `input_setup_polling`/`input_set_poll_interval` exist (`input.h:389/391`). Poll callback = `goodix_process_events(ts)` + `goodix_i2c_write_u8(ts->client, GOODIX_READ_COOR_ADDR, 0)`. **GT911 I2C address straps off INT at reset**: INT high→0x14, low→0x5D; INT ends at GD32 PA7 (pull-up) ⇒ expect **0x14** likely; bench `i2cdetect` decides; never drive PA7 from the bridge (sticky output would fight GT911's INT output).
+**Touch** (6.1 `goodix.c`): driver present, `CONFIG_TOUCHSCREEN_GOODIX` not set. IRQ hard-required at `goodix_configure_dev()`:1257-1264 via `goodix_request_irq()`:521-526. `input_setup_polling`/`input_set_poll_interval` exist (`input.h:389/391`). Poll callback = `goodix_process_events(ts)` + `goodix_i2c_write_u8(ts->client, GOODIX_READ_COOR_ADDR, 0)`.
+**SCOPE CHANGE 2026-06-04 (maintainer):** Display-1 touch bus = `DSI1_CSI_I2C` = **E1M_X_I2C3** (connector A23/A24), which on V2N routes to **GD32 PC8/PC9** — the bridge's planned secondary I2C slave transport (`gd32-io-mcu-map.tsv:57-58`), NOT a Renesas RIIC. The GT911 has no bus master on V2N today. Touch ships in a FOLLOW-UP gated on the GD32 workstream (bridge I2C-master proxy on GD32 I2C2 + a Linux `i2c-gd32-bridge` adapter). Consequences inside this plan: Task 3's polled patch is retained DORMANT (INT also ends at GD32 PA7, so polling stays required on any future path; GT911 address strap off INT also resolves then); Task 4 ships no touch Kconfig enables; Task 6 ships no GT911/RIIC2 nodes; bench gates G3/G5 are deferred to the follow-up.
 
 **Yocto:** No live bitbake tree — kernel iteration happens in `kbuild-cip43` (`make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image dtbs`, host gcc 11.4). meta-alp-sdk delivery: `linux-renesas_%.bbappend` `SRC_URI:append` (patches + .cfg) + `do_configure:prepend` (dtsi install list) + per-machine cfg appends (`:e1m-v2n101` / `:e1m-v2m101`). House patch style: starts `From: Alp Lab AB`, no personal emails. LVGL 9.1 packaged in meta-oe (`lvgl_9.1.0.bb`, PACKAGECONFIG drm ⇒ `LV_USE_LINUX_DRM=1`, `LV_USE_EVDEV=1`). `libdrm-tests` comes free under `DISTRO=rz-vlp`; weston = `IMAGE_INSTALL:append " weston weston-init"` (wayland/opengl already in distro features). alp-* example recipes use git+AUTOREV + `S=${WORKDIR}/git/examples/<cat>/<name>` + `inherit cmake`.
 
@@ -587,9 +588,10 @@ CONFIG_BACKLIGHT_CLASS_DEVICE=y
 CONFIG_BACKLIGHT_PWM=y
 CONFIG_GPIO_GD32_BRIDGE=y
 CONFIG_CRC_ITU_T=y
-CONFIG_INPUT_TOUCHSCREEN=y
-CONFIG_TOUCHSCREEN_GOODIX=y
 ```
+(No `TOUCHSCREEN_GOODIX` enables — the GT911 has no Linux-visible bus on
+V2N until the GD32 I2C-proxy lands; see the SCOPE CHANGE note. The goodix
+polled patch from Task 3 ships dormant.)
 
 - [ ] **Step 4.2: Wire into the bbappend.** In `linux-renesas_%.bbappend`:
 - Add to the existing `SRC_URI:append` block (lines ~46-53), after the 0001 patch line:
@@ -734,48 +736,26 @@ Expected: both dtbs build with no warnings about the new nodes.
 ```
 Notes: `reg_3p3v` is the SoM dtsi fixed rail (always-on; matches the carrier's strap-selected +L1_VIO at the 3V3 position — if the bench strap is 1V8, switch `iovcc-supply` to `&reg_1p8v`). `GPIO_ACTIVE_LOW` because the carrier net is `LCD1_RST_L` and the hx8394 driver asserts reset by driving the GPIO logical-active.
 
-- [ ] **Step 6.2: Enable RIIC2 + GT911.** Add to the carrier `&pinctrl` block:
+- [ ] **Step 6.2: Document the touch deferral.** Do NOT add any RIIC2/GT911 nodes (SCOPE CHANGE 2026-06-04: Display-1 touch = E1M_X_I2C3 → GD32 PC8/PC9; no Linux master exists until the GD32 I2C-proxy follow-up). Instead, extend the display comment block from Step 6.1 with:
 
-```dts
-	i2c2_pins: i2c2 {
-		pinmux = <RZV2N_PORT_PINMUX(3, 4, 1)>, /* RIIC2 SDA2 -> E1M I2C2 (DSI/CSI ctrl bank 0) */
-			 <RZV2N_PORT_PINMUX(3, 5, 1)>; /* RIIC2 SCL2 */
-	};
 ```
-and at file scope:
-```dts
-/* E1M I2C2 = display/camera control bank 0 -> Display-1 touch (GT911).
- * GT911 strap: I2C address depends on the INT level at reset release;
- * INT terminates at GD32 PA7 (pull-up by default) so the panel may
- * enumerate at 0x14 instead of 0x5d -- adjust reg after the bench
- * i2cdetect (see the port plan, Task 10). No interrupts property:
- * INT is not Linux-visible; the goodix driver polls (~60 Hz).
- */
-&i2c2 {
-	pinctrl-0 = <&i2c2_pins>;
-	pinctrl-names = "default";
-	clock-frequency = <400000>;
-	status = "okay";
-
-	touchscreen@5d {
-		compatible = "goodix,gt911";
-		reg = <0x5d>;
-		reset-gpios = <&gd32_gpio 3 GPIO_ACTIVE_LOW>; /* CTP1_RST = IO11 -> GD32 PB0 */
-		touchscreen-size-x = <720>;
-		touchscreen-size-y = <1280>;
-	};
-};
+ * Touch (GT911 on the panel FFC) is NOT wired here: its bus
+ * (DSI1_CSI_I2C = E1M I2C3) terminates on the GD32 IO-MCU
+ * (PC8/PC9, the bridge's secondary I2C transport), so Linux has
+ * no path to it until the bridge gains an I2C-master proxy.
+ * Tracked as a follow-up; the goodix polled-mode patch already
+ * ships dormant for that stack.
 ```
 
 - [ ] **Step 6.3: Build both dtbs** (same command as Step 5.3). Expected: clean; specifically no `Warning (graph_endpoint)` on the dsi0/panel OF-graph.
 
 - [ ] **Step 6.4: Boot-smoke the V2N dtb in QEMU? No** — there is no QEMU model for this SoC; the compile + OF-graph check is the pre-bench gate. Verify decompile looks right:
 ```bash
-wsl -d Ubuntu-22.04 -e bash -lc 'cd /home/caner/projects/rzv2n/kbuild-cip43 && dtc -I dtb -O dts arch/arm64/boot/dts/renesas/e1m-v2n101-x-evk.dtb 2>/dev/null | grep -A4 "panel@0\|touchscreen@5d\|gpio@70" | head -40'
+wsl -d Ubuntu-22.04 -e bash -lc 'cd /home/caner/projects/rzv2n/kbuild-cip43 && dtc -I dtb -O dts arch/arm64/boot/dts/renesas/e1m-v2n101-x-evk.dtb 2>/dev/null | grep -A4 "panel@0\|gpio@70" | head -30'
 ```
-Expected: the three nodes appear with the properties above.
+Expected: the panel and gpio@70 nodes appear with the properties above.
 
-- [ ] **Step 6.5: Commit:** stage `e1m-x-evk.dtsi`, then `git commit -q -m "feat(dts): X-EVK Display 1 -- dsi0/du + rk055 panel + RIIC2 GT911 (polled)"`
+- [ ] **Step 6.5: Commit:** stage `e1m-x-evk.dtsi`, then `git commit -q -m "feat(dts): X-EVK Display 1 -- dsi0/du enable + rk055hdmipi4ma0 panel (touch deferred to GD32 I2C-proxy)"`
 
 ---
 
@@ -875,9 +855,15 @@ int main(void)
 	lv_display_t *disp = lv_linux_drm_create();
 	lv_linux_drm_set_file(disp, DRM_CARD, -1);
 
-	/* Touch: evdev pointer (GT911, polled by the kernel driver). */
-	lv_indev_t *touch = lv_evdev_create(LV_INDEV_TYPE_POINTER, TOUCH_EVDEV);
-	lv_indev_set_display(touch, disp);
+	/* Touch: evdev pointer. On current V2N the GT911's bus terminates
+	 * at the GD32 IO-MCU (no Linux master yet -- the I2C-proxy
+	 * follow-up adds it), so the device node may not exist; the demo
+	 * stays usable display-only. */
+	if (access(TOUCH_EVDEV, R_OK) == 0) {
+		lv_indev_t *touch = lv_evdev_create(LV_INDEV_TYPE_POINTER,
+						    TOUCH_EVDEV);
+		lv_indev_set_display(touch, disp);
+	}
 
 	make_dashboard();
 
@@ -996,11 +982,11 @@ Pre-requisites: Task 0 done (G0 = bridge I2C transport PASS), Tasks 1–6 built.
 
 - [ ] **G1 — boot + probe:** dmesg shows `rzg2l-du`/`rzg2l-mipi-dsi` bind, `GD32 bridge protocol 0.6.x` from gpio-gd32-bridge, panel probe. **The first DCS write of the init sequence is the silicon DCS gate** — success ⇒ new-rev silicon confirmed working; failure with DSI transfer errors ⇒ record + check chip marking (#AC0?).
 - [ ] **G2 — pixels:** fbcon shows on the panel (CONFIG_DRM_FBDEV_EMULATION=y) and/or `modetest -M rzg2l-du -s <conn>@<crtc>:720x1280` pattern fills. Record connector/crtc ids from `modetest -M rzg2l-du`.
-- [ ] **G3 — touch enumerate:** `i2cdetect -y <riic2-busnum>` (find busnum: `ls /sys/bus/i2c/devices/ | grep 14400c00` style or `i2cdetect -l`). Expect GT911 ACK at **0x5d or 0x14** (strap via GD32 PA7 pull-up makes 0x14 likely). If 0x14: change the carrier dtsi node to `touchscreen@14` / `reg = <0x14>`, rebuild dtb, redeploy, commit the correction. This also empirically settles the spec's O1 (touch on RIIC2 at all) — if NO ACK on RIIC2: probe i2c3-capable buses, then escalate to the carrier owner (touch dead on V2N until carrier decision; display unaffected).
+- [ ] **G3 — DEFERRED (touch enumerate):** not testable on V2N — the GT911's bus (E1M I2C3) terminates at GD32 PC8/PC9 with no Linux master. Moves to the GD32 I2C-proxy follow-up (where the GT911 0x5d-vs-0x14 strap question also gets settled).
 - [ ] **G4 — backlight:** `echo 4 > /sys/class/backlight/backlight/brightness` (and 0/7 sweep) visibly dims/brightens.
-- [ ] **G5 — touch events:** `evtest /dev/input/event0` streams coordinates while touching; latency subjectively OK at 60 Hz poll.
+- [ ] **G5 — DEFERRED (touch events):** with G3; follow-up workstream.
 - [ ] **G6 — DPMS cycle:** `modetest` DPMS off/on (or `echo 1 > /sys/class/graphics/fb0/blank; echo 0 > …`) — panel re-inits cleanly through the bridge reset path (watch dmesg for hx8394 re-prepare).
-- [ ] **G7 — desktop + example:** full `alp-image-edge` bake (WSL, `MACHINE=e1m-v2n101-a55 bitbake alp-image-edge` with `PREFERRED_VERSION_linux-renesas = "6.1%"` forced; rebuild build dir from the VLP templates per docs/build-yocto-v2n.md), flash, Weston starts on the panel, `alp-lvgl-dashboard` runs fullscreen with working touch.
+- [ ] **G7 — desktop + example:** full `alp-image-edge` bake (WSL, `MACHINE=e1m-v2n101-a55 bitbake alp-image-edge` with `PREFERRED_VERSION_linux-renesas = "6.1%"` forced; rebuild build dir from the VLP templates per docs/build-yocto-v2n.md), flash, Weston starts on the panel, `alp-lvgl-dashboard` runs fullscreen (touch input arrives with the future I2C-proxy follow-up; the example tolerates a missing evdev node).
 - [ ] **G8 — soak + coexistence:** 1 h idle + periodic modetest/touch; THEN re-run the GD32 HIL soak example (coordinate with the bridge session) while the display is live — BRD_I2C GPIO frames must not disturb the CM33↔GD32 SCI7 link soak. dmesg clean of DSI/I2C errors.
 - [ ] **Record everything** in the bench log section; on full pass flip `docs/os-support-matrix.md` V2N Yocto Display → GA-pending-HIL → per repo convention, and commit: `git commit -q -m "test(hil): Display-1 bench ladder G1-G8 results -- <PASS/notes>"`
 - [ ] **V2M101 smoke** (when a new-silicon V2M board is available): repeat G1–G5 — expected identical (same PCB).

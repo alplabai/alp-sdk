@@ -43,7 +43,7 @@ assumptions are marked **(corrects docs)**.
 | 21 | `LCD1_RST_L` | E1M IO13 → **GD32 PF1** (bridge GPIO, active-low) |
 | 22 | panel LPTE | **not connected** on carrier (no TE; video mode only) |
 | 25 / 30 / 39+40 | +L1_VIO / +3V3 / +5V | always-on rails; L1_VIO strap-selected (header P1: 1V8/3V3/VIO) |
-| 26 / 27 | touch I2C SDA/SCL | E1M I2C2 = **RIIC2 (P34/P35)** — assumed, see open item O1 |
+| 26 / 27 | touch I2C SDA/SCL | **E1M_X_I2C3 (DSI1_CSI_I2C)** → GD32 PC8/PC9 (bridge secondary slave-transport port) — no Linux master; touch gated on a GD32 I2C-proxy (O1, resolved) |
 | 28 | `CTP1_RST_L` | E1M IO11 → **GD32 PB0** (bridge GPIO, active-low) |
 | 29 | `CTP1_INT_L` | E1M IO9 → **GD32 PA7** (no Linux IRQ path → polled touch) |
 | 32 | `LCD1_PWR_EN_L` | E1M IO15 — unrouted on V2N, **10k pull-up holds it enabled**; no SW action needed |
@@ -135,9 +135,9 @@ bbappend (same mechanism as the RSCI7/RIIC8 clk patch and the
      `"rocktech,rk055hdmipi4ma0", "himax,hx8394"`, `reset-gpios` pointing
      at the `&gd32_gpio` line for GD32 PF1 (active-low), `backlight`, vcc/iovcc
      fixed-regulator stubs for the always-on rails) with OF-graph to
-     `dsi0_out`, `data-lanes = <1 2>`; `&i2c2` (RIIC2, pinmux P34/P35)
-     with `gt911@5d` (`reset-gpios` via `&gd32_gpio` PB0 line, **no**
-     `interrupts` → polled).
+     `dsi0_out`, `data-lanes = <1 2>`. (GT911 DT node DROPPED from this
+     port — the touch bus terminates at the GD32, see O1; the node ships
+     with the future bridge I2C-proxy adapter.)
    - Both V2N and V2M board dts files inherit unchanged (carrier dtsi
      composition; pad routing identical across all four SKUs).
 6. **Image**: pull Weston/Mali userspace into `alp-image-edge` via the
@@ -202,12 +202,15 @@ bbappend (same mechanism as the RSCI7/RIIC8 clk patch and the
 
 ## 7. Risks / open items
 
-- **O1 — touch bus**: carrier netlist export leaves the Display-1 touch
-  I2C net aliasing ambiguous (`DSI1_CSI_I2C` vs `DSI_CSI_I2C0/1`).
-  Working assumption (maintainer-endorsed): Display-1 touch on
-  **I2C2/RIIC2**. If the bench probe finds it on I2C3 instead, touch is
-  unreachable on V2N (I2C3 unrouted) and needs a carrier decision —
-  display work is unaffected.
+- **O1 — touch bus (RESOLVED 2026-06-04, maintainer)**: Display-1 touch
+  = `DSI1_CSI_I2C` = **E1M_X_I2C3** (connector A23/A24), which on V2N
+  routes to **GD32 PC8/PC9** — the bridge's planned secondary I2C
+  slave transport, not a host bus. The GT911 therefore has NO bus
+  master on V2N today. Touch ships in a follow-up gated on the GD32
+  workstream: bridge I2C-master proxy on GD32 I2C2 + a Linux
+  `i2c-gd32-bridge` adapter driver; the goodix polled patch (deliverable
+  3) is retained dormant for exactly that stack (INT also terminates at
+  the GD32, so polling remains required). Display scope is unaffected.
 - **O2 — PA5 GPT function index**: exact `RZV2N_PORT_PINMUX(A,5,n)`
   function number and GPT channel must be read from the RZ/V2N HW manual
   (r01uh1071/1072) during implementation.
