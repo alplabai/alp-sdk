@@ -132,9 +132,9 @@
 };
 
 /* Display backlight: the LED boost driver lives ON the SoM (BL_LED_A/K
- * to the module edge pads B55/A55); Renesas PA5 = BL_PWM drives its
- * CNTRL input. PA5 func 9 = GTIOC10B = GPT1 channel 2, B-side output
- * (hence channel_B). 5 kHz PWM.
+ * to the module edge); Renesas PA5 = BL_PWM drives its CNTRL input.
+ * PA5 func 9 = GTIOC10B = GPT1 channel 2, B-side output (hence
+ * channel_B). 5 kHz PWM.
  */
 &gpt1_2 {
 	pinctrl-0 = <&backlight_pwm_pins>;
