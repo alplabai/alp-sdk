@@ -23,14 +23,14 @@ build it, how to flash it, and what state the implementation is in.
 
 ## At a glance
 
-| Aspect              | Today (2026-05-12)                                                                |
+| Aspect              | Today (2026-06-04)                                                                |
 |---------------------|-----------------------------------------------------------------------------------|
 | Firmware tree       | [`firmware/gd32-bridge/`](../firmware/gd32-bridge/)                                                 |
 | Toolchain           | Arm GNU Toolchain (`arm-none-eabi-gcc`), Cortex-M33 + thumb                       |
 | Build system        | CMake (separate from the Zephyr-side `west build`)                                |
 | HAL                 | Stub default; `BRIDGE_HAL_BACKEND=gd32` consumes the GigaDevice firmware library via the [`alplabai/gd32g5x3-firmware-library`](https://github.com/alplabai/gd32g5x3-firmware-library) submodule at `vendors/gd32_firmware_library/upstream/` (run `git submodule update --init` once after cloning) |
 | Protocol coverage   | `PING`, `GET_VERSION`, `GET_BUILD_ID` working end-to-end without HW dependency    |
-| Transport coverage  | SPI1 slave + I2C0 slave implemented in `hal/transport_hw_gd32.c` (gd32 backend); on-silicon timing validation pending |
+| Transport coverage  | SPI1 slave (25 MHz full-DMA, silicon-validated) + I2C0 slave in `hal/transport_hw_gd32.c` (gd32 backend) |
 | Datasheet           | GD32G553 datasheet + user manual (held in the vendor datasheet) |
 | Flash size on chip  | 512 KB (per datasheet)                                                            |
 | RAM size on chip    | 128 KB                                                                            |
@@ -78,22 +78,32 @@ Output: `build/gd32-bridge.elf`, `.hex`, `.bin`.
 
 ```
 firmware/gd32-bridge/
-├── CMakeLists.txt
+├── CMakeLists.txt                   (default monolithic build; -DBRIDGE_OTA_PARTITIONED=ON
+│                                     emits bootloader + slot-A/B apps instead)
 ├── README.md
 ├── toolchain/
 │   ├── arm-none-eabi.cmake          (Arm GNU Toolchain)
-│   └── gd32g553_flash.ld            (placeholder linker script)
+│   ├── gd32g553_flash.ld            (monolithic full-flash linker)
+│   ├── gd32g553_bootloader.ld       (32 KB Path-A bootloader)
+│   └── gd32g553_app_slot.ld.in      (slot-relocated app template; .ramfunc in RAM)
 ├── hal/
 │   ├── bridge_hw.h                  (HAL surface consumed by protocol.c)
-│   ├── bridge_hw_stub.c             (default, all ops return NOTIMPL)
-│   └── bridge_hw_gd32.c             (TODO: real GigaDevice impl)
+│   ├── bridge_hw_stub.c             (host-test backend, ops return NOTIMPL)
+│   ├── bridge_hw_gd32.c             (real GigaDevice peripheral HAL)
+│   ├── transport_hw_gd32.c          (SPI1 + I2C0 slave silicon bring-up, full-DMA SPI)
+│   └── fmc_ota.c                    (RAM-resident dual-bank FMC erase/program)
 ├── src/
 │   ├── main.c                       (entry point, WFI loop)
 │   ├── protocol.c                   (shared command-handler table)
 │   ├── protocol.h
 │   ├── transport_spi.c              (SPI-slave receive + reply staging)
 │   ├── transport_i2c.c              (I2C-slave receive + reply staging)
-│   └── bootloader/                  (OTA-opcode scaffold; STATUS_NOSUPPORT)
+│   ├── ota.c / ota.h / ota_layout.h (OTA Path-A state machine + A/B metadata)
+│   ├── crc32.c / crc32.h            (IEEE CRC-32 shared by app + bootloader)
+│   ├── boot/boot_main.c             (bootloader: slot pick + CRC validate + jump)
+│   └── bootloader/                  (0xF0..0xFF dispatch into ota.c)
+├── tools/
+│   └── gen_ota_metadata.py          (factory A/B metadata record for first-flash)
 └── tests/
     ├── gen_protocol_vectors.py      (CRC + wire-vector generator)
     └── protocol_vectors.txt         (CRC + wire vectors shared with host)
@@ -109,7 +119,7 @@ change.
 | Method                                | Status today      | Notes                                                                                                                                  |
 |---------------------------------------|-------------------|----------------------------------------------------------------------------------------------------------------------------------------|
 | External SWD probe (J-Link, ST-Link)  | **Supported.**    | SWDIO + SWCLK accessible on the V2N module's programming header.                                                                       |
-| In-system upgrade over SPI / I2C      | **Implemented, gated + HIL-pending.** | Application-bootloader path; the `0xF0..0xFF` opcodes route through `src/bootloader/` into the OTA state machine in [`src/ota.c`](../firmware/gd32-bridge/src/ota.c) (FMC backend `hal/fmc_ota.c`). Destructive flashing is armed only with `-DBRIDGE_OTA_PARTITIONED`; default builds reply `STATUS_NOSUPPORT` (can't brick the running image). The armed build emits the partitioned set (32 KB bootloader + slot-A/B apps); on-silicon validation is the remaining work. See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path A. |
+| In-system upgrade over SPI / I2C      | **Implemented, gated — silicon-validated 2026-06-04.** | Application-bootloader path; the `0xF0..0xFF` opcodes route through `src/bootloader/` into the OTA state machine in [`src/ota.c`](../firmware/gd32-bridge/src/ota.c) (FMC backend `hal/fmc_ota.c`). Destructive flashing is armed only with `-DBRIDGE_OTA_PARTITIONED`; default builds reply `STATUS_NOSUPPORT` (can't brick the running image). The armed build emits the partitioned set (32 KB bootloader + slot-A/B apps); first-flash also needs the factory metadata record from [`tools/gen_ota_metadata.py`](../firmware/gd32-bridge/tools/gen_ota_metadata.py) at `0x08008000`. Validated end-to-end on the bench: stream → verify → commit → boot new slot → rollback (protocol v0.6). See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path A. |
 | Host-driven SWD bit-bang from V2N     | **Scaffolded.**   | Renesas-side software SWD controller drives `GD32_SWDIO` + `GD32_SWCLK` (routed back to V2N pads per the 2026-05-12 HW decision); universal recovery + factory first-flash.  Driver lives at [`chips/gd32_swd/`](../chips/gd32_swd/) (`driver_status: partial` until exercised on real silicon).  See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path B. |
 
 ## Cross-link

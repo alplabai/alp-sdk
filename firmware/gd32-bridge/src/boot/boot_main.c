@@ -31,8 +31,7 @@ static bool meta_read(uint32_t addr, ota_meta_record_t *r)
     if (p->magic != OTA_META_MAGIC || p->struct_version != OTA_META_STRUCT_VER) {
         return false;
     }
-    if (ota_crc32(0u, (const uint8_t *)p, offsetof(ota_meta_record_t, rec_crc32))
-        != p->rec_crc32) {
+    if (ota_crc32(0u, (const uint8_t *)p, offsetof(ota_meta_record_t, rec_crc32)) != p->rec_crc32) {
         return false;
     }
     *r = *p;
@@ -42,18 +41,27 @@ static bool meta_read(uint32_t addr, ota_meta_record_t *r)
 static bool meta_current(ota_meta_record_t *out)
 {
     ota_meta_record_t a, b;
-    const bool va = meta_read(OTA_META_REC0, &a);
-    const bool vb = meta_read(OTA_META_REC1, &b);
-    if (va && vb) { *out = (a.counter >= b.counter) ? a : b; return true; }
-    if (va)       { *out = a; return true; }
-    if (vb)       { *out = b; return true; }
+    const bool        va = meta_read(OTA_META_REC0, &a);
+    const bool        vb = meta_read(OTA_META_REC1, &b);
+    if (va && vb) {
+        *out = (a.counter >= b.counter) ? a : b;
+        return true;
+    }
+    if (va) {
+        *out = a;
+        return true;
+    }
+    if (vb) {
+        *out = b;
+        return true;
+    }
     return false;
 }
 
 static bool active_slot_valid(const ota_meta_record_t *m)
 {
     const uint8_t slot = m->active_slot;
-    if (slot > OTA_SLOT_B) {           /* defensive: slot indexes [2] arrays */
+    if (slot > OTA_SLOT_B) { /* defensive: slot indexes [2] arrays */
         return false;
     }
     const uint32_t len = m->img_len[slot];
@@ -72,11 +80,11 @@ static void jump_to_slot(uint32_t slot_base)
     const uint32_t msp   = *(volatile uint32_t *)slot_base;
     const uint32_t reset = *(volatile uint32_t *)(slot_base + 4u);
     __disable_irq();
-    SCB->VTOR = slot_base;          /* relocate the vector table to the slot */
+    SCB->VTOR = slot_base; /* relocate the vector table to the slot */
     __DSB();
     __set_MSP(msp);
     __ISB();
-    ((void (*)(void))reset)();      /* no return */
+    ((void (*)(void))reset)(); /* no return */
 }
 
 int main(void)

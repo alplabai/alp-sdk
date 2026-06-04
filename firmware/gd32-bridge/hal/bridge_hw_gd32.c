@@ -373,7 +373,7 @@ static const gd32_adc_ch_t adc_channels_map[] = {
  * are still gated to defaults at v0.3 and live in a follow-up. */
 static uint16_t adc_sample_cycles_cache[8];
 
-static void adc_periph_init(uint32_t periph)
+static void     adc_periph_init(uint32_t periph)
 {
     adc_deinit(periph);
     adc_clock_config(periph, ADC_CLK_SYNC_HCLK_DIV6);
@@ -584,7 +584,7 @@ static const gd32_dac_ch_t dac_channels[] = {
  * moves to a buffered VREFINT source or a different rail.  Full-scale
  * code is 4095 for 12-bit alignment; code = (value_mv * 4095) /
  * VREF_mV with overflow clamped. */
-#define DAC_VREF_MV    1800u
+#define DAC_VREF_MV 1800u
 #define DAC_FULL_SCALE 4095u
 
 /* ----------------------------------------------------------------- */
@@ -979,14 +979,14 @@ int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio, uint16_t
 #define BRIDGE_ADC_STREAM_COUNT 2u
 
 typedef struct {
-    bool          in_use;
-    uint8_t       channel;     /* ADC channel index this stream watches */
-    uint32_t      dma_periph;  /* DMA0 or DMA1                          */
-    uint8_t       dma_channel; /* dma_channel_enum value                */
-    uint16_t      ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
-    uint16_t      read_idx;    /* host's consumer cursor                */
-    uint8_t       dsp_chain_id;
-    bool          dsp_bound;
+    bool     in_use;
+    uint8_t  channel;     /* ADC channel index this stream watches */
+    uint32_t dma_periph;  /* DMA0 or DMA1                          */
+    uint8_t  dma_channel; /* dma_channel_enum value                */
+    uint16_t ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
+    uint16_t read_idx; /* host's consumer cursor                */
+    uint8_t  dsp_chain_id;
+    bool     dsp_bound;
 } adc_stream_state_t;
 
 static adc_stream_state_t adc_streams[BRIDGE_ADC_STREAM_COUNT];
@@ -997,8 +997,8 @@ static adc_stream_state_t adc_streams[BRIDGE_ADC_STREAM_COUNT];
  * reload. */
 static uint16_t adc_stream_write_index(const adc_stream_state_t *s)
 {
-    const uint32_t remaining = dma_transfer_number_get(s->dma_periph,
-                                                       (dma_channel_enum)s->dma_channel);
+    const uint32_t remaining =
+        dma_transfer_number_get(s->dma_periph, (dma_channel_enum)s->dma_channel);
     if (remaining > BRIDGE_ADC_STREAM_RING_SAMPLES) return 0u;
     return (uint16_t)(BRIDGE_ADC_STREAM_RING_SAMPLES - remaining);
 }
@@ -1037,9 +1037,10 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
     /* DMAMUX request: route the channel to this ADC instance.  Without
      * this the request id is left uninitialised and the channel triggers
      * on the wrong (or no) source. */
-    init.request      = (ch->periph == ADC1) ? DMA_REQUEST_ADC1 :
-                        (ch->periph == ADC2) ? DMA_REQUEST_ADC2 :
-                        (ch->periph == ADC3) ? DMA_REQUEST_ADC3 : DMA_REQUEST_ADC0;
+    init.request = (ch->periph == ADC1)   ? DMA_REQUEST_ADC1
+                   : (ch->periph == ADC2) ? DMA_REQUEST_ADC2
+                   : (ch->periph == ADC3) ? DMA_REQUEST_ADC3
+                                          : DMA_REQUEST_ADC0;
     dma_init(s->dma_periph, (dma_channel_enum)s->dma_channel, &init);
 
     /* Circular mode -- DMA reloads `number` after each cycle so the
@@ -1055,8 +1056,7 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
      * `sample_rate_hz` argument is currently an aspirational hint that
      * a future commit will translate to a sample-cycle override. */
     (void)sample_rate_hz; /* aspirational; see comment above */
-    adc_routine_channel_config(ch->periph, 0u, ch->channel,
-                               adc_sample_cycles_cache[channel]);
+    adc_routine_channel_config(ch->periph, 0u, ch->channel, adc_sample_cycles_cache[channel]);
     adc_special_function_config(ch->periph, ADC_CONTINUOUS_MODE, ENABLE);
     adc_dma_mode_enable(ch->periph);
 
@@ -1103,7 +1103,7 @@ int bridge_hw_adc_stream_read(uint8_t stream_id, uint8_t max_samples, uint8_t *g
     for (uint16_t i = 0u; i < to_emit; ++i) {
         uint32_t code = s->ring[s->read_idx];
         if (code > ADC_FULL_SCALE) code = ADC_FULL_SCALE;
-        mv[i] = (uint16_t)((code * ADC_VREF_MV) / ADC_FULL_SCALE);
+        mv[i]       = (uint16_t)((code * ADC_VREF_MV) / ADC_FULL_SCALE);
         s->read_idx = (uint16_t)((s->read_idx + 1u) % BRIDGE_ADC_STREAM_RING_SAMPLES);
     }
     *got_samples = (uint8_t)to_emit;
@@ -1465,7 +1465,7 @@ int bridge_hw_pwm_capture_begin(uint8_t channel, uint8_t edge)
      * every selected edge. */
     timer_ic_parameter_struct ic;
     timer_channel_input_struct_para_init(&ic);
-    ic.icpolarity  = (edge == 0u) ? TIMER_IC_POLARITY_RISING
+    ic.icpolarity  = (edge == 0u)   ? TIMER_IC_POLARITY_RISING
                      : (edge == 1u) ? TIMER_IC_POLARITY_FALLING
                                     : TIMER_IC_POLARITY_BOTH_EDGE;
     ic.icselection = TIMER_IC_SELECTION_DIRECTTI;
@@ -1672,23 +1672,21 @@ int bridge_hw_timer_sync(uint8_t master, uint8_t slave, uint8_t mode)
  *            opcode; today the firmware rejects them so the host
  *            knows the request is moot.
  */
-#define POWER_WAKE_RTC      0x00000001u
-#define POWER_WAKE_GPIO     0x00000002u
-#define POWER_WAKE_UART_RX  0x00000004u
-#define POWER_WAKE_TIMER    0x00000008u
-#define POWER_WAKE_USB      0x00000010u
+#define POWER_WAKE_RTC 0x00000001u
+#define POWER_WAKE_GPIO 0x00000002u
+#define POWER_WAKE_UART_RX 0x00000004u
+#define POWER_WAKE_TIMER 0x00000008u
+#define POWER_WAKE_USB 0x00000010u
 #define POWER_WAKE_ETH_LINK 0x00000020u
-#define POWER_WAKE_MASK_SUPPORTED \
-    (POWER_WAKE_RTC | POWER_WAKE_GPIO | POWER_WAKE_TIMER)
-#define POWER_WAKE_MASK_HW_GATED \
-    (POWER_WAKE_UART_RX | POWER_WAKE_USB | POWER_WAKE_ETH_LINK)
+#define POWER_WAKE_MASK_SUPPORTED (POWER_WAKE_RTC | POWER_WAKE_GPIO | POWER_WAKE_TIMER)
+#define POWER_WAKE_MASK_HW_GATED (POWER_WAKE_UART_RX | POWER_WAKE_USB | POWER_WAKE_ETH_LINK)
 
 /* RTC wakeup timer LSB: with IRC32K (~32 kHz internal) clock and
  * the /16 divider, the timer ticks at 32000/16 = 2000 Hz -- 0.5 ms
  * per tick.  Max wake = 65535 / 2000 = 32.7 s.  Longer waits would
  * need the CKSPRE_2EXP16 mode which sits in a future commit. */
-#define POWER_WAKE_LSB_HZ        2000u
-#define POWER_WAKE_TIMER_MAX_MS  (65535u * 1000u / POWER_WAKE_LSB_HZ)
+#define POWER_WAKE_LSB_HZ 2000u
+#define POWER_WAKE_TIMER_MAX_MS (65535u * 1000u / POWER_WAKE_LSB_HZ)
 
 /* One-time RTC + LSI bring-up that arms the wakeup timer.  Idempotent
  * across multiple power_mode_set calls -- the LSI stays enabled, the
@@ -1776,11 +1774,9 @@ int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap, uint32_t wake_a
     case 2u: /* deep-sleep */
         rcu_periph_clock_enable(RCU_PMU);
         power_wake_pins_enable(wake_bitmap);
-        if (wake_after_ms != 0u ||
-            (wake_bitmap & (POWER_WAKE_RTC | POWER_WAKE_TIMER)) != 0u) {
-            const uint32_t ms = (wake_after_ms != 0u) ? wake_after_ms
-                                                      : POWER_WAKE_TIMER_MAX_MS;
-            int rc = rtc_wakeup_arm_ms(ms);
+        if (wake_after_ms != 0u || (wake_bitmap & (POWER_WAKE_RTC | POWER_WAKE_TIMER)) != 0u) {
+            const uint32_t ms = (wake_after_ms != 0u) ? wake_after_ms : POWER_WAKE_TIMER_MAX_MS;
+            int            rc = rtc_wakeup_arm_ms(ms);
             if (rc != BRIDGE_HW_OK) return rc;
         }
         /* PMU_LDO_LOWPOWER drops the core LDO into its low-power
@@ -1793,11 +1789,9 @@ int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap, uint32_t wake_a
     case 3u: /* standby */
         rcu_periph_clock_enable(RCU_PMU);
         power_wake_pins_enable(wake_bitmap);
-        if (wake_after_ms != 0u ||
-            (wake_bitmap & (POWER_WAKE_RTC | POWER_WAKE_TIMER)) != 0u) {
-            const uint32_t ms = (wake_after_ms != 0u) ? wake_after_ms
-                                                      : POWER_WAKE_TIMER_MAX_MS;
-            int rc = rtc_wakeup_arm_ms(ms);
+        if (wake_after_ms != 0u || (wake_bitmap & (POWER_WAKE_RTC | POWER_WAKE_TIMER)) != 0u) {
+            const uint32_t ms = (wake_after_ms != 0u) ? wake_after_ms : POWER_WAKE_TIMER_MAX_MS;
+            int            rc = rtc_wakeup_arm_ms(ms);
             if (rc != BRIDGE_HW_OK) return rc;
         }
         /* Standby powers down the core + SRAM (except backup) and
@@ -1856,7 +1850,7 @@ typedef struct {
  * bytes of metadata; well inside the GD32G553's 128 KB SRAM. */
 static adc_dsp_chain_t adc_dsp_chains[BRIDGE_DSP_MAX_CHAINS];
 
-int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id)
+int                    bridge_hw_adc_dsp_chain_open(uint8_t *chain_id)
 {
     if (chain_id == 0) return BRIDGE_HW_ERR_INVAL;
     *chain_id = 0u;
@@ -1954,8 +1948,8 @@ int bridge_hw_adc_dsp_chain_bind(uint8_t chain_id, uint8_t stream_id)
      *   - empty stages (total_size == 0) are allowed only at
      *     contiguous tail positions -- not interleaved with
      *     populated stages. */
-    uint8_t fft_index    = BRIDGE_DSP_MAX_STAGES;
-    uint8_t window_index = BRIDGE_DSP_MAX_STAGES;
+    uint8_t fft_index            = BRIDGE_DSP_MAX_STAGES;
+    uint8_t window_index         = BRIDGE_DSP_MAX_STAGES;
     uint8_t last_populated_index = BRIDGE_DSP_MAX_STAGES;
     for (uint8_t i = 0u; i < BRIDGE_DSP_MAX_STAGES; ++i) {
         adc_dsp_stage_t *st = &chain->stages[i];
@@ -1993,7 +1987,7 @@ int bridge_hw_adc_dsp_chain_bind(uint8_t chain_id, uint8_t stream_id)
     }
 
     adc_stream_state_t *s = &adc_streams[stream_id];
-    if (!s->in_use) return BRIDGE_HW_ERR_INVAL; /* stream not running */
+    if (!s->in_use) return BRIDGE_HW_ERR_INVAL;   /* stream not running */
     if (s->dsp_bound) return BRIDGE_HW_ERR_INVAL; /* stream already has a chain */
 
     /* Attachment is a state flip on both halves.  Runtime DSP

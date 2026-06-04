@@ -941,7 +941,10 @@ typedef enum {
 typedef struct {
     gd32g553_ota_state_t state;        /**< @ref gd32g553_ota_state_t. */
     gd32g553_ota_slot_t  active_slot;  /**< Slot the bridge is currently running. */
-    gd32g553_ota_slot_t  pending_slot; /**< Slot queued for next-boot commit; INVALID if none. */
+    gd32g553_ota_slot_t pending_slot; /**< Staging slot of the in-progress
+                                       *   session (not committed until
+                                       *   COMMIT); NONE when no session
+                                       *   is open. */
     uint16_t             boot_count;   /**< Monotonic boot counter from the metadata page. */
 } gd32g553_ota_state_info_t;
 

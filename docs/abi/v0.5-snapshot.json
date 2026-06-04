@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-31",
+  "generated": "2026-06-04",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2068,6 +2068,10 @@
           "hash": "c29fba951238345c",
           "signature": "void da9292_deinit(da9292_t *ctx);"
         },
+        "da9292_get_fault_pins": {
+          "hash": "be47e8e3fc1afd73",
+          "signature": "alp_status_t da9292_get_fault_pins(alp_gpio_t *int_n, alp_gpio_t *tw_n, uint8_t *flags);"
+        },
         "da9292_get_status": {
           "hash": "49e12c5ab4ce3658",
           "signature": "alp_status_t da9292_get_status(da9292_t *ctx, da9292_status_t *out);"
@@ -2691,12 +2695,12 @@
           "hash": "cba81c4fc55be27b"
         },
         "gd32g553_ota_slot_t": {
-          "definition": "typedef enum { GD32G553_OTA_SLOT_INVALID = 0u, GD32G553_OTA_SLOT_A = 1u, GD32G553_OTA_SLOT_B = 2u, } gd32g553_ota_slot_t;",
-          "hash": "23fea484c4ea9612"
+          "definition": "typedef enum { GD32G553_OTA_SLOT_A = 0u, GD32G553_OTA_SLOT_B = 1u, GD32G553_OTA_SLOT_NONE = 0xFFu, } gd32g553_ota_slot_t;",
+          "hash": "01b6e93c128891a7"
         },
         "gd32g553_ota_state_t": {
-          "definition": "typedef enum { GD32G553_OTA_STATE_IDLE = 0, GD32G553_OTA_STATE_RECEIVING = 1, GD32G553_OTA_STATE_VERIFIED = 2, GD32G553_OTA_STATE_PENDING_COMMIT = 3, GD32G553_OTA_STATE_FAULT = 4, } gd32g553_ota_state_t;",
-          "hash": "08d8fd1b4fb1d85a"
+          "definition": "typedef enum { GD32G553_OTA_STATE_IDLE = 0, GD32G553_OTA_STATE_READY = 1, GD32G553_OTA_STATE_BUSY = 2, GD32G553_OTA_STATE_VERIFIED = 3, GD32G553_OTA_STATE_ERROR = 4, } gd32g553_ota_state_t;",
+          "hash": "255bbe086e365366"
         },
         "gd32g553_pwm_align_t": {
           "definition": "typedef enum { GD32G553_PWM_ALIGN_EDGE = 0, GD32G553_PWM_ALIGN_CENTER_UP = 1, GD32G553_PWM_ALIGN_CENTER_DOWN = 2, GD32G553_PWM_ALIGN_CENTER_BOTH = 3, } gd32g553_pwm_align_t;",

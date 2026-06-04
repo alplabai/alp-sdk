@@ -715,6 +715,11 @@ caller wants liveness confirmation.
 
 Until the bridge fleet ships in production, `major` stays at `0`
 and the host driver insists on **exact** major-number match.
+**Pre-1.0 the host and firmware additionally ship in lock-step
+including `minor`**: a pre-production minor may revise a
+pre-production opcode's payload (v0.6 did this to `OTA_WRITE_CHUNK`),
+and the major-only handshake cannot detect that — do not mix a v0.5
+host with v0.6 firmware or vice versa.
 
 ## 9. Reference vectors
 

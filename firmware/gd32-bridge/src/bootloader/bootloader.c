@@ -12,13 +12,10 @@
 #include "bootloader.h"
 #include "../ota.h"
 
-gd32_bridge_status_t bl_dispatch_ota(uint8_t cmd,
-                                     const uint8_t *req_payload,
-                                     size_t req_payload_len,
-                                     uint8_t *reply_payload,
-                                     size_t reply_payload_cap,
-                                     size_t *reply_payload_len)
+gd32_bridge_status_t bl_dispatch_ota(uint8_t cmd, const uint8_t *req_payload,
+                                     size_t req_payload_len, uint8_t *reply_payload,
+                                     size_t reply_payload_cap, size_t *reply_payload_len)
 {
-    return ota_dispatch(cmd, req_payload, req_payload_len,
-                        reply_payload, reply_payload_cap, reply_payload_len);
+    return ota_dispatch(cmd, req_payload, req_payload_len, reply_payload, reply_payload_cap,
+                        reply_payload_len);
 }

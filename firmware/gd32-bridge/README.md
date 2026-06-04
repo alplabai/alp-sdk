@@ -49,19 +49,33 @@ cmake -B build -DCMAKE_TOOLCHAIN_FILE=toolchain/arm-none-eabi.cmake
 cmake --build build
 ```
 
-The build emits `build/gd32-bridge.elf` + `.hex` + `.bin`.  Flashing
-in the development case is done with an external SWD probe on
-`GD32_SWDIO` / `GD32_SWCLK` (J-Link, ST-Link, OpenOCD).  Field
-upgrades from the V2N host once the application-bootloader path
-lands are documented in [`../docs/gd32-bridge-protocol.md`](../docs/gd32-bridge-protocol.md) §10.
+The default build emits the monolithic `build/gd32-bridge.elf` + `.hex`
++ `.bin` (OTA inert — the whole `0xF0..0xFF` range answers
+`STATUS_NOSUPPORT`, so the image cannot brick itself).
+
+**`-DBRIDGE_OTA_PARTITIONED=ON`** (requires `BRIDGE_HAL_BACKEND=gd32`)
+arms the in-system upgrade path and emits the partitioned set instead:
+`gd32-bootloader` (32 KB at flash base), `gd32-bridge-slot-a` and
+`gd32-bridge-slot-b` (the app linked per A/B slot, `.ramfunc` FMC loop
+in RAM, `SCB->VTOR` relocated).  First-flash of a partitioned part also
+needs the factory A/B metadata record —
+[`tools/gen_ota_metadata.py`](tools/gen_ota_metadata.py) generates it
+(flash to `0x08008000`); without it the bootloader idles in its
+recovery loop.  The full Path-A wire contract is
+[`../docs/gd32-bridge-protocol.md`](../docs/gd32-bridge-protocol.md) §10.
+
+Development flashing uses an external SWD probe on `GD32_SWDIO` /
+`GD32_SWCLK` (J-Link, ST-Link, OpenOCD).
 
 > **Status:** Both backends build clean.  The gd32 backend drives the
-> real peripheral HAL (`hal/bridge_hw_gd32.c`) and the **SPI1 + I2C0
-> slave transports** (`hal/transport_hw_gd32.c`).  Remaining gaps
-> (ADC DSP-chain upload, `POWER_MODE_SET`, OTA) degrade to
-> `STATUS_NOSUPPORT`.  Byte-level interrupt timing needs on-silicon
-> validation; flash externally (host-driven SWD reflash is not wired in
-> the current HW revision).  The stub backend stays HW-free for host
+> real peripheral HAL (`hal/bridge_hw_gd32.c`), the **SPI1 + I2C0
+> slave transports** (`hal/transport_hw_gd32.c`), and the **OTA Path-A
+> state machine** (`src/ota.c` + `hal/fmc_ota.c` — silicon-validated
+> end-to-end 2026-06-04; armed only with `BRIDGE_OTA_PARTITIONED`).
+> Remaining gaps (ADC DSP-chain runtime dispatch, plus the HAL defects
+> the HiL soak quarantined: `pwm_capture`, `adc_stream`, `qenc`, `tmu`,
+> armed-build `ota_get_state` — see the soak example's table notes)
+> degrade to error statuses.  The stub backend stays HW-free for host
 > protocol round-trip tests.
 
 ## Protocol majorset

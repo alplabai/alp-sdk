@@ -39,6 +39,14 @@ One-shot at boot (not per-cycle): `adc_dsp_chain_open` probe — the
 4-chain pool has no close opcode yet, so looping it would exhaust the
 pool and poison the stats.
 
+**Quarantine list** (skipped, don't gate the verdict): the soak's
+first silicon runs (2026-06-04) caught five HAL surfaces failing from
+cycle 1 — `pwm_capture`, `adc_stream`, `qenc`, `tmu`,
+`ota_get_state` — with `adc_stream` actively destructive (a failed
+`STREAM_END` leaves its circular DMA contending with the SPI slave's
+channels until the link rots).  Each is quarantined in the test table
+with its observed failure; un-quarantine as firmware fixes land.
+
 ## Reading the output
 
 Per cycle: `[hil-soak] cycle N | 19/19 PASS`.  Every 16 cycles a

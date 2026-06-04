@@ -1,6 +1,6 @@
 # GD32 application bootloader
 
-Status: **Path-A state machine implemented, gated + HIL-pending.** The OTA
+Status: **Path-A implemented, gated — silicon-validated 2026-06-04.** The OTA
 opcode range `0xF0..0xFF` reserved in
 [`../../../docs/gd32-bridge-protocol.md`](../../../docs/gd32-bridge-protocol.md)
 §10 routes through `bl_dispatch_ota` into the state machine in
@@ -17,11 +17,15 @@ each slot (`toolchain/gd32g553_app_slot.ld.in`, `.ramfunc` in RAM; the app
 sets `SCB->VTOR` to its slot base). The host OTA opcodes already exist in
 `chips/gd32g553/` and the firmware payloads are reconciled to them.
 
-**HIL-REQUIRED:** the armed boot/validate/jump + slot relocation + FMC-from-RAM
-path is **not validated on silicon** — a bug bricks the part (no host-driven
-SWD reflash this HW rev; recover via a bench SWD probe). Until validated, GD32
-updates go through an external SWD probe, and the default (unarmed) image is
-what ships/tests.
+**SILICON-VALIDATED 2026-06-04** (bench, protocol v0.6): boot/validate/jump,
+slot relocation, dual-bank FMC-from-RAM, and the full stream → verify →
+commit → boot-new-slot → rollback cycle proven end-to-end over the 25 MHz
+link, including two GD32 self-reboots through this bootloader.  First-flash
+of a partitioned part needs the factory metadata record from
+[`../../tools/gen_ota_metadata.py`](../../tools/gen_ota_metadata.py) at
+`0x08008000`.  A bricked part is still recovered via a bench SWD probe (no
+host-driven SWD reflash this HW rev); the default (unarmed) image remains
+the cannot-brick-itself configuration.
 
 Integration detail (final flash sizes, commit/rollback policy, signing,
 threat model) is captured in the maintainer-held design doc

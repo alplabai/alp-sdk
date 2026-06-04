@@ -148,17 +148,17 @@ typedef enum {
 
 /** Decoded `PMC_STATUS_00` + `PMC_STATUS_01` snapshot. */
 typedef struct {
-    bool ch1_pg;       /**< CH1 power-good (output in regulation). */
-    bool ch2_pg;       /**< CH2 power-good. */
-    bool ch1_uv;       /**< CH1 under-voltage (live). */
-    bool ch2_uv;       /**< CH2 under-voltage. */
-    bool ch1_ov;       /**< CH1 over-voltage. */
-    bool ch2_ov;       /**< CH2 over-voltage. */
-    bool ch1_oc;       /**< CH1 over-current (live). */
-    bool ch2_oc;       /**< CH2 over-current. */
-    bool temp_warn;    /**< Thermal warning threshold crossed. */
-    bool temp_crit;    /**< Thermal critical threshold (shutdown imminent). */
-    bool vin_uvlo;     /**< Input UVLO -- supply below operating range. */
+    bool    ch1_pg;    /**< CH1 power-good (output in regulation). */
+    bool    ch2_pg;    /**< CH2 power-good. */
+    bool    ch1_uv;    /**< CH1 under-voltage (live). */
+    bool    ch2_uv;    /**< CH2 under-voltage. */
+    bool    ch1_ov;    /**< CH1 over-voltage. */
+    bool    ch2_ov;    /**< CH2 over-voltage. */
+    bool    ch1_oc;    /**< CH1 over-current (live). */
+    bool    ch2_oc;    /**< CH2 over-current. */
+    bool    temp_warn; /**< Thermal warning threshold crossed. */
+    bool    temp_crit; /**< Thermal critical threshold (shutdown imminent). */
+    bool    vin_uvlo;  /**< Input UVLO -- supply below operating range. */
     uint8_t raw_00;    /**< Untouched PMC_STATUS_00 byte for diagnostics. */
     uint8_t raw_01;    /**< Untouched PMC_STATUS_01 byte. */
 } da9292_status_t;
@@ -183,8 +183,8 @@ typedef struct {
     bool       initialised;
     alp_i2c_t *bus;
     uint8_t    addr;
-    uint8_t    dev_id;        /**< Cached PMC_DEV_ID (read at init). */
-    uint8_t    rev_id;        /**< Cached PMC_REV_ID. */
+    uint8_t    dev_id; /**< Cached PMC_DEV_ID (read at init). */
+    uint8_t    rev_id; /**< Cached PMC_REV_ID. */
 } da9292_t;
 
 /** @brief Probe + cache device + revision identifiers.
@@ -225,8 +225,7 @@ alp_status_t da9292_read_and_clear_events(da9292_t *ctx, da9292_events_t *out);
  *  @param flags  Receives the packed byte.  Required.
  *  @return ALP_OK, ALP_ERR_INVAL on NULL @p flags, or the first
  *          failing `alp_gpio_read` status. */
-alp_status_t da9292_get_fault_pins(alp_gpio_t *int_n, alp_gpio_t *tw_n,
-                                   uint8_t *flags);
+alp_status_t da9292_get_fault_pins(alp_gpio_t *int_n, alp_gpio_t *tw_n, uint8_t *flags);
 
 /** @brief Enable (or disable) a channel via `CHx_EN` in `PMC_CTRL_01`.
  *
@@ -305,7 +304,7 @@ alp_status_t da9292_read_reg(da9292_t *ctx, uint8_t reg, uint8_t *val);
 alp_status_t da9292_write_reg(da9292_t *ctx, uint8_t reg, uint8_t val);
 
 /** @brief Release resources.  Idempotent. */
-void         da9292_deinit(da9292_t *ctx);
+void da9292_deinit(da9292_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -18,11 +18,8 @@
 #include "protocol.h"
 
 /* OTA opcode handler (cmd in 0xF0..0xFF). */
-gd32_bridge_status_t ota_dispatch(uint8_t cmd,
-                                  const uint8_t *req_payload,
-                                  size_t req_payload_len,
-                                  uint8_t *reply_payload,
-                                  size_t reply_payload_cap,
+gd32_bridge_status_t ota_dispatch(uint8_t cmd, const uint8_t *req_payload, size_t req_payload_len,
+                                  uint8_t *reply_payload, size_t reply_payload_cap,
                                   size_t *reply_payload_len);
 
 #endif /* GD32_BRIDGE_OTA_H */
