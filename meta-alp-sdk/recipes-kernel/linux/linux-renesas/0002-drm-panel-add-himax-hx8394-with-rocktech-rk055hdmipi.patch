@@ -30,14 +30,16 @@ NXP fsl_hx8394.c HX8394_Init issues commands in this order:
 rk055hdmipi4ma0_init_sequence() follows this order exactly: SETEXTC first,
 SETMIPI second, then the NXP table starting at MIPI_DCS_SET_ADDRESS_MODE.
 
+Reset-low minimum dwell (>=1 ms) enforced in prepare() -- review finding.
+
 Upstream-Status: Backport [v6.6 + RK055HDMIPI4MA0 ALP extension]
 
 Signed-off-by: Alp Lab AB
 ---
  drivers/gpu/drm/panel/Kconfig              |  10 +
  drivers/gpu/drm/panel/Makefile             |   1 +
- drivers/gpu/drm/panel/panel-himax-hx8394.c | 544 +++++++++++++++++++++
- 3 files changed, 555 insertions(+)
+ drivers/gpu/drm/panel/panel-himax-hx8394.c | 549 +++++++++++++++++++++++++++++
+ 3 files changed, 560 insertions(+)
  create mode 100644 drivers/gpu/drm/panel/panel-himax-hx8394.c
 
 diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
@@ -47,7 +49,7 @@ index a582ddd583c2..42a89b17e34e 100644
 @@ -154,6 +154,16 @@ config DRM_PANEL_FEIYANG_FY07024DI26A30D
  	  Say Y if you want to enable support for panels based on the
  	  Feiyang FY07024DI26A30-D MIPI-DSI interface.
- 
+
 +config DRM_PANEL_HIMAX_HX8394
 +	tristate "HIMAX HX8394 MIPI-DSI LCD panels"
 +	depends on OF
@@ -71,14 +73,14 @@ index 34e717382dbb..cab074527bf0 100644
  obj-$(CONFIG_DRM_PANEL_FEIYANG_FY07024DI26A30D) += panel-feiyang-fy07024di26a30d.o
 +obj-$(CONFIG_DRM_PANEL_HIMAX_HX8394) += panel-himax-hx8394.o
  obj-$(CONFIG_DRM_PANEL_ILITEK_IL9322) += panel-ilitek-ili9322.o
- obj-$(CONFIG_DRM_PANEL_ILITEK_ILI9341) += panel-ilitek-ili9341.o
+ obj-$(CONFIG_DRM_PANEL_ILITEK_IL9341) += panel-ilitek-ili9341.o
  obj-$(CONFIG_DRM_PANEL_ILITEK_ILI9881C) += panel-ilitek-ili9881c.o
 diff --git a/drivers/gpu/drm/panel/panel-himax-hx8394.c b/drivers/gpu/drm/panel/panel-himax-hx8394.c
 new file mode 100644
-index 000000000000..1665bf2a9148
+index 000000000000..d772bc93f026
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/panel-himax-hx8394.c
-@@ -0,0 +1,544 @@
+@@ -0,0 +1,549 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Driver for panels based on Himax HX8394 controller, such as:
@@ -377,6 +379,11 @@ index 000000000000..1665bf2a9148
 +		goto disable_vcc;
 +	}
 +
++	/* Guarantee the panel's minimum reset-low dwell (>=1 ms per the
++	 * RK055HDMIPI4MA0 reference sequence) -- with always-on rails the
++	 * regulator enables are near-instant refcount bumps.
++	 */
++	usleep_range(1000, 2000);
 +	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
 +
 +	msleep(180);

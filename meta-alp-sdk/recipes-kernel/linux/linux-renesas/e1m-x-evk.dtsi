@@ -113,7 +113,9 @@
  * (no bridge/mux on this carrier). Display 2 (J28) sits on the DSI1
  * lane set, which the V2N family does not populate -- permanently
  * unavailable on V2N/V2M.
- * Panel rails (+5V/+3V3/+L1_VIO) are always-on; LCD1_PWR_EN (IO15) is
+ * Panel rails (+5V/+3V3/+L1_VIO) are always-on. The panel VIO rail is
+ * the carrier's strap-selected L1_VIO (header P1), modeled here as the
+ * 3V3 default strap. LCD1_PWR_EN (IO15) is
  * pulled high on the carrier and IO15 is unrouted on V2N -- no power
  * GPIO needed. Panel reset = E1M IO13 -> GD32 PF1 = bridge gpio line 5.
  * Touch (GT911 on the panel FFC) is NOT wired here: its bus
