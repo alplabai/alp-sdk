@@ -101,6 +101,20 @@ endif()
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/firmware-version.txt GD32_BRIDGE_FW_VERSION LIMIT_COUNT 1)
 message(STATUS "gd32-bridge firmware version: ${GD32_BRIDGE_FW_VERSION}")
 
+# GET_BUILD_ID payload: "<fw-version>+<sha>" padded to exactly 20 chars
+# (protocol.c _Static_asserts the literal length).  The post-link SHA hook
+# is still TODO, so the sha portion is a zero placeholder sized to fill the
+# frame -- but the version half is REAL, which is what lets an OTA bench
+# flow prove a slot swap took effect over the wire.
+string(LENGTH "${GD32_BRIDGE_FW_VERSION}" _fw_ver_len)
+math(EXPR _sha_pad_len "19 - ${_fw_ver_len}")
+if(_sha_pad_len LESS 1)
+    message(FATAL_ERROR "firmware-version.txt too long for the 20-char build-id frame")
+endif()
+string(REPEAT "0" ${_sha_pad_len} _sha_placeholder)
+set(GD32_BRIDGE_BUILD_ID "${GD32_BRIDGE_FW_VERSION}+${_sha_placeholder}")
+message(STATUS "gd32-bridge build-id: ${GD32_BRIDGE_BUILD_ID}")
+
 # Common per-target config: Cortex-M33 + thumb + soft-float, the version
 # define, includes, the vendor lib + .hex/.bin emission (gd32 backend only;
 # the stub backend has no Reset_Handler so objcopy of a sectionless ELF
@@ -108,7 +122,9 @@ message(STATUS "gd32-bridge firmware version: ${GD32_BRIDGE_FW_VERSION}")
 # failure on Generic-system toolchains.
 function(gd32_firmware_target tgt linker_script)
     target_include_directories(${tgt} PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/hal)
-    target_compile_definitions(${tgt} PRIVATE GD32_BRIDGE_FW_VERSION="${GD32_BRIDGE_FW_VERSION}")
+    target_compile_definitions(${tgt} PRIVATE
+        GD32_BRIDGE_FW_VERSION="${GD32_BRIDGE_FW_VERSION}"
+        GD32_BRIDGE_BUILD_ID="${GD32_BRIDGE_BUILD_ID}")
     target_compile_options(${tgt} PRIVATE
         -mcpu=cortex-m33 -mthumb -mfloat-abi=soft
         -ffunction-sections -fdata-sections
