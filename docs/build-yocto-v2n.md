@@ -62,7 +62,7 @@ Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
 
 ## 4. Deploy the rootfs
 
-The bootloader's `bootcmd` loads `Image` + `r9a09g056n48-rzv2n-evk.dtb`
+The bootloader's `bootcmd` loads `Image` + `e1m-v2n101-x-evk.dtb`
 from the ext4 rootfs `/boot` (SD `mmcblk1p2` in dev, eMMC `mmcblk0p2`
 in production; `ALP_BOOT_DEVICE ?= "emmc"`).
 
