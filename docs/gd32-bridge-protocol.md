@@ -761,7 +761,7 @@ firmware in `firmware/gd32-bridge/src/ota.c`):
 | Op | Name | Request payload | Reply payload |
 |------|------|----------------|---------------|
 | `0xF0` | `OTA_BEGIN` | `size:u32 expected_crc32:u32` | `chunk_max:u16 target_slot:u8` |
-| `0xF1` | `OTA_WRITE_CHUNK` | `offset:u32 data[..chunk_max]` | `received_bytes:u32` (high-water) |
+| `0xF1` | `OTA_WRITE_CHUNK` | `offset:u32 len:u8 data[len]` | `received_bytes:u32` (high-water) |
 | `0xF2` | `OTA_VERIFY` | _empty_ | `computed_crc32:u32 verified:u8` |
 | `0xF3` | `OTA_COMMIT` | _empty_ | _empty_ (resets on success) |
 | `0xF4` | `OTA_ROLLBACK` | _empty_ | _empty_ (resets on success) |
@@ -773,12 +773,26 @@ Value encodings: `state` = 0 IDLE / 1 READY / 2 BUSY / 3 VERIFIED /
 offsets must land on 8-byte (FMC doubleword) boundaries; the image
 CRC-32 is IEEE 802.3 reflected (zlib-compatible).  `WRITE_CHUNK` and
 `VERIFY` without a BEGIN-opened session answer `STATUS_NOT_READY`
-(0x02), as does `COMMIT` before a successful `VERIFY`.  Because
-BEGIN's slot erase, VERIFY's full-image CRC, and COMMIT/ROLLBACK's
-reset run inside the request transaction, their reply transaction
-can miss — hosts treat an I/O error there as "issued" and confirm
-via `OTA_GET_STATE` (or by re-initialising against the rebooted
-bridge after COMMIT/ROLLBACK).
+(0x02), as does `COMMIT` before a successful `VERIFY`.
+
+`WRITE_CHUNK`'s explicit `len` byte (v0.6) is load-bearing, not
+redundant: the slave can capture a request merged with the following
+transaction's zero filler (its FMC program window swallows CS edges),
+and for a frame whose CRC happens to be byte-palindromic the
+zero-extended span still passes the span CRC (CRC-CCITT-FALSE
+self-consumption: message + own CRC + zeros hashes to `0x0000` —
+silicon-caught 2026-06-04 at the first such chunk of a real image).
+A `len`-vs-span mismatch answers `STATUS_INVAL` without disturbing
+the session.  Re-sent chunks below the high-water mark are
+deduplicated against flash (identical → OK without re-programming;
+different → `STATUS_IO`): the ECC flash cannot program a doubleword
+twice even with identical data.
+
+Because BEGIN's slot erase, VERIFY's full-image CRC, and
+COMMIT/ROLLBACK's reset run inside the request transaction, their
+reply transaction can miss — hosts treat an I/O error there as
+"issued" and confirm via `OTA_GET_STATE` (or by re-initialising
+against the rebooted bridge after COMMIT/ROLLBACK).
 
 **Path B — Host-driven SWD bit-bang (universal recovery).**
 

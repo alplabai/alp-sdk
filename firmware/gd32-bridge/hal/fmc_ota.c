@@ -106,11 +106,17 @@ OTA_RAMFUNC static fmc_state_enum erase_one_page(uint32_t addr)
         page = (addr - OTA_BOOTLOADER_BASE) / OTA_FMC_PAGE_SIZE_SBANK;
     }
 
+    /* Clear stale sticky errors BEFORE the readiness wait: a latched
+     * PGERR from an earlier failed session is not "busy", but the
+     * decode reports it ahead of READY and would wedge every later op
+     * (silicon-caught 2026-06-04: one failed run poisoned the next
+     * session's first erase). */
+    FMC_STAT = OTA_FMC_STAT_ERR_MASK;
+
     fmc_state_enum st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
     if (st != FMC_READY) {
         return st;
     }
-    FMC_STAT = OTA_FMC_STAT_ERR_MASK;        /* drop stale sticky errors */
     if (bank1) {
         FMC_CTL |= FMC_CTL_BKSEL;
     } else {
@@ -151,11 +157,12 @@ bool ota_fmc_erase_range(uint32_t base, uint32_t len)
 
 OTA_RAMFUNC static fmc_state_enum program_one_dword(uint32_t addr, uint64_t dw)
 {
+    FMC_STAT = OTA_FMC_STAT_ERR_MASK;        /* stale errors are not busy */
+
     fmc_state_enum st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
     if (st != FMC_READY) {
         return st;
     }
-    FMC_STAT = OTA_FMC_STAT_ERR_MASK;        /* drop stale sticky errors */
     FMC_CTL |= FMC_CTL_PG;
     REG32(addr)      = (uint32_t)(dw & 0xFFFFFFFFu);
     __ISB();

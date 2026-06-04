@@ -33,8 +33,8 @@ spi_ping_request               = A500FF84
 spi_ping_reply_ok              = A500FF84
 # SOF | CMD=0x01 (GET_VERSION) | CRC -- empty payload
 spi_get_version_request        = A501EFA5
-# SOF | STATUS=0x00 | major=0 | minor=5 | patch=0 | CRC
-spi_get_version_reply_v0_5_0   = A500000500E7CA
+# SOF | STATUS=0x00 | major=0 | minor=6 | patch=0 | CRC
+spi_get_version_reply_v0_6_0   = A500000600B299
 
 # ---------------------------------------------------------------------
 # §3. I2C envelopes -- register-style framing
@@ -121,10 +121,10 @@ spi_adc_dsp_chain_bind_probe_request = A539000089C7
 # ---------------------------------------------------------------------
 # SOF | CMD=0xF0 | size=41976 (LE 0x0000A3F8) | expected_crc32=0xDEADBEEF (LE) | CRC
 spi_ota_begin_request          = A5F0F8A30000EFBEADDE50A8
-# SOF | STATUS=0x00 | chunk_max=61 (LE 0x003D) | target_slot=B(1) | CRC -- 61 = MAX_PAYLOAD(65) - 4-byte WRITE_CHUNK offset header
-spi_ota_begin_reply_slot_b     = A5003D00018FEA
-# SOF | CMD=0xF1 | offset=0 (LE) | data=01..08 (one FMC doubleword) | CRC -- offsets pace on 8-byte boundaries
-spi_ota_write_chunk_off0_8b_request = A5F1000000000102030405060708027C
+# SOF | STATUS=0x00 | chunk_max=60 (LE 0x003C) | target_slot=B(1) | CRC -- 60 = MAX_PAYLOAD(65) - offset:u32 - len:u8 header
+spi_ota_begin_reply_slot_b     = A5003C0001B8DA
+# SOF | CMD=0xF1 | offset=0 (LE) | len=8 | data=01..08 (one FMC doubleword) | CRC -- the len byte rejects transaction-merged zero-extended captures that survive the span CRC via the palindromic-CRC self-consumption hole; offsets pace on 8-byte boundaries
+spi_ota_write_chunk_off0_8b_request = A5F100000000080102030405060708B140
 # SOF | STATUS=0x00 | received_bytes=8 (LE, cumulative high-water) | CRC
 spi_ota_write_chunk_reply_8b   = A5000800000029FA
 # SOF | CMD=0xF2 | (no payload -- CRC was supplied at BEGIN) | CRC

@@ -883,17 +883,20 @@ alp_status_t gd32g553_ota_write_chunk(gd32g553_t *ctx,
 
     /* Chunk size is bounded by the wire payload ceiling.  Bridges
      * that advertise a smaller chunk_max_bytes in BEGIN are honoured
-     * by the caller -- this helper only enforces the absolute limit. */
-    if (data_len > GD32G553_MAX_PAYLOAD_BYTES - 4u) return ALP_ERR_INVAL;
+     * by the caller -- this helper only enforces the absolute limit.
+     * (v0.6: the payload carries an explicit len byte after the
+     * offset, so the data ceiling is MAX_PAYLOAD - 5.) */
+    if (data_len > GD32G553_MAX_PAYLOAD_BYTES - 5u) return ALP_ERR_INVAL;
 
     uint8_t req[GD32G553_MAX_PAYLOAD_BYTES] = { 0 };
     put_le32(&req[0], offset);
-    memcpy(&req[4], data, data_len);
+    req[4] = (uint8_t)data_len;   /* v0.6 anti-extension cross-check */
+    memcpy(&req[5], data, data_len);
 
     uint8_t reply[4] = {0};
     alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT,
                               GD32G553_CMD_OTA_WRITE_CHUNK,
-                              req, 4u + data_len,
+                              req, 5u + data_len,
                               reply, sizeof(reply));
     if (s != ALP_OK) return s;
     *received_bytes = get_le32(reply);

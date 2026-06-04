@@ -36,7 +36,7 @@
  * firmware-version.txt, surfaced via GET_BUILD_ID ("<ver>+<sha>").  The
  * two axes move independently. */
 #define PROTOCOL_VERSION_MAJOR           0u
-#define PROTOCOL_VERSION_MINOR           5u
+#define PROTOCOL_VERSION_MINOR           6u
 #define PROTOCOL_VERSION_PATCH           0u
 
 /* Number of concurrent DMA-backed ADC streams the firmware supports.

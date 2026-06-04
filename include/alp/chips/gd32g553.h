@@ -970,9 +970,18 @@ alp_status_t gd32g553_ota_begin(gd32g553_t *ctx,
 /**
  * @brief Write one chunk of the payload at @p offset.
  *
- * Chunks may be re-sent (same offset, same data) safely -- the
- * firmware re-writes the destination region without an erase.  Chunks
- * arriving out of order are also safe because the offset is absolute.
+ * Wire payload (protocol v0.6): `offset:u32 len:u8 data[len]` -- the
+ * explicit length byte lets the firmware reject transaction-merged
+ * captures regardless of CRC coincidences (the span CRC alone cannot:
+ * a frame whose CRC is byte-palindromic self-validates when
+ * zero-extended).
+ *
+ * Re-sends of an already-written chunk are deduplicated: the firmware
+ * compares the bytes against flash and acks without re-programming
+ * (the ECC flash cannot program a doubleword twice, even with
+ * identical data).  Stream chunks contiguously upward from offset 0;
+ * a chunk that PARTIALLY overlaps written data fails with an I/O
+ * error and poisons the session (re-BEGIN to recover).
  *
  * @param ctx             GD32G553 bridge context (must be initialised first).
  * @param offset          Absolute byte offset of this chunk within the

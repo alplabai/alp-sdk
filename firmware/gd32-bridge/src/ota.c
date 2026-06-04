@@ -147,9 +147,10 @@ static gd32_bridge_status_t h_begin(const uint8_t *req, size_t len,
     }
     s_last_off = 0u;
     s_state    = OTA_ST_READY;
-    /* Host OTA_BEGIN reply: chunk_max:u16 (LE), target_slot:u8. */
+    /* Host OTA_BEGIN reply: chunk_max:u16 (LE), target_slot:u8.
+     * chunk_max accounts for the offset:u32 + len:u8 header (v0.6). */
     if (cap >= 3u) {
-        const uint16_t chunk_max = (uint16_t)(GD32_BRIDGE_MAX_PAYLOAD_BYTES - 4u);
+        const uint16_t chunk_max = (uint16_t)(GD32_BRIDGE_MAX_PAYLOAD_BYTES - 5u);
         reply[0] = (uint8_t)(chunk_max & 0xFFu);
         reply[1] = (uint8_t)(chunk_max >> 8);
         reply[2] = s_inactive;
@@ -161,21 +162,54 @@ static gd32_bridge_status_t h_begin(const uint8_t *req, size_t len,
 static gd32_bridge_status_t h_write(const uint8_t *req, size_t len,
                                     uint8_t *reply, size_t cap, size_t *rlen)
 {
-    /* Host OTA_WRITE_CHUNK req: offset:u32, data[].  Reply: received_bytes:u32. */
+    /* Host OTA_WRITE_CHUNK req: offset:u32, len:u8, data[len].
+     * Reply: received_bytes:u32.
+     *
+     * The explicit len byte is LOAD-BEARING (protocol v0.6,
+     * silicon-caught 2026-06-04): the slave can capture a frame merged
+     * with the following transaction's zero filler (the FMC program
+     * window swallows CS edges), and for the ~1-in-256 chunk whose
+     * frame CRC is byte-palindromic the zero-extended span still
+     * passes the span CRC (CRC-CCITT self-consumption: frame + own
+     * CRC + zeros hashes to 0x0000).  Cross-checking the embedded
+     * length against the span-derived length rejects any such
+     * extension regardless of CRC coincidences -- and without
+     * poisoning the session (plain STATUS_INVAL, state untouched). */
     if (s_state != OTA_ST_READY) {
         /* No BEGIN-opened session: the inactive slot is not erased and
          * s_img_len/s_expected_crc are unset -- programming here would
          * corrupt the slot.  Host must (re-)issue OTA_BEGIN. */
         return STATUS_NOT_READY;
     }
-    if (len < 4u) { return STATUS_INVAL; }
+    if (len < 5u) { return STATUS_INVAL; }
     const uint32_t off  = rd_u32(&req[0]);
-    const size_t   dlen = len - 4u;
+    const size_t   dlen = req[4];
+    if (dlen == 0u || dlen != len - 5u) {
+        return STATUS_INVAL;       /* extended/truncated capture: drop */
+    }
     if ((uint32_t)off + dlen > OTA_SLOT_SIZE) {
         s_state = OTA_ST_ERROR; s_err = 3u; return STATUS_OUT_OF_RANGE;
     }
+    /* The transport is AT-LEAST-ONCE: the slave can decode a request
+     * twice (silicon-caught 2026-06-04: chunk #256 replayed
+     * deterministically), and re-programming ECC flash hard-faults.
+     * Make replays idempotent: a chunk entirely below the high-water
+     * mark is compared against what's in flash -- identical bytes ack
+     * without programming, different bytes are real corruption.  A
+     * PARTIAL overlap still falls through to the program path (and
+     * PGERRs) -- fixed-size streaming never produces one. */
+    if (off + (uint32_t)dlen <= s_last_off) {
+        const uint8_t *flash = (const uint8_t *)(ota_slot_base(s_inactive) + off);
+        if (memcmp(flash, &req[5], dlen) == 0) {
+            s_state = OTA_ST_READY;
+            if (cap >= 4u) { wr_u32(&reply[0], s_last_off); *rlen = 4u; }
+            return STATUS_OK;
+        }
+        s_state = OTA_ST_ERROR; s_err = 4u;
+        return STATUS_IO;
+    }
     s_state = OTA_ST_BUSY;
-    if (!ota_fmc_program(ota_slot_base(s_inactive) + off, &req[4], dlen)) {
+    if (!ota_fmc_program(ota_slot_base(s_inactive) + off, &req[5], dlen)) {
         s_state = OTA_ST_ERROR; s_err = 4u; return STATUS_IO;
     }
     if (off + (uint32_t)dlen > s_last_off) {

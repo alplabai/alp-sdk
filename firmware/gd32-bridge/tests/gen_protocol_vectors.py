@@ -110,7 +110,7 @@ STATUS_NOSUPPORT             = 0x06
 
 # Firmware-declared version triple; bump when protocol.h's
 # PROTOCOL_VERSION_{MAJOR,MINOR,PATCH} change.
-FW_VERSION = (0, 5, 0)
+FW_VERSION = (0, 6, 0)
 
 
 HEADER = """\
@@ -442,21 +442,25 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
     out.append((
         "spi_ota_begin_reply_slot_b",
         spi_frame(SOF, STATUS_OK,
-                  bytes([0x3D, 0x00,                      # chunk_max = 61 (LE)
+                  bytes([0x3C, 0x00,                      # chunk_max = 60 (LE)
                          0x01,                            # target_slot = B
                   ])).hex().upper(),
-        "SOF | STATUS=0x00 | chunk_max=61 (LE 0x003D) | target_slot=B(1) |"
-        " CRC -- 61 = MAX_PAYLOAD(65) - 4-byte WRITE_CHUNK offset header",
+        "SOF | STATUS=0x00 | chunk_max=60 (LE 0x003C) | target_slot=B(1) |"
+        " CRC -- 60 = MAX_PAYLOAD(65) - offset:u32 - len:u8 header",
     ))
     out.append((
         "spi_ota_write_chunk_off0_8b_request",
         spi_frame(SOF, CMD_OTA_WRITE_CHUNK,
                   bytes([0x00, 0x00, 0x00, 0x00,          # offset = 0 (LE)
+                         0x08,                            # len = 8 (v0.6 cross-check)
                          0x01, 0x02, 0x03, 0x04,          # data[8] (8-byte
                          0x05, 0x06, 0x07, 0x08,          # doubleword granule)
                   ])).hex().upper(),
-        "SOF | CMD=0xF1 | offset=0 (LE) | data=01..08 (one FMC doubleword) |"
-        " CRC -- offsets pace on 8-byte boundaries",
+        "SOF | CMD=0xF1 | offset=0 (LE) | len=8 | data=01..08 (one FMC"
+        " doubleword) | CRC -- the len byte rejects transaction-merged"
+        " zero-extended captures that survive the span CRC via the"
+        " palindromic-CRC self-consumption hole; offsets pace on 8-byte"
+        " boundaries",
     ))
     out.append((
         "spi_ota_write_chunk_reply_8b",
