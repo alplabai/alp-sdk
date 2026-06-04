@@ -194,12 +194,21 @@ static bool gpio_is_output[GPIO_PAD_MAP_COUNT];
 /* TRNG (NIST SP800-90B) state + bring-up.                            */
 /* ----------------------------------------------------------------- */
 
-/* Set true once bridge_hw_init() has confirmed the TRNG is producing
- * data and its hardware self-checks are clean.  bridge_hw_trng_read()
- * short-circuits to BRIDGE_HW_ERR_IO when this is false -- e.g. PLL
- * never stabilised, or the TRNG's analog noise source self-check
- * tripped CECS / SECS during bring-up. */
-static bool trng_ready = false;
+/* TRNG bring-up is INCREMENTAL: `trng_started` records that the unit
+ * is configured + enabled; `trng_ready` that the first conditioned
+ * word arrived (DRDY) with clean self-checks.  The split exists
+ * because the NIST-mode pipeline's first DRDY (analog source startup
+ * + 440-bit window fill + SHA-256 stage) can take longer than any
+ * wait this firmware is allowed to spin inside a request handler --
+ * the original single-shot bring-up waited ~1 ms at boot, timed out
+ * on real silicon, latched trng_ready = false FOREVER and every
+ * TRNG_READ answered STATUS_IO (HiL soak 2026-06-04: 0-for-437).
+ * Now bring-up configures and returns; each read re-polls DRDY with
+ * a short bound until conditioning completes, and a tripped
+ * CECS/SECS self-check triggers a full reconfigure on the next call
+ * instead of bricking the surface for the session. */
+static bool trng_started = false;
+static bool trng_ready   = false;
 
 /* Coarse timeout for the PLL stable + TRNG DRDY polls.  Roughly
  * 100k iterations of `trng_flag_get` -- about half a millisecond
@@ -209,21 +218,18 @@ static bool trng_ready = false;
 #define TRNG_INIT_TIMEOUT 100000u
 #define TRNG_READY_TIMEOUT 65535u
 
-/* One-time TRNG bring-up.  Configuration mirrors the vendor's
- * `TRNG_NIST_mode` example: PLL Q / 2 clock source, SHA-256
- * conditioning over a 440-bit input window, 256-bit output stage.
- * Returns true iff the TRNG produced its first DRDY without
- * tripping the clock-error (CECS) / seed-error (SECS) flags --
- * either of those fault states leaves the unit unable to deliver
- * randomness, and we surface that via `trng_ready = false`. */
-static bool trng_bringup(void)
+/* Configure + enable the TRNG (no DRDY wait here -- see above).
+ * Mirrors the vendor's `TRNG_NIST_mode` example: PLL Q / 2 clock
+ * source, SHA-256 conditioning over a 440-bit input window, 256-bit
+ * output stage. */
+static bool trng_start(void)
 {
     uint32_t to;
 
     /* Vendor's `SystemInit()` (called from Reset_Handler before
      * main()) boots the PLL.  In normal operation PLLSTB is set by
      * the time we get here; bound the wait so a misconfigured
-     * clock tree doesn't hang `bridge_hw_init`. */
+     * clock tree doesn't hang. */
     for (to = TRNG_INIT_TIMEOUT; to != 0u; --to) {
         if (SET == rcu_flag_get(RCU_FLAG_PLLSTB)) break;
     }
@@ -246,16 +252,51 @@ static bool trng_bringup(void)
     trng_conditioning_enable();
     trng_postprocessing_enable();
     trng_enable();
+    return true;
+}
 
-    /* Wait for the first DRDY -- proves the noise source + post-
-     * processing pipeline are alive.  Bounded -- if the analog
-     * source is dead the unit will never trip DRDY. */
+/* TRNG fault detector.  Mirrors the vendor's trng_ready_check: a
+ * fault shows in FOUR places, and the two LATCHED interrupt flags are
+ * the ones that persist -- a seed error parks the unit with SEIF +
+ * STAT.ERRSTA set while the *current*-status SECS reads CLEAR again
+ * (silicon 2026-06-04: TRNG_STAT == 0x48, DRDY never returning, and a
+ * CECS/SECS-only check looping blind on DRDY until its budget died).
+ * Recovery for any of them is the same full deinit + reconfigure. */
+static bool trng_faulted(void)
+{
+    return (SET == trng_interrupt_flag_get(TRNG_INT_FLAG_CEIF)) ||
+           (SET == trng_interrupt_flag_get(TRNG_INT_FLAG_SEIF)) ||
+           (SET == trng_flag_get(TRNG_FLAG_CECS)) || (SET == trng_flag_get(TRNG_FLAG_SECS));
+}
+
+static void trng_demote(void)
+{
+    trng_deinit(); /* RCU reset clears the latched flags too */
+    trng_started = false;
+    trng_ready   = false;
+}
+
+/* Short, handler-safe DRDY poll: promotes `trng_ready` once the first
+ * conditioned word lands.  Faults are checked BEFORE the DRDY wait --
+ * in the latched-error state DRDY never comes, and burning the whole
+ * poll budget on a dead unit kept the request handler busy long
+ * enough to tar-pit unrelated commands. */
+static bool trng_poll_ready(void)
+{
+    uint32_t to;
+
+    if (trng_faulted()) {
+        trng_demote();
+        return false;
+    }
     for (to = TRNG_READY_TIMEOUT; to != 0u; --to) {
         if (SET == trng_flag_get(TRNG_FLAG_DRDY)) break;
     }
-    if (to == 0u) return false;
-    if (SET == trng_flag_get(TRNG_FLAG_CECS)) return false;
-    if (SET == trng_flag_get(TRNG_FLAG_SECS)) return false;
+    if (to == 0u || trng_faulted()) {
+        if (trng_faulted()) trng_demote();
+        return false;
+    }
+    trng_ready = true;
     return true;
 }
 
@@ -638,11 +679,23 @@ void bridge_hw_init(void)
         gpio_is_output[i] = false;
     }
 
-    /* TRNG bring-up.  Failure (PLL never stable, analog noise
-     * source bad, self-check tripped) leaves trng_ready = false;
-     * bridge_hw_trng_read returns BRIDGE_HW_ERR_IO in that case
-     * rather than serving zero-filled "randomness". */
-    trng_ready = trng_bringup();
+    /* TRNG bring-up: configure + enable only.  The NIST pipeline's
+     * first conditioned word can lag past any boot-time wait we are
+     * willing to spin; readiness is promoted lazily by the first
+     * TRNG_READ's short DRDY poll (by which point the host's boot
+     * settle has given the analog source seconds, not milliseconds). */
+    trng_started = trng_start();
+    if (trng_started) {
+        /* Boot-time readiness grace: the transports aren't up yet, so
+         * spending a few milliseconds here is free and spares the
+         * FIRST host TRNG_READ the one-time conditioning latency
+         * (observed on the functional tier: the inaugural read paid
+         * the promotion and answered STATUS_IO once).  Bounded; the
+         * lazy per-read path remains the safety net. */
+        for (unsigned round = 0u; round < 8u && trng_started && !trng_ready; ++round) {
+            (void)trng_poll_ready();
+        }
+    }
 
     /* TMU clock enable.  Per-op configuration happens in
      * bridge_hw_tmu_compute because the mode + I/O width vary per
@@ -1133,22 +1186,57 @@ int bridge_hw_trng_read(uint8_t *dest, size_t len)
 {
     if (dest == 0) return BRIDGE_HW_ERR_INVAL;
     if (len == 0u || len > 32u) return BRIDGE_HW_ERR_RANGE;
-    if (!trng_ready) return BRIDGE_HW_ERR_IO;
+
+    /* Lazy readiness ladder (see trng_started/trng_ready above): a
+     * unit that never started reconfigures here; a configured unit
+     * that hasn't produced its first word yet gets another short DRDY
+     * poll.  Each step is bounded handler-safe work; the host's reply
+     * re-read schedule absorbs the one-time latency, and a persistent
+     * failure keeps answering STATUS_IO honestly. */
+    if (!trng_started) {
+        trng_started = trng_start();
+        if (!trng_started) return BRIDGE_HW_ERR_IO;
+    }
+    if (!trng_ready && !trng_poll_ready()) return BRIDGE_HW_ERR_IO;
 
     /* Pull 32-bit randoms and pack their LSB bytes into `dest`.  A
      * single trng_get_true_random_data() call drains one entry from
      * the TRNG's output FIFO and the unit refills autonomously; we
      * poll DRDY between pulls so a starved-noise condition doesn't
-     * silently emit a stale word. */
-    size_t off = 0u;
+     * silently emit a stale word.
+     *
+     * The DRDY budget is SHARED across the whole request, NOT
+     * per-word: a max-length pull is 8 words = one full 256-bit NIST
+     * conditioning round, so the FIFO routinely runs dry mid-request
+     * and per-word waits stack up to ~9 ms of handler time -- far
+     * beyond the host's reply window.  The overrun reply then
+     * tar-pitted the next several commands (functional tier
+     * 2026-06-04: trng-32B plus exactly three followers failed on
+     * every fresh boot).  When the budget runs out the unit is
+     * HEALTHY, just mid-conditioning -- answer BUSY and let the host
+     * retry into the next round. */
+    uint32_t budget = 2u * TRNG_READY_TIMEOUT;
+    size_t   off    = 0u;
     while (off < len) {
-        uint32_t to;
-        for (to = TRNG_READY_TIMEOUT; to != 0u; --to) {
-            if (SET == trng_flag_get(TRNG_FLAG_DRDY)) break;
+        if (trng_faulted()) {
+            /* Fault (latched seed/clock error included) -- checked
+             * BEFORE the DRDY wait, since a parked unit never raises
+             * DRDY again.  Demote so the next call rebuilds (full
+             * re-seed); fail THIS call loudly -- never pad with
+             * non-random bytes. */
+            trng_demote();
+            return BRIDGE_HW_ERR_IO;
         }
-        if (to == 0u) return BRIDGE_HW_ERR_IO;
-        if (SET == trng_flag_get(TRNG_FLAG_CECS)) return BRIDGE_HW_ERR_IO;
-        if (SET == trng_flag_get(TRNG_FLAG_SECS)) return BRIDGE_HW_ERR_IO;
+        while ((RESET == trng_flag_get(TRNG_FLAG_DRDY)) && (budget != 0u)) {
+            --budget;
+        }
+        if (RESET == trng_flag_get(TRNG_FLAG_DRDY)) {
+            if (trng_faulted()) {
+                trng_demote();
+                return BRIDGE_HW_ERR_IO;
+            }
+            return BRIDGE_HW_ERR_BUSY; /* healthy, mid-conditioning */
+        }
 
         uint32_t     word  = trng_get_true_random_data();
         const size_t chunk = (len - off >= 4u) ? 4u : (len - off);
@@ -1203,24 +1291,42 @@ int bridge_hw_tmu_compute(uint8_t function, uint8_t format, uint32_t in_a, uint3
      * wrapper passes 0); the TMU's `m*sin(theta)` form needs a
      * non-zero modulus, so substitute unit-scale (1.0 in the active
      * format).  For native 2-input modes (ATAN2, MODULUS) the host's
-     * in_b is the actual second operand. */
+     * in_b is the actual second operand.
+     *
+     * ANGLE UNITS: the TMU's SIN/COS angle input is in units of PI
+     * (the vendor example writes `theta / DEMO_PI`), while the wire
+     * contract is RADIANS -- normalize the F32 angle here.  Q31
+     * angles are theta/pi by definition of the fixed-point format
+     * and pass through unchanged.  (Caught building the functional
+     * tier 2026-06-04: sin(0) == 0 in both conventions, so the soak's
+     * zero-angle probe could never see the unit mismatch.) */
+    uint32_t a = in_a;
     uint32_t b = in_b;
     if (sin_or_cos) {
-        b = (format == 1u) ? f32_to_bits(1.0f) /* IEEE-754 */
-                           : 0x7FFFFFFFu;      /* Q31 ~1.0  */
+        if (format == 1u) {
+            a = f32_to_bits(bits_to_f32(in_a) / 3.14159265358979f);
+            b = f32_to_bits(1.0f); /* IEEE-754 unit modulus */
+        } else {
+            b = 0x7FFFFFFFu;       /* Q31 ~1.0 */
+        }
     }
+
+    /* PACED input writes -- do NOT use the vendor tmu_two_*_write():
+     * it issues the two IDATA stores back-to-back, and with a warm
+     * i-cache they land ~1 AHB cycle apart and the TMU SWALLOWS the
+     * second word; the engine then waits forever for input word 2
+     * and ENDF never sets.  Silicon 2026-06-04: SIN computed exactly
+     * once per power-up (the cache-cold first call) and timed out on
+     * every subsequent call, while hand-driven SWD register writes --
+     * milliseconds apart -- always computed.  A TMU_CS read-back
+     * between the stores forces an AHB round-trip so the input latch
+     * takes word 1 before word 2 arrives.  Raw IDATA stores also skip
+     * the bits->float->bits soft-float churn (the wire carries the
+     * IEEE-754 pattern already). */
+    TMU_IDATA = a;
     if (d->inputs == 2u) {
-        if (format == 1u) {
-            tmu_two_f32_write(bits_to_f32(in_a), bits_to_f32(b));
-        } else {
-            tmu_two_q31_write(in_a, b);
-        }
-    } else {
-        if (format == 1u) {
-            tmu_one_f32_write(bits_to_f32(in_a));
-        } else {
-            tmu_one_q31_write(in_a);
-        }
+        (void)TMU_CS;
+        TMU_IDATA = b;
     }
 
     /* Wait for END.  Bounded so a misconfigured op doesn't hang. */
@@ -1236,7 +1342,16 @@ int bridge_hw_tmu_compute(uint8_t function, uint8_t format, uint32_t in_a, uint3
 
     /* Drain output(s).  For SIN/COS the second word is the aux
      * scaling factor; we discard it.  Single-output modes need
-     * only one read. */
+     * only one read.
+     *
+     * ANGLE UNITS, output side: ATAN/ATAN2 results come out of the
+     * CORDIC in units of PI (the mirror image of the SIN/COS input
+     * convention above) -- scale back to the wire's RADIANS for F32.
+     * Caught by the functional tier 2026-06-04: atan(1) answered
+     * 0.25 (pi/4 in pi-units) with STATUS_OK.  Q31 angle results stay
+     * native (theta/pi is the documented Q31 convention). */
+    const bool angle_out = (d->mode == TMU_MODE_ATAN) || (d->mode == TMU_MODE_ATAN2);
+
     if (sin_or_cos) {
         if (format == 1u) {
             float fr;
@@ -1251,6 +1366,9 @@ int bridge_hw_tmu_compute(uint8_t function, uint8_t format, uint32_t in_a, uint3
         if (format == 1u) {
             float fr;
             tmu_one_f32_read(&fr);
+            if (angle_out) {
+                fr *= 3.14159265358979f;
+            }
             *result_out = f32_to_bits(fr);
         } else {
             tmu_one_q31_read(result_out);

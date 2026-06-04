@@ -51,6 +51,21 @@ static uint8_t  spi_tx_buf[SPI_MAX_FRAME_BYTES];
 static size_t   spi_tx_len;
 static size_t   spi_tx_cursor;
 
+/* Consecutive drain/empty rewinds since the last decoded request.
+ * The host's re-read ladder legitimately drains the same staged
+ * reply up to 8 times; far beyond that the staged bytes are a STALE
+ * reply some LATER command keeps tripping over (its own request was
+ * lost to edge coalescing while a long handler ran, so every read
+ * returns a wrong-shaped frame that fails the host's CRC and the
+ * rewind re-arms it -- a tar pit that serially poisoned 3 commands
+ * per overrun on the 2026-06-04 functional tier).  Past the bound,
+ * swap the stale reply for the 4-byte STATUS_IO envelope: EVERY
+ * expected reply shape decodes that via the host's error-envelope
+ * fallback, so the poisoned command fails fast and the next request
+ * starts clean. */
+#define SPI_DRAIN_REWIND_BOUND 12u
+static uint8_t  spi_drain_streak;
+
 static void stage_reply(uint8_t status, const uint8_t *payload, size_t payload_len)
 {
     spi_tx_buf[0] = GD32_BRIDGE_SOF;
@@ -62,8 +77,9 @@ static void stage_reply(uint8_t status, const uint8_t *payload, size_t payload_l
     const uint16_t crc       = crc16_ccitt_false(spi_tx_buf, crc_covered);
     spi_tx_buf[crc_covered]      = (uint8_t)(crc & 0xFFu);
     spi_tx_buf[crc_covered + 1u] = (uint8_t)((crc >> 8) & 0xFFu);
-    spi_tx_len    = crc_covered + 2u;
-    spi_tx_cursor = 0u;
+    spi_tx_len      = crc_covered + 2u;
+    spi_tx_cursor   = 0u;
+    spi_drain_streak = 0u; /* fresh reply staged: the drain ladder restarts */
 }
 
 /* For early-error replies that don't have a CMD context yet, fall
@@ -96,6 +112,10 @@ static void decode_and_dispatch(void)
      * clean kill is a sequence echo in the STATUS byte -- queued for the
      * next wire-protocol rev (docs/gd32-link-sci7-next-rev.md). */
     if (spi_rx_len == 0u) {
+        if (++spi_drain_streak > SPI_DRAIN_REWIND_BOUND) {
+            stage_error_reply(STATUS_IO); /* tar-pit breaker, see above */
+            return;
+        }
         spi_tx_cursor = 0u;
         return;
     }
@@ -130,6 +150,10 @@ static void decode_and_dispatch(void)
          * with the correct reply intact in the buffer.  Rewinding makes
          * the re-arm idempotent: every drain re-stages the same reply,
          * so the host's re-read schedule converges as documented. */
+        if (++spi_drain_streak > SPI_DRAIN_REWIND_BOUND) {
+            stage_error_reply(STATUS_IO); /* tar-pit breaker, see above */
+            return;
+        }
         spi_tx_cursor = 0u;
         return;
     }
@@ -206,9 +230,10 @@ bool spi_slave_tx_pending(void)
 
 void transport_spi_init(void)
 {
-    spi_rx_len    = 0u;
-    spi_tx_len    = 0u;
-    spi_tx_cursor = 0u;
+    spi_rx_len       = 0u;
+    spi_tx_len       = 0u;
+    spi_tx_cursor    = 0u;
+    spi_drain_streak = 0u;
     /* SPI1 slave + CS-EXTI bring-up lives in the gd32 HAL backend
      * (hal/transport_hw_gd32.c); the stub backend's weak no-op keeps
      * this hardware-free for host-side protocol tests. */
