@@ -269,7 +269,7 @@ The active generators are:
 
 | Script                                  | Reads                                                | Writes                                                                         |
 |-----------------------------------------|------------------------------------------------------|--------------------------------------------------------------------------------|
-| `scripts/alp_orchestrate.py`            | `board.yaml` + SoM preset + SoC JSON + board preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, per-slice `alp.conf` / `local.conf` / `cmake-args.txt` |
+| `scripts/alp_orchestrate.py`            | `board.yaml` + SoM preset + SoC JSON + board preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, `build/alp_sysbuild.conf` (when `boot:` declared), per-slice `alp.conf` / `local.conf` / `cmake-args.txt`; also `--emit build-plan` — the machine-readable plan JSON external build front-ends consume (ADR 0014) |
 | `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × board route-table demonstrator) |
 | `scripts/gen_soc_caps.py`               | `metadata/socs/**/*.json`                            | `include/alp/soc_caps.h` (per-SoC `ALP_SOC_*_COUNT` + `ALP_SOC_*_MAX_*` macros) |
 | `scripts/gen_board_header.py`         | `metadata/boards/<name>.yaml`                       | `include/alp/boards/alp_<board>_routes.h` (board macro mapping)            |
