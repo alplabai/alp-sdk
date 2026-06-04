@@ -40,12 +40,23 @@ One-shot at boot (not per-cycle): `adc_dsp_chain_open` probe — the
 pool and poison the stats.
 
 **Quarantine list** (skipped, don't gate the verdict): the soak's
-first silicon runs (2026-06-04) caught five HAL surfaces failing from
+first silicon runs (2026-06-04) caught six HAL surfaces failing from
 cycle 1 — `pwm_capture`, `adc_stream`, `qenc`, `tmu`,
-`ota_get_state` — with `adc_stream` actively destructive (a failed
-`STREAM_END` leaves its circular DMA contending with the SPI slave's
-channels until the link rots).  Each is quarantined in the test table
-with its observed failure; un-quarantine as firmware fixes land.
+`ota_get_state`, `trng` — with `adc_stream` actively destructive (a
+failed `STREAM_END` leaves its circular DMA contending with the SPI
+slave's channels until the link rots) and `trng`'s in-handler
+conditioning wait breaking the reply window plus rippling stale
+replies into the next ~3 tests of the cycle.  Each is quarantined in
+the test table with its observed failure; un-quarantine as firmware
+fixes land.
+
+**Validation record** (2026-06-04, trng still active in that run):
+**1526 cycles / ~50 min, cold-boot-autonomous, zero link wedges**.
+The 13 healthy surfaces scored 1526/1526 clean apiece (counter
+1525/1526 — one recovered transient); trng failed every cycle and
+rippled into the 3 tests after it, all recovered at each cycle
+boundary — which is itself the strongest liveness evidence: ~6000
+sustained per-cycle errors with zero hangs.
 
 ## Reading the output
 

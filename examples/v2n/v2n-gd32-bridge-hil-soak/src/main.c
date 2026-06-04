@@ -557,6 +557,13 @@ static bool t_ota_get_state(soak_stat_t *st)
 /*   - qenc          reset/read -> -5 from cycle 1                    */
 /*   - tmu           sqrt -> -5 from cycle 1                          */
 /*   - ota_get_state -5 from cycle 1 on the armed build               */
+/*   - trng          -5 every cycle: the DRDY/conditioning wait runs  */
+/*                   inside the request handler, long enough to break  */
+/*                   the reply window (transaction-merge class), and   */
+/*                   the stale-reply ripple then fails the next ~3     */
+/*                   tests of the same cycle (cycle-boundary idle      */
+/*                   self-heals -- 1526-cycle soak proved the link     */
+/*                   itself never wedges from this)                    */
 /* ------------------------------------------------------------------ */
 
 typedef bool (*soak_fn_t)(soak_stat_t *st);
@@ -579,7 +586,7 @@ static struct {
     { { "dac", 0, 0, 0 }, t_dac, false },
     { { "qenc", 0, 0, 0 }, t_qenc, true },
     { { "counter", 0, 0, 0 }, t_counter, false },
-    { { "trng", 0, 0, 0 }, t_trng, false },
+    { { "trng", 0, 0, 0 }, t_trng, true },
     { { "tmu", 0, 0, 0 }, t_tmu, true },
     { { "timer_sync", 0, 0, 0 }, t_timer_sync, false },
     { { "power_mode", 0, 0, 0 }, t_power_mode, false },
