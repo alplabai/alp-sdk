@@ -188,7 +188,7 @@ typedef enum {
      * for PWM, DMA-backed continuous acquisition).  On V2N every
      * E1M PWM channel rides one of the GD32's 16-bit advanced
      * timers (TIMER0 MCH0..MCH3 on PWM0..3, TIMER7 MCH0..MCH3 on
-     * PWM4..7) -- ~4.16 ns LSB at the 240 MHz core clock, 273 us
+     * PWM4..7) -- ~4.63 ns LSB at the 216 MHz CK_TIMER, 303 us
      * maximum period.  CMD_PWM_GET reports the rounded actual. */
     GD32G553_CMD_PWM_CONFIGURE    = 0x22,
     GD32G553_CMD_ADC_CONFIGURE    = 0x32,
@@ -490,7 +490,7 @@ typedef enum {
  *  TIMER7 channel (PWM0..3 -> TIMER0_MCH0..MCH3 on GD32 pads
  *  PA11 / PB1 / PB14 / PC5; PWM4..7 -> TIMER7_MCH0..MCH3 on PC10 /
  *  PC11 / PC12 / PD0).  Both are 16-bit advanced timers running at
- *  the 240 MHz core clock, giving ~4.16 ns LSB and 273 us max
+ *  the 216 MHz CK_TIMER, giving ~4.63 ns LSB and 303 us max
  *  period; the firmware rounds caller `period_ns` / `duty_ns` down
  *  to the closest achievable tick count, and @ref gd32g553_pwm_get
  *  returns the rounded actual.
@@ -545,16 +545,22 @@ alp_status_t gd32g553_adc_configure(gd32g553_t *ctx, uint8_t channel,
  *  Two streams supported concurrently: stream 0 binds to GD32 DMA0,
  *  stream 1 binds to DMA1 (per the chip's dual-DMA-controller
  *  topology).  Different channels and different sample rates can run
- *  simultaneously across the two streams.  Calling BEGIN on a
- *  stream_id that's already active returns @ref ALP_ERR_BUSY.
+ *  simultaneously across the two streams, with one constraint: each
+ *  stream needs its own ADC converter, so a second BEGIN whose
+ *  channel shares the first stream's converter returns
+ *  @ref ALP_ERR_INVAL (channels 0-1 = ADC3, 2-3 = ADC2, 4-5 = ADC1,
+ *  6-7 = ADC0).  Calling BEGIN on a stream_id that's already active
+ *  also returns @ref ALP_ERR_INVAL.
  *
  *  @param ctx            GD32G553 bridge context (must be initialised first).
  *  @param stream_id      Stream slot (0 .. @ref GD32G553_BRIDGE_ADC_STREAM_COUNT - 1).
  *  @param channel        ADC channel (0..7).
- *  @param sample_rate_hz Target rate.  Firmware caps at the SoC's
- *                        physical limit (~1.5 Msps on a 12-bit
- *                        single-channel acquisition); exceeded
- *                        requests return @ref ALP_ERR_OUT_OF_RANGE.
+ *  @param sample_rate_hz Target rate, realised by a firmware pacing
+ *                        timer (fw v0.2.4+): one conversion per timer
+ *                        period, 1 Hz..100 kHz, quantised to the
+ *                        pacer tick (1 us at >=16 Hz, 100 us below).
+ *                        0 returns @ref ALP_ERR_INVAL; above the cap
+ *                        returns @ref ALP_ERR_OUT_OF_RANGE.
  */
 alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx, uint8_t stream_id,
                                        uint8_t channel,

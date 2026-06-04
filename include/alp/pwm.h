@@ -143,7 +143,7 @@ alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns);
  *
  * Backends round @p dead_time_ns down to the nearest tick they can
  * honour at the configured period; on the GD32 family that's
- * ~4.16 ns at the 240 MHz core clock.  @p break_cfg is treated as an
+ * ~4.63 ns at the 216 MHz timer clock.  @p break_cfg is treated as an
  * opaque bitmap of @ref ALP_PWM_BREAK_NONE / @ref ALP_PWM_BREAK_EXTERNAL
  * flags.
  *

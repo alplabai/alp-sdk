@@ -7,6 +7,47 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Fixed — gd32-bridge v0.2.4: ADC stream really streams (DDM + pacing timer) + the 216 MHz clock truth (2026-06-04)
+
+* **ADC streaming produced zero samples since it shipped**
+  (`hal/bridge_hw_gd32.c`).  Three stacked defects, root-caused by a
+  three-angle audit (firmware vs vendor SPL vs host) and the vendor's
+  own `ADC0_routine_channel_with_DMA` reference: (1) `CTL1.DDM`
+  (`adc_dma_request_after_last_enable`) was never set, so the ADC
+  stopped issuing DMA requests after one run — circular DMA without
+  DDM stalls by design; (2) continuous/DMA controls were programmed
+  onto an already-running converter — streaming now reconfigures with
+  ADCON clear in the vendor's order; (3) the stream path never enabled
+  the `RCU_DMAMUX` clock, working only because the SPI transport
+  happened to enable it first (an I2C-only build would stream
+  nothing).
+* **`sample_rate_hz` is now a real hardware contract.**  v0.2.3 and
+  earlier silently ignored it (free-run "aspirational hint").  Each
+  stream now owns a pacing timer (stream 0: TIMER5, stream 1: TIMER6)
+  whose update-event TRGO triggers exactly one conversion per period
+  via TRIGSEL: 1 Hz..100 kHz, tick-quantised, `STATUS_OUT_OF_RANGE`
+  above the cap.  One stream per ADC converter (second `BEGIN` on a
+  shared converter answers `STATUS_INVAL`); `STREAM_END` stops the
+  pacer and restores the converter's single-shot state.  The HiL soak
+  row now PROVES pacing with a two-read assertion (a free-running
+  stream answers the 32-cap twice; a paced one leaves ~18 samples).
+* **Every GD32 timer-clock constant was wrong: the part runs 216 MHz,
+  not 240 MHz.**  The SoM's SystemInit override is 216M-PLL-IRC8M with
+  APB at DIV1, and the GD32G5x3 has no separate timer PLL (GigaDevice's
+  own example states "TIMER0 frequency is fixed to 216MHz") — the
+  "240 MHz advanced-timer clock" in `metadata/chips/gd32g553.yaml` was
+  an invented value that propagated into the firmware.  Consequence:
+  **every PWM period ever generated was ~11 % long** (a commanded
+  1 kHz physically ran ~900 Hz).  Fixed: `PWM_TIMER_PRESCALER` 240→216
+  (true 1 µs tick), `pwm_routing.counter_clock_hz` 240 M→216 M, LSB
+  ~4.16→~4.63 ns and max single-counter period ~273→~303 µs corrected
+  across `metadata/`, `include/alp/chips/gd32g553.h`, `include/alp/pwm.h`,
+  `docs/gd32-bridge-protocol.md`, and firmware comments.
+* Doc drift: `STREAM_BEGIN` on an active slot answers `STATUS_INVAL`
+  (the doc claimed `STATUS_BUSY`); host header's "~1.5 Msps cap"
+  replaced with the real 100 kHz pacing contract.
+* `firmware-version.txt` 0.2.3 → **0.2.4**.
+
 ### Added — `--emit build-plan`: machine-readable build plan for external front-ends (2026-06-04)
 
 * **`python3 scripts/alp_orchestrate.py --emit build-plan`** emits the
