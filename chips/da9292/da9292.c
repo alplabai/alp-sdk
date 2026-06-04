@@ -209,6 +209,33 @@ alp_status_t da9292_read_and_clear_events(da9292_t *ctx, da9292_events_t *out)
     return ALP_OK;
 }
 
+alp_status_t da9292_get_fault_pins(alp_gpio_t *int_n, alp_gpio_t *tw_n,
+                                   uint8_t *flags)
+{
+    if (flags == NULL) return ALP_ERR_INVAL;
+
+    /* Both fault outputs are open-drain ACTIVE-LOW (INT_N / TW_N):
+     * asserted = pin reads low.  Packing mirrors the GD32 bridge's
+     * DA9292_STATUS_FORWARD reply byte (bit0 = INT, bit1 = TW) so the
+     * two paths stay drop-in compatible.  A NULL pin reports its bit
+     * deasserted -- the caller's board may wire only one of the two. */
+    uint8_t packed = 0u;
+    bool    level;
+
+    if (int_n != NULL) {
+        alp_status_t s = alp_gpio_read(int_n, &level);
+        if (s != ALP_OK) return s;
+        if (!level) packed |= 0x01u;
+    }
+    if (tw_n != NULL) {
+        alp_status_t s = alp_gpio_read(tw_n, &level);
+        if (s != ALP_OK) return s;
+        if (!level) packed |= 0x02u;
+    }
+    *flags = packed;
+    return ALP_OK;
+}
+
 alp_status_t da9292_set_enable(da9292_t *ctx, da9292_channel_t ch, bool enable)
 {
     if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;

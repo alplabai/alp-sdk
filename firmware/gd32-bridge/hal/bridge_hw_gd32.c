@@ -94,10 +94,12 @@
  *                               timer also honours wake_after_ms.
  *                               UART_RX / USB / ETH_LINK reject as
  *                               NOSUPPORT (no HW path on GD32G5).
- *   17. DA9292 fault forward -- sample DA9292_INT(P37)/DA9292_TW(P36)
- *                               input pins on a SysTick cadence and
- *                               pack into fault flags.  The GD32 has
- *                               no I2C path to the DA9292 (pins only).
+ *   17. DA9292 fault forward -- 0xFF sentinel UNCONDITIONALLY: this
+ *                               SoM rev wires the DA9292 fault nets
+ *                               only to the Renesas (P37/P36); the
+ *                               GD32 has no connection to them and no
+ *                               I2C path to the PMIC.  Pin sampling
+ *                               awaits a HW rev that mirrors the nets.
  *   18. ADC_DSP_*            -- DONE (§C.15d + §C.24): chain_open +
  *                               stage_push implemented as a 4-chain
  *                               pool with per-stage chunk reassembly
@@ -591,9 +593,9 @@ static const gd32_dac_ch_t dac_channels[] = {
 
 /* Called once on entry to main() before the transport ISRs come
  * online.  Future commits also wire up the remaining peripherals
- * the bridge uses (TMU, ADC0..ADC3, DAC, TIMER0/7/19, the DA9292_INT
- * (P37)/DA9292_TW (P36) input pins -- the GD32's only DA9292
- * connections -- SysTick, etc.). */
+ * the bridge uses (TMU, ADC0..ADC3, DAC, TIMER0/7/19, SysTick, etc.).
+ * NOTE: no DA9292 wiring exists on this SoM rev -- the fault nets
+ * reach only the Renesas (P37/P36); see bridge_hw_da9292_status_cached. */
 void bridge_hw_init(void)
 {
 #if defined(BRIDGE_OTA_PARTITIONED) && defined(BRIDGE_APP_SLOT_BASE)
@@ -718,16 +720,16 @@ void bridge_hw_init(void)
     }
 }
 
-/* Called from the SysTick handler (or the main loop's idle path)
- * on a fixed cadence.  Future real implementation will sample the
- * DA9292_INT(P37)/DA9292_TW(P36) GPIO inputs and update the fault-
- * flag byte returned by bridge_hw_da9292_status_cached().  The GD32
- * has no I2C path to the DA9292, so this never reads a PMIC register
- * -- pin state only.  Pin sampling lands in a future firmware
- * release; current firmware leaves this a no-op. */
+/* Called from the SysTick handler (or the main loop's idle path) on a
+ * fixed cadence.  Intentionally a no-op on this SoM revision: the
+ * DA9292 fault nets (DA9292_INT/DA9292_TW) reach only the Renesas
+ * (P37/P36) -- the GD32 has no pin to sample and no I2C path to the
+ * PMIC.  When a future HW rev mirrors the fault nets onto GD32
+ * inputs, this hook samples them and updates the byte returned by
+ * bridge_hw_da9292_status_cached(). */
 void bridge_hw_tick(void)
 {
-    /* No-op today. */
+    /* No-op on this HW rev (nothing to sample). */
 }
 
 /* ----------------------------------------------------------------- */
@@ -1315,7 +1317,9 @@ int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks)
 
 uint8_t bridge_hw_da9292_status_cached(void)
 {
-    return 0xFFu; /* "no DA9292 pin sample taken yet" sentinel */
+    /* 0xFF sentinel unconditionally: no DA9292 net reaches the GD32 on
+     * this SoM rev (fault pins are Renesas P37/P36 inputs). */
+    return 0xFFu;
 }
 
 /* ----------------------------------------------------------------- */

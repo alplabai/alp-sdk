@@ -105,9 +105,13 @@
  *   - `INT_N` -> Renesas `P37` (`DA9292_INT`) -- generic interrupt
  *     output that goes low on any unmasked event.
  *
- * The driver itself doesn't grab those GPIOs -- board-board code
- * wires the `alp_gpio_*` ISR to call `da9292_read_and_clear_events`
- * when the line falls.
+ * The driver itself doesn't grab those GPIOs -- board-side code opens
+ * them and either wires the `alp_gpio_*` ISR to call
+ * `da9292_read_and_clear_events` when the line falls, or polls the
+ * packed level snapshot via `da9292_get_fault_pins`.  (The GD32
+ * bridge's `DA9292_STATUS_FORWARD` opcode answers the `0xFF` sentinel
+ * on this SoM revision -- no DA9292 net reaches the GD32 -- so the
+ * direct read here is the working fault-pin path.)
  *
  * @par Datasheet provenance
  * - **REN_DA9292_Datasheet_2v2_DST_20250323.pdf** (Renesas) -- full
@@ -197,6 +201,32 @@ alp_status_t da9292_get_status(da9292_t *ctx, da9292_status_t *out);
 
 /** @brief Read + clear `PMC_EVENT_00/01` (write-1-to-clear semantics). */
 alp_status_t da9292_read_and_clear_events(da9292_t *ctx, da9292_events_t *out);
+
+/** @brief Sample the DA9292 fault pins and pack them into a flag byte.
+ *
+ *  Reads two already-opened GPIO inputs wired to the chip's
+ *  open-drain, active-low fault outputs -- on V2N: `INT_N` = Renesas
+ *  `P37` (`DA9292_INT`), `TW_N` = Renesas `P36` (`DA9292_TW`) -- and
+ *  packs:
+ *    - bit0 = `INT_N` asserted (pin reads low)
+ *    - bit1 = `TW_N`  asserted (pin reads low)
+ *    - bits 2-7 = 0
+ *
+ *  The packing matches the GD32 bridge's `DA9292_STATUS_FORWARD`
+ *  (opcode `0x40`) reply byte, so code written against that contract
+ *  works unchanged if a future SoM revision lets the bridge serve it.
+ *  On the current revision the bridge answers `0xFF` ("no sample") --
+ *  this direct read is the working fault-pin path.
+ *
+ *  @param int_n  Opened input on the `DA9292_INT` net, or NULL to
+ *                skip (bit0 then reports deasserted).
+ *  @param tw_n   Opened input on the `DA9292_TW` net, or NULL to
+ *                skip (bit1 then reports deasserted).
+ *  @param flags  Receives the packed byte.  Required.
+ *  @return ALP_OK, ALP_ERR_INVAL on NULL @p flags, or the first
+ *          failing `alp_gpio_read` status. */
+alp_status_t da9292_get_fault_pins(alp_gpio_t *int_n, alp_gpio_t *tw_n,
+                                   uint8_t *flags);
 
 /** @brief Enable (or disable) a channel via `CHx_EN` in `PMC_CTRL_01`.
  *

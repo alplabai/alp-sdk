@@ -16,12 +16,14 @@
  * The GD32G553 is the V2N module's general-purpose supervisor MCU.
  * It owns a fleet of pads that don't fit on the Renesas RZ/V2N pinout
  * (notably two of the eight E1M PWM channels post-2026-05-11 schematic
- * revision, several E1M I2C management lines, and the DA9292 fault-pin
- * forwarder -- the GD32 only observes the DA9292's DA9292_INT/DA9292_TW
- * signal pins, it does NOT cache a PMIC register snapshot and has no
- * I2C path to the PMIC; register-level PMIC status is read by the
- * CM33/host over BRD_I2C via the `chips/da9292` driver).  Host code
- * reaches the supervisor over a **hybrid** transport:
+ * revision and several E1M I2C management lines).  The DA9292 fault
+ * pins do NOT reach the GD32 on the current SoM revision -- the
+ * DA9292_INT/DA9292_TW nets land only on Renesas P37/P36, so the
+ * 0x40 forwarder answers the 0xFF sentinel (see
+ * gd32g553_da9292_status_forward); the GD32 also has no I2C path to
+ * the PMIC, whose register-level status is read by the CM33/host over
+ * BRD_I2C via the `chips/da9292` driver.  Host code reaches the
+ * supervisor over a **hybrid** transport:
  *
  *   - **SPI fast path** (Renesas RSPI master / GD32 slave on the GD32's
  *     `PA8`/`PA9`/`PA10`/`PB15` pads) -- low-latency, dedicated link.
@@ -398,21 +400,24 @@ alp_status_t gd32g553_pwm_get(gd32g553_t *ctx, uint8_t channel,
 alp_status_t gd32g553_adc_read(gd32g553_t *ctx, uint8_t channel,
                                uint8_t samples, uint16_t *mv);
 
-/** @brief Read the GD32-observed DA9292 fault-pin state.
+/** @brief Read the bridge's DA9292 fault-pin forward byte.
  *
- *  Opcode `0x40` (DA9292_STATUS_FORWARD) returns a single byte built
- *  from the GD32's two DA9292 signal pins:
- *    - bit0 = DA9292_INT asserted (P37, active-low)
- *    - bit1 = DA9292_TW  asserted (P36)
+ *  Opcode `0x40` (DA9292_STATUS_FORWARD).  On the **current SoM
+ *  revision this always returns `0xFF`**: the DA9292_INT/DA9292_TW
+ *  fault nets land only on Renesas pads P37/P36 -- the GD32 has no
+ *  connection to them (schematic-verified 2026-06-04) and no I2C path
+ *  to the PMIC.  The byte packing is reserved for a future HW rev
+ *  that mirrors the fault nets onto GD32 inputs:
+ *    - bit0 = DA9292_INT asserted (active-low net)
+ *    - bit1 = DA9292_TW  asserted (active-low net)
  *    - bits 2-6 reserved (0)
- *    - `0xFF` = "no sample taken yet" sentinel
+ *    - `0xFF` = "no sample available" sentinel
  *
- *  The GD32 has NO I2C path to the DA9292; this is pin-state
- *  forwarding only, not a PMIC register read.  Pin sampling lands in
- *  a future firmware release; current firmware always returns `0xFF`.
- *  For register-level PMIC status (PMC_STATUS_00 etc.) the host reads
- *  the DA9292 directly over BRD_I2C via @ref da9292_get_status in the
- *  `chips/da9292` driver. */
+ *  On today's hardware use @ref da9292_get_fault_pins (CM33 reads
+ *  P37/P36 directly, same packing) for live fault-pin state, and
+ *  @ref da9292_get_status for register-level PMIC status
+ *  (PMC_STATUS_00 etc.) over BRD_I2C -- both in the `chips/da9292`
+ *  driver. */
 alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status);
 
 /** @brief Program a DAC channel's output voltage in millivolts.

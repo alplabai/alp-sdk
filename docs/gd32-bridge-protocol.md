@@ -55,7 +55,7 @@ byte; their numeric encoding is:
 | `0x20` | `PWM_SET`             | `channel:u8 reserved:u8 period_ns:u32 duty_ns:u32` | _empty_                                            |
 | `0x21` | `PWM_GET`             | `channel:u8`                                       | `period_ns:u32 duty_ns:u32`                        |
 | `0x30` | `ADC_READ`            | `channel:u8 samples:u8`                            | `mv[samples]:u16` (millivolt, raw averaged)        |
-| `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (GD32-sampled DA9292 INT/TW pin states) |
+| `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (always `0xFF` on this HW rev — see §3.4) |
 | `0x50` | `DAC_SET`             | `channel:u8 reserved:u8 value_mv:u16`              | _empty_                                            |
 | `0x51` | `DAC_GET`             | `channel:u8`                                       | `value_mv:u16`                                     |
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
@@ -294,29 +294,33 @@ for telemetry purposes.
 
 ### 3.4 DA9292 status forward
 
-The GD32 has **no I2C path** to the DA9292; its only DA9292
-connections are the two fault signal pins `DA9292_INT` (P37,
-active-low) and `DA9292_TW` (P36), both GD32-side inputs.  The
-forwarded byte therefore carries **GD32-observed pin state**, not a
-PMIC register snapshot:
+The GD32 has **no I2C path** to the DA9292, and on the **current SoM
+revision it has no wiring to the DA9292 fault pins either**
+(schematic-verified 2026-06-04: the `DA9292_INT` / `DA9292_TW` nets
+land only on Renesas pads `P37` / `P36`; the GD32 schematic page
+carries no DA9292 net).  Firmware on this revision therefore
+**always returns the `0xFF` "no sample" sentinel**.
 
-| Bit   | Meaning                                       |
-|-------|-----------------------------------------------|
-| 0     | `DA9292_INT` asserted (P37, active-low)        |
-| 1     | `DA9292_TW` asserted (P36)                     |
+The reply packing below is reserved for a future HW revision that
+mirrors the fault nets onto GD32 inputs:
+
+| Bit   | Meaning                                        |
+|-------|------------------------------------------------|
+| 0     | `DA9292_INT` asserted (active-low net)         |
+| 1     | `DA9292_TW` asserted (active-low net)          |
 | 2–6   | reserved (0)                                   |
-| —     | `0xFF` = "no sample taken yet" sentinel        |
+| —     | `0xFF` = "no sample available" sentinel        |
 
-Pin sampling lands in a future firmware release; current firmware
-always returns `0xFF`.
-
-This byte is **not** `PMC_STATUS_00` and does not mirror its bit
-layout.  For register-level PMIC status (`PMC_STATUS_00` etc.) the
-host reads the DA9292 directly over `BRD_I2C` from the CM33 via
-`da9292_get_status()` in the `chips/da9292` driver — see
-`<alp/chips/da9292.h>`.  In short: the GD32 provides a fast
-fault-pin forward over the bridge; the CM33 `da9292` driver provides
-full register read/decode + event clear.
+On today's hardware the host observes the fault pins **directly**:
+`DA9292_INT` (Renesas `P37`) and `DA9292_TW` (Renesas `P36`) are
+CM33-readable GPIO inputs — `da9292_get_fault_pins()` in the
+`chips/da9292` driver packs them with the same bit layout, so host
+code written against this byte works unchanged when a future HW rev
+lets the bridge serve it.  This byte is **not** `PMC_STATUS_00` and
+does not mirror its bit layout.  For register-level PMIC status
+(`PMC_STATUS_00` etc.) the host reads the DA9292 directly over
+`BRD_I2C` from the CM33 via `da9292_get_status()` in the
+`chips/da9292` driver — see `<alp/chips/da9292.h>`.
 
 ### 3.5 DAC outputs (`v0.2+`)
 
@@ -786,12 +790,12 @@ header.
   [`docs/ota.md`](ota.md) +
   [`docs/ota-device-contract.md`](ota-device-contract.md); Hakan
   owns the server side.
-* DA9292 fault pins / PMIC alarms — the GD32 monitors the
-  `DA9292_INT`/`DA9292_TW` pins (not PMIC register events) but does
-  not relay asynchronously over the bridge; the host reads the latest
-  sampled pin state via `DA9292_STATUS_FORWARD`, or reads full PMIC
-  register status directly over `BRD_I2C` from the CM33 via the
-  `chips/da9292` driver.
+* DA9292 fault pins / PMIC alarms — on the current SoM revision the
+  `DA9292_INT`/`DA9292_TW` nets reach only the Renesas (P37/P36), so
+  the host reads the pin state directly (`da9292_get_fault_pins()`)
+  and full PMIC register status over `BRD_I2C` from the CM33 via the
+  `chips/da9292` driver; `DA9292_STATUS_FORWARD` answers `0xFF` until
+  a HW rev wires the nets to the GD32 (see §3.4).
 * Streaming workloads (audio, video) — not in scope; use the
   Renesas direct peripherals for those.
 

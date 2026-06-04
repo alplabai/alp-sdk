@@ -147,7 +147,8 @@ int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks)
 
 uint8_t bridge_hw_da9292_status_cached(void)
 {
-    return 0xFFu; /* "no DA9292 INT/TW pin sample taken yet" sentinel */
+    return 0xFFu; /* "no sample available" sentinel (matches real HW:
+                   * no DA9292 net reaches the GD32 on this SoM rev) */
 }
 
 /* --------------------------------------------------------------- */
