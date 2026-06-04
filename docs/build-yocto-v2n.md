@@ -43,9 +43,22 @@ MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
 Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
 - `alp-image-edge-*.wic[.gz]` — full SD/eMMC image (bootloader excluded;
   it's already on xSPI).
-- `Image` + `renesas/r9a09g056n48-rzv2n-evk.dtb` — kernel + the **carrier
+- `Image` + `renesas/e1m-v2n101-x-evk.dtb` — kernel + the **carrier
   dtb** (the meta-alp-sdk DT patches 0006–0013 are applied here, so this
   dtb is the e1m-x carrier dtb the shipped bootloader loads).
+
+> **Kernel version pin:** the VLP-v5 `local.conf` template defaults to
+> `PREFERRED_VERSION_linux-renesas = "6.12%"` — you **must** override this
+> to `"6.1%"` (linux-renesas 6.1.141-cip43) for BSP v6.30.  Leaving it at
+> the template default causes a recipe mismatch and build failure.
+
+> **Machine fragments:** `alp-image-edge` picks up per-machine `.cfg`
+> fragments from `meta-alp-sdk/recipes-kernel/linux/`.  For V2N with the
+> display and audio features enabled, the active fragment list includes
+> `display.cfg` + `tas2563-audio.cfg`.  To build a minimal image without
+> Weston/display, remove the `alp-lvgl-dashboard`, `weston`, and
+> `weston-init` packages from `IMAGE_INSTALL` in your `local.conf` and
+> drop the `display.cfg` fragment from the `SRC_URI` override.
 
 ## 4. Deploy the rootfs
 
@@ -56,7 +69,7 @@ in production; `ALP_BOOT_DEVICE ?= "emmc"`).
 - **Full image:** write the `.wic` to the target device (eMMC via
   USB-gadget/`dd`, or SD via your host).
 - **Fast dev iteration** (kernel/dtb only): copy `Image` +
-  `r9a09g056n48-rzv2n-evk.dtb` into the running rootfs `/boot` over the
+  `e1m-v2n101-x-evk.dtb` into the running rootfs `/boot` over the
   network (`ssh root@<board> "cat > /boot/<f>" < <f>`) and reboot.
   (Plain `scp` *upload* to the board's dropbear can silently no-op; the
   `ssh cat >` redirect is reliable.)

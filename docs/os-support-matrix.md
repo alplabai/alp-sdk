@@ -46,10 +46,14 @@ full per-(library × core × runtime) picture.
 | Library     | AEN E5..E8: a32_cluster Yocto | V2N: a55_cluster Yocto | V2N-M1: a55_cluster Yocto | iMX93: a55_cluster Yocto |
 |-------------|-------------------------------|------------------------|---------------------------|--------------------------|
 | Peripherals (I2C/SPI/GPIO/UART) | stub | stub | stub | planned |
-| Display     | stub                          | stub                   | stub                      | planned |
+| Display     | stub                          | stub [^disp1]          | stub [^disp1]             | planned |
 | Camera      | stub                          | stub (planned v0.2 MIPI CSI-2) | stub (planned v0.2) | planned |
 | GUI/LVGL    | planned                       | planned                | planned                   | planned |
 | IoT         | stub                          | stub                   | stub                      | planned |
+
+[^disp1]: Display 1 (RK055HDMIPI4MA0, HX8394-F, 2-lane MIPI-DSI) bring-up code-complete on
+    `feat/v2n-lcd-display1` (kernel patches 0002–0004, weston image, LVGL example); row flips
+    on HIL pass.  Display 2 (J28, DSI1 lane set) is permanently unavailable on V2N/V2M SoMs.
 
 ### Cortex-M (Zephyr)
 
