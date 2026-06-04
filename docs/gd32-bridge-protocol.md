@@ -734,7 +734,7 @@ that file so the two implementations cannot diverge.
 
 ## 10. Field upgrades of the bridge firmware
 
-> **Status: design committed; implementation pending.**
+> **Status: Path A implemented (gated, HIL-pending); Path B scaffolded.**
 
 Two upgrade paths.  Per the V2N hardware decision (2026-05-12),
 the board routes `GD32_SWDIO` + `GD32_SWCLK` + `GD32_NRST` from
@@ -745,17 +745,40 @@ USART-only (User Manual Rev1.2 §1.4).
 **Path A — Application bootloader over the bridge (preferred
 normal upgrade path).**
 
-* Lives in the first N KiB of GD32 flash, never overwritten by a
-  field upgrade.
-* Implements an additional set of bridge opcodes (`OTA_BEGIN` /
-  `OTA_WRITE_CHUNK` / `OTA_VERIFY` / `OTA_COMMIT` / `OTA_ROLLBACK`,
-  numerically **reserved at `0xF0..0xFF`** in this protocol for the
-  next minor revision).
-* Keeps two **slots** in upper flash; the active slot runs at boot
-  while the inactive slot receives the upgrade.  Roll-back is a
-  metadata flip + reset.
+* A 32 KB bootloader lives at the base of GD32 flash, never
+  overwritten by a field upgrade; two 236 KB **slots** sit in upper
+  flash with an A/B metadata pair between them.  The active slot
+  runs at boot while the inactive slot receives the upgrade;
+  roll-back is a metadata flip + reset.  Destructive flashing is
+  armed only in `-DBRIDGE_OTA_PARTITIONED` firmware builds — the
+  default build answers `STATUS_NOSUPPORT` to the whole range.
 * Uses the same SPI / I2C transport as the rest of the protocol --
   no extra wiring beyond what is already in place.
+
+Wire contract (host mirrors in `<alp/chips/gd32g553.h>`,
+firmware in `firmware/gd32-bridge/src/ota.c`):
+
+| Op | Name | Request payload | Reply payload |
+|------|------|----------------|---------------|
+| `0xF0` | `OTA_BEGIN` | `size:u32 expected_crc32:u32` | `chunk_max:u16 target_slot:u8` |
+| `0xF1` | `OTA_WRITE_CHUNK` | `offset:u32 data[..chunk_max]` | `received_bytes:u32` (high-water) |
+| `0xF2` | `OTA_VERIFY` | _empty_ | `computed_crc32:u32 verified:u8` |
+| `0xF3` | `OTA_COMMIT` | _empty_ | _empty_ (resets on success) |
+| `0xF4` | `OTA_ROLLBACK` | _empty_ | _empty_ (resets on success) |
+| `0xF5` | `OTA_GET_STATE` | _empty_ | `state:u8 active:u8 pending:u8 boot_count:u16` |
+| `0xF6` | `OTA_ABORT` | _empty_ | _empty_ |
+
+Value encodings: `state` = 0 IDLE / 1 READY / 2 BUSY / 3 VERIFIED /
+4 ERROR; slot bytes = 0 A / 1 B / `0xFF` none-pending.  `WRITE_CHUNK`
+offsets must land on 8-byte (FMC doubleword) boundaries; the image
+CRC-32 is IEEE 802.3 reflected (zlib-compatible).  `WRITE_CHUNK` and
+`VERIFY` without a BEGIN-opened session answer `STATUS_NOT_READY`
+(0x02), as does `COMMIT` before a successful `VERIFY`.  Because
+BEGIN's slot erase, VERIFY's full-image CRC, and COMMIT/ROLLBACK's
+reset run inside the request transaction, their reply transaction
+can miss — hosts treat an I/O error there as "issued" and confirm
+via `OTA_GET_STATE` (or by re-initialising against the rebooted
+bridge after COMMIT/ROLLBACK).
 
 **Path B — Host-driven SWD bit-bang (universal recovery).**
 

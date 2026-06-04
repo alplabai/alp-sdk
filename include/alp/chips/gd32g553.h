@@ -900,32 +900,41 @@ alp_status_t gd32g553_adc_dsp_chain_bind(gd32g553_t *ctx, uint8_t chain_id, uint
 /* ------------------------------------------------------------------ */
 /* OTA -- in-system upgrade of the bridge firmware                    */
 /*                                                                    */
-/* Opcodes 0xF0..0xF6 are reserved by the bridge protocol             */
-/* (docs/gd32-bridge-protocol.md §10) for the application-bootloader  */
-/* upgrade path.  Scaffolds today: the firmware-side handler set      */
-/* compiles + dispatches but every body except CMD_OTA_GET_STATE      */
-/* replies with STATUS_NOSUPPORT until the FMC integration lands.     */
-/* The host helpers below match that contract: every call returns     */
-/* ALP_ERR_NOSUPPORT against current-firmware bridges, and ALP_OK     */
-/* once the firmware-side bodies ship.  GET_STATE is the exception -- */
-/* it answers concretely today so customer telemetry can already      */
-/* read the OTA state machine.                                        */
+/* Opcodes 0xF0..0xF6 implement the Path-A application-bootloader     */
+/* upgrade (docs/gd32-bridge-protocol.md §10): BEGIN announces        */
+/* size+CRC and erases the inactive slot, WRITE_CHUNK streams the     */
+/* image, VERIFY CRC-checks it, COMMIT flips the A/B metadata and     */
+/* resets into the new slot, ROLLBACK flips back.  The firmware side  */
+/* is SAFE-BY-DEFAULT: only a -DBRIDGE_OTA_PARTITIONED build (paired  */
+/* with the bootloader + slot-linked apps) arms the flash path;       */
+/* default builds answer STATUS_NOSUPPORT to the whole range, which   */
+/* these helpers surface as ALP_ERR_NOSUPPORT.                        */
+/*                                                                    */
+/* Transaction note: BEGIN (slot erase), VERIFY (full-image CRC) and  */
+/* COMMIT/ROLLBACK (reset before the reply is drained) block the      */
+/* bridge long enough that the reply transaction can miss -- treat    */
+/* ALP_ERR_IO from those as "issued, confirm via GET_STATE" (or, for  */
+/* COMMIT/ROLLBACK, by re-initialising against the rebooted bridge).  */
 /* ------------------------------------------------------------------ */
 
-/** OTA state-machine snapshot returned by @ref gd32g553_ota_get_state. */
+/** OTA state-machine snapshot returned by @ref gd32g553_ota_get_state.
+ *  Values are the WIRE encoding from the firmware state machine
+ *  (firmware/gd32-bridge/src/ota.c) -- keep numerically identical. */
 typedef enum {
-    GD32G553_OTA_STATE_IDLE           = 0, /**< No upgrade in progress. */
-    GD32G553_OTA_STATE_RECEIVING      = 1, /**< Between BEGIN and last chunk. */
-    GD32G553_OTA_STATE_VERIFIED       = 2, /**< VERIFY succeeded. */
-    GD32G553_OTA_STATE_PENDING_COMMIT = 3, /**< Metadata flip queued. */
-    GD32G553_OTA_STATE_FAULT          = 4, /**< Aborted; staging slot dirty. */
+    GD32G553_OTA_STATE_IDLE     = 0, /**< No upgrade session open. */
+    GD32G553_OTA_STATE_READY    = 1, /**< Session open; accepting chunks. */
+    GD32G553_OTA_STATE_BUSY     = 2, /**< Transient: FMC erase/program in flight. */
+    GD32G553_OTA_STATE_VERIFIED = 3, /**< VERIFY matched; COMMIT allowed. */
+    GD32G553_OTA_STATE_ERROR    = 4, /**< Failed; re-BEGIN to restart. */
 } gd32g553_ota_state_t;
 
-/** Slot id mirrors the firmware's bl_slot_id_t. */
+/** Slot id -- the WIRE encoding from the firmware's A/B metadata
+ *  (firmware/gd32-bridge/src/ota_layout.h OTA_SLOT_A/B); 0xFF is the
+ *  GET_STATE "no pending slot" sentinel. */
 typedef enum {
-    GD32G553_OTA_SLOT_INVALID = 0u,
-    GD32G553_OTA_SLOT_A       = 1u,
-    GD32G553_OTA_SLOT_B       = 2u,
+    GD32G553_OTA_SLOT_A    = 0u,
+    GD32G553_OTA_SLOT_B    = 1u,
+    GD32G553_OTA_SLOT_NONE = 0xFFu, /**< No slot (e.g. nothing pending). */
 } gd32g553_ota_slot_t;
 
 /** Read-only telemetry of the OTA state machine. */
