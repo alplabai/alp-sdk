@@ -4,9 +4,14 @@
  *
  * gd32-bridge OTA — flash layout + on-flash structures (Path A).
  *
- * Single-bank, 2 KB page (MAIN_FLASH_PAGE_SIZE_SBANK = 0x800, per the
- * vendor FMC driver).  Layout matches the design proposal
- * (alp-sdk-internal/docs/gd32-bridge-ota-path-a-design.md §2):
+ * OTA_PAGE_SIZE below is the LAYOUT granule (2 KB), not necessarily the
+ * silicon erase page: the V2N's GD32G553 ships in DUAL-BANK mode
+ * (OBCTL.DBS = 1, silicon-verified 2026-06-04), where the real page is
+ * 1 KB (MAIN_FLASH_PAGE_SIZE_DBANK) and addresses >= 0x08040000 are
+ * bank 1.  2 KB is a multiple of the page size in both bank modes, so
+ * all region bases/sizes stay valid; hal/fmc_ota.c walks the REAL page
+ * size and selects the bank per address.  Layout matches the design
+ * proposal (alp-sdk-internal/docs/gd32-bridge-ota-path-a-design.md §2):
  *
  *   0x08000000  bootloader   32 KB   (never erased by OTA)
  *   0x08008000  metadata      8 KB   (A/B records, one per page)

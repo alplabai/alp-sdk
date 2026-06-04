@@ -604,6 +604,16 @@ void bridge_hw_init(void)
      * use.  Runs first (main calls bridge_hw_init before the transports
      * enable interrupts). */
     SCB->VTOR = (uint32_t)(BRIDGE_APP_SLOT_BASE);
+    __DSB();
+    __ISB();
+    /* The Path-A bootloader hands off with PRIMASK SET (it runs
+     * __disable_irq() before swapping MSP/VTOR for the jump) -- without
+     * clearing it here no interrupt ever fires in the slot app and the
+     * transports go silent (silicon-caught 2026-06-04: CM33 retried init
+     * 1600+ times against a slot app whose CS-EXTI could never run).
+     * Re-enable now that OUR vector table is live; on a plain power-on
+     * boot PRIMASK is already clear and this is a no-op. */
+    __enable_irq();
 #endif
 
     /* Enable AHB2 clocks for every GPIO port the pad map references.

@@ -43,6 +43,26 @@
  * CTL_PNSEL_OFFSET); the public header only exposes the BITS(3,10) mask. */
 #define OTA_FMC_CTL_PNSEL_OFFSET 3u
 
+/* Dual-bank geometry (silicon-verified 2026-06-04: the V2N's GD32G553
+ * ships with OBCTL.DBS = 1).  In dual-bank mode the page is 1 KB (vendor
+ * MAIN_FLASH_PAGE_SIZE_DBANK) and addresses >= bank1 base need
+ * FMC_CTL.BKSEL with a bank-relative page index; single-bank mode is
+ * 2 KB pages, bank0 only.  Getting this wrong "succeeds" loudly:
+ * page indexes silently resolve into bank0 and erase the wrong region
+ * (caught on silicon as a PGERR on the first slot-B program). */
+#define OTA_FMC_BANK1_BASE      0x08040000u
+#define OTA_FMC_PAGE_SIZE_DBANK 0x400u
+#define OTA_FMC_PAGE_SIZE_SBANK 0x800u
+
+/* Sticky FMC_STAT error flags (rc_w1).  MUST be cleared before each
+ * erase/program: one failed op otherwise poisons every later
+ * ota_fmc_wait_ready with the latched error (silicon-verified: a single
+ * PGERR short-circuited the whole remaining OTA session). */
+#define OTA_FMC_STAT_ERR_MASK (FMC_STAT_WPERR | FMC_STAT_PGERR |   \
+                               FMC_STAT_PGSERR | FMC_STAT_PGAERR | \
+                               FMC_STAT_RPERR | FMC_STAT_PGMERR |  \
+                               FMC_STAT_OBERR)
+
 bool ota_fmc_supported(void) { return true; }
 
 /* RAM-safe FMC state decode (vendor fmc_state_get, inlined so the
@@ -74,15 +94,28 @@ __attribute__((always_inline)) static inline fmc_state_enum ota_fmc_wait_ready(u
 
 OTA_RAMFUNC static fmc_state_enum erase_one_page(uint32_t addr)
 {
-    const uint32_t page = (addr - OTA_BOOTLOADER_BASE) / OTA_PAGE_SIZE;
+    const bool dual = (FMC_OBCTL & FMC_OBCTL_DBS) != 0u;
+    uint32_t   page;
+    bool       bank1 = false;
+
+    if (dual) {
+        bank1 = (addr >= OTA_FMC_BANK1_BASE);
+        page  = (addr - (bank1 ? OTA_FMC_BANK1_BASE : OTA_BOOTLOADER_BASE))
+                / OTA_FMC_PAGE_SIZE_DBANK;
+    } else {
+        page = (addr - OTA_BOOTLOADER_BASE) / OTA_FMC_PAGE_SIZE_SBANK;
+    }
 
     fmc_state_enum st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
     if (st != FMC_READY) {
         return st;
     }
-    /* Bootloader + metadata + both slots all live in bank 0; the vendor
-     * FMC_BANK0 arm clears BKSEL in both single- and dual-bank modes. */
-    FMC_CTL &= ~FMC_CTL_BKSEL;
+    FMC_STAT = OTA_FMC_STAT_ERR_MASK;        /* drop stale sticky errors */
+    if (bank1) {
+        FMC_CTL |= FMC_CTL_BKSEL;
+    } else {
+        FMC_CTL &= ~FMC_CTL_BKSEL;
+    }
     FMC_CTL &= ~FMC_CTL_PNSEL;
     FMC_CTL |= page << OTA_FMC_CTL_PNSEL_OFFSET;
     FMC_CTL |= FMC_CTL_PER;
@@ -92,17 +125,24 @@ OTA_RAMFUNC static fmc_state_enum erase_one_page(uint32_t addr)
 
     FMC_CTL &= ~FMC_CTL_PER;
     FMC_CTL &= ~FMC_CTL_PNSEL;
+    FMC_CTL &= ~FMC_CTL_BKSEL;
     return st;
 }
 
 bool ota_fmc_erase_range(uint32_t base, uint32_t len)
 {
+    /* Layout regions stay OTA_PAGE_SIZE-granular (2 KB -- a multiple of
+     * the real page in both bank modes); the erase loop walks the REAL
+     * page size so dual-bank (1 KB pages) erases every page. */
     if ((base % OTA_PAGE_SIZE) != 0u || (len % OTA_PAGE_SIZE) != 0u) {
         return false;
     }
+    const uint32_t step = ((FMC_OBCTL & FMC_OBCTL_DBS) != 0u)
+                              ? OTA_FMC_PAGE_SIZE_DBANK
+                              : OTA_FMC_PAGE_SIZE_SBANK;
     bool ok = true;
     fmc_unlock();
-    for (uint32_t a = base; a < base + len; a += OTA_PAGE_SIZE) {
+    for (uint32_t a = base; a < base + len; a += step) {
         if (erase_one_page(a) != FMC_READY) { ok = false; break; }
     }
     fmc_lock();
@@ -115,6 +155,7 @@ OTA_RAMFUNC static fmc_state_enum program_one_dword(uint32_t addr, uint64_t dw)
     if (st != FMC_READY) {
         return st;
     }
+    FMC_STAT = OTA_FMC_STAT_ERR_MASK;        /* drop stale sticky errors */
     FMC_CTL |= FMC_CTL_PG;
     REG32(addr)      = (uint32_t)(dw & 0xFFFFFFFFu);
     __ISB();
