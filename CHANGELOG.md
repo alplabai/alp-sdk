@@ -7,6 +7,50 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — full-bridge functional tier + math/TRNG silicon fixes (2026-06-04)
+
+New `examples/v2n/v2n-gd32-bridge-functional`: single-pass, VALUE-asserting
+validation of the bridge surfaces (the soak proves the link; this proves
+the functions) — 18 TMU math probes against known-exact results (incl.
+Q31), TRNG entropy/boundary pulls, PWM setpoint readback + configure
+contract, ADC configure error-path + all-channel sweep, DSP-chain pool
+lifecycle, identity — then a forever PWM7 duty staircase (the EVK LED
+pad) as a live oscilloscope observable.  **26/26 FUNCTIONAL-CLEAN on
+silicon**, after the suite itself caught and drove the fixes below:
+
+* **TMU (firmware)**: the vendor `tmu_two_*_write()` issues its two
+  IDATA stores back-to-back; with a warm i-cache the TMU swallows the
+  second word and ENDF never sets (computed exactly once per power-up —
+  the cache-cold first call).  Writes are now paced by a CS read-back.
+  Angle units fixed in BOTH directions: the CORDIC takes and returns
+  angles in units of pi, the wire contract is RADIANS (documented in
+  the host header) — sin/cos inputs are normalised, atan/atan2 outputs
+  scaled back.  sin(0)-only probes could never see either bug.
+* **TRNG (firmware)**: the unit takes intermittent SEED ERRORS and
+  parks with the LATCHED flags set (`TRNG_STAT = 0x48` = ERRSTA+SEIF
+  while current-status SECS reads clear) — the old CECS/SECS-only check
+  was blind to it and burned its whole DRDY budget on a dead unit.
+  Now: latched-fault detection first (vendor `trng_ready_check`
+  parity), incremental bring-up + lazy per-read rebuild (full re-seed),
+  and a whole-request DRDY budget that answers the new `STATUS_BUSY`
+  (`BRIDGE_HW_ERR_BUSY`) instead of overrunning the reply window; the
+  host driver retries BUSY.  Recovery silicon-validated.
+* **Host driver**: firmware ERROR replies carry no payload, so for any
+  payload-bearing opcode the fixed-width reply read CRC-failed on a
+  legitimate error and masked the real status as `ALP_ERR_IO` — an
+  entire class of "-5 from cycle 1" HiL rows (pwm_capture's documented
+  NOSUPPORT among them) was this.  The host now decodes the short
+  error envelope, and after any failed command sends one throwaway
+  PING so a stale staged reply can never be mis-attributed to the next
+  command; the firmware bounds drain rewinds (tar-pit breaker) on its
+  side.
+* **HiL soak**: pwm_capture / qenc / tmu / trng / ota_get_state
+  un-quarantined (their "-5 from cycle 1" was the transport bug + the
+  masked-status bug, not broken HAL bodies); qenc gets a floating-input
+  noise bound; trng one retry per the documented fault-recover cycle.
+  `adc_stream` stays quarantined (destructive failure mode — its own
+  supervised pass is next).
+
 ### Changed — 25 MHz link: SCI-B FIFO burst engine + reply re-read made real (2026-06-04)
 
 The GD32↔CM33 SPI link's wire density and per-command latency were

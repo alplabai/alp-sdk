@@ -647,6 +647,11 @@ typedef enum {
  * @p result_out are interpreted in the chosen @p format -- the host
  * does NOT byte-swap or reinterpret on the caller's behalf.
  *
+ * Angle units: F32 trig angles are RADIANS (the firmware converts to
+ * the TMU's native units-of-pi internally; usable domain |x| <= pi --
+ * the firmware does not range-reduce).  Q31 trig angles are in units
+ * of pi by definition of the format (see @ref gd32g553_tmu_format_t).
+ *
  * @param[in]  ctx         Initialised driver context.
  * @param[in]  function    One of @ref gd32g553_tmu_function_t.
  * @param[in]  format      One of @ref gd32g553_tmu_format_t.  Must

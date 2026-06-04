@@ -457,6 +457,10 @@ static gd32_bridge_status_t handle_adc_stream_end(const uint8_t *req, size_t req
     return STATUS_OK;
 }
 
+/* Defined with the v0.5 handler set below; the TRNG handler (v0.4)
+ * shares the central mapping for its BUSY/IO discrimination. */
+static gd32_bridge_status_t status_from_hw(int rv);
+
 static gd32_bridge_status_t handle_trng_read(const uint8_t *req, size_t req_len,
                                              uint8_t *reply, size_t reply_cap,
                                              size_t *reply_len)
@@ -466,8 +470,7 @@ static gd32_bridge_status_t handle_trng_read(const uint8_t *req, size_t req_len,
     if (want == 0u || want > 32u) return STATUS_INVAL;
     if (reply_cap < want) return STATUS_NOMEM;
     const int rv = bridge_hw_trng_read(reply, (size_t)want);
-    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
-    if (rv < 0) return STATUS_IO;
+    if (rv != BRIDGE_HW_OK) return status_from_hw(rv);
     *reply_len = want;
     return STATUS_OK;
 }
@@ -522,6 +525,7 @@ static gd32_bridge_status_t status_from_hw(int rv)
     if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
     if (rv == BRIDGE_HW_ERR_RANGE) return STATUS_OUT_OF_RANGE;
     if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv == BRIDGE_HW_ERR_BUSY) return STATUS_BUSY;
     return STATUS_IO;
 }
 

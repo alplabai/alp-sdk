@@ -165,6 +165,28 @@ static uint32_t reply_staging_gap_us(uint8_t cmd, const uint8_t *req_payload,
     return gap;
 }
 
+/* Forward declaration for the failed-command resync epilogue below. */
+static alp_status_t spi_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_payload,
+                             size_t req_payload_len, uint8_t *reply_payload,
+                             size_t reply_payload_len);
+
+/* Resync after a failed command.  The slave clears its staged reply
+ * ONLY when it decodes a fresh request -- drains re-arm it (the
+ * documented re-read semantics).  So when a command gives up (ladder
+ * exhausted, or a short error envelope decoded), its stale staged
+ * reply stays armed, and if the NEXT command's request is ever lost
+ * to edge coalescing, that command reads the leftover -- at best a
+ * CRC mismatch, at worst a perfectly valid error envelope attributed
+ * to the WRONG command (observed 2026-06-04: GET_VERSION "returned"
+ * a lingering TRNG BUSY).  One throwaway PING here forces a decode,
+ * replacing the leftover with PING's reply and consuming it --
+ * bounding staleness to the command that already failed.  Recursion
+ * is depth-1 by construction: the epilogue never runs for PING. */
+static void spi_resync_after_failure(gd32g553_t *ctx)
+{
+    (void)spi_xfer(ctx, 0x00u /* CMD_PING */, NULL, 0u, NULL, 0u);
+}
+
 static alp_status_t spi_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_payload,
                              size_t req_payload_len, uint8_t *reply_payload,
                              size_t reply_payload_len)
@@ -214,12 +236,35 @@ static alp_status_t spi_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_pa
                 reply_ok = true;
                 break;
             }
+
+            /* ERROR-ENVELOPE FALLBACK.  Firmware error replies carry NO
+             * payload (stage_error_reply: SOF | STATUS | CRC = 4 bytes)
+             * regardless of the opcode's success-reply width, so for any
+             * payload-bearing opcode the full-width CRC check above
+             * fails on a legitimate error reply -- the bytes past the
+             * 4-byte envelope are TX-FIFO idle filler.  Without this
+             * fallback every firmware error surfaced as ALP_ERR_IO,
+             * masking the real status (silicon 2026-06-04: an entire
+             * class of "-5 from cycle 1" HiL rows -- pwm_capture's
+             * documented NOSUPPORT among them -- were short error
+             * replies the host could not decode). */
+            if (reply_payload_len > 0u && reply[1] != 0x00u /* STATUS_OK */) {
+                const uint16_t err_crc = crc16_ccitt_false(reply, 2u);
+                const uint16_t err_got = (uint16_t)reply[2] | ((uint16_t)reply[3] << 8);
+                if (err_got == err_crc) {
+                    if (cmd != 0x00u /* PING */) spi_resync_after_failure(ctx);
+                    return status_from_wire(reply[1]);
+                }
+            }
         }
         if (attempt + 1u < GD32G553_REPLY_READ_TRIES) {
             alp_delay_us(gd32g553_reply_retry_us[attempt]);
         }
     }
-    if (!reply_ok) return ALP_ERR_IO;
+    if (!reply_ok) {
+        if (cmd != 0x00u /* PING */) spi_resync_after_failure(ctx);
+        return ALP_ERR_IO;
+    }
 
     const alp_status_t firmware_status = status_from_wire(reply[1]);
     if (firmware_status != ALP_OK) return firmware_status;
@@ -271,7 +316,20 @@ static alp_status_t i2c_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_pa
     const uint16_t expect_crc = crc16_ccitt_false(rbuf, 1u + reply_payload_len);
     const uint16_t got_crc =
         (uint16_t)rbuf[1u + reply_payload_len] | (uint16_t)rbuf[1u + reply_payload_len + 1u] << 8;
-    if (got_crc != expect_crc) return ALP_ERR_IO;
+    if (got_crc != expect_crc) {
+        /* Error-envelope fallback -- same trap as the SPI side: firmware
+         * error replies carry no payload ([STATUS][CRC] = 3 bytes on
+         * I2C), so the full-width CRC fails on a legitimate error.
+         * Decode the short shape before declaring transport failure. */
+        if (reply_payload_len > 0u && rbuf[0] != 0x00u /* STATUS_OK */) {
+            const uint16_t err_crc = crc16_ccitt_false(rbuf, 1u);
+            const uint16_t err_got = (uint16_t)rbuf[1] | ((uint16_t)rbuf[2] << 8);
+            if (err_got == err_crc) {
+                return status_from_wire(rbuf[0]);
+            }
+        }
+        return ALP_ERR_IO;
+    }
 
     const alp_status_t firmware_status = status_from_wire(rbuf[0]);
     if (firmware_status != ALP_OK) return firmware_status;
@@ -681,7 +739,20 @@ alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len)
     if (dest == NULL) return ALP_ERR_INVAL;
     if (len == 0u || len > GD32G553_BRIDGE_TRNG_MAX_BYTES) return ALP_ERR_INVAL;
     const uint8_t req = (uint8_t)len;
-    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_TRNG_READ, &req, 1u, dest, len);
+
+    /* A max-length pull spans a whole 256-bit NIST conditioning round,
+     * so the firmware legitimately answers STATUS_BUSY when its FIFO
+     * runs dry mid-request (it bounds its in-handler wait instead of
+     * overrunning the reply window).  Ride out a few rounds here --
+     * conditioning completes in low milliseconds and randomness is
+     * not a latency-critical surface. */
+    alp_status_t s = ALP_ERR_BUSY;
+    for (unsigned attempt = 0u; attempt < 4u && s == ALP_ERR_BUSY; ++attempt) {
+        if (attempt != 0u) alp_delay_us(2000u);
+        s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_TRNG_READ, &req, 1u, dest,
+                     len);
+    }
+    return s;
 }
 
 /* ------------------------------------------------------------------ */
