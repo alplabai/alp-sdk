@@ -50,6 +50,7 @@ Bad / costs: ...
 | [0011](0011-intra-family-portability.md) | Intra-family portability is load-bearing; cross-form-factor portability is intentionally not a goal | Accepted |
 | [0012](0012-cross-platform-developer-host.md) | alp-sdk developer host is cross-platform; Linux required ONLY for Yocto | Accepted |
 | [0013](0013-tfm-boundary-m55-hp-trustzone.md) | TF-M trust boundary on AEN: TrustZone-M split on M55-HP, not a dedicated M55-HE | Accepted |
+| [0014](0014-build-plan-emit-cli-contract.md) | The `alp` CLI consumes the orchestrator's emitted build plan (`--emit build-plan`), not a re-implemented planner | Accepted |
 
 ## When to write an ADR
 

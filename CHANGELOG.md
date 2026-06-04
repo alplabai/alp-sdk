@@ -7,6 +7,30 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — `--emit build-plan`: machine-readable build plan for external front-ends (2026-06-04)
+
+* **`python3 scripts/alp_orchestrate.py --emit build-plan`** emits the
+  resolved build plan as deterministic, write-free JSON: one slice per
+  non-`off` core (build dir, exact tool command, env) plus every
+  generated artefact **with its contents** (`sharedArtefacts` +
+  per-slice `configArtefacts`), so a consumer materialises files and
+  runs commands with zero planner logic of its own.  This is the
+  agreed contract for the `alp` CLI / IDE extension (alp-sdk-vscode
+  "Wave C") — see [ADR 0014](docs/adr/0014-build-plan-emit-cli-contract.md)
+  for the settlement: camelCase keys, independent `schemaVersion`
+  (bumped + flagged here on breaking shape changes), no `inputHash` /
+  `sequential` (cache keys + parallelism belong to the consumer), and
+  command-less slices carried as `command: null` + a `no-command`
+  warning.  **Consumers: pin to release tags; the per-slice command
+  shape is not frozen** (it will grow `--sysbuild` flags when the
+  conf→build wiring lands).
+* The Orchestrator's materialise step and the plan emit now read the
+  same single sources (`_shared_artefacts` / `_slice_config_artefact`),
+  so the plan and the on-disk build cannot drift by construction.
+  This also fixes a latent gap: `emit_sysbuild_conf` was emit-only —
+  a `boot:` block now materialises `build/alp_sysbuild.conf` during
+  `west alp-build` too, matching its long-documented destination.
+
 ### Fixed — gd32-bridge v0.2.3: honest PWM read-back + ISR-bounded ADC waits (2026-06-04)
 
 * **`PWM_GET` reads the silicon, not a cache** (`hal/bridge_hw_gd32.c`).

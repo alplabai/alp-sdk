@@ -1,0 +1,84 @@
+# 0014. The `alp` CLI consumes the orchestrator's emitted build plan
+
+Status: Accepted
+Date: 2026-06-04
+Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode)
+
+## Context
+
+The alp-sdk-vscode repo ships the native `alp` CLI + IDE extension
+("Wave C" on their roadmap: the CLI sits at the top of the build and
+invokes `west` / `bitbake` / `cmake` directly, instead of shelling out
+to `west alp-build`).  Three proposals were exchanged:
+
+1. **Shared Rust crate** — extract `alp_orchestrate.py` into an
+   `alp-build-core` crate both repos consume.  Rejected: forces a
+   rewrite of working Python, couples the repos' release trains.
+2. **Rust planner mirror** — the CLI re-implements the planner
+   (board.yaml → slices, IPC/DTS/sysbuild/TF-M derivation) in Rust,
+   with `alp_orchestrate.py` demoted to a parity-test golden.
+   Rejected: the planner is the fast-moving, vendor-heavy half (it
+   doubled — 1547 → 3066 lines — in the three v0.6 weeks); mirroring
+   it is a standing re-implementation tax and a second source of
+   planner truth, violating the SDK's one-machine-readable-source
+   rule.  The prize ("no Python at runtime") is small: `west` and
+   `bitbake` are Python, so every build host has a Python-bearing
+   SDK checkout anyway.
+3. **Emitted build plan** (this ADR) — the SDK adds
+   `alp_orchestrate.py --emit build-plan`; the CLI consumes the JSON.
+
+The settlement is recorded on their side in
+`alp-sdk-vscode/docs/PROPOSAL-alp-build-core.md` (2026-06-04).
+
+## Decision
+
+`scripts/alp_orchestrate.py` grows `--emit build-plan`: deterministic,
+write-free, schema-versioned JSON carrying everything the consumer
+needs to materialise + run the build itself.
+
+The split: the **SDK owns the planner** (slice resolution, partition
+allocation, IPC/DTS/sysbuild/TF-M derivation, generated-file
+*contents*) and the builders; the **CLI owns the mechanism** —
+materialise (pure byte-write of the plan's files), execute (run each
+slice's command), schedule (parallelism + incremental cache), progress
+UX, JSON envelope.
+
+Contract properties (locked with the consumer):
+
+- **camelCase keys; independent `schemaVersion`** — bumped on breaking
+  shape changes, flagged in the CHANGELOG.
+- **Artefacts carry `contents`** (`GeneratedFile {path, contents}`)
+  for both `sharedArtefacts` and per-slice `configArtefacts`, so the
+  consumer's materialise step is pure IO and no content-derivation
+  logic leaks out of the SDK.  Internally, `_shared_artefacts` /
+  `_slice_config_artefact` are the single sources both the emit and
+  the Orchestrator's own materialise step read — the plan and the
+  on-disk build cannot drift by construction.
+- **No `inputHash`** (the consumer computes its own cache key over the
+  plan) and **no `sequential`** (parallelism policy belongs to the
+  consumer's scheduler).
+- **One slice per non-`off` core**, sorted by `coreId`.  A slice the
+  script cannot build yet (e.g. a TBD Zephyr board target) is carried
+  with `command: null` plus a `no-command` warning — never dropped.
+- The per-slice `command` shape is **not frozen** — it will grow (e.g.
+  `--sysbuild --sysbuild-config` when the Phase 3 conf→build wiring
+  lands); consumers track release tags and re-baseline on CHANGELOG
+  notice.
+
+## Consequences
+
+- The SDK commits to: `board.yaml` schema-version bumps on breaking
+  changes; `schema_version` retained on `metadata/e1m_modules` YAMLs;
+  CHANGELOG heads-up for changes to the per-slice command shape,
+  build-dir convention, env keys, or metadata layout; answering the
+  conf→build wiring question before the CLI's first end-to-end phase.
+- Consumers pin to **release tags**, never `dev` — the emit must ship
+  in a tagged release to be consumable.
+- `west alp-build` **stays native** (the shim-over-`alp build` idea is
+  withdrawn): standalone `west` usage is a first-class consumer path,
+  and an SDK west command must not depend on a binary from another
+  repo.
+- Wiring `emit_sysbuild_conf` into the shared-artefact set (it was
+  emit-only before) means a `boot:` block now also materialises
+  `build/alp_sysbuild.conf` during `west alp-build` — previously the
+  overlay was only available via `--emit`.

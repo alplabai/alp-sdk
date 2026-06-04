@@ -281,6 +281,21 @@ dataclass but never land in the manifest; the cache state in
 `build/.alp-build-state.json` is internal and not part of the
 declarative output either.
 
+**Machine-readable build plan.**  Tooling that wants to drive the
+build itself — the `alp` CLI / IDE extension does — consumes the plan
+instead of re-deriving it:
+
+```bash
+python3 scripts/alp_orchestrate.py --input board.yaml --emit build-plan
+```
+
+The JSON carries one entry per non-`off` core (build dir, the exact
+tool command, env) plus every generated artefact **with its contents**,
+so a consumer materialises files and runs commands without any planner
+logic of its own.  It is deterministic, write-free, and versioned by
+its own `schemaVersion` — see
+[ADR 0014](adr/0014-build-plan-emit-cli-contract.md) for the contract.
+
 ### Iterating on one slice
 
 The Yocto cold build takes hours; the Zephyr build takes seconds.
