@@ -81,6 +81,12 @@ int bridge_hw_gpio_write(uint32_t mask, uint32_t levels);
 /* --------------------------------------------------------------- */
 
 int bridge_hw_pwm_set(uint8_t channel, uint32_t period_ns, uint32_t duty_ns);
+
+/* Report what the channel's pad is ACTUALLY generating by reading the
+ * timer registers back (auto-reload + compare, converted to ns) --
+ * never a software echo of the last request.  Before the first
+ * bridge_hw_pwm_set a channel reports the boot default (65.536 ms
+ * period, 0 duty); the period is shared per underlying timer. */
 int bridge_hw_pwm_get(uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns);
 
 /* v0.3: sticky PWM tuning.  align_mode is one of
