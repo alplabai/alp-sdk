@@ -216,7 +216,16 @@ int main(void)
 	 * hence the *1000 conversion. */
 	while (1) {
 		uint32_t idle_ms = lv_timer_handler();
-		usleep(idle_ms * 1000);
+
+		/* lv_timer_handler() returns the time until its next timer is
+		 * due -- or LV_NO_TIMER_READY (UINT32_MAX) when none is pending.
+		 * Clamp before sleeping: POSIX usleep() requires an argument
+		 * below 1e6, and the naive `idle_ms * 1000` multiply would wrap
+		 * for the sentinel. 100 ms keeps the loop responsive either way.
+		 */
+		if (idle_ms > 100)
+			idle_ms = 100;
+		usleep(idle_ms * 1000u);
 	}
 
 	return 0; /* unreachable */

@@ -16,7 +16,10 @@ LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=787726818c896f394f6627ab59d98d69
 DEPENDS = "lvgl libdrm"
 RDEPENDS:${PN} = "lvgl"
 
-SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
+# Staged on the dev integration branch: the example source is not on
+# `main` until the next promotion -- flip branch=dev to branch=main
+# then (the alp-edgeai recipe shows the end state).
+SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=dev"
 SRCREV  = "${AUTOREV}"
 PV      = "0.6.0"
 
