@@ -35,8 +35,8 @@
 **Panel** (mainline v6.6 `panel-himax-hx8394.c` + NXP `fsl_hx8394.c` BSD-3 + Zephyr overlay cross-check):
 - v6.6 driver compiles on 6.1-cip **as-is** (`mipi_dsi_dcs_write_seq` exists at `drm_mipi_dsi.h:312`; `drm_panel_init` 4-arg; `.remove` void; `drm_panel_of_backlight` present). Only edit: drop the vestigial `#include <linux/media-bus-format.h>`.
 - RK055 mode: `clock=62346`, h: 720/732/738/762 (fp 12, sync 6, bp 24), v: 1280/1296/1298/1312 (fp 16, sync 2, bp 14), `DRM_MODE_FLAG_NHSYNC|NVSYNC`, active area 68×121 mm (5.5"), **2 lanes, RGB565**.
-- NXP init table (translate from BSD-3 `fsl_hx8394.c`; byte-identical in Zephyr — do NOT copy Apache code): `0x36 02; 0xB1 48 12 72 09 32 54 71 71 57 47; 0xB2 00 80 64 0C 0D 2F; 0xB4 73 74 73 74 73 74 01 0C 86 75 00 3F 73 74 73 74 73 74 01 0C 86; 0xD3 …(33B); 0xD5 …(44B); 0xD6 …(44B); 0xB6 92 92; 0xE0 …(58B); 0xC0 1F 31; 0xCC 03; 0xD4 02; 0xBD 02; 0xD8 FF×12; 0xBD 00; 0xBD 01; 0xB1 00; 0xBD 00; 0xBF 40 81 50 00 1A FC 01; 0xC6 ED; 0x35 00` (full byte runs in Task 2 code). Then exit_sleep (120 ms) + display_on — the mainline driver's enable() already does that.
-- Two verify-at-implementation flags: (a) the real `fsl_hx8394.c` may contain a `0xBA` SETMIPI write the capture clipped — fetch and check; if present, include it with the **2-lane** lane-count nibble (`0x61`, not the 4-lane `0x63`); (b) confirm `MIPI_DSI_FMT_RGB565` exists in 6.1 `drm_mipi_dsi.h` and which `MIPI_DSI_MODE_VIDEO*` flags `rzg2l_mipi_dsi.c` accepts.
+- NXP init table (translate from BSD-3 `fsl_hx8394.c`; byte-identical in Zephyr — do NOT copy Apache code): `0xB9 FF 83 94 (SETEXTC, FIRST); 0xBA 61 03 68 6B B2 C0 (SETMIPI, SECOND); 0x36 02; 0xB1 48 12 72 09 32 54 71 71 57 47; 0xB2 00 80 64 0C 0D 2F; 0xB4 73 74 73 74 73 74 01 0C 86 75 00 3F 73 74 73 74 73 74 01 0C 86; 0xD3 …(33B); 0xD5 …(44B); 0xD6 …(44B); 0xB6 92 92; 0xE0 …(58B); 0xC0 1F 31; 0xCC 03; 0xD4 02; 0xBD 02; 0xD8 FF×12; 0xBD 00; 0xBD 01; 0xB1 00; 0xBD 00; 0xBF 40 81 50 00 1A FC 01; 0xC6 ED; 0x35 00` (full byte runs in Task 2 code). Then exit_sleep (120 ms) + display_on — the mainline driver's enable() already does that. SETEXTC must be first (unlocks manufacturer registers); SETMIPI must be second (lane config); without SETEXTC the entire init is silently ignored.
+- Verify flag: confirm `MIPI_DSI_FMT_RGB565` exists in 6.1 `drm_mipi_dsi.h` and which `MIPI_DSI_MODE_VIDEO*` flags `rzg2l_mipi_dsi.c` accepts (SETEXTC+SETMIPI ordering is resolved — verified against NXP HX8394_Init).
 
 **Touch** (6.1 `goodix.c`): driver present, `CONFIG_TOUCHSCREEN_GOODIX` not set. IRQ hard-required at `goodix_configure_dev()`:1257-1264 via `goodix_request_irq()`:521-526. `input_setup_polling`/`input_set_poll_interval` exist (`input.h:389/391`). Poll callback = `goodix_process_events(ts)` + `goodix_i2c_write_u8(ts->client, GOODIX_READ_COOR_ADDR, 0)`. **GT911 I2C address straps off INT at reset**: INT high→0x14, low→0x5D; INT ends at GD32 PA7 (pull-up) ⇒ expect **0x14** likely; bench `i2cdetect` decides; never drive PA7 from the bridge (sticky output would fight GT911's INT output).
 
@@ -118,6 +118,11 @@ static int rk055hdmipi4ma0_init_sequence(struct hx8394 *ctx)
 {
 	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);
 
+	/* 5.19.8 SETEXTC: unlock manufacturer registers (must be first) */
+	mipi_dsi_dcs_write_seq(dsi, HX8394_CMD_SETEXTC, 0xff, 0x83, 0x94);
+	/* 5.19.9 SETMIPI: 2-lane config (0x60 | (lanes-1) = 0x61) */
+	mipi_dsi_dcs_write_seq(dsi, HX8394_CMD_SETMIPI,
+			       0x61, 0x03, 0x68, 0x6b, 0xb2, 0xc0);
 	mipi_dsi_dcs_write_seq(dsi, MIPI_DCS_SET_ADDRESS_MODE, 0x02);
 	mipi_dsi_dcs_write_seq(dsi, HX8394_CMD_SETPOWER,
 			       0x48, 0x12, 0x72, 0x09, 0x32, 0x54, 0x71, 0x71, 0x57, 0x47);
@@ -168,8 +173,6 @@ static int rk055hdmipi4ma0_init_sequence(struct hx8394 *ctx)
 	mipi_dsi_dcs_write_seq(dsi, HX8394_CMD_UNKNOWN2, 0xed);
 	/* TE on (vblank) — harmless in pure video mode; carrier TE pin is NC. */
 	mipi_dsi_dcs_write_seq(dsi, MIPI_DCS_SET_TEAR_ON, 0x00);
-	/* If Step 1.2 found a SETMIPI (0xBA) entry in fsl_hx8394.c, add it
-	 * HERE verbatim but with the lane field set for 2 lanes (0x61). */
 
 	return 0;
 }
