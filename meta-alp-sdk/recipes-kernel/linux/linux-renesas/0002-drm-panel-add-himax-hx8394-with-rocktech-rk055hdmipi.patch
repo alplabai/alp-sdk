@@ -1,5 +1,6 @@
 From: Alp Lab AB
-Date: Thu, 4 Jun 2026 14:02:43 +0200
+From: x <x@x.com>
+Date: Thu, 4 Jun 2026 15:47:10 +0200
 Subject: [PATCH] drm/panel: add himax-hx8394 with rocktech,rk055hdmipi4ma0
  (backport from v6.6)
 
@@ -38,7 +39,7 @@ Signed-off-by: Alp Lab AB
 ---
  drivers/gpu/drm/panel/Kconfig              |  10 +
  drivers/gpu/drm/panel/Makefile             |   1 +
- drivers/gpu/drm/panel/panel-himax-hx8394.c | 549 +++++++++++++++++++++++++++++
+ drivers/gpu/drm/panel/panel-himax-hx8394.c | 549 +++++++++++++++++++++
  3 files changed, 560 insertions(+)
  create mode 100644 drivers/gpu/drm/panel/panel-himax-hx8394.c
 
@@ -49,7 +50,7 @@ index a582ddd583c2..42a89b17e34e 100644
 @@ -154,6 +154,16 @@ config DRM_PANEL_FEIYANG_FY07024DI26A30D
  	  Say Y if you want to enable support for panels based on the
  	  Feiyang FY07024DI26A30-D MIPI-DSI interface.
-
+ 
 +config DRM_PANEL_HIMAX_HX8394
 +	tristate "HIMAX HX8394 MIPI-DSI LCD panels"
 +	depends on OF
@@ -73,7 +74,7 @@ index 34e717382dbb..cab074527bf0 100644
  obj-$(CONFIG_DRM_PANEL_FEIYANG_FY07024DI26A30D) += panel-feiyang-fy07024di26a30d.o
 +obj-$(CONFIG_DRM_PANEL_HIMAX_HX8394) += panel-himax-hx8394.o
  obj-$(CONFIG_DRM_PANEL_ILITEK_IL9322) += panel-ilitek-ili9322.o
- obj-$(CONFIG_DRM_PANEL_ILITEK_IL9341) += panel-ilitek-ili9341.o
+ obj-$(CONFIG_DRM_PANEL_ILITEK_ILI9341) += panel-ilitek-ili9341.o
  obj-$(CONFIG_DRM_PANEL_ILITEK_ILI9881C) += panel-ilitek-ili9881c.o
 diff --git a/drivers/gpu/drm/panel/panel-himax-hx8394.c b/drivers/gpu/drm/panel/panel-himax-hx8394.c
 new file mode 100644

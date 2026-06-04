@@ -1,6 +1,10 @@
 From: Alp Lab AB
-Date: Thu, 4 Jun 2026 14:59:31 +0200
+From: x <x@x.com>
+Date: Thu, 4 Jun 2026 15:47:10 +0200
 Subject: [PATCH] input: goodix - fall back to polling when no IRQ is wired
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Copyright (c) 2026 Alp Lab AB
 SPDX-License-Identifier: GPL-2.0
@@ -54,13 +58,13 @@ index 6de64b3f900f..3db0f0eaac81 100644
  #define GOODIX_HAVE_KEY			BIT(4)
  #define GOODIX_BUFFER_STATUS_TIMEOUT	20
 +#define GOODIX_POLL_INTERVAL_MS		17	/* ~59 Hz, matches GT911 report rate */
-
+ 
  #define RESOLUTION_LOC		1
  #define MAX_CONTACTS_LOC	5
 @@ -513,6 +514,14 @@ static irqreturn_t goodix_ts_irq_handler(int irq, void *dev_id)
  	return IRQ_HANDLED;
  }
-
+ 
 +static void goodix_ts_poll(struct input_dev *input)
 +{
 +	struct goodix_ts_data *ts = input_get_drvdata(input);
@@ -75,7 +79,7 @@ index 6de64b3f900f..3db0f0eaac81 100644
 @@ -1237,6 +1246,18 @@ static int goodix_configure_dev(struct goodix_ts_data *ts)
  		return error;
  	}
-
+ 
 +	input_set_drvdata(ts->input_dev, ts);
 +
 +	if (ts->client->irq <= 0) {
@@ -94,7 +98,7 @@ index 6de64b3f900f..3db0f0eaac81 100644
 @@ -1255,11 +1276,13 @@ static int goodix_configure_dev(struct goodix_ts_data *ts)
  	if (error)
  		return error;
-
+ 
 -	ts->irq_flags = goodix_irq_flags[ts->int_trigger_type] | IRQF_ONESHOT;
 -	error = goodix_request_irq(ts);
 -	if (error) {
@@ -108,10 +112,10 @@ index 6de64b3f900f..3db0f0eaac81 100644
 +			return error;
 +		}
  	}
-
+ 
  	return 0;
 @@ -1441,7 +1464,8 @@ static int __maybe_unused goodix_suspend(struct device *dev)
-
+ 
  	/* We need gpio pins to suspend/resume */
  	if (ts->irq_pin_access_method == IRQ_PIN_ACCESS_NONE) {
 -		disable_irq(client->irq);
@@ -119,13 +123,14 @@ index 6de64b3f900f..3db0f0eaac81 100644
 +			disable_irq(client->irq);
  		return 0;
  	}
-
+ 
 @@ -1485,7 +1509,8 @@ static int __maybe_unused goodix_resume(struct device *dev)
  	int error;
-
+ 
  	if (ts->irq_pin_access_method == IRQ_PIN_ACCESS_NONE) {
 -		enable_irq(client->irq);
 +		if (client->irq > 0)
 +			enable_irq(client->irq);
  		return 0;
  	}
+ 
