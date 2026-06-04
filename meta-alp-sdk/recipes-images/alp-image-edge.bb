@@ -37,6 +37,18 @@ IMAGE_INSTALL = " \
     openssh                        \
 "
 
+# Display stack (X-EVK MIPI-DSI panel): Weston on Mali/Wayland
+# (wayland+opengl come from the rz-vlp distro features), plus
+# modetest for bench bring-up. libdrm-tests also rides in rz-vlp's
+# tools group; listed explicitly so rz-bsp builds get it too.
+IMAGE_INSTALL += " \
+    weston                         \
+    weston-init                    \
+    libdrm                         \
+    libdrm-tests                   \
+    alp-lvgl-dashboard             \
+"
+
 # Add the DEEPX runtime only on the V2M (V2N + DEEPX) variants;
 # the plain V2N101 / V2N102 machine configs leave this empty.
 # Drives both -a55 sibling and historical e1m-v2m101 override

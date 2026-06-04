@@ -12,7 +12,7 @@ DESCRIPTION = "End-to-end EdgeAI demo: camera capture → ISP / format-convert \
 → Ethos-U / DRP-AI inference → results overlay on display."
 HOMEPAGE    = "https://github.com/alplabai/alp-sdk"
 LICENSE     = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=86d3f3a95c324c9479bd8986968f4327"
+LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=787726818c896f394f6627ab59d98d69"
 
 DEPENDS = "alp-sdk"
 
