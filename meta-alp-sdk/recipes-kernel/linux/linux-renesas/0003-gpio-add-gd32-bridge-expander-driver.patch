@@ -31,8 +31,8 @@ Signed-off-by: Alp Lab AB
 ---
  drivers/gpio/Kconfig            |   9 ++
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 227 ++++++++++++++++++++++++++++++++
- 3 files changed, 237 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 237 ++++++++++++++++++++++++++++++++
+ 3 files changed, 247 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -42,7 +42,7 @@ index 74d8b949ce36..eefc447b2148 100644
 @@ -1009,6 +1009,15 @@ config GPIO_ADNP
  	  enough to represent all pins, but the driver will assume a
  	  register layout for 64 pins (8 registers).
- 
+
 +config GPIO_GD32_BRIDGE
 +	tristate "Alp Lab GD32 IO-MCU bridge GPIO expander"
 +	depends on I2C && OF
@@ -69,10 +69,10 @@ index e331e951ef2e..3ba5cc2f2193 100644
  obj-$(CONFIG_GPIO_GRGPIO)		+= gpio-grgpio.o
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
 new file mode 100644
-index 000000000000..afa62b92f82e
+index 000000000000..d29bd4e07de5
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,227 @@
+@@ -0,0 +1,237 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -122,8 +122,15 @@ index 000000000000..afa62b92f82e
 +	struct i2c_client *client;
 +	struct gpio_chip chip;
 +	struct mutex lock;		/* serialize cmd/reply pairs */
-+	u32 output_mask;		/* lines promoted to output (sticky) */
-+	u32 output_vals;		/* last driven levels */
++	/*
++	 * output_mask: lines promoted to output (sticky; once written a pad
++	 * stays push-pull until GD32 reset).
++	 * output_vals: last driven levels.
++	 * Single-writer assumption: gpiolib serializes per-line ops so no
++	 * atomic RMW is needed here.
++	 */
++	u32 output_mask;
++	u32 output_vals;
 +};
 +
 +static int gd32_bridge_xfer(struct gd32_bridge_gpio *gd32, u8 cmd,
@@ -201,13 +208,16 @@ index 000000000000..afa62b92f82e
 +
 +	put_unaligned_le32(mask, &req[0]);
 +	put_unaligned_le32(value ? mask : 0, &req[4]);
-+	if (!gd32_bridge_xfer(gd32, GD32_CMD_GPIO_WRITE, req, 8, NULL, 0)) {
-+		gd32->output_mask |= mask;
-+		if (value)
-+			gd32->output_vals |= mask;
-+		else
-+			gd32->output_vals &= ~mask;
++	if (gd32_bridge_xfer(gd32, GD32_CMD_GPIO_WRITE, req, 8, NULL, 0)) {
++		dev_warn_ratelimited(chip->parent,
++				     "GPIO write line %u failed\n", offset);
++		return;
 +	}
++	gd32->output_mask |= mask;
++	if (value)
++		gd32->output_vals |= mask;
++	else
++		gd32->output_vals &= ~mask;
 +}
 +
 +static int gd32_bridge_gpio_dir_out(struct gpio_chip *chip,
