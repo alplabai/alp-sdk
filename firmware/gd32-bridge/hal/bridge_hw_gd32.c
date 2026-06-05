@@ -466,6 +466,49 @@ static bool adc_periph_init(uint32_t periph)
     return adc_calibrate_bounded(periph);
 }
 
+/* Stream-DMA bring-up state.  Two parallel streams: stream 0 binds
+ * DMA0_CH0, stream 1 binds DMA1_CH0.  Each stream owns a circular
+ * ring buffer that the DMA fills peripheral-to-memory at the ADC
+ * clock; bridge_hw_adc_stream_read drains samples between the host's
+ * polls.  Declared here (above the single-shot read path) because
+ * bridge_hw_adc_read's converter-sharing guard inspects the live
+ * stream slots.
+ *
+ * Ring size is chosen so a 100 kHz stream fills it in ~10 ms (1024
+ * samples) -- comfortably above the host's typical poll cadence yet
+ * small enough to keep the SRAM footprint inside the GD32G553's
+ * 128 KB budget.  Total cost: 2 streams x 1024 samples x 2 bytes =
+ * 4 KB. */
+#define BRIDGE_ADC_STREAM_RING_SAMPLES 1024u
+#define BRIDGE_ADC_STREAM_COUNT 2u
+
+/* Honest sample-rate contract: the requested rate is realised by a
+ * dedicated pacing timer (see stream_begin), not ignored.  100 kHz
+ * cap = the ring's documented design point (fills in ~10 ms); 0 is
+ * INVAL at the call site, anything above the cap is RANGE. */
+#define BRIDGE_ADC_STREAM_RATE_MAX_HZ 100000u
+
+/* Pacing-timer clock.  TIMER5/6 are APB1 basic timers; with APB1 at
+ * DIV1 they tick at the full 216 MHz core clock (same base the PWM
+ * timers use -- see PWM_TIMER_CLK_HZ).  The silicon validation
+ * cross-checks this constant: a wrong base shows up directly as a
+ * got-count mismatch over a timed dwell. */
+#define BRIDGE_ADC_PACE_CLK_HZ 216000000u
+
+typedef struct {
+    bool     in_use;
+    uint8_t  channel;     /* ADC channel index this stream watches */
+    uint32_t dma_periph;  /* DMA0 or DMA1                          */
+    uint8_t  dma_channel; /* dma_channel_enum value                */
+    uint32_t pace_timer;  /* TIMER5 (stream 0) or TIMER6 (stream 1) */
+    uint16_t ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
+    uint16_t read_idx; /* host's consumer cursor                */
+    uint8_t  dsp_chain_id;
+    bool     dsp_bound;
+} adc_stream_state_t;
+
+static adc_stream_state_t adc_streams[BRIDGE_ADC_STREAM_COUNT];
+
 /* ----------------------------------------------------------------- */
 /* Quadrature encoder channels.                                       */
 /* ----------------------------------------------------------------- */
@@ -1044,6 +1087,22 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
 
     const gd32_adc_ch_t *ch = &adc_channels_map[channel];
 
+    /* Converter-sharing guard, the read-side mirror of stream_begin's
+     * stream-vs-stream check: two bridge channels ride each ADC
+     * peripheral (ch0/1 -> ADC3, 2/3 -> ADC2, 4/5 -> ADC1, 6/7 ->
+     * ADC0), and a stream owns its converter outright between BEGIN
+     * and END (external-trigger + circular DMA + DDM).  A single-shot
+     * read on the sibling channel would re-point routine rank 0 out
+     * from under the stream's DMA, software-trigger an unpaced
+     * conversion next to the pacing timer's, and consume the EOC the
+     * DDM path depends on -- corrupting the live ring AND returning
+     * bogus data.  Refuse honestly; the host retries after STREAM_END. */
+    for (uint8_t si = 0u; si < BRIDGE_ADC_STREAM_COUNT; ++si) {
+        if (adc_streams[si].in_use && adc_channels_map[adc_streams[si].channel].periph == ch->periph) {
+            return BRIDGE_HW_ERR_BUSY;
+        }
+    }
+
     /* Configure the routine channel for this op (each call re-applies
      * because multiple bridge channels can share an ADC peripheral -- a
      * prior bridge_hw_adc_read on a different bridge channel may have
@@ -1136,47 +1195,6 @@ int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio, uint16_t
     adc_sample_cycles_cache[channel] = sc;
     return BRIDGE_HW_OK;
 }
-
-/* Stream-DMA bring-up state.  Two parallel streams: stream 0 binds
- * DMA0_CH0, stream 1 binds DMA1_CH0.  Each stream owns a circular
- * ring buffer that the DMA fills peripheral-to-memory at the ADC
- * clock; bridge_hw_adc_stream_read drains samples between the host's
- * polls.
- *
- * Ring size is chosen so a 100 kHz stream fills it in ~10 ms (1024
- * samples) -- comfortably above the host's typical poll cadence yet
- * small enough to keep the SRAM footprint inside the GD32G553's
- * 128 KB budget.  Total cost: 2 streams x 1024 samples x 2 bytes =
- * 4 KB. */
-#define BRIDGE_ADC_STREAM_RING_SAMPLES 1024u
-#define BRIDGE_ADC_STREAM_COUNT 2u
-
-/* Honest sample-rate contract: the requested rate is realised by a
- * dedicated pacing timer (below), not ignored.  100 kHz cap = the
- * ring's documented design point (fills in ~10 ms); 0 is INVAL at
- * the call site, anything above the cap is RANGE. */
-#define BRIDGE_ADC_STREAM_RATE_MAX_HZ 100000u
-
-/* Pacing-timer clock.  TIMER5/6 are APB1 basic timers; with APB1 at
- * DIV1 they tick at the full 216 MHz core clock (same base the PWM
- * timers use -- see PWM_TIMER_CLK_HZ).  The silicon validation
- * cross-checks this constant: a wrong base shows up directly as a
- * got-count mismatch over a timed dwell. */
-#define BRIDGE_ADC_PACE_CLK_HZ 216000000u
-
-typedef struct {
-    bool     in_use;
-    uint8_t  channel;     /* ADC channel index this stream watches */
-    uint32_t dma_periph;  /* DMA0 or DMA1                          */
-    uint8_t  dma_channel; /* dma_channel_enum value                */
-    uint32_t pace_timer;  /* TIMER5 (stream 0) or TIMER6 (stream 1) */
-    uint16_t ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
-    uint16_t read_idx; /* host's consumer cursor                */
-    uint8_t  dsp_chain_id;
-    bool     dsp_bound;
-} adc_stream_state_t;
-
-static adc_stream_state_t adc_streams[BRIDGE_ADC_STREAM_COUNT];
 
 /* TRIGSEL route target for an ADC peripheral's routine-group trigger. */
 static trigsel_periph_enum adc_stream_routrg(uint32_t adc_periph)
