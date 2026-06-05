@@ -124,7 +124,7 @@
 
 	backlight: backlight {
 		compatible = "pwm-backlight";
-		pwms = <&gpt1_2 0 200000>;
+		pwms = <&gpt1_0 0 200000>;
 		power-supply = <&reg_3p3v>;
 		brightness-levels = <0 4 8 16 32 64 128 255>;
 		default-brightness-level = <6>;
@@ -133,10 +133,15 @@
 
 /* Display backlight: the LED boost driver lives ON the SoM (BL_LED_A/K
  * to the module edge); Renesas PA5 = BL_PWM drives its CNTRL input.
- * PA5 func 9 = GTIOC10B = GPT1 channel 2, B-side output (hence
- * channel_B). 5 kHz PWM.
+ * PA5 func 9 = GTIOC10B. NOTE the second GPT bank's units are numbered
+ * GPT10..GPT17 (there is no GPT8/9 -- vendor device header
+ * R9A09G056N gpt_iodefine.h), so GTIOC10B = unit base 0x13020000 =
+ * &gpt1_0, B-side output (hence channel_B). 5 kHz PWM.
+ * Silicon-verified 2026-06-05: driving gpt@13020200 instead (the
+ * "GTIOC8-15" misreading) ran GPT12 with perfect registers and a dead
+ * PA5 ball.
  */
-&gpt1_2 {
+&gpt1_0 {
 	pinctrl-0 = <&backlight_pwm_pins>;
 	pinctrl-names = "default";
 	channel = "channel_B";
