@@ -89,7 +89,11 @@ firmware/gd32-bridge/
 ├── hal/
 │   ├── bridge_hw.h                  (HAL surface consumed by protocol.c)
 │   ├── bridge_hw_stub.c             (host-test backend, ops return NOTIMPL)
-│   ├── bridge_hw_gd32.c             (real GigaDevice peripheral HAL)
+│   ├── gd32/                        (real GigaDevice peripheral HAL, one TU
+│   │                                 per peripheral: init.c gpio.c trng.c
+│   │                                 tmu.c vref.c adc.c adc_stream.c dac.c
+│   │                                 qenc.c pwm.c pwm_capture.c counter.c
+│   │                                 timer_sync.c power.c + gd32_common.h)
 │   ├── transport_hw_gd32.c          (SPI1 + I2C0 slave silicon bring-up, full-DMA SPI)
 │   └── fmc_ota.c                    (RAM-resident dual-bank FMC erase/program)
 ├── src/

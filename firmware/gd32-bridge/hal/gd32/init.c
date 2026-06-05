@@ -243,7 +243,7 @@ void bridge_hw_init(void)
      * TRCENA in CoreDebug->DEMCR gates the entire DWT/ITM trace block;
      * setting CYCCNTENA in DWT->CTRL starts the 32-bit free-running
      * counter at the core clock rate (216 MHz on the GD32G553 in the
-     * stock clock config -> ~17.9 s wrap, ~4.16 ns LSB).  The counter
+     * stock clock config -> ~19.9 s wrap, ~4.63 ns LSB).  The counter
      * is the source for bridge_hw_counter_read(). */
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CYCCNT = 0u;

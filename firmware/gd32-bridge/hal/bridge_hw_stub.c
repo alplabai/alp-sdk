@@ -10,8 +10,8 @@
  * underlying HW operation failed" (IO).
  *
  * The real implementation against the GigaDevice firmware library
- * lives in bridge_hw_gd32.c; the build picks one or the other via
- * BRIDGE_HAL_BACKEND in CMakeLists.txt.
+ * lives in the per-peripheral TUs under hal/gd32/; the build picks
+ * one or the other via BRIDGE_HAL_BACKEND in CMakeLists.txt.
  */
 
 #include <stdint.h>

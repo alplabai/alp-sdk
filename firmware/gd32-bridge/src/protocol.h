@@ -82,7 +82,7 @@ typedef enum {
      * PWM4..7 -> TIMER7 channels MCH0..MCH3 per
      * `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`).  The 16-bit
      * counter at the GD32's 216 MHz core clock gives ~4.63 ns LSB
-     * resolution + 273 us maximum period; CMD_PWM_GET reports the
+     * resolution + 303 us maximum period; CMD_PWM_GET reports the
      * actual programmed value so callers can see what rounding the
      * firmware applied. */
     CMD_PWM_CONFIGURE = 0x22,

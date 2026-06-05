@@ -190,10 +190,10 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
 
     # ----- §4. v0.2 additions: DAC / QENC / COUNTER ------------------
     # Request envelopes (host -> firmware).  Stub firmware replies
-    # NOSUPPORT (0x06) for every body until bridge_hw_*_set / *_read /
-    # *_reset are wired in hal/bridge_hw_gd32.c; the vectors below let
-    # both sides assert that the framing layer is byte-for-byte locked
-    # before the HAL bodies land.
+    # NOSUPPORT (0x06) for every body; the gd32 backend's real
+    # bridge_hw_*_set / *_read / *_reset live under hal/gd32/.  The
+    # vectors let both sides assert that the framing layer is
+    # byte-for-byte locked independently of the HAL bodies.
     out.append((
         "spi_dac_set_ch0_1650mv_request",
         spi_frame(SOF, CMD_DAC_SET,
@@ -289,8 +289,8 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
     # Single representative vector: alp_tmu_sqrt(4.0f) -> 2.0f as
     # encoded on the wire.  Function = SQRT (5); format = IEEE-754
     # single (1); in_a = 0x40800000 (float bits for 4.0f); in_b = 0.
-    # Firmware stub replies STATUS_NOSUPPORT until bridge_hw_gd32.c
-    # wires the TMU, mirroring the existing v0.3 pattern.
+    # Firmware stub replies STATUS_NOSUPPORT; the gd32 backend's TMU
+    # body lives in hal/gd32/tmu.c, mirroring the existing v0.3 pattern.
     out.append((
         "spi_tmu_compute_sqrt_f32_4p0_request",
         spi_frame(SOF, CMD_TMU_COMPUTE,

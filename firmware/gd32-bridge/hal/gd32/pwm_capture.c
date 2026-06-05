@@ -249,9 +249,9 @@ int bridge_hw_pwm_capture_read(uint8_t channel, uint32_t *period_ns, uint32_t *p
 
     /* Convert ticks back to nanoseconds.  The PWM timers run at the
      * 1 us tick configured by pwm_timer_init (prescaler 216-1 against
-     * the 216 MHz timer clock); the bridge_hw.h doc-comment's
-     * "~4.16 ns LSB" refers to the unscaled core clock used by the
-     * counter peripheral, not the prescaled PWM tick used here. */
+     * the 216 MHz timer clock) -- NOT the unscaled ~4.63 ns core-clock
+     * LSB the free-running counter peripheral uses; bridge_hw.h's
+     * capture contract documents the same 1 us resolution. */
     *period_ns      = s->period_ticks * PWM_TIMER_TICK_NS;
     *pulse_width_ns = s->pulse_width_ticks * PWM_TIMER_TICK_NS;
 

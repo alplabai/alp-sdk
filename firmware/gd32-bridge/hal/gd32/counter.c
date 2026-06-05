@@ -23,7 +23,7 @@ int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks)
     /* Single free-running counter exposed today; future revisions can
      * carve out additional ids for derived (slower) tick bases.  The
      * DWT counter ticks at the core clock (216 MHz on GD32G553),
-     * wraps every ~17.9 s, and is monotonically non-decreasing across
+     * wraps every ~19.9 s, and is monotonically non-decreasing across
      * reads -- the host can compute deltas without watching for
      * mid-read consistency since the register is atomic. */
     if (counter != 0u) return BRIDGE_HW_ERR_RANGE;

@@ -8,11 +8,9 @@
  *
  * The default implementations in hal/bridge_hw_stub.c return
  * BRIDGE_HW_ERR_NOTIMPL so the protocol round-trip can be smoke-tested
- * without the GigaDevice library being on the workspace yet.  The
- * real implementations land in hal/bridge_hw_gd32.c alongside the
- * GigaDevice firmware library pull (TBD: maintainer to drop the
- * vendor library at vendors/gd32_firmware_library/ and flip a
- * CMake flag).
+ * without the GigaDevice library on the workspace.  The real
+ * implementations live in the per-peripheral TUs under hal/gd32/
+ * (BRIDGE_HAL_BACKEND=gd32, against vendors/gd32_firmware_library/).
  */
 
 #ifndef GD32_BRIDGE_HAL_BRIDGE_HW_H
@@ -22,7 +20,7 @@
 #include <stdint.h>
 
 /* --------------------------------------------------------------- */
-/* Performance notes for the future bridge_hw_gd32.c implementer:    */
+/* Performance notes for the hal/gd32/ backend implementer:          */
 /*                                                                  */
 /* * The GD32G5 carries a hardware CRC unit (datasheet §95) that    */
 /*   processes one byte per AHB clock vs the ~16 cycles the         */
