@@ -1053,3 +1053,38 @@ Pre-requisites: Task 0 done (G0 = bridge I2C transport PASS), Tasks 1–6 built.
 - **Still open for the next session:** backlight hardware fix → G2/G4
   re-test; G6 DPMS; G7 bake+Weston+example; G8 soak; the bench dtb is
   diagnostic-only (shipped DT keeps reset-gpios for healthy bridges).
+
+### 2026-06-05 (part 2) — the backlight deep-dive, instrumented end to end
+
+- **Root-cause fix found and committed (c4f23d9): the GPT numbering trap.**
+  The second GPT bank on R9A09G056 is numbered **GPT10..GPT17 at
+  0x13020000+n*0x100 — there is no GPT8/GPT9** (vendor device header
+  R9A09G056N gpt_iodefine.h; FSP altId `gpt10.gtioc10b.pa5`). GTIOC10B
+  therefore = `&gpt1_0`, not `&gpt1_2`; the original DT ran GPT12 with
+  perfect registers and a dead PA5. After the fix the PWM runs on
+  13020000.gpt.
+- **Full software audit, measured on silicon (post-fix):** PFC nibble =
+  0x9 (vendor-confirmed func for GTIOC10B); GPT10 counter measured at
+  **199.86 MHz**, GTPR=40000 → **4996.5 Hz** PWM @ 50 %; GTIOR OBE set.
+  GPIO-mode drive of PA5 with PM=0b11 shows the **PIN register (physical
+  pad) following every toggle** — the pad output stage works.
+- **Yet the BL_PWM net stays flat**: Siglent SDS2504X+ (192.168.1.240,
+  SCPI-driven) read 8 mV mean / 50 mV pkpk, zero edge triggers across
+  armed NORMAL/SINGLE windows, through GPT PWM, GPIO blinks at 2 Hz, and
+  boot windows. Off-by-one walk (PA4/PA1/PA3 blinked, scope armed): no
+  triggers. Fresh V2 SchDoc source scan (binary records, not the stale
+  PDF): `BL_PWM` label (415,570) wired to pin record `Name=PA5 |
+  Designator=AH15` — schematic agrees with vendor + silicon.
+- **CM33 secure-world test attempted**: minimal Zephyr blinker built
+  (alp_e1m_v2m101_m33_sm), mtd1 fully backed up, flashed @0x1a0000,
+  cold-cycled — the bootloader did NOT launch it (liveness marker
+  PM_PA[11:10] untouched), so the secure-world question stays OPEN.
+  mtd1 restored byte-perfect from backup (md5 06dbd083… verified).
+- **Verdict so far:** every A55-software-measurable setting is proven
+  good on both GPT and GPIO paths; the failure is bracketed between
+  ball AH15 and the BL_PWM probe point. Remaining discriminators:
+  (1) J-Link CM33 ELF load over SWD (secure-world drive, no flash);
+  (2) continuity TP↔AH15 fanout, powered off; (3) the V2 LAYOUT
+  (PcbDoc netlist sync — only the layout says where the copper went).
+- Bench infra: PSU cold-cycle scripted + user-authorized standing;
+  scope SCPI control established; soft reboots remain broken.
