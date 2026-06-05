@@ -1,6 +1,6 @@
-From abca5c37554f036a216f1fba394aa3632bb91ace Mon Sep 17 00:00:00 2001
+From 3f7ee5e684e711048c07e8ef18b5691a9ab6202f Mon Sep 17 00:00:00 2001
 From: Alp Lab AB
-Date: Fri, 5 Jun 2026 18:02:34 +0200
+Date: Fri, 5 Jun 2026 21:28:50 +0200
 Subject: [PATCH] drm/panel: add himax-hx8394 with rocktech,rk055hdmipi4ma0
  (backport from v6.6)
 
@@ -38,14 +38,21 @@ IO-MCU bridge and rests deasserted (pull-up) by firmware default, so the
 panel must still probe on systems where the bridge GPIO provider is
 unreachable (e.g. a held BRD_I2C).
 
+Commands are sent in LP mode (MIPI_DSI_MODE_LPM): the rz-du DSI host enables
+HS clock and video output in its bridge enable, which precedes the panel's
+enable in the chain - HS command transmission there times out (-110 on the
+first write); LP commands interleave during blanking. Silicon-validated on
+E1M-V2M101 2026-06-05: the full init sequence ACKs and the DSI-1 connector
+reports connected at 720x1280.
+
 Upstream-Status: Backport [v6.6 + RK055HDMIPI4MA0 ALP extension]
 
 Signed-off-by: Alp Lab AB
 ---
  drivers/gpu/drm/panel/Kconfig              |  10 +
  drivers/gpu/drm/panel/Makefile             |   1 +
- drivers/gpu/drm/panel/panel-himax-hx8394.c | 549 +++++++++++++++++++++
- 3 files changed, 560 insertions(+)
+ drivers/gpu/drm/panel/panel-himax-hx8394.c | 550 +++++++++++++++++++++
+ 3 files changed, 561 insertions(+)
  create mode 100644 drivers/gpu/drm/panel/panel-himax-hx8394.c
 
 diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
@@ -83,10 +90,10 @@ index 34e717382dbb..cab074527bf0 100644
  obj-$(CONFIG_DRM_PANEL_ILITEK_ILI9881C) += panel-ilitek-ili9881c.o
 diff --git a/drivers/gpu/drm/panel/panel-himax-hx8394.c b/drivers/gpu/drm/panel/panel-himax-hx8394.c
 new file mode 100644
-index 000000000000..28b6d926eceb
+index 000000000000..154223bc3d65
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/panel-himax-hx8394.c
-@@ -0,0 +1,549 @@
+@@ -0,0 +1,550 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Driver for panels based on Himax HX8394 controller, such as:
@@ -610,7 +617,8 @@ index 000000000000..28b6d926eceb
 +	.lanes         = 2,
 +	/* Burst mode: rzg2l_mipi_dsi.c treats VIDEO_SYNC_PULSE+!VIDEO_BURST as the
 +	 * special case; VIDEO_BURST is the default accepted path. */
-+	.mode_flags    = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST,
++	.mode_flags    = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
++			 MIPI_DSI_MODE_LPM,
 +	.format        = MIPI_DSI_FMT_RGB565,
 +	.init_sequence = rk055hdmipi4ma0_init_sequence,
 +};
