@@ -414,7 +414,36 @@ static const gd32_adc_ch_t adc_channels_map[] = {
  * are still gated to defaults at v0.3 and live in a follow-up. */
 static uint16_t adc_sample_cycles_cache[8];
 
-static void     adc_periph_init(uint32_t periph)
+/* Bounded reimplementation of the vendor's adc_calibration_enable().
+ * The SPL body spins `while (RSTCLB)` then `while (CLB)` with NO
+ * timeout -- and the calibration FSM only advances on a healthy,
+ * clocked converter.  adc_periph_init() is reachable from the CS-EXTI
+ * request handler (bridge_hw_adc_read's timeout self-heal and
+ * bridge_hw_adc_stream_end's restore), where an unbounded spin on a
+ * wedged ADC takes the WHOLE LINK down -- the exact failure class the
+ * read path's own EOC bound was added to stop (silicon 2026-06-04).
+ * Without the irony: the self-heal for a wedged converter must not
+ * itself trust that converter to terminate a loop.  Same register
+ * sequence as the vendor, same bound family as the other handler-safe
+ * waits in this file; returns false if either phase never completes. */
+static bool adc_calibrate_bounded(uint32_t periph)
+{
+    uint32_t to;
+
+    ADC_CTL1(periph) |= (uint32_t)ADC_CTL1_RSTCLB;
+    for (to = 100000u; to != 0u; --to) {
+        if (RESET == (ADC_CTL1(periph) & ADC_CTL1_RSTCLB)) break;
+    }
+    if (to == 0u) return false;
+
+    ADC_CTL1(periph) |= (uint32_t)ADC_CTL1_CLB;
+    for (to = 100000u; to != 0u; --to) {
+        if (RESET == (ADC_CTL1(periph) & ADC_CTL1_CLB)) break;
+    }
+    return to != 0u;
+}
+
+static bool adc_periph_init(uint32_t periph)
 {
     adc_deinit(periph);
     adc_clock_config(periph, ADC_CLK_SYNC_HCLK_DIV6);
@@ -424,14 +453,17 @@ static void     adc_periph_init(uint32_t periph)
     adc_enable(periph);
 
     /* Stabilisation + calibration.  The datasheet wants tSTAB after
-     * ADCON before calibrating; a generous spin costs microseconds in
-     * this boot-only path.  adc_calibration_enable() then self-blocks
-     * on RSTCLB/CLB until the hardware finishes -- without it the
-     * converter runs uncalibrated for the whole session (linearity
-     * offsets land directly in every reported millivolt). */
+     * ADCON before calibrating; a generous spin costs microseconds.
+     * The bounded calibration then waits on RSTCLB/CLB -- without it
+     * the converter runs uncalibrated for the whole session (linearity
+     * offsets land directly in every reported millivolt).  A false
+     * return means the calibration FSM never finished: the converter
+     * is configured but its accuracy is unknown -- callers on the
+     * request path surface that as an IO error rather than serving
+     * readings from a converter in an unproven state. */
     for (volatile uint32_t stab = 0u; stab < 4096u; ++stab) {
     }
-    adc_calibration_enable(periph);
+    return adc_calibrate_bounded(periph);
 }
 
 /* ----------------------------------------------------------------- */
@@ -815,10 +847,15 @@ void bridge_hw_init(void)
     rcu_periph_clock_enable(RCU_ADC1);
     rcu_periph_clock_enable(RCU_ADC2);
     rcu_periph_clock_enable(RCU_ADC3);
-    adc_periph_init(ADC0);
-    adc_periph_init(ADC1);
-    adc_periph_init(ADC2);
-    adc_periph_init(ADC3);
+    /* Boot-time calibration result intentionally not latched: a
+     * converter that fails here is also the converter every request-
+     * path op re-times against (the read path's bounded EOC wait +
+     * self-heal), so the failure surfaces loudly on first use instead
+     * of wedging boot. */
+    (void)adc_periph_init(ADC0);
+    (void)adc_periph_init(ADC1);
+    (void)adc_periph_init(ADC2);
+    (void)adc_periph_init(ADC3);
     for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
         adc_sample_cycles_cache[i] = ADC_DEFAULT_SAMPLE_CYCLES;
     }
@@ -1040,7 +1077,11 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
             /* spin, bounded */
         }
         if (to == 0u) {
-            adc_periph_init(ch->periph);
+            /* Self-heal is best-effort: the re-init's calibration is
+             * itself bounded (a wedged converter must not convert a
+             * read timeout into a link wedge), and this path already
+             * reports IO either way. */
+            (void)adc_periph_init(ch->periph);
             return BRIDGE_HW_ERR_IO;
         }
         adc_flag_clear(ch->periph, ADC_FLAG_EOC);
@@ -1362,16 +1403,20 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
         /* fixed dwell, ~tens of microseconds */
     }
 
-    /* Full single-shot restore: deinit + reconfigure + recalibrate.
-     * This puts EXTERNAL_TRIGGER_DISABLE, routine length 1 and the
-     * boot calibration back so a following bridge_hw_adc_read sees
-     * the exact converter state adc_periph_init promised it -- the
-     * same self-heal shape the read path's timeout branch uses. */
-    adc_periph_init(ch->periph);
+    /* Full single-shot restore: deinit + reconfigure + recalibrate
+     * (calibration BOUNDED -- this runs in the CS-EXTI handler).  This
+     * puts EXTERNAL_TRIGGER_DISABLE, routine length 1 and a fresh
+     * calibration back so a following bridge_hw_adc_read sees the
+     * exact converter state adc_periph_init promised it -- the same
+     * self-heal shape the read path's timeout branch uses.  The stream
+     * state clears regardless of the restore verdict (the stream IS
+     * over); a calibration that never completed reports IO so the host
+     * knows the converter came back in an unproven state. */
+    const bool restored = adc_periph_init(ch->periph);
 
     s->in_use    = false;
     s->dsp_bound = false;
-    return BRIDGE_HW_OK;
+    return restored ? BRIDGE_HW_OK : BRIDGE_HW_ERR_IO;
 }
 
 int bridge_hw_trng_read(uint8_t *dest, size_t len)
