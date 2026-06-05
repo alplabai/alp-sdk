@@ -1,5 +1,6 @@
+From abca5c37554f036a216f1fba394aa3632bb91ace Mon Sep 17 00:00:00 2001
 From: Alp Lab AB
-Date: Thu, 4 Jun 2026 15:47:10 +0200
+Date: Fri, 5 Jun 2026 18:02:34 +0200
 Subject: [PATCH] drm/panel: add himax-hx8394 with rocktech,rk055hdmipi4ma0
  (backport from v6.6)
 
@@ -31,6 +32,11 @@ rk055hdmipi4ma0_init_sequence() follows this order exactly: SETEXTC first,
 SETMIPI second, then the NXP table starting at MIPI_DCS_SET_ADDRESS_MODE.
 
 Reset-low minimum dwell (>=1 ms) enforced in prepare() -- review finding.
+
+reset-gpios is optional for this desc: the panel reset is owned by the GD32
+IO-MCU bridge and rests deasserted (pull-up) by firmware default, so the
+panel must still probe on systems where the bridge GPIO provider is
+unreachable (e.g. a held BRD_I2C).
 
 Upstream-Status: Backport [v6.6 + RK055HDMIPI4MA0 ALP extension]
 
@@ -77,7 +83,7 @@ index 34e717382dbb..cab074527bf0 100644
  obj-$(CONFIG_DRM_PANEL_ILITEK_ILI9881C) += panel-ilitek-ili9881c.o
 diff --git a/drivers/gpu/drm/panel/panel-himax-hx8394.c b/drivers/gpu/drm/panel/panel-himax-hx8394.c
 new file mode 100644
-index 000000000000..d772bc93f026
+index 000000000000..28b6d926eceb
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/panel-himax-hx8394.c
 @@ -0,0 +1,549 @@
@@ -440,7 +446,7 @@ index 000000000000..d772bc93f026
 +	if (!ctx)
 +		return -ENOMEM;
 +
-+	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
++	ctx->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
 +	if (IS_ERR(ctx->reset_gpio))
 +		return dev_err_probe(dev, PTR_ERR(ctx->reset_gpio),
 +				     "Failed to get reset gpio\n");
