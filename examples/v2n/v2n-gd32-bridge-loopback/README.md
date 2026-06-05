@@ -73,19 +73,31 @@ buffered path because no external gain resistors remain in the loop.
 The DAC is parked at 0 on every exit path, including failures.
 
 ### 2. `t_pwm_capture_loopback` (Jumper C)
-Drive PWM ch2 at 1 ms period / 300 us pulse, rebind ch3 as a
-**both-edges** input-capture source, settle 20 ms, then read with a
-retry ladder (up to 5 attempts, 5 ms apart) that treats
-`ALP_ERR_NOSUPPORT` as the **documented "ring empty, retry" sentinel**.
-Asserts pulse width in `[294000, 306000]` ns.
+Drive PWM ch2 at **200 Hz, 50 % duty** (5 ms period, 2.5 ms high),
+rebind ch3 as a **both-edges** input-capture source, settle 10 ms, then
+read in a **tight poll loop** (up to 80 reads, no inter-read delay) that
+treats `ALP_ERR_NOSUPPORT` as the **documented "no fresh edge yet, poll
+again" sentinel**. Asserts pulse width in `[2400000, 2600000]` ns
+(2.5 ms ± 100 us).
 
-**The period is deliberately not asserted.** The stimulus (ch2) and the
-capture (ch3) live on the *same* advanced timer (TIMER0), so the
-captured "period" is the counter's wrap interval, which by construction
-equals the output period for any setpoint. The period measurement is
-**wrap-degenerate** -- it cannot fail independently of the stimulus, so
-asserting it proves nothing. The raw `period_ns` and `pulse_width_ns`
-are still recorded for bench forensics.
+Two choices make this robust on the **shared-timer** loopback (ch2 and
+ch3 both ride TIMER0):
+- **50 % duty** -- the both-edges machine measures the delta between
+  *adjacent* edges; at 50 % the high and low times are equal
+  (period/2 = 2.5 ms), so the pulse width is the same regardless of
+  which edge armed the capture (no phase ambiguity).
+- **slow rate + tight polling** -- at 200 Hz the edges are 2.5 ms apart,
+  far wider than one bridge transaction (~150 us), so the host catches
+  three *consecutive* edges. (At the old 1 kHz with a 5 ms retry ladder
+  the three samples were non-consecutive edges and the delta was
+  meaningless -- the bug that made this read 0 before fw v0.2.7.)
+
+**The period is deliberately not asserted.** Stimulus (ch2) and capture
+(ch3) share TIMER0, so the same-edge "period" delta is exactly one
+counter wrap and reads ~0 -- a documented degeneracy, not a fault. The
+raw `period_ns` and `pulse_width_ns` are still recorded for forensics.
+The firmware (fw v0.2.7) takes all edge deltas modulo the counter
+period so the wrap underflow no longer poisons the pulse-width reading.
 
 ### 3. `t_pwm_qenc_stimulus` (Jumper B)
 Reset encoder 1, drive `ENC1_X` with a 1 kHz 50% square from PWM ch1,
