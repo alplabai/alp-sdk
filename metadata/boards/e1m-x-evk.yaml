@@ -190,12 +190,22 @@ e1m_routes:
         board_alias: BOARD_PWM_LED_GREEN,
         doc: "RGB LED green channel (GPIO-secondary = XEVK_PIN_LED_GREEN)." }
   adc:
-    - { e1m: E1M_X_ADC0, macro: XEVK_ADC_ARDUINO_A0,
-        doc: "Arduino UNO header A0 analog input (ANA_S0)." }
+    - { e1m: E1M_X_ADC0, macro: XEVK_ADC_MIKROBUS_AN,
+        doc: "mikroBUS Click socket AN analog input (net CK_ANA, also on
+              breakout header P7.1; raw passthrough, no divider).  The V2
+              carrier netlist routes ONLY the mikroBUS AN to ANA_S0; the
+              earlier 'Arduino A0' doc here did not match the netlist." }
   dac:
     - { e1m: E1M_X_DAC0, macro: XEVK_DAC0,
         board_alias: BOARD_DAC0,
-        doc: "DAC0 analog output." }
+        doc: "DAC0 analog output.  Header J15.2 (DAC0_OUT) is the OPA189
+              x2-buffered copy, but ON THIS CARRIER REV THE BUFFER IS
+              INOPERABLE: both OPA189s are supplied from the VAU2 rail,
+              which is not connected to any source (maintainer-confirmed
+              2026-06-04; next-rev fix = tie VAU2 to a real supply).  An
+              unpowered OPA189's input ESD clamp also LOADS the raw DAC
+              net to ~0.3 V -- bench use of the raw 1.8 V-full-scale DAC
+              requires lifting the buffer's input off the net." }
     - { e1m: E1M_X_DAC1, macro: XEVK_DAC1,
         board_alias: BOARD_DAC1,
         doc: "DAC1 analog output." }

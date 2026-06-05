@@ -325,14 +325,22 @@ static bool t_adc_stream(soak_stat_t *st)
     return true;
 }
 
-/* 0x50/0x51 DAC_SET + DAC_GET readback at mid-rail.  12-bit DAC off
- * 3.3 V is ~0.8 mV/LSB; ±16 mV of tolerance covers rounding plus a
- * generous firmware-side conversion slack.  Returns the pad to 0 mV
- * so the bench pin idles between cycles. */
+/* 0x50/0x51 DAC_SET + DAC_GET readback.  12-bit DAC off the 1.8 V
+ * analog rail is ~0.44 mV/LSB; ±16 mV of tolerance covers rounding
+ * plus a generous firmware-side conversion slack.  Returns the pad
+ * to 0 mV so the bench pin idles between cycles.
+ *
+ * SETPOINT BOUNDED at 600 mV: a safe mid-low point on the 1.8 V
+ * analog rail.  This row stays defensive about the X-EVK Tier-B
+ * bench, where DAC0 is jumpered straight to the ADC0 pad (CK_ANA) --
+ * keeping the command well under the 1.8 V rail means the soak can
+ * run with that jumper installed without driving the ADC pad to its
+ * ceiling.  With the v0.2.6 VREF fix (internal reference now live)
+ * this readback finally measures the real pad, not a dead converter. */
 static bool t_dac(soak_stat_t *st)
 {
     uint16_t     rb = 0;
-    alp_status_t s  = gd32g553_dac_set(&ctx, 0u, 1650u);
+    alp_status_t s  = gd32g553_dac_set(&ctx, 0u, 600u);
     if (s != ALP_OK) {
         st->last_status = (int)s;
         SOAK_FAIL(st, "set status=%d", (int)s);
@@ -344,9 +352,9 @@ static bool t_dac(soak_stat_t *st)
         SOAK_FAIL(st, "get status=%d", (int)s);
         return false;
     }
-    const bool ok = (rb >= 1650u - 16u) && (rb <= 1650u + 16u);
+    const bool ok = (rb >= 600u - 16u) && (rb <= 600u + 16u);
     if (!ok) {
-        SOAK_FAIL(st, "readback %u mV (wrote 1650)", rb);
+        SOAK_FAIL(st, "readback %u mV (wrote 600)", rb);
     }
     (void)gd32g553_dac_set(&ctx, 0u, 0u);
     return ok;
