@@ -1010,4 +1010,46 @@ Pre-requisites: Task 0 done (G0 = bridge I2C transport PASS), Tasks 1–6 built.
 
 ## Bench log
 
-(appended during Tasks 0 and 10)
+### 2026-06-05 — first silicon session (E1M-V2M101 @ .198, new-rev DCS-capable silicon, panel on J6)
+
+- **G0 (bridge I2C transport): BLOCKED by hardware** — the board's BRD_I2C is
+  the known pre-existing wedge (whole bus scans empty; RTC/clock-gen/GD32 all
+  silent). Not a bridge-firmware or driver issue. Until the carrier-level fix
+  (DX-M1 clamp / refclk, see the bench handoff), the gpio-gd32-bridge path is
+  untestable on this board. Display proceeded via a bench-only dtb with the
+  panel's `reset-gpios` dropped (GD32 PF1 default pull-up keeps reset
+  deasserted) + the (committed) reset-gpios-optional driver change.
+- **G1 (panel probe + DCS init): PASS** — required one driver fix found on
+  silicon: the rz-du DSI host enables HS clock/video in bridge-enable BEFORE
+  the panel's enable, so HS command TX times out (-110 on SETEXTC). Adding
+  `MIPI_DSI_MODE_LPM` to the rk055 desc (LP commands, blanking-interleaved)
+  makes the FULL init sequence ACK. fb0 720x1280 created; DSI-1 connector
+  `connected`; backlight + GPT probed; uname-match modules load.
+  **The #AC0 DCS silicon gate is therefore PASSED on this module.**
+- **G2 (pixels on glass): UNVERIFIED** — backlight dead (below) makes the
+  transmissive panel unreadable; flashlight inspection inconclusive.
+- **G4 (backlight): FAIL — board-level, not software.** Exhaustive narrowing:
+  PFC nibble = 0x9 (GTIOC10B), GTCR.CST=1, GTCNT advancing, GTIOR=0x011b011b
+  (OBE set), GTPR/GTCCRB = 5 kHz @ 50/100% — all read back live from the
+  hardware. A register-driven GPIO blink (PMC→PM→P, RMW pin-5-only) on the
+  same ball produced NO movement on the BL_PWM-net test point, while the V2
+  schematic still sources BL_PWM from PA5/AH15 and VCC_IN_5V is present.
+  PA6 (same port byte) demonstrably drives (M1_RESET) → port-A output path
+  works. The Linux pinctrl PA offset (0x2a) was re-verified against the V2N
+  HUM Tables 4.2-6/9/10 — correct. **Conclusion: open between ball AH15 and
+  the BL_PWM net on this V2 build** (layout/netlist-sync or TP labeling) —
+  hardware owner to check the V2 PcbDoc routing + continuity at the BGA
+  escape/series-R pad.
+- **Bench infrastructure findings:** this board ignores ALL soft reboots
+  (`reboot -f`, even sysrq-b) — only a PSU cold-cycle (SCPI .156:5025 CH2)
+  reboots it; verify every "reboot" via dmesg timestamps before trusting
+  measurements. Ethernet (errata E1) drops on most power events → cable
+  re-seat. Serial getty on COM24 echoes but doesn't execute (unexplained;
+  use SSH).
+- **Board state left:** `/boot/Image -> Image-lcd-display1` (LPM build),
+  dtb = bench no-reset variant (backups: `.pre-lcd`, `.wifi`, …). WiFi
+  session restore: `ln -sfn Image-wifi-bt /boot/Image` + `cp
+  /boot/r9a09g056n44-dev.dtb.wifi /boot/r9a09g056n44-dev.dtb`.
+- **Still open for the next session:** backlight hardware fix → G2/G4
+  re-test; G6 DPMS; G7 bake+Weston+example; G8 soak; the bench dtb is
+  diagnostic-only (shipped DT keeps reset-gpios for healthy bridges).
