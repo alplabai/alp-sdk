@@ -1129,7 +1129,8 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
      * DDM path depends on -- corrupting the live ring AND returning
      * bogus data.  Refuse honestly; the host retries after STREAM_END. */
     for (uint8_t si = 0u; si < BRIDGE_ADC_STREAM_COUNT; ++si) {
-        if (adc_streams[si].in_use && adc_channels_map[adc_streams[si].channel].periph == ch->periph) {
+        if (adc_streams[si].in_use &&
+            adc_channels_map[adc_streams[si].channel].periph == ch->periph) {
             return BRIDGE_HW_ERR_BUSY;
         }
     }
