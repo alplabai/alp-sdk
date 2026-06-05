@@ -414,6 +414,29 @@ static const gd32_adc_ch_t adc_channels_map[] = {
  * are still gated to defaults at v0.3 and live in a follow-up. */
 static uint16_t adc_sample_cycles_cache[8];
 
+/* Analog-reference health latch.  bridge_hw_init arms the on-chip
+ * reference buffer and records whether VREFRDY ever set; every
+ * ADC/DAC entry point consults this before touching its converter.
+ * A reference that never locked means EVERY conversion result is
+ * garbage referenced to a dead node -- the v0.2.6 root cause -- and a
+ * STATUS_OK reply carrying garbage millivolts is indistinguishable on
+ * the wire from healthy analog (no GET_FAULT-style opcode exists).
+ * Failing the analog ops with an IO error is the only honest signal
+ * this protocol revision can give.
+ *
+ * The check self-heals: a buffer that locks LATE (after init's bounded
+ * wait expired) is promoted on the first analog op that finds VREFRDY
+ * set -- same lazy-readiness shape the TRNG bring-up uses. */
+static bool vref_ok = false;
+
+static bool vref_ready_check(void)
+{
+    if (!vref_ok) {
+        vref_ok = (vref_status_get() == SET);
+    }
+    return vref_ok;
+}
+
 /* Bounded reimplementation of the vendor's adc_calibration_enable().
  * The SPL body spins `while (RSTCLB)` then `while (CLB)` with NO
  * timeout -- and the calibration FSM only advances on a healthy,
@@ -875,6 +898,12 @@ void bridge_hw_init(void)
     for (uint32_t vr = 0u; vr < 100000u; ++vr) {
         if (vref_status_get() == SET) break; /* VREFRDY -- buffer locked */
     }
+    /* Latch the verdict.  A buffer that never locked leaves vref_ok
+     * false and every ADC/DAC op answers IO instead of serving
+     * garbage referenced to a dead node (the exact silent failure the
+     * VREF bring-up exists to cure).  vref_ready_check() re-probes on
+     * each analog op, so a late lock self-promotes. */
+    vref_ok = (vref_status_get() == SET);
 
     /* ADC bring-up: configure 8 pads as analog, enable all four ADC
      * peripheral clocks, run the per-peripheral init.  Calibration
@@ -1084,6 +1113,7 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
     if (mv == 0) return BRIDGE_HW_ERR_INVAL;
     if (samples == 0u) return BRIDGE_HW_ERR_INVAL;
     if (channel >= ADC_CHANNEL_MAP_COUNT) return BRIDGE_HW_ERR_RANGE;
+    if (!vref_ready_check()) return BRIDGE_HW_ERR_IO; /* dead reference -- fail loud */
 
     const gd32_adc_ch_t *ch = &adc_channels_map[channel];
 
@@ -1223,6 +1253,7 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
     if (channel >= ADC_CHANNEL_MAP_COUNT) return BRIDGE_HW_ERR_RANGE;
     if (sample_rate_hz == 0u) return BRIDGE_HW_ERR_INVAL;
     if (sample_rate_hz > BRIDGE_ADC_STREAM_RATE_MAX_HZ) return BRIDGE_HW_ERR_RANGE;
+    if (!vref_ready_check()) return BRIDGE_HW_ERR_IO; /* dead reference -- fail loud */
 
     adc_stream_state_t *s = &adc_streams[stream_id];
     if (s->in_use) return BRIDGE_HW_ERR_INVAL; /* stream already running */
@@ -1635,6 +1666,7 @@ int bridge_hw_tmu_compute(uint8_t function, uint8_t format, uint32_t in_a, uint3
 int bridge_hw_dac_set(uint8_t channel, uint16_t value_mv)
 {
     if (channel >= DAC_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+    if (!vref_ready_check()) return BRIDGE_HW_ERR_IO; /* dead reference -- fail loud */
     /* mV -> 12-bit code, clamp on over-range (the host doesn't see
      * BRIDGE_HW_ERR_RANGE for this case -- saturating is friendlier
      * than rejecting a request the user can recover from by reading
@@ -1651,6 +1683,7 @@ int bridge_hw_dac_get(uint8_t channel, uint16_t *value_mv)
     if (value_mv == 0) return BRIDGE_HW_ERR_INVAL;
     *value_mv = 0u;
     if (channel >= DAC_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+    if (!vref_ready_check()) return BRIDGE_HW_ERR_IO; /* dead reference -- fail loud */
     /* dac_output_value_get reads the DAC's hold register (the value
      * currently driving the pad), not the input setpoint -- this is
      * what we want for read-back: callers see the actual code in
