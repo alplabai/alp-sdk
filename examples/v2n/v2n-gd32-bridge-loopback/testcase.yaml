@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-gd32-bridge-loopback
+  description: |
+    V2N-specific JUMPERED Tier-B LOOPBACK validation of the GD32
+    bridge: the analog/timer surfaces that a status-only or
+    floating-pad functional test cannot prove are exercised through
+    three physical loopback jumpers on the E1M-X V2 carrier --
+    DAC0 -> ADC0 (through the OPA189 x2 buffer), PWM ch1 -> ENC1_X,
+    and PWM ch2 -> PWM ch3 input-capture.  Each test drives a known
+    stimulus and asserts the value that returns over the wire, then
+    parks (single pass, then idle forever).  Exercises the gd32g553
+    chip-driver surface directly (intentional for this bridge demo
+    per spec section 4.5).  BENCH-ONLY: meaningful only on a board
+    wired per README.md; builds clean everywhere as a CI artifact.
+
+tests:
+  alp_sdk.examples.v2n.gd32_bridge_loopback.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - supervisor-mcu
+      - gd32-bridge
+      - hil
+      - loopback
+    build_only: true

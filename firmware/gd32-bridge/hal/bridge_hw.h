@@ -239,8 +239,14 @@ int bridge_hw_pwm_capture_begin(uint8_t channel, uint8_t edge);
  * channel is not currently in capture mode. */
 int bridge_hw_pwm_capture_read(uint8_t channel, uint32_t *period_ns, uint32_t *pulse_width_ns);
 
-/* Stop the @p channel's input-capture session and return the pin
- * to high-impedance.  Idempotent. */
+/* Stop the @p channel's input-capture session and RESTORE the
+ * channel's PWM output stage (pad back to AF-output push-pull, the
+ * channel unit re-programmed to PWM output at 0 % duty) so a
+ * subsequent bridge_hw_pwm_set drives again.  The original "return
+ * the pin to high-impedance" contract relied on pwm_set re-initing
+ * the channel direction, which it never did -- one capture session
+ * left the channel output-dead until reboot (silicon 2026-06-04).
+ * Idempotent. */
 int bridge_hw_pwm_capture_end(uint8_t channel);
 
 /* One-shot pulse: drive @p channel high for @p pulse_ns then return

@@ -762,12 +762,51 @@ void bridge_hw_init(void)
         pwm_channel_init(&pwm_channels[i]);
     }
 
+    /* Analog REFERENCE bring-up -- MUST precede any ADC/DAC use.
+     *
+     * On this SoM the GD32's VREF+ pin is NOT wired on the PCB (VDDA =
+     * 1.8 V is connected, VREF+ is left floating; maintainer-confirmed
+     * 2026-06-05 over the schematic + bench meter).  At reset VREF_CS
+     * defaults to 0x02 (HIPM high-impedance) so VREF+ floats ~0.85 V,
+     * and EVERY ADC channel + both DACs reference that dead node --
+     * the entire analog subsystem read garbage/zero (silently, since
+     * the old ADC assertions were ceiling-only and DAC_GET echoes the
+     * digital hold register, not the pad).
+     *
+     * Fix: drive VREF+ from the on-chip reference buffer.  Its three
+     * targets (2.048 / 2.5 / 2.9 V) all exceed the 1.8 V VDDA, so the
+     * buffer regulates as high as the rail allows (~VDDA); the lowest
+     * target (2.048 V) is the closest fit and least headroom stress.
+     * Bench-proven: VREFEN -> VREFRDY sets, and a DAC->ADC copper
+     * loopback then tracks 1:1 (DAC 2730 -> ADC 2730).  The reference
+     * cancels ratiometrically in that loop, so correctness is
+     * independent of the exact railed VREF+ value; the absolute mV
+     * scale (ADC_VREF_MV / DAC_VREF_MV) tracks the railed VDDA.
+     *
+     * VREFRDY wait is BOUNDED (boot-time, no SysTick yet): a spin
+     * cap, not an unbounded poll -- a never-ready buffer must not hang
+     * the bridge before the transports come online. */
+    rcu_periph_clock_enable(RCU_VREF);
+    vref_voltage_select(VREF_VOLTAGE_SEL_2_048V); /* lowest target = closest under VDDA */
+    /* CLEAR HIPM first.  VREF_CS resets to 0x02 (HIPM high-impedance),
+     * and the SPL's vref_enable() is a read-modify-write that only
+     * sets VREFEN -- it PRESERVES the reset HIPM bit, leaving the
+     * buffer output high-Z so VREFRDY never sets and VREF+ stays dead
+     * (silicon-caught 2026-06-05: VREF_CS read 0x03 = VREFEN|HIPM,
+     * ADC still zero).  HIPM must be cleared for the buffer to drive
+     * the pin. */
+    vref_high_impedance_mode_disable();
+    vref_enable();
+    for (uint32_t vr = 0u; vr < 100000u; ++vr) {
+        if (vref_status_get() == SET) break; /* VREFRDY -- buffer locked */
+    }
+
     /* ADC bring-up: configure 8 pads as analog, enable all four ADC
-     * peripheral clocks, run the per-peripheral init.  No calibration
-     * pass here -- it needs a millisecond settling delay after
-     * adc_enable() and the bridge boot has no SysTick yet.  A
-     * follow-up commit can add calibration once a delay primitive
-     * lands. */
+     * peripheral clocks, run the per-peripheral init.  Calibration
+     * inside adc_periph_init now runs against a LIVE reference (it
+     * previously self-calibrated against the floating VREF+, baking in
+     * a bogus offset); the VREF bring-up above is the prerequisite
+     * that makes that calibration meaningful. */
     for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
         gpio_mode_set(adc_channels_map[i].gpio_port, GPIO_MODE_ANALOG, GPIO_PUPD_NONE,
                       adc_channels_map[i].gpio_pin);
@@ -1638,12 +1677,26 @@ typedef struct {
 
 static pwm_capture_state_t pwm_capture[PWM_CHANNEL_COUNT];
 
-/* CCxIF flag for a channel index 0..3.  Mirrors timer.h's flag macros
- * but exposed here so the polled drain can pick the right one without
- * a switch. */
-static uint32_t pwm_capture_flag(uint16_t ch)
+/* The capture UNIT for a PWM channel.  Every E1M PWM rides an MCH
+ * (complementary) pad, and on the GD32G5 the classic CHx input stage
+ * (CIx) samples the CHx PRIMARY pin -- a different package pad
+ * entirely.  Capturing what arrives on the PWM pad therefore needs
+ * the MCH capture unit (MCHCTL0/1 + MCHxCV + MCHxIF), which the SPL
+ * addresses with the TIMER_MCH_x channel ids (0x10 | index).  Routing
+ * capture through TIMER_CH_x was the silicon-caught 2026-06-04 bug:
+ * the loopback jumper drove the MCH pad while CIx listened on an
+ * unconnected pin -- zero edges, forever. */
+static uint16_t pwm_capture_unit(const gd32_pwm_ch_t *ch)
 {
-    switch (ch) {
+    return ch->complement ? (uint16_t)(TIMER_MCH_0 + ch->channel) : ch->channel;
+}
+
+/* Capture/compare interrupt flag for a classic OR multi-mode channel
+ * unit id.  Mirrors timer.h's flag macros but exposed here so the
+ * polled drain can pick the right one without a switch. */
+static uint32_t pwm_capture_flag(uint16_t unit)
+{
+    switch (unit) {
     case TIMER_CH_0:
         return TIMER_FLAG_CH0;
     case TIMER_CH_1:
@@ -1652,6 +1705,14 @@ static uint32_t pwm_capture_flag(uint16_t ch)
         return TIMER_FLAG_CH2;
     case TIMER_CH_3:
         return TIMER_FLAG_CH3;
+    case TIMER_MCH_0:
+        return TIMER_FLAG_MCH0;
+    case TIMER_MCH_1:
+        return TIMER_FLAG_MCH1;
+    case TIMER_MCH_2:
+        return TIMER_FLAG_MCH2;
+    case TIMER_MCH_3:
+        return TIMER_FLAG_MCH3;
     default:
         return 0u;
     }
@@ -1664,11 +1725,12 @@ static void pwm_capture_drain(uint8_t channel)
 {
     pwm_capture_state_t *s    = &pwm_capture[channel];
     const gd32_pwm_ch_t *ch   = &pwm_channels[channel];
-    const uint32_t       flag = pwm_capture_flag(ch->channel);
+    const uint16_t       unit = pwm_capture_unit(ch);
+    const uint32_t       flag = pwm_capture_flag(unit);
     if (flag == 0u) return;
     if (RESET == timer_flag_get(ch->periph, flag)) return;
 
-    const uint32_t now = timer_channel_capture_value_register_read(ch->periph, ch->channel);
+    const uint32_t now = timer_channel_capture_value_register_read(ch->periph, unit);
     timer_flag_clear(ch->periph, flag);
 
     if (s->edge == 2u) {
@@ -1715,14 +1777,22 @@ int bridge_hw_pwm_capture_begin(uint8_t channel, uint8_t edge)
     if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
     if (edge > 2u) return BRIDGE_HW_ERR_INVAL;
 
-    const gd32_pwm_ch_t *ch = &pwm_channels[channel];
+    const gd32_pwm_ch_t *ch   = &pwm_channels[channel];
+    const uint16_t       unit = pwm_capture_unit(ch);
 
-    /* Tear down any output state on this channel.  Disabling the
-     * complementary output before switching the channel direction
-     * stops the pad driving immediately; bridge_hw_pwm_set will
-     * fully re-init both directions on a subsequent call. */
-    timer_channel_output_state_config(ch->periph, ch->channel, TIMER_CCX_DISABLE);
+    /* Stop the pad driving: the complementary output (CHxNEN) is what
+     * feeds the MCH pad in COMPLEMENTARY mode.  The classic CHx output
+     * unit keeps running for the other channels of this timer. */
     timer_channel_complementary_output_state_config(ch->periph, ch->channel, TIMER_CCXN_DISABLE);
+
+    /* Free the MCH pad from the CHx output unit: in the reset-default
+     * COMPLEMENTARY mode the MCH pin is slaved to CHx and its own
+     * capture stage never sees the pad.  INDEPENDENT mode hands the
+     * pin to the MCH unit (input capture lives there).  capture_end
+     * restores COMPLEMENTARY. */
+    if (ch->complement) {
+        timer_multi_mode_channel_mode_config(ch->periph, unit, TIMER_MCH_MODE_INDEPENDENTLY);
+    }
 
     /* Switch the pad's GPIO mode to AF input (pull-up keeps a
      * disconnected line at a defined level).  The pad still uses the
@@ -1730,10 +1800,12 @@ int bridge_hw_pwm_capture_begin(uint8_t channel, uint8_t edge)
      * for a given (port, pin) so we don't touch gpio_af_set. */
     gpio_mode_set(ch->gpio_port, GPIO_MODE_AF, GPIO_PUPD_PULLUP, ch->gpio_pin);
 
-    /* Configure the input-capture parameters.  Filter=0 (no debounce
-     * cycles) -- the host can ask for a fixed filter via a follow-up
-     * opcode if a glitchy source needs it.  Prescaler=DIV1 captures
-     * every selected edge. */
+    /* Configure the input-capture parameters ON THE MCH UNIT (the SPL
+     * routes TIMER_MCH_x ids to MCHCTL0/1 + MCHxEN; see
+     * pwm_capture_unit's rationale).  Filter=0 (no debounce cycles) --
+     * the host can ask for a fixed filter via a follow-up opcode if a
+     * glitchy source needs it.  Prescaler=DIV1 captures every selected
+     * edge. */
     timer_ic_parameter_struct ic;
     timer_channel_input_struct_para_init(&ic);
     ic.icpolarity  = (edge == 0u)   ? TIMER_IC_POLARITY_RISING
@@ -1742,11 +1814,11 @@ int bridge_hw_pwm_capture_begin(uint8_t channel, uint8_t edge)
     ic.icselection = TIMER_IC_SELECTION_DIRECTTI;
     ic.icprescaler = TIMER_IC_PSC_DIV1;
     ic.icfilter    = 0u;
-    timer_input_capture_config(ch->periph, ch->channel, &ic);
+    timer_input_capture_config(ch->periph, unit, &ic);
 
     /* Clear any stale capture flag so the first drained edge after
      * BEGIN is genuinely the first new edge. */
-    timer_flag_clear(ch->periph, pwm_capture_flag(ch->channel));
+    timer_flag_clear(ch->periph, pwm_capture_flag(unit));
 
     pwm_capture[channel].last_tick         = 0u;
     pwm_capture[channel].period_ticks      = 0u;
@@ -1795,14 +1867,37 @@ int bridge_hw_pwm_capture_end(uint8_t channel)
 {
     if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
 
-    const gd32_pwm_ch_t *ch = &pwm_channels[channel];
-    /* Disable the input-capture channel.  The contract is "return the
-     * pin to high-impedance"; leaving the pad in INPUT + PULL_UP from
-     * BEGIN is the closest HW approximation -- a subsequent
-     * bridge_hw_pwm_set re-configures it as alt-function output
-     * push-pull if the host wants to drive again. */
-    timer_channel_output_state_config(ch->periph, ch->channel, TIMER_CCX_DISABLE);
-    timer_flag_clear(ch->periph, pwm_capture_flag(ch->channel));
+    const gd32_pwm_ch_t *ch   = &pwm_channels[channel];
+    const uint16_t       unit = pwm_capture_unit(ch);
+    timer_flag_clear(ch->periph, pwm_capture_flag(unit));
+
+    /* FULL output-stage restore (silicon lesson 2026-06-04): BEGIN
+     * disabled the complementary drive, handed the MCH pad to its own
+     * capture unit (INDEPENDENT mode, MCHxMS=input, MCHxEN armed) and
+     * flipped the pad to INPUT+PULLUP.  The old teardown left all of
+     * that in place on the assumption that "bridge_hw_pwm_set
+     * re-configures on the next call" -- it does NOT (pwm_set only
+     * writes CAR + CHxCV), so one capture session left that PWM
+     * channel output-dead until reboot: the HiL soak's capture row
+     * (bridge ch2) silently killed PWM2 every run, caught by the
+     * Tier-B loopback's zero-edge capture.  Restore mirrors boot:
+     * the MCH unit back to compare mode + COMPLEMENTARY slaving
+     * (timer_multi_mode_channel_output_config clears MCHxMS, drops
+     * MCHxEN, and re-selects the mode in CTL2), the pad back to
+     * AF-output push-pull, then pwm_channel_init() re-programs the
+     * classic unit to PWM0-output / complementary-enabled / 0 duty. */
+    if (ch->complement) {
+        timer_omc_parameter_struct omc;
+        timer_multi_mode_channel_output_parameter_struct_init(&omc);
+        omc.outputmode  = TIMER_MCH_MODE_COMPLEMENTARY;
+        omc.outputstate = TIMER_MCCX_DISABLE; /* pad drive comes via CHxNEN */
+        omc.ocpolarity  = TIMER_OMC_POLARITY_HIGH;
+        timer_multi_mode_channel_output_config(ch->periph, unit, &omc);
+    }
+    gpio_mode_set(ch->gpio_port, GPIO_MODE_AF, GPIO_PUPD_NONE, ch->gpio_pin);
+    gpio_output_options_set(ch->gpio_port, GPIO_OTYPE_PP, GPIO_OSPEED_12MHZ, ch->gpio_pin);
+    gpio_af_set(ch->gpio_port, ch->gpio_af, ch->gpio_pin);
+    pwm_channel_init(ch);
 
     pwm_capture[channel].in_capture = false;
     return BRIDGE_HW_OK;
