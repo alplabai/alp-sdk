@@ -7,6 +7,51 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Fixed — gd32-bridge v0.2.8: ISR-safety + error-masking fixes from the delta review (2026-06-05)
+
+Three behavior fixes found by an adversarial review of the
+v0.2.3→v0.2.7 delta (one critical, two major).  **Bench-validated: NO**
+— this release is awaiting its silicon smoke pass (PING / GET_VERSION /
+loopback / soak rerun); on healthy hardware all three are
+no-behavior-change by design.
+
+* **CRITICAL — unbounded ADC-calibration spin reachable from the
+  CS-EXTI request handler** (`hal/bridge_hw_gd32.c`).  The vendor
+  SPL's `adc_calibration_enable()` spins on RSTCLB/CLB with no
+  timeout, and `adc_periph_init()` routed through it from two
+  in-handler sites: `STREAM_END`'s converter restore and `ADC_READ`'s
+  timeout self-heal.  A converter wedged hard enough to need the
+  self-heal is exactly the one that can hold those bits forever — the
+  recovery for the wedged-ADC case could itself wedge the whole SPI
+  link (the same failure class the bounded EOC waits were added to
+  stop).  Calibration is now a bounded reimplementation; `STREAM_END`
+  reports `STATUS_IO` if the restore calibration never completes (the
+  stream still tears down).
+* **MAJOR — single-shot `ADC_READ` could corrupt a live stream**: two
+  logical channels share each ADC converter, and a read on the sibling
+  of a streaming channel re-pointed routine rank 0 out from under the
+  stream's DMA, injected an unpaced software trigger, and consumed the
+  EOC the DDM path depends on.  Now refused (`STATUS_IO`) while the
+  stream owns the converter; retry after `STREAM_END`.
+* **MAJOR — a never-ready analog reference was silently swallowed**:
+  v0.2.6's bounded VREFRDY wait discarded its verdict, so a reference
+  buffer that never locks would let every ADC/DAC op answer
+  `STATUS_OK` with garbage millivolts — the exact masking class the
+  VREF fix targeted, and unobservable on the wire (no GET_FAULT
+  opcode).  The readiness verdict is now latched; `ADC_READ`,
+  `ADC_STREAM_BEGIN`, `DAC_SET` and `DAC_GET` answer `STATUS_IO`
+  while the reference is dead, re-probing on each attempt so a
+  late-locking buffer self-promotes.
+* Documentation from the same review: loopback verdict-slot legend
+  corrected to the real `{150, 450, 900, 1350}` setpoints; "firmware-
+  averaged" ADC wording removed (4 independent samples); host
+  `gd32g553_pwm_get` doc now states hardware-readback semantics
+  (shared-per-timer period, 65.536 ms / 0-duty boot default);
+  PWM-capture single-wrap validity bound documented (spans ≥ CAR+1
+  ticks alias undetected); TRNG fault-recover contract (one honest
+  `STATUS_IO`, next pull succeeds) added to the wire spec.
+* `firmware-version.txt` 0.2.7 → **0.2.8**.
+
 ### Fixed — gd32-bridge v0.2.7: PWM-capture wrap-aware deltas (2026-06-05)
 
 * **PWM input-capture read a wrapped-garbage period and a zero pulse
