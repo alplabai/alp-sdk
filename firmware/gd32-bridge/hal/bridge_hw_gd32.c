@@ -862,23 +862,24 @@ void bridge_hw_init(void)
 
     /* Analog REFERENCE bring-up -- MUST precede any ADC/DAC use.
      *
-     * On this SoM the GD32's VREF+ pin is NOT wired on the PCB (VDDA =
-     * 1.8 V is connected, VREF+ is left floating; maintainer-confirmed
-     * 2026-06-05 over the schematic + bench meter).  At reset VREF_CS
-     * defaults to 0x02 (HIPM high-impedance) so VREF+ floats ~0.85 V,
-     * and EVERY ADC channel + both DACs reference that dead node --
-     * the entire analog subsystem read garbage/zero (silently, since
-     * the old ADC assertions were ceiling-only and DAC_GET echoes the
-     * digital hold register, not the pad).
+     * On this module revision the converters' reference node is served
+     * by the GD32's ON-CHIP reference buffer -- there is no external
+     * reference source (hardware rationale in the internal bench
+     * notes).  At reset VREF_CS defaults to 0x02 (HIPM high-impedance):
+     * the buffer is parked, the reference node is undriven, and EVERY
+     * ADC channel + both DACs reference a dead node -- the entire
+     * analog subsystem read garbage/zero (silently, since the old ADC
+     * assertions were ceiling-only and DAC_GET echoes the digital hold
+     * register, not the pad).
      *
-     * Fix: drive VREF+ from the on-chip reference buffer.  Its three
-     * targets (2.048 / 2.5 / 2.9 V) all exceed the 1.8 V VDDA, so the
-     * buffer regulates as high as the rail allows (~VDDA); the lowest
+     * Fix: enable the buffer.  Its three targets (2.048 / 2.5 /
+     * 2.9 V) all exceed the module's 1.8 V VDDA, so the buffer
+     * regulates as high as the rail allows (~VDDA); the lowest
      * target (2.048 V) is the closest fit and least headroom stress.
      * Bench-proven: VREFEN -> VREFRDY sets, and a DAC->ADC copper
      * loopback then tracks 1:1 (DAC 2730 -> ADC 2730).  The reference
      * cancels ratiometrically in that loop, so correctness is
-     * independent of the exact railed VREF+ value; the absolute mV
+     * independent of the exact railed reference value; the absolute mV
      * scale (ADC_VREF_MV / DAC_VREF_MV) tracks the railed VDDA.
      *
      * VREFRDY wait is BOUNDED (boot-time, no SysTick yet): a spin
@@ -889,10 +890,10 @@ void bridge_hw_init(void)
     /* CLEAR HIPM first.  VREF_CS resets to 0x02 (HIPM high-impedance),
      * and the SPL's vref_enable() is a read-modify-write that only
      * sets VREFEN -- it PRESERVES the reset HIPM bit, leaving the
-     * buffer output high-Z so VREFRDY never sets and VREF+ stays dead
-     * (silicon-caught 2026-06-05: VREF_CS read 0x03 = VREFEN|HIPM,
-     * ADC still zero).  HIPM must be cleared for the buffer to drive
-     * the pin. */
+     * buffer output high-Z so VREFRDY never sets and the reference
+     * node stays dead (silicon-caught 2026-06-05: VREF_CS read 0x03 =
+     * VREFEN|HIPM, ADC still zero).  HIPM must be cleared for the
+     * buffer to drive the node. */
     vref_high_impedance_mode_disable();
     vref_enable();
     for (uint32_t vr = 0u; vr < 100000u; ++vr) {
@@ -908,9 +909,9 @@ void bridge_hw_init(void)
     /* ADC bring-up: configure 8 pads as analog, enable all four ADC
      * peripheral clocks, run the per-peripheral init.  Calibration
      * inside adc_periph_init now runs against a LIVE reference (it
-     * previously self-calibrated against the floating VREF+, baking in
-     * a bogus offset); the VREF bring-up above is the prerequisite
-     * that makes that calibration meaningful. */
+     * previously self-calibrated against the undriven reference node,
+     * baking in a bogus offset); the VREF bring-up above is the
+     * prerequisite that makes that calibration meaningful. */
     for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
         gpio_mode_set(adc_channels_map[i].gpio_port, GPIO_MODE_ANALOG, GPIO_PUPD_NONE,
                       adc_channels_map[i].gpio_pin);

@@ -94,7 +94,7 @@ extern "C" {
 /* DAC channels (E1M_DAC<N> -> board-side signal) */
 /* ------------------------------------------------------------------ */
 
-#define XEVK_DAC0 E1M_X_DAC0  /**< DAC0 analog output.  Header J15.2 (DAC0_OUT) is the OPA189 x2-buffered copy, but ON THIS CARRIER REV THE BUFFER IS INOPERABLE: both OPA189s are supplied from the VAU2 rail, which is not connected to any source (maintainer-confirmed 2026-06-04; next-rev fix = tie VAU2 to a real supply).  An unpowered OPA189's input ESD clamp also LOADS the raw DAC net to ~0.3 V -- bench use of the raw 1.8 V-full-scale DAC requires lifting the buffer's input off the net. */
+#define XEVK_DAC0 E1M_X_DAC0  /**< DAC0 analog output.  Header J15.2 (DAC0_OUT) is the x2-buffered copy, but the buffered path is INOPERABLE on this carrier revision (carrier erratum, fixed next rev; rework details in the internal carrier errata).  Bench use taps the raw 1.8 V-full-scale DAC0 net instead. */
 #define XEVK_DAC1 E1M_X_DAC1  /**< DAC1 analog output. */
 
 /* ------------------------------------------------------------------ */

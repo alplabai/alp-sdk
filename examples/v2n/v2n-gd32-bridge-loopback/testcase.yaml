@@ -7,7 +7,7 @@ sample:
     bridge: the analog/timer surfaces that a status-only or
     floating-pad functional test cannot prove are exercised through
     three physical loopback jumpers on the E1M-X V2 carrier --
-    DAC0 -> ADC0 (through the OPA189 x2 buffer), PWM ch1 -> ENC1_X,
+    DAC0 -> ADC0 (direct 1:1 raw-net tap), PWM ch1 -> ENC1_X,
     and PWM ch2 -> PWM ch3 input-capture.  Each test drives a known
     stimulus and asserts the value that returns over the wire, then
     parks (single pass, then idle forever).  Exercises the gd32g553

@@ -28,25 +28,26 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Fixed — gd32-bridge v0.2.6: enable the internal VREF (the analog subsystem was dead) (2026-06-05)
 
-* **The GD32's entire ADC + DAC subsystem read garbage because VREF+
-  was never driven** (`hal/bridge_hw_gd32.c`).  On this SoM the GD32
-  VREF+ pin is not wired on the PCB (VDDA = 1.8 V is connected, VREF+
-  floats); at reset `VREF_CS = 0x02` (HIPM high-impedance) so VREF+
-  sat at ~0.85 V and every ADC channel + both DACs referenced that
-  dead node.  It went unnoticed for the bridge's whole life because
-  the ADC self-tests were ceiling-only (`sample < 3400 mV` passes on a
-  zero reading) and `DAC_GET` echoes the digital hold register, not
-  the pad — the jumpered Tier-B loopback is what finally caught it
-  (DAC→ADC read 0 with a known driven input).  `bridge_hw_init` now
-  enables the on-chip VREF buffer (`RCU_VREF` clock + `vref_enable()`
-  at the 2.048 V target, bounded `VREFRDY` wait) before any ADC/DAC
-  bring-up, so the converters self-calibrate against a live reference
-  instead of the floating pin.  Bench-proven over SWD: with VREF up, a
-  DAC→ADC copper loopback tracks 1:1 (DAC 2730 → ADC 2730; DAC 600 →
-  ADC 599).  The buffer's three targets all exceed the 1.8 V VDDA so
-  it regulates at the rail (~VDDA); correctness in a loopback is
-  ratiometric and independent of the exact value, and the absolute mV
-  scale tracks VDDA (`ADC_VREF_MV = 1800`).
+* **The GD32's entire ADC + DAC subsystem read garbage because the
+  analog reference was never driven** (`hal/bridge_hw_gd32.c`).  On
+  this module revision the converters' reference node depends on the
+  GD32's on-chip reference buffer (no external reference source); at
+  reset `VREF_CS = 0x02` (HIPM high-impedance) parks the buffer, so
+  every ADC channel + both DACs referenced an undriven node.  It went
+  unnoticed for the bridge's whole life because the ADC self-tests
+  were ceiling-only (`sample < 3400 mV` passes on a zero reading) and
+  `DAC_GET` echoes the digital hold register, not the pad — the
+  jumpered Tier-B loopback is what finally caught it (DAC→ADC read 0
+  with a known driven input).  `bridge_hw_init` now enables the
+  on-chip VREF buffer (`RCU_VREF` clock + `vref_enable()` at the
+  2.048 V target, bounded `VREFRDY` wait) before any ADC/DAC
+  bring-up, so the converters self-calibrate against a live
+  reference.  Bench-proven over SWD: with VREF up, a DAC→ADC copper
+  loopback tracks 1:1 (DAC 2730 → ADC 2730; DAC 600 → ADC 599).  The
+  buffer's three targets all exceed the 1.8 V VDDA so it regulates at
+  the rail (~VDDA); correctness in a loopback is ratiometric and
+  independent of the exact value, and the absolute mV scale tracks
+  VDDA (`ADC_VREF_MV = 1800`).
 * `firmware-version.txt` 0.2.5 → **0.2.6**.
 
 ### Added — gd32-bridge Tier-B jumpered loopback example (2026-06-05)
@@ -56,9 +57,9 @@ that closes three GD32 bridge signal paths in copper on the X-EVK
 carrier and value-asserts them end-to-end — DAC0→ADC0 (direct 1:1
 after the VREF fix), PWM→PWM input-capture (pulse width), and
 PWM→quadrature-encoder stimulus.  Documents the exact jumper header
-pins, the per-rev carrier errata (OPA189 DAC buffers dead — VAU2
-unpowered; raw DAC0 tapped instead), and reads its verdict block over
-SWD.  Also fixes the input-capture HAL to use the GD32G5 **MCH**
+pins (the buffered DAC output path is inoperable on this carrier rev —
+see the internal carrier errata; the loopback taps the raw DAC0 net
+instead), and reads its verdict block over SWD.  Also fixes the input-capture HAL to use the GD32G5 **MCH**
 capture units (the E1M PWM pads are MCH, not the classic CHx input
 the engine previously armed) and to restore the channel's output
 stage on `capture_end` (a capture session previously left the PWM
