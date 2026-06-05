@@ -189,7 +189,8 @@ typedef enum {
      * E1M PWM channel rides one of the GD32's 16-bit advanced
      * timers (TIMER0 MCH0..MCH3 on PWM0..3, TIMER7 MCH0..MCH3 on
      * PWM4..7) -- ~4.63 ns LSB at the 216 MHz CK_TIMER, 303 us
-     * maximum period.  CMD_PWM_GET reports the rounded actual. */
+     * maximum period.  CMD_PWM_GET reads the LIVE timer registers
+     * (never an echo of the last request -- see gd32g553_pwm_get). */
     GD32G553_CMD_PWM_CONFIGURE    = 0x22,
     GD32G553_CMD_ADC_CONFIGURE    = 0x32,
     GD32G553_CMD_ADC_STREAM_BEGIN = 0x33,
@@ -383,7 +384,16 @@ alp_status_t gd32g553_gpio_write(gd32g553_t *ctx, uint32_t mask, uint32_t levels
 alp_status_t gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel,
                               uint32_t period_ns, uint32_t duty_ns);
 
-/** @brief Read back a PWM channel's currently-programmed setpoint. */
+/** @brief Read back what a PWM channel's timer is ACTUALLY generating.
+ *
+ *  The firmware reads the live timer registers (period/compare), never
+ *  a software echo of the last request, so the reply reflects silicon
+ *  truth (fw >= v0.2.3).  Two consequences worth knowing:
+ *    - the period is SHARED per underlying timer, so a
+ *      @ref gd32g553_pwm_set on a sibling channel moves this channel's
+ *      reported period too;
+ *    - before the first set, a channel reports the boot default
+ *      (65.536 ms period, 0 duty), not zeros. */
 alp_status_t gd32g553_pwm_get(gd32g553_t *ctx, uint8_t channel,
                               uint32_t *period_ns, uint32_t *duty_ns);
 

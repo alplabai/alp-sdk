@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-04",
+  "generated": "2026-06-05",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1022,8 +1022,8 @@
           "hash": "1c7d3f3a6b23b7a1",
           "value": "XEVK_UART_PORT_DEBUG"
         },
-        "XEVK_ADC_ARDUINO_A0": {
-          "hash": "6383eac38e69c1ba",
+        "XEVK_ADC_MIKROBUS_AN": {
+          "hash": "36009cfa2c59e990",
           "value": "E1M_X_ADC0"
         },
         "XEVK_ARD_PWM0": {

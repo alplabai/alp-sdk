@@ -233,8 +233,13 @@ uint8_t bridge_hw_da9292_status_cached(void);
 int bridge_hw_pwm_capture_begin(uint8_t channel, uint8_t edge);
 
 /* Read one (period_ns, pulse_width_ns) tuple from the @p channel's
- * capture ring.  Both outputs are in nanoseconds against the GD32
- * core clock (~4.63 ns LSB at 216 MHz).  BRIDGE_HW_ERR_NOTIMPL if the
+ * capture ring.  Both outputs are in nanoseconds at the PWM timers'
+ * prescaled 1 us tick (the same resolution bridge_hw_pwm_set rounds
+ * to -- NOT the unscaled ~4.63 ns core-clock LSB).  Edge deltas are
+ * computed modulo one counter period and are therefore SINGLE-WRAP:
+ * a captured signal whose edge spacing meets or exceeds the timer's
+ * configured period (CAR + 1 ticks; boot default 65.5 ms) aliases to
+ * the remainder with no detection.  BRIDGE_HW_ERR_NOTIMPL if the
  * ring is empty (host should poll); BRIDGE_HW_ERR_INVAL if the
  * channel is not currently in capture mode. */
 int bridge_hw_pwm_capture_read(uint8_t channel, uint32_t *period_ns, uint32_t *pulse_width_ns);

@@ -35,25 +35,25 @@ forever. Every stimulus is parked at 0 on the way out of its test.
 
 | Jumper | From (header.pin) | To (header.pin) | Signal path |
 | ------ | ----------------- | --------------- | ----------- |
-| **A** | **raw `DAC0` net** (E1M-X pin A19; tapped at the OPA189 U23 input pad after lifting the op-amp's input -- see safety note 1) | `P7.1` (CK_ANA) | **Direct 1:1** analog loopback -> raw passthrough to E1M-X pin **A17 = ANA_S0 = bridge ADC channel 0** (GD32 `PD9`, ADC3_CH12, via the SoM's 22R series R273). The carrier's J15.2 `DAC0_OUT` buffer is NOT usable on this rev: both OPA189s are supplied from the **VAU2 rail, which has no source** (next-rev item). |
-| **B** | `J26.14` (CK_PWM1) | `J18.7` (ENC1_X) | **LSF0108** pass-FETs on both sides (bidirectional, transparent). PWM bridge **ch1** (`PB1`, TIMER0_MCH2) -> encoder **index 1** X input (`PC6`, TIMER2 CH0). Y (`PC7`) floats with firmware pull-up = static **HIGH**. The 22R series R102 is benign. |
-| **C** | `J26.10` (CK_PWM2) | `J26.8` (CK_PWM3) | Both B-side ports of the **same LSF0108 (U18)** -- no contention. PWM bridge **ch2** (`PB14`, TIMER0_MCH1) output -> PWM bridge **ch3** (`PC5`, TIMER0_MCH3) rebound as input capture. |
+| **A** | **raw `DAC0` net** (E1M-X pin A19 -- requires the bench rework from the internal carrier errata; see safety note 1) | `P7.1` (CK_ANA) | **Direct 1:1** analog loopback -> raw passthrough to E1M-X pin **A17 = ANA_S0 = bridge ADC channel 0** (GD32 `PD9`, ADC3_CH12). The carrier's buffered J15.2 `DAC0_OUT` path is NOT usable on this carrier rev (erratum, fixed next rev). |
+| **B** | `J26.14` (CK_PWM1) | `J18.7` (ENC1_X) | Bidirectional level translation on both sides (transparent to the signal). PWM bridge **ch1** (`PB1`, TIMER0_MCH2) -> encoder **index 1** X input (`PC6`, TIMER2 CH0). Y (`PC7`) floats with firmware pull-up = static **HIGH**. |
+| **C** | `J26.10` (CK_PWM2) | `J26.8` (CK_PWM3) | Both pins ride the same bidirectional level translator -- no contention. PWM bridge **ch2** (`PB14`, TIMER0_MCH1) output -> PWM bridge **ch3** (`PC5`, TIMER0_MCH3) rebound as input capture. |
 
 ---
 
 ## ⚠️ Safety -- read before plugging anything in
 
-1. **The OPA189 DAC buffers are dead on this carrier rev** -- they ride
-   the **VAU2** rail, which is not connected to any source. A dead
-   op-amp's input ESD clamp loads the raw DAC0 net to ~0.3 V, so the
-   buffers' **inputs must be lifted off the net** before the direct tap
-   is usable (bench rework 2026-06-04). With the rework in place the
+1. **The carrier's buffered DAC output path (J15.2) is inoperable on
+   this carrier revision** (carrier erratum, fixed next rev), and the
+   raw DAC0 net only reads true after a small bench rework -- the
+   erratum + rework procedure are documented in the **internal carrier
+   errata** (2026-06-04), not here. With the rework in place the
    loopback is same-rail 1.8 V -> 1.8 V and physically cannot overdrive
    the ADC pad; `DAC_MAX_SAFE_MV` (1500 mV) in `src/main.c` is a
    linearity bound (stay off the rail-clip region), not an electrical
-   cap. If a future rev powers VAU2 and the buffered J15.2 path
-   returns, the x2 gain makes everything above ~850 mV an over-rail
-   hazard again -- re-derive the bound before rewiring.
+   cap. If a future carrier rev restores the buffered J15.2 path, its
+   x2 gain makes everything above ~850 mV an over-rail hazard --
+   re-derive the bound before rewiring.
 
 2. **No physical rotary encoder may be plugged into `J18`** during the
    qenc test. Jumper B drives `ENC1_X` from the PWM bridge; an external
@@ -65,9 +65,10 @@ forever. Every stimulus is parked at 0 on the way out of its test.
 
 ### 1. `t_dac_adc_loopback` (Jumper A)
 For each setpoint in `{150, 450, 900, 1350}` mV: command DAC0, settle
-3 ms, then read ADC channel 0 (4 samples, firmware-averaged). Expected
-reading **equals the command** (direct 1:1 wiring, both converters on
-the same 1.8 V VREF). Tolerance is **±(25 mV + 2% of expected)** --
+3 ms, then read ADC channel 0 (a burst of 4 independent samples; the
+assertion takes the first, the burst makes a noisy connection visible
+in the forensics). Expected reading **equals the command** (direct 1:1
+wiring, both converters on the same 1.8 V VREF). Tolerance is **±(25 mV + 2% of expected)** --
 offset/INL of the converter pair plus scale error; tighter than a
 buffered path because no external gain resistors remain in the loop.
 The DAC is parked at 0 on every exit path, including failures.
@@ -127,7 +128,7 @@ SWD. Each word:
 | `[2]` | pass count |
 | `[3]` | fail count |
 | `[4..11]` | per-record code (cursor order: 4x DAC setpoints, then capture, then qenc): `0` = PASS, `0x7E` = transport OK but value assertion failed, anything else = the failing `alp_status_t` (two's complement) |
-| `[12..15]` | the four raw DAC->ADC readings (mV), in `{200, 400, 600, 800}` setpoint order |
+| `[12..15]` | the four raw DAC->ADC readings (mV), in `{150, 450, 900, 1350}` setpoint order |
 | `[16]` | raw capture `period_ns` (forensics; **not** asserted -- shared-timer wrap degeneracy) |
 | `[17]` | raw capture `pulse_width_ns` |
 | `[18]` | raw qenc `pos1` (cast to u32 from int32_t) |

@@ -29,11 +29,11 @@
  * SAFETY (read before plugging anything in)
  * ====================================================================
  *   * Jumper A is a DIRECT tap of the raw DAC0 net: the carrier's
- *     OPA189 buffers ride the unpowered VAU2 rail on this rev, and a
- *     dead op-amp's input ESD clamp loads the DAC net to ~0.3 V --
- *     the buffers' inputs must be lifted off the net (bench rework
- *     2026-06-04).  DAC and ADC share the same 1.8 V analog rail, so
- *     a direct loopback physically cannot overdrive the ADC pad; the
+ *     buffered DAC output path is INOPERABLE on this carrier revision
+ *     and a bench rework (2026-06-04, documented in the internal
+ *     carrier errata) is required before the raw tap reads true.
+ *     DAC and ADC share the same 1.8 V analog rail, so a direct
+ *     loopback physically cannot overdrive the ADC pad; the
  *     DAC_MAX_SAFE_MV bound below is a linearity choice (stay off the
  *     rail-clip region), not an electrical-safety cap.
  *   * NO physical rotary encoder may be plugged into J18 during the
@@ -126,13 +126,12 @@ static void record(alp_status_t s, bool value_ok)
 /* ------------------------------------------------------------------ */
 
 /* DIRECT 1:1 LOOPBACK (bench rewire 2026-06-04).  The carrier's
- * OPA189 DAC buffers ride the VAU2 rail, which has NO SOURCE on this
- * carrier rev (next-rev item) -- a dead op-amp whose input ESD clamp
- * loads the DAC net to ~0.3 V.  The maintainer therefore taps the RAW
- * DAC0 net (E1M-X pin A19) straight to CK_ANA / P7.1 and lifts the
- * op-amp input.  DAC and ADC share the same 1.8 V analog rail, so the
- * loopback is gain-1, full-range, and physically incapable of
- * overdriving the ADC pad. */
+ * buffered DAC output path is inoperable on this carrier revision
+ * (carrier erratum, fixed next rev; rework details in the internal
+ * carrier errata), so the maintainer taps the RAW DAC0 net (E1M-X pin
+ * A19) straight to CK_ANA / P7.1.  DAC and ADC share the same 1.8 V
+ * analog rail, so the loopback is gain-1, full-range, and physically
+ * incapable of overdriving the ADC pad. */
 #define LOOPBACK_GAIN 1u
 
 /* Stay below ~1.5 V so the assertion never rides the rail-clip region
@@ -163,14 +162,19 @@ static void           t_dac_adc_loopback(void)
         alp_status_t   s   = gd32g553_dac_set(&ctx, 0u /* DAC0 */, cmd);
 
         /* 3 ms settle: covers the 12-bit DAC's own settling plus the
-         * OPA189's slew into the (lightly loaded) ADC pad. */
+         * jumper line's slew into the (lightly loaded) ADC pad. */
         k_msleep(3);
 
         uint16_t readings[4] = { 0 };
         if (s == ALP_OK) {
-            /* 4 samples; the firmware averages them into readings[0]
-             * (it returns one mV reading per requested sample, and we
-             * take slot 0 as the representative average-of-burst). */
+            /* 4 INDEPENDENT samples -- the firmware returns one mV
+             * reading per requested sample, back-to-back conversions
+             * with NO averaging.  The assertion takes readings[0]
+             * (silicon-validated 2026-06-04: all four samples land
+             * within a couple of mV of each other on the jumpered
+             * loop, so any one is representative; the burst exists to
+             * make a noisy/intermittent connection visible in the
+             * forensic slot deltas, not to smooth it away). */
             s = gd32g553_adc_read(&ctx, 0u /* ADC channel 0 */, 4u, readings);
         }
 

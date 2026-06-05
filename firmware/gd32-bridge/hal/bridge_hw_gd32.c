@@ -414,7 +414,59 @@ static const gd32_adc_ch_t adc_channels_map[] = {
  * are still gated to defaults at v0.3 and live in a follow-up. */
 static uint16_t adc_sample_cycles_cache[8];
 
-static void     adc_periph_init(uint32_t periph)
+/* Analog-reference health latch.  bridge_hw_init arms the on-chip
+ * reference buffer and records whether VREFRDY ever set; every
+ * ADC/DAC entry point consults this before touching its converter.
+ * A reference that never locked means EVERY conversion result is
+ * garbage referenced to a dead node -- the v0.2.6 root cause -- and a
+ * STATUS_OK reply carrying garbage millivolts is indistinguishable on
+ * the wire from healthy analog (no GET_FAULT-style opcode exists).
+ * Failing the analog ops with an IO error is the only honest signal
+ * this protocol revision can give.
+ *
+ * The check self-heals: a buffer that locks LATE (after init's bounded
+ * wait expired) is promoted on the first analog op that finds VREFRDY
+ * set -- same lazy-readiness shape the TRNG bring-up uses. */
+static bool vref_ok = false;
+
+static bool vref_ready_check(void)
+{
+    if (!vref_ok) {
+        vref_ok = (vref_status_get() == SET);
+    }
+    return vref_ok;
+}
+
+/* Bounded reimplementation of the vendor's adc_calibration_enable().
+ * The SPL body spins `while (RSTCLB)` then `while (CLB)` with NO
+ * timeout -- and the calibration FSM only advances on a healthy,
+ * clocked converter.  adc_periph_init() is reachable from the CS-EXTI
+ * request handler (bridge_hw_adc_read's timeout self-heal and
+ * bridge_hw_adc_stream_end's restore), where an unbounded spin on a
+ * wedged ADC takes the WHOLE LINK down -- the exact failure class the
+ * read path's own EOC bound was added to stop (silicon 2026-06-04).
+ * Without the irony: the self-heal for a wedged converter must not
+ * itself trust that converter to terminate a loop.  Same register
+ * sequence as the vendor, same bound family as the other handler-safe
+ * waits in this file; returns false if either phase never completes. */
+static bool adc_calibrate_bounded(uint32_t periph)
+{
+    uint32_t to;
+
+    ADC_CTL1(periph) |= (uint32_t)ADC_CTL1_RSTCLB;
+    for (to = 100000u; to != 0u; --to) {
+        if (RESET == (ADC_CTL1(periph) & ADC_CTL1_RSTCLB)) break;
+    }
+    if (to == 0u) return false;
+
+    ADC_CTL1(periph) |= (uint32_t)ADC_CTL1_CLB;
+    for (to = 100000u; to != 0u; --to) {
+        if (RESET == (ADC_CTL1(periph) & ADC_CTL1_CLB)) break;
+    }
+    return to != 0u;
+}
+
+static bool adc_periph_init(uint32_t periph)
 {
     adc_deinit(periph);
     adc_clock_config(periph, ADC_CLK_SYNC_HCLK_DIV6);
@@ -424,15 +476,61 @@ static void     adc_periph_init(uint32_t periph)
     adc_enable(periph);
 
     /* Stabilisation + calibration.  The datasheet wants tSTAB after
-     * ADCON before calibrating; a generous spin costs microseconds in
-     * this boot-only path.  adc_calibration_enable() then self-blocks
-     * on RSTCLB/CLB until the hardware finishes -- without it the
-     * converter runs uncalibrated for the whole session (linearity
-     * offsets land directly in every reported millivolt). */
+     * ADCON before calibrating; a generous spin costs microseconds.
+     * The bounded calibration then waits on RSTCLB/CLB -- without it
+     * the converter runs uncalibrated for the whole session (linearity
+     * offsets land directly in every reported millivolt).  A false
+     * return means the calibration FSM never finished: the converter
+     * is configured but its accuracy is unknown -- callers on the
+     * request path surface that as an IO error rather than serving
+     * readings from a converter in an unproven state. */
     for (volatile uint32_t stab = 0u; stab < 4096u; ++stab) {
     }
-    adc_calibration_enable(periph);
+    return adc_calibrate_bounded(periph);
 }
+
+/* Stream-DMA bring-up state.  Two parallel streams: stream 0 binds
+ * DMA0_CH0, stream 1 binds DMA1_CH0.  Each stream owns a circular
+ * ring buffer that the DMA fills peripheral-to-memory at the ADC
+ * clock; bridge_hw_adc_stream_read drains samples between the host's
+ * polls.  Declared here (above the single-shot read path) because
+ * bridge_hw_adc_read's converter-sharing guard inspects the live
+ * stream slots.
+ *
+ * Ring size is chosen so a 100 kHz stream fills it in ~10 ms (1024
+ * samples) -- comfortably above the host's typical poll cadence yet
+ * small enough to keep the SRAM footprint inside the GD32G553's
+ * 128 KB budget.  Total cost: 2 streams x 1024 samples x 2 bytes =
+ * 4 KB. */
+#define BRIDGE_ADC_STREAM_RING_SAMPLES 1024u
+#define BRIDGE_ADC_STREAM_COUNT 2u
+
+/* Honest sample-rate contract: the requested rate is realised by a
+ * dedicated pacing timer (see stream_begin), not ignored.  100 kHz
+ * cap = the ring's documented design point (fills in ~10 ms); 0 is
+ * INVAL at the call site, anything above the cap is RANGE. */
+#define BRIDGE_ADC_STREAM_RATE_MAX_HZ 100000u
+
+/* Pacing-timer clock.  TIMER5/6 are APB1 basic timers; with APB1 at
+ * DIV1 they tick at the full 216 MHz core clock (same base the PWM
+ * timers use -- see PWM_TIMER_CLK_HZ).  The silicon validation
+ * cross-checks this constant: a wrong base shows up directly as a
+ * got-count mismatch over a timed dwell. */
+#define BRIDGE_ADC_PACE_CLK_HZ 216000000u
+
+typedef struct {
+    bool     in_use;
+    uint8_t  channel;     /* ADC channel index this stream watches */
+    uint32_t dma_periph;  /* DMA0 or DMA1                          */
+    uint8_t  dma_channel; /* dma_channel_enum value                */
+    uint32_t pace_timer;  /* TIMER5 (stream 0) or TIMER6 (stream 1) */
+    uint16_t ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
+    uint16_t read_idx; /* host's consumer cursor                */
+    uint8_t  dsp_chain_id;
+    bool     dsp_bound;
+} adc_stream_state_t;
+
+static adc_stream_state_t adc_streams[BRIDGE_ADC_STREAM_COUNT];
 
 /* ----------------------------------------------------------------- */
 /* Quadrature encoder channels.                                       */
@@ -764,23 +862,24 @@ void bridge_hw_init(void)
 
     /* Analog REFERENCE bring-up -- MUST precede any ADC/DAC use.
      *
-     * On this SoM the GD32's VREF+ pin is NOT wired on the PCB (VDDA =
-     * 1.8 V is connected, VREF+ is left floating; maintainer-confirmed
-     * 2026-06-05 over the schematic + bench meter).  At reset VREF_CS
-     * defaults to 0x02 (HIPM high-impedance) so VREF+ floats ~0.85 V,
-     * and EVERY ADC channel + both DACs reference that dead node --
-     * the entire analog subsystem read garbage/zero (silently, since
-     * the old ADC assertions were ceiling-only and DAC_GET echoes the
-     * digital hold register, not the pad).
+     * On this module revision the converters' reference node is served
+     * by the GD32's ON-CHIP reference buffer -- there is no external
+     * reference source (hardware rationale in the internal bench
+     * notes).  At reset VREF_CS defaults to 0x02 (HIPM high-impedance):
+     * the buffer is parked, the reference node is undriven, and EVERY
+     * ADC channel + both DACs reference a dead node -- the entire
+     * analog subsystem read garbage/zero (silently, since the old ADC
+     * assertions were ceiling-only and DAC_GET echoes the digital hold
+     * register, not the pad).
      *
-     * Fix: drive VREF+ from the on-chip reference buffer.  Its three
-     * targets (2.048 / 2.5 / 2.9 V) all exceed the 1.8 V VDDA, so the
-     * buffer regulates as high as the rail allows (~VDDA); the lowest
+     * Fix: enable the buffer.  Its three targets (2.048 / 2.5 /
+     * 2.9 V) all exceed the module's 1.8 V VDDA, so the buffer
+     * regulates as high as the rail allows (~VDDA); the lowest
      * target (2.048 V) is the closest fit and least headroom stress.
      * Bench-proven: VREFEN -> VREFRDY sets, and a DAC->ADC copper
      * loopback then tracks 1:1 (DAC 2730 -> ADC 2730).  The reference
      * cancels ratiometrically in that loop, so correctness is
-     * independent of the exact railed VREF+ value; the absolute mV
+     * independent of the exact railed reference value; the absolute mV
      * scale (ADC_VREF_MV / DAC_VREF_MV) tracks the railed VDDA.
      *
      * VREFRDY wait is BOUNDED (boot-time, no SysTick yet): a spin
@@ -791,22 +890,28 @@ void bridge_hw_init(void)
     /* CLEAR HIPM first.  VREF_CS resets to 0x02 (HIPM high-impedance),
      * and the SPL's vref_enable() is a read-modify-write that only
      * sets VREFEN -- it PRESERVES the reset HIPM bit, leaving the
-     * buffer output high-Z so VREFRDY never sets and VREF+ stays dead
-     * (silicon-caught 2026-06-05: VREF_CS read 0x03 = VREFEN|HIPM,
-     * ADC still zero).  HIPM must be cleared for the buffer to drive
-     * the pin. */
+     * buffer output high-Z so VREFRDY never sets and the reference
+     * node stays dead (silicon-caught 2026-06-05: VREF_CS read 0x03 =
+     * VREFEN|HIPM, ADC still zero).  HIPM must be cleared for the
+     * buffer to drive the node. */
     vref_high_impedance_mode_disable();
     vref_enable();
     for (uint32_t vr = 0u; vr < 100000u; ++vr) {
         if (vref_status_get() == SET) break; /* VREFRDY -- buffer locked */
     }
+    /* Latch the verdict.  A buffer that never locked leaves vref_ok
+     * false and every ADC/DAC op answers IO instead of serving
+     * garbage referenced to a dead node (the exact silent failure the
+     * VREF bring-up exists to cure).  vref_ready_check() re-probes on
+     * each analog op, so a late lock self-promotes. */
+    vref_ok = (vref_status_get() == SET);
 
     /* ADC bring-up: configure 8 pads as analog, enable all four ADC
      * peripheral clocks, run the per-peripheral init.  Calibration
      * inside adc_periph_init now runs against a LIVE reference (it
-     * previously self-calibrated against the floating VREF+, baking in
-     * a bogus offset); the VREF bring-up above is the prerequisite
-     * that makes that calibration meaningful. */
+     * previously self-calibrated against the undriven reference node,
+     * baking in a bogus offset); the VREF bring-up above is the
+     * prerequisite that makes that calibration meaningful. */
     for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
         gpio_mode_set(adc_channels_map[i].gpio_port, GPIO_MODE_ANALOG, GPIO_PUPD_NONE,
                       adc_channels_map[i].gpio_pin);
@@ -815,10 +920,15 @@ void bridge_hw_init(void)
     rcu_periph_clock_enable(RCU_ADC1);
     rcu_periph_clock_enable(RCU_ADC2);
     rcu_periph_clock_enable(RCU_ADC3);
-    adc_periph_init(ADC0);
-    adc_periph_init(ADC1);
-    adc_periph_init(ADC2);
-    adc_periph_init(ADC3);
+    /* Boot-time calibration result intentionally not latched: a
+     * converter that fails here is also the converter every request-
+     * path op re-times against (the read path's bounded EOC wait +
+     * self-heal), so the failure surfaces loudly on first use instead
+     * of wedging boot. */
+    (void)adc_periph_init(ADC0);
+    (void)adc_periph_init(ADC1);
+    (void)adc_periph_init(ADC2);
+    (void)adc_periph_init(ADC3);
     for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
         adc_sample_cycles_cache[i] = ADC_DEFAULT_SAMPLE_CYCLES;
     }
@@ -1004,8 +1114,26 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
     if (mv == 0) return BRIDGE_HW_ERR_INVAL;
     if (samples == 0u) return BRIDGE_HW_ERR_INVAL;
     if (channel >= ADC_CHANNEL_MAP_COUNT) return BRIDGE_HW_ERR_RANGE;
+    if (!vref_ready_check()) return BRIDGE_HW_ERR_IO; /* dead reference -- fail loud */
 
     const gd32_adc_ch_t *ch = &adc_channels_map[channel];
+
+    /* Converter-sharing guard, the read-side mirror of stream_begin's
+     * stream-vs-stream check: two bridge channels ride each ADC
+     * peripheral (ch0/1 -> ADC3, 2/3 -> ADC2, 4/5 -> ADC1, 6/7 ->
+     * ADC0), and a stream owns its converter outright between BEGIN
+     * and END (external-trigger + circular DMA + DDM).  A single-shot
+     * read on the sibling channel would re-point routine rank 0 out
+     * from under the stream's DMA, software-trigger an unpaced
+     * conversion next to the pacing timer's, and consume the EOC the
+     * DDM path depends on -- corrupting the live ring AND returning
+     * bogus data.  Refuse honestly; the host retries after STREAM_END. */
+    for (uint8_t si = 0u; si < BRIDGE_ADC_STREAM_COUNT; ++si) {
+        if (adc_streams[si].in_use &&
+            adc_channels_map[adc_streams[si].channel].periph == ch->periph) {
+            return BRIDGE_HW_ERR_BUSY;
+        }
+    }
 
     /* Configure the routine channel for this op (each call re-applies
      * because multiple bridge channels can share an ADC peripheral -- a
@@ -1040,7 +1168,11 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
             /* spin, bounded */
         }
         if (to == 0u) {
-            adc_periph_init(ch->periph);
+            /* Self-heal is best-effort: the re-init's calibration is
+             * itself bounded (a wedged converter must not convert a
+             * read timeout into a link wedge), and this path already
+             * reports IO either way. */
+            (void)adc_periph_init(ch->periph);
             return BRIDGE_HW_ERR_IO;
         }
         adc_flag_clear(ch->periph, ADC_FLAG_EOC);
@@ -1096,47 +1228,6 @@ int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio, uint16_t
     return BRIDGE_HW_OK;
 }
 
-/* Stream-DMA bring-up state.  Two parallel streams: stream 0 binds
- * DMA0_CH0, stream 1 binds DMA1_CH0.  Each stream owns a circular
- * ring buffer that the DMA fills peripheral-to-memory at the ADC
- * clock; bridge_hw_adc_stream_read drains samples between the host's
- * polls.
- *
- * Ring size is chosen so a 100 kHz stream fills it in ~10 ms (1024
- * samples) -- comfortably above the host's typical poll cadence yet
- * small enough to keep the SRAM footprint inside the GD32G553's
- * 128 KB budget.  Total cost: 2 streams x 1024 samples x 2 bytes =
- * 4 KB. */
-#define BRIDGE_ADC_STREAM_RING_SAMPLES 1024u
-#define BRIDGE_ADC_STREAM_COUNT 2u
-
-/* Honest sample-rate contract: the requested rate is realised by a
- * dedicated pacing timer (below), not ignored.  100 kHz cap = the
- * ring's documented design point (fills in ~10 ms); 0 is INVAL at
- * the call site, anything above the cap is RANGE. */
-#define BRIDGE_ADC_STREAM_RATE_MAX_HZ 100000u
-
-/* Pacing-timer clock.  TIMER5/6 are APB1 basic timers; with APB1 at
- * DIV1 they tick at the full 216 MHz core clock (same base the PWM
- * timers use -- see PWM_TIMER_CLK_HZ).  The silicon validation
- * cross-checks this constant: a wrong base shows up directly as a
- * got-count mismatch over a timed dwell. */
-#define BRIDGE_ADC_PACE_CLK_HZ 216000000u
-
-typedef struct {
-    bool     in_use;
-    uint8_t  channel;     /* ADC channel index this stream watches */
-    uint32_t dma_periph;  /* DMA0 or DMA1                          */
-    uint8_t  dma_channel; /* dma_channel_enum value                */
-    uint32_t pace_timer;  /* TIMER5 (stream 0) or TIMER6 (stream 1) */
-    uint16_t ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
-    uint16_t read_idx; /* host's consumer cursor                */
-    uint8_t  dsp_chain_id;
-    bool     dsp_bound;
-} adc_stream_state_t;
-
-static adc_stream_state_t adc_streams[BRIDGE_ADC_STREAM_COUNT];
-
 /* TRIGSEL route target for an ADC peripheral's routine-group trigger. */
 static trigsel_periph_enum adc_stream_routrg(uint32_t adc_periph)
 {
@@ -1164,6 +1255,7 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
     if (channel >= ADC_CHANNEL_MAP_COUNT) return BRIDGE_HW_ERR_RANGE;
     if (sample_rate_hz == 0u) return BRIDGE_HW_ERR_INVAL;
     if (sample_rate_hz > BRIDGE_ADC_STREAM_RATE_MAX_HZ) return BRIDGE_HW_ERR_RANGE;
+    if (!vref_ready_check()) return BRIDGE_HW_ERR_IO; /* dead reference -- fail loud */
 
     adc_stream_state_t *s = &adc_streams[stream_id];
     if (s->in_use) return BRIDGE_HW_ERR_INVAL; /* stream already running */
@@ -1362,16 +1454,20 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
         /* fixed dwell, ~tens of microseconds */
     }
 
-    /* Full single-shot restore: deinit + reconfigure + recalibrate.
-     * This puts EXTERNAL_TRIGGER_DISABLE, routine length 1 and the
-     * boot calibration back so a following bridge_hw_adc_read sees
-     * the exact converter state adc_periph_init promised it -- the
-     * same self-heal shape the read path's timeout branch uses. */
-    adc_periph_init(ch->periph);
+    /* Full single-shot restore: deinit + reconfigure + recalibrate
+     * (calibration BOUNDED -- this runs in the CS-EXTI handler).  This
+     * puts EXTERNAL_TRIGGER_DISABLE, routine length 1 and a fresh
+     * calibration back so a following bridge_hw_adc_read sees the
+     * exact converter state adc_periph_init promised it -- the same
+     * self-heal shape the read path's timeout branch uses.  The stream
+     * state clears regardless of the restore verdict (the stream IS
+     * over); a calibration that never completed reports IO so the host
+     * knows the converter came back in an unproven state. */
+    const bool restored = adc_periph_init(ch->periph);
 
     s->in_use    = false;
     s->dsp_bound = false;
-    return BRIDGE_HW_OK;
+    return restored ? BRIDGE_HW_OK : BRIDGE_HW_ERR_IO;
 }
 
 int bridge_hw_trng_read(uint8_t *dest, size_t len)
@@ -1572,6 +1668,7 @@ int bridge_hw_tmu_compute(uint8_t function, uint8_t format, uint32_t in_a, uint3
 int bridge_hw_dac_set(uint8_t channel, uint16_t value_mv)
 {
     if (channel >= DAC_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+    if (!vref_ready_check()) return BRIDGE_HW_ERR_IO; /* dead reference -- fail loud */
     /* mV -> 12-bit code, clamp on over-range (the host doesn't see
      * BRIDGE_HW_ERR_RANGE for this case -- saturating is friendlier
      * than rejecting a request the user can recover from by reading
@@ -1588,6 +1685,7 @@ int bridge_hw_dac_get(uint8_t channel, uint16_t *value_mv)
     if (value_mv == 0) return BRIDGE_HW_ERR_INVAL;
     *value_mv = 0u;
     if (channel >= DAC_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+    if (!vref_ready_check()) return BRIDGE_HW_ERR_IO; /* dead reference -- fail loud */
     /* dac_output_value_get reads the DAC's hold register (the value
      * currently driving the pad), not the input setpoint -- this is
      * what we want for read-back: callers see the actual code in
@@ -1742,7 +1840,17 @@ static void pwm_capture_drain(uint8_t channel)
      * capture both on TIMER0): there the period (same-edge delta) is
      * exactly one wrap and reads ~0 -- a documented degeneracy the host
      * must not assert -- while the pulse width (adjacent-edge delta)
-     * stays meaningful. */
+     * stays meaningful.
+     *
+     * VALIDITY BOUND: the modulo arithmetic is single-wrap.  A true
+     * inter-edge span of >= (CAR + 1) ticks -- a captured signal slower
+     * than the capture timer's configured period, or an edge the
+     * hardware overwrote because the drain polled too slowly -- ALIASES
+     * to its remainder with no detection (the per-unit overcapture
+     * flags, CHxOF/MCHxOF, are not read in this revision).  Callers
+     * must keep the captured signal's edge spacing under the timer
+     * period; BEGIN inherits whatever CAR the last pwm_set programmed
+     * (boot default 65536 ticks = 65.5 ms at the 1 us tick). */
     const uint32_t mod   = (TIMER_CAR(ch->periph) & 0xFFFFu) + 1u;
     const uint32_t delta = (now + mod - (s->last_tick % mod)) % mod;
 
