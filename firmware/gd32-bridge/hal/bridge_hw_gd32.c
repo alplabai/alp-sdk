@@ -1733,25 +1733,41 @@ static void pwm_capture_drain(uint8_t channel)
     const uint32_t now = timer_channel_capture_value_register_read(ch->periph, unit);
     timer_flag_clear(ch->periph, flag);
 
+    /* WRAP-AWARE edge delta.  The capture counter is the timer's own
+     * up-counter (0..CAR), so consecutive edges straddle the wrap and a
+     * raw `now - last` underflows to a huge value.  Take the delta
+     * modulo the counter period (CAR + 1) so it is always the true tick
+     * span.  This matters most when the capture timer is SHARED with
+     * the stimulus (the Tier-B PWM->PWM loopback: ch2 stimulus + ch3
+     * capture both on TIMER0): there the period (same-edge delta) is
+     * exactly one wrap and reads ~0 -- a documented degeneracy the host
+     * must not assert -- while the pulse width (adjacent-edge delta)
+     * stays meaningful. */
+    const uint32_t mod   = (TIMER_CAR(ch->periph) & 0xFFFFu) + 1u;
+    const uint32_t delta = (now + mod - (s->last_tick % mod)) % mod;
+
     if (s->edge == 2u) {
         /* Both-edge polarity.  Alternate the state machine: the
-         * first edge after BEGIN seeds last_tick; the second is a
-         * rising-to-falling delta (pulse_width); the third closes
-         * the period.  After the third edge the cycle repeats. */
+         * first edge after BEGIN seeds last_tick; the second is an
+         * adjacent-edge delta (pulse_width); the third closes the
+         * period.  After the third edge the cycle repeats.  Correct
+         * pulse-width measurement requires the host to poll fast
+         * enough to catch ADJACENT edges -- a slow poll samples
+         * non-consecutive edges and the delta is meaningless. */
         switch (s->state) {
         case 0u: /* first edge -- seed */
             s->last_tick = now;
             s->state     = 1u;
             break;
         case 1u: /* second edge -- pulse_width sample */
-            s->pulse_width_ticks = now - s->last_tick;
+            s->pulse_width_ticks = delta;
             s->have_pulse        = true;
             s->last_tick         = now;
             s->state             = 2u;
             break;
         case 2u: /* third edge -- period closer */
         default:
-            s->period_ticks = (now - s->last_tick) + s->pulse_width_ticks;
+            s->period_ticks = delta + s->pulse_width_ticks;
             s->have_period  = true;
             s->last_tick    = now;
             s->state        = 1u;
@@ -1765,7 +1781,7 @@ static void pwm_capture_drain(uint8_t channel)
             s->last_tick = now;
             s->state     = 1u;
         } else {
-            s->period_ticks = now - s->last_tick;
+            s->period_ticks = delta;
             s->have_period  = true;
             s->last_tick    = now;
         }

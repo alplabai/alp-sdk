@@ -7,6 +7,25 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Fixed — gd32-bridge v0.2.7: PWM-capture wrap-aware deltas (2026-06-05)
+
+* **PWM input-capture read a wrapped-garbage period and a zero pulse
+  width** (`hal/bridge_hw_gd32.c`).  `pwm_capture_drain` subtracted raw
+  capture counts (`now - last_tick`); on the capture timer's own
+  up-counter consecutive edges straddle the 0..CAR wrap, so the
+  subtraction underflowed.  All edge deltas are now taken modulo the
+  counter period (`CAR + 1`).  Most visible on the Tier-B PWM→PWM
+  loopback where stimulus and capture share TIMER0: the same-edge
+  "period" is now a clean ~0 (documented shared-timer degeneracy
+  instead of `0xFFFB6C20` garbage) and the adjacent-edge pulse width
+  is meaningful.  The loopback example's capture test moves to a
+  200 Hz / 50 % stimulus polled in a tight loop — 50 % removes the
+  arm-phase ambiguity (high = low = period/2) and the slow rate lets
+  the host catch three *consecutive* edges (the old 1 kHz + 5 ms retry
+  ladder sampled non-consecutive edges, which is why it read 0).
+  Silicon-validated end-to-end through the carrier jumper.
+* `firmware-version.txt` 0.2.6 → **0.2.7**.
+
 ### Fixed — gd32-bridge v0.2.6: enable the internal VREF (the analog subsystem was dead) (2026-06-05)
 
 * **The GD32's entire ADC + DAC subsystem read garbage because VREF+

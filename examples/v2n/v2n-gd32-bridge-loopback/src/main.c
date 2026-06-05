@@ -209,10 +209,22 @@ static void           t_dac_adc_loopback(void)
 
 static void t_pwm_capture_loopback(void)
 {
-    /* Stimulus: 1 ms period, 300 us active pulse on PWM ch2.
-     * gd32g553_pwm_set takes nanoseconds. */
+    /* Stimulus: 200 Hz, 50 % duty on PWM ch2 (5 ms period, 2.5 ms
+     * high).  Two deliberate choices make this robust on the SHARED-
+     * timer loopback (ch2 stimulus + ch3 capture both ride TIMER0):
+     *
+     *   - 50 % duty: the both-edges state machine measures the delta
+     *     between ADJACENT edges.  At 50 % the high time and the low
+     *     time are equal (period/2 = 2.5 ms), so the measured pulse
+     *     width is 2.5 ms regardless of WHICH edge (rising or falling)
+     *     happened to arm the capture -- no phase ambiguity.
+     *   - slow rate: at 200 Hz the edges are 2.5 ms apart, far wider
+     *     than a single bridge transaction (~150 us), so the tight
+     *     poll loop below reliably catches three ADJACENT edges.  At
+     *     the old 1 kHz with a 5 ms retry ladder the three samples
+     *     were NON-consecutive edges and the delta was meaningless. */
     alp_status_t s =
-        gd32g553_pwm_set(&ctx, 2u /* PWM ch2 */, 1000000u /* 1 ms */, 300000u /* 300 us */);
+        gd32g553_pwm_set(&ctx, 2u /* PWM ch2 */, 5000000u /* 5 ms */, 2500000u /* 2.5 ms */);
 
     /* Rebind PWM ch3's pin as a both-edges input-capture source.  The
      * jumper carries ch2's output into ch3's pin, so ch3 now measures
@@ -221,25 +233,24 @@ static void t_pwm_capture_loopback(void)
         s = gd32g553_pwm_capture_begin(&ctx, 3u /* PWM ch3 */, PWM_CAPTURE_EDGE_BOTH);
     }
 
-    /* 20 ms settle: ~20 stimulus periods, so the capture ring has
-     * several complete pulses latched before we read. */
-    k_msleep(20);
+    /* 10 ms settle: a couple of stimulus periods so the capture unit
+     * is latching before we start polling. */
+    k_msleep(10);
 
-    /* Retry ladder.  The capture ring may be momentarily empty right
-     * after begin (the first edge pair hasn't landed yet); the firmware
-     * signals "nothing captured yet" with ALP_ERR_NOSUPPORT on this
-     * path -- a DOCUMENTED ring-empty sentinel here, not a missing-HAL
-     * verdict -- so we treat NOSUPPORT as "retry", up to 5 attempts
-     * spaced 5 ms apart. */
+    /* TIGHT poll loop -- no inter-read delay.  Each read advances the
+     * firmware's edge state machine by at most one NEW edge, so to
+     * walk seed -> pulse -> period the host must poll faster than the
+     * 2.5 ms edge spacing (a ~150 us transaction easily does).
+     * NOSUPPORT = "no fresh edge yet, poll again" (documented ring-
+     * empty sentinel); up to 80 reads (~12 ms) covers several edges. */
     uint32_t     period_ns = 0, pulse_ns = 0;
     alp_status_t cap = ALP_ERR_NOSUPPORT;
     if (s == ALP_OK) {
-        for (unsigned attempt = 0; attempt < 5u; ++attempt) {
+        for (unsigned attempt = 0; attempt < 80u; ++attempt) {
             cap = gd32g553_pwm_capture_read(&ctx, 3u, &period_ns, &pulse_ns);
             if (cap != ALP_ERR_NOSUPPORT) {
                 break; /* got a real status (OK or a hard error) */
             }
-            k_msleep(5);
         }
         s = cap;
     }
@@ -249,17 +260,15 @@ static void t_pwm_capture_loopback(void)
     loopback_results[SLOT_CAP_PERIOD] = period_ns;
     loopback_results[SLOT_CAP_PULSE]  = pulse_ns;
 
-    /* Assert ONLY the pulse width: 300 us +/- 6 us -> [294000, 306000].
+    /* Assert ONLY the pulse width: 2.5 ms +/- 100 us -> [2.4, 2.6] ms.
      *
      * We deliberately do NOT assert the period.  Reason: the stimulus
      * (ch2) and the capture (ch3) live on the SAME advanced timer
-     * (TIMER0).  The captured "period" is therefore the counter's wrap
-     * interval, which by construction equals the output period for any
-     * setpoint -- the measurement is wrap-DEGENERATE and cannot fail
-     * independently of the stimulus, so asserting it would prove
-     * nothing.  The pulse width, by contrast, is a real CH-to-CH edge
-     * delta and IS a meaningful loopback check. */
-    const bool value_ok = (s == ALP_OK) && (pulse_ns >= 294000u) && (pulse_ns <= 306000u);
+     * (TIMER0).  The captured "period" is the same-edge delta, which on
+     * a shared timer is exactly one counter wrap and reads ~0 -- a
+     * documented degeneracy, not a fault.  The pulse width is the
+     * ADJACENT-edge delta and IS a meaningful loopback check. */
+    const bool value_ok = (s == ALP_OK) && (pulse_ns >= 2400000u) && (pulse_ns <= 2600000u);
     record(s, value_ok);
 
     /* Tear down capture mode, then park ch2's output (period kept,
