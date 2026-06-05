@@ -58,13 +58,29 @@ option(BRIDGE_OTA_PARTITIONED "Arm the OTA Path-A flash path (HIL-gated)" OFF)
 if(BRIDGE_HAL_BACKEND STREQUAL "stub")
     list(APPEND GD32_BRIDGE_SOURCES hal/bridge_hw_stub.c)
 elseif(BRIDGE_HAL_BACKEND STREQUAL "gd32")
-    # bridge_hw_gd32.c: the real (currently stubbed) peripheral hooks.
+    # hal/gd32/: the real peripheral hooks, split move-only into per-
+    # peripheral translation units (fw v0.2.8 refactor).  init.c owns boot
+    # bring-up + board-level reads; the rest are one TU per peripheral and
+    # share tables/helpers via hal/gd32/gd32_common.h.
     # gd32_libc_stubs.c: weak `_init` / `_fini` newlib stubs needed
     # because `-nostartfiles` drops crti.o.  Only relevant to this
     # backend; the stub HAL backend never links the vendor Reset_Handler
     # that pulls in `__libc_init_array`.
     list(APPEND GD32_BRIDGE_SOURCES
-        hal/bridge_hw_gd32.c
+        hal/gd32/init.c
+        hal/gd32/adc.c
+        hal/gd32/adc_stream.c
+        hal/gd32/counter.c
+        hal/gd32/dac.c
+        hal/gd32/gpio.c
+        hal/gd32/power.c
+        hal/gd32/pwm.c
+        hal/gd32/pwm_capture.c
+        hal/gd32/qenc.c
+        hal/gd32/timer_sync.c
+        hal/gd32/tmu.c
+        hal/gd32/trng.c
+        hal/gd32/vref.c
         hal/transport_hw_gd32.c
         hal/fmc_ota.c
         hal/gd32_libc_stubs.c

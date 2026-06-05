@@ -68,15 +68,16 @@ Development flashing uses an external SWD probe on `GD32_SWDIO` /
 `GD32_SWCLK` (J-Link, ST-Link, OpenOCD).
 
 > **Status:** Both backends build clean.  The gd32 backend drives the
-> real peripheral HAL (`hal/bridge_hw_gd32.c`), the **SPI1 + I2C0
-> slave transports** (`hal/transport_hw_gd32.c`), and the **OTA Path-A
-> state machine** (`src/ota.c` + `hal/fmc_ota.c` — silicon-validated
-> end-to-end 2026-06-04; armed only with `BRIDGE_OTA_PARTITIONED`).
-> Remaining gaps (ADC DSP-chain runtime dispatch, plus the HAL defects
-> the HiL soak quarantined: `pwm_capture`, `adc_stream`, `qenc`, `tmu`,
-> armed-build `ota_get_state` — see the soak example's table notes)
-> degrade to error statuses.  The stub backend stays HW-free for host
-> protocol round-trip tests.
+> real peripheral HAL (per-peripheral TUs under `hal/gd32/`), the
+> **SPI1 + I2C0 slave transports** (`hal/transport_hw_gd32.c`), and
+> the **OTA Path-A state machine** (`src/ota.c` + `hal/fmc_ota.c` —
+> silicon-validated end-to-end 2026-06-04; armed only with
+> `BRIDGE_OTA_PARTITIONED`).  The fw v0.2.3–v0.2.7 campaign cleared
+> the soak-quarantined HAL defects (`pwm_capture`, `adc_stream`,
+> `qenc`, `tmu` — silicon-validated; the analog subsystem additionally
+> needed the v0.2.6 internal-VREF bring-up).  Remaining gap: ADC
+> DSP-chain runtime dispatch degrades to error statuses.  The stub
+> backend stays HW-free for host protocol round-trip tests.
 
 ## Protocol majorset
 

@@ -21,8 +21,8 @@
  * etc.) is read by the host over BRD_I2C via the chips/da9292 driver.
  *
  * Backends: BRIDGE_HAL_BACKEND=gd32 drives real silicon (peripheral
- * HAL in hal/bridge_hw_gd32.c, SPI1 + I2C0 slave transports in
- * hal/transport_hw_gd32.c).  BRIDGE_HAL_BACKEND=stub keeps everything
+ * HAL in the per-peripheral TUs under hal/gd32/, SPI1 + I2C0 slave
+ * transports in hal/transport_hw_gd32.c).  BRIDGE_HAL_BACKEND=stub keeps everything
  * hardware-free for host-side protocol tests: PING / GET_VERSION /
  * GET_BUILD_ID / RESET_REASON round-trip and HW-touching ops return
  * NOSUPPORT.

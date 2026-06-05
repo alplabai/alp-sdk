@@ -7,8 +7,9 @@
 #              hardware-less HAL stubs in `hal/bridge_hw_stub.c`.
 #              Exercises the dispatcher path end-to-end without
 #              needing the vendor library on the workspace.
-#   * gd32  -- bridge_hw_gd32.c + the GigaDevice standard-peripheral
-#              library link successfully.  Catches missing peripheral
+#   * gd32  -- the hal/gd32/ per-peripheral TUs + the GigaDevice
+#              standard-peripheral library link successfully.
+#              Catches missing peripheral
 #              header includes, mismatched function signatures
 #              against the vendor library, and linker errors before
 #              they reach the maintainer's HIL bench.

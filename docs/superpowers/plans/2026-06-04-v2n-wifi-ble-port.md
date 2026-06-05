@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-04-v2n-wifi-ble-port-design.md`
 
-**Cross-session coordination (read first):** another session is concurrently editing `firmware/gd32-bridge/` (LCD sideband work; `bridge_hw_gd32.c`, `bridge_hw.h`, `docs/gd32-bridge-protocol.md`, `firmware-version.txt` are dirty in the main tree, fw now v0.2.3, protocol may move past 0.6.0). ALL work happens in a separate worktree branched from **latest** `dev`; before flashing the GD32 or merging, re-check `git -C E:\GitHub\alp-sdk log dev -3` and renumber the protocol bump / re-sequence J-Link use if needed.
+**Cross-session coordination (read first):** another session is concurrently editing `firmware/gd32-bridge/` (LCD sideband work; fw moved v0.2.3→v0.2.8, protocol may move past 0.6.0). **LAYOUT CHANGE 2026-06-05 (fw v0.2.8 refactor):** the monolithic `hal/bridge_hw_gd32.c` was split move-only into per-peripheral TUs under `hal/gd32/` — `gpio_pad_map[]` + GPIO bodies now live in `hal/gd32/gpio.c`, boot bring-up in `hal/gd32/init.c`, shared decls in `hal/gd32/gd32_common.h` (note: `GPIO_PAD_MAP_COUNT` is now a literal there — adding pad rows means bumping it + the `_Static_assert` keeps you honest). ALL work happens in a separate worktree branched from **latest** `dev`; before flashing the GD32 or merging, re-check `git -C E:\GitHub\alp-sdk log dev -3` and renumber the protocol bump / re-sequence J-Link use if needed.
 
 ---
 
@@ -18,7 +18,7 @@
 
 | File | Change | Responsibility |
 |---|---|---|
-| `firmware/gd32-bridge/hal/bridge_hw_gd32.c` | modify | pad-map +2 rows, boot REG_ON sequence |
+| `firmware/gd32-bridge/hal/gd32/gpio.c` + `gd32_common.h` + `init.c` | modify | pad-map +2 rows (+COUNT bump), boot REG_ON sequence |
 | `firmware/gd32-bridge/hal/bridge_hw_stub.c` | modify | stub parity for bits 18/19 |
 | `firmware/gd32-bridge/src/protocol.h` | modify | `PROTOCOL_VERSION_MINOR` bump |
 | `docs/gd32-bridge-protocol.md` | modify | §3.1 REG_ON bit rows + boot-default note |
@@ -83,12 +83,12 @@ Resolves spec §9 rows 2–3. No code; produces facts used by Tasks 7/8 and 13.
 REQUIRED SUB-SKILL: `extending-the-gd32-bridge-protocol` (covers version-bump etiquette, doc table, host-driver lockstep).
 
 **Files:**
-- Modify: `firmware/gd32-bridge/hal/bridge_hw_gd32.c` (pad map ends ~`:182`, boot loop ~`:685`, write ~`:876` — anchor on symbols, lines drift due to the LCD session)
+- Modify: `firmware/gd32-bridge/hal/gd32/gpio.c` (`gpio_pad_map[]` + `bridge_hw_gpio_write`), `hal/gd32/gd32_common.h` (`GPIO_PAD_MAP_COUNT` literal), `hal/gd32/init.c` (boot loop) — anchor on symbols (post v0.2.8 TU split)
 - Modify: `firmware/gd32-bridge/hal/bridge_hw_stub.c`
 - Modify: `firmware/gd32-bridge/src/protocol.h`
 - Modify: `docs/gd32-bridge-protocol.md`
 
-- [ ] **Step 1:** In `bridge_hw_gd32.c`, append to `gpio_pad_map[]` (after the `{ GPIOD, GPIO_PIN_1 },  /* bit 17 = E1M IO35 */` row):
+- [ ] **Step 1:** In `hal/gd32/gpio.c`, append to `gpio_pad_map[]` (after the `{ GPIOD, GPIO_PIN_1 },  /* bit 17 = E1M IO35 */` row; then bump `GPIO_PAD_MAP_COUNT` 18u→20u in `hal/gd32/gd32_common.h` — the `_Static_assert` in gpio.c enforces it):
 
 ```c
     /* Murata LBEE5HY2FY-922 sideband (NOT E1M pads -- module power
@@ -162,7 +162,7 @@ re-enumerate.
 - [ ] **Step 7:** Commit:
 
 ```bash
-git add firmware/gd32-bridge/hal/bridge_hw_gd32.c firmware/gd32-bridge/hal/bridge_hw_stub.c firmware/gd32-bridge/src/protocol.h docs/gd32-bridge-protocol.md
+git add firmware/gd32-bridge/hal/gd32/gpio.c firmware/gd32-bridge/hal/gd32/gd32_common.h firmware/gd32-bridge/hal/gd32/init.c firmware/gd32-bridge/hal/bridge_hw_stub.c firmware/gd32-bridge/src/protocol.h docs/gd32-bridge-protocol.md
 git commit -q -m "feat(gd32-bridge): REG_ON pad-map bits 18/19, boot default-on for Murata Wi-Fi/BT"
 ```
 

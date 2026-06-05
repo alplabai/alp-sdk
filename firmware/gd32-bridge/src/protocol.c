@@ -510,11 +510,11 @@ static gd32_bridge_status_t handle_tmu_compute(const uint8_t *req, size_t req_le
 /* Wire frames per docs/gd32-bridge-protocol.md §3.y.  Every handler  */
 /* validates the request payload length, calls into the HAL hook,    */
 /* and maps the BRIDGE_HW_ERR_* return into the on-wire STATUS_*     */
-/* code.  Today bridge_hw_stub.c returns BRIDGE_HW_ERR_NOTIMPL for   */
-/* all of these -- which protocol_dispatch maps to STATUS_NOSUPPORT  */
-/* on the wire -- so host code sees a precise NOSUPPORT contract     */
-/* until the real bridge_hw_gd32.c bodies land alongside the         */
-/* GigaDevice firmware library pull.                                  */
+/* code.  On the stub backend (bridge_hw_stub.c) all of these return */
+/* BRIDGE_HW_ERR_NOTIMPL -- which protocol_dispatch maps to          */
+/* STATUS_NOSUPPORT on the wire -- so host code sees a precise       */
+/* NOSUPPORT contract; the gd32 backend's real bodies live in the    */
+/* per-peripheral TUs under hal/gd32/.                                */
 /* ----------------------------------------------------------------- */
 
 /* Translate a BRIDGE_HW_ERR_* return into a STATUS_*.  Centralised so
@@ -731,9 +731,8 @@ gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
     case CMD_QENC_RESET:            h = handle_qenc_reset;       break;
     case CMD_COUNTER_READ:          h = handle_counter_read;     break;
     /* v0.5 (§2B.2) advanced timer extras + (§2B.3) power-mode set.
-     * All return STATUS_NOSUPPORT against bridge_hw_stub.c today; the
-     * real bodies in bridge_hw_gd32.c land alongside the GigaDevice
-     * firmware library pull. */
+     * Real bodies in hal/gd32/ (pwm_capture.c / pwm.c / timer_sync.c /
+     * power.c); the stub backend answers STATUS_NOSUPPORT. */
     case CMD_PWM_CAPTURE_BEGIN:
         h = handle_pwm_capture_begin;
         break;

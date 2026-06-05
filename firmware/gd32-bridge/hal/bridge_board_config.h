@@ -44,7 +44,7 @@
  * DMA and the only SPI-side interrupts left are the CS edges on EXTI8).
  * DMA0 CH2(TX)/CH3(RX) mirror GigaDevice's own
  * SPI_master_slave_fullduplex_dma reference; DMA0 CH0 is owned by ADC
- * stream 0 (bridge_hw_gd32.c) -- keep clear of it.  Requests route through
+ * stream 0 (hal/gd32/adc_stream.c) -- keep clear of it.  Requests route through
  * the DMAMUX (SPI1_RX = mux id 12, SPI1_TX = mux id 13). */
 #define BRIDGE_SPI_DMA             DMA0
 #define BRIDGE_SPI_DMA_RCU         RCU_DMA0
