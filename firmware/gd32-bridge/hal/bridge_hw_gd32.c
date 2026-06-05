@@ -1838,7 +1838,17 @@ static void pwm_capture_drain(uint8_t channel)
      * capture both on TIMER0): there the period (same-edge delta) is
      * exactly one wrap and reads ~0 -- a documented degeneracy the host
      * must not assert -- while the pulse width (adjacent-edge delta)
-     * stays meaningful. */
+     * stays meaningful.
+     *
+     * VALIDITY BOUND: the modulo arithmetic is single-wrap.  A true
+     * inter-edge span of >= (CAR + 1) ticks -- a captured signal slower
+     * than the capture timer's configured period, or an edge the
+     * hardware overwrote because the drain polled too slowly -- ALIASES
+     * to its remainder with no detection (the per-unit overcapture
+     * flags, CHxOF/MCHxOF, are not read in this revision).  Callers
+     * must keep the captured signal's edge spacing under the timer
+     * period; BEGIN inherits whatever CAR the last pwm_set programmed
+     * (boot default 65536 ticks = 65.5 ms at the 1 us tick). */
     const uint32_t mod   = (TIMER_CAR(ch->periph) & 0xFFFFu) + 1u;
     const uint32_t delta = (now + mod - (s->last_tick % mod)) % mod;
 

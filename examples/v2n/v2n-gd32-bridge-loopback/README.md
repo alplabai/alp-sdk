@@ -65,9 +65,10 @@ forever. Every stimulus is parked at 0 on the way out of its test.
 
 ### 1. `t_dac_adc_loopback` (Jumper A)
 For each setpoint in `{150, 450, 900, 1350}` mV: command DAC0, settle
-3 ms, then read ADC channel 0 (4 samples, firmware-averaged). Expected
-reading **equals the command** (direct 1:1 wiring, both converters on
-the same 1.8 V VREF). Tolerance is **±(25 mV + 2% of expected)** --
+3 ms, then read ADC channel 0 (a burst of 4 independent samples; the
+assertion takes the first, the burst makes a noisy connection visible
+in the forensics). Expected reading **equals the command** (direct 1:1
+wiring, both converters on the same 1.8 V VREF). Tolerance is **±(25 mV + 2% of expected)** --
 offset/INL of the converter pair plus scale error; tighter than a
 buffered path because no external gain resistors remain in the loop.
 The DAC is parked at 0 on every exit path, including failures.
@@ -127,7 +128,7 @@ SWD. Each word:
 | `[2]` | pass count |
 | `[3]` | fail count |
 | `[4..11]` | per-record code (cursor order: 4x DAC setpoints, then capture, then qenc): `0` = PASS, `0x7E` = transport OK but value assertion failed, anything else = the failing `alp_status_t` (two's complement) |
-| `[12..15]` | the four raw DAC->ADC readings (mV), in `{200, 400, 600, 800}` setpoint order |
+| `[12..15]` | the four raw DAC->ADC readings (mV), in `{150, 450, 900, 1350}` setpoint order |
 | `[16]` | raw capture `period_ns` (forensics; **not** asserted -- shared-timer wrap degeneracy) |
 | `[17]` | raw capture `pulse_width_ns` |
 | `[18]` | raw qenc `pos1` (cast to u32 from int32_t) |

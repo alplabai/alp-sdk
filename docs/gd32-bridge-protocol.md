@@ -292,6 +292,21 @@ host side.  Each `mv[i]` carries the firmware's internal-reference-
 corrected reading; the host treats the values as **ground truth**
 for telemetry purposes.
 
+Two converter-level guards (fw `v0.2.8+`) make `ADC_READ` answer
+`STATUS_IO` instead of serving unreliable data:
+
+- **converter owned by a stream** -- two logical channels ride each
+  ADC converter, and a running `ADC_STREAM_*` session owns its
+  converter outright.  A single-shot read on either channel of a
+  streaming converter is refused (it would corrupt the live stream's
+  ring AND return wrong data); retry after `STREAM_END`.
+- **analog reference not ready** -- if the on-chip reference buffer
+  never reported ready at boot, every conversion would be garbage
+  referenced to a dead node.  The firmware fails the read loudly
+  rather than answering `STATUS_OK` with bogus millivolts, and
+  re-probes the reference on each attempt so a late-locking buffer
+  self-heals.
+
 ### 3.4 DA9292 status forward
 
 The GD32 has **no I2C path** to the DA9292, and on the **current SoM
@@ -327,15 +342,18 @@ does not mirror its bit layout.  For register-level PMIC status
 The V2N module routes both E1M DAC channels (`DAC0` → GD32 `PA4`,
 `DAC1` → GD32 `PA6`) through the bridge.  `DAC_SET` programs the
 output in millivolts; the firmware rounds to the GD32's 12-bit DAC
-resolution (~0.8 mV/LSB on a 3.3 V reference) and saturates above
-the reference rail.  `DAC_GET` reads back what was actually
-programmed — useful for verification + closed-loop telemetry.
+resolution (~0.44 mV/LSB on the module's 1.8 V analog rail) and
+saturates above the rail.  `DAC_GET` reads back the DAC's live hold
+register (the code actually driving the pad) — useful for
+verification + closed-loop telemetry.
 
-Until `hal/bridge_hw_gd32.c` wires the DAC channels (HAL stubs
-return `BRIDGE_HW_ERR_NOTIMPL` today), both opcodes return
-`STATUS_NOSUPPORT` and the SDK surfaces `ALP_ERR_NOSUPPORT` to the
-caller.  The wire framing is locked from `v0.2` so the firmware
-bodies are an independent landing.
+Both opcodes are live on silicon from fw `v0.2.6` (which also
+brings up the on-chip analog reference buffer the converters
+depend on; DAC→ADC copper loopback validated 1:1 on the bench
+2026-06-05).  From fw `v0.2.8`, a reference buffer that never
+reports ready makes both opcodes answer `STATUS_IO` — a loud
+failure instead of silently driving/reading garbage against a dead
+reference node.
 
 ### 3.6 Quadrature encoders (`v0.2+`)
 
@@ -426,7 +444,14 @@ constraints fall out of the silicon's converter-level trigger
 routing: only one stream may run per ADC converter at a time (a
 second `BEGIN` whose channel shares the first stream's converter
 answers `STATUS_INVAL`), and `STREAM_END` restores the converter's
-single-shot state for subsequent `ADC_READ` calls.
+single-shot state for subsequent `ADC_READ` calls.  While a stream
+runs, a single-shot `ADC_READ` on **either** channel of its
+converter answers `STATUS_IO` (fw `v0.2.8+`) -- retry after
+`STREAM_END`.  `STREAM_END` itself answers `STATUS_IO` in the rare
+case the converter's restore re-calibration never completes (the
+stream still tears down; the converter is back but in an unproven
+state -- the next `ADC_READ`'s own timeout/self-heal path arbitrates
+from there).
 
 `ADC_STREAM_READ` drains up to `max_samples` samples from the
 named stream's ring.  The wire envelope is fixed-length (host
@@ -456,6 +481,15 @@ path) until `len` is satisfied; latency at typical TRNG_CLK is
 ~40 cycles per pull (sub-microsecond).  Self-check failures
 (documented in the GD32 user manual TRNG_STAT register) cause
 the firmware to reply with `STATUS_IO`.
+
+**Fault-recover contract** (fw `v0.2.4+`, silicon-validated
+2026-06-04): a tripped self-check parks the unit with latched fault
+flags and answers exactly **one** honest `STATUS_IO` while the
+firmware demotes and lazily rebuilds the TRNG (full re-seed); the
+**next** `TRNG_READ` succeeds.  Callers should therefore retry once
+on `STATUS_IO` before treating the unit as down.  A reply of
+`STATUS_BUSY` is different: the unit is healthy but mid-conditioning
+(a max-length pull can drain the FIFO) -- poll again.
 
 ### 3.12 TMU compute (`v0.4+`)
 

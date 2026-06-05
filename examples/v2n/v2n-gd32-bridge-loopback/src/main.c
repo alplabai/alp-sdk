@@ -168,9 +168,14 @@ static void           t_dac_adc_loopback(void)
 
         uint16_t readings[4] = { 0 };
         if (s == ALP_OK) {
-            /* 4 samples; the firmware averages them into readings[0]
-             * (it returns one mV reading per requested sample, and we
-             * take slot 0 as the representative average-of-burst). */
+            /* 4 INDEPENDENT samples -- the firmware returns one mV
+             * reading per requested sample, back-to-back conversions
+             * with NO averaging.  The assertion takes readings[0]
+             * (silicon-validated 2026-06-04: all four samples land
+             * within a couple of mV of each other on the jumpered
+             * loop, so any one is representative; the burst exists to
+             * make a noisy/intermittent connection visible in the
+             * forensic slot deltas, not to smooth it away). */
             s = gd32g553_adc_read(&ctx, 0u /* ADC channel 0 */, 4u, readings);
         }
 
