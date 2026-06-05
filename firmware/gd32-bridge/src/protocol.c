@@ -46,10 +46,17 @@ uint16_t crc16_ccitt_false(const uint8_t *buf, size_t len)
 }
 
 /* --------------------------------------------------------------- */
-/* Build identifier.  Linker-emitted, ASCII hex truncated SHA-1 of   */
-/* the elf.  Until the build pipeline lands, use a placeholder so    */
-/* GET_BUILD_ID has a well-formed reply.                              */
+/* Build identifier: "<fw-version>+<git-sha-prefix>", 20 ASCII chars. */
+/* Baked at build time into the generated gd32_bridge_build_id.h by  */
+/* cmake/gen_build_id.cmake (re-run every build, so HEAD moves and   */
+/* version bumps land in the next incremental build).  Non-CMake     */
+/* consumers (the SDK-side transport unit tests compile this file    */
+/* directly) keep the hermetic placeholder below.                     */
 /* --------------------------------------------------------------- */
+
+#ifdef GD32_BRIDGE_HAVE_BUILD_ID_HEADER
+#include "gd32_bridge_build_id.h"
+#endif
 
 #ifndef GD32_BRIDGE_BUILD_ID
 #define GD32_BRIDGE_BUILD_ID "0000000000000000abcd"
