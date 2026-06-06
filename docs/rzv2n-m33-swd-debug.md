@@ -1,9 +1,10 @@
 # RZ/V2N Cortex-M33 SWD debug checklist — "why does the M33 firmware never reach its console?"
 
 Bench procedure for halting the on-SoC **Cortex-M33** over SWD and naming, in one
-session, exactly where/why it faults. Use this when the symptom is: **BL2 loads +
-releases the CM33 (`CPG_RSTMON_0 & 0xE0000 == 0`), but no SCI is ever configured —
-not even the `sci0`/`uart0` console** (verified from A55 Linux `/dev/mem`).
+session, exactly where/why it faults. Use this when the symptom is:
+**BL2 loads + releases the CM33** (`CPG_RSTMON_0 & 0xE0000 == 0`) **but no SCI is
+ever configured** — not even the `sci0`/`uart0` console
+(verified from A55 Linux `/dev/mem`).
 
 ## What we already know (so you don't re-chase it)
 Established from the A55 side + source — see `docs/rzv2n-m33-secure-boot.md`:

@@ -169,7 +169,7 @@ typedef struct {
  * @c alp_inference_* accessors unchanged.
  *
  * @param[in] opts  Load options; @c data (with @c size) or @c path required.
- * @return Open handle, or NULL — read @ref alp_last_error:
+ * @return Open handle, or NULL — read @ref alp_last_error for the cause:
  *         ALP_ERR_INVAL (bad opts / bad magic / corrupt),
  *         ALP_ERR_VERSION (package newer than this loader),
  *         ALP_ERR_NO_BACKEND / ALP_ERR_NO_FIT / ALP_ERR_NOT_FOUND (selection),
