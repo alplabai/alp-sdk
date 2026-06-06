@@ -48,13 +48,15 @@ Silicon-validated state after the FIFO/pacing rework (see
    Next bench session: dump/compare the SYS master-access-control
    registers, then re-bench; rewrite the Renesas ticket around the ER
    evidence if the security angle dead-ends.
-2. **Sequence echo in the reply STATUS byte** (wire-protocol MINOR).
-   Kills the residual stale-reply hazard: if a request is ever lost
-   whole to CS-edge coalescing, the slave's re-armed previous reply is
-   CRC-valid stale data for a same-opcode re-read (documented in
-   `firmware/gd32-bridge/src/transport_spi.c`).  A 4-bit sequence in the
-   STATUS high nibble, echoed from the request, makes staleness
-   detectable.
+2. **Sequence echo in the reply STATUS byte** — **DONE, protocol
+   v0.7 / fw v0.2.9 (2026-06-06)**.  A 4-bit slave-side sequence
+   stamp in the STATUS high nibble, negotiated via the new
+   `CMD_LINK_FEATURES` (0x81) so the un-negotiated wire stays
+   byte-identical to v0.6.  The hazard it kills was fingerprinted on
+   silicon the same day (byte-exact `COUNTER_READ` replays,
+   phase-dependent); the host driver detects "stamp did not advance",
+   re-sends once and counts occurrences (`ctx->seq_stale_count`).
+   See `docs/gd32-bridge-protocol.md` §3.14 / §4.1.1.
 3. **GD32 ADC sampling-time config** — conversions cost ~18-20 µs per
    sample inside the request's CS-rising handler (bench-bracketed),
    which is the dominant reply-staging latency for ADC opcodes.  The
@@ -64,6 +66,13 @@ Silicon-validated state after the FIFO/pacing rework (see
    + reconfigure is the slave-side floor (~tens of µs with decode).  A
    targeted FIFO flush (if a reliable one exists on this errata class)
    or a leaner reconfigure would cut every command's floor directly.
+
+5. **`fw_version` plumb into `OTA_BEGIN`** — **DONE, protocol v0.7 /
+   fw v0.2.9 (2026-06-06)**.  Additive 3-byte version triple on the
+   BEGIN request, recorded into the A/B metadata `fw_version[slot]`
+   at COMMIT (the record had reserved the field since v2).  Legacy
+   8-byte BEGIN = version-unknown; pre-v0.7 firmware ignores the
+   trailing bytes.
 
 ## Carry-over facts
 

@@ -207,72 +207,129 @@ static alp_status_t spi_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_pa
     req[crc_covered]           = (uint8_t)(crc & 0xFFu);
     req[crc_covered + 1u]      = (uint8_t)((crc >> 8) & 0xFFu);
 
-    alp_status_t s             = alp_spi_write(ctx->spi, req, crc_covered + 2u);
-    if (s != ALP_OK) return s;
+    /* v0.7 STATUS_SEQ outer loop: one RE-SEND when a CRC-valid reply
+     * turns out to be STALE -- its [7:4] stamp never advanced past the
+     * previous accepted reply, meaning the slave never decoded our
+     * request and is re-serving the old staged reply (the residual
+     * hazard documented in the firmware's transport_spi.c; byte-exact
+     * replays silicon-fingerprinted 2026-06-06).  A stale verdict is
+     * also proof the request was never EXECUTED, so the re-send is the
+     * first execution -- safe even for non-idempotent opcodes.
+     * Without the negotiated feature the loop body runs exactly once. */
+    for (unsigned send_attempt = 0u;; ++send_attempt) {
+        alp_status_t s = alp_spi_write(ctx->spi, req, crc_covered + 2u);
+        if (s != ALP_OK) return s;
 
-    /* Let the slave's CS-rising handler stage the reply before the first
-     * read (see the schedule comment above) -- cheaper than eating a
-     * wasted drain transaction + a ladder wait on every command. */
-    alp_delay_us(reply_staging_gap_us(cmd, req_payload, req_payload_len));
+        /* Let the slave's CS-rising handler stage the reply before the first
+         * read (see the schedule comment above) -- cheaper than eating a
+         * wasted drain transaction + a ladder wait on every command. */
+        alp_delay_us(reply_staging_gap_us(cmd, req_payload, req_payload_len));
 
-    /* Reply envelope: SOF | STATUS | PAYLOAD | CRC(SOF..PAYLOAD).
-     * Total bytes the host must clock = 1 + 1 + reply_payload_len + 2.
-     * Read with the re-read schedule above: a too-early read is a
-     * harmless miss, not a failure. */
-    uint8_t      reply[GD32G553_MAX_SPI_FRAME_BYTES];
-    const size_t reply_len = 2u + reply_payload_len + 2u;
-    if (reply_len > sizeof(reply)) return ALP_ERR_INVAL;
+        /* Reply envelope: SOF | STATUS | PAYLOAD | CRC(SOF..PAYLOAD).
+         * Total bytes the host must clock = 1 + 1 + reply_payload_len + 2.
+         * Read with the re-read schedule above: a too-early read is a
+         * harmless miss, not a failure.
+         *
+         * STATUS byte on SPI = [7:4] sequence stamp (zero until the
+         * v0.7 STATUS_SEQ feature is negotiated; old firmware never
+         * sets these bits) | [3:0] status code -- masking the code is
+         * unconditionally safe on this transport. */
+        uint8_t      reply[GD32G553_MAX_SPI_FRAME_BYTES];
+        const size_t reply_len = 2u + reply_payload_len + 2u;
+        if (reply_len > sizeof(reply)) return ALP_ERR_INVAL;
 
-    bool reply_ok = false;
-    for (unsigned attempt = 0u; attempt < GD32G553_REPLY_READ_TRIES; ++attempt) {
-        s = alp_spi_read(ctx->spi, reply, reply_len);
-        if (s != ALP_OK) return s; /* transport-level error: fail loud */
+        bool reply_ok = false;
+        bool stale    = false;
+        for (unsigned attempt = 0u; attempt < GD32G553_REPLY_READ_TRIES; ++attempt) {
+            s = alp_spi_read(ctx->spi, reply, reply_len);
+            if (s != ALP_OK) return s; /* transport-level error: fail loud */
 
-        if (reply[0] == GD32G553_BRIDGE_SOF) {
-            const uint16_t expect_crc = crc16_ccitt_false(reply, 2u + reply_payload_len);
-            const uint16_t got_crc    = (uint16_t)reply[2u + reply_payload_len] |
-                                     (uint16_t)reply[2u + reply_payload_len + 1u] << 8;
-            if (got_crc == expect_crc) {
-                reply_ok = true;
-                break;
-            }
+            if (reply[0] == GD32G553_BRIDGE_SOF) {
+                const uint16_t expect_crc = crc16_ccitt_false(reply, 2u + reply_payload_len);
+                const uint16_t got_crc    = (uint16_t)reply[2u + reply_payload_len] |
+                                         (uint16_t)reply[2u + reply_payload_len + 1u] << 8;
+                if (got_crc == expect_crc) {
+                    reply_ok = true;
+                    break;
+                }
 
-            /* ERROR-ENVELOPE FALLBACK.  Firmware error replies carry NO
-             * payload (stage_error_reply: SOF | STATUS | CRC = 4 bytes)
-             * regardless of the opcode's success-reply width, so for any
-             * payload-bearing opcode the full-width CRC check above
-             * fails on a legitimate error reply -- the bytes past the
-             * 4-byte envelope are TX-FIFO idle filler.  Without this
-             * fallback every firmware error surfaced as ALP_ERR_IO,
-             * masking the real status (silicon 2026-06-04: an entire
-             * class of "-5 from cycle 1" HiL rows -- pwm_capture's
-             * documented NOSUPPORT among them -- were short error
-             * replies the host could not decode). */
-            if (reply_payload_len > 0u && reply[1] != 0x00u /* STATUS_OK */) {
-                const uint16_t err_crc = crc16_ccitt_false(reply, 2u);
-                const uint16_t err_got = (uint16_t)reply[2] | ((uint16_t)reply[3] << 8);
-                if (err_got == err_crc) {
-                    if (cmd != 0x00u /* PING */) spi_resync_after_failure(ctx);
-                    return status_from_wire(reply[1]);
+                /* ERROR-ENVELOPE FALLBACK.  Firmware error replies carry NO
+                 * payload (stage_error_reply: SOF | STATUS | CRC = 4 bytes)
+                 * regardless of the opcode's success-reply width, so for any
+                 * payload-bearing opcode the full-width CRC check above
+                 * fails on a legitimate error reply -- the bytes past the
+                 * 4-byte envelope are TX-FIFO idle filler.  Without this
+                 * fallback every firmware error surfaced as ALP_ERR_IO,
+                 * masking the real status (silicon 2026-06-04: an entire
+                 * class of "-5 from cycle 1" HiL rows -- pwm_capture's
+                 * documented NOSUPPORT among them -- were short error
+                 * replies the host could not decode). */
+                if (reply_payload_len > 0u &&
+                    (reply[1] & GD32G553_STATUS_CODE_MASK) != 0x00u /* STATUS_OK */) {
+                    const uint16_t err_crc = crc16_ccitt_false(reply, 2u);
+                    const uint16_t err_got = (uint16_t)reply[2] | ((uint16_t)reply[3] << 8);
+                    if (err_got == err_crc) {
+                        if (ctx->seq_enabled) {
+                            const uint8_t stamp = (uint8_t)(reply[1] >> 4);
+                            if (stamp == ctx->seq_last) {
+                                stale = true; /* stale ERROR reply: re-send */
+                                break;
+                            }
+                            ctx->seq_last = stamp;
+                        }
+                        if (cmd != 0x00u /* PING */) spi_resync_after_failure(ctx);
+                        return status_from_wire(reply[1] & GD32G553_STATUS_CODE_MASK);
+                    }
                 }
             }
+            if (attempt + 1u < GD32G553_REPLY_READ_TRIES) {
+                alp_delay_us(gd32g553_reply_retry_us[attempt]);
+            }
         }
-        if (attempt + 1u < GD32G553_REPLY_READ_TRIES) {
-            alp_delay_us(gd32g553_reply_retry_us[attempt]);
+        if (!reply_ok && !stale) {
+            if (cmd != 0x00u /* PING */) spi_resync_after_failure(ctx);
+            return ALP_ERR_IO;
+        }
+
+        if (reply_ok) {
+            const uint8_t code  = (uint8_t)(reply[1] & GD32G553_STATUS_CODE_MASK);
+            const uint8_t stamp = (uint8_t)(reply[1] >> 4);
+
+            if (cmd == GD32G553_CMD_LINK_FEATURES && code == 0x00u && reply_payload_len >= 1u) {
+                /* Negotiation reply: arm/disarm host-side sequencing and
+                 * take THIS reply's stamp as the baseline (the firmware
+                 * stamps the negotiation reply itself once it grants). */
+                ctx->seq_enabled = (reply[2] & GD32G553_LINK_FEAT_STATUS_SEQ) != 0u;
+                ctx->seq_last    = stamp;
+            } else if (ctx->seq_enabled) {
+                if (stamp == ctx->seq_last) {
+                    stale = true; /* slave never decoded the request */
+                } else {
+                    ctx->seq_last = stamp;
+                }
+            }
+
+            if (!stale) {
+                const alp_status_t firmware_status = status_from_wire(code);
+                if (firmware_status != ALP_OK) return firmware_status;
+
+                if (reply_payload_len > 0u && reply_payload != NULL) {
+                    memcpy(reply_payload, &reply[2], reply_payload_len);
+                }
+                return ALP_OK;
+            }
+        }
+
+        /* Stale reply detected.  One re-send: the hazard is a
+         * single-transaction race, so the second attempt is expected
+         * to land; a SECOND stale in a row means the link is wedged
+         * beyond this mechanism -- resync + fail loud. */
+        ctx->seq_stale_count++;
+        if (send_attempt >= 1u) {
+            if (cmd != 0x00u /* PING */) spi_resync_after_failure(ctx);
+            return ALP_ERR_IO;
         }
     }
-    if (!reply_ok) {
-        if (cmd != 0x00u /* PING */) spi_resync_after_failure(ctx);
-        return ALP_ERR_IO;
-    }
-
-    const alp_status_t firmware_status = status_from_wire(reply[1]);
-    if (firmware_status != ALP_OK) return firmware_status;
-
-    if (reply_payload_len > 0u && reply_payload != NULL) {
-        memcpy(reply_payload, &reply[2], reply_payload_len);
-    }
-    return ALP_OK;
 }
 
 /* ----------------------------------------------------------------- */
@@ -393,6 +450,20 @@ alp_status_t gd32g553_init(gd32g553_t *ctx, alp_spi_t *spi, alp_i2c_t *i2c, uint
         return ALP_ERR_NOSUPPORT;
     }
     ctx->version = v;
+
+    /* v0.7 link-feature negotiation (best-effort, SPI only -- the
+     * STATUS_SEQ stamp is an SPI-framing feature).  Old firmware
+     * answers STATUS_NOSUPPORT and the link stays on the legacy
+     * framing; ctx->seq_enabled records the outcome (spi_xfer arms it
+     * from the negotiation reply itself, which carries the stamp
+     * baseline).  Any error here is deliberately non-fatal: the
+     * feature is an integrity upgrade, not a liveness requirement. */
+    if (ctx->spi != NULL) {
+        uint8_t want    = GD32G553_LINK_FEAT_STATUS_SEQ;
+        uint8_t granted = 0u;
+        (void)cmd_send(ctx, GD32G553_TRANSPORT_SPI, GD32G553_CMD_LINK_FEATURES, &want, 1u, &granted,
+                       1u);
+    }
     return ALP_OK;
 }
 
@@ -949,20 +1020,32 @@ alp_status_t gd32g553_adc_dsp_chain_bind(gd32g553_t *ctx, uint8_t chain_id, uint
 /* ----------------------------------------------------------------- */
 
 alp_status_t gd32g553_ota_begin(gd32g553_t *ctx, uint32_t size_bytes, uint32_t expected_crc32,
-                                uint16_t *chunk_max_bytes, gd32g553_ota_slot_t *target_slot)
+                                const gd32g553_version_t *fw_version, uint16_t *chunk_max_bytes,
+                                gd32g553_ota_slot_t *target_slot)
 {
     if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
     if (chunk_max_bytes == NULL || target_slot == NULL) return ALP_ERR_INVAL;
     if (size_bytes == 0u) return ALP_ERR_INVAL;
 
-    uint8_t req[8];
+    /* v0.7 additive form: size:u32, crc:u32 [, maj:u8, min:u8, pat:u8].
+     * The version triple lands in the bridge's A/B metadata record at
+     * COMMIT (fw_version[slot], "0 = unknown").  NULL = send the legacy
+     * 8-byte form; older firmware ignores the 3 trailing bytes of the
+     * long form, so either pairing degrades gracefully. */
+    uint8_t      req[11];
+    const size_t req_len = (fw_version != NULL) ? 11u : 8u;
     put_le32(&req[0], size_bytes);
     put_le32(&req[4], expected_crc32);
+    if (fw_version != NULL) {
+        req[8]  = fw_version->major;
+        req[9]  = fw_version->minor;
+        req[10] = fw_version->patch;
+    }
 
     /* Reply: chunk_max_bytes:u16 + target_slot:u8. */
     uint8_t      reply[3] = { 0 };
-    alp_status_t s        = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_OTA_BEGIN, req,
-                                     sizeof(req), reply, sizeof(reply));
+    alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_OTA_BEGIN, req, req_len,
+                              reply, sizeof(reply));
     if (s != ALP_OK) return s;
     *chunk_max_bytes = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
     *target_slot     = (gd32g553_ota_slot_t)reply[2];

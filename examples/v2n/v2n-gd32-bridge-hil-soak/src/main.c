@@ -463,6 +463,13 @@ static bool t_qenc(soak_stat_t *st)
  * hazard fingerprint (the sequence-echo design kills it for real). */
 static volatile uint32_t counter_forensics[4]; /* [0]=last raw a, [1]=last raw b,
                                                   [2]=raw-equal count, [3]=raw pairs */
+
+/* v0.7 link telemetry, refreshed once per soak cycle for the SWD
+ * reader: [0] = STATUS_SEQ negotiated this session, [1] = stale
+ * replies the host driver caught + recovered (each one is the
+ * residual hazard FIRING and being killed -- the raw counter pair
+ * above should read equal in lockstep whenever [1] advances). */
+static volatile uint32_t seq_forensics[2];
 static bool t_counter(soak_stat_t *st)
 {
     uint32_t     a = 0, raw_b = 0, b = 0;
@@ -852,6 +859,10 @@ int main(void)
 
         printf("[hil-soak] cycle %u | %u/%u PASS%s\n", cycle, cycle_pass, cycle_pass + cycle_fail,
                (cycle_fail != 0u) ? " <-- FAILURES THIS CYCLE" : "");
+
+        /* v0.7 link telemetry for the SWD reader (no console). */
+        seq_forensics[0] = ctx.seq_enabled ? 1u : 0u;
+        seq_forensics[1] = ctx.seq_stale_count;
 
         /* Cumulative table every 16 cycles -- greppable soak verdict.
          * "SOAK-CLEAN" appears iff every ACTIVE test has zero failures

@@ -164,6 +164,17 @@ extern "C" {
  *  to operate (see docs/gd32-bridge-protocol.md §8). */
 #define GD32G553_HOST_PROTOCOL_MAJOR     0u
 
+/** v0.7 link-feature bits (CMD_LINK_FEATURES payload).  STATUS_SEQ:
+ *  once granted, every SPI reply's STATUS byte carries a 4-bit
+ *  slave-side sequence stamp in bits [7:4] that advances per freshly
+ *  decoded request -- a reply whose stamp has not advanced is a STALE
+ *  re-serve (the request was never decoded) and the host driver
+ *  re-sends once before failing.  I2C replies are never stamped. */
+#define GD32G553_LINK_FEAT_STATUS_SEQ 0x01u
+/** SPI STATUS byte: code lives in bits [3:0]; [7:4] = sequence stamp
+ *  (zero until STATUS_SEQ is negotiated). */
+#define GD32G553_STATUS_CODE_MASK 0x0Fu
+
 /** Wire opcodes -- mirror docs/gd32-bridge-protocol.md §3. */
 typedef enum {
     GD32G553_CMD_PING                  = 0x00,
@@ -254,6 +265,12 @@ typedef enum {
      * Portable surface in <alp/power.h>.  Reserved opcode at v0.5;
      * firmware dispatcher returns STATUS_NOSUPPORT today. */
     GD32G553_CMD_POWER_MODE_SET = 0x28,
+    /* v0.7: link-feature negotiation (request `features:u8` wanted,
+     * reply `features:u8` granted+armed).  Older firmware answers
+     * STATUS_NOSUPPORT and the host stays on the legacy framing --
+     * gd32g553_init() negotiates automatically and records the
+     * outcome in ctx->seq_enabled. */
+    GD32G553_CMD_LINK_FEATURES = 0x81,
     /* Reserved range 0xF0..0xFF -- application-bootloader OTA. */
     GD32G553_CMD_OTA_BEGIN       = 0xF0,
     GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1,
@@ -304,6 +321,11 @@ typedef struct {
     uint8_t               i2c_addr;         /**< Valid when i2c != NULL.*/
     gd32g553_transport_t  default_transport;/**< Picked at init time.    */
     gd32g553_version_t    version;          /**< Cached after init.      */
+    bool                  seq_enabled;      /**< v0.7 STATUS_SEQ granted
+                                                 (negotiated at init).   */
+    uint8_t               seq_last;         /**< Last accepted stamp.    */
+    uint32_t              seq_stale_count;  /**< Stale replies caught +
+                                                 recovered (telemetry).  */
 } gd32g553_t;
 
 /**
@@ -979,6 +1001,12 @@ typedef struct {
  * @param size_bytes       Total payload size.
  * @param expected_crc32   CRC32 the bridge will verify after the
  *                         last chunk lands.
+ * @param fw_version       Version triple of the INCOMING image; the
+ *                         bridge records it in the A/B metadata at
+ *                         COMMIT ("0 = unknown").  NULL sends the
+ *                         legacy 8-byte BEGIN (version unknown) --
+ *                         wire-compatible with pre-v0.7 firmware in
+ *                         both pairings (protocol v0.7 additive form).
  * @param chunk_max_bytes  Out: chunk size the firmware accepts in
  *                         a single @ref gd32g553_ota_write_chunk.
  * @param target_slot      Out: slot the bridge will write into.
@@ -986,10 +1014,8 @@ typedef struct {
  * @return ALP_OK / ALP_ERR_NOSUPPORT (firmware lacks the bodies) /
  *         transport error.
  */
-alp_status_t gd32g553_ota_begin(gd32g553_t *ctx,
-                                uint32_t size_bytes,
-                                uint32_t expected_crc32,
-                                uint16_t *chunk_max_bytes,
+alp_status_t gd32g553_ota_begin(gd32g553_t *ctx, uint32_t size_bytes, uint32_t expected_crc32,
+                                const gd32g553_version_t *fw_version, uint16_t *chunk_max_bytes,
                                 gd32g553_ota_slot_t *target_slot);
 
 /**

@@ -33,8 +33,8 @@ spi_ping_request               = A500FF84
 spi_ping_reply_ok              = A500FF84
 # SOF | CMD=0x01 (GET_VERSION) | CRC -- empty payload
 spi_get_version_request        = A501EFA5
-# SOF | STATUS=0x00 | major=0 | minor=6 | patch=0 | CRC
-spi_get_version_reply_v0_6_0   = A500000600B299
+# SOF | STATUS=0x00 | major=0 | minor=7 | patch=0 | CRC
+spi_get_version_reply_v0_7_0   = A50000070081A8
 
 # ---------------------------------------------------------------------
 # §3. I2C envelopes -- register-style framing
@@ -121,6 +121,8 @@ spi_adc_dsp_chain_bind_probe_request = A539000089C7
 # ---------------------------------------------------------------------
 # SOF | CMD=0xF0 | size=41976 (LE 0x0000A3F8) | expected_crc32=0xDEADBEEF (LE) | CRC
 spi_ota_begin_request          = A5F0F8A30000EFBEADDE50A8
+# SOF | CMD=0xF0 | size=41976 (LE) | expected_crc32=0xDEADBEEF (LE) | fw_major=0 | fw_minor=2 | fw_patch=9 | CRC -- the v0.7 ADDITIVE form: the triple lands in the A/B metadata at COMMIT (fw_version[slot], 0 = unknown); pre-v0.7 firmware ignores the 3 trailing bytes, and the 8-byte legacy form stays valid
+spi_ota_begin_request_v0_7     = A5F0F8A30000EFBEADDE0002093D52
 # SOF | STATUS=0x00 | chunk_max=60 (LE 0x003C) | target_slot=B(1) | CRC -- 60 = MAX_PAYLOAD(65) - offset:u32 - len:u8 header
 spi_ota_begin_reply_slot_b     = A5003C0001B8DA
 # SOF | CMD=0xF1 | offset=0 (LE) | len=8 | data=01..08 (one FMC doubleword) | CRC -- the len byte rejects transaction-merged zero-extended captures that survive the span CRC via the palindromic-CRC self-consumption hole; offsets pace on 8-byte boundaries
@@ -143,3 +145,14 @@ spi_ota_get_state_reply_ready  = A5000100010100E336
 spi_ota_abort_request          = A5F6705D
 # SOF | STATUS=0x02 (NOT_READY) | CRC -- WRITE_CHUNK / VERIFY without a BEGIN-opened session, or COMMIT before VERIFY
 spi_ota_reply_not_ready        = A502DFC6
+
+# ---------------------------------------------------------------------
+# §12. v0.7 additions -- link-feature negotiation (CMD_LINK_FEATURES)
+#       + the STATUS_SEQ stamped-reply framing (SPI only)
+# ---------------------------------------------------------------------
+# SOF | CMD=0x81 (LINK_FEATURES) | features=0x01 (STATUS_SEQ wanted) | CRC -- pre-v0.7 firmware answers STATUS_NOSUPPORT
+spi_link_features_request      = A58101A278
+# SOF | STATUS=0x10 (code OK, stamp=1 -- the firmware arms the feature BEFORE staging, so the negotiation reply itself is stamped and the host baselines from it) | granted=0x01 | CRC
+spi_link_features_reply_granted_seq1 = A5100189A2
+# SOF | STATUS=0x50 (code OK, stamp=5) | CRC -- example stamped reply: code = STATUS & 0x0F, stamp = STATUS >> 4; a reply whose stamp equals the previously accepted one is a STALE re-serve
+spi_ping_reply_ok_seq5         = A550A571

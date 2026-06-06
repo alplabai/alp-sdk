@@ -75,8 +75,9 @@ byte; their numeric encoding is:
 | `0x26` | `PWM_SINGLE_PULSE`    | `channel:u8 reserved:u8 reserved:u16 pulse_ns:u32`    | _(empty; returns STATUS_NOSUPPORT today)_         |
 | `0x27` | `TIMER_SYNC`          | `master:u8 slave:u8 mode:u8`                          | _(empty; returns STATUS_NOSUPPORT today)_         |
 | `0x28` | `POWER_MODE_SET`      | `mode:u8 reserved:u8 wake_bitmap:u32 wake_after_ms:u32` | _(empty; returns STATUS_NOSUPPORT today)_       |
+| `0x81` | `LINK_FEATURES` (v0.7) | `features:u8` (wanted; bit0 = `STATUS_SEQ`)          | `features:u8` (granted + armed; see §3.14 / §4.1.1) |
 
-Opcodes `0x81..0xEF` are **reserved** for future ALP-defined
+Opcodes `0x82..0xEF` are **reserved** for future ALP-defined
 extensions (next slot: hardware AES via the CAU engine).  Boards
 SHOULD NOT define their own opcodes in this range -- the firmware
 replies with **`ALP_ERR_NOSUPPORT`** (see §6) for any opcode it
@@ -571,6 +572,27 @@ in bounded time.  Apps that need alarms must either use a host-
 local timer or poll `COUNTER_READ` and synthesise the callback
 client-side.
 
+### 3.14 Link-feature negotiation (`v0.7+`)
+
+`LINK_FEATURES` (0x81) negotiates opt-in framing upgrades.  The host
+sends the feature set it wants (`features:u8`); the firmware grants
+the intersection with what it implements, **arms it immediately**,
+and echoes the granted set.  A request of `0` disables everything
+(idempotent both ways).  Pre-v0.7 firmware answers
+`STATUS_NOSUPPORT` through the dispatch default, so a new host
+degrades to the legacy framing automatically — and an un-negotiated
+v0.7 link is byte-identical to the old wire.
+
+Defined feature bits:
+
+| Bit | Name | Effect when granted |
+|-----|------|---------------------|
+| 0 | `STATUS_SEQ` | Every **SPI** reply STATUS byte carries a 4-bit slave-side sequence stamp in bits `[7:4]` (§4.1.1).  The reply to the negotiation itself is already stamped — the host takes that stamp as its baseline.  I2C replies are never stamped. |
+
+After a firmware reboot the feature resets to off (replies revert to
+unstamped); the host's normal link-recovery path (re-init →
+`GET_VERSION`) re-negotiates.
+
 ## 4. SPI framing
 
 Each command on SPI is a **request frame** sent by the host while CS
@@ -593,7 +615,7 @@ clocks back out on the *next* CS transaction within
 |---------|-------|------------------------------------------------------------------------------------------------|
 | SOF     | 1     | `0xA5`. Anything else → host or firmware abandons the frame and resyncs on the next CS edge.   |
 | CMD     | 1     | Opcode from §3.                                                                                |
-| STATUS  | 1     | Reply only.  `0x00` = OK.  See §6 for non-zero values.                                         |
+| STATUS  | 1     | Reply only.  Bits `[3:0]` = status code (`0x0` = OK, §6).  Bits `[7:4]` = the v0.7 **sequence stamp** — zero until `LINK_FEATURES` negotiates `STATUS_SEQ` (§4.3), so the legacy wire is unchanged. |
 | PAYLOAD | N / M | Length is **opcode-derived** — both ends know the byte count from the opcode + status pair.   |
 | CRC     | 2     | CRC-16/CCITT-FALSE (poly `0x1021`, init `0xFFFF`, xor-out 0x0000, **non-reflected**), MSB first |
 
@@ -647,6 +669,34 @@ retry the whole command safely because the request side has already
 executed (commands are idempotent except for `GPIO_WRITE` /
 `PWM_SET`, where the host knows the desired final state and writing
 the same value twice is benign).
+
+### 4.1.1 The residual stale-reply hazard and its v0.7 kill
+
+The two-transaction pattern has one residual hazard (documented in
+`transport_spi.c` since v0.2.1): if a REQUEST is ever lost whole —
+every byte landing inside the slave's SPI-reset window while the
+previous handler still runs — the re-armed PREVIOUS reply is
+CRC-valid stale data, and for a **same-opcode re-read** it is
+indistinguishable from a fresh success.  This is not theoretical: it
+was fingerprinted on silicon 2026-06-06 as byte-exact value replays
+on back-to-back identical `COUNTER_READ` frames, with a fail rate
+that swung 0 % ↔ 100 % purely on host-side timing phase.
+
+Protocol v0.7 kills it with the **`STATUS_SEQ` sequence stamp**
+(negotiated via `LINK_FEATURES`, §3.14): the slave keeps a 4-bit
+counter that advances once per freshly decoded request and stamps it
+into bits `[7:4]` of every SPI reply STATUS byte.  The drain/rewind
+re-serves of the *same* staged reply keep the *same* stamp — so a
+host that reads a CRC-valid reply whose stamp has **not advanced**
+past its previously accepted reply knows its request was never
+decoded, and re-sends it (the `gd32g553` driver does this once
+automatically, counting occurrences in `ctx->seq_stale_count`).
+Because a stale verdict proves the request was never executed, the
+re-send is safe even for non-idempotent opcodes.  The stamp wraps
+mod 16; replies re-served across the wrap remain detectable because
+detection compares against the last accepted stamp, not zero.
+I2C replies are **never** stamped (`STATUS_NO_PENDING` owns bit 7
+on that transport, and the hazard is SPI-specific).
 
 ### 4.2 CRC validation
 
@@ -748,6 +798,13 @@ byte is naturally unsigned and human-readable on a logic analyser:
 Hosts MUST translate the wire byte back to a negative `alp_status_t`
 via the table above before returning it from a public API call.
 
+**v0.7 SPI note:** once `STATUS_SEQ` is negotiated (§3.14), the SPI
+status byte carries the sequence stamp in bits `[7:4]` — hosts mask
+with `0x0F` before the table lookup (every SPI-visible code fits the
+low nibble; `0x80 NO_PENDING` is I2C-only, where stamping never
+applies).  Masking is safe unconditionally on SPI: legacy firmware
+never sets the high nibble there.
+
 ## 7. Liveness handshake
 
 `gd32g553_init()` issues:
@@ -786,6 +843,12 @@ including `minor`**: a pre-production minor may revise a
 pre-production opcode's payload (v0.6 did this to `OTA_WRITE_CHUNK`),
 and the major-only handshake cannot detect that — do not mix a v0.5
 host with v0.6 firmware or vice versa.
+
+Version history (pre-1.0): **v0.7** adds `LINK_FEATURES` (0x81) +
+the negotiated `STATUS_SEQ` reply stamp (§3.14, §4.1.1) and the
+additive `OTA_BEGIN` version triple (§10) — both backward-compatible
+by construction (un-negotiated framing and the 8-byte BEGIN are
+byte-identical to v0.6).
 
 ## 9. Reference vectors
 
@@ -831,7 +894,7 @@ firmware in `firmware/gd32-bridge/src/ota.c`):
 
 | Op | Name | Request payload | Reply payload |
 |------|------|----------------|---------------|
-| `0xF0` | `OTA_BEGIN` | `size:u32 expected_crc32:u32` | `chunk_max:u16 target_slot:u8` |
+| `0xF0` | `OTA_BEGIN` | `size:u32 expected_crc32:u32` `[fw_major:u8 fw_minor:u8 fw_patch:u8]` (v0.7 additive: the incoming image's version, recorded into the A/B metadata `fw_version[slot]` at COMMIT; legacy 8-byte form ⇒ 0 = unknown, and pre-v0.7 firmware ignores the trailing triple) | `chunk_max:u16 target_slot:u8` |
 | `0xF1` | `OTA_WRITE_CHUNK` | `offset:u32 len:u8 data[len]` | `received_bytes:u32` (high-water) |
 | `0xF2` | `OTA_VERIFY` | _empty_ | `computed_crc32:u32 verified:u8` |
 | `0xF3` | `OTA_COMMIT` | _empty_ | _empty_ (resets on success) |

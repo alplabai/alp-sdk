@@ -65,6 +65,9 @@ static uint32_t s_img_len;
 static uint32_t s_last_off;
 static uint32_t s_expected_crc; /* from OTA_BEGIN (host supplies CRC up front) */
 static uint32_t s_img_crc;      /* computed at OTA_VERIFY, reused at COMMIT */
+static uint32_t s_fw_version;   /* from OTA_BEGIN v0.7 form (packed
+                                 * major<<16|minor<<8|patch); 0 = host
+                                 * sent the legacy 8-byte form = unknown */
 static uint8_t  s_err;
 
 static uint32_t rd_u32(const uint8_t *p)
@@ -171,12 +174,22 @@ static uint8_t active_slot_now(void)
 static gd32_bridge_status_t h_begin(const uint8_t *req, size_t len, uint8_t *reply, size_t cap,
                                     size_t *rlen)
 {
-    /* Host OTA_BEGIN req: size:u32, expected_crc32:u32. */
+    /* Host OTA_BEGIN req: size:u32, expected_crc32:u32
+     * [, fw_major:u8, fw_minor:u8, fw_patch:u8  -- v0.7 additive form].
+     * The version triple is recorded into the meta record at COMMIT
+     * (ota_meta_record_t.fw_version[slot], which reserved the field
+     * with "0 = unknown" from day one).  Length-tolerant by design:
+     * an 8-byte legacy BEGIN means version-unknown, and older firmware
+     * ignores the 3 trailing bytes of the v0.7 form -- additive both
+     * directions (wire MINOR). */
     if (len < 8u) {
         return STATUS_INVAL;
     }
     s_img_len      = rd_u32(&req[0]);
     s_expected_crc = rd_u32(&req[4]);
+    s_fw_version   = (len >= 11u)
+                         ? (((uint32_t)req[8] << 16) | ((uint32_t)req[9] << 8) | (uint32_t)req[10])
+                         : 0u;
     if (s_img_len == 0u || s_img_len > OTA_SLOT_SIZE) {
         s_state = OTA_ST_ERROR;
         s_err   = 1u;
@@ -307,7 +320,7 @@ static gd32_bridge_status_t h_commit(void)
     if (s_state != OTA_ST_VERIFIED) {
         return STATUS_NOT_READY;
     }
-    if (!meta_commit(s_inactive, true, 0u /* fw_ver: host BEGIN carries no version */, s_img_len,
+    if (!meta_commit(s_inactive, true, s_fw_version /* 0 = legacy BEGIN, unknown */, s_img_len,
                      s_img_crc)) {
         s_state = OTA_ST_ERROR;
         s_err   = 6u;

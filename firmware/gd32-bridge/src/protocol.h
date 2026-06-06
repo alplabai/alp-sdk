@@ -36,8 +36,27 @@
  * firmware-version.txt, surfaced via GET_BUILD_ID ("<ver>+<sha>").  The
  * two axes move independently. */
 #define PROTOCOL_VERSION_MAJOR 0u
-#define PROTOCOL_VERSION_MINOR 6u
+#define PROTOCOL_VERSION_MINOR 7u
 #define PROTOCOL_VERSION_PATCH 0u
+
+/* v0.7: opt-in link features negotiated via CMD_LINK_FEATURES.
+ *
+ * STATUS_SEQ ("sequence echo"): once granted, every SPI reply's STATUS
+ * byte carries a 4-bit slave-side sequence stamp in bits [7:4] (the
+ * status code keeps bits [3:0] -- all SPI-visible codes fit, see
+ * gd32_bridge_status_t).  The stamp advances by one (mod 16) each time
+ * the slave DECODES a fresh request and stages a new reply; the
+ * drain/rewind re-serves of the SAME staged reply keep the same stamp.
+ * A host that observes a reply whose stamp has not advanced past the
+ * previous accepted reply knows the slave never consumed its request
+ * -- the stale-reply residual hazard (transport_spi.c) becomes
+ * DETECTABLE instead of silently masquerading as a fresh success
+ * (silicon-fingerprinted 2026-06-06 on back-to-back COUNTER_READs).
+ * I2C replies are NEVER stamped: the I2C-only STATUS_NO_PENDING
+ * (0x80) owns bit 7 there, and the hazard is SPI-specific. */
+#define GD32_BRIDGE_LINK_FEAT_STATUS_SEQ 0x01u
+#define GD32_BRIDGE_STATUS_CODE_MASK 0x0Fu
+#define GD32_BRIDGE_STATUS_SEQ_SHIFT 4u
 
 /* Number of concurrent DMA-backed ADC streams the firmware supports.
  * Bounded by the GD32G553's two DMA controllers (DMA0 + DMA1 with
@@ -186,6 +205,15 @@ typedef enum {
      * dispatcher returns STATUS_NOSUPPORT until the HAL body lands.
      * Portable surface in <alp/power.h>. */
     CMD_POWER_MODE_SET = 0x28,
+    /* v0.7: link-feature negotiation.  Request `features:u8` = the set
+     * the host wants (GD32_BRIDGE_LINK_FEAT_*); reply `features:u8` =
+     * the subset the firmware granted (and immediately armed).  A
+     * request of 0 disables everything (idempotent).  Older firmware
+     * answers STATUS_NOSUPPORT via the dispatch default -- the host
+     * degrades to the legacy framing.  The reply to THIS command is
+     * already stamped when STATUS_SEQ is granted; the host uses that
+     * stamp as its sequence baseline. */
+    CMD_LINK_FEATURES = 0x81,
 } gd32_bridge_cmd_t;
 
 /* TMU function index sent in CMD_TMU_COMPUTE's request payload byte 0.
@@ -258,6 +286,11 @@ typedef enum {
 gd32_bridge_status_t protocol_dispatch(uint8_t cmd, const uint8_t *req_payload,
                                        size_t req_payload_len, uint8_t *reply_payload,
                                        size_t reply_payload_cap, size_t *reply_payload_len);
+
+/* Currently armed link features (GD32_BRIDGE_LINK_FEAT_* bits, set by
+ * CMD_LINK_FEATURES).  Consulted by the SPI transport when staging
+ * replies; 0 = legacy framing. */
+uint8_t protocol_link_features(void);
 
 /* --------------------------------------------------------------- */
 /* CRC-16 / CCITT-FALSE -- shared between transports.                */
