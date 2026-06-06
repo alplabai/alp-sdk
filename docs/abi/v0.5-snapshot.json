@@ -7805,8 +7805,8 @@
           "hash": "3d4c6b8b6611f2e7"
         },
         "alp_status_t": {
-          "definition": "typedef enum { ALP_OK = 0, ALP_ERR_INVAL = -1, ALP_ERR_NOT_READY = -2, ALP_ERR_BUSY = -3, ALP_ERR_TIMEOUT = -4, ALP_ERR_IO = -5, ALP_ERR_NOSUPPORT = -6, ALP_ERR_NOMEM = -7, ALP_ERR_OUT_OF_RANGE = -8, ALP_ERR_NOT_PRESENT_ON_THIS_SOC = -9, ALP_ERR_NOT_IMPLEMENTED = -10, ALP_ERR_VERSION = -11, ALP_ERR_NO_BACKEND = -12, ALP_ERR_NO_FIT = -13, ALP_ERR_NOT_FOUND = -14 } alp_status_t;",
-          "hash": "43d2d7d5e23eaf2c"
+          "definition": "typedef enum { ALP_OK = 0, ALP_ERR_INVAL = -1, ALP_ERR_NOT_READY = -2, ALP_ERR_BUSY = -3, ALP_ERR_TIMEOUT = -4, ALP_ERR_IO = -5, ALP_ERR_NOSUPPORT = -6, ALP_ERR_NOMEM = -7, ALP_ERR_OUT_OF_RANGE = -8, ALP_ERR_NOT_PRESENT_ON_THIS_SOC = -9, ALP_ERR_NOT_IMPLEMENTED = -10, ALP_ERR_VERSION = -11, ALP_ERR_NO_BACKEND = -12, ALP_ERR_NO_FIT = -13, ALP_ERR_NOT_FOUND = -14, ALP_ERR_NOT_PROVISIONED = -15 } alp_status_t;",
+          "hash": "55c3947676e50016"
         },
         "alp_uart_parity_t": {
           "definition": "typedef enum { ALP_UART_PARITY_NONE = 0, ALP_UART_PARITY_EVEN = 1, ALP_UART_PARITY_ODD = 2 } alp_uart_parity_t;",
