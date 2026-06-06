@@ -7,6 +7,58 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.7.0 candidate
 
+### Fixed — act8760: register map replaced with the verified one (2026-06-07)
+
+The original `chips/act8760/act8760.c` register table was guessed;
+VSET accessors returned `ALP_ERR_NOSUPPORT`; the status decode was
+entirely wrong.  All three are corrected in this commit.
+
+**Register map** (source: `AA82BZ_RegisterMap_Users_Rev1P1` workbook +
+ACT88760 Datasheet Rev C, independently re-derived cell-by-cell
+2026-06-06):
+
+- Two-slave model now correctly documented: ADD1 (0x25 on CMI 120.E1)
+  = MSTR + GPIO + Buck1..6 tiles; ADD2 (0x26) = Buck7 tile + dual-LDO
+  tiles (LDO12 @ 0x20, LDO53 @ 0x40, LDO64 @ 0x60 on ADD2).
+- Verified VSET0 byte addresses: B1 0x42, B2 0x62, B3 0x82, B4 0xA2,
+  B5 0xC2, B6 0xE2 (ADD1); B7 0x02, LDO5 0x41, LDO1 0x21, LDO2 0x27,
+  LDO3 0x47, LDO4 0x67, LDO6 0x61 (ADD2).
+
+**VSET accessors** (`act8760_rail_get_vset` / `act8760_rail_set_vset`):
+no longer stubs.  `set_vset` does a read-modify-write preserving bits
+outside the VSET field (EN_OutPD / IPD_SET on bucks, RANGE on LDOs).
+
+**`act8760_status_t` — ABI BREAK** (field rename; no existing consumers
+outside this repo at time of writing):
+
+| Old field (wrong)  | New field (verified)   | Bit |
+|--------------------|-----------------------|-----|
+| `sys_data`         | `vsys_stat`           | bit4 |
+| `sys_warning`      | `vsys_warning`        | bit1 |
+| `ilim_warning`     | (deleted)             | — |
+| `fault_pending`    | (deleted)             | — |
+| (new)              | `rom_stat`            | bit7 |
+| (new)              | `wd_alert`            | bit6 |
+| (new)              | `vin_pok_ov`          | bit3 |
+| (new)              | `pb_assert`           | bit2 |
+| (new)              | `pb_deassert`         | bit0 |
+
+`thermal_warning` (bit5 TWARN) and `raw` are unchanged.
+
+**Removed defines** (unverified + unused): `ACT8760_REG_GPIO_STAT_LO`
+(0x03), `ACT8760_REG_OV_UV_CFG` (0x09).
+
+**Tests**: `test_act8760_probe_both_slaves`,
+`test_act8760_vset_offsets_per_verified_map`,
+`test_act8760_status_decode_matches_mstr_sheet` added to
+`tests/zephyr/chips`; a dual-instance fake (`fake_act8760.c`, two DT
+nodes at 0x25 + 0x26) backs the emul.  168/168 green.
+
+**Metadata** (`metadata/chips/act8760.yaml`): `driver_status` promoted
+from `stub` to `partial`; `register_map` source doc added; address
+entries renamed from `page:` to `slave: add1/add2` to match the
+two-slave model.
+
 ## [v0.6.0] - 2026-06-06
 
 ### Added — gd32-bridge v0.2.9 / protocol v0.7: the stale-reply kill + OTA version plumb (2026-06-06)
