@@ -7,6 +7,41 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] — v0.6.0 candidate
 
+### Added — gd32-bridge v0.2.9 / protocol v0.7: the stale-reply kill + OTA version plumb (2026-06-06)
+
+Wire protocol 0.6.0 → **0.7.0** (MINOR; the un-negotiated wire is
+byte-identical to v0.6) and firmware 0.2.8 → **0.2.9**.
+
+* **`CMD_LINK_FEATURES` (0x81) + the negotiated `STATUS_SEQ` reply
+  stamp** — the architected kill for the transport's residual
+  stale-reply hazard, silicon-fingerprinted the day before
+  (byte-exact `COUNTER_READ` replays whose rate swung 0↔100 % on
+  host timing phase).  Once negotiated, every SPI reply carries a
+  4-bit slave-side sequence stamp in STATUS[7:4], advanced per
+  freshly-decoded request; the drain/rewind re-serves keep the same
+  stamp, so a CRC-valid reply whose stamp has not advanced tells the
+  host its request was never decoded — and since it was never
+  *executed*, the host driver's automatic single re-send is safe for
+  every opcode.  Host telemetry in `ctx->seq_stale_count`;
+  `gd32g553_init()` negotiates automatically and degrades to legacy
+  framing against older firmware.  I2C replies are never stamped
+  (`STATUS_NO_PENDING` owns bit 7 there).  Unit-pinned in
+  `tests/unit/gd32_bridge_transport` (stamp advance / rewind-keeps-
+  stamp / error-envelope stamping / mod-16 wrap / disable restores
+  byte-identical legacy framing) + new fuzz corpus seeds + §12
+  protocol vectors.
+* **`OTA_BEGIN` carries the incoming image's version** (additive
+  3-byte triple): recorded into the A/B metadata `fw_version[slot]`
+  at COMMIT — the record had reserved the field ("0 = unknown")
+  since its v2 layout.  Legacy 8-byte BEGIN still accepted;
+  pre-v0.7 firmware ignores the trailing bytes.
+  `gd32g553_ota_begin()` gains a nullable `fw_version` parameter
+  (no-legacy-compat: signature changed, callers updated, ABI
+  snapshot regenerated).
+* The HIL soak exports v0.7 link telemetry (`seq_forensics[]`:
+  negotiated flag + stale-catch count) next to the existing
+  counter-row discriminator, so the bench can WATCH the kill work.
+
 ### Fixed — gd32-bridge v0.2.8: ISR-safety + error-masking fixes from the delta review (2026-06-05)
 
 Three behavior fixes found by an adversarial review of the

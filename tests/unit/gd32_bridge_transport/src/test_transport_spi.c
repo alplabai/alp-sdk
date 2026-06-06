@@ -183,4 +183,113 @@ ZTEST(gd32_bridge_transport, test_mangled_request_stages_io_error)
     zassert_equal(buf[1], 0x05u, "STATUS_IO");
 }
 
+/* ------------------------------------------------------------------ */
+/* v0.7 STATUS_SEQ -- the stale-reply kill (silicon-fingerprinted      */
+/* 2026-06-06: byte-exact replays on back-to-back identical frames).   */
+/* ------------------------------------------------------------------ */
+
+/* Builds + replays a CMD_LINK_FEATURES transaction wanting `feat`. */
+static void negotiate(uint8_t feat)
+{
+    uint8_t        lf[5] = { 0xA5u, 0x81u /* CMD_LINK_FEATURES */, feat, 0, 0 };
+    const uint16_t crc   = crc16_ccitt_false(lf, 3u);
+
+    lf[3]                = (uint8_t)(crc & 0xFFu);
+    lf[4]                = (uint8_t)(crc >> 8);
+    transaction(lf, sizeof lf);
+}
+
+/* The full feature contract in one walk: the negotiation reply itself
+ * is stamped (baseline), every fresh decode advances the stamp, the
+ * drain/rewind re-serve KEEPS the stamp (that is the stale signature
+ * the host detects), error envelopes advance + stamp too, and a
+ * disable returns the wire to the legacy unstamped framing. */
+ZTEST(gd32_bridge_transport, test_status_seq_stamp_contract)
+{
+    uint8_t       buf[80];
+    const uint8_t zeros[4]   = { 0 };
+    const uint8_t garbage[5] = { 0x00u, 0xA5u, 0x12u, 0x34u, 0x56u };
+
+    transport_spi_init();
+
+    /* Negotiate ON: reply carries granted=0x01 and stamp 1 (the
+     * feature arms BEFORE the reply stages). */
+    negotiate(0x01u);
+    size_t n = hal_drain(buf, sizeof buf);
+    zassert_equal(n, 5u, "LINK_FEATURES reply: SOF STATUS granted CRC");
+    zassert_equal(buf[1], 0x10u, "stamp=1, code=OK");
+    zassert_equal(buf[2], 0x01u, "STATUS_SEQ granted");
+    /* The CRC covers the STAMPED status byte. */
+    {
+        const uint16_t crc = crc16_ccitt_false(buf, 3u);
+        zassert_equal(buf[3], (uint8_t)(crc & 0xFFu), "stamped CRC lo");
+        zassert_equal(buf[4], (uint8_t)(crc >> 8), "stamped CRC hi");
+    }
+
+    /* Fresh decode -> stamp advances. */
+    transaction(ping_frame, sizeof ping_frame);
+    n = hal_drain(buf, sizeof buf);
+    zassert_equal(n, 4u, "PING reply staged");
+    zassert_equal(buf[1], 0x20u, "stamp=2, code=OK");
+
+    /* Drain/rewind re-serves the SAME stamp -- the stale fingerprint
+     * a host uses to know its next request was never decoded. */
+    transaction(zeros, sizeof zeros);
+    n = hal_drain(buf, sizeof buf);
+    zassert_equal(n, 4u, "rewound reply re-armed");
+    zassert_equal(buf[1], 0x20u, "stamp UNCHANGED across rewind");
+
+    /* Another fresh decode advances again... */
+    transaction(ping_frame, sizeof ping_frame);
+    n = hal_drain(buf, sizeof buf);
+    zassert_equal(buf[1], 0x30u, "stamp=3 after the next decode");
+
+    /* ...and a framing-error envelope is a fresh decode too. */
+    transaction(garbage, sizeof garbage);
+    n = hal_drain(buf, sizeof buf);
+    zassert_equal(n, 4u, "error envelope");
+    zassert_equal(buf[1], 0x45u, "stamp=4, code=STATUS_IO");
+
+    /* Negotiate OFF: the disable-ack itself is already unstamped
+     * (feature disarmed before staging), and the wire returns to the
+     * legacy framing. */
+    negotiate(0x00u);
+    n = hal_drain(buf, sizeof buf);
+    zassert_equal(n, 5u, "LINK_FEATURES reply");
+    zassert_equal(buf[1], 0x00u, "disable-ack unstamped");
+    zassert_equal(buf[2], 0x00u, "nothing granted");
+
+    transaction(ping_frame, sizeof ping_frame);
+    n = hal_drain(buf, sizeof buf);
+    zassert_mem_equal(buf, ping_frame, sizeof ping_frame,
+                      "legacy framing restored (PING byte-identical)");
+}
+
+/* The 4-bit stamp wraps 15 -> 0 -> 1; stamp 0 is a VALID value mid-
+ * session (host-side inequality still detects staleness across it). */
+ZTEST(gd32_bridge_transport, test_status_seq_wraps_mod_16)
+{
+    uint8_t buf[80];
+
+    transport_spi_init();
+    negotiate(0x01u);
+    (void)hal_drain(buf, sizeof buf); /* stamp 1 consumed */
+
+    /* 14 more decodes take the stamp to 15. */
+    for (int i = 0; i < 14; i++) {
+        transaction(ping_frame, sizeof ping_frame);
+        (void)hal_drain(buf, sizeof buf);
+    }
+    transaction(ping_frame, sizeof ping_frame);
+    (void)hal_drain(buf, sizeof buf);
+    zassert_equal(buf[1] >> 4, 0x0u, "stamp wrapped to 0");
+
+    transaction(ping_frame, sizeof ping_frame);
+    (void)hal_drain(buf, sizeof buf);
+    zassert_equal(buf[1] >> 4, 0x1u, "and keeps counting");
+
+    negotiate(0x00u); /* leave the suite in legacy framing */
+    (void)hal_drain(buf, sizeof buf);
+}
+
 ZTEST_SUITE(gd32_bridge_transport, NULL, NULL, NULL, NULL, NULL);

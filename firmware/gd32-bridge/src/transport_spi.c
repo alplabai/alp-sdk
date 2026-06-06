@@ -66,8 +66,22 @@ static size_t   spi_tx_cursor;
 #define SPI_DRAIN_REWIND_BOUND 12u
 static uint8_t  spi_drain_streak;
 
+/* v0.7 STATUS_SEQ stamp.  A 4-bit slave-side counter advanced exactly
+ * once per FRESH staged reply (this function is the single staging
+ * site; the drain/rewind paths re-serve the buffer without restaging,
+ * so a re-read of the same reply keeps the same stamp -- by design).
+ * Armed only after the host negotiates CMD_LINK_FEATURES; until then
+ * the wire is byte-identical to pre-v0.7 firmware.  The host detects
+ * the stale-reply residual hazard (see decode_and_dispatch below) as
+ * "the stamp never advanced past my previous accepted reply". */
+static uint8_t spi_seq;
+
 static void stage_reply(uint8_t status, const uint8_t *payload, size_t payload_len)
 {
+    if ((protocol_link_features() & GD32_BRIDGE_LINK_FEAT_STATUS_SEQ) != 0u) {
+        spi_seq = (uint8_t)((spi_seq + 1u) & 0x0Fu);
+        status  = (uint8_t)(status | (uint8_t)(spi_seq << GD32_BRIDGE_STATUS_SEQ_SHIFT));
+    }
     spi_tx_buf[0] = GD32_BRIDGE_SOF;
     spi_tx_buf[1] = status;
     if (payload_len > 0u && payload != NULL) {
@@ -109,8 +123,10 @@ static void decode_and_dispatch(void)
      * edge, which the host's staging gap makes pathological), the
      * re-armed previous reply is CRC-valid stale data for a same-opcode
      * re-read.  A partial loss stays loud (non-SOF -> STATUS_IO).  The
-     * clean kill is a sequence echo in the STATUS byte -- queued for the
-     * next wire-protocol rev (docs/gd32-link-sci7-next-rev.md). */
+     * clean kill is the v0.7 STATUS_SEQ stamp (CMD_LINK_FEATURES): once
+     * negotiated, a reply whose stamp has not advanced tells the host
+     * its request was never decoded.  Hazard fingerprinted on silicon
+     * 2026-06-06 (byte-exact COUNTER_READ replays, phase-dependent). */
     if (spi_rx_len == 0u) {
         if (++spi_drain_streak > SPI_DRAIN_REWIND_BOUND) {
             stage_error_reply(STATUS_IO); /* tar-pit breaker, see above */
@@ -234,6 +250,7 @@ void transport_spi_init(void)
     spi_tx_len       = 0u;
     spi_tx_cursor    = 0u;
     spi_drain_streak = 0u;
+    spi_seq          = 0u;
     /* SPI1 slave + CS-EXTI bring-up lives in the gd32 HAL backend
      * (hal/transport_hw_gd32.c); the stub backend's weak no-op keeps
      * this hardware-free for host-side protocol tests. */

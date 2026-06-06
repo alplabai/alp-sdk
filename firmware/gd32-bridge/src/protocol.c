@@ -697,6 +697,39 @@ static gd32_bridge_status_t handle_adc_dsp_chain_bind(const uint8_t *req, size_t
 }
 
 /* --------------------------------------------------------------- */
+/* v0.7 -- link-feature negotiation                                  */
+/* --------------------------------------------------------------- */
+
+/* Armed link features (GD32_BRIDGE_LINK_FEAT_*).  Lives here rather
+ * than in a transport because the negotiation command can arrive over
+ * either transport; the SPI transport consults the accessor when it
+ * stages replies (the I2C transport never stamps -- STATUS_NO_PENDING
+ * owns bit 7 there).  Reset default: everything off = the pre-v0.7
+ * wire, so an un-negotiated link is byte-identical to older firmware. */
+static uint8_t link_features;
+
+uint8_t        protocol_link_features(void)
+{
+    return link_features;
+}
+
+static gd32_bridge_status_t handle_link_features(const uint8_t *req, size_t req_len, uint8_t *reply,
+                                                 size_t reply_cap, size_t *reply_len)
+{
+    if (req_len != 1u) return STATUS_INVAL;
+    if (reply_cap < 1u) return STATUS_NOMEM;
+    /* Grant the intersection of the request with what this firmware
+     * implements, and arm it IMMEDIATELY -- the reply to this very
+     * command already rides the new framing (the host treats its
+     * stamp as the sequence baseline).  A request of 0 disables
+     * everything; idempotent in both directions. */
+    link_features = (uint8_t)(req[0] & GD32_BRIDGE_LINK_FEAT_STATUS_SEQ);
+    reply[0]      = link_features;
+    *reply_len    = 1u;
+    return STATUS_OK;
+}
+
+/* --------------------------------------------------------------- */
 /* Dispatch                                                          */
 /* --------------------------------------------------------------- */
 
@@ -757,6 +790,9 @@ gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
         break;
     case CMD_POWER_MODE_SET:
         h = handle_power_mode_set;
+        break;
+    case CMD_LINK_FEATURES:
+        h = handle_link_features;
         break;
     /* v0.5 (§2B wave-2) chunked DSP-chain upload (CHAIN_OPEN /
      * STAGE_PUSH / CHAIN_BIND).  The 0x36 tombstone stays in the

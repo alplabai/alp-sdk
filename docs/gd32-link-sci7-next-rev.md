@@ -23,6 +23,11 @@ Silicon-validated state after the FIFO/pacing rework (see
 - Measured (256-op averages, zero errors): ping 120 µs, get_version
   133 µs, gpio_read 153 µs, adc_read(4) 196 µs, adc_read(8) 261 µs;
   raw transaction floor 27 µs; ~0.85 µs/byte marginal.
+- Re-measured 2026-06-06 on the **v0.7 stamped link** (fw v0.2.9,
+  STATUS_SEQ negotiated): ping 123 µs, get_version 136 µs, gpio_read
+  155 µs, adc_read(4) 199 µs, adc_read(8) 264 µs, floor 28 µs — the
+  sequence stamp costs ≤3 µs/op (noise-level); ~105 k ops, zero
+  errors, zero stale events this phase.
 
 ## Next-rev items (priority order)
 
@@ -48,22 +53,41 @@ Silicon-validated state after the FIFO/pacing rework (see
    Next bench session: dump/compare the SYS master-access-control
    registers, then re-bench; rewrite the Renesas ticket around the ER
    evidence if the security angle dead-ends.
-2. **Sequence echo in the reply STATUS byte** (wire-protocol MINOR).
-   Kills the residual stale-reply hazard: if a request is ever lost
-   whole to CS-edge coalescing, the slave's re-armed previous reply is
-   CRC-valid stale data for a same-opcode re-read (documented in
-   `firmware/gd32-bridge/src/transport_spi.c`).  A 4-bit sequence in the
-   STATUS high nibble, echoed from the request, makes staleness
-   detectable.
-3. **GD32 ADC sampling-time config** — conversions cost ~18-20 µs per
-   sample inside the request's CS-rising handler (bench-bracketed),
-   which is the dominant reply-staging latency for ADC opcodes.  The
-   host's staging gap deliberately under-covers it (measured optimum);
-   the real fix is slave-side sampling-time/clock tuning.
+2. **Sequence echo in the reply STATUS byte** — **DONE, protocol
+   v0.7 / fw v0.2.9 (2026-06-06)**.  A 4-bit slave-side sequence
+   stamp in the STATUS high nibble, negotiated via the new
+   `CMD_LINK_FEATURES` (0x81) so the un-negotiated wire stays
+   byte-identical to v0.6.  The hazard it kills was fingerprinted on
+   silicon the same day (byte-exact `COUNTER_READ` replays,
+   phase-dependent); the host driver detects "stamp did not advance",
+   re-sends once and counts occurrences (`ctx->seq_stale_count`).
+   See `docs/gd32-bridge-protocol.md` §3.14 / §4.1.1.
+3. **GD32 ADC sampling-time config** — **MEASURED + REFUTED as the
+   lever (bench 2026-06-06)**: `ADC_CONFIGURE` to 24 sample-cycles vs
+   the 240-cycle default produced byte-identical `ADC_READ(4)` latency
+   (199 µs vs 199 µs, 256-op averages, zero errors, low-Z source).
+   240 cycles @ ADCCK 36 MHz is only ~6.7 µs of the per-sample budget,
+   so the ~18-20 µs/sample bracket is dominated elsewhere (per-sample
+   trigger + EOC-poll overhead inside the handler, and the host
+   gap/ladder interplay).  The conservative 240-cycle default STAYS
+   (high-Z-safe, zero latency cost).  Any future ADC-latency work
+   should profile the per-sample trigger/poll loop on the GD32 side,
+   not the sample window.
 4. **GD32 rising-path slim-down** — the per-transaction RCU-reset flush
    + reconfigure is the slave-side floor (~tens of µs with decode).  A
    targeted FIFO flush (if a reliable one exists on this errata class)
    or a leaner reconfigure would cut every command's floor directly.
+   Bench 2026-06-06: the 1-byte-write whole-transaction floor measures
+   28 µs (unchanged across v0.6→v0.7); parked pending a vendor answer
+   on a reliable targeted flush — do not destabilise the validated
+   link for ~10 µs without one.
+
+5. **`fw_version` plumb into `OTA_BEGIN`** — **DONE, protocol v0.7 /
+   fw v0.2.9 (2026-06-06)**.  Additive 3-byte version triple on the
+   BEGIN request, recorded into the A/B metadata `fw_version[slot]`
+   at COMMIT (the record had reserved the field since v2).  Legacy
+   8-byte BEGIN = version-unknown; pre-v0.7 firmware ignores the
+   trailing bytes.
 
 ## Carry-over facts
 
