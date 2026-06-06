@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-06",
+  "generated": "2026-06-07",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1499,9 +1499,9 @@
           "definition": "typedef struct { bool initialised;",
           "hash": "98b22257593e61d9"
         },
-        "thermal_warning": {
-          "definition": "typedef struct { bool thermal_warning;",
-          "hash": "d637f3328618eb50"
+        "rom_stat": {
+          "definition": "typedef struct { bool rom_stat;",
+          "hash": "b135cd7a3ea92a21"
         }
       }
     },
