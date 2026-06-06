@@ -325,6 +325,58 @@ static bool t_adc_stream(soak_stat_t *st)
     return true;
 }
 
+/* fw v0.2.8 converter-ownership guard -- the targeted probe for the
+ * delta-review fix: while a stream owns an ADC converter, a single-
+ * shot ADC_READ on EITHER logical channel of that converter must be
+ * REFUSED (ALP_ERR_IO on the wire) instead of silently re-pointing
+ * routine rank 0 out from under the stream's DMA; a read on a
+ * DIFFERENT converter must keep working; and the refusal must not be
+ * sticky after STREAM_END.  Channel pairs per converter: ch0/1 ->
+ * ADC3, ch2/3 -> ADC2, ch4/5 -> ADC1, ch6/7 -> ADC0.
+ *
+ * Pre-v0.2.8 firmware answers the sibling read with STATUS_OK
+ * (serving corrupted data and often killing the stream config), so
+ * this row DOUBLES as a version probe: it fails loudly on old
+ * firmware. */
+static bool t_adc_stream_guard(soak_stat_t *st)
+{
+    alp_status_t s = gd32g553_adc_stream_begin(&ctx, 0u, 0u, 1000u);
+    if (s != ALP_OK) {
+        st->last_status = (int)s;
+        SOAK_FAIL(st, "begin status=%d", (int)s);
+        return false;
+    }
+
+    uint16_t           mv[2]   = { 0 };
+    const alp_status_t s_sib   = gd32g553_adc_read(&ctx, 1u, 1u, mv); /* ADC3 sibling   */
+    const alp_status_t s_other = gd32g553_adc_read(&ctx, 4u, 1u, mv); /* ADC1: distinct */
+    const alp_status_t s_end   = gd32g553_adc_stream_end(&ctx, 0u);
+    const alp_status_t s_after = gd32g553_adc_read(&ctx, 1u, 1u, mv); /* unstuck?       */
+
+    if (s_sib != ALP_ERR_IO) {
+        st->last_status = (int)s_sib;
+        SOAK_FAIL(st, "sibling read during stream answered %d (want ALP_ERR_IO: converter owned)",
+                  (int)s_sib);
+        return false;
+    }
+    if (s_other != ALP_OK) {
+        st->last_status = (int)s_other;
+        SOAK_FAIL(st, "other-converter read status=%d (guard over-blocks)", (int)s_other);
+        return false;
+    }
+    if (s_end != ALP_OK) {
+        st->last_status = (int)s_end;
+        SOAK_FAIL(st, "end status=%d", (int)s_end);
+        return false;
+    }
+    if (s_after != ALP_OK) {
+        st->last_status = (int)s_after;
+        SOAK_FAIL(st, "post-end sibling read status=%d (guard stuck)", (int)s_after);
+        return false;
+    }
+    return true;
+}
+
 /* 0x50/0x51 DAC_SET + DAC_GET readback.  12-bit DAC off the 1.8 V
  * analog rail is ~0.44 mV/LSB; ±16 mV of tolerance covers rounding
  * plus a generous firmware-side conversion slack.  Returns the pad
@@ -393,10 +445,27 @@ static bool t_qenc(soak_stat_t *st)
  * hundred microseconds apart must be strictly increasing (modulo a
  * 32-bit wrap, which at 216 MHz comes every ~19.9 s -- one spurious
  * fail per wrap window is acceptable soak noise and shows up as a
- * lone count, not a streak). */
+ * lone count, not a streak).
+ *
+ * STALE-REPLY DISCRIMINATOR (2026-06-06): two back-to-back IDENTICAL
+ * minimal frames are also the perfect victim for the transport's
+ * documented residual hazard (transport_spi.c: a request lost whole
+ * in the reset window re-serves the PREVIOUS CRC-valid reply, which
+ * for a same-opcode re-read masquerades as fresh) -- and this row is
+ * the soak's only consecutive-reply INEQUALITY assertion, so it is
+ * the only row that can even SEE that hazard.  To tell a stale reply
+ * from a genuinely-stuck counter, the asserted pair now interposes a
+ * GET_VERSION between the two counter reads (a stale counter reply
+ * cannot masquerade as a version reply: wrong shape, host rejects),
+ * while the ORIGINAL raw back-to-back pair is kept as pure telemetry:
+ * counter_forensics[] counts how often the raw pair reads equal.
+ * Raw-pair equality with the interposed pair healthy = the transport
+ * hazard fingerprint (the sequence-echo design kills it for real). */
+static volatile uint32_t counter_forensics[4]; /* [0]=last raw a, [1]=last raw b,
+                                                  [2]=raw-equal count, [3]=raw pairs */
 static bool t_counter(soak_stat_t *st)
 {
-    uint32_t     a = 0, b = 0;
+    uint32_t     a = 0, raw_b = 0, b = 0;
     alp_status_t s = gd32g553_counter_read(&ctx, 0u, &a);
     if (s != ALP_OK) {
         st->last_status = (int)s;
@@ -404,6 +473,25 @@ static bool t_counter(soak_stat_t *st)
         return false;
     }
     k_busy_wait(200);
+
+    /* Telemetry pair: the original back-to-back same-opcode read. */
+    s = gd32g553_counter_read(&ctx, 0u, &raw_b);
+    if (s == ALP_OK) {
+        counter_forensics[0] = a;
+        counter_forensics[1] = raw_b;
+        counter_forensics[3]++;
+        if (raw_b == a) {
+            counter_forensics[2]++;
+        }
+    }
+
+    /* Interposed different-opcode request: breaks any same-opcode
+     * stale-reply masquerade before the asserted second read. */
+    {
+        gd32g553_version_t v = { 0 };
+        (void)gd32g553_get_version(&ctx, &v);
+    }
+
     s = gd32g553_counter_read(&ctx, 0u, &b);
     if (s != ALP_OK) {
         st->last_status = (int)s;
@@ -647,6 +735,7 @@ static struct {
     { { "pwm_capture", 0, 0, 0 }, t_pwm_capture, false },
     { { "adc_read", 0, 0, 0 }, t_adc_read, false },
     { { "adc_stream", 0, 0, 0 }, t_adc_stream, false },
+    { { "adc_stream_guard", 0, 0, 0 }, t_adc_stream_guard, false },
     { { "dac", 0, 0, 0 }, t_dac, false },
     { { "qenc", 0, 0, 0 }, t_qenc, false },
     { { "counter", 0, 0, 0 }, t_counter, false },
