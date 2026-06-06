@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Test-side inspection helpers exposed by the fake i2c-emul targets
- * in this test (fake_lsm6dso.c / fake_ssd1306.c / fake_bme280.c).
+ * in this test (one fake_<chip>.c per emulated part).
  * Only used by tests/zephyr/chips/src/main.c.
  */
 

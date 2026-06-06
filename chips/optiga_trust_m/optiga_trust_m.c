@@ -15,8 +15,8 @@
  * acceleration transparently.  That work tracks as v0.3.x.
  *
  * For v0.3 we ship:
- *   - I2C address probe via a 1-byte read at 0x80 (the chip's
- *     status register; reads 0x00 when idle).
+ *   - I2C address probe via a 4-byte read of the I2C_STATE register
+ *     at 0x82.
  *   - Send-APDU + receive-response thin wrapper that lets apps
  *     hand-roll commands against Infineon's SRM until the host
  *     library lands.

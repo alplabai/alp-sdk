@@ -2928,8 +2928,13 @@ ZTEST(alp_chips, test_rv3028c7_time_bcd_roundtrip)
     /* Write a tricky BCD value (59 -> 0x59, 23 -> 0x23) and check
      * the raw register encoding, not just the round-trip. */
     const rv3028c7_time_t set = {
-        .second = 59, .minute = 8, .hour = 23,
-        .weekday = 1, .day = 31, .month = 12, .year = 2030,
+        .second  = 59,
+        .minute  = 8,
+        .hour    = 23,
+        .weekday = 1,
+        .day     = 31,
+        .month   = 12,
+        .year    = 2030,
     };
     zassert_equal(rv3028c7_set_time(&rtc, &set), ALP_OK);
     zassert_equal(fake_rv3028c7_get_reg(0x00), 0x59);
@@ -2953,8 +2958,13 @@ ZTEST(alp_chips, test_rv3028c7_alarm_match_mask_encoding)
     zassert_equal(rv3028c7_init(&rtc, bus), ALP_OK);
 
     const rv3028c7_time_t when = {
-        .second = 0, .minute = 30, .hour = 7,
-        .weekday = 2, .day = 15, .month = 1, .year = 2026,
+        .second  = 0,
+        .minute  = 30,
+        .hour    = 7,
+        .weekday = 2,
+        .day     = 15,
+        .month   = 1,
+        .year    = 2026,
     };
     const rv3028c7_alarm_match_t match = {
         .match_minute         = true,
@@ -3031,8 +3041,8 @@ ZTEST(alp_chips, test_tmp112_temperature_sign_extension)
 ZTEST(alp_chips, test_clk_5l35023b_probe_validates_strap)
 {
     fake_clk_5l35023b_reset();
-    alp_i2c_t      *bus = chips_test_bus();
-    clk_5l35023b_t  clk;
+    alp_i2c_t     *bus = chips_test_bus();
+    clk_5l35023b_t clk;
     zassert_equal(clk_5l35023b_init(&clk, bus, 0x68), ALP_OK);
     uint8_t dash = 0;
     zassert_equal(clk_5l35023b_read_dashcode_id(&clk, &dash), ALP_OK);
@@ -3047,8 +3057,8 @@ ZTEST(alp_chips, test_clk_5l35023b_probe_validates_strap)
 ZTEST(alp_chips, test_clk_5l35023b_power_down_toggles_pdb)
 {
     fake_clk_5l35023b_reset();
-    alp_i2c_t      *bus = chips_test_bus();
-    clk_5l35023b_t  clk;
+    alp_i2c_t     *bus = chips_test_bus();
+    clk_5l35023b_t clk;
     zassert_equal(clk_5l35023b_init(&clk, bus, 0x68), ALP_OK);
     zassert_equal(clk_5l35023b_set_power_down(&clk, true), ALP_OK);
     zassert_equal(fake_clk_5l35023b_get_reg(0x24) & 0x80, 0x00, "PDB low = powered down");
@@ -3068,8 +3078,8 @@ ZTEST(alp_chips, test_clk_5l35023b_power_down_toggles_pdb)
 ZTEST(alp_chips, test_tps628640_voltage_roundtrip_and_bounds)
 {
     fake_tps628640_reset();
-    alp_i2c_t   *bus = chips_test_bus();
-    tps628640_t  buck;
+    alp_i2c_t  *bus = chips_test_bus();
+    tps628640_t buck;
     zassert_equal(tps628640_init(&buck, bus, 0x4D, 600), ALP_OK);
 
     uint16_t mv = 0;
@@ -3093,8 +3103,8 @@ ZTEST(alp_chips, test_tps628640_control_shadow_rmw)
      * write from its shadow so independent knobs don't clobber each
      * other. */
     fake_tps628640_reset();
-    alp_i2c_t   *bus = chips_test_bus();
-    tps628640_t  buck;
+    alp_i2c_t  *bus = chips_test_bus();
+    tps628640_t buck;
     zassert_equal(tps628640_init(&buck, bus, 0x4D, 600), ALP_OK);
 
     zassert_equal(tps628640_set_fpwm_mode(&buck, true), ALP_OK);
@@ -3122,8 +3132,8 @@ ZTEST(alp_chips, test_tps628640_control_shadow_rmw)
 ZTEST(alp_chips, test_optiga_probe_and_apdu_contract)
 {
     fake_optiga_reset();
-    alp_i2c_t        *bus = chips_test_bus();
-    optiga_trust_m_t  se;
+    alp_i2c_t       *bus = chips_test_bus();
+    optiga_trust_m_t se;
     zassert_equal(optiga_trust_m_init(&se, bus, 0), ALP_OK,
                   "addr 0 selects the OPTIGA_TRUST_M_I2C_ADDR default");
     /* The full info-pack transport is deliberately NOSUPPORT until

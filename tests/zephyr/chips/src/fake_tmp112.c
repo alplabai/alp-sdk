@@ -54,6 +54,9 @@ static int fake_tmp112_transfer(const struct emul *target, struct i2c_msg *msgs,
             if (m->len >= 1) d->ptr = m->buf[0];
             if (m->len >= 3) {
                 d->regs[d->ptr & 0x3] = (uint16_t)(((uint16_t)m->buf[1] << 8) | m->buf[2]);
+            } else if (m->len == 2) {
+                /* tmp112 has no 1-byte-payload writes -- flag a malformed shape */
+                return -EIO;
             }
         }
     }
