@@ -280,6 +280,16 @@ drives none.  See `pwm_routing` in
 for the per-channel `e1m` → GD32 timer + pad map (the single source
 of truth).
 
+> **The PERIOD is shared per underlying timer** (one 16-bit ARR per
+> timer; duty is per-channel).  PWM0–3 ride TIMER0 and PWM4–7 ride
+> TIMER7, so a `PWM_SET` on any channel of a bank silently re-tunes
+> the period of **every** channel in that bank — last write wins
+> (1 kHz on PWM0 followed by 25 kHz on PWM2 leaves PWM0 at 25 kHz
+> with its programmed duty *ticks* rescaled to the new period).
+> `PWM_GET` reads live registers, so it always reports the
+> bank-shared truth.  Keep co-resident consumers of one bank on a
+> common period, or split them across the two banks.
+
 ### 3.3 ADC samples
 
 `samples = 0` is invalid (reply: `ALP_ERR_INVAL`).  `samples >
