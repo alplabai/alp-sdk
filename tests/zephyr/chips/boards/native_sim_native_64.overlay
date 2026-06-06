@@ -51,6 +51,26 @@
                 compatible = "alp,fake-act8760";
                 reg = <0x26>;
             };
+            fake_rv3028c7: fake_rv3028c7@52 {
+                compatible = "alp,fake-rv3028c7";
+                reg = <0x52>;
+            };
+            fake_tmp112: fake_tmp112@48 {
+                compatible = "alp,fake-tmp112";
+                reg = <0x48>;
+            };
+            fake_clk_5l35023b: fake_clk_5l35023b@68 {
+                compatible = "alp,fake-clk-5l35023b";
+                reg = <0x68>;
+            };
+            fake_tps628640: fake_tps628640@4d {
+                compatible = "alp,fake-tps628640";
+                reg = <0x4d>;
+            };
+            fake_optiga: fake_optiga@30 {
+                compatible = "alp,fake-optiga-trust-m";
+                reg = <0x30>;
+            };
         };
     };
 

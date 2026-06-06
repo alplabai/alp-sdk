@@ -2886,3 +2886,254 @@ ZTEST(alp_chips, test_es8388_init_null_args)
     zassert_equal(es8388_init(&dev, bus, 0), ALP_ERR_INVAL);
     alp_i2c_close(bus);
 }
+
+/* ==================================================================== */
+/* BRD_I2C register-level tests (Task 5 -- fake-backed)                  */
+/* ==================================================================== */
+
+#if DT_NODE_EXISTS(DT_NODELABEL(fake_rv3028c7))
+
+/* ------------------------------------------------------------------ */
+/* rv3028c7                                                            */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_rv3028c7_init_clears_porf_and_forces_24h)
+{
+    fake_rv3028c7_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    rv3028c7_t rtc;
+    zassert_equal(rv3028c7_init(&rtc, bus), ALP_OK);
+    zassert_equal(fake_rv3028c7_get_reg(0x0E) & 0x01, 0, "PORF must be cleared");
+    zassert_true((fake_rv3028c7_get_reg(0x10) & 0x40) != 0, "CTRL2 24H must be set");
+    rv3028c7_deinit(&rtc);
+}
+
+ZTEST(alp_chips, test_rv3028c7_time_bcd_roundtrip)
+{
+    fake_rv3028c7_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    rv3028c7_t rtc;
+    zassert_equal(rv3028c7_init(&rtc, bus), ALP_OK);
+
+    /* Seeded fake time is 2026-06-06 12:34:56 in BCD. */
+    rv3028c7_time_t t;
+    zassert_equal(rv3028c7_get_time(&rtc, &t), ALP_OK);
+    zassert_equal(t.year, 2026);
+    zassert_equal(t.month, 6);
+    zassert_equal(t.day, 6);
+    zassert_equal(t.hour, 12);
+    zassert_equal(t.minute, 34);
+    zassert_equal(t.second, 56);
+
+    /* Write a tricky BCD value (59 -> 0x59, 23 -> 0x23) and check
+     * the raw register encoding, not just the round-trip. */
+    const rv3028c7_time_t set = {
+        .second = 59, .minute = 8, .hour = 23,
+        .weekday = 1, .day = 31, .month = 12, .year = 2030,
+    };
+    zassert_equal(rv3028c7_set_time(&rtc, &set), ALP_OK);
+    zassert_equal(fake_rv3028c7_get_reg(0x00), 0x59);
+    zassert_equal(fake_rv3028c7_get_reg(0x01), 0x08);
+    zassert_equal(fake_rv3028c7_get_reg(0x02), 0x23);
+    zassert_equal(fake_rv3028c7_get_reg(0x04), 0x31);
+    zassert_equal(fake_rv3028c7_get_reg(0x05), 0x12);
+    zassert_equal(fake_rv3028c7_get_reg(0x06), 0x30);
+    rv3028c7_deinit(&rtc);
+}
+
+ZTEST(alp_chips, test_rv3028c7_alarm_match_mask_encoding)
+{
+    /* The RV-3028's alarm registers carry an AE_x bit (0x80): SET
+     * means "don't care", CLEAR means "participate in the match".
+     * Verify the driver encodes the match struct that way and BCDs
+     * the field values. */
+    fake_rv3028c7_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    rv3028c7_t rtc;
+    zassert_equal(rv3028c7_init(&rtc, bus), ALP_OK);
+
+    const rv3028c7_time_t when = {
+        .second = 0, .minute = 30, .hour = 7,
+        .weekday = 2, .day = 15, .month = 1, .year = 2026,
+    };
+    const rv3028c7_alarm_match_t match = {
+        .match_minute         = true,
+        .match_hour           = true,
+        .match_day_or_weekday = false,
+        .use_weekday          = false,
+    };
+    zassert_equal(rv3028c7_set_alarm(&rtc, &when, &match), ALP_OK);
+    zassert_equal(fake_rv3028c7_get_reg(0x07), 0x30, "minute: BCD 30, AE clear");
+    zassert_equal(fake_rv3028c7_get_reg(0x08), 0x07, "hour: BCD 7, AE clear");
+    zassert_equal(fake_rv3028c7_get_reg(0x09) & 0x80, 0x80,
+                  "day/weekday: AE set = excluded from the match");
+    rv3028c7_deinit(&rtc);
+}
+
+#endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_rv3028c7)) */
+
+#if DT_NODE_EXISTS(DT_NODELABEL(fake_tmp112))
+
+/* ------------------------------------------------------------------ */
+/* tmp112                                                              */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_tmp112_probe_fingerprints_conf)
+{
+    fake_tmp112_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    tmp112_t   sens;
+    zassert_equal(tmp112_init(&sens, bus, TMP112_I2C_ADDR_GND), ALP_OK);
+    tmp112_deinit(&sens);
+
+    /* A CONF without R1:R0 = 11 is not a TMP112 -- probe must reject. */
+    fake_tmp112_set_reg(1, 0x0000);
+    zassert_equal(tmp112_init(&sens, bus, TMP112_I2C_ADDR_GND), ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_chips, test_tmp112_temperature_sign_extension)
+{
+    fake_tmp112_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    tmp112_t   sens;
+    zassert_equal(tmp112_init(&sens, bus, TMP112_I2C_ADDR_GND), ALP_OK);
+
+    int32_t mc = 0;
+    /* +25.000 C: raw12 = 400 -> reg = 400<<4 = 0x1900. */
+    fake_tmp112_set_reg(0, 0x1900);
+    zassert_equal(tmp112_read_temp_milli_c(&sens, &mc), ALP_OK);
+    zassert_equal(mc, 25000);
+    /* -25.000 C: raw12 = -400 -> reg = (int16)(-400<<4) = 0xE700. */
+    fake_tmp112_set_reg(0, 0xE700);
+    zassert_equal(tmp112_read_temp_milli_c(&sens, &mc), ALP_OK);
+    zassert_equal(mc, -25000);
+    /* One LSB = 62 mC after integer truncation (625/10). */
+    fake_tmp112_set_reg(0, 0x0010);
+    zassert_equal(tmp112_read_temp_milli_c(&sens, &mc), ALP_OK);
+    zassert_equal(mc, 62);
+
+    /* Extended (13-bit) mode: -25.000 C -> raw13 = -400 -> -400<<3 = 0xF380. */
+    zassert_equal(tmp112_set_extended_mode(&sens, true), ALP_OK);
+    fake_tmp112_set_reg(0, 0xF380);
+    zassert_equal(tmp112_read_temp_milli_c(&sens, &mc), ALP_OK);
+    zassert_equal(mc, -25000);
+    tmp112_deinit(&sens);
+}
+
+#endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_tmp112)) */
+
+#if DT_NODE_EXISTS(DT_NODELABEL(fake_clk_5l35023b))
+
+/* ------------------------------------------------------------------ */
+/* clk_5l35023b                                                        */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_clk_5l35023b_probe_validates_strap)
+{
+    fake_clk_5l35023b_reset();
+    alp_i2c_t      *bus = chips_test_bus();
+    clk_5l35023b_t  clk;
+    zassert_equal(clk_5l35023b_init(&clk, bus, 0x68), ALP_OK);
+    uint8_t dash = 0;
+    zassert_equal(clk_5l35023b_read_dashcode_id(&clk, &dash), ALP_OK);
+    zassert_equal(dash, 0x5A, "dash code must round-trip from byte 0x01");
+    clk_5l35023b_deinit(&clk);
+
+    /* Strap says 0x69 but we asked at 0x68 -> mis-strap rejection. */
+    fake_clk_5l35023b_set_reg(0x00, 0x20); /* strap field bits[6:5] = 1 */
+    zassert_equal(clk_5l35023b_init(&clk, bus, 0x68), ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_chips, test_clk_5l35023b_power_down_toggles_pdb)
+{
+    fake_clk_5l35023b_reset();
+    alp_i2c_t      *bus = chips_test_bus();
+    clk_5l35023b_t  clk;
+    zassert_equal(clk_5l35023b_init(&clk, bus, 0x68), ALP_OK);
+    zassert_equal(clk_5l35023b_set_power_down(&clk, true), ALP_OK);
+    zassert_equal(fake_clk_5l35023b_get_reg(0x24) & 0x80, 0x00, "PDB low = powered down");
+    zassert_equal(clk_5l35023b_set_power_down(&clk, false), ALP_OK);
+    zassert_equal(fake_clk_5l35023b_get_reg(0x24) & 0x80, 0x80);
+    clk_5l35023b_deinit(&clk);
+}
+
+#endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_clk_5l35023b)) */
+
+#if DT_NODE_EXISTS(DT_NODELABEL(fake_tps628640))
+
+/* ------------------------------------------------------------------ */
+/* tps628640                                                           */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_tps628640_voltage_roundtrip_and_bounds)
+{
+    fake_tps628640_reset();
+    alp_i2c_t   *bus = chips_test_bus();
+    tps628640_t  buck;
+    zassert_equal(tps628640_init(&buck, bus, 0x4D, 600), ALP_OK);
+
+    uint16_t mv = 0;
+    zassert_equal(tps628640_get_voltage_mv(&buck, &mv), ALP_OK);
+    zassert_equal(mv, 600, "seeded 0x28 = 600 mV");
+
+    /* (1100-400)/5 = 140 = 0x8C. */
+    zassert_equal(tps628640_set_voltage_mv(&buck, 1100), ALP_OK);
+    zassert_equal(fake_tps628640_get_reg(TPS628640_REG_VOUT1), 0x8C);
+    zassert_equal(tps628640_get_voltage_mv(&buck, &mv), ALP_OK);
+    zassert_equal(mv, 1100);
+
+    zassert_equal(tps628640_set_voltage_mv(&buck, 399), ALP_ERR_OUT_OF_RANGE);
+    zassert_equal(tps628640_set_voltage_mv(&buck, 1680), ALP_ERR_OUT_OF_RANGE);
+    tps628640_deinit(&buck);
+}
+
+ZTEST(alp_chips, test_tps628640_control_shadow_rmw)
+{
+    /* CONTROL is write-only silicon; the driver must compose every
+     * write from its shadow so independent knobs don't clobber each
+     * other. */
+    fake_tps628640_reset();
+    alp_i2c_t   *bus = chips_test_bus();
+    tps628640_t  buck;
+    zassert_equal(tps628640_init(&buck, bus, 0x4D, 600), ALP_OK);
+
+    zassert_equal(tps628640_set_fpwm_mode(&buck, true), ALP_OK);
+    uint8_t ctrl = fake_tps628640_get_reg(TPS628640_REG_CONTROL);
+    zassert_true((ctrl & TPS628640_CTRL_FPWM_MODE) != 0);
+    zassert_true((ctrl & TPS628640_CTRL_SOFTWARE_ENABLE) != 0,
+                 "enable bit from the default shadow must survive the FPWM write");
+
+    zassert_equal(tps628640_software_enable(&buck, false), ALP_OK);
+    ctrl = fake_tps628640_get_reg(TPS628640_REG_CONTROL);
+    zassert_equal(ctrl & TPS628640_CTRL_SOFTWARE_ENABLE, 0);
+    zassert_true((ctrl & TPS628640_CTRL_FPWM_MODE) != 0,
+                 "FPWM choice must survive the enable write");
+    tps628640_deinit(&buck);
+}
+
+#endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_tps628640)) */
+
+#if DT_NODE_EXISTS(DT_NODELABEL(fake_optiga))
+
+/* ------------------------------------------------------------------ */
+/* optiga_trust_m                                                      */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_optiga_probe_and_apdu_contract)
+{
+    fake_optiga_reset();
+    alp_i2c_t        *bus = chips_test_bus();
+    optiga_trust_m_t  se;
+    zassert_equal(optiga_trust_m_init(&se, bus, 0), ALP_OK,
+                  "addr 0 selects the OPTIGA_TRUST_M_I2C_ADDR default");
+    /* The full info-pack transport is deliberately NOSUPPORT until
+     * Infineon's host library is vendored -- lock the contract so a
+     * half-implementation can't silently fake success. */
+    size_t  rlen = 0;
+    uint8_t resp[8];
+    zassert_equal(optiga_trust_m_send_apdu(&se, NULL, 0, resp, sizeof(resp), &rlen, 100),
+                  ALP_ERR_NOSUPPORT);
+    optiga_trust_m_deinit(&se);
+}
+
+#endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_optiga)) */

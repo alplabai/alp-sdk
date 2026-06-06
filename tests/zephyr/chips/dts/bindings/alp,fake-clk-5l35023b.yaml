@@ -1,0 +1,3 @@
+description: Fake Renesas 5L35023B clock generator for i2c-emul chip tests.
+compatible: "alp,fake-clk-5l35023b"
+include: i2c-device.yaml

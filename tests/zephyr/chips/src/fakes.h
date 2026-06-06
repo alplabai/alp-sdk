@@ -82,6 +82,31 @@ uint8_t fake_act8760_get_reg(uint8_t addr_7bit, uint8_t reg);
 void    fake_act8760_set_reg(uint8_t addr_7bit, uint8_t reg, uint8_t val);
 void    fake_act8760_reset(void);
 
+/* fake_rv3028c7.c -- RV-3028-C7 RTC @ 0x52. */
+uint8_t fake_rv3028c7_get_reg(uint8_t reg);
+void    fake_rv3028c7_set_reg(uint8_t reg, uint8_t val);
+void    fake_rv3028c7_reset(void);
+
+/* fake_tmp112.c -- TMP112 temp sensor @ 0x48 (16-bit registers). */
+uint16_t fake_tmp112_get_reg(uint8_t reg);
+void     fake_tmp112_set_reg(uint8_t reg, uint16_t val);
+void     fake_tmp112_reset(void);
+
+/* fake_clk_5l35023b.c -- 5L35023B clock generator @ 0x68. */
+uint8_t fake_clk_5l35023b_get_reg(uint8_t reg);
+void    fake_clk_5l35023b_set_reg(uint8_t reg, uint8_t val);
+void    fake_clk_5l35023b_reset(void);
+
+/* fake_tps628640.c -- TPS628640 buck @ 0x4d. */
+uint8_t fake_tps628640_get_reg(uint8_t reg);
+void    fake_tps628640_set_reg(uint8_t reg, uint8_t val);
+void    fake_tps628640_reset(void);
+
+/* fake_optiga_trust_m.c -- OPTIGA Trust M @ 0x30. */
+uint8_t fake_optiga_get_reg(uint8_t reg);
+void    fake_optiga_set_reg(uint8_t reg, uint8_t val);
+void    fake_optiga_reset(void);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

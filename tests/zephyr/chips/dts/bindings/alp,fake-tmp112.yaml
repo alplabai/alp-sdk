@@ -1,0 +1,3 @@
+description: Fake TI TMP112 temperature sensor for i2c-emul chip tests.
+compatible: "alp,fake-tmp112"
+include: i2c-device.yaml

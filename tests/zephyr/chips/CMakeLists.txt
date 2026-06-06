@@ -17,4 +17,9 @@ target_sources(app PRIVATE
     src/fake_bme280.c
     src/fake_da9292.c
     src/fake_act8760.c
+    src/fake_rv3028c7.c
+    src/fake_tmp112.c
+    src/fake_clk_5l35023b.c
+    src/fake_tps628640.c
+    src/fake_optiga_trust_m.c
 )
