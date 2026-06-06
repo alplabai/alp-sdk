@@ -1,0 +1,3 @@
+description: Fake Renesas DA9292 PMIC for i2c-emul chip tests.
+compatible: "alp,fake-da9292"
+include: i2c-device.yaml

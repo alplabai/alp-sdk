@@ -39,6 +39,10 @@
                 compatible = "alp,fake-bme280";
                 reg = <0x76>;
             };
+            fake_da9292: fake_da9292@1e {
+                compatible = "alp,fake-da9292";
+                reg = <0x1e>;
+            };
         };
     };
 

@@ -763,6 +763,20 @@ ZTEST(alp_chips, test_mproc_surface_v01_nosupport)
 /* address, and exposes inspection helpers via fakes.h.                  */
 /* ==================================================================== */
 
+/* Shared bus handle for the fake-backed register tests -- bus_id 0
+ * resolves to the i2c0_emul controller via the alp-i2c0 DT alias. */
+static alp_i2c_t *chips_test_bus(void)
+{
+    static alp_i2c_t *bus;
+    if (bus == NULL) {
+        bus = alp_i2c_open(&(alp_i2c_config_t){
+            .bus_id     = 0u,
+            .bitrate_hz = 400000u,
+        });
+    }
+    return bus;
+}
+
 #if DT_NODE_EXISTS(DT_NODELABEL(fake_lsm6dso))
 
 /* ------------------------------------------------------------------ */
@@ -1640,6 +1654,128 @@ ZTEST(alp_chips, test_da9292_get_fault_pins)
     zassert_equal(da9292_get_fault_pins(NULL, NULL, &flags), ALP_OK);
     zassert_equal(flags, 0x00u);
 }
+
+/* ------------------------------------------------------------------ */
+/* da9292 (fake-backed) -- register-level TDD locks                   */
+/* ------------------------------------------------------------------ */
+
+#if DT_NODE_EXISTS(DT_NODELABEL(fake_da9292))
+
+ZTEST(alp_chips, test_da9292_fake_probe_reads_ids)
+{
+    fake_da9292_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    da9292_t   pmic;
+    zassert_equal(da9292_init(&pmic, bus, 0x1E), ALP_OK);
+    zassert_equal(pmic.dev_id, 0xEA, "PMC_DEV_ID reset value (Table 12 p.35)");
+    zassert_equal(pmic.rev_id, 0x10, "PMC_REV_ID reset value");
+    da9292_deinit(&pmic);
+}
+
+ZTEST(alp_chips, test_da9292_status_decode_matches_table14)
+{
+    fake_da9292_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    da9292_t   pmic;
+    zassert_equal(da9292_init(&pmic, bus, 0x1E), ALP_OK);
+
+    /* Asymmetric pattern across the CH2-upper/CH1-lower pairs:
+     * S_CH2_OC (bit7) | S_CH1_UV (bit2) | S_CH1_PG (bit0) = 0x85. */
+    fake_da9292_set_reg(0x00, 0x85);
+    fake_da9292_set_reg(0x01, 0x05); /* S_TEMP_WARN | S_VIN_UVLO */
+
+    da9292_status_t st;
+    zassert_equal(da9292_get_status(&pmic, &st), ALP_OK);
+    zassert_true(st.ch2_oc);
+    zassert_false(st.ch1_oc);
+    zassert_true(st.ch1_uv);
+    zassert_false(st.ch2_uv);
+    zassert_true(st.ch1_pg);
+    zassert_false(st.ch2_pg);
+    zassert_false(st.ch1_ov);
+    zassert_false(st.ch2_ov);
+    zassert_true(st.temp_warn);
+    zassert_true(st.vin_uvlo);
+    zassert_false(st.temp_crit);
+    da9292_deinit(&pmic);
+}
+
+ZTEST(alp_chips, test_da9292_events_write1_to_clear)
+{
+    fake_da9292_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    da9292_t   pmic;
+    zassert_equal(da9292_init(&pmic, bus, 0x1E), ALP_OK);
+
+    fake_da9292_set_reg(0x02, 0x18); /* E_CH1_OV | E_CH2_UV */
+    da9292_events_t ev;
+    zassert_equal(da9292_read_and_clear_events(&pmic, &ev), ALP_OK);
+    zassert_true(ev.e_ch1_ov);
+    zassert_true(ev.e_ch2_uv);
+    zassert_false(ev.e_ch2_ov);
+    /* RWC1: the driver echoed 0x18 back; the hook cleared the bits. */
+    zassert_equal(fake_da9292_get_reg(0x02), 0x00);
+    da9292_deinit(&pmic);
+}
+
+ZTEST(alp_chips, test_da9292_voltage_encoding_roundtrip)
+{
+    fake_da9292_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    da9292_t   pmic;
+    zassert_equal(da9292_init(&pmic, bus, 0x1E), ALP_OK);
+
+    /* 750 mV at VSTEP=0: 0x3C + (750-300)/5 = 0x3C + 90 = 0x96. */
+    zassert_equal(da9292_set_voltage_mv(&pmic, DA9292_CH2, 750), ALP_OK);
+    zassert_equal(fake_da9292_get_reg(0x0C), 0x96, "Table 24 encoding");
+    uint16_t mv = 0;
+    zassert_equal(da9292_get_voltage_mv(&pmic, DA9292_CH2, &mv), ALP_OK);
+    zassert_equal(mv, 750);
+
+    /* Range guards: 0x00..0x3B are reserved bytes; <300 / >1275 mV invalid. */
+    zassert_equal(da9292_set_voltage_mv(&pmic, DA9292_CH1, 299), ALP_ERR_INVAL);
+    zassert_equal(da9292_set_voltage_mv(&pmic, DA9292_CH1, 1280), ALP_ERR_INVAL);
+    fake_da9292_set_reg(0x0A, 0x3B); /* reserved byte */
+    zassert_equal(da9292_get_voltage_mv(&pmic, DA9292_CH1, &mv), ALP_ERR_IO);
+    da9292_deinit(&pmic);
+}
+
+ZTEST(alp_chips, test_da9292_deepx_rail_clears_vstep_before_vout)
+{
+    /* THE trap: AROVx OTP boots CH2_VSTEP=1; writing the 0.75 V byte
+     * (0x96) at VSTEP=1 would put 1.5 V on DEEPX.  Assert the driver
+     * clears VSTEP (a CTRL_01 write) BEFORE any VOUT_CH2 write, via
+     * the fake's ordered write log. */
+    fake_da9292_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    da9292_t   pmic;
+    zassert_equal(da9292_init(&pmic, bus, 0x1E), ALP_OK);
+    fake_da9292_set_reg(0x00, 0x02); /* pre-seed S_CH2_PG so the poll exits */
+
+    zassert_equal(da9292_v2n_m1_enable_deepx_rail(&pmic, 1000), ALP_OK);
+
+    /* Walk the log: the first CTRL_01 (0x07) write must precede the
+     * first VOUT_CH2_00 (0x0C) write, and must have VSTEP (bit7) low. */
+    int idx_ctrl = -1, idx_vout = -1;
+    for (uint8_t i = 0; i < fake_da9292_log_count(); i++) {
+        uint8_t r, v;
+        fake_da9292_log_at(i, &r, &v);
+        if (r == 0x07 && idx_ctrl < 0) {
+            idx_ctrl = i;
+            zassert_equal(v & 0x80, 0, "VSTEP must be cleared by the first CTRL_01 write");
+        }
+        if (r == 0x0C && idx_vout < 0) idx_vout = i;
+    }
+    zassert_true(idx_ctrl >= 0, "driver never wrote PMC_CTRL_01");
+    zassert_true(idx_vout >= 0, "driver never wrote PMC_VOUT_CH2_00");
+    zassert_true(idx_ctrl < idx_vout, "VSTEP clear must precede the VOUT write");
+    zassert_equal(fake_da9292_get_reg(0x0C), 0x96);
+    /* Final CTRL_01: CH2_EN set, VSTEP still clear. */
+    zassert_equal(fake_da9292_get_reg(0x07) & 0x82, 0x02);
+    da9292_deinit(&pmic);
+}
+
+#endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_da9292)) */
 
 /* ------------------------------------------------------------------ */
 /* tps628640 -- single-channel buck (multi-instance)                  */
