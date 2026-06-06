@@ -19,6 +19,7 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/i2c_emul.h>
 
+#include "fake_reg8.h"
 #include "fakes.h"
 
 #define LOG_CAP 4096    /* Enough for full-screen 128×64 push (1024 B) + init. */
@@ -89,14 +90,7 @@ static int fake_ssd1306_init(const struct emul *target,
 
 DT_INST_FOREACH_STATUS_OKAY(FAKE_SSD1306_DEFINE)
 
-/* The i2c_emul controller's emuls_<N> array references
- * __device_dts_ord_<N> for each child emul.  Without a paired
- * DEVICE_DT_INST_DEFINE the linker cannot resolve those symbols even
- * under Zephyr v4.4.  Register a no-op device to satisfy the reference. */
-#define FAKE_DEV_DEFINE(n) \
-    DEVICE_DT_INST_DEFINE(n, NULL, NULL, NULL, NULL, POST_KERNEL, \
-                          CONFIG_KERNEL_INIT_PRIORITY_DEVICE, NULL);
-DT_INST_FOREACH_STATUS_OKAY(FAKE_DEV_DEFINE)
+FAKE_EMUL_DEV_SHIM()
 
 /* ------------------------------------------------------------------ */
 /* Test-side inspection API                                             */
