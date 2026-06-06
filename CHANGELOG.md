@@ -10,10 +10,20 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 ### Fixed — gd32-bridge v0.2.8: ISR-safety + error-masking fixes from the delta review (2026-06-05)
 
 Three behavior fixes found by an adversarial review of the
-v0.2.3→v0.2.7 delta (one critical, two major).  **Bench-validated: NO**
-— this release is awaiting its silicon smoke pass (PING / GET_VERSION /
-loopback / soak rerun); on healthy hardware all three are
-no-behavior-change by design.
+v0.2.3→v0.2.7 delta (one critical, two major).  **Bench-validated:
+YES (2026-06-06)** — v0.2.8 + the hal/gd32 TU split + the real-SHA
+build-id smoked together on silicon: `GET_BUILD_ID` round-tripped
+`0.2.8+d038f981186a20` (exact HEAD match); the 20-row HIL soak ran
+253/253 clean on every row including the new `adc_stream_guard`
+converter-ownership probe; the Tier-B loopback repeated its 5/6
+(DAC raws {151,450,900,1350} mV vs commanded {150,450,900,1350};
+capture 5.000 ms / 2.500 ms exact; qenc still blocked by the known
+carrier-wiring item).  A counter-row anomaly during the first soak
+window was root-caused to the transport's documented stale-reply
+residual hazard (byte-exact reply replays, phase-dependent; raw
+back-to-back pairs read equal 0/277 once re-phased) — transport-level
+and pre-existing, not a v0.2.8 defect; the soak now carries a
+permanent discriminator row for it.
 
 * **CRITICAL — unbounded ADC-calibration spin reachable from the
   CS-EXTI request handler** (`hal/bridge_hw_gd32.c`).  The vendor
