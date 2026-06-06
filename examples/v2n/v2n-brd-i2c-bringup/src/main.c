@@ -187,8 +187,8 @@ static void probe_tmp112(alp_i2c_t *bus)
 
 	if (tmp112_read_temp_milli_c(&sens, &mc) == ALP_OK) {
 		report("tmp112 temp", found, R_PASS,
-		       "%d.%03d degC",
-		       (int)(mc / 1000),
+		       "%s%d.%03d degC",
+		       (mc < 0) ? "-" : "", (int)((mc < 0 ? -mc : mc) / 1000),
 		       (int)((mc < 0 ? -mc : mc) % 1000));
 	} else {
 		report("tmp112 temp", found, R_FAIL, "temperature read failed");
