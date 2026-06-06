@@ -71,14 +71,14 @@ Two PMICs cooperate to bring V2N up:
 
 ## Boot + identification
 
-Two-stage SoM-ID flow:
+SoM identification is EEPROM-authoritative:
 
-1. **EEPROM manifest** -- 128-byte block at offset 0 of the
-   on-module 24C128 EEPROM carrying family / SKU / hw_rev /
-   serial / mfg date.  Read via `alp_hw_info_read()`.
-2. **BOARD_ID ADC** -- per-rev resistor divider on **ADC2_CH7**
-   (SoM-internal channel; the SoM owns rev detection). The per-bin
-   threshold voltages are SoM-internal (not published here).
+**EEPROM manifest** -- 128-byte block at offset 0 of the on-module
+24C128 carrying family / SKU / hw_rev / serial / mfg date, integrity-
+checked (magic + schema + CRC32). Read via `alp_hw_info_read()`. A
+blank module returns `ALP_ERR_NOT_PROVISIONED`; a corrupt one returns
+`ALP_ERR_IO`. The EEPROM is the sole source of the SoM revision (no
+ADC cross-check).
 
 Full procedure: [`docs/board-id.md`](../board-id.md).
 Example: [`examples/v2n/v2n-board-id-readout/`](../../examples/v2n/v2n-board-id-readout/).

@@ -422,6 +422,30 @@ fault pins directly via the new `da9292_get_fault_pins()` (same bit
 packing) and reads register-level PMIC status over BRD_I2C via
 `da9292_get_status()` — both in the `chips/da9292` driver.
 
+### Changed — hw_info: the EEPROM manifest is the sole SoM-rev source (2026-05-31)
+
+The on-module EEPROM manifest (magic + schema_version + CRC32) is now
+the single authoritative source of the SoM hardware revision; the
+SoM-side BOARD_ID ADC cross-check path was removed outright
+(no-legacy-compat).  **Breaking (pre-1.0 minor):** the `[ABI-STABLE]`
+struct `alp_hw_info_t` drops the `som_board_id_mv` field; ABI snapshot
+regenerated.  `alp_hw_info_read()` return-code contract sharpened:
+blank manifest → `ALP_ERR_NOT_PROVISIONED`, corrupt manifest →
+`ALP_ERR_IO`, EEPROM unreachable → `ALP_ERR_NOT_READY`, no bus
+configured → `ALP_ERR_NOSUPPORT`.  Carrier-side `board_id_mv` /
+`board_hw_rev` stay (board-side BOARD_ID is a separate, carrier-owned
+path).
+
+### Added — `ALP_ERR_NOT_PROVISIONED` status code (2026-05-31)
+
+New `alp_status_t` enumerator `ALP_ERR_NOT_PROVISIONED` (= -15) in
+`<alp/peripheral.h>`.  Returned when the on-module EEPROM manifest is blank
+(all-0xFF or all-0x00) — i.e. the module has not yet been through the factory
+provisioning tool.  Distinct from `ALP_ERR_IO` (= -5), which covers a CRC
+mismatch or corrupted manifest on an otherwise-reachable EEPROM.  Callers that
+previously conflated the two conditions can now present a clearer diagnostic
+("unprogrammed" vs "corrupted").
+
 ### Added — doc-drift CI gate (2026-05-27)
 
 `scripts/check_doc_drift.py` + `.github/workflows/pr-doc-drift.yml`: an
@@ -5102,10 +5126,10 @@ Deferred from this batch:
     `ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT` (hex, range 0x50..0x57)
     `ALP_SDK_HW_INFO_EEPROM_OFFSET` (int, default 0)
     `ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ` (int, default 400000)
-  BOARD_ID ADC cross-check remains a no-op stub (`adc_cross_check`)
-  pending the per-family generated header that maps `hw_rev` strings
-  to expected mV bins (depends on `scripts/alp_project.py` emitting
-  a runtime-readable digest of `metadata/e1m_modules/<family>/hw-revisions.yaml`).
+  The EEPROM manifest is the single authoritative source of the SoM
+  hardware revision; there is no SoM-side ADC cross-check (the earlier
+  no-op `adc_cross_check` stub was removed). A blank manifest returns
+  `ALP_ERR_NOT_PROVISIONED`; a corrupt one returns `ALP_ERR_IO`.
 
 - **`chips/pi3dbs12212/` Diodes PI3DBS12212A PCIe mux driver (2026-05-12).**
   GPIO-only control surface for the two passive 12 Gbps
