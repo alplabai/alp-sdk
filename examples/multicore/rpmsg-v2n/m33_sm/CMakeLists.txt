@@ -12,7 +12,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 # ---------------------------------------------------------------------
-# 1. Resolve the ALP SDK root.
+# 1. Resolve the Alp SDK root.
 # ALP_SDK_ROOT lets a customer point this example at an out-of-tree
 # SDK checkout; the fallback walks up four levels
 # (examples/multicore/<name>/<core> -> examples/multicore/<name>

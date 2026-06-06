@@ -1,4 +1,4 @@
-# tests/fuzz/ -- ALP SDK libFuzzer harnesses
+# tests/fuzz/ -- Alp SDK libFuzzer harnesses
 
 Scaffolding for the v1.0 fuzz testing deliverable in
 [`VERSIONS.md`](../../VERSIONS.md) ("Fuzz testing on every parser

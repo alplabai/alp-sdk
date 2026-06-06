@@ -6,7 +6,7 @@
 #
 # Image contents:
 #   - Poky core-image-base.
-#   - ALP SDK runtime + headers (Linux side).
+#   - Alp SDK runtime + headers (Linux side).
 #   - ROS 2 humble base + the alp_perception node.
 #   - DEEPX runtime + kernel driver (V2M101 only; absent on V2N101).
 #   - Mender OTA client (production-deployment example's update
@@ -14,7 +14,7 @@
 #   - GStreamer + libcamera for V4L2 camera capture.
 #   - SSH + serial console.
 
-SUMMARY = "ALP SDK edge AI reference image"
+SUMMARY = "Alp SDK edge AI reference image"
 LICENSE = "Apache-2.0"
 
 inherit core-image
@@ -35,6 +35,17 @@ IMAGE_INSTALL = " \
     gstreamer1.0-plugins-base      \
     mender-client                  \
     openssh                        \
+"
+
+# Display stack (X-EVK MIPI-DSI panel): Weston on Mali/Wayland
+# (wayland+opengl come from the rz-vlp distro features), plus
+# modetest for bench bring-up. libdrm-tests also rides in rz-vlp's
+# tools group; listed explicitly so rz-bsp builds get it too.
+IMAGE_INSTALL += " \
+    weston                         \
+    weston-init                    \
+    libdrm                         \
+    libdrm-tests                   \
 "
 
 # Add the DEEPX runtime only on the V2M (V2N + DEEPX) variants;

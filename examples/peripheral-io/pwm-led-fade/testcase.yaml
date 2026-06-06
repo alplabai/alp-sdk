@@ -3,22 +3,44 @@
 sample:
   name: pwm-led-fade
   description: |
-    Per-peripheral example for <alp/pwm.h>.  Fades an LED on
-    E1M_PWM0.  On native_sim there's no PWM emul controller
-    so the example prints the alp_last_error() diagnostic and
-    exits — proves the open / last_error / close path works.
+    Per-peripheral example for <alp/pwm.h>.  Fades the board's green
+    LED on BOARD_PWM_LED_GREEN.  Builds on both EVKs: E1M EVK uses
+    E1M_PWM0; E1M-X EVK uses E1M_X_PWM7.  On native_sim there's no
+    PWM emul controller so the example prints the alp_last_error()
+    diagnostic and exits -- proves the open / last_error / close path works.
 
 tests:
-  alp_sdk.example.pwm_led_fade:
+  alp_sdk.example.pwm_led_fade.e1m_x_evk:
     platform_allow:
       - native_sim
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     tags:
       - alp-sdk
       - example
       - pwm
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[pwm\\] done"
+  alp_sdk.example.pwm_led_fade.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - pwm
+      - aen
     harness: console
     harness_config:
         type: one_line

@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * audio-noise-suppression
@@ -105,9 +105,13 @@
 
 #include "alp/audio.h"
 #include "alp/dsp.h"
-/* EVK_I2S_AUDIO_CODEC is a board-macro from the generated routes header
- * (= E1M_I2S0); rebind it in board.yaml `pins:` to port to another board. */
-#include "alp/boards/alp_e1m_evk_routes.h"
+/* BOARD_I2S_AUDIO is a portable alias that resolves to the on-board
+ * audio codec I2S bus on whichever EVK is being targeted:
+ *   E1M EVK  (AEN)  → E1M_I2S0  (TAS2563 amps via 74LVC157 mux)
+ *   E1M-X EVK (V2N) → E1M_X_I2S0 (TAS2563 smart-amp I2S)
+ * Include via <alp/board.h>; ALP_BOARD_* is emitted by the build
+ * system from the board.yaml preset. */
+#include "alp/board.h"
 #include "alp/inference.h"
 #include "alp/peripheral.h"
 
@@ -122,12 +126,12 @@ LOG_MODULE_REGISTER(noise_suppress, LOG_LEVEL_INF);
  * which sets BOTH the DMA cadence and the perceived latency
  * budget.  See the header comment for the per-step breakdown.
  */
-#define SR_HZ         24000
-#define CHANNELS      1
-#define BLOCK_FRAMES  240
-#define BLOCK_MS      10
-#define FFT_POINTS    256
-#define DEMO_BLOCKS   50    /* ~500 ms of audio for HiL audibility. */
+#define SR_HZ 24000
+#define CHANNELS 1
+#define BLOCK_FRAMES 240
+#define BLOCK_MS 10
+#define FFT_POINTS 256
+#define DEMO_BLOCKS 50 /* ~500 ms of audio for HiL audibility. */
 
 /* ── Placeholder denoiser model ────────────────────────────────
  *
@@ -139,7 +143,7 @@ LOG_MODULE_REGISTER(noise_suppress, LOG_LEVEL_INF);
  * V2N-M1 the loader-emitted backend tolerates a stub model for
  * the bring-up scenario.
  */
-static const uint8_t s_model[] = {0x00};
+static const uint8_t s_model[] = { 0x00 };
 
 /* Tensor arena -- 96 KiB matches board.yaml's default_arena_kib.
  * Sized for a ~50k-param int8 CNN with two-frame context (current
@@ -149,13 +153,24 @@ static uint8_t s_arena[96 * 1024] __aligned(16);
 /* PCM block buffers.  Two of them so the DSP / inference path can
  * touch the previous block while the I2S DMA grabs the next one
  * (ping-pong, see the latency budget table). */
-static int16_t s_pcm_in [BLOCK_FRAMES * CHANNELS];
+static int16_t s_pcm_in[BLOCK_FRAMES * CHANNELS];
 static int16_t s_pcm_out[BLOCK_FRAMES * CHANNELS];
 
 /* FFT magnitude bins -- 256-pt FFT with MAGNITUDE output emits
  * `n_points` floats (not 2*n; that's the COMPLEX path).  See
  * <alp/dsp.h> for the contract. */
 static float s_bin_mag[FFT_POINTS];
+
+/* FFT input staging buffer.  alp_dsp_chain_apply_bins() consumes
+ * EXACTLY FFT_POINTS (256) samples and returns ALP_ERR_OUT_OF_RANGE
+ * if handed fewer.  A mic block is only BLOCK_FRAMES (240) samples,
+ * so we accumulate consecutive blocks here until we have a full
+ * 256-sample frame, then run the FFT once and carry the remainder
+ * forward.  (A production denoiser uses 50%-overlap framing; this is
+ * the simplest contiguous-fill scheme that keeps the FFT size and
+ * the input length in agreement.) */
+static int16_t s_fft_in[FFT_POINTS];
+static size_t  s_fft_fill; /* samples currently staged in s_fft_in */
 
 /* ── DSP chain: Hann window + 256-pt FFT ───────────────────────
  *
@@ -222,27 +237,26 @@ static struct {
  * a third DSP stage (mel filterbank) once <alp/dsp.h>'s stage
  * vocabulary grows.
  */
-static void push_bins_into_model(alp_inference_t *inf,
-                                 const float *bins, size_t n)
+static void push_bins_into_model(alp_inference_t *inf, const float *bins, size_t n)
 {
-    alp_inference_tensor_t in = {0};
+    alp_inference_tensor_t in = { 0 };
     if (alp_inference_get_input(inf, 0, &in) != ALP_OK) {
         return;
     }
     if (in.data == NULL || in.size_bytes == 0) {
-        return;  /* Stub backend; nothing to fill. */
+        return; /* Stub backend; nothing to fill. */
     }
     if (in.dtype == ALP_INFERENCE_DTYPE_F32) {
         size_t bytes = n * sizeof(float);
         if (bytes > in.size_bytes) bytes = in.size_bytes;
         memcpy(in.data, bins, bytes);
     } else if (in.dtype == ALP_INFERENCE_DTYPE_INT8) {
-        int8_t *q = (int8_t *)in.data;
+        int8_t *q   = (int8_t *)in.data;
         size_t  cap = (in.size_bytes < n) ? in.size_bytes : n;
         for (size_t i = 0; i < cap; i++) {
-            float v  = bins[i] / (in.scale > 0.0f ? in.scale : 1.0f);
+            float   v  = bins[i] / (in.scale > 0.0f ? in.scale : 1.0f);
             int32_t qv = (int32_t)(v + 0.5f) + in.zero_point;
-            if (qv >  127) qv =  127;
+            if (qv > 127) qv = 127;
             if (qv < -128) qv = -128;
             q[i] = (int8_t)qv;
         }
@@ -270,24 +284,52 @@ static void process_one_block(void)
     /* 1. Mic-in. */
     if (g_state.mic_ok) {
         size_t got = 0;
-        (void)alp_audio_in_read(g_state.mic, s_pcm_in, BLOCK_FRAMES,
-                                &got, /*timeout_ms=*/100);
+        (void)alp_audio_in_read(g_state.mic, s_pcm_in, BLOCK_FRAMES, &got, /*timeout_ms=*/100);
     } else {
         memset(s_pcm_in, 0, sizeof(s_pcm_in));
     }
 
-    /* 2. DSP preprocess (window + FFT -> magnitude bins). */
+    /* 2. DSP preprocess (window + FFT -> magnitude bins).
+     *
+     * Stage the mic block into the FFT input buffer.  The FFT needs a
+     * full FFT_POINTS (256) frame; one mic block is only BLOCK_FRAMES
+     * (240).  Append, and only run the chain once we have >= 256
+     * staged samples -- otherwise apply_bins() would return
+     * ALP_ERR_OUT_OF_RANGE on every short block. */
+    bool fft_ran = false;
     if (g_state.dsp_ok) {
-        size_t got = 0;
-        (void)alp_dsp_chain_apply_bins(g_state.dsp,
-                                       s_pcm_in, BLOCK_FRAMES,
-                                       s_bin_mag, FFT_POINTS, &got);
+        size_t take = BLOCK_FRAMES;
+        if (s_fft_fill + take > FFT_POINTS) {
+            take = FFT_POINTS - s_fft_fill;
+        }
+        memcpy(&s_fft_in[s_fft_fill], s_pcm_in, take * sizeof(int16_t));
+        s_fft_fill += take;
+
+        if (s_fft_fill >= FFT_POINTS) {
+            size_t       got = 0;
+            alp_status_t st = alp_dsp_chain_apply_bins(g_state.dsp, s_fft_in, FFT_POINTS, s_bin_mag,
+                                                       FFT_POINTS, &got);
+            if (st != ALP_OK) {
+                LOG_WRN("dsp apply_bins failed: st=%d (block %u)", (int)st,
+                        (unsigned)g_state.blocks_run);
+            } else {
+                fft_ran = true;
+            }
+            /* Carry the leftover tail of this block (the samples that
+             * didn't fit before the FFT fired) to the front of the
+             * next frame. */
+            size_t leftover = BLOCK_FRAMES - take;
+            if (leftover > FFT_POINTS) leftover = FFT_POINTS;
+            memmove(s_fft_in, &s_pcm_in[take], leftover * sizeof(int16_t));
+            s_fft_fill = leftover;
+        }
     }
 
     /* 3. Inference (per-bin gain mask).  The output tensor is the
      *    mask itself in the trained model; v0.5 just invokes for
-     *    framing-path correctness. */
-    if (g_state.inf_ok) {
+     *    framing-path correctness.  Only run when a fresh spectrum
+     *    was produced this block. */
+    if (g_state.inf_ok && fft_ran) {
         push_bins_into_model(g_state.inf, s_bin_mag, FFT_POINTS);
         (void)alp_inference_invoke(g_state.inf);
         /* TODO(v0.6): alp_inference_get_output() -> gain mask ->
@@ -302,8 +344,8 @@ static void process_one_block(void)
     /* 5. Speaker-out. */
     if (g_state.spk_ok) {
         size_t pushed = 0;
-        (void)alp_audio_out_write(g_state.spk, s_pcm_out, BLOCK_FRAMES,
-                                  &pushed, /*timeout_ms=*/100);
+        (void)alp_audio_out_write(g_state.spk, s_pcm_out, BLOCK_FRAMES, &pushed,
+                                  /*timeout_ms=*/100);
     }
 
     g_state.blocks_run++;
@@ -312,25 +354,25 @@ static void process_one_block(void)
 int main(void)
 {
     printf("[ns] audio-noise-suppression v0.5 -- mic -> DSP -> AI -> speaker\n");
-    printf("[ns]   block=%d frames @ %d Hz mono = %d ms latency target\n",
-           BLOCK_FRAMES, SR_HZ, BLOCK_MS);
+    printf("[ns]   block=%d frames @ %d Hz mono = %d ms latency target\n", BLOCK_FRAMES, SR_HZ,
+           BLOCK_MS);
 
     /* ── Open mic + speaker on the same I2S link ───────────
      *
-     * The TAS2563 codec on the EVK exposes both directions on
-     * I2S0 (the codec handles the PDM-to-I2S conversion on its
-     * own pins).  E1M_I2S0 is the portable bus ID; the §D.lib
-     * loader wires it to whichever physical I2S instance the SoM
-     * preset documented in its peripheral map.  On native_sim
+     * The TAS2563 codec on both EVKs exposes both directions on
+     * their respective I2S bus (the codec handles the PDM-to-I2S
+     * conversion on its own pins).  BOARD_I2S_AUDIO resolves to
+     * the audio codec I2S bus on whichever EVK is targeted
+     * (E1M_I2S0 on AEN, E1M_X_I2S0 on V2N).  On native_sim
      * neither open() succeeds; the loop tolerates that. */
     alp_audio_config_t cfg = {
-        .peripheral_id    = EVK_I2S_AUDIO_CODEC,
+        .peripheral_id    = BOARD_I2S_AUDIO, /* E1M EVK: E1M_I2S0; E1M-X EVK: E1M_X_I2S0 */
         .sample_rate_hz   = SR_HZ,
         .channels         = CHANNELS,
         .format           = ALP_AUDIO_FMT_S16_LE,
         .frames_per_block = BLOCK_FRAMES,
     };
-    g_state.mic = alp_audio_in_open(&cfg);
+    g_state.mic    = alp_audio_in_open(&cfg);
     g_state.mic_ok = (g_state.mic != NULL);
     if (g_state.mic_ok) {
         printf("[ns]   alp_audio_in_open(I2S0)         ok\n");
@@ -340,7 +382,7 @@ int main(void)
                (int)alp_last_error());
     }
 
-    g_state.spk = alp_audio_out_open(&cfg);
+    g_state.spk    = alp_audio_out_open(&cfg);
     g_state.spk_ok = (g_state.spk != NULL);
     if (g_state.spk_ok) {
         printf("[ns]   alp_audio_out_open(I2S0)        ok\n");
@@ -358,9 +400,7 @@ int main(void)
      * terminal stage.  Our two-stage descriptor satisfies
      * both.  Open should succeed even on native_sim (the chain
      * implementation is the portable C/CMSIS-DSP fallback). */
-    g_state.dsp = alp_dsp_chain_open(s_dsp_stages,
-                                     sizeof(s_dsp_stages) /
-                                         sizeof(s_dsp_stages[0]));
+    g_state.dsp = alp_dsp_chain_open(s_dsp_stages, sizeof(s_dsp_stages) / sizeof(s_dsp_stages[0]));
     g_state.dsp_ok = (g_state.dsp != NULL);
     if (g_state.dsp_ok) {
         printf("[ns]   alp_dsp_chain_open(hann+fft256) ok\n");
@@ -383,7 +423,7 @@ int main(void)
         .arena       = s_arena,
         .arena_bytes = sizeof(s_arena),
     };
-    g_state.inf = alp_inference_open(&inf_cfg);
+    g_state.inf    = alp_inference_open(&inf_cfg);
     g_state.inf_ok = (g_state.inf != NULL);
     if (g_state.inf_ok) {
         printf("[ns]   alp_inference_open(AUTO)        ok\n");
@@ -406,8 +446,7 @@ int main(void)
      * supervisor sits in WFI between DMA-ready IRQs so the
      * average power is dominated by the codec + DMA engines,
      * not the CPU. */
-    printf("[ns]   streaming %d blocks (%d ms total) ...\n",
-           DEMO_BLOCKS, DEMO_BLOCKS * BLOCK_MS);
+    printf("[ns]   streaming %d blocks (%d ms total) ...\n", DEMO_BLOCKS, DEMO_BLOCKS * BLOCK_MS);
     for (int b = 0; b < DEMO_BLOCKS; ++b) {
         process_one_block();
 #ifdef CONFIG_BOARD_NATIVE_SIM
@@ -422,9 +461,9 @@ int main(void)
      * guards.  Order: speaker first (so any in-flight DMA drains
      * cleanly), then mic, then DSP chain, then inference. */
     if (g_state.spk_ok) (void)alp_audio_out_stop(g_state.spk);
-    if (g_state.mic_ok) (void)alp_audio_in_stop (g_state.mic);
+    if (g_state.mic_ok) (void)alp_audio_in_stop(g_state.mic);
     alp_audio_out_close(g_state.spk);
-    alp_audio_in_close (g_state.mic);
+    alp_audio_in_close(g_state.mic);
     alp_dsp_chain_close(g_state.dsp);
     alp_inference_close(g_state.inf);
 

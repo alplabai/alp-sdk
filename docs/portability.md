@@ -297,7 +297,7 @@ Two things make this work portably:
    which spells out exactly this contract.
 
 If you specifically want DEEPX (say, for a benchmark run), pass
-`.backend = ALP_INFERENCE_BACKEND_DEEPX_DX` instead of AUTO.  If
+`.backend = ALP_INFERENCE_BACKEND_DEEPX_DXM1` instead of AUTO.  If
 that backend isn't present on the active SoM, `alp_inference_open()`
 returns NULL and `alp_last_error()` returns `ALP_ERR_NOSUPPORT` —
 see Section 5 for the runtime fallback pattern that uses this.
@@ -559,7 +559,7 @@ The error codes that matter for portability work are:
 `ALP_ERR_NOSUPPORT` is the load-bearing one for portability work.
 It means "the SDK compiled fine, the SoM is real, but this
 specific capability isn't available on the active silicon".  The
-canonical example is requesting `ALP_INFERENCE_BACKEND_DEEPX_DX`
+canonical example is requesting `ALP_INFERENCE_BACKEND_DEEPX_DXM1`
 on a V2N101 (no DEEPX) — the call returns NULL with
 `alp_last_error() == ALP_ERR_NOSUPPORT`.
 
@@ -651,7 +651,7 @@ on `ALP_ERR_NOSUPPORT`:
  * alp_inference_open() returns NULL with last_error =
  * ALP_ERR_NOSUPPORT and we drop to the next tier. */
 static const alp_inference_backend_t ladder[] = {
-    ALP_INFERENCE_BACKEND_DEEPX_DX,
+    ALP_INFERENCE_BACKEND_DEEPX_DXM1,
     ALP_INFERENCE_BACKEND_DRPAI,
     ALP_INFERENCE_BACKEND_ETHOS_U,
     ALP_INFERENCE_BACKEND_CPU,

@@ -25,8 +25,9 @@ iteration cycle for the same checks.
 
 The SDK supports two host layouts:
 
-- **WSL2 on Windows** (recommended for `native_sim` builds; Zephyr
-  docs explicitly say native_sim is Linux/macOS only).
+- **WSL2 on Windows** (required for `native_sim` builds; upstream
+  Zephyr supports native_sim on Linux/macOS only — there is no
+  native-Windows native_sim target).
 - **Pure Windows** (works for the cross-compiled `*.aen` scenarios
   only; falls back to MSYS2 for host tools).
 
@@ -60,28 +61,37 @@ This is the path that matches GitHub Actions exactly.
    pip3 install --user -r zephyr/scripts/requirements.txt
    ```
 
-4. **Hook your alp-sdk checkout in via `EXTRA_ZEPHYR_MODULES`.**
-   Your repo lives on the Windows side; WSL sees it under
-   `/mnt/c/Users/<you>/Documents/GitHub/alp-sdk`.  Add the
-   following lines to your shell rc file (`<your-shell-rc>` --
-   see [`docs/cross-platform-setup.md`](cross-platform-setup.md)
+4. **Clone alp-sdk onto WSL's native ext4 and hook it in via
+   `EXTRA_ZEPHYR_MODULES`.**  Keep the checkout under your WSL home
+   (`~/dev/alp-sdk`) rather than on a `/mnt/c/...` Windows path —
+   the native-ext4 clone avoids the slow 9P interop bridge and cuts
+   per-build configure time dramatically (see "What's slow on WSL"
+   below):
+   ```sh
+   git clone https://github.com/alplabai/alp-sdk ~/dev/alp-sdk
+   ```
+   Add the following lines to your shell rc file (`<your-shell-rc>`
+   -- see [`docs/cross-platform-setup.md`](cross-platform-setup.md)
    section 5 for the per-shell file name on each OS) so every
    shell has them:
    ```sh
    export ZEPHYR_BASE=$HOME/zephyrproject/zephyr
    export ZEPHYR_TOOLCHAIN_VARIANT=host
-   export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/<you>/Documents/GitHub/alp-sdk
+   export EXTRA_ZEPHYR_MODULES=$HOME/dev/alp-sdk
    ```
+   If you must work against a Windows-side checkout instead, point
+   `EXTRA_ZEPHYR_MODULES` at its `/mnt/c/...` path — but expect the
+   slower builds described below.
    For `*.aen` cross-compiled scenarios you also need the Zephyr
    SDK; install it under `~/zephyr-sdk-1.0.1/` and add:
    ```sh
    export ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk-1.0.1
    ```
 
-5. **Run twister.**  From the alp-sdk root (Windows path is fine):
+5. **Run twister.**  From the alp-sdk root:
    ```sh
    wsl -d Ubuntu -- bash -lc '
-     cd /mnt/c/Users/<you>/Documents/GitHub/alp-sdk &&
+     cd ~/dev/alp-sdk &&
      python3 $ZEPHYR_BASE/scripts/twister \
         --testsuite-root examples \
         -p native_sim/native/64 \
@@ -89,17 +99,16 @@ This is the path that matches GitHub Actions exactly.
    ```
    For a single example, add `-s alp_sdk.examples.<name>.native_sim`.
 
-Build artefacts land in `twister-out/` on the Windows side --
-your editor sees them immediately.
+Build artefacts land in `twister-out/` under the checkout.
 
 ### What's slow on WSL
 
-WSL2 reads `/mnt/c/...` over a 9P interop bridge.  CMake's
-configure step does ~hundreds of `stat()` calls, which adds ~5-10 s
-per build over the native-ext4 path.  For very tight iteration
-(one example, multiple builds in a row), `git clone` alp-sdk into
-WSL's `~/` and use the native-side clone -- compilation drops to
-~10 s per build.
+If you work against a Windows-side checkout, WSL2 reads
+`/mnt/c/...` over a 9P interop bridge.  CMake's configure step does
+~hundreds of `stat()` calls, which adds ~5-10 s per build over the
+native-ext4 path.  This is exactly why step 4 puts the checkout on
+native ext4 (`~/dev/alp-sdk`) -- compilation drops to ~10 s per
+build versus the `/mnt/c` path.
 
 ## Path B — Pure Windows
 
@@ -130,8 +139,8 @@ builds are not supported on Windows by upstream Zephyr.
 4. **Initialise the Zephyr workspace** somewhere off `C:\`'s root
    (Windows MAX_PATH bites long build paths):
    ```pwsh
-   west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 C:\Users\<you>\Documents\GitHub\zephyrproject
-   cd C:\Users\<you>\Documents\GitHub\zephyrproject
+   west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 C:\dev\zephyrproject
+   cd C:\dev\zephyrproject
    west update
    python -m pip install --user -r zephyr\scripts\requirements.txt
    ```
@@ -140,25 +149,25 @@ builds are not supported on Windows by upstream Zephyr.
    only is enough; ~1.5 GB).  Download from
    `github.com/zephyrproject-rtos/sdk-ng/releases/v1.0.1`,
    extract `zephyr-sdk-1.0.1_windows-x86_64_minimal.7z` to
-   `C:\Users\<you>\zephyr-sdk-1.0.1\`, then unpack the
+   `C:\dev\zephyr-sdk-1.0.1\`, then unpack the
    `toolchain_windows-x86_64_arm-zephyr-eabi.7z` into the same
    directory.  Register with CMake:
    ```pwsh
-   cd C:\Users\<you>\zephyr-sdk-1.0.1
+   cd C:\dev\zephyr-sdk-1.0.1
    cmake -P cmake\zephyr_sdk_export.cmake
    ```
 
 6. **Persist env vars** (User scope -- survives reboots):
    ```pwsh
-   [Environment]::SetEnvironmentVariable('ZEPHYR_BASE', 'C:\Users\<you>\Documents\GitHub\zephyrproject\zephyr', 'User')
-   [Environment]::SetEnvironmentVariable('ZEPHYR_SDK_INSTALL_DIR', 'C:\Users\<you>\zephyr-sdk-1.0.1', 'User')
+   [Environment]::SetEnvironmentVariable('ZEPHYR_BASE', 'C:\dev\zephyrproject\zephyr', 'User')
+   [Environment]::SetEnvironmentVariable('ZEPHYR_SDK_INSTALL_DIR', 'C:\dev\zephyr-sdk-1.0.1', 'User')
    [Environment]::SetEnvironmentVariable('ZEPHYR_TOOLCHAIN_VARIANT', 'zephyr', 'User')
-   [Environment]::SetEnvironmentVariable('EXTRA_ZEPHYR_MODULES', 'C:\Users\<you>\Documents\GitHub\alp-sdk', 'User')
+   [Environment]::SetEnvironmentVariable('EXTRA_ZEPHYR_MODULES', 'C:\dev\alp-sdk', 'User')
    ```
 
 7. **Run a cross-compiled build** to confirm everything's wired:
    ```pwsh
-   west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples\drone-autopilot
+   west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples\peripheral-io\drone-autopilot
    ```
 
 `native_sim` builds on Windows will fail at the DTS preprocess
@@ -179,6 +188,9 @@ python -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('metada
 
 # Loader smoke
 pytest tests/scripts/ -q
+
+# Doc drift: dead SDK-symbol refs in docs + docs-index integrity
+python scripts/check_doc_drift.py
 ```
 
 These run in seconds and catch 80% of the regressions that

@@ -52,7 +52,7 @@ non-routed instances return `ALP_ERR_NOSUPPORT`.
 
 ## HAL pinning
 
-The ALP SDK does not vendor Alif's HAL source — we link against
+The Alp SDK does not vendor Alif's HAL source — we link against
 whatever revision the surrounding Zephyr tree pulls via
 `modules/hal/alif`, or against a `cpackget`-installed
 `AlifSemiconductor::Ensemble` CMSIS pack for plain-CMake / bare-metal

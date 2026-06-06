@@ -11,7 +11,7 @@
  * capability checks accept any config — apps that want runtime
  * validation must select a specific SoC.
  *
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * @par ABI status: [ABI-STABLE]
@@ -60,6 +60,7 @@
 #define ALP_SOC_INLINE_AES 1
 #define ALP_SOC_CAU 0
 #define ALP_SOC_DMA2D 1
+#define ALP_SOC_NPU_ARENA_SRAM_KIB 0
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E4)
 /* alif:ensemble:e4 */
@@ -97,6 +98,7 @@
 #define ALP_SOC_INLINE_AES 1
 #define ALP_SOC_CAU 0
 #define ALP_SOC_DMA2D 1
+#define ALP_SOC_NPU_ARENA_SRAM_KIB 0
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E5)
 /* alif:ensemble:e5 */
@@ -134,6 +136,7 @@
 #define ALP_SOC_INLINE_AES 1
 #define ALP_SOC_CAU 0
 #define ALP_SOC_DMA2D 1
+#define ALP_SOC_NPU_ARENA_SRAM_KIB 0
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E6)
 /* alif:ensemble:e6 */
@@ -171,6 +174,7 @@
 #define ALP_SOC_INLINE_AES 1
 #define ALP_SOC_CAU 0
 #define ALP_SOC_DMA2D 1
+#define ALP_SOC_NPU_ARENA_SRAM_KIB 0
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7)
 /* alif:ensemble:e7 */
@@ -208,6 +212,7 @@
 #define ALP_SOC_INLINE_AES 1
 #define ALP_SOC_CAU 0
 #define ALP_SOC_DMA2D 1
+#define ALP_SOC_NPU_ARENA_SRAM_KIB 0
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8)
 /* alif:ensemble:e8 */
@@ -245,6 +250,7 @@
 #define ALP_SOC_INLINE_AES 1
 #define ALP_SOC_CAU 0
 #define ALP_SOC_DMA2D 1
+#define ALP_SOC_NPU_ARENA_SRAM_KIB 0
 
 #elif defined(CONFIG_ALP_SOC_DEEPX_DX_M1)
 /* deepx:dx:m1 */
@@ -282,6 +288,7 @@
 #define ALP_SOC_INLINE_AES 0
 #define ALP_SOC_CAU 0
 #define ALP_SOC_DMA2D 0
+#define ALP_SOC_NPU_ARENA_SRAM_KIB 0
 
 #elif defined(CONFIG_ALP_SOC_NXP_IMX9_IMX93)
 /* nxp:imx9:imx93 */
@@ -319,6 +326,7 @@
 #define ALP_SOC_INLINE_AES 0
 #define ALP_SOC_CAU 0
 #define ALP_SOC_DMA2D 0
+#define ALP_SOC_NPU_ARENA_SRAM_KIB 0
 
 #elif defined(CONFIG_ALP_SOC_RENESAS_RZV2N_N44)
 /* renesas:rzv2n:n44 */
@@ -356,8 +364,9 @@
 #define ALP_SOC_INLINE_AES 0
 #define ALP_SOC_CAU 0
 #define ALP_SOC_DMA2D 0
+#define ALP_SOC_NPU_ARENA_SRAM_KIB 0
 
-#else  /* No SoC selected — accept any config. */
+#else /* No SoC selected — accept any config. */
 #define ALP_SOC_REF_STR "unknown"
 #define ALP_SOC_I2C_COUNT UINT16_MAX
 #define ALP_SOC_SPI_COUNT UINT16_MAX
@@ -392,6 +401,7 @@
 #define ALP_SOC_INLINE_AES UINT16_MAX
 #define ALP_SOC_CAU UINT16_MAX
 #define ALP_SOC_DMA2D UINT16_MAX
+#define ALP_SOC_NPU_ARENA_SRAM_KIB UINT16_MAX
 
 #endif
 
@@ -436,4 +446,4 @@
 
 #define ALP_HAS(cap) (ALP_CAP_##cap)
 
-#endif  /* ALP_SOC_CAPS_H */
+#endif /* ALP_SOC_CAPS_H */

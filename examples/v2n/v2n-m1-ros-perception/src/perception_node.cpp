@@ -1,4 +1,4 @@
-// Copyright 2026 ALP Lab AB
+// Copyright 2026 Alp Lab AB
 // SPDX-License-Identifier: Apache-2.0
 //
 // alp_perception
@@ -46,7 +46,7 @@
 //   - V2N101 / V2N102 ->
 //       alp_inference_open(backend=AUTO) -> ALP_INFERENCE_BACKEND_DRPAI
 //   - V2M101 / V2M102 (V2N + DEEPX) ->
-//       alp_inference_open(backend=AUTO) -> ALP_INFERENCE_BACKEND_DEEPX_DX
+//       alp_inference_open(backend=AUTO) -> ALP_INFERENCE_BACKEND_DEEPX_DXM1
 //
 // The SoM preset's `capabilities:` block drives which backends the
 // build compiles into the inference registry: V2M101 ships both

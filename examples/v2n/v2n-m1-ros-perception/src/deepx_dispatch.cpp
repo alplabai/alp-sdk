@@ -1,4 +1,4 @@
-// Copyright 2026 ALP Lab AB
+// Copyright 2026 Alp Lab AB
 // SPDX-License-Identifier: Apache-2.0
 //
 // DeepxDispatcher implementation -- the bridge from the alp-sdk
@@ -26,29 +26,36 @@ DeepxDispatcher::DeepxDispatcher(rclcpp::Node &parent) : parent_(parent) {
 
     // Open the inference backend.  AUTO -> the SDK picks the
     // highest-priority backend the active SoM populates:
-    //   V2M101 / V2M102 -> ALP_INFERENCE_BACKEND_DEEPX_DX
+    //   V2M101 / V2M102 -> ALP_INFERENCE_BACKEND_DEEPX_DXM1
     //   V2N101 / V2N102 -> ALP_INFERENCE_BACKEND_DRPAI
     //   Anything else / no NPU -> ALP_INFERENCE_BACKEND_CPU
+    // Field names + order match alp_inference_config_t in
+    // <alp/inference.h>: model_data, model_size, format, backend,
+    // arena_bytes, arena.
     inf_ = alp_inference_open(&(const alp_inference_config_t){
-        .backend       = ALP_INFERENCE_BACKEND_AUTO,
-        .model_format  = ALP_INFERENCE_MODEL_DXNN,  // DEEPX-native;
-                                                     // dispatcher transcodes for
-                                                     // DRP-AI if needed.
-        .model         = nullptr,  // Customer drops their model into
+        .model_data    = nullptr,  // Customer drops their model into
                                     // /etc/alp/models/perception.dxnn at
                                     // image-bake time.
-        .model_len     = 0,
+        .model_size    = 0,
+        .format        = ALP_INFERENCE_MODEL_DXNN,  // DEEPX-native;
+                                                     // dispatcher transcodes for
+                                                     // DRP-AI if needed.
+        .backend       = ALP_INFERENCE_BACKEND_AUTO,
+        .arena_bytes   = 0,
         .arena         = nullptr,
-        .arena_len     = 0,
     });
     if (inf_ == nullptr) {
         RCLCPP_WARN(parent_.get_logger(),
                     "alp_inference_open returned NULL -- detections topic will be empty");
         backend_ = ALP_INFERENCE_BACKEND_CPU;
     } else {
-        // The dispatcher caches the resolved backend on the handle;
-        // we ask it directly so the watchdog log line is honest.
-        backend_ = alp_inference_get_backend(inf_);
+        // We requested AUTO; the SDK resolved a concrete backend
+        // internally.  <alp/inference.h> does not currently expose a
+        // public accessor to read that resolved backend back, so we
+        // leave backend_ at AUTO and backend_name() reports "auto".
+        // (TODO: switch to an alp_inference_get_backend() accessor if
+        // one is added to the public header.)
+        backend_ = ALP_INFERENCE_BACKEND_AUTO;
     }
 
     thread_ = std::thread(&DeepxDispatcher::capture_loop, this);
@@ -62,10 +69,11 @@ DeepxDispatcher::~DeepxDispatcher() {
 
 const char *DeepxDispatcher::backend_name() const {
     switch (backend_) {
-        case ALP_INFERENCE_BACKEND_DEEPX_DX: return "deepx_dx";
+        case ALP_INFERENCE_BACKEND_DEEPX_DXM1: return "deepx_dxm1";
         case ALP_INFERENCE_BACKEND_DRPAI:    return "drpai";
         case ALP_INFERENCE_BACKEND_ETHOS_U:  return "ethos_u";
         case ALP_INFERENCE_BACKEND_CPU:      return "cpu";
+        case ALP_INFERENCE_BACKEND_AUTO:     return "auto";  // resolved by SDK; not readable back
         default:                              return "stub";
     }
 }

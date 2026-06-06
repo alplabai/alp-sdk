@@ -3,34 +3,52 @@
 sample:
   name: ai-anomaly-detection-vibration
   description: |
-    Predictive-maintenance edge-AI demo: LSM6DSO accelerometer ->
+    Predictive-maintenance edge-AI demo: ICM-42670 accelerometer ->
     256-sample sliding window -> 1D-CNN anomaly model via TFLM ->
-    per-window score.  Same source targets E1M-AEN (Ethos-U) and
-    V2N (DEEPX DX-M1); native_sim exercises the framing path
-    against the CPU reference kernels.
+    per-window score.  Uses BOARD_I2C_SENSORS for portability across
+    E1M EVK (AEN, Ethos-U) and E1M-X EVK (V2N, DEEPX DX-M1);
+    native_sim exercises the framing path against the CPU reference
+    kernels.  The ICM-42670 is populated on BOTH EVK variants.
 common:
   tags: ai inference industrial predictive-maintenance marketing showcase
 tests:
-  alp_sdk.examples.anomaly_detection.native_sim:
+  alp_sdk.example.ai_anomaly_detection_vibration.e1m_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
+      - native_sim/native/64
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+    integration_platforms:
       - native_sim/native/64
     tags:
       - alp-sdk
       - example
       - ai
       - industrial
+      - aen
     build_only: true
     harness: console
     harness_config:
       type: one_line
       regex:
         - "\\[anomaly\\] done"
-  alp_sdk.examples.anomaly_detection.aen:
+
+  alp_sdk.example.ai_anomaly_detection_vibration.e1m_x_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
     tags:
       - alp-sdk
       - example
       - ai
       - industrial
+      - v2n
     build_only: true
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[anomaly\\] done"

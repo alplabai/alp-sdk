@@ -37,12 +37,14 @@ alp_pwm_t *pwm = alp_pwm_open(&(alp_pwm_config_t){
 });
 
 for (;;) {
+    /* duty is the active-level pulse width in ns; ramp it from 0 (off)
+       up to the full period (fully on), then back down. */
     for (uint32_t duty = 0; duty <= 10000000u; duty += 100000u) {
-        alp_pwm_set(pwm, duty);
+        alp_pwm_set_duty(pwm, duty);
         k_msleep(20);
     }
     for (uint32_t duty = 10000000u; duty > 0; duty -= 100000u) {
-        alp_pwm_set(pwm, duty);
+        alp_pwm_set_duty(pwm, duty);
         k_msleep(20);
     }
 }

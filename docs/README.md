@@ -38,6 +38,8 @@ into the topic-specific docs.
   on_module: auto-enable, generators inventory.
 - [board-config.md](board-config.md) — `board.yaml` v2 reference.
 - [e1m-pinout.md](e1m-pinout.md) — E1M form-factor pinout reference.
+- [board-id.md](board-id.md) — boot-time board identification:
+  SoM EEPROM manifest + BOARD_ID ADC cross-check.
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
   index (12 ADRs as of 2026-05-18).
@@ -48,6 +50,15 @@ into the topic-specific docs.
 - [bring-up-v2n.md](bring-up-v2n.md) — Renesas RZ/V2N.
 - [bring-up-v2n-m1.md](bring-up-v2n-m1.md) — V2N + DEEPX.
 - [bring-up-imx93.md](bring-up-imx93.md) — NXP i.MX 93.
+- [e1m-x-v2n-sdk-integration.md](e1m-x-v2n-sdk-integration.md) —
+  landing the bench-validated V2N-M1 / E1M-X-EVK carrier bring-up
+  into alp-sdk as the single source of truth.
+- [errata-e1m-x-v2n.md](errata-e1m-x-v2n.md) — hardware findings
+  from E1M-X-EVK + V2N-M1 bench bring-up (with software workarounds).
+- [rzv2n-m33-swd-debug.md](rzv2n-m33-swd-debug.md) — attaching to
+  the V2N CM33 over the DAP (J-Link), status-block reads, gotchas.
+- [rzv2n-m33-secure-boot.md](rzv2n-m33-secure-boot.md) — the CM33
+  image's place in the V2N secure-boot chain.
 
 ## Build & integration
 
@@ -56,10 +67,22 @@ into the topic-specific docs.
 - [gd32-bridge.md](gd32-bridge.md) +
   [gd32-bridge-protocol.md](gd32-bridge-protocol.md) — V2N's
   on-module IO MCU.
+- [gd32-link-sci7-next-rev.md](gd32-link-sci7-next-rev.md) —
+  SCI7 is the bridge link's permanent transport (RSPI reroute
+  rejected); hardening plan: DMAC data path, sequence echo, GD32
+  ADC/rising-path latency.
 - [cc3501e-bridge.md](cc3501e-bridge.md) — AEN's on-module Wi-Fi
   coprocessor.
+- [cc3501e-integration-plan.md](cc3501e-integration-plan.md) —
+  SWRU626 deep-dive informing the CC3501E host + firmware wire
+  protocol (research-only).
+- [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
+  the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
 - [os-support-matrix.md](os-support-matrix.md) — which OS runs
   on which core, per SoM.
+- [recommended-libraries.md](recommended-libraries.md) — curated
+  third-party libraries (integrated / recommended / deferred) for
+  what the SDK deliberately leaves out of `<alp/...>`.
 
 ## Security & release
 
@@ -73,8 +96,18 @@ into the topic-specific docs.
   — Mender-based OTA.
 - [release-policy.md](release-policy.md) — versioning + ABI
   policy.
+- [branching-and-merge-policy.md](branching-and-merge-policy.md) —
+  branch / PR / merge / push / tag rules (pairs with
+  release-policy).
 - [zephyr-version-policy.md](zephyr-version-policy.md) — Zephyr
   LTS pin.
+
+## Contributing
+
+- [contribution.md](contribution.md) — canonical contributor
+  guide: reporting bugs, code style, PR flow.
+- [contributing-tier-2.md](contributing-tier-2.md) — contributing
+  chip drivers / libraries to the Tier-2 `alp-sdk-community` repo.
 
 ## Testing & verification
 
@@ -107,6 +140,8 @@ into the topic-specific docs.
   everything between today and the v1.0.0 tag.
 - [v0.6-tbd-and-assumptions.md](v0.6-tbd-and-assumptions.md) —
   in-flight v0.6 caveats.
+- [vendor-partnerships.md](vendor-partnerships.md) — tracker for
+  the vendor relationships gating Pillar 9 (ecosystem) of v1.0.
 
 ## ABI
 

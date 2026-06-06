@@ -9,14 +9,19 @@ hardware mailbox, wait for a reply, read the result back.
 
 - Opening a shared-memory region (`alp_shmem_open`) and a
   hardware mailbox (`alp_mbox_open`) by portable instance IDs.
-- Staging payload bytes into the shared region via
-  `alp_shmem_write_at` -- the backend handles cache-coherency
-  on its way out.
+- Resolving a raw pointer view of the shared region with
+  `alp_shmem_view()`, then staging payload bytes by `memcpy`
+  through that pointer (the surface hands back a base pointer +
+  size and trusts the caller to write through it; the backend
+  handles cache-coherency for `cacheable = false` regions).
 - Signalling the peer with `alp_mbox_send` carrying a small
   tuple (offset + length) that points at the staged bytes.
-- Receiving a reply with `alp_mbox_recv` blocking up to a
-  caller-supplied timeout.
-- Reading the peer's echo response back from shared SRAM.
+- Receiving the reply through an inbound callback registered with
+  `alp_mbox_set_callback()` -- it fires on the SDK's mbox thread
+  with the peer's (offset, length) tuple, which `main()` then
+  drains.
+- Reading the peer's echo response back from shared SRAM via the
+  same pointer view.
 
 ## Build
 
@@ -70,9 +75,8 @@ HE -> RTSS-HE slot) and the roundtrip completes:
 [mproc-peer] request offset=0 len=13
 [mproc-peer] payload  "hello-from-HP"
 [mproc-peer] replied "echo: hello-from-HP" (19 bytes)
-[mproc] HE woke up, payload visible in shmem
+[mproc] HE replied via mbox callback
 [mproc] HE replied       "echo: hello-from-HP" (19 bytes)
-[mproc] HP read reply OK
 [mproc] done
 ```
 

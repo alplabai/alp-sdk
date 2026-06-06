@@ -295,7 +295,7 @@ def _flash_entry(entry: dict[str, Any],
 
     # Required-tool gate.  Backends list >=1 candidate; we consider
     # the backend usable when AT LEAST ONE is on PATH (matches the
-    # cc3501e_usb_bootloader / swd_v2n_host "either-or" shape).
+    # cc3501e_usb_bootloader / swd_probe "either-or" shape).
     requires: list[str] = list(getattr(backend, "requires", []) or [])
     if requires:
         present = [t for t in requires if shutil.which(t)]

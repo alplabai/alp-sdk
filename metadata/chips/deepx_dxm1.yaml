@@ -1,10 +1,10 @@
-# ALP SDK chip manifest: DEEPX DX-M1 NPU host-side bring-up sequencer.
+# Alp SDK chip manifest: DEEPX DX-M1 NPU host-side bring-up sequencer.
 #
 # This entry covers the alp-sdk-side GLUE -- the host code in
 # chips/deepx_dxm1/ that sequences M1_RESET + the PCIe muxes before
 # the Linux kernel driver (`dx_rt_npu_linux_driver`) opens the PCIe
 # device.  The DEEPX silicon's actual runtime + kernel driver are
-# upstream at github.com/DeepX-AI/ and brought into Yocto via the
+# upstream at github.com/DEEPX-AI/ and brought into Yocto via the
 # meta-deepx-m1 layer; see vendors/deepx-dxm1/README.md.
 schema_version:   1
 chip_id:          deepx_dxm1
@@ -26,10 +26,10 @@ control_lines:
   - { name: PCIe.MUX_SEL, direction: output, v2n_route: "Renesas P95 via pi3dbs12212", notes: "DEEPX_path mapped to PI3DBS_STATE_PATH_0 per metadata/chips/pi3dbs12212.yaml" }
 
 upstream:
-  runtime:        "github.com/DeepX-AI/dx_rt"
-  kernel_driver:  "github.com/DeepX-AI/dx_rt_npu_linux_driver"
-  yocto_layer:    "github.com/DeepX-AI/meta-deepx-m1"
-  reference_apps: "github.com/DeepX-AI/dx_app"
+  runtime:        "github.com/DEEPX-AI/dx_rt"
+  kernel_driver:  "github.com/DEEPX-AI/dx_rt_npu_linux_driver"
+  yocto_layer:    "github.com/DEEPX-AI/meta-deepx-m1"
+  reference_apps: "github.com/DEEPX-AI/dx_app"
 
 dependencies:
   - chip:  pi3dbs12212

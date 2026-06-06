@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * PI3WVR626 MIPI CSI 2:1 multiplexer helper -- thin GPIO wrapper.

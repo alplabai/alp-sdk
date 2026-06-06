@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * i2c-scanner — open the EVK sensor bus and probe every 7-bit
@@ -10,20 +10,22 @@
 
 #include "alp/peripheral.h"
 
-/* EVK_I2C_BUS_SENSORS is a board-macro from the generated routes header
- * (= E1M_I2C0); rebind it in board.yaml `pins:` to port to another board. */
-#include "alp/boards/alp_e1m_evk_routes.h"
+/* BOARD_I2C_SENSORS is a portable cross-EVK alias from <alp/board.h>:
+ *   E1M EVK  -> EVK_I2C_BUS_SENSORS  -> E1M_I2C0
+ *   E1M-X EVK -> XEVK_I2C_BUS_SENSORS -> E1M_X_I2C0
+ * Rebind it in board.yaml `pins:` to port to another board. */
+#include "alp/board.h"
 
-int main(void) {
-    printf("[i2c] open EVK_I2C_BUS_SENSORS @ 100 kHz\n");
+int main(void)
+{
+    printf("[i2c] open BOARD_I2C_SENSORS @ 100 kHz\n");
 
     alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id     = EVK_I2C_BUS_SENSORS, /* = E1M_I2C0 */
+        .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
         .bitrate_hz = 100000,
     });
     if (bus == NULL) {
-        printf("[i2c] open failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[i2c] open failed: alp_last_error=%d\n", (int)alp_last_error());
         printf("[i2c] done\n");
         return 0;
     }

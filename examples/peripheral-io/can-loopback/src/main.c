@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * can-loopback — bring up the EVK CAN bus in loopback mode, send a
+ * can-loopback — bring up the CAN bus in loopback mode, send a
  * frame, show that the rx callback receives it.
  *
  * Loopback mode is the canonical bring-up test for a CAN node:
@@ -14,6 +14,10 @@
  *   - The RX path decodes frames correctly.
  *   - Filters / callbacks dispatch.
  * Move to bus mode (loopback=false) only after this works.
+ *
+ * Runs on both EVKs: BOARD_CAN0 (from <alp/board.h>) resolves to
+ * E1M_CAN0 on E1M EVK (TCAN1044A transceiver, header J9) and
+ * E1M_X_CAN0 on E1M-X EVK (TCAN1044 transceiver U51).
  */
 
 #include <stdio.h>
@@ -23,9 +27,9 @@
 
 #include "alp/can.h"
 
-/* EVK_CAN_VEHICLE_BUS is a board-macro from the generated routes header
- * (= E1M_CAN0); rebind it in board.yaml `pins:` to port to another board. */
-#include "alp/boards/alp_e1m_evk_routes.h"
+/* BOARD_CAN0 is the portable alias from <alp/board.h>
+ * (E1M_CAN0 on E1M EVK; E1M_X_CAN0 on E1M-X EVK). */
+#include "alp/board.h"
 
 /* Volatile because the rx callback runs from the CAN driver's RX
  * thread (Zephyr's `can_rx` worker) and the main loop polls. */
@@ -35,18 +39,20 @@ static volatile int rx_count = 0;
  * an interrupt context, so printk-style logging is safe).  The
  * frame pointer is owned by the SDK and is reused after the
  * callback returns -- copy out anything you need to keep. */
-static void on_rx(const alp_can_frame_t *f, void *user) {
+static void on_rx(const alp_can_frame_t *f, void *user)
+{
     (void)user;
     rx_count++;
-    printk("[can] rx id=0x%03x dlc=%u data[0..3]=%02x %02x %02x %02x\n",
-           f->id, f->dlc, f->data[0], f->data[1], f->data[2], f->data[3]);
+    printk("[can] rx id=0x%03x dlc=%u data[0..3]=%02x %02x %02x %02x\n", f->id, f->dlc, f->data[0],
+           f->data[1], f->data[2], f->data[3]);
 }
 
-int main(void) {
-    printf("[can] open EVK_CAN_VEHICLE_BUS @ 500 kbps loopback\n");
+int main(void)
+{
+    printf("[can] open BOARD_CAN0 @ 500 kbps loopback\n");
 
     alp_can_t *bus = alp_can_open(&(alp_can_config_t){
-        .bus_id = EVK_CAN_VEHICLE_BUS, /* = E1M_CAN0 */
+        .bus_id = BOARD_CAN0, /* E1M_CAN0 on E1M EVK; E1M_X_CAN0 on E1M-X EVK */
         /* 500 kbps is the most common automotive default; bump to
          * 1 Mbps for industrial buses or down to 125 kbps for long
          * cable runs. */
@@ -60,8 +66,7 @@ int main(void) {
         .loopback = true,
     });
     if (bus == NULL) {
-        printf("[can] open failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[can] open failed: alp_last_error=%d\n", (int)alp_last_error());
         printf("[can] done\n");
         return 0;
     }
@@ -70,8 +75,8 @@ int main(void) {
      * Real apps use mask/id pairs to filter to specific node
      * groups -- e.g. (id=0x100, mask=0xF80) accepts 0x100..0x17F. */
     alp_can_filter_t filt = { .id = 0, .mask = 0, .ext_id = false };
-    int32_t fid = -1;   /* receives an opaque id we can use for remove_filter */
-    alp_status_t s = alp_can_add_filter(bus, &filt, on_rx, NULL, &fid);
+    int32_t          fid  = -1; /* receives an opaque id we can use for remove_filter */
+    alp_status_t     s    = alp_can_add_filter(bus, &filt, on_rx, NULL, &fid);
     printf("[can] add_filter -> status=%d fid=%d\n", (int)s, (int)fid);
 
     /* Move the controller from "configured" to "started" -- this is
@@ -85,15 +90,17 @@ int main(void) {
      * RX path; on a real bus, an external transceiver drives the
      * differential pair. */
     alp_can_frame_t tx = {
-        .id = 0x123, .dlc = 8,
-        .data = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
+        .id   = 0x123,
+        .dlc  = 8,
+        .data = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 },
     };
-    s = alp_can_send(bus, &tx, 100);   /* 100 ms timeout for TX mailbox */
+    s = alp_can_send(bus, &tx, 100); /* 100 ms timeout for TX mailbox */
     printf("[can] send id=0x%03x -> %d\n", tx.id, (int)s);
 
     /* Spin-poll for the loopback frame.  Real apps would await an
      * event flag set by on_rx (k_event_post / k_event_wait). */
-    for (int i = 0; i < 20 && rx_count == 0; i++) k_msleep(10);
+    for (int i = 0; i < 20 && rx_count == 0; i++)
+        k_msleep(10);
     printf("[can] rx_count=%d\n", rx_count);
 
     /* Tear down: stop first (drains pending TX, halts RX), then

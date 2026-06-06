@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Maxim MAX98357A class-D audio amp.
+# Alp SDK chip manifest: Maxim MAX98357A class-D audio amp.
 schema_version:   1
 chip_id:          max98357a
 driver_status:    complete

@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Bosch BMP390 pressure sensor (I2C).
+# Alp SDK chip manifest: Bosch BMP390 pressure sensor (I2C).
 schema_version:   1
 chip_id:          bmp390
 driver_status:    stub             # chip-ID + soft reset; pressure read path land later.

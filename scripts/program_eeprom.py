@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-Generate the 128-byte EEPROM manifest binary for the ALP SDK's
+Generate the 128-byte EEPROM manifest binary for the Alp SDK's
 on-module 24C128 EEPROM (AEN family, sits at I2C address 0x50 per
 the on_module section of metadata/e1m_modules/<MPN>.yaml).
 
@@ -176,7 +176,7 @@ def _build_manifest(family: str, sku: str, hw_rev: str,
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Pack a board.yaml + serial + mfg date into the "
-                    "128-byte ALP SDK EEPROM manifest binary.")
+                    "128-byte Alp SDK EEPROM manifest binary.")
     parser.add_argument("--board-yaml", type=Path, default=Path("board.yaml"),
                         help="Path to the project's board.yaml (default: ./board.yaml).")
     parser.add_argument("--serial", required=True,

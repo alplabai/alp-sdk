@@ -30,6 +30,7 @@
       "supports": ["CNN"]
     }
   ],
+  "inference_arena_sram_kib": 0,
   "peripherals": {
     "pcie_gen3": 1,
     "usb_2_otg": 1,
@@ -65,12 +66,12 @@
   ],
   "notes": [
     "Datasheet: 45 pages, DEEPX commercial datasheet v1.0, June 2025 (DEEPX Confidential).",
-    "DX-M1 is a *companion accelerator*, not a host SoC — it sits behind a PCIe Gen3 ×4 interface attached to a host CPU/MPU.  On ALP Lab's V2N-M1 SoMs the host is the Renesas RZ/V2N (R9A09G056N44GBG) and PCIe is wired internally on the SoM.",
+    "DX-M1 is a *companion accelerator*, not a host SoC — it sits behind a PCIe Gen3 ×4 interface attached to a host CPU/MPU.  On Alp Lab's V2N-M1 SoMs the host is the Renesas RZ/V2N (R9A09G056N44GBG) and PCIe is wired internally on the SoM.",
     "Optimised for INT8 CNN inference (ResNet, MobileNet, YOLO and similar topologies).  25 TOPS dense throughput @ 1.0 GHz.",
     "Internal Cortex-M55 runs DEEPX firmware that handles model load, scheduling, and PCIe doorbell.  Application code does not address it directly.",
     "Per-channel LPDDR capacity is 2 GB; up to 4 channels = 8 GB max model + activation memory on the accelerator side.",
     "PVT sensor exposes integrated temperature + voltage monitoring via on-chip registers.",
     "Security: TRNG, cryptographic accelerator, and chip-lifecycle management on-die — see datasheet §8.5.",
-    "Toolchain: DEEPX SDK (model compiler + runtime).  The ALP SDK exposes `<alp/iot.h>` / `<alp/peripheral.h>` for host-side interaction; DX-M1-specific APIs land in v0.3 alongside the DEEPX SDK integration."
+    "Toolchain: DEEPX SDK (model compiler + runtime).  The Alp SDK exposes `<alp/iot.h>` / `<alp/peripheral.h>` for host-side interaction; DX-M1-specific APIs land in v0.3 alongside the DEEPX SDK integration."
   ]
 }

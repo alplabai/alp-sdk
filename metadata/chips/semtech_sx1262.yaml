@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Semtech SX1262 LoRa transceiver.
+# Alp SDK chip manifest: Semtech SX1262 LoRa transceiver.
 schema_version:   1
 chip_id:          semtech_sx1262
 driver_status:    stub

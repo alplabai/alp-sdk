@@ -70,6 +70,11 @@ populated:
 #     macro:       <XEVK_* C-macro name to emit>
 #     doc:         "<one-line Doxygen `@brief`>"  (optional)
 #     active_low:  true                            (optional, documentation hint)
+#     board_alias: BOARD_<NAME>                    (optional) portable cross-EVK
+#                  alias; emitted in the generated header's BOARD_* block
+#                  (e1m-spec STANDARD.md §7.2 common set). The SAME board_alias
+#                  must be declared on every board exposing the role (enforced
+#                  by tests/scripts/test_board_alias_parity.py).
 #
 # SoM-side dispatch (the V2N GD32 IO-MCU bridge, etc.) lives in the
 # SoM preset's `pad_routes:` block, NOT here -- this board YAML is
@@ -84,10 +89,10 @@ e1m_routes:
     - { e1m: E1M_X_GPIO_IO2,  macro: XEVK_PIN_PCIE0_I2C_EN,
         doc: "Drive high to enable the I2C mux to the PCIe slot." }
     # --- I2S audio path mux ---
-    - { e1m: E1M_X_GPIO_IO4,  macro: XEVK_PIN_I2S_MUX_EN,
-        doc: "I2S path-mux enable." }
+    - { e1m: E1M_X_GPIO_IO4,  macro: XEVK_PIN_I2S_MUX_EN, active_low: true,
+        doc: "I2S path-mux (TMUX1574 U46) enable -- active-low; drive LOW to enable." }
     - { e1m: E1M_X_GPIO_IO5,  macro: XEVK_PIN_I2S_MUX_SEL,
-        doc: "I2S path-mux select (TAS2563 amps vs. external I2S)." }
+        doc: "I2S path-mux (TMUX1574 U46) select: LOW = TAS2563 amps (A side), HIGH = M.2 E-key I2S (B side)." }
     # --- M.2 E-key ---
     - { e1m: E1M_X_GPIO_IO6,  macro: XEVK_PIN_M2E_UART_WAKE, active_low: true,
         doc: "M.2 E-key UART-path wake (active-low)." }
@@ -125,69 +130,127 @@ e1m_routes:
         doc: "SDIO path-mux enable." }
     # --- Rotary encoder push switch ---
     - { e1m: E1M_X_GPIO_IO28, macro: XEVK_PIN_ENCODER_SW,  active_low: true,
+        board_alias: BOARD_PIN_ENCODER_SW,
         doc: "Rotary encoder (PEC12R-4222F) push switch; pull-up + RC debounce." }
     # --- IMU interrupt ---
     - { e1m: E1M_X_GPIO_IO32, macro: XEVK_PIN_BMI323_INT1,
+        board_alias: BOARD_PIN_BMI323_INT1,
         doc: "BMI323 INT1 (data-ready / motion / FIFO)." }
     # --- RGB LED pads driven as plain digital GPIOs (the GPIO-secondary
     #     of the PWM cluster -- same physical pads as the XEVK_PWM_LED_*
     #     entries in the `pwm:` section).  Open the PWM macro for
     #     brightness/fade, the GPIO macro for on/off; never both at once. ---
     - { e1m: E1M_X_GPIO_PWM5, macro: XEVK_PIN_LED_RED,
+        board_alias: BOARD_PIN_LED_RED,
         doc: "RGB LED red -- the PWM5 pad driven as a digital GPIO." }
     - { e1m: E1M_X_GPIO_PWM7, macro: XEVK_PIN_LED_GREEN,
+        board_alias: BOARD_PIN_LED_GREEN,
         doc: "RGB LED green -- the PWM7 pad driven as a digital GPIO." }
     - { e1m: E1M_X_GPIO_PWM6, macro: XEVK_PIN_LED_BLUE,
+        board_alias: BOARD_PIN_LED_BLUE,
         doc: "RGB LED blue -- the PWM6 pad driven as a digital GPIO." }
   buses:
     - { e1m: E1M_X_I2C0,  macro: XEVK_I2C_BUS_SENSORS,
+        board_alias: BOARD_I2C_SENSORS,
         doc: "On-board sensor + IO-expander + INA236 bus (ICM-42670, BMI323, BMP581, TCAL9538, INA236)." }
     - { e1m: E1M_X_I2C2,  macro: XEVK_I2C_BUS_DSI_CSI0,
         doc: "Display/camera control I2C bank 0 (DSI panel + CSI camera-side config)." }
     - { e1m: E1M_X_I2C3,  macro: XEVK_I2C_BUS_DSI_CSI1,
         doc: "Display/camera control I2C bank 1." }
     - { e1m: E1M_X_SPI1,  macro: XEVK_SPI_BUS_ARDUINO,
+        board_alias: BOARD_SPI_ARDUINO,
         doc: "Arduino UNO header SPI (level-shifted)." }
     - { e1m: E1M_X_UART0, macro: XEVK_UART_PORT_DEBUG,
+        board_alias: BOARD_UART_DEBUG,
         doc: "Console / debug UART." }
     - { e1m: E1M_X_UART1, macro: XEVK_UART_PORT_ARDUINO,
+        board_alias: BOARD_UART_ARDUINO,
         doc: "Arduino UNO header UART (D0/D1, level-shifted)." }
   pwm:
     - { e1m: E1M_X_PWM0, macro: XEVK_ARD_PWM0,
         doc: "Arduino UNO header PWM0 (level-shifted)." }
     - { e1m: E1M_X_PWM1, macro: XEVK_ARD_PWM1,
+        board_alias: BOARD_PWM_ARD1,
         doc: "Arduino UNO header PWM1." }
     - { e1m: E1M_X_PWM2, macro: XEVK_ARD_PWM2,
+        board_alias: BOARD_PWM_ARD2,
         doc: "Arduino UNO header PWM2." }
     - { e1m: E1M_X_PWM3, macro: XEVK_ARD_PWM3,
+        board_alias: BOARD_PWM_ARD3,
         doc: "Arduino UNO header PWM3." }
     - { e1m: E1M_X_PWM4, macro: XEVK_PWM_DISP2_BL,
         doc: "Display-2 backlight PWM (DISP2_BL_PWM)." }
     - { e1m: E1M_X_PWM5, macro: XEVK_PWM_LED_RED,
+        board_alias: BOARD_PWM_LED_RED,
         doc: "RGB LED red channel (GPIO-secondary = XEVK_PIN_LED_RED)." }
     - { e1m: E1M_X_PWM6, macro: XEVK_PWM_LED_BLUE,
+        board_alias: BOARD_PWM_LED_BLUE,
         doc: "RGB LED blue channel (GPIO-secondary = XEVK_PIN_LED_BLUE)." }
     - { e1m: E1M_X_PWM7, macro: XEVK_PWM_LED_GREEN,
+        board_alias: BOARD_PWM_LED_GREEN,
         doc: "RGB LED green channel (GPIO-secondary = XEVK_PIN_LED_GREEN)." }
   adc:
-    - { e1m: E1M_X_ADC0, macro: XEVK_ADC_ARDUINO_A0,
-        doc: "Arduino UNO header A0 analog input (ANA_S0)." }
+    - { e1m: E1M_X_ADC0, macro: XEVK_ADC_MIKROBUS_AN,
+        doc: "mikroBUS Click socket AN analog input (net CK_ANA, also on
+              breakout header P7.1; raw passthrough, no divider).  The V2
+              carrier netlist routes ONLY the mikroBUS AN to ANA_S0; the
+              earlier 'Arduino A0' doc here did not match the netlist." }
   dac:
     - { e1m: E1M_X_DAC0, macro: XEVK_DAC0,
-        doc: "DAC0 analog output." }
+        board_alias: BOARD_DAC0,
+        doc: "DAC0 analog output.  Header J15.2 (DAC0_OUT) is the
+              x2-buffered copy, but the buffered path is INOPERABLE on
+              this carrier revision (carrier erratum, fixed next rev;
+              rework details in the internal carrier errata).  Bench use
+              taps the raw 1.8 V-full-scale DAC0 net instead." }
     - { e1m: E1M_X_DAC1, macro: XEVK_DAC1,
+        board_alias: BOARD_DAC1,
         doc: "DAC1 analog output." }
   i2s:
     - { e1m: E1M_X_I2S0, macro: XEVK_I2S_AUDIO,
+        board_alias: BOARD_I2S_AUDIO,
         doc: "TAS2563 smart-amp I2S (SCLK / WS / SDI / SDO)." }
   can:
     - { e1m: E1M_X_CAN0, macro: XEVK_CAN_BUS0,
+        board_alias: BOARD_CAN0,
         doc: "CAN0 via TCAN1044 transceiver (U51)." }
     - { e1m: E1M_X_CAN1, macro: XEVK_CAN_BUS1,
         doc: "CAN1 via TCAN1044 transceiver (U52)." }
   qenc:
     - { e1m: E1M_X_ENC0, macro: XEVK_ENC_ROTARY,
+        board_alias: BOARD_ENC_ROTARY,
         doc: "PEC12R-4222F rotary encoder: ENC0_X = A phase, ENC0_Y = B phase; push switch on XEVK_PIN_ENCODER_SW (E1M_X_GPIO_IO28).  ENC1-3 pads are broken out but unpopulated." }
+
+# Audio -- 2x TAS2563 boosted class-D smart-amp (U27/U28) on E1M_X_I2C0 +
+# E1M_X_I2S0.  Scripts that emit the Linux DT (rcar_sound + audio-graph-card)
+# read this block; device-instance facts here are mined from the board
+# netlist (2026-05).  The E1M-IO -> SoC (RIIC / SSI / GPIO) mapping is
+# resolved SoM-side, not here.
+#
+# NB: the stock RZ/V2N EVK codec (DA7212) is NOT populated on this carrier.
+# The audio DT keeps &da7212 disabled and builds a fresh TAS2563 audio-
+# graph-card -- it does NOT re-enable the EVK's da7212-based sound_card.
+audio:
+  codecs:
+    # Stereo pair: U27 = LEFT, U28 = RIGHT, sharing one I2C bus + one I2S.
+    - { chip: tas2563, designator: U27, channel: left,  i2c_bus: E1M_X_I2C0, i2c_address: "0x4D" }   # AD0: 10k -> GND
+    - { chip: tas2563, designator: U28, channel: right, i2c_bus: E1M_X_I2C0, i2c_address: "0x4E" }   # AD0: 10k -> VIO
+  i2s_bus: E1M_X_I2S0              # SCLK / WS / SDI / SDO; codecs are bit-clock + frame slaves
+  mclk:
+    source:  e1m_audio_clk        # E1M AUDIO_CLK (SoM ADG); wired to the TAS MCLK on the current PCB rev
+    rate_hz: 12288000             # 256 x 48 kHz (default -- confirm against the ADG / clock-gen setup)
+  # I2S path-mux (TI TMUX1574, U46): SoC I2S0 -> TAS amps (A side) or the
+  # M.2 E-key slot (B side).  Both control lines active-low; drive LOW for the amps.
+  path_mux:
+    part:   tmux1574
+    enable: { macro: XEVK_PIN_I2S_MUX_EN,  e1m: E1M_X_GPIO_IO4, active_low: true }
+    select: { macro: XEVK_PIN_I2S_MUX_SEL, e1m: E1M_X_GPIO_IO5, amps_level: low }
+  # Shared amp control lines (both U27 + U28).  Wired to E1M IOs on the
+  # current PCB iteration -- exact E1M pads pending (maintainer assigning).
+  # Amp control on the otherwise-unused E1M_X_I2S1 pads, driven as plain
+  # GPIO (Linux DT pinmuxes them to GPIO, not SSI).  Wired on current PCB rev.
+  shutdown:  { net: AMP.ENABLE, e1m: E1M_X_I2S1_SCLK, active_low: true }   # \SD_N -> codec shutdown-gpios (GPIO out)
+  fault_irq: { net: AMP.FAULT,  e1m: E1M_X_I2S1_SDI,  active_low: true }   # IRQ_N -> fault interrupt (GPIO in); confirm SDI is I2S1 (NOT the live I2S0 audio data line)
 
 # Inference + display defaults a stock X-EVK app would pick.  Apps
 # override in their board.yaml as needed.
@@ -207,10 +270,12 @@ hw_revisions:
     max_sdk_version: ~
     status: preliminary
     board_id:
-      adc_channel:    TBD
+      adc_channel:    E1M_X_ADC7        # ANA_S7, E1M-X connector pin B14; read via the SoM (GD32-bridged on V2N) -- SoM-internal
       # Divider resistor values + per-rev expected_mv + bin_radius_mv
       # live in the private alp-sdk-internal repo per the public/private
       # split policy (see the E1M-EVK board.yaml for the rationale).
+      # The divider + this ANA_S7 routing land in the NEW PCB order
+      # (2026-05); the initial bring-up board predates it.
     notes: |
       E1M-X Development Board (45x65).  The `e1m_routes:` block is
       derived from the EVK module-connector pinout; macro names and
@@ -219,4 +284,4 @@ hw_revisions:
 
 status:
   preliminary:              true                # routes connector-derived, pending HW-writeup ratification
-  partial_hw_config:        true                # board_id ADC channel + a few control pads (CAN_STBY, CAM1_RST) still TBD
+  partial_hw_config:        true                # board_id ADC = ANA_S7 (E1M_X_ADC7) now assigned; a few control pads (CAN_STBY, CAM1_RST) still TBD

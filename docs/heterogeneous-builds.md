@@ -195,18 +195,24 @@ ipc:
 For each `ipc:` entry, `west alp-build` emits a header both halves
 `#include`:
 
+For a channel named `alp_default_rpmsg`, the stem is its
+upper-cased name, so the generated `#define`s are
+`ALP_IPC_<STEM>_NAME` / `_ADDR` / `_SIZE` / `_SRC_EPT` /
+`_DST_EPT` / `_MBOX_CH`:
+
 ```c
 /* build/generated/alp/system_ipc.h — auto-generated, do not edit */
-#define ALP_IPC_ALP_DEFAULT_RPMSG_NAME       "alp_default_rpmsg"
-#define ALP_IPC_ALP_DEFAULT_RPMSG_ADDR       0x00010000u
-#define ALP_IPC_ALP_DEFAULT_RPMSG_SIZE       0x00080000u
-#define ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT    0x000004e6u
-#define ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT    0x000004e7u
-#define ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH    0u
+#define ALP_IPC_<STEM>_NAME       "alp_default_rpmsg"
+#define ALP_IPC_<STEM>_ADDR       0x00010000u
+#define ALP_IPC_<STEM>_SIZE       0x00080000u
+#define ALP_IPC_<STEM>_SRC_EPT    0x000004e6u
+#define ALP_IPC_<STEM>_DST_EPT    0x000004e7u
+#define ALP_IPC_<STEM>_MBOX_CH    0u
 ```
 
-The macro stem is the channel `name:` upper-cased (so `alp_default_rpmsg`
-→ `ALP_IPC_ALP_DEFAULT_RPMSG_*`).  Both `linux/src/main.c` and
+The macro stem is the channel `name:` upper-cased (so
+`alp_default_rpmsg` → `ALP_IPC_ALP_DEFAULT_RPMSG_*`).  Both
+`linux/src/main.c` and
 `m33_sm/src/main.c` `#include <alp/system_ipc.h>` and use the same
 constants.  Endpoint IDs are derived from `name` deterministically via
 FNV-1a — re-running the build produces byte-identical headers.  Drift
@@ -274,6 +280,21 @@ Wall-clock fields (per-slice `duration_s`) live on the runtime Slice
 dataclass but never land in the manifest; the cache state in
 `build/.alp-build-state.json` is internal and not part of the
 declarative output either.
+
+**Machine-readable build plan.**  Tooling that wants to drive the
+build itself — the `alp` CLI / IDE extension does — consumes the plan
+instead of re-deriving it:
+
+```bash
+python3 scripts/alp_orchestrate.py --input board.yaml --emit build-plan
+```
+
+The JSON carries one entry per non-`off` core (build dir, the exact
+tool command, env) plus every generated artefact **with its contents**,
+so a consumer materialises files and runs commands without any planner
+logic of its own.  It is deterministic, write-free, and versioned by
+its own `schemaVersion` — see
+[ADR 0014](adr/0014-build-plan-emit-cli-contract.md) for the contract.
 
 ### Iterating on one slice
 
@@ -421,8 +442,8 @@ channels, declare multiple `ipc:` entries with distinct `name:` values.
 
 **Forgetting to declare `ipc:`.**  Call `alp_rpc_open()` for a name
 that doesn't appear in any `ipc:` block and you won't compile —
-`<alp/system_ipc.h>` doesn't carry the matching constants, so
-`ALP_IPC_FOO_NAME` is undeclared at the call site.  Every cross-core
+`<alp/system_ipc.h>` doesn't carry the matching constants, so the
+`ALP_IPC_<name>_NAME` macro is undeclared at the call site.  Every cross-core
 touchpoint is declared at build time, not discovered at runtime.  If
 you hardcode the strings instead, the runtime returns
 `ALP_ERR_NOSUPPORT` because no carve-out backs the name; check

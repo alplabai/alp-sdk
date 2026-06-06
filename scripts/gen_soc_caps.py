@@ -160,7 +160,7 @@ def _emit_cap_h() -> str:
         " * metadata/socs/{vendor}/{family}/{part}.json. DO NOT EDIT BY HAND --",
         " * regenerate with: python3 scripts/gen_soc_caps.py",
         " *",
-        " * Copyright 2026 ALP Lab AB",
+        " * Copyright 2026 Alp Lab AB",
         " * SPDX-License-Identifier: Apache-2.0",
         " *",
         " * @par ABI status: [ABI-EXPERIMENTAL]",
@@ -296,11 +296,13 @@ def extract_bool_caps(soc: dict[str, Any]) -> dict[str, int]:
 
 
 def emit() -> str:
-    socs: list[tuple[str, str, dict[str, int], dict[str, int]]] = []
+    socs: list[tuple[str, str, dict[str, int], dict[str, int], int]] = []
     for path in sorted(META_DIR.rglob("*.json")):
         soc = json.loads(path.read_text(encoding="utf-8"))
         ref = soc["ref"]
-        socs.append((ref, kconfig_token(ref), extract_caps(soc), extract_bool_caps(soc)))
+        arena_kib = int(soc.get("inference_arena_sram_kib", 0))
+        socs.append((ref, kconfig_token(ref), extract_caps(soc), extract_bool_caps(soc),
+                     arena_kib))
 
     lines: list[str] = [
         "/**",
@@ -321,7 +323,7 @@ def emit() -> str:
         " * capability checks accept any config — apps that want runtime",
         " * validation must select a specific SoC.",
         " *",
-        " * Copyright 2026 ALP Lab AB",
+        " * Copyright 2026 Alp Lab AB",
         " * SPDX-License-Identifier: Apache-2.0",
         " *",
         " * @par ABI status: [ABI-STABLE]",
@@ -336,7 +338,7 @@ def emit() -> str:
         "",
     ]
 
-    for i, (ref, kc, caps, bool_caps) in enumerate(socs):
+    for i, (ref, kc, caps, bool_caps, arena_kib) in enumerate(socs):
         keyword = "if" if i == 0 else "elif"
         lines.append(f"#{keyword} defined(CONFIG_ALP_SOC_{kc})")
         lines.append(f"/* {ref} */")
@@ -345,21 +347,23 @@ def emit() -> str:
             lines.append(f"#define ALP_SOC_{cap} {caps[cap]}")
         for key in BOOL_CAPS:
             lines.append(f"#define ALP_SOC_{key.upper()} {bool_caps[key.upper()]}")
+        lines.append(f"#define ALP_SOC_NPU_ARENA_SRAM_KIB {arena_kib}")
         lines.append("")
 
-    lines.append("#else  /* No SoC selected — accept any config. */")
+    lines.append("#else /* No SoC selected — accept any config. */")
     lines.append("#define ALP_SOC_REF_STR \"unknown\"")
     for cap, _ in CAPS:
         lines.append(f"#define ALP_SOC_{cap} UINT16_MAX")
     for key in BOOL_CAPS:
         lines.append(f"#define ALP_SOC_{key.upper()} UINT16_MAX")
+    lines.append("#define ALP_SOC_NPU_ARENA_SRAM_KIB UINT16_MAX")
     lines.append("")
     lines.append("#endif")
 
     _emit_cap_layer(lines)
 
     lines.append("")
-    lines.append("#endif  /* ALP_SOC_CAPS_H */")
+    lines.append("#endif /* ALP_SOC_CAPS_H */")
     lines.append("")
 
     return "\n".join(lines)

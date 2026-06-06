@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-24",
+  "generated": "2026-06-06",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -413,6 +413,11 @@
         }
       }
     },
+    "alp/board.h": {
+      "functions": {},
+      "macros": {},
+      "typedefs": {}
+    },
     "alp/boards/alp_e1m_evk.h": {
       "functions": {},
       "macros": {
@@ -655,6 +660,86 @@
     "alp/boards/alp_e1m_evk_routes.h": {
       "functions": {},
       "macros": {
+        "BOARD_CAN0": {
+          "hash": "99261e5f6a128599",
+          "value": "EVK_CAN_VEHICLE_BUS"
+        },
+        "BOARD_DAC0": {
+          "hash": "622bdd9ccbfce5fb",
+          "value": "EVK_DAC_ARDUINO_DAC0"
+        },
+        "BOARD_DAC1": {
+          "hash": "50af66e8c5b6b08c",
+          "value": "EVK_DAC_AUDIO_LINE_OUT"
+        },
+        "BOARD_ENC_ROTARY": {
+          "hash": "2c2fedfb621d05eb",
+          "value": "EVK_ENC_ROTARY"
+        },
+        "BOARD_I2C_SENSORS": {
+          "hash": "a01fc0f8caefe3ab",
+          "value": "EVK_I2C_BUS_SENSORS"
+        },
+        "BOARD_I2S_AUDIO": {
+          "hash": "d4502c849ef2d487",
+          "value": "EVK_I2S_AUDIO_CODEC"
+        },
+        "BOARD_PIN_BMI323_INT1": {
+          "hash": "71f7cf4b47e5844f",
+          "value": "EVK_PIN_BMI323_INT1"
+        },
+        "BOARD_PIN_ENCODER_SW": {
+          "hash": "6b3951abd0a538a3",
+          "value": "EVK_PIN_ENCODER_SW"
+        },
+        "BOARD_PIN_LED_BLUE": {
+          "hash": "b224d05006f662d5",
+          "value": "EVK_PIN_LED_BLUE"
+        },
+        "BOARD_PIN_LED_GREEN": {
+          "hash": "7eefb5cab8da37b1",
+          "value": "EVK_PIN_LED_GREEN"
+        },
+        "BOARD_PIN_LED_RED": {
+          "hash": "7f6b161546668cd0",
+          "value": "EVK_PIN_LED_RED"
+        },
+        "BOARD_PWM_ARD1": {
+          "hash": "e73f6b85a5cd9d52",
+          "value": "EVK_ARD_PWM1"
+        },
+        "BOARD_PWM_ARD2": {
+          "hash": "6ab99c7fc2ecb82b",
+          "value": "EVK_ARD_PWM2"
+        },
+        "BOARD_PWM_ARD3": {
+          "hash": "86260709405d4ea7",
+          "value": "EVK_ARD_PWM3"
+        },
+        "BOARD_PWM_LED_BLUE": {
+          "hash": "a701aae518999337",
+          "value": "EVK_PWM_LED_BLUE"
+        },
+        "BOARD_PWM_LED_GREEN": {
+          "hash": "9eec37182389326a",
+          "value": "EVK_PWM_LED_GREEN"
+        },
+        "BOARD_PWM_LED_RED": {
+          "hash": "3887b6a03ddad07b",
+          "value": "EVK_PWM_LED_RED"
+        },
+        "BOARD_SPI_ARDUINO": {
+          "hash": "07f6eff5b99ed57c",
+          "value": "EVK_SPI_BUS_ARDUINO"
+        },
+        "BOARD_UART_ARDUINO": {
+          "hash": "61f86877e7fa7dec",
+          "value": "EVK_UART_PORT_ARDUINO"
+        },
+        "BOARD_UART_DEBUG": {
+          "hash": "86d0a8bbfad74393",
+          "value": "EVK_UART_PORT_DEBUG"
+        },
         "EVK_ADC_ARDUINO_A1": {
           "hash": "66218ed769d9ba28",
           "value": "E1M_ADC1"
@@ -857,8 +942,88 @@
     "alp/boards/alp_e1m_x_evk_routes.h": {
       "functions": {},
       "macros": {
-        "XEVK_ADC_ARDUINO_A0": {
-          "hash": "6383eac38e69c1ba",
+        "BOARD_CAN0": {
+          "hash": "b96f3a68213927d0",
+          "value": "XEVK_CAN_BUS0"
+        },
+        "BOARD_DAC0": {
+          "hash": "e67eca8c25d22955",
+          "value": "XEVK_DAC0"
+        },
+        "BOARD_DAC1": {
+          "hash": "dd4184f301ec6d1f",
+          "value": "XEVK_DAC1"
+        },
+        "BOARD_ENC_ROTARY": {
+          "hash": "82920f370ddcb1ea",
+          "value": "XEVK_ENC_ROTARY"
+        },
+        "BOARD_I2C_SENSORS": {
+          "hash": "bbc04581e1478e9d",
+          "value": "XEVK_I2C_BUS_SENSORS"
+        },
+        "BOARD_I2S_AUDIO": {
+          "hash": "b0dd7332f22cd7a8",
+          "value": "XEVK_I2S_AUDIO"
+        },
+        "BOARD_PIN_BMI323_INT1": {
+          "hash": "bf9fbc643887c33d",
+          "value": "XEVK_PIN_BMI323_INT1"
+        },
+        "BOARD_PIN_ENCODER_SW": {
+          "hash": "940e184bb3a23a00",
+          "value": "XEVK_PIN_ENCODER_SW"
+        },
+        "BOARD_PIN_LED_BLUE": {
+          "hash": "e1d739f4862a2a33",
+          "value": "XEVK_PIN_LED_BLUE"
+        },
+        "BOARD_PIN_LED_GREEN": {
+          "hash": "b5351b4721933f7f",
+          "value": "XEVK_PIN_LED_GREEN"
+        },
+        "BOARD_PIN_LED_RED": {
+          "hash": "07fe1ede48c9e930",
+          "value": "XEVK_PIN_LED_RED"
+        },
+        "BOARD_PWM_ARD1": {
+          "hash": "d7af141754225e78",
+          "value": "XEVK_ARD_PWM1"
+        },
+        "BOARD_PWM_ARD2": {
+          "hash": "f9c4a61d38bc26b7",
+          "value": "XEVK_ARD_PWM2"
+        },
+        "BOARD_PWM_ARD3": {
+          "hash": "db06f436763304bd",
+          "value": "XEVK_ARD_PWM3"
+        },
+        "BOARD_PWM_LED_BLUE": {
+          "hash": "413216ceb7c4c84b",
+          "value": "XEVK_PWM_LED_BLUE"
+        },
+        "BOARD_PWM_LED_GREEN": {
+          "hash": "79cc0c0c10251415",
+          "value": "XEVK_PWM_LED_GREEN"
+        },
+        "BOARD_PWM_LED_RED": {
+          "hash": "0ee0bbf966a7e636",
+          "value": "XEVK_PWM_LED_RED"
+        },
+        "BOARD_SPI_ARDUINO": {
+          "hash": "3295e147bfa96cf3",
+          "value": "XEVK_SPI_BUS_ARDUINO"
+        },
+        "BOARD_UART_ARDUINO": {
+          "hash": "c1520e0a53455053",
+          "value": "XEVK_UART_PORT_ARDUINO"
+        },
+        "BOARD_UART_DEBUG": {
+          "hash": "1c7d3f3a6b23b7a1",
+          "value": "XEVK_UART_PORT_DEBUG"
+        },
+        "XEVK_ADC_MIKROBUS_AN": {
+          "hash": "36009cfa2c59e990",
           "value": "E1M_X_ADC0"
         },
         "XEVK_ARD_PWM0": {
@@ -1903,6 +2068,10 @@
           "hash": "c29fba951238345c",
           "signature": "void da9292_deinit(da9292_t *ctx);"
         },
+        "da9292_get_fault_pins": {
+          "hash": "be47e8e3fc1afd73",
+          "signature": "alp_status_t da9292_get_fault_pins(alp_gpio_t *int_n, alp_gpio_t *tw_n, uint8_t *flags);"
+        },
         "da9292_get_status": {
           "hash": "49e12c5ab4ce3658",
           "signature": "alp_status_t da9292_get_status(da9292_t *ctx, da9292_status_t *out);"
@@ -2362,8 +2531,8 @@
           "signature": "alp_status_t gd32g553_ota_abort(gd32g553_t *ctx);"
         },
         "gd32g553_ota_begin": {
-          "hash": "ff99476dc3fad1dc",
-          "signature": "alp_status_t gd32g553_ota_begin(gd32g553_t *ctx, uint32_t size_bytes, uint32_t expected_crc32, uint16_t *chunk_max_bytes, gd32g553_ota_slot_t *target_slot);"
+          "hash": "2a7a4c42e66443b9",
+          "signature": "alp_status_t gd32g553_ota_begin(gd32g553_t *ctx, uint32_t size_bytes, uint32_t expected_crc32, const gd32g553_version_t *fw_version, uint16_t *chunk_max_bytes, gd32g553_ota_slot_t *target_slot);"
         },
         "gd32g553_ota_commit": {
           "hash": "a69cb1673b78011a",
@@ -2518,20 +2687,28 @@
         "GD32G553_HOST_PROTOCOL_MAJOR": {
           "hash": "8cbf9804b6cc9204",
           "value": "0u"
+        },
+        "GD32G553_LINK_FEAT_STATUS_SEQ": {
+          "hash": "21952b50a552699a",
+          "value": "0x01u"
+        },
+        "GD32G553_STATUS_CODE_MASK": {
+          "hash": "5fac453e1d04fcbd",
+          "value": "0x0Fu"
         }
       },
       "typedefs": {
         "gd32g553_cmd_t": {
-          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_TMU_COMPUTE = 0x90, GD32G553_CMD_ADC_STREAM_CONFIGURE_DSP = 0x36, GD32G553_CMD_ADC_DSP_CHAIN_OPEN = 0x37, GD32G553_CMD_ADC_DSP_STAGE_PUSH = 0x38, GD32G553_CMD_ADC_DSP_CHAIN_BIND = 0x39, GD32G553_CMD_PWM_CAPTURE_BEGIN = 0x23, GD32G553_CMD_PWM_CAPTURE_READ = 0x24, GD32G553_CMD_PWM_CAPTURE_END = 0x25, GD32G553_CMD_PWM_SINGLE_PULSE = 0x26, GD32G553_CMD_TIMER_SYNC = 0x27, GD32G553_CMD_POWER_MODE_SET = 0x28, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
-          "hash": "cba81c4fc55be27b"
+          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_TMU_COMPUTE = 0x90, GD32G553_CMD_ADC_STREAM_CONFIGURE_DSP = 0x36, GD32G553_CMD_ADC_DSP_CHAIN_OPEN = 0x37, GD32G553_CMD_ADC_DSP_STAGE_PUSH = 0x38, GD32G553_CMD_ADC_DSP_CHAIN_BIND = 0x39, GD32G553_CMD_PWM_CAPTURE_BEGIN = 0x23, GD32G553_CMD_PWM_CAPTURE_READ = 0x24, GD32G553_CMD_PWM_CAPTURE_END = 0x25, GD32G553_CMD_PWM_SINGLE_PULSE = 0x26, GD32G553_CMD_TIMER_SYNC = 0x27, GD32G553_CMD_POWER_MODE_SET = 0x28, GD32G553_CMD_LINK_FEATURES = 0x81, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
+          "hash": "bd9741a0a277b97f"
         },
         "gd32g553_ota_slot_t": {
-          "definition": "typedef enum { GD32G553_OTA_SLOT_INVALID = 0u, GD32G553_OTA_SLOT_A = 1u, GD32G553_OTA_SLOT_B = 2u, } gd32g553_ota_slot_t;",
-          "hash": "23fea484c4ea9612"
+          "definition": "typedef enum { GD32G553_OTA_SLOT_A = 0u, GD32G553_OTA_SLOT_B = 1u, GD32G553_OTA_SLOT_NONE = 0xFFu, } gd32g553_ota_slot_t;",
+          "hash": "01b6e93c128891a7"
         },
         "gd32g553_ota_state_t": {
-          "definition": "typedef enum { GD32G553_OTA_STATE_IDLE = 0, GD32G553_OTA_STATE_RECEIVING = 1, GD32G553_OTA_STATE_VERIFIED = 2, GD32G553_OTA_STATE_PENDING_COMMIT = 3, GD32G553_OTA_STATE_FAULT = 4, } gd32g553_ota_state_t;",
-          "hash": "08d8fd1b4fb1d85a"
+          "definition": "typedef enum { GD32G553_OTA_STATE_IDLE = 0, GD32G553_OTA_STATE_READY = 1, GD32G553_OTA_STATE_BUSY = 2, GD32G553_OTA_STATE_VERIFIED = 3, GD32G553_OTA_STATE_ERROR = 4, } gd32g553_ota_state_t;",
+          "hash": "255bbe086e365366"
         },
         "gd32g553_pwm_align_t": {
           "definition": "typedef enum { GD32G553_PWM_ALIGN_EDGE = 0, GD32G553_PWM_ALIGN_CENTER_UP = 1, GD32G553_PWM_ALIGN_CENTER_DOWN = 2, GD32G553_PWM_ALIGN_CENTER_BOTH = 3, } gd32g553_pwm_align_t;",
@@ -7201,13 +7378,17 @@
         "alp_inference_open": {
           "hash": "176980d6c3627f80",
           "signature": "alp_inference_t * alp_inference_open(const alp_inference_config_t *cfg);"
+        },
+        "alp_inference_open_alpmodel": {
+          "hash": "b630c05efb03a9f9",
+          "signature": "alp_inference_t * alp_inference_open_alpmodel(const alp_model_open_opts_t *opts);"
         }
       },
       "macros": {},
       "typedefs": {
         "alp_inference_backend_t": {
-          "definition": "typedef enum { ALP_INFERENCE_BACKEND_AUTO = 0, ALP_INFERENCE_BACKEND_CPU = 1, ALP_INFERENCE_BACKEND_ETHOS_U = 2, ALP_INFERENCE_BACKEND_DRPAI = 3, ALP_INFERENCE_BACKEND_DEEPX_DX = 4 } alp_inference_backend_t;",
-          "hash": "04fb75226b383e41"
+          "definition": "typedef enum { ALP_INFERENCE_BACKEND_AUTO = 0, ALP_INFERENCE_BACKEND_CPU = 1, ALP_INFERENCE_BACKEND_ETHOS_U = 2, ALP_INFERENCE_BACKEND_DRPAI = 3, ALP_INFERENCE_BACKEND_DEEPX_DXM1 = 4 } alp_inference_backend_t;",
+          "hash": "39aad73f1220b0b4"
         },
         "alp_inference_dtype_t": {
           "definition": "typedef enum { ALP_INFERENCE_DTYPE_F32 = 0, ALP_INFERENCE_DTYPE_F16 = 1, ALP_INFERENCE_DTYPE_INT8 = 2, ALP_INFERENCE_DTYPE_UINT8 = 3, ALP_INFERENCE_DTYPE_INT16 = 4, ALP_INFERENCE_DTYPE_INT32 = 5 } alp_inference_dtype_t;",
@@ -7224,6 +7405,10 @@
         "model_size": {
           "definition": "typedef struct { const void *model_data; size_t model_size;",
           "hash": "51b78f8e3d9ba0d1"
+        },
+        "size": {
+          "definition": "typedef struct { const void *data; size_t size;",
+          "hash": "97167131422960af"
         },
         "size_bytes": {
           "definition": "typedef struct { void *data; size_t size_bytes;",
@@ -7311,6 +7496,42 @@
         "keepalive_s": {
           "definition": "typedef struct { const char *broker_uri; const char *client_id; const char *username; const char *password; uint16_t keepalive_s;",
           "hash": "a7e99fc7d2affff5"
+        }
+      }
+    },
+    "alp/model.h": {
+      "functions": {
+        "alp_model_parse": {
+          "hash": "2f6a2daa899bea6a",
+          "signature": "alp_status_t alp_model_parse(const uint8_t *data, size_t size, alp_model_t *out);"
+        }
+      },
+      "macros": {
+        "ALP_MODEL_CONTAINER_V": {
+          "hash": "fccd02fa26c3221c",
+          "value": "1u"
+        },
+        "ALP_MODEL_MAGIC": {
+          "hash": "183f18166efcf711",
+          "value": "\"ALPM\""
+        },
+        "ALP_MODEL_MAX_TARGETS": {
+          "hash": "51bfdf8a922cd883",
+          "value": "8u"
+        },
+        "ALP_MODEL_STR_MAX": {
+          "hash": "9ee336e451079dbf",
+          "value": "32u"
+        }
+      },
+      "typedefs": {
+        "arena_bytes": {
+          "definition": "typedef struct { char backend[ALP_MODEL_STR_MAX]; char silicon_ref[ALP_MODEL_STR_MAX]; char blob_format[ALP_MODEL_STR_MAX]; char accel_config[ALP_MODEL_STR_MAX]; uint32_t arena_bytes;",
+          "hash": "b13afabbcc0620ee"
+        },
+        "size": {
+          "definition": "typedef struct { const uint8_t *data; size_t size;",
+          "hash": "0dc495449d626d06"
         }
       }
     },
@@ -7540,7 +7761,12 @@
           "signature": "alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_SPI_NO_CS": {
+          "hash": "e4997898b273a23e",
+          "value": "0xFFFFFFFFu"
+        }
+      },
       "typedefs": {
         "alp_gpio_cb_t": {
           "definition": "typedef void (*alp_gpio_cb_t)(alp_gpio_t *pin, void *user);",
@@ -7579,8 +7805,8 @@
           "hash": "3d4c6b8b6611f2e7"
         },
         "alp_status_t": {
-          "definition": "typedef enum { ALP_OK = 0, ALP_ERR_INVAL = -1, ALP_ERR_NOT_READY = -2, ALP_ERR_BUSY = -3, ALP_ERR_TIMEOUT = -4, ALP_ERR_IO = -5, ALP_ERR_NOSUPPORT = -6, ALP_ERR_NOMEM = -7, ALP_ERR_OUT_OF_RANGE = -8, ALP_ERR_NOT_PRESENT_ON_THIS_SOC = -9, ALP_ERR_NOT_IMPLEMENTED = -10 } alp_status_t;",
-          "hash": "aea8362fc383ca21"
+          "definition": "typedef enum { ALP_OK = 0, ALP_ERR_INVAL = -1, ALP_ERR_NOT_READY = -2, ALP_ERR_BUSY = -3, ALP_ERR_TIMEOUT = -4, ALP_ERR_IO = -5, ALP_ERR_NOSUPPORT = -6, ALP_ERR_NOMEM = -7, ALP_ERR_OUT_OF_RANGE = -8, ALP_ERR_NOT_PRESENT_ON_THIS_SOC = -9, ALP_ERR_NOT_IMPLEMENTED = -10, ALP_ERR_VERSION = -11, ALP_ERR_NO_BACKEND = -12, ALP_ERR_NO_FIT = -13, ALP_ERR_NOT_FOUND = -14, ALP_ERR_NOT_PROVISIONED = -15 } alp_status_t;",
+          "hash": "55c3947676e50016"
         },
         "alp_uart_parity_t": {
           "definition": "typedef enum { ALP_UART_PARITY_NONE = 0, ALP_UART_PARITY_EVEN = 1, ALP_UART_PARITY_ODD = 2 } alp_uart_parity_t;",
@@ -8254,6 +8480,10 @@
         },
         "ALP_SOC_NEON": {
           "hash": "63f438f0ee2e4669",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_NPU_ARENA_SRAM_KIB": {
+          "hash": "161006f809f7deca",
           "value": "UINT16_MAX"
         },
         "ALP_SOC_PDM_COUNT": {

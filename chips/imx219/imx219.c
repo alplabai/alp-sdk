@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * Sony IMX219 MIPI CSI-2 driver (SCCB).  See <alp/chips/imx219.h>.

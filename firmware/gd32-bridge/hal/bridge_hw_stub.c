@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * Default HAL implementation: every operation returns
@@ -10,8 +10,8 @@
  * underlying HW operation failed" (IO).
  *
  * The real implementation against the GigaDevice firmware library
- * lives in bridge_hw_gd32.c; the build picks one or the other via
- * BRIDGE_HAL_BACKEND in CMakeLists.txt.
+ * lives in the per-peripheral TUs under hal/gd32/; the build picks
+ * one or the other via BRIDGE_HAL_BACKEND in CMakeLists.txt.
  */
 
 #include <stdint.h>
@@ -147,7 +147,8 @@ int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks)
 
 uint8_t bridge_hw_da9292_status_cached(void)
 {
-    return 0xFFu; /* "no PMIC poll has populated the cache yet" sentinel */
+    return 0xFFu; /* "no sample available" sentinel (matches real HW:
+                   * no DA9292 net reaches the GD32 on this SoM rev) */
 }
 
 /* --------------------------------------------------------------- */

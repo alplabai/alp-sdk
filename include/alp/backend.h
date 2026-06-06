@@ -11,7 +11,7 @@
  * See docs/architecture/backend-registry.md for the design
  * narrative.
  *
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * @par ABI status: [ABI-EXPERIMENTAL]

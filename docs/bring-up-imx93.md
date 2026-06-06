@@ -14,7 +14,7 @@ USB-UART adapter, and a 1 Gb Ethernet link partner.
 > **Yocto-first family.**  Unlike the AEN family (Zephyr / bare-
 > metal), the N93 family targets **Yocto Linux** as its primary
 > OS.  The Cortex-M33 side runs Zephyr as a co-processor; the
-> Cortex-A55s run a Linux kernel built from `meta-alp`.  This
+> Cortex-A55s run a Linux kernel built from `meta-alp-sdk`.  This
 > bring-up walks the A55 boot first; M33 attach lands in §5.
 
 ## 0. Pre-flight
@@ -37,8 +37,8 @@ Inventory check before powering anything:
 
 ## 1. First-power smoke test
 
-1. Insert a microSD card flashed with a `core-image-minimal`
-   built from `meta-alp` (see §3 below for the build).
+1. Insert a microSD card flashed with `alp-image-edge`
+   built from `meta-alp-sdk` (see §3 below for the build).
 2. Connect a current-limited bench supply (1.5 A limit) to V_IN.
 3. Power on; watch the supply.  Steady-state current with
    Yocto idle at the login prompt: **~280..400 mA**.
@@ -57,7 +57,7 @@ Check the PMIC's `INT_STATUS` register over BRD_I2C; the
 1. Wire USB-UART to UART1 on the board (silkscreen
    `USB_UART_TXD` / `_RXD`).  Standard 115200 8N1.
 2. Open a terminal.
-3. Insert the microSD with the `meta-alp` image and power on.
+3. Insert the microSD with the `alp-image-edge` image and power on.
 
 Expected output within ~5 s:
 
@@ -70,7 +70,7 @@ Booting Linux on physical CPU 0x0000000000 [0x412fd050]
 Linux version 6.6.x (alp@alp-build)
 ...
 Welcome to ALP Yocto (kirkstone, branch ...)
-e1m-n93 login:
+e1m-nx9101-a55 login:
 ```
 
 Login as `root` (no password on the bring-up image).  If you
@@ -87,31 +87,38 @@ bricked SoC fuse (rare).
 mkdir -p ~/work/yocto-alp && cd ~/work/yocto-alp
 git clone https://git.yoctoproject.org/poky -b kirkstone
 cd poky
+# meta-imx depends on meta-freescale; clone both.
+git clone https://github.com/Freescale/meta-freescale -b kirkstone
 git clone https://github.com/nxp-imx/meta-imx -b kirkstone
 git clone https://github.com/alplabai/alp-sdk    # then symlink meta-alp-sdk
 ln -s alp-sdk/meta-alp-sdk ./meta-alp-sdk
 
 source oe-init-build-env build-n93
 
-# Add the three layers:
-bitbake-layers add-layer ../meta-imx/meta-bsp
-bitbake-layers add-layer ../meta-imx/meta-ml
+# Add the layers (meta-freescale first; meta-imx sublayers depend on it):
+bitbake-layers add-layer ../meta-freescale
+bitbake-layers add-layer ../meta-imx/meta-imx-bsp
+bitbake-layers add-layer ../meta-imx/meta-imx-ml
 bitbake-layers add-layer ../meta-alp-sdk
 
-# In conf/local.conf:
-echo 'MACHINE = "e1m-n93"' >> conf/local.conf
-echo 'DISTRO  = "alp-distro"' >> conf/local.conf
+# In conf/local.conf -- keep the meta-imx default DISTRO (fsl-imx-*);
+# meta-alp-sdk ships no standalone distro, only a Mender include
+# (conf/distro/include/mender.inc) layered onto the chosen distro.
+echo 'MACHINE = "e1m-nx9101-a55"' >> conf/local.conf
 
+# Build the alp-sdk edge image (alp-image-edge), which carries the
+# alp-sdk payload -- chips, runtime, EdgeAI demos.  A plain
+# core-image-minimal builds, but ships NONE of the alp-sdk payload.
 # Build (45-90 min the first time; warm cache: 5-10 min).
-bitbake core-image-minimal
+bitbake alp-image-edge
 ```
 
 The output image lands at
-`tmp/deploy/images/e1m-n93/core-image-minimal-e1m-n93.wic`.
+`tmp/deploy/images/e1m-nx9101-a55/alp-image-edge-e1m-nx9101-a55.wic`.
 Flash to microSD:
 
 ```bash
-sudo dd if=tmp/deploy/images/e1m-n93/core-image-minimal-e1m-n93.wic \
+sudo dd if=tmp/deploy/images/e1m-nx9101-a55/alp-image-edge-e1m-nx9101-a55.wic \
         of=/dev/sdX bs=4M conv=fsync
 ```
 

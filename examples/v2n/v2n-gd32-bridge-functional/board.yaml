@@ -1,0 +1,22 @@
+# board.yaml -- per-app project configuration for v2n-gd32-bridge-functional.
+som:
+  sku: E1M-V2M101
+
+preset: e1m-x-evk
+cores:
+  a55_cluster:
+    os: "off"
+  m33_sm:
+    app: ./src
+    # SPI is the 25 MHz fast path under test; I2C is enabled so the
+    # driver's hybrid surface compiles (the suite passes i2c=NULL --
+    # BRD_I2C correctness has its own HIL coverage).
+    peripherals:
+      - spi
+      - i2c
+
+chips:
+  - gd32g553
+
+diagnostics:
+  log_level: info

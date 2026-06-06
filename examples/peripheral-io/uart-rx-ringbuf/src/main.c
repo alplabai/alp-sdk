@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * uart-rx-ringbuf — exercise the opt-in LwRB-backed RX path on
@@ -44,34 +44,35 @@
 
 #include "alp/peripheral.h"
 
-/* EVK_UART_PORT_DEBUG is a board-macro from the generated routes
- * header (= E1M_UART0); rebind it in board.yaml `pins:` to port this
- * app to another board without touching the code below. */
-#include "alp/boards/alp_e1m_evk_routes.h"
+/* BOARD_UART_DEBUG is a portable cross-EVK alias from <alp/board.h>:
+ *   E1M EVK  -> EVK_UART_PORT_DEBUG  -> E1M_UART0
+ *   E1M-X EVK -> XEVK_UART_PORT_DEBUG -> E1M_X_UART0
+ * Rebind it in board.yaml `pins:` to port this app to another board
+ * without touching the code below. */
+#include "alp/board.h"
 
 /* Backing store for the ring.  64 bytes is enough for the CI run;
  * production apps size against the worst-case drain latency formula
  * in the header comment above. */
 static uint8_t rx_backing[64];
 
-int main(void)
+int            main(void)
 {
-    printf("[ringbuf] open EVK_UART_PORT_DEBUG @ 115200 8N1\n");
+    printf("[ringbuf] open BOARD_UART_DEBUG @ 115200 8N1\n");
 
     /* The classic open() — no different from the uart-echo example.
      * The ringbuf is a *layer on top*, not a replacement.  Apps that
      * mix polled reads with ringbuf reads on the same handle work,
      * though the typical pattern is one or the other. */
     alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
-        .port_id   = EVK_UART_PORT_DEBUG, /* = E1M_UART0 */
+        .port_id   = BOARD_UART_DEBUG, /* E1M EVK: E1M_UART0; E1M-X EVK: E1M_X_UART0 */
         .baudrate  = 115200,
         .data_bits = 8,
         .stop_bits = 1,
         .parity    = ALP_UART_PARITY_NONE,
     });
     if (u == NULL) {
-        printf("[ringbuf] open failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[ringbuf] open failed: alp_last_error=%d\n", (int)alp_last_error());
         printf("[ringbuf] done\n");
         return 0;
     }
@@ -82,16 +83,14 @@ int main(void)
      * and lets the buffer live in a specific region (e.g. DTCM /
      * tightly-coupled SRAM on Cortex-M55 for lowest IRQ-to-consumer
      * latency). */
-    alp_uart_rx_ringbuf_t *rb = alp_uart_rx_ringbuf_attach(
-        u, rx_backing, sizeof(rx_backing));
+    alp_uart_rx_ringbuf_t *rb = alp_uart_rx_ringbuf_attach(u, rx_backing, sizeof(rx_backing));
     if (rb == NULL) {
         /* On builds without CONFIG_ALP_SDK_UART_RX_RINGBUF the
          * attach helper returns NULL with ALP_ERR_NOSUPPORT.  The
          * example's prj.conf flips that config on so we shouldn't
          * see this in CI -- but real-world apps should still
          * defend against it. */
-        printf("[ringbuf] attach failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[ringbuf] attach failed: alp_last_error=%d\n", (int)alp_last_error());
         alp_uart_close(u);
         printf("[ringbuf] done\n");
         return 0;
@@ -112,11 +111,11 @@ int main(void)
      * is empty, got=0 and we move on.  This is the pattern apps
      * follow at every wakeup -- pop opportunistically, never block
      * waiting for the ring. */
-    uint8_t scratch[32];
-    size_t  got = 0;
-    alp_status_t s = alp_uart_rx_ringbuf_pop(rb, scratch, sizeof(scratch), &got);
-    printf("[ringbuf] pop -> status=%d got=%zu count_remaining=%zu\n",
-           (int)s, got, alp_uart_rx_ringbuf_count(rb));
+    uint8_t      scratch[32];
+    size_t       got = 0;
+    alp_status_t s   = alp_uart_rx_ringbuf_pop(rb, scratch, sizeof(scratch), &got);
+    printf("[ringbuf] pop -> status=%d got=%zu count_remaining=%zu\n", (int)s, got,
+           alp_uart_rx_ringbuf_count(rb));
 
     /* Detach when the ringbuf is no longer needed.  Disables the
      * IRQ-driven RX path so the underlying alp_uart_t reverts to

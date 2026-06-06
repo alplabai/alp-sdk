@@ -11,6 +11,10 @@ tests:
   alp_sdk.examples.v2n.xspi_flash_readwrite.native_sim:
     platform_allow:
       - native_sim/native/64
+    # native_sim has no xSPI controller -- this overlay backs the
+    # flash API with the in-RAM flash simulator so the build links
+    # (real V2N keeps the xSPI flash driver from prj.conf).
+    extra_args: EXTRA_CONF_FILE=generated/native_sim.conf
     tags:
       - alp-sdk
       - example

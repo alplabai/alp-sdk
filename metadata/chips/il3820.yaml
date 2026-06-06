@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Solomon IL3820 4.2" tri-colour e-paper (SPI).
+# Alp SDK chip manifest: Solomon IL3820 4.2" tri-colour e-paper (SPI).
 schema_version:   1
 chip_id:          il3820
 driver_status:    stub

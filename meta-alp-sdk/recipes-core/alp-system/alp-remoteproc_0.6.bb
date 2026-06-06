@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Yocto recipe for the ALP SDK heterogeneous-IPC remoteproc launcher.
+# Yocto recipe for the Alp SDK heterogeneous-IPC remoteproc launcher.
 #
 # Installs:
 #   - alp-remoteproc.service  -- systemd unit (oneshot, RemainAfterExit).
@@ -13,7 +13,7 @@
 # specific images) -- both halves of the dual-OS boot need this unit
 # to finish before userspace can call into <alp/rpc.h>.
 
-SUMMARY = "ALP SDK remoteproc lifecycle for heterogeneous IPC"
+SUMMARY = "Alp SDK remoteproc lifecycle for heterogeneous IPC"
 DESCRIPTION = "Walks /sys/class/remoteproc/, starts every M-class \
                firmware whose `firmware` attribute is in the alp/ \
                namespace, and waits for the kernel to publish \
@@ -26,7 +26,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 SRC_URI = " \
     file://alp-remoteproc.service \
-    file://files/alp-remoteproc-start.sh \
+    file://alp-remoteproc-start.sh \
 "
 
 S = "${WORKDIR}"
@@ -42,7 +42,7 @@ do_install() {
         ${D}${systemd_unitdir}/system/alp-remoteproc.service
 
     install -d ${D}${bindir}
-    install -m 0755 ${WORKDIR}/files/alp-remoteproc-start.sh \
+    install -m 0755 ${WORKDIR}/alp-remoteproc-start.sh \
         ${D}${bindir}/alp-remoteproc-start.sh
 }
 

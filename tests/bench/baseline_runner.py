@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# Copyright 2026 ALP Lab AB
+# Copyright 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 """
-Performance-baseline harness for the ALP SDK.
+Performance-baseline harness for the Alp SDK.
 
 Reads `alp_bench`'s stdout (one line per microbench case, `<name> <iters>
 iters <ns> ns/iter`), records the results into a per-target YAML file

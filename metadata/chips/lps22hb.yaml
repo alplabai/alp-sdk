@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: STMicroelectronics LPS22HB pressure sensor.
+# Alp SDK chip manifest: STMicroelectronics LPS22HB pressure sensor.
 schema_version:   1
 chip_id:          lps22hb
 driver_status:    stub

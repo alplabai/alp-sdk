@@ -9,7 +9,7 @@ in-field firmware updates.
 **Prerequisites:**
 
 - Tutorial [01](01-first-build.md) completed.
-- A V2N / V2N-M1 / i.MX 93 module running a `meta-alp` Yocto
+- A V2N / V2N-M1 / i.MX 93 module running a `meta-alp-sdk` Yocto
   image.
 - A reachable Mender server.  For development: stand up
   Mender's open-source server locally (15 minutes; instructions
@@ -56,7 +56,7 @@ prompted.  Save the credentials.
 > ([hosted.mender.io](https://hosted.mender.io)).  Same client
 > protocol; the URL changes.
 
-## 2. Enable Mender in your `meta-alp` build (5 minutes)
+## 2. Enable Mender in your `meta-alp-sdk` build (5 minutes)
 
 ```yaml
 # In your board.yaml:
@@ -102,7 +102,7 @@ MACHINE=e1m-v2n101-a55
 bitbake core-image-minimal-mender
 ```
 
-Output: `tmp/deploy/images/e1m-v2n/core-image-minimal-mender-e1m-v2n.mender`.
+Output: `tmp/deploy/images/e1m-v2n101-a55/core-image-minimal-mender-e1m-v2n101-a55.mender`.
 This is the **Mender artefact** -- a tar archive containing the
 rootfs blob + metadata + the signature.
 
@@ -110,7 +110,7 @@ Flash the initial image to microSD or eMMC:
 
 ```bash
 sudo dd \
-    if=tmp/deploy/images/e1m-v2n/core-image-minimal-mender-e1m-v2n.wic \
+    if=tmp/deploy/images/e1m-v2n101-a55/core-image-minimal-mender-e1m-v2n101-a55.wic \
     of=/dev/sdX bs=4M conv=fsync
 ```
 
@@ -136,7 +136,7 @@ journalctl -u mender-client -n 50
 
 ## 5. Build + deploy an updated image (5 minutes)
 
-Make a small change in your meta-alp recipes (e.g. bump a
+Make a small change in your meta-alp-sdk recipes (e.g. bump a
 package version, add a debug log).  Rebuild:
 
 ```bash
@@ -184,7 +184,7 @@ The Mender UI shows the deployment as `FAILED -- reverted`.
       enterprise).  Don't ship to the field pointed at a
       laptop-localhost server.
 - [ ] Real CA-signed TLS cert on the Mender server.  Pin the
-      CA bundle in `meta-alp`'s Mender client config.
+      CA bundle in `meta-alp-sdk`'s Mender client config.
 - [ ] Sign all artefacts (Mender's `mender-artifact write`
       `--key-pair` mode).  Verify on the device side via the
       Mender client's `ArtifactVerifyKey` config.

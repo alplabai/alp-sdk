@@ -61,6 +61,7 @@
     }
   ],
   "soc_ram_kb": 13824,
+  "inference_arena_sram_kib": 0,
   "soc_flash_mb": 5.5,
   "always_on_sram_kb": 4,
   "peripherals": {
@@ -232,6 +233,6 @@
   "notes": [
     "Datasheet: 187 pages, ADTS0007 v2.8 May 2024.",
     "Variants differ in NPU-HP presence, CAN-FD presence, MRAM size (5.5 MB vs 1.5 MB), and SRAM tier (13.5 / 8.25 / 5.75 / 3.75 MB).",
-    "AE302F80F55D5LE is the variant ALP Lab uses on the E1M-AEN301 module SKU."
+    "AE302F80F55D5LE is the variant Alp Lab uses on the E1M-AEN301 module SKU."
   ]
 }

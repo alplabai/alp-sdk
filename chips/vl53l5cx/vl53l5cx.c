@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * ST VL53L5CX multi-zone ToF driver (I²C).  See <alp/chips/vl53l5cx.h>.

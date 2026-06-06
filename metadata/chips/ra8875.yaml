@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: RAiO RA8875 LCD controller (SPI).
+# Alp SDK chip manifest: RAiO RA8875 LCD controller (SPI).
 schema_version:   1
 chip_id:          ra8875
 driver_status:    stub

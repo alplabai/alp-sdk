@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Renesas / IDT 5L35023B audio clock generator.
+# Alp SDK chip manifest: Renesas / IDT 5L35023B audio clock generator.
 schema_version:   1
 chip_id:          clk_5l35023b
 driver_status:    partial          # Lifecycle + raw R/W + register dump + typed Dash-Code-ID

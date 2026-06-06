@@ -22,7 +22,7 @@ Both SKUs share the same silicon + PCB.  Pick by memory budget.
 | Application SoC         | Renesas RZ/V2N (R9A09G056N44) | -- | (vendor HAL)                                  |
 | Companion supervisor MCU| GigaDevice GD32G553MEY7TR  | SPI + I2C bridge | [`<alp/chips/gd32g553.h>`](../../include/alp/chips/gd32g553.h) |
 | Primary PMIC            | Qorvo ACT88760-120.E1      | I2C `0x25/0x26`  | [`<alp/chips/act8760.h>`](../../include/alp/chips/act8760.h) |
-| Secondary PMIC          | Renesas DA9292             | I2C `0x1C`       | [`<alp/chips/da9292.h>`](../../include/alp/chips/da9292.h) |
+| Secondary PMIC          | Renesas DA9292             | I2C `0x1E`       | [`<alp/chips/da9292.h>`](../../include/alp/chips/da9292.h) |
 | Optional buck (LPDDR4X) | TI TPS628640 (1×, optional)| I2C `0x4D`       | [`<alp/chips/tps628640.h>`](../../include/alp/chips/tps628640.h) |
 | Clock generator         | Renesas / IDT 5L35023B     | I2C `0x68`       | [`<alp/chips/clk_5l35023b.h>`](../../include/alp/chips/clk_5l35023b.h) |
 | RTC                     | Micro Crystal RV-3028-C7   | I2C `0x52`       | [`<alp/chips/rv3028c7.h>`](../../include/alp/chips/rv3028c7.h) |
@@ -46,9 +46,9 @@ peripherals (eight PWM channels, dual ADC + DAC bank, the Wi-Fi/BT
 REG_ON pins, OPTIGA reset, 18 IO routes to the E1M edge).  The
 host driver speaks both transports:
 
-* **SPI fast path** -- Renesas RSPI master on `P76/P77/P96/P97`
-  ↔ GD32 slave on `PA8/9/10/PB15`.  Use for high-frequency
-  telemetry + PWM updates.
+* **SPI fast path** -- Renesas SCI7 Simple-SPI master on
+  `P76/P77/P96/P97` ↔ GD32 slave on `PA8/9/10/PB15`.  Use for
+  high-frequency telemetry + PWM updates.
 * **I2C management path** -- on BRD_I2C (`P07/P06`), GD32 at
   7-bit `0x70`.  Use when you're already on BRD_I2C for the
   PMIC fleet.
@@ -71,14 +71,14 @@ Two PMICs cooperate to bring V2N up:
 
 ## Boot + identification
 
-Two-stage SoM-ID flow:
+SoM identification is EEPROM-authoritative:
 
-1. **EEPROM manifest** -- 128-byte block at offset 0 of the
-   on-module 24C128 EEPROM carrying family / SKU / hw_rev /
-   serial / mfg date.  Read via `alp_hw_info_read()`.
-2. **BOARD_ID ADC** -- per-rev resistor divider on ADC2_CH7
-   (stubbed; pending the per-family generated header from
-   `scripts/alp_project.py`).
+**EEPROM manifest** -- 128-byte block at offset 0 of the on-module
+24C128 carrying family / SKU / hw_rev / serial / mfg date, integrity-
+checked (magic + schema + CRC32). Read via `alp_hw_info_read()`. A
+blank module returns `ALP_ERR_NOT_PROVISIONED`; a corrupt one returns
+`ALP_ERR_IO`. The EEPROM is the sole source of the SoM revision (no
+ADC cross-check).
 
 Full procedure: [`docs/board-id.md`](../board-id.md).
 Example: [`examples/v2n/v2n-board-id-readout/`](../../examples/v2n/v2n-board-id-readout/).

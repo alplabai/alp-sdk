@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: QST QMC5883L 3-axis magnetic compass.
+# Alp SDK chip manifest: QST QMC5883L 3-axis magnetic compass.
 schema_version:   1
 chip_id:          qmc5883l
 driver_status:    complete

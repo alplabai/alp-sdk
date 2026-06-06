@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Quectel BG77 LTE-M / NB-IoT / GNSS module.
+# Alp SDK chip manifest: Quectel BG77 LTE-M / NB-IoT / GNSS module.
 schema_version:   1
 chip_id:          quectel_bg77
 driver_status:    stub

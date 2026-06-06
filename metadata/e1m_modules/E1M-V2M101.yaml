@@ -7,7 +7,7 @@
 schema_version: 1
 
 sku: E1M-V2M101
-family: renesas-rzv2n
+family: renesas-rzv2n-deepx
 silicon: renesas:rzv2n:n44
 silicon_variant: R9A09G056N44GBG         # see metadata/socs/renesas/rzv2n/n44.json variants[]
 
@@ -60,7 +60,7 @@ inference:
   preferred_backend:    deepx_dxm1             # DX-M1 NPU on-module
 
 capabilities:
-  deepx_dx:             true       # DEEPX DX-M1 NPU on-module via PCIe.
+  deepx_dxm1:           true       # DEEPX DX-M1 NPU on-module via PCIe.
   cau:                  true       # GD32G553 supervisor's CAU accessible via bridge.
   optiga_trust_m:       true
   quadspi_dma:          true       # GD32-side QuadSPI accessible via bridge.
@@ -75,7 +75,12 @@ topology:
     toolchain: poky-glibc
   m33_sm:
     app: alp-stock-shim
-    board: alp_e1m_v2m101_m33_sm      # Zephyr board target
+    # Qualified Zephyr board target: the RZ/V2N SoC is multi-cluster
+    # (A55 + M33), so `west build -b` needs the <soc>/<cpucluster>
+    # qualifiers.  Zephyr models the die as the n48gbg variant (the
+    # n44/n48 delta is GPU/ISP/crypto fusing, devicetree-identical for
+    # the M33 + SPI/I2C).
+    board: alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33
     toolchain: arm-zephyr-eabi
 
 # Memory layout (SRAM banks + MRAM) is derived from the SoC variant
@@ -160,8 +165,8 @@ pad_routes:
 helper_firmware:
   - name:          gd32_bridge
     chip:          gd32g553
-    firmware_path: firmware/gd32-bridge/build/gd32_bridge.bin
-    flash_method:  swd_v2n_host
+    firmware_path: firmware/gd32-bridge/build/gd32/gd32-bridge.bin
+    flash_method:  swd_probe
     flash_args:
       interface: cmsis-dap
       target:    gd32g553

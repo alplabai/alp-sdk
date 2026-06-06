@@ -3,7 +3,7 @@
 schema_version: 1
 
 sku: E1M-V2M102
-family: renesas-rzv2n
+family: renesas-rzv2n-deepx
 silicon: renesas:rzv2n:n44
 silicon_variant: R9A09G056N44GBG         # see metadata/socs/renesas/rzv2n/n44.json variants[]
 
@@ -56,7 +56,7 @@ inference:
   preferred_backend:    deepx_dxm1
 
 capabilities:
-  deepx_dx:             true       # DEEPX DX-M1 NPU on-module via PCIe.
+  deepx_dxm1:           true       # DEEPX DX-M1 NPU on-module via PCIe.
   cau:                  true       # GD32G553 supervisor's CAU accessible via bridge.
   optiga_trust_m:       true
   quadspi_dma:          true       # GD32-side QuadSPI accessible via bridge.
@@ -156,8 +156,8 @@ pad_routes:
 helper_firmware:
   - name:          gd32_bridge
     chip:          gd32g553
-    firmware_path: firmware/gd32-bridge/build/gd32_bridge.bin
-    flash_method:  swd_v2n_host
+    firmware_path: firmware/gd32-bridge/build/gd32/gd32-bridge.bin
+    flash_method:  swd_probe
     flash_args:
       interface: cmsis-dap
       target:    gd32g553

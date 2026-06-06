@@ -71,8 +71,8 @@ deltas (verify when the HW config writeup lands):
 ## What this means for the SDK
 
 - v0.2 ships first-class support for the E1M-X EVK + V2N101 SoM
-  via [`tests/zephyr/peripheral/boards/alp_e1m_evk_v2n.overlay`](../../tests/zephyr/peripheral/boards/alp_e1m_evk_v2n.overlay)
-  (currently parked) and a placeholder header at
+  via `tests/zephyr/peripheral/boards/alp_e1m_evk_v2n.overlay`
+  (currently parked, not yet committed) and a placeholder header at
   `include/alp/boards/alp_e1m_evk_v2n.h` (lands with v0.2).
 - v0.3 extends to V2M101 / V2M102 with DX-M1 detection on PCIe.
 - The Zephyr board file for `alp_e1m_evk_v2n` lives in

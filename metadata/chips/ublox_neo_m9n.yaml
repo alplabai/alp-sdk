@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: u-blox NEO-M9N GNSS receiver.
+# Alp SDK chip manifest: u-blox NEO-M9N GNSS receiver.
 schema_version:   1
 chip_id:          ublox_neo_m9n
 driver_status:    complete         # NMEA line read; sentence parsing in consumer code.

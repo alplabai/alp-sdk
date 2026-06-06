@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Ilitek ILI9341 SPI TFT 240x320.
+# Alp SDK chip manifest: Ilitek ILI9341 SPI TFT 240x320.
 schema_version:   1
 chip_id:          ili9341
 driver_status:    partial

@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file inference.h
- * @brief ALP SDK unified ML inference abstraction.
+ * @brief Alp SDK unified ML inference abstraction.
  *
  * Lifts compiled-model loaders + dispatch into a single uniform
  * surface so apps don't need to know which NPU is bonded out on
@@ -72,11 +72,12 @@ extern "C" {
  *  Vela picks at model-compile time and the runtime dispatches via
  *  the matching driver shim emitted by `scripts/alp_project.py`. */
 typedef enum {
-    ALP_INFERENCE_BACKEND_AUTO     = 0,
-    ALP_INFERENCE_BACKEND_CPU      = 1,    /**< TFLM reference kernels. */
-    ALP_INFERENCE_BACKEND_ETHOS_U  = 2,    /**< Arm Ethos-U via Vela (U55 / U65 / U85). */
-    ALP_INFERENCE_BACKEND_DRPAI    = 3,    /**< Renesas DRP-AI3. */
-    ALP_INFERENCE_BACKEND_DEEPX_DX = 4     /**< DEEPX DX-M1. */
+    ALP_INFERENCE_BACKEND_AUTO    = 0,
+    ALP_INFERENCE_BACKEND_CPU     = 1, /**< TFLM reference kernels. */
+    ALP_INFERENCE_BACKEND_ETHOS_U = 2, /**< Arm Ethos-U via Vela (U55 / U65 / U85). */
+    ALP_INFERENCE_BACKEND_DRPAI   = 3, /**< Renesas DRP-AI3. */
+    ALP_INFERENCE_BACKEND_DEEPX_DXM1 =
+        4 /**< DEEPX DX-M1 (canonical id; matches the .alpmodel `deepx_dxm1` backend string). */
 } alp_inference_backend_t;
 
 /** Model format.  Each backend supports a subset; AUTO picks based
@@ -143,6 +144,38 @@ typedef struct {
  *         Read @ref alp_last_error for the precise reason.
  */
 alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg);
+
+/** Options for loading a `.alpmodel` package (the fat multi-backend
+ *  container).  Provide the bytes in-memory (@c data/@c size, MCU embed)
+ *  or a storage @c path (Linux).  @c backend = AUTO lets the loader pick
+ *  the best blob for the active SoM; pin a specific backend to force it. */
+typedef struct {
+    const void             *data;        /**< Package bytes, or NULL to use @c path. */
+    size_t                  size;        /**< Byte count when @c data is set. */
+    const char             *path;        /**< Storage path (Linux), or NULL. */
+    alp_inference_backend_t backend;     /**< AUTO, or a forced backend. */
+    size_t                  arena_bytes; /**< 0 = size from the manifest. */
+    void                   *arena;       /**< Caller arena, or NULL for backend default. */
+} alp_model_open_opts_t;
+
+/**
+ * @brief Load a `.alpmodel` package and open the best-fit blob for this SoM.
+ *
+ * Parses the package, selects the blob whose backend is available on the
+ * active SoC, whose `silicon_ref` is compatible, and that fits the device
+ * NPU envelope (arena SRAM); ties break by the SoM's preferred backend.
+ * Delegates the chosen blob to the matching backend via @ref
+ * alp_inference_open — the returned handle works with all the
+ * @c alp_inference_* accessors unchanged.
+ *
+ * @param[in] opts  Load options; @c data (with @c size) or @c path required.
+ * @return Open handle, or NULL — read @ref alp_last_error for the cause:
+ *         ALP_ERR_INVAL (bad opts / bad magic / corrupt),
+ *         ALP_ERR_VERSION (package newer than this loader),
+ *         ALP_ERR_NO_BACKEND / ALP_ERR_NO_FIT / ALP_ERR_NOT_FOUND (selection),
+ *         or any @ref alp_inference_open error from the chosen backend.
+ */
+alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts);
 
 /**
  * @brief Number of input tensors the model expects.

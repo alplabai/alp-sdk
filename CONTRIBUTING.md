@@ -1,12 +1,12 @@
 @page contributing_index Contributing
 
-# Contributing to ALP SDK
+# Contributing to Alp SDK
 
 Canonical contributor guide: [`docs/contribution.md`](docs/contribution.md).
 This file is the GitHub-auto-discovered short version.
 
-Thanks for considering a contribution.  The ALP SDK is the unification
-software layer for ALP Lab's E1M edge AI modules; keeping it small,
+Thanks for considering a contribution.  The Alp SDK is the unification
+software layer for Alp Lab's E1M edge AI modules; keeping it small,
 predictable, and OS-pivoted is the whole point.
 
 ## Where to ask things
@@ -40,7 +40,11 @@ signatures), if you have one in mind.
 
 ### Submitting code
 
-1. Fork the repo and branch from `main`: `git checkout -b feature/my-feature`.
+1. Fork the repo and branch from `dev`: `git checkout -b feat/my-feature`.
+   Feature branches branch off `dev` and merge back into `dev` via PR
+   (`--no-ff`); use a type prefix (`feat/`, `fix/`, `docs/`, ...).
+   `dev` is the shared integration branch; `main` is the tested,
+   releasable baseline `dev` is promoted to at the release gate.
 2. Keep changes scoped to one library or one SoM at a time.
 3. Add or update tests under `tests/`.  Every public function must
    have at least one Unity / ztest test.
@@ -69,6 +73,23 @@ signatures), if you have one in mind.
 For the full branching topology, merge methods, PR gates,
 backport flow, and branch-protection settings, see
 [`docs/branching-and-merge-policy.md`](docs/branching-and-merge-policy.md).
+
+### Sign your work (Developer Certificate of Origin)
+
+Contributions are accepted under the project's Apache-2.0 license (see
+[`LICENSE`](LICENSE) / [`NOTICE`](NOTICE)).  To certify that you wrote the
+patch — or otherwise have the right to submit it under that license — **sign
+off every commit** per the
+[Developer Certificate of Origin 1.1](https://developercertificate.org):
+
+```bash
+git commit -s -m "your message"
+```
+
+This appends a `Signed-off-by: Your Name <you@example.com>` line from your
+`git config user.name` / `user.email`.  Commits without a sign-off may be
+asked to amend.  No separate CLA is required.  (Trademark use is governed
+separately — see [`TRADEMARKS.md`](TRADEMARKS.md).)
 
 ### Code style
 
@@ -126,7 +147,7 @@ for the formatting rules.
 
 ## Team
 
-The ALP SDK is built and maintained by [Alp Lab](https://alplab.ai).
+The Alp SDK is built and maintained by [Alp Lab](https://alplab.ai).
 
 | Contributor          | GitHub                                                   | Role                          |
 |----------------------|----------------------------------------------------------|-------------------------------|

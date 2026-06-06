@@ -26,7 +26,7 @@
  *
  * @par Supported silicon: renesas:rzv2n:n44
  *
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * @par ABI status: [ABI-EXPERIMENTAL]

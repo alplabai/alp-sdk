@@ -162,6 +162,10 @@ manifest:
           - hal_renesas
           - hal_nxp
           - cmsis
+          # cmsis_6 provides cmsis_core.h for Cortex-M targets on Zephyr
+          # v4.4 (the legacy `cmsis` module now serves Cortex-A/R only).
+          # Required by the RZ/V2N + i.MX93 M33/M-class cores.
+          - cmsis_6
           - cmsis-dsp
           - lvgl
           - mbedtls
@@ -171,6 +175,12 @@ manifest:
           # CONFIG_ALP_SDK_INFERENCE_TFLM=y just work; the module
           # is small enough that the cost-of-presence is negligible.
           - tflite-micro
+          # zcbor backs the `.alpmodel` container reader
+          # (CONFIG_ALP_SDK_MODEL_READER selects CONFIG_ZCBOR).
+          # Without this allowlist entry an alp-sdk-topdir workspace
+          # never fetches the module and the Kconfig select aborts
+          # every MODEL_READER build.
+          - zcbor
           # nanopb is also pulled in by Zephyr's tree when ALP_NANOPB
           # is enabled.  Our SDK uses it via the upstream Zephyr
           # module (no extras-tier1 pin needed for v0.5).
@@ -319,7 +329,7 @@ manifest:
     #       (a) enable this group + set EXTRA_ZEPHYR_MODULES to
     #           the cloned sdk-alif path, or
     #       (b) use sdk-alif itself as the workspace topdir (which
-    #           replaces our Zephyr v3.7 pin with zephyr_alif's
+    #           replaces our Zephyr v4.4 pin with zephyr_alif's
     #           Alif-patched Zephyr fork).
     #     Customers with their own AEN board overlay don't
     #     need sdk-alif -- the top-level hal_alif direct import

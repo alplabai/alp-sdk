@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file tmu.h
- * @brief ALP SDK math-accelerator surface (CORDIC / TMU offload with libm fallback).
+ * @brief Alp SDK math-accelerator surface (CORDIC / TMU offload with libm fallback).
  *
  * Portable single-precision math primitives that the active SoM's
  * hardware math unit can accelerate when present.  On the V2N family

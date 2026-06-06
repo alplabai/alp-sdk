@@ -1,0 +1,48 @@
+Alp SDK
+Copyright 2026 Alp Lab AB
+
+This product includes software developed at Alp Lab AB.
+Licensed under the Apache License, Version 2.0 (the "License"); you may
+not use this software except in compliance with the License. A copy of
+the License is in the LICENSE file at the root of this repository.
+
+================================================================================
+Third-party components
+================================================================================
+
+This repository integrates, vendors, or references the third-party software
+below. Each is governed by its own license; the full terms ship with the
+respective component (under vendors/<name>/ or the referenced upstream).
+
+- Zephyr RTOS — Apache-2.0. Copyright the Zephyr Project and contributors.
+  Build-time dependency (west/Zephyr); not redistributed in this repository.
+
+- Arm CMSIS — Apache-2.0. Copyright (c) Arm Limited.
+  Bundled with the GD32 firmware library at
+  vendors/gd32_firmware_library/upstream/Firmware/CMSIS/.
+
+- GigaDevice GD32G5x3 Firmware Library — Apache-2.0.
+  Copyright (c) GigaDevice Semiconductor Inc.
+  Git submodule at vendors/gd32_firmware_library/upstream (mirror of v1.5.0).
+
+- Renesas RZ/V2N DRP-AI TVM / RUHMI compiler — Apache-2.0.
+  Copyright (c) Renesas Electronics Corporation.
+  Referenced for the RZ/V2N NPU compile path; see vendors/renesas-rzv2n/.
+
+- Mbed TLS — Apache-2.0. Copyright (c) Arm Limited and contributors.
+  Build-time dependency via Zephyr.
+
+- lwrb (lightweight ring buffer) — MIT. Copyright (c) Tilen Majerle.
+  Integrated under vendors/lwrb/.
+
+- nanopb — zlib license. Copyright (c) Petteri Aimonen.
+  Integrated under vendors/nanopb/.
+
+--------------------------------------------------------------------------------
+Vendor BSPs and SDK binaries
+
+Silicon-vendor BSPs and SDK binaries (Alif Ensemble, Renesas RZ/V2N, NXP
+i.MX93, DEEPX DX-M1) are NOT redistributed in this repository. They are
+obtained directly from the vendor under the vendor's own license. The
+vendors/<name>/ directories here contain only Alp Lab's own integration
+shims (Apache-2.0) plus instructions; see each vendors/<name>/README.md.

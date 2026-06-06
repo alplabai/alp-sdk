@@ -1,11 +1,14 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * Sensor-loop implementations for drone-hud.  Three discrete
  * jobs:
  *   1. Bring up each chip via its `<alp/chips/X.h>` driver.
- *   2. Run a 100 Hz IMU sample + Madgwick attitude fuse loop.
+ *   2. Run a 100 Hz IMU sample + attitude-integrate loop.  NOTE:
+ *      update_attitude() is a placeholder gyro Euler integrator
+ *      (it discards the accelerometer and drifts), NOT the real
+ *      Madgwick fusion -- see its comment and the main.c header.
  *   3. Run a 5 Hz GPS + battery telemetry loop.
  *
  * All bus access goes through the portable `<alp/...>` surfaces;
@@ -36,7 +39,7 @@ static lsm6dso_t       s_imu;
 static ublox_neo_m9n_t s_gps;
 static ina236_t        s_batt;
 
-int drone_sensors_init(drone_telemetry_t *telem)
+int                    drone_sensors_init(drone_telemetry_t *telem)
 {
     memset(telem, 0, sizeof(*telem));
     telem->mode = DRONE_MODE_STABILISED;
@@ -77,8 +80,7 @@ int drone_sensors_init(drone_telemetry_t *telem)
     }
 
     /* GNSS.  Tolerates missing UART. */
-    if (s_gps_uart != NULL &&
-        ublox_neo_m9n_init(&s_gps, s_gps_uart) != ALP_OK) {
+    if (s_gps_uart != NULL && ublox_neo_m9n_init(&s_gps, s_gps_uart) != ALP_OK) {
         LOG_WRN("NEO-M9N init failed; GPS will report no fix");
         rc--;
     }
@@ -91,36 +93,34 @@ int drone_sensors_init(drone_telemetry_t *telem)
  * this is a placeholder inline that integrates gyro into Euler
  * angles so the HUD has something to animate even on the demo
  * board without the upstream lib fetched. */
-static void update_attitude(drone_telemetry_t *t,
-                            float gx_dps, float gy_dps, float gz_dps,
+static void update_attitude(drone_telemetry_t *t, float gx_dps, float gy_dps, float gz_dps,
                             float dt_s)
 {
-    t->roll_deg  += gx_dps * dt_s;
+    t->roll_deg += gx_dps * dt_s;
     t->pitch_deg += gy_dps * dt_s;
-    t->yaw_deg   += gz_dps * dt_s;
+    t->yaw_deg += gz_dps * dt_s;
     /* Clamp to [-180, +180] for HUD readability. */
-    if (t->roll_deg  >  180.f) t->roll_deg  -= 360.f;
-    if (t->roll_deg  < -180.f) t->roll_deg  += 360.f;
-    if (t->pitch_deg >   90.f) t->pitch_deg  =   90.f;
-    if (t->pitch_deg <  -90.f) t->pitch_deg  =  -90.f;
-    if (t->yaw_deg   >  360.f) t->yaw_deg   -= 360.f;
-    if (t->yaw_deg   <    0.f) t->yaw_deg   += 360.f;
+    if (t->roll_deg > 180.f) t->roll_deg -= 360.f;
+    if (t->roll_deg < -180.f) t->roll_deg += 360.f;
+    if (t->pitch_deg > 90.f) t->pitch_deg = 90.f;
+    if (t->pitch_deg < -90.f) t->pitch_deg = -90.f;
+    if (t->yaw_deg > 360.f) t->yaw_deg -= 360.f;
+    if (t->yaw_deg < 0.f) t->yaw_deg += 360.f;
 }
 
 /* Default-FS LSB-to-physical conversion factors for the LSM6DSO.
  * Accel default FS = ±2 g, sensitivity 16384 LSB/g.
  * Gyro  default FS = ±250 dps, sensitivity 114.286 LSB/dps. */
-#define LSM6DSO_ACCEL_LSB_PER_G    16384.f
-#define LSM6DSO_GYRO_LSB_PER_DPS     114.286f
+#define LSM6DSO_ACCEL_LSB_PER_G 16384.f
+#define LSM6DSO_GYRO_LSB_PER_DPS 114.286f
 
 void drone_sensors_run_imu_loop(drone_telemetry_t *telem)
 {
     /* 100 Hz target -- 10 ms slice. */
     while (1) {
-        lsm6dso_axes_t a = {0};
-        lsm6dso_axes_t g = {0};
-        if (lsm6dso_read_accel(&s_imu, &a) == ALP_OK &&
-            lsm6dso_read_gyro(&s_imu,  &g) == ALP_OK) {
+        lsm6dso_axes_t a = { 0 };
+        lsm6dso_axes_t g = { 0 };
+        if (lsm6dso_read_accel(&s_imu, &a) == ALP_OK && lsm6dso_read_gyro(&s_imu, &g) == ALP_OK) {
             /* Convert raw int16 counts to dps using the gyro's
              * default ±250 dps full-scale sensitivity.  The driver
              * leaves FS at reset defaults; the demo doesn't call
@@ -143,7 +143,7 @@ void drone_sensors_run_imu_loop(drone_telemetry_t *telem)
 void drone_sensors_run_slow_loop(drone_telemetry_t *telem)
 {
     static uint8_t  nmea_line[128];
-    static int32_t  remaining_min = 25;   /* coarse Coulomb-counter */
+    static int32_t  remaining_min = 25; /* coarse Coulomb-counter */
     static uint32_t coulomb_ticks = 0;
 
     while (1) {
@@ -173,9 +173,8 @@ void drone_sensors_run_slow_loop(drone_telemetry_t *telem)
          * the path is live. */
         if (s_gps_uart != NULL) {
             size_t got = 0;
-            if (ublox_neo_m9n_read_nmea_line(&s_gps, nmea_line,
-                                             sizeof(nmea_line),
-                                             &got, /*timeout_ms=*/100) == ALP_OK) {
+            if (ublox_neo_m9n_read_nmea_line(&s_gps, nmea_line, sizeof(nmea_line), &got,
+                                             /*timeout_ms=*/100) == ALP_OK) {
                 if (got > 0) {
                     /* Bump the sat count + flip the fix bit so the
                      * UI shows movement.  Real parse in v0.6. */
@@ -185,6 +184,6 @@ void drone_sensors_run_slow_loop(drone_telemetry_t *telem)
             }
         }
 
-        k_msleep(200);   /* 5 Hz cadence. */
+        k_msleep(200); /* 5 Hz cadence. */
     }
 }

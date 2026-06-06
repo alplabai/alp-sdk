@@ -1,0 +1,13 @@
+[Unit]
+Description=Alp SDK remoteproc lifecycle for heterogeneous IPC
+Documentation=https://github.com/alplabai/alp-sdk
+After=local-fs.target
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/alp-remoteproc-start.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

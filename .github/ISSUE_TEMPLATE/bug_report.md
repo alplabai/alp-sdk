@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug in ALP SDK or E1M modules
+about: Report a bug in Alp SDK or E1M modules
 title: "[BUG] "
 labels: bug
 assignees: ''

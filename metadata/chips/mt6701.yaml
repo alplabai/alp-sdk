@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: MagnTek MT6701 magnetic rotary encoder.
+# Alp SDK chip manifest: MagnTek MT6701 magnetic rotary encoder.
 schema_version:   1
 chip_id:          mt6701
 driver_status:    complete

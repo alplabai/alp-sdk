@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file camera.h
- * @brief ALP SDK camera abstraction (stub for v0.1).
+ * @brief Alp SDK camera abstraction (stub for v0.1).
  *
  * v0.2 ships a real MIPI CSI-2 wrapper for the V2N family.  v0.1
  * declares the surface so app code can compile against it; the

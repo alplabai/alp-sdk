@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 ALP Lab AB
+# Copyright 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 """
 Cross-family portability lint for examples/*/board.yaml.
@@ -7,7 +7,7 @@ Cross-family portability lint for examples/*/board.yaml.
 What this catches
 -----------------
 
-The ALP SDK's portability story is layered:
+The Alp SDK's portability story is layered:
 
   Ring 1 -- cross-family examples.  Same main.c builds on every E1M-X
             family.  Declares no chip drivers in board.yaml; relies

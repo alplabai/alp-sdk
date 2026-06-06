@@ -1,4 +1,4 @@
-# Chip + library ecosystem expansion for the ALP SDK
+# Chip + library ecosystem expansion for the Alp SDK
 
 **Status**: design approved 2026-05-14.  Ready for implementation planning.
 **Cross-refs**: docs/branching-and-merge-policy.md (PR + override flow),
@@ -12,7 +12,7 @@ libraries through a curated index.  A customer who wants to
 talk to chip X or use library Y should find it in minutes,
 drop it in, and write their app.
 
-The ALP SDK today has **30 chip drivers** (under `chips/`) and
+The Alp SDK today has **30 chip drivers** (under `chips/`) and
 **8 libraries** behind the `board.yaml` `libraries:` enum
 (`etl`, `fmt`, `nlohmann_json`, `doctest`, `lvgl`, `mbedtls`,
 `cmsis_dsp`, `littlefs`).  That's enough to demonstrate the
@@ -195,7 +195,7 @@ ecosystem without depending on the maintainer's bandwidth.
 
 ## Hardware-acceleration backend wiring (per-library HW table)
 
-A library shipping as pure source is the floor.  The ALP SDK's
+A library shipping as pure source is the floor.  The Alp SDK's
 distinguishing value is that the **same `libraries:` knob also
 wires the matching hardware accelerators** — GPU, NPU, DMA, FPU
 SIMD, hardware crypto, hardware DSP blocks, timers — when the

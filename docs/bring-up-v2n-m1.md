@@ -92,7 +92,7 @@ ROM has executed and PCIe link training can start.
 ### 4. Hand off to Linux
 
 If the SoM is running Yocto with the `meta-deepx-m1` layer wired
-into `e1m-x-v2n-m1.conf`:
+into `e1m-v2m101-a55.conf`:
 
 * `dx_rt_npu_linux_driver` opens the PCIe device at `lspci`-time.
 * `dxrt_init()` from user-space succeeds; load a `.dxnn` model
@@ -100,7 +100,7 @@ into `e1m-x-v2n-m1.conf`:
 
 If the kernel comes up but `dxrt_init()` returns an error, see the
 upstream DEEPX troubleshooting docs at
-[`github.com/DeepX-AI/dx_rt`](https://github.com/DeepX-AI/dx_rt).
+[`github.com/DEEPX-AI/dx_rt`](https://github.com/DEEPX-AI/dx_rt).
 
 ## Bring-up regression checks
 

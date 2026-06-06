@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: NXP PCA9451A multi-channel PMIC.
+# Alp SDK chip manifest: NXP PCA9451A multi-channel PMIC.
 schema_version:   1
 chip_id:          pca9451a
 driver_status:    stub             # manifest only; chip-driver headers + impl

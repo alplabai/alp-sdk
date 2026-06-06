@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# OS-agnostic helpers for the ALP SDK.
+# OS-agnostic helpers for the Alp SDK.
 
 if(NOT DEFINED ZEPHYR_BASE)
     target_sources(alp_sdk PRIVATE

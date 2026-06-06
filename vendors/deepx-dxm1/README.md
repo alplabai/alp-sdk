@@ -8,7 +8,7 @@ sits behind PCIe on the **E1M-X V2N-M1** SoM family.
 The DX-M1 is a 25-TOPS @ 1.0 GHz DXNN accelerator in an FC-BGA
 625-ball package, paired with 2 × LPDDR5X and a SPI NAND boot flash,
 all on-module.  The host RZ/V2N's PCIe Root Complex enumerates the
-DX-M1 as a single device on `PCIE0`; the ALP SDK's
+DX-M1 as a single device on `PCIE0`; the Alp SDK's
 `<alp/inference.h>` backend talks to it via the DEEPX user-space
 runtime on Linux (Yocto first-class target).
 
@@ -33,7 +33,7 @@ Real `do_compile` against the DEEPX runtime arrives in the v0.4
 cycle, gated behind the CMake option `ALP_SDK_USE_DEEPX_DXM1=ON`.
 When ON the backend hook calls `dxnn_*` entry points for real;
 when OFF (the default) the SDK dispatcher's auto-resolve skips
-DEEPX_DX and the V2N-M1 host falls back to CPU.
+DEEPX_DXM1 and the V2N-M1 host falls back to CPU.
 
 ## Where to get the DEEPX software
 
@@ -59,8 +59,9 @@ Two additional repos are useful but not on the runtime path:
 
 ### Yocto integration (V2N-M1)
 
-`meta-alp`'s `conf/layer.conf` `LAYERRECOMMENDS` the Renesas V2N
-base BSP plus `meta-deepx-m1`, and `conf/machine/e1m-x-v2n-m1.conf`
+`meta-alp-sdk`'s `conf/layer.conf` `LAYERRECOMMENDS` the Renesas V2N
+base BSP plus `meta-deepx-m1`, and `conf/machine/e1m-v2m101-a55.conf`
+(and `e1m-v2m102-a55.conf`)
 appends `dx-driver dx-rt` to `IMAGE_INSTALL` so V2N-M1 images
 ship the DEEPX stack by default.
 

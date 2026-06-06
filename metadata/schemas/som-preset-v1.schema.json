@@ -269,7 +269,7 @@
             { "pattern": "^[a-z][a-z0-9_]+$" },
             { "const": "TBD" }
           ],
-          "description": "Backend tool key consumed by `west alp-flash`'s helper-MCU dispatcher (e.g. `swd_v2n_host`, `cc3501e_usb_bootloader`).  TBD pending the authoritative flow."
+          "description": "Backend tool key consumed by `west alp-flash`'s helper-MCU dispatcher (e.g. `swd_probe`, `cc3501e_usb_bootloader`).  TBD pending the authoritative flow."
         },
         "flash_args": {
           "oneOf": [

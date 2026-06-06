@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: TI TMP112 digital temperature sensor.
+# Alp SDK chip manifest: TI TMP112 digital temperature sensor.
 schema_version:   1
 chip_id:          tmp112
 driver_status:    complete         # init / set-rate / set-extended-mode / read milli-Celsius.

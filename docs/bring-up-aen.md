@@ -108,7 +108,7 @@ against the SKU's `som.yaml` preset.
 
 4. The default firmware on a freshly-assembled module is the
    Alif demo image -- the BootROM hands off to it and you'll
-   see Alif's demo banner.  To take it over with the ALP SDK,
+   see Alif's demo banner.  To take it over with the Alp SDK,
    flash a built image:
 
    ```bash
@@ -133,7 +133,7 @@ console:
 
 | Slave | 7-bit addr | What |
 |-------|------------|------|
-| TCAL9538 | `0x70` | GPIO expander |
+| TCAL9538 | `0x72` | GPIO expander |
 | 24C128 | `0x50` | EEPROM (manifest) |
 | TMP112 | `0x48` | Thermometer (optional) |
 | BMP581 | `0x47` | Barometer (optional) |

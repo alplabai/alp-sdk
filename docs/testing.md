@@ -1,4 +1,4 @@
-# Testing the ALP SDK
+# Testing the Alp SDK
 
 How to verify everything works, from a fresh clone, without touching
 hardware.  Coverage map per `<alp/...>` header below.
@@ -102,7 +102,7 @@ It does **not** prove:
 | `<alp/iot.h>` — MQTT cleartext    | `tests/yocto/iot_mqtt.c` (parse + open) + `tests/zephyr/iot/`                                                          | `hil-yocto` + `nightly-aen-hil`       |
 | `<alp/iot.h>` — MQTT TLS          | `tests/yocto/iot_mqtt.c` (5 TLS tests: default / pinned-CA / missing-CA / insecure / default-port-8883)                | `hil-yocto`                           |
 | `<alp/security.h>` (Zephyr)       | `tests/zephyr/security/`                                                                                               | `nightly-aen-hil`                     |
-| `<alp/security.h>` (Yocto, OpenSSL) | `tests/yocto/security_openssl.c` — 16 tests: SHA-256 NIST `"abc"` KAT, SHA-384/512 length, AEAD round-trip, tag-mismatch, key-length / NULL refusals, TRNG fill | meta-alp image build (flips ✅)      |
+| `<alp/security.h>` (Yocto, OpenSSL) | `tests/yocto/security_openssl.c` — 16 tests: SHA-256 NIST `"abc"` KAT, SHA-384/512 length, AEAD round-trip, tag-mismatch, key-length / NULL refusals, TRNG fill | meta-alp-sdk image build (flips ✅)      |
 | `<alp/ble.h>`                     | `tests/zephyr/ble/`                                                                                                    | `nightly-aen-hil`                     |
 | `<alp/mproc.h>` — shmem/mbox/hwsem | `tests/zephyr/mproc/` (`smoke` scenario)                                                                              | `nightly-aen-hil`                     |
 | `<alp/mproc.h>` — IPC framing     | `tests/zephyr/mproc/` (`nanopb_framing` scenario, 9 ZTESTs)                                                            | `nightly-aen-hil`                     |

@@ -47,5 +47,8 @@ CMakeLists.txt text eol=lf
 *.zip     binary
 *.tar.gz  binary
 *.tflite  binary
+*.onnx    binary
+*.dxnn    binary
+*.alpmodel binary
 *.bin     binary
 *.elf     binary

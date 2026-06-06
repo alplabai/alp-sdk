@@ -18,9 +18,9 @@ Two distinct pieces, easy to confuse:
 | Component                                      | Where it runs | Source                                                |
 |------------------------------------------------|---------------|-------------------------------------------------------|
 | **RUHMI compiler** (this anchor)               | Host (build)  | <https://github.com/renesas-rz/rzv_drp-ai_tvm>, Apache-2.0. |
-| **DRP-AI runtime** (`libdrpai`, ioctls)        | Target (V2N)  | `meta-rz-drpai` sublayer of Renesas's BSP tarball -- see `yocto/meta-alp/README.md`. |
+| **DRP-AI runtime** (`libdrpai`, ioctls)        | Target (V2N)  | `meta-rz-drpai` sublayer of Renesas's BSP -- see `meta-alp-sdk/README.md`. |
 
-The ALP SDK's `<alp/inference.h>` Yocto backend links against the
+The Alp SDK's `<alp/inference.h>` Yocto backend links against the
 *runtime*; it never invokes the *compiler*.  Model authors run
 RUHMI on their workstation and ship the compiled output as a
 model asset alongside their app.
@@ -42,11 +42,10 @@ RUHMI as a build-step pull it from the upstream repo directly.
 
 ## Recommended pin
 
-RUHMI is paired with the **RZ/V2N AI SDK 7.10** runtime (currently
-the canonical version per the [*RZ/V2N Group Handbook*](https://www.renesas.com/en/document/oth/rzv2n-group-handbook)).
-Build RUHMI against the matching release tag in the upstream repo
-when one is published; until then, `main` at the time of the AI
-SDK 7.10 release is a safe pin.
+RUHMI is paired with the **RZ/V2N AI SDK (platform 7.1) on BSP
+v6.30** runtime.  Build RUHMI against the matching release tag in
+the upstream repo when one is published; until then, `main` at the
+time of the BSP v6.30 release is a safe pin.
 
 ## Installation (host)
 
@@ -78,7 +77,7 @@ work; RUHMI doesn't claim copyright on compiled artefacts.
 
 ## See also
 
-- [`yocto/meta-alp/README.md`](../../../yocto/meta-alp/README.md)
+- [`meta-alp-sdk/README.md`](../../../meta-alp-sdk/README.md)
   -- The V2N Yocto BSP setup; `meta-rz-drpai` provides the
   runtime side this compiler targets.
 - [`vendors/renesas-rzv2n/README.md`](../README.md) -- The

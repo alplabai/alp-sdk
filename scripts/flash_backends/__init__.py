@@ -24,7 +24,7 @@ The orchestrator's ``_slice_flash_recipe`` emits these method names:
 
 and helper-MCU entries from SoM presets emit (e.g.):
 
-    GD32 supervisor: "swd_v2n_host"
+    GD32 supervisor: "swd_probe"
     CC3501E coproc:  "cc3501e_usb_bootloader"
 
 The yocto backend also registers under the short alias ``yocto_wic``
@@ -132,7 +132,7 @@ def lookup(method: str) -> Optional["FlashBackend"]:
 from . import yocto_wic                  # noqa: E402,F401
 from . import zephyr_west_flash          # noqa: E402,F401
 from . import baremetal_cmake_flash      # noqa: E402,F401
-from . import swd_v2n_host               # noqa: E402,F401
+from . import swd_probe                  # noqa: E402,F401
 from . import cc3501e_usb_bootloader     # noqa: E402,F401
 
 

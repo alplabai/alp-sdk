@@ -88,6 +88,14 @@ backend.
 
 #include "alp/iot.h"
 
+/* Subscription callback -- runs from alp_mqtt_loop()'s context, so keep
+   the work here minimal (copy what you need, signal a worker thread). */
+static void on_control(const char *topic, const uint8_t *payload,
+                       size_t len, void *user) {
+    (void)user;
+    printf("rx %.*s on %s\n", (int)len, (const char *)payload, topic);
+}
+
 int main(void) {
     alp_mqtt_config_t cfg = {
         .uri           = "mqtts://broker.local:8883",
@@ -106,14 +114,14 @@ int main(void) {
         return 1;
     }
 
-    if (alp_mqtt_connect(m) != ALP_OK) {
+    if (alp_mqtt_connect(m, 10000) != ALP_OK) {
         fprintf(stderr, "mqtt connect failed\n");
         alp_mqtt_close(m);
         return 1;
     }
     printf("mqtt connected\n");
 
-    alp_mqtt_subscribe(m, "alp/control/#", ALP_MQTT_QOS1);
+    alp_mqtt_subscribe(m, "alp/control/#", ALP_MQTT_QOS_1, on_control, NULL);
 
     int counter = 0;
     while (1) {
@@ -123,7 +131,7 @@ int main(void) {
                  counter++, (unsigned)time(NULL));
         alp_mqtt_publish(m, "alp/telemetry/dev-001",
                          payload, strlen(payload),
-                         ALP_MQTT_QOS1, false);
+                         ALP_MQTT_QOS_1, false);
         alp_mqtt_loop(m, 10000);   /* dispatches incoming + reconnect */
     }
 }
@@ -167,9 +175,9 @@ sudo dd if=tmp/deploy/images/e1m-v2n101-a55/alp-image-edge-e1m-v2n101-a55.wic \
         of=/dev/sdX bs=4M conv=fsync
 
 # Boot the module, login, drop the cert + binary, run:
-scp build/myapp root@e1m-v2n.local:/usr/bin/
-scp broker.crt root@e1m-v2n.local:/etc/alp/
-ssh root@e1m-v2n.local /usr/bin/myapp
+scp build/myapp root@e1m-v2n101-a55.local:/usr/bin/
+scp broker.crt root@e1m-v2n101-a55.local:/etc/alp/
+ssh root@e1m-v2n101-a55.local /usr/bin/myapp
 ```
 
 Expected output (on the device):
@@ -189,15 +197,20 @@ $ mosquitto_sub -t 'alp/telemetry/#' --cafile broker.crt -h broker.local -p 8883
 
 ## 6. Handle reconnect
 
-`alp_mqtt_loop` returns when the broker disconnects (TCP RST,
-TLS abort, network drop).  The wrapper handles MQTT-level
-disconnect; the application handles Wi-Fi-level reconnect:
+`alp_mqtt_loop` pumps the MQTT state machine and returns
+`alp_status_t`.  A broker disconnect (TCP RST, TLS abort,
+network drop) surfaces as `ALP_ERR_IO`; the application drives
+reconnection off that return value -- there is no separate
+"is-connected" query:
 
 ```c
 while (1) {
-    if (!alp_mqtt_is_connected(m)) {
-        alp_mqtt_connect(m);   // retries internally
-        sleep(1);
+    alp_status_t s = alp_mqtt_loop(m, 10000);
+    if (s == ALP_ERR_IO) {
+        /* link dropped -- re-establish (re-doing the TLS handshake). */
+        while (alp_mqtt_connect(m, 10000) != ALP_OK) {
+            sleep(1);
+        }
         continue;
     }
     /* normal publish loop */

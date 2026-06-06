@@ -35,7 +35,7 @@ the same `<alp/...>` API as the AEN family.
 
 For inference workloads, the Ethos-U65 NPU is exposed through the
 SDK's `<alp/inference.h>` dispatcher with the
-`ALP_SDK_INFERENCE_ETHOS_U_N93` Kconfig.
+`ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93` Kconfig.
 
 ## Pins
 

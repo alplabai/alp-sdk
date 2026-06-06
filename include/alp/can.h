@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file can.h
- * @brief ALP SDK CAN / CAN-FD bus abstraction.
+ * @brief Alp SDK CAN / CAN-FD bus abstraction.
  *
  * The RZ/V2N family routes six CAN-FD channels; Alif Ensemble routes
  * two.  Both vendors expose ISO 11898-1 and CAN-FD via their HAL; this

@@ -461,7 +461,7 @@ def test_emit_system_manifest_round_trip(tmp_path: Path) -> None:
     gd32 = next(h for h in parsed["helper_mcus"]
                 if h["name"] == "gd32_bridge")
     assert gd32["chip"] == "gd32g553"
-    assert gd32["flash_method"] == "swd_v2n_host"
+    assert gd32["flash_method"] == "swd_probe"
 
 
 # ---------------------------------------------------------------------
@@ -639,8 +639,8 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     gd32 = by_name["gd32_bridge"]
     assert gd32["chip"] == "gd32g553"
     assert gd32["firmware_path"] == \
-        "firmware/gd32-bridge/build/gd32_bridge.bin"
-    assert gd32["flash_method"] == "swd_v2n_host"
+        "firmware/gd32-bridge/build/gd32/gd32-bridge.bin"
+    assert gd32["flash_method"] == "swd_probe"
     assert isinstance(gd32["flash_args"], dict)
     assert gd32["flash_args"]["target"] == "gd32g553"
 
@@ -827,8 +827,8 @@ _SYNTHETIC_V2N_WITH_ON_MODULE = """\
     helper_firmware:
       - name: gd32_bridge
         chip: gd32g553
-        firmware_path: firmware/gd32-bridge/build/gd32_bridge.bin
-        flash_method:  swd_v2n_host
+        firmware_path: firmware/gd32-bridge/build/gd32/gd32-bridge.bin
+        flash_method:  swd_probe
         flash_args:
           interface: cmsis-dap
           target: gd32g553
@@ -2370,3 +2370,230 @@ cores:
     load_board_yaml(path)
     err = capsys.readouterr().err
     assert "sleep_mode" not in err
+
+
+# ---------------------------------------------------------------------
+# --emit build-plan (the Wave C consumer contract: the `alp` CLI
+# consumes this JSON instead of re-implementing the planner).
+# Settled 2026-06-04 with the alp-sdk-vscode team:
+#   * camelCase keys, schemaVersion'd independently of board.yaml;
+#   * GeneratedFile entries MUST carry `contents` (CLI materialise
+#     stays pure IO);
+#   * no `inputHash` (the CLI recomputes its cache key) and no
+#     `sequential` (parallelism policy belongs to the CLI scheduler);
+#   * one slice per non-`off` core; command-less slices carry
+#     `command: null` + a warning instead of being dropped.
+# ---------------------------------------------------------------------
+
+
+V2N_BOOT_MCUBOOT = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+
+boot:
+  method: mcuboot
+  signing:
+    algorithm: rsa2048
+    key_file: keys/dev_rsa.pem
+"""
+
+
+V2N_OFF_AND_COMMANDLESS = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  a55_cluster:
+    os: 'off'
+  m33_sm:
+    os: zephyr
+"""
+
+
+def test_emit_build_plan_happy(tmp_path: Path) -> None:
+    """The plan carries the settled top-level shape, one slice per
+    non-off core (sorted), the exact tool command per slice, and
+    contents-bearing artefacts."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    out = emit_build_plan(project, board_yaml=path,
+                          build_root=Path("build"))
+    plan = _json.loads(out)
+
+    assert plan["schemaVersion"] == 1
+    assert plan["sku"] == "E1M-V2N101"
+    assert plan["boardYaml"] == path.as_posix()
+    assert plan["buildRoot"] == "build"
+    assert isinstance(plan["warnings"], list)
+
+    # Settled schema decisions: the CLI owns cache keys + parallelism.
+    assert "sequential" not in plan
+    for s in plan["slices"]:
+        assert "inputHash" not in s
+
+    # Slices sorted by coreId, one per non-off core.
+    assert [s["coreId"] for s in plan["slices"]] == \
+        ["a55_cluster", "m33_sm"]
+
+    m33 = next(s for s in plan["slices"] if s["coreId"] == "m33_sm")
+    assert m33["backend"] == "zephyr"
+    assert m33["buildDir"] == "build/m33_sm-zephyr"
+    assert m33["command"]["tool"] == "west"
+    assert m33["command"]["args"][:2] == ["build", "-b"]
+    assert m33["command"]["cwd"] == m33["buildDir"]
+    assert m33["env"]["ALP_SDK_ROOT"]
+    confs = {a["path"]: a["contents"] for a in m33["configArtefacts"]}
+    assert "build/m33_sm-zephyr/alp.conf" in confs
+    assert "CONFIG_ALP_SDK=y" in confs["build/m33_sm-zephyr/alp.conf"]
+
+    a55 = next(s for s in plan["slices"] if s["coreId"] == "a55_cluster")
+    assert a55["backend"] == "yocto"
+    assert a55["command"]["tool"] == "bitbake"
+    assert a55["command"]["args"] == ["alp-image-edge"]
+    confs = {a["path"]: a["contents"] for a in a55["configArtefacts"]}
+    assert "build/a55_cluster-yocto/local.conf" in confs
+    assert confs["build/a55_cluster-yocto/local.conf"].strip()
+
+    # Shared artefacts carry contents (the CLI byte-writes them).
+    shared = {a["path"]: a["contents"] for a in plan["sharedArtefacts"]}
+    assert "build/generated/alp/system_ipc.h" in shared
+    assert "build/generated/dts-reservations.dtsi" in shared
+    assert "build/generated/dts-partitions.dtsi" in shared
+    for contents in shared.values():
+        assert contents.strip()
+
+
+def test_emit_build_plan_deterministic(tmp_path: Path) -> None:
+    """Spec parity with the other emits: byte-identical re-runs."""
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, V2N_HAPPY)
+    out_a = emit_build_plan(load_board_yaml(path), board_yaml=path,
+                            build_root=Path("build"))
+    out_b = emit_build_plan(load_board_yaml(path), board_yaml=path,
+                            build_root=Path("build"))
+    assert out_a == out_b
+
+
+def test_emit_build_plan_writes_nothing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The emit is pure -- no build dirs, no config files, nothing."""
+    from alp_orchestrate import emit_build_plan
+
+    monkeypatch.chdir(tmp_path)
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    emit_build_plan(project, board_yaml=path, build_root=Path("build"))
+    assert [p.name for p in tmp_path.iterdir()] == ["board.yaml"]
+
+
+def test_emit_build_plan_matches_materialiser(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """By-construction parity: every artefact the plan carries is
+    byte-identical to what the Orchestrator's materialise step writes
+    to disk (the contract promised to the CLI side)."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+    import alp_orchestrate
+
+    path = _write_board(tmp_path, V2N_HAPPY)
+    build_root = tmp_path / "build"
+
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=build_root))
+
+    # Materialise via the real fan_out (dispatch skipped: no tools).
+    monkeypatch.setattr(alp_orchestrate.shutil, "which",
+                        lambda name: None)
+    orch = Orchestrator(load_board_yaml(path), build_root)
+    orch.fan_out(parallel=False)
+
+    artefacts = list(plan["sharedArtefacts"])
+    for s in plan["slices"]:
+        artefacts.extend(s["configArtefacts"])
+    assert artefacts
+    for entry in artefacts:
+        on_disk = Path(entry["path"]).read_text(encoding="utf-8")
+        assert on_disk == entry["contents"], \
+            f"{entry['path']} diverges from the materialiser"
+
+
+def test_emit_build_plan_off_core_excluded_commandless_warns(
+    tmp_path: Path,
+) -> None:
+    """`off` cores never enter the plan; a slice the script cannot
+    yet build is carried with `command: null` plus a machine-readable
+    warning, so the CLI can still report the core."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, V2N_OFF_AND_COMMANDLESS)
+    project = load_board_yaml(path)
+    # Simulate a SoM whose topology hasn't pinned this core's Zephyr
+    # board target yet (the pending-HW-config TBD case): the loader
+    # permits `board: None` for zephyr -- only `app:` is enforced --
+    # and _slice_command then has nothing to hand `west build -b`.
+    project.cores["m33_sm"].board = None
+    plan = _json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    assert [s["coreId"] for s in plan["slices"]] == ["m33_sm"]
+    m33 = plan["slices"][0]
+    assert m33["command"] is None
+    codes = [(w["code"], w.get("coreId")) for w in plan["warnings"]]
+    assert ("no-command", "m33_sm") in codes
+
+
+def test_emit_build_plan_carries_boot_sysbuild_conf(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A `boot:` block surfaces as the build/alp_sysbuild.conf shared
+    artefact -- and the materialiser writes the same file (this also
+    pins the fix for emit_sysbuild_conf never being wired into
+    _materialise_shared)."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+    import alp_orchestrate
+
+    path = _write_board(tmp_path, V2N_BOOT_MCUBOOT)
+    build_root = tmp_path / "build"
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=build_root))
+
+    shared = {a["path"]: a["contents"] for a in plan["sharedArtefacts"]}
+    sysbuild_path = (build_root / "alp_sysbuild.conf").as_posix()
+    assert sysbuild_path in shared
+    assert "SB_CONFIG_BOOTLOADER_MCUBOOT=y" in shared[sysbuild_path]
+
+    monkeypatch.setattr(alp_orchestrate.shutil, "which",
+                        lambda name: None)
+    orch = Orchestrator(load_board_yaml(path), build_root)
+    orch.fan_out(parallel=False)
+    assert (build_root / "alp_sysbuild.conf").read_text(
+        encoding="utf-8") == shared[sysbuild_path]
+
+
+def test_cli_emit_build_plan(tmp_path: Path, capsys, monkeypatch) -> None:
+    """`--emit build-plan` prints the JSON to stdout, rc 0, writes
+    nothing to disk."""
+    import json as _json
+    from alp_orchestrate import main as orchestrate_main
+
+    monkeypatch.chdir(tmp_path)
+    path = _write_board(tmp_path, V2N_HAPPY)
+    rc = orchestrate_main(["--input", str(path), "--emit", "build-plan"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    plan = _json.loads(out)
+    assert plan["schemaVersion"] == 1
+    assert [p.name for p in tmp_path.iterdir()] == ["board.yaml"]

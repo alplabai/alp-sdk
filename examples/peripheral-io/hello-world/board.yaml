@@ -1,7 +1,7 @@
 # board.yaml -- per-app project configuration for the
 # hello-world example.
 #
-# The simplest possible ALP SDK app: no peripherals, no chips, no
+# The simplest possible Alp SDK app: no peripherals, no chips, no
 # board-specific wiring.  Just the boot path + a periodic printf
 # loop so customers can confirm their toolchain + flash flow + log
 # console are wired correctly before chasing harder bugs.
@@ -15,6 +15,9 @@ som:
   sku: E1M-AEN701
 
 preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
 cores:
   m55_hp:
     app: ./src

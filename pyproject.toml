@@ -5,12 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "alp-sdk-cli"
 version = "0.6.0"
-description = "Command-line front-end for the ALP SDK"
+description = "Command-line front-end for the Alp SDK"
 requires-python = ">=3.10"
 dependencies = [
     "PyYAML>=6.0",
     "jsonschema>=4.0",
     "click>=8.1",
+    "cbor2>=5.0",
     "questionary>=2.0",
     "colorama>=0.4.6",
 ]
@@ -20,6 +21,19 @@ dev = [
     "pytest>=7.0",
     "pytest-snapshot>=0.9",
     "pytest-mock>=3.10",
+]
+# Lightweight TFLite read/parse deps (tensor-I/O extraction + the hermetic
+# fixture generator) -- pure-Python, no compiler.  CI installs this so the
+# tensor-I/O tests run without pulling the heavy ethos-u-vela sdist.
+model-io = [
+    "tflite>=2.10",
+    "flatbuffers>=23.1.21",
+]
+# Full host model-compile toolchain (adds the Vela Ethos-U compiler).
+model-compile = [
+    "ethos-u-vela>=3.9",
+    "tflite>=2.10",
+    "flatbuffers>=23.1.21",
 ]
 
 [project.scripts]

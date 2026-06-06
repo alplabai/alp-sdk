@@ -1,14 +1,35 @@
 # GD32 application bootloader
 
-Status: **scaffold**.  The OTA opcode range `0xF0..0xFF` reserved
-in [`../../../docs/gd32-bridge-protocol.md`](../../../docs/gd32-bridge-protocol.md)
-§10 routes through this directory's dispatcher; every handler replies
-with the standard `STATUS_NOSUPPORT` (0x06) until the real
-implementation lands.
+Status: **Path-A implemented, gated — silicon-validated 2026-06-04.** The OTA
+opcode range `0xF0..0xFF` reserved in
+[`../../../docs/gd32-bridge-protocol.md`](../../../docs/gd32-bridge-protocol.md)
+§10 routes through `bl_dispatch_ota` into the state machine in
+[`../ota.c`](../ota.c) (BEGIN/WRITE_CHUNK/VERIFY/COMMIT/ROLLBACK/GET_STATE/
+ABORT, CRC-32, A/B metadata; FMC backend in `hal/fmc_ota.c`).
 
-Integration detail (flash layout, commit sequence, rollback policy,
-slot-jump path, threat model) is held by the maintainer and not
-mirrored here.
+**Safe-by-default:** destructive flashing is armed only with
+`-DBRIDGE_OTA_PARTITIONED` (default **OFF**); otherwise every handler still
+returns `STATUS_NOSUPPORT` and no flash is touched, so the full-flash image
+cannot brick itself. When armed, the CMake build emits the partitioned set:
+a 32 KB bootloader (`boot_main.c` + `toolchain/gd32g553_bootloader.ld`) that
+validates the active A/B slot and jumps (MSP/VTOR), plus the app linked for
+each slot (`toolchain/gd32g553_app_slot.ld.in`, `.ramfunc` in RAM; the app
+sets `SCB->VTOR` to its slot base). The host OTA opcodes already exist in
+`chips/gd32g553/` and the firmware payloads are reconciled to them.
+
+**SILICON-VALIDATED 2026-06-04** (bench, protocol v0.6): boot/validate/jump,
+slot relocation, dual-bank FMC-from-RAM, and the full stream → verify →
+commit → boot-new-slot → rollback cycle proven end-to-end over the 25 MHz
+link, including two GD32 self-reboots through this bootloader.  First-flash
+of a partitioned part needs the factory metadata record from
+[`../../tools/gen_ota_metadata.py`](../../tools/gen_ota_metadata.py) at
+`0x08008000`.  A bricked part is still recovered via a bench SWD probe (no
+host-driven SWD reflash this HW rev); the default (unarmed) image remains
+the cannot-brick-itself configuration.
+
+Integration detail (final flash sizes, commit/rollback policy, signing,
+threat model) is captured in the maintainer-held design doc
+(`alp-sdk-internal/docs/gd32-bridge-ota-path-a-design.md`), not mirrored here.
 
 ## OTA opcode contract
 

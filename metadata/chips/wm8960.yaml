@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Cirrus / Wolfson WM8960 stereo audio codec.
+# Alp SDK chip manifest: Cirrus / Wolfson WM8960 stereo audio codec.
 schema_version:   1
 chip_id:          wm8960
 driver_status:    stub             # I2C config shell; audio sample flow via <alp/i2s.h>.

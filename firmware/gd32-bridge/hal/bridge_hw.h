@@ -1,18 +1,16 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * Hardware-abstraction shim consumed by firmware/gd32-bridge/src/protocol.c.
  * Each function maps an opcode-level operation onto the GigaDevice
- * firmware library (timer / GPIO / ADC / I2C-master / etc.).
+ * firmware library (timer / GPIO / ADC / DAC / etc.).
  *
  * The default implementations in hal/bridge_hw_stub.c return
  * BRIDGE_HW_ERR_NOTIMPL so the protocol round-trip can be smoke-tested
- * without the GigaDevice library being on the workspace yet.  The
- * real implementations land in hal/bridge_hw_gd32.c alongside the
- * GigaDevice firmware library pull (TBD: maintainer to drop the
- * vendor library at vendors/gd32_firmware_library/ and flip a
- * CMake flag).
+ * without the GigaDevice library on the workspace.  The real
+ * implementations live in the per-peripheral TUs under hal/gd32/
+ * (BRIDGE_HAL_BACKEND=gd32, against vendors/gd32_firmware_library/).
  */
 
 #ifndef GD32_BRIDGE_HAL_BRIDGE_HW_H
@@ -22,7 +20,7 @@
 #include <stdint.h>
 
 /* --------------------------------------------------------------- */
-/* Performance notes for the future bridge_hw_gd32.c implementer:    */
+/* Performance notes for the hal/gd32/ backend implementer:          */
 /*                                                                  */
 /* * The GD32G5 carries a hardware CRC unit (datasheet §95) that    */
 /*   processes one byte per AHB clock vs the ~16 cycles the         */
@@ -49,6 +47,11 @@
 #define BRIDGE_HW_ERR_INVAL      -2
 #define BRIDGE_HW_ERR_RANGE      -3
 #define BRIDGE_HW_ERR_IO         -4
+/* Transient resource starvation: the request is valid and the unit
+ * healthy, but servicing it NOW would overrun the handler's reply
+ * window (e.g. a max-length TRNG pull while the conditioning round
+ * is mid-flight).  Maps to STATUS_BUSY -- hosts retry. */
+#define BRIDGE_HW_ERR_BUSY -5
 
 /* --------------------------------------------------------------- */
 /* Reset-cause                                                       */
@@ -76,6 +79,12 @@ int bridge_hw_gpio_write(uint32_t mask, uint32_t levels);
 /* --------------------------------------------------------------- */
 
 int bridge_hw_pwm_set(uint8_t channel, uint32_t period_ns, uint32_t duty_ns);
+
+/* Report what the channel's pad is ACTUALLY generating by reading the
+ * timer registers back (auto-reload + compare, converted to ns) --
+ * never a software echo of the last request.  Before the first
+ * bridge_hw_pwm_set a channel reports the boot default (65.536 ms
+ * period, 0 duty); the period is shared per underlying timer. */
 int bridge_hw_pwm_get(uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns);
 
 /* v0.3: sticky PWM tuning.  align_mode is one of
@@ -108,11 +117,18 @@ int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio,
  * concurrently (`stream_id` selects which one) -- the firmware
  * binds stream 0 to DMA0 and stream 1 to DMA1 per the chip's two-DMA
  * controller setup.  STREAM_BEGIN starts the firmware's ring buffer
- * at the requested sample_rate_hz; STREAM_READ drains up to
- * `max_samples` samples (firmware caps at
- * GD32_BRIDGE_ADC_STREAM_READ_MAX); STREAM_END stops the DMA and
- * flushes the ring.  Buffer overruns are returned as STATUS_BUSY on
- * subsequent STREAM_READ. */
+ * at the requested sample_rate_hz -- realised by a dedicated pacing
+ * timer (stream 0: TIMER5, stream 1: TIMER6) whose update-event TRGO
+ * triggers one conversion per period via TRIGSEL, so the rate is a
+ * REAL hardware contract: 1 Hz..100 kHz, quantised to the timer tick
+ * (1 us at >=16 Hz, 100 us below), BRIDGE_HW_ERR_RANGE above the
+ * cap.  One stream per ADC converter -- a second BEGIN on a channel
+ * sharing the first stream's ADC answers BRIDGE_HW_ERR_INVAL.
+ * STREAM_READ drains up to `max_samples` samples (firmware caps at
+ * GD32_BRIDGE_ADC_STREAM_READ_MAX); STREAM_END stops the pacing
+ * timer + DMA and restores the converter's single-shot state.
+ * Buffer overruns are returned as STATUS_BUSY on subsequent
+ * STREAM_READ. */
 int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel,
                                uint32_t sample_rate_hz);
 int bridge_hw_adc_stream_read(uint8_t stream_id, uint8_t max_samples,
@@ -184,9 +200,19 @@ int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks);
 /* DA9292 forward                                                    */
 /* --------------------------------------------------------------- */
 
-/* Returns the most recent cached snapshot of the DA9292's
- * PMC_STATUS_00 byte.  Refreshed by a periodic I2C-master poll on
- * the GD32 side (see hal/bridge_hw_gd32.c). */
+/* Returns the DA9292 fault-pin state byte:
+ *   bit0 = DA9292_INT asserted (active-low net)
+ *   bit1 = DA9292_TW  asserted (active-low net)
+ *   bits 2-6 reserved (0)
+ *   0xFF = "no sample available" sentinel
+ * The CURRENT SoM revision wires the DA9292 fault nets only to the
+ * Renesas (P37/P36) -- the GD32 has no connection to them (and no I2C
+ * path to the PMIC), so this returns the 0xFF sentinel unconditionally
+ * (schematic-verified 2026-06-04).  The packing is reserved for a
+ * future HW rev that mirrors the nets onto GD32 inputs.  Today the
+ * host samples the pins directly (chips/da9292 da9292_get_fault_pins(),
+ * same packing) and reads PMC_STATUS_00 etc. over BRD_I2C via
+ * chips/da9292. */
 uint8_t bridge_hw_da9292_status_cached(void);
 
 /* --------------------------------------------------------------- */
@@ -205,14 +231,25 @@ uint8_t bridge_hw_da9292_status_cached(void);
 int bridge_hw_pwm_capture_begin(uint8_t channel, uint8_t edge);
 
 /* Read one (period_ns, pulse_width_ns) tuple from the @p channel's
- * capture ring.  Both outputs are in nanoseconds against the GD32
- * core clock (~4.16 ns LSB at 240 MHz).  BRIDGE_HW_ERR_NOTIMPL if the
+ * capture ring.  Both outputs are in nanoseconds at the PWM timers'
+ * prescaled 1 us tick (the same resolution bridge_hw_pwm_set rounds
+ * to -- NOT the unscaled ~4.63 ns core-clock LSB).  Edge deltas are
+ * computed modulo one counter period and are therefore SINGLE-WRAP:
+ * a captured signal whose edge spacing meets or exceeds the timer's
+ * configured period (CAR + 1 ticks; boot default 65.5 ms) aliases to
+ * the remainder with no detection.  BRIDGE_HW_ERR_NOTIMPL if the
  * ring is empty (host should poll); BRIDGE_HW_ERR_INVAL if the
  * channel is not currently in capture mode. */
 int bridge_hw_pwm_capture_read(uint8_t channel, uint32_t *period_ns, uint32_t *pulse_width_ns);
 
-/* Stop the @p channel's input-capture session and return the pin
- * to high-impedance.  Idempotent. */
+/* Stop the @p channel's input-capture session and RESTORE the
+ * channel's PWM output stage (pad back to AF-output push-pull, the
+ * channel unit re-programmed to PWM output at 0 % duty) so a
+ * subsequent bridge_hw_pwm_set drives again.  The original "return
+ * the pin to high-impedance" contract relied on pwm_set re-initing
+ * the channel direction, which it never did -- one capture session
+ * left the channel output-dead until reboot (silicon 2026-06-04).
+ * Idempotent. */
 int bridge_hw_pwm_capture_end(uint8_t channel);
 
 /* One-shot pulse: drive @p channel high for @p pulse_ns then return

@@ -1,0 +1,301 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * ALP E1M-X-EVK carrier (45x65) — peripherals on the baseboard.
+ *
+ * Composes with a SoM dtsi: a board dts includes the SoC dtsi, then the
+ * SoM dtsi (e1m-v2n-som.dtsi), then this carrier dtsi. Because we build
+ * up from the SoC dtsi and only ENABLE what the carrier populates, there
+ * is no "disable the EVK's nodes" pile — the Renesas EVK's HDMI bridge,
+ * OV5645 cameras, DA7212 codec and RAA215300 PMIC simply aren't enabled.
+ *
+ * Ported from the Renesas RZ/V2N EVK reference dts (kernel SHA 6717c06).
+ * STATUS: UNVALIDATED through dtc/bitbake.
+ *
+ * TODO (carrier features to port once exercised on the bench):
+ *   - Audio: TAS2563 smart-amp pair on I2C0 @0x4D/0x4E, I2S0 -> SSI1
+ *     (rcar_sound audio-graph). See chips/tas2563 + issue #25.
+ *   - 2x MIPI-DSI displays + capacitive touch.
+ *   - 2x MIPI-CSI cameras.
+ *   - CAN-FD (TCAN1044 x2).
+ */
+
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	aliases {
+		ethernet0 = &eth0;
+		ethernet1 = &eth1;
+		i2c0 = &i2c0;
+		i2c1 = &i2c1;
+		i2c6 = &i2c6;
+		i2c7 = &i2c7;
+		i2c8 = &i2c8;
+		mmc0 = &sdhi0;
+		mmc1 = &sdhi1;
+		serial0 = &scif;
+	};
+
+	chosen {
+		bootargs = "ignore_loglevel";
+		stdout-path = "serial0:115200n8";
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		nmi {
+			interrupt-parent = <&icu>;
+			interrupts = <0 IRQ_TYPE_EDGE_FALLING>;
+			linux,code = <0>;
+			label = "NMI";
+			wakeup-source;
+		};
+	};
+
+	/* Carrier microSD (SDHI1) VccQ level-shifter. */
+	vqmmc_sdhi1: regulator-vqmmc-sdhi1 {
+		compatible = "regulator-gpio";
+		regulator-name = "SDHI1 VqmmC";
+		gpios = <&pinctrl RZV2N_GPIO(A, 2) GPIO_ACTIVE_HIGH>;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <3300000>;
+		gpios-states = <0>;
+		states = <3300000 0>, <1800000 1>;
+	};
+};
+
+&qextal_clk {
+	clock-frequency = <24000000>;
+};
+
+&rtxin_clk {
+	clock-frequency = <32768>;
+};
+
+&rtc_clk {
+	clock-frequency = <32768>;
+};
+
+&rtc {
+	status = "okay";
+};
+
+&wdt1 {
+	status = "okay";
+};
+
+/* Carrier microSD slot (SDHI1). The bench dev image roots from this card
+ * (root=/dev/mmcblk1p2); on-module eMMC (SDHI0) is the production boot. */
+&sdhi1 {
+	pinctrl-0 = <&sdhi1_pins>;
+	pinctrl-1 = <&sdhi1_pins>;
+	pinctrl-names = "default", "state_uhs";
+	vmmc-supply = <&reg_3p3v>;
+	vqmmc-supply = <&vqmmc_sdhi1>;
+	bus-width = <4>;
+	sd-uhs-sdr50;
+	sd-uhs-sdr104;
+	status = "okay";
+};
+
+&gpu {
+	status = "okay";
+	mali-supply = <&reg_0p8v>;
+};
+
+/* Dual GbE — MACs on the carrier RJ45s; PHYs are on-module (SoM dtsi). */
+&eth0 {
+	pinctrl-0 = <&eth0_pins>;
+	pinctrl-names = "default";
+	phy-handle = <&phy0>;
+	phy-mode = "rgmii-id";
+	status = "okay";
+};
+
+&eth1 {
+	pinctrl-0 = <&eth1_pins>;
+	pinctrl-names = "default";
+	phy-handle = <&phy1>;
+	phy-mode = "rgmii-id";
+	status = "okay";
+};
+
+&i2c0 {
+	pinctrl-0 = <&i2c0_pins>;
+	pinctrl-names = "default";
+	/* 100 kHz: on-module EEPROM bus on internal pull-ups (weak ~50k). */
+	clock-frequency = <100000>;
+	status = "okay";
+};
+
+&i2c1 {
+	pinctrl-0 = <&i2c1_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <400000>;
+	status = "okay";
+};
+
+&i2c6 {
+	pinctrl-0 = <&i2c6_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <400000>;
+	status = "okay";
+};
+
+&i2c7 {
+	pinctrl-0 = <&i2c7_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <400000>;
+	status = "okay";
+};
+
+&i2c8 {
+	pinctrl-0 = <&i2c8_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <400000>;
+	status = "okay";
+};
+
+&scif {
+	pinctrl-0 = <&scif_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/* USB 2.0 host (OTG) + USB 3.0. OVC pins read permanently asserted on
+ * this carrier, so claim them as GPIO inputs to de-select the OVC
+ * function (kills the false "over-current condition" each boot). */
+&ehci0 {
+	memory-region = <&global_cma>;
+	dr_mode = "otg";
+	status = "okay";
+};
+
+&ohci0 {
+	memory-region = <&global_cma>;
+	dr_mode = "otg";
+	status = "okay";
+};
+
+&hsusb {
+	dr_mode = "otg";
+	status = "okay";
+};
+
+&usb20phyrst {
+	status = "okay";
+};
+
+&usb2_phy0_vbus_otg {
+	status = "okay";
+};
+
+&usb2_phy0 {
+	/* USB2.0 VBUS is always-on (hardwired) on the E1M-X carrier, so no
+	 * VBUS GPIO/pinmux is needed. The old usb20_pins hogged P95 (func 14),
+	 * which is the DEEPX PCIe mux-sel on V2M and MUST stay a GPIO — the
+	 * pinctrl claim collided with the deepx-pcie-mux-sel hog. Dropped. */
+	vbus-supply = <&usb2_phy0_vbus_otg>;
+	status = "okay";
+};
+
+&usb3_phy0 {
+	status = "okay";
+};
+
+&xhci0 {
+	pinctrl-0 = <&usb30_pins>;
+	pinctrl-names = "default";
+	memory-region = <&global_cma>;
+	status = "okay";
+};
+
+&pinctrl {
+	eth0_pins: eth0 {
+		pins = "ET0_TXC_TXCLK";
+		output-enable;
+	};
+
+	eth1_pins: eth1 {
+		pins = "ET1_TXC_TXCLK";
+		output-enable;
+	};
+
+	/* Unlike the Renesas EVK (external pull-ups on RIIC0/1), the ALP
+	 * board has none on RIIC0 (on-module EEPROM bus), RIIC1, or RIIC8
+	 * (BRD_I2C); enable the SoC internal pull-ups so SCL/SDA idle high. */
+	i2c0_pins: i2c0 {
+		pinmux = <RZV2N_PORT_PINMUX(3, 0, 1)>, /* I2C0_SDA */
+			 <RZV2N_PORT_PINMUX(3, 1, 1)>; /* I2C0_SCL */
+		bias-pull-up;
+	};
+
+	i2c1_pins: i2c1 {
+		pinmux = <RZV2N_PORT_PINMUX(3, 2, 1)>, /* I2C1_SDA */
+			 <RZV2N_PORT_PINMUX(3, 3, 1)>; /* I2C1_SCL */
+		bias-pull-up;
+	};
+
+	i2c6_pins: i2c6 {
+		pinmux = <RZV2N_PORT_PINMUX(4, 4, 1)>, /* I2C6_SDA */
+			 <RZV2N_PORT_PINMUX(4, 5, 1)>; /* I2C6_SCL */
+		bias-pull-up;
+	};
+
+	i2c7_pins: i2c7 {
+		pinmux = <RZV2N_PORT_PINMUX(4, 6, 1)>, /* I2C7_SDA */
+			 <RZV2N_PORT_PINMUX(4, 7, 1)>; /* I2C7_SCL */
+		bias-pull-up;
+	};
+
+	i2c8_pins: i2c8 {
+		pinmux = <RZV2N_PORT_PINMUX(0, 6, 1)>, /* I2C8_SDA */
+			 <RZV2N_PORT_PINMUX(0, 7, 1)>; /* I2C8_SCL */
+		bias-pull-up;
+	};
+
+	scif_pins: scif {
+		pins = "SCIF_TXD", "SCIF_RXD";
+		renesas,output-impedance = <1>;
+	};
+
+	/* SD1 CLK/CMD/DAT are dedicated (hardwired) balls on the carrier and
+	 * don't need pin config.
+	 *
+	 * SD1_CD (card-detect) on P94 is DELIBERATELY NOT muxed here: P94 shares
+	 * the port-9 PMC9/PM9 control registers with P96 (SCK7) and P97 (CS) of the
+	 * on-module GD32 supervisor SPI, which the CM33 owns across the AMP split.
+	 * Linux's boot-time byte/half-word write to mux SD1_CD wiped the CM33's
+	 * P96/P97 bits (no SCK / no CS framing) -- the on-silicon root cause that
+	 * the bench /dev/mem poke worked around.  Dropping the SD1_CD claim removes
+	 * the clobber at the source so the CM33's own pin setup sticks.  (If carrier
+	 * microSD hot-plug detect is needed later, route it to a non-port-9 pin or
+	 * mark &sdhi1 broken-cd/non-removable.) */
+	sdhi1_pins: sd1 {
+	};
+
+	/* microSD slot power enable. */
+	sd1-pwr-en-hog {
+		gpio-hog;
+		gpios = <RZV2N_GPIO(A, 3) GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "sd1_pwr_en";
+	};
+
+	/* No usb20 (USB2.0 VBUS) pinmux: VBUS is always-on (hardwired) on this
+	 * carrier, and P95 is the DEEPX PCIe mux-sel on V2M (kept as GPIO). */
+
+	usb30_pins: usb30 {
+		vbus {
+			pinmux = <RZV2N_PORT_PINMUX(B, 0, 14)>; /* VBUS */
+		};
+	};
+
+	usb-ovc-disable-hog {
+		gpio-hog;
+		gpios = <RZV2N_GPIO(9, 6) GPIO_ACTIVE_HIGH>,
+			<RZV2N_GPIO(B, 1) GPIO_ACTIVE_HIGH>;
+		input;
+		line-name = "usb_ovc_disable";
+	};
+};

@@ -47,6 +47,7 @@
     }
   ],
   "soc_ram_kb": 1536,
+  "inference_arena_sram_kib": 0,
   "always_on_sram_kb": 0,
   "peripherals": {
     "i2c": 9,
@@ -200,9 +201,9 @@
     "Quad Cortex-A55 @ 1.8 GHz @ 0.9 V (1.1 GHz @ 0.8 V low-power).  L3 cache max frequency is 1.26 GHz, not 1.8 GHz.",
     "VCD: H.264 1080p60 / H.265 4K30 encode + decode in hardware.",
     "Shipment suffix '#ACx' = individual tray, '#BCx' = full carton.  Variants with '#AC0' or '#BC0' do not support MIPI-DSI Display Command Set control.",
-    "AC0 default per ALP Lab vendors/renesas-rzv2n/README.md — R9A09G056N44GBG#AC0 backs the E1M-V2N* and E1M-V2M* SoM SKUs.",
+    "AC0 default per Alp Lab vendors/renesas-rzv2n/README.md — R9A09G056N44GBG#AC0 backs the E1M-V2N* and E1M-V2M* SoM SKUs.",
     "MIPI CSI-2 has 2 instances; MIPI DSI has 1.  PCIe Gen3 supports 1 or 2 lanes (no 4-lane on RZ/V2N — that's RZ/V2H).",
     "GPU and ISP are optional silicon and require software to detect them at runtime via the Renesas FSP.",
-    "On the V2N-M1 SoM, the DeepX DX-M1 sits behind PCIe internally — see metadata/socs/deepx/dx/m1.json."
+    "On the V2N-M1 SoM, the DEEPX DX-M1 sits behind PCIe internally — see metadata/socs/deepx/dx/m1.json."
   ]
 }

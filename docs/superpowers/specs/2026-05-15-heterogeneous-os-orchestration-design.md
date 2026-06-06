@@ -9,7 +9,7 @@
 
 ## 1. Problem statement
 
-Today the ALP SDK presents **Zephyr** and **Yocto** as mutually-exclusive build
+Today the Alp SDK presents **Zephyr** and **Yocto** as mutually-exclusive build
 targets selected by a single `os:` field in `board.yaml`. That framing is
 architecturally wrong for the SoMs the SDK actually ships against:
 

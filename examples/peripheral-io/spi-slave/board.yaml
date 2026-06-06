@@ -2,7 +2,7 @@
 # spi-slave example.
 #
 # Demonstrates the *shape* of SPI slave-mode application code.
-# As of v0.6 the ALP SDK does NOT expose SPI slave mode through
+# As of v0.6 the Alp SDK does NOT expose SPI slave mode through
 # <alp/peripheral.h>; this example documents the gap and shows
 # what the slave-side main.c would look like when the API lands.
 # See the prominent TODO block in src/main.c.
@@ -16,6 +16,9 @@ som:
   sku: E1M-AEN701
 
 preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:

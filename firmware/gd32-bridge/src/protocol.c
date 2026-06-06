@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * gd32-bridge firmware: shared command-handler table.
@@ -10,9 +10,9 @@
  * file's protocol_dispatch().
  *
  * Handlers that need actual hardware (PWM channel programming, ADC
- * sampling, GPIO output, DA9292 I2C poll) currently call into the
- * `bridge_hw_*` HAL shims declared in hal/.  The HAL is a separate
- * compile unit and will be implemented against the GigaDevice
+ * sampling, GPIO output, DA9292 INT/TW pin sampling) currently call
+ * into the `bridge_hw_*` HAL shims declared in hal/.  The HAL is a
+ * separate compile unit and will be implemented against the GigaDevice
  * firmware library in a follow-up commit.  Today those shims return
  * STATUS_NOSUPPORT so the protocol round-trip is exercisable
  * end-to-end (PING + GET_VERSION + GET_BUILD_ID work without any
@@ -46,10 +46,17 @@ uint16_t crc16_ccitt_false(const uint8_t *buf, size_t len)
 }
 
 /* --------------------------------------------------------------- */
-/* Build identifier.  Linker-emitted, ASCII hex truncated SHA-1 of   */
-/* the elf.  Until the build pipeline lands, use a placeholder so    */
-/* GET_BUILD_ID has a well-formed reply.                              */
+/* Build identifier: "<fw-version>+<git-sha-prefix>", 20 ASCII chars. */
+/* Baked at build time into the generated gd32_bridge_build_id.h by  */
+/* cmake/gen_build_id.cmake (re-run every build, so HEAD moves and   */
+/* version bumps land in the next incremental build).  Non-CMake     */
+/* consumers (the SDK-side transport unit tests compile this file    */
+/* directly) keep the hermetic placeholder below.                     */
 /* --------------------------------------------------------------- */
+
+#ifdef GD32_BRIDGE_HAVE_BUILD_ID_HEADER
+#include "gd32_bridge_build_id.h"
+#endif
 
 #ifndef GD32_BRIDGE_BUILD_ID
 #define GD32_BRIDGE_BUILD_ID "0000000000000000abcd"
@@ -457,6 +464,10 @@ static gd32_bridge_status_t handle_adc_stream_end(const uint8_t *req, size_t req
     return STATUS_OK;
 }
 
+/* Defined with the v0.5 handler set below; the TRNG handler (v0.4)
+ * shares the central mapping for its BUSY/IO discrimination. */
+static gd32_bridge_status_t status_from_hw(int rv);
+
 static gd32_bridge_status_t handle_trng_read(const uint8_t *req, size_t req_len,
                                              uint8_t *reply, size_t reply_cap,
                                              size_t *reply_len)
@@ -466,8 +477,7 @@ static gd32_bridge_status_t handle_trng_read(const uint8_t *req, size_t req_len,
     if (want == 0u || want > 32u) return STATUS_INVAL;
     if (reply_cap < want) return STATUS_NOMEM;
     const int rv = bridge_hw_trng_read(reply, (size_t)want);
-    if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
-    if (rv < 0) return STATUS_IO;
+    if (rv != BRIDGE_HW_OK) return status_from_hw(rv);
     *reply_len = want;
     return STATUS_OK;
 }
@@ -507,11 +517,11 @@ static gd32_bridge_status_t handle_tmu_compute(const uint8_t *req, size_t req_le
 /* Wire frames per docs/gd32-bridge-protocol.md §3.y.  Every handler  */
 /* validates the request payload length, calls into the HAL hook,    */
 /* and maps the BRIDGE_HW_ERR_* return into the on-wire STATUS_*     */
-/* code.  Today bridge_hw_stub.c returns BRIDGE_HW_ERR_NOTIMPL for   */
-/* all of these -- which protocol_dispatch maps to STATUS_NOSUPPORT  */
-/* on the wire -- so host code sees a precise NOSUPPORT contract     */
-/* until the real bridge_hw_gd32.c bodies land alongside the         */
-/* GigaDevice firmware library pull.                                  */
+/* code.  On the stub backend (bridge_hw_stub.c) all of these return */
+/* BRIDGE_HW_ERR_NOTIMPL -- which protocol_dispatch maps to          */
+/* STATUS_NOSUPPORT on the wire -- so host code sees a precise       */
+/* NOSUPPORT contract; the gd32 backend's real bodies live in the    */
+/* per-peripheral TUs under hal/gd32/.                                */
 /* ----------------------------------------------------------------- */
 
 /* Translate a BRIDGE_HW_ERR_* return into a STATUS_*.  Centralised so
@@ -522,6 +532,7 @@ static gd32_bridge_status_t status_from_hw(int rv)
     if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
     if (rv == BRIDGE_HW_ERR_RANGE) return STATUS_OUT_OF_RANGE;
     if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+    if (rv == BRIDGE_HW_ERR_BUSY) return STATUS_BUSY;
     return STATUS_IO;
 }
 
@@ -686,6 +697,39 @@ static gd32_bridge_status_t handle_adc_dsp_chain_bind(const uint8_t *req, size_t
 }
 
 /* --------------------------------------------------------------- */
+/* v0.7 -- link-feature negotiation                                  */
+/* --------------------------------------------------------------- */
+
+/* Armed link features (GD32_BRIDGE_LINK_FEAT_*).  Lives here rather
+ * than in a transport because the negotiation command can arrive over
+ * either transport; the SPI transport consults the accessor when it
+ * stages replies (the I2C transport never stamps -- STATUS_NO_PENDING
+ * owns bit 7 there).  Reset default: everything off = the pre-v0.7
+ * wire, so an un-negotiated link is byte-identical to older firmware. */
+static uint8_t link_features;
+
+uint8_t        protocol_link_features(void)
+{
+    return link_features;
+}
+
+static gd32_bridge_status_t handle_link_features(const uint8_t *req, size_t req_len, uint8_t *reply,
+                                                 size_t reply_cap, size_t *reply_len)
+{
+    if (req_len != 1u) return STATUS_INVAL;
+    if (reply_cap < 1u) return STATUS_NOMEM;
+    /* Grant the intersection of the request with what this firmware
+     * implements, and arm it IMMEDIATELY -- the reply to this very
+     * command already rides the new framing (the host treats its
+     * stamp as the sequence baseline).  A request of 0 disables
+     * everything; idempotent in both directions. */
+    link_features = (uint8_t)(req[0] & GD32_BRIDGE_LINK_FEAT_STATUS_SEQ);
+    reply[0]      = link_features;
+    *reply_len    = 1u;
+    return STATUS_OK;
+}
+
+/* --------------------------------------------------------------- */
 /* Dispatch                                                          */
 /* --------------------------------------------------------------- */
 
@@ -727,9 +771,8 @@ gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
     case CMD_QENC_RESET:            h = handle_qenc_reset;       break;
     case CMD_COUNTER_READ:          h = handle_counter_read;     break;
     /* v0.5 (§2B.2) advanced timer extras + (§2B.3) power-mode set.
-     * All return STATUS_NOSUPPORT against bridge_hw_stub.c today; the
-     * real bodies in bridge_hw_gd32.c land alongside the GigaDevice
-     * firmware library pull. */
+     * Real bodies in hal/gd32/ (pwm_capture.c / pwm.c / timer_sync.c /
+     * power.c); the stub backend answers STATUS_NOSUPPORT. */
     case CMD_PWM_CAPTURE_BEGIN:
         h = handle_pwm_capture_begin;
         break;
@@ -747,6 +790,9 @@ gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
         break;
     case CMD_POWER_MODE_SET:
         h = handle_power_mode_set;
+        break;
+    case CMD_LINK_FEATURES:
+        h = handle_link_features;
         break;
     /* v0.5 (§2B wave-2) chunked DSP-chain upload (CHAIN_OPEN /
      * STAGE_PUSH / CHAIN_BIND).  The 0x36 tombstone stays in the

@@ -5,7 +5,7 @@
   "family": "Ensemble",
   "part": "E8",
   "status": "released",
-  "pending_alif_datasheet": true,
+  "pending_alif_datasheet": false,
   "datasheet": {
     "version": "1.0",
     "extracted_at": "2026-05-11",
@@ -127,6 +127,7 @@
     }
   ],
   "soc_ram_kb": 9984,
+  "inference_arena_sram_kib": 0,
   "soc_flash_mb": 5.5,
   "always_on_sram_kb": 4,
   "peripherals": {
@@ -243,6 +244,6 @@
     "E8 swaps OctalSPI for HexSPI (16-bit, 400 MB/s SDR / 800 MB/s DDR) -- a different external-memory protocol than E3/E7.",
     "E8 ships an ISP and JPEG encoder (E3/E7 do not).",
     "WLCSP216 package exposes 136× 1.8-V GPIOs; FBGA194 exposes 120 (note: 'GPIO[0-14]' subset on FBGA per datasheet table 7-1).",
-    "AE822FA0E5597LS0 is the variant ALP Lab uses on the E1M-AEN801 module SKU."
+    "AE822FA0E5597LS0 is the variant Alp Lab uses on the E1M-AEN801 module SKU."
   ]
 }

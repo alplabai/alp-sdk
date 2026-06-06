@@ -1,6 +1,6 @@
-# Contributing to ALP SDK
+# Contributing to Alp SDK
 
-Canonical contributor documentation for the ALP SDK.  The shorter
+Canonical contributor documentation for the Alp SDK.  The shorter
 [`/CONTRIBUTING.md`](../CONTRIBUTING.md) at the repo root is the
 GitHub-auto-discovered entry point and points back here.
 
@@ -24,7 +24,13 @@ signatures), if you have one.
 
 ### Submitting code
 
-1. Fork and branch from `main`: `git checkout -b feat/peripherals/whatever`.
+1. Fork and branch from `dev`: `git checkout -b feat/peripherals/whatever`.
+   Feature / fix / doc branches branch off `dev` and merge back into
+   `dev` via PR (`--no-ff`).  Use a type prefix (`feat/`, `fix/`,
+   `docs/`, ...).  `dev` is the shared integration branch; `main` is
+   the tested, releasable baseline that `dev` is promoted to at the
+   release gate.  See
+   [`docs/branching-and-merge-policy.md`](branching-and-merge-policy.md).
 2. Keep changes scoped to one library or one SoM at a time.
 3. Add or update tests under `tests/`.  Every public function must
    have at least one Unity / ztest test (the v0.1 quality bar).
@@ -52,7 +58,8 @@ signatures), if you have one.
 - C99-compatible.  Doxygen comments on every public function, type,
   and macro.
 - All public symbols use the **`alp_` prefix**: `alp_i2c_t`,
-  `alp_spi_open()`, `alp_display_blit()`, `alp_iot_*`, …
+  `alp_spi_open()`, `alp_display_blit()`, the `<alp/iot.h>`
+  Wi-Fi + MQTT surface (`alp_wifi_open()`, `alp_mqtt_publish()`), …
 - Lowercase, snake_case.
 - Opaque types (forward-declared structs returned as pointers)
   unless there's a strong reason to expose layout.

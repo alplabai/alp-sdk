@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file gui.h
- * @brief ALP SDK GUI library — LVGL re-export with ALP defaults.
+ * @brief Alp SDK GUI library — LVGL re-export with ALP defaults.
  *
  * v0.1: this header pulls in upstream LVGL (when ALP_HAS_LVGL is set
  * by the build) and exposes ALP-specific helpers for binding LVGL

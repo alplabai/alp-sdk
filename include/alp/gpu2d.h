@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file gpu2d.h
- * @brief ALP SDK 2D graphics accelerator (D/AVE 2D class) abstraction.
+ * @brief Alp SDK 2D graphics accelerator (D/AVE 2D class) abstraction.
  *
  * Portable 2D blit / fill / blend operations against framebuffer
  * surfaces.  Maps to the Alif Ensemble's D/AVE 2D ("GPU2D") block on

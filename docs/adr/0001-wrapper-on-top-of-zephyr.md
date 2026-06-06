@@ -1,4 +1,4 @@
-# 0001. Why ALP SDK wraps Zephyr (and why the wrapper stays thin)
+# 0001. Why Alp SDK wraps Zephyr (and why the wrapper stays thin)
 
 Status: Accepted
 Date: 2026-05-10
@@ -8,7 +8,7 @@ Date: 2026-05-10
 Zephyr already abstracts vendor-driver diversity below its driver
 classes: `i2c_*` works on Alif HAL, Renesas FSP, NXP MCUXpresso.  A
 reasonable question is: "if Zephyr already hides Alif vs. Renesas vs.
-NXP, why does the ALP SDK add another layer on top?"
+NXP, why does the Alp SDK add another layer on top?"
 
 The question matters because adding a layer that *only* re-exports
 Zephyr's API is dead weight — bug surface without portability gain.
@@ -17,7 +17,7 @@ a clean answer to "what does the wrapper buy us that Zephyr doesn't?"
 
 ## Decision
 
-**Yes, ALP SDK wraps Zephyr — but for reasons that are orthogonal to
+**Yes, Alp SDK wraps Zephyr — but for reasons that are orthogonal to
 vendor-diversity-within-Zephyr.**  The wrapper earns its keep on five
 distinct fronts:
 

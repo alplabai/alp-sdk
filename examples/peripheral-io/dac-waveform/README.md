@@ -1,6 +1,6 @@
 # dac-waveform
 
-Generate a sine wave on `E1M_X_DAC0`.
+Generate a sine wave on `BOARD_DAC0`.
 
 Walks a 32-point sine lookup table at a configurable sample rate,
 writing each sample to the DAC via `alp_dac_write_mv`.  The
@@ -8,23 +8,31 @@ staircase output approximates a sine at the requested frequency
 (32 samples per cycle -> 32-step staircase).  Pop a DSO probe on
 the `ANA_OUT0` pad to see it.
 
-## Why E1M-X (V2N family)?
+## How DAC0 is provided on each EVK
 
-The base E1M (35x35 mm) form factor does NOT route a DAC output
-pad.  Only the E1M-X (45x65 mm, V2N family) form factor exposes
-`ANA_OUT0` / `ANA_OUT1`.
+This example runs on BOTH EVKs.  `BOARD_DAC0` (from `<alp/board.h>`)
+resolves to the selected board's DAC0 channel -- the source code
+never names a form-factor-specific instance ID:
 
-On V2N the Renesas RZ/V2N SoC has no DAC peripheral at all -- the
-SDK routes `alp_dac_*` calls through the on-module GD32G553
-supervisor bridge to the GD32's PA4 (DAC0) / PA6 (DAC1) pads
-(per [`metadata/e1m_modules/E1M-V2N101.yaml`](../../../metadata/e1m_modules/E1M-V2N101.yaml)
-`pad_routes:` block).  Customer code doesn't see the dispatch --
-it's transparent to the `<alp/adc.h>` DAC API.
+* **E1M EVK** -- the base E1M (35x35 mm) SoM carries the Alif
+  Ensemble, whose native 2-channel DAC drives `ANA_OUT0` / `ANA_OUT1`
+  directly.  `BOARD_DAC0` resolves to `E1M_DAC0`.
+* **E1M-X EVK** -- the E1M-X (45x65 mm, V2N family) SoM carries the
+  Renesas RZ/V2N.  The RZ/V2N SoC itself has no DAC peripheral
+  (`ALP_SOC_DAC_COUNT 0`), so the SoM provides DAC0/DAC1 via the
+  on-module GD32G553 supervisor bridge: the SDK routes `alp_dac_*`
+  calls to the GD32's PA4 (DAC0) / PA6 (DAC1) pads
+  (per [`metadata/e1m_modules/E1M-V2N101.yaml`](../../../metadata/e1m_modules/E1M-V2N101.yaml)
+  `pad_routes:` block).  `BOARD_DAC0` resolves to the V2N SoM's
+  GD32-bridged DAC0 channel.
+
+Either way the example sees a working DAC0 -- neither EVK lacks one.
+The GD32 dispatch on E1M-X is transparent to the `<alp/adc.h>` DAC API.
 
 ## What this shows
 
-* `alp_dac_open()` with E1M-X form-factor instance IDs
-  (`E1M_X_DAC0`).
+* `alp_dac_open()` with a board-neutral channel ID
+  (`BOARD_DAC0`, resolved per board via `<alp/board.h>`).
 * `alp_dac_write_mv()` -- one mV setpoint write per sample.
 * Sample-rate control via `alp_delay_us` between samples.
 * Integer-only Q15 LUT scaling (no FPU required on Cortex-M33).
@@ -49,15 +57,15 @@ west flash
 native_sim (no DAC):
 
 ```
-[dac] open E1M_X_DAC0 (initial 1650 mV)
-[dac] open failed: alp_last_error=-2 (NOT_READY on native_sim; supervisor not ready on real V2N)
+[dac] open BOARD_DAC0 (initial 1650 mV)
+[dac] open failed: alp_last_error=-2 (NOT_READY on native_sim; DAC backend not ready on real hardware)
 [dac] done
 ```
 
 V2N hardware (GD32 supervisor ready):
 
 ```
-[dac] open E1M_X_DAC0 (initial 1650 mV)
+[dac] open BOARD_DAC0 (initial 1650 mV)
 [dac] generating sine: freq=100 Hz, mean=1650 mV, ampl=1650 mV
 [dac] cycle 0: peak=3299 mV trough=0 mV
 [dac] cycle 1: peak=3299 mV trough=0 mV
@@ -85,8 +93,8 @@ On a DSO probe attached to `ANA_OUT0`:
   triangle, sawtooth, or arbitrary user-defined sequence.
   Keep entries in Q15 (signed 16-bit centred on 0) so the
   `lut_to_mv` scaler stays unchanged.
-* **DAC1 instead of DAC0.**  Change `E1M_X_DAC0` ->
-  `E1M_X_DAC1`.  The board routes that to ANA_OUT1.
+* **DAC1 instead of DAC0.**  Change `BOARD_DAC0` ->
+  `BOARD_DAC1`.  The board routes that to ANA_OUT1.
 
 ## Verifying with a DMM (no scope)
 
@@ -103,9 +111,9 @@ suspect board routing or supervisor-not-ready
 ## Reference
 
 - [`<alp/adc.h>`](../../../include/alp/adc.h) -- DAC API lives here.
-- [`<alp/e1m_x_pinout.h>`](../../../include/alp/e1m_x_pinout.h)
-  -- E1M-X instance IDs.
+- [`<alp/board.h>`](../../../include/alp/board.h)
+  -- `BOARD_DAC0` / `BOARD_DAC1` board-neutral aliases.
 - [`metadata/e1m_modules/E1M-V2N101.yaml`](../../../metadata/e1m_modules/E1M-V2N101.yaml)
-  -- V2N `pad_routes:` for `E1M_X_DAC0` / `E1M_X_DAC1`.
+  -- V2N `pad_routes:` for the GD32-bridged DAC0 / DAC1 (E1M-X).
 - [`docs/architecture.md`](../../../docs/architecture.md)
   -- GD32 supervisor bridge architecture.

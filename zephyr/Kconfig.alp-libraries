@@ -14,7 +14,7 @@
 
 # v0.5 §D.lib.loader -- per-library HW-accelerator Kconfig knobs.
 
-menu "ALP SDK per-library HW-accelerator wiring"
+menu "Alp SDK per-library HW-accelerator wiring"
 
 # ----------------------------------------------------------------------
 # tflite_micro
@@ -314,4 +314,23 @@ config ALP_LITTLEFS_SYNC_IO
 	bool "littlefs sync I/O (SW fallback)"
 	default y
 
-endmenu  # "ALP SDK per-library HW-accelerator wiring"
+endmenu  # "Alp SDK per-library HW-accelerator wiring"
+
+# ----------------------------------------------------------------------
+# .alpmodel package reader (<alp/model.h>)
+# ----------------------------------------------------------------------
+
+config ALP_SDK_MODEL_READER
+	bool "Read-side .alpmodel package parser (<alp/model.h>)"
+	default n
+	select ZCBOR
+	help
+	  Compile src/common/alp_model.c, the OS-agnostic read-side parser
+	  for the .alpmodel package (24-byte header + CBOR manifest + blob
+	  table).  alp_model_parse() decodes an in-memory package into a
+	  bounded, stack-friendly alp_model_t view (model identity, the
+	  per-backend target table, and blob slices) with no heap.
+
+	  Selects ZCBOR for the manifest-map decode.  Off by default; the
+	  runtime model loader (and any hand-written firmware that consumes
+	  .alpmodel packages directly) opts in.

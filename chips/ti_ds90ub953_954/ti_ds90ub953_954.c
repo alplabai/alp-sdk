@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * TI DS90UB953-Q1 + DS90UB954-Q1 FPD-Link III SerDes pair driver.

@@ -1,6 +1,6 @@
-# ALP SDK Architecture
+# Alp SDK Architecture
 
-The ALP SDK is the **unification software layer** for ALP Lab edge AI
+The Alp SDK is the **unification software layer** for Alp Lab edge AI
 modules built on the **E1M open-standard form factor**. It provides
 application developers a single C/C++ API that works across every
 E1M-* SoM variant — present and future — by wrapping each vendor's
@@ -14,7 +14,7 @@ SDK on top of ARM CMSIS.
 ├─────────────────────────────────────────────────────────────┤
 │  Zephyr RTOS  /  Yocto Linux  /  Bare Metal                 │  ← OS, picked per variant
 ├─────────────────────────────────────────────────────────────┤
-│  ALP SDK                                                    │  ← THIS REPO
+│  Alp SDK                                                    │  ← THIS REPO
 │    Libraries:  GUI/LVGL · Display · Camera · DSP ·          │
 │                IoT · Peripherals                            │
 │    Vendor wrappers:  Alif HAL · Renesas RZ · ...            │
@@ -78,6 +78,9 @@ alp-sdk/
 │   ├── blocks/                      # <alp/blocks/<name>.h> for SDK-level block helpers
 │   └── boards/                      # GENERATED: per-board route headers
 ├── src/
+│   ├── <class>_dispatch.c           # per-peripheral-class dispatcher (i2c_dispatch.c, …)
+│   ├── backend.c                    # backend selector (alp_backend_select, registry walk)
+│   ├── backends/<class>/<impl>.c    # registered backends (zephyr_drv.c, sw_fallback.c, vendor HAL)
 │   ├── common/                      # OS-agnostic helpers (bit ops, ring buffers, status->str)
 │   ├── zephyr/                      # Zephyr-backed implementation
 │   ├── baremetal/                   # bare-metal implementation
@@ -94,7 +97,9 @@ alp-sdk/
 │   └── README.md                    # block-vs-chip rationale (`alp_` prefix vs chip-natural name)
 ├── vendors/
 │   ├── alif/                        # Alif HAL bindings (Ensemble)
-│   └── renesas-rzv2n/               # Renesas FSP bindings (RZ/V2N)
+│   ├── renesas-rzv2n/               # Renesas FSP bindings (RZ/V2N)
+│   ├── nxp-imx93/                   # NXP i.MX 93 vendor bindings
+│   └── deepx-dxm1/                  # DEEPX DX-M1 NPU runtime bindings
 ├── metadata/                        # ALL HW + LIBRARY METADATA — single source of truth
 │   ├── schemas/                     # JSON Schemas (board, board-preset, soc-spec-v1, …)
 │   ├── socs/<vendor>/<family>/<part>.json   # silicon datasheets (peripheral counts, caps)
@@ -264,7 +269,7 @@ The active generators are:
 
 | Script                                  | Reads                                                | Writes                                                                         |
 |-----------------------------------------|------------------------------------------------------|--------------------------------------------------------------------------------|
-| `scripts/alp_orchestrate.py`            | `board.yaml` + SoM preset + SoC JSON + board preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, per-slice `alp.conf` / `local.conf` / `cmake-args.txt` |
+| `scripts/alp_orchestrate.py`            | `board.yaml` + SoM preset + SoC JSON + board preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, `build/alp_sysbuild.conf` (when `boot:` declared), per-slice `alp.conf` / `local.conf` / `cmake-args.txt`; also `--emit build-plan` — the machine-readable plan JSON external build front-ends consume (ADR 0014) |
 | `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × board route-table demonstrator) |
 | `scripts/gen_soc_caps.py`               | `metadata/socs/**/*.json`                            | `include/alp/soc_caps.h` (per-SoC `ALP_SOC_*_COUNT` + `ALP_SOC_*_MAX_*` macros) |
 | `scripts/gen_board_header.py`         | `metadata/boards/<name>.yaml`                       | `include/alp/boards/alp_<board>_routes.h` (board macro mapping)            |
@@ -319,7 +324,10 @@ not others.
 | Audio            | `alp/audio.h`        | Zephyr `audio_dmic` + `i2s_*` chains; ALSA `snd_pcm_*` on Yocto.| v0.1 surface; Zephyr backend v0.2; Yocto ALSA backend code complete v0.4-prep (`pkg_check_modules(alsa)`-gated), real capture/playback gates on `hil-yocto` |
 | BLE              | `alp/ble.h`          | Zephyr `bt` host stack (peripheral + central + GATT).           | v0.1 surface; impl v0.3 |
 | Security         | `alp/security.h`     | MbedTLS PSA Crypto API (Zephyr) + OpenSSL `EVP_*` (Yocto).      | v0.1 surface; Yocto OpenSSL backend (SHA-256/384/512, AES-128/256-GCM, ChaCha20-Poly1305, `alp_random_bytes`) code complete v0.4-prep with KATs green at `tests/yocto/security_openssl.c`; Zephyr MbedTLS impl v0.3 |
-| Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions; placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` (replaced by nanopb-generated codec in v0.4-final). | v0.1 surface; framing scaffolding v0.4-prep; full impl v0.3+ |
+| Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions, plus framed RPC over RPMsg / OpenAMP (`rpc.h`, opened with the generated `system_ipc.h`); placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` (replaced by nanopb-generated codec in v0.4-final). | v0.1 surface; framing scaffolding v0.4-prep; full impl v0.3+ |
+| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`alp model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends: `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `drpai_v2n_stub` (DRP-AI3), `deepx_dxm1_stub` (DEEPX DX-M1), `sw_fallback`.  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
+| Storage          | `alp/storage.h`      | Block + filesystem (LittleFS) on Zephyr; standard FS on Yocto.  | v0.5 surface |
+| 2D graphics      | `alp/gpu2d.h`        | Portable blit/fill shim (Alif Dave2D / GPU2D); SW fallback.     | v0.5 surface; see [ADR 0008](adr/0008-gpu2d-portable-shim.md) |
 
 ### Peripherals: how a block resolves to a backend
 
@@ -328,29 +336,40 @@ its manifest (`interfaces.provides`).  The studio's deterministic pin
 allocator reads the per-SoM pad routes from this repo (the
 `pad_routes:` block under `metadata/e1m_modules/<SKU>.yaml`), picks
 peripheral instances per block, and emits codegen that calls into
-`<alp/peripheral.h>`.  Block-side driver C files include ALP SDK
+`<alp/peripheral.h>`.  Block-side driver C files include Alp SDK
 headers and consume `alp_i2c_t`, `alp_gpio_t`, etc.
 
 The SDK's job is to take the resolved instance identifier (the
-`bus_id`/`pin_id` field) and bind to the right vendor driver, picking
-the right backend dir at build time:
+`bus_id`/`pin_id` field) and bind to the right backend.  Binding is
+**runtime-resolved through a registry**, not a build-time directory
+swap.  Each peripheral class has a dispatcher in `src/<class>_dispatch.c`
+(e.g. `src/i2c_dispatch.c`).  Backends live under
+`src/backends/<class>/` — named by role (`zephyr_drv.c`,
+`sw_fallback.c`) or vendor, not `vendors/<som>/<class>.c`.  Each
+backend self-registers via `ALP_BACKEND_REGISTER(...)` (in
+`<alp/backend.h>`), which drops a descriptor (vendor, class,
+`silicon_ref`, priority, ops vtable) into a per-class linker section.
 
 ```
 alp_i2c_open(cfg)
         │
         ▼
-   src/<os>/i2c.c             # picks the OS path
-        │
+   src/i2c_dispatch.c                 # class dispatcher
+        │  alp_backend_select("i2c", silicon_ref)   (src/backend.c)
         ▼
-   vendors/<som>/i2c.c        # picks the vendor HAL call
-        │
+   src/backends/i2c/<impl>.c          # best-match registered backend
+        │  (zephyr_drv.c / sw_fallback.c / vendor HAL)
         ▼
-   vendor HAL  →  CMSIS  →  silicon
+   vendor HAL / Zephyr driver  →  silicon
 ```
 
-`src/common/` holds the OS-agnostic glue (status-code translation,
-parameter validation, opaque-handle allocation), so each OS backend
-stays small.
+`alp_backend_select()` (in `src/backend.c`) walks the class's
+registry section and picks the best match for the active
+`silicon_ref` by priority, then exact-vs-wildcard, then vendor
+strcmp (link-order-independent; see the tiebreaker comment in
+`src/backend.c`).  `src/common/` holds the OS-agnostic glue
+(status-code translation, parameter validation, opaque-handle
+allocation), so each backend stays small.
 
 ## Versioning
 
@@ -583,7 +602,7 @@ CONFIG_ALP_SDK_CHIP_LSM6DSO=y
 
 ### Yocto consumption (v0.4+)
 
-The Yocto path is symmetric: `meta-alp` ships a recipe that builds
+The Yocto path is symmetric: `meta-alp-sdk` ships a recipe that builds
 the SDK's `src/yocto/` backend as a shared library, exposes the
 public headers under `/usr/include/alp/`, and wires `pkg-config`
 data so application recipes can `inherit pkgconfig` and depend on
@@ -647,7 +666,9 @@ for the full rationale and edge-case guidance.
 - **Not a HAL.** Vendor HALs are wrapped, not replaced.
 - **Not a board-file collection.** Zephyr boards live in
   `alp-zephyr-modules`.
-- **Not the studio.** Chat, allocator, model pipeline, and fab routing
-  stay in alp-studio.
+- **Not the studio.** Chat, allocator, the model-training pipeline, and
+  fab routing stay in alp-studio.  (The SDK *does* own the on-device
+  `.alpmodel` compile/package/load pipeline — `alp model build` +
+  `alp_inference_open_alpmodel()` — which the studio builds on.)
 - **Not LVGL itself.** Upstream LVGL is included; we ship a config and
   integration only.

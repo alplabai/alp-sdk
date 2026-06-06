@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * Zephyr-backed implementation of <alp/hw_info.h>.
@@ -8,12 +8,10 @@
  * 128-byte manifest via the 24C128 driver, validates magic +
  * schema_version + CRC32, and copies the SoM identifiers out.
  *
- * BOARD_ID ADC cross-check is TODO pending the per-family generated
- * header that maps `hw_rev` strings to expected mV bins -- those
- * tables live in metadata/e1m_modules/<family>/hw-revisions.yaml
- * today and need a `scripts/alp_project.py` pass to emit the
- * runtime-readable form.  Once available, plug into the
- * adc_cross_check() helper below.
+ * The EEPROM manifest is the single authoritative source of the SoM
+ * hardware revision; validation (magic + schema_version + CRC32) and
+ * field population live in alp_hw_info_classify_manifest(), split out
+ * so native_sim tests can exercise it without a real EEPROM.
  */
 
 #include <stddef.h>
@@ -22,6 +20,7 @@
 
 #include "alp/hw_info.h"
 #include "alp/peripheral.h"
+#include "hw_info_manifest.h"
 
 #if defined(CONFIG_ALP_SDK_CHIP_EEPROM_24C128)
 #include "alp/chips/eeprom_24c128.h"
@@ -34,14 +33,14 @@
 /*   runtime here cannot disagree on the manifest's checksum.        */
 /* ---------------------------------------------------------------- */
 
-__attribute__((unused)) static uint32_t crc32_iso3309(const uint8_t *buf, size_t len)
+uint32_t alp_hw_info_crc32(const uint8_t *buf, size_t len)
 {
     uint32_t crc = 0xFFFFFFFFu;
     for (size_t i = 0; i < len; ++i) {
         crc ^= (uint32_t)buf[i];
         for (unsigned b = 0; b < 8; ++b) {
-            uint32_t mask = (uint32_t)-(int32_t)(crc & 1u);
-            crc = (crc >> 1) ^ (0xEDB88320u & mask);
+            uint32_t mask = (uint32_t) - (int32_t)(crc & 1u);
+            crc           = (crc >> 1) ^ (0xEDB88320u & mask);
         }
     }
     return ~crc;
@@ -52,8 +51,7 @@ __attribute__((unused)) static uint32_t crc32_iso3309(const uint8_t *buf, size_t
 /* The EEPROM manifest fields are spec'd as null-terminated but a     */
 /* corrupt or partially-programmed EEPROM might omit the terminator.  */
 /* ---------------------------------------------------------------- */
-__attribute__((unused)) static void copy_field(char *dst, size_t dst_len, const char *src,
-                                               size_t src_len)
+static void copy_field(char *dst, size_t dst_len, const char *src, size_t src_len)
 {
     size_t n = src_len;
     if (n >= dst_len) n = dst_len - 1u;
@@ -66,10 +64,8 @@ __attribute__((unused)) static void copy_field(char *dst, size_t dst_len, const 
     }
 }
 
-#if defined(CONFIG_ALP_SDK_HW_INFO) && \
-    defined(CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID) && \
-    (CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID >= 0) && \
-    defined(CONFIG_ALP_SDK_CHIP_EEPROM_24C128)
+#if defined(CONFIG_ALP_SDK_HW_INFO) && defined(CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID) &&        \
+    (CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID >= 0) && defined(CONFIG_ALP_SDK_CHIP_EEPROM_24C128)
 #define ALP_HW_INFO_EEPROM_ENABLED 1
 #else
 #define ALP_HW_INFO_EEPROM_ENABLED 0
@@ -91,11 +87,14 @@ static alp_status_t read_manifest(alp_hw_info_eeprom_t *manifest)
     if (bus == NULL) return alp_last_error();
 
     eeprom_24c128_t ee;
-    alp_status_t    s = eeprom_24c128_init(&ee, bus, (uint8_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT);
-    if (s != ALP_OK) { alp_i2c_close(bus); return s; }
+    alp_status_t s = eeprom_24c128_init(&ee, bus, (uint8_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT);
+    if (s != ALP_OK) {
+        alp_i2c_close(bus);
+        return s;
+    }
 
-    s = eeprom_24c128_read(&ee, (uint16_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET,
-                           (uint8_t *)manifest, sizeof(*manifest));
+    s = eeprom_24c128_read(&ee, (uint16_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET, (uint8_t *)manifest,
+                           sizeof(*manifest));
 
     eeprom_24c128_deinit(&ee);
     alp_i2c_close(bus);
@@ -104,18 +103,41 @@ static alp_status_t read_manifest(alp_hw_info_eeprom_t *manifest)
 
 #endif /* ALP_HW_INFO_EEPROM_ENABLED */
 
-/* TODO(hw_info ADC cross-check): once scripts/alp_project.py emits
- * a per-board generated header listing expected_mv / bin_radius_mv
- * per hw_rev, call alp_adc_open on the SoM BOARD_ID channel here,
- * sample, look up the rev, and cross-check against
- * manifest->hw_rev.  Mismatch -> ALP_ERR_IO with manifest left as
- * read (caller can log for diagnostics). */
-__attribute__((unused)) static alp_status_t adc_cross_check(const alp_hw_info_eeprom_t *manifest,
-                                                            alp_hw_info_t              *out)
+/* ----------------------------------------------------------------
+ * Manifest classification (pure; no I2C).  The EEPROM manifest is
+ * the single authoritative source of the SoM hardware revision --
+ * there is no ADC cross-check.  Split out from the I2C read path so
+ * native_sim tests can feed crafted buffers; declared in
+ * src/common/hw_info_manifest.h.
+ * ---------------------------------------------------------------- */
+alp_status_t alp_hw_info_classify_manifest(const alp_hw_info_eeprom_t *manifest, alp_hw_info_t *out)
 {
-    (void)manifest;
-    (void)out;
-    return ALP_OK; /* No-op until the generated header lands. */
+    if (manifest == NULL || out == NULL) return ALP_ERR_INVAL;
+
+    /* No valid header: a blank/erased EEPROM (0xFF or zeroed) carries
+     * no ALPH magic.  This is the expected state of a module the
+     * factory programmer has not run on yet -- distinct from a read
+     * fault, so report NOT_PROVISIONED rather than IO. */
+    if (manifest->magic != ALP_HW_INFO_MAGIC) return ALP_ERR_NOT_PROVISIONED;
+
+    /* Header claims our format but the body disagrees: corruption. */
+    if (manifest->schema_version != ALP_HW_INFO_SCHEMA_VERSION) return ALP_ERR_IO;
+
+    const size_t crc_covered_len = sizeof(*manifest) - sizeof(manifest->crc32);
+    uint32_t     calc_crc        = alp_hw_info_crc32((const uint8_t *)manifest, crc_covered_len);
+    if (calc_crc != manifest->crc32) return ALP_ERR_IO;
+
+    copy_field(out->som_family, sizeof(out->som_family), manifest->family,
+               sizeof(manifest->family));
+    copy_field(out->som_sku, sizeof(out->som_sku), manifest->sku, sizeof(manifest->sku));
+    copy_field(out->som_hw_rev, sizeof(out->som_hw_rev), manifest->hw_rev,
+               sizeof(manifest->hw_rev));
+    copy_field(out->som_serial, sizeof(out->som_serial), manifest->serial,
+               sizeof(manifest->serial));
+    out->som_mfg_year  = manifest->mfg_year;
+    out->som_mfg_month = manifest->mfg_month;
+    out->som_mfg_day   = manifest->mfg_day;
+    return ALP_OK;
 }
 
 alp_status_t alp_hw_info_read(alp_hw_info_t *out)
@@ -134,42 +156,21 @@ alp_status_t alp_hw_info_read(alp_hw_info_t *out)
     memset(&manifest, 0, sizeof(manifest));
 
     alp_status_t s = read_manifest(&manifest);
-    if (s != ALP_OK) return s == ALP_ERR_NOSUPPORT ? ALP_ERR_NOT_READY : s;
+    if (s != ALP_OK) {
+        /* The I2C backend maps a transport -ENOSYS/-ENOTSUP to
+         * ALP_ERR_NOSUPPORT, and eeprom_24c128_read() propagates it
+         * raw.  In THIS (#else) branch the EEPROM bus IS configured, so
+         * that means the device is unreachable, not "no hw_info path" --
+         * remap to NOT_READY so NOSUPPORT stays reserved for the
+         * bus-not-configured case above.  Not dead code: the read step
+         * can surface NOSUPPORT even though init() normalises to
+         * NOT_READY. */
+        return s == ALP_ERR_NOSUPPORT ? ALP_ERR_NOT_READY : s;
+    }
 
-    if (manifest.magic != ALP_HW_INFO_MAGIC) return ALP_ERR_IO;
-    if (manifest.schema_version != ALP_HW_INFO_SCHEMA_VERSION) return ALP_ERR_IO;
-
-    /* CRC covers every byte from `magic` (offset 0) through the
-     * final byte of `reserved[]` (offset 124).  The CRC field
-     * itself sits at offset 124..127 and is excluded. */
-    const size_t crc_covered_len = sizeof(manifest) - sizeof(manifest.crc32);
-    uint32_t     calc_crc        = crc32_iso3309((const uint8_t *)&manifest, crc_covered_len);
-    if (calc_crc != manifest.crc32) return ALP_ERR_IO;
-
-    /* Populate the SoM half of alp_hw_info_t.  The manifest's
-     * char-array fields are bounded by the chip-side sizes (see
-     * ALP_HW_INFO_FAMILY_LEN etc. in <alp/hw_info.h>); copy with a
-     * NUL guarantee. */
-    copy_field(out->som_family, sizeof(out->som_family),
-               manifest.family, sizeof(manifest.family));
-    copy_field(out->som_sku, sizeof(out->som_sku),
-               manifest.sku, sizeof(manifest.sku));
-    copy_field(out->som_hw_rev, sizeof(out->som_hw_rev),
-               manifest.hw_rev, sizeof(manifest.hw_rev));
-    copy_field(out->som_serial, sizeof(out->som_serial),
-               manifest.serial, sizeof(manifest.serial));
-    out->som_mfg_year  = manifest.mfg_year;
-    out->som_mfg_month = manifest.mfg_month;
-    out->som_mfg_day   = manifest.mfg_day;
-
-    /* SoM BOARD_ID ADC sample + cross-check.  No-op stub for now;
-     * see comment on adc_cross_check() above. */
-    s = adc_cross_check(&manifest, out);
-    if (s != ALP_OK) return s;
-
-    /* TODO: board-side BOARD_ID + board_name once the per-board
-     * board.yaml -> generated-header pipeline lands. */
-    return ALP_OK;
+    /* Validate + populate.  Board-side BOARD_ID decode is a future
+     * addition (board.yaml -> generated header). */
+    return alp_hw_info_classify_manifest(&manifest, out);
 #endif
 }
 
@@ -192,7 +193,8 @@ alp_status_t alp_hw_info_assert_matches_build(const alp_hw_info_t *info, const c
     }
     if (expected_hw_rev != NULL) {
         if (info->som_hw_rev[0] == '\0') return ALP_ERR_IO;
-        if (strncmp(info->som_hw_rev, expected_hw_rev, sizeof(info->som_hw_rev)) != 0) return ALP_ERR_IO;
+        if (strncmp(info->som_hw_rev, expected_hw_rev, sizeof(info->som_hw_rev)) != 0)
+            return ALP_ERR_IO;
     }
     return ALP_OK;
 #endif

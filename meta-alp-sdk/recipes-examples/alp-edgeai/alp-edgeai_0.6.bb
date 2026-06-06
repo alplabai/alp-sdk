@@ -7,7 +7,7 @@
 # (examples/aen/edgeai-vision-aen) after the AEN-family example
 # move.
 
-SUMMARY     = "ALP SDK EdgeAI reference application"
+SUMMARY     = "Alp SDK EdgeAI reference application"
 DESCRIPTION = "End-to-end EdgeAI demo: camera capture → ISP / format-convert \
 → Ethos-U / DRP-AI inference → results overlay on display."
 HOMEPAGE    = "https://github.com/alplabai/alp-sdk"

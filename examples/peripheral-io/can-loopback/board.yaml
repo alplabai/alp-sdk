@@ -10,6 +10,9 @@ som:
   sku: E1M-AEN701
 
 preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:

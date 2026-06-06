@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: Murata LBEE5HY2FY-922 (Type 2FY) Wi-Fi 6 + BLE 5.4.
+# Alp SDK chip manifest: Murata LBEE5HY2FY-922 (Type 2FY) Wi-Fi 6 + BLE 5.4.
 schema_version:   1
 chip_id:          murata_lbee5hy2fy
 driver_status:    partial          # thin GPIO surface for REG_ON + HOST_WAKE

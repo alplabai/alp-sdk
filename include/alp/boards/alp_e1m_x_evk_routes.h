@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * Auto-generated from metadata/boards/e1m-x-evk.yaml
@@ -37,8 +37,8 @@ extern "C" {
 #define XEVK_PIN_PCIE_MUX_PD   E1M_X_GPIO_IO0  /**< Drive HIGH to power down the PCIe lane mux. */
 #define XEVK_PIN_PCIE_MUX_SEL  E1M_X_GPIO_IO1  /**< PCIe lane-mux routing select. */
 #define XEVK_PIN_PCIE0_I2C_EN  E1M_X_GPIO_IO2  /**< Drive high to enable the I2C mux to the PCIe slot. */
-#define XEVK_PIN_I2S_MUX_EN    E1M_X_GPIO_IO4  /**< I2S path-mux enable. */
-#define XEVK_PIN_I2S_MUX_SEL   E1M_X_GPIO_IO5  /**< I2S path-mux select (TAS2563 amps vs. external I2S). */
+#define XEVK_PIN_I2S_MUX_EN    E1M_X_GPIO_IO4  /**< I2S path-mux (TMUX1574 U46) enable -- active-low; drive LOW to enable. Active-low. */
+#define XEVK_PIN_I2S_MUX_SEL   E1M_X_GPIO_IO5  /**< I2S path-mux (TMUX1574 U46) select: LOW = TAS2563 amps (A side), HIGH = M.2 E-key I2S (B side). */
 #define XEVK_PIN_M2E_UART_WAKE E1M_X_GPIO_IO6  /**< M.2 E-key UART-path wake (active-low). Active-low. */
 #define XEVK_PIN_CTP1_INT      E1M_X_GPIO_IO9  /**< Capacitive touch panel 1 interrupt (display 1). */
 #define XEVK_PIN_CTP1_RST      E1M_X_GPIO_IO11  /**< Capacitive touch panel 1 reset (active-low). Active-low. */
@@ -88,13 +88,13 @@ extern "C" {
 /* ADC channels (E1M_ADC<N> -> board-side signal) */
 /* ------------------------------------------------------------------ */
 
-#define XEVK_ADC_ARDUINO_A0 E1M_X_ADC0  /**< Arduino UNO header A0 analog input (ANA_S0). */
+#define XEVK_ADC_MIKROBUS_AN E1M_X_ADC0  /**< mikroBUS Click socket AN analog input (net CK_ANA, also on breakout header P7.1; raw passthrough, no divider).  The V2 carrier netlist routes ONLY the mikroBUS AN to ANA_S0; the earlier 'Arduino A0' doc here did not match the netlist. */
 
 /* ------------------------------------------------------------------ */
 /* DAC channels (E1M_DAC<N> -> board-side signal) */
 /* ------------------------------------------------------------------ */
 
-#define XEVK_DAC0 E1M_X_DAC0  /**< DAC0 analog output. */
+#define XEVK_DAC0 E1M_X_DAC0  /**< DAC0 analog output.  Header J15.2 (DAC0_OUT) is the x2-buffered copy, but the buffered path is INOPERABLE on this carrier revision (carrier erratum, fixed next rev; rework details in the internal carrier errata).  Bench use taps the raw 1.8 V-full-scale DAC0 net instead. */
 #define XEVK_DAC1 E1M_X_DAC1  /**< DAC1 analog output. */
 
 /* ------------------------------------------------------------------ */
@@ -115,6 +115,32 @@ extern "C" {
 /* ------------------------------------------------------------------ */
 
 #define XEVK_ENC_ROTARY E1M_X_ENC0  /**< PEC12R-4222F rotary encoder: ENC0_X = A phase, ENC0_Y = B phase; push switch on XEVK_PIN_ENCODER_SW (E1M_X_GPIO_IO28).  ENC1-3 pads are broken out but unpopulated. */
+
+/* ------------------------------------------------------------------ */
+/* Portable cross-EVK aliases (e1m-spec STANDARD.md §7.2 common set). */
+/* Same BOARD_* names on every board; include via <alp/board.h>.       */
+/* ------------------------------------------------------------------ */
+
+#define BOARD_CAN0            XEVK_CAN_BUS0
+#define BOARD_DAC0            XEVK_DAC0
+#define BOARD_DAC1            XEVK_DAC1
+#define BOARD_ENC_ROTARY      XEVK_ENC_ROTARY
+#define BOARD_I2C_SENSORS     XEVK_I2C_BUS_SENSORS
+#define BOARD_I2S_AUDIO       XEVK_I2S_AUDIO
+#define BOARD_PIN_BMI323_INT1 XEVK_PIN_BMI323_INT1
+#define BOARD_PIN_ENCODER_SW  XEVK_PIN_ENCODER_SW
+#define BOARD_PIN_LED_BLUE    XEVK_PIN_LED_BLUE
+#define BOARD_PIN_LED_GREEN   XEVK_PIN_LED_GREEN
+#define BOARD_PIN_LED_RED     XEVK_PIN_LED_RED
+#define BOARD_PWM_ARD1        XEVK_ARD_PWM1
+#define BOARD_PWM_ARD2        XEVK_ARD_PWM2
+#define BOARD_PWM_ARD3        XEVK_ARD_PWM3
+#define BOARD_PWM_LED_BLUE    XEVK_PWM_LED_BLUE
+#define BOARD_PWM_LED_GREEN   XEVK_PWM_LED_GREEN
+#define BOARD_PWM_LED_RED     XEVK_PWM_LED_RED
+#define BOARD_SPI_ARDUINO     XEVK_SPI_BUS_ARDUINO
+#define BOARD_UART_ARDUINO    XEVK_UART_PORT_ARDUINO
+#define BOARD_UART_DEBUG      XEVK_UART_PORT_DEBUG
 
 #ifdef __cplusplus
 } /* extern "C" */

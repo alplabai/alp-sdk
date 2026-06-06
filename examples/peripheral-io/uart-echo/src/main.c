@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * uart-echo — read bytes from the console UART and write them back.
@@ -16,13 +16,16 @@
 
 #include "alp/peripheral.h"
 
-/* EVK_UART_PORT_DEBUG is a board-macro from the generated routes
- * header (= E1M_UART0); rebind it in board.yaml `pins:` to port this
- * app to another board without touching the code below. */
-#include "alp/boards/alp_e1m_evk_routes.h"
+/* BOARD_UART_DEBUG is a portable cross-EVK alias from <alp/board.h>:
+ *   E1M EVK  -> EVK_UART_PORT_DEBUG  -> E1M_UART0
+ *   E1M-X EVK -> XEVK_UART_PORT_DEBUG -> E1M_X_UART0
+ * Rebind it in board.yaml `pins:` to port this app to another board
+ * without touching the code below. */
+#include "alp/board.h"
 
-int main(void) {
-    printf("[uart] open EVK_UART_PORT_DEBUG @ 115200 8N1\n");
+int main(void)
+{
+    printf("[uart] open BOARD_UART_DEBUG @ 115200 8N1\n");
 
     /* The 8-N-1 framing is the lowest common denominator for serial
      * consoles -- 8 data bits, no parity, 1 stop bit.  Override
@@ -31,7 +34,7 @@ int main(void) {
      * 7-E-1, RS-485 buses with multidrop addressing use 9-bit
      * frames, etc.). */
     alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
-        .port_id   = EVK_UART_PORT_DEBUG, /* = E1M_UART0 */
+        .port_id   = BOARD_UART_DEBUG, /* E1M EVK: E1M_UART0; E1M-X EVK: E1M_X_UART0 */
         .baudrate  = 115200,
         .data_bits = 8,
         .stop_bits = 1,
@@ -42,8 +45,7 @@ int main(void) {
          * On native_sim with the overlay we ship, the alias maps
          * to the host-stdin/stdout virtual UART so this branch
          * isn't taken. */
-        printf("[uart] open failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[uart] open failed: alp_last_error=%d\n", (int)alp_last_error());
         printf("[uart] done\n");
         return 0;
     }
@@ -52,7 +54,7 @@ int main(void) {
      * terminal but short enough that CI doesn't stall.  The byte
      * value is meaningful only when status==ALP_OK; otherwise the
      * caller must treat it as unspecified. */
-    uint8_t b = 0;
+    uint8_t      b = 0;
     alp_status_t s = alp_uart_read(u, &b, 1, 50);
     printf("[uart] read -> status=%d byte=0x%02x\n", (int)s, b);
 
@@ -60,7 +62,7 @@ int main(void) {
      * real hardware sees output.  alp_uart_write blocks until the
      * full buffer is sent or the driver returns an error. */
     static const uint8_t hello[] = "[uart] hello\r\n";
-    s = alp_uart_write(u, hello, sizeof hello - 1);
+    s                            = alp_uart_write(u, hello, sizeof hello - 1);
     printf("[uart] write -> %d\n", (int)s);
 
     /* Close releases the handle but does NOT power down the

@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-# ALP SDK Kconfig fragment exposed to Zephyr applications.
+# Alp SDK Kconfig fragment exposed to Zephyr applications.
 
 config ALP_SDK
-	bool "ALP SDK"
+	bool "Alp SDK"
 	help
-	  Enable the ALP SDK on Zephyr.  When set, the SDK's Zephyr
+	  Enable the Alp SDK on Zephyr.  When set, the SDK's Zephyr
 	  backend is compiled and <alp/...> headers are added to the
 	  application include path.
 
@@ -88,6 +88,85 @@ config ALP_SDK_SPI_SW_FALLBACK
 	  into rx when both non-NULL; tx-only is a no-op; rx-only zero-fills.
 	  For native_sim build / test only -- production firmware MUST NOT
 	  rely on this since no real device is driven.
+
+# Renesas RZ SPI_B (RSPI) controller driver -- carried in the alp-sdk
+# module (NOT upstream Zephyr) so it survives a `west update` of the
+# Zephyr tree.  Drives the new-generation RZ SPI_B IP (RZ/V2N, ...) via
+# the FSP r_spi_b module; backs the on-module GD32 supervisor SPI fast
+# path.  Driver source: zephyr/drivers/spi/spi_renesas_rz_spi_b.c;
+# binding: zephyr/dts/bindings/spi/renesas,rz-spi-b.yaml.
+config SPI_RENESAS_RZ_SPI_B
+	bool "Renesas RZ SPI_B (RSPI)"
+	default y
+	depends on DT_HAS_RENESAS_RZ_SPI_B_ENABLED
+	select USE_RZ_FSP_SPI_B
+	select PINCTRL
+	help
+	  Enable the Renesas RZ SPI_B (RSPI) driver for the new-generation RZ
+	  MPUs (RZ/V2N, RZ/V2H, ...), which replace the classic RSPI with the
+	  SPI_B IP served by the FSP r_spi_b module.  The upstream
+	  `renesas,rz-spi` driver targets the classic `r_spi` the rzv FSP does
+	  not ship, so this dedicated `renesas,rz-spi-b` driver is required.
+
+config SPI_RENESAS_RZ_SPI_B_INTERRUPT
+	bool "RZ SPI_B interrupt-driven transfers"
+	default y
+	depends on SPI_RENESAS_RZ_SPI_B
+	help
+	  Use the FSP r_spi_b interrupt-driven transfer path (rxi/txi/tei/eri).
+	  When disabled, the driver falls back to polled PIO transfers.
+
+config SPI_RENESAS_RZ_SPI_B_USE_HW_SS
+	bool "RZ SPI_B hardware slave select"
+	default y
+	depends on SPI_RENESAS_RZ_SPI_B
+	help
+	  Drive the chip select with the SPI_B SSL output instead of a GPIO.
+
+config USE_RZ_FSP_SPI_B
+	bool
+	help
+	  Compile the FSP r_spi_b module source (selected by
+	  SPI_RENESAS_RZ_SPI_B).  The HAL build (modules/hal/renesas/drivers/
+	  rz/CMakeLists.txt) gates rzv/r_spi_b/r_spi_b.c on this symbol, but
+	  upstream Zephyr v4.4's zephyr/modules/Kconfig.renesas never defines
+	  it (it defines the sibling USE_RZ_FSP_{SPI,RSPI_SPI,RIIC_MASTER});
+	  define it here so the deliverable doesn't depend on patching Zephyr.
+
+# Renesas RZ SCI-B Simple-SPI driver -- an SCI channel in clock-synchronous
+# "Simple SPI" mode.  Drives the on-module GD32 supervisor SPI fast path, which
+# the board wires to SCI7 (P76/P77/P96/P97 = MOSI7/MISO7/SCK7/SS7), NOT the
+# dedicated SPI_B IP.  The rzv FSP ships no SCI-SPI module, so the FSP
+# r_sci_b_spi module is vendored from RA into this SDK
+# (zephyr/drivers/spi/r_sci_b_spi/) and gated by USE_RZ_FSP_SCI_B_SPI.
+# Driver: zephyr/drivers/spi/spi_renesas_rz_sci_b.c;
+# binding: zephyr/dts/bindings/spi/renesas,rz-sci-b-spi.yaml.
+config SPI_RENESAS_RZ_SCI_B
+	bool "Renesas RZ SCI-B Simple-SPI"
+	default y
+	depends on DT_HAS_RENESAS_RZ_SCI_B_SPI_ENABLED
+	select USE_RZ_FSP_SCI_B_SPI
+	select PINCTRL
+	select GPIO
+	help
+	  Enable the Renesas RZ SCI-B Simple-SPI driver for the new-generation RZ
+	  MPUs (RZ/V2N, ...).  An SCI channel runs in clock-synchronous Simple-SPI
+	  mode via the FSP r_sci_b_spi module (vendored from RA -- see
+	  USE_RZ_FSP_SCI_B_SPI).  The driver is interrupt-driven and master-only on
+	  this port; master mode has no hardware slave-select, so the chip-select is
+	  a GPIO (cs-gpios) -- GPIO is selected here because the driver cannot frame
+	  a transfer without it.
+
+config USE_RZ_FSP_SCI_B_SPI
+	bool
+	help
+	  Compile the vendored FSP r_sci_b_spi module
+	  (zephyr/drivers/spi/r_sci_b_spi/r_sci_b_spi.c), selected by
+	  SPI_RENESAS_RZ_SCI_B.  The rzv FSP HAL ships only r_sci_b_uart / r_spi_b /
+	  r_rspi, so -- unlike USE_RZ_FSP_SPI_B, which gates an existing HAL source
+	  -- this symbol gates a BSD-3 FSP source carried inside this SDK (the RA
+	  r_sci_b_spi.c, near-identical -- one documented one-line deviation -- with
+	  an RZ cfg shim in r_sci_b_spi_cfg.h).
 
 config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
@@ -1511,7 +1590,7 @@ config ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ
 # drivers.  The button_led / pdm_mic helpers are the exception
 # (generic block utilities, alp_-prefixed).
 
-menu "ALP SDK chip drivers"
+menu "Alp SDK chip drivers"
 
 config ALP_SDK_CHIP_LSM6DSO
 	bool "STMicroelectronics LSM6DSO 6-axis IMU driver"
@@ -1790,10 +1869,12 @@ config ALP_SDK_CHIP_GD32G553
 	  over the hybrid SPI + I2C bridge documented in
 	  docs/gd32-bridge-protocol.md.  Exposes PING, GET_VERSION,
 	  GET_BUILD_ID, RESET_REASON, GPIO_READ/WRITE, PWM_SET/GET,
-	  ADC_READ, and DA9292_STATUS_FORWARD on top of either bus
-	  (or both at once with per-call routing).  The firmware
-	  counterpart lives in firmware/gd32-bridge/ as a separate compile
-	  artifact.
+	  ADC_READ, and DA9292_STATUS_FORWARD (0xFF sentinel on the
+	  current SoM rev -- the DA9292 fault nets reach only the
+	  Renesas; see chips/da9292 for the direct pin + register
+	  paths) on top of either bus (or both at once with per-call
+	  routing).  The firmware counterpart lives in
+	  firmware/gd32-bridge/ as a separate compile artifact.
 
 config ALP_SDK_CHIP_RTL8211FDI
 	bool "Realtek RTL8211FDI-VD-CG 10/100/1000BASE-T Ethernet PHY"
@@ -2227,7 +2308,7 @@ config ALP_SDK_CHIP_ES8388
 	  Compile chips/es8388/es8388.c.  China-domestic cost-sensitive
 	  codec; same shape as WM8960.
 
-endmenu # "ALP SDK chip drivers"
+endmenu # "Alp SDK chip drivers"
 
 # §D.lib.loader -- per-library HW-accelerator Kconfig knobs declared
 # in a sibling file so the chip-driver menu above stays focused on

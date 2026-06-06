@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-gd32-bridge-hil-soak
+  description: |
+    V2N-specific pass/fail HiL soak: exercises the WHOLE GD32 bridge
+    command set over the 25 MHz SPI fast path with per-opcode
+    self-verification (readback compare, range sanity, sentinel
+    asserts) and per-cycle pass/fail accounting.  Exercises the
+    gd32g553 chip-driver surface directly (intentional for this
+    bridge demo per spec §4.5).
+
+tests:
+  alp_sdk.examples.v2n.gd32_bridge_hil_soak.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - supervisor-mcu
+      - gd32-bridge
+      - hil
+    build_only: true

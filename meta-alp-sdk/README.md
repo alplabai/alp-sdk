@@ -2,11 +2,14 @@
 
 # meta-alp-sdk
 
-> **`[UNTESTED]` -- v0.6 paper-correct.** Recipes parse cleanly against
-> meta-renesas (rzv2n) v3.1 and meta-imx (kirkstone+) but no full
-> image bake has been executed.  Real bring-up gates on v0.7 V2N HiL.
+> **Build-validated (partial), 2026-05-26.** The BSP v6.30
+> `bitbake-layers` flow below was exercised on WSL: the carrier DT
+> patches apply to linux-renesas 6.1.141-cip43 and `core-image-minimal`
+> produces the kernel `Image` + carrier dtb + `.wic.gz`.  A full
+> `alp-image-edge` bake and on-bench boot are the remaining gates; the
+> i.MX 93 path is still paper-correct (gates on v0.7 HiL).
 
-Yocto layer that packages the **ALP SDK** runtime, on-board chip
+Yocto layer that packages the **Alp SDK** runtime, on-board chip
 drivers, edge-AI examples, and reference ROS 2 nodes for the
 V2N / V2N-M1 / i.MX 93 Linux side of every supported E1M SoM.
 
@@ -72,21 +75,28 @@ AEN A32-class MACHINEs are deferred to v0.7 (Phase 5 CI gate).
 
 ## How customers consume it
 
-### V2N / V2N-M1 — via the Renesas RZ/V2N AI SDK 7.10 BSP
+### V2N / V2N-M1 — via the Renesas RZ/V2N AI SDK (platform 7.1 / BSP v6.30)
 
-Renesas distributes the **RZ/V2N AI SDK** (v7.10,
-<https://renesas-rz.github.io/rzv_ai_sdk/7.10/>) as a single
-downloadable package on the *My Renesas* portal — free signup, no
-NDA for the standard build.  The package ID is
-**`RTK0EF0045Z94001AZJ-v1.0.3.zip`** (per the
-[*RZ/V2N Group Handbook*](https://www.renesas.com/en/document/oth/rzv2n-group-handbook),
-item #18).
+Renesas distributes the **RZ/V2N AI SDK** through their own portal
+(start at the public [RZ/V2N product
+page](https://www.renesas.com/en/products/rz-v2n) under *Software &
+Tools*).  Mind the two version axes: the **AI SDK platform is 7.1**,
+while the **BSP it rides on is v6.30** (= linux-renesas
+`6.1.141-cip43`) -- v6.30 is the revision this carrier was
+bring-up-tested against.
 
-The zip contains a `rzv2n_ai-sdk_yocto_recipe_*.tar.gz` tarball
-that, when extracted, gives you the following pre-arranged set of
-meta-layers (each is a git checkout pinned to the v7.10 release;
-the tarball model is canonical because V2N silicon support may not
-yet be on the corresponding `meta-renesas` upstream branch):
+The AI SDK comes as two downloads -- an apps/binary package and a
+**Source Code** package.  To *build* an image you need the Source
+Code package, because that is the one carrying the
+`rzv2n_ai-sdk_yocto_recipe_*.tar.gz` tarball.  Extracting it gives
+the pre-arranged set of meta-layers below (each a git checkout
+pinned to the BSP v6.30 release; the tarball model is canonical
+because V2N silicon support may not yet be on the corresponding
+`meta-renesas` upstream branch):
+
+> **alp-sdk does not redistribute the Renesas BSP or AI SDK.** Fetch
+> them from Renesas under your own account and licence; this repo
+> ships only the `meta-alp-sdk` overlay that layers on top.
 
 | Layer                                          | Source repo                                                                    | Role                                                       |
 |------------------------------------------------|--------------------------------------------------------------------------------|------------------------------------------------------------|
@@ -113,9 +123,10 @@ MACHINE.
 ### Build steps
 
 ```bash
-# 1. Download the BSP zip from My Renesas (free signup required).
-#    File: RTK0EF0045Z94001AZJ-v1.0.3.zip
-unzip RTK0EF0045Z94001AZJ-v1.0.3.zip
+# 1. Obtain the AI SDK *Source Code* package from Renesas (under your
+#    own Renesas account + licence -- alp-sdk does not redistribute
+#    it).  Choose the Source Code download, NOT the apps/binary one.
+unzip <rzv2n-ai-sdk-source-code>.zip
 cd <extracted_dir>
 
 # 2. Extract the recipe tarball; produces poky/, meta-arm/,
@@ -126,12 +137,19 @@ tar zxvf src_setup/rzv2n_ai-sdk_yocto_recipe_*.tar.gz
 TEMPLATECONF=$PWD/meta-renesas/meta-rz-distro/conf/templates/vlp-v4-conf/ \
     source poky/oe-init-build-env build
 
-# 4. Add the Renesas feature sublayers + meta-ros2-humble:
+# 4. Add the Renesas feature sublayers:
 bitbake-layers add-layer ../meta-rz-features/meta-rz-graphics
 bitbake-layers add-layer ../meta-rz-features/meta-rz-drpai
 bitbake-layers add-layer ../meta-rz-features/meta-rz-opencva
 bitbake-layers add-layer ../meta-rz-features/meta-rz-codecs
 bitbake-layers add-layer ../meta-econsys
+
+# 4b. ROS 2 layer -- ONLY for images that ship the alp-sdk ROS nodes
+#     (e.g. alp-image-edge).  meta-ros2-humble is a LAYERRECOMMENDS, not
+#     a hard dep: for a lean image (e.g. core-image-minimal) skip this
+#     step and BBMASK the ROS recipes.  It is not in the BSP tarball, so
+#     clone it from upstream meta-ros first:
+git clone -b scarthgap https://github.com/ros/meta-ros ../meta-ros
 bitbake-layers add-layer ../meta-ros/meta-ros2-humble
 
 # 5. Add meta-alp-sdk:
@@ -151,8 +169,10 @@ MACHINE = "e1m-v2m101-a55"     # V2N + DEEPX
 bitbake alp-image-edge
 ```
 
-The resulting `alp-image-edge-e1m-v2m101-a55.wic` flashes onto the
-SoM's eMMC via the standard Renesas flash-writer tooling.
+The resulting `alp-image-edge-<machine>.wic[.gz]` is the kernel +
+rootfs (the bootloader is production-flashed by ALP).  See
+[`../docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md) for the
+deploy + on-board verification steps.
 
 ### i.MX 93 — via meta-imx
 
@@ -186,7 +206,7 @@ each machine pulls the matching userspace runtime via the
 
 Customer apps pick the active backend per-handle at runtime via
 `alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or
-an explicit `ETHOS_U / DRPAI / DEEPX_DX` value for benchmarking).
+an explicit `ETHOS_U / DRPAI / DEEPX_DXM1` value for benchmarking).
 There is NO build-time pin -- silicon is the source of truth.
 
 ### DRP-AI userspace headers
@@ -275,8 +295,6 @@ such in the matching recipes' `LICENSE` field.
   acknowledgement closes the legal review per
   [`docs/vendor-partnerships.md`](../docs/vendor-partnerships.md)
   §C.31.
-- `drp-ai-tvm_*.bb` (Renesas DRP-AI runtime) lands alongside
-  meta-renesas-rz-features.
 - AEN A32-class MACHINE (v0.7).
 - `alp-image-edge.bb`'s minimal package set is documentary; the
   v1.0 sysbuild matrix in `docs/test-plan.md` adds the BLE
@@ -284,16 +302,17 @@ such in the matching recipes' `LICENSE` field.
 
 ## Verification status
 
-`[UNTESTED]`.  Recipe metadata parses but no full image bake
-has been done yet — the recipes pin tags + checksums from the
-maintainer's local notes that need re-validation against
-upstream releases.  v0.7 V2N HiL is the verification gate.
+**Partial.** `core-image-minimal` baked on the BSP v6.30 flow (WSL,
+2026-05-26): the carrier DT patches apply and the kernel + carrier dtb
++ image build.  Still pending: a full `alp-image-edge` bake (ROS 2 +
+DEEPX + Mender recipes) and on-bench boot — the v0.7 V2N HiL gate.  The
+i.MX 93 path remains unbaked.
 
 ## See also
 
 - [*RZ/V2N Group Handbook*](https://www.renesas.com/en/document/oth/rzv2n-group-handbook)
   — Renesas's master index of V2N collateral.
-- [RZ/V AI SDK 7.10 docs](https://renesas-rz.github.io/rzv_ai_sdk/7.10/)
+- [RZ/V2N product page (AI SDK + BSP downloads)](https://www.renesas.com/en/products/rz-v2n)
   — Software overview + getting-started + how-to-build.
 - [`vendors/deepx-dxm1/README.md`](../vendors/deepx-dxm1/README.md)
   — DEEPX DX-M1 integration notes (covers V2M101 / V2M102).

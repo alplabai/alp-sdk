@@ -95,7 +95,7 @@ On the SDK log console (e.g. RTT or another UART):
 On the terminal attached to E1M_UART0 itself:
 
 ```
-ALP SDK uart-hello-world
+Alp SDK uart-hello-world
 tick 0
 tick 1
 tick 2

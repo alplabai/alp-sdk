@@ -5,19 +5,41 @@ sample:
   description: |
     Minimal "first program" example.  Prints a periodic heartbeat
     so customers can verify their toolchain + flash flow + log
-    console before tackling peripheral wiring.
+    console before tackling peripheral wiring.  Builds on both
+    EVKs: no board-specific macros required.
 
 tests:
-  alp_sdk.example.hello_world:
+  alp_sdk.example.hello_world.e1m_x_evk:
     platform_allow:
       - native_sim
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     tags:
       - alp-sdk
       - example
       - hello-world
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[hello\\] done"
+  alp_sdk.example.hello_world.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - hello-world
+      - aen
     harness: console
     harness_config:
         type: one_line

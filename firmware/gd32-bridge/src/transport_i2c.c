@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * gd32-bridge firmware: I2C-slave transport.
@@ -16,11 +16,12 @@
  * (holds SCL low) just long enough to run protocol_dispatch() before
  * clocking out the reply bytes.
  *
- * THIS FILE is a SCAFFOLD.  The byte-level GigaDevice firmware
- * library hookups (I2C0 init, slave-address ACK, clock-stretching)
- * are marked TODO; today the file compiles standalone and exercises
- * the protocol-dispatch path via the i2c_slave_rx_byte() /
- * i2c_slave_repeated_start() entry points.
+ * THIS FILE is SILICON-FREE: framing, CRC, staging and the
+ * protocol_dispatch() hand-off only.  The byte-level GigaDevice
+ * hookups (I2C0 slave init, address ACK, clock-stretching, ISR wiring)
+ * live in the gd32 backend at hal/transport_hw_gd32.c and drive the
+ * i2c_slave_*() seams below; the stub backend leaves the bring-up hook
+ * a no-op so a unit-test mock can feed the same seams directly.
  */
 
 #include <stdbool.h>
@@ -28,6 +29,14 @@
 #include <string.h>
 
 #include "protocol.h"
+#include "transport.h"
+
+/* Weak default: the stub backend links this no-op so it needs no vendor
+ * library.  The gd32 backend's hal/transport_hw_gd32.c overrides it with
+ * the real I2C0 slave bring-up. */
+__attribute__((weak)) void bridge_transport_i2c_hw_init(void)
+{
+}
 
 #define I2C_MAX_WRITE_BYTES (1u /* reg */ + 1u /* CMD */ + GD32_BRIDGE_MAX_PAYLOAD_BYTES + 2u /* CRC */)
 #define I2C_MAX_READ_BYTES  (1u /* STATUS */ + GD32_BRIDGE_MAX_PAYLOAD_BYTES + 2u /* CRC */)
@@ -143,8 +152,8 @@ void transport_i2c_init(void)
     i2c_tx_len          = 0u;
     i2c_tx_cursor       = 0u;
     pending_reply_valid = false;
-    /* TODO: GigaDevice firmware library init for I2C0 slave mode on
-     *       PA15/PB9, slave address GD32_BRIDGE_DEFAULT_I2C_ADDR.
-     *       Hook the START/STOP/byte-received/byte-transmit interrupts
-     *       to the i2c_slave_* entry points above. */
+    /* I2C0 slave bring-up (PA15/PB9, addr GD32_BRIDGE_DEFAULT_I2C_ADDR)
+     * lives in the gd32 HAL backend (hal/transport_hw_gd32.c); the stub
+     * backend's weak no-op keeps this hardware-free for host tests. */
+    bridge_transport_i2c_hw_init();
 }

@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: ACT88760 primary PMIC (CMI 120.E1).
+# Alp SDK chip manifest: ACT88760 primary PMIC (CMI 120.E1).
 #
 # Read by scripts/alp_project.py and alp-studio's pin allocator to
 # resolve a populated `on_module.<role>: act8760` reference in a

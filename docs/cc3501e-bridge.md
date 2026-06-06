@@ -62,8 +62,8 @@ Per UG Table 7-4, the ROM's first-stage bootloader keys off the
 | Reset cause                       | What the ROM does next                      |
 |-----------------------------------|---------------------------------------------|
 | Reset pin OR POR                  | Cold-boot, full Chain-of-Trust auth         |
-| RVML / RVMH (rail voltage monitor)| Cold-boot                                   |
-| Brown-out (VDDMAIN ~1.3 V trip)   | Cold-boot                                   |
+| RVML / RVMH (rail voltage monitor, ~1.3 V) | Cold-boot                          |
+| Brown-out (VDDMAIN < 1.71 V trip, SWRU626 §7.1.4) | Cold-boot                   |
 | M33 WDT                           | Warm-boot (watchdog-recovery flow)          |
 | Self-reset by M33                 | Warm-boot                                   |
 | Debug-subsystem reset             | Boot into debug-aware path                  |
@@ -147,17 +147,23 @@ client refuses to talk to a firmware whose
 `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the
 compile-time expectation.
 
-## Firmware bootstrap (for `alplabai/cc3501e-firmware`)
+## Firmware: pre-flashed by ALP; rebuild is optional
 
-When that repo is created, it should:
+**The CC3501E ships pre-flashed by ALP** with the bridge firmware — for
+normal use the customer flashes and configures nothing; the device boots
+the bridge and the Alif-side `<alp/...>` calls work out of the box.  A
+version-pinned prebuilt blob also lives at
+`firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` for field re-flash.
 
-1. Vendor TI's SimpleLink CC33xx SDK as a git submodule.  Canonical
-   download: TI Resource Explorer →
-   [SimpleLink Wi-Fi SDK](https://dev.ti.com/tirex/explore/node?node=A__AEIJm0rwIeU.2P1OBWwlaA__com.ti.SIMPLELINK_WIFI_SDK__ZlChU-m__LATEST)
-   (the SimpleLink Wi-Fi SDK bundle covers the CC33xx family; the
-   CC3501E ships in this SDK alongside the CC3300/CC3301 line).
-   The download requires a TI.com login and acceptance of TI's BSD-3
-   + restricted-use click-through.
+Rebuilding or customizing the firmware is **optional and open** — the
+bridge firmware source is ALP's (public, like the GD32 bridge), built on
+TI's **BSD-3-licensed** SimpleLink Wi-Fi SDK.  The future
+`alplabai/cc3501e-firmware` repo would:
+
+1. Vendor TI's **BSD-3-licensed** SimpleLink Wi-Fi SDK as a git
+   submodule — it covers the CC33xx family, and the CC3501E ships in it
+   alongside the CC3300/CC3301 line.  Open-source-licensed, so it can be
+   tracked as a public submodule, same as the GD32 GigaDevice library.
 2. Build with TI Code Composer Studio or the open `ticlang`
    toolchain.
 3. Implement the SPI-slave parser against this repo's
@@ -174,6 +180,20 @@ When that repo is created, it should:
 7. Hand-off via `update_cc3501e.py` (or the existing TI flash
    utility if one is available) on USB or via a JTAG probe
    wired to the CC3501E's debug pads.
+
+## Versioning
+
+Three independent version axes (same model as the GD32 bridge) — track
+them separately:
+
+| Axis | Where | Bumps when |
+|------|-------|-----------|
+| **Firmware release** | `firmware/cc3501e/firmware-version.txt` (semver) | each firmware release — names the tag + the `cc3501e-vX.Y.Z.bin` prebuilt blob; the device reports it as `fw_version` via `GET_VERSION` / `GET_DIAG_INFO` |
+| **Wire protocol** | `ALP_CC3501E_PROTOCOL_VERSION` (`<alp/protocol/cc3501e.h>`) + `firmware/cc3501e/protocol-version.txt` | the wire format changes; the host refuses a mismatched version |
+| **Build / signature** | the signed binary's `.sha256` in `prebuilt/` | every build — pins the exact image |
+
+The firmware version moves on its own cadence — a release can ship
+without a protocol bump, and vice-versa.
 
 ## Firmware-side GPIO behaviour contract
 

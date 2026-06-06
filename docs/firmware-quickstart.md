@@ -150,16 +150,17 @@ The V2N module's companion GD32G553 supervisor MCU owns every
 E1M-standard analog + counter peripheral plus a fleet of side-channel
 GPIOs: all eight PWM channels, the eight-channel ADC bank, both DAC
 outputs, the four quadrature encoders, the Wi-Fi/BT REG_ON pins, the
-OPTIGA reset, and the cached DA9292 PMIC status forwarder (per the
+OPTIGA reset, and the DA9292 INT/TW fault-pin forwarder (per the
 2026-05-12 schematic decision).  Reach it via
 [`<alp/chips/gd32g553.h>`](../include/alp/chips/gd32g553.h) over
 SPI (fast path) or I2C (management path):
 
 ```c
 alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
-    .bus_id = 1u, .freq_hz = 10000000u,
+    .bus_id = 1u, .freq_hz = 25000000u,
     .mode = ALP_SPI_MODE_0, .bits_per_word = 8u,
-    .cs_pin_id = 0u,
+    /* The platform SPI driver owns the chip-select on this SoM. */
+    .cs_pin_id = ALP_SPI_NO_CS,
 });
 alp_i2c_t *brd_i2c = alp_i2c_open(&(alp_i2c_config_t){
     .bus_id = 0u, .bitrate_hz = 400000u,

@@ -2,7 +2,7 @@
 
 # blocks/ — SDK-level block helper implementations
 
-One subdirectory per block helper.  A **block** in the ALP SDK is an
+One subdirectory per block helper.  A **block** in the Alp SDK is an
 SDK-owned abstraction that orchestrates two or more lower-level
 peripherals (or a peripheral plus a portable transport) into a
 single, reusable unit -- and is therefore *not* a binding to a

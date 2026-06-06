@@ -1,0 +1,44 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Renesas RZ SCI-B Simple-SPI controller (new-generation RZ MPUs: RZ/V2N, ...).
+
+  An SCI channel running in clock-synchronous "Simple SPI" mode.  This node is a
+  child of the SoC sci<N> node (compatible "renesas,rz-sci-b"); the PARENT
+  supplies reg, channel, the fixed rxi/txi/tei/eri interrupt vectors and the
+  pin-control state, while this child carries the SPI-controller framework
+  (chip-select GPIOs + child-device addressing).
+
+  Master mode has NO hardware slave-select on the SCI (CCR0.SSE applies to slave
+  mode only), so the chip-select must be wired as a GPIO via cs-gpios.
+
+  Example (GD32 supervisor fast path on SCI7, P76/P77/P96 + GPIO CS on P97):
+
+    &sci7 {
+        pinctrl-0 = <&sci7_spi_pins>;
+        pinctrl-names = "default";
+        status = "okay";
+
+        spi7: spi {
+            compatible = "renesas,rz-sci-b-spi";
+            #address-cells = <1>;
+            #size-cells = <0>;
+            cs-gpios = <&gpio9 7 GPIO_ACTIVE_LOW>;
+            status = "okay";
+        };
+    };
+
+compatible: "renesas,rz-sci-b-spi"
+
+include: [spi-controller.yaml]
+
+properties:
+  cs-gpios:
+    required: true
+    description: |
+      Chip-select GPIO(s).  REQUIRED on this controller: the SCI in master
+      Simple-SPI mode has no hardware slave-select at all (CCR0.SSE is a
+      slave-mode feature), so without a GPIO CS the peripheral cannot frame
+      transactions and slaves that latch on CS edges (e.g. the GD32 bridge's
+      NSS/EXTI) never synchronize.  Omitting it is always a board-porting bug.

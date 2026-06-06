@@ -333,7 +333,7 @@ def test_diagnostics_spec_references_known_modules() -> None:
     surface calls LOG_MODULE_REGISTER -- the spec text still uses
     the same identifiers."""
     text = (_COMMON / "diagnostics_modules.yaml").read_text(encoding="utf-8")
-    # Stock ALP SDK module names the emit path knows how to render.
+    # Stock Alp SDK module names the emit path knows how to render.
     known = ("alp_iot", "alp_security", "alp_gpio", "alp_audio",
              "alp_inference", "alp_uart", "alp_i2c", "alp_spi")
     found = [m for m in known if m in text]

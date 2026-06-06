@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * dac-waveform -- generate a sine wave on E1M_X_DAC0.
+ * dac-waveform -- generate a sine wave on BOARD_DAC0.
  *
  * Walks a 32-point sine lookup table at a configurable sample rate,
  * writing each sample to the DAC via alp_dac_write_mv.  The
@@ -10,12 +10,10 @@
  * (32 samples per cycle -> 32-step staircase).  Pop a DSO probe on
  * the ANA_OUT0 pad to see it.
  *
- * Why E1M-X?  The base E1M (35x35 mm) form factor doesn't route a
- * DAC output pad; only E1M-X (45x65 mm, V2N family) does.  On V2N
- * the SDK dispatches alp_dac_* calls through the on-module GD32G553
- * supervisor bridge to PA4 (DAC0) / PA6 (DAC1).  Customer code
- * doesn't see the dispatch -- it's transparent to the
- * <alp/adc.h> DAC API.
+ * Runs on both EVKs: the E1M EVK drives the Alif Ensemble's native
+ * 2-channel DAC; the E1M-X EVK drives the V2N's two DAC channels
+ * through the on-module GD32G553 bridge.  BOARD_DAC0 (from
+ * <alp/board.h>) resolves to the selected board's DAC0 pad.
  *
  * Default waveform: 100 Hz sine, 1.65 V mean, 1.65 V amplitude
  * (full-range on a 3.3 V reference).  Override SINE_FREQ_HZ +
@@ -23,25 +21,25 @@
  *
  * What success looks like:
  *
- *   [dac] open E1M_X_DAC0 (initial 1650 mV)
+ *   [dac] open BOARD_DAC0 (initial 1650 mV)
  *   [dac] generating sine: freq=100 Hz, mean=1650 mV, ampl=1650 mV
  *   [dac] cycle 0: peak=3299 mV trough=0 mV
  *   [dac] cycle 1: peak=3299 mV trough=0 mV
  *   ...
  *   [dac] done
  *
- * Scope view: 100 Hz sine on ANA_OUT0, swinging from ~0 V to ~3.3 V
- * (the GD32 DAC's 12-bit resolution gives ~0.8 mV / LSB on a 3.3 V
- * reference, so the visible staircase is barely perceptible without
- * a high-bandwidth scope).
+ * Scope view: 100 Hz sine on ANA_OUT0, swinging from ~0 V to ~3.3 V.
+ * Both converters are 12-bit (~0.8 mV/LSB on a 3.3 V reference):
+ * on E1M the Alif native DAC; on E1M-X the GD32-bridged DAC.  The
+ * visible staircase is barely perceptible without a high-bandwidth scope.
  */
 
 #include <stdio.h>
 
 #include <zephyr/kernel.h>
 
-#include "alp/adc.h"               /* alp_dac_* lives in adc.h */
-#include "alp/e1m_x_pinout.h"       /* E1M-X form-factor instance IDs */
+#include "alp/adc.h"   /* alp_dac_* lives in adc.h */
+#include "alp/board.h" /* BOARD_DAC0 -> the selected EVK's DAC0 pad */
 
 /* ------------------------------------------------------------------
  * Waveform parameters.  Tweak these for your application.
@@ -59,8 +57,8 @@
  *
  * SINE_SAMPLE_RATE = SINE_FREQ_HZ * SINE_SAMPLES.
  * At 100 Hz * 32 samples we write 3200 samples / second --
- * comfortably within the GD32 bridge's 32-sample-per-batch ceiling
- * and the supervisor mutex's ~1 ms typical hold time. */
+ * comfortably within both the Alif native DAC's update rate and the
+ * GD32 bridge's 32-sample-per-batch ceiling on E1M-X / V2N. */
 #define SINE_FREQ_HZ 100u
 
 /* DC bias of the sine (centre voltage).  1650 mV puts the waveform
@@ -93,10 +91,9 @@
  *       print(int(round(v * 32767)))
  * ------------------------------------------------------------------ */
 static const int16_t SINE_LUT_Q15[SINE_SAMPLES] = {
-        0,   6393,  12539,  18204,  23170,  27245,  30273,  32137,
-    32767,  32137,  30273,  27245,  23170,  18204,  12539,   6393,
-        0,  -6393, -12539, -18204, -23170, -27245, -30273, -32137,
-   -32767, -32137, -30273, -27245, -23170, -18204, -12539,  -6393,
+    0,      6393,   12539,  18204,  23170,  27245,  30273,  32137,  32767,  32137,  30273,
+    27245,  23170,  18204,  12539,  6393,   0,      -6393,  -12539, -18204, -23170, -27245,
+    -30273, -32137, -32767, -32137, -30273, -27245, -23170, -18204, -12539, -6393,
 };
 
 /* ------------------------------------------------------------------
@@ -118,40 +115,40 @@ static uint16_t lut_to_mv(int16_t q15)
     return (uint16_t)mv;
 }
 
-int main(void) {
-    printf("[dac] open E1M_X_DAC0 (initial %u mV)\n", SINE_DC_OFFSET_MV);
+int main(void)
+{
+    printf("[dac] open BOARD_DAC0 (initial %u mV)\n", SINE_DC_OFFSET_MV);
 
     /* Open the DAC at the centre voltage.  The wrapper rounds to
-     * the converter's hardware-achievable resolution (12-bit on
-     * the GD32 DAC -> ~0.8 mV / LSB on a 3.3 V reference).
+     * the converter's hardware-achievable resolution.
      *
-     * channel_id = E1M_X_DAC0 maps to PA4 on the V2N (via the GD32
-     * bridge); E1M_X_DAC1 maps to PA6.  Use the pin-granular IDs
-     * from <alp/e1m_x_pinout.h> -- there is no E1M_X_DAC_CHn alias. */
+     * channel_id = BOARD_DAC0 -> the selected board's DAC0 pad
+     * (E1M_DAC0 on E1M / Alif; E1M_X_DAC0 -> GD32 PA4 on E1M-X / V2N). */
     alp_dac_t *dac = alp_dac_open(&(alp_dac_config_t){
-        .channel_id = E1M_X_DAC0,
+        .channel_id = BOARD_DAC0,
         .initial_mv = SINE_DC_OFFSET_MV,
     });
     if (dac == NULL) {
         /* Likely causes:
-         *   * ALP_ERR_NOT_READY -- supervisor singleton not up yet
-         *     (V2N transport bus_ids unset, no GD32 firmware).
-         *   * ALP_ERR_NOSUPPORT -- backend has no DAC at all
-         *     (e.g. an E1M-AEN SoM running this on the base E1M
-         *     form factor; the AEN's SoC DAC isn't routed to a
-         *     board pad in the E1M v1.0 pinout).
-         *   * ALP_ERR_OUT_OF_RANGE -- channel_id >= E1M_X_DAC_COUNT.
+         *   * ALP_ERR_NOT_READY -- DAC backend not yet initialised
+         *     (e.g. GD32 firmware not running on E1M-X / V2N, or
+         *     the Alif DAC clock not enabled on E1M / AEN).
+         *   * ALP_ERR_NOSUPPORT -- the targeted SoM SKU has no DAC
+         *     backend compiled in (e.g. a future SoM variant with
+         *     no DAC silicon and no bridge).
+         *   * ALP_ERR_OUT_OF_RANGE -- channel_id out of range for
+         *     this board's DAC count.
          *   * On native_sim there's no DAC controller; open
          *     returns NULL with NOT_READY. */
         printf("[dac] open failed: alp_last_error=%d "
-               "(NOT_READY on native_sim; supervisor not ready on real V2N)\n",
+               "(NOT_READY on native_sim; DAC backend not ready on real hardware)\n",
                (int)alp_last_error());
         printf("[dac] done\n");
         return 0;
     }
 
-    printf("[dac] generating sine: freq=%u Hz, mean=%u mV, ampl=%u mV\n",
-           SINE_FREQ_HZ, SINE_DC_OFFSET_MV, SINE_AMPLITUDE_MV);
+    printf("[dac] generating sine: freq=%u Hz, mean=%u mV, ampl=%u mV\n", SINE_FREQ_HZ,
+           SINE_DC_OFFSET_MV, SINE_AMPLITUDE_MV);
 
     /* Per-sample delay.  SINE_SAMPLES * delay_us = 1 / freq_hz.
      *
@@ -160,36 +157,35 @@ int main(void) {
      * At 100 Hz * 32 samples = 3200 Hz sample rate -> 312.5 us /
      * sample.  alp_delay_us takes an integer micro count; round
      * DOWN to keep the worst-case frequency above target. */
-    const uint32_t sample_delay_us =
-        (uint32_t)(1000000u / (SINE_FREQ_HZ * SINE_SAMPLES));
+    const uint32_t sample_delay_us = (uint32_t)(1000000u / (SINE_FREQ_HZ * SINE_SAMPLES));
 
     /* Generate CYCLES_TO_GENERATE complete cycles, then exit.
      * Real firmware would loop forever (or until a control event
      * trips a flag). */
     for (uint32_t cycle = 0; cycle < CYCLES_TO_GENERATE; cycle++) {
-        uint16_t peak = 0;
+        uint16_t peak   = 0;
         uint16_t trough = 0xFFFF;
 
         /* Walk the LUT once per cycle.  alp_dac_write_mv blocks
-         * until the new setpoint is in the converter's data
-         * register; on the V2N bridge that's ~10-100 us depending
-         * on whether the supervisor takes the SPI or I2C path. */
+         * until the new setpoint is in the converter's data register.
+         * On E1M-X / V2N the dispatch goes through the GD32 bridge
+         * (~10-100 us); on E1M / Alif the native DAC register write
+         * is sub-microsecond. */
         for (uint32_t i = 0; i < SINE_SAMPLES; i++) {
-            uint16_t mv = lut_to_mv(SINE_LUT_Q15[i]);
-            alp_status_t s = alp_dac_write_mv(dac, mv);
+            uint16_t     mv = lut_to_mv(SINE_LUT_Q15[i]);
+            alp_status_t s  = alp_dac_write_mv(dac, mv);
             if (s != ALP_OK) {
-                /* Write failures are rare on the bridge; usually
+                /* Write failures are rare; on E1M-X / V2N usually
                  * a transient supervisor-busy.  Log and continue;
                  * the next sample likely succeeds. */
                 printf("[dac] write_mv(%u) -> %d\n", mv, (int)s);
                 break;
             }
-            if (mv > peak)   peak   = mv;
+            if (mv > peak) peak = mv;
             if (mv < trough) trough = mv;
             alp_delay_us(sample_delay_us);
         }
-        printf("[dac] cycle %u: peak=%u mV trough=%u mV\n",
-               cycle, peak, trough);
+        printf("[dac] cycle %u: peak=%u mV trough=%u mV\n", cycle, peak, trough);
     }
 
     /* Park the DAC at mid-rail before closing -- some downstream

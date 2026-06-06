@@ -3,7 +3,7 @@
 
   ONE reusable exporter.  Run it on ANY board project (E1M-EVK,
   E1M-X-EVK, a SoM project, ...) to pull GROUND-TRUTH data out of the
-  schematics so ALP SDK board metadata can be DERIVED rather than
+  schematics so Alp SDK board metadata can be DERIVED rather than
   hand-transcribed.  One run writes two CSVs next to each other:
 
     <base>_pinmap.csv      Net, Designator, PinNumber, PinName
@@ -21,7 +21,7 @@
     2. File -> Run Script... -> pick  ExportAll  -> Run.
     3. At the prompt, set the output base path -- RENAME IT PER BOARD
        (e.g. ...\xevk, ...\e1m_evk, ...\v2n).  Default:
-         C:\Users\caner\AppData\Local\Temp\board
+         %TEMP%\board
     4. Send both CSVs over.
 
   Builds output in memory and writes with SaveToFile (no lingering file
@@ -61,7 +61,7 @@ Begin
 
     base := InputBox('ALP board export',
                      'Output base path (no extension) -- rename per board:',
-                     'C:\Users\caner\AppData\Local\Temp\board');
+                     '%TEMP%\board');
     If base = '' Then Exit;
 
     { ---- 1) pin map : iterate COMPONENTS -> PINS so EVERY pin is listed, ---- }

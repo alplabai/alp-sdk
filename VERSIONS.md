@@ -1,6 +1,6 @@
-# ALP SDK Versions
+# Alp SDK Versions
 
-Living roadmap for the ALP SDK.  Each version below lists what ships,
+Living roadmap for the Alp SDK.  Each version below lists what ships,
 what's stubbed, and the acceptance bar.  When a version is tagged the
 "Status" cell flips to `released`; CHANGELOG.md captures the bump.
 
@@ -28,10 +28,10 @@ the old plan to this one:
 |---------|-------------|------------------|
 | v0.1.0  | in-progress | AEN bring-up (Zephyr peripherals + multi-proc BSP foundation) |
 | v0.2.0  | **surface complete; impl in progress** | 12 wrapped peripheral classes + capability validation + E1M portability bound + per-peripheral examples + v0.2/v0.3 stub headers + ADRs all shipped early.  Bare-metal AEN real, V2N intro, EdgeAI app real are the remaining v0.2 deliverables. |
-| v0.3.0  | **surface complete; impl in progress** | Real impl behind v0.2-declared surfaces (`<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`, `<alp/mproc.h>`).  IoT reference app, multi-proc completion, display polish, V2N+M1 intro.  **Plus: `board.yaml` project config + loader (`scripts/alp_project.py`), DEEPX DX-M1 + Ethos-U65/i.MX 93 inference-backend dispatchers, bench + fuzz scaffolding, Coverity workflow stub, Renesas V2N AI SDK 7.10 BSP wire-up in meta-alp.** |
+| v0.3.0  | **surface complete; impl in progress** | Real impl behind v0.2-declared surfaces (`<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`, `<alp/mproc.h>`).  IoT reference app, multi-proc completion, display polish, V2N+M1 intro.  **Plus: `board.yaml` project config + loader (`scripts/alp_project.py`), DEEPX DX-M1 + Ethos-U65/i.MX 93 inference-backend dispatchers, bench + fuzz scaffolding, Coverity workflow stub, Renesas V2N AI SDK platform 7.1 / BSP v6.30 wire-up in meta-alp.** |
 | v0.4.0  | **in-progress (prep code merged, untested)** | Yocto first-class (V2N + V2N+M1 full); secure boot + secure OTA on AEN-Zephyr.  **Prep merged on main:** Yocto core-4 peripheral wrappers (I²C / SPI / UART / GPIO + IRQ dispatcher), MQTT via libmosquitto, per-class override gates, `lwrb` + `nanopb` pinned behind `extras-v04` group.  Failure-path ctest green; **HW roundtrip still pending** — every row in [`docs/test-plan.md`](docs/test-plan.md)'s v0.4 section gates the tag. |
 | v0.5.0  | **wave-2 surface complete; HAL bodies pending** | Wave-2 GD32-bridge DSP + advanced-timer + power-saving + AEN-audit top-five gap surfaces.  **Shipped on main** (per `memory/project_v05_autonomous_burst_2026_05_12.md`): PROTOCOL_VERSION_MINOR 4 -> 5 + seven new reserved opcodes (`0x23..0x28` + `0x36`).  `<alp/dsp.h>` standalone DSP-chain API (FIR / IIR / WINDOW / FFT) with CMSIS-DSP + portable-C fallback.  `alp_adc_filter_t` + `alp_adc_spectrum_t` in `<alp/adc.h>` composing stream + chain.  Advanced timer extras in `<alp/pwm.h>` (`alp_pwm_capture_t` + `alp_pwm_single_pulse`).  `<alp/power.h>` system-power-mode surface.  `<alp/gpu2d.h>` 2D-accelerator surface (AEN audit headline gap).  `<alp/camera.h>::alp_camera_configure_isp` for Mali-C55 ISP toggles.  `<alp/storage.h>::alp_storage_configure_inline_aes` for AEN SecAES on OSPI / HexSPI.  `alp_delay_us` + `alp_delay_ms` portable primitives.  CC3501E §2A.2-plan items §5.1..§5.5 + §5.7 (protocol docs hygiene, named GPIO enums, IRQ event structs, diag info, reset-timing fix, power policy).  v2n_supervisor `alp_z_v2n_supervisor_invalidate()` post-wake re-init hook.  Six `gd32g553_*` host helpers mirroring the new opcodes.  Tests for every new surface.  **HAL bodies pending** in the GD32 firmware tree (`firmware/gd32-bridge/hal/`) -- every wave-2 reserved opcode returns STATUS_NOSUPPORT until the firmware ships them.  CAU (DES / TDES / AES) deferred to v0.6 with PSA driver registration. |
-| v0.6.0  | **shipped on main; pre-HiL** | Heterogeneous-OS orchestration.  `board.yaml` v2 introduces the per-core `cores:` block + cross-core `ipc:` carve-outs (v1 top-level `os:` / `peripherals:` / `libraries:` / `iot:` / `inference:` removed).  `scripts/alp_orchestrate.py` fans out one build slice per non-`off` core; `<alp/rpc.h>` + the generated `<alp/system_ipc.h>` give apps a framed RPC surface over OpenAMP RPMsg.  Reference: rpmsg-aen / rpmsg-v2n / rpmsg-imx93 / heterogeneous-offload examples.  Silicon-determined fields (`inference.backend`) removed from customer scope -- per-handle runtime selection via `alp_inference_open(.backend=...)`.  `alp_core_id_t` generalized to cover every SoM topology core_id.  HiL spec scaffolding for all 11 boards lands.  **2026-05-18 additions:** intra-family portability proven (matrix at [`docs/portability-matrix.md`](docs/portability-matrix.md), cookbook at [`docs/portability.md`](docs/portability.md), ADR 0011); 5 Phase B gap fixes landed (V2M102 namespace + V2M IO27..35 + per-variant Ethos-U U55/U65/U85 + per-CPU-class TFLM NEON/HELIUM/REF + cores key diagnostic); cross-platform Win/Mac/Linux developer host first-class (ADR 0012, [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md), `check_cross_platform.py` lint, CI matrix scaffolding); 8 vendor-SDK-style peripheral tutorial examples (hello-world, uart-hello-world, i2c-master, i2c-slave, spi-master, spi-slave, dac-waveform, timer-periodic-interrupt).  **Pre-HiL** -- still untested on real silicon. |
+| v0.6.0  | **shipped on main; pre-HiL** | Heterogeneous-OS orchestration.  `board.yaml` v2 introduces the per-core `cores:` block + cross-core `ipc:` carve-outs (v1 top-level `os:` / `peripherals:` / `libraries:` / `iot:` / `inference:` removed).  `scripts/alp_orchestrate.py` fans out one build slice per non-`off` core; `<alp/rpc.h>` + the generated `<alp/system_ipc.h>` give apps a framed RPC surface over OpenAMP RPMsg.  Reference: rpmsg-aen / rpmsg-v2n / rpmsg-imx93 / heterogeneous-offload examples.  Silicon-determined fields (`inference.backend`) removed from customer scope -- per-handle runtime selection via `alp_inference_open(.backend=...)`.  `alp_core_id_t` generalized to cover every SoM topology core_id.  HiL spec scaffolding for all 11 boards lands.  **2026-05-18 additions:** intra-family portability proven (matrix at [`docs/portability-matrix.md`](docs/portability-matrix.md), cookbook at [`docs/portability.md`](docs/portability.md), ADR 0011); 5 Phase B gap fixes landed (V2M102 namespace + V2M IO27..35 + per-variant Ethos-U U55/U65/U85 + per-CPU-class TFLM NEON/HELIUM/REF + cores key diagnostic); cross-platform Win/Mac/Linux developer host first-class (ADR 0012, [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md), `check_cross_platform.py` lint, CI matrix scaffolding); 8 vendor-SDK-style peripheral tutorial examples (hello-world, uart-hello-world, i2c-master, i2c-slave, spi-master, spi-slave, dac-waveform, timer-periodic-interrupt).  **Late-v0.6 additions (see CHANGELOG [v0.6.0]):** the GD32 supervisor-bridge silicon campaign (firmware v0.2.3 → v0.2.9, wire protocol v0.7 with the negotiated STATUS_SEQ stale-reply kill, A/B OTA Path-A, the hal/gd32 per-peripheral TU split, real-SHA build ids), EEPROM-authoritative SoM hardware revision (`ALP_ERR_NOT_PROVISIONED`; SoM-side ADC cross-check retired), Linux rz-dmac evicted from the CM33-owned DMAC0, `.alpmodel` unified AI-model pipeline Stage-1 + real-dxcom Stage-2 compile.  **Validation status at tag time:** V2N silicon-validated end-to-end on the bench (GD32 link functional suite 26/26, 20-row HIL soak 253/253, Tier-B loopback 5/6, OTA A/B e2e, protocol v0.7 negotiation) -- see [`docs/verification-status.md`](docs/verification-status.md); AEN / i.MX 93 surfaces remain pre-HiL. |
 | **Backlog** | (cherry-pick into future tags) | See "Backlog -- cherry-pick into future tags" section below.  No per-version commitments for future items; releases tag whatever's ready at the time. |
 
 > **Note on v0.2 sequencing.**  The original v0.2 plan in this file
@@ -132,7 +132,7 @@ Real datasheet extraction:
 - `alif:ensemble:e8` — `Alif E8 Datasheet 0.51.pdf` (preliminary)
 
 Preliminary stubs (`pending_alif_datasheet: true`):
-- `alif:ensemble:e4`, `e5`, `e6` — derived from ALP Lab E1M-AEN
+- `alif:ensemble:e4`, `e5`, `e6` — derived from Alp Lab E1M-AEN
   module datasheet draft + Ensemble family pattern.  Each stub
   carries the canonical Alif part number that backs the
   corresponding E1M-AEN module SKU.
@@ -222,7 +222,7 @@ more sensors) and add a second SoM family.
 - `renesas:rzv2n:n44` (`metadata/socs/renesas/rzv2n/n44.json`) —
   shipped early in v0.1 alongside the V2N silicon datasheet
   ingest; covers all 8 RZ/V2N + RZ/V2NP orderable SKUs in one
-  file.  ALP Lab's `R9A09G056N44GBG#AC0` default is recorded.
+  file.  Alp Lab's `R9A09G056N44GBG#AC0` default is recorded.
 - `deepx:dx:m1` (`metadata/socs/deepx/dx/m1.json`) — the DEEPX
   DX-M1 companion accelerator behind PCIe on V2N-M1 SoMs.
   25 TOPS @ 1.0 GHz, FC-BGA 625-ball.
@@ -403,7 +403,7 @@ target verification still parked behind the `hil-yocto` runner.
   `alp_e1m_evk_aen` board file landing at
   `alplabai/alp-zephyr-modules`.
 - **Mender OTA opt-in on meta-alp.**
-  `yocto/meta-alp/conf/distro/include/mender.inc` configures
+  `meta-alp-sdk/conf/distro/include/mender.inc` configures
   Mender's `mender-full` class with A/B rootfs + storage layout +
   server/tenant placeholders.  V2N / V2N-M1 / i.MX 93 machine
   configs gain `require` opt-in hook blocks.  Mender server

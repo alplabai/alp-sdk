@@ -137,7 +137,7 @@ Pre-`board.yaml` the user had to track configuration across:
 |------|-----------------|
 | `prj.conf` (Zephyr) | `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y` + Kconfig knobs |
 | cmake configure args | `-DALP_OS=baremetal -DALP_SOM=aen` |
-| `local.conf` (Yocto) | `MACHINE=e1m-x-v2n-m1` + IMAGE_INSTALL |
+| `local.conf` (Yocto) | `MACHINE=e1m-v2m101-a55` + IMAGE_INSTALL |
 | Per-component cmake / Kconfig flags | `CONFIG_ALP_SDK_CHIP_LSM6DSO=y`, ... |
 | Vendor-library opt-in flags | `CONFIG_ALP_SDK_USE_LWRB=y`, ... |
 
@@ -631,9 +631,17 @@ flows from `board.yaml`:
 ```cmake
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+# Point ALP_SDK_ROOT at your alp-sdk checkout (env override, else a
+# tree-relative fallback -- mirrors the examples/*/CMakeLists.txt pattern).
+if(DEFINED ENV{ALP_SDK_ROOT})
+    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
+else()
+    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../.. ABSOLUTE)
+endif()
+
 set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_PATH}/scripts/alp_project.py
+    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
             --input ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
             --emit zephyr-conf
             --output ${_alp_generated}

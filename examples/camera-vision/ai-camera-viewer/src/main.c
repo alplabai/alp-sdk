@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * ai-camera-viewer
@@ -66,24 +66,24 @@
 #include <lvgl.h>
 
 #include "alp/peripheral.h"
-#include "alp/e1m_pinout.h"
 #include "alp/camera.h"
 #include "alp/inference.h"
-#include "alp/chips/ov5640.h"
 
 #include "viewer_ui.h"
 #include "inference_loop.h"
 
 LOG_MODULE_REGISTER(ai_camera_viewer, LOG_LEVEL_INF);
 
-static viewer_state_t  g_state;
+static viewer_state_t g_state;
 
 K_THREAD_STACK_DEFINE(infer_stack, 8192);
 static struct k_thread infer_thread;
 
-static void infer_entry(void *p1, void *p2, void *p3)
+static void            infer_entry(void *p1, void *p2, void *p3)
 {
-    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
     inference_loop_run(&g_state);
 }
 
@@ -109,9 +109,8 @@ int main(void)
 
     /* Spawn the inference thread.  Higher priority than main so
      * the model gets timely CPU even when LVGL is mid-blit. */
-    k_thread_create(&infer_thread, infer_stack, K_THREAD_STACK_SIZEOF(infer_stack),
-                    infer_entry, NULL, NULL, NULL,
-                    K_PRIO_PREEMPT(3), 0, K_NO_WAIT);
+    k_thread_create(&infer_thread, infer_stack, K_THREAD_STACK_SIZEOF(infer_stack), infer_entry,
+                    NULL, NULL, NULL, K_PRIO_PREEMPT(3), 0, K_NO_WAIT);
     k_thread_name_set(&infer_thread, "infer_loop");
 
     /* Render loop: 30 fps, sample the shared state once per

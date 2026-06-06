@@ -2,7 +2,7 @@
 
 # Tutorial 09: `board.yaml` deep dive
 
-**Target audience:** developers who've shipped one ALP SDK build
+**Target audience:** developers who've shipped one Alp SDK build
 and want to understand every knob in `board.yaml`, including
 the custom-board flow.
 
@@ -553,4 +553,4 @@ preset; exit 3 = hw_rev incompatible with SDK version.
   point.
 - Tutorial [12: Mender OTA on Yocto](12-mender-ota.md) (TBD)
   for how `board.yaml`'s OTA-config block threads through to
-  meta-alp.
+  meta-alp-sdk.

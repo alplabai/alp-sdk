@@ -1,0 +1,33 @@
+# meta-alp-sdk: bring up the on-module DEEPX DX-M1 in U-Boot, before the
+# A55 kernel's PCIe root complex probes.
+#
+# WHY: the V2N-M1 SoM wires the DX-M1 behind two passive PI3DBS12212A PCIe
+# muxes (PD on Renesas P80, SEL on P95) and an active-low reset M1_RESET
+# (PA6). The A55 Linux PCIe RC (rzg3s-pcie-host) trains the link in its
+# builtin probe very early (~1.7s) and the driver has no gpio/reset hook,
+# so Linux gpio-hogs apply too late -- the RC trains into a powered-down
+# mux and fails with -ETIMEDOUT. Boot is A55-only here, so the only layer
+# that runs before the RC is U-Boot.
+#
+# WHAT: board_late_init() (board/renesas/rzv2n-dev/rzv2n-dev.c) reads the
+# on-module hardware-info manifest from the RIIC0 24C128 EEPROM (0x50),
+# validates magic + schema_version + CRC32 (EEPROM-MANIFEST-SPEC.md), and
+# ONLY when the manifest reports family "v2n-m1" sets, before bootcmd:
+#     P80 = low   -> enable the PI3DBS12212A muxes (PD active-low)
+#     P95 = low   -> route PCIe to the DEEPX path (path_0)
+#     PA6 = high  -> release M1_RESET (active-low)
+# So the same U-Boot is safe on a non-DEEPX V2N SoM (no manifest match ->
+# DEEPX path left untouched). RIIC0 (P30/P31) pinmux is added to s_init and
+# the i2c0 node enabled in rzv2n-dev.dts. (Pair with the kernel dtb's pcie
+# num-lanes=2.) DEEPX rails are always-on (current SoM rev's standalone
+# buck), so no rail sequencing is needed.
+#
+# Targets the renesas-u-boot-cip SRCREV this BSP pins for rzv2n-family
+# (2024.07, bcf29d98); applies on top of meta-renesas's rzv2n-dev PMIC-I2C
+# removal patch.
+
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
+
+SRC_URI:append:rzv2n-family = " \
+    file://0001-rzv2n-dev-EEPROM-gated-DEEPX-DX-M1-PCIe-bring-up.patch \
+"

@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * i2c-master -- discrete I2C master that reads a known device at
@@ -19,7 +19,7 @@
  *
  * What success looks like (real hardware):
  *
- *   [i2c-master] open EVK_I2C_BUS_SENSORS @ 400 kHz
+ *   [i2c-master] open BOARD_I2C_SENSORS @ 400 kHz
  *   [i2c-master] tmp112_init @ 0x48 -> 0 (OK)
  *   [i2c-master] sample 0: 23.625 degC
  *   [i2c-master] sample 1: 23.687 degC
@@ -39,16 +39,18 @@
 #include "alp/peripheral.h"
 #include "alp/chips/tmp112.h"
 
-/* EVK_I2C_BUS_SENSORS is a board-macro from the generated routes header
- * (= E1M_I2C0); rebind it in board.yaml `pins:` to port to another board. */
-#include "alp/boards/alp_e1m_evk_routes.h"
+/* BOARD_I2C_SENSORS is a portable cross-EVK alias from <alp/board.h>:
+ *   E1M EVK  -> EVK_I2C_BUS_SENSORS  -> E1M_I2C0
+ *   E1M-X EVK -> XEVK_I2C_BUS_SENSORS -> E1M_X_I2C0
+ * Rebind it in board.yaml `pins:` to port to another board. */
+#include "alp/board.h"
 
 /* TMP112 7-bit I2C address with ADD0 = GND (the strap the AEN
  * SoM uses by default).  V2N's TMP112 sits at 0x40 because the
  * SoM ties ADD0 to SDA -- if you copy this example to a V2N
  * project, change this constant.  See the TMP112 datasheet
  * SBOS473K table 2 or include/alp/chips/tmp112.h. */
-#define TMP112_ADDR_7BIT TMP112_I2C_ADDR_GND   /* 0x48 */
+#define TMP112_ADDR_7BIT TMP112_I2C_ADDR_GND /* 0x48 */
 
 /* Number of samples to take before exiting.  Capped so the
  * native_sim build doesn't stall the twister harness; real
@@ -61,8 +63,9 @@
  * watch-tick which is easy on the eyes. */
 #define SAMPLE_PERIOD_MS 1000u
 
-int main(void) {
-    printf("[i2c-master] open EVK_I2C_BUS_SENSORS @ 400 kHz\n");
+int main(void)
+{
+    printf("[i2c-master] open BOARD_I2C_SENSORS @ 400 kHz\n");
 
     /* Open the bus at 400 kHz (I2C Fast-mode).  TMP112 supports up
      * to 400 kHz per its datasheet; the SDK rounds DOWN to the
@@ -70,7 +73,7 @@ int main(void) {
      * baseline for unknown devices; 1 MHz (Fast-mode Plus) needs
      * confirmation in the chip's datasheet and short bus traces. */
     alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id     = EVK_I2C_BUS_SENSORS, /* = E1M_I2C0 */
+        .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
         .bitrate_hz = 400000,
     });
     if (bus == NULL) {
@@ -82,8 +85,7 @@ int main(void) {
          *     portable E1M baseline).
          *   * On native_sim without the emul overlay we ship,
          *     the alias is unset. */
-        printf("[i2c-master] open failed: alp_last_error=%d\n",
-               (int)alp_last_error());
+        printf("[i2c-master] open failed: alp_last_error=%d\n", (int)alp_last_error());
         printf("[i2c-master] done\n");
         return 0;
     }
@@ -97,7 +99,7 @@ int main(void) {
      * isn't populated, maybe the address is wrong, maybe the
      * bus is held low by another device.  i2c-scanner can
      * confirm which devices ACK. */
-    tmp112_t sensor;
+    tmp112_t     sensor;
     alp_status_t s = tmp112_init(&sensor, bus, TMP112_ADDR_7BIT);
     if (s != ALP_OK) {
         /* Most-frequent failure modes:
@@ -115,8 +117,7 @@ int main(void) {
         printf("[i2c-master] done\n");
         return 0;
     }
-    printf("[i2c-master] tmp112_init @ 0x%02x -> %d (OK)\n",
-           TMP112_ADDR_7BIT, (int)s);
+    printf("[i2c-master] tmp112_init @ 0x%02x -> %d (OK)\n", TMP112_ADDR_7BIT, (int)s);
 
     /* Optional: tune the conversion rate.  4 Hz is the datasheet
      * default; reach for 8 Hz when you want lower latency at the
@@ -134,7 +135,7 @@ int main(void) {
      * an alert threshold and pull a GPIO. */
     for (uint32_t i = 0; i < SAMPLE_COUNT; i++) {
         int32_t milli_c = 0;
-        s = tmp112_read_temp_milli_c(&sensor, &milli_c);
+        s               = tmp112_read_temp_milli_c(&sensor, &milli_c);
         if (s == ALP_OK) {
             /* Format integer + fractional parts so we avoid float
              * printf on M-class targets.  milli_c is signed -- the
@@ -143,15 +144,13 @@ int main(void) {
              * "-1.-750 degC"). */
             int whole = milli_c / 1000;
             int frac  = (milli_c < 0 ? -milli_c : milli_c) % 1000;
-            printf("[i2c-master] sample %u: %d.%03d degC\n",
-                   i, whole, frac);
+            printf("[i2c-master] sample %u: %d.%03d degC\n", i, whole, frac);
         } else {
             /* Read errors during steady-state are rare -- usually
              * a transient bus glitch (EMI, ground bounce).  Log
              * and continue rather than aborting; the next sample
              * will likely succeed. */
-            printf("[i2c-master] sample %u: read -> %d\n",
-                   i, (int)s);
+            printf("[i2c-master] sample %u: read -> %d\n", i, (int)s);
         }
         k_msleep(SAMPLE_PERIOD_MS);
     }

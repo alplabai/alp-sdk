@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * ALP E1M-V2N-M1 (V2M) DEEPX DXM1 NPU enablement — V2M boards only.
+ *
+ * The on-module DEEPX DXM1 NPU sits on a PCIe lane behind an on-module
+ * lane mux. Route the mux to the DEEPX path and release the NPU reset so
+ * the PCIe root complex enumerates the NPU at boot. The gpio-hogs below
+ * apply at pinctrl probe (before the PCIe controller), which is the order
+ * the link needs. Power sequencing for the NPU rails is handled on-module
+ * (in U-Boot / PMIC DT), not here.
+ *
+ *   M1_RESET     = PA6  (active-low: drive HIGH to release)
+ *   PCIe.MUX_PD  = P80  (LOW = muxes enabled; PD is active-low)
+ *   PCIe.MUX_SEL = P95  (LOW  = path_0 = DEEPX; HIGH = E1M edge)
+ *
+ * Source: alp-sdk include/alp/chips/{deepx_dxm1,pi3dbs12212}.h +
+ * alp-sdk-internal metadata/e1m_modules/v2n-m1/. gpio-hogs apply at
+ * pinctrl probe (before the PCIe controller), which is the order the
+ * link needs.
+ *
+ * Rails: the current SoM rev powers the DEEPX rails from the old
+ * standalone buck (always-on) — no sequencing needed. The target rev
+ * moves them to DA9292 ch3+ch4 + three BRD_I2C TPS628640 bucks (enable
+ * in U-Boot / PMIC DT then).
+ *
+ * STATUS: UNVALIDATED — first DEEPX PCIe bring-up; verify on the bench
+ * (lspci shows the NPU, dxrt_init succeeds).
+ */
+
+/* The base SoC dts enables pcie0 as root complex by default
+ * (PCIE_MODE_SEL=0); keep it on for V2M and add the carrier dma-ranges. */
+&pcie0 {
+	dma-ranges = <0x42000000 0 0x48000000 0 0x48000000 0x1 0xf8000000>;
+	/* DEEPX DX-M1 is wired x2 on V2N-M1 (SoC dtsi default is x4). */
+	num-lanes = <2>;
+	status = "okay";
+};
+
+&pinctrl {
+	/* P80 = PCIe.MUX_PD: LOW enables the PI3DBS12212A muxes (PD active-low).
+	 * U-Boot sets this before the RC probes; this hog must match (drive LOW)
+	 * or it would re-disable the mux ~93ms after the link trains. */
+	deepx-pcie-mux-pd-hog {
+		gpio-hog;
+		gpios = <RZV2N_GPIO(8, 0) GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "deepx_pcie_mux_pd";
+	};
+
+	/* PCIe lane-mux select: drive to the DEEPX path. */
+	deepx-pcie-mux-sel-hog {
+		gpio-hog;
+		gpios = <RZV2N_GPIO(9, 5) GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "deepx_pcie_mux_sel";
+	};
+
+	/* DEEPX NPU reset (active-low): drive HIGH to release the NPU. */
+	deepx-m1-reset-release-hog {
+		gpio-hog;
+		gpios = <RZV2N_GPIO(A, 6) GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "deepx_m1_reset";
+	};
+};

@@ -1,0 +1,246 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * ALP E1M-V2N SoM (on-module) — Renesas RZ/V2N (r9a09g056n48).
+ *
+ * Public, per SoM-vendor norm (Toradex/Phytec/Variscite publish their SoM
+ * dtsi; the dtb ships on every module and is GPL). Schematic design IP
+ * (resistor IDs, divider math, datasheet notes) stays in alp-sdk-internal
+ * metadata, NOT here.
+ *
+ * On-module hardware described here: DRP-AI/codec reserved memory, the
+ * core fixed rails, the dual Realtek RTL8211F-VD GbE PHYs, on-module eMMC
+ * (SDHI0), and the on-module xSPI NOR. Carrier-facing enables live in the
+ * carrier dtsi (e1m-x-evk.dtsi); each product board dts composes
+ * SoC dtsi + this SoM dtsi + a carrier dtsi.
+ *
+ * Ported from the Renesas RZ/V2N EVK reference dts (kernel SHA 6717c06,
+ * AI SDK platform 7.1 / BSP v6.30).
+ *
+ * STATUS: UNVALIDATED through dtc/bitbake — first structured port.
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+#include "r9a09g056.dtsi"
+
+/ {
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		global_cma: linux,cma@58000000 {
+			compatible = "shared-dma-pool";
+			linux,cma-default;
+			reusable;
+			reg = <0x0 0x58000000 0x0 0x28000000>;
+		};
+
+		mmp_reserved: linux,multimedia {
+			compatible = "shared-dma-pool";
+			reusable;
+			reg = <0x0 0x80000000 0x0 0x10000000>;
+		};
+
+		isp: isp@90000000 {
+			compatible = "shared-dma-pool";
+			reusable;
+			reg = <0x0 0x90000000 0x0 0x18000000>;
+		};
+
+		opencva_reserved: opencva@a8000000 {
+			reusable;
+			reg = <0x0 0xa8000000 0x0 0x7cff000>;
+		};
+
+		shared_drp_reserved: shareddrp@afcff000 {
+			reusable;
+			reg = <0x0 0xafcff000 0x0 0x00001000>;
+		};
+
+		drp_codec: drp-codec@afd00000 {
+			reusable;
+			reg = <0x0 0xafd00000 0x0 0x300000>;
+		};
+
+		image_buf0: image_buf@b0000000 {
+			compatible = "shared-dma-pool";
+			reusable;
+			reg = <0x0 0xb0000000 0x0 0x4000000>;
+			label = "image_buf0";
+		};
+
+		cru_func: cru_buffer@b4000000 {
+			compatible = "shared-dma-pool";
+			reusable;
+			reg = <0x0 0xb4000000 0x0 0x16400000>;
+		};
+
+		/* DRP-AI3 working memory (on-die NPU). */
+		drp_reserved: drp-ai@d0000000 {
+			reusable;
+			reg = <0x0 0xd0000000 0x0 0x20000000>;
+		};
+	};
+
+	mmngr {
+		compatible = "renesas,mmngr";
+		memory-region = <&mmp_reserved>;
+	};
+
+	mmngrbuf {
+		compatible = "renesas,mmngrbuf";
+	};
+
+	vspm_if {
+		compatible = "renesas,vspm_if";
+	};
+
+	reg_0p8v: regulator-0p8v {
+		compatible = "regulator-fixed";
+		regulator-name = "fixed-0.8V";
+		regulator-min-microvolt = <800000>;
+		regulator-max-microvolt = <800000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	reg_1p8v: regulator-1p8v {
+		compatible = "regulator-fixed";
+		regulator-name = "fixed-1.8V";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	reg_3p3v: regulator-3p3v {
+		compatible = "regulator-fixed";
+		regulator-name = "fixed-3.3V";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+};
+
+/*
+ * Dual on-module GbE PHYs. Each PHY is addressed at MDIO address 2 on its
+ * bus (the on-module wiring makes address 2 the reliable address; address
+ * 0 does not respond to phy_poll_reset). The compatible string carries the
+ * PHY's IEEE OUI/model so the matching mainline driver binds.
+ */
+&mdio0 {
+	phy0: ethernet-phy@2 {
+		compatible = "ethernet-phy-id001c.c878",
+			     "ethernet-phy-ieee802.3-c22";
+		reg = <2>;
+	};
+};
+
+&mdio1 {
+	phy1: ethernet-phy@2 {
+		compatible = "ethernet-phy-id001c.c878",
+			     "ethernet-phy-ieee802.3-c22";
+		reg = <2>;
+	};
+};
+
+/* On-module eMMC on SDHI0 (8-bit, HS200, non-removable). */
+&sdhi0 {
+	pinctrl-0 = <&sdhi0_emmc_pins>;
+	pinctrl-1 = <&sdhi0_emmc_pins>;
+	pinctrl-names = "default", "state_uhs";
+	vmmc-supply = <&reg_3p3v>;
+	vqmmc-supply = <&reg_1p8v>;
+	bus-width = <8>;
+	mmc-hs200-1_8v;
+	non-removable;
+	fixed-emmc-driver-type = <1>;
+	status = "okay";
+};
+
+/* On-module xSPI NOR. */
+&xspi {
+	pinctrl-0 = <&xspi_pins>;
+	pinctrl-names = "default";
+	assigned-clocks = <&cpg CPG_CORE R9A09G056_SPI_CLK_SPI>;
+	assigned-clock-rates = <133333334>;
+	status = "okay";
+
+	flash@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		vcc-supply = <&reg_1p8v>;
+		m25p,fast-read;
+		spi-tx-bus-width = <4>;
+		spi-rx-bus-width = <4>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@0 {
+				label = "bl2";
+				reg = <0x00000000 0x00060000>;
+			};
+
+			partition@60000 {
+				label = "fip";
+				reg = <0x00060000 0x1fa0000>;
+			};
+
+			partition@2000000 {
+				label = "user";
+				reg = <0x2000000 0x2000000>;
+			};
+		};
+	};
+};
+
+/* MCPU DMAC (DMAC0 @ 0x11400000) is OWNED BY THE CM33 firmware (the
+ * GD32 supervisor link's SCI7 DMA path drives it through the rzv FSP
+ * r_dmac_b).  The upstream SoC dtsi enables it for Linux, whose
+ * rz-dmac driver then binds the unit, claims all 8 channel interrupts
+ * and resets/owns the channels under the CM33's feet -- the same AMP
+ * double-ownership class as the port-9 SD1_CD lesson.  Silicon
+ * 2026-06-06: rz-dmac bound + 8 GIC IRQs claimed on the live system
+ * while the CM33 FSP was arming the same channels.  The A55 has four
+ * other DMAC units; this one is off-limits.
+ * (dmac0_aclk is NOT gated by this: bench-verified on the pristine
+ * BSP kernel with the node disabled, the cpg driver keeps the clock
+ * held -- enable_cnt=1, deviceless -- so the CM33's engine keeps its
+ * clock.) */
+&dmac0 {
+	status = "disabled";
+};
+
+&pinctrl {
+	sdhi0_emmc_pins: emmc-pins {
+		sd0-clk {
+			pins = "SD0CLK";
+			renesas,output-impedance = <3>;
+			slew-rate = <0>;
+		};
+
+		sd0-dat-cmd {
+			pins = "SD0DAT0", "SD0DAT1", "SD0DAT2", "SD0DAT3", "SD0DAT4",
+			       "SD0DAT5", "SD0DAT6", "SD0DAT7", "SD0CMD";
+			input-enable;
+			renesas,output-impedance = <3>;
+			slew-rate = <0>;
+		};
+	};
+
+	xspi_pins: xspi0 {
+		ctrl {
+			pins = "XSPI0_RESET0N", "XSPI0_CS0N", "XSPI0_CKP";
+			output-enable;
+		};
+
+		io {
+			pins = "XSPI0_IO0", "XSPI0_IO1", "XSPI0_IO2", "XSPI0_IO3";
+			renesas,output-impedance = <3>;
+		};
+	};
+};

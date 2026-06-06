@@ -15,6 +15,7 @@ Public API:
     emit_system_manifest(project, slices=...) -> str
     emit_dts_reservations(project) -> str
     emit_ipc_contract_h(project)   -> str
+    emit_build_plan(project, board_yaml=..., build_root=...) -> str
 
     BoardProject, Slice, ResolvedCarveOut, SystemManifest, Orchestrator,
     OrchestratorError
@@ -31,7 +32,7 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -441,6 +442,15 @@ def _available_presets(metadata_root: Path) -> list[str]:
     if not boards_dir.is_dir():
         return []
     return [p.stem for p in boards_dir.glob("*.yaml")]
+
+
+def _board_define_slug(name: str) -> str:
+    """'E1M-X-EVK' -> 'E1M_X_EVK': the ALP_BOARD_* compile-define suffix.
+
+    Mirrors gen_board_header._board_slug (lower + '-'->'_') then uppercases
+    for the C macro. Used by <alp/board.h>'s board-selection facade.
+    """
+    return name.lower().replace("-", "_").upper()
 
 
 def _synthesize_inline_board(project: dict[str, Any]) -> dict[str, Any]:
@@ -1971,6 +1981,167 @@ def emit_system_manifest(
 
 
 # ---------------------------------------------------------------------
+# Build-plan emission (the Wave C consumer contract)
+# ---------------------------------------------------------------------
+
+
+def _slice_build_dir(build_root: Path, slice_: Slice) -> Path:
+    """Per-slice build directory: build/<core>-<os>/."""
+    return Path(build_root) / f"{slice_.core_id}-{slice_.os}"
+
+
+def _slice_config_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's config artefact, or None
+    when the os has none.
+
+    Single source for both the Orchestrator's materialise step and
+    `emit_build_plan` -- the two MUST agree byte-for-byte (the CLI
+    consumer byte-writes the plan's contents and trusts them to match
+    what we'd write ourselves).
+    """
+    if slice_.os == "zephyr":
+        return ("alp.conf", _slice_alp_conf(project, slice_))
+    if slice_.os == "yocto":
+        return ("local.conf", _slice_local_conf(project, slice_))
+    if slice_.os == "baremetal":
+        return ("cmake-args.txt", _slice_cmake_args(project, slice_))
+    return None
+
+
+def _shared_artefacts(
+    project: BoardProject,
+    build_root: Path,
+) -> list[tuple[Path, str]]:
+    """(path, contents) of every shared generated artefact.
+
+    Single source for `_materialise_shared` and `emit_build_plan`
+    (same byte-parity contract as `_slice_config_artefact`).
+    Conditional artefacts (sysbuild / TF-M) follow absence-emits-
+    nothing: they only appear when their emit is non-empty.
+    """
+    build_root = Path(build_root)
+    gen = build_root / "generated"
+    out: list[tuple[Path, str]] = [
+        # `<alp/system_ipc.h>` is the canonical include path consumers
+        # use (see include/alp/rpc.h §usage and the per-slice main.c
+        # references) -- the header sits in an `alp/` subdir so slice
+        # CMakeLists add `generated/` straight to the include path.
+        (gen / "alp" / "system_ipc.h", emit_ipc_contract_h(project)),
+        (gen / "dts-reservations.dtsi", emit_dts_reservations(project)),
+        # Apps that don't declare storage[] still get a stub file with
+        # a "nothing to emit" comment so downstream #include resolves.
+        (gen / "dts-partitions.dtsi", emit_dts_partitions(project)),
+    ]
+    sysbuild_conf = emit_sysbuild_conf(project)
+    if sysbuild_conf:
+        out.append((build_root / "alp_sysbuild.conf", sysbuild_conf))
+    tfm_conf = emit_tfm_sysbuild_conf(project)
+    if tfm_conf:
+        out.append((build_root / "sysbuild" / "tfm" / "tfm.conf",
+                    tfm_conf))
+    return out
+
+
+def emit_build_plan(
+    project: BoardProject,
+    *,
+    board_yaml: Path,
+    build_root: Path,
+) -> str:
+    """Emit the machine-readable build plan as JSON (Wave C contract).
+
+    Consumed by the `alp` CLI (alp-sdk-vscode), which materialises the
+    plan's files, runs each slice's command, and owns scheduling /
+    caching / progress UX on top -- instead of re-implementing this
+    planner.  Agreed 2026-06-04 with the alp-sdk-vscode team; their
+    docs/PROPOSAL-alp-build-core.md records the settlement.
+
+    Contract notes (locked with the consumer -- bump `schemaVersion`
+    and flag in the CHANGELOG before changing the shape):
+
+      * camelCase keys; `schemaVersion` is independent of board.yaml's
+        schema version.
+      * Every artefact carries its `contents` so the consumer's
+        materialise step stays pure IO.  `_shared_artefacts` /
+        `_slice_config_artefact` are the single sources both this emit
+        and the Orchestrator's own materialise step read, so the two
+        cannot drift.
+      * No `inputHash` (the consumer computes its own cache key over
+        the plan) and no `sequential` (parallelism policy belongs to
+        the consumer's scheduler).
+      * One slice per non-`off` core, sorted by coreId.  A slice this
+        script cannot build yet (e.g. no `app:`) is carried with
+        `command: null` plus a `no-command` warning -- never dropped,
+        so the consumer can still report the core.
+      * Write-free: nothing is created on disk.  (Command resolution
+        stats the app dir to pick the CMakeLists.txt convention --
+        read-only, same as the build itself.)
+    """
+    build_root = Path(build_root)
+    slices_out: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+
+    for slice_ in sorted(project.cores.values(),
+                         key=lambda s: s.core_id):
+        if slice_.os == "off":
+            continue
+        build_dir = _slice_build_dir(build_root, slice_)
+        # `replace` keeps this emit side-effect free: _slice_command
+        # reads `build_dir` off the slice (baremetal -B), and the
+        # project's own Slice objects must stay untouched.
+        cmd = _slice_command(
+            project, replace(slice_, build_dir=build_dir))
+        if cmd is None:
+            warnings.append({
+                "code":    "no-command",
+                "coreId":  slice_.core_id,
+                "message": (f"no build command for core "
+                            f"'{slice_.core_id}' (os: {slice_.os}) "
+                            f"-- missing app/board/image"),
+            })
+        config_artefacts: list[dict[str, str]] = []
+        artefact = _slice_config_artefact(project, slice_)
+        if artefact is not None:
+            name, contents = artefact
+            config_artefacts.append({
+                "path":     (build_dir / name).as_posix(),
+                "contents": contents,
+            })
+        slices_out.append({
+            "coreId":          slice_.core_id,
+            "backend":         slice_.os,
+            "buildDir":        build_dir.as_posix(),
+            "configArtefacts": config_artefacts,
+            "command": None if cmd is None else {
+                "tool": cmd[0],
+                "args": cmd[1:],
+                "cwd":  build_dir.as_posix(),
+            },
+            # Native host-path form: the value is handed to the slice
+            # subprocess environment verbatim.
+            "env": {"ALP_SDK_ROOT": str(REPO)},
+        })
+
+    plan: dict[str, Any] = {
+        "schemaVersion":   1,
+        "generatedBy":     "scripts/alp_orchestrate.py",
+        "boardYaml":       Path(board_yaml).as_posix(),
+        "sku":             project.sku,
+        "buildRoot":       build_root.as_posix(),
+        "slices":          slices_out,
+        "sharedArtefacts": [
+            {"path": p.as_posix(), "contents": c}
+            for p, c in _shared_artefacts(project, build_root)
+        ],
+        "warnings":        warnings,
+    }
+    return json.dumps(plan, indent=2) + "\n"
+
+
+# ---------------------------------------------------------------------
 # Orchestrator (fan-out)
 # ---------------------------------------------------------------------
 
@@ -2051,49 +2222,36 @@ class Orchestrator:
 
     def _materialise_slice_config(self, slice_: Slice) -> Path:
         """Write per-core config artefacts under
-        build/<core>-<os>/."""
-        slice_dir = self.build_root / f"{slice_.core_id}-{slice_.os}"
+        build/<core>-<os>/.
+
+        The artefact itself comes from `_slice_config_artefact` -- the
+        same source `emit_build_plan` reads -- so what we write and
+        what the plan promises cannot drift.
+        """
+        slice_dir = _slice_build_dir(self.build_root, slice_)
         slice_dir.mkdir(parents=True, exist_ok=True)
         slice_.build_dir = slice_dir
         slice_.log_path = slice_dir / "build.log"
-        if slice_.os == "zephyr":
-            (slice_dir / "alp.conf").write_text(
-                _slice_alp_conf(self.project, slice_), encoding="utf-8")
-        elif slice_.os == "yocto":
-            (slice_dir / "local.conf").write_text(
-                _slice_local_conf(self.project, slice_), encoding="utf-8")
-        elif slice_.os == "baremetal":
-            (slice_dir / "cmake-args.txt").write_text(
-                _slice_cmake_args(self.project, slice_), encoding="utf-8")
+        artefact = _slice_config_artefact(self.project, slice_)
+        if artefact is not None:
+            name, contents = artefact
+            (slice_dir / name).write_text(contents, encoding="utf-8")
         return slice_dir
 
     def _materialise_shared(self) -> Path:
+        """Write the shared generated artefacts.
+
+        The (path, contents) set comes from `_shared_artefacts` -- the
+        same source `emit_build_plan` reads -- so what we write and
+        what the plan promises cannot drift.  Conditional artefacts
+        (sysbuild / TF-M) are absent from the list when empty, so
+        their directories are never created spuriously.
+        """
         gen = self.build_root / "generated"
-        gen.mkdir(parents=True, exist_ok=True)
-        # `<alp/system_ipc.h>` is the canonical include path consumers
-        # use (see include/alp/rpc.h §usage and the per-slice main.c
-        # references) — write the generated header at the matching
-        # `alp/` subdir so slice CMakeLists can add this directory
-        # straight to the include path.
-        alp_subdir = gen / "alp"
-        alp_subdir.mkdir(parents=True, exist_ok=True)
-        (alp_subdir / "system_ipc.h").write_text(
-            emit_ipc_contract_h(self.project), encoding="utf-8")
-        (gen / "dts-reservations.dtsi").write_text(
-            emit_dts_reservations(self.project), encoding="utf-8")
-        # Storage partitions land alongside the IPC reservations DTS;
-        # apps that don't declare storage[] still get a stub file with
-        # a "nothing to emit" comment so downstream `#include` resolves.
-        (gen / "dts-partitions.dtsi").write_text(
-            emit_dts_partitions(self.project), encoding="utf-8")
-        # TF-M sysbuild child-image overlay -- only when the project
-        # opts in to `security.psa.tfm: true`.  Absence-emits-nothing:
-        # we don't create the directory when the file would be empty.
-        tfm_conf = emit_tfm_sysbuild_conf(self.project)
-        if tfm_conf:
-            tfm_dir = self.build_root / "sysbuild" / "tfm"
-            tfm_dir.mkdir(parents=True, exist_ok=True)
-            (tfm_dir / "tfm.conf").write_text(tfm_conf, encoding="utf-8")
+        for path, contents in _shared_artefacts(self.project,
+                                                self.build_root):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(contents, encoding="utf-8")
         return gen
 
     # ---- dispatch ----
@@ -2560,6 +2718,26 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     if kconfig:
         lines.append(f"# SoM silicon ({silicon} via {project.sku})")
         lines.append(f"CONFIG_{kconfig}=y")
+        lines.append("")
+
+    # Cross-EVK board facade selector (<alp/board.h>).
+    # Emitted only when the project resolves to a named board preset
+    # (e.g. `preset: e1m-x-evk` -> board_name "E1M-X-EVK").
+    # CONFIG_COMPILER_OPT passes the define into every source file the
+    # Zephyr build compiles, so the facade header can resolve the
+    # correct EVK-specific BOARD_* aliases without per-app prj.conf
+    # entries or extra_args.  Inline boards (no preset/name) skip this;
+    # native_sim testcases that do need the define set it via extra_args.
+    if project.board_name:
+        # Cross-EVK board facade selector for <alp/board.h>.  NOTE:
+        # CONFIG_COMPILER_OPT is a single-value Kconfig string (last write
+        # wins, not additive) -- an app must NOT also set it in prj.conf or
+        # this -D is silently dropped; pass extra defines another way.
+        lines.append("# Cross-EVK board facade selector (<alp/board.h>);"
+                     " CONFIG_COMPILER_OPT is single-value (do not also set in prj.conf).")
+        lines.append(
+            f'CONFIG_COMPILER_OPT="-DALP_BOARD_{_board_define_slug(project.board_name)}"'
+        )
         lines.append("")
 
     # ----------------------------------------------------------------
@@ -3200,11 +3378,19 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
     lines.append(f"-DALP_SOM_SKU={project.sku}")
     lines.append(f"-DALP_SOM_FAMILY={family}")
     lines.append(f"-DALP_CORE_ID={slice_.core_id}")
+    # Cross-EVK board facade selector (<alp/board.h>).
+    # Emitted only when the project resolves to a named board preset
+    # (e.g. `preset: e1m-x-evk` -> board_name "E1M-X-EVK").
+    # Inline boards with no preset/name skip this; the facade defaults
+    # to an #error forcing the builder to set it explicitly (e.g. via
+    # extra_args for native_sim testcases).
+    if project.board_name:
+        lines.append(f"-DALP_BOARD_{_board_define_slug(project.board_name)}")
     if slice_.toolchain:
         lines.append(f"-DALP_TOOLCHAIN={slice_.toolchain}")
     if capabilities.get("drp_ai"):
         lines.append("-DALP_SDK_USE_DRPAI=ON")
-    if capabilities.get("deepx_dx"):
+    if capabilities.get("deepx_dxm1"):
         lines.append("-DALP_SDK_USE_DEEPX_DXM1=ON")
     return "\n".join(lines) + "\n"
 
@@ -3266,7 +3452,7 @@ def _slice_command(
         return [
             "west", "build",
             "-b", slice_.board,
-            str(_resolve_app_path(slice_.app)),
+            str(_zephyr_app_dir(slice_.app)),
         ]
     if slice_.os == "yocto":
         target = slice_.image or slice_.app
@@ -3287,6 +3473,29 @@ def _resolve_app_path(app: str) -> Path:
     if p.is_absolute():
         return p
     return (Path.cwd() / p).resolve()
+
+
+def _zephyr_app_dir(app: str) -> Path:
+    """Resolve a Zephyr slice's `app:` to the directory holding the
+    application `CMakeLists.txt` (what `west build` needs).
+
+    Two example conventions are supported:
+
+      * multicore examples point `app:` straight at a self-contained
+        Zephyr app directory (e.g. ``./m33_sm`` -- carries its own
+        CMakeLists.txt + prj.conf); used verbatim.
+      * single-core examples keep one CMakeLists.txt at the example
+        root and point `app:` at the sources subdir (e.g. ``./src`` with
+        ``target_sources(app PRIVATE src/main.c)``).  The sources dir has
+        no CMakeLists.txt of its own, so fall back to its parent (the
+        example root) which does.
+    """
+    p = _resolve_app_path(app)
+    if (p / "CMakeLists.txt").is_file():
+        return p
+    if (p.parent / "CMakeLists.txt").is_file():
+        return p.parent
+    return p
 
 
 # ---------------------------------------------------------------------
@@ -3311,7 +3520,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         choices=["system-manifest", "ipc-contract-h",
                                  "dts-reservations", "dts-partitions",
                                  "storage-mounts-c",
-                                 "tfm-sysbuild-conf"],
+                                 "tfm-sysbuild-conf", "build-plan"],
                         help="Skip the build; just emit one of the "
                              "generated artefacts to stdout.")
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -3336,6 +3545,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 sys.stdout.write(emit_storage_mounts_c(project))
             elif args.emit == "tfm-sysbuild-conf":
                 sys.stdout.write(emit_tfm_sysbuild_conf(project))
+            elif args.emit == "build-plan":
+                sys.stdout.write(emit_build_plan(
+                    project, board_yaml=args.input,
+                    build_root=args.build_root))
         except OrchestratorError as e:
             print(f"alp-orchestrate: {e}", file=sys.stderr)
             return 1

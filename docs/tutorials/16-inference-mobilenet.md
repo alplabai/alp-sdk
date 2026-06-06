@@ -53,7 +53,7 @@ Backend selection:
 | `_AUTO` | Picks per SoM: Ethos-U on AEN/N93, DRP-AI on V2N, DEEPX on V2M, CPU fallback otherwise. |
 | `_ETHOS_U` | AEN (E3..E8 with Ethos-U55 + E4/E6/E8 with Ethos-U85) + N93 (Ethos-U65). |
 | `_DRPAI` | V2N + V2M (DRP-AI3). |
-| `_DEEPX_DX` | V2M101 / V2M102 (DEEPX DX-M1 on a PCIe-like link). |
+| `_DEEPX_DXM1` | V2M101 / V2M102 (DEEPX DX-M1 on a PCIe-like link). |
 | `_CPU` | TFLM reference / Helium / NEON kernels; always available. |
 
 The `ETHOS_U` token is a single customer-facing handle that
@@ -190,7 +190,7 @@ an explicit value).
 ## 5. Build + flash
 
 ```bash
-west alp-build -b alif_e7_dk_rtss_he examples/inference-mobilenet
+west alp-build -b alif_e7_dk_rtss_he examples/aen/edgeai-vision-aen
 west flash
 ```
 
@@ -250,15 +250,36 @@ under native_sim — same source, three SoMs.
 > | Ethos-U55 (AEN)      | `vela --accelerator-config ethos-u55-256`   | `.tflite` (Vela-rewritten)  |
 > | Ethos-U85 (AEN E4/E6/E8) | `vela --accelerator-config ethos-u85-256` | `.tflite` (Vela-rewritten)  |
 > | Ethos-U65 (N93)      | `vela --accelerator-config ethos-u65-256`   | `.tflite` (Vela-rewritten)  |
-> | DRP-AI3 (V2N / V2M)  | Renesas DRP-AI translator | `.drpai` + companion `.tflite` |
-> | DEEPX DX-M1 (V2M)    | DEEPX SDK toolchain       | `.dxnn` binary              |
+> | DRP-AI3 (V2N / V2M)  | Renesas DRP-AI TVM        | DRP-AI runtime dir          |
+> | DEEPX DX-M1 (V2M)    | `dxcom` (license-gated)   | `.dxnn` binary              |
+>
+> For **Ethos-U** the SDK runs Vela automatically as part of `alp model build`
+> (no extra `board.yaml` needed).  For **DRP-AI** and **DEEPX** the toolchains
+> require per-model configuration (a DRP-AI TVM spec file, or a DEEPX JSON
+> config + calibration dataset).  Supply these in `board.yaml` under
+> `models[].compile:` so `alp model build` can invoke them:
+>
+> ```yaml
+> models:
+>   - name: mobilenet
+>     source: models/mobilenet.onnx
+>     compile:
+>       drpai:
+>         spec: models/mobilenet.drpai.yaml   # DRP-AI TVM compile spec
+>       deepx_dxm1:
+>         config:      models/mobilenet.deepx.json   # dxcom per-model JSON
+>         calibration: models/calib/                 # PTQ calibration dataset
+> ```
+>
+> A backend with no `compile:` block is recorded as
+> `coverage: skipped ("no compile config")` in the `.alpmodel` manifest —
+> the build still succeeds and produces blobs for every backend whose config
+> is present.  Real DRP-AI / DEEPX compilation (Stage 2) is gated on the
+> respective toolchain being installed; see the local-CI guide.
 >
 > Customers writing one-source-multiple-target apps ship every
-> model variant they want to run and select at runtime based on
-> `alp_hw_info_read()` (the runtime SoM identity).  The
-> `alp_inference_config_t.format` field tells the loader which
-> dispatcher to bind: `ALP_INFERENCE_MODEL_VELA` for Ethos-U,
-> `_DRPAI` for DRP-AI, `_DXNN` for DEEPX.
+> model variant they want to run; the on-device `alp_inference_open_alpmodel()`
+> loader picks the right blob automatically from the `.alpmodel` package.
 >
 > This is **what you can't abstract** — the C surface stays
 > uniform, but the bytes a model compiles to are
@@ -288,7 +309,7 @@ alp_inference_t *m_vision = alp_inference_open(&(alp_inference_config_t){
     .model_data  = vision_dxnn,
     .model_size  = sizeof(vision_dxnn),
     .format      = ALP_INFERENCE_MODEL_DXNN,
-    .backend     = ALP_INFERENCE_BACKEND_DEEPX_DX,   // dispatch to DEEPX
+    .backend     = ALP_INFERENCE_BACKEND_DEEPX_DXM1,   // dispatch to DEEPX
     .arena_bytes = 256 * 1024,
 });
 

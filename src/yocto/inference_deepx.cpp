@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * DEEPX DX-M1 backend hook for <alp/inference.h>.
@@ -9,7 +9,7 @@
  * MACHINE recipe drives ON).  The dispatcher in
  * src/yocto/inference_yocto.c calls the alp_inference_deepx_*
  * symbols declared here when the active backend is
- * ALP_INFERENCE_BACKEND_DEEPX_DX.
+ * ALP_INFERENCE_BACKEND_DEEPX_DXM1.
  *
  * Real implementation bridges the DEEPX DX-M1 host SDK
  * (vendors/deepx-dxm1/include/dxnn/dxnn.h or the SDK-installed

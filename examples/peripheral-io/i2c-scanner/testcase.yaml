@@ -3,20 +3,42 @@
 sample:
   name: i2c-scanner
   description: |
-    Per-peripheral example for I²C.  Walks 7-bit addresses on
-    E1M_I2C0 and reports responders.
+    Per-peripheral example for I2C.  Walks 7-bit addresses on
+    BOARD_I2C_SENSORS and reports responders.  Builds on both EVKs:
+    E1M EVK uses E1M_I2C0; E1M-X EVK uses E1M_X_I2C0.
 
 tests:
-  alp_sdk.example.i2c_scanner:
+  alp_sdk.example.i2c_scanner.e1m_x_evk:
     platform_allow:
       - native_sim
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     tags:
       - alp-sdk
       - example
       - i2c
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[i2c\\] done"
+  alp_sdk.example.i2c_scanner.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - i2c
+      - aen
     harness: console
     harness_config:
         type: one_line

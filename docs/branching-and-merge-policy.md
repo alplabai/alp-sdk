@@ -1,7 +1,7 @@
 # Branching and merge policy
 
 Concrete rules for branches, PRs, merges, pushes, and tags in the
-ALP SDK repo.  This doc pairs with:
+Alp SDK repo.  This doc pairs with:
 
 - [`docs/release-policy.md`](release-policy.md) — what gets
   released when (SemVer + LTS).
@@ -57,55 +57,74 @@ release/v1.0 ──────────────────────�
                                   /                 / ▲
                                  / cherry-pick ↑   /  │
                                 /  (sec patches)  /   │ tagged after stabilisation
-main ────●───────●───────●─────●─────●───────●───●────●──── (active development)
-         │       │       │     ▲     │       │
-         │       │       │     │     │       │
-         │       │       │   merge   │       │
-         │       │       │  (squash) │       │
-         │       │       │     │     │       │
-         │       │       │     │     │       │
-         │   feature/A  feat/B │  feat/C  feat/D     ─── (feature branches)
-         │       │       │     │     │       │
-         │       └───PR──┘     │     └───PR──┘
-         │                                            ─── (per-contributor;
-         │                                                  merge via PR only)
+main ───────────────●─────────────────────●─────────────── (tested, releasable baseline)
+                    ▲                       ▲
+                    │ dev → main            │ dev → main
+                    │ (release gate:        │ (release gate)
+                    │  bench/HW/CI passed)  │
+dev ──●──────●──────●──────●──────●─────────●───────●─────── (shared integration; untested work)
+      ▲      ▲             ▲      ▲                 ▲
+      │      │             │      │                 │
+   merge  merge         merge  merge             merge
+  (--no-ff)(--no-ff)   (--no-ff)(--no-ff)       (--no-ff)
+      │      │             │      │                 │
+   feat/A  fix/B        feat/C  docs/D           feat/E   ─── (feature branches:
+      │      │             │      │                 │           branch off dev,
+      └──PR──┘             └──PR──┘                 │           merge back into dev)
+                                                   PR
 ```
+
+Feature branches branch off `dev` and merge back into `dev` via PR
+(`--no-ff`, so each merge stays an auditable record).  `dev` is the
+shared integration branch for not-yet-tested work.  Promotion of
+`dev` → `main` is the **release gate**: it is crossed only after the
+integrated work passes testing (bench / hardware / CI).  `main` is
+therefore always a tested, releasable baseline, and version tags are
+cut on `main`.
 
 ### Branches that exist
 
 | Branch                                    | Purpose                                                                 | Direct push?            | Deletion policy                           |
 |-------------------------------------------|-------------------------------------------------------------------------|-------------------------|-------------------------------------------|
-| `main`                                    | Next pre-release development.  All new work lands here first.            | **Forbidden**.  PR only. | Permanent.                                |
+| `main`                                    | Tested, releasable baseline.  Only `dev` merges in, after testing.      | **Forbidden**.  PR only. | Permanent.                                |
+| `dev`                                     | Shared integration branch for untested work.  Feature branches merge here first. | PR only (by convention).  | Permanent.                                |
 | `release/v1.0`                            | LTS branch (first LTS).  Lives 24 months from v1.0.0 tag.                | **Forbidden**.  PR only. | Permanent until LTS retires; then archive. |
 | `release/v1.1`, `release/v1.2`, ...       | Future LTS branches once promoted.                                       | **Forbidden**.  PR only. | Permanent during their LTS window.         |
-| `release/v1.0-rc`, `release/v1.1-rc`, ... | Short-lived release-candidate branches.  Cut from `main` before tagging. | **Forbidden**.  PR only. | Delete after final tag lands.              |
-| `<gh-user>/<topic>`                       | Per-contributor feature / fix branches.                                  | OK on the contributor's fork. | Auto-deleted on PR merge.            |
+| `release/v1.0-rc`, `release/v1.1-rc`, ... | Short-lived release-candidate branches.  Cut from `dev` for stabilisation before the `dev` → `main` promotion + tag. | **Forbidden**.  PR only. | Delete after final tag lands.              |
+| `feat/<topic>`, `fix/<topic>`, `docs/<topic>`, ... | Feature / fix / doc branches.  Branch off `dev`, merge back into `dev` via PR (`--no-ff`).  Type prefix per the commit-message `<type>` set. | OK on the contributor's fork or branch. | Auto-deleted on PR merge.            |
 | `dependabot/...`                          | Bot-created dependency-bump branches.                                    | Bot push only.          | Auto-deleted on PR merge.                  |
 | `pre-1.0-archive/<tag>`                   | Frozen post-mortem snapshots of pre-1.0 tags.  Read-only.                | Read-only.              | Permanent.                                 |
 
 ### Branches that explicitly do NOT exist
 
-- `develop` / `dev` / `next` — `main` is always the next minor's
-  development target.  No separate integration branch.
+- `develop` / `next` — `dev` is the single shared integration
+  branch; we don't keep additional aliases for it.
 - `staging` / `qa` — verification is by Twister + the HiL runs in
-  `.github/workflows/nightly-*.yml`, not by a branch.
+  `.github/workflows/nightly-*.yml`, not by a dedicated branch.
+  `dev` is the integration branch; the `dev` → `main` promotion is
+  the gate that those verification runs guard.
 - Long-lived per-contributor `master` clones — fork-based PRs only.
 
 ## What lands where
 
+All new work lands on `dev` first (via a feature branch + PR); it
+reaches `main` only after testing, when `dev` is promoted at the
+release gate.
+
 | Change type                                 | Target branch                       | Required?                             |
 |---------------------------------------------|-------------------------------------|---------------------------------------|
-| Feature, refactor, ABI addition             | `main`                              | Always.                               |
-| Bug fix to current pre-release              | `main`                              | Always (pre-1.0; no LTS branches yet). |
-| Bug fix to active LTS (post-1.0)            | `main` first, then cherry-pick to `release/v<MAJOR>.<MINOR>` | Both — fix lands on `main`; the cherry-pick to LTS is the **backport PR**. |
-| Critical security fix to active LTS        | `release/v<MAJOR>.<MINOR>` directly, then forward-port to `main` | Either order; both must land. |
-| Doc-only change                             | `main`                              | Same PR rules as code.                |
-| CI workflow change                          | `main`                              | Requires `@alpCaner` review (CODEOWNERS `/.github/`). |
+| Feature, refactor, ABI addition             | `dev`                               | Always.  Promoted to `main` at the release gate. |
+| Bug fix to current pre-release              | `dev`                               | Always (pre-1.0; no LTS branches yet). |
+| Bug fix to active LTS (post-1.0)            | `dev` first, then cherry-pick to `release/v<MAJOR>.<MINOR>` | Both — fix lands on `dev` (and reaches `main` at the release gate); the cherry-pick to LTS is the **backport PR**. |
+| Critical security fix to active LTS        | `release/v<MAJOR>.<MINOR>` directly, then forward-port to `dev` | Either order; both must land. |
+| Doc-only change                             | `dev`                               | Same PR rules as code.                |
+| CI workflow change                          | `dev`                               | Requires `@alpCaner` review (CODEOWNERS `/.github/`). |
 
 ### Backport flow (post-1.0)
 
 ```
-1. Fix lands on main (PR_A, squash-merged).
+1. Fix lands on dev (PR_A, --no-ff merge), and reaches main when
+   dev is next promoted at the release gate.
 2. Open PR_B against release/v1.0 with the same commit
    cherry-picked.  Title prefix: "[backport v1.0]".
 3. PR_B description links PR_A.
@@ -118,6 +137,12 @@ main ────●───────●───────●────
 ## Merge rules
 
 ### PR requirements (gated by branch protection)
+
+The table below is gated server-side by branch protection on `main`
+and `release/*`.  The same review + CI gates also apply to PRs that
+merge a feature branch into `dev` (enforced by convention, since
+that is where work first lands); the `dev` → `main` promotion is a
+PR like any other and is held to the full `main` gate set.
 
 For both `main` and `release/*` branches:
 
@@ -134,7 +159,9 @@ For both `main` and `release/*` branches:
 
 ### Required CI checks
 
-Every PR targeting `main` or `release/*` must pass these workflows:
+Every PR targeting `dev`, `main`, or `release/*` must pass these
+workflows (on `dev` they catch problems before integration; on
+`main` / `release/*` they are enforced server-side):
 
 - `pr-static-analysis` — lints, clang-tidy, shellcheck.
 - `pr-doxygen` — zero warnings across `include/alp/*.h`.
@@ -154,17 +181,24 @@ hard gate.
 
 ### Merge method
 
-- **`main`**: **squash-and-merge** by default.  One PR = one
-  commit on `main` = one CHANGELOG entry.  Exception:
-  multi-§-step commit chains (e.g. the §C.15a..d HAL bring-up
-  batch where each opcode is a separate commit) merge as
-  **rebase-and-merge** so each step stays bisectable.  The
-  CODEOWNER approving the PR picks the method.
-- **`release/*`**: **cherry-pick from main + merge commit**.
+- **Feature branch → `dev`**: **merge commit with `--no-ff`** by
+  default.  The non-fast-forward merge keeps an auditable record of
+  every integrated branch on `dev`.  One PR = one feature branch =
+  one CHANGELOG entry.  Exception: multi-§-step commit chains (e.g.
+  the §C.15a..d HAL bring-up batch where each opcode is a separate
+  commit) keep their individual commits via the `--no-ff` merge so
+  each step stays bisectable.  The CODEOWNER approving the PR picks
+  whether to squash the branch first.
+- **`dev` → `main`** (the release gate): **merge commit with
+  `--no-ff`**, crossed only after the integrated work passes testing
+  (bench / hardware / CI).  This is the promotion that keeps `main`
+  a tested, releasable baseline; tags are then cut on `main`.
+- **`release/*`**: **cherry-pick from `main` + merge commit**.
   The cherry-pick should keep the original SHA's commit message
   prefixed with `(cherry picked from commit <sha>)` so the
   backport trail is auditable.
-- **Never**: plain merge commit on `main` (creates topology
+- **Never**: plain fast-forward merge that erases the branch
+  boundary on `dev` or `main` (creates topology
   noise + makes bisect harder).
 
 ### Commit-message style (enforced informally; pre-commit hint)
@@ -196,8 +230,8 @@ maintainer (or to whichever human ran the keyboard).
 - Fork-based or feature-branch pushes are unrestricted; CI
   runs on push for any branch.
 - Force-push to feature branches is fine while the PR is in
-  draft; once review starts, prefer additional commits
-  (squash happens at merge time).
+  draft; once review starts, prefer additional commits (the
+  branch is merged into `dev` with `--no-ff` at merge time).
 - Force-push to `main` / `release/*` is forbidden (server-side
   enforced).  If a bad merge lands, **revert via PR** rather
   than force-resetting.
@@ -228,6 +262,12 @@ required.
 The settings below are what the maintainer should configure under
 Repository Settings → Branches.  Documented here so an audit-trail
 exists; the live settings are the authoritative copy.
+
+Server-side branch protection is applied to `main` and `release/*`.
+`dev` is the shared integration branch: the PR + review + CI flow
+into `dev` is followed by convention (it's where work first lands
+and is integrated), and the `dev` → `main` promotion is itself a PR
+held to the full `main` gate set below.
 
 ### `main`
 
@@ -299,24 +339,27 @@ Same as `main` plus a stricter set:
 ## Hotfix flow
 
 If a critical fix needs to land on `release/v1.0` before its
-corresponding patch can sit on `main`:
+corresponding patch can sit on `dev` (and reach `main` at the next
+release gate):
 
 ```
 1. Cut a hotfix branch from release/v1.0:
-   git checkout -b alpCaner/hotfix-cve-123 release/v1.0
+   git checkout -b fix/hotfix-cve-123 release/v1.0
 
 2. Make the fix.  Cherry-pickable single commit if possible.
 
 3. PR_A → release/v1.0.  All gates required.
 
 4. After PR_A lands + v1.0.x is tagged, forward-port:
-   git checkout -b alpCaner/cve-123-forward main
+   git checkout -b fix/cve-123-forward dev
    git cherry-pick <PR_A's commit>
 
-5. PR_B → main.  Title prefix "[forward-port from release/v1.0]".
+5. PR_B → dev.  Title prefix "[forward-port from release/v1.0]".
 
 6. PR_B can land normally; CI may have evolved between
-   release/v1.0 and main, so the cherry-pick may need rebases.
+   release/v1.0 and dev, so the cherry-pick may need rebases.
+   The fix reaches main when dev is next promoted at the
+   release gate.
 ```
 
 Security backports follow this flow plus the embargo procedure

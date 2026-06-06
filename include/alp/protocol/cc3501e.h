@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -233,7 +233,9 @@ typedef enum {
  *  the radio state).  Sized at 16 bytes (one cache line on the
  *  M33) so the SPI reply fits in a single short envelope.
  *  Field-level meanings:
- *   - fw_version: same value as GET_VERSION returns.
+ *   - fw_version: the firmware *release* version the device reports
+ *     (its own semver from firmware-version.txt; tracked separately
+ *     from ALP_CC3501E_PROTOCOL_VERSION).  Same value GET_VERSION returns.
  *   - reset_cause: one of @ref alp_cc3501e_reset_cause_t.
  *   - role: one of @ref alp_cc3501e_role_t.
  *   - uptime_ms: time since power-on / last reset.

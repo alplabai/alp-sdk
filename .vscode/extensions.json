@@ -1,6 +1,6 @@
 {
     "//": [
-        "Recommended VS Code extensions for working on (or with) the ALP SDK.",
+        "Recommended VS Code extensions for working on (or with) the Alp SDK.",
         "Vendor-neutral by design — the SDK targets Alif / Renesas / NXP",
         "silicon, so we don't ship recommendations for any specific vendor's",
         "branded tooling (no Nordic nRF-Connect, no STM32 plugins, etc.)."

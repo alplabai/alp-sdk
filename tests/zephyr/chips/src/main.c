@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * Smoke tests for the v0.1 chip drivers (lsm6dso, ssd1306) and
@@ -1632,6 +1632,20 @@ ZTEST(alp_chips, test_da9292_set_voltage_range_validation)
     zassert_equal(da9292_set_voltage_mv(&ctx, DA9292_CH1, 100u), ALP_ERR_INVAL);
     /* Above the documented range. */
     zassert_equal(da9292_set_voltage_mv(&ctx, DA9292_CH1, 2000u), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_da9292_get_fault_pins)
+{
+    uint8_t flags = 0xAAu;
+
+    /* NULL out-pointer is the only hard-invalid argument. */
+    zassert_equal(da9292_get_fault_pins(NULL, NULL, NULL), ALP_ERR_INVAL);
+
+    /* Both pins NULL is legal (a board may wire neither): each bit
+     * reports deasserted, so the packed byte must be 0x00 -- never
+     * the bridge's 0xFF "no sample" sentinel. */
+    zassert_equal(da9292_get_fault_pins(NULL, NULL, &flags), ALP_OK);
+    zassert_equal(flags, 0x00u);
 }
 
 /* ------------------------------------------------------------------ */

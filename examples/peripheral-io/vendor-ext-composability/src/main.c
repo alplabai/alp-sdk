@@ -1,10 +1,10 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * vendor-ext-composability -- one pad, three ways.
  *
- * The ALP SDK's vendor-extension layer (<alp/ext/<vendor>/...>) is
+ * The Alp SDK's vendor-extension layer (<alp/ext/<vendor>/...>) is
  * ADDITIVE, never exclusive.  Claiming a vendor-specific feature on a
  * pad does NOT lock the pad out of the portable surfaces: the same pad
  * stays usable as a plain digital GPIO and as its portable E1M

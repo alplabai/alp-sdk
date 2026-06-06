@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file dsp.h
- * @brief ALP SDK digital-signal-processing chain abstraction.
+ * @brief Alp SDK digital-signal-processing chain abstraction.
  *
  * Composable filter / window / FFT chains run against in-RAM sample
  * buffers (standalone API) or, in a later release, inline with an

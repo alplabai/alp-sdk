@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file adc.h
- * @brief ALP SDK analog-to-digital + digital-to-analog converter abstraction.
+ * @brief Alp SDK analog-to-digital + digital-to-analog converter abstraction.
  *
  * One-shot ADC reads + DAC writes against studio-resolved channel
  * indices, plus DMA-backed continuous-acquisition streaming on SoMs

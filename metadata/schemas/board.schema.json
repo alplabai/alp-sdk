@@ -137,7 +137,7 @@
           "type": "string",
           "enum": ["error", "warn", "info", "debug", "trace"],
           "default": "info",
-          "description": "Default log level for every ALP SDK module that does not appear in `modules:` below."
+          "description": "Default log level for every Alp SDK module that does not appear in `modules:` below."
         },
         "modules": {
           "type": "object",
@@ -145,7 +145,7 @@
             "type": "string",
             "enum": ["error", "warn", "info", "debug", "trace", "off"]
           },
-          "description": "Per-module log-level overrides.  Keys match ALP SDK module names (e.g. `alp_iot`, `alp_inference`, `alp_audio`, `alp_security`, `alp_gpio`, ...).  Each value is the same log-level enum as the top-level `log_level`, plus `off` to silence the module entirely.  The loader emits CONFIG_<MODULE>_LOG_LEVEL_<LEVEL>=y per entry into the generated alp.conf."
+          "description": "Per-module log-level overrides.  Keys match Alp SDK module names (e.g. `alp_iot`, `alp_inference`, `alp_audio`, `alp_security`, `alp_gpio`, ...).  Each value is the same log-level enum as the top-level `log_level`, plus `off` to silence the module entirely.  The loader emits CONFIG_<MODULE>_LOG_LEVEL_<LEVEL>=y per entry into the generated alp.conf."
         }
       }
     },
@@ -341,6 +341,52 @@
       "type": "object",
       "additionalProperties": true,
       "description": "App-specific feature configuration that doesn't map cleanly onto the strict-typed blocks above.  Free-form map; the loader passes structured entries through to the right backend."
+    },
+
+    "models": {
+      "type": "array",
+      "description": "AI models to compile + package into .alpmodel (silicon-agnostic; backends derived from som.sku).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "source"],
+        "properties": {
+          "name":   { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
+          "source": { "type": "string", "description": "Path (relative to board.yaml) to the source model. `.tflite` compiles for CPU (TFLM) + Ethos-U (Vela) out of the box; `.onnx` requires a vendor toolchain (DRP-AI / DEEPX) on the build host and is otherwise recorded as a coverage skip." },
+          "spec":   { "type": "string", "description": "Optional $ref to an external model spec for large/shared models." },
+          "inputs": { "type": "array", "description": "Optional app-side input hints (e.g. layout)." },
+          "compile": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Per-backend compile configuration for NPU toolchains that need a per-model config + calibration the SDK cannot derive (DRP-AI, DEEPX). Keys are backend ids; a backend with no block here is recorded as a coverage skip (\"no compile config\") rather than guessed. Paths are relative to this board.yaml.",
+            "properties": {
+              "deepx_dxm1": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["config", "calibration"],
+                "properties": {
+                  "config":      { "type": "string", "description": "Path to the dxcom JSON config (per-model quantization/compile settings)." },
+                  "calibration": { "type": "string", "description": "Path to the calibration dataset directory for post-training quantization." }
+                }
+              },
+              "drpai": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["spec"],
+                "properties": {
+                  "spec": { "type": "string", "description": "Path to the DRP-AI TVM compile spec (model input/quant configuration)." }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "supported_boards": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "uniqueItems": true,
+      "description": "Board presets this project/example is verified to build for (e.g. [e1m-evk, e1m-x-evk]). Examples only; per ADR-0011 application firmware still targets one SoM family. Twister builds one scenario per entry. Defaults to the single `preset:` when omitted."
     }
   },
 
@@ -373,7 +419,12 @@
         "doc":         { "type": "string", "description": "One-line Doxygen @brief documenting what the pad is wired to on this board." },
         "active_low":  { "type": "boolean", "description": "Board convention -- pressed/asserted = 0 V.  Documentation only; the app passes ALP_GPIO_ACTIVE_LOW at alp_gpio_open() time if it wants auto-inversion." },
         "pull":        { "type": "string", "enum": ["up", "down", "none"], "default": "none", "description": "Physical pull-resistor present on the PCB (board-static fact).  Apps still pass the matching ALP_GPIO_PULL_{UP,DOWN} at alp_gpio_open() time -- this field documents what the board ships with, it does not drive the controller's internal pulls." },
-        "debounce_ms": { "type": "integer", "minimum": 0, "description": "RC-debounce time constant in milliseconds for the board's hardware debounce (mostly buttons).  Documentation hint; the app may add software debounce on top." }
+        "debounce_ms": { "type": "integer", "minimum": 0, "description": "RC-debounce time constant in milliseconds for the board's hardware debounce (mostly buttons).  Documentation hint; the app may add software debounce on top." },
+        "board_alias": {
+          "type": "string",
+          "pattern": "^BOARD_[A-Z0-9_]+$",
+          "description": "Portable cross-EVK alias (e1m-spec STANDARD.md §7.2 common role). gen_board_header.py emits `#define <board_alias> <macro>` into the generated routes header. The SAME board_alias MUST be declared on every board that exposes the role (enforced by tests/scripts/test_board_alias_parity.py)."
+        }
       }
     },
     "route_entry_list_gpio": {

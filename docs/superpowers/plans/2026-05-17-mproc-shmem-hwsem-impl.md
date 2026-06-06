@@ -112,7 +112,7 @@ Create `tests/zephyr/mproc/boards/native_sim_native_64.overlay`:
 
 ```dts
 /*
- * Copyright 2026 ALP Lab AB
+ * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
  * DT overlay for the alp_sdk.mproc.shmem_hwsem ZTEST scenario.

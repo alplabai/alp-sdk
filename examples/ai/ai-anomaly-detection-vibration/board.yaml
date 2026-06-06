@@ -1,16 +1,22 @@
 # board.yaml -- AI vibration-anomaly detection demo.
 #
-# Predictive-maintenance edge-AI pitch on the always-on Ethos-U:
-# read a 256-sample window from the EVK's LSM6DSO accelerometer,
-# feed it through a 1D-CNN anomaly model via TFLM, publish the
-# per-window score.  Same app source builds against the V2N's
-# DEEPX DX-M1 path when the SoM SKU is flipped.
+# Predictive-maintenance edge-AI pitch on the always-on NPU:
+# read a 256-sample window from the on-board ICM-42670 accelerometer
+# (populated on BOTH E1M EVK and E1M-X EVK), feed it through a 1D-CNN
+# anomaly model via TFLM, publish the per-window score.  Same app
+# source builds against the V2N's DEEPX DX-M1 path when the SoM SKU
+# is flipped.
+#
+# Why ICM-42670 instead of LSM6DSO: the ICM-42670-P is present on
+# BOTH EVK variants; the LSM6DSO is fitted only on the E1M EVK (AEN).
+# Using ICM-42670 lets the demo target both boards without hardware
+# qualification branching.
 #
 # Why the headline matters for customers: factory-floor vibration
-# monitoring without a cloud round-trip.  The model + LSM6DSO
-# sample loop both run on the on-die NPU + M55 -- battery-powered
-# nodes can run for months on a single charge because the heavy
-# compute lives behind the Ethos-U's clock-gated path.
+# monitoring without a cloud round-trip.  The model + ICM-42670
+# sample loop both run on the on-die NPU + Cortex core -- battery-
+# powered nodes can run for months on a single charge because the
+# heavy compute lives behind the NPU's clock-gated path.
 
 som:
   sku: E1M-AEN701           # E7's two Ethos-U55s give an always-on
@@ -18,10 +24,15 @@ som:
                              # add U85 for transformer-style anomaly
                              # models on the same source.
 
-preset: e1m-evk             # EVK preset populates the LSM6DSO at
-                            # I2C0 0x6A by default.
+preset: e1m-evk             # EVK preset populates the ICM-42670 at
+                            # I2C0 by default.
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
 
-# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+# E1M pads this app uses (resolved via BOARD_I2C_SENSORS at build time).
+# E1M EVK:   E1M_I2C0 (shared sensor + IO-expander + INA236 bus)
+# E1M-X EVK: E1M_X_I2C0 (on-board sensor + IO-expander + INA236 bus)
 pins:
   - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
 
@@ -43,10 +54,10 @@ cores:
     libraries:
       - tflite_micro
     peripherals:
-      - i2c                  # LSM6DSO link.
+      - i2c                  # ICM-42670 link.
 
 chips:
-  - lsm6dso                  # 6-axis IMU; we only use the accel here.
+  - icm42670                 # 6-axis IMU; we only use the accel here.
 
 diagnostics:
   log_level: info

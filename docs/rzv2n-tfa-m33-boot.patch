@@ -1,0 +1,42 @@
+diff --git a/plat/renesas/rz/common/v2n_common.mk b/plat/renesas/rz/common/v2n_common.mk
+index d9d90f5..82e55b8 100644
+--- a/plat/renesas/rz/common/v2n_common.mk
++++ b/plat/renesas/rz/common/v2n_common.mk
+@@ -20,7 +20,7 @@ PLAT_DDR_ECC					:= 0
+ PLAT_SYSTEM_SUSPEND				:= 0
+ RESET_TO_BL31					:= 1
+ INIT_UNUSED_NS_EL2				:= 1
+-PLAT_M33_BOOT_SUPPORT			:= 0
++PLAT_M33_BOOT_SUPPORT			:= 1
+ PLAT_EMMC_WRITE_ENABLE			:= 1
+ BOOT_TFA_USING_CM33				:= 0
+ 
+diff --git a/plat/renesas/rz/soc/v2n/plat_storage.c b/plat/renesas/rz/soc/v2n/plat_storage.c
+index c61eeec..1d111da 100644
+--- a/plat/renesas/rz/soc/v2n/plat_storage.c
++++ b/plat/renesas/rz/soc/v2n/plat_storage.c
+@@ -15,8 +15,11 @@
+ #include <io_sddrv.h>
+ #include <lib/mmio.h>
+ #include <tools_share/firmware_image_package.h>
+-#if PLAT_SYSTEM_SUSPEND
++#if (PLAT_SYSTEM_SUSPEND || PLAT_M33_BOOT_SUPPORT)
++/* plat_tbbr_img_def.h defines BL22_IMAGE_ID, needed by the M33 boot path too */
+ #include <plat_tbbr_img_def.h>
++#endif
++#if PLAT_SYSTEM_SUSPEND
+ #include <io_xspidrv.h>
+ #endif /* PLAT_SYSTEM_SUSPEND */
+ 
+@@ -180,9 +183,9 @@ static const struct plat_io_policy emmc_bl22_image_policy = {
+ 	&open_emmcdrv
+ };
+ static const struct plat_io_policy spirom_bl22_image_policy = {
+-	&xspidrv_dev_handle,
++	&memdrv_dev_handle,
+ 	(uintptr_t) &spirom_bl22_image_spec,
+-	&open_xspidrv
++	&open_memmap
+ };
+ static const struct plat_io_policy sd_bl22_image_policy = {
+ 	&sddrv_dev_handle,

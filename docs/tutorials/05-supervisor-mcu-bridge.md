@@ -13,8 +13,12 @@ companion GD32G553 because they don't fit on the Renesas RZ/V2N
 pinmux.  Per the 2026-05-12 schematic decision, **all eight E1M
 PWM channels are GD32-driven**, along with the encoder bank,
 the ADC + DAC bank, the camera-LDO enables, the Murata Wi-Fi/BT
-REG_ON pins, the OPTIGA reset, and the cached DA9292 PMIC status
-forwarder.
+REG_ON pins, and the OPTIGA reset.  (The DA9292 fault pins do NOT
+reach the GD32 on this SoM revision -- `DA9292_INT`/`DA9292_TW`
+land on Renesas `P37`/`P36`, read directly by the host via
+`da9292_get_fault_pins()`; register-level PMIC status comes over
+`BRD_I2C` via `da9292_get_status()`.  The bridge's 0x40 opcode
+answers the `0xFF` sentinel until a HW rev wires the nets across.)
 
 For ordinary application code, none of that surfaces -- callers
 use `<alp/pwm.h>`, `<alp/adc.h>`, `<alp/counter.h>` etc. with the
@@ -49,7 +53,7 @@ major.
 | 0x10/11 | `gd32g553_gpio_read/write`        | Masked GD32-side GPIO access                  |
 | 0x20/21 | `gd32g553_pwm_set/get`            | E1M PWM0..PWM7 control (all GD32-routed)      |
 | 0x30    | `gd32g553_adc_read`               | E1M ADC0..ADC7 samples (mV, firmware-averaged)|
-| 0x40    | `gd32g553_da9292_status_forward`  | Cached DA9292 PMIC status byte                |
+| 0x40    | `gd32g553_da9292_status_forward`  | `0xFF` sentinel this HW rev (no DA9292 net reaches the GD32); direct pin read via `da9292_get_fault_pins()`, register status via `da9292_get_status()` |
 | 0x50/51 | `gd32g553_dac_set/get`            | E1M DAC0..DAC1 setpoint (mV) -- protocol v0.2 |
 | 0x60/61 | `gd32g553_qenc_read/reset`        | E1M ENC0..ENC3 accumulated count -- v0.2      |
 | 0x70    | `gd32g553_counter_read`           | Free-running counter tick value -- v0.2       |

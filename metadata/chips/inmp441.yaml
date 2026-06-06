@@ -1,4 +1,4 @@
-# ALP SDK chip manifest: InvenSense INMP441 MEMS microphone.
+# Alp SDK chip manifest: InvenSense INMP441 MEMS microphone.
 schema_version:   1
 chip_id:          inmp441
 driver_status:    complete

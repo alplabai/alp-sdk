@@ -9,7 +9,7 @@ Camera variant).
 | Family             | SKUs                          | Renesas part            | LPDDR4X         | eMMC                       | Companion accelerator   |
 |--------------------|-------------------------------|-------------------------|-----------------|----------------------------|--------------------------|
 | **E1M-X V2N**      | `E1M-V2N101`, `E1M-V2N102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit    | —                        |
-| **E1M-X V2N-M1**   | `E1M-V2M101`, `E1M-V2M102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit    | DeepX DX-M1 (25 TOPS)    |
+| **E1M-X V2N-M1**   | `E1M-V2M101`, `E1M-V2M102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit    | DEEPX DX-M1 (25 TOPS)    |
 
 Authoritative per-SKU detail and the silicon stack live in
 [`e1m-spec` Annex A.2 / A.3](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#a2-e1m-x-v2n-family-renesas-rzv2n).
@@ -26,7 +26,7 @@ CPUs:
 | Renesas internal **Cortex-M33** @ 200 MHz | inside `R9A09G056N44GBG#AC0`     | Application-level real-time work (paired with the four A55 cores via the IPC). |
 | GigaDevice **GD32G553** @ 216 MHz         | separate IC on the SoM           | Supervisory: PMIC sequencing alongside `DA9292`, on-module supervisory I/O, low-power-state orchestration. |
 
-The ALP SDK's V2N backend talks to the **Renesas internal M33**
+The Alp SDK's V2N backend talks to the **Renesas internal M33**
 through the standard Zephyr / Yocto path; the supervisor `GD32G553`
 runs SoM-internal firmware and is not directly addressable from
 application code.  Porting docs that mention "the M33" need to be
@@ -41,7 +41,7 @@ versus the standard's max are:
 - **PCIe** — V2N silicon supports PCIe 3.0 ×2 lanes.  E1M-X exposes
   4 lanes per controller; lanes 2 and 3 of `PCIE0_*` (and all of
   `PCIE1_*`) are NC on this family.
-- **PCIe sharing on V2N-M1** — the on-module DeepX DX-M1 sits behind
+- **PCIe sharing on V2N-M1** — the on-module DEEPX DX-M1 sits behind
   `PCIE0` internally, so external `PCIE0_*` is functionally a bridge
   share, not an independent ×4.
 - **Ethernet** — both `ETH0_*` and `ETH1_*` are routed and each goes
@@ -74,7 +74,7 @@ V2N-M1 adds:
 
 | Role | Part |
 |---|---|
-| Companion AI accelerator | DeepX `DX-M1` (PCIe-attached, 25 TOPS) |
+| Companion AI accelerator | DEEPX `DX-M1` (PCIe-attached, 25 TOPS) |
 | DX-M1 memory | 2 × LPDDR5X |
 | DX-M1 storage | SPI NAND flash |
 
@@ -87,15 +87,16 @@ SoM column in `docs/os-support-matrix.md` has somewhere to point.
 
 ## Yocto BSP integration
 
-The V2N + V2N-M1 Yocto build is rooted on the **Renesas RZ/V2N AI
-SDK 7.10** -- a free download from My Renesas, no NDA for the
-standard build path.  Setup recipe (extract tarball, add the four
-`meta-rz-features/*` sublayers, build `core-image-weston` against
-`MACHINE=rzv2n-evk`) lives in
-[`yocto/meta-alp/README.md`](../../yocto/meta-alp/README.md).
-`meta-alp`'s `e1m-x-v2n.conf` inherits from Renesas's stock
-`rzv2n-evk` MACHINE; board deltas are TBD per the user-supplied
-HW config writeup.
+The V2N + V2N-M1 Yocto build rides on the **Renesas RZ/V2N AI SDK
+(platform 7.1) on BSP v6.30** (`RTK0EF0189F06300SJ`, linux-renesas
+6.1.141-cip43) -- obtained from Renesas under your own account and
+licence; alp-sdk does not redistribute it.  The full build flow
+(extract the Source Code package, `bitbake-layers add-layer` the
+canonical set, build against the carrier MACHINE) lives in
+[`meta-alp-sdk/README.md`](../../meta-alp-sdk/README.md).
+`meta-alp-sdk`'s `e1m-v2n101-a55.conf` derives from Renesas's stock
+`rzv2n-evk` MACHINE; carrier deltas land via the DT patches in
+`meta-alp-sdk/recipes-kernel/linux/`.
 
 ## DRP-AI inference toolchain
 
@@ -109,7 +110,7 @@ different licenses.
   [`vendors/renesas-rzv2n/rzv_drp-ai_tvm/`](rzv_drp-ai_tvm/);
   upstream <https://github.com/renesas-rz/rzv_drp-ai_tvm>.
 - **Runtime (`libdrpai`)** -- runs on the V2N, shipped by the
-  `meta-rz-drpai` sublayer in the Renesas AI SDK 7.10 BSP.  The
+  `meta-rz-drpai` sublayer in the Renesas AI SDK BSP v6.30.  The
   alp-sdk's `<alp/inference.h>` Yocto backend (planned for v0.4)
   links against this via the target sysroot; no separate
   per-app pkg-config plumbing.

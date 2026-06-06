@@ -1,4 +1,4 @@
-# Getting started with the ALP SDK
+# Getting started with the Alp SDK
 
 This walkthrough takes you from "git clone" to a working
 `gpio-button-led` build under `native_sim`, then onto real
@@ -160,9 +160,9 @@ What the flags mean:
 
 - `-b native_sim/native/64` — Zephyr's POSIX simulator on a 64-bit
   host.  No silicon needed; runs as a native process on Linux /
-  macOS / WSL.  (Native Windows: use `west alp-build -b native_sim/native/32`
-  with the MSVC-compatible toolchain, or run the 64-bit variant
-  through WSL.)
+  macOS / WSL.  Upstream Zephyr's `native_sim` is Linux/macOS only;
+  on native Windows there is no `native_sim` target — run it through
+  WSL2 (Ubuntu).
 - `alp-sdk/examples/peripheral-io/gpio-button-led` — the application directory.
   Each example under `examples/` ships a `board.yaml` + an empty
   `prj.conf` + a CMakeLists.txt that invokes the loader at
@@ -229,12 +229,15 @@ SDK-level; the underlying primitives (`alp_gpio_*`) are in
 Every wrapped peripheral has a corresponding example:
 
 ```bash
-for ex in pwm-led-fade adc-voltmeter i2c-scanner spi-loopback \
-          uart-echo uart-rx-ringbuf counter-alarm rtc-clock wdt-feed \
-          can-loopback i2s-tone qenc-readout; do
+for ex in peripheral-io/pwm-led-fade peripheral-io/adc-voltmeter \
+          peripheral-io/i2c-scanner peripheral-io/spi-loopback \
+          peripheral-io/uart-echo peripheral-io/uart-rx-ringbuf \
+          peripheral-io/can-loopback peripheral-io/qenc-readout \
+          power-timing/counter-alarm power-timing/rtc-clock \
+          power-timing/wdt-feed audio/i2s-tone; do
     west build -b native_sim/native/64 alp-sdk/examples/$ex \
-        -d build/$ex
-    west build -d build/$ex -t run
+        -d build/$(basename $ex)
+    west build -d build/$(basename $ex) -t run
 done
 ```
 

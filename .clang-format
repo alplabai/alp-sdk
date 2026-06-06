@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# clang-format style for the ALP SDK.
+# clang-format style for the Alp SDK.
 # Conservative LLVM/Zephyr-leaning baseline; refine in follow-ups.
 ---
 Language: Cpp

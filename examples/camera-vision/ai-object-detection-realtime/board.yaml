@@ -22,7 +22,7 @@ som:
   # on-module via PCIe).  V2M101's `capabilities:` block declares
   # drp_ai: true + deepx_dx: true -- both dispatchers compile in;
   # apps pick per-handle at runtime via
-  # alp_inference_open(.backend = DEEPX_DX or DRPAI).
+  # alp_inference_open(.backend = DEEPX_DXM1 or DRPAI).
   sku: E1M-V2M101
 
 preset: e1m-evk

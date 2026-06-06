@@ -70,7 +70,12 @@ jobs:
               echo "::warning::clang-format-diff not found; skipping diff check"
               exit 0
           fi
+          # vendors/** and zephyr/** are excluded: those subtrees keep
+          # their UPSTREAM project's style (GigaDevice firmware library,
+          # Zephyr/Renesas-FSP drivers) so they stay diffable against
+          # their sources -- our .clang-format does not govern them.
           git diff -U0 ${{ steps.base.outputs.ref }} -- '*.c' '*.h' \
+              ':!vendors/**' ':!zephyr/**' \
               | python3 "$DIFF_TOOL" -p1 \
               | tee clang-format-diff.txt
           if [ -s clang-format-diff.txt ]; then

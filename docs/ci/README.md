@@ -2,7 +2,7 @@
 
 # docs/ci/
 
-CI policy + auxiliary documentation for the ALP SDK.
+CI policy + auxiliary documentation for the Alp SDK.
 
 The actual GitHub Actions workflow files live at
 [`/.github/workflows/`](../../.github/workflows/) (where GitHub
@@ -27,7 +27,7 @@ reference.
 
 | Workflow                                                                       | Target version | Notes                                                                                              |
 |--------------------------------------------------------------------------------|----------------|----------------------------------------------------------------------------------------------------|
-| `nightly-yocto-hil.yml`                                                        | v0.4           | HW-in-loop on a real V2N or i.MX 93 EVK running a meta-alp Yocto image.  Runner label `hil-yocto`.  Flips every 🟡 Yocto row in `docs/test-plan.md` to ✅ on a green run. |
+| `nightly-yocto-hil.yml`                                                        | v0.4           | HW-in-loop on a real V2N or i.MX 93 EVK running a meta-alp-sdk Yocto image.  Runner label `hil-yocto`.  Flips every 🟡 Yocto row in `docs/test-plan.md` to ✅ on a green run. |
 | `nightly-v2n-m1-hil.yml`                                                       | v0.4           | HW-in-loop on a real V2N + DEEPX DX-M1 dev kit.  Runner label `hil-v2n-m1`.                        |
 | `release-abi-snapshot.yml`                                                     | v1.0           | Diffs `include/alp/**` ABI against the previous tag's snapshot; fails on breaking changes after v1.0. |
 | `release-publish-doxygen.yml`                                                  | v1.0           | Pushes Doxygen HTML to `gh-pages` on every release tag.                                            |

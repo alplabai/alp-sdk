@@ -1,10 +1,14 @@
 # Verification status
 
-> ⚠️ **`v0.5` is `[UNTESTED]` end-to-end.  Nothing has touched real
-> silicon yet.**
+> ⚠️ **`v0.6` carries the SDK's first silicon evidence — and only on
+> one board.**  The E1M-X **V2N** bench verified the GD32
+> supervisor-bridge stack end-to-end (link + soak + A/B OTA + analog
+> loopback; see the v0.6.0 section of
+> [`docs/test-plan.md`](test-plan.md)).  Every **other** family (AEN,
+> i.MX 93, V2M/DEEPX) remains `[UNTESTED]` on real hardware.
 
 This page is the single source of truth for "what's been silicon-
-verified in the ALP SDK as of today".  It complements:
+verified in the Alp SDK as of today".  It complements:
 
 - `metadata/chips/<name>.yaml` -- per-chip `verification:` block.
 - `metadata/library-profiles/<name>/hw-backends.yaml` -- per-
@@ -13,12 +17,14 @@ verified in the ALP SDK as of today".  It complements:
 - `docs/test-plan.md` -- the HiL ledger that flips rows to ✅ as
   evidence lands.
 
-## Where v0.5 actually sits
+## Where v0.6 actually sits
 
 | Layer | Status | What "passes" today |
 |---|---|---|
 | Public API (`<alp/*.h>`) | `[ABI-EXPERIMENTAL]` | Doxygen-clean, ABI snapshot tracked, builds on every supported target |
-| Chip drivers (`chips/<name>/`) | `[UNTESTED]` | Build + NULL-arg-guard ZTEST on `native_sim/native/64` |
+| GD32 supervisor bridge (`firmware/gd32-bridge/` + `chips/gd32g553/`) | `[VERIFIED]` on V2N silicon | fw v0.2.9 / protocol v0.7: functional suite 26/26, 20-row HIL soak 253/253, A/B OTA e2e, Tier-B loopback 5/6 (qenc = carrier wiring, issue #85) |
+| CM33↔GD32 SCI7 SPI link (interrupt path) | `[VERIFIED]` on V2N silicon | Sustained bidirectional soak, zero CRC errors (DMA fast path stays default-off — issue #84) |
+| Chip drivers (`chips/<name>/`, all others) | `[UNTESTED]` | Build + NULL-arg-guard ZTEST on `native_sim/native/64` |
 | Library bindings (`metadata/library-profiles/<name>/`) | `[UNTESTED]` | Schema validated; emission unit-tested in `tests/scripts/test_alp_project.py`; build-time linkable for Zephyr-native libs |
 | Per-SoM `capabilities:` blocks | `[PARTIAL]` | Populated from datasheet readings; some fields marked `# TBD` for items pending datasheet verification |
 | Per-NPU TFLM driver gates (`CONFIG_ALP_TFLM_ETHOS_U85/U65/U55`) | `[UNTESTED]` | Kconfig-reachable; no Vela-compiled model has actually been dispatched yet |
@@ -39,25 +45,33 @@ verified in the ALP SDK as of today".  It complements:
   the contract we'll honour once HiL runs.
 - **You can write portable apps.**  Examples build on `native_sim`
   today; they'll port to real hardware as HiL evidence accumulates.
-- **You should NOT ship production firmware against v0.5 unless
-  you've done your own HiL.**  Register addresses, timing values,
-  init sequences -- none have been silicon-validated.
+- **The V2N GD32-bridge stack is bench-proven.**  The v0.6 silicon
+  campaign verified the supervisor link, OTA, and analog paths on
+  the real board -- the per-row evidence lives in
+  [`docs/test-plan.md`](test-plan.md).
+- **You should NOT ship production firmware against the other
+  families (AEN, i.MX 93, V2M) unless you've done your own HiL.**
+  Their register addresses, timing values, init sequences have not
+  been silicon-validated.
 
 ## Verification roadmap
 
-Verification rolls out per-SKU + per-chip from v0.6 onward.  The
-order is driven by the E1M-AEN701 EVK availability + the test-
-plan ledger in `docs/test-plan.md`:
+Verification rolls out per-SKU + per-chip as benches come online
+(the roadmap is a cherry-pick backlog -- releases tag whatever's
+ready).  The V2N bench came online first, so the original
+AEN-first order inverted:
 
-1. **v0.6** -- E1M-AEN701 bring-up.  Verifies the AEN-family
+1. **v0.6 (done)** -- E1M-V2N101 bring-up.  Verified the GD32
+   bridge stack (gd32g553 host driver + firmware: link, soak,
+   A/B OTA, DAC/ADC/capture loopback) + the CM33 AMP link +
+   the V2N Yocto BSP bake/boot leg.
+2. **next** -- E1M-AEN701 bring-up.  Verifies the AEN-family
    chip drivers (the on-module ones: act8760, da9292,
    clk_5l35023b, etc.) + a representative sample of the §D.AI
    chips (st7789, sh1106, the camera SCCB path).
-2. **v0.7** -- E1M-V2N101 bring-up.  Verifies the V2N family +
-   the GD32 bridge (gd32g553, gd32_swd, cau, tmu_*).
-3. **v0.8** -- E1M-V2M101 bring-up.  Adds DEEPX DX-M1.
-4. **v0.9** -- E1M-NX9101 bring-up.  Adds Ethos-U65.
-5. **v1.0** -- All four families verified.  `[UNTESTED]` tags
+3. **then** -- E1M-V2M101 (adds DEEPX DX-M1) and E1M-NX9101
+   (adds Ethos-U65), bench-availability permitting.
+4. **v1.0** -- All four families verified.  `[UNTESTED]` tags
    flip to `[VERIFIED]` per chip as evidence lands.
 
 ## Where to find the per-driver status
@@ -67,7 +81,7 @@ plan ledger in `docs/test-plan.md`:
 - Public header: look for `@par Verification status` near the
   top of `include/alp/<surface>.h` or `include/alp/chips/<name>.h`.
 
-## What "passes" for a v0.5-style smoke
+## What "passes" for a native_sim-only smoke (the pre-HiL bar)
 
 The ZTEST suite (`tests/zephyr/`) catches:
 
@@ -88,9 +102,11 @@ The ZTEST suite does NOT catch:
 - An Ethos-U / DRP-AI / DEEPX dispatch that returns nonsense.
 - A capacitor missing on the schematic.
 
-That's all v0.6+ HiL territory.
+That's HiL territory -- exactly the class the v0.6 V2N campaign
+caught for real (an analog subsystem dead until its internal
+voltage-reference enable, seven OTA silicon bugs, a capture-wrap
+arithmetic slip -- none visible to native_sim).
 
 ## Questions
 
-`#untested-v05` in the community forum; or open an issue with
-the `verification` label.
+Open an issue with the `verification` label.

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# tests/bench/ -- microbenchmark suite for the ALP SDK public surface.
+# tests/bench/ -- microbenchmark suite for the Alp SDK public surface.
 # Opt-in via ALP_BUILD_BENCH=ON at the top-level cmake configure.
 # See tests/bench/README.md for the design + how to add new cases.
 #

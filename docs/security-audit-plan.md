@@ -47,7 +47,7 @@ The auditor reviews the TF-M build flow (`board.yaml`
 `security.psa.tfm: true` -> orchestrator emits
 `build/sysbuild/tfm/tfm.conf` -> sysbuild builds the TF-M secure
 image as a child image) and the PSA <-> OPTIGA Trust M bridge driver
-at `src/security/optiga_trust_m_bridge.c`.
+at `chips/optiga_trust_m/optiga_trust_m.c`.
 
 ## Out of scope (separate engagements)
 

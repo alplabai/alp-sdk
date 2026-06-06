@@ -3,22 +3,44 @@
 sample:
   name: spi-master
   description: |
-    Per-peripheral example for SPI master.  Send a known byte
-    pattern via write / transceive / read against E1M_SPI1.
+    Per-peripheral example for SPI master.  Send a known byte pattern
+    via write / transceive / read on BOARD_SPI_ARDUINO.  Builds on both
+    EVKs: E1M EVK uses E1M_SPI1; E1M-X EVK uses E1M_X_SPI1.
     Contrasts with examples/peripheral-io/spi-loopback (which exercises both
     ends on the same chip).
 
 tests:
-  alp_sdk.example.spi_master:
+  alp_sdk.example.spi_master.e1m_x_evk:
     platform_allow:
       - native_sim
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     tags:
       - alp-sdk
       - example
       - spi
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[spi-master\\] done"
+  alp_sdk.example.spi_master.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - spi
+      - aen
     harness: console
     harness_config:
         type: one_line
