@@ -124,7 +124,7 @@
 
 	backlight: backlight {
 		compatible = "pwm-backlight";
-		pwms = <&gpt1_0 0 200000>;
+		pwms = <&gpt1_2 0 200000>;
 		power-supply = <&reg_3p3v>;
 		brightness-levels = <0 4 8 16 32 64 128 255>;
 		default-brightness-level = <6>;
@@ -133,15 +133,23 @@
 
 /* Display backlight: the LED boost driver lives ON the SoM (BL_LED_A/K
  * to the module edge); Renesas PA5 = BL_PWM drives its CNTRL input.
- * PA5 func 9 = GTIOC10B. NOTE the second GPT bank's units are numbered
- * GPT10..GPT17 (there is no GPT8/9 -- vendor device header
- * R9A09G056N gpt_iodefine.h), so GTIOC10B = unit base 0x13020000 =
- * &gpt1_0, B-side output (hence channel_B). 5 kHz PWM.
- * Silicon-verified 2026-06-05: driving gpt@13020200 instead (the
- * "GTIOC8-15" misreading) ran GPT12 with perfect registers and a dead
- * PA5 ball.
+ * PA5 func 9 = GTIOC10B. GPT naming trap, the full story:
+ *   - GPT INSTANCES are unit-channel composite: GPT00-07 (unit 0,
+ *     0x13010000) and GPT10-17 (unit 1, 0x13020000 + ch * 0x100).
+ *     "GPT12" = unit 1 channel 2. There is no GPT08/09 instance.
+ *   - PIN FUNCTIONS GTIOCnA/B are numbered FLAT n = 0..15 across both
+ *     units (HW manual Table 1.2-3 has GTIOC8/9, never GTIOC16/17;
+ *     Table 5.7-12 lists unit-1's own pins as GTIOC8A..GTIOC15B).
+ *   - Therefore GTIOC10B = unit 1 channel 2 = gpt@13020200 = &gpt1_2,
+ *     B-side output (hence channel_B). 5 kHz PWM.
+ * The FSP iodefine name "R_GPT10" (= 0x.3020000) is the composite
+ * INSTANCE name, not the pin-function index -- do not "fix" this back
+ * to &gpt1_0. Silicon-verified 2026-06-06: GPT12 PWM observed at the
+ * PA5 die pad via PIN-register sampling (IEN on, ~50% duty); unit-1
+ * ch-0 (&gpt1_0) runs identical register images into the unmuxed
+ * GTIOC8B function and leaves PA5 dead.
  */
-&gpt1_0 {
+&gpt1_2 {
 	pinctrl-0 = <&backlight_pwm_pins>;
 	pinctrl-names = "default";
 	channel = "channel_B";
