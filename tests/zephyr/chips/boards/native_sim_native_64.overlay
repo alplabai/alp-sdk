@@ -43,6 +43,14 @@
                 compatible = "alp,fake-da9292";
                 reg = <0x1e>;
             };
+            fake_act8760_add1: fake_act8760@25 {
+                compatible = "alp,fake-act8760";
+                reg = <0x25>;
+            };
+            fake_act8760_add2: fake_act8760@26 {
+                compatible = "alp,fake-act8760";
+                reg = <0x26>;
+            };
         };
     };
 

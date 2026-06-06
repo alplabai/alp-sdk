@@ -1590,6 +1590,82 @@ ZTEST(alp_chips, test_act8760_calls_reject_uninitialised)
     zassert_equal(act8760_rail_get_vset(&ctx, ACT8760_RAIL_BUCK1, &v), ALP_ERR_NOT_READY);
 }
 
+#if DT_NODE_EXISTS(DT_NODELABEL(fake_act8760_add1))
+
+ZTEST(alp_chips, test_act8760_probe_both_slaves)
+{
+    fake_act8760_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    act8760_t  pmic;
+    zassert_equal(act8760_init(&pmic, bus), ALP_OK);
+    act8760_deinit(&pmic);
+}
+
+ZTEST(alp_chips, test_act8760_vset_offsets_per_verified_map)
+{
+    /* Spot-check the three architecturally distinct cases:
+     * Buck1 on ADD1, Buck7 on ADD2 (NOT with Buck1-6!), LDO3 as the
+     * second LDO of the LDO53 dual tile. */
+    fake_act8760_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    act8760_t  pmic;
+    zassert_equal(act8760_init(&pmic, bus), ALP_OK);
+
+    /* Buck1: ADD1 reg 0x42.  Seed EN_OutPD (bit7) high; the write
+     * must preserve it (read-modify-write). */
+    fake_act8760_set_reg(0x25, 0x42, 0x80);
+    zassert_equal(act8760_rail_set_vset(&pmic, ACT8760_RAIL_BUCK1, 60), ALP_OK);
+    zassert_equal(fake_act8760_get_reg(0x25, 0x42), 0x80 | 60,
+                  "VSET write must land at ADD1 0x42 and preserve bit7");
+    uint8_t v = 0;
+    zassert_equal(act8760_rail_get_vset(&pmic, ACT8760_RAIL_BUCK1, &v), ALP_OK);
+    zassert_equal(v, 60, "get must mask off the control bit");
+
+    /* Buck7: ADD2 reg 0x02 -- the old guessed table had it at the
+     * wrong offset; this is the cross-slave regression lock. */
+    zassert_equal(act8760_rail_set_vset(&pmic, ACT8760_RAIL_BUCK7, 0x30), ALP_OK);
+    zassert_equal(fake_act8760_get_reg(0x26, 0x02), 0x30);
+
+    /* LDO3: ADD2 reg 0x47 (second LDO of the LDO53 tile); 6-bit
+     * field; RANGE bit (bit7) must survive a write. */
+    fake_act8760_set_reg(0x26, 0x47, 0x80);
+    zassert_equal(act8760_rail_set_vset(&pmic, ACT8760_RAIL_LDO3, 0x2A), ALP_OK);
+    zassert_equal(fake_act8760_get_reg(0x26, 0x47), 0x80 | 0x2A);
+    zassert_equal(act8760_rail_get_vset(&pmic, ACT8760_RAIL_LDO3, &v), ALP_OK);
+    zassert_equal(v, 0x2A);
+
+    /* LDO width guard: 7-bit values are invalid for 6-bit LDO fields. */
+    zassert_equal(act8760_rail_set_vset(&pmic, ACT8760_RAIL_LDO1, 0x40), ALP_ERR_INVAL);
+    act8760_deinit(&pmic);
+}
+
+ZTEST(alp_chips, test_act8760_status_decode_matches_mstr_sheet)
+{
+    fake_act8760_reset();
+    alp_i2c_t *bus = chips_test_bus();
+    act8760_t  pmic;
+    zassert_equal(act8760_init(&pmic, bus), ALP_OK);
+
+    /* TWARN (bit5) | VSYSWARN (bit1) = 0x22 -- under the OLD wrong
+     * decode this read as SYSDAT|nothing; under the verified map it
+     * is thermal_warning + vsys_warning. */
+    fake_act8760_set_reg(0x25, 0x00, 0x22);
+    act8760_status_t st;
+    zassert_equal(act8760_get_status(&pmic, &st), ALP_OK);
+    zassert_true(st.thermal_warning);
+    zassert_true(st.vsys_warning);
+    zassert_false(st.vsys_stat);
+    zassert_false(st.vin_pok_ov);
+    zassert_false(st.rom_stat);
+    zassert_false(st.wd_alert);
+    zassert_false(st.pb_assert);
+    zassert_false(st.pb_deassert);
+    zassert_equal(st.raw, 0x22);
+    act8760_deinit(&pmic);
+}
+
+#endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_act8760_add1)) */
+
 /* ------------------------------------------------------------------ */
 /* da9292 -- DA9292 secondary PMIC on V2N BRD_I2C                     */
 /* ------------------------------------------------------------------ */

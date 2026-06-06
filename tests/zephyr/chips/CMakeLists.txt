@@ -16,4 +16,5 @@ target_sources(app PRIVATE
     src/fake_ssd1306.c
     src/fake_bme280.c
     src/fake_da9292.c
+    src/fake_act8760.c
 )

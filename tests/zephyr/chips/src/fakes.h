@@ -77,6 +77,11 @@ void fake_da9292_log_at(uint8_t i, uint8_t *reg, uint8_t *val);
 /** Reset all registers to the DA9292-AROVx power-on defaults. */
 void fake_da9292_reset(void);
 
+/* fake_act8760.c -- ACT88760 primary PMIC, two slaves (0x25 + 0x26). */
+uint8_t fake_act8760_get_reg(uint8_t addr_7bit, uint8_t reg);
+void    fake_act8760_set_reg(uint8_t addr_7bit, uint8_t reg, uint8_t val);
+void    fake_act8760_reset(void);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
