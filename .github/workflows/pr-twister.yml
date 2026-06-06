@@ -142,13 +142,22 @@ jobs:
             --inline-logs \
             --no-detailed-test-id
 
-      # Persist the twister output regardless of pass/fail so the
-      # PR comment can link to per-test logs.
-      - name: Upload twister-out artefact
+      # Persist the twister REPORTS (json/xml/log) regardless of
+      # pass/fail.  Do NOT upload the whole twister-out/ tree: the
+      # per-test build directories grew past 2 GB with the v0.6
+      # example/test count and actions/upload-artifact@v4 dies with
+      # a Node "JavaScript heap out of memory" mid-upload (first hit
+      # on PR #88 -- the run was 721/721 green and the job still
+      # FAILED in this step).  Failing-test build logs are already
+      # in the job output via --inline-logs.
+      - name: Upload twister reports artefact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: twister-out
-          path: zephyrproject/twister-out/
+          path: |
+            zephyrproject/twister-out/*.json
+            zephyrproject/twister-out/*.xml
+            zephyrproject/twister-out/*.log
           retention-days: 14
           if-no-files-found: ignore
