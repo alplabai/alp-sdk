@@ -998,7 +998,7 @@ ZTEST(alp_chips, test_fake_bme280_read_raw_decodes_msb_first)
     /* Pressure raw block 0x65 0x5A 0xC0 → (0x65<<12)|(0x5A<<4)|(0xC0>>4)
      * = 0x655AC = 415148 (canonical Bosch example). */
     zassert_equal(raw.pressure_raw, 415148);
-    /* Temperature raw block 0x7E 0xF5 0x00 → 0x7EF50 = 519888. */
+    /* Temperature raw block 0x7E 0xED 0x00 → 0x7EED0 = 519888. */
     zassert_equal(raw.temperature_raw, 519888);
     /* Humidity 0x6F 0xF0 → 0x6FF0 (synthetic). */
     zassert_equal(raw.humidity_raw, 0x6FF0u);
