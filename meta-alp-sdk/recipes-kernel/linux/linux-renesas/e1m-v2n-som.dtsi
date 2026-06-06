@@ -198,6 +198,23 @@
 	};
 };
 
+/* MCPU DMAC (DMAC0 @ 0x11400000) is OWNED BY THE CM33 firmware (the
+ * GD32 supervisor link's SCI7 DMA path drives it through the rzv FSP
+ * r_dmac_b).  The upstream SoC dtsi enables it for Linux, whose
+ * rz-dmac driver then binds the unit, claims all 8 channel interrupts
+ * and resets/owns the channels under the CM33's feet -- the same AMP
+ * double-ownership class as the port-9 SD1_CD lesson.  Silicon
+ * 2026-06-06: rz-dmac bound + 8 GIC IRQs claimed on the live system
+ * while the CM33 FSP was arming the same channels.  The A55 has four
+ * other DMAC units; this one is off-limits.
+ * (dmac0_aclk is NOT gated by this: bench-verified on the pristine
+ * BSP kernel with the node disabled, the cpg driver keeps the clock
+ * held -- enable_cnt=1, deviceless -- so the CM33's engine keeps its
+ * clock.) */
+&dmac0 {
+	status = "disabled";
+};
+
 &pinctrl {
 	sdhi0_emmc_pins: emmc-pins {
 		sd0-clk {
