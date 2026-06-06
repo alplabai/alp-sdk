@@ -470,7 +470,7 @@ static volatile uint32_t counter_forensics[4]; /* [0]=last raw a, [1]=last raw b
  * residual hazard FIRING and being killed -- the raw counter pair
  * above should read equal in lockstep whenever [1] advances). */
 static volatile uint32_t seq_forensics[2];
-static bool t_counter(soak_stat_t *st)
+static bool              t_counter(soak_stat_t *st)
 {
     uint32_t     a = 0, raw_b = 0, b = 0;
     alp_status_t s = gd32g553_counter_read(&ctx, 0u, &a);

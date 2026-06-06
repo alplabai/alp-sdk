@@ -34,7 +34,9 @@
 /* Weak default: the stub backend links this no-op so it needs no vendor
  * library.  The gd32 backend's hal/transport_hw_gd32.c overrides it with
  * the real SPI1 slave + CS-EXTI bring-up. */
-__attribute__((weak)) void bridge_transport_spi_hw_init(void) { }
+__attribute__((weak)) void bridge_transport_spi_hw_init(void)
+{
+}
 
 /* Maximum SPI envelope = SOF + (CMD or STATUS) + PAYLOAD + CRC. */
 #define SPI_MAX_FRAME_BYTES (1u + 1u + GD32_BRIDGE_MAX_PAYLOAD_BYTES + 2u)
@@ -64,7 +66,7 @@ static size_t   spi_tx_cursor;
  * fallback, so the poisoned command fails fast and the next request
  * starts clean. */
 #define SPI_DRAIN_REWIND_BOUND 12u
-static uint8_t  spi_drain_streak;
+static uint8_t spi_drain_streak;
 
 /* v0.7 STATUS_SEQ stamp.  A 4-bit slave-side counter advanced exactly
  * once per FRESH staged reply (this function is the single staging
@@ -91,9 +93,9 @@ static void stage_reply(uint8_t status, const uint8_t *payload, size_t payload_l
     const uint16_t crc       = crc16_ccitt_false(spi_tx_buf, crc_covered);
     spi_tx_buf[crc_covered]      = (uint8_t)(crc & 0xFFu);
     spi_tx_buf[crc_covered + 1u] = (uint8_t)((crc >> 8) & 0xFFu);
-    spi_tx_len      = crc_covered + 2u;
-    spi_tx_cursor   = 0u;
-    spi_drain_streak = 0u; /* fresh reply staged: the drain ladder restarts */
+    spi_tx_len                   = crc_covered + 2u;
+    spi_tx_cursor                = 0u;
+    spi_drain_streak             = 0u; /* fresh reply staged: the drain ladder restarts */
 }
 
 /* For early-error replies that don't have a CMD context yet, fall
@@ -151,7 +153,10 @@ static void decode_and_dispatch(void)
      * the dropped request. */
     if (spi_rx_buf[0] != GD32_BRIDGE_SOF) {
         for (size_t i = 0u; i < spi_rx_len; i++) {
-            if (spi_rx_buf[i] != 0u) { stage_error_reply(STATUS_IO); return; }
+            if (spi_rx_buf[i] != 0u) {
+                stage_error_reply(STATUS_IO);
+                return;
+            }
         }
         /* All-0x00: reply-drain.  REWIND the cursor, don't just keep the
          * buffer: the gd32 backend consumes the staged reply through
@@ -177,7 +182,10 @@ static void decode_and_dispatch(void)
     /* A request addressed to us (leading SOF) but too short to hold even an
      * empty envelope (SOF + CMD + 0-byte payload + CRC = 4 bytes) is a genuine
      * framing error -> STATUS_IO so the host re-syncs. */
-    if (spi_rx_len < 4u) { stage_error_reply(STATUS_IO); return; }
+    if (spi_rx_len < 4u) {
+        stage_error_reply(STATUS_IO);
+        return;
+    }
 
     const size_t payload_len   = spi_rx_len - 4u; /* SOF + CMD + .. + CRC(2) */
     const uint16_t got_crc     = (uint16_t)spi_rx_buf[2u + payload_len]

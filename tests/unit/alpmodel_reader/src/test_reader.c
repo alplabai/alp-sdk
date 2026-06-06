@@ -48,7 +48,10 @@ ZTEST(alpmodel_reader, test_oversized_blob_count_rejected)
     zassert_true(alp_model_fixture_len <= sizeof(buf), "buffer too small for fixture");
     memcpy(buf, alp_model_fixture, alp_model_fixture_len);
     /* blob_count is the u32 at header offset 20; make the blob table run past EOF */
-    buf[20] = 0xFF; buf[21] = 0xFF; buf[22] = 0x00; buf[23] = 0x00;   /* 65535 blobs */
+    buf[20] = 0xFF;
+    buf[21] = 0xFF;
+    buf[22] = 0x00;
+    buf[23] = 0x00; /* 65535 blobs */
     alp_model_t m;
     zassert_equal(ALP_ERR_INVAL, alp_model_parse(buf, alp_model_fixture_len, &m));
 }

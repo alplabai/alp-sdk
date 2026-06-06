@@ -45,7 +45,7 @@ int main(void) {
      * sits at P76/77/96/97 (MOSI/MISO/SCLK/CS) -- alp-studio resolves
      * the bus from the SoM's gd32-io-mcu-map.tsv. */
     alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
-        .bus_id        = 1u,
+        .bus_id = 1u,
         /*
          * 25 MHz fast path.  The GD32 SLAVE streams through its DMA0 CH2/CH3
          * (RX capture + staged-reply arming framed by the CS EXTI, see
@@ -71,7 +71,7 @@ int main(void) {
          * transaction for the GD32's CS-EXTI).  Passing a pin id here
          * would ALSO route CS through the generic GPIO path -- a second,
          * conflicting owner for the same pad. */
-        .cs_pin_id     = ALP_SPI_NO_CS,
+        .cs_pin_id = ALP_SPI_NO_CS,
     });
     if (spi == NULL) {
         printf("[gd32-bridge-ping] alp_spi_open failed: err=%d "
@@ -99,7 +99,7 @@ int main(void) {
 
     gd32g553_t ctx;
     alp_status_t s;
-    unsigned attempt = 0u;
+    unsigned     attempt = 0u;
 
     if (spi == NULL) {
         printf("[gd32-bridge-ping] no SPI bus resolved -- cannot run the "
@@ -118,9 +118,8 @@ int main(void) {
         }
     } while (s != ALP_OK);
 
-    printf("[gd32-bridge-ping] init OK after %u retr%s; firmware v%u.%u.%u\n",
-           attempt, (attempt == 1u) ? "y" : "ies",
-           ctx.version.major, ctx.version.minor, ctx.version.patch);
+    printf("[gd32-bridge-ping] init OK after %u retr%s; firmware v%u.%u.%u\n", attempt,
+           (attempt == 1u) ? "y" : "ies", ctx.version.major, ctx.version.minor, ctx.version.patch);
 
     /* Continuous SPI-path liveness PING -- refreshes the GD32's spi_rx_buf so
      * the link can be confirmed over SWD at any time, and proves the CM33 is
@@ -138,10 +137,10 @@ int main(void) {
          * wedge the link, so logging it lets a console-attached run confirm the
          * 7-byte path stays byte-aligned alongside the 4-byte PING. */
         if ((i % 8u) == 0u) {
-            gd32g553_version_t v = {0};
-            alp_status_t vs = gd32g553_get_version(&ctx, &v);
-            printf("[gd32-bridge-ping] SPI get_version #%u -> %d (v%u.%u.%u)\n",
-                   i, (int)vs, v.major, v.minor, v.patch);
+            gd32g553_version_t v  = { 0 };
+            alp_status_t       vs = gd32g553_get_version(&ctx, &v);
+            printf("[gd32-bridge-ping] SPI get_version #%u -> %d (v%u.%u.%u)\n", i, (int)vs,
+                   v.major, v.minor, v.patch);
         }
 
         k_msleep(500);

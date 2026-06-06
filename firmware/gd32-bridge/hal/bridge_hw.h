@@ -51,7 +51,7 @@
  * healthy, but servicing it NOW would overrun the handler's reply
  * window (e.g. a max-length TRNG pull while the conditioning round
  * is mid-flight).  Maps to STATUS_BUSY -- hosts retry. */
-#define BRIDGE_HW_ERR_BUSY       -5
+#define BRIDGE_HW_ERR_BUSY -5
 
 /* --------------------------------------------------------------- */
 /* Reset-cause                                                       */

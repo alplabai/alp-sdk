@@ -55,8 +55,8 @@
 #include "gd32g5x3.h"
 
 #include "bridge_board_config.h"
-#include "protocol.h"   /* GD32_BRIDGE_DEFAULT_I2C_ADDR */
-#include "transport.h"  /* the seams we drive */
+#include "protocol.h"  /* GD32_BRIDGE_DEFAULT_I2C_ADDR */
+#include "transport.h" /* the seams we drive */
 
 /* =================================================================== */
 /* SPI slave bring-up                                                   */
@@ -73,20 +73,24 @@ static void spi_gpio_init(void)
      * hardware-NSS input; EXTI taps the same pin for CS-edge detection. */
     const uint32_t af = BRIDGE_SPI_GPIO_AF;
 
-    gpio_mode_set(BRIDGE_SPI_SCK_PORT,  GPIO_MODE_AF, GPIO_PUPD_NONE, BRIDGE_SPI_SCK_PIN);
+    gpio_mode_set(BRIDGE_SPI_SCK_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, BRIDGE_SPI_SCK_PIN);
     gpio_mode_set(BRIDGE_SPI_MISO_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, BRIDGE_SPI_MISO_PIN);
     gpio_mode_set(BRIDGE_SPI_MOSI_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, BRIDGE_SPI_MOSI_PIN);
-    gpio_mode_set(BRIDGE_SPI_NSS_PORT,  GPIO_MODE_AF, GPIO_PUPD_PULLUP, BRIDGE_SPI_NSS_PIN);
+    gpio_mode_set(BRIDGE_SPI_NSS_PORT, GPIO_MODE_AF, GPIO_PUPD_PULLUP, BRIDGE_SPI_NSS_PIN);
 
-    gpio_output_options_set(BRIDGE_SPI_SCK_PORT,  GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ, BRIDGE_SPI_SCK_PIN);
-    gpio_output_options_set(BRIDGE_SPI_MISO_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ, BRIDGE_SPI_MISO_PIN);
-    gpio_output_options_set(BRIDGE_SPI_MOSI_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ, BRIDGE_SPI_MOSI_PIN);
-    gpio_output_options_set(BRIDGE_SPI_NSS_PORT,  GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ, BRIDGE_SPI_NSS_PIN);
+    gpio_output_options_set(BRIDGE_SPI_SCK_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ,
+                            BRIDGE_SPI_SCK_PIN);
+    gpio_output_options_set(BRIDGE_SPI_MISO_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ,
+                            BRIDGE_SPI_MISO_PIN);
+    gpio_output_options_set(BRIDGE_SPI_MOSI_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ,
+                            BRIDGE_SPI_MOSI_PIN);
+    gpio_output_options_set(BRIDGE_SPI_NSS_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ,
+                            BRIDGE_SPI_NSS_PIN);
 
-    gpio_af_set(BRIDGE_SPI_SCK_PORT,  af, BRIDGE_SPI_SCK_PIN);
+    gpio_af_set(BRIDGE_SPI_SCK_PORT, af, BRIDGE_SPI_SCK_PIN);
     gpio_af_set(BRIDGE_SPI_MISO_PORT, af, BRIDGE_SPI_MISO_PIN);
     gpio_af_set(BRIDGE_SPI_MOSI_PORT, af, BRIDGE_SPI_MOSI_PIN);
-    gpio_af_set(BRIDGE_SPI_NSS_PORT,  af, BRIDGE_SPI_NSS_PIN);
+    gpio_af_set(BRIDGE_SPI_NSS_PORT, af, BRIDGE_SPI_NSS_PIN);
 }
 
 /* ── SPI slave DMA plumbing ─────────────────────────────────────────── */
@@ -156,10 +160,8 @@ static void spi_dma_init(void)
 static void spi_dma_arm_rx(void)
 {
     dma_channel_disable(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH);
-    dma_memory_address_config(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH,
-                              (uint32_t)spi_rx_dma_buf);
-    dma_transfer_number_config(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH,
-                               BRIDGE_SPI_DMA_BUF_LEN);
+    dma_memory_address_config(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH, (uint32_t)spi_rx_dma_buf);
+    dma_transfer_number_config(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH, BRIDGE_SPI_DMA_BUF_LEN);
     dma_channel_enable(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH);
 }
 
@@ -172,8 +174,7 @@ static void spi_dma_arm_tx(uint32_t len)
     if (len == 0u) {
         return;
     }
-    dma_memory_address_config(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH,
-                              (uint32_t)spi_tx_dma_buf);
+    dma_memory_address_config(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH, (uint32_t)spi_tx_dma_buf);
     dma_transfer_number_config(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH, len);
     dma_channel_enable(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH);
 }
@@ -201,7 +202,7 @@ static void bridge_spi_periph_config(void)
     sp.frame_size           = SPI_FRAMESIZE_8BIT;
     sp.nss                  = SPI_NSS_HARD;
     sp.endian               = SPI_ENDIAN_MSB;
-    sp.clock_polarity_phase = SPI_CK_PL_LOW_PH_1EDGE;   /* mode 0 */
+    sp.clock_polarity_phase = SPI_CK_PL_LOW_PH_1EDGE; /* mode 0 */
     spi_init(BRIDGE_SPI_PERIPH, &sp);
 
     /* Byte-access the FIFO so one CPU access == one 8-bit frame.  At reset the
@@ -293,9 +294,8 @@ void BRIDGE_SPI_CS_EXTI_HANDLER(void)
              * 216 MHz -- single-digit microseconds, well inside the master's
              * inter-transaction gap (its CS setup window alone is 60 us). */
             uint32_t remaining = dma_transfer_number_get(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH);
-            uint32_t received  = (remaining <= BRIDGE_SPI_DMA_BUF_LEN)
-                                     ? (BRIDGE_SPI_DMA_BUF_LEN - remaining)
-                                     : 0u;
+            uint32_t received =
+                (remaining <= BRIDGE_SPI_DMA_BUF_LEN) ? (BRIDGE_SPI_DMA_BUF_LEN - remaining) : 0u;
 
             dma_channel_disable(BRIDGE_SPI_DMA, BRIDGE_SPI_RX_DMA_CH);
             dma_channel_disable(BRIDGE_SPI_DMA, BRIDGE_SPI_TX_DMA_CH);
@@ -335,8 +335,10 @@ static void i2c_gpio_init(void)
     /* Open-drain; rely on the BRD_I2C bus pull-ups. */
     gpio_mode_set(BRIDGE_I2C_SCL_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, BRIDGE_I2C_SCL_PIN);
     gpio_mode_set(BRIDGE_I2C_SDA_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, BRIDGE_I2C_SDA_PIN);
-    gpio_output_options_set(BRIDGE_I2C_SCL_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_60MHZ, BRIDGE_I2C_SCL_PIN);
-    gpio_output_options_set(BRIDGE_I2C_SDA_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_60MHZ, BRIDGE_I2C_SDA_PIN);
+    gpio_output_options_set(BRIDGE_I2C_SCL_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_60MHZ,
+                            BRIDGE_I2C_SCL_PIN);
+    gpio_output_options_set(BRIDGE_I2C_SDA_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_60MHZ,
+                            BRIDGE_I2C_SDA_PIN);
     gpio_af_set(BRIDGE_I2C_SCL_PORT, af, BRIDGE_I2C_SCL_PIN);
     gpio_af_set(BRIDGE_I2C_SDA_PORT, af, BRIDGE_I2C_SDA_PIN);
 }
@@ -356,22 +358,24 @@ void bridge_transport_i2c_hw_init(void)
      * SCLDEL=2 / SDADEL=1 then give Fast-mode setup/hold, with the analog
      * filter on for Fm (400 kHz) spike suppression. */
     uint32_t apb1_hz = rcu_clock_freq_get(CK_APB1);
-    uint32_t psc     = apb1_hz / 8000000u;   /* tick ~= (psc+1)/apb1 */
-    if (psc > 0u)  { psc -= 1u; }
-    if (psc > 15u) { psc = 15u; }            /* TIMING_PSC is a 4-bit field */
+    uint32_t psc     = apb1_hz / 8000000u; /* tick ~= (psc+1)/apb1 */
+    if (psc > 0u) {
+        psc -= 1u;
+    }
+    if (psc > 15u) {
+        psc = 15u;
+    } /* TIMING_PSC is a 4-bit field */
     i2c_timing_config(BRIDGE_I2C_PERIPH, psc, 2u /*scl_dely*/, 1u /*sda_dely*/);
     i2c_analog_noise_filter_enable(BRIDGE_I2C_PERIPH);
 
-    i2c_address_config(BRIDGE_I2C_PERIPH,
-                       (uint32_t)GD32_BRIDGE_DEFAULT_I2C_ADDR << 1,
+    i2c_address_config(BRIDGE_I2C_PERIPH, (uint32_t)GD32_BRIDGE_DEFAULT_I2C_ADDR << 1,
                        I2C_ADDFORMAT_7BITS);
     i2c_stretch_scl_low_enable(BRIDGE_I2C_PERIPH);
 
     /* Address-match, receive, stop, NACK and error always on; the
      * transmit interrupt is enabled only while serving a read. */
     i2c_interrupt_enable(BRIDGE_I2C_PERIPH,
-                         I2C_INT_ADDM | I2C_INT_RBNE | I2C_INT_STPDET |
-                         I2C_INT_NACK | I2C_INT_ERR);
+                         I2C_INT_ADDM | I2C_INT_RBNE | I2C_INT_STPDET | I2C_INT_NACK | I2C_INT_ERR);
     nvic_irq_enable(BRIDGE_I2C_EV_IRQN, BRIDGE_I2C_IRQ_PRIO, BRIDGE_I2C_IRQ_SUBPRIO);
     nvic_irq_enable(BRIDGE_I2C_ER_IRQN, BRIDGE_I2C_IRQ_PRIO, BRIDGE_I2C_IRQ_SUBPRIO);
 
@@ -383,8 +387,7 @@ void bridge_transport_i2c_hw_init(void)
 void BRIDGE_I2C_EV_HANDLER(void)
 {
     if (RESET != i2c_interrupt_flag_get(BRIDGE_I2C_PERIPH, I2C_INT_FLAG_ADDSEND)) {
-        const bool is_transmitter =
-            (RESET != i2c_flag_get(BRIDGE_I2C_PERIPH, I2C_FLAG_TR));
+        const bool is_transmitter = (RESET != i2c_flag_get(BRIDGE_I2C_PERIPH, I2C_FLAG_TR));
         i2c_interrupt_flag_clear(BRIDGE_I2C_PERIPH, I2C_INT_FLAG_ADDSEND);
         if (is_transmitter) {
             /* Repeated-START read: make sure the reply for the just-

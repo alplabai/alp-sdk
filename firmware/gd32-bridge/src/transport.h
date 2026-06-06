@@ -36,16 +36,16 @@ void bridge_transport_spi_hw_init(void);
 void bridge_transport_i2c_hw_init(void);
 
 /* ---- SPI slave seams (defined in transport_spi.c) -------------- */
-void    spi_slave_cs_low(void);        /* CS falling edge: reset RX staging   */
-void    spi_slave_rx_byte(uint8_t b);  /* one received byte (per SPI RBNE)     */
-void    spi_slave_cs_high(void);       /* CS rising edge: decode + dispatch    */
-uint8_t spi_slave_tx_next_byte(void);  /* next reply byte (per SPI TBE), 0xFF idle */
-bool    spi_slave_tx_pending(void);    /* true while staged reply has bytes left   */
+void    spi_slave_cs_low(void);       /* CS falling edge: reset RX staging   */
+void    spi_slave_rx_byte(uint8_t b); /* one received byte (per SPI RBNE)     */
+void    spi_slave_cs_high(void);      /* CS rising edge: decode + dispatch    */
+uint8_t spi_slave_tx_next_byte(void); /* next reply byte (per SPI TBE), 0xFF idle */
+bool    spi_slave_tx_pending(void);   /* true while staged reply has bytes left   */
 
 /* ---- I2C slave seams (defined in transport_i2c.c) -------------- */
-void    i2c_slave_write_start(void);   /* START + addressed write: reset RX    */
-void    i2c_slave_rx_byte(uint8_t b);  /* one received byte (write phase)      */
-bool    i2c_slave_write_end(void);     /* STOP / repeated-START: dispatch+stage */
-uint8_t i2c_slave_tx_next_byte(void);  /* next reply byte (read phase), 0xFF idle */
+void    i2c_slave_write_start(void);  /* START + addressed write: reset RX    */
+void    i2c_slave_rx_byte(uint8_t b); /* one received byte (write phase)      */
+bool    i2c_slave_write_end(void);    /* STOP / repeated-START: dispatch+stage */
+uint8_t i2c_slave_tx_next_byte(void); /* next reply byte (read phase), 0xFF idle */
 
 #endif /* GD32_BRIDGE_TRANSPORT_H */

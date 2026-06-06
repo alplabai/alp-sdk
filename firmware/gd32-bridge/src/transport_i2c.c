@@ -34,7 +34,9 @@
 /* Weak default: the stub backend links this no-op so it needs no vendor
  * library.  The gd32 backend's hal/transport_hw_gd32.c overrides it with
  * the real I2C0 slave bring-up. */
-__attribute__((weak)) void bridge_transport_i2c_hw_init(void) { }
+__attribute__((weak)) void bridge_transport_i2c_hw_init(void)
+{
+}
 
 #define I2C_MAX_WRITE_BYTES (1u /* reg */ + 1u /* CMD */ + GD32_BRIDGE_MAX_PAYLOAD_BYTES + 2u /* CRC */)
 #define I2C_MAX_READ_BYTES  (1u /* STATUS */ + GD32_BRIDGE_MAX_PAYLOAD_BYTES + 2u /* CRC */)
