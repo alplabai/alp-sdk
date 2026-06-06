@@ -126,11 +126,11 @@ A release does **not** tag until every row gating it is `verified`.
 | Yocto MQTT TLS (`mqtts://`) | `src/yocto/iot_yocto.c` (`apply_tls`) | 🟡 partial | Connect + handshake against a TLS broker with a pinned CA bundle; reject on bad cert | `tests/yocto/iot_mqtt.c` (default-TLS open / pinned-CA open / missing-CA refusal / insecure-flag accepted / default-8883 port); **broker handshake via `hil-yocto`** | v0.4 |
 | Yocto audio backend (ALSA) | `src/yocto/audio_yocto.c` | 🟡 partial | 1 kHz tone captured + played back via ALSA on a real Yocto target; FFT peak within ±5 Hz; volume scale audibly correct | `tests/yocto/audio_alsa.c` (NULL/INVAL + unreachable device failure paths); **real capture/playback via `hil-yocto`** | v0.4 |
 | Yocto `<alp/security.h>` (OpenSSL) | `src/yocto/security_yocto.c` | 🟡 partial | KATs + AEAD round-trip on a representative Yocto image; same wins on a developer-bench Linux host (the ALP_OS=yocto build IS the runtime target -- crypto correctness is host-portable) | `tests/yocto/security_openssl.c` (16 tests: SHA-256 NIST `"abc"` KAT, SHA-384/512 length checks, AES-128-GCM + ChaCha20-Poly1305 roundtrips, tag-mismatch path, key-length / NULL-key / unsupported-alg refusals, TRNG fill + null-arg).  Flips to ✅ once `meta-alp-sdk` builds a real Yocto image carrying this code on a SoM. | v0.4 |
-| `meta-alp-sdk` BSP for V2N / V2N-M1 / i.MX 93 | `meta-alp-sdk/` | ⏳ untested | `bitbake alp-image-edge` succeeds for each `e1m-<sku>-a55` MACHINE; produced image boots on the matching SoM | HIL | v0.6 |
+| `meta-alp-sdk` BSP for V2N / V2N-M1 / i.MX 93 | `meta-alp-sdk/` | 🟡 partial | `bitbake alp-image-edge` succeeds for each `e1m-<sku>-a55` MACHINE; produced image boots on the matching SoM | V2N leg: full `core-image-minimal` bake clean on BSP v6.30 (8313 tasks, 2026-05-26, kernel 6.1.141-cip43 + carrier dtb + FIP) and the produced kernel/dtb run the live V2N bench board from eMMC.  `alp-image-edge` target + V2N-M1 + i.MX 93 machines still pending | v0.7 |
 | Authoritative Zephyr board files | external (`alplabai/alp-zephyr-modules`) | ⏳ untested | `alp_e1m_evk_aen` board boots and binds the same DT aliases the SDK overlays expect | HIL | v0.4 |
 | MCUboot secure-boot on AEN-Zephyr | `zephyr/sysbuild/aen/sysbuild.conf` + `keys/generate_dev_key.sh` + `docs/secure-boot.md` | ⏳ untested | Signed image boots; tampered image triggers rollback to previous slot; mid-swap power loss recovers atomically | HIL + tamper test (gates on `alp_e1m_evk_aen` board file in `alplabai/alp-zephyr-modules`) | v0.4 |
 | Secure OTA on AEN-Zephyr (MCUboot + Mender) | `docs/ota.md` (Zephyr-client decision pending) | ⏳ untested | Signed update delivered, swap-using-scratch completes, next boot validates | HIL + OTA bench (gates on Zephyr-side Mender client choice: `mender-mcu-client` vs Hawkbit, plus `alp_e1m_evk_aen` board file) | v0.4 |
-| Secure OTA on V2N-Yocto (`meta-mender`) | `meta-alp-sdk/conf/distro/include/mender.inc` + machine .conf opt-in lines + `docs/ota.md` | ⏳ untested | A/B partition swap survives an interrupted-update simulation; rollback on failed commit health-check | HIL via `hil-yocto` | v0.6 |
+| Secure OTA on V2N-Yocto (`meta-mender`) | `meta-alp-sdk/conf/distro/include/mender.inc` + machine .conf opt-in lines + `docs/ota.md` | ⏳ untested | A/B partition swap survives an interrupted-update simulation; rollback on failed commit health-check | HIL via `hil-yocto` (the A55/Mender path; distinct from the GD32 supervisor A/B OTA verified in the v0.6 section below) | v0.7 |
 | Secure OTA on i.MX 93-Yocto (`meta-mender`) | same scaffolding as V2N row above | ⏳ untested | A/B partition swap survives an interrupted-update simulation | HIL via `hil-yocto` | v0.4 |
 | OPTIGA Trust M-rooted device identity | TBD | ⏳ untested | TLS handshake succeeds using OPTIGA-stored ECC key; tampered key rejects | HIL | v0.4 |
 | DEEPX DX-M1 real `dxnn_*` link | `src/yocto/inference_deepx.cpp` | ⏳ untested | DX-M1 SDK on sysroot; sample model run completes; outputs match host-CPU reference | HIL | v0.4 |
@@ -151,6 +151,24 @@ right now" status is one scroll away from the v0.4 gate list:
 | `west.yml` `extras-v04` group with lwrb + nanopb pins | 🟡 partial — pins resolve via `west update --group-filter +extras-v04` on a fresh workspace; first LwRB consumer (UART RX ringbuf) landed against the in-tree stub impl; first nanopb consumer landed against a placeholder framing impl (not the generator-emitted codec yet) | (Stub-side coverage in `alp_sdk.peripheral.uart_rx_ringbuf` + `alp_sdk.mproc.nanopb_framing` twister scenarios; upstream-on-workspace builds untested) |
 | AEN-Zephyr UART RX ring buffer (LwRB) | 🟡 partial — failure-path ZTESTs green in `pr-twister` (both the default and `prj_uart_ringbuf.conf` scenarios); real-IRQ attach untested | `pr-twister.yml` `alp_sdk.peripheral.uart_rx_ringbuf` scenario |
 | AEN-Zephyr mproc envelope framing (placeholder) | 🟡 partial — 9 framing helper ZTESTs + the `alp_sdk.mproc.nanopb_framing` scenario compile the framing branches in `alp_mbox_send` / `mbox_rx_cb`; peer-firmware roundtrip untested | `pr-twister.yml` `alp_sdk.mproc.nanopb_framing` scenario |
+
+## v0.6.0 — V2N GD32-bridge silicon campaign (verified on the bench)
+
+The first rows in this ledger verified against real silicon: the
+E1M-X V2N bench board (RZ/V2N CM33 host ↔ GD32G553 supervisor,
+firmware v0.2.9, wire protocol v0.7).  Evidence pointers are the
+merge commits on `main` (each names its bench results) + the
+matching CHANGELOG `[v0.6.0]` entries.
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| GD32 bridge link (SPI 25 MHz + I2C), full command set | `firmware/gd32-bridge/` + `chips/gd32g553/` | ✅ verified | Functional suite asserts real values (ADC/DAC/PWM/math/TRNG fault-recover contract) on silicon | 26/26 on fw v0.2.4 (merge `ed1daf2`); re-smoked through v0.2.9 | v0.6 |
+| Bridge HIL soak (20 rows, link-stability) | `examples/v2n/v2n-gd32-bridge-hil-soak/` | ✅ verified | Every row passes a sustained soak with zero IO errors; counter-row stale-reply discriminator clean | 253/253 × 20 rows on v0.2.8 + v0.2.9 (2026-06-06) | v0.6 |
+| Protocol v0.7 STATUS_SEQ stale-reply kill | `firmware/gd32-bridge/src/transport_spi.c` + host driver | ✅ verified | Negotiated stamp advances per fresh decode; stale replies detected + safely re-sent on silicon | CHANGELOG v0.2.9 entry; `seq_forensics` telemetry in the soak | v0.6 |
+| GD32 supervisor A/B OTA (Path A, opcodes 0xF0..) | `firmware/gd32-bridge/src/ota.c` + bootloader | ✅ verified | Full image stream → CRC verify → slot swap → boot-back, e2e on silicon | OTA bench e2e (7 silicon bugs found + fixed; memory ledger `project-gd32-ota-path-a-validated`) | v0.6 |
+| Tier-B analog loopback (DAC→ADC, PWM-capture) | `examples/v2n/v2n-gd32-bridge-loopback/` | ✅ verified | DAC raws within 1 LSB of commanded through the carrier jumper; capture period/pulse exact | 5/6 rows (qenc blocked by carrier ENC1_Y float — issue #85) on v0.2.7+ | v0.6 |
+| CM33↔GD32 SCI7 SPI bidirectional link | `zephyr/drivers/spi/` RSCI path | ✅ verified | Sustained request/reply traffic, both transports, zero CRC errors in soak | merges `9f3e600`, `7845ad7`, `b5c941c` | v0.6 |
+| SCI7 DMA fast path | `zephyr/drivers/spi/spi_renesas_rz_sci_b.c` DMAC-B path | ❌ failing | DMA-driven transactions sustain the soak | Survives full init incl. v0.7 negotiation, then TX requests stop post-settle (issue #84; vendor ticket drafted); gate stays default-off | v0.7 |
 
 ## CI-only / tooling rows (no HIL gate)
 
