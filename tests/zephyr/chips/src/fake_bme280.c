@@ -73,8 +73,8 @@ static const uint8_t raw_block[8] = {
     /* Pressure: 415148 = 0x655AC → MSB-first 20-bit packs as
      * 0x65 0x5A 0xC0 (low 4 bits unused). */
     0x65, 0x5A, 0xC0,
-    /* Temperature: 519888 = 0x7EF50 → 0x7E 0xF5 0x00. */
-    0x7E, 0xF5, 0x00,
+    /* Temperature: 519888 = 0x7EED0 → 0x7E 0xED 0x00. */
+    0x7E, 0xED, 0x00,
     /* Humidity: 0x6FF0 (synthetic; no datasheet example). */
     0x6F, 0xF0,
 };
@@ -135,6 +135,15 @@ static int fake_bme280_init(const struct emul *target,
                         &fake_bme280_api, NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(FAKE_BME280_DEFINE)
+
+/* The i2c_emul controller's emuls_<N> array references
+ * __device_dts_ord_<N> for each child emul.  Without a paired
+ * DEVICE_DT_INST_DEFINE the linker cannot resolve those symbols even
+ * under Zephyr v4.4.  Register a no-op device to satisfy the reference. */
+#define FAKE_DEV_DEFINE(n) \
+    DEVICE_DT_INST_DEFINE(n, NULL, NULL, NULL, NULL, POST_KERNEL, \
+                          CONFIG_KERNEL_INIT_PRIORITY_DEVICE, NULL);
+DT_INST_FOREACH_STATUS_OKAY(FAKE_DEV_DEFINE)
 
 /* ------------------------------------------------------------------ */
 /* Test-side inspection API                                             */

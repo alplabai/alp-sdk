@@ -27,29 +27,18 @@
             #size-cells = <0>;
             clock-frequency = <I2C_BITRATE_STANDARD>;
 
-            /* Fake i2c-emul targets at chip-default addresses are
-             * temporarily commented out -- the EMUL_DT_INST_DEFINE
-             * pattern needs a paired DEVICE_DT_INST_DEFINE for the
-             * Zephyr 3.7 native_sim x86 link to resolve the
-             * `__device_dts_ord_<N>` references the parent
-             * i2c-emul controller's emuls_<N> array generates.
-             * Tracked as a v0.2 follow-up; the fake-using ZTESTs
-             * are gated on DT_NODE_EXISTS so they no-op cleanly
-             * while disabled.
-             *
-             * fake_lsm6dso: fake_lsm6dso@6a {
-             *     compatible = "alp,fake-lsm6dso";
-             *     reg = <0x6a>;
-             * };
-             * fake_ssd1306: fake_ssd1306@3c {
-             *     compatible = "alp,fake-ssd1306";
-             *     reg = <0x3c>;
-             * };
-             * fake_bme280: fake_bme280@76 {
-             *     compatible = "alp,fake-bme280";
-             *     reg = <0x76>;
-             * };
-             */
+            fake_lsm6dso: fake_lsm6dso@6a {
+                compatible = "alp,fake-lsm6dso";
+                reg = <0x6a>;
+            };
+            fake_ssd1306: fake_ssd1306@3c {
+                compatible = "alp,fake-ssd1306";
+                reg = <0x3c>;
+            };
+            fake_bme280: fake_bme280@76 {
+                compatible = "alp,fake-bme280";
+                reg = <0x76>;
+            };
         };
     };
 

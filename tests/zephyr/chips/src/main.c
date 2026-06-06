@@ -761,13 +761,6 @@ ZTEST(alp_chips, test_mproc_surface_v01_nosupport)
 /* not just lifecycle / NULL handling.  Each fake target lives in       */
 /* src/fake_<chip>.c, attaches to i2c0_emul at the chip's default I2C   */
 /* address, and exposes inspection helpers via fakes.h.                  */
-/*                                                                      */
-/* TEMPORARILY GATED — the fake EMUL_DT_INST_DEFINE pattern needs a     */
-/* paired DEVICE_DT_INST_DEFINE for Zephyr 3.7's native_sim x86 link    */
-/* to resolve `__device_dts_ord_<N>` references the parent i2c-emul     */
-/* controller's emuls_<N> array generates.  Tracked as a v0.2 follow-   */
-/* up; gated on DT_NODE_EXISTS so the tests are no-ops while the        */
-/* overlay's fake_* nodes are commented out.                             */
 /* ==================================================================== */
 
 #if DT_NODE_EXISTS(DT_NODELABEL(fake_lsm6dso))
