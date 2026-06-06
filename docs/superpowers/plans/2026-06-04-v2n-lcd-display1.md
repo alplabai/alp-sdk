@@ -1088,3 +1088,41 @@ Pre-requisites: Task 0 done (G0 = bridge I2C transport PASS), Tasks 1–6 built.
   (PcbDoc netlist sync — only the layout says where the copper went).
 - Bench infra: PSU cold-cycle scripted + user-authorized standing;
   scope SCPI control established; soft reboots remain broken.
+
+### 2026-06-06 (part 3) — PA5 PWM SOLVED: the trap inside the trap
+
+- **The c4f23d9 "fix" was itself the bug.** GPT pin FUNCTIONS are
+  numbered **flat** GTIOC0..GTIOC15 across both units (manual Table
+  1.2-3 carries GTIOC8A/B and GTIOC9A/B as pin functions and never
+  GTIOC16/17; Table 5.7-12 lists unit-1's own pins as
+  GTIOC8A..GTIOC15B), while GPT INSTANCES are unit-channel composite
+  (GPT00-07 @0x13010000, GPT10-17 @0x13020000+ch*0x100 — no GPT08/09).
+  So **GTIOC10B = unit 1 channel 2 = gpt@13020200 = `&gpt1_2`** — the
+  ORIGINAL binding. The FSP iodefine `R_GPT10` names the composite
+  instance, not the pin-function index; that's what misled the rename.
+- **New silicon technique that settled it: PIN-register sampling with
+  IEN.** In peripheral mode the PIN readback needs PFC_IEN (PM's input
+  bit only applies to GPIO mode). With IEN[pin5]=1: GPT10 (unit1 ch0)
+  running a byte-identical register image → PA5 die pad FLAT (0/4000);
+  hand-programming GPT12 @0x13020200 → **PA5 die pad shows the 5 kHz
+  ~50 % PWM (2062/4000)**. After the DT revert (e2066b1) + dtb
+  redeploy + cold boot, the **kernel-owned** backlight PWM measures
+  1728/4000 at the pad on 13020200.gpt. G4 = PASS at silicon level.
+- **The 2026-06-05 "secure-vs-NS" theory is RETRACTED.** Instrumented
+  re-run (NS-view register sampler at 20 Hz on the board + phased
+  J-Link script): CM33 debug-AP writes are silently dropped (never
+  appear in any register view; reads were already known blocked), so
+  the earlier SINGLE-trigger "win" was a false positive (probe bump).
+  An ultracode manual+TF-A fan-out had already shown SLVACCCTL12
+  (PFC slave gate) = 0 = NS-open, and i2c0's live device ACKs prove
+  NS Linux port-muxing works generally. No TF-A/FIP change needed.
+- **Still open (G2):** PWM proven at the pad, but no PSU current delta
+  toggling duty 0↔50 % → the LED chain isn't lighting yet (suspects:
+  BL_EN/boost enable line, panel-side gating, PWM amplitude into the
+  boost CNTRL). And the **BL_PWM scope testpoint reads flat while the
+  pad provably toggles** — probe placement / testpoint path needs a
+  human look before trusting that scope channel again.
+- Board state: /boot/Image → Image-lcd-display1; dtb = fresh
+  e1m-v2n101-x-evk build (gpt1_2), backup `.pre-gpt12fix` alongside
+  the older `.pre-lcd`/`.wifi` set; bl_power came up 4 (blanked) this
+  boot — forced on via sysfs for the verification.
