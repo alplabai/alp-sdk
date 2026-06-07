@@ -91,10 +91,11 @@
  * - During normal operation the host's role is **read-only telemetry +
  *   error reporting**: poll `act8760_get_status`, react on faults,
  *   read VSET back to confirm a rail came up to its programmed value.
- * - DVS (dynamic voltage scaling) is supported via `act8760_rail_set_vset`
- *   on Buck1/2/7's VSET1/2/3 slots; the change takes effect when a
- *   configured GPIO asserts or when the host writes the `BkxDvsI2C`
- *   bits in register `0x2C` (ADD1).
+ * - DVS (dynamic voltage scaling) on Buck1/2/7's VSET1..VSET3 slots is
+ *   OUT of this driver's scope (`act8760_rail_set_vset` programs VSET0
+ *   only); callers needing DVS drive the slot registers and the
+ *   `BkxDvsI2C` bits in MSTR register `0x2C` via the raw
+ *   `act8760_write_reg` helpers.
  * - **Volatile vs non-volatile:** I2C writes only update the volatile
  *   shadow.  Power-cycling reverts to the CMI defaults.  This is
  *   intentional -- the CMI is the source of truth for the production
