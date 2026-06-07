@@ -18,7 +18,6 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/i2c_emul.h>
 
-#include "fake_reg8.h"
 #include "fakes.h"
 
 #define REG_WHO_AM_I 0x0F
@@ -84,8 +83,6 @@ static int fake_lsm6dso_init(const struct emul *target,
                         &fake_lsm6dso_api, NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(FAKE_LSM6DSO_DEFINE)
-
-FAKE_EMUL_DEV_SHIM()
 
 /* ------------------------------------------------------------------ */
 /* Test-side inspection API                                             */

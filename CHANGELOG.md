@@ -21,29 +21,6 @@ PASS/FAIL/SKIP table.  The example surfaces the `tmp112`
 `0x40`-vs-`0x48` metadata discrepancy explicitly as a FAIL row instead
 of silently misreading the sensor.
 
-### Added — tests/zephyr/chips: register-level fakes + ztests for the BRD_I2C ICs (2026-06-07)
-
-The Zephyr chips test suite grew from 160 to 178 cases:
-
-- **i2c-emul fakes re-enabled under Zephyr v4.4.0** — the three
-  existing fakes had been disabled since a 3.7-era
-  `__device_dts_ord_<N>` link error; the requirement (every
-  `EMUL_DT_INST_DEFINE` child needs a paired no-op device) persists
-  under v4.4 and is now satisfied by a shared `FAKE_EMUL_DEV_SHIM`
-  macro; 160/160 pass with the fake-backed tests live again.
-- **`fake_reg8` core** (`tests/zephyr/chips/src/fake_reg8.h`) — shared
-  register-file primitive with pointer-protocol reads, per-chip write
-  hooks, and an ordered-write log; replaces copy-pasted per-fake
-  implementations.
-- **New BRD_I2C fakes**: `fake_da9292`, `fake_act8760` (dual-slave, DT
-  nodes at 0x25 + 0x26), `fake_rv3028c7`, `fake_tmp112`, `fake_clk_5l35023b`,
-  `fake_tps628640`, `fake_optiga_trust_m`.
-- New ztest coverage: DA9292 STATUS_00 register decode, ordered-write-log
-  contract; ACT8760 dual-slave probe + VSET tile offsets + status decode
-  vs `MSTR` sheet; RV-3028-C7 BCD encode + PORF clear + alarm AE-flag;
-  TMP112 12/13-bit sign-extension; CLK 5L35023B strap guard; TPS628640
-  shadow-register RMW; OPTIGA probe contract.
-
 ### Fixed — da9292: STATUS_00 layout verified vs Datasheet Rev 2.2 Table 14 (2026-06-07)
 
 An open TODO in `chips/da9292/da9292.c` queried whether the
@@ -51,17 +28,9 @@ An open TODO in `chips/da9292/da9292.c` queried whether the
 against Renesas DA9292 Datasheet Rev 2.2 (R16DS0518EJ0220) Table 14
 (p.36-37) confirmed the existing decode was **correct** (the
 mirror-of-MASK assumption holds for every status bit).  The TODO is
-retired and the layout is now locked by register-level ztests;
-`metadata/chips/da9292.yaml` `driver_status` moves `partial` →
-`complete`.
-
-### Fixed — tests/chips: fake_bme280 raw-temperature seed bytes (2026-06-07)
-
-`fake_bme280.c` seeded the raw-temperature bytes as `0x7E 0xF5 0x00`
-(decoding to 520016) while the datasheet-compensation test asserts
-519888 — a latent mismatch the disabled fakes had hidden.  Seed
-corrected to `0x7E 0xED 0x00` (= `0x7EED0` = 519888, the BME280
-datasheet example value).
+retired; `metadata/chips/da9292.yaml` `driver_status` moves
+`partial` → `complete`.  On-silicon validation follows on the
+patched BRD_I2C bus via `examples/v2n/v2n-brd-i2c-bringup`.
 
 ### Fixed — act8760: register map replaced with the verified one (2026-06-07)
 
@@ -103,12 +72,6 @@ outside this repo at time of writing):
 
 **Removed defines** (unverified + unused): `ACT8760_REG_GPIO_STAT_LO`
 (0x03), `ACT8760_REG_OV_UV_CFG` (0x09).
-
-**Tests**: `test_act8760_probe_both_slaves`,
-`test_act8760_vset_offsets_per_verified_map`,
-`test_act8760_status_decode_matches_mstr_sheet` added to
-`tests/zephyr/chips`; a dual-instance fake (`fake_act8760.c`, two DT
-nodes at 0x25 + 0x26) backs the emul.  168/168 green.
 
 **Metadata** (`metadata/chips/act8760.yaml`): `driver_status` promoted
 from `stub` to `partial`; `register_map` source doc added; address

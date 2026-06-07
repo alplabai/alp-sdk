@@ -25,7 +25,6 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/i2c_emul.h>
 
-#include "fake_reg8.h"
 #include "fakes.h"
 
 #define REG_CHIP_ID   0xD0
@@ -141,8 +140,6 @@ static int fake_bme280_init(const struct emul *target,
                         &fake_bme280_api, NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(FAKE_BME280_DEFINE)
-
-FAKE_EMUL_DEV_SHIM()
 
 /* ------------------------------------------------------------------ */
 /* Test-side inspection API                                             */

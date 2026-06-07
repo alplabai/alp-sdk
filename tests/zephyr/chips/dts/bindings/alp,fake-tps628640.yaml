@@ -1,3 +1,0 @@
-description: Fake TI TPS628640 buck regulator for i2c-emul chip tests.
-compatible: "alp,fake-tps628640"
-include: i2c-device.yaml

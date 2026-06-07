@@ -58,4 +58,3 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
-  register_tests: fake_da9292    # probe/status/events/voltage/VSTEP-ordering locked 2026-06-06

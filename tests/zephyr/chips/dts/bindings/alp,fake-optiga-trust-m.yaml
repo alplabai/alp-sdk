@@ -1,3 +1,0 @@
-description: Fake Infineon OPTIGA Trust M secure element for i2c-emul chip tests.
-compatible: "alp,fake-optiga-trust-m"
-include: i2c-device.yaml

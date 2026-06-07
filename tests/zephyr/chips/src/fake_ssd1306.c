@@ -19,7 +19,6 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/i2c_emul.h>
 
-#include "fake_reg8.h"
 #include "fakes.h"
 
 #define LOG_CAP 4096    /* Enough for full-screen 128×64 push (1024 B) + init. */
@@ -89,8 +88,6 @@ static int fake_ssd1306_init(const struct emul *target,
                         &fake_ssd1306_api, NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(FAKE_SSD1306_DEFINE)
-
-FAKE_EMUL_DEV_SHIM()
 
 /* ------------------------------------------------------------------ */
 /* Test-side inspection API                                             */

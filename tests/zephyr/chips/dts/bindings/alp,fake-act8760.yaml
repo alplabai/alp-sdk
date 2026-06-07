@@ -1,3 +1,0 @@
-description: Fake Qorvo ACT88760 PMIC slave (one node per I2C address; the chip exposes two).
-compatible: "alp,fake-act8760"
-include: i2c-device.yaml

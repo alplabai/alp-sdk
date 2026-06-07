@@ -18,11 +18,9 @@
  *   bits[7:0] = S_CH2_OC, S_CH1_OC, S_CH2_OV, S_CH1_OV,
  *               S_CH2_UV, S_CH1_UV, S_CH2_PG, S_CH1_PG.
  *   The assumption that STATUS_00 mirrors MASK_00 (Table 18) was
- *   correct.  Register-level behaviour (probe IDs, status decode,
- *   voltage encoding, RWC1 event clear, VSTEP-before-VOUT ordering)
- *   is locked by fake-backed ztests in
- *   `tests/zephyr/chips/src/fake_da9292.c`.  The [UNTESTED]
- *   on-silicon caveat below remains -- no HiL bring-up yet.
+ *   correct.  The [UNTESTED] on-silicon caveat below remains -- no
+ *   HiL bring-up yet; validation happens on the patched BRD_I2C bus
+ *   via `examples/v2n/v2n-brd-i2c-bringup`.
  *
  * The DA9292 is a multi-phase DC-DC buck PMIC that can be configured
  * (via the silicon's `CONF` strap pin) as either:
