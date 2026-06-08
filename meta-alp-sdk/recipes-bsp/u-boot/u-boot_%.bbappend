@@ -31,3 +31,12 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI:append:rzv2n-family = " \
     file://0001-rzv2n-dev-EEPROM-gated-DEEPX-DX-M1-PCIe-bring-up.patch \
 "
+
+# Build U-Boot with the rzv2n-dev config, not the machine's stock rzv2n-evk.
+# The DEEPX bring-up patched above lives in board/renesas/rzv2n-dev/rzv2n-dev.c,
+# which is ONLY compiled under CONFIG_TARGET_RZV2N_DEV -- so the dev config is
+# mandatory, not cosmetic. It also reproduces the silicon-validated manual
+# bootloader (DEV target, env-in-MMC, Renesas clock driver off). The longer-term
+# rzv2n-dev-vs-rzv2n-evk production-config decision (clock driver, env storage)
+# is deliberately deferred -- see the alp-sdk-internal som-productization docs.
+UBOOT_CONFIG[rzv2n-evk] = "rzv2n-dev_defconfig"
