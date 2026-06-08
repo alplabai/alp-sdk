@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -129,6 +130,8 @@ def _alloc_serial(cfg: Cfg, bundle: dict):
     if proc.returncode != 0:
         return None, Step("serial", False, f"alloc failed: {proc.stderr.strip()}")
     serial = proc.stdout.strip()
+    if not serial:
+        return None, Step("serial", False, "alloc returned an empty serial")
     return serial, Step("serial", True, f"allocated serial {serial}", cmd)
 
 
@@ -198,6 +201,11 @@ def provision(cfg: Cfg) -> int:
     if not sv.ok:
         return done()
 
+    # --carrier selects the per-SoM HiL smoke set when --hil-spec isn't given.
+    if cfg.hil_spec is None and cfg.carrier:
+        root = cfg.alp_sdk_root or REPO
+        cfg.hil_spec = root / "tests" / "hil" / f"{bundle['sku'].lower()}-{cfg.carrier}"
+
     bootloader_only = bundle["status"].startswith("bootloader-only")
     image_skipped = False
     for comp in sorted(bundle["components"], key=lambda c: _FLASH_ORDER.get(c["role"], 9)):
@@ -225,6 +233,9 @@ def provision(cfg: Cfg) -> int:
     ts = _power_on_test(cfg)
     steps.append(ts)
     steps.append(_record(cfg, bundle, manifest, ts.ok))
+    # _eeprom created a temp dir that held the manifest through _record; clean it.
+    if manifest is not None:
+        shutil.rmtree(manifest.parent, ignore_errors=True)
     return done()
 
 
@@ -235,7 +246,7 @@ def _print(steps: list[Step], execute: bool) -> None:
         mark = "OK  " if s.ok else "FAIL"
         print(f"[{mark}] {s.name}: {s.message}")
         if s.command:
-            print(f"        would run: {' '.join(str(x) for x in s.command)}")
+            print(f"        cmd: {' '.join(str(x) for x in s.command)}")
     bad = [s.name for s in steps if not s.ok]
     print(f"--- {'all steps ok' if not bad else 'FAILED at: ' + ', '.join(bad)} ---")
 
