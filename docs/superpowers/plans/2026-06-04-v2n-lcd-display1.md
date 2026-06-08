@@ -1126,3 +1126,45 @@ Pre-requisites: Task 0 done (G0 = bridge I2C transport PASS), Tasks 1–6 built.
   e1m-v2n101-x-evk build (gpt1_2), backup `.pre-gpt12fix` alongside
   the older `.pre-lcd`/`.wifi` set; bl_power came up 4 (blanked) this
   boot — forced on via sysfs for the verification.
+
+## Bench log part 4 — 2026-06-08 (verdict reversal + display up)
+
+- **The 2026-06-06 "ball-open" verdict is RETRACTED — the AH15↔BL_PWM
+  net is CONNECTED.** The open theory rested on TP76 reading flat while
+  the die drove the pad — exactly the scope-probe-contact artifact
+  flagged as an open item in part 3 ("scope testpoint reads flat while
+  the pad provably toggles"). Settled scope-independently: driving PA5
+  push-pull from `/dev/mem` (`pa5_drive.py`) and metering TP76 with a
+  DMM, the CNTRL net tracks the pad **bidirectionally** (PA5 high → TP76
+  ~1.8 V; PA5 low → TP76 0 V). A live 5 kHz GPT12 PWM on PA5 also reaches
+  TP76 on the scope. The P52 witness had only proven scope ch C4 alive,
+  never that C2 contacted TP76.
+- **Real G4 fault = the on-SoM KTD2801 boost (U12) is dead** — downstream
+  of CNTRL, not the silicon→net path. CNTRL is a hard 1.8 V (and a clean
+  5 kHz PWM) yet zero LED current / no glow; per the KTD datasheet a
+  constant-high CTRL = full brightness, so the boost/power stage is gone
+  (the CNTRL *input* pin is healthy — clean 0↔1.8 push-pull, normal
+  load). Software is exonerated end-to-end. `alp-sdk-internal#1`
+  corrected (verdict reversed; reball / P52-bodge moot).
+- **Persistent kernel PWM**: redeployed the real LCD kernel + a fresh
+  gpt1_2 dtb; `13020200.gpt` + `pwm-backlight` + `pwmchip0` probe, PA5
+  muxed func9. It boots *blanked* (`bl_power=4`) because the DSI pipeline
+  defers (next bullet); an enabled `alp-bl-pwm.service` unblanks at boot
+  so the 5 kHz ~50 % PWM survives reboot (proven across two cold-cycles).
+- **Display brought UP + root-caused the deferral.** `card0`/`fb0` never
+  appeared because `i2c 8-0070` (the `gpio-gd32-bridge` gpiochip) stays
+  in deferred probe when the GD32 is down — its `probe()` returned
+  `-EPROBE_DEFER` on a failed handshake, which (via the panel
+  `reset-gpios` consumer) held the entire DSI/DU pipeline hostage. A
+  no-reset dtb confirmed the pipeline is otherwise healthy: `card0` +
+  `card0-DSI-1 connected` + `/dev/fb0` 720×1280. **Fix (patch 0003):**
+  the driver now registers the gpiochip unconditionally (best-effort
+  handshake, graceful per-op failure), so the standard reset-gpios dtb is
+  robust to a down bridge — no bench-only no-reset dtb needed.
+  Compile-validated; on-board validation of the fixed driver + standard
+  dtb is the one remaining bench step.
+- **Still dark on this unit**: U12's boost is physically dead, so the
+  panel won't light until U12 is repaired or the healthy Display-2 boost
+  (`DISP2_BL_PWM` = GD32 PC10) is bodged onto the DISP1 LED string. The
+  pipeline, panel (DCS init OK, connector `connected`), and PWM are all
+  proven healthy.
