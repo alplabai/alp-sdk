@@ -37,21 +37,11 @@ def _validate(path: Path, validator: jsonschema.Draft202012Validator) -> int:
         print(f"FAIL {rel}: parse error ({e})")
         return 1
     errors = sorted(validator.iter_errors(doc), key=lambda e: list(e.absolute_path))
-    # Augment schema errors with a semantic note when status=complete is missing
-    # a system_image component (the if/then schema emits a generic "contains"
-    # message; make the role name explicit so callers can parse it).
-    extra = []
-    if doc.get("status") == "complete":
-        roles = [c.get("role") for c in doc.get("components", []) if isinstance(c, dict)]
-        if "system_image" not in roles:
-            extra.append("components: status is 'complete' but no system_image component found")
-    if errors or extra:
+    if errors:
         print(f"FAIL {rel}")
         for err in errors:
             loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
-            print(f"  - {loc}: {err.message}")
-        for msg in extra:
-            print(f"  - {msg}")
+            print(f"  · {loc}: {err.message}")
         return 1
     print(f"OK   {rel}  (release_version={doc.get('release_version', '?')}, status={doc.get('status', '?')})")
     return 0

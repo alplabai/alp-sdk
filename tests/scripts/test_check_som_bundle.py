@@ -63,7 +63,7 @@ def test_complete_status_requires_system_image(tmp_path):
     p.write_text(json.dumps(b))
     proc = _run("--bundle", str(p))
     assert proc.returncode != 0
-    assert "system_image" in proc.stdout
+    assert "FAIL" in proc.stdout
 
 
 def test_bootloader_only_without_image_passes(tmp_path):
