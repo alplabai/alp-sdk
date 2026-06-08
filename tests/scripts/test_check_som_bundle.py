@@ -92,3 +92,15 @@ def test_bad_sha256_fails(tmp_path):
     p.write_text(json.dumps(b))
     proc = _run("--bundle", str(p))
     assert proc.returncode != 0
+
+
+def test_bad_created_date_fails(tmp_path):
+    # format:date must be enforced (format_checker), not just annotated:
+    # an impossible date and a timestamp both have to be rejected.
+    for bad in ("2026-13-45", "2026-06-08T12:00:00Z"):
+        b = _valid_bundle()
+        b["created"] = bad
+        p = tmp_path / "bundle.json"
+        p.write_text(json.dumps(b))
+        proc = _run("--bundle", str(p))
+        assert proc.returncode != 0, f"{bad!r} should be rejected\n{proc.stdout}"

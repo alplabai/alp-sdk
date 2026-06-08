@@ -56,7 +56,8 @@ def main() -> int:
 
     schema = json.loads(args.schema.read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator.check_schema(schema)
-    validator = jsonschema.Draft202012Validator(schema)
+    validator = jsonschema.Draft202012Validator(
+        schema, format_checker=jsonschema.FormatChecker())
 
     targets = args.bundle or [EXAMPLE]
     failures = sum(_validate(p, validator) for p in targets)

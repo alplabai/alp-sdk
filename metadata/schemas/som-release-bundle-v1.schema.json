@@ -23,7 +23,7 @@
         "required": ["role", "file", "sha256", "size_bytes", "flash_target"],
         "properties": {
           "role": { "type": "string", "enum": ["bl2", "fip", "system_image"] },
-          "file": { "type": "string" },
+          "file": { "type": "string", "minLength": 1 },
           "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "size_bytes": { "type": "integer", "minimum": 1 },
           "flash_target": { "type": "string", "enum": ["xspi:mtd0", "xspi:mtd1", "emmc"] }
@@ -62,7 +62,7 @@
       "description": "Reserved for the ECDSA-P256 signing follow-up; null until then."
     }
   },
-  "if": { "properties": { "status": { "const": "complete" } } },
+  "if": { "required": ["status"], "properties": { "status": { "const": "complete" } } },
   "then": {
     "properties": {
       "components": {
