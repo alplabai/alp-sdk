@@ -21,6 +21,8 @@ on:
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
       - 'scripts/lint_doc_yaml_fragments.py'
+      - 'scripts/check_som_bundle.py'
+      - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
       - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
@@ -35,6 +37,8 @@ on:
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
       - 'scripts/lint_doc_yaml_fragments.py'
+      - 'scripts/check_som_bundle.py'
+      - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
       - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
@@ -260,6 +264,9 @@ jobs:
 
       - name: Gate — sw_fallback.c files carry Cost + Performance tags
         run: python3 scripts/check_sw_fallback_tags.py
+
+      - name: Gate — SoM-release bundle example validates against the v1 schema
+        run: python3 scripts/check_som_bundle.py
 
       - name: Gate — chip driver <-> metadata manifest parity
         run: python3 scripts/check_chip_manifest_parity.py
