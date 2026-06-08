@@ -113,9 +113,13 @@ bbappend (same mechanism as the RSCI7/RIIC8 clk patch and the
    `reset-gpios` flow.
 2. **`gpio-gd32-bridge.c` driver patch** — I2C client driver registering
    a gpiochip (no irqchip). Line space = the GD32 bridge GPIO pin
-   namespace; DT child of `&i2c8` at `reg = <0x70>`. Probe defers until
-   the bridge answers (so panel/touch probe ordering is safe). Get/set
-   map 1:1 onto `CMD_GPIO_READ`/`CMD_GPIO_WRITE` frames.
+   namespace; DT child of `&i2c8` at `reg = <0x70>`. Probe runs a
+   best-effort version handshake (logged) but registers the gpiochip
+   **unconditionally** — a `-EPROBE_DEFER` would hold every consumer of
+   these lines (notably the panel reset), and thus the whole DSI/DU
+   pipeline, hostage to the bridge's liveness. Get/set map 1:1 onto
+   `CMD_GPIO_READ`/`CMD_GPIO_WRITE` frames and fail gracefully
+   (`dev_warn`) when the bridge is down.
 3. **`goodix.c` polled-mode patch** — when the GT911 node has no
    `interrupts` property, fall back to `input_setup_polling` (~60 Hz
    poll). Touch INT physically terminates at the GD32 and cannot raise
@@ -162,14 +166,22 @@ bbappend (same mechanism as the RSCI7/RIIC8 clk patch and the
 
 ## 5. Data flow / error handling
 
-- Boot: `gd32_gpio` probes on i2c8 (defers until the bridge ACKs) →
-  panel probe finds reset GPIO → DSI host powers D-PHY → panel `prepare()`
-  toggles reset, sends HX8394 init over DCS LP → video mode on →
-  `pwm-backlight` ramps. GT911 probes on i2c2, resets via bridge GPIO,
-  polls at ~60 Hz.
-- Bridge unreachable (GD32 unflashed/held in reset): gpiochip defers →
-  panel/touch defer; the rest of the system boots normally; clear
-  one-line dmesg breadcrumb. No panics, no silent skips.
+- Boot: `gd32_gpio` registers its gpiochip on i2c8 (best-effort
+  handshake, **no defer**) → panel probe finds reset GPIO → DSI host
+  powers D-PHY → panel `prepare()` toggles reset, sends HX8394 init over
+  DCS LP → video mode on → `pwm-backlight` ramps. GT911 probes on i2c2,
+  resets via bridge GPIO, polls at ~60 Hz.
+- Bridge unreachable (GD32 unflashed/held in reset): the gpiochip still
+  registers; GPIO ops fail gracefully (`dev_warn`). The panel reset
+  becomes a best-effort no-op, so the panel / DSI / DU **still come up**
+  (the hx8394 driver tolerates a missing reset); only the bridge-routed
+  lines are inert until the GD32 answers. The equivalent end-state was
+  bench-validated 2026-06-08 (a no-reset dtb brought `card0` + `fb0` up
+  with the GD32 down, proving the panel needs no working reset; the
+  hx8394 `prepare()` already tolerates a failed reset toggle). On-silicon
+  validation of *this* driver fix paired with the standard reset-gpios
+  dtb is the one remaining bench step. No display defer, no panics, no
+  silent skips.
 - Panel absent: HX8394 init times out → probe fails gracefully; DRM
   pipeline stays idle; Weston falls back to headless.
 - DPMS off/on and suspend/resume re-run the reset/init sequence through

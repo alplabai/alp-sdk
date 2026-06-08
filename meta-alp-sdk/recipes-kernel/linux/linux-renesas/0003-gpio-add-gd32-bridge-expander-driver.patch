@@ -20,10 +20,13 @@ output permanently (until GD32 reset). direction_input() returns
 -EPERM on a line that has ever been written; this matches the
 bridge firmware hardware model.
 
-Probe-defer rationale: if the GD32 is unflashed or held in reset,
-the PING handshake will NAK; returning -EPROBE_DEFER allows the
-kernel to retry once the bridge comes up, rather than hard-failing
-the panel and touch drivers that depend on these GPIO lines.
+Bridge-liveness handling: the GD32 may be unflashed, held in reset, or
+its BRD_I2C bus wedged at boot. probe() runs a best-effort GET_VERSION
+handshake (result logged) but registers the gpiochip unconditionally.
+Returning -EPROBE_DEFER here would also defer every consumer of these
+lines -- notably the Display-1 panel reset -- holding the entire DSI/DU
+pipeline hostage to the bridge's liveness. Individual GPIO ops instead
+fail gracefully (dev_warn) and begin working once the bridge answers.
 
 Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 
@@ -31,9 +34,8 @@ Signed-off-by: Alp Lab AB
 ---
  drivers/gpio/Kconfig            |   9 ++
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 237 ++++++++++++++++++++++++++++++++
- 3 files changed, 247 insertions(+)
- create mode 100644 drivers/gpio/gpio-gd32-bridge.c
+ drivers/gpio/gpio-gd32-bridge.c | 245 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 255 insertions(+)
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
 index 74d8b949ce36..eefc447b2148 100644
@@ -42,7 +44,7 @@ index 74d8b949ce36..eefc447b2148 100644
 @@ -1009,6 +1009,15 @@ config GPIO_ADNP
  	  enough to represent all pins, but the driver will assume a
  	  register layout for 64 pins (8 registers).
-
+ 
 +config GPIO_GD32_BRIDGE
 +	tristate "Alp Lab GD32 IO-MCU bridge GPIO expander"
 +	depends on I2C && OF
@@ -69,10 +71,10 @@ index e331e951ef2e..3ba5cc2f2193 100644
  obj-$(CONFIG_GPIO_GRGPIO)		+= gpio-grgpio.o
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
 new file mode 100644
-index 000000000000..d29bd4e07de5
+index 000000000000..acc6ca9c7966
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,237 @@
+@@ -0,0 +1,245 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -260,20 +262,28 @@ index 000000000000..d29bd4e07de5
 +	gd32->client = client;
 +	mutex_init(&gd32->lock);
 +
-+	/* Probe handshake: PING, then version gate (wire major must be 0). */
-+	ret = gd32_bridge_xfer(gd32, GD32_CMD_PING, NULL, 0, NULL, 0);
-+	if (ret)
-+		return dev_err_probe(&client->dev, -EPROBE_DEFER,
-+				     "bridge not answering (%d)\n", ret);
++	/*
++	 * Best-effort handshake: log the bridge protocol if it answers, but
++	 * register the gpiochip regardless of the result.  The GD32 may be
++	 * unflashed, held in reset, or its BRD_I2C bus wedged at boot; a
++	 * -EPROBE_DEFER here would also defer every consumer of these lines
++	 * -- notably the Display-1 panel reset -- holding the whole DSI/DU
++	 * pipeline hostage to the bridge's liveness.  Expose the gpiochip
++	 * immediately instead; individual GPIO ops fail gracefully (see
++	 * gd32_bridge_gpio_get/_set) and start working once the bridge is up.
++	 */
 +	ret = gd32_bridge_xfer(gd32, GD32_CMD_GET_VERSION, NULL, 0, ver, 3);
 +	if (ret)
-+		return dev_err_probe(&client->dev, ret, "GET_VERSION failed\n");
-+	if (ver[0] != 0)
-+		return dev_err_probe(&client->dev, -ENODEV,
-+				     "unsupported bridge protocol %u.%u.%u\n",
-+				     ver[0], ver[1], ver[2]);
-+	dev_info(&client->dev, "GD32 bridge protocol %u.%u.%u\n",
-+		 ver[0], ver[1], ver[2]);
++		dev_warn(&client->dev,
++			 "bridge not answering (%d); registering gpiochip anyway -- GPIO ops will error until it is up\n",
++			 ret);
++	else if (ver[0] != 0)
++		dev_warn(&client->dev,
++			 "unsupported bridge protocol %u.%u.%u; registering anyway\n",
++			 ver[0], ver[1], ver[2]);
++	else
++		dev_info(&client->dev, "GD32 bridge protocol %u.%u.%u\n",
++			 ver[0], ver[1], ver[2]);
 +
 +	gd32->chip.label	  = "gd32-bridge-gpio";
 +	gd32->chip.parent	  = &client->dev;
