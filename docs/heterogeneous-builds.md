@@ -281,6 +281,28 @@ dataclass but never land in the manifest; the cache state in
 `build/.alp-build-state.json` is internal and not part of the
 declarative output either.
 
+**Manifest contract (IDE / tooling).**  `system-manifest.yaml` is the
+single derived projection of `board.yaml` — one `slices[]` entry per
+per-core image (its `os`, `build_dir`, `output_artefact`,
+`board`/`machine`, and `flash_method`/`flash_args`), plus the `ipc:`
+links and `helper_mcus:`.  Tools — the alp-sdk-vscode extension, CI,
+the flasher — read **this** to manage a multi-image project instead of
+re-deriving folder layout and build wiring from `board.yaml` + the SoM
+presets.  Its shape is pinned by
+[`metadata/schemas/system-manifest-v1.schema.json`](../metadata/schemas/system-manifest-v1.schema.json);
+`scripts/check_system_manifest.py` validates the orchestrator's output
+against it so the emitter and the contract move in lockstep.  Validate
+a real build's manifest with:
+
+```bash
+python3 scripts/check_system_manifest.py --manifest build/system-manifest.yaml
+```
+
+This pairs with the build plan below: the **manifest** is the *result*
+(what was/your-to-be built, per image) that an IDE reads to drive
+build/run/debug/flash; the **build plan** is the *write-free recipe* to
+drive the build itself.
+
 **Machine-readable build plan.**  Tooling that wants to drive the
 build itself — the `alp` CLI / IDE extension does — consumes the plan
 instead of re-deriving it:
