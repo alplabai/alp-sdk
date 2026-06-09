@@ -49,27 +49,34 @@ RPMsg protocol details (OpenAMP docs).
 
 ## 3. Project layout
 
-A dual-app project keeps each half in its own sub-directory.
-Sub-directory names match the `cores:` keys in `board.yaml` exactly —
-the orchestrator uses them to route generated config and find source
-trees.
+A multi-image project keeps each per-core image in its own
+sub-directory.  **The canonical layout names each app folder after its
+core ID** (`m33_sm/`, `a55_cluster/`) — that keeps the project
+self-describing and lets an IDE map cores ↔ folders by convention.
+What actually binds a core to its folder is the single source, the
+`cores.<id>.app:` path in `board.yaml`; the folder name is convention,
+not magic, so you *may* alias one when a name reads better (this
+example uses `linux/` for the a55_cluster's Yocto side).
 
 ```
 examples/multicore/rpmsg-v2n/
 ├── board.yaml                       (declares a55_cluster + m33_sm)
 ├── README.md
-├── linux/                           (a55_cluster's app)
+├── linux/                           (a55_cluster's app — aliased via app: ./linux)
 │   ├── CMakeLists.txt
 │   └── src/main.c                   (consumer using <alp/rpc.h>)
-└── m33_sm/                          (m33_sm's app)
+└── m33_sm/                          (m33_sm's app — folder == core ID, the canonical convention)
     ├── CMakeLists.txt
     ├── prj.conf
     └── src/main.c                   (producer using <alp/rpc.h>)
 ```
 
-`linux/` and `m33_sm/` are conventions, not magic — the
-`cores.<id>.app:` path in `board.yaml` binds them.  Matching the
-core ID keeps the layout easy to read.
+The `cores.<id>.app:` path is the binding; `m33_sm/` matches its core
+ID (canonical), while `linux/` is an explicit alias set by
+`app: ./linux`.  Omitting `app:` entirely is also valid — the core
+then builds the SoM's stock default app (`alp-image-edge` on a Linux
+core, `alp-stock-shim` on a Zephyr core), so a bare board.yaml still
+produces working firmware.
 
 Single-OS examples don't change shape: they keep their flat `src/`
 layout and declare a single core in `board.yaml`.  The sub-directory
