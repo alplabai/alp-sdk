@@ -189,20 +189,24 @@ MACHINE = "e1m-nx9101-a55"
 bitbake alp-image-edge
 ```
 
-## Per-machine inference runtime install
+## Per-machine inference runtime
 
-The SDK's `<alp/inference.h>` compiles in every dispatcher the SoM
-preset's `capabilities:` block declares (silicon-determined), so
-each machine pulls the matching userspace runtime via the
-`alp-sdk` recipe's `DEPENDS:append:<machine>` lines.
+The SDK's `<alp/inference.h>` compiles in the dispatcher for every
+backend the SoM preset's `capabilities:` block declares
+(silicon-determined), but the **vendor NPU runtimes are not build-time
+dependencies of the `alp-sdk` library** — the Yocto build links only
+the dispatcher + portable stubs.  Where a runtime userspace package
+exists, the **image** recipe installs it (e.g. `alp-image-edge`'s
+`IMAGE_INSTALL:append:e1m-v2m101 = "dx-rt"`); DRP-AI3 is driven through
+the in-kernel driver + UAPI headers from `meta-rz-drpai` (see below).
 
-| MACHINE              | Runtime installed                       | Source                                     |
-|----------------------|------------------------------------------|--------------------------------------------|
-| `e1m-v2n101-a55`     | `drpai-driver`                           | Renesas RZ/V2N on-chip DRP-AI3             |
-| `e1m-v2n102-a55`     | `drpai-driver`                           | Same as V2N101 (memory variant)            |
-| `e1m-v2m101-a55`     | `drpai-driver` + `dxm1-runtime`          | V2N silicon + DEEPX DX-M1 NPU on-module    |
-| `e1m-v2m102-a55`     | `drpai-driver` + `dxm1-runtime`          | Same as V2M101 (memory variant)            |
-| `e1m-nx9101-a55`     | `ethosu-driver-library`                  | NXP i.MX 93 on-die Ethos-U65               |
+| MACHINE              | NPU backend            | Runtime source                              |
+|----------------------|------------------------|---------------------------------------------|
+| `e1m-v2n101-a55`     | DRP-AI3                | in-kernel driver + `meta-rz-drpai` headers  |
+| `e1m-v2n102-a55`     | DRP-AI3                | Same as V2N101 (memory variant)             |
+| `e1m-v2m101-a55`     | DRP-AI3 + DEEPX DX-M1  | DRP-AI3 as above; `dx-rt` via the image     |
+| `e1m-v2m102-a55`     | Same as V2M101         | Same as V2M101 (memory variant)             |
+| `e1m-nx9101-a55`     | Ethos-U65              | NXP i.MX 93 Ethos-U userspace via the image |
 
 Customer apps pick the active backend per-handle at runtime via
 `alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or
