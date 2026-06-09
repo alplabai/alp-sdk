@@ -3,7 +3,7 @@
   "sku": "E1M-V2N101",
   "family": "v2n",
   "hw_rev": "r1",
-  "release_version": "som-1.0.0",
+  "release_version": "som-0.2.0",
   "created": "2026-06-08",
   "status": "complete",
   "components": [
