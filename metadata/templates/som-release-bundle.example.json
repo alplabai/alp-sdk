@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "sku": "E1M-V2N101",
+  "family": "v2n",
+  "hw_rev": "r1",
+  "release_version": "som-0.2.0",
+  "created": "2026-06-08",
+  "status": "complete",
+  "components": [
+    { "role": "bl2", "file": "artifacts/bl2_bp_spi-rzv2n-evk.bin", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "size_bytes": 131072, "flash_target": "xspi:mtd0" },
+    { "role": "fip", "file": "artifacts/fip-rzv2n-evk.bin", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size_bytes": 1048576, "flash_target": "xspi:mtd1" },
+    { "role": "system_image", "file": "artifacts/core-image-weston-rzv2n-evk.wic.gz", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size_bytes": 905969664, "flash_target": "emmc" }
+  ],
+  "provenance": {
+    "toolchain": "gcc-13.4.0",
+    "u_boot_srcrev": "bcf29d98",
+    "tf_a_srcrev": "4092464",
+    "uboot_defconfig": "rzv2n-dev_defconfig",
+    "patches": ["pmic-removal", "add-ether", "deepx"],
+    "equivalence": "functional-equiv modulo gcc",
+    "equivalence_ref": "bootloader-equivalence-verdict.md"
+  },
+  "signature": null
+}
