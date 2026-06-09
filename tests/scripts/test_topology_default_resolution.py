@@ -46,6 +46,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_orchestrate import (                       # noqa: E402
+    OrchestratorError,
     load_board_yaml,
 )
 
@@ -269,6 +270,67 @@ def test_explicit_os_baremetal_overrides_topology_zephyr(tmp_path: Path) -> None
     path = _write_board(tmp_path, body)
     project = load_board_yaml(path)
     assert project.cores["m55_hp"].os == "baremetal"
+
+
+# ---------------------------------------------------------------------
+# 3b. The OS runtime is class-derived and NOT cross-overridable (issue #95).
+# A Cortex-A core runs Yocto/Linux; a Cortex-M core runs Zephyr/RTOS. A
+# board.yaml may disable a core (`off`) or drop it to `baremetal`, but it
+# must NOT select the *other* class's OS. baremetal stays allowed.
+# ---------------------------------------------------------------------
+
+
+def test_cross_class_zephyr_on_a_core_rejected(tmp_path: Path) -> None:
+    body = """
+        som:
+          sku: E1M-V2N101
+
+        cores:
+          a55_cluster:
+            os: zephyr
+            app: ./linux
+          m33_sm:
+            app: ./m33
+    """
+    with pytest.raises(OrchestratorError, match="not selectable|runtime"):
+        load_board_yaml(_write_board(tmp_path, body))
+
+
+def test_cross_class_yocto_on_m_core_rejected(tmp_path: Path) -> None:
+    body = """
+        som:
+          sku: E1M-V2N101
+
+        cores:
+          a55_cluster:
+            app: ./linux
+            image: alp-image-edge
+          m33_sm:
+            os: yocto
+            app: ./m33
+    """
+    with pytest.raises(OrchestratorError, match="not selectable|runtime"):
+        load_board_yaml(_write_board(tmp_path, body))
+
+
+def test_class_matching_explicit_os_still_allowed(tmp_path: Path) -> None:
+    # an explicit os that MATCHES the core class is fine (redundant, not a
+    # cross-class override) -- this is what shipped board.yamls/tests use.
+    body = """
+        som:
+          sku: E1M-V2N101
+
+        cores:
+          a55_cluster:
+            os: yocto
+            app: ./linux
+          m33_sm:
+            os: zephyr
+            app: ./m33
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    assert project.cores["a55_cluster"].os == "yocto"
+    assert project.cores["m33_sm"].os == "zephyr"
 
 
 # ---------------------------------------------------------------------
