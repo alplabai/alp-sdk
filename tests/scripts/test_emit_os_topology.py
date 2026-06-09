@@ -102,6 +102,23 @@ def test_emit_os_topology_is_valid_json(tmp_path: Path) -> None:
     assert ids == sorted(ids)
 
 
+def test_allowed_os_is_derived_from_the_schema(tmp_path: Path) -> None:
+    # unification: the value-set must come from the board schema's enum,
+    # not a hardcoded copy in the code (else the two can drift).
+    schema = json.loads(
+        (REPO / "metadata" / "schemas" / "board.schema.json").read_text(encoding="utf-8"))
+    enum = schema["$defs"]["core_entry"]["properties"]["os"]["enum"]
+    body = """
+        som:
+          sku: E1M-V2N101
+        cores:
+          m33_sm:
+            app: ./src
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    assert core_os_topology(project)["allowed_os"] == enum
+
+
 def test_cli_emit_os_topology(tmp_path: Path) -> None:
     body = """
         som:

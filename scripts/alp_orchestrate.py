@@ -25,6 +25,7 @@ Reference: docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-desi
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -80,9 +81,17 @@ def _default_os_from_core_type(core_type: str) -> str:
     return "off"
 
 
-# The runtimes a core's `os:` may resolve to; mirrors board.schema.json
-# cores.<core>.os + Slice.os.  `off` skips the core (no slice is built).
-OS_CHOICES = ("zephyr", "yocto", "baremetal", "off")
+@functools.lru_cache(maxsize=None)
+def _core_os_choices() -> tuple[str, ...]:
+    """The runtimes a core's `os:` may resolve to, read from the board
+    schema's `$defs/core_entry/properties/os` enum.
+
+    Derived (not re-typed) so the value-set has exactly one source of truth
+    and cannot drift between the schema and the code.  `off` skips the core
+    (no slice is built).
+    """
+    schema = json.loads(BOARD_SCHEMA.read_text(encoding="utf-8"))
+    return tuple(schema["$defs"]["core_entry"]["properties"]["os"]["enum"])
 
 
 def core_os_topology(project: "BoardProject") -> dict[str, Any]:
@@ -123,7 +132,7 @@ def core_os_topology(project: "BoardProject") -> dict[str, Any]:
     return {
         "schema_version": 1,
         "sku":            project.sku,
-        "allowed_os":     list(OS_CHOICES),
+        "allowed_os":     list(_core_os_choices()),
         "cores":          rows,
     }
 
@@ -817,7 +826,7 @@ def _enforce_loader_rules(slice_: Slice) -> None:
             raise OrchestratorError(
                 f"core '{slice_.core_id}': os: yocto requires either "
                 f"`app:` (custom recipe) or `image:` (stock recipe)")
-    elif slice_.os not in ("zephyr", "yocto", "baremetal", "off"):
+    elif slice_.os not in _core_os_choices():
         raise OrchestratorError(
             f"core '{slice_.core_id}': unknown os '{slice_.os}'")
 
