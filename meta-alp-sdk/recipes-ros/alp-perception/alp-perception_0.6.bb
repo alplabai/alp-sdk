@@ -48,7 +48,7 @@ ROS_BUILDTOOL_DEPENDS = "ament-cmake-native"
 ROS_BUILDTOOL_EXPORT_DEPENDS = ""
 ROS_EXEC_DEPENDS = "${ROS_BUILD_DEPENDS}"
 
-DEPENDS = "${ROS_BUILD_DEPENDS} ${ROS_BUILDTOOL_DEPENDS} alp-sdk"
+DEPENDS = "${ROS_BUILD_DEPENDS} ${ROS_BUILDTOOL_DEPENDS} alp-sdk alp-chips"
 RDEPENDS:${PN} = "${ROS_EXEC_DEPENDS} alp-sdk"
 
 # The DEEPX DX-M1 runtime (dx-rt) is NOT a dependency of this node.

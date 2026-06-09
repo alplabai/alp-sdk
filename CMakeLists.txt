@@ -93,6 +93,49 @@ endif()
 add_library(alp::sdk_headers ALIAS alp_sdk_headers)
 
 # ---------------------------------------------------------------------
+# Chip-driver collection (libalp_chips)
+#
+# chips/<part>/<part>.c are OS-agnostic C drivers that call back into
+# <alp/peripheral.h> (alp_i2c_* / alp_spi_* / ...), resolved at final
+# link against libalp_sdk.  Each driver is opt-in via a per-chip
+# ALP_SDK_CHIP_<NAME> toggle (default OFF) so a consumer builds exactly
+# the drivers its board populates.  The Yocto `alp-chips` recipe drives
+# this with ALP_BUILD_CHIPS_ONLY=ON + the toggles, emitting a static
+# libalp_chips.a that apps (e.g. the alp_perception ROS node) link
+# alongside libalp_sdk.so.
+# ---------------------------------------------------------------------
+set(ALP_SDK_CHIP_LIST
+    tcal9538 ina236 tas2563 lsm6dso bmi323 bmp581 icm42670
+    ssd1306 ssd1331 tmp112 rv3028c7 optiga_trust_m eeprom_24c128
+    ov5640 cam_mux_pi3wvr626 ublox_neo_m9n
+    CACHE INTERNAL "Chip drivers selectable via ALP_SDK_CHIP_<NAME>")
+option(ALP_BUILD_CHIPS_ONLY
+    "Build the libalp_chips static archive from the enabled chip drivers (Yocto alp-chips recipe)." OFF)
+foreach(_chip IN LISTS ALP_SDK_CHIP_LIST)
+    string(TOUPPER "${_chip}" _chip_uc)
+    option(ALP_SDK_CHIP_${_chip_uc} "Build the ${_chip} driver into libalp_chips" OFF)
+endforeach()
+
+if(ALP_BUILD_CHIPS_ONLY)
+    add_library(alp_chips STATIC)
+    target_link_libraries(alp_chips PUBLIC alp_sdk_headers)
+    set(_alp_chips_enabled "")
+    foreach(_chip IN LISTS ALP_SDK_CHIP_LIST)
+        string(TOUPPER "${_chip}" _chip_uc)
+        if(ALP_SDK_CHIP_${_chip_uc})
+            target_sources(alp_chips PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/chips/${_chip}/${_chip}.c)
+            list(APPEND _alp_chips_enabled ${_chip})
+        endif()
+    endforeach()
+    message(STATUS "alp-sdk: libalp_chips drivers: ${_alp_chips_enabled}")
+    include(GNUInstallDirs)
+    install(TARGETS alp_chips ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/alp/chips
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/alp)
+endif()
+
+# ---------------------------------------------------------------------
 # Implementation library
 #
 # In Zephyr-module mode the per-backend CMakeLists uses zephyr_library_*

@@ -52,6 +52,7 @@ PACKAGECONFIG ??= " \
     tcal9538 ina236 tas2563 lsm6dso bmi323 bmp581 \
     icm42670 ssd1306 ssd1331 tmp112 rv3028c7 \
     optiga_trust_m eeprom_24c128 ov5640 cam_mux_pi3wvr626 \
+    ublox_neo_m9n \
 "
 
 PACKAGECONFIG[tcal9538]            = "-DALP_SDK_CHIP_TCAL9538=ON,-DALP_SDK_CHIP_TCAL9538=OFF"
@@ -69,6 +70,7 @@ PACKAGECONFIG[optiga_trust_m]      = "-DALP_SDK_CHIP_OPTIGA_TRUST_M=ON,-DALP_SDK
 PACKAGECONFIG[eeprom_24c128]       = "-DALP_SDK_CHIP_EEPROM_24C128=ON,-DALP_SDK_CHIP_EEPROM_24C128=OFF"
 PACKAGECONFIG[ov5640]              = "-DALP_SDK_CHIP_OV5640=ON,-DALP_SDK_CHIP_OV5640=OFF"
 PACKAGECONFIG[cam_mux_pi3wvr626]   = "-DALP_SDK_CHIP_CAM_MUX_PI3WVR626=ON,-DALP_SDK_CHIP_CAM_MUX_PI3WVR626=OFF"
+PACKAGECONFIG[ublox_neo_m9n]       = "-DALP_SDK_CHIP_UBLOX_NEO_M9N=ON,-DALP_SDK_CHIP_UBLOX_NEO_M9N=OFF"
 
 FILES:${PN}-staticdev = "${libdir}/libalp_chips.a"
 FILES:${PN}-dev       = "${includedir}/alp/chips/"
