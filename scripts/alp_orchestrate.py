@@ -80,6 +80,62 @@ def _default_os_from_core_type(core_type: str) -> str:
     return "off"
 
 
+# The runtimes a core's `os:` may resolve to; mirrors board.schema.json
+# cores.<core>.os + Slice.os.  `off` skips the core (no slice is built).
+OS_CHOICES = ("zephyr", "yocto", "baremetal", "off")
+
+
+def core_os_topology(project: "BoardProject") -> dict[str, Any]:
+    """Per-core OS facts for an IDE / tool (issue #95).
+
+    For each resolved core, reports the SoC-derived *natural* OS
+    (`_default_os_from_core_type`: cortex-m* -> zephyr, cortex-a* -> yocto),
+    the *effective* OS after the SoM-preset + board.yaml overrides, whether
+    that differs from natural, and where the override came from
+    (`board.yaml` | `som-preset` | `soc-default`).  Lets the Board
+    Configurator render "natural: zephyr (override?)" instead of guessing
+    the M/A -> OS mapping itself.
+    """
+    soc_types = {
+        c["id"]: c.get("type", "")
+        for c in (project.soc_spec.get("cores") or []) if "id" in c
+    }
+    board_cores = project.raw.get("cores") or {}
+    som_topology = project.som_preset.get("topology") or {}
+    rows: list[dict[str, Any]] = []
+    for core_id, sl in sorted(project.cores.items()):
+        core_type = soc_types.get(core_id, "")
+        natural = _default_os_from_core_type(core_type)
+        if (board_cores.get(core_id) or {}).get("os"):
+            source = "board.yaml"
+        elif (som_topology.get(core_id) or {}).get("os"):
+            source = "som-preset"
+        else:
+            source = "soc-default"
+        rows.append({
+            "core_id":      core_id,
+            "core_type":    core_type,
+            "natural_os":   natural,
+            "effective_os": sl.os,
+            "overridden":   sl.os != natural,
+            "source":       source,
+        })
+    return {
+        "schema_version": 1,
+        "sku":            project.sku,
+        "allowed_os":     list(OS_CHOICES),
+        "cores":          rows,
+    }
+
+
+def emit_os_topology(project: "BoardProject") -> str:
+    """JSON for `alp_project.py --emit os-topology` (see core_os_topology).
+
+    Sorted keys + a trailing newline so the output is byte-deterministic.
+    """
+    return json.dumps(core_os_topology(project), indent=2) + "\n"
+
+
 class OrchestratorError(RuntimeError):
     """Raised when the orchestrator can't resolve / build a project.
 
