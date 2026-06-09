@@ -78,6 +78,8 @@ into the topic-specific docs.
   protocol (research-only).
 - [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
+- [provisioning.md](provisioning.md) — provisioning a SoM from a
+  versioned release bundle (the `provision_som.py` orchestrator + runbook).
 - [os-support-matrix.md](os-support-matrix.md) — which OS runs
   on which core, per SoM.
 - [recommended-libraries.md](recommended-libraries.md) — curated
@@ -87,6 +89,8 @@ into the topic-specific docs.
 ## Security & release
 
 - [secure-boot.md](secure-boot.md) — MCUboot + OPTIGA flow.
+- [som-release-signing.md](som-release-signing.md) — verifying SoM-release
+  bundle provenance (ECDSA-P256; a separate concern from device secure-boot).
 - [threat-model.md](threat-model.md) — adversary classes, asset
   classes, per-header threat catalogue.
 - [security-advisories.md](security-advisories.md),
