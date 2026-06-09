@@ -210,6 +210,9 @@ if(ALP_SDK_BUILD_SHARED AND NOT DEFINED ZEPHYR_BASE)
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    # alp/chips/ headers are owned by the alp-chips package; exclude them
+    # so a sysroot with both alp-sdk and alp-chips has no file collision.
     install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/alp
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        PATTERN "chips" EXCLUDE)
 endif()
