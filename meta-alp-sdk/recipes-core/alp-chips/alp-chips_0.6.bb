@@ -17,7 +17,7 @@ DESCRIPTION = "Static library of ALP-curated drivers for chips populated \
 on the E1M and E1M-X EVKs and modules.  Pairs with libalp_sdk.so."
 HOMEPAGE    = "https://github.com/alplabai/alp-sdk"
 LICENSE     = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=787726818c896f394f6627ab59d98d69"
 
 # Pinned to the v0.6 release tag; CI bumps SRCREV when alp-sdk
 # tags a new release.

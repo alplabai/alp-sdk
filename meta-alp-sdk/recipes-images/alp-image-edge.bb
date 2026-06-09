@@ -25,11 +25,11 @@ IMAGE_INSTALL = " \
     packagegroup-core-boot         \
     alp-sdk                        \
     alp-perception                 \
-    ros-humble-rclcpp              \
-    ros-humble-sensor-msgs         \
-    ros-humble-vision-msgs         \
-    ros-humble-image-transport     \
-    ros-humble-cv-bridge           \
+    rclcpp                         \
+    sensor-msgs                    \
+    vision-msgs                    \
+    image-transport                \
+    cv-bridge                      \
     libcamera                      \
     gstreamer1.0                   \
     gstreamer1.0-plugins-base      \

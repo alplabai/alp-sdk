@@ -6,7 +6,12 @@
 
 inherit ros_distro_humble
 inherit ros_superflore_generated
-inherit ament_cmake
+
+# Build type: ament_cmake.  meta-ros names the build-type class
+# ros_<ROS_BUILD_TYPE> (e.g. ros_ament_cmake), matching the idiom the
+# generated recipes use -- there is no bare `ament_cmake` class.
+ROS_BUILD_TYPE = "ament_cmake"
+inherit ros_${ROS_BUILD_TYPE}
 
 SUMMARY = "Alp SDK ROS 2 perception node for V2N + V2N-M1"
 DESCRIPTION = "Publishes IMU / GNSS / battery / camera / \
@@ -15,7 +20,7 @@ DESCRIPTION = "Publishes IMU / GNSS / battery / camera / \
                on V2N (no DEEPX).  Same source for both."
 HOMEPAGE = "https://github.com/alplabai/alp-sdk"
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=86d3f3a95c324c9479bd8986968f4327"
+LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=787726818c896f394f6627ab59d98d69"
 
 # Track the alp-sdk default branch; CI repins SRCREV to the release-tag
 # commit when alp-sdk tags a new release (same pattern as the other
@@ -44,10 +49,11 @@ ROS_BUILDTOOL_EXPORT_DEPENDS = ""
 ROS_EXEC_DEPENDS = "${ROS_BUILD_DEPENDS}"
 
 DEPENDS = "${ROS_BUILD_DEPENDS} ${ROS_BUILDTOOL_DEPENDS} alp-sdk"
-RDEPENDS:${PN} = "${ROS_EXEC_DEPENDS} alp-sdk dx-rt"
+RDEPENDS:${PN} = "${ROS_EXEC_DEPENDS} alp-sdk"
 
-# On V2N101 (no DEEPX) the dx-rt dependency is satisfied by a
-# stub package that prints "no DEEPX silicon" at startup and
-# alp_inference_open AUTO-falls-through to DRP-AI.  Customers
-# build separately for V2N vs V2M101 -- the dx-rt package presence
-# matters at install time, not at compile time.
+# The DEEPX DX-M1 runtime (dx-rt) is NOT a dependency of this node.
+# It is a SoM/image-level install: alp-image-edge adds dx-rt only on
+# the V2M variants (which carry DEEPX silicon), the same way it gates
+# any other NPU runtime.  On V2N101/V2N102 (no DEEPX) the node's
+# alp_inference_open AUTO-falls through to DRP-AI.  Same source builds
+# for both; only the image install set differs.
