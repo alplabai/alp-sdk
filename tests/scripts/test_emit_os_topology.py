@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for `alp_project.py --emit os-topology` / `emit_os_topology`.
 
-Issue #95: the IDE Board Configurator should not have to *guess* each core's
-natural OS. This surface exposes, per core, the SoC-derived **natural** OS
-(`cortex-m* -> zephyr`, `cortex-a* -> yocto`), the **effective** OS after the
-SoM-preset + board.yaml overrides, and whether/where it was overridden -- so the
-UI can render "natural: zephyr (override?)".
+Issue #95: the OS runtime is *determined by the core class* and is not
+user-selectable -- Cortex-A -> Yocto (Linux), Cortex-M -> Zephyr (RTOS). The
+surface reports, per core, the `runtime_class`, the class `default_os`, the
+`effective_os` (after the only legal overrides: `off` to disable, `baremetal`
+for no-OS), `enabled`, and the per-core `allowed_os` set (the valid dropdown,
+which excludes the other class's OS).
 """
 from __future__ import annotations
 
@@ -37,7 +38,7 @@ def _by_id(topo: dict) -> dict:
     return {c["core_id"]: c for c in topo["cores"]}
 
 
-def test_natural_os_when_no_override(tmp_path: Path) -> None:
+def test_class_derived_os_no_override(tmp_path: Path) -> None:
     body = """
         som:
           sku: E1M-AEN701
@@ -45,25 +46,25 @@ def test_natural_os_when_no_override(tmp_path: Path) -> None:
           m55_hp:
             app: ./src
     """
-    project = load_board_yaml(_write_board(tmp_path, body))
-    topo = core_os_topology(project)
+    topo = core_os_topology(load_board_yaml(_write_board(tmp_path, body)))
     assert topo["sku"] == "E1M-AEN701"
-    assert topo["allowed_os"] == ["zephyr", "yocto", "baremetal", "off"]
     cores = _by_id(topo)
-    # M-class -> natural zephyr; A-class -> natural yocto; no override.
-    assert cores["m55_hp"]["natural_os"] == "zephyr"
+    # M-class -> Zephyr (RTOS); A-class -> Yocto (Linux).
+    assert cores["m55_hp"]["runtime_class"] == "rtos"
+    assert cores["m55_hp"]["default_os"] == "zephyr"
     assert cores["m55_hp"]["effective_os"] == "zephyr"
     assert cores["m55_hp"]["overridden"] is False
-    assert cores["m55_hp"]["source"] == "soc-default"
-    assert cores["a32_cluster"]["natural_os"] == "yocto"
-    assert cores["a32_cluster"]["effective_os"] == "yocto"
-    assert cores["a32_cluster"]["overridden"] is False
-    # the SoC core type the natural OS was derived from is surfaced
+    assert cores["m55_hp"]["enabled"] is True
+    assert cores["a32_cluster"]["runtime_class"] == "linux"
+    assert cores["a32_cluster"]["default_os"] == "yocto"
+    # per-core dropdown excludes the OTHER class's OS
+    assert cores["m55_hp"]["allowed_os"] == ["zephyr", "baremetal", "off"]
+    assert cores["a32_cluster"]["allowed_os"] == ["yocto", "baremetal", "off"]
     assert cores["m55_hp"]["core_type"].lower().startswith("cortex-m")
     assert cores["a32_cluster"]["core_type"].lower().startswith("cortex-a")
 
 
-def test_board_override_flagged(tmp_path: Path) -> None:
+def test_baremetal_and_off_overrides_flagged(tmp_path: Path) -> None:
     body = """
         som:
           sku: E1M-AEN701
@@ -74,15 +75,14 @@ def test_board_override_flagged(tmp_path: Path) -> None:
           m55_he:
             os: "off"
     """
-    project = load_board_yaml(_write_board(tmp_path, body))
-    cores = _by_id(core_os_topology(project))
-    assert cores["m55_hp"]["natural_os"] == "zephyr"
+    cores = _by_id(core_os_topology(load_board_yaml(_write_board(tmp_path, body))))
+    assert cores["m55_hp"]["default_os"] == "zephyr"
     assert cores["m55_hp"]["effective_os"] == "baremetal"
     assert cores["m55_hp"]["overridden"] is True
-    assert cores["m55_hp"]["source"] == "board.yaml"
+    assert cores["m55_hp"]["enabled"] is True
     assert cores["m55_he"]["effective_os"] == "off"
+    assert cores["m55_he"]["enabled"] is False
     assert cores["m55_he"]["overridden"] is True
-    assert cores["m55_he"]["source"] == "board.yaml"
 
 
 def test_emit_os_topology_is_valid_json(tmp_path: Path) -> None:
@@ -93,21 +93,19 @@ def test_emit_os_topology_is_valid_json(tmp_path: Path) -> None:
           m33_sm:
             app: ./src
     """
-    project = load_board_yaml(_write_board(tmp_path, body))
-    doc = json.loads(emit_os_topology(project))
+    doc = json.loads(emit_os_topology(load_board_yaml(_write_board(tmp_path, body))))
     assert doc["schema_version"] == 1
     assert {c["core_id"] for c in doc["cores"]} >= {"a55_cluster", "m33_sm"}
-    # cores are emitted in a stable (sorted) order for byte-determinism
     ids = [c["core_id"] for c in doc["cores"]]
-    assert ids == sorted(ids)
+    assert ids == sorted(ids)            # stable order for byte-determinism
 
 
-def test_allowed_os_is_derived_from_the_schema(tmp_path: Path) -> None:
-    # unification: the value-set must come from the board schema's enum,
-    # not a hardcoded copy in the code (else the two can drift).
+def test_allowed_os_derived_from_schema_minus_cross_class(tmp_path: Path) -> None:
+    # unification: per-core allowed_os is the board-schema enum minus the
+    # other class's OS -- not a hardcoded list.
     schema = json.loads(
         (REPO / "metadata" / "schemas" / "board.schema.json").read_text(encoding="utf-8"))
-    enum = schema["$defs"]["core_entry"]["properties"]["os"]["enum"]
+    enum = set(schema["$defs"]["core_entry"]["properties"]["os"]["enum"])
     body = """
         som:
           sku: E1M-V2N101
@@ -115,8 +113,14 @@ def test_allowed_os_is_derived_from_the_schema(tmp_path: Path) -> None:
           m33_sm:
             app: ./src
     """
-    project = load_board_yaml(_write_board(tmp_path, body))
-    assert core_os_topology(project)["allowed_os"] == enum
+    cores = _by_id(core_os_topology(load_board_yaml(_write_board(tmp_path, body))))
+    for c in cores.values():
+        assert set(c["allowed_os"]) <= enum
+    # M-core excludes yocto; A-core excludes zephyr
+    assert "yocto" not in cores["m33_sm"]["allowed_os"]
+    assert "zephyr" in cores["m33_sm"]["allowed_os"]
+    assert "zephyr" not in cores["a55_cluster"]["allowed_os"]
+    assert "yocto" in cores["a55_cluster"]["allowed_os"]
 
 
 def test_cli_emit_os_topology(tmp_path: Path) -> None:
@@ -133,5 +137,5 @@ def test_cli_emit_os_topology(tmp_path: Path) -> None:
         capture_output=True, text=True)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     cores = {c["core_id"]: c for c in json.loads(proc.stdout)["cores"]}
-    assert cores["m33_sm"]["natural_os"] == "zephyr"
-    assert cores["a55_cluster"]["natural_os"] == "yocto"
+    assert cores["m33_sm"]["default_os"] == "zephyr"
+    assert cores["a55_cluster"]["default_os"] == "yocto"
