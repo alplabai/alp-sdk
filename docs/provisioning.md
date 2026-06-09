@@ -28,7 +28,7 @@ Dry-run a real bundle, exercising the (private) ledger:
 
 ```bash
 python scripts/provision_som.py \
-    --bundle ../alp-sdk-internal/releases/E1M-V2N101/som-1.0.0 \
+    --bundle ../alp-sdk-internal/releases/E1M-V2N101/som-0.1.0 \
     --ledger-root ../alp-sdk-internal/ledger \
     --som-ledger ../alp-sdk-internal/scripts/som_ledger.py \
     --carrier x-evk --by lab
