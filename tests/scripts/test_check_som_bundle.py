@@ -1,5 +1,6 @@
 """Unit tests for scripts/check_som_bundle.py."""
 
+import base64
 import json
 import subprocess
 import sys
@@ -8,6 +9,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "check_som_bundle.py"
 EXAMPLE = REPO / "metadata" / "templates" / "som-release-bundle.example.json"
+sys.path.insert(0, str(REPO / "scripts"))
+import som_signing  # noqa: E402
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
 
 def _run(*args):
@@ -104,3 +109,61 @@ def test_bad_created_date_fails(tmp_path):
         p.write_text(json.dumps(b))
         proc = _run("--bundle", str(p))
         assert proc.returncode != 0, f"{bad!r} should be rejected\n{proc.stdout}"
+
+
+def _sign_bundle(bundle, key):
+    sig = key.sign(som_signing.canonical_bytes(bundle), ec.ECDSA(hashes.SHA256()))
+    bundle["signature"] = {
+        "format_version": som_signing.FORMAT_VERSION,
+        "algorithm": som_signing.ALGORITHM,
+        "key_id": som_signing.compute_key_id(key.public_key()),
+        "signed_at": "2026-06-09",
+        "value": base64.b64encode(sig).decode(),
+    }
+    return bundle
+
+
+def _write_pub(key, path):
+    path.write_bytes(key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+
+
+def test_signed_bundle_verifies(tmp_path):
+    key = ec.generate_private_key(ec.SECP256R1())
+    b = _sign_bundle(_valid_bundle(), key)
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
+    pub = tmp_path / "pub.pem"; _write_pub(key, pub)
+    proc = _run("--bundle", str(p), "--pubkey", str(pub), "--require-signature")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "verified" in proc.stdout
+
+
+def test_tampered_signed_bundle_fails(tmp_path):
+    key = ec.generate_private_key(ec.SECP256R1())
+    b = _sign_bundle(_valid_bundle(), key)
+    b["hw_rev"] = "r2"  # mutate AFTER signing
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
+    pub = tmp_path / "pub.pem"; _write_pub(key, pub)
+    proc = _run("--bundle", str(p), "--pubkey", str(pub))
+    assert proc.returncode != 0
+    assert "FAIL" in proc.stdout
+
+
+def test_unsigned_with_require_fails(tmp_path):
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(_valid_bundle()))
+    proc = _run("--bundle", str(p), "--require-signature")
+    assert proc.returncode != 0
+
+
+def test_unsigned_without_require_passes(tmp_path):
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(_valid_bundle()))
+    proc = _run("--bundle", str(p))
+    assert proc.returncode == 0, proc.stdout
+
+
+def test_malformed_signature_object_rejected_by_schema(tmp_path):
+    b = _valid_bundle()
+    b["signature"] = {"algorithm": "ecdsa-p256-sha256"}  # missing required fields
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
+    proc = _run("--bundle", str(p))
+    assert proc.returncode != 0
