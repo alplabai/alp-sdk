@@ -18,6 +18,9 @@ Usage:
     # Yocto local.conf snippet:
     python3 scripts/alp_project.py --emit yocto-conf
 
+    # Per-core natural-vs-effective OS facts (JSON; for IDEs / tooling):
+    python3 scripts/alp_project.py --emit os-topology
+
     # Write to a file (typical Zephyr usage: included by prj.conf):
     python3 scripts/alp_project.py --emit zephyr-conf \\
         --output build/generated/alp.conf
@@ -1497,6 +1500,7 @@ def _run_v2_emit(args: argparse.Namespace) -> int:
             OrchestratorError,
             emit_dts_reservations,
             emit_ipc_contract_h,
+            emit_os_topology,
             emit_system_manifest,
             load_board_yaml,
         )
@@ -1514,6 +1518,8 @@ def _run_v2_emit(args: argparse.Namespace) -> int:
             out = emit_ipc_contract_h(project)
         elif args.emit == "dts-reservations":
             out = emit_dts_reservations(project)
+        elif args.emit == "os-topology":
+            out = emit_os_topology(project)
         else:
             print(f"alp_project: unknown v2 emit '{args.emit}'",
                   file=sys.stderr)
@@ -1704,6 +1710,8 @@ def main() -> int:
                                  # v2 orchestration emits (Phase 2):
                                  "system-manifest", "dts-reservations",
                                  "ipc-contract-h",
+                                 # Per-core natural-vs-effective OS facts (issue #95).
+                                 "os-topology",
                                  # Demonstrator: JSON route-table dump.
                                  "composed-route-table"],
                         default="zephyr-conf",
@@ -1728,7 +1736,7 @@ def main() -> int:
     # Project-wide v2 emit modes (system-manifest, dts-reservations,
     # ipc-contract-h) route through alp_orchestrate.py directly.
     if args.emit in ("system-manifest", "dts-reservations",
-                     "ipc-contract-h"):
+                     "ipc-contract-h", "os-topology"):
         return _run_v2_emit(args)
 
     project = _validate_and_load(args.input)

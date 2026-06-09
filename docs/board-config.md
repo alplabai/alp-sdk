@@ -221,6 +221,20 @@ Custom SoMs ported via
 inference for free as long as their SoC JSON declares core types
 correctly.
 
+**Querying it (for IDEs / tooling).**  Rather than re-deriving the
+M/A → OS mapping, tools read the resolved facts directly:
+
+```bash
+python3 scripts/alp_project.py --emit os-topology   # JSON to stdout
+```
+
+emits, per resolved core, the `core_type`, the SoC-derived
+`natural_os`, the `effective_os` after overrides, an `overridden`
+flag, and the override `source` (`board.yaml` | `som-preset` |
+`soc-default`) — plus the `allowed_os` set.  This is what an editor's
+board configurator uses to show "natural: zephyr (override?)" without
+guessing.
+
 **Silicon-determined fields never appear in `board.yaml`.**  Inference
 backend selection, NPU presence, on-module component populations,
 and memory capacities are all dictated by the SoM SKU preset under
