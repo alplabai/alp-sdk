@@ -14,20 +14,34 @@ using namespace std::chrono_literals;
 
 SensorPublishers::SensorPublishers(rclcpp::Node &parent) : parent_(parent) {
     // Shared I²C bus -- LSM6DSO + INA236 sit on it.
-    i2c_ = alp_i2c_open((const alp_i2c_config_t *)&(const alp_i2c_config_t){
+    const alp_i2c_config_t i2c_cfg = {
         .bus_id     = E1M_I2C0,
         .bitrate_hz = 400000,
-    });
+    };
+    i2c_ = alp_i2c_open(&i2c_cfg);
     if (i2c_ != nullptr) {
-        lsm6dso_init(&imu_,  i2c_, LSM6DSO_I2C_ADDR_LOW);
-        ina236_init(&batt_, i2c_, INA236_I2C_ADDR_DEFAULT, /*shunt_ohms=*/0.01f);
+        if (lsm6dso_init(&imu_, i2c_, LSM6DSO_I2C_ADDR_LOW) == ALP_OK) {
+            // 104 Hz, ±2 g / ±250 dps -- lsm6dso_init() only binds the
+            // bus; the caller selects ODR + full-scale.  These are the
+            // full-scales tick_imu()'s raw-count conversion assumes.
+            lsm6dso_set_accel(&imu_, LSM6DSO_ODR_104_HZ, LSM6DSO_ACCEL_FS_2G);
+            lsm6dso_set_gyro(&imu_,  LSM6DSO_ODR_104_HZ, LSM6DSO_GYRO_FS_250_DPS);
+        }
+        // addr 0 -> INA236A default (0x40).  Example calibration: 10 mΩ
+        // shunt, 4 A full-scale -- customers set their rail's values.
+        ina236_init(&batt_, i2c_, 0, /*shunt_ohms=*/0.01f,
+                    /*max_current_a=*/4.0f, INA236_ADCRANGE_81MV);
     }
 
-    // GNSS UART (factory-default 9600/8N1).
-    gps_uart_ = alp_uart_open((const alp_uart_config_t *)&(const alp_uart_config_t){
+    // GNSS UART (factory-default 9600 8N1).
+    const alp_uart_config_t gps_cfg = {
         .port_id   = E1M_UART0,
-        .baud_rate = 9600,
-    });
+        .baudrate  = 9600,
+        .data_bits = 8,
+        .stop_bits = 1,
+        .parity    = ALP_UART_PARITY_NONE,
+    };
+    gps_uart_ = alp_uart_open(&gps_cfg);
     if (gps_uart_ != nullptr) {
         ublox_neo_m9n_init(&gps_, gps_uart_);
     }
@@ -48,8 +62,8 @@ SensorPublishers::~SensorPublishers() {
 }
 
 void SensorPublishers::tick_imu() {
-    lsm6dso_accel_t a = {};
-    lsm6dso_gyro_t  g = {};
+    lsm6dso_axes_t a = {};
+    lsm6dso_axes_t g = {};
     if (lsm6dso_read_accel(&imu_, &a) != ALP_OK) return;
     if (lsm6dso_read_gyro(&imu_,  &g) != ALP_OK) return;
 
@@ -57,16 +71,24 @@ void SensorPublishers::tick_imu() {
     msg.header.stamp = parent_.now();
     msg.header.frame_id = "imu_link";
 
-    // Linear accel in m/s².  LSM6DSO returns milli-g; convert with
-    // 9.80665 m/s² per g.
-    msg.linear_acceleration.x = a.x_mg / 1000.0 * 9.80665;
-    msg.linear_acceleration.y = a.y_mg / 1000.0 * 9.80665;
-    msg.linear_acceleration.z = a.z_mg / 1000.0 * 9.80665;
+    // lsm6dso_read_* return raw int16 counts; scale by the configured
+    // full-scale sensitivities (LSM6DSO datasheet):
+    //   ±2 g     accel -> 0.061 mg/LSB
+    //   ±250 dps gyro  -> 8.75  mdps/LSB
+    constexpr double kAccelMgPerLsb  = 0.061;
+    constexpr double kGyroMdpsPerLsb = 8.75;
+    constexpr double kGravity        = 9.80665;                  // m/s² per g
+    constexpr double kDegToRad       = 3.14159265358979 / 180.0;
 
-    // Angular velocity in rad/s.  Gyro returns milli-dps.
-    msg.angular_velocity.x = g.x_mdps / 1000.0 * (3.14159265 / 180.0);
-    msg.angular_velocity.y = g.y_mdps / 1000.0 * (3.14159265 / 180.0);
-    msg.angular_velocity.z = g.z_mdps / 1000.0 * (3.14159265 / 180.0);
+    // Linear accel in m/s².
+    msg.linear_acceleration.x = a.x * kAccelMgPerLsb / 1000.0 * kGravity;
+    msg.linear_acceleration.y = a.y * kAccelMgPerLsb / 1000.0 * kGravity;
+    msg.linear_acceleration.z = a.z * kAccelMgPerLsb / 1000.0 * kGravity;
+
+    // Angular velocity in rad/s.
+    msg.angular_velocity.x = g.x * kGyroMdpsPerLsb / 1000.0 * kDegToRad;
+    msg.angular_velocity.y = g.y * kGyroMdpsPerLsb / 1000.0 * kDegToRad;
+    msg.angular_velocity.z = g.z * kGyroMdpsPerLsb / 1000.0 * kDegToRad;
 
     // Orientation is unknown without AHRS; ROS convention: covariance
     // matrix's [0] = -1 signals "no orientation available".
@@ -77,13 +99,13 @@ void SensorPublishers::tick_imu() {
 
 void SensorPublishers::tick_slow_telem() {
     // Battery snapshot.
-    int32_t mv = 0, ma = 0;
-    if (ina236_read_voltage_mv(&batt_, &mv) == ALP_OK &&
-        ina236_read_current_ma(&batt_, &ma) == ALP_OK) {
+    int32_t mv = 0, ua = 0;
+    if (ina236_read_bus_mv(&batt_, &mv) == ALP_OK &&
+        ina236_read_current_ua(&batt_, &ua) == ALP_OK) {
         sensor_msgs::msg::BatteryState msg;
         msg.header.stamp = parent_.now();
-        msg.voltage = mv / 1000.f;
-        msg.current = ma / 1000.f;
+        msg.voltage = mv / 1000.f;    // mV -> V
+        msg.current = ua / 1.0e6f;    // µA -> A
         msg.present = true;
         msg.power_supply_status =
             sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_DISCHARGING;

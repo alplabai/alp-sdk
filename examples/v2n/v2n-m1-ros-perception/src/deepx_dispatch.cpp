@@ -32,7 +32,7 @@ DeepxDispatcher::DeepxDispatcher(rclcpp::Node &parent) : parent_(parent) {
     // Field names + order match alp_inference_config_t in
     // <alp/inference.h>: model_data, model_size, format, backend,
     // arena_bytes, arena.
-    inf_ = alp_inference_open(&(const alp_inference_config_t){
+    const alp_inference_config_t inf_cfg = {
         .model_data    = nullptr,  // Customer drops their model into
                                     // /etc/alp/models/perception.dxnn at
                                     // image-bake time.
@@ -43,7 +43,8 @@ DeepxDispatcher::DeepxDispatcher(rclcpp::Node &parent) : parent_(parent) {
         .backend       = ALP_INFERENCE_BACKEND_AUTO,
         .arena_bytes   = 0,
         .arena         = nullptr,
-    });
+    };
+    inf_ = alp_inference_open(&inf_cfg);
     if (inf_ == nullptr) {
         RCLCPP_WARN(parent_.get_logger(),
                     "alp_inference_open returned NULL -- detections topic will be empty");
