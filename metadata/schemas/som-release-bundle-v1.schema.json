@@ -58,8 +58,22 @@
       }
     },
     "signature": {
-      "type": ["object", "null"],
-      "description": "Reserved for the ECDSA-P256 signing follow-up; null until then."
+      "description": "ECDSA-P256 provenance signature (null until signed).",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["format_version", "algorithm", "key_id", "signed_at", "value"],
+          "properties": {
+            "format_version": { "const": 1 },
+            "algorithm": { "const": "ecdsa-p256-sha256" },
+            "key_id": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+            "signed_at": { "type": "string", "format": "date" },
+            "value": { "type": "string", "pattern": "^[A-Za-z0-9+/]+={0,2}$" }
+          }
+        }
+      ]
     }
   },
   "if": { "required": ["status"], "properties": { "status": { "const": "complete" } } },
