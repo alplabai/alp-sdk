@@ -167,3 +167,16 @@ def test_malformed_signature_object_rejected_by_schema(tmp_path):
     p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
     proc = _run("--bundle", str(p))
     assert proc.returncode != 0
+
+
+def test_malformed_pubkey_is_clean_fail(tmp_path):
+    # a garbage public key must produce a clean FAIL line, not a Python traceback
+    key = ec.generate_private_key(ec.SECP256R1())
+    b = _sign_bundle(_valid_bundle(), key)
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
+    bad_pub = tmp_path / "bad.pem"
+    bad_pub.write_text("-----BEGIN PUBLIC KEY-----\nnotbase64\n-----END PUBLIC KEY-----\n")
+    proc = _run("--bundle", str(p), "--pubkey", str(bad_pub))
+    assert proc.returncode != 0
+    assert "cannot load public key" in proc.stdout
+    assert "Traceback" not in proc.stderr

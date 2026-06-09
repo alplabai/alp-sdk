@@ -52,7 +52,11 @@ def _validate(path: Path, validator: jsonschema.Draft202012Validator, pubkey_pat
         if not pub_path.exists():
             print(f"FAIL {rel}: signature present but no public key at {pub_path}")
             return 1
-        pub = som_signing.load_public_key_file(pub_path)
+        try:
+            pub = som_signing.load_public_key_file(pub_path)
+        except Exception as e:
+            print(f"FAIL {rel}: cannot load public key {pub_path}: {e}")
+            return 1
         if not som_signing.verify_signature(doc, pub):
             print(f"FAIL {rel}: signature verification failed")
             return 1
