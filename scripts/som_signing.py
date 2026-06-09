@@ -30,13 +30,13 @@ def canonical_bytes(doc: dict) -> bytes:
     ).encode("utf-8")
 
 
-def load_public_key(pem: "str | bytes"):
+def load_public_key(pem: "str | bytes") -> ec.EllipticCurvePublicKey:
     if isinstance(pem, str):
         pem = pem.encode()
     return serialization.load_pem_public_key(pem)
 
 
-def load_public_key_file(path: "str | Path"):
+def load_public_key_file(path: "str | Path") -> ec.EllipticCurvePublicKey:
     return load_public_key(Path(path).read_bytes())
 
 
@@ -45,12 +45,18 @@ def compute_key_id(public_key) -> str:
         serialization.Encoding.DER,
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
+    # 64-bit prefix: enough to disambiguate signing keys for rotation; it is a
+    # lookup hint, not a secret, so truncation is intentional.
     return hashlib.sha256(der).hexdigest()[:16]
 
 
 def verify_signature(doc: dict, public_key) -> bool:
     sig = doc.get("signature")
-    if not sig or sig.get("algorithm") != ALGORITHM:
+    if not isinstance(sig, dict):
+        return False
+    if sig.get("format_version") != FORMAT_VERSION:
+        return False
+    if sig.get("algorithm") != ALGORITHM:
         return False
     if sig.get("key_id") != compute_key_id(public_key):
         return False
@@ -61,7 +67,9 @@ def verify_signature(doc: dict, public_key) -> bool:
     try:
         public_key.verify(raw, canonical_bytes(doc), ec.ECDSA(hashes.SHA256()))
         return True
-    except InvalidSignature:
+    except (InvalidSignature, ValueError, TypeError):
+        # wrong key type / malformed-but-decodable signature must return False,
+        # never propagate (the contract is -> bool).
         return False
 
 

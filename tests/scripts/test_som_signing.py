@@ -1,9 +1,10 @@
-import base64, json, sys
+import base64
+import sys
 from pathlib import Path
-import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 import som_signing as s
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 
 
@@ -62,3 +63,29 @@ def test_verify_with_keys_rotation():
     doc["signature"] = _sign(doc, new)
     assert s.verify_with_keys(doc, [old_pub, new_pub]) is True
     assert s.verify_with_keys(doc, [old_pub]) is False
+
+
+def test_non_dict_signature_returns_false():
+    # a truthy non-dict signature must return False, not raise AttributeError
+    _, pub = _keypair()
+    assert s.verify_signature({"a": 1, "signature": "tampered"}, pub) is False
+    assert s.verify_signature({"a": 1, "signature": 123}, pub) is False
+
+
+def test_garbage_signature_value_returns_false():
+    # valid base64 but not a real DER ECDSA signature: must return False, never raise
+    key, pub = _keypair()
+    doc = {"a": 1, "signature": None}
+    sig = _sign(doc, key)
+    sig["value"] = base64.b64encode(b"not-a-real-der-signature").decode()
+    doc["signature"] = sig
+    assert s.verify_signature(doc, pub) is False
+
+
+def test_bad_format_version_returns_false():
+    key, pub = _keypair()
+    doc = {"a": 1, "signature": None}
+    sig = _sign(doc, key)
+    sig["format_version"] = 999
+    doc["signature"] = sig
+    assert s.verify_signature(doc, pub) is False
