@@ -195,3 +195,22 @@ ZTEST(alp_update_log, test_verify_detects_reorder)
     zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
     zassert_equal(v, ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN);
 }
+
+ZTEST(alp_update_log, test_count_and_get)
+{
+    struct td_store t; alp_secure_store_if s; alp_monotonic_counter_if c;
+    td_ifaces(&t, &s, &c);
+    alp_update_log_entry_t ent0 = mk_entry(10, "a", ALP_UPDATE_STATUS_CONFIRMED);
+    alp_update_log_entry_t ent1 = mk_entry(20, "b", ALP_UPDATE_STATUS_ROLLED_BACK);
+    (void)ulog_engine_append(&s, &c, &ent0);
+    (void)ulog_engine_append(&s, &c, &ent1);
+
+    uint64_t n = 0; zassert_equal(ulog_engine_count(&s, &c, &n), ALP_OK); zassert_equal(n, 2);
+
+    alp_update_log_entry_t e; zassert_equal(ulog_engine_get(&s, 1, &e), ALP_OK);
+    zassert_equal(e.seq, 1); zassert_equal(e.status, ALP_UPDATE_STATUS_ROLLED_BACK);
+    zassert_equal(strcmp(e.fw_version, "b"), 0);
+    uint8_t want[32]; memset(want, 20, 32); zassert_mem_equal(e.image_hash, want, 32);
+
+    zassert_equal(ulog_engine_get(&s, 9, &e), ALP_ERR_NOT_FOUND);
+}

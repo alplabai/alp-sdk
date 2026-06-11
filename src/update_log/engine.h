@@ -10,7 +10,7 @@
 #include "update_log/store.h"
 
 #define ULOG_VERSION          1u
-#define ULOG_ENTRY_WIRE_LEN   83u
+#define ULOG_ENTRY_WIRE_LEN   115u
 #define ULOG_META_WIRE_LEN    46u
 #define ULOG_META_MAGIC       0x554C4F47u  /* 'ULOG' */
 

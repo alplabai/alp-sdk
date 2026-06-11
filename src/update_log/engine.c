@@ -36,6 +36,7 @@ alp_status_t ulog_entry_encode(const alp_update_log_entry_t *e,
     out[19] = (uint8_t)vlen;
     memcpy(out + 20, e->fw_version, vlen);
     memcpy(out + 51, prev_hash, 32);
+    memcpy(out + 83, e->image_hash, 32);
     return ALP_OK;
 }
 
@@ -53,9 +54,7 @@ alp_status_t ulog_entry_decode(const uint8_t *buf, size_t len,
     e_out->status    = (alp_update_status_t)buf[10];
     e_out->timestamp = get_u64(buf + 11);
     memcpy(e_out->fw_version, buf + 20, vlen);   /* zero-padded -> NUL-terminated */
-    /* image_hash is NOT on the wire in slice 1 (the chained prev_hash and the
-     * entry's own re-hash carry integrity); keep it zeroed on decode. The
-     * caller-supplied image_hash is preserved through append via the chain. */
+    memcpy(e_out->image_hash, buf + 83, 32);
     if (prev_hash_out != NULL) memcpy(prev_hash_out, buf + 51, 32);
     return ALP_OK;
 }
@@ -194,4 +193,24 @@ alp_status_t ulog_engine_verify(const alp_secure_store_if *store,
 
     *verdict_out = ALP_UPDATE_LOG_VERIFY_OK;
     return ALP_OK;
+}
+
+alp_status_t ulog_engine_count(const alp_secure_store_if *store,
+                               const alp_monotonic_counter_if *ctr, uint64_t *count_out)
+{
+    (void)store;
+    if (ctr == NULL || count_out == NULL) return ALP_ERR_INVAL;
+    return ctr->read(ctr->ctx, 0, count_out);
+}
+
+alp_status_t ulog_engine_get(const alp_secure_store_if *store, uint64_t seq,
+                             alp_update_log_entry_t *e_out)
+{
+    if (store == NULL || e_out == NULL) return ALP_ERR_INVAL;
+    char key[24]; kbuf(key, sizeof(key), seq);
+    uint8_t wire[ULOG_ENTRY_WIRE_LEN]; size_t n = 0;
+    alp_status_t rc = store->get(store->ctx, key, wire, sizeof(wire), &n);
+    if (rc != ALP_OK) return rc;   /* ALP_ERR_NOT_FOUND propagates */
+    uint8_t prev[32];
+    return ulog_entry_decode(wire, n, e_out, prev);
 }
