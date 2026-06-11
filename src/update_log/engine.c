@@ -1,0 +1,83 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * Pure update-log engine. No Zephyr/PSA includes -- builds on host. */
+#include <string.h>
+
+#include "update_log/engine.h"
+#include "update_log/sha256.h"
+
+static void put_u16(uint8_t *p, uint16_t v) { p[0]=(uint8_t)v; p[1]=(uint8_t)(v>>8); }
+static void put_u32(uint8_t *p, uint32_t v) { for (int i=0;i<4;i++) p[i]=(uint8_t)(v>>(8*i)); }
+static void put_u64(uint8_t *p, uint64_t v) { for (int i=0;i<8;i++) p[i]=(uint8_t)(v>>(8*i)); }
+static uint16_t get_u16(const uint8_t *p){ return (uint16_t)(p[0]|((uint16_t)p[1]<<8)); }
+static uint32_t get_u32(const uint8_t *p){ uint32_t v=0; for(int i=0;i<4;i++) v|=(uint32_t)p[i]<<(8*i); return v; }
+static uint64_t get_u64(const uint8_t *p){ uint64_t v=0; for(int i=0;i<8;i++) v|=(uint64_t)p[i]<<(8*i); return v; }
+
+/* Bounded string length -- strnlen is POSIX, not C99, and the engine must
+ * stay libc-variant-portable (Zephyr's minimal libc omits it). */
+static size_t bounded_len(const char *s, size_t cap)
+{
+    size_t n = 0;
+    while (n < cap && s[n] != '\0') n++;
+    return n;
+}
+
+alp_status_t ulog_entry_encode(const alp_update_log_entry_t *e,
+                               const uint8_t prev_hash[32],
+                               uint8_t out[ULOG_ENTRY_WIRE_LEN])
+{
+    if (e == NULL || prev_hash == NULL || out == NULL) return ALP_ERR_INVAL;
+    size_t vlen = bounded_len(e->fw_version, ALP_UPDATE_LOG_FWVER_MAX + 1);
+    if (vlen > ALP_UPDATE_LOG_FWVER_MAX) return ALP_ERR_INVAL;
+    memset(out, 0, ULOG_ENTRY_WIRE_LEN);
+    put_u16(out + 0, (uint16_t)ULOG_VERSION);
+    put_u64(out + 2, e->seq);
+    out[10] = (uint8_t)e->status;
+    put_u64(out + 11, e->timestamp);
+    out[19] = (uint8_t)vlen;
+    memcpy(out + 20, e->fw_version, vlen);
+    memcpy(out + 51, prev_hash, 32);
+    return ALP_OK;
+}
+
+alp_status_t ulog_entry_decode(const uint8_t *buf, size_t len,
+                               alp_update_log_entry_t *e_out,
+                               uint8_t prev_hash_out[32])
+{
+    if (buf == NULL || e_out == NULL) return ALP_ERR_INVAL;
+    if (len < ULOG_ENTRY_WIRE_LEN) return ALP_ERR_INVAL;
+    if (get_u16(buf + 0) != ULOG_VERSION) return ALP_ERR_VERSION;
+    uint8_t vlen = buf[19];
+    if (vlen > ALP_UPDATE_LOG_FWVER_MAX) return ALP_ERR_INVAL;
+    memset(e_out, 0, sizeof(*e_out));
+    e_out->seq       = get_u64(buf + 2);
+    e_out->status    = (alp_update_status_t)buf[10];
+    e_out->timestamp = get_u64(buf + 11);
+    memcpy(e_out->fw_version, buf + 20, vlen);   /* zero-padded -> NUL-terminated */
+    /* image_hash is NOT on the wire in slice 1 (the chained prev_hash and the
+     * entry's own re-hash carry integrity); keep it zeroed on decode. The
+     * caller-supplied image_hash is preserved through append via the chain. */
+    if (prev_hash_out != NULL) memcpy(prev_hash_out, buf + 51, 32);
+    return ALP_OK;
+}
+
+alp_status_t ulog_meta_encode(const struct ulog_meta *m, uint8_t out[ULOG_META_WIRE_LEN])
+{
+    if (m == NULL || out == NULL) return ALP_ERR_INVAL;
+    memset(out, 0, ULOG_META_WIRE_LEN);
+    put_u16(out + 0, (uint16_t)ULOG_VERSION);
+    put_u32(out + 2, ULOG_META_MAGIC);
+    put_u64(out + 6, m->count);
+    memcpy(out + 14, m->head_hash, 32);
+    return ALP_OK;
+}
+
+alp_status_t ulog_meta_decode(const uint8_t *buf, size_t len, struct ulog_meta *m_out)
+{
+    if (buf == NULL || m_out == NULL) return ALP_ERR_INVAL;
+    if (len < ULOG_META_WIRE_LEN) return ALP_ERR_INVAL;
+    if (get_u16(buf + 0) != ULOG_VERSION) return ALP_ERR_VERSION;
+    if (get_u32(buf + 2) != ULOG_META_MAGIC) return ALP_ERR_INVAL;
+    m_out->count = get_u64(buf + 6);
+    memcpy(m_out->head_hash, buf + 14, 32);
+    return ALP_OK;
+}
