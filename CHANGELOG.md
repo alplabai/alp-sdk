@@ -7,6 +7,81 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.7.0 candidate
 
+### Added — orchestrate: per-core OS topology + `system-manifest` pinned as the IDE/tool contract (issues #93, #95, #106)
+
+`metadata/schemas/system-manifest-v1.schema.json` formalizes
+`build/system-manifest.yaml` — the single derived projection of a
+`board.yaml` that `west alp-build` emits — as **the contract IDE/CLI
+tools read** instead of re-deriving folder layout and build wiring from
+`board.yaml` + the SoM presets.  The `scripts/alp_orchestrate.py`
+emitter and this schema move in lockstep, enforced by the new
+`scripts/check_system_manifest.py` gate.  Stability policy:
+`schema_version: 1` is **additive-only** (new optional fields only);
+breaking changes go to a `schema_version: 2` schema through a
+deprecation cycle.
+
+`scripts/alp_project.py --emit os-topology` reports, per resolved core,
+its `runtime_class`, class `default_os`, `effective_os`, and the legal
+`allowed_os` set — so a Board Configurator shows the SDK's selection and
+the valid overrides instead of guessing.  The OS is **class-derived and
+not user-selectable**: Cortex-A → Yocto/Linux, Cortex-M → Zephyr/RTOS;
+a `board.yaml` may only disable a core (`off`) or drop it to no-OS
+(`baremetal`), and selecting the other class's OS is rejected at load.
+The `os:` value-set is derived from `board.schema.json` (one source).
+`scripts/bootstrap.py` now installs west + Zephyr deps into a workspace
+`.venv` and respects `ZEPHYR_BASE`.
+
+### Added — meta-alp-sdk: `alp-image-edge` ROS 2 Humble image + `libalp_chips` shared library (V2N/V2M/NX)
+
+The `alp-image-edge` Yocto image builds for V2N/V2M/NX.  A new
+`libalp_chips` recipe builds the chip drivers as a shared library and
+links it into the `alp_perception` ROS 2 node, which builds against the
+current SDK API.  The SDK install no longer ships `alp/chips/*` headers
+— those are owned by the `alp-chips` package.
+
+### Added — metadata: signed SoM-release bundle manifest + provenance verification
+
+SoM-release bundles carry an ECDSA-P256 signature over a canonical-JSON
+manifest.  `scripts/check_som_bundle.py` verifies provenance
+(`--require-signature`) against the published signing public key
+(`keys/`, key_id `8be383f850354f40`), with a public v1 bundle schema
+and a CI gate on the example bundle.  Docs cover how to verify
+SoM-release provenance.
+
+### Added — provisioning: `scripts/provision_som.py` + `xspi_flashwriter` backend
+
+`provision_som.py` orchestrates per-SoM provisioning from a release
+bundle; the `xspi_flashwriter` flash backend drives the Renesas Flash
+Writer over SCIF (the real-write step is HW-gated).  Includes a
+provisioning runbook.
+
+### Added — bsp: public TF-A DDR-injection bbappend + u-boot `rzv2n-dev` config
+
+The TF-A DDR-parameter injection bbappend is now public; the overlaid
+private DDR param stays out of the public tree (gitignored).  The
+`rzv2n-dev` u-boot config (required for the DEEPX bring-up) builds.
+
+### Changed — docs: community-health files + landing-page polish
+
+Adds `SECURITY.md` and an issue-chooser with contact links; README
+badges + the verification callout corrected.
+
+### Fixed — release.yml: customer verification recipe points at the real proof
+
+The customer-facing verification recipe now uses `slsa-verifier` against
+the `.intoto.jsonl` asset (the SLSA generator's L3 proof), not
+`gh attestation verify` (which only serves the L2
+attest-build-provenance).  Proven on v0.6.0 (rekor 1740409638).
+
+### Removed — chips: fake-based register tests (driver validation moves to real silicon)
+
+The mocked-I2C ztests for the BRD_I2C ICs are removed per maintainer
+call — driver validation happens on real silicon via
+`v2n-brd-i2c-bringup` once the bus is patched.  The verified
+act8760/da9292 register maps, ABI snapshot, metadata, and the bring-up
+example stay; the chips suite is restored to its pre-slice state
+(151/151 green).
+
 ### Added — examples/v2n: v2n-brd-i2c-bringup patch-day diagnostic (2026-06-07)
 
 `examples/v2n/v2n-brd-i2c-bringup` is a read-only bring-up diagnostic
