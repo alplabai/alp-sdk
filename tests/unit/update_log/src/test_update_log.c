@@ -214,3 +214,23 @@ ZTEST(alp_update_log, test_count_and_get)
 
     zassert_equal(ulog_engine_get(&s, 9, &e), ALP_ERR_NOT_FOUND);
 }
+
+/* --- Task 5: public-surface smoke (dispatch + sw_tier backend). Keep LAST. --- */
+
+ZTEST(alp_update_log, test_public_surface_sw_tier)
+{
+    alp_update_log_t *log = alp_update_log_open();
+    zassert_not_null(log);
+    zassert_equal(alp_update_log_assurance(log), ALP_UPDATE_LOG_SW_TAMPER_EVIDENT);
+
+    alp_update_log_entry_t e = mk_entry(42, "2.0.0", ALP_UPDATE_STATUS_PENDING_CONFIRM);
+    zassert_equal(alp_update_log_append(log, &e), ALP_OK);
+
+    uint64_t n = 0;
+    zassert_equal(alp_update_log_count(log, &n), ALP_OK);
+    zassert_true(n >= 1);
+    alp_update_log_verdict_t v;
+    zassert_equal(alp_update_log_verify(log, &v, NULL), ALP_OK);
+    zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
+    alp_update_log_close(log);
+}
