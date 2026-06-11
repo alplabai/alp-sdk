@@ -247,11 +247,11 @@ static gd32_bridge_status_t handle_da9292_forward(const uint8_t *req, size_t req
     return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_se_reset(const uint8_t *req, size_t req_len,
-                                            uint8_t *reply, size_t reply_cap,
-                                            size_t *reply_len)
+static gd32_bridge_status_t handle_se_reset(const uint8_t *req, size_t req_len, uint8_t *reply,
+                                            size_t reply_cap, size_t *reply_len)
 {
-    (void)reply; (void)reply_cap;
+    (void)reply;
+    (void)reply_cap;
     if (req_len != 1u) return STATUS_INVAL;
     if (req[0] > 1u) return STATUS_INVAL; /* assert ∈ {0 = release, 1 = hold} */
     const int rv = bridge_hw_se_reset(req[0]);
@@ -780,7 +780,9 @@ gd32_bridge_status_t protocol_dispatch(uint8_t cmd,
     case CMD_TRNG_READ:             h = handle_trng_read;        break;
     case CMD_TMU_COMPUTE:           h = handle_tmu_compute;      break;
     case CMD_DA9292_STATUS_FORWARD: h = handle_da9292_forward;   break;
-    case CMD_SE_RESET:              h = handle_se_reset;         break;
+    case CMD_SE_RESET:
+        h = handle_se_reset;
+        break;
     case CMD_DAC_SET:               h = handle_dac_set;          break;
     case CMD_DAC_GET:               h = handle_dac_get;          break;
     case CMD_QENC_READ:             h = handle_qenc_read;        break;

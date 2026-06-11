@@ -188,7 +188,7 @@ typedef enum {
     GD32G553_CMD_ADC_READ              = 0x30,
     GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40,
     /* v0.8: secure-element (OPTIGA Trust M) reset, SE_RST = GD32 PC13. */
-    GD32G553_CMD_SE_RESET     = 0x41,
+    GD32G553_CMD_SE_RESET = 0x41,
     /* v0.2 additions -- analog + counter peripherals routed via the
      * GD32 on V2N (see metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv). */
     GD32G553_CMD_DAC_SET      = 0x50,
