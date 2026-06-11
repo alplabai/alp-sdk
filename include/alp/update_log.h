@@ -24,16 +24,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "alp/peripheral.h"  /* alp_status_t */
+#include "alp/peripheral.h" /* alp_status_t */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /** SHA-256 digest length used for image hashes + chaining. */
-#define ALP_UPDATE_LOG_HASH_LEN     32
+#define ALP_UPDATE_LOG_HASH_LEN 32
 /** Max firmware-version string length stored per entry (excl. NUL). */
-#define ALP_UPDATE_LOG_FWVER_MAX    31
+#define ALP_UPDATE_LOG_FWVER_MAX 31
 
 /** Outcome of an update, as recorded in an entry. */
 typedef enum {
@@ -63,11 +63,11 @@ typedef enum {
  * counter). On @ref alp_update_log_get every field is populated.
  */
 typedef struct {
-    uint64_t            seq;        /**< Authoritative order; engine-assigned. */
+    uint64_t            seq; /**< Authoritative order; engine-assigned. */
     char                fw_version[ALP_UPDATE_LOG_FWVER_MAX + 1]; /**< NUL-terminated. */
     uint8_t             image_hash[ALP_UPDATE_LOG_HASH_LEN];      /**< SHA-256 of the image. */
     alp_update_status_t status;
-    uint64_t            timestamp;  /**< Best-effort epoch; 0 = unset. */
+    uint64_t            timestamp; /**< Best-effort epoch; 0 = unset. */
 } alp_update_log_entry_t;
 
 /** Opaque log handle. Acquire via @ref alp_update_log_open. */
@@ -83,18 +83,17 @@ alp_update_log_t *alp_update_log_open(void);
  * @brief Append one entry. @c seq is assigned by the engine.
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_update_log_append(alp_update_log_t *log,
-                                   const alp_update_log_entry_t *entry);
+alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_entry_t *entry);
 
 /**
  * @brief Walk the chain and report integrity.
+ * @param      log          The update log handle (from @ref alp_update_log_open).
  * @param[out] verdict_out  Required.
  * @param[out] bad_seq_out  On CHAIN_BROKEN/TRUNCATED, the offending seq. May be NULL.
  * @return ALP_OK if the walk ran (inspect @p verdict_out for the result);
  *         ALP_ERR_IO if the store was unreadable.
  */
-alp_status_t alp_update_log_verify(alp_update_log_t *log,
-                                   alp_update_log_verdict_t *verdict_out,
+alp_status_t alp_update_log_verify(alp_update_log_t *log, alp_update_log_verdict_t *verdict_out,
                                    uint64_t *bad_seq_out);
 
 /** @brief Number of entries. */
