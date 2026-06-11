@@ -131,3 +131,67 @@ ZTEST(alp_update_log, test_append_assigns_seq_and_chains)
     zassert_mem_equal(prev1, expect, 32);
     zassert_equal(d1.seq, 1);
 }
+
+/* --- Task 3: verify() helpers and tests --- */
+
+static void seed(struct td_store *t, alp_secure_store_if *s, alp_monotonic_counter_if *c, int n) {
+    td_ifaces(t, s, c);
+    for (int i = 0; i < n; i++) {
+        alp_update_log_entry_t ent = mk_entry((uint64_t)(i+1)*10, "1.0.0", ALP_UPDATE_STATUS_CONFIRMED);
+        (void)ulog_engine_append(s, c, &ent);
+    }
+}
+
+ZTEST(alp_update_log, test_verify_ok)
+{
+    struct td_store t; alp_secure_store_if s; alp_monotonic_counter_if c;
+    seed(&t, &s, &c, 3);
+    alp_update_log_verdict_t v; uint64_t bad = 999;
+    zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+    zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
+}
+
+ZTEST(alp_update_log, test_verify_detects_mutation)
+{
+    struct td_store t; alp_secure_store_if s; alp_monotonic_counter_if c;
+    seed(&t, &s, &c, 3);
+    int i = td_find(&t, "ulog.1"); t.s[i].buf[12] ^= 0xFF;   /* flip a timestamp byte in entry 1 */
+    alp_update_log_verdict_t v; uint64_t bad = 0;
+    zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+    zassert_equal(v, ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN);
+    zassert_equal(bad, 2);   /* entry 2's prev_hash no longer matches mutated entry 1 */
+}
+
+ZTEST(alp_update_log, test_verify_detects_truncation)
+{
+    struct td_store t; alp_secure_store_if s; alp_monotonic_counter_if c;
+    seed(&t, &s, &c, 3);
+    (void)td_erase(&t, "ulog.2");   /* drop the tail; counter still says 3 */
+    alp_update_log_verdict_t v; uint64_t bad = 0;
+    zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+    zassert_equal(v, ALP_UPDATE_LOG_VERIFY_TRUNCATED);
+}
+
+ZTEST(alp_update_log, test_verify_detects_rollback)
+{
+    struct td_store t; alp_secure_store_if s; alp_monotonic_counter_if c;
+    seed(&t, &s, &c, 3);
+    t.counter = 5;   /* counter advanced past the stored meta.count (=3): store regressed */
+    alp_update_log_verdict_t v; uint64_t bad = 0;
+    zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+    zassert_equal(v, ALP_UPDATE_LOG_VERIFY_ROLLED_BACK);
+}
+
+ZTEST(alp_update_log, test_verify_detects_reorder)
+{
+    struct td_store t; alp_secure_store_if s; alp_monotonic_counter_if c;
+    seed(&t, &s, &c, 3);
+    int a = td_find(&t, "ulog.0"), b = td_find(&t, "ulog.1");
+    uint8_t tmp[TD_BLOB];
+    memcpy(tmp, t.s[a].buf, TD_BLOB);
+    memcpy(t.s[a].buf, t.s[b].buf, TD_BLOB);
+    memcpy(t.s[b].buf, tmp, TD_BLOB);  /* swap contents */
+    alp_update_log_verdict_t v; uint64_t bad = 0;
+    zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+    zassert_equal(v, ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN);
+}

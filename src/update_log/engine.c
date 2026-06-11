@@ -133,3 +133,65 @@ alp_status_t ulog_engine_append(const alp_secure_store_if *store,
     uint64_t newhw = 0;
     return ctr->increment(ctr->ctx, 0, &newhw);
 }
+
+alp_status_t ulog_engine_verify(const alp_secure_store_if *store,
+                                const alp_monotonic_counter_if *ctr,
+                                alp_update_log_verdict_t *verdict_out,
+                                uint64_t *bad_seq_out)
+{
+    if (store == NULL || ctr == NULL || verdict_out == NULL) return ALP_ERR_INVAL;
+    if (bad_seq_out) *bad_seq_out = 0;
+
+    uint64_t hw = 0;
+    alp_status_t rc = ctr->read(ctr->ctx, 0, &hw);
+    if (rc != ALP_OK) return ALP_ERR_IO;
+
+    struct ulog_meta m; m.count = 0; memset(m.head_hash, 0, 32);
+    if (hw > 0) {
+        uint8_t metabuf[ULOG_META_WIRE_LEN]; size_t mlen = 0;
+        rc = store->get(store->ctx, "ulog.meta", metabuf, sizeof(metabuf), &mlen);
+        if (rc == ALP_ERR_NOT_FOUND) { *verdict_out = ALP_UPDATE_LOG_VERIFY_ROLLED_BACK; return ALP_OK; }
+        if (rc != ALP_OK) return ALP_ERR_IO;
+        if (ulog_meta_decode(metabuf, mlen, &m) != ALP_OK) return ALP_ERR_IO;
+        /* The counter is the trusted anchor. If the stored meta disagrees, the
+         * store (or the counter) was rolled back. */
+        if (m.count != hw) { *verdict_out = ALP_UPDATE_LOG_VERIFY_ROLLED_BACK; return ALP_OK; }
+    }
+
+    uint8_t prev[32]; memset(prev, 0, sizeof(prev));
+    uint8_t cur_hash[32]; memset(cur_hash, 0, sizeof(cur_hash));
+    for (uint64_t i = 0; i < hw; i++) {
+        char key[24]; kbuf(key, sizeof(key), i);
+        uint8_t wire[ULOG_ENTRY_WIRE_LEN]; size_t n = 0;
+        rc = store->get(store->ctx, key, wire, sizeof(wire), &n);
+        if (rc == ALP_ERR_NOT_FOUND) {
+            *verdict_out = ALP_UPDATE_LOG_VERIFY_TRUNCATED;
+            if (bad_seq_out) *bad_seq_out = i;
+            return ALP_OK;
+        }
+        if (rc != ALP_OK) return ALP_ERR_IO;
+
+        alp_update_log_entry_t e; uint8_t got_prev[32];
+        if (ulog_entry_decode(wire, n, &e, got_prev) != ALP_OK) {
+            *verdict_out = ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN;
+            if (bad_seq_out) *bad_seq_out = i;
+            return ALP_OK;
+        }
+        if (e.seq != i || memcmp(got_prev, prev, 32) != 0) {
+            *verdict_out = ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN;
+            if (bad_seq_out) *bad_seq_out = i;
+            return ALP_OK;
+        }
+        ulog_sha256(wire, n, cur_hash);
+        memcpy(prev, cur_hash, 32);
+    }
+
+    if (hw > 0 && memcmp(cur_hash, m.head_hash, 32) != 0) {
+        *verdict_out = ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN;
+        if (bad_seq_out) *bad_seq_out = hw - 1;
+        return ALP_OK;
+    }
+
+    *verdict_out = ALP_UPDATE_LOG_VERIFY_OK;
+    return ALP_OK;
+}
