@@ -56,6 +56,7 @@ byte; their numeric encoding is:
 | `0x21` | `PWM_GET`             | `channel:u8`                                       | `period_ns:u32 duty_ns:u32`                        |
 | `0x30` | `ADC_READ`            | `channel:u8 samples:u8`                            | `mv[samples]:u16` (millivolt, raw averaged)        |
 | `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (always `0xFF` on this HW rev — see §3.4) |
+| `0x41` | `SE_RESET` (v0.8)       | `assert:u8` (`0` = release, `1` = hold in reset) | _empty_ (see §3.15) |
 | `0x50` | `DAC_SET`             | `channel:u8 reserved:u8 value_mv:u16`              | _empty_                                            |
 | `0x51` | `DAC_GET`             | `channel:u8`                                       | `value_mv:u16`                                     |
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
@@ -603,6 +604,44 @@ After a firmware reboot the feature resets to off (replies revert to
 unstamped); the host's normal link-recovery path (re-init →
 `GET_VERSION`) re-negotiates.
 
+### 3.15 Secure-element reset (`v0.8+`)
+
+`SE_RESET` (`0x41`) drives the on-module secure element's reset line,
+`SE_RST` = GD32 **`PC13`** (per
+`metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`).  The SE is an **OPTIGA
+Trust M** slave on the shared **BRD_I2C** management bus.  Request
+payload is one byte:
+
+| `assert` | Effect |
+|----------|--------|
+| `0`      | Release reset — the SE runs. |
+| `1`      | Hold the SE in reset. |
+
+The reply is empty.  The firmware owns the **active level** (OPTIGA
+Trust M `RST` is **active-low**, so `assert=1` drives `PC13` low); the
+host expresses intent, not polarity.  At boot the firmware parks the
+line **released** so the SE runs and `PC13` no longer floats at its
+GPIO power-on default.
+
+**Bus-recovery use.**  The OPTIGA speaks I²C with clock-stretching; an
+aborted APDU (e.g. the host warm-resets mid-transaction while the SE
+keeps power) can leave it holding **SCL low**, wedging BRD_I2C for every
+other master/slave (the 5L35023B PCIe-refclk generator, the PMICs, …).
+The recovery is a **reset pulse**, sequenced by the host:
+
+1. `SE_RESET assert=1` (hold in reset),
+2. wait ≥ a few hundred µs,
+3. `SE_RESET assert=0` (release),
+4. wait ~15 ms for the OPTIGA to warm-boot before re-probing BRD_I2C.
+
+Crucially this works **even when BRD_I2C is dead**: `PC13` is an
+independent GPIO and the **SPI transport** reaches the GD32 while the
+I²C bus is held low, so the host can always command the reset.
+
+Returns `STATUS_INVAL` for an `assert` byte outside `{0, 1}` and
+`STATUS_NOSUPPORT` on firmware whose GD32 HAL body is not built (the
+stub backend).
+
 ## 4. SPI framing
 
 Each command on SPI is a **request frame** sent by the host while CS
@@ -858,7 +897,8 @@ Version history (pre-1.0): **v0.7** adds `LINK_FEATURES` (0x81) +
 the negotiated `STATUS_SEQ` reply stamp (§3.14, §4.1.1) and the
 additive `OTA_BEGIN` version triple (§10) — both backward-compatible
 by construction (un-negotiated framing and the 8-byte BEGIN are
-byte-identical to v0.6).
+byte-identical to v0.6).  **v0.8** adds `SE_RESET` (0x41, §3.15) — a
+new opcode; older hosts simply never send it.
 
 ## 9. Reference vectors
 

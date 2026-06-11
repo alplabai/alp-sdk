@@ -187,6 +187,8 @@ typedef enum {
     GD32G553_CMD_PWM_GET               = 0x21,
     GD32G553_CMD_ADC_READ              = 0x30,
     GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40,
+    /* v0.8: secure-element (OPTIGA Trust M) reset, SE_RST = GD32 PC13. */
+    GD32G553_CMD_SE_RESET     = 0x41,
     /* v0.2 additions -- analog + counter peripherals routed via the
      * GD32 on V2N (see metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv). */
     GD32G553_CMD_DAC_SET      = 0x50,
@@ -452,6 +454,25 @@ alp_status_t gd32g553_adc_read(gd32g553_t *ctx, uint8_t channel,
  *  (PMC_STATUS_00 etc.) over BRD_I2C -- both in the `chips/da9292`
  *  driver. */
 alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status);
+
+/** @brief Drive the secure-element (OPTIGA Trust M) reset line,
+ *         SE_RST = GD32 `PC13`.
+ *
+ *  The OPTIGA sits on the shared BRD_I2C management bus.  Use this to
+ *  recover a bus the SE has clock-stretched low (it can hold SCL down
+ *  mid-APDU after an aborted transaction): pulse the line -- assert,
+ *  wait, release -- then leave ~15 ms before re-probing while the SE
+ *  warm-boots.  The SPI transport reaches the GD32 even while BRD_I2C is
+ *  held low, so this recovers the bus even when the I2C transport is dead.
+ *
+ *  @param ctx     GD32G553 bridge context (must be initialised first).
+ *  @param assert  @c true holds the SE in reset; @c false releases it
+ *                 (the firmware owns the active-low polarity).
+ *
+ *  @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT (firmware lacks
+ *          the HAL body) / transport error.
+ */
+alp_status_t gd32g553_se_reset(gd32g553_t *ctx, bool assert);
 
 /** @brief Program a DAC channel's output voltage in millivolts.
  *

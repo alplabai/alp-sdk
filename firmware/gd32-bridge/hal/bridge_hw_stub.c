@@ -151,6 +151,12 @@ uint8_t bridge_hw_da9292_status_cached(void)
                    * no DA9292 net reaches the GD32 on this SoM rev) */
 }
 
+int bridge_hw_se_reset(uint8_t assert)
+{
+    (void)assert;
+    return BRIDGE_HW_ERR_NOTIMPL;
+}
+
 /* --------------------------------------------------------------- */
 /* v0.5 (§2B.2) -- advanced timer extras                             */
 /* --------------------------------------------------------------- */
