@@ -148,6 +148,18 @@ zephyr_library_sources_ifdef(CONFIG_MBEDTLS
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/zephyr_drv.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/sw_fallback.c)
+# Update-log surface (<alp/update_log.h>) -- experimental, opt-in.
+# Pure engine + software tamper-evident tier + (compiled, unregistered)
+# Alif TF-M stub seam. Gated on CONFIG_ALP_SDK_UPDATE_LOG.  The dispatch
+# owns the public surface + the singleton handle; sw_tier registers the
+# universal silicon_ref="*" backend; alif_tfm_stub is compiled (so it
+# can't bitrot) but deliberately NOT registered until its silicon lands.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/engine.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/sha256.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/sw_tier.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/alif_tfm_stub.c)
 # Audio registry sources.  The dispatcher owns two handle pools
 # (alp_audio_in_t + alp_audio_out_t) keyed off the same class
 # registry; the portable Zephyr backend wires DMIC input +

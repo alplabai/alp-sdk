@@ -153,6 +153,22 @@ from `stub` to `partial`; `register_map` source doc added; address
 entries renamed from `page:` to `slave: add1/add2` to match the
 two-slave model.
 
+### Added — update-log: experimental `<alp/update_log.h>` portable tamper-evident firmware-update audit log
+
+`<alp/update_log.h>` is a new **experimental** surface that records
+firmware-update outcomes in a tamper-evident, append-only log that
+is portable across all supported SoMs.  The software tier
+(`ALP_UPDATE_LOG_SW_TAMPER_EVIDENT`) — active on every target today
+— backs the log with a SHA-256 hash-chain and a monotonic counter,
+detecting mutation, truncation, rollback, and reorder of historical
+entries.  A hardware-enforced tier (`ALP_UPDATE_LOG_HW_ENFORCED`,
+backed by TF-M Protected Storage + a non-decrementable hardware
+monotonic counter) is a defined stub seam and is not yet
+implemented; the assurance level reported at runtime tells
+application code which tier is active.  ABI is marked
+`[ABI-EXPERIMENTAL]`; the surface may change before the hardware
+backend is silicon-proven.  Enable with `CONFIG_ALP_SDK_UPDATE_LOG=y`.
+
 ## [v0.6.0] - 2026-06-06
 
 ### Added — gd32-bridge v0.2.9 / protocol v0.7: the stale-reply kill + OTA version plumb (2026-06-06)
