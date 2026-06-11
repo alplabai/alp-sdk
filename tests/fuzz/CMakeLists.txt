@@ -49,6 +49,14 @@ _alp_add_fuzz_target(mproc_frame)
 _alp_add_fuzz_target(ble_adv_parser)
 _alp_add_fuzz_target(optiga_apdu)
 _alp_add_fuzz_target(tls_handshake)
+_alp_add_fuzz_target(update_log_entry)
+# Link the real engine + vendored SHA-256 so the harness fuzzes production decode.
+target_sources(alp_fuzz_update_log_entry PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/update_log/engine.c
+    ${CMAKE_SOURCE_DIR}/src/update_log/sha256.c)
+target_include_directories(alp_fuzz_update_log_entry PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/include)
 
 # gd32_bridge_frame additionally links the firmware-side
 # protocol.c + bridge_hw_stub.c so the harness exercises the
