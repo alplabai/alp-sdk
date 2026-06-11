@@ -81,3 +81,55 @@ alp_status_t ulog_meta_decode(const uint8_t *buf, size_t len, struct ulog_meta *
     memcpy(m_out->head_hash, buf + 14, 32);
     return ALP_OK;
 }
+
+static void kbuf(char *out, size_t cap, uint64_t seq)
+{
+    /* "ulog.<seq>" decimal. */
+    int n = 0; char tmp[24]; uint64_t v = seq;
+    do { tmp[n++] = (char)('0' + (v % 10u)); v /= 10u; } while (v && n < 20);
+    size_t pos = 0; const char *pfx = "ulog.";
+    while (*pfx && pos < cap-1) out[pos++] = *pfx++;
+    while (n > 0 && pos < cap-1) out[pos++] = tmp[--n];
+    out[pos] = 0;
+}
+
+alp_status_t ulog_engine_append(const alp_secure_store_if *store,
+                                const alp_monotonic_counter_if *ctr,
+                                const alp_update_log_entry_t *entry)
+{
+    if (store == NULL || ctr == NULL || entry == NULL) return ALP_ERR_INVAL;
+
+    uint64_t hw = 0;
+    alp_status_t rc = ctr->read(ctr->ctx, 0, &hw);
+    if (rc != ALP_OK) return rc;
+
+    uint8_t prev[32]; memset(prev, 0, sizeof(prev));
+    if (hw > 0) {
+        uint8_t metabuf[ULOG_META_WIRE_LEN]; size_t mlen = 0;
+        rc = store->get(store->ctx, "ulog.meta", metabuf, sizeof(metabuf), &mlen);
+        if (rc != ALP_OK) return rc;
+        struct ulog_meta m;
+        rc = ulog_meta_decode(metabuf, mlen, &m);
+        if (rc != ALP_OK) return rc;
+        memcpy(prev, m.head_hash, 32);
+    }
+
+    alp_update_log_entry_t e = *entry; e.seq = hw;
+    uint8_t wire[ULOG_ENTRY_WIRE_LEN];
+    rc = ulog_entry_encode(&e, prev, wire);
+    if (rc != ALP_OK) return rc;
+
+    char key[24]; kbuf(key, sizeof(key), hw);
+    rc = store->put(store->ctx, key, wire, sizeof(wire));
+    if (rc != ALP_OK) return rc;
+
+    struct ulog_meta nm; nm.count = hw + 1u;
+    ulog_sha256(wire, sizeof(wire), nm.head_hash);
+    uint8_t metaout[ULOG_META_WIRE_LEN];
+    (void)ulog_meta_encode(&nm, metaout);
+    rc = store->put(store->ctx, "ulog.meta", metaout, sizeof(metaout));
+    if (rc != ALP_OK) return rc;
+
+    uint64_t newhw = 0;
+    return ctr->increment(ctr->ctx, 0, &newhw);
+}
