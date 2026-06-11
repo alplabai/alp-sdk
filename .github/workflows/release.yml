@@ -38,14 +38,21 @@
 # (`vX.Y.Z-rc1`) are supported and produce a "pre-release" Release
 # on GitHub.
 #
-# Verification (downstream customer one-liner):
+# Verification (downstream customer):
 #
-#   gh attestation verify alp-sdk-v<N>.tar.gz --owner alplabai
+#   slsa-verifier verify-artifact alp-sdk-v<N>.tar.gz \
+#       --provenance-path alp-sdk-v<N>.tar.gz.intoto.jsonl \
+#       --source-uri github.com/alplabai/alp-sdk --source-tag v<N>
 #
-# This checks the Sigstore signature, the workflow identity
-# (slsa-framework/slsa-github-generator), the source repo
-# (alplabai/alp-sdk), and the artefact digest match -- all four
-# bound to the SLSA L3 provenance bundle.
+# (github.com/slsa-framework/slsa-verifier -- single static binary.)
+# This checks the Sigstore signature against the Rekor transparency
+# log, the builder identity (the pinned generic generator), the
+# source repo + tag, and the artefact digest match -- all bound to
+# the SLSA L3 provenance bundle.  NOTE: `gh attestation verify` does
+# NOT work here -- that API only serves attest-build-provenance (L2)
+# attestations; the generic generator ships its proof as the
+# .intoto.jsonl release asset instead (verified for real on the
+# v0.6.0 release: rekor entry 1740409638).
 #
 # See docs/release-policy.md + https://slsa.dev/spec/v1.0/levels#level-3.
 

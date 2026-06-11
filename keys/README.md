@@ -11,6 +11,7 @@ signing.  Production keys never live in git.**
 |-----------------------------------|----------------------|-----------------|-------|
 | `mcuboot_dev_ecdsa_p256.pem`      | ECDSA-P256 dev key   | NO (`.gitignore`'d) | Generated locally via `generate_dev_key.sh`.  Used by [`zephyr/sysbuild/aen/sysbuild.conf`](../zephyr/sysbuild/aen/sysbuild.conf).  **Insecure: signing power equals every developer who's ever cloned this repo.** |
 | `mcuboot_prod_ecdsa_p256.pub.pem` | ECDSA-P256 prod pub  | YES (when it lands) | Public half only.  Compiled into the bootloader for verification.  Production private key never leaves OPTIGA Trust M. |
+| `alp_release_signing_ecdsa_p256.pub.pem` | ECDSA-P256 release pub | YES | Public half of the **SoM-release** signing key — a *separate* concern from MCUboot (it signs release bundles / provisioning records, not firmware images).  Used by `scripts/check_som_bundle.py` to verify bundle provenance.  See [`docs/som-release-signing.md`](../docs/som-release-signing.md).  The private half lives in alp-sdk-internal (pilot) / a hardware signer (production), never here. |
 
 ## Generating the dev key
 

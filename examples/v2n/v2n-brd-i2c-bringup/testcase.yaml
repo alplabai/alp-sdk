@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+sample:
+  name: v2n-brd-i2c-bringup
+  description: |
+    Patch-day diagnostic for the V2N SoM's BRD_I2C management bus:
+    bus-health check + full address scan + read-only probe of every
+    populated IC (RTC, temp sensor, clock generator, both PMICs, the
+    optional LPDDR buck, the secure element, and the GD32 supervisor
+    over its I2C transport), ending in a PASS/FAIL/SKIP table.
+
+tests:
+  alp_sdk.examples.v2n.brd_i2c_bringup.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - i2c
+    build_only: true

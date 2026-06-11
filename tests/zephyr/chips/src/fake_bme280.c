@@ -72,11 +72,16 @@ static const uint8_t calib_block_2[7] = {
 static const uint8_t raw_block[8] = {
     /* Pressure: 415148 = 0x655AC → MSB-first 20-bit packs as
      * 0x65 0x5A 0xC0 (low 4 bits unused). */
-    0x65, 0x5A, 0xC0,
-    /* Temperature: 519888 = 0x7EF50 → 0x7E 0xF5 0x00. */
-    0x7E, 0xF5, 0x00,
+    0x65,
+    0x5A,
+    0xC0,
+    /* Temperature: 519888 = 0x7EED0 → 0x7E 0xED 0x00. */
+    0x7E,
+    0xED,
+    0x00,
     /* Humidity: 0x6FF0 (synthetic; no datasheet example). */
-    0x6F, 0xF0,
+    0x6F,
+    0xF0,
 };
 
 static void seed_defaults(struct fake_bme280_data *d) {

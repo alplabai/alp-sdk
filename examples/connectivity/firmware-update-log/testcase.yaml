@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+sample:
+  name: firmware-update-log
+  description: |
+    Portable tamper-evident firmware-update audit log via
+    <alp/update_log.h>. Software tier runs on native_sim; the same
+    code is hardware-enforced where a secure backend is present.
+tests:
+  alp_sdk.examples.connectivity.firmware_update_log.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - update_log
+      - security
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "verify: OK"

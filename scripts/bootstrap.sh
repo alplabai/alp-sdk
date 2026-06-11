@@ -24,6 +24,7 @@
 #     ├── alp-sdk/                  (this repo)
 #     └── zephyrproject/
 #         ├── .west/
+#         ├── .venv/                (hermetic west + Zephyr/SDK Python deps)
 #         ├── zephyr/               (v4.4.0 pin -- keep in sync with west.yml)
 #         └── modules/
 #
@@ -64,7 +65,7 @@ while [ $# -gt 0 ]; do
         --no-west)      DO_WEST=0 ;;
         --print-env)    PRINT_ENV_ONLY=1 ;;
         -h|--help)
-            sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '3,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -87,6 +88,8 @@ die()  { printf "\033[1;31m[bootstrap]\033[0m %s\n" "$*" >&2; exit 1; }
 if [ "${PRINT_ENV_ONLY}" -eq 1 ]; then
     cat <<EOF
 # Add to your shell profile (or run before invoking the SDK):
+# Activate the workspace venv (west + Zephyr/SDK Python deps live here):
+#   source "${WORKSPACE_DIR}/.venv/bin/activate"
 export ZEPHYR_BASE="${WORKSPACE_DIR}/zephyr"
 export ZEPHYR_TOOLCHAIN_VARIANT=zephyr
 EOF
@@ -118,36 +121,86 @@ info "Repo root:       ${REPO_ROOT}"
 info "Workspace dir:   ${WORKSPACE_DIR}"
 info "Detected OS:     ${OS_LABEL}"
 
-# -------- west setup ----------------------------------------------------------
+# -------- workspace selection (reuse a compatible ZEPHYR_BASE) ----------------
+
+# If ZEPHYR_BASE points at a Zephyr tree whose MAJOR.MINOR matches our pin and
+# whose parent is a west workspace, reuse it (never modify the user's tree);
+# otherwise ignore a stale ZEPHYR_BASE so it can't hijack `west init`, and build
+# an isolated workspace.  Detection reads the ENVIRONMENT VARIABLE only -- never
+# a shell rc file -- so it behaves identically under bash / zsh / fish / WSL.
+PIN_MM="$(printf '%s' "${ZEPHYR_VERSION}" | sed -E 's/^v?([0-9]+\.[0-9]+).*/\1/')"
+REUSE_WS=0
+if [ -n "${ZEPHYR_BASE:-}" ] && [ -f "${ZEPHYR_BASE}/VERSION" ]; then
+    EXIST_TOP="$(cd "${ZEPHYR_BASE}/.." 2>/dev/null && pwd || true)"
+    EXIST_MM="$(awk -F= '
+        /^VERSION_MAJOR/{gsub(/[^0-9]/,"",$2); j=$2}
+        /^VERSION_MINOR/{gsub(/[^0-9]/,"",$2); n=$2}
+        END{print j"."n}' "${ZEPHYR_BASE}/VERSION" 2>/dev/null)"
+    if [ -n "${EXIST_TOP}" ] && [ -d "${EXIST_TOP}/.west" ] && [ "${EXIST_MM}" = "${PIN_MM}" ]; then
+        REUSE_WS=1
+        WORKSPACE_DIR="${EXIST_TOP}"
+        ok "Reusing compatible Zephyr workspace from \$ZEPHYR_BASE: ${WORKSPACE_DIR} (Zephyr ${EXIST_MM}.x)"
+    else
+        warn "\$ZEPHYR_BASE (${ZEPHYR_BASE}) is not a ${PIN_MM}.x west workspace -- ignoring it and building an isolated one"
+        unset ZEPHYR_BASE
+    fi
+fi
+
+VENV_DIR="${WORKSPACE_DIR}/.venv"
+
+# -------- workspace venv (hermetic west + Python deps) ------------------------
+
+# Everything -- west, the Zephyr requirements, the SDK extras -- installs into a
+# workspace-local venv, never the system interpreter / --user / --break-system-
+# packages (issue #93: a half-removed system `packaging` once broke `west init`,
+# and a global west couples the build to the host interpreter's state).  The
+# alp CLI + VS Code extension auto-discover <workspace>/.venv, so this is
+# backwards-compatible.  Idempotent: an existing venv is reused.
+if [ "${DO_WEST}" -eq 1 ] || [ "${DO_PIP}" -eq 1 ]; then
+    mkdir -p "${WORKSPACE_DIR}"
+    if [ -x "${VENV_DIR}/bin/python" ] || [ -x "${VENV_DIR}/Scripts/python.exe" ]; then
+        ok "Workspace venv already present at ${VENV_DIR}"
+    else
+        info "Creating workspace venv at ${VENV_DIR}"
+        python3 -m venv "${VENV_DIR}" || die "python3 -m venv ${VENV_DIR} failed"
+    fi
+    # POSIX venvs put executables in bin/; a Windows (git-bash) venv uses Scripts/.
+    if [ -d "${VENV_DIR}/bin" ]; then VBIN="${VENV_DIR}/bin"; else VBIN="${VENV_DIR}/Scripts"; fi
+    VPY="${VBIN}/python"
+    WEST="${VBIN}/west"
+    "${VPY}" -m pip install --upgrade -q pip wheel || warn "pip/wheel upgrade reported a problem"
+fi
+
+# -------- west init / update --------------------------------------------------
 
 if [ "${DO_WEST}" -eq 1 ]; then
-    # Ensure pip-installable west is available; install user-locally if not.
-    if ! command -v west >/dev/null 2>&1; then
-        info "west not on PATH -- installing via pip (--user)"
-        python3 -m pip install --user --upgrade west || die "pip install west failed"
-        # Add the user-pip bin dir to PATH for this invocation.
-        export PATH="$(python3 -m site --user-base)/bin:${PATH}"
+    # west into the venv (NOT global / --user) so the system interpreter can't break it.
+    if [ ! -x "${WEST}" ]; then
+        info "Installing west into the workspace venv"
+        "${VPY}" -m pip install --upgrade -q west || die "pip install west (venv) failed"
     fi
 
-    if [ ! -d "${WORKSPACE_DIR}/.west" ]; then
+    if [ "${REUSE_WS}" -eq 1 ]; then
+        ok "Existing workspace reused -- skipping 'west init' / 'west update' (left untouched)"
+    elif [ ! -d "${WORKSPACE_DIR}/.west" ]; then
         info "Creating Zephyr workspace at ${WORKSPACE_DIR} (this takes a few minutes)"
-        mkdir -p "${WORKSPACE_DIR}"
         ( cd "${WORKSPACE_DIR}" && \
-          west init -m https://github.com/zephyrproject-rtos/zephyr \
+          "${WEST}" init -m https://github.com/zephyrproject-rtos/zephyr \
                     --mr "${ZEPHYR_VERSION}" . \
         ) || die "west init failed"
+        info "Running 'west update' (shallow + narrow; ~30 MB on a cold cache)"
+        ( cd "${WORKSPACE_DIR}" && "${WEST}" update --narrow -o=--depth=1 ) || die "west update failed"
+        ( cd "${WORKSPACE_DIR}" && "${WEST}" zephyr-export ) || true
     else
         ok "Zephyr workspace already initialised at ${WORKSPACE_DIR}"
+        info "Running 'west update' (shallow + narrow)"
+        ( cd "${WORKSPACE_DIR}" && "${WEST}" update --narrow -o=--depth=1 ) || die "west update failed"
+        ( cd "${WORKSPACE_DIR}" && "${WEST}" zephyr-export ) || true
     fi
-
-    info "Running 'west update' (shallow + narrow; ~30 MB on a cold cache)"
-    ( cd "${WORKSPACE_DIR}" && west update --narrow -o=--depth=1 ) \
-        || die "west update failed"
-    ( cd "${WORKSPACE_DIR}" && west zephyr-export ) || true
 
     # NOTE: this does NOT install the Zephyr SDK (the cross toolchains).
     # Real-silicon targets (e.g. the V2N M33-SM) require it -- run
-    # `west sdk install` from "${WORKSPACE_DIR}" once after this step.
+    # `"${WEST}" sdk install` from "${WORKSPACE_DIR}" once after this step.
     # native_sim smoke builds use host gcc (ZEPHYR_TOOLCHAIN_VARIANT=host)
     # and don't need the SDK.
 else
@@ -157,17 +210,17 @@ fi
 # -------- pip dependencies ----------------------------------------------------
 
 if [ "${DO_PIP}" -eq 1 ]; then
+    # Into the SAME workspace venv -- no --user / --break-system-packages.
     if [ -f "${WORKSPACE_DIR}/zephyr/scripts/requirements.txt" ]; then
-        info "Installing Zephyr Python requirements"
-        python3 -m pip install --user --break-system-packages -q \
+        info "Installing Zephyr Python requirements into the venv"
+        "${VPY}" -m pip install -q \
             -r "${WORKSPACE_DIR}/zephyr/scripts/requirements.txt" \
             || warn "Zephyr requirements install reported a problem -- check manually"
     fi
     # SDK-side extras: alp_project.py needs jsonschema; the MCUboot
     # dev-key script needs imgtool.
-    info "Installing alp-sdk Python extras (jsonschema, imgtool)"
-    python3 -m pip install --user --break-system-packages -q \
-        jsonschema imgtool \
+    info "Installing alp-sdk Python extras into the venv (jsonschema, imgtool)"
+    "${VPY}" -m pip install -q jsonschema imgtool \
         || warn "alp-sdk extras install reported a problem -- check manually"
 else
     info "Skipping pip installs (--no-pip)"
@@ -217,6 +270,9 @@ ok "Bootstrap complete."
 cat <<EOF
 
 Next steps:
+  # Activate the workspace venv (west + Zephyr/SDK deps live here):
+  source "${VENV_DIR}/bin/activate"
+
   # Make Zephyr reachable for builds:
   export ZEPHYR_BASE="${WORKSPACE_DIR}/zephyr"
   export ZEPHYR_TOOLCHAIN_VARIANT=zephyr

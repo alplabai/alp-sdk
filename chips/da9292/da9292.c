@@ -42,17 +42,12 @@
 #define DA9292_CTRL01_CH2_EN (1u << 1)
 #define DA9292_CTRL01_CH1_EN (1u << 0)
 
-/* PMC_STATUS_00 bit layout (datasheet Table 14).
- *
- * The exact bit assignments aren't fully visible in the extracted
- * snippets but the field set is:
- *   S_CH2_OC, S_CH1_OC, S_CH2_OV, S_CH1_OV,
- *   S_CH2_UV, S_CH1_UV, S_CH2_PG, S_CH1_PG.
- * Order TODO -- assumed below to mirror PMC_MASK_00 (which IS
- * documented as bits[7:0] = M_CH2_OC, M_CH1_OC, M_CH2_OV, M_CH1_OV,
- * M_CH2_UV, M_CH1_UV, M_CH2_PG, M_CH1_PG).  Verify against the
- * datasheet's Table 14 register description before relying on these
- * masks in production. */
+/* PMC_STATUS_00 bit layout -- VERIFIED against DA9292 Datasheet
+ * Rev 2.2 (R16DS0518EJ0220), Table 14 (p.36-37) on 2026-06-06:
+ * bits[7:0] = S_CH2_OC, S_CH1_OC, S_CH2_OV, S_CH1_OV,
+ *             S_CH2_UV, S_CH1_UV, S_CH2_PG, S_CH1_PG.
+ * (Same ordering as PMC_MASK_00, Table 18 -- the historical
+ * mirror-the-mask assumption checked out.) */
 #define DA9292_STATUS00_CH2_OC (1u << 7)
 #define DA9292_STATUS00_CH1_OC (1u << 6)
 #define DA9292_STATUS00_CH2_OV (1u << 5)

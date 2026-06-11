@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-06",
+  "generated": "2026-06-11",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1499,9 +1499,9 @@
           "definition": "typedef struct { bool initialised;",
           "hash": "98b22257593e61d9"
         },
-        "thermal_warning": {
-          "definition": "typedef struct { bool thermal_warning;",
-          "hash": "d637f3328618eb50"
+        "rom_stat": {
+          "definition": "typedef struct { bool rom_stat;",
+          "hash": "b135cd7a3ea92a21"
         }
       }
     },
@@ -8657,6 +8657,70 @@
       },
       "macros": {},
       "typedefs": {}
+    },
+    "alp/update_log.h": {
+      "functions": {
+        "alp_update_log_append": {
+          "hash": "a0385cf92a0e599b",
+          "signature": "alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_entry_t *entry);"
+        },
+        "alp_update_log_assurance": {
+          "hash": "d5cf59e88cb7ad92",
+          "signature": "alp_update_log_assurance_t alp_update_log_assurance(const alp_update_log_t *log);"
+        },
+        "alp_update_log_close": {
+          "hash": "82718d8828d77948",
+          "signature": "void alp_update_log_close(alp_update_log_t *log);"
+        },
+        "alp_update_log_count": {
+          "hash": "5b6f22e22177a783",
+          "signature": "alp_status_t alp_update_log_count(alp_update_log_t *log, uint64_t *count_out);"
+        },
+        "alp_update_log_get": {
+          "hash": "65a91dec2240a93d",
+          "signature": "alp_status_t alp_update_log_get(alp_update_log_t *log, uint64_t seq, alp_update_log_entry_t *entry_out);"
+        },
+        "alp_update_log_open": {
+          "hash": "bba25a790a0bb4ff",
+          "signature": "alp_update_log_t * alp_update_log_open(void);"
+        },
+        "alp_update_log_verify": {
+          "hash": "3ca5e00d2d37b61b",
+          "signature": "alp_status_t alp_update_log_verify(alp_update_log_t *log, alp_update_log_verdict_t *verdict_out, uint64_t *bad_seq_out);"
+        }
+      },
+      "macros": {
+        "ALP_UPDATE_LOG_FWVER_MAX": {
+          "hash": "ea8ba9389a3f73e7",
+          "value": "31"
+        },
+        "ALP_UPDATE_LOG_HASH_LEN": {
+          "hash": "ac823c2487873d18",
+          "value": "32"
+        }
+      },
+      "typedefs": {
+        "alp_update_log_assurance_t": {
+          "definition": "typedef enum { ALP_UPDATE_LOG_SW_TAMPER_EVIDENT = 0, ALP_UPDATE_LOG_HW_ENFORCED = 1, } alp_update_log_assurance_t;",
+          "hash": "8fbda4801f564ab6"
+        },
+        "alp_update_log_t": {
+          "definition": "typedef struct alp_update_log alp_update_log_t;",
+          "hash": "17d3d5cd89f53a3c"
+        },
+        "alp_update_log_verdict_t": {
+          "definition": "typedef enum { ALP_UPDATE_LOG_VERIFY_OK = 0, ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN = 1, ALP_UPDATE_LOG_VERIFY_TRUNCATED = 2, ALP_UPDATE_LOG_VERIFY_ROLLED_BACK = 3, } alp_update_log_verdict_t;",
+          "hash": "a11adb6eb511a37b"
+        },
+        "alp_update_status_t": {
+          "definition": "typedef enum { ALP_UPDATE_STATUS_CONFIRMED = 0, ALP_UPDATE_STATUS_VERIFY_FAILED = 1, ALP_UPDATE_STATUS_ROLLED_BACK = 2, ALP_UPDATE_STATUS_PENDING_CONFIRM = 3, } alp_update_status_t;",
+          "hash": "4fbd9b266388f10b"
+        },
+        "seq": {
+          "definition": "typedef struct { uint64_t seq;",
+          "hash": "010a1414d5fdcd0c"
+        }
+      }
     },
     "alp/usb.h": {
       "functions": {

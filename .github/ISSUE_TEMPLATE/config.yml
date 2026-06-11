@@ -1,0 +1,14 @@
+# Routes non-bug traffic away from the issue tracker: questions go to
+# the community forum, docs lookups to the rendered doc site, and
+# vulnerabilities to private reporting instead of a public issue.
+blank_issues_enabled: true
+contact_links:
+  - name: Ask a question
+    url: https://community.alplab.ai/
+    about: Questions and community discussion live on the Alp Lab forum.
+  - name: Read the docs
+    url: https://docs.alplab.ai/sdk/introduction
+    about: Rendered SDK documentation — quickstarts, board.yaml reference, per-SoM guides.
+  - name: Report a security vulnerability
+    url: https://github.com/alplabai/alp-sdk/security/advisories/new
+    about: Please report vulnerabilities privately — see SECURITY.md. Do not open a public issue.

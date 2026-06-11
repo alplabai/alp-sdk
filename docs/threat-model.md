@@ -194,6 +194,7 @@ defend (e.g. `<alp/e1m_pinout.h>` is just constants) marked n/a.
 | `<alp/storage.h>` (inline-AES) | Local physical | Key material via OPTIGA path only; SDK never sees the AES key in clear |
 | `<alp/camera.h>` | DMA-buffer overflow if frame_size mis-declared | Backend reconciles frame_size against silicon-reported width × height × bpp |
 | `<alp/audio.h>` | DMA-buffer overflow on misbehaving DMIC | Backend enforces `frames_per_block` × `channels` × `sizeof(int16_t)` against allocator |
+| `<alp/update_log.h>` | Tamper of historical update records | Hash-chain + monotonic-counter (SW tier, tamper-evident); TF-M Protected Storage + HW counter (HW_ENFORCED tier) |
 
 ## 5. Out-of-scope (explicit non-goals)
 

@@ -17,7 +17,7 @@ DESCRIPTION = "Static library of ALP-curated drivers for chips populated \
 on the E1M and E1M-X EVKs and modules.  Pairs with libalp_sdk.so."
 HOMEPAGE    = "https://github.com/alplabai/alp-sdk"
 LICENSE     = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://LICENSE;md5=86d3f3a95c324c9479bd8986968f4327"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=787726818c896f394f6627ab59d98d69"
 
 # Pinned to the v0.6 release tag; CI bumps SRCREV when alp-sdk
 # tags a new release.
@@ -52,6 +52,7 @@ PACKAGECONFIG ??= " \
     tcal9538 ina236 tas2563 lsm6dso bmi323 bmp581 \
     icm42670 ssd1306 ssd1331 tmp112 rv3028c7 \
     optiga_trust_m eeprom_24c128 ov5640 cam_mux_pi3wvr626 \
+    ublox_neo_m9n \
 "
 
 PACKAGECONFIG[tcal9538]            = "-DALP_SDK_CHIP_TCAL9538=ON,-DALP_SDK_CHIP_TCAL9538=OFF"
@@ -69,6 +70,7 @@ PACKAGECONFIG[optiga_trust_m]      = "-DALP_SDK_CHIP_OPTIGA_TRUST_M=ON,-DALP_SDK
 PACKAGECONFIG[eeprom_24c128]       = "-DALP_SDK_CHIP_EEPROM_24C128=ON,-DALP_SDK_CHIP_EEPROM_24C128=OFF"
 PACKAGECONFIG[ov5640]              = "-DALP_SDK_CHIP_OV5640=ON,-DALP_SDK_CHIP_OV5640=OFF"
 PACKAGECONFIG[cam_mux_pi3wvr626]   = "-DALP_SDK_CHIP_CAM_MUX_PI3WVR626=ON,-DALP_SDK_CHIP_CAM_MUX_PI3WVR626=OFF"
+PACKAGECONFIG[ublox_neo_m9n]       = "-DALP_SDK_CHIP_UBLOX_NEO_M9N=ON,-DALP_SDK_CHIP_UBLOX_NEO_M9N=OFF"
 
 FILES:${PN}-staticdev = "${libdir}/libalp_chips.a"
 FILES:${PN}-dev       = "${includedir}/alp/chips/"

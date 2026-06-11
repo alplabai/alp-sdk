@@ -1,8 +1,9 @@
 # Alp SDK chip manifest: Renesas DA9292 multi-phase buck PMIC.
 schema_version:   1
 chip_id:          da9292
-driver_status:    partial       # full register map; PMC_STATUS bit
-                                # layout TODO-flagged for verify
+driver_status:    complete      # full register map; PMC_STATUS/EVENT/
+                                # CTRL/VOUT encodings verified vs
+                                # datasheet Rev 2.2 Tables 12-27 (2026-06-06)
 display_name:     "Renesas DA9292 multi-phase buck PMIC"
 vendor:           renesas
 mpn_population:

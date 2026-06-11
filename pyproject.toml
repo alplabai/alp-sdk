@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "PyYAML>=6.0",
     "jsonschema>=4.0",
+    "cryptography>=41.0",
     "click>=8.1",
     "cbor2>=5.0",
     "questionary>=2.0",

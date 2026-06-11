@@ -1,0 +1,24 @@
+som:
+  sku: E1M-V2N101
+
+preset: e1m-x-evk
+cores:
+  a55_cluster:
+    os: "off"
+  m33_sm:
+    app: ./src
+    peripherals:
+      - i2c
+
+chips:
+  - rv3028c7
+  - tmp112
+  - clk_5l35023b
+  - act8760
+  - da9292
+  - tps628640
+  - optiga_trust_m
+  - gd32g553
+
+diagnostics:
+  log_level: info

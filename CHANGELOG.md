@@ -7,6 +7,168 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.7.0 candidate
 
+### Added — orchestrate: per-core OS topology + `system-manifest` pinned as the IDE/tool contract (issues #93, #95, #106)
+
+`metadata/schemas/system-manifest-v1.schema.json` formalizes
+`build/system-manifest.yaml` — the single derived projection of a
+`board.yaml` that `west alp-build` emits — as **the contract IDE/CLI
+tools read** instead of re-deriving folder layout and build wiring from
+`board.yaml` + the SoM presets.  The `scripts/alp_orchestrate.py`
+emitter and this schema move in lockstep, enforced by the new
+`scripts/check_system_manifest.py` gate.  Stability policy:
+`schema_version: 1` is **additive-only** (new optional fields only);
+breaking changes go to a `schema_version: 2` schema through a
+deprecation cycle.
+
+`scripts/alp_project.py --emit os-topology` reports, per resolved core,
+its `runtime_class`, class `default_os`, `effective_os`, and the legal
+`allowed_os` set — so a Board Configurator shows the SDK's selection and
+the valid overrides instead of guessing.  The OS is **class-derived and
+not user-selectable**: Cortex-A → Yocto/Linux, Cortex-M → Zephyr/RTOS;
+a `board.yaml` may only disable a core (`off`) or drop it to no-OS
+(`baremetal`), and selecting the other class's OS is rejected at load.
+The `os:` value-set is derived from `board.schema.json` (one source).
+`scripts/bootstrap.py` now installs west + Zephyr deps into a workspace
+`.venv` and respects `ZEPHYR_BASE`.
+
+### Added — meta-alp-sdk: `alp-image-edge` ROS 2 Humble image + `libalp_chips` shared library (V2N/V2M/NX)
+
+The `alp-image-edge` Yocto image builds for V2N/V2M/NX.  A new
+`libalp_chips` recipe builds the chip drivers as a shared library and
+links it into the `alp_perception` ROS 2 node, which builds against the
+current SDK API.  The SDK install no longer ships `alp/chips/*` headers
+— those are owned by the `alp-chips` package.
+
+### Added — metadata: signed SoM-release bundle manifest + provenance verification
+
+SoM-release bundles carry an ECDSA-P256 signature over a canonical-JSON
+manifest.  `scripts/check_som_bundle.py` verifies provenance
+(`--require-signature`) against the published signing public key
+(`keys/`, key_id `8be383f850354f40`), with a public v1 bundle schema
+and a CI gate on the example bundle.  Docs cover how to verify
+SoM-release provenance.
+
+### Added — provisioning: `scripts/provision_som.py` + `xspi_flashwriter` backend
+
+`provision_som.py` orchestrates per-SoM provisioning from a release
+bundle; the `xspi_flashwriter` flash backend drives the Renesas Flash
+Writer over SCIF (the real-write step is HW-gated).  Includes a
+provisioning runbook.
+
+### Added — bsp: public TF-A DDR-injection bbappend + u-boot `rzv2n-dev` config
+
+The TF-A DDR-parameter injection bbappend is now public; the overlaid
+private DDR param stays out of the public tree (gitignored).  The
+`rzv2n-dev` u-boot config (required for the DEEPX bring-up) builds.
+
+### Changed — docs: community-health files + landing-page polish
+
+Adds `SECURITY.md` and an issue-chooser with contact links; README
+badges + the verification callout corrected.
+
+### Fixed — release.yml: customer verification recipe points at the real proof
+
+The customer-facing verification recipe now uses `slsa-verifier` against
+the `.intoto.jsonl` asset (the SLSA generator's L3 proof), not
+`gh attestation verify` (which only serves the L2
+attest-build-provenance).  Proven on v0.6.0 (rekor 1740409638).
+
+### Removed — chips: fake-based register tests (driver validation moves to real silicon)
+
+The mocked-I2C ztests for the BRD_I2C ICs are removed per maintainer
+call — driver validation happens on real silicon via
+`v2n-brd-i2c-bringup` once the bus is patched.  The verified
+act8760/da9292 register maps, ABI snapshot, metadata, and the bring-up
+example stay; the chips suite is restored to its pre-slice state
+(151/151 green).
+
+### Added — examples/v2n: v2n-brd-i2c-bringup patch-day diagnostic (2026-06-07)
+
+`examples/v2n/v2n-brd-i2c-bringup` is a read-only bring-up diagnostic
+for the BRD_I2C management bus: a full 0x08..0x77 scan that
+distinguishes a bus-level electrical fault (line held low, missing
+pull-ups, wrong pinmux) from per-device failures, then per-IC probes —
+RV-3028-C7 time read, TMP112 temperature, CLK 5L35023B dash-code ID,
+ACT88760 dual-slave status, DA9292 ID + status, TPS628640 VOUT
+(assembly option, SKIP when absent), OPTIGA Trust M I2C_STATE, and a
+GD32 bridge PING + GET_VERSION over the I2C transport — ending in a
+PASS/FAIL/SKIP table.  The example surfaces the `tmp112`
+`0x40`-vs-`0x48` metadata discrepancy explicitly as a FAIL row instead
+of silently misreading the sensor.
+
+### Fixed — da9292: STATUS_00 layout verified vs Datasheet Rev 2.2 Table 14 (2026-06-07)
+
+An open TODO in `chips/da9292/da9292.c` queried whether the
+`PMC_STATUS_00` bit assignments matched the datasheet.  Verification
+against Renesas DA9292 Datasheet Rev 2.2 (R16DS0518EJ0220) Table 14
+(p.36-37) confirmed the existing decode was **correct** (the
+mirror-of-MASK assumption holds for every status bit).  The TODO is
+retired; `metadata/chips/da9292.yaml` `driver_status` moves
+`partial` → `complete`.  On-silicon validation follows on the
+patched BRD_I2C bus via `examples/v2n/v2n-brd-i2c-bringup`.
+
+### Fixed — act8760: register map replaced with the verified one (2026-06-07)
+
+The original `chips/act8760/act8760.c` register table was guessed;
+VSET accessors returned `ALP_ERR_NOSUPPORT`; the status decode was
+entirely wrong.  All three are corrected in this commit.
+
+**Register map** (source: `AA82BZ_RegisterMap_Users_Rev1P1` workbook +
+ACT88760 Datasheet Rev C, independently re-derived cell-by-cell
+2026-06-06):
+
+- Two-slave model now correctly documented: ADD1 (0x25 on CMI 120.E1)
+  = MSTR + GPIO + Buck1..6 tiles; ADD2 (0x26) = Buck7 tile + dual-LDO
+  tiles (LDO12 @ 0x20, LDO53 @ 0x40, LDO64 @ 0x60 on ADD2).
+- Verified VSET0 byte addresses: B1 0x42, B2 0x62, B3 0x82, B4 0xA2,
+  B5 0xC2, B6 0xE2 (ADD1); B7 0x02, LDO5 0x41, LDO1 0x21, LDO2 0x27,
+  LDO3 0x47, LDO4 0x67, LDO6 0x61 (ADD2).
+
+**VSET accessors** (`act8760_rail_get_vset` / `act8760_rail_set_vset`):
+no longer stubs.  `set_vset` does a read-modify-write preserving bits
+outside the VSET field (EN_OutPD / IPD_SET on bucks, RANGE on LDOs).
+
+**`act8760_status_t` — ABI BREAK** (field rename; no existing consumers
+outside this repo at time of writing):
+
+| Old field (wrong)  | New field (verified)   | Bit |
+|--------------------|-----------------------|-----|
+| `sys_data`         | `vsys_stat`           | bit4 |
+| `sys_warning`      | `vsys_warning`        | bit1 |
+| `ilim_warning`     | (deleted)             | — |
+| `fault_pending`    | (deleted)             | — |
+| (new)              | `rom_stat`            | bit7 |
+| (new)              | `wd_alert`            | bit6 |
+| (new)              | `vin_pok_ov`          | bit3 |
+| (new)              | `pb_assert`           | bit2 |
+| (new)              | `pb_deassert`         | bit0 |
+
+`thermal_warning` (bit5 TWARN) and `raw` are unchanged.
+
+**Removed defines** (unverified + unused): `ACT8760_REG_GPIO_STAT_LO`
+(0x03), `ACT8760_REG_OV_UV_CFG` (0x09).
+
+**Metadata** (`metadata/chips/act8760.yaml`): `driver_status` promoted
+from `stub` to `partial`; `register_map` source doc added; address
+entries renamed from `page:` to `slave: add1/add2` to match the
+two-slave model.
+
+### Added — update-log: experimental `<alp/update_log.h>` portable tamper-evident firmware-update audit log
+
+`<alp/update_log.h>` is a new **experimental** surface that records
+firmware-update outcomes in a tamper-evident, append-only log that
+is portable across all supported SoMs.  The software tier
+(`ALP_UPDATE_LOG_SW_TAMPER_EVIDENT`) — active on every target today
+— backs the log with a SHA-256 hash-chain and a monotonic counter,
+detecting mutation, truncation, rollback, and reorder of historical
+entries.  A hardware-enforced tier (`ALP_UPDATE_LOG_HW_ENFORCED`,
+backed by TF-M Protected Storage + a non-decrementable hardware
+monotonic counter) is a defined stub seam and is not yet
+implemented; the assurance level reported at runtime tells
+application code which tier is active.  ABI is marked
+`[ABI-EXPERIMENTAL]`; the surface may change before the hardware
+backend is silicon-proven.  Enable with `CONFIG_ALP_SDK_UPDATE_LOG=y`.
+
 ## [v0.6.0] - 2026-06-06
 
 ### Added — gd32-bridge v0.2.9 / protocol v0.7: the stale-reply kill + OTA version plumb (2026-06-06)

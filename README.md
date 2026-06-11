@@ -2,21 +2,19 @@
 
 > Write once, run on any E1M module.
 
-> ⚠️ **[UNTESTED] — `v0.6` status: paper-correct, no real-silicon verification yet.**
->
-> Every chip driver, library binding, peripheral wrapper, and
-> example app in this repo builds clean on `native_sim/native/64`
-> and passes its NULL-arg-guard ZTEST.  **Nothing has been brought
-> up on real silicon yet.**  Treat register addresses, timing
-> values, lifecycle sequencing, and per-SoM accelerator wiring as
-> *paper-correct only* until the v1.0 HiL verification sweep
-> lands.  Per-driver verification status is recorded in
-> `metadata/chips/<name>.yaml`'s `verification:` block and as
-> `@par Verification status: [UNTESTED]` Doxygen tags on every
-> public header.  Customers shipping production firmware should
-> assume nothing in here has been silicon-validated and budget
-> their own bring-up time accordingly.  Verification rolls out
-> per-SKU + per-chip from v0.6 onward.
+[![CI](https://github.com/alplabai/alp-sdk/actions/workflows/pr-twister.yml/badge.svg?branch=main)](https://github.com/alplabai/alp-sdk/actions/workflows/pr-twister.yml)
+[![Release](https://img.shields.io/github/v/release/alplabai/alp-sdk)](https://github.com/alplabai/alp-sdk/releases)
+[![License](https://img.shields.io/github/license/alplabai/alp-sdk)](LICENSE)
+[![Zephyr](https://img.shields.io/badge/Zephyr-v4.4.0-blue)](docs/zephyr-version-policy.md)
+
+> [!WARNING]
+> **Mostly pre-silicon (`v0.6`):** every chip driver, peripheral wrapper, and
+> example builds clean and passes its CI tests on `native_sim`, but **most of
+> the SDK has not yet been verified on real hardware**.  The first
+> silicon-verified slice landed in v0.6 — the V2N GD32-bridge campaign
+> (SPI/I²C link, HIL soak, A/B OTA, analog loopback).  Full caveats in the
+> *Status* section below; per-feature state in
+> [`docs/test-plan.md`](docs/test-plan.md).
 
 The **Alp SDK** is the unification software layer for Alp Lab edge AI
 modules built on the **E1M open-standard form factor**.  It provides
@@ -264,6 +262,19 @@ landed; runtime implementations fill in across point releases.  Code
 merged ≠ verified — every claim is tracked in
 [`docs/test-plan.md`](docs/test-plan.md), and a release does not tag
 until its gating rows flip to ✅.
+
+Treat register addresses, timing values, lifecycle sequencing, and
+per-SoM accelerator wiring as *paper-correct only* until their
+test-plan rows flip to ✅.  The first silicon-verified rows landed
+in v0.6 — the V2N GD32-bridge campaign (see the v0.6.0 section of
+[`docs/test-plan.md`](docs/test-plan.md)) — and the V2N Yocto image
+boots the bench board; everything else remains pre-HIL.  Per-driver
+verification status is recorded in `metadata/chips/<name>.yaml`'s
+`verification:` block and as `@par Verification status: [UNTESTED]`
+Doxygen tags on public headers.  Customers shipping production
+firmware should check the matching test-plan row and budget their
+own bring-up time for any surface not yet marked ✅.  Verification
+rolls out per-SKU + per-chip from v0.6 onward.
 
 v0.6 lands heterogeneous OS orchestration — see ADR 0010 + [`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md).
 

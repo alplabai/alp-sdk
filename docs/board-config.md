@@ -195,7 +195,7 @@ the SoM preset's `topology.<id>` when omitted):
 |----------------|----------------------------------------------------------------------------------------|
 | `app`          | App source dir.  Required for `os: zephyr` / `os: baremetal`.                          |
 | `image`        | Yocto image recipe name (e.g. `alp-image-edge`).                                       |
-| `os`           | Override the natural runtime only — `off` (skip slice) or `baremetal` (rare).          |
+| `os`           | NOT an OS picker — the runtime is class-derived (M→Zephyr, A→Yocto). Only `off` (skip slice) or `baremetal` (rare) are settable; a cross-class OS is rejected. |
 | `peripherals`  | Zephyr subsystem / Yocto package list for this slice.                                  |
 | `libraries`    | Library opt-in list for this slice.                                                    |
 | `inference`    | App-level inference tuning (`default_arena_kib` only — backend set is silicon-driven). |
@@ -214,12 +214,33 @@ in the matching SoC JSON: `cortex-m*` -> `zephyr`, `cortex-a*`
 `_default_os_from_core_type()` in
 [`scripts/alp_orchestrate.py`](../scripts/alp_orchestrate.py).
 
-Customer override behaviour is unchanged: `cores.<id>.os:` in
-`board.yaml` wins when set, the inference applies when omitted.
-Custom SoMs ported via
-[`docs/porting-new-som.md`](porting-new-som.md) get this OS
-inference for free as long as their SoC JSON declares core types
-correctly.
+The OS is **not** user-selectable: the runtime follows the core
+class, full stop.  A `board.yaml` may only **disable** a core
+(`os: off`) or drop it to **no-OS** (`os: baremetal`); selecting the
+*other* class's OS — `zephyr` on a Cortex-A, `yocto` on a Cortex-M —
+is **rejected by the loader** (`OrchestratorError`).  We support
+exactly two OSes — Yocto for Linux, Zephyr for the RTOS — mapped to
+the silicon class, not chosen.  (The check lives in the loader, not
+the schema, because it's cross-file: board.yaml `os:` vs the SoC
+`cores[].type`.)  Custom SoMs ported via
+[`docs/porting-new-som.md`](porting-new-som.md) get this for free as
+long as their SoC JSON declares core types correctly.
+
+**Querying it (for IDEs / tooling).**  Rather than re-deriving the
+M/A → OS mapping, tools read the resolved facts directly:
+
+```bash
+python3 scripts/alp_project.py --emit os-topology   # JSON to stdout
+```
+
+emits, per resolved core, the `core_type`, the `runtime_class`
+(`linux` | `rtos`), the class `default_os`, the `effective_os`,
+whether the core is `enabled`, and the per-core `allowed_os` — the
+valid dropdown, which *excludes the other class's OS* (so a Cortex-A
+shows `[yocto, baremetal, off]`, a Cortex-M `[zephyr, baremetal,
+off]`).  That's what an editor's board configurator uses to present
+the SDK's selection + the legal overrides, instead of guessing or
+offering a cross-class OS.
 
 **Silicon-determined fields never appear in `board.yaml`.**  Inference
 backend selection, NPU presence, on-module component populations,

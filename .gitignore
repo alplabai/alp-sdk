@@ -101,3 +101,9 @@ notes/
 *.egg-info/
 dist/
 *.dist-info/
+
+# meta-alp-sdk: the private LPDDR4X DDR param is OVERLAID into this public layer
+# tree at build time from alp-sdk-internal (see that repo's conf/bblayers-overlay.md).
+# It is Renesas-gen_tool-derived, SoM-hardware-specific config and MUST NOT be
+# committed to the public repo.
+meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/ddr_param_def_lpddr4-alp.c

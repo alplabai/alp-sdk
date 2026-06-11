@@ -184,7 +184,7 @@ Expected: PHYID1 reads `0x001C` (Realtek OUI).  After ~3-5 s with a
 * **DA9292 status**: `da9292_get_status()` -- expect CH1 PG=1,
   CH2 PG=0 (CH2 is the V2N-M1-only DEEPX rail), no fault bits.
 * **ACT88760 status**: `act8760_get_status()` -- expect no
-  `thermal_warning`, no `sys_warning`, `ilim_warning=false`.
+  `thermal_warning`, no `vsys_warning`, `vin_pok_ov=false`.
 
 ## 7. Common gotchas
 
