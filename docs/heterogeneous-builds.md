@@ -305,6 +305,14 @@ a real build's manifest with:
 python3 scripts/check_system_manifest.py --manifest build/system-manifest.yaml
 ```
 
+**Stability policy.**  `schema_version: 1` is **additive-only** — new
+*optional* fields may appear in any tagged release, but nothing existing
+is renamed, retyped, made required, or removed.  A breaking change ships
+as `schema_version: 2` through a deprecation cycle: the replaced shape is
+emitted alongside its replacement for at least one tagged release before
+removal.  Consumers should tolerate unknown fields so an additive v1
+change is a no-op for them.
+
 This pairs with the build plan below: the **manifest** is the *result*
 (what was/your-to-be built, per image) that an IDE reads to drive
 build/run/debug/flash; the **build plan** is the *write-free recipe* to
