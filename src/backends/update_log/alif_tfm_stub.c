@@ -14,6 +14,8 @@
  * acceptance criteria in the design spec pass on silicon, the software tier
  * serves every SoM. Wiring this up is a later slice. Every entry point
  * returns ALP_ERR_NOSUPPORT.
+ *
+ * @par Tracking: github.com/alplabai/alp-sdk/issues/111
  */
 #include "alp/update_log.h"
 #include "update_log/store.h"
