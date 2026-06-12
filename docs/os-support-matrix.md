@@ -195,7 +195,7 @@ hasn't been measured.
 ## CMSIS-DSP per-SoM validation
 
 Alp SDK does not re-export CMSIS-DSP -- application code includes
-`arm_math.h` directly when DSP/math primitives are needed.  ALP's
+`arm_math.h` directly when DSP/math primitives are needed.  Alp's
 own internals (e.g. filtering inside `<alp/audio.h>` ) optionally
 pull in CMSIS-DSP when the build sets `ALP_HAS_CMSIS_DSP`.  Either
 way the validated **feature groups** depend on each SoC's

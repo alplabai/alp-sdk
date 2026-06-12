@@ -27,7 +27,7 @@ Inventory check before powering anything:
     [`metadata/e1m_modules/E1M-NX9101.yaml`](../metadata/e1m_modules/E1M-NX9101.yaml).
   - **PCA9450** primary PMIC.
   - **PCAL9538** GPIO expander on BRD_I2C.
-  - **24C128** EEPROM at `0x50` with the ALP manifest.
+  - **24C128** EEPROM at `0x50` with the Alp manifest.
   - **DP83825I** Ethernet PHY (single MAC routed; ETH1 lives on
     E1M-X form factor only).
   - **OPTIGA Trust M** secure element.
@@ -69,7 +69,7 @@ DRAM:  2 GiB ...
 Booting Linux on physical CPU 0x0000000000 [0x412fd050]
 Linux version 6.6.x (alp@alp-build)
 ...
-Welcome to ALP Yocto (kirkstone, branch ...)
+Welcome to Alp Yocto (kirkstone, branch ...)
 e1m-nx9101-a55 login:
 ```
 

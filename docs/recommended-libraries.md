@@ -259,7 +259,7 @@ it's parked.  v0.5 cycle revisits.
 | MCUboot     | Bootloader for Zephyr targets (AEN, N93-RTcore).  Locked in by [ADR 0006](adr/0006-secure-boot-secure-ota.md). |
 | MbedTLS     | PSA Crypto backend for `<alp/security.h>`.                                                  |
 | TinyUSB     | Reference for `<alp/usb.h>` Zephyr backend.                                                  |
-| LVGL        | `<alp/gui.h>` opt-in re-export with ALP defaults via `lv_conf.h`.                            |
+| LVGL        | `<alp/gui.h>` opt-in re-export with Alp defaults via `lv_conf.h`.                            |
 | lwIP / Mongoose | Zephyr's net stack + `<alp/iot.h>` MQTT path.  Mongoose available for users wanting an embedded HTTP server. |
 | u8g2        | Monochrome OLED graphics — pairs with the `chips/ssd1306` driver.                            |
 | SSD1306 / SSD1331 | Already in `chips/` library.                                                          |

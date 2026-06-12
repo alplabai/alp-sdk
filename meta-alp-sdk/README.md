@@ -184,7 +184,7 @@ See the edge-vs-prod posture table + `DISTRO=alp` notes in
 [`../docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md#edge-vs-production-image).
 
 The resulting `alp-image-edge-<machine>.wic[.gz]` is the kernel +
-rootfs (the bootloader is production-flashed by ALP).  See
+rootfs (the bootloader is production-flashed by Alp).  See
 [`../docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md) for the
 deploy + on-board verification steps.
 

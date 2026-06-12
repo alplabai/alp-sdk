@@ -6,7 +6,7 @@ custom carrier).  The build itself is the `bitbake-layers` flow in
 [`../meta-alp-sdk/README.md`](../meta-alp-sdk/README.md); this page adds
 the V2N-specific BSP, deploy, and on-board verification detail.
 
-> **Bootloader is production-flashed by ALP.** Every SoM ships with BL2
+> **Bootloader is production-flashed by Alp.** Every SoM ships with BL2
 > (alp LPDDR4X DDR init) + FIP already on the on-module xSPI, so it
 > reaches U-Boot on first power-on. Your normal flow **never rebuilds
 > the bootloader** — you build only kernel+rootfs below. Bootloader
@@ -91,12 +91,12 @@ not the distro.
 
 ## 4. Deploy the rootfs
 
-The bootloader's `bootcmd` (rzv2n-dev config + the ALP 0002 patch)
+The bootloader's `bootcmd` (rzv2n-dev config + the Alp 0002 patch)
 loads `Image` + `boot/r9a09g056n44-dev.dtb` from the ext4 rootfs
 `/boot`, auto-detecting the boot medium **per boot**: if an SD card is
 present, root = `/dev/mmcblk2p2`, otherwise eMMC `/dev/mmcblk0p2`
 (`ALP_BOOT_DEVICE ?= "emmc"` names the provisioning default, not a
-build split). The kernel cmdline is rebuilt by the ALP override with
+build split). The kernel cmdline is rebuilt by the Alp override with
 `console=ttySC0,115200` pinned; dev builds keep `earlycon`.
 
 **Production boot variant:** set `ALP_PROD_BOOT = "1"` for

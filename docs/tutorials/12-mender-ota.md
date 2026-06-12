@@ -97,12 +97,11 @@ source poky/oe-init-build-env build-v2n
 # bitbake-layers add-layer ../alp-sdk/meta-alp-sdk  (if not already added)
 MACHINE=e1m-v2n101-a55
 
-# Build a Mender-aware image (instead of plain
-# core-image-minimal):
-bitbake core-image-minimal-mender
+# Build the Mender-aware Alp image:
+bitbake alp-image-edge
 ```
 
-Output: `tmp/deploy/images/e1m-v2n101-a55/core-image-minimal-mender-e1m-v2n101-a55.mender`.
+Output: `tmp/deploy/images/e1m-v2n101-a55/alp-image-edge-e1m-v2n101-a55.mender`.
 This is the **Mender artefact** -- a tar archive containing the
 rootfs blob + metadata + the signature.
 
