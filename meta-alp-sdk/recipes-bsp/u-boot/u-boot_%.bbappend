@@ -50,11 +50,14 @@ SRC_URI:append:rzv2n-family = " \
 #     (patch-safe vs the build-varying env block); the future per-SKU
 #     fdtfile derivation must also happen there, AFTER the leading
 #     'env default -a' wipe -- see the comment in the patch.
-# VALIDATION: bitbake-built dev + prod with config asserts; dev FIP
-# bench boot 2026-06-12 (see the PR). The manual FIP flow
-# (build_custom_fip_v630_deepx.sh, WSL) must apply 0002 alongside the
-# DEEPX patch and check for it (strings u-boot | grep 'setenv
-# alp_root') -- updated bench-side the same day.
+# VALIDATION: bitbake-built dev + prod with config asserts; the FIP
+# (BL2+BL31+u-boot, manual flow) was built 2026-06-12 with both ALP
+# patches and the u-boot binary content-verified (alp_root bootcmd +
+# pinned console). On-silicon FIP flash + boot is PENDING maintainer
+# authorization (a persistent bootloader write to the shared bench
+# board). The manual FIP flow (build_custom_fip_v630_deepx.sh, WSL)
+# was updated the same day to apply 0002 alongside the DEEPX patch and
+# to verify it (strings u-boot | grep 'setenv alp_root').
 
 # Production boot lockdown (BOOTDELAY=0 + keyed autoboot + the prod
 # cmdline above): opt-in for release-bundle builds only. An
