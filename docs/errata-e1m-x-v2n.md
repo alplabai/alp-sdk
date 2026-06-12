@@ -3,7 +3,7 @@
 Hardware findings from bench bring-up that affect the device tree /
 board design and are **not** captured by the connector-derived
 metadata. Confidence + the workaround in software are noted per item.
-Filed for ALP review; some need confirmation that they are rev-wide
+Filed for Alp review; some need confirmation that they are rev-wide
 (vs. unit-specific) against the authoritative schematic.
 
 ## E1: Ethernet MDI pair-order reversal (LAYOUT BUG — needs respin)

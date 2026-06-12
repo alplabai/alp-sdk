@@ -64,7 +64,10 @@ AEN-first order inverted:
 1. **v0.6 (done)** -- E1M-V2N101 bring-up.  Verified the GD32
    bridge stack (gd32g553 host driver + firmware: link, soak,
    A/B OTA, DAC/ADC/capture loopback) + the CM33 AMP link +
-   the V2N Yocto BSP bake/boot leg.
+   the V2N Yocto Linux boot leg: the productized image (eMMC
+   HS200, USB-OVC, CA55-cluster watchdog, branded/reproducible
+   firmware banners, and the hardened `alp-image-prod` /
+   `alp` distro) boots the bench board from eMMC.
 2. **next** -- E1M-AEN701 bring-up.  Verifies the AEN-family
    chip drivers (the on-module ones: act8760, da9292,
    clk_5l35023b, etc.) + a representative sample of the §D.AI
