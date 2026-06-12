@@ -121,6 +121,7 @@
 		regulator-boot-on;
 		regulator-always-on;
 	};
+
 };
 
 /*
@@ -238,6 +239,27 @@
 };
 
 &pinctrl {
+	/* eMMC/SD0 IO rail select (PA0, eMMC_V_SEL): the rail is
+	 * GPIO-selected between 3.3 V (on-module pull-down default) and
+	 * 1.8 V, switching the SoC's VDD1833_SD0 pad rail AND the eMMC
+	 * VccQ + bus pull-ups together.  Park it HIGH (1.8 V) before the
+	 * card is ever initialised: eMMC has no live VccQ-switch
+	 * handshake (unlike SD CMD11), so modelling this as a switchable
+	 * vqmmc regulator costs a guaranteed mmc_select_hs200 -110 +
+	 * retry on every boot (silicon-verified) -- whereas a hog at
+	 * pinctrl probe (~1.9 s) has the rail stable at 1.8 V long
+	 * before sdhi probes (~3.0 s), the fixed reg_1p8v vqmmc claim is
+	 * then TRUE, and HS200 trains first try.  Without this hog the
+	 * rail sat at its 3.3 V default while the driver claimed 1.8 V:
+	 * 'mmc_select_hs200 failed, error -74' + silent HS-52 fallback
+	 * on every cold boot. */
+	emmc-v-sel-hog {
+		gpio-hog;
+		gpios = <RZV2N_GPIO(A, 0) GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "emmc_v_sel_1v8";
+	};
+
 	sdhi0_emmc_pins: emmc-pins {
 		sd0-clk {
 			pins = "SD0CLK";
