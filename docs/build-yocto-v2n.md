@@ -43,9 +43,11 @@ MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
 Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
 - `alp-image-edge-*.wic[.gz]` — full SD/eMMC image (bootloader excluded;
   it's already on xSPI).
-- `Image` + `renesas/r9a09g056n48-rzv2n-evk.dtb` — kernel + the **carrier
-  dtb** (the meta-alp-sdk DT patches 0006–0013 are applied here, so this
-  dtb is the e1m-x carrier dtb the shipped bootloader loads).
+- `Image` + `renesas/e1m-v2n101-x-evk.dtb` — kernel + the **carrier
+  dtb** (composed from the SoC + SoM + E1M-X-EVK carrier dtsi and selected
+  via the machine's `KERNEL_DEVICETREE`, so this is the e1m-x carrier dtb
+  the shipped bootloader loads — the stock `r9a09g056n48-rzv2n-evk.dtb` is
+  not built).
 
 ### Edge vs production image
 
@@ -107,7 +109,7 @@ prompt. See `meta-alp-sdk/recipes-bsp/u-boot/u-boot/prod-boot.cfg`.
 - **Full image:** write the `.wic` to the target device (eMMC via
   USB-gadget/`dd`, or SD via your host).
 - **Fast dev iteration** (kernel/dtb only): copy `Image` +
-  `r9a09g056n48-rzv2n-evk.dtb` into the running rootfs `/boot` over the
+  `e1m-v2n101-x-evk.dtb` into the running rootfs `/boot` over the
   network (`ssh root@<board> "cat > /boot/<f>" < <f>`) and reboot.
   (Plain `scp` *upload* to the board's dropbear can silently no-op; the
   `ssh cat >` redirect is reliable.)

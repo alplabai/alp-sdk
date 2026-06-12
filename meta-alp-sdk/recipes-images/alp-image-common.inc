@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Shared runtime for the ALP SDK images. The two top-level images differ only
+# Shared runtime for the Alp SDK images. The two top-level images differ only
 # in posture, not in hardware enablement:
 #   - alp-image-edge: development (debug-tweaks, bench/dev tooling)
 #   - alp-image-prod: production (hardened: no passwordless root, dev tooling

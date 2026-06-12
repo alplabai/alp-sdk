@@ -35,16 +35,20 @@ meta-alp-sdk/
 │       └── e1m-nx9101-a55.conf          # NXP i.MX 93.
 ├── recipes-core/
 │   ├── alp-sdk/
-│   │   └── alp-sdk_0.5.bb               # libalp_sdk.so + headers.
+│   │   └── alp-sdk_0.6.bb               # libalp_sdk.so + headers.
 │   ├── alp-chips/
 │   │   └── alp-chips_0.6.bb             # libalp_chips.a + per-chip PACKAGECONFIG.
 │   └── alp-system/
 │       ├── alp-dts-reservations_0.6.bb  # Orchestrator-emitted DT reservations.
+│       ├── alp-network-defaults_0.7.bb  # Wired-DHCP networkd story pinned in the layer.
 │       ├── alp-remoteproc_0.6.bb        # systemd unit for the M-side firmware lifecycle.
 │       ├── alp-remoteproc.service
 │       ├── alp-ssh-hardening_0.7.bb     # Prod key-only SSH (sshd_config.d drop-in).
+│       ├── alp-watchdog-policy_0.7.bb   # CA55-cluster systemd HW-watchdog supervision.
 │       └── files/
 │           ├── 10-alp-ssh-hardening.conf
+│           ├── 10-alp-watchdog.conf
+│           ├── 80-alp-wired-dhcp.network
 │           └── alp-remoteproc-start.sh
 ├── recipes-examples/
 │   └── alp-edgeai/
@@ -58,7 +62,7 @@ meta-alp-sdk/
 │   └── alp-image-prod.bb               # Production image: hardened, key-only SSH (DISTRO=alp).
 ├── recipes-ros/
 │   └── alp-perception/
-│       └── alp-perception_0.5.bb        # examples/v2n/v2n-m1-ros-perception node.
+│       └── alp-perception_0.6.bb        # examples/v2n/v2n-m1-ros-perception node.
 └── README.md                            # this file
 ```
 

@@ -42,7 +42,7 @@ into the topic-specific docs.
   SoM EEPROM manifest + BOARD_ID ADC cross-check.
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
-  index (12 ADRs as of 2026-05-18).
+  index (14 ADRs as of 2026-06-12).
 
 ## Per-SoM bring-up
 
