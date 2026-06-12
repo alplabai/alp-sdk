@@ -47,6 +47,46 @@ Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
   dtb** (the meta-alp-sdk DT patches 0006–0013 are applied here, so this
   dtb is the e1m-x carrier dtb the shipped bootloader loads).
 
+### Edge vs production image
+
+Two images share one runtime (`alp-image-common.inc`: SDK, ROS 2 +
+perception, GStreamer/libcamera, Mender, Weston, watchdog, networkd) and
+differ only in posture:
+
+| | `alp-image-edge` | `alp-image-prod` |
+|---|---|---|
+| Root login | passwordless (`debug-tweaks`) | locked; **SSH key-only** (key provisioned per unit) |
+| Dev tooling | `libdrm-tests`/modetest, profilers | stripped |
+| Discovery daemons | default | avahi/connman/ofono/rpcbind/tcf-agent trimmed |
+| Branding | (set by `DISTRO`) | (set by `DISTRO`) |
+
+Build the production image against the **`alp` distro** so the rootfs
+carries an ALP identity (`/etc/os-release`, `/etc/issue`, the login
+banner say `ALP SDK 6.30`) instead of the upstream
+`Poky (Yocto Project Reference Distro)` reference-distro banner:
+
+```bash
+DISTRO=alp MACHINE=e1m-v2m101-a55 bitbake alp-image-prod
+```
+
+`DISTRO=alp` (`meta-alp-sdk/conf/distro/alp.conf`) is an identity-only
+override of Renesas's `rz-vlp` — it inherits the entire BSP/graphics/Mender
+feature set and changes no `DISTRO_FEATURES`, so it is equally usable for
+`alp-image-edge`. The production hardening (no passwordless root, key-only
+SSH via `alp-ssh-hardening`, trimmed services) lives in the image recipe,
+not the distro.
+
+> **Scope of the hardening:** it removes the remote *dev/debug daemons*
+> (tcf-agent, zero-conf/RPC/telephony) and locks login. It does **not**
+> constrain the ROS 2 payload: `alp-perception` + the ROS 2 stack ship in
+> both images, and ROS 2's default DDS transport (FastDDS) opens
+> unauthenticated discovery on **all interfaces**. On a deployed unit you
+> must constrain it per deployment — `ROS_LOCALHOST_ONLY=1` for a single-host
+> graph, a bound-interface FastDDS profile, or DDS-Security/SROS2 + a host
+> firewall when the graph must be reachable across hosts. It is left to the
+> integrator because the perception example documents a multi-host robot
+> graph, so a forced loopback default would silently break it.
+
 ## 4. Deploy the rootfs
 
 The bootloader's `bootcmd` (rzv2n-dev config + the ALP 0002 patch)

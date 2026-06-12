@@ -24,6 +24,7 @@ meta-alp-sdk/
 ├── conf/
 │   ├── layer.conf                       # Yocto layer metadata.
 │   ├── distro/
+│   │   ├── alp.conf                     # ALP distro identity (rebrands Renesas rz-vlp).
 │   │   └── include/
 │   │       └── mender.inc               # Opt-in Mender OTA distro config.
 │   └── machine/
@@ -41,7 +42,9 @@ meta-alp-sdk/
 │       ├── alp-dts-reservations_0.6.bb  # Orchestrator-emitted DT reservations.
 │       ├── alp-remoteproc_0.6.bb        # systemd unit for the M-side firmware lifecycle.
 │       ├── alp-remoteproc.service
+│       ├── alp-ssh-hardening_0.7.bb     # Prod key-only SSH (sshd_config.d drop-in).
 │       └── files/
+│           ├── 10-alp-ssh-hardening.conf
 │           └── alp-remoteproc-start.sh
 ├── recipes-examples/
 │   └── alp-edgeai/
@@ -50,7 +53,9 @@ meta-alp-sdk/
 │   └── dx-rt/
 │       └── dx-rt_2.4.bb                 # Pins the DEEPX runtime (vendor-licensed).
 ├── recipes-images/
-│   └── alp-image-edge.bb                # Reference image: ROS 2 + alp-sdk + DEEPX + Mender.
+│   ├── alp-image-common.inc            # Shared runtime for both images below.
+│   ├── alp-image-edge.bb                # Dev image: common + debug-tweaks + bench tooling.
+│   └── alp-image-prod.bb               # Production image: hardened, key-only SSH (DISTRO=alp).
 ├── recipes-ros/
 │   └── alp-perception/
 │       └── alp-perception_0.5.bb        # examples/v2n/v2n-m1-ros-perception node.
@@ -165,9 +170,14 @@ MACHINE = "e1m-v2n101-a55"     # plain V2N
 # or
 MACHINE = "e1m-v2m101-a55"     # V2N + DEEPX
 
-# 8. Build the reference image:
-bitbake alp-image-edge
+# 8. Build the image:
+bitbake alp-image-edge                 # dev image (passwordless root, bench tooling)
+# or the hardened production image, against the ALP distro identity:
+DISTRO=alp bitbake alp-image-prod      # key-only SSH, no debug tooling, "ALP SDK" branding
 ```
+
+See the edge-vs-prod posture table + `DISTRO=alp` notes in
+[`../docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md#edge-vs-production-image).
 
 The resulting `alp-image-edge-<machine>.wic[.gz]` is the kernel +
 rootfs (the bootloader is production-flashed by ALP).  See

@@ -101,9 +101,10 @@ bitbake-layers add-layer ../meta-imx/meta-imx-bsp
 bitbake-layers add-layer ../meta-imx/meta-imx-ml
 bitbake-layers add-layer ../meta-alp-sdk
 
-# In conf/local.conf -- keep the meta-imx default DISTRO (fsl-imx-*);
-# meta-alp-sdk ships no standalone distro, only a Mender include
-# (conf/distro/include/mender.inc) layered onto the chosen distro.
+# In conf/local.conf -- keep the meta-imx default DISTRO (fsl-imx-*).
+# meta-alp-sdk's `alp` distro (conf/distro/alp.conf) is NOT selectable here:
+# it requires Renesas rz-vlp and is RZ/V2N-only. On i.MX 93 use only the
+# Mender include (conf/distro/include/mender.inc) layered onto fsl-imx-*.
 echo 'MACHINE = "e1m-nx9101-a55"' >> conf/local.conf
 
 # Build the alp-sdk edge image (alp-image-edge), which carries the
