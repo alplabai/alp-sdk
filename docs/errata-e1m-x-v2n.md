@@ -65,15 +65,32 @@ wired. Removing OVC from the pinctrl groups alone is insufficient
 (U-Boot leaves the pins in OVC function), and OHCI has no software
 over-current-ignore knob.
 
-**Software workaround (shipped):** DT patch 0012 — `/delete-node/ ovc`
-from usb20_pins/usb30_pins **and** a gpio-hog claiming P9.6 + PB.1 as
-GPIO inputs (deselects the OVC peripheral function → internal OVRCUR
-reads inactive). EHCI/OHCI stay enabled; USB2.0 host fully functional.
+**Software workaround (shipped, since revised):** DT patch 0012 —
+`/delete-node/ ovc` from usb20_pins/usb30_pins **and** a gpio-hog
+claiming P9.6 + PB.1 as GPIO inputs (deselects the OVC peripheral
+function → internal OVRCUR reads inactive). EHCI/OHCI stay enabled;
+USB2.0 host fully functional. *That verification predates the GD32
+SCI7 supervisor link.*
+
+**Revision (2026-06-12):** the P9.6 half of the hog REGRESSED when the
+CM33-owned GD32 supervisor SPI took P96/SCK7 (2026-06-03): the CM33's
+function mux overrides the hog once remoteproc starts, so the usb20
+channel's `usb2-port1`/`usb3-port1` over-current lines returned — and
+the hog itself violated the port-9 AMP ownership rule (same class as
+the SD1_CD/P94 clobber). The hog is now **PB.1-only**; the two usb20
+boot lines are expected and cosmetic (VBUS is hardwired always-on, so
+host operation is unaffected) until OVC is suppressed at the controller
+level: `ehci_hcd.ignore_oc=1` on the production kernel cmdline plus an
+OHCI NOCP (HcRhDescriptorA bit 12) patch — queued with the production
+U-Boot env/bootargs work.
 
 **Suggested metadata:** an `ovc_wired: false` flag per USB channel in
 the carrier YAML would let the generator emit this automatically.
 
-**Confidence:** high (boot logs before/after + DT fix HW-verified).
+**Confidence:** high for PB.1/usb30 (no xHCI OVC in boot logs); the
+usb20 regression mechanism is from the 2026-06-12 boot-log audit
+(hog applies at ~1.9 s, OVC lines return at ~3.9 s, CM33 link healthy)
+— controller-level suppression to be HW-verified when it lands.
 
 ---
 
