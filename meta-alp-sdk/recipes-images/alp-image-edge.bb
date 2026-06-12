@@ -38,6 +38,19 @@ IMAGE_INSTALL = " \
     alp-watchdog-policy            \
 "
 
+# Deterministic boot plumbing (2026-06-12 boot-log audit):
+#   - alp-network-defaults: wired-DHCP networkd config. The image
+#     previously shipped no interface configuration at all; this also
+#     avoids the vendor image's socket-without-service [FAILED] unit.
+#   - rng-tools: rngd (jitterentropy source) credits the entropy pool
+#     early, so first-boot key generation (ssh host keys, the Mender
+#     device identity) doesn't ride on incidental jitter alone --
+#     the entropy contract src/yocto/security_yocto.c documents.
+IMAGE_INSTALL += " \
+    alp-network-defaults           \
+    rng-tools                      \
+"
+
 # Display stack (X-EVK MIPI-DSI panel): Weston on Mali/Wayland
 # (wayland+opengl come from the rz-vlp distro features), plus
 # modetest for bench bring-up. libdrm-tests also rides in rz-vlp's

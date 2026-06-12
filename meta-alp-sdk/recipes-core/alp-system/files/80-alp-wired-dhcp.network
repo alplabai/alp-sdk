@@ -1,0 +1,9 @@
+# Default wired networking for ALP images: DHCP on every Ethernet
+# interface (the V2N SoM exposes two on-module GbE MACs, end0/end1).
+# Installed to /etc/systemd/network/ so a customer image can override
+# per-interface files at higher precedence or replace this one.
+[Match]
+Name=en* eth*
+
+[Network]
+DHCP=yes
