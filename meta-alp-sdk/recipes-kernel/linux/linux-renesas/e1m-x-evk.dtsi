@@ -80,10 +80,6 @@
 	status = "okay";
 };
 
-&wdt1 {
-	status = "okay";
-};
-
 /* Carrier microSD slot (SDHI1). The bench dev image roots from this card
  * (root=/dev/mmcblk1p2); on-module eMMC (SDHI0) is the production boot. */
 &sdhi1 {

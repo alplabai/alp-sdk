@@ -35,6 +35,7 @@ IMAGE_INSTALL = " \
     gstreamer1.0-plugins-base      \
     mender-client                  \
     openssh                        \
+    alp-watchdog-policy            \
 "
 
 # Display stack (X-EVK MIPI-DSI panel): Weston on Mali/Wayland

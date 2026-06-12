@@ -202,6 +202,18 @@
 	};
 };
 
+/* CA55-cluster watchdog (wdt1 -- wdt0 belongs to the CM33, wdt2/3 to
+ * the CR8s).  SoC-internal, so enabled at SoM level rather than per
+ * carrier (moved from e1m-x-evk.dtsi).  systemd arms and pets it from
+ * early userspace (RuntimeWatchdogSec -- see the alp-watchdog-policy
+ * recipe); timeout-sec pins the policy explicitly instead of
+ * inheriting the driver default.
+ * VALIDATION: pending bench hang-injection on a built image. */
+&wdt1 {
+	timeout-sec = <60>;
+	status = "okay";
+};
+
 /* MCPU DMAC (DMAC0 @ 0x11400000) is OWNED BY THE CM33 firmware (the
  * GD32 supervisor link's SCI7 DMA path drives it through the rzv FSP
  * r_dmac_b).  The upstream SoC dtsi enables it for Linux, whose
