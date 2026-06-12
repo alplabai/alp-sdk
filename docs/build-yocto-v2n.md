@@ -49,9 +49,20 @@ Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
 
 ## 4. Deploy the rootfs
 
-The bootloader's `bootcmd` loads `Image` + `r9a09g056n48-rzv2n-evk.dtb`
-from the ext4 rootfs `/boot` (SD `mmcblk1p2` in dev, eMMC `mmcblk0p2`
-in production; `ALP_BOOT_DEVICE ?= "emmc"`).
+The bootloader's `bootcmd` (rzv2n-dev config + the ALP 0002 patch)
+loads `Image` + `boot/r9a09g056n44-dev.dtb` from the ext4 rootfs
+`/boot`, auto-detecting the boot medium **per boot**: if an SD card is
+present, root = `/dev/mmcblk2p2`, otherwise eMMC `/dev/mmcblk0p2`
+(`ALP_BOOT_DEVICE ?= "emmc"` names the provisioning default, not a
+build split). The kernel cmdline is rebuilt by the ALP override with
+`console=ttySC0,115200` pinned; dev builds keep `earlycon`.
+
+**Production boot variant:** set `ALP_PROD_BOOT = "1"` for
+release-bundle builds only — quiet cmdline (`quiet loglevel=4`, no
+earlycon), `BOOTDELAY=0`, and keyed autoboot whose stop string is
+injected by the internal release pipeline (an un-overridden prod build
+has no stop sequence at all). Dev/bench builds keep the open 2 s
+prompt. See `meta-alp-sdk/recipes-bsp/u-boot/u-boot/prod-boot.cfg`.
 
 - **Full image:** write the `.wic` to the target device (eMMC via
   USB-gadget/`dd`, or SD via your host).

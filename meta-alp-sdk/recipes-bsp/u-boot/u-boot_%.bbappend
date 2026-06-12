@@ -42,19 +42,28 @@ SRC_URI:append:rzv2n-family = " \
 #     powers up at 3.3 V and eMMC has no live VccQ-switch handshake,
 #     so the whole chain must run the card at 1.8 V from the start.
 #     Pairs with the Linux-side PA0 gpio-hog (e1m-v2n-som.dtsi).
-#   CONFIG_ALP_PROD_BOOT (default n): production kernel cmdline
-#     (console= pinned + quiet, earlycon dropped). The dev cmdline
-#     keeps earlycon but gains console=ttySC0,115200, which stops the
-#     kernel replaying the early log across the console handover.
-# VALIDATION: bitbake-built; FIP reflash + bench boot pending (the
-# manual FIP flow must apply 0002 alongside the DEEPX patch).
+#   CONFIG_ALP_PROD_BOOT (default n, DEV-target only): production
+#     kernel cmdline (console= pinned + quiet, earlycon dropped). The
+#     dev cmdline keeps earlycon but gains console=ttySC0,115200,
+#     which stops the kernel replaying the early log across the
+#     console handover. The cmdline is rebuilt at CONFIG_BOOTCOMMAND
+#     (patch-safe vs the build-varying env block); the future per-SKU
+#     fdtfile derivation must also happen there, AFTER the leading
+#     'env default -a' wipe -- see the comment in the patch.
+# VALIDATION: bitbake-built dev + prod with config asserts; dev FIP
+# bench boot 2026-06-12 (see the PR). The manual FIP flow
+# (build_custom_fip_v630_deepx.sh, WSL) must apply 0002 alongside the
+# DEEPX patch and check for it (strings u-boot | grep 'setenv
+# alp_root') -- updated bench-side the same day.
 
 # Production boot lockdown (BOOTDELAY=0 + keyed autoboot + the prod
-# cmdline above): opt-in for release-bundle builds only. The real
-# autoboot stop string is injected by the internal release pipeline;
-# this public fragment ships a locked placeholder.
+# cmdline above): opt-in for release-bundle builds only. An
+# un-overridden prod build has an EMPTY stop string (= no stop
+# sequence at all); the internal release pipeline injects the real
+# per-product stop string. See prod-boot.cfg for the lock mechanism
+# and the deferred saved-env hole.
 ALP_PROD_BOOT ?= "0"
-SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if d.getVar('ALP_PROD_BOOT') == '1' else ''}"
+SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if bb.utils.to_boolean(d.getVar('ALP_PROD_BOOT')) else ''}"
 
 # Build U-Boot with the rzv2n-dev config, not the machine's stock rzv2n-evk.
 # The DEEPX bring-up patched above lives in board/renesas/rzv2n-dev/rzv2n-dev.c,
