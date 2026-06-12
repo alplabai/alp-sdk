@@ -65,15 +65,41 @@ wired. Removing OVC from the pinctrl groups alone is insufficient
 (U-Boot leaves the pins in OVC function), and OHCI has no software
 over-current-ignore knob.
 
-**Software workaround (shipped):** DT patch 0012 — `/delete-node/ ovc`
-from usb20_pins/usb30_pins **and** a gpio-hog claiming P9.6 + PB.1 as
-GPIO inputs (deselects the OVC peripheral function → internal OVRCUR
-reads inactive). EHCI/OHCI stay enabled; USB2.0 host fully functional.
+**Software workaround (shipped, since revised):** DT patch 0012 —
+`/delete-node/ ovc` from usb20_pins/usb30_pins **and** a gpio-hog
+claiming P9.6 + PB.1 as GPIO inputs (deselects the OVC peripheral
+function → internal OVRCUR reads inactive). EHCI/OHCI stay enabled;
+USB2.0 host fully functional. *That verification predates the GD32
+SCI7 supervisor link.*
+
+**Revision (2026-06-12):** the P9.6 half of the hog REGRESSED when the
+CM33-owned GD32 supervisor SPI took P96/SCK7 (2026-06-03). The CM33 is
+started by BL2 **pre-Linux** (see `rzv2n-m33-secure-boot.md`), so its
+SCK7 mux is live before Linux boots; the hog's PMC9 byte-RMW at ~1.9 s
+then *clobbered the running link's clock pad* at every Linux boot until
+the CM33's own pin re-init took the pad back — the same clobber class
+as SD1_CD/P94, and the reason usb20 OVC suppression was lost. The hog
+is now **PB.1-only**; the two usb20-channel boot lines
+(`usb2-port1`/`usb3-port1`) are expected until OVC is suppressed at the
+controller level: `ehci_hcd.ignore_oc=1` on the production kernel
+cmdline plus an OHCI NOCP (HcRhDescriptorA bit 12) patch — queued with
+the production U-Boot env/bootargs work.
+
+**Open question (bench):** USB2.0 *host behavior under the asserted OC
+input* is unverified — the original "fully functional" verification
+predates the regression. VBUS is hardwired always-on, but the EHCI
+port-power/OC paths still react to OC events, so enumeration on the
+USB2.0 host port must be re-checked on the bench (and recorded here)
+before the lines are called purely cosmetic.
 
 **Suggested metadata:** an `ovc_wired: false` flag per USB channel in
 the carrier YAML would let the generator emit this automatically.
 
-**Confidence:** high (boot logs before/after + DT fix HW-verified).
+**Confidence:** high for PB.1/usb30 (no xHCI OVC in boot logs); the
+usb20 regression mechanism is from the 2026-06-12 boot-log audit
+(hog applies at ~1.9 s, OVC lines return at ~3.9 s, CM33 link healthy)
+— controller-level suppression + host-under-OC behavior to be
+HW-verified when they land.
 
 ---
 

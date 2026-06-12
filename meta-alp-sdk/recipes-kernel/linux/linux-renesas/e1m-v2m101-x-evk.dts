@@ -20,8 +20,12 @@
 
 	memory@48000000 {
 		device_type = "memory";
-		/* First 128 MB reserved for the secure area. Size must match
-		 * the BL2 DDR config. VERIFY per SKU (V2M101 vs V2M102). */
+		/* First 128 MB reserved for the secure area.  U-Boot
+		 * overwrites this node at boot (ARCH_FIXUP_FDT_MEMORY) with
+		 * the size from its own control DT inside the FIP, so the
+		 * authoritative per-SKU DRAM size lives in the firmware
+		 * pack (U-Boot dts + TF-A DDR parameters), not here.  This
+		 * value is only the no-fixup fallback. */
 		reg = <0x0 0x48000000 0x1 0xf8000000>;
 	};
 };

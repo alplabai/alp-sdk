@@ -175,6 +175,15 @@
 		spi-tx-bus-width = <4>;
 		spi-rx-bus-width = <4>;
 
+		/* Layout for the populated 32 MiB MX25U25635F: bl2 (mtd0) +
+		 * fip (mtd1, spans the remainder; also carries the CM33
+		 * image).  The EVK reference layout this was ported from
+		 * assumed a 64 MiB part and declared a third "user"
+		 * partition at 0x2000000 -- past the end of this flash, so
+		 * the kernel disabled it on every boot ("partition is out
+		 * of reach").  Re-cutting fip to free real user space is a
+		 * deliberate layout decision (it moves mtd1's bounds for
+		 * provisioning and CM33 flashing) -- not done casually here. */
 		partitions {
 			compatible = "fixed-partitions";
 			#address-cells = <1>;
@@ -189,13 +198,26 @@
 				label = "fip";
 				reg = <0x00060000 0x1fa0000>;
 			};
-
-			partition@2000000 {
-				label = "user";
-				reg = <0x2000000 0x2000000>;
-			};
 		};
 	};
+};
+
+/* CA55-cluster watchdog (wdt1 -- wdt0 belongs to the CM33, wdt2/3 to
+ * the CR8s).  SoC-internal, so enabled at SoM level rather than per
+ * carrier.  systemd arms and pets it from early userspace
+ * (RuntimeWatchdogSec -- see the alp-watchdog-policy recipe);
+ * timeout-sec pins the policy explicitly instead of inheriting the
+ * driver default (the HW period itself is fixed ~175 ms; longer
+ * timeouts are kernel-emulated).
+ * NOTE: the WDT1-underflow -> reset routing (CPG_ERRORRST_SEL2) is
+ * programmed by TF-A BL2 on r9a09g056 (this kernel's DT has no
+ * renesas,syscon-cpg-error-rst) -- supervision only resets the board
+ * when running the ALP/BSP FIP.
+ * VALIDATION: pending bench hang-injection on a built image + the
+ * deployed FIP. */
+&wdt1 {
+	timeout-sec = <60>;
+	status = "okay";
 };
 
 /* MCPU DMAC (DMAC0 @ 0x11400000) is OWNED BY THE CM33 firmware (the

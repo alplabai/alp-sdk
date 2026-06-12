@@ -80,10 +80,6 @@
 	status = "okay";
 };
 
-&wdt1 {
-	status = "okay";
-};
-
 /* Carrier microSD slot (SDHI1). The bench dev image roots from this card
  * (root=/dev/mmcblk1p2); on-module eMMC (SDHI0) is the production boot. */
 &sdhi1 {
@@ -162,9 +158,19 @@
 	status = "okay";
 };
 
-/* USB 2.0 host (OTG) + USB 3.0. OVC pins read permanently asserted on
- * this carrier, so claim them as GPIO inputs to de-select the OVC
- * function (kills the false "over-current condition" each boot). */
+/* USB 2.0 host (OTG) + USB 3.0.  The carrier's OVC sense wiring is not
+ * usable (errata E3).  PB.1 (usb30) is parked as a GPIO input by the hog
+ * below, which keeps the xHCI OVC input inactive.  P9.6 (usb20) can no
+ * longer be parked the same way: it is SCK7 of the CM33-owned GD32
+ * supervisor SPI, and the CM33 is started by BL2 PRE-Linux -- so the old
+ * hog actually clobbered the live SCK7 mux at every Linux boot (~1.9 s,
+ * PMC9 byte-RMW; same clobber class as SD1_CD below) until the CM33's
+ * own pin re-init took the pad back, which is also why usb20 OVC
+ * suppression was lost.  The usb2/usb3-port1 "over-current condition"
+ * boot lines remain expected until OVC is suppressed at the controller
+ * instead (EHCI ignore_oc on the kernel cmdline / OHCI NOCP -- queued
+ * with the production U-Boot env+bootargs work); host behavior under
+ * the asserted OC input is still to be bench-verified (errata E3). */
 &ehci0 {
 	memory-region = <&global_cma>;
 	dr_mode = "otg";
@@ -291,10 +297,16 @@
 		};
 	};
 
+	/* usb30 OVC (PB.1) parked as a plain GPIO input so the xHCI OVC
+	 * input reads inactive.  P9.6 (usb20 OVC) is DELIBERATELY absent:
+	 * it is the CM33's SCK7.  Linux must never claim or re-mux the
+	 * CM33's P9.6/P9.7, and every Linux port-9 access is a non-atomic
+	 * PMC9/PM9 byte-RMW that can race the CM33 (the SD1_CD/P94 lesson
+	 * above).  The one deliberate exception is the V2M deepx mux-sel
+	 * hog on P9.5 (e1m-v2m-deepx.dtsi) -- see the race note there. */
 	usb-ovc-disable-hog {
 		gpio-hog;
-		gpios = <RZV2N_GPIO(9, 6) GPIO_ACTIVE_HIGH>,
-			<RZV2N_GPIO(B, 1) GPIO_ACTIVE_HIGH>;
+		gpios = <RZV2N_GPIO(B, 1) GPIO_ACTIVE_HIGH>;
 		input;
 		line-name = "usb_ovc_disable";
 	};

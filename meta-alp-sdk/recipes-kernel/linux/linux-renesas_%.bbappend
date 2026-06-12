@@ -88,6 +88,14 @@ do_configure:prepend() {
         "${ALP_DTS_DST}/"
 }
 
+# Production kernel-config trims (linux-renesas is kernel-yocto based,
+# so .cfg fragments in SRC_URI auto-merge).  Both grounded in the
+# 2026-06-12 V2M101 boot-log audit; rationale inside each file.
+SRC_URI:append = " \
+    file://trim-unused-storage-net-fs.cfg \
+    file://no-kernel-audit.cfg \
+"
+
 # TAS2563 smart-amp codec (mainline ASoC `tas2562` covers it) -- pre-staged
 # for the carrier audio TODO in e1m-x-evk.dtsi. linux-renesas is
 # kernel-yocto based, so this .cfg is auto-merged from SRC_URI. Harmless

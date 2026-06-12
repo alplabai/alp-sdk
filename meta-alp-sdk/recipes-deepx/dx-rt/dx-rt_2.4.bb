@@ -24,11 +24,14 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=00000000000000000000000000000000"
 
 # UNBUILDABLE by design: this recipe has no resolvable source, no real
 # sha256, and no shippable LICENSE. DEEPX dx_rt is license-gated and is
-# NOT redistributed in this public layer. Removing the blacklist requires
+# NOT redistributed in this public layer. Removing the skip requires
 # a per-customer DEEPX agreement + a real source mirror, sha256, and
 # LICENSE file. See docs/vendor-partnerships.md and the alp-sdk-internal
 # repo for the licensed-vendor file placement.
-PNBLACKLIST[dx-rt] ?= "DEEPX dx_rt is license-gated and not redistributed in the public meta-alp-sdk layer; provide a real source mirror + sha256 + LICENSE and clear this blacklist (see comments in this recipe)."
+# (SKIP_RECIPE, not PNBLACKLIST: scarthgap's base.bbclass only honors
+# SKIP_RECIPE -- PNBLACKLIST has been inert since honister, so the old
+# flag never actually skipped anything; only the do_fetch stop did.)
+SKIP_RECIPE[dx-rt] ?= "DEEPX dx_rt is license-gated and not redistributed in the public meta-alp-sdk layer; provide a real source mirror + sha256 + LICENSE and clear this skip (see comments in this recipe)."
 EXCLUDE_FROM_WORLD = "1"
 
 # Customer-private source tree.  Upstream is DEEPX's github.com/DEEPX-AI
@@ -50,7 +53,7 @@ python do_fetch() {
              "meta-alp-sdk layer: no redistributable DEEPX dx_rt source, "
              "sha256, or LICENSE is shipped. Obtain dx_rt under a DEEPX "
              "license, mirror it, set SRC_URI + SRC_URI[sha256sum] + a "
-             "real LIC_FILES_CHKSUM, then clear PNBLACKLIST[dx-rt].")
+             "real LIC_FILES_CHKSUM, then clear SKIP_RECIPE[dx-rt].")
 }
 
 EXTRA_OECMAKE = "-DDX_RT_TARGET=DXM1 -DDX_RT_BUILD_DRIVER=ON"
