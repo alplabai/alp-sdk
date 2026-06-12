@@ -51,6 +51,7 @@ SRC_URI:append = " \
     file://e1m-v2m101-x-evk.dts \
     file://0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-RIIC8-on.patch \
     file://0002-drm-renesas-rzg2l-mipi-dsi-pm_runtime-guard-host-tra.patch \
+    file://0003-usb-ohci-platform-add-spurious-oc-DT-property.patch \
 "
 
 # AMP clock ownership: RSCI7 + RIIC8 belong to the Cortex-M33 system
@@ -73,6 +74,15 @@ SRC_URI:append = " \
 # completion poll just times out harmlessly when the link is down.
 # Silicon-validated 2026-06-11 on E1M-V2M101: `reboot` now reaches the
 # reset and boots.
+
+# 0003 (usb20 OVC silencing): the carrier's OVC sense is unusable
+# (errata E3) and P9.6 can no longer be parked as GPIO (CM33-owned
+# SCK7), so OC is suppressed at the controllers instead.  EHCI already
+# has the generic spurious-oc DT property in-tree; 0003 adds the same
+# property to ohci-platform (sets NOCP / clears OCPM in roothub A) and
+# documents it in generic-ohci.yaml.  Both &ehci0 and &ohci0 carry
+# spurious-oc in e1m-x-evk.dtsi.  Cold-boot-verified 2026-06-12 on
+# E1M-V2M101: zero over-current lines.
 
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the

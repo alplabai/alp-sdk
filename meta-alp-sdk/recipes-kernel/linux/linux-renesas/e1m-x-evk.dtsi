@@ -166,20 +166,22 @@
  * hog actually clobbered the live SCK7 mux at every Linux boot (~1.9 s,
  * PMC9 byte-RMW; same clobber class as SD1_CD below) until the CM33's
  * own pin re-init took the pad back, which is also why usb20 OVC
- * suppression was lost.  The usb2/usb3-port1 "over-current condition"
- * boot lines remain expected until OVC is suppressed at the controller
- * instead (EHCI ignore_oc on the kernel cmdline / OHCI NOCP -- queued
- * with the production U-Boot env+bootargs work); host behavior under
- * the asserted OC input is still to be bench-verified (errata E3). */
+ * suppression was lost.  The usb20 channel is instead suppressed at the
+ * controller: spurious-oc on the EHCI (generic binding, in-tree) and on
+ * the OHCI (kernel patch 0003 adds the same property).  OC processing
+ * is fully off for usb20 -- correct here because VBUS is hardwired
+ * always-on with no per-port switching to protect. */
 &ehci0 {
 	memory-region = <&global_cma>;
 	dr_mode = "otg";
+	spurious-oc;
 	status = "okay";
 };
 
 &ohci0 {
 	memory-region = <&global_cma>;
 	dr_mode = "otg";
+	spurious-oc;
 	status = "okay";
 };
 

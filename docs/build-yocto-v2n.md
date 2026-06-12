@@ -68,7 +68,8 @@ smoke checks:
 
 ```bash
 cat /proc/device-tree/model            # ALP e1m-x carrier + v2n-m1 SoM …
-dmesg | grep -i over-current   # expect ONLY usb2-port1 + usb3-port1 (cosmetic, errata E3 revision)
+dmesg | grep -i over-current || echo none   # expect: none (suppressed via spurious-oc, errata E3)
+grep timing /sys/kernel/debug/mmc0/ios      # expect: 9 (mmc HS200) -- HS-52 fallback means the eMMC rail fix regressed
 i2cdetect -l                            # expect i2c-0/1/2/8 only
 ethtool end0 | grep "Link detected"     # PHY attaches stmmac-N:02
 ```
