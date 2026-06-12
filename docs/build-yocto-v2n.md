@@ -107,6 +107,27 @@ export KBUILD_BUILD_USER=alp KBUILD_BUILD_HOST=alp-sdk
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= -j"$(nproc)" Image
 ```
 
+## CA55 CPU frequency cap (1.7 GHz default, 1.8 GHz opt-in)
+
+The image ships the conservative Renesas default: the CA55 cluster tops out
+at **1.7 GHz @ 0.9 V**. The RZ/V2N silicon is datasheet-rated to **1.8 GHz @
+0.9 V** (same rail — the only difference is a ~6 % clock bump, not a higher
+voltage), validated on E1M-V2M101 silicon (5 min 4-core soak: no miscompute,
+no throttle, 56 °C peak). It is left opt-in because 1.8 GHz is the datasheet
+ceiling, so per-unit timing (Fmax) margin is thinner there.
+
+To raise the cap to 1.8 GHz, flip one line in the SoM dtsi
+(`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi`):
+
+```c
+#define ALP_CA55_1P8GHZ 1   /* 0 = 1.7 GHz (default), 1 = 1.8 GHz */
+```
+
+…or pass it to the kernel dtb build without editing the file
+(`-DALP_CA55_1P8GHZ=1`). The change is SoM-level, so it applies to all four
+V2N-family SKUs. Validate your own silicon + thermals before enabling it
+fleet-wide.
+
 ## Notes
 
 - Audio is currently **disabled** in the DT (no DA7212 on the carrier);
