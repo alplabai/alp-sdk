@@ -1,4 +1,8 @@
-usb: ohci-platform: add "spurious-oc" DT property (mirrors generic-EHCI)
+From f7897b7a3933f9b0795d1c2c5097d4e9c7a3cd0f Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <gate@alp-lab.se>
+Date: Fri, 12 Jun 2026 12:25:36 +0200
+Subject: [PATCH] usb: ohci-platform: add "spurious-oc" DT property (mirrors
+ generic-EHCI)
 
 The E1M-X carrier's USB over-current sense wiring is unusable (errata
 E1M-X E3): the usb20-channel OVC input reads permanently asserted, and
@@ -11,18 +15,42 @@ effect (hub port power-cycling), not just log noise.
 
 Add the same property to ohci-platform: a new OHCI_QUIRK_SPURIOUS_OC
 sets NOCP (no over-current protection) and clears OCPM in the root-hub
-descriptor A during ohci_run, matching the EHCI behaviour and the
-binding name.
+descriptor A during ohci_run, matching the EHCI behaviour, and document
+it in generic-ohci.yaml like the generic-ehci.yaml entry.
 
 Upstream-Status: Inappropriate [board-specific OC policy; the generic
 binding addition would need to go through linux-usb]
-Signed-off-by: Alp Lab AB
 
+Signed-off-by: Alp Lab AB <gate@alp-lab.se>
+---
+ Documentation/devicetree/bindings/usb/generic-ohci.yaml | 6 ++++++
+ drivers/usb/host/ohci-hcd.c                             | 8 ++++++++
+ drivers/usb/host/ohci-platform.c                        | 3 +++
+ drivers/usb/host/ohci.h                                 | 1 +
+ 4 files changed, 18 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/usb/generic-ohci.yaml b/Documentation/devicetree/bindings/usb/generic-ohci.yaml
+index f838f78..04ddcd3 100644
+--- a/Documentation/devicetree/bindings/usb/generic-ohci.yaml
++++ b/Documentation/devicetree/bindings/usb/generic-ohci.yaml
+@@ -88,6 +88,12 @@ properties:
+     description:
+       Set this flag for HCDs with big endian registers.
+ 
++  spurious-oc:
++    type: boolean
++    description:
++      Set this flag to indicate that the hardware sometimes turns on
++      the OC bit when an over-current isn't actually happening.
++
+   remote-wakeup-connected:
+     $ref: /schemas/types.yaml#/definitions/flag
+     description:
 diff --git a/drivers/usb/host/ohci-hcd.c b/drivers/usb/host/ohci-hcd.c
-index ab175e181e55..5da79a0daaf4 100644
+index ab175e1..5da79a0 100644
 --- a/drivers/usb/host/ohci-hcd.c
 +++ b/drivers/usb/host/ohci-hcd.c
-@@ -687,6 +687,14 @@ static int ohci_run (struct ohci_hcd *ohci)
+@@ -687,6 +687,14 @@ retry:
  		 */
  		val |= RH_A_NPS;
  	}
@@ -38,7 +66,7 @@ index ab175e181e55..5da79a0daaf4 100644
  
  	ohci_writel (ohci, RH_HS_LPSC, &ohci->regs->roothub.status);
 diff --git a/drivers/usb/host/ohci-platform.c b/drivers/usb/host/ohci-platform.c
-index fa27bbd68512..8714c57aef6a 100644
+index fa27bbd..8714c57 100644
 --- a/drivers/usb/host/ohci-platform.c
 +++ b/drivers/usb/host/ohci-platform.c
 @@ -136,6 +136,9 @@ static int ohci_platform_probe(struct platform_device *dev)
@@ -52,7 +80,7 @@ index fa27bbd68512..8714c57aef6a 100644
  					  "remote-wakeup-connected"))
  			ohci->hc_control = OHCI_CTRL_RWC;
 diff --git a/drivers/usb/host/ohci.h b/drivers/usb/host/ohci.h
-index aac6285b37f8..026e9951139b 100644
+index aac6285..026e995 100644
 --- a/drivers/usb/host/ohci.h
 +++ b/drivers/usb/host/ohci.h
 @@ -422,6 +422,7 @@ struct ohci_hcd {
@@ -63,3 +91,6 @@ index aac6285b37f8..026e9951139b 100644
  
  	// there are also chip quirks/bugs in init logic
  
+-- 
+2.34.1
+

@@ -37,9 +37,10 @@ into alp-sdk so a clean checkout reproduces a working board. Branch:
 - **HW-validated end-to-end** (booted on the board): the DT deltas
   (model, EVK-peripheral disables, RTL8211F-VD @ MDIO addr 2,
   RIIC3/6/7 off, audio off, USB-OVC suppression — since revised to
-  PB.1-only with usb20 OVC suppressed at the controllers (spurious-oc), see
+  PB.1-only with usb20 OVC suppressed at the controllers (spurious-oc,
+  cold-boot-verified 2026-06-12), see
   [`errata-e1m-x-v2n.md`](errata-e1m-x-v2n.md) E3 revision 2026-06-12 —
-  / USB2.0 kept), and the alp DDR
+  USB2.0 host kept enabled), and the alp DDR
   in BL2 (DDR 7.9 GiB, boots). The 0006–0013 patches were also dtc-clean
   rebuilt from source.
 - **WSL-baked 2026-05-26** (bitbake-layers, BSP v6.30): DT patches

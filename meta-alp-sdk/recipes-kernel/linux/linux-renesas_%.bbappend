@@ -75,6 +75,15 @@ SRC_URI:append = " \
 # Silicon-validated 2026-06-11 on E1M-V2M101: `reboot` now reaches the
 # reset and boots.
 
+# 0003 (usb20 OVC silencing): the carrier's OVC sense is unusable
+# (errata E3) and P9.6 can no longer be parked as GPIO (CM33-owned
+# SCK7), so OC is suppressed at the controllers instead.  EHCI already
+# has the generic spurious-oc DT property in-tree; 0003 adds the same
+# property to ohci-platform (sets NOCP / clears OCPM in roothub A) and
+# documents it in generic-ohci.yaml.  Both &ehci0 and &ohci0 carry
+# spurious-oc in e1m-x-evk.dtsi.  Cold-boot-verified 2026-06-12 on
+# E1M-V2M101: zero over-current lines.
+
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the
 # SoC r9a09g056.dtsi and these dtsi by relative path).
@@ -88,13 +97,6 @@ do_configure:prepend() {
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
         "${ALP_DTS_DST}/"
 }
-
-# 0003 (usb20 OVC silencing): the carrier's OVC sense is unusable
-# (errata E3) and P9.6 can no longer be parked as GPIO (CM33-owned
-# SCK7), so OC is suppressed at the controllers instead.  EHCI already
-# has the generic spurious-oc DT property in-tree; 0003 adds the same
-# property to ohci-platform (sets NOCP / clears OCPM in roothub A).
-# Both &ehci0 and &ohci0 carry spurious-oc in e1m-x-evk.dtsi.
 
 # Production kernel-config trims (linux-renesas is kernel-yocto based,
 # so .cfg fragments in SRC_URI auto-merge).  Both grounded in the

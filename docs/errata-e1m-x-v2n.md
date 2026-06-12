@@ -62,8 +62,9 @@ companion channel).
 **Root cause:** the SoC OVC pins (P9.6 for the usb20 channel, PB.1 for
 usb30) read asserted on this carrier — the OC sense is not usable as
 wired. Removing OVC from the pinctrl groups alone is insufficient
-(U-Boot leaves the pins in OVC function), and OHCI has no software
-over-current-ignore knob.
+(U-Boot leaves the pins in OVC function), and stock OHCI has no
+software over-current-ignore knob (addressed by kernel patch 0003 in
+the second revision below).
 
 **Software workaround (shipped, since revised):** DT patch 0012 —
 `/delete-node/ ovc` from usb20_pins/usb30_pins **and** a gpio-hog
@@ -92,6 +93,8 @@ in root-hub descriptor A). This removes both the boot lines and the
 functional OC side-effects (hub port power-cycling on OC events).
 Disabling OC processing is correct on this carrier: VBUS is hardwired
 always-on with no per-port power switching to protect.
+*Cold-boot-verified on the bench 2026-06-12 (patched kernel +
+spurious-oc dtb): zero over-current lines from either controller.*
 
 **Open question (bench):** USB2.0 *host enumeration* should still be
 re-verified with a device plugged once the spurious-oc build is
