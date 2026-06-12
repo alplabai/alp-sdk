@@ -1,0 +1,65 @@
+usb: ohci-platform: add "spurious-oc" DT property (mirrors generic-EHCI)
+
+The E1M-X carrier's USB over-current sense wiring is unusable (errata
+E1M-X E3): the usb20-channel OVC input reads permanently asserted, and
+since the GD32 supervisor SPI owns P9.6 the pin can no longer be parked
+as a GPIO input to mask it.  ehci-platform already supports the generic
+"spurious-oc" DT property for exactly this class of board; OHCI (the
+usb20 companion controller) has no equivalent knob, so the false
+over-current report cannot be silenced -- and OC events have functional
+effect (hub port power-cycling), not just log noise.
+
+Add the same property to ohci-platform: a new OHCI_QUIRK_SPURIOUS_OC
+sets NOCP (no over-current protection) and clears OCPM in the root-hub
+descriptor A during ohci_run, matching the EHCI behaviour and the
+binding name.
+
+Upstream-Status: Inappropriate [board-specific OC policy; the generic
+binding addition would need to go through linux-usb]
+Signed-off-by: Alp Lab AB
+
+diff --git a/drivers/usb/host/ohci-hcd.c b/drivers/usb/host/ohci-hcd.c
+index ab175e181e55..5da79a0daaf4 100644
+--- a/drivers/usb/host/ohci-hcd.c
++++ b/drivers/usb/host/ohci-hcd.c
+@@ -687,6 +687,14 @@ static int ohci_run (struct ohci_hcd *ohci)
+ 		 */
+ 		val |= RH_A_NPS;
+ 	}
++	if (ohci->flags & OHCI_QUIRK_SPURIOUS_OC) {
++		/* Board-level OC sense is miswired/unusable: disable
++		 * over-current processing entirely (NOCP), matching the
++		 * generic-EHCI spurious-oc behaviour.
++		 */
++		val |= RH_A_NOCP;
++		val &= ~RH_A_OCPM;
++	}
+ 	ohci_writel(ohci, val, &ohci->regs->roothub.a);
+ 
+ 	ohci_writel (ohci, RH_HS_LPSC, &ohci->regs->roothub.status);
+diff --git a/drivers/usb/host/ohci-platform.c b/drivers/usb/host/ohci-platform.c
+index fa27bbd68512..8714c57aef6a 100644
+--- a/drivers/usb/host/ohci-platform.c
++++ b/drivers/usb/host/ohci-platform.c
+@@ -136,6 +136,9 @@ static int ohci_platform_probe(struct platform_device *dev)
+ 		if (of_property_read_bool(dev->dev.of_node, "no-big-frame-no"))
+ 			ohci->flags |= OHCI_QUIRK_FRAME_NO;
+ 
++		if (of_property_read_bool(dev->dev.of_node, "spurious-oc"))
++			ohci->flags |= OHCI_QUIRK_SPURIOUS_OC;
++
+ 		if (of_property_read_bool(dev->dev.of_node,
+ 					  "remote-wakeup-connected"))
+ 			ohci->hc_control = OHCI_CTRL_RWC;
+diff --git a/drivers/usb/host/ohci.h b/drivers/usb/host/ohci.h
+index aac6285b37f8..026e9951139b 100644
+--- a/drivers/usb/host/ohci.h
++++ b/drivers/usb/host/ohci.h
+@@ -422,6 +422,7 @@ struct ohci_hcd {
+ #define	OHCI_QUIRK_AMD_PREFETCH	0x400			/* pre-fetch for ISO transfer */
+ #define	OHCI_QUIRK_GLOBAL_SUSPEND	0x800		/* must suspend ports */
+ #define	OHCI_QUIRK_QEMU		0x1000			/* relax timing expectations */
++#define	OHCI_QUIRK_SPURIOUS_OC	0x2000			/* miswired OC sense; force NOCP */
+ 
+ 	// there are also chip quirks/bugs in init logic
+ 

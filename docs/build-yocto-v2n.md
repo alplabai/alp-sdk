@@ -68,7 +68,7 @@ smoke checks:
 
 ```bash
 cat /proc/device-tree/model            # ALP e1m-x carrier + v2n-m1 SoM …
-dmesg | grep -i over-current   # expect ONLY usb2-port1 + usb3-port1 (cosmetic, errata E3 revision)
+dmesg | grep -i over-current || echo none   # expect: none (suppressed via spurious-oc, errata E3)
 i2cdetect -l                            # expect i2c-0/1/2/8 only
 ethtool end0 | grep "Link detected"     # PHY attaches stmmac-N:02
 ```

@@ -81,16 +81,22 @@ the CM33's own pin re-init took the pad back — the same clobber class
 as SD1_CD/P94, and the reason usb20 OVC suppression was lost. The hog
 is now **PB.1-only**; the two usb20-channel boot lines
 (`usb2-port1`/`usb3-port1`) are expected until OVC is suppressed at the
-controller level: `ehci_hcd.ignore_oc=1` on the production kernel
-cmdline plus an OHCI NOCP (HcRhDescriptorA bit 12) patch — queued with
-the production U-Boot env/bootargs work.
+controller level — done in the second revision below (`spurious-oc` on
+both controllers; no kernel-cmdline change needed).
 
-**Open question (bench):** USB2.0 *host behavior under the asserted OC
-input* is unverified — the original "fully functional" verification
-predates the regression. VBUS is hardwired always-on, but the EHCI
-port-power/OC paths still react to OC events, so enumeration on the
-USB2.0 host port must be re-checked on the bench (and recorded here)
-before the lines are called purely cosmetic.
+**Controller-level suppression (2026-06-12, second revision):** the
+usb20 channel's OC processing is now disabled at the controllers —
+`spurious-oc` on the EHCI (generic in-tree binding) and on the OHCI
+(kernel patch 0003 adds the same property, setting NOCP/clearing OCPM
+in root-hub descriptor A). This removes both the boot lines and the
+functional OC side-effects (hub port power-cycling on OC events).
+Disabling OC processing is correct on this carrier: VBUS is hardwired
+always-on with no per-port power switching to protect.
+
+**Open question (bench):** USB2.0 *host enumeration* should still be
+re-verified with a device plugged once the spurious-oc build is
+deployed — the original "fully functional" verification predates the
+P9.6 regression. Record the result here.
 
 **Suggested metadata:** an `ovc_wired: false` flag per USB channel in
 the carrier YAML would let the generator emit this automatically.
