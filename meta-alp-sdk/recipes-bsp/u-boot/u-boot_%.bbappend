@@ -38,8 +38,9 @@ SRC_URI:append:rzv2n-family = " \
 # appends `git describe --dirty` -- always "-dirty" here because the
 # patches above are git-applied into the tree -- leaking a "-dirty"
 # flag + the upstream SHA into the boot banner. The fragment disables
-# the auto version and pins an ALP localversion. Auto-merged by the
-# kernel-yocto-style cfg handling u-boot.inc applies to UBOOT_CONFIG.
+# the auto version and pins an ALP localversion. Merged into the
+# resolved defconfig by u-boot-configure.inc (find_cfgs() + merge_config.sh
+# pick up any *.cfg in SRC_URI) -- the same path prod-boot.cfg uses.
 
 # 0002 (production boot): two build-gated ALP additions to the same
 # rzv2n-dev board files.

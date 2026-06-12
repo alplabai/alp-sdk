@@ -83,11 +83,29 @@ dmesg | grep -i over-current || echo none   # expect: none (suppressed via spuri
 grep timing /sys/kernel/debug/mmc0/ios      # expect: 9 (mmc HS200) -- HS-52 fallback means the eMMC rail fix regressed
 i2cdetect -l                            # expect i2c-0/1/2/8 only
 ethtool end0 | grep "Link detected"     # PHY attaches stmmac-N:02
+cat /proc/version                       # expect "alp@alp-sdk", no "-dirty"/no personal host
 ```
+
+The boot banners are pinned for traceability: BL2/BL31 read
+`v2.10.5(release):alp`, U-Boot `2024.07-alp+`, kernel `alp@alp-sdk` —
+all without a `-dirty` flag, upstream SHA, or builder `user@host`. A
+drift back to `-dirty` means `BUILD_STRING` / `CONFIG_LOCALVERSION_AUTO`
+regressed.
 
 (End-to-end link needs the MDI-reversal layout fix — see
 [`errata-e1m-x-v2n.md`](errata-e1m-x-v2n.md) E1 — until the respin, a
 pair-mirror cable links at 100M.)
+
+### Hand-building the kernel (outside bitbake)
+
+The bitbake kernel banner is branded automatically. A **manual** kernel
+build does **not** source the recipe, so export the same identity to
+avoid leaking your own `user@host` into the banner:
+
+```bash
+export KBUILD_BUILD_USER=alp KBUILD_BUILD_HOST=alp-sdk
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= -j"$(nproc)" Image
+```
 
 ## Notes
 

@@ -49,8 +49,9 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 # outside bitbake) leaks the developer's real user@host into the boot
 # banner ("Linux version ... (caner@DESKTOP-...)").  Pin both to an ALP
 # id so the shipped banner is branded and a manual build that inherits
-# the recipe environment can never leak.  (Manual kernel builds outside
-# bitbake must export the same two vars -- see reference-wsl-build.)
+# the recipe environment can never leak.  (A manual kernel build OUTSIDE
+# bitbake does not source this recipe -- it must export the same two
+# vars itself: see docs/build-yocto-v2n.md "Hand-building the kernel".)
 export KBUILD_BUILD_USER = "alp"
 export KBUILD_BUILD_HOST = "alp-sdk"
 

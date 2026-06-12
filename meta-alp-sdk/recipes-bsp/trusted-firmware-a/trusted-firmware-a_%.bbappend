@@ -40,7 +40,11 @@ SRC_URI:append:rzv2n-family = " file://ddr_param_def_lpddr4-alp.c"
 # ALP_TFA_BUILD_STRING with the signed-bundle version for full
 # traceability; the default just guarantees no "-dirty" / no SHA leak.
 ALP_TFA_BUILD_STRING ?= "alp"
-EXTRA_OEMAKE:append:rzv2n-family = " BUILD_STRING=${ALP_TFA_BUILD_STRING}"
+# Single-quote so a release-pipeline override reaches make as one arg
+# (oe_runmake word-splits EXTRA_OEMAKE on whitespace).  The release
+# version is schema-locked to a whitespace-free token (som-X.Y.Z), so
+# the default is safe regardless; the quote is defensive.
+EXTRA_OEMAKE:append:rzv2n-family = " BUILD_STRING='${ALP_TFA_BUILD_STRING}'"
 
 # Path of the stock DDR param file inside the TF-A source tree.
 ALP_TFA_DDR_DST ?= "plat/renesas/rz/soc/v2n/drivers/ddr/ddr_param_def_lpddr4.c"
