@@ -31,7 +31,15 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI:append:rzv2n-family = " \
     file://0001-rzv2n-dev-EEPROM-gated-DEEPX-DX-M1-PCIe-bring-up.patch \
     file://0002-rzv2n-dev-ALP-E1M-production-boot.patch \
+    file://no-dirty-version.cfg \
 "
+
+# no-dirty-version.cfg: the vendor defconfig's CONFIG_LOCALVERSION_AUTO
+# appends `git describe --dirty` -- always "-dirty" here because the
+# patches above are git-applied into the tree -- leaking a "-dirty"
+# flag + the upstream SHA into the boot banner. The fragment disables
+# the auto version and pins an ALP localversion. Auto-merged by the
+# kernel-yocto-style cfg handling u-boot.inc applies to UBOOT_CONFIG.
 
 # 0002 (production boot): two build-gated ALP additions to the same
 # rzv2n-dev board files.

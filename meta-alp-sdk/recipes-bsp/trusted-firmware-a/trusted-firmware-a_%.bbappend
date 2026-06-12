@@ -29,6 +29,19 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI:append:rzv2n-family = " file://ddr_param_def_lpddr4-alp.c"
 
+# Reproducible / traceable BL2+BL31 version string.  TF-A's Makefile
+# derives BUILD_STRING from `git describe --always --dirty --tags` when
+# it is unset, which on our build is ALWAYS "-dirty": do_configure
+# overwrites the tracked ddr_param_def_lpddr4.c (above), so the TF-A
+# source tree is intentionally modified at build time.  The result was
+# a permanently "-dirty" boot banner ("v2.10.5(release):4092464-dirty")
+# that also leaked the upstream short SHA.  Pin BUILD_STRING to a clean,
+# deterministic ALP id instead.  The per-SKU release pipeline overrides
+# ALP_TFA_BUILD_STRING with the signed-bundle version for full
+# traceability; the default just guarantees no "-dirty" / no SHA leak.
+ALP_TFA_BUILD_STRING ?= "alp"
+EXTRA_OEMAKE:append:rzv2n-family = " BUILD_STRING=${ALP_TFA_BUILD_STRING}"
+
 # Path of the stock DDR param file inside the TF-A source tree.
 ALP_TFA_DDR_DST ?= "plat/renesas/rz/soc/v2n/drivers/ddr/ddr_param_def_lpddr4.c"
 
