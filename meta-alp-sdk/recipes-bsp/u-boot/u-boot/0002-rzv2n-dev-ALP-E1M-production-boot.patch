@@ -1,6 +1,6 @@
-From f58fd8322aa5fa63b6af3c0e3bce4d62968bfb11 Mon Sep 17 00:00:00 2001
+From 44d7979ce6f370141de33bc15ecd12c1166fe9aa Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <gate@alp-lab.se>
-Date: Fri, 12 Jun 2026 12:49:21 +0200
+Date: Fri, 12 Jun 2026 12:56:34 +0200
 Subject: [PATCH] rzv2n-dev: ALP E1M production boot: eMMC 1.8 V rail + pinned
  console
 
