@@ -165,7 +165,7 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 - **Display:** 40-pin MIPI DSI connector for the **RK055HDMIPI4MA0**
   720p panel (NXP-supplied reference panel; drivers are available
   from NXP's MIPI-DSI panel collection).  Backlight rails + the
-  capacitive-touch controller sit on `EVK_AEN_I2C_BUS_DSI_CSI`
+  capacitive-touch controller sit on `EVK_I2C_BUS_DSI_CSI`
   (`E1M_I2C1`).
 - **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
   the PEC12R-4222F-S0024 quadrature signals.  The push-switch

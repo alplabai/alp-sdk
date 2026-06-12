@@ -1,0 +1,26 @@
+# Wired-DHCP policy for ALP images: DHCP on every Ethernet interface
+# (the V2N SoM exposes two on-module GbE MACs, end0/end1).
+#
+# This deliberately shadows oe-core systemd-conf's 80-wired.network
+# ("80-alp-..." sorts first), pinning the network story in the ALP
+# layer instead of inheriting whatever the base distro ships. The
+# KernelCommandLine guards and [DHCP] tuning are carried over from the
+# oe-core file so we lose nothing it provided: the guards keep networkd
+# off interfaces the kernel already configured (NFS-root benches /
+# ip= on the cmdline), and ClientIdentifier=mac keeps DHCP leases
+# stable across reboots and OS updates.
+#
+# Installed to /etc/systemd/network/; a customer image can override
+# with a lower-sorting file or replace this one.
+[Match]
+Name=en* eth*
+KernelCommandLine=!nfsroot
+KernelCommandLine=!ip
+
+[Network]
+DHCP=yes
+
+[DHCP]
+UseMTU=yes
+RouteMetric=10
+ClientIdentifier=mac

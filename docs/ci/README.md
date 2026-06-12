@@ -60,7 +60,8 @@ reference.
 
 - **GitHub-hosted**: PR-time workflows (`pr-twister`,
   `pr-metadata-validate`, `pr-doxygen`).  Run on
-  `ubuntu-latest`; PR-twister uses the
+  `ubuntu-latest`; PR-twister deliberately uses the runner's
+  stock gcc (`ZEPHYR_TOOLCHAIN_VARIANT=host`), not the
   `ghcr.io/zephyrproject-rtos/ci` Docker image.
 - **Self-hosted (HIL)**: nightly workflows.  See
   [`HW-IN-LOOP.md`](HW-IN-LOOP.md) for runner setup contracts and

@@ -43,6 +43,18 @@
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
+# Deterministic, branded kernel banner.  Poky's linux-kernel-base sets
+# KBUILD_BUILD_USER/HOST to "oe-user"/"oe-host" by default, which is
+# already reproducible -- but a manually-built bench kernel (built
+# outside bitbake) leaks the developer's real user@host into the boot
+# banner ("Linux version ... (caner@DESKTOP-...)").  Pin both to an ALP
+# id so the shipped banner is branded and a manual build that inherits
+# the recipe environment can never leak.  (A manual kernel build OUTSIDE
+# bitbake does not source this recipe -- it must export the same two
+# vars itself: see docs/build-yocto-v2n.md "Hand-building the kernel".)
+export KBUILD_BUILD_USER = "alp"
+export KBUILD_BUILD_HOST = "alp-sdk"
+
 SRC_URI:append = " \
     file://e1m-v2n-som.dtsi \
     file://e1m-x-evk.dtsi \
@@ -50,6 +62,8 @@ SRC_URI:append = " \
     file://e1m-v2n101-x-evk.dts \
     file://e1m-v2m101-x-evk.dts \
     file://0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-RIIC8-on.patch \
+    file://0002-drm-renesas-rzg2l-mipi-dsi-pm_runtime-guard-host-tra.patch \
+    file://0003-usb-ohci-platform-add-spurious-oc-DT-property.patch \
 "
 
 # AMP clock ownership: RSCI7 + RIIC8 belong to the Cortex-M33 system
@@ -60,6 +74,27 @@ SRC_URI:append = " \
 # marks the six clocks DEF_MOD_CRITICAL so both gates stay held for the
 # remote core.  Silicon-validated 2026-06-03 (two cold cycles + warm
 # reboot, link autonomous from ~2 s after power-on, no intervention).
+
+# 0002 (DSI shutdown SError): rzg2l_mipi_dsi's host transfer touched DSI
+# registers while the host was runtime-suspended (held in reset).  A panel
+# .shutdown() that disables the panel during device_shutdown() -- the
+# E1M-X LCD's hx8394 -- then took an asynchronous SError -> kernel panic ->
+# the reboot never completed and the board hung.  (The SoC reset path
+# itself is fine: sysrq-b, which skips device_shutdown, resets cleanly via
+# PSCI/WDT.)  The patch pm_runtime-resumes the host around the register
+# accesses so a DCS transfer is safe in any PM state; the bounded
+# completion poll just times out harmlessly when the link is down.
+# Silicon-validated 2026-06-11 on E1M-V2M101: `reboot` now reaches the
+# reset and boots.
+
+# 0003 (usb20 OVC silencing): the carrier's OVC sense is unusable
+# (errata E3) and P9.6 can no longer be parked as GPIO (CM33-owned
+# SCK7), so OC is suppressed at the controllers instead.  EHCI already
+# has the generic spurious-oc DT property in-tree; 0003 adds the same
+# property to ohci-platform (sets NOCP / clears OCPM in roothub A) and
+# documents it in generic-ohci.yaml.  Both &ehci0 and &ohci0 carry
+# spurious-oc in e1m-x-evk.dtsi.  Cold-boot-verified 2026-06-12 on
+# E1M-V2M101: zero over-current lines.
 
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the
@@ -74,6 +109,14 @@ do_configure:prepend() {
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
         "${ALP_DTS_DST}/"
 }
+
+# Production kernel-config trims (linux-renesas is kernel-yocto based,
+# so .cfg fragments in SRC_URI auto-merge).  Both grounded in the
+# 2026-06-12 V2M101 boot-log audit; rationale inside each file.
+SRC_URI:append = " \
+    file://trim-unused-storage-net-fs.cfg \
+    file://no-kernel-audit.cfg \
+"
 
 # TAS2563 smart-amp codec (mainline ASoC `tas2562` covers it) -- pre-staged
 # for the carrier audio TODO in e1m-x-evk.dtsi. linux-renesas is

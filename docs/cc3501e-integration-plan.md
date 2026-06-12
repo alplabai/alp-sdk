@@ -36,7 +36,7 @@ The CC3501E is the wireless brain on every E1M-AEN module. The Alif Ensemble
 application SoC has no integrated Wi-Fi/BLE radios for the AEN family, so
 the CC3501E is treated as an on-module coprocessor with its own Cortex-M33,
 its own external xSPI flash (4 MB on the E1M-AEN; the SKU table in SWRS343
-also lists 8 MB and PSRAM-augmented variants), and its own ALP-authored
+also lists 8 MB and PSRAM-augmented variants), and its own Alp-authored
 firmware.
 
 The CC3501E also doubles as a GPIO + camera-LDO expander: per
@@ -174,7 +174,7 @@ a proxied surface:
 > intentionally do **not** read that spec here — per ADR 0005 the alp-sdk
 > host side does NOT speak that protocol. The CC3501E firmware does:
 > the firmware runs TI's `sl_*` driver internally, and exposes a small
-> ALP-authored protocol (the `<alp/protocol/cc3501e.h>` opcodes) to the
+> Alp-authored protocol (the `<alp/protocol/cc3501e.h>` opcodes) to the
 > Alif side.
 >
 > §3.10 below documents the implications.

@@ -1,0 +1,75 @@
+From 7cf9474931d9e4e2c867906bedd519296f0d3ddb Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <gate@alp-lab.se>
+Date: Thu, 11 Jun 2026 22:47:55 +0200
+Subject: [PATCH] platform/devicetree: leave GPU clocks to the PM domain
+
+The Renesas CPG genpd manages the GPU module clocks via pm_clk (GENPD_FLAG_PM_CLK): it prepares them at attach and enables/disables them across runtime resume/suspend. The kbase devicetree platform also managed the same clocks in enable/disable_gpu_power_control(), double-counting the prepare refcount. On suspend, clk_disable_unprepare() dropped the prepare pm_clk relies on; the next pm_clk_resume() clk_enable() then hit Enabling unprepared <clk> -> -ESHUTDOWN, firing on every compositor repaint (~60 s) on RZ/V2N E1M and leaving the GPU unable to power. Skip the clock loops when the device sits in a PM domain so genpd owns the clocks; kbase keeps managing the regulator and resets.
+
+Upstream-Status: Pending
+
+Signed-off-by: Alp Lab AB
+---
+ .../devicetree/mali_kbase_runtime_pm.c        | 40 ++++++++++++++-----
+ 1 file changed, 29 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/gpu/arm/midgard/platform/devicetree/mali_kbase_runtime_pm.c b/drivers/gpu/arm/midgard/platform/devicetree/mali_kbase_runtime_pm.c
+index 7ac330a..a5c4efb 100644
+--- a/drivers/gpu/arm/midgard/platform/devicetree/mali_kbase_runtime_pm.c
++++ b/drivers/gpu/arm/midgard/platform/devicetree/mali_kbase_runtime_pm.c
+@@ -50,11 +50,22 @@ static void enable_gpu_power_control(struct kbase_device *kbdev)
+ 			WARN_ON(reset_control_deassert(kbdev->resets[i]));
+ 	};
+ 
+-	for (i = 0; i < kbdev->nr_clocks; i++) {
+-		if (WARN_ON(kbdev->clocks[i] == NULL))
+-			;
+-		else if (!__clk_is_enabled(kbdev->clocks[i]))
+-			WARN_ON(clk_prepare_enable(kbdev->clocks[i]));
++	/*
++	 * Skip clock management when a PM domain owns the clocks. The Renesas
++	 * CPG genpd uses GENPD_FLAG_PM_CLK, so pm_clk prepares the GPU clocks
++	 * at attach and enables/disables them across runtime resume/suspend.
++	 * Doing it here too double-counts the refcounts: disable's
++	 * clk_disable_unprepare() drops the prepare pm_clk relies on, and the
++	 * next pm_clk_resume() then warns "Enabling unprepared <clk>" and
++	 * returns -ESHUTDOWN. Leave the clocks to genpd in that case.
++	 */
++	if (!kbdev->dev->pm_domain) {
++		for (i = 0; i < kbdev->nr_clocks; i++) {
++			if (WARN_ON(kbdev->clocks[i] == NULL))
++				;
++			else if (!__clk_is_enabled(kbdev->clocks[i]))
++				WARN_ON(clk_prepare_enable(kbdev->clocks[i]));
++		}
+ 	}
+ }
+ 
+@@ -62,12 +73,19 @@ static void disable_gpu_power_control(struct kbase_device *kbdev)
+ {
+ 	unsigned int i;
+ 
+-	for (i = 0; i < kbdev->nr_clocks; i++) {
+-		if (WARN_ON(kbdev->clocks[i] == NULL))
+-			;
+-		else if (__clk_is_enabled(kbdev->clocks[i])) {
+-			clk_disable_unprepare(kbdev->clocks[i]);
+-			WARN_ON(__clk_is_enabled(kbdev->clocks[i]));
++	/*
++	 * See enable_gpu_power_control(): leave the clocks to genpd's pm_clk
++	 * when a PM domain manages them, so the prepare refcount stays
++	 * balanced.
++	 */
++	if (!kbdev->dev->pm_domain) {
++		for (i = 0; i < kbdev->nr_clocks; i++) {
++			if (WARN_ON(kbdev->clocks[i] == NULL))
++				;
++			else if (__clk_is_enabled(kbdev->clocks[i])) {
++				clk_disable_unprepare(kbdev->clocks[i]);
++				WARN_ON(__clk_is_enabled(kbdev->clocks[i]));
++			}
+ 		}
+ 	}
+ 
+-- 
+2.34.1
+
