@@ -24,7 +24,7 @@ meta-alp-sdk/
 ├── conf/
 │   ├── layer.conf                       # Yocto layer metadata.
 │   ├── distro/
-│   │   ├── alp.conf                     # ALP distro identity (rebrands Renesas rz-vlp).
+│   │   ├── alp.conf                     # Alp distro identity (rebrands Renesas rz-vlp).
 │   │   └── include/
 │   │       └── mender.inc               # Opt-in Mender OTA distro config.
 │   └── machine/
@@ -172,8 +172,8 @@ MACHINE = "e1m-v2m101-a55"     # V2N + DEEPX
 
 # 8. Build the image:
 bitbake alp-image-edge                 # dev image (passwordless root, bench tooling)
-# or the hardened production image, against the ALP distro identity:
-DISTRO=alp bitbake alp-image-prod      # key-only SSH, no debug tooling, "ALP SDK" branding
+# or the hardened production image, against the Alp distro identity:
+DISTRO=alp bitbake alp-image-prod      # key-only SSH, no debug tooling, "Alp SDK" branding
 ```
 
 See the edge-vs-prod posture table + `DISTRO=alp` notes in
