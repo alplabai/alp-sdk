@@ -30,7 +30,31 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI:append:rzv2n-family = " \
     file://0001-rzv2n-dev-EEPROM-gated-DEEPX-DX-M1-PCIe-bring-up.patch \
+    file://0002-rzv2n-dev-ALP-E1M-production-boot.patch \
 "
+
+# 0002 (production boot): two build-gated ALP additions to the same
+# rzv2n-dev board files.
+#   CONFIG_ALP_E1M_EMMC_1V8 (default y in the patched defconfig):
+#     drive eMMC_V_SEL (PA0) high in board_init, BEFORE the first MMC
+#     access (initr_env loads the environment from eMMC right after
+#     board_init in init_sequence_r) -- the E1M SoM's eMMC/SD0 IO rail
+#     powers up at 3.3 V and eMMC has no live VccQ-switch handshake,
+#     so the whole chain must run the card at 1.8 V from the start.
+#     Pairs with the Linux-side PA0 gpio-hog (e1m-v2n-som.dtsi).
+#   CONFIG_ALP_PROD_BOOT (default n): production kernel cmdline
+#     (console= pinned + quiet, earlycon dropped). The dev cmdline
+#     keeps earlycon but gains console=ttySC0,115200, which stops the
+#     kernel replaying the early log across the console handover.
+# VALIDATION: bitbake-built; FIP reflash + bench boot pending (the
+# manual FIP flow must apply 0002 alongside the DEEPX patch).
+
+# Production boot lockdown (BOOTDELAY=0 + keyed autoboot + the prod
+# cmdline above): opt-in for release-bundle builds only. The real
+# autoboot stop string is injected by the internal release pipeline;
+# this public fragment ships a locked placeholder.
+ALP_PROD_BOOT ?= "0"
+SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if d.getVar('ALP_PROD_BOOT') == '1' else ''}"
 
 # Build U-Boot with the rzv2n-dev config, not the machine's stock rzv2n-evk.
 # The DEEPX bring-up patched above lives in board/renesas/rzv2n-dev/rzv2n-dev.c,

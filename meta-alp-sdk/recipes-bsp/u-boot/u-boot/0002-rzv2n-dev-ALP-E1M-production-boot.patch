@@ -1,0 +1,126 @@
+From f58fd8322aa5fa63b6af3c0e3bce4d62968bfb11 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <gate@alp-lab.se>
+Date: Fri, 12 Jun 2026 12:49:21 +0200
+Subject: [PATCH] rzv2n-dev: ALP E1M production boot: eMMC 1.8 V rail + pinned
+ console
+
+Two build-gated ALP E1M additions:
+
+CONFIG_ALP_E1M_EMMC_1V8 (default y for rzv2n-dev): drive eMMC_V_SEL
+(PA0) high in board_init, before the first MMC access -- the E1M SoM's
+eMMC/SD0 IO rail powers up at 3.3 V from an on-module pull-down, and
+eMMC defines VccQ as fixed from card init with no live voltage-switch
+handshake.  With the rail parked at 1.8 V from board_init, U-Boot's own
+environment load and kernel load run the card at its proper signaling
+voltage and the card never sees a VccQ transition; Linux re-asserts the
+same level via a gpio-hog.  Not enabled for stock Renesas boards whose
+SD0 channel may carry a 3.3 V SD card.
+
+CONFIG_ALP_PROD_BOOT (default n): build the default environment with
+the production kernel cmdline (console=ttySC0,115200 + quiet
+loglevel=4, earlycon dropped).  The dev cmdline keeps earlycon but
+gains the pinned console=, which stops the kernel replaying the early
+log across the console handover.
+
+Signed-off-by: Alp Lab AB <gate@alp-lab.se>
+---
+ board/renesas/rzv2n-dev/Kconfig     | 21 +++++++++++++++++++++
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 11 +++++++++++
+ configs/rzv2n-dev_defconfig         |  1 +
+ include/configs/rzv2n-dev.h         | 13 +++++++++++--
+ 4 files changed, 44 insertions(+), 2 deletions(-)
+
+diff --git a/board/renesas/rzv2n-dev/Kconfig b/board/renesas/rzv2n-dev/Kconfig
+index 4ef61be..a449a47 100644
+--- a/board/renesas/rzv2n-dev/Kconfig
++++ b/board/renesas/rzv2n-dev/Kconfig
+@@ -30,3 +30,24 @@ config SYS_CONFIG_NAME
+ 
+ endif
+ 
++
++config ALP_E1M_EMMC_1V8
++	bool "ALP E1M: drive eMMC_V_SEL (PA0) high before MMC init"
++	depends on TARGET_RZV2N_DEV || TARGET_RZV2N_EVK
++	help
++	  On the ALP E1M V2N SoM family the eMMC/SD0 IO rail is
++	  GPIO-selected (PA0, on-module pull-down -> 3.3 V at power-on).
++	  Drive it high in board_init so VccQ is a stable 1.8 V before
++	  the first MMC access (the environment loads from eMMC right
++	  after board_init) -- eMMC defines VccQ as fixed from card init
++	  and has no live voltage-switch handshake.  Do NOT enable on
++	  boards whose SD0 channel carries a 3.3 V SD card.
++
++config ALP_PROD_BOOT
++	bool "ALP E1M: production kernel cmdline (quiet, no earlycon)"
++	depends on TARGET_RZV2N_DEV || TARGET_RZV2N_EVK
++	help
++	  Build the default environment with the production kernel
++	  cmdline: console=ttySC0,115200 + quiet loglevel=4, earlycon
++	  dropped.  Pair with CONFIG_BOOTDELAY=0 and
++	  CONFIG_AUTOBOOT_KEYED (the ALP prod-boot.cfg fragment).
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index b5f159a..bc16730 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -378,6 +378,17 @@ int board_init(void)
+ 	/* address of boot parameters */
+ 	gd->bd->bi_boot_params = CONFIG_TEXT_BASE + 0x50000;
+ 
++#ifdef CONFIG_ALP_E1M_EMMC_1V8
++	/* eMMC_V_SEL (PA0): the E1M SoM's eMMC/SD0 IO rail powers up
++	 * at 3.3 V (on-module pull-down).  Park it at 1.8 V here,
++	 * BEFORE the first MMC access (initr_env loads the environment
++	 * from eMMC right after board_init): eMMC defines VccQ as
++	 * stable from card init, so the rail must never change
++	 * mid-session.  Linux re-asserts the same level via a
++	 * gpio-hog. */
++	alp_gpio_output(10, 0, 1);
++#endif
++
+ 	board_usb_init();
+ 
+ 	return 0;
+diff --git a/configs/rzv2n-dev_defconfig b/configs/rzv2n-dev_defconfig
+index 7ced1c5..e04099d 100644
+--- a/configs/rzv2n-dev_defconfig
++++ b/configs/rzv2n-dev_defconfig
+@@ -97,3 +97,4 @@ CONFIG_USB_GADGET_DOWNLOAD=y
+ CONFIG_USB_FUNCTION_MASS_STORAGE=y
+ CONFIG_CMD_USB_MASS_STORAGE=y
+ 
++CONFIG_ALP_E1M_EMMC_1V8=y
+diff --git a/include/configs/rzv2n-dev.h b/include/configs/rzv2n-dev.h
+index ad8f46a..0040c5e 100644
+--- a/include/configs/rzv2n-dev.h
++++ b/include/configs/rzv2n-dev.h
+@@ -54,6 +54,15 @@
+ /* The HF/QSPI layout permits up to 1 MiB large bootloader blob */
+ #define CONFIG_BOARD_SIZE_LIMIT		1048576
+ 
++/* ALP: kernel cmdline base.  console= pinned so the early kernel log
++ * is not replayed across the console handover; the production build
++ * drops earlycon and quiets the console. */
++#ifdef CONFIG_ALP_PROD_BOOT
++#define ALP_BOOTARGS_BASE	"console=ttySC0,115200 rootwait rw quiet loglevel=4"
++#else
++#define ALP_BOOTARGS_BASE	"console=ttySC0,115200 rootwait rw earlycon"
++#endif
++
+ /* ENV setting */
+ #define CFG_EXTRA_ENV_SETTINGS		\
+ 	"usb_pgood_delay=2000\0" \
+@@ -63,8 +72,8 @@
+ 	"netmask=255.255.255.0\0" \
+ 	"ethaddr=02:11:22:33:44:55\0" \
+ 	"eth1addr=02:11:22:33:44:66\0" \
+-	"prodsdbootargs=setenv bootargs rw rootwait earlycon root=/dev/mmcblk2p2 \0" \
+-	"prodemmcbootargs=setenv bootargs rw rootwait earlycon root=/dev/mmcblk0p2 \0" \
++	"prodsdbootargs=setenv bootargs " ALP_BOOTARGS_BASE " root=/dev/mmcblk2p2 \0" \
++	"prodemmcbootargs=setenv bootargs " ALP_BOOTARGS_BASE " root=/dev/mmcblk0p2 \0" \
+ 	"bootimage=booti 0x48080000 - 0x48000000 \0" \
+ 	"emmcload=ext4load mmc 0:2 0x48080000 boot/Image;ext4load mmc 0:2 0x48000000 boot/r9a09g056n44-dev.dtb;run prodemmcbootargs \0" \
+ 	"sd2load=ext4load mmc 1:2 0x48080000 boot/Image;ext4load mmc 1:2 0x48000000 boot/r9a09g056n44-dev.dtb;run prodsdbootargs \0" \
+-- 
+2.34.1
+
