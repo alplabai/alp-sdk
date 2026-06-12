@@ -1,6 +1,6 @@
-From 44d7979ce6f370141de33bc15ecd12c1166fe9aa Mon Sep 17 00:00:00 2001
+From 5e5134179b49496584210c51c9403bdc328289a1 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <gate@alp-lab.se>
-Date: Fri, 12 Jun 2026 12:56:34 +0200
+Date: Fri, 12 Jun 2026 13:02:57 +0200
 Subject: [PATCH] rzv2n-dev: ALP E1M production boot: eMMC 1.8 V rail + pinned
  console
 
@@ -16,22 +16,26 @@ voltage and the card never sees a VccQ transition; Linux re-asserts the
 same level via a gpio-hog.  Not enabled for stock Renesas boards whose
 SD0 channel may carry a 3.3 V SD card.
 
-CONFIG_ALP_PROD_BOOT (default n): build the default environment with
-the production kernel cmdline (console=ttySC0,115200 + quiet
-loglevel=4, earlycon dropped).  The dev cmdline keeps earlycon but
-gains the pinned console=, which stops the kernel replaying the early
-log across the console handover.
+CONFIG_ALP_PROD_BOOT (default n): rebuild the kernel cmdline with the
+production settings (console=ttySC0,115200 + quiet loglevel=4,
+earlycon dropped); the dev cmdline keeps earlycon but gains the pinned
+console=, which stops the kernel replaying the early log across the
+console handover.  The cmdline is rebuilt at CONFIG_BOOTCOMMAND rather
+than by editing the env block: that block is patched by optional
+vendor feature layers (meta-rz-drpai add-ether) and varies per
+machine, so the stable CONFIG_BOOTCOMMAND line is the only patch-safe
+hook.
 
 Signed-off-by: Alp Lab AB <gate@alp-lab.se>
 ---
  board/renesas/rzv2n-dev/Kconfig     | 21 +++++++++++++++++++++
  board/renesas/rzv2n-dev/rzv2n-dev.c | 11 +++++++++++
  configs/rzv2n-dev_defconfig         |  1 +
- include/configs/rzv2n-dev.h         | 13 +++++++++++--
- 4 files changed, 44 insertions(+), 2 deletions(-)
+ include/configs/rzv2n-dev.h         | 19 ++++++++++++++++++-
+ 4 files changed, 51 insertions(+), 1 deletion(-)
 
 diff --git a/board/renesas/rzv2n-dev/Kconfig b/board/renesas/rzv2n-dev/Kconfig
-index 4ef61be..a449a47 100644
+index 4ef61be..0714c0a 100644
 --- a/board/renesas/rzv2n-dev/Kconfig
 +++ b/board/renesas/rzv2n-dev/Kconfig
 @@ -30,3 +30,24 @@ config SYS_CONFIG_NAME
@@ -55,10 +59,10 @@ index 4ef61be..a449a47 100644
 +	bool "ALP E1M: production kernel cmdline (quiet, no earlycon)"
 +	depends on TARGET_RZV2N_DEV || TARGET_RZV2N_EVK
 +	help
-+	  Build the default environment with the production kernel
-+	  cmdline: console=ttySC0,115200 + quiet loglevel=4, earlycon
-+	  dropped.  Pair with CONFIG_BOOTDELAY=0 and
-+	  CONFIG_AUTOBOOT_KEYED (the ALP prod-boot.cfg fragment).
++	  Rebuild the kernel cmdline with the production settings:
++	  console=ttySC0,115200 + quiet loglevel=4, earlycon dropped.
++	  Pair with CONFIG_BOOTDELAY=0 and CONFIG_AUTOBOOT_KEYED (the
++	  ALP prod-boot.cfg fragment).
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
 index b5f159a..bc16730 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
@@ -91,13 +95,14 @@ index 7ced1c5..e04099d 100644
  
 +CONFIG_ALP_E1M_EMMC_1V8=y
 diff --git a/include/configs/rzv2n-dev.h b/include/configs/rzv2n-dev.h
-index ad8f46a..0040c5e 100644
+index ad8f46a..9fac694 100644
 --- a/include/configs/rzv2n-dev.h
 +++ b/include/configs/rzv2n-dev.h
-@@ -54,6 +54,15 @@
- /* The HF/QSPI layout permits up to 1 MiB large bootloader blob */
- #define CONFIG_BOARD_SIZE_LIMIT		1048576
+@@ -70,7 +70,24 @@
+ 	"sd2load=ext4load mmc 1:2 0x48080000 boot/Image;ext4load mmc 1:2 0x48000000 boot/r9a09g056n44-dev.dtb;run prodsdbootargs \0" \
+ 	"bootcmd_check=if mmc dev 1; then run sd2load; else run emmcload; fi \0"
  
+-#define CONFIG_BOOTCOMMAND	"env default -a;run bootcmd_check;run bootimage"
 +/* ALP: kernel cmdline base.  console= pinned so the early kernel log
 + * is not replayed across the console handover; the production build
 + * drops earlycon and quiets the console. */
@@ -107,20 +112,18 @@ index ad8f46a..0040c5e 100644
 +#define ALP_BOOTARGS_BASE	"console=ttySC0,115200 rootwait rw earlycon"
 +#endif
 +
- /* ENV setting */
- #define CFG_EXTRA_ENV_SETTINGS		\
- 	"usb_pgood_delay=2000\0" \
-@@ -63,8 +72,8 @@
- 	"netmask=255.255.255.0\0" \
- 	"ethaddr=02:11:22:33:44:55\0" \
- 	"eth1addr=02:11:22:33:44:66\0" \
--	"prodsdbootargs=setenv bootargs rw rootwait earlycon root=/dev/mmcblk2p2 \0" \
--	"prodemmcbootargs=setenv bootargs rw rootwait earlycon root=/dev/mmcblk0p2 \0" \
-+	"prodsdbootargs=setenv bootargs " ALP_BOOTARGS_BASE " root=/dev/mmcblk2p2 \0" \
-+	"prodemmcbootargs=setenv bootargs " ALP_BOOTARGS_BASE " root=/dev/mmcblk0p2 \0" \
- 	"bootimage=booti 0x48080000 - 0x48000000 \0" \
- 	"emmcload=ext4load mmc 0:2 0x48080000 boot/Image;ext4load mmc 0:2 0x48000000 boot/r9a09g056n44-dev.dtb;run prodemmcbootargs \0" \
- 	"sd2load=ext4load mmc 1:2 0x48080000 boot/Image;ext4load mmc 1:2 0x48000000 boot/r9a09g056n44-dev.dtb;run prodsdbootargs \0" \
++/* ALP: bootargs are REBUILT here rather than by editing the env block
++ * above -- that block is patched by optional vendor feature layers
++ * (e.g. meta-rz-drpai add-ether) and its contents vary per machine,
++ * so an override at this stable line is the only patch-safe hook.
++ * The sd-vs-emmc root choice mirrors bootcmd_check. */
++#define CONFIG_BOOTCOMMAND	"env default -a;run bootcmd_check;" \
++	"if mmc dev 1; then setenv alp_root /dev/mmcblk2p2; else setenv alp_root /dev/mmcblk0p2; fi;" \
++	"setenv bootargs " ALP_BOOTARGS_BASE " root=${alp_root};" \
++	"run bootimage"
+ 
+ /* For board */
+ /* Ethernet RAVB */
 -- 
 2.34.1
 
