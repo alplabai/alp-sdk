@@ -168,6 +168,38 @@ To raise the cap to 1.8 GHz, flip one line in the SoM dtsi
 V2N-family SKUs. Validate your own silicon + thermals before enabling it
 fleet-wide.
 
+## Kernel FIT signing (opt-in scaffolding)
+
+By default U-Boot loads a **raw** `Image` + dtb from `/boot` and boots them
+with no integrity check. An opt-in builds the kernel instead as a **signed
+`fitImage`** — kernel + dtb in one FIT with an **RSA-2048 / SHA-256**
+signature over the configuration (so the kernel and its dtb are bound
+together). Enable it in `conf/local.conf`:
+
+```bash
+ALP_FIT_SIGNED = "1"
+require conf/include/alp-fit-signing.inc
+```
+
+When off (the default) the build is unchanged. When on, the kernel deploys
+`fitImage` signed with a **generated dev key** under `build/alp-fit-keys/`
+(gitignored build dir; dev-only — never ship it).
+
+> **This is build-side scaffolding only — it is not yet enforced.** Making
+> U-Boot *verify* the FIT before boot (`CONFIG_FIT_SIGNATURE` + the
+> production public key in the FIP's U-Boot dtb + `bootcmd` → `bootm`) means
+> rebuilding and reflashing the bootloader, and choosing the production key
+> custody — a separate, brick-class step tracked in `alp-sdk-internal`. The
+> dev-key fitImage here lets you exercise the signed-image build path now.
+>
+> **Caveat — not bootable as-is.** With the flag on the kernel deploys
+> **only** the signed `fitImage` (the raw `Image` is no longer produced), and
+> the current (phase-1) bootloader still `ext4load`s `/boot/Image` + `booti`s
+> it — it does **not** `bootm` a FIT. So the flag validates the signed-*build*
+> path, not a bootable board, and the §4 "Fast dev iteration" copy-`Image`
+> recipe does not apply while it is on. Booting the FIT comes with the
+> phase-2 U-Boot work.
+
 ## Notes
 
 - Audio is currently **disabled** in the DT (no DA7212 on the carrier);
