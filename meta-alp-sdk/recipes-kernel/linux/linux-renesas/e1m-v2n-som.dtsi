@@ -204,11 +204,17 @@
 
 /* CA55-cluster watchdog (wdt1 -- wdt0 belongs to the CM33, wdt2/3 to
  * the CR8s).  SoC-internal, so enabled at SoM level rather than per
- * carrier (moved from e1m-x-evk.dtsi).  systemd arms and pets it from
- * early userspace (RuntimeWatchdogSec -- see the alp-watchdog-policy
- * recipe); timeout-sec pins the policy explicitly instead of
- * inheriting the driver default.
- * VALIDATION: pending bench hang-injection on a built image. */
+ * carrier.  systemd arms and pets it from early userspace
+ * (RuntimeWatchdogSec -- see the alp-watchdog-policy recipe);
+ * timeout-sec pins the policy explicitly instead of inheriting the
+ * driver default (the HW period itself is fixed ~175 ms; longer
+ * timeouts are kernel-emulated).
+ * NOTE: the WDT1-underflow -> reset routing (CPG_ERRORRST_SEL2) is
+ * programmed by TF-A BL2 on r9a09g056 (this kernel's DT has no
+ * renesas,syscon-cpg-error-rst) -- supervision only resets the board
+ * when running the ALP/BSP FIP.
+ * VALIDATION: pending bench hang-injection on a built image + the
+ * deployed FIP. */
 &wdt1 {
 	timeout-sec = <60>;
 	status = "okay";

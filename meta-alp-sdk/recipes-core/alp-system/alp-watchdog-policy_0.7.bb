@@ -32,12 +32,10 @@ S = "${WORKDIR}"
 
 inherit allarch
 
+RDEPENDS:${PN} = "systemd"
+
 do_install() {
     install -d ${D}${sysconfdir}/systemd/system.conf.d
     install -m 0644 ${WORKDIR}/10-alp-watchdog.conf \
         ${D}${sysconfdir}/systemd/system.conf.d/10-alp-watchdog.conf
 }
-
-FILES:${PN} += " \
-    ${sysconfdir}/systemd/system.conf.d/10-alp-watchdog.conf \
-"
