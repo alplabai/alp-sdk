@@ -19,7 +19,7 @@ Inventory check before powering anything:
   - **Alif Ensemble E3..E8** SoC (Cortex-M55 HP + HE, optional
     Cortex-A32 on E7/E8, Ethos-U55 NPU).
   - **TCAL9538** GPIO expander on BRD_I2C.
-  - **24C128** EEPROM with the 128-byte ALP manifest at offset
+  - **24C128** EEPROM with the 128-byte Alp manifest at offset
     `0x0000`.
   - **CC3501E** Wi-Fi 6 + BLE coprocessor (TI SimpleLink).
   - **DP83825I** 10/100 Ethernet PHY (a single MAC; ET1 is
@@ -65,7 +65,7 @@ PMIC's `EVENT_00` status register over BRD_I2C.
 
 ## 3. EEPROM manifest read
 
-The 24C128 carries the 128-byte ALP manifest at offset
+The 24C128 carries the 128-byte Alp manifest at offset
 `0x0000`.  Read it back through the board's BRD_I2C bus:
 
 ```bash
@@ -199,7 +199,7 @@ Once §1..5 pass:
   image-rejected scenario.  Re-flash with the dev key or check
   the MCUboot trailer.
 * **`i2cdetect` returns no slaves at all** -- BRD_I2C pull-ups
-  missing or wrong voltage.  Standard ALP boards pull to
+  missing or wrong voltage.  Standard Alp boards pull to
   1.8 V; some custom boards use 3.3 V (re-strap the SoC
   side accordingly).
 * **PHY won't link** -- DP83825I requires its 25 MHz REFCLK

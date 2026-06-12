@@ -1,14 +1,14 @@
 # Verifying SoM-release provenance signatures
 
-ALP signs each SoM-release **bundle** (and each per-unit provisioning record) with an
-ECDSA-P256 **release-signing key**, so you can verify that a bundle was produced by ALP
+Alp signs each SoM-release **bundle** (and each per-unit provisioning record) with an
+ECDSA-P256 **release-signing key**, so you can verify that a bundle was produced by Alp
 and has not been altered in transit or storage. This is *supply-chain provenance* — it is
 **not** the device secure-boot chain (see [secure-boot.md](secure-boot.md), which signs
 bootable firmware images with a different, device-scoped key).
 
 ## Trust model
 
-- The release-signing key is an ECDSA P-256 key. ALP holds the **private** half (in the
+- The release-signing key is an ECDSA P-256 key. Alp holds the **private** half (in the
   pilot phase a restricted key file; in production a hardware-backed signer). The
   **public** half is published in this repo at
   [`keys/alp_release_signing_ecdsa_p256.pub.pem`](../keys/alp_release_signing_ecdsa_p256.pub.pem)

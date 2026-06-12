@@ -29,7 +29,7 @@ distinct fronts:
 
 2. **Studio codegen target.**  alp-studio's pin allocator emits C
    that calls a fixed API regardless of which OS the active SoM
-   uses.  Without the ALP wrapper, codegen would have to fork
+   uses.  Without the Alp wrapper, codegen would have to fork
    per-OS — multiplying the surface area the studio team
    maintains.
 
@@ -41,8 +41,8 @@ distinct fronts:
    wrapper apps would need DT-label substitution at build time.
 
 4. **ABI stability for v1.0.**  Zephyr's APIs can change across
-   LTS lines.  The ALP wrapper is the boundary that absorbs Zephyr
-   churn.  Apps recompile against any future ALP 1.x.  The ABI
+   LTS lines.  The Alp wrapper is the boundary that absorbs Zephyr
+   churn.  Apps recompile against any future Alp SDK 1.x.  The ABI
    snapshot at `docs/abi/v0.1-snapshot.json` documents what we'll
    keep.
 

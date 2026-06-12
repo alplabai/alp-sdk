@@ -62,7 +62,7 @@ versions cleanly.
 | Display     | minimal   | `alp_display_init/clear/print` routes through Zephyr `display_*`         |
 | Math / DSP  | _(removed)_ | App code includes `arm_math.h` directly; ALP does not re-export CMSIS-DSP. SDK internals may use it via `ALP_HAS_CMSIS_DSP`. |
 | Camera      | header    | `<alp/camera.h>` API frozen; impl returns `ALP_ERR_NOSUPPORT`            |
-| GUI/LVGL    | header    | `<alp/gui.h>` includes upstream LVGL with ALP defaults; no widgets       |
+| GUI/LVGL    | header    | `<alp/gui.h>` includes upstream LVGL with Alp defaults; no widgets       |
 | IoT         | header    | `<alp/iot.h>` API frozen; impl stubbed                                   |
 | Audio       | —         | not in v0.1                                                              |
 | BLE         | —         | not in v0.1                                                              |
@@ -210,7 +210,7 @@ more sensors) and add a second SoM family.
   `pdm_mic` (PDM microphone) helper landed v0.1-tail.  Real impl
   for `ov5640` resolution presets + `pdm_mic` underlying I²S
   finishes in v0.2.  Plus `camera_parallel` (CPI fallback).
-- **Audio:** `alp_audio_*` PDM input + I²S output, ALP-default DSP chain.
+- **Audio:** `alp_audio_*` PDM input + I²S output, Alp-default DSP chain.
 - **Signal:** real FIR/IIR helpers using CMSIS-DSP, FFT wrappers.
 - **Math:** BLAS-style helpers for tensor pre/post processing.
 - **Camera:** real impl over Zephyr's `video_*` API (was stub in v0.1).
@@ -270,10 +270,10 @@ Example" deliverable for AEN, materialised as a shipped example.
   helpers, `alp_iot_http` (HTTP/HTTPS over MbedTLS), provisioning UI
   templates.
 - **Display:** e-paper drivers (`ssd1683`, `uc8175`), small TFTs
-  (`st7789`, `ili9341`), LVGL widget pack with ALP visual defaults.
+  (`st7789`, `ili9341`), LVGL widget pack with Alp visual defaults.
 - **Security:** `alp_security_*` re-export of MbedTLS + Alif/Renesas
   hardware crypto.
-- **GUI:** ALP widget set on top of LVGL (cards, status bars, tile
+- **GUI:** Alp widget set on top of LVGL (cards, status bars, tile
   layouts).
 
 ### Multi-Processor Support Completion (AEN)

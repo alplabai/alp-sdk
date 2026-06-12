@@ -66,7 +66,7 @@ int main(void) {
 }
 ```
 
-Key contract every ALP peripheral call follows:
+Key contract every Alp peripheral call follows:
 
 * `alp_<class>_open(...)` returns NULL on failure; the failure
   reason is in `alp_last_error()`.

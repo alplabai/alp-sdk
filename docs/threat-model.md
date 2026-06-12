@@ -163,10 +163,11 @@ keys, or insert a backdoored vendor library.
 
 **Mitigations:**
 
-- Release tarballs SHA-256/512 + SHA-512 checksums per the
+- Release tarballs ship SHA-256 + SHA-512 checksums per the
   `release.yml` workflow.
-- v1.0+ adds SLSA L2 provenance attestations (planned per
-  Pillar 8 of `docs/v1.0-readiness.md`).
+- Release builds emit SLSA L3 provenance attestations per
+  Pillar 8 of `docs/v1.0-readiness.md` (L2 landed in Â§C.18, upgraded
+  to L3 in Â§C.27).
 - `keys/.gitignore` excludes every `*.pem` file; only the
   generator script + README live in the keys dir.
 - Production signing key never leaves the OPTIGA secure NVM;

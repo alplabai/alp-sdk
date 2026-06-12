@@ -189,7 +189,7 @@ Rationale for the switch:
 - Mender's hosted server + on-target client are mature and
   well-documented; RAUC's reference server (Hawkbit-via-RAUC) is
   thinner.
-- A separate ALP-owned OTA-server project (in another repo) is
+- A separate Alp-owned OTA-server project (in another repo) is
   planned -- starting Mender-protocol-compatible keeps the device
   side unchanged when that server replaces the hosted Mender
   instance.
