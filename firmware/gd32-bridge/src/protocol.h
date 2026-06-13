@@ -36,7 +36,7 @@
  * firmware-version.txt, surfaced via GET_BUILD_ID ("<ver>+<sha>").  The
  * two axes move independently. */
 #define PROTOCOL_VERSION_MAJOR 0u
-#define PROTOCOL_VERSION_MINOR 7u
+#define PROTOCOL_VERSION_MINOR 8u
 #define PROTOCOL_VERSION_PATCH 0u
 
 /* v0.7: opt-in link features negotiated via CMD_LINK_FEATURES.
@@ -121,6 +121,16 @@ typedef enum {
     CMD_ADC_STREAM_READ       = 0x34,
     CMD_ADC_STREAM_END        = 0x35,
     CMD_DA9292_STATUS_FORWARD = 0x40,
+    /* v0.8: secure-element reset line.  SE_RST = GD32 PC13 drives the
+     * OPTIGA Trust M's reset (the SE sits on the shared BRD_I2C bus per
+     * metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv).  Request payload
+     * `assert:u8` -- 0 = release (SE runs), 1 = hold the SE in reset;
+     * empty reply.  Pulsing it (1 -> wait -> 0) is the recovery for a
+     * wedged BRD_I2C where the SE clock-stretches SCL low; the host
+     * sequences the pulse + post-reset settle (the SPI transport reaches
+     * the GD32 even while BRD_I2C is held low).  The active level is
+     * firmware-owned (OPTIGA RST is active-low; see hal/gd32/se_reset.c). */
+    CMD_SE_RESET = 0x41,
     /* v0.2 additions -- the GD32 carries every E1M-standard analog
      * and counter peripheral on V2N (per gd32-io-mcu-map.tsv); the
      * SDK's portable surface routes through these. */

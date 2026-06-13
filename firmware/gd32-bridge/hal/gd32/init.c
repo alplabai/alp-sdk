@@ -239,6 +239,13 @@ void bridge_hw_init(void)
         dac_enable(dac_channels[i].periph, dac_channels[i].out);
     }
 
+    /* Secure-element reset (SE_RST = PC13): park it DEASSERTED so the
+     * OPTIGA Trust M runs and the line stops floating at the GPIO POR
+     * default.  The host pulses it via CMD_SE_RESET to recover a
+     * BRD_I2C bus the SE has clock-stretched low.  (GPIOC clock was
+     * enabled above.) */
+    se_reset_init();
+
     /* Free-running counter: enable the Cortex-M33 DWT cycle counter.
      * TRCENA in CoreDebug->DEMCR gates the entire DWT/ITM trace block;
      * setting CYCCNTENA in DWT->CTRL starts the 32-bit free-running

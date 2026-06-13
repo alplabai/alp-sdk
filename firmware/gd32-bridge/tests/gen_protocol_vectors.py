@@ -97,6 +97,7 @@ CMD_DAC_GET                  = 0x51
 CMD_QENC_READ                = 0x60
 CMD_QENC_RESET               = 0x61
 CMD_COUNTER_READ             = 0x70
+CMD_SE_RESET                 = 0x41
 CMD_LINK_FEATURES            = 0x81
 CMD_OTA_BEGIN                = 0xF0
 CMD_OTA_WRITE_CHUNK          = 0xF1
@@ -111,7 +112,7 @@ STATUS_NOSUPPORT             = 0x06
 
 # Firmware-declared version triple; bump when protocol.h's
 # PROTOCOL_VERSION_{MAJOR,MINOR,PATCH} change.
-FW_VERSION = (0, 7, 0)
+FW_VERSION = (0, 8, 0)
 
 
 HEADER = """\
@@ -220,6 +221,16 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         "spi_counter_read_ch0_request",
         spi_frame(SOF, CMD_COUNTER_READ, bytes([0x00])).hex().upper(),
         "SOF | CMD=0x70 | counter=0 | CRC",
+    ))
+    out.append((
+        "spi_se_reset_assert_request",
+        spi_frame(SOF, CMD_SE_RESET, bytes([0x01])).hex().upper(),
+        "SOF | CMD=0x41 | assert=1 (hold OPTIGA Trust M in reset) | CRC",
+    ))
+    out.append((
+        "spi_se_reset_release_request",
+        spi_frame(SOF, CMD_SE_RESET, bytes([0x00])).hex().upper(),
+        "SOF | CMD=0x41 | assert=0 (release the SE) | CRC",
     ))
     out.append((
         "spi_reply_nosupport",

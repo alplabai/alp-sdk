@@ -636,6 +636,13 @@ alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status)
                     status, 1u);
 }
 
+alp_status_t gd32g553_se_reset(gd32g553_t *ctx, bool assert)
+{
+    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+    const uint8_t req = assert ? 1u : 0u;
+    return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_SE_RESET, &req, 1u, NULL, 0u);
+}
+
 alp_status_t gd32g553_dac_set(gd32g553_t *ctx, uint8_t channel, uint16_t value_mv)
 {
     if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;

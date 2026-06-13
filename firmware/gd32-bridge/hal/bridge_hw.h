@@ -216,6 +216,20 @@ int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks);
 uint8_t bridge_hw_da9292_status_cached(void);
 
 /* --------------------------------------------------------------- */
+/* Secure-element reset (OPTIGA Trust M, SE_RST = GD32 PC13)          */
+/* --------------------------------------------------------------- */
+
+/* Drive the secure-element reset line.  @p assert == 1 holds the
+ * OPTIGA Trust M in reset; @p assert == 0 releases it.  The active
+ * GPIO level (the SE's RST is active-low) is owned by the GD32 backend
+ * (hal/gd32/se_reset.c), so the host expresses intent, not polarity.
+ * Returns BRIDGE_HW_ERR_INVAL for an out-of-range @p assert.  The
+ * recovery for a BRD_I2C bus the SE has clock-stretched low is a pulse
+ * -- assert, wait, release -- sequenced by the host (the OPTIGA needs
+ * ~15 ms after release before it answers I2C again). */
+int bridge_hw_se_reset(uint8_t assert);
+
+/* --------------------------------------------------------------- */
 /* v0.5 (§2B.2) -- advanced timer extras                             */
 /* --------------------------------------------------------------- */
 

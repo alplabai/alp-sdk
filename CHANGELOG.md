@@ -7,6 +7,23 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.8.0 candidate
 
+### Added — gd32-bridge: `SE_RESET` opcode to drive the secure-element reset (SE_RST = PC13)
+
+The GD32 bridge gains a `CMD_SE_RESET` wire opcode (`0x41`; bridge wire
+protocol → v0.8) and the `gd32g553_se_reset()` host helper to drive the
+on-module OPTIGA Trust M's reset line (`SE_RST` = GD32 `PC13`, per
+`metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`).  The pin was previously
+left floating at its GPIO power-on default with no host control path;
+the firmware now parks it released at boot and lets the host assert /
+release it.
+
+This gives the host a bus-independent way to reset the secure element:
+`PC13` and the SPI transport are independent of BRD_I2C, so the host can
+pulse `SE_RESET` (assert → wait → release) even when the I²C transport is
+down.  The active level (OPTIGA `RST` is active-low) is firmware-owned and
+flagged for schematic verification.  The stub HAL backend reports
+`STATUS_NOSUPPORT`.
+
 ## [v0.7.0] - 2026-06-12
 
 ### Added — meta-alp-sdk: production image (`alp-image-prod`) + ALP distro identity + hardening

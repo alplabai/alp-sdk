@@ -180,5 +180,6 @@ bool adc_periph_init(uint32_t periph);          /* adc.c */
 void qenc_channel_init(const gd32_qenc_t *e);   /* qenc.c */
 void pwm_timer_init(uint32_t periph);           /* pwm.c */
 void pwm_channel_init(const gd32_pwm_ch_t *ch); /* pwm.c */
+void se_reset_init(void);                       /* se_reset.c */
 
 #endif /* GD32_BRIDGE_HAL_GD32_COMMON_H */
