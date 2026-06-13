@@ -46,22 +46,41 @@ status on the originating PR.
 | `alp-sdk` (public) | `.github/workflows/pr-bitbake.yml` | GitHub-hosted bridge: pending status + `repository_dispatch` to alp-sdk-internal |
 | `alp-sdk-internal` (private) | `.github/workflows/bitbake.yml` | self-hosted build matrix + status-back |
 
-## Tokens (fine-grained PATs, or a GitHub App)
+## Auth: one org-owned GitHub App (short-lived tokens)
 
-| Secret | Lives in | Scope | Used for |
-|--------|----------|-------|----------|
-| `ALP_INTERNAL_DISPATCH_TOKEN` | **alp-sdk** (public) | `alp-sdk-internal` → Contents: read+write | `repository_dispatch` to the private repo |
-| `ALP_SDK_STATUS_TOKEN` | **alp-sdk-internal** (private) | `alp-sdk` → Commit statuses: read+write | post build result back to the PR |
+Both workflows mint a **short-lived (~1 h) installation token at runtime**
+via [`actions/create-github-app-token`](https://github.com/actions/create-github-app-token),
+from a single org-owned GitHub App. No long-lived PAT lives in either
+repo — the only persistent secret is the App's private key (org-owned,
+revocable), and fork PRs never receive it. This is preferred over PATs:
+it isn't tied to a person, the runtime token is short-lived and re-scoped
+per job, and the App can be revoked centrally.
 
-Set them with:
+**App** (`alp-ci-bridge`, owned by the `alplabai` org):
+
+- Repository permissions: **Contents: read & write** (for
+  `repository_dispatch` to alp-sdk-internal) + **Commit statuses: read &
+  write** (to post status to alp-sdk) + Metadata: read (mandatory).
+- Webhook: **disabled** (the App is used only for token minting in Actions).
+- Installed on **both** `alp-sdk` and `alp-sdk-internal`.
+
+**Secrets** (the same App, set on both repos):
+
+| Secret | Repos | Value |
+|--------|-------|-------|
+| `ALP_CI_APP_ID` | alp-sdk + alp-sdk-internal | the App's numeric App ID |
+| `ALP_CI_APP_PRIVATE_KEY` | alp-sdk + alp-sdk-internal | the App's downloaded `.pem` private key |
 
 ```bash
-gh secret set ALP_INTERNAL_DISPATCH_TOKEN  --repo alplabai/alp-sdk           # paste the PAT
-gh secret set ALP_SDK_STATUS_TOKEN         --repo alplabai/alp-sdk-internal  # paste the PAT
+gh secret set ALP_CI_APP_ID          --repo alplabai/alp-sdk           --body "<APP_ID>"
+gh secret set ALP_CI_APP_PRIVATE_KEY --repo alplabai/alp-sdk           < app-private-key.pem
+gh secret set ALP_CI_APP_ID          --repo alplabai/alp-sdk-internal  --body "<APP_ID>"
+gh secret set ALP_CI_APP_PRIVATE_KEY --repo alplabai/alp-sdk-internal  < app-private-key.pem
 ```
 
-Keep the dispatch token's scope to the single repo + Contents only; it is
-the one secret that lives on the public repo (and forks never receive it).
+Each workflow scopes its minted token to just the repo it touches: the
+bridge → `repositories: alp-sdk-internal` (dispatch); the build →
+`repositories: alp-sdk` (status).
 
 ## Self-hosted runner (on alp-sdk-internal)
 

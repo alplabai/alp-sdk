@@ -14,13 +14,14 @@
 # the dev→main PR and can be a required check.
 #
 # Security model (see docs/ci/runner-architecture.md):
-#   * Fork PRs receive NO secrets, so ALP_INTERNAL_DISPATCH_TOKEN is
-#     absent and the guard below skips the dispatch entirely — a fork can
-#     never trigger the private build.
-#   * ALP_INTERNAL_DISPATCH_TOKEN is a fine-grained PAT scoped to
-#     alp-sdk-internal with Contents:write ONLY (enough for
-#     repository_dispatch).  Worst case if leaked: someone can kick off a
-#     build — no code execution on any runner, no host access.
+#   * Fork PRs receive NO secrets, so the App credentials are absent and
+#     the guard below skips the dispatch entirely — a fork can never
+#     trigger the private build.
+#   * The dispatch token is minted at runtime from a GitHub App
+#     (actions/create-github-app-token), scoped to alp-sdk-internal with
+#     Contents:write ONLY and valid ~1h.  The only long-lived secret is
+#     the App's private key (org-owned + revocable); worst case if leaked,
+#     someone can kick off a build — no code execution, no host access.
 
 name: pr-bitbake
 
@@ -82,15 +83,21 @@ jobs:
             -f context="bitbake (alp-sdk-internal)" \
             -f description="Dispatched to the private Yocto runner…"
 
+      - name: Mint a short-lived App token (scoped to alp-sdk-internal)
+        if: steps.guard.outputs.go == 'true'
+        id: apptoken
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.ALP_CI_APP_ID }}
+          private-key: ${{ secrets.ALP_CI_APP_PRIVATE_KEY }}
+          owner: alplabai
+          repositories: alp-sdk-internal
+
       - name: Dispatch build to alp-sdk-internal
         if: steps.guard.outputs.go == 'true'
         env:
-          GH_TOKEN: ${{ secrets.ALP_INTERNAL_DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
         run: |
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "::error::ALP_INTERNAL_DISPATCH_TOKEN not set — see docs/ci/runner-architecture.md"
-            exit 1
-          fi
           gh api repos/alplabai/alp-sdk-internal/dispatches \
             -f event_type=bitbake \
             -F "client_payload[sha]=${{ steps.t.outputs.sha }}" \
