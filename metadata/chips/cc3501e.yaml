@@ -26,7 +26,8 @@ bus:              spi              # DEFAULT host-control link (inter-chip SPI1)
                                    # docs/cc3501e-bridge.md "Selectable host-control
                                    # transport".
 spi:
-  interface:      SPI1             # E1M_SPI1 inter-chip bus
+  interface:      SPI1             # E1M_SPI1 bus (Alif SPI1 master); the
+                                   # CC3501E endpoint is its own SPI0 peripheral
   mode:           [0]
   word_bits:      8
   max_clock_hz:   8000000          # current default per the header lifecycle

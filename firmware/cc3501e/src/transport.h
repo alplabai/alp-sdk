@@ -7,7 +7,8 @@
  * The host-control link between the Alif and the CC3501E is
  * CUSTOMER-SELECTABLE:
  *
- *   - SPI1 slave  -- the DEFAULT and always-available baseline.  Low
+ *   - SPI0 slave (the CC3501E's SPI0; the Alif master is SPI1)  -- the
+ *     DEFAULT and always-available baseline.  Low
  *     pin count, never conflicts with anything else on the SoM.
  *   - SDIO slave  -- OPTIONAL, higher throughput for Wi-Fi data.  The
  *     Alif Ensemble has a SINGLE SDIO controller, shared at board
