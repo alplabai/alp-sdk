@@ -10,12 +10,15 @@ Status keys:
 - **planned** — declared roadmap, no code yet.
 - **n/a** — combination not targeted.
 
-> **Calibration note (2026-05-11).** Many rows tagged **GA** below
-> reference work the original v0.1 / v0.2 cycles completed *to the
-> code-merged bar*, but the SDK's first canonical HIL run is still
-> pending (the `nightly-aen-hil.yml` skeleton needs a self-hosted
-> runner per [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md)).  Treat
-> every **GA** entry as "code complete, awaiting HIL" until the
+> **Calibration note (2026-05-11; updated 2026-06-12).** Many rows tagged
+> **GA** below reference work the original v0.1 / v0.2 cycles completed
+> *to the code-merged bar*.  The first silicon-verified slice is the v0.6
+> E1M-X V2N GD32-bridge campaign (see the v0.6.0 "verified on the bench"
+> section of [`test-plan.md`](test-plan.md)); the **GA** rows in *this*
+> matrix — the AEN-class Zephyr columns — have **not** had their own
+> canonical HIL run yet (the `nightly-aen-hil.yml` skeleton needs a
+> self-hosted runner per [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md)).
+> Treat every **GA** entry as "code complete, awaiting HIL" until the
 > matching `test-plan.md` row flips to ✅.
 
 Each column targets a **`<SoM>: <core_id> <runtime>`** triple — the
@@ -192,7 +195,7 @@ hasn't been measured.
 ## CMSIS-DSP per-SoM validation
 
 Alp SDK does not re-export CMSIS-DSP -- application code includes
-`arm_math.h` directly when DSP/math primitives are needed.  ALP's
+`arm_math.h` directly when DSP/math primitives are needed.  Alp's
 own internals (e.g. filtering inside `<alp/audio.h>` ) optionally
 pull in CMSIS-DSP when the build sets `ALP_HAS_CMSIS_DSP`.  Either
 way the validated **feature groups** depend on each SoC's

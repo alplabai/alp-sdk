@@ -14,7 +14,7 @@ date programming flow.
   (Aardvark, MCP2221, FT232H).
 - Python 3.10+, `pip install pyyaml`.
 
-**Outcome:** write the 128-byte ALP manifest into the on-module
+**Outcome:** write the 128-byte Alp manifest into the on-module
 24C128 EEPROM.  Confirm read-back from runtime via
 `<alp/hw_info.h>`.  Understand the BOARD_ID ADC companion path.
 
@@ -194,11 +194,15 @@ debug time for "why isn't this image booting" -- it's usually
 SKU mismatch when the build target was changed but the binary
 wasn't reflashed.
 
-## 6. BOARD_ID ADC: the rev-discriminator companion
+## 6. BOARD_ID ADC: the carrier-board companion
 
-The EEPROM manifest carries the **declared** hw_rev.  The
-**measured** rev is read from a per-board resistor divider on
-a dedicated ADC channel:
+The on-module EEPROM manifest is the **sole authoritative source of
+the SoM hardware revision** -- there is no SoM-side ADC cross-check of
+it (see `<alp/hw_info.h>`).  The BOARD_ID resistor divider below is a
+separate, **carrier-board** signal: it identifies the *carrier* (and
+its rev), decoded against the board preset's `hw_revisions` table,
+independent of the SoM revision.  Wiring it into the runtime read is a
+documented future addition -- it is not yet part of `alp_hw_info_read`.
 
 | `hw_rev` | Divider | Expected `mV` (±100 mV bin) |
 |----------|---------|----------------------------|
@@ -206,18 +210,16 @@ a dedicated ADC channel:
 | r2       | 4.7 kΩ / 10 kΩ | 1240 (TBD) |
 | r3       | 22 kΩ / 10 kΩ | 562 (TBD) |
 
-The firmware at boot reads the ADC + bins to a rev; if the
-binned rev disagrees with the EEPROM's `hw_rev`, that's a
-hard fault (mismatched manifest vs hardware).  This cross-check
-is built into `alp_hw_info_read` itself -- it returns
-`ALP_ERR_IO` (rather than `ALP_OK`) when the BOARD_ID divider
-reading doesn't match the manifest's `hw_rev`:
+`alp_hw_info_read` itself returns `ALP_ERR_IO` only when the manifest
+is **corrupt** (magic present but a bad `schema_version` / CRC), or
+when a caller-supplied expected field disagrees -- not on any
+ADC/divider reading:
 
 ```c
 alp_hw_info_t info;
 if (alp_hw_info_read(&info) == ALP_ERR_IO) {
-    /* EEPROM says r1 but the divider reads as r2 -- somebody
-     * mis-programmed the manifest or mis-stuffed the board. */
+    /* Magic is present but the schema_version or CRC is bad -- the
+     * EEPROM manifest is corrupt or was mis-programmed. */
     k_panic();
 }
 ```

@@ -818,6 +818,19 @@ config ALP_SDK_GPU2D
 	  acceleration because Zephyr has no portable `gpu` / `2d`
 	  driver class.
 
+config ALP_SDK_UPDATE_LOG
+	bool "Enable <alp/update_log.h> firmware-update audit-log surface (experimental)"
+	default n
+	help
+	  Compile the portable update-log surface: src/update_log_dispatch.c,
+	  the pure engine (src/update_log/engine.c + sha256.c), and the
+	  software tamper-evident tier (src/backends/update_log/sw_tier.c).
+
+	  The software tier works on every target and reports assurance
+	  SW_TAMPER_EVIDENT. A hardware-enforced backend (TF-M Protected
+	  Storage + monotonic counter) is a later slice; until it lands the
+	  surface stays experimental. See docs/abi-markers.md.
+
 # IoT (Wi-Fi station + MQTT) — v0.2 deliverable.  When OFF the
 # wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT
 # contract so apps can link cleanly against <alp/iot.h>.

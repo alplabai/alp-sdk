@@ -116,8 +116,8 @@ defaults, emit a starter devicetree overlay via
 `python3 scripts/alp_project.py --input board.yaml --emit dts-overlay`
 and hand-edit from there.
 
-**Preset (SDK-internal shortcut).**  The 41 example projects in
-this repo all target the EVK + X-EVK, so they share a single
+**Preset (SDK-internal shortcut).**  The example projects in
+this repo mostly target the EVK + X-EVK, so they share a single
 shared board definition via `preset:`:
 
 ```yaml

@@ -295,8 +295,8 @@ v0.6 lands heterogeneous OS orchestration — see ADR 0010 + [`docs/heterogeneou
 - Roadmap: [`VERSIONS.md`](VERSIONS.md).
 - What changed when: `CHANGELOG.md` (in the repo root).
 - Per-(library × OS × SoM) status: [`docs/os-support-matrix.md`](docs/os-support-matrix.md).
-- Architecture decisions: [`docs/adr/`](docs/adr/) (12 ADRs, latest:
-  0011 intra-family portability + 0012 cross-platform host).
+- Architecture decisions: [`docs/adr/`](docs/adr/) (14 ADRs, latest:
+  0013 TF-M trust boundary + 0014 build-plan emit CLI contract).
 
 ## Test it from scratch
 

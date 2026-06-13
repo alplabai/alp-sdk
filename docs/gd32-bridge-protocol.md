@@ -78,7 +78,7 @@ byte; their numeric encoding is:
 | `0x28` | `POWER_MODE_SET`      | `mode:u8 reserved:u8 wake_bitmap:u32 wake_after_ms:u32` | _(empty; returns STATUS_NOSUPPORT today)_       |
 | `0x81` | `LINK_FEATURES` (v0.7) | `features:u8` (wanted; bit0 = `STATUS_SEQ`)          | `features:u8` (granted + armed; see §3.14 / §4.1.1) |
 
-Opcodes `0x82..0xEF` are **reserved** for future ALP-defined
+Opcodes `0x82..0xEF` are **reserved** for future Alp-defined
 extensions (next slot: hardware AES via the CAU engine).  Boards
 SHOULD NOT define their own opcodes in this range -- the firmware
 replies with **`ALP_ERR_NOSUPPORT`** (see §6) for any opcode it

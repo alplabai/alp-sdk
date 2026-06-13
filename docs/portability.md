@@ -164,7 +164,7 @@ the U55 line:
 ```
 
 (`CONFIG_I2C=y` is the Zephyr-subsystem class symbol the loader
-emits per `peripherals: [i2c]`; the ALP wrapper Kconfigs
+emits per `peripherals: [i2c]`; the Alp wrapper Kconfigs
 `ALP_SDK_PERIPH_*` flip `default y` once the underlying class is
 on.  See the `_PERIPHERAL_KCONFIG` table in
 [`scripts/alp_project.py`](../scripts/alp_project.py).)

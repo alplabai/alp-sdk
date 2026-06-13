@@ -3,7 +3,7 @@
 Hardware findings from bench bring-up that affect the device tree /
 board design and are **not** captured by the connector-derived
 metadata. Confidence + the workaround in software are noted per item.
-Filed for ALP review; some need confirmation that they are rev-wide
+Filed for Alp review; some need confirmation that they are rev-wide
 (vs. unit-specific) against the authoritative schematic.
 
 ## E1: Ethernet MDI pair-order reversal (LAYOUT BUG — needs respin)
@@ -62,18 +62,53 @@ companion channel).
 **Root cause:** the SoC OVC pins (P9.6 for the usb20 channel, PB.1 for
 usb30) read asserted on this carrier — the OC sense is not usable as
 wired. Removing OVC from the pinctrl groups alone is insufficient
-(U-Boot leaves the pins in OVC function), and OHCI has no software
-over-current-ignore knob.
+(U-Boot leaves the pins in OVC function), and stock OHCI has no
+software over-current-ignore knob (addressed by kernel patch 0003 in
+the second revision below).
 
-**Software workaround (shipped):** DT patch 0012 — `/delete-node/ ovc`
-from usb20_pins/usb30_pins **and** a gpio-hog claiming P9.6 + PB.1 as
-GPIO inputs (deselects the OVC peripheral function → internal OVRCUR
-reads inactive). EHCI/OHCI stay enabled; USB2.0 host fully functional.
+**Software workaround (shipped, since revised):** DT patch 0012 —
+`/delete-node/ ovc` from usb20_pins/usb30_pins **and** a gpio-hog
+claiming P9.6 + PB.1 as GPIO inputs (deselects the OVC peripheral
+function → internal OVRCUR reads inactive). EHCI/OHCI stay enabled;
+USB2.0 host fully functional. *That verification predates the GD32
+SCI7 supervisor link.*
+
+**Revision (2026-06-12):** the P9.6 half of the hog REGRESSED when the
+CM33-owned GD32 supervisor SPI took P96/SCK7 (2026-06-03). The CM33 is
+started by BL2 **pre-Linux** (see `rzv2n-m33-secure-boot.md`), so its
+SCK7 mux is live before Linux boots; the hog's PMC9 byte-RMW at ~1.9 s
+then *clobbered the running link's clock pad* at every Linux boot until
+the CM33's own pin re-init took the pad back — the same clobber class
+as SD1_CD/P94, and the reason usb20 OVC suppression was lost. The hog
+is now **PB.1-only**; the two usb20-channel boot lines
+(`usb2-port1`/`usb3-port1`) are expected until OVC is suppressed at the
+controller level — done in the second revision below (`spurious-oc` on
+both controllers; no kernel-cmdline change needed).
+
+**Controller-level suppression (2026-06-12, second revision):** the
+usb20 channel's OC processing is now disabled at the controllers —
+`spurious-oc` on the EHCI (generic in-tree binding) and on the OHCI
+(kernel patch 0003 adds the same property, setting NOCP/clearing OCPM
+in root-hub descriptor A). This removes both the boot lines and the
+functional OC side-effects (hub port power-cycling on OC events).
+Disabling OC processing is correct on this carrier: VBUS is hardwired
+always-on with no per-port power switching to protect.
+*Cold-boot-verified on the bench 2026-06-12 (patched kernel +
+spurious-oc dtb): zero over-current lines from either controller.*
+
+**Open question (bench):** USB2.0 *host enumeration* should still be
+re-verified with a device plugged once the spurious-oc build is
+deployed — the original "fully functional" verification predates the
+P9.6 regression. Record the result here.
 
 **Suggested metadata:** an `ovc_wired: false` flag per USB channel in
 the carrier YAML would let the generator emit this automatically.
 
-**Confidence:** high (boot logs before/after + DT fix HW-verified).
+**Confidence:** high for PB.1/usb30 (no xHCI OVC in boot logs); the
+usb20 regression mechanism is from the 2026-06-12 boot-log audit
+(hog applies at ~1.9 s, OVC lines return at ~3.9 s, CM33 link healthy)
+— controller-level suppression + host-under-OC behavior to be
+HW-verified when they land.
 
 ---
 
