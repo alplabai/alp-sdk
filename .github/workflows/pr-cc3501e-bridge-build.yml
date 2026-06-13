@@ -39,7 +39,7 @@ jobs:
     name: cc3501e-bridge · CC3501E_HAL_BACKEND=stub
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install arm-none-eabi toolchain
         run: |
@@ -71,6 +71,6 @@ jobs:
     name: cc3501e-bridge · wire vectors
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check canonical wire vectors are regenerated
         run: python3 firmware/cc3501e/tests/gen_protocol_vectors.py --check

@@ -92,7 +92,7 @@ jobs:
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -101,7 +101,7 @@ jobs:
       # every recipe/append under meta-alp-sdk; pure example or
       # metadata-yaml edits keep the existing sstate hot.
       - name: Restore sstate-cache for ${{ matrix.MACHINE }}
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             tmp/sstate-cache
@@ -177,7 +177,7 @@ jobs:
 
       - name: Upload bitbake image artefact for pr-renode-dual-os
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bitbake-${{ matrix.MACHINE }}-image
           path: |
