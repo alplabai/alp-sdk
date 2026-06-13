@@ -15,14 +15,16 @@ because TI's pad allocation hits those pins.  Net: any E1M pad
 that terminates on the CC3501E (see
 [`metadata/e1m_modules/aen/from-cc3501e.tsv`](../metadata/e1m_modules/aen/from-cc3501e.tsv))
 must be reached via the CC3501E firmware over the inter-chip
-SPI1 bus.
+SPI bus (Alif **SPI1** master ↔ CC3501E **SPI0** slave).
 
 ## Inter-chip wiring
 
 Per [`metadata/e1m_modules/aen/inter-chip.tsv`](../metadata/e1m_modules/aen/inter-chip.tsv):
 
-- **SPI1**: Alif `P14_4/5/6` ↔ CC3501E `GPIO_27/28/29`.  Alif is
-  master, CC3501E is slave.  Carries the host-control protocol.
+- **SPI** (Alif **SPI1** ↔ CC3501E **SPI0**): Alif `P14_4/5/6` ↔
+  CC3501E `GPIO_27/28/29`.  Alif is master, CC3501E is slave.  Carries
+  the host-control protocol.  (Note: the bus net is named `SPI1_*` after
+  the Alif master; the CC3501E endpoint is its own SPI0 peripheral.)
 - **SDIO**: shared with the SD-card slot via board-level
   resistors.  Pick one or the other -- not both at the same time.
 - **WIFI_EN** (Alif `P15_5`): Alif drives the CC3501E
@@ -38,7 +40,7 @@ customers trade pin count against Wi-Fi throughput differently:
 
 | Transport | Role | CC3501E pins | Availability |
 |-----------|------|--------------|--------------|
-| **SPI1 slave** | **DEFAULT** + always-available baseline/fallback | `GPIO_27/28/29` | Always |
+| **SPI0 slave** (CC35; Alif master = SPI1) | **DEFAULT** + always-available baseline/fallback | `GPIO_27/28/29` | Always |
 | **SDIO slave** | OPTIONAL, higher throughput for Wi-Fi data | `GPIO_3/4/5/6/10/11` | Only when the board dedicates the Alif SDIO to the CC3501E |
 
 The catch: the Alif Ensemble has a **single SDIO controller**, shared at

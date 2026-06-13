@@ -60,7 +60,7 @@ The Alif↔CC3501E control link is **customer-selectable**:
 
 | Transport | Role | Availability |
 |-----------|------|--------------|
-| **SPI1 slave** | **DEFAULT** + always-available baseline/fallback | Always (CC3501E GPIO_27/28/29) |
+| **SPI0 slave** (CC35; Alif master = SPI1) | **DEFAULT** + always-available baseline/fallback | Always (CC3501E GPIO_27/28/29) |
 | **SDIO slave** | OPTIONAL, higher throughput for Wi-Fi data | Only when the board routes the Alif's **single** SDIO controller to the CC3501E -- **mutually exclusive with a micro-SD card** (CC3501E GPIO_3/4/5/6/10/11) |
 
 Because the Alif Ensemble has one SDIO controller shared at board level

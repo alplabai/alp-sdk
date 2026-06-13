@@ -35,7 +35,7 @@
 
 /* Weak default: the stub backend links this no-op so it needs no TI
  * SDK.  The ti backend's hal/ti/transport_hw_ti_spi.c overrides it with
- * the real SPI1 slave + CS bring-up. */
+ * the real SPI0 slave + CS bring-up (the CC3501E's SPI0; Alif = SPI1 master). */
 __attribute__((weak)) void bridge_transport_spi_hw_init(void)
 {
 }
@@ -100,7 +100,7 @@ void transport_spi_init(void)
     spi_rx_len    = 0u;
     spi_tx_len    = 0u;
     spi_tx_cursor = 0u;
-    /* SPI1 slave bring-up lives in the ti HAL backend
+    /* SPI0 slave bring-up lives in the ti HAL backend
      * (hal/ti/transport_hw_ti_spi.c); the stub backend's weak no-op
      * keeps this hardware-free for host-side protocol tests. */
     bridge_transport_spi_hw_init();
