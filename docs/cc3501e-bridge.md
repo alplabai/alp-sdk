@@ -55,6 +55,26 @@ command dispatcher — see
 [`firmware/cc3501e/`](../firmware/cc3501e/) (`transport_spi.c` /
 `transport_sdio.c`).
 
+### Current rev: 3-wire SPI (no CS, no IRQ)
+
+The current E1M-AEN board rev wires the inter-chip SPI as **3 wires
+only — SCLK/MOSI/MISO**.  With no chip-select edge to frame
+transactions, the host↔firmware exchange runs as four deterministic
+fixed-count transfers in lockstep (request header → request payload →
+reply header → reply payload), each side taking the next length from a
+header it already exchanged; the host adds a short settle gap before
+reading the reply.  This requires the CC3501E SS pad to be tied asserted
+on the SoM and the SPI slave to complete on clock-count (SWRU626 §18).
+
+The **next board rev adds two lines**: a **CS** (restores hardware
+framing + a desync-recovery edge) and a **host-IRQ / DATA_READY**
+(CC3501E→Alif).  The IRQ line is the important one — the Alif is SPI
+master, so the CC3501E can never initiate, yet the protocol defines async
+events (`EVT_WIFI_*`, `EVT_BLE_*`, `EVT_GPIO_INTERRUPT`) with the 5–10 ms
+latency budgets above; a host-IRQ line is the standard SPI-coprocessor
+way to meet them without polling the bus, and it also removes the reply
+settle gap.  See `firmware/cc3501e/DESIGN.md` "Next-rev hardening".
+
 ## Boot model
 
 The CC3501E has **no host-strap boot pin**.  Boot-mode selection

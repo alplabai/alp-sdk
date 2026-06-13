@@ -8,80 +8,81 @@
  * Drives the SILICON-FREE byte seams in src/transport_spi.c from the
  * CC3501E's SPI peripheral via TI Drivers (SPI_open in SPI_SLAVE +
  * SPI_MODE_CALLBACK).  Inter-chip pins (metadata/e1m_modules/aen/
- * inter-chip.tsv): the host SPI1 control link lands on CC3501E
- * GPIO_27/28/29 (SCLK/MOSI/MISO); the Alif is master, the CC3501E is
- * slave.
+ * inter-chip.tsv): SCLK/MOSI/MISO on CC3501E GPIO_27/28/29; Alif is
+ * master, CC3501E is slave.
  *
- * TI Drivers SPI is transfer-oriented (DMA), not byte-at-a-time, so a
- * frame arrives as a completed SPI_transfer rather than a per-byte ISR.
- * Because the cc3501e frame header carries an explicit payload_len, we
- * clock each frame in two fixed-count slave transfers -- a 4-byte
- * HEADER, then a payload of exactly the declared length -- then a third
- * transfer clocks the staged reply back.  A READY GPIO gives the host
- * the flow-control edge between chunks (raised when a transfer is armed,
- * lowered the instant its callback fires); this is the firmware READY
- * line that chips/cc3501e/cc3501e.c's bring-up rework consumes.  The
- * completed frame is replayed through the byte seams so the framing /
- * dispatch logic (and its host test) is identical to the stub path.
+ * ===================== 3-WIRE FRAMING (this rev) =====================
+ * The current E1M-AEN rev wires ONLY SCLK/MOSI/MISO -- no CS, no host
+ * IRQ/READY line (CS + IRQ are planned for the next board rev, which
+ * will harden framing + enable async events; see docs/cc3501e-bridge.md
+ * "Selectable host-control transport").  With no CS edge to delimit
+ * transactions, framing is purely by FIXED CLOCK COUNT in deterministic
+ * lockstep -- each side derives the next transfer's length from a header
+ * it already exchanged:
  *
- * Board anchors CONFIG_SPI_0 and CONFIG_GPIO_CC3501E_HOST_READY come
- * from the SDK's SysConfig output (ti_drivers_config.h) generated for
- * the E1M-AEN board -- resolved at bench-build time, not invented here.
- * Confirm the inter-chip SPI instance maps to GPIO_27/28/29 and the
- * READY pad against the board's SysConfig + SWRU626 §18 (SPI).
+ *   1. master clocks 4    -> request header   (slave reads payload_len)
+ *   2. master clocks N    -> request payload   (N = that payload_len)
+ *   3. master clocks 4    -> reply header      (master reads reply len)
+ *   4. master clocks M    -> reply payload      (M = that reply len)
+ *
+ * No CS means the CC3501E's SS pad must be tied to its asserted level
+ * on the SoM so the slave is permanently selected, and SPI_transfer()
+ * must complete on clock-count alone -- CONFIRM against SWRU626 §18.
+ * No IRQ means the host POLLS for the reply (it adds a settle gap then
+ * reads the reply header); slow (Wi-Fi/BLE) replies + async events wait
+ * on the next-rev IRQ line.  For the v0.1 META group dispatch is instant
+ * so the settle gap suffices.  The completed request frame is replayed
+ * through the byte seams, so framing/dispatch (and the host test) are
+ * identical to the stub path.
+ *
+ * CONFIG_SPI_0 is the SysConfig anchor for the inter-chip SPI instance,
+ * resolved at bench-build time from the E1M-AEN board file -- confirm it
+ * maps to GPIO_27/28/29.
+ * =====================================================================
  */
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "ti_drivers_config.h"
 
-#include <ti/drivers/GPIO.h>
 #include <ti/drivers/SPI.h>
 
 #include "../../src/protocol.h"
 #include "../../src/transport.h"
 
-/* Frame-clocking phases (see file header). */
+/* Deterministic lockstep phases (see file header). */
 enum spi_phase {
-    PH_HEADER = 0, /* awaiting the 4-byte request header             */
-    PH_PAYLOAD,    /* awaiting payload_len request payload bytes     */
-    PH_REPLY,      /* clocking the staged reply back to the host     */
+    PH_REQ_HEADER = 0, /* clocking the 4-byte request header   */
+    PH_REQ_PAYLOAD,    /* clocking payload_len request bytes   */
+    PH_REPLY_HEADER,   /* clocking the 4-byte reply header     */
+    PH_REPLY_PAYLOAD,  /* clocking the reply payload           */
 };
 
 static SPI_Handle     spi;
 static enum spi_phase phase;
 
-/* One in-flight request frame + its staged reply.  Sized to the wire
- * ceiling (header + max payload). */
+/* One in-flight request frame + its staged reply (header + max payload). */
 static uint8_t  frame_buf[CC3501E_FRAME_MAX_BYTES];
 static uint8_t  reply_buf[CC3501E_FRAME_MAX_BYTES];
 static size_t   reply_len;
 static uint16_t cur_payload_len;
 
-/* READY edge: high = a slave transfer is armed and the host may clock. */
-static inline void host_ready(bool armed)
-{
-    GPIO_write(CONFIG_GPIO_CC3501E_HOST_READY, armed ? 1 : 0);
-}
-
-/* Arm a fixed-count slave RX (host clocks in; we send the 0xFF idle
- * fill the SysConfig SPI default provides for a NULL txBuf) or TX (host
- * clocks dummies; rxBuf NULL discards).  Raises READY once queued. */
+/* Arm a fixed-count slave transfer.  For RX, tx is NULL (the SPI
+ * default fill clocks out on MISO); for TX, rx is NULL (the host's
+ * MOSI dummies are discarded).  Non-blocking in SPI_MODE_CALLBACK. */
 static void arm_transfer(void *rx, const void *tx, size_t count)
 {
-    static SPI_Transaction t; /* retained for the duration of the transfer */
+    static SPI_Transaction t; /* retained for the transfer's duration */
     t.count = count;
     t.txBuf = (void *)tx;
     t.rxBuf = rx;
     t.arg   = NULL;
     (void)SPI_transfer(spi, &t);
-    host_ready(true);
 }
 
-/* Replay the captured request frame through the silicon-free seams,
- * which build the staged reply, then drain that reply into reply_buf. */
+/* Replay the captured request frame through the silicon-free seams
+ * (which build the staged reply), then drain that reply into reply_buf. */
 static void dispatch_frame(size_t frame_len)
 {
     spi_slave_cs_low();
@@ -94,22 +95,23 @@ static void dispatch_frame(size_t frame_len)
     while (spi_slave_tx_pending() && reply_len < sizeof(reply_buf)) {
         reply_buf[reply_len++] = spi_slave_tx_next_byte();
     }
+    /* The reply is always header(4) + payload(>=1 status byte). */
 }
 
 /* SPI transfer-complete callback (driver SWI/HWI context).  Advances
- * the header -> payload -> reply state machine. */
+ * the request-header -> request-payload -> reply-header -> reply-payload
+ * lockstep. */
 static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 {
     (void)h;
     (void)t;
-    host_ready(false); /* transfer done; nothing armed yet */
 
     switch (phase) {
-    case PH_HEADER: {
-        /* frame_buf[0..3] hold the header.  Bound the declared payload
-         * to the wire ceiling so a garbage length can't overrun the
-         * RX into frame_buf; an over-long declared length then fails
-         * the seam's captured-vs-declared check as RESP_ERR_PROTOCOL. */
+    case PH_REQ_HEADER: {
+        /* Bound the declared payload to the wire ceiling so a garbage
+         * length can't overrun the RX into frame_buf; an over-long
+         * declared length then fails the seam's captured-vs-declared
+         * check as RESP_ERR_PROTOCOL. */
         uint16_t plen = (uint16_t)frame_buf[2] | ((uint16_t)frame_buf[3] << 8);
         if (plen > ALP_CC3501E_MAX_PAYLOAD) {
             plen = ALP_CC3501E_MAX_PAYLOAD;
@@ -117,26 +119,34 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
         cur_payload_len = plen;
         if (plen == 0u) {
             dispatch_frame(ALP_CC3501E_HEADER_BYTES);
-            phase = PH_REPLY;
-            arm_transfer(NULL, reply_buf, reply_len);
+            phase = PH_REPLY_HEADER;
+            arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
         } else {
-            phase = PH_PAYLOAD;
+            phase = PH_REQ_PAYLOAD;
             arm_transfer(&frame_buf[ALP_CC3501E_HEADER_BYTES], NULL, plen);
         }
         break;
     }
-    case PH_PAYLOAD:
+    case PH_REQ_PAYLOAD:
         dispatch_frame((size_t)ALP_CC3501E_HEADER_BYTES + cur_payload_len);
-        phase = PH_REPLY;
-        arm_transfer(NULL, reply_buf, reply_len);
+        phase = PH_REPLY_HEADER;
+        arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
         break;
 
-    case PH_REPLY:
+    case PH_REPLY_HEADER:
+        /* Reply header clocked out; now the reply payload (status + data
+         * = reply_len - 4 bytes, always >= 1). */
+        phase = PH_REPLY_PAYLOAD;
+        arm_transfer(NULL, &reply_buf[ALP_CC3501E_HEADER_BYTES],
+                     reply_len - ALP_CC3501E_HEADER_BYTES);
+        break;
+
+    case PH_REPLY_PAYLOAD:
     default:
-        /* Reply fully clocked.  Re-arm for the next request header.
+        /* Whole reply clocked.  Re-arm for the next request header.
          * (A pending CMD_RESET is actioned by cc3501e_hw_tick() on the
          * next idle wakeup, after this ack has gone out.) */
-        phase = PH_HEADER;
+        phase = PH_REQ_HEADER;
         arm_transfer(frame_buf, NULL, ALP_CC3501E_HEADER_BYTES);
         break;
     }
@@ -144,9 +154,6 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 
 void bridge_transport_spi_hw_init(void)
 {
-    /* READY starts low until the first header RX is armed. */
-    GPIO_setConfig(CONFIG_GPIO_CC3501E_HOST_READY, GPIO_CFG_OUT_STD | GPIO_CFG_OUT_LOW);
-
     SPI_Params params;
     SPI_Params_init(&params);
     params.mode                = SPI_SLAVE;
@@ -157,12 +164,12 @@ void bridge_transport_spi_hw_init(void)
 
     spi                        = SPI_open(CONFIG_SPI_0, &params);
     if (spi == NULL) {
-        /* No console this early; leave READY low so the host's PING
-         * never completes and bring-up code reports the dead link. */
+        /* No console this early; the host's PING simply never completes
+         * and bring-up code reports the dead link. */
         return;
     }
 
     /* Arm the first request header. */
-    phase = PH_HEADER;
+    phase = PH_REQ_HEADER;
     arm_transfer(frame_buf, NULL, ALP_CC3501E_HEADER_BYTES);
 }

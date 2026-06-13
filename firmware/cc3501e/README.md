@@ -72,6 +72,11 @@ build the choice is sourced from the customer `board.yaml`.  Both
 transports always compile; the selector only chooses which one `main()`
 starts.
 
+The current E1M-AEN rev wires SPI as **3 wires only** (SCLK/MOSI/MISO —
+no CS, no host IRQ), so framing is deterministic fixed-count lockstep
+(see DESIGN.md "Wire framing").  CS + a host-IRQ line are planned for the
+next rev (framing robustness + async-event delivery).
+
 ## Build
 
 The CMake build runs **outside** the Zephyr build (the Alif side's
@@ -147,8 +152,9 @@ first production binary is built + signed on the bench.
 | Wire-protocol header + host driver | ✅ landed (`include/alp/protocol/`, `chips/cc3501e/`) |
 | Firmware tree (embedded) | ✅ this tree |
 | v0.1 META group (PING / GET_VERSION / GET_MAC / RESET) | ✅ silicon-free + stub backend; native test green |
-| TI backend: SPI-slave + lifecycle (`hal/ti/`) | ✅ implemented against TI Drivers (`SPI_open` SPI_SLAVE callback) + SimpleLink (`sl_Start`/`sl_NetCfgGet`) + CMSIS reset. Compiles on the bench against the SimpleLink CC35xx SDK + a SysConfig board file. Bench-confirm: the SysConfig anchors (`CONFIG_SPI_0`, `CONFIG_GPIO_CC3501E_HOST_READY`) + the reply-timing handshake (needs a CC3501E→Alif READY line — see DESIGN.md). |
+| TI backend: SPI-slave + lifecycle (`hal/ti/`) | ✅ implemented against TI Drivers (`SPI_open` SPI_SLAVE callback) + SimpleLink (`sl_Start`/`sl_NetCfgGet`) + CMSIS reset. 3-wire deterministic lockstep (this rev wires only SCLK/MOSI/MISO — no CS/IRQ); host `cc3501e_request()` reconciled to match. Compiles on the bench against the SimpleLink CC35xx SDK + a SysConfig board file (`CONFIG_SPI_0`). Bench-confirm: SWRU626 §18 CS-less slave operation (see DESIGN.md). |
 | TI backend: SDIO-slave (`hal/ti/transport_hw_ti_sdio.c`) | 🟡 frame glue complete; the SDIO-**device** register bring-up needs SWRU626 §21 (no public SDK SDIO-device driver). Off the v0.1 critical path — SPI is the default. |
+| Next-rev hardening: CS + host-IRQ lines | 🔮 framing robustness + async-event delivery (see DESIGN.md "Next-rev hardening") |
 | `flash.py` real flashing | 🔮 blocked on TI's `cc3501e-flasher` CLI (not public yet); manual SWD/J-Link is the interim bench path |
 | `prebuilt/` populated | 🔮 when the first bench binary is built/signed (first board: E1M-AEN801) |
 | Wi-Fi / BLE / GPIO-proxy groups (v0.2+) | 🔮 roadmap |

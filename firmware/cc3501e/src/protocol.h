@@ -47,17 +47,17 @@
  * only the DATA bytes (after the status) and RETURNS the status; the
  * transport prepends the status byte and builds the 4-byte header.
  *
- * CONTRACT NOTE (host reconciliation, tracked in DESIGN.md): the
- * Alif-side driver chips/cc3501e/cc3501e.c is marked [UNTESTED] and
- * currently (a) reads the reply inside the same full-duplex transceive
- * as the request -- impossible for a real slave, which only knows the
- * reply AFTER the request is fully clocked -- and (b) treats the whole
- * GET_VERSION payload as the version with no status byte.  This
- * firmware implements the staged two-transaction model + the
- * status-byte convention from the authoritative header; the host
- * driver's bring-up rework (busy/ready handshake + status parse) is
- * the #1 reconciliation follow-up.  Nothing is on silicon yet, so the
- * two sides are reconciled to the spec, not to each other's drafts.
+ * WIRE FRAMING (3-wire, this HW rev): the E1M-AEN rev wires only
+ * SCLK/MOSI/MISO -- no CS, no host IRQ (both arrive next rev).  With no
+ * CS edge to delimit transactions, a request/reply is clocked as four
+ * deterministic fixed-count transfers in lockstep -- request header,
+ * request payload, reply header, reply payload -- each side deriving the
+ * next length from an exchanged header.  The Alif-side driver
+ * (chips/cc3501e/cc3501e.c) implements the matching sequence + reads the
+ * status byte; the TI SPI-slave backend
+ * (hal/ti/transport_hw_ti_spi.c) implements the slave side.  Both are
+ * reconciled to this header (the spec), [UNTESTED] until the AEN801
+ * bench bring-up.  See DESIGN.md for the next-rev CS/IRQ hardening.
  */
 
 /* Maximum reply DATA bytes a handler may emit (after the status byte).

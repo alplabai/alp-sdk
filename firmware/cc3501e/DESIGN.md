@@ -1,10 +1,10 @@
 # cc3501e-bridge firmware — design notes
 
-Scope, wire-reply contract, and the cross-side reconciliation items
-surfaced while authoring v0.1.  The authoritative wire contract is
+Scope, the wire framing, and the bench bring-up plan.  The authoritative
+wire contract is
 [`include/alp/protocol/cc3501e.h`](../../include/alp/protocol/cc3501e.h);
-this file records the firmware-side decisions and the gaps that need a
-matching host-side change.
+this file records the firmware-side decisions and the host/firmware
+framing they share.
 
 ## v0.1 scope ("bring-up")
 
@@ -13,7 +13,7 @@ version-compatible:
 
 | Opcode | Behaviour |
 |--------|-----------|
-| `PING` (0x00) | empty reply payload → `RESP_OK`; the liveness signal |
+| `PING` (0x00) | empty reply data → `RESP_OK`; the liveness signal |
 | `GET_VERSION` (0x01) | reply data = `ALP_CC3501E_PROTOCOL_VERSION` (u16 LE) |
 | `GET_MAC` (0x03) | reply data = 6-byte factory MAC (HAL); stub → `RESP_ERR_NOT_READY` |
 | `RESET` (0x02) | ack `RESP_OK`, then HAL reboots after the ack is drained |
@@ -24,101 +24,97 @@ contract that v1 firmware rejects opcodes it does not implement.  Those
 groups land in v0.2+ and route to TI's SimpleLink Wi-Fi / BLE APIs
 through the `hal/ti/` backend.
 
-## Wire-reply framing (firmware side)
+## Wire framing — 3-wire deterministic lockstep (this HW rev)
 
-The reply frame mirrors the request: a 4-byte LE header
-`[cmd | flags | payload_len(LE16)]` + payload.  The firmware:
+Both sides build the same frame: a 4-byte LE header
+`[cmd | flags | payload_len(LE16)]` + payload.  The reply echoes the
+request `cmd`, uses `flags = 0` (solicited; async events in v0.2+ set
+`ALP_CC3501E_FLAG_ASYNC_EVENT`), and its payload is `[status][data...]`
+— the response status (`ALP_CC3501E_RESP_*`) is the first payload byte,
+per the header.  Framing + dispatch is centralised in
+`protocol_build_reply()` so SPI and SDIO are byte-identical.
 
-- echoes the request `cmd` in reply byte 0 (lets a corrected host
-  correlate reply↔request),
-- sets `flags = 0` (a solicited reply; async-event frames in v0.2+ set
-  `ALP_CC3501E_FLAG_ASYNC_EVENT`),
-- puts the response status (`ALP_CC3501E_RESP_*`) as the **first payload
-  byte**, per the header's stated convention, followed by any data.
+The **current E1M-AEN rev wires only SCLK/MOSI/MISO** — no CS, no host
+IRQ (see "Next-rev hardening").  With no CS edge to delimit
+transactions, a request/reply is clocked as **four fixed-count transfers
+in deterministic lockstep**, each side deriving the next length from a
+header it already exchanged:
 
-Framing + dispatch is centralised in `protocol_build_reply()` so the
-SPI and SDIO transports are byte-identical on the wire.
+| # | master clocks | direction | length |
+|---|---------------|-----------|--------|
+| 1 | request header | MOSI | 4 |
+| 2 | request payload | MOSI | `payload_len` (from #1) |
+| 3 | reply header | MISO | 4 |
+| 4 | reply payload | MISO | reply `payload_len` (from #3) = status + data |
 
-## Cross-side reconciliation items (host driver)
+The host adds a short settle gap before step 3 so the slave can dispatch
+and arm the reply (v0.1 META dispatch is instant).  No CS means the
+CC3501E SS pad must be tied to its asserted level on the SoM and
+`SPI_transfer()` must complete on clock-count alone — **confirm against
+SWRU626 §18**.  Firmware side: `hal/ti/transport_hw_ti_spi.c` (a
+`SPI_SLAVE` + `SPI_MODE_CALLBACK` state machine that replays the captured
+frame through the silicon-free byte seams).  Host side:
+`chips/cc3501e/cc3501e.c` `cc3501e_request()` (matching 4-transfer
+sequence + `resp_to_status()` on `payload[0]`).  Host + firmware are
+reconciled to each other and to the header; both are `[UNTESTED]` until
+the AEN801 bench.
 
-Authoring the firmware surfaced two places where the **executable**
-host driver (`chips/cc3501e/cc3501e.c`, marked `[UNTESTED]`) and/or the
-header prose disagree.  Nothing is on silicon yet and there are no
-active customers, so the firmware is reconciled to the **authoritative
-header**, and the host driver's v0.x bring-up rework must catch up.
-These are the #1/#2 follow-ups before HiL:
-
-1. **Reply-read handshake.**  `cc3501e_request()` currently reads the
-   reply inside the *same* full-duplex `alp_spi_transceive()` as the
-   request.  A real SPI slave cannot do that -- it only knows the reply
-   *after* the request is fully clocked.  The firmware stages the reply
-   for a **separate** read transaction and (per the driver's own TODO)
-   needs a firmware **READY GPIO** so the host knows when to read.  The
-   host driver must move to the two-transaction + READY model.
-
-2. **Status-byte parsing + GET_VERSION.**  The header says "response
-   status codes [are] carried in the first byte of every response
-   payload", and this firmware follows that.  But `cc3501e_request()`
-   returns the raw payload without inspecting a status byte, and
-   `cc3501e_get_version()` treats the whole payload as the version.  The
-   host driver must (a) read `payload[0]` as the status and (b) read the
-   version from `payload[1..2]`.  Relatedly, the diag-struct comment in
-   the header that says GET_VERSION returns the firmware *release*
-   version is a documentation slip -- GET_VERSION returns the *protocol*
-   version (the host's compat gate compares it to
-   `ALP_CC3501E_PROTOCOL_VERSION`); the release version is reported via
-   `GET_DIAG_INFO.fw_version` in v2.
+GET_VERSION returns the *protocol* version (the host's compat gate),
+not the firmware *release* version — the diag-struct comment that
+implied otherwise was a header doc slip (now fixed); the release version
+is surfaced via `GET_DIAG_INFO.fw_version` in v2.
 
 ## Selectable host-control transport
 
 SPI is the default + always-available baseline; SDIO is opt-in and
-mutually exclusive with a micro-SD card (the Alif has a single SDIO
+mutually exclusive with a micro-SD card (the Alif has one SDIO
 controller).  Both transports compile; `CC3501E_CONTROL_TRANSPORT`
-selects which `main()` starts.  See README.md "Selectable host-control
-transport".
+selects which `main()` starts.  See README.md.
 
 ## Backends
 
 - `stub` (`hal/cc3501e_hw_stub.c`): hardware-free; HW ops return
   `CC3501E_HW_ERR_NOTIMPL`.  The host test + CI compile smoke build this.
 - `ti` (`hal/ti/`): the real bench backend, built with `ticlang` against
-  TI's SimpleLink CC35xx SDK (FreeRTOS + LwIP + TI Drivers).  Implemented,
-  not stubbed:
-  - `cc3501e_hw_ti.c`: `cc3501e_hw_init` (TI Drivers `GPIO_init`/`SPI_init`),
-    lazy SimpleLink start, `cc3501e_hw_get_mac` via
-    `sl_NetCfgGet(SL_NETCFG_MAC_ADDRESS_GET)`, and a deferred reset via
-    CMSIS `NVIC_SystemReset()` (after the ack is clocked out).
-  - `transport_hw_ti_spi.c`: SPI-slave via `SPI_open(..., SPI_SLAVE,
-    SPI_MODE_CALLBACK)`.  Because TI Drivers SPI is transfer-oriented, a
-    frame is clocked as three fixed-count transfers — 4-byte header, then
-    a payload of the declared length, then the staged reply — with a
-    READY GPIO as the per-chunk flow-control edge.  The completed frame
-    is replayed through the silicon-free byte seams, so framing/dispatch
-    (and the host test) are identical to the stub path.
+  TI's SimpleLink CC35xx SDK (FreeRTOS + LwIP + TI Drivers).  Implemented:
+  - `cc3501e_hw_ti.c`: `GPIO_init`/`SPI_init`, lazy SimpleLink start,
+    `cc3501e_hw_get_mac` via `sl_NetCfgGet(SL_NETCFG_MAC_ADDRESS_GET)`,
+    deferred reset via CMSIS `NVIC_SystemReset()` after the ack is sent.
+  - `transport_hw_ti_spi.c`: the 4-transfer 3-wire SPI-slave lockstep
+    above (`SPI_open(..., SPI_SLAVE, SPI_MODE_CALLBACK)`); no CS/IRQ.
   - `transport_hw_ti_sdio.c`: frame glue complete; SDIO-device register
     bring-up is the one SWRU626 §21 bench item (no public SDK SDIO-device
     driver) — off the v0.1 critical path.
 
-## TI backend bench bring-up (open items)
+## Next-rev hardening: add CS + host IRQ
 
-These are the things to settle when the hardware (first board: **E1M-AEN801**;
-the firmware is identical across all AEN SKUs — the CC3501E + its inter-chip
-wiring are AEN-family-wide) is on the bench.  None require firmware redesign;
-they pin board-specific anchors and the host side.
+The 3-wire link works for v0.1 bring-up but is intentionally minimal.
+The next board rev adds two CC3501E↔Alif lines:
 
-1. **SysConfig anchors.** The `ti` build needs a SysConfig board file
-   defining `CONFIG_SPI_0` (the inter-chip SPI on CC3501E GPIO_27/28/29)
-   and `CONFIG_GPIO_CC3501E_HOST_READY` (the READY output to the Alif).
-2. **Reply-timing handshake + READY line.** The SPI-slave reply rides a
-   separate transaction gated by a CC3501E→Alif READY line.  `inter-chip.tsv`
-   does not yet show a dedicated READY/IRQ pad (only `RTC_ALARM` on Alif
-   `P15_0_FLEX`).  Decide: route a READY line (or repurpose one) vs. a
-   poll-on-MISO scheme.  This determines the host-driver rework below.
-3. **Host-driver reconciliation (#1 from above).** Once the handshake is
-   fixed, rework `chips/cc3501e/cc3501e.c` `cc3501e_request()` to clock
-   header → (READY) → payload → (READY) → reply and parse `payload[0]` as
-   the status.  Held until the READY decision so it's not built on a guess.
-4. **SDIO-device.** Implement the §21 register bring-up in
+- **CS** — restores hardware transaction framing + a re-sync edge (the
+  3-wire lockstep has no way to recover if a stray clock desyncs it).
+- **host IRQ / DATA_READY** (CC3501E→Alif) — the bigger one: the Alif is
+  SPI master, so the CC3501E can never initiate, yet the protocol defines
+  async events (`EVT_WIFI_*`, `EVT_BLE_*`, `EVT_GPIO_INTERRUPT`) with
+  5–10 ms latency budgets (docs/cc3501e-bridge.md).  Polling can't meet
+  those without hammering the bus; a host-IRQ line is the standard
+  SPI-coprocessor solution and also removes the reply settle gap.
+
+When those land, the firmware raises IRQ when a reply/event is ready and
+the host waits on it instead of the settle gap; the `cc3501e_request()`
+4-transfer shape stays, just gated by IRQ instead of a delay.
+
+## Bench bring-up open items (AEN801)
+
+The firmware is identical across all AEN SKUs (the CC3501E + its
+inter-chip wiring are AEN-family-wide); these are board/SDK anchors, not
+firmware redesigns:
+
+1. **SysConfig anchor.** The `ti` build needs a board file defining
+   `CONFIG_SPI_0` (the inter-chip SPI on CC3501E GPIO_27/28/29).
+2. **§18 confirm.** Verify the SPI slave runs CS-less (SS tied asserted)
+   and `SPI_transfer()` completes on clock-count — the 3-wire assumption.
+3. **SDIO-device.** Implement the §21 register bring-up in
    `transport_hw_ti_sdio.c` if/when SDIO is needed (SPI is the default).
-5. **Flashing.** `flash.py` / the `cc3501e_usb_bootloader` backend wait on
-   TI's `cc3501e-flasher` CLI; until it ships, flash via SWD/J-Link.
+4. **Flashing.** `flash.py` / the `cc3501e_usb_bootloader` backend wait
+   on TI's `cc3501e-flasher` CLI; until it ships, flash via SWD/J-Link.
