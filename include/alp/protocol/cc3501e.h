@@ -9,11 +9,12 @@
  *        TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor.
  *
  * The CC3501E ships its own Cortex-M MCU and runs ALP-authored
- * firmware (separate project: `alplabai/cc3501e-firmware`).  The
- * firmware exposes Wi-Fi + BLE control to the Alif over the
- * inter-chip SPI1 bus -- Alif is master, CC3501E is slave.  This
- * header is the contract between the two sides: any change here
- * must be matched in the firmware's parser.
+ * firmware that lives in this repo at `firmware/cc3501e/` (embedded,
+ * like the gd32-bridge -- see ADR 0015).  The firmware exposes Wi-Fi +
+ * BLE control to the Alif over the inter-chip link (SPI default, SDIO
+ * optional) -- Alif is master, CC3501E is slave.  This header is the
+ * single-source contract between the two sides: the firmware includes
+ * it directly, so a change here moves both sides in one commit.
  *
  * Why a custom protocol instead of standardised Wi-Fi-host
  * commands (e.g. ESP-AT)?  We need granular control over the BLE
@@ -235,7 +236,10 @@ typedef enum {
  *  Field-level meanings:
  *   - fw_version: the firmware *release* version the device reports
  *     (its own semver from firmware-version.txt; tracked separately
- *     from ALP_CC3501E_PROTOCOL_VERSION).  Same value GET_VERSION returns.
+ *     from ALP_CC3501E_PROTOCOL_VERSION).  NOTE: this is distinct from
+ *     what CMD_GET_VERSION returns -- GET_VERSION returns the *protocol*
+ *     version (ALP_CC3501E_PROTOCOL_VERSION) for the host compatibility
+ *     gate; the release version is surfaced only here (v2 firmware).
  *   - reset_cause: one of @ref alp_cc3501e_reset_cause_t.
  *   - role: one of @ref alp_cc3501e_role_t.
  *   - uptime_ms: time since power-on / last reset.

@@ -59,9 +59,10 @@ CTestTestfile.cmake
 Makefile
 *.cmake
 !CMakeLists.txt
-# Toolchain files MUST stay tracked -- the gd32-bridge build invokes
+# Toolchain files MUST stay tracked -- the bridge builds invoke
 # them via -DCMAKE_TOOLCHAIN_FILE in CI + locally.
 !firmware/gd32-bridge/toolchain/*.cmake
+!firmware/cc3501e/toolchain/*.cmake
 # ... as is the build-id baker the gd32-bridge CMakeLists runs every build.
 !firmware/gd32-bridge/cmake/*.cmake
 !cmake/**/*.cmake

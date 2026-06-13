@@ -7,6 +7,32 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.8.0 candidate
 
+### Added — cc3501e-bridge: embedded CC3501E Wi-Fi/BLE firmware (v0.1 bring-up) + selectable SPI/SDIO transport
+
+The TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on the E1M-AEN family now has
+its bridge firmware **embedded in alp-sdk** at `firmware/cc3501e/` — modeled
+on `firmware/gd32-bridge/`, not a separate repo ([ADR
+0015](docs/adr/0015-cc3501e-firmware-embedded.md), which supersedes the
+earlier separate-`alplabai/cc3501e-firmware` plan).  The firmware `#include`s
+the canonical `include/alp/protocol/cc3501e.h` directly, so the host driver,
+the firmware parser, and the wire-vector tests move in one commit.
+
+- **v0.1 META group**: `PING` / `GET_VERSION` / `GET_MAC` / `RESET`, enough
+  to prove the link is alive and version-compatible.  All other opcodes
+  return `RESP_ERR_INVALID` (the header's v1 contract); Wi-Fi/BLE/GPIO-proxy
+  land in v0.2+.
+- **Selectable host-control transport**: SPI (default + always-available
+  fallback) and SDIO (optional, higher throughput).  Because the Alif has a
+  single SDIO controller shared with the micro-SD slot, SDIO is mutually
+  exclusive with an SD card; both transports feed one dispatcher
+  (`protocol_build_reply`).
+- Silicon-free core + `stub` HAL (host tests + CI compile smoke) + `ti` bench
+  backend skeleton (TI SimpleLink CC33xx SDK + ticlang).  Native transport
+  test at `tests/zephyr/cc3501e_bridge_transport/`; dedicated CI build at
+  `.github/workflows/pr-cc3501e-bridge-build.yml`; canonical wire vectors.
+- Production binary is built + signed on the bench (no SDK/silicon in CI);
+  the AEN `helper_firmware[].firmware_path` stays `TBD` until that lands.
+
 ### Added — gd32-bridge: `SE_RESET` opcode to drive the secure-element reset (SE_RST = PC13)
 
 The GD32 bridge gains a `CMD_SE_RESET` wire opcode (`0x41`; bridge wire

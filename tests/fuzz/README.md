@@ -39,8 +39,8 @@ parsers for the real ones (`alp_cc3501e_parse_frame`,
 `alp_mqtt_decode_fixed_header`, `alp_hw_info_decode_eeprom`) once
 those land in the implementation pass.  Catching crashes on the
 inline decoder today still has value: it shadows the cc3501e
-firmware's parser (separate repo `alplabai/cc3501e-firmware`), so
-malformed-frame issues caught here are also reportable upstream.
+firmware's parser (embedded in alp-sdk at `firmware/cc3501e/`), so
+malformed-frame issues caught here apply to that parser too.
 
 ## Build
 
