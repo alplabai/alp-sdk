@@ -86,23 +86,38 @@ selects which `main()` starts.  See README.md.
     bring-up is the one SWRU626 §21 bench item (no public SDK SDIO-device
     driver) — off the v0.1 critical path.
 
-## Next-rev hardening: add CS + host IRQ
+## Next-rev hardening: CS + host IRQ, reusing the SDIO pins
 
 The 3-wire link works for v0.1 bring-up but is intentionally minimal.
-The next board rev adds two CC3501E↔Alif lines:
+The next board rev (AEN **r2**) adds two CC3501E↔Alif lines — a **CS**
+and a **host IRQ / DATA_READY** — without spending new CC3501E pins, by
+**reusing the SDIO pins**.  SPI and SDIO are mutually-exclusive control
+transports, so the CC3501E's `GPIO3/4/5/6/10/11` are free for SPI-mode
+extras whenever SDIO isn't the active transport:
 
-- **CS** — restores hardware transaction framing + a re-sync edge (the
-  3-wire lockstep has no way to recover if a stray clock desyncs it).
-- **host IRQ / DATA_READY** (CC3501E→Alif) — the bigger one: the Alif is
-  SPI master, so the CC3501E can never initiate, yet the protocol defines
-  async events (`EVT_WIFI_*`, `EVT_BLE_*`, `EVT_GPIO_INTERRUPT`) with
-  5–10 ms latency budgets (docs/cc3501e-bridge.md).  Polling can't meet
-  those without hammering the bus; a host-IRQ line is the standard
-  SPI-coprocessor solution and also removes the reply settle gap.
+| CC3501E pin | SDIO mode | SPI mode (r2) |
+|-------------|-----------|---------------|
+| `GPIO3`     | SDIO.CLK  | **HOST_IRQ** → Alif `P7_0` (E1M `IO0`) |
+| `GPIO4`/... | SDIO.CMD/D* | **CS** (one spare SDIO pin — TBD) |
 
-When those land, the firmware raises IRQ when a reply/event is ready and
-the host waits on it instead of the settle gap; the `cc3501e_request()`
-4-transfer shape stays, just gated by IRQ instead of a delay.
+- **CS** restores hardware transaction framing + a desync-recovery edge
+  (the 3-wire lockstep can't recover if a stray clock desyncs it).
+- **host IRQ** is the bigger win: the Alif is SPI master, so the CC3501E
+  can never initiate, yet the protocol defines async events
+  (`EVT_WIFI_*`, `EVT_BLE_*`, `EVT_GPIO_INTERRUPT`) with 5–10 ms latency
+  budgets (docs/cc3501e-bridge.md).  Polling can't meet those without
+  hammering the bus; a host-IRQ line is the standard SPI-coprocessor
+  solution and also removes the reply settle gap.
+
+The IRQ pad (`GPIO3`→`P7_0`) consumes E1M `IO0` **only in SPI mode**;
+in SDIO mode that pin is the SDIO clock and `IO0` is unaffected (this is
+a per-transport pinmux, configured at build time alongside
+`CC3501E_CONTROL_TRANSPORT`).  When r2 lands, the firmware raises IRQ
+when a reply/event is ready and the host waits on it instead of the
+settle gap — the `cc3501e_request()` 4-transfer shape is unchanged, just
+gated by IRQ instead of a delay.  Boot-safe: active-high with an Alif
+pull-down; firmware drives it low early and the Alif arms the interrupt
+only after the boot budget.
 
 ## Bench bring-up open items (AEN801)
 

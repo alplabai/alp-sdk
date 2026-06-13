@@ -66,14 +66,19 @@ header it already exchanged; the host adds a short settle gap before
 reading the reply.  This requires the CC3501E SS pad to be tied asserted
 on the SoM and the SPI slave to complete on clock-count (SWRU626 §18).
 
-The **next board rev adds two lines**: a **CS** (restores hardware
-framing + a desync-recovery edge) and a **host-IRQ / DATA_READY**
-(CC3501E→Alif).  The IRQ line is the important one — the Alif is SPI
-master, so the CC3501E can never initiate, yet the protocol defines async
-events (`EVT_WIFI_*`, `EVT_BLE_*`, `EVT_GPIO_INTERRUPT`) with the 5–10 ms
-latency budgets above; a host-IRQ line is the standard SPI-coprocessor
-way to meet them without polling the bus, and it also removes the reply
-settle gap.  See `firmware/cc3501e/DESIGN.md` "Next-rev hardening".
+The **coming board rev (AEN r2) adds two lines — CS + host-IRQ —
+without spending new CC3501E pins**, by reusing the SDIO pins: SPI and
+SDIO are mutually-exclusive control transports, so when SPI is active the
+CC3501E's `GPIO3/4/5/6/10/11` are free for SPI-mode extras.  The planned
+mapping is **`GPIO3` = HOST_IRQ → Alif `P7_0` (E1M `IO0`)** and a spare
+SDIO pin for CS (in SDIO mode those are the SDIO bus, so `IO0` is
+unaffected — it's a per-transport pinmux).  The IRQ line is the important
+one: the Alif is SPI master, so the CC3501E can never initiate, yet the
+protocol defines async events (`EVT_WIFI_*`, `EVT_BLE_*`,
+`EVT_GPIO_INTERRUPT`) with the 5–10 ms latency budgets above; a host-IRQ
+line is the standard SPI-coprocessor way to meet them without polling the
+bus, and it also removes the reply settle gap.  The current rev (r1) is
+unaffected.  See `firmware/cc3501e/DESIGN.md` "Next-rev hardening".
 
 ## Boot model
 
