@@ -51,18 +51,16 @@ Never collapse the product version, the upstream BSP, and the Yocto lineage into
 | Yocto lineage | `scarthgap` | Distro foundation |
 
 ```sh
-# /etc/os-release  (customer-facing banner)
+# /etc/os-release — single identity + provenance file. ALP_* are vendor-prefixed
+# per the os-release spec, added via OS_RELEASE_FIELDS in conf/distro/alp.conf.
 NAME="Alp SDK"
-VERSION="0.7.0"
+VERSION="0.7.0"          # headline = Alp product version (DISTRO_VERSION)
 VERSION_ID="0.7.0"
-
-# /etc/alp-release  (provenance manifest — explicit, vendor-attributed)
 ALP_SDK_VERSION=0.7.0
 ALP_BSP_VENDOR=Renesas
 ALP_BSP_NAME="RZ/V2N AI SDK BSP"
-ALP_BSP_VERSION=6.30
+ALP_BSP_VERSION=6.30     # attributed provenance — never the headline
 ALP_YOCTO_RELEASE=scarthgap
-ALP_MACHINE=e1m-v2n101-a55
 ```
 
 **One source of truth = the Alp SDK release tag.** `os-release VERSION`, the `alp-sdk` recipe `PV`, and `MENDER_ARTIFACT_NAME` all derive from it. **Future-proof:** the vendor-attributed BSP line changes vendor/version when Renesas bumps the BSP or a new SoM uses a different SoC vendor (Alif AEN, NXP i.MX93); the Alp version line stays coherent.
