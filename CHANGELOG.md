@@ -5,7 +5,43 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.7.0 candidate
+## [Unreleased] - v0.8.0 candidate
+
+## [v0.7.0] - 2026-06-12
+
+### Added — meta-alp-sdk: production image (`alp-image-prod`) + ALP distro identity + hardening
+
+A dedicated `alp-image-prod` image, with `alp-image-common.inc` factoring the
+shared content out of `alp-image-edge`, carrying the ALP distro identity and
+version banners.  Hardening recipes ship alongside: SSH hardening
+(`alp-ssh-hardening`), a watchdog policy (`alp-watchdog-policy`), and
+wired-DHCP network defaults (`alp-network-defaults`).
+
+### Added — meta-alp-sdk: U-Boot production boot + reproducible firmware banners
+
+A production-boot U-Boot config and `rzv2n-dev` production-boot patch, plus a
+`no-dirty-version` config, give clean reproducible/traceable firmware version
+banners across BL2 + U-Boot.
+
+### Added — meta-alp-sdk: CA55 1.8 GHz operating point (one-line opt-in)
+
+The Cortex-A55 1.8 GHz OPP is a one-line opt-in; 1.7 GHz stays the default.
+
+### Added — meta-alp-sdk: kernel FIT-signing build scaffolding (opt-in, default off)
+
+Opt-in scaffolding to build a signed kernel FIT image; default off.
+
+### Fixed — meta-alp-sdk: V2N reboot hang + Mali GPU clock double-management
+
+pm_runtime-guards the rzg2l MIPI-DSI host transfer so the DSI panel
+`.shutdown` path no longer takes an SError on reboot, and stops the Mali GPU
+driver double-managing the GPU clocks (the devicetree leaves GPU clocks to the
+PM domain) — killing the "Enabling unprepared gpu_0_clk" spam.
+
+### Changed — docs: post-productization documentation sweep + "Alp SDK" brand casing
+
+A documentation sweep across the productization surface plus a brand-casing
+fix to "Alp SDK".
 
 ### Added — orchestrate: per-core OS topology + `system-manifest` pinned as the IDE/tool contract (issues #93, #95, #106)
 
