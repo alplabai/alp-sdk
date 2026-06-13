@@ -377,7 +377,7 @@ with one `#define <MACRO> E1M_<…>` line per entry.
 
 #### Preset mode (SDK-internal shortcut)
 
-The 41 example projects under `examples/` all target the EVK or
+The 61 example projects under `examples/` all target the EVK or
 X-EVK, so they share a single board definition each via the
 `preset:` field:
 
@@ -847,7 +847,7 @@ the canonical math lives at
 
 ```
 metadata/
-├── sdk_version.yaml                            # single-line "version: 0.3.0"
+├── sdk_version.yaml                            # SDK release version (currently "version: 0.6.0")
 ├── e1m_modules/
 │   ├── aen/hw-revisions.yaml                   # family-level revs (AEN family
 │   │                                            #  shares one PCB; SKUs differ
@@ -858,11 +858,11 @@ metadata/
 │   └── E1M-AEN701.yaml                     # MPN preset; `default_hw_rev: r1`
 │                                                #  points into the family table.
 └── boards/
-    ├── E1M-EVK/board.yaml                      # board preset; carries its own
+    ├── e1m-evk.yaml                            # board preset; carries its own
     │                                            #  hw_revisions + default_hw_rev.
-    ├── E1M-X-EVK/board.yaml                    # V2N / V2N-M1 board
+    ├── e1m-x-evk.yaml                          # V2N / V2N-M1 board
     │                                            #  (board_id.adc_channel TBD).
-    └── custom-example/board.yaml               # copy-friendly template
+    └── custom-example.yaml                     # copy-friendly template
 ```
 
 `board.yaml` overrides go in the `som.hw_rev` / `board.hw_rev`

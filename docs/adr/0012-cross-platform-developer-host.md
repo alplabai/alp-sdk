@@ -64,7 +64,7 @@ Existing state on 2026-05-18:
   is a coverage gap — nothing in CI exercises the SDK on a Mac or
   Windows runner.
 - Memory `[[ubuntu-deferred-to-v2]]` records that an Ubuntu /
-  Linux *backend* (running ALP user-space binaries on Linux) is
+  Linux *backend* (running Alp user-space binaries on Linux) is
   deferred indefinitely past v1.0.  That is orthogonal to this
   ADR, which is about the *host* developers use to build firmware,
   not about the runtime target.
@@ -287,7 +287,7 @@ scaffolding.  Rejected because:
   analogue: the same source builds the same artefact on
   Win + Mac + Linux.
 - Memory `[[ubuntu-deferred-to-v2]]` — Ubuntu / Linux as a
-  *backend* (running ALP user-space on Linux) is deferred past
+  *backend* (running Alp user-space on Linux) is deferred past
   v1.0.  Orthogonal to this ADR: this ADR is about the **host**,
   not the target runtime.
 - Memory `[[alp-sdk-standalone-studio-is-consumer]]` — alp-sdk

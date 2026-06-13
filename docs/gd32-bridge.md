@@ -12,8 +12,8 @@ The **wire protocol** is specified in
 covers the **firmware-tree** side -- where the source lives, how to
 build it, how to flash it, and what state the implementation is in.
 
-> **Pre-flashed by ALP; rebuild is optional and fully open.** The
-> GD32G553 ships flashed by ALP with the bridge firmware, so for normal
+> **Pre-flashed by Alp; rebuild is optional and fully open.** The
+> GD32G553 ships flashed by Alp with the bridge firmware, so for normal
 > use the customer does nothing — the Renesas host talks to a working
 > supervisor out of the box.  Like the CC3501E bridge, the GD32 firmware is
 > **open**: the source lives in this repo (`firmware/gd32-bridge/`) and

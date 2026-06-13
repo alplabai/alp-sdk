@@ -47,7 +47,13 @@
 		line-name = "deepx_pcie_mux_pd";
 	};
 
-	/* PCIe lane-mux select: drive to the DEEPX path. */
+	/* PCIe lane-mux select: drive to the DEEPX path.
+	 * KNOWN RACE: P9.5 shares the PMC9/PM9 byte registers with the
+	 * CM33's P9.6/P9.7 (GD32 supervisor SPI), and this hog's
+	 * non-atomic RMW lands at ~1.9 s -- inside the CM33's pin-setup
+	 * window.  Tolerated so far on the bench; if the link ever
+	 * glitches at Linux boot on V2M, sequence or move this hog (the
+	 * port-9 AMP rule in e1m-x-evk.dtsi). */
 	deepx-pcie-mux-sel-hog {
 		gpio-hog;
 		gpios = <RZV2N_GPIO(9, 5) GPIO_ACTIVE_HIGH>;

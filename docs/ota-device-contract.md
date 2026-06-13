@@ -13,12 +13,14 @@ Two layers of OTA exist:
    E7 / NXP i.MX 93 on other E1M variants).  Updates the Linux
    kernel, root filesystem, and userspace.  This is the "big"
    OTA.
-2. **GD32 bridge firmware OTA** -- planned; opcodes `0xF0..0xFF`
-   reserved in [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md)
-   §10.  Not implemented today.
+2. **GD32 bridge firmware OTA** -- Path A (application bootloader
+   over the bridge) implemented and silicon-validated, gated behind
+   `-DBRIDGE_OTA_PARTITIONED` (HIL-pending); opcodes `0xF0..0xFF`
+   and the wire contract are in
+   [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10.
 
 The two paths are independent.  Mender does not flash the GD32;
-the GD32 application bootloader does, once the bootloader exists.
+the GD32 application bootloader does.
 
 ## Main system OTA (Mender)
 
@@ -81,23 +83,26 @@ The server side (Hakan's repo) hands the device an artifact
 
 ### Status
 
-**Design phase.**  The opcodes `0xF0..0xFF` are reserved in the
-bridge protocol for OTA but not implemented.  The bridge firmware
-field-upgrade path is documented in
-[`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10.
-Until the bootloader + opcodes land, GD32 field upgrades require
-SWD via the V2N programming header.
+**Path A implemented (gated, HIL-pending); Path B scaffolded.**
+The `0xF0..0xFF` opcode set is implemented in
+`firmware/gd32-bridge/src/ota.c` and specified in
+[`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10;
+destructive flashing is armed only in `-DBRIDGE_OTA_PARTITIONED`
+builds (the default build answers `STATUS_NOSUPPORT`).  Host-driven
+SWD via the V2N programming header remains the universal recovery
+path (Path B).
 
-### Planned opcode set
+### Opcode set
 
-| Opcode | Name                  | Payload (request)                          | Reply payload                |
-|--------|-----------------------|--------------------------------------------|------------------------------|
-| `0xF0` | `OTA_BEGIN`           | `slot:u8 size:u32 sha256:u8[32]`           | `accepted:u8`                |
-| `0xF1` | `OTA_WRITE_CHUNK`     | `slot:u8 page_addr:u32 data:u8[chunk_len]` | `bytes_written:u32`          |
-| `0xF2` | `OTA_VERIFY`          | `slot:u8`                                  | `match:u8`                   |
-| `0xF3` | `OTA_COMMIT`          | `slot:u8`                                  | _empty_                      |
-| `0xF4` | `OTA_ROLLBACK`        | _empty_                                    | _empty_                      |
-| `0xF5` | `OTA_GET_STATE`       | _empty_                                    | `active_slot:u8 stable:u8 …` |
+The authoritative wire contract is
+[`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10
+(implemented in `firmware/gd32-bridge/src/ota.c`, mirrored host-side
+in `<alp/chips/gd32g553.h>`).  As implemented, `OTA_BEGIN` carries
+`size:u32 expected_crc32:u32` (plus an optional additive version
+triple), session state is implicit rather than slot-addressed on
+every op, and integrity is a CRC-32 (`OTA_VERIFY` returns
+`computed_crc32:u32 verified:u8`).  See §10 for the full table
+including `0xF6 OTA_ABORT`.
 
 ### Planned flash layout (GD32G553, 512 KB)
 
@@ -136,7 +141,7 @@ into the bootloader image** at compile time, and rotating the
 signing key requires a bootloader update (SWD).
 
 A future revision may add an OPTIGA-mediated verification path,
-but that's a v0.5 problem.
+but that's a post-1.0 problem.
 
 ## Failure-recovery matrix (combined)
 

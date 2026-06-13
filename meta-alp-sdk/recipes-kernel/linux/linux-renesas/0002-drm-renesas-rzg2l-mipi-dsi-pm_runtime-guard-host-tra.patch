@@ -1,0 +1,62 @@
+From 1e8e2e941c9593a900bffe5ee67f256263ce9960 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <gate@alp-lab.se>
+Date: Thu, 11 Jun 2026 22:08:12 +0200
+Subject: [PATCH] drm: renesas: rzg2l-mipi-dsi: pm_runtime-guard host transfer
+ to avoid SError at shutdown
+
+A DCS transfer can be issued while the DSI host is runtime suspended --
+e.g. drm_panel_disable() from a panel .shutdown() during
+device_shutdown(), after the display pipeline has already powered the
+link down. rzg2l_mipi_pm_runtime_suspend() holds the host in reset
+(reset_control_assert), so the register writes in
+rzg2l_mipi_dsi_host_transfer() fault with an asynchronous SError that
+panics the kernel mid-reboot (RZ/V2N E1M board: hx8394 panel
+.shutdown), and the reboot never completes.
+
+Resume the host across the register accesses so a transfer is safe in
+any PM state; the bounded SQCH0SR completion poll then simply times out
+harmlessly when the link is down.
+
+Upstream-Status: Pending
+
+Signed-off-by: Alp Lab AB
+---
+ drivers/gpu/drm/renesas/rz-du/rzg2l_mipi_dsi.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/drivers/gpu/drm/renesas/rz-du/rzg2l_mipi_dsi.c b/drivers/gpu/drm/renesas/rz-du/rzg2l_mipi_dsi.c
+index 3062088d8913..b00376119eed 100644
+--- a/drivers/gpu/drm/renesas/rz-du/rzg2l_mipi_dsi.c
++++ b/drivers/gpu/drm/renesas/rz-du/rzg2l_mipi_dsi.c
+@@ -1196,6 +1196,19 @@ static ssize_t rzg2l_mipi_dsi_host_transfer(struct mipi_dsi_host *host,
+ 		value |= SQCH0DSC0AR_FMT_SHORT;
+ 	}
+ 
++	/*
++	 * A DCS transfer may be issued while the DSI host is runtime
++	 * suspended -- e.g. drm_panel_disable() from a panel's .shutdown()
++	 * during device_shutdown(), after the display pipeline has already
++	 * powered the link down. The host registers are held in reset while
++	 * suspended, so touching them faults with an asynchronous SError.
++	 * Resume the host across the register accesses so a transfer is safe
++	 * in any PM state.
++	 */
++	ret = pm_runtime_resume_and_get(dsi->dev);
++	if (ret < 0)
++		return ret;
++
+ 	rzg2l_mipi_dsi_link_write(dsi, SQCH0DSC0AR, value);
+ 
+ 	/*
+@@ -1236,6 +1249,8 @@ static ssize_t rzg2l_mipi_dsi_host_transfer(struct mipi_dsi_host *host,
+ 			ret = packet.payload_length;
+ 	}
+ 
++	pm_runtime_put(dsi->dev);
++
+ 	return ret;
+ }
+ 
+-- 
+2.34.1
+
