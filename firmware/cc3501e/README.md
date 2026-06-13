@@ -147,6 +147,8 @@ first production binary is built + signed on the bench.
 | Wire-protocol header + host driver | ✅ landed (`include/alp/protocol/`, `chips/cc3501e/`) |
 | Firmware tree (embedded) | ✅ this tree |
 | v0.1 META group (PING / GET_VERSION / GET_MAC / RESET) | ✅ silicon-free + stub backend; native test green |
-| TI backend (`hal/ti/`) | 🟡 bench skeleton -- seam wiring in place, TI-SDK calls flagged `[TI-SDK]` |
-| `prebuilt/` populated + `flash.py` real | 🔮 when the first bench binary is built/signed |
+| TI backend: SPI-slave + lifecycle (`hal/ti/`) | ✅ implemented against TI Drivers (`SPI_open` SPI_SLAVE callback) + SimpleLink (`sl_Start`/`sl_NetCfgGet`) + CMSIS reset. Compiles on the bench against the SimpleLink CC35xx SDK + a SysConfig board file. Bench-confirm: the SysConfig anchors (`CONFIG_SPI_0`, `CONFIG_GPIO_CC3501E_HOST_READY`) + the reply-timing handshake (needs a CC3501E→Alif READY line — see DESIGN.md). |
+| TI backend: SDIO-slave (`hal/ti/transport_hw_ti_sdio.c`) | 🟡 frame glue complete; the SDIO-**device** register bring-up needs SWRU626 §21 (no public SDK SDIO-device driver). Off the v0.1 critical path — SPI is the default. |
+| `flash.py` real flashing | 🔮 blocked on TI's `cc3501e-flasher` CLI (not public yet); manual SWD/J-Link is the interim bench path |
+| `prebuilt/` populated | 🔮 when the first bench binary is built/signed (first board: E1M-AEN801) |
 | Wi-Fi / BLE / GPIO-proxy groups (v0.2+) | 🔮 roadmap |
