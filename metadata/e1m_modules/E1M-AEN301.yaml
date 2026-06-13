@@ -118,9 +118,9 @@ pad_routes:
       doc: "CC3501E GPIO_30." }
 
 # On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
-# on the AEN module; firmware comes from the separate
-# `alplabai/cc3501e-firmware` repo and stays TBD until a release
-# lands (matches the project's standing convention).
+# on the AEN module; firmware is embedded in alp-sdk at
+# `firmware/cc3501e/` (ADR 0015) and stays TBD until the first binary
+# is built + signed on the bench (the project's standing convention).
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e

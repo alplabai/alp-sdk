@@ -5,9 +5,9 @@
 firmware/cc3501e/flash.py -- CC3501E firmware-image flasher.
 
 STUB.  Real implementation lands alongside the first prebuilt
-binary from `alplabai/cc3501e-firmware`.  The CLI shape below is
-the consumer-facing contract that the real implementation must
-honour.
+binary built on the bench from the in-tree firmware/cc3501e/ source.
+The CLI shape below is the consumer-facing contract that the real
+implementation must honour.
 
 Flow (planned):
   1. Connect to the Alif main MCU via the standard debug probe
@@ -17,14 +17,13 @@ Flow (planned):
      bootloader entry mode (assert E_WIFI.NRST, raise WIFI_EN,
      pull GPIO strap pins to "external load" pattern).
   3. Stream the firmware image to the CC3501E over the inter-chip
-     SPI1 using the TI bootloader protocol.  Verify the signature
+     link using the TI bootloader protocol.  Verify the signature
      against the OTP-burned public key (the CC3501E does this
      itself before committing).
   4. Release reset and run sanity check via
      `chips/cc3501e/cc3501e.c`'s `cc3501e_get_version()`.
 
-See `firmware/cc3501e/README.md` for the full bootstrap and
-release process.
+See `firmware/cc3501e/README.md` for the build + release process.
 """
 
 import argparse
@@ -113,9 +112,9 @@ def main() -> int:
 
     sys.exit(
         "error: real flashing not yet implemented.\n"
-        "       The CC3501E firmware repo (alplabai/cc3501e-firmware) and the\n"
-        "       first prebuilt binary have not landed yet.  Once they do, this\n"
-        "       script will drive the inter-chip SPI1 bootloader sequence.\n"
+        "       The first prebuilt binary has not been built on the bench yet.\n"
+        "       Once it lands in firmware/cc3501e/prebuilt/, this script will\n"
+        "       drive the inter-chip bootloader sequence.\n"
         "       Track progress in firmware/cc3501e/README.md \"Status\" table."
     )
 

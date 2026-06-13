@@ -31,6 +31,55 @@ Per [`metadata/e1m_modules/aen/inter-chip.tsv`](../metadata/e1m_modules/aen/inte
 - **CAM_EN_LDO0 / LDO1** (CC3501E `GPIO_0` / `GPIO_1`): CC3501E
   enables the camera modules.
 
+## Selectable host-control transport
+
+The host-control link is **customer-selectable**, because different
+customers trade pin count against Wi-Fi throughput differently:
+
+| Transport | Role | CC3501E pins | Availability |
+|-----------|------|--------------|--------------|
+| **SPI1 slave** | **DEFAULT** + always-available baseline/fallback | `GPIO_27/28/29` | Always |
+| **SDIO slave** | OPTIONAL, higher throughput for Wi-Fi data | `GPIO_3/4/5/6/10/11` | Only when the board dedicates the Alif SDIO to the CC3501E |
+
+The catch: the Alif Ensemble has a **single SDIO controller**, shared at
+board level (mux resistors) with the micro-SD slot.  So SDIO is
+available to the CC3501E **only on boards without an SD card** — when an
+SD card is populated, SDIO is blocked and the link **must use SPI**.
+SPI is therefore always wired and always the fallback.
+
+The choice is a per-board integration decision: in a studio build it
+comes from the customer `board.yaml`; for a hand-built firmware it's the
+`CC3501E_CONTROL_TRANSPORT` CMake option (default `spi`).  Either way the
+firmware brings up exactly one control transport, and both feed the same
+command dispatcher — see
+[`firmware/cc3501e/`](../firmware/cc3501e/) (`transport_spi.c` /
+`transport_sdio.c`).
+
+### Current rev: 3-wire SPI (no CS, no IRQ)
+
+The current E1M-AEN board rev wires the inter-chip SPI as **3 wires
+only — SCLK/MOSI/MISO**.  With no chip-select edge to frame
+transactions, the host↔firmware exchange runs as four deterministic
+fixed-count transfers in lockstep (request header → request payload →
+reply header → reply payload), each side taking the next length from a
+header it already exchanged; the host adds a short settle gap before
+reading the reply.  This requires the CC3501E SS pad to be tied asserted
+on the SoM and the SPI slave to complete on clock-count (SWRU626 §18).
+
+The **coming board rev (AEN r2) adds two lines — CS + host-IRQ —
+without spending new CC3501E pins**, by reusing the SDIO pins: SPI and
+SDIO are mutually-exclusive control transports, so when SPI is active the
+CC3501E's `GPIO3/4/5/6/10/11` are free for SPI-mode extras.  The planned
+mapping is **`GPIO3` = HOST_IRQ → Alif `P7_0` (E1M `IO0`)** and a spare
+SDIO pin for CS (in SDIO mode those are the SDIO bus, so `IO0` is
+unaffected — it's a per-transport pinmux).  The IRQ line is the important
+one: the Alif is SPI master, so the CC3501E can never initiate, yet the
+protocol defines async events (`EVT_WIFI_*`, `EVT_BLE_*`,
+`EVT_GPIO_INTERRUPT`) with the 5–10 ms latency budgets above; a host-IRQ
+line is the standard SPI-coprocessor way to meet them without polling the
+bus, and it also removes the reply settle gap.  The current rev (r1) is
+unaffected.  See `firmware/cc3501e/DESIGN.md` "Next-rev hardening".
+
 ## Boot model
 
 The CC3501E has **no host-strap boot pin**.  Boot-mode selection
@@ -117,7 +166,7 @@ populates a **4 MB external xSPI flash** on that bus carrying:
 
 - BL2 (TI-signed 2nd-stage bootloader)
 - Application image (SimpleLink + Wi-Fi stack + BLE stack +
-  the `alplabai/cc3501e-firmware` SPI-slave parser)
+  the embedded `firmware/cc3501e/` SPI/SDIO-slave parser)
 - Filesystem region (TI SimpleLink file system for certs,
   service-pack, profile data)
 
@@ -127,25 +176,27 @@ inter-chip SPI1 -- not via direct xSPI access from Alif.  If the
 on-flash BL2 is ever corrupt, recovery goes through TI's tools,
 not through any strap-pin recovery mode (there isn't one).
 
-## Two-repo split
+## Where the firmware lives (embedded in alp-sdk)
 
-Per [ADR 0005](adr/0005-alp-sdk-vs-alp-studio-boundary.md)'s
-dual-use acid test, the firmware that runs on the CC3501E lives
-in its own repository -- it ships TI's SimpleLink CC33xx SDK,
-licences differently, releases on its own cadence, and most
-SDK consumers never rebuild it.
+The firmware that runs on the CC3501E lives **in this repo** at
+[`firmware/cc3501e/`](../firmware/cc3501e/) -- exactly as the
+[`gd32-bridge`](../firmware/gd32-bridge/) firmware does.  Both are the
+same class of artifact (an on-SoM helper-MCU bridge: custom binary
+protocol, host driver in alp-sdk, prebuilt blob shipped in alp-sdk, its
+own toolchain + version axis), so they are maintained the same way.  The
+rationale -- and why the earlier "separate `alplabai/cc3501e-firmware`
+repo" plan was dropped -- is [ADR 0015](adr/0015-cc3501e-firmware-embedded.md).
 
-| Repo                              | Owns                                                                        |
-|-----------------------------------|-----------------------------------------------------------------------------|
-| `alplabai/alp-sdk` (this repo)    | Wire-protocol header (`include/alp/protocol/cc3501e.h`); Alif-side SPI client (`chips/cc3501e/`); `<alp/iot.h>` / `<alp/ble.h>` route-through. |
-| `alplabai/cc3501e-firmware` (TBD) | Firmware that runs on the CC3501E MCU: TI SimpleLink + Wi-Fi station/AP + BLE 5.4 stack + SPI-slave protocol parser + GPIO proxy + camera-enable drivers. |
+| Side | Lives in | Owns |
+|------|----------|------|
+| Host | `chips/cc3501e/` + `include/alp/protocol/cc3501e.h` | Alif-side SPI/SDIO client; `<alp/iot.h>` / `<alp/ble.h>` route-through. |
+| Device | `firmware/cc3501e/` | Firmware on the CC3501E: SPI/SDIO-slave parser + TI SimpleLink Wi-Fi/AP + BLE 5.4 + GPIO proxy + camera-enable drivers. |
 
-The two are linked by a stable wire protocol (defined in this
-repo, version-tagged via `ALP_CC3501E_PROTOCOL_VERSION`).
-Firmware releases pin to a protocol version; the Alif-side
-client refuses to talk to a firmware whose
-`ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the
-compile-time expectation.
+The firmware `#include`s the wire-protocol header **directly** (no
+mirror), so a protocol change moves both sides + the wire-vector tests
+in one commit.  The Alif-side client still refuses to talk to a firmware
+whose `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the compile-time
+`ALP_CC3501E_PROTOCOL_VERSION`.
 
 ## Firmware: pre-flashed by Alp; rebuild is optional
 
@@ -156,30 +207,30 @@ version-pinned prebuilt blob also lives at
 `firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` for field re-flash.
 
 Rebuilding or customizing the firmware is **optional and open** — the
-bridge firmware source is Alp's (public, like the GD32 bridge), built on
-TI's **BSD-3-licensed** SimpleLink Wi-Fi SDK.  The future
-`alplabai/cc3501e-firmware` repo would:
+bridge firmware source is Alp's (public, like the GD32 bridge), in-tree
+at [`firmware/cc3501e/`](../firmware/cc3501e/), built on TI's
+**BSD-3-licensed** SimpleLink Wi-Fi SDK.  The in-tree firmware:
 
-1. Vendor TI's **BSD-3-licensed** SimpleLink Wi-Fi SDK as a git
-   submodule — it covers the CC33xx family, and the CC3501E ships in it
-   alongside the CC3300/CC3301 line.  Open-source-licensed, so it can be
-   tracked as a public submodule, same as the GD32 GigaDevice library.
-2. Build with TI Code Composer Studio or the open `ticlang`
-   toolchain.
-3. Implement the SPI-slave parser against this repo's
-   `include/alp/protocol/cc3501e.h` -- a copy of that header
-   sits in the firmware's `include/alp/` for source-of-truth
-   consistency.
-4. Wire commands into TI's SimpleLink Wi-Fi APIs (`sl_*`) and
-   the BLE host (CC3501E ships an Apache-licenced BLE 5.4 host).
-5. Drive `GPIO_0`, `GPIO_1` (camera enables) and the GPIO-proxy
-   pads (`GPIO_2`, `GPIO_13..30` per `from-cc3501e.tsv`).
-6. Tag releases `vX.Y.Z`; the binary blob lands at
-   `firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` here in alp-sdk
-   so consumers can flash without cloning the firmware repo.
-7. Hand-off via `update_cc3501e.py` (or the existing TI flash
-   utility if one is available) on USB or via a JTAG probe
-   wired to the CC3501E's debug pads.
+1. Vendors TI's **BSD-3-licensed** SimpleLink CC33xx SDK as an optional
+   git submodule under `firmware/cc3501e/vendor/simplelink-cc33xx/` —
+   only the bench `ti` build pulls it; not recursed by default.  Same
+   shape as the GD32 GigaDevice library.
+2. Builds with TI Code Composer Studio or the open `ticlang` toolchain
+   (`firmware/cc3501e/toolchain/ticlang.cmake`).
+3. `#include`s this repo's `include/alp/protocol/cc3501e.h` **directly**
+   — no mirrored copy, so the two sides cannot drift.
+4. Wires commands into TI's SimpleLink Wi-Fi APIs (`sl_*`) and the BLE
+   host (CC3501E ships an Apache-licenced BLE 5.4 host) — v0.2+.
+5. Drives `GPIO_0`, `GPIO_1` (camera enables) and the GPIO-proxy pads
+   (`GPIO_2`, `GPIO_13..30` per `from-cc3501e.tsv`) — v0.4.
+6. Tags releases `vX.Y.Z`; the signed binary lands at
+   `firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` so consumers can flash
+   without rebuilding.
+7. Hands off via `firmware/cc3501e/flash.py` on USB / debug probe.
+
+See [`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) for the
+build + tree layout and [`firmware/cc3501e/DESIGN.md`](../firmware/cc3501e/DESIGN.md)
+for the v0.1 scope + wire-reply contract.
 
 ## Versioning
 
@@ -258,16 +309,16 @@ The Alif's bring-up code then sequences enables once it's ready.
 
 | Step                                             | Where it lands                          |
 |--------------------------------------------------|-----------------------------------------|
-| Wire protocol v1 frozen                          | `include/alp/protocol/cc3501e.h` (this commit) |
-| Alif-side SPI client (`chips/cc3501e/`)          | Follow-up commit in alp-sdk              |
+| Wire protocol v1 frozen                          | `include/alp/protocol/cc3501e.h` ✅ |
+| Alif-side SPI client (`chips/cc3501e/`)          | ✅ landed in alp-sdk              |
 | `<alp/iot.h>` / `<alp/ble.h>` route via CC3501E  | Follow-up: dispatcher branch in iot_zephyr.c / ble_zephyr.c |
-| Firmware repo bootstrap                          | `alplabai/cc3501e-firmware` (created separately) |
-| Bring-up firmware (PING + version)               | Firmware repo v0.1                       |
-| Wi-Fi station mode                               | Firmware repo v0.2                       |
-| BLE peripheral + advertise                       | Firmware repo v0.3                       |
-| GPIO proxy + camera-enable                       | Firmware repo v0.4                       |
+| Firmware tree (embedded)                         | `firmware/cc3501e/` ✅ (per [ADR 0015](adr/0015-cc3501e-firmware-embedded.md)) |
+| Bring-up firmware (PING + GET_VERSION + GET_MAC + RESET) | `firmware/cc3501e/` v0.1 ✅ (silicon-free + stub; bench build pending) |
+| Wi-Fi station mode                               | `firmware/cc3501e/` v0.2            |
+| BLE peripheral + advertise                       | `firmware/cc3501e/` v0.3            |
+| GPIO proxy + camera-enable                       | `firmware/cc3501e/` v0.4            |
 | Full feature parity with `<alp/iot.h>` /
-  `<alp/ble.h>`                                    | Firmware repo v1.0                       |
+  `<alp/ble.h>`                                    | `firmware/cc3501e/` v1.0            |
 
 ## See also
 

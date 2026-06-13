@@ -2,11 +2,21 @@
 
 **Date:** 2026-05-12
 **Owner:** alpCaner
-**Status:** Research-only. Informs the first production firmware drop in
-`alplabai/cc3501e-firmware` and the v0.x follow-ups on the alp-sdk host side.
+**Status:** Research-only. Informs the first production firmware drop (now the
+embedded `firmware/cc3501e/` tree) and the v0.x follow-ups on the alp-sdk host side.
 **Trigger:** Maintainer asked for a deep SWRU626 read before host + firmware
 are wired the first time, so the wire protocol does not need a v1→v2 break
 the moment real packets start flowing.
+
+> **UPDATE (ADR 0015, 2026-06-13):** this plan predates the decision to
+> **embed** the CC3501E firmware in alp-sdk at
+> [`firmware/cc3501e/`](../firmware/cc3501e/) (like the gd32-bridge), rather
+> than create a separate `alplabai/cc3501e-firmware` repo.  References below to
+> that repo — including the acid-test ground rule and the §4.4 handoff
+> checklist — now mean the in-tree `firmware/cc3501e/` tree; the firmware
+> `#include`s the wire-protocol header directly (no mirror).  The
+> alp-sdk-vs-TI-SDK split still holds: TI SimpleLink code rides as an optional
+> submodule under `firmware/cc3501e/vendor/`, kept out of the default clone.
 **Sources read:**
 
 - TI SWRU626 Technical Reference Manual, December 2025 (~500 pages),

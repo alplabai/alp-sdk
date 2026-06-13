@@ -161,9 +161,12 @@ The AEN SoM's Wi-Fi/BLE bridge is the
 [`TI CC3501E`](cc3501e-bridge.md).  OTA payloads land on the
 Alif Ensemble main SoC through the inter-chip SPI1 bus, not
 the CC3501E's own flash.  The CC3501E firmware is **not** updated
-via the same OTA path -- it ships with a separate upgrade flow
-described in the CC3501E firmware repo
-([`alplabai/cc3501e-firmware`](https://github.com/alplabai/cc3501e-firmware)).
+via the same OTA path -- it has its own upgrade flow
+([`firmware/cc3501e/flash.py`](../firmware/cc3501e/flash.py) +
+the version-pinned blob under `firmware/cc3501e/prebuilt/`; the
+firmware source is embedded in alp-sdk at
+[`firmware/cc3501e/`](../firmware/cc3501e/) per
+[ADR 0015](adr/0015-cc3501e-firmware-embedded.md)).
 Decoupling the two firmwares means a failed CC3501E update can't
 brick the Alif side and vice versa.
 
