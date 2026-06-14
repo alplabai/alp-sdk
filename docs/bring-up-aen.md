@@ -177,9 +177,184 @@ These are optional per the SKU and the board.  See
 [`docs/soms/aen.md`](soms/aen.md) for the camera-mux truth table
 and the per-SKU display options.
 
-## 6. Going to production
+## 6. Bench-day bring-up runbook (first physical SoM)
 
-Once §1..5 pass:
+When the first physical AEN SoM lands on the bench, run this
+ordered checklist top-to-bottom.  Each step is a hard gate: do
+**not** advance until the prior one passes.  §1..§5 above carry
+the detailed wiring + register tables -- this section is the
+one-page sequence that ties them together, plus the three steps
+(mailbox controller, Ethos-U, model load) that bring-up adds on
+top of the per-subsystem checks.
+
+> Board target: **the first SoM to arrive is the E1M-AEN801 (E8).**
+> AEN701 (E7) is deprioritised and may never be produced -- AEN801
+> supersedes it (it adds the Ethos-U85 on top of the U55 pair), so
+> bench bring-up centres on the **E8** part.  E8 is fully supported on
+> **alp-sdk's own upstream Zephyr base (v4.4.0)** -- no fork needed:
+> `boards/alif/ensemble_e8_dk` ships our exact part, so the M55 targets
+> are **`ensemble_e8_dk/ae822fa0e5597ls0/rtss_he`** (M55-HE) /
+> **`ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`** (M55-HP), backed by the
+> `hal_alif` module pinned in our `west.yml`.  So on bench day you can
+> build + flash that **Alif E8 DevKit** board as the reference target
+> immediately.  (Alif's own `sdk-alif` / `zephyr_alif` fork -- board
+> `alif_e8_dk` -- and the CMSIS-Pack DFP (`alif_ensemble-cmsis-dfp`,
+> device `AE822FA0E5597`) are opt-in alternatives; Yocto/A32 is
+> `meta-alif-ensemble` branch **scarthgap**, `devkit-e8.conf` /
+> `appkit-e8.conf`.  Note E7 is not in upstream Zephyr v4.4 at all --
+> only e4/e6/e8/e1c -- another reason E8 leads.)  The only piece still to generate is the
+> **Alp-Lab carrier board**: the SKU preset declares
+> `alp_e1m_aen801_m55_hp` / `_m55_he`, derived from the Alif E8 SoC dtsi
+> but needing the E1M-EVK carrier overlay (board file pending -- see
+> [`docs/porting-new-som.md`](porting-new-som.md)).  The commands below
+> show the older `alif_e7_dk_rtss_he` form as the invocation *shape* --
+> substitute the E8 DevKit target above (or the alp-sdk carrier board
+> once generated).
+
+0. **Current-limited power-on + rail check.**  Bench supply at a
+   **1 A** limit on V_IN (§1).  Power on, watch steady-state
+   current settle to **~80..150 mA**, then probe V_3V3
+   (3.30 V ±2 %) and V_CORE (~0.90 V ±3 %).  A current trip or a
+   missing rail stops here -- see §1's PMIC-sequencer note.
+
+1. **SWD/J-Link attach + CPUID read.**  Wire the probe (§2),
+   then:
+
+   ```bash
+   pyocd cmd -t alif_e7        # or the J-Link Commander equivalent
+   ```
+
+   Read `DPIDR` ≈ `0x6BA02477`, halt, and confirm the M55 HP
+   `CPUID` = `0x410FD220` (r0p0).  Wrong values = wrong target
+   or reversed SWD wiring.
+
+2. **UART console capture.**  Wire USB-UART to UART0
+   (`USB_UART_TXD`/`_RXD`), 115200 8N1, open a terminal and
+   **log to a file** -- the boot ROM banner is the first thing
+   you want captured.  Power-cycle; expect the
+   `AlifSemi BootROM v1.x.y` banner within ~200 ms (§4).
+
+3. **EEPROM / board_id read over BRD_I2C.**  Confirm the 24C128
+   ACKs at `0x50` and dump the 128-byte Alp manifest (§3):
+
+   ```bash
+   i2cdetect -y 1                 # 0x50 must ACK
+   i2cdump  -y 1 0x50 b           # full manifest hexdump
+   ```
+
+   Cross-check the magic/SKU/CRC fields against
+   [`include/alp/hw_info.h`](../include/alp/hw_info.h).  An
+   unprogrammed manifest is fine on a fresh assembly -- program it
+   in §7 -- but a *non-ACKing* EEPROM is a wiring/pull-up fault.
+
+4. **CC3501E PING / GET_VERSION.**  Bring the on-module Wi-Fi/BLE
+   coprocessor to life over the inter-chip SPI1 bus.  Issue the
+   two META-group opcodes from the bridge host driver (see the
+   wire frame in `firmware/cc3501e/DESIGN.md`):
+   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`).
+   A standalone host-side helper for the M55 side is **TBD**
+   (only the device firmware + `flash.py` ship today), so drive
+   it from app code via the bridge dispatch for now.
+
+   * `PING` must return `RESP_OK` with empty data -- the liveness
+     signal.
+   * `GET_VERSION` must return the firmware's wire-protocol
+     version; cross-check it against
+     `firmware/cc3501e/prebuilt/CHANGELOG.md`.
+
+   No `RESP_OK` usually means the CC3501E hasn't been flashed yet
+   (`helper_firmware[].firmware_path` is still TBD in the SKU
+   preset) or the SPI1 CS/IRQ wiring is off.
+
+5. **Flash a Zephyr smoke image.**  Take the module over from the
+   Alif demo image with the SDK's first-build example (§4):
+
+   ```bash
+   west alp-build -b alif_e7_dk_rtss_he examples/peripheral-io/gpio-button-led
+   west flash
+   ```
+
+   Expect the
+   `[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED`
+   banner on the console.  This proves the toolchain, the board
+   file, and `west flash` end-to-end before anything harder.
+
+6. **Confirm the `mailbox.controller` value against the Alif HW
+   config.**  The SKU preset
+   ([`metadata/e1m_modules/E1M-AEN701.yaml`](../metadata/e1m_modules/E1M-AEN701.yaml),
+   `.../E1M-AEN801.yaml`) ships `mailbox.controller: TBD` with a
+   **candidate** of `alif_mhu` (Arm MHU; MHU0 + MHU1, 32-byte
+   payload limit -- see
+   [`docs/tutorials/15-mproc-mailbox.md`](tutorials/15-mproc-mailbox.md)).
+   The Alif Linux BSP corroborates **MHUv2** (`meta-alif-ensemble` +
+   `linux_alif` enable `apss-mhu` -> `mhuv2.cfg`), so the inter-core
+   mailbox IP is MHUv2 -- only the exact Zephyr binding name is unconfirmed.
+   On bench day, confirm the actual Zephyr binding name against
+   the **Alif hand-written HW-config doc** and the generated
+   board DTS, then promote TBD to the confirmed value in **both**
+   AEN701 + AEN801 presets.  Smoke-test it with the multicore
+   example:
+
+   ```bash
+   west alp-build -b alif_e7_dk_rtss_he examples/multicore/mproc-mailbox
+   west flash
+   ```
+
+   The HE↔HP round-trip on MBOX channel 0 must echo a 32-byte
+   message.  Until this step passes, treat `mailbox.controller`
+   as unverified -- do **not** commit a guessed value.
+
+7. **Ethos-U sanity.**  Confirm the NPU is visible to the runtime
+   before loading any model.  On the M55 side the Ethos-U55 is
+   driven in-process by the TFLM + Ethos-U driver, so the sanity
+   check is a built example that opens the NPU dispatcher and
+   reports the detected variant:
+
+   ```bash
+   west alp-build -b alif_e7_dk_rtss_he examples/aen/edgeai-vision-aen
+   west flash
+   ```
+
+   Expect the console to report the Ethos-U variant the SKU
+   preset declares (`u55` on AEN701; `u85` primary + dual `u55`
+   on AEN801 -- see the `inference.npu_population` block).  A
+   variant mismatch means the board DTS NPU node disagrees with
+   the SoC JSON `npus[]`.
+
+8. **Load a host-pre-compiled `.alpmodel` + Vela walkthrough.**
+   Final gate: prove the end-to-end model path.
+
+   1. On the **host**, compile + package the model(s) declared in
+      `board.yaml` `models:` into `.alpmodel` packages (the
+      backends, including Ethos-U / Vela, are derived from
+      `som.sku`):
+
+      ```bash
+      alp model build --board board.yaml   # emits build/models/<name>.alpmodel
+      ```
+
+   2. Bundle the `.alpmodel` with the app image, flash, and run
+      the inference example.  The runtime loads the package,
+      picks the `vela_tflite` blob matching the on-die Ethos-U
+      `accel_config` (`ethos-u85-256` / `ethos-u55-256` on
+      AEN801), and runs the first inference on the NPU.
+
+   3. Confirm the prediction matches the reference output within
+      floating-point tolerance -- the same end-to-end gate the
+      i.MX 93 bring-up uses in
+      [`bring-up-imx93.md`](bring-up-imx93.md) §6.3, here driven
+      from the M55 side rather than from Linux.
+
+   If the `.alpmodel` has no Ethos-U blob the loader falls back to
+   the CPU path -- correct behaviour, but it means the Vela target
+   in your model-compile config didn't match this SoM's NPU.
+
+Once §6's steps 0..8 all pass, the SoM is bench-validated; move
+to §7 to write the production manifest.
+
+## 7. Going to production
+
+Once §6's runbook passes:
 
 1. Use [`scripts/program_eeprom.py`](../scripts/program_eeprom.py)
    to write the production manifest (real serial, real mfg
@@ -193,7 +368,7 @@ Once §1..5 pass:
 3. Flash the signed image with `west flash`; the MCUboot
    secondary slot stays empty until OTA lands.
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 * **Boot ROM banner but then silence** -- usually a signed-
   image-rejected scenario.  Re-flash with the dev key or check

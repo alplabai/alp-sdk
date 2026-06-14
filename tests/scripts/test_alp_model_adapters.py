@@ -151,6 +151,25 @@ def test_vela_real_compile_of_tiny_fixture(tmp_path):
     assert blob.compiler_version.startswith("vela")
 
 
+@pytest.mark.skipif(shutil.which("vela") is None, reason="vela (ethos-u-vela) not installed")
+@pytest.mark.parametrize("accel_config", ["ethos-u85-256", "ethos-u55-256", "ethos-u55-128"])
+def test_vela_real_compile_for_e8_accel_configs(tmp_path, accel_config):
+    """Compile the committed fixture for each E1M-AEN801 (E8) accel config.
+
+    Proves the shipped Vela accepts every metadata-derived config string for
+    the arriving part -- including the E8-only ``ethos-u85-256`` generative NPU
+    -- and emits a vela_tflite blob (i.e. op-support + arena sizing).  It does
+    NOT prove the blob runs correctly on the U85; that is silicon + Ethos-U HAL
+    gated (alp_ethosu_aen_register() returns NOSUPPORT today).
+    """
+    src = tmp_path / "tiny.tflite"
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite", src)
+    blob = VelaAdapter().compile(src, accel_config=accel_config, out_dir=tmp_path)
+    assert blob.format == "vela_tflite"
+    assert blob.payload[4:8] == b"TFL3"
+    assert blob.compiler_version.startswith("vela")
+
+
 def test_cpu_and_vela_do_not_require_compile_opts():
     assert CpuAdapter().requires_compile_opts is False
     assert VelaAdapter().requires_compile_opts is False

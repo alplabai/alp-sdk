@@ -337,6 +337,147 @@ typedef struct {
 } alp_cc3501e_scan_result_t;
 
 /* ------------------------------------------------------------------ */
+/* TCP/UDP socket payload formats                                      */
+/* ------------------------------------------------------------------ */
+
+/** Socket type for @ref alp_cc3501e_sock_open_t::type.  Stored on the
+ *  wire as a single byte; the named values keep callers from shipping
+ *  magic numbers.  Mirrors the BSD SOCK_* split the firmware's IP stack
+ *  exposes.
+ *  Field-level meanings:
+ *   - STREAM: connection-oriented (TCP).
+ *   - DGRAM:  connectionless datagram (UDP). */
+typedef enum {
+    ALP_CC3501E_SOCK_TYPE_STREAM = 0u,
+    ALP_CC3501E_SOCK_TYPE_DGRAM  = 1u,
+} alp_cc3501e_sock_type_t;
+
+/** Address family for @ref alp_cc3501e_sock_open_t::family and the
+ *  family-tag byte of @ref alp_cc3501e_sock_addr_t.  Stored on the wire
+ *  as a single byte.  IPv6 is reserved in v1 (the firmware IP stack is
+ *  IPv4-only this rev; v2 firmware lands the IPv6 path).
+ *  Field-level meanings:
+ *   - IPV4: 32-bit IPv4 address in @ref alp_cc3501e_sock_addr_t::addr.
+ *   - IPV6: 128-bit IPv6 address (reserved in v1). */
+typedef enum {
+    ALP_CC3501E_SOCK_FAMILY_IPV4 = 0u,
+    ALP_CC3501E_SOCK_FAMILY_IPV6 = 1u,
+} alp_cc3501e_sock_family_t;
+
+/** Endpoint address shared by CMD_SOCK_CONNECT and the from-address of
+ *  a received datagram.  Fixed 16-byte body so an IPv6 address fits the
+ *  same slot once v2 firmware enables it; v1 firmware uses only the
+ *  first 4 bytes of @c addr (IPv4) and zero-fills the rest.
+ *  Field-level meanings:
+ *   - family: one of @ref alp_cc3501e_sock_family_t.
+ *   - port: TCP/UDP port, host byte order on this side; the firmware
+ *     converts to network order on the wire to the peer.
+ *   - addr: address bytes, big-endian (network order), left-justified
+ *     for the active family (IPv4 = addr[0..3]). */
+typedef struct {
+    uint8_t  family;
+    uint8_t  reserved;
+    uint16_t port;
+    uint8_t  addr[16];
+} alp_cc3501e_sock_addr_t;
+
+/** Payload of CMD_SOCK_OPEN (opcode 0x20).  Allocates a socket in the
+ *  firmware IP stack and returns a handle the host uses on every later
+ *  socket command.  The reply DATA is a single @ref
+ *  alp_cc3501e_sock_handle_t (the status byte precedes it per the frame
+ *  contract).
+ *  Field-level meanings:
+ *   - family: one of @ref alp_cc3501e_sock_family_t.
+ *   - type: one of @ref alp_cc3501e_sock_type_t.
+ *   - protocol: IP protocol number (0 = default for the type:
+ *     TCP for STREAM, UDP for DGRAM). */
+typedef struct {
+    uint8_t family;
+    uint8_t type;
+    uint8_t protocol;
+    uint8_t reserved;
+} alp_cc3501e_sock_open_t;
+
+/** Socket handle returned by CMD_SOCK_OPEN and supplied by the host on
+ *  every later socket command.  The firmware treats 0 as the invalid /
+ *  unallocated handle; a successful open returns a non-zero value.
+ *  Field-level meanings:
+ *   - handle: opaque firmware-side socket id. */
+typedef struct {
+    uint16_t handle;
+    uint8_t  reserved[2];
+} alp_cc3501e_sock_handle_t;
+
+/** Payload of CMD_SOCK_CONNECT (opcode 0x21).  For STREAM sockets this
+ *  starts the TCP handshake to @c peer; for DGRAM sockets it sets the
+ *  default peer used by later parameterless CMD_SOCK_SEND.  The reply
+ *  carries only the status byte.
+ *  Field-level meanings:
+ *   - handle: socket from CMD_SOCK_OPEN.
+ *   - peer: destination endpoint, @ref alp_cc3501e_sock_addr_t. */
+typedef struct {
+    uint16_t                handle;
+    uint16_t                reserved;
+    alp_cc3501e_sock_addr_t peer;
+} alp_cc3501e_sock_connect_t;
+
+/** Payload of CMD_SOCK_SEND (opcode 0x22).  The data bytes follow this
+ *  header packed inline (no padding).  data_len upper-bounds the frame
+ *  length (header + data_len still <= MAX_PAYLOAD).  The reply DATA is a
+ *  single uint16_t LE byte count actually queued by the firmware.
+ *  Field-level meanings:
+ *   - handle: socket from CMD_SOCK_OPEN.
+ *   - flags: send flags (bit 0 = MORE; further bits reserved 0).
+ *   - data_len: number of payload bytes that follow inline. */
+typedef struct {
+    uint16_t handle;
+    uint8_t  flags;
+    uint8_t  reserved;
+    uint16_t data_len;
+    uint16_t reserved2;
+    /* uint8_t data[data_len];   -- packed inline, no padding */
+} alp_cc3501e_sock_send_t;
+
+/** Payload of CMD_SOCK_RECV (opcode 0x23).  Requests up to max_len
+ *  bytes from the socket's receive queue.  The reply DATA is an
+ *  @ref alp_cc3501e_sock_recv_resp_t followed inline by the received
+ *  bytes (for DGRAM sockets the from-address is filled; for STREAM it
+ *  is zeroed).
+ *  Field-level meanings:
+ *   - handle: socket from CMD_SOCK_OPEN.
+ *   - max_len: host receive-buffer capacity for this request. */
+typedef struct {
+    uint16_t handle;
+    uint16_t max_len;
+} alp_cc3501e_sock_recv_t;
+
+/** Reply DATA header for CMD_SOCK_RECV (precedes the received bytes,
+ *  which follow inline with no padding).  data_len == 0 means no data
+ *  was available (non-blocking semantics; the status is still
+ *  ALP_CC3501E_RESP_OK).
+ *  Field-level meanings:
+ *   - from: peer endpoint for DGRAM sockets (@ref
+ *     alp_cc3501e_sock_addr_t); zeroed for STREAM sockets.
+ *   - data_len: number of received bytes that follow inline. */
+typedef struct {
+    alp_cc3501e_sock_addr_t from;
+    uint16_t                data_len;
+    uint16_t                reserved;
+    /* uint8_t data[data_len];   -- packed inline, no padding */
+} alp_cc3501e_sock_recv_resp_t;
+
+/** Payload of CMD_SOCK_CLOSE (opcode 0x24).  Releases the firmware-side
+ *  socket and (for STREAM) issues the TCP teardown.  After close the
+ *  handle is invalid and the firmware may reuse its value.  The reply
+ *  carries only the status byte.
+ *  Field-level meanings:
+ *   - handle: socket from CMD_SOCK_OPEN. */
+typedef struct {
+    uint16_t handle;
+    uint16_t reserved;
+} alp_cc3501e_sock_close_t;
+
+/* ------------------------------------------------------------------ */
 /* BLE advertising / scanning payload formats                          */
 /* ------------------------------------------------------------------ */
 

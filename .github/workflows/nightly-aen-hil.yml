@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   hil:
-    name: HIL · E1M-AEN701 dev kit
+    name: HIL · E1M-AEN801 dev kit
     # The runner must self-identify with these labels.  Until a
     # physical runner registers with `hil-aen` GitHub queues the
     # job indefinitely; manual `workflow_dispatch` triggers a no-op
@@ -58,7 +58,7 @@ jobs:
             west zephyr-export
           fi
 
-      - name: Build peripheral test for E1M-AEN701
+      - name: Build peripheral test for E1M-AEN801
         env:
           ZEPHYR_BASE: ${{ env.HOME }}/zephyrproject/zephyr
           EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
@@ -92,7 +92,7 @@ jobs:
           fi
 
       # ---- HiL smoke specs -------------------------------------------------
-      # Drives every *.yaml under tests/hil/_common/ + the aen701-evk
+      # Drives every *.yaml under tests/hil/_common/ + the aen801-evk
       # board dir through the standard runner (build + flash + serial
       # capture + assertion).  Each spec covers one peripheral OR (since
       # v0.6) one declarative board.yaml block:
@@ -105,7 +105,7 @@ jobs:
       # The runner exits 0 if every spec asserts cleanly, 1 if any fail,
       # 2 on invocation error.  Skipped when the board-target module
       # isn't published yet (same gate as the ztest build above).
-      - name: HiL smoke -- _common + AEN701 board specs
+      - name: HiL smoke -- _common + AEN801 board specs
         if: success()
         env:
           ZEPHYR_BASE: ${{ env.HOME }}/zephyrproject/zephyr
@@ -116,8 +116,8 @@ jobs:
             exit 0
           fi
           cd ${{ github.workspace }}/alp-sdk
-          python3 tests/hil/run_smoke.py --validate tests/hil/aen701-evk/
-          python3 tests/hil/run_smoke.py tests/hil/aen701-evk/
+          python3 tests/hil/run_smoke.py --validate tests/hil/aen801-evk/
+          python3 tests/hil/run_smoke.py tests/hil/aen801-evk/
 
       - name: Upload HIL artefacts
         if: always()

@@ -49,7 +49,13 @@ def test_alp_model_build_threads_compile_opts(tmp_path, monkeypatch):
 
 def test_alp_model_build_emits_alpmodel(tmp_path):
     (tmp_path / "models").mkdir()
-    (tmp_path / "models" / "m.tflite").write_bytes(b"TFL3-DUMMY")
+    # A real (compilable) fixture, not dummy bytes: E1M-AEN701 resolves ethos_u
+    # targets, so when `vela` is installed (dev/bench boxes, per running-local-ci)
+    # the build invokes the real compiler -- which rejects garbage. The tiny
+    # fixture compiles on cpu and (when present) vela alike, keeping this green
+    # regardless of whether the Ethos-U toolchain is on PATH.
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite",
+                tmp_path / "models" / "m.tflite")
     (tmp_path / "board.yaml").write_text(
         "name: demo\n"
         "som:\n  sku: E1M-AEN701\n"

@@ -124,7 +124,7 @@ in [`docs/cc3501e-bridge.md`](../../docs/cc3501e-bridge.md)
 | Bridge architecture + GPIO behaviour contract | [`docs/cc3501e-bridge.md`](../../docs/cc3501e-bridge.md) |
 | Inter-chip wiring (SPI1 / SDIO / control lines) | [`metadata/e1m_modules/aen/inter-chip.tsv`](../../metadata/e1m_modules/aen/inter-chip.tsv) |
 | E1M ↔ CC3501E pad routing | [`metadata/e1m_modules/aen/from-cc3501e.tsv`](../../metadata/e1m_modules/aen/from-cc3501e.tsv) |
-| v0.1 scope + wire-reply contract + reconciliation items | [`DESIGN.md`](DESIGN.md) |
+| v0.1 scope + wire-reply contract + reconciliation items | `DESIGN.md` |
 
 ## Versioning
 

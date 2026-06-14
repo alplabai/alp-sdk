@@ -8,8 +8,10 @@
 # prj.conf via OVERLAY_CONFIG.
 
 som:
-  sku: E1M-AEN701          # Alif Ensemble E7 -- has the Ethos-U55 NPU
-                            # this example dispatches inference to.
+  sku: E1M-AEN801          # Alif Ensemble E8 (the lead AEN part) -- carries
+                            # a pair of Ethos-U55s (vision) + an Ethos-U85
+                            # (generative) this example dispatches inference
+                            # to, plus the on-die Mali-C55 ISP + JPEG encoder.
 
 preset: e1m-evk            # EVK preset populates lsm6dso + ssd1306 on
                            # I2C0; this demo adds an encoder-switch
@@ -26,7 +28,7 @@ pins:
 # Single-OS app: the M55-HP core runs the vision pipeline + dispatches
 # to the NPU bonded to it via topology.  M55-HE keeps the SoM
 # topology default (stock-shim Zephyr image) so the peer-NPU stays
-# powered for fallback.  The A32 cluster on E7 is not used here;
+# powered for fallback.  The A32 cluster on E8 is not used here;
 # defaults Linux on for A-cores so opt-out explicitly via `os: off`.
 cores:
   a32_cluster:
