@@ -72,6 +72,25 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../wdt_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rtc/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/wdt/sw_fallback.c
+    # CAN / PWM / ADC / I2S / Counter migrate onto the same registry /
+    # dispatcher pattern (Yocto first-class peripheral slice).  The
+    # dispatchers own the public alp_{can,pwm,adc,i2s,counter}_* symbols
+    # (stub_backend.c + the old peripheral_{can,i2s}.c direct-impl stubs
+    # are muted / dropped below via ALP_VENDOR_OVERRIDES_<CLASS>).  The
+    # sw_fallback backends are the portable priority-0 catch-alls; the
+    # real Linux backends (SocketCAN / sysfs-pwm / IIO / ALSA / Counter
+    # subsystem) live in backends/<class>/yocto_drv.c and are added in
+    # the Linux block (they self-gate on __linux__).
+    ${CMAKE_CURRENT_SOURCE_DIR}/../can_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../pwm_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../adc_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../i2s_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../counter_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/can/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/pwm/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/adc/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/i2s/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/counter/sw_fallback.c
     # The shared dispatchers call alp_z_set_last_error/clear (defined
     # Zephyr-side in src/zephyr/last_error.c, which the Yocto build does
     # not compile).  This shim forwards them onto the common last-error
@@ -101,14 +120,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio.c
-        # CAN / I2S still carry Yocto-side NOSUPPORT stubs that stamp
-        # alp_last_error so apps detect-and-fallback at runtime rather
-        # than discovering the gap at link time via the umbrella
-        # stub_backend.c bodies.  Real Linux backends (SocketCAN, ALSA)
-        # land alongside the rest of the Yocto first-class peripheral
-        # work tracked in VERSIONS.md.
-        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_can.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2s.c
+        # CAN / PWM / ADC / Counter are now REAL registry backends, not
+        # the old direct-impl NOSUPPORT stubs: backends/<class>/yocto_drv.c
+        # drive SocketCAN (PF_CAN/CAN_RAW), the sysfs PWM class, the IIO
+        # sysfs ADC interface, and the Linux Counter subsystem sysfs, and
+        # register into the per-class sections at priority 100 (vendor
+        # "linux").  Their dispatchers + sw_fallback + backend.c are pulled
+        # in unconditionally above; these files self-gate on __linux__.
+        # (The former peripheral_can.c / peripheral_i2s.c direct-impl stubs
+        # are dropped: the dispatcher now owns alp_can_*/alp_i2s_*.  I2S is
+        # gated below behind pkg_check_modules(ALSA), mirroring audio_yocto.c.)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/can/yocto_drv.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/pwm/yocto_drv.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/adc/yocto_drv.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/counter/yocto_drv.c
         # RTC + WDT are now REAL registry backends (#33), not stubs:
         # backends/{rtc,wdt}/yocto_drv.c drive /dev/rtcN + /dev/watchdogN
         # via <linux/rtc.h> / <linux/watchdog.h> ioctls and register into
@@ -129,7 +154,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ALP_VENDOR_OVERRIDES_UART=1
         ALP_VENDOR_OVERRIDES_GPIO=1
         ALP_VENDOR_OVERRIDES_CAN=1
+        ALP_VENDOR_OVERRIDES_PWM=1
+        ALP_VENDOR_OVERRIDES_ADC=1
         ALP_VENDOR_OVERRIDES_I2S=1
+        ALP_VENDOR_OVERRIDES_COUNTER=1
         ALP_VENDOR_OVERRIDES_RTC=1
         ALP_VENDOR_OVERRIDES_WDT=1
     )
@@ -216,6 +244,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         if(ALSA_FOUND)
             target_sources(alp_sdk PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/audio_yocto.c
+                # I2S real backend over ALSA (snd_pcm_*).  Gated behind the
+                # same pkg_check_modules(ALSA) as audio_yocto.c: when ALSA
+                # isn't on the sysroot the i2s_dispatch + sw_fallback (linked
+                # unconditionally above) still own alp_i2s_* and the class
+                # degrades to the portable fallback rather than failing to
+                # link against libasound.
+                ${CMAKE_CURRENT_SOURCE_DIR}/../backends/i2s/yocto_drv.c
             )
             target_compile_definitions(alp_sdk PRIVATE
                 ALP_VENDOR_OVERRIDES_AUDIO_IN=1
@@ -225,7 +260,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         else()
             message(STATUS
                 "alp-sdk yocto: ALSA libasound not found via pkg-config; "
-                "alp_audio_* stays NOSUPPORT.  Install libasound2-dev "
+                "alp_audio_* stays NOSUPPORT and alp_i2s_* degrades to the "
+                "sw_fallback backend.  Install libasound2-dev "
                 "(Debian/Ubuntu) or the matching Yocto recipe to enable.")
         endif()
     endif()
