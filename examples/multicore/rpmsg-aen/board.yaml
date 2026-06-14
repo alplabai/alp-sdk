@@ -6,7 +6,7 @@
 #
 #   * `a32_cluster` -- Yocto Linux consumer under `linux/`.
 #   * `m55_hp`      -- Zephyr producer under `m55_hp/` reading the
-#                       board's on-board LSM6DSO + BMP581 sensors
+#                       board's on-board BMP581 + BMI323 sensors
 #                       and publishing them over RPMsg.
 #   * `m55_he`      -- left at the SoM topology default (stock-shim
 #                       Zephyr image); the always-on M55-HE core
@@ -31,8 +31,8 @@ som:
   sku: E1M-AEN701
   hw_rev: r1
 
-preset: e1m-evk             # LSM6DSO + BMP581 already populated by
-                            # the EVK preset defaults.
+preset: e1m-evk             # BMP581 + BMI323 (on-board IMU) are
+                            # populated by the EVK preset defaults.
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:

@@ -701,7 +701,8 @@ def test_slugs_from_on_module_v2n101() -> None:
 
 def test_slugs_from_on_module_aen701() -> None:
     """AEN701 on_module: cc3501e, optiga_trust_m, rv3028c7, tmp112,
-    eeprom_24c128 present; TBD ospi entries excluded."""
+    eeprom_24c128 present; ospi_memories / hyperram storage MPNs are
+    excluded (they have no chips/<part>/ driver)."""
     import yaml
     with open(REPO / "metadata" / "e1m_modules" / "E1M-AEN701.yaml",
               encoding="utf-8") as f:
@@ -714,6 +715,11 @@ def test_slugs_from_on_module_aen701() -> None:
 
     assert "TBD" not in slugs, "TBD values must be excluded"
     assert "alif:ensemble:e7" not in slugs, "silicon field must be excluded"
+    # Storage MPNs (OSPI NOR flash + HyperRAM) are NOT chip-driver slugs:
+    # they have no chips/<part>/ driver, so emitting them as
+    # CONFIG_ALP_SDK_CHIP_<X> would trip Zephyr's undefined-symbol guard.
+    assert "MX25UM25645GXDI00" not in slugs, "OSPI flash MPN must not be a chip slug"
+    assert "W958D8NBYA5I" not in slugs, "HyperRAM MPN must not be a chip slug"
 
 
 def test_slugs_from_on_module_nx9101_tbd_filtered() -> None:
@@ -1426,17 +1432,18 @@ def test_resolve_storage_partitions_blocks_on_tbd_ospi(
     tmp_path: Path,
 ) -> None:
     """A partition pointing at an ospi_memories: entry with capacity_mbit
-    TBD must block with a clear reason -- AEN301 has this shape today
-    (capacity_mbit: TBD), so the storage emitter should not silently
-    allocate against unknown capacity."""
-    # AEN301 declares on_module.ospi_memories.ospi0 with capacity_mbit: TBD.
+    TBD must block with a clear reason -- AEN301 declares ospi1 with
+    capacity_mbit: TBD (ospi0 carries the known 256-Mbit NOR flash on
+    CS0), so the storage emitter should not silently allocate against the
+    unknown ospi1 capacity."""
+    # AEN301 declares on_module.ospi_memories.ospi1 with capacity_mbit: TBD.
     body = """
     name: test-aen-ospi-tbd
     som: { sku: E1M-AEN301 }
     cores:
       m55_hp: { os: zephyr, app: ./m55_hp }
     storage:
-      - { name: app_data, size_kib: 64, fs: littlefs, flash_device: ospi0 }
+      - { name: app_data, size_kib: 64, fs: littlefs, flash_device: ospi1 }
     """
     path = _write_board(tmp_path, body)
     project = load_board_yaml(path)
@@ -1445,7 +1452,7 @@ def test_resolve_storage_partitions_blocks_on_tbd_ospi(
     assert parts[0].status == "blocked"
     reason = parts[0].reason or ""
     assert "TBD" in reason
-    assert "ospi0" in reason
+    assert "ospi1" in reason
 
 
 def test_emit_system_manifest_carries_storage(tmp_path: Path) -> None:

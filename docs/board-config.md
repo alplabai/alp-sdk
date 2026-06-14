@@ -277,9 +277,11 @@ The schema deliberately separates two concerns that get conflated:
 On E1M-AEN, the on-module parts are: Alif Ensemble silicon, TI
 CC3501E (Wi-Fi/BLE), Infineon OPTIGA Trust M, Micro Crystal
 RV-3028-C7 RTC, TI TMP112, Onsemi 24C128 EEPROM.  Everything else
-on the dev kit (LSM6DSO, BMI323, ICM-42670, BMP581, OLEDs, OV5640,
-TAS2563, INA236, ...) is on the **E1M-EVK board**, not on the
-module.
+on the dev kit (BMI323, ICM-42670, BMP581, TAS2563, INA236, the
+camera mux, ...) is on the **E1M-EVK board**, not on the module.
+LSM6DSO and an SSD1306 OLED are not soldered on the EVK -- apps that
+want them attach the part to the I2C/Qwiic header and declare it in
+their board.yaml `chips:` array.
 
 ### `som` block
 

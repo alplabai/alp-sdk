@@ -2601,7 +2601,7 @@ _ON_MODULE_NON_CHIP_FIELDS: frozenset[str] = frozenset({
     "silicon",             # e.g. "renesas:rzv2n:n44" — SoC identifier, not a driver
     "ethernet_phy_count",  # integer count, not a chip slug
     "i2c_devices",         # sub-block: handled by extracting chip: entries below
-    "ospi_memories",       # sub-block: handled by extracting chip: entries below
+    "ospi_memories",       # sub-block: storage parts (flash/HyperRAM); MPNs have no chips/ driver -- excluded like nor_flash/emmc below
     # Storage-class fields encode the SoC controller / peripheral name
     # that reaches the on-module storage (e.g. `nor_flash: xspi` -> the
     # NOR flash is wired to the xSPI controller; `emmc: sd0` -> eMMC on
@@ -2618,10 +2618,13 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
     """Extract unique, non-TBD chip slugs from an ``on_module:`` block.
 
     Walks every scalar field that is NOT in ``_ON_MODULE_NON_CHIP_FIELDS``,
-    then recurses into the ``ospi_memories`` sub-block (extracting the
-    ``chip:`` field from each memory entry) and the ``i2c_devices``
-    sub-block (extracting the ``chip:`` field from each device entry).
-    Duplicate slugs and values of ``TBD`` / ``null`` are silently dropped.
+    then recurses into the ``i2c_devices`` sub-block (extracting the
+    ``chip:`` field from each device entry).  ``ospi_memories`` and the
+    ``hyperram`` block are storage parts (NOR flash / HyperRAM) with no
+    ``chips/<part>/`` driver, so their MPNs are NOT extracted as chip
+    slugs (emitting them as ``CONFIG_ALP_SDK_CHIP_<X>`` would trip
+    Zephyr's undefined-symbol guard).  Duplicate slugs and values of
+    ``TBD`` / ``null`` are silently dropped.
 
     Returns a sorted, deduplicated list of slug strings.
     """
@@ -2642,15 +2645,7 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
         if isinstance(val, str):
             _add(val)
 
-    # 2. ospi_memories sub-block — each value is a dict with a `chip:`
-    #    key.
-    ospi = on_module.get("ospi_memories")
-    if isinstance(ospi, dict):
-        for _slot, entry in ospi.items():
-            if isinstance(entry, dict):
-                _add(entry.get("chip"))
-
-    # 3. i2c_devices sub-block — each bus entry contains a `devices:`
+    # 2. i2c_devices sub-block — each bus entry contains a `devices:`
     #    list; extract the `chip:` field from each device.
     #    Devices marked `assembled: optional` are DNI (do-not-install)
     #    on some builds and must NOT be auto-enabled as chip drivers —

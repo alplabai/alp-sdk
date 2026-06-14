@@ -34,15 +34,24 @@ on_module:
   eeprom:               eeprom_24c128       # Onsemi N24S128C4DYT3G (128-Kbit I2C)
   ospi_memories:
     ospi0:
-      chip:           TBD            # part MPN pending HW design freeze
-      assembled:      optional       # BOM variant
-      capacity_mbit:  TBD            # density pending HW design freeze
+      chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
+      assembled:      optional            # BOM variant
+      capacity_mbit:  256                 # 256 Mbit (32 MiB)
+      chip_select:    0                   # OSPI0 CS0
       role:           app_storage
     ospi1:
-      chip:           TBD
-      assembled:      optional
+      chip:           TBD            # OSPI1 controller unused on this SoM: both OSPI devices
+      assembled:      optional       # share the OSPI0 octal bus (NOR = CS0, HyperRAM = CS1)
       capacity_mbit:  TBD
       role:           data_log
+  # External HyperRAM -- volatile XIP / scratch RAM, separate from the
+  # NOR flash above.  Shares the OSPI0 octal controller with the flash,
+  # separated only by chip-select (NOR flash = CS0, HyperRAM = CS1).
+  hyperram:
+    chip:           W958D8NBYA5I    # Winbond OctalRAM (HyperBus)
+    capacity_mbit:  256             # 256 Mbit (32 MiB)
+    interface:      ospi0
+    chip_select:    1
 
 # Inference defaults -- silicon-determined.  `preferred_backend` is
 # consumed by the build to set the default per-handle dispatcher when
