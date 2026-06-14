@@ -119,6 +119,21 @@ nm-audited (one owner per public symbol; backends export only the registry struc
 BENCH-UNVERIFIED.  The remaining `mqtt` / `security` classes stay on the direct-impl model
 until their vendor headers are available in CI to compile-test the migration.  (#33)
 
+### Changed — DAC migrated to the registry; `<alp/dac.h>` split out of `adc.h`
+
+DAC was the last peripheral class still on the legacy Zephyr-only direct-impl model
+(`src/zephyr/peripheral_dac.c`).  It now uses the registry/dispatcher pattern like every
+other class: new `src/dac_dispatch.c` (owns the public `alp_dac_*`) + `src/backends/dac/`
+with `zephyr_drv.c` (native Zephyr DAC), `gd32_bridge.c` (V2N GD32 bridge via the
+`v2n_supervisor`, registered for `renesas:rzv2n:n44`), and a `sw_fallback.c` — vendor bodies
+moved verbatim.  The public DAC surface (`alp_dac_open` / `write_mv` / `read_mv` / `close`,
+**unchanged signatures**) splits out of `<alp/adc.h>` into its own **`<alp/dac.h>`** (the
+per-class-header convention); consumers now `#include <alp/dac.h>`.  This also unblocks a
+future cross-core DAC RPMsg proxy on V2N-M1.  The native + sw_fallback paths are
+native_sim-testable; the GD32 path stays bench-unverified.  (The ABI snapshot diff flags the
+`alp_dac_*` move adc.h→dac.h, but the symbols/signatures are unchanged — a source-include
+reorganization, not a binary break; the advisory pre-1.0 gate does not enforce it.)  (#33)
+
 ### Fixed — orchestrator: resolve no command for the stock M-core shim
 
 `scripts/alp_orchestrate.py` no longer emits a broken `west build` for the

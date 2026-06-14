@@ -508,17 +508,6 @@ config ALP_SDK_PERIPH_PWM
 	  RZ/V2N has no PWM peripherals per soc_caps; all eight E1M
 	  channels reach the GD32 IO-MCU.
 
-config ALP_SDK_PERIPH_DAC
-	bool "Enable <alp/adc.h> DAC half (alp_dac_*)"
-	default y if DAC || ALP_SDK_V2N_SUPERVISOR
-	help
-	  Compile src/zephyr/peripheral_dac.c.  Provides alp_dac_*
-	  on top of Zephyr's dac_* API (alp-dac0..alp-dac1 DT aliases).
-	  On V2N (CONFIG_ALP_SOC_RENESAS_RZV2N_N44), the wrapper
-	  dispatches through the GD32 supervisor singleton instead of
-	  resolving DT aliases -- the Renesas RZ/V2N has no DAC
-	  peripherals.
-
 config ALP_SDK_PERIPH_ADC
 	bool "Enable <alp/adc.h> wrapper"
 	default y if ADC

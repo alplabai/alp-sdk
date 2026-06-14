@@ -41,7 +41,6 @@
         k_mutex_unlock(&kind##_lock);                                      \
     }
 
-DEFINE_POOL(dac,     CONFIG_ALP_SDK_MAX_DAC_HANDLES,     alp_dac)
 DEFINE_POOL(adc_stream, CONFIG_ALP_SDK_MAX_ADC_STREAM_HANDLES, alp_adc_stream)
 
 #if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)

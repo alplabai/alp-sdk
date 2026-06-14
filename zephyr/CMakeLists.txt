@@ -243,8 +243,23 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP
 # v0.2 peripheral wrappers — opt-in per-class so apps that don't use
 # a given Zephyr subsystem don't link the wrapper.  Each defaults on
 # when its underlying Zephyr driver class is enabled.
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_DAC
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/peripheral_dac.c)
+# DAC class dispatcher.  Owns the alp_dac_* API surface
+# (alp_dac_open / write_mv / read_mv / close) and routes through the
+# backend registry.  Backends register under .alp_backends_dac and
+# ship from src/backends/dac/*.c.  The dispatcher compiles
+# unconditionally (mirrors rtc_dispatch); the zephyr_drv backend
+# guards its DT-alias body on CONFIG_DAC internally.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/dac_dispatch.c)
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dac/zephyr_drv.c)
+
+if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dac/gd32_bridge.c)
+endif()
+
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dac/sw_fallback.c)
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/rtc_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_RTC
