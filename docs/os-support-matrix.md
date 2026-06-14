@@ -78,11 +78,11 @@ plan in `VERSIONS.md`.
 
 | Library                   | AEN E5..E8: a32_cluster Yocto | V2N: a55_cluster Yocto | V2N-M1: a55_cluster Yocto | iMX93: a55_cluster Yocto |
 |---------------------------|-------------------------------|------------------------|---------------------------|--------------------------|
-| **PWM** (`<alp/pwm.h>`)   | planned                       | planned                | planned                   | planned |
-| **ADC** (`<alp/adc.h>`)   | planned                       | planned                | planned                   | planned |
-| **Counter / QEnc** (`<alp/counter.h>`) | planned          | planned                | planned                   | planned |
-| **I²S / SAI** (`<alp/i2s.h>`) | planned                   | planned                | planned                   | planned |
-| **CAN / CAN-FD** (`<alp/can.h>`) | planned                | planned                | planned                   | planned |
+| **PWM** (`<alp/pwm.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
+| **ADC** (`<alp/adc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
+| **Counter / QEnc** (`<alp/counter.h>`) | code complete¹  | code complete¹         | code complete¹            | code complete¹            |
+| **I²S / SAI** (`<alp/i2s.h>`) | code complete¹ (ALSA)     | code complete¹ (ALSA)  | code complete¹ (ALSA)     | code complete¹ (ALSA)     |
+| **CAN / CAN-FD** (`<alp/can.h>`) | code complete¹         | code complete¹         | code complete¹            | code complete¹            |
 | **RTC** (`<alp/rtc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
 | **Watchdog** (`<alp/wdt.h>`) | code complete¹             | code complete¹         | code complete¹            | code complete¹            |
 | **Audio** (`<alp/audio.h>`) | planned                     | planned                | planned                   | planned |
@@ -104,11 +104,15 @@ plan in `VERSIONS.md`.
 | **Camera** (`<alp/camera.h>`) | planned              | planned                  | planned                   | planned                   | stub               | stub                 | stub               |
 | **IoT** (`<alp/iot.h>`)   | **GA** (Wi-Fi+MQTT)      | **GA** (Wi-Fi+MQTT)      | **GA** (Wi-Fi+MQTT)       | **GA** (Wi-Fi+MQTT)       | stub               | stub                 | stub               |
 
-¹ **code complete** — RTC + Watchdog migrated to the registry/dispatcher pattern
-with real Linux backends (`/dev/rtcN` + `/dev/watchdogN` ioctls) in the v0.8 cycle
-(issue #33), which also lands `alp_rtc_capabilities()` / `alp_wdt_capabilities()`
-on Yocto.  The full Yocto link + on-target ioctl run are still HIL-gated; the other
-four Yocto classes (mqtt / audio / security / rpc) still use the direct-impl model.
+¹ **code complete** — migrated to the registry/dispatcher pattern with real Linux
+backends in the v0.8 cycle (issue #33), which also lands the per-class
+`alp_<class>_capabilities()` getter on Yocto:
+RTC (`/dev/rtcN`), Watchdog (`/dev/watchdogN`), CAN (SocketCAN), PWM (`/sys/class/pwm`),
+ADC (IIO sysfs), Counter (Linux Counter sysfs), and I²S (ALSA — gated on `libasound`,
+falls back to the stub when absent).  Each compiles + passes an nm symbol-ownership
+audit, but the **full Yocto link + on-target run are HIL-gated** (no sysroot / real
+device nodes in CI).  The other three Yocto classes (audio / security / rpc — already
+real via the direct-impl model) and the cross-core RPMsg proxy are separate slices.
 
 ### Cross-cutting v0.2 capability infrastructure
 

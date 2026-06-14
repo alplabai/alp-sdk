@@ -93,6 +93,20 @@ via the `WDIOC_*` ioctls (`src/backends/wdt/yocto_drv.c`) — which also lands
 classes (mqtt / audio / security / rpc) follow in a later slice.  **Yocto-link +
 on-target ioctl run UNVERIFIED** (no sysroot in CI).  (#33)
 
+### Added — Yocto PWM / ADC / CAN / I²S / Counter: real Linux backends on the registry
+
+Extends the Yocto registry migration to five more peripheral classes (the "planned"
+A-class rows), each a real Linux userspace backend: **CAN** SocketCAN
+(`src/backends/can/yocto_drv.c`), **PWM** `/sys/class/pwm` sysfs, **ADC** IIO sysfs,
+**I²S** ALSA (`snd_pcm_*`, CMake-gated on `libasound`), and **Counter/QEnc** the Linux
+Counter sysfs.  Wired via the dispatcher pattern (`ALP_VENDOR_OVERRIDES_*` so the
+dispatchers own the public symbols; nm-audited); deleted the orphaned
+`peripheral_can.c` / `peripheral_i2s.c`; fixed `pwm/sw_fallback.c` to drop a
+Zephyr-only `CONTAINER_OF` include so it builds on the Yocto host.  Non-standard ops
+(CAN out-of-band bitrate, PWM dead-time/one-shot/capture, Counter alarms) honestly
+return `ALP_ERR_NOSUPPORT`.  **BENCH-UNVERIFIED** — full Yocto link + on-target runs
+(real `/dev`/sysfs nodes, a CAN bus, an I²S codec) need the sysroot/board.  (#33)
+
 ### Fixed — orchestrator: resolve no command for the stock M-core shim
 
 `scripts/alp_orchestrate.py` no longer emits a broken `west build` for the
