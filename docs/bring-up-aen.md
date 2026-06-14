@@ -190,16 +190,19 @@ top of the per-subsystem checks.
 > Board target: **the first SoM to arrive is the E1M-AEN801 (E8).**
 > AEN701 (E7) is deprioritised and may never be produced -- AEN801
 > supersedes it (it adds the Ethos-U85 on top of the U55 pair), so
-> bench bring-up centres on the **E8** part.  Alif ships full E8 support:
-> the Zephyr board is **`alif_e8_dk`** — target
-> `alif_e8_dk/ae822fa0e5597xx0/rtss_he` (M55-HE) /
-> `.../rtss_hp` (M55-HP), plus an `apss` target for the A32 Linux side —
-> in `alifsemi/zephyr_alif` + the `sdk-alif` ZAS release; the CMSIS-Pack
-> DFP (`alif_ensemble-cmsis-dfp`, device `AE822FA0E5597`) is the VS Code
-> path; and Yocto is `meta-alif-ensemble` (branch **scarthgap**, which
-> matches alp-sdk) with `devkit-e8.conf` / `appkit-e8.conf`.  So on bench
-> day you can build + flash against the **Alif E8 DevKit** board as the
-> reference target immediately.  The only piece still to generate is the
+> bench bring-up centres on the **E8** part.  E8 is fully supported on
+> **alp-sdk's own upstream Zephyr base (v4.4.0)** -- no fork needed:
+> `boards/alif/ensemble_e8_dk` ships our exact part, so the M55 targets
+> are **`ensemble_e8_dk/ae822fa0e5597ls0/rtss_he`** (M55-HE) /
+> **`ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`** (M55-HP), backed by the
+> `hal_alif` module pinned in our `west.yml`.  So on bench day you can
+> build + flash that **Alif E8 DevKit** board as the reference target
+> immediately.  (Alif's own `sdk-alif` / `zephyr_alif` fork -- board
+> `alif_e8_dk` -- and the CMSIS-Pack DFP (`alif_ensemble-cmsis-dfp`,
+> device `AE822FA0E5597`) are opt-in alternatives; Yocto/A32 is
+> `meta-alif-ensemble` branch **scarthgap**, `devkit-e8.conf` /
+> `appkit-e8.conf`.  Note E7 is not in upstream Zephyr v4.4 at all --
+> only e4/e6/e8/e1c -- another reason E8 leads.)  The only piece still to generate is the
 > **Alp-Lab carrier board**: the SKU preset declares
 > `alp_e1m_aen801_m55_hp` / `_m55_he`, derived from the Alif E8 SoC dtsi
 > but needing the E1M-EVK carrier overlay (board file pending -- see
