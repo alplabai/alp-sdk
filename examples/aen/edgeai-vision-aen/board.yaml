@@ -13,11 +13,12 @@ som:
                             # (generative) this example dispatches inference
                             # to, plus the on-die Mali-C55 ISP + JPEG encoder.
 
-preset: e1m-evk            # EVK preset populates lsm6dso + ssd1306 on
-                           # I2C0; this demo adds an encoder-switch
-                           # trigger (GPIO) + an RGB-red status LED
-                           # (the PWM3 pad as a GPIO) from the routes
-                           # below.
+preset: e1m-evk            # Forks the EVK preset.  lsm6dso + ssd1306 are
+                           # NOT soldered on the EVK -- this demo attaches
+                           # them to the I2C0 header and declares them in the
+                           # `chips:` array below.  It also adds an encoder-
+                           # switch trigger (GPIO) + an RGB-red status LED
+                           # (the PWM3 pad as a GPIO) from the routes below.
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
@@ -42,6 +43,14 @@ cores:
                                 # only tunes the per-model arena size.
                                 # Vela-compiled .tflite picks up the
                                 # on-die NPU at alp_inference_open time.
+
+# External parts this demo attaches to the EVK's I2C0 header (the EVK
+# solders neither): a 6-axis IMU + a 128x64 mono OLED for status text.
+# Listing them here flips on their chip drivers independently of the
+# board's `populated:` block.
+chips:
+  - lsm6dso                # 6-axis IMU (I2C) -- plug-in module.
+  - ssd1306                # 128x64 mono OLED (I2C) -- plug-in module.
 
 diagnostics:
   log_level: info

@@ -7,10 +7,10 @@
 # source builds against the V2N's DEEPX DX-M1 path when the SoM SKU
 # is flipped.
 #
-# Why ICM-42670 instead of LSM6DSO: the ICM-42670-P is present on
-# BOTH EVK variants; the LSM6DSO is fitted only on the E1M EVK (AEN).
-# Using ICM-42670 lets the demo target both boards without hardware
-# qualification branching.
+# Why ICM-42670: the ICM-42670-P is soldered on BOTH EVK variants
+# (E1M EVK + E1M-X EVK).  The LSM6DSO is not soldered on either board,
+# so using the on-board ICM-42670 lets the demo target both without
+# hardware qualification branching or an external plug-in IMU.
 #
 # Why the headline matters for customers: factory-floor vibration
 # monitoring without a cloud round-trip.  The model + ICM-42670
