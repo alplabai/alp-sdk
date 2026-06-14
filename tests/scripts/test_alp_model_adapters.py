@@ -1,5 +1,6 @@
 # tests/scripts/test_alp_model_adapters.py
 """Compiler adapters: interface + CPU passthrough."""
+import os
 import shutil
 import pytest
 from pathlib import Path
@@ -42,7 +43,9 @@ def test_drpai_adapter_detect_and_skip(monkeypatch):
     assert a.backend == "drpai"
     assert a.is_available() is False
     assert a.accepts("onnx") and not a.accepts("tflite") and not a.accepts("pt")
-    with pytest.raises(NotImplementedError):
+    # compile() is real now (Stage 2); with the toolchain absent it raises
+    # RuntimeError naming ALP_DRPAI_TVM_HOME (detect-and-skip surfaces here).
+    with pytest.raises(RuntimeError, match="ALP_DRPAI_TVM_HOME"):
         a.compile(Path("x.onnx"), accel_config="", out_dir=Path("."))
 
 
@@ -295,6 +298,155 @@ def _host_mem_avail_gib() -> float:
 
 # dx-com 2.3.0 aborts in PREPARE with a RamSizeError below ~15 GiB host RAM.
 _DXCOM_MIN_RAM_GIB = 15.5
+
+
+# --- DRP-AI TVM compile (Stage 2) -----------------------------------------
+
+def _drpai_opts(images_dir):
+    return {"input_shape": "1,3,224,224", "input_name": "input",
+            "images": str(images_dir), "product": "V2N"}
+
+
+def test_drpai_compile_rejects_missing_opts(tmp_path, monkeypatch):
+    # Toolchain present (faked) but the per-model compile config is incomplete
+    # -> RuntimeError naming the required keys.
+    monkeypatch.setenv("ALP_DRPAI_TVM_HOME", str(tmp_path))
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX")
+    with pytest.raises(RuntimeError, match="input_shape"):
+        DrpaiAdapter().compile(src, accel_config="", out_dir=tmp_path,
+                               opts={"input_name": "input"})
+
+
+def test_drpai_compile_rejects_bad_product(tmp_path, monkeypatch):
+    monkeypatch.setenv("ALP_DRPAI_TVM_HOME", str(tmp_path))
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX")
+    calib = tmp_path / "calib"; calib.mkdir()
+    opts = _drpai_opts(calib); opts["product"] = "V2L"        # unsupported
+    with pytest.raises(RuntimeError, match="product"):
+        DrpaiAdapter().compile(src, accel_config="", out_dir=tmp_path, opts=opts)
+
+
+def test_drpai_compile_invokes_tvm_and_returns_drpai_dir(tmp_path, monkeypatch):
+    # A successful DRP-AI compile writes a multi-file object DIR; the adapter
+    # tars it into one byte blob with blob_format 'drpai_dir' (what the device
+    # _fmt_enum maps to ALP_INFERENCE_MODEL_DRPAI), passing PRODUCT in the env.
+    import io
+    import tarfile
+
+    home = tmp_path / "tvm"; (home / "tutorials").mkdir(parents=True)
+    monkeypatch.setenv("ALP_DRPAI_TVM_HOME", str(home))
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
+    calib = tmp_path / "calib"; calib.mkdir()
+    (calib / "0.png").write_bytes(b"PNG")
+    seen = {}
+
+    def fake_run(cmd, capture_output, text, timeout, env):
+        seen["cmd"] = cmd
+        seen["product"] = env.get("PRODUCT")
+        out = Path(cmd[cmd.index("-o") + 1])             # the -o object dir
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "drp_desc.bin").write_bytes(b"DESC")      # required artifacts
+        (out / "weight.bin").write_bytes(b"WEIGHT")
+        (out / "addr_map.txt").write_text("0x0", encoding="utf-8")
+        (out / "deploy.json").write_text("{}", encoding="utf-8")
+
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return _R()
+
+    monkeypatch.setattr("alp_model.adapters.drpai.subprocess.run", fake_run)
+    blob = DrpaiAdapter().compile(src, accel_config="V2N", out_dir=tmp_path,
+                                  opts=_drpai_opts(calib))
+    assert seen["cmd"][:3] == ["python3",
+                               str(home / "tutorials" / "compile_onnx_model_quant.py"),
+                               str(src)]
+    assert "-o" in seen["cmd"] and "-s" in seen["cmd"] and "-i" in seen["cmd"]
+    # Pin the input-geometry VALUES, not just the flag presence: a regression
+    # that swapped shape/name or passed a stale literal must fail here.
+    assert seen["cmd"][seen["cmd"].index("-s") + 1] == "1,3,224,224"
+    assert seen["cmd"][seen["cmd"].index("-i") + 1] == "input"
+    assert "--images" in seen["cmd"] and str(calib) in seen["cmd"]
+    assert seen["product"] == "V2N"
+    assert blob.format == "drpai_dir"
+    assert blob.compiler_version.startswith("drp-ai_tvm")
+    # The payload is a real tar carrying the object-dir files.
+    with tarfile.open(fileobj=io.BytesIO(blob.payload), mode="r") as tar:
+        names = set(tar.getnames())
+    assert {"drp_desc.bin", "weight.bin", "addr_map.txt", "deploy.json"} <= names
+
+
+def test_drpai_compile_raises_when_artifacts_missing(tmp_path, monkeypatch):
+    home = tmp_path / "tvm"; (home / "tutorials").mkdir(parents=True)
+    monkeypatch.setenv("ALP_DRPAI_TVM_HOME", str(home))
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
+    calib = tmp_path / "calib"; calib.mkdir()
+
+    def fake_run(cmd, capture_output, text, timeout, env):
+        Path(cmd[cmd.index("-o") + 1]).mkdir(parents=True, exist_ok=True)   # "ok", no .bin
+
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return _R()
+
+    monkeypatch.setattr("alp_model.adapters.drpai.subprocess.run", fake_run)
+    with pytest.raises(RuntimeError, match="drp_desc.bin"):
+        DrpaiAdapter().compile(src, accel_config="V2N", out_dir=tmp_path,
+                               opts=_drpai_opts(calib))
+
+
+def test_drpai_compile_raises_on_tool_error(tmp_path, monkeypatch):
+    home = tmp_path / "tvm"; (home / "tutorials").mkdir(parents=True)
+    monkeypatch.setenv("ALP_DRPAI_TVM_HOME", str(home))
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
+    calib = tmp_path / "calib"; calib.mkdir()
+
+    def fake_run(cmd, capture_output, text, timeout, env):
+        class _R:
+            returncode = 1
+            stdout = ""
+            stderr = "translator error"
+        return _R()
+
+    monkeypatch.setattr("alp_model.adapters.drpai.subprocess.run", fake_run)
+    with pytest.raises(RuntimeError, match="DRP-AI compile failed"):
+        DrpaiAdapter().compile(src, accel_config="V2N", out_dir=tmp_path,
+                               opts=_drpai_opts(calib))
+
+
+@pytest.mark.skipif(os.environ.get("ALP_DRPAI_TVM_HOME") is None
+                    or not Path(os.environ.get("ALP_DRPAI_TVM_HOME", "")).is_dir(),
+                    reason="DRP-AI TVM toolchain absent (set ALP_DRPAI_TVM_HOME)")
+def test_drpai_real_compile_of_tiny_fixture(tmp_path):
+    """Compile the committed tiny ONNX with the REAL DRP-AI TVM toolchain.
+
+    Runs only where a built rzv_drp-ai_tvm install is on ALP_DRPAI_TVM_HOME
+    (a maintainer box / RZ/V SDK container); skips otherwise (always in cloud
+    CI). Mirrors test_deepx_real_compile_of_tiny_fixture. The fixture is the
+    tiny 2-conv classifier (input [1,3,224,224])."""
+    import numpy as np
+    from PIL import Image
+
+    onnx = _ROOT / "tests/fixtures/models/tiny_cnn.onnx"
+    calib = tmp_path / "calib"
+    calib.mkdir()
+    rng = np.random.default_rng(0)
+    for i in range(4):
+        Image.fromarray(rng.integers(0, 256, (224, 224, 3), dtype=np.uint8)).save(calib / f"{i}.png")
+
+    blob = DrpaiAdapter().compile(onnx, accel_config="V2N", out_dir=tmp_path,
+                                  opts={"input_shape": "1,3,224,224",
+                                        "input_name": "input",
+                                        "images": str(calib), "product": "V2N"})
+    assert blob.format == "drpai_dir"
+    assert blob.compiler_version.startswith("drp-ai_tvm")
+    import io as _io, tarfile as _tf
+    with _tf.open(fileobj=_io.BytesIO(blob.payload), mode="r") as tar:
+        names = set(tar.getnames())
+    assert {"drp_desc.bin", "weight.bin", "addr_map.txt"} <= names
 
 
 @pytest.mark.skipif(shutil.which("dxcom") is None, reason="dxcom (dx-com wheel) not installed")

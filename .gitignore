@@ -87,6 +87,11 @@ __pycache__/
 .Python
 env/
 venv/
+# any virtualenv flavour, incl. the NPU-branch scratch envs (.venv-vela/,
+# .venv/, etc.) -- keeps account-gated Vela/CMSIS/TVM wheels out of the
+# public repo (the ~/npu-sdks-outside-the-tree convention).
+.venv*/
+*venv/
 .claude/
 
 # MCUboot signing keys -- per-directory .gitignore at keys/.gitignore
