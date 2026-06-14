@@ -110,6 +110,18 @@ alp_status_t alp_inference_deepx_invoke(struct alp_inference *h);
 void         alp_inference_deepx_close(struct alp_inference *h);
 #endif
 
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+alp_status_t alp_inference_drpai_open(struct alp_inference *h, const alp_inference_config_t *cfg);
+size_t       alp_inference_drpai_num_inputs(struct alp_inference *h);
+size_t       alp_inference_drpai_num_outputs(struct alp_inference *h);
+alp_status_t alp_inference_drpai_get_input(struct alp_inference *h, size_t index,
+                                           alp_inference_tensor_t *out);
+alp_status_t alp_inference_drpai_get_output(struct alp_inference *h, size_t index,
+                                            alp_inference_tensor_t *out);
+alp_status_t alp_inference_drpai_invoke(struct alp_inference *h);
+void         alp_inference_drpai_close(struct alp_inference *h);
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Auto-select policy                                                  */
 /*                                                                     */
@@ -121,7 +133,12 @@ void         alp_inference_deepx_close(struct alp_inference *h);
 static alp_inference_backend_t resolve_auto(void)
 {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
+    /* DEEPX DX-M1 wins first on V2N-M1: the companion NPU is the SoM's
+     * reason for shipping. */
     return ALP_INFERENCE_BACKEND_DEEPX_DXM1;
+#elif defined(ALP_SDK_USE_DRPAI_V2N)
+    /* Plain V2N (no DX-M1): the on-SoC DRP-AI3 is the NPU. */
+    return ALP_INFERENCE_BACKEND_DRPAI;
 #else
     return ALP_INFERENCE_BACKEND_AUTO; /* signals "nothing available" */
 #endif
@@ -175,6 +192,11 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
         rc = alp_inference_deepx_open(h, cfg);
         break;
 #endif
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        rc = alp_inference_drpai_open(h, cfg);
+        break;
+#endif
     default:
         rc = ALP_ERR_NOSUPPORT;
         break;
@@ -196,6 +218,10 @@ size_t alp_inference_num_inputs(alp_inference_t *inf)
     case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         return alp_inference_deepx_num_inputs(inf);
 #endif
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        return alp_inference_drpai_num_inputs(inf);
+#endif
     default:
         return 0u;
     }
@@ -208,6 +234,10 @@ size_t alp_inference_num_outputs(alp_inference_t *inf)
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
     case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         return alp_inference_deepx_num_outputs(inf);
+#endif
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        return alp_inference_drpai_num_outputs(inf);
 #endif
     default:
         return 0u;
@@ -225,6 +255,10 @@ alp_status_t alp_inference_get_input(alp_inference_t *inf, size_t index,
     case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         return alp_inference_deepx_get_input(inf, index, out);
 #endif
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        return alp_inference_drpai_get_input(inf, index, out);
+#endif
     default:
         return ALP_ERR_NOSUPPORT;
     }
@@ -241,6 +275,10 @@ alp_status_t alp_inference_get_output(alp_inference_t *inf, size_t index,
     case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         return alp_inference_deepx_get_output(inf, index, out);
 #endif
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        return alp_inference_drpai_get_output(inf, index, out);
+#endif
     default:
         return ALP_ERR_NOSUPPORT;
     }
@@ -254,6 +292,10 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
     case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         return alp_inference_deepx_invoke(inf);
 #endif
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        return alp_inference_drpai_invoke(inf);
+#endif
     default:
         return ALP_ERR_NOSUPPORT;
     }
@@ -266,6 +308,11 @@ void alp_inference_close(alp_inference_t *inf)
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
     case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
         alp_inference_deepx_close(inf);
+        break;
+#endif
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+    case ALP_INFERENCE_BACKEND_DRPAI:
+        alp_inference_drpai_close(inf);
         break;
 #endif
     default:

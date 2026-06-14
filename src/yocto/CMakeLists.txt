@@ -17,10 +17,10 @@
 # v0.3 carve-out: the inference dispatcher (inference_yocto.c) is the
 # first real Yocto-side surface.  It overrides stub_backend.c's
 # inference symbols and routes ALP_INFERENCE_BACKEND_DEEPX_DXM1 through
-# the DEEPX DX-M1 backend hook when ALP_SDK_USE_DEEPX_DXM1=ON.  The
-# routing is exercised today; the real dxnn_* call sites in
-# inference_deepx.cpp fill in v0.4 once the deepx-dxm1-host-sdk Yocto
-# recipe lands.
+# inference_deepx.cpp, which is written against the real dx_rt C++ API
+# (dxrt::InferenceEngine) and links libdxrt when ALP_SDK_USE_DEEPX_DXM1=ON.
+# The routing is exercised today; the real run requires the deepx-dxm1
+# dx-rt Yocto recipe on the V2N-M1 sysroot (BENCH-UNVERIFIED until HIL).
 #
 # This file only fires on plain-CMake builds (ZEPHYR_BASE unset);
 # Yocto recipes ultimately invoke this same plain-CMake path.
@@ -30,10 +30,18 @@ if(DEFINED ZEPHYR_BASE)
 endif()
 
 option(ALP_SDK_USE_DEEPX_DXM1
-    "Wire the DEEPX DX-M1 backend hook for <alp/inference.h>.  Enable on \
-e1m-x-v2n-m1 builds; depends on the proprietary DEEPX host SDK at \
-runtime (vendors/deepx-dxm1/ provides a stub header so the dispatcher \
-compiles without the SDK installed)."
+    "Wire the DEEPX DX-M1 backend hook (src/yocto/inference_deepx.cpp) for \
+<alp/inference.h>.  Enable on e1m-x-v2n-m1 builds.  Links the proprietary \
+DEEPX dx_rt runtime (libdxrt) located via the Yocto sysroot; the SDK is \
+NOT vendored (DEEPX EULA).  Default OFF."
+    OFF)
+
+option(ALP_SDK_USE_DRPAI_V2N
+    "Wire the Renesas DRP-AI backend hook (src/yocto/inference_drpai.cpp) for \
+<alp/inference.h>.  Enable on plain e1m-x-v2n (no DX-M1) builds.  Links the \
+EdgeCortix MERA2 + DRP-AI TVM runtime (mera2_runtime / drp_tvm_rt / \
+tvm_runtime) located via the RZ/V Yocto SDK sysroot; the prebuilt libs are \
+account-gated and NOT vendored.  Default OFF."
     OFF)
 
 target_sources(alp_sdk PRIVATE
@@ -188,6 +196,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endif()
 endif()
 
+# ------------------------------------------------------------------ #
+# [vendor-ext] DEEPX DX-M1 backend (proprietary dx_rt runtime).       #
+#                                                                     #
+# inference_deepx.cpp is written against the real DEEPX dx_rt C++ API #
+# (#include "dxrt/dxrt_api.h", namespace dxrt).  dx_rt is PROPRIETARY  #
+# (DEEPX EULA) and is NOT vendored in this repo; the headers + libdxrt #
+# come from the Yocto sysroot (the meta-deepx-m1 dx-rt recipe), or for #
+# a maintainer header-check from a local clone pointed at by           #
+# ALP_DEEPX_DXRT_HOME (expects <root>/lib/include + <root>/lib).       #
+# BENCH-UNVERIFIED: compiles/header-checks; not run on silicon.        #
+# ------------------------------------------------------------------ #
 if(ALP_SDK_USE_DEEPX_DXM1)
     target_sources(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/inference_deepx.cpp
@@ -195,6 +214,75 @@ if(ALP_SDK_USE_DEEPX_DXM1)
     target_compile_definitions(alp_sdk PRIVATE
         ALP_SDK_USE_DEEPX_DXM1=1
     )
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../vendors/deepx-dxm1
-                     ${CMAKE_CURRENT_BINARY_DIR}/vendors-deepx-dxm1)
+
+    # Resolve the dx_rt headers + libdxrt.  Inside the Yocto cross-build
+    # the sysroot already carries them at the standard prefix; for an
+    # out-of-Yocto build (maintainer header-check) point ALP_DEEPX_DXRT_HOME
+    # at a dx_rt clone/install.
+    if(DEFINED ENV{ALP_DEEPX_DXRT_HOME})
+        target_include_directories(alp_sdk PRIVATE
+            $ENV{ALP_DEEPX_DXRT_HOME}/lib/include)
+        find_library(DXRT_LIB dxrt PATHS $ENV{ALP_DEEPX_DXRT_HOME}/lib)
+    else()
+        find_path(DXRT_INCLUDE_DIR dxrt/dxrt_api.h)
+        if(DXRT_INCLUDE_DIR)
+            target_include_directories(alp_sdk PRIVATE ${DXRT_INCLUDE_DIR})
+        endif()
+        find_library(DXRT_LIB dxrt)
+    endif()
+
+    if(DXRT_LIB)
+        target_link_libraries(alp_sdk PRIVATE ${DXRT_LIB})
+    else()
+        message(WARNING
+            "alp-sdk yocto: ALP_SDK_USE_DEEPX_DXM1=ON but libdxrt not found. "
+            "Install the meta-deepx-m1 dx-rt recipe on the Yocto sysroot, or "
+            "set ALP_DEEPX_DXRT_HOME.  The DEEPX backend will not link until "
+            "then (BENCH-UNVERIFIED until V2N-M1 HIL bring-up).")
+    endif()
+endif()
+
+# ------------------------------------------------------------------ #
+# [vendor-ext] Renesas DRP-AI backend (DRP-AI TVM / MERA2 runtime).   #
+#                                                                     #
+# inference_drpai.cpp is written against the real EdgeCortix MERA      #
+# DRP-AI runtime wrapper (#include "MeraDrpRuntimeWrapper.h").  The    #
+# rzv_drp-ai_tvm sources are Apache-2.0 but the prebuilt MERA2 libs +  #
+# the Translator are Renesas/EdgeCortix account-gated; neither is      #
+# vendored here.  Headers + libs come from the RZ/V Yocto SDK sysroot, #
+# or for a maintainer header-check from ALP_DRPAI_TVM_APPS (the        #
+# rzv_drp-ai_tvm/apps dir that ships MeraDrpRuntimeWrapper.h).         #
+# BENCH-UNVERIFIED + needs the sysroot to cross-link.                  #
+# ------------------------------------------------------------------ #
+if(ALP_SDK_USE_DRPAI_V2N)
+    target_sources(alp_sdk PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/inference_drpai.cpp
+    )
+    target_compile_definitions(alp_sdk PRIVATE
+        ALP_SDK_USE_DRPAI_V2N=1
+    )
+
+    if(DEFINED ENV{ALP_DRPAI_TVM_APPS})
+        target_include_directories(alp_sdk PRIVATE $ENV{ALP_DRPAI_TVM_APPS})
+    else()
+        find_path(DRPAI_WRAPPER_INCLUDE_DIR MeraDrpRuntimeWrapper.h)
+        if(DRPAI_WRAPPER_INCLUDE_DIR)
+            target_include_directories(alp_sdk PRIVATE ${DRPAI_WRAPPER_INCLUDE_DIR})
+        endif()
+    endif()
+
+    # The MERA2 + DRP-AI TVM runtime stack from the RZ/V Yocto SDK sysroot.
+    find_library(MERA2_RUNTIME_LIB mera2_runtime)
+    find_library(DRP_TVM_RT_LIB    drp_tvm_rt)
+    find_library(TVM_RUNTIME_LIB   tvm_runtime)
+    if(MERA2_RUNTIME_LIB AND DRP_TVM_RT_LIB AND TVM_RUNTIME_LIB)
+        target_link_libraries(alp_sdk PRIVATE
+            ${MERA2_RUNTIME_LIB} ${DRP_TVM_RT_LIB} ${TVM_RUNTIME_LIB})
+    else()
+        message(WARNING
+            "alp-sdk yocto: ALP_SDK_USE_DRPAI_V2N=ON but the MERA2/DRP-AI TVM "
+            "runtime (mera2_runtime/drp_tvm_rt/tvm_runtime) was not found.  "
+            "Build inside the RZ/V Yocto SDK so the sysroot carries them.  "
+            "The DRP-AI backend will not link until then (BENCH-UNVERIFIED).")
+    endif()
 endif()
