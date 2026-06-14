@@ -59,7 +59,7 @@ jobs:
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -83,7 +83,7 @@ jobs:
       # pr-bitbake.yml run (when triggered via workflow_run) or
       # the latest successful run on main (when manually dispatched).
       - name: Download V2N A55 bitbake image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: bitbake-e1m-v2n101-a55-image
           path: ${{ github.workspace }}/artefacts/bitbake
@@ -107,7 +107,7 @@ jobs:
       # an explicit `actions/upload-artifact` for the per-slice ELF
       # in pr-alp-build.yml, update the name pattern below.
       - name: Download M33-SM Zephyr ELF
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: system-manifest-E1M-V2N101-heterogeneous-default
           path: ${{ github.workspace }}/artefacts/zephyr
@@ -163,7 +163,7 @@ jobs:
 
       - name: Upload Renode logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: renode-dual-os-logs
           path: /tmp/renode-logs/

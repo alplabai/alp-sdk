@@ -40,6 +40,9 @@ into the topic-specific docs.
 - [e1m-pinout.md](e1m-pinout.md) — E1M form-factor pinout reference.
 - [board-id.md](board-id.md) — boot-time board identification:
   SoM EEPROM manifest + BOARD_ID ADC cross-check.
+- [aen-accelerator-backends-design.md](aen-accelerator-backends-design.md)
+  — integration design for the Alif Ensemble accelerator surfaces
+  (GPU2D / Mali-C55 ISP / SecAES / aiPM), each silicon + HAL-pack gated.
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
   index (14 ADRs as of 2026-06-12).

@@ -1,14 +1,14 @@
 # edgeai-vision-aen
 
 End-to-end EdgeAI reference application for the **E1M EVK** populated
-with an **E1M-AEN701** SoM (Alif Ensemble E7).
+with an **E1M-AEN801** SoM (Alif Ensemble E8 -- the lead AEN part).
 
 ```
-        ┌──────────────────┐    ┌─────────────┐    ┌────────────────┐
-        │  Camera          │    │  ISP /      │    │  Ethos-U55     │
-RPi CSI │  (e.g. OV5640    │ →  │  format     │ →  │  inference     │
-        │   on the EVK)    │    │  convert    │    │  (Vela model)  │
-        └──────────────────┘    └─────────────┘    └────────────────┘
+        ┌──────────────────┐    ┌──────────────┐    ┌────────────────┐
+        │  Camera          │    │  Mali-C55    │    │  Ethos-U55     │
+RPi CSI │  (e.g. OV5640    │ →  │  ISP         │ →  │  inference     │
+        │   on the EVK)    │    │  (format/3A) │    │  (Vela model)  │
+        └──────────────────┘    └──────────────┘    └────────────────┘
                                                             │
                                                             ▼
                                                    ┌────────────────┐
@@ -18,6 +18,19 @@ RPi CSI │  (e.g. OV5640    │ →  │  format     │ →  │  inference   
                                                    │  SSD1306 OLED  │
                                                    └────────────────┘
 ```
+
+> **On-die Mali-C55 ISP on E8.**  Unlike E3 / E5 / E7, the E1M-AEN801
+> (Ensemble E8) ships the **Mali-C55 ISP** (E4 / E6 / E8 only) — so the
+> v0.2 camera path can offload debayer / format-convert / 3A to the ISP
+> once the Alif HAL pack lands (the `<alp/ext/alif/camera.h>` vendor
+> surface is a NOSUPPORT stub today — see
+> [`docs/aen-accelerator-backends-design.md`](../../../docs/aen-accelerator-backends-design.md)).
+> Until then the example configures the OV5640 to emit the model's pixel
+> format (RGB888) directly via `<alp/camera.h>` and does crop / resize /
+> normalisation on the M55-HP with CMSIS-DSP.  See
+> [`docs/pipeline.md`](docs/pipeline.md) for the full data flow and
+> `metadata/socs/alif/ensemble/e8.json` for the authoritative E8
+> capability set.
 
 ## Status
 

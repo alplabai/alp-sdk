@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Native-sim unit tests for the cc3501e-bridge SPI-slave transport +
+# shared framing/dispatch (firmware/cc3501e/src/), linked against the
+# silicon-free stub HAL.  Lives under tests/zephyr/ (not tests/unit/) so
+# the pr-twister gate actually runs it -- tests/unit/ is not yet in any
+# twister root (issue #90).
+
+tests:
+  alp_sdk.cc3501e.bridge_transport:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - cc3501e-bridge
+      - transport

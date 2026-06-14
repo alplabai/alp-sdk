@@ -189,8 +189,8 @@ typedef enum {
  * ALP_CC3501E_CMD_GPIO_CONFIGURE (with open-drain direction =
  * input pull-up + write 0 to assert / write 1 / Hi-Z to release)
  * + ALP_CC3501E_CMD_GPIO_WRITE.  The CC3501E firmware needs the
- * open-drain mode wired into its GPIO_CONFIGURE handler -- noted
- * for the alplabai/cc3501e-firmware project.
+ * open-drain mode wired into its GPIO_CONFIGURE handler -- a v0.4
+ * item for the embedded firmware/cc3501e/ tree (GPIO proxy group).
  *
  * EVK_PIN_W_DISABLE1 (= E1M_GPIO_IO17) and EVK_PIN_W_DISABLE2
  * (= E1M_GPIO_IO16) are defined in the generated routes header. */

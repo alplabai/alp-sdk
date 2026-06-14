@@ -83,8 +83,16 @@ topology:
 # need one).
 
 # Alif IPC controller name TBD pending the hand-written HW config.
+# Strong candidate (DO NOT promote to truth yet): the Zephyr binding is
+# almost certainly `alif_mhu` (Arm MHU) -- AEN exposes MHU0 + MHU1 with a
+# 32-byte payload limit (see docs/tutorials/15-mproc-mailbox.md).
+# Corroborated by the Alif Linux BSP: meta-alif-ensemble + linux_alif enable
+# Arm MHUv2 (apss-mhu -> mhuv2.cfg), so the inter-core mailbox IP is MHUv2.
+# Still confirm the exact Zephyr binding name against the Alif hand-written
+# HW-config doc + generated board DTS before it replaces TBD; see the bench
+# step in docs/bring-up-aen.md "§6 mailbox controller".
 mailbox:
-  controller: TBD
+  controller: TBD                          # candidate: alif_mhu -- confirm vs Alif HW config before committing
   channels:
     - { id: 0, reserved_for: alp_default_rpmsg }
     - { id: 1, reserved_for: app }
@@ -126,14 +134,14 @@ pad_routes:
       doc: "CC3501E GPIO_30." }
 
 # On-module helper MCUs.  CC3501E is the TI Wi-Fi 6 + BLE 5.4
-# coprocessor wired to the Alif over SPI1.  Firmware image is
-# delivered as a signed binary by the separate
-# `alplabai/cc3501e-firmware` repo; once a release lands its
-# version replaces TBD here.
+# coprocessor wired to the Alif over SPI1.  Firmware is embedded in
+# alp-sdk at `firmware/cc3501e/` (ADR 0015); a signed binary built on
+# the bench lands in `firmware/cc3501e/prebuilt/` and its version
+# replaces TBD here.
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e
-    firmware_path: TBD                       # populated when alplabai/cc3501e-firmware releases v0.1
+    firmware_path: TBD                       # populated when firmware/cc3501e/ cuts its first bench binary
     flash_method:  TBD                       # cc3501e_usb_bootloader or alif_spi_relay; see firmware/cc3501e/flash.py
     flash_args:    TBD
 
