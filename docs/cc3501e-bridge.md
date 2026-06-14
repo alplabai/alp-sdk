@@ -231,7 +231,7 @@ at [`firmware/cc3501e/`](../firmware/cc3501e/), built on TI's
 7. Hands off via `firmware/cc3501e/flash.py` on USB / debug probe.
 
 See [`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) for the
-build + tree layout and [`firmware/cc3501e/DESIGN.md`](../firmware/cc3501e/DESIGN.md)
+build + tree layout and `firmware/cc3501e/DESIGN.md`
 for the v0.1 scope + wire-reply contract.
 
 ## Versioning

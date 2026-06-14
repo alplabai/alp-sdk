@@ -1,0 +1,40 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Host-build overlay for the vibration-anomaly demo -- makes the
+ * native_sim build hermetic instead of relying on a board define for
+ * the sensor bus.  Exposes one emulated I2C controller via the
+ * alp-i2c0 alias so alp_i2c_open(BOARD_I2C_SENSORS) resolves and the
+ * ICM-42670 bring-up runs end-to-end.
+ *
+ * No emul target is attached to the bus, so the ICM-42670 WHO_AM_I
+ * read returns no response and the demo falls back to its synthetic
+ * vibration window (see fill_window() in src/main.c) -- the framing
+ * path still exercises open() / write() / read() / close() and prints
+ * "[anomaly] done".  On real silicon this file is NOT applied; the
+ * SoM board overlay brings up the actual I2C controller + ICM-42670.
+ *
+ * This demo opens no GPIO/PWM pads, so there is no alp,pin-array here
+ * (unlike the EVK-targeted demos): the only resource it touches is the
+ * sensor I2C bus.
+ */
+
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/ {
+    aliases {
+        alp-i2c0 = &i2c0_emul;
+    };
+
+    soc {
+        i2c0_emul: i2c@100 {
+            compatible = "zephyr,i2c-emul-controller";
+            status = "okay";
+            reg = <0 0x100 4>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+            clock-frequency = <I2C_BITRATE_FAST>;
+        };
+    };
+};

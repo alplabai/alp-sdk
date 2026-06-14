@@ -62,8 +62,13 @@ topology:
 # need one).
 
 # Alif IPC controller name TBD pending the hand-written HW config.
+# Strong candidate (DO NOT promote to truth yet): the Zephyr binding is
+# almost certainly `alif_mhu` (Arm MHU) -- AEN exposes MHU0 + MHU1 with a
+# 32-byte payload limit (see docs/tutorials/15-mproc-mailbox.md).  This MUST
+# be confirmed against the Alif hand-written HW-config doc before it replaces
+# TBD; see the bench step in docs/bring-up-aen.md "§6 mailbox controller".
 mailbox:
-  controller: TBD
+  controller: TBD                          # candidate: alif_mhu -- confirm vs Alif HW config before committing
   channels:
     - { id: 0, reserved_for: alp_default_rpmsg }
     - { id: 1, reserved_for: app }

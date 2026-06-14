@@ -93,6 +93,6 @@ is).
 - [`docs/cc3501e-bridge.md`](../cc3501e-bridge.md) -- bridge architecture
   + selectable transport + the (now embedded) firmware layout.
 - [`firmware/cc3501e/README.md`](../../firmware/cc3501e/README.md),
-  [`firmware/cc3501e/DESIGN.md`](../../firmware/cc3501e/DESIGN.md).
+  `firmware/cc3501e/DESIGN.md`.
 - [ADR 0005](0005-alp-sdk-vs-alp-studio-boundary.md) -- the
   alp-sdk/alp-studio boundary (distinct from this firmware-home question).

@@ -4,11 +4,11 @@ End-to-end EdgeAI reference application for the **E1M EVK** populated
 with an **E1M-AEN701** SoM (Alif Ensemble E7).
 
 ```
-        ┌──────────────────┐    ┌─────────────┐    ┌────────────────┐
-        │  Camera          │    │  ISP /      │    │  Ethos-U55     │
-RPi CSI │  (e.g. OV5640    │ →  │  format     │ →  │  inference     │
-        │   on the EVK)    │    │  convert    │    │  (Vela model)  │
-        └──────────────────┘    └─────────────┘    └────────────────┘
+        ┌──────────────────┐    ┌──────────────┐    ┌────────────────┐
+        │  Camera          │    │  Sensor-side │    │  Ethos-U55     │
+RPi CSI │  (e.g. OV5640    │ →  │  format +    │ →  │  inference     │
+        │   on the EVK)    │    │  CPU resize  │    │  (Vela model)  │
+        └──────────────────┘    └──────────────┘    └────────────────┘
                                                             │
                                                             ▼
                                                    ┌────────────────┐
@@ -18,6 +18,15 @@ RPi CSI │  (e.g. OV5640    │ →  │  format     │ →  │  inference   
                                                    │  SSD1306 OLED  │
                                                    └────────────────┘
 ```
+
+> **No on-die ISP on E7.**  The E1M-AEN701 (Ensemble E7) ships **no
+> Mali-C55 ISP fabric** — that block is E4 / E6 / E8 only.  This
+> example therefore configures the OV5640 to emit the model's pixel
+> format (RGB888) directly via `<alp/camera.h>`, and does any crop /
+> resize / normalisation on the M55-HP with CMSIS-DSP.  See
+> [`docs/pipeline.md`](docs/pipeline.md) for the full data flow and
+> `metadata/socs/alif/ensemble/e7.json` for the authoritative E7
+> capability set.
 
 ## Status
 

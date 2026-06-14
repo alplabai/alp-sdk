@@ -152,6 +152,23 @@ right now" status is one scroll away from the v0.4 gate list:
 | AEN-Zephyr UART RX ring buffer (LwRB) | 🟡 partial — failure-path ZTESTs green in `pr-twister` (both the default and `prj_uart_ringbuf.conf` scenarios); real-IRQ attach untested | `pr-twister.yml` `alp_sdk.peripheral.uart_rx_ringbuf` scenario |
 | AEN-Zephyr mproc envelope framing (placeholder) | 🟡 partial — 9 framing helper ZTESTs + the `alp_sdk.mproc.nanopb_framing` scenario compile the framing branches in `alp_mbox_send` / `mbox_rx_cb`; peer-firmware roundtrip untested | `pr-twister.yml` `alp_sdk.mproc.nanopb_framing` scenario |
 
+## v0.5.0 — AEN accelerator surfaces (vendor-HAL-gated)
+
+The 2026-05-12 AEN feature audit surfaced three on-die AEN-family
+accelerator blocks with no portable / vendor-ext surface.  Each
+header + stub landed in v0.5 ahead of the Alif HAL pack: every
+function returns `ALP_ERR_NOSUPPORT` until the matching vendor pack
+ships, so these rows are **gated on the vendor HAL pack and stay
+`⏳ untested` until first silicon** (no SoM in scope ships the HAL
+pack today).  Design captured in
+[`docs/aen-accelerator-backends-design.md`](aen-accelerator-backends-design.md).
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| GPU2D (D/AVE 2D) portable surface | `src/backends/gpu2d/zephyr_stub.c` (Alif D/AVE 2D real backend tracked by issue #24) | ⏳ untested | `alp_gpu2d_fill_rect` / `blit` / `blend` produce the expected pixels in a framebuffer on a real E1M-AEN701 EVK once the Alif D/AVE 2D HAL backend replaces the stub | NULL/INVAL surface-validation ZTESTs green in `pr-twister`; **HAL-backed pixel assertion via `nightly-aen-hil`** — gated on the Alif D/AVE 2D vendor pack | v0.5 (stub), real backend gates v0.x |
+| ISP (Mali-C55) vendor-ext surface | `src/backends/ext/alif/camera.c` + `<alp/ext/alif/camera.h>` (Mali-C55 backend, priority 100 on E4/E6/E8) | ⏳ untested | 3A window / per-channel gain LUT / LSC MESH LUT take effect on real Mali-C55 silicon (E4/E6/E8 — **not E7**); non-Alif handle returns `ALP_ERR_NOT_PRESENT_ON_THIS_SOC` | NULL/INVAL + vendor-handle-gate ZTESTs green in `pr-twister`; **HAL-backed ISP statistics readback** on Mali-C55 silicon — gated on the Alif Mali-C55 HAL pack | v0.5 (header+stub), real bodies gate v0.x |
+| Inline-AES (OSPI SecAES) vendor-ext surface | `src/backends/ext/alif/storage.c` + `<alp/ext/alif/storage.h>` | ⏳ untested | SecAES key-provision binds a slot and encrypted XIP executes from OctalSPI on real Mali-C55-tier silicon (E4/E6/E8); status read-back reports `ENGAGED` before XIP is trusted | NULL/INVAL + vendor-handle-gate ZTESTs green in `pr-twister`; **encrypted-XIP boot + status readback** on silicon — gated on the Alif SecAES HAL pack | v0.5 (header+stub), real bodies gate v0.x |
+
 ## v0.6.0 — V2N GD32-bridge silicon campaign (verified on the bench)
 
 The first rows in this ledger verified against real silicon: the
