@@ -428,9 +428,10 @@ target verification still parked behind the `hil-yocto` runner.
   decision; image-write hook onto MCUboot secondary slot.
 - **Device identity:** OPTIGA Trust M pre-provisioned ECC key pair
   surfaced via `<alp/security.h>` for TLS client certs.
-- **DEEPX DX-M1 real link:** `dxnn_*` link in
-  `src/yocto/inference_deepx.cpp` (pending DEEPX SDK provenance
-  decision).
+- **DEEPX DX-M1 on-silicon link:** the `src/yocto/inference_deepx.cpp`
+  body is now real (`dxrt::InferenceEngine`, replacing the earlier
+  `dxnn_*` plan); the remaining work is the cross-link against `dx_rt`
+  on the RZ/V Yocto sysroot + an on-silicon run on the DX-M1 PCIe card.
 - **Ethos-U65 real attach on i.MX 93:** Vela toolchain integration.
 
 See [`docs/secure-boot.md`](docs/secure-boot.md) and

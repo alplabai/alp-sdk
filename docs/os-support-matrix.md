@@ -83,8 +83,8 @@ plan in `VERSIONS.md`.
 | **Counter / QEnc** (`<alp/counter.h>`) | planned          | planned                | planned                   | planned |
 | **I²S / SAI** (`<alp/i2s.h>`) | planned                   | planned                | planned                   | planned |
 | **CAN / CAN-FD** (`<alp/can.h>`) | planned                | planned                | planned                   | planned |
-| **RTC** (`<alp/rtc.h>`)   | planned                       | planned                | planned                   | planned |
-| **Watchdog** (`<alp/wdt.h>`) | planned                    | planned                | planned                   | planned |
+| **RTC** (`<alp/rtc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
+| **Watchdog** (`<alp/wdt.h>`) | code complete¹             | code complete¹         | code complete¹            | code complete¹            |
 | **Audio** (`<alp/audio.h>`) | planned                     | planned                | planned                   | planned |
 | **Camera** (`<alp/camera.h>`) | planned                   | **GA** (MIPI CSI-2)    | **GA**                    | planned |
 | **IoT** (`<alp/iot.h>`)   | **GA**                        | **GA**                 | **GA**                    | planned |
@@ -98,11 +98,17 @@ plan in `VERSIONS.md`.
 | **Counter / QEnc** (`<alp/counter.h>`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | stub | stub | stub |
 | **I²S / SAI** (`<alp/i2s.h>`) | **GA** (Zephyr `i2s_*`) | **GA** (Zephyr `i2s_*`) | **GA** (Zephyr `i2s_*`)   | **GA** (Zephyr `i2s_*`)   | stub               | stub                 | stub               |
 | **CAN / CAN-FD** (`<alp/can.h>`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | stub               | stub                 | stub               |
-| **RTC** (`<alp/rtc.h>`)   | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)   | **GA** (Zephyr `rtc_*`)   | stub               | stub                 | stub               |
-| **Watchdog** (`<alp/wdt.h>`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`)   | **GA** (Zephyr `wdt_*`)   | stub               | stub                 | stub               |
+| **RTC** (`<alp/rtc.h>`)   | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)   | **GA** (Zephyr `rtc_*`)   | code complete¹     | code complete¹       | code complete¹     |
+| **Watchdog** (`<alp/wdt.h>`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`)   | **GA** (Zephyr `wdt_*`)   | code complete¹     | code complete¹       | code complete¹     |
 | **Audio** (`<alp/audio.h>`) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | stub | stub | stub |
 | **Camera** (`<alp/camera.h>`) | planned              | planned                  | planned                   | planned                   | stub               | stub                 | stub               |
 | **IoT** (`<alp/iot.h>`)   | **GA** (Wi-Fi+MQTT)      | **GA** (Wi-Fi+MQTT)      | **GA** (Wi-Fi+MQTT)       | **GA** (Wi-Fi+MQTT)       | stub               | stub                 | stub               |
+
+¹ **code complete** — RTC + Watchdog migrated to the registry/dispatcher pattern
+with real Linux backends (`/dev/rtcN` + `/dev/watchdogN` ioctls) in the v0.8 cycle
+(issue #33), which also lands `alp_rtc_capabilities()` / `alp_wdt_capabilities()`
+on Yocto.  The full Yocto link + on-target ioctl run are still HIL-gated; the other
+four Yocto classes (mqtt / audio / security / rpc) still use the direct-impl model.
 
 ### Cross-cutting v0.2 capability infrastructure
 
@@ -120,7 +126,7 @@ plan in `VERSIONS.md`.
 |----------------------|---------|----------------|
 | BLE (`<alp/ble.h>`)  | declared| Zephyr `bt` host stack |
 | Security (`<alp/security.h>`) | declared | MbedTLS PSA + per-SoC HW accelerator routing |
-| MProc (`<alp/mproc.h>`) | declared | Zephyr `mbox_*` (MHU on Alif) + `hwsem_*` + shared-memory regions |
+| MProc (`<alp/mproc.h>`) | declared | Zephyr `mbox_*` — the AEN MHU is now backed by alp-sdk's `alif,mhuv2-mbox` driver (AEN801, bench-unverified, #45/#50) — + `hwsem_*` + shared-memory regions |
 
 ## v0.4.0 prep — landed on `main` (2026-05-11)
 
@@ -185,10 +191,10 @@ hasn't been measured.
 
 | Surface | Header(s) | Cores / backing | Status |
 |---------|-----------|-----------------|--------|
-| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr) + A (Yocto); registry over `tflm` / `ethos_u` / `drpai` / `deepx_dxm1` | surface + backend registry present; per-NPU dispatch **untested** |
+| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr) + A (Yocto); registry over `tflm` / `ethos_u` / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** backend bodies are now **real, bench-unverified** (link needs the Yocto sysroot; default-off Kconfig) — #58/#59; `tflm`/`ethos_u` paths still untested |
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
-| 2D graphics | `gpu2d.h` | M (Alif Dave2D / GPU2D) + SW fallback | surface present; **untested** |
+| 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim; D/AVE 2D needs an AEN EVK + the Alif pack — #24.  (AEN 2D engine is **D/AVE 2D**, not Mali-D71; i.MX 93 = PXP, no Vivante) |
 | Power management | `power.h` | M (Zephyr `pm_*`) + A | surface present; **untested** |
 | Heterogeneous RPC | `rpc.h` (+ generated `system_ipc.h`) | A↔M over RPMsg / OpenAMP | surface + scaffold; **untested** |
 
