@@ -52,6 +52,7 @@ Bad / costs: ...
 | [0013](0013-tfm-boundary-m55-hp-trustzone.md) | TF-M trust boundary on AEN: TrustZone-M split on M55-HP, not a dedicated M55-HE | Accepted |
 | [0014](0014-build-plan-emit-cli-contract.md) | The `alp` CLI consumes the orchestrator's emitted build plan (`--emit build-plan`), not a re-implemented planner | Accepted |
 | [0015](0015-cc3501e-firmware-embedded.md) | CC3501E bridge firmware is embedded in alp-sdk (like gd32-bridge), not a separate repo | Accepted |
+| [0016](0016-cross-core-peripheral-proxy-wire-schema.md) | Cross-core peripheral proxy wire schema: the GD32 bridge command frame carried over RPMsg (A55→M33→GD32) | Proposed |
 
 ## When to write an ADR
 
