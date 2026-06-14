@@ -46,22 +46,18 @@
  *   / weight.bin / addr_map.txt / deploy.json / deploy.so / preprocess/ ...)
  *   emitted by the host DRP-AI TVM compiler
  *   (scripts/alp_model/adapters/drpai.py).  It is NOT a single flat
- *   buffer, so the portable surface can't pass it by value.  Convention:
- *   for ALP_INFERENCE_MODEL_DRPAI, cfg.model_data points at a
- *   NUL-terminated FILESYSTEM PATH (UTF-8) to the installed object dir on
- *   the A55, and cfg.model_size is its length+1.
+ *   buffer, so the portable `.alpmodel` blob is the deterministic .tar of
+ *   that object dir produced by adapters/drpai.py (`blob_format "drpai_dir"`).
+ *   cfg.model_data / cfg.model_size carry those raw tar BYTES by value --
+ *   exactly like the DEEPX path passes the raw .dxnn buffer, so the generic
+ *   loader (src/common/alp_model_loader.c) stays format-agnostic.
  *
- *   TODO(loader staging, BENCH-UNVERIFIED): this body REQUIRES cfg.model_data
- *   to be a directory path, but src/common/alp_model_loader.c currently
- *   passes the raw `drpai_dir` blob (the deterministic .tar produced by
- *   adapters/drpai.py) straight through as cfg.model_data/model_size -- it
- *   does NOT yet untar the blob to a temp dir and substitute the staged
- *   path.  Until that staging lands in alp_model_loader.c (untar-to-tempdir
- *   when sel.format == ALP_INFERENCE_MODEL_DRPAI, then pass the dir path),
- *   a real .alpmodel DRP-AI load would hand tar bytes to LoadModel() as if
- *   they were a path and fail on target.  The DEEPX path is unaffected (it
- *   takes the raw .dxnn buffer by value, matching the InferenceEngine
- *   ctor).  Pending follow-up; tracked alongside the Yocto runtime work.
+ *   This body owns the staging: open() extracts the tar into a private
+ *   mkdtemp() directory (the .dat object files land flat -- drpai.py tars
+ *   them relative to the object dir), calls LoadModel() on that dir, and
+ *   close() removes the directory.  Extraction shells out to `tar -xf - -C
+ *   <dir>` (busybox/GNU, A55/Yocto-side); the dir path is mkdtemp-private so
+ *   there is no untrusted input in the command.
  *
  * Vendor-artifact handling (classifying-public-vs-internal)
  *   rzv_drp-ai_tvm is Apache-2.0 (referenceable) BUT the prebuilt MERA2
@@ -84,6 +80,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <new>
 #include <string>
@@ -104,7 +102,8 @@ struct alp_inference_handle_layout {
     void                   *be_state;
 };
 
-namespace {
+namespace
+{
 
 /* DRP-AI runtime memory window start address on the RZ/V2N.  The DRP-AI
  * reserved CMA region base; the tutorial apps use the value the kernel
@@ -113,12 +112,62 @@ namespace {
  * drpai udmabuf/CMA node rather than hard-coding. */
 constexpr uint64_t kDrpAiMemStart = 0x80000000ULL;
 
+/** Recursively remove a staging directory created by _stage_drpai_blob().
+ *  No-op on an empty path.  Best-effort: the path is always an mkdtemp()
+ *  result, so there is no untrusted input in the command. */
+void _rm_rf(const std::string &dir)
+{
+    if (dir.empty()) {
+        return;
+    }
+    std::string cmd = "rm -rf '" + dir + "'";
+    (void)std::system(cmd.c_str());
+}
+
+/** Extract the `drpai_dir` tar @p data (@p len bytes) into a fresh private
+ *  directory and return its path in @p out_dir.
+ *
+ *  @return ALP_OK on success; ALP_ERR_NOMEM / ALP_ERR_IO on failure (the
+ *          partially-created dir is cleaned up on failure).
+ */
+alp_status_t _stage_drpai_blob(const void *data, size_t len, std::string &out_dir)
+{
+    char        tmpl[] = "/tmp/alp-drpai-XXXXXX";
+    const char *dir    = ::mkdtemp(tmpl);
+    if (dir == nullptr) {
+        return ALP_ERR_IO;
+    }
+
+    /* Pipe the tar bytes to `tar`'s stdin (-f -).  popen uses /bin/sh, but
+     * the only interpolated token is our mkdtemp() path, so the command is
+     * not attacker-influenced. */
+    std::string cmd = "tar -xf - -C '" + std::string(dir) + "'";
+    FILE       *p   = ::popen(cmd.c_str(), "w");
+    if (p == nullptr) {
+        _rm_rf(dir);
+        return ALP_ERR_IO;
+    }
+
+    size_t wrote = (len > 0) ? std::fwrite(data, 1, len, p) : 0;
+    int    rc    = ::pclose(p);
+    if (wrote != len || rc != 0) {
+        _rm_rf(dir);
+        return ALP_ERR_IO;
+    }
+
+    out_dir = dir;
+    return ALP_OK;
+}
+
 /** Per-handle DRP-AI state.  Owns the MERA runtime wrapper + SDK-owned
  *  input staging buffers + a snapshot of the I/O tensor metadata taken
- *  at open() time. */
+ *  at open() time, plus the private staging dir extracted from the blob. */
 struct DrpaiState {
-    MeraDrpRuntimeWrapper runtime;          /* default-constructed */
+    MeraDrpRuntimeWrapper runtime; /* default-constructed */
     std::string           model_dir;
+    /* mkdtemp() staging dir holding the extracted .dat object files; removed
+     * (after the runtime is torn down) in close(). Empty if not staged. */
+    std::string staged_dir;
 
     /* One SDK-owned input staging buffer per input tensor; the app fills
      * these via get_input(), invoke() pushes them with SetInput(). */
@@ -152,7 +201,7 @@ alp_inference_dtype_t mera_dtype_to_alp(InOutDataType t)
     }
 }
 
-}  /* namespace */
+} /* namespace */
 
 /* ------------------------------------------------------------------ */
 /* Backend hooks (C ABI, matching inference_yocto.c's declarations).   */
@@ -163,8 +212,8 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 {
     auto *h = reinterpret_cast<alp_inference_handle_layout *>(h_);
 
-    /* For ALP_INFERENCE_MODEL_DRPAI the blob is a directory PATH, not a
-     * flat buffer (see the header comment).  Reject an empty path early. */
+    /* For ALP_INFERENCE_MODEL_DRPAI the blob is the `drpai_dir` tar bytes
+     * (see the header comment).  Reject an empty blob early. */
     if (cfg->model_data == nullptr || cfg->model_size == 0) {
         return ALP_ERR_INVAL;
     }
@@ -174,16 +223,20 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
         return ALP_ERR_NOMEM;
     }
 
-    /* model_data is a NUL-terminated UTF-8 directory path; bound the copy
-     * by model_size so a missing terminator can't run off the end. */
-    st->model_dir.assign(static_cast<const char *>(cfg->model_data),
-                         ::strnlen(static_cast<const char *>(cfg->model_data),
-                                   cfg->model_size));
+    /* Stage the tar out to a private dir; the .dat object files land flat. */
+    alp_status_t stage = _stage_drpai_blob(cfg->model_data, cfg->model_size, st->staged_dir);
+    if (stage != ALP_OK) {
+        delete st;
+        return stage;
+    }
+    st->model_dir = st->staged_dir;
 
     /* LoadModel returns false on a missing/corrupt object dir or a DRP-AI
      * memory-mapping failure. */
     if (!st->runtime.LoadModel(st->model_dir, kDrpAiMemStart)) {
-        delete st;
+        std::string dir = st->staged_dir;
+        delete st; /* tears down the runtime before we remove the dir */
+        _rm_rf(dir);
         return ALP_ERR_IO;
     }
 
@@ -258,16 +311,16 @@ extern "C" alp_status_t alp_inference_drpai_get_output(struct alp_inference *h_,
      * gives the byte size; prefer the GetOutputInfo() byte size when the
      * dtype is known. */
     InOutDataType dtype;
-    void         *data      = nullptr;
-    int64_t       num_elems = 0;
+    void         *data               = nullptr;
+    int64_t       num_elems          = 0;
     std::tie(dtype, data, num_elems) = st->runtime.GetOutput(static_cast<int>(index));
 
-    out->data       = data;
-    out->size_bytes = std::get<1>(st->out_info[index]);
-    out->dtype      = mera_dtype_to_alp(dtype);
-    out->rank       = 0u;
-    out->scale      = 1.0f;
-    out->zero_point = 0;
+    out->data                        = data;
+    out->size_bytes                  = std::get<1>(st->out_info[index]);
+    out->dtype                       = mera_dtype_to_alp(dtype);
+    out->rank                        = 0u;
+    out->scale                       = 1.0f;
+    out->zero_point                  = 0;
     return ALP_OK;
 }
 
@@ -283,14 +336,12 @@ extern "C" alp_status_t alp_inference_drpai_invoke(struct alp_inference *h_)
      * on fp32 vs fp16; pick by the reported input dtype so fp16 models
      * route through the uint16_t overload (raw half-float bytes). */
     for (size_t i = 0; i < st->input_bufs.size(); ++i) {
-        const InOutDataType dt = std::get<2>(st->in_info[i]);
-        const void *buf        = st->input_bufs[i].data();
+        const InOutDataType dt  = std::get<2>(st->in_info[i]);
+        const void         *buf = st->input_bufs[i].data();
         if (dt == InOutDataType::FLOAT16) {
-            st->runtime.SetInput(static_cast<int>(i),
-                                 static_cast<const uint16_t *>(buf));
+            st->runtime.SetInput(static_cast<int>(i), static_cast<const uint16_t *>(buf));
         } else {
-            st->runtime.SetInput(static_cast<int>(i),
-                                 static_cast<const float *>(buf));
+            st->runtime.SetInput(static_cast<int>(i), static_cast<const float *>(buf));
         }
     }
 
@@ -308,7 +359,10 @@ extern "C" void alp_inference_drpai_close(struct alp_inference *h_)
         return;
     }
     /* MeraDrpRuntimeWrapper owns its DRP-AI mappings + releases them in
-     * its dtor (unique_ptr<Impl>); deleting the state tears it down. */
+     * its dtor (unique_ptr<Impl>); deleting the state tears it down.  Remove
+     * the staging dir AFTER the runtime is gone (it may hold the dir open). */
+    std::string dir = st->staged_dir;
     delete st;
+    _rm_rf(dir);
     h->be_state = nullptr;
 }
