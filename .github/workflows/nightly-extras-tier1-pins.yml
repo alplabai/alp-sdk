@@ -114,6 +114,12 @@ jobs:
         if: always()
         run: |
           set -e
+          # nullglob: when no library dir is populated (e.g. a PR that
+          # didn't fetch the extras-tier1 group), the loop must skip
+          # rather than run once with the literal pattern -- otherwise
+          # `basename` yields `*` and we create a file named `*.txt`,
+          # which upload-artifact later rejects (`*` is an illegal path).
+          shopt -s nullglob
           mkdir -p /tmp/extras-tier1-audit
           for d in alp-sdk/modules/lib/*/; do
             lib=$(basename "$d")
@@ -128,3 +134,4 @@ jobs:
         with:
           name: extras-tier1-audit
           path: /tmp/extras-tier1-audit/
+          if-no-files-found: ignore
