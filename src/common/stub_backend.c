@@ -314,6 +314,7 @@ void alp_uart_rx_ringbuf_detach(alp_uart_rx_ringbuf_t *rb)
 /* PWM / ADC / Counter / QEnc / I2S / CAN / RTC / WDT (v0.2)           */
 /* ------------------------------------------------------------------ */
 
+#if !defined(ALP_VENDOR_OVERRIDES_PWM)
 alp_pwm_t *alp_pwm_open(const alp_pwm_config_t *cfg)
 {
     (void)cfg;
@@ -336,7 +337,9 @@ void alp_pwm_close(alp_pwm_t *p)
 {
     (void)p;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_PWM */
 
+#if !defined(ALP_VENDOR_OVERRIDES_ADC)
 alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg)
 {
     (void)cfg;
@@ -359,7 +362,9 @@ void alp_adc_close(alp_adc_t *a)
 {
     (void)a;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_ADC */
 
+#if !defined(ALP_VENDOR_OVERRIDES_COUNTER)
 alp_counter_t *alp_counter_open(const alp_counter_config_t *cfg)
 {
     (void)cfg;
@@ -406,6 +411,7 @@ void alp_counter_close(alp_counter_t *c)
 {
     (void)c;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_COUNTER */
 
 alp_qenc_t *alp_qenc_open(const alp_qenc_config_t *cfg)
 {
