@@ -2471,6 +2471,46 @@ def test_emit_build_plan_happy(tmp_path: Path) -> None:
         assert contents.strip()
 
 
+def test_emit_build_plan_stock_shim_skipped(tmp_path: Path) -> None:
+    """A core left on the stock M-core shim (app: alp-stock-shim) carries
+    command: null + a `stock-shim-unimplemented` warning (issue #49): the
+    shim image body is not in the SDK tree, so we must NOT emit a west
+    command pointing at a non-existent app dir.  The slice is still carried
+    (never dropped) with its config artefact."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    board = """
+name: stock-shim-board
+som:
+  sku: E1M-V2N101
+  hw_rev: r1
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: alp-stock-shim
+"""
+    path = _write_board(tmp_path, board)
+    project = load_board_yaml(path)
+    out = emit_build_plan(project, board_yaml=path, build_root=Path("build"))
+    plan = _json.loads(out)
+
+    m33 = next(s for s in plan["slices"] if s["coreId"] == "m33_sm")
+    assert m33["command"] is None
+
+    stock_warns = [w for w in plan["warnings"]
+                   if w["code"] == "stock-shim-unimplemented"]
+    assert len(stock_warns) == 1
+    assert stock_warns[0]["coreId"] == "m33_sm"
+    assert "alp-stock-shim" in stock_warns[0]["message"]
+    assert "m33_sm" in stock_warns[0]["message"]
+
+    # Carried, not dropped: the slice still ships its alp.conf artefact.
+    assert any(a["path"].endswith("alp.conf")
+               for a in m33["configArtefacts"])
+
+
 def test_emit_build_plan_deterministic(tmp_path: Path) -> None:
     """Spec parity with the other emits: byte-identical re-runs."""
     from alp_orchestrate import emit_build_plan
@@ -2544,6 +2584,10 @@ def test_emit_build_plan_off_core_excluded_commandless_warns(
     # permits `board: None` for zephyr -- only `app:` is enforced --
     # and _slice_command then has nothing to hand `west build -b`.
     project.cores["m33_sm"].board = None
+    # Use a real app so this isolates the board-missing -> no-command path;
+    # the SoM preset would otherwise default this M-core to the stock shim,
+    # which has its own warning code (see test_emit_build_plan_stock_shim_skipped).
+    project.cores["m33_sm"].app = "./m33"
     plan = _json.loads(emit_build_plan(
         project, board_yaml=path, build_root=Path("build")))
 
