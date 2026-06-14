@@ -95,6 +95,16 @@ if(CONFIG_USE_RZ_FSP_SCI_B_SPI)
         ${ZEPHYR_HAL_RENESAS_MODULE_DIR}/drivers/rz/fsp/inc/instances/rzv)
 endif()
 
+# Alif Ensemble ARM MHUv2 inter-core mailbox driver -- vendor-ext,
+# BENCH-UNVERIFIED.  Carried here (not upstream Zephyr) so it survives a
+# `west update`.  Standard Zephyr MBOX-class driver (DT_DRV_COMPAT
+# alif_mhuv2_mbox); doorbell-only, backs alp_rpc_open / OpenAMP static-vrings on
+# AEN.  Cannot build under native_sim (Cortex-M55 target), hence
+# bench-unverified in CI.  Driver: zephyr/drivers/mbox/mbox_alif_mhuv2.c;
+# binding: zephyr/dts/bindings/mbox/alif,mhuv2-mbox.yaml.
+zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_alif_mhuv2.c)
+
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.

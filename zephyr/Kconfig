@@ -168,6 +168,28 @@ config USE_RZ_FSP_SCI_B_SPI
 	  r_sci_b_spi.c, near-identical -- one documented one-line deviation -- with
 	  an RZ cfg shim in r_sci_b_spi_cfg.h).
 
+# Alif Ensemble ARM MHUv2 inter-core mailbox driver -- vendor-ext,
+# BENCH-UNVERIFIED.  Carried here (not upstream Zephyr) so it survives a
+# `west update`.  Mainline Zephyr v4.4 ships no `arm,mhuv2` binding; the
+# opt-in alifsemi/zephyr_alif fork does, so a DISTINCT compatible
+# `alif,mhuv2-mbox` is used to stay collision-free and let the stack build on
+# the default upstream-Zephyr + hal_alif base.  Backs alp_rpc_open (OpenAMP
+# static-vrings) on AEN801 (E8); rollout to AEN301..701 follows after AEN801
+# bench-passes.  Driver: zephyr/drivers/mbox/mbox_alif_mhuv2.c;
+# binding: zephyr/dts/bindings/mbox/alif,mhuv2-mbox.yaml.
+config MBOX_ALIF_MHUV2
+	bool "Alif Ensemble MHUv2 mailbox (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on MBOX
+	depends on DT_HAS_ALIF_MHUV2_MBOX_ENABLED
+	help
+	  Enable the ARM MHUv2 inter-core doorbell mailbox driver as integrated in
+	  the Alif Ensemble family (E1/E3/E5/E7/E8).  Doorbell (signalling) mode
+	  only: no payload travels through the MHU; data rides the OpenAMP
+	  static-vrings in shared SRAM and the MHU only rings a per-bit doorbell.
+	  vendor-ext, BENCH-UNVERIFIED -- authored from the ARM MHUv2 spec + the
+	  zephyr_alif fork DTS; not yet validated on real silicon.
+
 config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4
