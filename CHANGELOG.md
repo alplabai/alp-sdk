@@ -50,6 +50,76 @@ down.  The active level (OPTIGA `RST` is active-low) is firmware-owned and
 flagged for schematic verification.  The stub HAL backend reports
 `STATUS_NOSUPPORT`.
 
+### Added — AEN inter-core mailbox: Alif Ensemble ARM MHUv2 Zephyr MBOX driver
+
+The AEN (Alif Ensemble) inter-core IPC mailbox is the **ARM MHUv2**, confirmed
+from the `alifsemi/zephyr_alif` fork DTS.  alp-sdk now ships its own MBOX-class
+driver (`zephyr/drivers/mbox/mbox_alif_mhuv2.c` + binding) under the **distinct
+compatible `alif,mhuv2-mbox`** (collision-free against the fork's `arm,mhuv2`), so
+AEN mailbox works on the default upstream-Zephyr + hal_alif base.  `E1M-AEN801`'s
+`mailbox.controller` is now `alif_mhuv2` (was `TBD`); `alp_rpc_open` is unblocked.
+**vendor-ext, BENCH-UNVERIFIED** (Cortex-M55 — can't build in native_sim).  AEN801
+only; the RTSS-HP MHU base + AEN301..701 rollout follow bench validation.  (#45, #50)
+
+### Added — GPU2D real backends: portable software 2D + Alif D/AVE 2D
+
+The GPU2D wildcard NOSUPPORT stub is replaced by two real backends: a pure-C
+**software fallback** (`src/backends/gpu2d/sw_fallback.c`) — real `fill_rect` /
+`blit` / `blend` across all 5 formats + 4 blend modes, **unit-tested with exact
+pixel asserts** on native_sim — and the **Alif D/AVE 2D** backend
+(`alif_dave2d.c`, behind `CONFIG_ALP_SDK_GPU2D_ALIF_DAVE2D`, bench-unverified).
+Doc corrections: the AEN 2D engine is **TES D/AVE 2D** (not Mali-D71), and i.MX 93
+has **no Vivante** (its 2D engine is PXP), so the NXP 2D backend is out of scope.  (#24)
+
+### Added — inference: real A55 NPU backends (DeepX dx_rt + Renesas DRP-AI)
+
+The Yocto/A55-side inference backends are now real: `src/yocto/inference_deepx.cpp`
+is rewritten to the real **`dxrt::InferenceEngine`** API (replacing a *fictional*
+`dxnn_*` API), and `src/yocto/inference_drpai.cpp` is a new backend against the real
+**`MeraDrpRuntimeWrapper`**.  Both gated (`ALP_SDK_USE_DEEPX_DXM1` /
+`ALP_SDK_USE_DRPAI_V2N`, default off).  The Stage-2 `scripts/alp_model/adapters/
+drpai.py` compiler adapter is implemented (`blob_format "drpai_dir"`, detect-and-skip)
+with mocked + hermetic tests.  **BENCH-UNVERIFIED** — the real link needs the RZ/V
+Yocto sysroot; on-silicon runs need the V2N board / DX-M1 card.  Proprietary SDKs are
+not vendored.  (#58, #59)
+
+### Added — Yocto RTC + Watchdog: real `/dev` ioctl backends on the registry
+
+RTC and Watchdog on the Yocto/Linux side migrate from NOSUPPORT stubs to the
+registry/dispatcher pattern with **real backends** — `/dev/rtcN` via
+`RTC_RD_TIME` / `RTC_SET_TIME` (`src/backends/rtc/yocto_drv.c`) and `/dev/watchdogN`
+via the `WDIOC_*` ioctls (`src/backends/wdt/yocto_drv.c`) — which also lands
+`alp_rtc_capabilities()` / `alp_wdt_capabilities()` on Yocto.  The other four Yocto
+classes (mqtt / audio / security / rpc) follow in a later slice.  **Yocto-link +
+on-target ioctl run UNVERIFIED** (no sysroot in CI).  (#33)
+
+### Fixed — orchestrator: resolve no command for the stock M-core shim
+
+`scripts/alp_orchestrate.py` no longer emits a broken `west build` for the
+placeholder `app: alp-stock-shim` (whose image body isn't in the tree).  The slice is
+carried as `command: null` / skipped with a `stock-shim-unimplemented` warning
+pointing at overriding `cores.<id>.app`.  (#49)
+
+### Fixed — library profiles: `cmsis_dsp` dir now matches its board token
+
+The CMSIS-DSP profile directory is renamed `cmsis-dsp/` → `cmsis_dsp/` to match the
+`board.yaml` token.  The loader's profile lookup (built from the raw token) was
+missing the hyphenated dir and **silently dropping the CMSIS-DSP HW-accelerator
+bindings** (NEON / TMU CORDIC / FFT).  `_LIBRARY_WEST_MODULES` keeps `cmsis_dsp →
+cmsis-dsp` (the upstream west *project* name).  (#47)
+
+### Fixed — CI + docs hygiene
+
+- `pr-twister` now runs the `tests/unit` suites (35 unit scenarios that previously
+  ran only in the local gate).  (#90)
+- `nightly-extras-tier1-pins`: fixed a west-topdir path mismatch that left the
+  library audit empty and produced an invalid `/*.txt` artifact path.
+- `zephyr/module.yml`: re-baselined the stale Zephyr-v3.7 `west-commands` note to v4.4.  (#51)
+- `<alp/display.h>`: corrected the `@brief` that described a non-existent v0.1 backend;
+  display remains a NOSUPPORT stub with the real backends tracked by #23.
+- bitbake CI moved to a private-runner dispatch bridge (no self-hosted runner on the
+  public repo).  (#127)
+
 ## [v0.7.0] - 2026-06-12
 
 ### Added — meta-alp-sdk: production image (`alp-image-prod`) + ALP distro identity + hardening
