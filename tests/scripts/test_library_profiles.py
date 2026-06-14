@@ -15,9 +15,9 @@ What the test enforces:
 
 1. Coverage -- the set of library names appearing in
    ``metadata/library-profiles/`` exactly matches the schema enum.
-   The single ``cmsis_dsp`` -> ``cmsis-dsp`` name mapping (mirrored
-   in ``_LIBRARY_WEST_MODULES`` in ``scripts/alp_project.py``) is
-   accommodated explicitly.
+   Profile directory names equal their board.yaml library token
+   1:1 (``_LIB_TO_DIR`` is the empty override map kept for any
+   future, deliberate divergence).
 
 2. Shape -- each profile YAML has the required top-level fields
    (``schema_version``, ``library``, ``class``, ``accelerators``,
@@ -65,14 +65,13 @@ SCHEMA_PATH = REPO / "metadata" / "schemas" / "board.schema.json"
 PROFILE_DIR = REPO / "metadata" / "library-profiles"
 
 
-# Mirrors `_LIBRARY_WEST_MODULES` in scripts/alp_project.py: the
-# library name in board.yaml uses underscores ("cmsis_dsp") while
-# the directory uses hyphens ("cmsis-dsp").  Only this one library
-# differs today; declare the mapping explicitly so a future
-# divergence triggers an explicit decision rather than silent drift.
-_LIB_TO_DIR: dict[str, str] = {
-    "cmsis_dsp": "cmsis-dsp",
-}
+# Profile directory names match the board.yaml library token 1:1
+# (e.g. `cmsis_dsp/`, `tflite_micro/`, `madgwick_ahrs/`).  This
+# invariant is what the loader's profile-path lookup relies on
+# (scripts/alp_project.py `_emit_library_hw_backends`).  Declare an
+# explicit (currently empty) override map so any future token!=dir
+# divergence triggers a deliberate decision rather than silent drift.
+_LIB_TO_DIR: dict[str, str] = {}
 
 
 # ---------------------------------------------------------------------

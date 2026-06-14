@@ -69,7 +69,7 @@ DEFAULT_EXCLUDES: tuple[str, ...] = (
     "vendors",
     "docs/superpowers/specs",
     "docs/superpowers/plans",
-    "metadata/library-profiles/cmsis-dsp",
+    "metadata/library-profiles/cmsis_dsp",
 )
 
 # Fenced-block extractor.  Captures content between ```yaml (or ```yml)

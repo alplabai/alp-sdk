@@ -516,6 +516,12 @@ class TestHwBackendsLoader(unittest.TestCase):
         self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_BEARSSL_CAU=y")
         self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_LITTLEFS_EMMC_DMA=y")
         self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
+        # Regression guard: the cmsis_dsp profile dir must equal its
+        # board.yaml token so the loader's profile-path lookup resolves
+        # and the HW-accelerator bindings are not silently dropped.
+        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_CMSIS_DSP_NEON=y")
+        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_CMSIS_DSP_TMU_CORDIC=y")
+        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_CMSIS_DSP_TMU_FFT=y")
 
     def test_nx9101_u65_resolves(self) -> None:
         """NX9101: i.MX 93's Ethos-U65 must resolve via the

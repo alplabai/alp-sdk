@@ -82,8 +82,9 @@ metadata/library-profiles/
 ├── mbedtls/
 │   └── mbedtls_config.h               (MbedTLS.  Set MBEDTLS_CONFIG_FILE
 │                                       to this when including.)
-└── cmsis-dsp/
-    └── README.md                      (intentionally empty -- see file)
+└── cmsis_dsp/
+    ├── hw-backends.yaml               (SIMD/CORDIC/FFT/DMA backend bindings)
+    └── README.md
 ```
 
 Profile headers stay **small and conservative** -- they encode
