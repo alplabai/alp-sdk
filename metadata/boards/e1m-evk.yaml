@@ -43,11 +43,11 @@ populated:
   # Accelerometer (additional, beyond the IMUs)
   lis2dw12:                 false               # not on the EVK by default
 
-  # Displays -- none are soldered on the EVK; panels (e.g. the SSD1306
-  # OLED) attach via the DSI/CSI FFC or the I2C/SPI headers and are
-  # declared per-app in a board.yaml `chips:` array, so they are
-  # intentionally absent here.  SSD1331 below is a documented DNI
-  # footprint option.
+  # Displays -- none are soldered on the EVK.  The SSD1306 OLED attaches
+  # via the I2C/Qwiic header (the SSD1331 variant uses SPI); MIPI panels
+  # use the DSI/CSI FFC.  Apps that drive a panel declare it per-app in a
+  # board.yaml `chips:` array, so panels are intentionally absent here.
+  # SSD1331 below is a documented DNI footprint option.
   ssd1331:                  false               # colour OLED (SPI), not on the EVK
 
   # Camera + camera mux
@@ -232,8 +232,9 @@ e1m_routes:
 # Inference + display defaults a stock EVK app would pick.  Apps
 # override in their board.yaml as needed.
 defaults:
-  display:                  ssd1306             # the always-populated OLED
-  primary_imu:              lsm6dso             # canonical (other IMUs are alternates)
+  display:                  ssd1306             # default panel for apps that attach an
+                                                # SSD1306 to the I2C header (none is soldered)
+  primary_imu:              bmi323              # canonical soldered IMU (ICM-42670 is the alternate)
 
 # Hardware revisions.  Same ADC + resistor-divider scheme as the
 # SoM modules (see metadata/e1m_modules/aen/hw-revisions.yaml for
