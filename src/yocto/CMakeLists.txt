@@ -22,6 +22,15 @@
 # The routing is exercised today; the real run requires the deepx-dxm1
 # dx-rt Yocto recipe on the V2N-M1 sysroot (BENCH-UNVERIFIED until HIL).
 #
+# RTC + WDT carve-out (#33): these two classes have migrated off the
+# stub_backend.c direct-impl model onto the backend registry /
+# dispatcher pattern already used Zephyr-side.  The public alp_rtc_* /
+# alp_wdt_* symbols are now owned by src/rtc_dispatch.c +
+# src/wdt_dispatch.c, which route through src/backend.c to the real
+# Linux backends src/backends/{rtc,wdt}/yocto_drv.c (/dev/rtcN +
+# /dev/watchdogN ioctls).  The ioctl backends are compile-verified on
+# a Linux host; the full Yocto cross-link is BENCH-UNVERIFIED.
+#
 # This file only fires on plain-CMake builds (ZEPHYR_BASE unset);
 # Yocto recipes ultimately invoke this same plain-CMake path.
 
@@ -49,6 +58,26 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/inference_yocto.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/alp_model_loader.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/inference/alp_model_select.c
+    # Backend registry selector + the RTC/WDT class dispatchers (#33).
+    # backend.c walks the per-class linker sections; the dispatchers own
+    # the public alp_rtc_*/alp_wdt_* symbols (stub_backend.c is muted for
+    # those classes below via ALP_VENDOR_OVERRIDES_RTC/WDT).  The
+    # sw_fallback backends are portable priority-0 catch-alls; the real
+    # /dev/rtcN + /dev/watchdogN ioctl backends are added in the Linux
+    # block (they self-gate on __linux__, so listing them here would be
+    # harmless too, but the Linux block keeps the device-node backends
+    # grouped with the other Linux userspace wrappers).
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backend.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../rtc_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../wdt_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rtc/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/wdt/sw_fallback.c
+    # The shared dispatchers call alp_z_set_last_error/clear (defined
+    # Zephyr-side in src/zephyr/last_error.c, which the Yocto build does
+    # not compile).  This shim forwards them onto the common last-error
+    # slot (alp_internal_set_last_error) so there is exactly one error
+    # static and no undefined reference on the Yocto link.
+    ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_last_error_shim.c
 )
 
 # Stop stub_backend.c from emitting its own alp_inference_* symbols --
@@ -72,16 +101,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio.c
-        # CAN / I2S / RTC / WDT carry Yocto-side NOSUPPORT stubs that
-        # stamp alp_last_error so apps detect-and-fallback at runtime
-        # rather than discovering the gap at link time via the umbrella
-        # stub_backend.c bodies.  Real Linux backends (SocketCAN, ALSA,
-        # /dev/rtcN, /dev/watchdogN) land alongside the rest of the
-        # Yocto first-class peripheral work tracked in VERSIONS.md.
+        # CAN / I2S still carry Yocto-side NOSUPPORT stubs that stamp
+        # alp_last_error so apps detect-and-fallback at runtime rather
+        # than discovering the gap at link time via the umbrella
+        # stub_backend.c bodies.  Real Linux backends (SocketCAN, ALSA)
+        # land alongside the rest of the Yocto first-class peripheral
+        # work tracked in VERSIONS.md.
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_can.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2s.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_rtc.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_wdt.c
+        # RTC + WDT are now REAL registry backends (#33), not stubs:
+        # backends/{rtc,wdt}/yocto_drv.c drive /dev/rtcN + /dev/watchdogN
+        # via <linux/rtc.h> / <linux/watchdog.h> ioctls and register into
+        # the per-class sections at priority 100 (vendor "linux").  The
+        # dispatchers + sw_fallback + backend.c are pulled in
+        # unconditionally above; these two files self-gate on __linux__.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rtc/yocto_drv.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/wdt/yocto_drv.c
         # <alp/rpc.h> userspace RPMsg backend.  The .c file gates its
         # full implementation behind ALP_SDK_HAVE_OPENAMP_USERLAND; the
         # NOSUPPORT fallback is compile-tested on every Linux build so
