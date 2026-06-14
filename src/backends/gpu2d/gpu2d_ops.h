@@ -5,15 +5,16 @@
  * implementations.  NOT a public header -- customer code never
  * sees this struct.  Layout may change between SDK versions.
  *
- * Slice 8b ships only the zephyr_stub backend; every op returns
- * ALP_ERR_NOT_IMPLEMENTED except open(), which succeeds so the
- * dispatcher's surface-validation pre-checks (NULL pointer, zero
- * dimensions, format range) stay reachable and match the legacy
- * src/zephyr/gpu2d_zephyr.c contract.  Real backends (Alif D/AVE 2D
- * on AEN, Vivante GC328 on i.MX 93) land per the tracking issue on
- * the stub source file.  No vendor extensions exist for GPU2D in
- * this slice, so the first-member-aliasing pattern the ADC vtable
- * uses is not required here.
+ * Backends:
+ *   - sw_fallback.c : portable pure-C CPU fill/blit/blend, wildcard
+ *                     "*" at priority 0.  open() returns ALP_OK and
+ *                     the ops do real pixel work; this is the
+ *                     backend native_sim runs and tests.
+ *   - alif_dave2d.c : the AEN D/AVE 2D real backend (priority 100,
+ *                     per-SKU silicon_refs), gated on the Dave2D
+ *                     pack + bench-unverified.
+ * No vendor extensions exist for GPU2D, so the first-member-aliasing
+ * pattern the ADC vtable uses is not required here.
  */
 
 #ifndef ALP_BACKENDS_GPU2D_OPS_H

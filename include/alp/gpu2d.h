@@ -9,9 +9,8 @@
  *
  * Portable 2D blit / fill / blend operations against framebuffer
  * surfaces.  Maps to the Alif Ensemble's D/AVE 2D ("GPU2D") block on
- * AEN-family SoMs; planned implementations land for the NXP i.MX 93
- * Vivante GC328 (when the vendor HAL ships) and as a software
- * fallback for SoMs without a 2D accelerator.
+ * AEN-family SoMs; every other SoM is served by a portable software
+ * fallback that does the same fill / blit / blend on the CPU.
  *
  * Surface rationale: the Alif Ensemble audit
  * (internal AEN feature audit, top-five NEEDS-PORTABLE-
@@ -19,24 +18,23 @@
  * Zephyr driver class.  Customers migrating from V2N to AEN
  * silently lose the 2D acceleration if the SDK does not expose a
  * portable surface.  This header declares the API so customer code
- * compiles against every SoM; the actual GPU2D dispatch lands once
- * the AEN HAL pack stabilises (see roadmap in
- * the internal AEN feature audit §5.2).
+ * compiles against every SoM.
  *
  * Backends:
  *   - AEN-family : D/AVE 2D hardware block (SDK backend; no vendor
- *                  SDK dependency in app code).
- *   - i.MX 93    : Vivante 2D core (SDK backend, planned).
- *   - V2N        : NOSUPPORT (no on-die 2D block).
- *   - Yocto      : DRM / KMS planes where available; NOSUPPORT
- *                  otherwise.
- *   - Baremetal  : NOSUPPORT.
+ *                  SDK dependency in app code).  Bench-unverified
+ *                  today -- see src/backends/gpu2d/alif_dave2d.c.
+ *   - all others : portable software fallback (CPU fill/blit/blend;
+ *                  src/backends/gpu2d/sw_fallback.c).  This is what
+ *                  V2N, i.MX 93 (whose 2D engine is PXP, not a
+ *                  GPU2D peer -- see ADR 0008), Yocto, and
+ *                  bare-metal builds use.
  *
  * Concurrency: the singleton handle returned by @ref alp_gpu2d_open
  * is reentrant under a shared driver mutex.  Callers must serialise
  * @ref alp_gpu2d_fill_rect / @ref alp_gpu2d_blit / @ref alp_gpu2d_blend
- * issuance if the underlying HAL doesn't queue ops -- the v0.5 stub
- * doesn't perform any work so concurrency is not yet load-bearing.
+ * issuance -- the software fallback writes caller memory directly and
+ * the D/AVE 2D HAL's display-list builder is not itself thread-safe.
  *
  * Typical usage:
  * @code
@@ -85,9 +83,12 @@ typedef enum {
     ALP_GPU2D_FMT_RGBA8888 = 4,
 } alp_gpu2d_format_t;
 
-/** Blend mode for @ref alp_gpu2d_blend.  Field-level meanings:
+/** Blend mode for @ref alp_gpu2d_blend.  Colours are straight
+ *  (non-premultiplied) alpha.  Field-level meanings:
  *   - REPLACE: dst = src (no blend).
- *   - SRC_OVER: dst = src + dst*(1-src.a) (Porter-Duff).
+ *   - SRC_OVER: dst = src*src.a + dst*(1-src.a) (straight-alpha
+ *     src-over: a transparent src leaves dst untouched, an opaque
+ *     src replaces it).
  *   - ADDITIVE: dst = src + dst (clamped).
  *   - MULTIPLY: dst = src * dst. */
 typedef enum {

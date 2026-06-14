@@ -44,7 +44,7 @@ part:
 
 | Surface                | Populates on        | E7 (E1M-AEN701)?                       |
 |------------------------|---------------------|---------------------------------------|
-| GPU2D (D/AVE 2D)       | E5 / E7 / E8 …      | **Yes** — `gpu2d` + `dave2d` true in `e7.json` |
+| GPU2D (D/AVE 2D)       | E6 / E7 / E8 only   | **Yes** — `gpu2d` + `dave2d` true in `e7.json` |
 | Mali-C55 ISP           | E4 / E6 / E8 only   | **No** — no `isp` / `mali_c55` key in `e7.json` |
 | OSPI SecAES (vendor)   | E4 / E6 / E8 only   | **No** SecAES fabric (see note below) |
 
@@ -73,11 +73,15 @@ on the M55-HP — exactly the data flow in that example's
 **Portable surface:** `<alp/gpu2d.h>` — `alp_gpu2d_open` /
 `alp_gpu2d_fill_rect` / `alp_gpu2d_blit` / `alp_gpu2d_blend` /
 `alp_gpu2d_close`.
-**Stub it replaces:** `src/backends/gpu2d/zephyr_stub.c` (wildcard
-`"*"`, priority 0, vendor `"stub"`).
-**Real backend:** Alif D/AVE 2D HAL on the AEN family, registering a
-silicon-specific entry at a priority higher than the wildcard stub
-(tracking issue #24).
+**Portable fallback:** `src/backends/gpu2d/sw_fallback.c` (wildcard
+`"*"`, priority 0, vendor `"sw"`) — a REAL pure-C CPU
+fill/blit/blend, not a NOSUPPORT stub.  It replaced the original
+`zephyr_stub.c` (issue #24).
+**Real backend:** `src/backends/gpu2d/alif_dave2d.c` — Alif D/AVE 2D
+HAL on the AEN family, registering a silicon-specific entry per
+`alif:ensemble:e6` / `e7` / `e8` (the SKUs whose SoC JSON carries
+`dave2d: true`) at priority 100, above the wildcard fallback
+(tracking issue #24; bench-unverified).
 
 ### Dispatch + registration
 
@@ -330,8 +334,9 @@ here is what the backend must implement, not a stub.
 - [ADR 0008](adr/0008-gpu2d-portable-shim.md) — why GPU2D ships as a
   portable shim even on single-silicon.
 - [`include/alp/gpu2d.h`](../include/alp/gpu2d.h) /
-  [`src/backends/gpu2d/zephyr_stub.c`](../src/backends/gpu2d/zephyr_stub.c)
-  — GPU2D surface + stub.
+  [`src/backends/gpu2d/sw_fallback.c`](../src/backends/gpu2d/sw_fallback.c) /
+  [`src/backends/gpu2d/alif_dave2d.c`](../src/backends/gpu2d/alif_dave2d.c)
+  — GPU2D surface + software fallback + D/AVE 2D real backend.
 - [`include/alp/ext/alif/camera.h`](../include/alp/ext/alif/camera.h) /
   [`src/backends/ext/alif/camera.c`](../src/backends/ext/alif/camera.c)
   — Mali-C55 ISP vendor surface + stub.

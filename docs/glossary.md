@@ -99,9 +99,10 @@ bring-up.  Two flavours: E1M-EVK (35 × 35) and E1M-X-EVK (45 × 65).
 N93 modules carry Ethos-U65.
 
 **GPU2D** -- 2D compositing accelerator (alpha blending, rotation,
-scaling) for OLED/TFT pipelines.  AEN populates a Mali-D71;
-other E1M families currently don't.  Exposed via
-`<alp/gpu2d.h>` for portability.  See
+scaling) for OLED/TFT pipelines.  AEN's "GPU2D" is the TES **D/AVE
+2D** engine (`dave2d: true` in the AEN SoC JSON); other E1M families
+have no peer hardware and run a portable software fallback.  Exposed
+via `<alp/gpu2d.h>` for portability.  See
 [ADR 0008](adr/0008-gpu2d-portable-shim.md).
 
 **`<family>/hw-revisions.yaml`** -- Per-rev SDK-version compatibility

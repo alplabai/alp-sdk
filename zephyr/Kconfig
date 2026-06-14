@@ -820,25 +820,59 @@ config ALP_SDK_GPU2D
 	bool "Enable <alp/gpu2d.h> 2D graphics accelerator surface"
 	default y
 	help
-	  Compile src/gpu2d_dispatch.c + src/backends/gpu2d/zephyr_stub.c
-	  (Slice 8b -- registry migration).  Provides the portable
-	  alp_gpu2d_open / fill_rect / blit / blend / close surface
-	  that maps to vendor 2D-accelerator HALs (Alif D/AVE 2D on
-	  Ensemble, planned Vivante GC328 on i.MX 93).
-
-	  Slice 8b ships the surface on top of the backend registry
-	  with a wildcard stub backend: open() returns a valid handle
-	  and the dispatcher's surface-validation pre-checks (NULL
-	  pointer, zero dimensions, format range -> ALP_ERR_INVAL)
-	  still fire, but fill_rect / blit / blend return
-	  ALP_ERR_NOT_IMPLEMENTED.  Per-vendor HAL bodies land in
-	  follow-up commits per issue #24.
+	  Compile src/gpu2d_dispatch.c, the class dispatcher behind the
+	  portable alp_gpu2d_open / fill_rect / blit / blend / close
+	  surface.  The actual ops come from a backend: the portable
+	  software fallback (ALP_SDK_GPU2D_SW_FALLBACK) or the Alif
+	  D/AVE 2D real backend (ALP_SDK_GPU2D_ALIF_DAVE2D) on AEN
+	  silicon.
 
 	  Surfaces the headline gap the Alif Ensemble feature audit
 	  (internal AEN feature audit) called out: customers
 	  migrating from V2N to AEN otherwise silently lose 2D
 	  acceleration because Zephyr has no portable `gpu` / `2d`
 	  driver class.
+
+config ALP_SDK_GPU2D_SW_FALLBACK
+	bool "Portable software 2D fallback (real CPU fill/blit/blend)"
+	depends on ALP_SDK_GPU2D
+	default y
+	help
+	  Compile src/backends/gpu2d/sw_fallback.c, a REAL pure-C 2D
+	  implementation registered as the wildcard "*" at priority 0.
+	  It does actual pixel work -- solid fill, format-converting
+	  blit, and the four blend modes (REPLACE / SRC_OVER /
+	  ADDITIVE / MULTIPLY) over caller-owned framebuffer memory --
+	  with no hardware or vendor dependency, so it builds and is
+	  unit-tested on native_sim.
+
+	  Always loses backend selection to a real silicon backend
+	  (the Alif D/AVE 2D backend at priority 100 on AEN parts), but
+	  is the backend that serves the API on every SoM without an
+	  on-die 2D engine (V2N, i.MX 93) and on native_sim.  Default y
+	  so alp_gpu2d_open() succeeds portably everywhere.
+
+config ALP_SDK_GPU2D_ALIF_DAVE2D
+	bool "Compile the Alif D/AVE 2D real backend (bench-unverified)"
+	depends on ALP_SDK_GPU2D
+	default n
+	help
+	  Compile src/backends/gpu2d/alif_dave2d.c, the AEN-family
+	  D/AVE 2D backend.  Registers one entry per
+	  alif:ensemble:e1..e8 at priority 100, driving the engine
+	  through the documented d2_* API of the proprietary Alif
+	  D/AVE 2D driver pack (AlifSemiconductor::Dave2DDriver).
+
+	  Off by default: it can only build when the Dave2D pack is on
+	  the include path (the SDK never vendors the pack), and it is
+	  NOT silicon-validated -- the call sequencing and format /
+	  blend-mode mappings are authored against the documented API
+	  and await AEN bench bring-up (issue #24).  It cannot build on
+	  native_sim; leave it off there and let the software fallback
+	  serve the surface.  ADDITIVE / MULTIPLY blends have no
+	  documented single-pass D/AVE 2D mapping and return NOSUPPORT
+	  from this backend, so portable code that needs them falls
+	  back to the software path.
 
 config ALP_SDK_UPDATE_LOG
 	bool "Enable <alp/update_log.h> firmware-update audit-log surface (experimental)"
