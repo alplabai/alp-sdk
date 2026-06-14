@@ -1,0 +1,91 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# vendor-ext, BENCH-UNVERIFIED.
+#
+# Binding for the ARM MHUv2 (Message Handling Unit, v2) as integrated in the
+# Alif Ensemble (E1/E3/E5/E7/E8) family for inter-core doorbell signalling
+# (e.g. RTSS-HE <-> APSS / RTSS-HP). Each devicetree node describes exactly
+# ONE MHUv2 frame -- either a sender frame or a receiver frame, selected by the
+# `alif,direction` property. The driver
+# (zephyr/drivers/mbox/mbox_alif_mhuv2.c) presents the standard Zephyr MBOX
+# class API and operates in doorbell (signalling) mode only: no payload travels
+# through the MHU itself; the OpenAMP static-vrings carry data in shared SRAM
+# and the MHU only rings a per-bit doorbell.
+#
+# A DISTINCT compatible `alif,mhuv2-mbox` is used deliberately (NOT `arm,mhuv2`)
+# so this binding never collides with the `arm,mhuv2` mhu-class binding shipped
+# by the opt-in alifsemi/zephyr_alif fork; the whole stack works on the DEFAULT
+# upstream-Zephyr + hal_alif base with no fork.
+#
+# The single mbox cell is the doorbell BIT INDEX (0..31) inside channel-window 0
+# of the frame. We use window 0 only. This is intentionally NOT the Linux
+# 2-cell `arm,mhuv2` form (Linux encodes <channel-window doorbell>); Zephyr's
+# MBOX API addresses a single uint32_t channel id, which here maps to the bit.
+#
+# Register offsets and the E8 node addresses/IRQs were transcribed from the ARM
+# MHUv2 spec (DDI 0515) and the alifsemi/zephyr_alif fork's
+# dts/arm/alif/ensemble/common/ensemble_rtss_he.dtsi. They have NOT been
+# validated on real silicon.
+
+description: |
+  ARM MHUv2 inter-core mailbox frame as integrated in Alif Ensemble.
+  vendor-ext, BENCH-UNVERIFIED -- authored from the ARM MHUv2 register spec and
+  the alifsemi/zephyr_alif fork DTS; not yet run on silicon.
+
+  One node = one MHUv2 frame (sender OR receiver). #mbox-cells = <1>, the cell
+  being the doorbell bit index (0..31) in channel-window 0.
+
+  Example:
+
+    mhu_seh_rx: mhu@40000000 {
+        compatible = "alif,mhuv2-mbox";
+        reg = <0x40000000 0x1000>;
+        interrupts = <33 3>;
+        alif,direction = "rx";
+        #mbox-cells = <1>;
+        status = "okay";
+    };
+
+    mhu_seh_tx: mhu@40010000 {
+        compatible = "alif,mhuv2-mbox";
+        reg = <0x40010000 0x1000>;
+        interrupts = <34 3>;
+        alif,direction = "tx";
+        #mbox-cells = <1>;
+        status = "okay";
+    };
+
+compatible: "alif,mhuv2-mbox"
+
+include: [base.yaml, "mailbox-controller.yaml"]
+
+properties:
+  reg:
+    required: true
+    description: |
+      Base address and size (0x1000) of this MHUv2 frame's register window.
+
+  interrupts:
+    description: |
+      Combined doorbell interrupt for a receiver frame. Required when
+      `alif,direction = "rx"`; omitted for sender frames (which never take an
+      interrupt in doorbell mode).
+
+  alif,direction:
+    type: string
+    required: true
+    enum:
+      - "tx"
+      - "rx"
+    description: |
+      Role of this frame.
+        - "tx": sender frame. Implements `send` (rings the doorbell via CH_SET)
+          and performs the ACCESS_REQUEST/ACCESS_READY wake handshake. No
+          callback, no interrupt.
+        - "rx": receiver frame. Implements `register_callback` + `set_enabled`
+          (UNMASK/MASK), services the doorbell IRQ, and acks via CH_CLEAR.
+          `interrupts` is required for this role.
+
+mbox-cells:
+  - channel

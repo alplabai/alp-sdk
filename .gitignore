@@ -108,3 +108,6 @@ dist/
 # It is Renesas-gen_tool-derived, SoM-hardware-specific config and MUST NOT be
 # committed to the public repo.
 meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/ddr_param_def_lpddr4-alp.c
+
+# Local ARM Vela / NPU toolchain virtualenv (not redistributed)
+.venv-vela/

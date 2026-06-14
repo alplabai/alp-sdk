@@ -279,21 +279,34 @@ top of the per-subsystem checks.
    banner on the console.  This proves the toolchain, the board
    file, and `west flash` end-to-end before anything harder.
 
-6. **Confirm the `mailbox.controller` value against the Alif HW
-   config.**  The SKU preset
-   ([`metadata/e1m_modules/E1M-AEN701.yaml`](../metadata/e1m_modules/E1M-AEN701.yaml),
-   `.../E1M-AEN801.yaml`) ships `mailbox.controller: TBD` with a
-   **candidate** of `alif_mhu` (Arm MHU; MHU0 + MHU1, 32-byte
-   payload limit -- see
-   [`docs/tutorials/15-mproc-mailbox.md`](tutorials/15-mproc-mailbox.md)).
-   The Alif Linux BSP corroborates **MHUv2** (`meta-alif-ensemble` +
-   `linux_alif` enable `apss-mhu` -> `mhuv2.cfg`), so the inter-core
-   mailbox IP is MHUv2 -- only the exact Zephyr binding name is unconfirmed.
-   On bench day, confirm the actual Zephyr binding name against
-   the **Alif hand-written HW-config doc** and the generated
-   board DTS, then promote TBD to the confirmed value in **both**
-   AEN701 + AEN801 presets.  Smoke-test it with the multicore
-   example:
+6. **Validate the MHUv2 doorbell round-trip with the real driver.**
+   The mailbox controller is **no longer TBD**.  The inter-core IP
+   is the **ARM MHUv2** (confirmed via the alifsemi/zephyr_alif
+   fork DTS, corroborated by the Alif Linux BSP: `meta-alif-ensemble`
+   + `linux_alif` wire `apss-mhu` -> `mhuv2.cfg`).  alp-sdk now ships
+   a Zephyr MBOX-class driver for it under the **distinct** compatible
+   `alif,mhuv2-mbox`
+   ([`zephyr/drivers/mbox/mbox_alif_mhuv2.c`](../zephyr/drivers/mbox/mbox_alif_mhuv2.c),
+   binding
+   [`zephyr/dts/bindings/mbox/alif,mhuv2-mbox.yaml`](../zephyr/dts/bindings/mbox/alif,mhuv2-mbox.yaml)).
+   The lead-part preset
+   ([`.../E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml))
+   now sets `mailbox.controller: alif_mhuv2`, and the AEN801 M55-HE/HP
+   overlays wire ipc0's `mboxes` to the APSS<->RTSS-HE MHU0 sender/
+   receiver pair.
+
+   > **vendor-ext, BENCH-UNVERIFIED.**  The driver, the MHUv2 register
+   > map, and the node addresses/IRQs come from the ARM MHUv2 spec
+   > (DDI 0515) + the fork DTS and have **not** yet been run on real
+   > silicon.  The RTSS-HP MHU base in particular is unverified (the
+   > fork's HP dtsi reused the HE addresses) -- see the "bench-confirm
+   > HP MHU base" note in the HP overlay.  AEN801 is the lead part;
+   > the rollout of this wiring to AEN301..701 follows after AEN801
+   > bench-passes.
+
+   On bench day, validate the doorbell round-trip with the multicore
+   example (the step is now "make the real driver work", not "confirm
+   the name"):
 
    ```bash
    west alp-build -b alif_e7_dk_rtss_he examples/multicore/mproc-mailbox
@@ -301,8 +314,10 @@ top of the per-subsystem checks.
    ```
 
    The HE↔HP round-trip on MBOX channel 0 must echo a 32-byte
-   message.  Until this step passes, treat `mailbox.controller`
-   as unverified -- do **not** commit a guessed value.
+   message.  If it fails, cross-check the MHUv2 frame base addresses
+   and IRQ numbers in the overlay against the **Alif hand-written
+   HW-config doc** and the generated board DTS before assuming a
+   driver bug -- those values are the unverified part.
 
 7. **Ethos-U sanity.**  Confirm the NPU is visible to the runtime
    before loading any model.  On the M55 side the Ethos-U55 is
