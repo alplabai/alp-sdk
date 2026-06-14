@@ -74,8 +74,12 @@ jobs:
             madgwick_ahrs || echo "west update returned non-zero"
         continue-on-error: true
 
+      # NB: no `working-directory: alp-sdk`.  `west init -l .` (run in
+      # the nested manifest repo) puts the workspace topdir at its
+      # PARENT -- i.e. $GITHUB_WORKSPACE -- so west projects land in
+      # $GITHUB_WORKSPACE/modules/lib/, NOT alp-sdk/modules/lib/.
+      # These steps must resolve against the topdir (the default cwd).
       - name: Verify stable pins populated content
-        working-directory: alp-sdk
         run: |
           set -euo pipefail
           status=0
@@ -97,7 +101,6 @@ jobs:
           exit $status
 
       - name: Note TBD-pinned libraries (warn-only)
-        working-directory: alp-sdk
         run: |
           set -eu
           # TBD pins -- track but don't gate merge until a SHA lands.
@@ -114,8 +117,15 @@ jobs:
         if: always()
         run: |
           set -e
+          # nullglob: when no library dir is populated (e.g. a PR that
+          # didn't fetch the extras-tier1 group), the loop must skip
+          # rather than run once with the literal pattern -- otherwise
+          # `basename` yields `*` and we create a file named `*.txt`,
+          # which upload-artifact later rejects (`*` is an illegal path).
+          # Path is topdir-relative (see the verify step's note above).
+          shopt -s nullglob
           mkdir -p /tmp/extras-tier1-audit
-          for d in alp-sdk/modules/lib/*/; do
+          for d in modules/lib/*/; do
             lib=$(basename "$d")
             head -1 "${d}README.md" 2>/dev/null \
               > "/tmp/extras-tier1-audit/${lib}.txt" || \
@@ -128,3 +138,4 @@ jobs:
         with:
           name: extras-tier1-audit
           path: /tmp/extras-tier1-audit/
+          if-no-files-found: ignore
