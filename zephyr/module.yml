@@ -22,10 +22,13 @@ build:
     board_root: zephyr
 
 # NOTE on `west alp-build`:
-#   Zephyr v3.7's module.yml schema does NOT accept `west-commands:`
-#   at the top level (that key was added to module.yml in a later
-#   Zephyr release).  The command lives in `scripts/west-commands.yml`
-#   and is surfaced via the manifest's `self.west-commands` (when
-#   alp-sdk is the workspace topdir) or via the consuming project's
-#   `projects.alp-sdk.west-commands` field in their own west.yml.
-#   See west.yml + scripts/west-commands.yml for the wiring.
+#   The command lives in `scripts/west-commands.yml` and is surfaced
+#   via the *manifest's* west-commands -- the manifest's
+#   `self.west-commands` (when alp-sdk is the workspace topdir) or the
+#   consuming project's `projects.alp-sdk.west-commands` (when alp-sdk
+#   is consumed as a Zephyr module).  This is a deliberate choice for
+#   topdir/consumer symmetry, not a schema limitation: the workspace
+#   now pins Zephyr v4.4.0 (see west.yml / README), so the earlier
+#   v3.7-era note about module.yml's top-level `west-commands:` key no
+#   longer applies.  See west.yml + scripts/west-commands.yml for the
+#   wiring.
