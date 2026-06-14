@@ -323,14 +323,21 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/display_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/display/zephyr_stub.c)
 
-# 2D graphics accelerator surface (<alp/gpu2d.h>).  Class
-# dispatcher + wildcard stub backend ship unconditionally.  Real
-# backends (Alif D/AVE 2D on AEN, NXP Vivante GC328 on i.MX 93)
-# land per issue #24 with their own silicon-specific registry
-# entries.
+# 2D graphics accelerator surface (<alp/gpu2d.h>).  The class
+# dispatcher ships whenever the surface is enabled; the portable
+# software fallback (sw_fallback.c -- the priority-0 wildcard that
+# does real CPU fill/blit/blend) is gated on its own opt-in so it
+# always builds on native_sim.  The Alif D/AVE 2D real backend is
+# gated on the proprietary Dave2D pack being on the include path
+# (BENCH-UNVERIFIED, never built on native_sim).  No NXP/Vivante
+# backend exists: i.MX 93's 2D engine is PXP, not Vivante -- see
+# docs/adr/0008-gpu2d-portable-shim.md.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpu2d_dispatch.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpu2d/zephyr_stub.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpu2d_dispatch.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D_SW_FALLBACK
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpu2d/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D_ALIF_DAVE2D
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpu2d/alif_dave2d.c)
 
 # Runtime hardware-info reader (EEPROM manifest + BOARD_ID ADC).
 # v0.3 stub returns NOSUPPORT; v0.3.x fills in the real impl.
