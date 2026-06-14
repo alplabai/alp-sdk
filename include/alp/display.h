@@ -7,13 +7,15 @@
  * @file display.h
  * @brief Alp SDK display abstraction.
  *
- * v0.1: thin wrapper around the underlying OS display layer.  On
- * Zephyr this routes through Zephyr's `display_*` driver API so
- * generic SSD1306 / SSD1351 / similar parts work via devicetree.
- *
- * v0.2 will add:
+ * Portable surface only.  Every op is currently served by the
+ * priority-0 NOT_IMPLEMENTED stub (src/backends/display/zephyr_stub.c)
+ * -- no real backend exists yet.  The planned real backends are
+ * tracked by issue #23:
+ *   - a Zephyr `display_*` driver wrapper (so generic SSD1306 /
+ *     SSD1351 / similar parts resolve via devicetree),
+ *   - the V2N DSI / parallel-RGB framebuffer path,
+ *   - the Alif LCD-IF path,
  *   - alp_display_lvgl_attach() for LVGL flush integration.
- *   - DSI / parallel-RGB framebuffer paths for the V2N family.
  *
 
  * @par ABI status: [ABI-EXPERIMENTAL]
