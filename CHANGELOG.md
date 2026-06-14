@@ -107,6 +107,18 @@ Zephyr-only `CONTAINER_OF` include so it builds on the Yocto host.  Non-standard
 return `ALP_ERR_NOSUPPORT`.  **BENCH-UNVERIFIED** — full Yocto link + on-target runs
 (real `/dev`/sysfs nodes, a CAN bus, an I²S codec) need the sysroot/board.  (#33)
 
+### Changed — Yocto audio + rpc migrated to the registry
+
+The Yocto **audio** (ALSA) and **rpc** (OpenAMP/RPMsg userland) classes — which already
+worked via the older direct-impl model — move onto the registry/dispatcher pattern, with
+the vendor-API bodies preserved verbatim: `audio_yocto.c` → `src/backends/audio/yocto_drv.c`,
+`rpc_yocto.c` → `src/backends/rpc/yocto_drv.c` (the direct-impl files are deleted).  Both
+keep their CMake gates (ALSA; `open-amp`/`libmetal` with a NOSUPPORT fallback); rpc needs no
+override macro (it was never a stub class, so `rpc_dispatch.c` is the sole symbol owner).
+nm-audited (one owner per public symbol; backends export only the registry struct).
+BENCH-UNVERIFIED.  The remaining `mqtt` / `security` classes stay on the direct-impl model
+until their vendor headers are available in CI to compile-test the migration.  (#33)
+
 ### Fixed — orchestrator: resolve no command for the stock M-core shim
 
 `scripts/alp_orchestrate.py` no longer emits a broken `west build` for the

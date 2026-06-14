@@ -85,7 +85,7 @@ plan in `VERSIONS.md`.
 | **CAN / CAN-FD** (`<alp/can.h>`) | code complete¹         | code complete¹         | code complete¹            | code complete¹            |
 | **RTC** (`<alp/rtc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
 | **Watchdog** (`<alp/wdt.h>`) | code complete¹             | code complete¹         | code complete¹            | code complete¹            |
-| **Audio** (`<alp/audio.h>`) | planned                     | planned                | planned                   | planned |
+| **Audio** (`<alp/audio.h>`) | code complete¹              | code complete¹         | code complete¹            | code complete¹            |
 | **Camera** (`<alp/camera.h>`) | planned                   | **GA** (MIPI CSI-2)    | **GA**                    | planned |
 | **IoT** (`<alp/iot.h>`)   | **GA**                        | **GA**                 | **GA**                    | planned |
 
@@ -108,11 +108,14 @@ plan in `VERSIONS.md`.
 backends in the v0.8 cycle (issue #33), which also lands the per-class
 `alp_<class>_capabilities()` getter on Yocto:
 RTC (`/dev/rtcN`), Watchdog (`/dev/watchdogN`), CAN (SocketCAN), PWM (`/sys/class/pwm`),
-ADC (IIO sysfs), Counter (Linux Counter sysfs), and I²S (ALSA — gated on `libasound`,
-falls back to the stub when absent).  Each compiles + passes an nm symbol-ownership
-audit, but the **full Yocto link + on-target run are HIL-gated** (no sysroot / real
-device nodes in CI).  The other three Yocto classes (audio / security / rpc — already
-real via the direct-impl model) and the cross-core RPMsg proxy are separate slices.
+ADC (IIO sysfs), Counter (Linux Counter sysfs), I²S + Audio (ALSA `snd_pcm_*` — gated on
+`libasound`, fall back to the stub when absent), and RPC (OpenAMP/RPMsg userland — gated
+on `open-amp`/`libmetal`, with a NOSUPPORT fallback).  Each compiles + passes an nm
+symbol-ownership audit, but the **full Yocto link + on-target run are HIL-gated** (no
+sysroot / real device nodes in CI).  The remaining two classes (mqtt / security — already
+real via the direct-impl model; their migration is deferred because the vendor headers
+`libmosquitto` / OpenSSL aren't installable in CI to compile-test it) and the cross-core
+RPMsg proxy are separate slices.
 
 ### Cross-cutting v0.2 capability infrastructure
 
