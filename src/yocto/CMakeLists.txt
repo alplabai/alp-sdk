@@ -91,6 +91,21 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/adc/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/i2s/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/counter/sw_fallback.c
+    # Audio + RPC migrate onto the same registry / dispatcher pattern
+    # (#33).  The dispatchers own the public alp_audio_in_*/alp_audio_out_*
+    # / alp_rpc_* symbols.  For audio, stub_backend.c is muted below via
+    # ALP_VENDOR_OVERRIDES_AUDIO_IN/OUT; rpc was never a stub class (no
+    # stub_backend.c rpc surface), so its old rpc_yocto.c direct-impl is
+    # simply dropped and rpc_dispatch.c is the sole owner -- no override
+    # macro is needed.  The sw_fallback backends are the portable
+    # priority-0 catch-alls; the
+    # real Linux backends (ALSA snd_pcm_* for audio, OpenAMP-userland
+    # RPMsg for rpc) live in backends/<class>/yocto_drv.c and are added
+    # in their existing gated blocks below (ALSA gate / open-amp gate).
+    ${CMAKE_CURRENT_SOURCE_DIR}/../audio_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../rpc_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/audio/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/sw_fallback.c
     # The shared dispatchers call alp_z_set_last_error/clear (defined
     # Zephyr-side in src/zephyr/last_error.c, which the Yocto build does
     # not compile).  This shim forwards them onto the common last-error
@@ -142,11 +157,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # unconditionally above; these two files self-gate on __linux__.
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rtc/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/wdt/yocto_drv.c
-        # <alp/rpc.h> userspace RPMsg backend.  The .c file gates its
-        # full implementation behind ALP_SDK_HAVE_OPENAMP_USERLAND; the
-        # NOSUPPORT fallback is compile-tested on every Linux build so
-        # apps that don't pull in OpenAMP still link cleanly.
-        ${CMAKE_CURRENT_SOURCE_DIR}/rpc_yocto.c
+        # <alp/rpc.h> is now a REAL registry backend (#33), not the old
+        # rpc_yocto.c direct-impl: backends/rpc/yocto_drv.c is the
+        # userspace RPMsg backend.  It self-gates on __linux__ and gates
+        # its full OpenAMP implementation behind ALP_SDK_HAVE_OPENAMP_USERLAND
+        # (set in the open-amp pkg block below); the NOSUPPORT fallback is
+        # compile-tested on every Linux build so apps that don't pull in
+        # OpenAMP still link cleanly.  The dispatcher + sw_fallback +
+        # backend.c are pulled in unconditionally above; rpc_dispatch.c
+        # owns the public alp_rpc_* symbols (no stub_backend.c rpc stub
+        # exists, so no ALP_VENDOR_OVERRIDES_RPC mute is needed).
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/yocto_drv.c
     )
     target_compile_definitions(alp_sdk PRIVATE
         ALP_VENDOR_OVERRIDES_I2C=1
@@ -170,9 +191,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # OpenAMP user-space libraries (libmetal + open-amp).  On Yocto
     # these come from meta-openamp; on plain Debian/Ubuntu install
     # libopen-amp-dev + libmetal-dev.  When the host doesn't have them
-    # the rpc_yocto.c file falls back to NOSUPPORT stubs at compile
-    # time (gated on ALP_SDK_HAVE_OPENAMP_USERLAND) so the SDK still
-    # links cleanly.
+    # the backends/rpc/yocto_drv.c file falls back to NOSUPPORT stubs at
+    # compile time (gated on ALP_SDK_HAVE_OPENAMP_USERLAND) so the SDK
+    # still links cleanly.
     find_package(PkgConfig)
     if(PkgConfig_FOUND)
         pkg_check_modules(OPENAMP_USER IMPORTED_TARGET open-amp libmetal)
@@ -243,13 +264,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         pkg_check_modules(ALSA IMPORTED_TARGET alsa)
         if(ALSA_FOUND)
             target_sources(alp_sdk PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/audio_yocto.c
+                # Audio is now a REAL registry backend (#33), not the old
+                # audio_yocto.c direct-impl: backends/audio/yocto_drv.c is
+                # the ALSA snd_pcm_* IN + OUT backend, registered at
+                # priority 100 (vendor "linux").  The audio_dispatch +
+                # sw_fallback + backend.c are pulled in unconditionally
+                # above; audio_dispatch.c owns the public alp_audio_in_*/
+                # alp_audio_out_* symbols (stub_backend.c is muted via
+                # ALP_VENDOR_OVERRIDES_AUDIO_IN/OUT below).  When ALSA isn't
+                # on the sysroot the dispatcher degrades to the sw_fallback
+                # rather than failing to link against libasound.
+                ${CMAKE_CURRENT_SOURCE_DIR}/../backends/audio/yocto_drv.c
                 # I2S real backend over ALSA (snd_pcm_*).  Gated behind the
-                # same pkg_check_modules(ALSA) as audio_yocto.c: when ALSA
-                # isn't on the sysroot the i2s_dispatch + sw_fallback (linked
-                # unconditionally above) still own alp_i2s_* and the class
-                # degrades to the portable fallback rather than failing to
-                # link against libasound.
+                # same pkg_check_modules(ALSA) as the audio backend: when
+                # ALSA isn't on the sysroot the i2s_dispatch + sw_fallback
+                # (linked unconditionally above) still own alp_i2s_* and the
+                # class degrades to the portable fallback rather than failing
+                # to link against libasound.
                 ${CMAKE_CURRENT_SOURCE_DIR}/../backends/i2s/yocto_drv.c
             )
             target_compile_definitions(alp_sdk PRIVATE
