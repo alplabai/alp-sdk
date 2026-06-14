@@ -136,6 +136,7 @@ jobs:
           # of the ${{ github.workspace }} expansion which the runner
           # may render as a host path on container jobs.
           python3 zephyr/scripts/twister \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/unit" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples" \
             -p native_sim/native/64 \
