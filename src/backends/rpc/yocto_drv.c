@@ -2,73 +2,75 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Linux userspace backend for <alp/rpc.h> -- framed RPC over OpenAMP /
- * RPMsg.
+ * Real Linux/Yocto rpc_* driver-class backend.  Binds the alp_rpc
+ * dispatcher's ops vtable to the kernel RPMsg chardev surface
+ * (/dev/rpmsg_ctrlN + /dev/rpmsgN) via RPMSG_CREATE_EPT_IOCTL +
+ * read/write/poll on the resulting endpoint fd -- framed RPC over
+ * OpenAMP / RPMsg in userland.  Registered at priority 100 with
+ * vendor "linux"; the sw_fallback backend (priority 0) still wins on
+ * non-Linux native_sim builds where this TU compiles to an empty
+ * object.
  *
  * On a Yocto / mainline-Linux A-class core, the kernel's remoteproc
  * framework exposes each loaded M-class firmware as a /dev/rpmsg*
  * chardev once the userspace systemd unit
  * (meta-alp-sdk/recipes-core/alp-system/alp-remoteproc.service)
  * echos `start` into /sys/class/remoteproc/remoteprocN/state and the
- * device's name-service announce arrives.  This file plumbs the
- * public <alp/rpc.h> surface onto those chardev nodes via the
- * RPMSG_CREATE_EPT_IOCTL ioctl + read/write/poll on the resulting
- * endpoint fd.
+ * device's name-service announce arrives.  This backend plumbs the
+ * public <alp/rpc.h> surface onto those chardev nodes.
  *
- * Per-channel state:
+ * Per-channel backend state (struct rpc_be, reached through
+ * state->be_data):
  *   - The RPMsg control fd (/dev/rpmsg_ctrlN) used to create endpoints.
  *   - The per-endpoint fd opened against /dev/rpmsgN.
  *   - A per-channel pthread that runs poll() + read() and dispatches
  *     to the registered method callbacks.
  *   - TX serialisation via a pthread_mutex.
  *
- * v0.6 status -- complete implementation.
- *   - alp_rpc_open / alp_rpc_close / alp_rpc_subscribe /
- *     alp_rpc_unsubscribe / alp_rpc_send / alp_rpc_call are all
- *     implemented end-to-end.
+ * The OpenAMP / RPMsg vendor calls are preserved verbatim from the
+ * original direct-impl (src/yocto/rpc_yocto.c); only the wrapping into
+ * the ops vtable + registration changed in the re-home.
  *
  * Header conventions: this file uses the same fnv1a + frame_build +
- * frame_parse helpers as src/zephyr/rpc_zephyr.c so the two backends
- * stay byte-compatible on the wire without depending on each other.
+ * frame_parse helpers as src/backends/rpc/zephyr_drv.c so the two
+ * backends stay byte-compatible on the wire without depending on each
+ * other.
  *
  * alp_rpc_call -- correlation strategy.
- *   Matches the Zephyr backend (src/zephyr/rpc_zephyr.c) byte-for-byte:
- *   no correlation ID prepended to the frame, the peer is expected to
- *   reply on the same channel with the same method name, and concurrent
- *   calls on a single channel are serialised by the channel's tx_mutex.
+ *   Matches the Zephyr backend byte-for-byte: no correlation ID
+ *   prepended to the frame, the peer is expected to reply on the same
+ *   channel with the same method name, and concurrent calls on a
+ *   single channel are serialised by the channel's tx_mutex.
  *   Applications needing concurrent in-flight requests open multiple
  *   channels.
  *
- *   Per-channel synchronous-call state:
- *     - tx_mutex            held end-to-end for one alp_rpc_call (also
- *                            serialises alp_rpc_send).
- *     - call_mutex          protects the call slot (call_method /
- *                            call_resp_* / call_result / call_pending);
- *                            briefly taken by both the caller thread and
- *                            the RX worker so they never race.
- *     - call_cond           pthread_cond_t signalled by the RX worker
- *                            when a matching response arrives, or by
- *                            alp_rpc_close when the channel is torn
- *                            down with a pending call.
- *     - call_pending        bool; the RX worker only routes responses
- *                            into the call slot while it is true.
- *
  *   Buffer-too-small policy: we copy what fits into the caller's resp
  *   buffer (truncated) and report the actual response size in *resp_len
- *   along with ALP_ERR_NOMEM.  Matches the alp/rpc.h documentation;
- *   diverges from the Zephyr backend which drops the partial copy.
+ *   along with ALP_ERR_NOMEM.  Matches the alp/rpc.h documentation.
  *
  * Linking: src/yocto/CMakeLists.txt gates this file behind
- * find_package(Threads) + pkg_check_modules(libmetal librpmsg).  When
- * the host doesn't have the OpenAMP user-space libraries (e.g. a
- * macOS / Windows dev box) the file is excluded and the symbols
- * fall through to the NOSUPPORT stubs in src/common/stub_backend.c
- * once that stub registry learns about <alp/rpc.h>.
+ * find_package(Threads) + pkg_check_modules(libmetal librpmsg) and
+ * the ALP_SDK_HAVE_OPENAMP_USERLAND define.  When the host doesn't
+ * have the OpenAMP user-space libraries (e.g. a macOS / Windows dev
+ * box, or a host-only syntax check) the ops compile to NOSUPPORT via
+ * the #else branch below, so the TU still builds + links cleanly and
+ * the dispatcher falls through to the SW fallback.
+ *
+ * STATUS: real impl, Yocto-link + on-target run BENCH-UNVERIFIED (no
+ *         sysroot / no real /dev/rpmsg* nodes in this environment).
  */
+
+#if defined(__linux__)
 
 #include "alp/rpc.h"
 
-#if defined(__linux__) && defined(ALP_SDK_HAVE_OPENAMP_USERLAND)
+#include <alp/backend.h>
+#include <alp/cap_instance.h>
+#include <alp/peripheral.h>
+
+#include "rpc_ops.h"
+
+#if defined(ALP_SDK_HAVE_OPENAMP_USERLAND)
 
 #include <errno.h>
 #include <fcntl.h>
@@ -85,10 +87,6 @@
 
 #include <linux/rpmsg.h>
 
-#ifndef ALP_RPC_MAX_CHANNELS
-#define ALP_RPC_MAX_CHANNELS 4
-#endif
-
 #ifndef ALP_RPC_SUBS_PER_CHANNEL
 #define ALP_RPC_SUBS_PER_CHANNEL 8
 #endif
@@ -98,7 +96,7 @@
 #endif
 
 /* ------------------------------------------------------------------ */
-/* Internal types                                                      */
+/* Backend-owned per-channel state (reached via state->be_data)        */
 /* ------------------------------------------------------------------ */
 
 struct alp_rpc_sub {
@@ -108,8 +106,10 @@ struct alp_rpc_sub {
     void               *user;
 };
 
-struct alp_rpc_channel {
-    bool               in_use;
+/* Per-channel backend block.  Boxed onto the heap so the void* be_data
+ * slot in alp_rpc_backend_state_t owns it; the dispatcher's
+ * alp_rpc_channel_t pool owns the handle itself. */
+struct rpc_be {
     char               name[ALP_RPC_METHOD_MAX_LEN];
     uint32_t           src_ept;
     uint32_t           dst_ept;
@@ -142,11 +142,8 @@ struct alp_rpc_channel {
     bool            call_pending;
 };
 
-static struct alp_rpc_channel g_rpc_pool[ALP_RPC_MAX_CHANNELS];
-static pthread_mutex_t        g_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 /* ------------------------------------------------------------------ */
-/* Helpers (intentionally mirrors src/zephyr/rpc_zephyr.c)             */
+/* Helpers (intentionally mirrors src/backends/rpc/zephyr_drv.c)       */
 /* ------------------------------------------------------------------ */
 
 static uint32_t fnv1a_32(const char *s)
@@ -207,37 +204,15 @@ static const char *frame_parse(const void *data, size_t len, const void **payloa
     return bytes;
 }
 
-static struct alp_rpc_channel *rpc_pool_acquire(void)
-{
-    pthread_mutex_lock(&g_pool_mutex);
-    for (size_t i = 0; i < ALP_RPC_MAX_CHANNELS; ++i) {
-        if (!g_rpc_pool[i].in_use) {
-            memset(&g_rpc_pool[i], 0, sizeof(g_rpc_pool[i]));
-            g_rpc_pool[i].in_use = true;
-            pthread_mutex_unlock(&g_pool_mutex);
-            return &g_rpc_pool[i];
-        }
-    }
-    pthread_mutex_unlock(&g_pool_mutex);
-    return NULL;
-}
-
-static void rpc_pool_release(struct alp_rpc_channel *ch)
-{
-    pthread_mutex_lock(&g_pool_mutex);
-    ch->in_use = false;
-    pthread_mutex_unlock(&g_pool_mutex);
-}
-
 /* RX worker: poll() the endpoint fd; on inbound frame, parse + dispatch. */
 static void *rpc_rx_main(void *arg)
 {
-    struct alp_rpc_channel *ch = (struct alp_rpc_channel *)arg;
-    uint8_t                 buf[ALP_RPC_TX_FRAME_MAX];
+    struct rpc_be *ch = (struct rpc_be *)arg;
+    uint8_t        buf[ALP_RPC_TX_FRAME_MAX];
 
-    struct pollfd           fds[2] = {
-                  { .fd = ch->ept_fd, .events = POLLIN },
-                  { .fd = ch->rx_wake_pipe[0], .events = POLLIN },
+    struct pollfd  fds[2] = {
+         { .fd = ch->ept_fd, .events = POLLIN },
+         { .fd = ch->rx_wake_pipe[0], .events = POLLIN },
     };
 
     while (atomic_load(&ch->rx_run)) {
@@ -318,10 +293,6 @@ static void *rpc_rx_main(void *arg)
     return NULL;
 }
 
-/* ------------------------------------------------------------------ */
-/* Public API                                                          */
-/* ------------------------------------------------------------------ */
-
 /* The Linux RPMsg chardev convention: the orchestrator's systemd unit
  * starts remoteproc, which exposes /dev/rpmsg_ctrl0 (+ /dev/rpmsgN per
  * announced endpoint).  The customer-visible @c name maps onto one
@@ -338,18 +309,56 @@ static const char *rpmsg_ctrl_path(void)
     return env ? env : "/dev/rpmsg_ctrl0";
 }
 
-alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
+/* Compute an absolute CLOCK_REALTIME deadline `timeout_ms` from now,
+ * for pthread_cond_timedwait.  Returns 0 on success, -1 on clock_gettime
+ * failure (vanishingly rare; we surface ALP_ERR_IO in that case). */
+static int absolute_deadline(struct timespec *ts, uint32_t timeout_ms)
 {
+    if (clock_gettime(CLOCK_REALTIME, ts) != 0) {
+        return -1;
+    }
+    /* Carry-safe add: split timeout_ms into whole seconds + remainder
+     * nanoseconds, then normalise tv_nsec into [0, 1e9). */
+    uint64_t add_s  = (uint64_t)(timeout_ms / 1000u);
+    uint64_t add_ns = (uint64_t)(timeout_ms % 1000u) * 1000000u;
+    ts->tv_sec += (time_t)add_s;
+    ts->tv_nsec += (long)add_ns;
+    if (ts->tv_nsec >= 1000000000L) {
+        ts->tv_sec += ts->tv_nsec / 1000000000L;
+        ts->tv_nsec %= 1000000000L;
+    }
+    return 0;
+}
+
+/* ================================================================== */
+/* Ops                                                                 */
+/* ================================================================== */
+
+/**
+ * @brief Open the RPMsg control device, create the named endpoint, and
+ *        spawn the per-channel RX worker.
+ *
+ * Opens /dev/rpmsg_ctrl0 (override via ALP_RPMSG_CTRL_DEV), creates the
+ * endpoint with RPMSG_CREATE_EPT_IOCTL, opens the matching /dev/rpmsgN
+ * (override via ALP_RPMSG_EPT_DEV), and starts the poll()/read() worker.
+ * The RPMsg chardev ABI exposes no queryable capability surface, so
+ * caps stay 0.  The OpenAMP / RPMsg calls are preserved verbatim from
+ * the original direct-impl.
+ */
+static alp_status_t y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st,
+                           alp_capabilities_t *caps_out)
+{
+    if (caps_out != NULL) caps_out->flags = 0u;
     if (cfg == NULL || cfg->name == NULL || cfg->name[0] == '\0') {
-        return NULL;
+        return ALP_ERR_INVAL;
     }
     if (strnlen(cfg->name, ALP_RPC_METHOD_MAX_LEN) == ALP_RPC_METHOD_MAX_LEN) {
-        return NULL;
+        return ALP_ERR_INVAL;
     }
 
-    struct alp_rpc_channel *ch = rpc_pool_acquire();
+    struct rpc_be *ch = (struct rpc_be *)calloc(1, sizeof(*ch));
     if (ch == NULL) {
-        return NULL;
+        return ALP_ERR_NOMEM;
     }
 
     strncpy(ch->name, cfg->name, sizeof(ch->name) - 1);
@@ -372,8 +381,8 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
     ch->ctrl_fd = open(rpmsg_ctrl_path(), O_RDWR);
     if (ch->ctrl_fd < 0) {
         fprintf(stderr, "alp_rpc: open(%s) failed: %s\n", rpmsg_ctrl_path(), strerror(errno));
-        rpc_pool_release(ch);
-        return NULL;
+        free(ch);
+        return ALP_ERR_NOT_READY;
     }
 
     struct rpmsg_endpoint_info eptinfo;
@@ -386,8 +395,8 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
         fprintf(stderr, "alp_rpc: RPMSG_CREATE_EPT_IOCTL(%s) failed: %s\n", ch->name,
                 strerror(errno));
         close(ch->ctrl_fd);
-        rpc_pool_release(ch);
-        return NULL;
+        free(ch);
+        return ALP_ERR_NOT_READY;
     }
 
     /* The kernel creates a /dev/rpmsg<N> matching the endpoint we
@@ -404,16 +413,16 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
     if (ch->ept_fd < 0) {
         fprintf(stderr, "alp_rpc: open(%s) failed: %s\n", ept_path, strerror(errno));
         close(ch->ctrl_fd);
-        rpc_pool_release(ch);
-        return NULL;
+        free(ch);
+        return ALP_ERR_NOT_READY;
     }
 
     if (pipe(ch->rx_wake_pipe) < 0) {
         fprintf(stderr, "alp_rpc: pipe() failed: %s\n", strerror(errno));
         close(ch->ept_fd);
         close(ch->ctrl_fd);
-        rpc_pool_release(ch);
-        return NULL;
+        free(ch);
+        return ALP_ERR_IO;
     }
 
     atomic_store(&ch->rx_run, 1);
@@ -423,59 +432,33 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
         close(ch->rx_wake_pipe[1]);
         close(ch->ept_fd);
         close(ch->ctrl_fd);
-        rpc_pool_release(ch);
-        return NULL;
+        free(ch);
+        return ALP_ERR_IO;
     }
 
-    return ch;
+    st->be_data = ch;
+    return ALP_OK;
 }
 
-void alp_rpc_close(alp_rpc_channel_t *ch)
+/**
+ * @brief Subscribe a callback to a named method on this channel.
+ *
+ * Replaces any prior registration for the same (channel, method) pair;
+ * a NULL @p cb removes the registration.  The subscribe table is
+ * guarded by the channel's sub_mutex against the RX worker.
+ */
+static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *method);
+
+static alp_status_t y_subscribe(alp_rpc_backend_state_t *st, const char *method,
+                                alp_rpc_method_cb_t cb, void *user)
 {
-    if (ch == NULL || !ch->in_use) {
-        return;
-    }
-
-    /* Wake any pending alp_rpc_call so the caller unblocks with a
-     * clear NOT_READY rather than waiting for its timeout to expire.
-     * Holding call_mutex here is mandatory to synchronise with a
-     * caller that is about to enter pthread_cond_timedwait. */
-    pthread_mutex_lock(&ch->call_mutex);
-    if (ch->call_pending) {
-        ch->call_result   = ALP_ERR_NOT_READY;
-        ch->call_resp_len = 0;
-        ch->call_pending  = false;
-        pthread_cond_broadcast(&ch->call_cond);
-    }
-    pthread_mutex_unlock(&ch->call_mutex);
-
-    atomic_store(&ch->rx_run, 0);
-    /* Kick the RX worker out of poll(). */
-    if (ch->rx_wake_pipe[1] >= 0) {
-        char b = 1;
-        (void)write(ch->rx_wake_pipe[1], &b, 1);
-    }
-    pthread_join(ch->rx_thread, NULL);
-
-    if (ch->rx_wake_pipe[0] >= 0) close(ch->rx_wake_pipe[0]);
-    if (ch->rx_wake_pipe[1] >= 0) close(ch->rx_wake_pipe[1]);
-    if (ch->ept_fd >= 0) close(ch->ept_fd);
-    if (ch->ctrl_fd >= 0) close(ch->ctrl_fd);
-
-    pthread_mutex_destroy(&ch->tx_mutex);
-    pthread_mutex_destroy(&ch->sub_mutex);
-    pthread_cond_destroy(&ch->call_cond);
-    pthread_mutex_destroy(&ch->call_mutex);
-    rpc_pool_release(ch);
-}
-
-alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb,
-                               void *user)
-{
-    if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
+    struct rpc_be *ch = (struct rpc_be *)st->be_data;
+    if (ch == NULL) return ALP_ERR_NOT_READY;
     if (!method_valid(method)) return ALP_ERR_INVAL;
+    /* NULL cb == unsubscribe -- matches the documented behaviour and the
+     * original direct-impl, which delegated to alp_rpc_unsubscribe. */
     if (cb == NULL) {
-        return alp_rpc_unsubscribe(ch, method);
+        return y_unsubscribe(st, method);
     }
     uint32_t h = fnv1a_32(method);
 
@@ -513,9 +496,15 @@ alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rp
     return rc;
 }
 
-alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
+/**
+ * @brief Remove a prior @ref y_subscribe registration.
+ *
+ * @return ALP_ERR_INVAL when no registration matched.
+ */
+static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *method)
 {
-    if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
+    struct rpc_be *ch = (struct rpc_be *)st->be_data;
+    if (ch == NULL) return ALP_ERR_NOT_READY;
     if (!method_valid(method)) return ALP_ERR_INVAL;
 
     uint32_t h = fnv1a_32(method);
@@ -537,10 +526,18 @@ alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
     return rc;
 }
 
-alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload,
-                          size_t len)
+/**
+ * @brief Fire-and-forget send: frame the (method, payload) pair and
+ *        write() it to the endpoint fd.
+ *
+ * TX is serialised by the channel's tx_mutex.  A non-blocking write
+ * that would block maps EAGAIN/EWOULDBLOCK -> ALP_ERR_BUSY.
+ */
+static alp_status_t y_send(alp_rpc_backend_state_t *st, const char *method, const void *payload,
+                           size_t len)
 {
-    if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
+    struct rpc_be *ch = (struct rpc_be *)st->be_data;
+    if (ch == NULL) return ALP_ERR_NOT_READY;
     if (!method_valid(method)) return ALP_ERR_INVAL;
     if (payload == NULL && len > 0) return ALP_ERR_INVAL;
 
@@ -563,31 +560,19 @@ alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void 
     return rc;
 }
 
-/* Compute an absolute CLOCK_REALTIME deadline `timeout_ms` from now,
- * for pthread_cond_timedwait.  Returns 0 on success, -1 on clock_gettime
- * failure (vanishingly rare; we surface ALP_ERR_IO in that case). */
-static int absolute_deadline(struct timespec *ts, uint32_t timeout_ms)
+/**
+ * @brief Synchronous request/response.
+ *
+ * Stages the per-channel call slot, sends the request frame, then waits
+ * on call_cond (pthread_cond_timedwait) until the RX worker routes a
+ * matching response, the timeout elapses, or the channel closes.
+ * Concurrent calls on one channel are serialised by tx_mutex.
+ */
+static alp_status_t y_call(alp_rpc_backend_state_t *st, const char *method, const void *req,
+                           size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms)
 {
-    if (clock_gettime(CLOCK_REALTIME, ts) != 0) {
-        return -1;
-    }
-    /* Carry-safe add: split timeout_ms into whole seconds + remainder
-     * nanoseconds, then normalise tv_nsec into [0, 1e9). */
-    uint64_t add_s  = (uint64_t)(timeout_ms / 1000u);
-    uint64_t add_ns = (uint64_t)(timeout_ms % 1000u) * 1000000u;
-    ts->tv_sec += (time_t)add_s;
-    ts->tv_nsec += (long)add_ns;
-    if (ts->tv_nsec >= 1000000000L) {
-        ts->tv_sec += ts->tv_nsec / 1000000000L;
-        ts->tv_nsec %= 1000000000L;
-    }
-    return 0;
-}
-
-alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method, const void *req,
-                          size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms)
-{
-    if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
+    struct rpc_be *ch = (struct rpc_be *)st->be_data;
+    if (ch == NULL) return ALP_ERR_NOT_READY;
     if (!method_valid(method)) return ALP_ERR_INVAL;
     if (req == NULL && req_len > 0) return ALP_ERR_INVAL;
     if (resp != NULL && resp_len == NULL) return ALP_ERR_INVAL;
@@ -675,55 +660,107 @@ alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method, const void 
     return s;
 }
 
-#else /* !__linux__ || !ALP_SDK_HAVE_OPENAMP_USERLAND */
+/**
+ * @brief Tear down the RX worker + chardev fds and free the channel box.
+ *
+ * Wakes any pending alp_rpc_call with ALP_ERR_NOT_READY, signals the RX
+ * worker via the wake pipe, joins it, then closes the fds and destroys
+ * the synchronisation primitives.
+ */
+static void y_close(alp_rpc_backend_state_t *st)
+{
+    struct rpc_be *ch = (struct rpc_be *)st->be_data;
+    if (ch == NULL) {
+        return;
+    }
+
+    /* Wake any pending alp_rpc_call so the caller unblocks with a
+     * clear NOT_READY rather than waiting for its timeout to expire.
+     * Holding call_mutex here is mandatory to synchronise with a
+     * caller that is about to enter pthread_cond_timedwait. */
+    pthread_mutex_lock(&ch->call_mutex);
+    if (ch->call_pending) {
+        ch->call_result   = ALP_ERR_NOT_READY;
+        ch->call_resp_len = 0;
+        ch->call_pending  = false;
+        pthread_cond_broadcast(&ch->call_cond);
+    }
+    pthread_mutex_unlock(&ch->call_mutex);
+
+    atomic_store(&ch->rx_run, 0);
+    /* Kick the RX worker out of poll(). */
+    if (ch->rx_wake_pipe[1] >= 0) {
+        char b = 1;
+        (void)write(ch->rx_wake_pipe[1], &b, 1);
+    }
+    pthread_join(ch->rx_thread, NULL);
+
+    if (ch->rx_wake_pipe[0] >= 0) close(ch->rx_wake_pipe[0]);
+    if (ch->rx_wake_pipe[1] >= 0) close(ch->rx_wake_pipe[1]);
+    if (ch->ept_fd >= 0) close(ch->ept_fd);
+    if (ch->ctrl_fd >= 0) close(ch->ctrl_fd);
+
+    pthread_mutex_destroy(&ch->tx_mutex);
+    pthread_mutex_destroy(&ch->sub_mutex);
+    pthread_cond_destroy(&ch->call_cond);
+    pthread_mutex_destroy(&ch->call_mutex);
+    free(ch);
+    st->be_data = NULL;
+}
+
+#else /* !ALP_SDK_HAVE_OPENAMP_USERLAND */
 
 /* Build-time fallback: no OpenAMP user-space libs available on the
- * host (typical for Windows / macOS dev boxes).  Compile to NOSUPPORT
- * stubs so the library still links cleanly and the customer sees a
- * clear runtime error if they actually try to call into <alp/rpc.h>. */
+ * host (typical for Windows / macOS dev boxes, or a host-only syntax
+ * check).  Compile the ops to NOSUPPORT so the TU still links cleanly
+ * and the dispatcher falls through to the SW fallback; a customer who
+ * forces this backend still sees a clear runtime error. */
 
-alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
+/** @brief NOSUPPORT open() -- no OpenAMP user-space libraries linked. */
+static alp_status_t y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st,
+                           alp_capabilities_t *caps_out)
 {
     (void)cfg;
-    return NULL;
+    (void)st;
+    if (caps_out != NULL) caps_out->flags = 0u;
+    return ALP_ERR_NOSUPPORT;
 }
 
-void alp_rpc_close(alp_rpc_channel_t *ch)
+/** @brief NOSUPPORT subscribe() -- no OpenAMP user-space libraries linked. */
+static alp_status_t y_subscribe(alp_rpc_backend_state_t *st, const char *method,
+                                alp_rpc_method_cb_t cb, void *user)
 {
-    (void)ch;
-}
-
-alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb,
-                               void *user)
-{
-    (void)ch;
+    (void)st;
     (void)method;
     (void)cb;
     (void)user;
     return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
+/** @brief NOSUPPORT unsubscribe() -- no OpenAMP user-space libraries linked. */
+static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *method)
 {
-    (void)ch;
+    (void)st;
     (void)method;
     return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload,
-                          size_t len)
+/** @brief NOSUPPORT send() -- no OpenAMP user-space libraries linked. */
+static alp_status_t y_send(alp_rpc_backend_state_t *st, const char *method, const void *payload,
+                           size_t len)
 {
-    (void)ch;
+    (void)st;
     (void)method;
     (void)payload;
     (void)len;
     return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method, const void *req,
-                          size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms)
+/** @brief NOSUPPORT call() -- no OpenAMP user-space libraries linked. */
+static alp_status_t y_call(alp_rpc_backend_state_t *st, const char *method, const void *req,
+                           size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms)
 {
-    (void)ch;
+    (void)st;
     (void)method;
     (void)req;
     (void)req_len;
@@ -733,4 +770,35 @@ alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method, const void 
     return ALP_ERR_NOSUPPORT;
 }
 
-#endif /* __linux__ && ALP_SDK_HAVE_OPENAMP_USERLAND */
+/** @brief NOSUPPORT close() -- no OpenAMP user-space libraries linked. */
+static void y_close(alp_rpc_backend_state_t *st)
+{
+    (void)st;
+}
+
+#endif /* ALP_SDK_HAVE_OPENAMP_USERLAND */
+
+/* ------------------------------------------------------------------ */
+/* Registration                                                        */
+/* ------------------------------------------------------------------ */
+
+static const alp_rpc_ops_t _ops = {
+    .open        = y_open,
+    .subscribe   = y_subscribe,
+    .unsubscribe = y_unsubscribe,
+    .send        = y_send,
+    .call        = y_call,
+    .close       = y_close,
+};
+
+ALP_BACKEND_REGISTER(rpc, yocto_drv,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "linux",
+                         .base_caps   = 0u,
+                         .priority    = 100,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });
+
+#endif /* __linux__ */
