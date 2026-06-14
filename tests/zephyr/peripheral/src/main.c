@@ -35,6 +35,7 @@
 #include "alp/peripheral.h"
 #include "alp/pwm.h"
 #include "alp/adc.h"
+#include "alp/dac.h"
 #include "alp/camera.h"
 #include "alp/counter.h"
 #include "alp/gpu2d.h"

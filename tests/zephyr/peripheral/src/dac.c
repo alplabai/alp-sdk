@@ -10,15 +10,17 @@
 
 #include <zephyr/ztest.h>
 
-#include "alp/adc.h"        /* alp_dac_open / alp_dac_t / alp_dac_config_t */
+#include "alp/dac.h" /* alp_dac_open / alp_dac_t / alp_dac_config_t */
 #include "alp/peripheral.h"
 
-ZTEST(alp_peripheral, test_dac_null_cfg) {
+ZTEST(alp_peripheral, test_dac_null_cfg)
+{
     zassert_is_null(alp_dac_open(NULL));
     zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 }
 
-ZTEST(alp_peripheral, test_dac_out_of_range_channel) {
+ZTEST(alp_peripheral, test_dac_out_of_range_channel)
+{
     /* E1M_DAC_COUNT = 2; the wrapper's internal array sized to
      * match.  Channel id 9 must reject. */
     alp_dac_t *d = alp_dac_open(&(alp_dac_config_t){
@@ -29,7 +31,8 @@ ZTEST(alp_peripheral, test_dac_out_of_range_channel) {
     zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 }
 
-ZTEST(alp_peripheral, test_dac_unresolved_channel_yields_not_ready) {
+ZTEST(alp_peripheral, test_dac_unresolved_channel_yields_not_ready)
+{
     /* Without a real DAC controller or V2N supervisor backing
      * channel 0, open must fail with NOT_READY (DT-alias path) or
      * NOSUPPORT (CONFIG_DAC=n).  Either is acceptable; both surface

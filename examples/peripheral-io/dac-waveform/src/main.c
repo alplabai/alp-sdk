@@ -38,7 +38,7 @@
 
 #include <zephyr/kernel.h>
 
-#include "alp/adc.h"   /* alp_dac_* lives in adc.h */
+#include "alp/dac.h"   /* alp_dac_* lives in dac.h */
 #include "alp/board.h" /* BOARD_DAC0 -> the selected EVK's DAC0 pad */
 
 /* ------------------------------------------------------------------

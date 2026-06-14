@@ -27,10 +27,6 @@
 #include "alp/rtc.h"
 #include "alp/wdt.h"
 
-#if defined(CONFIG_ALP_SDK_V2N_SUPERVISOR)
-#include <zephyr/drivers/dac.h>
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -138,21 +134,7 @@ struct alp_uart_rx_ringbuf {
 
 /* struct alp_wdt is defined in src/backends/wdt/wdt_ops.h.             */
 
-/* ------------------------------------------------------------------ */
-/* DAC                                                                 */
-/*                                                                     */
-/* `dev == NULL` -> dispatch through the V2N supervisor singleton      */
-/* (CONFIG_ALP_SDK_V2N_SUPERVISOR).  Non-NULL `dev` -> resolve via the */
-/* alp-dacN DT alias path on the local SoC's Zephyr dac_* driver.      */
-/* ------------------------------------------------------------------ */
-
-struct alp_dac {
-    bool                  in_use;
-    uint32_t              channel_id;
-    const struct device  *dev;            /* NULL -> via_bridge */
-    uint8_t               channel;        /* hardware channel id when dev != NULL */
-    uint16_t              last_mv;        /* most recently programmed setpoint   */
-};
+/* struct alp_dac is defined in src/backends/dac/dac_ops.h.            */
 
 /* ------------------------------------------------------------------ */
 /* Streaming ADC                                                       */
@@ -189,9 +171,6 @@ void alp_z_clear_last_error(void);
 struct alp_uart_rx_ringbuf *alp_z_uart_rx_ringbuf_pool_acquire(void);
 void                        alp_z_uart_rx_ringbuf_pool_release(struct alp_uart_rx_ringbuf *h);
 #endif
-
-struct alp_dac     *alp_z_dac_pool_acquire(void);
-void                alp_z_dac_pool_release(struct alp_dac *h);
 
 struct alp_adc_stream *alp_z_adc_stream_pool_acquire(void);
 void                   alp_z_adc_stream_pool_release(struct alp_adc_stream *h);
