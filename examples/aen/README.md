@@ -9,6 +9,7 @@ carries the exact SKU + board.
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`edgeai-vision-aen`](edgeai-vision-aen/)          | End-to-end EdgeAI vision pipeline -- CSI camera -> ISP -> Ethos-U55 inference -> OLED overlay. The flagship AEN demo. |
+| [`aen-eeprom-manifest`](aen-eeprom-manifest/) | Read + decode the on-module 24C128 Alp manifest over SoC I2C2 (DesignWare, upstream i2c_dw). |
 | [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M sanity + ECDSA-P256 sign over BRD_I2C (LPI2C0, owned by M55-HE), via the portable `<alp/...>` API. The AEN sibling of the V2N variant; the §5.2 bench OPTIGA check. |
 
 ## Why a separate index here
