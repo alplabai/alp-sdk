@@ -20,10 +20,14 @@
  * Included by the alp_e1m_aen801_m55_{he,hp} boards via the alp-sdk dts_root
  * (`#include <alif/ensemble_e8_peripherals.dtsi>`).  vendor-ext, BENCH-UNVERIFIED.
  *
- * Populated so far: GPIO (snps,designware-gpio).  I2C / SPI / Ethernet land
- * with their respective driver bring-up (each needs the clock IDs upstream's
- * alif-ensemble-clocks.h omits).
+ * Populated: GPIO (snps,designware-gpio), LPI2C (alif,lpi2c), Ethernet
+ * (alif,ethernet over the upstream eth_dwmac core), SPI0 (snps,designware-spi).
+ * The non-UART peripheral clock IDs upstream's alif-ensemble-clocks.h omits are
+ * supplied, re-encoded for the upstream clockctrl, by the alp-sdk -ext header
+ * included below.
  */
+
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
 
 &soc {
 	/*
@@ -168,6 +172,70 @@
 		#size-cells = <0>;
 		reg = <0x43009000 0x100>;
 		interrupts = <47 3>;
+		status = "disabled";
+	};
+
+	/*
+	 * Synopsys DesignWare MAC (GMAC) -- the Ensemble RMII Ethernet MAC,
+	 * backing the UPSTREAM eth_dwmac core via the alp-sdk Alif glue
+	 * (drivers/ethernet/eth_dwmac_alif_ensemble.c, compatible "alif,ethernet").
+	 * reg/IRQ transcribed from the fork's e1.dtsi (ethernet@48100000, IRQ 148);
+	 * the ALIF_ETHERNET_CLK id is synthesized in the UPSTREAM clock encoding
+	 * (see alif-ensemble-clocks-ext.h -- the fork's packed value would target
+	 * the wrong clock block).
+	 *
+	 * First bring-up uses a FIXED-LINK PHY: upstream Zephyr v4.4 ships no
+	 * snps,designware-mdio driver, so the on-SoM TI DP83825I (RMII, 100/full)
+	 * runs unmanaged.  A board enables this node (status="okay") + supplies
+	 * pinctrl_eth (the RMII pin group) + a real local-mac-address.
+	 *
+	 * BENCH-UNVERIFIED + bench follow-up: the RMII 50 MHz ref-clock on the
+	 * E1M-AEN801 comes from an on-module oscillator into P11_0 (clock-in mode);
+	 * the upstream alif clock driver has NO path to program ETH_CTRL_REG's
+	 * ref-clk-source select, so whether silicon needs that bit set before the
+	 * MAC sees a clock is unconfirmed (do NOT invent it).
+	 */
+	ethernet: ethernet@48100000 {
+		compatible = "alif,ethernet", "snps,designware-ethernet";
+		reg = <0x48100000 0x1000>;
+		interrupts = <148 3>;
+		clocks = <&clockctrl ALIF_ETHERNET_CLK>;
+		local-mac-address = [02 01 56 78 43 21];
+		phy-connection-type = "rmii";
+		phy-handle = <&eth_phy>;
+		/* pinctrl-0 + pinctrl-names supplied by the enabling board overlay
+		 * (RMII pin group); omitted here so the disabled node validates. */
+		status = "disabled";
+
+		eth_phy: ethernet-phy {
+			compatible = "ethernet-phy-fixed-link";
+			status = "okay";
+			default-speeds = "100BASE Full-Duplex";
+		};
+	};
+
+	/*
+	 * DesignWare SSI SPI0 (AHB, always-on domain), against the UPSTREAM
+	 * spi_dw driver (compatible "snps,designware-spi").  reg/IRQ from the
+	 * fork's e1.dtsi; ALIF_SPI_CLK is a frequency-only dummy (no gate reg).
+	 *
+	 * BENCH-UNVERIFIED -- SPI bring-up RISK: the Ensemble SPI IP is DWC-SSI,
+	 * but upstream spi_dw drives the DW-apb-SSI register layout unconditionally
+	 * (it lacks the fork's `dwc-ssi` mode prop, which upstream's binding would
+	 * REJECT -- do NOT add it here, it breaks the build).  CTRLR0 bit positions
+	 * differ between the two IPs, so this node will build + DT-validate but may
+	 * not correctly drive transfers on silicon; making SPI work likely needs a
+	 * spi_dw_alif DWC-SSI glue (follow-up).  spi1 (0x48104000) is the on-SoM
+	 * WiFi bus, not a free edge bus -- not declared here.
+	 */
+	spi0: spi@48103000 {
+		compatible = "snps,designware-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x48103000 0x1000>;
+		interrupts = <137 3>;
+		clocks = <&clockctrl ALIF_SPI_CLK>;
+		fifo-depth = <16>;
 		status = "disabled";
 	};
 };
