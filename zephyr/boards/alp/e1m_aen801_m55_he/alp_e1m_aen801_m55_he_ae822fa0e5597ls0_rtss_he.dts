@@ -22,6 +22,7 @@
 
 #include <alif/ensemble/ae822fa0e5597ls0.dtsi>
 #include <alif/ensemble/common/ensemble_rtss_he.dtsi>
+#include <alif/ensemble_e8_peripherals.dtsi>
 #include "alp_e1m_aen801_m55_he-pinctrl.dtsi"
 
 / {
