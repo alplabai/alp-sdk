@@ -15,20 +15,37 @@ adapter.
 
 Inventory check before powering anything:
 
-* Module populated:
-  - **Alif Ensemble E3..E8** SoC (Cortex-M55 HP + HE, optional
-    Cortex-A32 on E7/E8, Ethos-U55 NPU).
-  - **TCAL9538** GPIO expander on BRD_I2C.
+* Module populated (the **lead part** is the **E1M-AEN801 / Alif
+  Ensemble E8** -- per [`E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml)
+  `on_module:`):
+  - **Alif Ensemble E8** SoC (2x Cortex-A32 + 2x Cortex-M55
+    (HP + HE) + Ethos-U85 + dual Ethos-U55).  The broader
+    **E3..E8** family scales cores + NPU count + memory down from
+    this; lower SKUs drop the A32 cluster and/or NPUs.
   - **24C128** EEPROM with the 128-byte Alp manifest at offset
     `0x0000`.
   - **CC3501E** Wi-Fi 6 + BLE coprocessor (TI SimpleLink).
+  - **OPTIGA Trust M** secure element.
+  - **RV-3028-C7** external RTC.
+  - **TMP112** temperature sensor.
   - **DP83825I** 10/100 Ethernet PHY (a single MAC; ET1 is
-    E1M-X-only).
-  - **CAM_MUX_PI3WVR626** camera multiplexer for the CSI side.
-  - Optional sensor stuffing per the SKU (LSM6DSO IMU, BMP581
-    barometer, TMP112 thermometer, INA236 power monitor).
-* Board populated: at minimum, E1M-edge passthroughs + the
-  5 V power input + JTAG/SWD header + USB-UART for console.
+    E1M-X-only) -- see [`docs/soms/aen.md`](soms/aen.md).
+* Board populated (**Alp E1M-EVK** carrier -- per
+  [`metadata/boards/e1m-evk.yaml`](../metadata/boards/e1m-evk.yaml)
+  `populated:`): E1M-edge passthroughs + the 5 V power input +
+  JTAG/SWD header + USB-UART for console, plus the carrier's
+  soldered parts: **TCAL9538** GPIO expander, **6x INA236** power
+  monitors, **BMP581** barometer, **CAM_MUX_PI3WVR626** MIPI CSI
+  2:1 camera mux, BMI323 + ICM-42670 IMUs, TAS2563 amps, PDM mics.
+  (Carrier parts ride **BRD_I2C** / the EVK headers, not the SoM.)
+
+> **This batch: the SoM's OSPI memories are NOT populated.** The
+> OSPI0 octal bus (BOM-optional NOR flash on CS0 + HyperRAM on CS1,
+> both `assembled: optional` in the SKU preset) is un-stuffed on the
+> AEN801 modules on the bench, so boot **and** app storage run from
+> on-die **MRAM only** (5.5 MB on `AE822FA0E5597LS0`).  Don't expect
+> an external flash / XIP device on this hardware; MCUboot slots and
+> any storage partition must target MRAM, not OSPI.
 
 ## 1. First-power smoke test
 
@@ -53,15 +70,26 @@ PMIC's `EVENT_00` status register over BRD_I2C.
 2. With the probe plugged in, run:
 
    ```bash
-   pyocd cmd -t alif_e7
+   # Use the Alif E8 target for device AE822FA0E5597.  The exact
+   # pyocd `-t` id depends on the installed `alif_ensemble-cmsis-dfp`
+   # CMSIS-pack (do NOT assume an `alif_e8` id) -- BENCH-UNVERIFIED
+   # until confirmed against the installed pack.
+   pyocd cmd -t <alif-e8-target-from-installed-dfp>
    ```
 
-   Or the J-Link Commander equivalent.  Expect to read the
-   Cortex-M55 HP core's `DPIDR` ≈ `0x6BA02477`.  Different value
+   Or the J-Link Commander equivalent (the documented alternative).
+   Expect to read the SW-DP IDR (the debug-port identification
+   register -- a property of the ADIv5 SW-DP, **not** a core ID)
+   ≈ `0x6BA02477`.  **BENCH-UNVERIFIED for the E8:** `0x6BA02477`
+   is a generic ADIv5 SW-DPv2 IDR (this repo also reads it for the
+   GD32/Cortex-M33 -- see
+   [`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)),
+   so confirm the E8's actual value on silicon.  A different value
    means either wrong target or SWD wiring is reversed.
 
-3. Halt the core and read `CPUID` (M55 returns `0x410FD220` on
-   r0p0).  Confirms you're talking to the right silicon.
+3. Halt the core and read `CPUID`.  `0x410FD220` is plausibly the
+   M55 r0p0 CPUID -- **BENCH-UNVERIFIED for the E8**; confirm on
+   silicon.  Confirms you're talking to the right silicon.
 
 ## 3. EEPROM manifest read
 
@@ -112,12 +140,12 @@ against the SKU's `som.yaml` preset.
    flash a built image:
 
    ```bash
-   west alp-build -b alif_e7_dk_rtss_he examples/peripheral-io/gpio-button-led
+   west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
    west flash
    ```
 
    Expected output on the UART: the
-   `[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED` banner
+   `[gpio] init button=BOARD_PIN_ENCODER_SW, led=BOARD_PIN_LED_RED` banner
    from the SDK's first-build tutorial.
 
 ## 5. Peripheral sanity checks
@@ -131,31 +159,41 @@ The AEN module routes one shared BRD_I2C bus.  Drive an
 i2cdetect from a built `i2c-scanner` example or via the
 console:
 
-| Slave | 7-bit addr | What |
-|-------|------------|------|
-| TCAL9538 | `0x72` | GPIO expander |
-| 24C128 | `0x50` | EEPROM (manifest) |
-| TMP112 | `0x48` | Thermometer (optional) |
-| BMP581 | `0x47` | Barometer (optional) |
-| LSM6DSO | `0x6A` | IMU (optional) |
-| INA236 | `0x40` | Power monitor (optional) |
-| OPTIGA TM | `0x30` | Secure element |
+| Slave | 7-bit addr | What | Where |
+|-------|------------|------|-------|
+| 24C128 | `0x50` | EEPROM (manifest) | SoM |
+| OPTIGA TM | `0x30` | Secure element | SoM |
+| RV-3028-C7 | `0x52` | RTC | SoM |
+| TMP112 | `0x48` | Thermometer | SoM |
+| TCAL9538 | `0x72` | GPIO expander | EVK carrier |
+| INA236 | `0x40`..`0x46` | Power monitor (6x) | EVK carrier |
+| BMP581 | `0x47` | Barometer | EVK carrier |
 
-A missing slave that's *expected* per the SKU's
-`metadata/e1m_modules/E1M-AEN<NNN>.yaml` `i2c_devices` block
-is a real fault.  A missing optional slave is fine -- the SKU
-preset declares which are populated.
+A missing slave that's *expected* is a real fault.  The on-module
+set is authoritative in
+[`E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml)'s
+scalar `on_module:` keys (the AEN presets have no `i2c_devices:`
+block -- that's a V2N/V2M-only convention); the carrier-side parts
+are authoritative in
+[`metadata/boards/e1m-evk.yaml`](../metadata/boards/e1m-evk.yaml)'s
+`populated:` block, where individual parts can be flipped off for
+DNI variants.
 
 ### 5.2 OPTIGA Trust M sanity
 
+Adapt the secure-element example
+([`examples/v2n/v2n-secure-element-sign`](../examples/v2n/v2n-secure-element-sign))
+to the AEN target -- it exercises the OPTIGA Trust M over the
+portable `<alp/*>` API:
+
 ```bash
-west alp-build -b alif_e7_dk_rtss_he examples/optiga-trust-m-quickread
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/v2n/v2n-secure-element-sign
 west flash
 ```
 
-Expected on the console: `[optiga] product_info = ...`
-followed by a 32-byte device-unique ID.  All-zeros or all-FFs
-means the OPTIGA wasn't bonded out correctly on this assembly.
+Expect a successful OPTIGA read/sign on the console.  An
+all-zeros / all-FFs device ID or a probe failure means the
+OPTIGA wasn't bonded out correctly on this assembly.
 
 ### 5.3 Ethernet PHY link
 
@@ -173,9 +211,10 @@ of cable insert.
 
 ### 5.4 Camera + display
 
-These are optional per the SKU and the board.  See
-[`docs/soms/aen.md`](soms/aen.md) for the camera-mux truth table
-and the per-SKU display options.
+These are optional and SKU-/carrier-dependent.  The E1M-EVK
+carries a `CAM_MUX_PI3WVR626` MIPI CSI 2:1 mux (selected via
+`EVK_PIN_CAM_MUX_SEL`), but no camera-mux truth table is published
+yet -- treat the wiring as TBD until the carrier camera doc lands.
 
 ## 6. Bench-day bring-up runbook (first physical SoM)
 
@@ -204,12 +243,20 @@ top of the per-subsystem checks.
 > `appkit-e8.conf`.  Note E7 is not in upstream Zephyr v4.4 at all --
 > only e4/e6/e8/e1c -- another reason E8 leads.)  The only piece still to generate is the
 > **Alp-Lab carrier board**: the SKU preset declares
-> `alp_e1m_aen801_m55_hp` / `_m55_he`, derived from the Alif E8 SoC dtsi
-> but needing the E1M-EVK carrier overlay (board file pending -- see
-> [`docs/porting-new-som.md`](porting-new-som.md)).  The commands below
-> show the older `alif_e7_dk_rtss_he` form as the invocation *shape* --
-> substitute the E8 DevKit target above (or the alp-sdk carrier board
-> once generated).
+> `alp_e1m_aen801_m55_hp` / `_m55_he` (carrier-accurate E1M-EVK
+> peripheral wiring), derived from the Alif E8 SoC dtsi but needing
+> the E1M-EVK carrier overlay (board file pending -- see
+> [`docs/porting-new-som.md`](porting-new-som.md)).  So **TODAY** the
+> working target is the upstream DevKit base
+> `ensemble_e8_dk/ae822fa0e5597ls0/rtss_{he,hp}`, built per-core with
+> plain `west build -b <target> <app>` -- that is what the commands
+> below use.  (`west alp-build <app>` is the multi-core *orchestrator*:
+> it fans a board.yaml out into per-core slices using the SoM-preset
+> board string, which still resolves to the pending
+> `alp_e1m_aen801_m55_{he,hp}` carrier board -- so it is not yet a
+> working single-image path.  Once the carrier board file lands,
+> **prefer `west alp-build <app>`** -- it builds both M55 cores from
+> the example's board.yaml with the EVK's actual peripheral routing.)
 
 0. **Current-limited power-on + rail check.**  Bench supply at a
    **1 A** limit on V_IN (§1).  Power on, watch steady-state
@@ -221,12 +268,18 @@ top of the per-subsystem checks.
    then:
 
    ```bash
-   pyocd cmd -t alif_e7        # or the J-Link Commander equivalent
+   # Alif E8 target for device AE822FA0E5597; exact pyocd `-t` id
+   # depends on the installed `alif_ensemble-cmsis-dfp` pack
+   # (BENCH-UNVERIFIED).  Or the J-Link Commander equivalent.
+   pyocd cmd -t <alif-e8-target-from-installed-dfp>
    ```
 
-   Read `DPIDR` ≈ `0x6BA02477`, halt, and confirm the M55 HP
-   `CPUID` = `0x410FD220` (r0p0).  Wrong values = wrong target
-   or reversed SWD wiring.
+   Read the SW-DP IDR (debug-port ID, **not** a core ID) ≈
+   `0x6BA02477`, halt, and read `CPUID` (plausibly `0x410FD220`,
+   M55 r0p0).  Both values are **BENCH-UNVERIFIED for the E8** --
+   `0x6BA02477` is a generic ADIv5 SW-DPv2 IDR (this repo also
+   reads it for the GD32/Cortex-M33) -- confirm both on silicon.
+   Wrong values = wrong target or reversed SWD wiring.
 
 2. **UART console capture.**  Wire USB-UART to UART0
    (`USB_UART_TXD`/`_RXD`), 115200 8N1, open a terminal and
@@ -270,12 +323,12 @@ top of the per-subsystem checks.
    Alif demo image with the SDK's first-build example (§4):
 
    ```bash
-   west alp-build -b alif_e7_dk_rtss_he examples/peripheral-io/gpio-button-led
+   west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
    west flash
    ```
 
    Expect the
-   `[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED`
+   `[gpio] init button=BOARD_PIN_ENCODER_SW, led=BOARD_PIN_LED_RED`
    banner on the console.  This proves the toolchain, the board
    file, and `west flash` end-to-end before anything harder.
 
@@ -308,8 +361,13 @@ top of the per-subsystem checks.
    example (the step is now "make the real driver work", not "confirm
    the name"):
 
+   This round-trip spans **HE↔HP**, so build both core images: the
+   HE side here, and the peer HP image against
+   `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`.
+
    ```bash
-   west alp-build -b alif_e7_dk_rtss_he examples/multicore/mproc-mailbox
+   west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox
+   # peer image: -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
    west flash
    ```
 
@@ -326,7 +384,7 @@ top of the per-subsystem checks.
    reports the detected variant:
 
    ```bash
-   west alp-build -b alif_e7_dk_rtss_he examples/aen/edgeai-vision-aen
+   west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/aen/edgeai-vision-aen
    west flash
    ```
 
