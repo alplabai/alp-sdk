@@ -1,0 +1,73 @@
+# Copyright (c) 2018 Synopsys, Inc. All rights reserved.
+# Copyright (c) 2024 Alif Semiconductor
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Alif Ensemble DesignWare DWC_ssi SPI controller.
+
+  Distinct compatible (NOT "snps,designware-spi") so the alp-sdk vendored
+  DWC-SSI driver (zephyr/drivers/spi/spi_dw_alif.c, ported from the Apache-2.0
+  zephyr_alif fork) binds instead of upstream Zephyr's DW-apb-SSI spi_dw, which
+  owns "snps,designware-spi" and would double-instantiate. The Ensemble SPI IP
+  is DWC_ssi, whose CTRLR0 bit layout differs from DW-apb-SSI -- set `dwc-ssi`.
+  vendor-ext, BENCH-UNVERIFIED.
+
+compatible: "alif,dwc-ssi-spi"
+
+include: [spi-controller.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  dwc-ssi:
+    type: boolean
+    description: |
+      Select the DWC_ssi register layout (CTRLR0 bit positions) instead of the
+      legacy DW_apb_ssi layout. The Ensemble on-AHB SPIs are DWC_ssi, so set
+      this; leaving it off silently uses the DW-apb layout and mis-programs the
+      controller.
+
+  aux-reg:
+    type: boolean
+    description: Auxiliary-register access mode. Default off for the Ensemble.
+
+  fifo-depth:
+    type: int
+    default: 16
+    description: |
+      RX/TX FIFO depth (SSI_{TX,RX}_FIFO_DEPTH). Override per the Alif TRM for
+      the specific instance; 16 is a safe overridable default, not an
+      authoritative silicon value.
+
+  max-xfer-size:
+    type: int
+    default: 16
+    description: |
+      Frame size (SPI_MAX_XFER_SIZE); only 16 or 32 are valid. Override per the
+      TRM; 16 is a conservative overridable default.
+    enum:
+      - 16
+      - 32
+
+  rx-delay:
+    type: int
+    default: 0
+    description: |
+      SPI_CLK cycles to delay before sampling RxD. 0 = no delay (reset default);
+      raise per the TRM / board signal integrity if needed.
+
+  serial-target:
+    type: boolean
+    description: |
+      True if this instance is a serial target (slave); false (default) =
+      serial master (SSI_IS_MASTER).
+
+  slv-slct-toggle:
+    type: boolean
+    description: |
+      Toggle the chip-select line between consecutive data frames.
