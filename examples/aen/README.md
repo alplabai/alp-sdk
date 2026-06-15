@@ -1,14 +1,15 @@
 # AEN-specific examples
 
-Reference applications that exercise E1M-AEN-family-only
-hardware (Alif Ensemble E7 dual-M55 + Ethos-U55 NPU, on-module
-ISP / camera path, GPU2D).  Build any of these against an
-E1M-AEN SoM populated on the E1M-EVK board; the per-example
-`board.yaml` carries the exact SKU + board.
+Reference applications for the E1M-AEN family (lead part: Alif
+Ensemble E8 -- dual-M55 + Ethos-U85/U55 NPUs, on-module ISP /
+camera path, GPU2D).  Build any of these against an E1M-AEN SoM
+populated on the E1M-EVK board; the per-example `board.yaml`
+carries the exact SKU + board.
 
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`edgeai-vision-aen`](edgeai-vision-aen/)          | End-to-end EdgeAI vision pipeline -- CSI camera -> ISP -> Ethos-U55 inference -> OLED overlay. The flagship AEN demo. |
+| [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M sanity + ECDSA-P256 sign over BRD_I2C (LPI2C0, owned by M55-HE), via the portable `<alp/...>` API. The AEN sibling of the V2N variant; the §5.2 bench OPTIGA check. |
 
 ## Why a separate index here
 
