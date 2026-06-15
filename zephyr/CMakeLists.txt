@@ -5,6 +5,18 @@
 # Plain-CMake (add_subdirectory) consumers don't reach this file —
 # they use the repo root CMakeLists.txt instead.
 
+# Alif Ensemble build-bridge -- applied BEFORE the CONFIG_ALP_SDK early-return
+# because it is needed for *any* Ensemble Zephyr build, not just alp-feature
+# builds.  Upstream Zephyr v4.4's (minimal) Alif SoC layer omits
+# soc/alif/ensemble/common/soc_common.h, but hal_alif v2.2.0 builds
+# drivers/dma_event_router/src/dma_event_router.c *unconditionally* for the
+# Ensemble family and that TU does `#include <soc_common.h>`.  Supply our
+# bridge copy ONLY for Ensemble builds, so it cannot shadow another vendor's
+# soc_common.h (e.g. NXP's on i.MX93).  See zephyr/soc-bridge/alif/soc_common.h.
+if(CONFIG_SOC_FAMILY_ENSEMBLE OR CONFIG_SOC_FAMILY_ENSEMBLE_RTSS)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif)
+endif()
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()
