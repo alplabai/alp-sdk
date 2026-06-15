@@ -131,8 +131,16 @@ static int counter_alif_utimer_start(const struct device *dev)
 {
 	const struct counter_alif_utimer_config *cfg = dev->config;
 
-	alif_utimer_start_counter(global_base(dev), cfg->timer_id);
+	/* Order mirrors the bench-validated PWM driver (pwm_alif_utimer.c:200-201):
+	 * arm the per-timer counter block (CNTR_CTRL.EN, utimer.c:22-25) FIRST,
+	 * then pulse the shared global software-start trigger
+	 * (GLB_CNTR_START |= 1<<timer_id, utimer.c:148-151).  The global start only
+	 * has effect because init() enabled the per-timer software START source via
+	 * alif_utimer_enable_soft_counter_ctrl() (CNTR_SRC1_PGM_EN, utimer.c:82-87);
+	 * without that program-enable bit the counter never leaves STOP and CNTR
+	 * stays 0 even though this returns rc=0. */
 	alif_utimer_enable_counter(timer_base(dev));
+	alif_utimer_start_counter(global_base(dev), cfg->timer_id);
 	return 0;
 }
 
@@ -309,7 +317,20 @@ static int counter_alif_utimer_init(const struct device *dev)
 		break;
 	}
 
-	/* Free-running 32-bit: reload at max, start at 0, leave disabled. */
+	/* CRITICAL: enable the per-timer SOFTWARE counter-control source.  This sets
+	 * CNTR_SRC1_PGM_EN (bit31) in the per-timer START_1_SRC/STOP_1_SRC/CLEAR_1_SRC
+	 * registers (hal_alif utimer.c:82-87), which is what makes the timer respond
+	 * to the SHARED global software START/STOP/CLEAR writes.  alif_utimer_start_counter()
+	 * only pokes the global GLB_CNTR_START bit (utimer.c:148-151); without this
+	 * program-enable the per-timer START source is unselected, the global start is
+	 * ignored, and CNTR never advances (reads 0 on every get_value) -- the observed
+	 * bug.  The bench-validated PWM sibling does this at pwm_alif_utimer.c:155. */
+	alif_utimer_enable_soft_counter_ctrl(base);
+
+	/* Free-running 32-bit: reload at max; zero the live count by writing the CNTR
+	 * register directly (alif_utimer_set_counter_value -> CNTR, utimer.c:106-109;
+	 * NOT via the software CLEAR source), and leave the counter disabled until
+	 * counter_alif_utimer_start(). */
 	alif_utimer_set_counter_reload_value(base, UTIMER_TOP_VALUE);
 	alif_utimer_set_counter_value(base, 0U);
 
