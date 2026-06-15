@@ -16,7 +16,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **Zephyr boot (alp-sdk image)** | ✅ first light | Boots to the idle thread; "Hello World" read back via RAM console over SWD. |
 | **UTIMER counter** (Tier-1.5) | ✅ PASS *after a fix* | As-merged it never counted (read 0); fixed in **PR #158** (missing `alif_utimer_enable_soft_counter_ctrl`). Re-validated: counter advances. |
 | **GPIO** (`gpio_dw`, Tier-1) | ✅ PASS (controller) | DDR/DR set+readback correct via the Zephyr GPIO API (J-Link ground truth). Driving an actual **pad** needs the GPIO pad-mux (gpio_dw doesn't apply it). |
-| **I2C2** (`i2c_dw`, Tier-1) | ✅ controller validated | Bus arbitrates + clocks + clean NACKs across `0x08..0x77`. **Reading the on-module EEPROM needs external pull-ups** — see §3. |
+| **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM at 0x50 reads back (64 B, `0xff` = blank/unprogrammed) once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
 | **PWM** (Tier-1.5) | ⚙ driver builds | Shares the exact hal_alif UTIMER start-path the counter fix validated; a dedicated reg-readback bench app is pending a binding tweak. |
 
 ## 2. The three flashing / observation flows
@@ -95,14 +95,20 @@ J-Link> go                                    # core is already at our reset han
 
 ## 3. Board HW requirements found on the bench
 
-- **I2C2 needs external pull-ups.** The on-module 24C128 EEPROM is on **SoC I2C2**
-  (P5_6 `SCL_C` / P5_7 `SDA_C`, bridge/DNP-selected). The `i2c_dw` controller is
-  validated, but with only the SoC pads' internal pull-ups (~50 kΩ, enabled via
-  `bias-pull-up`) the bus comes up enough to NACK across `0x08..0x77` yet **no
-  device answers** — the internal pulls are too weak/slow for the EEPROM. Stuff
-  **~2.2–4.7 kΩ external pull-ups on SCL/SDA to 1.8 V** (bench rework now, or
-  populate next rev). With those, `examples/aen/aen-eeprom-manifest` reads the
-  ALPH manifest.
+- **I2C2 pads need the right pinctrl config (NOT external pull-ups).** The
+  on-module 24C128 EEPROM is on **SoC I2C2** (P5_6 `SCL_C` / P5_7 `SDA_C`,
+  bridge/DNP-selected) and works on the internal pulls. The original example
+  pinctrl set only `pinmux`, so the controller couldn't sense SDA → it NACKed
+  every address (looked like a dead/no-device bus). The fix matches Alif's own
+  reference i2c pinctrl (`sdk-alif .../ensemble-pinctrl.dtsi`): add
+  **`input-enable`** (sets the pad REN bit so `i2c_dw` can read SDA/SCL — ACK
+  detect + clock-stretch) and **`bias-pull-down`** (upstream `pinctrl_soc.h`
+  encodes this as the pad driver-state-control field **DSC=2**, exactly Alif's
+  I2C value — `bias-pull-up` gives DSC=1 and a dead bus; the upstream binding's
+  pull naming is effectively inverted vs the Alif pad HW). With that,
+  `examples/aen/aen-eeprom-manifest` reads the EEPROM at 0x50 (blank = `0xff`
+  until programmed). External pull-ups are only needed for fast-mode (400 kHz);
+  100 kHz works on the internal pulls.
 - **UTIMER tick rate ≈ 400 MHz, not the 100 MHz placeholder.** The counter
   advanced ~800 k ticks per 2 ms busy-wait → real input ≈ 400 MHz, 4× the
   `clock-frequency = <100000000>` placeholder on the `utimer*` SoC nodes. The
@@ -123,5 +129,5 @@ J-Link> go                                    # core is already at our reset han
 | RAM console all-zeros | Read the **`ram_console_buf`** symbol (not `ram_console`); re-resolve from `zephyr.map`; ensure `CONFIG_UART_CONSOLE=n`. |
 | J-Link `Could not connect to the target device` | You used the Alif part-number device — switch to the generic `-device Cortex-M55`. |
 | Link error `region FLASH overflowed` on a RAM-run app | The overlay used `zephyr,flash = <&itcm>` — use the path-reference form `&itcm` (else `FLASH_SIZE=0`). |
-| I2C2 probe times out (`-ETIMEDOUT`) | No/weak pull-ups → bus stuck. Enable pad `bias-pull-up` + 100 kHz to un-stick the controller; stuff external pull-ups (§3) for real device comms. |
-| I2C2 clean NACKs but no device ACKs | Internal pull-ups too weak — add external pull-ups (§3). |
+| I2C2 probe times out (`-ETIMEDOUT`) | Bus stuck — pads not driving. Add the I2C pinctrl pad config (§3): `input-enable` + `bias-pull-down`; run at 100 kHz. |
+| I2C2 clean NACKs but no device ACKs | The pinctrl is missing **`input-enable`** (REN) so the controller can't sense SDA, or it used `bias-pull-up` (DSC=1) instead of `bias-pull-down` (DSC=2). Match Alif's reference (§3) — then the EEPROM ACKs at 0x50. |

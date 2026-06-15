@@ -14,6 +14,25 @@
 	pinctrl_i2c2: pinctrl_i2c2 {
 		group0 {
 			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+			/* I2C pad config -- BENCH-VALIDATED on the E8 (2026-06-15) and
+			 * matching Alif's own reference i2c pinctrl (sdk-alif
+			 * common/ensemble-pinctrl.dtsi: read-enable=1 +
+			 * driver-state-control=2):
+			 *   input-enable    -> pad REN bit: the i2c_dw controller MUST be
+			 *                      able to SENSE SDA/SCL or it reads every
+			 *                      address as a NACK (no ACK detect). Without
+			 *                      this the EEPROM never responds.
+			 *   bias-pull-down  -> upstream pinctrl_soc.h encodes the pad
+			 *                      driver-state-control (DSC) field as DSC=2
+			 *                      from bias-pull-down -- which is exactly the
+			 *                      value Alif's reference uses for I2C. (DSC=1
+			 *                      via bias-pull-up does NOT work -> dead bus;
+			 *                      the upstream binding's pull naming is
+			 *                      effectively inverted vs the Alif pad HW.)
+			 * Do NOT "correct" bias-pull-down to bias-pull-up.
+			 */
+			input-enable;
+			bias-pull-down;
 		};
 	};
 };
@@ -22,7 +41,9 @@
 	status = "okay";
 	pinctrl-0 = <&pinctrl_i2c2>;
 	pinctrl-names = "default";
-	clock-frequency = <I2C_BITRATE_FAST>;
+	/* 100 kHz: bench-validated; the on-module bus has no fast-mode margin
+	 * unless external pull-ups are stuffed. */
+	clock-frequency = <I2C_BITRATE_STANDARD>;
 };
 
 / {
