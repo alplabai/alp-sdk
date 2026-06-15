@@ -67,29 +67,37 @@ PMIC's `EVENT_00` status register over BRD_I2C.
 1. Wire the SWD probe to the board's debug header
    (SWDIO/SWCLK/nRST/GND).  Power the board (probe stays
    unpowered; standard 1.8/3.3 V level convention applies).
-2. With the probe plugged in, run:
+2. With the probe plugged in, attach with J-Link Commander. **Use the
+   generic `Cortex-M55` device, _not_ the Alif part number** — on the E8
+   bench the part-specific device (`AE822FA0E5597LS0_M55_HE`) connect
+   sequence fails post-boot ("Could not connect to the target device"),
+   while the generic core device scans the APs and finds the core
+   directly (BENCH-VERIFIED on the E1M-AEN801, 2026-06-15):
 
    ```bash
-   # Use the Alif E8 target for device AE822FA0E5597.  The exact
-   # pyocd `-t` id depends on the installed `alif_ensemble-cmsis-dfp`
-   # CMSIS-pack (do NOT assume an `alif_e8` id) -- BENCH-UNVERIFIED
-   # until confirmed against the installed pack.
-   pyocd cmd -t <alif-e8-target-from-installed-dfp>
+   JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1
    ```
 
-   Or the J-Link Commander equivalent (the documented alternative).
-   Expect to read the SW-DP IDR (the debug-port identification
-   register -- a property of the ADIv5 SW-DP, **not** a core ID)
-   ≈ `0x6BA02477`.  **BENCH-UNVERIFIED for the E8:** `0x6BA02477`
-   is a generic ADIv5 SW-DPv2 IDR (this repo also reads it for the
-   GD32/Cortex-M33 -- see
-   [`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)),
-   so confirm the E8's actual value on silicon.  A different value
-   means either wrong target or SWD wiring is reversed.
+   The SW-DP IDR (the debug-port identification register — a property of
+   the ADIv5 SW-DP, **not** a core ID) reads **`0x4C013477`** on the E8
+   (BENCH-VERIFIED). Note this is *not* the generic `0x6BA02477` this repo
+   reads for the GD32/Cortex-M33 — a wrong value means wrong target or
+   reversed SWD wiring.
 
-3. Halt the core and read `CPUID`.  `0x410FD220` is plausibly the
-   M55 r0p0 CPUID -- **BENCH-UNVERIFIED for the E8**; confirm on
-   silicon.  Confirms you're talking to the right silicon.
+   > pyocd works too, but its `-t` target id depends on the installed
+   > `alif_ensemble-cmsis-dfp` CMSIS-pack (do NOT assume an `alif_e8` id).
+
+3. The attach enumerates the core and reads `CPUID`:
+   **`0x411FD220`** (BENCH-VERIFIED) → ARM (impl `0x41`), Cortex-M55
+   **r1p0**. (The earlier `0x410FD220` guess was r0p0 — wrong revision
+   nibble; the silicon is r1p0.) J-Link also reports `Secure debug:
+   enabled` and the full CoreSight ROM table (DWT/FPB/ITM/ETM/CTI).
+
+   > A fresh, un-provisioned SoM finds **no core** here ("Could not find
+   > core in CoreSight setup") — the SES holds the M55 until an app is
+   > provisioned. If you see that, the board isn't broken: provision an
+   > app first (see [`aen-provisioning.md`](aen-provisioning.md)), then
+   > the debug-AP comes alive as above.
 
 ## 3. EEPROM manifest read
 
@@ -265,21 +273,20 @@ top of the per-subsystem checks.
    missing rail stops here -- see §1's PMIC-sequencer note.
 
 1. **SWD/J-Link attach + CPUID read.**  Wire the probe (§2),
-   then:
+   then (use the **generic `Cortex-M55` device**, not the Alif part
+   number — the part-specific device connect fails post-boot):
 
    ```bash
-   # Alif E8 target for device AE822FA0E5597; exact pyocd `-t` id
-   # depends on the installed `alif_ensemble-cmsis-dfp` pack
-   # (BENCH-UNVERIFIED).  Or the J-Link Commander equivalent.
-   pyocd cmd -t <alif-e8-target-from-installed-dfp>
+   JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1
    ```
 
-   Read the SW-DP IDR (debug-port ID, **not** a core ID) ≈
-   `0x6BA02477`, halt, and read `CPUID` (plausibly `0x410FD220`,
-   M55 r0p0).  Both values are **BENCH-UNVERIFIED for the E8** --
-   `0x6BA02477` is a generic ADIv5 SW-DPv2 IDR (this repo also
-   reads it for the GD32/Cortex-M33) -- confirm both on silicon.
-   Wrong values = wrong target or reversed SWD wiring.
+   SW-DP IDR (debug-port ID, **not** a core ID) reads **`0x4C013477`**
+   and `CPUID` reads **`0x411FD220`** (Cortex-M55 **r1p0**) — both
+   BENCH-VERIFIED on the E1M-AEN801 (2026-06-15).  Wrong values =
+   wrong target or reversed SWD wiring.  **Finds no core on a fresh
+   un-provisioned SoM** (SES holds the M55) — provision first, see
+   [`aen-provisioning.md`](aen-provisioning.md).  pyocd works too but
+   its `-t` id depends on the installed `alif_ensemble-cmsis-dfp` pack.
 
 2. **UART console capture.**  Wire USB-UART to UART0
    (`USB_UART_TXD`/`_RXD`), 115200 8N1, open a terminal and
