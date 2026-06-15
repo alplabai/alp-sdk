@@ -242,6 +242,48 @@ config SPI_DW_ALIF_USE_DMA
 	  only actually engaged when the node wires `dmas`/`dma-names`; left off
 	  by default (the DMAC channel/handshake encoding is a bench unknown).
 
+# hal_alif (drivers/CMakeLists.txt) gates its UTIMER HW library on
+# CONFIG_USE_ALIF_HAL_UTIMER but never DEFINES that symbol -- it only `select`s
+# it (under ALIF_BLE_HOST) and uses it in add_subdirectory_ifdef. On upstream
+# Zephyr + hal_alif (no fork) nothing defines it, so a bare `select` is a no-op
+# and drivers/utimer never builds.  alp-sdk, as the integration layer, defines
+# it here so the PWM/counter drivers below can select it to pull in
+# modules/hal/alif drivers/utimer (publishes <utimer.h> + compiles utimer.c).
+config USE_ALIF_HAL_UTIMER
+	bool
+	help
+	  Pull in the hal_alif UTIMER register library (drivers/utimer).  Selected
+	  by PWM_ALIF_UTIMER / COUNTER_ALIF_UTIMER; not user-facing.
+
+config PWM_ALIF_UTIMER
+	bool "Alif Ensemble UTIMER PWM (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on PWM
+	depends on DT_HAS_ALIF_PWM_ENABLED
+	select PINCTRL
+	select USE_ALIF_HAL_UTIMER
+	help
+	  Alif Ensemble UTIMER PWM-class driver (compatible "alif,pwm"), written
+	  over the hal_alif drivers/utimer register library (USE_ALIF_HAL_UTIMER
+	  pulls in modules/hal/alif drivers/utimer).  Upstream Zephyr v4.4 + hal_alif
+	  ship no PWM-class device for the Alif UTIMER.  Edge-aligned PWM only;
+	  capture/dead-time route through the GD32-bridge backend on V2N.  Not
+	  silicon-validated.  Driver: zephyr/drivers/pwm/pwm_alif_utimer.c.
+
+config COUNTER_ALIF_UTIMER
+	bool "Alif Ensemble UTIMER counter (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on COUNTER
+	depends on DT_HAS_ALIF_UTIMER_COUNTER_ENABLED
+	select USE_ALIF_HAL_UTIMER
+	help
+	  Zephyr counter-class driver for the Alif Ensemble UTIMER, built on the
+	  hal_alif utimer helpers.  Binds the "alif,utimer-counter" child node and
+	  reaches the parent "alif,utimer" (reg / timer-id / clock-frequency / IRQ)
+	  via DT_INST_PARENT, mirroring the sibling PWM driver.  Backs the portable
+	  alp_counter surface via the alp-counter0 alias.  Not silicon-validated.
+	  Driver: zephyr/drivers/counter/counter_alif_utimer.c.
+
 config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4

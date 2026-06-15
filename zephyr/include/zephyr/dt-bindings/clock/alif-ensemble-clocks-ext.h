@@ -56,6 +56,11 @@
 /* Regular SPI0-3 (DesignWare SSI on the AHB) -- frequency-only dummy clock. */
 #define ALIF_SPI_CLK ALIF_CLK(2U)
 
+/* UTIMER -- frequency-only dummy (no software gate reg). The real per-timer tick
+ * rate is carried on the utimer node's `clock-frequency` property (TBD vs TRM),
+ * not this id; this is the ALIF_SPI_CLK-style placeholder. */
+#define ALIF_UTIMER_CLK ALIF_CLK(2U)
+
 /* LPSPI (SPI4, M55-HE local domain): bit 16 of HE_CLK_ENA in M55HE_CFG ->
  * sets bit 16 of 0x43007010.  HE-core only. */
 #define ALIF_LPSPI_CLK                                                         \

@@ -145,6 +145,15 @@ if(CONFIG_SPI_DW_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/spi)
 endif()
 
+# Alif Ensemble UTIMER PWM + counter class drivers (compatibles alif,pwm /
+# alif,utimer-counter), over the hal_alif drivers/utimer register library
+# (the drivers select USE_ALIF_HAL_UTIMER).  Bindings under
+# zephyr/dts/bindings/{pwm,counter,timer}/; nodes in the E8 SoC overlay.
+zephyr_library_sources_ifdef(CONFIG_PWM_ALIF_UTIMER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/pwm/pwm_alif_utimer.c)
+zephyr_library_sources_ifdef(CONFIG_COUNTER_ALIF_UTIMER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/counter/counter_alif_utimer.c)
+
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
@@ -620,6 +629,10 @@ if(NOT DEFINED ZEPHYR_LWRB_MODULE_DIR)
 endif()
 
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include)
+# alp-sdk-owned dt-bindings headers (e.g. clock/alif-ensemble-clocks-ext.h,
+# timer/alif_utimer.h) live under zephyr/include and are #included by C drivers
+# (the utimer PWM/counter drivers), not just by DTS -- put the dir on the C path.
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
 # src/common holds the internal mproc framing helper that tests
 # include directly to cover encode/decode without a real mbox peer.
 # Header path is `proto/alp_mproc_frame.h` so apps that don't opt in
