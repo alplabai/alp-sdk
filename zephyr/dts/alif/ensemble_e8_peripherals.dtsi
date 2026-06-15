@@ -28,6 +28,7 @@
  */
 
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
 
 &soc {
 	/*
@@ -238,6 +239,47 @@
 		clocks = <&clockctrl ALIF_SPI_CLK>;
 		dwc-ssi;
 		fifo-depth = <16>;
+		status = "disabled";
+	};
+
+	/*
+	 * Synopsys DesignWare I2C (DW_apb_i2c) -- the customer-facing EDGE I2C
+	 * master buses on the E1M connector.  Bound by UPSTREAM Zephyr v4.4 i2c_dw
+	 * (compatible "snps,designware-i2c"): full controller-mode read + write +
+	 * repeated-START -- the capability the on-module "alif,lpi2c" above lacks.
+	 * i2c_dw consumes only reg / interrupts / clock-frequency (= the I2C BUS
+	 * speed, NOT an input clock); it does NOT read a `clocks` phandle and calls
+	 * no clock_control op, so no clock-id is needed.  reg/IRQ (132/133) + the
+	 * spike-filter tuning transcribed from the Apache-2.0 zephyr_alif fork
+	 * e1.dtsi.  A board enables an instance (status="okay") + supplies pinctrl-0
+	 * + the alp-i2cN alias.  vendor-ext (upstream driver), BENCH-UNVERIFIED.
+	 *
+	 * NOTE: these reach EDGE pads only.  The on-module EEPROM/RTC/TMP112 are on
+	 * P7_4/P7_5, which pinmux ONLY to lpi2c0 (no DW route exists on those pads),
+	 * so they are NOT reachable here -- reading them needs the LPI2C master-read
+	 * path, blocked on the Alif TRM.
+	 */
+	i2c0: i2c@49010000 {
+		compatible = "snps,designware-i2c";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x49010000 0x1000>;
+		interrupts = <132 3>;
+		clock-frequency = <I2C_BITRATE_STANDARD>;
+		fs-spike-len = <5>;
+		hs-spike-len = <1>;
+		status = "disabled";
+	};
+
+	i2c1: i2c@49011000 {
+		compatible = "snps,designware-i2c";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x49011000 0x1000>;
+		interrupts = <133 3>;
+		clock-frequency = <I2C_BITRATE_STANDARD>;
+		fs-spike-len = <5>;
+		hs-spike-len = <1>;
 		status = "disabled";
 	};
 };
