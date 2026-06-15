@@ -206,7 +206,7 @@ config I2C_ALIF_LPI2C
 	  zephyr/drivers/i2c/i2c_alif_lpi2c.c.
 
 config ETH_DWMAC_ALIF
-	bool "Alif Ensemble DesignWare MAC glue (vendor-ext, BENCH-UNVERIFIED)"
+	bool "Alif Ensemble DesignWare MAC glue (ADR 0017 Tier-1.5, INTERIM/BENCH-UNVERIFIED)"
 	default y
 	depends on DT_HAS_ALIF_ETHERNET_ENABLED
 	select ETH_DWMAC
@@ -214,14 +214,22 @@ config ETH_DWMAC_ALIF
 	select NOCACHE_MEMORY if ARCH_HAS_NOCACHE_MEMORY_SUPPORT
 	help
 	  Alif Ensemble platform glue (compatible "alif,ethernet") backing the
-	  upstream eth_dwmac (Synopsys DesignWare GMAC) core.  Enables the
+	  UPSTREAM eth_dwmac (Synopsys DesignWare GMAC) core.  Enables the
 	  GMAC peripheral clock via the alif clock controller, wires the IRQ +
 	  pinctrl, and hands the descriptor rings to the core.  First bring-up
 	  is fixed-link (no upstream MDIO driver in Zephyr v4.4).  Not
 	  silicon-validated.  Driver: zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c.
 
+	  ADR 0017 Tier-1.5 (in-tree thin glue over an UPSTREAM core): kept
+	  in-tree, NOT retired onto the fork -- the sdk-alif fork forked the
+	  DWMAC *core* (consuming it violates one-upstream-base), and upstream
+	  Kconfig.dwmac offers no Ensemble path (STM32-only / MMU-gated; the M55
+	  has an MPU).  Retiring would be an unconditional silent Ethernet loss.
+	  INTERIM until E8 bench (address-translation + RMII ref-clk gates), then
+	  promotes to permanent Tier-1.5.  See docs/adr/0017 + task #21.
+
 config SPI_DW_ALIF
-	bool "Alif Ensemble DWC_ssi SPI (vendor-ext, BENCH-UNVERIFIED)"
+	bool "Alif Ensemble DWC_ssi SPI (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
 	default y
 	depends on DT_HAS_ALIF_DWC_SSI_SPI_ENABLED
 	select PINCTRL
@@ -232,6 +240,13 @@ config SPI_DW_ALIF
 	  upstream Zephyr's DW-apb-SSI spi_dw (which owns "snps,designware-spi").
 	  The DWC_ssi CTRLR0 register layout differs from DW-apb-SSI -- set the
 	  node's `dwc-ssi` property.  Not silicon-validated.
+
+	  ADR 0017 Tier-2 (a genuine fork-driver copy -- hal_alif ships no SSI
+	  library): INTERIM.  Retires onto the opt-in sdk-alif fork once `spi0`
+	  is repointed to the fork compatible AND bench-verified (hard-deleting
+	  before the repoint lands would be a silent SPI-master regression).  A
+	  pure-Tier-1 end-state is one small upstream patch away (set SSI_IS_MST,
+	  CTRLR0[31], under CONFIG_SPI_DW_HSSI -- filed, non-blocking).  Task #21.
 
 config SPI_DW_ALIF_USE_DMA
 	bool "Alif DWC_ssi SPI DMA code path"

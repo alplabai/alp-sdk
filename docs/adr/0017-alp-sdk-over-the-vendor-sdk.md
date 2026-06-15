@@ -1,6 +1,6 @@
 # 0017. alp-sdk rides over the vendor SDK — no rewritten vendor drivers
 
-Status: Accepted
+Status: Accepted (amended 2026-06-15 — adds **Tier 1.5**; reclassifies the four AEN drivers; see "Amendment" below)
 Date: 2026-06-15
 
 alp-sdk's value is the portable `<alp/*>` unification layer plus the SoM/carrier
@@ -40,12 +40,34 @@ Every AEN peripheral falls into exactly one tier:
   the `<alp/*>` mapping. **No vendor code.** (GPIO and the edge DW I2C of PR #152
   are the reference examples.)
 
-- **Tier 2 — vendor-SDK-consumed.** Alif-specific peripherals upstream lacks: the
-  Alif LPI2C1 master, the Alif PWM/ADC/DAC/ISP drivers, the DWC-SSI SPI flavor,
-  the eth platform glue. These come from the **opt-in Alif vendor SDK**
-  (`sdk-alif` fork / the CMSIS DFP, in the `vendor-sdks` manifest group) that the
-  customer adds. alp-sdk maps `<alp/*>` onto them when present and returns
-  `sw_fallback`/`NOSUPPORT` otherwise. **alp-sdk does not vendor or rewrite them.**
+- **Tier 1.5 — in-tree thin driver over an Apache-2.0 HW library or an upstream
+  core** *(added by the 2026-06-15 amendment)*. A small Zephyr-class driver
+  alp-sdk keeps in-tree **only** where upstream **and** the opt-in fork ship no
+  usable driver, and where the in-tree code links nothing but (a) an Apache-2.0
+  vendor HW-register library (`hal_alif`) that exposes no Zephyr `struct device`,
+  or (b) an upstream Zephyr core via its sanctioned platform-glue extension
+  contract. It copies **no** fork driver logic and drags in **no** divergent
+  fork core, so it keeps the one-upstream-base invariant intact. This tier exists
+  because pure fork-consume (Tier 2) is *infeasible* for these peripherals —
+  retiring them would drop real, build-verified AEN capability to `NOSUPPORT`
+  with **no in-tree or fork replacement**, violating the "no removal before a
+  proven replacement" rule below. Reference examples: the **UTIMER PWM/counter**
+  drivers (thin shell over the Apache-2.0 `hal_alif` `alif_utimer_*` register
+  library — flavor *a*; the fork ships UTIMER *bindings only*, no driver) and the
+  **eth_dwmac platform glue** (upstream-shaped glue over the **upstream**
+  `eth_dwmac` core via `dwmac_bus_init`/`dwmac_platform_init` — flavor *b*; the
+  fork forked the DWMAC *core* itself, so consuming it would violate
+  one-upstream-base). Each Tier-1.5 driver ships clearly marked *interim* until
+  bench-verified on E8 silicon, then promotes to permanent.
+
+- **Tier 2 — vendor-SDK-consumed.** Alif-specific peripherals upstream lacks
+  **and** for which a genuine vendor *driver* exists to consume: the Alif LPI2C1
+  master, the Alif PWM/ADC/DAC/ISP drivers, the **DWC-SSI SPI** flavor (a true
+  fork-driver copy — `hal_alif` ships no SSI library). These come from the
+  **opt-in Alif vendor SDK** (`sdk-alif` fork / the CMSIS DFP, in the
+  `vendor-sdks` manifest group) that the customer adds. alp-sdk maps `<alp/*>`
+  onto them when present and returns `sw_fallback`/`NOSUPPORT` otherwise.
+  **alp-sdk does not vendor or rewrite them.**
 
 - **Tier 3 — SE-mediated.** Housekeeping/security devices behind the Secure
   Enclave. On the E1M-AEN801 the on-module trio sits on the **slave-only LPI2C0**
@@ -58,14 +80,43 @@ Bench-verification on real E8 silicon remains the acceptance gate for every tier
 
 ## Consequences
 
-- **The interim vendored Alif drivers are migrated, not kept.** The merged ones
-  (#148 LPI2C-TX, #149 eth glue, #150 SPI) stay as clearly-marked *interim*
-  gap-fillers until their Tier-2 `<alp/*>`-over-vendor-SDK mapping lands; PR #151
-  (PWM/counter) is **held** rather than merged. The migration is deliberate (a
-  planned PR per peripheral), not a revert-storm — working code is not removed
-  before its replacement is proven + bench-verified. Tracked as task #21.
-- **New AEN peripheral work follows the tiers from day one** (e.g. ADC/DAC/NPU/ISP
-  are Tier 2; the manifest/board-id read is Tier 3).
+- **The four interim AEN drivers are dispositioned per-tier, not lumped together**
+  *(corrected by the 2026-06-15 amendment — the original "all four are Tier-2,
+  migrate or hold" framing would have silently regressed three working
+  peripherals; see "Amendment")*:
+  - **#148 LPI2C-TX — retired.** Not interim: it is a master-TX-only copy against
+    a bus the silicon can only be a **slave** on (LPI2C0 @0x40, TRM §3.17.4). It
+    can never do a master read, has **zero** consumers, and the edge I2C master is
+    already Tier-1 `i2c_dw`. Retiring loses no capability; the on-module
+    RTC/TMP112 reads go **Tier-3 (SE)** (tasks #16/#17). The one driver whose
+    removal ADR 0017-as-written genuinely justified.
+  - **#149 eth glue — Tier-1.5, kept** (interim until E8 bench). Fork-consume is a
+    trap (the fork forked the DWMAC *core*); retiring it is an **unconditional**
+    silent Ethernet loss on the upstream-only build (upstream `Kconfig.dwmac`
+    offers only an STM32-gated platform and an `MMU`-gated path — the M55 has an
+    MPU, not an MMU — and `hal_alif` ships no GMAC library).
+  - **#150 SPI (DWC-SSI) — Tier-2 interim → retire onto the fork.** A genuine
+    fork-driver copy (no `hal_alif` SSI library exists). Kept interim-marked now;
+    hard-deleted only once `spi0` is repointed to the fork compatible **and**
+    bench-verified — otherwise it is a silent SPI-master regression. A pure-Tier-1
+    end-state is one small upstream patch away (set `SSI_IS_MST`, CTRLR0[31],
+    under `CONFIG_SPI_DW_HSSI`); filed as a follow-up, non-blocking.
+  - **#151 UTIMER PWM/counter — merged as Tier-1.5** (interim, bench-pending).
+    Tier-2 is **infeasible**: the fork ships UTIMER bindings only (no `.c`), so
+    there is nothing to migrate onto; retiring drops all AEN PWM (8 E1M pads) and
+    the sole hardware counter to `NOSUPPORT` with no recovery (and AEN has no
+    GD32-bridge fallback). The prior "held" stance is **reversed** under the
+    Tier-1.5 amendment.
+
+  The migration is deliberate (a planned PR per peripheral), not a revert-storm —
+  working code is not removed before its replacement is proven + bench-verified.
+  Tracked as task #21.
+- **New AEN peripheral work follows the tiers from day one.** Where `hal_alif`
+  ships an Apache-2.0 HW library and neither upstream nor the fork ships a usable
+  driver, it is **Tier 1.5** — `hal_alif` provides `analog` (ADC/DAC, task #18),
+  `isp` (task #20) and `ethos_u` (NPU, task #19) register libraries, so those
+  follow the UTIMER pattern. Peripherals with a genuine fork *driver* and no
+  Apache HW library are Tier 2; the manifest/board-id read is Tier 3.
 - **Pure-DesignWare stays.** Tier-1 nodes (`gpio_dw`, `i2c_dw`, …) are *not* vendor
   rewrites — they're upstream drivers we merely wire — and remain.
 - **A hardware follow-up is recorded:** on the current E1M-AEN801 rev the
@@ -82,3 +133,30 @@ Bench-verification on real E8 silicon remains the acceptance gate for every tier
 - *Base the AEN target on the Alif Zephyr fork*: rejected — fragments the
   one-upstream-base invariant that serves Alif + Renesas + NXP; the fork stays
   opt-in for customers who want Alif's whole tree.
+
+## Amendment (2026-06-15) — Tier 1.5
+
+Executing the original three-tier policy literally would have **silently
+regressed the upstream-only AEN build**: it enumerated the eth platform glue,
+the DWC-SSI SPI flavor, and (by the "held" stance) the UTIMER PWM/counter drivers
+as Tier-2 items that retire onto the opt-in fork — but for two of them the fork
+has **nothing to retire onto**, contradicting this ADR's own rule that working
+code is not removed before a proven replacement exists. Concretely:
+
+- **The Context's licensing objection conflated two different things.** The "Alif
+  Software License Agreement, not Apache-2.0" tangle is real for the **CMSIS
+  DFP**, but **`hal_alif` is Apache-2.0** and already a pinned `west` manifest
+  module. A thin Zephyr driver over `hal_alif`'s register library carries none of
+  that licensing liability, and there is no competing vendor *driver* to diverge
+  from (the library exposes no `struct device`).
+- **The fork ships no UTIMER driver** (bindings only) and **no GMAC library
+  anywhere**; `hal_alif` ships no SSI/GMAC library either. So "consume the fork
+  driver" is infeasible for UTIMER and a one-upstream-base violation for eth (the
+  fork forked the DWMAC *core*).
+
+The amendment adds **Tier 1.5** (above) for exactly these in-tree-thin-driver
+cases and reclassifies the four drivers (see Consequences). It is a deliberate
+scope **correction**, not a reversal of the policy: rewritten fork-driver copies
+(SPI, LPI2C) are still wrong and still go; in-tree drivers that link only an
+Apache-2.0 HW library or an upstream core are recognised as legitimate and kept.
+The one-upstream-base invariant and bench-verification gate are unchanged.
