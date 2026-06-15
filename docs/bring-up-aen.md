@@ -195,19 +195,22 @@ DNI variants.
 
 ### 5.2 OPTIGA Trust M sanity
 
-Adapt the secure-element example
-([`examples/v2n/v2n-secure-element-sign`](../examples/v2n/v2n-secure-element-sign))
-to the AEN target -- it exercises the OPTIGA Trust M over the
-portable `<alp/*>` API:
+The AEN secure-element example
+([`examples/aen/aen-secure-element-sign`](../examples/aen/aen-secure-element-sign))
+exercises the OPTIGA Trust M over the portable `<alp/*>` API on
+BRD_I2C.  (It is the AEN sibling of the V2N variant -- identical
+`src/`, AEN `board.yaml` with `m55_he` as the BRD_I2C owner.)
 
 ```bash
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/v2n/v2n-secure-element-sign
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-secure-element-sign
 west flash
 ```
 
 Expect a successful OPTIGA read/sign on the console.  An
 all-zeros / all-FFs device ID or a probe failure means the
-OPTIGA wasn't bonded out correctly on this assembly.
+OPTIGA wasn't bonded out correctly on this assembly.  (Running on
+hardware needs BRD_I2C / LPI2C0 wired to portable bus 0 -- the
+alp-sdk Alif LPI2C bring-up.)
 
 ### 5.3 Ethernet PHY link
 
