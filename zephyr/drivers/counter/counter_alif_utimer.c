@@ -12,7 +12,12 @@
  * gives that backend a real device to talk to on E8.
  *
  * ============================== STATUS ==============================
- * vendor-ext, BENCH-UNVERIFIED.
+ * ADR 0017 Tier-1.5 (in-tree thin driver over the Apache-2.0 hal_alif HW
+ * library) -- INTERIM, BENCH-UNVERIFIED.  Kept in-tree, not retired onto the
+ * fork: the fork ships UTIMER bindings only (no counter driver), and hal_alif's
+ * alif_utimer_* library exposes no Zephyr device model -- so this thin shell is
+ * the only path to an AEN hardware counter.  INTERIM until E8 bench, then
+ * permanent.  See docs/adr/0017 + task #21.
  *
  * Upstream Zephyr v4.4 ships NO Alif counter/timer driver, and the Apache-2.0
  * alifsemi/zephyr_alif fork ships only the DTS bindings + nodes for the UTIMER

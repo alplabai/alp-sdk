@@ -18,7 +18,12 @@
  *     E1M PWM7 = UT3_T0_C  (utimer3,  driver A / channel 0)
  *
  * ============================== STATUS ==============================
- * vendor-ext, BENCH-UNVERIFIED.
+ * ADR 0017 Tier-1.5 (in-tree thin driver over the Apache-2.0 hal_alif HW
+ * library) -- INTERIM, BENCH-UNVERIFIED.  Kept in-tree, not retired onto the
+ * fork: there is no fork PWM driver to consume (bindings only), and hal_alif's
+ * alif_utimer_* library exposes no Zephyr device model -- so this thin shell is
+ * the only path to AEN PWM.  INTERIM until E8 bench, then permanent.  See
+ * docs/adr/0017 + task #21.
  *
  * Written over the hal_alif register-poke library (modules/hal/alif
  * drivers/utimer/{include/utimer.h,src/utimer.c}); that library exposes NO

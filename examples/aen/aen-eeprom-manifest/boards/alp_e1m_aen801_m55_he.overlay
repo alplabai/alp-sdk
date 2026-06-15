@@ -1,0 +1,32 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Wire the on-module 24C128 EEPROM bus for the manifest read on the E1M-AEN801
+ * (M55-HE).  The EEPROM's interface is selected by bridge/DNP resistors onto SoC
+ * I2C2 (DesignWare master, upstream i2c_dw), pins P5_6 SCL_C / P5_7 SDA_C -- NOT
+ * the slave-only LPI2C0.  Map portable bus 0 (alp-i2c0) -> &i2c2.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+&pinctrl {
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+		};
+	};
+};
+
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_FAST>;
+};
+
+/ {
+	aliases {
+		alp-i2c0 = &i2c2;
+	};
+};

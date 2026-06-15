@@ -15,14 +15,27 @@
  * Copyright 2026 Alp Lab AB
  *
  * ============================== STATUS ==============================
- * vendor-ext, BENCH-UNVERIFIED.
+ * ADR 0017 Tier-1.5 (in-tree thin glue over an UPSTREAM core) -- INTERIM,
+ * BENCH-UNVERIFIED.
+ *
+ * KEPT in-tree, NOT retired onto the sdk-alif fork: the fork forked the DWMAC
+ * *core* (its local_to_global() is patched into the core's address path), so
+ * consuming the fork's ETH_DWMAC_ALIF would drag a divergent core onto the
+ * tree and violate alp-sdk's one-upstream-base invariant. And upstream
+ * Kconfig.dwmac ships no Ensemble path (STM32-gated platform; the other path
+ * is MMU-gated and the Cortex-M55 has an MPU, not an MMU; hal_alif ships no
+ * GMAC library) -- so retiring this glue would be an UNCONDITIONAL silent
+ * Ethernet loss on the upstream-only AEN build. This is the legitimate
+ * Tier-1.5 case, not a fork-driver copy. See docs/adr/0017 + task #21.
  *
  * Ported from alifsemi/zephyr_alif's drivers/ethernet/eth_dwmac_alif_ensemble.c
  * (Apache-2.0) and adapted to the glue interface of the DWMAC core shipped in
  * OUR pinned upstream Zephyr v4.4. The MAC/DMA register writes are transcribed
  * verbatim from that source and from eth_dwmac_priv.h; no register value has
  * been invented. It has NOT been run on real silicon. Cannot build under
- * native_sim (Cortex-M55 target), hence bench-unverified in CI.
+ * native_sim (Cortex-M55 target), hence bench-unverified in CI.  INTERIM until
+ * the two E8 bench gates pass (address-translation placement + RMII ref-clk),
+ * then promotes to permanent Tier-1.5.
  *
  * Compatible: `alif,ethernet` (+ `snps,designware-ethernet`).
  * Driver:  zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c
