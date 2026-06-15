@@ -146,6 +146,32 @@ ipc:
 """
 
 
+# AEN801 (the lead E8 part) RESOLVES its mailbox controller
+# (alif_mhuv2), so it sails past the controller-TBD guard -- but its
+# memory map is DERIVED from the E8 SoC variant JSON, which carries no
+# per-region `base` yet.  Before the region.get("base") fix this
+# crashed resolve_carve_outs with `KeyError: 'base'`; it MUST instead
+# land a clean blocked carve-out.  Regression guard for that crash.
+AEN801_UNMAPPED = """
+som:
+  sku: E1M-AEN801
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: zephyr
+    app: ./m55_he
+
+ipc:
+  - kind: rpmsg
+    endpoints: [m55_hp, m55_he]
+    carve_out_kb: 64
+    name: alp_test_rpmsg
+"""
+
+
 # ---------------------------------------------------------------------
 # 1. load_board_yaml -- happy path
 # ---------------------------------------------------------------------
@@ -363,6 +389,24 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
     assert entry.reason is not None
     assert "TBD" in entry.reason
     assert "E1M-AEN701" in entry.reason
+
+
+def test_resolve_carve_outs_blocks_on_unmapped_base(tmp_path: Path) -> None:
+    """AEN801 has a RESOLVED mailbox controller (alif_mhuv2), so it
+    proceeds past the controller-TBD guard into the region allocator --
+    but its memory map is derived from the E8 SoC variant JSON, which
+    has no per-region `base` yet.  resolve_carve_outs MUST emit a
+    blocked carve-out (base unmapped) rather than crash with
+    `KeyError: 'base'`."""
+    path = _write_board(tmp_path, AEN801_UNMAPPED)
+    project = load_board_yaml(path)
+    resolved = resolve_carve_outs(project)        # must not raise
+    assert len(resolved) == 1
+    entry = resolved[0]
+    assert entry.status == "blocked"
+    assert entry.reason is not None
+    assert "E1M-AEN801" in entry.reason
+    assert "HW-mapped" in entry.reason
 
 
 # ---------------------------------------------------------------------

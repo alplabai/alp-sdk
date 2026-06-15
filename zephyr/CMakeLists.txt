@@ -5,6 +5,18 @@
 # Plain-CMake (add_subdirectory) consumers don't reach this file —
 # they use the repo root CMakeLists.txt instead.
 
+# Alif Ensemble build-bridge -- applied BEFORE the CONFIG_ALP_SDK early-return
+# because it is needed for *any* Ensemble Zephyr build, not just alp-feature
+# builds.  Upstream Zephyr v4.4's (minimal) Alif SoC layer omits
+# soc/alif/ensemble/common/soc_common.h, but hal_alif v2.2.0 builds
+# drivers/dma_event_router/src/dma_event_router.c *unconditionally* for the
+# Ensemble family and that TU does `#include <soc_common.h>`.  Supply our
+# bridge copy ONLY for Ensemble builds, so it cannot shadow another vendor's
+# soc_common.h (e.g. NXP's on i.MX93).  See zephyr/soc-bridge/alif/soc_common.h.
+if(CONFIG_SOC_FAMILY_ENSEMBLE OR CONFIG_SOC_FAMILY_ENSEMBLE_RTSS)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif)
+endif()
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()
@@ -104,6 +116,11 @@ endif()
 # binding: zephyr/dts/bindings/mbox/alif,mhuv2-mbox.yaml.
 zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_alif_mhuv2.c)
+
+# Alif Ensemble LPI2C (on-module BRD_I2C bus).  Ported from the Apache-2.0
+# zephyr_alif fork; upstream Zephyr + hal_alif ship no LPI2C driver.
+zephyr_library_sources_ifdef(CONFIG_I2C_ALIF_LPI2C
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2c/i2c_alif_lpi2c.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship

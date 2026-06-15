@@ -1343,7 +1343,7 @@ def resolve_carve_outs(
                 f"metadata.  Fill `mailbox.controller:` in "
                 f"metadata/e1m_modules/{project.sku}.yaml with the "
                 f"vendor mailbox node name (e.g. `renesas_mhu`, "
-                f"`nxp_mu`, `alif_evtrtr`) or remove the rpmsg "
+                f"`nxp_mu`, `alif_mhuv2`) or remove the rpmsg "
                 f"entries from board.yaml.")
         else:
             reserved_tags = {
@@ -1367,15 +1367,26 @@ def resolve_carve_outs(
         name = region["name"]
         if name in region_top:
             return region_top[name], None
-        base = region["base"]
+        # A region derived from the SoC variant JSON (no explicit
+        # `memory_map:` in the preset) carries name/size but NO `base`
+        # until the SoM is HW-mapped.  Treat a missing base the same as
+        # an explicit `TBD` so an un-mapped SoM (e.g. AEN801, whose E8
+        # SoC JSON has no per-region base yet) lands a clean *blocked*
+        # carve-out instead of crashing with KeyError: 'base'.
+        base = region.get("base")
         size_bytes = _region_size_bytes(region)
-        if isinstance(base, str) and base.strip().upper() == "TBD":
+        base_is_unmapped = (
+            base is None
+            or (isinstance(base, str) and base.strip().upper() == "TBD")
+        )
+        if base_is_unmapped:
             return None, (
-                f"memory_map.base is TBD for region '{name}' in SoM "
-                f"{project.sku}; this SoM hasn't been HW-mapped yet so "
-                f"IPC carve-outs cannot be allocated.  Fill the value "
-                f"in metadata/e1m_modules/{project.sku}.yaml or remove "
-                f"the matching ipc entry from board.yaml.")
+                f"memory_map.base is {'unset' if base is None else 'TBD'} "
+                f"for region '{name}' in SoM {project.sku}; this SoM "
+                f"hasn't been HW-mapped yet so IPC carve-outs cannot be "
+                f"allocated.  Add a `memory_map:` block to "
+                f"metadata/e1m_modules/{project.sku}.yaml (or per-region "
+                f"`base`) or remove the matching ipc entry from board.yaml.")
         if size_bytes is None:
             return None, (
                 f"memory_map.size is unresolvable for region '{name}' "

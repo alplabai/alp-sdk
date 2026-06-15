@@ -1,0 +1,97 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-AEN801 (Alif Ensemble E8, AE822FA0E5597LS0) Cortex-M55-HP carrier,
+ * for the Alp E1M-EVK.
+ *
+ * Reuses the upstream Alif E8 SoC + RTSS-HP cluster devicetree and:
+ *   - retargets the console from the DevKit's UART2 to the E1M carrier console
+ *     (Alif UART5, P3_4/P3_5 -- the E1M edge "UART0");
+ *   - runs boot + storage from on-die MRAM only.  The SoM's OSPI0 NOR
+ *     (MX25UM25645) + HyperRAM (W958D8NB) are BOM-optional and NOT populated
+ *     on the current batch, so there is no external XIP / flash device;
+ *   - lays down a production MCUboot partition map in MRAM.
+ *
+ * NOTE (AMP): this per-core board takes the full MRAM view for single-image
+ * bring-up (one core flashed/run at a time).  An HE+HP co-resident AMP image
+ * partitions MRAM between the two cores at the system-integration layer
+ * (sysbuild); see docs/heterogeneous-builds.md.
+ *
+ * Inter-core IPC (the APSS<->RTSS-HP MHUv2 doorbell pair) + the on-module
+ * peripheral buses (GPIO / I2C / SPI / Ethernet) are added alongside the
+ * alp-sdk Alif peripheral drivers; this base wires boot + console only.
+ */
+
+/dts-v1/;
+
+#include <alif/ensemble/ae822fa0e5597ls0.dtsi>
+#include <alif/ensemble/common/ensemble_rtss_hp.dtsi>
+#include <alif/ensemble_e8_peripherals.dtsi>
+#include "alp_e1m_aen801_m55_hp-pinctrl.dtsi"
+
+/ {
+	model = "Alp E1M-AEN801 Cortex-M55 HP carrier";
+	compatible = "alp,e1m-aen801-m55-hp";
+
+	chosen {
+		zephyr,flash = &mram;
+		zephyr,sram = &dtcm;
+		zephyr,console = &uart5;
+		zephyr,shell-uart = &uart5;
+		zephyr,code-partition = &slot0_partition;
+	};
+};
+
+/*
+ * On-die MRAM partition map (5632 KiB total).  Production layout for the
+ * sysbuild/aen MCUboot profile (MCUboot + a signed application image,
+ * swap-using-scratch):
+ *
+ *   mcuboot  0x000000  64 KiB
+ *   image-0  0x010000  2688 KiB   (primary slot, code-partition)
+ *   image-1  0x2b0000  2688 KiB   (secondary slot for OTA)
+ *   scratch  0x550000  64 KiB
+ *   storage  0x560000  128 KiB    (settings / NVS)
+ *                      = 5632 KiB
+ */
+&mram {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x0 DT_SIZE_K(64)>;
+		};
+
+		slot0_partition: partition@10000 {
+			label = "image-0";
+			reg = <0x10000 DT_SIZE_K(2688)>;
+		};
+
+		slot1_partition: partition@2b0000 {
+			label = "image-1";
+			reg = <0x2b0000 DT_SIZE_K(2688)>;
+		};
+
+		scratch_partition: partition@550000 {
+			label = "image-scratch";
+			reg = <0x550000 DT_SIZE_K(64)>;
+		};
+
+		storage_partition: partition@560000 {
+			label = "storage";
+			reg = <0x560000 DT_SIZE_K(128)>;
+		};
+	};
+};
+
+/* Carrier console: Alif UART5 on P3_4 (RX) / P3_5 (TX), 115200 8N1. */
+&uart5 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_uart5>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+};

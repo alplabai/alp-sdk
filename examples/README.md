@@ -172,6 +172,16 @@ SoM EEPROM manifest).
 | `v2n/v2n-emmc-block-stat`       | Disk-access ioctls + first-block read on the on-module eMMC.             |
 | `v2n/v2n-gd32-swd-flash`        | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
 
+### AEN platform
+
+These live under `examples/aen/` and target the E1M-AEN (Alif
+Ensemble) family on the E1M-EVK board (lead part: E8).
+
+| Directory                       | What it shows                                                            |
+|---------------------------------|--------------------------------------------------------------------------|
+| `aen/edgeai-vision-aen`         | Flagship EdgeAI vision pipeline -- CSI camera -> ISP -> Ethos-U55 -> OLED. |
+| `aen/aen-secure-element-sign`   | OPTIGA Trust M init + product info + raw-APDU ECDSA-P256 sign over BRD_I2C (M55-HE). |
+
 ## Anatomy of a single-OS example
 
 ```

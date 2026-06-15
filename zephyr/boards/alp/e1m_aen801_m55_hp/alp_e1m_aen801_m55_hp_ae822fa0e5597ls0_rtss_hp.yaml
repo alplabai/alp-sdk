@@ -1,0 +1,12 @@
+identifier: alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+name: E1M-AEN801 (Alif Ensemble E8) Cortex-M55 HP carrier
+type: mcu
+arch: arm
+vendor: alp
+toolchain:
+  - zephyr
+  - gnuarmemb
+supported:
+  - uart
+ram: 1024
+flash: 5632

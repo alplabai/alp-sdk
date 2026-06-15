@@ -7,23 +7,38 @@ want MCUboot-verified secure boot.
 
 ## Status
 
-**v0.4-prep.**  The configuration is complete and matches the
-intended v0.4 reference path (MCUboot + ECDSA-P256 +
-swap-using-scratch).  The authoritative `alp_e1m_evk_aen` Zephyr
-board file lives at
-[`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
-(TBD; tracked in [`VERSIONS.md`](../../../VERSIONS.md) v0.3 row).
-Once that lands, the `pr-twister` workflow gains a sysbuild scenario that
-compile-verifies this config against a smoke example.  Until
-then this directory documents the target so downstream consumers
-don't have to reverse-engineer it.
+The configuration matches the reference path (MCUboot + ECDSA-P256 +
+swap-using-scratch) and builds against the in-repo
+`alp_e1m_aen801_m55_{he,hp}` boards (the MRAM partition map it relies on
+lives in those board DTs).  The remaining bench-validation step is the
+**SES → MCUboot → slot0** chain itself: the E8 bench has proven the
+SES → app-direct path (a signed app as the ATOC), and this profile is the
+MCUboot-as-ATOC variant of the same flow.  See
+[`docs/bring-up-aen.md`](../../../docs/bring-up-aen.md) and
+[`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md).
+
+## Boot chain
+
+The Alif Secure Enclave (SES) launches an ATOC image from MRAM.  In this
+profile that image is MCUboot, which then verifies and chain-loads the
+application from slot0:
+
+```
+SES ──ATOC──▶ MCUboot ──verify slot0──▶ application
+```
+
+MRAM map (from the board DT; MRAM base `0x80000000`): MCUboot `0x80000000`
+· slot0 `0x80010000` (2688 KiB) · slot1 `0x802b0000` (OTA) · scratch ·
+storage.  This is also the **SoM-maker provisioning model** — Alp Lab
+pre-provisions this MCUboot as the factory ATOC so shipped modules boot
+out-of-box and customers `west flash` into slot0 (see
+[`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md)).
 
 ## Usage
 
 ```bash
-# From a Zephyr workspace with alp-sdk + alp-zephyr-modules
-# resolved via west:
-west build -b alp_e1m_evk_aen \
+# From a Zephyr workspace with alp-sdk resolved via west:
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     path/to/app \
     --sysbuild \
     --sysbuild-config alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
@@ -32,7 +47,8 @@ west build -b alp_e1m_evk_aen \
 #   build/zephyr/zephyr.signed.bin     -- signed application image
 #   build/mcuboot/zephyr/zephyr.bin    -- MCUboot bootloader
 #
-# Flash both:
+# Flash both (once the module's MCUboot ATOC is provisioned and the SES
+# has released the core, so SWD/west flash is available):
 west flash --bin-file build/mcuboot/zephyr/zephyr.bin --domain mcuboot
 west flash --bin-file build/zephyr/zephyr.signed.bin
 ```

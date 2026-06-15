@@ -1,0 +1,173 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * alp-sdk SoC-overlay for the Alif Ensemble E8 (AE822FA0E5597xx0).
+ *
+ * Upstream Zephyr v4.4's Alif SoC layer (dts/arm/alif/ensemble/) models only
+ * UART + clocks + pinctrl + memory; the GPIO / I2C / SPI / Ethernet peripheral
+ * nodes are absent.  Alif's peripherals are DesignWare (Synopsys) IP, for which
+ * Zephyr already ships generic drivers (gpio_dw / i2c_dw / spi_dw / eth_dwmac),
+ * so this overlay just *declares the nodes* with the `snps,designware-*`
+ * compatibles + the SoC's reg / IRQ / clock; a board enables (status="okay")
+ * the instances its carrier uses.
+ *
+ * reg/IRQ values are transcribed from Alif's Apache-2.0 zephyr_alif fork
+ * (dts/arm/alif/ensemble/common/e1.dtsi) -- the same SoC, identical addresses.
+ * The fork's ALIF_DEFAULT_IRQ_PRIORITY (not in upstream) is rendered here as a
+ * literal priority 3 (the repo's default IRQ priority, matching the MHU nodes).
+ *
+ * Included by the alp_e1m_aen801_m55_{he,hp} boards via the alp-sdk dts_root
+ * (`#include <alif/ensemble_e8_peripherals.dtsi>`).  vendor-ext, BENCH-UNVERIFIED.
+ *
+ * Populated so far: GPIO (snps,designware-gpio).  I2C / SPI / Ethernet land
+ * with their respective driver bring-up (each needs the clock IDs upstream's
+ * alif-ensemble-clocks.h omits).
+ */
+
+&soc {
+	/*
+	 * DesignWare GPIO -- 10 general ports (gpio0..gpio9) + the LP-island
+	 * port (lpgpio).  Each port is an independent 0x1000 register block with
+	 * 8 pins and 8 per-pin interrupt lines.  gpio_dw needs no clocks and no
+	 * pinctrl on the controller; the pad->GPIO mux is applied per-pin via the
+	 * Alif pinctrl group on whichever node consumes the pin.
+	 */
+	gpio0: gpio@49000000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x49000000 0x1000>;
+		ngpios = <8>;
+		interrupts = <179 3>, <180 3>, <181 3>, <182 3>,
+			     <183 3>, <184 3>, <185 3>, <186 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio1: gpio@49001000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x49001000 0x1000>;
+		ngpios = <8>;
+		interrupts = <187 3>, <188 3>, <189 3>, <190 3>,
+			     <191 3>, <192 3>, <193 3>, <194 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio2: gpio@49002000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x49002000 0x1000>;
+		ngpios = <8>;
+		interrupts = <195 3>, <196 3>, <197 3>, <198 3>,
+			     <199 3>, <200 3>, <201 3>, <202 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio3: gpio@49003000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x49003000 0x1000>;
+		ngpios = <8>;
+		interrupts = <203 3>, <204 3>, <205 3>, <206 3>,
+			     <207 3>, <208 3>, <209 3>, <210 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio4: gpio@49004000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x49004000 0x1000>;
+		ngpios = <8>;
+		interrupts = <211 3>, <212 3>, <213 3>, <214 3>,
+			     <215 3>, <216 3>, <217 3>, <218 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio5: gpio@49005000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x49005000 0x1000>;
+		ngpios = <8>;
+		interrupts = <219 3>, <220 3>, <221 3>, <222 3>,
+			     <223 3>, <224 3>, <225 3>, <226 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio6: gpio@49006000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x49006000 0x1000>;
+		ngpios = <8>;
+		interrupts = <227 3>, <228 3>, <229 3>, <230 3>,
+			     <231 3>, <232 3>, <233 3>, <234 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio7: gpio@49007000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x49007000 0x1000>;
+		ngpios = <8>;
+		interrupts = <235 3>, <236 3>, <237 3>, <238 3>,
+			     <239 3>, <240 3>, <241 3>, <242 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio8: gpio@49008000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x49008000 0x1000>;
+		ngpios = <8>;
+		interrupts = <243 3>, <244 3>, <245 3>, <246 3>,
+			     <247 3>, <248 3>, <249 3>, <250 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio9: gpio@49009000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x49009000 0x1000>;
+		ngpios = <8>;
+		interrupts = <251 3>, <252 3>, <253 3>, <254 3>,
+			     <255 3>, <256 3>, <257 3>, <258 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	lpgpio: gpio@42002000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x42002000 0x1000>;
+		ngpios = <8>;
+		interrupts = <171 3>, <172 3>, <173 3>, <174 3>,
+			     <175 3>, <176 3>, <177 3>, <178 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	/*
+	 * LPI2C0 -- the on-module "BRD_I2C" housekeeping bus (P7_4 SCL_A /
+	 * P7_5 SDA_A), carrying OPTIGA (0x30) / RV-3028 (0x52) / TMP112 (0x48) /
+	 * EEPROM (0x50).  Minimal Alif LPI2C IP (compatible "alif,lpi2c", driver
+	 * zephyr/drivers/i2c/i2c_alif_lpi2c.c, ported from the Apache-2.0 fork;
+	 * reg/IRQ from the fork's e1.dtsi -- no clock prop).  A board enables it
+	 * (status="okay") and supplies pinctrl_lpi2c0.  vendor-ext, BENCH-UNVERIFIED.
+	 */
+	lpi2c0: i2c@43009000 {
+		compatible = "alif,lpi2c";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x43009000 0x100>;
+		interrupts = <47 3>;
+		status = "disabled";
+	};
+};

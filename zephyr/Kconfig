@@ -190,6 +190,21 @@ config MBOX_ALIF_MHUV2
 	  vendor-ext, BENCH-UNVERIFIED -- authored from the ARM MHUv2 spec + the
 	  zephyr_alif fork DTS; not yet validated on real silicon.
 
+config I2C_ALIF_LPI2C
+	bool "Alif Ensemble LPI2C (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on I2C
+	depends on DT_HAS_ALIF_LPI2C_ENABLED
+	help
+	  Enable the Alif Ensemble LPI2C (Low-Power I2C) controller driver for the
+	  on-module BRD_I2C housekeeping bus (LPI2C0 @0x43009000, pins P7_4/P7_5).
+	  Ported from the Apache-2.0 zephyr_alif fork; a deliberately MINIMAL
+	  FIFO-mode controller (master TX + single-byte RX target callback) -- it
+	  does NOT do repeated-START / multi-message read / bus recovery, so it is
+	  not sufficient on its own for register reads of the on-module EEPROM /
+	  sensors.  vendor-ext, BENCH-UNVERIFIED.  Driver:
+	  zephyr/drivers/i2c/i2c_alif_lpi2c.c.
+
 config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4
