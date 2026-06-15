@@ -122,6 +122,19 @@ zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
 zephyr_library_sources_ifdef(CONFIG_I2C_ALIF_LPI2C
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2c/i2c_alif_lpi2c.c)
 
+# Alif Ensemble Ethernet (GMAC) platform glue backing upstream eth_dwmac
+# (compatible alif,ethernet); driver: zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c,
+# binding: zephyr/dts/bindings/ethernet/alif,ethernet.yaml.  The clock id it
+# enables (ALIF_ETHERNET_CLK) is re-encoded for the upstream alif,clockctrl in
+# zephyr/include/zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h.  bench-unverified.
+zephyr_library_sources_ifdef(CONFIG_ETH_DWMAC_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c)
+# The glue uses the eth_dwmac core's private header (struct dwmac_priv); upstream
+# keeps it co-located in drivers/ethernet/, so expose that dir on the include path.
+if(CONFIG_ETH_DWMAC_ALIF)
+    zephyr_include_directories(${ZEPHYR_BASE}/drivers/ethernet)
+endif()
+
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.

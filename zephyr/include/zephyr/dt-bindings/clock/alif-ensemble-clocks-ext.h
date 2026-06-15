@@ -1,0 +1,65 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * alp-sdk extension clock IDs for the Alif Ensemble, in the UPSTREAM 8-arg
+ * ALIF_CLK_CFG() encoding (zephyr/dt-bindings/clock/alif-clocks-common.h).
+ *
+ * Upstream Zephyr v4.4's alif-ensemble-clocks.h defines ONLY the 8 UART
+ * clocks; the peripheral clock IDs below are re-expressed from Alif's
+ * Apache-2.0 zephyr_alif fork into the upstream encoding.  This re-authoring
+ * is load-bearing, NOT a transcription: the fork and upstream encodings
+ * differ in two ways that both matter --
+ *
+ *   1. arity: fork ALIF_CLK_CFG() takes 7 args, upstream takes 8 (adds a
+ *      trailing parent_clk field at bits [26:30]); the fork macro body will
+ *      not even compile against the upstream macro.
+ *   2. module IDs are off by +1: fork CLKCTL_PER_MST=0x2 / M55HE=0x6 vs
+ *      upstream CLKCTL_PER_MST=0x1 / M55HE=0x5.  The module index occupies
+ *      the same low bits in both, so a *packed* fork value survives copy but
+ *      then selects the WRONG register block under the upstream decode driver
+ *      (drivers/clock_control/clock_control_alif.c): e.g. the fork's
+ *      ALIF_ETHERNET_CLK (0x00016062) decodes to clkctl_per_slv 0x4902F00C,
+ *      not the intended GMAC gate clkctl_per_mst 0x4903F00C.
+ *
+ * Therefore every ID here uses the upstream ALIF_CLK_CFG() macro so the
+ * upstream ALIF_*_MODULE constants get pasted in; the register offset +
+ * enable bit (identical silicon, identical in both trees) are carried over
+ * from the fork's alif_ensemble_clocks.h.  vendor-ext, BENCH-UNVERIFIED.
+ */
+#ifndef ALP_DT_BINDINGS_CLOCK_ALIF_ENSEMBLE_CLOCKS_EXT_H_
+#define ALP_DT_BINDINGS_CLOCK_ALIF_ENSEMBLE_CLOCKS_EXT_H_
+
+#include <zephyr/dt-bindings/clock/alif-clocks-common.h>
+
+/* Register offsets absent from upstream's header (verified vs fork
+ * alif_clocks_common.h: PERIPH_CLK_ENA in CLKCTL_PER_MST, HE_CLK_ENA in
+ * M55HE_CFG).  Same silicon, same offsets in both trees. */
+#define ALIF_PERIPH_CLK_ENA_REG 0x0CU /* CLKCTL_PER_MST base 0x4903F000 */
+#define ALIF_HE_CLK_ENA_REG     0x10U /* M55HE_CFG      base 0x43007000 */
+
+/* Dummy-clock scaffolding (upstream omits it; fork alif_clocks_common.h).
+ * DUMMY module = 0x0, en_mask = 0 -> alif_clock_control_on() returns at the
+ * `if (!EN_MASK)` guard and touches no register. */
+#define ALIF_DUMMY_MODULE 0x0U
+#define ALIF_DUMMY_REG    0xFFU
+#define ALIF_CLK(value)   ALIF_CLK_CFG(DUMMY, DUMMY, (value), 0U, 0U, 0U, 0U, 0U)
+
+/* Ethernet (GMAC) peripheral clock gate: bit 12 of PERIPH_CLK_ENA in
+ * CLKCTL_PER_MST -> sets bit 12 of 0x4903F00C.  parent_clk is used only by
+ * clock_control_get_rate(); the dwmac glue does not consume the reported rate
+ * for a fixed-link bring-up, so SYST_HCLK is a safe filler. */
+#define ALIF_ETHERNET_CLK                                                      \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, PERIPH_CLK_ENA, 12U, 1U, 0U, 0U, 0U,       \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
+/* Regular SPI0-3 (DesignWare SSI on the AHB) -- frequency-only dummy clock. */
+#define ALIF_SPI_CLK ALIF_CLK(2U)
+
+/* LPSPI (SPI4, M55-HE local domain): bit 16 of HE_CLK_ENA in M55HE_CFG ->
+ * sets bit 16 of 0x43007010.  HE-core only. */
+#define ALIF_LPSPI_CLK                                                         \
+	ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 16U, 1U, 0U, 0U, 0U,               \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
+#endif /* ALP_DT_BINDINGS_CLOCK_ALIF_ENSEMBLE_CLOCKS_EXT_H_ */

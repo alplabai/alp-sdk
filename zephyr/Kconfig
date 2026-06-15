@@ -205,6 +205,21 @@ config I2C_ALIF_LPI2C
 	  sensors.  vendor-ext, BENCH-UNVERIFIED.  Driver:
 	  zephyr/drivers/i2c/i2c_alif_lpi2c.c.
 
+config ETH_DWMAC_ALIF
+	bool "Alif Ensemble DesignWare MAC glue (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on DT_HAS_ALIF_ETHERNET_ENABLED
+	select ETH_DWMAC
+	select PINCTRL
+	select NOCACHE_MEMORY if ARCH_HAS_NOCACHE_MEMORY_SUPPORT
+	help
+	  Alif Ensemble platform glue (compatible "alif,ethernet") backing the
+	  upstream eth_dwmac (Synopsys DesignWare GMAC) core.  Enables the
+	  GMAC peripheral clock via the alif clock controller, wires the IRQ +
+	  pinctrl, and hands the descriptor rings to the core.  First bring-up
+	  is fixed-link (no upstream MDIO driver in Zephyr v4.4).  Not
+	  silicon-validated.  Driver: zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c.
+
 config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4

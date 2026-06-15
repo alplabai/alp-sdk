@@ -1,0 +1,91 @@
+# Copyright 2026 Alp Lab AB
+# Copyright (C) 2025 Alif Semiconductor
+# SPDX-License-Identifier: Apache-2.0
+#
+# vendor-ext, BENCH-UNVERIFIED.
+#
+# Synopsys DesignWare MAC (DWC-ETHERNET QoS, v4.x/5.x) as integrated on the
+# Alif Ensemble family -- the RMII MAC at 0x4810_0000. Drives the upstream
+# Zephyr DWMAC core (drivers/ethernet/eth_dwmac.c) via the Alif platform glue
+# carried in this SDK (zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c,
+# DT_DRV_COMPAT alif_ethernet), since upstream Zephyr v4.4 ships the core but
+# not the Alif glue nor this binding.
+#
+# A node lists BOTH compatibles:
+#
+#     compatible = "alif,ethernet", "snps,designware-ethernet";
+#
+# `alif,ethernet` (first, more specific) is what the platform glue binds to
+# (DT_DRV_COMPAT alif_ethernet) and what enables CONFIG_ETH_DWMAC_ALIF.
+# `snps,designware-ethernet` (second, the generic fallback) is what enables the
+# upstream core's CONFIG_ETH_DWMAC via DT_HAS_SNPS_DESIGNWARE_ETHERNET_ENABLED.
+# Both must be present.
+#
+# This binding ADDS, over the bare upstream `snps,designware-ethernet`:
+#   - clocks    (the Alif clock manager gate -- upstream omits it entirely;
+#                the glue's clock_control_on() needs it. Reference the
+#                ALIF_ETHERNET_CLK macro from
+#                <zephyr/dt-bindings/clock/alif_ensemble_clocks.h>, e.g.
+#                clocks = <&clockctrl ALIF_ETHERNET_CLK>.)
+#   - pinctrl-0 / pinctrl-names  (the RMII pad routing)
+#   - local-mac-address          (required: the glue reads it directly; there
+#                                 is no fuse/OUI fallback in this glue)
+#
+# PHY: the controller node may carry a child `mdio` bus with a managed PHY
+# (e.g. ti,dp83825 at addr 0), OR -- for first bring-up -- a `fixed-link` child
+# PHY node (compatible "ethernet-phy-fixed-link", no MDIO). Either way the node
+# references it via the standard `phy-handle` property (inherited from
+# ethernet-controller.yaml); the glue forwards it to the core as p->phy_dev.
+# When `phy-handle` is absent the core skips link management and the MAC stays
+# at the static MAC_CONF speed/duplex the glue programs (100 Mbps / full).
+#
+# Register offsets used by the glue (MAC_CONF, DMA_SYSBUS_MODE, MAC_MDIO_*) are
+# transcribed verbatim from eth_dwmac_priv.h; the node geometry (reg, IRQ,
+# clock id) is from the alifsemi/zephyr_alif fork DTS. NOT validated on silicon.
+
+description: |
+  Alif Ensemble Synopsys DesignWare Ethernet MAC (RMII).
+
+compatible: "alif,ethernet"
+
+include: [ethernet-controller.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  clocks:
+    required: true
+    description: |
+      Single phandle-array entry to the Alif clock controller with the
+      Ethernet clock id in its `clkid` cell, i.e.
+      clocks = <&clockctrl ALIF_ETHERNET_CLK>. The platform glue enables this
+      gate via clock_control_on() before applying pinctrl.
+
+  pinctrl-0:
+    required: true
+
+  pinctrl-names:
+    required: true
+
+  local-mac-address:
+    required: true
+    description: |
+      The 6-byte station MAC address. Required: the Alif glue copies it
+      straight into the MAC with no fuse/derived-OUI fallback.
+
+  # phy-handle is inherited from ethernet-controller.yaml (type: phandle). The
+  # node points it at either a managed PHY on a child `mdio` bus or a fixed-link
+  # PHY (compatible "ethernet-phy-fixed-link"); the glue forwards it to the core
+  # as p->phy_dev. Optional -- when omitted the core leaves the MAC at the
+  # glue's static speed/duplex.
+
+  phy-connection-type:
+    type: string
+    default: "rmii"
+    description: |
+      MAC<->PHY interface. The Ensemble MAC is wired RMII on this SoM; kept for
+      DT documentation parity with the generic ethernet-controller binding.
