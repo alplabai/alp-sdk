@@ -27,6 +27,11 @@ west flash
 > driver bring-up). Until that lands, the example builds (CI builds it
 > under `native_sim`) but `alp_i2c_open(bus_id=0)` will not find the
 > chip on a board that hasn't wired LPI2C0 yet.
+>
+> **The current E1M-AEN801 bench batch does not populate the OPTIGA**
+> (DNI), so this example has nothing to talk to on those boards — it is
+> for OPTIGA-populated SoMs. OPTIGA is part of the E1M-AEN801 SoM design
+> (`on_module`); the absence is a current-batch population fact.
 
 ## What it shows
 

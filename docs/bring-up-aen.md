@@ -176,12 +176,18 @@ console:
 | Slave | 7-bit addr | What | Where |
 |-------|------------|------|-------|
 | 24C128 | `0x50` | EEPROM (manifest) | SoM |
-| OPTIGA TM | `0x30` | Secure element | SoM |
+| OPTIGA TM | `0x30` | Secure element | SoM — **DNI on this bench batch** |
 | RV-3028-C7 | `0x52` | RTC | SoM |
 | TMP112 | `0x48` | Thermometer | SoM |
 | TCAL9538 | `0x72` | GPIO expander | EVK carrier |
 | INA236 | `0x40`..`0x46` | Power monitor (6x) | EVK carrier |
 | BMP581 | `0x47` | Barometer | EVK carrier |
+
+> **This bench batch (2026-06-15):** the **OPTIGA Trust M (`0x30`) is not
+> populated** — `i2cdetect` will not ACK 0x30, and that is *expected*, not a
+> fault. OPTIGA is in the E1M-AEN801 SoM design (`on_module`); the absence is a
+> current-batch population fact (like the un-stuffed OSPI memories). Skip §5.2 on
+> these boards.
 
 A missing slave that's *expected* is a real fault.  The on-module
 set is authoritative in
@@ -194,6 +200,9 @@ are authoritative in
 DNI variants.
 
 ### 5.2 OPTIGA Trust M sanity
+
+> **N/A on the current bench batch** — OPTIGA is DNI here (§5.1). Run this on an
+> OPTIGA-populated SoM; the example below build-verifies regardless.
 
 The AEN secure-element example
 ([`examples/aen/aen-secure-element-sign`](../examples/aen/aen-secure-element-sign))
