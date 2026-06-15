@@ -20,14 +20,19 @@
  * Included by the alp_e1m_aen801_m55_{he,hp} boards via the alp-sdk dts_root
  * (`#include <alif/ensemble_e8_peripherals.dtsi>`).  vendor-ext, BENCH-UNVERIFIED.
  *
- * Populated: GPIO (snps,designware-gpio), LPI2C (alif,lpi2c), Ethernet
- * (alif,ethernet over the upstream eth_dwmac core), SPI0 (snps,designware-spi).
+ * Populated (per ADR 0017 tiers): edge I2C i2c0/i2c1/i2c2 + GPIO
+ * (snps,designware-* -- Tier-1 upstream-native); Ethernet (alif,ethernet glue
+ * over the upstream eth_dwmac core -- Tier-1.5) + UTIMER PWM/counter
+ * (alif,utimer over the Apache-2.0 hal_alif lib -- Tier-1.5); SPI0
+ * (alif,dwc-ssi-spi -- Tier-2 interim); LPI2C0 (alif,lpi2c -- slave-only,
+ * Tier-3 SE, retired by task #21).
  * The non-UART peripheral clock IDs upstream's alif-ensemble-clocks.h omits are
  * supplied, re-encoded for the upstream clockctrl, by the alp-sdk -ext header
  * included below.
  */
 
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+#include <zephyr/dt-bindings/timer/alif_utimer.h>
 #include <zephyr/dt-bindings/i2c/i2c.h>
 
 &soc {
@@ -246,6 +251,117 @@
 		dwc-ssi;
 		fifo-depth = <16>;
 		status = "disabled";
+	};
+
+	/*
+	 * UTIMER -- Alif Universal Timer.  The parent "alif,utimer" node is an
+	 * unbound container (reg = per-timer block 0x48001000+id*0x1000 + the shared
+	 * global block 0x48000000); a child binds the actual class driver:
+	 *   - "alif,pwm"            -> zephyr/drivers/pwm/pwm_alif_utimer.c
+	 *   - "alif,utimer-counter" -> zephyr/drivers/counter/counter_alif_utimer.c
+	 * reg/IRQ transcribed VERBATIM from the Apache-2.0 zephyr_alif fork e1*.dtsi
+	 * (utimer0 IRQ377-384; utimer3 401-408; utimer6 425-432; utimer10 457-464;
+	 * utimer11 465-472).  clock-frequency is a PLACEHOLDER tick rate (confirm vs
+	 * the Alif TRM at bench bring-up; only scales us<->ticks, not register
+	 * programming).  A board enables a node + its child + the alp-{pwm,counter}
+	 * alias.  ADR 0017 Tier-1.5 (thin Zephyr drivers over the Apache-2.0 hal_alif
+	 * alif_utimer_* register library; the fork ships UTIMER bindings only, no
+	 * driver -- so there is no Tier-2 path to retire onto).  INTERIM until E8
+	 * bench, then promotes to permanent.  BENCH-UNVERIFIED.
+	 *
+	 * utimer0 backs the portable alp_counter surface; utimer3/6/10/11 back the
+	 * eight E1M PWM pads.
+	 */
+	utimer0: utimer@48001000 {
+		compatible = "alif,utimer";
+		reg = <0x48001000 0x1000 0x48000000 0x24>;
+		reg-names = "timer", "global";
+		interrupts = <377 3>, <378 3>, <379 3>, <380 3>,
+			     <381 3>, <382 3>, <383 3>, <384 3>;
+		interrupt-names = "comp_capt_a", "comp_capt_b",
+				  "comp_a_buf1", "comp_a_buf2", "comp_b_buf1",
+				  "comp_b_buf2", "underflow", "overflow";
+		timer-id = <0>;
+		counter-direction = <ALIF_UTIMER_COUNTER_DIRECTION_UP>;
+		clock-frequency = <100000000>; /* placeholder; confirm vs TRM */
+		status = "disabled";
+
+		utimer0_counter: counter {
+			compatible = "alif,utimer-counter";
+			status = "disabled";
+		};
+	};
+
+	utimer3: utimer@48004000 {
+		compatible = "alif,utimer";
+		reg = <0x48004000 0x1000 0x48000000 0x24>;
+		reg-names = "timer", "global";
+		interrupts = <401 3>, <402 3>, <403 3>, <404 3>,
+			     <405 3>, <406 3>, <407 3>, <408 3>;
+		timer-id = <3>;
+		counter-direction = <ALIF_UTIMER_COUNTER_DIRECTION_UP>;
+		clocks = <&clockctrl ALIF_UTIMER_CLK>;
+		status = "disabled";
+
+		pwm3: pwm3 {
+			compatible = "alif,pwm";
+			#pwm-cells = <3>;
+			status = "disabled";
+		};
+	};
+
+	utimer6: utimer@48007000 {
+		compatible = "alif,utimer";
+		reg = <0x48007000 0x1000 0x48000000 0x24>;
+		reg-names = "timer", "global";
+		interrupts = <425 3>, <426 3>, <427 3>, <428 3>,
+			     <429 3>, <430 3>, <431 3>, <432 3>;
+		timer-id = <6>;
+		counter-direction = <ALIF_UTIMER_COUNTER_DIRECTION_UP>;
+		clocks = <&clockctrl ALIF_UTIMER_CLK>;
+		status = "disabled";
+
+		pwm6: pwm6 {
+			compatible = "alif,pwm";
+			#pwm-cells = <3>;
+			status = "disabled";
+		};
+	};
+
+	utimer10: utimer@4800b000 {
+		compatible = "alif,utimer";
+		reg = <0x4800B000 0x1000 0x48000000 0x24>;
+		reg-names = "timer", "global";
+		interrupts = <457 3>, <458 3>, <459 3>, <460 3>,
+			     <461 3>, <462 3>, <463 3>, <464 3>;
+		timer-id = <10>;
+		counter-direction = <ALIF_UTIMER_COUNTER_DIRECTION_UP>;
+		clocks = <&clockctrl ALIF_UTIMER_CLK>;
+		status = "disabled";
+
+		pwm10: pwm10 {
+			compatible = "alif,pwm";
+			#pwm-cells = <3>;
+			status = "disabled";
+		};
+	};
+
+	utimer11: utimer@4800c000 {
+		compatible = "alif,utimer";
+		reg = <0x4800C000 0x1000 0x48000000 0x24>;
+		reg-names = "timer", "global";
+		interrupts = <465 3>, <466 3>, <467 3>, <468 3>,
+			     <469 3>, <470 3>, <471 3>, <472 3>;
+		timer-id = <11>;
+		counter-direction = <ALIF_UTIMER_COUNTER_DIRECTION_UP>;
+		clocks = <&clockctrl ALIF_UTIMER_CLK>;
+		status = "disabled";
+
+		pwm11: pwm11 {
+			compatible = "alif,pwm";
+			#pwm-cells = <3>;
+			status = "disabled";
+		};
 	};
 
 	/*
