@@ -11,19 +11,27 @@
 
 #include "alp/chips/eeprom_24c128.h"
 
-/** Maximum poll-cycles to wait for a write to complete (one cycle
- *  is one I2C transaction; chip ACKs once the internal cycle ends). */
-#define EEPROM_WRITE_POLL_MAX 20
+/** Maximum poll-cycles to wait for a write to complete.  The 24Cxx internal
+ *  write cycle is up to 5 ms (datasheet t_WR); we pace each poll by ~1 ms so the
+ *  total budget (~20 ms) comfortably spans it.  Bench-found 2026-06-15: without
+ *  the inter-poll delay, 20 back-to-back I2C transactions complete in well under
+ *  one write cycle and poll_for_ack returned ALP_ERR_TIMEOUT on every page write
+ *  (the chip was still busy), so eeprom_24c128_write failed even though the data
+ *  had been accepted -- validated on the E8 (I2C2). */
+#define EEPROM_WRITE_POLL_MAX     20
+#define EEPROM_WRITE_POLL_STEP_US 1000u
 
 static alp_status_t poll_for_ack(eeprom_24c128_t *ctx)
 {
-    /* Acknowledge polling: try a 0-byte write at the device's
-     * address; if the chip is still finishing an internal write
-     * cycle it NACKs.  Loop until ACK or budget exhausted. */
+    /* Acknowledge polling: try a 0-byte (address-only) write at the device's
+     * address; if the chip is still finishing an internal write cycle it NACKs.
+     * Loop until ACK or budget exhausted, pacing each retry so the loop spans
+     * the chip's write cycle rather than racing past it. */
     for (int i = 0; i < EEPROM_WRITE_POLL_MAX; ++i) {
         uint8_t      addr_buf[2] = {0, 0};
         alp_status_t s           = alp_i2c_write(ctx->bus, ctx->addr, addr_buf, 2);
         if (s == ALP_OK) return ALP_OK;
+        alp_delay_us(EEPROM_WRITE_POLL_STEP_US);
     }
     return ALP_ERR_TIMEOUT;
 }
