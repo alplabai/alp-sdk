@@ -220,6 +220,28 @@ config ETH_DWMAC_ALIF
 	  is fixed-link (no upstream MDIO driver in Zephyr v4.4).  Not
 	  silicon-validated.  Driver: zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c.
 
+config SPI_DW_ALIF
+	bool "Alif Ensemble DWC_ssi SPI (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on DT_HAS_ALIF_DWC_SSI_SPI_ENABLED
+	select PINCTRL
+	help
+	  Alif Ensemble DesignWare DWC_ssi SPI controller driver, vendored from
+	  the Apache-2.0 zephyr_alif fork (drivers/spi/spi_dw_alif.c).  Binds the
+	  distinct compatible "alif,dwc-ssi-spi" so it does NOT collide with
+	  upstream Zephyr's DW-apb-SSI spi_dw (which owns "snps,designware-spi").
+	  The DWC_ssi CTRLR0 register layout differs from DW-apb-SSI -- set the
+	  node's `dwc-ssi` property.  Not silicon-validated.
+
+config SPI_DW_ALIF_USE_DMA
+	bool "Alif DWC_ssi SPI DMA code path"
+	default n
+	depends on SPI_DW_ALIF
+	help
+	  Compile the DMA transfer path of the Alif DWC_ssi SPI driver.  DMA is
+	  only actually engaged when the node wires `dmas`/`dma-names`; left off
+	  by default (the DMAC channel/handshake encoding is a bench unknown).
+
 config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4

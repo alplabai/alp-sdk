@@ -215,26 +215,28 @@
 	};
 
 	/*
-	 * DesignWare SSI SPI0 (AHB, always-on domain), against the UPSTREAM
-	 * spi_dw driver (compatible "snps,designware-spi").  reg/IRQ from the
+	 * DesignWare DWC_ssi SPI0 (AHB, always-on domain).  Driven by the alp-sdk
+	 * vendored DWC-SSI driver (drivers/spi/spi_dw_alif.c, compatible
+	 * "alif,dwc-ssi-spi") -- NOT upstream's "snps,designware-spi" spi_dw, which
+	 * drives the DW-apb-SSI register layout (wrong CTRLR0 bit positions for this
+	 * IP).  The `dwc-ssi` flag selects the DWC_ssi layout.  reg/IRQ from the
 	 * fork's e1.dtsi; ALIF_SPI_CLK is a frequency-only dummy (no gate reg).
 	 *
-	 * BENCH-UNVERIFIED -- SPI bring-up RISK: the Ensemble SPI IP is DWC-SSI,
-	 * but upstream spi_dw drives the DW-apb-SSI register layout unconditionally
-	 * (it lacks the fork's `dwc-ssi` mode prop, which upstream's binding would
-	 * REJECT -- do NOT add it here, it breaks the build).  CTRLR0 bit positions
-	 * differ between the two IPs, so this node will build + DT-validate but may
-	 * not correctly drive transfers on silicon; making SPI work likely needs a
-	 * spi_dw_alif DWC-SSI glue (follow-up).  spi1 (0x48104000) is the on-SoM
-	 * WiFi bus, not a free edge bus -- not declared here.
+	 * BENCH-UNVERIFIED.  Netlist-grounded as the customer-facing edge SPI master
+	 * (SoC P5_x); a board enables it (status="okay") + supplies pinctrl + the CS
+	 * scheme (HW-SS vs cs-gpios is a bench unknown -- do not hard-code).  spi1
+	 * (0x48104000) is the on-SoM CC3501E Wi-Fi link (GPIO-CS), not a free edge
+	 * bus -- not declared here.  fifo-depth/max-xfer-size/rx-delay carry safe
+	 * overridable binding defaults; override per the Alif TRM.
 	 */
 	spi0: spi@48103000 {
-		compatible = "snps,designware-spi";
+		compatible = "alif,dwc-ssi-spi";
 		#address-cells = <1>;
 		#size-cells = <0>;
 		reg = <0x48103000 0x1000>;
 		interrupts = <137 3>;
 		clocks = <&clockctrl ALIF_SPI_CLK>;
+		dwc-ssi;
 		fifo-depth = <16>;
 		status = "disabled";
 	};

@@ -135,6 +135,16 @@ if(CONFIG_ETH_DWMAC_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/ethernet)
 endif()
 
+# Alif Ensemble DWC_ssi SPI (compatible alif,dwc-ssi-spi), vendored from the
+# Apache-2.0 zephyr_alif fork; distinct compatible so it doesn't collide with
+# upstream spi_dw.  The driver reuses upstream's private spi_context.h, so put
+# drivers/spi on the include path (the SCI-B/eth precedent).
+zephyr_library_sources_ifdef(CONFIG_SPI_DW_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/spi_dw_alif.c)
+if(CONFIG_SPI_DW_ALIF)
+    zephyr_include_directories(${ZEPHYR_BASE}/drivers/spi)
+endif()
+
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
