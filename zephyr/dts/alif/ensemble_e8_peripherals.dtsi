@@ -153,4 +153,21 @@
 		#gpio-cells = <2>;
 		status = "disabled";
 	};
+
+	/*
+	 * LPI2C0 -- the on-module "BRD_I2C" housekeeping bus (P7_4 SCL_A /
+	 * P7_5 SDA_A), carrying OPTIGA (0x30) / RV-3028 (0x52) / TMP112 (0x48) /
+	 * EEPROM (0x50).  Minimal Alif LPI2C IP (compatible "alif,lpi2c", driver
+	 * zephyr/drivers/i2c/i2c_alif_lpi2c.c, ported from the Apache-2.0 fork;
+	 * reg/IRQ from the fork's e1.dtsi -- no clock prop).  A board enables it
+	 * (status="okay") and supplies pinctrl_lpi2c0.  vendor-ext, BENCH-UNVERIFIED.
+	 */
+	lpi2c0: i2c@43009000 {
+		compatible = "alif,lpi2c";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x43009000 0x100>;
+		interrupts = <47 3>;
+		status = "disabled";
+	};
 };

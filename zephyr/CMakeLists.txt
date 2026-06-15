@@ -117,6 +117,11 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_alif_mhuv2.c)
 
+# Alif Ensemble LPI2C (on-module BRD_I2C bus).  Ported from the Apache-2.0
+# zephyr_alif fork; upstream Zephyr + hal_alif ship no LPI2C driver.
+zephyr_library_sources_ifdef(CONFIG_I2C_ALIF_LPI2C
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2c/i2c_alif_lpi2c.c)
+
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
