@@ -142,13 +142,19 @@ against the SKU's `som.yaml` preset.
    No boot ROM output usually means: wrong UART selected (TX/RX
    swapped), wrong baud, or the PMIC didn't release the core.
 
-4. The default firmware on a freshly-assembled module is the
-   Alif demo image -- the BootROM hands off to it and you'll
-   see Alif's demo banner.  To take it over with the Alp SDK,
-   flash a built image:
+4. An Alp-Lab-provisioned module ships with a dev-signed **MCUboot**
+   (the SES-launched ATOC) plus a **self-test** image in slot0, so it
+   boots that on power-up and the M55 core is already released — `west
+   flash`/SWD work directly.  (A *bare* module sourced outside Alp Lab,
+   or one whose ATOC was wiped, reports `No ATOC` and the core stays
+   gated until you provision MCUboot over the SE-UART — see
+   [`aen-provisioning.md`](aen-provisioning.md).)  To take it over with
+   your own image, build with sysbuild so MCUboot signs it into slot0:
 
    ```bash
-   west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+       examples/peripheral-io/gpio-button-led \
+       --sysbuild --sysbuild-config zephyr/sysbuild/aen/sysbuild.conf
    west flash
    ```
 
@@ -195,7 +201,7 @@ to the AEN target -- it exercises the OPTIGA Trust M over the
 portable `<alp/*>` API:
 
 ```bash
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/v2n/v2n-secure-element-sign
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/v2n/v2n-secure-element-sign
 west flash
 ```
 
@@ -238,33 +244,37 @@ top of the per-subsystem checks.
 > AEN701 (E7) is deprioritised and may never be produced -- AEN801
 > supersedes it (it adds the Ethos-U85 on top of the U55 pair), so
 > bench bring-up centres on the **E8** part.  E8 is fully supported on
-> **alp-sdk's own upstream Zephyr base (v4.4.0)** -- no fork needed:
-> `boards/alif/ensemble_e8_dk` ships our exact part, so the M55 targets
-> are **`ensemble_e8_dk/ae822fa0e5597ls0/rtss_he`** (M55-HE) /
-> **`ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`** (M55-HP), backed by the
-> `hal_alif` module pinned in our `west.yml`.  So on bench day you can
-> build + flash that **Alif E8 DevKit** board as the reference target
-> immediately.  (Alif's own `sdk-alif` / `zephyr_alif` fork -- board
-> `alif_e8_dk` -- and the CMSIS-Pack DFP (`alif_ensemble-cmsis-dfp`,
-> device `AE822FA0E5597`) are opt-in alternatives; Yocto/A32 is
-> `meta-alif-ensemble` branch **scarthgap**, `devkit-e8.conf` /
-> `appkit-e8.conf`.  Note E7 is not in upstream Zephyr v4.4 at all --
-> only e4/e6/e8/e1c -- another reason E8 leads.)  The only piece still to generate is the
-> **Alp-Lab carrier board**: the SKU preset declares
-> `alp_e1m_aen801_m55_hp` / `_m55_he` (carrier-accurate E1M-EVK
-> peripheral wiring), derived from the Alif E8 SoC dtsi but needing
-> the E1M-EVK carrier overlay (board file pending -- see
-> [`docs/porting-new-som.md`](porting-new-som.md)).  So **TODAY** the
-> working target is the upstream DevKit base
-> `ensemble_e8_dk/ae822fa0e5597ls0/rtss_{he,hp}`, built per-core with
-> plain `west build -b <target> <app>` -- that is what the commands
-> below use.  (`west alp-build <app>` is the multi-core *orchestrator*:
-> it fans a board.yaml out into per-core slices using the SoM-preset
-> board string, which still resolves to the pending
-> `alp_e1m_aen801_m55_{he,hp}` carrier board -- so it is not yet a
-> working single-image path.  Once the carrier board file lands,
-> **prefer `west alp-build <app>`** -- it builds both M55 cores from
-> the example's board.yaml with the EVK's actual peripheral routing.)
+> **alp-sdk's own upstream Zephyr base (v4.4.0)** -- no fork needed,
+> backed by the `hal_alif` module pinned in our `west.yml`.
+>
+> The **primary target is the Alp-Lab carrier board**, now authored +
+> build-verified in-repo (`boards/alp/e1m_aen801_m55_{he,hp}`):
+> **`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`** (M55-HE) /
+> **`…/rtss_hp`** (M55-HP).  It carries the carrier-accurate E1M-EVK
+> peripheral wiring (console on UART5, the MRAM MCUboot partition map,
+> the alp-sdk Alif drivers) and is what the commands below use.  It is
+> build-verified but **not yet bench-booted** for a Zephyr image -- the
+> SES provisioning + Alif stock-blink boot is proven (§4,
+> [`aen-provisioning.md`](aen-provisioning.md)); booting our own Zephyr
+> image on it is the next bench step.
+>
+> **Upstream known-good fallback:** `boards/alif/ensemble_e8_dk` ships
+> the exact part, so `ensemble_e8_dk/ae822fa0e5597ls0/rtss_{he,hp}` is a
+> guaranteed-buildable reference target -- use it to prove the
+> toolchain + silicon before switching to the carrier board.  (Alif's
+> own `sdk-alif` / `zephyr_alif` fork -- board `alif_e8_dk` -- and the
+> CMSIS-Pack DFP (`alif_ensemble-cmsis-dfp`, device `AE822FA0E5597`)
+> are opt-in alternatives; Yocto/A32 is `meta-alif-ensemble` branch
+> **scarthgap**, `devkit-e8.conf` / `appkit-e8.conf`.  Note E7 is not in
+> upstream Zephyr v4.4 at all -- only e4/e6/e8/e1c -- another reason E8
+> leads.)
+>
+> Per-core builds use plain `west build -b <target> <app>`.
+> (`west alp-build <app>` is the multi-core *orchestrator*: it fans a
+> board.yaml out into per-core slices using the SoM-preset board string,
+> which resolves to the `alp_e1m_aen801_m55_{he,hp}` carrier board --
+> **prefer it** once the carrier board boots, as it builds both M55
+> cores from the example's board.yaml with the EVK's actual routing.)
 
 0. **Current-limited power-on + rail check.**  Bench supply at a
    **1 A** limit on V_IN (§1).  Power on, watch steady-state
@@ -326,11 +336,14 @@ top of the per-subsystem checks.
    (`helper_firmware[].firmware_path` is still TBD in the SKU
    preset) or the SPI1 CS/IRQ wiring is off.
 
-5. **Flash a Zephyr smoke image.**  Take the module over from the
-   Alif demo image with the SDK's first-build example (§4):
+5. **Flash a Zephyr smoke image.**  Take the module over from its
+   shipped self-test with the SDK's first-build example (§4).  To prove
+   the toolchain + silicon first, build the upstream DevKit fallback
+   (`ensemble_e8_dk/ae822fa0e5597ls0/rtss_he`); then switch to the
+   carrier board for the carrier-accurate routing:
 
    ```bash
-   west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
    west flash
    ```
 
@@ -370,11 +383,11 @@ top of the per-subsystem checks.
 
    This round-trip spans **HE↔HP**, so build both core images: the
    HE side here, and the peer HP image against
-   `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`.
+   `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`.
 
    ```bash
-   west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox
-   # peer image: -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox
+   # peer image: -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
    west flash
    ```
 
@@ -391,7 +404,7 @@ top of the per-subsystem checks.
    reports the detected variant:
 
    ```bash
-   west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/aen/edgeai-vision-aen
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/edgeai-vision-aen
    west flash
    ```
 

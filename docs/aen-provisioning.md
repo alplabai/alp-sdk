@@ -24,9 +24,37 @@ So "flashing" an Ensemble is not `west flash` to an address — it's:
    (`app-gen-toc`) and write it to MRAM (`app-write-mram`).
 3. On the next boot the SES validates the ATOC and launches your M55 image.
 
-`west flash` / J-Link SWD **cannot** bring up a fresh board: until the SES
-releases the core, SWD reaches the SoC's SW-DP but the core's debug-AP is
+`west flash` / J-Link SWD **cannot** bring up a *truly blank* board: until the
+SES releases the core, SWD reaches the SoC's SW-DP but the core's debug-AP is
 gated (`Could not find core in CoreSight setup`).
+
+## 0.5 If your module came from Alp Lab — you probably don't need this
+
+**E1M-AEN modules ship pre-provisioned by Alp Lab.** At manufacturing we write
+a development-signed **MCUboot** bootloader as the factory ATOC and a small
+**self-test** image into MCUboot's primary slot (slot0), with the module left
+in lifecycle state **DM** (development — debug open, fully re-provisionable).
+So out of the box your module:
+
+- **boots on its own** (the self-test runs — proves the unit at our QA), and
+- the M55 core is **already released**, so **`west flash` / SWD just work**.
+
+That means your day-1 path is the normal Zephyr one — no SETOOLS, no SE-UART:
+
+```bash
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
+    --sysbuild --sysbuild-config <alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+west flash    # writes your MCUboot-signed image into slot0 over SWD
+```
+
+You only need the SES/SE-UART flow in this guide if you are:
+
+1. **re-keying** to your own production signing key (replacing Alp's dev
+   MCUboot — see [`secure-boot.md`](secure-boot.md)), or
+2. **recovering** a module whose ATOC was wiped/corrupted (back to `No ATOC`),
+   or bringing up a **bare module** sourced outside Alp Lab.
+
+The rest of this document is that path.
 
 ## 1. What you need
 
