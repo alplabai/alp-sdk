@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: aen-eeprom-manifest
+  description: |
+    Read + decode the 128-byte Alp hardware-info manifest from the on-module
+    24C128 EEPROM on the E1M-AEN (Alif Ensemble) SoM, via the portable <alp/*>
+    API. AEN sibling of v2n-eeprom-manifest-dump; EEPROM on SoC I2C2 (i2c_dw).
+
+tests:
+  alp_sdk.examples.aen.eeprom_manifest.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - eeprom
+      - hw-info
+    build_only: true

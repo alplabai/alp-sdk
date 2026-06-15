@@ -282,4 +282,25 @@
 		hs-spike-len = <1>;
 		status = "disabled";
 	};
+
+	/*
+	 * I2C2 -- carries the on-module 24C128 EEPROM (the Alp manifest) on the
+	 * E1M-AEN801: the EEPROM's interface is selected by bridge/DNP resistors to
+	 * this DesignWare master bus (SoC pins P5_6 SCL_C / P5_7 SDA_C), NOT the
+	 * slave-only LPI2C0.  Full master read+write via upstream i2c_dw.  reg/IRQ
+	 * are authoritative from the AE822 DFP device header (I2C2_BASE 0x49012000,
+	 * I2C2_IRQ_IRQn 134).  A board enables it + supplies pinctrl_i2c2 (P5_6/7) +
+	 * the alp-i2cN alias.  vendor-ext (upstream driver), BENCH-UNVERIFIED.
+	 */
+	i2c2: i2c@49012000 {
+		compatible = "snps,designware-i2c";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x49012000 0x1000>;
+		interrupts = <134 3>;
+		clock-frequency = <I2C_BITRATE_STANDARD>;
+		fs-spike-len = <5>;
+		hs-spike-len = <1>;
+		status = "disabled";
+	};
 };
