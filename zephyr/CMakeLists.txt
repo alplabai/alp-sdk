@@ -117,10 +117,9 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_alif_mhuv2.c)
 
-# Alif Ensemble LPI2C (on-module BRD_I2C bus).  Ported from the Apache-2.0
-# zephyr_alif fork; upstream Zephyr + hal_alif ship no LPI2C driver.
-zephyr_library_sources_ifdef(CONFIG_I2C_ALIF_LPI2C
-    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2c/i2c_alif_lpi2c.c)
+# (Retired, task #21 / ADR 0017) No Alif LPI2C driver: LPI2C0 is slave-only
+# (TRM §3.17.4), so a master driver is a dead end; the housekeeping trio is
+# Tier-3 (Alif SE services), edge I2C is Tier-1 upstream i2c_dw.
 
 # Alif Ensemble Ethernet (GMAC) platform glue backing upstream eth_dwmac
 # (compatible alif,ethernet); driver: zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c,

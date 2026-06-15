@@ -30,7 +30,7 @@ on_module:
   wifi_ble:             cc3501e             # TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor
   secure_element:       optiga_trust_m      # Infineon SLS32AIA010
   rtc_external:         rv3028c7            # Micro Crystal ultra-low-power RTC
-  temperature_sensor:   tmp112              # TI TMP112 on Alif's LPI2C
+  temperature_sensor:   tmp112              # TI TMP112 on the slave-only LPI2C0 (Tier-3 SE; ADR 0017)
   eeprom:               eeprom_24c128       # Onsemi N24S128C4DYT3G (128-Kbit I2C)
   ospi_memories:
     ospi0:
