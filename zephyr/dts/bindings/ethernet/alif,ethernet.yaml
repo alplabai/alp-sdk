@@ -2,7 +2,9 @@
 # Copyright (C) 2025 Alif Semiconductor
 # SPDX-License-Identifier: Apache-2.0
 #
-# vendor-ext, BENCH-UNVERIFIED.
+# ADR 0017 Tier-1.5 (in-tree glue over the UPSTREAM eth_dwmac core) -- INTERIM,
+# BENCH-UNVERIFIED. Kept in-tree (not retired onto the fork: the fork forked the
+# DWMAC core; upstream ships no Ensemble path) until E8 bench. See docs/adr/0017.
 #
 # Synopsys DesignWare MAC (DWC-ETHERNET QoS, v4.x/5.x) as integrated on the
 # Alif Ensemble family -- the RMII MAC at 0x4810_0000. Drives the upstream

@@ -11,7 +11,12 @@ description: |
   zephyr_alif fork) binds instead of upstream Zephyr's DW-apb-SSI spi_dw, which
   owns "snps,designware-spi" and would double-instantiate. The Ensemble SPI IP
   is DWC_ssi, whose CTRLR0 bit layout differs from DW-apb-SSI -- set `dwc-ssi`.
-  vendor-ext, BENCH-UNVERIFIED.
+
+  ADR 0017 Tier-2 (a genuine fork-driver copy -- hal_alif ships no SSI library):
+  INTERIM. Retires onto the opt-in sdk-alif fork once `spi0` is repointed to the
+  fork compatible AND bench-verified; a pure-Tier-1 end-state is one upstream
+  patch away (SSI_IS_MST, CTRLR0[31], under CONFIG_SPI_DW_HSSI). See docs/adr/0017
+  + task #21. BENCH-UNVERIFIED.
 
 compatible: "alif,dwc-ssi-spi"
 

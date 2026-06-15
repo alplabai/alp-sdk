@@ -190,6 +190,9 @@
 	 * runs unmanaged.  A board enables this node (status="okay") + supplies
 	 * pinctrl_eth (the RMII pin group) + a real local-mac-address.
 	 *
+	 * ADR 0017 Tier-1.5 (in-tree glue over the UPSTREAM core; kept, not
+	 * fork-consumed -- the fork forked the core).  INTERIM until E8 bench.
+	 *
 	 * BENCH-UNVERIFIED + bench follow-up: the RMII 50 MHz ref-clock on the
 	 * E1M-AEN801 comes from an on-module oscillator into P11_0 (clock-in mode);
 	 * the upstream alif clock driver has NO path to program ETH_CTRL_REG's
@@ -222,6 +225,9 @@
 	 * drives the DW-apb-SSI register layout (wrong CTRLR0 bit positions for this
 	 * IP).  The `dwc-ssi` flag selects the DWC_ssi layout.  reg/IRQ from the
 	 * fork's e1.dtsi; ALIF_SPI_CLK is a frequency-only dummy (no gate reg).
+	 *
+	 * ADR 0017 Tier-2 (fork-driver copy; hal_alif has no SSI lib) -- INTERIM,
+	 * retires onto the fork once spi0 is repointed + bench-verified (task #21).
 	 *
 	 * BENCH-UNVERIFIED.  Netlist-grounded as the customer-facing edge SPI master
 	 * (SoC P5_x); a board enables it (status="okay") + supplies pinctrl + the CS
