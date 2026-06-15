@@ -111,12 +111,20 @@ Bench-verification on real E8 silicon remains the acceptance gate for every tier
   The migration is deliberate (a planned PR per peripheral), not a revert-storm —
   working code is not removed before its replacement is proven + bench-verified.
   Tracked as task #21.
-- **New AEN peripheral work follows the tiers from day one.** Where `hal_alif`
-  ships an Apache-2.0 HW library and neither upstream nor the fork ships a usable
-  driver, it is **Tier 1.5** — `hal_alif` provides `analog` (ADC/DAC, task #18),
-  `isp` (task #20) and `ethos_u` (NPU, task #19) register libraries, so those
-  follow the UTIMER pattern. Peripherals with a genuine fork *driver* and no
-  Apache HW library are Tier 2; the manifest/board-id read is Tier 3.
+- **New AEN peripheral work follows the tiers from day one** — but Tier 1.5 needs
+  a HW library that actually covers the *data path*, verified per peripheral:
+  - **NPU (task #19)** and **ISP (task #20)** are **Tier 1.5** — `hal_alif` ships
+    real `ethos_u` and `isp` register libraries, so they follow the UTIMER pattern.
+  - **ADC/DAC (task #18) is NOT yet Tier 1.5 — it stays NOSUPPORT/blocked.**
+    `hal_alif`'s `analog` module (`analog_ctrl.{c,h}`) is only **analog
+    reference/bias control** (VBAT rail, ADC vref buffer, DAC6/DAC12 vref scale) —
+    a Tier-1.5 *helper* for the rails, but **not** the ADC sample/convert-FIFO or
+    DAC output convert path. That convert-path driver exists in **none** of
+    upstream, the `sdk-alif` fork, or `hal_alif` (verified 2026-06-15). So
+    `alp_adc`/`alp_dac` return `NOSUPPORT` until a driver source appears — do not
+    invent the convert registers from the TRM (per the pending-hw-configs policy).
+  Peripherals with a genuine fork *driver* and no Apache HW library are Tier 2;
+  the manifest/board-id read is Tier 3.
 - **Pure-DesignWare stays.** Tier-1 nodes (`gpio_dw`, `i2c_dw`, …) are *not* vendor
   rewrites — they're upstream drivers we merely wire — and remain.
 - **A hardware follow-up is recorded:** on the current E1M-AEN801 rev the
