@@ -39,6 +39,26 @@ static void put_le16(uint8_t *p, uint16_t v)
 	p[1] = (uint8_t)((v >> 8) & 0xFFu);
 }
 
+static void put_le32(uint8_t *p, uint32_t v)
+{
+	p[0] = (uint8_t)(v & 0xFFu);
+	p[1] = (uint8_t)((v >> 8) & 0xFFu);
+	p[2] = (uint8_t)((v >> 16) & 0xFFu);
+	p[3] = (uint8_t)((v >> 24) & 0xFFu);
+}
+
+/* Firmware *release* version reported by GET_DIAG_INFO.fw_version (u16) --
+ * distinct from ALP_CC3501E_PROTOCOL_VERSION (GET_VERSION).  Encodes
+ * firmware-version.txt 0.1.0 as 0x0001 (the first release). */
+#define CC3501E_BRIDGE_FW_VERSION_U16 0x0001u
+
+/* Diagnostics state (firmware-side): last_error = the most recent non-OK
+ * response emitted; the frame counters feed DIAG_GET_STATS.  All are
+ * updated centrally in protocol_build_reply(). */
+static uint8_t  g_last_error = ALP_CC3501E_RESP_OK;
+static uint32_t g_frames_ok;
+static uint32_t g_frames_err;
+
 /* --------------------------------------------------------------- */
 /* META handlers (opcodes 0x00..0x0F)                                */
 /* --------------------------------------------------------------- */
@@ -502,6 +522,77 @@ static alp_cc3501e_resp_t handle_ble_gatt_read(const uint8_t *req, size_t req_le
 }
 
 /* --------------------------------------------------------------- */
+/* Power policy + diagnostics (0x04, 0x62, 0x70, 0x71)               */
+/* --------------------------------------------------------------- */
+
+/* POWER_POLICY (0x62): packed wire = policy(1) | wake_events(1) |
+ * reserved(2) | idle_ms_before_sleep(LE32) = 8 bytes. */
+static alp_cc3501e_resp_t handle_power_policy(const uint8_t *req, size_t req_len, uint8_t *reply_data,
+                                              size_t reply_cap, size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 8u) return ALP_CC3501E_RESP_ERR_INVALID;
+	const uint8_t  policy      = req[0];
+	const uint8_t  wake_events = req[1];
+	const uint32_t idle_ms     = (uint32_t)req[4] | ((uint32_t)req[5] << 8) |
+	                         ((uint32_t)req[6] << 16) | ((uint32_t)req[7] << 24);
+	return hw_to_resp(cc3501e_hw_set_power_policy(policy, wake_events, idle_ms));
+}
+
+/* DIAG_LOG_LEVEL (0x71): packed wire = level(1). */
+static alp_cc3501e_resp_t handle_diag_log_level(const uint8_t *req, size_t req_len,
+                                                uint8_t *reply_data, size_t reply_cap,
+                                                size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 1u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_set_log_level(req[0]));
+}
+
+/* DIAG_GET_STATS (0x70): reply data = frames_ok(LE32) | frames_err(LE32). */
+static alp_cc3501e_resp_t handle_diag_get_stats(const uint8_t *req, size_t req_len,
+                                                uint8_t *reply_data, size_t reply_cap,
+                                                size_t *reply_data_len)
+{
+	(void)req;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	if (reply_cap < 8u) return ALP_CC3501E_RESP_ERR_NO_MEM;
+	put_le32(&reply_data[0], g_frames_ok);
+	put_le32(&reply_data[4], g_frames_err);
+	*reply_data_len = 8u;
+	return ALP_CC3501E_RESP_OK;
+}
+
+/* GET_DIAG_INFO (0x04): reply data = the 16-byte packed diag struct:
+ * fw_version(LE16) | reset_cause(1) | role(1) | uptime_ms(LE32) |
+ * free_heap_bytes(LE32) | last_error(1) | reserved(3). */
+static alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req, size_t req_len,
+                                               uint8_t *reply_data, size_t reply_cap,
+                                               size_t *reply_data_len)
+{
+	(void)req;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	if (reply_cap < 16u) return ALP_CC3501E_RESP_ERR_NO_MEM;
+	put_le16(&reply_data[0], (uint16_t)CC3501E_BRIDGE_FW_VERSION_U16);
+	reply_data[2] = cc3501e_hw_reset_cause();
+	reply_data[3] = (uint8_t)ALP_CC3501E_ROLE_OFF; /* v0.1: no radio role active */
+	put_le32(&reply_data[4], cc3501e_hw_uptime_ms());
+	put_le32(&reply_data[8], cc3501e_hw_free_heap_bytes());
+	reply_data[12] = g_last_error;
+	reply_data[13] = 0u;
+	reply_data[14] = 0u;
+	reply_data[15] = 0u;
+	*reply_data_len = 16u;
+	return ALP_CC3501E_RESP_OK;
+}
+
+/* --------------------------------------------------------------- */
 /* Dispatch                                                          */
 /* --------------------------------------------------------------- */
 
@@ -529,6 +620,9 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t cmd, uint8_t flags, const uint8_t *
 		break;
 	case ALP_CC3501E_CMD_RESET:
 		h = handle_reset;
+		break;
+	case ALP_CC3501E_CMD_GET_DIAG_INFO:
+		h = handle_get_diag_info;
 		break;
 	/* GPIO proxy + camera enables (v0.4). */
 	case ALP_CC3501E_CMD_GPIO_CONFIGURE:
@@ -611,6 +705,16 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t cmd, uint8_t flags, const uint8_t *
 	case ALP_CC3501E_CMD_BLE_GATT_WRITE:
 		h = handle_ble_gatt_write;
 		break;
+	/* Power policy + diagnostics (configurability). */
+	case ALP_CC3501E_CMD_POWER_POLICY:
+		h = handle_power_policy;
+		break;
+	case ALP_CC3501E_CMD_DIAG_GET_STATS:
+		h = handle_diag_get_stats;
+		break;
+	case ALP_CC3501E_CMD_DIAG_LOG_LEVEL:
+		h = handle_diag_log_level;
+		break;
 	default:
 		/* Unknown, or a known v1 opcode whose firmware body has not
          * landed yet (all of Wi-Fi / BLE / GPIO / power / diag in
@@ -647,6 +751,15 @@ size_t protocol_build_reply(const uint8_t *req_frame, size_t req_len, uint8_t *r
 			                                       &reply_frame[CC3501E_REPLY_DATA_OFF],
 			                                       reply_cap - CC3501E_REPLY_DATA_OFF, &data_len);
 		}
+	}
+
+	/* Diagnostics bookkeeping: count OK vs error replies and latch the last
+	 * non-OK status, for GET_DIAG_INFO / DIAG_GET_STATS. */
+	if (status == ALP_CC3501E_RESP_OK) {
+		g_frames_ok++;
+	} else {
+		g_frames_err++;
+		g_last_error = (uint8_t)status;
 	}
 
 	/* Frame the reply: [cmd | flags=0 | payload_len(LE) | status | data].

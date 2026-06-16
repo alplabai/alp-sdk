@@ -128,4 +128,23 @@ int cc3501e_hw_ble_gatt_notify(uint16_t handle, const uint8_t *data, uint16_t da
 int cc3501e_hw_ble_gatt_read(uint16_t handle, uint8_t *out, uint16_t cap, uint16_t *out_len);
 int cc3501e_hw_ble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t data_len);
 
+/* --------------------------------------------------------------- */
+/* Power policy + diagnostics (configurability)                      */
+/* --------------------------------------------------------------- */
+
+/* Apply the host's power-policy hint (alp_cc3501e_power_policy_t fields:
+ * coarse policy preset, wake-event bitmap, idle-before-sleep ms).  These
+ * are firmware-side config knobs (no radio needed) -- the backend applies
+ * what it can and returns OK. */
+int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t idle_ms_before_sleep);
+
+/* Set firmware log verbosity (0 = off).  Firmware-side config -> OK. */
+int cc3501e_hw_set_log_level(uint8_t level);
+
+/* Diagnostics sources for GET_DIAG_INFO (best-effort; 0 / UNKNOWN when the
+ * backend has no source yet).  reset_cause is an alp_cc3501e_reset_cause_t. */
+uint8_t  cc3501e_hw_reset_cause(void);
+uint32_t cc3501e_hw_uptime_ms(void);
+uint32_t cc3501e_hw_free_heap_bytes(void);
+
 #endif /* CC3501E_BRIDGE_HAL_CC3501E_HW_H */

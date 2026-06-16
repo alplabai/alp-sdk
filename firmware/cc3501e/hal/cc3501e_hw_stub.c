@@ -14,6 +14,7 @@
 
 #include <stdint.h>
 
+#include "alp/protocol/cc3501e.h"
 #include "cc3501e_hw.h"
 
 void cc3501e_hw_init(void)
@@ -237,4 +238,37 @@ int cc3501e_hw_ble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t dat
 	(void)data;
 	(void)data_len;
 	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+/* --------------------------------------------------------------- */
+/* Power policy + diagnostics -- firmware-side config (no radio), so */
+/* the stub accepts config and reports a cold-start diag.            */
+/* --------------------------------------------------------------- */
+int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t idle_ms_before_sleep)
+{
+	(void)policy;
+	(void)wake_events;
+	(void)idle_ms_before_sleep;
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_set_log_level(uint8_t level)
+{
+	(void)level;
+	return CC3501E_HW_OK;
+}
+
+uint8_t cc3501e_hw_reset_cause(void)
+{
+	return (uint8_t)ALP_CC3501E_RESET_POWER_ON;
+}
+
+uint32_t cc3501e_hw_uptime_ms(void)
+{
+	return 0u;
+}
+
+uint32_t cc3501e_hw_free_heap_bytes(void)
+{
+	return 0u;
 }

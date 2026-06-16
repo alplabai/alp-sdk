@@ -37,6 +37,8 @@
 #include <ti/drivers/GPIO.h>
 #include <ti/drivers/SPI.h>
 
+#include "alp/protocol/cc3501e.h"
+
 #include "../cc3501e_hw.h"
 
 /* Deferred-reset latch: CMD_RESET sets this; cc3501e_hw_tick() performs
@@ -297,4 +299,39 @@ int cc3501e_hw_ble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t dat
 	(void)data;
 	(void)data_len;
 	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+/* --------------------------------------------------------------- */
+/* Power policy + diagnostics.                                       */
+/* TODO(cc3501e): apply the policy via the CC35xx power driver, route */
+/* the log level, source reset_cause from the boot/reset-cause        */
+/* register, and uptime from ClockP.  v0.1 accepts the config and     */
+/* reports best-effort diag. */
+int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t idle_ms_before_sleep)
+{
+	(void)policy;
+	(void)wake_events;
+	(void)idle_ms_before_sleep;
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_set_log_level(uint8_t level)
+{
+	(void)level;
+	return CC3501E_HW_OK;
+}
+
+uint8_t cc3501e_hw_reset_cause(void)
+{
+	return (uint8_t)ALP_CC3501E_RESET_UNKNOWN;
+}
+
+uint32_t cc3501e_hw_uptime_ms(void)
+{
+	return 0u;
+}
+
+uint32_t cc3501e_hw_free_heap_bytes(void)
+{
+	return 0u;
 }

@@ -336,4 +336,74 @@ ZTEST(cc3501e_bridge_transport, test_ble_connect_bad_len_invalid)
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "short BLE_CONNECT -> INVALID");
 }
 
+/* Configurability + diagnostics (firmware-side, no radio): these are fully
+ * functional on the stub -- config is accepted (OK) and diag/stats return
+ * real firmware-tracked data. */
+ZTEST(cc3501e_bridge_transport, test_get_diag_info)
+{
+	uint8_t reply[40];
+	transport_spi_init();
+	const uint8_t d[] = { ALP_CC3501E_CMD_GET_DIAG_INFO, 0x00u, 0x00u, 0x00u };
+	transaction(d, sizeof d);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 4u + 1u + 16u, "diag reply = header + status + 16B struct");
+	assert_reply_header(reply, ALP_CC3501E_CMD_GET_DIAG_INFO, 17u);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "GET_DIAG_INFO -> OK");
+	const uint16_t fw = (uint16_t)reply[5] | ((uint16_t)reply[6] << 8);
+	zassert_equal(fw, 0x0001u, "fw_version = 0x0001 (v0.1.0)");
+	zassert_equal(reply[7], (uint8_t)ALP_CC3501E_RESET_POWER_ON, "stub reset cause = POWER_ON");
+	zassert_equal(reply[8], (uint8_t)ALP_CC3501E_ROLE_OFF, "role = OFF in v0.1 (no radio)");
+}
+
+ZTEST(cc3501e_bridge_transport, test_power_policy_ok)
+{
+	uint8_t reply[16];
+	transport_spi_init();
+	/* policy=BALANCED(1) | wake=HOST_SPI(0x01) | rsvd(2) | idle_ms=1000 (LE32) */
+	const uint8_t pp[] = { ALP_CC3501E_CMD_POWER_POLICY, 0x00u, 8u, 0x00u,
+		               1u, 0x01u, 0u, 0u, 0xE8u, 0x03u, 0u, 0u };
+	transaction(pp, sizeof pp);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "POWER_POLICY accepted -> OK");
+}
+
+ZTEST(cc3501e_bridge_transport, test_power_policy_bad_len_invalid)
+{
+	uint8_t reply[16];
+	transport_spi_init();
+	const uint8_t pp[] = { ALP_CC3501E_CMD_POWER_POLICY, 0x00u, 4u, 0x00u, 1u, 0u, 0u, 0u };
+	transaction(pp, sizeof pp);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "short POWER_POLICY -> INVALID");
+}
+
+ZTEST(cc3501e_bridge_transport, test_diag_get_stats_counts_frames)
+{
+	uint8_t reply[24];
+	transport_spi_init();
+	/* A PING first guarantees >= 1 OK frame before we read the stats. */
+	const uint8_t ping[] = { ALP_CC3501E_CMD_PING, 0x00u, 0x00u, 0x00u };
+	transaction(ping, sizeof ping);
+	(void)drain(reply, sizeof reply);
+
+	const uint8_t s[] = { ALP_CC3501E_CMD_DIAG_GET_STATS, 0x00u, 0x00u, 0x00u };
+	transaction(s, sizeof s);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 4u + 1u + 8u, "stats reply = header + status + 8B");
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "DIAG_GET_STATS -> OK");
+	const uint32_t frames_ok = (uint32_t)reply[5] | ((uint32_t)reply[6] << 8) |
+	                           ((uint32_t)reply[7] << 16) | ((uint32_t)reply[8] << 24);
+	zassert_true(frames_ok >= 1u, "OK frames counted (>= the prior PING)");
+}
+
+ZTEST(cc3501e_bridge_transport, test_diag_log_level_ok)
+{
+	uint8_t reply[16];
+	transport_spi_init();
+	const uint8_t l[] = { ALP_CC3501E_CMD_DIAG_LOG_LEVEL, 0x00u, 1u, 0x00u, 2u };
+	transaction(l, sizeof l);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "DIAG_LOG_LEVEL accepted -> OK");
+}
+
 ZTEST_SUITE(cc3501e_bridge_transport, NULL, NULL, NULL, NULL, NULL);
