@@ -62,10 +62,15 @@ Two J-Links: one on the Alif, one on the CC3501E.
 #    NOTE: the CC3501E reads VTref=0V until this app powers it, so flash it
 #    with the Alif app already powering WIFI_EN, or hold WIFI_EN externally.
 
-# 2. Build + flash this Alif app:
-west build -b alp_e1m_aen801_m55_he examples/aen/aen-cc3501e-bringup
-west flash                      # over the Alif J-Link
+# 2. Build + flash this Alif app (use the FULL qualified board target so the
+#    per-board overlay boards/<target>.overlay is auto-applied):
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-cc3501e-bringup
+west flash                      # over the Alif J-Link (AE822FA0E5597LS0_M55_HE)
 ```
+
+> The per-board overlay is named for the **full** board target
+> (`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`); Zephyr's
+> auto-discovery matches the qualified target, not the bare board name.
 
 Watch the carrier console (Alif **UART5**, P3_4/P3_5, 115200 8N1 — the E1M
 edge "UART0") for the `[cc3501e-bringup]` log. If the link wedges, cold-cycle

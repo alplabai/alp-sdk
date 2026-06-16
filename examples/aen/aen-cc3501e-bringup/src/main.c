@@ -45,6 +45,7 @@
 #include <string.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/fatal.h>
 
 #include "alp/peripheral.h"
 #include "alp/chips/cc3501e.h"
@@ -104,11 +105,43 @@ typedef struct {
 	uint32_t ping_fail;    /* count of failed PINGs                     */
 	uint32_t last_status;  /* (uint32_t)alp_status_t of the last PING   */
 	uint32_t version;      /* protocol version (low 16b) | status<<16   */
+	uint32_t phase;        /* progress checkpoint (see CC3501E_PHASE_*)  */
 } cc3501e_witness_t;
+
+/* Progress checkpoints written to g_cc3501e_witness.phase so a J-Link can
+ * localise where the app got to (read after a fault: .bss survives a halt).
+ * 1=entered main, 2=GPIOs configured, 3=SPI opened, 4=reset done,
+ * 5=in PING-retry loop, 6=version read, 7=in soak loop. */
+#define CC3501E_PHASE_MAIN 1u
+#define CC3501E_PHASE_GPIO 2u
+#define CC3501E_PHASE_SPI_OPEN 3u
+#define CC3501E_PHASE_RESET 4u
+#define CC3501E_PHASE_PING 5u
+#define CC3501E_PHASE_VERSION 6u
+#define CC3501E_PHASE_SOAK 7u
 
 #define CC3501E_WITNESS_MAGIC 0x35334343u /* "CC35" little-endian */
 
 volatile cc3501e_witness_t g_cc3501e_witness __attribute__((used));
+
+/* BRING-UP DIAGNOSTIC (temporary): capture the fatal reason + the stacked
+ * exception frame's PC/LR/xPSR into the witness so a J-Link can read exactly
+ * where a fault hit, with no console.  last_status = 0xFA0000<reason>;
+ * ping_ok=LR, ping_fail=faulting PC, version=xPSR (those counters are 0 on a
+ * fault anyway).  Remove once the link is up. */
+void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
+{
+	g_cc3501e_witness.last_status = 0xFA000000u | (reason & 0xFFu);
+	if (esf != NULL) {
+		const uint32_t *f           = (const uint32_t *)esf;
+		g_cc3501e_witness.ping_ok   = f[5]; /* LR  (basic ARM frame) */
+		g_cc3501e_witness.ping_fail = f[6]; /* PC  (faulting addr)   */
+		g_cc3501e_witness.version   = f[7]; /* xPSR                  */
+	}
+	for (;;) {
+		__asm__ volatile("nop");
+	}
+}
 
 /* Send a bare PING (META opcode 0x00).  The reply payload is just the
  * status byte -- no data -- so we pass a NULL/0 receive buffer.  Returns
@@ -161,6 +194,7 @@ int main(void)
 {
 	printf("\n[cc3501e-bringup] E1M-AEN CC3501E Wi-Fi/BLE coprocessor bring-up\n");
 	g_cc3501e_witness.magic = CC3501E_WITNESS_MAGIC; /* marks the struct found over SWD */
+	g_cc3501e_witness.phase = CC3501E_PHASE_MAIN;
 
 	/*
 	 * Step 1 -- claim the two control GPIOs and make them outputs.
@@ -173,6 +207,12 @@ int main(void)
 	alp_gpio_t *wifi_en = alp_gpio_open(CC3501E_PIN_WIFI_EN);
 	alp_gpio_t *nrst    = alp_gpio_open(CC3501E_PIN_NRST);
 	if (wifi_en == NULL || nrst == NULL) {
+		/* BRING-UP DIAGNOSTIC: record which open failed + the last error into
+		 * the witness (no console).  reset_status = 0xE000_0000 | wifi<<8 |
+		 * nrst<<9 | (alp_last_error & 0xFF). */
+		g_cc3501e_witness.reset_status = 0xE0000000u | ((wifi_en == NULL) ? 0x100u : 0u) |
+		                                 ((nrst == NULL) ? 0x200u : 0u) |
+		                                 ((uint32_t)(uint8_t)alp_last_error());
 		printf("[cc3501e-bringup] alp_gpio_open failed (WIFI_EN=%p NRST=%p, err=%d) -- "
 		       "check the alp,pin-array in the board overlay\n",
 		       (void *)wifi_en, (void *)nrst, (int)alp_last_error());
@@ -180,6 +220,7 @@ int main(void)
 	}
 	(void)alp_gpio_configure(wifi_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	(void)alp_gpio_configure(nrst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	g_cc3501e_witness.phase = CC3501E_PHASE_GPIO;
 
 	/*
 	 * Step 2 -- open the inter-chip SPI bus (Alif = master).
@@ -204,6 +245,7 @@ int main(void)
 		alp_gpio_close(nrst);
 		return 0;
 	}
+	g_cc3501e_witness.phase = CC3501E_PHASE_SPI_OPEN;
 
 	/*
 	 * Step 3 -- bind the driver and run the reset/power sequence.
@@ -223,6 +265,7 @@ int main(void)
 	       "~900 ms boot)...\n");
 	alp_status_t s                 = cc3501e_reset(&fw);
 	g_cc3501e_witness.reset_status = (uint32_t)s;
+	g_cc3501e_witness.phase        = CC3501E_PHASE_RESET;
 	printf("[cc3501e-bringup] cc3501e_reset -> %d%s\n", (int)s,
 	       (s == ALP_ERR_NOSUPPORT) ? " (control pins not bound?)" : "");
 
@@ -234,7 +277,8 @@ int main(void)
 	 * jitter.  A serviced PING proves the firmware parsed a frame and
 	 * staged its reply in lockstep -- the core thing this bring-up checks.
 	 */
-	bool up = false;
+	g_cc3501e_witness.phase = CC3501E_PHASE_PING;
+	bool up                 = false;
 	for (unsigned attempt = 0u; attempt < CC3501E_PING_RETRIES; ++attempt) {
 		s = cc3501e_ping(&fw);
 		if (s == ALP_OK) {
@@ -262,6 +306,7 @@ int main(void)
 	uint16_t version          = 0u;
 	s                         = cc3501e_get_version(&fw, &version);
 	g_cc3501e_witness.version = (uint32_t)version | ((uint32_t)(uint8_t)s << 16);
+	g_cc3501e_witness.phase   = CC3501E_PHASE_VERSION;
 	if (s == ALP_OK) {
 		printf("[cc3501e-bringup] GET_VERSION -> protocol v%u (host expects v%u)%s\n", version,
 		       ALP_CC3501E_PROTOCOL_VERSION,
@@ -280,6 +325,7 @@ int main(void)
 	 * mirrors the v2n-gd32-bridge-ping soak.
 	 */
 	printf("[cc3501e-bringup] entering liveness soak (PING every 500 ms)\n");
+	g_cc3501e_witness.phase = CC3501E_PHASE_SOAK;
 	for (uint32_t i = 0u;; ++i) {
 		s                             = cc3501e_ping(&fw);
 		g_cc3501e_witness.last_status = (uint32_t)s;
