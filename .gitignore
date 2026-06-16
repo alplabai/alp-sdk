@@ -67,6 +67,9 @@ Makefile
 !firmware/gd32-bridge/cmake/*.cmake
 !cmake/**/*.cmake
 !toolchain/**/*.cmake
+# Checked-in Zephyr board flash/debug runner files (board.cmake) -- these
+# are source, not generated, and `west flash` needs them tracked.
+!zephyr/boards/**/board.cmake
 
 # Test results
 Testing/
