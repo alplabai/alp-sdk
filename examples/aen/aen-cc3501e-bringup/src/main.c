@@ -124,24 +124,44 @@ typedef struct {
 
 volatile cc3501e_witness_t g_cc3501e_witness __attribute__((used));
 
-/* BRING-UP DIAGNOSTIC (temporary): capture the fatal reason + the stacked
- * exception frame's PC/LR/xPSR into the witness so a J-Link can read exactly
- * where a fault hit, with no console.  last_status = 0xFA0000<reason>;
- * ping_ok=LR, ping_fail=faulting PC, version=xPSR (those counters are 0 on a
- * fault anyway).  Remove once the link is up. */
-void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
+#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HE)
+/*
+ * AEN LP-pad bring-up shim (Alif Ensemble E8, M55-HE only).
+ *
+ * WIFI_EN (P15_5) and E_WIFI.NRST (P15_1) are on the Alif LP-GPIO island.
+ * The lpgpio node is bound by the generic snps,designware-gpio driver, which
+ * does NOT apply Alif pinctrl -- so the LP pads are left un-muxed and their
+ * output drivers stay OFF.  Result (confirmed on silicon 2026-06-16): driving
+ * the pins via the gpio controller alone leaves the physical pad un-driven,
+ * so WIFI_EN never powers the CC3501E (its rail stayed at 0 V) until the LP
+ * pad-control registers are programmed for LPGPIO output.
+ *
+ * The LP pad-control block is at 0x42007000, one 32-bit register per pin
+ * (offset = pin*4), per the upstream Alif pinctrl driver
+ * (zephyr/drivers/pinctrl/pinctrl_alif.c).  0x23 is the Alif GPIO-output pad
+ * config (output driver + read-enable + drive strength) -- the same value the
+ * main-domain GPIO pads use.  Verified on silicon: writing it to P15_5/P15_1
+ * + driving the lpgpio data register brings the CC3501E rail up.
+ *
+ * TODO: replace this raw poke with a proper pinctrl path once the alp-sdk
+ * Alif GPIO backend applies pinctrl for the LP island.
+ */
+#include <zephyr/sys/sys_io.h>
+#define ALIF_LPGPIO_PADCTRL_BASE 0x42007000u
+#define ALIF_PAD_GPIO_OUTPUT 0x23u
+#define ALIF_LP_PIN_WIFI_EN 5u /* P15_5 */
+#define ALIF_LP_PIN_NRST 1u    /* P15_1 */
+
+static void aen_lp_pads_enable_output(void)
 {
-	g_cc3501e_witness.last_status = 0xFA000000u | (reason & 0xFFu);
-	if (esf != NULL) {
-		const uint32_t *f           = (const uint32_t *)esf;
-		g_cc3501e_witness.ping_ok   = f[5]; /* LR  (basic ARM frame) */
-		g_cc3501e_witness.ping_fail = f[6]; /* PC  (faulting addr)   */
-		g_cc3501e_witness.version   = f[7]; /* xPSR                  */
-	}
-	for (;;) {
-		__asm__ volatile("nop");
-	}
+	sys_write32(ALIF_PAD_GPIO_OUTPUT, ALIF_LPGPIO_PADCTRL_BASE + ALIF_LP_PIN_WIFI_EN * 4u);
+	sys_write32(ALIF_PAD_GPIO_OUTPUT, ALIF_LPGPIO_PADCTRL_BASE + ALIF_LP_PIN_NRST * 4u);
 }
+#else
+static inline void aen_lp_pads_enable_output(void)
+{
+}
+#endif
 
 /* Send a bare PING (META opcode 0x00).  The reply payload is just the
  * status byte -- no data -- so we pass a NULL/0 receive buffer.  Returns
@@ -218,6 +238,10 @@ int main(void)
 		       (void *)wifi_en, (void *)nrst, (int)alp_last_error());
 		return 0;
 	}
+	/* Enable the LP-GPIO pad output drivers before driving the pins (the
+	 * gpio_dw controller alone does not mux the Alif LP pads -- see
+	 * aen_lp_pads_enable_output).  No-op off the AEN board. */
+	aen_lp_pads_enable_output();
 	(void)alp_gpio_configure(wifi_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	(void)alp_gpio_configure(nrst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	g_cc3501e_witness.phase = CC3501E_PHASE_GPIO;
