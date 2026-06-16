@@ -14,16 +14,23 @@
  * repointed AND bench-verified (task #21).
  * ==================================================================
  *
- * Vendored VERBATIM from the fork (only this provenance header is added).
- *
- * NOT-YET-PORTED to the upstream Zephyr v4.4 video API (gated OFF): like
- * video_alif.c it implements the OLD `enum video_endpoint_id`-based video API
- * that v4.4 removed, so CONFIG_VIDEO_MIPI_CSI2_DW is gated
- * `depends on ALP_VIDEO_ALIF_BROKEN` -- carried in-tree but NOT compiled until
- * the body is ported (task #21).  It also depends on the vendored
- * MIPI-DPHY driver (zephyr/drivers/mipi_dphy/dphy_dw.c) for
- * dphy_dw_slave_setup/select + struct dphy_csi2_settings.  vendor-ext,
- * BENCH-UNVERIFIED.
+ * Vendored from the fork, then PORTED to the upstream Zephyr v4.4 video API by
+ * Alp Lab AB.  Like video_alif.c the fork body implemented the OLD
+ * `enum video_endpoint_id`-based video API that v4.4 removed.  v4.4 deltas
+ * applied here (marked "v4.4 video-API shim (Alp Lab AB)" at each site):
+ *   - dropped the `enum video_endpoint_id ep` param + its validation from
+ *     set_format/get_format/get_caps; the sensor forwarders lose their `ep`;
+ *   - set_stream(dev, bool) gained an `enum video_buf_type type` param;
+ *     video_stream_start/_stop now take VIDEO_BUF_TYPE_OUTPUT;
+ *   - the value-pointer .set_ctrl/.get_ctrl callbacks (which handled the
+ *     PRIVATE CIDs VIDEO_CID_ALIF_CSI_DPHY_FREQ / _CURR_CAM and forwarded to
+ *     the sensor) are dropped -- v4.4 controls are registry-owned; see the note
+ *     above the API table.  The multi-camera D-PHY-freq / camera-select path is
+ *     deferred (BENCH-UNVERIFIED; single-sensor capture does not need it).
+ * It depends on the vendored MIPI-DPHY driver
+ * (zephyr/drivers/mipi_dphy/dphy_dw.c) for dphy_dw_slave_setup +
+ * struct dphy_csi2_settings.  The driver now COMPILES against v4.4 (the
+ * ALP_VIDEO_ALIF_BROKEN gate is retired).  vendor-ext, BENCH-UNVERIFIED.
  */
 #define DT_DRV_COMPAT snps_designware_csi
 
@@ -454,7 +461,8 @@ static int csi2_dw_stream_start(const struct device *dev)
 
 	/* Enable CMOS sensor streaming */
 	if (config->sensor[data->current_sensor]) {
-		ret = video_stream_start(config->sensor[data->current_sensor]);
+		ret = video_stream_start(config->sensor[data->current_sensor],
+					 VIDEO_BUF_TYPE_OUTPUT);
 		if (ret) {
 			LOG_ERR("Failed to start sensor stream!");
 			return ret;
@@ -492,7 +500,8 @@ static int csi2_dw_stream_stop(const struct device *dev)
 
 	/* Disable CMOS sensor streaming */
 	if (config->sensor[data->current_sensor]) {
-		ret = video_stream_stop(config->sensor[data->current_sensor]);
+		ret = video_stream_stop(config->sensor[data->current_sensor],
+					VIDEO_BUF_TYPE_OUTPUT);
 		if (ret) {
 			LOG_ERR("Failed to stop sensor stream!");
 			return ret;
@@ -507,8 +516,13 @@ static int csi2_dw_stream_stop(const struct device *dev)
 	return 0;
 }
 
-static int csi2_dw_set_stream(const struct device *dev, bool enable)
+/* v4.4 video-API shim (Alp Lab AB): set_stream gained an `enum video_buf_type
+ * type` param (the CSI-2 bridge is output-only, so the value is unused).
+ */
+static int csi2_dw_set_stream(const struct device *dev, bool enable, enum video_buf_type type)
 {
+	ARG_UNUSED(type);
+
 	if (enable) {
 		return csi2_dw_stream_start(dev);
 	} else {
@@ -516,8 +530,10 @@ static int csi2_dw_set_stream(const struct device *dev, bool enable)
 	}
 }
 
-static int csi2_dw_set_format(const struct device *dev, enum video_endpoint_id ep,
-			      struct video_format *fmt)
+/* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
+ * param; the sensor-format forwarder loses its `ep` arg.
+ */
+static int csi2_dw_set_format(const struct device *dev, struct video_format *fmt)
 {
 	const struct csi2_dw_config *config = dev->config;
 	struct csi2_dw_data *data = dev->data;
@@ -526,7 +542,7 @@ static int csi2_dw_set_format(const struct device *dev, enum video_endpoint_id e
 	int i;
 
 	if (config->sensor[data->current_sensor]) {
-		ret = video_set_format(config->sensor[data->current_sensor], ep, fmt);
+		ret = video_set_format(config->sensor[data->current_sensor], fmt);
 		if (ret) {
 			LOG_ERR("Failed to set Sensor pixel format!");
 			return ret;
@@ -572,19 +588,21 @@ static int csi2_dw_set_format(const struct device *dev, enum video_endpoint_id e
 	return csi2_dw_configure(dev);
 }
 
-static int csi2_dw_get_format(const struct device *dev, enum video_endpoint_id ep,
-		       struct video_format *fmt)
+/* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
+ * param + its validation; the sensor-format forwarder loses its `ep` arg.
+ */
+static int csi2_dw_get_format(const struct device *dev, struct video_format *fmt)
 {
 	const struct csi2_dw_config *config = dev->config;
 	struct csi2_dw_data *data = dev->data;
 	int ret = -ENODEV;
 
-	if (!fmt || (ep != VIDEO_EP_OUT && ep != VIDEO_EP_ALL)) {
+	if (!fmt) {
 		return -EINVAL;
 	}
 
 	if (config->sensor[data->current_sensor]) {
-		ret = video_get_format(config->sensor[data->current_sensor], ep, fmt);
+		ret = video_get_format(config->sensor[data->current_sensor], fmt);
 		if (ret) {
 			LOG_ERR("Failed to get sensor format!");
 		}
@@ -594,127 +612,46 @@ static int csi2_dw_get_format(const struct device *dev, enum video_endpoint_id e
 	return ret;
 }
 
-static int csi2_dw_get_caps(const struct device *dev, enum video_endpoint_id ep,
-			    struct video_caps *caps)
+/* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
+ * param + its validation; the caps forwarder loses its `ep` arg.
+ */
+static int csi2_dw_get_caps(const struct device *dev, struct video_caps *caps)
 {
 	const struct csi2_dw_config *config = dev->config;
 	struct csi2_dw_data *data = dev->data;
-
-	if (ep != VIDEO_EP_OUT && ep != VIDEO_EP_ALL) {
-		LOG_ERR("Invalid endpoint, ep - %d", ep);
-		return -EINVAL;
-	}
 
 	/*
 	 * Get the pipeline capabilities from sensor and
 	 * send the same data to user.
 	 */
-	return video_get_caps(config->sensor[data->current_sensor], ep, caps);
+	return video_get_caps(config->sensor[data->current_sensor], caps);
 }
 
-static int csi2_dw_set_ctrl(const struct device *dev, unsigned int cid, void *value)
-{
-	const struct csi2_dw_config *config = dev->config;
-	struct csi2_dw_data *data = dev->data;
-	uintptr_t regs = DEVICE_MMIO_GET(dev);
-	int ret = 0;
-
-	switch (cid) {
-	case VIDEO_CID_ALIF_CSI_DPHY_FREQ:
-		data->phy[data->current_sensor].pll_fin = *((uint32_t *)value);
-		LOG_DBG("DPHY New PLL Freq. %d", data->phy[data->current_sensor].pll_fin);
-		break;
-	case VIDEO_CID_ALIF_CSI_CURR_CAM:
-		{
-			uint8_t tmp = 0;
-
-			tmp = *((uint8_t *)value);
-
-			if (!(data->sensors_map & BIT(tmp))) {
-				LOG_ERR("Invalid sensor provided to switch to!");
-				return -EINVAL;
-			}
-
-			/* Flush IPI FIFO */
-			sys_set_bits(regs + CSI_IPI_MEM_FLUSH, CSI_IPI_MEM_FLUSH_FLUSH);
-
-			ret = dphy_dw_slave_select(config->rx_dphy, tmp);
-			if (ret) {
-				LOG_ERR("Failed to switch selected camera!");
-				return ret;
-			}
-			data->current_sensor = tmp;
-
-			if (data->current_sensor) {
-				LOG_DBG("Using Standard Camera");
-			} else {
-				LOG_DBG("Using Selfie Camera");
-			}
-			break;
-		}
-	default:
-		/* This CID is not supported with the CSI driver. */
-		ret = -ENOTSUP;
-	}
-
-	/* Set control call to Sensor device. */
-	if (config->sensor[data->current_sensor]) {
-		/*
-		 * If ret is non-zero, the CID was not supported by CSI-2 bus controller.
-		 * In such a case, we depend on sensor device to get support status of CID.
-		 *
-		 * else ret is zero, which means that the CID was supported in CSI-2
-		 * controller. Thus, we can mark the set_ctrl as success even if camera
-		 * sensor does not support the CID. Hence, ignore the return status from
-		 * set_ctrl call to sensor device.
-		 */
-		if (ret) {
-			ret = video_set_ctrl(config->sensor[data->current_sensor], cid, value);
-			if (ret) {
-				LOG_ERR("CID Is neither supported by pipeline, nor by CSI IP.");
-				return ret;
-			}
-		} else {
-			video_set_ctrl(config->sensor[data->current_sensor], cid, value);
-		}
-	} else {
-		LOG_ERR("Invalid sensor selected!");
-		return -ENODEV;
-	}
-
-	return 0;
-}
-
-static int csi2_dw_get_ctrl(const struct device *dev, unsigned int cid, void *value)
-{
-	const struct csi2_dw_config *config = dev->config;
-	struct csi2_dw_data *data = dev->data;
-	int ret;
-
-	switch (cid) {
-	case VIDEO_CID_ALIF_CSI_CURR_CAM:
-		*((uint8_t *)value) = data->current_sensor;
-		ret = 0;
-		break;
-	default:
-		ret = -ENOTSUP;
-	}
-
-	if (!ret) {
-		video_get_ctrl(config->sensor[data->current_sensor], cid, value);
-		return 0;
-	} else {
-		return video_get_ctrl(config->sensor[data->current_sensor], cid, value);
-	}
-}
+/*
+ * v4.4 video-API shim (Alp Lab AB): the fork's value-pointer ctrl API
+ * (set_ctrl/get_ctrl taking `unsigned int cid, void *value`) is gone.  The CSI
+ * bridge handled two PRIVATE CIDs by reading the caller's `void *value`:
+ *   - VIDEO_CID_ALIF_CSI_DPHY_FREQ -- latch a new D-PHY PLL input frequency;
+ *   - VIDEO_CID_ALIF_CSI_CURR_CAM  -- select the active sensor (re-points the
+ *     RX D-PHY slave + flushes the IPI FIFO),
+ * and otherwise forwarded the CID/value to the active sensor device.  v4.4
+ * routes control values through the framework's per-device control registry
+ * (video_init_ctrl + struct video_control), so these PRIVATE-base CIDs would
+ * need to be registered as device controls before the value-less
+ * .set_ctrl(dev, cid) / .get_volatile_ctrl(dev, cid) callbacks could read them
+ * back -- a behavioural change beyond a mechanical API shim.  Until those
+ * controls are registered (and the sensor-select side-effects re-homed onto the
+ * registry path), the forwarding ctrl callbacks are dropped from the API table
+ * below; the multi-camera D-PHY-freq / camera-select side-effects are
+ * BENCH-UNVERIFIED and deferred.  The single-sensor capture path (the ARX3A0 on
+ * this batch) does not exercise either private CID.
+ */
 
 static DEVICE_API(video, csi2_dw_driver_api) = {
 	.set_format = csi2_dw_set_format,
 	.get_format = csi2_dw_get_format,
 	.set_stream = csi2_dw_set_stream,
 	.get_caps = csi2_dw_get_caps,
-	.set_ctrl = csi2_dw_set_ctrl,
-	.get_ctrl = csi2_dw_get_ctrl,
 };
 
 static int csi_enable_clocks(const struct device *dev)

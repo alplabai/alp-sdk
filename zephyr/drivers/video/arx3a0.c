@@ -13,13 +13,19 @@
  * sensor node is repointed AND bench-verified (task #21).
  * ==================================================================
  *
- * Vendored VERBATIM from the fork (only this provenance header is added).
- *
- * NOT-YET-PORTED to the upstream Zephyr v4.4 video API (gated OFF): it
- * implements the OLD `enum video_endpoint_id`-based video API that v4.4
- * removed, so CONFIG_VIDEO_ARX3A0 is gated `depends on ALP_VIDEO_ALIF_BROKEN`
- * -- carried in-tree but NOT compiled until the body is ported (task #21).
- * vendor-ext, BENCH-UNVERIFIED.
+ * Vendored from the fork, then PORTED to the upstream Zephyr v4.4 video API by
+ * Alp Lab AB.  The fork body implemented the OLD `enum video_endpoint_id`-based
+ * video API that v4.4 removed.  v4.4 deltas applied here (marked "v4.4
+ * video-API shim (Alp Lab AB)" at each site):
+ *   - dropped the `enum video_endpoint_id ep` param from
+ *     set_format/get_format/get_caps (output-only sensor);
+ *   - set_stream(dev, bool) gained an `enum video_buf_type type` param;
+ *   - the value-pointer .set_ctrl/.get_ctrl callbacks (GAIN rw / EXPOSURE w)
+ *     are dropped -- v4.4 controls are registry-owned (video_init_ctrl +
+ *     VIDEO_DEVICE_DEFINE); the sensor register helpers are kept for the
+ *     deferred registry wiring (see the note above the API table).
+ * The driver now COMPILES against v4.4 (the ALP_VIDEO_ALIF_BROKEN gate is
+ * retired).  vendor-ext, BENCH-UNVERIFIED.
  */
 
 #define DT_DRV_COMPAT onnn_arx3a0
@@ -894,8 +900,11 @@ static int arx3a0_set_output_format(const struct device *dev, int pixel_format)
 	return ret;
 }
 
-static int arx3a0_set_fmt(const struct device *dev, enum video_endpoint_id ep,
-			  struct video_format *fmt)
+/* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
+ * param (the ARX3A0 is an output-only sensor; v4.4 removed per-endpoint
+ * dispatch).
+ */
+static int arx3a0_set_fmt(const struct device *dev, struct video_format *fmt)
 {
 	struct arx3a0_data *drv_data = dev->data;
 	int ret;
@@ -939,8 +948,10 @@ static int arx3a0_set_fmt(const struct device *dev, enum video_endpoint_id ep,
 	return 0;
 }
 
-static int arx3a0_get_fmt(const struct device *dev, enum video_endpoint_id ep,
-			  struct video_format *fmt)
+/* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
+ * param.
+ */
+static int arx3a0_get_fmt(const struct device *dev, struct video_format *fmt)
 {
 	struct arx3a0_data *drv_data = dev->data;
 
@@ -997,8 +1008,13 @@ static int arx3a0_stream_stop(const struct device *dev)
 	return 0;
 }
 
-static int arx3a0_set_stream(const struct device *dev, bool enable)
+/* v4.4 video-API shim (Alp Lab AB): set_stream gained an `enum video_buf_type
+ * type` param (output-only sensor, so the value is unused).
+ */
+static int arx3a0_set_stream(const struct device *dev, bool enable, enum video_buf_type type)
 {
+	ARG_UNUSED(type);
+
 	if (enable) {
 		return arx3a0_stream_start(dev);
 	} else {
@@ -1016,8 +1032,10 @@ static const struct video_format_cap fmts[] = {
 	ARX3A0_VIDEO_FORMAT_CAP(560, 560, VIDEO_PIX_FMT_Y10P), /* RAW10 MIPI */
 	{0}};
 
-static int arx3a0_get_caps(const struct device *dev, enum video_endpoint_id ep,
-			   struct video_caps *caps)
+/* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
+ * param.
+ */
+static int arx3a0_get_caps(const struct device *dev, struct video_caps *caps)
 {
 	caps->format_caps = fmts;
 	return 0;
@@ -1192,26 +1210,35 @@ static int arx3a0_set_camera_exp(const struct device *dev, uint32_t intline)
 			ARX3A0_COARSE_INTEGRATION_TIME_REGISTER, 2, &intline);
 }
 
-static int arx3a0_set_ctrl(const struct device *dev, unsigned int cid, void *value)
+/*
+ * v4.4 video-API shim (Alp Lab AB): the fork exposed GAIN (rw) and EXPOSURE (w)
+ * through the OLD value-pointer ctrl API (set_ctrl/get_ctrl taking
+ * `unsigned int cid, void *value`), reading/writing the caller's pointer
+ * directly via arx3a0_set_camera_gain / _exp / arx3a0_get_camera_gain.  v4.4
+ * routes control values through the framework's per-device control registry
+ * (video_init_ctrl + VIDEO_DEVICE_DEFINE + struct video_control), so a faithful
+ * port requires registering GAIN/EXPOSURE as device controls and reading the
+ * registered .val in value-less .set_ctrl(dev, cid) / .get_volatile_ctrl(dev,
+ * cid) callbacks.  That control-registry wiring is deferred (it must land across
+ * the whole pipeline -- CPI/CSI forward controls too); the ctrl callbacks are
+ * dropped from the API table below for now.  The sensor register helpers are
+ * retained (marked __maybe_unused) so the registry wiring can reuse them
+ * verbatim.  GAIN/EXPOSURE control is BENCH-UNVERIFIED and not exercised by the
+ * single-format RAW10 capture path.
+ */
+__maybe_unused static int arx3a0_ctrl_set_gain(const struct device *dev, uint32_t gain)
 {
-	switch (cid) {
-	case VIDEO_CID_GAIN:
-		return arx3a0_set_camera_gain(dev, *(uint32_t *)value);
-	case VIDEO_CID_EXPOSURE:
-		return arx3a0_set_camera_exp(dev, *(uint32_t *)value);
-	default:
-		return -ENOTSUP;
-	}
+	return arx3a0_set_camera_gain(dev, gain);
 }
 
-static int arx3a0_get_ctrl(const struct device *dev, unsigned int cid, void *value)
+__maybe_unused static int arx3a0_ctrl_set_exp(const struct device *dev, uint32_t intline)
 {
-	switch (cid) {
-	case VIDEO_CID_GAIN:
-		return arx3a0_get_camera_gain(dev, (uint32_t *)value);
-	default:
-		return -ENOTSUP;
-	}
+	return arx3a0_set_camera_exp(dev, intline);
+}
+
+__maybe_unused static int arx3a0_ctrl_get_gain(const struct device *dev, uint32_t *gain)
+{
+	return arx3a0_get_camera_gain(dev, gain);
 }
 
 static DEVICE_API(video, arx3a0_driver_api) = {
@@ -1219,8 +1246,6 @@ static DEVICE_API(video, arx3a0_driver_api) = {
 	.get_format = arx3a0_get_fmt,
 	.get_caps = arx3a0_get_caps,
 	.set_stream = arx3a0_set_stream,
-	.set_ctrl = arx3a0_set_ctrl,
-	.get_ctrl = arx3a0_get_ctrl,
 };
 
 static int arx3a0_hard_reseten(const struct device *dev)
@@ -1372,7 +1397,7 @@ static int arx3a0_init(const struct device *dev)
 		.pitch = ARX3A0_DEFAULT_PITCH,
 	};
 
-	ret = arx3a0_set_fmt(dev, VIDEO_EP_OUT, &fmt);
+	ret = arx3a0_set_fmt(dev, &fmt);
 	if (ret) {
 		LOG_ERR("Unable to set default format. ret - %d", ret);
 		return ret;

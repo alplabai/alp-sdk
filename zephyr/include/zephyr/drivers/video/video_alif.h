@@ -26,6 +26,25 @@ extern "C" {
 #define VIDEO_CID_ALIF_ISP_SET               (VIDEO_CID_PRIVATE_BASE + 2)
 #define VIDEO_CID_ALIF_ISP_GET               (VIDEO_CID_PRIVATE_BASE + 3)
 
+/*
+ * v4.4 video-API shim (Alp Lab AB): legacy Bayer + greyscale pixel-format
+ * aliases the fork driver bodies reference by their PRE-v4.4 names.  Upstream
+ * Zephyr v4.4 renamed the 8/10/12/14/16-bit Bayer FOURCCs to the `S`-prefixed
+ * `VIDEO_PIX_FMT_SBGGR8` etc.; the FOURCC byte values are UNCHANGED, so we alias
+ * the fork's `BGGR8`/`GBRG8`/`GRBG8`/`RGGB8` names to the v4.4 `S`-prefixed
+ * macros to keep the vendored driver bodies verbatim.  `Y6P`/`Y7P` (RAW6/RAW7
+ * MIPI-packed greyscale) were DROPPED entirely by v4.4 with no replacement, so
+ * we re-declare them here with the fork's original FOURCC values (the only
+ * consumers are the fork CPI/CSI data-type tables, gated under the
+ * Tier-2 ALP_VIDEO_ALIF_* family).
+ */
+#define VIDEO_PIX_FMT_BGGR8                  VIDEO_PIX_FMT_SBGGR8
+#define VIDEO_PIX_FMT_GBRG8                  VIDEO_PIX_FMT_SGBRG8
+#define VIDEO_PIX_FMT_GRBG8                  VIDEO_PIX_FMT_SGRBG8
+#define VIDEO_PIX_FMT_RGGB8                  VIDEO_PIX_FMT_SRGGB8
+#define VIDEO_PIX_FMT_Y6P                    (VIDEO_FOURCC('Y', '0', '6', 'P'))
+#define VIDEO_PIX_FMT_Y7P                    (VIDEO_FOURCC('Y', '0', '7', 'P'))
+
 /* Additional supported formats */
 #define VIDEO_PIX_FMT_RGB888_PLANAR_PRIVATE  (VIDEO_FOURCC('P', 'R', 'G', 'B'))
 #define VIDEO_PIX_FMT_BGGR10P                (VIDEO_FOURCC('p', 'B', 'A', 'A'))
@@ -56,21 +75,56 @@ extern "C" {
 #define VIDEO_PIX_FMT_GBRG16                 (VIDEO_FOURCC('G', 'B', '1', '6'))
 #define VIDEO_PIX_FMT_GRBG16                 (VIDEO_FOURCC('G', 'R', '1', '6'))
 #define VIDEO_PIX_FMT_RGGB16                 (VIDEO_FOURCC('R', 'G', '1', '6'))
+/*
+ * v4.4 video-API shim (Alp Lab AB): v4.4 core <zephyr/drivers/video.h> now
+ * defines most of these greyscale / YUV-packed / NV-planar FOURCCs natively
+ * (with byte-identical values).  Guard each with #ifndef so the vendored header
+ * only supplies the names v4.4 still lacks (e.g. YUV422P) and never re-defines a
+ * core macro (which warns under -Wall).
+ */
+#ifndef VIDEO_PIX_FMT_Y10
 #define VIDEO_PIX_FMT_Y10                    (VIDEO_FOURCC('Y', '1', '0', ' '))
+#endif
+#ifndef VIDEO_PIX_FMT_Y12
 #define VIDEO_PIX_FMT_Y12                    (VIDEO_FOURCC('Y', '1', '2', ' '))
+#endif
+#ifndef VIDEO_PIX_FMT_Y14
 #define VIDEO_PIX_FMT_Y14                    (VIDEO_FOURCC('Y', '1', '4', ' '))
+#endif
+#ifndef VIDEO_PIX_FMT_YVYU
 #define VIDEO_PIX_FMT_YVYU                   (VIDEO_FOURCC('Y', 'V', 'Y', 'U'))
+#endif
+#ifndef VIDEO_PIX_FMT_VYUY
 #define VIDEO_PIX_FMT_VYUY                   (VIDEO_FOURCC('V', 'Y', 'U', 'Y'))
+#endif
+#ifndef VIDEO_PIX_FMT_UYVY
 #define VIDEO_PIX_FMT_UYVY                   (VIDEO_FOURCC('U', 'Y', 'V', 'Y'))
+#endif
+#ifndef VIDEO_PIX_FMT_NV12
 #define VIDEO_PIX_FMT_NV12                   (VIDEO_FOURCC('N', 'V', '1', '2'))
+#endif
+#ifndef VIDEO_PIX_FMT_NV21
 #define VIDEO_PIX_FMT_NV21                   (VIDEO_FOURCC('N', 'V', '2', '1'))
+#endif
+#ifndef VIDEO_PIX_FMT_NV16
 #define VIDEO_PIX_FMT_NV16                   (VIDEO_FOURCC('N', 'V', '1', '6'))
+#endif
+#ifndef VIDEO_PIX_FMT_NV61
 #define VIDEO_PIX_FMT_NV61                   (VIDEO_FOURCC('N', 'V', '6', '1'))
+#endif
+#ifndef VIDEO_PIX_FMT_NV24
 #define VIDEO_PIX_FMT_NV24                   (VIDEO_FOURCC('N', 'V', '2', '4'))
+#endif
+#ifndef VIDEO_PIX_FMT_NV42
 #define VIDEO_PIX_FMT_NV42                   (VIDEO_FOURCC('N', 'V', '4', '2'))
+#endif
 #define VIDEO_PIX_FMT_YUV422P                (VIDEO_FOURCC('4', '2', '2', 'P'))
+#ifndef VIDEO_PIX_FMT_YUV420
 #define VIDEO_PIX_FMT_YUV420                 (VIDEO_FOURCC('Y', 'U', '1', '2'))
+#endif
+#ifndef VIDEO_PIX_FMT_YVU420
 #define VIDEO_PIX_FMT_YVU420                 (VIDEO_FOURCC('Y', 'V', '1', '2'))
+#endif
 
 enum csi2_data_type {
 	/* Data Type Non-Image data */

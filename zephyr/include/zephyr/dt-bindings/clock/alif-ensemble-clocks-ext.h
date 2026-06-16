@@ -77,10 +77,10 @@
  * unknown -- NOT re-authored here.  These IDs use the dummy clock (ALIF_CLK,
  * module 0x0 / en_mask 0 -> alif_clock_control_on() returns at the !EN_MASK
  * guard, touches no register), so the camera DT nodes are well-formed without
- * inventing a register gate.  The camera DT nodes are status="disabled" AND the
- * drivers are gated OFF (ALP_VIDEO_ALIF_BROKEN, NOT YET PORTED to v4.4), so no
- * clock is actually programmed.  Re-author the real IDs when the camera stack
- * is bench-brought-up (task #21).  vendor-ext, BENCH-UNVERIFIED.
+ * inventing a register gate.  The drivers are now PORTED to the v4.4 video API
+ * (the ALP_VIDEO_ALIF_BROKEN gate is retired), but no real clock is programmed
+ * (the dummy clock above).  Re-author the real IDs when the camera stack is
+ * bench-brought-up (task #21).  vendor-ext, BENCH-UNVERIFIED.
  */
 #define ALIF_CPI_CLK      ALIF_CLK(2U)
 #define ALIF_CSI_CLK      ALIF_CLK(2U)
