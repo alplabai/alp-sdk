@@ -17,7 +17,9 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **UTIMER counter** (Tier-1.5) | ✅ PASS *after a fix* | As-merged it never counted (read 0); fixed in **PR #158** (missing `alif_utimer_enable_soft_counter_ctrl`). Re-validated: counter advances. |
 | **GPIO** (`gpio_dw`, Tier-1) | ✅ PASS (controller) | DDR/DR set+readback correct via the Zephyr GPIO API (J-Link ground truth). Driving an actual **pad** needs the GPIO pad-mux (gpio_dw doesn't apply it). |
 | **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM at 0x50 reads back (64 B, `0xff` = blank/unprogrammed) once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
-| **PWM** (Tier-1.5) | ⚙ driver builds | Shares the exact hal_alif UTIMER start-path the counter fix validated; a dedicated reg-readback bench app is pending a binding tweak. |
+| **PWM** (Tier-1.5) | ✅ PASS | pwm_set_cycles reg readback matches (CNTR_PTR/COMPARE/CTRL), shares the hal_alif UTIMER start-path the counter fix validated. |
+| **SPI** (`alif,dwc-ssi-spi`, Tier-2) | ✅ PASS *after a fix* | DWC-SSI stayed in slave mode → `spi_transceive` -116 (TX FIFO full, no SCLK). The Alif SoC gates master mode behind `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`), which upstream never sets. **PR #162** sets it in the driver. Re-validated: `rc=0`, internal-loopback `rx==tx`, CTRLR0=`0x80002007`. See §3. |
+| **Ethernet** (`alif,ethernet` / `eth_dwmac`, Tier-1.5) | ✅ PASS *after a fix* | GMAC reachable (HW v5.40) but the DMA reset stalled — no RMII 50 MHz ref-clock. **PR #162** programs the `ETH_CTRL` (`0x4903F080` bit4) source mux with an auto-detect (external pin → fall back to internal PLL). Re-validated: MAC reset completes, iface `admin_up=1`, MAC programmed. See §3. |
 
 ## 2. The three flashing / observation flows
 
@@ -117,6 +119,24 @@ J-Link> go                                    # core is already at our reset han
 - **Housekeeping trio (RTC/TMP/OPTIGA)** is on the slave-only **LPI2C0** this rev
   → Tier-3 (SE-mediated). A next-rev respin moves it to a master-capable I2C
   (LPI2C0 → I2C0 on P7_0/P7_1).
+- **SPI needs the SoC master-mode select set (not just CTRLR0).** The Ensemble
+  wraps the DWC_ssi macrocell behind a SoC master/slave select in
+  `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`: bit n = SSI*n* master-mode, bit 8+n =
+  SS value). Until it's set the controller ignores `CTRLR0.SSI_IS_MST` and never
+  drives SCLK as a master (TX FIFO fills, `spi_transceive` → -116). Upstream
+  Zephyr's alif SoC layer doesn't program it, so the alp-sdk driver does, in init
+  (PR #162). Customers need nothing — it's automatic for master instances. The
+  SPI node also carries `clock-frequency` (BAUDR divider) since the clock
+  controller doesn't report a rate.
+- **Ethernet needs the RMII 50 MHz reference clock selected.** The DWMAC DMA
+  soft-reset cannot complete without it. `ETH_CTRL` (`0x4903F080` bit 4) selects
+  the source: 0 = external REFCLK pin (P11_0 oscillator, production wiring),
+  1 = internal 50 MHz PLL. The driver auto-detects (PR #162): it tries external,
+  and if the reset can't complete (no oscillator populated) it falls back to the
+  internal PLL — so Ethernet comes up on any board population with no config.
+  **Bench note:** this reduced-population board has no working external RMII
+  oscillator, so auto-detect selects the internal PLL. Override with
+  `CONFIG_ETH_DWMAC_ALIF_RMII_REFCLK_{EXTERNAL,INTERNAL_PLL}` to pin a source.
 
 ## 4. Troubleshooting
 
@@ -131,3 +151,6 @@ J-Link> go                                    # core is already at our reset han
 | Link error `region FLASH overflowed` on a RAM-run app | The overlay used `zephyr,flash = <&itcm>` — use the path-reference form `&itcm` (else `FLASH_SIZE=0`). |
 | I2C2 probe times out (`-ETIMEDOUT`) | Bus stuck — pads not driving. Add the I2C pinctrl pad config (§3): `input-enable` + `bias-pull-down`; run at 100 kHz. |
 | I2C2 clean NACKs but no device ACKs | The pinctrl is missing **`input-enable`** (REN) so the controller can't sense SDA, or it used `bias-pull-up` (DSC=1) instead of `bias-pull-down` (DSC=2). Match Alif's reference (§3) — then the EEPROM ACKs at 0x50. |
+| `spi_transceive` returns `-116` (TX FIFO full, no SCLK) | SoC master-mode not set — `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`) per-instance master bit. The alp-sdk driver sets it in init (PR #162); if you forked the driver, replicate it. |
+| `spi_transceive` returns `-EINVAL` with no register programming | No `clock-frequency` for the BAUDR divider and the alif clock controller has no `get_rate`. Set `clock-frequency` on the SPI node (§3). |
+| Ethernet `unable to reset hardware` (then MPU fault) | No RMII 50 MHz ref-clock. The driver auto-selects the source (PR #162); if forced to `EXTERNAL` on a board without the oscillator populated, switch to `AUTO` or `INTERNAL_PLL`. |
