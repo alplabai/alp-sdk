@@ -85,9 +85,78 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 #include <zephyr/net/ethernet.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/clock_control.h>
+#include <zephyr/sys/sys_io.h>
+#include <zephyr/sys/util.h>
 #include <zephyr/irq.h>
 
 #include "eth_dwmac_priv.h"
+
+/*
+ * RMII 50 MHz reference-clock source select.  The GMAC DMA software-reset
+ * (DMA_MODE.SWR) will not complete unless a 50 MHz RMII reference clock is
+ * running, so the source MUST be selected before the core resets the MAC.  The
+ * upstream alif clock controller programs ALIF_ETHERNET_CLK (peripheral-clock
+ * enable) but has NO path to this ref-clk source mux, so the glue programs it
+ * directly.  ETH_CTRL = CLKCTL_PER_MST base 0x4903F000 + 0x80; bit 4 selects
+ * 0 = external REFCLK pin (P11_0 input) / 1 = internal 50 MHz PLL.  Register +
+ * bit transcribed from the Apache-2.0 zephyr_alif fork
+ * (ALIF_ETH_RMII_{REFCLK_PIN,PLL_CLK_50M}, alif_ensemble_clocks.h); no value is
+ * invented.
+ *
+ * Default (CONFIG_..._AUTO): try the external pin (production wiring), then
+ * fall back to the internal PLL if no external clock is present -- detected by
+ * whether a GMAC DMA soft-reset can complete.  Bench-validated on the E8: the
+ * reduced-population bench board has no working external oscillator, so the
+ * probe selects the internal PLL and the MAC comes up.  The two FORCE_* Kconfig
+ * options skip the probe and pin a single source.
+ */
+#define ALIF_ETH_CTRL_REG 0x4903F080U
+#define ALIF_ETH_CTRL_RMII_REFCLK_SEL BIT(4)
+
+/* Bounded DMA-soft-reset probe: ~2 ms budget (a clocked GMAC clears SWR within
+ * a few cycles; an unclocked one never does). */
+#define DWMAC_RMII_PROBE_TRIES 200
+#define DWMAC_RMII_PROBE_STEP_US 10
+
+static bool dwmac_dma_reset_completes(struct dwmac_priv *p)
+{
+	REG_WRITE(DMA_MODE, DMA_MODE_SWR);
+	for (int i = 0; i < DWMAC_RMII_PROBE_TRIES; i++) {
+		if (!(REG_READ(DMA_MODE) & DMA_MODE_SWR)) {
+			return true;
+		}
+		k_busy_wait(DWMAC_RMII_PROBE_STEP_US);
+	}
+	return false;
+}
+
+/*
+ * Select the RMII ref-clock source.  Runs in dwmac_bus_init (before the core's
+ * own MAC reset).  Requires pinctrl already applied so the external REFCLK pin
+ * is routed for the probe.
+ */
+static void dwmac_select_rmii_refclk(struct dwmac_priv *p)
+{
+	if (IS_ENABLED(CONFIG_ETH_DWMAC_ALIF_RMII_REFCLK_INTERNAL_PLL)) {
+		sys_set_bits(ALIF_ETH_CTRL_REG, ALIF_ETH_CTRL_RMII_REFCLK_SEL);
+		LOG_INF("RMII ref-clk: internal 50 MHz PLL (forced)");
+		return;
+	}
+	if (IS_ENABLED(CONFIG_ETH_DWMAC_ALIF_RMII_REFCLK_EXTERNAL)) {
+		sys_clear_bits(ALIF_ETH_CTRL_REG, ALIF_ETH_CTRL_RMII_REFCLK_SEL);
+		LOG_INF("RMII ref-clk: external pin P11_0 (forced)");
+		return;
+	}
+
+	/* AUTO: external first, fall back to the internal PLL if no clock. */
+	sys_clear_bits(ALIF_ETH_CTRL_REG, ALIF_ETH_CTRL_RMII_REFCLK_SEL);
+	if (dwmac_dma_reset_completes(p)) {
+		LOG_INF("RMII ref-clk: external pin P11_0 (auto)");
+		return;
+	}
+	sys_set_bits(ALIF_ETH_CTRL_REG, ALIF_ETH_CTRL_RMII_REFCLK_SEL);
+	LOG_INF("RMII ref-clk: external absent -> internal 50 MHz PLL (auto)");
+}
 
 PINCTRL_DT_INST_DEFINE(0);
 static const struct pinctrl_dev_config *eth_pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(0);
@@ -123,12 +192,22 @@ int dwmac_bus_init(struct dwmac_priv *p)
 		return ret;
 	}
 
-	/* Route the RMII pins (REFCLK/MDIO/MDC/RXD/TXD/RST) to the MAC */
+	/* Route the RMII pins (REFCLK/MDIO/MDC/RXD/TXD/RST) to the MAC first, so
+	 * the external REFCLK pin is connected for the ref-clk source probe.
+	 */
 	ret = pinctrl_apply_state(eth_pcfg, PINCTRL_STATE_DEFAULT);
 	if (ret != 0) {
 		LOG_ERR("could not configure ethernet pins (%d)", ret);
 		return ret;
 	}
+
+	/*
+	 * Select the RMII 50 MHz reference-clock source BEFORE the core resets
+	 * the MAC -- the DMA soft-reset stalls without a running ref-clock (the
+	 * "unable to reset hardware" failure). AUTO probes external then falls
+	 * back to the internal PLL; see dwmac_select_rmii_refclk above.
+	 */
+	dwmac_select_rmii_refclk(p);
 
 	return 0;
 }
