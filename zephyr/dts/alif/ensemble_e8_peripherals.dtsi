@@ -422,4 +422,28 @@
 		hs-spike-len = <1>;
 		status = "disabled";
 	};
+
+	/*
+	 * Arm Ethos-U85 NPU (the E8's ML accelerator, 256 MAC/cycle).  Bound by the
+	 * UPSTREAM Zephyr driver (drivers/misc/ethos_u/ethos_u_arm.c, compatible
+	 * "arm,ethos-u") over Arm's Apache-2.0 ethos-u-core-driver (the `hal_ethos_u`
+	 * Zephyr module) -- pure Tier-1 (upstream + a standard Zephyr HAL module), no
+	 * vendored code.  reg/IRQ from the Apache-2.0 zephyr_alif fork e4_e6_e8.dtsi
+	 * (ethosu85@49042000, IRQ 366, secure + privilege enable).  The E8 variant
+	 * has Ethos-U85; the e1c/e1 variants instead have an Ethos-U55 @0x400e1000.
+	 *
+	 * A board enables this node + selects CONFIG_ETHOS_U + CONFIG_ETHOS_U_ARM +
+	 * CONFIG_ETHOS_U85_256 and adds `hal_ethos_u` as a Zephyr module.  Inference
+	 * then needs a Vela-compiled model + tensor arena.  BENCH-VALIDATED at the
+	 * driver level on real E8 (M55-HE): ethosu_init() soft-resets + registers the
+	 * NPU, device_is_ready() true, NPU_REG_ID 0x20007001.
+	 */
+	ethosu85: ethosu85@49042000 {
+		compatible = "arm,ethos-u";
+		reg = <0x49042000 0x1000>;
+		interrupts = <366 3>;
+		secure-enable;
+		privilege-enable;
+		status = "disabled";
+	};
 };
