@@ -43,68 +43,77 @@
 
 #include "can_ops.h"
 
-static alp_status_t sw_open(const alp_can_config_t *cfg,
-                            alp_can_backend_state_t *st,
-                            alp_capabilities_t *caps_out) {
-    (void)cfg;
-    st->dev     = NULL;
-    st->bus_id  = 0u;
-    st->be_data = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+static alp_status_t sw_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st,
+                            alp_capabilities_t *caps_out)
+{
+	(void)cfg;
+	st->dev         = NULL;
+	st->bus_id      = 0u;
+	st->be_data     = NULL;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
-static alp_status_t sw_start(alp_can_backend_state_t *st) {
-    (void)st;
-    return ALP_OK;
+static alp_status_t sw_start(alp_can_backend_state_t *st)
+{
+	(void)st;
+	return ALP_OK;
 }
 
-static alp_status_t sw_stop(alp_can_backend_state_t *st) {
-    (void)st;
-    return ALP_OK;
+static alp_status_t sw_stop(alp_can_backend_state_t *st)
+{
+	(void)st;
+	return ALP_OK;
 }
 
-static alp_status_t sw_send(alp_can_backend_state_t *st,
-                            const alp_can_frame_t *frame,
-                            uint32_t timeout_ms) {
-    (void)st; (void)frame; (void)timeout_ms;
-    return ALP_ERR_NOSUPPORT;
+static alp_status_t sw_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame,
+                            uint32_t timeout_ms)
+{
+	(void)st;
+	(void)frame;
+	(void)timeout_ms;
+	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t sw_add_filter(alp_can_backend_state_t *st,
-                                  const alp_can_filter_t *filter,
-                                  alp_can_rx_cb_t cb,
-                                  void *user,
-                                  int32_t *filter_id_out) {
-    (void)st; (void)filter; (void)cb; (void)user; (void)filter_id_out;
-    return ALP_ERR_NOSUPPORT;
+static alp_status_t sw_add_filter(alp_can_backend_state_t *st, const alp_can_filter_t *filter,
+                                  alp_can_rx_cb_t cb, void *user, int32_t *filter_id_out)
+{
+	(void)st;
+	(void)filter;
+	(void)cb;
+	(void)user;
+	(void)filter_id_out;
+	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t sw_remove_filter(alp_can_backend_state_t *st,
-                                     int32_t filter_id) {
-    (void)st; (void)filter_id;
-    return ALP_OK;
+static alp_status_t sw_remove_filter(alp_can_backend_state_t *st, int32_t filter_id)
+{
+	(void)st;
+	(void)filter_id;
+	return ALP_OK;
 }
 
-static void sw_close(alp_can_backend_state_t *st) {
-    (void)st;
+static void sw_close(alp_can_backend_state_t *st)
+{
+	(void)st;
 }
 
 static const alp_can_ops_t _ops = {
-    .open          = sw_open,
-    .start         = sw_start,
-    .stop          = sw_stop,
-    .send          = sw_send,
-    .add_filter    = sw_add_filter,
-    .remove_filter = sw_remove_filter,
-    .close         = sw_close,
+	.open          = sw_open,
+	.start         = sw_start,
+	.stop          = sw_stop,
+	.send          = sw_send,
+	.add_filter    = sw_add_filter,
+	.remove_filter = sw_remove_filter,
+	.close         = sw_close,
 };
 
-ALP_BACKEND_REGISTER(can, sw_fallback, {
-    .silicon_ref = "*",
-    .vendor      = "sw_fallback",
-    .base_caps   = 0u,
-    .priority    = 0,
-    .ops         = &_ops,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(can, sw_fallback,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "sw_fallback",
+                         .base_caps   = 0u,
+                         .priority    = 0,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });

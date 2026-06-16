@@ -36,12 +36,12 @@ extern "C" {
 
 /** Trigger source for the Alif ADC hardware sequencer. */
 typedef enum {
-    ALP_ALIF_ADC_TRIGGER_SOFTWARE = 0,
-    ALP_ALIF_ADC_TRIGGER_TIMER0,
-    ALP_ALIF_ADC_TRIGGER_TIMER1,
-    ALP_ALIF_ADC_TRIGGER_TIMER2,
-    ALP_ALIF_ADC_TRIGGER_TIMER3,
-    ALP_ALIF_ADC_TRIGGER_EXT_PIN,
+	ALP_ALIF_ADC_TRIGGER_SOFTWARE = 0,
+	ALP_ALIF_ADC_TRIGGER_TIMER0,
+	ALP_ALIF_ADC_TRIGGER_TIMER1,
+	ALP_ALIF_ADC_TRIGGER_TIMER2,
+	ALP_ALIF_ADC_TRIGGER_TIMER3,
+	ALP_ALIF_ADC_TRIGGER_EXT_PIN,
 } alp_alif_adc_trigger_t;
 
 /* Note: HW oversampling is NOT a vendor extension -- it's reachable
@@ -62,8 +62,7 @@ typedef enum {
  * @return  @ref ALP_OK / @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC /
  *          @ref ALP_ERR_INVAL.
  */
-alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h,
-                                             alp_alif_adc_trigger_t src);
+alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h, alp_alif_adc_trigger_t src);
 
 #ifdef __cplusplus
 }

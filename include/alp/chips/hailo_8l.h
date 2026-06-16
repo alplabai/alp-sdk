@@ -48,9 +48,9 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_gpio_t *resetb;   /**< Open-drain reset to the M.2 slot. */
-    alp_gpio_t *pe_wake;  /**< PCIe WAKE# input from the slot. */
-    bool        initialised;
+	alp_gpio_t *resetb;  /**< Open-drain reset to the M.2 slot. */
+	alp_gpio_t *pe_wake; /**< PCIe WAKE# input from the slot. */
+	bool        initialised;
 } hailo_8l_t;
 
 /**
@@ -66,9 +66,7 @@ typedef struct {
  * @param pe_wake  Host PCIe WAKE# input from the M.2 slot.
  * @return `ALP_OK` on success.
  */
-alp_status_t hailo_8l_init(hailo_8l_t *dev,
-                           alp_gpio_t *resetb,
-                           alp_gpio_t *pe_wake);
+alp_status_t hailo_8l_init(hailo_8l_t *dev, alp_gpio_t *resetb, alp_gpio_t *pe_wake);
 
 /** @brief Assert RESETB then release.  100 ms low pulse. */
 alp_status_t hailo_8l_reset(hailo_8l_t *dev);

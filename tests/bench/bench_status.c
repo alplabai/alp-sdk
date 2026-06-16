@@ -14,8 +14,8 @@
 
 void bench_status_main(void)
 {
-    /* alp_last_error is a thread-local read on Zephyr (TLS) and a
+	/* alp_last_error is a thread-local read on Zephyr (TLS) and a
      * single static read on baremetal / yocto.  Either way it
      * should be one or two instructions plus the call overhead. */
-    BENCH_RUN("alp_last_error", 1000000, { (void)alp_last_error(); });
+	BENCH_RUN("alp_last_error", 1000000, { (void)alp_last_error(); });
 }

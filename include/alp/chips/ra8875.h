@@ -38,16 +38,16 @@ extern "C" {
 
 /** RA8875 SPI command bytes (data direction + register/data flag). */
 #define RA8875_CMD_WRITE 0x80u
-#define RA8875_CMD_READ  0xC0u
+#define RA8875_CMD_READ 0xC0u
 #define RA8875_DATA_WRITE 0x00u
-#define RA8875_DATA_READ  0x40u
+#define RA8875_DATA_READ 0x40u
 
 #define RA8875_REG_PWRR 0x01u /**< Power & Display Control Register. */
 
 typedef struct {
-    alp_spi_t  *bus;
-    alp_gpio_t *reset;
-    bool        initialised;
+	alp_spi_t  *bus;
+	alp_gpio_t *reset;
+	bool        initialised;
 } ra8875_t;
 
 /**

@@ -33,66 +33,64 @@
 
 #include "i2c_ops.h"
 
-#define SW_BUF_LEN  64u
+#define SW_BUF_LEN 64u
 
-static uint8_t  _buf[SW_BUF_LEN];
-static size_t   _buf_len  = 0u;
-static uint8_t  _buf_addr = 0u;
+static uint8_t      _buf[SW_BUF_LEN];
+static size_t       _buf_len  = 0u;
+static uint8_t      _buf_addr = 0u;
 
-static alp_status_t sw_open(const alp_i2c_config_t *cfg,
-                            alp_i2c_backend_state_t *st,
-                            alp_capabilities_t *caps_out) {
-    (void)cfg;
-    st->dev    = NULL;
-    st->bus_id = 0u;
-    st->be_data = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+static alp_status_t sw_open(const alp_i2c_config_t *cfg, alp_i2c_backend_state_t *st,
+                            alp_capabilities_t *caps_out)
+{
+	(void)cfg;
+	st->dev         = NULL;
+	st->bus_id      = 0u;
+	st->be_data     = NULL;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
-static alp_status_t sw_write(alp_i2c_backend_state_t *st,
-                             uint8_t addr,
-                             const uint8_t *data, size_t len) {
-    (void)st;
-    _buf_addr = addr;
-    _buf_len  = (len < SW_BUF_LEN) ? len : SW_BUF_LEN;
-    if (_buf_len > 0u && data != NULL) {
-        memcpy(_buf, data, _buf_len);
-    }
-    return ALP_OK;
+static alp_status_t sw_write(alp_i2c_backend_state_t *st, uint8_t addr, const uint8_t *data,
+                             size_t len)
+{
+	(void)st;
+	_buf_addr = addr;
+	_buf_len  = (len < SW_BUF_LEN) ? len : SW_BUF_LEN;
+	if (_buf_len > 0u && data != NULL) {
+		memcpy(_buf, data, _buf_len);
+	}
+	return ALP_OK;
 }
 
-static alp_status_t sw_read(alp_i2c_backend_state_t *st,
-                            uint8_t addr,
-                            uint8_t *data, size_t len) {
-    (void)st;
-    if (len == 0u) return ALP_OK;
-    if (addr != _buf_addr) {
-        /* Unknown address -- return all zeros */
-        memset(data, 0, len);
-        return ALP_OK;
-    }
-    size_t copy = (_buf_len < len) ? _buf_len : len;
-    if (copy > 0u) memcpy(data, _buf, copy);
-    if (copy < len) memset(data + copy, 0, len - copy);
-    return ALP_OK;
+static alp_status_t sw_read(alp_i2c_backend_state_t *st, uint8_t addr, uint8_t *data, size_t len)
+{
+	(void)st;
+	if (len == 0u) return ALP_OK;
+	if (addr != _buf_addr) {
+		/* Unknown address -- return all zeros */
+		memset(data, 0, len);
+		return ALP_OK;
+	}
+	size_t copy = (_buf_len < len) ? _buf_len : len;
+	if (copy > 0u) memcpy(data, _buf, copy);
+	if (copy < len) memset(data + copy, 0, len - copy);
+	return ALP_OK;
 }
 
-static alp_status_t sw_write_read(alp_i2c_backend_state_t *st,
-                                  uint8_t addr,
-                                  const uint8_t *wdata, size_t wlen,
-                                  uint8_t *rdata, size_t rlen) {
-    alp_status_t rc = sw_write(st, addr, wdata, wlen);
-    if (rc != ALP_OK) return rc;
-    return sw_read(st, addr, rdata, rlen);
+static alp_status_t sw_write_read(alp_i2c_backend_state_t *st, uint8_t addr, const uint8_t *wdata,
+                                  size_t wlen, uint8_t *rdata, size_t rlen)
+{
+	alp_status_t rc = sw_write(st, addr, wdata, wlen);
+	if (rc != ALP_OK) return rc;
+	return sw_read(st, addr, rdata, rlen);
 }
 
 static const alp_i2c_ops_t _ops = {
-    .open       = sw_open,
-    .write      = sw_write,
-    .read       = sw_read,
-    .write_read = sw_write_read,
-    .close      = NULL,
+	.open       = sw_open,
+	.write      = sw_write,
+	.read       = sw_read,
+	.write_read = sw_write_read,
+	.close      = NULL,
 };
 
 ALP_BACKEND_REGISTER(i2c, sw_fallback,

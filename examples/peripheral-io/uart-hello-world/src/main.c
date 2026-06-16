@@ -65,10 +65,11 @@
  * implement bare-LF auto-CR like a stdout). */
 static const uint8_t HELLO_GREETING[] = "Alp SDK uart-hello-world\r\n";
 
-int main(void) {
-    printf("[uart-hello] open E1M_UART0 @ 115200 8N1\n");
+int                  main(void)
+{
+	printf("[uart-hello] open E1M_UART0 @ 115200 8N1\n");
 
-    /* Open UART0 at the lowest-common-denominator serial framing.
+	/* Open UART0 at the lowest-common-denominator serial framing.
      *
      * 115200 8N1 is what every serial console + USB-UART bridge
      * supports out of the box.  Override these fields when talking
@@ -80,15 +81,15 @@ int main(void) {
      * E1M-conformant SoM (E1M-AEN, E1M-V2N, ...): the SDK's
      * loader resolves it to the right SoC USART node at build
      * time via the devicetree `alp-uart0` alias. */
-    alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
-        .port_id   = E1M_UART0,
-        .baudrate  = 115200,
-        .data_bits = 8,
-        .stop_bits = 1,
-        .parity    = ALP_UART_PARITY_NONE,
-    });
-    if (u == NULL) {
-        /* Likely causes (in descending order of frequency):
+	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
+	    .port_id   = E1M_UART0,
+	    .baudrate  = 115200,
+	    .data_bits = 8,
+	    .stop_bits = 1,
+	    .parity    = ALP_UART_PARITY_NONE,
+	});
+	if (u == NULL) {
+		/* Likely causes (in descending order of frequency):
          *
          *   * No `alp-uart0` alias on this board's overlay.  Add
          *     one in your board file or
@@ -99,31 +100,30 @@ int main(void) {
          *     baudrate / framing combination.
          *   * On native_sim without the matching overlay the
          *     alias resolves to NULL spec and you land here. */
-        printf("[uart-hello] open failed: alp_last_error=%d\n",
-               (int)alp_last_error());
-        printf("[uart-hello] done\n");
-        return 0;
-    }
+		printf("[uart-hello] open failed: alp_last_error=%d\n", (int)alp_last_error());
+		printf("[uart-hello] done\n");
+		return 0;
+	}
 
-    /* Write the greeting.  alp_uart_write blocks until every byte
+	/* Write the greeting.  alp_uart_write blocks until every byte
      * is queued in the controller's TX FIFO (or shifted out the
      * line on tiny SoCs with no FIFO).  The `sizeof - 1` trims
      * the trailing NUL in the string literal -- send the bytes
      * a human would see on the terminal, not the C-string
      * sentinel. */
-    alp_status_t s = alp_uart_write(u, HELLO_GREETING, sizeof HELLO_GREETING - 1);
-    if (s != ALP_OK) {
-        /* Write failures are rare on UART (no slave to NACK like
+	alp_status_t s = alp_uart_write(u, HELLO_GREETING, sizeof HELLO_GREETING - 1);
+	if (s != ALP_OK) {
+		/* Write failures are rare on UART (no slave to NACK like
          * I2C) -- they usually indicate the driver was torn down
          * mid-write, e.g. because of a runtime PM transition. */
-        printf("[uart-hello] greeting write -> status=%d\n", (int)s);
-        alp_uart_close(u);
-        printf("[uart-hello] done\n");
-        return 0;
-    }
-    printf("[uart-hello] greeting written\n");
+		printf("[uart-hello] greeting write -> status=%d\n", (int)s);
+		alp_uart_close(u);
+		printf("[uart-hello] done\n");
+		return 0;
+	}
+	printf("[uart-hello] greeting written\n");
 
-    /* Periodic counter loop.  Format each tick into a local stack
+	/* Periodic counter loop.  Format each tick into a local stack
      * buffer using snprintf (NUL-safe + bounded), then write the
      * formatted bytes (minus the NUL) over the UART.
      *
@@ -131,27 +131,26 @@ int main(void) {
      * written if the buffer were unbounded; on truncation that's
      * > sizeof(buf).  Clamp before passing to alp_uart_write so
      * we never read past the end of the stack buffer. */
-    for (uint32_t tick = 0; tick < HELLO_TICKS; tick++) {
-        char    buf[48];
-        int     n  = snprintf(buf, sizeof buf, "tick %u\r\n", tick);
-        size_t  ln = (n < 0) ? 0u : (size_t)n;
-        if (ln > sizeof buf - 1u) ln = sizeof buf - 1u;
+	for (uint32_t tick = 0; tick < HELLO_TICKS; tick++) {
+		char   buf[48];
+		int    n  = snprintf(buf, sizeof buf, "tick %u\r\n", tick);
+		size_t ln = (n < 0) ? 0u : (size_t)n;
+		if (ln > sizeof buf - 1u) ln = sizeof buf - 1u;
 
-        s = alp_uart_write(u, (const uint8_t *)buf, ln);
-        if (s != ALP_OK) {
-            printf("[uart-hello] tick %u write -> status=%d\n",
-                   tick, (int)s);
-            break;
-        }
-        printf("[uart-hello] tick %u written\n", tick);
-        k_msleep(HELLO_TICK_PERIOD_MS);
-    }
+		s = alp_uart_write(u, (const uint8_t *)buf, ln);
+		if (s != ALP_OK) {
+			printf("[uart-hello] tick %u write -> status=%d\n", tick, (int)s);
+			break;
+		}
+		printf("[uart-hello] tick %u written\n", tick);
+		k_msleep(HELLO_TICK_PERIOD_MS);
+	}
 
-    /* Close releases the SDK handle but does NOT power down the
+	/* Close releases the SDK handle but does NOT power down the
      * controller or drop the line -- on real hardware the UART
      * keeps running idle high.  If you truly need to shut down,
      * use the Zephyr PM API (pm_device_action_run) after close. */
-    alp_uart_close(u);
-    printf("[uart-hello] done\n");
-    return 0;
+	alp_uart_close(u);
+	printf("[uart-hello] done\n");
+	return 0;
 }

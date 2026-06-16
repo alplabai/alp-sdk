@@ -8,85 +8,85 @@
 #include <alp/soc_caps.h>
 
 static const bool _cap_table[ALP_CAP_ID_COUNT] = {
-    [ALP_CAP_ID_HW_I2C]      = ALP_CAP_HW_I2C,
-    [ALP_CAP_ID_HW_SPI]      = ALP_CAP_HW_SPI,
-    [ALP_CAP_ID_HW_UART]     = ALP_CAP_HW_UART,
-    [ALP_CAP_ID_HW_I2S]      = ALP_CAP_HW_I2S,
-    [ALP_CAP_ID_HW_PDM]      = ALP_CAP_HW_PDM,
-    [ALP_CAP_ID_HW_ADC]      = ALP_CAP_HW_ADC,
-    [ALP_CAP_ID_HW_DAC]      = ALP_CAP_HW_DAC,
-    [ALP_CAP_ID_HW_CAN]      = ALP_CAP_HW_CAN,
-    [ALP_CAP_ID_HW_CAN_FD]   = ALP_CAP_HW_CAN_FD,
-    [ALP_CAP_ID_HW_RTC]      = ALP_CAP_HW_RTC,
-    [ALP_CAP_ID_HW_WDT]      = ALP_CAP_HW_WDT,
-    [ALP_CAP_ID_HW_QENC]     = ALP_CAP_HW_QENC,
-    [ALP_CAP_ID_HW_TIMER]    = ALP_CAP_HW_TIMER,
-    [ALP_CAP_ID_HW_PWM]      = ALP_CAP_HW_PWM,
-    [ALP_CAP_ID_HW_ETHERNET] = ALP_CAP_HW_ETHERNET,
-    [ALP_CAP_ID_HW_USB]      = ALP_CAP_HW_USB,
-    [ALP_CAP_ID_HW_MIPI_CSI] = ALP_CAP_HW_MIPI_CSI,
-    [ALP_CAP_ID_HW_MIPI_DSI] = ALP_CAP_HW_MIPI_DSI,
-    [ALP_CAP_ID_XSPI_DMA]    = ALP_CAP_XSPI_DMA,
-    [ALP_CAP_ID_HEXSPI_DMA]  = ALP_CAP_HEXSPI_DMA,
-    [ALP_CAP_ID_EMMC_DMA]    = ALP_CAP_EMMC_DMA,
-    [ALP_CAP_ID_QUADSPI_DMA] = ALP_CAP_QUADSPI_DMA,
-    [ALP_CAP_ID_NPU_DRPAI]   = ALP_CAP_NPU_DRPAI,
-    [ALP_CAP_ID_HELIUM_MVE]  = ALP_CAP_HELIUM_MVE,
-    [ALP_CAP_ID_NEON]        = ALP_CAP_NEON,
-    [ALP_CAP_ID_GPU2D]       = ALP_CAP_GPU2D,
-    [ALP_CAP_ID_DAVE2D]      = ALP_CAP_DAVE2D,
-    [ALP_CAP_ID_CRYPTOCELL]  = ALP_CAP_CRYPTOCELL,
-    [ALP_CAP_ID_INLINE_AES]  = ALP_CAP_INLINE_AES,
-    [ALP_CAP_ID_CAU]         = ALP_CAP_CAU,
-    [ALP_CAP_ID_DMA2D]       = ALP_CAP_DMA2D,
+	[ALP_CAP_ID_HW_I2C]      = ALP_CAP_HW_I2C,
+	[ALP_CAP_ID_HW_SPI]      = ALP_CAP_HW_SPI,
+	[ALP_CAP_ID_HW_UART]     = ALP_CAP_HW_UART,
+	[ALP_CAP_ID_HW_I2S]      = ALP_CAP_HW_I2S,
+	[ALP_CAP_ID_HW_PDM]      = ALP_CAP_HW_PDM,
+	[ALP_CAP_ID_HW_ADC]      = ALP_CAP_HW_ADC,
+	[ALP_CAP_ID_HW_DAC]      = ALP_CAP_HW_DAC,
+	[ALP_CAP_ID_HW_CAN]      = ALP_CAP_HW_CAN,
+	[ALP_CAP_ID_HW_CAN_FD]   = ALP_CAP_HW_CAN_FD,
+	[ALP_CAP_ID_HW_RTC]      = ALP_CAP_HW_RTC,
+	[ALP_CAP_ID_HW_WDT]      = ALP_CAP_HW_WDT,
+	[ALP_CAP_ID_HW_QENC]     = ALP_CAP_HW_QENC,
+	[ALP_CAP_ID_HW_TIMER]    = ALP_CAP_HW_TIMER,
+	[ALP_CAP_ID_HW_PWM]      = ALP_CAP_HW_PWM,
+	[ALP_CAP_ID_HW_ETHERNET] = ALP_CAP_HW_ETHERNET,
+	[ALP_CAP_ID_HW_USB]      = ALP_CAP_HW_USB,
+	[ALP_CAP_ID_HW_MIPI_CSI] = ALP_CAP_HW_MIPI_CSI,
+	[ALP_CAP_ID_HW_MIPI_DSI] = ALP_CAP_HW_MIPI_DSI,
+	[ALP_CAP_ID_XSPI_DMA]    = ALP_CAP_XSPI_DMA,
+	[ALP_CAP_ID_HEXSPI_DMA]  = ALP_CAP_HEXSPI_DMA,
+	[ALP_CAP_ID_EMMC_DMA]    = ALP_CAP_EMMC_DMA,
+	[ALP_CAP_ID_QUADSPI_DMA] = ALP_CAP_QUADSPI_DMA,
+	[ALP_CAP_ID_NPU_DRPAI]   = ALP_CAP_NPU_DRPAI,
+	[ALP_CAP_ID_HELIUM_MVE]  = ALP_CAP_HELIUM_MVE,
+	[ALP_CAP_ID_NEON]        = ALP_CAP_NEON,
+	[ALP_CAP_ID_GPU2D]       = ALP_CAP_GPU2D,
+	[ALP_CAP_ID_DAVE2D]      = ALP_CAP_DAVE2D,
+	[ALP_CAP_ID_CRYPTOCELL]  = ALP_CAP_CRYPTOCELL,
+	[ALP_CAP_ID_INLINE_AES]  = ALP_CAP_INLINE_AES,
+	[ALP_CAP_ID_CAU]         = ALP_CAP_CAU,
+	[ALP_CAP_ID_DMA2D]       = ALP_CAP_DMA2D,
 };
 
 static const char *const _cap_names[ALP_CAP_ID_COUNT] = {
-    [ALP_CAP_ID_HW_I2C]      = "HW_I2C",
-    [ALP_CAP_ID_HW_SPI]      = "HW_SPI",
-    [ALP_CAP_ID_HW_UART]     = "HW_UART",
-    [ALP_CAP_ID_HW_I2S]      = "HW_I2S",
-    [ALP_CAP_ID_HW_PDM]      = "HW_PDM",
-    [ALP_CAP_ID_HW_ADC]      = "HW_ADC",
-    [ALP_CAP_ID_HW_DAC]      = "HW_DAC",
-    [ALP_CAP_ID_HW_CAN]      = "HW_CAN",
-    [ALP_CAP_ID_HW_CAN_FD]   = "HW_CAN_FD",
-    [ALP_CAP_ID_HW_RTC]      = "HW_RTC",
-    [ALP_CAP_ID_HW_WDT]      = "HW_WDT",
-    [ALP_CAP_ID_HW_QENC]     = "HW_QENC",
-    [ALP_CAP_ID_HW_TIMER]    = "HW_TIMER",
-    [ALP_CAP_ID_HW_PWM]      = "HW_PWM",
-    [ALP_CAP_ID_HW_ETHERNET] = "HW_ETHERNET",
-    [ALP_CAP_ID_HW_USB]      = "HW_USB",
-    [ALP_CAP_ID_HW_MIPI_CSI] = "HW_MIPI_CSI",
-    [ALP_CAP_ID_HW_MIPI_DSI] = "HW_MIPI_DSI",
-    [ALP_CAP_ID_XSPI_DMA]    = "XSPI_DMA",
-    [ALP_CAP_ID_HEXSPI_DMA]  = "HEXSPI_DMA",
-    [ALP_CAP_ID_EMMC_DMA]    = "EMMC_DMA",
-    [ALP_CAP_ID_QUADSPI_DMA] = "QUADSPI_DMA",
-    [ALP_CAP_ID_NPU_DRPAI]   = "NPU_DRPAI",
-    [ALP_CAP_ID_HELIUM_MVE]  = "HELIUM_MVE",
-    [ALP_CAP_ID_NEON]        = "NEON",
-    [ALP_CAP_ID_GPU2D]       = "GPU2D",
-    [ALP_CAP_ID_DAVE2D]      = "DAVE2D",
-    [ALP_CAP_ID_CRYPTOCELL]  = "CRYPTOCELL",
-    [ALP_CAP_ID_INLINE_AES]  = "INLINE_AES",
-    [ALP_CAP_ID_CAU]         = "CAU",
-    [ALP_CAP_ID_DMA2D]       = "DMA2D",
+	[ALP_CAP_ID_HW_I2C]      = "HW_I2C",
+	[ALP_CAP_ID_HW_SPI]      = "HW_SPI",
+	[ALP_CAP_ID_HW_UART]     = "HW_UART",
+	[ALP_CAP_ID_HW_I2S]      = "HW_I2S",
+	[ALP_CAP_ID_HW_PDM]      = "HW_PDM",
+	[ALP_CAP_ID_HW_ADC]      = "HW_ADC",
+	[ALP_CAP_ID_HW_DAC]      = "HW_DAC",
+	[ALP_CAP_ID_HW_CAN]      = "HW_CAN",
+	[ALP_CAP_ID_HW_CAN_FD]   = "HW_CAN_FD",
+	[ALP_CAP_ID_HW_RTC]      = "HW_RTC",
+	[ALP_CAP_ID_HW_WDT]      = "HW_WDT",
+	[ALP_CAP_ID_HW_QENC]     = "HW_QENC",
+	[ALP_CAP_ID_HW_TIMER]    = "HW_TIMER",
+	[ALP_CAP_ID_HW_PWM]      = "HW_PWM",
+	[ALP_CAP_ID_HW_ETHERNET] = "HW_ETHERNET",
+	[ALP_CAP_ID_HW_USB]      = "HW_USB",
+	[ALP_CAP_ID_HW_MIPI_CSI] = "HW_MIPI_CSI",
+	[ALP_CAP_ID_HW_MIPI_DSI] = "HW_MIPI_DSI",
+	[ALP_CAP_ID_XSPI_DMA]    = "XSPI_DMA",
+	[ALP_CAP_ID_HEXSPI_DMA]  = "HEXSPI_DMA",
+	[ALP_CAP_ID_EMMC_DMA]    = "EMMC_DMA",
+	[ALP_CAP_ID_QUADSPI_DMA] = "QUADSPI_DMA",
+	[ALP_CAP_ID_NPU_DRPAI]   = "NPU_DRPAI",
+	[ALP_CAP_ID_HELIUM_MVE]  = "HELIUM_MVE",
+	[ALP_CAP_ID_NEON]        = "NEON",
+	[ALP_CAP_ID_GPU2D]       = "GPU2D",
+	[ALP_CAP_ID_DAVE2D]      = "DAVE2D",
+	[ALP_CAP_ID_CRYPTOCELL]  = "CRYPTOCELL",
+	[ALP_CAP_ID_INLINE_AES]  = "INLINE_AES",
+	[ALP_CAP_ID_CAU]         = "CAU",
+	[ALP_CAP_ID_DMA2D]       = "DMA2D",
 };
 
 bool alp_has(alp_cap_id_t cap)
 {
-    if ((unsigned)cap >= (unsigned)ALP_CAP_ID_COUNT) {
-        return false;
-    }
-    return _cap_table[cap];
+	if ((unsigned)cap >= (unsigned)ALP_CAP_ID_COUNT) {
+		return false;
+	}
+	return _cap_table[cap];
 }
 
 const char *alp_cap_name(alp_cap_id_t cap)
 {
-    if ((unsigned)cap >= (unsigned)ALP_CAP_ID_COUNT) {
-        return NULL;
-    }
-    return _cap_names[cap];
+	if ((unsigned)cap >= (unsigned)ALP_CAP_ID_COUNT) {
+		return NULL;
+	}
+	return _cap_names[cap];
 }

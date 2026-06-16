@@ -32,59 +32,59 @@
  * latency (say, a slow flash erase) doesn't trip a false reset,
  * but short enough that a genuine hang doesn't leave the
  * device unresponsive for too long.  5 seconds is typical. */
-#define WDT_TIMEOUT_MS  5000
+#define WDT_TIMEOUT_MS 5000
 
 /* Feed every 500 ms -- 10x safety margin against the 5 s timeout.
  * The 10x margin lets feeds line up with a slow main loop without
  * needing exact periodicity. */
-#define FEED_PERIOD_MS  500
+#define FEED_PERIOD_MS 500
 
-int main(void) {
-    printf("[wdt] open id=0 timeout=%u ms\n", WDT_TIMEOUT_MS);
+int main(void)
+{
+	printf("[wdt] open id=0 timeout=%u ms\n", WDT_TIMEOUT_MS);
 
-    /* on_timeout = ALP_WDT_RESET_SOC asks for a full SoC reset on
+	/* on_timeout = ALP_WDT_RESET_SOC asks for a full SoC reset on
      * miss-feed.  Alternatives are RESET_CPU (core reset only,
      * peripherals retain state -- useful for soft-fault recovery)
      * and INTERRUPT_ONLY (fires an IRQ; you'd capture state in the
      * handler before manually triggering a reset). */
-    alp_wdt_t *wdt = alp_wdt_open(0, &(alp_wdt_config_t){
-        .timeout_ms = WDT_TIMEOUT_MS,
-        .on_timeout = ALP_WDT_RESET_SOC,
-    });
-    if (wdt == NULL) {
-        printf("[wdt] open failed: alp_last_error=%d "
-               "(expected NOT_READY = -2 on native_sim)\n",
-               (int)alp_last_error());
-        printf("[wdt] done\n");
-        return 0;
-    }
+	alp_wdt_t *wdt = alp_wdt_open(0, &(alp_wdt_config_t){
+	                                     .timeout_ms = WDT_TIMEOUT_MS,
+	                                     .on_timeout = ALP_WDT_RESET_SOC,
+	                                 });
+	if (wdt == NULL) {
+		printf("[wdt] open failed: alp_last_error=%d "
+		       "(expected NOT_READY = -2 on native_sim)\n",
+		       (int)alp_last_error());
+		printf("[wdt] done\n");
+		return 0;
+	}
 
-    /* The feed loop.  In production this lives inside main()'s
+	/* The feed loop.  In production this lives inside main()'s
      * top-level loop (or, for cooperative-scheduled apps, inside
      * the dispatcher's per-task budget).  Critically, it should
      * NOT run from a high-priority kernel timer -- that would feed
      * the watchdog regardless of whether the application's actual
      * work is making progress. */
-    for (int i = 0; i < 3; i++) {
-        alp_status_t s = alp_wdt_feed(wdt);
-        printf("[wdt] feed %d -> %d\n", i, (int)s);
-        k_msleep(FEED_PERIOD_MS);
-    }
+	for (int i = 0; i < 3; i++) {
+		alp_status_t s = alp_wdt_feed(wdt);
+		printf("[wdt] feed %d -> %d\n", i, (int)s);
+		k_msleep(FEED_PERIOD_MS);
+	}
 
-    /* Best-effort disable.  Many M-class watchdogs are
+	/* Best-effort disable.  Many M-class watchdogs are
      * write-once-armed in hardware -- once you call wdt_setup,
      * you cannot turn it off without a reset.  ALP_ERR_NOSUPPORT
      * is the expected return on those SoCs; treat as
      * informational, not as failure. */
-    alp_status_t s = alp_wdt_disable(wdt);
-    printf("[wdt] disable -> %d (NOSUPPORT is OK on one-shot WDTs)\n",
-           (int)s);
+	alp_status_t s = alp_wdt_disable(wdt);
+	printf("[wdt] disable -> %d (NOSUPPORT is OK on one-shot WDTs)\n", (int)s);
 
-    /* close() releases the handle.  On hardware that can't disable
+	/* close() releases the handle.  On hardware that can't disable
      * the WDT, you MUST keep feeding from another thread or accept
      * the reset.  Plan for this when designing the firmware --
      * close() doesn't grant you a free pass. */
-    alp_wdt_close(wdt);
-    printf("[wdt] done\n");
-    return 0;
+	alp_wdt_close(wdt);
+	printf("[wdt] done\n");
+	return 0;
 }

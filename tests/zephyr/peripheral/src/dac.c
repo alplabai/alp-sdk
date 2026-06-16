@@ -15,31 +15,31 @@
 
 ZTEST(alp_peripheral, test_dac_null_cfg)
 {
-    zassert_is_null(alp_dac_open(NULL));
-    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+	zassert_is_null(alp_dac_open(NULL));
+	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_peripheral, test_dac_out_of_range_channel)
 {
-    /* E1M_DAC_COUNT = 2; the wrapper's internal array sized to
+	/* E1M_DAC_COUNT = 2; the wrapper's internal array sized to
      * match.  Channel id 9 must reject. */
-    alp_dac_t *d = alp_dac_open(&(alp_dac_config_t){
-        .channel_id = 9u,
-        .initial_mv = 0u,
-    });
-    zassert_is_null(d);
-    zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+	alp_dac_t *d = alp_dac_open(&(alp_dac_config_t){
+	    .channel_id = 9u,
+	    .initial_mv = 0u,
+	});
+	zassert_is_null(d);
+	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_peripheral, test_dac_unresolved_channel_yields_not_ready)
 {
-    /* Without a real DAC controller or V2N supervisor backing
+	/* Without a real DAC controller or V2N supervisor backing
      * channel 0, open must fail with NOT_READY (DT-alias path) or
      * NOSUPPORT (CONFIG_DAC=n).  Either is acceptable; both surface
      * as a NULL return. */
-    alp_dac_t *d = alp_dac_open(&(alp_dac_config_t){
-        .channel_id = 0u,
-        .initial_mv = 0u,
-    });
-    zassert_is_null(d);
+	alp_dac_t *d = alp_dac_open(&(alp_dac_config_t){
+	    .channel_id = 0u,
+	    .initial_mv = 0u,
+	});
+	zassert_is_null(d);
 }

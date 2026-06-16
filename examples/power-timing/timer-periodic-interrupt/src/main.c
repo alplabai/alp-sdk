@@ -131,100 +131,100 @@ static uint32_t       g_period_ticks = 0u;
  * ------------------------------------------------------------------ */
 static void on_periodic_alarm(alp_counter_t *c, uint32_t ticks, void *user)
 {
-    (void)user;
-    g_last_tick_value = ticks;
-    g_tick_count++;
-    g_tick_fired = true;
+	(void)user;
+	g_last_tick_value = ticks;
+	g_tick_count++;
+	g_tick_fired = true;
 
-    /* Re-arm for the next period.  The counter API is one-shot
+	/* Re-arm for the next period.  The counter API is one-shot
      * per call -- this is how you build "periodic" out of "one
      * shot".  The set_alarm call IS safe from ISR (it just
      * writes a compare register on the counter peripheral). */
-    (void)alp_counter_set_alarm(c, g_period_ticks, on_periodic_alarm, NULL);
+	(void)alp_counter_set_alarm(c, g_period_ticks, on_periodic_alarm, NULL);
 }
 
 int main(void)
 {
-    printf("[timer] open counter=0\n");
+	printf("[timer] open counter=0\n");
 
-    /* Open counter 0.  Channel choice matters less for this
+	/* Open counter 0.  Channel choice matters less for this
      * example than for hardware-PWM-tied timer usage; counter 0
      * is conventionally the "general purpose" timer in
      * E1M-conformant SoMs.  Both EVK presets expose counter 0
      * via the alp-counter0 DT alias. */
-    alp_counter_t *c = alp_counter_open(&(alp_counter_config_t){
-        .counter_id = 0,
-    });
-    if (c == NULL) {
-        /* Likely causes:
+	alp_counter_t *c = alp_counter_open(&(alp_counter_config_t){
+	    .counter_id = 0,
+	});
+	if (c == NULL) {
+		/* Likely causes:
          *   * No alp-counter0 alias on this build.
          *   * Counter pool exhausted (rare).
          *   * On native_sim there's no counter device by
          *     default -- alp_counter_open returns NULL with
          *     ALP_ERR_NOT_READY. */
-        printf("[timer] open counter failed: alp_last_error=%d\n", (int)alp_last_error());
-        printf("[timer] done\n");
-        return 0;
-    }
-    g_counter = c;
+		printf("[timer] open counter failed: alp_last_error=%d\n", (int)alp_last_error());
+		printf("[timer] done\n");
+		return 0;
+	}
+	g_counter = c;
 
-    /* Start the counter ticking.  Without this set_alarm fails
+	/* Start the counter ticking.  Without this set_alarm fails
      * with NOT_READY (the counter has to be running for the
      * compare unit to fire). */
-    alp_status_t s = alp_counter_start(c);
-    printf("[timer] start -> %d\n", (int)s);
+	alp_status_t s = alp_counter_start(c);
+	printf("[timer] start -> %d\n", (int)s);
 
-    /* Convert wall-clock microseconds to native counter ticks.
+	/* Convert wall-clock microseconds to native counter ticks.
      * Tick rate is hardware-specific; the SDK hides the
      * conversion so app code stays portable across SoMs. */
-    s = alp_counter_us_to_ticks(c, ALARM_PERIOD_US, &g_period_ticks);
-    printf("[timer] %u us = %u ticks (status=%d)\n", ALARM_PERIOD_US, g_period_ticks, (int)s);
-    if (s != ALP_OK) {
-        /* On the V2N supervisor backend this returns NOSUPPORT
+	s = alp_counter_us_to_ticks(c, ALARM_PERIOD_US, &g_period_ticks);
+	printf("[timer] %u us = %u ticks (status=%d)\n", ALARM_PERIOD_US, g_period_ticks, (int)s);
+	if (s != ALP_OK) {
+		/* On the V2N supervisor backend this returns NOSUPPORT
          * because the bridge can't report the GD32 timer's tick
          * frequency to the host without a protocol-v0.3 opcode.
          * Bail cleanly. */
-        printf("[timer] us_to_ticks not supported on this backend; "
-               "this example is AEN / native_sim today\n");
-        alp_counter_close(c);
-        printf("[timer] done\n");
-        return 0;
-    }
+		printf("[timer] us_to_ticks not supported on this backend; "
+		       "this example is AEN / native_sim today\n");
+		alp_counter_close(c);
+		printf("[timer] done\n");
+		return 0;
+	}
 
-    /* Open the user LED via the portable BOARD_PIN_LED_RED alias.
+	/* Open the user LED via the portable BOARD_PIN_LED_RED alias.
      * On the E1M EVK this resolves to the red RGB pad (default
      * function PWM3) claimed as a digital GPIO; on the E1M-X EVK
      * it resolves to the equivalent carrier indicator pad.  On a
      * custom board, rebind in board.yaml `pins:`. */
-    printf("[timer] open LED on BOARD_PIN_LED_RED\n");
-    alp_gpio_t *led = alp_gpio_open(BOARD_PIN_LED_RED);
-    if (led != NULL) {
-        s = alp_gpio_configure(led, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
-        if (s != ALP_OK) {
-            printf("[timer] gpio_configure -> %d\n", (int)s);
-            alp_gpio_close(led);
-            led = NULL;
-        }
-    }
-    /* If led is NULL after this point the example still works --
+	printf("[timer] open LED on BOARD_PIN_LED_RED\n");
+	alp_gpio_t *led = alp_gpio_open(BOARD_PIN_LED_RED);
+	if (led != NULL) {
+		s = alp_gpio_configure(led, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+		if (s != ALP_OK) {
+			printf("[timer] gpio_configure -> %d\n", (int)s);
+			alp_gpio_close(led);
+			led = NULL;
+		}
+	}
+	/* If led is NULL after this point the example still works --
      * we just won't have a physical LED to wiggle; the printf
      * trace shows the ISR is firing correctly. */
 
-    /* Arm the first alarm.  The callback re-arms itself for
+	/* Arm the first alarm.  The callback re-arms itself for
      * subsequent periods -- this gives us "periodic" out of the
      * "one-shot" counter API.  On a backend that can't dispatch
      * the callback (V2N supervisor) this returns NOSUPPORT. */
-    printf("[timer] arming first alarm\n");
-    s = alp_counter_set_alarm(c, g_period_ticks, on_periodic_alarm, NULL);
-    if (s != ALP_OK) {
-        printf("[timer] set_alarm -> %d (NOSUPPORT on V2N supervisor)\n", (int)s);
-        if (led != NULL) alp_gpio_close(led);
-        alp_counter_close(c);
-        printf("[timer] done\n");
-        return 0;
-    }
+	printf("[timer] arming first alarm\n");
+	s = alp_counter_set_alarm(c, g_period_ticks, on_periodic_alarm, NULL);
+	if (s != ALP_OK) {
+		printf("[timer] set_alarm -> %d (NOSUPPORT on V2N supervisor)\n", (int)s);
+		if (led != NULL) alp_gpio_close(led);
+		alp_counter_close(c);
+		printf("[timer] done\n");
+		return 0;
+	}
 
-    /* ------------------------------------------------------------------
+	/* ------------------------------------------------------------------
      * Main loop -- drain the flag, toggle the LED, log.
      *
      * Polling a flag in the main loop is the simplest form of
@@ -233,19 +233,19 @@ int main(void)
      * k_event or k_msgq instead so the main thread can wait()
      * efficiently rather than busy-checking.
      * ------------------------------------------------------------------ */
-    bool led_state = false;
-    while (g_tick_count < TICK_COUNT) {
-        /* Spin until the ISR sets the flag.  k_msleep yields the
+	bool led_state = false;
+	while (g_tick_count < TICK_COUNT) {
+		/* Spin until the ISR sets the flag.  k_msleep yields the
          * CPU so the kernel idle thread / lower-priority work
          * can run during the wait.  10 ms is conservative -- on
          * a 100 ms alarm cycle that's at most a 10% latency hit
          * between alarm fire and LED update. */
-        if (!g_tick_fired) {
-            k_msleep(10);
-            continue;
-        }
+		if (!g_tick_fired) {
+			k_msleep(10);
+			continue;
+		}
 
-        /* Drain the flag FIRST, then read the data the ISR
+		/* Drain the flag FIRST, then read the data the ISR
          * wrote.  This ordering matters when the ISR could fire
          * multiple times between drains: if we read the data
          * first, then cleared the flag, a fresh ISR between
@@ -256,32 +256,32 @@ int main(void)
          * volatile flag access this race is microsecond-narrow
          * but still exists.  For multi-core systems use
          * atomic_set / atomic_clear instead. */
-        g_tick_fired        = false;
-        uint32_t tick_no    = g_tick_count;
-        uint32_t tick_value = g_last_tick_value;
+		g_tick_fired        = false;
+		uint32_t tick_no    = g_tick_count;
+		uint32_t tick_value = g_last_tick_value;
 
-        /* Toggle the LED.  alp_gpio_write IS safe from any
+		/* Toggle the LED.  alp_gpio_write IS safe from any
          * context; we run it from main thread for symmetry with
          * the printf below (which is NOT safe from ISR). */
-        led_state = !led_state;
-        if (led != NULL) {
-            (void)alp_gpio_write(led, led_state);
-        }
+		led_state = !led_state;
+		if (led != NULL) {
+			(void)alp_gpio_write(led, led_state);
+		}
 
-        /* Now safe to log -- main thread context, printf is
+		/* Now safe to log -- main thread context, printf is
          * fine.  Including the tick number, the counter value
          * at the moment the alarm fired, and the new LED state
          * gives a complete event trace. */
-        printf("[timer] tick %u fired @ %u ticks, LED -> %d\n", tick_no, tick_value,
-               (int)led_state);
-    }
+		printf("[timer] tick %u fired @ %u ticks, LED -> %d\n", tick_no, tick_value,
+		       (int)led_state);
+	}
 
-    /* Clean teardown -- cancel any pending alarm, close the GPIO
+	/* Clean teardown -- cancel any pending alarm, close the GPIO
      * handle, close the counter handle.  Counter handle's close
      * also stops the counter; nothing left in flight. */
-    (void)alp_counter_cancel_alarm(c);
-    if (led != NULL) alp_gpio_close(led);
-    alp_counter_close(c);
-    printf("[timer] done\n");
-    return 0;
+	(void)alp_counter_cancel_alarm(c);
+	if (led != NULL) alp_gpio_close(led);
+	alp_counter_close(c);
+	printf("[timer] done\n");
+	return 0;
 }

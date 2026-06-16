@@ -51,35 +51,35 @@ extern "C" {
 /** Wall-clock representation; same shape as <time.h>'s tm but
  *  packed for I2C transport with no padding. */
 typedef struct {
-    uint8_t  second;  /**< 0..59 */
-    uint8_t  minute;  /**< 0..59 */
-    uint8_t  hour;    /**< 0..23 */
-    uint8_t  weekday; /**< 1..7 (1 = Sunday by convention) */
-    uint8_t  day;     /**< 1..31 */
-    uint8_t  month;   /**< 1..12 */
-    uint16_t year;    /**< Full year 2000..2099 */
+	uint8_t  second;  /**< 0..59 */
+	uint8_t  minute;  /**< 0..59 */
+	uint8_t  hour;    /**< 0..23 */
+	uint8_t  weekday; /**< 1..7 (1 = Sunday by convention) */
+	uint8_t  day;     /**< 1..31 */
+	uint8_t  month;   /**< 1..12 */
+	uint16_t year;    /**< Full year 2000..2099 */
 } rv3028c7_time_t;
 
 /** Alarm match mask -- which fields participate in the comparison. */
 typedef struct {
-    bool match_minute;
-    bool match_hour;
-    bool match_day_or_weekday;
-    bool use_weekday; /**< false => match by day-of-month */
+	bool match_minute;
+	bool match_hour;
+	bool match_day_or_weekday;
+	bool use_weekday; /**< false => match by day-of-month */
 } rv3028c7_alarm_match_t;
 
 typedef struct {
-    bool       initialised;
-    alp_i2c_t *bus;
-    /* Per-source handler table.  Indexed by rv3028c7_src_t.  NULL
+	bool       initialised;
+	alp_i2c_t *bus;
+	/* Per-source handler table.  Indexed by rv3028c7_src_t.  NULL
      * means "source not registered -- ignore on dispatch".  Default
      * after rv3028c7_init() is all-NULL; the legacy alarm helpers
      * keep working without registering a handler because they
      * bypass the dispatcher entirely. */
-    void                  *src_user[7]; /* RV3028C7_SRC_COUNT */
-    /* Stored as void* to avoid pulling in the handler typedef before
+	void *src_user[7]; /* RV3028C7_SRC_COUNT */
+	/* Stored as void* to avoid pulling in the handler typedef before
      * its declaration; cast happens at call site. */
-    void                  *src_handler[7]; /* rv3028c7_src_handler_t */
+	void *src_handler[7]; /* rv3028c7_src_handler_t */
 } rv3028c7_t;
 
 /** @brief Probe the RTC, clear the oscillator-stop flag (set on
@@ -127,14 +127,14 @@ alp_status_t rv3028c7_alarm_check_and_clear(rv3028c7_t *ctx, bool *fired);
 
 /** Latched event sources surfaced in the `STATUS` register. */
 typedef enum {
-    RV3028C7_SRC_PORF       = 0, /**< Power-on reset flag (STATUS bit 0). */
-    RV3028C7_SRC_EXT_EVENT  = 1, /**< External-event flag from EVI pin (bit 1). */
-    RV3028C7_SRC_ALARM      = 2, /**< Alarm match (bit 2). */
-    RV3028C7_SRC_COUNTDOWN  = 3, /**< Countdown-timer underflow (bit 3). */
-    RV3028C7_SRC_PERIODIC   = 4, /**< Periodic update flag, 1 s / 1 min (bit 4). */
-    RV3028C7_SRC_BSF        = 5, /**< Backup-switchover (VBAT vs Vdd) (bit 5). */
-    RV3028C7_SRC_CLKF       = 6, /**< Clock-output sync flag (bit 6). */
-    RV3028C7_SRC_COUNT
+	RV3028C7_SRC_PORF      = 0, /**< Power-on reset flag (STATUS bit 0). */
+	RV3028C7_SRC_EXT_EVENT = 1, /**< External-event flag from EVI pin (bit 1). */
+	RV3028C7_SRC_ALARM     = 2, /**< Alarm match (bit 2). */
+	RV3028C7_SRC_COUNTDOWN = 3, /**< Countdown-timer underflow (bit 3). */
+	RV3028C7_SRC_PERIODIC  = 4, /**< Periodic update flag, 1 s / 1 min (bit 4). */
+	RV3028C7_SRC_BSF       = 5, /**< Backup-switchover (VBAT vs Vdd) (bit 5). */
+	RV3028C7_SRC_CLKF      = 6, /**< Clock-output sync flag (bit 6). */
+	RV3028C7_SRC_COUNT
 } rv3028c7_src_t;
 
 /** Per-source handler callback.  Runs in the same context that calls
@@ -174,14 +174,14 @@ alp_status_t rv3028c7_dispatch_irq(rv3028c7_t *ctx, uint8_t *status_seen);
  *  full table -- the practical "use CLKOUT as a second IRQ line"
  *  modes are the periodic-timer + countdown-timer routes. */
 typedef enum {
-    RV3028C7_CLKOUT_32_768_HZ  = 0,
-    RV3028C7_CLKOUT_8192_HZ    = 1,
-    RV3028C7_CLKOUT_1024_HZ    = 2,
-    RV3028C7_CLKOUT_64_HZ      = 3,
-    RV3028C7_CLKOUT_32_HZ      = 4,
-    RV3028C7_CLKOUT_1_HZ       = 5,
-    RV3028C7_CLKOUT_PERIODIC   = 6, /**< Pulses on Periodic-update (= bit 4 of STATUS) */
-    RV3028C7_CLKOUT_LOW        = 7, /**< CLKOUT driven low (effectively disabled). */
+	RV3028C7_CLKOUT_32_768_HZ = 0,
+	RV3028C7_CLKOUT_8192_HZ   = 1,
+	RV3028C7_CLKOUT_1024_HZ   = 2,
+	RV3028C7_CLKOUT_64_HZ     = 3,
+	RV3028C7_CLKOUT_32_HZ     = 4,
+	RV3028C7_CLKOUT_1_HZ      = 5,
+	RV3028C7_CLKOUT_PERIODIC  = 6, /**< Pulses on Periodic-update (= bit 4 of STATUS) */
+	RV3028C7_CLKOUT_LOW       = 7, /**< CLKOUT driven low (effectively disabled). */
 } rv3028c7_clkout_src_t;
 
 /** @brief Reprogram the CLKOUT pin's source.  Used by boards that
@@ -197,7 +197,7 @@ alp_status_t rv3028c7_route_clkout(rv3028c7_t *ctx, rv3028c7_clkout_src_t src);
 alp_status_t rv3028c7_set_int_enable(rv3028c7_t *ctx, rv3028c7_src_t src, bool enable);
 
 /** @brief Release resources.  Idempotent. */
-void         rv3028c7_deinit(rv3028c7_t *ctx);
+void rv3028c7_deinit(rv3028c7_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

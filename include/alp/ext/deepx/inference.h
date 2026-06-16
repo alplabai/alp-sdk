@@ -48,22 +48,22 @@ extern "C" {
 /** DX-M1 carries exactly four hardware slots.  Tile reservations
  *  are addressed by named-slot rather than bare 0..3 integers. */
 typedef enum {
-    ALP_DEEPX_INFERENCE_SLOT_0 = 0u,
-    ALP_DEEPX_INFERENCE_SLOT_1 = 1u,
-    ALP_DEEPX_INFERENCE_SLOT_2 = 2u,
-    ALP_DEEPX_INFERENCE_SLOT_3 = 3u,
+	ALP_DEEPX_INFERENCE_SLOT_0 = 0u,
+	ALP_DEEPX_INFERENCE_SLOT_1 = 1u,
+	ALP_DEEPX_INFERENCE_SLOT_2 = 2u,
+	ALP_DEEPX_INFERENCE_SLOT_3 = 3u,
 } alp_deepx_inference_slot_t;
 
 #define ALP_DEEPX_INFERENCE_SLOT_COUNT 4u
 
 /** DX-M1 runtime status flags. */
 typedef enum {
-    ALP_DEEPX_INFERENCE_STATUS_IDLE        = 0u,
-    ALP_DEEPX_INFERENCE_STATUS_ARMED       = 1u << 0,
-    ALP_DEEPX_INFERENCE_STATUS_RUNNING     = 1u << 1,
-    ALP_DEEPX_INFERENCE_STATUS_DONE        = 1u << 2,
-    ALP_DEEPX_INFERENCE_STATUS_TIMEOUT     = 1u << 3,
-    ALP_DEEPX_INFERENCE_STATUS_TRANSPORT_ERR = 1u << 4,
+	ALP_DEEPX_INFERENCE_STATUS_IDLE          = 0u,
+	ALP_DEEPX_INFERENCE_STATUS_ARMED         = 1u << 0,
+	ALP_DEEPX_INFERENCE_STATUS_RUNNING       = 1u << 1,
+	ALP_DEEPX_INFERENCE_STATUS_DONE          = 1u << 2,
+	ALP_DEEPX_INFERENCE_STATUS_TIMEOUT       = 1u << 3,
+	ALP_DEEPX_INFERENCE_STATUS_TRANSPORT_ERR = 1u << 4,
 } alp_deepx_inference_status_t;
 
 /**
@@ -91,8 +91,7 @@ typedef enum {
  *          @ref ALP_ERR_NOSUPPORT until the DEEPX SDK adapter
  *               lands.
  */
-alp_status_t alp_deepx_inference_slot_pin(alp_inference_t *inf,
-                                          alp_deepx_inference_slot_t slot);
+alp_status_t alp_deepx_inference_slot_pin(alp_inference_t *inf, alp_deepx_inference_slot_t slot);
 
 /**
  * @brief Configure the DRAM tile reservation for this handle.
@@ -120,8 +119,7 @@ alp_status_t alp_deepx_inference_slot_pin(alp_inference_t *inf,
  *          @ref ALP_ERR_NOSUPPORT until the DEEPX SDK adapter
  *               lands.
  */
-alp_status_t alp_deepx_inference_dram_tile_reserve(alp_inference_t *inf,
-                                                   uint32_t         tile_bytes);
+alp_status_t alp_deepx_inference_dram_tile_reserve(alp_inference_t *inf, uint32_t tile_bytes);
 
 /**
  * @brief Read the DX-M1 runtime status flags.
@@ -143,8 +141,7 @@ alp_status_t alp_deepx_inference_dram_tile_reserve(alp_inference_t *inf,
  *          @ref ALP_ERR_NOSUPPORT until the DEEPX SDK adapter
  *               lands.
  */
-alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf,
-                                            uint32_t        *status_out);
+alp_status_t alp_deepx_inference_get_status(alp_inference_t *inf, uint32_t *status_out);
 
 #ifdef __cplusplus
 }

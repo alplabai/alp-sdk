@@ -65,52 +65,52 @@ extern "C" {
 #endif
 
 /* MAVLink v2 magic + message IDs we handle. */
-#define ALP_MAVLINK_STX_V2                0xFDu
-#define ALP_MAVLINK_MSG_HEARTBEAT           0u
-#define ALP_MAVLINK_MSG_GPS_RAW_INT        24u
-#define ALP_MAVLINK_MSG_ATTITUDE           30u
-#define ALP_MAVLINK_MSG_GLOBAL_POSITION    33u
-#define ALP_MAVLINK_MSG_RC_CHANNELS        65u
-#define ALP_MAVLINK_MSG_COMMAND_LONG       76u
-#define ALP_MAVLINK_MSG_BATTERY_STATUS    147u
+#define ALP_MAVLINK_STX_V2 0xFDu
+#define ALP_MAVLINK_MSG_HEARTBEAT 0u
+#define ALP_MAVLINK_MSG_GPS_RAW_INT 24u
+#define ALP_MAVLINK_MSG_ATTITUDE 30u
+#define ALP_MAVLINK_MSG_GLOBAL_POSITION 33u
+#define ALP_MAVLINK_MSG_RC_CHANNELS 65u
+#define ALP_MAVLINK_MSG_COMMAND_LONG 76u
+#define ALP_MAVLINK_MSG_BATTERY_STATUS 147u
 
 /* HEARTBEAT mav_type / autopilot enums (subset). */
-#define ALP_MAV_TYPE_QUADROTOR              2u
-#define ALP_MAV_AUTOPILOT_GENERIC           0u
+#define ALP_MAV_TYPE_QUADROTOR 2u
+#define ALP_MAV_AUTOPILOT_GENERIC 0u
 
 /* COMMAND_LONG command IDs we honour. */
-#define ALP_MAV_CMD_COMPONENT_ARM_DISARM  400u
-#define ALP_MAV_CMD_DO_SET_MODE           176u
+#define ALP_MAV_CMD_COMPONENT_ARM_DISARM 400u
+#define ALP_MAV_CMD_DO_SET_MODE 176u
 
 /** Frame-parser state machine. */
 typedef struct {
-    enum {
-        ALP_MAV_RX_IDLE = 0,
-        ALP_MAV_RX_LEN,
-        ALP_MAV_RX_INCOMPAT,
-        ALP_MAV_RX_COMPAT,
-        ALP_MAV_RX_SEQ,
-        ALP_MAV_RX_SYSID,
-        ALP_MAV_RX_COMPID,
-        ALP_MAV_RX_MSGID_LO,
-        ALP_MAV_RX_MSGID_MID,
-        ALP_MAV_RX_MSGID_HI,
-        ALP_MAV_RX_PAYLOAD,
-        ALP_MAV_RX_CRC_LO,
-        ALP_MAV_RX_CRC_HI,
-    } state;
-    uint8_t  payload_len;
-    uint8_t  seq;
-    uint8_t  sysid;
-    uint8_t  compid;
-    uint32_t msgid;
-    uint8_t  payload[256];
-    uint16_t payload_idx;
-    uint16_t crc;
+	enum {
+		ALP_MAV_RX_IDLE = 0,
+		ALP_MAV_RX_LEN,
+		ALP_MAV_RX_INCOMPAT,
+		ALP_MAV_RX_COMPAT,
+		ALP_MAV_RX_SEQ,
+		ALP_MAV_RX_SYSID,
+		ALP_MAV_RX_COMPID,
+		ALP_MAV_RX_MSGID_LO,
+		ALP_MAV_RX_MSGID_MID,
+		ALP_MAV_RX_MSGID_HI,
+		ALP_MAV_RX_PAYLOAD,
+		ALP_MAV_RX_CRC_LO,
+		ALP_MAV_RX_CRC_HI,
+	} state;
+	uint8_t  payload_len;
+	uint8_t  seq;
+	uint8_t  sysid;
+	uint8_t  compid;
+	uint32_t msgid;
+	uint8_t  payload[256];
+	uint16_t payload_idx;
+	uint16_t crc;
 } alp_mavlink_rx_t;
 
 /** Bring up the MAVLink link.  @return 0 on success. */
-int  alp_mavlink_init(uint8_t sysid, uint8_t compid);
+int alp_mavlink_init(uint8_t sysid, uint8_t compid);
 
 /** Telemetry loop -- emits HEARTBEAT + ATTITUDE + GPS + BATTERY
  *  at the configured rates from the autopilot state snapshot. */

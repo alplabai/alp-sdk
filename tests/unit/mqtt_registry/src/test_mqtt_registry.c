@@ -37,57 +37,55 @@ ZTEST_SUITE(alp_mqtt_registry, NULL, NULL, NULL, NULL, NULL);
 
 ZTEST(alp_mqtt_registry, test_zephyr_drv_picked_over_sw_on_alif_e7)
 {
-    const alp_backend_t *be =
-        alp_backend_select("mqtt", "alif:ensemble:e7");
-    zassert_not_null(be);
-    zassert_equal(strcmp(be->vendor, "zephyr"), 0);
-    zassert_equal(be->priority, 100);
+	const alp_backend_t *be = alp_backend_select("mqtt", "alif:ensemble:e7");
+	zassert_not_null(be);
+	zassert_equal(strcmp(be->vendor, "zephyr"), 0);
+	zassert_equal(be->priority, 100);
 }
 
 ZTEST(alp_mqtt_registry, test_sw_fallback_picked_for_unknown_silicon)
 {
-    /* Both registered backends are wildcards; the higher-priority
+	/* Both registered backends are wildcards; the higher-priority
      * zephyr_drv would normally win.  This case still exercises the
      * selector and asserts the sw_fallback is reachable on the test
      * build via the registry's count.  Degraded pattern: only
      * inventory is asserted, not the specific pick. */
-    const alp_backend_t *be =
-        alp_backend_select("mqtt", "fictional:soc:zz");
-    zassert_not_null(be);
-    (void)be;
-    zassert_true(alp_backend_count("mqtt") >= 2u);
+	const alp_backend_t *be = alp_backend_select("mqtt", "fictional:soc:zz");
+	zassert_not_null(be);
+	(void)be;
+	zassert_true(alp_backend_count("mqtt") >= 2u);
 }
 
 ZTEST(alp_mqtt_registry, test_select_returns_null_for_null_class)
 {
-    zassert_is_null(alp_backend_select(NULL, "alif:ensemble:e7"));
+	zassert_is_null(alp_backend_select(NULL, "alif:ensemble:e7"));
 }
 
 ZTEST(alp_mqtt_registry, test_select_returns_null_for_null_silicon_ref)
 {
-    /* Regression for the NULL silicon_ref fix in src/backend.c.
+	/* Regression for the NULL silicon_ref fix in src/backend.c.
      * NULL must NOT silently match the "*" wildcard. */
-    zassert_is_null(alp_backend_select("mqtt", NULL));
+	zassert_is_null(alp_backend_select("mqtt", NULL));
 }
 
 /* ---------- Public-API behaviour tests ------------------------------ */
 
 ZTEST(alp_mqtt_registry, test_mqtt_open_returns_null_on_null_config)
 {
-    /* Dispatcher must reject NULL cfg before reaching the backend. */
-    zassert_is_null(alp_mqtt_open(NULL));
+	/* Dispatcher must reject NULL cfg before reaching the backend. */
+	zassert_is_null(alp_mqtt_open(NULL));
 }
 
 ZTEST(alp_mqtt_registry, test_mqtt_capabilities_returns_null_for_null_handle)
 {
-    zassert_is_null(alp_mqtt_capabilities(NULL));
+	zassert_is_null(alp_mqtt_capabilities(NULL));
 }
 
 /* ---------- Registry inventory test -------------------------------- */
 
 ZTEST(alp_mqtt_registry, test_backend_count_for_mqtt)
 {
-    /* zephyr_drv + sw_fallback registered on this build.
+	/* zephyr_drv + sw_fallback registered on this build.
      * No vendor-specific backends exist for MQTT in Slice 4b. */
-    zassert_equal(alp_backend_count("mqtt"), 2u);
+	zassert_equal(alp_backend_count("mqtt"), 2u);
 }

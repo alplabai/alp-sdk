@@ -36,103 +36,103 @@
 
 static alp_status_t tmp112_read_reg16(tmp112_t *ctx, uint8_t reg, uint16_t *val_out)
 {
-    uint8_t      buf[2] = {0};
-    alp_status_t s      = alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, buf, sizeof(buf));
-    if (s != ALP_OK) return s;
-    *val_out = ((uint16_t)buf[0] << 8) | buf[1];
-    return ALP_OK;
+	uint8_t      buf[2] = { 0 };
+	alp_status_t s      = alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, buf, sizeof(buf));
+	if (s != ALP_OK) return s;
+	*val_out = ((uint16_t)buf[0] << 8) | buf[1];
+	return ALP_OK;
 }
 
 static alp_status_t tmp112_write_reg16(tmp112_t *ctx, uint8_t reg, uint16_t val)
 {
-    uint8_t buf[3] = {reg, (uint8_t)(val >> 8), (uint8_t)(val & 0xFF)};
-    return alp_i2c_write(ctx->bus, ctx->addr, buf, sizeof(buf));
+	uint8_t buf[3] = { reg, (uint8_t)(val >> 8), (uint8_t)(val & 0xFF) };
+	return alp_i2c_write(ctx->bus, ctx->addr, buf, sizeof(buf));
 }
 
 alp_status_t tmp112_init(tmp112_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
 {
-    if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
-    if (addr_7bit < TMP112_I2C_ADDR_GND || addr_7bit > TMP112_I2C_ADDR_SCL) {
-        return ALP_ERR_INVAL;
-    }
-    memset(ctx, 0, sizeof(*ctx));
-    ctx->bus  = bus;
-    ctx->addr = addr_7bit;
+	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
+	if (addr_7bit < TMP112_I2C_ADDR_GND || addr_7bit > TMP112_I2C_ADDR_SCL) {
+		return ALP_ERR_INVAL;
+	}
+	memset(ctx, 0, sizeof(*ctx));
+	ctx->bus  = bus;
+	ctx->addr = addr_7bit;
 
-    /* Probe via CONF read -- the upper byte's R1:R0 bits must read 11. */
-    uint16_t     conf = 0;
-    alp_status_t s    = tmp112_read_reg16(ctx, TMP112_REG_CONF, &conf);
-    if (s != ALP_OK) return s;
-    if ((conf & (TMP112_CONF_R1 | TMP112_CONF_R0)) != (TMP112_CONF_R1 | TMP112_CONF_R0)) {
-        return ALP_ERR_NOT_READY; /* Not a TMP112 -- probably mis-addressed */
-    }
+	/* Probe via CONF read -- the upper byte's R1:R0 bits must read 11. */
+	uint16_t     conf = 0;
+	alp_status_t s    = tmp112_read_reg16(ctx, TMP112_REG_CONF, &conf);
+	if (s != ALP_OK) return s;
+	if ((conf & (TMP112_CONF_R1 | TMP112_CONF_R0)) != (TMP112_CONF_R1 | TMP112_CONF_R0)) {
+		return ALP_ERR_NOT_READY; /* Not a TMP112 -- probably mis-addressed */
+	}
 
-    s = tmp112_write_reg16(ctx, TMP112_REG_CONF, TMP112_CONF_DEFAULT);
-    if (s != ALP_OK) return s;
-    ctx->extended_mode = false;
-    ctx->initialised   = true;
-    return ALP_OK;
+	s = tmp112_write_reg16(ctx, TMP112_REG_CONF, TMP112_CONF_DEFAULT);
+	if (s != ALP_OK) return s;
+	ctx->extended_mode = false;
+	ctx->initialised   = true;
+	return ALP_OK;
 }
 
 alp_status_t tmp112_set_rate(tmp112_t *ctx, tmp112_rate_t rate)
 {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    uint16_t     conf = 0;
-    alp_status_t s    = tmp112_read_reg16(ctx, TMP112_REG_CONF, &conf);
-    if (s != ALP_OK) return s;
-    conf &= ~(TMP112_CONF_CR1 | TMP112_CONF_CR0);
-    conf |= ((uint16_t)rate & 0x3) << 6;
-    return tmp112_write_reg16(ctx, TMP112_REG_CONF, conf);
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	uint16_t     conf = 0;
+	alp_status_t s    = tmp112_read_reg16(ctx, TMP112_REG_CONF, &conf);
+	if (s != ALP_OK) return s;
+	conf &= ~(TMP112_CONF_CR1 | TMP112_CONF_CR0);
+	conf |= ((uint16_t)rate & 0x3) << 6;
+	return tmp112_write_reg16(ctx, TMP112_REG_CONF, conf);
 }
 
 alp_status_t tmp112_set_extended_mode(tmp112_t *ctx, bool extended)
 {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    uint16_t     conf = 0;
-    alp_status_t s    = tmp112_read_reg16(ctx, TMP112_REG_CONF, &conf);
-    if (s != ALP_OK) return s;
-    if (extended)
-        conf |= TMP112_CONF_EM;
-    else
-        conf &= ~TMP112_CONF_EM;
-    s = tmp112_write_reg16(ctx, TMP112_REG_CONF, conf);
-    if (s == ALP_OK) ctx->extended_mode = extended;
-    return s;
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	uint16_t     conf = 0;
+	alp_status_t s    = tmp112_read_reg16(ctx, TMP112_REG_CONF, &conf);
+	if (s != ALP_OK) return s;
+	if (extended)
+		conf |= TMP112_CONF_EM;
+	else
+		conf &= ~TMP112_CONF_EM;
+	s = tmp112_write_reg16(ctx, TMP112_REG_CONF, conf);
+	if (s == ALP_OK) ctx->extended_mode = extended;
+	return s;
 }
 
 alp_status_t tmp112_read_temp_milli_c(tmp112_t *ctx, int32_t *temp_milli_c)
 {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if (temp_milli_c == NULL) return ALP_ERR_INVAL;
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (temp_milli_c == NULL) return ALP_ERR_INVAL;
 
-    uint16_t     raw = 0;
-    alp_status_t s   = tmp112_read_reg16(ctx, TMP112_REG_TEMP, &raw);
-    if (s != ALP_OK) return s;
+	uint16_t     raw = 0;
+	alp_status_t s   = tmp112_read_reg16(ctx, TMP112_REG_TEMP, &raw);
+	if (s != ALP_OK) return s;
 
-    /* TMP112 packs the 12-bit (or 13-bit in extended mode) value
+	/* TMP112 packs the 12-bit (or 13-bit in extended mode) value
      * left-justified.  Sign-extend before the divide. */
-    int32_t shifted;
-    if (ctx->extended_mode) {
-        /* 13-bit, right-shift by 3, sign-extend. */
-        int32_t sx = (int16_t)raw;
-        sx >>= 3;
-        shifted = sx;
-    } else {
-        /* 12-bit, right-shift by 4, sign-extend. */
-        int32_t sx = (int16_t)raw;
-        sx >>= 4;
-        shifted = sx;
-    }
-    /* Each LSB = 0.0625 C = 62.5 milli-C.  Multiply by 625, then
+	int32_t shifted;
+	if (ctx->extended_mode) {
+		/* 13-bit, right-shift by 3, sign-extend. */
+		int32_t sx = (int16_t)raw;
+		sx >>= 3;
+		shifted = sx;
+	} else {
+		/* 12-bit, right-shift by 4, sign-extend. */
+		int32_t sx = (int16_t)raw;
+		sx >>= 4;
+		shifted = sx;
+	}
+	/* Each LSB = 0.0625 C = 62.5 milli-C.  Multiply by 625, then
      * divide by 10 -- avoids the half-LSB (62.5) by keeping integer
      * arithmetic. */
-    *temp_milli_c = (shifted * 625) / 10;
-    return ALP_OK;
+	*temp_milli_c = (shifted * 625) / 10;
+	return ALP_OK;
 }
 
 void tmp112_deinit(tmp112_t *ctx)
 {
-    if (ctx == NULL) return;
-    ctx->initialised = false;
-    ctx->bus         = NULL;
+	if (ctx == NULL) return;
+	ctx->initialised = false;
+	ctx->bus         = NULL;
 }

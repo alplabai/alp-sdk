@@ -55,69 +55,69 @@ static int16_t g_pcm[FRAMES * CHANS];
 
 int            main(void)
 {
-    printf("[audio] audio-loopback v0.2 reference -- mic -> DSP -> DAC\n");
+	printf("[audio] audio-loopback v0.2 reference -- mic -> DSP -> DAC\n");
 
-    alp_audio_config_t cfg = {
-        .peripheral_id    = E1M_PDM0,
-        .sample_rate_hz   = SR_HZ,
-        .channels         = CHANS,
-        .format           = ALP_AUDIO_FMT_S16_LE,
-        .frames_per_block = FRAMES,
-    };
+	alp_audio_config_t cfg = {
+		.peripheral_id    = E1M_PDM0,
+		.sample_rate_hz   = SR_HZ,
+		.channels         = CHANS,
+		.format           = ALP_AUDIO_FMT_S16_LE,
+		.frames_per_block = FRAMES,
+	};
 
-    alp_audio_in_t *mic = alp_audio_in_open(&cfg);
-    if (mic == NULL) {
-        printf("[audio]   alp_audio_in_open               skip (no DMIC, last_err=%d)\n",
-               (int)alp_last_error());
-        goto done;
-    }
-    printf("[audio]   alp_audio_in_open(PDM0)         ok\n");
+	alp_audio_in_t *mic = alp_audio_in_open(&cfg);
+	if (mic == NULL) {
+		printf("[audio]   alp_audio_in_open               skip (no DMIC, last_err=%d)\n",
+		       (int)alp_last_error());
+		goto done;
+	}
+	printf("[audio]   alp_audio_in_open(PDM0)         ok\n");
 
-    cfg.peripheral_id    = EVK_I2S_AUDIO_CODEC;
-    alp_audio_out_t *spk = alp_audio_out_open(&cfg);
-    if (spk == NULL) {
-        printf("[audio]   alp_audio_out_open              skip (no I2S, last_err=%d)\n",
-               (int)alp_last_error());
-        alp_audio_in_close(mic);
-        goto done;
-    }
-    printf("[audio]   alp_audio_out_open(I2S0)        ok\n");
+	cfg.peripheral_id    = EVK_I2S_AUDIO_CODEC;
+	alp_audio_out_t *spk = alp_audio_out_open(&cfg);
+	if (spk == NULL) {
+		printf("[audio]   alp_audio_out_open              skip (no I2S, last_err=%d)\n",
+		       (int)alp_last_error());
+		alp_audio_in_close(mic);
+		goto done;
+	}
+	printf("[audio]   alp_audio_out_open(I2S0)        ok\n");
 
-    /* Set software volume to ~60 % (0x9A in Q8 of 0x100 = ~60 %).
+	/* Set software volume to ~60 % (0x9A in Q8 of 0x100 = ~60 %).
      * Real apps would also drive the codec's gain pin if exposed. */
-    (void)alp_audio_out_set_volume(spk, 0x9A);
+	(void)alp_audio_out_set_volume(spk, 0x9A);
 
-    if (alp_audio_in_start(mic) != ALP_OK) {
-        printf("[audio]   alp_audio_in_start              fail\n");
-        goto teardown;
-    }
-    if (alp_audio_out_start(spk) != ALP_OK) {
-        printf("[audio]   alp_audio_out_start             fail\n");
-        goto teardown;
-    }
-    printf("[audio]   streaming %d blocks of %d frames @ %d Hz\n", BLOCKS, FRAMES, SR_HZ);
+	if (alp_audio_in_start(mic) != ALP_OK) {
+		printf("[audio]   alp_audio_in_start              fail\n");
+		goto teardown;
+	}
+	if (alp_audio_out_start(spk) != ALP_OK) {
+		printf("[audio]   alp_audio_out_start             fail\n");
+		goto teardown;
+	}
+	printf("[audio]   streaming %d blocks of %d frames @ %d Hz\n", BLOCKS, FRAMES, SR_HZ);
 
-    /* The actual loop -- read, then write.  The wrapper applies
+	/* The actual loop -- read, then write.  The wrapper applies
      * the DC-block + software volume internally; the user code
      * stays this small. */
-    for (int b = 0; b < BLOCKS; ++b) {
-        size_t got = 0;
-        if (alp_audio_in_read(mic, g_pcm, FRAMES, &got, 1000) != ALP_OK || got == 0) {
-            break;
-        }
-        size_t pushed = 0;
-        (void)alp_audio_out_write(spk, g_pcm, got, &pushed, 1000);
-    }
+	for (int b = 0; b < BLOCKS; ++b) {
+		size_t got = 0;
+		if (alp_audio_in_read(mic, g_pcm, FRAMES, &got, 1000) != ALP_OK || got == 0) {
+			break;
+		}
+		size_t pushed = 0;
+		(void)alp_audio_out_write(spk, g_pcm, got, &pushed, 1000);
+	}
 
-    (void)alp_audio_out_stop(spk);
-    (void)alp_audio_in_stop(mic);
-    printf("[audio]   loopback complete\n");
+	(void)alp_audio_out_stop(spk);
+	(void)alp_audio_in_stop(mic);
+	printf("[audio]   loopback complete\n");
 
 teardown:
-    alp_audio_out_close(spk);
-    alp_audio_in_close(mic);
+	alp_audio_out_close(spk);
+	alp_audio_in_close(mic);
 
 done:
-    printf("[audio] done\n");
-    return 0;
+	printf("[audio] done\n");
+	return 0;
 }

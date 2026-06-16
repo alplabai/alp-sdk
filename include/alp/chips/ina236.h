@@ -70,25 +70,25 @@ extern "C" {
 
 /** ADC range setting — affects shunt voltage LSB and full-scale. */
 typedef enum {
-    INA236_ADCRANGE_81MV = 0, /**< Full-scale 81.92 mV, LSB = 2.5 uV.  Default. */
-    INA236_ADCRANGE_20MV =
-        1, /**< Full-scale 20.48 mV, LSB = 625 nV.  Higher resolution at low currents. */
+	INA236_ADCRANGE_81MV = 0, /**< Full-scale 81.92 mV, LSB = 2.5 uV.  Default. */
+	INA236_ADCRANGE_20MV =
+	    1, /**< Full-scale 20.48 mV, LSB = 625 nV.  Higher resolution at low currents. */
 } ina236_adcrange_t;
 
 typedef struct {
-    bool       initialised;
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    /* Calibration parameters, retained for diagnostics. */
-    float shunt_ohms;
-    float max_current_a;
-    /* Computed at init: CURRENT_LSB in amps.  Multiply the raw
+	bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	/* Calibration parameters, retained for diagnostics. */
+	float shunt_ohms;
+	float max_current_a;
+	/* Computed at init: CURRENT_LSB in amps.  Multiply the raw
      * CURRENT register by this to get amps; multiply by 1e6 first
      * for microamps. */
-    float current_lsb_a;
-    /* Cached config register so toggles don't read-modify-write. */
-    uint16_t          cfg_cache;
-    ina236_adcrange_t adcrange;
+	float current_lsb_a;
+	/* Cached config register so toggles don't read-modify-write. */
+	uint16_t          cfg_cache;
+	ina236_adcrange_t adcrange;
 } ina236_t;
 
 /**
@@ -137,10 +137,10 @@ alp_status_t ina236_read_power_uw(ina236_t *ctx, uint32_t *uw_out);
  *        four separate calls when polling at high rate.
  */
 typedef struct {
-    int32_t  bus_mv;
-    int32_t  shunt_uv;
-    int32_t  current_ua;
-    uint32_t power_uw;
+	int32_t  bus_mv;
+	int32_t  shunt_uv;
+	int32_t  current_ua;
+	uint32_t power_uw;
 } ina236_sample_t;
 
 /** @brief Read shunt voltage + bus voltage + current + power into one struct. */
@@ -151,7 +151,7 @@ alp_status_t ina236_read_all(ina236_t *ctx, ina236_sample_t *sample_out);
 alp_status_t ina236_reset(ina236_t *ctx);
 
 /** @brief Release the driver context.  Idempotent. */
-void         ina236_deinit(ina236_t *ctx);
+void ina236_deinit(ina236_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

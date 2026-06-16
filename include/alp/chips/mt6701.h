@@ -37,9 +37,9 @@ extern "C" {
 #define MT6701_REG_ANGLE_LO 0x04u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } mt6701_t;
 
 /** @brief Bind context to an open I²C bus. */

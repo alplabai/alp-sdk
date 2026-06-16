@@ -38,10 +38,10 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_uart_t *port;
-    alp_gpio_t *pwrkey; /**< Active-high PWRKEY pulse line. */
-    alp_gpio_t *reset;  /**< Optional hardware reset. */
-    bool        initialised;
+	alp_uart_t *port;
+	alp_gpio_t *pwrkey; /**< Active-high PWRKEY pulse line. */
+	alp_gpio_t *reset;  /**< Optional hardware reset. */
+	bool        initialised;
 } quectel_bg95_t;
 
 /** @brief Bind context to caller-opened UART + GPIOs. */

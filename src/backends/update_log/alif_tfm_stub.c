@@ -22,17 +22,17 @@
 
 alp_status_t alp_update_log_alif_tfm_store_put(void *c, const char *k, const uint8_t *b, size_t n)
 {
-    (void)c;
-    (void)k;
-    (void)b;
-    (void)n;
-    return ALP_ERR_NOSUPPORT;
+	(void)c;
+	(void)k;
+	(void)b;
+	(void)n;
+	return ALP_ERR_NOSUPPORT;
 }
 
 alp_status_t alp_update_log_alif_tfm_counter_read(void *c, uint32_t id, uint64_t *v)
 {
-    (void)c;
-    (void)id;
-    (void)v;
-    return ALP_ERR_NOSUPPORT;
+	(void)c;
+	(void)id;
+	(void)v;
+	return ALP_ERR_NOSUPPORT;
 }

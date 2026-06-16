@@ -102,26 +102,26 @@ extern "C" {
  *  via this enum.  Use `alp_core_id_t` when the app is explicitly
  *  SoM-scoped and wants to talk to a specific physical core. */
 typedef enum {
-    ALP_CORE_SELF        = 0,   /**< Whichever core this code is running on. */
+	ALP_CORE_SELF = 0, /**< Whichever core this code is running on. */
 
-    /* ---- Alif Ensemble (AEN family) ---- */
-    ALP_CORE_M55_HP      = 1,   /**< AEN High-Performance Cortex-M55 (400 MHz). */
-    ALP_CORE_M55_HE      = 2,   /**< AEN High-Efficiency Cortex-M55 (160 MHz, always-on). */
-    ALP_CORE_A32_0       = 3,   /**< AEN Cortex-A32 #0 on E5/E6/E7/E8 (Linux). */
-    ALP_CORE_A32_1       = 4,   /**< AEN Cortex-A32 #1 on E7/E8 (Linux). */
-    ALP_CORE_A32_CLUSTER = 5,   /**< AEN Cortex-A32 cluster as a single endpoint
+	/* ---- Alif Ensemble (AEN family) ---- */
+	ALP_CORE_M55_HP      = 1, /**< AEN High-Performance Cortex-M55 (400 MHz). */
+	ALP_CORE_M55_HE      = 2, /**< AEN High-Efficiency Cortex-M55 (160 MHz, always-on). */
+	ALP_CORE_A32_0       = 3, /**< AEN Cortex-A32 #0 on E5/E6/E7/E8 (Linux). */
+	ALP_CORE_A32_1       = 4, /**< AEN Cortex-A32 #1 on E7/E8 (Linux). */
+	ALP_CORE_A32_CLUSTER = 5, /**< AEN Cortex-A32 cluster as a single endpoint
                                      (E5/E6/E7/E8 -- matches `a32_cluster` in
                                      the AEN5+ topology blocks). */
 
-    /* ---- Renesas RZ/V2N (V2N + V2M families) ---- */
-    ALP_CORE_M33_SM      = 6,   /**< V2N Cortex-M33 system-manager
+	/* ---- Renesas RZ/V2N (V2N + V2M families) ---- */
+	ALP_CORE_M33_SM      = 6, /**< V2N Cortex-M33 system-manager
                                      (matches `m33_sm` in V2N101/V2M101
                                      topology). */
-    ALP_CORE_A55_CLUSTER = 7,   /**< V2N / NX9 Cortex-A55 cluster as a single
+	ALP_CORE_A55_CLUSTER = 7, /**< V2N / NX9 Cortex-A55 cluster as a single
                                      endpoint (matches `a55_cluster`). */
 
-    /* ---- NXP i.MX 93 (NX9 family) ---- */
-    ALP_CORE_M33         = 8    /**< NX9 Cortex-M33 (no _sm suffix -- NX9's
+	/* ---- NXP i.MX 93 (NX9 family) ---- */
+	ALP_CORE_M33 = 8 /**< NX9 Cortex-M33 (no _sm suffix -- NX9's
                                      M33 doesn't carry the system-manager
                                      role; matches `m33` in NX9101 topology). */
 } alp_core_id_t;
@@ -135,9 +135,9 @@ typedef struct alp_shmem alp_shmem_t;
 
 /** Configuration for a shared-memory region. */
 typedef struct {
-    const char *name;       /**< Region name shared across cores (DT-anchored). */
-    size_t      size;       /**< Required bytes; rounded up to MMU/MPU page. */
-    bool        cacheable;  /**< false ⇒ allocate non-cacheable; required for
+	const char *name;      /**< Region name shared across cores (DT-anchored). */
+	size_t      size;      /**< Required bytes; rounded up to MMU/MPU page. */
+	bool        cacheable; /**< false ⇒ allocate non-cacheable; required for
                                  the simple "core A writes, core B reads"
                                  pattern. */
 } alp_shmem_config_t;
@@ -176,7 +176,7 @@ alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg);
 alp_status_t alp_shmem_view(alp_shmem_t *s, void **base_out, size_t *size_out);
 
 /** @brief Release the region handle.  Doesn't free underlying memory. */
-void         alp_shmem_close(alp_shmem_t *s);
+void alp_shmem_close(alp_shmem_t *s);
 
 /**
  * @brief Query the capabilities of an opened shared-memory handle.
@@ -202,14 +202,12 @@ typedef struct alp_mbox alp_mbox_t;
  * @param[in] len      Payload length.
  * @param[in] user     Opaque pointer set via @ref alp_mbox_set_callback.
  */
-typedef void (*alp_mbox_msg_cb_t)(uint32_t channel,
-                                  const void *data, size_t len,
-                                  void *user);
+typedef void (*alp_mbox_msg_cb_t)(uint32_t channel, const void *data, size_t len, void *user);
 
 /** Mailbox-channel configuration. */
 typedef struct {
-    uint32_t channel;        /**< MHU/Mailbox channel index per the SoC manifest. */
-    alp_core_id_t peer;      /**< Counterpart core. */
+	uint32_t      channel; /**< MHU/Mailbox channel index per the SoC manifest. */
+	alp_core_id_t peer;    /**< Counterpart core. */
 } alp_mbox_config_t;
 
 /**
@@ -218,7 +216,7 @@ typedef struct {
  * @param[in] cfg  Configuration.  Must be non-NULL.
  * @return Open handle on success, or NULL on resolution failure.
  */
-alp_mbox_t  *alp_mbox_open(const alp_mbox_config_t *cfg);
+alp_mbox_t *alp_mbox_open(const alp_mbox_config_t *cfg);
 
 /**
  * @brief Send @p len bytes to the peer core.
@@ -229,8 +227,7 @@ alp_mbox_t  *alp_mbox_open(const alp_mbox_config_t *cfg);
  * @param[in] timeout_ms  Max wait for peer to drain its inbox.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
  */
-alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len,
-                           uint32_t timeout_ms);
+alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len, uint32_t timeout_ms);
 
 /**
  * @brief Register or replace the inbound-message callback.
@@ -240,11 +237,10 @@ alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len,
  * @param[in] user  Opaque pointer forwarded to @p cb.
  * @return ALP_OK / ALP_ERR_NOT_READY.
  */
-alp_status_t alp_mbox_set_callback(alp_mbox_t *mb,
-                                   alp_mbox_msg_cb_t cb, void *user);
+alp_status_t alp_mbox_set_callback(alp_mbox_t *mb, alp_mbox_msg_cb_t cb, void *user);
 
 /** @brief Release the channel handle.  In-flight messages may be dropped. */
-void         alp_mbox_close(alp_mbox_t *mb);
+void alp_mbox_close(alp_mbox_t *mb);
 
 /**
  * @brief Query the capabilities of an opened mailbox channel handle.
@@ -329,7 +325,7 @@ alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem);
  *       explicit @ref alp_hwsem_unlock; the defensive release is a
  *       safety net, not a substitute.
  */
-void         alp_hwsem_close(alp_hwsem_t *sem);
+void alp_hwsem_close(alp_hwsem_t *sem);
 
 /**
  * @brief Query the capabilities of an opened hardware-semaphore handle.
@@ -340,7 +336,7 @@ void         alp_hwsem_close(alp_hwsem_t *sem);
 const alp_capabilities_t *alp_hwsem_capabilities(const alp_hwsem_t *sem);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_MPROC_H */
+#endif /* ALP_MPROC_H */

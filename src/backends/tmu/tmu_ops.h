@@ -30,18 +30,18 @@
 /* ------------------------------------------------------------------ */
 
 typedef struct alp_tmu_ops {
-    alp_status_t (*sin)(float in_a, float *out);
-    alp_status_t (*cos)(float in_a, float *out);
-    alp_status_t (*tan)(float in_a, float *out);
-    alp_status_t (*atan)(float in_a, float *out);
-    alp_status_t (*atan2)(float in_a, float in_b, float *out);
-    alp_status_t (*sqrt)(float in_a, float *out);
-    alp_status_t (*log)(float in_a, float *out);
-    alp_status_t (*exp)(float in_a, float *out);
-    alp_status_t (*sinh)(float in_a, float *out);
-    alp_status_t (*cosh)(float in_a, float *out);
-    alp_status_t (*tanh)(float in_a, float *out);
-    alp_status_t (*hypot)(float in_a, float in_b, float *out);
+	alp_status_t (*sin)(float in_a, float *out);
+	alp_status_t (*cos)(float in_a, float *out);
+	alp_status_t (*tan)(float in_a, float *out);
+	alp_status_t (*atan)(float in_a, float *out);
+	alp_status_t (*atan2)(float in_a, float in_b, float *out);
+	alp_status_t (*sqrt)(float in_a, float *out);
+	alp_status_t (*log)(float in_a, float *out);
+	alp_status_t (*exp)(float in_a, float *out);
+	alp_status_t (*sinh)(float in_a, float *out);
+	alp_status_t (*cosh)(float in_a, float *out);
+	alp_status_t (*tanh)(float in_a, float *out);
+	alp_status_t (*hypot)(float in_a, float in_b, float *out);
 } alp_tmu_ops_t;
 
 #endif /* ALP_BACKENDS_TMU_OPS_H */

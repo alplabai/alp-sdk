@@ -28,19 +28,19 @@ void bench_security_main(void);
 
 int  main(void)
 {
-    fprintf(stdout, "# alp_bench -- Alp SDK microbenchmarks\n");
-    fprintf(stdout, "# %-38s %12s %14s\n", "case", "iters", "ns/iter");
+	fprintf(stdout, "# alp_bench -- Alp SDK microbenchmarks\n");
+	fprintf(stdout, "# %-38s %12s %14s\n", "case", "iters", "ns/iter");
 
-    bench_status_main();
-    bench_peripheral_main();
-    bench_inference_main();
-    bench_iot_main();
-    bench_audio_main();
-    bench_storage_main();
-    bench_dsp_main();
-    bench_tmu_main();
-    bench_power_main();
-    bench_security_main();
+	bench_status_main();
+	bench_peripheral_main();
+	bench_inference_main();
+	bench_iot_main();
+	bench_audio_main();
+	bench_storage_main();
+	bench_dsp_main();
+	bench_tmu_main();
+	bench_power_main();
+	bench_security_main();
 
-    return 0;
+	return 0;
 }

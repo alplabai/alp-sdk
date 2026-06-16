@@ -46,25 +46,25 @@ extern "C" {
 
 /** Resolution presets. */
 typedef enum {
-    OV7670_RES_QQVGA = 0, /**< 160 × 120 */
-    OV7670_RES_QVGA  = 1, /**< 320 × 240 */
-    OV7670_RES_VGA   = 2, /**< 640 × 480 */
+	OV7670_RES_QQVGA = 0, /**< 160 × 120 */
+	OV7670_RES_QVGA  = 1, /**< 320 × 240 */
+	OV7670_RES_VGA   = 2, /**< 640 × 480 */
 } ov7670_resolution_t;
 
 /** Pixel-format selection. */
 typedef enum {
-    OV7670_FMT_RGB565 = 0,
-    OV7670_FMT_YUV422 = 1,
-    OV7670_FMT_BAYER  = 2,
+	OV7670_FMT_RGB565 = 0,
+	OV7670_FMT_YUV422 = 1,
+	OV7670_FMT_BAYER  = 2,
 } ov7670_format_t;
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-    alp_i2c_t          *bus;
-    uint8_t             addr;
-    ov7670_resolution_t res;
-    ov7670_format_t     fmt;
-    bool                initialised;
+	alp_i2c_t          *bus;
+	uint8_t             addr;
+	ov7670_resolution_t res;
+	ov7670_format_t     fmt;
+	bool                initialised;
 } ov7670_t;
 
 /**

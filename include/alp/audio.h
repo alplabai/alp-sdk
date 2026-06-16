@@ -56,18 +56,18 @@ extern "C" {
 
 /** PCM sample format. */
 typedef enum {
-    ALP_AUDIO_FMT_S16_LE = 0,    /**< Signed 16-bit little-endian. */
-    ALP_AUDIO_FMT_S24_LE = 1,    /**< Signed 24-bit, packed in 32-bit slots. */
-    ALP_AUDIO_FMT_S32_LE = 2     /**< Signed 32-bit. */
+	ALP_AUDIO_FMT_S16_LE = 0, /**< Signed 16-bit little-endian. */
+	ALP_AUDIO_FMT_S24_LE = 1, /**< Signed 24-bit, packed in 32-bit slots. */
+	ALP_AUDIO_FMT_S32_LE = 2  /**< Signed 32-bit. */
 } alp_audio_format_t;
 
 /** Configuration shared by both audio-in and audio-out streams. */
 typedef struct {
-    uint32_t           peripheral_id;   /**< Studio-resolved PDM/I²S instance. */
-    uint32_t           sample_rate_hz;  /**< 8 k / 16 k / 44.1 k / 48 k typical. */
-    uint8_t            channels;        /**< 1 = mono, 2 = stereo. */
-    alp_audio_format_t format;
-    uint16_t           frames_per_block; /**< Block size for DMA / ring queueing. */
+	uint32_t           peripheral_id;  /**< Studio-resolved PDM/I²S instance. */
+	uint32_t           sample_rate_hz; /**< 8 k / 16 k / 44.1 k / 48 k typical. */
+	uint8_t            channels;       /**< 1 = mono, 2 = stereo. */
+	alp_audio_format_t format;
+	uint16_t           frames_per_block; /**< Block size for DMA / ring queueing. */
 } alp_audio_config_t;
 
 /* ------------------------------------------------------------------ */
@@ -121,9 +121,7 @@ alp_status_t alp_audio_in_stop(alp_audio_in_t *in);
  * @param[in]  timeout_ms   Max wait for available frames.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
  */
-alp_status_t alp_audio_in_read(alp_audio_in_t *in,
-                               void *buf, size_t frames,
-                               size_t *out_frames,
+alp_status_t alp_audio_in_read(alp_audio_in_t *in, void *buf, size_t frames, size_t *out_frames,
                                uint32_t timeout_ms);
 
 /**
@@ -131,7 +129,7 @@ alp_status_t alp_audio_in_read(alp_audio_in_t *in,
  *
  * @param[in] in  Handle from @ref alp_audio_in_open, or NULL.
  */
-void          alp_audio_in_close(alp_audio_in_t *in);
+void alp_audio_in_close(alp_audio_in_t *in);
 
 /**
  * @brief Return the per-instance capability descriptor cached at open() time.
@@ -179,7 +177,7 @@ alp_status_t alp_audio_out_start(alp_audio_out_t *out);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_audio_out_stop (alp_audio_out_t *out);
+alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
 
 /**
  * @brief Block until the driver is ready for the next PCM block, then push.
@@ -191,10 +189,8 @@ alp_status_t alp_audio_out_stop (alp_audio_out_t *out);
  * @param[in]  timeout_ms   Max wait for driver readiness.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
  */
-alp_status_t alp_audio_out_write(alp_audio_out_t *out,
-                                 const void *buf, size_t frames,
-                                 size_t *out_frames,
-                                 uint32_t timeout_ms);
+alp_status_t alp_audio_out_write(alp_audio_out_t *out, const void *buf, size_t frames,
+                                 size_t *out_frames, uint32_t timeout_ms);
 
 /**
  * @brief Adjust output volume.
@@ -211,7 +207,7 @@ alp_status_t alp_audio_out_set_volume(alp_audio_out_t *out, uint8_t vol);
  *
  * @param[in] out  Handle from @ref alp_audio_out_open, or NULL.
  */
-void          alp_audio_out_close(alp_audio_out_t *out);
+void alp_audio_out_close(alp_audio_out_t *out);
 
 /**
  * @brief Return the per-instance capability descriptor cached at open() time.
@@ -226,7 +222,7 @@ void          alp_audio_out_close(alp_audio_out_t *out);
 const alp_capabilities_t *alp_audio_out_capabilities(const alp_audio_out_t *out);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_AUDIO_H */
+#endif /* ALP_AUDIO_H */

@@ -25,44 +25,44 @@
 
 /* GPIO pad map element (table lives in gpio.c). */
 typedef struct {
-    uint32_t periph; /* GPIOA..GPIOF base address. */
-    uint32_t pin;    /* GPIO_PIN_n bit mask.       */
+	uint32_t periph; /* GPIOA..GPIOF base address. */
+	uint32_t pin;    /* GPIO_PIN_n bit mask.       */
 } gd32_gpio_pad_t;
 
 /* ADC channel map element (table lives in adc.c). */
 typedef struct {
-    uint32_t periph;    /* ADC0..ADC3 base                            */
-    uint8_t  channel;   /* ADC_CHANNEL_n                              */
-    uint32_t gpio_port; /* GPIOA..GPIOF                               */
-    uint32_t gpio_pin;  /* GPIO_PIN_n                                 */
+	uint32_t periph;    /* ADC0..ADC3 base                            */
+	uint8_t  channel;   /* ADC_CHANNEL_n                              */
+	uint32_t gpio_port; /* GPIOA..GPIOF                               */
+	uint32_t gpio_pin;  /* GPIO_PIN_n                                 */
 } gd32_adc_ch_t;
 
 /* Quadrature-encoder map element (table lives in qenc.c). */
 typedef struct {
-    uint32_t timer_periph;
-    uint32_t gpio_x_port;
-    uint32_t gpio_x_pin;
-    uint32_t gpio_y_port;
-    uint32_t gpio_y_pin;
-    uint32_t gpio_af;
+	uint32_t timer_periph;
+	uint32_t gpio_x_port;
+	uint32_t gpio_x_pin;
+	uint32_t gpio_y_port;
+	uint32_t gpio_y_pin;
+	uint32_t gpio_af;
 } gd32_qenc_t;
 
 /* PWM channel map element (table lives in pwm.c). */
 typedef struct {
-    uint32_t periph;     /* TIMER0 or TIMER7 base                          */
-    uint16_t channel;    /* TIMER_CH_0..TIMER_CH_3                          */
-    bool     complement; /* true: drive complementary output, false: main */
-    uint32_t gpio_port;  /* GPIOA..GPIOF                                    */
-    uint32_t gpio_pin;   /* GPIO_PIN_n                                     */
-    uint32_t gpio_af;    /* GPIO_AF_X                                      */
+	uint32_t periph;     /* TIMER0 or TIMER7 base                          */
+	uint16_t channel;    /* TIMER_CH_0..TIMER_CH_3                          */
+	bool     complement; /* true: drive complementary output, false: main */
+	uint32_t gpio_port;  /* GPIOA..GPIOF                                    */
+	uint32_t gpio_pin;   /* GPIO_PIN_n                                     */
+	uint32_t gpio_af;    /* GPIO_AF_X                                      */
 } gd32_pwm_ch_t;
 
 /* DAC channel map element (table lives in dac.c). */
 typedef struct {
-    uint32_t periph;    /* DAC0..DAC3 base address */
-    uint8_t  out;       /* DAC_OUT0 or DAC_OUT1    */
-    uint32_t gpio_port; /* GPIOA..GPIOG base addr  */
-    uint32_t gpio_pin;  /* GPIO_PIN_n bit mask     */
+	uint32_t periph;    /* DAC0..DAC3 base address */
+	uint8_t  out;       /* DAC_OUT0 or DAC_OUT1    */
+	uint32_t gpio_port; /* GPIOA..GPIOG base addr  */
+	uint32_t gpio_pin;  /* GPIO_PIN_n bit mask     */
 } gd32_dac_ch_t;
 
 /* Stream-DMA bring-up state.  Two parallel streams: stream 0 binds
@@ -95,15 +95,15 @@ typedef struct {
 #define BRIDGE_ADC_PACE_CLK_HZ 216000000u
 
 typedef struct {
-    bool     in_use;
-    uint8_t  channel;     /* ADC channel index this stream watches */
-    uint32_t dma_periph;  /* DMA0 or DMA1                          */
-    uint8_t  dma_channel; /* dma_channel_enum value                */
-    uint32_t pace_timer;  /* TIMER5 (stream 0) or TIMER6 (stream 1) */
-    uint16_t ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
-    uint16_t read_idx; /* host's consumer cursor                */
-    uint8_t  dsp_chain_id;
-    bool     dsp_bound;
+	bool     in_use;
+	uint8_t  channel;     /* ADC channel index this stream watches */
+	uint32_t dma_periph;  /* DMA0 or DMA1                          */
+	uint8_t  dma_channel; /* dma_channel_enum value                */
+	uint32_t pace_timer;  /* TIMER5 (stream 0) or TIMER6 (stream 1) */
+	uint16_t ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
+	uint16_t read_idx; /* host's consumer cursor                */
+	uint8_t  dsp_chain_id;
+	bool     dsp_bound;
 } adc_stream_state_t;
 
 /* ----------------------------------------------------------------- */

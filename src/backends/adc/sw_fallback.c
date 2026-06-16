@@ -23,35 +23,33 @@
 
 #include "adc_ops.h"
 
-static int32_t _saw_counter = 0;
+static int32_t      _saw_counter = 0;
 
-static alp_status_t sw_open(const alp_adc_config_t *cfg,
-                            alp_adc_backend_state_t *state,
+static alp_status_t sw_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *state,
                             alp_capabilities_t *caps_out)
 {
-    /* No real ADC controller / channel->pin resolution on native_sim:
+	/* No real ADC controller / channel->pin resolution on native_sim:
      * report the device isn't ready so the dispatcher returns NULL +
      * last_error = NOT_READY (the adc-voltmeter example expects exactly
      * this on native_sim). */
-    (void)cfg;
-    (void)state;
-    (void)caps_out;
-    return ALP_ERR_NOT_READY;
+	(void)cfg;
+	(void)state;
+	(void)caps_out;
+	return ALP_ERR_NOT_READY;
 }
 
-static alp_status_t sw_read_raw(alp_adc_backend_state_t *state,
-                                int32_t *raw_out)
+static alp_status_t sw_read_raw(alp_adc_backend_state_t *state, int32_t *raw_out)
 {
-    (void)state;
-    *raw_out = _saw_counter;
-    _saw_counter = (_saw_counter + 137) & 0x0FFF;   /* saw mod 4096 */
-    return ALP_OK;
+	(void)state;
+	*raw_out     = _saw_counter;
+	_saw_counter = (_saw_counter + 137) & 0x0FFF; /* saw mod 4096 */
+	return ALP_OK;
 }
 
 static const alp_adc_ops_t sw_ops = {
-    .open     = sw_open,
-    .read_raw = sw_read_raw,
-    .close    = NULL,
+	.open     = sw_open,
+	.read_raw = sw_read_raw,
+	.close    = NULL,
 };
 
 ALP_BACKEND_REGISTER(adc, sw_fallback,

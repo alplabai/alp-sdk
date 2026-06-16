@@ -102,6 +102,14 @@ separately — see [`TRADEMARKS.md`](TRADEMARKS.md).)
 
 ### Formatting
 
+Alp SDK is its **own** code style — a unification layer across hardware
+and software platforms, not a Zephyr project — so it has a house style.
+Native C is **TAB-indented** (`.clang-format`: `UseTab: ForIndentation`);
+render tabs at whatever width reads best for you, since the file stores
+tabs rather than a fixed number of spaces.  Alignment stays in spaces, so
+columns line up at any tab width.  A `.editorconfig` sets this up
+automatically in most editors.
+
 The tree is formatted with **clang-format v14** (the Ubuntu 22.04 apt
 default that `pr-static-analysis` pins via `update-alternatives`).
 Mismatched versions reflow braces, trailing-comment columns, and
@@ -115,9 +123,17 @@ bash scripts/setup-clang-format.sh           # install + verify (apt / brew)
 bash scripts/setup-clang-format.sh --check   # verify only (no install)
 ```
 
-`.clang-format` at the repo root carries the style spec (LLVM base +
+Optionally, enable the local pre-commit hook so formatting is checked
+before every commit (mirrors the CI gate, opt-in):
+
+```bash
+pip install pre-commit && pre-commit install
+```
+
+`.clang-format` at the repo root carries the style spec (LLVM base, tabs,
 `Cpp11BracedListStyle: false` to keep designated-initialiser brace
-spacing stable across v14 / v18+).  See
+spacing stable across v14 / v18+).  Vendored upstream trees (`zephyr/**`,
+`vendors/**`) keep their own style and are excluded from the gate.  See
 [`docs/contribution.md`](docs/contribution.md#formatting) for platform
 notes and the manual-install fallback for non-Debian Linux / Windows.
 

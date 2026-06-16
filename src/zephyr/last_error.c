@@ -25,14 +25,17 @@ static __thread alp_status_t z_last_err;
 static alp_status_t z_last_err;
 #endif
 
-void alp_z_set_last_error(alp_status_t s) {
-    z_last_err = s;
+void alp_z_set_last_error(alp_status_t s)
+{
+	z_last_err = s;
 }
 
-void alp_z_clear_last_error(void) {
-    z_last_err = ALP_OK;
+void alp_z_clear_last_error(void)
+{
+	z_last_err = ALP_OK;
 }
 
-alp_status_t alp_last_error(void) {
-    return z_last_err;
+alp_status_t alp_last_error(void)
+{
+	return z_last_err;
 }

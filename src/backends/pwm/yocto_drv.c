@@ -73,40 +73,40 @@
  * forwarding here, so open() must populate it.  <zephyr/sys/util.h>'s
  * CONTAINER_OF is unavailable on Linux, so define the offset locally. */
 #define ALP_PWM_HANDLE_OF(st_ptr)                                                                  \
-    ((struct alp_pwm *)((char *)(st_ptr)-offsetof(struct alp_pwm, state)))
+	((struct alp_pwm *)((char *)(st_ptr)-offsetof(struct alp_pwm, state)))
 
 /* Per-handle backend data: the channel's sysfs directory and channel
  * index, boxed onto the heap so the void* be_data slot owns it. */
 typedef struct {
-    char dir[64]; /* "/sys/class/pwm/pwmchip<chip>/pwm<ch>" */
-    int  chip;    /* pwmchip number */
-    int  channel; /* sysfs channel index */
+	char dir[64]; /* "/sys/class/pwm/pwmchip<chip>/pwm<ch>" */
+	int  chip;    /* pwmchip number */
+	int  channel; /* sysfs channel index */
 } y_pwm_data_t;
 
 /** @brief Map a (positive) errno value to the closest alp_status_t. */
 static alp_status_t _errno_to_alp(int err)
 {
-    switch (err) {
-    case 0:
-        return ALP_OK;
-    case EINVAL:
-        return ALP_ERR_INVAL;
-    case EBUSY:
-    case EAGAIN:
-        return ALP_ERR_BUSY;
-    case ENODEV:
-    case ENOENT:
-        return ALP_ERR_NOT_READY;
-    case ENOTTY:
-    case ENOSYS:
-    case ENOTSUP:
+	switch (err) {
+	case 0:
+		return ALP_OK;
+	case EINVAL:
+		return ALP_ERR_INVAL;
+	case EBUSY:
+	case EAGAIN:
+		return ALP_ERR_BUSY;
+	case ENODEV:
+	case ENOENT:
+		return ALP_ERR_NOT_READY;
+	case ENOTTY:
+	case ENOSYS:
+	case ENOTSUP:
 #if defined(EOPNOTSUPP) && EOPNOTSUPP != ENOTSUP
-    case EOPNOTSUPP:
+	case EOPNOTSUPP:
 #endif
-        return ALP_ERR_NOSUPPORT;
-    default:
-        return ALP_ERR_IO;
-    }
+		return ALP_ERR_NOSUPPORT;
+	default:
+		return ALP_ERR_IO;
+	}
 }
 
 /**
@@ -119,17 +119,17 @@ static alp_status_t _errno_to_alp(int err)
  */
 static alp_status_t _sysfs_write(const char *path, const char *val)
 {
-    int fd = open(path, O_WRONLY | O_CLOEXEC);
-    if (fd < 0) return _errno_to_alp(errno);
+	int fd = open(path, O_WRONLY | O_CLOEXEC);
+	if (fd < 0) return _errno_to_alp(errno);
 
-    size_t  len = strlen(val);
-    ssize_t n   = write(fd, val, len);
-    int     e   = errno;
-    close(fd);
+	size_t  len = strlen(val);
+	ssize_t n   = write(fd, val, len);
+	int     e   = errno;
+	close(fd);
 
-    if (n < 0) return _errno_to_alp(e);
-    if ((size_t)n != len) return ALP_ERR_IO;
-    return ALP_OK;
+	if (n < 0) return _errno_to_alp(e);
+	if ((size_t)n != len) return ALP_ERR_IO;
+	return ALP_OK;
 }
 
 /**
@@ -141,16 +141,16 @@ static alp_status_t _sysfs_write(const char *path, const char *val)
  */
 static alp_status_t _write_ns(const y_pwm_data_t *d, const char *attr, uint32_t ns)
 {
-    char path[96];
-    char buf[16];
+	char path[96];
+	char buf[16];
 
-    int  n = snprintf(path, sizeof(path), "%s/%s", d->dir, attr);
-    if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
+	int  n = snprintf(path, sizeof(path), "%s/%s", d->dir, attr);
+	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
 
-    n = snprintf(buf, sizeof(buf), "%u", (unsigned)ns);
-    if (n < 0 || (size_t)n >= sizeof(buf)) return ALP_ERR_INVAL;
+	n = snprintf(buf, sizeof(buf), "%u", (unsigned)ns);
+	if (n < 0 || (size_t)n >= sizeof(buf)) return ALP_ERR_INVAL;
 
-    return _sysfs_write(path, buf);
+	return _sysfs_write(path, buf);
 }
 
 /**
@@ -162,13 +162,13 @@ static alp_status_t _write_ns(const y_pwm_data_t *d, const char *attr, uint32_t 
  */
 static void _unexport_chip(int chip, int channel)
 {
-    char unexp[64];
-    char idx[16];
-    int  n = snprintf(unexp, sizeof(unexp), "/sys/class/pwm/pwmchip%d/unexport", chip);
-    int  m = snprintf(idx, sizeof(idx), "%d", channel);
-    if (n > 0 && (size_t)n < sizeof(unexp) && m > 0 && (size_t)m < sizeof(idx)) {
-        (void)_sysfs_write(unexp, idx);
-    }
+	char unexp[64];
+	char idx[16];
+	int  n = snprintf(unexp, sizeof(unexp), "/sys/class/pwm/pwmchip%d/unexport", chip);
+	int  m = snprintf(idx, sizeof(idx), "%d", channel);
+	if (n > 0 && (size_t)n < sizeof(unexp) && m > 0 && (size_t)m < sizeof(idx)) {
+		(void)_sysfs_write(unexp, idx);
+	}
 }
 
 /**
@@ -185,97 +185,97 @@ static void _unexport_chip(int chip, int channel)
 static alp_status_t y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st,
                            alp_capabilities_t *caps_out)
 {
-    if (cfg->channel_id >= 8u) return ALP_ERR_OUT_OF_RANGE;
+	if (cfg->channel_id >= 8u) return ALP_ERR_OUT_OF_RANGE;
 
-    y_pwm_data_t *d = (y_pwm_data_t *)malloc(sizeof(*d));
-    if (d == NULL) return ALP_ERR_NOMEM;
-    d->chip    = ALP_YOCTO_PWM_CHIP;
-    d->channel = (int)cfg->channel_id;
+	y_pwm_data_t *d = (y_pwm_data_t *)malloc(sizeof(*d));
+	if (d == NULL) return ALP_ERR_NOMEM;
+	d->chip    = ALP_YOCTO_PWM_CHIP;
+	d->channel = (int)cfg->channel_id;
 
-    char chipdir[48];
-    int  n = snprintf(chipdir, sizeof(chipdir), "/sys/class/pwm/pwmchip%d", d->chip);
-    if (n < 0 || (size_t)n >= sizeof(chipdir)) {
-        free(d);
-        return ALP_ERR_INVAL;
-    }
+	char chipdir[48];
+	int  n = snprintf(chipdir, sizeof(chipdir), "/sys/class/pwm/pwmchip%d", d->chip);
+	if (n < 0 || (size_t)n >= sizeof(chipdir)) {
+		free(d);
+		return ALP_ERR_INVAL;
+	}
 
-    n = snprintf(d->dir, sizeof(d->dir), "%s/pwm%d", chipdir, d->channel);
-    if (n < 0 || (size_t)n >= sizeof(d->dir)) {
-        free(d);
-        return ALP_ERR_INVAL;
-    }
+	n = snprintf(d->dir, sizeof(d->dir), "%s/pwm%d", chipdir, d->channel);
+	if (n < 0 || (size_t)n >= sizeof(d->dir)) {
+		free(d);
+		return ALP_ERR_INVAL;
+	}
 
-    /* Request the channel.  EBUSY == already exported -> reuse it. */
-    char exp_path[64];
-    char idx[16];
-    n = snprintf(exp_path, sizeof(exp_path), "%s/export", chipdir);
-    if (n < 0 || (size_t)n >= sizeof(exp_path)) {
-        free(d);
-        return ALP_ERR_INVAL;
-    }
-    n = snprintf(idx, sizeof(idx), "%d", d->channel);
-    if (n < 0 || (size_t)n >= sizeof(idx)) {
-        free(d);
-        return ALP_ERR_INVAL;
-    }
+	/* Request the channel.  EBUSY == already exported -> reuse it. */
+	char exp_path[64];
+	char idx[16];
+	n = snprintf(exp_path, sizeof(exp_path), "%s/export", chipdir);
+	if (n < 0 || (size_t)n >= sizeof(exp_path)) {
+		free(d);
+		return ALP_ERR_INVAL;
+	}
+	n = snprintf(idx, sizeof(idx), "%d", d->channel);
+	if (n < 0 || (size_t)n >= sizeof(idx)) {
+		free(d);
+		return ALP_ERR_INVAL;
+	}
 
-    alp_status_t rc = _sysfs_write(exp_path, idx);
-    if (rc != ALP_OK && rc != ALP_ERR_BUSY) {
-        free(d);
-        return rc;
-    }
+	alp_status_t rc = _sysfs_write(exp_path, idx);
+	if (rc != ALP_OK && rc != ALP_ERR_BUSY) {
+		free(d);
+		return rc;
+	}
 
-    struct alp_pwm *h = ALP_PWM_HANDLE_OF(st);
-    h->channel        = cfg->channel_id;
-    h->period_ns      = (cfg->period_ns != 0u) ? cfg->period_ns : 1000000u; /* 1 kHz */
-    h->flags          = (uint32_t)cfg->polarity;
+	struct alp_pwm *h = ALP_PWM_HANDLE_OF(st);
+	h->channel        = cfg->channel_id;
+	h->period_ns      = (cfg->period_ns != 0u) ? cfg->period_ns : 1000000u; /* 1 kHz */
+	h->flags          = (uint32_t)cfg->polarity;
 
-    /* polarity is write-rejected by some drivers while enabled, so set
+	/* polarity is write-rejected by some drivers while enabled, so set
      * it before enabling.  EINVAL/ENOTSUP here is non-fatal: not every
      * driver allows polarity inversion. */
-    const char *pol = (cfg->polarity == ALP_PWM_POLARITY_INVERTED) ? "inversed" : "normal";
-    char        pol_path[96];
-    n = snprintf(pol_path, sizeof(pol_path), "%s/polarity", d->dir);
-    if (n > 0 && (size_t)n < sizeof(pol_path)) {
-        (void)_sysfs_write(pol_path, pol); /* best-effort */
-    }
+	const char *pol = (cfg->polarity == ALP_PWM_POLARITY_INVERTED) ? "inversed" : "normal";
+	char        pol_path[96];
+	n = snprintf(pol_path, sizeof(pol_path), "%s/polarity", d->dir);
+	if (n > 0 && (size_t)n < sizeof(pol_path)) {
+		(void)_sysfs_write(pol_path, pol); /* best-effort */
+	}
 
-    /* period before duty_cycle (ABI: duty_cycle <= period).  On any
+	/* period before duty_cycle (ABI: duty_cycle <= period).  On any
      * post-export failure, unexport the channel (best-effort) before
      * returning so a later retry does not inherit a half-configured
      * channel (period set but never enabled, or stale duty); see
      * _unexport_chip() / y_close()'s unexport. */
-    rc = _write_ns(d, "period", h->period_ns);
-    if (rc != ALP_OK) {
-        _unexport_chip(d->chip, d->channel);
-        free(d);
-        return rc;
-    }
-    rc = _write_ns(d, "duty_cycle", 0u);
-    if (rc != ALP_OK) {
-        _unexport_chip(d->chip, d->channel);
-        free(d);
-        return rc;
-    }
+	rc = _write_ns(d, "period", h->period_ns);
+	if (rc != ALP_OK) {
+		_unexport_chip(d->chip, d->channel);
+		free(d);
+		return rc;
+	}
+	rc = _write_ns(d, "duty_cycle", 0u);
+	if (rc != ALP_OK) {
+		_unexport_chip(d->chip, d->channel);
+		free(d);
+		return rc;
+	}
 
-    /* Enable so subsequent set_duty takes effect immediately; output
+	/* Enable so subsequent set_duty takes effect immediately; output
      * stays low at 0 % duty until the caller arms it. */
-    char en_path[96];
-    n = snprintf(en_path, sizeof(en_path), "%s/enable", d->dir);
-    if (n > 0 && (size_t)n < sizeof(en_path)) {
-        rc = _sysfs_write(en_path, "1");
-        if (rc != ALP_OK) {
-            _unexport_chip(d->chip, d->channel);
-            free(d);
-            return rc;
-        }
-    }
+	char en_path[96];
+	n = snprintf(en_path, sizeof(en_path), "%s/enable", d->dir);
+	if (n > 0 && (size_t)n < sizeof(en_path)) {
+		rc = _sysfs_write(en_path, "1");
+		if (rc != ALP_OK) {
+			_unexport_chip(d->chip, d->channel);
+			free(d);
+			return rc;
+		}
+	}
 
-    st->dev         = NULL;
-    st->channel_id  = cfg->channel_id;
-    st->be_data     = d;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	st->dev         = NULL;
+	st->channel_id  = cfg->channel_id;
+	st->be_data     = d;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
 /**
@@ -286,9 +286,9 @@ static alp_status_t y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t 
  */
 static alp_status_t y_set_duty(alp_pwm_backend_state_t *st, uint32_t pulse_ns)
 {
-    y_pwm_data_t *d = (y_pwm_data_t *)st->be_data;
-    if (d == NULL) return ALP_ERR_NOT_READY;
-    return _write_ns(d, "duty_cycle", pulse_ns);
+	y_pwm_data_t *d = (y_pwm_data_t *)st->be_data;
+	if (d == NULL) return ALP_ERR_NOT_READY;
+	return _write_ns(d, "duty_cycle", pulse_ns);
 }
 
 /**
@@ -300,12 +300,12 @@ static alp_status_t y_set_duty(alp_pwm_backend_state_t *st, uint32_t pulse_ns)
  */
 static alp_status_t y_set_period(alp_pwm_backend_state_t *st, uint32_t period_ns)
 {
-    y_pwm_data_t *d = (y_pwm_data_t *)st->be_data;
-    if (d == NULL) return ALP_ERR_NOT_READY;
+	y_pwm_data_t *d = (y_pwm_data_t *)st->be_data;
+	if (d == NULL) return ALP_ERR_NOT_READY;
 
-    alp_status_t rc = _write_ns(d, "duty_cycle", 0u);
-    if (rc != ALP_OK) return rc;
-    return _write_ns(d, "period", period_ns);
+	alp_status_t rc = _write_ns(d, "duty_cycle", 0u);
+	if (rc != ALP_OK) return rc;
+	return _write_ns(d, "period", period_ns);
 }
 
 /**
@@ -318,11 +318,11 @@ static alp_status_t y_set_period(alp_pwm_backend_state_t *st, uint32_t period_ns
 static alp_status_t y_configure(alp_pwm_backend_state_t *st, alp_pwm_align_t align_mode,
                                 uint32_t dead_time_ns, uint8_t break_cfg)
 {
-    (void)st;
-    (void)align_mode;
-    (void)dead_time_ns;
-    (void)break_cfg;
-    return ALP_ERR_NOSUPPORT;
+	(void)st;
+	(void)align_mode;
+	(void)dead_time_ns;
+	(void)break_cfg;
+	return ALP_ERR_NOSUPPORT;
 }
 
 /**
@@ -334,9 +334,9 @@ static alp_status_t y_configure(alp_pwm_backend_state_t *st, alp_pwm_align_t ali
  */
 static alp_status_t y_single_pulse(alp_pwm_backend_state_t *st, uint32_t pulse_ns)
 {
-    (void)st;
-    (void)pulse_ns;
-    return ALP_ERR_NOSUPPORT;
+	(void)st;
+	(void)pulse_ns;
+	return ALP_ERR_NOSUPPORT;
 }
 
 /**
@@ -350,26 +350,26 @@ static alp_status_t y_single_pulse(alp_pwm_backend_state_t *st, uint32_t pulse_n
 static alp_status_t y_capture_open(const alp_pwm_capture_config_t *cfg, alp_pwm_backend_state_t *st,
                                    alp_capabilities_t *caps_out)
 {
-    (void)cfg;
-    (void)st;
-    (void)caps_out;
-    return ALP_ERR_NOSUPPORT;
+	(void)cfg;
+	(void)st;
+	(void)caps_out;
+	return ALP_ERR_NOSUPPORT;
 }
 
 /** @brief Input capture read -- unsupported (see @ref y_capture_open). */
 static alp_status_t y_capture_read(alp_pwm_backend_state_t *st, uint32_t *period_ns_out,
                                    uint32_t *pulse_ns_out)
 {
-    (void)st;
-    if (period_ns_out != NULL) *period_ns_out = 0u;
-    if (pulse_ns_out != NULL) *pulse_ns_out = 0u;
-    return ALP_ERR_NOSUPPORT;
+	(void)st;
+	if (period_ns_out != NULL) *period_ns_out = 0u;
+	if (pulse_ns_out != NULL) *pulse_ns_out = 0u;
+	return ALP_ERR_NOSUPPORT;
 }
 
 /** @brief Input capture close -- no-op (capture is unsupported). */
 static void y_capture_close(alp_pwm_backend_state_t *st)
 {
-    (void)st;
+	(void)st;
 }
 
 /**
@@ -381,31 +381,31 @@ static void y_capture_close(alp_pwm_backend_state_t *st)
  */
 static void y_close(alp_pwm_backend_state_t *st)
 {
-    y_pwm_data_t *d = (y_pwm_data_t *)st->be_data;
-    if (d == NULL) return;
+	y_pwm_data_t *d = (y_pwm_data_t *)st->be_data;
+	if (d == NULL) return;
 
-    char path[96];
-    int  n = snprintf(path, sizeof(path), "%s/enable", d->dir);
-    if (n > 0 && (size_t)n < sizeof(path)) {
-        (void)_sysfs_write(path, "0");
-    }
+	char path[96];
+	int  n = snprintf(path, sizeof(path), "%s/enable", d->dir);
+	if (n > 0 && (size_t)n < sizeof(path)) {
+		(void)_sysfs_write(path, "0");
+	}
 
-    _unexport_chip(d->chip, d->channel);
+	_unexport_chip(d->chip, d->channel);
 
-    free(d);
-    st->be_data = NULL;
+	free(d);
+	st->be_data = NULL;
 }
 
 static const alp_pwm_ops_t _ops = {
-    .open          = y_open,
-    .set_duty      = y_set_duty,
-    .set_period    = y_set_period,
-    .configure     = y_configure,
-    .single_pulse  = y_single_pulse,
-    .capture_open  = y_capture_open,
-    .capture_read  = y_capture_read,
-    .capture_close = y_capture_close,
-    .close         = y_close,
+	.open          = y_open,
+	.set_duty      = y_set_duty,
+	.set_period    = y_set_period,
+	.configure     = y_configure,
+	.single_pulse  = y_single_pulse,
+	.capture_open  = y_capture_open,
+	.capture_read  = y_capture_read,
+	.capture_close = y_capture_close,
+	.close         = y_close,
 };
 
 ALP_BACKEND_REGISTER(pwm, yocto_drv,

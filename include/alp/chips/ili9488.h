@@ -34,33 +34,24 @@
 extern "C" {
 #endif
 
-#define ILI9488_WIDTH  320
+#define ILI9488_WIDTH 320
 #define ILI9488_HEIGHT 480
 
 typedef struct {
-    alp_spi_t  *bus;
-    alp_gpio_t *dc;
-    alp_gpio_t *reset;
-    bool        initialised;
+	alp_spi_t  *bus;
+	alp_gpio_t *dc;
+	alp_gpio_t *reset;
+	bool        initialised;
 } ili9488_t;
 
 /** @brief Initialise an ILI9488 over SPI. */
-alp_status_t ili9488_init(ili9488_t  *dev,
-                          alp_spi_t  *spi,
-                          alp_gpio_t *dc,
-                          alp_gpio_t *reset);
+alp_status_t ili9488_init(ili9488_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gpio_t *reset);
 
 /** @brief Set the active drawing window (inclusive). */
-alp_status_t ili9488_set_window(ili9488_t *dev,
-                                uint16_t   x0,
-                                uint16_t   y0,
-                                uint16_t   x1,
-                                uint16_t   y1);
+alp_status_t ili9488_set_window(ili9488_t *dev, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 
 /** @brief Push a buffer of native big-endian RGB565 pixels. */
-alp_status_t ili9488_write_pixels(ili9488_t     *dev,
-                                  const uint8_t *pixels,
-                                  size_t         n_bytes);
+alp_status_t ili9488_write_pixels(ili9488_t *dev, const uint8_t *pixels, size_t n_bytes);
 
 /** @brief Release the driver context. */
 void ili9488_deinit(ili9488_t *dev);

@@ -211,15 +211,15 @@ static const alp_dsp_stage_t s_dsp_stages[] = {
  * NPU) and still produce a "[ns] done" sentinel for twister.
  */
 static struct {
-    alp_audio_in_t  *mic;
-    alp_audio_out_t *spk;
-    alp_dsp_chain_t *dsp;
-    alp_inference_t *inf;
-    bool             mic_ok;
-    bool             spk_ok;
-    bool             dsp_ok;
-    bool             inf_ok;
-    uint32_t         blocks_run;
+	alp_audio_in_t  *mic;
+	alp_audio_out_t *spk;
+	alp_dsp_chain_t *dsp;
+	alp_inference_t *inf;
+	bool             mic_ok;
+	bool             spk_ok;
+	bool             dsp_ok;
+	bool             inf_ok;
+	uint32_t         blocks_run;
 } g_state;
 
 /* ── Push bin magnitudes into the model's input tensor ─────────
@@ -239,29 +239,29 @@ static struct {
  */
 static void push_bins_into_model(alp_inference_t *inf, const float *bins, size_t n)
 {
-    alp_inference_tensor_t in = { 0 };
-    if (alp_inference_get_input(inf, 0, &in) != ALP_OK) {
-        return;
-    }
-    if (in.data == NULL || in.size_bytes == 0) {
-        return; /* Stub backend; nothing to fill. */
-    }
-    if (in.dtype == ALP_INFERENCE_DTYPE_F32) {
-        size_t bytes = n * sizeof(float);
-        if (bytes > in.size_bytes) bytes = in.size_bytes;
-        memcpy(in.data, bins, bytes);
-    } else if (in.dtype == ALP_INFERENCE_DTYPE_INT8) {
-        int8_t *q   = (int8_t *)in.data;
-        size_t  cap = (in.size_bytes < n) ? in.size_bytes : n;
-        for (size_t i = 0; i < cap; i++) {
-            float   v  = bins[i] / (in.scale > 0.0f ? in.scale : 1.0f);
-            int32_t qv = (int32_t)(v + 0.5f) + in.zero_point;
-            if (qv > 127) qv = 127;
-            if (qv < -128) qv = -128;
-            q[i] = (int8_t)qv;
-        }
-    }
-    /* TODO(v0.6): handle UINT8 / INT16 quantisation flavours
+	alp_inference_tensor_t in = { 0 };
+	if (alp_inference_get_input(inf, 0, &in) != ALP_OK) {
+		return;
+	}
+	if (in.data == NULL || in.size_bytes == 0) {
+		return; /* Stub backend; nothing to fill. */
+	}
+	if (in.dtype == ALP_INFERENCE_DTYPE_F32) {
+		size_t bytes = n * sizeof(float);
+		if (bytes > in.size_bytes) bytes = in.size_bytes;
+		memcpy(in.data, bins, bytes);
+	} else if (in.dtype == ALP_INFERENCE_DTYPE_INT8) {
+		int8_t *q   = (int8_t *)in.data;
+		size_t  cap = (in.size_bytes < n) ? in.size_bytes : n;
+		for (size_t i = 0; i < cap; i++) {
+			float   v  = bins[i] / (in.scale > 0.0f ? in.scale : 1.0f);
+			int32_t qv = (int32_t)(v + 0.5f) + in.zero_point;
+			if (qv > 127) qv = 127;
+			if (qv < -128) qv = -128;
+			q[i] = (int8_t)qv;
+		}
+	}
+	/* TODO(v0.6): handle UINT8 / INT16 quantisation flavours
      * once the v0.6 quantisation matrix is locked. */
 }
 
@@ -281,83 +281,83 @@ static void push_bins_into_model(alp_inference_t *inf, const float *bins, size_t
  */
 static void process_one_block(void)
 {
-    /* 1. Mic-in. */
-    if (g_state.mic_ok) {
-        size_t got = 0;
-        (void)alp_audio_in_read(g_state.mic, s_pcm_in, BLOCK_FRAMES, &got, /*timeout_ms=*/100);
-    } else {
-        memset(s_pcm_in, 0, sizeof(s_pcm_in));
-    }
+	/* 1. Mic-in. */
+	if (g_state.mic_ok) {
+		size_t got = 0;
+		(void)alp_audio_in_read(g_state.mic, s_pcm_in, BLOCK_FRAMES, &got, /*timeout_ms=*/100);
+	} else {
+		memset(s_pcm_in, 0, sizeof(s_pcm_in));
+	}
 
-    /* 2. DSP preprocess (window + FFT -> magnitude bins).
+	/* 2. DSP preprocess (window + FFT -> magnitude bins).
      *
      * Stage the mic block into the FFT input buffer.  The FFT needs a
      * full FFT_POINTS (256) frame; one mic block is only BLOCK_FRAMES
      * (240).  Append, and only run the chain once we have >= 256
      * staged samples -- otherwise apply_bins() would return
      * ALP_ERR_OUT_OF_RANGE on every short block. */
-    bool fft_ran = false;
-    if (g_state.dsp_ok) {
-        size_t take = BLOCK_FRAMES;
-        if (s_fft_fill + take > FFT_POINTS) {
-            take = FFT_POINTS - s_fft_fill;
-        }
-        memcpy(&s_fft_in[s_fft_fill], s_pcm_in, take * sizeof(int16_t));
-        s_fft_fill += take;
+	bool fft_ran = false;
+	if (g_state.dsp_ok) {
+		size_t take = BLOCK_FRAMES;
+		if (s_fft_fill + take > FFT_POINTS) {
+			take = FFT_POINTS - s_fft_fill;
+		}
+		memcpy(&s_fft_in[s_fft_fill], s_pcm_in, take * sizeof(int16_t));
+		s_fft_fill += take;
 
-        if (s_fft_fill >= FFT_POINTS) {
-            size_t       got = 0;
-            alp_status_t st = alp_dsp_chain_apply_bins(g_state.dsp, s_fft_in, FFT_POINTS, s_bin_mag,
-                                                       FFT_POINTS, &got);
-            if (st != ALP_OK) {
-                LOG_WRN("dsp apply_bins failed: st=%d (block %u)", (int)st,
-                        (unsigned)g_state.blocks_run);
-            } else {
-                fft_ran = true;
-            }
-            /* Carry the leftover tail of this block (the samples that
+		if (s_fft_fill >= FFT_POINTS) {
+			size_t       got = 0;
+			alp_status_t st = alp_dsp_chain_apply_bins(g_state.dsp, s_fft_in, FFT_POINTS, s_bin_mag,
+			                                           FFT_POINTS, &got);
+			if (st != ALP_OK) {
+				LOG_WRN("dsp apply_bins failed: st=%d (block %u)", (int)st,
+				        (unsigned)g_state.blocks_run);
+			} else {
+				fft_ran = true;
+			}
+			/* Carry the leftover tail of this block (the samples that
              * didn't fit before the FFT fired) to the front of the
              * next frame. */
-            size_t leftover = BLOCK_FRAMES - take;
-            if (leftover > FFT_POINTS) leftover = FFT_POINTS;
-            memmove(s_fft_in, &s_pcm_in[take], leftover * sizeof(int16_t));
-            s_fft_fill = leftover;
-        }
-    }
+			size_t leftover = BLOCK_FRAMES - take;
+			if (leftover > FFT_POINTS) leftover = FFT_POINTS;
+			memmove(s_fft_in, &s_pcm_in[take], leftover * sizeof(int16_t));
+			s_fft_fill = leftover;
+		}
+	}
 
-    /* 3. Inference (per-bin gain mask).  The output tensor is the
+	/* 3. Inference (per-bin gain mask).  The output tensor is the
      *    mask itself in the trained model; v0.5 just invokes for
      *    framing-path correctness.  Only run when a fresh spectrum
      *    was produced this block. */
-    if (g_state.inf_ok && fft_ran) {
-        push_bins_into_model(g_state.inf, s_bin_mag, FFT_POINTS);
-        (void)alp_inference_invoke(g_state.inf);
-        /* TODO(v0.6): alp_inference_get_output() -> gain mask ->
+	if (g_state.inf_ok && fft_ran) {
+		push_bins_into_model(g_state.inf, s_bin_mag, FFT_POINTS);
+		(void)alp_inference_invoke(g_state.inf);
+		/* TODO(v0.6): alp_inference_get_output() -> gain mask ->
          * multiply against the FFT bins (we'd keep the COMPLEX
          * output format then so phase survives) -> IFFT -> OLA. */
-    }
+	}
 
-    /* 4. v0.5 passthrough -- TODO(v0.6) replace with the
+	/* 4. v0.5 passthrough -- TODO(v0.6) replace with the
      *    masked + IFFT + overlap-add synthesis path. */
-    memcpy(s_pcm_out, s_pcm_in, sizeof(s_pcm_out));
+	memcpy(s_pcm_out, s_pcm_in, sizeof(s_pcm_out));
 
-    /* 5. Speaker-out. */
-    if (g_state.spk_ok) {
-        size_t pushed = 0;
-        (void)alp_audio_out_write(g_state.spk, s_pcm_out, BLOCK_FRAMES, &pushed,
-                                  /*timeout_ms=*/100);
-    }
+	/* 5. Speaker-out. */
+	if (g_state.spk_ok) {
+		size_t pushed = 0;
+		(void)alp_audio_out_write(g_state.spk, s_pcm_out, BLOCK_FRAMES, &pushed,
+		                          /*timeout_ms=*/100);
+	}
 
-    g_state.blocks_run++;
+	g_state.blocks_run++;
 }
 
 int main(void)
 {
-    printf("[ns] audio-noise-suppression v0.5 -- mic -> DSP -> AI -> speaker\n");
-    printf("[ns]   block=%d frames @ %d Hz mono = %d ms latency target\n", BLOCK_FRAMES, SR_HZ,
-           BLOCK_MS);
+	printf("[ns] audio-noise-suppression v0.5 -- mic -> DSP -> AI -> speaker\n");
+	printf("[ns]   block=%d frames @ %d Hz mono = %d ms latency target\n", BLOCK_FRAMES, SR_HZ,
+	       BLOCK_MS);
 
-    /* ── Open mic + speaker on the same I2S link ───────────
+	/* ── Open mic + speaker on the same I2S link ───────────
      *
      * The TAS2563 codec on both EVKs exposes both directions on
      * their respective I2S bus (the codec handles the PDM-to-I2S
@@ -365,74 +365,74 @@ int main(void)
      * the audio codec I2S bus on whichever EVK is targeted
      * (E1M_I2S0 on AEN, E1M_X_I2S0 on V2N).  On native_sim
      * neither open() succeeds; the loop tolerates that. */
-    alp_audio_config_t cfg = {
-        .peripheral_id    = BOARD_I2S_AUDIO, /* E1M EVK: E1M_I2S0; E1M-X EVK: E1M_X_I2S0 */
-        .sample_rate_hz   = SR_HZ,
-        .channels         = CHANNELS,
-        .format           = ALP_AUDIO_FMT_S16_LE,
-        .frames_per_block = BLOCK_FRAMES,
-    };
-    g_state.mic    = alp_audio_in_open(&cfg);
-    g_state.mic_ok = (g_state.mic != NULL);
-    if (g_state.mic_ok) {
-        printf("[ns]   alp_audio_in_open(I2S0)         ok\n");
-        (void)alp_audio_in_start(g_state.mic);
-    } else {
-        printf("[ns]   alp_audio_in_open(I2S0)         skip (last_err=%d)\n",
-               (int)alp_last_error());
-    }
+	alp_audio_config_t cfg = {
+		.peripheral_id    = BOARD_I2S_AUDIO, /* E1M EVK: E1M_I2S0; E1M-X EVK: E1M_X_I2S0 */
+		.sample_rate_hz   = SR_HZ,
+		.channels         = CHANNELS,
+		.format           = ALP_AUDIO_FMT_S16_LE,
+		.frames_per_block = BLOCK_FRAMES,
+	};
+	g_state.mic    = alp_audio_in_open(&cfg);
+	g_state.mic_ok = (g_state.mic != NULL);
+	if (g_state.mic_ok) {
+		printf("[ns]   alp_audio_in_open(I2S0)         ok\n");
+		(void)alp_audio_in_start(g_state.mic);
+	} else {
+		printf("[ns]   alp_audio_in_open(I2S0)         skip (last_err=%d)\n",
+		       (int)alp_last_error());
+	}
 
-    g_state.spk    = alp_audio_out_open(&cfg);
-    g_state.spk_ok = (g_state.spk != NULL);
-    if (g_state.spk_ok) {
-        printf("[ns]   alp_audio_out_open(I2S0)        ok\n");
-        (void)alp_audio_out_set_volume(g_state.spk, 0xA0);
-        (void)alp_audio_out_start(g_state.spk);
-    } else {
-        printf("[ns]   alp_audio_out_open(I2S0)        skip (last_err=%d)\n",
-               (int)alp_last_error());
-    }
+	g_state.spk    = alp_audio_out_open(&cfg);
+	g_state.spk_ok = (g_state.spk != NULL);
+	if (g_state.spk_ok) {
+		printf("[ns]   alp_audio_out_open(I2S0)        ok\n");
+		(void)alp_audio_out_set_volume(g_state.spk, 0xA0);
+		(void)alp_audio_out_start(g_state.spk);
+	} else {
+		printf("[ns]   alp_audio_out_open(I2S0)        skip (last_err=%d)\n",
+		       (int)alp_last_error());
+	}
 
-    /* ── Open the DSP chain (window + FFT) ─────────────────
+	/* ── Open the DSP chain (window + FFT) ─────────────────
      *
      * The chain validator (see <alp/dsp.h>) enforces that
      * WINDOW immediately precedes FFT and that FFT is the
      * terminal stage.  Our two-stage descriptor satisfies
      * both.  Open should succeed even on native_sim (the chain
      * implementation is the portable C/CMSIS-DSP fallback). */
-    g_state.dsp = alp_dsp_chain_open(s_dsp_stages, sizeof(s_dsp_stages) / sizeof(s_dsp_stages[0]));
-    g_state.dsp_ok = (g_state.dsp != NULL);
-    if (g_state.dsp_ok) {
-        printf("[ns]   alp_dsp_chain_open(hann+fft256) ok\n");
-    } else {
-        printf("[ns]   alp_dsp_chain_open(hann+fft256) skip (last_err=%d)\n",
-               (int)alp_last_error());
-    }
+	g_state.dsp = alp_dsp_chain_open(s_dsp_stages, sizeof(s_dsp_stages) / sizeof(s_dsp_stages[0]));
+	g_state.dsp_ok = (g_state.dsp != NULL);
+	if (g_state.dsp_ok) {
+		printf("[ns]   alp_dsp_chain_open(hann+fft256) ok\n");
+	} else {
+		printf("[ns]   alp_dsp_chain_open(hann+fft256) skip (last_err=%d)\n",
+		       (int)alp_last_error());
+	}
 
-    /* ── Open the inference backend ────────────────────────
+	/* ── Open the inference backend ────────────────────────
      *
      * AUTO routes to whatever the §D.lib loader resolved from
      * the SoM preset -- DX-M1 on V2N-M1, CPU TFLM on V2N
      * (no NPU), DX-M2 on V2H once that SKU lands.  App source
      * doesn't change. */
-    alp_inference_config_t inf_cfg = {
-        .backend     = ALP_INFERENCE_BACKEND_AUTO,
-        .format      = ALP_INFERENCE_MODEL_TFLITE,
-        .model_data  = s_model,
-        .model_size  = sizeof(s_model),
-        .arena       = s_arena,
-        .arena_bytes = sizeof(s_arena),
-    };
-    g_state.inf    = alp_inference_open(&inf_cfg);
-    g_state.inf_ok = (g_state.inf != NULL);
-    if (g_state.inf_ok) {
-        printf("[ns]   alp_inference_open(AUTO)        ok\n");
-    } else {
-        printf("[ns]   alp_inference_open(AUTO)        skip (last_err=%d)\n",
-               (int)alp_last_error());
-    }
+	alp_inference_config_t inf_cfg = {
+		.backend     = ALP_INFERENCE_BACKEND_AUTO,
+		.format      = ALP_INFERENCE_MODEL_TFLITE,
+		.model_data  = s_model,
+		.model_size  = sizeof(s_model),
+		.arena       = s_arena,
+		.arena_bytes = sizeof(s_arena),
+	};
+	g_state.inf    = alp_inference_open(&inf_cfg);
+	g_state.inf_ok = (g_state.inf != NULL);
+	if (g_state.inf_ok) {
+		printf("[ns]   alp_inference_open(AUTO)        ok\n");
+	} else {
+		printf("[ns]   alp_inference_open(AUTO)        skip (last_err=%d)\n",
+		       (int)alp_last_error());
+	}
 
-    /* ── Steady-state loop ─────────────────────────────────
+	/* ── Steady-state loop ─────────────────────────────────
      *
      * On HiL we loop DEMO_BLOCKS * 10 ms = ~500 ms of audio --
      * enough for a customer to hear "the noise dropped" on a
@@ -446,28 +446,28 @@ int main(void)
      * supervisor sits in WFI between DMA-ready IRQs so the
      * average power is dominated by the codec + DMA engines,
      * not the CPU. */
-    printf("[ns]   streaming %d blocks (%d ms total) ...\n", DEMO_BLOCKS, DEMO_BLOCKS * BLOCK_MS);
-    for (int b = 0; b < DEMO_BLOCKS; ++b) {
-        process_one_block();
+	printf("[ns]   streaming %d blocks (%d ms total) ...\n", DEMO_BLOCKS, DEMO_BLOCKS * BLOCK_MS);
+	for (int b = 0; b < DEMO_BLOCKS; ++b) {
+		process_one_block();
 #ifdef CONFIG_BOARD_NATIVE_SIM
-        /* One iteration is enough for native_sim framing. */
-        if (b == 0) break;
+		/* One iteration is enough for native_sim framing. */
+		if (b == 0) break;
 #endif
-    }
+	}
 
-    /* ── Teardown ──────────────────────────────────────────
+	/* ── Teardown ──────────────────────────────────────────
      *
      * All close() calls tolerate NULL so we don't need per-handle
      * guards.  Order: speaker first (so any in-flight DMA drains
      * cleanly), then mic, then DSP chain, then inference. */
-    if (g_state.spk_ok) (void)alp_audio_out_stop(g_state.spk);
-    if (g_state.mic_ok) (void)alp_audio_in_stop(g_state.mic);
-    alp_audio_out_close(g_state.spk);
-    alp_audio_in_close(g_state.mic);
-    alp_dsp_chain_close(g_state.dsp);
-    alp_inference_close(g_state.inf);
+	if (g_state.spk_ok) (void)alp_audio_out_stop(g_state.spk);
+	if (g_state.mic_ok) (void)alp_audio_in_stop(g_state.mic);
+	alp_audio_out_close(g_state.spk);
+	alp_audio_in_close(g_state.mic);
+	alp_dsp_chain_close(g_state.dsp);
+	alp_inference_close(g_state.inf);
 
-    printf("[ns]   ran %u blocks\n", (unsigned)g_state.blocks_run);
-    printf("[ns] done\n");
-    return 0;
+	printf("[ns]   ran %u blocks\n", (unsigned)g_state.blocks_run);
+	printf("[ns] done\n");
+	return 0;
 }

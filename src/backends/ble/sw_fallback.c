@@ -37,137 +37,127 @@
 
 /* ---------- Radio-side ops ---------- */
 
-static alp_status_t sw_open(alp_ble_radio_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t sw_open(alp_ble_radio_state_t *st, alp_capabilities_t *caps_out)
 {
-    st->be_data = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	st->be_data     = NULL;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
-static alp_status_t sw_advertise_start(alp_ble_radio_state_t *st,
-                                       const alp_ble_adv_config_t *cfg)
+static alp_status_t sw_advertise_start(alp_ble_radio_state_t *st, const alp_ble_adv_config_t *cfg)
 {
-    (void)st;
-    (void)cfg;
-    return ALP_OK;
+	(void)st;
+	(void)cfg;
+	return ALP_OK;
 }
 
 static alp_status_t sw_advertise_stop(alp_ble_radio_state_t *st)
 {
-    (void)st;
-    return ALP_OK;
+	(void)st;
+	return ALP_OK;
 }
 
-static alp_status_t sw_gatt_register_service(alp_ble_radio_state_t *st,
+static alp_status_t sw_gatt_register_service(alp_ble_radio_state_t       *st,
                                              const alp_ble_service_def_t *def,
-                                             alp_ble_attr_handle_t *handles_out)
+                                             alp_ble_attr_handle_t       *handles_out)
 {
-    (void)st;
-    (void)def;
-    (void)handles_out;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)st;
+	(void)def;
+	(void)handles_out;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_gatt_notify(alp_ble_radio_state_t *radio_st,
-                                   alp_ble_conn_state_t *conn_st,
-                                   alp_ble_attr_handle_t handle,
-                                   const uint8_t *payload, size_t len)
+static alp_status_t sw_gatt_notify(alp_ble_radio_state_t *radio_st, alp_ble_conn_state_t *conn_st,
+                                   alp_ble_attr_handle_t handle, const uint8_t *payload, size_t len)
 {
-    (void)radio_st;
-    (void)conn_st;
-    (void)handle;
-    (void)payload;
-    (void)len;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)radio_st;
+	(void)conn_st;
+	(void)handle;
+	(void)payload;
+	(void)len;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_scan_start(alp_ble_radio_state_t *st, bool active,
-                                  alp_ble_scan_cb_t cb, void *user)
+static alp_status_t sw_scan_start(alp_ble_radio_state_t *st, bool active, alp_ble_scan_cb_t cb,
+                                  void *user)
 {
-    (void)st;
-    (void)active;
-    (void)cb;
-    (void)user;
-    return ALP_OK;
+	(void)st;
+	(void)active;
+	(void)cb;
+	(void)user;
+	return ALP_OK;
 }
 
 static alp_status_t sw_scan_stop(alp_ble_radio_state_t *st)
 {
-    (void)st;
-    return ALP_OK;
+	(void)st;
+	return ALP_OK;
 }
 
-static alp_status_t sw_connect(alp_ble_radio_state_t *st,
-                               const alp_ble_addr_t *peer,
-                               uint32_t timeout_ms,
-                               alp_ble_conn_state_t *conn_st)
+static alp_status_t sw_connect(alp_ble_radio_state_t *st, const alp_ble_addr_t *peer,
+                               uint32_t timeout_ms, alp_ble_conn_state_t *conn_st)
 {
-    (void)st;
-    (void)peer;
-    (void)timeout_ms;
-    (void)conn_st;
-    /* No real controller, so no real peer can connect.  Returning
+	(void)st;
+	(void)peer;
+	(void)timeout_ms;
+	(void)conn_st;
+	/* No real controller, so no real peer can connect.  Returning
      * NOT_IMPLEMENTED rather than OK keeps the dispatcher from
      * handing out a conn handle that no subsequent op can use. */
-    return ALP_ERR_NOT_IMPLEMENTED;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static void sw_close(alp_ble_radio_state_t *st)
 {
-    (void)st;
+	(void)st;
 }
 
 /* ---------- Conn-side ops ---------- */
 
 static alp_status_t sw_disconnect(alp_ble_conn_state_t *conn_st)
 {
-    (void)conn_st;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)conn_st;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_gatt_read(alp_ble_conn_state_t *conn_st,
-                                 alp_ble_attr_handle_t handle,
-                                 uint8_t *out, size_t out_cap,
-                                 size_t *out_len, uint32_t timeout_ms)
+static alp_status_t sw_gatt_read(alp_ble_conn_state_t *conn_st, alp_ble_attr_handle_t handle,
+                                 uint8_t *out, size_t out_cap, size_t *out_len, uint32_t timeout_ms)
 {
-    (void)conn_st;
-    (void)handle;
-    (void)out;
-    (void)out_cap;
-    (void)timeout_ms;
-    if (out_len != NULL) *out_len = 0;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)conn_st;
+	(void)handle;
+	(void)out;
+	(void)out_cap;
+	(void)timeout_ms;
+	if (out_len != NULL) *out_len = 0;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_gatt_write(alp_ble_conn_state_t *conn_st,
-                                  alp_ble_attr_handle_t handle,
-                                  const uint8_t *data, size_t len,
-                                  uint32_t timeout_ms)
+static alp_status_t sw_gatt_write(alp_ble_conn_state_t *conn_st, alp_ble_attr_handle_t handle,
+                                  const uint8_t *data, size_t len, uint32_t timeout_ms)
 {
-    (void)conn_st;
-    (void)handle;
-    (void)data;
-    (void)len;
-    (void)timeout_ms;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)conn_st;
+	(void)handle;
+	(void)data;
+	(void)len;
+	(void)timeout_ms;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 /* ---------- Registration ---------- */
 
 static const alp_ble_ops_t _ops = {
-    .open                  = sw_open,
-    .advertise_start       = sw_advertise_start,
-    .advertise_stop        = sw_advertise_stop,
-    .gatt_register_service = sw_gatt_register_service,
-    .gatt_notify           = sw_gatt_notify,
-    .scan_start            = sw_scan_start,
-    .scan_stop             = sw_scan_stop,
-    .connect               = sw_connect,
-    .close                 = sw_close,
-    .disconnect            = sw_disconnect,
-    .gatt_read             = sw_gatt_read,
-    .gatt_write            = sw_gatt_write,
+	.open                  = sw_open,
+	.advertise_start       = sw_advertise_start,
+	.advertise_stop        = sw_advertise_stop,
+	.gatt_register_service = sw_gatt_register_service,
+	.gatt_notify           = sw_gatt_notify,
+	.scan_start            = sw_scan_start,
+	.scan_stop             = sw_scan_stop,
+	.connect               = sw_connect,
+	.close                 = sw_close,
+	.disconnect            = sw_disconnect,
+	.gatt_read             = sw_gatt_read,
+	.gatt_write            = sw_gatt_write,
 };
 
 ALP_BACKEND_REGISTER(ble, sw_fallback,

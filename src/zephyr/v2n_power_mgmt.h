@@ -66,7 +66,7 @@ extern "C" {
 alp_status_t alp_z_v2n_power_mgmt_init(void);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_INTERNAL_ZEPHYR_V2N_POWER_MGMT_H_ */
+#endif /* ALP_INTERNAL_ZEPHYR_V2N_POWER_MGMT_H_ */

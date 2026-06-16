@@ -44,9 +44,9 @@ extern "C" {
 #define EEPROM_24C128_I2C_ADDR_LOW 0x50u  /* A2:A1:A0 = 000 */
 
 typedef struct {
-    bool       initialised;
-    alp_i2c_t *bus;
-    uint8_t    addr;
+	bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
 } eeprom_24c128_t;
 
 /** @brief Probe the EEPROM (1-byte read at offset 0; ACK -> success). */
@@ -78,7 +78,7 @@ alp_status_t eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const ui
                                  size_t len);
 
 /** @brief Release the driver context.  Idempotent. */
-void         eeprom_24c128_deinit(eeprom_24c128_t *ctx);
+void eeprom_24c128_deinit(eeprom_24c128_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

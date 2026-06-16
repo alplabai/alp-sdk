@@ -35,17 +35,17 @@ extern "C" {
 
 #define VEML7700_I2C_ADDR 0x10u
 
-#define VEML7700_REG_CONF      0x00u
-#define VEML7700_REG_HIGH_TH   0x01u
-#define VEML7700_REG_LOW_TH    0x02u
+#define VEML7700_REG_CONF 0x00u
+#define VEML7700_REG_HIGH_TH 0x01u
+#define VEML7700_REG_LOW_TH 0x02u
 #define VEML7700_REG_POWER_SAVE 0x03u
-#define VEML7700_REG_ALS       0x04u
-#define VEML7700_REG_WHITE     0x05u
+#define VEML7700_REG_ALS 0x04u
+#define VEML7700_REG_WHITE 0x05u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } veml7700_t;
 
 /** @brief Bind context and turn on the ALS (clears CONF bit 0). */

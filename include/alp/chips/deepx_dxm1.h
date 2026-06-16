@@ -72,17 +72,17 @@ extern "C" {
  *  @ref deepx_dxm1_set_reset_polarity() if the silicon polarity
  *  ever changes. */
 typedef enum {
-    DEEPX_DXM1_RESET_ACTIVE_LOW  = 0, /**< Default on V2N-M1. */
-    DEEPX_DXM1_RESET_ACTIVE_HIGH = 1,
+	DEEPX_DXM1_RESET_ACTIVE_LOW  = 0, /**< Default on V2N-M1. */
+	DEEPX_DXM1_RESET_ACTIVE_HIGH = 1,
 } deepx_dxm1_reset_polarity_t;
 
 /** Driver context. */
 typedef struct {
-    bool                         initialised;
-    alp_gpio_t                  *m1_reset_pin;  /**< Renesas PA6.        */
-    pi3dbs12212_t               *pcie_mux;      /**< owned + opened by caller. */
-    pi3dbs12212_state_t          deepx_path;    /**< Which mux state means "to DEEPX". */
-    deepx_dxm1_reset_polarity_t  reset_polarity;
+	bool                        initialised;
+	alp_gpio_t                 *m1_reset_pin; /**< Renesas PA6.        */
+	pi3dbs12212_t              *pcie_mux;     /**< owned + opened by caller. */
+	pi3dbs12212_state_t         deepx_path;   /**< Which mux state means "to DEEPX". */
+	deepx_dxm1_reset_polarity_t reset_polarity;
 } deepx_dxm1_t;
 
 /**
@@ -104,14 +104,11 @@ typedef struct {
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO.
  */
-alp_status_t deepx_dxm1_init(deepx_dxm1_t *ctx,
-                             alp_gpio_t *m1_reset,
-                             pi3dbs12212_t *pcie_mux,
+alp_status_t deepx_dxm1_init(deepx_dxm1_t *ctx, alp_gpio_t *m1_reset, pi3dbs12212_t *pcie_mux,
                              pi3dbs12212_state_t deepx_path);
 
 /** @brief Override the assumed reset-line polarity.  Default is active-high. */
-alp_status_t deepx_dxm1_set_reset_polarity(deepx_dxm1_t *ctx,
-                                           deepx_dxm1_reset_polarity_t p);
+alp_status_t deepx_dxm1_set_reset_polarity(deepx_dxm1_t *ctx, deepx_dxm1_reset_polarity_t p);
 
 /**
  * @brief Run the bring-up sequence: route the PCIe muxes to DEEPX,
@@ -144,7 +141,7 @@ alp_status_t deepx_dxm1_shut_down(deepx_dxm1_t *ctx);
 
 /** @brief Release the context.  Does NOT close the underlying GPIO /
  *         mux handles -- caller retains ownership. */
-void         deepx_dxm1_deinit(deepx_dxm1_t *ctx);
+void deepx_dxm1_deinit(deepx_dxm1_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -34,8 +34,8 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_gpio_t *sd_mode; /**< Active-high shutdown / mode-select pin. */
-    bool        initialised;
+	alp_gpio_t *sd_mode; /**< Active-high shutdown / mode-select pin. */
+	bool        initialised;
 } max98357a_t;
 
 /** @brief Bind context to caller-opened SD_MODE GPIO. */

@@ -35,12 +35,12 @@ extern "C" {
 
 #define GC2145_REG_PID_HI 0xF0u
 #define GC2145_REG_PID_LO 0xF1u
-#define GC2145_CHIP_ID    0x2145u
+#define GC2145_CHIP_ID 0x2145u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } gc2145_t;
 
 /** @brief Bind context and verify chip ID. */

@@ -78,8 +78,8 @@ extern "C" {
 
 /** Identifier for each of the two regulator-enable lines. */
 typedef enum {
-    MURATA_REG_BT  = 0, /**< `BT_REG_ON`. */
-    MURATA_REG_WL  = 1, /**< `WL_REG_ON`. */
+	MURATA_REG_BT = 0, /**< `BT_REG_ON`. */
+	MURATA_REG_WL = 1, /**< `WL_REG_ON`. */
 } murata_reg_t;
 
 /** Set the regulator-enable line at @p which to the active-high level
@@ -91,18 +91,18 @@ typedef int (*murata_reg_get_t)(murata_reg_t which, bool *enable, void *user);
 
 /** Driver context. */
 typedef struct {
-    bool              initialised;
-    /* REG_ON outputs (GD32-side on V2N) -- callback driven. */
-    murata_reg_set_t  reg_set;
-    murata_reg_get_t  reg_get;
-    void             *reg_user;
-    /* HOST_WAKE inputs (Renesas-side on V2N) -- direct alp_gpio_t. */
-    alp_gpio_t       *bt_host_wake;   /**< NULL if the board doesn't route this. */
-    alp_gpio_t       *wl_host_wake;   /**< NULL if the board doesn't route this. */
-    alp_gpio_t       *bt_dev_wake;    /**< NULL today (TBD on V2N). */
-    /* Cached state. */
-    bool              bt_powered;
-    bool              wl_powered;
+	bool initialised;
+	/* REG_ON outputs (GD32-side on V2N) -- callback driven. */
+	murata_reg_set_t reg_set;
+	murata_reg_get_t reg_get;
+	void            *reg_user;
+	/* HOST_WAKE inputs (Renesas-side on V2N) -- direct alp_gpio_t. */
+	alp_gpio_t *bt_host_wake; /**< NULL if the board doesn't route this. */
+	alp_gpio_t *wl_host_wake; /**< NULL if the board doesn't route this. */
+	alp_gpio_t *bt_dev_wake;  /**< NULL today (TBD on V2N). */
+	/* Cached state. */
+	bool bt_powered;
+	bool wl_powered;
 } murata_lbee5hy2fy_t;
 
 /**
@@ -124,12 +124,9 @@ typedef struct {
  * @param bt_dev_wake   Optional alp_gpio_t for BT_DEV_WAKE output;
  *                      NULL on V2N until the maintainer routes it.
  */
-alp_status_t murata_lbee5hy2fy_init(murata_lbee5hy2fy_t *ctx,
-                                    murata_reg_set_t reg_set,
-                                    murata_reg_get_t reg_get,
-                                    void *reg_user,
-                                    alp_gpio_t *bt_host_wake,
-                                    alp_gpio_t *wl_host_wake,
+alp_status_t murata_lbee5hy2fy_init(murata_lbee5hy2fy_t *ctx, murata_reg_set_t reg_set,
+                                    murata_reg_get_t reg_get, void *reg_user,
+                                    alp_gpio_t *bt_host_wake, alp_gpio_t *wl_host_wake,
                                     alp_gpio_t *bt_dev_wake);
 
 /** @brief Drive `BT_REG_ON` to the requested level. */

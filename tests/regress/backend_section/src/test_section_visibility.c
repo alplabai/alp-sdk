@@ -14,14 +14,15 @@
 #include <zephyr/ztest.h>
 #include <alp/backend.h>
 
-ALP_BACKEND_REGISTER(regress_sentinel, alif, {
-    .silicon_ref = "alif:ensemble:e7",
-    .vendor      = "alif",
-    .base_caps   = 0u,
-    .priority    = 100,
-    .ops         = NULL,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(regress_sentinel, alif,
+                     {
+                         .silicon_ref = "alif:ensemble:e7",
+                         .vendor      = "alif",
+                         .base_caps   = 0u,
+                         .priority    = 100,
+                         .ops         = NULL,
+                         .probe       = NULL,
+                     });
 
 ALP_BACKEND_DEFINE_CLASS(regress_sentinel);
 
@@ -29,24 +30,23 @@ ZTEST_SUITE(alp_backend_section, NULL, NULL, NULL, NULL, NULL);
 
 ZTEST(alp_backend_section, test_sentinel_is_visible_to_selector)
 {
-    const alp_backend_t *be = alp_backend_select(
-        "regress_sentinel", "alif:ensemble:e7");
-    zassert_not_null(be, "sentinel backend not found -- linker stripped the section");
-    zassert_equal(strcmp(be->vendor, "alif"), 0);
-    zassert_equal(be->priority, 100);
+	const alp_backend_t *be = alp_backend_select("regress_sentinel", "alif:ensemble:e7");
+	zassert_not_null(be, "sentinel backend not found -- linker stripped the section");
+	zassert_equal(strcmp(be->vendor, "alif"), 0);
+	zassert_equal(be->priority, 100);
 }
 
 ZTEST(alp_backend_section, test_count_reflects_section)
 {
-    zassert_equal(alp_backend_count("regress_sentinel"), 1u);
+	zassert_equal(alp_backend_count("regress_sentinel"), 1u);
 }
 
 ZTEST(alp_backend_section, test_select_returns_null_for_unknown_class)
 {
-    zassert_is_null(alp_backend_select("does_not_exist", "alif:ensemble:e7"));
+	zassert_is_null(alp_backend_select("does_not_exist", "alif:ensemble:e7"));
 }
 
 ZTEST(alp_backend_section, test_select_returns_null_for_unknown_silicon)
 {
-    zassert_is_null(alp_backend_select("regress_sentinel", "fictional:soc:zz"));
+	zassert_is_null(alp_backend_select("regress_sentinel", "fictional:soc:zz"));
 }

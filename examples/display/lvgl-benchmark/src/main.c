@@ -50,34 +50,34 @@ LOG_MODULE_REGISTER(lvgl_benchmark, LOG_LEVEL_INF);
 
 int main(void)
 {
-    LOG_INF("LVGL benchmark starting");
+	LOG_INF("LVGL benchmark starting");
 
-    /* Resolve the display via devicetree -- whichever node has
+	/* Resolve the display via devicetree -- whichever node has
      * `zephyr,display` is the panel LVGL renders into. */
-    const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
-    if (!device_is_ready(display)) {
-        LOG_ERR("display %s not ready", display->name);
-        return 1;
-    }
+	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
+	if (!device_is_ready(display)) {
+		LOG_ERR("display %s not ready", display->name);
+		return 1;
+	}
 
-    /* Initialise LVGL (allocates framebuffer + draw context). */
-    lv_init();
+	/* Initialise LVGL (allocates framebuffer + draw context). */
+	lv_init();
 
-    /* Kick off the benchmark.  The scene set is fixed and lives
+	/* Kick off the benchmark.  The scene set is fixed and lives
      * upstream in LVGL's demos/benchmark/.  Results print to the
      * Zephyr console via LVGL's lv_log() hook, which our prj.conf
      * routes to printk via CONFIG_LOG_PRINTK=y. */
-    lv_demo_benchmark();
+	lv_demo_benchmark();
 
-    display_blanking_off(display);
+	display_blanking_off(display);
 
-    /* Drain the LVGL task queue; the benchmark scene plays through
+	/* Drain the LVGL task queue; the benchmark scene plays through
      * scene-by-scene and emits its summary when the last scene
      * completes.  Same 10 ms slice as the widgets demo. */
-    while (1) {
-        const uint32_t sleep_ms = lv_task_handler();
-        k_msleep(MIN(sleep_ms, 10u));
-    }
+	while (1) {
+		const uint32_t sleep_ms = lv_task_handler();
+		k_msleep(MIN(sleep_ms, 10u));
+	}
 
-    return 0;
+	return 0;
 }

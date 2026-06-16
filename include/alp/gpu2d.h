@@ -76,11 +76,11 @@ extern "C" {
  *   - RGB888: 24-bit packed; backend-defined byte order.
  *   - RGBA8888: 32-bit, R:G:B:A = 8:8:8:8 (alternate ordering). */
 typedef enum {
-    ALP_GPU2D_FMT_ARGB8888 = 0,
-    ALP_GPU2D_FMT_RGB565   = 1,
-    ALP_GPU2D_FMT_A8       = 2,
-    ALP_GPU2D_FMT_RGB888   = 3,
-    ALP_GPU2D_FMT_RGBA8888 = 4,
+	ALP_GPU2D_FMT_ARGB8888 = 0,
+	ALP_GPU2D_FMT_RGB565   = 1,
+	ALP_GPU2D_FMT_A8       = 2,
+	ALP_GPU2D_FMT_RGB888   = 3,
+	ALP_GPU2D_FMT_RGBA8888 = 4,
 } alp_gpu2d_format_t;
 
 /** Blend mode for @ref alp_gpu2d_blend.  Colours are straight
@@ -92,10 +92,10 @@ typedef enum {
  *   - ADDITIVE: dst = src + dst (clamped).
  *   - MULTIPLY: dst = src * dst. */
 typedef enum {
-    ALP_GPU2D_BLEND_REPLACE  = 0,
-    ALP_GPU2D_BLEND_SRC_OVER = 1,
-    ALP_GPU2D_BLEND_ADDITIVE = 2,
-    ALP_GPU2D_BLEND_MULTIPLY = 3,
+	ALP_GPU2D_BLEND_REPLACE  = 0,
+	ALP_GPU2D_BLEND_SRC_OVER = 1,
+	ALP_GPU2D_BLEND_ADDITIVE = 2,
+	ALP_GPU2D_BLEND_MULTIPLY = 3,
 } alp_gpu2d_blend_mode_t;
 
 /** Surface descriptor.  Lives in caller memory; copied internally
@@ -107,11 +107,11 @@ typedef enum {
  *     (= width * bytes-per-pixel for tightly-packed surfaces).
  *   - format: one of @ref alp_gpu2d_format_t. */
 typedef struct {
-    void              *base;
-    uint32_t           width;
-    uint32_t           height;
-    uint32_t           stride_bytes;
-    alp_gpu2d_format_t format;
+	void              *base;
+	uint32_t           width;
+	uint32_t           height;
+	uint32_t           stride_bytes;
+	alp_gpu2d_format_t format;
 } alp_gpu2d_surface_t;
 
 /** Opaque GPU2D handle.  Allocate via @ref alp_gpu2d_open. */

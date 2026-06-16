@@ -33,33 +33,24 @@
 extern "C" {
 #endif
 
-#define ILI9341_WIDTH  240
+#define ILI9341_WIDTH 240
 #define ILI9341_HEIGHT 320
 
 typedef struct {
-    alp_spi_t  *bus;
-    alp_gpio_t *dc;
-    alp_gpio_t *reset;
-    bool        initialised;
+	alp_spi_t  *bus;
+	alp_gpio_t *dc;
+	alp_gpio_t *reset;
+	bool        initialised;
 } ili9341_t;
 
 /** @brief Initialise an ILI9341 over SPI.  See @ref st7789_init for shape. */
-alp_status_t ili9341_init(ili9341_t  *dev,
-                          alp_spi_t  *spi,
-                          alp_gpio_t *dc,
-                          alp_gpio_t *reset);
+alp_status_t ili9341_init(ili9341_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gpio_t *reset);
 
 /** @brief Set the active drawing window (inclusive coords). */
-alp_status_t ili9341_set_window(ili9341_t *dev,
-                                uint16_t   x0,
-                                uint16_t   y0,
-                                uint16_t   x1,
-                                uint16_t   y1);
+alp_status_t ili9341_set_window(ili9341_t *dev, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 
 /** @brief Push a buffer of native big-endian RGB565 pixels. */
-alp_status_t ili9341_write_pixels(ili9341_t     *dev,
-                                  const uint8_t *pixels,
-                                  size_t         n_bytes);
+alp_status_t ili9341_write_pixels(ili9341_t *dev, const uint8_t *pixels, size_t n_bytes);
 
 /** @brief Release the driver context. */
 void ili9341_deinit(ili9341_t *dev);

@@ -116,33 +116,33 @@ typedef struct alp_rpc_channel alp_rpc_channel_t;
  * initialiser literal directly to @ref alp_rpc_open for terse use.
  */
 typedef struct {
-    /** RPMsg endpoint name (matches @c ALP_IPC_<NAME>_NAME from the
+	/** RPMsg endpoint name (matches @c ALP_IPC_<NAME>_NAME from the
      *  generated `<alp/system_ipc.h>`).  Must be non-NULL + non-empty
      *  and ≤ 32 bytes including the NUL terminator. */
-    const char *name;
+	const char *name;
 
-    /** This side's endpoint ID (@c ALP_IPC_<NAME>_SRC_EPT).  When 0
+	/** This side's endpoint ID (@c ALP_IPC_<NAME>_SRC_EPT).  When 0
      *  the backend assigns a deterministic value from the channel
      *  name via FNV-1a hash; matching `<alp/system_ipc.h>` saves a
      *  hop. */
-    uint32_t src_ept;
+	uint32_t src_ept;
 
-    /** Peer side's endpoint ID (@c ALP_IPC_<NAME>_DST_EPT).  Must
+	/** Peer side's endpoint ID (@c ALP_IPC_<NAME>_DST_EPT).  Must
      *  agree with the value seen by the peer's @ref alp_rpc_open
      *  call -- the generated header on both sides is the contract.
      *  When 0 the backend uses `src_ept + 1` (same convention as
      *  the orchestrator). */
-    uint32_t dst_ept;
+	uint32_t dst_ept;
 
-    /** Mailbox channel index (@c ALP_IPC_<NAME>_MBOX_CH).  Defaults
+	/** Mailbox channel index (@c ALP_IPC_<NAME>_MBOX_CH).  Defaults
      *  to @ref ALP_RPC_DEFAULT_MBOX_CH when 0. */
-    uint32_t mbox_ch;
+	uint32_t mbox_ch;
 
-    /** Memory-caching policy for the carve-out.  @c false picks the
+	/** Memory-caching policy for the carve-out.  @c false picks the
      *  non-cacheable region (the v0.6 default).  Set to @c true on
      *  AEN where M55 caches are enabled and the carve-out is in
      *  cacheable MRAM. */
-    bool cacheable;
+	bool cacheable;
 } alp_rpc_config_t;
 
 /**

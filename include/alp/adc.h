@@ -69,10 +69,10 @@ extern "C" {
 
 /** Reference voltage source. */
 typedef enum {
-    ALP_ADC_REF_INTERNAL   = 0,    /**< On-die bandgap reference. */
-    ALP_ADC_REF_EXTERNAL_0 = 1,    /**< External pin pair 0 (VREF+ / VREF-). */
-    ALP_ADC_REF_EXTERNAL_1 = 2,    /**< Secondary external reference where present. */
-    ALP_ADC_REF_VDD        = 3     /**< Use VDD as the reference. */
+	ALP_ADC_REF_INTERNAL   = 0, /**< On-die bandgap reference. */
+	ALP_ADC_REF_EXTERNAL_0 = 1, /**< External pin pair 0 (VREF+ / VREF-). */
+	ALP_ADC_REF_EXTERNAL_1 = 2, /**< Secondary external reference where present. */
+	ALP_ADC_REF_VDD        = 3  /**< Use VDD as the reference. */
 } alp_adc_ref_t;
 
 /** Opaque ADC channel handle.  Allocate via @ref alp_adc_open. */
@@ -80,24 +80,24 @@ typedef struct alp_adc alp_adc_t;
 
 /** Configuration passed to @ref alp_adc_open. */
 typedef struct {
-    uint32_t      channel_id;      /**< Studio-resolved ADC channel index (0..7). */
-    uint8_t       resolution_bits; /**< 8 / 10 / 12 / 14 / 16 typical. 0 = use DT default. */
-    uint16_t      acquisition_us;  /**< Sample-and-hold time, microseconds. */
-    alp_adc_ref_t reference;
-    uint8_t       gain_num; /**< Gain numerator (e.g. 1 for 1/1). */
-    uint8_t       gain_den; /**< Gain denominator (e.g. 6 for 1/6). */
-    /** Hardware oversampling ratio (1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256).
+	uint32_t      channel_id;      /**< Studio-resolved ADC channel index (0..7). */
+	uint8_t       resolution_bits; /**< 8 / 10 / 12 / 14 / 16 typical. 0 = use DT default. */
+	uint16_t      acquisition_us;  /**< Sample-and-hold time, microseconds. */
+	alp_adc_ref_t reference;
+	uint8_t       gain_num; /**< Gain numerator (e.g. 1 for 1/1). */
+	uint8_t       gain_den; /**< Gain denominator (e.g. 6 for 1/6). */
+	/** Hardware oversampling ratio (1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256).
      *  Backend rounds down to the nearest power-of-two it supports.  0 means
      *  "backend default".  Backends without HW oversampling ignore this
      *  field; the SoC-cap layer documents which SoMs honour it. */
-    uint16_t oversampling_ratio;
-    /** Extra sample-and-hold cycles at the ADC clock.  Backend rounds to
+	uint16_t oversampling_ratio;
+	/** Extra sample-and-hold cycles at the ADC clock.  Backend rounds to
      *  its nearest discrete tap (8 taps on the GD32 IO MCU; vendor-defined
      *  elsewhere).  0 means "backend default".  Mutually independent from
      *  @c acquisition_us -- @c acquisition_us is a portable time-domain
      *  expression; @c sample_cycles is the backend-rounded discrete-tap
      *  expression for callers that already know which tap they want. */
-    uint16_t sample_cycles;
+	uint16_t sample_cycles;
 } alp_adc_config_t;
 
 /**
@@ -115,7 +115,7 @@ typedef struct {
  * @return Open handle on success, or NULL if the channel can't be
  *         resolved, configured, or the pool is exhausted.
  */
-alp_adc_t   *alp_adc_open(const alp_adc_config_t *cfg);
+alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg);
 
 /**
  * @brief One-shot read returning the raw conversion result.
@@ -153,7 +153,7 @@ alp_status_t alp_adc_read_uv(alp_adc_t *adc, int32_t *uv_out);
  *
  * @param[in] adc  Handle from @ref alp_adc_open, or NULL.
  */
-void         alp_adc_close(alp_adc_t *adc);
+void alp_adc_close(alp_adc_t *adc);
 
 /**
  * @brief Query the capabilities of an opened ADC handle.
@@ -178,8 +178,8 @@ typedef struct alp_adc_stream alp_adc_stream_t;
 
 /** Configuration passed to @ref alp_adc_stream_open. */
 typedef struct {
-    uint32_t channel_id;     /**< Studio-resolved ADC channel index (0..7). */
-    uint32_t sample_rate_hz; /**< Target sample rate (Hz).  Backend rounds
+	uint32_t channel_id;     /**< Studio-resolved ADC channel index (0..7). */
+	uint32_t sample_rate_hz; /**< Target sample rate (Hz).  Backend rounds
                                     *  down to its nearest achievable value and
                                     *  caps at the active SoM's hardware ceiling
                                     *  (~1.5 MSps on V2N at 12-bit). */
@@ -264,13 +264,13 @@ typedef struct alp_adc_filter alp_adc_filter_t;
 
 /** Configuration passed to @ref alp_adc_filter_open. */
 typedef struct {
-    uint32_t channel_id;     /**< ADC channel index (0..7). */
-    uint32_t sample_rate_hz; /**< Target acquisition rate (Hz). */
-    /** DSP stages, filter-terminated (no FFT).  Copied into the
+	uint32_t channel_id;     /**< ADC channel index (0..7). */
+	uint32_t sample_rate_hz; /**< Target acquisition rate (Hz). */
+	/** DSP stages, filter-terminated (no FFT).  Copied into the
      *  internal chain at open time; caller may free immediately. */
-    const alp_dsp_stage_t *stages;
-    /** Stage count (1..@ref ALP_DSP_MAX_STAGES). */
-    size_t n_stages;
+	const alp_dsp_stage_t *stages;
+	/** Stage count (1..@ref ALP_DSP_MAX_STAGES). */
+	size_t n_stages;
 } alp_adc_filter_config_t;
 
 /**
@@ -329,13 +329,13 @@ typedef struct alp_adc_spectrum alp_adc_spectrum_t;
 
 /** Configuration passed to @ref alp_adc_spectrum_open. */
 typedef struct {
-    uint32_t channel_id;     /**< ADC channel index (0..7). */
-    uint32_t sample_rate_hz; /**< Target acquisition rate (Hz). */
-    /** DSP stages, FFT-terminated (optional WINDOW immediately
+	uint32_t channel_id;     /**< ADC channel index (0..7). */
+	uint32_t sample_rate_hz; /**< Target acquisition rate (Hz). */
+	/** DSP stages, FFT-terminated (optional WINDOW immediately
      *  before FFT).  Copied at open time. */
-    const alp_dsp_stage_t *stages;
-    /** Stage count (1..@ref ALP_DSP_MAX_STAGES). */
-    size_t n_stages;
+	const alp_dsp_stage_t *stages;
+	/** Stage count (1..@ref ALP_DSP_MAX_STAGES). */
+	size_t n_stages;
 } alp_adc_spectrum_config_t;
 
 /**
@@ -386,7 +386,7 @@ alp_status_t alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, s
 void alp_adc_spectrum_close(alp_adc_spectrum_t *spec);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_ADC_H */
+#endif /* ALP_ADC_H */

@@ -52,20 +52,20 @@ extern "C" {
  *  pin a model layer to a specific stage when the translator
  *  output leaves the choice open. */
 typedef enum {
-    ALP_RENESAS_INFERENCE_STAGE_DRP      = 0u,  /**< DRP fabric (data-reconfigurable processor). */
-    ALP_RENESAS_INFERENCE_STAGE_AI_MAC   = 1u,  /**< AI-MAC unit (multiply-accumulate array). */
-    ALP_RENESAS_INFERENCE_STAGE_AI_SRAM  = 2u,  /**< AI-SRAM staging buffer. */
-    ALP_RENESAS_INFERENCE_STAGE_DMA      = 3u,  /**< DMA controller (off-chip transfer). */
+	ALP_RENESAS_INFERENCE_STAGE_DRP     = 0u, /**< DRP fabric (data-reconfigurable processor). */
+	ALP_RENESAS_INFERENCE_STAGE_AI_MAC  = 1u, /**< AI-MAC unit (multiply-accumulate array). */
+	ALP_RENESAS_INFERENCE_STAGE_AI_SRAM = 2u, /**< AI-SRAM staging buffer. */
+	ALP_RENESAS_INFERENCE_STAGE_DMA     = 3u, /**< DMA controller (off-chip transfer). */
 } alp_renesas_inference_stage_t;
 
 /** DRP-AI runtime status flags. */
 typedef enum {
-    ALP_RENESAS_INFERENCE_STATUS_IDLE        = 0u,
-    ALP_RENESAS_INFERENCE_STATUS_ARMED       = 1u << 0,
-    ALP_RENESAS_INFERENCE_STATUS_RUNNING     = 1u << 1,
-    ALP_RENESAS_INFERENCE_STATUS_DONE        = 1u << 2,
-    ALP_RENESAS_INFERENCE_STATUS_TIMEOUT     = 1u << 3,
-    ALP_RENESAS_INFERENCE_STATUS_BUS_ERR     = 1u << 4,
+	ALP_RENESAS_INFERENCE_STATUS_IDLE    = 0u,
+	ALP_RENESAS_INFERENCE_STATUS_ARMED   = 1u << 0,
+	ALP_RENESAS_INFERENCE_STATUS_RUNNING = 1u << 1,
+	ALP_RENESAS_INFERENCE_STATUS_DONE    = 1u << 2,
+	ALP_RENESAS_INFERENCE_STATUS_TIMEOUT = 1u << 3,
+	ALP_RENESAS_INFERENCE_STATUS_BUS_ERR = 1u << 4,
 } alp_renesas_inference_status_t;
 
 /**
@@ -96,8 +96,7 @@ typedef enum {
  *               translator's layer count.
  *          @ref ALP_ERR_NOSUPPORT until the vendor pack body lands.
  */
-alp_status_t alp_renesas_inference_pipeline_stage_pin(alp_inference_t *inf,
-                                                      uint32_t         layer_index,
+alp_status_t alp_renesas_inference_pipeline_stage_pin(alp_inference_t *inf, uint32_t layer_index,
                                                       alp_renesas_inference_stage_t stage);
 
 /**
@@ -125,8 +124,7 @@ alp_status_t alp_renesas_inference_pipeline_stage_pin(alp_inference_t *inf,
  *               exceeds the physical AI-SRAM size) /
  *          @ref ALP_ERR_NOSUPPORT until the vendor pack body lands.
  */
-alp_status_t alp_renesas_inference_ai_sram_reserve(alp_inference_t *inf,
-                                                   uint32_t         reserve_bytes);
+alp_status_t alp_renesas_inference_ai_sram_reserve(alp_inference_t *inf, uint32_t reserve_bytes);
 
 /**
  * @brief Read the DRP-AI runtime status flags.
@@ -148,8 +146,7 @@ alp_status_t alp_renesas_inference_ai_sram_reserve(alp_inference_t *inf,
  *          @ref ALP_ERR_INVAL (NULL inf or NULL status_out) /
  *          @ref ALP_ERR_NOSUPPORT until the vendor pack body lands.
  */
-alp_status_t alp_renesas_inference_get_status(alp_inference_t *inf,
-                                              uint32_t        *status_out);
+alp_status_t alp_renesas_inference_get_status(alp_inference_t *inf, uint32_t *status_out);
 
 #ifdef __cplusplus
 }

@@ -19,32 +19,29 @@
 typedef struct alp_uart_ops alp_uart_ops_t;
 
 typedef struct alp_uart_backend_state {
-    void                    *dev;        /* opaque backend device pointer
+	void                 *dev; /* opaque backend device pointer
                                           * (const struct device * on Zephyr;
                                           * kept void* so the portable handle
                                           * does not pull in <zephyr/device.h>) */
-    uint32_t                 port_id;
-    void                    *be_data;
-    const alp_uart_ops_t    *ops;
+	uint32_t              port_id;
+	void                 *be_data;
+	const alp_uart_ops_t *ops;
 } alp_uart_backend_state_t;
 
 struct alp_uart_ops {
-    alp_status_t (*open)(const alp_uart_config_t *cfg,
-                         alp_uart_backend_state_t *state,
-                         alp_capabilities_t *caps_out);
-    alp_status_t (*write)(alp_uart_backend_state_t *state,
-                          const uint8_t *data, size_t len);
-    alp_status_t (*read)(alp_uart_backend_state_t *state,
-                         uint8_t *data, size_t len,
-                         uint32_t timeout_ms);
-    void         (*close)(alp_uart_backend_state_t *state);
+	alp_status_t (*open)(const alp_uart_config_t *cfg, alp_uart_backend_state_t *state,
+	                     alp_capabilities_t *caps_out);
+	alp_status_t (*write)(alp_uart_backend_state_t *state, const uint8_t *data, size_t len);
+	alp_status_t (*read)(alp_uart_backend_state_t *state, uint8_t *data, size_t len,
+	                     uint32_t timeout_ms);
+	void (*close)(alp_uart_backend_state_t *state);
 };
 
 struct alp_uart {
-    alp_uart_backend_state_t  state;
-    const alp_backend_t      *backend;
-    alp_capabilities_t        cached_caps;
-    bool                      in_use;
+	alp_uart_backend_state_t state;
+	const alp_backend_t     *backend;
+	alp_capabilities_t       cached_caps;
+	bool                     in_use;
 };
 
 #endif /* ALP_BACKENDS_UART_OPS_H */

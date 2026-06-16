@@ -37,8 +37,8 @@ extern "C" {
 #define MAX31855_FAULT_MASK 0x00010007u
 
 typedef struct {
-    alp_spi_t *bus;
-    bool       initialised;
+	alp_spi_t *bus;
+	bool       initialised;
 } max31855_t;
 
 /** @brief Bind context to caller-opened SPI bus. */
@@ -53,10 +53,8 @@ alp_status_t max31855_init(max31855_t *dev, alp_spi_t *spi);
  * @param fault_flags       Output: bitmap of fault flags.            Optional.
  * @return `ALP_OK` on success.
  */
-alp_status_t max31855_read(max31855_t *dev,
-                           int32_t    *tc_milli_c,
-                           int32_t    *internal_milli_c,
-                           uint8_t    *fault_flags);
+alp_status_t max31855_read(max31855_t *dev, int32_t *tc_milli_c, int32_t *internal_milli_c,
+                           uint8_t *fault_flags);
 
 /** @brief Release driver context. */
 void max31855_deinit(max31855_t *dev);

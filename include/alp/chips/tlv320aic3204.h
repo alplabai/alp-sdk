@@ -38,10 +38,10 @@ extern "C" {
 #define TLV320AIC3204_REG_PAGE_SELECT 0x00u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    uint8_t    current_page;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	uint8_t    current_page;
+	bool       initialised;
 } tlv320aic3204_t;
 
 /** @brief Bind context to caller-opened I²C bus. */

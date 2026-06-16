@@ -56,52 +56,52 @@ static size_t  spi_tx_cursor;
 
 void spi_slave_cs_low(void)
 {
-    spi_rx_len = 0u;
+	spi_rx_len = 0u;
 }
 
 void spi_slave_rx_byte(uint8_t b)
 {
-    if (spi_rx_len < sizeof(spi_rx_buf)) {
-        spi_rx_buf[spi_rx_len++] = b;
-    }
-    /* Else: silently drop -- protocol_build_reply() sees the captured
+	if (spi_rx_len < sizeof(spi_rx_buf)) {
+		spi_rx_buf[spi_rx_len++] = b;
+	}
+	/* Else: silently drop -- protocol_build_reply() sees the captured
      * count exceed the declared payload and replies RESP_ERR_PROTOCOL. */
 }
 
 void spi_slave_cs_high(void)
 {
-    /* Empty transaction: the host toggled CS without sending a request
+	/* Empty transaction: the host toggled CS without sending a request
      * (e.g. a bare reply-read poll before the READY handshake).  Leave
      * the staged reply intact and rewind its cursor so the read
      * re-serves it from the top. */
-    if (spi_rx_len == 0u) {
-        spi_tx_cursor = 0u;
-        return;
-    }
-    spi_tx_len    = protocol_build_reply(spi_rx_buf, spi_rx_len, spi_tx_buf, sizeof(spi_tx_buf));
-    spi_tx_cursor = 0u;
+	if (spi_rx_len == 0u) {
+		spi_tx_cursor = 0u;
+		return;
+	}
+	spi_tx_len    = protocol_build_reply(spi_rx_buf, spi_rx_len, spi_tx_buf, sizeof(spi_tx_buf));
+	spi_tx_cursor = 0u;
 }
 
 uint8_t spi_slave_tx_next_byte(void)
 {
-    if (spi_tx_cursor < spi_tx_len) {
-        return spi_tx_buf[spi_tx_cursor++];
-    }
-    return 0xFFu; /* idle pattern once the reply is drained */
+	if (spi_tx_cursor < spi_tx_len) {
+		return spi_tx_buf[spi_tx_cursor++];
+	}
+	return 0xFFu; /* idle pattern once the reply is drained */
 }
 
 bool spi_slave_tx_pending(void)
 {
-    return spi_tx_cursor < spi_tx_len;
+	return spi_tx_cursor < spi_tx_len;
 }
 
 void transport_spi_init(void)
 {
-    spi_rx_len    = 0u;
-    spi_tx_len    = 0u;
-    spi_tx_cursor = 0u;
-    /* SPI0 slave bring-up lives in the ti HAL backend
+	spi_rx_len    = 0u;
+	spi_tx_len    = 0u;
+	spi_tx_cursor = 0u;
+	/* SPI0 slave bring-up lives in the ti HAL backend
      * (hal/ti/transport_hw_ti_spi.c); the stub backend's weak no-op
      * keeps this hardware-free for host-side protocol tests. */
-    bridge_transport_spi_hw_init();
+	bridge_transport_spi_hw_init();
 }

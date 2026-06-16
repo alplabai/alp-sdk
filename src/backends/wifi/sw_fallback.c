@@ -32,44 +32,42 @@
 
 #include "wifi_ops.h"
 
-static alp_status_t sw_open(alp_wifi_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t sw_open(alp_wifi_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-    st->be_data     = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	st->be_data     = NULL;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
-static alp_status_t sw_connect(alp_wifi_backend_state_t *st,
-                               const alp_wifi_credentials_t *creds,
+static alp_status_t sw_connect(alp_wifi_backend_state_t *st, const alp_wifi_credentials_t *creds,
                                uint32_t timeout_ms)
 {
-    (void)st;
-    (void)creds;
-    (void)timeout_ms;
-    /* No real radio under native_sim, so no real AP can be reached.
+	(void)st;
+	(void)creds;
+	(void)timeout_ms;
+	/* No real radio under native_sim, so no real AP can be reached.
      * Returning NOT_IMPLEMENTED rather than OK keeps callers from
      * thinking they've associated when they haven't. */
-    return ALP_ERR_NOT_IMPLEMENTED;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static alp_status_t sw_disconnect(alp_wifi_backend_state_t *st)
 {
-    (void)st;
-    /* Idempotent on a never-connected radio. */
-    return ALP_OK;
+	(void)st;
+	/* Idempotent on a never-connected radio. */
+	return ALP_OK;
 }
 
 static void sw_close(alp_wifi_backend_state_t *st)
 {
-    (void)st;
+	(void)st;
 }
 
 static const alp_wifi_ops_t _ops = {
-    .open       = sw_open,
-    .connect    = sw_connect,
-    .disconnect = sw_disconnect,
-    .close      = sw_close,
+	.open       = sw_open,
+	.connect    = sw_connect,
+	.disconnect = sw_disconnect,
+	.close      = sw_close,
 };
 
 ALP_BACKEND_REGISTER(wifi, sw_fallback,

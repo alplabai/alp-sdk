@@ -33,60 +33,57 @@
 
 static bool _is_alif_backend(const alp_camera_t *c)
 {
-    return c != NULL && c->backend != NULL &&
-           c->backend->vendor != NULL &&
-           strcmp(c->backend->vendor, "alif") == 0;
+	return c != NULL && c->backend != NULL && c->backend->vendor != NULL &&
+	       strcmp(c->backend->vendor, "alif") == 0;
 }
 
-alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t *camera,
-                                               alp_alif_camera_3a_region_t region,
+alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t                 *camera,
+                                               alp_alif_camera_3a_region_t   region,
                                                const alp_alif_camera_rect_t *rect)
 {
-    if (camera == NULL || rect == NULL) {
-        return ALP_ERR_INVAL;
-    }
-    if (!_is_alif_backend(camera)) {
-        return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
-    }
-    if (rect->w == 0u || rect->h == 0u) {
-        return ALP_ERR_INVAL;
-    }
-    (void)region;
-    /* Mali-C55 HAL pack not in scope yet -- body lands with the
+	if (camera == NULL || rect == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (!_is_alif_backend(camera)) {
+		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+	}
+	if (rect->w == 0u || rect->h == 0u) {
+		return ALP_ERR_INVAL;
+	}
+	(void)region;
+	/* Mali-C55 HAL pack not in scope yet -- body lands with the
      * Ensemble E4 / E6 / E8 vendor integration. */
-    return ALP_ERR_NOSUPPORT;
+	return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_alif_camera_isp_gain_table_load(alp_camera_t *camera,
+alp_status_t alp_alif_camera_isp_gain_table_load(alp_camera_t             *camera,
                                                  alp_alif_camera_channel_t channel,
-                                                 const uint16_t *table,
-                                                 uint16_t        len)
+                                                 const uint16_t *table, uint16_t len)
 {
-    if (camera == NULL || table == NULL) {
-        return ALP_ERR_INVAL;
-    }
-    if (!_is_alif_backend(camera)) {
-        return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
-    }
-    if (len < 16u || len > 1024u) {
-        return ALP_ERR_INVAL;
-    }
-    (void)channel;
-    return ALP_ERR_NOSUPPORT;
+	if (camera == NULL || table == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (!_is_alif_backend(camera)) {
+		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+	}
+	if (len < 16u || len > 1024u) {
+		return ALP_ERR_INVAL;
+	}
+	(void)channel;
+	return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_alif_camera_isp_lsc_lut_load(alp_camera_t  *camera,
-                                              const uint16_t *lut,
-                                              uint16_t        len)
+alp_status_t alp_alif_camera_isp_lsc_lut_load(alp_camera_t *camera, const uint16_t *lut,
+                                              uint16_t len)
 {
-    if (camera == NULL || lut == NULL) {
-        return ALP_ERR_INVAL;
-    }
-    if (!_is_alif_backend(camera)) {
-        return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
-    }
-    if (len < 64u || len > 4096u) {
-        return ALP_ERR_INVAL;
-    }
-    return ALP_ERR_NOSUPPORT;
+	if (camera == NULL || lut == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (!_is_alif_backend(camera)) {
+		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+	}
+	if (len < 64u || len > 4096u) {
+		return ALP_ERR_INVAL;
+	}
+	return ALP_ERR_NOSUPPORT;
 }

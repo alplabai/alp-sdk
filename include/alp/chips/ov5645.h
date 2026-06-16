@@ -45,29 +45,29 @@ extern "C" {
 /** Chip-ID register pair (16-bit register addressing). */
 #define OV5645_REG_CHIP_ID_HI 0x300Au
 #define OV5645_REG_CHIP_ID_LO 0x300Bu
-#define OV5645_CHIP_ID        0x5645u
+#define OV5645_CHIP_ID 0x5645u
 
 /** Resolution presets. */
 typedef enum {
-    OV5645_RES_VGA   = 0, /**< 640 × 480   */
-    OV5645_RES_720P  = 1, /**< 1280 × 720  */
-    OV5645_RES_1080P = 2, /**< 1920 × 1080 */
-    OV5645_RES_5MP   = 3, /**< 2592 × 1944 */
+	OV5645_RES_VGA   = 0, /**< 640 × 480   */
+	OV5645_RES_720P  = 1, /**< 1280 × 720  */
+	OV5645_RES_1080P = 2, /**< 1920 × 1080 */
+	OV5645_RES_5MP   = 3, /**< 2592 × 1944 */
 } ov5645_resolution_t;
 
 /** MIPI CSI-2 lane count. */
 typedef enum {
-    OV5645_LANES_1 = 1,
-    OV5645_LANES_2 = 2,
+	OV5645_LANES_1 = 1,
+	OV5645_LANES_2 = 2,
 } ov5645_lanes_t;
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-    alp_i2c_t          *bus;
-    uint8_t             addr;
-    ov5645_resolution_t res;
-    ov5645_lanes_t      lanes;
-    bool                initialised;
+	alp_i2c_t          *bus;
+	uint8_t             addr;
+	ov5645_resolution_t res;
+	ov5645_lanes_t      lanes;
+	bool                initialised;
 } ov5645_t;
 
 /**

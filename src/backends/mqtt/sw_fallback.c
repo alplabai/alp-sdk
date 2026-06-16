@@ -34,69 +34,67 @@
 
 #include "mqtt_ops.h"
 
-static alp_status_t sw_open(const alp_mqtt_config_t *cfg,
-                            alp_mqtt_backend_state_t *st,
+static alp_status_t sw_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st,
                             alp_capabilities_t *caps_out)
 {
-    (void)cfg;
-    st->be_data     = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	(void)cfg;
+	st->be_data     = NULL;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
 static alp_status_t sw_connect(alp_mqtt_backend_state_t *st, uint32_t timeout_ms)
 {
-    (void)st;
-    (void)timeout_ms;
-    /* No real broker under native_sim, so returning NOT_IMPLEMENTED
+	(void)st;
+	(void)timeout_ms;
+	/* No real broker under native_sim, so returning NOT_IMPLEMENTED
      * (rather than OK) keeps callers from thinking they've connected
      * when they haven't. */
-    return ALP_ERR_NOT_IMPLEMENTED;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static alp_status_t sw_publish(alp_mqtt_backend_state_t *st, const char *topic,
-                               const uint8_t *payload, size_t len,
-                               alp_mqtt_qos_t qos, bool retain)
+                               const uint8_t *payload, size_t len, alp_mqtt_qos_t qos, bool retain)
 {
-    (void)st;
-    (void)topic;
-    (void)payload;
-    (void)len;
-    (void)qos;
-    (void)retain;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)st;
+	(void)topic;
+	(void)payload;
+	(void)len;
+	(void)qos;
+	(void)retain;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static alp_status_t sw_subscribe(alp_mqtt_backend_state_t *st, const char *topic_filter,
                                  alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user)
 {
-    (void)st;
-    (void)topic_filter;
-    (void)qos;
-    (void)cb;
-    (void)user;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)st;
+	(void)topic_filter;
+	(void)qos;
+	(void)cb;
+	(void)user;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static alp_status_t sw_loop(alp_mqtt_backend_state_t *st, uint32_t timeout_ms)
 {
-    (void)st;
-    (void)timeout_ms;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)st;
+	(void)timeout_ms;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static void sw_close(alp_mqtt_backend_state_t *st)
 {
-    (void)st;
+	(void)st;
 }
 
 static const alp_mqtt_ops_t _ops = {
-    .open      = sw_open,
-    .connect   = sw_connect,
-    .publish   = sw_publish,
-    .subscribe = sw_subscribe,
-    .loop      = sw_loop,
-    .close     = sw_close,
+	.open      = sw_open,
+	.connect   = sw_connect,
+	.publish   = sw_publish,
+	.subscribe = sw_subscribe,
+	.loop      = sw_loop,
+	.close     = sw_close,
 };
 
 ALP_BACKEND_REGISTER(mqtt, sw_fallback,

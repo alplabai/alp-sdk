@@ -1,12 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 # clang-format style for the Alp SDK.
-# Conservative LLVM/Zephyr-leaning baseline; refine in follow-ups.
+#
+# Alp SDK is its OWN code style -- a unification layer across hardware and
+# software platforms (Zephyr-on-M, Yocto/Linux-on-A, vendor SDKs), NOT a Zephyr
+# project -- so this is the house style, not a mirror of any one platform.
+# Indentation is TABS (each developer renders them at their preferred width;
+# TabWidth below only feeds clang-format's column math).  Alignment stays in
+# spaces ("smart tabs"), so columns line up regardless of tab width.  Vendored
+# upstream code (zephyr/**, vendors/**) keeps its own style and is excluded from
+# the format gate -- see .github/workflows/pr-static-analysis.yml.
 ---
 Language: Cpp
 BasedOnStyle: LLVM
 IndentWidth: 4
 TabWidth: 4
-UseTab: Never
+UseTab: ForIndentation
 ColumnLimit: 100
 AlignConsecutiveAssignments: AcrossEmptyLines
 AlignConsecutiveDeclarations: AcrossEmptyLines

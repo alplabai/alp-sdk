@@ -49,9 +49,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>  /* abort() on CRC divergence */
+#include <stdlib.h> /* abort() on CRC divergence */
 
-#include "protocol.h"   /* firmware-side; declares protocol_dispatch + crc16_ccitt_false */
+#include "protocol.h" /* firmware-side; declares protocol_dispatch + crc16_ccitt_false */
 
 /* Reference CRC-16/CCITT-FALSE -- intentionally a second
  * implementation, byte-for-byte expected to agree with the
@@ -61,46 +61,45 @@
  * libFuzzer crash. */
 static uint16_t ref_crc16(const uint8_t *buf, size_t len)
 {
-    uint16_t crc = 0xFFFFu;
-    for (size_t i = 0; i < len; ++i) {
-        crc ^= (uint16_t)buf[i] << 8;
-        for (unsigned b = 0; b < 8; ++b) {
-            if (crc & 0x8000u) {
-                crc = (uint16_t)((crc << 1) ^ 0x1021u);
-            } else {
-                crc <<= 1;
-            }
-        }
-    }
-    return crc;
+	uint16_t crc = 0xFFFFu;
+	for (size_t i = 0; i < len; ++i) {
+		crc ^= (uint16_t)buf[i] << 8;
+		for (unsigned b = 0; b < 8; ++b) {
+			if (crc & 0x8000u) {
+				crc = (uint16_t)((crc << 1) ^ 0x1021u);
+			} else {
+				crc <<= 1;
+			}
+		}
+	}
+	return crc;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    /* CRC parity check: every iteration confirms the firmware CRC
+	/* CRC parity check: every iteration confirms the firmware CRC
      * symbol agrees with the reference impl.  Run on the whole
      * input -- a CRC drift on byte stream X exposes the bug. */
-    {
-        const uint16_t a = ref_crc16(data, size);
-        const uint16_t b = crc16_ccitt_false(data, size);
-        if (a != b) abort();
-    }
+	{
+		const uint16_t a = ref_crc16(data, size);
+		const uint16_t b = crc16_ccitt_false(data, size);
+		if (a != b) abort();
+	}
 
-    /* Frame dispatcher: opcode + payload pulled from the fuzz input.
+	/* Frame dispatcher: opcode + payload pulled from the fuzz input.
      * The dispatcher's per-opcode handlers each have strict length
      * checks; mismatched lengths must reject with STATUS_INVAL, not
      * overrun the reply buffer. */
-    if (size < 1u) return 0;
-    const uint8_t  cmd          = data[0];
-    const uint8_t *payload      = data + 1;
-    const size_t   payload_len  = size - 1u;
+	if (size < 1u) return 0;
+	const uint8_t  cmd         = data[0];
+	const uint8_t *payload     = data + 1;
+	const size_t   payload_len = size - 1u;
 
-    uint8_t reply_scratch[1u + (GD32_BRIDGE_ADC_MAX_SAMPLES * 2u)];
-    size_t  reply_len           = 0u;
-    (void)protocol_dispatch(cmd, payload, payload_len,
-                            reply_scratch, sizeof reply_scratch,
-                            &reply_len);
-    /* Sanity: dispatcher must not claim more bytes than scratch had. */
-    if (reply_len > sizeof reply_scratch) abort();
-    return 0;
+	uint8_t        reply_scratch[1u + (GD32_BRIDGE_ADC_MAX_SAMPLES * 2u)];
+	size_t         reply_len = 0u;
+	(void)protocol_dispatch(cmd, payload, payload_len, reply_scratch, sizeof reply_scratch,
+	                        &reply_len);
+	/* Sanity: dispatcher must not claim more bytes than scratch had. */
+	if (reply_len > sizeof reply_scratch) abort();
+	return 0;
 }

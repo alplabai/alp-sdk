@@ -66,8 +66,8 @@ typedef struct alp_i2c_slave_shim alp_i2c_slave_t;
 
 /** Proposed: slave configuration. */
 typedef struct {
-    uint32_t bus_id;        /**< E1M_I2Cn bus to claim. */
-    uint8_t  own_addr_7bit; /**< This slave's 7-bit address. */
+	uint32_t bus_id;        /**< E1M_I2Cn bus to claim. */
+	uint8_t  own_addr_7bit; /**< This slave's 7-bit address. */
 } alp_i2c_slave_config_t;
 
 /** Proposed: callback signature for incoming write-from-master. */
@@ -83,26 +83,26 @@ typedef alp_status_t (*alp_i2c_slave_read_cb_t)(uint8_t reg_addr, uint8_t *data,
  * against the proposed names. */
 static alp_i2c_slave_t *alp_i2c_slave_open(const alp_i2c_slave_config_t *cfg)
 {
-    (void)cfg;
-    /* Real impl will Zephyr-dispatch to the controller's slave
+	(void)cfg;
+	/* Real impl will Zephyr-dispatch to the controller's slave
      * registration call (i2c_slave_register on the Zephyr API). */
-    return NULL;
+	return NULL;
 }
 
 static alp_status_t alp_i2c_slave_set_callbacks(alp_i2c_slave_t         *slave,
                                                 alp_i2c_slave_write_cb_t on_write,
                                                 alp_i2c_slave_read_cb_t on_read, void *user)
 {
-    (void)slave;
-    (void)on_write;
-    (void)on_read;
-    (void)user;
-    return ALP_ERR_NOSUPPORT;
+	(void)slave;
+	(void)on_write;
+	(void)on_read;
+	(void)user;
+	return ALP_ERR_NOSUPPORT;
 }
 
 static void alp_i2c_slave_close(alp_i2c_slave_t *slave)
 {
-    (void)slave;
+	(void)slave;
 }
 
 /* ------------------------------------------------------------------
@@ -135,20 +135,20 @@ static volatile uint32_t g_writes_seen = 0;
  * Keep ISR-context work minimal -- defer everything else. */
 static void on_master_write(uint8_t reg_addr, const uint8_t *data, size_t len, void *user)
 {
-    (void)user;
-    g_writes_seen++;
-    if (reg_addr >= SLAVE_REG_COUNT) {
-        return; /* Master wrote to a non-existent register. */
-    }
-    /* Clamp the copy to the register file end -- protects against a
+	(void)user;
+	g_writes_seen++;
+	if (reg_addr >= SLAVE_REG_COUNT) {
+		return; /* Master wrote to a non-existent register. */
+	}
+	/* Clamp the copy to the register file end -- protects against a
      * master that streams more bytes than we have registers to hold. */
-    size_t to_copy = len;
-    if (reg_addr + to_copy > SLAVE_REG_COUNT) {
-        to_copy = SLAVE_REG_COUNT - reg_addr;
-    }
-    for (size_t i = 0; i < to_copy; i++) {
-        g_regs[reg_addr + i] = data[i];
-    }
+	size_t to_copy = len;
+	if (reg_addr + to_copy > SLAVE_REG_COUNT) {
+		to_copy = SLAVE_REG_COUNT - reg_addr;
+	}
+	for (size_t i = 0; i < to_copy; i++) {
+		g_regs[reg_addr + i] = data[i];
+	}
 }
 
 /* Read-from-master callback.  Master sends our 7-bit address with the
@@ -158,71 +158,71 @@ static void on_master_write(uint8_t reg_addr, const uint8_t *data, size_t len, v
 static alp_status_t on_master_read(uint8_t reg_addr, uint8_t *data, size_t max_len, size_t *out_len,
                                    void *user)
 {
-    (void)user;
-    if (reg_addr >= SLAVE_REG_COUNT) {
-        *out_len = 0;
-        return ALP_ERR_OUT_OF_RANGE;
-    }
-    size_t available = SLAVE_REG_COUNT - reg_addr;
-    size_t n         = available < max_len ? available : max_len;
-    for (size_t i = 0; i < n; i++) {
-        data[i] = g_regs[reg_addr + i];
-    }
-    *out_len = n;
-    return ALP_OK;
+	(void)user;
+	if (reg_addr >= SLAVE_REG_COUNT) {
+		*out_len = 0;
+		return ALP_ERR_OUT_OF_RANGE;
+	}
+	size_t available = SLAVE_REG_COUNT - reg_addr;
+	size_t n         = available < max_len ? available : max_len;
+	for (size_t i = 0; i < n; i++) {
+		data[i] = g_regs[reg_addr + i];
+	}
+	*out_len = n;
+	return ALP_OK;
 }
 
 int main(void)
 {
-    printf("[i2c-slave] open as slave @ 0x%02x on BOARD_I2C_SENSORS\n", SLAVE_OWN_ADDR_7BIT);
+	printf("[i2c-slave] open as slave @ 0x%02x on BOARD_I2C_SENSORS\n", SLAVE_OWN_ADDR_7BIT);
 
-    /* Prime the register file so a master reading from address 0
+	/* Prime the register file so a master reading from address 0
      * sees recognisable bytes.  Real firmware would expose device
      * state here (ID register, status, sensor reading). */
-    for (uint8_t i = 0; i < SLAVE_REG_COUNT; i++) {
-        g_regs[i] = (uint8_t)(0xA0 + i);
-    }
+	for (uint8_t i = 0; i < SLAVE_REG_COUNT; i++) {
+		g_regs[i] = (uint8_t)(0xA0 + i);
+	}
 
-    alp_i2c_slave_t *s = alp_i2c_slave_open(&(alp_i2c_slave_config_t){
-        .bus_id        = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
-        .own_addr_7bit = SLAVE_OWN_ADDR_7BIT,
-    });
-    if (s == NULL) {
-        /* Today this branch ALWAYS fires because the shim returns
+	alp_i2c_slave_t *s = alp_i2c_slave_open(&(alp_i2c_slave_config_t){
+	    .bus_id        = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
+	    .own_addr_7bit = SLAVE_OWN_ADDR_7BIT,
+	});
+	if (s == NULL) {
+		/* Today this branch ALWAYS fires because the shim returns
          * NULL.  The diagnostic line documents that the SDK lacks
          * slave-mode support so customers reading the console
          * output understand why their `west build` succeeded but
          * the device doesn't respond to a master probe. */
-        printf("[i2c-slave] Alp SDK v0.6 does NOT support I2C slave mode\n");
-        printf("[i2c-slave]   <alp/peripheral.h> is master-only today\n");
-        printf("[i2c-slave]   tracking: v0.7 API surface addition\n");
-        printf("[i2c-slave] done\n");
-        return 0;
-    }
+		printf("[i2c-slave] Alp SDK v0.6 does NOT support I2C slave mode\n");
+		printf("[i2c-slave]   <alp/peripheral.h> is master-only today\n");
+		printf("[i2c-slave]   tracking: v0.7 API surface addition\n");
+		printf("[i2c-slave] done\n");
+		return 0;
+	}
 
-    /* This block is unreachable today but stays compiled-in so the
+	/* This block is unreachable today but stays compiled-in so the
      * proposed API shape is exercised by the type-checker.  When
      * the shim deletes, this is the only production-path code. */
-    alp_status_t st = alp_i2c_slave_set_callbacks(s, on_master_write, on_master_read,
-                                                  /* user */ NULL);
-    if (st != ALP_OK) {
-        printf("[i2c-slave] set_callbacks -> %d (expected -6 NOSUPPORT today)\n", (int)st);
-        alp_i2c_slave_close(s);
-        printf("[i2c-slave] done\n");
-        return 0;
-    }
+	alp_status_t st = alp_i2c_slave_set_callbacks(s, on_master_write, on_master_read,
+	                                              /* user */ NULL);
+	if (st != ALP_OK) {
+		printf("[i2c-slave] set_callbacks -> %d (expected -6 NOSUPPORT today)\n", (int)st);
+		alp_i2c_slave_close(s);
+		printf("[i2c-slave] done\n");
+		return 0;
+	}
 
-    /* Idle loop -- on real hardware the callbacks fire whenever a
+	/* Idle loop -- on real hardware the callbacks fire whenever a
      * master addresses us.  Print the write count once a second so
      * an operator running the example can SEE incoming traffic. */
-    for (int i = 0; i < 5; i++) {
-        printf("[i2c-slave] tick %d writes_seen=%u "
-               "regs={0x%02x,0x%02x,0x%02x,0x%02x,...}\n",
-               i, (unsigned)g_writes_seen, g_regs[0], g_regs[1], g_regs[2], g_regs[3]);
-        k_msleep(1000);
-    }
+	for (int i = 0; i < 5; i++) {
+		printf("[i2c-slave] tick %d writes_seen=%u "
+		       "regs={0x%02x,0x%02x,0x%02x,0x%02x,...}\n",
+		       i, (unsigned)g_writes_seen, g_regs[0], g_regs[1], g_regs[2], g_regs[3]);
+		k_msleep(1000);
+	}
 
-    alp_i2c_slave_close(s);
-    printf("[i2c-slave] done\n");
-    return 0;
+	alp_i2c_slave_close(s);
+	printf("[i2c-slave] done\n");
+	return 0;
 }

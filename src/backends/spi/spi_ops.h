@@ -27,32 +27,30 @@
 typedef struct alp_spi_ops alp_spi_ops_t;
 
 typedef struct alp_spi_backend_state {
-    void                    *dev;        /* opaque backend device pointer
+	void                *dev; /* opaque backend device pointer
                                           * (const struct device * on Zephyr;
                                           * kept void* so the portable handle
                                           * does not pull in <zephyr/device.h>) */
-    uint32_t                 bus_id;
-    void                    *be_data;    /* per-handle backend sidecar
+	uint32_t             bus_id;
+	void                *be_data; /* per-handle backend sidecar
                                           * (Zephyr backend stashes spi_config +
                                           * cs_ctrl + cs_spec + cs_present here) */
-    const alp_spi_ops_t     *ops;
+	const alp_spi_ops_t *ops;
 } alp_spi_backend_state_t;
 
 struct alp_spi_ops {
-    alp_status_t (*open)(const alp_spi_config_t *cfg,
-                         alp_spi_backend_state_t *state,
-                         alp_capabilities_t *caps_out);
-    alp_status_t (*transceive)(alp_spi_backend_state_t *state,
-                               const uint8_t *tx, uint8_t *rx,
-                               size_t len);
-    void         (*close)(alp_spi_backend_state_t *state);
+	alp_status_t (*open)(const alp_spi_config_t *cfg, alp_spi_backend_state_t *state,
+	                     alp_capabilities_t *caps_out);
+	alp_status_t (*transceive)(alp_spi_backend_state_t *state, const uint8_t *tx, uint8_t *rx,
+	                           size_t len);
+	void (*close)(alp_spi_backend_state_t *state);
 };
 
 struct alp_spi {
-    alp_spi_backend_state_t  state;
-    const alp_backend_t     *backend;
-    alp_capabilities_t       cached_caps;
-    bool                     in_use;
+	alp_spi_backend_state_t state;
+	const alp_backend_t    *backend;
+	alp_capabilities_t      cached_caps;
+	bool                    in_use;
 };
 
 #endif /* ALP_BACKENDS_SPI_OPS_H */

@@ -60,42 +60,42 @@ extern "C" {
 
 /** Expected SW-DP IDCODE for the GD32G553 (Cortex-M33 r0p1 SW-DPv2).
  *  Boards can match against this value in production test. */
-#define GD32_SWD_EXPECTED_IDCODE          0x6BA02477u
+#define GD32_SWD_EXPECTED_IDCODE 0x6BA02477u
 
 /** Default clock-delay loop count.  Higher = slower SWCLK. */
-#define GD32_SWD_DEFAULT_CLOCK_DELAY      4u
+#define GD32_SWD_DEFAULT_CLOCK_DELAY 4u
 
 /** Maximum number of retry rounds for `ACK_WAIT` from the target. */
-#define GD32_SWD_MAX_WAIT_RETRIES         16u
+#define GD32_SWD_MAX_WAIT_RETRIES 16u
 
 /** GD32G553 flash base address (per the GD32G553 datasheet). */
-#define GD32_SWD_FMC_FLASH_BASE           0x08000000u
+#define GD32_SWD_FMC_FLASH_BASE 0x08000000u
 
 /** Sector size on the GD32G553 in bytes. */
-#define GD32_SWD_FMC_SECTOR_BYTES         2048u
+#define GD32_SWD_FMC_SECTOR_BYTES 2048u
 
 /** SRAM base, used internally to stage operations. */
-#define GD32_SWD_FMC_SRAM_BASE            0x20000000u
+#define GD32_SWD_FMC_SRAM_BASE 0x20000000u
 
 /** ACK response (3-bit field returned by the target after every
  *  request).  Values match the Arm ADIv5 specification. */
 typedef enum {
-    GD32_SWD_ACK_OK    = 0x1,
-    GD32_SWD_ACK_WAIT  = 0x2,
-    GD32_SWD_ACK_FAULT = 0x4,
-    GD32_SWD_ACK_PROTO = 0x7,
+	GD32_SWD_ACK_OK    = 0x1,
+	GD32_SWD_ACK_WAIT  = 0x2,
+	GD32_SWD_ACK_FAULT = 0x4,
+	GD32_SWD_ACK_PROTO = 0x7,
 } gd32_swd_ack_t;
 
 /** Driver context. */
 typedef struct {
-    bool          initialised;
-    bool          connected;
-    alp_gpio_t   *swdio;
-    alp_gpio_t   *swclk;
-    alp_gpio_t   *nrst;
-    uint32_t      clock_delay;
-    uint32_t      idcode;
-    bool          swdio_is_output;
+	bool        initialised;
+	bool        connected;
+	alp_gpio_t *swdio;
+	alp_gpio_t *swclk;
+	alp_gpio_t *nrst;
+	uint32_t    clock_delay;
+	uint32_t    idcode;
+	bool        swdio_is_output;
 } gd32_swd_t;
 
 /**
@@ -109,10 +109,7 @@ typedef struct {
  *         swdio / swclk, or the @ref alp_gpio_write error from the
  *         idle-state configuration.
  */
-alp_status_t gd32_swd_init(gd32_swd_t *ctx,
-                           alp_gpio_t *swdio,
-                           alp_gpio_t *swclk,
-                           alp_gpio_t *nrst);
+alp_status_t gd32_swd_init(gd32_swd_t *ctx, alp_gpio_t *swdio, alp_gpio_t *swclk, alp_gpio_t *nrst);
 
 /** Override the per-half-bit clock-delay loop count.  Clamped to
  *  [0, 2048]. */
@@ -136,23 +133,15 @@ alp_status_t gd32_swd_halt(gd32_swd_t *ctx);
  * Address + size are rounded out to sector boundaries
  * (@ref GD32_SWD_FMC_SECTOR_BYTES).
  */
-alp_status_t gd32_swd_flash_erase(gd32_swd_t *ctx,
-                                  uint32_t addr,
-                                  uint32_t size);
+alp_status_t gd32_swd_flash_erase(gd32_swd_t *ctx, uint32_t addr, uint32_t size);
 
 /** Program @p len bytes from @p data into flash starting at @p addr.
  *  Destination must be erased.  Doubleword-aligned. */
-alp_status_t gd32_swd_flash_write(gd32_swd_t *ctx,
-                                  uint32_t addr,
-                                  const uint8_t *data,
-                                  size_t len);
+alp_status_t gd32_swd_flash_write(gd32_swd_t *ctx, uint32_t addr, const uint8_t *data, size_t len);
 
 /** Read @p len bytes from flash starting at @p addr and compare
  *  against @p data.  Returns @ref ALP_OK on full match. */
-alp_status_t gd32_swd_flash_verify(gd32_swd_t *ctx,
-                                   uint32_t addr,
-                                   const uint8_t *data,
-                                   size_t len);
+alp_status_t gd32_swd_flash_verify(gd32_swd_t *ctx, uint32_t addr, const uint8_t *data, size_t len);
 
 /** Release the core from debug halt + issue a system reset.  Uses
  *  the hardware @c NRST line when wired, otherwise the standard
@@ -160,7 +149,7 @@ alp_status_t gd32_swd_flash_verify(gd32_swd_t *ctx,
 alp_status_t gd32_swd_reset_and_run(gd32_swd_t *ctx);
 
 /** Release the driver context.  Does NOT close the GPIO handles. */
-void         gd32_swd_deinit(gd32_swd_t *ctx);
+void gd32_swd_deinit(gd32_swd_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

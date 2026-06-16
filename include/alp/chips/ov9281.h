@@ -34,17 +34,17 @@
 extern "C" {
 #endif
 
-#define OV9281_I2C_ADDR_LOW  0x60u /**< AGND on SID strap. */
+#define OV9281_I2C_ADDR_LOW 0x60u  /**< AGND on SID strap. */
 #define OV9281_I2C_ADDR_HIGH 0x62u /**< AVDD on SID strap. */
 
 #define OV9281_REG_CHIP_ID_HI 0x300Au
 #define OV9281_REG_CHIP_ID_LO 0x300Bu
-#define OV9281_CHIP_ID        0x9281u
+#define OV9281_CHIP_ID 0x9281u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } ov9281_t;
 
 /** @brief Bind context and verify chip ID. */

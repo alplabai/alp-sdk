@@ -53,39 +53,36 @@
 
 static uint32_t f32_to_u32_bits(float f)
 {
-    uint32_t bits;
-    memcpy(&bits, &f, sizeof bits);
-    return bits;
+	uint32_t bits;
+	memcpy(&bits, &f, sizeof bits);
+	return bits;
 }
 
 static float u32_to_f32_bits(uint32_t bits)
 {
-    float f;
-    memcpy(&f, &bits, sizeof f);
-    return f;
+	float f;
+	memcpy(&f, &bits, sizeof f);
+	return f;
 }
 
 /* Shared bridge path: acquire supervisor, send one CMD_TMU_COMPUTE,
  * release.  All twelve TMU ops share this body -- the per-op static
  * helpers below just pick the function id and fold their inputs
  * into u32 bits. */
-static alp_status_t tmu_bridge_call(gd32g553_tmu_function_t function,
-                                    float in_a, float in_b,
+static alp_status_t tmu_bridge_call(gd32g553_tmu_function_t function, float in_a, float in_b,
                                     float *out)
 {
-    gd32g553_t  *ctx = NULL;
-    alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
-    if (s != ALP_OK) return s;
+	gd32g553_t  *ctx = NULL;
+	alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
+	if (s != ALP_OK) return s;
 
-    uint32_t result_bits = 0u;
-    s = gd32g553_tmu_compute(ctx, function, GD32G553_TMU_FMT_F32,
-                             f32_to_u32_bits(in_a),
-                             f32_to_u32_bits(in_b),
-                             &result_bits);
-    alp_z_v2n_supervisor_release();
-    if (s != ALP_OK) return s;
-    *out = u32_to_f32_bits(result_bits);
-    return ALP_OK;
+	uint32_t result_bits = 0u;
+	s = gd32g553_tmu_compute(ctx, function, GD32G553_TMU_FMT_F32, f32_to_u32_bits(in_a),
+	                         f32_to_u32_bits(in_b), &result_bits);
+	alp_z_v2n_supervisor_release();
+	if (s != ALP_OK) return s;
+	*out = u32_to_f32_bits(result_bits);
+	return ALP_OK;
 }
 #endif
 
@@ -99,145 +96,146 @@ static alp_status_t tmu_bridge_call(gd32g553_tmu_function_t function,
 static alp_status_t z_sin(float in_a, float *out)
 {
 #if ALP_TMU_HAS_BRIDGE_PATH
-    return tmu_bridge_call(GD32G553_TMU_FN_SIN, in_a, 0.0f, out);
+	return tmu_bridge_call(GD32G553_TMU_FN_SIN, in_a, 0.0f, out);
 #else
-    *out = sinf(in_a);
-    return ALP_OK;
+	*out = sinf(in_a);
+	return ALP_OK;
 #endif
 }
 
 static alp_status_t z_cos(float in_a, float *out)
 {
 #if ALP_TMU_HAS_BRIDGE_PATH
-    return tmu_bridge_call(GD32G553_TMU_FN_COS, in_a, 0.0f, out);
+	return tmu_bridge_call(GD32G553_TMU_FN_COS, in_a, 0.0f, out);
 #else
-    *out = cosf(in_a);
-    return ALP_OK;
+	*out = cosf(in_a);
+	return ALP_OK;
 #endif
 }
 
 static alp_status_t z_tan(float in_a, float *out)
 {
 #if ALP_TMU_HAS_BRIDGE_PATH
-    return tmu_bridge_call(GD32G553_TMU_FN_TAN, in_a, 0.0f, out);
+	return tmu_bridge_call(GD32G553_TMU_FN_TAN, in_a, 0.0f, out);
 #else
-    *out = tanf(in_a);
-    return ALP_OK;
+	*out = tanf(in_a);
+	return ALP_OK;
 #endif
 }
 
 static alp_status_t z_atan(float in_a, float *out)
 {
 #if ALP_TMU_HAS_BRIDGE_PATH
-    return tmu_bridge_call(GD32G553_TMU_FN_ATAN, in_a, 0.0f, out);
+	return tmu_bridge_call(GD32G553_TMU_FN_ATAN, in_a, 0.0f, out);
 #else
-    *out = atanf(in_a);
-    return ALP_OK;
+	*out = atanf(in_a);
+	return ALP_OK;
 #endif
 }
 
 static alp_status_t z_atan2(float in_a, float in_b, float *out)
 {
 #if ALP_TMU_HAS_BRIDGE_PATH
-    return tmu_bridge_call(GD32G553_TMU_FN_ATAN2, in_a, in_b, out);
+	return tmu_bridge_call(GD32G553_TMU_FN_ATAN2, in_a, in_b, out);
 #else
-    *out = atan2f(in_a, in_b);
-    return ALP_OK;
+	*out = atan2f(in_a, in_b);
+	return ALP_OK;
 #endif
 }
 
 static alp_status_t z_sqrt(float in_a, float *out)
 {
 #if ALP_TMU_HAS_BRIDGE_PATH
-    return tmu_bridge_call(GD32G553_TMU_FN_SQRT, in_a, 0.0f, out);
+	return tmu_bridge_call(GD32G553_TMU_FN_SQRT, in_a, 0.0f, out);
 #else
-    *out = sqrtf(in_a);
-    return ALP_OK;
+	*out = sqrtf(in_a);
+	return ALP_OK;
 #endif
 }
 
 static alp_status_t z_log(float in_a, float *out)
 {
 #if ALP_TMU_HAS_BRIDGE_PATH
-    return tmu_bridge_call(GD32G553_TMU_FN_LOG, in_a, 0.0f, out);
+	return tmu_bridge_call(GD32G553_TMU_FN_LOG, in_a, 0.0f, out);
 #else
-    *out = logf(in_a);
-    return ALP_OK;
+	*out = logf(in_a);
+	return ALP_OK;
 #endif
 }
 
 static alp_status_t z_exp(float in_a, float *out)
 {
 #if ALP_TMU_HAS_BRIDGE_PATH
-    return tmu_bridge_call(GD32G553_TMU_FN_EXP, in_a, 0.0f, out);
+	return tmu_bridge_call(GD32G553_TMU_FN_EXP, in_a, 0.0f, out);
 #else
-    *out = expf(in_a);
-    return ALP_OK;
+	*out = expf(in_a);
+	return ALP_OK;
 #endif
 }
 
 static alp_status_t z_sinh(float in_a, float *out)
 {
 #if ALP_TMU_HAS_BRIDGE_PATH
-    return tmu_bridge_call(GD32G553_TMU_FN_SINH, in_a, 0.0f, out);
+	return tmu_bridge_call(GD32G553_TMU_FN_SINH, in_a, 0.0f, out);
 #else
-    *out = sinhf(in_a);
-    return ALP_OK;
+	*out = sinhf(in_a);
+	return ALP_OK;
 #endif
 }
 
 static alp_status_t z_cosh(float in_a, float *out)
 {
 #if ALP_TMU_HAS_BRIDGE_PATH
-    return tmu_bridge_call(GD32G553_TMU_FN_COSH, in_a, 0.0f, out);
+	return tmu_bridge_call(GD32G553_TMU_FN_COSH, in_a, 0.0f, out);
 #else
-    *out = coshf(in_a);
-    return ALP_OK;
+	*out = coshf(in_a);
+	return ALP_OK;
 #endif
 }
 
 static alp_status_t z_tanh(float in_a, float *out)
 {
 #if ALP_TMU_HAS_BRIDGE_PATH
-    return tmu_bridge_call(GD32G553_TMU_FN_TANH, in_a, 0.0f, out);
+	return tmu_bridge_call(GD32G553_TMU_FN_TANH, in_a, 0.0f, out);
 #else
-    *out = tanhf(in_a);
-    return ALP_OK;
+	*out = tanhf(in_a);
+	return ALP_OK;
 #endif
 }
 
 static alp_status_t z_hypot(float in_a, float in_b, float *out)
 {
 #if ALP_TMU_HAS_BRIDGE_PATH
-    return tmu_bridge_call(GD32G553_TMU_FN_HYPOT, in_a, in_b, out);
+	return tmu_bridge_call(GD32G553_TMU_FN_HYPOT, in_a, in_b, out);
 #else
-    *out = hypotf(in_a, in_b);
-    return ALP_OK;
+	*out = hypotf(in_a, in_b);
+	return ALP_OK;
 #endif
 }
 
 /* ---------- Registration ---------- */
 
 static const alp_tmu_ops_t _ops = {
-    .sin   = z_sin,
-    .cos   = z_cos,
-    .tan   = z_tan,
-    .atan  = z_atan,
-    .atan2 = z_atan2,
-    .sqrt  = z_sqrt,
-    .log   = z_log,
-    .exp   = z_exp,
-    .sinh  = z_sinh,
-    .cosh  = z_cosh,
-    .tanh  = z_tanh,
-    .hypot = z_hypot,
+	.sin   = z_sin,
+	.cos   = z_cos,
+	.tan   = z_tan,
+	.atan  = z_atan,
+	.atan2 = z_atan2,
+	.sqrt  = z_sqrt,
+	.log   = z_log,
+	.exp   = z_exp,
+	.sinh  = z_sinh,
+	.cosh  = z_cosh,
+	.tanh  = z_tanh,
+	.hypot = z_hypot,
 };
 
-ALP_BACKEND_REGISTER(tmu, zephyr_drv, {
-    .silicon_ref = "*",
-    .vendor      = "zephyr",
-    .base_caps   = 0u,
-    .priority    = 100,
-    .ops         = &_ops,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(tmu, zephyr_drv,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "zephyr",
+                         .base_caps   = 0u,
+                         .priority    = 100,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });

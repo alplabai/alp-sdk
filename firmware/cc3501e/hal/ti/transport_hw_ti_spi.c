@@ -53,10 +53,10 @@
 
 /* Deterministic lockstep phases (see file header). */
 enum spi_phase {
-    PH_REQ_HEADER = 0, /* clocking the 4-byte request header   */
-    PH_REQ_PAYLOAD,    /* clocking payload_len request bytes   */
-    PH_REPLY_HEADER,   /* clocking the 4-byte reply header     */
-    PH_REPLY_PAYLOAD,  /* clocking the reply payload           */
+	PH_REQ_HEADER = 0, /* clocking the 4-byte request header   */
+	PH_REQ_PAYLOAD,    /* clocking payload_len request bytes   */
+	PH_REPLY_HEADER,   /* clocking the 4-byte reply header     */
+	PH_REPLY_PAYLOAD,  /* clocking the reply payload           */
 };
 
 static SPI_Handle     spi;
@@ -73,29 +73,29 @@ static uint16_t cur_payload_len;
  * MOSI dummies are discarded).  Non-blocking in SPI_MODE_CALLBACK. */
 static void arm_transfer(void *rx, const void *tx, size_t count)
 {
-    static SPI_Transaction t; /* retained for the transfer's duration */
-    t.count = count;
-    t.txBuf = (void *)tx;
-    t.rxBuf = rx;
-    t.arg   = NULL;
-    (void)SPI_transfer(spi, &t);
+	static SPI_Transaction t; /* retained for the transfer's duration */
+	t.count = count;
+	t.txBuf = (void *)tx;
+	t.rxBuf = rx;
+	t.arg   = NULL;
+	(void)SPI_transfer(spi, &t);
 }
 
 /* Replay the captured request frame through the silicon-free seams
  * (which build the staged reply), then drain that reply into reply_buf. */
 static void dispatch_frame(size_t frame_len)
 {
-    spi_slave_cs_low();
-    for (size_t i = 0; i < frame_len; i++) {
-        spi_slave_rx_byte(frame_buf[i]);
-    }
-    spi_slave_cs_high();
+	spi_slave_cs_low();
+	for (size_t i = 0; i < frame_len; i++) {
+		spi_slave_rx_byte(frame_buf[i]);
+	}
+	spi_slave_cs_high();
 
-    reply_len = 0u;
-    while (spi_slave_tx_pending() && reply_len < sizeof(reply_buf)) {
-        reply_buf[reply_len++] = spi_slave_tx_next_byte();
-    }
-    /* The reply is always header(4) + payload(>=1 status byte). */
+	reply_len = 0u;
+	while (spi_slave_tx_pending() && reply_len < sizeof(reply_buf)) {
+		reply_buf[reply_len++] = spi_slave_tx_next_byte();
+	}
+	/* The reply is always header(4) + payload(>=1 status byte). */
 }
 
 /* SPI transfer-complete callback (driver SWI/HWI context).  Advances
@@ -103,73 +103,73 @@ static void dispatch_frame(size_t frame_len)
  * lockstep. */
 static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 {
-    (void)h;
-    (void)t;
+	(void)h;
+	(void)t;
 
-    switch (phase) {
-    case PH_REQ_HEADER: {
-        /* Bound the declared payload to the wire ceiling so a garbage
+	switch (phase) {
+	case PH_REQ_HEADER: {
+		/* Bound the declared payload to the wire ceiling so a garbage
          * length can't overrun the RX into frame_buf; an over-long
          * declared length then fails the seam's captured-vs-declared
          * check as RESP_ERR_PROTOCOL. */
-        uint16_t plen = (uint16_t)frame_buf[2] | ((uint16_t)frame_buf[3] << 8);
-        if (plen > ALP_CC3501E_MAX_PAYLOAD) {
-            plen = ALP_CC3501E_MAX_PAYLOAD;
-        }
-        cur_payload_len = plen;
-        if (plen == 0u) {
-            dispatch_frame(ALP_CC3501E_HEADER_BYTES);
-            phase = PH_REPLY_HEADER;
-            arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
-        } else {
-            phase = PH_REQ_PAYLOAD;
-            arm_transfer(&frame_buf[ALP_CC3501E_HEADER_BYTES], NULL, plen);
-        }
-        break;
-    }
-    case PH_REQ_PAYLOAD:
-        dispatch_frame((size_t)ALP_CC3501E_HEADER_BYTES + cur_payload_len);
-        phase = PH_REPLY_HEADER;
-        arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
-        break;
+		uint16_t plen = (uint16_t)frame_buf[2] | ((uint16_t)frame_buf[3] << 8);
+		if (plen > ALP_CC3501E_MAX_PAYLOAD) {
+			plen = ALP_CC3501E_MAX_PAYLOAD;
+		}
+		cur_payload_len = plen;
+		if (plen == 0u) {
+			dispatch_frame(ALP_CC3501E_HEADER_BYTES);
+			phase = PH_REPLY_HEADER;
+			arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
+		} else {
+			phase = PH_REQ_PAYLOAD;
+			arm_transfer(&frame_buf[ALP_CC3501E_HEADER_BYTES], NULL, plen);
+		}
+		break;
+	}
+	case PH_REQ_PAYLOAD:
+		dispatch_frame((size_t)ALP_CC3501E_HEADER_BYTES + cur_payload_len);
+		phase = PH_REPLY_HEADER;
+		arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
+		break;
 
-    case PH_REPLY_HEADER:
-        /* Reply header clocked out; now the reply payload (status + data
+	case PH_REPLY_HEADER:
+		/* Reply header clocked out; now the reply payload (status + data
          * = reply_len - 4 bytes, always >= 1). */
-        phase = PH_REPLY_PAYLOAD;
-        arm_transfer(NULL, &reply_buf[ALP_CC3501E_HEADER_BYTES],
-                     reply_len - ALP_CC3501E_HEADER_BYTES);
-        break;
+		phase = PH_REPLY_PAYLOAD;
+		arm_transfer(NULL, &reply_buf[ALP_CC3501E_HEADER_BYTES],
+		             reply_len - ALP_CC3501E_HEADER_BYTES);
+		break;
 
-    case PH_REPLY_PAYLOAD:
-    default:
-        /* Whole reply clocked.  Re-arm for the next request header.
+	case PH_REPLY_PAYLOAD:
+	default:
+		/* Whole reply clocked.  Re-arm for the next request header.
          * (A pending CMD_RESET is actioned by cc3501e_hw_tick() on the
          * next idle wakeup, after this ack has gone out.) */
-        phase = PH_REQ_HEADER;
-        arm_transfer(frame_buf, NULL, ALP_CC3501E_HEADER_BYTES);
-        break;
-    }
+		phase = PH_REQ_HEADER;
+		arm_transfer(frame_buf, NULL, ALP_CC3501E_HEADER_BYTES);
+		break;
+	}
 }
 
 void bridge_transport_spi_hw_init(void)
 {
-    SPI_Params params;
-    SPI_Params_init(&params);
-    params.mode                = SPI_SLAVE;
-    params.transferMode        = SPI_MODE_CALLBACK;
-    params.transferCallbackFxn = on_transfer;
-    params.frameFormat         = SPI_POL0_PHA0; /* mode 0, per the host driver / chip manifest */
-    params.dataSize            = 8;
+	SPI_Params params;
+	SPI_Params_init(&params);
+	params.mode                = SPI_SLAVE;
+	params.transferMode        = SPI_MODE_CALLBACK;
+	params.transferCallbackFxn = on_transfer;
+	params.frameFormat         = SPI_POL0_PHA0; /* mode 0, per the host driver / chip manifest */
+	params.dataSize            = 8;
 
-    spi                        = SPI_open(CONFIG_SPI_0, &params);
-    if (spi == NULL) {
-        /* No console this early; the host's PING simply never completes
+	spi                        = SPI_open(CONFIG_SPI_0, &params);
+	if (spi == NULL) {
+		/* No console this early; the host's PING simply never completes
          * and bring-up code reports the dead link. */
-        return;
-    }
+		return;
+	}
 
-    /* Arm the first request header. */
-    phase = PH_REQ_HEADER;
-    arm_transfer(frame_buf, NULL, ALP_CC3501E_HEADER_BYTES);
+	/* Arm the first request header. */
+	phase = PH_REQ_HEADER;
+	arm_transfer(frame_buf, NULL, ALP_CC3501E_HEADER_BYTES);
 }

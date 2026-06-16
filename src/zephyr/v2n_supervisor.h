@@ -125,7 +125,7 @@ void alp_z_v2n_supervisor_brd_i2c_release(void);
 void alp_z_v2n_supervisor_invalidate(void);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_INTERNAL_ZEPHYR_V2N_SUPERVISOR_H_ */
+#endif /* ALP_INTERNAL_ZEPHYR_V2N_SUPERVISOR_H_ */

@@ -41,15 +41,15 @@ static bool se_rst_configured;
 static void se_reset_drive(uint8_t assert)
 {
 #if SE_RST_ACTIVE_LOW
-    const bool pin_high = (assert == 0u); /* release = HIGH, assert = LOW */
+	const bool pin_high = (assert == 0u); /* release = HIGH, assert = LOW */
 #else
-    const bool pin_high = (assert != 0u);
+	const bool pin_high = (assert != 0u);
 #endif
-    if (pin_high) {
-        gpio_bit_set(SE_RST_PORT, SE_RST_PIN);
-    } else {
-        gpio_bit_reset(SE_RST_PORT, SE_RST_PIN);
-    }
+	if (pin_high) {
+		gpio_bit_set(SE_RST_PORT, SE_RST_PIN);
+	} else {
+		gpio_bit_reset(SE_RST_PORT, SE_RST_PIN);
+	}
 }
 
 /* Promote PC13 to a push-pull output.  RCU_GPIOC is already clocked by
@@ -57,21 +57,21 @@ static void se_reset_drive(uint8_t assert)
  * for a reset control line). */
 static void se_reset_configure(void)
 {
-    gpio_output_options_set(SE_RST_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_12MHZ, SE_RST_PIN);
-    gpio_mode_set(SE_RST_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, SE_RST_PIN);
-    se_rst_configured = true;
+	gpio_output_options_set(SE_RST_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_12MHZ, SE_RST_PIN);
+	gpio_mode_set(SE_RST_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, SE_RST_PIN);
+	se_rst_configured = true;
 }
 
 void se_reset_init(void)
 {
-    se_reset_configure();
-    se_reset_drive(0u); /* boot default: SE released (running), not floating */
+	se_reset_configure();
+	se_reset_drive(0u); /* boot default: SE released (running), not floating */
 }
 
 int bridge_hw_se_reset(uint8_t assert)
 {
-    if (assert > 1u) return BRIDGE_HW_ERR_INVAL;
-    if (!se_rst_configured) se_reset_configure(); /* lazy guard if init skipped */
-    se_reset_drive(assert);
-    return BRIDGE_HW_OK;
+	if (assert > 1u) return BRIDGE_HW_ERR_INVAL;
+	if (!se_rst_configured) se_reset_configure(); /* lazy guard if init skipped */
+	se_reset_drive(assert);
+	return BRIDGE_HW_OK;
 }

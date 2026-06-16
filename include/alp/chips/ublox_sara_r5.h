@@ -33,10 +33,10 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_uart_t *port;
-    alp_gpio_t *pwr_on;
-    alp_gpio_t *reset;
-    bool        initialised;
+	alp_uart_t *port;
+	alp_gpio_t *pwr_on;
+	alp_gpio_t *reset;
+	bool        initialised;
 } ublox_sara_r5_t;
 
 /** @brief Bind context to caller-opened UART + GPIOs. */

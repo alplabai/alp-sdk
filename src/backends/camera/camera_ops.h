@@ -27,25 +27,22 @@ typedef struct alp_camera_ops alp_camera_ops_t;
 
 /** Backend-owned per-handle state. */
 typedef struct alp_camera_backend_state {
-    void                    *be_data;
-    const alp_camera_ops_t  *ops;
+	void                   *be_data;
+	const alp_camera_ops_t *ops;
 } alp_camera_backend_state_t;
 
 /** Vtable each camera backend implements. */
 struct alp_camera_ops {
-    alp_status_t (*open)(const alp_camera_config_t *cfg,
-                         alp_camera_backend_state_t *state,
-                         alp_capabilities_t *caps_out);
-    alp_status_t (*start)(alp_camera_backend_state_t *state);
-    alp_status_t (*stop)(alp_camera_backend_state_t *state);
-    alp_status_t (*capture)(alp_camera_backend_state_t *state,
-                            alp_camera_frame_t *out,
-                            uint32_t timeout_ms);
-    alp_status_t (*release)(alp_camera_backend_state_t *state,
-                            alp_camera_frame_t *frame);
-    alp_status_t (*configure_isp)(alp_camera_backend_state_t *state,
-                                  const alp_camera_isp_config_t *isp);
-    void         (*close)(alp_camera_backend_state_t *state);
+	alp_status_t (*open)(const alp_camera_config_t *cfg, alp_camera_backend_state_t *state,
+	                     alp_capabilities_t *caps_out);
+	alp_status_t (*start)(alp_camera_backend_state_t *state);
+	alp_status_t (*stop)(alp_camera_backend_state_t *state);
+	alp_status_t (*capture)(alp_camera_backend_state_t *state, alp_camera_frame_t *out,
+	                        uint32_t timeout_ms);
+	alp_status_t (*release)(alp_camera_backend_state_t *state, alp_camera_frame_t *frame);
+	alp_status_t (*configure_isp)(alp_camera_backend_state_t    *state,
+	                              const alp_camera_isp_config_t *isp);
+	void (*close)(alp_camera_backend_state_t *state);
 };
 
 /**
@@ -56,10 +53,10 @@ struct alp_camera_ops {
  * access the fields without duplicating the layout.
  */
 struct alp_camera {
-    alp_camera_backend_state_t  state;
-    const alp_backend_t        *backend;
-    alp_capabilities_t          cached_caps;
-    bool                        in_use;
+	alp_camera_backend_state_t state;
+	const alp_backend_t       *backend;
+	alp_capabilities_t         cached_caps;
+	bool                       in_use;
 };
 
 #endif /* ALP_BACKENDS_CAMERA_OPS_H */

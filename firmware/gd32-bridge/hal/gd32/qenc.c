@@ -35,10 +35,10 @@
  * cast to int32_t -- the host handles wrap detection via deltas. */
 
 const gd32_qenc_t qenc_map[] = {
-    [0] = { TIMER1, GPIOA, GPIO_PIN_0, GPIOB, GPIO_PIN_3, GPIO_AF_1 },
-    [1] = { TIMER2, GPIOC, GPIO_PIN_6, GPIOC, GPIO_PIN_7, GPIO_AF_2 },
-    [2] = { TIMER3, GPIOB, GPIO_PIN_6, GPIOB, GPIO_PIN_7, GPIO_AF_2 },
-    [3] = { TIMER4, GPIOB, GPIO_PIN_2, GPIOA, GPIO_PIN_1, GPIO_AF_2 },
+	[0] = { TIMER1, GPIOA, GPIO_PIN_0, GPIOB, GPIO_PIN_3, GPIO_AF_1 },
+	[1] = { TIMER2, GPIOC, GPIO_PIN_6, GPIOC, GPIO_PIN_7, GPIO_AF_2 },
+	[2] = { TIMER3, GPIOB, GPIO_PIN_6, GPIOB, GPIO_PIN_7, GPIO_AF_2 },
+	[3] = { TIMER4, GPIOB, GPIO_PIN_2, GPIOA, GPIO_PIN_1, GPIO_AF_2 },
 };
 _Static_assert(sizeof(qenc_map) / sizeof(qenc_map[0]) == QENC_CHANNEL_COUNT,
                "qenc_map size must match QENC_CHANNEL_COUNT");
@@ -49,43 +49,43 @@ _Static_assert(sizeof(qenc_map) / sizeof(qenc_map[0]) == QENC_CHANNEL_COUNT,
  * counts on both edges of both inputs), and starts the counter. */
 void qenc_channel_init(const gd32_qenc_t *e)
 {
-    gpio_mode_set(e->gpio_x_port, GPIO_MODE_AF, GPIO_PUPD_PULLUP, e->gpio_x_pin);
-    gpio_mode_set(e->gpio_y_port, GPIO_MODE_AF, GPIO_PUPD_PULLUP, e->gpio_y_pin);
-    gpio_af_set(e->gpio_x_port, e->gpio_af, e->gpio_x_pin);
-    gpio_af_set(e->gpio_y_port, e->gpio_af, e->gpio_y_pin);
+	gpio_mode_set(e->gpio_x_port, GPIO_MODE_AF, GPIO_PUPD_PULLUP, e->gpio_x_pin);
+	gpio_mode_set(e->gpio_y_port, GPIO_MODE_AF, GPIO_PUPD_PULLUP, e->gpio_y_pin);
+	gpio_af_set(e->gpio_x_port, e->gpio_af, e->gpio_x_pin);
+	gpio_af_set(e->gpio_y_port, e->gpio_af, e->gpio_y_pin);
 
-    timer_parameter_struct ip;
-    timer_struct_para_init(&ip);
-    ip.prescaler         = 0u; /* count every encoder edge   */
-    ip.alignedmode       = TIMER_COUNTER_EDGE;
-    ip.counterdirection  = TIMER_COUNTER_UP;
-    ip.period            = 0xFFFFFFFFu; /* 16-bit timers truncate     */
-    ip.clockdivision     = TIMER_CKDIV_DIV1;
-    ip.repetitioncounter = 0u;
-    timer_deinit(e->timer_periph);
-    timer_init(e->timer_periph, &ip);
-    timer_quadrature_decoder_mode_config(e->timer_periph, TIMER_QUAD_DECODER_MODE2,
-                                         TIMER_IC_POLARITY_RISING, TIMER_IC_POLARITY_RISING);
-    timer_enable(e->timer_periph);
+	timer_parameter_struct ip;
+	timer_struct_para_init(&ip);
+	ip.prescaler         = 0u; /* count every encoder edge   */
+	ip.alignedmode       = TIMER_COUNTER_EDGE;
+	ip.counterdirection  = TIMER_COUNTER_UP;
+	ip.period            = 0xFFFFFFFFu; /* 16-bit timers truncate     */
+	ip.clockdivision     = TIMER_CKDIV_DIV1;
+	ip.repetitioncounter = 0u;
+	timer_deinit(e->timer_periph);
+	timer_init(e->timer_periph, &ip);
+	timer_quadrature_decoder_mode_config(e->timer_periph, TIMER_QUAD_DECODER_MODE2,
+	                                     TIMER_IC_POLARITY_RISING, TIMER_IC_POLARITY_RISING);
+	timer_enable(e->timer_periph);
 }
 
 int bridge_hw_qenc_read(uint8_t encoder, int32_t *position)
 {
-    if (position == 0) return BRIDGE_HW_ERR_INVAL;
-    *position = 0;
-    if (encoder >= QENC_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
-    /* Cast the raw counter (uint32_t) to int32_t.  For 16-bit timers
+	if (position == 0) return BRIDGE_HW_ERR_INVAL;
+	*position = 0;
+	if (encoder >= QENC_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+	/* Cast the raw counter (uint32_t) to int32_t.  For 16-bit timers
      * (TIMER2, TIMER3) the upper bits read zero so the value is
      * always positive; for 32-bit timers (TIMER1, TIMER4) the value
      * wraps the full int32_t range.  The host detects wraps via
      * deltas. */
-    *position = (int32_t)timer_counter_read(qenc_map[encoder].timer_periph);
-    return BRIDGE_HW_OK;
+	*position = (int32_t)timer_counter_read(qenc_map[encoder].timer_periph);
+	return BRIDGE_HW_OK;
 }
 
 int bridge_hw_qenc_reset(uint8_t encoder)
 {
-    if (encoder >= QENC_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
-    timer_counter_value_config(qenc_map[encoder].timer_periph, 0u);
-    return BRIDGE_HW_OK;
+	if (encoder >= QENC_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
+	timer_counter_value_config(qenc_map[encoder].timer_periph, 0u);
+	return BRIDGE_HW_OK;
 }

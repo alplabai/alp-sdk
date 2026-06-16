@@ -65,49 +65,49 @@
 #define ALP_Y_CAN_MAX_FILTERS 16
 
 typedef struct {
-    alp_can_rx_cb_t   cb;
-    void             *user;
-    struct can_filter kf; /* kernel filter installed for this slot */
-    bool              in_use;
+	alp_can_rx_cb_t   cb;
+	void             *user;
+	struct can_filter kf; /* kernel filter installed for this slot */
+	bool              in_use;
 } y_can_filter_t;
 
 /* Per-handle backend data: the open CAN raw socket plus the RX reader
  * thread + its filter table.  Boxed onto the heap so the void* be_data
  * slot in alp_can_backend_state_t owns it. */
 typedef struct {
-    int             fd;
-    bool            fd_frames; /* CAN_RAW_FD_FRAMES enabled */
-    pthread_t       rx_thread;
-    bool            rx_running;
-    pthread_mutex_t lock; /* guards filters[] */
-    y_can_filter_t  filters[ALP_Y_CAN_MAX_FILTERS];
+	int             fd;
+	bool            fd_frames; /* CAN_RAW_FD_FRAMES enabled */
+	pthread_t       rx_thread;
+	bool            rx_running;
+	pthread_mutex_t lock; /* guards filters[] */
+	y_can_filter_t  filters[ALP_Y_CAN_MAX_FILTERS];
 } y_can_data_t;
 
 /** @brief Map a (positive) errno value to the closest alp_status_t. */
 static alp_status_t _errno_to_alp(int err)
 {
-    switch (err) {
-    case 0:
-        return ALP_OK;
-    case EINVAL:
-        return ALP_ERR_INVAL;
-    case EBUSY:
-        return ALP_ERR_BUSY;
-    case EAGAIN:
-    case ETIMEDOUT:
-        return ALP_ERR_TIMEOUT;
-    case ENODEV:
-    case ENXIO:
-        return ALP_ERR_NOT_READY;
-    case ENOMEM:
-        return ALP_ERR_NOMEM;
-    case EOPNOTSUPP:
-    case ENOPROTOOPT:
-    case ENOSYS:
-        return ALP_ERR_NOSUPPORT;
-    default:
-        return ALP_ERR_IO;
-    }
+	switch (err) {
+	case 0:
+		return ALP_OK;
+	case EINVAL:
+		return ALP_ERR_INVAL;
+	case EBUSY:
+		return ALP_ERR_BUSY;
+	case EAGAIN:
+	case ETIMEDOUT:
+		return ALP_ERR_TIMEOUT;
+	case ENODEV:
+	case ENXIO:
+		return ALP_ERR_NOT_READY;
+	case ENOMEM:
+		return ALP_ERR_NOMEM;
+	case EOPNOTSUPP:
+	case ENOPROTOOPT:
+	case ENOSYS:
+		return ALP_ERR_NOSUPPORT;
+	default:
+		return ALP_ERR_IO;
+	}
 }
 
 /* Reinstall the union of all active kernel filters on the socket.
@@ -115,18 +115,18 @@ static alp_status_t _errno_to_alp(int err)
  * it from the slot table after any add/remove.  Caller holds d->lock. */
 static int _apply_filters_locked(y_can_data_t *d)
 {
-    struct can_filter set[ALP_Y_CAN_MAX_FILTERS];
-    size_t            n = 0;
-    for (size_t i = 0; i < ALP_Y_CAN_MAX_FILTERS; ++i) {
-        if (d->filters[i].in_use) set[n++] = d->filters[i].kf;
-    }
-    /* n==0 leaves an empty filter set: the kernel then drops all RX,
+	struct can_filter set[ALP_Y_CAN_MAX_FILTERS];
+	size_t            n = 0;
+	for (size_t i = 0; i < ALP_Y_CAN_MAX_FILTERS; ++i) {
+		if (d->filters[i].in_use) set[n++] = d->filters[i].kf;
+	}
+	/* n==0 leaves an empty filter set: the kernel then drops all RX,
      * which matches "no filters installed -> deliver nothing". */
-    if (setsockopt(d->fd, SOL_CAN_RAW, CAN_RAW_FILTER, n ? set : NULL,
-                   (socklen_t)(n * sizeof(set[0]))) < 0) {
-        return errno;
-    }
-    return 0;
+	if (setsockopt(d->fd, SOL_CAN_RAW, CAN_RAW_FILTER, n ? set : NULL,
+	               (socklen_t)(n * sizeof(set[0]))) < 0) {
+		return errno;
+	}
+	return 0;
 }
 
 /* Decode a received frame buffer (can_frame or canfd_frame) into the
@@ -134,34 +134,34 @@ static int _apply_filters_locked(y_can_data_t *d)
  * nbytes is the number of bytes read() returned. */
 static void _dispatch_rx(y_can_data_t *d, const void *buf, ssize_t nbytes)
 {
-    alp_can_frame_t out;
-    memset(&out, 0, sizeof(out));
+	alp_can_frame_t out;
+	memset(&out, 0, sizeof(out));
 
-    if ((size_t)nbytes >= sizeof(struct canfd_frame) && d->fd_frames) {
-        const struct canfd_frame *cf = (const struct canfd_frame *)buf;
-        out.id                       = cf->can_id & CAN_EFF_MASK;
-        out.ext_id                   = (cf->can_id & CAN_EFF_FLAG) != 0;
-        out.rtr                      = false; /* canfd_frame has no RTR (FD forbids RTR) */
-        out.fd                       = true;
-        out.brs                      = (cf->flags & CANFD_BRS) != 0;
-        out.dlc                      = cf->len;
-        if (out.dlc > sizeof(out.data)) out.dlc = sizeof(out.data);
-        memcpy(out.data, cf->data, out.dlc);
-    } else if ((size_t)nbytes >= sizeof(struct can_frame)) {
-        const struct can_frame *cf = (const struct can_frame *)buf;
-        out.id                     = cf->can_id & CAN_EFF_MASK;
-        out.ext_id                 = (cf->can_id & CAN_EFF_FLAG) != 0;
-        out.rtr                    = (cf->can_id & CAN_RTR_FLAG) != 0;
-        out.fd                     = false;
-        out.brs                    = false;
-        out.dlc                    = cf->can_dlc;
-        if (out.dlc > ALP_CAN_MAX_DLC_CLASSIC) out.dlc = ALP_CAN_MAX_DLC_CLASSIC;
-        memcpy(out.data, cf->data, out.dlc);
-    } else {
-        return; /* short / malformed read */
-    }
+	if ((size_t)nbytes >= sizeof(struct canfd_frame) && d->fd_frames) {
+		const struct canfd_frame *cf = (const struct canfd_frame *)buf;
+		out.id                       = cf->can_id & CAN_EFF_MASK;
+		out.ext_id                   = (cf->can_id & CAN_EFF_FLAG) != 0;
+		out.rtr                      = false; /* canfd_frame has no RTR (FD forbids RTR) */
+		out.fd                       = true;
+		out.brs                      = (cf->flags & CANFD_BRS) != 0;
+		out.dlc                      = cf->len;
+		if (out.dlc > sizeof(out.data)) out.dlc = sizeof(out.data);
+		memcpy(out.data, cf->data, out.dlc);
+	} else if ((size_t)nbytes >= sizeof(struct can_frame)) {
+		const struct can_frame *cf = (const struct can_frame *)buf;
+		out.id                     = cf->can_id & CAN_EFF_MASK;
+		out.ext_id                 = (cf->can_id & CAN_EFF_FLAG) != 0;
+		out.rtr                    = (cf->can_id & CAN_RTR_FLAG) != 0;
+		out.fd                     = false;
+		out.brs                    = false;
+		out.dlc                    = cf->can_dlc;
+		if (out.dlc > ALP_CAN_MAX_DLC_CLASSIC) out.dlc = ALP_CAN_MAX_DLC_CLASSIC;
+		memcpy(out.data, cf->data, out.dlc);
+	} else {
+		return; /* short / malformed read */
+	}
 
-    /* Kernel-side filtering already gated delivery; fan out to every
+	/* Kernel-side filtering already gated delivery; fan out to every
      * installed slot cb so software multiplexing matches the alp_can
      * "dispatch matching frames" contract.
      *
@@ -170,35 +170,35 @@ static void _dispatch_rx(y_can_data_t *d, const void *buf, ssize_t nbytes)
      * y_add_filter).  Re-apply the EFF flag to the comparison id for
      * extended frames so bit 31 lines up; otherwise every 29-bit slot
      * would mismatch on bit 31 and never fire. */
-    canid_t cmp = out.id | (out.ext_id ? CAN_EFF_FLAG : 0u);
-    pthread_mutex_lock(&d->lock);
-    for (size_t i = 0; i < ALP_Y_CAN_MAX_FILTERS; ++i) {
-        y_can_filter_t *f = &d->filters[i];
-        if (!f->in_use || f->cb == NULL) continue;
-        if ((cmp & f->kf.can_mask) == (f->kf.can_id & f->kf.can_mask)) {
-            f->cb(&out, f->user);
-        }
-    }
-    pthread_mutex_unlock(&d->lock);
+	canid_t cmp = out.id | (out.ext_id ? CAN_EFF_FLAG : 0u);
+	pthread_mutex_lock(&d->lock);
+	for (size_t i = 0; i < ALP_Y_CAN_MAX_FILTERS; ++i) {
+		y_can_filter_t *f = &d->filters[i];
+		if (!f->in_use || f->cb == NULL) continue;
+		if ((cmp & f->kf.can_mask) == (f->kf.can_id & f->kf.can_mask)) {
+			f->cb(&out, f->user);
+		}
+	}
+	pthread_mutex_unlock(&d->lock);
 }
 
 /** @brief RX reader thread: blocking read() loop until the socket closes. */
 static void *_rx_loop(void *arg)
 {
-    y_can_data_t *d = (y_can_data_t *)arg;
-    /* A canfd_frame buffer is a superset of can_frame, so one buffer
+	y_can_data_t *d = (y_can_data_t *)arg;
+	/* A canfd_frame buffer is a superset of can_frame, so one buffer
      * serves both; read() returns the actual frame length. */
-    struct canfd_frame frame;
-    for (;;) {
-        ssize_t n = read(d->fd, &frame, sizeof(frame));
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            break; /* socket closed (EBADF) or fatal error -> stop */
-        }
-        if (n == 0) break;
-        _dispatch_rx(d, &frame, n);
-    }
-    return NULL;
+	struct canfd_frame frame;
+	for (;;) {
+		ssize_t n = read(d->fd, &frame, sizeof(frame));
+		if (n < 0) {
+			if (errno == EINTR) continue;
+			break; /* socket closed (EBADF) or fatal error -> stop */
+		}
+		if (n == 0) break;
+		_dispatch_rx(d, &frame, n);
+	}
+	return NULL;
 }
 
 /**
@@ -215,66 +215,66 @@ static void *_rx_loop(void *arg)
 static alp_status_t y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st,
                            alp_capabilities_t *caps_out)
 {
-    if (cfg == NULL) return ALP_ERR_INVAL;
+	if (cfg == NULL) return ALP_ERR_INVAL;
 
-    char ifname[IFNAMSIZ];
-    int  k = snprintf(ifname, sizeof(ifname), "can%u", (unsigned)cfg->bus_id);
-    if (k < 0 || (size_t)k >= sizeof(ifname)) return ALP_ERR_INVAL;
+	char ifname[IFNAMSIZ];
+	int  k = snprintf(ifname, sizeof(ifname), "can%u", (unsigned)cfg->bus_id);
+	if (k < 0 || (size_t)k >= sizeof(ifname)) return ALP_ERR_INVAL;
 
-    int fd = socket(PF_CAN, SOCK_RAW | SOCK_CLOEXEC, CAN_RAW);
-    if (fd < 0) return _errno_to_alp(errno);
+	int fd = socket(PF_CAN, SOCK_RAW | SOCK_CLOEXEC, CAN_RAW);
+	if (fd < 0) return _errno_to_alp(errno);
 
-    struct ifreq ifr;
-    memset(&ifr, 0, sizeof(ifr));
-    /* ifr_name is IFNAMSIZ; ifname already fits (checked above). */
-    memcpy(ifr.ifr_name, ifname, (size_t)k + 1u);
-    if (ioctl(fd, SIOCGIFINDEX, &ifr) < 0) {
-        int e = errno;
-        close(fd);
-        return _errno_to_alp(e);
-    }
+	struct ifreq ifr;
+	memset(&ifr, 0, sizeof(ifr));
+	/* ifr_name is IFNAMSIZ; ifname already fits (checked above). */
+	memcpy(ifr.ifr_name, ifname, (size_t)k + 1u);
+	if (ioctl(fd, SIOCGIFINDEX, &ifr) < 0) {
+		int e = errno;
+		close(fd);
+		return _errno_to_alp(e);
+	}
 
-    bool want_fd = (cfg->mode == ALP_CAN_MODE_FD);
-    if (want_fd) {
-        int on = 1;
-        if (setsockopt(fd, SOL_CAN_RAW, CAN_RAW_FD_FRAMES, &on, sizeof(on)) < 0) {
-            int e = errno;
-            close(fd);
-            /* Interface / kernel without CAN-FD -> NOSUPPORT, honouring
+	bool want_fd = (cfg->mode == ALP_CAN_MODE_FD);
+	if (want_fd) {
+		int on = 1;
+		if (setsockopt(fd, SOL_CAN_RAW, CAN_RAW_FD_FRAMES, &on, sizeof(on)) < 0) {
+			int e = errno;
+			close(fd);
+			/* Interface / kernel without CAN-FD -> NOSUPPORT, honouring
              * the alp_can_open contract for "CAN-FD requested but
              * unsupported". */
-            return _errno_to_alp(e);
-        }
-    }
+			return _errno_to_alp(e);
+		}
+	}
 
-    struct sockaddr_can addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.can_family  = AF_CAN;
-    addr.can_ifindex = ifr.ifr_ifindex;
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        int e = errno;
-        close(fd);
-        return _errno_to_alp(e);
-    }
+	struct sockaddr_can addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.can_family  = AF_CAN;
+	addr.can_ifindex = ifr.ifr_ifindex;
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+		int e = errno;
+		close(fd);
+		return _errno_to_alp(e);
+	}
 
-    y_can_data_t *d = (y_can_data_t *)calloc(1, sizeof(*d));
-    if (d == NULL) {
-        close(fd);
-        return ALP_ERR_NOMEM;
-    }
-    d->fd        = fd;
-    d->fd_frames = want_fd;
-    if (pthread_mutex_init(&d->lock, NULL) != 0) {
-        close(fd);
-        free(d);
-        return ALP_ERR_IO;
-    }
+	y_can_data_t *d = (y_can_data_t *)calloc(1, sizeof(*d));
+	if (d == NULL) {
+		close(fd);
+		return ALP_ERR_NOMEM;
+	}
+	d->fd        = fd;
+	d->fd_frames = want_fd;
+	if (pthread_mutex_init(&d->lock, NULL) != 0) {
+		close(fd);
+		free(d);
+		return ALP_ERR_IO;
+	}
 
-    st->dev         = NULL;
-    st->bus_id      = cfg->bus_id;
-    st->be_data     = d;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	st->dev         = NULL;
+	st->bus_id      = cfg->bus_id;
+	st->be_data     = d;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
 /**
@@ -289,9 +289,9 @@ static alp_status_t y_open(const alp_can_config_t *cfg, alp_can_backend_state_t 
  */
 static alp_status_t y_start(alp_can_backend_state_t *st)
 {
-    y_can_data_t *d = (y_can_data_t *)st->be_data;
-    if (d == NULL) return ALP_ERR_NOT_READY;
-    return ALP_OK;
+	y_can_data_t *d = (y_can_data_t *)st->be_data;
+	if (d == NULL) return ALP_ERR_NOT_READY;
+	return ALP_OK;
 }
 
 /**
@@ -303,9 +303,9 @@ static alp_status_t y_start(alp_can_backend_state_t *st)
  */
 static alp_status_t y_stop(alp_can_backend_state_t *st)
 {
-    y_can_data_t *d = (y_can_data_t *)st->be_data;
-    if (d == NULL) return ALP_ERR_NOT_READY;
-    return ALP_OK;
+	y_can_data_t *d = (y_can_data_t *)st->be_data;
+	if (d == NULL) return ALP_ERR_NOT_READY;
+	return ALP_OK;
 }
 
 /**
@@ -321,43 +321,43 @@ static alp_status_t y_stop(alp_can_backend_state_t *st)
 static alp_status_t y_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame,
                            uint32_t timeout_ms)
 {
-    (void)timeout_ms; /* see doxygen: no raw-socket per-write timeout */
-    y_can_data_t *d = (y_can_data_t *)st->be_data;
-    if (d == NULL) return ALP_ERR_NOT_READY;
-    if (frame == NULL) return ALP_ERR_INVAL;
+	(void)timeout_ms; /* see doxygen: no raw-socket per-write timeout */
+	y_can_data_t *d = (y_can_data_t *)st->be_data;
+	if (d == NULL) return ALP_ERR_NOT_READY;
+	if (frame == NULL) return ALP_ERR_INVAL;
 
-    canid_t can_id = frame->id & (frame->ext_id ? CAN_EFF_MASK : CAN_SFF_MASK);
-    if (frame->ext_id) can_id |= CAN_EFF_FLAG;
+	canid_t can_id = frame->id & (frame->ext_id ? CAN_EFF_MASK : CAN_SFF_MASK);
+	if (frame->ext_id) can_id |= CAN_EFF_FLAG;
 
-    ssize_t wr;
-    if (frame->fd) {
-        if (!d->fd_frames) return ALP_ERR_NOSUPPORT;
-        if (frame->dlc > ALP_CAN_MAX_DLC_FD) return ALP_ERR_INVAL;
-        struct canfd_frame cf;
-        memset(&cf, 0, sizeof(cf));
-        cf.can_id = can_id; /* FD frames never carry RTR */
-        cf.len    = frame->dlc;
-        cf.flags  = (uint8_t)(frame->brs ? CANFD_BRS : 0);
-        memcpy(cf.data, frame->data, frame->dlc);
-        wr = write(d->fd, &cf, sizeof(cf));
-        if (wr == (ssize_t)sizeof(cf)) return ALP_OK;
-    } else {
-        if (frame->dlc > ALP_CAN_MAX_DLC_CLASSIC) return ALP_ERR_INVAL;
-        if (frame->rtr) can_id |= CAN_RTR_FLAG;
-        struct can_frame cf;
-        memset(&cf, 0, sizeof(cf));
-        cf.can_id  = can_id;
-        cf.can_dlc = frame->dlc;
-        memcpy(cf.data, frame->data, frame->dlc);
-        wr = write(d->fd, &cf, sizeof(cf));
-        if (wr == (ssize_t)sizeof(cf)) return ALP_OK;
-    }
+	ssize_t wr;
+	if (frame->fd) {
+		if (!d->fd_frames) return ALP_ERR_NOSUPPORT;
+		if (frame->dlc > ALP_CAN_MAX_DLC_FD) return ALP_ERR_INVAL;
+		struct canfd_frame cf;
+		memset(&cf, 0, sizeof(cf));
+		cf.can_id = can_id; /* FD frames never carry RTR */
+		cf.len    = frame->dlc;
+		cf.flags  = (uint8_t)(frame->brs ? CANFD_BRS : 0);
+		memcpy(cf.data, frame->data, frame->dlc);
+		wr = write(d->fd, &cf, sizeof(cf));
+		if (wr == (ssize_t)sizeof(cf)) return ALP_OK;
+	} else {
+		if (frame->dlc > ALP_CAN_MAX_DLC_CLASSIC) return ALP_ERR_INVAL;
+		if (frame->rtr) can_id |= CAN_RTR_FLAG;
+		struct can_frame cf;
+		memset(&cf, 0, sizeof(cf));
+		cf.can_id  = can_id;
+		cf.can_dlc = frame->dlc;
+		memcpy(cf.data, frame->data, frame->dlc);
+		wr = write(d->fd, &cf, sizeof(cf));
+		if (wr == (ssize_t)sizeof(cf)) return ALP_OK;
+	}
 
-    if (wr < 0) {
-        if (errno == ENOBUFS) return ALP_ERR_TIMEOUT; /* TX queue full */
-        return _errno_to_alp(errno);
-    }
-    return ALP_ERR_IO; /* short write */
+	if (wr < 0) {
+		if (errno == ENOBUFS) return ALP_ERR_TIMEOUT; /* TX queue full */
+		return _errno_to_alp(errno);
+	}
+	return ALP_ERR_IO; /* short write */
 }
 
 /**
@@ -371,56 +371,56 @@ static alp_status_t y_send(alp_can_backend_state_t *st, const alp_can_frame_t *f
 static alp_status_t y_add_filter(alp_can_backend_state_t *st, const alp_can_filter_t *filter,
                                  alp_can_rx_cb_t cb, void *user, int32_t *filter_id_out)
 {
-    y_can_data_t *d = (y_can_data_t *)st->be_data;
-    if (d == NULL) return ALP_ERR_NOT_READY;
-    if (filter == NULL || cb == NULL) return ALP_ERR_INVAL;
+	y_can_data_t *d = (y_can_data_t *)st->be_data;
+	if (d == NULL) return ALP_ERR_NOT_READY;
+	if (filter == NULL || cb == NULL) return ALP_ERR_INVAL;
 
-    pthread_mutex_lock(&d->lock);
+	pthread_mutex_lock(&d->lock);
 
-    int slot = -1;
-    for (int i = 0; i < ALP_Y_CAN_MAX_FILTERS; ++i) {
-        if (!d->filters[i].in_use) {
-            slot = i;
-            break;
-        }
-    }
-    if (slot < 0) {
-        pthread_mutex_unlock(&d->lock);
-        return ALP_ERR_NOMEM;
-    }
+	int slot = -1;
+	for (int i = 0; i < ALP_Y_CAN_MAX_FILTERS; ++i) {
+		if (!d->filters[i].in_use) {
+			slot = i;
+			break;
+		}
+	}
+	if (slot < 0) {
+		pthread_mutex_unlock(&d->lock);
+		return ALP_ERR_NOMEM;
+	}
 
-    y_can_filter_t *f = &d->filters[slot];
-    f->cb             = cb;
-    f->user           = user;
-    f->kf.can_id      = filter->id & (filter->ext_id ? CAN_EFF_MASK : CAN_SFF_MASK);
-    f->kf.can_mask    = filter->mask;
-    if (filter->ext_id) {
-        f->kf.can_id |= CAN_EFF_FLAG;
-        f->kf.can_mask |= CAN_EFF_FLAG; /* require EFF frames to match */
-    }
-    f->in_use = true;
+	y_can_filter_t *f = &d->filters[slot];
+	f->cb             = cb;
+	f->user           = user;
+	f->kf.can_id      = filter->id & (filter->ext_id ? CAN_EFF_MASK : CAN_SFF_MASK);
+	f->kf.can_mask    = filter->mask;
+	if (filter->ext_id) {
+		f->kf.can_id |= CAN_EFF_FLAG;
+		f->kf.can_mask |= CAN_EFF_FLAG; /* require EFF frames to match */
+	}
+	f->in_use = true;
 
-    int e     = _apply_filters_locked(d);
-    if (e != 0) {
-        *f = (y_can_filter_t){ 0 };
-        pthread_mutex_unlock(&d->lock);
-        return _errno_to_alp(e);
-    }
+	int e     = _apply_filters_locked(d);
+	if (e != 0) {
+		*f = (y_can_filter_t){ 0 };
+		pthread_mutex_unlock(&d->lock);
+		return _errno_to_alp(e);
+	}
 
-    /* Lazily start the reader thread on the first installed filter. */
-    if (!d->rx_running) {
-        if (pthread_create(&d->rx_thread, NULL, _rx_loop, d) != 0) {
-            *f = (y_can_filter_t){ 0 };
-            (void)_apply_filters_locked(d);
-            pthread_mutex_unlock(&d->lock);
-            return ALP_ERR_IO;
-        }
-        d->rx_running = true;
-    }
+	/* Lazily start the reader thread on the first installed filter. */
+	if (!d->rx_running) {
+		if (pthread_create(&d->rx_thread, NULL, _rx_loop, d) != 0) {
+			*f = (y_can_filter_t){ 0 };
+			(void)_apply_filters_locked(d);
+			pthread_mutex_unlock(&d->lock);
+			return ALP_ERR_IO;
+		}
+		d->rx_running = true;
+	}
 
-    pthread_mutex_unlock(&d->lock);
-    if (filter_id_out != NULL) *filter_id_out = slot;
-    return ALP_OK;
+	pthread_mutex_unlock(&d->lock);
+	if (filter_id_out != NULL) *filter_id_out = slot;
+	return ALP_OK;
 }
 
 /**
@@ -430,22 +430,22 @@ static alp_status_t y_add_filter(alp_can_backend_state_t *st, const alp_can_filt
  */
 static alp_status_t y_remove_filter(alp_can_backend_state_t *st, int32_t filter_id)
 {
-    y_can_data_t *d = (y_can_data_t *)st->be_data;
-    if (d == NULL) return ALP_ERR_NOT_READY;
-    if (filter_id < 0 || filter_id >= ALP_Y_CAN_MAX_FILTERS) {
-        return ALP_ERR_INVAL;
-    }
+	y_can_data_t *d = (y_can_data_t *)st->be_data;
+	if (d == NULL) return ALP_ERR_NOT_READY;
+	if (filter_id < 0 || filter_id >= ALP_Y_CAN_MAX_FILTERS) {
+		return ALP_ERR_INVAL;
+	}
 
-    pthread_mutex_lock(&d->lock);
-    y_can_filter_t *f = &d->filters[filter_id];
-    if (!f->in_use) {
-        pthread_mutex_unlock(&d->lock);
-        return ALP_ERR_INVAL;
-    }
-    *f    = (y_can_filter_t){ 0 };
-    int e = _apply_filters_locked(d);
-    pthread_mutex_unlock(&d->lock);
-    return _errno_to_alp(e);
+	pthread_mutex_lock(&d->lock);
+	y_can_filter_t *f = &d->filters[filter_id];
+	if (!f->in_use) {
+		pthread_mutex_unlock(&d->lock);
+		return ALP_ERR_INVAL;
+	}
+	*f    = (y_can_filter_t){ 0 };
+	int e = _apply_filters_locked(d);
+	pthread_mutex_unlock(&d->lock);
+	return _errno_to_alp(e);
 }
 
 /**
@@ -457,40 +457,40 @@ static alp_status_t y_remove_filter(alp_can_backend_state_t *st, int32_t filter_
  */
 static void y_close(alp_can_backend_state_t *st)
 {
-    y_can_data_t *d = (y_can_data_t *)st->be_data;
-    if (d == NULL) return;
+	y_can_data_t *d = (y_can_data_t *)st->be_data;
+	if (d == NULL) return;
 
-    bool      join = false;
-    pthread_t th   = d->rx_thread;
-    pthread_mutex_lock(&d->lock);
-    if (d->rx_running) {
-        d->rx_running = false;
-        join          = true;
-    }
-    pthread_mutex_unlock(&d->lock);
+	bool      join = false;
+	pthread_t th   = d->rx_thread;
+	pthread_mutex_lock(&d->lock);
+	if (d->rx_running) {
+		d->rx_running = false;
+		join          = true;
+	}
+	pthread_mutex_unlock(&d->lock);
 
-    /* Closing the fd unblocks read() in _rx_loop so it returns and the
+	/* Closing the fd unblocks read() in _rx_loop so it returns and the
      * thread exits; join before freeing the box it dereferences. */
-    if (d->fd >= 0) {
-        close(d->fd);
-        d->fd = -1;
-    }
-    if (join) {
-        (void)pthread_join(th, NULL);
-    }
-    pthread_mutex_destroy(&d->lock);
-    free(d);
-    st->be_data = NULL;
+	if (d->fd >= 0) {
+		close(d->fd);
+		d->fd = -1;
+	}
+	if (join) {
+		(void)pthread_join(th, NULL);
+	}
+	pthread_mutex_destroy(&d->lock);
+	free(d);
+	st->be_data = NULL;
 }
 
 static const alp_can_ops_t _ops = {
-    .open          = y_open,
-    .start         = y_start,
-    .stop          = y_stop,
-    .send          = y_send,
-    .add_filter    = y_add_filter,
-    .remove_filter = y_remove_filter,
-    .close         = y_close,
+	.open          = y_open,
+	.start         = y_start,
+	.stop          = y_stop,
+	.send          = y_send,
+	.add_filter    = y_add_filter,
+	.remove_filter = y_remove_filter,
+	.close         = y_close,
 };
 
 ALP_BACKEND_REGISTER(can, yocto_drv,

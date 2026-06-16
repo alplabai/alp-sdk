@@ -47,22 +47,22 @@ static uint16_t sdio_reply_len;
  * Builds + stages the reply frame for the backend to clock back. */
 void sdio_slave_on_request(const uint8_t *frame, uint16_t len)
 {
-    const size_t n = protocol_build_reply(frame, len, sdio_reply_buf, sizeof(sdio_reply_buf));
-    sdio_reply_len = (uint16_t)n;
+	const size_t n = protocol_build_reply(frame, len, sdio_reply_buf, sizeof(sdio_reply_buf));
+	sdio_reply_len = (uint16_t)n;
 }
 
 const uint8_t *sdio_slave_reply(void)
 {
-    return sdio_reply_buf;
+	return sdio_reply_buf;
 }
 
 uint16_t sdio_slave_reply_len(void)
 {
-    return sdio_reply_len;
+	return sdio_reply_len;
 }
 
 void transport_sdio_init(void)
 {
-    sdio_reply_len = 0u;
-    bridge_transport_sdio_hw_init();
+	sdio_reply_len = 0u;
+	bridge_transport_sdio_hw_init();
 }

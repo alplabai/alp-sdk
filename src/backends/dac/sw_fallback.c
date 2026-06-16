@@ -26,33 +26,33 @@
 static alp_status_t sw_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st,
                             alp_capabilities_t *caps_out)
 {
-    (void)cfg;
-    st->dev         = NULL;
-    st->channel_id  = cfg->channel_id;
-    st->be_data     = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	(void)cfg;
+	st->dev         = NULL;
+	st->channel_id  = cfg->channel_id;
+	st->be_data     = NULL;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
 static alp_status_t sw_write_mv(alp_dac_backend_state_t *st, uint16_t mv)
 {
-    (void)st;
-    (void)mv;
-    return ALP_ERR_NOSUPPORT;
+	(void)st;
+	(void)mv;
+	return ALP_ERR_NOSUPPORT;
 }
 
 static alp_status_t sw_read_mv(alp_dac_backend_state_t *st, uint16_t *mv_out)
 {
-    (void)st;
-    (void)mv_out;
-    return ALP_ERR_NOSUPPORT;
+	(void)st;
+	(void)mv_out;
+	return ALP_ERR_NOSUPPORT;
 }
 
 static const alp_dac_ops_t sw_ops = {
-    .open     = sw_open,
-    .write_mv = sw_write_mv,
-    .read_mv  = sw_read_mv,
-    .close    = NULL,
+	.open     = sw_open,
+	.write_mv = sw_write_mv,
+	.read_mv  = sw_read_mv,
+	.close    = NULL,
 };
 
 ALP_BACKEND_REGISTER(dac, sw_fallback,

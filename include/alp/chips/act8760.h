@@ -124,28 +124,28 @@ extern "C" {
 
 /** Slave selector for raw register access. */
 typedef enum {
-    ACT8760_PAGE_SYSTEM = 0, /**< ADD1: MSTR + Buck1..Buck6 + GPIOs (0x25 on CMI 120.E1). */
-    ACT8760_PAGE_AUX    = 1, /**< ADD2: Buck7 + LDO1..LDO6 (0x26 on CMI 120.E1). */
+	ACT8760_PAGE_SYSTEM = 0, /**< ADD1: MSTR + Buck1..Buck6 + GPIOs (0x25 on CMI 120.E1). */
+	ACT8760_PAGE_AUX    = 1, /**< ADD2: Buck7 + LDO1..LDO6 (0x26 on CMI 120.E1). */
 } act8760_page_t;
 
 /** Per-regulator identifier used by the high-level voltage / status
  *  helpers.  The numeric values are arbitrary; do not assume they
  *  match silicon register indices. */
 typedef enum {
-    ACT8760_RAIL_BUCK1 = 0,
-    ACT8760_RAIL_BUCK2,
-    ACT8760_RAIL_BUCK3,
-    ACT8760_RAIL_BUCK4,
-    ACT8760_RAIL_BUCK5,
-    ACT8760_RAIL_BUCK6,
-    ACT8760_RAIL_BUCK7,
-    ACT8760_RAIL_LDO1,
-    ACT8760_RAIL_LDO2,
-    ACT8760_RAIL_LDO3,
-    ACT8760_RAIL_LDO4,
-    ACT8760_RAIL_LDO5,
-    ACT8760_RAIL_LDO6,
-    ACT8760_RAIL_COUNT
+	ACT8760_RAIL_BUCK1 = 0,
+	ACT8760_RAIL_BUCK2,
+	ACT8760_RAIL_BUCK3,
+	ACT8760_RAIL_BUCK4,
+	ACT8760_RAIL_BUCK5,
+	ACT8760_RAIL_BUCK6,
+	ACT8760_RAIL_BUCK7,
+	ACT8760_RAIL_LDO1,
+	ACT8760_RAIL_LDO2,
+	ACT8760_RAIL_LDO3,
+	ACT8760_RAIL_LDO4,
+	ACT8760_RAIL_LDO5,
+	ACT8760_RAIL_LDO6,
+	ACT8760_RAIL_COUNT
 } act8760_rail_t;
 
 /** Decoded system status (register 0x00 on the ADD1 slave).  Bit map
@@ -154,23 +154,23 @@ typedef enum {
  *  regulator POK/OV/ILIM flags live in each tile's offset-0 register
  *  (reachable via act8760_read_reg), NOT in this byte. */
 typedef struct {
-    bool    rom_stat;        /**< bit7: ROM/CMI configuration-load status. */
-    bool    wd_alert;        /**< bit6: watchdog timer alert. */
-    bool    thermal_warning; /**< bit5 TWARN: junction at warning threshold. */
-    bool    vsys_stat;       /**< bit4: AVIN below VSYS_MON (latched). */
-    bool    vin_pok_ov;      /**< bit3: VIN power-OK / over-voltage flag. */
-    bool    pb_assert;       /**< bit2: push-button assert event. */
-    bool    vsys_warning;    /**< bit1: AVIN below VSYS_WARN (latched). */
-    bool    pb_deassert;     /**< bit0: push-button de-assert event. */
-    uint8_t raw;             /**< Untouched register byte for diagnostics. */
+	bool    rom_stat;        /**< bit7: ROM/CMI configuration-load status. */
+	bool    wd_alert;        /**< bit6: watchdog timer alert. */
+	bool    thermal_warning; /**< bit5 TWARN: junction at warning threshold. */
+	bool    vsys_stat;       /**< bit4: AVIN below VSYS_MON (latched). */
+	bool    vin_pok_ov;      /**< bit3: VIN power-OK / over-voltage flag. */
+	bool    pb_assert;       /**< bit2: push-button assert event. */
+	bool    vsys_warning;    /**< bit1: AVIN below VSYS_WARN (latched). */
+	bool    pb_deassert;     /**< bit0: push-button de-assert event. */
+	uint8_t raw;             /**< Untouched register byte for diagnostics. */
 } act8760_status_t;
 
 /** Driver context. */
 typedef struct {
-    bool       initialised;
-    alp_i2c_t *bus;
-    uint8_t    addr_page0; /**< Defaults to ACT8760_I2C_ADDR_PAGE0. */
-    uint8_t    addr_page1; /**< Defaults to ACT8760_I2C_ADDR_PAGE1. */
+	bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr_page0; /**< Defaults to ACT8760_I2C_ADDR_PAGE0. */
+	uint8_t    addr_page1; /**< Defaults to ACT8760_I2C_ADDR_PAGE1. */
 } act8760_t;
 
 /**

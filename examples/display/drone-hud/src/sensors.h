@@ -23,29 +23,29 @@ extern "C" {
 /** Live drone telemetry snapshot.  Updated by the IMU + slow
  *  telemetry threads; read once-per-frame by the LVGL render loop. */
 typedef struct {
-    /* Attitude (Madgwick output, ENU frame). */
-    float roll_deg;        /**< Roll about X axis. */
-    float pitch_deg;       /**< Pitch about Y axis. */
-    float yaw_deg;         /**< Yaw about Z axis (compass heading). */
+	/* Attitude (Madgwick output, ENU frame). */
+	float roll_deg;  /**< Roll about X axis. */
+	float pitch_deg; /**< Pitch about Y axis. */
+	float yaw_deg;   /**< Yaw about Z axis (compass heading). */
 
-    /* GPS. */
-    float    lat_deg;
-    float    lon_deg;
-    float    altitude_m;
-    uint8_t  sat_count;
-    bool     gps_fix;
+	/* GPS. */
+	float   lat_deg;
+	float   lon_deg;
+	float   altitude_m;
+	uint8_t sat_count;
+	bool    gps_fix;
 
-    /* Battery (INA236). */
-    float    battery_v;
-    float    battery_a;
-    int32_t  battery_remaining_min;  /**< Coulomb-counter estimate. */
+	/* Battery (INA236). */
+	float   battery_v;
+	float   battery_a;
+	int32_t battery_remaining_min; /**< Coulomb-counter estimate. */
 
-    /* Flight mode selector (host UI sets, autopilot reads). */
-    enum {
-        DRONE_MODE_MANUAL     = 0,
-        DRONE_MODE_STABILISED = 1,
-        DRONE_MODE_GPS_HOLD   = 2,
-    } mode;
+	/* Flight mode selector (host UI sets, autopilot reads). */
+	enum {
+		DRONE_MODE_MANUAL     = 0,
+		DRONE_MODE_STABILISED = 1,
+		DRONE_MODE_GPS_HOLD   = 2,
+	} mode;
 } drone_telemetry_t;
 
 /** Bring up every chip + library this demo touches.  Tolerates
