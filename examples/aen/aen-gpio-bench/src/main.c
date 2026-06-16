@@ -41,22 +41,30 @@
 #include <zephyr/sys/util.h>
 
 /* gpio8 node + the pad-mux state attached in the overlay. */
-#define GPIO8_NODE   DT_NODELABEL(gpio8)
-#define TEST_PIN     0U                     /* P8_0 -> DR/DDR bit 0 */
-#define TEST_BIT     BIT(TEST_PIN)
+#define GPIO8_NODE DT_NODELABEL(gpio8)
+#define TEST_PIN   0U /* P8_0 -> DR/DDR bit 0 */
+#define TEST_BIT   BIT(TEST_PIN)
 
 /* DesignWare PORT-A register absolute addresses for this node. These match
  * what gpio_dw writes; we read them directly purely to self-verify. */
-#define GPIO8_BASE       DT_REG_ADDR(GPIO8_NODE)   /* 0x49008000 */
-#define DW_SWPORTA_DR    (GPIO8_BASE + 0x00U)      /* 0x49008000 */
-#define DW_SWPORTA_DDR   (GPIO8_BASE + 0x04U)      /* 0x49008004 */
-#define DW_EXT_PORTA     (GPIO8_BASE + 0x50U)      /* 0x49008050 */
+#define GPIO8_BASE     DT_REG_ADDR(GPIO8_NODE) /* 0x49008000 */
+#define DW_SWPORTA_DR  (GPIO8_BASE + 0x00U)    /* 0x49008000 */
+#define DW_SWPORTA_DDR (GPIO8_BASE + 0x04U)    /* 0x49008004 */
+#define DW_EXT_PORTA   (GPIO8_BASE + 0x50U)    /* 0x49008050 */
 
 /* P8_0 -> GPIO (AF0).  gpio_dw does not touch the pad mux, and the upstream
  * "snps,designware-gpio" binding carries no pinctrl-0, so apply the mux straight
  * through the Alif pinctrl SoC driver (pinctrl_soc_pin_t is the uint32_t PINMUX
- * word; the Alif impl ignores the reg argument). */
-static const pinctrl_soc_pin_t p8_0_gpio[] = { PIN_P8_0__GPIO };
+ * word; the Alif impl ignores the reg argument).
+ *
+ * ALIF_PAD_REN = the pad RECEIVER-ENABLE bit (pinctrl_soc.h REN_BIT_POS=16, the
+ * low bit of the pad-config byte [23:16] of the pinmux word).  gpio_dw drives the
+ * output via DDR/DR, but the pad's input buffer must be enabled for EXT_PORTA to
+ * SENSE the driven level back -- same REN the I2C2 path needs to sense SDA.  With
+ * it set, EXT_PORTA tracks the output, validating the FULL pad path (mux + drive +
+ * sense), not just the gpio_dw controller registers. */
+#define ALIF_PAD_REN (1U << 16)
+static const pinctrl_soc_pin_t p8_0_gpio[] = { PIN_P8_0__GPIO | ALIF_PAD_REN };
 
 static const struct device *const gpio8 = DEVICE_DT_GET(GPIO8_NODE);
 
@@ -67,21 +75,26 @@ static void dump_regs(const char *tag)
 	uint32_t ext = sys_read32(DW_EXT_PORTA);
 
 	printk("  [%s] DR=0x%08x (bit0=%u) DDR=0x%08x (bit0=%u) EXT=0x%08x (bit0=%u)\n",
-	       tag, dr, (unsigned int)((dr >> TEST_PIN) & 1U),
-	       ddr, (unsigned int)((ddr >> TEST_PIN) & 1U),
-	       ext, (unsigned int)((ext >> TEST_PIN) & 1U));
+	       tag,
+	       dr,
+	       (unsigned int)((dr >> TEST_PIN) & 1U),
+	       ddr,
+	       (unsigned int)((ddr >> TEST_PIN) & 1U),
+	       ext,
+	       (unsigned int)((ext >> TEST_PIN) & 1U));
 }
 
 int main(void)
 {
-	int rc;
-	uint32_t dr_hi, ddr_hi, dr_lo, ddr_lo;
+	int      rc;
+	uint32_t dr_hi, ddr_hi, dr_lo, ddr_lo, ext_hi, ext_lo;
 
-	printk("\n=== AEN801 GPIO bench (gpio_dw / P8_0 / gpio8 pin %u) ===\n",
-	       TEST_PIN);
+	printk("\n=== AEN801 GPIO bench (gpio_dw / P8_0 / gpio8 pin %u) ===\n", TEST_PIN);
 	printk("base=0x%08x  DR=0x%08x  DDR=0x%08x  EXT=0x%08x\n",
-	       (unsigned int)GPIO8_BASE, (unsigned int)DW_SWPORTA_DR,
-	       (unsigned int)DW_SWPORTA_DDR, (unsigned int)DW_EXT_PORTA);
+	       (unsigned int)GPIO8_BASE,
+	       (unsigned int)DW_SWPORTA_DR,
+	       (unsigned int)DW_SWPORTA_DDR,
+	       (unsigned int)DW_EXT_PORTA);
 
 	/* 1. mux P8_0 -> GPIO (gpio_dw never touches the pad mux). */
 	rc = pinctrl_configure_pins(p8_0_gpio, ARRAY_SIZE(p8_0_gpio), 0U);
@@ -119,6 +132,7 @@ int main(void)
 	dump_regs("driven-high");
 	dr_hi  = sys_read32(DW_SWPORTA_DR);
 	ddr_hi = sys_read32(DW_SWPORTA_DDR);
+	ext_hi = sys_read32(DW_EXT_PORTA); /* pad sense (REN on) -> tracks output */
 
 	/* --- J-Link readback window #1 (HIGH): mem32 0x49008000 / 0x49008004 --- */
 
@@ -133,21 +147,31 @@ int main(void)
 	dump_regs("driven-low");
 	dr_lo  = sys_read32(DW_SWPORTA_DR);
 	ddr_lo = sys_read32(DW_SWPORTA_DDR);
+	ext_lo = sys_read32(DW_EXT_PORTA); /* pad sense (REN on) -> tracks output */
 
 	/* --- J-Link readback window #2 (LOW): mem32 0x49008000 / 0x49008004 --- */
 
-	/* 6. verdict: DDR shows the pin as output in BOTH states, and DR tracks
-	 *    the driven level (high bit set, low bit clear). */
+	/* 6. verdict: DDR shows the pin as output in BOTH states, DR tracks the
+	 *    driven level (controller), AND -- with the pad receiver enabled
+	 *    (ALIF_PAD_REN) -- EXT_PORTA reads back the same level (the FULL pad
+	 *    path: mux + push-pull drive + sense), high then low. */
 	bool ddr_ok = ((ddr_hi & TEST_BIT) != 0U) && ((ddr_lo & TEST_BIT) != 0U);
-	bool dr_ok  = ((dr_hi  & TEST_BIT) != 0U) && ((dr_lo  & TEST_BIT) == 0U);
+	bool dr_ok  = ((dr_hi & TEST_BIT) != 0U) && ((dr_lo & TEST_BIT) == 0U);
+	bool ext_ok = ((ext_hi & TEST_BIT) != 0U) && ((ext_lo & TEST_BIT) == 0U);
 
-	if (ddr_ok && dr_ok) {
-		printk("RESULT PASS: gpio_dw P8_0 output drives high then low "
-		       "(DDR bit0=1, DR high=1 low=0)\n");
+	if (ddr_ok && dr_ok && ext_ok) {
+		printk("RESULT PASS: gpio_dw P8_0 FULL pad path -- DDR bit0=1, DR & "
+		       "EXT_PORTA both high=1 low=0 (mux+drive+sense, REN on)\n");
 	} else {
-		printk("RESULT FAIL: ddr_ok=%d dr_ok=%d "
-		       "DDR_hi=0x%08x DDR_lo=0x%08x DR_hi=0x%08x DR_lo=0x%08x\n",
-		       (int)ddr_ok, (int)dr_ok, ddr_hi, ddr_lo, dr_hi, dr_lo);
+		printk("RESULT FAIL: ddr_ok=%d dr_ok=%d ext_ok=%d "
+		       "DR_hi=0x%08x DR_lo=0x%08x EXT_hi=0x%08x EXT_lo=0x%08x\n",
+		       (int)ddr_ok,
+		       (int)dr_ok,
+		       (int)ext_ok,
+		       dr_hi,
+		       dr_lo,
+		       ext_hi,
+		       ext_lo);
 	}
 
 	/* Leave the pin LOW + park; the registers stay readable over J-Link. */
