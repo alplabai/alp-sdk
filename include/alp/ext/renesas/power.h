@@ -96,9 +96,9 @@ typedef uint8_t alp_renesas_power_supervisor_mode_t;
  *           not implement the requested mode;
  *         any error from the GD32 bridge transport.
  */
-alp_status_t alp_renesas_power_supervisor_mode_set(
-    alp_power_t                         *handle,
-    alp_renesas_power_supervisor_mode_t  supervisor_mode);
+alp_status_t
+alp_renesas_power_supervisor_mode_set(alp_power_t                        *handle,
+                                      alp_renesas_power_supervisor_mode_t supervisor_mode);
 
 #ifdef __cplusplus
 }

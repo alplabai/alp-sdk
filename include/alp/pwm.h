@@ -47,8 +47,8 @@ extern "C" {
 
 /** Output polarity (which level represents the "on" portion of the cycle). */
 typedef enum {
-    ALP_PWM_POLARITY_NORMAL   = 0,    /**< High during the active portion. */
-    ALP_PWM_POLARITY_INVERTED = 1     /**< Low during the active portion. */
+	ALP_PWM_POLARITY_NORMAL   = 0, /**< High during the active portion. */
+	ALP_PWM_POLARITY_INVERTED = 1  /**< Low during the active portion. */
 } alp_pwm_polarity_t;
 
 /** Per-channel alignment mode for @ref alp_pwm_configure.  Edge-aligned
@@ -58,10 +58,10 @@ typedef enum {
  *  both phases, which reduces high-frequency harmonic content in motor-
  *  drive applications. */
 typedef enum {
-    ALP_PWM_ALIGN_EDGE        = 0, /**< Sawtooth counter (default). */
-    ALP_PWM_ALIGN_CENTER_UP   = 1, /**< Triangle, edges in count-up. */
-    ALP_PWM_ALIGN_CENTER_DOWN = 2, /**< Triangle, edges in count-down. */
-    ALP_PWM_ALIGN_CENTER_BOTH = 3, /**< Triangle, edges in both phases. */
+	ALP_PWM_ALIGN_EDGE        = 0, /**< Sawtooth counter (default). */
+	ALP_PWM_ALIGN_CENTER_UP   = 1, /**< Triangle, edges in count-up. */
+	ALP_PWM_ALIGN_CENTER_DOWN = 2, /**< Triangle, edges in count-down. */
+	ALP_PWM_ALIGN_CENTER_BOTH = 3, /**< Triangle, edges in both phases. */
 } alp_pwm_align_t;
 
 /** Bitmap of break-input / fault sources for @ref alp_pwm_configure.
@@ -77,9 +77,9 @@ typedef struct alp_pwm alp_pwm_t;
 
 /** Configuration passed to @ref alp_pwm_open. */
 typedef struct {
-    uint32_t            channel_id;   /**< Studio-resolved PWM channel index (0..7). */
-    uint32_t            period_ns;    /**< PWM period in nanoseconds. 0 = use DT default. */
-    alp_pwm_polarity_t  polarity;
+	uint32_t           channel_id; /**< Studio-resolved PWM channel index (0..7). */
+	uint32_t           period_ns;  /**< PWM period in nanoseconds. 0 = use DT default. */
+	alp_pwm_polarity_t polarity;
 } alp_pwm_config_t;
 
 /**
@@ -99,7 +99,7 @@ typedef struct {
  *         - handle pool exhausted
  *         - hardware rejected the period
  */
-alp_pwm_t   *alp_pwm_open(const alp_pwm_config_t *cfg);
+alp_pwm_t *alp_pwm_open(const alp_pwm_config_t *cfg);
 
 /**
  * @brief Set the active-level pulse width.
@@ -171,7 +171,7 @@ alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint3
  *
  * @param[in] pwm  Handle from @ref alp_pwm_open, or NULL.
  */
-void         alp_pwm_close(alp_pwm_t *pwm);
+void alp_pwm_close(alp_pwm_t *pwm);
 
 /**
  * @brief Query the capabilities of an opened PWM channel handle.
@@ -216,9 +216,9 @@ alp_status_t alp_pwm_single_pulse(alp_pwm_t *pwm, uint32_t pulse_ns);
 
 /** Edge polarity selector for @ref alp_pwm_capture_open. */
 typedef enum {
-    ALP_PWM_CAPTURE_EDGE_RISING  = 0, /**< Capture on rising edges only. */
-    ALP_PWM_CAPTURE_EDGE_FALLING = 1, /**< Capture on falling edges only. */
-    ALP_PWM_CAPTURE_EDGE_BOTH    = 2, /**< Capture on both edges (pulse-width measurement). */
+	ALP_PWM_CAPTURE_EDGE_RISING  = 0, /**< Capture on rising edges only. */
+	ALP_PWM_CAPTURE_EDGE_FALLING = 1, /**< Capture on falling edges only. */
+	ALP_PWM_CAPTURE_EDGE_BOTH    = 2, /**< Capture on both edges (pulse-width measurement). */
 } alp_pwm_capture_edge_t;
 
 /** Opaque input-capture handle.  Allocate via @ref alp_pwm_capture_open. */
@@ -226,8 +226,8 @@ typedef struct alp_pwm_capture alp_pwm_capture_t;
 
 /** Configuration passed to @ref alp_pwm_capture_open. */
 typedef struct {
-    uint32_t               channel_id; /**< PWM channel index (0..7) used as input. */
-    alp_pwm_capture_edge_t edge;       /**< Edge polarity selector. */
+	uint32_t               channel_id; /**< PWM channel index (0..7) used as input. */
+	alp_pwm_capture_edge_t edge;       /**< Edge polarity selector. */
 } alp_pwm_capture_config_t;
 
 /**
@@ -297,7 +297,7 @@ alp_status_t alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_ou
 void alp_pwm_capture_close(alp_pwm_capture_t *cap);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_PWM_H */
+#endif /* ALP_PWM_H */

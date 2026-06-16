@@ -36,12 +36,12 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_pwm_t  *in1; /**< Channel-A input 1. */
-    alp_pwm_t  *in2; /**< Channel-A input 2. */
-    alp_pwm_t  *in3; /**< Channel-B input 1. */
-    alp_pwm_t  *in4; /**< Channel-B input 2. */
-    alp_gpio_t *nsleep; /**< Active-low enable; may be NULL when tied high. */
-    bool        initialised;
+	alp_pwm_t  *in1;    /**< Channel-A input 1. */
+	alp_pwm_t  *in2;    /**< Channel-A input 2. */
+	alp_pwm_t  *in3;    /**< Channel-B input 1. */
+	alp_pwm_t  *in4;    /**< Channel-B input 2. */
+	alp_gpio_t *nsleep; /**< Active-low enable; may be NULL when tied high. */
+	bool        initialised;
 } drv8833_t;
 
 /**
@@ -55,12 +55,8 @@ typedef struct {
  * @param nsleep  Open GPIO for nSLEEP (NULL if tied permanently high).
  * @return `ALP_OK` on success.
  */
-alp_status_t drv8833_init(drv8833_t  *dev,
-                          alp_pwm_t  *in1,
-                          alp_pwm_t  *in2,
-                          alp_pwm_t  *in3,
-                          alp_pwm_t  *in4,
-                          alp_gpio_t *nsleep);
+alp_status_t drv8833_init(drv8833_t *dev, alp_pwm_t *in1, alp_pwm_t *in2, alp_pwm_t *in3,
+                          alp_pwm_t *in4, alp_gpio_t *nsleep);
 
 /**
  * @brief Set channel-A pulse-width.

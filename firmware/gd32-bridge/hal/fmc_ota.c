@@ -60,12 +60,12 @@
  * ota_fmc_wait_ready with the latched error (silicon-verified: a single
  * PGERR short-circuited the whole remaining OTA session). */
 #define OTA_FMC_STAT_ERR_MASK                                                                      \
-    (FMC_STAT_WPERR | FMC_STAT_PGERR | FMC_STAT_PGSERR | FMC_STAT_PGAERR | FMC_STAT_RPERR |        \
-     FMC_STAT_PGMERR | FMC_STAT_OBERR)
+	(FMC_STAT_WPERR | FMC_STAT_PGERR | FMC_STAT_PGSERR | FMC_STAT_PGAERR | FMC_STAT_RPERR |        \
+	 FMC_STAT_PGMERR | FMC_STAT_OBERR)
 
 bool ota_fmc_supported(void)
 {
-    return true;
+	return true;
 }
 
 /* RAM-safe FMC state decode (vendor fmc_state_get, inlined so the
@@ -73,156 +73,156 @@ bool ota_fmc_supported(void)
  * FMC is busy).  Decode order mirrors the vendor exactly. */
 __attribute__((always_inline)) static inline fmc_state_enum ota_fmc_state_now(void)
 {
-    if ((FMC_STAT & FMC_STAT_BUSY) != 0u) {
-        return FMC_BUSY;
-    }
-    if ((FMC_STAT & FMC_STAT_WPERR) != 0u) {
-        return FMC_WPERR;
-    }
-    if ((FMC_STAT & FMC_STAT_PGERR) != 0u) {
-        return FMC_PGERR;
-    }
-    if ((FMC_STAT & FMC_STAT_PGSERR) != 0u) {
-        return FMC_PGSERR;
-    }
-    if ((FMC_STAT & FMC_STAT_PGAERR) != 0u) {
-        return FMC_PGAERR;
-    }
-    if ((FMC_STAT & FMC_STAT_RPERR) != 0u) {
-        return FMC_RPERR;
-    }
-    if ((FMC_STAT & FMC_STAT_PGMERR) != 0u) {
-        return FMC_PGMERR;
-    }
-    if ((FMC_STAT & FMC_STAT_OBERR) != 0u) {
-        return FMC_OBERR;
-    }
-    return FMC_READY;
+	if ((FMC_STAT & FMC_STAT_BUSY) != 0u) {
+		return FMC_BUSY;
+	}
+	if ((FMC_STAT & FMC_STAT_WPERR) != 0u) {
+		return FMC_WPERR;
+	}
+	if ((FMC_STAT & FMC_STAT_PGERR) != 0u) {
+		return FMC_PGERR;
+	}
+	if ((FMC_STAT & FMC_STAT_PGSERR) != 0u) {
+		return FMC_PGSERR;
+	}
+	if ((FMC_STAT & FMC_STAT_PGAERR) != 0u) {
+		return FMC_PGAERR;
+	}
+	if ((FMC_STAT & FMC_STAT_RPERR) != 0u) {
+		return FMC_RPERR;
+	}
+	if ((FMC_STAT & FMC_STAT_PGMERR) != 0u) {
+		return FMC_PGMERR;
+	}
+	if ((FMC_STAT & FMC_STAT_OBERR) != 0u) {
+		return FMC_OBERR;
+	}
+	return FMC_READY;
 }
 
 /* RAM-safe fmc_ready_wait (vendor decode + timeout, inlined). */
 __attribute__((always_inline)) static inline fmc_state_enum ota_fmc_wait_ready(uint32_t timeout)
 {
-    fmc_state_enum st;
-    do {
-        st = ota_fmc_state_now();
-        timeout--;
-    } while ((st == FMC_BUSY) && (timeout != 0u));
-    return (st == FMC_BUSY) ? FMC_TOERR : st;
+	fmc_state_enum st;
+	do {
+		st = ota_fmc_state_now();
+		timeout--;
+	} while ((st == FMC_BUSY) && (timeout != 0u));
+	return (st == FMC_BUSY) ? FMC_TOERR : st;
 }
 
 OTA_RAMFUNC static fmc_state_enum erase_one_page(uint32_t addr)
 {
-    const bool dual = (FMC_OBCTL & FMC_OBCTL_DBS) != 0u;
-    uint32_t   page;
-    bool       bank1 = false;
+	const bool dual = (FMC_OBCTL & FMC_OBCTL_DBS) != 0u;
+	uint32_t   page;
+	bool       bank1 = false;
 
-    if (dual) {
-        bank1 = (addr >= OTA_FMC_BANK1_BASE);
-        page =
-            (addr - (bank1 ? OTA_FMC_BANK1_BASE : OTA_BOOTLOADER_BASE)) / OTA_FMC_PAGE_SIZE_DBANK;
-    } else {
-        page = (addr - OTA_BOOTLOADER_BASE) / OTA_FMC_PAGE_SIZE_SBANK;
-    }
+	if (dual) {
+		bank1 = (addr >= OTA_FMC_BANK1_BASE);
+		page =
+		    (addr - (bank1 ? OTA_FMC_BANK1_BASE : OTA_BOOTLOADER_BASE)) / OTA_FMC_PAGE_SIZE_DBANK;
+	} else {
+		page = (addr - OTA_BOOTLOADER_BASE) / OTA_FMC_PAGE_SIZE_SBANK;
+	}
 
-    /* Clear stale sticky errors BEFORE the readiness wait: a latched
+	/* Clear stale sticky errors BEFORE the readiness wait: a latched
      * PGERR from an earlier failed session is not "busy", but the
      * decode reports it ahead of READY and would wedge every later op
      * (silicon-caught 2026-06-04: one failed run poisoned the next
      * session's first erase). */
-    FMC_STAT          = OTA_FMC_STAT_ERR_MASK;
+	FMC_STAT          = OTA_FMC_STAT_ERR_MASK;
 
-    fmc_state_enum st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
-    if (st != FMC_READY) {
-        return st;
-    }
-    if (bank1) {
-        FMC_CTL |= FMC_CTL_BKSEL;
-    } else {
-        FMC_CTL &= ~FMC_CTL_BKSEL;
-    }
-    FMC_CTL &= ~FMC_CTL_PNSEL;
-    FMC_CTL |= page << OTA_FMC_CTL_PNSEL_OFFSET;
-    FMC_CTL |= FMC_CTL_PER;
-    FMC_CTL |= FMC_CTL_START;
+	fmc_state_enum st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
+	if (st != FMC_READY) {
+		return st;
+	}
+	if (bank1) {
+		FMC_CTL |= FMC_CTL_BKSEL;
+	} else {
+		FMC_CTL &= ~FMC_CTL_BKSEL;
+	}
+	FMC_CTL &= ~FMC_CTL_PNSEL;
+	FMC_CTL |= page << OTA_FMC_CTL_PNSEL_OFFSET;
+	FMC_CTL |= FMC_CTL_PER;
+	FMC_CTL |= FMC_CTL_START;
 
-    st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
+	st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
 
-    FMC_CTL &= ~FMC_CTL_PER;
-    FMC_CTL &= ~FMC_CTL_PNSEL;
-    FMC_CTL &= ~FMC_CTL_BKSEL;
-    return st;
+	FMC_CTL &= ~FMC_CTL_PER;
+	FMC_CTL &= ~FMC_CTL_PNSEL;
+	FMC_CTL &= ~FMC_CTL_BKSEL;
+	return st;
 }
 
 bool ota_fmc_erase_range(uint32_t base, uint32_t len)
 {
-    /* Layout regions stay OTA_PAGE_SIZE-granular (2 KB -- a multiple of
+	/* Layout regions stay OTA_PAGE_SIZE-granular (2 KB -- a multiple of
      * the real page in both bank modes); the erase loop walks the REAL
      * page size so dual-bank (1 KB pages) erases every page. */
-    if ((base % OTA_PAGE_SIZE) != 0u || (len % OTA_PAGE_SIZE) != 0u) {
-        return false;
-    }
-    const uint32_t step =
-        ((FMC_OBCTL & FMC_OBCTL_DBS) != 0u) ? OTA_FMC_PAGE_SIZE_DBANK : OTA_FMC_PAGE_SIZE_SBANK;
-    bool ok = true;
-    fmc_unlock();
-    for (uint32_t a = base; a < base + len; a += step) {
-        if (erase_one_page(a) != FMC_READY) {
-            ok = false;
-            break;
-        }
-    }
-    fmc_lock();
-    return ok;
+	if ((base % OTA_PAGE_SIZE) != 0u || (len % OTA_PAGE_SIZE) != 0u) {
+		return false;
+	}
+	const uint32_t step =
+	    ((FMC_OBCTL & FMC_OBCTL_DBS) != 0u) ? OTA_FMC_PAGE_SIZE_DBANK : OTA_FMC_PAGE_SIZE_SBANK;
+	bool ok = true;
+	fmc_unlock();
+	for (uint32_t a = base; a < base + len; a += step) {
+		if (erase_one_page(a) != FMC_READY) {
+			ok = false;
+			break;
+		}
+	}
+	fmc_lock();
+	return ok;
 }
 
 OTA_RAMFUNC static fmc_state_enum program_one_dword(uint32_t addr, uint64_t dw)
 {
-    FMC_STAT          = OTA_FMC_STAT_ERR_MASK; /* stale errors are not busy */
+	FMC_STAT          = OTA_FMC_STAT_ERR_MASK; /* stale errors are not busy */
 
-    fmc_state_enum st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
-    if (st != FMC_READY) {
-        return st;
-    }
-    FMC_CTL |= FMC_CTL_PG;
-    REG32(addr) = (uint32_t)(dw & 0xFFFFFFFFu);
-    __ISB();
-    REG32(addr + 4u) = (uint32_t)(dw >> 32);
+	fmc_state_enum st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
+	if (st != FMC_READY) {
+		return st;
+	}
+	FMC_CTL |= FMC_CTL_PG;
+	REG32(addr) = (uint32_t)(dw & 0xFFFFFFFFu);
+	__ISB();
+	REG32(addr + 4u) = (uint32_t)(dw >> 32);
 
-    st               = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
+	st               = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
 
-    FMC_CTL &= ~FMC_CTL_PG;
-    return st;
+	FMC_CTL &= ~FMC_CTL_PG;
+	return st;
 }
 
 bool ota_fmc_program(uint32_t addr, const uint8_t *data, size_t len)
 {
-    /* GD32G5 programs in 64-bit doublewords; `addr` must be 8-byte aligned
+	/* GD32G5 programs in 64-bit doublewords; `addr` must be 8-byte aligned
      * (the host paces chunk offsets on 8-byte boundaries). Pad a short tail
      * with 0xFF (erased state). */
-    if ((addr % 8u) != 0u) {
-        return false;
-    }
-    bool ok = true;
-    fmc_unlock();
-    for (size_t i = 0u; i < len; i += 8u) {
-        uint8_t      buf[8];
-        const size_t n = (len - i > 8u) ? 8u : (len - i);
-        for (size_t k = 0u; k < 8u; k++) {
-            buf[k] = (k < n) ? data[i + k] : 0xFFu;
-        }
-        uint64_t dw;
-        memcpy(&dw, buf, sizeof dw);
-        if (program_one_dword(addr + (uint32_t)i, dw) != FMC_READY) {
-            ok = false;
-            break;
-        }
-    }
-    fmc_lock();
-    return ok;
+	if ((addr % 8u) != 0u) {
+		return false;
+	}
+	bool ok = true;
+	fmc_unlock();
+	for (size_t i = 0u; i < len; i += 8u) {
+		uint8_t      buf[8];
+		const size_t n = (len - i > 8u) ? 8u : (len - i);
+		for (size_t k = 0u; k < 8u; k++) {
+			buf[k] = (k < n) ? data[i + k] : 0xFFu;
+		}
+		uint64_t dw;
+		memcpy(&dw, buf, sizeof dw);
+		if (program_one_dword(addr + (uint32_t)i, dw) != FMC_READY) {
+			ok = false;
+			break;
+		}
+	}
+	fmc_lock();
+	return ok;
 }
 
 void ota_system_reset(void)
 {
-    NVIC_SystemReset();
+	NVIC_SystemReset();
 }

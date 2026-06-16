@@ -28,10 +28,10 @@
 
 void alp_z_set_last_error(alp_status_t s)
 {
-    alp_internal_set_last_error(s);
+	alp_internal_set_last_error(s);
 }
 
 void alp_z_clear_last_error(void)
 {
-    alp_internal_set_last_error(ALP_OK);
+	alp_internal_set_last_error(ALP_OK);
 }

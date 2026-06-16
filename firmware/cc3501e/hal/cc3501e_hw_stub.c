@@ -18,27 +18,27 @@
 
 void cc3501e_hw_init(void)
 {
-    /* no-op on the stub backend */
+	/* no-op on the stub backend */
 }
 
 void cc3501e_hw_tick(void)
 {
-    /* no-op on the stub backend */
+	/* no-op on the stub backend */
 }
 
 int cc3501e_hw_get_mac(uint8_t mac[6])
 {
-    /* No radio on the host stub -- zero the buffer and report NOTIMPL so
+	/* No radio on the host stub -- zero the buffer and report NOTIMPL so
      * the protocol layer answers RESP_ERR_NOT_READY rather than handing
      * back a fabricated MAC. */
-    if (mac != 0) {
-        for (unsigned i = 0u; i < 6u; ++i)
-            mac[i] = 0u;
-    }
-    return CC3501E_HW_ERR_NOTIMPL;
+	if (mac != 0) {
+		for (unsigned i = 0u; i < 6u; ++i)
+			mac[i] = 0u;
+	}
+	return CC3501E_HW_ERR_NOTIMPL;
 }
 
 void cc3501e_hw_request_reset(void)
 {
-    /* no-op on the stub backend */
+	/* no-op on the stub backend */
 }

@@ -32,16 +32,16 @@
 extern "C" {
 #endif
 
-#define LPS22HB_I2C_ADDR_LOW  0x5Cu /**< SA0 = low. */
+#define LPS22HB_I2C_ADDR_LOW 0x5Cu  /**< SA0 = low. */
 #define LPS22HB_I2C_ADDR_HIGH 0x5Du /**< SA0 = high (default). */
 
 #define LPS22HB_REG_WHO_AM_I 0x0Fu
-#define LPS22HB_WHO_AM_I     0xB1u
+#define LPS22HB_WHO_AM_I 0xB1u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } lps22hb_t;
 
 /** @brief Bind context and verify WHO_AM_I = 0xB1. */

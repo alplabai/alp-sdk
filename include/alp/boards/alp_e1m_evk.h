@@ -112,8 +112,8 @@ extern "C" {
  * (= E1M_GPIO_IO21) are defined in the generated routes header. */
 
 typedef enum {
-    EVK_SDIO_M2E_KEY = 0, /**< MUX_SEL.SDIO low. */
-    EVK_SDIO_SDCARD  = 1, /**< MUX_SEL.SDIO high. */
+	EVK_SDIO_M2E_KEY = 0, /**< MUX_SEL.SDIO low. */
+	EVK_SDIO_SDCARD  = 1, /**< MUX_SEL.SDIO high. */
 } evk_sdio_select_t;
 
 /* I2S0 74LVC157 multiplexer (TAS2563 amplifier vs M.2 E-key I2S).
@@ -134,8 +134,8 @@ typedef enum {
  * (= E1M_GPIO_IO13) are defined in the generated routes header. */
 
 typedef enum {
-    EVK_I2S_AMP     = 0, /**< I2S0 routed to the TAS2563 amplifiers. */
-    EVK_I2S_M2E_KEY = 1, /**< I2S0 routed to the M.2 E-key slot. */
+	EVK_I2S_AMP     = 0, /**< I2S0 routed to the TAS2563 amplifiers. */
+	EVK_I2S_M2E_KEY = 1, /**< I2S0 routed to the M.2 E-key slot. */
 } evk_i2s_select_t;
 
 /* USB2 TMUXHS221 multiplexer (USB-A connector vs M.2 E-key USB).
@@ -157,8 +157,8 @@ typedef enum {
  * generated routes header. */
 
 typedef enum {
-    EVK_USB2_CONNECTOR = 0, /**< External USB-A jack. */
-    EVK_USB2_M2E_KEY   = 1, /**< M.2 E-key USB.        */
+	EVK_USB2_CONNECTOR = 0, /**< External USB-A jack. */
+	EVK_USB2_M2E_KEY   = 1, /**< M.2 E-key USB.        */
 } evk_usb2_select_t;
 
 /* M.2 E-key wake signals.  Asserted by the M.2 module to request
@@ -251,21 +251,21 @@ typedef enum {
  * (= E1M_GPIO_IO23) are defined in the generated routes header. */
 
 typedef enum {
-    EVK_PCIE_E_KEY = 0, /**< Lanes 0 routed to PCIe E-key (Wi-Fi/BT modules). */
-    EVK_PCIE_M_KEY = 1, /**< Lanes 0..3 routed to PCIe M-key (NVMe SSD).      */
+	EVK_PCIE_E_KEY = 0, /**< Lanes 0 routed to PCIe E-key (Wi-Fi/BT modules). */
+	EVK_PCIE_M_KEY = 1, /**< Lanes 0..3 routed to PCIe M-key (NVMe SSD).      */
 } evk_pcie_select_t;
 
 /** PCIe IO expander pin layout (TCAL9538 #2 on I2C0 at 0x71). */
 typedef enum {
-    EVK_PCIE_IOEXP_I2C_SEL =
-        0, /**< P0: PCIE0_I2C.SEL -- selects which slot the I2C mux routes to. */
-    EVK_PCIE_IOEXP_M2E_ALERT      = 1, /**< P1: M.2 E-key alert input.        */
-    EVK_PCIE_IOEXP_E_PCIE0_RST    = 2, /**< P2: E-key PCIe reset output.       */
-    EVK_PCIE_IOEXP_E_PCIE0_WAKE   = 3, /**< P3: E-key PCIe wake input.         */
-    EVK_PCIE_IOEXP_E_PCIE0_CLKREQ = 4, /**< P4: E-key PCIe clock-request input.*/
-    EVK_PCIE_IOEXP_M_PCIE0_RST    = 5, /**< P5: M-key PCIe reset output.       */
-    EVK_PCIE_IOEXP_M_PCIE0_WAKE   = 6, /**< P6: M-key PCIe wake input.         */
-    EVK_PCIE_IOEXP_M_PCIE0_CLKREQ = 7, /**< P7: M-key PCIe clock-request input.*/
+	EVK_PCIE_IOEXP_I2C_SEL =
+	    0, /**< P0: PCIE0_I2C.SEL -- selects which slot the I2C mux routes to. */
+	EVK_PCIE_IOEXP_M2E_ALERT      = 1, /**< P1: M.2 E-key alert input.        */
+	EVK_PCIE_IOEXP_E_PCIE0_RST    = 2, /**< P2: E-key PCIe reset output.       */
+	EVK_PCIE_IOEXP_E_PCIE0_WAKE   = 3, /**< P3: E-key PCIe wake input.         */
+	EVK_PCIE_IOEXP_E_PCIE0_CLKREQ = 4, /**< P4: E-key PCIe clock-request input.*/
+	EVK_PCIE_IOEXP_M_PCIE0_RST    = 5, /**< P5: M-key PCIe reset output.       */
+	EVK_PCIE_IOEXP_M_PCIE0_WAKE   = 6, /**< P6: M-key PCIe wake input.         */
+	EVK_PCIE_IOEXP_M_PCIE0_CLKREQ = 7, /**< P7: M-key PCIe clock-request input.*/
 } evk_pcie_ioexp_pin_t;
 
 /* The rotary encoder's quadrature signals run through the SoC's
@@ -382,8 +382,8 @@ typedef enum {
 /* ================================================================== */
 
 typedef enum {
-    EVK_CAM_A = 0, /**< MIPI_CSI_<lane>_<P/N> -> A_MIPI_CSI_<lane>_<P/N> */
-    EVK_CAM_B = 1, /**< MIPI_CSI_<lane>_<P/N> -> B_MIPI_CSI_<lane>_<P/N> */
+	EVK_CAM_A = 0, /**< MIPI_CSI_<lane>_<P/N> -> A_MIPI_CSI_<lane>_<P/N> */
+	EVK_CAM_B = 1, /**< MIPI_CSI_<lane>_<P/N> -> B_MIPI_CSI_<lane>_<P/N> */
 } evk_cam_select_t;
 
 /* ================================================================== */
@@ -446,15 +446,15 @@ typedef enum {
 /* ================================================================== */
 
 typedef enum {
-    EVK_IOEXP_LCD_PWR_EN = 0, /**< P0: LCD power enable.            */
-    EVK_IOEXP_LCD_RST    = 1, /**< P1: LCD reset.                    */
-    EVK_IOEXP_CAM_EN =
-        2, /**< P2: Camera-module enable (drives the camera sensor's EN/STBY pin -- NOT the +V_CAM0/+V_CAM1 power rails, which are gated separately). */
-    EVK_IOEXP_CTP_RST        = 3, /**< P3: Capacitive touch panel reset. */
-    EVK_IOEXP_ICM42670_INT1  = 4, /**< P4: ICM-42670 INT1 input.         */
-    EVK_IOEXP_ICM42670_INT2  = 5, /**< P5: ICM-42670 INT2 input.         */
-    EVK_IOEXP_ICM42670_FSYNC = 6, /**< P6: ICM-42670 frame-sync input.   */
-    EVK_IOEXP_BMP581_INT1    = 7, /**< P7: BMP581 INT1 input.            */
+	EVK_IOEXP_LCD_PWR_EN = 0, /**< P0: LCD power enable.            */
+	EVK_IOEXP_LCD_RST    = 1, /**< P1: LCD reset.                    */
+	EVK_IOEXP_CAM_EN =
+	    2, /**< P2: Camera-module enable (drives the camera sensor's EN/STBY pin -- NOT the +V_CAM0/+V_CAM1 power rails, which are gated separately). */
+	EVK_IOEXP_CTP_RST        = 3, /**< P3: Capacitive touch panel reset. */
+	EVK_IOEXP_ICM42670_INT1  = 4, /**< P4: ICM-42670 INT1 input.         */
+	EVK_IOEXP_ICM42670_INT2  = 5, /**< P5: ICM-42670 INT2 input.         */
+	EVK_IOEXP_ICM42670_FSYNC = 6, /**< P6: ICM-42670 frame-sync input.   */
+	EVK_IOEXP_BMP581_INT1    = 7, /**< P7: BMP581 INT1 input.            */
 } evk_ioexp_pin_t;
 
 /* ================================================================== */
@@ -638,15 +638,15 @@ typedef enum {
  * broadcast write at 0x48; firmware writers must avoid that
  * sequence on this EVK or use targeted unit-address writes. */
 #define EVK_I2C_ADDR_INA236_3V3                                                                    \
-    0x40u /**< U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max).      */
+	0x40u /**< U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max).      */
 #define EVK_I2C_ADDR_INA236_1V8                                                                    \
-    0x41u /**< U31 INA236A, +1V8 rail (20 mOhm shunt, 4.0 A max).      */
+	0x41u /**< U31 INA236A, +1V8 rail (20 mOhm shunt, 4.0 A max).      */
 #define EVK_I2C_ADDR_INA236_VIO                                                                    \
-    0x42u /**< U33 INA236A, +VIO rail (50 mOhm shunt, 1.6 A max).      */
+	0x42u /**< U33 INA236A, +VIO rail (50 mOhm shunt, 1.6 A max).      */
 #define EVK_I2C_ADDR_INA236_VCAM0                                                                  \
-    0x48u /**< U32 INA236B, +V_CAM0 rail (50 mOhm shunt, 1.6 A max).   */
+	0x48u /**< U32 INA236B, +V_CAM0 rail (50 mOhm shunt, 1.6 A max).   */
 #define EVK_I2C_ADDR_INA236_VCAM1                                                                  \
-    0x49u                            /**< U34 INA236B, +V_CAM1 rail (50 mOhm shunt, 1.6 A max).   */
+	0x49u                            /**< U34 INA236B, +V_CAM1 rail (50 mOhm shunt, 1.6 A max).   */
 #define EVK_I2C_ADDR_INA236_5V 0x4Au /**< U30 INA236B, +5V rail  (20 mOhm shunt, 4.0 A max).      */
 
 /* Per-rail shunt + max-current values for ina236_init().  All six

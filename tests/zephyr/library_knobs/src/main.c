@@ -46,7 +46,7 @@ ZTEST_SUITE(alp_lib_knobs, NULL, NULL, NULL, NULL, NULL);
 
 ZTEST(alp_lib_knobs, test_mbedtls_links)
 {
-    /* CONFIG_MBEDTLS isn't pinned in this test's prj.conf — Zephyr
+	/* CONFIG_MBEDTLS isn't pinned in this test's prj.conf — Zephyr
      * v4.4's mbedtls module brings in the SSL helper headers
      * transitively (mbedtls_error_pair_t et al.), which needs the
      * full TLS Kconfig stack the knob smoke shouldn't carry.  Real
@@ -54,7 +54,7 @@ ZTEST(alp_lib_knobs, test_mbedtls_links)
      * (Zephyr side) + tests/yocto/security_openssl.c (Yocto side).
      * Mark this case skipped so the knob smoke stays focused on the
      * §D.lib SW-fallback Kconfig reachability test. */
-    ztest_test_skip();
+	ztest_test_skip();
 }
 
 /* ------------------------------------------------------------------ */
@@ -65,15 +65,14 @@ ZTEST(alp_lib_knobs, test_mbedtls_links)
 ZTEST(alp_lib_knobs, test_cmsis_dsp_links)
 {
 #if defined(CONFIG_CMSIS_DSP)
-    /* Trivial scalar copy through the CMSIS-DSP arm_copy_f32 path.
+	/* Trivial scalar copy through the CMSIS-DSP arm_copy_f32 path.
      * Confirms the math symbol resolves at link time on native_sim. */
-    static const float src[4] = {1.0f, 2.0f, 3.0f, 4.0f};
-    float              dst[4] = {0};
-    arm_copy_f32((float32_t *)src, dst, 4);
-    zassert_within(dst[3], 4.0f, 1e-6f,
-                   "arm_copy_f32 did not propagate the last element");
+	static const float src[4] = { 1.0f, 2.0f, 3.0f, 4.0f };
+	float              dst[4] = { 0 };
+	arm_copy_f32((float32_t *)src, dst, 4);
+	zassert_within(dst[3], 4.0f, 1e-6f, "arm_copy_f32 did not propagate the last element");
 #else
-    ztest_test_skip();
+	ztest_test_skip();
 #endif
 }
 
@@ -85,14 +84,14 @@ ZTEST(alp_lib_knobs, test_cmsis_dsp_links)
 ZTEST(alp_lib_knobs, test_littlefs_headers_resolve)
 {
 #if defined(CONFIG_FILE_SYSTEM_LITTLEFS)
-    struct fs_mount_t mp = {0};
-    (void)mp;
-    /* The presence of struct fs_mount_t in this translation unit
+	struct fs_mount_t mp = { 0 };
+	(void)mp;
+	/* The presence of struct fs_mount_t in this translation unit
      * confirms the fs.h header chain reaches littlefs's
      * Kconfig-gated definitions.  Build-time check only. */
-    zassert_true(true, "header path resolved at compile time");
+	zassert_true(true, "header path resolved at compile time");
 #else
-    ztest_test_skip();
+	ztest_test_skip();
 #endif
 }
 
@@ -109,38 +108,28 @@ ZTEST(alp_lib_knobs, test_littlefs_headers_resolve)
 
 ZTEST(alp_lib_knobs, test_sw_fallback_knobs_defined)
 {
-    const int reachable =
-        _ALP_REQUIRE_KCONFIG(ALP_TFLM_REF_KERNELS)
-      + _ALP_REQUIRE_KCONFIG(ALP_MBEDTLS_PURE_C)
-      + _ALP_REQUIRE_KCONFIG(ALP_CMSIS_DSP_SCALAR)
-      + _ALP_REQUIRE_KCONFIG(ALP_LITTLEFS_SYNC_IO)
-      + _ALP_REQUIRE_KCONFIG(ALP_LVGL_SW_BLIT)
-      + _ALP_REQUIRE_KCONFIG(ALP_BEARSSL_PURE_C)
-      + _ALP_REQUIRE_KCONFIG(ALP_OPUS_PURE_C)
-      + _ALP_REQUIRE_KCONFIG(ALP_MINIMP3_PURE_C)
-      + _ALP_REQUIRE_KCONFIG(ALP_LIBHELIX_PURE_C)
-      + _ALP_REQUIRE_KCONFIG(ALP_MADGWICK_LIBM)
-      + _ALP_REQUIRE_KCONFIG(ALP_U8G2_SW_BLIT)
-      + _ALP_REQUIRE_KCONFIG(ALP_GFX_COMPAT_SW)
-      + _ALP_REQUIRE_KCONFIG(ALP_JSMN_SW)
-      + _ALP_REQUIRE_KCONFIG(ALP_CATCH2_SW)
-      + _ALP_REQUIRE_KCONFIG(ALP_NANOPB_SW)
-      + _ALP_REQUIRE_KCONFIG(ALP_MQTTSN_NO_TLS)
-      + _ALP_REQUIRE_KCONFIG(ALP_COAP_NO_TLS)
-      + _ALP_REQUIRE_KCONFIG(ALP_TINYGSM_SYNC_IO)
-      + _ALP_REQUIRE_KCONFIG(ALP_LWS_NO_TLS)
-      + _ALP_REQUIRE_KCONFIG(ALP_MODBUS_SYNC_IO)
-      + _ALP_REQUIRE_KCONFIG(ALP_PID_INT_MATH);
-    /* The default-y SW-fallback knobs that survive `CONFIG_ALP_SDK=y` +
+	const int reachable =
+	    _ALP_REQUIRE_KCONFIG(ALP_TFLM_REF_KERNELS) + _ALP_REQUIRE_KCONFIG(ALP_MBEDTLS_PURE_C) +
+	    _ALP_REQUIRE_KCONFIG(ALP_CMSIS_DSP_SCALAR) + _ALP_REQUIRE_KCONFIG(ALP_LITTLEFS_SYNC_IO) +
+	    _ALP_REQUIRE_KCONFIG(ALP_LVGL_SW_BLIT) + _ALP_REQUIRE_KCONFIG(ALP_BEARSSL_PURE_C) +
+	    _ALP_REQUIRE_KCONFIG(ALP_OPUS_PURE_C) + _ALP_REQUIRE_KCONFIG(ALP_MINIMP3_PURE_C) +
+	    _ALP_REQUIRE_KCONFIG(ALP_LIBHELIX_PURE_C) + _ALP_REQUIRE_KCONFIG(ALP_MADGWICK_LIBM) +
+	    _ALP_REQUIRE_KCONFIG(ALP_U8G2_SW_BLIT) + _ALP_REQUIRE_KCONFIG(ALP_GFX_COMPAT_SW) +
+	    _ALP_REQUIRE_KCONFIG(ALP_JSMN_SW) + _ALP_REQUIRE_KCONFIG(ALP_CATCH2_SW) +
+	    _ALP_REQUIRE_KCONFIG(ALP_NANOPB_SW) + _ALP_REQUIRE_KCONFIG(ALP_MQTTSN_NO_TLS) +
+	    _ALP_REQUIRE_KCONFIG(ALP_COAP_NO_TLS) + _ALP_REQUIRE_KCONFIG(ALP_TINYGSM_SYNC_IO) +
+	    _ALP_REQUIRE_KCONFIG(ALP_LWS_NO_TLS) + _ALP_REQUIRE_KCONFIG(ALP_MODBUS_SYNC_IO) +
+	    _ALP_REQUIRE_KCONFIG(ALP_PID_INT_MATH);
+	/* The default-y SW-fallback knobs that survive `CONFIG_ALP_SDK=y` +
      * the test's own library enables should all be reachable.  We don't
      * assert a fixed total because new knobs land per release and the
      * test must keep compiling — instead we check that at least the
      * 4 always-on SW fallbacks (TFLM-ref, mbedtls pure-C, CMSIS-DSP
      * scalar, LittleFS sync-IO) resolve. */
-    zassert_true(reachable >= 4,
-                 "only %d SW-fallback knobs resolved; expected at least "
-                 "the 4 always-on fallbacks (TFLM_REF_KERNELS, "
-                 "MBEDTLS_PURE_C, CMSIS_DSP_SCALAR, LITTLEFS_SYNC_IO).  "
-                 "Check Kconfig.alp-libraries source line in zephyr/Kconfig",
-                 reachable);
+	zassert_true(reachable >= 4,
+	             "only %d SW-fallback knobs resolved; expected at least "
+	             "the 4 always-on fallbacks (TFLM_REF_KERNELS, "
+	             "MBEDTLS_PURE_C, CMSIS_DSP_SCALAR, LITTLEFS_SYNC_IO).  "
+	             "Check Kconfig.alp-libraries source line in zephyr/Kconfig",
+	             reachable);
 }

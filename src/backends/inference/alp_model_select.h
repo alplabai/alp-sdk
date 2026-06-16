@@ -14,20 +14,20 @@
  *  is unit-tested without a live SoC).  @c avail_silicon must be non-NULL
  *  when @c n_avail_silicon > 0. */
 typedef struct {
-    const char        *soc_ref;       /* ALP_SOC_REF_STR */
-    const char *const *avail_silicon; /* silicon refs runnable on this build
+	const char        *soc_ref;       /* ALP_SOC_REF_STR */
+	const char *const *avail_silicon; /* silicon refs runnable on this build
 					      (host SoC + any compiled-in discrete) */
-    size_t             n_avail_silicon;
-    uint32_t           arena_sram_kib; /* device NPU arena budget; 0 = unknown -> skip SRAM gate */
-    alp_inference_backend_t preferred_backend; /* SoM preferred (tiebreak); AUTO if none */
+	size_t             n_avail_silicon;
+	uint32_t           arena_sram_kib; /* device NPU arena budget; 0 = unknown -> skip SRAM gate */
+	alp_inference_backend_t preferred_backend; /* SoM preferred (tiebreak); AUTO if none */
 } alp_model_select_env_t;
 
 /** The chosen blob + its resolved descriptors. */
 typedef struct {
-    uint32_t                     target_index;
-    alp_inference_backend_t      backend;
-    alp_inference_model_format_t format;
-    uint32_t                     arena_bytes;
+	uint32_t                     target_index;
+	alp_inference_backend_t      backend;
+	alp_inference_model_format_t format;
+	uint32_t                     arena_bytes;
 } alp_model_select_result_t;
 
 /**

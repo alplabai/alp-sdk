@@ -34,29 +34,27 @@ extern "C" {
 
 #define TSL2591_I2C_ADDR 0x29u
 
-#define TSL2591_CMD_BIT       0xA0u
-#define TSL2591_REG_ENABLE    0x00u
-#define TSL2591_REG_ID        0x12u
+#define TSL2591_CMD_BIT 0xA0u
+#define TSL2591_REG_ENABLE 0x00u
+#define TSL2591_REG_ID 0x12u
 #define TSL2591_REG_C0DATA_LO 0x14u
 
 #define TSL2591_DEVICE_ID 0x50u
 
 #define TSL2591_ENABLE_POWER_ON 0x01u
-#define TSL2591_ENABLE_AEN      0x02u
+#define TSL2591_ENABLE_AEN 0x02u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } tsl2591_t;
 
 /** @brief Bind context and verify chip ID. */
 alp_status_t tsl2591_init(tsl2591_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 
 /** @brief Read 16-bit visible+IR (CH0) and IR-only (CH1) counts. */
-alp_status_t tsl2591_read_channels(tsl2591_t *dev,
-                                   uint16_t  *ch0_full_out,
-                                   uint16_t  *ch1_ir_out);
+alp_status_t tsl2591_read_channels(tsl2591_t *dev, uint16_t *ch0_full_out, uint16_t *ch1_ir_out);
 
 /** @brief Release driver context. */
 void tsl2591_deinit(tsl2591_t *dev);

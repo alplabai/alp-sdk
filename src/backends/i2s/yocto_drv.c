@@ -57,34 +57,34 @@
  * onto the heap so the void* be_data slot in alp_i2s_backend_state_t
  * owns it and the portable handle stays free of ALSA types. */
 typedef struct {
-    snd_pcm_t *pcm;
-    size_t     frame_bytes; /* channels * (word_bits / 8) */
-    bool       capture;     /* true: RX stream; false: TX stream */
+	snd_pcm_t *pcm;
+	size_t     frame_bytes; /* channels * (word_bits / 8) */
+	bool       capture;     /* true: RX stream; false: TX stream */
 } y_i2s_data_t;
 
 /** @brief Map a snd_pcm_* return code (negative errno) to alp_status_t. */
 static alp_status_t _alsa_to_alp(int rc)
 {
-    if (rc >= 0) return ALP_OK;
-    switch (-rc) {
-    case EINVAL:
-        return ALP_ERR_INVAL;
-    case ENOENT:
-    case ENODEV:
-        return ALP_ERR_NOT_READY;
-    case EBUSY:
-        return ALP_ERR_BUSY;
-    case EAGAIN:
-    case ETIMEDOUT:
-        return ALP_ERR_TIMEOUT;
-    case ENOMEM:
-        return ALP_ERR_NOMEM;
-    case ENOSYS:
-    case ENOTSUP:
-        return ALP_ERR_NOSUPPORT;
-    default:
-        return ALP_ERR_IO;
-    }
+	if (rc >= 0) return ALP_OK;
+	switch (-rc) {
+	case EINVAL:
+		return ALP_ERR_INVAL;
+	case ENOENT:
+	case ENODEV:
+		return ALP_ERR_NOT_READY;
+	case EBUSY:
+		return ALP_ERR_BUSY;
+	case EAGAIN:
+	case ETIMEDOUT:
+		return ALP_ERR_TIMEOUT;
+	case ENOMEM:
+		return ALP_ERR_NOMEM;
+	case ENOSYS:
+	case ENOTSUP:
+		return ALP_ERR_NOSUPPORT;
+	default:
+		return ALP_ERR_IO;
+	}
 }
 
 /** @brief Map an alp_i2s word width to its packed ALSA sample format.
@@ -95,26 +95,26 @@ static alp_status_t _alsa_to_alp(int rc)
  * SND_PCM_FORMAT_UNKNOWN for any other width so the caller rejects it. */
 static snd_pcm_format_t _to_alsa_format(uint8_t word_bits)
 {
-    switch (word_bits) {
-    case 16:
-        return SND_PCM_FORMAT_S16_LE;
-    case 24:
-        return SND_PCM_FORMAT_S24_LE; /* 32-bit container */
-    case 32:
-        return SND_PCM_FORMAT_S32_LE;
-    default:
-        return SND_PCM_FORMAT_UNKNOWN;
-    }
+	switch (word_bits) {
+	case 16:
+		return SND_PCM_FORMAT_S16_LE;
+	case 24:
+		return SND_PCM_FORMAT_S24_LE; /* 32-bit container */
+	case 32:
+		return SND_PCM_FORMAT_S32_LE;
+	default:
+		return SND_PCM_FORMAT_UNKNOWN;
+	}
 }
 
 /* Resolve a bus_id into the canonical ALSA PCM device name.  Writes
  * into the caller-supplied buffer (32 bytes is plenty for "hw:<N>,0"). */
 static int _resolve_device_name(uint32_t bus_id, char *out, size_t cap)
 {
-    if (bus_id == 0u) {
-        return snprintf(out, cap, "default");
-    }
-    return snprintf(out, cap, "hw:%u,0", (unsigned)(bus_id - 1u));
+	if (bus_id == 0u) {
+		return snprintf(out, cap, "default");
+	}
+	return snprintf(out, cap, "hw:%u,0", (unsigned)(bus_id - 1u));
 }
 
 /* Apply hw params (access / format / channels / rate / period) to a
@@ -124,41 +124,41 @@ static int _resolve_device_name(uint32_t bus_id, char *out, size_t cap)
 static alp_status_t _configure_pcm(snd_pcm_t *pcm, const alp_i2s_config_t *cfg,
                                    snd_pcm_format_t fmt)
 {
-    snd_pcm_hw_params_t *hw = NULL;
-    snd_pcm_hw_params_alloca(&hw);
+	snd_pcm_hw_params_t *hw = NULL;
+	snd_pcm_hw_params_alloca(&hw);
 
-    int rc = snd_pcm_hw_params_any(pcm, hw);
-    if (rc < 0) return _alsa_to_alp(rc);
+	int rc = snd_pcm_hw_params_any(pcm, hw);
+	if (rc < 0) return _alsa_to_alp(rc);
 
-    rc = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED);
-    if (rc < 0) return _alsa_to_alp(rc);
+	rc = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED);
+	if (rc < 0) return _alsa_to_alp(rc);
 
-    rc = snd_pcm_hw_params_set_format(pcm, hw, fmt);
-    if (rc < 0) return _alsa_to_alp(rc);
+	rc = snd_pcm_hw_params_set_format(pcm, hw, fmt);
+	if (rc < 0) return _alsa_to_alp(rc);
 
-    rc = snd_pcm_hw_params_set_channels(pcm, hw, cfg->channels);
-    if (rc < 0) return _alsa_to_alp(rc);
+	rc = snd_pcm_hw_params_set_channels(pcm, hw, cfg->channels);
+	if (rc < 0) return _alsa_to_alp(rc);
 
-    unsigned int rate = cfg->sample_rate_hz;
-    rc                = snd_pcm_hw_params_set_rate_near(pcm, hw, &rate, NULL);
-    if (rc < 0) return _alsa_to_alp(rc);
+	unsigned int rate = cfg->sample_rate_hz;
+	rc                = snd_pcm_hw_params_set_rate_near(pcm, hw, &rate, NULL);
+	if (rc < 0) return _alsa_to_alp(rc);
 
-    /* block_frames is the alp_i2s DMA-block unit; map it to the ALSA
+	/* block_frames is the alp_i2s DMA-block unit; map it to the ALSA
      * period size so each writei/readi corresponds to one block. */
-    snd_pcm_uframes_t period = cfg->block_frames;
-    rc                       = snd_pcm_hw_params_set_period_size_near(pcm, hw, &period, NULL);
-    if (rc < 0) return _alsa_to_alp(rc);
+	snd_pcm_uframes_t period = cfg->block_frames;
+	rc                       = snd_pcm_hw_params_set_period_size_near(pcm, hw, &period, NULL);
+	if (rc < 0) return _alsa_to_alp(rc);
 
-    /* Buffer = 4 periods: enough to absorb scheduling jitter without
+	/* Buffer = 4 periods: enough to absorb scheduling jitter without
      * bloating RAM.  Apps that need different sizing tune block_frames. */
-    snd_pcm_uframes_t buf = period * 4u;
-    rc                    = snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &buf);
-    if (rc < 0) return _alsa_to_alp(rc);
+	snd_pcm_uframes_t buf = period * 4u;
+	rc                    = snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &buf);
+	if (rc < 0) return _alsa_to_alp(rc);
 
-    rc = snd_pcm_hw_params(pcm, hw);
-    if (rc < 0) return _alsa_to_alp(rc);
+	rc = snd_pcm_hw_params(pcm, hw);
+	if (rc < 0) return _alsa_to_alp(rc);
 
-    return ALP_OK;
+	return ALP_OK;
 }
 
 /**
@@ -184,63 +184,63 @@ static alp_status_t _configure_pcm(snd_pcm_t *pcm, const alp_i2s_config_t *cfg,
 static alp_status_t y_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st,
                            alp_capabilities_t *caps_out)
 {
-    if (cfg == NULL || st == NULL) return ALP_ERR_INVAL;
-    if (cfg->channels == 0u || cfg->channels > 2u) return ALP_ERR_INVAL;
-    if (cfg->sample_rate_hz == 0u || cfg->block_frames == 0u) return ALP_ERR_INVAL;
+	if (cfg == NULL || st == NULL) return ALP_ERR_INVAL;
+	if (cfg->channels == 0u || cfg->channels > 2u) return ALP_ERR_INVAL;
+	if (cfg->sample_rate_hz == 0u || cfg->block_frames == 0u) return ALP_ERR_INVAL;
 
-    snd_pcm_format_t fmt = _to_alsa_format(cfg->word_bits);
-    if (fmt == SND_PCM_FORMAT_UNKNOWN) return ALP_ERR_INVAL;
+	snd_pcm_format_t fmt = _to_alsa_format(cfg->word_bits);
+	if (fmt == SND_PCM_FORMAT_UNKNOWN) return ALP_ERR_INVAL;
 
-    /* Only standard I²S framing maps cleanly to a PCM handle (see the
+	/* Only standard I²S framing maps cleanly to a PCM handle (see the
      * function-level note); the other wire formats are DAI-link
      * properties with no userspace override. */
-    if (cfg->format != ALP_I2S_FMT_I2S) return ALP_ERR_NOSUPPORT;
+	if (cfg->format != ALP_I2S_FMT_I2S) return ALP_ERR_NOSUPPORT;
 
-    snd_pcm_stream_t stream;
-    bool             capture;
-    switch (cfg->direction) {
-    case ALP_I2S_DIR_RX:
-        stream  = SND_PCM_STREAM_CAPTURE;
-        capture = true;
-        break;
-    case ALP_I2S_DIR_TX:
-        stream  = SND_PCM_STREAM_PLAYBACK;
-        capture = false;
-        break;
-    case ALP_I2S_DIR_BOTH:
-    default:
-        /* Full-duplex needs two PCM handles; not modelled here. */
-        return ALP_ERR_NOSUPPORT;
-    }
+	snd_pcm_stream_t stream;
+	bool             capture;
+	switch (cfg->direction) {
+	case ALP_I2S_DIR_RX:
+		stream  = SND_PCM_STREAM_CAPTURE;
+		capture = true;
+		break;
+	case ALP_I2S_DIR_TX:
+		stream  = SND_PCM_STREAM_PLAYBACK;
+		capture = false;
+		break;
+	case ALP_I2S_DIR_BOTH:
+	default:
+		/* Full-duplex needs two PCM handles; not modelled here. */
+		return ALP_ERR_NOSUPPORT;
+	}
 
-    char dev[32];
-    int  n = _resolve_device_name(cfg->bus_id, dev, sizeof(dev));
-    if (n < 0 || (size_t)n >= sizeof(dev)) return ALP_ERR_INVAL;
+	char dev[32];
+	int  n = _resolve_device_name(cfg->bus_id, dev, sizeof(dev));
+	if (n < 0 || (size_t)n >= sizeof(dev)) return ALP_ERR_INVAL;
 
-    snd_pcm_t *pcm = NULL;
-    int        rc  = snd_pcm_open(&pcm, dev, stream, 0);
-    if (rc < 0) return _alsa_to_alp(rc);
+	snd_pcm_t *pcm = NULL;
+	int        rc  = snd_pcm_open(&pcm, dev, stream, 0);
+	if (rc < 0) return _alsa_to_alp(rc);
 
-    alp_status_t s = _configure_pcm(pcm, cfg, fmt);
-    if (s != ALP_OK) {
-        (void)snd_pcm_close(pcm);
-        return s;
-    }
+	alp_status_t s = _configure_pcm(pcm, cfg, fmt);
+	if (s != ALP_OK) {
+		(void)snd_pcm_close(pcm);
+		return s;
+	}
 
-    y_i2s_data_t *d = (y_i2s_data_t *)malloc(sizeof(*d));
-    if (d == NULL) {
-        (void)snd_pcm_close(pcm);
-        return ALP_ERR_NOMEM;
-    }
-    d->pcm          = pcm;
-    d->capture      = capture;
-    d->frame_bytes  = (size_t)cfg->channels * (size_t)((cfg->word_bits + 7u) / 8u);
+	y_i2s_data_t *d = (y_i2s_data_t *)malloc(sizeof(*d));
+	if (d == NULL) {
+		(void)snd_pcm_close(pcm);
+		return ALP_ERR_NOMEM;
+	}
+	d->pcm          = pcm;
+	d->capture      = capture;
+	d->frame_bytes  = (size_t)cfg->channels * (size_t)((cfg->word_bits + 7u) / 8u);
 
-    st->dev         = NULL;
-    st->bus_id      = cfg->bus_id;
-    st->be_data     = d;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	st->dev         = NULL;
+	st->bus_id      = cfg->bus_id;
+	st->be_data     = d;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
 /**
@@ -255,17 +255,17 @@ static alp_status_t y_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t 
  */
 static alp_status_t y_start(alp_i2s_backend_state_t *st)
 {
-    y_i2s_data_t *d = (y_i2s_data_t *)st->be_data;
-    if (d == NULL || d->pcm == NULL) return ALP_ERR_NOT_READY;
+	y_i2s_data_t *d = (y_i2s_data_t *)st->be_data;
+	if (d == NULL || d->pcm == NULL) return ALP_ERR_NOT_READY;
 
-    int rc = snd_pcm_prepare(d->pcm);
-    if (rc < 0) return _alsa_to_alp(rc);
+	int rc = snd_pcm_prepare(d->pcm);
+	if (rc < 0) return _alsa_to_alp(rc);
 
-    if (d->capture) {
-        rc = snd_pcm_start(d->pcm);
-        if (rc < 0) return _alsa_to_alp(rc);
-    }
-    return ALP_OK;
+	if (d->capture) {
+		rc = snd_pcm_start(d->pcm);
+		if (rc < 0) return _alsa_to_alp(rc);
+	}
+	return ALP_OK;
 }
 
 /**
@@ -278,11 +278,11 @@ static alp_status_t y_start(alp_i2s_backend_state_t *st)
  */
 static alp_status_t y_stop(alp_i2s_backend_state_t *st)
 {
-    y_i2s_data_t *d = (y_i2s_data_t *)st->be_data;
-    if (d == NULL || d->pcm == NULL) return ALP_ERR_NOT_READY;
+	y_i2s_data_t *d = (y_i2s_data_t *)st->be_data;
+	if (d == NULL || d->pcm == NULL) return ALP_ERR_NOT_READY;
 
-    int rc = d->capture ? snd_pcm_drop(d->pcm) : snd_pcm_drain(d->pcm);
-    return _alsa_to_alp(rc);
+	int rc = d->capture ? snd_pcm_drop(d->pcm) : snd_pcm_drain(d->pcm);
+	return _alsa_to_alp(rc);
 }
 
 /**
@@ -297,27 +297,27 @@ static alp_status_t y_stop(alp_i2s_backend_state_t *st)
 static alp_status_t y_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes,
                             uint32_t timeout_ms)
 {
-    y_i2s_data_t *d = (y_i2s_data_t *)st->be_data;
-    if (d == NULL || d->pcm == NULL) return ALP_ERR_NOT_READY;
-    if (d->capture) return ALP_ERR_INVAL; /* wrong direction */
-    if (block == NULL && bytes > 0u) return ALP_ERR_INVAL;
-    if (d->frame_bytes == 0u) return ALP_ERR_NOT_READY;
-    if (bytes == 0u) return ALP_OK;
+	y_i2s_data_t *d = (y_i2s_data_t *)st->be_data;
+	if (d == NULL || d->pcm == NULL) return ALP_ERR_NOT_READY;
+	if (d->capture) return ALP_ERR_INVAL; /* wrong direction */
+	if (block == NULL && bytes > 0u) return ALP_ERR_INVAL;
+	if (d->frame_bytes == 0u) return ALP_ERR_NOT_READY;
+	if (bytes == 0u) return ALP_OK;
 
-    snd_pcm_uframes_t frames = (snd_pcm_uframes_t)(bytes / d->frame_bytes);
-    if (frames == 0u) return ALP_ERR_INVAL; /* fewer than one frame */
+	snd_pcm_uframes_t frames = (snd_pcm_uframes_t)(bytes / d->frame_bytes);
+	if (frames == 0u) return ALP_ERR_INVAL; /* fewer than one frame */
 
-    int rc = snd_pcm_wait(d->pcm, (int)timeout_ms);
-    if (rc == 0) return ALP_ERR_TIMEOUT;
-    if (rc < 0) return _alsa_to_alp(rc);
+	int rc = snd_pcm_wait(d->pcm, (int)timeout_ms);
+	if (rc == 0) return ALP_ERR_TIMEOUT;
+	if (rc < 0) return _alsa_to_alp(rc);
 
-    snd_pcm_sframes_t wrote = snd_pcm_writei(d->pcm, block, frames);
-    if (wrote < 0) {
-        int rec = snd_pcm_recover(d->pcm, (int)wrote, 1 /* silent */);
-        if (rec < 0) return _alsa_to_alp(rec);
-        return ALP_ERR_IO;
-    }
-    return ALP_OK;
+	snd_pcm_sframes_t wrote = snd_pcm_writei(d->pcm, block, frames);
+	if (wrote < 0) {
+		int rec = snd_pcm_recover(d->pcm, (int)wrote, 1 /* silent */);
+		if (rec < 0) return _alsa_to_alp(rec);
+		return ALP_ERR_IO;
+	}
+	return ALP_OK;
 }
 
 /**
@@ -331,58 +331,58 @@ static alp_status_t y_write(alp_i2s_backend_state_t *st, const void *block, size
 static alp_status_t y_read(alp_i2s_backend_state_t *st, void *block, size_t bytes,
                            size_t *bytes_out, uint32_t timeout_ms)
 {
-    if (bytes_out != NULL) *bytes_out = 0u;
+	if (bytes_out != NULL) *bytes_out = 0u;
 
-    y_i2s_data_t *d = (y_i2s_data_t *)st->be_data;
-    if (d == NULL || d->pcm == NULL) return ALP_ERR_NOT_READY;
-    if (!d->capture) return ALP_ERR_INVAL; /* wrong direction */
-    if (block == NULL && bytes > 0u) return ALP_ERR_INVAL;
-    if (d->frame_bytes == 0u) return ALP_ERR_NOT_READY;
-    if (bytes == 0u) return ALP_OK;
+	y_i2s_data_t *d = (y_i2s_data_t *)st->be_data;
+	if (d == NULL || d->pcm == NULL) return ALP_ERR_NOT_READY;
+	if (!d->capture) return ALP_ERR_INVAL; /* wrong direction */
+	if (block == NULL && bytes > 0u) return ALP_ERR_INVAL;
+	if (d->frame_bytes == 0u) return ALP_ERR_NOT_READY;
+	if (bytes == 0u) return ALP_OK;
 
-    snd_pcm_uframes_t frames = (snd_pcm_uframes_t)(bytes / d->frame_bytes);
-    if (frames == 0u) return ALP_ERR_INVAL; /* dest < one frame */
+	snd_pcm_uframes_t frames = (snd_pcm_uframes_t)(bytes / d->frame_bytes);
+	if (frames == 0u) return ALP_ERR_INVAL; /* dest < one frame */
 
-    int rc = snd_pcm_wait(d->pcm, (int)timeout_ms);
-    if (rc == 0) return ALP_ERR_TIMEOUT;
-    if (rc < 0) return _alsa_to_alp(rc);
+	int rc = snd_pcm_wait(d->pcm, (int)timeout_ms);
+	if (rc == 0) return ALP_ERR_TIMEOUT;
+	if (rc < 0) return _alsa_to_alp(rc);
 
-    snd_pcm_sframes_t got = snd_pcm_readi(d->pcm, block, frames);
-    if (got < 0) {
-        int rec = snd_pcm_recover(d->pcm, (int)got, 1 /* silent */);
-        if (rec < 0) return _alsa_to_alp(rec);
-        return ALP_ERR_IO;
-    }
-    if (bytes_out != NULL) *bytes_out = (size_t)got * d->frame_bytes;
-    return ALP_OK;
+	snd_pcm_sframes_t got = snd_pcm_readi(d->pcm, block, frames);
+	if (got < 0) {
+		int rec = snd_pcm_recover(d->pcm, (int)got, 1 /* silent */);
+		if (rec < 0) return _alsa_to_alp(rec);
+		return ALP_ERR_IO;
+	}
+	if (bytes_out != NULL) *bytes_out = (size_t)got * d->frame_bytes;
+	return ALP_OK;
 }
 
 /** @brief Drain (TX) / drop (RX), close the PCM, free the sidecar. */
 static void y_close(alp_i2s_backend_state_t *st)
 {
-    y_i2s_data_t *d = (y_i2s_data_t *)st->be_data;
-    if (d != NULL) {
-        if (d->pcm != NULL) {
-            if (d->capture) {
-                (void)snd_pcm_drop(d->pcm);
-            } else {
-                (void)snd_pcm_drain(d->pcm);
-            }
-            (void)snd_pcm_close(d->pcm);
-            d->pcm = NULL;
-        }
-        free(d);
-        st->be_data = NULL;
-    }
+	y_i2s_data_t *d = (y_i2s_data_t *)st->be_data;
+	if (d != NULL) {
+		if (d->pcm != NULL) {
+			if (d->capture) {
+				(void)snd_pcm_drop(d->pcm);
+			} else {
+				(void)snd_pcm_drain(d->pcm);
+			}
+			(void)snd_pcm_close(d->pcm);
+			d->pcm = NULL;
+		}
+		free(d);
+		st->be_data = NULL;
+	}
 }
 
 static const alp_i2s_ops_t _ops = {
-    .open  = y_open,
-    .start = y_start,
-    .stop  = y_stop,
-    .write = y_write,
-    .read  = y_read,
-    .close = y_close,
+	.open  = y_open,
+	.start = y_start,
+	.stop  = y_stop,
+	.write = y_write,
+	.read  = y_read,
+	.close = y_close,
 };
 
 ALP_BACKEND_REGISTER(i2s, yocto_drv,

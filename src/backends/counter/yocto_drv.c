@@ -59,30 +59,30 @@
  * plus the Count index.  Boxed onto the heap so the void* be_data slot
  * in alp_counter_backend_state_t owns it. */
 typedef struct {
-    char     dir[64];   /* /sys/bus/counter/devices/counter<N> */
-    unsigned count_idx; /* Count index within the device */
+	char     dir[64];   /* /sys/bus/counter/devices/counter<N> */
+	unsigned count_idx; /* Count index within the device */
 } y_counter_data_t;
 
 /** @brief Map a (positive) errno value to the closest alp_status_t. */
 static alp_status_t _errno_to_alp(int err)
 {
-    switch (err) {
-    case 0:
-        return ALP_OK;
-    case EINVAL:
-        return ALP_ERR_INVAL;
-    case EBUSY:
-        return ALP_ERR_BUSY;
-    case ENOENT:
-    case ENODEV:
-        return ALP_ERR_NOT_READY;
-    case ENOTTY:
-    case ENOSYS:
-    case EOPNOTSUPP:
-        return ALP_ERR_NOSUPPORT;
-    default:
-        return ALP_ERR_IO;
-    }
+	switch (err) {
+	case 0:
+		return ALP_OK;
+	case EINVAL:
+		return ALP_ERR_INVAL;
+	case EBUSY:
+		return ALP_ERR_BUSY;
+	case ENOENT:
+	case ENODEV:
+		return ALP_ERR_NOT_READY;
+	case ENOTTY:
+	case ENOSYS:
+	case EOPNOTSUPP:
+		return ALP_ERR_NOSUPPORT;
+	default:
+		return ALP_ERR_IO;
+	}
 }
 
 /**
@@ -95,20 +95,20 @@ static alp_status_t _errno_to_alp(int err)
  */
 static alp_status_t _sysfs_write(const char *dir, const char *attr, const char *val)
 {
-    char path[128];
-    int  n = snprintf(path, sizeof(path), "%s/%s", dir, attr);
-    if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
+	char path[128];
+	int  n = snprintf(path, sizeof(path), "%s/%s", dir, attr);
+	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
 
-    int fd = open(path, O_WRONLY | O_CLOEXEC);
-    if (fd < 0) return _errno_to_alp(errno);
+	int fd = open(path, O_WRONLY | O_CLOEXEC);
+	if (fd < 0) return _errno_to_alp(errno);
 
-    size_t  len = strlen(val);
-    ssize_t w   = write(fd, val, len);
-    int     e   = errno;
-    close(fd);
-    if (w < 0) return _errno_to_alp(e);
-    if ((size_t)w != len) return ALP_ERR_IO;
-    return ALP_OK;
+	size_t  len = strlen(val);
+	ssize_t w   = write(fd, val, len);
+	int     e   = errno;
+	close(fd);
+	if (w < 0) return _errno_to_alp(e);
+	if ((size_t)w != len) return ALP_ERR_IO;
+	return ALP_OK;
 }
 
 /**
@@ -121,25 +121,25 @@ static alp_status_t _sysfs_write(const char *dir, const char *attr, const char *
  */
 static alp_status_t _sysfs_read_u32(const char *dir, const char *attr, uint32_t *out)
 {
-    char path[128];
-    int  n = snprintf(path, sizeof(path), "%s/%s", dir, attr);
-    if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
+	char path[128];
+	int  n = snprintf(path, sizeof(path), "%s/%s", dir, attr);
+	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
 
-    int fd = open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return _errno_to_alp(errno);
+	int fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0) return _errno_to_alp(errno);
 
-    char    buf[32];
-    ssize_t r = read(fd, buf, sizeof(buf) - 1);
-    int     e = errno;
-    close(fd);
-    if (r < 0) return _errno_to_alp(e);
+	char    buf[32];
+	ssize_t r = read(fd, buf, sizeof(buf) - 1);
+	int     e = errno;
+	close(fd);
+	if (r < 0) return _errno_to_alp(e);
 
-    buf[r]            = '\0';
-    char         *end = NULL;
-    unsigned long v   = strtoul(buf, &end, 0);
-    if (end == buf) return ALP_ERR_IO; /* no digits parsed */
-    *out = (uint32_t)v;
-    return ALP_OK;
+	buf[r]            = '\0';
+	char         *end = NULL;
+	unsigned long v   = strtoul(buf, &end, 0);
+	if (end == buf) return ALP_ERR_IO; /* no digits parsed */
+	*out = (uint32_t)v;
+	return ALP_OK;
 }
 
 /**
@@ -154,37 +154,37 @@ static alp_status_t _sysfs_read_u32(const char *dir, const char *attr, uint32_t 
 static alp_status_t y_open(const alp_counter_config_t *cfg, alp_counter_backend_state_t *st,
                            alp_capabilities_t *caps_out)
 {
-    if (cfg == NULL || st == NULL || caps_out == NULL) return ALP_ERR_INVAL;
+	if (cfg == NULL || st == NULL || caps_out == NULL) return ALP_ERR_INVAL;
 
-    y_counter_data_t *d = (y_counter_data_t *)malloc(sizeof(*d));
-    if (d == NULL) return ALP_ERR_NOMEM;
+	y_counter_data_t *d = (y_counter_data_t *)malloc(sizeof(*d));
+	if (d == NULL) return ALP_ERR_NOMEM;
 
-    d->count_idx = Y_COUNTER_COUNT_INDEX;
-    int n        = snprintf(d->dir, sizeof(d->dir), "/sys/bus/counter/devices/counter%u",
-                            (unsigned)cfg->counter_id);
-    if (n < 0 || (size_t)n >= sizeof(d->dir)) {
-        free(d);
-        return ALP_ERR_INVAL;
-    }
+	d->count_idx = Y_COUNTER_COUNT_INDEX;
+	int n        = snprintf(d->dir, sizeof(d->dir), "/sys/bus/counter/devices/counter%u",
+	                        (unsigned)cfg->counter_id);
+	if (n < 0 || (size_t)n >= sizeof(d->dir)) {
+		free(d);
+		return ALP_ERR_INVAL;
+	}
 
-    /* Confirm the device + Count 0 exist by probing count<M>/count. */
-    char probe[128];
-    n = snprintf(probe, sizeof(probe), "%s/count%u/count", d->dir, d->count_idx);
-    if (n < 0 || (size_t)n >= sizeof(probe)) {
-        free(d);
-        return ALP_ERR_INVAL;
-    }
-    if (access(probe, F_OK) != 0) {
-        int e = errno;
-        free(d);
-        return _errno_to_alp(e);
-    }
+	/* Confirm the device + Count 0 exist by probing count<M>/count. */
+	char probe[128];
+	n = snprintf(probe, sizeof(probe), "%s/count%u/count", d->dir, d->count_idx);
+	if (n < 0 || (size_t)n >= sizeof(probe)) {
+		free(d);
+		return ALP_ERR_INVAL;
+	}
+	if (access(probe, F_OK) != 0) {
+		int e = errno;
+		free(d);
+		return _errno_to_alp(e);
+	}
 
-    st->dev         = NULL;
-    st->counter_id  = cfg->counter_id;
-    st->be_data     = d;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	st->dev         = NULL;
+	st->counter_id  = cfg->counter_id;
+	st->be_data     = d;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
 /**
@@ -195,13 +195,13 @@ static alp_status_t y_open(const alp_counter_config_t *cfg, alp_counter_backend_
  */
 static alp_status_t y_start(alp_counter_backend_state_t *st)
 {
-    y_counter_data_t *d = (y_counter_data_t *)st->be_data;
-    if (d == NULL) return ALP_ERR_NOT_READY;
+	y_counter_data_t *d = (y_counter_data_t *)st->be_data;
+	if (d == NULL) return ALP_ERR_NOT_READY;
 
-    char attr[32];
-    int  n = snprintf(attr, sizeof(attr), "count%u/enable", d->count_idx);
-    if (n < 0 || (size_t)n >= sizeof(attr)) return ALP_ERR_INVAL;
-    return _sysfs_write(d->dir, attr, "1\n");
+	char attr[32];
+	int  n = snprintf(attr, sizeof(attr), "count%u/enable", d->count_idx);
+	if (n < 0 || (size_t)n >= sizeof(attr)) return ALP_ERR_INVAL;
+	return _sysfs_write(d->dir, attr, "1\n");
 }
 
 /**
@@ -212,13 +212,13 @@ static alp_status_t y_start(alp_counter_backend_state_t *st)
  */
 static alp_status_t y_stop(alp_counter_backend_state_t *st)
 {
-    y_counter_data_t *d = (y_counter_data_t *)st->be_data;
-    if (d == NULL) return ALP_ERR_NOT_READY;
+	y_counter_data_t *d = (y_counter_data_t *)st->be_data;
+	if (d == NULL) return ALP_ERR_NOT_READY;
 
-    char attr[32];
-    int  n = snprintf(attr, sizeof(attr), "count%u/enable", d->count_idx);
-    if (n < 0 || (size_t)n >= sizeof(attr)) return ALP_ERR_INVAL;
-    return _sysfs_write(d->dir, attr, "0\n");
+	char attr[32];
+	int  n = snprintf(attr, sizeof(attr), "count%u/enable", d->count_idx);
+	if (n < 0 || (size_t)n >= sizeof(attr)) return ALP_ERR_INVAL;
+	return _sysfs_write(d->dir, attr, "0\n");
 }
 
 /**
@@ -230,14 +230,14 @@ static alp_status_t y_stop(alp_counter_backend_state_t *st)
  */
 static alp_status_t y_get_value(alp_counter_backend_state_t *st, uint32_t *ticks_out)
 {
-    if (ticks_out == NULL) return ALP_ERR_INVAL;
-    y_counter_data_t *d = (y_counter_data_t *)st->be_data;
-    if (d == NULL) return ALP_ERR_NOT_READY;
+	if (ticks_out == NULL) return ALP_ERR_INVAL;
+	y_counter_data_t *d = (y_counter_data_t *)st->be_data;
+	if (d == NULL) return ALP_ERR_NOT_READY;
 
-    char attr[32];
-    int  n = snprintf(attr, sizeof(attr), "count%u/count", d->count_idx);
-    if (n < 0 || (size_t)n >= sizeof(attr)) return ALP_ERR_INVAL;
-    return _sysfs_read_u32(d->dir, attr, ticks_out);
+	char attr[32];
+	int  n = snprintf(attr, sizeof(attr), "count%u/count", d->count_idx);
+	if (n < 0 || (size_t)n >= sizeof(attr)) return ALP_ERR_INVAL;
+	return _sysfs_read_u32(d->dir, attr, ticks_out);
 }
 
 /**
@@ -254,10 +254,10 @@ static alp_status_t y_get_value(alp_counter_backend_state_t *st, uint32_t *ticks
  */
 static alp_status_t y_us_to_ticks(alp_counter_backend_state_t *st, uint32_t us, uint32_t *ticks_out)
 {
-    (void)st;
-    (void)us;
-    if (ticks_out != NULL) *ticks_out = 0u;
-    return ALP_ERR_NOSUPPORT;
+	(void)st;
+	(void)us;
+	if (ticks_out != NULL) *ticks_out = 0u;
+	return ALP_ERR_NOSUPPORT;
 }
 
 /**
@@ -276,10 +276,10 @@ static alp_status_t y_us_to_ticks(alp_counter_backend_state_t *st, uint32_t us, 
 static alp_status_t y_set_alarm(alp_counter_backend_state_t *st, uint32_t ticks_from_now,
                                 struct alp_counter *owner)
 {
-    (void)st;
-    (void)ticks_from_now;
-    (void)owner;
-    return ALP_ERR_NOSUPPORT;
+	(void)st;
+	(void)ticks_from_now;
+	(void)owner;
+	return ALP_ERR_NOSUPPORT;
 }
 
 /**
@@ -295,8 +295,8 @@ static alp_status_t y_set_alarm(alp_counter_backend_state_t *st, uint32_t ticks_
  */
 static alp_status_t y_cancel_alarm(alp_counter_backend_state_t *st)
 {
-    (void)st;
-    return ALP_OK;
+	(void)st;
+	return ALP_OK;
 }
 
 /**
@@ -308,27 +308,27 @@ static alp_status_t y_cancel_alarm(alp_counter_backend_state_t *st)
  */
 static void y_close(alp_counter_backend_state_t *st)
 {
-    y_counter_data_t *d = (y_counter_data_t *)st->be_data;
-    if (d != NULL) {
-        char attr[32];
-        int  n = snprintf(attr, sizeof(attr), "count%u/enable", d->count_idx);
-        if (n > 0 && (size_t)n < sizeof(attr)) {
-            (void)_sysfs_write(d->dir, attr, "0\n");
-        }
-        free(d);
-        st->be_data = NULL;
-    }
+	y_counter_data_t *d = (y_counter_data_t *)st->be_data;
+	if (d != NULL) {
+		char attr[32];
+		int  n = snprintf(attr, sizeof(attr), "count%u/enable", d->count_idx);
+		if (n > 0 && (size_t)n < sizeof(attr)) {
+			(void)_sysfs_write(d->dir, attr, "0\n");
+		}
+		free(d);
+		st->be_data = NULL;
+	}
 }
 
 static const alp_counter_ops_t _ops = {
-    .open         = y_open,
-    .start        = y_start,
-    .stop         = y_stop,
-    .get_value    = y_get_value,
-    .us_to_ticks  = y_us_to_ticks,
-    .set_alarm    = y_set_alarm,
-    .cancel_alarm = y_cancel_alarm,
-    .close        = y_close,
+	.open         = y_open,
+	.start        = y_start,
+	.stop         = y_stop,
+	.get_value    = y_get_value,
+	.us_to_ticks  = y_us_to_ticks,
+	.set_alarm    = y_set_alarm,
+	.cancel_alarm = y_cancel_alarm,
+	.close        = y_close,
 };
 
 ALP_BACKEND_REGISTER(counter, yocto_drv,

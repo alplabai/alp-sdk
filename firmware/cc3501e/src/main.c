@@ -37,21 +37,21 @@ __attribute__((weak)) void __WFI(void)
 
 int main(void)
 {
-    cc3501e_hw_init();
+	cc3501e_hw_init();
 
 #if defined(CC3501E_CONTROL_TRANSPORT_SDIO)
-    /* Opt-in: the board routes the Alif SDIO controller to the CC3501E
+	/* Opt-in: the board routes the Alif SDIO controller to the CC3501E
      * (no SD card present).  Falls back to SPI by simply not defining
      * this at build time. */
-    transport_sdio_init();
+	transport_sdio_init();
 #else
-    transport_spi_init(); /* default + always-available baseline */
+	transport_spi_init(); /* default + always-available baseline */
 #endif
 
-    for (;;) {
-        __WFI();
-        cc3501e_hw_tick();
-    }
-    /* unreachable */
-    return 0;
+	for (;;) {
+		__WFI();
+		cc3501e_hw_tick();
+	}
+	/* unreachable */
+	return 0;
 }

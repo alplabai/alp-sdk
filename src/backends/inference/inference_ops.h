@@ -42,27 +42,24 @@ typedef struct alp_inference_ops alp_inference_ops_t;
 
 /** Backend-owned per-handle state. */
 typedef struct alp_inference_backend_state {
-    void                       *dev;        /* opaque backend device pointer */
-    alp_inference_backend_t     backend_id; /* AUTO-resolved or caller-pinned */
-    void                       *be_data;    /* backend-private state */
-    const alp_inference_ops_t  *ops;
+	void                      *dev;        /* opaque backend device pointer */
+	alp_inference_backend_t    backend_id; /* AUTO-resolved or caller-pinned */
+	void                      *be_data;    /* backend-private state */
+	const alp_inference_ops_t *ops;
 } alp_inference_backend_state_t;
 
 /** Vtable each inference backend implements. */
 struct alp_inference_ops {
-    alp_status_t (*open)(const alp_inference_config_t *cfg,
-                         alp_inference_backend_state_t *state,
-                         alp_capabilities_t *caps_out);
-    size_t       (*num_inputs)(alp_inference_backend_state_t *state);
-    size_t       (*num_outputs)(alp_inference_backend_state_t *state);
-    alp_status_t (*get_input)(alp_inference_backend_state_t *state,
-                              size_t index,
-                              alp_inference_tensor_t *out);
-    alp_status_t (*get_output)(alp_inference_backend_state_t *state,
-                               size_t index,
-                               alp_inference_tensor_t *out);
-    alp_status_t (*invoke)(alp_inference_backend_state_t *state);
-    void         (*close)(alp_inference_backend_state_t *state);
+	alp_status_t (*open)(const alp_inference_config_t *cfg, alp_inference_backend_state_t *state,
+	                     alp_capabilities_t *caps_out);
+	size_t (*num_inputs)(alp_inference_backend_state_t *state);
+	size_t (*num_outputs)(alp_inference_backend_state_t *state);
+	alp_status_t (*get_input)(alp_inference_backend_state_t *state, size_t index,
+	                          alp_inference_tensor_t *out);
+	alp_status_t (*get_output)(alp_inference_backend_state_t *state, size_t index,
+	                           alp_inference_tensor_t *out);
+	alp_status_t (*invoke)(alp_inference_backend_state_t *state);
+	void (*close)(alp_inference_backend_state_t *state);
 };
 
 /**
@@ -74,10 +71,10 @@ struct alp_inference_ops {
  * layout.
  */
 struct alp_inference {
-    alp_inference_backend_state_t  state;
-    const alp_backend_t           *backend;
-    alp_capabilities_t             cached_caps;
-    bool                           in_use;
+	alp_inference_backend_state_t state;
+	const alp_backend_t          *backend;
+	alp_capabilities_t            cached_caps;
+	bool                          in_use;
 };
 
 #endif /* ALP_BACKENDS_INFERENCE_OPS_H */

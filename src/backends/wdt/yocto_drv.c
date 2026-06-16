@@ -45,26 +45,26 @@
  * the driver advertised magic-close support (so close() can disarm
  * via the 'V' write when the platform honours it). */
 typedef struct {
-    int  fd;
-    bool magic_close;
+	int  fd;
+	bool magic_close;
 } y_wdt_data_t;
 
 /** @brief Map a (positive) errno value to the closest alp_status_t. */
 static alp_status_t _errno_to_alp(int err)
 {
-    switch (err) {
-    case 0:
-        return ALP_OK;
-    case EINVAL:
-        return ALP_ERR_INVAL;
-    case EBUSY:
-        return ALP_ERR_BUSY;
-    case ENOTTY:
-    case ENOSYS:
-        return ALP_ERR_NOSUPPORT;
-    default:
-        return ALP_ERR_IO;
-    }
+	switch (err) {
+	case 0:
+		return ALP_OK;
+	case EINVAL:
+		return ALP_ERR_INVAL;
+	case EBUSY:
+		return ALP_ERR_BUSY;
+	case ENOTTY:
+	case ENOSYS:
+		return ALP_ERR_NOSUPPORT;
+	default:
+		return ALP_ERR_IO;
+	}
 }
 
 /**
@@ -78,59 +78,59 @@ static alp_status_t _errno_to_alp(int err)
 static alp_status_t y_open(uint32_t wdt_id, const alp_wdt_config_t *cfg,
                            alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-    char path[32];
-    int  n = snprintf(path, sizeof(path), "/dev/watchdog%u", (unsigned)wdt_id);
-    if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
+	char path[32];
+	int  n = snprintf(path, sizeof(path), "/dev/watchdog%u", (unsigned)wdt_id);
+	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
 
-    int fd = open(path, O_WRONLY | O_CLOEXEC);
-    if (fd < 0) return _errno_to_alp(errno);
+	int fd = open(path, O_WRONLY | O_CLOEXEC);
+	if (fd < 0) return _errno_to_alp(errno);
 
-    y_wdt_data_t *d = (y_wdt_data_t *)malloc(sizeof(*d));
-    if (d == NULL) {
-        close(fd);
-        return ALP_ERR_NOMEM;
-    }
-    d->fd          = fd;
-    d->magic_close = false;
+	y_wdt_data_t *d = (y_wdt_data_t *)malloc(sizeof(*d));
+	if (d == NULL) {
+		close(fd);
+		return ALP_ERR_NOMEM;
+	}
+	d->fd          = fd;
+	d->magic_close = false;
 
-    /* Round timeout_ms up to whole seconds (min 1 s); the dispatcher
+	/* Round timeout_ms up to whole seconds (min 1 s); the dispatcher
      * already rejected a zero timeout_ms before reaching the backend. */
-    int timeout_s = (int)((cfg->timeout_ms + 999u) / 1000u);
-    if (timeout_s < 1) timeout_s = 1;
-    if (ioctl(fd, WDIOC_SETTIMEOUT, &timeout_s) < 0) {
-        /* Some watchdogs have a fixed timeout (no WDIOF_SETTIMEOUT);
+	int timeout_s = (int)((cfg->timeout_ms + 999u) / 1000u);
+	if (timeout_s < 1) timeout_s = 1;
+	if (ioctl(fd, WDIOC_SETTIMEOUT, &timeout_s) < 0) {
+		/* Some watchdogs have a fixed timeout (no WDIOF_SETTIMEOUT);
          * that is not fatal -- the device is still armed and feedable. */
-        if (errno != EOPNOTSUPP && errno != ENOTTY) {
-            int e = errno;
-            close(fd);
-            free(d);
-            return _errno_to_alp(e);
-        }
-    }
+		if (errno != EOPNOTSUPP && errno != ENOTTY) {
+			int e = errno;
+			close(fd);
+			free(d);
+			return _errno_to_alp(e);
+		}
+	}
 
-    struct watchdog_info info;
-    memset(&info, 0, sizeof(info));
-    if (ioctl(fd, WDIOC_GETSUPPORT, &info) == 0) {
-        d->magic_close = (info.options & WDIOF_MAGICCLOSE) != 0u;
-    }
+	struct watchdog_info info;
+	memset(&info, 0, sizeof(info));
+	if (ioctl(fd, WDIOC_GETSUPPORT, &info) == 0) {
+		d->magic_close = (info.options & WDIOF_MAGICCLOSE) != 0u;
+	}
 
-    st->dev         = NULL;
-    st->wdt_id      = wdt_id;
-    st->channel_id  = 0;
-    st->cfg         = *cfg;
-    st->be_data     = d;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	st->dev         = NULL;
+	st->wdt_id      = wdt_id;
+	st->channel_id  = 0;
+	st->cfg         = *cfg;
+	st->be_data     = d;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
 /** @brief Kick the watchdog via WDIOC_KEEPALIVE. */
 static alp_status_t y_feed(alp_wdt_backend_state_t *st)
 {
-    y_wdt_data_t *d = (y_wdt_data_t *)st->be_data;
-    if (d == NULL) return ALP_ERR_NOT_READY;
-    int dummy = 0;
-    if (ioctl(d->fd, WDIOC_KEEPALIVE, &dummy) < 0) return _errno_to_alp(errno);
-    return ALP_OK;
+	y_wdt_data_t *d = (y_wdt_data_t *)st->be_data;
+	if (d == NULL) return ALP_ERR_NOT_READY;
+	int dummy = 0;
+	if (ioctl(d->fd, WDIOC_KEEPALIVE, &dummy) < 0) return _errno_to_alp(errno);
+	return ALP_OK;
 }
 
 /**
@@ -143,14 +143,14 @@ static alp_status_t y_feed(alp_wdt_backend_state_t *st)
  */
 static alp_status_t y_disable(alp_wdt_backend_state_t *st)
 {
-    y_wdt_data_t *d = (y_wdt_data_t *)st->be_data;
-    if (d == NULL) return ALP_ERR_NOT_READY;
-    int flags = WDIOS_DISABLECARD;
-    if (ioctl(d->fd, WDIOC_SETOPTIONS, &flags) < 0) {
-        if (errno == EOPNOTSUPP) return ALP_ERR_NOSUPPORT;
-        return _errno_to_alp(errno);
-    }
-    return ALP_OK;
+	y_wdt_data_t *d = (y_wdt_data_t *)st->be_data;
+	if (d == NULL) return ALP_ERR_NOT_READY;
+	int flags = WDIOS_DISABLECARD;
+	if (ioctl(d->fd, WDIOC_SETOPTIONS, &flags) < 0) {
+		if (errno == EOPNOTSUPP) return ALP_ERR_NOSUPPORT;
+		return _errno_to_alp(errno);
+	}
+	return ALP_OK;
 }
 
 /**
@@ -164,25 +164,25 @@ static alp_status_t y_disable(alp_wdt_backend_state_t *st)
  */
 static void y_close(alp_wdt_backend_state_t *st)
 {
-    y_wdt_data_t *d = (y_wdt_data_t *)st->be_data;
-    if (d == NULL) return;
-    if (d->fd >= 0) {
-        int flags = WDIOS_DISABLECARD;
-        (void)ioctl(d->fd, WDIOC_SETOPTIONS, &flags);
-        if (d->magic_close) {
-            (void)!write(d->fd, "V", 1);
-        }
-        close(d->fd);
-    }
-    free(d);
-    st->be_data = NULL;
+	y_wdt_data_t *d = (y_wdt_data_t *)st->be_data;
+	if (d == NULL) return;
+	if (d->fd >= 0) {
+		int flags = WDIOS_DISABLECARD;
+		(void)ioctl(d->fd, WDIOC_SETOPTIONS, &flags);
+		if (d->magic_close) {
+			(void)!write(d->fd, "V", 1);
+		}
+		close(d->fd);
+	}
+	free(d);
+	st->be_data = NULL;
 }
 
 static const alp_wdt_ops_t _ops = {
-    .open    = y_open,
-    .feed    = y_feed,
-    .disable = y_disable,
-    .close   = y_close,
+	.open    = y_open,
+	.feed    = y_feed,
+	.disable = y_disable,
+	.close   = y_close,
 };
 
 ALP_BACKEND_REGISTER(wdt, yocto_drv,

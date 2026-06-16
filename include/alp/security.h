@@ -55,11 +55,7 @@ extern "C" {
 /* ------------------------------------------------------------------ */
 
 /** Supported hash algorithms.  Routes to HW where the SoC supports it. */
-typedef enum {
-    ALP_HASH_SHA256 = 0,
-    ALP_HASH_SHA384 = 1,
-    ALP_HASH_SHA512 = 2
-} alp_hash_alg_t;
+typedef enum { ALP_HASH_SHA256 = 0, ALP_HASH_SHA384 = 1, ALP_HASH_SHA512 = 2 } alp_hash_alg_t;
 
 /** Opaque hash context.  Allocate via @ref alp_hash_open. */
 typedef struct alp_hash alp_hash_t;
@@ -71,7 +67,7 @@ typedef struct alp_hash alp_hash_t;
  * @return Open context on success; NULL if the backend doesn't
  *         support the requested algorithm.
  */
-alp_hash_t  *alp_hash_open(alp_hash_alg_t alg);
+alp_hash_t *alp_hash_open(alp_hash_alg_t alg);
 
 /**
  * @brief Feed @p len bytes of data into the running digest.
@@ -102,7 +98,7 @@ alp_status_t alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_c
                              size_t *digest_len);
 
 /** @brief Release without finalising.  Use after a partial computation. */
-void         alp_hash_close(alp_hash_t *h);
+void alp_hash_close(alp_hash_t *h);
 
 /**
  * @brief Per-instance capability descriptor for an opened hash context.
@@ -123,9 +119,9 @@ const alp_capabilities_t *alp_hash_capabilities(const alp_hash_t *h);
 
 /** Supported authenticated-encryption algorithms. */
 typedef enum {
-    ALP_AEAD_AES_128_GCM       = 0,
-    ALP_AEAD_AES_256_GCM       = 1,
-    ALP_AEAD_CHACHA20_POLY1305 = 2
+	ALP_AEAD_AES_128_GCM       = 0,
+	ALP_AEAD_AES_256_GCM       = 1,
+	ALP_AEAD_CHACHA20_POLY1305 = 2
 } alp_aead_alg_t;
 
 /** Opaque AEAD context.  Allocate via @ref alp_aead_open. */
@@ -140,8 +136,7 @@ typedef struct alp_aead alp_aead_t;
  * @param[in] key_len  Key length.
  * @return Open context, or NULL on bad key length / unsupported alg.
  */
-alp_aead_t  *alp_aead_open(alp_aead_alg_t alg,
-                           const uint8_t *key, size_t key_len);
+alp_aead_t *alp_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t key_len);
 
 /**
  * @brief Authenticated encrypt.
@@ -159,12 +154,9 @@ alp_aead_t  *alp_aead_open(alp_aead_alg_t alg,
  * @param[in]  tag_len     Tag length, typically 16 B.  Must be ≥ 16.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
  */
-alp_status_t alp_aead_encrypt(alp_aead_t *a,
-                              const uint8_t *iv, size_t iv_len,
-                              const uint8_t *aad, size_t aad_len,
-                              const uint8_t *plain, size_t plain_len,
-                              uint8_t *cipher_out,
-                              uint8_t *tag_out, size_t tag_len);
+alp_status_t alp_aead_encrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, const uint8_t *aad,
+                              size_t aad_len, const uint8_t *plain, size_t plain_len,
+                              uint8_t *cipher_out, uint8_t *tag_out, size_t tag_len);
 
 /**
  * @brief Authenticated decrypt.
@@ -184,15 +176,12 @@ alp_status_t alp_aead_encrypt(alp_aead_t *a,
  *         with — @p plain_out content is undefined and MUST be discarded);
  *         ALP_ERR_NOT_READY / ALP_ERR_INVAL otherwise.
  */
-alp_status_t alp_aead_decrypt(alp_aead_t *a,
-                              const uint8_t *iv, size_t iv_len,
-                              const uint8_t *aad, size_t aad_len,
-                              const uint8_t *cipher, size_t cipher_len,
-                              const uint8_t *tag, size_t tag_len,
-                              uint8_t *plain_out);
+alp_status_t alp_aead_decrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, const uint8_t *aad,
+                              size_t aad_len, const uint8_t *cipher, size_t cipher_len,
+                              const uint8_t *tag, size_t tag_len, uint8_t *plain_out);
 
 /** @brief Release the AEAD context.  Wipes key material. */
-void         alp_aead_close(alp_aead_t *a);
+void alp_aead_close(alp_aead_t *a);
 
 /**
  * @brief Per-instance capability descriptor for an opened AEAD context.
@@ -229,7 +218,7 @@ const alp_capabilities_t *alp_aead_capabilities(const alp_aead_t *a);
 alp_status_t alp_random_bytes(uint8_t *out, size_t len);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_SECURITY_H */
+#endif /* ALP_SECURITY_H */

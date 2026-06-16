@@ -39,16 +39,16 @@ extern "C" {
 /** Gain selection -- determined by number of trailing clock pulses
  *  after the 24 data bits. */
 typedef enum {
-    HX711_GAIN_128 = 25, /**< Channel A, gain 128 (25 pulses total) */
-    HX711_GAIN_32  = 26, /**< Channel B, gain 32  (26 pulses total) */
-    HX711_GAIN_64  = 27, /**< Channel A, gain 64  (27 pulses total) */
+	HX711_GAIN_128 = 25, /**< Channel A, gain 128 (25 pulses total) */
+	HX711_GAIN_32  = 26, /**< Channel B, gain 32  (26 pulses total) */
+	HX711_GAIN_64  = 27, /**< Channel A, gain 64  (27 pulses total) */
 } hx711_gain_t;
 
 typedef struct {
-    alp_gpio_t  *sck;
-    alp_gpio_t  *dout;
-    hx711_gain_t gain;
-    bool         initialised;
+	alp_gpio_t  *sck;
+	alp_gpio_t  *dout;
+	hx711_gain_t gain;
+	bool         initialised;
 } hx711_t;
 
 /** @brief Bind context to caller-opened SCK + DOUT GPIOs. */

@@ -94,78 +94,78 @@ extern "C" {
  *   0x80..0xFF  reserved (vendor extensions)
  */
 typedef enum {
-    /* Meta */
-    ALP_CC3501E_CMD_PING          = 0x00,
-    ALP_CC3501E_CMD_GET_VERSION   = 0x01,
-    ALP_CC3501E_CMD_RESET         = 0x02,
-    ALP_CC3501E_CMD_GET_MAC       = 0x03,
-    /* §5.4 -- extended diagnostics.  Reply payload is
+	/* Meta */
+	ALP_CC3501E_CMD_PING        = 0x00,
+	ALP_CC3501E_CMD_GET_VERSION = 0x01,
+	ALP_CC3501E_CMD_RESET       = 0x02,
+	ALP_CC3501E_CMD_GET_MAC     = 0x03,
+	/* §5.4 -- extended diagnostics.  Reply payload is
      * @ref alp_cc3501e_diag_info_t.  Adds firmware-side context
      * (reset cause, current role, uptime, free heap, last error)
      * beyond what GET_VERSION returns.  v2-firmware-only; v1
      * firmware rejects with ALP_CC3501E_RESP_ERR_INVALID. */
-    ALP_CC3501E_CMD_GET_DIAG_INFO = 0x04,
+	ALP_CC3501E_CMD_GET_DIAG_INFO = 0x04,
 
-    /* Wi-Fi */
-    ALP_CC3501E_CMD_WIFI_SCAN_START   = 0x10,
-    ALP_CC3501E_CMD_WIFI_SCAN_STOP    = 0x11,
-    ALP_CC3501E_CMD_WIFI_CONNECT_STA  = 0x12,
-    ALP_CC3501E_CMD_WIFI_DISCONNECT   = 0x13,
-    ALP_CC3501E_CMD_WIFI_AP_START     = 0x14,
-    ALP_CC3501E_CMD_WIFI_AP_STOP      = 0x15,
-    ALP_CC3501E_CMD_WIFI_GET_RSSI     = 0x16,
-    ALP_CC3501E_CMD_WIFI_GET_IP       = 0x17,
-    ALP_CC3501E_EVT_WIFI_SCAN_RESULT  = 0x18, /* async, slave -> master */
-    ALP_CC3501E_EVT_WIFI_CONNECTED    = 0x19, /* async */
-    ALP_CC3501E_EVT_WIFI_DISCONNECTED = 0x1A, /* async */
+	/* Wi-Fi */
+	ALP_CC3501E_CMD_WIFI_SCAN_START   = 0x10,
+	ALP_CC3501E_CMD_WIFI_SCAN_STOP    = 0x11,
+	ALP_CC3501E_CMD_WIFI_CONNECT_STA  = 0x12,
+	ALP_CC3501E_CMD_WIFI_DISCONNECT   = 0x13,
+	ALP_CC3501E_CMD_WIFI_AP_START     = 0x14,
+	ALP_CC3501E_CMD_WIFI_AP_STOP      = 0x15,
+	ALP_CC3501E_CMD_WIFI_GET_RSSI     = 0x16,
+	ALP_CC3501E_CMD_WIFI_GET_IP       = 0x17,
+	ALP_CC3501E_EVT_WIFI_SCAN_RESULT  = 0x18, /* async, slave -> master */
+	ALP_CC3501E_EVT_WIFI_CONNECTED    = 0x19, /* async */
+	ALP_CC3501E_EVT_WIFI_DISCONNECTED = 0x1A, /* async */
 
-    /* TCP/UDP sockets (host-managed; offload to firmware). */
-    ALP_CC3501E_CMD_SOCK_OPEN    = 0x20,
-    ALP_CC3501E_CMD_SOCK_CONNECT = 0x21,
-    ALP_CC3501E_CMD_SOCK_SEND    = 0x22,
-    ALP_CC3501E_CMD_SOCK_RECV    = 0x23,
-    ALP_CC3501E_CMD_SOCK_CLOSE   = 0x24,
+	/* TCP/UDP sockets (host-managed; offload to firmware). */
+	ALP_CC3501E_CMD_SOCK_OPEN    = 0x20,
+	ALP_CC3501E_CMD_SOCK_CONNECT = 0x21,
+	ALP_CC3501E_CMD_SOCK_SEND    = 0x22,
+	ALP_CC3501E_CMD_SOCK_RECV    = 0x23,
+	ALP_CC3501E_CMD_SOCK_CLOSE   = 0x24,
 
-    /* BLE */
-    ALP_CC3501E_CMD_BLE_ENABLE         = 0x30,
-    ALP_CC3501E_CMD_BLE_DISABLE        = 0x31,
-    ALP_CC3501E_CMD_BLE_ADV_START      = 0x32,
-    ALP_CC3501E_CMD_BLE_ADV_STOP       = 0x33,
-    ALP_CC3501E_CMD_BLE_SCAN_START     = 0x34,
-    ALP_CC3501E_CMD_BLE_SCAN_STOP      = 0x35,
-    ALP_CC3501E_CMD_BLE_CONNECT        = 0x36,
-    ALP_CC3501E_CMD_BLE_DISCONNECT     = 0x37,
-    ALP_CC3501E_CMD_BLE_GATT_REGISTER  = 0x38,
-    ALP_CC3501E_CMD_BLE_GATT_NOTIFY    = 0x39,
-    ALP_CC3501E_CMD_BLE_GATT_READ      = 0x3A,
-    ALP_CC3501E_CMD_BLE_GATT_WRITE     = 0x3B,
-    ALP_CC3501E_EVT_BLE_ADV_REPORT     = 0x3C, /* async */
-    ALP_CC3501E_EVT_BLE_CONNECTED      = 0x3D, /* async */
-    ALP_CC3501E_EVT_BLE_DISCONNECTED   = 0x3E, /* async */
-    ALP_CC3501E_EVT_BLE_GATT_WRITE_REQ = 0x3F, /* async */
+	/* BLE */
+	ALP_CC3501E_CMD_BLE_ENABLE         = 0x30,
+	ALP_CC3501E_CMD_BLE_DISABLE        = 0x31,
+	ALP_CC3501E_CMD_BLE_ADV_START      = 0x32,
+	ALP_CC3501E_CMD_BLE_ADV_STOP       = 0x33,
+	ALP_CC3501E_CMD_BLE_SCAN_START     = 0x34,
+	ALP_CC3501E_CMD_BLE_SCAN_STOP      = 0x35,
+	ALP_CC3501E_CMD_BLE_CONNECT        = 0x36,
+	ALP_CC3501E_CMD_BLE_DISCONNECT     = 0x37,
+	ALP_CC3501E_CMD_BLE_GATT_REGISTER  = 0x38,
+	ALP_CC3501E_CMD_BLE_GATT_NOTIFY    = 0x39,
+	ALP_CC3501E_CMD_BLE_GATT_READ      = 0x3A,
+	ALP_CC3501E_CMD_BLE_GATT_WRITE     = 0x3B,
+	ALP_CC3501E_EVT_BLE_ADV_REPORT     = 0x3C, /* async */
+	ALP_CC3501E_EVT_BLE_CONNECTED      = 0x3D, /* async */
+	ALP_CC3501E_EVT_BLE_DISCONNECTED   = 0x3E, /* async */
+	ALP_CC3501E_EVT_BLE_GATT_WRITE_REQ = 0x3F, /* async */
 
-    /* GPIO proxy.  IO11 / IO13 / IO15..IO21 hang off CC3501E
+	/* GPIO proxy.  IO11 / IO13 / IO15..IO21 hang off CC3501E
      * GPIOs; these commands let the Alif read/write them via the
      * inter-chip bus. */
-    ALP_CC3501E_CMD_GPIO_CONFIGURE     = 0x50,
-    ALP_CC3501E_CMD_GPIO_WRITE         = 0x51,
-    ALP_CC3501E_CMD_GPIO_READ          = 0x52,
-    ALP_CC3501E_CMD_GPIO_SET_INTERRUPT = 0x53,
-    ALP_CC3501E_EVT_GPIO_INTERRUPT     = 0x54, /* async */
+	ALP_CC3501E_CMD_GPIO_CONFIGURE     = 0x50,
+	ALP_CC3501E_CMD_GPIO_WRITE         = 0x51,
+	ALP_CC3501E_CMD_GPIO_READ          = 0x52,
+	ALP_CC3501E_CMD_GPIO_SET_INTERRUPT = 0x53,
+	ALP_CC3501E_EVT_GPIO_INTERRUPT     = 0x54, /* async */
 
-    /* Power / camera enables.  CC3501E drives the camera-LDO
+	/* Power / camera enables.  CC3501E drives the camera-LDO
      * enable pins (CAM_EN_LDO0/1) per the inter-chip TSV. */
-    ALP_CC3501E_CMD_CAM_ENABLE   = 0x60,
-    ALP_CC3501E_CMD_CAM_DISABLE  = 0x61,
-    /* §5.7 -- system-wide power policy for the CC3501E itself.
+	ALP_CC3501E_CMD_CAM_ENABLE  = 0x60,
+	ALP_CC3501E_CMD_CAM_DISABLE = 0x61,
+	/* §5.7 -- system-wide power policy for the CC3501E itself.
      * Request payload is @ref alp_cc3501e_power_policy_t.  Lets
      * the host hint at how aggressively the CC3501E firmware
      * should idle between Wi-Fi / BLE events.  v2-firmware-only. */
-    ALP_CC3501E_CMD_POWER_POLICY = 0x62,
+	ALP_CC3501E_CMD_POWER_POLICY = 0x62,
 
-    /* Diagnostics */
-    ALP_CC3501E_CMD_DIAG_GET_STATS = 0x70,
-    ALP_CC3501E_CMD_DIAG_LOG_LEVEL = 0x71,
+	/* Diagnostics */
+	ALP_CC3501E_CMD_DIAG_GET_STATS = 0x70,
+	ALP_CC3501E_CMD_DIAG_LOG_LEVEL = 0x71,
 } alp_cc3501e_cmd_t;
 
 /**
@@ -174,16 +174,16 @@ typedef enum {
  *        when the host adapts the value.
  */
 typedef enum {
-    ALP_CC3501E_RESP_OK            = 0x00,
-    ALP_CC3501E_RESP_ERR_INVALID   = 0x01, /**< Bad cmd / bad payload. */
-    ALP_CC3501E_RESP_ERR_BUSY      = 0x02, /**< Subsystem in use. */
-    ALP_CC3501E_RESP_ERR_TIMEOUT   = 0x03,
-    ALP_CC3501E_RESP_ERR_NO_MEM    = 0x04,
-    ALP_CC3501E_RESP_ERR_NOT_READY = 0x05, /**< Wi-Fi/BLE not enabled. */
-    ALP_CC3501E_RESP_ERR_RADIO     = 0x06, /**< RF / antenna failure. */
-    ALP_CC3501E_RESP_ERR_PROTOCOL  = 0x07, /**< Frame mis-parse. */
-    ALP_CC3501E_RESP_ERR_VERSION   = 0x08, /**< Firmware ↔ host version mismatch. */
-    ALP_CC3501E_RESP_ERR_INTERNAL  = 0xFF
+	ALP_CC3501E_RESP_OK            = 0x00,
+	ALP_CC3501E_RESP_ERR_INVALID   = 0x01, /**< Bad cmd / bad payload. */
+	ALP_CC3501E_RESP_ERR_BUSY      = 0x02, /**< Subsystem in use. */
+	ALP_CC3501E_RESP_ERR_TIMEOUT   = 0x03,
+	ALP_CC3501E_RESP_ERR_NO_MEM    = 0x04,
+	ALP_CC3501E_RESP_ERR_NOT_READY = 0x05, /**< Wi-Fi/BLE not enabled. */
+	ALP_CC3501E_RESP_ERR_RADIO     = 0x06, /**< RF / antenna failure. */
+	ALP_CC3501E_RESP_ERR_PROTOCOL  = 0x07, /**< Frame mis-parse. */
+	ALP_CC3501E_RESP_ERR_VERSION   = 0x08, /**< Firmware ↔ host version mismatch. */
+	ALP_CC3501E_RESP_ERR_INTERNAL  = 0xFF
 } alp_cc3501e_resp_t;
 
 /* ------------------------------------------------------------------ */
@@ -201,14 +201,14 @@ typedef enum {
  *   - BLE_STACK: BLE stack panic.
  *   - WIFI_STACK: Wi-Fi stack panic. */
 typedef enum {
-    ALP_CC3501E_RESET_UNKNOWN    = 0u,
-    ALP_CC3501E_RESET_POWER_ON   = 1u,
-    ALP_CC3501E_RESET_NRST_PIN   = 2u,
-    ALP_CC3501E_RESET_SOFT       = 3u,
-    ALP_CC3501E_RESET_WATCHDOG   = 4u,
-    ALP_CC3501E_RESET_BROWNOUT   = 5u,
-    ALP_CC3501E_RESET_BLE_STACK  = 6u,
-    ALP_CC3501E_RESET_WIFI_STACK = 7u,
+	ALP_CC3501E_RESET_UNKNOWN    = 0u,
+	ALP_CC3501E_RESET_POWER_ON   = 1u,
+	ALP_CC3501E_RESET_NRST_PIN   = 2u,
+	ALP_CC3501E_RESET_SOFT       = 3u,
+	ALP_CC3501E_RESET_WATCHDOG   = 4u,
+	ALP_CC3501E_RESET_BROWNOUT   = 5u,
+	ALP_CC3501E_RESET_BLE_STACK  = 6u,
+	ALP_CC3501E_RESET_WIFI_STACK = 7u,
 } alp_cc3501e_reset_cause_t;
 
 /** Active-role codes for @ref alp_cc3501e_diag_info_t::role.
@@ -220,12 +220,12 @@ typedef enum {
  *   - BLE_CENTRAL: BLE central role.
  *   - DUAL_WIFI_BLE: Wi-Fi STA + BLE coexist. */
 typedef enum {
-    ALP_CC3501E_ROLE_OFF            = 0u,
-    ALP_CC3501E_ROLE_WIFI_STA       = 1u,
-    ALP_CC3501E_ROLE_WIFI_AP        = 2u,
-    ALP_CC3501E_ROLE_BLE_PERIPHERAL = 3u,
-    ALP_CC3501E_ROLE_BLE_CENTRAL    = 4u,
-    ALP_CC3501E_ROLE_DUAL_WIFI_BLE  = 5u,
+	ALP_CC3501E_ROLE_OFF            = 0u,
+	ALP_CC3501E_ROLE_WIFI_STA       = 1u,
+	ALP_CC3501E_ROLE_WIFI_AP        = 2u,
+	ALP_CC3501E_ROLE_BLE_PERIPHERAL = 3u,
+	ALP_CC3501E_ROLE_BLE_CENTRAL    = 4u,
+	ALP_CC3501E_ROLE_DUAL_WIFI_BLE  = 5u,
 } alp_cc3501e_role_t;
 
 /** Reply payload for CMD_GET_DIAG_INFO (opcode 0x04).  Firmware
@@ -248,13 +248,13 @@ typedef enum {
  *     emitted on the wire; @ref ALP_CC3501E_RESP_OK if no error
  *     since last reset. */
 typedef struct {
-    uint16_t fw_version;
-    uint8_t  reset_cause;
-    uint8_t  role;
-    uint32_t uptime_ms;
-    uint32_t free_heap_bytes;
-    uint8_t  last_error;
-    uint8_t  reserved[3];
+	uint16_t fw_version;
+	uint8_t  reset_cause;
+	uint8_t  role;
+	uint32_t uptime_ms;
+	uint32_t free_heap_bytes;
+	uint8_t  last_error;
+	uint8_t  reserved[3];
 } alp_cc3501e_diag_info_t;
 
 /* ------------------------------------------------------------------ */
@@ -270,10 +270,10 @@ typedef struct {
  *   - LOW_POWER: aggressive idle; longer wake.
  *   - DEEP_SLEEP: radios off; wake-on-host only. */
 typedef enum {
-    ALP_CC3501E_PP_PERFORMANCE = 0u,
-    ALP_CC3501E_PP_BALANCED    = 1u,
-    ALP_CC3501E_PP_LOW_POWER   = 2u,
-    ALP_CC3501E_PP_DEEP_SLEEP  = 3u,
+	ALP_CC3501E_PP_PERFORMANCE = 0u,
+	ALP_CC3501E_PP_BALANCED    = 1u,
+	ALP_CC3501E_PP_LOW_POWER   = 2u,
+	ALP_CC3501E_PP_DEEP_SLEEP  = 3u,
 } alp_cc3501e_pp_preset_t;
 
 /** Wake-event bitmap for @ref alp_cc3501e_power_policy_t::wake_events.
@@ -305,10 +305,10 @@ typedef enum {
  *     chosen policy's sleep mode.  0 = use firmware default for
  *     the policy. */
 typedef struct {
-    uint8_t  policy;
-    uint8_t  wake_events;
-    uint16_t reserved;
-    uint32_t idle_ms_before_sleep;
+	uint8_t  policy;
+	uint8_t  wake_events;
+	uint16_t reserved;
+	uint32_t idle_ms_before_sleep;
 } alp_cc3501e_power_policy_t;
 
 /* ------------------------------------------------------------------ */
@@ -318,22 +318,22 @@ typedef struct {
 /** Sent in the payload of CMD_WIFI_CONNECT_STA.  ssid_len + psk_len
  *  upper-bound on the cumulative frame length (still ≤ MAX_PAYLOAD). */
 typedef struct {
-    uint8_t ssid_len;
-    uint8_t psk_len;
-    uint8_t security; /**< 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE */
-    uint8_t reserved;
-    /* uint8_t ssid[ssid_len];   -- packed inline, no padding */
-    /* uint8_t psk[psk_len];     -- packed inline, no padding */
+	uint8_t ssid_len;
+	uint8_t psk_len;
+	uint8_t security; /**< 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE */
+	uint8_t reserved;
+	/* uint8_t ssid[ssid_len];   -- packed inline, no padding */
+	/* uint8_t psk[psk_len];     -- packed inline, no padding */
 } alp_cc3501e_wifi_connect_t;
 
 /** Async event for CMD_WIFI_SCAN_START and friends. */
 typedef struct {
-    uint8_t bssid[6];
-    int8_t  rssi_dbm;
-    uint8_t channel;
-    uint8_t security;
-    uint8_t ssid_len;
-    /* uint8_t ssid[ssid_len]; */
+	uint8_t bssid[6];
+	int8_t  rssi_dbm;
+	uint8_t channel;
+	uint8_t security;
+	uint8_t ssid_len;
+	/* uint8_t ssid[ssid_len]; */
 } alp_cc3501e_scan_result_t;
 
 /* ------------------------------------------------------------------ */
@@ -348,8 +348,8 @@ typedef struct {
  *   - STREAM: connection-oriented (TCP).
  *   - DGRAM:  connectionless datagram (UDP). */
 typedef enum {
-    ALP_CC3501E_SOCK_TYPE_STREAM = 0u,
-    ALP_CC3501E_SOCK_TYPE_DGRAM  = 1u,
+	ALP_CC3501E_SOCK_TYPE_STREAM = 0u,
+	ALP_CC3501E_SOCK_TYPE_DGRAM  = 1u,
 } alp_cc3501e_sock_type_t;
 
 /** Address family for @ref alp_cc3501e_sock_open_t::family and the
@@ -360,8 +360,8 @@ typedef enum {
  *   - IPV4: 32-bit IPv4 address in @ref alp_cc3501e_sock_addr_t::addr.
  *   - IPV6: 128-bit IPv6 address (reserved in v1). */
 typedef enum {
-    ALP_CC3501E_SOCK_FAMILY_IPV4 = 0u,
-    ALP_CC3501E_SOCK_FAMILY_IPV6 = 1u,
+	ALP_CC3501E_SOCK_FAMILY_IPV4 = 0u,
+	ALP_CC3501E_SOCK_FAMILY_IPV6 = 1u,
 } alp_cc3501e_sock_family_t;
 
 /** Endpoint address shared by CMD_SOCK_CONNECT and the from-address of
@@ -375,10 +375,10 @@ typedef enum {
  *   - addr: address bytes, big-endian (network order), left-justified
  *     for the active family (IPv4 = addr[0..3]). */
 typedef struct {
-    uint8_t  family;
-    uint8_t  reserved;
-    uint16_t port;
-    uint8_t  addr[16];
+	uint8_t  family;
+	uint8_t  reserved;
+	uint16_t port;
+	uint8_t  addr[16];
 } alp_cc3501e_sock_addr_t;
 
 /** Payload of CMD_SOCK_OPEN (opcode 0x20).  Allocates a socket in the
@@ -392,10 +392,10 @@ typedef struct {
  *   - protocol: IP protocol number (0 = default for the type:
  *     TCP for STREAM, UDP for DGRAM). */
 typedef struct {
-    uint8_t family;
-    uint8_t type;
-    uint8_t protocol;
-    uint8_t reserved;
+	uint8_t family;
+	uint8_t type;
+	uint8_t protocol;
+	uint8_t reserved;
 } alp_cc3501e_sock_open_t;
 
 /** Socket handle returned by CMD_SOCK_OPEN and supplied by the host on
@@ -404,8 +404,8 @@ typedef struct {
  *  Field-level meanings:
  *   - handle: opaque firmware-side socket id. */
 typedef struct {
-    uint16_t handle;
-    uint8_t  reserved[2];
+	uint16_t handle;
+	uint8_t  reserved[2];
 } alp_cc3501e_sock_handle_t;
 
 /** Payload of CMD_SOCK_CONNECT (opcode 0x21).  For STREAM sockets this
@@ -416,9 +416,9 @@ typedef struct {
  *   - handle: socket from CMD_SOCK_OPEN.
  *   - peer: destination endpoint, @ref alp_cc3501e_sock_addr_t. */
 typedef struct {
-    uint16_t                handle;
-    uint16_t                reserved;
-    alp_cc3501e_sock_addr_t peer;
+	uint16_t                handle;
+	uint16_t                reserved;
+	alp_cc3501e_sock_addr_t peer;
 } alp_cc3501e_sock_connect_t;
 
 /** Payload of CMD_SOCK_SEND (opcode 0x22).  The data bytes follow this
@@ -430,12 +430,12 @@ typedef struct {
  *   - flags: send flags (bit 0 = MORE; further bits reserved 0).
  *   - data_len: number of payload bytes that follow inline. */
 typedef struct {
-    uint16_t handle;
-    uint8_t  flags;
-    uint8_t  reserved;
-    uint16_t data_len;
-    uint16_t reserved2;
-    /* uint8_t data[data_len];   -- packed inline, no padding */
+	uint16_t handle;
+	uint8_t  flags;
+	uint8_t  reserved;
+	uint16_t data_len;
+	uint16_t reserved2;
+	/* uint8_t data[data_len];   -- packed inline, no padding */
 } alp_cc3501e_sock_send_t;
 
 /** Payload of CMD_SOCK_RECV (opcode 0x23).  Requests up to max_len
@@ -447,8 +447,8 @@ typedef struct {
  *   - handle: socket from CMD_SOCK_OPEN.
  *   - max_len: host receive-buffer capacity for this request. */
 typedef struct {
-    uint16_t handle;
-    uint16_t max_len;
+	uint16_t handle;
+	uint16_t max_len;
 } alp_cc3501e_sock_recv_t;
 
 /** Reply DATA header for CMD_SOCK_RECV (precedes the received bytes,
@@ -460,10 +460,10 @@ typedef struct {
  *     alp_cc3501e_sock_addr_t); zeroed for STREAM sockets.
  *   - data_len: number of received bytes that follow inline. */
 typedef struct {
-    alp_cc3501e_sock_addr_t from;
-    uint16_t                data_len;
-    uint16_t                reserved;
-    /* uint8_t data[data_len];   -- packed inline, no padding */
+	alp_cc3501e_sock_addr_t from;
+	uint16_t                data_len;
+	uint16_t                reserved;
+	/* uint8_t data[data_len];   -- packed inline, no padding */
 } alp_cc3501e_sock_recv_resp_t;
 
 /** Payload of CMD_SOCK_CLOSE (opcode 0x24).  Releases the firmware-side
@@ -473,8 +473,8 @@ typedef struct {
  *  Field-level meanings:
  *   - handle: socket from CMD_SOCK_OPEN. */
 typedef struct {
-    uint16_t handle;
-    uint16_t reserved;
+	uint16_t handle;
+	uint16_t reserved;
 } alp_cc3501e_sock_close_t;
 
 /* ------------------------------------------------------------------ */
@@ -482,21 +482,21 @@ typedef struct {
 /* ------------------------------------------------------------------ */
 
 typedef struct {
-    uint8_t  connectable;
-    uint8_t  reserved;
-    uint16_t interval_min_ms;
-    uint16_t interval_max_ms;
-    uint8_t  adv_data_len;
-    /* uint8_t adv_data[adv_data_len]; */
+	uint8_t  connectable;
+	uint8_t  reserved;
+	uint16_t interval_min_ms;
+	uint16_t interval_max_ms;
+	uint8_t  adv_data_len;
+	/* uint8_t adv_data[adv_data_len]; */
 } alp_cc3501e_ble_adv_start_t;
 
 typedef struct {
-    uint8_t addr_type;
-    uint8_t addr[6];
-    int8_t  rssi_dbm;
-    uint8_t adv_type;
-    uint8_t adv_data_len;
-    /* uint8_t adv_data[adv_data_len]; */
+	uint8_t addr_type;
+	uint8_t addr[6];
+	int8_t  rssi_dbm;
+	uint8_t adv_type;
+	uint8_t adv_data_len;
+	/* uint8_t adv_data[adv_data_len]; */
 } alp_cc3501e_ble_adv_report_t;
 
 /* ------------------------------------------------------------------ */
@@ -509,9 +509,9 @@ typedef struct {
  *  W_DISABLE1 / W_DISABLE2 contract (host drives low to disable; HiZ
  *  releases via the board's external pull-up). */
 typedef enum {
-    ALP_CC3501E_GPIO_DIR_INPUT      = 0u,
-    ALP_CC3501E_GPIO_DIR_OUTPUT     = 1u,
-    ALP_CC3501E_GPIO_DIR_OPEN_DRAIN = 2u,
+	ALP_CC3501E_GPIO_DIR_INPUT      = 0u,
+	ALP_CC3501E_GPIO_DIR_OUTPUT     = 1u,
+	ALP_CC3501E_GPIO_DIR_OPEN_DRAIN = 2u,
 } alp_cc3501e_gpio_direction_t;
 
 /** Internal-pull selector for @ref alp_cc3501e_gpio_configure_t::pull.
@@ -519,22 +519,22 @@ typedef enum {
  *  pull MUST add an external resistor; the on-die pull strengths are
  *  documented as weak. */
 typedef enum {
-    ALP_CC3501E_GPIO_PULL_NONE = 0u,
-    ALP_CC3501E_GPIO_PULL_UP   = 1u,
-    ALP_CC3501E_GPIO_PULL_DOWN = 2u,
+	ALP_CC3501E_GPIO_PULL_NONE = 0u,
+	ALP_CC3501E_GPIO_PULL_UP   = 1u,
+	ALP_CC3501E_GPIO_PULL_DOWN = 2u,
 } alp_cc3501e_gpio_pull_t;
 
 typedef struct {
-    uint8_t cc3501e_gpio; /**< CC3501E pad index (e.g. 13 for GPIO13). */
-    uint8_t direction;    /**< One of @ref alp_cc3501e_gpio_direction_t. */
-    uint8_t pull;         /**< One of @ref alp_cc3501e_gpio_pull_t. */
-    uint8_t reserved;
+	uint8_t cc3501e_gpio; /**< CC3501E pad index (e.g. 13 for GPIO13). */
+	uint8_t direction;    /**< One of @ref alp_cc3501e_gpio_direction_t. */
+	uint8_t pull;         /**< One of @ref alp_cc3501e_gpio_pull_t. */
+	uint8_t reserved;
 } alp_cc3501e_gpio_configure_t;
 
 typedef struct {
-    uint8_t cc3501e_gpio;
-    uint8_t level; /**< 0 or 1 */
-    uint8_t reserved[2];
+	uint8_t cc3501e_gpio;
+	uint8_t level; /**< 0 or 1 */
+	uint8_t reserved[2];
 } alp_cc3501e_gpio_write_t;
 
 /** Edge selector for @ref alp_cc3501e_gpio_set_interrupt_t::edge.
@@ -543,10 +543,10 @@ typedef struct {
  *  NONE doubles as "disable the IRQ" by entering the same code
  *  path on the firmware side. */
 typedef enum {
-    ALP_CC3501E_GPIO_EDGE_NONE    = 0u,
-    ALP_CC3501E_GPIO_EDGE_RISING  = 1u,
-    ALP_CC3501E_GPIO_EDGE_FALLING = 2u,
-    ALP_CC3501E_GPIO_EDGE_BOTH    = 3u,
+	ALP_CC3501E_GPIO_EDGE_NONE    = 0u,
+	ALP_CC3501E_GPIO_EDGE_RISING  = 1u,
+	ALP_CC3501E_GPIO_EDGE_FALLING = 2u,
+	ALP_CC3501E_GPIO_EDGE_BOTH    = 3u,
 } alp_cc3501e_gpio_edge_t;
 
 /** Payload of CMD_GPIO_SET_INTERRUPT.  Enable / disable an
@@ -559,10 +559,10 @@ typedef enum {
  *   - edge: one of @ref alp_cc3501e_gpio_edge_t.
  *   - enabled: 0 = disable; 1 = enable. */
 typedef struct {
-    uint8_t cc3501e_gpio;
-    uint8_t edge;
-    uint8_t enabled;
-    uint8_t reserved;
+	uint8_t cc3501e_gpio;
+	uint8_t edge;
+	uint8_t enabled;
+	uint8_t reserved;
 } alp_cc3501e_gpio_set_interrupt_t;
 
 /** Async event payload for EVT_GPIO_INTERRUPT.  Slave -> master
@@ -575,10 +575,10 @@ typedef struct {
  *   - level: sampled level on the triggering edge.
  *   - timestamp_us: CC3501E uptime at the edge. */
 typedef struct {
-    uint8_t  cc3501e_gpio;
-    uint8_t  level;
-    uint8_t  reserved[2];
-    uint32_t timestamp_us;
+	uint8_t  cc3501e_gpio;
+	uint8_t  level;
+	uint8_t  reserved[2];
+	uint32_t timestamp_us;
 } alp_cc3501e_gpio_event_t;
 
 #ifdef __cplusplus

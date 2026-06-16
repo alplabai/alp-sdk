@@ -99,17 +99,17 @@ extern "C" {
  * the static_assert at the bottom of this header enforces both.
  */
 typedef struct alp_hw_info_eeprom_t {
-    uint32_t magic;                          /**< @ref ALP_HW_INFO_MAGIC. */
-    uint32_t schema_version;                 /**< @ref ALP_HW_INFO_SCHEMA_VERSION. */
-    char     family[ALP_HW_INFO_FAMILY_LEN]; /**< Family slug, e.g. "aen". */
-    char     sku[ALP_HW_INFO_SKU_LEN];       /**< MPN string, e.g. "E1M-AEN701". */
-    char     hw_rev[ALP_HW_INFO_HW_REV_LEN]; /**< Revision, e.g. "r1". */
-    char     serial[ALP_HW_INFO_SERIAL_LEN]; /**< Factory-assigned serial. */
-    uint16_t mfg_year;                       /**< Manufacturing year (e.g. 2026). */
-    uint8_t  mfg_month;                      /**< 1..12. */
-    uint8_t  mfg_day;                        /**< 1..31. */
-    uint8_t  reserved[40];                   /**< Zero-padded; covered by CRC. */
-    uint32_t crc32;                          /**< CRC-32 over preceding bytes. */
+	uint32_t magic;                          /**< @ref ALP_HW_INFO_MAGIC. */
+	uint32_t schema_version;                 /**< @ref ALP_HW_INFO_SCHEMA_VERSION. */
+	char     family[ALP_HW_INFO_FAMILY_LEN]; /**< Family slug, e.g. "aen". */
+	char     sku[ALP_HW_INFO_SKU_LEN];       /**< MPN string, e.g. "E1M-AEN701". */
+	char     hw_rev[ALP_HW_INFO_HW_REV_LEN]; /**< Revision, e.g. "r1". */
+	char     serial[ALP_HW_INFO_SERIAL_LEN]; /**< Factory-assigned serial. */
+	uint16_t mfg_year;                       /**< Manufacturing year (e.g. 2026). */
+	uint8_t  mfg_month;                      /**< 1..12. */
+	uint8_t  mfg_day;                        /**< 1..31. */
+	uint8_t  reserved[40];                   /**< Zero-padded; covered by CRC. */
+	uint32_t crc32;                          /**< CRC-32 over preceding bytes. */
 } alp_hw_info_eeprom_t;
 
 /**
@@ -122,22 +122,22 @@ typedef struct alp_hw_info_eeprom_t {
  * channel is wired.
  */
 typedef struct alp_hw_info_t {
-    /* SoM identifiers -- sourced from the on-module EEPROM. */
-    char     som_family[ALP_HW_INFO_FAMILY_LEN];
-    char     som_sku[ALP_HW_INFO_SKU_LEN];
-    char     som_hw_rev[ALP_HW_INFO_HW_REV_LEN];
-    char     som_serial[ALP_HW_INFO_SERIAL_LEN];
-    uint16_t som_mfg_year;
-    uint8_t  som_mfg_month;
-    uint8_t  som_mfg_day;
+	/* SoM identifiers -- sourced from the on-module EEPROM. */
+	char     som_family[ALP_HW_INFO_FAMILY_LEN];
+	char     som_sku[ALP_HW_INFO_SKU_LEN];
+	char     som_hw_rev[ALP_HW_INFO_HW_REV_LEN];
+	char     som_serial[ALP_HW_INFO_SERIAL_LEN];
+	uint16_t som_mfg_year;
+	uint8_t  som_mfg_month;
+	uint8_t  som_mfg_day;
 
-    /* Board identifiers -- decoded from the board-side BOARD_ID
+	/* Board identifiers -- decoded from the board-side BOARD_ID
      * ADC + the board preset's hw_revisions table.  No EEPROM
      * on the board today; the name comes from the build-time
      * declaration in board.yaml, not from runtime detection. */
-    char     board_name[ALP_HW_INFO_SKU_LEN];
-    char     board_hw_rev[ALP_HW_INFO_HW_REV_LEN];
-    uint32_t board_id_mv;
+	char     board_name[ALP_HW_INFO_SKU_LEN];
+	char     board_hw_rev[ALP_HW_INFO_HW_REV_LEN];
+	uint32_t board_id_mv;
 } alp_hw_info_t;
 
 /**

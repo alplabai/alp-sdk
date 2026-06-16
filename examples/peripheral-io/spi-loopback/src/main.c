@@ -29,48 +29,48 @@
 
 int main(void)
 {
-    printf("[spi] open BOARD_SPI_ARDUINO @ 1 MHz mode 0\n");
+	printf("[spi] open BOARD_SPI_ARDUINO @ 1 MHz mode 0\n");
 
-    alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
-        .bus_id = BOARD_SPI_ARDUINO,
-        /* 1 MHz is the conservative default; SPI tolerates up to
+	alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
+	    .bus_id = BOARD_SPI_ARDUINO,
+	    /* 1 MHz is the conservative default; SPI tolerates up to
          * tens of MHz on most controllers.  Bump after confirming
          * the slave's max clock and that wires are short. */
-        .freq_hz = 1000000,
-        /* MODE_0 (CPOL=0, CPHA=0) is the most common configuration:
+	    .freq_hz = 1000000,
+	    /* MODE_0 (CPOL=0, CPHA=0) is the most common configuration:
          * idle-low clock, sample on rising edge.  See the ALP SPI
          * mode chart in <alp/peripheral.h> for the other three
          * combinations. */
-        .mode = ALP_SPI_MODE_0,
-        /* 8 bits/word is universal; some SoCs support 16 or 32.  If
+	    .mode = ALP_SPI_MODE_0,
+	    /* 8 bits/word is universal; some SoCs support 16 or 32.  If
          * your slave needs a non-octet word width, this is the knob. */
-        .bits_per_word = 8,
-        /* No CS GPIO -- many SoCs handle CS automatically inside
+	    .bits_per_word = 8,
+	    /* No CS GPIO -- many SoCs handle CS automatically inside
          * the SPI controller.  When the slave needs a separate CS
          * pin (typical for multi-slave buses), set this to a
          * studio-resolved pin_id from <alp/e1m_pinout.h>. */
-        .cs_pin_id = ALP_SPI_NO_CS,
-    });
-    if (bus == NULL) {
-        printf("[spi] open failed: alp_last_error=%d\n", (int)alp_last_error());
-        printf("[spi] done\n");
-        return 0;
-    }
+	    .cs_pin_id = ALP_SPI_NO_CS,
+	});
+	if (bus == NULL) {
+		printf("[spi] open failed: alp_last_error=%d\n", (int)alp_last_error());
+		printf("[spi] done\n");
+		return 0;
+	}
 
-    /* Test pattern -- 0xAA, 0x55 alternates the data line every bit
+	/* Test pattern -- 0xAA, 0x55 alternates the data line every bit
      * (catches stuck-bit faults); 0x12 0x34 is non-symmetric and
      * shows endian handling.  rx[] receives whatever the slave
      * clocks back. */
-    uint8_t      tx[4] = { 0xAA, 0x55, 0x12, 0x34 };
-    uint8_t      rx[4] = { 0 };
-    alp_status_t s     = alp_spi_transceive(bus, tx, rx, sizeof tx);
-    printf("[spi] transceive -> status=%d  rx={%02x %02x %02x %02x}\n", (int)s, rx[0], rx[1], rx[2],
-           rx[3]);
+	uint8_t      tx[4] = { 0xAA, 0x55, 0x12, 0x34 };
+	uint8_t      rx[4] = { 0 };
+	alp_status_t s     = alp_spi_transceive(bus, tx, rx, sizeof tx);
+	printf("[spi] transceive -> status=%d  rx={%02x %02x %02x %02x}\n", (int)s, rx[0], rx[1], rx[2],
+	       rx[3]);
 
-    /* Close releases the bus handle.  CS line returns to its idle
+	/* Close releases the bus handle.  CS line returns to its idle
      * state (high for active-low CS); clock and MOSI go to whatever
      * the controller's idle line state is. */
-    alp_spi_close(bus);
-    printf("[spi] done\n");
-    return 0;
+	alp_spi_close(bus);
+	printf("[spi] done\n");
+	return 0;
 }

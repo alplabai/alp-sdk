@@ -54,9 +54,9 @@ extern "C" {
  *  per loop so a fresh set call replaces (not unions with) the
  *  prior rectangle. */
 typedef enum {
-    ALP_RENESAS_CAMERA_3A_AE  = 0,  /**< Auto-exposure metering region. */
-    ALP_RENESAS_CAMERA_3A_AWB = 1,  /**< Auto-white-balance statistics. */
-    ALP_RENESAS_CAMERA_3A_AF  = 2,  /**< Auto-focus contrast window. */
+	ALP_RENESAS_CAMERA_3A_AE  = 0, /**< Auto-exposure metering region. */
+	ALP_RENESAS_CAMERA_3A_AWB = 1, /**< Auto-white-balance statistics. */
+	ALP_RENESAS_CAMERA_3A_AF  = 2, /**< Auto-focus contrast window. */
 } alp_renesas_camera_3a_region_t;
 
 /** Bayer / per-channel slot the gain-table loader addresses.  The
@@ -64,10 +64,10 @@ typedef enum {
  *  callers wanting a single curve across all channels load the
  *  same table four times. */
 typedef enum {
-    ALP_RENESAS_CAMERA_CHANNEL_R  = 0,
-    ALP_RENESAS_CAMERA_CHANNEL_GR = 1,
-    ALP_RENESAS_CAMERA_CHANNEL_GB = 2,
-    ALP_RENESAS_CAMERA_CHANNEL_B  = 3,
+	ALP_RENESAS_CAMERA_CHANNEL_R  = 0,
+	ALP_RENESAS_CAMERA_CHANNEL_GR = 1,
+	ALP_RENESAS_CAMERA_CHANNEL_GB = 2,
+	ALP_RENESAS_CAMERA_CHANNEL_B  = 3,
 } alp_renesas_camera_channel_t;
 
 /** Pixel-coordinate rectangle.  All four fields measured from
@@ -75,10 +75,10 @@ typedef enum {
  *  configured sensor resolution and a value of zero rejects
  *  with @ref ALP_ERR_INVAL. */
 typedef struct {
-    uint16_t x;
-    uint16_t y;
-    uint16_t w;
-    uint16_t h;
+	uint16_t x;
+	uint16_t y;
+	uint16_t w;
+	uint16_t h;
 } alp_renesas_camera_rect_t;
 
 /**
@@ -108,8 +108,8 @@ typedef struct {
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC on non-Renesas backend;
  *         @ref ALP_ERR_NOT_READY if the camera isn't open.
  */
-alp_status_t alp_renesas_camera_isp_3a_window_set(alp_camera_t *camera,
-                                                  alp_renesas_camera_3a_region_t region,
+alp_status_t alp_renesas_camera_isp_3a_window_set(alp_camera_t                    *camera,
+                                                  alp_renesas_camera_3a_region_t   region,
                                                   const alp_renesas_camera_rect_t *rect);
 
 /**
@@ -138,10 +138,9 @@ alp_status_t alp_renesas_camera_isp_3a_window_set(alp_camera_t *camera,
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC on non-Renesas backend;
  *         @ref ALP_ERR_NOT_READY if the camera isn't open.
  */
-alp_status_t alp_renesas_camera_isp_gain_table_load(alp_camera_t *camera,
+alp_status_t alp_renesas_camera_isp_gain_table_load(alp_camera_t                *camera,
                                                     alp_renesas_camera_channel_t channel,
-                                                    const uint16_t *table,
-                                                    uint16_t        len);
+                                                    const uint16_t *table, uint16_t len);
 
 /**
  * @brief Load the lens-shading-correction LUT.
@@ -164,9 +163,8 @@ alp_status_t alp_renesas_camera_isp_gain_table_load(alp_camera_t *camera,
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC /
  *         @ref ALP_ERR_NOT_READY.
  */
-alp_status_t alp_renesas_camera_isp_lsc_lut_load(alp_camera_t  *camera,
-                                                 const uint16_t *lut,
-                                                 uint16_t        len);
+alp_status_t alp_renesas_camera_isp_lsc_lut_load(alp_camera_t *camera, const uint16_t *lut,
+                                                 uint16_t len);
 
 #ifdef __cplusplus
 }

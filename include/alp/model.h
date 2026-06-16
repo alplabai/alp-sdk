@@ -30,25 +30,25 @@ extern "C" {
 
 /** One compiled-blob target entry from the manifest. */
 typedef struct {
-    char           backend[ALP_MODEL_STR_MAX];     /* "cpu" | "ethos_u" | "drpai" | "deepx_dxm1" */
-    char           silicon_ref[ALP_MODEL_STR_MAX]; /* "alif:ensemble:e8" | "*" */
-    char           blob_format[ALP_MODEL_STR_MAX];
-    char           accel_config[ALP_MODEL_STR_MAX]; /* "" when N/A */
-    uint32_t       arena_bytes;
-    uint32_t       req_sram_kib;
-    const uint8_t *blob; /* pointer into the source buffer */
-    uint32_t       blob_len;
+	char           backend[ALP_MODEL_STR_MAX];     /* "cpu" | "ethos_u" | "drpai" | "deepx_dxm1" */
+	char           silicon_ref[ALP_MODEL_STR_MAX]; /* "alif:ensemble:e8" | "*" */
+	char           blob_format[ALP_MODEL_STR_MAX];
+	char           accel_config[ALP_MODEL_STR_MAX]; /* "" when N/A */
+	uint32_t       arena_bytes;
+	uint32_t       req_sram_kib;
+	const uint8_t *blob; /* pointer into the source buffer */
+	uint32_t       blob_len;
 } alp_model_target_t;
 
 /** Parsed view of an .alpmodel (no heap; references the source buffer). */
 typedef struct {
-    const uint8_t     *data; /* source buffer (kept by caller) */
-    size_t             size;
-    char               name[ALP_MODEL_STR_MAX];
-    uint8_t            src_sha[32];
-    uint16_t           flags;
-    uint32_t           n_targets;
-    alp_model_target_t targets[ALP_MODEL_MAX_TARGETS];
+	const uint8_t     *data; /* source buffer (kept by caller) */
+	size_t             size;
+	char               name[ALP_MODEL_STR_MAX];
+	uint8_t            src_sha[32];
+	uint16_t           flags;
+	uint32_t           n_targets;
+	alp_model_target_t targets[ALP_MODEL_MAX_TARGETS];
 } alp_model_t;
 
 /**

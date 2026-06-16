@@ -15,27 +15,32 @@
 
 #include "alp/blocks/pdm_mic.h"
 
-alp_pdm_mic_t *alp_pdm_mic_open(const alp_pdm_mic_config_t *cfg) {
-    (void)cfg;
-    return NULL;
+alp_pdm_mic_t *alp_pdm_mic_open(const alp_pdm_mic_config_t *cfg)
+{
+	(void)cfg;
+	return NULL;
 }
 
-alp_status_t alp_pdm_mic_read(alp_pdm_mic_t *mic,
-                              int16_t *out, size_t frames,
-                              size_t *out_frames,
-                              uint32_t timeout_ms) {
-    (void)mic; (void)out; (void)frames; (void)timeout_ms;
-    if (out_frames != NULL) *out_frames = 0;
-    return ALP_ERR_NOSUPPORT;
+alp_status_t alp_pdm_mic_read(alp_pdm_mic_t *mic, int16_t *out, size_t frames, size_t *out_frames,
+                              uint32_t timeout_ms)
+{
+	(void)mic;
+	(void)out;
+	(void)frames;
+	(void)timeout_ms;
+	if (out_frames != NULL) *out_frames = 0;
+	return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_pdm_mic_set_gain(alp_pdm_mic_t *mic,
-                                  int32_t left_gain_db,
-                                  int32_t right_gain_db) {
-    (void)mic; (void)left_gain_db; (void)right_gain_db;
-    return ALP_ERR_NOSUPPORT;
+alp_status_t alp_pdm_mic_set_gain(alp_pdm_mic_t *mic, int32_t left_gain_db, int32_t right_gain_db)
+{
+	(void)mic;
+	(void)left_gain_db;
+	(void)right_gain_db;
+	return ALP_ERR_NOSUPPORT;
 }
 
-void alp_pdm_mic_close(alp_pdm_mic_t *mic) {
-    (void)mic;
+void alp_pdm_mic_close(alp_pdm_mic_t *mic)
+{
+	(void)mic;
 }

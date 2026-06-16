@@ -48,31 +48,31 @@
 
 int main(void)
 {
-    printf("[pm] power-managed-sensor (AEN301 / M55-HE)\n");
-    printf("[pm] wake sources: rtc(%ds) | gpio_int(IMU/user) | "
-           "uart(console)\n",
-           RTC_TICK_S);
-    printf("[pm] sleep policy: deep -- see board.yaml "
-           "cores.m55_he.power:\n");
+	printf("[pm] power-managed-sensor (AEN301 / M55-HE)\n");
+	printf("[pm] wake sources: rtc(%ds) | gpio_int(IMU/user) | "
+	       "uart(console)\n",
+	       RTC_TICK_S);
+	printf("[pm] sleep policy: deep -- see board.yaml "
+	       "cores.m55_he.power:\n");
 
-    /* Three wake-stage announcements.  These are printf framing
+	/* Three wake-stage announcements.  These are printf framing
      * only -- the "sample acquired / push" lines mark where a real
      * node would call its alp_* sensor + host-channel APIs.  On real
      * silicon the loop repeats forever; this framing demo runs the
      * stages once and exits. */
-    const char *stages[] = {
-        "rtc",      /* periodic sample (60 s) */
-        "gpio_int", /* IMU motion event / user button */
-        "uart",     /* diagnostic console */
-    };
+	const char *stages[] = {
+		"rtc",      /* periodic sample (60 s) */
+		"gpio_int", /* IMU motion event / user button */
+		"uart",     /* diagnostic console */
+	};
 
-    for (int i = 0; i < (int)(sizeof(stages) / sizeof(stages[0])); i++) {
-        printf("[pm] stage %d: wake-source=%s\n", i + 1, stages[i]);
-        printf("[pm]   sample acquired, host channel push -> ok\n");
-        printf("[pm]   re-entering deep sleep\n");
-        k_msleep(20);
-    }
+	for (int i = 0; i < (int)(sizeof(stages) / sizeof(stages[0])); i++) {
+		printf("[pm] stage %d: wake-source=%s\n", i + 1, stages[i]);
+		printf("[pm]   sample acquired, host channel push -> ok\n");
+		printf("[pm]   re-entering deep sleep\n");
+		k_msleep(20);
+	}
 
-    printf("[pm] done\n");
-    return 0;
+	printf("[pm] done\n");
+	return 0;
 }

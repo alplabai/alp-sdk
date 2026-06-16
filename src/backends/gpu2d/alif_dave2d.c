@@ -78,48 +78,48 @@
  */
 static d2_s32 _bpp_for(alp_gpu2d_format_t fmt)
 {
-    switch (fmt) {
-    case ALP_GPU2D_FMT_ARGB8888:
-    case ALP_GPU2D_FMT_RGBA8888:
-        return 4;
-    case ALP_GPU2D_FMT_RGB888:
-        return 3;
-    case ALP_GPU2D_FMT_RGB565:
-        return 2;
-    case ALP_GPU2D_FMT_A8:
-        return 1;
-    default:
-        return 0;
-    }
+	switch (fmt) {
+	case ALP_GPU2D_FMT_ARGB8888:
+	case ALP_GPU2D_FMT_RGBA8888:
+		return 4;
+	case ALP_GPU2D_FMT_RGB888:
+		return 3;
+	case ALP_GPU2D_FMT_RGB565:
+		return 2;
+	case ALP_GPU2D_FMT_A8:
+		return 1;
+	default:
+		return 0;
+	}
 }
 
 /* Pixel pitch (in pixels) from a surface's byte stride.  bpp is
  * non-zero whenever the format mapped through _fmt_to_d2 first. */
 static d2_s32 _pitch_px(const alp_gpu2d_surface_t *s)
 {
-    d2_s32 bpp = _bpp_for(s->format);
-    return bpp != 0 ? (d2_s32)(s->stride_bytes / (d2_u32)bpp) : 0;
+	d2_s32 bpp = _bpp_for(s->format);
+	return bpp != 0 ? (d2_s32)(s->stride_bytes / (d2_u32)bpp) : 0;
 }
 
 static alp_status_t _fmt_to_d2(alp_gpu2d_format_t fmt, d2_u32 *out)
 {
-    switch (fmt) {
-    case ALP_GPU2D_FMT_ARGB8888:
-    case ALP_GPU2D_FMT_RGBA8888:
-        *out = d2_mode_argb8888;
-        return ALP_OK;
-    case ALP_GPU2D_FMT_RGB565:
-        *out = d2_mode_rgb565;
-        return ALP_OK;
-    case ALP_GPU2D_FMT_RGB888:
-        *out = d2_mode_rgb888;
-        return ALP_OK;
-    case ALP_GPU2D_FMT_A8:
-        *out = d2_mode_alpha8;
-        return ALP_OK;
-    default:
-        return ALP_ERR_NOSUPPORT;
-    }
+	switch (fmt) {
+	case ALP_GPU2D_FMT_ARGB8888:
+	case ALP_GPU2D_FMT_RGBA8888:
+		*out = d2_mode_argb8888;
+		return ALP_OK;
+	case ALP_GPU2D_FMT_RGB565:
+		*out = d2_mode_rgb565;
+		return ALP_OK;
+	case ALP_GPU2D_FMT_RGB888:
+		*out = d2_mode_rgb888;
+		return ALP_OK;
+	case ALP_GPU2D_FMT_A8:
+		*out = d2_mode_alpha8;
+		return ALP_OK;
+	default:
+		return ALP_ERR_NOSUPPORT;
+	}
 }
 
 /**
@@ -141,23 +141,23 @@ static alp_status_t _fmt_to_d2(alp_gpu2d_format_t fmt, d2_u32 *out)
  */
 static alp_status_t _blend_to_d2(alp_gpu2d_blend_mode_t mode, d2_u32 *src_bf, d2_u32 *dst_bf)
 {
-    switch (mode) {
-    case ALP_GPU2D_BLEND_REPLACE:
-        *src_bf = d2_bm_one;
-        *dst_bf = d2_bm_zero;
-        return ALP_OK;
-    case ALP_GPU2D_BLEND_SRC_OVER:
-        *src_bf = d2_bm_one;
-        *dst_bf = d2_bm_one_minus_alpha;
-        return ALP_OK;
-    case ALP_GPU2D_BLEND_ADDITIVE:
-    case ALP_GPU2D_BLEND_MULTIPLY:
-        /* No documented single-pass d2 factor pair; sw_fallback owns
+	switch (mode) {
+	case ALP_GPU2D_BLEND_REPLACE:
+		*src_bf = d2_bm_one;
+		*dst_bf = d2_bm_zero;
+		return ALP_OK;
+	case ALP_GPU2D_BLEND_SRC_OVER:
+		*src_bf = d2_bm_one;
+		*dst_bf = d2_bm_one_minus_alpha;
+		return ALP_OK;
+	case ALP_GPU2D_BLEND_ADDITIVE:
+	case ALP_GPU2D_BLEND_MULTIPLY:
+		/* No documented single-pass d2 factor pair; sw_fallback owns
          * these.  BENCH-UNVERIFIED -- see header. */
-        return ALP_ERR_NOSUPPORT;
-    default:
-        return ALP_ERR_NOSUPPORT;
-    }
+		return ALP_ERR_NOSUPPORT;
+	default:
+		return ALP_ERR_NOSUPPORT;
+	}
 }
 
 /**
@@ -168,78 +168,78 @@ static alp_status_t _blend_to_d2(alp_gpu2d_blend_mode_t mode, d2_u32 *src_bf, d2
  */
 static alp_status_t _bind_dst(d2_device *dev, const alp_gpu2d_surface_t *s)
 {
-    d2_u32       mode;
-    alp_status_t rc = _fmt_to_d2(s->format, &mode);
-    if (rc != ALP_OK) {
-        return rc;
-    }
-    /* d2_framebuffer(handle, ptr, pitch-in-pixels, width, height, mode) */
-    d2_framebuffer(dev, s->base, _pitch_px(s), (d2_u32)s->width, (d2_u32)s->height, mode);
-    return ALP_OK;
+	d2_u32       mode;
+	alp_status_t rc = _fmt_to_d2(s->format, &mode);
+	if (rc != ALP_OK) {
+		return rc;
+	}
+	/* d2_framebuffer(handle, ptr, pitch-in-pixels, width, height, mode) */
+	d2_framebuffer(dev, s->base, _pitch_px(s), (d2_u32)s->width, (d2_u32)s->height, mode);
+	return ALP_OK;
 }
 
 static alp_status_t dave2d_open(alp_gpu2d_backend_state_t *state, alp_capabilities_t *caps_out)
 {
-    d2_device *dev = d2_opendevice(0);
-    if (dev == NULL) {
-        return ALP_ERR_NOSUPPORT;
-    }
-    if (d2_inithw(dev, 0) != D2_OK) {
-        d2_closedevice(dev);
-        return ALP_ERR_NOSUPPORT;
-    }
-    state->be_data = dev;
-    if (caps_out != NULL) {
-        caps_out->flags               = ALP_INSTANCE_CAP_DMA; /* DMA blit engine */
-        caps_out->max_sample_rate     = 0u;
-        caps_out->max_resolution_bits = 0u;
-        caps_out->channel_count       = 0u;
-    }
-    return ALP_OK;
+	d2_device *dev = d2_opendevice(0);
+	if (dev == NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	if (d2_inithw(dev, 0) != D2_OK) {
+		d2_closedevice(dev);
+		return ALP_ERR_NOSUPPORT;
+	}
+	state->be_data = dev;
+	if (caps_out != NULL) {
+		caps_out->flags               = ALP_INSTANCE_CAP_DMA; /* DMA blit engine */
+		caps_out->max_sample_rate     = 0u;
+		caps_out->max_resolution_bits = 0u;
+		caps_out->channel_count       = 0u;
+	}
+	return ALP_OK;
 }
 
 static alp_status_t dave2d_fill_rect(alp_gpu2d_backend_state_t *state,
                                      const alp_gpu2d_surface_t *dst, uint32_t x, uint32_t y,
                                      uint32_t w, uint32_t h, uint32_t argb_color)
 {
-    d2_device   *dev = (d2_device *)state->be_data;
-    alp_status_t rc  = _bind_dst(dev, dst);
-    if (rc != ALP_OK) {
-        return rc;
-    }
-    /* BENCH-UNVERIFIED: clean the dst range from cache after the
+	d2_device   *dev = (d2_device *)state->be_data;
+	alp_status_t rc  = _bind_dst(dev, dst);
+	if (rc != ALP_OK) {
+		return rc;
+	}
+	/* BENCH-UNVERIFIED: clean the dst range from cache after the
      * engine writes it (docs/aen-accelerator-backends-design.md §1). */
-    d2_startframe(dev);
-    d2_setcolor(dev, 0, (d2_color)argb_color);
-    d2_renderbox(dev, (d2_point)(x << 4), (d2_point)(y << 4), (d2_width)(w << 4),
-                 (d2_width)(h << 4)); /* 16.4 fixed point */
-    d2_endframe(dev);
-    d2_flushframe(dev); /* submit-and-wait per the v0.5 API contract */
-    return ALP_OK;
+	d2_startframe(dev);
+	d2_setcolor(dev, 0, (d2_color)argb_color);
+	d2_renderbox(dev, (d2_point)(x << 4), (d2_point)(y << 4), (d2_width)(w << 4),
+	             (d2_width)(h << 4)); /* 16.4 fixed point */
+	d2_endframe(dev);
+	d2_flushframe(dev); /* submit-and-wait per the v0.5 API contract */
+	return ALP_OK;
 }
 
 static alp_status_t dave2d_blit(alp_gpu2d_backend_state_t *state, const alp_gpu2d_surface_t *src,
                                 uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst,
                                 uint32_t dx, uint32_t dy, uint32_t w, uint32_t h)
 {
-    d2_device   *dev = (d2_device *)state->be_data;
-    d2_u32       src_mode;
-    alp_status_t rc = _fmt_to_d2(src->format, &src_mode);
-    if (rc != ALP_OK) {
-        return rc;
-    }
-    rc = _bind_dst(dev, dst);
-    if (rc != ALP_OK) {
-        return rc;
-    }
-    d2_startframe(dev);
-    d2_setblitsrc(dev, src->base, _pitch_px(src), (d2_u32)src->width, (d2_u32)src->height,
-                  src_mode);
-    d2_blitcopy(dev, (d2_s32)w, (d2_s32)h, (d2_blitpos)sx, (d2_blitpos)sy, (d2_width)(w << 4),
-                (d2_width)(h << 4), (d2_point)(dx << 4), (d2_point)(dy << 4), 0);
-    d2_endframe(dev);
-    d2_flushframe(dev);
-    return ALP_OK;
+	d2_device   *dev = (d2_device *)state->be_data;
+	d2_u32       src_mode;
+	alp_status_t rc = _fmt_to_d2(src->format, &src_mode);
+	if (rc != ALP_OK) {
+		return rc;
+	}
+	rc = _bind_dst(dev, dst);
+	if (rc != ALP_OK) {
+		return rc;
+	}
+	d2_startframe(dev);
+	d2_setblitsrc(dev, src->base, _pitch_px(src), (d2_u32)src->width, (d2_u32)src->height,
+	              src_mode);
+	d2_blitcopy(dev, (d2_s32)w, (d2_s32)h, (d2_blitpos)sx, (d2_blitpos)sy, (d2_width)(w << 4),
+	            (d2_width)(h << 4), (d2_point)(dx << 4), (d2_point)(dy << 4), 0);
+	d2_endframe(dev);
+	d2_flushframe(dev);
+	return ALP_OK;
 }
 
 static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state, const alp_gpu2d_surface_t *src,
@@ -247,47 +247,47 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state, const alp_gpu
                                  uint32_t dx, uint32_t dy, uint32_t w, uint32_t h,
                                  alp_gpu2d_blend_mode_t mode)
 {
-    d2_device   *dev = (d2_device *)state->be_data;
-    d2_u32       src_bf, dst_bf, src_mode;
-    alp_status_t rc = _blend_to_d2(mode, &src_bf, &dst_bf);
-    if (rc != ALP_OK) {
-        return rc; /* ADDITIVE / MULTIPLY -> NOSUPPORT; sw_fallback owns them */
-    }
-    rc = _fmt_to_d2(src->format, &src_mode);
-    if (rc != ALP_OK) {
-        return rc;
-    }
-    rc = _bind_dst(dev, dst);
-    if (rc != ALP_OK) {
-        return rc;
-    }
-    d2_startframe(dev);
-    d2_setblendmode(dev, src_bf, dst_bf);
-    d2_setblitsrc(dev, src->base, _pitch_px(src), (d2_u32)src->width, (d2_u32)src->height,
-                  src_mode);
-    d2_blitcopy(dev, (d2_s32)w, (d2_s32)h, (d2_blitpos)sx, (d2_blitpos)sy, (d2_width)(w << 4),
-                (d2_width)(h << 4), (d2_point)(dx << 4), (d2_point)(dy << 4), d2_bf_usealpha);
-    d2_endframe(dev);
-    d2_flushframe(dev);
-    return ALP_OK;
+	d2_device   *dev = (d2_device *)state->be_data;
+	d2_u32       src_bf, dst_bf, src_mode;
+	alp_status_t rc = _blend_to_d2(mode, &src_bf, &dst_bf);
+	if (rc != ALP_OK) {
+		return rc; /* ADDITIVE / MULTIPLY -> NOSUPPORT; sw_fallback owns them */
+	}
+	rc = _fmt_to_d2(src->format, &src_mode);
+	if (rc != ALP_OK) {
+		return rc;
+	}
+	rc = _bind_dst(dev, dst);
+	if (rc != ALP_OK) {
+		return rc;
+	}
+	d2_startframe(dev);
+	d2_setblendmode(dev, src_bf, dst_bf);
+	d2_setblitsrc(dev, src->base, _pitch_px(src), (d2_u32)src->width, (d2_u32)src->height,
+	              src_mode);
+	d2_blitcopy(dev, (d2_s32)w, (d2_s32)h, (d2_blitpos)sx, (d2_blitpos)sy, (d2_width)(w << 4),
+	            (d2_width)(h << 4), (d2_point)(dx << 4), (d2_point)(dy << 4), d2_bf_usealpha);
+	d2_endframe(dev);
+	d2_flushframe(dev);
+	return ALP_OK;
 }
 
 static void dave2d_close(alp_gpu2d_backend_state_t *state)
 {
-    d2_device *dev = (d2_device *)state->be_data;
-    if (dev != NULL) {
-        d2_deinithw(dev);
-        d2_closedevice(dev);
-        state->be_data = NULL;
-    }
+	d2_device *dev = (d2_device *)state->be_data;
+	if (dev != NULL) {
+		d2_deinithw(dev);
+		d2_closedevice(dev);
+		state->be_data = NULL;
+	}
 }
 
 static const alp_gpu2d_ops_t _ops = {
-    .open      = dave2d_open,
-    .fill_rect = dave2d_fill_rect,
-    .blit      = dave2d_blit,
-    .blend     = dave2d_blend,
-    .close     = dave2d_close,
+	.open      = dave2d_open,
+	.fill_rect = dave2d_fill_rect,
+	.blit      = dave2d_blit,
+	.blend     = dave2d_blend,
+	.close     = dave2d_close,
 };
 
 /* One row per AEN SKU that actually carries the D/AVE 2D engine

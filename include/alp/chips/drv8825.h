@@ -36,32 +36,27 @@ extern "C" {
 
 /** Microstep mode selection (M2:M1:M0). */
 typedef enum {
-    DRV8825_USTEP_FULL  = 0, /**< 000 */
-    DRV8825_USTEP_HALF  = 1,
-    DRV8825_USTEP_1_4   = 2,
-    DRV8825_USTEP_1_8   = 3,
-    DRV8825_USTEP_1_16  = 4,
-    DRV8825_USTEP_1_32  = 5, /**< 5..7 all decode to 1/32. */
+	DRV8825_USTEP_FULL = 0, /**< 000 */
+	DRV8825_USTEP_HALF = 1,
+	DRV8825_USTEP_1_4  = 2,
+	DRV8825_USTEP_1_8  = 3,
+	DRV8825_USTEP_1_16 = 4,
+	DRV8825_USTEP_1_32 = 5, /**< 5..7 all decode to 1/32. */
 } drv8825_ustep_t;
 
 typedef struct {
-    alp_pwm_t  *step;
-    alp_gpio_t *dir;
-    alp_gpio_t *nenbl; /**< Active-low enable.  Optional. */
-    alp_gpio_t *m0;
-    alp_gpio_t *m1;
-    alp_gpio_t *m2;
-    bool        initialised;
+	alp_pwm_t  *step;
+	alp_gpio_t *dir;
+	alp_gpio_t *nenbl; /**< Active-low enable.  Optional. */
+	alp_gpio_t *m0;
+	alp_gpio_t *m1;
+	alp_gpio_t *m2;
+	bool        initialised;
 } drv8825_t;
 
 /** @brief Bind context to caller-opened PWM + GPIO handles. */
-alp_status_t drv8825_init(drv8825_t  *dev,
-                          alp_pwm_t  *step,
-                          alp_gpio_t *dir,
-                          alp_gpio_t *nenbl,
-                          alp_gpio_t *m0,
-                          alp_gpio_t *m1,
-                          alp_gpio_t *m2);
+alp_status_t drv8825_init(drv8825_t *dev, alp_pwm_t *step, alp_gpio_t *dir, alp_gpio_t *nenbl,
+                          alp_gpio_t *m0, alp_gpio_t *m1, alp_gpio_t *m2);
 
 /** @brief Apply a microstep mode by latching M0/M1/M2 GPIOs. */
 alp_status_t drv8825_set_microstep(drv8825_t *dev, drv8825_ustep_t mode);

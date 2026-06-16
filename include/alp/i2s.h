@@ -43,18 +43,18 @@ extern "C" {
 
 /** Direction of data flow over the bus. */
 typedef enum {
-    ALP_I2S_DIR_RX   = 0,    /**< Microphone, codec input. */
-    ALP_I2S_DIR_TX   = 1,    /**< DAC, codec output. */
-    ALP_I2S_DIR_BOTH = 2     /**< Full-duplex (rare on M-class targets). */
+	ALP_I2S_DIR_RX   = 0, /**< Microphone, codec input. */
+	ALP_I2S_DIR_TX   = 1, /**< DAC, codec output. */
+	ALP_I2S_DIR_BOTH = 2  /**< Full-duplex (rare on M-class targets). */
 } alp_i2s_dir_t;
 
 /** Wire-format choice.  Most modern codecs accept @ref ALP_I2S_FMT_I2S. */
 typedef enum {
-    ALP_I2S_FMT_I2S            = 0,    /**< Standard I²S (Phillips). */
-    ALP_I2S_FMT_LEFT_JUSTIFIED = 1,
-    ALP_I2S_FMT_RIGHT_JUSTIFIED = 2,
-    ALP_I2S_FMT_PCM_SHORT      = 3,    /**< PCM with short frame sync. */
-    ALP_I2S_FMT_PCM_LONG       = 4
+	ALP_I2S_FMT_I2S             = 0, /**< Standard I²S (Phillips). */
+	ALP_I2S_FMT_LEFT_JUSTIFIED  = 1,
+	ALP_I2S_FMT_RIGHT_JUSTIFIED = 2,
+	ALP_I2S_FMT_PCM_SHORT       = 3, /**< PCM with short frame sync. */
+	ALP_I2S_FMT_PCM_LONG        = 4
 } alp_i2s_format_t;
 
 /** Opaque I²S handle.  Allocate via @ref alp_i2s_open. */
@@ -62,13 +62,13 @@ typedef struct alp_i2s alp_i2s_t;
 
 /** Configuration passed to @ref alp_i2s_open. */
 typedef struct {
-    uint32_t          bus_id;
-    uint32_t          sample_rate_hz;
-    uint8_t           word_bits;       /**< 16 / 24 / 32. */
-    uint8_t           channels;        /**< 1 = mono, 2 = stereo. */
-    alp_i2s_format_t  format;
-    alp_i2s_dir_t     direction;
-    uint16_t          block_frames;    /**< Frames per DMA block. */
+	uint32_t         bus_id;
+	uint32_t         sample_rate_hz;
+	uint8_t          word_bits; /**< 16 / 24 / 32. */
+	uint8_t          channels;  /**< 1 = mono, 2 = stereo. */
+	alp_i2s_format_t format;
+	alp_i2s_dir_t    direction;
+	uint16_t         block_frames; /**< Frames per DMA block. */
 } alp_i2s_config_t;
 
 /**
@@ -87,7 +87,7 @@ typedef struct {
  *         - underlying device not ready
  *         - heap allocation failure for the slab
  */
-alp_i2s_t   *alp_i2s_open(const alp_i2s_config_t *cfg);
+alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg);
 
 /** @brief Begin streaming.  TX direction starts producing the bit clock. */
 alp_status_t alp_i2s_start(alp_i2s_t *i2s);
@@ -108,9 +108,7 @@ alp_status_t alp_i2s_stop(alp_i2s_t *i2s);
  * @param[in] timeout_ms  Max wait for an available slab block.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
  */
-alp_status_t alp_i2s_write(alp_i2s_t *i2s,
-                           const void *block, size_t bytes,
-                           uint32_t timeout_ms);
+alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint32_t timeout_ms);
 
 /**
  * @brief Pull the next PCM block from the RX path.
@@ -131,13 +129,11 @@ alp_status_t alp_i2s_write(alp_i2s_t *i2s,
  *                         plumbing through `alp_i2s_config_t`.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
  */
-alp_status_t alp_i2s_read(alp_i2s_t *i2s,
-                          void *block, size_t bytes,
-                          size_t *bytes_out,
+alp_status_t alp_i2s_read(alp_i2s_t *i2s, void *block, size_t bytes, size_t *bytes_out,
                           uint32_t timeout_ms);
 
 /** @brief Stop streaming, free the slab, release the handle.  NULL safe. */
-void         alp_i2s_close(alp_i2s_t *i2s);
+void alp_i2s_close(alp_i2s_t *i2s);
 
 /**
  * @brief Query the capabilities of an opened I²S handle.
@@ -148,7 +144,7 @@ void         alp_i2s_close(alp_i2s_t *i2s);
 const alp_capabilities_t *alp_i2s_capabilities(const alp_i2s_t *i2s);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_I2S_H */
+#endif /* ALP_I2S_H */

@@ -37,35 +37,35 @@ extern "C" {
 
 /** Pixel format shared by the display and camera APIs. */
 typedef enum {
-    ALP_PIXFMT_MONO_VLSB = 0, /**< 1 bpp, vertical bytes (SSD1306 native). */
-    ALP_PIXFMT_RGB565    = 1,
-    ALP_PIXFMT_RGB888    = 2,
-    ALP_PIXFMT_ARGB8888  = 3
+	ALP_PIXFMT_MONO_VLSB = 0, /**< 1 bpp, vertical bytes (SSD1306 native). */
+	ALP_PIXFMT_RGB565    = 1,
+	ALP_PIXFMT_RGB888    = 2,
+	ALP_PIXFMT_ARGB8888  = 3
 } alp_pixfmt_t;
 
 /** Status codes returned by ALP peripheral functions. */
 typedef enum {
-    ALP_OK               = 0,
-    ALP_ERR_INVAL        = -1, /**< Invalid argument. */
-    ALP_ERR_NOT_READY    = -2, /**< Peripheral not initialised. */
-    ALP_ERR_BUSY         = -3, /**< Peripheral busy. */
-    ALP_ERR_TIMEOUT      = -4, /**< Transfer timed out. */
-    ALP_ERR_IO           = -5, /**< Bus / line error. */
-    ALP_ERR_NOSUPPORT    = -6, /**< Backend lacks this feature. */
-    ALP_ERR_NOMEM        = -7, /**< Allocation failure. */
-    ALP_ERR_OUT_OF_RANGE = -8, /**< Config exceeds the SoC's documented hardware caps. */
-    ALP_ERR_NOT_PRESENT_ON_THIS_SOC =
-        -9, /**< Hardware does not exist on this silicon (silicon-absent). Paired with ALP_BACKEND_AVAILABLE() == 0 at compile time. */
-    ALP_ERR_NOT_IMPLEMENTED =
-        -10, /**< Backend exists for this silicon but the implementation is a tracked stub (planned, not yet wired). Consult the linked @par Tracking: GitHub issue on the stub backend. */
-    ALP_ERR_VERSION = -11, /**< Format/container version is newer than this reader supports. */
-    ALP_ERR_NO_BACKEND =
-        -12, /**< .alpmodel has no blob for any backend available on this SoM (and no CPU fallback). */
-    ALP_ERR_NO_FIT =
-        -13, /**< A backend matched but no blob fits the device NPU envelope (e.g. arena SRAM too small), and no CPU fallback. */
-    ALP_ERR_NOT_FOUND = -14, /**< An explicitly-requested backend is absent from the package. */
-    ALP_ERR_NOT_PROVISIONED =
-        -15 /**< Hardware identity store (e.g. the on-module EEPROM manifest) is blank / unprogrammed -- the module has not been provisioned by the factory tool yet. */
+	ALP_OK               = 0,
+	ALP_ERR_INVAL        = -1, /**< Invalid argument. */
+	ALP_ERR_NOT_READY    = -2, /**< Peripheral not initialised. */
+	ALP_ERR_BUSY         = -3, /**< Peripheral busy. */
+	ALP_ERR_TIMEOUT      = -4, /**< Transfer timed out. */
+	ALP_ERR_IO           = -5, /**< Bus / line error. */
+	ALP_ERR_NOSUPPORT    = -6, /**< Backend lacks this feature. */
+	ALP_ERR_NOMEM        = -7, /**< Allocation failure. */
+	ALP_ERR_OUT_OF_RANGE = -8, /**< Config exceeds the SoC's documented hardware caps. */
+	ALP_ERR_NOT_PRESENT_ON_THIS_SOC =
+	    -9, /**< Hardware does not exist on this silicon (silicon-absent). Paired with ALP_BACKEND_AVAILABLE() == 0 at compile time. */
+	ALP_ERR_NOT_IMPLEMENTED =
+	    -10, /**< Backend exists for this silicon but the implementation is a tracked stub (planned, not yet wired). Consult the linked @par Tracking: GitHub issue on the stub backend. */
+	ALP_ERR_VERSION = -11, /**< Format/container version is newer than this reader supports. */
+	ALP_ERR_NO_BACKEND =
+	    -12, /**< .alpmodel has no blob for any backend available on this SoM (and no CPU fallback). */
+	ALP_ERR_NO_FIT =
+	    -13, /**< A backend matched but no blob fits the device NPU envelope (e.g. arena SRAM too small), and no CPU fallback. */
+	ALP_ERR_NOT_FOUND = -14, /**< An explicitly-requested backend is absent from the package. */
+	ALP_ERR_NOT_PROVISIONED =
+	    -15 /**< Hardware identity store (e.g. the on-module EEPROM manifest) is blank / unprogrammed -- the module has not been provisioned by the factory tool yet. */
 } alp_status_t;
 
 /**
@@ -135,17 +135,17 @@ typedef enum { ALP_GPIO_INPUT = 0, ALP_GPIO_OUTPUT = 1 } alp_gpio_dir_t;
 
 /** Pin pull configuration. */
 typedef enum {
-    ALP_GPIO_PULL_NONE = 0,
-    ALP_GPIO_PULL_UP   = 1,
-    ALP_GPIO_PULL_DOWN = 2
+	ALP_GPIO_PULL_NONE = 0,
+	ALP_GPIO_PULL_UP   = 1,
+	ALP_GPIO_PULL_DOWN = 2
 } alp_gpio_pull_t;
 
 /** Edge for interrupt-on-change. */
 typedef enum {
-    ALP_GPIO_EDGE_NONE    = 0,
-    ALP_GPIO_EDGE_RISING  = 1,
-    ALP_GPIO_EDGE_FALLING = 2,
-    ALP_GPIO_EDGE_BOTH    = 3
+	ALP_GPIO_EDGE_NONE    = 0,
+	ALP_GPIO_EDGE_RISING  = 1,
+	ALP_GPIO_EDGE_FALLING = 2,
+	ALP_GPIO_EDGE_BOTH    = 3
 } alp_gpio_edge_t;
 
 typedef struct alp_gpio alp_gpio_t;
@@ -245,8 +245,8 @@ const alp_capabilities_t *alp_gpio_capabilities(const alp_gpio_t *pin);
 typedef struct alp_i2c alp_i2c_t;
 
 typedef struct {
-    uint32_t bus_id;     /**< Studio-resolved bus instance id. */
-    uint32_t bitrate_hz; /**< 100k / 400k / 1M typical. */
+	uint32_t bus_id;     /**< Studio-resolved bus instance id. */
+	uint32_t bitrate_hz; /**< 100k / 400k / 1M typical. */
 } alp_i2c_config_t;
 
 /**
@@ -327,10 +327,10 @@ const alp_capabilities_t *alp_i2c_capabilities(const alp_i2c_t *bus);
 typedef struct alp_spi alp_spi_t;
 
 typedef enum {
-    ALP_SPI_MODE_0 = 0, /**< CPOL=0, CPHA=0 */
-    ALP_SPI_MODE_1 = 1, /**< CPOL=0, CPHA=1 */
-    ALP_SPI_MODE_2 = 2, /**< CPOL=1, CPHA=0 */
-    ALP_SPI_MODE_3 = 3  /**< CPOL=1, CPHA=1 */
+	ALP_SPI_MODE_0 = 0, /**< CPOL=0, CPHA=0 */
+	ALP_SPI_MODE_1 = 1, /**< CPOL=0, CPHA=1 */
+	ALP_SPI_MODE_2 = 2, /**< CPOL=1, CPHA=0 */
+	ALP_SPI_MODE_3 = 3  /**< CPOL=1, CPHA=1 */
 } alp_spi_mode_t;
 
 /**
@@ -341,11 +341,11 @@ typedef enum {
 #define ALP_SPI_NO_CS 0xFFFFFFFFu
 
 typedef struct {
-    uint32_t       bus_id;
-    uint32_t       freq_hz;
-    alp_spi_mode_t mode;
-    uint8_t        bits_per_word; /**< Usually 8. */
-    uint32_t       cs_pin_id;     /**< Studio-resolved chip-select pin, or
+	uint32_t       bus_id;
+	uint32_t       freq_hz;
+	alp_spi_mode_t mode;
+	uint8_t        bits_per_word; /**< Usually 8. */
+	uint32_t       cs_pin_id;     /**< Studio-resolved chip-select pin, or
                                    *   @ref ALP_SPI_NO_CS for none. */
 } alp_spi_config_t;
 
@@ -420,17 +420,17 @@ const alp_capabilities_t *alp_spi_capabilities(const alp_spi_t *bus);
 typedef struct alp_uart alp_uart_t;
 
 typedef enum {
-    ALP_UART_PARITY_NONE = 0,
-    ALP_UART_PARITY_EVEN = 1,
-    ALP_UART_PARITY_ODD  = 2
+	ALP_UART_PARITY_NONE = 0,
+	ALP_UART_PARITY_EVEN = 1,
+	ALP_UART_PARITY_ODD  = 2
 } alp_uart_parity_t;
 
 typedef struct {
-    uint32_t          port_id;
-    uint32_t          baudrate;
-    uint8_t           data_bits; /**< Usually 8. */
-    uint8_t           stop_bits; /**< 1 or 2. */
-    alp_uart_parity_t parity;
+	uint32_t          port_id;
+	uint32_t          baudrate;
+	uint8_t           data_bits; /**< Usually 8. */
+	uint8_t           stop_bits; /**< 1 or 2. */
+	alp_uart_parity_t parity;
 } alp_uart_config_t;
 
 /**

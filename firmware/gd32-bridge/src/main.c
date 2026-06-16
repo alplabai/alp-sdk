@@ -37,27 +37,33 @@
  * busy WFI loop -- behaviour-equivalent to a no-op for the
  * scaffold; the real HAL overrides these for peripheral bring-up
  * and periodic housekeeping. */
-__attribute__((weak)) void bridge_hw_init(void) { }
-__attribute__((weak)) void bridge_hw_tick(void) { }
+__attribute__((weak)) void bridge_hw_init(void)
+{
+}
+__attribute__((weak)) void bridge_hw_tick(void)
+{
+}
 
 /* The Cortex-M intrinsic; weakly defined here so the scaffold
  * compiles under hosted toolchains where __WFI() is missing. */
 #ifndef __WFI
-__attribute__((weak)) void __WFI(void) { }
+__attribute__((weak)) void __WFI(void)
+{
+}
 #endif
 
 int main(void)
 {
-    bridge_hw_init();
-    transport_spi_init();
-    transport_i2c_init();
+	bridge_hw_init();
+	transport_spi_init();
+	transport_i2c_init();
 
-    /* Periodic housekeeping lives inside bridge_hw_tick() (a no-op on
+	/* Periodic housekeeping lives inside bridge_hw_tick() (a no-op on
      * this SoM rev); the main loop just yields. */
-    for (;;) {
-        __WFI();
-        bridge_hw_tick();
-    }
-    /* unreachable */
-    return 0;
+	for (;;) {
+		__WFI();
+		bridge_hw_tick();
+	}
+	/* unreachable */
+	return 0;
 }

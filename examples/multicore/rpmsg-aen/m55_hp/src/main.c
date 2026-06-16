@@ -27,59 +27,59 @@
 
 /* Shared wire format -- mirror of linux/src/main.c's struct. */
 typedef struct {
-    uint32_t seq;
-    float    accel_g[3];
-    float    pressure_pa;
-    float    temperature_c;
+	uint32_t seq;
+	float    accel_g[3];
+	float    pressure_pa;
+	float    temperature_c;
 } __attribute__((packed)) imu_sample_t;
 
 #define SAMPLE_BURST 4u
 
 int main(void)
 {
-    printf("[m55-hp] rpmsg-aen producer coming up\n");
+	printf("[m55-hp] rpmsg-aen producer coming up\n");
 
-    const alp_rpc_config_t cfg = {
-        .name      = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
-        .src_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
-        .dst_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
-        .mbox_ch   = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
-        .cacheable = true, /* AEN MRAM is cacheable (spec §6.8). */
-    };
-    alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
-    if (ch == NULL) {
-        printf("[m55-hp]   alp_rpc_open failed: last_err=%d\n", (int)alp_last_error());
-        goto done;
-    }
+	const alp_rpc_config_t cfg = {
+		.name      = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
+		.src_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
+		.dst_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
+		.mbox_ch   = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
+		.cacheable = true, /* AEN MRAM is cacheable (spec §6.8). */
+	};
+	alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
+	if (ch == NULL) {
+		printf("[m55-hp]   alp_rpc_open failed: last_err=%d\n", (int)alp_last_error());
+		goto done;
+	}
 
-    /* Producer loop.  On real silicon this reads alp_i2c_xfer()
+	/* Producer loop.  On real silicon this reads alp_i2c_xfer()
      * against the LSM6DSO + BMP581 chip drivers; under native_sim
      * the sensors aren't wired so we publish synthetic data so the
      * harness can latch. */
-    for (uint32_t i = 0; i < SAMPLE_BURST; ++i) {
-        imu_sample_t s = {
-            .seq           = i,
-            .accel_g       = { 0.0f, 0.0f, 1.0f },
-            .pressure_pa   = 101325.0f - (float)i * 12.0f,
-            .temperature_c = 22.5f + (float)i * 0.1f,
-        };
+	for (uint32_t i = 0; i < SAMPLE_BURST; ++i) {
+		imu_sample_t s = {
+			.seq           = i,
+			.accel_g       = { 0.0f, 0.0f, 1.0f },
+			.pressure_pa   = 101325.0f - (float)i * 12.0f,
+			.temperature_c = 22.5f + (float)i * 0.1f,
+		};
 
-        const alp_status_t rv = alp_rpc_send(ch, "imu_sample", &s, sizeof s);
-        if (rv != ALP_OK) {
-            printf("[m55-hp]   alp_rpc_send rv=%d at i=%u\n", (int)rv, (unsigned)i);
-            break;
-        }
-        printf("[m55-hp] published imu_sample seq=%u T=%.1f\n", (unsigned)i,
-               (double)s.temperature_c);
+		const alp_status_t rv = alp_rpc_send(ch, "imu_sample", &s, sizeof s);
+		if (rv != ALP_OK) {
+			printf("[m55-hp]   alp_rpc_send rv=%d at i=%u\n", (int)rv, (unsigned)i);
+			break;
+		}
+		printf("[m55-hp] published imu_sample seq=%u T=%.1f\n", (unsigned)i,
+		       (double)s.temperature_c);
 
 #ifndef CONFIG_BOARD_NATIVE_SIM
-        k_msleep(1000);
+		k_msleep(1000);
 #endif
-    }
+	}
 
-    alp_rpc_close(ch);
+	alp_rpc_close(ch);
 
 done:
-    printf("[rpmsg-aen] done\n");
-    return 0;
+	printf("[rpmsg-aen] done\n");
+	return 0;
 }

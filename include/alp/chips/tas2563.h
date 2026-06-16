@@ -64,16 +64,16 @@ extern "C" {
 
 /** Operating-mode enum mapped onto the chip's MODE_CTRL register. */
 typedef enum {
-    TAS2563_MODE_ACTIVE   = 0x00, /**< Audio amplification active. */
-    TAS2563_MODE_MUTE     = 0x01, /**< PWM muted, register state preserved. */
-    TAS2563_MODE_SHUTDOWN = 0x02, /**< Software shutdown, lowest IDD. */
+	TAS2563_MODE_ACTIVE   = 0x00, /**< Audio amplification active. */
+	TAS2563_MODE_MUTE     = 0x01, /**< PWM muted, register state preserved. */
+	TAS2563_MODE_SHUTDOWN = 0x02, /**< Software shutdown, lowest IDD. */
 } tas2563_mode_t;
 
 typedef struct {
-    bool        initialised;
-    alp_i2c_t  *bus;
-    uint8_t     addr;
-    alp_gpio_t *sd_n; /**< AMP.ENABLE pin (active-high; drive
+	bool        initialised;
+	alp_i2c_t  *bus;
+	uint8_t     addr;
+	alp_gpio_t *sd_n; /**< AMP.ENABLE pin (active-high; drive
                                low to assert SD_N hardware shutdown). */
 } tas2563_t;
 
@@ -108,7 +108,7 @@ alp_status_t tas2563_set_mode(tas2563_t *ctx, tas2563_mode_t mode);
 alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
 
 /** @brief Release the driver context.  Drops SD_N before returning. */
-void         tas2563_deinit(tas2563_t *ctx);
+void tas2563_deinit(tas2563_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

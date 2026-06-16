@@ -29,8 +29,7 @@ extern "C" {
  *  @param tau_q Pitch torque, -1..+1.
  *  @param tau_r Yaw torque, -1..+1.
  *  @param out   Output array of 4 motor commands, 0..1. */
-void mixer_x_quad(float thr, float tau_p, float tau_q, float tau_r,
-                  float out[4]);
+void mixer_x_quad(float thr, float tau_p, float tau_q, float tau_r, float out[4]);
 
 #ifdef __cplusplus
 } /* extern "C" */

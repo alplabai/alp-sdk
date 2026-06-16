@@ -21,18 +21,18 @@ typedef struct alp_dac_ops alp_dac_ops_t;
 
 /** Backend-owned per-handle state. */
 typedef struct alp_dac_backend_state {
-    void                *dev; /* opaque backend device pointer
+	void                *dev; /* opaque backend device pointer
                                        * (const struct device * on Zephyr;
                                        * kept void* so the portable handle
                                        * does not pull in <zephyr/device.h>) */
-    uint32_t             channel_id;
-    void                *be_data;
-    const alp_dac_ops_t *ops;
+	uint32_t             channel_id;
+	void                *be_data;
+	const alp_dac_ops_t *ops;
 } alp_dac_backend_state_t;
 
 /** Vtable each backend implements. */
 struct alp_dac_ops {
-    /* Open the channel.  cfg is the customer's config; state is
+	/* Open the channel.  cfg is the customer's config; state is
      * preallocated by the dispatcher; caps_out is filled with the
      * (possibly probe-refined) instance capabilities.
      *
@@ -40,17 +40,17 @@ struct alp_dac_ops {
      * ALP_ERR_NOT_READY if hardware isn't initialised; ALP_ERR_NOSUPPORT
      * when the backend has no DAC body (CONFIG_DAC=n).
      */
-    alp_status_t (*open)(const alp_dac_config_t *cfg, alp_dac_backend_state_t *state,
-                         alp_capabilities_t *caps_out);
+	alp_status_t (*open)(const alp_dac_config_t *cfg, alp_dac_backend_state_t *state,
+	                     alp_capabilities_t *caps_out);
 
-    /* Set the output in millivolts. */
-    alp_status_t (*write_mv)(alp_dac_backend_state_t *state, uint16_t mv);
+	/* Set the output in millivolts. */
+	alp_status_t (*write_mv)(alp_dac_backend_state_t *state, uint16_t mv);
 
-    /* Read back the programmed output in millivolts. */
-    alp_status_t (*read_mv)(alp_dac_backend_state_t *state, uint16_t *mv_out);
+	/* Read back the programmed output in millivolts. */
+	alp_status_t (*read_mv)(alp_dac_backend_state_t *state, uint16_t *mv_out);
 
-    /* Tear down.  May be NULL for stateless backends. */
-    void (*close)(alp_dac_backend_state_t *state);
+	/* Tear down.  May be NULL for stateless backends. */
+	void (*close)(alp_dac_backend_state_t *state);
 };
 
 /**
@@ -61,10 +61,10 @@ struct alp_dac_ops {
  * translation unit.
  */
 struct alp_dac {
-    alp_dac_backend_state_t state;
-    const alp_backend_t    *backend;
-    alp_capabilities_t      cached_caps;
-    bool                    in_use;
+	alp_dac_backend_state_t state;
+	const alp_backend_t    *backend;
+	alp_capabilities_t      cached_caps;
+	bool                    in_use;
 };
 
 #endif /* ALP_BACKENDS_DAC_OPS_H */

@@ -32,69 +32,91 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_UART_HANDLES 4
 #endif
 
-static struct alp_uart _pool[CONFIG_ALP_SDK_MAX_UART_HANDLES];
+static struct alp_uart  _pool[CONFIG_ALP_SDK_MAX_UART_HANDLES];
 
-static struct alp_uart *_alloc(void) {
-    for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_UART_HANDLES; ++i) {
-        if (!_pool[i].in_use) {
-            memset(&_pool[i], 0, sizeof(_pool[i]));
-            _pool[i].in_use = true;
-            return &_pool[i];
-        }
-    }
-    return NULL;
+static struct alp_uart *_alloc(void)
+{
+	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_UART_HANDLES; ++i) {
+		if (!_pool[i].in_use) {
+			memset(&_pool[i], 0, sizeof(_pool[i]));
+			_pool[i].in_use = true;
+			return &_pool[i];
+		}
+	}
+	return NULL;
 }
 
-static void _free(struct alp_uart *h) { h->in_use = false; }
-
-alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg) {
-    alp_z_clear_last_error();
-    if (cfg == NULL) { alp_z_set_last_error(ALP_ERR_INVAL); return NULL; }
-    const alp_backend_t *be = alp_backend_select("uart", ALP_SOC_REF_STR);
-    if (be == NULL) { alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC); return NULL; }
-    const alp_uart_ops_t *ops = (const alp_uart_ops_t *)be->ops;
-    if (ops == NULL || ops->open == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOT_IMPLEMENTED); return NULL;
-    }
-    struct alp_uart *h = _alloc();
-    if (h == NULL) { alp_z_set_last_error(ALP_ERR_NOMEM); return NULL; }
-    h->backend = be;
-    h->state.ops = ops;
-    alp_capabilities_t caps = { .flags = be->base_caps };
-    if (be->probe != NULL) {
-        uint32_t refined = caps.flags;
-        (void)be->probe(cfg->port_id, &refined);
-        caps.flags = refined;
-    }
-    alp_status_t rc = ops->open(cfg, &h->state, &caps);
-    if (rc != ALP_OK) { _free(h); alp_z_set_last_error(rc); return NULL; }
-    h->cached_caps = caps;
-    return h;
+static void _free(struct alp_uart *h)
+{
+	h->in_use = false;
 }
 
-alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len) {
-    if (port == NULL || !port->in_use) return ALP_ERR_NOT_READY;
-    if (data == NULL && len > 0) return ALP_ERR_INVAL;
-    if (len == 0) return ALP_OK;
-    return port->state.ops->write(&port->state, data, len);
+alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
+{
+	alp_z_clear_last_error();
+	if (cfg == NULL) {
+		alp_z_set_last_error(ALP_ERR_INVAL);
+		return NULL;
+	}
+	const alp_backend_t *be = alp_backend_select("uart", ALP_SOC_REF_STR);
+	if (be == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
+		return NULL;
+	}
+	const alp_uart_ops_t *ops = (const alp_uart_ops_t *)be->ops;
+	if (ops == NULL || ops->open == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOT_IMPLEMENTED);
+		return NULL;
+	}
+	struct alp_uart *h = _alloc();
+	if (h == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOMEM);
+		return NULL;
+	}
+	h->backend              = be;
+	h->state.ops            = ops;
+	alp_capabilities_t caps = { .flags = be->base_caps };
+	if (be->probe != NULL) {
+		uint32_t refined = caps.flags;
+		(void)be->probe(cfg->port_id, &refined);
+		caps.flags = refined;
+	}
+	alp_status_t rc = ops->open(cfg, &h->state, &caps);
+	if (rc != ALP_OK) {
+		_free(h);
+		alp_z_set_last_error(rc);
+		return NULL;
+	}
+	h->cached_caps = caps;
+	return h;
 }
 
-alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len,
-                           uint32_t timeout_ms) {
-    if (port == NULL || !port->in_use) return ALP_ERR_NOT_READY;
-    if (data == NULL && len > 0) return ALP_ERR_INVAL;
-    if (len == 0) return ALP_OK;
-    return port->state.ops->read(&port->state, data, len, timeout_ms);
+alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len)
+{
+	if (port == NULL || !port->in_use) return ALP_ERR_NOT_READY;
+	if (data == NULL && len > 0) return ALP_ERR_INVAL;
+	if (len == 0) return ALP_OK;
+	return port->state.ops->write(&port->state, data, len);
 }
 
-void alp_uart_close(alp_uart_t *port) {
-    if (port == NULL || !port->in_use) return;
-    if (port->state.ops != NULL && port->state.ops->close != NULL) {
-        port->state.ops->close(&port->state);
-    }
-    _free(port);
+alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms)
+{
+	if (port == NULL || !port->in_use) return ALP_ERR_NOT_READY;
+	if (data == NULL && len > 0) return ALP_ERR_INVAL;
+	if (len == 0) return ALP_OK;
+	return port->state.ops->read(&port->state, data, len, timeout_ms);
 }
 
-const alp_capabilities_t *alp_uart_capabilities(const alp_uart_t *port) {
-    return (port != NULL) ? &port->cached_caps : NULL;
+void alp_uart_close(alp_uart_t *port)
+{
+	if (port == NULL || !port->in_use) return;
+	if (port->state.ops != NULL && port->state.ops->close != NULL) {
+		port->state.ops->close(&port->state);
+	}
+	_free(port);
+}
+
+const alp_capabilities_t *alp_uart_capabilities(const alp_uart_t *port)
+{
+	return (port != NULL) ? &port->cached_caps : NULL;
 }

@@ -32,16 +32,16 @@
 extern "C" {
 #endif
 
-#define AR0234_I2C_ADDR_LOW  0x10u
+#define AR0234_I2C_ADDR_LOW 0x10u
 #define AR0234_I2C_ADDR_HIGH 0x18u
 
 #define AR0234_REG_CHIP_VERSION 0x3000u
-#define AR0234_CHIP_ID          0x0A56u
+#define AR0234_CHIP_ID 0x0A56u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } ar0234_t;
 
 /** @brief Bind context and verify chip ID. */

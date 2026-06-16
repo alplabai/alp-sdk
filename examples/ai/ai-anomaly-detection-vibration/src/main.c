@@ -166,11 +166,11 @@ static uint8_t s_arena[128 * 1024] __aligned(16);
  * against g-magnitude features in the v0.5 reference pipeline. */
 static inline float accel_magnitude_g(const icm42670_axes_t *a)
 {
-    const float lsb_per_g = 16384.0f; /* ICM-42670 FS_2G sensitivity (= LSM6DSO FS_2G) */
-    const float fx        = (float)a->x / lsb_per_g;
-    const float fy        = (float)a->y / lsb_per_g;
-    const float fz        = (float)a->z / lsb_per_g;
-    return sqrtf(fx * fx + fy * fy + fz * fz);
+	const float lsb_per_g = 16384.0f; /* ICM-42670 FS_2G sensitivity (= LSM6DSO FS_2G) */
+	const float fx        = (float)a->x / lsb_per_g;
+	const float fy        = (float)a->y / lsb_per_g;
+	const float fz        = (float)a->z / lsb_per_g;
+	return sqrtf(fx * fx + fy * fy + fz * fz);
 }
 
 /* Synthesize a deterministic vibration window when no IMU is
@@ -187,25 +187,25 @@ static inline float accel_magnitude_g(const icm42670_axes_t *a)
  * silicon fill_window() reads the actual ICM-42670 instead. */
 static void synthesize_window(float *out, size_t n, int iter)
 {
-    /* Every 2nd window carries the injected fault transient. */
-    const bool faulty = (iter % 2) == 1;
-    for (size_t i = 0; i < n; i++) {
-        /* ~1 g gravity baseline + a 60 Hz-ish running sinusoid
+	/* Every 2nd window carries the injected fault transient. */
+	const bool faulty = (iter % 2) == 1;
+	for (size_t i = 0; i < n; i++) {
+		/* ~1 g gravity baseline + a 60 Hz-ish running sinusoid
          * (period chosen against the 256-sample window for a clean
          * repeat). */
-        float v = 1.0f + 0.15f * sinf((2.0f * 3.14159265f * 8.0f * (float)i) / (float)n);
-        if (faulty) {
-            /* Injected impulsive transient: a decaying knock part-way
+		float v = 1.0f + 0.15f * sinf((2.0f * 3.14159265f * 8.0f * (float)i) / (float)n);
+		if (faulty) {
+			/* Injected impulsive transient: a decaying knock part-way
              * through the window.  Big enough to dominate the crest
              * factor / RMS so a vibration-anomaly model (or the
              * heuristic fallback below) flags it. */
-            if (i >= n / 3 && i < n / 3 + 16) {
-                float k = (float)(i - n / 3);
-                v += 1.2f * expf(-k / 4.0f);
-            }
-        }
-        out[i] = v;
-    }
+			if (i >= n / 3 && i < n / 3 + 16) {
+				float k = (float)(i - n / 3);
+				v += 1.2f * expf(-k / 4.0f);
+			}
+		}
+		out[i] = v;
+	}
 }
 
 /* Fill the window from the IMU.  When the IMU handle is NULL --
@@ -215,22 +215,22 @@ static void synthesize_window(float *out, size_t n, int iter)
  * zero. */
 static void fill_window(icm42670_t *imu, float *out, size_t n, int iter)
 {
-    if (imu == NULL) {
-        synthesize_window(out, n, iter);
-        return;
-    }
-    for (size_t i = 0; i < n; i++) {
-        icm42670_axes_t a = { 0 };
-        if (icm42670_read_accel(imu, &a) != ALP_OK) {
-            out[i] = 0.0f;
-            continue;
-        }
-        out[i] = accel_magnitude_g(&a);
-        /* Pace the loop at the chip's 800 Hz ODR.  Real
+	if (imu == NULL) {
+		synthesize_window(out, n, iter);
+		return;
+	}
+	for (size_t i = 0; i < n; i++) {
+		icm42670_axes_t a = { 0 };
+		if (icm42670_read_accel(imu, &a) != ALP_OK) {
+			out[i] = 0.0f;
+			continue;
+		}
+		out[i] = accel_magnitude_g(&a);
+		/* Pace the loop at the chip's 800 Hz ODR.  Real
          * deployments wire the ICM-42670 INT1 line to a GPIO IRQ
          * for jitter-free sample-ready dispatch; v0.5 polls. */
-        k_usleep(1250);
-    }
+		k_usleep(1250);
+	}
 }
 
 /* Copy a float window into the model's input tensor.  Quantises
@@ -240,30 +240,30 @@ static void fill_window(icm42670_t *imu, float *out, size_t n, int iter)
  * the window -- v0.5 stub backend returns rank-0 tensors. */
 static void copy_window_into_input(alp_inference_t *inf, const float *win, size_t n)
 {
-    alp_inference_tensor_t in = { 0 };
-    if (alp_inference_get_input(inf, 0, &in) != ALP_OK) {
-        return;
-    }
-    if (in.data == NULL || in.size_bytes == 0) {
-        return; /* Stub backend; nothing to fill. */
-    }
-    if (in.dtype == ALP_INFERENCE_DTYPE_F32) {
-        size_t bytes = n * sizeof(float);
-        if (bytes > in.size_bytes) bytes = in.size_bytes;
-        memcpy(in.data, win, bytes);
-    } else if (in.dtype == ALP_INFERENCE_DTYPE_INT8) {
-        int8_t *q   = (int8_t *)in.data;
-        size_t  cap = (in.size_bytes < n) ? in.size_bytes : n;
-        for (size_t i = 0; i < cap; i++) {
-            /* y = round(x / scale) + zero_point, clamp to int8. */
-            float   v  = win[i] / (in.scale > 0.0f ? in.scale : 1.0f);
-            int32_t qv = (int32_t)(v + 0.5f) + in.zero_point;
-            if (qv > 127) qv = 127;
-            if (qv < -128) qv = -128;
-            q[i] = (int8_t)qv;
-        }
-    }
-    /* TODO(v0.6): handle UINT8 / INT16 once the customer-facing
+	alp_inference_tensor_t in = { 0 };
+	if (alp_inference_get_input(inf, 0, &in) != ALP_OK) {
+		return;
+	}
+	if (in.data == NULL || in.size_bytes == 0) {
+		return; /* Stub backend; nothing to fill. */
+	}
+	if (in.dtype == ALP_INFERENCE_DTYPE_F32) {
+		size_t bytes = n * sizeof(float);
+		if (bytes > in.size_bytes) bytes = in.size_bytes;
+		memcpy(in.data, win, bytes);
+	} else if (in.dtype == ALP_INFERENCE_DTYPE_INT8) {
+		int8_t *q   = (int8_t *)in.data;
+		size_t  cap = (in.size_bytes < n) ? in.size_bytes : n;
+		for (size_t i = 0; i < cap; i++) {
+			/* y = round(x / scale) + zero_point, clamp to int8. */
+			float   v  = win[i] / (in.scale > 0.0f ? in.scale : 1.0f);
+			int32_t qv = (int32_t)(v + 0.5f) + in.zero_point;
+			if (qv > 127) qv = 127;
+			if (qv < -128) qv = -128;
+			q[i] = (int8_t)qv;
+		}
+	}
+	/* TODO(v0.6): handle UINT8 / INT16 once the customer-facing
      * Vela quantisation matrix is finalised. */
 }
 
@@ -272,20 +272,20 @@ static void copy_window_into_input(alp_inference_t *inf, const float *win, size_
  * de-quantise if the model emits int8. */
 static float read_anomaly_score(alp_inference_t *inf)
 {
-    alp_inference_tensor_t out = { 0 };
-    if (alp_inference_get_output(inf, 0, &out) != ALP_OK || out.data == NULL) {
-        return 0.0f;
-    }
-    if (out.dtype == ALP_INFERENCE_DTYPE_F32 && out.size_bytes >= sizeof(float)) {
-        float v;
-        memcpy(&v, out.data, sizeof(v));
-        return v;
-    }
-    if (out.dtype == ALP_INFERENCE_DTYPE_INT8 && out.size_bytes >= 1) {
-        int8_t q = ((const int8_t *)out.data)[0];
-        return ((float)q - (float)out.zero_point) * out.scale;
-    }
-    return 0.0f;
+	alp_inference_tensor_t out = { 0 };
+	if (alp_inference_get_output(inf, 0, &out) != ALP_OK || out.data == NULL) {
+		return 0.0f;
+	}
+	if (out.dtype == ALP_INFERENCE_DTYPE_F32 && out.size_bytes >= sizeof(float)) {
+		float v;
+		memcpy(&v, out.data, sizeof(v));
+		return v;
+	}
+	if (out.dtype == ALP_INFERENCE_DTYPE_INT8 && out.size_bytes >= 1) {
+		int8_t q = ((const int8_t *)out.data)[0];
+		return ((float)q - (float)out.zero_point) * out.scale;
+	}
+	return 0.0f;
 }
 
 /* Transparent heuristic anomaly score, used ONLY when the real
@@ -299,113 +299,113 @@ static float read_anomaly_score(alp_inference_t *inf)
  * model output from read_anomaly_score(). */
 static float heuristic_anomaly_score(const float *win, size_t n)
 {
-    if (n == 0) return 0.0f;
-    float sumsq = 0.0f;
-    float peak  = 0.0f;
-    for (size_t i = 0; i < n; i++) {
-        float a = fabsf(win[i]);
-        sumsq += win[i] * win[i];
-        if (a > peak) peak = a;
-    }
-    float rms = sqrtf(sumsq / (float)n);
-    if (rms <= 0.0f) return 0.0f;
-    float crest = peak / rms;    /* ~1.41 for a pure sinusoid. */
-    float score = crest - 1.41f; /* clean window -> ~0. */
-    return score < 0.0f ? 0.0f : score;
+	if (n == 0) return 0.0f;
+	float sumsq = 0.0f;
+	float peak  = 0.0f;
+	for (size_t i = 0; i < n; i++) {
+		float a = fabsf(win[i]);
+		sumsq += win[i] * win[i];
+		if (a > peak) peak = a;
+	}
+	float rms = sqrtf(sumsq / (float)n);
+	if (rms <= 0.0f) return 0.0f;
+	float crest = peak / rms;    /* ~1.41 for a pure sinusoid. */
+	float score = crest - 1.41f; /* clean window -> ~0. */
+	return score < 0.0f ? 0.0f : score;
 }
 
 int main(void)
 {
-    printf("[anomaly] alp-sdk vibration anomaly detection demo (ICM-42670)\n");
+	printf("[anomaly] alp-sdk vibration anomaly detection demo (ICM-42670)\n");
 
-    /* I2C bring-up.  BOARD_I2C_SENSORS resolves to the on-board sensor
+	/* I2C bring-up.  BOARD_I2C_SENSORS resolves to the on-board sensor
      * bus on whichever EVK is being targeted.  400 kHz is comfortable
      * for the ICM-42670's 1 MHz max.  Failure tolerated -- the loop
      * falls back to a zero-fill window so native_sim still runs. */
-    alp_i2c_t *i2c = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
-        .bitrate_hz = 400000,
-    });
-    if (i2c == NULL) {
-        printf("[anomaly] I2C open failed -- running with synthetic window\n");
-    }
+	alp_i2c_t *i2c = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
+	    .bitrate_hz = 400000,
+	});
+	if (i2c == NULL) {
+		printf("[anomaly] I2C open failed -- running with synthetic window\n");
+	}
 
-    /* IMU bring-up.  WHO_AM_I check happens inside icm42670_init;
+	/* IMU bring-up.  WHO_AM_I check happens inside icm42670_init;
      * we treat failure as "no IMU" and carry on. */
-    icm42670_t  imu   = { 0 };
-    icm42670_t *imu_p = NULL;
-    if (i2c != NULL) {
-        if (icm42670_init(&imu, i2c, IMU_I2C_ADDR) == ALP_OK) {
-            (void)icm42670_set_accel(&imu, IMU_ODR, IMU_FS);
-            imu_p = &imu;
-        } else {
-            printf("[anomaly] ICM-42670 WHO_AM_I failed -- synthetic window\n");
-        }
-    }
+	icm42670_t  imu   = { 0 };
+	icm42670_t *imu_p = NULL;
+	if (i2c != NULL) {
+		if (icm42670_init(&imu, i2c, IMU_I2C_ADDR) == ALP_OK) {
+			(void)icm42670_set_accel(&imu, IMU_ODR, IMU_FS);
+			imu_p = &imu;
+		} else {
+			printf("[anomaly] ICM-42670 WHO_AM_I failed -- synthetic window\n");
+		}
+	}
 
-    /* Inference bring-up.  AUTO routes to the on-die NPU on real
+	/* Inference bring-up.  AUTO routes to the on-die NPU on real
      * silicon, falls back to CPU on native_sim.  TODO: when the
      * v0.6 real-model artifact lands, switch format to
      * ALP_INFERENCE_MODEL_VELA for AEN / NX9101 + DXNN for V2N
      * (the loader-emitted preset will set this). */
-    alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
-        .backend     = ALP_INFERENCE_BACKEND_AUTO,
-        .format      = ALP_INFERENCE_MODEL_TFLITE,
-        .model_data  = s_model,
-        .model_size  = sizeof(s_model),
-        .arena       = s_arena,
-        .arena_bytes = sizeof(s_arena),
-    });
-    if (inf == NULL) {
-        printf("[anomaly] inference_open returned NULL -- v0.5 stub backend\n");
-    }
+	alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
+	    .backend     = ALP_INFERENCE_BACKEND_AUTO,
+	    .format      = ALP_INFERENCE_MODEL_TFLITE,
+	    .model_data  = s_model,
+	    .model_size  = sizeof(s_model),
+	    .arena       = s_arena,
+	    .arena_bytes = sizeof(s_arena),
+	});
+	if (inf == NULL) {
+		printf("[anomaly] inference_open returned NULL -- v0.5 stub backend\n");
+	}
 
-    /* Steady-state loop -- one inference per window.  On HiL the
+	/* Steady-state loop -- one inference per window.  On HiL the
      * window-fill blocks at the 800 Hz ODR (~320 ms per pass); on
      * native_sim it returns instantly and we exit after one
      * iteration so the twister harness sees a clean "done". */
-    for (int iter = 0; iter < 4; iter++) {
-        fill_window(imu_p, s_window, WINDOW_SAMPLES, iter);
+	for (int iter = 0; iter < 4; iter++) {
+		fill_window(imu_p, s_window, WINDOW_SAMPLES, iter);
 
-        /* Try the real model first.  read_anomaly_score() returns 0
+		/* Try the real model first.  read_anomaly_score() returns 0
          * when the backend is the v0.5 stub (rank-0 output) or no
          * NPU is present -- in that case fall back to the transparent
          * crest-factor heuristic so the demo still shows a meaningful,
          * varying score offline.  `from_model` tells the reader which
          * path produced the number. */
-        float score      = 0.0f;
-        bool  from_model = false;
-        if (inf != NULL) {
-            copy_window_into_input(inf, s_window, WINDOW_SAMPLES);
-            if (alp_inference_invoke(inf) == ALP_OK) {
-                score      = read_anomaly_score(inf);
-                from_model = (score != 0.0f);
-            }
-        }
-        if (!from_model) {
-            score = heuristic_anomaly_score(s_window, WINDOW_SAMPLES);
-        }
+		float score      = 0.0f;
+		bool  from_model = false;
+		if (inf != NULL) {
+			copy_window_into_input(inf, s_window, WINDOW_SAMPLES);
+			if (alp_inference_invoke(inf) == ALP_OK) {
+				score      = read_anomaly_score(inf);
+				from_model = (score != 0.0f);
+			}
+		}
+		if (!from_model) {
+			score = heuristic_anomaly_score(s_window, WINDOW_SAMPLES);
+		}
 
-        /* Dashboard line -- one row per window.  Threshold +
+		/* Dashboard line -- one row per window.  Threshold +
          * hysteresis logic for "raise an alarm" is the
          * application owner's call; v0.5 just publishes the raw
          * score so the customer can plot it and pick a cutoff.
          * `src` flags whether the score came from the trained model
          * or the heuristic fallback so the log is never misleading. */
-        printf("[anomaly] window=%d score=%.4f src=%s\n", iter, (double)score,
-               from_model ? "model" : "heuristic");
+		printf("[anomaly] window=%d score=%.4f src=%s\n", iter, (double)score,
+		       from_model ? "model" : "heuristic");
 
-        /* On native_sim fill_window() returns instantly (synthesized,
+		/* On native_sim fill_window() returns instantly (synthesized,
          * no IMU pacing), so running all four windows is cheap and
          * lets the reader see the score alternate between the healthy
          * and injected-fault windows.  On HiL each pass blocks ~308 ms
          * at the 833 Hz ODR. */
-    }
+	}
 
-    alp_inference_close(inf);
-    if (imu_p) icm42670_deinit(imu_p);
-    alp_i2c_close(i2c);
+	alp_inference_close(inf);
+	if (imu_p) icm42670_deinit(imu_p);
+	alp_i2c_close(i2c);
 
-    printf("[anomaly] done\n");
-    return 0;
+	printf("[anomaly] done\n");
+	return 0;
 }

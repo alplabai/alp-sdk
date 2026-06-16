@@ -58,165 +58,165 @@
 #endif
 
 struct alp_spi {
-    bool     in_use;
-    int      fd;
-    uint32_t bus_id;
-    uint32_t cs_pin_id;
-    uint32_t freq_hz;
-    uint8_t  bits_per_word;
+	bool     in_use;
+	int      fd;
+	uint32_t bus_id;
+	uint32_t cs_pin_id;
+	uint32_t freq_hz;
+	uint8_t  bits_per_word;
 };
 
 static struct alp_spi  g_spi_pool[ALP_SDK_YOCTO_MAX_SPI_HANDLES];
 
 static struct alp_spi *pool_acquire(void)
 {
-    for (size_t i = 0; i < ARRAY_SIZE(g_spi_pool); ++i) {
-        if (!g_spi_pool[i].in_use) {
-            memset(&g_spi_pool[i], 0, sizeof(g_spi_pool[i]));
-            g_spi_pool[i].in_use = true;
-            g_spi_pool[i].fd     = -1;
-            return &g_spi_pool[i];
-        }
-    }
-    return NULL;
+	for (size_t i = 0; i < ARRAY_SIZE(g_spi_pool); ++i) {
+		if (!g_spi_pool[i].in_use) {
+			memset(&g_spi_pool[i], 0, sizeof(g_spi_pool[i]));
+			g_spi_pool[i].in_use = true;
+			g_spi_pool[i].fd     = -1;
+			return &g_spi_pool[i];
+		}
+	}
+	return NULL;
 }
 
 static void pool_release(struct alp_spi *h)
 {
-    if (h == NULL) {
-        return;
-    }
-    if (h->fd >= 0) {
-        (void)close(h->fd);
-        h->fd = -1;
-    }
-    h->in_use = false;
+	if (h == NULL) {
+		return;
+	}
+	if (h->fd >= 0) {
+		(void)close(h->fd);
+		h->fd = -1;
+	}
+	h->in_use = false;
 }
 
 alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 {
-    if (cfg == NULL) {
-        alp_internal_set_last_error(ALP_ERR_INVAL);
-        return NULL;
-    }
-    if (cfg->mode > ALP_SPI_MODE_3) {
-        alp_internal_set_last_error(ALP_ERR_INVAL);
-        return NULL;
-    }
-    /* spidev accepts 1..32 bits/word; 0 from caller means "default 8". */
-    uint8_t bits = (cfg->bits_per_word == 0) ? 8 : cfg->bits_per_word;
-    if (bits == 0 || bits > 32) {
-        alp_internal_set_last_error(ALP_ERR_INVAL);
-        return NULL;
-    }
+	if (cfg == NULL) {
+		alp_internal_set_last_error(ALP_ERR_INVAL);
+		return NULL;
+	}
+	if (cfg->mode > ALP_SPI_MODE_3) {
+		alp_internal_set_last_error(ALP_ERR_INVAL);
+		return NULL;
+	}
+	/* spidev accepts 1..32 bits/word; 0 from caller means "default 8". */
+	uint8_t bits = (cfg->bits_per_word == 0) ? 8 : cfg->bits_per_word;
+	if (bits == 0 || bits > 32) {
+		alp_internal_set_last_error(ALP_ERR_INVAL);
+		return NULL;
+	}
 
-    char path[40];
-    int  n = snprintf(path, sizeof(path), "/dev/spidev%u.%u", cfg->bus_id, cfg->cs_pin_id);
-    if (n < 0 || (size_t)n >= sizeof(path)) {
-        alp_internal_set_last_error(ALP_ERR_INVAL);
-        return NULL;
-    }
+	char path[40];
+	int  n = snprintf(path, sizeof(path), "/dev/spidev%u.%u", cfg->bus_id, cfg->cs_pin_id);
+	if (n < 0 || (size_t)n >= sizeof(path)) {
+		alp_internal_set_last_error(ALP_ERR_INVAL);
+		return NULL;
+	}
 
-    int fd = open(path, O_RDWR | O_CLOEXEC);
-    if (fd < 0) {
-        alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
-        return NULL;
-    }
+	int fd = open(path, O_RDWR | O_CLOEXEC);
+	if (fd < 0) {
+		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		return NULL;
+	}
 
-    uint8_t mode_byte = (uint8_t)cfg->mode;
-    if (ioctl(fd, SPI_IOC_WR_MODE, &mode_byte) < 0 ||
-        ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits) < 0) {
-        alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
-        (void)close(fd);
-        return NULL;
-    }
-    if (cfg->freq_hz != 0) {
-        uint32_t freq = cfg->freq_hz;
-        if (ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &freq) < 0) {
-            alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
-            (void)close(fd);
-            return NULL;
-        }
-    }
+	uint8_t mode_byte = (uint8_t)cfg->mode;
+	if (ioctl(fd, SPI_IOC_WR_MODE, &mode_byte) < 0 ||
+	    ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits) < 0) {
+		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		(void)close(fd);
+		return NULL;
+	}
+	if (cfg->freq_hz != 0) {
+		uint32_t freq = cfg->freq_hz;
+		if (ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &freq) < 0) {
+			alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+			(void)close(fd);
+			return NULL;
+		}
+	}
 
-    struct alp_spi *h = pool_acquire();
-    if (h == NULL) {
-        alp_internal_set_last_error(ALP_ERR_NOMEM);
-        (void)close(fd);
-        return NULL;
-    }
-    h->fd            = fd;
-    h->bus_id        = cfg->bus_id;
-    h->cs_pin_id     = cfg->cs_pin_id;
-    h->freq_hz       = cfg->freq_hz;
-    h->bits_per_word = bits;
-    return h;
+	struct alp_spi *h = pool_acquire();
+	if (h == NULL) {
+		alp_internal_set_last_error(ALP_ERR_NOMEM);
+		(void)close(fd);
+		return NULL;
+	}
+	h->fd            = fd;
+	h->bus_id        = cfg->bus_id;
+	h->cs_pin_id     = cfg->cs_pin_id;
+	h->freq_hz       = cfg->freq_hz;
+	h->bits_per_word = bits;
+	return h;
 }
 
 alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len)
 {
-    if (bus == NULL || !bus->in_use) {
-        return ALP_ERR_INVAL;
-    }
-    if (len == 0) {
-        return ALP_OK;
-    }
-    /* SPI_IOC_MESSAGE caps `len` at UINT32_MAX; we additionally
+	if (bus == NULL || !bus->in_use) {
+		return ALP_ERR_INVAL;
+	}
+	if (len == 0) {
+		return ALP_OK;
+	}
+	/* SPI_IOC_MESSAGE caps `len` at UINT32_MAX; we additionally
      * guard against size_t overflow on 64-bit hosts -- a single
      * transfer >4 GiB is the caller's mistake. */
-    if (len > UINT32_MAX) {
-        return ALP_ERR_INVAL;
-    }
-    struct spi_ioc_transfer xfer = {
-        .tx_buf        = (uintptr_t)tx,
-        .rx_buf        = (uintptr_t)rx,
-        .len           = (uint32_t)len,
-        .speed_hz      = bus->freq_hz,
-        .bits_per_word = bus->bits_per_word,
-    };
-    if (ioctl(bus->fd, SPI_IOC_MESSAGE(1), &xfer) < 0) {
-        return alp_yocto_errno_to_alp(errno);
-    }
-    return ALP_OK;
+	if (len > UINT32_MAX) {
+		return ALP_ERR_INVAL;
+	}
+	struct spi_ioc_transfer xfer = {
+		.tx_buf        = (uintptr_t)tx,
+		.rx_buf        = (uintptr_t)rx,
+		.len           = (uint32_t)len,
+		.speed_hz      = bus->freq_hz,
+		.bits_per_word = bus->bits_per_word,
+	};
+	if (ioctl(bus->fd, SPI_IOC_MESSAGE(1), &xfer) < 0) {
+		return alp_yocto_errno_to_alp(errno);
+	}
+	return ALP_OK;
 }
 
 alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 {
-    if (bus == NULL || !bus->in_use || (tx == NULL && len > 0)) {
-        return ALP_ERR_INVAL;
-    }
-    if (len == 0) {
-        return ALP_OK;
-    }
-    ssize_t n = write(bus->fd, tx, len);
-    if (n < 0) {
-        return alp_yocto_errno_to_alp(errno);
-    }
-    if ((size_t)n != len) {
-        return ALP_ERR_IO;
-    }
-    return ALP_OK;
+	if (bus == NULL || !bus->in_use || (tx == NULL && len > 0)) {
+		return ALP_ERR_INVAL;
+	}
+	if (len == 0) {
+		return ALP_OK;
+	}
+	ssize_t n = write(bus->fd, tx, len);
+	if (n < 0) {
+		return alp_yocto_errno_to_alp(errno);
+	}
+	if ((size_t)n != len) {
+		return ALP_ERR_IO;
+	}
+	return ALP_OK;
 }
 
 alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len)
 {
-    if (bus == NULL || !bus->in_use || (rx == NULL && len > 0)) {
-        return ALP_ERR_INVAL;
-    }
-    if (len == 0) {
-        return ALP_OK;
-    }
-    ssize_t n = read(bus->fd, rx, len);
-    if (n < 0) {
-        return alp_yocto_errno_to_alp(errno);
-    }
-    if ((size_t)n != len) {
-        return ALP_ERR_IO;
-    }
-    return ALP_OK;
+	if (bus == NULL || !bus->in_use || (rx == NULL && len > 0)) {
+		return ALP_ERR_INVAL;
+	}
+	if (len == 0) {
+		return ALP_OK;
+	}
+	ssize_t n = read(bus->fd, rx, len);
+	if (n < 0) {
+		return alp_yocto_errno_to_alp(errno);
+	}
+	if ((size_t)n != len) {
+		return ALP_ERR_IO;
+	}
+	return ALP_OK;
 }
 
 void alp_spi_close(alp_spi_t *bus)
 {
-    pool_release(bus);
+	pool_release(bus);
 }

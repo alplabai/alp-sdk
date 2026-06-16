@@ -58,74 +58,74 @@ static uint8_t rx_backing[64];
 
 int            main(void)
 {
-    printf("[ringbuf] open BOARD_UART_DEBUG @ 115200 8N1\n");
+	printf("[ringbuf] open BOARD_UART_DEBUG @ 115200 8N1\n");
 
-    /* The classic open() — no different from the uart-echo example.
+	/* The classic open() — no different from the uart-echo example.
      * The ringbuf is a *layer on top*, not a replacement.  Apps that
      * mix polled reads with ringbuf reads on the same handle work,
      * though the typical pattern is one or the other. */
-    alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
-        .port_id   = BOARD_UART_DEBUG, /* E1M EVK: E1M_UART0; E1M-X EVK: E1M_X_UART0 */
-        .baudrate  = 115200,
-        .data_bits = 8,
-        .stop_bits = 1,
-        .parity    = ALP_UART_PARITY_NONE,
-    });
-    if (u == NULL) {
-        printf("[ringbuf] open failed: alp_last_error=%d\n", (int)alp_last_error());
-        printf("[ringbuf] done\n");
-        return 0;
-    }
+	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
+	    .port_id   = BOARD_UART_DEBUG, /* E1M EVK: E1M_UART0; E1M-X EVK: E1M_X_UART0 */
+	    .baudrate  = 115200,
+	    .data_bits = 8,
+	    .stop_bits = 1,
+	    .parity    = ALP_UART_PARITY_NONE,
+	});
+	if (u == NULL) {
+		printf("[ringbuf] open failed: alp_last_error=%d\n", (int)alp_last_error());
+		printf("[ringbuf] done\n");
+		return 0;
+	}
 
-    /* Attach the ring.  The backing store is caller-owned -- the SDK
+	/* Attach the ring.  The backing store is caller-owned -- the SDK
      * never allocates a buffer behind the user's back.  This makes
      * the memory contract explicit (apps can audit their RAM budget)
      * and lets the buffer live in a specific region (e.g. DTCM /
      * tightly-coupled SRAM on Cortex-M55 for lowest IRQ-to-consumer
      * latency). */
-    alp_uart_rx_ringbuf_t *rb = alp_uart_rx_ringbuf_attach(u, rx_backing, sizeof(rx_backing));
-    if (rb == NULL) {
-        /* On builds without CONFIG_ALP_SDK_UART_RX_RINGBUF the
+	alp_uart_rx_ringbuf_t *rb = alp_uart_rx_ringbuf_attach(u, rx_backing, sizeof(rx_backing));
+	if (rb == NULL) {
+		/* On builds without CONFIG_ALP_SDK_UART_RX_RINGBUF the
          * attach helper returns NULL with ALP_ERR_NOSUPPORT.  The
          * example's prj.conf flips that config on so we shouldn't
          * see this in CI -- but real-world apps should still
          * defend against it. */
-        printf("[ringbuf] attach failed: alp_last_error=%d\n", (int)alp_last_error());
-        alp_uart_close(u);
-        printf("[ringbuf] done\n");
-        return 0;
-    }
+		printf("[ringbuf] attach failed: alp_last_error=%d\n", (int)alp_last_error());
+		alp_uart_close(u);
+		printf("[ringbuf] done\n");
+		return 0;
+	}
 
-    /* Background work happens here.  In a real app this is where
+	/* Background work happens here.  In a real app this is where
      * the main loop runs -- service other peripherals, run inference,
      * advance state machines, etc.  Meanwhile the UART IRQ
      * silently drains the controller FIFO into the ring. */
-    printf("[ringbuf] attached; backing=%zu bytes\n", sizeof(rx_backing));
+	printf("[ringbuf] attached; backing=%zu bytes\n", sizeof(rx_backing));
 
-    /* k_msleep emulates "doing real work for a while".  On native_sim
+	/* k_msleep emulates "doing real work for a while".  On native_sim
      * we won't actually receive any bytes during this nap, but the
      * code path is identical to a production loop. */
-    k_msleep(50);
+	k_msleep(50);
 
-    /* Drain whatever the IRQ has staged.  Non-blocking: if the ring
+	/* Drain whatever the IRQ has staged.  Non-blocking: if the ring
      * is empty, got=0 and we move on.  This is the pattern apps
      * follow at every wakeup -- pop opportunistically, never block
      * waiting for the ring. */
-    uint8_t      scratch[32];
-    size_t       got = 0;
-    alp_status_t s   = alp_uart_rx_ringbuf_pop(rb, scratch, sizeof(scratch), &got);
-    printf("[ringbuf] pop -> status=%d got=%zu count_remaining=%zu\n", (int)s, got,
-           alp_uart_rx_ringbuf_count(rb));
+	uint8_t      scratch[32];
+	size_t       got = 0;
+	alp_status_t s   = alp_uart_rx_ringbuf_pop(rb, scratch, sizeof(scratch), &got);
+	printf("[ringbuf] pop -> status=%d got=%zu count_remaining=%zu\n", (int)s, got,
+	       alp_uart_rx_ringbuf_count(rb));
 
-    /* Detach when the ringbuf is no longer needed.  Disables the
+	/* Detach when the ringbuf is no longer needed.  Disables the
      * IRQ-driven RX path so the underlying alp_uart_t reverts to
      * normal polled-read semantics.  After detach the caller's
      * backing store may be reused or freed. */
-    alp_uart_rx_ringbuf_detach(rb);
+	alp_uart_rx_ringbuf_detach(rb);
 
-    /* Closing the port releases the alp_uart_t handle but does not
+	/* Closing the port releases the alp_uart_t handle but does not
      * power down the controller -- same as uart-echo. */
-    alp_uart_close(u);
-    printf("[ringbuf] done\n");
-    return 0;
+	alp_uart_close(u);
+	printf("[ringbuf] done\n");
+	return 0;
 }

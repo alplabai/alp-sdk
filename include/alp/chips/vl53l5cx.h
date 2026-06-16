@@ -36,13 +36,13 @@ extern "C" {
 #endif
 
 #define VL53L5CX_I2C_ADDR_DEFAULT 0x29u
-#define VL53L5CX_REG_DEVICE_ID    0x0000u
-#define VL53L5CX_DEVICE_ID        0xF0u /**< boot-status low byte after fw load. */
+#define VL53L5CX_REG_DEVICE_ID 0x0000u
+#define VL53L5CX_DEVICE_ID 0xF0u /**< boot-status low byte after fw load. */
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } vl53l5cx_t;
 
 /** @brief Bind context and probe. */

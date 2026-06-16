@@ -51,10 +51,10 @@ extern "C" {
  *  semicolon-terminated statement between the macro above and the
  *  first function declaration below. */
 typedef enum {
-    ALP_NXP_STORAGE_OTFAD_SLOT_0 = 0,
-    ALP_NXP_STORAGE_OTFAD_SLOT_1 = 1,
-    ALP_NXP_STORAGE_OTFAD_SLOT_2 = 2,
-    ALP_NXP_STORAGE_OTFAD_SLOT_3 = 3,
+	ALP_NXP_STORAGE_OTFAD_SLOT_0 = 0,
+	ALP_NXP_STORAGE_OTFAD_SLOT_1 = 1,
+	ALP_NXP_STORAGE_OTFAD_SLOT_2 = 2,
+	ALP_NXP_STORAGE_OTFAD_SLOT_3 = 3,
 } alp_nxp_storage_otfad_slot_t;
 
 /**
@@ -80,10 +80,8 @@ typedef enum {
  *          @ref ALP_ERR_NOSUPPORT until the vendor pack body lands /
  *          @ref ALP_ERR_IO on hardware bus / slot-program fault.
  */
-alp_status_t alp_nxp_storage_otfad_provision(alp_storage_t *s,
-                                             uint8_t        window_id,
-                                             const uint8_t *key,
-                                             const uint8_t *counter);
+alp_status_t alp_nxp_storage_otfad_provision(alp_storage_t *s, uint8_t window_id,
+                                             const uint8_t *key, const uint8_t *counter);
 
 /**
  * @brief Define the FlexSPI address window that an OTFAD slot decrypts.
@@ -107,10 +105,8 @@ alp_status_t alp_nxp_storage_otfad_provision(alp_storage_t *s,
  *          end <= start) / @ref ALP_ERR_NOSUPPORT until the vendor
  *          pack body lands.
  */
-alp_status_t alp_nxp_storage_otfad_set_window(alp_storage_t *s,
-                                              uint8_t        window_id,
-                                              uint32_t       start_addr,
-                                              uint32_t       end_addr);
+alp_status_t alp_nxp_storage_otfad_set_window(alp_storage_t *s, uint8_t window_id,
+                                              uint32_t start_addr, uint32_t end_addr);
 
 #ifdef __cplusplus
 }

@@ -37,9 +37,9 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_uart_t *port;
-    uint8_t     slave_addr; /**< 0..3 (MS1 + MS2 strap-selected). */
-    bool        initialised;
+	alp_uart_t *port;
+	uint8_t     slave_addr; /**< 0..3 (MS1 + MS2 strap-selected). */
+	bool        initialised;
 } tmc2209_t;
 
 /** @brief Bind context to caller-opened UART port. */

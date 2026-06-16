@@ -57,12 +57,12 @@ enum { OTA_SLOT_A = 0u, OTA_SLOT_B = 1u };
 #define OTA_SIG_LEN 64u /* ECDSA-P256 (r||s) */
 
 typedef struct {
-    uint32_t magic;       /* OTA_IMG_MAGIC */
-    uint32_t fmt_version; /* OTA_IMG_FMT_VERSION */
-    uint32_t img_len;     /* bytes of the image body (incl. this header) */
-    uint32_t fw_version;  /* firmware semver, packed */
-    uint32_t body_crc32;  /* CRC-32 over the body excluding this field+sig */
-    uint8_t  signature[OTA_SIG_LEN];
+	uint32_t magic;       /* OTA_IMG_MAGIC */
+	uint32_t fmt_version; /* OTA_IMG_FMT_VERSION */
+	uint32_t img_len;     /* bytes of the image body (incl. this header) */
+	uint32_t fw_version;  /* firmware semver, packed */
+	uint32_t body_crc32;  /* CRC-32 over the body excluding this field+sig */
+	uint8_t  signature[OTA_SIG_LEN];
 } ota_img_header_t;
 
 /* A/B metadata record — the bootloader picks the highest `counter` with a
@@ -78,21 +78,21 @@ typedef struct {
 #define OTA_META_STRUCT_VER 2u
 
 typedef struct {
-    uint32_t magic;          /* OTA_META_MAGIC */
-    uint32_t struct_version; /* OTA_META_STRUCT_VER */
-    uint32_t counter;        /* monotonic; highest valid record wins */
-    uint8_t  active_slot;    /* OTA_SLOT_A | OTA_SLOT_B */
-    uint8_t  slot_valid;     /* bit0 = slot A valid, bit1 = slot B valid */
-    uint8_t  _pad[2];
-    uint32_t fw_version[2]; /* per-slot firmware semver (A, B); 0 = unknown */
-    uint32_t img_len[2];    /* per-slot image length (A, B) */
-    uint32_t img_crc32[2];  /* per-slot image CRC-32 (A, B) */
-    uint32_t rec_crc32;     /* CRC-32 over this record excluding this field */
+	uint32_t magic;          /* OTA_META_MAGIC */
+	uint32_t struct_version; /* OTA_META_STRUCT_VER */
+	uint32_t counter;        /* monotonic; highest valid record wins */
+	uint8_t  active_slot;    /* OTA_SLOT_A | OTA_SLOT_B */
+	uint8_t  slot_valid;     /* bit0 = slot A valid, bit1 = slot B valid */
+	uint8_t  _pad[2];
+	uint32_t fw_version[2]; /* per-slot firmware semver (A, B); 0 = unknown */
+	uint32_t img_len[2];    /* per-slot image length (A, B) */
+	uint32_t img_crc32[2];  /* per-slot image CRC-32 (A, B) */
+	uint32_t rec_crc32;     /* CRC-32 over this record excluding this field */
 } ota_meta_record_t;
 
 static inline uint32_t ota_slot_base(uint8_t slot)
 {
-    return (slot == OTA_SLOT_B) ? OTA_SLOT_B_BASE : OTA_SLOT_A_BASE;
+	return (slot == OTA_SLOT_B) ? OTA_SLOT_B_BASE : OTA_SLOT_A_BASE;
 }
 
 #endif /* GD32_BRIDGE_OTA_LAYOUT_H */

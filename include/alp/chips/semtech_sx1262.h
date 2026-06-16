@@ -40,10 +40,10 @@ extern "C" {
 #define SX1262_OPCODE_WAKEUP 0xC0u
 
 typedef struct {
-    alp_spi_t  *bus;
-    alp_gpio_t *nreset;
-    alp_gpio_t *busy;
-    bool        initialised;
+	alp_spi_t  *bus;
+	alp_gpio_t *nreset;
+	alp_gpio_t *busy;
+	bool        initialised;
 } semtech_sx1262_t;
 
 /** @brief Bind context to caller-opened SPI + GPIO. */

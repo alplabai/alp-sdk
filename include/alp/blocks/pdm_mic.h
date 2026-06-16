@@ -41,20 +41,17 @@ extern "C" {
 #endif
 
 /** Number of channels the helper carries from the PDM front-end. */
-typedef enum {
-    ALP_PDM_MIC_MONO   = 1,
-    ALP_PDM_MIC_STEREO = 2
-} alp_pdm_mic_channels_t;
+typedef enum { ALP_PDM_MIC_MONO = 1, ALP_PDM_MIC_STEREO = 2 } alp_pdm_mic_channels_t;
 
 typedef struct alp_pdm_mic alp_pdm_mic_t;
 
 typedef struct {
-    uint32_t                peripheral_id;   /**< Studio-resolved I²S/PDM instance. */
-    uint32_t                sample_rate_hz;  /**< 8 kHz / 16 kHz / 48 kHz typical. */
-    alp_pdm_mic_channels_t  channels;
-    uint8_t                 sample_bits;     /**< 16 or 24. */
-    uint32_t                left_gain_db;    /**< +/- gain in dB applied by the decimator. */
-    uint32_t                right_gain_db;
+	uint32_t               peripheral_id;  /**< Studio-resolved I²S/PDM instance. */
+	uint32_t               sample_rate_hz; /**< 8 kHz / 16 kHz / 48 kHz typical. */
+	alp_pdm_mic_channels_t channels;
+	uint8_t                sample_bits;  /**< 16 or 24. */
+	uint32_t               left_gain_db; /**< +/- gain in dB applied by the decimator. */
+	uint32_t               right_gain_db;
 } alp_pdm_mic_config_t;
 
 /**
@@ -71,21 +68,17 @@ alp_pdm_mic_t *alp_pdm_mic_open(const alp_pdm_mic_config_t *cfg);
  * Frames interleave channels (L,R,L,R,…) in stereo configurations.
  * Returns the number of frames actually delivered via @p out_frames.
  */
-alp_status_t alp_pdm_mic_read(alp_pdm_mic_t *mic,
-                              int16_t *out, size_t frames,
-                              size_t *out_frames,
+alp_status_t alp_pdm_mic_read(alp_pdm_mic_t *mic, int16_t *out, size_t frames, size_t *out_frames,
                               uint32_t timeout_ms);
 
 /** Apply a runtime gain change (dB, signed) to the channels. */
-alp_status_t alp_pdm_mic_set_gain(alp_pdm_mic_t *mic,
-                                  int32_t left_gain_db,
-                                  int32_t right_gain_db);
+alp_status_t alp_pdm_mic_set_gain(alp_pdm_mic_t *mic, int32_t left_gain_db, int32_t right_gain_db);
 
 /** Release the helper.  Stops the peripheral. */
-void          alp_pdm_mic_close(alp_pdm_mic_t *mic);
+void alp_pdm_mic_close(alp_pdm_mic_t *mic);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_BLOCKS_PDM_MIC_H */
+#endif /* ALP_BLOCKS_PDM_MIC_H */

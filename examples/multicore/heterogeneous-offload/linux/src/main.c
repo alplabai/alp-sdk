@@ -39,70 +39,70 @@ static float g_mags[MAGS_LEN];
 /* Fill g_samples with a sine wave at `freq_hz`. */
 static void synth_sine(float freq_hz)
 {
-    const float two_pi_f = 2.0f * 3.14159265358979323846f * freq_hz / SAMPLE_RATE;
-    for (uint32_t i = 0; i < FFT_LEN; ++i) {
-        g_samples[i] = sinf(two_pi_f * (float)i);
-    }
+	const float two_pi_f = 2.0f * 3.14159265358979323846f * freq_hz / SAMPLE_RATE;
+	for (uint32_t i = 0; i < FFT_LEN; ++i) {
+		g_samples[i] = sinf(two_pi_f * (float)i);
+	}
 }
 
 /* Find the (non-DC) bin with the largest magnitude. */
 static uint32_t dominant_bin(void)
 {
-    uint32_t best = 1u;
-    float    bm   = g_mags[1];
-    for (uint32_t i = 2u; i < MAGS_LEN; ++i) {
-        if (g_mags[i] > bm) {
-            bm   = g_mags[i];
-            best = i;
-        }
-    }
-    return best;
+	uint32_t best = 1u;
+	float    bm   = g_mags[1];
+	for (uint32_t i = 2u; i < MAGS_LEN; ++i) {
+		if (g_mags[i] > bm) {
+			bm   = g_mags[i];
+			best = i;
+		}
+	}
+	return best;
 }
 
 static int call_fft_once(alp_rpc_channel_t *ch, float freq_hz)
 {
-    synth_sine(freq_hz);
+	synth_sine(freq_hz);
 
-    size_t             mags_len = sizeof g_mags;
-    const alp_status_t rv = alp_rpc_call(ch, "fft", g_samples, sizeof g_samples, g_mags, &mags_len,
-                                         /* timeout_ms = */ 1000u);
-    if (rv != ALP_OK) {
-        printf("[a55]   alp_rpc_call rv=%d\n", (int)rv);
-        return -1;
-    }
+	size_t             mags_len = sizeof g_mags;
+	const alp_status_t rv = alp_rpc_call(ch, "fft", g_samples, sizeof g_samples, g_mags, &mags_len,
+	                                     /* timeout_ms = */ 1000u);
+	if (rv != ALP_OK) {
+		printf("[a55]   alp_rpc_call rv=%d\n", (int)rv);
+		return -1;
+	}
 
-    const uint32_t bin = dominant_bin();
-    const float    f   = (float)bin * SAMPLE_RATE / (float)FFT_LEN;
-    printf("[a55]    fft returned; dominant bin=%u (~%.1f Hz)\n", (unsigned)bin, (double)f);
-    return 0;
+	const uint32_t bin = dominant_bin();
+	const float    f   = (float)bin * SAMPLE_RATE / (float)FFT_LEN;
+	printf("[a55]    fft returned; dominant bin=%u (~%.1f Hz)\n", (unsigned)bin, (double)f);
+	return 0;
 }
 
 int main(void)
 {
-    printf("[a55] heterogeneous-offload requester coming up\n");
+	printf("[a55] heterogeneous-offload requester coming up\n");
 
-    const alp_rpc_config_t cfg = {
-        .name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
-        .src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
-        .dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
-        .mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
-    };
-    alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
-    if (ch == NULL) {
-        printf("[a55]   alp_rpc_open failed: last_err=%d\n", (int)alp_last_error());
-        return 1;
-    }
+	const alp_rpc_config_t cfg = {
+		.name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
+		.src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
+		.dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
+		.mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
+	};
+	alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
+	if (ch == NULL) {
+		printf("[a55]   alp_rpc_open failed: last_err=%d\n", (int)alp_last_error());
+		return 1;
+	}
 
-    /* Two test passes -- different frequencies so the demo verifies
+	/* Two test passes -- different frequencies so the demo verifies
      * the FFT actually reflects the input.  Production code would
      * pull samples from libcamera / ALSA in a continuous loop. */
-    printf("[a55]    generated 1024-sample @ 440 Hz sine, calling fft...\n");
-    call_fft_once(ch, 440.0f);
+	printf("[a55]    generated 1024-sample @ 440 Hz sine, calling fft...\n");
+	call_fft_once(ch, 440.0f);
 
-    printf("[a55]    generated 1024-sample @ 880 Hz sine, calling fft...\n");
-    call_fft_once(ch, 880.0f);
+	printf("[a55]    generated 1024-sample @ 880 Hz sine, calling fft...\n");
+	call_fft_once(ch, 880.0f);
 
-    alp_rpc_close(ch);
-    printf("[heterogeneous-offload] done\n");
-    return 0;
+	alp_rpc_close(ch);
+	printf("[heterogeneous-offload] done\n");
+	return 0;
 }

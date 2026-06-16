@@ -45,13 +45,13 @@ extern "C" {
 #endif
 
 typedef enum {
-    CAM_MUX_PI3WVR626_INPUT_A = 0,
-    CAM_MUX_PI3WVR626_INPUT_B = 1,
+	CAM_MUX_PI3WVR626_INPUT_A = 0,
+	CAM_MUX_PI3WVR626_INPUT_B = 1,
 } cam_mux_pi3wvr626_input_t;
 
 typedef struct {
-    bool        initialised;
-    alp_gpio_t *sel_pin;
+	bool        initialised;
+	alp_gpio_t *sel_pin;
 } cam_mux_pi3wvr626_t;
 
 /**
@@ -70,7 +70,7 @@ alp_status_t cam_mux_pi3wvr626_select(cam_mux_pi3wvr626_t *ctx, cam_mux_pi3wvr62
 alp_status_t cam_mux_pi3wvr626_get(cam_mux_pi3wvr626_t *ctx, cam_mux_pi3wvr626_input_t *input_out);
 
 /** @brief Release the driver context.  Idempotent. */
-void         cam_mux_pi3wvr626_deinit(cam_mux_pi3wvr626_t *ctx);
+void cam_mux_pi3wvr626_deinit(cam_mux_pi3wvr626_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

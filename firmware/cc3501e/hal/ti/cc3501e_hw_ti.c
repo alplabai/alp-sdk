@@ -45,64 +45,64 @@ static volatile bool reset_pending;
 
 static int           ensure_simplelink_started(void)
 {
-    if (sl_running) {
-        return CC3501E_HW_OK;
-    }
-    /* sl_Start returns the device role (>=0) on success, a negative
+	if (sl_running) {
+		return CC3501E_HW_OK;
+	}
+	/* sl_Start returns the device role (>=0) on success, a negative
      * error otherwise.  NULL args = default interface / no init
      * callback (synchronous start). */
-    int16_t role = sl_Start(NULL, NULL, NULL);
-    if (role < 0) {
-        return CC3501E_HW_ERR_IO;
-    }
-    sl_running = true;
-    return CC3501E_HW_OK;
+	int16_t role = sl_Start(NULL, NULL, NULL);
+	if (role < 0) {
+		return CC3501E_HW_ERR_IO;
+	}
+	sl_running = true;
+	return CC3501E_HW_OK;
 }
 
 void cc3501e_hw_init(void)
 {
-    /* TI Drivers core init.  GPIO + SPI are brought up here so the
+	/* TI Drivers core init.  GPIO + SPI are brought up here so the
      * transport's hw-init hook can open its handles.  SimpleLink (the
      * radio) is started lazily -- see ensure_simplelink_started(). */
-    GPIO_init();
-    SPI_init();
+	GPIO_init();
+	SPI_init();
 }
 
 void cc3501e_hw_tick(void)
 {
-    if (reset_pending) {
-        /* Bring the NWP down cleanly if it was started, then reset the
+	if (reset_pending) {
+		/* Bring the NWP down cleanly if it was started, then reset the
          * application core.  By the time the idle loop runs this tick the
          * transport has already staged + started clocking the CMD_RESET
          * ack, so the host sees the ack then the link going quiet. */
-        if (sl_running) {
-            (void)sl_Stop(200 /* ms */);
-            sl_running = false;
-        }
-        NVIC_SystemReset(); /* CMSIS: M33 system reset -- does not return */
-    }
+		if (sl_running) {
+			(void)sl_Stop(200 /* ms */);
+			sl_running = false;
+		}
+		NVIC_SystemReset(); /* CMSIS: M33 system reset -- does not return */
+	}
 }
 
 int cc3501e_hw_get_mac(uint8_t mac[6])
 {
-    if (mac == 0) {
-        return CC3501E_HW_ERR_INVAL;
-    }
-    const int rv = ensure_simplelink_started();
-    if (rv != CC3501E_HW_OK) {
-        return rv;
-    }
-    /* Read the factory MAC.  MAC config takes no config-option; the
+	if (mac == 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	const int rv = ensure_simplelink_started();
+	if (rv != CC3501E_HW_OK) {
+		return rv;
+	}
+	/* Read the factory MAC.  MAC config takes no config-option; the
      * length is SL_MAC_ADDR_LEN (6). */
-    uint16_t len = 6u;
-    int32_t  rc  = sl_NetCfgGet(SL_NETCFG_MAC_ADDRESS_GET, NULL, &len, mac);
-    if (rc < 0 || len != 6u) {
-        return CC3501E_HW_ERR_IO;
-    }
-    return CC3501E_HW_OK;
+	uint16_t len = 6u;
+	int32_t  rc  = sl_NetCfgGet(SL_NETCFG_MAC_ADDRESS_GET, NULL, &len, mac);
+	if (rc < 0 || len != 6u) {
+		return CC3501E_HW_ERR_IO;
+	}
+	return CC3501E_HW_OK;
 }
 
 void cc3501e_hw_request_reset(void)
 {
-    reset_pending = true;
+	reset_pending = true;
 }

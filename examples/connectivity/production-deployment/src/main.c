@@ -93,7 +93,7 @@
 #include "alp/storage.h"
 
 #define MENDER_POLL_INTERVAL_S 600u
-#define HEARTBEAT_INTERVAL_S   60u
+#define HEARTBEAT_INTERVAL_S 60u
 
 /* ----------------------------------------------------------------- */
 /* Stage 1: factory-provisioning read-back                            */
@@ -101,23 +101,21 @@
 
 static void stage_factory_identity(void)
 {
-    printf("[prod] stage 1: reading manufacturer EEPROM manifest\n");
-    alp_hw_info_t info = { 0 };
-    const alp_status_t s = alp_hw_info_read(&info);
-    if (s != ALP_OK) {
-        printf("[prod]   alp_hw_info_read -> %d -- continuing with no identity\n", (int)s);
-        return;
-    }
-    printf("[prod]   SoM SKU=%s\n", info.som_sku);
-    printf("[prod]   SoM serial=%s\n", info.som_serial);
-    printf("[prod]   SoM hw_rev=%s\n", info.som_hw_rev);
-    printf("[prod]   SoM mfg date=%u-%02u-%02u\n",
-           (unsigned)info.som_mfg_year,
-           (unsigned)info.som_mfg_month,
-           (unsigned)info.som_mfg_day);
-    if (info.board_name[0] != '\0') {
-        printf("[prod]   board=%s rev=%s\n", info.board_name, info.board_hw_rev);
-    }
+	printf("[prod] stage 1: reading manufacturer EEPROM manifest\n");
+	alp_hw_info_t      info = { 0 };
+	const alp_status_t s    = alp_hw_info_read(&info);
+	if (s != ALP_OK) {
+		printf("[prod]   alp_hw_info_read -> %d -- continuing with no identity\n", (int)s);
+		return;
+	}
+	printf("[prod]   SoM SKU=%s\n", info.som_sku);
+	printf("[prod]   SoM serial=%s\n", info.som_serial);
+	printf("[prod]   SoM hw_rev=%s\n", info.som_hw_rev);
+	printf("[prod]   SoM mfg date=%u-%02u-%02u\n", (unsigned)info.som_mfg_year,
+	       (unsigned)info.som_mfg_month, (unsigned)info.som_mfg_day);
+	if (info.board_name[0] != '\0') {
+		printf("[prod]   board=%s rev=%s\n", info.board_name, info.board_hw_rev);
+	}
 }
 
 /* ----------------------------------------------------------------- */
@@ -126,30 +124,29 @@ static void stage_factory_identity(void)
 
 static void stage_secure_boot_evidence(void)
 {
-    printf("[prod] stage 2: reading MCUboot slot info\n");
-    /* alp_storage_open(INTERNAL_FLASH) lets us inspect the MCUboot
+	printf("[prod] stage 2: reading MCUboot slot info\n");
+	/* alp_storage_open(INTERNAL_FLASH) lets us inspect the MCUboot
      * trailer area; the swap-state byte + image_ok flag live in
      * the last sector of the active slot.  The exact offsets are
      * MCUboot's responsibility; this example just demonstrates the
      * read path. */
-    alp_storage_t *s = alp_storage_open(&(alp_storage_config_t){
-        .kind        = ALP_STORAGE_KIND_INTERNAL_FLASH,
-        .instance_id = 0u,
-    });
-    if (s == NULL) {
-        printf("[prod]   internal flash open -> last_err=%d\n", (int)alp_last_error());
-        return;
-    }
-    alp_storage_info_t info = { 0 };
-    const alp_status_t rc = alp_storage_get_info(s, &info);
-    if (rc == ALP_OK) {
-        printf("[prod]   internal flash: %llu bytes total, block=%u erase=%u\n",
-               (unsigned long long)info.total_bytes,
-               (unsigned)info.block_size,
-               (unsigned)info.erase_size);
-        printf("[prod]   (slot inspection + image_ok read happens here on HiL)\n");
-    }
-    alp_storage_close(s);
+	alp_storage_t *s = alp_storage_open(&(alp_storage_config_t){
+	    .kind        = ALP_STORAGE_KIND_INTERNAL_FLASH,
+	    .instance_id = 0u,
+	});
+	if (s == NULL) {
+		printf("[prod]   internal flash open -> last_err=%d\n", (int)alp_last_error());
+		return;
+	}
+	alp_storage_info_t info = { 0 };
+	const alp_status_t rc   = alp_storage_get_info(s, &info);
+	if (rc == ALP_OK) {
+		printf("[prod]   internal flash: %llu bytes total, block=%u erase=%u\n",
+		       (unsigned long long)info.total_bytes, (unsigned)info.block_size,
+		       (unsigned)info.erase_size);
+		printf("[prod]   (slot inspection + image_ok read happens here on HiL)\n");
+	}
+	alp_storage_close(s);
 }
 
 /* ----------------------------------------------------------------- */
@@ -158,8 +155,8 @@ static void stage_secure_boot_evidence(void)
 
 static void stage_ota_poll(void)
 {
-    printf("[prod] stage 3: connecting to Mender server\n");
-    /* The real Mender stack:
+	printf("[prod] stage 3: connecting to Mender server\n");
+	/* The real Mender stack:
      *   1. alp_iot_wifi_open + alp_iot_wifi_connect to associate.
      *   2. alp_iot_mqtt_open against the broker carrying the
      *      Mender deployment commands (or HTTPS poll, depending
@@ -171,12 +168,12 @@ static void stage_ota_poll(void)
      *
      * On native_sim every step returns NOSUPPORT; the example
      * prints the transitions but doesn't actually move bytes. */
-    alp_wifi_t *wifi = alp_wifi_open();
-    if (wifi == NULL) {
-        printf("[prod]   wifi open -> NOSUPPORT (native_sim) or NOT_READY (HiL pre-DT)\n");
-        return;
-    }
-    alp_wifi_close(wifi);
+	alp_wifi_t *wifi = alp_wifi_open();
+	if (wifi == NULL) {
+		printf("[prod]   wifi open -> NOSUPPORT (native_sim) or NOT_READY (HiL pre-DT)\n");
+		return;
+	}
+	alp_wifi_close(wifi);
 }
 
 /* ----------------------------------------------------------------- */
@@ -185,50 +182,50 @@ static void stage_ota_poll(void)
 
 static void stage_remote_attestation_tick(void)
 {
-    /* alp_aead_open(AES_GCM, derived-key) wrapped around an
+	/* alp_aead_open(AES_GCM, derived-key) wrapped around an
      * OPTIGA-signed payload would be the production shape; under
      * native_sim we exercise the framing path so the code-path
      * coverage stays meaningful in CI. */
-    uint8_t      payload[64];
-    const alp_status_t s = alp_random_bytes(payload, sizeof payload);
-    if (s != ALP_OK) {
-        printf("[prod]   attestation: alp_random_bytes -> %d\n", (int)s);
-        return;
-    }
-    printf("[prod]   attestation: 64-byte nonce drawn from TRNG\n");
-    /* On HiL: alp_optiga_sign(payload, sizeof payload, signature)
+	uint8_t            payload[64];
+	const alp_status_t s = alp_random_bytes(payload, sizeof payload);
+	if (s != ALP_OK) {
+		printf("[prod]   attestation: alp_random_bytes -> %d\n", (int)s);
+		return;
+	}
+	printf("[prod]   attestation: 64-byte nonce drawn from TRNG\n");
+	/* On HiL: alp_optiga_sign(payload, sizeof payload, signature)
      * then alp_iot_mqtt_publish(topic, signature, ...). */
 }
 
 int main(void)
 {
-    printf("[prod] alp-sdk production-deployment flagship\n");
+	printf("[prod] alp-sdk production-deployment flagship\n");
 
-    stage_factory_identity();
-    stage_secure_boot_evidence();
-    stage_ota_poll();
+	stage_factory_identity();
+	stage_secure_boot_evidence();
+	stage_ota_poll();
 
-    /* Steady-state loop -- this is the production shape.  On HiL
+	/* Steady-state loop -- this is the production shape.  On HiL
      * the heartbeat publishes every HEARTBEAT_INTERVAL_S; the
      * OTA poll fires every MENDER_POLL_INTERVAL_S.  Under
      * native_sim the loop exits after one iteration so the
      * Twister harness sees a clean "done". */
-    uint32_t ota_countdown_s = MENDER_POLL_INTERVAL_S;
-    for (;;) {
-        stage_remote_attestation_tick();
-        if (ota_countdown_s <= HEARTBEAT_INTERVAL_S) {
-            stage_ota_poll();
-            ota_countdown_s = MENDER_POLL_INTERVAL_S;
-        } else {
-            ota_countdown_s -= HEARTBEAT_INTERVAL_S;
-        }
+	uint32_t ota_countdown_s = MENDER_POLL_INTERVAL_S;
+	for (;;) {
+		stage_remote_attestation_tick();
+		if (ota_countdown_s <= HEARTBEAT_INTERVAL_S) {
+			stage_ota_poll();
+			ota_countdown_s = MENDER_POLL_INTERVAL_S;
+		} else {
+			ota_countdown_s -= HEARTBEAT_INTERVAL_S;
+		}
 #ifdef CONFIG_BOARD_NATIVE_SIM
-        break; /* one iteration is enough for the framing test */
+		break; /* one iteration is enough for the framing test */
 #else
-        k_sleep(K_SECONDS(HEARTBEAT_INTERVAL_S));
+		k_sleep(K_SECONDS(HEARTBEAT_INTERVAL_S));
 #endif
-    }
+	}
 
-    printf("[prod] done\n");
-    return 0;
+	printf("[prod] done\n");
+	return 0;
 }

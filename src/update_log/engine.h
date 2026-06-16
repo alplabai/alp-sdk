@@ -22,8 +22,8 @@ alp_status_t ulog_entry_decode(const uint8_t *buf, size_t len, alp_update_log_en
                                uint8_t prev_hash_out[32]);
 
 struct ulog_meta {
-    uint64_t count;
-    uint8_t  head_hash[32];
+	uint64_t count;
+	uint8_t  head_hash[32];
 };
 alp_status_t ulog_meta_encode(const struct ulog_meta *m, uint8_t out[ULOG_META_WIRE_LEN]);
 alp_status_t ulog_meta_decode(const uint8_t *buf, size_t len, struct ulog_meta *m_out);

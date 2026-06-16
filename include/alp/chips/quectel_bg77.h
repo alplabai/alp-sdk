@@ -34,10 +34,10 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_uart_t *port;
-    alp_gpio_t *pwrkey;
-    alp_gpio_t *reset;
-    bool        initialised;
+	alp_uart_t *port;
+	alp_gpio_t *pwrkey;
+	alp_gpio_t *reset;
+	bool        initialised;
 } quectel_bg77_t;
 
 /** @brief Bind context to caller-opened UART + GPIOs. */

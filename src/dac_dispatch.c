@@ -36,80 +36,80 @@ static struct alp_dac  _pool[CONFIG_ALP_SDK_MAX_DAC_HANDLES];
 
 static struct alp_dac *_alloc(void)
 {
-    for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_DAC_HANDLES; ++i) {
-        if (!_pool[i].in_use) {
-            memset(&_pool[i], 0, sizeof(_pool[i]));
-            _pool[i].in_use = true;
-            return &_pool[i];
-        }
-    }
-    return NULL;
+	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_DAC_HANDLES; ++i) {
+		if (!_pool[i].in_use) {
+			memset(&_pool[i], 0, sizeof(_pool[i]));
+			_pool[i].in_use = true;
+			return &_pool[i];
+		}
+	}
+	return NULL;
 }
 
 static void _free(struct alp_dac *h)
 {
-    h->in_use = false;
+	h->in_use = false;
 }
 
 alp_dac_t *alp_dac_open(const alp_dac_config_t *cfg)
 {
-    alp_z_clear_last_error();
-    if (cfg == NULL) {
-        alp_z_set_last_error(ALP_ERR_INVAL);
-        return NULL;
-    }
+	alp_z_clear_last_error();
+	if (cfg == NULL) {
+		alp_z_set_last_error(ALP_ERR_INVAL);
+		return NULL;
+	}
 
-    const alp_backend_t *be = alp_backend_select("dac", ALP_SOC_REF_STR);
-    if (be == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-        return NULL;
-    }
-    const alp_dac_ops_t *ops = (const alp_dac_ops_t *)be->ops;
-    if (ops == NULL || ops->open == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOT_IMPLEMENTED);
-        return NULL;
-    }
-    struct alp_dac *h = _alloc();
-    if (h == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOMEM);
-        return NULL;
-    }
-    h->backend              = be;
-    h->state.ops            = ops;
-    alp_capabilities_t caps = { .flags = be->base_caps };
-    if (be->probe != NULL) {
-        uint32_t refined = caps.flags;
-        (void)be->probe(cfg->channel_id, &refined);
-        caps.flags = refined;
-    }
-    alp_status_t rc = ops->open(cfg, &h->state, &caps);
-    if (rc != ALP_OK) {
-        _free(h);
-        alp_z_set_last_error(rc);
-        return NULL;
-    }
-    h->cached_caps = caps;
-    return h;
+	const alp_backend_t *be = alp_backend_select("dac", ALP_SOC_REF_STR);
+	if (be == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
+		return NULL;
+	}
+	const alp_dac_ops_t *ops = (const alp_dac_ops_t *)be->ops;
+	if (ops == NULL || ops->open == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOT_IMPLEMENTED);
+		return NULL;
+	}
+	struct alp_dac *h = _alloc();
+	if (h == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOMEM);
+		return NULL;
+	}
+	h->backend              = be;
+	h->state.ops            = ops;
+	alp_capabilities_t caps = { .flags = be->base_caps };
+	if (be->probe != NULL) {
+		uint32_t refined = caps.flags;
+		(void)be->probe(cfg->channel_id, &refined);
+		caps.flags = refined;
+	}
+	alp_status_t rc = ops->open(cfg, &h->state, &caps);
+	if (rc != ALP_OK) {
+		_free(h);
+		alp_z_set_last_error(rc);
+		return NULL;
+	}
+	h->cached_caps = caps;
+	return h;
 }
 
 alp_status_t alp_dac_write_mv(alp_dac_t *h, uint16_t mv)
 {
-    if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
-    return h->state.ops->write_mv(&h->state, mv);
+	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
+	return h->state.ops->write_mv(&h->state, mv);
 }
 
 alp_status_t alp_dac_read_mv(alp_dac_t *h, uint16_t *mv_out)
 {
-    if (mv_out == NULL) return ALP_ERR_INVAL;
-    if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
-    return h->state.ops->read_mv(&h->state, mv_out);
+	if (mv_out == NULL) return ALP_ERR_INVAL;
+	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
+	return h->state.ops->read_mv(&h->state, mv_out);
 }
 
 void alp_dac_close(alp_dac_t *h)
 {
-    if (h == NULL || !h->in_use) return;
-    if (h->state.ops != NULL && h->state.ops->close != NULL) {
-        h->state.ops->close(&h->state);
-    }
-    _free(h);
+	if (h == NULL || !h->in_use) return;
+	if (h->state.ops != NULL && h->state.ops->close != NULL) {
+		h->state.ops->close(&h->state);
+	}
+	_free(h);
 }

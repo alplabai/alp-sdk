@@ -41,47 +41,47 @@ static atomic_uint g_received;
 
 static void        on_temperature(const void *payload, size_t len, void *user)
 {
-    (void)user;
-    if (len != sizeof(float)) {
-        printf("[a55]   short payload (%zu)\n", len);
-        return;
-    }
-    float c;
-    memcpy(&c, payload, sizeof c);
-    const unsigned n = atomic_fetch_add(&g_received, 1u);
-    printf("[a55] recv temperature[%u]=%.1f\n", n, (double)c);
+	(void)user;
+	if (len != sizeof(float)) {
+		printf("[a55]   short payload (%zu)\n", len);
+		return;
+	}
+	float c;
+	memcpy(&c, payload, sizeof c);
+	const unsigned n = atomic_fetch_add(&g_received, 1u);
+	printf("[a55] recv temperature[%u]=%.1f\n", n, (double)c);
 }
 
 int main(void)
 {
-    printf("[a55] rpmsg-v2n consumer coming up\n");
+	printf("[a55] rpmsg-v2n consumer coming up\n");
 
-    const alp_rpc_config_t cfg = {
-        .name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
-        .src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT, /* mirror of M33 */
-        .dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
-        .mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
-    };
-    alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
-    if (ch == NULL) {
-        printf("[a55]   alp_rpc_open failed: last_err=%d\n", (int)alp_last_error());
-        return 1;
-    }
+	const alp_rpc_config_t cfg = {
+		.name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
+		.src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT, /* mirror of M33 */
+		.dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
+		.mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
+	};
+	alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
+	if (ch == NULL) {
+		printf("[a55]   alp_rpc_open failed: last_err=%d\n", (int)alp_last_error());
+		return 1;
+	}
 
-    if (alp_rpc_subscribe(ch, "temperature", on_temperature, NULL) != ALP_OK) {
-        printf("[a55]   alp_rpc_subscribe failed: last_err=%d\n", (int)alp_last_error());
-        alp_rpc_close(ch);
-        return 1;
-    }
+	if (alp_rpc_subscribe(ch, "temperature", on_temperature, NULL) != ALP_OK) {
+		printf("[a55]   alp_rpc_subscribe failed: last_err=%d\n", (int)alp_last_error());
+		alp_rpc_close(ch);
+		return 1;
+	}
 
-    /* Wait until the M33 has pushed DRAIN_COUNT samples.  Real
+	/* Wait until the M33 has pushed DRAIN_COUNT samples.  Real
      * deployments would run an event loop indefinitely; the demo
      * exits so the systemd unit + CI can observe completion. */
-    for (int i = 0; i < 50 && atomic_load(&g_received) < DRAIN_COUNT; ++i) {
-        usleep(100 * 1000);
-    }
+	for (int i = 0; i < 50 && atomic_load(&g_received) < DRAIN_COUNT; ++i) {
+		usleep(100 * 1000);
+	}
 
-    alp_rpc_close(ch);
-    printf("[rpmsg-v2n] done\n");
-    return 0;
+	alp_rpc_close(ch);
+	printf("[rpmsg-v2n] done\n");
+	return 0;
 }

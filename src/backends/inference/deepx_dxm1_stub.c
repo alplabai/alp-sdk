@@ -36,79 +36,81 @@
 
 #include "inference_ops.h"
 
-static alp_status_t deepx_open(const alp_inference_config_t *cfg,
-                               alp_inference_backend_state_t *state,
-                               alp_capabilities_t *caps_out)
+static alp_status_t deepx_open(const alp_inference_config_t  *cfg,
+                               alp_inference_backend_state_t *state, alp_capabilities_t *caps_out)
 {
-    (void)cfg;
-    state->be_data  = NULL;
-    state->dev      = NULL;
-    caps_out->flags = 0u;
-    /* The real body negotiates the .dxnn version, primes the
+	(void)cfg;
+	state->be_data  = NULL;
+	state->dev      = NULL;
+	caps_out->flags = 0u;
+	/* The real body negotiates the .dxnn version, primes the
      * DX-M1 command queue + DRAM tile allocator, and surfaces
      * the slot-management knobs via <alp/ext/deepx/inference.h>.
      * See issue #59 for the v0.x landing target. */
-    return ALP_ERR_NOT_IMPLEMENTED;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static size_t deepx_num_inputs(alp_inference_backend_state_t *state)
 {
-    (void)state;
-    return 0u;
+	(void)state;
+	return 0u;
 }
 
 static size_t deepx_num_outputs(alp_inference_backend_state_t *state)
 {
-    (void)state;
-    return 0u;
+	(void)state;
+	return 0u;
 }
 
-static alp_status_t deepx_get_input(alp_inference_backend_state_t *state,
-                                    size_t index,
+static alp_status_t deepx_get_input(alp_inference_backend_state_t *state, size_t index,
                                     alp_inference_tensor_t *out)
 {
-    (void)state; (void)index; (void)out;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)state;
+	(void)index;
+	(void)out;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t deepx_get_output(alp_inference_backend_state_t *state,
-                                     size_t index,
+static alp_status_t deepx_get_output(alp_inference_backend_state_t *state, size_t index,
                                      alp_inference_tensor_t *out)
 {
-    (void)state; (void)index; (void)out;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)state;
+	(void)index;
+	(void)out;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static alp_status_t deepx_invoke(alp_inference_backend_state_t *state)
 {
-    (void)state;
-    /* DX-M1 dispatch lands with the DEEPX SDK adapter.
+	(void)state;
+	/* DX-M1 dispatch lands with the DEEPX SDK adapter.
      * See issue #59. */
-    return ALP_ERR_NOT_IMPLEMENTED;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static void deepx_close(alp_inference_backend_state_t *state)
 {
-    if (state != NULL) {
-        state->be_data = NULL;
-    }
+	if (state != NULL) {
+		state->be_data = NULL;
+	}
 }
 
 static const alp_inference_ops_t _ops = {
-    .open        = deepx_open,
-    .num_inputs  = deepx_num_inputs,
-    .num_outputs = deepx_num_outputs,
-    .get_input   = deepx_get_input,
-    .get_output  = deepx_get_output,
-    .invoke      = deepx_invoke,
-    .close       = deepx_close,
+	.open        = deepx_open,
+	.num_inputs  = deepx_num_inputs,
+	.num_outputs = deepx_num_outputs,
+	.get_input   = deepx_get_input,
+	.get_output  = deepx_get_output,
+	.invoke      = deepx_invoke,
+	.close       = deepx_close,
 };
 
-ALP_BACKEND_REGISTER(inference, deepx_dxm1, {
-    .silicon_ref = "deepx:dx:m1",
-    .vendor      = "deepx",
-    .base_caps   = 0u,
-    .priority    = 100,
-    .ops         = &_ops,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(inference, deepx_dxm1,
+                     {
+                         .silicon_ref = "deepx:dx:m1",
+                         .vendor      = "deepx",
+                         .base_caps   = 0u,
+                         .priority    = 100,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });

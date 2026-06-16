@@ -19,11 +19,11 @@
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    alp_update_log_entry_t e;
-    uint8_t                prev[32];
-    (void)ulog_entry_decode(data, size, &e, prev);
+	alp_update_log_entry_t e;
+	uint8_t                prev[32];
+	(void)ulog_entry_decode(data, size, &e, prev);
 
-    struct ulog_meta m;
-    (void)ulog_meta_decode(data, size, &m);
-    return 0;
+	struct ulog_meta m;
+	(void)ulog_meta_decode(data, size, &m);
+	return 0;
 }

@@ -39,47 +39,43 @@
 
 static bool _is_renesas_backend(const alp_inference_t *inf)
 {
-    return inf != NULL && inf->backend != NULL &&
-           inf->backend->vendor != NULL &&
-           strcmp(inf->backend->vendor, "renesas") == 0;
+	return inf != NULL && inf->backend != NULL && inf->backend->vendor != NULL &&
+	       strcmp(inf->backend->vendor, "renesas") == 0;
 }
 
-alp_status_t alp_renesas_inference_pipeline_stage_pin(alp_inference_t *inf,
-                                                      uint32_t         layer_index,
+alp_status_t alp_renesas_inference_pipeline_stage_pin(alp_inference_t *inf, uint32_t layer_index,
                                                       alp_renesas_inference_stage_t stage)
 {
-    if (inf == NULL) return ALP_ERR_INVAL;
-    if (!_is_renesas_backend(inf)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
-    if ((unsigned)stage > (unsigned)ALP_RENESAS_INFERENCE_STAGE_DMA) {
-        return ALP_ERR_INVAL;
-    }
-    (void)layer_index;
-    /* Per-layer pin lands when the drpai_v2n backend grows past
+	if (inf == NULL) return ALP_ERR_INVAL;
+	if (!_is_renesas_backend(inf)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+	if ((unsigned)stage > (unsigned)ALP_RENESAS_INFERENCE_STAGE_DMA) {
+		return ALP_ERR_INVAL;
+	}
+	(void)layer_index;
+	/* Per-layer pin lands when the drpai_v2n backend grows past
      * its NOT_IMPLEMENTED stub (issue #58).  The layer-count
      * range check requires translator metadata which only the
      * real body has access to. */
-    return ALP_ERR_NOSUPPORT;
+	return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_renesas_inference_ai_sram_reserve(alp_inference_t *inf,
-                                                   uint32_t         reserve_bytes)
+alp_status_t alp_renesas_inference_ai_sram_reserve(alp_inference_t *inf, uint32_t reserve_bytes)
 {
-    if (inf == NULL) return ALP_ERR_INVAL;
-    if (!_is_renesas_backend(inf)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
-    if (reserve_bytes == 0u) return ALP_ERR_OUT_OF_RANGE;
-    if (reserve_bytes > ALP_RENESAS_INFERENCE_AI_SRAM_BYTES) {
-        return ALP_ERR_OUT_OF_RANGE;
-    }
-    /* AI-SRAM reservation pokes happen when the drpai_v2n backend
+	if (inf == NULL) return ALP_ERR_INVAL;
+	if (!_is_renesas_backend(inf)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+	if (reserve_bytes == 0u) return ALP_ERR_OUT_OF_RANGE;
+	if (reserve_bytes > ALP_RENESAS_INFERENCE_AI_SRAM_BYTES) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
+	/* AI-SRAM reservation pokes happen when the drpai_v2n backend
      * grows past its NOT_IMPLEMENTED stub. */
-    return ALP_ERR_NOSUPPORT;
+	return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_renesas_inference_get_status(alp_inference_t *inf,
-                                              uint32_t        *status_out)
+alp_status_t alp_renesas_inference_get_status(alp_inference_t *inf, uint32_t *status_out)
 {
-    if (inf == NULL || status_out == NULL) return ALP_ERR_INVAL;
-    if (!_is_renesas_backend(inf)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
-    *status_out = (uint32_t)ALP_RENESAS_INFERENCE_STATUS_IDLE;
-    return ALP_ERR_NOSUPPORT;
+	if (inf == NULL || status_out == NULL) return ALP_ERR_INVAL;
+	if (!_is_renesas_backend(inf)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+	*status_out = (uint32_t)ALP_RENESAS_INFERENCE_STATUS_IDLE;
+	return ALP_ERR_NOSUPPORT;
 }

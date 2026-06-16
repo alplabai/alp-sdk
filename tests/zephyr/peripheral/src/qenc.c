@@ -12,30 +12,31 @@
 #include "alp/counter.h"
 #include "alp/peripheral.h"
 
-ZTEST(alp_peripheral, test_qenc_null_cfg) {
-    zassert_is_null(alp_qenc_open(NULL));
-    /* qenc backend doesn't yet stamp last_error on NULL cfg --
+ZTEST(alp_peripheral, test_qenc_null_cfg)
+{
+	zassert_is_null(alp_qenc_open(NULL));
+	/* qenc backend doesn't yet stamp last_error on NULL cfg --
      * this is a TODO retrofit; the test still passes on NULL
      * return. */
 }
 
 ZTEST(alp_peripheral, test_qenc_get_position_null_handle_not_ready)
 {
-    int32_t pos = 99;
-    zassert_equal(alp_qenc_get_position(NULL, &pos), ALP_ERR_NOT_READY);
+	int32_t pos = 99;
+	zassert_equal(alp_qenc_get_position(NULL, &pos), ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_peripheral, test_qenc_get_position_null_out_invalid)
 {
-    zassert_equal(alp_qenc_get_position(NULL, NULL), ALP_ERR_INVAL);
+	zassert_equal(alp_qenc_get_position(NULL, NULL), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_peripheral, test_qenc_reset_position_null_handle_not_ready)
 {
-    zassert_equal(alp_qenc_reset_position(NULL), ALP_ERR_NOT_READY);
+	zassert_equal(alp_qenc_reset_position(NULL), ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_peripheral, test_qenc_close_null_is_noop)
 {
-    alp_qenc_close(NULL);
+	alp_qenc_close(NULL);
 }

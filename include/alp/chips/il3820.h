@@ -37,22 +37,19 @@
 extern "C" {
 #endif
 
-#define IL3820_WIDTH  400
+#define IL3820_WIDTH 400
 #define IL3820_HEIGHT 300
 
 typedef struct {
-    alp_spi_t  *bus;
-    alp_gpio_t *dc;
-    alp_gpio_t *reset;
-    alp_gpio_t *busy;
-    bool        initialised;
+	alp_spi_t  *bus;
+	alp_gpio_t *dc;
+	alp_gpio_t *reset;
+	alp_gpio_t *busy;
+	bool        initialised;
 } il3820_t;
 
 /** @brief Initialise an IL3820 e-paper controller over SPI. */
-alp_status_t il3820_init(il3820_t   *dev,
-                         alp_spi_t  *spi,
-                         alp_gpio_t *dc,
-                         alp_gpio_t *reset,
+alp_status_t il3820_init(il3820_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gpio_t *reset,
                          alp_gpio_t *busy);
 
 /** @brief Wait until BUSY de-asserts (panel ready) or timeout fires. */

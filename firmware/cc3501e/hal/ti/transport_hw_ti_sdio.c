@@ -48,19 +48,19 @@
  * the host's read block. */
 uint16_t sdio_hw_on_block_received(const uint8_t *block, uint16_t len)
 {
-    sdio_slave_on_request(block, len);
-    return sdio_slave_reply_len();
+	sdio_slave_on_request(block, len);
+	return sdio_slave_reply_len();
 }
 
 /* The staged reply buffer the SDIO-device read path clocks back. */
 const uint8_t *sdio_hw_reply_ptr(void)
 {
-    return sdio_slave_reply();
+	return sdio_slave_reply();
 }
 
 uint16_t sdio_hw_reply_len(void)
 {
-    return sdio_slave_reply_len();
+	return sdio_slave_reply_len();
 }
 
 /* --------------------------------------------------------------- */
@@ -69,7 +69,7 @@ uint16_t sdio_hw_reply_len(void)
 
 void bridge_transport_sdio_hw_init(void)
 {
-    /* Configure the CC3501E SDIO peripheral in DEVICE/function mode on
+	/* Configure the CC3501E SDIO peripheral in DEVICE/function mode on
      * GPIO_3/4/5/6/10/11 and register the block-transfer ISR so it
      * drives sdio_hw_on_block_received() (request block in) and clocks
      * sdio_hw_reply_ptr()/sdio_hw_reply_len() back (reply block out).

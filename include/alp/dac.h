@@ -53,8 +53,8 @@ typedef struct alp_dac alp_dac_t;
 
 /** Configuration passed to @ref alp_dac_open. */
 typedef struct {
-    uint32_t channel_id; /**< Studio-resolved DAC channel index (E1M_DAC0..DAC1). */
-    uint16_t initial_mv; /**< Initial output in millivolts; 0 = ground. */
+	uint32_t channel_id; /**< Studio-resolved DAC channel index (E1M_DAC0..DAC1). */
+	uint16_t initial_mv; /**< Initial output in millivolts; 0 = ground. */
 } alp_dac_config_t;
 
 /**

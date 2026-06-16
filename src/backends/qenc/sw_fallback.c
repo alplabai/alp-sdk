@@ -19,34 +19,36 @@
 
 #include "qenc_ops.h"
 
-static alp_status_t sw_open(const alp_qenc_config_t *cfg,
-                            alp_qenc_backend_state_t *st,
-                            alp_capabilities_t *caps_out) {
-    (void)cfg;
-    st->dev = NULL;
-    st->encoder_id = cfg->encoder_id;
-    st->last_position = 0;
-    st->be_data = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+static alp_status_t sw_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st,
+                            alp_capabilities_t *caps_out)
+{
+	(void)cfg;
+	st->dev           = NULL;
+	st->encoder_id    = cfg->encoder_id;
+	st->last_position = 0;
+	st->be_data       = NULL;
+	caps_out->flags   = 0u;
+	return ALP_OK;
 }
 
-static alp_status_t sw_get_position(alp_qenc_backend_state_t *st, int32_t *pos_out) {
-    st->last_position += 7;
-    *pos_out = st->last_position;
-    return ALP_OK;
+static alp_status_t sw_get_position(alp_qenc_backend_state_t *st, int32_t *pos_out)
+{
+	st->last_position += 7;
+	*pos_out = st->last_position;
+	return ALP_OK;
 }
 
-static alp_status_t sw_reset_position(alp_qenc_backend_state_t *st) {
-    st->last_position = 0;
-    return ALP_OK;
+static alp_status_t sw_reset_position(alp_qenc_backend_state_t *st)
+{
+	st->last_position = 0;
+	return ALP_OK;
 }
 
 static const alp_qenc_ops_t _ops = {
-    .open           = sw_open,
-    .get_position   = sw_get_position,
-    .reset_position = sw_reset_position,
-    .close          = NULL,
+	.open           = sw_open,
+	.get_position   = sw_get_position,
+	.reset_position = sw_reset_position,
+	.close          = NULL,
 };
 
 ALP_BACKEND_REGISTER(qenc, sw_fallback,

@@ -21,83 +21,83 @@
 
 static alp_status_t reg_read(tas2563_t *ctx, uint8_t reg, uint8_t *val_out)
 {
-    return alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, val_out, 1);
+	return alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, val_out, 1);
 }
 
 static alp_status_t reg_write(tas2563_t *ctx, uint8_t reg, uint8_t val)
 {
-    uint8_t buf[2] = {reg, val};
-    return alp_i2c_write(ctx->bus, ctx->addr, buf, sizeof(buf));
+	uint8_t buf[2] = { reg, val };
+	return alp_i2c_write(ctx->bus, ctx->addr, buf, sizeof(buf));
 }
 
 static alp_status_t select_page(tas2563_t *ctx, uint8_t page)
 {
-    return reg_write(ctx, TAS2563_REG_PAGE, page);
+	return reg_write(ctx, TAS2563_REG_PAGE, page);
 }
 
 alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp_gpio_t *sd_n)
 {
-    if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
-    memset(ctx, 0, sizeof(*ctx));
-    ctx->bus  = bus;
-    ctx->addr = addr_7bit;
-    ctx->sd_n = sd_n;
+	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
+	memset(ctx, 0, sizeof(*ctx));
+	ctx->bus  = bus;
+	ctx->addr = addr_7bit;
+	ctx->sd_n = sd_n;
 
-    /* If we own the SD_N pin, drive it high to leave HW shutdown.
+	/* If we own the SD_N pin, drive it high to leave HW shutdown.
      * If sd_n == NULL the caller is managing that line elsewhere
      * (or it's tied permanently asserted on the board). */
-    if (sd_n != NULL) {
-        alp_status_t s = alp_gpio_configure(sd_n, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
-        if (s != ALP_OK) return s;
-        s = alp_gpio_write(sd_n, true); /* AMP.ENABLE high -> chip out of HW shutdown */
-        if (s != ALP_OK) return s;
-    }
+	if (sd_n != NULL) {
+		alp_status_t s = alp_gpio_configure(sd_n, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+		if (s != ALP_OK) return s;
+		s = alp_gpio_write(sd_n, true); /* AMP.ENABLE high -> chip out of HW shutdown */
+		if (s != ALP_OK) return s;
+	}
 
-    /* I2C connectivity probe via REVID register on PAGE 0. */
-    alp_status_t s = select_page(ctx, 0);
-    if (s != ALP_OK) return ALP_ERR_NOT_READY;
-    uint8_t rev = 0;
-    s           = reg_read(ctx, TAS2563_REG_REVID, &rev);
-    if (s != ALP_OK) return ALP_ERR_NOT_READY;
+	/* I2C connectivity probe via REVID register on PAGE 0. */
+	alp_status_t s = select_page(ctx, 0);
+	if (s != ALP_OK) return ALP_ERR_NOT_READY;
+	uint8_t rev = 0;
+	s           = reg_read(ctx, TAS2563_REG_REVID, &rev);
+	if (s != ALP_OK) return ALP_ERR_NOT_READY;
 
-    ctx->initialised = true;
-    return ALP_OK;
+	ctx->initialised = true;
+	return ALP_OK;
 }
 
 alp_status_t tas2563_read_revision(tas2563_t *ctx, uint8_t *rev_out)
 {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if (rev_out == NULL) return ALP_ERR_INVAL;
-    alp_status_t s = select_page(ctx, 0);
-    if (s != ALP_OK) return s;
-    return reg_read(ctx, TAS2563_REG_REVID, rev_out);
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (rev_out == NULL) return ALP_ERR_INVAL;
+	alp_status_t s = select_page(ctx, 0);
+	if (s != ALP_OK) return s;
+	return reg_read(ctx, TAS2563_REG_REVID, rev_out);
 }
 
 alp_status_t tas2563_set_mode(tas2563_t *ctx, tas2563_mode_t mode)
 {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    alp_status_t s = select_page(ctx, 0);
-    if (s != ALP_OK) return s;
-    uint8_t cur = 0;
-    s           = reg_read(ctx, TAS2563_REG_MODE_CTRL, &cur);
-    if (s != ALP_OK) return s;
-    cur = (uint8_t)((cur & ~TAS2563_MODE_CTRL_MASK) | ((uint8_t)mode & TAS2563_MODE_CTRL_MASK));
-    return reg_write(ctx, TAS2563_REG_MODE_CTRL, cur);
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	alp_status_t s = select_page(ctx, 0);
+	if (s != ALP_OK) return s;
+	uint8_t cur = 0;
+	s           = reg_read(ctx, TAS2563_REG_MODE_CTRL, &cur);
+	if (s != ALP_OK) return s;
+	cur = (uint8_t)((cur & ~TAS2563_MODE_CTRL_MASK) | ((uint8_t)mode & TAS2563_MODE_CTRL_MASK));
+	return reg_write(ctx, TAS2563_REG_MODE_CTRL, cur);
 }
 
 alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable)
 {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if (ctx->sd_n == NULL) return ALP_ERR_NOSUPPORT;
-    return alp_gpio_write(ctx->sd_n, enable);
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (ctx->sd_n == NULL) return ALP_ERR_NOSUPPORT;
+	return alp_gpio_write(ctx->sd_n, enable);
 }
 
 void tas2563_deinit(tas2563_t *ctx)
 {
-    if (ctx == NULL) return;
-    if (ctx->initialised && ctx->sd_n != NULL) {
-        (void)alp_gpio_write(ctx->sd_n, false); /* HW shutdown on close */
-    }
-    ctx->initialised = false;
-    ctx->bus         = NULL;
+	if (ctx == NULL) return;
+	if (ctx->initialised && ctx->sd_n != NULL) {
+		(void)alp_gpio_write(ctx->sd_n, false); /* HW shutdown on close */
+	}
+	ctx->initialised = false;
+	ctx->bus         = NULL;
 }

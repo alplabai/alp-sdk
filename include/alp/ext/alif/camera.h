@@ -63,17 +63,17 @@ extern "C" {
  *  honours one rectangle per loop; a fresh call replaces the
  *  prior rectangle. */
 typedef enum {
-    ALP_ALIF_CAMERA_3A_AE  = 0,  /**< Auto-exposure metering region. */
-    ALP_ALIF_CAMERA_3A_AWB = 1,  /**< Auto-white-balance statistics. */
-    ALP_ALIF_CAMERA_3A_AF  = 2,  /**< Auto-focus contrast window. */
+	ALP_ALIF_CAMERA_3A_AE  = 0, /**< Auto-exposure metering region. */
+	ALP_ALIF_CAMERA_3A_AWB = 1, /**< Auto-white-balance statistics. */
+	ALP_ALIF_CAMERA_3A_AF  = 2, /**< Auto-focus contrast window. */
 } alp_alif_camera_3a_region_t;
 
 /** Bayer / per-channel slot the gain-table loader addresses. */
 typedef enum {
-    ALP_ALIF_CAMERA_CHANNEL_R  = 0,
-    ALP_ALIF_CAMERA_CHANNEL_GR = 1,
-    ALP_ALIF_CAMERA_CHANNEL_GB = 2,
-    ALP_ALIF_CAMERA_CHANNEL_B  = 3,
+	ALP_ALIF_CAMERA_CHANNEL_R  = 0,
+	ALP_ALIF_CAMERA_CHANNEL_GR = 1,
+	ALP_ALIF_CAMERA_CHANNEL_GB = 2,
+	ALP_ALIF_CAMERA_CHANNEL_B  = 3,
 } alp_alif_camera_channel_t;
 
 /** Pixel-coordinate rectangle.  Layout intentionally mirrors
@@ -81,10 +81,10 @@ typedef enum {
  *  AEN silicon can share rectangle-computation code modulo the
  *  enum types. */
 typedef struct {
-    uint16_t x;
-    uint16_t y;
-    uint16_t w;
-    uint16_t h;
+	uint16_t x;
+	uint16_t y;
+	uint16_t w;
+	uint16_t h;
 } alp_alif_camera_rect_t;
 
 /**
@@ -108,8 +108,8 @@ typedef struct {
  *         @ref ALP_ERR_NOSUPPORT until the Alif HAL Mali-C55
  *           integration lands.
  */
-alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t *camera,
-                                               alp_alif_camera_3a_region_t region,
+alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t                 *camera,
+                                               alp_alif_camera_3a_region_t   region,
                                                const alp_alif_camera_rect_t *rect);
 
 /**
@@ -131,10 +131,9 @@ alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t *camera,
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC /
  *         @ref ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_alif_camera_isp_gain_table_load(alp_camera_t *camera,
+alp_status_t alp_alif_camera_isp_gain_table_load(alp_camera_t             *camera,
                                                  alp_alif_camera_channel_t channel,
-                                                 const uint16_t *table,
-                                                 uint16_t        len);
+                                                 const uint16_t *table, uint16_t len);
 
 /**
  * @brief Load the lens-shading-correction LUT (Mali-C55 "MESH").
@@ -153,9 +152,8 @@ alp_status_t alp_alif_camera_isp_gain_table_load(alp_camera_t *camera,
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC /
  *         @ref ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_alif_camera_isp_lsc_lut_load(alp_camera_t  *camera,
-                                              const uint16_t *lut,
-                                              uint16_t        len);
+alp_status_t alp_alif_camera_isp_lsc_lut_load(alp_camera_t *camera, const uint16_t *lut,
+                                              uint16_t len);
 
 #ifdef __cplusplus
 }

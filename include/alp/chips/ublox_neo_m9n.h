@@ -35,8 +35,8 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_uart_t *port;
-    bool        initialised;
+	alp_uart_t *port;
+	bool        initialised;
 } ublox_neo_m9n_t;
 
 /** @brief Bind context to caller-opened UART port. */

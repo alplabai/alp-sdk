@@ -56,39 +56,39 @@ extern "C" {
 
 /** Bank-select pseudo-register (selects DSP / SENSOR register pages). */
 #define OV2640_REG_BANK_SEL 0xFFu
-#define OV2640_BANK_DSP     0x00u
-#define OV2640_BANK_SENSOR  0x01u
+#define OV2640_BANK_DSP 0x00u
+#define OV2640_BANK_SENSOR 0x01u
 
 /** PIDH:PIDL on bank SENSOR = (0x26, 0x42) -- combined `OV2640_CHIP_ID`. */
-#define OV2640_REG_PIDH   0x0Au
-#define OV2640_REG_PIDL   0x0Bu
-#define OV2640_CHIP_ID    0x2642u
+#define OV2640_REG_PIDH 0x0Au
+#define OV2640_REG_PIDL 0x0Bu
+#define OV2640_CHIP_ID 0x2642u
 
 /** Resolution presets the driver knows how to configure. */
 typedef enum {
-    OV2640_RES_QQVGA = 0, /**< 160 × 120 */
-    OV2640_RES_QVGA  = 1, /**< 320 × 240 */
-    OV2640_RES_VGA   = 2, /**< 640 × 480 */
-    OV2640_RES_SVGA  = 3, /**< 800 × 600 */
-    OV2640_RES_XGA   = 4, /**< 1024 × 768 */
-    OV2640_RES_SXGA  = 5, /**< 1280 × 1024 */
-    OV2640_RES_UXGA  = 6, /**< 1600 × 1200 (full-res) */
+	OV2640_RES_QQVGA = 0, /**< 160 × 120 */
+	OV2640_RES_QVGA  = 1, /**< 320 × 240 */
+	OV2640_RES_VGA   = 2, /**< 640 × 480 */
+	OV2640_RES_SVGA  = 3, /**< 800 × 600 */
+	OV2640_RES_XGA   = 4, /**< 1024 × 768 */
+	OV2640_RES_SXGA  = 5, /**< 1280 × 1024 */
+	OV2640_RES_UXGA  = 6, /**< 1600 × 1200 (full-res) */
 } ov2640_resolution_t;
 
 /** Pixel-format selection. */
 typedef enum {
-    OV2640_FMT_RGB565 = 0,
-    OV2640_FMT_YUV422 = 1,
-    OV2640_FMT_JPEG   = 2,
+	OV2640_FMT_RGB565 = 0,
+	OV2640_FMT_YUV422 = 1,
+	OV2640_FMT_JPEG   = 2,
 } ov2640_format_t;
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-    alp_i2c_t          *bus;
-    uint8_t             addr;
-    ov2640_resolution_t res;
-    ov2640_format_t     fmt;
-    bool                initialised;
+	alp_i2c_t          *bus;
+	uint8_t             addr;
+	ov2640_resolution_t res;
+	ov2640_format_t     fmt;
+	bool                initialised;
 } ov2640_t;
 
 /**

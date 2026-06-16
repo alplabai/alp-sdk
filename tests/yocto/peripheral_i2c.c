@@ -38,59 +38,59 @@
 
 static void test_null_cfg_returns_null_and_stamps_invalid(void)
 {
-    alp_i2c_t *bus = alp_i2c_open(NULL);
-    ALP_ASSERT_NULL(bus);
-    ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_INVAL);
+	alp_i2c_t *bus = alp_i2c_open(NULL);
+	ALP_ASSERT_NULL(bus);
+	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_INVAL);
 }
 
 static void test_nonexistent_bus_returns_null_and_stamps_not_ready(void)
 {
-    alp_i2c_config_t cfg = {
-        .bus_id     = ALP_TEST_BUS_NONEXISTENT,
-        .bitrate_hz = 400000,
-    };
-    alp_i2c_t *bus = alp_i2c_open(&cfg);
-    ALP_ASSERT_NULL(bus);
-    /* ENOENT -> ALP_ERR_NOT_READY per the errno_to_alp mapping. */
-    ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_NOT_READY);
+	alp_i2c_config_t cfg = {
+		.bus_id     = ALP_TEST_BUS_NONEXISTENT,
+		.bitrate_hz = 400000,
+	};
+	alp_i2c_t *bus = alp_i2c_open(&cfg);
+	ALP_ASSERT_NULL(bus);
+	/* ENOENT -> ALP_ERR_NOT_READY per the errno_to_alp mapping. */
+	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_NOT_READY);
 }
 
 static void test_write_on_null_bus_returns_invalid(void)
 {
-    uint8_t      buf[1] = {0x00};
-    alp_status_t rc     = alp_i2c_write(NULL, 0x6Bu, buf, sizeof(buf));
-    ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	uint8_t      buf[1] = { 0x00 };
+	alp_status_t rc     = alp_i2c_write(NULL, 0x6Bu, buf, sizeof(buf));
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
 }
 
 static void test_read_on_null_bus_returns_invalid(void)
 {
-    uint8_t      buf[1] = {0};
-    alp_status_t rc     = alp_i2c_read(NULL, 0x6Bu, buf, sizeof(buf));
-    ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	uint8_t      buf[1] = { 0 };
+	alp_status_t rc     = alp_i2c_read(NULL, 0x6Bu, buf, sizeof(buf));
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
 }
 
 static void test_write_read_on_null_bus_returns_invalid(void)
 {
-    uint8_t      wbuf[1] = {0x0F};
-    uint8_t      rbuf[1] = {0};
-    alp_status_t rc      = alp_i2c_write_read(NULL, 0x6Bu, wbuf, sizeof(wbuf), rbuf, sizeof(rbuf));
-    ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	uint8_t      wbuf[1] = { 0x0F };
+	uint8_t      rbuf[1] = { 0 };
+	alp_status_t rc      = alp_i2c_write_read(NULL, 0x6Bu, wbuf, sizeof(wbuf), rbuf, sizeof(rbuf));
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
 }
 
 static void test_close_null_is_safe(void)
 {
-    alp_i2c_close(NULL);
-    ALP_TEST_PASS();
+	alp_i2c_close(NULL);
+	ALP_TEST_PASS();
 }
 
 int main(void)
 {
-    test_null_cfg_returns_null_and_stamps_invalid();
-    test_nonexistent_bus_returns_null_and_stamps_not_ready();
-    test_write_on_null_bus_returns_invalid();
-    test_read_on_null_bus_returns_invalid();
-    test_write_read_on_null_bus_returns_invalid();
-    test_close_null_is_safe();
+	test_null_cfg_returns_null_and_stamps_invalid();
+	test_nonexistent_bus_returns_null_and_stamps_not_ready();
+	test_write_on_null_bus_returns_invalid();
+	test_read_on_null_bus_returns_invalid();
+	test_write_read_on_null_bus_returns_invalid();
+	test_close_null_is_safe();
 
-    ALP_TEST_SUMMARY();
+	ALP_TEST_SUMMARY();
 }

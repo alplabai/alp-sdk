@@ -66,34 +66,34 @@
  * cached uV-per-count scale, and the raw offset (kept for diagnostics;
  * not applied by read_raw -- see open()). */
 typedef struct {
-    unsigned device_id;
-    unsigned channel;
-    long     offset_raw; /* in_voltage<ch>_offset, raw counts; 0 if absent */
+	unsigned device_id;
+	unsigned channel;
+	long     offset_raw; /* in_voltage<ch>_offset, raw counts; 0 if absent */
 } y_adc_data_t;
 
 /** @brief Map a (positive) errno value to the closest alp_status_t. */
 static alp_status_t _errno_to_alp(int err)
 {
-    switch (err) {
-    case 0:
-        return ALP_OK;
-    case EINVAL:
-        return ALP_ERR_INVAL;
-    case EBUSY:
-    case EAGAIN:
-        return ALP_ERR_BUSY;
-    case ENODEV:
-    case ENOENT:
-        return ALP_ERR_NOT_READY;
-    case ENOTSUP:
+	switch (err) {
+	case 0:
+		return ALP_OK;
+	case EINVAL:
+		return ALP_ERR_INVAL;
+	case EBUSY:
+	case EAGAIN:
+		return ALP_ERR_BUSY;
+	case ENODEV:
+	case ENOENT:
+		return ALP_ERR_NOT_READY;
+	case ENOTSUP:
 #if defined(EOPNOTSUPP) && (EOPNOTSUPP != ENOTSUP)
-    case EOPNOTSUPP:
+	case EOPNOTSUPP:
 #endif
-    case ENOSYS:
-        return ALP_ERR_NOSUPPORT;
-    default:
-        return ALP_ERR_IO;
-    }
+	case ENOSYS:
+		return ALP_ERR_NOSUPPORT;
+	default:
+		return ALP_ERR_IO;
+	}
 }
 
 /**
@@ -106,30 +106,30 @@ static alp_status_t _errno_to_alp(int err)
 static alp_status_t _read_attr(unsigned device_id, unsigned channel, const char *suffix, char *buf,
                                size_t buflen)
 {
-    char path[96];
-    int  n = snprintf(path, sizeof(path), "/sys/bus/iio/devices/iio:device%u/in_voltage%u_%s",
-                      device_id, channel, suffix);
-    if (n < 0 || (size_t)n >= sizeof(path)) {
-        return ALP_ERR_INVAL;
-    }
+	char path[96];
+	int  n = snprintf(path, sizeof(path), "/sys/bus/iio/devices/iio:device%u/in_voltage%u_%s",
+	                  device_id, channel, suffix);
+	if (n < 0 || (size_t)n >= sizeof(path)) {
+		return ALP_ERR_INVAL;
+	}
 
-    int fd = open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) {
-        return _errno_to_alp(errno);
-    }
+	int fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0) {
+		return _errno_to_alp(errno);
+	}
 
-    ssize_t r = read(fd, buf, buflen - 1u);
-    int     e = errno;
-    close(fd);
-    if (r < 0) {
-        return _errno_to_alp(e);
-    }
-    buf[r] = '\0';
-    /* Strip the trailing newline the kernel appends. */
-    if (r > 0 && buf[r - 1] == '\n') {
-        buf[r - 1] = '\0';
-    }
-    return ALP_OK;
+	ssize_t r = read(fd, buf, buflen - 1u);
+	int     e = errno;
+	close(fd);
+	if (r < 0) {
+		return _errno_to_alp(e);
+	}
+	buf[r] = '\0';
+	/* Strip the trailing newline the kernel appends. */
+	if (r > 0 && buf[r - 1] == '\n') {
+		buf[r - 1] = '\0';
+	}
+	return ALP_OK;
 }
 
 /**
@@ -147,49 +147,49 @@ static alp_status_t _read_attr(unsigned device_id, unsigned channel, const char 
  */
 static alp_status_t _scale_mv_str_to_uv(const char *s, uint64_t *uv_per_count)
 {
-    /* Skip leading whitespace. */
-    while (*s == ' ' || *s == '\t') {
-        s++;
-    }
-    if (*s == '\0' || *s == '-') {
-        /* Negative scale is not meaningful for a single-ended voltage
+	/* Skip leading whitespace. */
+	while (*s == ' ' || *s == '\t') {
+		s++;
+	}
+	if (*s == '\0' || *s == '-') {
+		/* Negative scale is not meaningful for a single-ended voltage
          * channel and cannot be represented in reference_uv (unsigned);
          * reject rather than guess. */
-        return ALP_ERR_INVAL;
-    }
+		return ALP_ERR_INVAL;
+	}
 
-    uint64_t whole     = 0;
-    int      saw_digit = 0;
-    while (*s >= '0' && *s <= '9') {
-        whole = whole * 10u + (uint64_t)(*s - '0');
-        s++;
-        saw_digit = 1;
-    }
+	uint64_t whole     = 0;
+	int      saw_digit = 0;
+	while (*s >= '0' && *s <= '9') {
+		whole = whole * 10u + (uint64_t)(*s - '0');
+		s++;
+		saw_digit = 1;
+	}
 
-    uint64_t micros = whole * 1000u; /* mV -> uV */
-    if (*s == '.') {
-        s++;
-        uint64_t scale = 100u; /* 0.1 mV = 100 uV at the first frac digit */
-        /* Three digits: weights 100 -> 10 -> 1 uV.  A 4th digit would be
+	uint64_t micros = whole * 1000u; /* mV -> uV */
+	if (*s == '.') {
+		s++;
+		uint64_t scale = 100u; /* 0.1 mV = 100 uV at the first frac digit */
+		/* Three digits: weights 100 -> 10 -> 1 uV.  A 4th digit would be
          * 0.1 uV, below the 1 uV resolution and (with integer 1u/10u==0)
          * would contribute nothing, so stop at three. */
-        for (int i = 0; i < 3 && *s >= '0' && *s <= '9'; ++i) {
-            micros += (uint64_t)(*s - '0') * scale;
-            scale /= 10u;
-            s++;
-            saw_digit = 1;
-        }
-        /* Drop any remaining sub-1uV digits (below our resolution). */
-        while (*s >= '0' && *s <= '9') {
-            s++;
-        }
-    }
+		for (int i = 0; i < 3 && *s >= '0' && *s <= '9'; ++i) {
+			micros += (uint64_t)(*s - '0') * scale;
+			scale /= 10u;
+			s++;
+			saw_digit = 1;
+		}
+		/* Drop any remaining sub-1uV digits (below our resolution). */
+		while (*s >= '0' && *s <= '9') {
+			s++;
+		}
+	}
 
-    if (!saw_digit) {
-        return ALP_ERR_INVAL;
-    }
-    *uv_per_count = micros;
-    return ALP_OK;
+	if (!saw_digit) {
+		return ALP_ERR_INVAL;
+	}
+	*uv_per_count = micros;
+	return ALP_OK;
 }
 
 /**
@@ -214,74 +214,74 @@ static alp_status_t _scale_mv_str_to_uv(const char *s, uint64_t *uv_per_count)
 static alp_status_t y_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st,
                            alp_capabilities_t *caps_out)
 {
-    if (cfg == NULL || st == NULL || caps_out == NULL) {
-        return ALP_ERR_INVAL;
-    }
-    /* A caller-pinned resolution above our projection width can't be
+	if (cfg == NULL || st == NULL || caps_out == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	/* A caller-pinned resolution above our projection width can't be
      * honoured through the dispatcher's fixed-width read_uv formula. */
-    if (cfg->resolution_bits != 0 && cfg->resolution_bits > Y_ADC_RES_BITS) {
-        return ALP_ERR_OUT_OF_RANGE;
-    }
+	if (cfg->resolution_bits != 0 && cfg->resolution_bits > Y_ADC_RES_BITS) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
 
-    const unsigned device_id = (unsigned)cfg->channel_id;
-    const unsigned channel   = 0u; /* see doxygen above */
+	const unsigned device_id = (unsigned)cfg->channel_id;
+	const unsigned channel   = 0u; /* see doxygen above */
 
-    /* Probe the raw attribute to confirm the channel exists + is
+	/* Probe the raw attribute to confirm the channel exists + is
      * readable; the value itself is discarded here. */
-    char         rawbuf[Y_ADC_SYSBUF];
-    alp_status_t rc = _read_attr(device_id, channel, "raw", rawbuf, sizeof(rawbuf));
-    if (rc != ALP_OK) {
-        return rc;
-    }
+	char         rawbuf[Y_ADC_SYSBUF];
+	alp_status_t rc = _read_attr(device_id, channel, "raw", rawbuf, sizeof(rawbuf));
+	if (rc != ALP_OK) {
+		return rc;
+	}
 
-    /* Scale (mV per count) -> uV per count. */
-    char scalebuf[Y_ADC_SYSBUF];
-    rc = _read_attr(device_id, channel, "scale", scalebuf, sizeof(scalebuf));
-    if (rc != ALP_OK) {
-        return rc;
-    }
-    uint64_t uv_per_count = 0;
-    rc                    = _scale_mv_str_to_uv(scalebuf, &uv_per_count);
-    if (rc != ALP_OK) {
-        return rc;
-    }
+	/* Scale (mV per count) -> uV per count. */
+	char scalebuf[Y_ADC_SYSBUF];
+	rc = _read_attr(device_id, channel, "scale", scalebuf, sizeof(scalebuf));
+	if (rc != ALP_OK) {
+		return rc;
+	}
+	uint64_t uv_per_count = 0;
+	rc                    = _scale_mv_str_to_uv(scalebuf, &uv_per_count);
+	if (rc != ALP_OK) {
+		return rc;
+	}
 
-    /* Optional raw offset.  IIO's processed value is
+	/* Optional raw offset.  IIO's processed value is
      * (raw + offset) * scale; the dispatcher's read_uv has no offset
      * term and read_raw must report the true raw code, so a non-zero
      * offset is cached for diagnostics only and NOT applied.  Channels
      * needing offset correction are BENCH-UNVERIFIED here. */
-    long offset_raw = 0;
-    char offbuf[Y_ADC_SYSBUF];
-    if (_read_attr(device_id, channel, "offset", offbuf, sizeof(offbuf)) == ALP_OK) {
-        offset_raw = strtol(offbuf, NULL, 10);
-    }
+	long offset_raw = 0;
+	char offbuf[Y_ADC_SYSBUF];
+	if (_read_attr(device_id, channel, "offset", offbuf, sizeof(offbuf)) == ALP_OK) {
+		offset_raw = strtol(offbuf, NULL, 10);
+	}
 
-    /* reference_uv = uv_per_count * full-scale.  Saturate at UINT32_MAX
+	/* reference_uv = uv_per_count * full-scale.  Saturate at UINT32_MAX
      * (a >65 V single-ended SAR reference is not a real Alp target;
      * guard the multiply rather than overflow). */
-    uint64_t ref = uv_per_count * (uint64_t)Y_ADC_FULLSCALE;
-    if (ref > (uint64_t)UINT32_MAX) {
-        ref = (uint64_t)UINT32_MAX;
-    }
+	uint64_t ref = uv_per_count * (uint64_t)Y_ADC_FULLSCALE;
+	if (ref > (uint64_t)UINT32_MAX) {
+		ref = (uint64_t)UINT32_MAX;
+	}
 
-    y_adc_data_t *d = (y_adc_data_t *)malloc(sizeof(*d));
-    if (d == NULL) {
-        return ALP_ERR_NOMEM;
-    }
-    d->device_id                  = device_id;
-    d->channel                    = channel;
-    d->offset_raw                 = offset_raw;
+	y_adc_data_t *d = (y_adc_data_t *)malloc(sizeof(*d));
+	if (d == NULL) {
+		return ALP_ERR_NOMEM;
+	}
+	d->device_id                  = device_id;
+	d->channel                    = channel;
+	d->offset_raw                 = offset_raw;
 
-    st->be_data                   = d;
-    st->reference_uv              = (uint32_t)ref;
-    st->resolution_bits           = (uint16_t)Y_ADC_RES_BITS;
+	st->be_data                   = d;
+	st->reference_uv              = (uint32_t)ref;
+	st->resolution_bits           = (uint16_t)Y_ADC_RES_BITS;
 
-    caps_out->flags               = 0u;
-    caps_out->max_resolution_bits = (uint16_t)Y_ADC_RES_BITS;
-    caps_out->max_sample_rate     = 0u; /* one-shot sysfs read; rate not advertised */
-    caps_out->channel_count       = 1u;
-    return ALP_OK;
+	caps_out->flags               = 0u;
+	caps_out->max_resolution_bits = (uint16_t)Y_ADC_RES_BITS;
+	caps_out->max_sample_rate     = 0u; /* one-shot sysfs read; rate not advertised */
+	caps_out->channel_count       = 1u;
+	return ALP_OK;
 }
 
 /**
@@ -293,47 +293,47 @@ static alp_status_t y_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t 
  */
 static alp_status_t y_read_raw(alp_adc_backend_state_t *st, int32_t *raw_out)
 {
-    if (st == NULL || raw_out == NULL) {
-        return ALP_ERR_INVAL;
-    }
-    y_adc_data_t *d = (y_adc_data_t *)st->be_data;
-    if (d == NULL) {
-        return ALP_ERR_NOT_READY;
-    }
+	if (st == NULL || raw_out == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	y_adc_data_t *d = (y_adc_data_t *)st->be_data;
+	if (d == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
 
-    char         buf[Y_ADC_SYSBUF];
-    alp_status_t rc = _read_attr(d->device_id, d->channel, "raw", buf, sizeof(buf));
-    if (rc != ALP_OK) {
-        return rc;
-    }
+	char         buf[Y_ADC_SYSBUF];
+	alp_status_t rc = _read_attr(d->device_id, d->channel, "raw", buf, sizeof(buf));
+	if (rc != ALP_OK) {
+		return rc;
+	}
 
-    errno     = 0;
-    char *end = NULL;
-    long  v   = strtol(buf, &end, 10);
-    if (end == buf || errno == ERANGE) {
-        return ALP_ERR_IO;
-    }
-    *raw_out = (int32_t)v;
-    return ALP_OK;
+	errno     = 0;
+	char *end = NULL;
+	long  v   = strtol(buf, &end, 10);
+	if (end == buf || errno == ERANGE) {
+		return ALP_ERR_IO;
+	}
+	*raw_out = (int32_t)v;
+	return ALP_OK;
 }
 
 /** @brief Free the per-handle box. */
 static void y_close(alp_adc_backend_state_t *st)
 {
-    if (st == NULL) {
-        return;
-    }
-    y_adc_data_t *d = (y_adc_data_t *)st->be_data;
-    if (d != NULL) {
-        free(d);
-        st->be_data = NULL;
-    }
+	if (st == NULL) {
+		return;
+	}
+	y_adc_data_t *d = (y_adc_data_t *)st->be_data;
+	if (d != NULL) {
+		free(d);
+		st->be_data = NULL;
+	}
 }
 
 static const alp_adc_ops_t _ops = {
-    .open     = y_open,
-    .read_raw = y_read_raw,
-    .close    = y_close,
+	.open     = y_open,
+	.read_raw = y_read_raw,
+	.close    = y_close,
 };
 
 ALP_BACKEND_REGISTER(adc, yocto_drv,

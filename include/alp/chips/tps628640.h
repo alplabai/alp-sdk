@@ -111,8 +111,8 @@ extern "C" {
  *  Driver initialises the shadow to this so the first call to a
  *  typed helper reflects the chip's actual reset state. */
 #define TPS628640_CTRL_DEFAULT                                                                     \
-    (TPS628640_CTRL_FPWM_DURING_VID_CHANGE | TPS628640_CTRL_SOFTWARE_ENABLE |                      \
-     TPS628640_CTRL_OUTPUT_DISCHARGE | TPS628640_CTRL_HICCUP | TPS628640_CTRL_RAMP_SPEED_MASK)
+	(TPS628640_CTRL_FPWM_DURING_VID_CHANGE | TPS628640_CTRL_SOFTWARE_ENABLE |                      \
+	 TPS628640_CTRL_OUTPUT_DISCHARGE | TPS628640_CTRL_HICCUP | TPS628640_CTRL_RAMP_SPEED_MASK)
 
 /* STATUS bits ------------------------------------------------------ */
 #define TPS628640_STATUS_THERMAL_WARNING (1u << 4)
@@ -126,21 +126,21 @@ extern "C" {
 
 /** Voltage-ramp-speed enum -- CONTROL bits [1:0]. */
 typedef enum {
-    TPS628640_RAMP_20_MV_PER_US = 0u, /**< 0.25 us/step */
-    TPS628640_RAMP_10_MV_PER_US = 1u, /**< 0.5  us/step */
-    TPS628640_RAMP_5_MV_PER_US  = 2u, /**< 1    us/step */
-    TPS628640_RAMP_1_MV_PER_US  = 3u, /**< 5    us/step  (default) */
+	TPS628640_RAMP_20_MV_PER_US = 0u, /**< 0.25 us/step */
+	TPS628640_RAMP_10_MV_PER_US = 1u, /**< 0.5  us/step */
+	TPS628640_RAMP_5_MV_PER_US  = 2u, /**< 1    us/step */
+	TPS628640_RAMP_1_MV_PER_US  = 3u, /**< 5    us/step  (default) */
 } tps628640_ramp_speed_t;
 
 /** Driver context.  Instantiate one per populated TPS628640 on the
  *  bus -- the V2N-M1 populates four (0x44, 0x48, 0x4D, 0x4F). */
 typedef struct {
-    bool       initialised;
-    alp_i2c_t *bus;
-    uint8_t    addr;               /**< 7-bit I2C slave address.   */
-    uint16_t   default_voltage_mv; /**< Design target for this rail
+	bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;               /**< 7-bit I2C slave address.   */
+	uint16_t   default_voltage_mv; /**< Design target for this rail
                                          per `metadata/chips/tps628640.yaml`. */
-    uint8_t    control_shadow;     /**< Last CONTROL byte written.
+	uint8_t    control_shadow;     /**< Last CONTROL byte written.
                                          Maintained because the chip's
                                          CONTROL reg is write-only. */
 } tps628640_t;

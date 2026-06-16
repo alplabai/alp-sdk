@@ -41,13 +41,13 @@ typedef struct alp_display alp_display_t;
  * shared with the camera surface without a forward dependency. */
 
 typedef struct {
-    uint32_t display_id;    /**< Studio-resolved display instance. */
+	uint32_t display_id; /**< Studio-resolved display instance. */
 } alp_display_config_t;
 
 typedef struct {
-    uint16_t width;
-    uint16_t height;
-    alp_pixfmt_t format;
+	uint16_t     width;
+	uint16_t     height;
+	alp_pixfmt_t format;
 } alp_display_caps_t;
 
 /**
@@ -86,9 +86,7 @@ alp_status_t alp_display_get_caps(alp_display_t *d, alp_display_caps_t *out);
  *         (rect outside display caps) / ALP_ERR_NOT_READY /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_display_blit(alp_display_t *d,
-                              uint16_t x, uint16_t y,
-                              uint16_t w, uint16_t h,
+alp_status_t alp_display_blit(alp_display_t *d, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                               const void *pixels);
 
 /**
@@ -120,4 +118,4 @@ const alp_capabilities_t *alp_display_capabilities(const alp_display_t *d);
 }
 #endif
 
-#endif  /* ALP_DISPLAY_H */
+#endif /* ALP_DISPLAY_H */

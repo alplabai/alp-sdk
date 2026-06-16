@@ -36,9 +36,9 @@ extern "C" {
 #define WM8960_I2C_ADDR 0x1Au
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } wm8960_t;
 
 /** @brief Bind context to caller-opened I²C bus. */

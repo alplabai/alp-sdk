@@ -60,39 +60,39 @@ extern "C" {
 #endif
 
 /** SCCB 7-bit address (fixed; OV5640 does not strap selectable). */
-#define OV5640_I2C_ADDR        0x3C
+#define OV5640_I2C_ADDR 0x3C
 
 /** Chip-ID register pair (16-bit register addressing). */
-#define OV5640_REG_CHIP_ID_HI  0x300A
-#define OV5640_REG_CHIP_ID_LO  0x300B
+#define OV5640_REG_CHIP_ID_HI 0x300A
+#define OV5640_REG_CHIP_ID_LO 0x300B
 
 /** Combined chip-ID value (CHIP_ID_HI:CHIP_ID_LO). */
-#define OV5640_CHIP_ID         0x5640
+#define OV5640_CHIP_ID 0x5640
 
 /** Resolution presets the driver knows how to configure. */
 typedef enum {
-    OV5640_RES_QVGA  = 0,    /**< 320 × 240 */
-    OV5640_RES_VGA   = 1,    /**< 640 × 480 */
-    OV5640_RES_720P  = 2,    /**< 1280 × 720 */
-    OV5640_RES_1080P = 3,    /**< 1920 × 1080 */
-    OV5640_RES_5MP   = 4     /**< 2592 × 1944 (still capture). */
+	OV5640_RES_QVGA  = 0, /**< 320 × 240 */
+	OV5640_RES_VGA   = 1, /**< 640 × 480 */
+	OV5640_RES_720P  = 2, /**< 1280 × 720 */
+	OV5640_RES_1080P = 3, /**< 1920 × 1080 */
+	OV5640_RES_5MP   = 4  /**< 2592 × 1944 (still capture). */
 } ov5640_resolution_t;
 
 /** Pixel-format selection. */
 typedef enum {
-    OV5640_FMT_RGB565  = 0,
-    OV5640_FMT_YUV422  = 1,
-    OV5640_FMT_JPEG    = 2,
-    OV5640_FMT_RAW8    = 3
+	OV5640_FMT_RGB565 = 0,
+	OV5640_FMT_YUV422 = 1,
+	OV5640_FMT_JPEG   = 2,
+	OV5640_FMT_RAW8   = 3
 } ov5640_format_t;
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-    alp_i2c_t           *bus;
-    uint8_t              addr;          /**< 7-bit SCCB address. */
-    ov5640_resolution_t  res;
-    ov5640_format_t      fmt;
-    bool                 initialised;
+	alp_i2c_t          *bus;
+	uint8_t             addr; /**< 7-bit SCCB address. */
+	ov5640_resolution_t res;
+	ov5640_format_t     fmt;
+	bool                initialised;
 } ov5640_t;
 
 /**
@@ -138,10 +138,10 @@ alp_status_t ov5640_set_format(ov5640_t *dev, ov5640_format_t fmt);
 alp_status_t ov5640_set_test_pattern(ov5640_t *dev, bool enabled);
 
 /** Release the driver context.  Does not power down the chip. */
-void         ov5640_deinit(ov5640_t *dev);
+void ov5640_deinit(ov5640_t *dev);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_CHIPS_OV5640_H */
+#endif /* ALP_CHIPS_OV5640_H */

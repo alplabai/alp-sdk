@@ -38,37 +38,34 @@
 #include "../../power/power_ops.h"
 #include "../../../zephyr/v2n_supervisor.h"
 
-alp_status_t alp_renesas_power_supervisor_mode_set(
-    alp_power_t                         *handle,
-    alp_renesas_power_supervisor_mode_t  supervisor_mode)
+alp_status_t
+alp_renesas_power_supervisor_mode_set(alp_power_t                        *handle,
+                                      alp_renesas_power_supervisor_mode_t supervisor_mode)
 {
-    if (handle == NULL) {
-        return ALP_ERR_INVAL;
-    }
-    if (handle->backend == NULL ||
-        strcmp(handle->backend->vendor, "renesas") != 0) {
-        return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
-    }
+	if (handle == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (handle->backend == NULL || strcmp(handle->backend->vendor, "renesas") != 0) {
+		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+	}
 
-    /* Acquire the supervisor under the shared mutex so the wire
+	/* Acquire the supervisor under the shared mutex so the wire
      * transaction can't interleave with a concurrent portable
      * peripheral call.  Failed acquires return naturally without
      * a release (mirrors the contract in v2n_supervisor.h). */
-    gd32g553_t *ctx = NULL;
-    alp_status_t s  = alp_z_v2n_supervisor_acquire(&ctx);
-    if (s != ALP_OK) {
-        return s;
-    }
+	gd32g553_t  *ctx = NULL;
+	alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
+	if (s != ALP_OK) {
+		return s;
+	}
 
-    /* Forward the mirrored wake-bitmap from the dispatcher; the
+	/* Forward the mirrored wake-bitmap from the dispatcher; the
      * supervisor honours the bitmap on its wake-source enable
      * pass.  wake_after_ms is 0 for this low-level entry point --
      * callers wanting timed wake should use the portable
      * alp_power_request_sleep instead. */
-    s = gd32g553_power_mode_set(ctx,
-                                supervisor_mode,
-                                handle->state.wake_bitmap,
-                                0u /* no timed wake from this path */);
-    alp_z_v2n_supervisor_release();
-    return s;
+	s = gd32g553_power_mode_set(ctx, supervisor_mode, handle->state.wake_bitmap,
+	                            0u /* no timed wake from this path */);
+	alp_z_v2n_supervisor_release();
+	return s;
 }
