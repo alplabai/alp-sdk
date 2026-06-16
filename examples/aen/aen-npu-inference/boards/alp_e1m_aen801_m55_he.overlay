@@ -1,0 +1,76 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-npu-inference overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run --
+ * adds the Arm Ethos-U85 NPU node and retargets ROM to ITCM, identical to the
+ * aen-npu-ethosu-regcheck overlay it is derived from.  See that app's overlay
+ * header for the full provenance of the NPU node (base 0x49042000, IRQ 366,
+ * secure/privilege flags from Alif's Apache-2.0 zephyr_alif fork).
+ *
+ * =====================  THE #1 BENCH RISK: DMA PLACEMENT  ====================
+ * The Ethos-U85 is a DMA bus master: it reads the Vela command stream + weights
+ * (the embedded model) and the intermediate tensors (the TFLM arena) over its
+ * own AXI master, and writes the output tensor back the same way.  Those buffers
+ * MUST live in memory the NPU can reach.
+ *
+ * The generated M55-HE board sets `zephyr,sram = &dtcm` -- the M55's tightly-
+ * coupled DTCM.  DTCM is private to the CPU and is NOT on the NPU's DMA path, so
+ * an arena/model left in the default .bss/.noinit (which lands in DTCM) would be
+ * invisible to the NPU and the inference would read garbage / fault.
+ *
+ * Fix (mirrors the eth_dwmac DMA-buffers-in-sram0 + DCACHE=n finding): the model
+ * + arena are tagged into the "SRAM0" linker region -- the global on-chip SRAM
+ * @0x02000000 (4 MiB), declared by the SoC dtsi sram0 node:
+ *
+ *     sram0: sram@2000000 {
+ *             compatible = "zephyr,memory-region", "mmio-sram";
+ *             reg = <0x2000000 DT_SIZE_M(4)>;
+ *             zephyr,memory-region = "SRAM0";   <-- becomes the "SRAM0" section
+ *     };
+ *
+ * gen_model.py emits `__attribute__((section("SRAM0")))` on networkModelData[]
+ * and main.cpp does the same on the tensor arena, so the linker places both in
+ * that 4 MiB bank.  Combined with CONFIG_DCACHE=n (prj.conf), the CPU and NPU
+ * share a coherent view of SRAM0 with no cache-maintenance calls.
+ * ============================================================================
+ */
+
+/*
+ * RAM-run: the SoC `select` puts code in XIP; retarget ROM to ITCM so the image
+ * links + runs from RAM (J-Link loadbin+go, no reset).  PATH-REFERENCE form
+ * (&itcm) -- the phandle-array form <&itcm> makes FLASH_SIZE=0 and overflows the
+ * link.  Same as the regcheck overlay.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&soc {
+	/*
+	 * Arm Ethos-U85 NPU.  compatible "arm,ethos-u" (binding arm,ethos-u.yaml),
+	 * driven by the Arm Ethos-U core driver's Zephyr frontend
+	 * (drivers/misc/ethos_u/ethos_u_arm.c, DT_DRV_COMPAT arm_ethos_u).
+	 * status="okay" makes DT_HAS_ARM_ETHOS_U_ENABLED true, which builds the
+	 * frontend and auto-instantiates the device at POST_KERNEL -- ethosu_init()
+	 * runs the NPU soft-reset before main(), and the TFLM Ethos-U kernel later
+	 * grabs this driver instance via ethosu_reserve_driver() inside Invoke().
+	 *
+	 * IRQ 366 + secure/privilege flags transcribed verbatim from the fork node.
+	 * No `clocks` property: the fork's ethosu85 node carries none -- the NPU
+	 * clock/power is brought up outside the Zephyr clockctrl (regcheck already
+	 * confirmed the block is clocked: device_is_ready=1, ID=0x20007001).
+	 */
+	ethosu_npu: ethosu85@49042000 {
+		compatible = "arm,ethos-u";
+		reg = <0x49042000 0x1000>;
+		interrupts = <366 3>;
+		interrupt-parent = <&nvic>;
+		secure-enable;
+		privilege-enable;
+		status = "okay";
+	};
+};
