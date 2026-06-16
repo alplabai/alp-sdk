@@ -204,6 +204,19 @@ if(CONFIG_ALIF_PDM)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
 endif()
 
+# Alif Ensemble DesignWare I2S controller (compatible "snps,designware-i2s"),
+# vendored VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/i2s/i2s_dw.c)
+# + its private header i2s_dw.h.  Upstream Zephyr v4.4 + hal_alif ship no
+# DesignWare I2S driver.  Implements the standard Zephyr I2S API; FIFO/interrupt
+# driven (no DMA subsystem dependency -- see CONFIG_I2S_DW).  Binding
+# zephyr/dts/bindings/i2s/snps,designware-i2s.yaml; node in the app overlay.
+# ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_I2S_DW
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2s/i2s_dw.c)
+if(CONFIG_I2S_DW)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2s)
+endif()
+
 # Alif Ensemble CAMERA CAPTURE path -- CPI controller (compatible "alif,cam"),
 # DesignWare MIPI CSI-2 bridge (compatible "snps,designware-csi"), DesignWare
 # MIPI D-PHY (compatible "snps,designware-dphy") + ON Semi ARX3A0 sensor

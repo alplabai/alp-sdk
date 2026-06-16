@@ -38,6 +38,15 @@
 #define ALIF_PERIPH_CLK_ENA_REG 0x0CU /* CLKCTL_PER_MST base 0x4903F000 */
 #define ALIF_HE_CLK_ENA_REG     0x10U /* M55HE_CFG      base 0x43007000 */
 
+/* I2S0..I2S3 control registers in CLKCTL_PER_SLV (base 0x4902F000); offsets
+ * carried from the fork's alif_ensemble_clocks.h (I2S0=0x10 .. I2S3=0x1C, the
+ * +4 stride).  Each holds the I2S clock-source select (bit 16) + the bit-clock
+ * divider field. */
+#define ALIF_I2S0_CTRL_REG 0x10U
+#define ALIF_I2S1_CTRL_REG 0x14U
+#define ALIF_I2S2_CTRL_REG 0x18U
+#define ALIF_I2S3_CTRL_REG 0x1CU
+
 /* Dummy-clock scaffolding (upstream omits it; fork alif_clocks_common.h).
  * DUMMY module = 0x0, en_mask = 0 -> alif_clock_control_on() returns at the
  * `if (!EN_MASK)` guard and touches no register. */
@@ -77,6 +86,30 @@
  * is unused).  HE-core only. */
 #define ALIF_LPPDM_76M8_CLK                                                    \
 	ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 8U, 1U, 0U, 1U, 9U,                \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
+/* I2S0..I2S3 block clocks (DesignWare I2S, drivers/i2s/i2s_dw.c).  Re-authored
+ * from the fork 7-arg ALIF_CLK_CFG(CLKCTL_PER_SLV, I2Sx_CTRL, 12U, 1U, 0U, 1U,
+ * 16U) (alif_ensemble_clocks.h) into the upstream 8-arg encoding: gate bit 12 of
+ * the I2Sx_CTRL register in CLKCTL_PER_SLV, with a 1-bit clock-source field at
+ * bit 16 (src=0 selects the 76.8 MHz reference; the *_AUDIO variant src=1 would
+ * select the external audio PLL, not re-authored here).  parent_clk is a filler:
+ * i2s_dw.c derives its bit clock via clock_control_set_rate() (not get_rate()),
+ * and our upstream clockctrl has no .set_rate -- so neither the parent nor the
+ * divider is consulted by get_rate().  See the i2s_dw.c set_rate note.  Per
+ * [[reference_alif_clock_encoding_fork_vs_upstream]] the packed fork value must
+ * NOT be copied; the module/reg/bit are re-pasted via the upstream macro. */
+#define ALIF_I2S0_76M8_CLK                                                     \
+	ALIF_CLK_CFG(CLKCTL_PER_SLV, I2S0_CTRL, 12U, 1U, 0U, 1U, 16U,          \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+#define ALIF_I2S1_76M8_CLK                                                     \
+	ALIF_CLK_CFG(CLKCTL_PER_SLV, I2S1_CTRL, 12U, 1U, 0U, 1U, 16U,          \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+#define ALIF_I2S2_76M8_CLK                                                     \
+	ALIF_CLK_CFG(CLKCTL_PER_SLV, I2S2_CTRL, 12U, 1U, 0U, 1U, 16U,          \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+#define ALIF_I2S3_76M8_CLK                                                     \
+	ALIF_CLK_CFG(CLKCTL_PER_SLV, I2S3_CTRL, 12U, 1U, 0U, 1U, 16U,          \
 		     ALIF_PARENT_CLK_SYST_HCLK)
 
 /*

@@ -1,0 +1,57 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * I2S0 audio-out overlay for the E1M-AEN801 (E8, M55-HE).
+ *
+ * i2s0@49014000 (compatible snps,designware-i2s, IRQ 141, clock ALIF_I2S0_76M8_CLK)
+ * is transcribed from the Apache-2.0 zephyr_alif fork (dts/arm/alif/ensemble/
+ * common/e1.dtsi) -- the alp-sdk E8 SoC dtsi doesn't carry it, so it is enabled
+ * here.  Driver: drivers/i2s/i2s_dw.c (vendored Tier-2, CONFIG_I2S_DW).
+ *
+ * PADS -- TBD, see [[project_pending_hw_configs]] / [[project_som_pad_map_lives_in_alp_sdk]]:
+ * the SoC offers I2S0 on TWO pad options (header ensemble-e4-e6-e8-pinctrl.h):
+ *   A: P1_6 SDI / P1_7 SDO / P3_0 SCLK / P3_1 WS
+ *   B: P4_1 SDI / P4_2 SDO / P4_3 SCLK / P4_4 WS
+ * Which one the E1M-AEN801 SoM routes to the I2S0 edge (and on to the EVK 74LVC157
+ * mux -> TAS2563 amps) is NOT yet declared in metadata/e1m_modules/E1M-AEN801.yaml.
+ * This overlay uses the **A** option as a documented default; CONFIRM against the
+ * SoM schematic before trusting amp output.  Re-point to the B group if the SoM
+ * routes I2S0_B.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+	};
+	aliases {
+		alp-i2s0 = &i2s0;
+	};
+};
+
+&pinctrl {
+	pinctrl_i2s0: pinctrl_i2s0 {
+		/* TX path: SDO (data out) + SCLK + WS.  (read-enable, which the fork
+		 * sets on the SDI input pad, is not in the upstream alif,pinctrl
+		 * binding -- REN-off is the upstream default and SDI is unused for TX.) */
+		group0 {
+			pinmux = <PIN_P1_7__I2S0_SDO_A>, <PIN_P3_0__I2S0_SCLK_A>,
+				 <PIN_P3_1__I2S0_WS_A>;
+		};
+	};
+};
+
+&{/soc} {
+	i2s0: i2s0@49014000 {
+		compatible = "snps,designware-i2s";
+		reg = <0x49014000 0x1000>;
+		interrupts = <141 3>;
+		pinctrl-0 = <&pinctrl_i2s0>;
+		pinctrl-names = "default";
+		clocks = <&clockctrl ALIF_I2S0_76M8_CLK>;
+		status = "okay";
+	};
+};

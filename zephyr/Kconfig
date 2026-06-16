@@ -407,6 +407,43 @@ config ALIF_PDM
 	  driver): INTERIM.  Retires onto the opt-in sdk-alif fork once bench-verified.
 	  Task #21.  Driver: zephyr/drivers/audio/alif_pdm.c.
 
+config I2S_DW
+	bool "Alif Ensemble DesignWare I2S (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
+	default y
+	depends on I2S
+	depends on DT_HAS_SNPS_DESIGNWARE_I2S_ENABLED
+	select PINCTRL
+	help
+	  Alif Ensemble DesignWare I2S controller driver (compatible
+	  "snps,designware-i2s"), vendored VERBATIM from the Apache-2.0 zephyr_alif
+	  fork (drivers/i2s/i2s_dw.c) -- upstream Zephyr v4.4 ships no DesignWare I2S
+	  driver and hal_alif ships none either.  Implements the standard Zephyr I2S
+	  API (i2s_configure / i2s_write / i2s_read / i2s_trigger), FIFO/interrupt
+	  driven (the dma_config struct fields are present but no dma_*() is called,
+	  so it runs without the Alif DMA subsystem).  The I2Sx block clock is gated
+	  via ALIF_I2Sx_76M8_CLK.
+
+	  alp-sdk patch vs the fork: i2s_dw.c tolerates -ENOSYS/-ENOTSUP from
+	  clock_control_set_rate() / _configure() (our upstream clockctrl has only
+	  .on/.off/.get_rate).  The bit-clock divider is therefore NOT programmed
+	  from the requested sample rate -- exact SCLK is BENCH-UNVERIFIED until the
+	  clockctrl gains a real .set_rate for the I2Sx_CTRL divider.
+
+	  ADR 0017 Tier-2 (a genuine fork-driver copy): INTERIM.  Retires onto the
+	  opt-in fork once bench-verified.  Task #21.  Driver: zephyr/drivers/i2s/i2s_dw.c.
+
+if I2S_DW
+
+config I2S_DW_RX_BLOCK_COUNT
+	int "I2S DesignWare RX queue length"
+	default 10
+
+config I2S_DW_TX_BLOCK_COUNT
+	int "I2S DesignWare TX queue length"
+	default 10
+
+endif # I2S_DW
+
 # ---------------------------------------------------------------------------
 # Alif Ensemble CAMERA CAPTURE path (CPI controller + DesignWare MIPI CSI-2
 # bridge + DesignWare MIPI D-PHY + ON Semi ARX3A0 sensor) -- ADR 0017 Tier-2,
