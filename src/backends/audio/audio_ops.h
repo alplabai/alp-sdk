@@ -61,21 +61,29 @@ typedef struct alp_audio_out_backend_state {
 
 struct alp_audio_ops {
 	/* ---- Input (microphone) ---- */
-	alp_status_t (*in_open)(const alp_audio_config_t *cfg, alp_audio_in_backend_state_t *state,
-	                        alp_capabilities_t *caps_out);
+	alp_status_t (*in_open)(const alp_audio_config_t     *cfg,
+	                        alp_audio_in_backend_state_t *state,
+	                        alp_capabilities_t           *caps_out);
 	alp_status_t (*in_start)(alp_audio_in_backend_state_t *state);
 	alp_status_t (*in_stop)(alp_audio_in_backend_state_t *state);
-	alp_status_t (*in_read)(alp_audio_in_backend_state_t *state, void *buf, size_t frames,
-	                        size_t *out_frames, uint32_t timeout_ms);
+	alp_status_t (*in_read)(alp_audio_in_backend_state_t *state,
+	                        void                         *buf,
+	                        size_t                        frames,
+	                        size_t                       *out_frames,
+	                        uint32_t                      timeout_ms);
 	void (*in_close)(alp_audio_in_backend_state_t *state);
 
 	/* ---- Output (speaker) ---- */
-	alp_status_t (*out_open)(const alp_audio_config_t *cfg, alp_audio_out_backend_state_t *state,
-	                         alp_capabilities_t *caps_out);
+	alp_status_t (*out_open)(const alp_audio_config_t      *cfg,
+	                         alp_audio_out_backend_state_t *state,
+	                         alp_capabilities_t            *caps_out);
 	alp_status_t (*out_start)(alp_audio_out_backend_state_t *state);
 	alp_status_t (*out_stop)(alp_audio_out_backend_state_t *state);
-	alp_status_t (*out_write)(alp_audio_out_backend_state_t *state, const void *buf, size_t frames,
-	                          size_t *out_frames, uint32_t timeout_ms);
+	alp_status_t (*out_write)(alp_audio_out_backend_state_t *state,
+	                          const void                    *buf,
+	                          size_t                         frames,
+	                          size_t                        *out_frames,
+	                          uint32_t                       timeout_ms);
 	alp_status_t (*out_set_volume)(alp_audio_out_backend_state_t *state, uint8_t vol);
 	void (*out_close)(alp_audio_out_backend_state_t *state);
 };

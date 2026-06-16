@@ -139,29 +139,61 @@ int main(void)
      * -> ESC PWMs.  Highest priority of any application thread.  If
      * this ever stops getting CPU time, the failsafe in nav_loop
      * will cut throttle on the next 40 ms tick (defence in depth). */
-	k_thread_create(&t_rate, stk_rate, K_THREAD_STACK_SIZEOF(stk_rate), rate_entry, NULL, NULL,
-	                NULL, K_PRIO_PREEMPT(1), 0, K_NO_WAIT);
+	k_thread_create(&t_rate,
+	                stk_rate,
+	                K_THREAD_STACK_SIZEOF(stk_rate),
+	                rate_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(1),
+	                0,
+	                K_NO_WAIT);
 	k_thread_name_set(&t_rate, "rate_loop");
 
 	/* prio 2: 250 Hz attitude loop -- accel+gyro -> Madgwick fuse
      * -> attitude PID -> rate setpoints.  Feeds the rate loop above. */
-	k_thread_create(&t_atti, stk_atti, K_THREAD_STACK_SIZEOF(stk_atti), atti_entry, NULL, NULL,
-	                NULL, K_PRIO_PREEMPT(2), 0, K_NO_WAIT);
+	k_thread_create(&t_atti,
+	                stk_atti,
+	                K_THREAD_STACK_SIZEOF(stk_atti),
+	                atti_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(2),
+	                0,
+	                K_NO_WAIT);
 	k_thread_name_set(&t_atti, "atti_loop");
 
 	/* prio 3: 50 Hz SBUS RC receiver -- UART read of the 25-byte
      * SBUS frame from the radio.  Writes stick + mode + rc_link_ok
      * into g_state for the inner loops to consume. */
-	k_thread_create(&t_rc, stk_rc, K_THREAD_STACK_SIZEOF(stk_rc), rc_entry, NULL, NULL, NULL,
-	                K_PRIO_PREEMPT(3), 0, K_NO_WAIT);
+	k_thread_create(&t_rc,
+	                stk_rc,
+	                K_THREAD_STACK_SIZEOF(stk_rc),
+	                rc_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(3),
+	                0,
+	                K_NO_WAIT);
 	k_thread_name_set(&t_rc, "rc_recv");
 
 	/* prio 4: 25 Hz navigation loop -- GPS + baro + battery monitoring.
      * Lower frequency because GNSS solutions only refresh ~10 Hz and
      * altitude smoothing benefits from longer windows.  Also owns the
      * failsafe arbitration (RC-loss, battery-critical, etc.). */
-	k_thread_create(&t_nav, stk_nav, K_THREAD_STACK_SIZEOF(stk_nav), nav_entry, NULL, NULL, NULL,
-	                K_PRIO_PREEMPT(4), 0, K_NO_WAIT);
+	k_thread_create(&t_nav,
+	                stk_nav,
+	                K_THREAD_STACK_SIZEOF(stk_nav),
+	                nav_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(4),
+	                0,
+	                K_NO_WAIT);
 	k_thread_name_set(&t_nav, "nav_loop");
 
 	/* ── MAVLink ground-station link (optional) ────────────────────
@@ -179,16 +211,32 @@ int main(void)
 		/* prio 5: 10 Hz outbound telemetry -- packs HEARTBEAT,
          * ATTITUDE, GLOBAL_POSITION_INT, BATTERY_STATUS frames from
          * g_state and writes them to the GCS UART. */
-		k_thread_create(&t_mav_tx, stk_mav_tx, K_THREAD_STACK_SIZEOF(stk_mav_tx), mav_tx_entry,
-		                NULL, NULL, NULL, K_PRIO_PREEMPT(5), 0, K_NO_WAIT);
+		k_thread_create(&t_mav_tx,
+		                stk_mav_tx,
+		                K_THREAD_STACK_SIZEOF(stk_mav_tx),
+		                mav_tx_entry,
+		                NULL,
+		                NULL,
+		                NULL,
+		                K_PRIO_PREEMPT(5),
+		                0,
+		                K_NO_WAIT);
 		k_thread_name_set(&t_mav_tx, "mav_tx");
 
 		/* prio 5: inbound MAVLink parser -- blocks in UART read,
          * dispatches MAV_CMD_* into the autopilot (e.g. arm/disarm
          * from QGC, waypoint upload, parameter set).  Same priority
          * as TX because neither is timing-critical. */
-		k_thread_create(&t_mav_rx, stk_mav_rx, K_THREAD_STACK_SIZEOF(stk_mav_rx), mav_rx_entry,
-		                NULL, NULL, NULL, K_PRIO_PREEMPT(5), 0, K_NO_WAIT);
+		k_thread_create(&t_mav_rx,
+		                stk_mav_rx,
+		                K_THREAD_STACK_SIZEOF(stk_mav_rx),
+		                mav_rx_entry,
+		                NULL,
+		                NULL,
+		                NULL,
+		                K_PRIO_PREEMPT(5),
+		                0,
+		                K_NO_WAIT);
 		k_thread_name_set(&t_mav_rx, "mav_rx");
 	}
 
@@ -202,9 +250,13 @@ int main(void)
      * thread Zephyr spawned).  This loop never returns; the four
      * spawned loops run forever. */
 	while (1) {
-		LOG_INF("mode=%d arm=%d roll=%.1f pitch=%.1f alt=%.1fm bat=%.2fV", (int)g_state.mode,
-		        (int)g_state.armed, (double)g_state.roll, (double)g_state.pitch,
-		        (double)g_state.altitude_m, (double)g_state.battery_v);
+		LOG_INF("mode=%d arm=%d roll=%.1f pitch=%.1f alt=%.1fm bat=%.2fV",
+		        (int)g_state.mode,
+		        (int)g_state.armed,
+		        (double)g_state.roll,
+		        (double)g_state.pitch,
+		        (double)g_state.altitude_m,
+		        (double)g_state.battery_v);
 		k_msleep(1000);
 	}
 	/* Unreachable -- here so the compiler doesn't whine about main's
@@ -229,7 +281,7 @@ int main(void)
  * autopilot_init() and the handle is owned over there. */
 extern alp_uart_t *autopilot_rc_uart(void); /* defined in autopilot.c */
 
-void               autopilot_rc_loop(autopilot_state_t *s)
+void autopilot_rc_loop(autopilot_state_t *s)
 {
 	/* The autopilot owns the UART handle; we pull frame bytes via
      * a small re-export to keep this file pure-orchestration.

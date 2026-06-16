@@ -49,7 +49,8 @@ ALP_BACKEND_DEFINE_CLASS(tb_bridge_qenc);
  * ------------------------------------------------------------------ */
 
 /* ---- ADC class -------------------------------------------------- */
-ALP_BACKEND_REGISTER(tb_bridge_adc, sw_fallback,
+ALP_BACKEND_REGISTER(tb_bridge_adc,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",
@@ -59,7 +60,8 @@ ALP_BACKEND_REGISTER(tb_bridge_adc, sw_fallback,
                          .probe       = NULL,
                      });
 
-ALP_BACKEND_REGISTER(tb_bridge_adc, zephyr_drv,
+ALP_BACKEND_REGISTER(tb_bridge_adc,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr_drv",
@@ -69,7 +71,8 @@ ALP_BACKEND_REGISTER(tb_bridge_adc, zephyr_drv,
                          .probe       = NULL,
                      });
 
-ALP_BACKEND_REGISTER(tb_bridge_adc, gd32_bridge,
+ALP_BACKEND_REGISTER(tb_bridge_adc,
+                     gd32_bridge,
                      {
                          .silicon_ref = "renesas:rzv2n:n44",
                          .vendor      = "gd32_bridge",
@@ -80,7 +83,8 @@ ALP_BACKEND_REGISTER(tb_bridge_adc, gd32_bridge,
                      });
 
 /* ---- Counter class ---------------------------------------------- */
-ALP_BACKEND_REGISTER(tb_bridge_counter, sw_fallback,
+ALP_BACKEND_REGISTER(tb_bridge_counter,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",
@@ -90,7 +94,8 @@ ALP_BACKEND_REGISTER(tb_bridge_counter, sw_fallback,
                          .probe       = NULL,
                      });
 
-ALP_BACKEND_REGISTER(tb_bridge_counter, zephyr_drv,
+ALP_BACKEND_REGISTER(tb_bridge_counter,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr_drv",
@@ -100,7 +105,8 @@ ALP_BACKEND_REGISTER(tb_bridge_counter, zephyr_drv,
                          .probe       = NULL,
                      });
 
-ALP_BACKEND_REGISTER(tb_bridge_counter, gd32_bridge,
+ALP_BACKEND_REGISTER(tb_bridge_counter,
+                     gd32_bridge,
                      {
                          .silicon_ref = "renesas:rzv2n:n44",
                          .vendor      = "gd32_bridge",
@@ -111,7 +117,8 @@ ALP_BACKEND_REGISTER(tb_bridge_counter, gd32_bridge,
                      });
 
 /* ---- QEnc class ------------------------------------------------- */
-ALP_BACKEND_REGISTER(tb_bridge_qenc, sw_fallback,
+ALP_BACKEND_REGISTER(tb_bridge_qenc,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",
@@ -121,7 +128,8 @@ ALP_BACKEND_REGISTER(tb_bridge_qenc, sw_fallback,
                          .probe       = NULL,
                      });
 
-ALP_BACKEND_REGISTER(tb_bridge_qenc, zephyr_drv,
+ALP_BACKEND_REGISTER(tb_bridge_qenc,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr_drv",
@@ -131,7 +139,8 @@ ALP_BACKEND_REGISTER(tb_bridge_qenc, zephyr_drv,
                          .probe       = NULL,
                      });
 
-ALP_BACKEND_REGISTER(tb_bridge_qenc, gd32_bridge,
+ALP_BACKEND_REGISTER(tb_bridge_qenc,
+                     gd32_bridge,
                      {
                          .silicon_ref = "renesas:rzv2n:n44",
                          .vendor      = "gd32_bridge",
@@ -144,14 +153,18 @@ ALP_BACKEND_REGISTER(tb_bridge_qenc, gd32_bridge,
 /* ------------------------------------------------------------------
  * Helper: assert the selector returns a backend whose vendor matches.
  * ------------------------------------------------------------------ */
-static void assert_vendor(const char *class_name, const char *silicon_ref,
-                          const char *expected_vendor)
+static void
+assert_vendor(const char *class_name, const char *silicon_ref, const char *expected_vendor)
 {
 	const alp_backend_t *be = alp_backend_select(class_name, silicon_ref);
 	zassert_not_null(be, "no backend for class=%s silicon=%s", class_name, silicon_ref);
-	zassert_equal(strcmp(be->vendor, expected_vendor), 0,
-	              "class=%s silicon=%s: expected vendor=%s, got %s", class_name, silicon_ref,
-	              expected_vendor, be->vendor);
+	zassert_equal(strcmp(be->vendor, expected_vendor),
+	              0,
+	              "class=%s silicon=%s: expected vendor=%s, got %s",
+	              class_name,
+	              silicon_ref,
+	              expected_vendor,
+	              be->vendor);
 }
 
 /* ------------------------------------------------------------------

@@ -48,15 +48,25 @@ typedef struct alp_rpc_backend_state {
 /* ------------------------------------------------------------------ */
 
 struct alp_rpc_ops {
-	alp_status_t (*open)(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
-	alp_status_t (*subscribe)(alp_rpc_backend_state_t *state, const char *method,
-	                          alp_rpc_method_cb_t cb, void *user);
+	alp_status_t (*open)(const alp_rpc_config_t  *cfg,
+	                     alp_rpc_backend_state_t *state,
+	                     alp_capabilities_t      *caps_out);
+	alp_status_t (*subscribe)(alp_rpc_backend_state_t *state,
+	                          const char              *method,
+	                          alp_rpc_method_cb_t      cb,
+	                          void                    *user);
 	alp_status_t (*unsubscribe)(alp_rpc_backend_state_t *state, const char *method);
-	alp_status_t (*send)(alp_rpc_backend_state_t *state, const char *method, const void *payload,
-	                     size_t len);
-	alp_status_t (*call)(alp_rpc_backend_state_t *state, const char *method, const void *req,
-	                     size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms);
+	alp_status_t (*send)(alp_rpc_backend_state_t *state,
+	                     const char              *method,
+	                     const void              *payload,
+	                     size_t                   len);
+	alp_status_t (*call)(alp_rpc_backend_state_t *state,
+	                     const char              *method,
+	                     const void              *req,
+	                     size_t                   req_len,
+	                     void                    *resp,
+	                     size_t                  *resp_len,
+	                     uint32_t                 timeout_ms);
 	void (*close)(alp_rpc_backend_state_t *state);
 };
 

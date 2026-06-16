@@ -125,8 +125,8 @@ LOG_MODULE_REGISTER(anomaly, LOG_LEVEL_INF);
  * model with data sampled at 800 Hz to get accurate score calibration.
  */
 #define WINDOW_SAMPLES 256u
-#define IMU_ODR ICM42670_ODR_800_HZ
-#define IMU_FS ICM42670_ACCEL_FS_2G /* 16384 LSB / g at ±2 g */
+#define IMU_ODR        ICM42670_ODR_800_HZ
+#define IMU_FS         ICM42670_ACCEL_FS_2G /* 16384 LSB / g at ±2 g */
 
 /* I2C address of the ICM-42670 on the E1M EVK (AP_AD0 = high → 0x69).
  * Override by redefining this before including the header if your
@@ -392,7 +392,9 @@ int main(void)
          * score so the customer can plot it and pick a cutoff.
          * `src` flags whether the score came from the trained model
          * or the heuristic fallback so the log is never misleading. */
-		printf("[anomaly] window=%d score=%.4f src=%s\n", iter, (double)score,
+		printf("[anomaly] window=%d score=%.4f src=%s\n",
+		       iter,
+		       (double)score,
 		       from_model ? "model" : "heuristic");
 
 		/* On native_sim fill_window() returns instantly (synthesized,

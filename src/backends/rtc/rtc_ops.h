@@ -30,8 +30,9 @@ typedef struct alp_rtc_backend_state {
 } alp_rtc_backend_state_t;
 
 struct alp_rtc_ops {
-	alp_status_t (*open)(uint32_t rtc_id, alp_rtc_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
+	alp_status_t (*open)(uint32_t                 rtc_id,
+	                     alp_rtc_backend_state_t *state,
+	                     alp_capabilities_t      *caps_out);
 	alp_status_t (*set_time)(alp_rtc_backend_state_t *state, const alp_rtc_time_t *time);
 	alp_status_t (*get_time)(alp_rtc_backend_state_t *state, alp_rtc_time_t *time);
 	void (*close)(alp_rtc_backend_state_t *state);

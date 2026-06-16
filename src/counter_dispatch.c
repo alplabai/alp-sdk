@@ -27,7 +27,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_COUNTER_HANDLES 4
 #endif
 
-static struct alp_counter  _pool[CONFIG_ALP_SDK_MAX_COUNTER_HANDLES];
+static struct alp_counter _pool[CONFIG_ALP_SDK_MAX_COUNTER_HANDLES];
 
 static struct alp_counter *_alloc(void)
 {
@@ -112,8 +112,10 @@ alp_status_t alp_counter_us_to_ticks(alp_counter_t *h, uint32_t us, uint32_t *ti
 	return h->state.ops->us_to_ticks(&h->state, us, ticks_out);
 }
 
-alp_status_t alp_counter_set_alarm(alp_counter_t *h, uint32_t ticks_from_now,
-                                   alp_counter_alarm_cb_t cb, void *user)
+alp_status_t alp_counter_set_alarm(alp_counter_t         *h,
+                                   uint32_t               ticks_from_now,
+                                   alp_counter_alarm_cb_t cb,
+                                   void                  *user)
 {
 	if (cb == NULL) return ALP_ERR_INVAL;
 	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;

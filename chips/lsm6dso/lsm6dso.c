@@ -17,12 +17,12 @@
 /* Register map (DocID032086)                                         */
 /* ------------------------------------------------------------------ */
 
-#define REG_WHO_AM_I 0x0F
-#define REG_CTRL1_XL 0x10
-#define REG_CTRL2_G 0x11
+#define REG_WHO_AM_I   0x0F
+#define REG_CTRL1_XL   0x10
+#define REG_CTRL2_G    0x11
 #define REG_OUT_TEMP_L 0x20
-#define REG_OUTX_L_G 0x22
-#define REG_OUTX_L_A 0x28
+#define REG_OUTX_L_G   0x22
+#define REG_OUTX_L_A   0x28
 
 static alp_status_t reg_write(lsm6dso_t *dev, uint8_t reg, uint8_t val)
 {
@@ -55,8 +55,8 @@ alp_status_t lsm6dso_init(lsm6dso_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	dev->gyro_fs     = LSM6DSO_GYRO_FS_250_DPS;
 	dev->initialised = false;
 
-	uint8_t      id  = 0;
-	alp_status_t s   = lsm6dso_read_id(dev, &id);
+	uint8_t      id = 0;
+	alp_status_t s  = lsm6dso_read_id(dev, &id);
 	if (s != ALP_OK) return s;
 	if (id != LSM6DSO_WHO_AM_I_VAL) return ALP_ERR_IO;
 

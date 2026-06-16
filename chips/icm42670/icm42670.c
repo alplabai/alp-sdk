@@ -18,17 +18,17 @@
 /* Register map (DS-000451)                                            */
 /* ------------------------------------------------------------------ */
 
-#define REG_PWR_MGMT0 0x1F
+#define REG_PWR_MGMT0     0x1F
 #define REG_ACCEL_CONFIG0 0x21
-#define REG_GYRO_CONFIG0 0x20
-#define REG_TEMP_DATA1 0x09    /* Big-endian: TEMP_DATA1 then TEMP_DATA0 */
+#define REG_GYRO_CONFIG0  0x20
+#define REG_TEMP_DATA1    0x09 /* Big-endian: TEMP_DATA1 then TEMP_DATA0 */
 #define REG_ACCEL_DATA_X1 0x0B /* AX1 AX0 AY1 AY0 AZ1 AZ0 */
-#define REG_GYRO_DATA_X1 0x11  /* GX1 GX0 GY1 GY0 GZ1 GZ0 */
-#define REG_WHO_AM_I 0x75
+#define REG_GYRO_DATA_X1  0x11 /* GX1 GX0 GY1 GY0 GZ1 GZ0 */
+#define REG_WHO_AM_I      0x75
 
 /* PWR_MGMT0 bits: GYRO_MODE[3:2], ACCEL_MODE[1:0].
  * 0 = off, 1 = standby, 2 = low-noise, 3 = low-power. */
-#define PWR_GYRO_LN (0x3u << 2)
+#define PWR_GYRO_LN  (0x3u << 2)
 #define PWR_ACCEL_LN (0x3u << 0)
 
 static alp_status_t reg_write(icm42670_t *dev, uint8_t reg, uint8_t val)
@@ -63,8 +63,8 @@ alp_status_t icm42670_init(icm42670_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	dev->gyro_fs     = ICM42670_GYRO_FS_250_DPS;
 	dev->initialised = false;
 
-	uint8_t      id  = 0;
-	alp_status_t s   = icm42670_read_id(dev, &id);
+	uint8_t      id = 0;
+	alp_status_t s  = icm42670_read_id(dev, &id);
 	if (s != ALP_OK) return s;
 	if (id != ICM42670_WHO_AM_I_VAL) return ALP_ERR_IO;
 

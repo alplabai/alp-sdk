@@ -122,8 +122,9 @@ static int _apply_filters_locked(y_can_data_t *d)
 	}
 	/* n==0 leaves an empty filter set: the kernel then drops all RX,
      * which matches "no filters installed -> deliver nothing". */
-	if (setsockopt(d->fd, SOL_CAN_RAW, CAN_RAW_FILTER, n ? set : NULL,
-	               (socklen_t)(n * sizeof(set[0]))) < 0) {
+	if (setsockopt(
+	        d->fd, SOL_CAN_RAW, CAN_RAW_FILTER, n ? set : NULL, (socklen_t)(n * sizeof(set[0]))) <
+	    0) {
 		return errno;
 	}
 	return 0;
@@ -212,8 +213,8 @@ static void *_rx_loop(void *arg)
  * (see file header) and is recorded by the dispatcher snapshot, not
  * applied here.  caps stay 0 (SocketCAN exposes no queryable cap bits).
  */
-static alp_status_t y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg == NULL) return ALP_ERR_INVAL;
 
@@ -318,8 +319,8 @@ static alp_status_t y_stop(alp_can_backend_state_t *st)
  * kernel TX queue accepts or returns ENOBUFS.  ENOBUFS maps to
  * ALP_ERR_TIMEOUT (TX queue full / no slot), matching the contract.
  */
-static alp_status_t y_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame,
-                           uint32_t timeout_ms)
+static alp_status_t
+y_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame, uint32_t timeout_ms)
 {
 	(void)timeout_ms; /* see doxygen: no raw-socket per-write timeout */
 	y_can_data_t *d = (y_can_data_t *)st->be_data;
@@ -368,8 +369,11 @@ static alp_status_t y_send(alp_can_backend_state_t *st, const alp_can_frame_t *f
  * setsockopt(CAN_RAW_FILTER), and -- on first filter -- spawns the
  * per-handle reader thread.  The slot index is the opaque filter id.
  */
-static alp_status_t y_add_filter(alp_can_backend_state_t *st, const alp_can_filter_t *filter,
-                                 alp_can_rx_cb_t cb, void *user, int32_t *filter_id_out)
+static alp_status_t y_add_filter(alp_can_backend_state_t *st,
+                                 const alp_can_filter_t  *filter,
+                                 alp_can_rx_cb_t          cb,
+                                 void                    *user,
+                                 int32_t                 *filter_id_out)
 {
 	y_can_data_t *d = (y_can_data_t *)st->be_data;
 	if (d == NULL) return ALP_ERR_NOT_READY;
@@ -400,7 +404,7 @@ static alp_status_t y_add_filter(alp_can_backend_state_t *st, const alp_can_filt
 	}
 	f->in_use = true;
 
-	int e     = _apply_filters_locked(d);
+	int e = _apply_filters_locked(d);
 	if (e != 0) {
 		*f = (y_can_filter_t){ 0 };
 		pthread_mutex_unlock(&d->lock);
@@ -493,7 +497,8 @@ static const alp_can_ops_t _ops = {
 	.close         = y_close,
 };
 
-ALP_BACKEND_REGISTER(can, yocto_drv,
+ALP_BACKEND_REGISTER(can,
+                     yocto_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "linux",

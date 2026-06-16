@@ -22,8 +22,8 @@ extern "C" {
 
 extern const alp_inference_ops_t alp_inference_tflm_ops;
 
-const char                      *alp_inference_tflm_cpu_kernel_variant(void);
-const char                      *alp_inference_tflm_npu_variant_name(void);
+const char *alp_inference_tflm_cpu_kernel_variant(void);
+const char *alp_inference_tflm_npu_variant_name(void);
 
 #ifdef __cplusplus
 }

@@ -108,8 +108,8 @@ ZTEST(alp_gpio_registry, test_close_releases_handle)
 
 /* ---------- (f) sw_fallback round-trip + NOSUPPORT on irq_enable ---------- */
 
-extern const alp_backend_t   __start_alp_backends_gpio[] __attribute__((weak));
-extern const alp_backend_t   __stop_alp_backends_gpio[] __attribute__((weak));
+extern const alp_backend_t __start_alp_backends_gpio[] __attribute__((weak));
+extern const alp_backend_t __stop_alp_backends_gpio[] __attribute__((weak));
 
 static const alp_gpio_ops_t *_find_sw_fallback_ops(void)
 {

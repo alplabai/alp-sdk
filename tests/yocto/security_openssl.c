@@ -107,19 +107,35 @@ static void test_aes_128_gcm_roundtrip(void)
 	const uint8_t plain[] = "secret payload";
 	const uint8_t aad[]   = "metadata";
 
-	alp_aead_t   *a       = alp_aead_open(ALP_AEAD_AES_128_GCM, key, sizeof(key));
+	alp_aead_t *a = alp_aead_open(ALP_AEAD_AES_128_GCM, key, sizeof(key));
 	ALP_ASSERT_TRUE(a != NULL);
 
 	uint8_t cipher[sizeof(plain)];
 	uint8_t tag[16];
-	ALP_ASSERT_EQ_INT(alp_aead_encrypt(a, iv, sizeof(iv), aad, sizeof(aad) - 1, plain,
-	                                   sizeof(plain) - 1, cipher, tag, sizeof(tag)),
+	ALP_ASSERT_EQ_INT(alp_aead_encrypt(a,
+	                                   iv,
+	                                   sizeof(iv),
+	                                   aad,
+	                                   sizeof(aad) - 1,
+	                                   plain,
+	                                   sizeof(plain) - 1,
+	                                   cipher,
+	                                   tag,
+	                                   sizeof(tag)),
 	                  ALP_OK);
 
 	uint8_t recovered[sizeof(plain)];
 	memset(recovered, 0, sizeof(recovered));
-	ALP_ASSERT_EQ_INT(alp_aead_decrypt(a, iv, sizeof(iv), aad, sizeof(aad) - 1, cipher,
-	                                   sizeof(plain) - 1, tag, sizeof(tag), recovered),
+	ALP_ASSERT_EQ_INT(alp_aead_decrypt(a,
+	                                   iv,
+	                                   sizeof(iv),
+	                                   aad,
+	                                   sizeof(aad) - 1,
+	                                   cipher,
+	                                   sizeof(plain) - 1,
+	                                   tag,
+	                                   sizeof(tag),
+	                                   recovered),
 	                  ALP_OK);
 	ALP_ASSERT_TRUE(memcmp(recovered, plain, sizeof(plain) - 1) == 0);
 
@@ -136,20 +152,22 @@ static void test_chacha20_poly1305_roundtrip(void)
 		iv[i] = (uint8_t)(i * 7);
 	const uint8_t plain[] = "another payload";
 
-	alp_aead_t   *a       = alp_aead_open(ALP_AEAD_CHACHA20_POLY1305, key, sizeof(key));
+	alp_aead_t *a = alp_aead_open(ALP_AEAD_CHACHA20_POLY1305, key, sizeof(key));
 	ALP_ASSERT_TRUE(a != NULL);
 
 	uint8_t cipher[sizeof(plain)];
 	uint8_t tag[16];
-	ALP_ASSERT_EQ_INT(alp_aead_encrypt(a, iv, sizeof(iv), NULL, 0, plain, sizeof(plain) - 1, cipher,
-	                                   tag, sizeof(tag)),
-	                  ALP_OK);
+	ALP_ASSERT_EQ_INT(
+	    alp_aead_encrypt(
+	        a, iv, sizeof(iv), NULL, 0, plain, sizeof(plain) - 1, cipher, tag, sizeof(tag)),
+	    ALP_OK);
 
 	uint8_t recovered[sizeof(plain)];
 	memset(recovered, 0, sizeof(recovered));
-	ALP_ASSERT_EQ_INT(alp_aead_decrypt(a, iv, sizeof(iv), NULL, 0, cipher, sizeof(plain) - 1, tag,
-	                                   sizeof(tag), recovered),
-	                  ALP_OK);
+	ALP_ASSERT_EQ_INT(
+	    alp_aead_decrypt(
+	        a, iv, sizeof(iv), NULL, 0, cipher, sizeof(plain) - 1, tag, sizeof(tag), recovered),
+	    ALP_OK);
 	ALP_ASSERT_TRUE(memcmp(recovered, plain, sizeof(plain) - 1) == 0);
 
 	alp_aead_close(a);
@@ -164,18 +182,20 @@ static void test_aead_tag_mismatch_rejects(void)
 	uint8_t       iv[12]  = { 0 };
 	const uint8_t plain[] = "ABCDEFGHIJ";
 
-	alp_aead_t   *a       = alp_aead_open(ALP_AEAD_AES_128_GCM, key, sizeof(key));
+	alp_aead_t *a = alp_aead_open(ALP_AEAD_AES_128_GCM, key, sizeof(key));
 	ALP_ASSERT_TRUE(a != NULL);
 	uint8_t cipher[sizeof(plain)];
 	uint8_t tag[16];
-	ALP_ASSERT_EQ_INT(alp_aead_encrypt(a, iv, sizeof(iv), NULL, 0, plain, sizeof(plain) - 1, cipher,
-	                                   tag, sizeof(tag)),
-	                  ALP_OK);
+	ALP_ASSERT_EQ_INT(
+	    alp_aead_encrypt(
+	        a, iv, sizeof(iv), NULL, 0, plain, sizeof(plain) - 1, cipher, tag, sizeof(tag)),
+	    ALP_OK);
 	tag[0] ^= 0xFFu;
 	uint8_t recovered[sizeof(plain)];
-	ALP_ASSERT_EQ_INT(alp_aead_decrypt(a, iv, sizeof(iv), NULL, 0, cipher, sizeof(plain) - 1, tag,
-	                                   sizeof(tag), recovered),
-	                  ALP_ERR_IO);
+	ALP_ASSERT_EQ_INT(
+	    alp_aead_decrypt(
+	        a, iv, sizeof(iv), NULL, 0, cipher, sizeof(plain) - 1, tag, sizeof(tag), recovered),
+	    ALP_ERR_IO);
 	alp_aead_close(a);
 }
 

@@ -372,8 +372,8 @@ ZTEST(alp_dsp_chain_apply_bins, test_complex_output_yields_2n_elements)
 		const float re  = out[2u * k_idx];
 		const float im  = out[2u * k_idx + 1u];
 		const float mag = sqrtf(re * re + im * im);
-		zassert_true(mag > 999.0f && mag < 1001.0f, "bin %zu magnitude off: %f", k_idx,
-		             (double)mag);
+		zassert_true(
+		    mag > 999.0f && mag < 1001.0f, "bin %zu magnitude off: %f", k_idx, (double)mag);
 	}
 
 	alp_dsp_chain_close(c);
@@ -410,12 +410,12 @@ ZTEST(alp_adc_filter, test_open_null_stages_returns_inval)
 
 ZTEST(alp_adc_filter, test_open_zero_stages_returns_inval)
 {
-	static const float taps[1]  = { 1.0f };
-	alp_dsp_stage_t    stage    = { 0 };
-	stage.kind                  = ALP_DSP_STAGE_FIR;
-	stage.u.fir.coeff_format    = ALP_DSP_COEFF_FORMAT_F32;
-	stage.u.fir.n_taps          = 1u;
-	stage.u.fir.taps            = taps;
+	static const float taps[1] = { 1.0f };
+	alp_dsp_stage_t    stage   = { 0 };
+	stage.kind                 = ALP_DSP_STAGE_FIR;
+	stage.u.fir.coeff_format   = ALP_DSP_COEFF_FORMAT_F32;
+	stage.u.fir.n_taps         = 1u;
+	stage.u.fir.taps           = taps;
 
 	alp_adc_filter_config_t cfg = { 0 };
 	cfg.channel_id              = 0u;
@@ -431,12 +431,12 @@ ZTEST(alp_adc_filter, test_open_no_bridge_returns_nosupport)
 {
 	/* Valid args; native_sim has no V2N supervisor wired so the
      * filter open returns NOSUPPORT after the arg validation passes. */
-	static const float taps[1]  = { 1.0f };
-	alp_dsp_stage_t    stage    = { 0 };
-	stage.kind                  = ALP_DSP_STAGE_FIR;
-	stage.u.fir.coeff_format    = ALP_DSP_COEFF_FORMAT_F32;
-	stage.u.fir.n_taps          = 1u;
-	stage.u.fir.taps            = taps;
+	static const float taps[1] = { 1.0f };
+	alp_dsp_stage_t    stage   = { 0 };
+	stage.kind                 = ALP_DSP_STAGE_FIR;
+	stage.u.fir.coeff_format   = ALP_DSP_COEFF_FORMAT_F32;
+	stage.u.fir.n_taps         = 1u;
+	stage.u.fir.taps           = taps;
 
 	alp_adc_filter_config_t cfg = { 0 };
 	cfg.channel_id              = 0u;
@@ -506,10 +506,10 @@ ZTEST(alp_adc_spectrum, test_open_null_stages_returns_inval)
 
 ZTEST(alp_adc_spectrum, test_open_zero_stages_returns_inval)
 {
-	alp_dsp_stage_t stage               = { 0 };
-	stage.kind                          = ALP_DSP_STAGE_FFT;
-	stage.u.fft.n_points                = 64u;
-	stage.u.fft.output_format           = ALP_DSP_FFT_OUTPUT_MAGNITUDE;
+	alp_dsp_stage_t stage     = { 0 };
+	stage.kind                = ALP_DSP_STAGE_FFT;
+	stage.u.fft.n_points      = 64u;
+	stage.u.fft.output_format = ALP_DSP_FFT_OUTPUT_MAGNITUDE;
 
 	const alp_adc_spectrum_config_t cfg = {
 		.channel_id     = 0u,
@@ -525,12 +525,12 @@ ZTEST(alp_adc_spectrum, test_open_zero_stages_returns_inval)
 ZTEST(alp_adc_spectrum, test_open_filter_terminated_chain_returns_inval)
 {
 	/* Wrong entry point: filter-terminated chain passed to spectrum_open. */
-	static const float taps[1]          = { 1.0f };
-	alp_dsp_stage_t    stage            = { 0 };
-	stage.kind                          = ALP_DSP_STAGE_FIR;
-	stage.u.fir.coeff_format            = ALP_DSP_COEFF_FORMAT_F32;
-	stage.u.fir.n_taps                  = 1u;
-	stage.u.fir.taps                    = taps;
+	static const float taps[1] = { 1.0f };
+	alp_dsp_stage_t    stage   = { 0 };
+	stage.kind                 = ALP_DSP_STAGE_FIR;
+	stage.u.fir.coeff_format   = ALP_DSP_COEFF_FORMAT_F32;
+	stage.u.fir.n_taps         = 1u;
+	stage.u.fir.taps           = taps;
 
 	const alp_adc_spectrum_config_t cfg = {
 		.channel_id     = 0u,
@@ -545,10 +545,10 @@ ZTEST(alp_adc_spectrum, test_open_filter_terminated_chain_returns_inval)
 
 ZTEST(alp_adc_spectrum, test_open_fft_chain_no_bridge_returns_nosupport)
 {
-	alp_dsp_stage_t stage               = { 0 };
-	stage.kind                          = ALP_DSP_STAGE_FFT;
-	stage.u.fft.n_points                = 64u;
-	stage.u.fft.output_format           = ALP_DSP_FFT_OUTPUT_MAGNITUDE;
+	alp_dsp_stage_t stage     = { 0 };
+	stage.kind                = ALP_DSP_STAGE_FFT;
+	stage.u.fft.n_points      = 64u;
+	stage.u.fft.output_format = ALP_DSP_FFT_OUTPUT_MAGNITUDE;
 
 	const alp_adc_spectrum_config_t cfg = {
 		.channel_id     = 0u,

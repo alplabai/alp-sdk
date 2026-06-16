@@ -22,7 +22,8 @@
 
 #define ALP_I2C_DEV_OR_NULL(idx)                                                                   \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_i2c, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_i2c, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_i2c, idx)))),                                  \
+	            (NULL))
 
 static const struct device *const _devs[] = {
 	ALP_I2C_DEV_OR_NULL(0), ALP_I2C_DEV_OR_NULL(1), ALP_I2C_DEV_OR_NULL(2), ALP_I2C_DEV_OR_NULL(3),
@@ -58,8 +59,8 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
-static alp_status_t z_open(const alp_i2c_config_t *cfg, alp_i2c_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(const alp_i2c_config_t *cfg, alp_i2c_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg->bus_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (cfg->bus_id >= ALP_SOC_I2C_COUNT) return ALP_ERR_OUT_OF_RANGE;
@@ -74,8 +75,8 @@ static alp_status_t z_open(const alp_i2c_config_t *cfg, alp_i2c_backend_state_t 
 	return ALP_OK;
 }
 
-static alp_status_t z_write(alp_i2c_backend_state_t *st, uint8_t addr, const uint8_t *data,
-                            size_t len)
+static alp_status_t
+z_write(alp_i2c_backend_state_t *st, uint8_t addr, const uint8_t *data, size_t len)
 {
 	const struct device *dev = (const struct device *)st->dev;
 	return _errno_to_alp(i2c_write(dev, data, len, addr));
@@ -87,8 +88,12 @@ static alp_status_t z_read(alp_i2c_backend_state_t *st, uint8_t addr, uint8_t *d
 	return _errno_to_alp(i2c_read(dev, data, len, addr));
 }
 
-static alp_status_t z_write_read(alp_i2c_backend_state_t *st, uint8_t addr, const uint8_t *wdata,
-                                 size_t wlen, uint8_t *rdata, size_t rlen)
+static alp_status_t z_write_read(alp_i2c_backend_state_t *st,
+                                 uint8_t                  addr,
+                                 const uint8_t           *wdata,
+                                 size_t                   wlen,
+                                 uint8_t                 *rdata,
+                                 size_t                   rlen)
 {
 	const struct device *dev = (const struct device *)st->dev;
 	return _errno_to_alp(i2c_write_read(dev, addr, wdata, wlen, rdata, rlen));
@@ -102,7 +107,8 @@ static const alp_i2c_ops_t _ops = {
 	.close      = NULL, /* no teardown needed for i2c_configure */
 };
 
-ALP_BACKEND_REGISTER(i2c, zephyr_drv,
+ALP_BACKEND_REGISTER(i2c,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

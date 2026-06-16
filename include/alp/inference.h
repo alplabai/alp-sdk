@@ -207,8 +207,8 @@ size_t alp_inference_num_outputs(alp_inference_t *inf);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
  *         ALP_ERR_NOT_READY.
  */
-alp_status_t alp_inference_get_input(alp_inference_t *inf, size_t index,
-                                     alp_inference_tensor_t *out);
+alp_status_t
+alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out);
 
 /**
  * @brief Get a descriptor for output tensor @p index.
@@ -225,8 +225,8 @@ alp_status_t alp_inference_get_input(alp_inference_t *inf, size_t index,
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
  *         ALP_ERR_NOT_READY.
  */
-alp_status_t alp_inference_get_output(alp_inference_t *inf, size_t index,
-                                      alp_inference_tensor_t *out);
+alp_status_t
+alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out);
 
 /**
  * @brief Run one inference pass.

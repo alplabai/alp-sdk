@@ -94,8 +94,8 @@ alp_status_t alp_hash_update(alp_hash_t *h, const uint8_t *data, size_t len);
  * @param[out] digest_len  Receives the bytes written.  May be NULL.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
  */
-alp_status_t alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_cap,
-                             size_t *digest_len);
+alp_status_t
+alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_cap, size_t *digest_len);
 
 /** @brief Release without finalising.  Use after a partial computation. */
 void alp_hash_close(alp_hash_t *h);
@@ -154,9 +154,16 @@ alp_aead_t *alp_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t key_len
  * @param[in]  tag_len     Tag length, typically 16 B.  Must be ≥ 16.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
  */
-alp_status_t alp_aead_encrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, const uint8_t *aad,
-                              size_t aad_len, const uint8_t *plain, size_t plain_len,
-                              uint8_t *cipher_out, uint8_t *tag_out, size_t tag_len);
+alp_status_t alp_aead_encrypt(alp_aead_t    *a,
+                              const uint8_t *iv,
+                              size_t         iv_len,
+                              const uint8_t *aad,
+                              size_t         aad_len,
+                              const uint8_t *plain,
+                              size_t         plain_len,
+                              uint8_t       *cipher_out,
+                              uint8_t       *tag_out,
+                              size_t         tag_len);
 
 /**
  * @brief Authenticated decrypt.
@@ -176,9 +183,16 @@ alp_status_t alp_aead_encrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, c
  *         with — @p plain_out content is undefined and MUST be discarded);
  *         ALP_ERR_NOT_READY / ALP_ERR_INVAL otherwise.
  */
-alp_status_t alp_aead_decrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, const uint8_t *aad,
-                              size_t aad_len, const uint8_t *cipher, size_t cipher_len,
-                              const uint8_t *tag, size_t tag_len, uint8_t *plain_out);
+alp_status_t alp_aead_decrypt(alp_aead_t    *a,
+                              const uint8_t *iv,
+                              size_t         iv_len,
+                              const uint8_t *aad,
+                              size_t         aad_len,
+                              const uint8_t *cipher,
+                              size_t         cipher_len,
+                              const uint8_t *tag,
+                              size_t         tag_len,
+                              uint8_t       *plain_out);
 
 /** @brief Release the AEAD context.  Wipes key material. */
 void alp_aead_close(alp_aead_t *a);

@@ -32,7 +32,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_UART_HANDLES 4
 #endif
 
-static struct alp_uart  _pool[CONFIG_ALP_SDK_MAX_UART_HANDLES];
+static struct alp_uart _pool[CONFIG_ALP_SDK_MAX_UART_HANDLES];
 
 static struct alp_uart *_alloc(void)
 {

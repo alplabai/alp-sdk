@@ -32,8 +32,8 @@ ZTEST(alp_inference, test_open_no_backend_returns_null)
 	    .backend    = ALP_INFERENCE_BACKEND_AUTO,
 	});
 	zassert_is_null(h, "alp_inference_open without a backend must yield NULL");
-	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d",
-	              (int)alp_last_error());
+	zassert_equal(
+	    alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d", (int)alp_last_error());
 }
 
 ZTEST(alp_inference, test_open_explicit_cpu_returns_null)

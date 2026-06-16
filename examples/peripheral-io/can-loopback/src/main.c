@@ -43,8 +43,13 @@ static void on_rx(const alp_can_frame_t *f, void *user)
 {
 	(void)user;
 	rx_count++;
-	printk("[can] rx id=0x%03x dlc=%u data[0..3]=%02x %02x %02x %02x\n", f->id, f->dlc, f->data[0],
-	       f->data[1], f->data[2], f->data[3]);
+	printk("[can] rx id=0x%03x dlc=%u data[0..3]=%02x %02x %02x %02x\n",
+	       f->id,
+	       f->dlc,
+	       f->data[0],
+	       f->data[1],
+	       f->data[2],
+	       f->data[3]);
 }
 
 int main(void)

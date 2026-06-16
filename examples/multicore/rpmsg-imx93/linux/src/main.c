@@ -22,7 +22,7 @@
 
 static atomic_uint g_received;
 
-static void        on_temperature(const void *payload, size_t len, void *user)
+static void on_temperature(const void *payload, size_t len, void *user)
 {
 	(void)user;
 	if (len != sizeof(float)) {

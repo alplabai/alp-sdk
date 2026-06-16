@@ -16,12 +16,22 @@ IndentWidth: 4
 TabWidth: 4
 UseTab: ForIndentation
 ColumnLimit: 100
-AlignConsecutiveAssignments: AcrossEmptyLines
-AlignConsecutiveDeclarations: AcrossEmptyLines
+# Alignment: keep the polished column look for enums/structs/#define tables, but
+# use Consecutive (resets at blank lines) rather than AcrossEmptyLines so editing
+# one block never reflows its neighbours (avoids the "enum-alignment trap").
+# AlignConsecutiveMacros lines up #define value columns (register/capability blocks).
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations: Consecutive
+AlignConsecutiveMacros: Consecutive
 AlignTrailingComments: true
 AllowShortFunctionsOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: WithoutElse
 BreakBeforeBraces: Linux
+# Wrapping: when a call/declaration is too long for the column limit, put each
+# argument/parameter on its own line (one-per-line) rather than bin-packing them,
+# so long public-API signatures + designated initialisers read clearly.
+BinPackParameters: false
+BinPackArguments: false
 KeepEmptyLinesAtTheStartOfBlocks: false
 PointerAlignment: Right
 SortIncludes: Never

@@ -64,8 +64,8 @@ alp_renesas_power_supervisor_mode_set(alp_power_t                        *handle
      * pass.  wake_after_ms is 0 for this low-level entry point --
      * callers wanting timed wake should use the portable
      * alp_power_request_sleep instead. */
-	s = gd32g553_power_mode_set(ctx, supervisor_mode, handle->state.wake_bitmap,
-	                            0u /* no timed wake from this path */);
+	s = gd32g553_power_mode_set(
+	    ctx, supervisor_mode, handle->state.wake_bitmap, 0u /* no timed wake from this path */);
 	alp_z_v2n_supervisor_release();
 	return s;
 }

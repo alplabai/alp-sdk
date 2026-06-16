@@ -91,29 +91,29 @@ extern "C" {
 #define RTL8211FDI_PHY_OUI_REALTEK 0x001Cu
 
 /** Standard IEEE 802.3 clause-22 register addresses. */
-#define RTL8211FDI_REG_BMCR 0x00u
-#define RTL8211FDI_REG_BMSR 0x01u
-#define RTL8211FDI_REG_PHYID1 0x02u
-#define RTL8211FDI_REG_PHYID2 0x03u
-#define RTL8211FDI_REG_ANAR 0x04u
-#define RTL8211FDI_REG_ANLPAR 0x05u
-#define RTL8211FDI_REG_GBCR 0x09u
-#define RTL8211FDI_REG_GBSR 0x0Au
+#define RTL8211FDI_REG_BMCR        0x00u
+#define RTL8211FDI_REG_BMSR        0x01u
+#define RTL8211FDI_REG_PHYID1      0x02u
+#define RTL8211FDI_REG_PHYID2      0x03u
+#define RTL8211FDI_REG_ANAR        0x04u
+#define RTL8211FDI_REG_ANLPAR      0x05u
+#define RTL8211FDI_REG_GBCR        0x09u
+#define RTL8211FDI_REG_GBSR        0x0Au
 #define RTL8211FDI_REG_PAGE_SELECT 0x1Fu
 
 /** BMCR bits. */
-#define RTL8211FDI_BMCR_RESET (1u << 15)
-#define RTL8211FDI_BMCR_AUTONEG_ENABLE (1u << 12)
+#define RTL8211FDI_BMCR_RESET           (1u << 15)
+#define RTL8211FDI_BMCR_AUTONEG_ENABLE  (1u << 12)
 #define RTL8211FDI_BMCR_RESTART_AUTONEG (1u << 9)
 
 /** BMSR bits used by the driver. */
 #define RTL8211FDI_BMSR_AUTONEG_COMPLETE (1u << 5)
-#define RTL8211FDI_BMSR_LINK_STATUS (1u << 2)
+#define RTL8211FDI_BMSR_LINK_STATUS      (1u << 2)
 
 /** Realtek extended pages relevant to this driver. */
 #define RTL8211FDI_PAGE_DEFAULT 0x0000u /**< Standard IEEE registers. */
-#define RTL8211FDI_PAGE_PHYSR 0x0A43u   /**< PHY-specific status reg 0x1A. */
-#define RTL8211FDI_PAGE_WOL 0x0D8Au     /**< Wake-on-LAN config. */
+#define RTL8211FDI_PAGE_PHYSR   0x0A43u /**< PHY-specific status reg 0x1A. */
+#define RTL8211FDI_PAGE_WOL     0x0D8Au /**< Wake-on-LAN config. */
 
 /** Negotiated speed enumeration (returned by @ref rtl8211fdi_get_link). */
 typedef enum {
@@ -170,8 +170,11 @@ typedef struct {
  * @return ALP_ERR_IO    on MDIO bus error.
  * @return ALP_ERR_NOT_READY if PHYID1 OUI does not match Realtek.
  */
-alp_status_t rtl8211fdi_init(rtl8211fdi_t *ctx, uint8_t phy_addr, rtl8211fdi_mdio_read_t read,
-                             rtl8211fdi_mdio_write_t write, void *mdio_user);
+alp_status_t rtl8211fdi_init(rtl8211fdi_t           *ctx,
+                             uint8_t                 phy_addr,
+                             rtl8211fdi_mdio_read_t  read,
+                             rtl8211fdi_mdio_write_t write,
+                             void                   *mdio_user);
 
 /** @brief Release the context.  Idempotent.  Does NOT touch the MDIO bus. */
 void rtl8211fdi_deinit(rtl8211fdi_t *ctx);
@@ -205,8 +208,8 @@ alp_status_t rtl8211fdi_restart_autoneg(rtl8211fdi_t *ctx);
  *  @param speed        [out] negotiated speed.
  *  @param full_duplex  [out] true if full-duplex.
  */
-alp_status_t rtl8211fdi_get_link(rtl8211fdi_t *ctx, bool *up, rtl8211fdi_speed_t *speed,
-                                 bool *full_duplex);
+alp_status_t
+rtl8211fdi_get_link(rtl8211fdi_t *ctx, bool *up, rtl8211fdi_speed_t *speed, bool *full_duplex);
 
 /* --------------------------------------------------------------- */
 /* Wake-on-LAN                                                        */

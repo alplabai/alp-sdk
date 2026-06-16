@@ -27,10 +27,10 @@
 
 #include "fakes.h"
 
-#define REG_CHIP_ID 0xD0
-#define REG_CALIB_00 0x88
-#define REG_CALIB_25 0xA1
-#define REG_CALIB_26 0xE1
+#define REG_CHIP_ID   0xD0
+#define REG_CALIB_00  0x88
+#define REG_CALIB_25  0xA1
+#define REG_CALIB_26  0xE1
 #define REG_PRESS_MSB 0xF7
 
 struct fake_bme280_data {
@@ -94,8 +94,8 @@ static void seed_defaults(struct fake_bme280_data *d)
 	memcpy(&d->regs[REG_PRESS_MSB], raw_block, sizeof raw_block);
 }
 
-static int fake_bme280_transfer(const struct emul *target, struct i2c_msg *msgs, int num_msgs,
-                                int addr)
+static int
+fake_bme280_transfer(const struct emul *target, struct i2c_msg *msgs, int num_msgs, int addr)
 {
 	(void)addr;
 	struct fake_bme280_data *d = target->data;

@@ -94,7 +94,8 @@ static alp_spi_slave_t *alp_spi_slave_open(const alp_spi_slave_config_t *cfg)
 
 static alp_status_t alp_spi_slave_set_callbacks(alp_spi_slave_t        *slave,
                                                 alp_spi_slave_byte_cb_t on_byte,
-                                                alp_spi_slave_eot_cb_t on_eot, void *user)
+                                                alp_spi_slave_eot_cb_t  on_eot,
+                                                void                   *user)
 {
 	(void)slave;
 	(void)on_byte;
@@ -124,7 +125,7 @@ static void alp_spi_slave_close(alp_spi_slave_t *slave)
  * because it didn't know the command was coming until MOSI clocked in.
  * ------------------------------------------------------------------ */
 
-#define CMD_PING 0x01u        /* echo payload back */
+#define CMD_PING        0x01u /* echo payload back */
 #define CMD_GET_VERSION 0x02u /* reply with 4-byte version string */
 
 static volatile uint8_t  g_cmd        = 0u;
@@ -224,8 +225,11 @@ int main(void)
      * Print transfer counts once a second so an operator running
      * the example can SEE incoming traffic. */
 	for (int i = 0; i < 5; i++) {
-		printf("[spi-slave] tick %d transfers=%u bytes=%u last_cmd=0x%02x\n", i,
-		       (unsigned)g_transfers, (unsigned)g_bytes_seen, (unsigned)g_cmd);
+		printf("[spi-slave] tick %d transfers=%u bytes=%u last_cmd=0x%02x\n",
+		       i,
+		       (unsigned)g_transfers,
+		       (unsigned)g_bytes_seen,
+		       (unsigned)g_cmd);
 		k_msleep(1000);
 	}
 

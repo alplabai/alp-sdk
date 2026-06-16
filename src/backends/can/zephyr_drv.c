@@ -36,7 +36,8 @@
 
 #define ALP_CAN_DEV_OR_NULL(idx)                                                                   \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_can, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_can, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_can, idx)))),                                  \
+	            (NULL))
 
 static const struct device *const _devs[] = {
 	ALP_CAN_DEV_OR_NULL(0), ALP_CAN_DEV_OR_NULL(1), ALP_CAN_DEV_OR_NULL(2),
@@ -63,7 +64,7 @@ typedef struct {
 	bool     in_use;
 } alp_z_can_side_t;
 
-static alp_z_can_side_t  _sides[CONFIG_ALP_SDK_MAX_CAN_HANDLES];
+static alp_z_can_side_t _sides[CONFIG_ALP_SDK_MAX_CAN_HANDLES];
 
 static alp_z_can_side_t *_alloc_side(void)
 {
@@ -149,8 +150,8 @@ static size_t _side_index(alp_z_can_side_t *s)
 	return (size_t)(s - &_sides[0]);
 }
 
-static alp_status_t z_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg->bus_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (cfg->bus_id >= ALP_SOC_CAN_COUNT) return ALP_ERR_OUT_OF_RANGE;
@@ -207,8 +208,8 @@ static alp_status_t z_stop(alp_can_backend_state_t *st)
 	return _errno_to_alp(can_stop(dev));
 }
 
-static alp_status_t z_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame,
-                           uint32_t timeout_ms)
+static alp_status_t
+z_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame, uint32_t timeout_ms)
 {
 	const struct device *dev = (const struct device *)st->dev;
 	struct can_frame     zf  = {
@@ -221,8 +222,11 @@ static alp_status_t z_send(alp_can_backend_state_t *st, const alp_can_frame_t *f
 	return _errno_to_alp(can_send(dev, &zf, K_MSEC(timeout_ms), NULL, NULL));
 }
 
-static alp_status_t z_add_filter(alp_can_backend_state_t *st, const alp_can_filter_t *filter,
-                                 alp_can_rx_cb_t cb, void *user, int32_t *filter_id_out)
+static alp_status_t z_add_filter(alp_can_backend_state_t *st,
+                                 const alp_can_filter_t  *filter,
+                                 alp_can_rx_cb_t          cb,
+                                 void                    *user,
+                                 int32_t                 *filter_id_out)
 {
 	alp_z_can_side_t    *s   = (alp_z_can_side_t *)st->be_data;
 	const struct device *dev = (const struct device *)st->dev;
@@ -238,18 +242,18 @@ static alp_status_t z_add_filter(alp_can_backend_state_t *st, const alp_can_filt
 		}
 	}
 	if (slot < 0) return ALP_ERR_NOMEM;
-	s->cb_table[slot].cb       = cb;
-	s->cb_table[slot].user     = user;
+	s->cb_table[slot].cb   = cb;
+	s->cb_table[slot].user = user;
 
 	size_t            side_idx = _side_index(s);
 	trampoline_key_t *key      = &_keys[side_idx][slot];
 	key->side                  = s;
 	key->slot                  = (uint8_t)slot;
 
-	struct can_filter zf       = {
-		      .id    = filter->id,
-		      .mask  = filter->mask,
-		      .flags = filter->ext_id ? CAN_FILTER_IDE : 0,
+	struct can_filter zf = {
+		.id    = filter->id,
+		.mask  = filter->mask,
+		.flags = filter->ext_id ? CAN_FILTER_IDE : 0,
 	};
 	int fid = can_add_rx_filter(dev, _rx_trampoline, key, &zf);
 	if (fid < 0) {
@@ -298,7 +302,8 @@ static const alp_can_ops_t _ops = {
 	.close         = z_close,
 };
 
-ALP_BACKEND_REGISTER(can, zephyr_drv,
+ALP_BACKEND_REGISTER(can,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

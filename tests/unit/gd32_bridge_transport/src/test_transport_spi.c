@@ -61,8 +61,8 @@ ZTEST(gd32_bridge_transport, test_ping_stages_reply)
 	size_t n = hal_drain(reply, sizeof reply);
 
 	zassert_equal(n, sizeof ping_frame, "PING reply is 4 bytes");
-	zassert_mem_equal(reply, ping_frame, sizeof ping_frame,
-	                  "PING reply is byte-identical to the request");
+	zassert_mem_equal(
+	    reply, ping_frame, sizeof ping_frame, "PING reply is byte-identical to the request");
 }
 
 /* The silicon regression: after the HAL consumed the staged reply, an
@@ -82,8 +82,9 @@ ZTEST(gd32_bridge_transport, test_drain_rewinds_consumed_reply)
 	/* Host read that found nothing useful -> all-0x00 capture. */
 	transaction(zeros, sizeof zeros);
 
-	zassert_true(spi_slave_tx_pending(), "drain gate must rewind the staged reply (silicon bug "
-	                                     "2026-06-04: spent cursor disarmed every re-read)");
+	zassert_true(spi_slave_tx_pending(),
+	             "drain gate must rewind the staged reply (silicon bug "
+	             "2026-06-04: spent cursor disarmed every re-read)");
 	size_t n_again = hal_drain(again, sizeof again);
 	zassert_equal(n_again, n_first, "full reply re-armed");
 	zassert_mem_equal(again, first, n_first, "identical bytes re-armed");
@@ -143,8 +144,8 @@ ZTEST(gd32_bridge_transport, test_new_request_replaces_staged_reply)
 	uint8_t        gv[4] = { 0xA5u, 0x01u, 0, 0 };
 	const uint16_t crc   = crc16_ccitt_false(gv, 2u);
 
-	gv[2]                = (uint8_t)(crc & 0xFFu);
-	gv[3]                = (uint8_t)(crc >> 8);
+	gv[2] = (uint8_t)(crc & 0xFFu);
+	gv[3] = (uint8_t)(crc >> 8);
 
 	transport_spi_init();
 	transaction(ping_frame, sizeof ping_frame);
@@ -194,8 +195,8 @@ static void negotiate(uint8_t feat)
 	uint8_t        lf[5] = { 0xA5u, 0x81u /* CMD_LINK_FEATURES */, feat, 0, 0 };
 	const uint16_t crc   = crc16_ccitt_false(lf, 3u);
 
-	lf[3]                = (uint8_t)(crc & 0xFFu);
-	lf[4]                = (uint8_t)(crc >> 8);
+	lf[3] = (uint8_t)(crc & 0xFFu);
+	lf[4] = (uint8_t)(crc >> 8);
 	transaction(lf, sizeof lf);
 }
 
@@ -261,8 +262,8 @@ ZTEST(gd32_bridge_transport, test_status_seq_stamp_contract)
 
 	transaction(ping_frame, sizeof ping_frame);
 	n = hal_drain(buf, sizeof buf);
-	zassert_mem_equal(buf, ping_frame, sizeof ping_frame,
-	                  "legacy framing restored (PING byte-identical)");
+	zassert_mem_equal(
+	    buf, ping_frame, sizeof ping_frame, "legacy framing restored (PING byte-identical)");
 }
 
 /* The 4-bit stamp wraps 15 -> 0 -> 1; stamp 0 is a VALID value mid-

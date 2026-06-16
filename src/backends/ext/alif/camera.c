@@ -58,7 +58,8 @@ alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t                 *cam
 
 alp_status_t alp_alif_camera_isp_gain_table_load(alp_camera_t             *camera,
                                                  alp_alif_camera_channel_t channel,
-                                                 const uint16_t *table, uint16_t len)
+                                                 const uint16_t           *table,
+                                                 uint16_t                  len)
 {
 	if (camera == NULL || table == NULL) {
 		return ALP_ERR_INVAL;
@@ -73,8 +74,8 @@ alp_status_t alp_alif_camera_isp_gain_table_load(alp_camera_t             *camer
 	return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_alif_camera_isp_lsc_lut_load(alp_camera_t *camera, const uint16_t *lut,
-                                              uint16_t len)
+alp_status_t
+alp_alif_camera_isp_lsc_lut_load(alp_camera_t *camera, const uint16_t *lut, uint16_t len)
 {
 	if (camera == NULL || lut == NULL) {
 		return ALP_ERR_INVAL;

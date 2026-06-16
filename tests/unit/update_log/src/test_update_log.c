@@ -59,7 +59,7 @@ ZTEST(alp_update_log, test_decode_bad_version)
 
 /* Minimal RAM store double: fixed slots of (key,blob). */
 #define TD_SLOTS 16
-#define TD_BLOB 128
+#define TD_BLOB  128
 struct td_store {
 	struct {
 		char    key[24];

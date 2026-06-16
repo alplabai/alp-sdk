@@ -14,7 +14,8 @@
 #include <zephyr/ztest.h>
 #include <alp/backend.h>
 
-ALP_BACKEND_REGISTER(regress_sentinel, alif,
+ALP_BACKEND_REGISTER(regress_sentinel,
+                     alif,
                      {
                          .silicon_ref = "alif:ensemble:e7",
                          .vendor      = "alif",

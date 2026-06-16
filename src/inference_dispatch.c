@@ -53,7 +53,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_INFERENCE_HANDLES 2
 #endif
 
-static struct alp_inference  _pool[CONFIG_ALP_SDK_MAX_INFERENCE_HANDLES];
+static struct alp_inference _pool[CONFIG_ALP_SDK_MAX_INFERENCE_HANDLES];
 
 static struct alp_inference *_alloc(void)
 {
@@ -124,8 +124,8 @@ size_t alp_inference_num_outputs(alp_inference_t *inf)
 	return inf->state.ops->num_outputs(&inf->state);
 }
 
-alp_status_t alp_inference_get_input(alp_inference_t *inf, size_t index,
-                                     alp_inference_tensor_t *out)
+alp_status_t
+alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out)
 {
 	if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
 	if (out == NULL) return ALP_ERR_INVAL;
@@ -136,8 +136,8 @@ alp_status_t alp_inference_get_input(alp_inference_t *inf, size_t index,
 	return inf->state.ops->get_input(&inf->state, index, out);
 }
 
-alp_status_t alp_inference_get_output(alp_inference_t *inf, size_t index,
-                                      alp_inference_tensor_t *out)
+alp_status_t
+alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out)
 {
 	if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
 	if (out == NULL) return ALP_ERR_INVAL;

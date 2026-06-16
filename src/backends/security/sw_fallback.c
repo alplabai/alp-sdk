@@ -40,8 +40,8 @@
 
 /* ---------- Hash ---------- */
 
-static alp_status_t sw_hash_open(alp_hash_alg_t alg, alp_hash_backend_state_t *state,
-                                 alp_capabilities_t *caps_out)
+static alp_status_t
+sw_hash_open(alp_hash_alg_t alg, alp_hash_backend_state_t *state, alp_capabilities_t *caps_out)
 {
 	/* NOSUPPORT stub: no software hash on native_sim.  The dispatcher
      * relays this as a NULL handle + last_error = NOSUPPORT. */
@@ -59,8 +59,10 @@ static alp_status_t sw_hash_update(alp_hash_backend_state_t *state, const uint8_
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_hash_finish(alp_hash_backend_state_t *state, uint8_t *digest_out,
-                                   size_t digest_cap, size_t *digest_len)
+static alp_status_t sw_hash_finish(alp_hash_backend_state_t *state,
+                                   uint8_t                  *digest_out,
+                                   size_t                    digest_cap,
+                                   size_t                   *digest_len)
 {
 	(void)state;
 	(void)digest_out;
@@ -76,8 +78,11 @@ static void sw_hash_close(alp_hash_backend_state_t *state)
 
 /* ---------- AEAD ---------- */
 
-static alp_status_t sw_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t key_len,
-                                 alp_aead_backend_state_t *state, alp_capabilities_t *caps_out)
+static alp_status_t sw_aead_open(alp_aead_alg_t            alg,
+                                 const uint8_t            *key,
+                                 size_t                    key_len,
+                                 alp_aead_backend_state_t *state,
+                                 alp_capabilities_t       *caps_out)
 {
 	/* NOSUPPORT stub: no software AEAD on native_sim. */
 	(void)alg;
@@ -88,10 +93,16 @@ static alp_status_t sw_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t 
 	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t sw_aead_encrypt(alp_aead_backend_state_t *state, const uint8_t *iv,
-                                    size_t iv_len, const uint8_t *aad, size_t aad_len,
-                                    const uint8_t *plain, size_t plain_len, uint8_t *cipher_out,
-                                    uint8_t *tag_out, size_t tag_len)
+static alp_status_t sw_aead_encrypt(alp_aead_backend_state_t *state,
+                                    const uint8_t            *iv,
+                                    size_t                    iv_len,
+                                    const uint8_t            *aad,
+                                    size_t                    aad_len,
+                                    const uint8_t            *plain,
+                                    size_t                    plain_len,
+                                    uint8_t                  *cipher_out,
+                                    uint8_t                  *tag_out,
+                                    size_t                    tag_len)
 {
 	(void)state;
 	(void)iv;
@@ -106,10 +117,16 @@ static alp_status_t sw_aead_encrypt(alp_aead_backend_state_t *state, const uint8
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_aead_decrypt(alp_aead_backend_state_t *state, const uint8_t *iv,
-                                    size_t iv_len, const uint8_t *aad, size_t aad_len,
-                                    const uint8_t *cipher, size_t cipher_len, const uint8_t *tag,
-                                    size_t tag_len, uint8_t *plain_out)
+static alp_status_t sw_aead_decrypt(alp_aead_backend_state_t *state,
+                                    const uint8_t            *iv,
+                                    size_t                    iv_len,
+                                    const uint8_t            *aad,
+                                    size_t                    aad_len,
+                                    const uint8_t            *cipher,
+                                    size_t                    cipher_len,
+                                    const uint8_t            *tag,
+                                    size_t                    tag_len,
+                                    uint8_t                  *plain_out)
 {
 	(void)state;
 	(void)iv;
@@ -155,7 +172,8 @@ static const alp_security_ops_t _ops = {
 	.random_bytes = sw_random_bytes,
 };
 
-ALP_BACKEND_REGISTER(security, sw_fallback,
+ALP_BACKEND_REGISTER(security,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

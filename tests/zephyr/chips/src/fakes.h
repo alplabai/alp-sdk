@@ -43,7 +43,7 @@ const uint8_t *fake_ssd1306_cmd_log(void);
 size_t         fake_ssd1306_data_log_len(void);
 const uint8_t *fake_ssd1306_data_log(void);
 
-void           fake_ssd1306_reset_logs(void);
+void fake_ssd1306_reset_logs(void);
 
 /* ------------------------------------------------------------------ */
 /* fake BME280                                                         */

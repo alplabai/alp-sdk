@@ -119,7 +119,7 @@ static struct alp_mqtt g_mqtt_pool[ALP_SDK_YOCTO_MAX_MQTT_HANDLES];
  * on first open() so apps that never touch MQTT don't pay the cost;
  * cleanup is intentionally skipped (it's mostly bookkeeping NOPs
  * and process exit reaps the rest). */
-static bool             g_mosq_lib_init_done;
+static bool g_mosq_lib_init_done;
 
 static struct alp_mqtt *pool_acquire(void)
 {
@@ -204,7 +204,7 @@ static alp_status_t parse_broker_uri(struct alp_mqtt *h, const char *uri)
 		return ALP_ERR_INVAL;
 	}
 	memcpy(h->host, rest, rlen + 1);
-	h->port     = default_port;
+	h->port = default_port;
 
 	char *colon = strchr(h->host, ':');
 	if (colon != NULL) {
@@ -283,7 +283,9 @@ static void on_message(struct mosquitto *mosq, void *obj, const struct mosquitto
 			continue;
 		}
 		if (match && h->subs[i].cb != NULL) {
-			h->subs[i].cb(msg->topic, (const uint8_t *)msg->payload, (size_t)msg->payloadlen,
+			h->subs[i].cb(msg->topic,
+			              (const uint8_t *)msg->payload,
+			              (size_t)msg->payloadlen,
 			              h->subs[i].user);
 		}
 	}
@@ -337,7 +339,7 @@ alp_mqtt_t *alp_mqtt_open(const alp_mqtt_config_t *cfg)
 	}
 	h->keepalive_s = (cfg->keepalive_s != 0) ? cfg->keepalive_s : 60;
 
-	h->mosq        = mosquitto_new(cfg->client_id, cfg->clean_session, h);
+	h->mosq = mosquitto_new(cfg->client_id, cfg->clean_session, h);
 	if (h->mosq == NULL) {
 		alp_internal_set_last_error(errno == ENOMEM ? ALP_ERR_NOMEM : ALP_ERR_INVAL);
 		pool_release(h);
@@ -390,8 +392,12 @@ alp_status_t alp_mqtt_connect(alp_mqtt_t *m, uint32_t timeout_ms)
 	return m->connected ? ALP_OK : ALP_ERR_NOT_READY;
 }
 
-alp_status_t alp_mqtt_publish(alp_mqtt_t *m, const char *topic, const uint8_t *payload, size_t len,
-                              alp_mqtt_qos_t qos, bool retain)
+alp_status_t alp_mqtt_publish(alp_mqtt_t    *m,
+                              const char    *topic,
+                              const uint8_t *payload,
+                              size_t         len,
+                              alp_mqtt_qos_t qos,
+                              bool           retain)
 {
 	if (m == NULL || !m->in_use || m->mosq == NULL || topic == NULL) {
 		return ALP_ERR_INVAL;
@@ -406,8 +412,8 @@ alp_status_t alp_mqtt_publish(alp_mqtt_t *m, const char *topic, const uint8_t *p
 	return ALP_OK;
 }
 
-alp_status_t alp_mqtt_subscribe(alp_mqtt_t *m, const char *topic_filter, alp_mqtt_qos_t qos,
-                                alp_mqtt_msg_cb_t cb, void *user)
+alp_status_t alp_mqtt_subscribe(
+    alp_mqtt_t *m, const char *topic_filter, alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user)
 {
 	if (m == NULL || !m->in_use || m->mosq == NULL || topic_filter == NULL || cb == NULL) {
 		return ALP_ERR_INVAL;

@@ -14,7 +14,7 @@
 extern void alp_z_set_last_error(alp_status_t s);
 #define SET_ERR(s) alp_z_set_last_error(s)
 #else
-extern void      alp_internal_set_last_error(alp_status_t s);
+extern void alp_internal_set_last_error(alp_status_t s);
 #define SET_ERR(s) alp_internal_set_last_error(s)
 #endif
 

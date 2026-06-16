@@ -10,14 +10,14 @@
 
 #include "alp/chips/sh1106.h"
 
-#define SH1106_CTRL_CMD 0x00u
+#define SH1106_CTRL_CMD  0x00u
 #define SH1106_CTRL_DATA 0x40u
 
-#define SH1106_CMD_DISP_OFF 0xAEu
-#define SH1106_CMD_DISP_ON 0xAFu
-#define SH1106_CMD_SET_PAGE_BASE 0xB0u
-#define SH1106_CMD_SET_COL_LOW 0x00u  /* OR with low nibble. */
-#define SH1106_CMD_SET_COL_HIGH 0x10u /* OR with high nibble. */
+#define SH1106_CMD_DISP_OFF       0xAEu
+#define SH1106_CMD_DISP_ON        0xAFu
+#define SH1106_CMD_SET_PAGE_BASE  0xB0u
+#define SH1106_CMD_SET_COL_LOW    0x00u /* OR with low nibble. */
+#define SH1106_CMD_SET_COL_HIGH   0x10u /* OR with high nibble. */
 #define SH1106_CMD_NORMAL_DISPLAY 0xA6u
 
 /* SH1106 visible 128 columns are mapped at internal column 2..129. */
@@ -34,8 +34,8 @@ alp_status_t sh1106_init(sh1106_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	if (dev == NULL || bus == NULL) return ALP_ERR_INVAL;
 	if (i2c_addr == 0) return ALP_ERR_INVAL;
 	memset(dev, 0, sizeof(*dev));
-	dev->bus       = bus;
-	dev->addr      = i2c_addr;
+	dev->bus  = bus;
+	dev->addr = i2c_addr;
 
 	alp_status_t s = sh1106_write_cmd(dev, SH1106_CMD_DISP_OFF);
 	if (s != ALP_OK) return s;

@@ -34,10 +34,10 @@
 
 #if DT_NODE_EXISTS(ALP_PIN_NODE)
 #define ALP_PIN_AVAILABLE 1
-#define ALP_PIN_COUNT DT_PROP_LEN(ALP_PIN_NODE, gpios)
+#define ALP_PIN_COUNT     DT_PROP_LEN(ALP_PIN_NODE, gpios)
 #else
 #define ALP_PIN_AVAILABLE 0
-#define ALP_PIN_COUNT 0
+#define ALP_PIN_COUNT     0
 #endif
 
 #if ALP_PIN_AVAILABLE
@@ -77,7 +77,7 @@ typedef struct {
 	bool                 in_use;
 } alp_z_gpio_side_t;
 
-static alp_z_gpio_side_t  _sides[CONFIG_ALP_SDK_MAX_GPIO_HANDLES];
+static alp_z_gpio_side_t _sides[CONFIG_ALP_SDK_MAX_GPIO_HANDLES];
 
 static alp_z_gpio_side_t *_alloc_side(void)
 {
@@ -148,8 +148,8 @@ static void _isr_thunk(const struct device *port, struct gpio_callback *cb, gpio
 	}
 }
 
-static alp_status_t z_open(uint32_t pin_id, alp_gpio_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(uint32_t pin_id, alp_gpio_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	struct gpio_dt_spec spec;
 	if (!alp_z_gpio_resolve(pin_id, &spec)) return ALP_ERR_INVAL;
@@ -157,8 +157,8 @@ static alp_status_t z_open(uint32_t pin_id, alp_gpio_backend_state_t *st,
 
 	alp_z_gpio_side_t *s = _alloc_side();
 	if (s == NULL) return ALP_ERR_NOMEM;
-	s->spec         = spec;
-	s->owner        = CONTAINER_OF(st, struct alp_gpio, state);
+	s->spec  = spec;
+	s->owner = CONTAINER_OF(st, struct alp_gpio, state);
 
 	st->dev         = (void *)spec.port;
 	st->pin_id      = pin_id;
@@ -167,8 +167,8 @@ static alp_status_t z_open(uint32_t pin_id, alp_gpio_backend_state_t *st,
 	return ALP_OK;
 }
 
-static alp_status_t z_configure(alp_gpio_backend_state_t *st, alp_gpio_dir_t dir,
-                                alp_gpio_pull_t pull)
+static alp_status_t
+z_configure(alp_gpio_backend_state_t *st, alp_gpio_dir_t dir, alp_gpio_pull_t pull)
 {
 	alp_z_gpio_side_t *s = (alp_z_gpio_side_t *)st->be_data;
 	if (s == NULL) return ALP_ERR_NOT_READY;
@@ -192,8 +192,8 @@ static alp_status_t z_read(alp_gpio_backend_state_t *st, bool *level)
 	return ALP_OK;
 }
 
-static alp_status_t z_irq_enable(alp_gpio_backend_state_t *st, alp_gpio_edge_t edge,
-                                 alp_gpio_cb_t cb, void *user)
+static alp_status_t
+z_irq_enable(alp_gpio_backend_state_t *st, alp_gpio_edge_t edge, alp_gpio_cb_t cb, void *user)
 {
 	(void)cb;
 	(void)user; /* stashed in the portable handle by the dispatcher */
@@ -245,7 +245,8 @@ static const alp_gpio_ops_t _ops = {
 	.close       = z_close,
 };
 
-ALP_BACKEND_REGISTER(gpio, zephyr_drv,
+ALP_BACKEND_REGISTER(gpio,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

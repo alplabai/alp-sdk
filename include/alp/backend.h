@@ -78,9 +78,9 @@ typedef struct alp_backend_class_range {
  * ld auto-emits __start_alp_backends_<class> and __stop_<class>
  * bound symbols.  `retain` keeps the entry through --gc-sections. */
 #define ALP_BACKEND_REGISTER(class, name, ...)                                                     \
-	static const alp_backend_t _alp_be_##class##_##name                                            \
-	    __attribute__((used, retain, aligned(__alignof__(alp_backend_t)),                          \
-	                   section("alp_backends_" #class))) = __VA_ARGS__
+	static const alp_backend_t _alp_be_##class##_##name __attribute__((                            \
+	    used, retain, aligned(__alignof__(alp_backend_t)), section("alp_backends_" #class))) =     \
+	    __VA_ARGS__
 
 /**
  * @brief Define the class-range table entry for a per-class section.
@@ -98,7 +98,9 @@ typedef struct alp_backend_class_range {
      * exceed sizeof(struct), the linker inserts trailing pad between
      * entries, and the walker `++c` reads garbage from the pad.  */                             \
 	static const alp_backend_class_range_t _alp_class_range_##class __attribute__((                \
-	    used, retain, aligned(__alignof__(alp_backend_class_range_t)),                             \
+	    used,                                                                                      \
+	    retain,                                                                                    \
+	    aligned(__alignof__(alp_backend_class_range_t)),                                           \
 	    section("alp_backend_classes"))) = {                                                       \
 		.class_name = #class,                                                                      \
 		.start      = __start_alp_backends_##class,                                                \

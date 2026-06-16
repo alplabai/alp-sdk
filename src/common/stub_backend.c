@@ -118,8 +118,8 @@ void alp_delay_ms(uint32_t ms)
 /* ------------------------------------------------------------------ */
 
 #if defined(ALP_VENDOR_OVERRIDES_PERIPHERAL)
-#define ALP_VENDOR_OVERRIDES_I2C 1
-#define ALP_VENDOR_OVERRIDES_SPI 1
+#define ALP_VENDOR_OVERRIDES_I2C  1
+#define ALP_VENDOR_OVERRIDES_SPI  1
 #define ALP_VENDOR_OVERRIDES_GPIO 1
 #define ALP_VENDOR_OVERRIDES_UART 1
 #endif
@@ -147,8 +147,8 @@ alp_status_t alp_i2c_read(alp_i2c_t *b, uint8_t a, uint8_t *d, size_t l)
 	(void)l;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_i2c_write_read(alp_i2c_t *b, uint8_t a, const uint8_t *w, size_t wl, uint8_t *r,
-                                size_t rl)
+alp_status_t
+alp_i2c_write_read(alp_i2c_t *b, uint8_t a, const uint8_t *w, size_t wl, uint8_t *r, size_t rl)
 {
 	(void)b;
 	(void)a;
@@ -279,8 +279,8 @@ void alp_uart_close(alp_uart_t *p)
  * adopt the ringbuf later without re-implementing the entire UART
  * surface. */
 #if !defined(ALP_VENDOR_OVERRIDES_UART_RX_RINGBUF)
-alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing,
-                                                  size_t backing_size)
+alp_uart_rx_ringbuf_t *
+alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_size)
 {
 	(void)port;
 	(void)backing;
@@ -288,8 +288,8 @@ alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *bac
 	z_last_error = ALP_ERR_NOSUPPORT;
 	return NULL;
 }
-alp_status_t alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len,
-                                     size_t *got)
+alp_status_t
+alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len, size_t *got)
 {
 	(void)rb;
 	(void)out;
@@ -497,8 +497,8 @@ alp_status_t alp_can_send(alp_can_t *c, const alp_can_frame_t *f, uint32_t t)
 	(void)t;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_can_add_filter(alp_can_t *c, const alp_can_filter_t *f, alp_can_rx_cb_t cb,
-                                void *u, int32_t *id)
+alp_status_t alp_can_add_filter(
+    alp_can_t *c, const alp_can_filter_t *f, alp_can_rx_cb_t cb, void *u, int32_t *id)
 {
 	(void)c;
 	(void)f;
@@ -659,8 +659,8 @@ alp_status_t alp_mqtt_connect(alp_mqtt_t *m, uint32_t t)
 	(void)t;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_mqtt_publish(alp_mqtt_t *m, const char *t, const uint8_t *p, size_t l,
-                              alp_mqtt_qos_t q, bool r)
+alp_status_t
+alp_mqtt_publish(alp_mqtt_t *m, const char *t, const uint8_t *p, size_t l, alp_mqtt_qos_t q, bool r)
 {
 	(void)m;
 	(void)t;
@@ -670,8 +670,8 @@ alp_status_t alp_mqtt_publish(alp_mqtt_t *m, const char *t, const uint8_t *p, si
 	(void)r;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_mqtt_subscribe(alp_mqtt_t *m, const char *f, alp_mqtt_qos_t q,
-                                alp_mqtt_msg_cb_t cb, void *u)
+alp_status_t
+alp_mqtt_subscribe(alp_mqtt_t *m, const char *f, alp_mqtt_qos_t q, alp_mqtt_msg_cb_t cb, void *u)
 {
 	(void)m;
 	(void)f;
@@ -741,8 +741,8 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *o)
 	(void)o;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_audio_out_write(alp_audio_out_t *o, const void *b, size_t f, size_t *of,
-                                 uint32_t t)
+alp_status_t
+alp_audio_out_write(alp_audio_out_t *o, const void *b, size_t f, size_t *of, uint32_t t)
 {
 	(void)o;
 	(void)b;
@@ -782,16 +782,17 @@ alp_status_t alp_ble_advertise_stop(alp_ble_t *b)
 	(void)b;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_ble_gatt_register_service(alp_ble_t *b, const alp_ble_service_def_t *d,
-                                           alp_ble_attr_handle_t *h)
+alp_status_t alp_ble_gatt_register_service(alp_ble_t                   *b,
+                                           const alp_ble_service_def_t *d,
+                                           alp_ble_attr_handle_t       *h)
 {
 	(void)b;
 	(void)d;
 	(void)h;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_ble_gatt_notify(alp_ble_t *b, alp_ble_conn_t *c, alp_ble_attr_handle_t h,
-                                 const uint8_t *p, size_t l)
+alp_status_t alp_ble_gatt_notify(
+    alp_ble_t *b, alp_ble_conn_t *c, alp_ble_attr_handle_t h, const uint8_t *p, size_t l)
 {
 	(void)b;
 	(void)c;
@@ -813,8 +814,8 @@ alp_status_t alp_ble_scan_stop(alp_ble_t *b)
 	(void)b;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_ble_connect(alp_ble_t *b, const alp_ble_addr_t *p, uint32_t t,
-                             alp_ble_conn_t **out)
+alp_status_t
+alp_ble_connect(alp_ble_t *b, const alp_ble_addr_t *p, uint32_t t, alp_ble_conn_t **out)
 {
 	(void)b;
 	(void)p;
@@ -827,8 +828,8 @@ alp_status_t alp_ble_disconnect(alp_ble_conn_t *c)
 	(void)c;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_ble_gatt_read(alp_ble_conn_t *c, alp_ble_attr_handle_t h, uint8_t *o, size_t cap,
-                               size_t *ol, uint32_t t)
+alp_status_t alp_ble_gatt_read(
+    alp_ble_conn_t *c, alp_ble_attr_handle_t h, uint8_t *o, size_t cap, size_t *ol, uint32_t t)
 {
 	(void)c;
 	(void)h;
@@ -838,8 +839,8 @@ alp_status_t alp_ble_gatt_read(alp_ble_conn_t *c, alp_ble_attr_handle_t h, uint8
 	(void)t;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_ble_gatt_write(alp_ble_conn_t *c, alp_ble_attr_handle_t h, const uint8_t *d,
-                                size_t l, uint32_t t)
+alp_status_t alp_ble_gatt_write(
+    alp_ble_conn_t *c, alp_ble_attr_handle_t h, const uint8_t *d, size_t l, uint32_t t)
 {
 	(void)c;
 	(void)h;
@@ -883,9 +884,16 @@ alp_aead_t *alp_aead_open(alp_aead_alg_t a, const uint8_t *k, size_t kl)
 	z_last_error = ALP_ERR_NOSUPPORT;
 	return NULL;
 }
-alp_status_t alp_aead_encrypt(alp_aead_t *a, const uint8_t *iv, size_t il, const uint8_t *aad,
-                              size_t al, const uint8_t *p, size_t pl, uint8_t *co, uint8_t *t,
-                              size_t tl)
+alp_status_t alp_aead_encrypt(alp_aead_t    *a,
+                              const uint8_t *iv,
+                              size_t         il,
+                              const uint8_t *aad,
+                              size_t         al,
+                              const uint8_t *p,
+                              size_t         pl,
+                              uint8_t       *co,
+                              uint8_t       *t,
+                              size_t         tl)
 {
 	(void)a;
 	(void)iv;
@@ -899,9 +907,16 @@ alp_status_t alp_aead_encrypt(alp_aead_t *a, const uint8_t *iv, size_t il, const
 	(void)tl;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_aead_decrypt(alp_aead_t *a, const uint8_t *iv, size_t il, const uint8_t *aad,
-                              size_t al, const uint8_t *c, size_t cl, const uint8_t *t, size_t tl,
-                              uint8_t *po)
+alp_status_t alp_aead_decrypt(alp_aead_t    *a,
+                              const uint8_t *iv,
+                              size_t         il,
+                              const uint8_t *aad,
+                              size_t         al,
+                              const uint8_t *c,
+                              size_t         cl,
+                              const uint8_t *t,
+                              size_t         tl,
+                              uint8_t       *po)
 {
 	(void)a;
 	(void)iv;
@@ -1152,7 +1167,9 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *p, uint32_t wake_bitma
 	(void)wake_bitmap;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_power_request_sleep(alp_power_t *p, alp_power_mode_t mode, uint32_t wake_after_ms,
+alp_status_t alp_power_request_sleep(alp_power_t           *p,
+                                     alp_power_mode_t       mode,
+                                     uint32_t               wake_after_ms,
                                      alp_power_wake_info_t *info)
 {
 	(void)p;
@@ -1175,8 +1192,13 @@ alp_gpu2d_t *alp_gpu2d_open(void)
 	z_last_error = ALP_ERR_NOSUPPORT;
 	return NULL;
 }
-alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t *g, const alp_gpu2d_surface_t *dst, uint32_t x,
-                                 uint32_t y, uint32_t w, uint32_t h, uint32_t argb_color)
+alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t               *g,
+                                 const alp_gpu2d_surface_t *dst,
+                                 uint32_t                   x,
+                                 uint32_t                   y,
+                                 uint32_t                   w,
+                                 uint32_t                   h,
+                                 uint32_t                   argb_color)
 {
 	(void)g;
 	(void)dst;
@@ -1187,9 +1209,15 @@ alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t *g, const alp_gpu2d_surface_t *dst,
 	(void)argb_color;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_gpu2d_blit(alp_gpu2d_t *g, const alp_gpu2d_surface_t *src, uint32_t sx,
-                            uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy,
-                            uint32_t w, uint32_t h)
+alp_status_t alp_gpu2d_blit(alp_gpu2d_t               *g,
+                            const alp_gpu2d_surface_t *src,
+                            uint32_t                   sx,
+                            uint32_t                   sy,
+                            const alp_gpu2d_surface_t *dst,
+                            uint32_t                   dx,
+                            uint32_t                   dy,
+                            uint32_t                   w,
+                            uint32_t                   h)
 {
 	(void)g;
 	(void)src;
@@ -1202,9 +1230,16 @@ alp_status_t alp_gpu2d_blit(alp_gpu2d_t *g, const alp_gpu2d_surface_t *src, uint
 	(void)h;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_gpu2d_blend(alp_gpu2d_t *g, const alp_gpu2d_surface_t *src, uint32_t sx,
-                             uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy,
-                             uint32_t w, uint32_t h, alp_gpu2d_blend_mode_t mode)
+alp_status_t alp_gpu2d_blend(alp_gpu2d_t               *g,
+                             const alp_gpu2d_surface_t *src,
+                             uint32_t                   sx,
+                             uint32_t                   sy,
+                             const alp_gpu2d_surface_t *dst,
+                             uint32_t                   dx,
+                             uint32_t                   dy,
+                             uint32_t                   w,
+                             uint32_t                   h,
+                             alp_gpu2d_blend_mode_t     mode)
 {
 	(void)g;
 	(void)src;

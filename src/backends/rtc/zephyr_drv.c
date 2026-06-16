@@ -23,7 +23,8 @@
 
 #define ALP_RTC_DEV_OR_NULL(idx)                                                                   \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_rtc, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_rtc, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_rtc, idx)))),                                  \
+	            (NULL))
 
 static const struct device *const _devs[] = {
 	ALP_RTC_DEV_OR_NULL(0),
@@ -47,8 +48,8 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
-static alp_status_t z_open(uint32_t rtc_id, alp_rtc_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (rtc_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (rtc_id >= ALP_SOC_RTC_COUNT) return ALP_ERR_OUT_OF_RANGE;
@@ -100,7 +101,8 @@ static const alp_rtc_ops_t _ops = {
 	.close    = NULL,
 };
 
-ALP_BACKEND_REGISTER(rtc, zephyr_drv,
+ALP_BACKEND_REGISTER(rtc,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

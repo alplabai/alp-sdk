@@ -86,14 +86,16 @@ int main(void)
 			const uint32_t duty_ns = (uint32_t)((FAN_PWM_PERIOD_NS * step->duty_pct_x10) / 1000u);
 			alp_status_t   s       = alp_pwm_set_duty(fan, duty_ns);
 			if (s != ALP_OK) {
-				printf("[fan] alp_pwm_set_duty -> %d (duty=%u/1000)\n", (int)s,
+				printf("[fan] alp_pwm_set_duty -> %d (duty=%u/1000)\n",
+				       (int)s,
 				       (unsigned)step->duty_pct_x10);
 				/* Don't bail -- the backend may be transiently busy;
                  * just keep walking the curve and let the next
                  * setpoint succeed. */
 			} else {
 				printf("[fan] duty=%u/1000  period=%u ns  duty_ns=%u\n",
-				       (unsigned)step->duty_pct_x10, (unsigned)FAN_PWM_PERIOD_NS,
+				       (unsigned)step->duty_pct_x10,
+				       (unsigned)FAN_PWM_PERIOD_NS,
 				       (unsigned)duty_ns);
 			}
 			k_msleep(step->dwell_ms);

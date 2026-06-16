@@ -33,12 +33,14 @@ typedef struct alp_camera_backend_state {
 
 /** Vtable each camera backend implements. */
 struct alp_camera_ops {
-	alp_status_t (*open)(const alp_camera_config_t *cfg, alp_camera_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
+	alp_status_t (*open)(const alp_camera_config_t  *cfg,
+	                     alp_camera_backend_state_t *state,
+	                     alp_capabilities_t         *caps_out);
 	alp_status_t (*start)(alp_camera_backend_state_t *state);
 	alp_status_t (*stop)(alp_camera_backend_state_t *state);
-	alp_status_t (*capture)(alp_camera_backend_state_t *state, alp_camera_frame_t *out,
-	                        uint32_t timeout_ms);
+	alp_status_t (*capture)(alp_camera_backend_state_t *state,
+	                        alp_camera_frame_t         *out,
+	                        uint32_t                    timeout_ms);
 	alp_status_t (*release)(alp_camera_backend_state_t *state, alp_camera_frame_t *frame);
 	alp_status_t (*configure_isp)(alp_camera_backend_state_t    *state,
 	                              const alp_camera_isp_config_t *isp);

@@ -97,8 +97,14 @@ static bool t_get_version(soak_stat_t *st)
 	}
 	if (v.major != boot_version.major || v.minor != boot_version.minor ||
 	    v.patch != boot_version.patch) {
-		SOAK_FAIL(st, "version changed mid-soak: v%u.%u.%u (boot v%u.%u.%u)", v.major, v.minor,
-		          v.patch, boot_version.major, boot_version.minor, boot_version.patch);
+		SOAK_FAIL(st,
+		          "version changed mid-soak: v%u.%u.%u (boot v%u.%u.%u)",
+		          v.major,
+		          v.minor,
+		          v.patch,
+		          boot_version.major,
+		          boot_version.minor,
+		          boot_version.patch);
 		return false;
 	}
 	return true;
@@ -289,11 +295,11 @@ static bool t_adc_stream(soak_stat_t *st)
 
 	k_msleep(50); /* ~50 samples into the 1024-deep ring at 1 kHz */
 
-	uint8_t  got             = 0;
-	uint8_t  got2            = 0;
-	uint16_t mv[32]          = { 0 };
-	s                        = gd32g553_adc_stream_read(&ctx, 0u, 32u, &got, mv);
-	const alp_status_t s_r2  = gd32g553_adc_stream_read(&ctx, 0u, 32u, &got2, mv);
+	uint8_t  got            = 0;
+	uint8_t  got2           = 0;
+	uint16_t mv[32]         = { 0 };
+	s                       = gd32g553_adc_stream_read(&ctx, 0u, 32u, &got, mv);
+	const alp_status_t s_r2 = gd32g553_adc_stream_read(&ctx, 0u, 32u, &got2, mv);
 
 	const alp_status_t s_end = gd32g553_adc_stream_end(&ctx, 0u);
 
@@ -303,8 +309,8 @@ static bool t_adc_stream(soak_stat_t *st)
 		return false;
 	}
 	if (got != 32u) {
-		SOAK_FAIL(st, "read1 got=%u (want 32: ~50 paced samples after 50 ms @1 kHz)",
-		          (unsigned)got);
+		SOAK_FAIL(
+		    st, "read1 got=%u (want 32: ~50 paced samples after 50 ms @1 kHz)", (unsigned)got);
 		return false;
 	}
 	if (s_r2 != ALP_OK) {
@@ -313,7 +319,8 @@ static bool t_adc_stream(soak_stat_t *st)
 		return false;
 	}
 	if (got2 == 0u || got2 > 30u) {
-		SOAK_FAIL(st, "read2 got=%u (want 1..30: paced leftovers; 32 = rate ignored/free-run)",
+		SOAK_FAIL(st,
+		          "read2 got=%u (want 1..30: paced leftovers; 32 = rate ignored/free-run)",
 		          (unsigned)got2);
 		return false;
 	}
@@ -355,7 +362,8 @@ static bool t_adc_stream_guard(soak_stat_t *st)
 
 	if (s_sib != ALP_ERR_IO) {
 		st->last_status = (int)s_sib;
-		SOAK_FAIL(st, "sibling read during stream answered %d (want ALP_ERR_IO: converter owned)",
+		SOAK_FAIL(st,
+		          "sibling read during stream answered %d (want ALP_ERR_IO: converter owned)",
 		          (int)s_sib);
 		return false;
 	}
@@ -568,8 +576,8 @@ static bool t_tmu(soak_stat_t *st)
 	float    in = 4.0f, out    = 0.0f;
 	uint32_t in_bits, out_bits = 0;
 	memcpy(&in_bits, &in, sizeof in_bits);
-	alp_status_t s = gd32g553_tmu_compute(&ctx, GD32G553_TMU_FN_SQRT, GD32G553_TMU_FMT_F32, in_bits,
-	                                      0u, &out_bits);
+	alp_status_t s = gd32g553_tmu_compute(
+	    &ctx, GD32G553_TMU_FN_SQRT, GD32G553_TMU_FMT_F32, in_bits, 0u, &out_bits);
 	if (s != ALP_OK) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "sqrt status=%d", (int)s);
@@ -672,7 +680,9 @@ static bool t_ota_get_state(soak_stat_t *st)
 	}
 	if (info.state > GD32G553_OTA_STATE_ERROR ||
 	    (info.active_slot != GD32G553_OTA_SLOT_A && info.active_slot != GD32G553_OTA_SLOT_B)) {
-		SOAK_FAIL(st, "armed build, insane snapshot: state=%d active=%d", (int)info.state,
+		SOAK_FAIL(st,
+		          "armed build, insane snapshot: state=%d active=%d",
+		          (int)info.state,
 		          (int)info.active_slot);
 		return false;
 	}
@@ -771,14 +781,17 @@ static void link_init_blocking(alp_spi_t *spi)
 	do {
 		s = gd32g553_init(&ctx, spi, NULL, GD32G553_BRIDGE_DEFAULT_I2C_ADDR);
 		if (s != ALP_OK) {
-			printf("[hil-soak] init attempt %u failed: %d -- retrying in 200 ms\n", attempt++,
-			       (int)s);
+			printf(
+			    "[hil-soak] init attempt %u failed: %d -- retrying in 200 ms\n", attempt++, (int)s);
 			k_msleep(200);
 		}
 	} while (s != ALP_OK);
 	boot_version = ctx.version;
-	printf("[hil-soak] link up after %u retr%s; firmware v%u.%u.%u\n", attempt,
-	       (attempt == 1u) ? "y" : "ies", boot_version.major, boot_version.minor,
+	printf("[hil-soak] link up after %u retr%s; firmware v%u.%u.%u\n",
+	       attempt,
+	       (attempt == 1u) ? "y" : "ies",
+	       boot_version.major,
+	       boot_version.minor,
 	       boot_version.patch);
 }
 
@@ -857,7 +870,10 @@ int main(void)
 			}
 		}
 
-		printf("[hil-soak] cycle %u | %u/%u PASS%s\n", cycle, cycle_pass, cycle_pass + cycle_fail,
+		printf("[hil-soak] cycle %u | %u/%u PASS%s\n",
+		       cycle,
+		       cycle_pass,
+		       cycle_pass + cycle_fail,
 		       (cycle_fail != 0u) ? " <-- FAILURES THIS CYCLE" : "");
 
 		/* v0.7 link telemetry for the SWD reader (no console). */
@@ -877,7 +893,10 @@ int main(void)
 					continue;
 				}
 				if (st->fail != 0u) clean = false;
-				printf("[hil-soak]   %-18s pass=%u fail=%u%s\n", st->name, st->pass, st->fail,
+				printf("[hil-soak]   %-18s pass=%u fail=%u%s\n",
+				       st->name,
+				       st->pass,
+				       st->fail,
 				       st->fail ? " <--" : "");
 			}
 			printf("[hil-soak] verdict: %s\n", clean ? "SOAK-CLEAN" : "SOAK-DIRTY");

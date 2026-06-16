@@ -117,8 +117,8 @@ ZTEST(alp_uart_registry, test_close_releases_handle)
 
 /* ---------- (f) sw_fallback loopback round-trip --------------------------- */
 
-extern const alp_backend_t   __start_alp_backends_uart[] __attribute__((weak));
-extern const alp_backend_t   __stop_alp_backends_uart[] __attribute__((weak));
+extern const alp_backend_t __start_alp_backends_uart[] __attribute__((weak));
+extern const alp_backend_t __stop_alp_backends_uart[] __attribute__((weak));
 
 static const alp_uart_ops_t *_find_sw_fallback_ops(void)
 {

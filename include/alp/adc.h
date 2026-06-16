@@ -313,8 +313,8 @@ alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg);
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_BUSY /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap,
-                                 size_t *got);
+alp_status_t
+alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got);
 
 /**
  * @brief Close a filter handle.  NULL is a no-op.
@@ -379,8 +379,8 @@ alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg);
  *         ALP_ERR_OUT_OF_RANGE (cap < required) / ALP_ERR_IO /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap,
-                                        size_t *got);
+alp_status_t
+alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, size_t *got);
 
 /** Close a spectrum handle.  NULL is a no-op. */
 void alp_adc_spectrum_close(alp_adc_spectrum_t *spec);

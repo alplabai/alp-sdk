@@ -54,8 +54,8 @@ struct usb_dev_be {
 
 #if defined(CONFIG_ALP_SDK_USB)
 
-static struct usb_dev_be  _be_pool[CONFIG_ALP_SDK_MAX_USB_DEV_HANDLES];
-static bool               _be_pool_in_use[CONFIG_ALP_SDK_MAX_USB_DEV_HANDLES];
+static struct usb_dev_be _be_pool[CONFIG_ALP_SDK_MAX_USB_DEV_HANDLES];
+static bool              _be_pool_in_use[CONFIG_ALP_SDK_MAX_USB_DEV_HANDLES];
 
 static struct usb_dev_be *_be_alloc(void)
 {
@@ -109,8 +109,9 @@ static alp_status_t errno_to_alp(int err)
 /* Device-side ops                                                     */
 /* ================================================================== */
 
-static alp_status_t z_dev_open(const alp_usb_device_config_t *cfg, alp_usb_dev_state_t *st,
-                               alp_capabilities_t *caps_out)
+static alp_status_t z_dev_open(const alp_usb_device_config_t *cfg,
+                               alp_usb_dev_state_t           *st,
+                               alp_capabilities_t            *caps_out)
 {
 	if (cfg == NULL) return ALP_ERR_INVAL;
 #if defined(CONFIG_ALP_SDK_USB)
@@ -168,8 +169,8 @@ static alp_status_t z_dev_disable(alp_usb_dev_state_t *st)
 #endif
 }
 
-static alp_status_t z_dev_write(alp_usb_dev_state_t *st, const uint8_t *data, size_t len,
-                                uint32_t timeout_ms)
+static alp_status_t
+z_dev_write(alp_usb_dev_state_t *st, const uint8_t *data, size_t len, uint32_t timeout_ms)
 {
 	(void)st;
 	(void)data;
@@ -181,8 +182,8 @@ static alp_status_t z_dev_write(alp_usb_dev_state_t *st, const uint8_t *data, si
 	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t z_dev_read(alp_usb_dev_state_t *st, uint8_t *data, size_t len, size_t *out_len,
-                               uint32_t timeout_ms)
+static alp_status_t
+z_dev_read(alp_usb_dev_state_t *st, uint8_t *data, size_t len, size_t *out_len, uint32_t timeout_ms)
 {
 	(void)st;
 	(void)data;
@@ -245,12 +246,12 @@ static void z_host_close(alp_usb_host_state_t *st)
 /* ------------------------------------------------------------------ */
 
 static const alp_usb_ops_t _ops = {
-	.dev_open     = z_dev_open,
-	.dev_enable   = z_dev_enable,
-	.dev_disable  = z_dev_disable,
-	.dev_write    = z_dev_write,
-	.dev_read     = z_dev_read,
-	.dev_close    = z_dev_close,
+	.dev_open    = z_dev_open,
+	.dev_enable  = z_dev_enable,
+	.dev_disable = z_dev_disable,
+	.dev_write   = z_dev_write,
+	.dev_read    = z_dev_read,
+	.dev_close   = z_dev_close,
 
 	.host_open    = z_host_open,
 	.host_enable  = z_host_enable,
@@ -258,7 +259,8 @@ static const alp_usb_ops_t _ops = {
 	.host_close   = z_host_close,
 };
 
-ALP_BACKEND_REGISTER(usb, zephyr_drv,
+ALP_BACKEND_REGISTER(usb,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

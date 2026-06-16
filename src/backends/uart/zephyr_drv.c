@@ -29,7 +29,8 @@
 
 #define ALP_UART_DEV_OR_NULL(idx)                                                                  \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_uart, idx))),                                  \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_uart, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_uart, idx)))),                                 \
+	            (NULL))
 
 static const struct device *const _devs[] = {
 	ALP_UART_DEV_OR_NULL(0), ALP_UART_DEV_OR_NULL(1), ALP_UART_DEV_OR_NULL(2),
@@ -92,8 +93,8 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
-static alp_status_t z_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg->port_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (cfg->port_id >= ALP_SOC_UART_COUNT) return ALP_ERR_OUT_OF_RANGE;
@@ -129,8 +130,8 @@ static alp_status_t z_write(alp_uart_backend_state_t *st, const uint8_t *data, s
 	return ALP_OK;
 }
 
-static alp_status_t z_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len,
-                           uint32_t timeout_ms)
+static alp_status_t
+z_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout_ms)
 {
 	const struct device *dev = (const struct device *)st->dev;
 	const int64_t deadline   = (timeout_ms == 0) ? INT64_MAX : k_uptime_get() + (int64_t)timeout_ms;
@@ -163,7 +164,8 @@ static const alp_uart_ops_t _ops = {
 	.close = NULL, /* no teardown needed for uart_configure */
 };
 
-ALP_BACKEND_REGISTER(uart, zephyr_drv,
+ALP_BACKEND_REGISTER(uart,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",
@@ -204,8 +206,8 @@ static void alp_uart_rx_isr(const struct device *dev, void *user_data)
 	}
 }
 
-alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing,
-                                                  size_t backing_size)
+alp_uart_rx_ringbuf_t *
+alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_size)
 {
 	alp_z_clear_last_error();
 	if (port == NULL || !port->in_use || backing == NULL || backing_size < 2u) {
@@ -242,8 +244,8 @@ alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *bac
 	return s;
 }
 
-alp_status_t alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len,
-                                     size_t *got)
+alp_status_t
+alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len, size_t *got)
 {
 	if (got != NULL) *got = 0;
 	if (rb == NULL || !rb->in_use) return ALP_ERR_NOT_READY;
@@ -273,8 +275,8 @@ void alp_uart_rx_ringbuf_detach(alp_uart_rx_ringbuf_t *rb)
 
 #else /* !CONFIG_ALP_SDK_UART_RX_RINGBUF */
 
-alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing,
-                                                  size_t backing_size)
+alp_uart_rx_ringbuf_t *
+alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_size)
 {
 	(void)port;
 	(void)backing;
@@ -284,8 +286,8 @@ alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *bac
 	return NULL;
 }
 
-alp_status_t alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len,
-                                     size_t *got)
+alp_status_t
+alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len, size_t *got)
 {
 	(void)rb;
 	(void)out;

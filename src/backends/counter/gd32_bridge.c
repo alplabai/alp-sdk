@@ -15,8 +15,9 @@
 #include "counter_ops.h"
 #include "v2n_supervisor.h"
 
-static alp_status_t br_open(const alp_counter_config_t *cfg, alp_counter_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t br_open(const alp_counter_config_t  *cfg,
+                            alp_counter_backend_state_t *st,
+                            alp_capabilities_t          *caps_out)
 {
 	if (cfg->counter_id >= 1u) return ALP_ERR_INVAL; /* bridge: only id 0 */
 	gd32g553_t  *ctx = NULL;
@@ -52,8 +53,8 @@ static alp_status_t br_get_value(alp_counter_backend_state_t *st, uint32_t *tick
 	return s;
 }
 
-static alp_status_t br_us_to_ticks(alp_counter_backend_state_t *st, uint32_t us,
-                                   uint32_t *ticks_out)
+static alp_status_t
+br_us_to_ticks(alp_counter_backend_state_t *st, uint32_t us, uint32_t *ticks_out)
 {
 	(void)st;
 	(void)us;
@@ -61,8 +62,8 @@ static alp_status_t br_us_to_ticks(alp_counter_backend_state_t *st, uint32_t us,
 	return ALP_ERR_NOSUPPORT; /* v0.3 adds CMD_COUNTER_GET_FREQ */
 }
 
-static alp_status_t br_set_alarm(alp_counter_backend_state_t *st, uint32_t ticks_from_now,
-                                 struct alp_counter *owner)
+static alp_status_t
+br_set_alarm(alp_counter_backend_state_t *st, uint32_t ticks_from_now, struct alp_counter *owner)
 {
 	(void)st;
 	(void)ticks_from_now;
@@ -87,7 +88,8 @@ static const alp_counter_ops_t _ops = {
 	.close        = NULL,
 };
 
-ALP_BACKEND_REGISTER(counter, gd32_bridge,
+ALP_BACKEND_REGISTER(counter,
+                     gd32_bridge,
                      {
                          .silicon_ref = "renesas:rzv2n:n44",
                          .vendor      = "renesas",

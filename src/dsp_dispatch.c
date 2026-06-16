@@ -53,7 +53,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_DSP_HANDLES 2
 #endif
 
-static struct alp_dsp_chain  _pool[CONFIG_ALP_SDK_MAX_DSP_HANDLES];
+static struct alp_dsp_chain _pool[CONFIG_ALP_SDK_MAX_DSP_HANDLES];
 
 static struct alp_dsp_chain *_alloc(void)
 {
@@ -107,8 +107,12 @@ alp_dsp_chain_t *alp_dsp_chain_open(const alp_dsp_stage_t *stages, size_t n_stag
 	return h;
 }
 
-alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain, const int16_t *in_mv, size_t in_n,
-                                         int16_t *out_mv, size_t out_cap, size_t *got)
+alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
+                                         const int16_t   *in_mv,
+                                         size_t           in_n,
+                                         int16_t         *out_mv,
+                                         size_t           out_cap,
+                                         size_t          *got)
 {
 	if (chain == NULL || !chain->in_use || got == NULL) {
 		return ALP_ERR_INVAL;
@@ -119,8 +123,12 @@ alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain, const int16_t *
 	return chain->state.ops->apply_samples(&chain->state, in_mv, in_n, out_mv, out_cap, got);
 }
 
-alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain, const int16_t *in_mv, size_t in_n,
-                                      float *out_bins, size_t out_cap, size_t *got)
+alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
+                                      const int16_t   *in_mv,
+                                      size_t           in_n,
+                                      float           *out_bins,
+                                      size_t           out_cap,
+                                      size_t          *got)
 {
 	if (chain == NULL || !chain->in_use || got == NULL) {
 		return ALP_ERR_INVAL;

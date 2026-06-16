@@ -122,10 +122,10 @@ ZTEST(alp_chips, test_lsm6dso_init_null_args)
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 100000 });
 	zassert_not_null(bus);
 
-	zassert_equal(lsm6dso_init(NULL, bus, LSM6DSO_I2C_ADDR_LOW), ALP_ERR_INVAL,
-	              "NULL ctx must be invalid");
-	zassert_equal(lsm6dso_init(&dev, NULL, LSM6DSO_I2C_ADDR_LOW), ALP_ERR_INVAL,
-	              "NULL bus must be invalid");
+	zassert_equal(
+	    lsm6dso_init(NULL, bus, LSM6DSO_I2C_ADDR_LOW), ALP_ERR_INVAL, "NULL ctx must be invalid");
+	zassert_equal(
+	    lsm6dso_init(&dev, NULL, LSM6DSO_I2C_ADDR_LOW), ALP_ERR_INVAL, "NULL bus must be invalid");
 	zassert_equal(lsm6dso_init(&dev, bus, 0), ALP_ERR_INVAL, "addr=0 must be invalid");
 
 	alp_i2c_close(bus);
@@ -149,7 +149,8 @@ ZTEST(alp_chips, test_lsm6dso_post_init_calls_reject_uninitialised)
 	if (s != ALP_OK) {
 		/* Expected path on a bare emul controller. */
 		lsm6dso_axes_t axes;
-		zassert_equal(lsm6dso_read_accel(&dev, &axes), ALP_ERR_NOT_READY,
+		zassert_equal(lsm6dso_read_accel(&dev, &axes),
+		              ALP_ERR_NOT_READY,
 		              "reads on a failed-init driver must be NOT_READY");
 	}
 
@@ -167,9 +168,11 @@ ZTEST(alp_chips, test_ssd1306_init_invalid_geometry)
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
-	zassert_equal(ssd1306_init(&dev, bus, SSD1306_I2C_ADDR_LOW, 96, 48), ALP_ERR_NOSUPPORT,
+	zassert_equal(ssd1306_init(&dev, bus, SSD1306_I2C_ADDR_LOW, 96, 48),
+	              ALP_ERR_NOSUPPORT,
 	              "v0.1 supports only 128x64 or 128x32");
-	zassert_equal(ssd1306_init(&dev, bus, SSD1306_I2C_ADDR_LOW, 0, 0), ALP_ERR_NOSUPPORT,
+	zassert_equal(ssd1306_init(&dev, bus, SSD1306_I2C_ADDR_LOW, 0, 0),
+	              ALP_ERR_NOSUPPORT,
 	              "zero-sized geometry must be invalid");
 
 	alp_i2c_close(bus);
@@ -190,7 +193,8 @@ ZTEST(alp_chips, test_ssd1306_clear_and_pixel_safe_without_init)
 ZTEST(alp_chips, test_ssd1306_display_rejects_uninitialised)
 {
 	ssd1306_t dev = { 0 };
-	zassert_equal(ssd1306_display(&dev), ALP_ERR_NOT_READY,
+	zassert_equal(ssd1306_display(&dev),
+	              ALP_ERR_NOT_READY,
 	              "display() on uninitialised driver must be NOT_READY");
 }
 
@@ -210,11 +214,12 @@ ZTEST(alp_chips, test_button_led_init_valid_pair)
 	/* Overlay wires alp,pin-array index 0 → button (pull-up) and
      * index 1 → LED on the chips test's gpio_emul. */
 	alp_button_led_t bl;
-	alp_status_t     s = alp_button_led_init(&bl, &(alp_button_led_config_t){
-	                                                  .button_pin_id     = 0,
-	                                                  .led_pin_id        = 1,
-	                                                  .active_low_button = true,
-                                              });
+	alp_status_t     s = alp_button_led_init(&bl,
+                                         &(alp_button_led_config_t){
+	                                             .button_pin_id     = 0,
+	                                             .led_pin_id        = 1,
+	                                             .active_low_button = true,
+                                         });
 	zassert_equal(s, ALP_OK, "init failed: %d", (int)s);
 
 	/* Verify is_pressed() returns ALP_OK and writes a defined
@@ -294,8 +299,8 @@ ZTEST(alp_chips, test_ssd1306_draw_pixel_oob_silently_ignored)
 	ssd1306_draw_pixel(&dev, 9999, 9999, true); /* far OOB */
 
 	for (size_t i = 0; i < sizeof dev.fb; i++) {
-		zassert_equal(dev.fb[i], 0u, "fb[%zu] = 0x%02x; OOB writes should be ignored", i,
-		              dev.fb[i]);
+		zassert_equal(
+		    dev.fb[i], 0u, "fb[%zu] = 0x%02x; OOB writes should be ignored", i, dev.fb[i]);
 	}
 }
 
@@ -326,10 +331,10 @@ ZTEST(alp_chips, test_bme280_init_null_args)
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
-	zassert_equal(bme280_init(NULL, bus, BME280_I2C_ADDR_LOW), ALP_ERR_INVAL,
-	              "NULL ctx must be invalid");
-	zassert_equal(bme280_init(&dev, NULL, BME280_I2C_ADDR_LOW), ALP_ERR_INVAL,
-	              "NULL bus must be invalid");
+	zassert_equal(
+	    bme280_init(NULL, bus, BME280_I2C_ADDR_LOW), ALP_ERR_INVAL, "NULL ctx must be invalid");
+	zassert_equal(
+	    bme280_init(&dev, NULL, BME280_I2C_ADDR_LOW), ALP_ERR_INVAL, "NULL bus must be invalid");
 	zassert_equal(bme280_init(&dev, bus, 0), ALP_ERR_INVAL, "addr=0 must be invalid");
 
 	alp_i2c_close(bus);
@@ -346,11 +351,16 @@ ZTEST(alp_chips, test_bme280_post_init_calls_reject_uninitialised)
 	alp_status_t s = bme280_init(&dev, bus, BME280_I2C_ADDR_LOW);
 	if (s != ALP_OK) {
 		bme280_raw_t raw;
-		zassert_equal(bme280_read_raw(&dev, &raw), ALP_ERR_NOT_READY,
+		zassert_equal(bme280_read_raw(&dev, &raw),
+		              ALP_ERR_NOT_READY,
 		              "read_raw on a failed-init driver must be NOT_READY");
-		zassert_equal(bme280_set_sampling(&dev, BME280_OVERSAMPLING_X1, BME280_OVERSAMPLING_X1,
-		                                  BME280_OVERSAMPLING_X1, BME280_MODE_NORMAL,
-		                                  BME280_STANDBY_125_MS, BME280_FILTER_OFF),
+		zassert_equal(bme280_set_sampling(&dev,
+		                                  BME280_OVERSAMPLING_X1,
+		                                  BME280_OVERSAMPLING_X1,
+		                                  BME280_OVERSAMPLING_X1,
+		                                  BME280_MODE_NORMAL,
+		                                  BME280_STANDBY_125_MS,
+		                                  BME280_FILTER_OFF),
 		              ALP_ERR_NOT_READY);
 	}
 
@@ -385,8 +395,8 @@ ZTEST(alp_chips, test_lis2dw12_post_init_calls_reject_uninitialised)
 	if (s != ALP_OK) {
 		lis2dw12_axes_t axes;
 		zassert_equal(lis2dw12_read_accel(&dev, &axes), ALP_ERR_NOT_READY);
-		zassert_equal(lis2dw12_set_accel(&dev, LIS2DW12_ODR_50_HZ, LIS2DW12_FS_2G,
-		                                 LIS2DW12_MODE_HIGH_PERF_14BIT),
+		zassert_equal(lis2dw12_set_accel(
+		                  &dev, LIS2DW12_ODR_50_HZ, LIS2DW12_FS_2G, LIS2DW12_MODE_HIGH_PERF_14BIT),
 		              ALP_ERR_NOT_READY);
 	}
 
@@ -637,8 +647,8 @@ ZTEST(alp_chips, test_bmp581_post_init_calls_reject_uninitialised)
 	if (s != ALP_OK) {
 		bmp581_raw_t raw;
 		zassert_equal(bmp581_read_raw(&dev, &raw), ALP_ERR_NOT_READY);
-		zassert_equal(bmp581_set_sampling(&dev, BMP581_OSR_X4, BMP581_OSR_X1, BMP581_ODR_25_HZ,
-		                                  BMP581_MODE_NORMAL),
+		zassert_equal(bmp581_set_sampling(
+		                  &dev, BMP581_OSR_X4, BMP581_OSR_X1, BMP581_ODR_25_HZ, BMP581_MODE_NORMAL),
 		              ALP_ERR_NOT_READY);
 	}
 
@@ -677,7 +687,8 @@ ZTEST(alp_chips, test_public_headers_co_compile)
      * here at runtime is the success signal. */
 	zassert_equal((int)ALP_OK, 0, "ALP_OK must remain 0 across header-set evolution");
 	zassert_equal((unsigned)E1M_GPIO_IO0, 0u);
-	zassert_equal((unsigned)EVK_PWM_LED_RED, E1M_PWM3,
+	zassert_equal((unsigned)EVK_PWM_LED_RED,
+	              E1M_PWM3,
 	              "EVK feature names must layer atop the global e1m_pinout map");
 }
 
@@ -762,7 +773,7 @@ ZTEST(alp_chips, test_mproc_surface_v01_nosupport)
 /* ------------------------------------------------------------------ */
 
 #define REG_LSM6DSO_CTRL1_XL 0x10
-#define REG_LSM6DSO_CTRL2_G 0x11
+#define REG_LSM6DSO_CTRL2_G  0x11
 #define REG_LSM6DSO_OUTX_L_A 0x28
 #define REG_LSM6DSO_OUTX_L_G 0x22
 
@@ -773,7 +784,8 @@ ZTEST(alp_chips, test_fake_lsm6dso_init_succeeds_against_fake)
 	zassert_not_null(bus);
 
 	lsm6dso_t dev;
-	zassert_equal(lsm6dso_init(&dev, bus, LSM6DSO_I2C_ADDR_LOW), ALP_OK,
+	zassert_equal(lsm6dso_init(&dev, bus, LSM6DSO_I2C_ADDR_LOW),
+	              ALP_OK,
 	              "fake responds to WHO_AM_I with 0x6C — init must succeed");
 
 	uint8_t id = 0;
@@ -796,7 +808,8 @@ ZTEST(alp_chips, test_fake_lsm6dso_set_accel_writes_ctrl1_xl)
 	/* CTRL1_XL: ODR_XL[7:4] | FS_XL[3:2] | LPF2_XL_EN[1] | reserved[0].
      * ODR=104Hz (0x4), FS=4G (0x2) → byte = (0x4<<4) | (0x2<<2) = 0x48. */
 	zassert_equal(lsm6dso_set_accel(&dev, LSM6DSO_ODR_104_HZ, LSM6DSO_ACCEL_FS_4G), ALP_OK);
-	zassert_equal(fake_lsm6dso_get_reg(REG_LSM6DSO_CTRL1_XL), 0x48u,
+	zassert_equal(fake_lsm6dso_get_reg(REG_LSM6DSO_CTRL1_XL),
+	              0x48u,
 	              "CTRL1_XL should encode ODR=104Hz | FS=4G");
 
 	/* Switch to ODR=833Hz (0x7), FS=16G (0x1) → (0x7<<4) | (0x1<<2) = 0x74. */
@@ -863,7 +876,8 @@ ZTEST(alp_chips, test_fake_ssd1306_init_streams_documented_opcodes)
 	zassert_not_null(bus);
 
 	ssd1306_t dev;
-	zassert_equal(ssd1306_init(&dev, bus, SSD1306_I2C_ADDR_LOW, 128, 64), ALP_OK,
+	zassert_equal(ssd1306_init(&dev, bus, SSD1306_I2C_ADDR_LOW, 128, 64),
+	              ALP_OK,
 	              "fake records command bytes — init must succeed");
 
 	/* The init sequence MUST contain DISPLAY_OFF (0xAE), CHARGE_PUMP
@@ -916,7 +930,9 @@ ZTEST(alp_chips, test_fake_ssd1306_display_pushes_full_framebuffer)
 	zassert_equal(ssd1306_display(&dev), ALP_OK);
 
 	/* display() pushes width*height/8 = 1024 framebuffer bytes. */
-	zassert_equal(fake_ssd1306_data_log_len(), 1024u, "expected 1024 fb bytes, got %zu",
+	zassert_equal(fake_ssd1306_data_log_len(),
+	              1024u,
+	              "expected 1024 fb bytes, got %zu",
 	              fake_ssd1306_data_log_len());
 
 	/* The first byte (page=0, col=0) should hold our pixel. */
@@ -950,7 +966,8 @@ ZTEST(alp_chips, test_fake_bme280_init_loads_calibration)
 	zassert_not_null(bus);
 
 	bme280_t dev;
-	zassert_equal(bme280_init(&dev, bus, BME280_I2C_ADDR_LOW), ALP_OK,
+	zassert_equal(bme280_init(&dev, bus, BME280_I2C_ADDR_LOW),
+	              ALP_OK,
 	              "fake responds to CHIP_ID with 0x60 — init must succeed");
 
 	/* Canonical Bosch datasheet example values seeded by the fake. */
@@ -1009,9 +1026,15 @@ ZTEST(alp_chips, test_fake_bme280_compensate_matches_datasheet_example)
 	/* BST-BME280-DS002 §4.2.3 Table 2 documents the worked example:
      * T = 25.08 °C → c100 = 2508,  P ≈ 100653 Pa.  Allow ±2 c100 to
      * absorb the documented ±2-LSB rounding noise across compilers. */
-	zassert_within(comp.temperature_c100, 2508, 2, "compensated T x100 = %d, expected 2508 ± 2",
+	zassert_within(comp.temperature_c100,
+	               2508,
+	               2,
+	               "compensated T x100 = %d, expected 2508 ± 2",
 	               (int)comp.temperature_c100);
-	zassert_within(comp.pressure_pa, 100653u, 50u, "compensated P (Pa) = %u, expected 100653 ± 50",
+	zassert_within(comp.pressure_pa,
+	               100653u,
+	               50u,
+	               "compensated P (Pa) = %u, expected 100653 ± 50",
 	               comp.pressure_pa);
 
 	bme280_deinit(&dev);
@@ -1043,7 +1066,8 @@ ZTEST(alp_chips, test_gd32g553_init_invalid_i2c_addr)
 	    .bitrate_hz = 100000,
 	});
 	zassert_not_null(bus);
-	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x80u), ALP_ERR_INVAL,
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x80u),
+	              ALP_ERR_INVAL,
 	              "8-bit address through the 7-bit API must be rejected");
 	alp_i2c_close(bus);
 }
@@ -1158,7 +1182,7 @@ ZTEST(alp_chips, test_rtl8211fdi_init_oui_check_rejects_zero)
 
 ZTEST(alp_chips, test_rtl8211fdi_post_init_rejects_uninitialised)
 {
-	rtl8211fdi_t       ctx = { 0 };
+	rtl8211fdi_t ctx = { 0 };
 
 	bool               up;
 	rtl8211fdi_speed_t speed;
@@ -1181,13 +1205,15 @@ ZTEST(alp_chips, test_clk_5l35023b_init_null_args)
     });
 	zassert_not_null(bus);
 
-	zassert_equal(clk_5l35023b_init(NULL, bus, CLK_5L35023B_I2C_ADDR_DEFAULT), ALP_ERR_INVAL,
+	zassert_equal(clk_5l35023b_init(NULL, bus, CLK_5L35023B_I2C_ADDR_DEFAULT),
+	              ALP_ERR_INVAL,
 	              "NULL ctx must be rejected");
-	zassert_equal(clk_5l35023b_init(&ctx, NULL, CLK_5L35023B_I2C_ADDR_DEFAULT), ALP_ERR_INVAL,
+	zassert_equal(clk_5l35023b_init(&ctx, NULL, CLK_5L35023B_I2C_ADDR_DEFAULT),
+	              ALP_ERR_INVAL,
 	              "NULL bus must be rejected");
 	/* 0x80 is out of 7-bit range. */
-	zassert_equal(clk_5l35023b_init(&ctx, bus, 0x80u), ALP_ERR_INVAL,
-	              "addr > 0x7F must be rejected");
+	zassert_equal(
+	    clk_5l35023b_init(&ctx, bus, 0x80u), ALP_ERR_INVAL, "addr > 0x7F must be rejected");
 
 	alp_i2c_close(bus);
 }
@@ -1200,7 +1226,7 @@ ZTEST(alp_chips, test_clk_5l35023b_raw_rw_rejects_uninitialised)
      * NOT_READY rather than IO. */
 	clk_5l35023b_t ctx = { 0 };
 
-	uint8_t        v;
+	uint8_t v;
 	zassert_equal(clk_5l35023b_read_reg(&ctx, 0u, &v), ALP_ERR_NOT_READY);
 	zassert_equal(clk_5l35023b_write_reg(&ctx, 0u, 0xFFu), ALP_ERR_NOT_READY);
 
@@ -1272,9 +1298,12 @@ ZTEST(alp_chips, test_clk_5l35023b_get_strap_addr_decodes_general_ctrl)
 		ctx.general_ctrl              = cases[i].gc_byte;
 		clk_5l35023b_strap_addr_t got = (clk_5l35023b_strap_addr_t)0xFFu;
 		zassert_equal(clk_5l35023b_get_strap_addr(&ctx, &got), ALP_OK);
-		zassert_equal((unsigned)got, (unsigned)cases[i].expected,
-		              "gc_byte=0x%02X: expected strap %u, got %u", cases[i].gc_byte,
-		              (unsigned)cases[i].expected, (unsigned)got);
+		zassert_equal((unsigned)got,
+		              (unsigned)cases[i].expected,
+		              "gc_byte=0x%02X: expected strap %u, got %u",
+		              cases[i].gc_byte,
+		              (unsigned)cases[i].expected,
+		              (unsigned)got);
 	}
 }
 
@@ -1291,7 +1320,7 @@ ZTEST(alp_chips, test_clk_5l35023b_get_strap_addr_decodes_general_ctrl)
 static bool fake_murata_reg_state[2];
 static int  fake_murata_set_calls;
 
-static int  fake_murata_reg_set(murata_reg_t which, bool enable, void *user)
+static int fake_murata_reg_set(murata_reg_t which, bool enable, void *user)
 {
 	(void)user;
 	fake_murata_reg_state[(int)which] = enable;
@@ -1372,17 +1401,21 @@ ZTEST(alp_chips, test_deepx_dxm1_init_null_args)
 	pi3dbs12212_t bogus_mux = { 0 };
 	alp_gpio_t   *bogus_pin = (alp_gpio_t *)0xDEADBEEFu;
 
-	zassert_equal(deepx_dxm1_init(NULL, bogus_pin, &bogus_mux, PI3DBS_STATE_PATH_0), ALP_ERR_INVAL,
+	zassert_equal(deepx_dxm1_init(NULL, bogus_pin, &bogus_mux, PI3DBS_STATE_PATH_0),
+	              ALP_ERR_INVAL,
 	              "NULL ctx must be rejected");
-	zassert_equal(deepx_dxm1_init(&ctx, NULL, &bogus_mux, PI3DBS_STATE_PATH_0), ALP_ERR_INVAL,
+	zassert_equal(deepx_dxm1_init(&ctx, NULL, &bogus_mux, PI3DBS_STATE_PATH_0),
+	              ALP_ERR_INVAL,
 	              "NULL m1_reset must be rejected");
-	zassert_equal(deepx_dxm1_init(&ctx, bogus_pin, NULL, PI3DBS_STATE_PATH_0), ALP_ERR_INVAL,
+	zassert_equal(deepx_dxm1_init(&ctx, bogus_pin, NULL, PI3DBS_STATE_PATH_0),
+	              ALP_ERR_INVAL,
 	              "NULL mux ctx must be rejected");
 
 	/* Out-of-range deepx_path enum value -- caller must hit one of
      * PI3DBS_STATE_PATH_0 or PI3DBS_STATE_PATH_1.  PI3DBS_STATE_OFF
      * isn't a valid "to DEEPX" destination. */
-	zassert_equal(deepx_dxm1_init(&ctx, bogus_pin, &bogus_mux, PI3DBS_STATE_OFF), ALP_ERR_INVAL,
+	zassert_equal(deepx_dxm1_init(&ctx, bogus_pin, &bogus_mux, PI3DBS_STATE_OFF),
+	              ALP_ERR_INVAL,
 	              "deepx_path = OFF is not a valid bring-up destination");
 }
 
@@ -1515,7 +1548,8 @@ ZTEST(alp_chips, test_gd32_swd_clock_delay_clamp)
 	/* Once initialised the call returns OK even for an out-of-range
      * value (internally clamped). */
 	ctx.initialised = true;
-	zassert_equal(gd32_swd_set_clock_delay(&ctx, 100000u), ALP_OK,
+	zassert_equal(gd32_swd_set_clock_delay(&ctx, 100000u),
+	              ALP_OK,
 	              "delay 100000 must clamp + return OK, not INVAL");
 }
 
@@ -1821,8 +1855,11 @@ ZTEST(alp_chips, test_ina236_init_null_args)
 	/* Forward-declare the init signature locally so the test
      * compiles even if the header's extra args shift around;
      * this matches the real signature documented in ina236.h. */
-	extern alp_status_t ina236_init(ina236_t * ctx, alp_i2c_t * bus, uint8_t addr_7bit,
-	                                float shunt_ohms, float max_current_a,
+	extern alp_status_t ina236_init(ina236_t * ctx,
+	                                alp_i2c_t * bus,
+	                                uint8_t           addr_7bit,
+	                                float             shunt_ohms,
+	                                float             max_current_a,
 	                                ina236_adcrange_t adcrange);
 	ina236_t            ctx;
 	alp_i2c_t          *bus = alp_i2c_open(&(alp_i2c_config_t){
@@ -2328,8 +2365,8 @@ ZTEST(alp_chips, test_sh1106_draw_pixel_clips_oob)
 	sh1106_draw_pixel(&dev, 0, SH1106_HEIGHT + 5, true);
 	sh1106_draw_pixel(NULL, 10, 10, true);
 	for (size_t i = 0; i < sizeof(dev.fb); i++) {
-		zassert_equal(dev.fb[i], 0u, "fb[%zu] = 0x%02x; OOB write must not corrupt fb", i,
-		              dev.fb[i]);
+		zassert_equal(
+		    dev.fb[i], 0u, "fb[%zu] = 0x%02x; OOB write must not corrupt fb", i, dev.fb[i]);
 	}
 }
 

@@ -19,11 +19,11 @@
 /* Register map (BST-BMP581-DS004)                                    */
 /* ------------------------------------------------------------------ */
 
-#define REG_CHIP_ID 0x01
-#define REG_CMD 0x7E
-#define REG_OSR_CONF 0x36
-#define REG_ODR_CONF 0x37
-#define REG_TEMP_XLSB 0x1D  /* T = [TEMP_MSB][TEMP_LSB][TEMP_XLSB] */
+#define REG_CHIP_ID    0x01
+#define REG_CMD        0x7E
+#define REG_OSR_CONF   0x36
+#define REG_ODR_CONF   0x37
+#define REG_TEMP_XLSB  0x1D /* T = [TEMP_MSB][TEMP_LSB][TEMP_XLSB] */
 #define REG_PRESS_XLSB 0x20 /* P = [PRESS_MSB][PRESS_LSB][PRESS_XLSB] */
 
 #define CMD_SOFT_RESET 0xB6
@@ -62,8 +62,8 @@ alp_status_t bmp581_init(bmp581_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	dev->addr        = i2c_addr;
 	dev->initialised = false;
 
-	uint8_t      id  = 0;
-	alp_status_t s   = bmp581_read_id(dev, &id);
+	uint8_t      id = 0;
+	alp_status_t s  = bmp581_read_id(dev, &id);
 	if (s != ALP_OK) return s;
 	if (id != BMP581_CHIP_ID) return ALP_ERR_IO;
 
@@ -77,8 +77,11 @@ alp_status_t bmp581_read_id(bmp581_t *dev, uint8_t *id_out)
 	return reg_read(dev, REG_CHIP_ID, id_out, 1);
 }
 
-alp_status_t bmp581_set_sampling(bmp581_t *dev, bmp581_osr_t press_osr, bmp581_osr_t temp_osr,
-                                 bmp581_odr_t odr, bmp581_mode_t mode)
+alp_status_t bmp581_set_sampling(bmp581_t     *dev,
+                                 bmp581_osr_t  press_osr,
+                                 bmp581_osr_t  temp_osr,
+                                 bmp581_odr_t  odr,
+                                 bmp581_mode_t mode)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	/* OSR_CONFIG: PRESS_EN[6] | OSR_P[5:3] | OSR_T[2:0].

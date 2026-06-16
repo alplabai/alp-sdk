@@ -45,7 +45,7 @@ ZTEST_SUITE(alp_adc_registry, NULL, NULL, NULL, NULL, NULL);
 static struct alp_adc _fake_pool[4];
 static size_t         _fake_next = 0;
 
-static alp_adc_t     *_make_fake_handle(const char *silicon_ref)
+static alp_adc_t *_make_fake_handle(const char *silicon_ref)
 {
 	if (_fake_next >= 4) {
 		return NULL;

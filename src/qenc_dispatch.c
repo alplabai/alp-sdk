@@ -27,7 +27,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_QENC_HANDLES 4
 #endif
 
-static struct alp_qenc  _pool[CONFIG_ALP_SDK_MAX_QENC_HANDLES];
+static struct alp_qenc _pool[CONFIG_ALP_SDK_MAX_QENC_HANDLES];
 
 static struct alp_qenc *_alloc(void)
 {

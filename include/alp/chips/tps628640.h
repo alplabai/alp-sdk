@@ -93,19 +93,19 @@ extern "C" {
 #endif
 
 /* Register addresses ----------------------------------------------- */
-#define TPS628640_REG_VOUT1 0x01u
-#define TPS628640_REG_VOUT2 0x02u
+#define TPS628640_REG_VOUT1   0x01u
+#define TPS628640_REG_VOUT2   0x02u
 #define TPS628640_REG_CONTROL 0x03u
-#define TPS628640_REG_STATUS 0x05u
+#define TPS628640_REG_STATUS  0x05u
 
 /* CONTROL bits ----------------------------------------------------- */
-#define TPS628640_CTRL_RESET (1u << 7)
+#define TPS628640_CTRL_RESET                  (1u << 7)
 #define TPS628640_CTRL_FPWM_DURING_VID_CHANGE (1u << 6)
-#define TPS628640_CTRL_SOFTWARE_ENABLE (1u << 5)
-#define TPS628640_CTRL_FPWM_MODE (1u << 4)
-#define TPS628640_CTRL_OUTPUT_DISCHARGE (1u << 3)
-#define TPS628640_CTRL_HICCUP (1u << 2)
-#define TPS628640_CTRL_RAMP_SPEED_MASK (0x3u)
+#define TPS628640_CTRL_SOFTWARE_ENABLE        (1u << 5)
+#define TPS628640_CTRL_FPWM_MODE              (1u << 4)
+#define TPS628640_CTRL_OUTPUT_DISCHARGE       (1u << 3)
+#define TPS628640_CTRL_HICCUP                 (1u << 2)
+#define TPS628640_CTRL_RAMP_SPEED_MASK        (0x3u)
 
 /** Datasheet-defined CONTROL register default value (0b01101110).
  *  Driver initialises the shadow to this so the first call to a
@@ -116,12 +116,12 @@ extern "C" {
 
 /* STATUS bits ------------------------------------------------------ */
 #define TPS628640_STATUS_THERMAL_WARNING (1u << 4)
-#define TPS628640_STATUS_HICCUP (1u << 3)
-#define TPS628640_STATUS_UVLO (1u << 0)
+#define TPS628640_STATUS_HICCUP          (1u << 3)
+#define TPS628640_STATUS_UVLO            (1u << 0)
 
 /** VOUT encoding constants (datasheet §8.6.3). */
 #define TPS628640_VOUT_BASE_MV 400u
-#define TPS628640_VOUT_MAX_MV 1675u
+#define TPS628640_VOUT_MAX_MV  1675u
 #define TPS628640_VOUT_STEP_MV 5u
 
 /** Voltage-ramp-speed enum -- CONTROL bits [1:0]. */
@@ -164,8 +164,8 @@ typedef struct {
  *                            voltage at power-on.
  * @return ALP_OK / ALP_ERR_NOT_READY (no ACK) / ALP_ERR_INVAL.
  */
-alp_status_t tps628640_init(tps628640_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit,
-                            uint16_t default_voltage_mv);
+alp_status_t
+tps628640_init(tps628640_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, uint16_t default_voltage_mv);
 
 /**
  * @brief Set the chip's VOUT1 setpoint in millivolts.

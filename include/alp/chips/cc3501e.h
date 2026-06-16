@@ -105,9 +105,14 @@ alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);
  *  @param rx_cap      Capacity of @p rx_buf in bytes.
  *  @param rx_len      Receives bytes copied (may be NULL).
  *  @param timeout_ms  Max wait. */
-alp_status_t cc3501e_request(cc3501e_t *ctx, alp_cc3501e_cmd_t cmd, const uint8_t *tx_payload,
-                             size_t tx_len, uint8_t *rx_buf, size_t rx_cap, size_t *rx_len,
-                             uint32_t timeout_ms);
+alp_status_t cc3501e_request(cc3501e_t        *ctx,
+                             alp_cc3501e_cmd_t cmd,
+                             const uint8_t    *tx_payload,
+                             size_t            tx_len,
+                             uint8_t          *rx_buf,
+                             size_t            rx_cap,
+                             size_t           *rx_len,
+                             uint32_t          timeout_ms);
 
 /** Register or replace the async-event callback.  Pass cb=NULL to detach. */
 alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);

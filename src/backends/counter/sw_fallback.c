@@ -21,11 +21,12 @@
 
 #include "counter_ops.h"
 
-static uint32_t     _ticks   = 0u;
-static bool         _running = false;
+static uint32_t _ticks   = 0u;
+static bool     _running = false;
 
-static alp_status_t sw_open(const alp_counter_config_t *cfg, alp_counter_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t sw_open(const alp_counter_config_t  *cfg,
+                            alp_counter_backend_state_t *st,
+                            alp_capabilities_t          *caps_out)
 {
 	(void)cfg;
 	st->dev         = NULL;
@@ -57,16 +58,16 @@ static alp_status_t sw_get_value(alp_counter_backend_state_t *st, uint32_t *tick
 	return ALP_OK;
 }
 
-static alp_status_t sw_us_to_ticks(alp_counter_backend_state_t *st, uint32_t us,
-                                   uint32_t *ticks_out)
+static alp_status_t
+sw_us_to_ticks(alp_counter_backend_state_t *st, uint32_t us, uint32_t *ticks_out)
 {
 	(void)st;
 	*ticks_out = us; /* 1 us == 1 tick on the SW backend */
 	return ALP_OK;
 }
 
-static alp_status_t sw_set_alarm(alp_counter_backend_state_t *st, uint32_t ticks_from_now,
-                                 struct alp_counter *owner)
+static alp_status_t
+sw_set_alarm(alp_counter_backend_state_t *st, uint32_t ticks_from_now, struct alp_counter *owner)
 {
 	(void)st;
 	(void)ticks_from_now;
@@ -91,7 +92,8 @@ static const alp_counter_ops_t _ops = {
 	.close        = NULL,
 };
 
-ALP_BACKEND_REGISTER(counter, sw_fallback,
+ALP_BACKEND_REGISTER(counter,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

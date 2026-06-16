@@ -62,8 +62,10 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
 	return BRIDGE_HW_ERR_NOTIMPL;
 }
 
-int bridge_hw_pwm_configure(uint8_t channel, uint8_t align_mode, uint32_t dead_time_ns,
-                            uint8_t break_cfg)
+int bridge_hw_pwm_configure(uint8_t  channel,
+                            uint8_t  align_mode,
+                            uint32_t dead_time_ns,
+                            uint8_t  break_cfg)
 {
 	(void)channel;
 	(void)align_mode;
@@ -72,8 +74,10 @@ int bridge_hw_pwm_configure(uint8_t channel, uint8_t align_mode, uint32_t dead_t
 	return BRIDGE_HW_ERR_NOTIMPL;
 }
 
-int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio, uint16_t sample_cycles,
-                            uint8_t resolution_bits)
+int bridge_hw_adc_configure(uint8_t  channel,
+                            uint16_t oversample_ratio,
+                            uint16_t sample_cycles,
+                            uint8_t  resolution_bits)
 {
 	(void)channel;
 	(void)oversample_ratio;
@@ -90,7 +94,9 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
 	return BRIDGE_HW_ERR_NOTIMPL;
 }
 
-int bridge_hw_adc_stream_read(uint8_t stream_id, uint8_t max_samples, uint8_t *got_samples,
+int bridge_hw_adc_stream_read(uint8_t   stream_id,
+                              uint8_t   max_samples,
+                              uint8_t  *got_samples,
                               uint16_t *mv)
 {
 	(void)stream_id;
@@ -115,8 +121,8 @@ int bridge_hw_trng_read(uint8_t *dest, size_t len)
 	return BRIDGE_HW_ERR_NOTIMPL;
 }
 
-int bridge_hw_tmu_compute(uint8_t function, uint8_t format, uint32_t in_a, uint32_t in_b,
-                          uint32_t *result_out)
+int bridge_hw_tmu_compute(
+    uint8_t function, uint8_t format, uint32_t in_a, uint32_t in_b, uint32_t *result_out)
 {
 	(void)function;
 	(void)format;
@@ -234,9 +240,13 @@ int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id)
 	return BRIDGE_HW_ERR_NOTIMPL;
 }
 
-int bridge_hw_adc_dsp_stage_push(uint8_t chain_id, uint8_t stage_index, uint8_t kind,
-                                 uint16_t chunk_offset, uint16_t chunk_total_size,
-                                 const uint8_t *chunk_data, size_t chunk_data_len)
+int bridge_hw_adc_dsp_stage_push(uint8_t        chain_id,
+                                 uint8_t        stage_index,
+                                 uint8_t        kind,
+                                 uint16_t       chunk_offset,
+                                 uint16_t       chunk_total_size,
+                                 const uint8_t *chunk_data,
+                                 size_t         chunk_data_len)
 {
 	(void)chain_id;
 	(void)stage_index;

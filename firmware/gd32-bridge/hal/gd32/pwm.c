@@ -163,8 +163,10 @@ int bridge_hw_pwm_get(uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns)
 	return BRIDGE_HW_OK;
 }
 
-int bridge_hw_pwm_configure(uint8_t channel, uint8_t align_mode, uint32_t dead_time_ns,
-                            uint8_t break_cfg)
+int bridge_hw_pwm_configure(uint8_t  channel,
+                            uint8_t  align_mode,
+                            uint32_t dead_time_ns,
+                            uint8_t  break_cfg)
 {
 	if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
 

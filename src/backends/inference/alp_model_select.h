@@ -39,6 +39,8 @@ typedef struct {
  * @return ALP_OK (+ *out); ALP_ERR_INVAL (m/env/out NULL or n_targets==0);
  *         ALP_ERR_NOT_FOUND; ALP_ERR_NO_FIT; ALP_ERR_NO_BACKEND.
  */
-alp_status_t alp_model_select(const alp_model_t *m, const alp_model_select_env_t *env,
-                              alp_inference_backend_t requested, alp_model_select_result_t *out);
+alp_status_t alp_model_select(const alp_model_t            *m,
+                              const alp_model_select_env_t *env,
+                              alp_inference_backend_t       requested,
+                              alp_model_select_result_t    *out);
 #endif /* ALP_BACKENDS_INFERENCE_MODEL_SELECT_H */

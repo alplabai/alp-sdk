@@ -32,10 +32,10 @@
 extern "C" {
 #endif
 
-#define MS5611_I2C_ADDR_PRIMARY 0x77u /**< CSB low / VDD high (default). */
+#define MS5611_I2C_ADDR_PRIMARY   0x77u /**< CSB low / VDD high (default). */
 #define MS5611_I2C_ADDR_SECONDARY 0x76u
 
-#define MS5611_CMD_RESET 0x1Eu
+#define MS5611_CMD_RESET     0x1Eu
 #define MS5611_CMD_PROM_BASE 0xA0u /**< OR with 2*i for coefficient i in [0..7]. */
 
 typedef struct {

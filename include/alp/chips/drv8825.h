@@ -55,8 +55,13 @@ typedef struct {
 } drv8825_t;
 
 /** @brief Bind context to caller-opened PWM + GPIO handles. */
-alp_status_t drv8825_init(drv8825_t *dev, alp_pwm_t *step, alp_gpio_t *dir, alp_gpio_t *nenbl,
-                          alp_gpio_t *m0, alp_gpio_t *m1, alp_gpio_t *m2);
+alp_status_t drv8825_init(drv8825_t  *dev,
+                          alp_pwm_t  *step,
+                          alp_gpio_t *dir,
+                          alp_gpio_t *nenbl,
+                          alp_gpio_t *m0,
+                          alp_gpio_t *m1,
+                          alp_gpio_t *m2);
 
 /** @brief Apply a microstep mode by latching M0/M1/M2 GPIOs. */
 alp_status_t drv8825_set_microstep(drv8825_t *dev, drv8825_ustep_t mode);

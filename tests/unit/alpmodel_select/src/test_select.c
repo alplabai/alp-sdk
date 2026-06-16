@@ -6,8 +6,13 @@
 #include "../../../../src/backends/inference/alp_model_select.h"
 
 /* helper: build a target */
-static alp_model_target_t T(const char *be, const char *sil, const char *fmt, uint32_t arena,
-                            uint32_t sram, const uint8_t *blob, uint32_t blen)
+static alp_model_target_t T(const char    *be,
+                            const char    *sil,
+                            const char    *fmt,
+                            uint32_t       arena,
+                            uint32_t       sram,
+                            const uint8_t *blob,
+                            uint32_t       blen)
 {
 	alp_model_target_t t = { 0 };
 	strncpy(t.backend, be, ALP_MODEL_STR_MAX - 1);
@@ -171,14 +176,14 @@ ZTEST(alp_model_select, test_preferred_backend_breaks_tie_between_two_fitting_np
 	m.targets[0]           = T("ethos_u", "alif:ensemble:e7", "vela_tflite", 0, 0, b0, 4);
 	m.targets[1]           = T("deepx_dxm1", "deepx:dx:m1", "dxnn", 0, 0, b1, 4);
 	m.targets[2]           = T("cpu", "*", "tflite", 0, 0, b2, 4);
-	const char               *avail[] = { "deepx:dx:m1" };
+	const char *avail[]    = { "deepx:dx:m1" };
 
-	alp_model_select_env_t    env_d   = { .soc_ref           = "alif:ensemble:e7",
-		                                  .avail_silicon     = avail,
-		                                  .n_avail_silicon   = 1,
-		                                  .arena_sram_kib    = 0,
-		                                  .preferred_backend = ALP_INFERENCE_BACKEND_DEEPX_DXM1 };
-	alp_model_select_result_t r       = { 0 };
+	alp_model_select_env_t    env_d = { .soc_ref           = "alif:ensemble:e7",
+		                                .avail_silicon     = avail,
+		                                .n_avail_silicon   = 1,
+		                                .arena_sram_kib    = 0,
+		                                .preferred_backend = ALP_INFERENCE_BACKEND_DEEPX_DXM1 };
+	alp_model_select_result_t r     = { 0 };
 	zassert_equal(alp_model_select(&m, &env_d, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
 	zassert_equal(r.backend, ALP_INFERENCE_BACKEND_DEEPX_DXM1);
 

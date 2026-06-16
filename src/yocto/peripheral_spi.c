@@ -66,7 +66,7 @@ struct alp_spi {
 	uint8_t  bits_per_word;
 };
 
-static struct alp_spi  g_spi_pool[ALP_SDK_YOCTO_MAX_SPI_HANDLES];
+static struct alp_spi g_spi_pool[ALP_SDK_YOCTO_MAX_SPI_HANDLES];
 
 static struct alp_spi *pool_acquire(void)
 {

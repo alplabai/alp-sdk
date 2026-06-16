@@ -21,7 +21,7 @@ static const uint8_t k_key16[16] = { 0 };
 static const uint8_t k_iv12[12]  = { 0 };
 static const uint8_t k_tag16[16] = { 0 };
 
-void                 bench_security_main(void)
+void bench_security_main(void)
 {
 	/* alp_hash_open with no backend wired -- the wrapper hands off
      * to the active hash implementation which returns NULL on the
@@ -43,20 +43,21 @@ void                 bench_security_main(void)
      * each NOSUPPORT or NOT_READY -- collectively the price a caller
      * pays per "try AEAD, fall back to plaintext" decision when no
      * backend is wired. */
-	BENCH_RUN("alp_aead_open(AES_128_GCM)", 1000000,
-	          { (void)alp_aead_open(ALP_AEAD_AES_128_GCM, k_key16, sizeof k_key16); });
+	BENCH_RUN("alp_aead_open(AES_128_GCM)", 1000000, {
+		(void)alp_aead_open(ALP_AEAD_AES_128_GCM, k_key16, sizeof k_key16);
+	});
 
 	BENCH_RUN("alp_aead_encrypt(NULL handle)", 1000000, {
 		uint8_t ct[32]  = { 0 };
 		uint8_t tag[16] = { 0 };
-		(void)alp_aead_encrypt(NULL, k_iv12, sizeof k_iv12, NULL, 0u, NULL, 0u, ct, tag,
-		                       sizeof tag);
+		(void)alp_aead_encrypt(
+		    NULL, k_iv12, sizeof k_iv12, NULL, 0u, NULL, 0u, ct, tag, sizeof tag);
 	});
 
 	BENCH_RUN("alp_aead_decrypt(NULL handle)", 1000000, {
 		uint8_t pt[32] = { 0 };
-		(void)alp_aead_decrypt(NULL, k_iv12, sizeof k_iv12, NULL, 0u, NULL, 0u, k_tag16,
-		                       sizeof k_tag16, pt);
+		(void)alp_aead_decrypt(
+		    NULL, k_iv12, sizeof k_iv12, NULL, 0u, NULL, 0u, k_tag16, sizeof k_tag16, pt);
 	});
 
 	/* alp_random_bytes with NULL out -- INVAL pre-check before any

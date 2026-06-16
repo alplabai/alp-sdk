@@ -12,13 +12,13 @@
 #include "alp/peripheral.h"
 
 #define ILI9488_CMD_SWRESET 0x01u
-#define ILI9488_CMD_SLPOUT 0x11u
-#define ILI9488_CMD_PIXFMT 0x3Au
-#define ILI9488_CMD_MADCTL 0x36u
-#define ILI9488_CMD_DISPON 0x29u
-#define ILI9488_CMD_CASET 0x2Au
-#define ILI9488_CMD_PASET 0x2Bu
-#define ILI9488_CMD_RAMWR 0x2Cu
+#define ILI9488_CMD_SLPOUT  0x11u
+#define ILI9488_CMD_PIXFMT  0x3Au
+#define ILI9488_CMD_MADCTL  0x36u
+#define ILI9488_CMD_DISPON  0x29u
+#define ILI9488_CMD_CASET   0x2Au
+#define ILI9488_CMD_PASET   0x2Bu
+#define ILI9488_CMD_RAMWR   0x2Cu
 
 static alp_status_t ili9488_send(ili9488_t *dev, bool is_cmd, const uint8_t *buf, size_t len)
 {

@@ -30,8 +30,10 @@ static bool _is_nxp_backend(const alp_storage_t *s)
 	       strcmp(s->backend->vendor, "nxp") == 0;
 }
 
-alp_status_t alp_nxp_storage_otfad_provision(alp_storage_t *s, uint8_t window_id,
-                                             const uint8_t *key, const uint8_t *counter)
+alp_status_t alp_nxp_storage_otfad_provision(alp_storage_t *s,
+                                             uint8_t        window_id,
+                                             const uint8_t *key,
+                                             const uint8_t *counter)
 {
 	if (s == NULL) return ALP_ERR_INVAL;
 	if (!_is_nxp_backend(s)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
@@ -42,8 +44,10 @@ alp_status_t alp_nxp_storage_otfad_provision(alp_storage_t *s, uint8_t window_id
 	return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_nxp_storage_otfad_set_window(alp_storage_t *s, uint8_t window_id,
-                                              uint32_t start_addr, uint32_t end_addr)
+alp_status_t alp_nxp_storage_otfad_set_window(alp_storage_t *s,
+                                              uint8_t        window_id,
+                                              uint32_t       start_addr,
+                                              uint32_t       end_addr)
 {
 	if (s == NULL) return ALP_ERR_INVAL;
 	if (!_is_nxp_backend(s)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;

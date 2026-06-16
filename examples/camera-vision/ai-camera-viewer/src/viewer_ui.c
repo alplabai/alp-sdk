@@ -20,7 +20,7 @@ static lv_obj_t *s_box_widgets[VIEWER_MAX_BOXES];
 static lv_obj_t *s_lbl_stats;
 static lv_obj_t *s_lbl_health;
 
-void             viewer_ui_build(void)
+void viewer_ui_build(void)
 {
 	lv_obj_t *scr = lv_screen_active();
 	lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
@@ -75,11 +75,19 @@ void viewer_ui_apply(const viewer_state_t *s)
 	}
 
 	/* Stats strip. */
-	snprintf(buf, sizeof(buf), "%2u.%u fps  %5u µs/inv", (unsigned)(s->fps_x10 / 10),
-	         (unsigned)(s->fps_x10 % 10), (unsigned)s->last_invoke_us);
+	snprintf(buf,
+	         sizeof(buf),
+	         "%2u.%u fps  %5u µs/inv",
+	         (unsigned)(s->fps_x10 / 10),
+	         (unsigned)(s->fps_x10 % 10),
+	         (unsigned)s->last_invoke_us);
 	lv_label_set_text(s_lbl_stats, buf);
 
-	snprintf(buf, sizeof(buf), "cam: %s  inf: %s  boxes: %u", s->camera_ok ? "OK" : "!!",
-	         s->inference_ok ? "OK" : "!!", (unsigned)s->n_boxes);
+	snprintf(buf,
+	         sizeof(buf),
+	         "cam: %s  inf: %s  boxes: %u",
+	         s->camera_ok ? "OK" : "!!",
+	         s->inference_ok ? "OK" : "!!",
+	         (unsigned)s->n_boxes);
 	lv_label_set_text(s_lbl_health, buf);
 }

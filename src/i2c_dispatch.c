@@ -26,7 +26,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_I2C_HANDLES 4
 #endif
 
-static struct alp_i2c  _pool[CONFIG_ALP_SDK_MAX_I2C_HANDLES];
+static struct alp_i2c _pool[CONFIG_ALP_SDK_MAX_I2C_HANDLES];
 
 static struct alp_i2c *_alloc(void)
 {
@@ -99,8 +99,8 @@ alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t le
 	return bus->state.ops->read(&bus->state, addr, data, len);
 }
 
-alp_status_t alp_i2c_write_read(alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen,
-                                uint8_t *rdata, size_t rlen)
+alp_status_t alp_i2c_write_read(
+    alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen, uint8_t *rdata, size_t rlen)
 {
 	if (bus == NULL || !bus->in_use) return ALP_ERR_NOT_READY;
 	if ((wdata == NULL && wlen > 0) || (rdata == NULL && rlen > 0)) {

@@ -13,12 +13,12 @@
 /* Register map (DocID030334)                                         */
 /* ------------------------------------------------------------------ */
 
-#define REG_OUT_T_L 0x0D
+#define REG_OUT_T_L  0x0D
 #define REG_WHO_AM_I 0x0F
-#define REG_CTRL1 0x20 /* ODR[7:4] | MODE[3:2] | LP_MODE[1:0]. */
-#define REG_CTRL2 0x21
-#define REG_CTRL6 0x25 /* BW_FILT[7:6] | FS[5:4] | FDS[3] | LOW_NOISE[2] | reserved. */
-#define REG_OUT_X_L 0x28
+#define REG_CTRL1    0x20 /* ODR[7:4] | MODE[3:2] | LP_MODE[1:0]. */
+#define REG_CTRL2    0x21
+#define REG_CTRL6    0x25 /* BW_FILT[7:6] | FS[5:4] | FDS[3] | LOW_NOISE[2] | reserved. */
+#define REG_OUT_X_L  0x28
 
 static alp_status_t reg_write(lis2dw12_t *dev, uint8_t reg, uint8_t val)
 {
@@ -51,8 +51,8 @@ alp_status_t lis2dw12_init(lis2dw12_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	dev->mode        = LIS2DW12_MODE_LOW_POWER_12BIT;
 	dev->initialised = false;
 
-	uint8_t      id  = 0;
-	alp_status_t s   = lis2dw12_read_id(dev, &id);
+	uint8_t      id = 0;
+	alp_status_t s  = lis2dw12_read_id(dev, &id);
 	if (s != ALP_OK) return s;
 	if (id != LIS2DW12_WHO_AM_I_VAL) return ALP_ERR_IO;
 
@@ -66,8 +66,8 @@ alp_status_t lis2dw12_read_id(lis2dw12_t *dev, uint8_t *id_out)
 	return reg_read(dev, REG_WHO_AM_I, id_out, 1);
 }
 
-alp_status_t lis2dw12_set_accel(lis2dw12_t *dev, lis2dw12_odr_t odr, lis2dw12_fs_t fs,
-                                lis2dw12_mode_t mode)
+alp_status_t
+lis2dw12_set_accel(lis2dw12_t *dev, lis2dw12_odr_t odr, lis2dw12_fs_t fs, lis2dw12_mode_t mode)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 

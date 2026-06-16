@@ -65,7 +65,7 @@
 extern "C" {
 #endif
 
-#define INA236_MFG_ID 0x5449u    /**< "TI" — manufacturer ID const.   */
+#define INA236_MFG_ID    0x5449u /**< "TI" — manufacturer ID const.   */
 #define INA236_DEVICE_ID 0xA080u /**< INA236 device ID const.         */
 
 /** ADC range setting — affects shunt voltage LSB and full-scale. */
@@ -115,8 +115,12 @@ typedef struct {
  * @return ALP_OK on success, ALP_ERR_NOT_READY on probe failure
  *         (wrong device ID), ALP_ERR_INVAL on bad parameters.
  */
-alp_status_t ina236_init(ina236_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, float shunt_ohms,
-                         float max_current_a, ina236_adcrange_t adcrange);
+alp_status_t ina236_init(ina236_t         *ctx,
+                         alp_i2c_t        *bus,
+                         uint8_t           addr_7bit,
+                         float             shunt_ohms,
+                         float             max_current_a,
+                         ina236_adcrange_t adcrange);
 
 /** @brief Read the bus voltage in millivolts. */
 alp_status_t ina236_read_bus_mv(ina236_t *ctx, int32_t *mv_out);

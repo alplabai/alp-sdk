@@ -512,7 +512,7 @@ typedef enum {
 #define EVK_ARD_DIO2 EVK_PIN_CK_DIO2 /**< CK_DIO2 = I2S1_WS. */
 #define EVK_ARD_DIO3 EVK_PIN_CK_DIO3 /**< CK_DIO3 = SPI0_SCLK. */
 #define EVK_ARD_DIO4 EVK_PIN_CK_DIO4 /**< CK_DIO4 = SPI0_MOSI. */
-#define EVK_ARD_RST EVK_PIN_CK_RST   /**< CK_RST  = I2S1_SCLK. */
+#define EVK_ARD_RST  EVK_PIN_CK_RST  /**< CK_RST  = I2S1_SCLK. */
 
 /* Analog (header pins on E1M ADC channels). */
 #define EVK_ARD_A0 E1M_ADC0 /**< ARD.A0 = E1M ANA_S0. */
@@ -574,8 +574,8 @@ typedef enum {
 /* ================================================================== */
 
 #define EVK_I2C_ADDR_ICM42670 0x69u /**< U12 IMU (AD0=1). */
-#define EVK_I2C_ADDR_BMI323 0x68u   /**< U13 IMU (SDO=0).  No collision with ICM. */
-#define EVK_I2C_ADDR_BMP581 0x47u   /**< U14 barometer (SDO=1). */
+#define EVK_I2C_ADDR_BMI323   0x68u /**< U13 IMU (SDO=0).  No collision with ICM. */
+#define EVK_I2C_ADDR_BMP581   0x47u /**< U14 barometer (SDO=1). */
 
 /* BMI323 INT1 (data-ready / motion / FIFO interrupt) routes to
  * E1M IO15, NOT through the main TCAL9538 expander (the expander's
@@ -613,7 +613,7 @@ typedef enum {
  * EVK by U32 INA236B (+V_CAM0 rail).  Firmware that wants to write
  * both amps simultaneously must issue two targeted unit-address
  * writes back-to-back rather than relying on a 0x48 broadcast. */
-#define EVK_I2C_ADDR_TAS2563_LOW 0x4Du  /**< U27 (AD0 = LOW). */
+#define EVK_I2C_ADDR_TAS2563_LOW  0x4Du /**< U27 (AD0 = LOW). */
 #define EVK_I2C_ADDR_TAS2563_HIGH 0x4Eu /**< U28 (AD0 = HIGH). */
 
 /* Six INA236 high-side current-shunt monitors -- one per power
@@ -659,18 +659,18 @@ typedef enum {
  *               EVK_INA236_SHUNT_3V3_OHMS,
  *               EVK_INA236_MAX_3V3_A,
  *               INA236_ADCRANGE_81MV); */
-#define EVK_INA236_SHUNT_3V3_OHMS 0.020f
-#define EVK_INA236_MAX_3V3_A 4.0f
-#define EVK_INA236_SHUNT_1V8_OHMS 0.020f
-#define EVK_INA236_MAX_1V8_A 4.0f
-#define EVK_INA236_SHUNT_VIO_OHMS 0.050f
-#define EVK_INA236_MAX_VIO_A 1.6f
+#define EVK_INA236_SHUNT_3V3_OHMS   0.020f
+#define EVK_INA236_MAX_3V3_A        4.0f
+#define EVK_INA236_SHUNT_1V8_OHMS   0.020f
+#define EVK_INA236_MAX_1V8_A        4.0f
+#define EVK_INA236_SHUNT_VIO_OHMS   0.050f
+#define EVK_INA236_MAX_VIO_A        1.6f
 #define EVK_INA236_SHUNT_VCAM0_OHMS 0.050f
-#define EVK_INA236_MAX_VCAM0_A 1.6f
+#define EVK_INA236_MAX_VCAM0_A      1.6f
 #define EVK_INA236_SHUNT_VCAM1_OHMS 0.050f
-#define EVK_INA236_MAX_VCAM1_A 1.6f
-#define EVK_INA236_SHUNT_5V_OHMS 0.020f
-#define EVK_INA236_MAX_5V_A 4.0f
+#define EVK_INA236_MAX_VCAM1_A      1.6f
+#define EVK_INA236_SHUNT_5V_OHMS    0.020f
+#define EVK_INA236_MAX_5V_A         4.0f
 
 /* ================================================================== */
 /* On-board audio I/O                                                 */

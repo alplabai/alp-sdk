@@ -154,8 +154,8 @@ static const uint16_t gd32g553_reply_retry_us[] = { 25u, 50u, 100u, 200u, 400u, 
  * 356 us avg vs 196 us) while the ladder absorbs the remainder.  The
  * real fix for ADC reply latency is slave-side (sampling-time config),
  * tracked for the next firmware rev. */
-static uint32_t reply_staging_gap_us(uint8_t cmd, const uint8_t *req_payload,
-                                     size_t req_payload_len)
+static uint32_t
+reply_staging_gap_us(uint8_t cmd, const uint8_t *req_payload, size_t req_payload_len)
 {
 	uint32_t gap = GD32G553_REPLY_STAGING_GAP_US;
 
@@ -166,9 +166,12 @@ static uint32_t reply_staging_gap_us(uint8_t cmd, const uint8_t *req_payload,
 }
 
 /* Forward declaration for the failed-command resync epilogue below. */
-static alp_status_t spi_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_payload,
-                             size_t req_payload_len, uint8_t *reply_payload,
-                             size_t reply_payload_len);
+static alp_status_t spi_xfer(gd32g553_t    *ctx,
+                             uint8_t        cmd,
+                             const uint8_t *req_payload,
+                             size_t         req_payload_len,
+                             uint8_t       *reply_payload,
+                             size_t         reply_payload_len);
 
 /* Resync after a failed command.  The slave clears its staged reply
  * ONLY when it decodes a fresh request -- drains re-arm it (the
@@ -187,9 +190,12 @@ static void spi_resync_after_failure(gd32g553_t *ctx)
 	(void)spi_xfer(ctx, 0x00u /* CMD_PING */, NULL, 0u, NULL, 0u);
 }
 
-static alp_status_t spi_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_payload,
-                             size_t req_payload_len, uint8_t *reply_payload,
-                             size_t reply_payload_len)
+static alp_status_t spi_xfer(gd32g553_t    *ctx,
+                             uint8_t        cmd,
+                             const uint8_t *req_payload,
+                             size_t         req_payload_len,
+                             uint8_t       *reply_payload,
+                             size_t         reply_payload_len)
 {
 	if (ctx->spi == NULL) return ALP_ERR_NOSUPPORT;
 
@@ -336,9 +342,12 @@ static alp_status_t spi_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_pa
 /* Transport: I2C                                                     */
 /* ----------------------------------------------------------------- */
 
-static alp_status_t i2c_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_payload,
-                             size_t req_payload_len, uint8_t *reply_payload,
-                             size_t reply_payload_len)
+static alp_status_t i2c_xfer(gd32g553_t    *ctx,
+                             uint8_t        cmd,
+                             const uint8_t *req_payload,
+                             size_t         req_payload_len,
+                             uint8_t       *reply_payload,
+                             size_t         reply_payload_len)
 {
 	if (ctx->i2c == NULL) return ALP_ERR_NOSUPPORT;
 
@@ -357,7 +366,7 @@ static alp_status_t i2c_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_pa
 	wbuf[2u + req_payload_len]      = (uint8_t)(crc & 0xFFu);
 	wbuf[2u + req_payload_len + 1u] = (uint8_t)((crc >> 8) & 0xFFu);
 
-	const size_t wlen               = 2u + req_payload_len + 2u;
+	const size_t wlen = 2u + req_payload_len + 2u;
 
 	/* Read side: [STATUS][PAYLOAD][CRC(STATUS..PAYLOAD) lo, hi] */
 	uint8_t      rbuf[GD32G553_MAX_I2C_READ_BYTES];
@@ -401,9 +410,13 @@ static alp_status_t i2c_xfer(gd32g553_t *ctx, uint8_t cmd, const uint8_t *req_pa
 /* Transport router                                                   */
 /* ----------------------------------------------------------------- */
 
-static alp_status_t cmd_send(gd32g553_t *ctx, gd32g553_transport_t t, uint8_t cmd,
-                             const uint8_t *req_payload, size_t req_payload_len,
-                             uint8_t *reply_payload, size_t reply_payload_len)
+static alp_status_t cmd_send(gd32g553_t          *ctx,
+                             gd32g553_transport_t t,
+                             uint8_t              cmd,
+                             const uint8_t       *req_payload,
+                             size_t               req_payload_len,
+                             uint8_t             *reply_payload,
+                             size_t               reply_payload_len)
 {
 	if (t == GD32G553_TRANSPORT_DEFAULT) t = ctx->default_transport;
 	switch (t) {
@@ -433,7 +446,7 @@ alp_status_t gd32g553_init(gd32g553_t *ctx, alp_spi_t *spi, alp_i2c_t *i2c, uint
 	ctx->default_transport = (spi != NULL) ? GD32G553_TRANSPORT_SPI : GD32G553_TRANSPORT_I2C;
 	ctx->initialised       = true;
 
-	alp_status_t s         = gd32g553_ping(ctx);
+	alp_status_t s = gd32g553_ping(ctx);
 	if (s != ALP_OK) {
 		ctx->initialised = false;
 		return s;
@@ -461,8 +474,8 @@ alp_status_t gd32g553_init(gd32g553_t *ctx, alp_spi_t *spi, alp_i2c_t *i2c, uint
 	if (ctx->spi != NULL) {
 		uint8_t want    = GD32G553_LINK_FEAT_STATUS_SEQ;
 		uint8_t granted = 0u;
-		(void)cmd_send(ctx, GD32G553_TRANSPORT_SPI, GD32G553_CMD_LINK_FEATURES, &want, 1u, &granted,
-		               1u);
+		(void)cmd_send(
+		    ctx, GD32G553_TRANSPORT_SPI, GD32G553_CMD_LINK_FEATURES, &want, 1u, &granted, 1u);
 	}
 	return ALP_OK;
 }
@@ -496,8 +509,8 @@ alp_status_t gd32g553_get_version(gd32g553_t *ctx, gd32g553_version_t *out)
 {
 	if (ctx == NULL || out == NULL) return ALP_ERR_INVAL;
 	uint8_t      reply[3];
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_GET_VERSION, NULL, 0u,
-	                          reply, sizeof(reply));
+	alp_status_t s = cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_GET_VERSION, NULL, 0u, reply, sizeof(reply));
 	if (s != ALP_OK) return s;
 	out->major = reply[0];
 	out->minor = reply[1];
@@ -510,8 +523,8 @@ alp_status_t gd32g553_get_build_id(gd32g553_t *ctx, char build_id[GD32G553_BUILD
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (build_id == NULL) return ALP_ERR_INVAL;
 	uint8_t      reply[GD32G553_BUILD_ID_LEN];
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_GET_BUILD_ID, NULL, 0u,
-	                          reply, sizeof(reply));
+	alp_status_t s = cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_GET_BUILD_ID, NULL, 0u, reply, sizeof(reply));
 	if (s != ALP_OK) return s;
 	memcpy(build_id, reply, GD32G553_BUILD_ID_LEN);
 	build_id[GD32G553_BUILD_ID_LEN] = '\0';
@@ -551,8 +564,13 @@ alp_status_t gd32g553_gpio_read(gd32g553_t *ctx, uint32_t mask, uint32_t *levels
 	uint8_t req[4];
 	put_le32(req, mask);
 	uint8_t      reply[4];
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_GPIO_READ, req,
-	                          sizeof(req), reply, sizeof(reply));
+	alp_status_t s = cmd_send(ctx,
+	                          GD32G553_TRANSPORT_DEFAULT,
+	                          GD32G553_CMD_GPIO_READ,
+	                          req,
+	                          sizeof(req),
+	                          reply,
+	                          sizeof(reply));
 	if (s != ALP_OK) return s;
 	*levels = get_le32(reply);
 	return ALP_OK;
@@ -564,12 +582,12 @@ alp_status_t gd32g553_gpio_write(gd32g553_t *ctx, uint32_t mask, uint32_t levels
 	uint8_t req[8];
 	put_le32(&req[0], mask);
 	put_le32(&req[4], levels);
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_GPIO_WRITE, req, sizeof(req),
-	                NULL, 0u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_GPIO_WRITE, req, sizeof(req), NULL, 0u);
 }
 
-alp_status_t gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns,
-                              uint32_t duty_ns)
+alp_status_t
+gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t duty_ns)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (duty_ns > period_ns) return ALP_ERR_INVAL;
@@ -578,19 +596,19 @@ alp_status_t gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_
 	req[1] = 0u; /* reserved */
 	put_le32(&req[2], period_ns);
 	put_le32(&req[6], duty_ns);
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_SET, req, sizeof(req), NULL,
-	                0u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_SET, req, sizeof(req), NULL, 0u);
 }
 
-alp_status_t gd32g553_pwm_get(gd32g553_t *ctx, uint8_t channel, uint32_t *period_ns,
-                              uint32_t *duty_ns)
+alp_status_t
+gd32g553_pwm_get(gd32g553_t *ctx, uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (period_ns == NULL || duty_ns == NULL) return ALP_ERR_INVAL;
 	uint8_t      req = channel;
 	uint8_t      reply[8];
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_GET, &req, 1u,
-	                          reply, sizeof(reply));
+	alp_status_t s = cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_GET, &req, 1u, reply, sizeof(reply));
 	if (s != ALP_OK) return s;
 	*period_ns = get_le32(&reply[0]);
 	*duty_ns   = get_le32(&reply[4]);
@@ -612,8 +630,13 @@ alp_status_t gd32g553_adc_read(gd32g553_t *ctx, uint8_t channel, uint8_t samples
 	const size_t reply_payload_len = 1u + (size_t)samples * 2u;
 	uint8_t      reply[1u + (GD32G553_BRIDGE_ADC_MAX_SAMPLES * 2u)];
 
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_READ, req,
-	                          sizeof(req), reply, reply_payload_len);
+	alp_status_t s = cmd_send(ctx,
+	                          GD32G553_TRANSPORT_DEFAULT,
+	                          GD32G553_CMD_ADC_READ,
+	                          req,
+	                          sizeof(req),
+	                          reply,
+	                          reply_payload_len);
 	if (s != ALP_OK) return s;
 
 	/* The firmware MUST echo the same samples value back at byte 0.
@@ -632,8 +655,8 @@ alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (status == NULL) return ALP_ERR_INVAL;
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_DA9292_STATUS_FORWARD, NULL, 0u,
-	                status, 1u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_DA9292_STATUS_FORWARD, NULL, 0u, status, 1u);
 }
 
 alp_status_t gd32g553_se_reset(gd32g553_t *ctx, bool assert)
@@ -652,8 +675,8 @@ alp_status_t gd32g553_dac_set(gd32g553_t *ctx, uint8_t channel, uint16_t value_m
 	req[1] = 0u; /* reserved */
 	req[2] = (uint8_t)(value_mv & 0xFFu);
 	req[3] = (uint8_t)((value_mv >> 8) & 0xFFu);
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_DAC_SET, req, sizeof(req), NULL,
-	                0u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_DAC_SET, req, sizeof(req), NULL, 0u);
 }
 
 alp_status_t gd32g553_dac_get(gd32g553_t *ctx, uint8_t channel, uint16_t *value_mv)
@@ -662,8 +685,8 @@ alp_status_t gd32g553_dac_get(gd32g553_t *ctx, uint8_t channel, uint16_t *value_
 	if (value_mv == NULL) return ALP_ERR_INVAL;
 	if (channel >= GD32G553_BRIDGE_DAC_CHANNELS) return ALP_ERR_INVAL;
 	uint8_t      reply[2];
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_DAC_GET, &channel, 1u,
-	                          reply, sizeof(reply));
+	alp_status_t s = cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_DAC_GET, &channel, 1u, reply, sizeof(reply));
 	if (s != ALP_OK) return s;
 	*value_mv = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
 	return ALP_OK;
@@ -675,8 +698,13 @@ alp_status_t gd32g553_qenc_read(gd32g553_t *ctx, uint8_t encoder, int32_t *posit
 	if (position_out == NULL) return ALP_ERR_INVAL;
 	if (encoder >= GD32G553_BRIDGE_QENC_CHANNELS) return ALP_ERR_INVAL;
 	uint8_t      reply[4];
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_QENC_READ, &encoder, 1u,
-	                          reply, sizeof(reply));
+	alp_status_t s = cmd_send(ctx,
+	                          GD32G553_TRANSPORT_DEFAULT,
+	                          GD32G553_CMD_QENC_READ,
+	                          &encoder,
+	                          1u,
+	                          reply,
+	                          sizeof(reply));
 	if (s != ALP_OK) return s;
 	*position_out = (int32_t)get_le32(reply);
 	return ALP_OK;
@@ -686,8 +714,8 @@ alp_status_t gd32g553_qenc_reset(gd32g553_t *ctx, uint8_t encoder)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (encoder >= GD32G553_BRIDGE_QENC_CHANNELS) return ALP_ERR_INVAL;
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_QENC_RESET, &encoder, 1u, NULL,
-	                0u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_QENC_RESET, &encoder, 1u, NULL, 0u);
 }
 
 alp_status_t gd32g553_counter_read(gd32g553_t *ctx, uint8_t counter, uint32_t *ticks_out)
@@ -696,8 +724,13 @@ alp_status_t gd32g553_counter_read(gd32g553_t *ctx, uint8_t counter, uint32_t *t
 	if (ticks_out == NULL) return ALP_ERR_INVAL;
 	if (counter >= GD32G553_BRIDGE_COUNTER_CHANNELS) return ALP_ERR_INVAL;
 	uint8_t      reply[4];
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_COUNTER_READ, &counter,
-	                          1u, reply, sizeof(reply));
+	alp_status_t s = cmd_send(ctx,
+	                          GD32G553_TRANSPORT_DEFAULT,
+	                          GD32G553_CMD_COUNTER_READ,
+	                          &counter,
+	                          1u,
+	                          reply,
+	                          sizeof(reply));
 	if (s != ALP_OK) return s;
 	*ticks_out = get_le32(reply);
 	return ALP_OK;
@@ -707,9 +740,11 @@ alp_status_t gd32g553_counter_read(gd32g553_t *ctx, uint8_t counter, uint32_t *t
 /* v0.3 -- GD32G5 HW knobs                                            */
 /* ------------------------------------------------------------------ */
 
-alp_status_t gd32g553_pwm_configure(gd32g553_t *ctx, uint8_t channel,
-                                    gd32g553_pwm_align_t align_mode, uint32_t dead_time_ns,
-                                    uint8_t break_cfg)
+alp_status_t gd32g553_pwm_configure(gd32g553_t          *ctx,
+                                    uint8_t              channel,
+                                    gd32g553_pwm_align_t align_mode,
+                                    uint32_t             dead_time_ns,
+                                    uint8_t              break_cfg)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if ((unsigned)align_mode > 3u) return ALP_ERR_INVAL;
@@ -718,12 +753,15 @@ alp_status_t gd32g553_pwm_configure(gd32g553_t *ctx, uint8_t channel,
 	req[1] = (uint8_t)align_mode;
 	put_le32(&req[2], dead_time_ns);
 	req[6] = break_cfg;
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_CONFIGURE, req, sizeof(req),
-	                NULL, 0u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_CONFIGURE, req, sizeof(req), NULL, 0u);
 }
 
-alp_status_t gd32g553_adc_configure(gd32g553_t *ctx, uint8_t channel, uint16_t oversample_ratio,
-                                    uint16_t sample_cycles, uint8_t resolution_bits)
+alp_status_t gd32g553_adc_configure(gd32g553_t *ctx,
+                                    uint8_t     channel,
+                                    uint16_t    oversample_ratio,
+                                    uint16_t    sample_cycles,
+                                    uint8_t     resolution_bits)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	/* Resolution must be one of the supported widths (or 0 for
@@ -749,12 +787,14 @@ alp_status_t gd32g553_adc_configure(gd32g553_t *ctx, uint8_t channel, uint16_t o
 	req[4] = (uint8_t)(sample_cycles & 0xFFu);
 	req[5] = (uint8_t)((sample_cycles >> 8) & 0xFFu);
 	req[6] = resolution_bits;
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_CONFIGURE, req, sizeof(req),
-	                NULL, 0u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_CONFIGURE, req, sizeof(req), NULL, 0u);
 }
 
-alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx, uint8_t stream_id, uint8_t channel,
-                                       uint32_t sample_rate_hz)
+alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx,
+                                       uint8_t     stream_id,
+                                       uint8_t     channel,
+                                       uint32_t    sample_rate_hz)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (stream_id >= GD32G553_BRIDGE_ADC_STREAM_COUNT) return ALP_ERR_INVAL;
@@ -764,12 +804,12 @@ alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx, uint8_t stream_id, uint8
 	req[1] = channel;
 	req[2] = 0u; /* reserved */
 	put_le32(&req[3], sample_rate_hz);
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_STREAM_BEGIN, req,
-	                sizeof(req), NULL, 0u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_STREAM_BEGIN, req, sizeof(req), NULL, 0u);
 }
 
-alp_status_t gd32g553_adc_stream_read(gd32g553_t *ctx, uint8_t stream_id, uint8_t max_samples,
-                                      uint8_t *got_samples, uint16_t *mv)
+alp_status_t gd32g553_adc_stream_read(
+    gd32g553_t *ctx, uint8_t stream_id, uint8_t max_samples, uint8_t *got_samples, uint16_t *mv)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (got_samples == NULL || mv == NULL) return ALP_ERR_INVAL;
@@ -788,8 +828,13 @@ alp_status_t gd32g553_adc_stream_read(gd32g553_t *ctx, uint8_t stream_id, uint8_
 	uint8_t       reply[1u + (GD32G553_BRIDGE_ADC_STREAM_READ_MAX * 2u)];
 	const size_t  reply_len = 1u + ((size_t)max_samples * 2u);
 	const uint8_t req[2]    = { stream_id, max_samples };
-	alp_status_t  s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_STREAM_READ, req,
-	                           sizeof(req), reply, reply_len);
+	alp_status_t  s         = cmd_send(ctx,
+                              GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_ADC_STREAM_READ,
+                              req,
+                              sizeof(req),
+                              reply,
+                              reply_len);
 	if (s != ALP_OK) {
 		*got_samples = 0u;
 		return s;
@@ -807,8 +852,8 @@ alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (stream_id >= GD32G553_BRIDGE_ADC_STREAM_COUNT) return ALP_ERR_INVAL;
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_STREAM_END, &stream_id, 1u,
-	                NULL, 0u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_STREAM_END, &stream_id, 1u, NULL, 0u);
 }
 
 alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len)
@@ -836,9 +881,12 @@ alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len)
 /* v0.4 -- GD32G5 TMU (CORDIC) math accelerator                        */
 /* ------------------------------------------------------------------ */
 
-alp_status_t gd32g553_tmu_compute(gd32g553_t *ctx, gd32g553_tmu_function_t function,
-                                  gd32g553_tmu_format_t format, uint32_t in_a, uint32_t in_b,
-                                  uint32_t *result_out)
+alp_status_t gd32g553_tmu_compute(gd32g553_t             *ctx,
+                                  gd32g553_tmu_function_t function,
+                                  gd32g553_tmu_format_t   format,
+                                  uint32_t                in_a,
+                                  uint32_t                in_b,
+                                  uint32_t               *result_out)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (result_out == NULL) return ALP_ERR_INVAL;
@@ -856,8 +904,13 @@ alp_status_t gd32g553_tmu_compute(gd32g553_t *ctx, gd32g553_tmu_function_t funct
 	put_le32(&req[8], in_b);
 
 	uint8_t      reply[4] = { 0 };
-	alp_status_t s        = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_TMU_COMPUTE, req,
-	                                 sizeof(req), reply, sizeof(reply));
+	alp_status_t s        = cmd_send(ctx,
+                              GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_TMU_COMPUTE,
+                              req,
+                              sizeof(req),
+                              reply,
+                              sizeof(reply));
 	if (s != ALP_OK) return s;
 	*result_out = get_le32(reply);
 	return ALP_OK;
@@ -877,19 +930,29 @@ alp_status_t gd32g553_pwm_capture_begin(gd32g553_t *ctx, uint8_t channel, uint8_
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (edge > 2u) return ALP_ERR_INVAL;
 	uint8_t req[2] = { channel, edge };
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_CAPTURE_BEGIN, req,
-	                sizeof(req), NULL, 0u);
+	return cmd_send(ctx,
+	                GD32G553_TRANSPORT_DEFAULT,
+	                GD32G553_CMD_PWM_CAPTURE_BEGIN,
+	                req,
+	                sizeof(req),
+	                NULL,
+	                0u);
 }
 
-alp_status_t gd32g553_pwm_capture_read(gd32g553_t *ctx, uint8_t channel, uint32_t *period_ns,
-                                       uint32_t *pulse_ns)
+alp_status_t
+gd32g553_pwm_capture_read(gd32g553_t *ctx, uint8_t channel, uint32_t *period_ns, uint32_t *pulse_ns)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (period_ns == NULL && pulse_ns == NULL) return ALP_ERR_INVAL;
 	uint8_t      req[1]   = { channel };
 	uint8_t      reply[8] = { 0 };
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_CAPTURE_READ, req,
-	                          sizeof(req), reply, sizeof(reply));
+	alp_status_t s        = cmd_send(ctx,
+                              GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_PWM_CAPTURE_READ,
+                              req,
+                              sizeof(req),
+                              reply,
+                              sizeof(reply));
 	if (s != ALP_OK) return s;
 	if (period_ns != NULL) *period_ns = get_le32(&reply[0]);
 	if (pulse_ns != NULL) *pulse_ns = get_le32(&reply[4]);
@@ -900,8 +963,8 @@ alp_status_t gd32g553_pwm_capture_end(gd32g553_t *ctx, uint8_t channel)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	uint8_t req[1] = { channel };
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_CAPTURE_END, req, sizeof(req),
-	                NULL, 0u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_CAPTURE_END, req, sizeof(req), NULL, 0u);
 }
 
 alp_status_t gd32g553_pwm_single_pulse(gd32g553_t *ctx, uint8_t channel, uint32_t pulse_ns)
@@ -914,20 +977,20 @@ alp_status_t gd32g553_pwm_single_pulse(gd32g553_t *ctx, uint8_t channel, uint32_
 	req[2] = 0u;
 	req[3] = 0u;
 	put_le32(&req[4], pulse_ns);
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_SINGLE_PULSE, req,
-	                sizeof(req), NULL, 0u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_PWM_SINGLE_PULSE, req, sizeof(req), NULL, 0u);
 }
 
 alp_status_t gd32g553_timer_sync(gd32g553_t *ctx, uint8_t master, uint8_t slave, uint8_t mode)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	uint8_t req[3] = { master, slave, mode };
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_TIMER_SYNC, req, sizeof(req),
-	                NULL, 0u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_TIMER_SYNC, req, sizeof(req), NULL, 0u);
 }
 
-alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx, uint8_t mode, uint32_t wake_bitmap,
-                                     uint32_t wake_after_ms)
+alp_status_t
+gd32g553_power_mode_set(gd32g553_t *ctx, uint8_t mode, uint32_t wake_bitmap, uint32_t wake_after_ms)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (mode > 3u) return ALP_ERR_INVAL;
@@ -936,8 +999,8 @@ alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx, uint8_t mode, uint32_t wak
 	req[1] = 0u; /* reserved */
 	put_le32(&req[2], wake_bitmap);
 	put_le32(&req[6], wake_after_ms);
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_POWER_MODE_SET, req, sizeof(req),
-	                NULL, 0u);
+	return cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_POWER_MODE_SET, req, sizeof(req), NULL, 0u);
 }
 
 /* ----------------------------------------------------------------- */
@@ -957,16 +1020,24 @@ alp_status_t gd32g553_adc_dsp_chain_open(gd32g553_t *ctx, uint8_t *chain_id_out)
 	if (chain_id_out == NULL) return ALP_ERR_INVAL;
 
 	uint8_t      reply[1] = { 0 };
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_DSP_CHAIN_OPEN,
-	                          NULL, 0u, reply, sizeof(reply));
+	alp_status_t s        = cmd_send(ctx,
+                              GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_ADC_DSP_CHAIN_OPEN,
+                              NULL,
+                              0u,
+                              reply,
+                              sizeof(reply));
 	if (s != ALP_OK) return s;
 	*chain_id_out = reply[0];
 	return ALP_OK;
 }
 
-alp_status_t gd32g553_adc_dsp_stage_push(gd32g553_t *ctx, uint8_t chain_id, uint8_t stage_index,
-                                         uint8_t kind, const uint8_t *stage_params,
-                                         uint16_t stage_params_len)
+alp_status_t gd32g553_adc_dsp_stage_push(gd32g553_t    *ctx,
+                                         uint8_t        chain_id,
+                                         uint8_t        stage_index,
+                                         uint8_t        kind,
+                                         const uint8_t *stage_params,
+                                         uint16_t       stage_params_len)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (stage_index >= GD32G553_BRIDGE_ADC_DSP_MAX_STAGES) return ALP_ERR_INVAL;
@@ -999,8 +1070,13 @@ alp_status_t gd32g553_adc_dsp_stage_push(gd32g553_t *ctx, uint8_t chain_id, uint
 		if (this_chunk > 0u) {
 			memcpy(&req[7], stage_params + offset, this_chunk);
 		}
-		alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_DSP_STAGE_PUSH,
-		                          req, (size_t)(7u + this_chunk), NULL, 0u);
+		alp_status_t s = cmd_send(ctx,
+		                          GD32G553_TRANSPORT_DEFAULT,
+		                          GD32G553_CMD_ADC_DSP_STAGE_PUSH,
+		                          req,
+		                          (size_t)(7u + this_chunk),
+		                          NULL,
+		                          0u);
 		if (s != ALP_OK) return s;
 		offset = (uint16_t)(offset + this_chunk);
 	} while (offset < stage_params_len);
@@ -1013,8 +1089,13 @@ alp_status_t gd32g553_adc_dsp_chain_bind(gd32g553_t *ctx, uint8_t chain_id, uint
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (stream_id >= GD32G553_BRIDGE_ADC_STREAM_COUNT) return ALP_ERR_INVAL;
 	uint8_t req[2] = { chain_id, stream_id };
-	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_DSP_CHAIN_BIND, req,
-	                sizeof(req), NULL, 0u);
+	return cmd_send(ctx,
+	                GD32G553_TRANSPORT_DEFAULT,
+	                GD32G553_CMD_ADC_DSP_CHAIN_BIND,
+	                req,
+	                sizeof(req),
+	                NULL,
+	                0u);
 }
 
 /* ----------------------------------------------------------------- */
@@ -1025,9 +1106,12 @@ alp_status_t gd32g553_adc_dsp_chain_bind(gd32g553_t *ctx, uint8_t chain_id, uint
 /* scaffold so customer telemetry already works.                      */
 /* ----------------------------------------------------------------- */
 
-alp_status_t gd32g553_ota_begin(gd32g553_t *ctx, uint32_t size_bytes, uint32_t expected_crc32,
-                                const gd32g553_version_t *fw_version, uint16_t *chunk_max_bytes,
-                                gd32g553_ota_slot_t *target_slot)
+alp_status_t gd32g553_ota_begin(gd32g553_t               *ctx,
+                                uint32_t                  size_bytes,
+                                uint32_t                  expected_crc32,
+                                const gd32g553_version_t *fw_version,
+                                uint16_t                 *chunk_max_bytes,
+                                gd32g553_ota_slot_t      *target_slot)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (chunk_max_bytes == NULL || target_slot == NULL) return ALP_ERR_INVAL;
@@ -1050,16 +1134,24 @@ alp_status_t gd32g553_ota_begin(gd32g553_t *ctx, uint32_t size_bytes, uint32_t e
 
 	/* Reply: chunk_max_bytes:u16 + target_slot:u8. */
 	uint8_t      reply[3] = { 0 };
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_OTA_BEGIN, req, req_len,
-	                          reply, sizeof(reply));
+	alp_status_t s        = cmd_send(ctx,
+                              GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_OTA_BEGIN,
+                              req,
+                              req_len,
+                              reply,
+                              sizeof(reply));
 	if (s != ALP_OK) return s;
 	*chunk_max_bytes = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
 	*target_slot     = (gd32g553_ota_slot_t)reply[2];
 	return ALP_OK;
 }
 
-alp_status_t gd32g553_ota_write_chunk(gd32g553_t *ctx, uint32_t offset, const uint8_t *data,
-                                      size_t data_len, uint32_t *received_bytes)
+alp_status_t gd32g553_ota_write_chunk(gd32g553_t    *ctx,
+                                      uint32_t       offset,
+                                      const uint8_t *data,
+                                      size_t         data_len,
+                                      uint32_t      *received_bytes)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (data == NULL || data_len == 0u) return ALP_ERR_INVAL;
@@ -1078,8 +1170,13 @@ alp_status_t gd32g553_ota_write_chunk(gd32g553_t *ctx, uint32_t offset, const ui
 	memcpy(&req[5], data, data_len);
 
 	uint8_t      reply[4] = { 0 };
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_OTA_WRITE_CHUNK, req,
-	                          5u + data_len, reply, sizeof(reply));
+	alp_status_t s        = cmd_send(ctx,
+                              GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_OTA_WRITE_CHUNK,
+                              req,
+                              5u + data_len,
+                              reply,
+                              sizeof(reply));
 	if (s != ALP_OK) return s;
 	*received_bytes = get_le32(reply);
 	return ALP_OK;
@@ -1092,8 +1189,8 @@ alp_status_t gd32g553_ota_verify(gd32g553_t *ctx, bool *verified, uint32_t *comp
 
 	/* Reply: computed_crc32(u32) + verified(u8). */
 	uint8_t      reply[5] = { 0 };
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_OTA_VERIFY, NULL, 0u,
-	                          reply, sizeof(reply));
+	alp_status_t s        = cmd_send(
+        ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_OTA_VERIFY, NULL, 0u, reply, sizeof(reply));
 	if (s != ALP_OK) return s;
 	*computed_crc32 = get_le32(&reply[0]);
 	*verified       = (reply[4] != 0u);
@@ -1119,8 +1216,13 @@ alp_status_t gd32g553_ota_get_state(gd32g553_t *ctx, gd32g553_ota_state_info_t *
 
 	/* Reply: state(u8) + active(u8) + pending(u8) + boot_count(u16 LE). */
 	uint8_t      reply[5] = { 0 };
-	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_OTA_GET_STATE, NULL, 0u,
-	                          reply, sizeof(reply));
+	alp_status_t s        = cmd_send(ctx,
+                              GD32G553_TRANSPORT_DEFAULT,
+                              GD32G553_CMD_OTA_GET_STATE,
+                              NULL,
+                              0u,
+                              reply,
+                              sizeof(reply));
 	if (s != ALP_OK) return s;
 	out->state        = (gd32g553_ota_state_t)reply[0];
 	out->active_slot  = (gd32g553_ota_slot_t)reply[1];

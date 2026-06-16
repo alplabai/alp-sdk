@@ -47,13 +47,13 @@
  * console harness sees [audio] done within the build timeout. */
 #define BLOCKS 50
 #define FRAMES 256
-#define SR_HZ 16000
-#define CHANS 1
+#define SR_HZ  16000
+#define CHANS  1
 
 /* Stack-friendly scratch buffer: 256 frames * 1 ch * 2 B = 512 B. */
 static int16_t g_pcm[FRAMES * CHANS];
 
-int            main(void)
+int main(void)
 {
 	printf("[audio] audio-loopback v0.2 reference -- mic -> DSP -> DAC\n");
 

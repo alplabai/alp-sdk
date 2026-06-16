@@ -11,7 +11,7 @@
 
 #include "alp/chips/atecc608b.h"
 
-#define ATECC608B_CMD_IDLE 0x02u
+#define ATECC608B_CMD_IDLE  0x02u
 #define ATECC608B_CMD_SLEEP 0x01u
 
 alp_status_t atecc608b_init(atecc608b_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)

@@ -32,7 +32,7 @@ static lv_obj_t *s_lbl_gps;
 static lv_obj_t *s_lbl_batt;
 static lv_obj_t *s_lbl_mode;
 
-void             hud_ui_build(void)
+void hud_ui_build(void)
 {
 	lv_obj_t *scr = lv_screen_active();
 	lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
@@ -86,13 +86,21 @@ void hud_ui_apply_telemetry(const drone_telemetry_t *t)
 	lv_obj_set_style_transform_rotation(s_horizon, (int16_t)(t->roll_deg * 10), 0);
 	lv_obj_set_pos(s_horizon, 0, (int)(t->pitch_deg * 0.5f));
 
-	snprintf(buf, sizeof(buf), "R:%+6.1f P:%+6.1f Y:%6.1f", (double)t->roll_deg,
-	         (double)t->pitch_deg, (double)t->yaw_deg);
+	snprintf(buf,
+	         sizeof(buf),
+	         "R:%+6.1f P:%+6.1f Y:%6.1f",
+	         (double)t->roll_deg,
+	         (double)t->pitch_deg,
+	         (double)t->yaw_deg);
 	lv_label_set_text(s_lbl_attitude, buf);
 
 	/* GPS. */
 	if (t->gps_fix) {
-		snprintf(buf, sizeof(buf), "GPS %d sats\n%.5f, %.5f", (int)t->sat_count, (double)t->lat_deg,
+		snprintf(buf,
+		         sizeof(buf),
+		         "GPS %d sats\n%.5f, %.5f",
+		         (int)t->sat_count,
+		         (double)t->lat_deg,
 		         (double)t->lon_deg);
 	} else {
 		snprintf(buf, sizeof(buf), "GPS: %d sats (no fix)", (int)t->sat_count);
@@ -100,8 +108,12 @@ void hud_ui_apply_telemetry(const drone_telemetry_t *t)
 	lv_label_set_text(s_lbl_gps, buf);
 
 	/* Battery. */
-	snprintf(buf, sizeof(buf), "BAT %5.2fV %+5.2fA\nremain %3ld min", (double)t->battery_v,
-	         (double)t->battery_a, (long)t->battery_remaining_min);
+	snprintf(buf,
+	         sizeof(buf),
+	         "BAT %5.2fV %+5.2fA\nremain %3ld min",
+	         (double)t->battery_v,
+	         (double)t->battery_a,
+	         (long)t->battery_remaining_min);
 	lv_label_set_text(s_lbl_batt, buf);
 
 	/* Mode. */

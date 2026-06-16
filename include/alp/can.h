@@ -57,7 +57,7 @@ typedef enum {
 
 /** Maximum payload bytes per frame, by mode. */
 #define ALP_CAN_MAX_DLC_CLASSIC 8
-#define ALP_CAN_MAX_DLC_FD 64
+#define ALP_CAN_MAX_DLC_FD      64
 
 /** A single CAN frame (TX or RX). */
 typedef struct {
@@ -169,8 +169,11 @@ alp_status_t alp_can_send(alp_can_t *can, const alp_can_frame_t *frame, uint32_t
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOMEM
  *         (filter slots exhausted) / ALP_ERR_IO.
  */
-alp_status_t alp_can_add_filter(alp_can_t *can, const alp_can_filter_t *filter, alp_can_rx_cb_t cb,
-                                void *user, int32_t *filter_id_out);
+alp_status_t alp_can_add_filter(alp_can_t              *can,
+                                const alp_can_filter_t *filter,
+                                alp_can_rx_cb_t         cb,
+                                void                   *user,
+                                int32_t                *filter_id_out);
 
 /**
  * @brief Remove a previously-installed filter by id.

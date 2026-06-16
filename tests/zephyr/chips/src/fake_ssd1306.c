@@ -40,8 +40,8 @@ static void log_append(uint8_t *buf, size_t *len, size_t cap, const uint8_t *src
 	*len += n;
 }
 
-static int fake_ssd1306_transfer(const struct emul *target, struct i2c_msg *msgs, int num_msgs,
-                                 int addr)
+static int
+fake_ssd1306_transfer(const struct emul *target, struct i2c_msg *msgs, int num_msgs, int addr)
 {
 	(void)addr;
 	struct fake_ssd1306_data *d = target->data;
@@ -54,11 +54,11 @@ static int fake_ssd1306_transfer(const struct emul *target, struct i2c_msg *msgs
 		if (msgs[m].len < 1) continue;
 		const uint8_t ctrl = msgs[m].buf[0];
 		if (ctrl == 0x00u) {
-			log_append(d->cmd_log, &d->cmd_len, sizeof d->cmd_log, msgs[m].buf + 1,
-			           msgs[m].len - 1);
+			log_append(
+			    d->cmd_log, &d->cmd_len, sizeof d->cmd_log, msgs[m].buf + 1, msgs[m].len - 1);
 		} else if (ctrl == 0x40u) {
-			log_append(d->data_log, &d->data_len, sizeof d->data_log, msgs[m].buf + 1,
-			           msgs[m].len - 1);
+			log_append(
+			    d->data_log, &d->data_len, sizeof d->data_log, msgs[m].buf + 1, msgs[m].len - 1);
 		} else {
 			/* Unknown control byte. */
 			return -EIO;
@@ -83,8 +83,8 @@ static int fake_ssd1306_init(const struct emul *target, const struct device *par
 
 #define FAKE_SSD1306_DEFINE(n)                                                                     \
 	static struct fake_ssd1306_data fake_ssd1306_data_##n;                                         \
-	EMUL_DT_INST_DEFINE(n, fake_ssd1306_init, &fake_ssd1306_data_##n, NULL, &fake_ssd1306_api,     \
-	                    NULL);
+	EMUL_DT_INST_DEFINE(                                                                           \
+	    n, fake_ssd1306_init, &fake_ssd1306_data_##n, NULL, &fake_ssd1306_api, NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(FAKE_SSD1306_DEFINE)
 

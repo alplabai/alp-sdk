@@ -46,7 +46,7 @@
  * read-back -- any single missed byte stands out. */
 static uint8_t pattern[XSPI_TEST_BYTES];
 
-static void    build_pattern(void)
+static void build_pattern(void)
 {
 	for (size_t i = 0u; i < sizeof pattern; ++i) {
 		pattern[i] = (uint8_t)i;

@@ -37,12 +37,12 @@
 #define HAS_CMSIS_DSP 0
 #endif
 
-#define FFT_LEN 1024u
+#define FFT_LEN  1024u
 #define MAGS_LEN (FFT_LEN / 2u + 1u)
 
-static float              g_samples[FFT_LEN];
-static float              g_complex[FFT_LEN * 2u]; /* CMSIS interleaved scratch */
-static float              g_mags[MAGS_LEN];
+static float g_samples[FFT_LEN];
+static float g_complex[FFT_LEN * 2u]; /* CMSIS interleaved scratch */
+static float g_mags[MAGS_LEN];
 
 static alp_rpc_channel_t *g_ch;
 

@@ -10,8 +10,13 @@
 
 #include "alp/chips/a4988.h"
 
-alp_status_t a4988_init(a4988_t *dev, alp_pwm_t *step, alp_gpio_t *dir, alp_gpio_t *nenable,
-                        alp_gpio_t *ms1, alp_gpio_t *ms2, alp_gpio_t *ms3)
+alp_status_t a4988_init(a4988_t    *dev,
+                        alp_pwm_t  *step,
+                        alp_gpio_t *dir,
+                        alp_gpio_t *nenable,
+                        alp_gpio_t *ms1,
+                        alp_gpio_t *ms2,
+                        alp_gpio_t *ms3)
 {
 	if (dev == NULL || step == NULL || dir == NULL) return ALP_ERR_INVAL;
 	memset(dev, 0, sizeof(*dev));

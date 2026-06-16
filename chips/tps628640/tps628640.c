@@ -53,8 +53,8 @@ static alp_status_t flush_control(tps628640_t *ctx)
 	return reg_write(ctx, TPS628640_REG_CONTROL, ctx->control_shadow);
 }
 
-alp_status_t tps628640_init(tps628640_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit,
-                            uint16_t default_voltage_mv)
+alp_status_t
+tps628640_init(tps628640_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, uint16_t default_voltage_mv)
 {
 	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
 	if (addr_7bit > 0x7Fu) return ALP_ERR_INVAL;

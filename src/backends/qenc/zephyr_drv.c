@@ -22,7 +22,8 @@
 
 #define ALP_QENC_DEV_OR_NULL(idx)                                                                  \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_qenc, idx))),                                  \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_qenc, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_qenc, idx)))),                                 \
+	            (NULL))
 
 static const struct device *const _devs[] = {
 	ALP_QENC_DEV_OR_NULL(0),
@@ -48,8 +49,8 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
-static alp_status_t z_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg->encoder_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	const struct device *dev = _devs[cfg->encoder_id];
@@ -90,7 +91,8 @@ static const alp_qenc_ops_t _ops = {
 	.close          = NULL,
 };
 
-ALP_BACKEND_REGISTER(qenc, zephyr_drv,
+ALP_BACKEND_REGISTER(qenc,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

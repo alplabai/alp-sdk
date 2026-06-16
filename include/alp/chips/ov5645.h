@@ -45,7 +45,7 @@ extern "C" {
 /** Chip-ID register pair (16-bit register addressing). */
 #define OV5645_REG_CHIP_ID_HI 0x300Au
 #define OV5645_REG_CHIP_ID_LO 0x300Bu
-#define OV5645_CHIP_ID 0x5645u
+#define OV5645_CHIP_ID        0x5645u
 
 /** Resolution presets. */
 typedef enum {

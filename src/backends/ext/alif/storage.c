@@ -27,8 +27,8 @@ static bool _is_alif_backend(const alp_storage_t *s)
 	       strcmp(s->backend->vendor, "alif") == 0;
 }
 
-alp_status_t alp_alif_storage_secaes_key_provision(alp_storage_t *s, const uint8_t *key,
-                                                   uint8_t key_bytes)
+alp_status_t
+alp_alif_storage_secaes_key_provision(alp_storage_t *s, const uint8_t *key, uint8_t key_bytes)
 {
 	if (s == NULL) return ALP_ERR_INVAL;
 	if (!_is_alif_backend(s)) return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;

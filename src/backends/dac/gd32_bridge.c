@@ -42,7 +42,7 @@ typedef struct gd32_bridge_state {
 #define CONFIG_ALP_SDK_MAX_DAC_HANDLES 2
 #endif
 
-static gd32_bridge_state_t  _state_pool[CONFIG_ALP_SDK_MAX_DAC_HANDLES];
+static gd32_bridge_state_t _state_pool[CONFIG_ALP_SDK_MAX_DAC_HANDLES];
 
 static gd32_bridge_state_t *_alloc_state(void)
 {
@@ -61,8 +61,8 @@ static void _free_state(gd32_bridge_state_t *s)
 	s->in_use = false;
 }
 
-static alp_status_t gd32_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st,
-                              alp_capabilities_t *caps_out)
+static alp_status_t
+gd32_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	/* E1M reserves 2 DAC channels (E1M_DAC_COUNT); the bridge
      * routes DAC0/DAC1 to the GD32's PA4 / PA6 pads. */
@@ -86,8 +86,8 @@ static alp_status_t gd32_open(const alp_dac_config_t *cfg, alp_dac_backend_state
 	if (bs == NULL) {
 		return ALP_ERR_NOMEM;
 	}
-	bs->channel     = (uint8_t)cfg->channel_id;
-	bs->last_mv     = cfg->initial_mv;
+	bs->channel = (uint8_t)cfg->channel_id;
+	bs->last_mv = cfg->initial_mv;
 
 	st->dev         = NULL; /* bridge sentinel */
 	st->channel_id  = cfg->channel_id;
@@ -98,10 +98,10 @@ static alp_status_t gd32_open(const alp_dac_config_t *cfg, alp_dac_backend_state
 
 static alp_status_t gd32_write_mv(alp_dac_backend_state_t *st, uint16_t mv)
 {
-	gd32_bridge_state_t *bs  = (gd32_bridge_state_t *)st->be_data;
+	gd32_bridge_state_t *bs = (gd32_bridge_state_t *)st->be_data;
 
-	gd32g553_t          *ctx = NULL;
-	alp_status_t         s   = alp_z_v2n_supervisor_acquire(&ctx);
+	gd32g553_t  *ctx = NULL;
+	alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
 	if (s != ALP_OK) {
 		return s;
 	}
@@ -115,10 +115,10 @@ static alp_status_t gd32_write_mv(alp_dac_backend_state_t *st, uint16_t mv)
 
 static alp_status_t gd32_read_mv(alp_dac_backend_state_t *st, uint16_t *mv_out)
 {
-	gd32_bridge_state_t *bs  = (gd32_bridge_state_t *)st->be_data;
+	gd32_bridge_state_t *bs = (gd32_bridge_state_t *)st->be_data;
 
-	gd32g553_t          *ctx = NULL;
-	alp_status_t         s   = alp_z_v2n_supervisor_acquire(&ctx);
+	gd32g553_t  *ctx = NULL;
+	alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
 	if (s != ALP_OK) {
 		return s;
 	}
@@ -145,7 +145,8 @@ static const alp_dac_ops_t gd32_ops = {
 	.close    = gd32_close,
 };
 
-ALP_BACKEND_REGISTER(dac, gd32_bridge,
+ALP_BACKEND_REGISTER(dac,
+                     gd32_bridge,
                      {
                          .silicon_ref = "renesas:rzv2n:n44",
                          .vendor      = "renesas", /* SoC vendor, not bridge chip */

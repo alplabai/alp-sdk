@@ -121,8 +121,8 @@ static int _resolve_device_name(uint32_t bus_id, char *out, size_t cap)
  * freshly-opened PCM handle from the alp_i2s config.  Mirrors the
  * configure_pcm() flow in audio_yocto.c.  Returns ALP_OK or an
  * alp_status_t on failure. */
-static alp_status_t _configure_pcm(snd_pcm_t *pcm, const alp_i2s_config_t *cfg,
-                                   snd_pcm_format_t fmt)
+static alp_status_t
+_configure_pcm(snd_pcm_t *pcm, const alp_i2s_config_t *cfg, snd_pcm_format_t fmt)
 {
 	snd_pcm_hw_params_t *hw = NULL;
 	snd_pcm_hw_params_alloca(&hw);
@@ -181,8 +181,8 @@ static alp_status_t _configure_pcm(snd_pcm_t *pcm, const alp_i2s_config_t *cfg,
  * The ALSA PCM handle has no queryable instance-capability surface
  * beyond presence, so caps stay 0.
  */
-static alp_status_t y_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+y_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg == NULL || st == NULL) return ALP_ERR_INVAL;
 	if (cfg->channels == 0u || cfg->channels > 2u) return ALP_ERR_INVAL;
@@ -232,9 +232,9 @@ static alp_status_t y_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t 
 		(void)snd_pcm_close(pcm);
 		return ALP_ERR_NOMEM;
 	}
-	d->pcm          = pcm;
-	d->capture      = capture;
-	d->frame_bytes  = (size_t)cfg->channels * (size_t)((cfg->word_bits + 7u) / 8u);
+	d->pcm         = pcm;
+	d->capture     = capture;
+	d->frame_bytes = (size_t)cfg->channels * (size_t)((cfg->word_bits + 7u) / 8u);
 
 	st->dev         = NULL;
 	st->bus_id      = cfg->bus_id;
@@ -294,8 +294,8 @@ static alp_status_t y_stop(alp_i2s_backend_state_t *st)
  * next write succeeds on a healthy DAI.  timeout_ms gates the wait for
  * buffer room via snd_pcm_wait(); 0 means "don't block".
  */
-static alp_status_t y_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes,
-                            uint32_t timeout_ms)
+static alp_status_t
+y_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t timeout_ms)
 {
 	y_i2s_data_t *d = (y_i2s_data_t *)st->be_data;
 	if (d == NULL || d->pcm == NULL) return ALP_ERR_NOT_READY;
@@ -328,8 +328,8 @@ static alp_status_t y_write(alp_i2s_backend_state_t *st, const void *block, size
  * -ESTRPIPE) are recovered via snd_pcm_recover().  timeout_ms gates the
  * wait for available frames via snd_pcm_wait(); 0 means "don't block".
  */
-static alp_status_t y_read(alp_i2s_backend_state_t *st, void *block, size_t bytes,
-                           size_t *bytes_out, uint32_t timeout_ms)
+static alp_status_t y_read(
+    alp_i2s_backend_state_t *st, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms)
 {
 	if (bytes_out != NULL) *bytes_out = 0u;
 
@@ -385,7 +385,8 @@ static const alp_i2s_ops_t _ops = {
 	.close = y_close,
 };
 
-ALP_BACKEND_REGISTER(i2s, yocto_drv,
+ALP_BACKEND_REGISTER(i2s,
+                     yocto_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "linux",

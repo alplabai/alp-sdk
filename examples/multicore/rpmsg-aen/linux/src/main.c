@@ -31,7 +31,7 @@ typedef struct {
 
 static atomic_uint g_received;
 
-static void        on_imu_sample(const void *payload, size_t len, void *user)
+static void on_imu_sample(const void *payload, size_t len, void *user)
 {
 	(void)user;
 	if (len != sizeof(imu_sample_t)) {
@@ -40,8 +40,11 @@ static void        on_imu_sample(const void *payload, size_t len, void *user)
 	}
 	imu_sample_t s;
 	memcpy(&s, payload, sizeof s);
-	printf("[a32] imu_sample seq=%u T=%.1f P=%.1f Az=%.2fg\n", (unsigned)s.seq,
-	       (double)s.temperature_c, (double)s.pressure_pa, (double)s.accel_g[2]);
+	printf("[a32] imu_sample seq=%u T=%.1f P=%.1f Az=%.2fg\n",
+	       (unsigned)s.seq,
+	       (double)s.temperature_c,
+	       (double)s.pressure_pa,
+	       (double)s.accel_g[2]);
 	atomic_fetch_add(&g_received, 1u);
 }
 

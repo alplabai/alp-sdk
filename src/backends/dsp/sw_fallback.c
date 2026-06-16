@@ -101,7 +101,7 @@ struct dsp_be {
  * but defaults to the same count so the worst-case footprint is
  * unchanged from the v0.3 build. */
 #define DSP_BE_POOL_SIZE 2u
-static struct dsp_be  g_be_pool[DSP_BE_POOL_SIZE];
+static struct dsp_be g_be_pool[DSP_BE_POOL_SIZE];
 
 static struct dsp_be *acquire_be_slot(void)
 {
@@ -178,8 +178,8 @@ static void fir_apply(dsp_stage_t *stage, const float *in, size_t in_n, float *o
      * one-shot init here to avoid keeping CMSIS state across calls
      * when we already keep our own state in stage->fir.state. */
 	arm_fir_instance_f32 inst;
-	arm_fir_init_f32(&inst, stage->u.fir.n_taps, stage->u.fir.taps, stage->u.fir.state,
-	                 (uint32_t)in_n);
+	arm_fir_init_f32(
+	    &inst, stage->u.fir.n_taps, stage->u.fir.taps, stage->u.fir.state, (uint32_t)in_n);
 	arm_fir_f32(&inst, (float *)in, out, (uint32_t)in_n);
 #else
 	const uint16_t M = stage->u.fir.n_taps;
@@ -377,8 +377,10 @@ static alp_status_t validate_window(const alp_dsp_window_params_t *src, dsp_stag
 /* Ops                                                                 */
 /* ================================================================== */
 
-static alp_status_t sw_open(const alp_dsp_stage_t *stages, size_t n_stages,
-                            alp_dsp_backend_state_t *state, alp_capabilities_t *caps_out)
+static alp_status_t sw_open(const alp_dsp_stage_t   *stages,
+                            size_t                   n_stages,
+                            alp_dsp_backend_state_t *state,
+                            alp_capabilities_t      *caps_out)
 {
 	if (n_stages > ALP_DSP_MAX_STAGES) {
 		return ALP_ERR_INVAL;
@@ -461,8 +463,12 @@ static alp_status_t sw_open(const alp_dsp_stage_t *stages, size_t n_stages,
 	return ALP_OK;
 }
 
-static alp_status_t sw_apply_samples(alp_dsp_backend_state_t *state, const int16_t *in_mv,
-                                     size_t in_n, int16_t *out_mv, size_t out_cap, size_t *got)
+static alp_status_t sw_apply_samples(alp_dsp_backend_state_t *state,
+                                     const int16_t           *in_mv,
+                                     size_t                   in_n,
+                                     int16_t                 *out_mv,
+                                     size_t                   out_cap,
+                                     size_t                  *got)
 {
 	struct dsp_be *be = (struct dsp_be *)state->be_data;
 	if (be == NULL || !be->in_use) {
@@ -513,8 +519,12 @@ static alp_status_t sw_apply_samples(alp_dsp_backend_state_t *state, const int16
 	return ALP_OK;
 }
 
-static alp_status_t sw_apply_bins(alp_dsp_backend_state_t *state, const int16_t *in_mv, size_t in_n,
-                                  float *out_bins, size_t out_cap, size_t *got)
+static alp_status_t sw_apply_bins(alp_dsp_backend_state_t *state,
+                                  const int16_t           *in_mv,
+                                  size_t                   in_n,
+                                  float                   *out_bins,
+                                  size_t                   out_cap,
+                                  size_t                  *got)
 {
 	struct dsp_be *be = (struct dsp_be *)state->be_data;
 	if (be == NULL || !be->in_use) {
@@ -633,7 +643,8 @@ static const alp_dsp_ops_t _ops = {
 	.close         = sw_close,
 };
 
-ALP_BACKEND_REGISTER(dsp, sw_fallback,
+ALP_BACKEND_REGISTER(dsp,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

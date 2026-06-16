@@ -29,14 +29,19 @@ typedef struct alp_can_backend_state {
 } alp_can_backend_state_t;
 
 struct alp_can_ops {
-	alp_status_t (*open)(const alp_can_config_t *cfg, alp_can_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
+	alp_status_t (*open)(const alp_can_config_t  *cfg,
+	                     alp_can_backend_state_t *state,
+	                     alp_capabilities_t      *caps_out);
 	alp_status_t (*start)(alp_can_backend_state_t *state);
 	alp_status_t (*stop)(alp_can_backend_state_t *state);
-	alp_status_t (*send)(alp_can_backend_state_t *state, const alp_can_frame_t *frame,
-	                     uint32_t timeout_ms);
-	alp_status_t (*add_filter)(alp_can_backend_state_t *state, const alp_can_filter_t *filter,
-	                           alp_can_rx_cb_t cb, void *user, int32_t *filter_id_out);
+	alp_status_t (*send)(alp_can_backend_state_t *state,
+	                     const alp_can_frame_t   *frame,
+	                     uint32_t                 timeout_ms);
+	alp_status_t (*add_filter)(alp_can_backend_state_t *state,
+	                           const alp_can_filter_t  *filter,
+	                           alp_can_rx_cb_t          cb,
+	                           void                    *user,
+	                           int32_t                 *filter_id_out);
 	alp_status_t (*remove_filter)(alp_can_backend_state_t *state, int32_t filter_id);
 	void (*close)(alp_can_backend_state_t *state);
 };

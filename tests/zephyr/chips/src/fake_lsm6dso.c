@@ -29,14 +29,14 @@ struct fake_lsm6dso_data {
 /* Singleton — the test only instantiates one fake LSM6DSO. */
 static struct fake_lsm6dso_data *g_fake_lsm6dso;
 
-static void                      seed_defaults(struct fake_lsm6dso_data *d)
+static void seed_defaults(struct fake_lsm6dso_data *d)
 {
 	memset(d->regs, 0, sizeof d->regs);
 	d->regs[REG_WHO_AM_I] = 0x6C;
 }
 
-static int fake_lsm6dso_transfer(const struct emul *target, struct i2c_msg *msgs, int num_msgs,
-                                 int addr)
+static int
+fake_lsm6dso_transfer(const struct emul *target, struct i2c_msg *msgs, int num_msgs, int addr)
 {
 	(void)addr;
 	struct fake_lsm6dso_data *d = target->data;
@@ -78,8 +78,8 @@ static int fake_lsm6dso_init(const struct emul *target, const struct device *par
 
 #define FAKE_LSM6DSO_DEFINE(n)                                                                     \
 	static struct fake_lsm6dso_data fake_lsm6dso_data_##n;                                         \
-	EMUL_DT_INST_DEFINE(n, fake_lsm6dso_init, &fake_lsm6dso_data_##n, NULL, &fake_lsm6dso_api,     \
-	                    NULL);
+	EMUL_DT_INST_DEFINE(                                                                           \
+	    n, fake_lsm6dso_init, &fake_lsm6dso_data_##n, NULL, &fake_lsm6dso_api, NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(FAKE_LSM6DSO_DEFINE)
 

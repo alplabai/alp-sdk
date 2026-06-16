@@ -64,7 +64,7 @@ struct wifi_radio_be {
 
 static struct wifi_radio_be _radio_be;
 
-static alp_status_t         errno_to_alp(int err)
+static alp_status_t errno_to_alp(int err)
 {
 	switch (err) {
 	case 0:
@@ -88,8 +88,8 @@ static alp_status_t         errno_to_alp(int err)
 	}
 }
 
-static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_event,
-                               struct net_if *iface)
+static void
+wifi_event_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_event, struct net_if *iface)
 {
 	(void)iface;
 	struct wifi_radio_be *be = CONTAINER_OF(cb, struct wifi_radio_be, wifi_cb);
@@ -128,7 +128,8 @@ static alp_status_t z_open(alp_wifi_backend_state_t *st, alp_capabilities_t *cap
 	}
 
 	k_sem_init(&be->connect_sem, 0, 1);
-	net_mgmt_init_event_callback(&be->wifi_cb, wifi_event_handler,
+	net_mgmt_init_event_callback(&be->wifi_cb,
+	                             wifi_event_handler,
 	                             NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT);
 	net_mgmt_add_event_callback(&be->wifi_cb);
 	st->be_data     = be;
@@ -141,8 +142,8 @@ static alp_status_t z_open(alp_wifi_backend_state_t *st, alp_capabilities_t *cap
 #endif
 }
 
-static alp_status_t z_connect(alp_wifi_backend_state_t *st, const alp_wifi_credentials_t *creds,
-                              uint32_t timeout_ms)
+static alp_status_t
+z_connect(alp_wifi_backend_state_t *st, const alp_wifi_credentials_t *creds, uint32_t timeout_ms)
 {
 #if defined(CONFIG_ALP_SDK_IOT_WIFI)
 	struct wifi_radio_be *be = (struct wifi_radio_be *)st->be_data;
@@ -164,7 +165,7 @@ static alp_status_t z_connect(alp_wifi_backend_state_t *st, const alp_wifi_crede
 	k_sem_reset(&be->connect_sem);
 	be->connect_status = -EIO;
 
-	int err            = net_mgmt(NET_REQUEST_WIFI_CONNECT, be->iface, &params, sizeof(params));
+	int err = net_mgmt(NET_REQUEST_WIFI_CONNECT, be->iface, &params, sizeof(params));
 	if (err != 0) {
 		return errno_to_alp(err);
 	}
@@ -218,7 +219,8 @@ static const alp_wifi_ops_t _ops = {
 	.close      = z_close,
 };
 
-ALP_BACKEND_REGISTER(wifi, zephyr_drv,
+ALP_BACKEND_REGISTER(wifi,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

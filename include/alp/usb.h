@@ -108,8 +108,8 @@ alp_status_t alp_usb_device_disable(alp_usb_dev_t *dev);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (not enumerated) /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_usb_device_write(alp_usb_dev_t *dev, const uint8_t *data, size_t len,
-                                  uint32_t timeout_ms);
+alp_status_t
+alp_usb_device_write(alp_usb_dev_t *dev, const uint8_t *data, size_t len, uint32_t timeout_ms);
 
 /**
  * @brief Receive up to @p len bytes from the device's primary endpoint
@@ -124,8 +124,8 @@ alp_status_t alp_usb_device_write(alp_usb_dev_t *dev, const uint8_t *data, size_
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_usb_device_read(alp_usb_dev_t *dev, uint8_t *data, size_t len, size_t *out_len,
-                                 uint32_t timeout_ms);
+alp_status_t alp_usb_device_read(
+    alp_usb_dev_t *dev, uint8_t *data, size_t len, size_t *out_len, uint32_t timeout_ms);
 
 /**
  * @brief Release the USB device handle.  Idempotent on NULL.

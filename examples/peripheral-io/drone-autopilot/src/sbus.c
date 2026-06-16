@@ -12,7 +12,7 @@
 #include "sbus.h"
 
 #define SBUS_START 0x0F
-#define SBUS_END 0x00
+#define SBUS_END   0x00
 
 bool sbus_decode(const uint8_t buf[SBUS_FRAME_LEN], sbus_frame_t *out)
 {

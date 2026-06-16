@@ -51,7 +51,7 @@ LOG_MODULE_REGISTER(alp_v2n_power_mgmt, CONFIG_LOG_DEFAULT_LEVEL);
  * the DEEPX rail (V2N base SoMs without the M1 DEEPX add-on)
  * legitimately don't populate these aliases. */
 #define V2N_PWR_EN_REQ_NODE DT_ALIAS(v2n_deepx_pwr_en_req)
-#define V2N_CORE_0P75_NODE DT_ALIAS(v2n_deepx_core_0p75_en)
+#define V2N_CORE_0P75_NODE  DT_ALIAS(v2n_deepx_core_0p75_en)
 
 #if DT_NODE_HAS_STATUS(V2N_PWR_EN_REQ_NODE, okay) && DT_NODE_HAS_STATUS(V2N_CORE_0P75_NODE, okay)
 
@@ -108,8 +108,8 @@ static void v2n_pwr_work_handler(struct k_work *work)
 	LOG_INF("DEEPX 0.75 V rail up + P64 driven high");
 }
 
-static void v2n_pwr_irq_handler(const struct device *port, struct gpio_callback *cb,
-                                gpio_port_pins_t pins)
+static void
+v2n_pwr_irq_handler(const struct device *port, struct gpio_callback *cb, gpio_port_pins_t pins)
 {
 	(void)port;
 	(void)cb;

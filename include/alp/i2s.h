@@ -129,8 +129,8 @@ alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint
  *                         plumbing through `alp_i2s_config_t`.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
  */
-alp_status_t alp_i2s_read(alp_i2s_t *i2s, void *block, size_t bytes, size_t *bytes_out,
-                          uint32_t timeout_ms);
+alp_status_t
+alp_i2s_read(alp_i2s_t *i2s, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms);
 
 /** @brief Stop streaming, free the slab, release the handle.  NULL safe. */
 void alp_i2s_close(alp_i2s_t *i2s);

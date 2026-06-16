@@ -119,9 +119,10 @@ ZTEST(alp_gpu2d_registry, test_ops_null_handle_not_ready)
 	/* The dispatcher's NULL-handle guard surfaces NOT_READY before
      * any backend op or surface validation. */
 	zassert_equal(alp_gpu2d_fill_rect(NULL, &_valid_dst, 0u, 0u, 4u, 4u, 0xffu), ALP_ERR_NOT_READY);
-	zassert_equal(alp_gpu2d_blend(NULL, &_valid_src, 0u, 0u, &_valid_dst, 0u, 0u, 4u, 4u,
-	                              (alp_gpu2d_blend_mode_t)0),
-	              ALP_ERR_NOT_READY);
+	zassert_equal(
+	    alp_gpu2d_blend(
+	        NULL, &_valid_src, 0u, 0u, &_valid_dst, 0u, 0u, 4u, 4u, (alp_gpu2d_blend_mode_t)0),
+	    ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_gpu2d_registry, test_invalid_surface_rejected)
@@ -142,9 +143,10 @@ ZTEST(alp_gpu2d_registry, test_blend_mode_range_rejected)
 {
 	alp_gpu2d_t *g = alp_gpu2d_open();
 	zassert_not_null(g);
-	zassert_equal(alp_gpu2d_blend(g, &_valid_src, 0u, 0u, &_valid_dst, 0u, 0u, 4u, 4u,
-	                              (alp_gpu2d_blend_mode_t)42),
-	              ALP_ERR_INVAL);
+	zassert_equal(
+	    alp_gpu2d_blend(
+	        g, &_valid_src, 0u, 0u, &_valid_dst, 0u, 0u, 4u, 4u, (alp_gpu2d_blend_mode_t)42),
+	    ALP_ERR_INVAL);
 	alp_gpu2d_close(g);
 }
 
@@ -154,8 +156,8 @@ ZTEST(alp_gpu2d_registry, test_blend_mode_range_rejected)
  * an over-write past the surface is caught. */
 #define W 4
 #define H 4
-static uint32_t            _fb_a[W * H + 1];
-static uint32_t            _fb_b[W * H + 1];
+static uint32_t _fb_a[W * H + 1];
+static uint32_t _fb_b[W * H + 1];
 
 static alp_gpu2d_surface_t _argb(uint32_t *buf)
 {
@@ -258,7 +260,7 @@ ZTEST(alp_gpu2d_registry, test_fill_rect_honours_padded_stride)
 	for (int i = 0; i < PAD_ROW * H; ++i) {
 		fb[i] = 0xCAFEF00Du; /* fill EVERYTHING incl. padding */
 	}
-	fb[PAD_ROW * H]         = 0xDEADBEEFu; /* guard */
+	fb[PAD_ROW * H] = 0xDEADBEEFu; /* guard */
 
 	alp_gpu2d_surface_t dst = {
 		.base         = fb,

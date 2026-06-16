@@ -36,7 +36,9 @@ int main(void)
 		printf("[board-id] sku       = %s\n", info.som_sku);
 		printf("[board-id] hw_rev    = %s\n", info.som_hw_rev);
 		printf("[board-id] serial    = %s\n", info.som_serial);
-		printf("[board-id] mfg date  = %04u-%02u-%02u\n", info.som_mfg_year, info.som_mfg_month,
+		printf("[board-id] mfg date  = %04u-%02u-%02u\n",
+		       info.som_mfg_year,
+		       info.som_mfg_month,
 		       info.som_mfg_day);
 		break;
 	case ALP_ERR_NOSUPPORT:

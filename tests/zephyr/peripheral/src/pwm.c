@@ -18,8 +18,8 @@
 ZTEST(alp_peripheral, test_pwm_null_cfg_returns_null_and_invalidates)
 {
 	zassert_is_null(alp_pwm_open(NULL));
-	zassert_equal(alp_last_error(), ALP_ERR_INVAL, "expected ALP_ERR_INVAL, got %d",
-	              (int)alp_last_error());
+	zassert_equal(
+	    alp_last_error(), ALP_ERR_INVAL, "expected ALP_ERR_INVAL, got %d", (int)alp_last_error());
 }
 
 ZTEST(alp_peripheral, test_pwm_out_of_range_channel_id)

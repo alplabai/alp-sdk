@@ -48,7 +48,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_POWER_HANDLES 1
 #endif
 
-static struct alp_power  _pool[CONFIG_ALP_SDK_MAX_POWER_HANDLES];
+static struct alp_power _pool[CONFIG_ALP_SDK_MAX_POWER_HANDLES];
 
 static struct alp_power *_alloc(void)
 {
@@ -107,7 +107,9 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *h, uint32_t wake_bitma
 	return h->state.ops->configure_wake_source(&h->state, wake_bitmap);
 }
 
-alp_status_t alp_power_request_sleep(alp_power_t *h, alp_power_mode_t mode, uint32_t wake_after_ms,
+alp_status_t alp_power_request_sleep(alp_power_t           *h,
+                                     alp_power_mode_t       mode,
+                                     uint32_t               wake_after_ms,
                                      alp_power_wake_info_t *info)
 {
 	if (h == NULL || !h->in_use) {

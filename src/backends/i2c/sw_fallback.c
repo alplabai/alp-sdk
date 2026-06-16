@@ -35,12 +35,12 @@
 
 #define SW_BUF_LEN 64u
 
-static uint8_t      _buf[SW_BUF_LEN];
-static size_t       _buf_len  = 0u;
-static uint8_t      _buf_addr = 0u;
+static uint8_t _buf[SW_BUF_LEN];
+static size_t  _buf_len  = 0u;
+static uint8_t _buf_addr = 0u;
 
-static alp_status_t sw_open(const alp_i2c_config_t *cfg, alp_i2c_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t
+sw_open(const alp_i2c_config_t *cfg, alp_i2c_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	(void)cfg;
 	st->dev         = NULL;
@@ -50,8 +50,8 @@ static alp_status_t sw_open(const alp_i2c_config_t *cfg, alp_i2c_backend_state_t
 	return ALP_OK;
 }
 
-static alp_status_t sw_write(alp_i2c_backend_state_t *st, uint8_t addr, const uint8_t *data,
-                             size_t len)
+static alp_status_t
+sw_write(alp_i2c_backend_state_t *st, uint8_t addr, const uint8_t *data, size_t len)
 {
 	(void)st;
 	_buf_addr = addr;
@@ -77,8 +77,12 @@ static alp_status_t sw_read(alp_i2c_backend_state_t *st, uint8_t addr, uint8_t *
 	return ALP_OK;
 }
 
-static alp_status_t sw_write_read(alp_i2c_backend_state_t *st, uint8_t addr, const uint8_t *wdata,
-                                  size_t wlen, uint8_t *rdata, size_t rlen)
+static alp_status_t sw_write_read(alp_i2c_backend_state_t *st,
+                                  uint8_t                  addr,
+                                  const uint8_t           *wdata,
+                                  size_t                   wlen,
+                                  uint8_t                 *rdata,
+                                  size_t                   rlen)
 {
 	alp_status_t rc = sw_write(st, addr, wdata, wlen);
 	if (rc != ALP_OK) return rc;
@@ -93,7 +97,8 @@ static const alp_i2c_ops_t _ops = {
 	.close      = NULL,
 };
 
-ALP_BACKEND_REGISTER(i2c, sw_fallback,
+ALP_BACKEND_REGISTER(i2c,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

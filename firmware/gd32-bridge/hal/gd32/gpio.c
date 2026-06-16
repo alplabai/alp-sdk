@@ -58,7 +58,7 @@ _Static_assert(sizeof(gpio_pad_map) / sizeof(gpio_pad_map[0]) == GPIO_PAD_MAP_CO
  * write, after which subsequent reads return the driven level. */
 bool gpio_is_output[GPIO_PAD_MAP_COUNT];
 
-int  bridge_hw_gpio_read(uint32_t mask, uint32_t *levels)
+int bridge_hw_gpio_read(uint32_t mask, uint32_t *levels)
 {
 	if (levels == 0) return BRIDGE_HW_ERR_INVAL;
 	*levels = 0u;
@@ -90,10 +90,10 @@ int bridge_hw_gpio_write(uint32_t mask, uint32_t levels)
              * adequate for control lines, low EMI.  The bridge
              * dispatcher is single-threaded so no locking is
              * needed around the mode flip + the flag write. */
-			gpio_output_options_set(gpio_pad_map[i].periph, GPIO_OTYPE_PP, GPIO_OSPEED_12MHZ,
-			                        gpio_pad_map[i].pin);
-			gpio_mode_set(gpio_pad_map[i].periph, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE,
-			              gpio_pad_map[i].pin);
+			gpio_output_options_set(
+			    gpio_pad_map[i].periph, GPIO_OTYPE_PP, GPIO_OSPEED_12MHZ, gpio_pad_map[i].pin);
+			gpio_mode_set(
+			    gpio_pad_map[i].periph, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, gpio_pad_map[i].pin);
 			gpio_is_output[i] = true;
 		}
 		if (levels & ((uint32_t)1u << i)) {

@@ -11,10 +11,13 @@
 
 #include "alp/chips/murata_lbee5hy2fy.h"
 
-alp_status_t murata_lbee5hy2fy_init(murata_lbee5hy2fy_t *ctx, murata_reg_set_t reg_set,
-                                    murata_reg_get_t reg_get, void *reg_user,
-                                    alp_gpio_t *bt_host_wake, alp_gpio_t *wl_host_wake,
-                                    alp_gpio_t *bt_dev_wake)
+alp_status_t murata_lbee5hy2fy_init(murata_lbee5hy2fy_t *ctx,
+                                    murata_reg_set_t     reg_set,
+                                    murata_reg_get_t     reg_get,
+                                    void                *reg_user,
+                                    alp_gpio_t          *bt_host_wake,
+                                    alp_gpio_t          *wl_host_wake,
+                                    alp_gpio_t          *bt_dev_wake)
 {
 	if (ctx == NULL || reg_set == NULL) return ALP_ERR_INVAL;
 	memset(ctx, 0, sizeof(*ctx));

@@ -37,7 +37,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_CAMERA_HANDLES 2
 #endif
 
-static struct alp_camera  _pool[CONFIG_ALP_SDK_MAX_CAMERA_HANDLES];
+static struct alp_camera _pool[CONFIG_ALP_SDK_MAX_CAMERA_HANDLES];
 
 static struct alp_camera *_alloc(void)
 {

@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /** Default 7-bit I2C addresses (SDO/SA0 pin selects). */
-#define LSM6DSO_I2C_ADDR_LOW 0x6A  /**< SDO/SA0 tied low. */
+#define LSM6DSO_I2C_ADDR_LOW  0x6A /**< SDO/SA0 tied low. */
 #define LSM6DSO_I2C_ADDR_HIGH 0x6B /**< SDO/SA0 tied high. */
 
 /** WHO_AM_I register value the chip returns for self-identification. */

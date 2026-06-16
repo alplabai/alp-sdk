@@ -59,7 +59,7 @@
 
 /* Pinned full-scale used to project the IIO mV/count scale onto the
  * dispatcher's raw*ref/(2^bits-1) formula.  See the file header. */
-#define Y_ADC_RES_BITS 16u
+#define Y_ADC_RES_BITS  16u
 #define Y_ADC_FULLSCALE 65535u /* (1u << Y_ADC_RES_BITS) - 1u */
 
 /* Per-handle backend data: the IIO device id + channel index, the
@@ -103,12 +103,16 @@ static alp_status_t _errno_to_alp(int err)
  *         errno-mapped status.  ENOENT (attribute absent) is left for
  *         the caller to treat as "not present" where that is valid.
  */
-static alp_status_t _read_attr(unsigned device_id, unsigned channel, const char *suffix, char *buf,
-                               size_t buflen)
+static alp_status_t
+_read_attr(unsigned device_id, unsigned channel, const char *suffix, char *buf, size_t buflen)
 {
 	char path[96];
-	int  n = snprintf(path, sizeof(path), "/sys/bus/iio/devices/iio:device%u/in_voltage%u_%s",
-	                  device_id, channel, suffix);
+	int  n = snprintf(path,
+                     sizeof(path),
+                     "/sys/bus/iio/devices/iio:device%u/in_voltage%u_%s",
+                     device_id,
+                     channel,
+                     suffix);
 	if (n < 0 || (size_t)n >= sizeof(path)) {
 		return ALP_ERR_INVAL;
 	}
@@ -211,8 +215,8 @@ static alp_status_t _scale_mv_str_to_uv(const char *s, uint64_t *uv_per_count)
  * ALP_ERR_OUT_OF_RANGE if cfg requests a resolution exceeding the
  * pinned mapping width; ALP_ERR_NOMEM on the per-handle box.
  */
-static alp_status_t y_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+y_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg == NULL || st == NULL || caps_out == NULL) {
 		return ALP_ERR_INVAL;
@@ -269,13 +273,13 @@ static alp_status_t y_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t 
 	if (d == NULL) {
 		return ALP_ERR_NOMEM;
 	}
-	d->device_id                  = device_id;
-	d->channel                    = channel;
-	d->offset_raw                 = offset_raw;
+	d->device_id  = device_id;
+	d->channel    = channel;
+	d->offset_raw = offset_raw;
 
-	st->be_data                   = d;
-	st->reference_uv              = (uint32_t)ref;
-	st->resolution_bits           = (uint16_t)Y_ADC_RES_BITS;
+	st->be_data         = d;
+	st->reference_uv    = (uint32_t)ref;
+	st->resolution_bits = (uint16_t)Y_ADC_RES_BITS;
 
 	caps_out->flags               = 0u;
 	caps_out->max_resolution_bits = (uint16_t)Y_ADC_RES_BITS;
@@ -336,7 +340,8 @@ static const alp_adc_ops_t _ops = {
 	.close    = y_close,
 };
 
-ALP_BACKEND_REGISTER(adc, yocto_drv,
+ALP_BACKEND_REGISTER(adc,
+                     yocto_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "linux",

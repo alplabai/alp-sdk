@@ -22,7 +22,8 @@
 
 #define ALP_WDT_DEV_OR_NULL(idx)                                                                   \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_wdt, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_wdt, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_wdt, idx)))),                                  \
+	            (NULL))
 
 static const struct device *const _devs[] = {
 	ALP_WDT_DEV_OR_NULL(0),
@@ -46,8 +47,10 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
-static alp_status_t z_open(uint32_t wdt_id, const alp_wdt_config_t *cfg,
-                           alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
+static alp_status_t z_open(uint32_t                 wdt_id,
+                           const alp_wdt_config_t  *cfg,
+                           alp_wdt_backend_state_t *st,
+                           alp_capabilities_t      *caps_out)
 {
 	if (wdt_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (wdt_id >= ALP_SOC_WDT_COUNT) return ALP_ERR_OUT_OF_RANGE;
@@ -99,7 +102,8 @@ static const alp_wdt_ops_t _ops = {
 	.close   = z_close,
 };
 
-ALP_BACKEND_REGISTER(wdt, zephyr_drv,
+ALP_BACKEND_REGISTER(wdt,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

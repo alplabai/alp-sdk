@@ -65,8 +65,11 @@ static bool timeout_expired(uint32_t *spent_us, uint32_t per_iter_us, uint32_t l
 /* Lifecycle                                                          */
 /* --------------------------------------------------------------- */
 
-alp_status_t rtl8211fdi_init(rtl8211fdi_t *ctx, uint8_t phy_addr, rtl8211fdi_mdio_read_t read,
-                             rtl8211fdi_mdio_write_t write, void *mdio_user)
+alp_status_t rtl8211fdi_init(rtl8211fdi_t           *ctx,
+                             uint8_t                 phy_addr,
+                             rtl8211fdi_mdio_read_t  read,
+                             rtl8211fdi_mdio_write_t write,
+                             void                   *mdio_user)
 {
 	if (ctx == NULL || read == NULL || write == NULL) return ALP_ERR_INVAL;
 	if (phy_addr > 31u) return ALP_ERR_INVAL;
@@ -150,8 +153,8 @@ alp_status_t rtl8211fdi_restart_autoneg(rtl8211fdi_t *ctx)
 	return mdio_write_raw(ctx, RTL8211FDI_REG_BMCR, bmcr);
 }
 
-alp_status_t rtl8211fdi_get_link(rtl8211fdi_t *ctx, bool *up, rtl8211fdi_speed_t *speed,
-                                 bool *full_duplex)
+alp_status_t
+rtl8211fdi_get_link(rtl8211fdi_t *ctx, bool *up, rtl8211fdi_speed_t *speed, bool *full_duplex)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (up == NULL || speed == NULL || full_duplex == NULL) return ALP_ERR_INVAL;
@@ -241,7 +244,7 @@ alp_status_t rtl8211fdi_get_link(rtl8211fdi_t *ctx, bool *up, rtl8211fdi_speed_t
 #define RTL8211FDI_WOL_STAT_REG 0x14u
 
 #define RTL8211FDI_WOL_CTRL_MAGIC_PKT_EN (1u << 6)
-#define RTL8211FDI_WOL_STAT_MAGIC_PKT (1u << 15)
+#define RTL8211FDI_WOL_STAT_MAGIC_PKT    (1u << 15)
 
 alp_status_t rtl8211fdi_wol_set_mac(rtl8211fdi_t *ctx, const uint8_t mac[6])
 {

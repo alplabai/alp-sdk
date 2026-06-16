@@ -28,7 +28,7 @@ static lv_obj_t          *s_lbl_status;
 static lv_obj_t          *s_chart;
 static lv_chart_series_t *s_pressure_series;
 
-void                      dashboard_ui_build(void)
+void dashboard_ui_build(void)
 {
 	lv_obj_t *scr = lv_screen_active();
 	lv_obj_set_style_bg_color(scr, lv_color_hex(0x101820), 0);
@@ -85,7 +85,10 @@ void dashboard_ui_apply(const dashboard_state_t *s)
 	lv_chart_set_next_value(s_chart, s_pressure_series, (int32_t)s->pressure_hpa);
 	lv_chart_refresh(s_chart);
 
-	snprintf(buf, sizeof(buf), "MQTT: %s   t=%u ms", s->mqtt_connected ? "CONNECTED" : "offline",
+	snprintf(buf,
+	         sizeof(buf),
+	         "MQTT: %s   t=%u ms",
+	         s->mqtt_connected ? "CONNECTED" : "offline",
 	         (unsigned)s->last_update_ms);
 	lv_label_set_text(s_lbl_status, buf);
 }

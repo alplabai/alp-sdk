@@ -66,8 +66,8 @@ alp_status_t clk_5l35023b_write_reg(clk_5l35023b_t *ctx, uint8_t reg, uint8_t va
 	return alp_i2c_write(ctx->bus, ctx->addr, buf, sizeof(buf));
 }
 
-alp_status_t clk_5l35023b_register_dump(clk_5l35023b_t *ctx, uint8_t start_reg, uint8_t *out,
-                                        size_t count)
+alp_status_t
+clk_5l35023b_register_dump(clk_5l35023b_t *ctx, uint8_t start_reg, uint8_t *out, size_t count)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (out == NULL || count == 0u) return ALP_ERR_INVAL;

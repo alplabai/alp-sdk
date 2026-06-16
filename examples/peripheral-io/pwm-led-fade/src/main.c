@@ -27,8 +27,8 @@
  * (E1M_PWM0 on E1M EVK; E1M_X_PWM7 on E1M-X EVK). */
 #include "alp/board.h"
 
-#define PERIOD_NS 1000000u /* 1 kHz */
-#define STEPS 50
+#define PERIOD_NS     1000000u /* 1 kHz */
+#define STEPS         50
 #define STEP_DELAY_MS 20
 
 int main(void)

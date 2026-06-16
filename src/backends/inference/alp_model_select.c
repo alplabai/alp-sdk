@@ -57,8 +57,10 @@ static bool _fits(const alp_model_target_t *t, const alp_model_select_env_t *e)
 	return e->arena_sram_kib == 0u || t->req_sram_kib <= e->arena_sram_kib;
 }
 
-alp_status_t alp_model_select(const alp_model_t *m, const alp_model_select_env_t *env,
-                              alp_inference_backend_t requested, alp_model_select_result_t *out)
+alp_status_t alp_model_select(const alp_model_t            *m,
+                              const alp_model_select_env_t *env,
+                              alp_inference_backend_t       requested,
+                              alp_model_select_result_t    *out)
 {
 	if (m == NULL || env == NULL || out == NULL || m->n_targets == 0u) {
 		return ALP_ERR_INVAL;
@@ -137,9 +139,9 @@ alp_status_t alp_model_select(const alp_model_t *m, const alp_model_select_env_t
 
 	const alp_model_target_t *t = &m->targets[best];
 
-	out->target_index           = (uint32_t)best;
-	out->backend                = _backend_enum(t->backend);
-	out->format                 = _fmt_enum(t->blob_format);
-	out->arena_bytes            = t->arena_bytes;
+	out->target_index = (uint32_t)best;
+	out->backend      = _backend_enum(t->backend);
+	out->format       = _fmt_enum(t->blob_format);
+	out->arena_bytes  = t->arena_bytes;
 	return ALP_OK;
 }

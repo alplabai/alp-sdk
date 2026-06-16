@@ -23,7 +23,8 @@ ZTEST(alp_peripheral, test_gpio_output_write_read_roundtrip)
      * register is decoupled from the output register and reads
      * back zero unless gpio_emul_input_set() is called first. The
      * SDK's job is just to forward gpio_pin_get_dt's result. */
-	zassert_equal(alp_gpio_configure(p, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE), ALP_OK,
+	zassert_equal(alp_gpio_configure(p, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE),
+	              ALP_OK,
 	              "configure as output failed");
 	zassert_equal(alp_gpio_write(p, true), ALP_OK, "write high failed");
 	zassert_equal(alp_gpio_write(p, false), ALP_OK, "write low failed");
@@ -44,7 +45,8 @@ ZTEST(alp_peripheral, test_gpio_irq_invalid_args)
 {
 	alp_gpio_t *p = alp_gpio_open(1);
 	zassert_not_null(p);
-	zassert_equal(alp_gpio_irq_enable(p, ALP_GPIO_EDGE_NONE, NULL, NULL), ALP_ERR_INVAL,
+	zassert_equal(alp_gpio_irq_enable(p, ALP_GPIO_EDGE_NONE, NULL, NULL),
+	              ALP_ERR_INVAL,
 	              "edge=NONE+cb=NULL must be invalid");
 	alp_gpio_close(p);
 }
@@ -62,7 +64,8 @@ ZTEST(alp_peripheral, test_gpio_pool_exhaustion_returns_null)
 		opened++;
 	}
 
-	zassert_equal(opened, (size_t)CONFIG_ALP_SDK_MAX_GPIO_HANDLES,
+	zassert_equal(opened,
+	              (size_t)CONFIG_ALP_SDK_MAX_GPIO_HANDLES,
 	              "pool should hand out exactly CONFIG_ALP_SDK_MAX_GPIO_HANDLES "
 	              "before refusing; opened=%zu",
 	              opened);
