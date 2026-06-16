@@ -1,0 +1,54 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-npu-ethosu55-regcheck overlay for the E1M-AEN801 (Ensemble E8, M55-HE)
+ * RAM-run -- adds the HE-core-local Ethos-U55 node and retargets ROM to ITCM.
+ *
+ * NPU base + variant (AUTHORITATIVE -- derived, not invented):
+ *   The E8 has THREE Ethos-U NPUs: one global Ethos-U85 (256-MAC) @ 0x49042000
+ *   (the aen-npu-ethosu-regcheck target), plus a PER-RTSS-CORE-LOCAL Ethos-U55 at
+ *   the core-private base 0x400e1000.  0x400e1000 is core-private and hal_alif
+ *   does the local->global remap, so each M55 sees ONLY its own U55 at that
+ *   address: the HE cluster's is the 128-MAC config, the HP cluster's is 256-MAC.
+ *   From the M55-HE this node therefore probes the HE-local U55-128.
+ *   Source: Alif's Apache-2.0 zephyr_alif fork ethos-u node (ethosu0 @ 0x400e1000,
+ *   arch 1.x, IRQ 55) + the alif_e8_dk NPU topology.  MEMORY: validated from HE,
+ *   ID reads back 0x10104201 (arch 1.1.0, product=U55).
+ *
+ * The IRQ (55) and secure/privilege flags are transcribed from the fork node.
+ * This presence/clock probe reads the ID register directly and does not depend
+ * on the IRQ path or an inference completing.
+ *
+ * vendor-ext, BENCH (re-)VERIFICATION target.
+ */
+
+/*
+ * RAM-run: retarget ROM to ITCM (PATH-REFERENCE form &itcm -- the <&itcm>
+ * phandle-array form makes FLASH_SIZE=0 and overflows the link).
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&soc {
+	/*
+	 * HE-core-local Ethos-U55.  compatible "arm,ethos-u" (arm,ethos-u.yaml),
+	 * driven by upstream drivers/misc/ethos_u/ethos_u_arm.c.  status="okay"
+	 * makes DT_HAS_ARM_ETHOS_U_ENABLED true -> builds the frontend + auto-inits
+	 * the device at POST_KERNEL.  No `clocks` property (NPU clock/power is
+	 * brought up outside the Zephyr clockctrl, like the U85 node).
+	 */
+	ethosu_npu: ethosu55@400e1000 {
+		compatible = "arm,ethos-u";
+		reg = <0x400e1000 0x1000>;
+		interrupts = <55 3>;
+		interrupt-parent = <&nvic>;
+		secure-enable;
+		privilege-enable;
+		status = "okay";
+	};
+};

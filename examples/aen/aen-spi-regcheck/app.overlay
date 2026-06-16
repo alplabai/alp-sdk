@@ -70,27 +70,27 @@
 	 * HW chip-select 0 (SS0_B on P5_2): no cs-gpios, so the driver uses the
 	 * controller SER register. The transfer below targets slave 0.
 	 */
-};
 
-/*
- * Give the SPI driver a non-zero input-clock frequency.
- *
- * WHY THIS IS HERE (bench finding, not cosmetic): spi_dw_configure() reads
- * info->clock_frequency, which is populated ONLY from a `clock-frequency`
- * property on the `clocks` phandle target (the clockctrl node). When it is 0 the
- * driver falls back to clock_control_configure(), but the upstream alif
- * clockctrl driver (clock_control_alif.c) implements NO `.configure` op -- so
- * clock_control_configure() returns -ENOSYS, and spi_dw_configure() turns that
- * into -EINVAL and ABORTS before programming a single register. Providing
- * clock-frequency here makes the driver skip both the configure call and
- * clock_control_get_rate(), and use this value verbatim for the BAUDR divider.
- *
- * 100 MHz is a PLACEHOLDER (mirrors the UTIMER clock-frequency placeholder
- * convention in the dtsi); it only scales the BAUDR divider, NOT the CTRLR0
- * programming the strict PASS gate checks. Confirm the real SPI input clock vs
- * the Alif TRM at bench bring-up and override. This is a property-ADD on the
- * existing SoC clockctrl node, not a redefinition of a SoC clock value.
- */
-&clockctrl {
+	/*
+	 * Give the SPI driver a non-zero input-clock frequency.
+	 *
+	 * WHY THIS IS HERE (bench finding, not cosmetic): spi_dw_configure() reads
+	 * info->clock_frequency.  spi_dw_alif.c PREFERS the SPI node's own
+	 * `clock-frequency` (the alp-sdk-owned alif,dwc-ssi-spi binding declares
+	 * it); only when absent does it fall back to clock_control_configure() --
+	 * which the upstream alif clockctrl driver implements as NO-OP (-ENOSYS) ->
+	 * spi_dw_configure() turns that into -EINVAL and ABORTS before programming a
+	 * single register.  Setting it on the SPI node makes the driver use this
+	 * value verbatim for the BAUDR divider.
+	 *
+	 * NOTE: this property lives on &spi0, NOT on &clockctrl -- the alif,clockctrl
+	 * binding does not declare clock-frequency (placing it there is a hard DT
+	 * error), and the driver reads it from the SPI node anyway.
+	 *
+	 * 100 MHz is a PLACEHOLDER (mirrors the UTIMER clock-frequency convention);
+	 * it only scales the BAUDR divider, NOT the CTRLR0 programming the strict
+	 * PASS gate checks.  Confirm the real SPI input clock vs the Alif TRM and
+	 * override.
+	 */
 	clock-frequency = <100000000>;
 };

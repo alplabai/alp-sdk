@@ -36,6 +36,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/pinctrl.h>
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/sys/sys_io.h>
 #include <zephyr/sys/util.h>
 
@@ -51,9 +52,11 @@
 #define DW_SWPORTA_DDR   (GPIO8_BASE + 0x04U)      /* 0x49008004 */
 #define DW_EXT_PORTA     (GPIO8_BASE + 0x50U)      /* 0x49008050 */
 
-PINCTRL_DT_DEFINE(GPIO8_NODE);
-static const struct pinctrl_dev_config *gpio8_pcfg =
-	PINCTRL_DT_DEV_CONFIG_GET(GPIO8_NODE);
+/* P8_0 -> GPIO (AF0).  gpio_dw does not touch the pad mux, and the upstream
+ * "snps,designware-gpio" binding carries no pinctrl-0, so apply the mux straight
+ * through the Alif pinctrl SoC driver (pinctrl_soc_pin_t is the uint32_t PINMUX
+ * word; the Alif impl ignores the reg argument). */
+static const pinctrl_soc_pin_t p8_0_gpio[] = { PIN_P8_0__GPIO };
 
 static const struct device *const gpio8 = DEVICE_DT_GET(GPIO8_NODE);
 
@@ -81,10 +84,10 @@ int main(void)
 	       (unsigned int)DW_SWPORTA_DDR, (unsigned int)DW_EXT_PORTA);
 
 	/* 1. mux P8_0 -> GPIO (gpio_dw never touches the pad mux). */
-	rc = pinctrl_apply_state(gpio8_pcfg, PINCTRL_STATE_DEFAULT);
-	printk("pinctrl_apply_state rc=%d\n", rc);
+	rc = pinctrl_configure_pins(p8_0_gpio, ARRAY_SIZE(p8_0_gpio), 0U);
+	printk("pinctrl_configure_pins(P8_0->GPIO) rc=%d\n", rc);
 	if (rc != 0) {
-		printk("RESULT FAIL: pinctrl_apply_state rc=%d\n", rc);
+		printk("RESULT FAIL: pinctrl_configure_pins rc=%d\n", rc);
 		return 0;
 	}
 

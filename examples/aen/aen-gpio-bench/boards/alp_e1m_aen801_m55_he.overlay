@@ -25,8 +25,12 @@
  * gpio_dw does NOT apply any pad mux, so we attach a pinctrl state that selects
  * P8_0 -> GPIO (function 0) and main() applies it explicitly via
  * pinctrl_apply_state() before configuring the pin.
+ *
+ * The P8_0 pad mux is NOT expressed here as a pinctrl-0 on &gpio8: the upstream
+ * "snps,designware-gpio" binding does not carry pinctrl (gpio_dw never applies a
+ * pad mux), and alp-sdk does not shadow upstream bindings.  main() instead muxes
+ * P8_0 -> GPIO directly through the Alif pinctrl driver (pinctrl_configure_pins).
  */
-#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 
 /*
  * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
@@ -34,7 +38,10 @@
  */
 / {
 	chosen {
-		zephyr,flash = <&itcm>;
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
 		/delete-property/ zephyr,code-partition;
 	};
 
@@ -43,21 +50,6 @@
 	};
 };
 
-&pinctrl {
-	/* Select P8_0 to its GPIO function (AF0).  No pull / no special pad
-	 * config bits: ALIF_PINMUX() leaves pad_config==0, the pad's default
-	 * push-pull output drive is used once the GPIO controller sets DDR. */
-	pinctrl_gpio8_p0: pinctrl_gpio8_p0 {
-		group0 {
-			pinmux = <PIN_P8_0__GPIO>;
-		};
-	};
-};
-
 &gpio8 {
 	status = "okay";
-	/* gpio_dw ignores these, but they make PINCTRL_DT_DEFINE(gpio8) +
-	 * pinctrl_apply_state() in main() resolve the P8_0->GPIO mux state. */
-	pinctrl-0 = <&pinctrl_gpio8_p0>;
-	pinctrl-names = "default";
 };
