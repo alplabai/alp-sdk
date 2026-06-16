@@ -106,4 +106,26 @@ int cc3501e_hw_wifi_ap_stop(void);
 int cc3501e_hw_wifi_get_rssi(int8_t *rssi_dbm_out);
 int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4]);
 
+/* --------------------------------------------------------------- */
+/* BLE 5.4 (v0.3)                                                    */
+/* --------------------------------------------------------------- */
+
+/* Route to TI's BLE host (NimBLE, source/ti/net/ble_interface) in the ti
+ * backend; the stub + the silicon-free host build report NOTIMPL.  adv/scan
+ * intervals are in ms; addr is a 6-byte BLE device address; GATT ops carry
+ * a 16-bit attribute handle. */
+int cc3501e_hw_ble_enable(void);
+int cc3501e_hw_ble_disable(void);
+int cc3501e_hw_ble_adv_start(uint8_t connectable, uint16_t interval_min_ms,
+                             uint16_t interval_max_ms, const uint8_t *adv_data, uint8_t adv_data_len);
+int cc3501e_hw_ble_adv_stop(void);
+int cc3501e_hw_ble_scan_start(void);
+int cc3501e_hw_ble_scan_stop(void);
+int cc3501e_hw_ble_connect(uint8_t addr_type, const uint8_t addr[6]);
+int cc3501e_hw_ble_disconnect(void);
+int cc3501e_hw_ble_gatt_register(const uint8_t *desc, uint16_t desc_len);
+int cc3501e_hw_ble_gatt_notify(uint16_t handle, const uint8_t *data, uint16_t data_len);
+int cc3501e_hw_ble_gatt_read(uint16_t handle, uint8_t *out, uint16_t cap, uint16_t *out_len);
+int cc3501e_hw_ble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t data_len);
+
 #endif /* CC3501E_BRIDGE_HAL_CC3501E_HW_H */

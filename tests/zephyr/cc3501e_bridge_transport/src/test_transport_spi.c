@@ -284,4 +284,56 @@ ZTEST(cc3501e_bridge_transport, test_wifi_connect_bad_len_invalid)
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "connect length mismatch -> INVALID");
 }
 
+/* BLE (v0.3): no BLE host on the stub -> well-formed requests parse and map
+ * to NOT_READY; malformed ones are rejected (INVALID) at the protocol layer. */
+ZTEST(cc3501e_bridge_transport, test_ble_enable_not_ready)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	const uint8_t e[] = { ALP_CC3501E_CMD_BLE_ENABLE, 0x00u, 0x00u, 0x00u };
+	transaction(e, sizeof e);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "ble enable reply = header + status");
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "no BLE host on stub -> NOT_READY");
+}
+
+ZTEST(cc3501e_bridge_transport, test_ble_adv_start_parses_then_not_ready)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	/* connectable=1, rsvd=0, imin=100, imax=200, adv_data_len=3, adv={02 01 06};
+	 * packed header is 7 bytes -> payload_len = 7 + 3 = 10. */
+	const uint8_t req[] = { ALP_CC3501E_CMD_BLE_ADV_START, 0x00u, 10u, 0x00u,
+		                1u, 0u, 100u, 0u, 200u, 0u, 3u,
+		                0x02u, 0x01u, 0x06u };
+	transaction(req, sizeof req);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "adv reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_BLE_ADV_START, 1u);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "well-formed adv parses -> NOT_READY");
+}
+
+ZTEST(cc3501e_bridge_transport, test_ble_adv_start_bad_len_invalid)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	/* adv_data_len=3 needs payload 10, but only 7 sent. */
+	const uint8_t req[] = { ALP_CC3501E_CMD_BLE_ADV_START, 0x00u, 7u, 0x00u,
+		                1u, 0u, 100u, 0u, 200u, 0u, 3u };
+	transaction(req, sizeof req);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "adv length mismatch -> INVALID");
+}
+
+ZTEST(cc3501e_bridge_transport, test_ble_connect_bad_len_invalid)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	/* BLE_CONNECT needs 7 bytes (addr_type + addr[6]); send 4. */
+	const uint8_t req[] = { ALP_CC3501E_CMD_BLE_CONNECT, 0x00u, 4u, 0x00u, 0u, 1u, 2u, 3u };
+	transaction(req, sizeof req);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "short BLE_CONNECT -> INVALID");
+}
+
 ZTEST_SUITE(cc3501e_bridge_transport, NULL, NULL, NULL, NULL, NULL);

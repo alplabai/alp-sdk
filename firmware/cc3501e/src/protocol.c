@@ -340,6 +340,168 @@ static alp_cc3501e_resp_t handle_wifi_get_ip(const uint8_t *req, size_t req_len,
 }
 
 /* --------------------------------------------------------------- */
+/* BLE 5.4 (0x30..0x4F)                                              */
+/*                                                                   */
+/* BLE payloads with multi-byte fields are parsed field-by-field from */
+/* the PACKED wire (LE), not by casting to the doc structs in         */
+/* <alp/protocol/cc3501e.h> -- those structs carry uint16 alignment   */
+/* padding that the wire format does not.                             */
+/* --------------------------------------------------------------- */
+
+static alp_cc3501e_resp_t handle_ble_enable(const uint8_t *req, size_t req_len, uint8_t *reply_data,
+                                            size_t reply_cap, size_t *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ble_enable());
+}
+
+static alp_cc3501e_resp_t handle_ble_disable(const uint8_t *req, size_t req_len, uint8_t *reply_data,
+                                             size_t reply_cap, size_t *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ble_disable());
+}
+
+/* BLE_ADV_START (0x32): packed wire = connectable(1) | reserved(1) |
+ * interval_min_ms(LE16) | interval_max_ms(LE16) | adv_data_len(1) |
+ * adv_data[adv_data_len].  (7-byte header; the doc struct is 8 with pad.) */
+#define BLE_ADV_START_HDR 7u
+static alp_cc3501e_resp_t handle_ble_adv_start(const uint8_t *req, size_t req_len,
+                                               uint8_t *reply_data, size_t reply_cap,
+                                               size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len < BLE_ADV_START_HDR) return ALP_CC3501E_RESP_ERR_INVALID;
+	const uint8_t  connectable = req[0];
+	const uint16_t interval_min = (uint16_t)req[2] | ((uint16_t)req[3] << 8);
+	const uint16_t interval_max = (uint16_t)req[4] | ((uint16_t)req[5] << 8);
+	const uint8_t  adv_data_len = req[6];
+	if (req_len != (size_t)BLE_ADV_START_HDR + adv_data_len) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ble_adv_start(connectable, interval_min, interval_max,
+	                                           &req[BLE_ADV_START_HDR], adv_data_len));
+}
+
+static alp_cc3501e_resp_t handle_ble_adv_stop(const uint8_t *req, size_t req_len, uint8_t *reply_data,
+                                              size_t reply_cap, size_t *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ble_adv_stop());
+}
+
+static alp_cc3501e_resp_t handle_ble_scan_start(const uint8_t *req, size_t req_len,
+                                                uint8_t *reply_data, size_t reply_cap,
+                                                size_t *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ble_scan_start());
+}
+
+static alp_cc3501e_resp_t handle_ble_scan_stop(const uint8_t *req, size_t req_len,
+                                               uint8_t *reply_data, size_t reply_cap,
+                                               size_t *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ble_scan_stop());
+}
+
+/* BLE_CONNECT (0x36): packed wire = addr_type(1) | addr[6]. */
+static alp_cc3501e_resp_t handle_ble_connect(const uint8_t *req, size_t req_len, uint8_t *reply_data,
+                                             size_t reply_cap, size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 7u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ble_connect(req[0], &req[1]));
+}
+
+static alp_cc3501e_resp_t handle_ble_disconnect(const uint8_t *req, size_t req_len,
+                                                uint8_t *reply_data, size_t reply_cap,
+                                                size_t *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ble_disconnect());
+}
+
+/* BLE_GATT_REGISTER (0x38): opaque attribute-table descriptor (>= 1 byte). */
+static alp_cc3501e_resp_t handle_ble_gatt_register(const uint8_t *req, size_t req_len,
+                                                   uint8_t *reply_data, size_t reply_cap,
+                                                   size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len < 1u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ble_gatt_register(req, (uint16_t)req_len));
+}
+
+/* BLE_GATT_NOTIFY (0x39) / WRITE (0x3B): packed wire = handle(LE16) | data. */
+static alp_cc3501e_resp_t handle_ble_gatt_notify(const uint8_t *req, size_t req_len,
+                                                 uint8_t *reply_data, size_t reply_cap,
+                                                 size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len < 2u) return ALP_CC3501E_RESP_ERR_INVALID;
+	const uint16_t handle = (uint16_t)req[0] | ((uint16_t)req[1] << 8);
+	return hw_to_resp(cc3501e_hw_ble_gatt_notify(handle, &req[2], (uint16_t)(req_len - 2u)));
+}
+
+static alp_cc3501e_resp_t handle_ble_gatt_write(const uint8_t *req, size_t req_len,
+                                                uint8_t *reply_data, size_t reply_cap,
+                                                size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len < 2u) return ALP_CC3501E_RESP_ERR_INVALID;
+	const uint16_t handle = (uint16_t)req[0] | ((uint16_t)req[1] << 8);
+	return hw_to_resp(cc3501e_hw_ble_gatt_write(handle, &req[2], (uint16_t)(req_len - 2u)));
+}
+
+/* BLE_GATT_READ (0x3A): packed wire = handle(LE16); reply data = attr value. */
+static alp_cc3501e_resp_t handle_ble_gatt_read(const uint8_t *req, size_t req_len,
+                                               uint8_t *reply_data, size_t reply_cap,
+                                               size_t *reply_data_len)
+{
+	*reply_data_len = 0u;
+	if (req_len != 2u) return ALP_CC3501E_RESP_ERR_INVALID;
+	const uint16_t     handle  = (uint16_t)req[0] | ((uint16_t)req[1] << 8);
+	uint16_t           out_len = 0u;
+	alp_cc3501e_resp_t st =
+	    hw_to_resp(cc3501e_hw_ble_gatt_read(handle, reply_data, (uint16_t)reply_cap, &out_len));
+	if (st == ALP_CC3501E_RESP_OK) *reply_data_len = out_len;
+	return st;
+}
+
+/* --------------------------------------------------------------- */
 /* Dispatch                                                          */
 /* --------------------------------------------------------------- */
 
@@ -411,6 +573,43 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t cmd, uint8_t flags, const uint8_t *
 		break;
 	case ALP_CC3501E_CMD_WIFI_GET_IP:
 		h = handle_wifi_get_ip;
+		break;
+	/* BLE 5.4 (v0.3). */
+	case ALP_CC3501E_CMD_BLE_ENABLE:
+		h = handle_ble_enable;
+		break;
+	case ALP_CC3501E_CMD_BLE_DISABLE:
+		h = handle_ble_disable;
+		break;
+	case ALP_CC3501E_CMD_BLE_ADV_START:
+		h = handle_ble_adv_start;
+		break;
+	case ALP_CC3501E_CMD_BLE_ADV_STOP:
+		h = handle_ble_adv_stop;
+		break;
+	case ALP_CC3501E_CMD_BLE_SCAN_START:
+		h = handle_ble_scan_start;
+		break;
+	case ALP_CC3501E_CMD_BLE_SCAN_STOP:
+		h = handle_ble_scan_stop;
+		break;
+	case ALP_CC3501E_CMD_BLE_CONNECT:
+		h = handle_ble_connect;
+		break;
+	case ALP_CC3501E_CMD_BLE_DISCONNECT:
+		h = handle_ble_disconnect;
+		break;
+	case ALP_CC3501E_CMD_BLE_GATT_REGISTER:
+		h = handle_ble_gatt_register;
+		break;
+	case ALP_CC3501E_CMD_BLE_GATT_NOTIFY:
+		h = handle_ble_gatt_notify;
+		break;
+	case ALP_CC3501E_CMD_BLE_GATT_READ:
+		h = handle_ble_gatt_read;
+		break;
+	case ALP_CC3501E_CMD_BLE_GATT_WRITE:
+		h = handle_ble_gatt_write;
 		break;
 	default:
 		/* Unknown, or a known v1 opcode whose firmware body has not
