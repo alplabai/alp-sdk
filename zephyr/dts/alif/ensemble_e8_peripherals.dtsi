@@ -424,31 +424,41 @@
 	};
 
 	/*
-	 * Arm Ethos-U NPUs.  The E8 (AE822) carries TWO Ethos-U NPUs, BOTH bound by
-	 * the UPSTREAM Zephyr driver (drivers/misc/ethos_u/ethos_u_arm.c, compatible
-	 * "arm,ethos-u") over Arm's Apache-2.0 ethos-u-core-driver (the `hal_ethos_u`
-	 * Zephyr module) -- pure Tier-1 (upstream + a standard Zephyr HAL module), no
-	 * vendored code.  reg/IRQ from the Apache-2.0 zephyr_alif fork (e4_e6_e8.dtsi
-	 * for U85; e1.dtsi for U55):
-	 *   - ethosu85@49042000 (IRQ 366): the high-end Ethos-U85, 256 MAC/cycle,
-	 *     in the global peripheral space -- the E8's headline ML/GenAI accelerator.
-	 *   - ethosu55@400e1000 (IRQ 55): an Ethos-U55, in the RTSS-core-LOCAL
-	 *     peripheral space (so each M55 cluster sees its own at this address).
-	 * Both are reachable from RTSS-HE and RTSS-HP; the alif_e8_dk HP defconfig
-	 * pins the HP core to the U55 256 MAC.  (The e1c/e1 variants have ONLY the
-	 * Ethos-U55 @0x400e1000 -- no U85.)  The alif_e8_dk doc lists the E8 as
-	 * 1x U85 (256) + 2x U55 (256+128 MAC) across the two cores; the U55 MAC count
-	 * is core-specific, so a board selects CONFIG_ARM_ETHOS_U55_{256,128} for the
-	 * core it builds.
+	 * Arm Ethos-U NPUs.  The E8 (AE822) has THREE Ethos-U NPUs total -- 1x
+	 * Ethos-U85 (256 MAC) + 2x Ethos-U55 (256 + 128 MAC), per the alif_e8_dk doc.
+	 * All are bound by the UPSTREAM Zephyr driver (drivers/misc/ethos_u/
+	 * ethos_u_arm.c, compatible "arm,ethos-u") over Arm's Apache-2.0
+	 * ethos-u-core-driver (the `hal_ethos_u` Zephyr module) -- pure Tier-1
+	 * (upstream + a standard Zephyr HAL module), no vendored code.  But only TWO
+	 * device-tree nodes are needed, because of how the NPUs are addressed (reg/IRQ
+	 * from the Apache-2.0 zephyr_alif fork: e4_e6_e8.dtsi for U85, e1.dtsi for U55):
+	 *
+	 *   - ethosu85@49042000 (IRQ 366): the high-end Ethos-U85, 256 MAC/cycle, in
+	 *     the GLOBAL peripheral space -- one physical NPU, reachable from a core
+	 *     (the RTSS-HE on this SoM) at this global address.  The E8's headline
+	 *     ML/GenAI accelerator.
+	 *   - ethosu55@400e1000 (IRQ 55): the Ethos-U55, but at the RTSS-core-LOCAL
+	 *     address (0x400e1000 is core-private; the hal_alif driver does a
+	 *     local->global remap).  The "2x U55" are NOT two addressable nodes -- they
+	 *     are the per-core-local NPUs that alias to the SAME local address: the
+	 *     RTSS-HP cluster's U55 is 256 MAC (alif_e8_dk HP defconfig pins
+	 *     CONFIG_ARM_ETHOS_U55_256), the RTSS-HE cluster's U55 is 128 MAC.  Each
+	 *     M55 only sees its OWN at 0x400e1000, so a single node suffices (exactly
+	 *     as Alif's own fork dtsi does); the MAC count is core-specific, picked via
+	 *     CONFIG_ARM_ETHOS_U55_{256,128} by whichever board/core builds.  (The
+	 *     e1c/e1 SoC variants have ONLY this local U55 -- no U85.)
 	 *
 	 * A board enables the node(s) it uses + selects CONFIG_ETHOS_U +
 	 * CONFIG_ETHOS_U_ARM + the per-NPU config (CONFIG_ETHOS_U85_256 /
-	 * CONFIG_ARM_ETHOS_U55_*) and adds `hal_ethos_u` as a Zephyr module.
+	 * CONFIG_ARM_ETHOS_U55_*) and adds `hal_ethos_u` as a Zephyr module.  ETHOS_U_NPU
+	 * is one Kconfig `choice`, so the U85 and the U55 are SEPARATE firmware builds.
 	 * Inference then needs a Vela-compiled model + tensor arena.
 	 *
-	 * BOTH are BENCH-VALIDATED at the driver level on real E8 (M55-HE): ethosu_init()
-	 * soft-resets + registers each NPU, device_is_ready() true -- U85 NPU_REG_ID
-	 * 0x20007001, U55 NPU_REG_ID 0x10104201 (distinct IDs = distinct silicon).
+	 * BENCH-VALIDATED at the driver level on real E8 (M55-HE) -- BOTH NPUs the HE
+	 * core can reach: ethosu_init() soft-resets + registers each, device_is_ready()
+	 * true.  U85 @0x49042000 NPU_REG_ID 0x20007001; HE-local U55 @0x400e1000
+	 * NPU_REG_ID 0x10104201 (distinct IDs = distinct silicon).  The HP-local U55
+	 * (256 MAC) is only reachable from the RTSS-HP core, so it is not exercised here.
 	 */
 	ethosu85: ethosu85@49042000 {
 		compatible = "arm,ethos-u";
