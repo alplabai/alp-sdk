@@ -120,8 +120,12 @@ typedef struct alif_e8_adc_state {
 	uint8_t                   resolution_bits;
 	uint16_t                  oversample_ratio; /* sourced from cfg->oversampling_ratio at open */
 	alp_alif_adc_trigger_t    trigger_source;
-	int16_t                   sample_buf;
-	bool                      in_use;
+	/* 32-bit sample word: the Alif adc_alif driver's check_buffer_size() requires
+	 * 4 bytes per channel (it stores a full 24-bit-capable sample), and rejects a
+	 * 2-byte buffer with -ENOMEM. A 16-bit buffer here makes adc_read() fail -> the
+	 * read returned ALP_ERR_IO on E8 until this was widened. */
+	int32_t sample_buf;
+	bool    in_use;
 } alif_e8_adc_state_t;
 
 #ifndef CONFIG_ALP_SDK_ADC_HANDLE_POOL
@@ -201,7 +205,11 @@ static alp_status_t alif_e8_read_raw(alp_adc_backend_state_t *st, int32_t *raw_o
 		 .channels    = BIT(s->spec->channel_id),
 		 .buffer      = &s->sample_buf,
 		 .buffer_size = sizeof s->sample_buf,
-		 .resolution  = s->resolution_bits,
+		 /* MUST be 0: the Alif adc_alif driver programs resolution from the DT
+		  * channel config and returns -ENOTSUP for a non-zero adc_sequence.resolution
+		  * (read returned ALP_ERR_IO on E8 until this was zeroed).  The raw->uV scale
+		  * still uses st->resolution_bits, set from the channel at open. */
+		 .resolution = 0,
 		 .oversampling =
             (s->oversample_ratio > 1u) ? (uint8_t)__builtin_ctz(s->oversample_ratio) : 0u,
 	};
