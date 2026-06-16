@@ -58,4 +58,32 @@ int cc3501e_hw_get_mac(uint8_t mac[6]);
  * the stub backend. */
 void cc3501e_hw_request_reset(void);
 
+/* Transport -> HAL: the in-flight reply frame has been FULLY clocked back
+ * to the host.  The slave-side SPI/SDIO transport calls this from its
+ * reply-complete path.  The deferred-reset latch (cc3501e_hw_request_reset)
+ * only fires the reboot once this has been observed for the CMD_RESET ack,
+ * so the host always sees the ack before the link goes quiet.  No-op on
+ * the stub backend. */
+void cc3501e_hw_notify_reply_sent(void);
+
+/* --------------------------------------------------------------- */
+/* GPIO proxy (v0.4) + camera enables                                */
+/* --------------------------------------------------------------- */
+
+/* The CC3501E fronts E1M pads IO11 / IO13 / IO15..IO21 (plus mux/wake
+ * lines) and the two camera-enable LDOs, per
+ * metadata/e1m_modules/aen/from-cc3501e.tsv.  These shims drive the
+ * proxied CC3501E GPIOs on the Alif's behalf.  @p pad is the CC3501E
+ * GPIO index; @p dir / @p pull / @p edge use the alp_cc3501e_gpio_*
+ * enums in <alp/protocol/cc3501e.h>.  Return CC3501E_HW_* (NOTIMPL maps
+ * to RESP_ERR_NOT_READY at the protocol layer). */
+int cc3501e_hw_gpio_configure(uint8_t pad, uint8_t dir, uint8_t pull);
+int cc3501e_hw_gpio_write(uint8_t pad, uint8_t level);
+int cc3501e_hw_gpio_read(uint8_t pad, uint8_t *level_out);
+int cc3501e_hw_gpio_set_interrupt(uint8_t pad, uint8_t edge, uint8_t enabled);
+
+/* Camera-enable LDOs: @p which 0 -> CAM_EN_LDO0 (GPIO_0), 1 -> CAM_EN_LDO1
+ * (GPIO_1); @p on != 0 asserts the enable.  Default OFF at boot. */
+int cc3501e_hw_cam_enable(uint8_t which, uint8_t on);
+
 #endif /* CC3501E_BRIDGE_HAL_CC3501E_HW_H */

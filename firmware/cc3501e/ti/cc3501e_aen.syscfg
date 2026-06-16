@@ -1,0 +1,33 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ */
+// @cliArgs --board /ti/boards/LP_EM_CC35X1 --rtos freertos
+
+/*
+ * cc3501e-bridge ti-build board file (SysConfig input).
+ *
+ * Generates CONFIG_SPI_0 -- the inter-chip SPI-slave the firmware opens in
+ * hal/ti/transport_hw_ti_spi.c (SPI_open(CONFIG_SPI_0, SPI_SLAVE,
+ * SPI_MODE_CALLBACK)).  Based on the SDK's drivers/spiperipheral demo
+ * (examples/rtos/LP_EM_CC35X1/drivers/spiperipheral), which is the
+ * known-good CC35X1 SPI-peripheral (slave) configuration.
+ *
+ * FIRST CUT (compile-verify, task #7): uses the LP_EM_CC35X1 LaunchPad's
+ * LP_SPI0 hardware (auto-pinned) so the firmware + the 3 audit fixes build
+ * against the real SDK.  BENCH REFINEMENT (task #8): reassign SCLK/MOSI/MISO
+ * to CC3501E GPIO_27/28/29 (metadata/e1m_modules/aen/inter-chip.tsv) and run
+ * CS-less 3-wire (the SS pad tied asserted on the SoM -- confirm SWRU626 §18;
+ * the firmware's lockstep needs no CS).
+ */
+
+/* ======== Kernel ======== */
+system.getScript("kernel_config_release.syscfg.js");
+
+/* ======== SPI peripheral (slave) -> CONFIG_SPI_0 ======== */
+var SPI  = scripting.addModule("/ti/drivers/SPI");
+var spi0 = SPI.addInstance();
+spi0.$name               = "CONFIG_SPI_0";
+spi0.mode                = "Four Pin CS Active Low"; /* bench: drop to 3-wire/CS-less */
+spi0.$hardware           = system.deviceData.board.components.LP_SPI0;
+spi0.defaultTxBufferValue = "0xFF";                  /* idle MISO pattern (matches the firmware seam) */

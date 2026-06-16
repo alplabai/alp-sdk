@@ -42,3 +42,55 @@ void cc3501e_hw_request_reset(void)
 {
 	/* no-op on the stub backend */
 }
+
+void cc3501e_hw_notify_reply_sent(void)
+{
+	/* no-op on the stub backend */
+}
+
+/* --------------------------------------------------------------- */
+/* GPIO proxy (v0.4) -- in-memory simulation so the host protocol    */
+/* path (configure/write/read/IRQ-arm + camera enables) is fully     */
+/* exercisable on the host with no silicon.  Real pad I/O is in       */
+/* hal/ti/.                                                          */
+/* --------------------------------------------------------------- */
+#define STUB_GPIO_MAX 32u
+static uint8_t stub_gpio_level[STUB_GPIO_MAX];
+static uint8_t stub_cam[2];
+
+int cc3501e_hw_gpio_configure(uint8_t pad, uint8_t dir, uint8_t pull)
+{
+	(void)dir;
+	(void)pull;
+	if (pad >= STUB_GPIO_MAX) return CC3501E_HW_ERR_INVAL;
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_gpio_write(uint8_t pad, uint8_t level)
+{
+	if (pad >= STUB_GPIO_MAX) return CC3501E_HW_ERR_INVAL;
+	stub_gpio_level[pad] = level ? 1u : 0u;
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_gpio_read(uint8_t pad, uint8_t *level_out)
+{
+	if (pad >= STUB_GPIO_MAX || level_out == 0) return CC3501E_HW_ERR_INVAL;
+	*level_out = stub_gpio_level[pad];
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_gpio_set_interrupt(uint8_t pad, uint8_t edge, uint8_t enabled)
+{
+	(void)edge;
+	(void)enabled;
+	if (pad >= STUB_GPIO_MAX) return CC3501E_HW_ERR_INVAL;
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_cam_enable(uint8_t which, uint8_t on)
+{
+	if (which > 1u) return CC3501E_HW_ERR_INVAL;
+	stub_cam[which] = on ? 1u : 0u;
+	return CC3501E_HW_OK;
+}

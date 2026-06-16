@@ -24,6 +24,12 @@ vendors/*/cube/
 !vendors/*/*.c
 !vendors/*/*.h
 
+# CC3501E SimpleLink CC33xx SDK -- license-gated, multi-GB, NOT redistributed
+# by alp-sdk.  Keep the committed wrapper (CMakeLists.txt + README.md); ignore
+# the extracted SDK if it is dropped in-tree under sdk/.  (The `vendors/`
+# plural rule above does not match this firmware-local singular `vendor/` path.)
+firmware/cc3501e/vendor/simplelink-cc33xx/sdk/
+
 # Zephyr / west workspace artefacts when this repo is the topdir.
 .west/
 twister-out/

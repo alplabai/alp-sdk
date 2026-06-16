@@ -25,6 +25,15 @@
  *   3. master clocks 4    -> reply header      (master reads reply len)
  *   4. master clocks M    -> reply payload      (M = that reply len)
  *
+ * Reply arming: the SLAVE arms steps 3+4 as a SINGLE fixed-count transfer
+ * of reply_len bytes (NOT header-then-payload).  With no CS the slave keeps
+ * clocking out of its reply buffer across the host's two read bursts, so
+ * there is NO callback turnaround inside the host's gap-less transfer-3 ->
+ * transfer-4 window (the host inserts a settle gap only before step 3).
+ * The earlier split (arm header, then arm payload from the header's
+ * completion callback) could be outrun by the master, clocking the SPI
+ * default fill into the reply payload -- the v0.1 reply-arming race.
+ *
  * No CS means the CC3501E's SS pad must be tied to its asserted level
  * on the SoM so the slave is permanently selected, and SPI_transfer()
  * must complete on clock-count alone -- CONFIRM against SWRU626 §18.
@@ -50,13 +59,13 @@
 
 #include "../../src/protocol.h"
 #include "../../src/transport.h"
+#include "../cc3501e_hw.h"
 
 /* Deterministic lockstep phases (see file header). */
 enum spi_phase {
-	PH_REQ_HEADER = 0, /* clocking the 4-byte request header   */
-	PH_REQ_PAYLOAD,    /* clocking payload_len request bytes   */
-	PH_REPLY_HEADER,   /* clocking the 4-byte reply header     */
-	PH_REPLY_PAYLOAD,  /* clocking the reply payload           */
+	PH_REQ_HEADER = 0, /* clocking the 4-byte request header              */
+	PH_REQ_PAYLOAD,    /* clocking payload_len request bytes              */
+	PH_REPLY,          /* clocking the whole reply (header + payload) out */
 };
 
 static SPI_Handle     spi;
@@ -99,8 +108,8 @@ static void dispatch_frame(size_t frame_len)
 }
 
 /* SPI transfer-complete callback (driver SWI/HWI context).  Advances
- * the request-header -> request-payload -> reply-header -> reply-payload
- * lockstep. */
+ * the request-header -> request-payload -> reply lockstep (the reply
+ * header+payload is one armed transfer; see the file header). */
 static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 {
 	(void)h;
@@ -119,8 +128,10 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 		cur_payload_len = plen;
 		if (plen == 0u) {
 			dispatch_frame(ALP_CC3501E_HEADER_BYTES);
-			phase = PH_REPLY_HEADER;
-			arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
+			/* Arm the WHOLE reply (header + payload) as ONE transfer --
+			 * see the reply-arming note in the file header. */
+			phase = PH_REPLY;
+			arm_transfer(NULL, reply_buf, reply_len);
 		} else {
 			phase = PH_REQ_PAYLOAD;
 			arm_transfer(&frame_buf[ALP_CC3501E_HEADER_BYTES], NULL, plen);
@@ -129,23 +140,23 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 	}
 	case PH_REQ_PAYLOAD:
 		dispatch_frame((size_t)ALP_CC3501E_HEADER_BYTES + cur_payload_len);
-		phase = PH_REPLY_HEADER;
-		arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
+		/* Arm the WHOLE reply (header + payload) as ONE transfer. */
+		phase = PH_REPLY;
+		arm_transfer(NULL, reply_buf, reply_len);
 		break;
 
-	case PH_REPLY_HEADER:
-		/* Reply header clocked out; now the reply payload (status + data
-         * = reply_len - 4 bytes, always >= 1). */
-		phase = PH_REPLY_PAYLOAD;
-		arm_transfer(NULL, &reply_buf[ALP_CC3501E_HEADER_BYTES],
-		             reply_len - ALP_CC3501E_HEADER_BYTES);
-		break;
-
-	case PH_REPLY_PAYLOAD:
+	case PH_REPLY:
 	default:
-		/* Whole reply clocked.  Re-arm for the next request header.
-         * (A pending CMD_RESET is actioned by cc3501e_hw_tick() on the
-         * next idle wakeup, after this ack has gone out.) */
+		/* The entire reply (header + payload) clocked out in a SINGLE armed
+         * transfer, so no callback turnaround sits in the host's gap-less
+         * transfer-3 -> transfer-4 window (audit finding
+         * "no-gap-between-reply-header-and-payload": the old split armed the
+         * payload only after the header completed, which the host could
+         * outrun and clock the SPI default fill instead of the staged
+         * reply).  Tell the HAL the ack has fully drained so a pending
+         * CMD_RESET can fire (cc3501e_hw_tick), then re-arm the next request
+         * header. */
+		cc3501e_hw_notify_reply_sent();
 		phase = PH_REQ_HEADER;
 		arm_transfer(frame_buf, NULL, ALP_CC3501E_HEADER_BYTES);
 		break;
@@ -156,7 +167,7 @@ void bridge_transport_spi_hw_init(void)
 {
 	SPI_Params params;
 	SPI_Params_init(&params);
-	params.mode                = SPI_SLAVE;
+	params.mode                = SPI_PERIPHERAL; /* CC35xx TI Drivers term for SPI slave */
 	params.transferMode        = SPI_MODE_CALLBACK;
 	params.transferCallbackFxn = on_transfer;
 	params.frameFormat         = SPI_POL0_PHA0; /* mode 0, per the host driver / chip manifest */

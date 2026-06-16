@@ -188,4 +188,54 @@ ZTEST(cc3501e_bridge_transport, test_new_request_replaces_staged_reply)
 	zassert_equal(buf[0], ALP_CC3501E_CMD_GET_VERSION, "still GET_VERSION after rewind");
 }
 
+/* GPIO proxy (v0.4): configure -> write -> read round-trip through the
+ * production dispatch + the stub HAL's in-memory pin model. */
+ZTEST(cc3501e_bridge_transport, test_gpio_write_then_read)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+
+	const uint8_t cfg[] = { ALP_CC3501E_CMD_GPIO_CONFIGURE, 0x00u, 0x04u, 0x00u,
+		                14u, ALP_CC3501E_GPIO_DIR_OUTPUT, ALP_CC3501E_GPIO_PULL_NONE, 0x00u };
+	transaction(cfg, sizeof cfg);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "configure reply = header + status");
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "GPIO_CONFIGURE -> OK");
+
+	const uint8_t wr[] = { ALP_CC3501E_CMD_GPIO_WRITE, 0x00u, 0x04u, 0x00u, 14u, 1u, 0x00u, 0x00u };
+	transaction(wr, sizeof wr);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "GPIO_WRITE -> OK");
+
+	const uint8_t rd[] = { ALP_CC3501E_CMD_GPIO_READ, 0x00u, 0x01u, 0x00u, 14u };
+	transaction(rd, sizeof rd);
+	n = drain(reply, sizeof reply);
+	zassert_equal(n, 6u, "read reply = header + status + level");
+	assert_reply_header(reply, ALP_CC3501E_CMD_GPIO_READ, 2u);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "GPIO_READ -> OK");
+	zassert_equal(reply[5], 1u, "GPIO_READ reflects the written level");
+}
+
+ZTEST(cc3501e_bridge_transport, test_cam_enable_ok)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	const uint8_t cam[] = { ALP_CC3501E_CMD_CAM_ENABLE, 0x00u, 0x01u, 0x00u, 0u };
+	transaction(cam, sizeof cam);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "cam reply = header + status");
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "CAM_ENABLE -> OK on stub");
+}
+
+ZTEST(cc3501e_bridge_transport, test_gpio_write_bad_len_invalid)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	/* GPIO_WRITE declares a 1-byte payload but the struct is 4 -> INVALID. */
+	const uint8_t wr[] = { ALP_CC3501E_CMD_GPIO_WRITE, 0x00u, 0x01u, 0x00u, 14u };
+	transaction(wr, sizeof wr);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "wrong-length GPIO_WRITE -> INVALID");
+}
+
 ZTEST_SUITE(cc3501e_bridge_transport, NULL, NULL, NULL, NULL, NULL);

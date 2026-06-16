@@ -114,6 +114,106 @@ static alp_cc3501e_resp_t handle_reset(const uint8_t *req, size_t req_len, uint8
 }
 
 /* --------------------------------------------------------------- */
+/* GPIO proxy (0x50..0x5F) + camera enables (0x60..0x61)             */
+/* --------------------------------------------------------------- */
+
+/* Map a HAL return code (CC3501E_HW_*) onto a wire response status.
+ * NOTIMPL -> NOT_READY (the op is not wired on this backend yet);
+ * INVAL -> INVALID; any other failure -> RADIO (generic HW/IO). */
+static alp_cc3501e_resp_t hw_to_resp(int rv)
+{
+	switch (rv) {
+	case CC3501E_HW_OK:
+		return ALP_CC3501E_RESP_OK;
+	case CC3501E_HW_ERR_NOTIMPL:
+		return ALP_CC3501E_RESP_ERR_NOT_READY;
+	case CC3501E_HW_ERR_INVAL:
+		return ALP_CC3501E_RESP_ERR_INVALID;
+	default:
+		return ALP_CC3501E_RESP_ERR_RADIO;
+	}
+}
+
+/* GPIO_CONFIGURE (0x50): set direction + pull on a proxied CC3501E pad. */
+static alp_cc3501e_resp_t handle_gpio_configure(const uint8_t *req, size_t req_len,
+                                                uint8_t *reply_data, size_t reply_cap,
+                                                size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != sizeof(alp_cc3501e_gpio_configure_t)) return ALP_CC3501E_RESP_ERR_INVALID;
+	const alp_cc3501e_gpio_configure_t *c = (const alp_cc3501e_gpio_configure_t *)req;
+	return hw_to_resp(cc3501e_hw_gpio_configure(c->cc3501e_gpio, c->direction, c->pull));
+}
+
+/* GPIO_WRITE (0x51): drive a proxied pad (open-drain semantics in the HAL). */
+static alp_cc3501e_resp_t handle_gpio_write(const uint8_t *req, size_t req_len, uint8_t *reply_data,
+                                            size_t reply_cap, size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != sizeof(alp_cc3501e_gpio_write_t)) return ALP_CC3501E_RESP_ERR_INVALID;
+	const alp_cc3501e_gpio_write_t *w = (const alp_cc3501e_gpio_write_t *)req;
+	return hw_to_resp(cc3501e_hw_gpio_write(w->cc3501e_gpio, w->level));
+}
+
+/* GPIO_READ (0x52): request payload = 1 byte (cc3501e_gpio); reply data =
+ * the sampled level (1 byte). */
+static alp_cc3501e_resp_t handle_gpio_read(const uint8_t *req, size_t req_len, uint8_t *reply_data,
+                                           size_t reply_cap, size_t *reply_data_len)
+{
+	*reply_data_len = 0u;
+	if (req_len != 1u) return ALP_CC3501E_RESP_ERR_INVALID;
+	if (reply_cap < 1u) return ALP_CC3501E_RESP_ERR_NO_MEM;
+	uint8_t            level = 0u;
+	alp_cc3501e_resp_t st    = hw_to_resp(cc3501e_hw_gpio_read(req[0], &level));
+	if (st == ALP_CC3501E_RESP_OK) {
+		reply_data[0]   = level;
+		*reply_data_len = 1u;
+	}
+	return st;
+}
+
+/* GPIO_SET_INTERRUPT (0x53): arm/disable an edge IRQ on a proxied pad.  The
+ * async EVT_GPIO_INTERRUPT delivery needs the next-rev host-IRQ line; this
+ * rev accepts the config (event delivery lands with r2 -- see DESIGN.md). */
+static alp_cc3501e_resp_t handle_gpio_set_interrupt(const uint8_t *req, size_t req_len,
+                                                    uint8_t *reply_data, size_t reply_cap,
+                                                    size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != sizeof(alp_cc3501e_gpio_set_interrupt_t)) return ALP_CC3501E_RESP_ERR_INVALID;
+	const alp_cc3501e_gpio_set_interrupt_t *s = (const alp_cc3501e_gpio_set_interrupt_t *)req;
+	return hw_to_resp(cc3501e_hw_gpio_set_interrupt(s->cc3501e_gpio, s->edge, s->enabled));
+}
+
+/* CAM_ENABLE (0x60) / CAM_DISABLE (0x61): drive CAM_EN_LDO0/1.  Request
+ * payload = 1 byte (which: 0 -> LDO0, 1 -> LDO1). */
+static alp_cc3501e_resp_t handle_cam_enable(const uint8_t *req, size_t req_len, uint8_t *reply_data,
+                                            size_t reply_cap, size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 1u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_cam_enable(req[0], 1u));
+}
+
+static alp_cc3501e_resp_t handle_cam_disable(const uint8_t *req, size_t req_len, uint8_t *reply_data,
+                                             size_t reply_cap, size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 1u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_cam_enable(req[0], 0u));
+}
+
+/* --------------------------------------------------------------- */
 /* Dispatch                                                          */
 /* --------------------------------------------------------------- */
 
@@ -141,6 +241,25 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t cmd, uint8_t flags, const uint8_t *
 		break;
 	case ALP_CC3501E_CMD_RESET:
 		h = handle_reset;
+		break;
+	/* GPIO proxy + camera enables (v0.4). */
+	case ALP_CC3501E_CMD_GPIO_CONFIGURE:
+		h = handle_gpio_configure;
+		break;
+	case ALP_CC3501E_CMD_GPIO_WRITE:
+		h = handle_gpio_write;
+		break;
+	case ALP_CC3501E_CMD_GPIO_READ:
+		h = handle_gpio_read;
+		break;
+	case ALP_CC3501E_CMD_GPIO_SET_INTERRUPT:
+		h = handle_gpio_set_interrupt;
+		break;
+	case ALP_CC3501E_CMD_CAM_ENABLE:
+		h = handle_cam_enable;
+		break;
+	case ALP_CC3501E_CMD_CAM_DISABLE:
+		h = handle_cam_disable;
 		break;
 	default:
 		/* Unknown, or a known v1 opcode whose firmware body has not
