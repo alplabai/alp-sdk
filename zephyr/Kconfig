@@ -368,6 +368,27 @@ config ADC_ALIF
 	  are repointed to the fork compatible AND bench-verified.  Task #21.
 	  Driver: zephyr/drivers/adc/adc_alif.c.
 
+config DAC_ALIF
+	bool "Alif Ensemble DAC (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
+	default y
+	depends on DAC
+	depends on DT_HAS_ALIF_DAC_ENABLED
+	select PINCTRL
+	select USE_ALIF_HAL_ANALOG
+	help
+	  Alif Ensemble DAC12 class driver (2x 12-bit current-output DACs), vendored
+	  VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/dac/dac_alif.c).
+	  Binds the fork-native compatible "alif,dac" (no upstream Zephyr Alif DAC
+	  exists, so no collision).  Built over the hal_alif analog_ctrl VREF helper
+	  library (USE_ALIF_HAL_ANALOG pulls in modules/hal/alif drivers/analog --
+	  the same library ADC_ALIF uses).  Write-only IP with NO interrupt; the
+	  setpoint goes through the DAC_IN register.  Not silicon-validated.
+
+	  ADR 0017 Tier-2 (a genuine fork-driver copy -- hal_alif ships no DAC class
+	  driver): INTERIM.  Retires onto the opt-in sdk-alif fork once the dac nodes
+	  are repointed to the fork compatible AND bench-verified.  Task #21.
+	  Driver: zephyr/drivers/dac/dac_alif.c.
+
 config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4

@@ -166,6 +166,16 @@ if(CONFIG_ADC_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/adc)
 endif()
 
+# Alif Ensemble DAC12 class driver (compatible "alif,dac"), vendored VERBATIM
+# from the Apache-2.0 zephyr_alif fork; hal_alif ships no DAC class driver, only
+# the analog_ctrl VREF helper library (drivers/analog), so the driver selects
+# USE_ALIF_HAL_ANALOG to pull that in (shared with ADC_ALIF).  Unlike the ADC, the
+# DAC driver pulls in no private upstream context header, so no extra include dir
+# is needed.  Bindings under zephyr/dts/bindings/dac/; nodes in the E8 SoC
+# overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_DAC_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dac/dac_alif.c)
+
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
