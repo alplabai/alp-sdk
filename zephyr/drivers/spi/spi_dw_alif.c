@@ -68,6 +68,21 @@ LOG_MODULE_REGISTER(spi_dw_alif);
 #define SPI_DW_DMA_SEMAPHORE_COUNT SPI_DW_DMA_FULL_DUPLEX
 #endif
 
+/*
+ * Alif Ensemble SoC-integration register that selects master vs slave mode for
+ * the four DWC_ssi instances.  The DWC_ssi macrocell's own CTRLR0.SSI_IS_MST bit
+ * is gated by this SoC wrapper: until the per-instance master-mode bit here is
+ * set, the controller stays in slave mode and never drives SCLK as a master
+ * (TX FIFO fills but nothing shifts).  Per-instance layout (from the Apache-2.0
+ * zephyr_alif fork soc_common.{c,h} -- CLKCTRL_PER_SLV base 0x4902F000 + 0x28):
+ *   bit n      (0..3) : SSI<n> master-mode enable
+ *   bit 8+n    (8..11): SSI<n> SS (slave-select) value
+ * Confirm the value against the Alif Ensemble TRM clock chapter.
+ */
+#define ALIF_CLKCTRL_PER_SLV_SSI_CTRL 0x4902F028U
+#define ALIF_SSI_CTRL_MST_BIT(idx) BIT(idx)
+#define ALIF_SSI_CTRL_SS_VAL_BIT(idx) BIT((idx) + 8U)
+
 static inline bool spi_dw_is_slave(struct spi_dw_data *spi)
 {
 	return (IS_ENABLED(CONFIG_SPI_SLAVE) &&
@@ -1020,6 +1035,18 @@ int spi_dw_init(const struct device *dev)
 
 	DEVICE_MMIO_MAP(dev, K_MEM_CACHE_NONE);
 
+	/*
+	 * Put the SoC SSI wrapper into master mode for this instance.  Without
+	 * this the macrocell ignores CTRLR0.SSI_IS_MST and never shifts as a
+	 * master (no SCLK; TX FIFO stuck).  Slave (serial-target) instances are
+	 * left alone so the wrapper keeps them in slave mode.
+	 */
+	if (!info->serial_target) {
+		sys_set_bits(ALIF_CLKCTRL_PER_SLV_SSI_CTRL,
+			     ALIF_SSI_CTRL_MST_BIT(info->spi_idx) |
+			     ALIF_SSI_CTRL_SS_VAL_BIT(info->spi_idx));
+	}
+
 	info->config_func();
 
 	/* Masking interrupt and making sure controller is disabled */
@@ -1272,6 +1299,15 @@ COND_CODE_1(IS_EQ(DT_NUM_IRQS(DT_DRV_INST(inst)), 1),              \
 	static const struct spi_dw_config spi_dw_config_##inst = {                             \
 		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(inst)),                                       \
 		COND_CODE_1(                                                                   \
+			DT_INST_NODE_HAS_PROP(inst, clock_frequency),                          \
+			(                                                                      \
+				/* Prefer the SPI node's own clock-frequency (works    \
+				 * without the clock controller reporting a rate). */  \
+				.clock_frequency = DT_INST_PROP(inst, clock_frequency),\
+				.clock_dev = NULL,                                             \
+				.clock_subsys = NULL,                                          \
+			),                                                                     \
+		(COND_CODE_1(                                                                  \
 			DT_NODE_HAS_PROP(DT_INST_PHANDLE(inst, clocks), clock_frequency),      \
 			(                                                                      \
 				.clock_frequency =                                             \
@@ -1285,9 +1321,11 @@ COND_CODE_1(IS_EQ(DT_NUM_IRQS(DT_DRV_INST(inst)), 1),              \
 				.clock_subsys =                                                \
 					(clock_control_subsys_t)DT_INST_PHA(inst, clocks, clkid),\
 			)                                                                        \
+		))                                                                               \
 		)                                                                                \
 		.config_func = spi_dw_irq_config_##inst,                                    \
 		.serial_target = DT_INST_PROP(inst, serial_target),                         \
+		.spi_idx = (uint8_t)((DT_INST_REG_ADDR(inst) - 0x48103000U) / 0x1000U),     \
 		.fifo_depth = DT_INST_PROP(inst, fifo_depth),                               \
 		.max_xfer_size = DT_INST_PROP(inst, max_xfer_size),                         \
 		.rx_delay = DT_INST_PROP(inst, rx_delay),                                   \
