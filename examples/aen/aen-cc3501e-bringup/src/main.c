@@ -85,6 +85,31 @@
 #define CC3501E_PING_RETRIES 25u
 #define CC3501E_PING_GAP_MS 200u
 
+/*
+ * SWD-readable bring-up witness.
+ *
+ * The AEN carrier console (uart5) may not be broken out on every bench, so
+ * this struct mirrors the PING result into RAM where a J-Link can read it
+ * with no console attached (the gd32-bridge-ping trick).  Find its address
+ * in zephyr.map (symbol `g_cc3501e_witness`), then over J-Link:
+ *   mem32 <addr> 8     -- magic should read 0x35334343 ("CC35" LE) once
+ *                         main() runs; ping_ok increments while the link is
+ *                         up; last_status / version are the latest results.
+ * `used` keeps it through --gc-sections; volatile stops the compiler from
+ * optimising the stores away (nothing in this TU reads the fields back). */
+typedef struct {
+	uint32_t magic;        /* 0x35334343 once main() starts            */
+	uint32_t reset_status; /* (uint32_t)alp_status_t from cc3501e_reset */
+	uint32_t ping_ok;      /* count of successful PINGs                 */
+	uint32_t ping_fail;    /* count of failed PINGs                     */
+	uint32_t last_status;  /* (uint32_t)alp_status_t of the last PING   */
+	uint32_t version;      /* protocol version (low 16b) | status<<16   */
+} cc3501e_witness_t;
+
+#define CC3501E_WITNESS_MAGIC 0x35334343u /* "CC35" little-endian */
+
+volatile cc3501e_witness_t g_cc3501e_witness __attribute__((used));
+
 /* Send a bare PING (META opcode 0x00).  The reply payload is just the
  * status byte -- no data -- so we pass a NULL/0 receive buffer.  Returns
  * the driver status: ALP_OK means the coprocessor parsed the frame and
@@ -135,6 +160,7 @@ static void cc3501e_dump_diag(cc3501e_t *fw)
 int main(void)
 {
 	printf("\n[cc3501e-bringup] E1M-AEN CC3501E Wi-Fi/BLE coprocessor bring-up\n");
+	g_cc3501e_witness.magic = CC3501E_WITNESS_MAGIC; /* marks the struct found over SWD */
 
 	/*
 	 * Step 1 -- claim the two control GPIOs and make them outputs.
@@ -195,7 +221,8 @@ int main(void)
 
 	printf("[cc3501e-bringup] powering + resetting CC3501E (WIFI_EN high, nRESET pulse, "
 	       "~900 ms boot)...\n");
-	alp_status_t s = cc3501e_reset(&fw);
+	alp_status_t s                 = cc3501e_reset(&fw);
+	g_cc3501e_witness.reset_status = (uint32_t)s;
 	printf("[cc3501e-bringup] cc3501e_reset -> %d%s\n", (int)s,
 	       (s == ALP_ERR_NOSUPPORT) ? " (control pins not bound?)" : "");
 
@@ -232,8 +259,9 @@ int main(void)
 	 * GET_VERSION returns the *protocol* version; it must match
 	 * ALP_CC3501E_PROTOCOL_VERSION for the wire contract to hold.
 	 */
-	uint16_t version = 0u;
-	s                = cc3501e_get_version(&fw, &version);
+	uint16_t version          = 0u;
+	s                         = cc3501e_get_version(&fw, &version);
+	g_cc3501e_witness.version = (uint32_t)version | ((uint32_t)(uint8_t)s << 16);
 	if (s == ALP_OK) {
 		printf("[cc3501e-bringup] GET_VERSION -> protocol v%u (host expects v%u)%s\n", version,
 		       ALP_CC3501E_PROTOCOL_VERSION,
@@ -253,12 +281,19 @@ int main(void)
 	 */
 	printf("[cc3501e-bringup] entering liveness soak (PING every 500 ms)\n");
 	for (uint32_t i = 0u;; ++i) {
-		s = cc3501e_ping(&fw);
+		s                             = cc3501e_ping(&fw);
+		g_cc3501e_witness.last_status = (uint32_t)s;
+		if (s == ALP_OK) {
+			g_cc3501e_witness.ping_ok++;
+		} else {
+			g_cc3501e_witness.ping_fail++;
+		}
 		printf("[cc3501e-bringup] soak PING #%u -> %d\n", i, (int)s);
 
 		if ((i % 8u) == 0u) {
-			uint16_t     v  = 0u;
-			alp_status_t vs = cc3501e_get_version(&fw, &v);
+			uint16_t     v            = 0u;
+			alp_status_t vs           = cc3501e_get_version(&fw, &v);
+			g_cc3501e_witness.version = (uint32_t)v | ((uint32_t)(uint8_t)vs << 16);
 			printf("[cc3501e-bringup] soak GET_VERSION #%u -> %d (v%u)\n", i, (int)vs, v);
 		}
 		k_msleep(500);
