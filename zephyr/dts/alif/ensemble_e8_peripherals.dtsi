@@ -680,4 +680,121 @@
 		capacitance = "DAC_8PF_CAPACITANCE";
 		status = "disabled";
 	};
+
+	/*
+	 * CAMERA CAPTURE path -- CPI parallel-camera controller (cam) +
+	 * DesignWare MIPI CSI-2 host bridge (csi) + DesignWare MIPI D-PHY (dphy),
+	 * all driven by the alp-sdk vendored fork drivers (zephyr/drivers/video/
+	 * video_alif.c "alif,cam", video_csi_dw.c "snps,designware-csi",
+	 * zephyr/drivers/mipi_dphy/dphy_dw.c "snps,designware-dphy").  reg / IRQ /
+	 * reg-names / clock-names are transcribed VERBATIM from the Apache-2.0
+	 * zephyr_alif fork e3_e5_e7.dtsi (cam@49030000, csi@49033000) + e1.dtsi
+	 * (d-phy@49033000) -- the SAME DesignWare camera IP across the Ensemble
+	 * family, identical addresses on E8.
+	 *
+	 *   cam  : reg 0x49030000/0x1000          IRQ 345  clock-names "cam_clk"
+	 *   csi  : reg 0x49033000/0x1000          IRQ 344  clock-names "csi_clk","pix_clk"
+	 *   dphy : reg "csi_reg" 0x49033000/0x1000 (shared CSI base),
+	 *          "dsi_reg" 0x49032000/0x1000, "expmst_reg" 0x4903f000/0x40
+	 *          clock-names "pllref-clk","pllbypass-clk","tx-dphy-clk","rx-dphy-clk"
+	 *
+	 * CLOCKS -- FLAGGED PLACEHOLDER.  The fork drives these blocks with
+	 * ALIF_CPI_CLK / ALIF_CSI_CLK / ALIF_CSI_PIX_SYST_ACLK / ALIF_MIPI_*_CLK,
+	 * which exist ONLY in the fork's 7-arg clock encoding.  Per
+	 * [[reference_alif_clock_encoding_fork_vs_upstream]] those packed values
+	 * MUST NOT be copied onto the upstream alif,clockctrl (wrong register
+	 * block).  The upstream-encoding gate/offset/parent for the camera clocks
+	 * are a TRM/bench unknown and are NOT re-authored here -- a frequency-only
+	 * dummy clock (ALIF_CLK(2U), the ALIF_SPI_CLK precedent) is used so the
+	 * nodes are well-formed.  These nodes are status="disabled" AND the drivers
+	 * are gated OFF (ALP_VIDEO_ALIF_BROKEN, NOT YET PORTED to v4.4), so NO clock
+	 * is actually programmed.  Re-author the real camera clock IDs via
+	 * alif-ensemble-clocks-ext.h when the stack is bench-brought-up (task #21).
+	 *
+	 * NO pinctrl-0: the fork cam node references &pinctrl_cam8 (the 8-bit CPI
+	 * data pads), not defined in this tree; the driver applies pinctrl only IF
+	 * the node carries it, so the node is left pinctrl-less (a board that wires
+	 * a parallel sensor adds the group per the Alif TRM).  The CSI/MIPI path
+	 * uses serial D-PHY pads (no parallel pinctrl).
+	 *
+	 * ADR 0017 Tier-2 (fork-driver copies; upstream + hal_alif ship no camera
+	 * video / mipi_dphy drivers) -- INTERIM, retires onto the fork once the
+	 * nodes are repointed + the drivers ported to the v4.4 video API +
+	 * bench-verified (task #21).  Runtime frame CAPTURE is HW-blocked on this
+	 * batch (no camera sensor wired).  BENCH-UNVERIFIED.
+	 */
+	dphy: d-phy@49033000 {
+		compatible = "snps,designware-dphy";
+		reg = <0x49033000 0x1000>,
+		      <0x49032000 0x1000>,
+		      <0x4903F000 0x40>;
+		reg-names = "csi_reg", "dsi_reg", "expmst_reg";
+		#dphy-cells = <1>;
+		clocks = <&clockctrl ALIF_CSI_DPHY_CLK>,
+			 <&clockctrl ALIF_CSI_DPHY_CLK>,
+			 <&clockctrl ALIF_CSI_DPHY_CLK>,
+			 <&clockctrl ALIF_CSI_DPHY_CLK>;
+		clock-names = "pllref-clk", "pllbypass-clk", "tx-dphy-clk", "rx-dphy-clk";
+		ref-frequency = <38400000>;
+		cfg-clk-frequency = <25000000>;
+		status = "disabled";
+	};
+
+	cam: cam@49030000 {
+		compatible = "alif,cam";
+		reg = <0x49030000 0x1000>;
+		interrupts = <345 0>;
+		clocks = <&clockctrl ALIF_CPI_CLK>;
+		clock-names = "cam_clk";
+		fifo-wr-wmark = <0x18>;
+		fifo-rd-wmark = <0x08>;
+		wait-vsync;
+		status = "disabled";
+	};
+
+	csi: csi@49033000 {
+		compatible = "snps,designware-csi";
+		reg = <0x49033000 0x1000>;
+		interrupts = <344 0>;
+		clocks = <&clockctrl ALIF_CSI_CLK>, <&clockctrl ALIF_CSI_CLK>;
+		clock-names = "csi_clk", "pix_clk";
+		ipi-mode = "Camera";
+		phy-if = <&dphy 1>, <&dphy 0>;
+		csi-hsa = <5>;
+		csi-hbp = <10>;
+		csi-hsd = <280>;
+		csi-hact = <560>;
+		csi-vsa = <4>;
+		csi-vbp = <4>;
+		csi-vfp = <4>;
+		csi-vact = <560>;
+		status = "disabled";
+	};
+};
+
+/*
+ * ARX3A0 MIPI CSI-2 sensor (onnn,arx3a0), driven by the vendored fork driver
+ * zephyr/drivers/video/arx3a0.c.  Placed as an I2C child of i2c2 (the edge
+ * snps,designware-i2c declared above) -- the sensor's control plane is I2C, its
+ * pixel plane is the MIPI CSI-2 D-PHY (the &csi/&dphy nodes above).
+ *
+ * FLAGGED -- BENCH UNKNOWN (do NOT treat as authoritative):
+ *   - I2C BUS: which on-SoM/carrier I2C the camera connector routes to on the
+ *     AEN801 SoM is unverified; i2c2 is a plausible default, NOT confirmed.
+ *   - reg = <0x36>: the ARX3A0's standard 7-bit I2C address; carried as the
+ *     part default, NOT verified against the SoM's strap/connector.
+ *   - reset-gpios / power-gpios: the sensor RESETn + power-enable pins are NOT
+ *     sourced (no SoM camera-connector pinout in scope) -- OMITTED rather than
+ *     invented; the driver applies them only IF present.
+ * No camera sensor is wired on this hardware batch, so this is staging only.
+ */
+&i2c2 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	arx3a0: arx3a0@36 {
+		compatible = "onnn,arx3a0";
+		reg = <0x36>;
+		status = "disabled";
+	};
 };

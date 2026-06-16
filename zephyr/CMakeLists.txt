@@ -191,6 +191,36 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_DAC_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dac/dac_alif.c)
 
+# Alif Ensemble CAMERA CAPTURE path -- CPI controller (compatible "alif,cam"),
+# DesignWare MIPI CSI-2 bridge (compatible "snps,designware-csi"), DesignWare
+# MIPI D-PHY (compatible "snps,designware-dphy") + ON Semi ARX3A0 sensor
+# (compatible "onnn,arx3a0"), all vendored VERBATIM from the Apache-2.0
+# zephyr_alif fork.  Upstream Zephyr v4.4 + hal_alif ship NONE of these.  The
+# sources, bindings (zephyr/dts/bindings/{video,mipi-dphy}/) and DT nodes (E8
+# SoC overlay) are carried in-tree regardless of the build gate so they survive
+# a `west update`; the TUs themselves are gated on ALP_VIDEO_ALIF_BROKEN
+# (default n) because the fork video drivers implement the OLD
+# `enum video_endpoint_id`-based video API that upstream v4.4 removed, so they
+# DO NOT COMPILE against v4.4 without a body rewrite (deferred to the
+# fork-repoint, task #21).  The video drivers reuse upstream's private
+# drivers/video/video_common.c helpers + the public CSI tables vendored to
+# zephyr/include/zephyr/drivers/video/video_alif.h; soc_memory_map.h resolves
+# via the hal_alif common/include dir (CONFIG_RTSS_HE/HP).  Put the vendored
+# public include dir on the path so <zephyr/drivers/video/video_alif.h> and
+# <zephyr/drivers/mipi_dphy/dphy_dw.h> resolve.  ADR 0017 Tier-2 (INTERIM).
+if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_MIPI_CSI2_DW OR CONFIG_VIDEO_ARX3A0 OR CONFIG_MIPI_DPHY_DW)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+    zephyr_include_directories(${ZEPHYR_BASE}/drivers/video)
+endif()
+zephyr_library_sources_ifdef(CONFIG_VIDEO_ALIF_CAM
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_alif.c)
+zephyr_library_sources_ifdef(CONFIG_VIDEO_MIPI_CSI2_DW
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_csi_dw.c)
+zephyr_library_sources_ifdef(CONFIG_VIDEO_ARX3A0
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/arx3a0.c)
+zephyr_library_sources_ifdef(CONFIG_MIPI_DPHY_DW
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mipi_dphy/dphy_dw.c)
+
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
