@@ -191,6 +191,19 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_DAC_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dac/dac_alif.c)
 
+# Alif Ensemble LPPDM / PDM mic-capture class driver (compatible "alif,alif-pdm"),
+# vendored VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/audio/alif_pdm.c).
+# Upstream Zephyr v4.4 + hal_alif ship no Alif PDM driver.  Pure CMSIS + Zephyr
+# clock_control/pinctrl (no hal_alif library, like flash_mram_alif); implements the
+# Zephyr DMIC API.  Binding zephyr/dts/bindings/audio/alif,alif-pdm.yaml + the
+# private header zephyr/include/zephyr/drivers/pdm/pdm_alif.h; node in the E8 SoC
+# overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_ALIF_PDM
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/audio/alif_pdm.c)
+if(CONFIG_ALIF_PDM)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+endif()
+
 # Alif Ensemble CAMERA CAPTURE path -- CPI controller (compatible "alif,cam"),
 # DesignWare MIPI CSI-2 bridge (compatible "snps,designware-csi"), DesignWare
 # MIPI D-PHY (compatible "snps,designware-dphy") + ON Semi ARX3A0 sensor

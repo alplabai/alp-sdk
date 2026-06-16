@@ -67,6 +67,18 @@
 	ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 16U, 1U, 0U, 0U, 0U,               \
 		     ALIF_PARENT_CLK_SYST_HCLK)
 
+/* LPPDM (low-power PDM mic block, M55-HE local domain): bit 8 of HE_CLK_ENA in
+ * M55HE_CFG, with a 1-bit clock-source field at bit 9 (src=0 selects 76.8 MHz;
+ * src=1 would be ALIF_LPPDM_AUDIO_CLK).  Re-authored from the fork 7-arg
+ * ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 8U, 1U, 0U, 1U, 9U)
+ * (alif_ensemble_clocks.h:93) into the upstream 8-arg encoding -- same en_bit /
+ * en_mask / src / src_field, plus a parent_clk filler (the alif,alif-pdm driver
+ * only clock_control_configure()/on()s this id, never get_rate()s, so the parent
+ * is unused).  HE-core only. */
+#define ALIF_LPPDM_76M8_CLK                                                    \
+	ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 8U, 1U, 0U, 1U, 9U,                \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
 /*
  * CAMERA CAPTURE clocks (CPI / CSI / D-PHY) -- FREQUENCY-ONLY DUMMY PLACEHOLDERS.
  * The fork drives these blocks with ALIF_CPI_CLK / ALIF_CSI_CLK /

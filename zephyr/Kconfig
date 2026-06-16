@@ -389,6 +389,24 @@ config DAC_ALIF
 	  are repointed to the fork compatible AND bench-verified.  Task #21.
 	  Driver: zephyr/drivers/dac/dac_alif.c.
 
+config ALIF_PDM
+	bool "Alif Ensemble LPPDM PDM mic capture (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
+	default y
+	depends on AUDIO_DMIC
+	depends on DT_HAS_ALIF_ALIF_PDM_ENABLED
+	select PINCTRL
+	help
+	  Alif Ensemble LPPDM PDM-microphone class driver, vendored VERBATIM from the
+	  Apache-2.0 zephyr_alif fork (drivers/audio/alif_pdm.c).  Implements the Zephyr
+	  DMIC API over the alif,alif-pdm IP; pure CMSIS + Zephyr clock_control/pinctrl
+	  (no hal_alif library, like flash_mram_alif).  Binds the fork-native compatible
+	  "alif,alif-pdm" (no upstream Zephyr Alif PDM exists, so no collision).  The
+	  76.8 MHz block clock is gated via ALIF_LPPDM_76M8_CLK.  Not silicon-validated.
+
+	  ADR 0017 Tier-2 (a genuine fork-driver copy -- hal_alif ships no PDM class
+	  driver): INTERIM.  Retires onto the opt-in sdk-alif fork once bench-verified.
+	  Task #21.  Driver: zephyr/drivers/audio/alif_pdm.c.
+
 # ---------------------------------------------------------------------------
 # Alif Ensemble CAMERA CAPTURE path (CPI controller + DesignWare MIPI CSI-2
 # bridge + DesignWare MIPI D-PHY + ON Semi ARX3A0 sensor) -- ADR 0017 Tier-2,
