@@ -27,6 +27,50 @@
 #include "transport.h"
 #include "../hal/cc3501e_hw.h"
 
+#if defined(CC3501E_RTOS_FREERTOS)
+/* ----------------------------------------------------------------- *
+ * ti bench build (FreeRTOS).  The CC35xx TI Drivers dpl is FreeRTOS-  *
+ * backed -- the SPI/SDIO slave's transfer-complete callback dispatches *
+ * via SwiP, which only runs once the scheduler is started.  So main() *
+ * starts a single bring-up task that arms the active transport and    *
+ * runs the housekeeping tick; the slave callback then fires from the  *
+ * driver's ISR/SwiP.  (The native/stub build keeps the bare WFI loop  *
+ * below -- the gd32-bridge model.)                                    *
+ * ----------------------------------------------------------------- */
+#include <FreeRTOS.h>
+#include <task.h>
+
+#define CC3501E_BRINGUP_STACK_WORDS 512u
+static StackType_t  bringup_stack[CC3501E_BRINGUP_STACK_WORDS];
+static StaticTask_t bringup_tcb;
+
+static void bringup_task(void *arg)
+{
+	(void)arg;
+#if defined(CC3501E_CONTROL_TRANSPORT_SDIO)
+	transport_sdio_init();
+#else
+	transport_spi_init();
+#endif
+	for (;;) {
+		cc3501e_hw_tick();
+		vTaskDelay(pdMS_TO_TICKS(10));
+	}
+}
+
+int main(void)
+{
+	cc3501e_hw_init();
+	(void)xTaskCreateStatic(bringup_task, "cc3501e_bringup", CC3501E_BRINGUP_STACK_WORDS, NULL,
+	                        configMAX_PRIORITIES - 1, bringup_stack, &bringup_tcb);
+	vTaskStartScheduler();
+	for (;;) {
+	}
+	/* unreachable */
+}
+
+#else /* bare-loop: native/stub build (gd32-bridge model) */
+
 /* The Cortex-M intrinsic; weakly defined here so the scaffold compiles
  * under hosted toolchains where __WFI() is missing. */
 #ifndef __WFI
@@ -55,3 +99,5 @@ int main(void)
 	/* unreachable */
 	return 0;
 }
+
+#endif /* CC3501E_RTOS_FREERTOS */
