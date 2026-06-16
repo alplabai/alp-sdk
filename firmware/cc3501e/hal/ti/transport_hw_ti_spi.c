@@ -170,7 +170,10 @@ void bridge_transport_spi_hw_init(void)
 	params.mode                = SPI_PERIPHERAL; /* CC35xx TI Drivers term for SPI slave */
 	params.transferMode        = SPI_MODE_CALLBACK;
 	params.transferCallbackFxn = on_transfer;
-	params.frameFormat         = SPI_POL0_PHA0; /* mode 0, per the host driver / chip manifest */
+	params.frameFormat         = SPI_POL0_PHA1; /* mode 1 -- matches TI's validated CC35xx
+	                                             * spiperipheral example (bench mode-1 SPI-link
+	                                             * experiment 2026-06-16; pair with the Alif master
+	                                             * ALP_SPI_MODE_1). Was SPI_POL0_PHA0. */
 	params.dataSize            = 8;
 
 	spi                        = SPI_open(CONFIG_SPI_0, &params);

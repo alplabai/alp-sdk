@@ -68,12 +68,34 @@ foreach ($s in $sources) {
     $objs += $o
 }
 
+Write-Host "== Patch linker cmd (.args -> NOLOAD so the flash image doesn't span DRAM) =="
+# The stock cc35xx.cmd reserves an 8-byte initialized .args section in DRAM
+# (--args 0x8) loaded at its DRAM run address (0x28000000+).  The flash-image
+# builder flattens lowest..highest load address, so a single loaded DRAM section
+# makes the vendor image span FLASH..DRAM (~402 MB) and overflow the 8 MB part.
+# The bridge takes no main() args, so regenerate the cmd with --args 0 and
+# .args NOLOAD -> the vendor image is just the ~17 KB flash content.
+$stockCmd = "$SdkDir\source\ti\devices\cc35xx\linker_files\cc35xx.cmd"
+$localCmd = "$out\cc3501e_vendor.cmd"
+$cmdLines = (Get-Content $stockCmd) `
+    -replace '--args\s+0x8', '--args 0' `
+    -replace '(\.args\s*:\s*>\s*DRAM)', '$1, type = NOLOAD'
+# Also pin the TI Log metadata section (.log_data) into FLASH. Left to its
+# default it lands at the base of CRAM (~0x114) and, exactly like .args, would
+# balloon the flat vendor image across CRAM..FLASH. Keeping every loaded section
+# in the FLASH region bounds the vendor image to the ~17 KB it actually is.
+$cmdLines = $cmdLines | ForEach-Object {
+    $_
+    if ($_ -match '\.emb_text\s*:\s*>\s*FLASH') { '    .log_data       :   > FLASH PALIGN(4)' }
+}
+$cmdLines | Set-Content $localCmd
+
 Write-Host "== Link =="
 $link = @('-Wl,-u,_c_int00', '-mcpu=cortex-m33', '-mthumb', '-mfloat-abi=hard', '-mfpu=fpv5-sp-d16') +
         $objs +
         @("-L$SdkDir\source",
           "$out\ti_utils_build_linker.cmd.genlibs",                                  # drivers_cc35xx.a + driverlib.a
-          "$SdkDir\source\ti\devices\cc35xx\linker_files\cc35xx.cmd",
+          $localCmd,
           '-Wl,--rom_model', "-Wl,-m,$out\cc3501e-bridge.map", '-o', "$out\cc3501e-bridge.out")
 & $tc @link
 if ($LASTEXITCODE -ne 0) { throw "link failed" }

@@ -77,6 +77,16 @@
 		reg = <0x48104000 0x1000>;
 		interrupts = <138 3>;          /* BENCH-TBD: confirm SPI1 IRQ */
 		clocks = <&clockctrl ALIF_SPI_CLK>;
+		/*
+		 * ROOT-CAUSE FIX 2026-06-16: spi_dw_alif's configure takes the
+		 * clock-control path when no clock-frequency is set, and that path
+		 * fails (-EINVAL) for the gateless dummy ALIF_SPI_CLK -> every
+		 * transceive returned ALP_ERR_INVAL with zero SCLK (witness fail_step=1,
+		 * zerr=-EINVAL). Providing the SSI input clock here makes the driver
+		 * use it directly and skip the failing clock-control path. SYST_HCLK =
+		 * AHB = 400 MHz (E8 HWRM); BAUDR = 400M/freq_hz (=50 for an 8 MHz SCLK).
+		 */
+		clock-frequency = <400000000>;
 		dwc-ssi;
 		fifo-depth = <16>;
 		pinctrl-0 = <&pinctrl_spi1>;

@@ -106,7 +106,20 @@ typedef struct {
 	uint32_t last_status;  /* (uint32_t)alp_status_t of the last PING   */
 	uint32_t version;      /* protocol version (low 16b) | status<<16   */
 	uint32_t phase;        /* progress checkpoint (see CC3501E_PHASE_*)  */
+	uint32_t zerr;         /* bench debug: raw Zephyr spi_transceive() errno (last PING) */
+	uint32_t fail_step;    /* bench debug: cc3501e_request step that failed (1..6); 0=ok  */
+	uint32_t reqhdr_rx;    /* bench debug: MISO bytes clocked back during req-hdr write   */
+	uint32_t reply_hdr;    /* bench debug: raw 4 reply-header bytes the CC3501E drove     */
 } cc3501e_witness_t;
+
+/* Bench debug instrumentation (2026-06-16, REVERT after the SPI1-no-clock root
+ * cause is found): surface the raw Zephyr SPI errno + the failing request step
+ * through the witness so a J-Link can read the exact failure with no console.
+ * Defined in src/backends/spi/zephyr_drv.c and chips/cc3501e/cc3501e.c. */
+extern volatile int alp_spi_dbg_last_zerr;
+extern volatile int cc3501e_dbg_fail_step;
+extern volatile uint32_t cc3501e_dbg_reqhdr_rx;
+extern volatile uint32_t cc3501e_dbg_reply_hdr;
 
 /* Progress checkpoints written to g_cc3501e_witness.phase so a J-Link can
  * localise where the app got to (read after a fault: .bss survives a halt).
@@ -257,7 +270,9 @@ int main(void)
 	alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
 	    .bus_id        = CC3501E_SPI_BUS_ID,
 	    .freq_hz       = CC3501E_SPI_FREQ_HZ,
-	    .mode          = ALP_SPI_MODE_0,
+	    .mode          = ALP_SPI_MODE_1, /* bench mode-1 SPI-link experiment 2026-06-16:
+	                                      * match TI's validated CC35xx spiperipheral (POL0_PHA1);
+	                                      * pair with the firmware frameFormat. Was ALP_SPI_MODE_0. */
 	    .bits_per_word = 8u,
 	    .cs_pin_id     = ALP_SPI_NO_CS,
 	});
@@ -353,6 +368,10 @@ int main(void)
 	for (uint32_t i = 0u;; ++i) {
 		s                             = cc3501e_ping(&fw);
 		g_cc3501e_witness.last_status = (uint32_t)s;
+		g_cc3501e_witness.zerr        = (uint32_t)alp_spi_dbg_last_zerr;  /* bench debug */
+		g_cc3501e_witness.fail_step   = (uint32_t)cc3501e_dbg_fail_step;  /* bench debug */
+		g_cc3501e_witness.reqhdr_rx   = cc3501e_dbg_reqhdr_rx;            /* bench debug */
+		g_cc3501e_witness.reply_hdr   = cc3501e_dbg_reply_hdr;            /* bench debug */
 		if (s == ALP_OK) {
 			g_cc3501e_witness.ping_ok++;
 		} else {
