@@ -17,6 +17,21 @@ if(CONFIG_SOC_FAMILY_ENSEMBLE OR CONFIG_SOC_FAMILY_ENSEMBLE_RTSS)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif)
 endif()
 
+# Alif Ensemble on-die MRAM flash driver (compatible
+# "alif,mram-flash-controller", base 0x80000000), vendored VERBATIM from the
+# Apache-2.0 zephyr_alif fork.  Compiled into the DEFAULT Zephyr library via
+# zephyr_sources_ifdef -- and DELIBERATELY BEFORE the CONFIG_ALP_SDK
+# early-return below (the soc-bridge precedent) -- because the MCUboot
+# bootloader image needs it but never sets CONFIG_ALP_SDK.  Upstream Zephyr
+# v4.4 + hal_alif ship no flash-class driver for the MRAM (it is exposed only
+# as a memory region), so MCUboot's flash_map has no driver to read/write
+# slot0/slot1; this fork copy sets FLASH_HAS_DRIVER_ENABLED.  Pure CMSIS
+# register/memory access: no private upstream header and no hal_alif library,
+# so no extra include path.  Binding under zephyr/dts/bindings/flash_controller/;
+# node in the board overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_sources_ifdef(CONFIG_MRAM_FLASH_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_mram_alif.c)
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()
