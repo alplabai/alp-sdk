@@ -153,6 +153,19 @@ zephyr_library_sources_ifdef(CONFIG_PWM_ALIF_UTIMER
 zephyr_library_sources_ifdef(CONFIG_COUNTER_ALIF_UTIMER
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/counter/counter_alif_utimer.c)
 
+# Alif Ensemble ADC class driver (compatible "alif,adc"), vendored VERBATIM from
+# the Apache-2.0 zephyr_alif fork; hal_alif ships no ADC class driver, only the
+# analog_ctrl VREF helper library (drivers/analog), so the driver selects
+# USE_ALIF_HAL_ANALOG to pull that in.  The driver reuses upstream's private
+# adc_context.h, so put drivers/adc on the include path (the spi_context.h
+# precedent above).  Bindings under zephyr/dts/bindings/adc/; nodes in the E8
+# SoC overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_ADC_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/adc/adc_alif.c)
+if(CONFIG_ADC_ALIF)
+    zephyr_include_directories(${ZEPHYR_BASE}/drivers/adc)
+endif()
+
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
@@ -761,6 +774,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_ADC
 # tree-shaken from the build.
 zephyr_library_sources_ifdef(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/alif_e7.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/alif_e8.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SOC_RENESAS_RZV2N_N44
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/gd32_bridge.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_ADC_SW_FALLBACK

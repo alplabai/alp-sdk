@@ -34,6 +34,7 @@
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
 #include <zephyr/dt-bindings/timer/alif_utimer.h>
 #include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/adc/adc_alif.h>
 
 &soc {
 	/*
@@ -475,6 +476,144 @@
 		interrupts = <55 0>;
 		secure-enable;
 		privilege-enable;
+		status = "disabled";
+	};
+
+	/*
+	 * ADC -- Alif Ensemble analog-to-digital converters: three 12-bit SAR ADCs
+	 * (adc12_0..2) + one 24-bit sigma-delta ADC (adc24_0).  Driven by the alp-sdk
+	 * vendored fork driver (zephyr/drivers/adc/adc_alif.c, compatible "alif,adc")
+	 * over the hal_alif analog_ctrl VREF library (CONFIG_ADC_ALIF selects
+	 * USE_ALIF_HAL_ANALOG).  reg / reg-names / IRQs / config properties are
+	 * transcribed VERBATIM from the Apache-2.0 zephyr_alif fork e1.dtsi
+	 * (ensemble/common/e1.dtsi adc0..adc24):
+	 *
+	 *   reg-names: "adc_reg"   = per-instance ADC block (0x49020000 + id*0x1000;
+	 *                            adc24 at 0x49027000)
+	 *              "analog_reg"= shared ADC1 analog-control base 0x49020000
+	 *              "comp_reg"  = shared comparator block 0x49023000
+	 *              "aon_regs"  = always-on PMU_PERIPH block 0x1A604000
+	 *              "adc_vref"  = shared ADC VREF block 0x4902B000
+	 *   IRQs (done0,done1,comp_a,comp_b):
+	 *              adc12_0  151,154,157,160 ; adc12_1 152,155,158,161
+	 *              adc12_2  153,156,159,162 ; adc24_0 163,164,165,166
+	 *   interrupt_en = DONE0|DONE1 (single-shot completion fires on DONE1).
+	 *
+	 * No pinctrl-0: ADC inputs are direct analog pads (the driver applies
+	 * pinctrl only IF the node carries it -- IF_ENABLED on pinctrl_0).  A board
+	 * enables an instance (status="okay"), sets the alp-adcN alias for the
+	 * portable backend, and -- for differential / specific channels -- may add a
+	 * pinctrl group per the Alif TRM.
+	 *
+	 * ADR 0017 Tier-2 (fork-driver copy; hal_alif has no ADC class driver) --
+	 * INTERIM, retires onto the fork once the nodes are repointed +
+	 * bench-verified (task #21).  BENCH-UNVERIFIED.
+	 */
+	adc12_0: adc@49020000 {
+		compatible = "alif,adc";
+		reg = <0x49020000 0x1000>,
+		      <0x49020000 0x100>,
+		      <0x49023000 0x100>,
+		      <0x1A604000 0x100>,
+		      <0x4902B000 0x100>;
+		reg-names = "adc_reg", "analog_reg", "comp_reg", "aon_regs", "adc_vref";
+		interrupts = <151 0>, <154 0>, <157 0>, <160 0>;
+		interrupt-names = "done0", "done1", "comp_a", "comp_b";
+		interrupt_en = <(ADC_DONE0_INTERRUPT | ADC_DONE1_INTERRUPT)>;
+		comparator_threshold_a = <0x01>;
+		comparator_threshold_b = <0x01>;
+		comparator_threshold_comparison = "ABOVE_THRESHOLD_A_AND_B";
+		sample-width = <16>;
+		clock_div = <2>;
+		avg_sample_num = <256>;
+		shift_n_bits = <8>;
+		shift_direction = "RIGHT_SHIFT";
+		comparator_bias = "2.5_MS/s";
+		driver_instance = "ADC_INSTANCE_ADC12_0";
+		adc_channel_scan = "SINGLE_CHANNEL_SCAN";
+		adc_conversion_mode = "SINGLE_SHOT_CONVERSION";
+		pga_gain = "ADC_PGA_GAIN_0_DB";
+		status = "disabled";
+	};
+
+	adc12_1: adc@49021000 {
+		compatible = "alif,adc";
+		reg = <0x49021000 0x1000>,
+		      <0x49020000 0x100>,
+		      <0x49023000 0x100>,
+		      <0x1A604000 0x100>,
+		      <0x4902B000 0x100>;
+		reg-names = "adc_reg", "analog_reg", "comp_reg", "aon_regs", "adc_vref";
+		interrupts = <152 0>, <155 0>, <158 0>, <161 0>;
+		interrupt-names = "done0", "done1", "comp_a", "comp_b";
+		interrupt_en = <(ADC_DONE0_INTERRUPT | ADC_DONE1_INTERRUPT)>;
+		comparator_threshold_a = <0x01>;
+		comparator_threshold_b = <0x01>;
+		comparator_threshold_comparison = "ABOVE_THRESHOLD_A_AND_B";
+		sample-width = <16>;
+		clock_div = <2>;
+		avg_sample_num = <256>;
+		shift_n_bits = <8>;
+		shift_direction = "RIGHT_SHIFT";
+		comparator_bias = "2.5_MS/s";
+		driver_instance = "ADC_INSTANCE_ADC12_1";
+		adc_channel_scan = "SINGLE_CHANNEL_SCAN";
+		adc_conversion_mode = "SINGLE_SHOT_CONVERSION";
+		pga_gain = "ADC_PGA_GAIN_0_DB";
+		status = "disabled";
+	};
+
+	adc12_2: adc@49022000 {
+		compatible = "alif,adc";
+		reg = <0x49022000 0x1000>,
+		      <0x49020000 0x100>,
+		      <0x49023000 0x100>,
+		      <0x1A604000 0x100>,
+		      <0x4902B000 0x100>;
+		reg-names = "adc_reg", "analog_reg", "comp_reg", "aon_regs", "adc_vref";
+		interrupts = <153 0>, <156 0>, <159 0>, <162 0>;
+		interrupt-names = "done0", "done1", "comp_a", "comp_b";
+		interrupt_en = <(ADC_DONE0_INTERRUPT | ADC_DONE1_INTERRUPT)>;
+		comparator_threshold_a = <0x01>;
+		comparator_threshold_b = <0x01>;
+		comparator_threshold_comparison = "ABOVE_THRESHOLD_A_AND_B";
+		sample-width = <16>;
+		clock_div = <2>;
+		avg_sample_num = <256>;
+		shift_n_bits = <8>;
+		shift_direction = "RIGHT_SHIFT";
+		comparator_bias = "2.5_MS/s";
+		driver_instance = "ADC_INSTANCE_ADC12_2";
+		adc_channel_scan = "SINGLE_CHANNEL_SCAN";
+		adc_conversion_mode = "SINGLE_SHOT_CONVERSION";
+		pga_gain = "ADC_PGA_GAIN_0_DB";
+		status = "disabled";
+	};
+
+	adc24_0: adc@49027000 {
+		compatible = "alif,adc";
+		reg = <0x49027000 0x1000>,
+		      <0x49020000 0x100>,
+		      <0x49023000 0x100>,
+		      <0x1A604000 0x100>,
+		      <0x4902B000 0x100>;
+		reg-names = "adc_reg", "analog_reg", "comp_reg", "aon_regs", "adc_vref";
+		interrupts = <163 3>, <164 3>, <165 3>, <166 3>;
+		interrupt-names = "done0", "done1", "comp_a", "comp_b";
+		interrupt_en = <(ADC_DONE0_INTERRUPT | ADC_DONE1_INTERRUPT)>;
+		comparator_threshold_a = <0x01>;
+		comparator_threshold_b = <0x01>;
+		comparator_threshold_comparison = "ABOVE_THRESHOLD_A_AND_B";
+		clock_div = <2>;
+		avg_sample_num = <256>;
+		shift_n_bits = <8>;
+		shift_direction = "RIGHT_SHIFT";
+		adc24_output_rate = "1KS/s";
+		adc24_bias = "8.75uA";
+		driver_instance = "ADC_INSTANCE_ADC24_0";
+		adc_channel_scan = "SINGLE_CHANNEL_SCAN";
+		adc_conversion_mode = "SINGLE_SHOT_CONVERSION";
+		pga_gain = "ADC_PGA_GAIN_0_DB";
 		status = "disabled";
 	};
 };
