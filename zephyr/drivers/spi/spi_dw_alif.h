@@ -54,6 +54,7 @@ struct spi_dw_config {
 	uint32_t clock_frequency;
 	spi_dw_config_t config_func;
 	bool serial_target;
+	uint8_t spi_idx;	/* SoC SSI instance 0..3 (for the SSI_CTRL master-mode bit) */
 	uint8_t fifo_depth;
 	uint8_t max_xfer_size;
 	uint8_t rx_delay;

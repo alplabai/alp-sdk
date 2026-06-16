@@ -66,6 +66,16 @@ properties:
       SPI_CLK cycles to delay before sampling RxD. 0 = no delay (reset default);
       raise per the TRM / board signal integrity if needed.
 
+  clock-frequency:
+    type: int
+    description: |
+      SSI functional input-clock rate (Hz) used to derive BAUDR
+      (BAUDR = clock-frequency / spi_config.frequency). Set this on the node
+      when the Alif clock controller cannot report the rate via
+      clock_control_get_rate(); the driver prefers this node property, then the
+      `clocks` phandle's clock-frequency, then a runtime get_rate(). Placeholder
+      until the Alif TRM value is confirmed -- it only scales the SCLK divider.
+
   serial-target:
     type: boolean
     description: |
