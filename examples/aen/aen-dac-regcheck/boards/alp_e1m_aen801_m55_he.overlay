@@ -1,0 +1,34 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-dac-regcheck overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Enables dac0 (the first 12-bit DAC @ 0x49028000, driver dac_alif.c,
+ * compatible "alif,dac") declared in
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi.  reg / reg-names / config props
+ * are carried by the SoC dtsi node (transcribed VERBATIM from the Apache-2.0
+ * zephyr_alif fork e1.dtsi); this overlay only flips it okay.
+ *
+ * The DAC output is a direct analog pad (dac0 = P2_2), so NO pinctrl group is
+ * needed here (the driver applies pinctrl only IF the node carries it).  The pad
+ * is UNSCOPED on this batch -- the test does NOT check a measured voltage; the
+ * PASS gate is "the driver programmed the IP" (DAC_IN holds the written code +
+ * DAC_REG1 EN/RESET_B set), see main.c.
+ */
+
+/*
+ * RAM-run: the SoC `select` puts code in XIP; retarget ROM to ITCM so the image
+ * links + runs from RAM (J-Link loadbin+go, no reset). PATH-REFERENCE form
+ * (&itcm) -- the phandle-array form makes FLASH_SIZE=0 and overflows the link.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&dac0 {
+	status = "okay";
+};
