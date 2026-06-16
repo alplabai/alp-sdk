@@ -2521,3 +2521,42 @@ endmenu # "Alp SDK chip drivers"
 rsource "Kconfig.alp-libraries"
 
 endif # ALP_SDK
+
+# ---------------------------------------------------------------------------
+# Alif Ensemble MRAM flash driver -- DELIBERATELY OUTSIDE `if ALP_SDK`.
+#
+# Unlike the other vendored Alif drivers (ADC_ALIF / SPI_DW_ALIF / PWM_ALIF),
+# the MRAM flash driver must be visible to images that do NOT set
+# CONFIG_ALP_SDK -- specifically the MCUboot bootloader, which sysbuild builds
+# as its own vanilla Zephyr image (it never enables ALP_SDK).  MCUboot's
+# flash_map needs a flash driver on the MRAM to read/write slot0/slot1, so the
+# symbol has to be reachable in the bootloader's Kconfig tree.  Gating only on
+# CONFIG_FLASH + the DT node (not ALP_SDK) keeps it a plain Zephyr flash driver
+# that any image consuming alp-sdk as a module can pull in.
+# ---------------------------------------------------------------------------
+config MRAM_FLASH_ALIF
+	bool "Alif Ensemble MRAM flash (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
+	default y
+	depends on FLASH
+	depends on DT_HAS_ALIF_MRAM_FLASH_CONTROLLER_ENABLED
+	select FLASH_HAS_DRIVER_ENABLED
+	select FLASH_HAS_PAGE_LAYOUT
+	select FLASH_HAS_NO_EXPLICIT_ERASE
+	help
+	  Alif Ensemble on-die MRAM flash class driver (compatible
+	  "alif,mram-flash-controller", base 0x80000000), vendored VERBATIM from
+	  the Apache-2.0 zephyr_alif fork (drivers/flash/flash_mram_alif.c).
+	  Upstream Zephyr v4.4 + hal_alif ship NO flash-class driver for the MRAM
+	  -- the upstream E8 SoC dtsi exposes it only as a "zephyr,memory-region"/
+	  "soc-nv-flash" memory region (XIP-readable, no write/erase), which is not
+	  a flash controller and so does not set FLASH_HAS_DRIVER_ENABLED.  MCUboot
+	  and its flash_map need a real flash driver on the MRAM to read/write the
+	  slot0/slot1 partitions, hence this fork-driver copy.  Pure CMSIS register/
+	  memory access -- pulls in no hal_alif library (unlike ADC_ALIF).  16-byte
+	  (128-bit) program/sector unit; software write-protection.  Not
+	  silicon-validated.
+
+	  ADR 0017 Tier-2 (a genuine fork-driver copy -- upstream + hal_alif ship no
+	  MRAM flash driver): INTERIM.  Retires onto the opt-in sdk-alif fork once
+	  the MRAM flash node is repointed to the fork compatible AND bench-verified
+	  (task #21).  Driver: zephyr/drivers/flash/flash_mram_alif.c.
