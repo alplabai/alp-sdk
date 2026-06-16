@@ -1,36 +1,37 @@
 /**
  * @file ext/alif/camera.h
- * @brief Alif Ensemble Mali-C55 ISP vendor-specific surface.
+ * @brief Alif Ensemble VeriSilicon ISP Pico (vsi,isp-pico) vendor-specific surface.
  *
  * Non-portable.  Include only when you've committed to Alif
  * Ensemble silicon (E4 / E6 / E8 -- the variants that ship the
- * hardened Mali-C55 ISP fabric per the v0.5 AEN feature audit,
- * see docs/aen-feature-audit-2026-05.md §4.3).  Every function
+ * hardened VeriSilicon ISP Pico (vsi,isp-pico) ISP fabric per the
+ * v0.5 AEN feature audit, see docs/aen-feature-audit-2026-05.md §4.3).
+ * Every function
  * in this header verifies the handle's backend is Alif before
  * touching hardware; calls on a non-Alif handle return
  * @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC.
  *
- * Covers the finer-grained ISP knobs the Mali-C55 exposes
+ * Covers the finer-grained ISP knobs the ISP Pico exposes
  * beyond the portable @ref alp_camera_isp_config_t struct:
  *
- *   - 3A statistics windows (Mali-C55 carries 1024 weighted
+ *   - 3A statistics windows (ISP Pico carries 1024 weighted
  *     metering cells per loop; the API surface picks a coarser
  *     rectangle to match the Renesas V2N N44 ISP's surface).
  *   - per-channel gain LUTs.
- *   - lens-shading-correction LUT (the Mali-C55's "MESH" mode).
+ *   - lens-shading-correction LUT (the ISP Pico's "MESH" mode).
  *
  * Earns its spot per the vendor-ext audit rule (spec §3a): the
  * portable @ref alp_camera_isp_config_t struct can't carry
  * pixel-coordinate rectangles or kibibyte-scale LUT pointers
  * without forcing every backend (including AEN-family E3 / E5 /
- * E7 silicon without the Mali-C55 fabric) to allocate equivalent
+ * E7 silicon without the ISP Pico fabric) to allocate equivalent
  * fields.  Same shape as <alp/ext/renesas/camera.h> -- callers
  * targeting both V2N and AEN silicon get a near-identical API
  * surface; the vendor-handle gate keeps each call routed to the
  * matching hardware.
  *
  * @par Supported silicon: alif:ensemble:e4, alif:ensemble:e6, alif:ensemble:e8
- *      (E3 / E5 / E7 do not expose the Mali-C55 fabric; vendor
+ *      (E3 / E5 / E7 do not expose the ISP Pico fabric; vendor
  *      packs may extend this list in a follow-up release.)
  *
  * Copyright 2026 Alp Lab AB
@@ -38,7 +39,7 @@
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      Header lands ahead of the vendor pack body; every function
- *      returns @ref ALP_ERR_NOSUPPORT until the Alif HAL Mali-C55
+ *      returns @ref ALP_ERR_NOSUPPORT until the Alif HAL ISP Pico
  *      integration lands (same pattern as the OSPI SecAES and
  *      FlexSPI OTFAD precedents from Slice 6).  Promotes to
  *      [ABI-STABLE] when three vendor families ship extensions.
@@ -59,7 +60,7 @@ extern "C" {
 /** Compile-time presence marker -- used by example code to gate vendor calls. */
 #define ALP_EXT_ALIF_CAMERA_AVAILABLE 1
 
-/** Which 3A loop a window rectangle targets.  The Mali-C55
+/** Which 3A loop a window rectangle targets.  The ISP Pico
  *  honours one rectangle per loop; a fresh call replaces the
  *  prior rectangle. */
 typedef enum {
@@ -92,7 +93,7 @@ typedef struct {
  *
  * @par Supported silicon: alif:ensemble:e4, alif:ensemble:e6, alif:ensemble:e8
  *
- * Mirrors the Renesas knob's contract.  Mali-C55 weights the
+ * Mirrors the Renesas knob's contract.  ISP Pico weights the
  * matching 1024-cell statistics grid by the inclusive rectangle.
  *
  * @param camera  Handle from @ref alp_camera_open opened against
@@ -105,7 +106,7 @@ typedef struct {
  *         @ref ALP_ERR_INVAL on NULL handle / NULL rect /
  *           zero-sized rect;
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC on non-Alif backend;
- *         @ref ALP_ERR_NOSUPPORT until the Alif HAL Mali-C55
+ *         @ref ALP_ERR_NOSUPPORT until the Alif HAL ISP Pico
  *           integration lands.
  */
 alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t                 *camera,
@@ -113,7 +114,7 @@ alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t                 *cam
                                                const alp_alif_camera_rect_t *rect);
 
 /**
- * @brief Load a per-channel gain LUT into the Mali-C55.
+ * @brief Load a per-channel gain LUT into the ISP Pico.
  *
  * @par Supported silicon: alif:ensemble:e4, alif:ensemble:e6, alif:ensemble:e8
  *
@@ -137,11 +138,11 @@ alp_status_t alp_alif_camera_isp_gain_table_load(alp_camera_t             *camer
                                                  uint16_t                  len);
 
 /**
- * @brief Load the lens-shading-correction LUT (Mali-C55 "MESH").
+ * @brief Load the lens-shading-correction LUT (ISP Pico "MESH").
  *
  * @par Supported silicon: alif:ensemble:e4, alif:ensemble:e6, alif:ensemble:e8
  *
- * The Mali-C55 applies a 2D vignetting-correction surface stored
+ * The ISP Pico applies a 2D vignetting-correction surface stored
  * as a flattened uint16_t grid; each entry is a Q4.12 gain
  * applied to the matching grid cell.  Reference-not-copy.
  *

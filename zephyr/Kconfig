@@ -389,6 +389,139 @@ config DAC_ALIF
 	  are repointed to the fork compatible AND bench-verified.  Task #21.
 	  Driver: zephyr/drivers/dac/dac_alif.c.
 
+# ---------------------------------------------------------------------------
+# Alif Ensemble CAMERA CAPTURE path (CPI controller + DesignWare MIPI CSI-2
+# bridge + DesignWare MIPI D-PHY + ON Semi ARX3A0 sensor) -- ADR 0017 Tier-2,
+# vendored VERBATIM from the Apache-2.0 zephyr_alif fork.  Upstream Zephyr v4.4
+# + hal_alif ship NONE of these (no CPI/CSI video drivers, no mipi_dphy class),
+# so they are carried in-tree so they survive a `west update` (the ADC_ALIF /
+# MHUv2 precedents).
+#
+# THE STACK IS STAGED, NOT BUILT: the fork video drivers implement the OLDER
+# Zephyr video API whose callbacks take `enum video_endpoint_id ep` -- a type
+# upstream v4.4 REMOVED in the video-API rework (v4.4 callbacks are (dev, fmt) /
+# (dev, caps) / (dev, enable, type) / (dev, cid)).  Porting all three video
+# drivers to the v4.4 API is a driver rewrite, not a mechanical fix, and would
+# violate the "vendor ~verbatim" Tier-2 contract; it is deferred to the
+# fork-repoint (task #21).  Until then the driver Kconfigs depend on
+# ALP_VIDEO_ALIF_BROKEN (default n), so the sources + bindings + DT nodes are
+# carried in-tree (provenance staged, the bindings/nodes do bind in DT) but the
+# driver TUs are NOT compiled against the incompatible v4.4 API.  Flip
+# ALP_VIDEO_ALIF_BROKEN=y once the bodies are ported.  vendor-ext,
+# BENCH-UNVERIFIED, runtime capture HW-blocked on this batch (no sensor wired).
+# ---------------------------------------------------------------------------
+config ALP_VIDEO_ALIF_BROKEN
+	bool "Build the vendored Alif video stack (NOT YET PORTED to the v4.4 video API)"
+	default n
+	help
+	  Compile the vendored Alif camera-capture drivers (video_alif.c /
+	  video_csi_dw.c / arx3a0.c / dphy_dw.c).  OFF by default: these fork
+	  drivers target the OLD `enum video_endpoint_id`-based Zephyr video API
+	  that upstream v4.4 removed, so they DO NOT COMPILE against v4.4 without a
+	  driver-body rewrite (deferred to the fork-repoint, task #21).  The sources,
+	  bindings and DT nodes are carried in-tree regardless; this symbol only
+	  gates whether the TUs are added to the build.  Do NOT set this on v4.4.
+
+config VIDEO_ALIF_CAM
+	bool "Alif Ensemble CPI camera-capture controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on VIDEO
+	depends on ALP_VIDEO_ALIF_BROKEN
+	depends on DT_HAS_ALIF_CAM_ENABLED
+	select PINCTRL
+	help
+	  Alif Ensemble Camera Parallel Interface (CPI) capture controller, vendored
+	  VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/video/video_alif.c,
+	  compatible "alif,cam").  Upstream Zephyr v4.4 + hal_alif ship no CPI class
+	  driver.  Gated behind ALP_VIDEO_ALIF_BROKEN: NOT YET PORTED to the v4.4
+	  video API (the fork callbacks take the removed `enum video_endpoint_id`).
+
+	  ADR 0017 Tier-2 (fork-driver copy): INTERIM.  Retires onto the opt-in
+	  sdk-alif fork once the cam node is repointed AND bench-verified.  Task #21.
+	  Driver: zephyr/drivers/video/video_alif.c.
+
+config VIDEO_ALIF_CAM_INIT_PRIORITY
+	int "CPI video initialization priority"
+	default 59
+	depends on VIDEO_ALIF_CAM
+	help
+	  System initialization priority for the Alif CPI driver (default video
+	  device init priority is 60).
+
+config VIDEO_ALIF_CAM_EXTENDED
+	bool "CPI has extended registers and ports (ISP / memory-dump endpoints)"
+	depends on VIDEO_ALIF_CAM
+	help
+	  The CPI has extended registers and ports to forward video signals to the
+	  ISP and dump the frame to memory.
+
+config MIPI_DPHY
+	bool "MIPI-DPHY host controllers (vendored, ADR 0017 Tier-2 INTERIM)"
+	depends on ALP_VIDEO_ALIF_BROKEN
+	select EXPERIMENTAL
+	help
+	  MIPI-DPHY host-controller class.  Upstream Zephyr v4.4 has NO mipi_dphy
+	  class; this subtree is vendored from the Apache-2.0 zephyr_alif fork so the
+	  DesignWare CSI-2 driver can reach the D-PHY.  Gated behind
+	  ALP_VIDEO_ALIF_BROKEN (its only consumer, the CSI driver, is).
+
+config MIPI_DPHY_DW
+	bool "DesignWare MIPI-DPHY host controller for Alif"
+	default y
+	depends on MIPI_DPHY
+	depends on DT_HAS_SNPS_DESIGNWARE_DPHY_ENABLED
+	help
+	  Alif DesignWare MIPI D-PHY host-controller driver, vendored VERBATIM from
+	  the Apache-2.0 zephyr_alif fork (drivers/mipi_dphy/dphy_dw.c, compatible
+	  "snps,designware-dphy").  Pulled in by the CSI driver (dphy_dw_slave_*).
+	  Driver: zephyr/drivers/mipi_dphy/dphy_dw.c.
+
+config MIPI_DPHY_INIT_PRIORITY
+	int "MIPI-DPHY initialization priority"
+	default 39
+	depends on MIPI_DPHY_DW
+	help
+	  MIPI-DPHY host-controller init priority (ahead of the CSI bridge at 41).
+
+config VIDEO_MIPI_CSI2_DW
+	bool "DesignWare MIPI CSI-2 host bridge for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on VIDEO
+	depends on ALP_VIDEO_ALIF_BROKEN
+	depends on DT_HAS_SNPS_DESIGNWARE_CSI_ENABLED
+	depends on DT_HAS_SNPS_DESIGNWARE_DPHY_ENABLED
+	select MIPI_DPHY
+	help
+	  DesignWare MIPI CSI-2 host bridge in front of the Alif CPI, vendored
+	  VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/video/video_csi_dw.c,
+	  compatible "snps,designware-csi").  Hard-depends on the vendored MIPI-DPHY
+	  driver.  Gated behind ALP_VIDEO_ALIF_BROKEN: NOT YET PORTED to v4.4.
+
+	  ADR 0017 Tier-2 (fork-driver copy): INTERIM.  Task #21.
+	  Driver: zephyr/drivers/video/video_csi_dw.c.
+
+config VIDEO_MIPI_CSI2_DW_INIT_PRIORITY
+	int "MIPI CSI-2 host bridge initialization priority"
+	default 41
+	depends on VIDEO_MIPI_CSI2_DW
+	help
+	  Init priority for the DesignWare CSI-2 bridge (after the D-PHY at 39).
+
+config VIDEO_ARX3A0
+	bool "ON Semi ARX3A0 MIPI CSI-2 sensor (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on VIDEO
+	depends on ALP_VIDEO_ALIF_BROKEN
+	depends on DT_HAS_ONNN_ARX3A0_ENABLED
+	select I2C
+	help
+	  ON Semiconductor ARX3A0 CMOS MIPI CSI-2 image sensor, vendored VERBATIM
+	  from the Apache-2.0 zephyr_alif fork (drivers/video/arx3a0.c, compatible
+	  "onnn,arx3a0").  Gated behind ALP_VIDEO_ALIF_BROKEN: NOT YET PORTED to v4.4.
+
+	  ADR 0017 Tier-2 (fork-driver copy): INTERIM.  Task #21.
+	  Driver: zephyr/drivers/video/arx3a0.c.
+
 config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4
