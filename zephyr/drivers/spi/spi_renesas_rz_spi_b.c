@@ -3,6 +3,11 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
+ * ====== ADR 0017 Tier-1.5 (thin Zephyr glue over the Renesas FSP r_spi_b module) ======
+ * Consumes the vendor FSP r_spi_b (shared RA<->RZ) -- no fork-driver copy, no
+ * reimplementation. BENCH-UNVERIFIED. See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * ==================================================================
+ *
  * Renesas RZ SPI_B (RSPI) controller driver.
  *
  * The new-generation RZ MPUs (RZ/V2N R9A09G056, RZ/V2H R9A09G057, ...) replace

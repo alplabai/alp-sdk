@@ -3,6 +3,12 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
+ * ====== ADR 0017 Tier-1.5 (thin Zephyr glue over the vendored Renesas FSP r_sci_b_spi) ======
+ * The FSP r_sci_b_spi module is vendored from RA (zephyr/drivers/spi/r_sci_b_spi/,
+ * BSD-3, shared RA<->RZ); this is thin glue over it, not a fork-driver copy.
+ * BENCH-UNVERIFIED. See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * ==================================================================
+ *
  * Renesas RZ SCI-B Simple-SPI controller driver.
  *
  * The on-module GD32G553 supervisor's SPI fast path is wired to RZ/V2N pads
