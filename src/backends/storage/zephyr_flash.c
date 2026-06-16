@@ -59,8 +59,9 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
-static alp_status_t z_open(const alp_storage_config_t *cfg, alp_storage_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t z_open(const alp_storage_config_t  *cfg,
+                           alp_storage_backend_state_t *st,
+                           alp_capabilities_t          *caps_out)
 {
 	/* SD/MMC isn't a flash_area abstraction -- defer to a different
      * backend.  Returning NOSUPPORT lets the dispatcher's selector
@@ -104,8 +105,8 @@ static alp_status_t z_read(alp_storage_backend_state_t *st, uint64_t offset, voi
 	return _errno_to_alp(err);
 }
 
-static alp_status_t z_write(alp_storage_backend_state_t *st, uint64_t offset, const void *data,
-                            size_t len)
+static alp_status_t
+z_write(alp_storage_backend_state_t *st, uint64_t offset, const void *data, size_t len)
 {
 	const struct flash_area *fa = (const struct flash_area *)st->dev;
 	if (fa == NULL) return ALP_ERR_NOT_READY;
@@ -161,7 +162,8 @@ static const alp_storage_ops_t _ops = {
 	.close                = z_close,
 };
 
-ALP_BACKEND_REGISTER(storage, zephyr_flash,
+ALP_BACKEND_REGISTER(storage,
+                     zephyr_flash,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

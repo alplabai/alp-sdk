@@ -79,7 +79,7 @@ typedef struct {
  * 128 KB budget.  Total cost: 2 streams x 1024 samples x 2 bytes =
  * 4 KB. */
 #define BRIDGE_ADC_STREAM_RING_SAMPLES 1024u
-#define BRIDGE_ADC_STREAM_COUNT 2u
+#define BRIDGE_ADC_STREAM_COUNT        2u
 
 /* Honest sample-rate contract: the requested rate is realised by a
  * dedicated pacing timer (see stream_begin), not ignored.  100 kHz
@@ -111,11 +111,11 @@ typedef struct {
 /* _Static_assert that the sizeof-derived size matches these).        */
 /* ----------------------------------------------------------------- */
 
-#define GPIO_PAD_MAP_COUNT 18u   /* _Static_assert against sizeof in gpio.c       */
-#define ADC_CHANNEL_MAP_COUNT 8u /* _Static_assert against sizeof in adc.c        */
-#define QENC_CHANNEL_COUNT 4u    /* _Static_assert against sizeof in qenc.c       */
-#define PWM_CHANNEL_COUNT 8u     /* _Static_assert against sizeof in pwm.c        */
-#define DAC_CHANNEL_COUNT 2u     /* _Static_assert against sizeof in dac.c        */
+#define GPIO_PAD_MAP_COUNT    18u /* _Static_assert against sizeof in gpio.c       */
+#define ADC_CHANNEL_MAP_COUNT 8u  /* _Static_assert against sizeof in adc.c        */
+#define QENC_CHANNEL_COUNT    4u  /* _Static_assert against sizeof in qenc.c       */
+#define PWM_CHANNEL_COUNT     8u  /* _Static_assert against sizeof in pwm.c        */
+#define DAC_CHANNEL_COUNT     2u  /* _Static_assert against sizeof in dac.c        */
 
 /* ----------------------------------------------------------------- */
 /* Shared analog + timer constants.                                   */
@@ -124,7 +124,7 @@ typedef struct {
 /* VREF for the ADC's 12-bit right-aligned code -> millivolt
  * conversion.  V2N's analog supply is 1.8 V (maintainer-confirmed
  * the same rail used by DAC_VREF_MV).  Full-scale is 4095 codes. */
-#define ADC_VREF_MV 1800u
+#define ADC_VREF_MV    1800u
 #define ADC_FULL_SCALE 4095u
 
 /* Default sample time used for single-shot reads.  240 cycles is
@@ -148,10 +148,10 @@ typedef struct {
  * counter ticks at exactly 1 MHz.  ARR is then `period_us - 1`,
  * fitting in 16 bits for periods up to ~65 ms which covers every
  * realistic control PWM frequency (>=15 Hz). */
-#define PWM_TIMER_CLK_HZ 216000000u
+#define PWM_TIMER_CLK_HZ    216000000u
 #define PWM_TIMER_PRESCALER (216u - 1u) /* 216 MHz -> 1 MHz tick    */
-#define PWM_TIMER_TICK_NS 1000u         /* 1 us per timer tick      */
-#define PWM_TIMER_ARR_MAX 0xFFFFu       /* 16-bit auto-reload limit */
+#define PWM_TIMER_TICK_NS   1000u       /* 1 us per timer tick      */
+#define PWM_TIMER_ARR_MAX   0xFFFFu     /* 16-bit auto-reload limit */
 
 /* ----------------------------------------------------------------- */
 /* Shared tables (defined in the TU named per line).                  */

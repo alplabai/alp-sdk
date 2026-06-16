@@ -23,10 +23,10 @@
 
 #include "adc_ops.h"
 
-static int32_t      _saw_counter = 0;
+static int32_t _saw_counter = 0;
 
-static alp_status_t sw_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *state,
-                            alp_capabilities_t *caps_out)
+static alp_status_t
+sw_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *state, alp_capabilities_t *caps_out)
 {
 	/* No real ADC controller / channel->pin resolution on native_sim:
      * report the device isn't ready so the dispatcher returns NULL +
@@ -52,7 +52,8 @@ static const alp_adc_ops_t sw_ops = {
 	.close    = NULL,
 };
 
-ALP_BACKEND_REGISTER(adc, sw_fallback,
+ALP_BACKEND_REGISTER(adc,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

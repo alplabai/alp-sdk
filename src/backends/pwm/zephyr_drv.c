@@ -131,8 +131,8 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
-static alp_status_t z_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg->channel_id >= ARRAY_SIZE(_specs)) return ALP_ERR_INVAL;
 	if (cfg->channel_id >= ALP_SOC_PWM_COUNT) return ALP_ERR_OUT_OF_RANGE;
@@ -177,8 +177,10 @@ static alp_status_t z_set_period(alp_pwm_backend_state_t *st, uint32_t period_ns
 	return _errno_to_alp(pwm_set(dev, h->channel, period_ns, 0u, h->flags));
 }
 
-static alp_status_t z_configure(alp_pwm_backend_state_t *st, alp_pwm_align_t align_mode,
-                                uint32_t dead_time_ns, uint8_t break_cfg)
+static alp_status_t z_configure(alp_pwm_backend_state_t *st,
+                                alp_pwm_align_t          align_mode,
+                                uint32_t                 dead_time_ns,
+                                uint8_t                  break_cfg)
 {
 	/* Zephyr's portable pwm_* driver class doesn't expose dead-time or
      * center-aligned counters in a vendor-neutral way (the STM32
@@ -203,8 +205,9 @@ static alp_status_t z_single_pulse(alp_pwm_backend_state_t *st, uint32_t pulse_n
 	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t z_capture_open(const alp_pwm_capture_config_t *cfg, alp_pwm_backend_state_t *st,
-                                   alp_capabilities_t *caps_out)
+static alp_status_t z_capture_open(const alp_pwm_capture_config_t *cfg,
+                                   alp_pwm_backend_state_t        *st,
+                                   alp_capabilities_t             *caps_out)
 {
 	/* Input capture is bridge-only today (V2N GD32 firmware
      * CMD_PWM_CAPTURE_BEGIN handler).  The wave-2 GD32 HAL backend
@@ -216,8 +219,8 @@ static alp_status_t z_capture_open(const alp_pwm_capture_config_t *cfg, alp_pwm_
 	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t z_capture_read(alp_pwm_backend_state_t *st, uint32_t *period_ns_out,
-                                   uint32_t *pulse_ns_out)
+static alp_status_t
+z_capture_read(alp_pwm_backend_state_t *st, uint32_t *period_ns_out, uint32_t *pulse_ns_out)
 {
 	(void)st;
 	if (period_ns_out != NULL) *period_ns_out = 0u;
@@ -252,7 +255,8 @@ static const alp_pwm_ops_t _ops = {
 	.close         = z_close,
 };
 
-ALP_BACKEND_REGISTER(pwm, zephyr_drv,
+ALP_BACKEND_REGISTER(pwm,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

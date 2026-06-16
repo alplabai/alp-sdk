@@ -192,8 +192,8 @@ static void _release_all_locks(pm_locks_t *l)
 #define CONFIG_ALP_SDK_MAX_POWER_HANDLES 1
 #endif
 
-static pm_locks_t  _lock_pool[CONFIG_ALP_SDK_MAX_POWER_HANDLES];
-static bool        _lock_in_use[CONFIG_ALP_SDK_MAX_POWER_HANDLES];
+static pm_locks_t _lock_pool[CONFIG_ALP_SDK_MAX_POWER_HANDLES];
+static bool       _lock_in_use[CONFIG_ALP_SDK_MAX_POWER_HANDLES];
 
 static pm_locks_t *_alloc_locks(void)
 {
@@ -259,8 +259,10 @@ static alp_status_t z_configure_wake_source(alp_power_backend_state_t *state, ui
 	return ALP_OK;
 }
 
-static alp_status_t z_request_sleep(alp_power_backend_state_t *state, alp_power_mode_t mode,
-                                    uint32_t wake_after_ms, alp_power_wake_info_t *info)
+static alp_status_t z_request_sleep(alp_power_backend_state_t *state,
+                                    alp_power_mode_t           mode,
+                                    uint32_t                   wake_after_ms,
+                                    alp_power_wake_info_t     *info)
 {
 	pm_locks_t *l = (pm_locks_t *)state->be_data;
 	if (l == NULL) {
@@ -328,7 +330,8 @@ static const alp_power_ops_t _ops = {
 	.close                 = z_close,
 };
 
-ALP_BACKEND_REGISTER(power, zephyr_pm_policy,
+ALP_BACKEND_REGISTER(power,
+                     zephyr_pm_policy,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

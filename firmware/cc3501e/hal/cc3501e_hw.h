@@ -26,10 +26,10 @@
 
 /* Return codes.  0 = success; negatives are operation-independent
  * failure classes (mirrors the gd32-bridge BRIDGE_HW_* convention). */
-#define CC3501E_HW_OK 0
+#define CC3501E_HW_OK          0
 #define CC3501E_HW_ERR_NOTIMPL -1 /* op not wired on this backend (stub)   */
-#define CC3501E_HW_ERR_IO -2      /* peripheral / radio access failed       */
-#define CC3501E_HW_ERR_INVAL -3   /* bad argument                           */
+#define CC3501E_HW_ERR_IO      -2 /* peripheral / radio access failed       */
+#define CC3501E_HW_ERR_INVAL   -3 /* bad argument                           */
 
 /* --------------------------------------------------------------- */
 /* Lifecycle                                                         */

@@ -45,21 +45,34 @@ struct alp_ble_ops {
 	                                      const alp_ble_service_def_t *def,
 	                                      alp_ble_attr_handle_t       *handles_out);
 	alp_status_t (*gatt_notify)(alp_ble_radio_state_t *radio_state,
-	                            alp_ble_conn_state_t *conn_state, alp_ble_attr_handle_t handle,
-	                            const uint8_t *payload, size_t len);
-	alp_status_t (*scan_start)(alp_ble_radio_state_t *state, bool active, alp_ble_scan_cb_t cb,
-	                           void *user);
+	                            alp_ble_conn_state_t  *conn_state,
+	                            alp_ble_attr_handle_t  handle,
+	                            const uint8_t         *payload,
+	                            size_t                 len);
+	alp_status_t (*scan_start)(alp_ble_radio_state_t *state,
+	                           bool                   active,
+	                           alp_ble_scan_cb_t      cb,
+	                           void                  *user);
 	alp_status_t (*scan_stop)(alp_ble_radio_state_t *state);
-	alp_status_t (*connect)(alp_ble_radio_state_t *state, const alp_ble_addr_t *peer,
-	                        uint32_t timeout_ms, alp_ble_conn_state_t *conn_state_out);
+	alp_status_t (*connect)(alp_ble_radio_state_t *state,
+	                        const alp_ble_addr_t  *peer,
+	                        uint32_t               timeout_ms,
+	                        alp_ble_conn_state_t  *conn_state_out);
 	void (*close)(alp_ble_radio_state_t *state);
 
 	/* Conn-side ops */
 	alp_status_t (*disconnect)(alp_ble_conn_state_t *conn_state);
-	alp_status_t (*gatt_read)(alp_ble_conn_state_t *conn_state, alp_ble_attr_handle_t handle,
-	                          uint8_t *out, size_t out_cap, size_t *out_len, uint32_t timeout_ms);
-	alp_status_t (*gatt_write)(alp_ble_conn_state_t *conn_state, alp_ble_attr_handle_t handle,
-	                           const uint8_t *data, size_t len, uint32_t timeout_ms);
+	alp_status_t (*gatt_read)(alp_ble_conn_state_t *conn_state,
+	                          alp_ble_attr_handle_t handle,
+	                          uint8_t              *out,
+	                          size_t                out_cap,
+	                          size_t               *out_len,
+	                          uint32_t              timeout_ms);
+	alp_status_t (*gatt_write)(alp_ble_conn_state_t *conn_state,
+	                           alp_ble_attr_handle_t handle,
+	                           const uint8_t        *data,
+	                           size_t                len,
+	                           uint32_t              timeout_ms);
 };
 
 struct alp_ble {

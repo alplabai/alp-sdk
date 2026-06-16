@@ -41,8 +41,10 @@ typedef struct alp_power_backend_state {
 struct alp_power_ops {
 	alp_status_t (*open)(alp_power_backend_state_t *state, alp_capabilities_t *caps_out);
 	alp_status_t (*configure_wake_source)(alp_power_backend_state_t *state, uint32_t wake_bitmap);
-	alp_status_t (*request_sleep)(alp_power_backend_state_t *state, alp_power_mode_t mode,
-	                              uint32_t wake_after_ms, alp_power_wake_info_t *info);
+	alp_status_t (*request_sleep)(alp_power_backend_state_t *state,
+	                              alp_power_mode_t           mode,
+	                              uint32_t                   wake_after_ms,
+	                              alp_power_wake_info_t     *info);
 	void (*close)(alp_power_backend_state_t *state);
 };
 

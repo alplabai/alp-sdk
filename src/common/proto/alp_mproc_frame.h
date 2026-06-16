@@ -56,7 +56,7 @@
 extern "C" {
 #endif
 
-#define ALP_MPROC_FRAME_MAGIC 0x46504D41u /* 'AMPF' LE */
+#define ALP_MPROC_FRAME_MAGIC        0x46504D41u /* 'AMPF' LE */
 #define ALP_MPROC_FRAME_HEADER_BYTES 12u
 
 /**
@@ -75,8 +75,12 @@ extern "C" {
  *         ALP_ERR_INVAL on NULL out / NULL payload-with-len.
  *         ALP_ERR_NOMEM if @p out_cap is too small.
  */
-alp_status_t alp_mproc_frame_encode(uint32_t sequence, const void *payload, size_t payload_len,
-                                    uint8_t *out, size_t out_cap, size_t *out_len);
+alp_status_t alp_mproc_frame_encode(uint32_t    sequence,
+                                    const void *payload,
+                                    size_t      payload_len,
+                                    uint8_t    *out,
+                                    size_t      out_cap,
+                                    size_t     *out_len);
 
 /**
  * @brief Decode a framed envelope, returning a pointer into @p frame
@@ -100,8 +104,11 @@ alp_status_t alp_mproc_frame_encode(uint32_t sequence, const void *payload, size
  *         line-level integrity failure -- caller should drop the
  *         frame).
  */
-alp_status_t alp_mproc_frame_decode(const uint8_t *frame, size_t frame_len, uint32_t *sequence_out,
-                                    const uint8_t **payload_out, size_t *payload_len_out);
+alp_status_t alp_mproc_frame_decode(const uint8_t  *frame,
+                                    size_t          frame_len,
+                                    uint32_t       *sequence_out,
+                                    const uint8_t **payload_out,
+                                    size_t         *payload_len_out);
 
 #ifdef __cplusplus
 } /* extern "C" */

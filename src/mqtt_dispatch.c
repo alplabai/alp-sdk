@@ -38,7 +38,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_MQTT_HANDLES 2
 #endif
 
-static struct alp_mqtt  _mqtt_pool[CONFIG_ALP_SDK_MAX_MQTT_HANDLES];
+static struct alp_mqtt _mqtt_pool[CONFIG_ALP_SDK_MAX_MQTT_HANDLES];
 
 static struct alp_mqtt *_alloc_mqtt(void)
 {
@@ -106,8 +106,12 @@ alp_status_t alp_mqtt_connect(alp_mqtt_t *h, uint32_t timeout_ms)
 	return h->state.ops->connect(&h->state, timeout_ms);
 }
 
-alp_status_t alp_mqtt_publish(alp_mqtt_t *h, const char *topic, const uint8_t *payload, size_t len,
-                              alp_mqtt_qos_t qos, bool retain)
+alp_status_t alp_mqtt_publish(alp_mqtt_t    *h,
+                              const char    *topic,
+                              const uint8_t *payload,
+                              size_t         len,
+                              alp_mqtt_qos_t qos,
+                              bool           retain)
 {
 	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
 	if (topic == NULL) return ALP_ERR_INVAL;
@@ -118,8 +122,8 @@ alp_status_t alp_mqtt_publish(alp_mqtt_t *h, const char *topic, const uint8_t *p
 	return h->state.ops->publish(&h->state, topic, payload, len, qos, retain);
 }
 
-alp_status_t alp_mqtt_subscribe(alp_mqtt_t *h, const char *topic_filter, alp_mqtt_qos_t qos,
-                                alp_mqtt_msg_cb_t cb, void *user)
+alp_status_t alp_mqtt_subscribe(
+    alp_mqtt_t *h, const char *topic_filter, alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user)
 {
 	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
 	if (topic_filter == NULL || cb == NULL) return ALP_ERR_INVAL;

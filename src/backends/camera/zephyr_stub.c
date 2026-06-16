@@ -31,8 +31,9 @@
 
 #include "camera_ops.h"
 
-static alp_status_t stub_open(const alp_camera_config_t *cfg, alp_camera_backend_state_t *state,
-                              alp_capabilities_t *caps_out)
+static alp_status_t stub_open(const alp_camera_config_t  *cfg,
+                              alp_camera_backend_state_t *state,
+                              alp_capabilities_t         *caps_out)
 {
 	(void)cfg;
 	(void)state;
@@ -52,8 +53,8 @@ static alp_status_t stub_stop(alp_camera_backend_state_t *state)
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t stub_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out,
-                                 uint32_t timeout_ms)
+static alp_status_t
+stub_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t timeout_ms)
 {
 	(void)state;
 	(void)out;
@@ -86,7 +87,8 @@ static const alp_camera_ops_t _ops = {
 	.close         = NULL,
 };
 
-ALP_BACKEND_REGISTER(camera, zephyr_stub,
+ALP_BACKEND_REGISTER(camera,
+                     zephyr_stub,
                      {
                          .silicon_ref = "*",
                          .vendor      = "stub",

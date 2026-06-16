@@ -26,7 +26,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_SPI_HANDLES 4
 #endif
 
-static struct alp_spi  _pool[CONFIG_ALP_SDK_MAX_SPI_HANDLES];
+static struct alp_spi _pool[CONFIG_ALP_SDK_MAX_SPI_HANDLES];
 
 static struct alp_spi *_alloc(void)
 {

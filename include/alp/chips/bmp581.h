@@ -40,7 +40,7 @@ extern "C" {
 #endif
 
 /** Default 7-bit I²C addresses (CSB strap selects). */
-#define BMP581_I2C_ADDR_LOW 0x46
+#define BMP581_I2C_ADDR_LOW  0x46
 #define BMP581_I2C_ADDR_HIGH 0x47
 
 /** CHIP_ID (register 0x01) value the chip returns. */
@@ -111,8 +111,11 @@ alp_status_t bmp581_init(bmp581_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 alp_status_t bmp581_read_id(bmp581_t *dev, uint8_t *id_out);
 
 /** Configure oversampling, ODR, and mode in one call. */
-alp_status_t bmp581_set_sampling(bmp581_t *dev, bmp581_osr_t press_osr, bmp581_osr_t temp_osr,
-                                 bmp581_odr_t odr, bmp581_mode_t mode);
+alp_status_t bmp581_set_sampling(bmp581_t     *dev,
+                                 bmp581_osr_t  press_osr,
+                                 bmp581_osr_t  temp_osr,
+                                 bmp581_odr_t  odr,
+                                 bmp581_mode_t mode);
 
 /** Read the raw 24-bit P + T pair in one burst. */
 alp_status_t bmp581_read_raw(bmp581_t *dev, bmp581_raw_t *out);

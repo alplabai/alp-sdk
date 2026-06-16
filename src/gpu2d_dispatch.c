@@ -46,7 +46,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_GPU2D_HANDLES 1
 #endif
 
-static struct alp_gpu2d  _pool[CONFIG_ALP_SDK_MAX_GPU2D_HANDLES];
+static struct alp_gpu2d _pool[CONFIG_ALP_SDK_MAX_GPU2D_HANDLES];
 
 static struct alp_gpu2d *_alloc(void)
 {
@@ -110,8 +110,13 @@ alp_gpu2d_t *alp_gpu2d_open(void)
 	return h;
 }
 
-alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t *h, const alp_gpu2d_surface_t *dst, uint32_t x,
-                                 uint32_t y, uint32_t w, uint32_t height, uint32_t argb_color)
+alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t               *h,
+                                 const alp_gpu2d_surface_t *dst,
+                                 uint32_t                   x,
+                                 uint32_t                   y,
+                                 uint32_t                   w,
+                                 uint32_t                   height,
+                                 uint32_t                   argb_color)
 {
 	if (h == NULL || !h->in_use) {
 		return ALP_ERR_NOT_READY;
@@ -123,9 +128,15 @@ alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t *h, const alp_gpu2d_surface_t *dst,
 	return h->state.ops->fill_rect(&h->state, dst, x, y, w, height, argb_color);
 }
 
-alp_status_t alp_gpu2d_blit(alp_gpu2d_t *h, const alp_gpu2d_surface_t *src, uint32_t sx,
-                            uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy,
-                            uint32_t w, uint32_t height)
+alp_status_t alp_gpu2d_blit(alp_gpu2d_t               *h,
+                            const alp_gpu2d_surface_t *src,
+                            uint32_t                   sx,
+                            uint32_t                   sy,
+                            const alp_gpu2d_surface_t *dst,
+                            uint32_t                   dx,
+                            uint32_t                   dy,
+                            uint32_t                   w,
+                            uint32_t                   height)
 {
 	if (h == NULL || !h->in_use) {
 		return ALP_ERR_NOT_READY;
@@ -141,9 +152,16 @@ alp_status_t alp_gpu2d_blit(alp_gpu2d_t *h, const alp_gpu2d_surface_t *src, uint
 	return h->state.ops->blit(&h->state, src, sx, sy, dst, dx, dy, w, height);
 }
 
-alp_status_t alp_gpu2d_blend(alp_gpu2d_t *h, const alp_gpu2d_surface_t *src, uint32_t sx,
-                             uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy,
-                             uint32_t w, uint32_t height, alp_gpu2d_blend_mode_t mode)
+alp_status_t alp_gpu2d_blend(alp_gpu2d_t               *h,
+                             const alp_gpu2d_surface_t *src,
+                             uint32_t                   sx,
+                             uint32_t                   sy,
+                             const alp_gpu2d_surface_t *dst,
+                             uint32_t                   dx,
+                             uint32_t                   dy,
+                             uint32_t                   w,
+                             uint32_t                   height,
+                             alp_gpu2d_blend_mode_t     mode)
 {
 	if (h == NULL || !h->in_use) {
 		return ALP_ERR_NOT_READY;

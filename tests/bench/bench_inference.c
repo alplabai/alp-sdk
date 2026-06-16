@@ -21,7 +21,7 @@
 
 static const uint8_t k_fake_model[8] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE };
 
-void                 bench_inference_main(void)
+void bench_inference_main(void)
 {
 	/* Null-cfg rejection -- earliest exit. */
 	BENCH_RUN("alp_inference_open(NULL cfg)", 1000000, { (void)alp_inference_open(NULL); });
@@ -49,6 +49,6 @@ void                 bench_inference_main(void)
      * NULL-handle guards every wrapper function carries.  Cheap. */
 	BENCH_RUN("alp_inference_num_inputs(NULL)", 1000000, { (void)alp_inference_num_inputs(NULL); });
 
-	BENCH_RUN("alp_inference_num_outputs(NULL)", 1000000,
-	          { (void)alp_inference_num_outputs(NULL); });
+	BENCH_RUN(
+	    "alp_inference_num_outputs(NULL)", 1000000, { (void)alp_inference_num_outputs(NULL); });
 }

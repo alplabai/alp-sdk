@@ -69,7 +69,7 @@ typedef enum {
  *  output when asserted; remaining bits are reserved for future fault
  *  sources (e.g. on-die comparator trip).  Backends that don't support
  *  a particular bit silently ignore it. */
-#define ALP_PWM_BREAK_NONE 0x00u
+#define ALP_PWM_BREAK_NONE     0x00u
 #define ALP_PWM_BREAK_EXTERNAL 0x01u
 
 /** Opaque PWM channel handle.  Allocate via @ref alp_pwm_open. */
@@ -161,8 +161,10 @@ alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns);
  *         ALP_ERR_OUT_OF_RANGE (dead_time_ns exceeds the timer's
  *         maximum at the configured period) / ALP_ERR_IO.
  */
-alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint32_t dead_time_ns,
-                               uint8_t break_cfg);
+alp_status_t alp_pwm_configure(alp_pwm_t      *pwm,
+                               alp_pwm_align_t align_mode,
+                               uint32_t        dead_time_ns,
+                               uint8_t         break_cfg);
 
 /**
  * @brief Drive the output low and release the handle back to the pool.
@@ -282,8 +284,8 @@ alp_pwm_capture_t *alp_pwm_capture_open(const alp_pwm_capture_config_t *cfg);
  *         signal too slow for the timer's tick rate) / ALP_ERR_IO /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_out,
-                                  uint32_t *pulse_ns_out);
+alp_status_t
+alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_out, uint32_t *pulse_ns_out);
 
 /**
  * @brief Close a capture handle and release the channel.

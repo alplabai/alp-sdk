@@ -18,16 +18,16 @@
 /* Register map (BST-BME280-DS002 v1.6 §5)                             */
 /* ------------------------------------------------------------------ */
 
-#define REG_CHIP_ID 0xD0
-#define REG_RESET 0xE0
-#define REG_CTRL_HUM 0xF2
-#define REG_STATUS 0xF3
+#define REG_CHIP_ID   0xD0
+#define REG_RESET     0xE0
+#define REG_CTRL_HUM  0xF2
+#define REG_STATUS    0xF3
 #define REG_CTRL_MEAS 0xF4
-#define REG_CONFIG 0xF5
+#define REG_CONFIG    0xF5
 #define REG_PRESS_MSB 0xF7 /* Burst start: P[3] | T[3] | H[2] = 8 bytes. */
-#define REG_CALIB_00 0x88  /* Block 1: T1..T3 (3×u16 LE) | P1..P9 (9×i16 LE) = 26 B. */
-#define REG_CALIB_25 0xA1  /* H1 (1 B). */
-#define REG_CALIB_26 0xE1  /* Block 2: H2..H6 packed across 7 B. */
+#define REG_CALIB_00  0x88 /* Block 1: T1..T3 (3×u16 LE) | P1..P9 (9×i16 LE) = 26 B. */
+#define REG_CALIB_25  0xA1 /* H1 (1 B). */
+#define REG_CALIB_26  0xE1 /* Block 2: H2..H6 packed across 7 B. */
 
 #define RESET_MAGIC 0xB6
 
@@ -104,8 +104,8 @@ alp_status_t bme280_init(bme280_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	dev->t_fine      = 0;
 	dev->initialised = false;
 
-	uint8_t      id  = 0;
-	alp_status_t s   = bme280_read_id(dev, &id);
+	uint8_t      id = 0;
+	alp_status_t s  = bme280_read_id(dev, &id);
 	if (s != ALP_OK) return s;
 	if (id != BME280_CHIP_ID) return ALP_ERR_IO;
 
@@ -122,10 +122,13 @@ alp_status_t bme280_read_id(bme280_t *dev, uint8_t *id_out)
 	return reg_read(dev, REG_CHIP_ID, id_out, 1);
 }
 
-alp_status_t bme280_set_sampling(bme280_t *dev, bme280_oversampling_t t_os,
-                                 bme280_oversampling_t p_os, bme280_oversampling_t h_os,
-                                 bme280_mode_t mode, bme280_standby_t standby,
-                                 bme280_filter_t filter)
+alp_status_t bme280_set_sampling(bme280_t             *dev,
+                                 bme280_oversampling_t t_os,
+                                 bme280_oversampling_t p_os,
+                                 bme280_oversampling_t h_os,
+                                 bme280_mode_t         mode,
+                                 bme280_standby_t      standby,
+                                 bme280_filter_t       filter)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 

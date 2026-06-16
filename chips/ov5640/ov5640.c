@@ -25,7 +25,7 @@
 /* Register addresses (datasheet §8)                                   */
 /* ------------------------------------------------------------------ */
 
-#define REG_SYS_CTRL0 0x3008   /* bit7 = software reset, bit6 = power down. */
+#define REG_SYS_CTRL0   0x3008 /* bit7 = software reset, bit6 = power down. */
 #define REG_PRE_PATTERN 0x503D /* test-pattern enable. */
 
 static alp_status_t reg_write8(ov5640_t *dev, uint16_t reg, uint8_t val)
@@ -62,8 +62,8 @@ alp_status_t ov5640_init(ov5640_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	dev->fmt         = OV5640_FMT_RGB565;
 	dev->initialised = false;
 
-	uint16_t     id  = 0;
-	alp_status_t s   = ov5640_read_id(dev, &id);
+	uint16_t     id = 0;
+	alp_status_t s  = ov5640_read_id(dev, &id);
 	if (s != ALP_OK) return s;
 	if (id != OV5640_CHIP_ID) return ALP_ERR_IO;
 

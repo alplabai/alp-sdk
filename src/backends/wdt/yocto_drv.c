@@ -75,8 +75,10 @@ static alp_status_t _errno_to_alp(int err)
  * seconds, so we round up to at least 1 s.  WDIOC_GETSUPPORT tells us
  * whether magic-close is available for the close()-disarm path.
  */
-static alp_status_t y_open(uint32_t wdt_id, const alp_wdt_config_t *cfg,
-                           alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
+static alp_status_t y_open(uint32_t                 wdt_id,
+                           const alp_wdt_config_t  *cfg,
+                           alp_wdt_backend_state_t *st,
+                           alp_capabilities_t      *caps_out)
 {
 	char path[32];
 	int  n = snprintf(path, sizeof(path), "/dev/watchdog%u", (unsigned)wdt_id);
@@ -185,7 +187,8 @@ static const alp_wdt_ops_t _ops = {
 	.close   = y_close,
 };
 
-ALP_BACKEND_REGISTER(wdt, yocto_drv,
+ALP_BACKEND_REGISTER(wdt,
+                     yocto_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "linux",

@@ -40,8 +40,9 @@ struct alp_dac_ops {
      * ALP_ERR_NOT_READY if hardware isn't initialised; ALP_ERR_NOSUPPORT
      * when the backend has no DAC body (CONFIG_DAC=n).
      */
-	alp_status_t (*open)(const alp_dac_config_t *cfg, alp_dac_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
+	alp_status_t (*open)(const alp_dac_config_t  *cfg,
+	                     alp_dac_backend_state_t *state,
+	                     alp_capabilities_t      *caps_out);
 
 	/* Set the output in millivolts. */
 	alp_status_t (*write_mv)(alp_dac_backend_state_t *state, uint16_t mv);

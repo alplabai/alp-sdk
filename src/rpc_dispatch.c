@@ -41,7 +41,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_RPC_HANDLES 2
 #endif
 
-static struct alp_rpc_channel  _rpc_pool[CONFIG_ALP_SDK_MAX_RPC_HANDLES];
+static struct alp_rpc_channel _rpc_pool[CONFIG_ALP_SDK_MAX_RPC_HANDLES];
 
 static struct alp_rpc_channel *_alloc_rpc(void)
 {
@@ -113,8 +113,8 @@ void alp_rpc_close(alp_rpc_channel_t *ch)
 /* Subscriptions                                                       */
 /* ================================================================== */
 
-alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb,
-                               void *user)
+alp_status_t
+alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb, void *user)
 {
 	if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
 	if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
@@ -138,8 +138,8 @@ alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
 /* Send + call                                                         */
 /* ================================================================== */
 
-alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload,
-                          size_t len)
+alp_status_t
+alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, size_t len)
 {
 	if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
 	if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
@@ -150,8 +150,13 @@ alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void 
 	return ch->state.ops->send(&ch->state, method, payload, len);
 }
 
-alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method, const void *req,
-                          size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms)
+alp_status_t alp_rpc_call(alp_rpc_channel_t *ch,
+                          const char        *method,
+                          const void        *req,
+                          size_t             req_len,
+                          void              *resp,
+                          size_t            *resp_len,
+                          uint32_t           timeout_ms)
 {
 	if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
 	if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;

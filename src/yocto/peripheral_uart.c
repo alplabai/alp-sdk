@@ -74,7 +74,7 @@ struct alp_uart {
 	int  fd;
 };
 
-static struct alp_uart  g_uart_pool[ALP_SDK_YOCTO_MAX_UART_HANDLES];
+static struct alp_uart g_uart_pool[ALP_SDK_YOCTO_MAX_UART_HANDLES];
 
 static struct alp_uart *pool_acquire(void)
 {

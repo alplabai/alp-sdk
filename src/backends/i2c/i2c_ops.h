@@ -29,13 +29,20 @@ typedef struct alp_i2c_backend_state {
 } alp_i2c_backend_state_t;
 
 struct alp_i2c_ops {
-	alp_status_t (*open)(const alp_i2c_config_t *cfg, alp_i2c_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
-	alp_status_t (*write)(alp_i2c_backend_state_t *state, uint8_t addr, const uint8_t *data,
-	                      size_t len);
+	alp_status_t (*open)(const alp_i2c_config_t  *cfg,
+	                     alp_i2c_backend_state_t *state,
+	                     alp_capabilities_t      *caps_out);
+	alp_status_t (*write)(alp_i2c_backend_state_t *state,
+	                      uint8_t                  addr,
+	                      const uint8_t           *data,
+	                      size_t                   len);
 	alp_status_t (*read)(alp_i2c_backend_state_t *state, uint8_t addr, uint8_t *data, size_t len);
-	alp_status_t (*write_read)(alp_i2c_backend_state_t *state, uint8_t addr, const uint8_t *wdata,
-	                           size_t wlen, uint8_t *rdata, size_t rlen);
+	alp_status_t (*write_read)(alp_i2c_backend_state_t *state,
+	                           uint8_t                  addr,
+	                           const uint8_t           *wdata,
+	                           size_t                   wlen,
+	                           uint8_t                 *rdata,
+	                           size_t                   rlen);
 	void (*close)(alp_i2c_backend_state_t *state);
 };
 

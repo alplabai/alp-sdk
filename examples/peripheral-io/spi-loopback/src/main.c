@@ -64,7 +64,11 @@ int main(void)
 	uint8_t      tx[4] = { 0xAA, 0x55, 0x12, 0x34 };
 	uint8_t      rx[4] = { 0 };
 	alp_status_t s     = alp_spi_transceive(bus, tx, rx, sizeof tx);
-	printf("[spi] transceive -> status=%d  rx={%02x %02x %02x %02x}\n", (int)s, rx[0], rx[1], rx[2],
+	printf("[spi] transceive -> status=%d  rx={%02x %02x %02x %02x}\n",
+	       (int)s,
+	       rx[0],
+	       rx[1],
+	       rx[2],
 	       rx[3]);
 
 	/* Close releases the bus handle.  CS line returns to its idle

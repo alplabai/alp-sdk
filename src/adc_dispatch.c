@@ -37,7 +37,7 @@ extern void alp_z_set_last_error(alp_status_t s);
 #define CONFIG_ALP_SDK_ADC_HANDLE_POOL 8
 #endif
 
-static struct alp_adc  _pool[CONFIG_ALP_SDK_ADC_HANDLE_POOL];
+static struct alp_adc _pool[CONFIG_ALP_SDK_ADC_HANDLE_POOL];
 
 static struct alp_adc *_alloc_handle(void)
 {

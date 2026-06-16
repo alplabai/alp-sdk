@@ -35,7 +35,7 @@
 extern "C" {
 #endif
 
-#define ST7789_MAX_WIDTH 240
+#define ST7789_MAX_WIDTH  240
 #define ST7789_MAX_HEIGHT 320
 
 typedef struct {
@@ -61,8 +61,12 @@ typedef struct {
  * @param height  Panel height in pixels (≤ 320).
  * @return `ALP_OK` on success.
  */
-alp_status_t st7789_init(st7789_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gpio_t *reset,
-                         uint16_t width, uint16_t height);
+alp_status_t st7789_init(st7789_t   *dev,
+                         alp_spi_t  *spi,
+                         alp_gpio_t *dc,
+                         alp_gpio_t *reset,
+                         uint16_t    width,
+                         uint16_t    height);
 
 /**
  * @brief Set the active drawing window before pixel pushes.

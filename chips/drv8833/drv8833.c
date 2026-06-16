@@ -23,8 +23,12 @@ static alp_status_t drv8833_set_pair(alp_pwm_t *forward, alp_pwm_t *reverse, int
 	return alp_pwm_set_duty(reverse, (uint32_t)(-pulse_ns));
 }
 
-alp_status_t drv8833_init(drv8833_t *dev, alp_pwm_t *in1, alp_pwm_t *in2, alp_pwm_t *in3,
-                          alp_pwm_t *in4, alp_gpio_t *nsleep)
+alp_status_t drv8833_init(drv8833_t  *dev,
+                          alp_pwm_t  *in1,
+                          alp_pwm_t  *in2,
+                          alp_pwm_t  *in3,
+                          alp_pwm_t  *in4,
+                          alp_gpio_t *nsleep)
 {
 	if (dev == NULL) return ALP_ERR_INVAL;
 	if (in1 == NULL || in2 == NULL || in3 == NULL || in4 == NULL) return ALP_ERR_INVAL;

@@ -27,7 +27,9 @@ static bool released_level(deepx_dxm1_reset_polarity_t p)
 	return !asserted_level(p);
 }
 
-alp_status_t deepx_dxm1_init(deepx_dxm1_t *ctx, alp_gpio_t *m1_reset, pi3dbs12212_t *pcie_mux,
+alp_status_t deepx_dxm1_init(deepx_dxm1_t       *ctx,
+                             alp_gpio_t         *m1_reset,
+                             pi3dbs12212_t      *pcie_mux,
                              pi3dbs12212_state_t deepx_path)
 {
 	if (ctx == NULL || m1_reset == NULL || pcie_mux == NULL) return ALP_ERR_INVAL;

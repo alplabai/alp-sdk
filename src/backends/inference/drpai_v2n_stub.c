@@ -37,7 +37,8 @@
 #include "inference_ops.h"
 
 static alp_status_t drpai_open(const alp_inference_config_t  *cfg,
-                               alp_inference_backend_state_t *state, alp_capabilities_t *caps_out)
+                               alp_inference_backend_state_t *state,
+                               alp_capabilities_t            *caps_out)
 {
 	(void)cfg;
 	state->be_data  = NULL;
@@ -62,8 +63,8 @@ static size_t drpai_num_outputs(alp_inference_backend_state_t *state)
 	return 0u;
 }
 
-static alp_status_t drpai_get_input(alp_inference_backend_state_t *state, size_t index,
-                                    alp_inference_tensor_t *out)
+static alp_status_t
+drpai_get_input(alp_inference_backend_state_t *state, size_t index, alp_inference_tensor_t *out)
 {
 	(void)state;
 	(void)index;
@@ -71,8 +72,8 @@ static alp_status_t drpai_get_input(alp_inference_backend_state_t *state, size_t
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t drpai_get_output(alp_inference_backend_state_t *state, size_t index,
-                                     alp_inference_tensor_t *out)
+static alp_status_t
+drpai_get_output(alp_inference_backend_state_t *state, size_t index, alp_inference_tensor_t *out)
 {
 	(void)state;
 	(void)index;
@@ -105,7 +106,8 @@ static const alp_inference_ops_t _ops = {
 	.close       = drpai_close,
 };
 
-ALP_BACKEND_REGISTER(inference, drpai_v2n,
+ALP_BACKEND_REGISTER(inference,
+                     drpai_v2n,
                      {
                          .silicon_ref = "renesas:rzv2n:n44",
                          .vendor      = "renesas",

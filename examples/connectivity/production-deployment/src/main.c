@@ -93,7 +93,7 @@
 #include "alp/storage.h"
 
 #define MENDER_POLL_INTERVAL_S 600u
-#define HEARTBEAT_INTERVAL_S 60u
+#define HEARTBEAT_INTERVAL_S   60u
 
 /* ----------------------------------------------------------------- */
 /* Stage 1: factory-provisioning read-back                            */
@@ -111,8 +111,10 @@ static void stage_factory_identity(void)
 	printf("[prod]   SoM SKU=%s\n", info.som_sku);
 	printf("[prod]   SoM serial=%s\n", info.som_serial);
 	printf("[prod]   SoM hw_rev=%s\n", info.som_hw_rev);
-	printf("[prod]   SoM mfg date=%u-%02u-%02u\n", (unsigned)info.som_mfg_year,
-	       (unsigned)info.som_mfg_month, (unsigned)info.som_mfg_day);
+	printf("[prod]   SoM mfg date=%u-%02u-%02u\n",
+	       (unsigned)info.som_mfg_year,
+	       (unsigned)info.som_mfg_month,
+	       (unsigned)info.som_mfg_day);
 	if (info.board_name[0] != '\0') {
 		printf("[prod]   board=%s rev=%s\n", info.board_name, info.board_hw_rev);
 	}
@@ -142,7 +144,8 @@ static void stage_secure_boot_evidence(void)
 	const alp_status_t rc   = alp_storage_get_info(s, &info);
 	if (rc == ALP_OK) {
 		printf("[prod]   internal flash: %llu bytes total, block=%u erase=%u\n",
-		       (unsigned long long)info.total_bytes, (unsigned)info.block_size,
+		       (unsigned long long)info.total_bytes,
+		       (unsigned)info.block_size,
 		       (unsigned)info.erase_size);
 		printf("[prod]   (slot inspection + image_ok read happens here on HiL)\n");
 	}

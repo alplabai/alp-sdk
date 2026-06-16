@@ -32,15 +32,18 @@ typedef struct alp_counter_backend_state {
 } alp_counter_backend_state_t;
 
 struct alp_counter_ops {
-	alp_status_t (*open)(const alp_counter_config_t *cfg, alp_counter_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
+	alp_status_t (*open)(const alp_counter_config_t  *cfg,
+	                     alp_counter_backend_state_t *state,
+	                     alp_capabilities_t          *caps_out);
 	alp_status_t (*start)(alp_counter_backend_state_t *state);
 	alp_status_t (*stop)(alp_counter_backend_state_t *state);
 	alp_status_t (*get_value)(alp_counter_backend_state_t *state, uint32_t *ticks_out);
-	alp_status_t (*us_to_ticks)(alp_counter_backend_state_t *state, uint32_t us,
-	                            uint32_t *ticks_out);
-	alp_status_t (*set_alarm)(alp_counter_backend_state_t *state, uint32_t ticks_from_now,
-	                          struct alp_counter *owner /* for trampoline back-ref */);
+	alp_status_t (*us_to_ticks)(alp_counter_backend_state_t *state,
+	                            uint32_t                     us,
+	                            uint32_t                    *ticks_out);
+	alp_status_t (*set_alarm)(alp_counter_backend_state_t *state,
+	                          uint32_t                     ticks_from_now,
+	                          struct alp_counter          *owner /* for trampoline back-ref */);
 	alp_status_t (*cancel_alarm)(alp_counter_backend_state_t *state);
 	void (*close)(alp_counter_backend_state_t *state);
 };

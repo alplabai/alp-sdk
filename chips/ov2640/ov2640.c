@@ -41,8 +41,8 @@ alp_status_t ov2640_init(ov2640_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	if (i2c_addr == 0) return ALP_ERR_INVAL;
 
 	memset(dev, 0, sizeof(*dev));
-	dev->bus       = bus;
-	dev->addr      = i2c_addr;
+	dev->bus  = bus;
+	dev->addr = i2c_addr;
 
 	alp_status_t s = ov2640_select_bank(dev, OV2640_BANK_SENSOR);
 	if (s != ALP_OK) return s;

@@ -93,7 +93,9 @@ static alp_status_t read_manifest(alp_hw_info_eeprom_t *manifest)
 		return s;
 	}
 
-	s = eeprom_24c128_read(&ee, (uint16_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET, (uint8_t *)manifest,
+	s = eeprom_24c128_read(&ee,
+	                       (uint16_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET,
+	                       (uint8_t *)manifest,
 	                       sizeof(*manifest));
 
 	eeprom_24c128_deinit(&ee);
@@ -127,13 +129,13 @@ alp_status_t alp_hw_info_classify_manifest(const alp_hw_info_eeprom_t *manifest,
 	uint32_t     calc_crc        = alp_hw_info_crc32((const uint8_t *)manifest, crc_covered_len);
 	if (calc_crc != manifest->crc32) return ALP_ERR_IO;
 
-	copy_field(out->som_family, sizeof(out->som_family), manifest->family,
-	           sizeof(manifest->family));
+	copy_field(
+	    out->som_family, sizeof(out->som_family), manifest->family, sizeof(manifest->family));
 	copy_field(out->som_sku, sizeof(out->som_sku), manifest->sku, sizeof(manifest->sku));
-	copy_field(out->som_hw_rev, sizeof(out->som_hw_rev), manifest->hw_rev,
-	           sizeof(manifest->hw_rev));
-	copy_field(out->som_serial, sizeof(out->som_serial), manifest->serial,
-	           sizeof(manifest->serial));
+	copy_field(
+	    out->som_hw_rev, sizeof(out->som_hw_rev), manifest->hw_rev, sizeof(manifest->hw_rev));
+	copy_field(
+	    out->som_serial, sizeof(out->som_serial), manifest->serial, sizeof(manifest->serial));
 	out->som_mfg_year  = manifest->mfg_year;
 	out->som_mfg_month = manifest->mfg_month;
 	out->som_mfg_day   = manifest->mfg_day;
@@ -174,8 +176,9 @@ alp_status_t alp_hw_info_read(alp_hw_info_t *out)
 #endif
 }
 
-alp_status_t alp_hw_info_assert_matches_build(const alp_hw_info_t *info, const char *expected_sku,
-                                              const char *expected_hw_rev)
+alp_status_t alp_hw_info_assert_matches_build(const alp_hw_info_t *info,
+                                              const char          *expected_sku,
+                                              const char          *expected_hw_rev)
 {
 	if (info == NULL) return ALP_ERR_INVAL;
 

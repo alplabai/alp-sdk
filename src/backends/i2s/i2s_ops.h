@@ -29,14 +29,20 @@ typedef struct alp_i2s_backend_state {
 } alp_i2s_backend_state_t;
 
 struct alp_i2s_ops {
-	alp_status_t (*open)(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
+	alp_status_t (*open)(const alp_i2s_config_t  *cfg,
+	                     alp_i2s_backend_state_t *state,
+	                     alp_capabilities_t      *caps_out);
 	alp_status_t (*start)(alp_i2s_backend_state_t *state);
 	alp_status_t (*stop)(alp_i2s_backend_state_t *state);
-	alp_status_t (*write)(alp_i2s_backend_state_t *state, const void *block, size_t bytes,
-	                      uint32_t timeout_ms);
-	alp_status_t (*read)(alp_i2s_backend_state_t *state, void *block, size_t bytes,
-	                     size_t *bytes_out, uint32_t timeout_ms);
+	alp_status_t (*write)(alp_i2s_backend_state_t *state,
+	                      const void              *block,
+	                      size_t                   bytes,
+	                      uint32_t                 timeout_ms);
+	alp_status_t (*read)(alp_i2s_backend_state_t *state,
+	                     void                    *block,
+	                     size_t                   bytes,
+	                     size_t                  *bytes_out,
+	                     uint32_t                 timeout_ms);
 	void (*close)(alp_i2s_backend_state_t *state);
 };
 

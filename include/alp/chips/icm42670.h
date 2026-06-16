@@ -40,7 +40,7 @@ extern "C" {
 #endif
 
 /** Default 7-bit I2C addresses (AP_AD0 strap selects). */
-#define ICM42670_I2C_ADDR_LOW 0x68  /**< AP_AD0 tied low. */
+#define ICM42670_I2C_ADDR_LOW  0x68 /**< AP_AD0 tied low. */
 #define ICM42670_I2C_ADDR_HIGH 0x69 /**< AP_AD0 tied high. */
 
 /** WHO_AM_I (register 0x75) value the chip returns. */

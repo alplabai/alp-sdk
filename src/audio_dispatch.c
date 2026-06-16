@@ -150,8 +150,8 @@ alp_status_t alp_audio_in_stop(alp_audio_in_t *in)
 	return in->state.ops->in_stop(&in->state);
 }
 
-alp_status_t alp_audio_in_read(alp_audio_in_t *in, void *buf, size_t frames, size_t *out_frames,
-                               uint32_t timeout_ms)
+alp_status_t alp_audio_in_read(
+    alp_audio_in_t *in, void *buf, size_t frames, size_t *out_frames, uint32_t timeout_ms)
 {
 	if (out_frames != NULL) *out_frames = 0;
 	if (in == NULL || !in->in_use) return ALP_ERR_NOT_READY;
@@ -230,8 +230,8 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *out)
 	return out->state.ops->out_stop(&out->state);
 }
 
-alp_status_t alp_audio_out_write(alp_audio_out_t *out, const void *buf, size_t frames,
-                                 size_t *out_frames, uint32_t timeout_ms)
+alp_status_t alp_audio_out_write(
+    alp_audio_out_t *out, const void *buf, size_t frames, size_t *out_frames, uint32_t timeout_ms)
 {
 	if (out_frames != NULL) *out_frames = 0;
 	if (out == NULL || !out->in_use) return ALP_ERR_NOT_READY;

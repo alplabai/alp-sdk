@@ -39,10 +39,10 @@
 LOG_MODULE_REGISTER(autopilot, LOG_LEVEL_WRN);
 
 /* ───────── Driver handles + bus handles ───────── */
-static alp_i2c_t      *s_i2c;
-static alp_uart_t     *s_rc_uart;
-static alp_uart_t     *s_gps_uart;
-static alp_pwm_t      *s_esc[AUTOPILOT_N_MOTORS];
+static alp_i2c_t  *s_i2c;
+static alp_uart_t *s_rc_uart;
+static alp_uart_t *s_gps_uart;
+static alp_pwm_t  *s_esc[AUTOPILOT_N_MOTORS];
 
 static lsm6dso_t       s_imu;
 static bmp390_t        s_baro;
@@ -108,10 +108,10 @@ int autopilot_init(autopilot_state_t *s)
 	memset(s, 0, sizeof(*s));
 	s->mode = AP_MODE_DISARMED;
 
-	s_i2c   = alp_i2c_open(&(alp_i2c_config_t){
-	      .bus_id     = E1M_I2C0,
-	      .bitrate_hz = 400000,
-    });
+	s_i2c = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
 	if (!s_i2c) {
 		LOG_ERR("I2C0 open failed");
 		return -1;
@@ -119,7 +119,10 @@ int autopilot_init(autopilot_state_t *s)
 
 	if (lsm6dso_init(&s_imu, s_i2c, LSM6DSO_I2C_ADDR_LOW) != ALP_OK) return -2;
 	if (bmp390_init(&s_baro, s_i2c, BMP390_I2C_ADDR_PRIMARY) != ALP_OK) return -3;
-	if (ina236_init(&s_batt, s_i2c, /*addr_7bit=*/0x40, /*shunt_ohms=*/0.01f,
+	if (ina236_init(&s_batt,
+	                s_i2c,
+	                /*addr_7bit=*/0x40,
+	                /*shunt_ohms=*/0.01f,
 	                /*max_current_a=*/50.f,
 	                /*adcrange=*/INA236_ADCRANGE_81MV) != ALP_OK)
 		return -4;
@@ -190,9 +193,9 @@ void autopilot_rate_loop(autopilot_state_t *s)
 		                         : s->setp_pitch * (3.14159265f / 180.f);
 		const float setp_r = s->stick_yaw * 250.f * (3.14159265f / 180.f);
 
-		const float tau_p  = pid_step(&s_rate_p, setp_p, s->p, dt_s);
-		const float tau_q  = pid_step(&s_rate_q, setp_q, s->q, dt_s);
-		const float tau_r  = pid_step(&s_rate_r, setp_r, s->r, dt_s);
+		const float tau_p = pid_step(&s_rate_p, setp_p, s->p, dt_s);
+		const float tau_q = pid_step(&s_rate_q, setp_q, s->q, dt_s);
+		const float tau_r = pid_step(&s_rate_r, setp_r, s->r, dt_s);
 
 		const float thr =
 		    (s->mode == AP_MODE_DISARMED || s->mode == AP_MODE_FAILSAFE) ? 0.0f : s->stick_throttle;

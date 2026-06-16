@@ -28,8 +28,8 @@
 #include "alp/chips/cc3501e.h"
 #include "alp/peripheral.h"
 
-static void encode_header(uint8_t *frame, alp_cc3501e_cmd_t cmd, uint8_t flags,
-                          uint16_t payload_len)
+static void
+encode_header(uint8_t *frame, alp_cc3501e_cmd_t cmd, uint8_t flags, uint16_t payload_len)
 {
 	frame[0] = (uint8_t)cmd;
 	frame[1] = flags;
@@ -138,15 +138,19 @@ volatile uint32_t cc3501e_dbg_reply_hdr;
 
 static uint32_t pack4(const uint8_t *b)
 {
-	return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
-	       ((uint32_t)b[3] << 24);
+	return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
 }
 
-alp_status_t cc3501e_request(cc3501e_t *ctx, alp_cc3501e_cmd_t cmd, const uint8_t *tx_payload,
-                             size_t tx_len, uint8_t *rx_buf, size_t rx_cap, size_t *rx_len,
-                             uint32_t timeout_ms)
+alp_status_t cc3501e_request(cc3501e_t        *ctx,
+                             alp_cc3501e_cmd_t cmd,
+                             const uint8_t    *tx_payload,
+                             size_t            tx_len,
+                             uint8_t          *rx_buf,
+                             size_t            rx_cap,
+                             size_t           *rx_len,
+                             uint32_t          timeout_ms)
 {
-	(void)timeout_ms; /* Reserved for a future IRQ-driven wait (next HW rev). */
+	(void)timeout_ms;          /* Reserved for a future IRQ-driven wait (next HW rev). */
 	cc3501e_dbg_fail_step = 0; /* bench debug (REVERT) */
 	if (rx_len != NULL) *rx_len = 0;
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
@@ -166,11 +170,18 @@ alp_status_t cc3501e_request(cc3501e_t *ctx, alp_cc3501e_cmd_t cmd, const uint8_
 	encode_header(ctx->tx_scratch, cmd, ALP_CC3501E_FLAG_RESP_REQUIRED, (uint16_t)tx_len);
 	alp_status_t s =
 	    alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
-	if (s != ALP_OK) { cc3501e_dbg_fail_step = 1; return s; } /* bench debug (REVERT) */
-	cc3501e_dbg_reqhdr_rx = pack4(ctx->rx_scratch); /* bench debug (REVERT): MISO during req-hdr write */
+	if (s != ALP_OK) {
+		cc3501e_dbg_fail_step = 1;
+		return s;
+	} /* bench debug (REVERT) */
+	cc3501e_dbg_reqhdr_rx =
+	    pack4(ctx->rx_scratch); /* bench debug (REVERT): MISO during req-hdr write */
 	if (tx_len > 0) {
 		s = alp_spi_transceive(ctx->bus, tx_payload, ctx->rx_scratch, tx_len);
-		if (s != ALP_OK) { cc3501e_dbg_fail_step = 2; return s; } /* bench debug (REVERT) */
+		if (s != ALP_OK) {
+			cc3501e_dbg_fail_step = 2;
+			return s;
+		} /* bench debug (REVERT) */
 	}
 
 	/* Settle gap: let the slave dispatch + arm its reply before we read.
@@ -183,8 +194,12 @@ alp_status_t cc3501e_request(cc3501e_t *ctx, alp_cc3501e_cmd_t cmd, const uint8_
 
 	/* 3. Reply header -> learn the reply payload length. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
-	if (s != ALP_OK) { cc3501e_dbg_fail_step = 3; return s; } /* bench debug (REVERT) */
-	cc3501e_dbg_reply_hdr = pack4(ctx->rx_scratch); /* bench debug (REVERT): raw reply header bytes */
+	if (s != ALP_OK) {
+		cc3501e_dbg_fail_step = 3;
+		return s;
+	} /* bench debug (REVERT) */
+	cc3501e_dbg_reply_hdr =
+	    pack4(ctx->rx_scratch); /* bench debug (REVERT): raw reply header bytes */
 	uint16_t resp_payload_len = decode_header_payload_len(ctx->rx_scratch);
 	/* Every reply payload is status(1) + data; 0 or over-ceiling means the
      * slave wasn't ready or the lockstep desynced (no CS edge to recover). */
@@ -195,7 +210,10 @@ alp_status_t cc3501e_request(cc3501e_t *ctx, alp_cc3501e_cmd_t cmd, const uint8_
 
 	/* 4. Reply payload: status byte followed by the response data. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, resp_payload_len);
-	if (s != ALP_OK) { cc3501e_dbg_fail_step = 4; return s; } /* bench debug (REVERT) */
+	if (s != ALP_OK) {
+		cc3501e_dbg_fail_step = 4;
+		return s;
+	} /* bench debug (REVERT) */
 
 	const uint8_t resp     = ctx->rx_scratch[0];
 	const size_t  data_len = (size_t)resp_payload_len - 1u;

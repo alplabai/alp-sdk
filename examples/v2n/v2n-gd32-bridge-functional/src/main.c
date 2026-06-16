@@ -50,7 +50,7 @@ volatile uint32_t func_results[44] = { 0xF07C7E57u, 0u };
 static gd32g553_t ctx;
 static unsigned   test_idx; /* cursor into func_results[4..] */
 
-static void       record(alp_status_t s, bool value_ok)
+static void record(alp_status_t s, bool value_ok)
 {
 	uint32_t cell;
 	if (s == ALP_OK && value_ok) {
@@ -127,9 +127,9 @@ static void t_tmu_nosupport(gd32g553_tmu_function_t fn)
 static void t_tmu_q31_sqrt(void)
 {
 	uint32_t           out = 0;
-	const alp_status_t s   = gd32g553_tmu_compute(&ctx, GD32G553_TMU_FN_SQRT, GD32G553_TMU_FMT_Q31,
-	                                              0x20000000u, 0u, &out);
-	const int32_t      err = (int32_t)out - 0x40000000;
+	const alp_status_t s   = gd32g553_tmu_compute(
+        &ctx, GD32G553_TMU_FN_SQRT, GD32G553_TMU_FMT_Q31, 0x20000000u, 0u, &out);
+	const int32_t err = (int32_t)out - 0x40000000;
 	record(s, (s == ALP_OK) && (err > -4096) && (err < 4096));
 }
 
@@ -203,8 +203,9 @@ static void t_pwm_set_get_scope_ch(void)
 	if (s == ALP_OK) {
 		s = gd32g553_pwm_get(&ctx, SCOPE_PWM_CH, &period, &duty);
 	}
-	record(s, (s == ALP_OK) && (period >= 999000u) && (period <= 1001000u) && (duty >= 499000u) &&
-	              (duty <= 501000u));
+	record(s,
+	       (s == ALP_OK) && (period >= 999000u) && (period <= 1001000u) && (duty >= 499000u) &&
+	           (duty <= 501000u));
 }
 
 /* pwm_configure is a documented v0.3 PARTIAL: the default tuple
@@ -285,8 +286,9 @@ static void t_version_stable(void)
 	gd32g553_version_t v0, v1;
 	alp_status_t       s = gd32g553_get_version(&ctx, &v0);
 	if (s == ALP_OK) s = gd32g553_get_version(&ctx, &v1);
-	record(s, (s == ALP_OK) && (v0.major == v1.major) && (v0.minor == v1.minor) &&
-	              (v0.patch == v1.patch));
+	record(s,
+	       (s == ALP_OK) && (v0.major == v1.major) && (v0.minor == v1.minor) &&
+	           (v0.patch == v1.patch));
 }
 
 static void t_da9292_sentinel(void)

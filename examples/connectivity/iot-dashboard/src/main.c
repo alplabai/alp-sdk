@@ -72,7 +72,7 @@ static dashboard_state_t g_state;
 K_THREAD_STACK_DEFINE(sensor_stack, 4096);
 static struct k_thread sensor_thread;
 
-static void            sensor_entry(void *p1, void *p2, void *p3)
+static void sensor_entry(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1);
 	ARG_UNUSED(p2);
@@ -92,11 +92,17 @@ static void            sensor_entry(void *p1, void *p2, void *p3)
 			/* Push the same sample to MQTT if connected. */
 			if (s_mqtt != NULL) {
 				char payload[96];
-				int  n = snprintf(payload, sizeof(payload), "{\"t\":%.2f,\"h\":%.1f,\"p\":%.1f}",
-				                  (double)g_state.temp_c, (double)g_state.humid_pct,
-				                  (double)g_state.pressure_hpa);
+				int  n = snprintf(payload,
+                                 sizeof(payload),
+                                 "{\"t\":%.2f,\"h\":%.1f,\"p\":%.1f}",
+                                 (double)g_state.temp_c,
+                                 (double)g_state.humid_pct,
+                                 (double)g_state.pressure_hpa);
 				if (n > 0) {
-					(void)alp_mqtt_publish(s_mqtt, "alp/env", (const uint8_t *)payload, (size_t)n,
+					(void)alp_mqtt_publish(s_mqtt,
+					                       "alp/env",
+					                       (const uint8_t *)payload,
+					                       (size_t)n,
 					                       ALP_MQTT_QOS_0,
 					                       /*retain=*/false);
 				}
@@ -118,8 +124,12 @@ int main(void)
 	if (s_i2c == NULL || bme280_init(&s_env, s_i2c, BME280_I2C_ADDR_LOW) != ALP_OK) {
 		LOG_WRN("BME280 unavailable; dashboard will show zero readings");
 	} else {
-		bme280_set_sampling(&s_env, BME280_OVERSAMPLING_X1, BME280_OVERSAMPLING_X1,
-		                    BME280_OVERSAMPLING_X1, BME280_MODE_NORMAL, BME280_STANDBY_125_MS,
+		bme280_set_sampling(&s_env,
+		                    BME280_OVERSAMPLING_X1,
+		                    BME280_OVERSAMPLING_X1,
+		                    BME280_OVERSAMPLING_X1,
+		                    BME280_MODE_NORMAL,
+		                    BME280_STANDBY_125_MS,
 		                    BME280_FILTER_OFF);
 	}
 
@@ -156,8 +166,16 @@ int main(void)
 	display_blanking_off(display);
 
 	/* Spawn the sensor thread. */
-	k_thread_create(&sensor_thread, sensor_stack, K_THREAD_STACK_SIZEOF(sensor_stack), sensor_entry,
-	                NULL, NULL, NULL, K_PRIO_PREEMPT(4), 0, K_NO_WAIT);
+	k_thread_create(&sensor_thread,
+	                sensor_stack,
+	                K_THREAD_STACK_SIZEOF(sensor_stack),
+	                sensor_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(4),
+	                0,
+	                K_NO_WAIT);
 	k_thread_name_set(&sensor_thread, "env_sensor");
 
 	/* Render loop. */

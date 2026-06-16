@@ -39,7 +39,7 @@ static lsm6dso_t       s_imu;
 static ublox_neo_m9n_t s_gps;
 static ina236_t        s_batt;
 
-int                    drone_sensors_init(drone_telemetry_t *telem)
+int drone_sensors_init(drone_telemetry_t *telem)
 {
 	memset(telem, 0, sizeof(*telem));
 	telem->mode = DRONE_MODE_STABILISED;
@@ -73,8 +73,12 @@ int                    drone_sensors_init(drone_telemetry_t *telem)
 	}
 
 	/* Battery monitor.  INA236A at 0x40 (A0 = GND) is the default. */
-	if (ina236_init(&s_batt, s_i2c, 0x40, /*shunt_ohms=*/0.01f,
-	                /*max_current_a=*/50.f, INA236_ADCRANGE_81MV) != ALP_OK) {
+	if (ina236_init(&s_batt,
+	                s_i2c,
+	                0x40,
+	                /*shunt_ohms=*/0.01f,
+	                /*max_current_a=*/50.f,
+	                INA236_ADCRANGE_81MV) != ALP_OK) {
 		LOG_WRN("INA236 init failed; battery telemetry will read zero");
 		rc--;
 	}
@@ -93,8 +97,8 @@ int                    drone_sensors_init(drone_telemetry_t *telem)
  * this is a placeholder inline that integrates gyro into Euler
  * angles so the HUD has something to animate even on the demo
  * board without the upstream lib fetched. */
-static void update_attitude(drone_telemetry_t *t, float gx_dps, float gy_dps, float gz_dps,
-                            float dt_s)
+static void
+update_attitude(drone_telemetry_t *t, float gx_dps, float gy_dps, float gz_dps, float dt_s)
 {
 	t->roll_deg += gx_dps * dt_s;
 	t->pitch_deg += gy_dps * dt_s;
@@ -111,7 +115,7 @@ static void update_attitude(drone_telemetry_t *t, float gx_dps, float gy_dps, fl
 /* Default-FS LSB-to-physical conversion factors for the LSM6DSO.
  * Accel default FS = ±2 g, sensitivity 16384 LSB/g.
  * Gyro  default FS = ±250 dps, sensitivity 114.286 LSB/dps. */
-#define LSM6DSO_ACCEL_LSB_PER_G 16384.f
+#define LSM6DSO_ACCEL_LSB_PER_G  16384.f
 #define LSM6DSO_GYRO_LSB_PER_DPS 114.286f
 
 void drone_sensors_run_imu_loop(drone_telemetry_t *telem)
@@ -173,7 +177,10 @@ void drone_sensors_run_slow_loop(drone_telemetry_t *telem)
          * the path is live. */
 		if (s_gps_uart != NULL) {
 			size_t got = 0;
-			if (ublox_neo_m9n_read_nmea_line(&s_gps, nmea_line, sizeof(nmea_line), &got,
+			if (ublox_neo_m9n_read_nmea_line(&s_gps,
+			                                 nmea_line,
+			                                 sizeof(nmea_line),
+			                                 &got,
 			                                 /*timeout_ms=*/100) == ALP_OK) {
 				if (got > 0) {
 					/* Bump the sat count + flip the fix bit so the

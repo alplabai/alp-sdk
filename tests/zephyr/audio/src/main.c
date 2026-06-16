@@ -31,8 +31,8 @@ ZTEST(alp_audio, test_in_open_no_backend_returns_null)
 	    .frames_per_block = 256,
 	});
 	zassert_is_null(h, "alp_audio_in_open without DMIC must yield NULL");
-	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d",
-	              (int)alp_last_error());
+	zassert_equal(
+	    alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d", (int)alp_last_error());
 }
 
 ZTEST(alp_audio, test_in_open_null_cfg_invalid)
@@ -92,8 +92,8 @@ ZTEST(alp_audio, test_out_open_no_backend_returns_null)
 	    .frames_per_block = 256,
 	});
 	zassert_is_null(h, "alp_audio_out_open without I2S must yield NULL");
-	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d",
-	              (int)alp_last_error());
+	zassert_equal(
+	    alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d", (int)alp_last_error());
 }
 
 ZTEST(alp_audio, test_out_open_null_cfg_invalid)

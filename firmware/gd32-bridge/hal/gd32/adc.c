@@ -184,8 +184,10 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
 	return BRIDGE_HW_OK;
 }
 
-int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio, uint16_t sample_cycles,
-                            uint8_t resolution_bits)
+int bridge_hw_adc_configure(uint8_t  channel,
+                            uint16_t oversample_ratio,
+                            uint16_t sample_cycles,
+                            uint8_t  resolution_bits)
 {
 	if (channel >= ADC_CHANNEL_MAP_COUNT) return BRIDGE_HW_ERR_RANGE;
 

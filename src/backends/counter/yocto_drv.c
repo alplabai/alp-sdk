@@ -151,8 +151,9 @@ static alp_status_t _sysfs_read_u32(const char *dir, const char *attr, uint32_t 
  * Presence is checked by stat-ing the device directory's count<M>/count
  * attribute via access().
  */
-static alp_status_t y_open(const alp_counter_config_t *cfg, alp_counter_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t y_open(const alp_counter_config_t  *cfg,
+                           alp_counter_backend_state_t *st,
+                           alp_capabilities_t          *caps_out)
 {
 	if (cfg == NULL || st == NULL || caps_out == NULL) return ALP_ERR_INVAL;
 
@@ -160,8 +161,8 @@ static alp_status_t y_open(const alp_counter_config_t *cfg, alp_counter_backend_
 	if (d == NULL) return ALP_ERR_NOMEM;
 
 	d->count_idx = Y_COUNTER_COUNT_INDEX;
-	int n        = snprintf(d->dir, sizeof(d->dir), "/sys/bus/counter/devices/counter%u",
-	                        (unsigned)cfg->counter_id);
+	int n        = snprintf(
+        d->dir, sizeof(d->dir), "/sys/bus/counter/devices/counter%u", (unsigned)cfg->counter_id);
 	if (n < 0 || (size_t)n >= sizeof(d->dir)) {
 		free(d);
 		return ALP_ERR_INVAL;
@@ -273,8 +274,8 @@ static alp_status_t y_us_to_ticks(alp_counter_backend_state_t *st, uint32_t us, 
  * Return ALP_ERR_NOSUPPORT, which the contract permits on backends with
  * no ISR-context callback path.
  */
-static alp_status_t y_set_alarm(alp_counter_backend_state_t *st, uint32_t ticks_from_now,
-                                struct alp_counter *owner)
+static alp_status_t
+y_set_alarm(alp_counter_backend_state_t *st, uint32_t ticks_from_now, struct alp_counter *owner)
 {
 	(void)st;
 	(void)ticks_from_now;
@@ -331,7 +332,8 @@ static const alp_counter_ops_t _ops = {
 	.close        = y_close,
 };
 
-ALP_BACKEND_REGISTER(counter, yocto_drv,
+ALP_BACKEND_REGISTER(counter,
+                     yocto_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "linux",

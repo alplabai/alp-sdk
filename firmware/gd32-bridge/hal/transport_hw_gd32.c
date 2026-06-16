@@ -78,14 +78,14 @@ static void spi_gpio_init(void)
 	gpio_mode_set(BRIDGE_SPI_MOSI_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, BRIDGE_SPI_MOSI_PIN);
 	gpio_mode_set(BRIDGE_SPI_NSS_PORT, GPIO_MODE_AF, GPIO_PUPD_PULLUP, BRIDGE_SPI_NSS_PIN);
 
-	gpio_output_options_set(BRIDGE_SPI_SCK_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ,
-	                        BRIDGE_SPI_SCK_PIN);
-	gpio_output_options_set(BRIDGE_SPI_MISO_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ,
-	                        BRIDGE_SPI_MISO_PIN);
-	gpio_output_options_set(BRIDGE_SPI_MOSI_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ,
-	                        BRIDGE_SPI_MOSI_PIN);
-	gpio_output_options_set(BRIDGE_SPI_NSS_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ,
-	                        BRIDGE_SPI_NSS_PIN);
+	gpio_output_options_set(
+	    BRIDGE_SPI_SCK_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ, BRIDGE_SPI_SCK_PIN);
+	gpio_output_options_set(
+	    BRIDGE_SPI_MISO_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ, BRIDGE_SPI_MISO_PIN);
+	gpio_output_options_set(
+	    BRIDGE_SPI_MOSI_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ, BRIDGE_SPI_MOSI_PIN);
+	gpio_output_options_set(
+	    BRIDGE_SPI_NSS_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_85MHZ, BRIDGE_SPI_NSS_PIN);
 
 	gpio_af_set(BRIDGE_SPI_SCK_PORT, af, BRIDGE_SPI_SCK_PIN);
 	gpio_af_set(BRIDGE_SPI_MISO_PORT, af, BRIDGE_SPI_MISO_PIN);
@@ -335,10 +335,10 @@ static void i2c_gpio_init(void)
 	/* Open-drain; rely on the BRD_I2C bus pull-ups. */
 	gpio_mode_set(BRIDGE_I2C_SCL_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, BRIDGE_I2C_SCL_PIN);
 	gpio_mode_set(BRIDGE_I2C_SDA_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, BRIDGE_I2C_SDA_PIN);
-	gpio_output_options_set(BRIDGE_I2C_SCL_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_60MHZ,
-	                        BRIDGE_I2C_SCL_PIN);
-	gpio_output_options_set(BRIDGE_I2C_SDA_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_60MHZ,
-	                        BRIDGE_I2C_SDA_PIN);
+	gpio_output_options_set(
+	    BRIDGE_I2C_SCL_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_60MHZ, BRIDGE_I2C_SCL_PIN);
+	gpio_output_options_set(
+	    BRIDGE_I2C_SDA_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_60MHZ, BRIDGE_I2C_SDA_PIN);
 	gpio_af_set(BRIDGE_I2C_SCL_PORT, af, BRIDGE_I2C_SCL_PIN);
 	gpio_af_set(BRIDGE_I2C_SDA_PORT, af, BRIDGE_I2C_SDA_PIN);
 }
@@ -368,8 +368,8 @@ void bridge_transport_i2c_hw_init(void)
 	i2c_timing_config(BRIDGE_I2C_PERIPH, psc, 2u /*scl_dely*/, 1u /*sda_dely*/);
 	i2c_analog_noise_filter_enable(BRIDGE_I2C_PERIPH);
 
-	i2c_address_config(BRIDGE_I2C_PERIPH, (uint32_t)GD32_BRIDGE_DEFAULT_I2C_ADDR << 1,
-	                   I2C_ADDFORMAT_7BITS);
+	i2c_address_config(
+	    BRIDGE_I2C_PERIPH, (uint32_t)GD32_BRIDGE_DEFAULT_I2C_ADDR << 1, I2C_ADDFORMAT_7BITS);
 	i2c_stretch_scl_low_enable(BRIDGE_I2C_PERIPH);
 
 	/* Address-match, receive, stop, NACK and error always on; the

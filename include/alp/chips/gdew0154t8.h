@@ -35,7 +35,7 @@
 extern "C" {
 #endif
 
-#define GDEW0154T8_WIDTH 200
+#define GDEW0154T8_WIDTH  200
 #define GDEW0154T8_HEIGHT 200
 
 typedef struct {
@@ -47,8 +47,8 @@ typedef struct {
 } gdew0154t8_t;
 
 /** @brief Initialise the panel.  Mirrors `il3820_init`. */
-alp_status_t gdew0154t8_init(gdew0154t8_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gpio_t *reset,
-                             alp_gpio_t *busy);
+alp_status_t gdew0154t8_init(
+    gdew0154t8_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gpio_t *reset, alp_gpio_t *busy);
 
 /** @brief Wait for BUSY to de-assert. */
 alp_status_t gdew0154t8_wait_idle(gdew0154t8_t *dev, uint32_t timeout_ms);

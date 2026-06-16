@@ -35,7 +35,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_DISPLAY_HANDLES 2
 #endif
 
-static struct alp_display  _pool[CONFIG_ALP_SDK_MAX_DISPLAY_HANDLES];
+static struct alp_display _pool[CONFIG_ALP_SDK_MAX_DISPLAY_HANDLES];
 
 static struct alp_display *_alloc(void)
 {
@@ -101,8 +101,8 @@ alp_status_t alp_display_get_caps(alp_display_t *h, alp_display_caps_t *out)
 	return h->state.ops->get_caps(&h->state, out);
 }
 
-alp_status_t alp_display_blit(alp_display_t *h, uint16_t x, uint16_t y, uint16_t w, uint16_t h_rect,
-                              const void *pixels)
+alp_status_t alp_display_blit(
+    alp_display_t *h, uint16_t x, uint16_t y, uint16_t w, uint16_t h_rect, const void *pixels)
 {
 	if (h == NULL || !h->in_use) {
 		return ALP_ERR_NOT_READY;

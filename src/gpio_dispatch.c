@@ -31,7 +31,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_GPIO_HANDLES 16
 #endif
 
-static struct alp_gpio  _pool[CONFIG_ALP_SDK_MAX_GPIO_HANDLES];
+static struct alp_gpio _pool[CONFIG_ALP_SDK_MAX_GPIO_HANDLES];
 
 static struct alp_gpio *_alloc(void)
 {
@@ -116,8 +116,8 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
 	return pin->state.ops->read(&pin->state, level);
 }
 
-alp_status_t alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb,
-                                 void *user)
+alp_status_t
+alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, void *user)
 {
 	if (pin == NULL || !pin->in_use) return ALP_ERR_NOT_READY;
 	if (edge == ALP_GPIO_EDGE_NONE || cb == NULL) return ALP_ERR_INVAL;

@@ -12,17 +12,17 @@
 
 #include "alp/chips/rv3028c7.h"
 
-#define RV3028_REG_SECONDS 0x00
-#define RV3028_REG_MINUTES 0x01
-#define RV3028_REG_HOURS 0x02
-#define RV3028_REG_WEEKDAY 0x03
-#define RV3028_REG_DATE 0x04
-#define RV3028_REG_MONTH 0x05
-#define RV3028_REG_YEAR 0x06
+#define RV3028_REG_SECONDS   0x00
+#define RV3028_REG_MINUTES   0x01
+#define RV3028_REG_HOURS     0x02
+#define RV3028_REG_WEEKDAY   0x03
+#define RV3028_REG_DATE      0x04
+#define RV3028_REG_MONTH     0x05
+#define RV3028_REG_YEAR      0x06
 #define RV3028_REG_ALARM_MIN 0x07
-#define RV3028_REG_ALARM_HR 0x08
-#define RV3028_REG_ALARM_WD 0x09
-#define RV3028_REG_STATUS 0x0E
+#define RV3028_REG_ALARM_HR  0x08
+#define RV3028_REG_ALARM_WD  0x09
+#define RV3028_REG_STATUS    0x0E
 #define RV3028_REG_CONTROL_1 0x0F
 #define RV3028_REG_CONTROL_2 0x10
 
@@ -33,20 +33,20 @@
  * the read-modify-write pattern: read STATUS, dispatch handlers for
  * set bits, write back with set bits cleared. */
 #define RV3028_STATUS_PORF 0x01 /* Power-on reset flag           */
-#define RV3028_STATUS_EVF 0x02  /* External-event flag           */
-#define RV3028_STATUS_AF 0x04   /* Alarm flag                    */
-#define RV3028_STATUS_TF 0x08   /* Countdown-timer flag          */
-#define RV3028_STATUS_UF 0x10   /* Periodic update flag          */
-#define RV3028_STATUS_BSF 0x20  /* Backup-switchover flag        */
+#define RV3028_STATUS_EVF  0x02 /* External-event flag           */
+#define RV3028_STATUS_AF   0x04 /* Alarm flag                    */
+#define RV3028_STATUS_TF   0x08 /* Countdown-timer flag          */
+#define RV3028_STATUS_UF   0x10 /* Periodic update flag          */
+#define RV3028_STATUS_BSF  0x20 /* Backup-switchover flag        */
 #define RV3028_STATUS_CLKF 0x40 /* Clock-output sync flag        */
 
 /* CONTROL_2 bits -- per-source IRQ enables (datasheet section
  * "Interrupts and Events").  All defaults are 0 (disabled) at POR. */
-#define RV3028_CTRL2_EIE 0x04   /* External-event INT enable     */
-#define RV3028_CTRL2_AIE 0x08   /* Alarm INT enable              */
-#define RV3028_CTRL2_TIE 0x10   /* Countdown-timer INT enable    */
-#define RV3028_CTRL2_UIE 0x20   /* Periodic update INT enable    */
-#define RV3028_CTRL2_24H 0x40   /* 24-hour mode (1 = 24h)        */
+#define RV3028_CTRL2_EIE   0x04 /* External-event INT enable     */
+#define RV3028_CTRL2_AIE   0x08 /* Alarm INT enable              */
+#define RV3028_CTRL2_TIE   0x10 /* Countdown-timer INT enable    */
+#define RV3028_CTRL2_UIE   0x20 /* Periodic update INT enable    */
+#define RV3028_CTRL2_24H   0x40 /* 24-hour mode (1 = 24h)        */
 #define RV3028_CTRL2_CLKIE 0x80 /* Clock-out sync INT enable     */
 
 /* CONTROL_1 / EEPROM_BACKUP additional masks (BSF Backup-switchover
@@ -60,13 +60,13 @@
 #define RV3028_EEPROM_CLKOUT_MASK 0x07u
 
 /* EEPROM CMD / address registers for the EEPROM-refresh protocol. */
-#define RV3028_REG_EE_ADDR 0x25u
-#define RV3028_REG_EE_DATA 0x26u
-#define RV3028_REG_EE_CMD 0x27u
-#define RV3028_EE_CMD_FIRST 0x00u
+#define RV3028_REG_EE_ADDR    0x25u
+#define RV3028_REG_EE_DATA    0x26u
+#define RV3028_REG_EE_CMD     0x27u
+#define RV3028_EE_CMD_FIRST   0x00u
 #define RV3028_EE_CMD_REFRESH 0x12u
-#define RV3028_EE_CMD_READ 0x22u
-#define RV3028_EE_CMD_WRITE 0x21u
+#define RV3028_EE_CMD_READ    0x22u
+#define RV3028_EE_CMD_WRITE   0x21u
 
 /* CONTROL_1 bit for EEPROM auto-refresh (EERD); the chip pauses
  * automatic refresh when EERD=1 so firmware can do a clean
@@ -176,7 +176,8 @@ alp_status_t rv3028c7_set_time(rv3028c7_t *ctx, const rv3028c7_time_t *t)
 	return rv3028_write(ctx, RV3028_REG_SECONDS, buf, sizeof(buf));
 }
 
-alp_status_t rv3028c7_set_alarm(rv3028c7_t *ctx, const rv3028c7_time_t *when,
+alp_status_t rv3028c7_set_alarm(rv3028c7_t                   *ctx,
+                                const rv3028c7_time_t        *when,
                                 const rv3028c7_alarm_match_t *match)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
@@ -254,8 +255,10 @@ static const struct src_info src_tab[RV3028C7_SRC_COUNT] = {
 	[RV3028C7_SRC_CLKF]      = { RV3028_STATUS_CLKF, RV3028_CTRL2_CLKIE, 0 },
 };
 
-alp_status_t rv3028c7_register_handler(rv3028c7_t *ctx, rv3028c7_src_t src,
-                                       rv3028c7_src_handler_t handler, void *user)
+alp_status_t rv3028c7_register_handler(rv3028c7_t            *ctx,
+                                       rv3028c7_src_t         src,
+                                       rv3028c7_src_handler_t handler,
+                                       void                  *user)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if ((unsigned)src >= RV3028C7_SRC_COUNT) return ALP_ERR_INVAL;

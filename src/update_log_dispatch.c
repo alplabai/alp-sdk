@@ -16,12 +16,12 @@
 
 ALP_BACKEND_DEFINE_CLASS(update_log);
 
-extern void                  alp_z_set_last_error(alp_status_t s);
-extern void                  alp_z_clear_last_error(void);
+extern void alp_z_set_last_error(alp_status_t s);
+extern void alp_z_clear_last_error(void);
 
 static struct alp_update_log g_log;
 
-alp_update_log_t            *alp_update_log_open(void)
+alp_update_log_t *alp_update_log_open(void)
 {
 	alp_z_clear_last_error();
 	if (g_log.in_use) return &g_log;
@@ -43,8 +43,9 @@ alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_e
 	return log->ops->append(entry);
 }
 
-alp_status_t alp_update_log_verify(alp_update_log_t *log, alp_update_log_verdict_t *verdict_out,
-                                   uint64_t *bad_seq_out)
+alp_status_t alp_update_log_verify(alp_update_log_t         *log,
+                                   alp_update_log_verdict_t *verdict_out,
+                                   uint64_t                 *bad_seq_out)
 {
 	if (log == NULL || !log->in_use || verdict_out == NULL) return ALP_ERR_INVAL;
 	if (log->ops->verify == NULL) return ALP_ERR_NOT_IMPLEMENTED;
@@ -58,8 +59,8 @@ alp_status_t alp_update_log_count(alp_update_log_t *log, uint64_t *count_out)
 	return log->ops->count(count_out);
 }
 
-alp_status_t alp_update_log_get(alp_update_log_t *log, uint64_t seq,
-                                alp_update_log_entry_t *entry_out)
+alp_status_t
+alp_update_log_get(alp_update_log_t *log, uint64_t seq, alp_update_log_entry_t *entry_out)
 {
 	if (log == NULL || !log->in_use || entry_out == NULL) return ALP_ERR_INVAL;
 	if (log->ops->get == NULL) return ALP_ERR_NOT_IMPLEMENTED;

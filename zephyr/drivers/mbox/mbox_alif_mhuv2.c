@@ -8,6 +8,10 @@
  * (OpenAMP static-vrings) on AEN. Resolves alp-sdk issues #45/#50.
  *
  * ============================== STATUS ==============================
+ * ADR-0017-ADJACENT (vendor-native custom): a novel Alif MHUv2 doorbell IP with
+ * NO upstream Zephyr driver, no sdk-alif fork driver, and no hal_alif library to
+ * consume -- so it does not fit Tier-1/1.5/2/3. Authored from spec as a last
+ * resort per ADR 0017 (docs/adr/0017-alp-sdk-over-the-vendor-sdk.md).
  * vendor-ext, BENCH-UNVERIFIED.
  *
  * This driver was authored from the ARM MHUv2 register map (ARM DDI 0515,

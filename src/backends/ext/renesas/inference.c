@@ -43,7 +43,8 @@ static bool _is_renesas_backend(const alp_inference_t *inf)
 	       strcmp(inf->backend->vendor, "renesas") == 0;
 }
 
-alp_status_t alp_renesas_inference_pipeline_stage_pin(alp_inference_t *inf, uint32_t layer_index,
+alp_status_t alp_renesas_inference_pipeline_stage_pin(alp_inference_t              *inf,
+                                                      uint32_t                      layer_index,
                                                       alp_renesas_inference_stage_t stage)
 {
 	if (inf == NULL) return ALP_ERR_INVAL;

@@ -99,7 +99,8 @@ int main(void)
 	}
 
 	printf("[deepx] stage 3: model accepts %zu input + %zu output tensors\n",
-	       alp_inference_num_inputs(inf), alp_inference_num_outputs(inf));
+	       alp_inference_num_inputs(inf),
+	       alp_inference_num_outputs(inf));
 
 	alp_inference_tensor_t in = { 0 };
 	if (alp_inference_get_input(inf, 0u, &in) == ALP_OK) {
@@ -119,7 +120,8 @@ int main(void)
 
 	alp_inference_tensor_t out = { 0 };
 	if (alp_inference_get_output(inf, 0u, &out) == ALP_OK) {
-		printf("[deepx] stage 5: output tensor: %u bytes, dtype=%d\n", (unsigned)out.size_bytes,
+		printf("[deepx] stage 5: output tensor: %u bytes, dtype=%d\n",
+		       (unsigned)out.size_bytes,
 		       (int)out.dtype);
 	}
 

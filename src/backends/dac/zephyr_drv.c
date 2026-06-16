@@ -39,7 +39,8 @@
 
 #define ALP_DAC_DEV_OR_NULL(idx)                                                                   \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_dac, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_dac, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_dac, idx)))),                                  \
+	            (NULL))
 
 static const struct device *const alp_dac_devs[] = {
 	ALP_DAC_DEV_OR_NULL(0),
@@ -57,8 +58,8 @@ typedef struct {
 #define CONFIG_ALP_SDK_MAX_DAC_HANDLES 2
 #endif
 
-static zephyr_dac_state_t  _state_pool[CONFIG_ALP_SDK_MAX_DAC_HANDLES];
-static bool                _state_in_use[CONFIG_ALP_SDK_MAX_DAC_HANDLES];
+static zephyr_dac_state_t _state_pool[CONFIG_ALP_SDK_MAX_DAC_HANDLES];
+static bool               _state_in_use[CONFIG_ALP_SDK_MAX_DAC_HANDLES];
 
 static zephyr_dac_state_t *_alloc_state(void)
 {
@@ -101,8 +102,8 @@ static alp_status_t errno_to_alp(int err)
 
 static alp_status_t z_write_mv(alp_dac_backend_state_t *st, uint16_t mv);
 
-static alp_status_t z_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg->channel_id >= ARRAY_SIZE(alp_dac_devs)) {
 		return ALP_ERR_INVAL;
@@ -130,8 +131,8 @@ static alp_status_t z_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t 
 	if (bs == NULL) {
 		return ALP_ERR_NOMEM;
 	}
-	bs->channel     = (uint8_t)cfg->channel_id;
-	bs->last_mv     = 0u;
+	bs->channel = (uint8_t)cfg->channel_id;
+	bs->last_mv = 0u;
 
 	st->dev         = (void *)dev;
 	st->channel_id  = cfg->channel_id;
@@ -196,8 +197,8 @@ static const alp_dac_ops_t _ops = {
 
 #else /* !CONFIG_DAC */
 
-static alp_status_t z_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	(void)cfg;
 	(void)st;
@@ -228,7 +229,8 @@ static const alp_dac_ops_t _ops = {
 
 #endif /* CONFIG_DAC */
 
-ALP_BACKEND_REGISTER(dac, zephyr_drv,
+ALP_BACKEND_REGISTER(dac,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

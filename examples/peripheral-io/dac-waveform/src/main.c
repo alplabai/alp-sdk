@@ -147,8 +147,10 @@ int main(void)
 		return 0;
 	}
 
-	printf("[dac] generating sine: freq=%u Hz, mean=%u mV, ampl=%u mV\n", SINE_FREQ_HZ,
-	       SINE_DC_OFFSET_MV, SINE_AMPLITUDE_MV);
+	printf("[dac] generating sine: freq=%u Hz, mean=%u mV, ampl=%u mV\n",
+	       SINE_FREQ_HZ,
+	       SINE_DC_OFFSET_MV,
+	       SINE_AMPLITUDE_MV);
 
 	/* Per-sample delay.  SINE_SAMPLES * delay_us = 1 / freq_hz.
      *

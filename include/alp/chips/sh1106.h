@@ -35,11 +35,11 @@
 extern "C" {
 #endif
 
-#define SH1106_I2C_ADDR_LOW 0x3Cu
+#define SH1106_I2C_ADDR_LOW  0x3Cu
 #define SH1106_I2C_ADDR_HIGH 0x3Du
 
-#define SH1106_WIDTH 128
-#define SH1106_HEIGHT 64
+#define SH1106_WIDTH    128
+#define SH1106_HEIGHT   64
 #define SH1106_FB_BYTES (SH1106_WIDTH * SH1106_HEIGHT / 8)
 
 typedef struct {

@@ -80,7 +80,7 @@ extern "C" {
  *  in 128 bytes including header + CRC, without padding the
  *  strings past values released MPNs ever need. */
 #define ALP_HW_INFO_FAMILY_LEN 16u /**< e.g. "aen". */
-#define ALP_HW_INFO_SKU_LEN 24u    /**< e.g. "E1M-AEN701". */
+#define ALP_HW_INFO_SKU_LEN    24u /**< e.g. "E1M-AEN701". */
 #define ALP_HW_INFO_HW_REV_LEN 8u  /**< e.g. "r1". */
 #define ALP_HW_INFO_SERIAL_LEN 24u /**< Factory-assigned. */
 
@@ -186,8 +186,9 @@ alp_status_t alp_hw_info_read(alp_hw_info_t *out);
  *          @ref ALP_ERR_IO on any supplied-field disagreement.
  *          @ref ALP_ERR_NOSUPPORT mirrors @ref alp_hw_info_read.
  */
-alp_status_t alp_hw_info_assert_matches_build(const alp_hw_info_t *info, const char *expected_sku,
-                                              const char *expected_hw_rev);
+alp_status_t alp_hw_info_assert_matches_build(const alp_hw_info_t *info,
+                                              const char          *expected_sku,
+                                              const char          *expected_hw_rev);
 
 /* Compile-time guard: the manifest must be exactly 128 bytes and
  * tightly packed so the production programmer's binary lines up

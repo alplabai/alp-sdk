@@ -93,7 +93,8 @@ alp_status_t rv3028c7_get_time(rv3028c7_t *ctx, rv3028c7_time_t *out);
 alp_status_t rv3028c7_set_time(rv3028c7_t *ctx, const rv3028c7_time_t *t);
 
 /** @brief Configure the alarm registers + match mask. */
-alp_status_t rv3028c7_set_alarm(rv3028c7_t *ctx, const rv3028c7_time_t *when,
+alp_status_t rv3028c7_set_alarm(rv3028c7_t                   *ctx,
+                                const rv3028c7_time_t        *when,
                                 const rv3028c7_alarm_match_t *match);
 
 /** @brief Enable (or disable) the alarm-flag -> INT pin routing. */
@@ -149,8 +150,10 @@ typedef void (*rv3028c7_src_handler_t)(rv3028c7_t *ctx, rv3028c7_src_t src, void
  *  @param src        Event source.
  *  @param handler    Callback.  Pass NULL to unregister.
  *  @param user       Cookie passed through to the callback. */
-alp_status_t rv3028c7_register_handler(rv3028c7_t *ctx, rv3028c7_src_t src,
-                                       rv3028c7_src_handler_t handler, void *user);
+alp_status_t rv3028c7_register_handler(rv3028c7_t            *ctx,
+                                       rv3028c7_src_t         src,
+                                       rv3028c7_src_handler_t handler,
+                                       void                  *user);
 
 /**
  * @brief Read `STATUS`, dispatch registered handlers for each set

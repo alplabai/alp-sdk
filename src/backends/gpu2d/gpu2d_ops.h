@@ -44,14 +44,32 @@ typedef struct alp_gpu2d_backend_state {
  *  validation pre-checks pass. */
 struct alp_gpu2d_ops {
 	alp_status_t (*open)(alp_gpu2d_backend_state_t *state, alp_capabilities_t *caps_out);
-	alp_status_t (*fill_rect)(alp_gpu2d_backend_state_t *state, const alp_gpu2d_surface_t *dst,
-	                          uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t argb_color);
-	alp_status_t (*blit)(alp_gpu2d_backend_state_t *state, const alp_gpu2d_surface_t *src,
-	                     uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx,
-	                     uint32_t dy, uint32_t w, uint32_t h);
-	alp_status_t (*blend)(alp_gpu2d_backend_state_t *state, const alp_gpu2d_surface_t *src,
-	                      uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx,
-	                      uint32_t dy, uint32_t w, uint32_t h, alp_gpu2d_blend_mode_t mode);
+	alp_status_t (*fill_rect)(alp_gpu2d_backend_state_t *state,
+	                          const alp_gpu2d_surface_t *dst,
+	                          uint32_t                   x,
+	                          uint32_t                   y,
+	                          uint32_t                   w,
+	                          uint32_t                   h,
+	                          uint32_t                   argb_color);
+	alp_status_t (*blit)(alp_gpu2d_backend_state_t *state,
+	                     const alp_gpu2d_surface_t *src,
+	                     uint32_t                   sx,
+	                     uint32_t                   sy,
+	                     const alp_gpu2d_surface_t *dst,
+	                     uint32_t                   dx,
+	                     uint32_t                   dy,
+	                     uint32_t                   w,
+	                     uint32_t                   h);
+	alp_status_t (*blend)(alp_gpu2d_backend_state_t *state,
+	                      const alp_gpu2d_surface_t *src,
+	                      uint32_t                   sx,
+	                      uint32_t                   sy,
+	                      const alp_gpu2d_surface_t *dst,
+	                      uint32_t                   dx,
+	                      uint32_t                   dy,
+	                      uint32_t                   w,
+	                      uint32_t                   h,
+	                      alp_gpu2d_blend_mode_t     mode);
 	void (*close)(alp_gpu2d_backend_state_t *state);
 };
 

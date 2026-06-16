@@ -22,13 +22,13 @@
 /* Wire constants -- keep in sync with the host header.              */
 /* --------------------------------------------------------------- */
 
-#define GD32_BRIDGE_SOF 0xA5u
+#define GD32_BRIDGE_SOF         0xA5u
 #define GD32_BRIDGE_I2C_REG_CMD 0x00u
 /* Default 7-bit I2C slave address (host: GD32G553_BRIDGE_DEFAULT_I2C_ADDR;
  * metadata/chips/gd32g553.yaml default_address_7bit). */
 #define GD32_BRIDGE_DEFAULT_I2C_ADDR 0x70u
-#define GD32_BRIDGE_ADC_MAX_SAMPLES 8u
-#define GD32_BRIDGE_BUILD_ID_LEN 20u
+#define GD32_BRIDGE_ADC_MAX_SAMPLES  8u
+#define GD32_BRIDGE_BUILD_ID_LEN     20u
 
 /* WIRE-PROTOCOL version (compatibility gate) -- GET_VERSION returns this
  * triple and the host driver refuses a mismatched MAJOR.  This is NOT
@@ -55,8 +55,8 @@
  * I2C replies are NEVER stamped: the I2C-only STATUS_NO_PENDING
  * (0x80) owns bit 7 there, and the hazard is SPI-specific. */
 #define GD32_BRIDGE_LINK_FEAT_STATUS_SEQ 0x01u
-#define GD32_BRIDGE_STATUS_CODE_MASK 0x0Fu
-#define GD32_BRIDGE_STATUS_SEQ_SHIFT 4u
+#define GD32_BRIDGE_STATUS_CODE_MASK     0x0Fu
+#define GD32_BRIDGE_STATUS_SEQ_SHIFT     4u
 
 /* Number of concurrent DMA-backed ADC streams the firmware supports.
  * Bounded by the GD32G553's two DMA controllers (DMA0 + DMA1 with
@@ -293,9 +293,12 @@ typedef enum {
  *          downstream peripheral errors (e.g. an ADC or timer
  *          peripheral fault).
  */
-gd32_bridge_status_t protocol_dispatch(uint8_t cmd, const uint8_t *req_payload,
-                                       size_t req_payload_len, uint8_t *reply_payload,
-                                       size_t reply_payload_cap, size_t *reply_payload_len);
+gd32_bridge_status_t protocol_dispatch(uint8_t        cmd,
+                                       const uint8_t *req_payload,
+                                       size_t         req_payload_len,
+                                       uint8_t       *reply_payload,
+                                       size_t         reply_payload_cap,
+                                       size_t        *reply_payload_len);
 
 /* Currently armed link features (GD32_BRIDGE_LINK_FEAT_* bits, set by
  * CMD_LINK_FEATURES).  Consulted by the SPI transport when staging

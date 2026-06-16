@@ -117,8 +117,15 @@ int main(void)
 	if (s == ALP_OK) {
 		printf("[se] product info: chip_type=%02X%02X%02X%02X%02X%02X "
 		       "fw_id=%02X%02X build=%02X%02X\n",
-		       info.chip_type[0], info.chip_type[1], info.chip_type[2], info.chip_type[3],
-		       info.chip_type[4], info.chip_type[5], info.fw_id[0], info.fw_id[1], info.fw_build[0],
+		       info.chip_type[0],
+		       info.chip_type[1],
+		       info.chip_type[2],
+		       info.chip_type[3],
+		       info.chip_type[4],
+		       info.chip_type[5],
+		       info.fw_id[0],
+		       info.fw_id[1],
+		       info.fw_build[0],
 		       info.fw_build[1]);
 	} else {
 		printf("[se] read_product_info -> %d  (continuing -- sign may still work)\n", (int)s);
@@ -156,8 +163,10 @@ int main(void)
          *   resp[4..] = ASN.1 DER signature              */
 		const uint8_t  stacode = resp[0];
 		const uint16_t outlen  = (uint16_t)((resp[2] << 8) | resp[3]);
-		printf("[se] CalcSign reply: stacode=0x%02X  outlen=%u  total=%u\n", stacode,
-		       (unsigned)outlen, (unsigned)resp_len);
+		printf("[se] CalcSign reply: stacode=0x%02X  outlen=%u  total=%u\n",
+		       stacode,
+		       (unsigned)outlen,
+		       (unsigned)resp_len);
 		if (stacode == 0u && outlen + 4u == resp_len) {
 			/* Print the first 16 bytes of the signature as a sanity
              * check.  Real apps either feed the signature directly

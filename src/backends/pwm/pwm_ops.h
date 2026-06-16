@@ -36,17 +36,22 @@ typedef struct alp_pwm_backend_state {
  * ALP_ERR_NOSUPPORT from the relevant entry.
  */
 struct alp_pwm_ops {
-	alp_status_t (*open)(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
+	alp_status_t (*open)(const alp_pwm_config_t  *cfg,
+	                     alp_pwm_backend_state_t *state,
+	                     alp_capabilities_t      *caps_out);
 	alp_status_t (*set_duty)(alp_pwm_backend_state_t *state, uint32_t pulse_ns);
 	alp_status_t (*set_period)(alp_pwm_backend_state_t *state, uint32_t period_ns);
-	alp_status_t (*configure)(alp_pwm_backend_state_t *state, alp_pwm_align_t align_mode,
-	                          uint32_t dead_time_ns, uint8_t break_cfg);
+	alp_status_t (*configure)(alp_pwm_backend_state_t *state,
+	                          alp_pwm_align_t          align_mode,
+	                          uint32_t                 dead_time_ns,
+	                          uint8_t                  break_cfg);
 	alp_status_t (*single_pulse)(alp_pwm_backend_state_t *state, uint32_t pulse_ns);
 	alp_status_t (*capture_open)(const alp_pwm_capture_config_t *cfg,
-	                             alp_pwm_backend_state_t *state, alp_capabilities_t *caps_out);
-	alp_status_t (*capture_read)(alp_pwm_backend_state_t *state, uint32_t *period_ns_out,
-	                             uint32_t *pulse_ns_out);
+	                             alp_pwm_backend_state_t        *state,
+	                             alp_capabilities_t             *caps_out);
+	alp_status_t (*capture_read)(alp_pwm_backend_state_t *state,
+	                             uint32_t                *period_ns_out,
+	                             uint32_t                *pulse_ns_out);
 	void (*capture_close)(alp_pwm_backend_state_t *state);
 	void (*close)(alp_pwm_backend_state_t *state);
 };

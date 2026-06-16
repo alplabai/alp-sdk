@@ -30,8 +30,12 @@ static uint32_t get_u32_le(const uint8_t *src)
 	       ((uint32_t)src[3] << 24);
 }
 
-alp_status_t alp_mproc_frame_encode(uint32_t sequence, const void *payload, size_t payload_len,
-                                    uint8_t *out, size_t out_cap, size_t *out_len)
+alp_status_t alp_mproc_frame_encode(uint32_t    sequence,
+                                    const void *payload,
+                                    size_t      payload_len,
+                                    uint8_t    *out,
+                                    size_t      out_cap,
+                                    size_t     *out_len)
 {
 	if (out_len != NULL) {
 		*out_len = 0;
@@ -61,8 +65,11 @@ alp_status_t alp_mproc_frame_encode(uint32_t sequence, const void *payload, size
 	return ALP_OK;
 }
 
-alp_status_t alp_mproc_frame_decode(const uint8_t *frame, size_t frame_len, uint32_t *sequence_out,
-                                    const uint8_t **payload_out, size_t *payload_len_out)
+alp_status_t alp_mproc_frame_decode(const uint8_t  *frame,
+                                    size_t          frame_len,
+                                    uint32_t       *sequence_out,
+                                    const uint8_t **payload_out,
+                                    size_t         *payload_len_out)
 {
 	if (sequence_out != NULL) *sequence_out = 0;
 	if (payload_out != NULL) *payload_out = NULL;

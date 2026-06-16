@@ -28,7 +28,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_RTC_HANDLES 2
 #endif
 
-static struct alp_rtc  _pool[CONFIG_ALP_SDK_MAX_RTC_HANDLES];
+static struct alp_rtc _pool[CONFIG_ALP_SDK_MAX_RTC_HANDLES];
 
 static struct alp_rtc *_alloc(void)
 {

@@ -57,10 +57,10 @@ extern "C" {
 #endif
 
 #define TAS2563_I2C_ADDR_GND_DIRECT 0x4Cu
-#define TAS2563_I2C_ADDR_GND_PULL 0x4Du
-#define TAS2563_I2C_ADDR_VDD_PULL 0x4Eu
+#define TAS2563_I2C_ADDR_GND_PULL   0x4Du
+#define TAS2563_I2C_ADDR_VDD_PULL   0x4Eu
 #define TAS2563_I2C_ADDR_VDD_DIRECT 0x4Fu
-#define TAS2563_I2C_ADDR_BROADCAST 0x48u
+#define TAS2563_I2C_ADDR_BROADCAST  0x48u
 
 /** Operating-mode enum mapped onto the chip's MODE_CTRL register. */
 typedef enum {

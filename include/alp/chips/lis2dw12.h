@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /** Default 7-bit I2C addresses (SDO/SA0 pin selects). */
-#define LIS2DW12_I2C_ADDR_LOW 0x18
+#define LIS2DW12_I2C_ADDR_LOW  0x18
 #define LIS2DW12_I2C_ADDR_HIGH 0x19
 
 /** WHO_AM_I register value the chip returns. */
@@ -101,8 +101,8 @@ alp_status_t lis2dw12_init(lis2dw12_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 alp_status_t lis2dw12_read_id(lis2dw12_t *dev, uint8_t *id_out);
 
 /** Configure ODR + full-scale + power mode in a single call. */
-alp_status_t lis2dw12_set_accel(lis2dw12_t *dev, lis2dw12_odr_t odr, lis2dw12_fs_t fs,
-                                lis2dw12_mode_t mode);
+alp_status_t
+lis2dw12_set_accel(lis2dw12_t *dev, lis2dw12_odr_t odr, lis2dw12_fs_t fs, lis2dw12_mode_t mode);
 
 /** Read the current accelerometer sample (raw int16 counts). */
 alp_status_t lis2dw12_read_accel(lis2dw12_t *dev, lis2dw12_axes_t *out);

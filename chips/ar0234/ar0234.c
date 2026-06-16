@@ -40,8 +40,8 @@ alp_status_t ar0234_init(ar0234_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	if (i2c_addr == 0) return ALP_ERR_INVAL;
 
 	memset(dev, 0, sizeof(*dev));
-	dev->bus        = bus;
-	dev->addr       = i2c_addr;
+	dev->bus  = bus;
+	dev->addr = i2c_addr;
 
 	uint16_t     id = 0;
 	alp_status_t s  = ar0234_read16(dev, AR0234_REG_CHIP_VERSION, &id);

@@ -32,8 +32,9 @@
 
 #include "inference_ops.h"
 
-static alp_status_t sw_open(const alp_inference_config_t *cfg, alp_inference_backend_state_t *state,
-                            alp_capabilities_t *caps_out)
+static alp_status_t sw_open(const alp_inference_config_t  *cfg,
+                            alp_inference_backend_state_t *state,
+                            alp_capabilities_t            *caps_out)
 {
 	/* NOSUPPORT stub: no inference engine on native_sim.  The
      * dispatcher relays this as a NULL handle + last_error = NOSUPPORT. */
@@ -55,8 +56,8 @@ static size_t sw_num_outputs(alp_inference_backend_state_t *state)
 	return 0u;
 }
 
-static alp_status_t sw_get_input(alp_inference_backend_state_t *state, size_t index,
-                                 alp_inference_tensor_t *out)
+static alp_status_t
+sw_get_input(alp_inference_backend_state_t *state, size_t index, alp_inference_tensor_t *out)
 {
 	(void)state;
 	(void)index;
@@ -64,8 +65,8 @@ static alp_status_t sw_get_input(alp_inference_backend_state_t *state, size_t in
 	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t sw_get_output(alp_inference_backend_state_t *state, size_t index,
-                                  alp_inference_tensor_t *out)
+static alp_status_t
+sw_get_output(alp_inference_backend_state_t *state, size_t index, alp_inference_tensor_t *out)
 {
 	(void)state;
 	(void)index;
@@ -89,7 +90,8 @@ static const alp_inference_ops_t _ops = {
 	.close       = NULL,
 };
 
-ALP_BACKEND_REGISTER(inference, sw_fallback,
+ALP_BACKEND_REGISTER(inference,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

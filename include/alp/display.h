@@ -86,8 +86,8 @@ alp_status_t alp_display_get_caps(alp_display_t *d, alp_display_caps_t *out);
  *         (rect outside display caps) / ALP_ERR_NOT_READY /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_display_blit(alp_display_t *d, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                              const void *pixels);
+alp_status_t alp_display_blit(
+    alp_display_t *d, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *pixels);
 
 /**
  * @brief Clear the framebuffer to the background colour.

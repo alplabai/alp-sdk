@@ -28,8 +28,9 @@
 
 #include "display_ops.h"
 
-static alp_status_t stub_open(const alp_display_config_t *cfg, alp_display_backend_state_t *state,
-                              alp_capabilities_t *caps_out)
+static alp_status_t stub_open(const alp_display_config_t  *cfg,
+                              alp_display_backend_state_t *state,
+                              alp_capabilities_t          *caps_out)
 {
 	(void)cfg;
 	(void)state;
@@ -44,8 +45,12 @@ static alp_status_t stub_get_caps(alp_display_backend_state_t *state, alp_displa
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t stub_blit(alp_display_backend_state_t *state, uint16_t x, uint16_t y,
-                              uint16_t w, uint16_t h, const void *pixels)
+static alp_status_t stub_blit(alp_display_backend_state_t *state,
+                              uint16_t                     x,
+                              uint16_t                     y,
+                              uint16_t                     w,
+                              uint16_t                     h,
+                              const void                  *pixels)
 {
 	(void)state;
 	(void)x;
@@ -70,7 +75,8 @@ static const alp_display_ops_t _ops = {
 	.close    = NULL,
 };
 
-ALP_BACKEND_REGISTER(display, zephyr_stub,
+ALP_BACKEND_REGISTER(display,
+                     zephyr_stub,
                      {
                          .silicon_ref = "*",
                          .vendor      = "stub",

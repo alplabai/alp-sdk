@@ -193,8 +193,8 @@ void bridge_hw_init(void)
      * those pads.  bridge_hw_gpio_write() promotes individual
      * pads to OUTPUT on demand. */
 	for (size_t i = 0; i < GPIO_PAD_MAP_COUNT; ++i) {
-		gpio_mode_set(gpio_pad_map[i].periph, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP,
-		              gpio_pad_map[i].pin);
+		gpio_mode_set(
+		    gpio_pad_map[i].periph, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, gpio_pad_map[i].pin);
 		gpio_is_output[i] = false;
 	}
 
@@ -328,7 +328,9 @@ void bridge_hw_init(void)
      * baking in a bogus offset); the VREF bring-up above is the
      * prerequisite that makes that calibration meaningful. */
 	for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
-		gpio_mode_set(adc_channels_map[i].gpio_port, GPIO_MODE_ANALOG, GPIO_PUPD_NONE,
+		gpio_mode_set(adc_channels_map[i].gpio_port,
+		              GPIO_MODE_ANALOG,
+		              GPIO_PUPD_NONE,
 		              adc_channels_map[i].gpio_pin);
 	}
 	rcu_periph_clock_enable(RCU_ADC0);

@@ -34,8 +34,8 @@
 
 #include "mqtt_ops.h"
 
-static alp_status_t sw_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t
+sw_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	(void)cfg;
 	st->be_data     = NULL;
@@ -53,8 +53,12 @@ static alp_status_t sw_connect(alp_mqtt_backend_state_t *st, uint32_t timeout_ms
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_publish(alp_mqtt_backend_state_t *st, const char *topic,
-                               const uint8_t *payload, size_t len, alp_mqtt_qos_t qos, bool retain)
+static alp_status_t sw_publish(alp_mqtt_backend_state_t *st,
+                               const char               *topic,
+                               const uint8_t            *payload,
+                               size_t                    len,
+                               alp_mqtt_qos_t            qos,
+                               bool                      retain)
 {
 	(void)st;
 	(void)topic;
@@ -65,8 +69,11 @@ static alp_status_t sw_publish(alp_mqtt_backend_state_t *st, const char *topic,
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_subscribe(alp_mqtt_backend_state_t *st, const char *topic_filter,
-                                 alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user)
+static alp_status_t sw_subscribe(alp_mqtt_backend_state_t *st,
+                                 const char               *topic_filter,
+                                 alp_mqtt_qos_t            qos,
+                                 alp_mqtt_msg_cb_t         cb,
+                                 void                     *user)
 {
 	(void)st;
 	(void)topic_filter;
@@ -97,7 +104,8 @@ static const alp_mqtt_ops_t _ops = {
 	.close     = sw_close,
 };
 
-ALP_BACKEND_REGISTER(mqtt, sw_fallback,
+ALP_BACKEND_REGISTER(mqtt,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

@@ -181,7 +181,9 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
 	return BRIDGE_HW_OK;
 }
 
-int bridge_hw_adc_stream_read(uint8_t stream_id, uint8_t max_samples, uint8_t *got_samples,
+int bridge_hw_adc_stream_read(uint8_t   stream_id,
+                              uint8_t   max_samples,
+                              uint8_t  *got_samples,
                               uint16_t *mv)
 {
 	if (got_samples == 0) return BRIDGE_HW_ERR_INVAL;
@@ -256,8 +258,8 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
      * knows the converter came back in an unproven state. */
 	const bool restored = adc_periph_init(ch->periph);
 
-	s->in_use           = false;
-	s->dsp_bound        = false;
+	s->in_use    = false;
+	s->dsp_bound = false;
 	return restored ? BRIDGE_HW_OK : BRIDGE_HW_ERR_IO;
 }
 
@@ -273,8 +275,8 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
  * Bumping any of them requires a coordinated edit on both sides --
  * see `docs/gd32-bridge-protocol.md` §3.x for the wire-format
  * implications. */
-#define BRIDGE_DSP_MAX_CHAINS 4u
-#define BRIDGE_DSP_MAX_STAGES 4u
+#define BRIDGE_DSP_MAX_CHAINS      4u
+#define BRIDGE_DSP_MAX_STAGES      4u
 #define BRIDGE_DSP_MAX_STAGE_BYTES 260u
 
 /* Valid `kind` byte range -- alp_dsp_stage_kind_t mirrors the wire
@@ -301,7 +303,7 @@ typedef struct {
  * bytes of metadata; well inside the GD32G553's 128 KB SRAM. */
 static adc_dsp_chain_t adc_dsp_chains[BRIDGE_DSP_MAX_CHAINS];
 
-int                    bridge_hw_adc_dsp_chain_open(uint8_t *chain_id)
+int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id)
 {
 	if (chain_id == 0) return BRIDGE_HW_ERR_INVAL;
 	*chain_id = 0u;
@@ -332,9 +334,13 @@ int                    bridge_hw_adc_dsp_chain_open(uint8_t *chain_id)
 	return BRIDGE_HW_ERR_NOTIMPL;
 }
 
-int bridge_hw_adc_dsp_stage_push(uint8_t chain_id, uint8_t stage_index, uint8_t kind,
-                                 uint16_t chunk_offset, uint16_t chunk_total_size,
-                                 const uint8_t *chunk_data, size_t chunk_data_len)
+int bridge_hw_adc_dsp_stage_push(uint8_t        chain_id,
+                                 uint8_t        stage_index,
+                                 uint8_t        kind,
+                                 uint16_t       chunk_offset,
+                                 uint16_t       chunk_total_size,
+                                 const uint8_t *chunk_data,
+                                 size_t         chunk_data_len)
 {
 	if (chain_id >= BRIDGE_DSP_MAX_CHAINS) return BRIDGE_HW_ERR_RANGE;
 	if (stage_index >= BRIDGE_DSP_MAX_STAGES) return BRIDGE_HW_ERR_RANGE;

@@ -38,8 +38,8 @@
 
 #include "i2s_ops.h"
 
-static alp_status_t sw_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t
+sw_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	(void)cfg;
 	st->dev         = NULL;
@@ -61,8 +61,8 @@ static alp_status_t sw_stop(alp_i2s_backend_state_t *st)
 	return ALP_OK;
 }
 
-static alp_status_t sw_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes,
-                             uint32_t timeout_ms)
+static alp_status_t
+sw_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t timeout_ms)
 {
 	(void)st;
 	(void)block;
@@ -71,8 +71,8 @@ static alp_status_t sw_write(alp_i2s_backend_state_t *st, const void *block, siz
 	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t sw_read(alp_i2s_backend_state_t *st, void *block, size_t bytes,
-                            size_t *bytes_out, uint32_t timeout_ms)
+static alp_status_t sw_read(
+    alp_i2s_backend_state_t *st, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms)
 {
 	(void)st;
 	(void)block;
@@ -96,7 +96,8 @@ static const alp_i2s_ops_t _ops = {
 	.close = sw_close,
 };
 
-ALP_BACKEND_REGISTER(i2s, sw_fallback,
+ALP_BACKEND_REGISTER(i2s,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

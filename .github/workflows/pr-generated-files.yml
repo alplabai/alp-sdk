@@ -55,6 +55,17 @@ jobs:
         with:
           python-version: '3.12'
 
+      # gen_soc_caps.py formats its output with clang-format-14 (the same version
+      # the diff-only style gate pins) so the generated headers match the repo
+      # .clang-format byte-for-byte.  Without it the regen below is unformatted
+      # and the in-sync diff fails.
+      - name: Install clang-format-14
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-14
+          sudo update-alternatives --install /usr/bin/clang-format \
+              clang-format /usr/bin/clang-format-14 100
+
       - name: Regenerate soc_caps.h from metadata
         run: python3 scripts/gen_soc_caps.py
 

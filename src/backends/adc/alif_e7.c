@@ -119,7 +119,7 @@ typedef struct alif_e7_adc_state {
 #define CONFIG_ALP_SDK_ADC_HANDLE_POOL 8
 #endif
 
-static alif_e7_adc_state_t  _state_pool[CONFIG_ALP_SDK_ADC_HANDLE_POOL];
+static alif_e7_adc_state_t _state_pool[CONFIG_ALP_SDK_ADC_HANDLE_POOL];
 
 static alif_e7_adc_state_t *_alloc_state(void)
 {
@@ -139,8 +139,8 @@ static void _free_state(alif_e7_adc_state_t *s)
 	s->in_use = false;
 }
 
-static alp_status_t alif_e7_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st,
-                                 alp_capabilities_t *caps_out)
+static alp_status_t
+alif_e7_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg->channel_id >= 8u) {
 		return ALP_ERR_INVAL;
@@ -169,15 +169,15 @@ static alp_status_t alif_e7_open(const alp_adc_config_t *cfg, alp_adc_backend_st
      * for oversampling would be redundant -- it's promoted to portable. */
 	s->oversample_ratio = (cfg->oversampling_ratio > 1u) ? cfg->oversampling_ratio : 1u;
 
-	int err             = adc_channel_setup_dt(spec);
+	int err = adc_channel_setup_dt(spec);
 	if (err != 0) {
 		_free_state(s);
 		return ALP_ERR_IO;
 	}
 
-	st->be_data                   = s;
-	st->reference_uv              = (uint32_t)spec->vref_mv * 1000u;
-	st->resolution_bits           = s->resolution_bits;
+	st->be_data         = s;
+	st->reference_uv    = (uint32_t)spec->vref_mv * 1000u;
+	st->resolution_bits = s->resolution_bits;
 
 	caps_out->max_resolution_bits = ALP_SOC_ADC_MAX_RESOLUTION_BITS;
 	caps_out->max_sample_rate     = 0u; /* not advertised at v0.7 */
@@ -218,7 +218,8 @@ static const alp_adc_ops_t alif_e7_ops = {
 	.close    = alif_e7_close,
 };
 
-ALP_BACKEND_REGISTER(adc, alif_e7,
+ALP_BACKEND_REGISTER(adc,
+                     alif_e7,
                      {
                          .silicon_ref = "alif:ensemble:e7",
                          .vendor      = "alif",

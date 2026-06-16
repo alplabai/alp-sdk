@@ -29,7 +29,7 @@ alp_status_t alp_button_led_init(alp_button_led_t *bl, const alp_button_led_conf
 	bl->active_low_button = cfg->active_low_button;
 	bl->initialised       = false;
 
-	bl->button            = alp_gpio_open(cfg->button_pin_id);
+	bl->button = alp_gpio_open(cfg->button_pin_id);
 	if (bl->button == NULL) return ALP_ERR_INVAL;
 
 	bl->led = alp_gpio_open(cfg->led_pin_id);
@@ -86,8 +86,8 @@ alp_status_t alp_button_led_toggle(alp_button_led_t *bl)
 	return alp_gpio_write(bl->led, !level);
 }
 
-alp_status_t alp_button_led_set_press_callback(alp_button_led_t *bl, alp_button_led_press_cb_t cb,
-                                               void *user)
+alp_status_t
+alp_button_led_set_press_callback(alp_button_led_t *bl, alp_button_led_press_cb_t cb, void *user)
 {
 	if (bl == NULL || !bl->initialised) return ALP_ERR_NOT_READY;
 

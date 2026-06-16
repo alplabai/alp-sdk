@@ -12,9 +12,9 @@
 #include "alp/chips/tas2563.h"
 
 /* TAS2563 register map (datasheet Table 7-50, BOOK 0 / PAGE 0). */
-#define TAS2563_REG_PAGE 0x00u      /* Page select.            */
+#define TAS2563_REG_PAGE      0x00u /* Page select.            */
 #define TAS2563_REG_MODE_CTRL 0x02u /* Operating-mode control. */
-#define TAS2563_REG_REVID 0x7Du     /* Revision ID (RO).       */
+#define TAS2563_REG_REVID     0x7Du /* Revision ID (RO).       */
 
 /* MODE_CTRL field encoding -- bits 0..1.  Datasheet table 7-58. */
 #define TAS2563_MODE_CTRL_MASK 0x07u

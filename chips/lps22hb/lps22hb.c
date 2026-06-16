@@ -11,7 +11,7 @@
 
 #include "alp/chips/lps22hb.h"
 
-#define LPS22HB_REG_CTRL_REG2 0x11u
+#define LPS22HB_REG_CTRL_REG2     0x11u
 #define LPS22HB_CTRL_REG2_SWRESET 0x04u
 
 alp_status_t lps22hb_init(lps22hb_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
@@ -19,8 +19,8 @@ alp_status_t lps22hb_init(lps22hb_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	if (dev == NULL || bus == NULL) return ALP_ERR_INVAL;
 	if (i2c_addr == 0) return ALP_ERR_INVAL;
 	memset(dev, 0, sizeof(*dev));
-	dev->bus         = bus;
-	dev->addr        = i2c_addr;
+	dev->bus  = bus;
+	dev->addr = i2c_addr;
 
 	uint8_t      reg = LPS22HB_REG_WHO_AM_I;
 	uint8_t      id  = 0;

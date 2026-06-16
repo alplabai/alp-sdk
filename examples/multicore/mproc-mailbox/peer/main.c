@@ -45,10 +45,10 @@
  * the alp-shmem0 alias. */
 #define SHMEM_REGION_NAME "alp_shmem0"
 #define SHMEM_REGION_SIZE 512u
-#define MBOX_CHANNEL 0u
-#define RESPONSE_OFFSET 256u /* must match HP's expectation */
-#define ECHO_PREFIX "echo: "
-#define MAX_PAYLOAD 128u
+#define MBOX_CHANNEL      0u
+#define RESPONSE_OFFSET   256u /* must match HP's expectation */
+#define ECHO_PREFIX       "echo: "
+#define MAX_PAYLOAD       128u
 
 static struct {
 	alp_shmem_t *shmem;
@@ -130,7 +130,7 @@ int main(void)
 		.size      = SHMEM_REGION_SIZE,
 		.cacheable = false,
 	};
-	g_peer.shmem                     = alp_shmem_open(&shmem_cfg);
+	g_peer.shmem = alp_shmem_open(&shmem_cfg);
 
 	const alp_mbox_config_t mbox_cfg = {
 		.channel = MBOX_CHANNEL,
@@ -153,7 +153,8 @@ int main(void)
 		return 1;
 	}
 
-	printf("[mproc-peer] waiting on mbox channel=%u shmem=%zu bytes\n", (unsigned)MBOX_CHANNEL,
+	printf("[mproc-peer] waiting on mbox channel=%u shmem=%zu bytes\n",
+	       (unsigned)MBOX_CHANNEL,
 	       g_peer.shmem_size);
 
 	/* Steady-state idle.  The mbox callback fires from the SDK

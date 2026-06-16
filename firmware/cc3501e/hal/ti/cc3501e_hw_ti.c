@@ -170,8 +170,8 @@ int cc3501e_hw_wifi_scan_stop(void)
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
-int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk,
-                                uint8_t psk_len, uint8_t security)
+int cc3501e_hw_wifi_connect_sta(
+    const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security)
 {
 	(void)ssid;
 	(void)ssid_len;
@@ -186,8 +186,8 @@ int cc3501e_hw_wifi_disconnect(void)
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
-int cc3501e_hw_wifi_ap_start(const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk,
-                             uint8_t psk_len, uint8_t security)
+int cc3501e_hw_wifi_ap_start(
+    const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security)
 {
 	(void)ssid;
 	(void)ssid_len;
@@ -231,8 +231,11 @@ int cc3501e_hw_ble_disable(void)
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
-int cc3501e_hw_ble_adv_start(uint8_t connectable, uint16_t interval_min_ms,
-                             uint16_t interval_max_ms, const uint8_t *adv_data, uint8_t adv_data_len)
+int cc3501e_hw_ble_adv_start(uint8_t        connectable,
+                             uint16_t       interval_min_ms,
+                             uint16_t       interval_max_ms,
+                             const uint8_t *adv_data,
+                             uint8_t        adv_data_len)
 {
 	(void)connectable;
 	(void)interval_min_ms;

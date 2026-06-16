@@ -7,3 +7,6 @@
 
 # style: reformat native C to tab indentation (alp-sdk house style)
 2fc8e0d3d717ade90a0ca9dd66296533593c8d82
+
+# style: reapply clang-format with the readability settings (Consecutive align, macros, BinPack off)
+afa7e7e273b2f799ef503b0a364f2ca088cf90fc

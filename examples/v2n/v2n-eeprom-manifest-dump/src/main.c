@@ -137,8 +137,10 @@ int main(void)
 	printf("[manifest] sku           = %.*s\n", ALP_HW_INFO_SKU_LEN, m->sku);
 	printf("[manifest] hw_rev        = %.*s\n", ALP_HW_INFO_HW_REV_LEN, m->hw_rev);
 	printf("[manifest] serial        = %.*s\n", ALP_HW_INFO_SERIAL_LEN, m->serial);
-	printf("[manifest] mfg date      = %04u-%02u-%02u\n", (unsigned)m->mfg_year,
-	       (unsigned)m->mfg_month, (unsigned)m->mfg_day);
+	printf("[manifest] mfg date      = %04u-%02u-%02u\n",
+	       (unsigned)m->mfg_year,
+	       (unsigned)m->mfg_month,
+	       (unsigned)m->mfg_day);
 
 	/* CRC covers bytes [0x00, 0x7C) -- everything except the CRC
      * field itself.  Mismatch indicates the manifest was partially
@@ -159,7 +161,10 @@ int main(void)
 	printf("\n[manifest] alp_hw_info_read() -> status=%d\n", (int)s);
 	if (s == ALP_OK) {
 		printf("[manifest]   som_family=%s som_sku=%s som_hw_rev=%s som_serial=%s\n",
-		       info.som_family, info.som_sku, info.som_hw_rev, info.som_serial);
+		       info.som_family,
+		       info.som_sku,
+		       info.som_hw_rev,
+		       info.som_serial);
 	}
 
 	eeprom_24c128_deinit(&ee);

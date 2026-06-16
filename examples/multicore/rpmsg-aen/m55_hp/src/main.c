@@ -69,8 +69,8 @@ int main(void)
 			printf("[m55-hp]   alp_rpc_send rv=%d at i=%u\n", (int)rv, (unsigned)i);
 			break;
 		}
-		printf("[m55-hp] published imu_sample seq=%u T=%.1f\n", (unsigned)i,
-		       (double)s.temperature_c);
+		printf(
+		    "[m55-hp] published imu_sample seq=%u T=%.1f\n", (unsigned)i, (double)s.temperature_c);
 
 #ifndef CONFIG_BOARD_NATIVE_SIM
 		k_msleep(1000);

@@ -37,12 +37,12 @@ extern "C" {
 #endif
 
 /** Default 7-bit I2C addresses (D/C# pin selects). */
-#define SSD1306_I2C_ADDR_LOW 0x3C
+#define SSD1306_I2C_ADDR_LOW  0x3C
 #define SSD1306_I2C_ADDR_HIGH 0x3D
 
 /** Maximum supported geometry in v0.1.  128 × 64 is the dev-kit standard. */
-#define SSD1306_MAX_WIDTH 128
-#define SSD1306_MAX_HEIGHT 64
+#define SSD1306_MAX_WIDTH    128
+#define SSD1306_MAX_HEIGHT   64
 #define SSD1306_MAX_FB_BYTES (SSD1306_MAX_WIDTH * SSD1306_MAX_HEIGHT / 8)
 
 /** Driver context.  Treat as opaque. */
@@ -70,8 +70,8 @@ typedef struct {
  * is left to the caller — call `ssd1306_display(dev)` after drawing
  * to flush.
  */
-alp_status_t ssd1306_init(ssd1306_t *dev, alp_i2c_t *bus, uint8_t i2c_addr, uint16_t width,
-                          uint16_t height);
+alp_status_t
+ssd1306_init(ssd1306_t *dev, alp_i2c_t *bus, uint8_t i2c_addr, uint16_t width, uint16_t height);
 
 /** Set the panel display ON or OFF (charge pump stays running). */
 alp_status_t ssd1306_set_display_on(ssd1306_t *dev, bool on);

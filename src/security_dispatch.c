@@ -67,8 +67,8 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_AEAD_HANDLES 2
 #endif
 
-static struct alp_hash  _hash_pool[CONFIG_ALP_SDK_MAX_HASH_HANDLES];
-static struct alp_aead  _aead_pool[CONFIG_ALP_SDK_MAX_AEAD_HANDLES];
+static struct alp_hash _hash_pool[CONFIG_ALP_SDK_MAX_HASH_HANDLES];
+static struct alp_aead _aead_pool[CONFIG_ALP_SDK_MAX_AEAD_HANDLES];
 
 static struct alp_hash *_alloc_hash(void)
 {
@@ -180,8 +180,8 @@ alp_status_t alp_hash_update(alp_hash_t *h, const uint8_t *data, size_t len)
 	return h->state.ops->hash_update(&h->state, data, len);
 }
 
-alp_status_t alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_cap,
-                             size_t *digest_len)
+alp_status_t
+alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_cap, size_t *digest_len)
 {
 	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
 	if (digest_out == NULL || digest_cap == 0) return ALP_ERR_INVAL;
@@ -245,22 +245,36 @@ alp_aead_t *alp_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t key_len
 	return a;
 }
 
-alp_status_t alp_aead_encrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, const uint8_t *aad,
-                              size_t aad_len, const uint8_t *plain, size_t plain_len,
-                              uint8_t *cipher_out, uint8_t *tag_out, size_t tag_len)
+alp_status_t alp_aead_encrypt(alp_aead_t    *a,
+                              const uint8_t *iv,
+                              size_t         iv_len,
+                              const uint8_t *aad,
+                              size_t         aad_len,
+                              const uint8_t *plain,
+                              size_t         plain_len,
+                              uint8_t       *cipher_out,
+                              uint8_t       *tag_out,
+                              size_t         tag_len)
 {
 	if (a == NULL || !a->in_use) return ALP_ERR_NOT_READY;
 	if (iv == NULL || cipher_out == NULL || tag_out == NULL) return ALP_ERR_INVAL;
 	if (a->state.ops == NULL || a->state.ops->aead_encrypt == NULL) {
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
-	return a->state.ops->aead_encrypt(&a->state, iv, iv_len, aad, aad_len, plain, plain_len,
-	                                  cipher_out, tag_out, tag_len);
+	return a->state.ops->aead_encrypt(
+	    &a->state, iv, iv_len, aad, aad_len, plain, plain_len, cipher_out, tag_out, tag_len);
 }
 
-alp_status_t alp_aead_decrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, const uint8_t *aad,
-                              size_t aad_len, const uint8_t *cipher, size_t cipher_len,
-                              const uint8_t *tag, size_t tag_len, uint8_t *plain_out)
+alp_status_t alp_aead_decrypt(alp_aead_t    *a,
+                              const uint8_t *iv,
+                              size_t         iv_len,
+                              const uint8_t *aad,
+                              size_t         aad_len,
+                              const uint8_t *cipher,
+                              size_t         cipher_len,
+                              const uint8_t *tag,
+                              size_t         tag_len,
+                              uint8_t       *plain_out)
 {
 	if (a == NULL || !a->in_use) return ALP_ERR_NOT_READY;
 	if (iv == NULL || cipher == NULL || tag == NULL || plain_out == NULL) {
@@ -269,8 +283,8 @@ alp_status_t alp_aead_decrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, c
 	if (a->state.ops == NULL || a->state.ops->aead_decrypt == NULL) {
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
-	return a->state.ops->aead_decrypt(&a->state, iv, iv_len, aad, aad_len, cipher, cipher_len, tag,
-	                                  tag_len, plain_out);
+	return a->state.ops->aead_decrypt(
+	    &a->state, iv, iv_len, aad, aad_len, cipher, cipher_len, tag, tag_len, plain_out);
 }
 
 void alp_aead_close(alp_aead_t *a)

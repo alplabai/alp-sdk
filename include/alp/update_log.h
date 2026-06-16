@@ -93,15 +93,16 @@ alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_e
  * @return ALP_OK if the walk ran (inspect @p verdict_out for the result);
  *         ALP_ERR_IO if the store was unreadable.
  */
-alp_status_t alp_update_log_verify(alp_update_log_t *log, alp_update_log_verdict_t *verdict_out,
-                                   uint64_t *bad_seq_out);
+alp_status_t alp_update_log_verify(alp_update_log_t         *log,
+                                   alp_update_log_verdict_t *verdict_out,
+                                   uint64_t                 *bad_seq_out);
 
 /** @brief Number of entries. */
 alp_status_t alp_update_log_count(alp_update_log_t *log, uint64_t *count_out);
 
 /** @brief Fetch the entry at @p seq. ALP_ERR_NOT_FOUND if absent. */
-alp_status_t alp_update_log_get(alp_update_log_t *log, uint64_t seq,
-                                alp_update_log_entry_t *entry_out);
+alp_status_t
+alp_update_log_get(alp_update_log_t *log, uint64_t seq, alp_update_log_entry_t *entry_out);
 
 /** @brief Assurance level on this SoM. */
 alp_update_log_assurance_t alp_update_log_assurance(const alp_update_log_t *log);

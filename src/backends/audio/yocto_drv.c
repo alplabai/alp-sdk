@@ -210,8 +210,9 @@ static alp_status_t configure_pcm(snd_pcm_t *pcm, const alp_audio_config_t *cfg)
  * on the boxed backend data.  caps stay 0 (ALSA exposes no queryable
  * cap bits here).
  */
-static alp_status_t y_in_open(const alp_audio_config_t *cfg, alp_audio_in_backend_state_t *state,
-                              alp_capabilities_t *caps_out)
+static alp_status_t y_in_open(const alp_audio_config_t     *cfg,
+                              alp_audio_in_backend_state_t *state,
+                              alp_capabilities_t           *caps_out)
 {
 	if (cfg == NULL) return ALP_ERR_INVAL;
 	if (format_bytes(cfg->format) == 0) return ALP_ERR_INVAL;
@@ -241,8 +242,8 @@ static alp_status_t y_in_open(const alp_audio_config_t *cfg, alp_audio_in_backen
 	d->format           = cfg->format;
 	d->frames_per_block = cfg->frames_per_block;
 
-	state->be_data      = d;
-	caps_out->flags     = 0u;
+	state->be_data  = d;
+	caps_out->flags = 0u;
 	return ALP_OK;
 }
 
@@ -277,8 +278,11 @@ static alp_status_t y_in_stop(alp_audio_in_backend_state_t *state)
  * Recovers transparently from xruns via snd_pcm_recover so the next
  * read succeeds when the underlying driver is healthy.
  */
-static alp_status_t y_in_read(alp_audio_in_backend_state_t *state, void *buf, size_t frames,
-                              size_t *out_frames, uint32_t timeout_ms)
+static alp_status_t y_in_read(alp_audio_in_backend_state_t *state,
+                              void                         *buf,
+                              size_t                        frames,
+                              size_t                       *out_frames,
+                              uint32_t                      timeout_ms)
 {
 	if (out_frames != NULL) *out_frames = 0;
 	y_audio_data_t *d = (y_audio_data_t *)state->be_data;
@@ -330,8 +334,9 @@ static void y_in_close(alp_audio_in_backend_state_t *state)
  * volume scale defaults to full (255) on the dispatcher-owned out
  * state; see @ref y_out_set_volume + @ref y_out_write.
  */
-static alp_status_t y_out_open(const alp_audio_config_t *cfg, alp_audio_out_backend_state_t *state,
-                               alp_capabilities_t *caps_out)
+static alp_status_t y_out_open(const alp_audio_config_t      *cfg,
+                               alp_audio_out_backend_state_t *state,
+                               alp_capabilities_t            *caps_out)
 {
 	if (cfg == NULL) return ALP_ERR_INVAL;
 	if (format_bytes(cfg->format) == 0) return ALP_ERR_INVAL;
@@ -361,9 +366,9 @@ static alp_status_t y_out_open(const alp_audio_config_t *cfg, alp_audio_out_back
 	d->format           = cfg->format;
 	d->frames_per_block = cfg->frames_per_block;
 
-	state->volume       = 255u; /* full volume by default */
-	state->be_data      = d;
-	caps_out->flags     = 0u;
+	state->volume   = 255u; /* full volume by default */
+	state->be_data  = d;
+	caps_out->flags = 0u;
 	return ALP_OK;
 }
 
@@ -416,8 +421,11 @@ static void apply_software_volume(const y_audio_data_t *d, uint8_t volume, void 
  * full and the format is S16_LE; the common full-volume path is
  * zero-copy.
  */
-static alp_status_t y_out_write(alp_audio_out_backend_state_t *state, const void *buf,
-                                size_t frames, size_t *out_frames, uint32_t timeout_ms)
+static alp_status_t y_out_write(alp_audio_out_backend_state_t *state,
+                                const void                    *buf,
+                                size_t                         frames,
+                                size_t                        *out_frames,
+                                uint32_t                       timeout_ms)
 {
 	if (out_frames != NULL) *out_frames = 0;
 	y_audio_data_t *d = (y_audio_data_t *)state->be_data;
@@ -495,7 +503,8 @@ static const alp_audio_ops_t _ops = {
 	.out_close      = y_out_close,
 };
 
-ALP_BACKEND_REGISTER(audio, yocto_drv,
+ALP_BACKEND_REGISTER(audio,
+                     yocto_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "linux",

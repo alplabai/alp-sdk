@@ -55,8 +55,11 @@ static inline uint64_t alp_bench_now_ns(void)
 		    (_alp_bench_iters == 0)                                                                \
 		        ? 0                                                                                \
 		        : ((_alp_bench_t1 - _alp_bench_t0) / (uint64_t)_alp_bench_iters);                  \
-		fprintf(stdout, "%-40s %12lu iters %12lu ns/iter\n", (name_),                              \
-		        (unsigned long)_alp_bench_iters, (unsigned long)_alp_bench_ns);                    \
+		fprintf(stdout,                                                                            \
+		        "%-40s %12lu iters %12lu ns/iter\n",                                               \
+		        (name_),                                                                           \
+		        (unsigned long)_alp_bench_iters,                                                   \
+		        (unsigned long)_alp_bench_ns);                                                     \
 	} while (0)
 
 #endif /* ALP_BENCH_H_ */

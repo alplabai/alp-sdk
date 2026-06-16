@@ -32,7 +32,7 @@
 #define SE_RST_ACTIVE_LOW 1
 
 #define SE_RST_PORT GPIOC
-#define SE_RST_PIN GPIO_PIN_13
+#define SE_RST_PIN  GPIO_PIN_13
 
 static bool se_rst_configured;
 

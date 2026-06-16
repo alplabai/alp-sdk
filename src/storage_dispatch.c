@@ -37,7 +37,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_STORAGE_HANDLES 4
 #endif
 
-static struct alp_storage  _pool[CONFIG_ALP_SDK_MAX_STORAGE_HANDLES];
+static struct alp_storage _pool[CONFIG_ALP_SDK_MAX_STORAGE_HANDLES];
 
 static struct alp_storage *_alloc(void)
 {
@@ -78,11 +78,11 @@ alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
 		alp_z_set_last_error(ALP_ERR_NOMEM);
 		return NULL;
 	}
-	h->backend              = be;
-	h->state.ops            = ops;
-	h->state.kind           = cfg->kind;
-	h->state.read_only      = cfg->read_only;
-	h->state.instance_id    = cfg->instance_id;
+	h->backend           = be;
+	h->state.ops         = ops;
+	h->state.kind        = cfg->kind;
+	h->state.read_only   = cfg->read_only;
+	h->state.instance_id = cfg->instance_id;
 
 	alp_capabilities_t caps = { .flags = be->base_caps };
 	if (be->probe != NULL) {

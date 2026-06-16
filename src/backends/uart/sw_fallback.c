@@ -38,13 +38,13 @@
 
 #define SW_BUF_LEN 64u
 
-static uint8_t      _buf[SW_BUF_LEN];
-static size_t       _head  = 0u; /* read index */
-static size_t       _tail  = 0u; /* write index */
-static size_t       _count = 0u; /* bytes currently buffered */
+static uint8_t _buf[SW_BUF_LEN];
+static size_t  _head  = 0u; /* read index */
+static size_t  _tail  = 0u; /* write index */
+static size_t  _count = 0u; /* bytes currently buffered */
 
-static alp_status_t sw_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t
+sw_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	(void)cfg;
 	st->dev         = NULL;
@@ -72,8 +72,8 @@ static alp_status_t sw_write(alp_uart_backend_state_t *st, const uint8_t *data, 
 	return ALP_OK;
 }
 
-static alp_status_t sw_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len,
-                            uint32_t timeout_ms)
+static alp_status_t
+sw_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout_ms)
 {
 	(void)st;
 	(void)timeout_ms;
@@ -93,7 +93,8 @@ static const alp_uart_ops_t _ops = {
 	.close = NULL,
 };
 
-ALP_BACKEND_REGISTER(uart, sw_fallback,
+ALP_BACKEND_REGISTER(uart,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

@@ -65,7 +65,7 @@ struct report_row {
 static struct report_row rows[ROW_MAX];
 static int               row_count;
 
-static void              report(const char *name, uint8_t addr, result_t res, const char *fmt, ...)
+static void report(const char *name, uint8_t addr, result_t res, const char *fmt, ...)
 {
 	if (row_count >= ROW_MAX) {
 		return;
@@ -137,8 +137,16 @@ static void probe_rtc(alp_i2c_t *bus)
 	if (rv3028c7_get_time(&rtc, &t) == ALP_OK) {
 		/* A wildly implausible year usually means the backup supply
 		 * never charged -- worth knowing on first power-up. */
-		report("rv3028c7 RTC", RV3028C7_I2C_ADDR, R_PASS, "%04u-%02u-%02u %02u:%02u:%02u%s", t.year,
-		       t.month, t.day, t.hour, t.minute, t.second,
+		report("rv3028c7 RTC",
+		       RV3028C7_I2C_ADDR,
+		       R_PASS,
+		       "%04u-%02u-%02u %02u:%02u:%02u%s",
+		       t.year,
+		       t.month,
+		       t.day,
+		       t.hour,
+		       t.minute,
+		       t.second,
 		       (t.year < 2026 || t.year > 2099) ? " (time not set)" : "");
 	} else {
 		report("rv3028c7 RTC", RV3028C7_I2C_ADDR, R_FAIL, "probe OK but time read failed");
@@ -167,7 +175,9 @@ static void probe_tmp112(alp_i2c_t *bus)
 		/* ACKs at the metadata address -- but the driver (faithfully
 		 * to the datasheet) refuses 0x40.  Surface the conflict; do
 		 * NOT quietly loosen the driver. */
-		report("tmp112 temp", 0x40, R_FAIL,
+		report("tmp112 temp",
+		       0x40,
+		       R_FAIL,
 		       "ACKs at 0x40 -- not a TMP112 address; fix metadata or BOM");
 		return;
 	}
@@ -180,8 +190,13 @@ static void probe_tmp112(alp_i2c_t *bus)
 	int32_t mc = 0;
 
 	if (tmp112_read_temp_milli_c(&sens, &mc) == ALP_OK) {
-		report("tmp112 temp", found, R_PASS, "%s%d.%03d degC", (mc < 0) ? "-" : "",
-		       (int)((mc < 0 ? -mc : mc) / 1000), (int)((mc < 0 ? -mc : mc) % 1000));
+		report("tmp112 temp",
+		       found,
+		       R_PASS,
+		       "%s%d.%03d degC",
+		       (mc < 0) ? "-" : "",
+		       (int)((mc < 0 ? -mc : mc) / 1000),
+		       (int)((mc < 0 ? -mc : mc) % 1000));
 	} else {
 		report("tmp112 temp", found, R_FAIL, "temperature read failed");
 	}
@@ -193,7 +208,9 @@ static void probe_clkgen(alp_i2c_t *bus)
 	clk_5l35023b_t clk;
 
 	if (clk_5l35023b_init(&clk, bus, CLK_5L35023B_I2C_ADDR_DEFAULT) != ALP_OK) {
-		report("5l35023b clk", CLK_5L35023B_I2C_ADDR_DEFAULT, R_FAIL,
+		report("5l35023b clk",
+		       CLK_5L35023B_I2C_ADDR_DEFAULT,
+		       R_FAIL,
 		       "no ACK or address-strap mismatch");
 		return;
 	}
@@ -209,15 +226,20 @@ static void probe_act8760(alp_i2c_t *bus)
 	act8760_t pmic;
 
 	if (act8760_init(&pmic, bus) != ALP_OK) {
-		report("act8760 PMIC", ACT8760_I2C_ADDR_PAGE0, R_FAIL,
-		       "ADD1 (0x25) or ADD2 (0x26) missing");
+		report(
+		    "act8760 PMIC", ACT8760_I2C_ADDR_PAGE0, R_FAIL, "ADD1 (0x25) or ADD2 (0x26) missing");
 		return;
 	}
 	act8760_status_t st;
 
 	if (act8760_get_status(&pmic, &st) == ALP_OK) {
-		report("act8760 PMIC", ACT8760_I2C_ADDR_PAGE0, R_PASS, "both slaves; status 0x%02X%s%s",
-		       st.raw, st.thermal_warning ? " TWARN!" : "", st.vsys_warning ? " VSYSWARN!" : "");
+		report("act8760 PMIC",
+		       ACT8760_I2C_ADDR_PAGE0,
+		       R_PASS,
+		       "both slaves; status 0x%02X%s%s",
+		       st.raw,
+		       st.thermal_warning ? " TWARN!" : "",
+		       st.vsys_warning ? " VSYSWARN!" : "");
 	} else {
 		report("act8760 PMIC", ACT8760_I2C_ADDR_PAGE0, R_FAIL, "status read failed");
 	}
@@ -235,8 +257,13 @@ static void probe_da9292(alp_i2c_t *bus)
 	da9292_status_t st;
 
 	if (da9292_get_status(&pmic, &st) == ALP_OK) {
-		report("da9292 PMIC", DA9292_I2C_ADDR_V2N, R_PASS,
-		       "dev 0x%02X rev 0x%02X  CH1 PG=%d  CH2 PG=%d", pmic.dev_id, pmic.rev_id, st.ch1_pg,
+		report("da9292 PMIC",
+		       DA9292_I2C_ADDR_V2N,
+		       R_PASS,
+		       "dev 0x%02X rev 0x%02X  CH1 PG=%d  CH2 PG=%d",
+		       pmic.dev_id,
+		       pmic.rev_id,
+		       st.ch1_pg,
 		       st.ch2_pg);
 	} else {
 		report("da9292 PMIC", DA9292_I2C_ADDR_V2N, R_FAIL, "status read failed");
@@ -285,12 +312,19 @@ static void probe_gd32(alp_i2c_t *bus)
 	gd32g553_t mcu;
 
 	if (gd32g553_init(&mcu, NULL, bus, GD32G553_BRIDGE_DEFAULT_I2C_ADDR) != ALP_OK) {
-		report("gd32g553 bridge", GD32G553_BRIDGE_DEFAULT_I2C_ADDR, R_FAIL,
+		report("gd32g553 bridge",
+		       GD32G553_BRIDGE_DEFAULT_I2C_ADDR,
+		       R_FAIL,
 		       "PING/GET_VERSION failed (firmware running? major match?)");
 		return;
 	}
-	report("gd32g553 bridge", GD32G553_BRIDGE_DEFAULT_I2C_ADDR, R_PASS, "fw v%u.%u.%u over I2C",
-	       mcu.version.major, mcu.version.minor, mcu.version.patch);
+	report("gd32g553 bridge",
+	       GD32G553_BRIDGE_DEFAULT_I2C_ADDR,
+	       R_PASS,
+	       "fw v%u.%u.%u over I2C",
+	       mcu.version.major,
+	       mcu.version.minor,
+	       mcu.version.patch);
 	gd32g553_deinit(&mcu);
 }
 

@@ -107,14 +107,14 @@ struct hwsem_be {
 #define CONFIG_ALP_SDK_MAX_HWSEM_HANDLES 4
 #endif
 
-static struct shmem_be  _shmem_be_pool[CONFIG_ALP_SDK_MAX_SHMEM_HANDLES];
-static bool             _shmem_be_in_use[CONFIG_ALP_SDK_MAX_SHMEM_HANDLES];
+static struct shmem_be _shmem_be_pool[CONFIG_ALP_SDK_MAX_SHMEM_HANDLES];
+static bool            _shmem_be_in_use[CONFIG_ALP_SDK_MAX_SHMEM_HANDLES];
 
-static struct mbox_be   _mbox_be_pool[CONFIG_ALP_SDK_MAX_MBOX_HANDLES];
-static bool             _mbox_be_in_use[CONFIG_ALP_SDK_MAX_MBOX_HANDLES];
+static struct mbox_be _mbox_be_pool[CONFIG_ALP_SDK_MAX_MBOX_HANDLES];
+static bool           _mbox_be_in_use[CONFIG_ALP_SDK_MAX_MBOX_HANDLES];
 
-static struct hwsem_be  _hwsem_be_pool[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
-static bool             _hwsem_be_in_use[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
+static struct hwsem_be _hwsem_be_pool[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
+static bool            _hwsem_be_in_use[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
 
 static struct shmem_be *_shmem_be_alloc(void)
 {
@@ -239,8 +239,9 @@ static const struct alp_shmem_region alp_shmem_regions[] = { ALP_SHMEM_REGION_EN
 
 #endif /* CONFIG_ALP_SDK_MPROC */
 
-static alp_status_t z_shmem_open(const alp_shmem_config_t *cfg, alp_shmem_backend_state_t *state,
-                                 alp_capabilities_t *caps_out)
+static alp_status_t z_shmem_open(const alp_shmem_config_t  *cfg,
+                                 alp_shmem_backend_state_t *state,
+                                 alp_capabilities_t        *caps_out)
 {
 	(void)caps_out;
 #if defined(CONFIG_ALP_SDK_MPROC)
@@ -266,8 +267,8 @@ static alp_status_t z_shmem_open(const alp_shmem_config_t *cfg, alp_shmem_backen
 #endif
 }
 
-static alp_status_t z_shmem_view(alp_shmem_backend_state_t *state, void **base_out,
-                                 size_t *size_out)
+static alp_status_t
+z_shmem_view(alp_shmem_backend_state_t *state, void **base_out, size_t *size_out)
 {
 #if defined(CONFIG_ALP_SDK_MPROC)
 	struct shmem_be *be = (struct shmem_be *)state->be_data;
@@ -303,7 +304,8 @@ static void z_shmem_close(alp_shmem_backend_state_t *state)
 
 #define ALP_MBOX_DEV_OR_NULL(idx)                                                                  \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_mbox, idx))),                                  \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_mbox, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_mbox, idx)))),                                 \
+	            (NULL))
 
 static const struct device *const alp_mbox_devs[] = {
 	ALP_MBOX_DEV_OR_NULL(0),
@@ -312,8 +314,10 @@ static const struct device *const alp_mbox_devs[] = {
 	ALP_MBOX_DEV_OR_NULL(3),
 };
 
-static void mbox_rx_cb(const struct device *dev, mbox_channel_id_t channel_id, void *user_data,
-                       struct mbox_msg *data)
+static void mbox_rx_cb(const struct device *dev,
+                       mbox_channel_id_t    channel_id,
+                       void                *user_data,
+                       struct mbox_msg     *data)
 {
 	(void)dev;
 	struct mbox_be *be = (struct mbox_be *)user_data;
@@ -347,8 +351,9 @@ static void mbox_rx_cb(const struct device *dev, mbox_channel_id_t channel_id, v
 
 #endif /* CONFIG_ALP_SDK_MPROC */
 
-static alp_status_t z_mbox_open(const alp_mbox_config_t *cfg, alp_mbox_backend_state_t *state,
-                                alp_capabilities_t *caps_out)
+static alp_status_t z_mbox_open(const alp_mbox_config_t  *cfg,
+                                alp_mbox_backend_state_t *state,
+                                alp_capabilities_t       *caps_out)
 {
 	(void)caps_out;
 #if defined(CONFIG_ALP_SDK_MPROC)
@@ -368,8 +373,8 @@ static alp_status_t z_mbox_open(const alp_mbox_config_t *cfg, alp_mbox_backend_s
 #endif
 }
 
-static alp_status_t z_mbox_send(alp_mbox_backend_state_t *state, const void *data, size_t len,
-                                uint32_t timeout_ms)
+static alp_status_t
+z_mbox_send(alp_mbox_backend_state_t *state, const void *data, size_t len, uint32_t timeout_ms)
 {
 	(void)timeout_ms;
 #if defined(CONFIG_ALP_SDK_MPROC)
@@ -383,8 +388,8 @@ static alp_status_t z_mbox_send(alp_mbox_backend_state_t *state, const void *dat
      * peer-side debugging). */
 	uint32_t     next_seq   = be->tx_sequence + 1u;
 	size_t       framed_len = 0;
-	alp_status_t s          = alp_mproc_frame_encode(next_seq, data, len, be->tx_scratch,
-	                                                 sizeof(be->tx_scratch), &framed_len);
+	alp_status_t s          = alp_mproc_frame_encode(
+        next_seq, data, len, be->tx_scratch, sizeof(be->tx_scratch), &framed_len);
 	if (s != ALP_OK) {
 		return s;
 	}
@@ -412,8 +417,8 @@ static alp_status_t z_mbox_send(alp_mbox_backend_state_t *state, const void *dat
 #endif
 }
 
-static alp_status_t z_mbox_set_callback(alp_mbox_backend_state_t *state, alp_mbox_msg_cb_t cb,
-                                        void *user)
+static alp_status_t
+z_mbox_set_callback(alp_mbox_backend_state_t *state, alp_mbox_msg_cb_t cb, void *user)
 {
 #if defined(CONFIG_ALP_SDK_MPROC)
 	struct mbox_be *be = (struct mbox_be *)state->be_data;
@@ -471,7 +476,7 @@ static struct k_sem      alp_hwsem_kobjs[CONFIG_ALP_SDK_MPROC_HWSEM_COUNT];
 static bool              alp_hwsem_kobjs_initialised;
 static struct k_spinlock alp_hwsem_init_lock;
 
-static void              hwsem_kobjs_init_once(void)
+static void hwsem_kobjs_init_once(void)
 {
 	k_spinlock_key_t key = k_spin_lock(&alp_hwsem_init_lock);
 	if (!alp_hwsem_kobjs_initialised) {
@@ -484,8 +489,8 @@ static void              hwsem_kobjs_init_once(void)
 }
 #endif
 
-static alp_status_t z_hwsem_open(uint32_t hwsem_id, alp_hwsem_backend_state_t *state,
-                                 alp_capabilities_t *caps_out)
+static alp_status_t
+z_hwsem_open(uint32_t hwsem_id, alp_hwsem_backend_state_t *state, alp_capabilities_t *caps_out)
 {
 	(void)caps_out;
 #if defined(CONFIG_ALP_SDK_MPROC)
@@ -593,7 +598,8 @@ static const alp_mproc_ops_t _ops = {
 	.hwsem_close       = z_hwsem_close,
 };
 
-ALP_BACKEND_REGISTER(mproc, zephyr_drv,
+ALP_BACKEND_REGISTER(mproc,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

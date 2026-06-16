@@ -19,7 +19,7 @@
 #include "update_log/store.h"
 
 #define SW_SLOTS 32
-#define SW_BLOB ULOG_ENTRY_WIRE_LEN
+#define SW_BLOB  ULOG_ENTRY_WIRE_LEN
 struct sw_state {
 	struct {
 		char    key[24];
@@ -31,7 +31,7 @@ struct sw_state {
 };
 static struct sw_state g_sw;
 
-static int             sw_find(const char *key)
+static int sw_find(const char *key)
 {
 	for (int i = 0; i < SW_SLOTS; i++) {
 		if (g_sw.s[i].used && strcmp(g_sw.s[i].key, key) == 0) {
@@ -114,7 +114,7 @@ static alp_status_t sw_cinc(void *c, uint32_t id, uint64_t *v)
 static const alp_secure_store_if      g_store = { sw_put, sw_get, sw_erase, NULL };
 static const alp_monotonic_counter_if g_ctr   = { sw_cread, sw_cinc, NULL };
 
-static alp_status_t                   sw_append(const alp_update_log_entry_t *e)
+static alp_status_t sw_append(const alp_update_log_entry_t *e)
 {
 	return ulog_engine_append(&g_store, &g_ctr, e);
 }
@@ -142,7 +142,8 @@ static const alp_update_log_ops_t _sw_ops = {
 	.get       = sw_get_e,
 };
 
-ALP_BACKEND_REGISTER(update_log, sw_tier,
+ALP_BACKEND_REGISTER(update_log,
+                     sw_tier,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_tier",

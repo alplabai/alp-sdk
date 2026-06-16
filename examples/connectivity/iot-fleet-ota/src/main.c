@@ -198,8 +198,8 @@ static bool fleet_poll_for_update(uint8_t *manifest_out, size_t manifest_cap, si
  *
  * @return true on signature pass, false otherwise.
  */
-static bool fleet_verify_signature(const uint8_t *image, size_t image_len, const uint8_t *sig,
-                                   size_t sig_len)
+static bool
+fleet_verify_signature(const uint8_t *image, size_t image_len, const uint8_t *sig, size_t sig_len)
 {
 	(void)image;
 	(void)image_len;
@@ -247,7 +247,8 @@ static bool fleet_write_inactive_slot(const uint8_t *image, size_t image_len)
 	if (rc == ALP_OK) {
 		printf("[ota]   flash geometry: %llu bytes total,"
 		       " erase=%u write=%u\n",
-		       (unsigned long long)info.total_bytes, (unsigned)info.erase_size,
+		       (unsigned long long)info.total_bytes,
+		       (unsigned)info.erase_size,
 		       (unsigned)info.block_size);
 	}
 	/* On HiL: loop over MENDER_CHUNK_SIZE windows, erase the

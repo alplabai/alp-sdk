@@ -255,8 +255,12 @@ alp_dsp_chain_t *alp_dsp_chain_open(const alp_dsp_stage_t *stages, size_t n_stag
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT (chain ends with
  *         FFT -- use @ref alp_dsp_chain_apply_bins instead).
  */
-alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain, const int16_t *in_mv, size_t in_n,
-                                         int16_t *out_mv, size_t out_cap, size_t *got);
+alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
+                                         const int16_t   *in_mv,
+                                         size_t           in_n,
+                                         int16_t         *out_mv,
+                                         size_t           out_cap,
+                                         size_t          *got);
 
 /**
  * @brief Apply an FFT-terminated chain to an in-RAM sample buffer.
@@ -288,8 +292,12 @@ alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain, const int16_t *
  *         end with FFT) / ALP_ERR_OUT_OF_RANGE (in_n < n_points or
  *         out_cap < required).
  */
-alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain, const int16_t *in_mv, size_t in_n,
-                                      float *out_bins, size_t out_cap, size_t *got);
+alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
+                                      const int16_t   *in_mv,
+                                      size_t           in_n,
+                                      float           *out_bins,
+                                      size_t           out_cap,
+                                      size_t          *got);
 
 /**
  * @brief Release a DSP chain back to the pool.

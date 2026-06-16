@@ -79,7 +79,8 @@ ZTEST(cc3501e_bridge_transport, test_get_version_returns_protocol_version)
 	assert_reply_header(reply, ALP_CC3501E_CMD_GET_VERSION, 3u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "GET_VERSION -> RESP_OK");
 	const uint16_t version = (uint16_t)reply[5] | ((uint16_t)reply[6] << 8);
-	zassert_equal(version, (uint16_t)ALP_CC3501E_PROTOCOL_VERSION,
+	zassert_equal(version,
+	              (uint16_t)ALP_CC3501E_PROTOCOL_VERSION,
 	              "GET_VERSION returns the wire-protocol version (the host's compat gate)");
 }
 
@@ -113,7 +114,8 @@ ZTEST(cc3501e_bridge_transport, test_unknown_opcode_rejected)
 
 	zassert_equal(n, 5u, "unknown-opcode reply is header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_RESERVED_VENDOR_BASE, 1u);
-	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID,
+	zassert_equal(reply[4],
+	              ALP_CC3501E_RESP_ERR_INVALID,
 	              "unimplemented opcode -> RESP_ERR_INVALID (header contract)");
 }
 
@@ -197,8 +199,10 @@ ZTEST(cc3501e_bridge_transport, test_gpio_write_then_read)
 	uint8_t reply[32];
 	transport_spi_init();
 
-	const uint8_t cfg[] = { ALP_CC3501E_CMD_GPIO_CONFIGURE, 0x00u, 0x04u, 0x00u,
-		                14u, ALP_CC3501E_GPIO_DIR_OUTPUT, ALP_CC3501E_GPIO_PULL_NONE, 0x00u };
+	const uint8_t cfg[] = {
+		ALP_CC3501E_CMD_GPIO_CONFIGURE, 0x00u, 0x04u, 0x00u, 14u, ALP_CC3501E_GPIO_DIR_OUTPUT,
+		ALP_CC3501E_GPIO_PULL_NONE,     0x00u
+	};
 	transaction(cfg, sizeof cfg);
 	size_t n = drain(reply, sizeof reply);
 	zassert_equal(n, 5u, "configure reply = header + status");
@@ -260,16 +264,33 @@ ZTEST(cc3501e_bridge_transport, test_wifi_connect_sta_parses_then_not_ready)
 	transport_spi_init();
 	/* connect_t {ssid_len=4, psk_len=8, security=WPA2(1), rsvd} + "wifi" + "password";
 	 * payload_len = 4 (header) + 4 (ssid) + 8 (psk) = 16. */
-	const uint8_t req[] = { ALP_CC3501E_CMD_WIFI_CONNECT_STA, 0x00u, 16u, 0x00u,
-		                4u,  8u,  1u,  0u,
-		                'w', 'i', 'f', 'i',
-		                'p', 'a', 's', 's', 'w', 'o', 'r', 'd' };
+	const uint8_t req[] = { ALP_CC3501E_CMD_WIFI_CONNECT_STA,
+		                    0x00u,
+		                    16u,
+		                    0x00u,
+		                    4u,
+		                    8u,
+		                    1u,
+		                    0u,
+		                    'w',
+		                    'i',
+		                    'f',
+		                    'i',
+		                    'p',
+		                    'a',
+		                    's',
+		                    's',
+		                    'w',
+		                    'o',
+		                    'r',
+		                    'd' };
 	transaction(req, sizeof req);
 	size_t n = drain(reply, sizeof reply);
 	zassert_equal(n, 5u, "connect reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_CONNECT_STA, 1u);
-	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY,
-		      "well-formed connect parses, then NOT_READY (no radio)");
+	zassert_equal(reply[4],
+	              ALP_CC3501E_RESP_ERR_NOT_READY,
+	              "well-formed connect parses, then NOT_READY (no radio)");
 }
 
 ZTEST(cc3501e_bridge_transport, test_wifi_connect_bad_len_invalid)
@@ -277,8 +298,9 @@ ZTEST(cc3501e_bridge_transport, test_wifi_connect_bad_len_invalid)
 	uint8_t reply[32];
 	transport_spi_init();
 	/* connect_t says ssid_len=4 psk_len=8 (needs 16 payload) but only 8 sent. */
-	const uint8_t req[] = { ALP_CC3501E_CMD_WIFI_CONNECT_STA, 0x00u, 8u, 0x00u,
-		                4u, 8u, 1u, 0u, 'w', 'i', 'f', 'i' };
+	const uint8_t req[] = {
+		ALP_CC3501E_CMD_WIFI_CONNECT_STA, 0x00u, 8u, 0x00u, 4u, 8u, 1u, 0u, 'w', 'i', 'f', 'i'
+	};
 	transaction(req, sizeof req);
 	(void)drain(reply, sizeof reply);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "connect length mismatch -> INVALID");
@@ -303,9 +325,20 @@ ZTEST(cc3501e_bridge_transport, test_ble_adv_start_parses_then_not_ready)
 	transport_spi_init();
 	/* connectable=1, rsvd=0, imin=100, imax=200, adv_data_len=3, adv={02 01 06};
 	 * packed header is 7 bytes -> payload_len = 7 + 3 = 10. */
-	const uint8_t req[] = { ALP_CC3501E_CMD_BLE_ADV_START, 0x00u, 10u, 0x00u,
-		                1u, 0u, 100u, 0u, 200u, 0u, 3u,
-		                0x02u, 0x01u, 0x06u };
+	const uint8_t req[] = { ALP_CC3501E_CMD_BLE_ADV_START,
+		                    0x00u,
+		                    10u,
+		                    0x00u,
+		                    1u,
+		                    0u,
+		                    100u,
+		                    0u,
+		                    200u,
+		                    0u,
+		                    3u,
+		                    0x02u,
+		                    0x01u,
+		                    0x06u };
 	transaction(req, sizeof req);
 	size_t n = drain(reply, sizeof reply);
 	zassert_equal(n, 5u, "adv reply = header + status");
@@ -318,8 +351,9 @@ ZTEST(cc3501e_bridge_transport, test_ble_adv_start_bad_len_invalid)
 	uint8_t reply[32];
 	transport_spi_init();
 	/* adv_data_len=3 needs payload 10, but only 7 sent. */
-	const uint8_t req[] = { ALP_CC3501E_CMD_BLE_ADV_START, 0x00u, 7u, 0x00u,
-		                1u, 0u, 100u, 0u, 200u, 0u, 3u };
+	const uint8_t req[] = {
+		ALP_CC3501E_CMD_BLE_ADV_START, 0x00u, 7u, 0x00u, 1u, 0u, 100u, 0u, 200u, 0u, 3u
+	};
 	transaction(req, sizeof req);
 	(void)drain(reply, sizeof reply);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "adv length mismatch -> INVALID");
@@ -360,8 +394,9 @@ ZTEST(cc3501e_bridge_transport, test_power_policy_ok)
 	uint8_t reply[16];
 	transport_spi_init();
 	/* policy=BALANCED(1) | wake=HOST_SPI(0x01) | rsvd(2) | idle_ms=1000 (LE32) */
-	const uint8_t pp[] = { ALP_CC3501E_CMD_POWER_POLICY, 0x00u, 8u, 0x00u,
-		               1u, 0x01u, 0u, 0u, 0xE8u, 0x03u, 0u, 0u };
+	const uint8_t pp[] = {
+		ALP_CC3501E_CMD_POWER_POLICY, 0x00u, 8u, 0x00u, 1u, 0x01u, 0u, 0u, 0xE8u, 0x03u, 0u, 0u
+	};
 	transaction(pp, sizeof pp);
 	(void)drain(reply, sizeof reply);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "POWER_POLICY accepted -> OK");

@@ -144,7 +144,7 @@ static alp_status_t _write_ns(const y_pwm_data_t *d, const char *attr, uint32_t 
 	char path[96];
 	char buf[16];
 
-	int  n = snprintf(path, sizeof(path), "%s/%s", d->dir, attr);
+	int n = snprintf(path, sizeof(path), "%s/%s", d->dir, attr);
 	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
 
 	n = snprintf(buf, sizeof(buf), "%u", (unsigned)ns);
@@ -182,8 +182,8 @@ static void _unexport_chip(int chip, int channel)
  * Note the ABI ordering constraint: duty_cycle must be <= period, so
  * period is written first and duty_cycle is left at 0 here.
  */
-static alp_status_t y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg->channel_id >= 8u) return ALP_ERR_OUT_OF_RANGE;
 
@@ -315,8 +315,10 @@ static alp_status_t y_set_period(alp_pwm_backend_state_t *st, uint32_t period_ns
  * enable.  It has NO standard attribute for dead-time or center-aligned
  * counter modes, so the call is refused rather than silently no-op'd.
  */
-static alp_status_t y_configure(alp_pwm_backend_state_t *st, alp_pwm_align_t align_mode,
-                                uint32_t dead_time_ns, uint8_t break_cfg)
+static alp_status_t y_configure(alp_pwm_backend_state_t *st,
+                                alp_pwm_align_t          align_mode,
+                                uint32_t                 dead_time_ns,
+                                uint8_t                  break_cfg)
 {
 	(void)st;
 	(void)align_mode;
@@ -347,8 +349,9 @@ static alp_status_t y_single_pulse(alp_pwm_backend_state_t *st, uint32_t pulse_n
  * (IIO triggered buffers, the Counter subsystem), not /sys/class/pwm,
  * so this entry is refused.
  */
-static alp_status_t y_capture_open(const alp_pwm_capture_config_t *cfg, alp_pwm_backend_state_t *st,
-                                   alp_capabilities_t *caps_out)
+static alp_status_t y_capture_open(const alp_pwm_capture_config_t *cfg,
+                                   alp_pwm_backend_state_t        *st,
+                                   alp_capabilities_t             *caps_out)
 {
 	(void)cfg;
 	(void)st;
@@ -357,8 +360,8 @@ static alp_status_t y_capture_open(const alp_pwm_capture_config_t *cfg, alp_pwm_
 }
 
 /** @brief Input capture read -- unsupported (see @ref y_capture_open). */
-static alp_status_t y_capture_read(alp_pwm_backend_state_t *st, uint32_t *period_ns_out,
-                                   uint32_t *pulse_ns_out)
+static alp_status_t
+y_capture_read(alp_pwm_backend_state_t *st, uint32_t *period_ns_out, uint32_t *pulse_ns_out)
 {
 	(void)st;
 	if (period_ns_out != NULL) *period_ns_out = 0u;
@@ -408,7 +411,8 @@ static const alp_pwm_ops_t _ops = {
 	.close         = y_close,
 };
 
-ALP_BACKEND_REGISTER(pwm, yocto_drv,
+ALP_BACKEND_REGISTER(pwm,
+                     yocto_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "linux",

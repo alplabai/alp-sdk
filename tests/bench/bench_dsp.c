@@ -22,7 +22,7 @@
  * power-of-two check, chain ordering FFT-must-be-terminal). */
 static const float k_fir_taps[4] = { 0.25f, 0.25f, 0.25f, 0.25f };
 
-void               bench_dsp_main(void)
+void bench_dsp_main(void)
 {
 	/* chain_open with a NULL stages pointer -- earliest INVAL exit. */
 	BENCH_RUN("alp_dsp_chain_open(NULL stages)", 1000000, { (void)alp_dsp_chain_open(NULL, 0u); });

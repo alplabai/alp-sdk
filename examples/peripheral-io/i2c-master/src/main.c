@@ -112,7 +112,8 @@ int main(void)
          * chasing a TMP112 that may not be populated. */
 		printf("[i2c-master] tmp112_init @ 0x%02x -> %d "
 		       "(populated? right address?)\n",
-		       TMP112_ADDR_7BIT, (int)s);
+		       TMP112_ADDR_7BIT,
+		       (int)s);
 		alp_i2c_close(bus);
 		printf("[i2c-master] done\n");
 		return 0;

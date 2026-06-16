@@ -46,9 +46,9 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_HWSEM_HANDLES 4
 #endif
 
-static struct alp_shmem  _shmem_pool[CONFIG_ALP_SDK_MAX_SHMEM_HANDLES];
-static struct alp_mbox   _mbox_pool[CONFIG_ALP_SDK_MAX_MBOX_HANDLES];
-static struct alp_hwsem  _hwsem_pool[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
+static struct alp_shmem _shmem_pool[CONFIG_ALP_SDK_MAX_SHMEM_HANDLES];
+static struct alp_mbox  _mbox_pool[CONFIG_ALP_SDK_MAX_MBOX_HANDLES];
+static struct alp_hwsem _hwsem_pool[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
 
 static struct alp_shmem *_alloc_shmem(void)
 {

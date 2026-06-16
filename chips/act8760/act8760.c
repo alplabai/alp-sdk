@@ -21,7 +21,7 @@
  * re-derived 2026-06-06.  Register 0x00 is the system status byte;
  * 0x01 carries the matching interrupt masks (TMSK = bit 5). */
 #define ACT8760_REG_STATUS 0x00u
-#define ACT8760_REG_TMASK 0x01u
+#define ACT8760_REG_TMASK  0x01u
 
 /* Register 0x00 bit map, MSB->LSB (MSTR sheet, row 0x00):
  *   ROM_STAT | WD_TIMER_ALERT | TWARN | VSYSSTAT | VIN_POK_OV |
@@ -30,14 +30,14 @@
  * NOTE: SYSDAT (the raw VSYSMON sample) is register 0x02 bit 4, and
  * per-regulator ILIM / OV / POK flags live in each tile's offset-0
  * register -- neither is in this byte. */
-#define ACT8760_STATUS_ROM_STAT 0x80u
-#define ACT8760_STATUS_WD_ALERT 0x40u
-#define ACT8760_STATUS_TWARN 0x20u
-#define ACT8760_STATUS_VSYS_STAT 0x10u
+#define ACT8760_STATUS_ROM_STAT   0x80u
+#define ACT8760_STATUS_WD_ALERT   0x40u
+#define ACT8760_STATUS_TWARN      0x20u
+#define ACT8760_STATUS_VSYS_STAT  0x10u
 #define ACT8760_STATUS_VIN_POK_OV 0x08u
-#define ACT8760_STATUS_PBA_STAT 0x04u
-#define ACT8760_STATUS_VSYS_WARN 0x02u
-#define ACT8760_STATUS_PBD_STAT 0x01u
+#define ACT8760_STATUS_PBA_STAT   0x04u
+#define ACT8760_STATUS_VSYS_WARN  0x02u
+#define ACT8760_STATUS_PBD_STAT   0x01u
 
 /* Per-rail VSET0 location.  Each regulator is a 0x20-wide register
  * tile: Buck1..6 at bases 0x40/0x60/0x80/0xA0/0xC0/0xE0 on ADD1;

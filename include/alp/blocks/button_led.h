@@ -79,8 +79,8 @@ alp_status_t alp_button_led_toggle(alp_button_led_t *bl);
  * Internally enables a GPIO interrupt with the appropriate edge for
  * the configured polarity.  Pass `cb = NULL` to clear.
  */
-alp_status_t alp_button_led_set_press_callback(alp_button_led_t *bl, alp_button_led_press_cb_t cb,
-                                               void *user);
+alp_status_t
+alp_button_led_set_press_callback(alp_button_led_t *bl, alp_button_led_press_cb_t cb, void *user);
 
 /** Release the helper.  Closes the underlying GPIOs. */
 void alp_button_led_deinit(alp_button_led_t *bl);

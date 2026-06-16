@@ -127,8 +127,8 @@ alp_status_t alp_hash_update(alp_hash_t *h, const uint8_t *data, size_t len)
 	return ALP_OK;
 }
 
-alp_status_t alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_cap,
-                             size_t *digest_len)
+alp_status_t
+alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_cap, size_t *digest_len)
 {
 	if (digest_len != NULL) *digest_len = 0;
 	if (h == NULL || h->ctx == NULL) return ALP_ERR_NOT_READY;
@@ -207,9 +207,16 @@ alp_aead_t *alp_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t key_len
 	return a;
 }
 
-alp_status_t alp_aead_encrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, const uint8_t *aad,
-                              size_t aad_len, const uint8_t *plain, size_t plain_len,
-                              uint8_t *cipher_out, uint8_t *tag_out, size_t tag_len)
+alp_status_t alp_aead_encrypt(alp_aead_t    *a,
+                              const uint8_t *iv,
+                              size_t         iv_len,
+                              const uint8_t *aad,
+                              size_t         aad_len,
+                              const uint8_t *plain,
+                              size_t         plain_len,
+                              uint8_t       *cipher_out,
+                              uint8_t       *tag_out,
+                              size_t         tag_len)
 {
 	if (a == NULL) return ALP_ERR_NOT_READY;
 	if (iv == NULL || iv_len == 0) return ALP_ERR_INVAL;
@@ -249,9 +256,16 @@ out:
 	return status;
 }
 
-alp_status_t alp_aead_decrypt(alp_aead_t *a, const uint8_t *iv, size_t iv_len, const uint8_t *aad,
-                              size_t aad_len, const uint8_t *cipher, size_t cipher_len,
-                              const uint8_t *tag, size_t tag_len, uint8_t *plain_out)
+alp_status_t alp_aead_decrypt(alp_aead_t    *a,
+                              const uint8_t *iv,
+                              size_t         iv_len,
+                              const uint8_t *aad,
+                              size_t         aad_len,
+                              const uint8_t *cipher,
+                              size_t         cipher_len,
+                              const uint8_t *tag,
+                              size_t         tag_len,
+                              uint8_t       *plain_out)
 {
 	if (a == NULL) return ALP_ERR_NOT_READY;
 	if (iv == NULL || iv_len == 0) return ALP_ERR_INVAL;

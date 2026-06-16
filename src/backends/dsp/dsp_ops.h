@@ -48,12 +48,22 @@ typedef struct alp_dsp_backend_state {
 /* ------------------------------------------------------------------ */
 
 struct alp_dsp_ops {
-	alp_status_t (*open)(const alp_dsp_stage_t *stages, size_t n_stages,
-	                     alp_dsp_backend_state_t *state, alp_capabilities_t *caps_out);
-	alp_status_t (*apply_samples)(alp_dsp_backend_state_t *state, const int16_t *in_mv, size_t in_n,
-	                              int16_t *out_mv, size_t out_cap, size_t *got);
-	alp_status_t (*apply_bins)(alp_dsp_backend_state_t *state, const int16_t *in_mv, size_t in_n,
-	                           float *out_bins, size_t out_cap, size_t *got);
+	alp_status_t (*open)(const alp_dsp_stage_t   *stages,
+	                     size_t                   n_stages,
+	                     alp_dsp_backend_state_t *state,
+	                     alp_capabilities_t      *caps_out);
+	alp_status_t (*apply_samples)(alp_dsp_backend_state_t *state,
+	                              const int16_t           *in_mv,
+	                              size_t                   in_n,
+	                              int16_t                 *out_mv,
+	                              size_t                   out_cap,
+	                              size_t                  *got);
+	alp_status_t (*apply_bins)(alp_dsp_backend_state_t *state,
+	                           const int16_t           *in_mv,
+	                           size_t                   in_n,
+	                           float                   *out_bins,
+	                           size_t                   out_cap,
+	                           size_t                  *got);
 	void (*close)(alp_dsp_backend_state_t *state);
 };
 

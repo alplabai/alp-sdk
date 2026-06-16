@@ -61,8 +61,10 @@ static alp_status_t stub_configure_wake_source(alp_power_backend_state_t *state,
 	return ALP_OK;
 }
 
-static alp_status_t stub_request_sleep(alp_power_backend_state_t *state, alp_power_mode_t mode,
-                                       uint32_t wake_after_ms, alp_power_wake_info_t *info)
+static alp_status_t stub_request_sleep(alp_power_backend_state_t *state,
+                                       alp_power_mode_t           mode,
+                                       uint32_t                   wake_after_ms,
+                                       alp_power_wake_info_t     *info)
 {
 	(void)state;
 	(void)wake_after_ms;
@@ -84,7 +86,8 @@ static const alp_power_ops_t _ops = {
 	.close                 = NULL,
 };
 
-ALP_BACKEND_REGISTER(power, zephyr_stub,
+ALP_BACKEND_REGISTER(power,
+                     zephyr_stub,
                      {
                          .silicon_ref = "*",
                          .vendor      = "stub",

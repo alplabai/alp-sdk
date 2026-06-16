@@ -56,8 +56,14 @@ int main(void)
      * when status == ALP_OK; treat fields as unspecified otherwise. */
 	alp_rtc_time_t got;
 	s = alp_rtc_get_time(rtc, &got);
-	printf("[rtc] get_time -> status=%d, %04u-%02u-%02u %02u:%02u:%02u\n", (int)s, got.year,
-	       got.month, got.day, got.hour, got.minute, got.second);
+	printf("[rtc] get_time -> status=%d, %04u-%02u-%02u %02u:%02u:%02u\n",
+	       (int)s,
+	       got.year,
+	       got.month,
+	       got.day,
+	       got.hour,
+	       got.minute,
+	       got.second);
 
 	/* Close releases the handle but doesn't stop the RTC -- it
      * keeps ticking in hardware.  If you need to actually disable

@@ -65,22 +65,22 @@ extern "C" {
 #endif
 
 /* MAVLink v2 magic + message IDs we handle. */
-#define ALP_MAVLINK_STX_V2 0xFDu
-#define ALP_MAVLINK_MSG_HEARTBEAT 0u
-#define ALP_MAVLINK_MSG_GPS_RAW_INT 24u
-#define ALP_MAVLINK_MSG_ATTITUDE 30u
+#define ALP_MAVLINK_STX_V2              0xFDu
+#define ALP_MAVLINK_MSG_HEARTBEAT       0u
+#define ALP_MAVLINK_MSG_GPS_RAW_INT     24u
+#define ALP_MAVLINK_MSG_ATTITUDE        30u
 #define ALP_MAVLINK_MSG_GLOBAL_POSITION 33u
-#define ALP_MAVLINK_MSG_RC_CHANNELS 65u
-#define ALP_MAVLINK_MSG_COMMAND_LONG 76u
-#define ALP_MAVLINK_MSG_BATTERY_STATUS 147u
+#define ALP_MAVLINK_MSG_RC_CHANNELS     65u
+#define ALP_MAVLINK_MSG_COMMAND_LONG    76u
+#define ALP_MAVLINK_MSG_BATTERY_STATUS  147u
 
 /* HEARTBEAT mav_type / autopilot enums (subset). */
-#define ALP_MAV_TYPE_QUADROTOR 2u
+#define ALP_MAV_TYPE_QUADROTOR    2u
 #define ALP_MAV_AUTOPILOT_GENERIC 0u
 
 /* COMMAND_LONG command IDs we honour. */
 #define ALP_MAV_CMD_COMPONENT_ARM_DISARM 400u
-#define ALP_MAV_CMD_DO_SET_MODE 176u
+#define ALP_MAV_CMD_DO_SET_MODE          176u
 
 /** Frame-parser state machine. */
 typedef struct {

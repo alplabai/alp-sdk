@@ -211,8 +211,8 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb,
-                                 void *user);
+alp_status_t
+alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, void *user);
 
 /**
  * @brief Tear down the IRQ registration from @ref alp_gpio_irq_enable.
@@ -302,8 +302,8 @@ alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t le
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_i2c_write_read(alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen,
-                                uint8_t *rdata, size_t rlen);
+alp_status_t alp_i2c_write_read(
+    alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen, uint8_t *rdata, size_t rlen);
 
 /**
  * @brief Release the I2C bus handle.  Idempotent on NULL.
@@ -520,8 +520,8 @@ typedef struct alp_uart_rx_ringbuf alp_uart_rx_ringbuf_t;
  *         Returns NULL + ALP_ERR_NOSUPPORT on builds without
  *         CONFIG_ALP_SDK_UART_RX_RINGBUF.
  */
-alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing,
-                                                  size_t backing_size);
+alp_uart_rx_ringbuf_t *
+alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_size);
 
 /**
  * @brief Pop up to @p max_len bytes out of the ring.
@@ -537,8 +537,8 @@ alp_uart_rx_ringbuf_t *alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *bac
  * @return ALP_OK on success.  ALP_ERR_NOT_READY if @p rb is NULL or
  *         detached.  ALP_ERR_INVAL if @p out is NULL with @p max_len > 0.
  */
-alp_status_t alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len,
-                                     size_t *got);
+alp_status_t
+alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len, size_t *got);
 
 /**
  * @brief Number of bytes currently buffered.

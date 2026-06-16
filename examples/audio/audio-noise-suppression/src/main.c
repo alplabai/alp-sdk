@@ -126,12 +126,12 @@ LOG_MODULE_REGISTER(noise_suppress, LOG_LEVEL_INF);
  * which sets BOTH the DMA cadence and the perceived latency
  * budget.  See the header comment for the per-step breakdown.
  */
-#define SR_HZ 24000
-#define CHANNELS 1
+#define SR_HZ        24000
+#define CHANNELS     1
 #define BLOCK_FRAMES 240
-#define BLOCK_MS 10
-#define FFT_POINTS 256
-#define DEMO_BLOCKS 50 /* ~500 ms of audio for HiL audibility. */
+#define BLOCK_MS     10
+#define FFT_POINTS   256
+#define DEMO_BLOCKS  50 /* ~500 ms of audio for HiL audibility. */
 
 /* ── Placeholder denoiser model ────────────────────────────────
  *
@@ -307,10 +307,11 @@ static void process_one_block(void)
 
 		if (s_fft_fill >= FFT_POINTS) {
 			size_t       got = 0;
-			alp_status_t st = alp_dsp_chain_apply_bins(g_state.dsp, s_fft_in, FFT_POINTS, s_bin_mag,
-			                                           FFT_POINTS, &got);
+			alp_status_t st  = alp_dsp_chain_apply_bins(
+                g_state.dsp, s_fft_in, FFT_POINTS, s_bin_mag, FFT_POINTS, &got);
 			if (st != ALP_OK) {
-				LOG_WRN("dsp apply_bins failed: st=%d (block %u)", (int)st,
+				LOG_WRN("dsp apply_bins failed: st=%d (block %u)",
+				        (int)st,
 				        (unsigned)g_state.blocks_run);
 			} else {
 				fft_ran = true;
@@ -344,7 +345,10 @@ static void process_one_block(void)
 	/* 5. Speaker-out. */
 	if (g_state.spk_ok) {
 		size_t pushed = 0;
-		(void)alp_audio_out_write(g_state.spk, s_pcm_out, BLOCK_FRAMES, &pushed,
+		(void)alp_audio_out_write(g_state.spk,
+		                          s_pcm_out,
+		                          BLOCK_FRAMES,
+		                          &pushed,
 		                          /*timeout_ms=*/100);
 	}
 
@@ -354,7 +358,9 @@ static void process_one_block(void)
 int main(void)
 {
 	printf("[ns] audio-noise-suppression v0.5 -- mic -> DSP -> AI -> speaker\n");
-	printf("[ns]   block=%d frames @ %d Hz mono = %d ms latency target\n", BLOCK_FRAMES, SR_HZ,
+	printf("[ns]   block=%d frames @ %d Hz mono = %d ms latency target\n",
+	       BLOCK_FRAMES,
+	       SR_HZ,
 	       BLOCK_MS);
 
 	/* ── Open mic + speaker on the same I2S link ───────────

@@ -39,7 +39,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_WIFI_HANDLES 1
 #endif
 
-static struct alp_wifi  _radio_pool[CONFIG_ALP_SDK_MAX_WIFI_HANDLES];
+static struct alp_wifi _radio_pool[CONFIG_ALP_SDK_MAX_WIFI_HANDLES];
 
 static struct alp_wifi *_alloc_radio(void)
 {
@@ -93,8 +93,8 @@ alp_wifi_t *alp_wifi_open(void)
 	return h;
 }
 
-alp_status_t alp_wifi_connect(alp_wifi_t *h, const alp_wifi_credentials_t *creds,
-                              uint32_t timeout_ms)
+alp_status_t
+alp_wifi_connect(alp_wifi_t *h, const alp_wifi_credentials_t *creds, uint32_t timeout_ms)
 {
 	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
 	if (creds == NULL || creds->ssid == NULL) return ALP_ERR_INVAL;

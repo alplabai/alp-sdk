@@ -64,8 +64,10 @@ void qenc_channel_init(const gd32_qenc_t *e)
 	ip.repetitioncounter = 0u;
 	timer_deinit(e->timer_periph);
 	timer_init(e->timer_periph, &ip);
-	timer_quadrature_decoder_mode_config(e->timer_periph, TIMER_QUAD_DECODER_MODE2,
-	                                     TIMER_IC_POLARITY_RISING, TIMER_IC_POLARITY_RISING);
+	timer_quadrature_decoder_mode_config(e->timer_periph,
+	                                     TIMER_QUAD_DECODER_MODE2,
+	                                     TIMER_IC_POLARITY_RISING,
+	                                     TIMER_IC_POLARITY_RISING);
 	timer_enable(e->timer_periph);
 }
 

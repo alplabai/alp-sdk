@@ -42,10 +42,10 @@
 extern "C" {
 #endif
 
-#define TMP112_I2C_ADDR_GND 0x48u
+#define TMP112_I2C_ADDR_GND   0x48u
 #define TMP112_I2C_ADDR_VPLUS 0x49u
-#define TMP112_I2C_ADDR_SDA 0x4Au
-#define TMP112_I2C_ADDR_SCL 0x4Bu
+#define TMP112_I2C_ADDR_SDA   0x4Au
+#define TMP112_I2C_ADDR_SCL   0x4Bu
 
 /** Conversion-rate enum (CR1:CR0 in CONF). */
 typedef enum {

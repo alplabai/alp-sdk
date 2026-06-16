@@ -16,19 +16,19 @@
 #include "alp/chips/ina236.h"
 
 /* Datasheet SBOSA38A table 7-1. */
-#define INA236_REG_CONFIG 0x00u
-#define INA236_REG_SHUNT 0x01u
-#define INA236_REG_BUS 0x02u
-#define INA236_REG_POWER 0x03u
-#define INA236_REG_CURRENT 0x04u
+#define INA236_REG_CONFIG      0x00u
+#define INA236_REG_SHUNT       0x01u
+#define INA236_REG_BUS         0x02u
+#define INA236_REG_POWER       0x03u
+#define INA236_REG_CURRENT     0x04u
 #define INA236_REG_CALIBRATION 0x05u
 #define INA236_REG_MASK_ENABLE 0x06u
 #define INA236_REG_ALERT_LIMIT 0x07u
-#define INA236_REG_MFG_ID 0x3Eu
-#define INA236_REG_DEVICE_ID 0x3Fu
+#define INA236_REG_MFG_ID      0x3Eu
+#define INA236_REG_DEVICE_ID   0x3Fu
 
 /* CONFIG bit fields (datasheet table 7-2). */
-#define INA236_CFG_RST 0x8000u           /* Soft reset.            */
+#define INA236_CFG_RST           0x8000u /* Soft reset.            */
 #define INA236_CFG_ADCRANGE_20MV 0x1000u /* 0 = 81.92 mV, 1 = 20.48 mV. */
 
 /* Shunt-voltage LSB depends on ADCRANGE (datasheet section 7.5.2). */
@@ -67,8 +67,12 @@ static alp_status_t apply_calibration(ina236_t *ctx)
 	return reg_write16(ctx, INA236_REG_CALIBRATION, cal);
 }
 
-alp_status_t ina236_init(ina236_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, float shunt_ohms,
-                         float max_current_a, ina236_adcrange_t adcrange)
+alp_status_t ina236_init(ina236_t         *ctx,
+                         alp_i2c_t        *bus,
+                         uint8_t           addr_7bit,
+                         float             shunt_ohms,
+                         float             max_current_a,
+                         ina236_adcrange_t adcrange)
 {
 	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
 	if (shunt_ohms <= 0.0f || max_current_a <= 0.0f) return ALP_ERR_INVAL;

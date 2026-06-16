@@ -87,8 +87,8 @@ LOG_MODULE_REGISTER(obj_det, LOG_LEVEL_INF);
  * the ST7789's 240x320 panel and keeps the YOLOv8-tiny input
  * tensor on a 32 B alignment without padding.  Bump to 320x320
  * once v0.6 wires the dedicated MIPI receiver subsystem. */
-#define FRAME_W 240u
-#define FRAME_H 240u
+#define FRAME_W   240u
+#define FRAME_H   240u
 #define FRAME_FPS 30u
 
 /* Maximum bounding boxes the display path renders per frame.
@@ -256,8 +256,11 @@ int main(void)
 			window_start_ms = now_ms;
 		}
 
-		printf("[obj-det] frame invoke=%uus boxes=%zu fps=%u.%u\n", (unsigned)invoke_us, n_boxes,
-		       (unsigned)(fps_x10 / 10u), (unsigned)(fps_x10 % 10u));
+		printf("[obj-det] frame invoke=%uus boxes=%zu fps=%u.%u\n",
+		       (unsigned)invoke_us,
+		       n_boxes,
+		       (unsigned)(fps_x10 / 10u),
+		       (unsigned)(fps_x10 % 10u));
 	}
 
 	/* Tidy up so the v0.5 skeleton's NOSUPPORT path closes the

@@ -35,17 +35,17 @@
 extern "C" {
 #endif
 
-#define MAX31865_REG_CONFIG 0x00u /* RW (write 0x80 | reg). */
-#define MAX31865_REG_RTD_MSB 0x01u
-#define MAX31865_REG_RTD_LSB 0x02u
+#define MAX31865_REG_CONFIG     0x00u /* RW (write 0x80 | reg). */
+#define MAX31865_REG_RTD_MSB    0x01u
+#define MAX31865_REG_RTD_LSB    0x02u
 #define MAX31865_REG_FAULT_STAT 0x07u
 
-#define MAX31865_CONFIG_VBIAS 0x80u
-#define MAX31865_CONFIG_MODE_AUTO 0x40u
-#define MAX31865_CONFIG_3WIRE 0x10u
-#define MAX31865_CONFIG_FAULT_AUTO 0x04u
+#define MAX31865_CONFIG_VBIAS        0x80u
+#define MAX31865_CONFIG_MODE_AUTO    0x40u
+#define MAX31865_CONFIG_3WIRE        0x10u
+#define MAX31865_CONFIG_FAULT_AUTO   0x04u
 #define MAX31865_CONFIG_CLEAR_FAULTS 0x02u
-#define MAX31865_CONFIG_FILTER_50HZ 0x01u
+#define MAX31865_CONFIG_FILTER_50HZ  0x01u
 
 typedef struct {
 	alp_spi_t *bus;

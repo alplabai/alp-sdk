@@ -64,8 +64,8 @@ typedef enum {
 /* Decode an MQTT variable-length integer (1-4 bytes).  Returns the
  * decoded value via @p out and the byte count via @p consumed, or
  * MQTT_REF_ERR_VLI_OVERRUN if the high bit is set past byte 4. */
-static mqtt_ref_status_t mqtt_decode_vli(const uint8_t *buf, size_t size, uint32_t *out,
-                                         size_t *consumed)
+static mqtt_ref_status_t
+mqtt_decode_vli(const uint8_t *buf, size_t size, uint32_t *out, size_t *consumed)
 {
 	uint32_t value      = 0;
 	uint32_t multiplier = 1;

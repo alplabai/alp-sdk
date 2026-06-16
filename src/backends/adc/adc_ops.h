@@ -47,8 +47,9 @@ struct alp_adc_ops {
      * if hardware isn't initialised; ALP_ERR_NOMEM if the backend's
      * per-instance state pool is exhausted.
      */
-	alp_status_t (*open)(const alp_adc_config_t *cfg, alp_adc_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
+	alp_status_t (*open)(const alp_adc_config_t  *cfg,
+	                     alp_adc_backend_state_t *state,
+	                     alp_capabilities_t      *caps_out);
 
 	/* One-shot raw read.  Signed for symmetry with differential
      * mode; single-ended SoCs return non-negative values. */

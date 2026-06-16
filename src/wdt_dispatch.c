@@ -27,7 +27,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_WDT_HANDLES 2
 #endif
 
-static struct alp_wdt  _pool[CONFIG_ALP_SDK_MAX_WDT_HANDLES];
+static struct alp_wdt _pool[CONFIG_ALP_SDK_MAX_WDT_HANDLES];
 
 static struct alp_wdt *_alloc(void)
 {

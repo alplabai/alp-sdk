@@ -15,8 +15,8 @@
 #include "qenc_ops.h"
 #include "v2n_supervisor.h"
 
-static alp_status_t br_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t
+br_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	/* Probe the supervisor up front so open() surfaces bus failures
      * instead of deferring them to the first read. */
@@ -60,7 +60,8 @@ static const alp_qenc_ops_t _ops = {
 	.close          = NULL,
 };
 
-ALP_BACKEND_REGISTER(qenc, gd32_bridge,
+ALP_BACKEND_REGISTER(qenc,
+                     gd32_bridge,
                      {
                          .silicon_ref = "renesas:rzv2n:n44",
                          .vendor      = "renesas",

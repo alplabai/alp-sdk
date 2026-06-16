@@ -121,8 +121,10 @@ int main(void)
 	printf("[manifest] sku           = %.*s\n", ALP_HW_INFO_SKU_LEN, m->sku);
 	printf("[manifest] hw_rev        = %.*s\n", ALP_HW_INFO_HW_REV_LEN, m->hw_rev);
 	printf("[manifest] serial        = %.*s\n", ALP_HW_INFO_SERIAL_LEN, m->serial);
-	printf("[manifest] mfg date      = %04u-%02u-%02u\n", (unsigned)m->mfg_year,
-	       (unsigned)m->mfg_month, (unsigned)m->mfg_day);
+	printf("[manifest] mfg date      = %04u-%02u-%02u\n",
+	       (unsigned)m->mfg_year,
+	       (unsigned)m->mfg_month,
+	       (unsigned)m->mfg_day);
 
 	const size_t crc_covered_len = sizeof(*m) - sizeof(m->crc32);
 	uint32_t     calc            = crc32_iso3309(raw, crc_covered_len);

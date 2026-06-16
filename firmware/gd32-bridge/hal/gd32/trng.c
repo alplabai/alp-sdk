@@ -41,7 +41,7 @@ bool trng_ready   = false;
  * at the GD32G553's 216 MHz core clock when the TRNG is healthy
  * (DRDY trips in dozens of cycles, so the timeout is the abort
  * latch, not the typical-case bound). */
-#define TRNG_INIT_TIMEOUT 100000u
+#define TRNG_INIT_TIMEOUT  100000u
 #define TRNG_READY_TIMEOUT 65535u
 
 /* Configure + enable the TRNG (no DRDY wait here -- see above).

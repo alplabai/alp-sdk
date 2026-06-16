@@ -65,7 +65,7 @@ extern "C" {
 
 /** Flags bitfield. */
 #define ALP_CC3501E_FLAG_RESP_REQUIRED 0x01
-#define ALP_CC3501E_FLAG_ASYNC_EVENT 0x02
+#define ALP_CC3501E_FLAG_ASYNC_EVENT   0x02
 /** Reserved frame-continuation flag for v2 long-write payloads.
  *  Hosts MUST treat this bit as zero on v1; v2 firmware will set
  *  it on intermediate frames of a multi-frame BLE-write transaction. */
@@ -287,13 +287,13 @@ typedef enum {
  *   - WIFI_BEACON: Wi-Fi STA beacon listen.
  *   - WIFI_AP_CLIENT: Wi-Fi AP client join / leave.
  *   - GPIO_IRQ: configured GPIO IRQ from CMD_GPIO_SET_INTERRUPT. */
-#define ALP_CC3501E_WAKE_NONE 0x00u
-#define ALP_CC3501E_WAKE_HOST_SPI 0x01u
-#define ALP_CC3501E_WAKE_BLE_CONN 0x02u
-#define ALP_CC3501E_WAKE_BLE_ADV 0x04u
-#define ALP_CC3501E_WAKE_WIFI_BEACON 0x08u
+#define ALP_CC3501E_WAKE_NONE           0x00u
+#define ALP_CC3501E_WAKE_HOST_SPI       0x01u
+#define ALP_CC3501E_WAKE_BLE_CONN       0x02u
+#define ALP_CC3501E_WAKE_BLE_ADV        0x04u
+#define ALP_CC3501E_WAKE_WIFI_BEACON    0x08u
 #define ALP_CC3501E_WAKE_WIFI_AP_CLIENT 0x10u
-#define ALP_CC3501E_WAKE_GPIO_IRQ 0x20u
+#define ALP_CC3501E_WAKE_GPIO_IRQ       0x20u
 
 /** Payload of CMD_POWER_POLICY (opcode 0x62).  Hint to the CC3501E
  *  firmware about how aggressively to idle between events.  Takes

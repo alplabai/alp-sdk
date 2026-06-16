@@ -10,8 +10,13 @@
 
 #include "alp/chips/drv8825.h"
 
-alp_status_t drv8825_init(drv8825_t *dev, alp_pwm_t *step, alp_gpio_t *dir, alp_gpio_t *nenbl,
-                          alp_gpio_t *m0, alp_gpio_t *m1, alp_gpio_t *m2)
+alp_status_t drv8825_init(drv8825_t  *dev,
+                          alp_pwm_t  *step,
+                          alp_gpio_t *dir,
+                          alp_gpio_t *nenbl,
+                          alp_gpio_t *m0,
+                          alp_gpio_t *m1,
+                          alp_gpio_t *m2)
 {
 	if (dev == NULL || step == NULL || dir == NULL) return ALP_ERR_INVAL;
 	memset(dev, 0, sizeof(*dev));

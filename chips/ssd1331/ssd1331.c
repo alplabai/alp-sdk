@@ -13,24 +13,24 @@
 /* Command opcodes (datasheet §9 Command Table)                        */
 /* ------------------------------------------------------------------ */
 
-#define CMD_SET_COLUMN_ADDR 0x15
-#define CMD_SET_ROW_ADDR 0x75
-#define CMD_SET_REMAP 0xA0
-#define CMD_SET_DISPLAY_START 0xA1
-#define CMD_SET_DISPLAY_OFFSET 0xA2
-#define CMD_SET_NORMAL 0xA4
-#define CMD_SET_MUX_RATIO 0xA8
-#define CMD_SET_MASTER_CONFIG 0xAD
-#define CMD_DISPLAY_OFF 0xAE
-#define CMD_DISPLAY_ON 0xAF
-#define CMD_SET_PRECHARGE 0xB1
-#define CMD_SET_DCLK_DIV 0xB3
+#define CMD_SET_COLUMN_ADDR     0x15
+#define CMD_SET_ROW_ADDR        0x75
+#define CMD_SET_REMAP           0xA0
+#define CMD_SET_DISPLAY_START   0xA1
+#define CMD_SET_DISPLAY_OFFSET  0xA2
+#define CMD_SET_NORMAL          0xA4
+#define CMD_SET_MUX_RATIO       0xA8
+#define CMD_SET_MASTER_CONFIG   0xAD
+#define CMD_DISPLAY_OFF         0xAE
+#define CMD_DISPLAY_ON          0xAF
+#define CMD_SET_PRECHARGE       0xB1
+#define CMD_SET_DCLK_DIV        0xB3
 #define CMD_SET_PRECHARGE_LEVEL 0xBB
-#define CMD_SET_VCOMH 0xBE
-#define CMD_SET_MASTER_CURRENT 0x87
-#define CMD_SET_CONTRAST_A 0x81
-#define CMD_SET_CONTRAST_B 0x82
-#define CMD_SET_CONTRAST_C 0x83
+#define CMD_SET_VCOMH           0xBE
+#define CMD_SET_MASTER_CURRENT  0x87
+#define CMD_SET_CONTRAST_A      0x81
+#define CMD_SET_CONTRAST_B      0x82
+#define CMD_SET_CONTRAST_C      0x83
 
 static alp_status_t write_cmds(ssd1331_t *dev, const uint8_t *cmds, size_t n)
 {
@@ -57,8 +57,8 @@ static alp_status_t write_data(ssd1331_t *dev, const uint8_t *data, size_t n)
 /* Public API                                                          */
 /* ------------------------------------------------------------------ */
 
-alp_status_t ssd1331_init(ssd1331_t *dev, alp_spi_t *spi, alp_gpio_t *dc, uint8_t *fb,
-                          size_t fb_len)
+alp_status_t
+ssd1331_init(ssd1331_t *dev, alp_spi_t *spi, alp_gpio_t *dc, uint8_t *fb, size_t fb_len)
 {
 	if (dev == NULL || spi == NULL || dc == NULL || fb == NULL) {
 		return ALP_ERR_INVAL;

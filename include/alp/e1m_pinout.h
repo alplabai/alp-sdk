@@ -105,9 +105,9 @@ extern "C" {
 
 /* Parallel-camera, SDIO, USB */
 #define E1M_PARCAM0 0u
-#define E1M_SDIO0 0u
-#define E1M_USB0 0u
-#define E1M_USB2 0u
+#define E1M_SDIO0   0u
+#define E1M_USB0    0u
+#define E1M_USB2    0u
 
 /* Camera LDOs (per-channel power feedback) */
 #define E1M_CAM0 0u
@@ -193,24 +193,24 @@ extern "C" {
  * see `docs/e1m-pinout.md` for how they thread through the studio's
  * pin allocator.
  */
-#define E1M_I2C_COUNT 2u
-#define E1M_SPI_COUNT 2u
-#define E1M_UART_COUNT 2u
-#define E1M_I2S_COUNT 2u
-#define E1M_I3C_COUNT 1u
-#define E1M_PDM_COUNT 2u
-#define E1M_CAN_COUNT 1u
-#define E1M_ETH_COUNT 1u
-#define E1M_CSI_COUNT 1u
-#define E1M_DSI_COUNT 1u
-#define E1M_PARCAM_COUNT 1u
-#define E1M_SDIO_COUNT 1u
-#define E1M_USB_COUNT 1u
-#define E1M_USB2_COUNT 1u
-#define E1M_DAC_COUNT 2u
-#define E1M_ADC_COUNT 8u
-#define E1M_PWM_COUNT 8u
-#define E1M_ENC_COUNT 4u
+#define E1M_I2C_COUNT     2u
+#define E1M_SPI_COUNT     2u
+#define E1M_UART_COUNT    2u
+#define E1M_I2S_COUNT     2u
+#define E1M_I3C_COUNT     1u
+#define E1M_PDM_COUNT     2u
+#define E1M_CAN_COUNT     1u
+#define E1M_ETH_COUNT     1u
+#define E1M_CSI_COUNT     1u
+#define E1M_DSI_COUNT     1u
+#define E1M_PARCAM_COUNT  1u
+#define E1M_SDIO_COUNT    1u
+#define E1M_USB_COUNT     1u
+#define E1M_USB2_COUNT    1u
+#define E1M_DAC_COUNT     2u
+#define E1M_ADC_COUNT     8u
+#define E1M_PWM_COUNT     8u
+#define E1M_ENC_COUNT     4u
 #define E1M_GPIO_IO_COUNT 26u /**< IO0..IO25; some "Reserved — not present on v1.0". */
 
 /* ================================================================== */
@@ -219,16 +219,16 @@ extern "C" {
 
 /* General-purpose IOs (silkscreen IO0..IO25 per E1M v1.0).
  * Indices 0..25 — the canonical numeric order. */
-#define E1M_GPIO_IO0 0u   /**< E1M pad L2  */
-#define E1M_GPIO_IO1 1u   /**< E1M pad L1  */
-#define E1M_GPIO_IO2 2u   /**< E1M pad W2  */
-#define E1M_GPIO_IO3 3u   /**< E1M pad AG2 */
-#define E1M_GPIO_IO4 4u   /**< E1M pad AG16 */
-#define E1M_GPIO_IO5 5u   /**< E1M pad AH18 */
-#define E1M_GPIO_IO6 6u   /**< E1M pad AG18 */
-#define E1M_GPIO_IO7 7u   /**< E1M pad AG34 */
-#define E1M_GPIO_IO8 8u   /**< E1M pad AG33 */
-#define E1M_GPIO_IO9 9u   /**< E1M pad AH34 */
+#define E1M_GPIO_IO0  0u  /**< E1M pad L2  */
+#define E1M_GPIO_IO1  1u  /**< E1M pad L1  */
+#define E1M_GPIO_IO2  2u  /**< E1M pad W2  */
+#define E1M_GPIO_IO3  3u  /**< E1M pad AG2 */
+#define E1M_GPIO_IO4  4u  /**< E1M pad AG16 */
+#define E1M_GPIO_IO5  5u  /**< E1M pad AH18 */
+#define E1M_GPIO_IO6  6u  /**< E1M pad AG18 */
+#define E1M_GPIO_IO7  7u  /**< E1M pad AG34 */
+#define E1M_GPIO_IO8  8u  /**< E1M pad AG33 */
+#define E1M_GPIO_IO9  9u  /**< E1M pad AH34 */
 #define E1M_GPIO_IO10 10u /**< E1M pad AH33 */
 #define E1M_GPIO_IO11 11u /**< E1M pad A18  */
 #define E1M_GPIO_IO12 12u /**< Reserved — not present on v1.0 (kept for ABI stability) */

@@ -25,15 +25,15 @@ static alp_status_t gmsl2_write(alp_i2c_t *bus, uint8_t addr, uint16_t reg, uint
 	return alp_i2c_write(bus, addr, buf, sizeof(buf));
 }
 
-alp_status_t maxim_gmsl2_init(maxim_gmsl2_t *dev, alp_i2c_t *bus, uint8_t ser_addr,
-                              uint8_t des_addr)
+alp_status_t
+maxim_gmsl2_init(maxim_gmsl2_t *dev, alp_i2c_t *bus, uint8_t ser_addr, uint8_t des_addr)
 {
 	if (dev == NULL || bus == NULL) return ALP_ERR_INVAL;
 	if (ser_addr == 0 || des_addr == 0) return ALP_ERR_INVAL;
 	memset(dev, 0, sizeof(*dev));
-	dev->bus        = bus;
-	dev->ser_addr   = ser_addr;
-	dev->des_addr   = des_addr;
+	dev->bus      = bus;
+	dev->ser_addr = ser_addr;
+	dev->des_addr = des_addr;
 
 	uint8_t      id = 0;
 	alp_status_t s  = gmsl2_read(bus, des_addr, MAX929x_REG_DEV_ID, &id);

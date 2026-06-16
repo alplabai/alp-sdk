@@ -12,29 +12,29 @@
 /* SSD1306 I2C control byte: bit7 = continuation, bit6 = D/C#.
  * Co=0, D/C#=0 → command stream
  * Co=0, D/C#=1 → data stream */
-#define CTRL_CMD_STREAM 0x00u
+#define CTRL_CMD_STREAM  0x00u
 #define CTRL_DATA_STREAM 0x40u
 
 /* Command opcodes used by init / control. */
-#define CMD_DISPLAY_OFF 0xAEu
-#define CMD_DISPLAY_ON 0xAFu
-#define CMD_SET_CONTRAST 0x81u
-#define CMD_NORMAL_DISPLAY 0xA6u
-#define CMD_INVERT_DISPLAY 0xA7u
-#define CMD_SET_MUX_RATIO 0xA8u
+#define CMD_DISPLAY_OFF        0xAEu
+#define CMD_DISPLAY_ON         0xAFu
+#define CMD_SET_CONTRAST       0x81u
+#define CMD_NORMAL_DISPLAY     0xA6u
+#define CMD_INVERT_DISPLAY     0xA7u
+#define CMD_SET_MUX_RATIO      0xA8u
 #define CMD_SET_DISPLAY_OFFSET 0xD3u
-#define CMD_SET_START_LINE 0x40u
-#define CMD_CHARGE_PUMP 0x8Du
-#define CMD_MEMORY_MODE 0x20u
-#define CMD_SEGMENT_REMAP 0xA1u /* column 127 mapped to SEG0 */
-#define CMD_COM_SCAN_DEC 0xC8u  /* COM[N-1] → COM[0] */
-#define CMD_SET_COM_PINS 0xDAu
-#define CMD_SET_DCLK_DIV 0xD5u
-#define CMD_SET_PRECHARGE 0xD9u
-#define CMD_SET_VCOM_DETECT 0xDBu
-#define CMD_DEACTIVATE_SCROLL 0x2Eu
-#define CMD_SET_COLUMN_ADDR 0x21u
-#define CMD_SET_PAGE_ADDR 0x22u
+#define CMD_SET_START_LINE     0x40u
+#define CMD_CHARGE_PUMP        0x8Du
+#define CMD_MEMORY_MODE        0x20u
+#define CMD_SEGMENT_REMAP      0xA1u /* column 127 mapped to SEG0 */
+#define CMD_COM_SCAN_DEC       0xC8u /* COM[N-1] → COM[0] */
+#define CMD_SET_COM_PINS       0xDAu
+#define CMD_SET_DCLK_DIV       0xD5u
+#define CMD_SET_PRECHARGE      0xD9u
+#define CMD_SET_VCOM_DETECT    0xDBu
+#define CMD_DEACTIVATE_SCROLL  0x2Eu
+#define CMD_SET_COLUMN_ADDR    0x21u
+#define CMD_SET_PAGE_ADDR      0x22u
 
 static alp_status_t write_cmd(ssd1306_t *dev, uint8_t cmd)
 {
@@ -58,8 +58,8 @@ static alp_status_t fb_size(const ssd1306_t *dev, size_t *out)
 	return ALP_OK;
 }
 
-alp_status_t ssd1306_init(ssd1306_t *dev, alp_i2c_t *bus, uint8_t i2c_addr, uint16_t width,
-                          uint16_t height)
+alp_status_t
+ssd1306_init(ssd1306_t *dev, alp_i2c_t *bus, uint8_t i2c_addr, uint16_t width, uint16_t height)
 {
 	if (dev == NULL || bus == NULL) return ALP_ERR_INVAL;
 	if (width > SSD1306_MAX_WIDTH) return ALP_ERR_INVAL;
@@ -79,7 +79,7 @@ alp_status_t ssd1306_init(ssd1306_t *dev, alp_i2c_t *bus, uint8_t i2c_addr, uint
 	const uint8_t mux   = (uint8_t)(height - 1u);
 	const uint8_t cpins = (height == 32u) ? 0x02u : 0x12u;
 
-	alp_status_t  s;
+	alp_status_t s;
 	if ((s = write_cmd(dev, CMD_DISPLAY_OFF)) != ALP_OK) return s;
 	if ((s = write_cmd2(dev, CMD_SET_DCLK_DIV, 0x80u)) != ALP_OK) return s;
 	if ((s = write_cmd2(dev, CMD_SET_MUX_RATIO, mux)) != ALP_OK) return s;
@@ -161,7 +161,7 @@ alp_status_t ssd1306_display(ssd1306_t *dev)
      * I2C controllers with small DMA windows. */
 	enum { CHUNK = 32 };
 	uint8_t buf[1 + CHUNK];
-	buf[0]     = CTRL_DATA_STREAM;
+	buf[0] = CTRL_DATA_STREAM;
 
 	size_t off = 0;
 	while (off < fb_bytes) {

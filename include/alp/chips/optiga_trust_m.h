@@ -97,9 +97,13 @@ alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx
  * @param[out] resp_len    Receives bytes copied into @p resp.
  * @param[in]  timeout_ms  Max wait for the chip to clock out the response.
  */
-alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx, const uint8_t *apdu, size_t apdu_len,
-                                      uint8_t *resp, size_t resp_cap, size_t *resp_len,
-                                      uint32_t timeout_ms);
+alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
+                                      const uint8_t    *apdu,
+                                      size_t            apdu_len,
+                                      uint8_t          *resp,
+                                      size_t            resp_cap,
+                                      size_t           *resp_len,
+                                      uint32_t          timeout_ms);
 
 /** @brief Close the application context + release I2C resources. */
 void optiga_trust_m_deinit(optiga_trust_m_t *ctx);

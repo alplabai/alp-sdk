@@ -54,11 +54,11 @@
 /* Common SW1-SW2 status codes (ISO-7816-4 + OPTIGA-specific).  An
  * unknown SW pair is mapped to a generic "io error" -- the parser
  * must surface it, not crash. */
-#define SW_SUCCESS 0x9000
-#define SW_MORE_DATA(sw) (((sw)&0xFF00u) == 0x6100u)
-#define SW_WRONG_LENGTH 0x6700
+#define SW_SUCCESS          0x9000
+#define SW_MORE_DATA(sw)    (((sw)&0xFF00u) == 0x6100u)
+#define SW_WRONG_LENGTH     0x6700
 #define SW_SECURITY_NOT_MET 0x6982
-#define SW_AUTH_FAILED 0x6300
+#define SW_AUTH_FAILED      0x6300
 
 typedef enum {
 	OPTIGA_OK            = 0,
@@ -73,8 +73,11 @@ typedef enum {
  * walk any BER-TLV payload structures.  Returns OPTIGA_OK on a
  * SW_SUCCESS response with a well-formed TLV payload.  Returns a
  * specific negative code otherwise; never crashes. */
-static optiga_status_t optiga_parse_response(const uint8_t *buf, size_t buf_len, uint16_t *sw_out,
-                                             const uint8_t **payload_out, size_t *payload_len_out)
+static optiga_status_t optiga_parse_response(const uint8_t  *buf,
+                                             size_t          buf_len,
+                                             uint16_t       *sw_out,
+                                             const uint8_t **payload_out,
+                                             size_t         *payload_len_out)
 {
 	if (buf == NULL || sw_out == NULL || payload_out == NULL || payload_len_out == NULL) {
 		return OPTIGA_ERR_INVAL;

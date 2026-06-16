@@ -10,10 +10,10 @@
 
 #include "alp/chips/tcal9538.h"
 
-#define TCAL9538_REG_INPUT 0x00u
+#define TCAL9538_REG_INPUT  0x00u
 #define TCAL9538_REG_OUTPUT 0x01u
-#define TCAL9538_REG_POL 0x02u
-#define TCAL9538_REG_CFG 0x03u
+#define TCAL9538_REG_POL    0x02u
+#define TCAL9538_REG_CFG    0x03u
 
 static alp_status_t reg_read(tcal9538_t *ctx, uint8_t reg, uint8_t *val_out)
 {

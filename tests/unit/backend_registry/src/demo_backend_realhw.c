@@ -33,7 +33,8 @@ static int demo_realhw_probe(uint32_t instance_id, uint32_t *caps)
 	return 0;
 }
 
-ALP_BACKEND_REGISTER(demo, realhw,
+ALP_BACKEND_REGISTER(demo,
+                     realhw,
                      {
                          .silicon_ref = "alif:ensemble:e7",
                          .vendor      = "alif",

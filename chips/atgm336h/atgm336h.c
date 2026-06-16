@@ -20,8 +20,8 @@ alp_status_t atgm336h_init(atgm336h_t *dev, alp_uart_t *port)
 	return ALP_OK;
 }
 
-alp_status_t atgm336h_read_nmea_line(atgm336h_t *dev, uint8_t *line_buf, size_t line_max,
-                                     size_t *len_out, uint32_t timeout_ms)
+alp_status_t atgm336h_read_nmea_line(
+    atgm336h_t *dev, uint8_t *line_buf, size_t line_max, size_t *len_out, uint32_t timeout_ms)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	if (line_buf == NULL || line_max < 2) return ALP_ERR_INVAL;

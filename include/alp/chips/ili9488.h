@@ -34,7 +34,7 @@
 extern "C" {
 #endif
 
-#define ILI9488_WIDTH 320
+#define ILI9488_WIDTH  320
 #define ILI9488_HEIGHT 480
 
 typedef struct {

@@ -62,7 +62,7 @@
  * native_sim and the AEN board overlays.
  */
 #define CC3501E_PIN_WIFI_EN 0u /* Alif P15_5      -- CC3501E supply gate */
-#define CC3501E_PIN_NRST 1u    /* Alif P15_1_FLEX -- CC3501E reset       */
+#define CC3501E_PIN_NRST    1u /* Alif P15_1_FLEX -- CC3501E reset       */
 
 /*
  * Inter-chip SPI bus.  bus_id 1 resolves through the `alp-spi1` devicetree
@@ -84,7 +84,7 @@
  * soak loop anyway (the soak loop keeps logging, so a console-attached
  * run still shows whether the link ever comes up). */
 #define CC3501E_PING_RETRIES 25u
-#define CC3501E_PING_GAP_MS 200u
+#define CC3501E_PING_GAP_MS  200u
 
 /*
  * SWD-readable bring-up witness.
@@ -116,8 +116,8 @@ typedef struct {
  * cause is found): surface the raw Zephyr SPI errno + the failing request step
  * through the witness so a J-Link can read the exact failure with no console.
  * Defined in src/backends/spi/zephyr_drv.c and chips/cc3501e/cc3501e.c. */
-extern volatile int alp_spi_dbg_last_zerr;
-extern volatile int cc3501e_dbg_fail_step;
+extern volatile int      alp_spi_dbg_last_zerr;
+extern volatile int      cc3501e_dbg_fail_step;
 extern volatile uint32_t cc3501e_dbg_reqhdr_rx;
 extern volatile uint32_t cc3501e_dbg_reply_hdr;
 
@@ -125,13 +125,13 @@ extern volatile uint32_t cc3501e_dbg_reply_hdr;
  * localise where the app got to (read after a fault: .bss survives a halt).
  * 1=entered main, 2=GPIOs configured, 3=SPI opened, 4=reset done,
  * 5=in PING-retry loop, 6=version read, 7=in soak loop. */
-#define CC3501E_PHASE_MAIN 1u
-#define CC3501E_PHASE_GPIO 2u
+#define CC3501E_PHASE_MAIN     1u
+#define CC3501E_PHASE_GPIO     2u
 #define CC3501E_PHASE_SPI_OPEN 3u
-#define CC3501E_PHASE_RESET 4u
-#define CC3501E_PHASE_PING 5u
-#define CC3501E_PHASE_VERSION 6u
-#define CC3501E_PHASE_SOAK 7u
+#define CC3501E_PHASE_RESET    4u
+#define CC3501E_PHASE_PING     5u
+#define CC3501E_PHASE_VERSION  6u
+#define CC3501E_PHASE_SOAK     7u
 
 #define CC3501E_WITNESS_MAGIC 0x35334343u /* "CC35" little-endian */
 
@@ -161,9 +161,9 @@ volatile cc3501e_witness_t g_cc3501e_witness __attribute__((used));
  */
 #include <zephyr/sys/sys_io.h>
 #define ALIF_LPGPIO_PADCTRL_BASE 0x42007000u
-#define ALIF_PAD_GPIO_OUTPUT 0x23u
-#define ALIF_LP_PIN_WIFI_EN 5u /* P15_5 */
-#define ALIF_LP_PIN_NRST 1u    /* P15_1 */
+#define ALIF_PAD_GPIO_OUTPUT     0x23u
+#define ALIF_LP_PIN_WIFI_EN      5u /* P15_5 */
+#define ALIF_LP_PIN_NRST         1u /* P15_1 */
 
 static void aen_lp_pads_enable_output(void)
 {
@@ -219,7 +219,11 @@ static void cc3501e_dump_diag(cc3501e_t *fw)
 	memcpy(&diag, raw, sizeof(diag));
 	printf("[cc3501e-bringup] diag: fw_version=0x%04x reset_cause=%u role=%u "
 	       "uptime=%u ms free_heap=%u B last_error=%u\n",
-	       diag.fw_version, diag.reset_cause, diag.role, diag.uptime_ms, diag.free_heap_bytes,
+	       diag.fw_version,
+	       diag.reset_cause,
+	       diag.role,
+	       diag.uptime_ms,
+	       diag.free_heap_bytes,
 	       diag.last_error);
 }
 
@@ -248,7 +252,9 @@ int main(void)
 		                                 ((uint32_t)(uint8_t)alp_last_error());
 		printf("[cc3501e-bringup] alp_gpio_open failed (WIFI_EN=%p NRST=%p, err=%d) -- "
 		       "check the alp,pin-array in the board overlay\n",
-		       (void *)wifi_en, (void *)nrst, (int)alp_last_error());
+		       (void *)wifi_en,
+		       (void *)nrst,
+		       (int)alp_last_error());
 		return 0;
 	}
 	/* Enable the LP-GPIO pad output drivers before driving the pins (the
@@ -270,16 +276,16 @@ int main(void)
 	alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
 	    .bus_id        = CC3501E_SPI_BUS_ID,
 	    .freq_hz       = CC3501E_SPI_FREQ_HZ,
-	    .mode          = ALP_SPI_MODE_1, /* bench mode-1 SPI-link experiment 2026-06-16:
-	                                      * match TI's validated CC35xx spiperipheral (POL0_PHA1);
-	                                      * pair with the firmware frameFormat. Was ALP_SPI_MODE_0. */
+	    .mode          = ALP_SPI_MODE_0, /* mode 0 -- matches the CC3501E firmware frameFormat
+	                                      * (SPI_POL0_PHA0) and the on-silicon vendor image */
 	    .bits_per_word = 8u,
 	    .cs_pin_id     = ALP_SPI_NO_CS,
 	});
 	if (spi == NULL) {
 		printf("[cc3501e-bringup] alp_spi_open(bus %u) failed: err=%d -- check the "
 		       "alp-spi1 alias / SPI1 node in the board overlay\n",
-		       CC3501E_SPI_BUS_ID, (int)alp_last_error());
+		       CC3501E_SPI_BUS_ID,
+		       (int)alp_last_error());
 		alp_gpio_close(wifi_en);
 		alp_gpio_close(nrst);
 		return 0;
@@ -305,7 +311,8 @@ int main(void)
 	alp_status_t s                 = cc3501e_reset(&fw);
 	g_cc3501e_witness.reset_status = (uint32_t)s;
 	g_cc3501e_witness.phase        = CC3501E_PHASE_RESET;
-	printf("[cc3501e-bringup] cc3501e_reset -> %d%s\n", (int)s,
+	printf("[cc3501e-bringup] cc3501e_reset -> %d%s\n",
+	       (int)s,
 	       (s == ALP_ERR_NOSUPPORT) ? " (control pins not bound?)" : "");
 
 	/*
@@ -321,13 +328,16 @@ int main(void)
 	for (unsigned attempt = 0u; attempt < CC3501E_PING_RETRIES; ++attempt) {
 		s = cc3501e_ping(&fw);
 		if (s == ALP_OK) {
-			printf("[cc3501e-bringup] PING ok after %u attempt%s\n", attempt + 1u,
+			printf("[cc3501e-bringup] PING ok after %u attempt%s\n",
+			       attempt + 1u,
 			       (attempt == 0u) ? "" : "s");
 			up = true;
 			break;
 		}
 		printf("[cc3501e-bringup] PING attempt %u -> %d (not ready yet?) -- retrying in %u ms\n",
-		       attempt, (int)s, CC3501E_PING_GAP_MS);
+		       attempt,
+		       (int)s,
+		       CC3501E_PING_GAP_MS);
 		k_msleep(CC3501E_PING_GAP_MS);
 	}
 	if (!up) {
@@ -347,7 +357,8 @@ int main(void)
 	g_cc3501e_witness.version = (uint32_t)version | ((uint32_t)(uint8_t)s << 16);
 	g_cc3501e_witness.phase   = CC3501E_PHASE_VERSION;
 	if (s == ALP_OK) {
-		printf("[cc3501e-bringup] GET_VERSION -> protocol v%u (host expects v%u)%s\n", version,
+		printf("[cc3501e-bringup] GET_VERSION -> protocol v%u (host expects v%u)%s\n",
+		       version,
 		       ALP_CC3501E_PROTOCOL_VERSION,
 		       (version == ALP_CC3501E_PROTOCOL_VERSION) ? " -- match" : " -- MISMATCH!");
 	} else {
@@ -368,10 +379,10 @@ int main(void)
 	for (uint32_t i = 0u;; ++i) {
 		s                             = cc3501e_ping(&fw);
 		g_cc3501e_witness.last_status = (uint32_t)s;
-		g_cc3501e_witness.zerr        = (uint32_t)alp_spi_dbg_last_zerr;  /* bench debug */
-		g_cc3501e_witness.fail_step   = (uint32_t)cc3501e_dbg_fail_step;  /* bench debug */
-		g_cc3501e_witness.reqhdr_rx   = cc3501e_dbg_reqhdr_rx;            /* bench debug */
-		g_cc3501e_witness.reply_hdr   = cc3501e_dbg_reply_hdr;            /* bench debug */
+		g_cc3501e_witness.zerr        = (uint32_t)alp_spi_dbg_last_zerr; /* bench debug */
+		g_cc3501e_witness.fail_step   = (uint32_t)cc3501e_dbg_fail_step; /* bench debug */
+		g_cc3501e_witness.reqhdr_rx   = cc3501e_dbg_reqhdr_rx;           /* bench debug */
+		g_cc3501e_witness.reply_hdr   = cc3501e_dbg_reply_hdr;           /* bench debug */
 		if (s == ALP_OK) {
 			g_cc3501e_witness.ping_ok++;
 		} else {

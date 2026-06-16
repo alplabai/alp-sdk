@@ -49,7 +49,7 @@ static uint8_t s_arena[256 * 1024] __aligned(16);
  * the simplest customer-facing baseline. */
 static uint8_t s_frame[240 * 240 * 2] __aligned(16);
 
-void           inference_loop_run(viewer_state_t *state)
+void inference_loop_run(viewer_state_t *state)
 {
 	memset(state, 0, sizeof(*state));
 

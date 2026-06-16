@@ -82,8 +82,11 @@ int main(void)
 		for (uint64_t i = 0; i < n; i++) {
 			alp_update_log_entry_t r;
 			if (alp_update_log_get(log, i, &r) == ALP_OK) {
-				printf("  #%llu  v=%s  status=%d  ts=%llu\n", (unsigned long long)r.seq,
-				       r.fw_version, (int)r.status, (unsigned long long)r.timestamp);
+				printf("  #%llu  v=%s  status=%d  ts=%llu\n",
+				       (unsigned long long)r.seq,
+				       r.fw_version,
+				       (int)r.status,
+				       (unsigned long long)r.timestamp);
 			}
 		}
 	}

@@ -32,11 +32,11 @@
 /* ------------------------------------------------------------------ */
 
 /* SW-DP registers (APnDP=0). */
-#define DP_REG_DPIDR 0x0u
-#define DP_REG_ABORT 0x0u /* (write side) */
+#define DP_REG_DPIDR     0x0u
+#define DP_REG_ABORT     0x0u /* (write side) */
 #define DP_REG_CTRL_STAT 0x4u
-#define DP_REG_SELECT 0x8u /* (write side) */
-#define DP_REG_RDBUFF 0xCu /* (read side) */
+#define DP_REG_SELECT    0x8u /* (write side) */
+#define DP_REG_RDBUFF    0xCu /* (read side) */
 
 /* AHB-AP banks. */
 #define AP_REG_CSW 0x00u
@@ -49,39 +49,39 @@
 #define CTRL_CSYSPWRUPACK (1u << 31)
 #define CTRL_CDBGPWRUPREQ (1u << 28)
 #define CTRL_CDBGPWRUPACK (1u << 29)
-#define CTRL_STICKYERR (1u << 5)
-#define CTRL_STICKYORUN (1u << 1)
+#define CTRL_STICKYERR    (1u << 5)
+#define CTRL_STICKYORUN   (1u << 1)
 
 /* AP CSW field: 32-bit transfer + auto-increment. */
-#define CSW_SIZE_WORD (0x2u) /* SIZE=Word */
+#define CSW_SIZE_WORD       (0x2u) /* SIZE=Word */
 #define CSW_ADDR_INC_SINGLE (0x1u << 4)
-#define CSW_BASE_VALUE (0x23000052u) /* DbgSwEnable | Priv | HPROT */
+#define CSW_BASE_VALUE      (0x23000052u) /* DbgSwEnable | Priv | HPROT */
 
 /* Cortex-M debug register addresses (memory-mapped via the AHB-AP). */
-#define CM_DHCSR 0xE000EDF0u
-#define CM_DEMCR 0xE000EDFCu
-#define CM_AIRCR 0xE000ED0Cu
-#define CM_DHCSR_DBGKEY 0xA05F0000u
-#define CM_DHCSR_C_DEBUGEN (1u << 0)
-#define CM_DHCSR_C_HALT (1u << 1)
-#define CM_DHCSR_S_HALT (1u << 17)
-#define CM_AIRCR_VECTKEY 0x05FA0000u
+#define CM_DHCSR             0xE000EDF0u
+#define CM_DEMCR             0xE000EDFCu
+#define CM_AIRCR             0xE000ED0Cu
+#define CM_DHCSR_DBGKEY      0xA05F0000u
+#define CM_DHCSR_C_DEBUGEN   (1u << 0)
+#define CM_DHCSR_C_HALT      (1u << 1)
+#define CM_DHCSR_S_HALT      (1u << 17)
+#define CM_AIRCR_VECTKEY     0x05FA0000u
 #define CM_AIRCR_SYSRESETREQ (1u << 2)
 
 /* GD32G553 FMC -- STM32G4-compatible register block @ 0x40022000. */
-#define FMC_BASE 0x40022000u
-#define FMC_REG_KEYR (FMC_BASE + 0x08u)
-#define FMC_REG_SR (FMC_BASE + 0x10u)
-#define FMC_REG_CR (FMC_BASE + 0x14u)
-#define FMC_KEY1 0x45670123u
-#define FMC_KEY2 0xCDEF89ABu
-#define FMC_CR_PG (1u << 0)
-#define FMC_CR_PER (1u << 1)
-#define FMC_CR_PNB_SHIFT 3u
-#define FMC_CR_PNB_MASK (0x7Fu << FMC_CR_PNB_SHIFT)
-#define FMC_CR_STRT (1u << 16)
-#define FMC_CR_LOCK (1u << 31)
-#define FMC_SR_BSY (1u << 16)
+#define FMC_BASE            0x40022000u
+#define FMC_REG_KEYR        (FMC_BASE + 0x08u)
+#define FMC_REG_SR          (FMC_BASE + 0x10u)
+#define FMC_REG_CR          (FMC_BASE + 0x14u)
+#define FMC_KEY1            0x45670123u
+#define FMC_KEY2            0xCDEF89ABu
+#define FMC_CR_PG           (1u << 0)
+#define FMC_CR_PER          (1u << 1)
+#define FMC_CR_PNB_SHIFT    3u
+#define FMC_CR_PNB_MASK     (0x7Fu << FMC_CR_PNB_SHIFT)
+#define FMC_CR_STRT         (1u << 16)
+#define FMC_CR_LOCK         (1u << 31)
+#define FMC_SR_BSY          (1u << 16)
 #define FMC_SR_PROGERR_MASK 0x000000F8u /* PROGERR | WRPERR | PGAERR | SIZERR | PGSERR */
 
 /* ------------------------------------------------------------------ */
@@ -235,8 +235,8 @@ static bool parity32(uint32_t v)
 	return (v & 1u) != 0u;
 }
 
-static gd32_swd_ack_t swd_xfer(gd32_swd_t *ctx, bool ap, bool rnw, uint8_t addr_a32,
-                               uint32_t *data_io)
+static gd32_swd_ack_t
+swd_xfer(gd32_swd_t *ctx, bool ap, bool rnw, uint8_t addr_a32, uint32_t *data_io)
 {
 	if (!ctx->initialised) return GD32_SWD_ACK_PROTO;
 
@@ -403,7 +403,7 @@ alp_status_t gd32_swd_init(gd32_swd_t *ctx, alp_gpio_t *swdio, alp_gpio_t *swclk
 	if (s != ALP_OK) return s;
 	ctx->swdio_is_output = true;
 
-	s                    = alp_gpio_write(swclk, true);
+	s = alp_gpio_write(swclk, true);
 	if (s != ALP_OK) return s;
 	s = alp_gpio_write(swdio, true);
 	if (s != ALP_OK) return s;
