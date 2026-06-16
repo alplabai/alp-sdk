@@ -1,0 +1,108 @@
+# Copyright (C) 2025 Alif Semiconductor
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Alif Ensemble DAC12 (2x 12-bit current-output DACs: dac0, dac1).
+
+  Bound by the alp-sdk vendored DAC driver (zephyr/drivers/dac/dac_alif.c,
+  ported VERBATIM from the Apache-2.0 zephyr_alif fork).  The compatible
+  "alif,dac" is fork-native and does NOT collide with any upstream Zephyr DAC
+  binding (upstream ships no Alif DAC).
+
+  ADR 0017 Tier-2 (a genuine fork-driver copy -- hal_alif ships no DAC class
+  driver, only the analog_ctrl VREF helper library reached via
+  CONFIG_USE_ALIF_HAL_ANALOG): INTERIM.  Retires onto the opt-in sdk-alif fork
+  compatible once the dac nodes are repointed AND bench-verified.  See
+  docs/adr/0017 + task #21.  BENCH-UNVERIFIED.
+
+  The driver maps the reg blocks via DEVICE_MMIO_NAMED_MAP, so reg-names is
+  REQUIRED.  The driver expects (in this order, by name -- the order is
+  irrelevant since it uses DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME):
+    reg-names "dac_reg"  = per-instance DAC control block (dac0 0x49028000,
+                           dac1 0x49029000)
+              "cmp_reg"  = shared comparator block 0x49023000 (VREF control)
+              "vbat_reg" = always-on VBAT/analog block 0x1A60A000 (LDO+BG)
+              "adc_vref" = shared ADC/DAC VREF block 0x4902B000 -- ONLY mapped
+                           when CONFIG_ANALOG_ALIASING; omit otherwise.
+
+  NOTE (reg-names): the upstream fork binding (alif,alif_dac.yaml) declares ONLY
+  `reg`, NOT reg-names, even though the driver maps reg blocks BY NAME -- so the
+  fork binding is incomplete for a NAMED MMIO driver.  reg-names is ADDED here
+  (authored from the driver's DEVICE_MMIO_NAMED_* usage + the fork e1.dtsi node
+  reg-names) so the named-MMIO map resolves.
+
+  The Alif DAC is a write-only IP with NO interrupt; the nodes carry no
+  `interrupts` (unlike the ADC).
+
+compatible: "alif,dac"
+
+include: [base.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  reg-names:
+    required: true
+
+  alif,reference-mv:
+    type: int
+    default: 900
+    description: |
+      DAC12 full-scale reference voltage, in millivolts, used by the alp-sdk
+      portable DAC backend (src/backends/dac/zephyr_drv.c) to convert a
+      requested millivolt setpoint into a 12-bit code:
+        code = mv * (2^12 - 1) / reference_mv
+
+      The Alif Ensemble DAC12 full-scale is the DAC VREF, NOT the 3.3 V supply
+      rail.  The default (900 mV) is a DOCUMENTED PLACEHOLDER pending TRM/bench
+      confirmation -- the auto-memory records the E8 DAC12 VREF as "~0.9 V,
+      selectable 0.5-0.833 V", which is NOT authoritative.  Override per board
+      once the exact VREF (and the analog_ctrl DAC12_VREF_CONT divider setting it
+      programs) is confirmed on the bench.  BENCH-UNVERIFIED.
+
+  twoscomp_enabled:
+    type: boolean
+    description: Enables conversion from two's complement signed input to
+                 unsigned binary.
+
+  bypass_enabled:
+    type: boolean
+    description: Enables DAC input bypass mode.
+
+  bypass_val:
+    type: int
+    description: Value to be used when DAC bypass mode is enabled(0-0xFFF)
+
+  output_current:
+    type: string
+    required: true
+    description: Selects the DAC output current trim value.
+    enum:
+      -  "DAC_0UA_OUT_CUR"
+      -  "DAC_100UA_OUT_CUR"
+      -  "DAC_200UA_OUT_CUR"
+      -  "DAC_300UA_OUT_CUR"
+      -  "DAC_400UA_OUT_CUR"
+      -  "DAC_500UA_OUT_CUR"
+      -  "DAC_600UA_OUT_CUR"
+      -  "DAC_700UA_OUT_CUR"
+      -  "DAC_800UA_OUT_CUR"
+      -  "DAC_900UA_OUT_CUR"
+      -  "DAC_1000UA_OUT_CUR"
+      -  "DAC_1100UA_OUT_CUR"
+      -  "DAC_1200UA_OUT_CUR"
+      -  "DAC_1300UA_OUT_CUR"
+      -  "DAC_1400UA_OUT_CUR"
+      -  "DAC_1500UA_OUT_CUR"
+
+  capacitance:
+    type: string
+    required: true
+    description: Selects DAC high-performance mode capacitance trim value.
+    enum:
+      -  "DAC_2PF_CAPACITANCE"
+      -  "DAC_4PF_CAPACITANCE"
+      -  "DAC_6PF_CAPACITANCE"
+      -  "DAC_8PF_CAPACITANCE"

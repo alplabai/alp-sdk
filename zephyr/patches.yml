@@ -1,0 +1,17 @@
+# West patch carry for the alp-sdk workspace (west patch apply).
+# alp-sdk does not own the mcuboot manifest pin (mcuboot is imported via Zephyr's
+# allowlist), so this Alif MRAM do_boot fix is carried as a re-appliable patch and
+# submitted upstream; drop it once the Zephyr mcuboot pin advances past it.
+patches:
+  - path: mcuboot/0001-flash_map_extended-alif-mram-base.patch
+    sha256sum: 23c8036823716f1b4decaed2d612408ad8503b866cd3b8395d7e2d8f3220de58
+    module: mcuboot
+    author: Alp Lab AB
+    email: dev@alplab.example
+    date: 2026-06-16
+    upstreamable: true
+    comments: |
+      do_boot() used CONFIG_FLASH_BASE_ADDRESS (MCUboot's ITCM exec base, 0x0)
+      for the slot vector address, but slot0 is in MRAM at 0x80000000 -> garbage
+      jump -> reboot loop. Derive the slot base from the alif,mram controller reg.
+      Bench-proven on E1M-AEN801 (E8): SES->MCUboot->slot0->app RESULT PASS.

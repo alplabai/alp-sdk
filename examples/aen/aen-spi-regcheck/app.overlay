@@ -1,0 +1,96 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-spi-regcheck overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Enables spi0 (DesignWare DWC_ssi @ 0x48103000, driver spi_dw_alif.c) on the
+ * SoC P5_x "B" pad route -- the netlist-grounded customer-facing edge SPI master
+ * called out in zephyr/dts/alif/ensemble_e8_peripherals.dtsi (spi0 comment:
+ * "the customer-facing edge SPI master (SoC P5_x)"):
+ *
+ *     P5_0  SPI0_MISO_B   (alt 4)   <- sensed input, REN must be on
+ *     P5_1  SPI0_MOSI_B   (alt 4)
+ *     P5_2  SPI0_SS0_B    (alt 4)   HW chip-select 0
+ *     P5_3  SPI0_SCLK_B   (alt 3)
+ *
+ * LOOPBACK: this app uses SPI_MODE_LOOP (internal SRL loopback in the
+ * controller), so NO external MOSI->MISO jumper is strictly required to validate
+ * the data path -- the DWC_ssi SRL bit (CTRLR0[13]) ties TX to RX inside the
+ * block. (If you instead want a PIN-level loopback, jumper P5_1 MOSI to P5_0
+ * MISO and drop SPI_MODE_LOOP in main.c -- see the app's unknowns note.)
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/*
+ * RAM-run: the SoC `select` puts code in XIP; retarget ROM to ITCM so the image
+ * links + runs from RAM (J-Link loadbin+go, no reset). PATH-REFERENCE form
+ * (&itcm) -- the phandle-array form makes FLASH_SIZE=0 and overflows the link.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&pinctrl {
+	pinctrl_spi0: pinctrl_spi0 {
+		group0 {
+			pinmux = <PIN_P5_0__SPI0_MISO_B>,
+				 <PIN_P5_1__SPI0_MOSI_B>,
+				 <PIN_P5_2__SPI0_SS0_B>,
+				 <PIN_P5_3__SPI0_SCLK_B>;
+			/*
+			 * SPI pad config, following the bench-validated I2C lesson
+			 * (aen-eeprom-manifest, 2026-06-15) and Alif's reference
+			 * pinctrl convention (read-enable=1 + driver-state-control=2):
+			 *   input-enable   -> pad REN (bit16): the controller MUST be
+			 *                     able to SENSE MISO or it samples nothing
+			 *                     back. Required on any sensed pad (MISO).
+			 *                     Set on the whole group; harmless on the
+			 *                     driven pads (MOSI/SCLK/SS).
+			 *   bias-pull-down -> upstream pinctrl_soc.h encodes the pad DSC
+			 *                     field as DSC=2 from bias-pull-down, which
+			 *                     is the value Alif's reference uses. Do NOT
+			 *                     "correct" to bias-pull-up (DSC=1 = the dead
+			 *                     bus seen on I2C).
+			 */
+			input-enable;
+			bias-pull-down;
+		};
+	};
+};
+
+&spi0 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_spi0>;
+	pinctrl-names = "default";
+	/*
+	 * HW chip-select 0 (SS0_B on P5_2): no cs-gpios, so the driver uses the
+	 * controller SER register. The transfer below targets slave 0.
+	 */
+
+	/*
+	 * Give the SPI driver a non-zero input-clock frequency.
+	 *
+	 * WHY THIS IS HERE (bench finding, not cosmetic): spi_dw_configure() reads
+	 * info->clock_frequency.  spi_dw_alif.c PREFERS the SPI node's own
+	 * `clock-frequency` (the alp-sdk-owned alif,dwc-ssi-spi binding declares
+	 * it); only when absent does it fall back to clock_control_configure() --
+	 * which the upstream alif clockctrl driver implements as NO-OP (-ENOSYS) ->
+	 * spi_dw_configure() turns that into -EINVAL and ABORTS before programming a
+	 * single register.  Setting it on the SPI node makes the driver use this
+	 * value verbatim for the BAUDR divider.
+	 *
+	 * NOTE: this property lives on &spi0, NOT on &clockctrl -- the alif,clockctrl
+	 * binding does not declare clock-frequency (placing it there is a hard DT
+	 * error), and the driver reads it from the SPI node anyway.
+	 *
+	 * 100 MHz is a PLACEHOLDER (mirrors the UTIMER clock-frequency convention);
+	 * it only scales the BAUDR divider, NOT the CTRLR0 programming the strict
+	 * PASS gate checks.  Confirm the real SPI input clock vs the Alif TRM and
+	 * override.
+	 */
+	clock-frequency = <100000000>;
+};

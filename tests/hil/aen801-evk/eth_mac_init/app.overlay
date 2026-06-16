@@ -1,0 +1,70 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Bench overlay: Alif Ensemble E8 GMAC (ethernet@48100000) MAC-INIT test on
+ * alp_e1m_aen801_m55_he, RAM-run-in-ITCM image (J-Link loadbin+go).
+ *
+ * (1) RAM-run retarget: the SoC select's XIP, so point zephyr,flash at ITCM and
+ *     drop the code-partition. PATH-REFERENCE form (&itcm), NOT the phandle-
+ *     array form -- <&itcm> makes FLASH_SIZE=0 and the link overflows.
+ *
+ * (2) Enable ethernet@48100000 with a real local-mac-address, the fixed-link
+ *     child PHY (already declared in ensemble_e8_peripherals.dtsi as eth_phy,
+ *     100BASE Full-Duplex), and the RMII pin group.
+ *
+ * (3) RMII pinctrl: the ETH function is the "C" pad group on Port 1 + Port 2
+ *     (from alif-ensemble-pinctrl.h: PIN_P1_x__ETH_*_C, PIN_P2_x__ETH_*_C). The
+ *     RX-side / clock-in pads must be SENSED, so they get `input-enable` (turns
+ *     on REN, pad bit16) per the Alif-pad lesson; TX-side pads are driven out.
+ *     bias is left at default (no pull) -- RMII is point-to-point to the on-SoM
+ *     PHY, not an open-drain bus, so the I2C DSC=2 pull-down rule does not apply.
+ */
+
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&pinctrl {
+	pinctrl_eth: pinctrl_eth {
+		/* RX data + carrier-sense + ref-clock: SENSED inputs (REN on). */
+		group_eth_in {
+			pinmux = <PIN_P1_0__ETH_RXD0_C>,
+				 <PIN_P1_1__ETH_RXD1_C>,
+				 <PIN_P2_2__ETH_CRS_DV_C>,
+				 <PIN_P1_7__ETH_REFCLK_C>;
+			input-enable;
+		};
+
+		/* TX data + TX-enable: driven outputs. */
+		group_eth_out {
+			pinmux = <PIN_P1_3__ETH_TXD0_C>,
+				 <PIN_P1_4__ETH_TXD1_C>,
+				 <PIN_P1_5__ETH_TXEN_C>;
+		};
+
+		/* PHY hard-reset strap (driven output). The fixed-link PHY node
+		 * carries no reset-gpios, so this just parks the pad in ETH-RST
+		 * function; the reset line itself is on-SoM and not toggled here. */
+		group_eth_rst {
+			pinmux = <PIN_P1_2__ETH_RST_C>;
+		};
+	};
+};
+
+&ethernet {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_eth>;
+	pinctrl-names = "default";
+
+	/* Locally-administered unicast MAC (matches the dtsi default; restated
+	 * here so the readback math is self-contained):
+	 *   02:01:56:78:43:21
+	 * The glue copies it straight into MAC_ADDRESS_HIGH/LOW (no fuse). */
+	local-mac-address = [02 01 56 78 43 21];
+};

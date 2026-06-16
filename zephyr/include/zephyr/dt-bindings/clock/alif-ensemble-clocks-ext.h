@@ -67,4 +67,23 @@
 	ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 16U, 1U, 0U, 0U, 0U,               \
 		     ALIF_PARENT_CLK_SYST_HCLK)
 
+/*
+ * CAMERA CAPTURE clocks (CPI / CSI / D-PHY) -- FREQUENCY-ONLY DUMMY PLACEHOLDERS.
+ * The fork drives these blocks with ALIF_CPI_CLK / ALIF_CSI_CLK /
+ * ALIF_CSI_PIX_SYST_ACLK / ALIF_MIPI_{PLLREF,BYPASS,TXDPHY,RXDPHY}_CLK in the
+ * fork's 7-arg encoding.  Per [[reference_alif_clock_encoding_fork_vs_upstream]]
+ * those packed values MUST NOT be copied onto the upstream clockctrl, and the
+ * upstream-encoding gate/offset/parent for the camera clocks are a TRM/bench
+ * unknown -- NOT re-authored here.  These IDs use the dummy clock (ALIF_CLK,
+ * module 0x0 / en_mask 0 -> alif_clock_control_on() returns at the !EN_MASK
+ * guard, touches no register), so the camera DT nodes are well-formed without
+ * inventing a register gate.  The drivers are now PORTED to the v4.4 video API
+ * (the ALP_VIDEO_ALIF_BROKEN gate is retired), but no real clock is programmed
+ * (the dummy clock above).  Re-author the real IDs when the camera stack is
+ * bench-brought-up (task #21).  vendor-ext, BENCH-UNVERIFIED.
+ */
+#define ALIF_CPI_CLK      ALIF_CLK(2U)
+#define ALIF_CSI_CLK      ALIF_CLK(2U)
+#define ALIF_CSI_DPHY_CLK ALIF_CLK(2U)
+
 #endif /* ALP_DT_BINDINGS_CLOCK_ALIF_ENSEMBLE_CLOCKS_EXT_H_ */

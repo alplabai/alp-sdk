@@ -1,0 +1,58 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On-silicon UTIMER counter validation overlay for the E1M-AEN801 (Alif
+ * Ensemble E8, M55-HE), bench RAM-run via J-Link.
+ *
+ * Validates the alp-sdk Tier-1.5 counter_alif_utimer driver on utimer0.  The
+ * "alif,utimer" PARENT (utimer@0x48001000) holds the two reg windows -- the
+ * per-timer block "timer" 0x48001000 (CNTR / COMPARE / INTERRUPT) and the shared
+ * "global" block 0x48000000 (per-timer START / STOP / CLK_ENABLE) -- and the
+ * counter_alif_utimer driver binds the "alif,utimer-counter" CHILD node
+ * (utimer0_counter), reaching the parent via DT_INST_PARENT() for those windows
+ * + timer-id + clock-frequency + the comp_capt_a IRQ.  BOTH the parent and the
+ * child must be okay'd for the driver to instantiate a device.
+ *
+ * UTIMER per-timer register map for utimer0 (parent reg[0] base 0x48001000), the
+ * ground-truth the human reads over J-Link to confirm the count advances:
+ *     CNTR (live counter value) = 0x48001000 + 0x44 = 0x48001044
+ *   (offset per the hal_alif utimer.c CNTR register; confirm vs the Alif TRM at
+ *    bench bring-up -- the in-firmware counter_get_value() is the primary
+ *    evidence and does not depend on this address.)
+ *
+ * The utimer0 parent carries clock-frequency = <100000000> (a PLACEHOLDER tick
+ * rate from the dtsi; see the bench note in main.c) -- it only scales
+ * us<->ticks, not the register programming, so the count still advances
+ * correctly.
+ */
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		/* The wildcard counter backend resolves alp-counter0; keep the
+		 * alias here so a portable alp_counter_open() path also works. */
+		alp-counter0 = &utimer0_counter;
+	};
+};
+
+/* Enable BOTH the parent timer block and its counter child -- the driver binds
+ * the child but reads the reg/IRQ/clock off the parent. */
+&utimer0 {
+	status = "okay";
+};
+
+&utimer0_counter {
+	status = "okay";
+};

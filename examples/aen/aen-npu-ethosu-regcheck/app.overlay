@@ -1,0 +1,74 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-npu-ethosu-regcheck overlay for the E1M-AEN801 (Ensemble E8, M55-HE)
+ * RAM-run -- adds the Arm Ethos-U NPU node and retargets ROM to ITCM.
+ *
+ * NPU base + variant (AUTHORITATIVE -- derived, not invented):
+ *   The AE822 (E8) carries an Ethos-U85 NPU. Its register block sits at
+ *   0x49042000 (size 0x1000). Source: Alif's Apache-2.0 zephyr_alif fork,
+ *     dts/arm/alif/ensemble/common/e4_e6_e8.dtsi
+ *   which is included by the E8 SoC dtsi (e8/ae822fa0e5597xx0.dtsi):
+ *
+ *       ethosu1: ethosu85@49042000 {
+ *               compatible = "arm,ethos-u";
+ *               reg = <0x49042000 0x1000>;
+ *               interrupts = <366 3>;
+ *               interrupt-parent = <&nvic>;
+ *               secure-enable;
+ *               privilege-enable;
+ *               status = "disabled";
+ *       };
+ *
+ *   0x49042000 is in the same system-MMIO band (0x4904xxxx, alongside isp@49046000
+ *   and jpeg@49044000) that the alp-sdk SoC overlay already uses for 0x4900xxxx
+ *   peripherals -- reachable from the M55-HE core. The E8 ALSO has an Ethos-U55
+ *   (ethosu0 @ 0x400e1000, arch 1.x) bound to the HP subsystem; we target the
+ *   U85 here, which is the AEN801's lead AI accelerator (see MEMORY: "AEN801 is
+ *   the lead part ... adds Ethos-U85").
+ *
+ * The interrupt (366) and the secure/privilege flags are transcribed verbatim
+ * from that same fork node. The interrupt is only used if the driver's IRQ path
+ * runs; this presence/clock probe does not depend on an inference completing.
+ *
+ * vendor-ext, BENCH-UNVERIFIED. No node for this NPU exists in the alp-sdk SoC
+ * overlay yet -- this overlay is the first DT declaration of it.
+ */
+
+/*
+ * RAM-run: the SoC `select` puts code in XIP; retarget ROM to ITCM so the image
+ * links + runs from RAM (J-Link loadbin+go, no reset). PATH-REFERENCE form
+ * (&itcm) -- the phandle-array form <&itcm> makes FLASH_SIZE=0 and overflows the
+ * link.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&soc {
+	/*
+	 * Arm Ethos-U85 NPU. compatible "arm,ethos-u" (binding arm,ethos-u.yaml),
+	 * driven by upstream drivers/misc/ethos_u/ethos_u_arm.c (DT_DRV_COMPAT
+	 * arm_ethos_u). Setting status="okay" makes DT_HAS_ARM_ETHOS_U_ENABLED
+	 * true, which (a) builds the arm frontend and (b) auto-instantiates the
+	 * device at POST_KERNEL. See the app's init-hang note in src/main.c.
+	 *
+	 * secure-enable / privilege-enable mirror the fork node. No `clocks`
+	 * property: the fork's ethosu85 node carries none -- the NPU clock/power
+	 * is brought up outside the Zephyr clockctrl (aiPM / SE / always-on). This
+	 * is the single biggest bench risk for this probe (see unknowns).
+	 */
+	ethosu_npu: ethosu85@49042000 {
+		compatible = "arm,ethos-u";
+		reg = <0x49042000 0x1000>;
+		interrupts = <366 3>;
+		interrupt-parent = <&nvic>;
+		secure-enable;
+		privilege-enable;
+		status = "okay";
+	};
+};
