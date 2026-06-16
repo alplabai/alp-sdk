@@ -7,6 +7,12 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
+ * ====== ADR 0017 Tier-2 (vendored fork-driver copy, INTERIM) ======
+ * hal_alif ships no SSI library, so this is the one genuine vendored driver copy.
+ * Retire onto the sdk-alif fork compatible once spi0 is repointed + bench-verified
+ * (task #21). See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * ==================================================================
+ *
  * Alif Ensemble DWC_ssi SPI driver -- vendored verbatim from the Apache-2.0
  * zephyr_alif fork (drivers/spi/spi_dw.c) so it survives a `west update`, then
  * carried on upstream Zephyr v4.4 + hal_alif (no fork). Only mechanical edits
