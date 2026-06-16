@@ -33,8 +33,8 @@ ZTEST(alp_iot, test_wifi_open_no_radio_returns_null)
      * before returning NULL, matching the v0.1 contract. */
 	alp_wifi_t *w = alp_wifi_open();
 	zassert_is_null(w, "alp_wifi_open without WIFI must yield NULL");
-	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d",
-	              (int)alp_last_error());
+	zassert_equal(
+	    alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d", (int)alp_last_error());
 }
 
 ZTEST(alp_iot, test_wifi_connect_null_handle_errors)
@@ -71,15 +71,17 @@ ZTEST(alp_iot, test_mqtt_open_no_stack_returns_null)
 	    .clean_session = true,
 	});
 	zassert_is_null(m, "alp_mqtt_open without MQTT_LIB must yield NULL");
-	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d",
-	              (int)alp_last_error());
+	zassert_equal(
+	    alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d", (int)alp_last_error());
 }
 
 ZTEST(alp_iot, test_mqtt_open_null_cfg_invalid)
 {
 	alp_mqtt_t *m = alp_mqtt_open(NULL);
 	zassert_is_null(m);
-	zassert_equal(alp_last_error(), ALP_ERR_INVAL, "NULL cfg must stamp INVAL, got %d",
+	zassert_equal(alp_last_error(),
+	              ALP_ERR_INVAL,
+	              "NULL cfg must stamp INVAL, got %d",
 	              (int)alp_last_error());
 }
 

@@ -30,7 +30,8 @@
 
 #define ALP_SPI_DEV_OR_NULL(idx)                                                                   \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_spi, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_spi, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_spi, idx)))),                                  \
+	            (NULL))
 
 static const struct device *const _devs[] = {
 	ALP_SPI_DEV_OR_NULL(0), ALP_SPI_DEV_OR_NULL(1), ALP_SPI_DEV_OR_NULL(2), ALP_SPI_DEV_OR_NULL(3),
@@ -66,7 +67,7 @@ typedef struct {
 	bool                  in_use;
 } alp_z_spi_side_t;
 
-static alp_z_spi_side_t  _sides[CONFIG_ALP_SDK_MAX_SPI_HANDLES];
+static alp_z_spi_side_t _sides[CONFIG_ALP_SDK_MAX_SPI_HANDLES];
 
 static alp_z_spi_side_t *_alloc_side(void)
 {
@@ -116,8 +117,8 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
-static alp_status_t z_open(const alp_spi_config_t *cfg, alp_spi_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(const alp_spi_config_t *cfg, alp_spi_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg->bus_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (cfg->bus_id >= ALP_SOC_SPI_COUNT) return ALP_ERR_OUT_OF_RANGE;
@@ -160,8 +161,8 @@ static alp_status_t z_open(const alp_spi_config_t *cfg, alp_spi_backend_state_t 
 	return ALP_OK;
 }
 
-static alp_status_t z_transceive(alp_spi_backend_state_t *st, const uint8_t *tx, uint8_t *rx,
-                                 size_t len)
+static alp_status_t
+z_transceive(alp_spi_backend_state_t *st, const uint8_t *tx, uint8_t *rx, size_t len)
 {
 	const struct device *dev = (const struct device *)st->dev;
 	alp_z_spi_side_t    *s   = (alp_z_spi_side_t *)st->be_data;
@@ -172,8 +173,8 @@ static alp_status_t z_transceive(alp_spi_backend_state_t *st, const uint8_t *tx,
 	struct spi_buf_set tx_set = { .buffers = &tx_buf, .count = 1 };
 	struct spi_buf_set rx_set = { .buffers = &rx_buf, .count = 1 };
 
-	int                err    = spi_transceive(dev, &s->zspi_cfg, (tx != NULL) ? &tx_set : NULL,
-                             (rx != NULL) ? &rx_set : NULL);
+	int err = spi_transceive(
+	    dev, &s->zspi_cfg, (tx != NULL) ? &tx_set : NULL, (rx != NULL) ? &rx_set : NULL);
 	return _errno_to_alp(err);
 }
 
@@ -190,7 +191,8 @@ static const alp_spi_ops_t _ops = {
 	.close      = z_close,
 };
 
-ALP_BACKEND_REGISTER(spi, zephyr_drv,
+ALP_BACKEND_REGISTER(spi,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

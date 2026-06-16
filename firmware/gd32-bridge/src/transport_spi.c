@@ -78,7 +78,7 @@ static uint8_t spi_drain_streak;
  * "the stamp never advanced past my previous accepted reply". */
 static uint8_t spi_seq;
 
-static void    stage_reply(uint8_t status, const uint8_t *payload, size_t payload_len)
+static void stage_reply(uint8_t status, const uint8_t *payload, size_t payload_len)
 {
 	if ((protocol_link_features() & GD32_BRIDGE_LINK_FEAT_STATUS_SEQ) != 0u) {
 		spi_seq = (uint8_t)((spi_seq + 1u) & 0x0Fu);
@@ -199,9 +199,12 @@ static void decode_and_dispatch(void)
 	const uint8_t              cmd = spi_rx_buf[1];
 	uint8_t                    reply_pl[GD32_BRIDGE_MAX_PAYLOAD_BYTES];
 	size_t                     reply_pl_len = 0u;
-	const gd32_bridge_status_t st =
-	    protocol_dispatch(cmd, payload_len > 0u ? &spi_rx_buf[2] : NULL, payload_len, reply_pl,
-	                      sizeof(reply_pl), &reply_pl_len);
+	const gd32_bridge_status_t st           = protocol_dispatch(cmd,
+                                                      payload_len > 0u ? &spi_rx_buf[2] : NULL,
+                                                      payload_len,
+                                                      reply_pl,
+                                                      sizeof(reply_pl),
+                                                      &reply_pl_len);
 	stage_reply((uint8_t)st, reply_pl, reply_pl_len);
 }
 

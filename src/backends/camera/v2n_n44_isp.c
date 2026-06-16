@@ -69,7 +69,8 @@
 
 #define ALP_V2N_CAM_DEV_OR_NULL(idx)                                                               \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_camera, idx))),                                \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_camera, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_camera, idx)))),                               \
+	            (NULL))
 
 static const struct device *const _devs[] = {
 	ALP_V2N_CAM_DEV_OR_NULL(0),
@@ -78,7 +79,7 @@ static const struct device *const _devs[] = {
 	ALP_V2N_CAM_DEV_OR_NULL(3),
 };
 
-static alp_v2n_n44_isp_state_t  _state_pool[CONFIG_ALP_SDK_MAX_CAMERA_HANDLES];
+static alp_v2n_n44_isp_state_t _state_pool[CONFIG_ALP_SDK_MAX_CAMERA_HANDLES];
 
 static alp_v2n_n44_isp_state_t *_alloc_state(void)
 {
@@ -143,8 +144,9 @@ static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
 /* silicon unchanged.                                              */
 /* ============================================================== */
 
-static alp_status_t isp_open(const alp_camera_config_t *cfg, alp_camera_backend_state_t *state,
-                             alp_capabilities_t *caps_out)
+static alp_status_t isp_open(const alp_camera_config_t  *cfg,
+                             alp_camera_backend_state_t *state,
+                             alp_capabilities_t         *caps_out)
 {
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
@@ -156,7 +158,7 @@ static alp_status_t isp_open(const alp_camera_config_t *cfg, alp_camera_backend_
 
 	alp_v2n_n44_isp_state_t *st = _alloc_state();
 	if (st == NULL) return ALP_ERR_NOMEM;
-	st->dev                 = dev;
+	st->dev = dev;
 
 	struct video_caps vcaps = { 0 };
 	int               err   = video_get_caps(dev, VIDEO_EP_OUT, &vcaps);
@@ -250,8 +252,8 @@ static alp_status_t isp_stop(alp_camera_backend_state_t *state)
 	return _errno_to_alp(err);
 }
 
-static alp_status_t isp_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out,
-                                uint32_t timeout_ms)
+static alp_status_t
+isp_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t timeout_ms)
 {
 	alp_v2n_n44_isp_state_t *st = (alp_v2n_n44_isp_state_t *)state->be_data;
 	if (st == NULL) return ALP_ERR_NOT_READY;
@@ -339,7 +341,8 @@ static const alp_camera_ops_t _ops = {
 	.close         = isp_close,
 };
 
-ALP_BACKEND_REGISTER(camera, v2n_n44_isp,
+ALP_BACKEND_REGISTER(camera,
+                     v2n_n44_isp,
                      {
                          .silicon_ref = "renesas:rzv2n:n44",
                          .vendor      = "renesas",

@@ -71,8 +71,9 @@ static size_t sw_bytes_per_frame(const alp_audio_config_t *cfg)
 
 /* ---------- Input ---------- */
 
-static alp_status_t sw_in_open(const alp_audio_config_t *cfg, alp_audio_in_backend_state_t *state,
-                               alp_capabilities_t *caps_out)
+static alp_status_t sw_in_open(const alp_audio_config_t     *cfg,
+                               alp_audio_in_backend_state_t *state,
+                               alp_capabilities_t           *caps_out)
 {
 	(void)cfg;
 	state->be_data  = NULL;
@@ -92,8 +93,11 @@ static alp_status_t sw_in_stop(alp_audio_in_backend_state_t *state)
 	return ALP_OK;
 }
 
-static alp_status_t sw_in_read(alp_audio_in_backend_state_t *state, void *buf, size_t frames,
-                               size_t *out_frames, uint32_t timeout_ms)
+static alp_status_t sw_in_read(alp_audio_in_backend_state_t *state,
+                               void                         *buf,
+                               size_t                        frames,
+                               size_t                       *out_frames,
+                               uint32_t                      timeout_ms)
 {
 	(void)timeout_ms;
 	/* Zero-fill -- silence source.  Tests that need byte-counts get
@@ -112,8 +116,9 @@ static void sw_in_close(alp_audio_in_backend_state_t *state)
 
 /* ---------- Output ---------- */
 
-static alp_status_t sw_out_open(const alp_audio_config_t *cfg, alp_audio_out_backend_state_t *state,
-                                alp_capabilities_t *caps_out)
+static alp_status_t sw_out_open(const alp_audio_config_t      *cfg,
+                                alp_audio_out_backend_state_t *state,
+                                alp_capabilities_t            *caps_out)
 {
 	(void)cfg;
 	state->be_data  = NULL;
@@ -133,8 +138,11 @@ static alp_status_t sw_out_stop(alp_audio_out_backend_state_t *state)
 	return ALP_OK;
 }
 
-static alp_status_t sw_out_write(alp_audio_out_backend_state_t *state, const void *buf,
-                                 size_t frames, size_t *out_frames, uint32_t timeout_ms)
+static alp_status_t sw_out_write(alp_audio_out_backend_state_t *state,
+                                 const void                    *buf,
+                                 size_t                         frames,
+                                 size_t                        *out_frames,
+                                 uint32_t                       timeout_ms)
 {
 	(void)state;
 	(void)buf;
@@ -173,7 +181,8 @@ static const alp_audio_ops_t _ops = {
 	.out_close      = sw_out_close,
 };
 
-ALP_BACKEND_REGISTER(audio, sw_fallback,
+ALP_BACKEND_REGISTER(audio,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

@@ -45,7 +45,7 @@ extern void alp_z_clear_last_error(void);
 static struct alp_ble      _radio_pool[CONFIG_ALP_SDK_MAX_BLE_HANDLES];
 static struct alp_ble_conn _conn_pool[CONFIG_ALP_SDK_MAX_BLE_CONN_HANDLES];
 
-static struct alp_ble     *_alloc_radio(void)
+static struct alp_ble *_alloc_radio(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_BLE_HANDLES; ++i) {
 		if (!_radio_pool[i].in_use) {
@@ -142,8 +142,9 @@ alp_status_t alp_ble_advertise_stop(alp_ble_t *h)
 	return h->state.ops->advertise_stop(&h->state);
 }
 
-alp_status_t alp_ble_gatt_register_service(alp_ble_t *h, const alp_ble_service_def_t *def,
-                                           alp_ble_attr_handle_t *handles_out)
+alp_status_t alp_ble_gatt_register_service(alp_ble_t                   *h,
+                                           const alp_ble_service_def_t *def,
+                                           alp_ble_attr_handle_t       *handles_out)
 {
 	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
 	if (def == NULL) return ALP_ERR_INVAL;
@@ -153,8 +154,11 @@ alp_status_t alp_ble_gatt_register_service(alp_ble_t *h, const alp_ble_service_d
 	return h->state.ops->gatt_register_service(&h->state, def, handles_out);
 }
 
-alp_status_t alp_ble_gatt_notify(alp_ble_t *h, alp_ble_conn_t *conn, alp_ble_attr_handle_t handle,
-                                 const uint8_t *payload, size_t len)
+alp_status_t alp_ble_gatt_notify(alp_ble_t            *h,
+                                 alp_ble_conn_t       *conn,
+                                 alp_ble_attr_handle_t handle,
+                                 const uint8_t        *payload,
+                                 size_t                len)
 {
 	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
 	if (conn == NULL || !conn->in_use) return ALP_ERR_INVAL;
@@ -184,8 +188,10 @@ alp_status_t alp_ble_scan_stop(alp_ble_t *h)
 	return h->state.ops->scan_stop(&h->state);
 }
 
-alp_status_t alp_ble_connect(alp_ble_t *h, const alp_ble_addr_t *peer, uint32_t timeout_ms,
-                             alp_ble_conn_t **conn_out)
+alp_status_t alp_ble_connect(alp_ble_t            *h,
+                             const alp_ble_addr_t *peer,
+                             uint32_t              timeout_ms,
+                             alp_ble_conn_t      **conn_out)
 {
 	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
 	if (peer == NULL || conn_out == NULL) return ALP_ERR_INVAL;
@@ -221,8 +227,12 @@ alp_status_t alp_ble_disconnect(alp_ble_conn_t *c)
 	return rc;
 }
 
-alp_status_t alp_ble_gatt_read(alp_ble_conn_t *c, alp_ble_attr_handle_t handle, uint8_t *out,
-                               size_t out_cap, size_t *out_len, uint32_t timeout_ms)
+alp_status_t alp_ble_gatt_read(alp_ble_conn_t       *c,
+                               alp_ble_attr_handle_t handle,
+                               uint8_t              *out,
+                               size_t                out_cap,
+                               size_t               *out_len,
+                               uint32_t              timeout_ms)
 {
 	if (out_len != NULL) *out_len = 0;
 	if (c == NULL || !c->in_use) return ALP_ERR_NOT_READY;
@@ -233,8 +243,11 @@ alp_status_t alp_ble_gatt_read(alp_ble_conn_t *c, alp_ble_attr_handle_t handle, 
 	return c->state.ops->gatt_read(&c->state, handle, out, out_cap, out_len, timeout_ms);
 }
 
-alp_status_t alp_ble_gatt_write(alp_ble_conn_t *c, alp_ble_attr_handle_t handle,
-                                const uint8_t *data, size_t len, uint32_t timeout_ms)
+alp_status_t alp_ble_gatt_write(alp_ble_conn_t       *c,
+                                alp_ble_attr_handle_t handle,
+                                const uint8_t        *data,
+                                size_t                len,
+                                uint32_t              timeout_ms)
 {
 	if (c == NULL || !c->in_use) return ALP_ERR_NOT_READY;
 	if (data == NULL && len > 0) return ALP_ERR_INVAL;

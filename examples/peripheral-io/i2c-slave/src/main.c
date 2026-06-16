@@ -71,12 +71,14 @@ typedef struct {
 } alp_i2c_slave_config_t;
 
 /** Proposed: callback signature for incoming write-from-master. */
-typedef void (*alp_i2c_slave_write_cb_t)(uint8_t reg_addr, const uint8_t *data, size_t len,
-                                         void *user);
+typedef void (*alp_i2c_slave_write_cb_t)(uint8_t        reg_addr,
+                                         const uint8_t *data,
+                                         size_t         len,
+                                         void          *user);
 
 /** Proposed: callback signature for incoming read-from-master. */
-typedef alp_status_t (*alp_i2c_slave_read_cb_t)(uint8_t reg_addr, uint8_t *data, size_t max_len,
-                                                size_t *out_len, void *user);
+typedef alp_status_t (*alp_i2c_slave_read_cb_t)(
+    uint8_t reg_addr, uint8_t *data, size_t max_len, size_t *out_len, void *user);
 
 /* TODO(api-gap): replace these stubs once <alp/peripheral.h> grows
  * slave-mode support.  The downstream main() is already coded
@@ -91,7 +93,8 @@ static alp_i2c_slave_t *alp_i2c_slave_open(const alp_i2c_slave_config_t *cfg)
 
 static alp_status_t alp_i2c_slave_set_callbacks(alp_i2c_slave_t         *slave,
                                                 alp_i2c_slave_write_cb_t on_write,
-                                                alp_i2c_slave_read_cb_t on_read, void *user)
+                                                alp_i2c_slave_read_cb_t  on_read,
+                                                void                    *user)
 {
 	(void)slave;
 	(void)on_write;
@@ -115,7 +118,7 @@ static void alp_i2c_slave_close(alp_i2c_slave_t *slave)
  * ------------------------------------------------------------------ */
 
 #define SLAVE_OWN_ADDR_7BIT 0x42u
-#define SLAVE_REG_COUNT 8u
+#define SLAVE_REG_COUNT     8u
 
 /* `volatile` because callbacks run from interrupt context on the
  * I2C peripheral's ISR; main thread polling the bytes must not
@@ -155,8 +158,8 @@ static void on_master_write(uint8_t reg_addr, const uint8_t *data, size_t len, v
  * R/W bit set, then clocks out bytes.  Return however many bytes the
  * register file holds starting at reg_addr.  out_len is what we
  * actually filled in. */
-static alp_status_t on_master_read(uint8_t reg_addr, uint8_t *data, size_t max_len, size_t *out_len,
-                                   void *user)
+static alp_status_t
+on_master_read(uint8_t reg_addr, uint8_t *data, size_t max_len, size_t *out_len, void *user)
 {
 	(void)user;
 	if (reg_addr >= SLAVE_REG_COUNT) {
@@ -203,7 +206,9 @@ int main(void)
 	/* This block is unreachable today but stays compiled-in so the
      * proposed API shape is exercised by the type-checker.  When
      * the shim deletes, this is the only production-path code. */
-	alp_status_t st = alp_i2c_slave_set_callbacks(s, on_master_write, on_master_read,
+	alp_status_t st = alp_i2c_slave_set_callbacks(s,
+	                                              on_master_write,
+	                                              on_master_read,
 	                                              /* user */ NULL);
 	if (st != ALP_OK) {
 		printf("[i2c-slave] set_callbacks -> %d (expected -6 NOSUPPORT today)\n", (int)st);
@@ -218,7 +223,12 @@ int main(void)
 	for (int i = 0; i < 5; i++) {
 		printf("[i2c-slave] tick %d writes_seen=%u "
 		       "regs={0x%02x,0x%02x,0x%02x,0x%02x,...}\n",
-		       i, (unsigned)g_writes_seen, g_regs[0], g_regs[1], g_regs[2], g_regs[3]);
+		       i,
+		       (unsigned)g_writes_seen,
+		       g_regs[0],
+		       g_regs[1],
+		       g_regs[2],
+		       g_regs[3]);
 		k_msleep(1000);
 	}
 

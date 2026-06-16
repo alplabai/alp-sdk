@@ -34,7 +34,7 @@ extern "C" {
 
 #define IMX477_REG_MODEL_ID_HI 0x0016u
 #define IMX477_REG_MODEL_ID_LO 0x0017u
-#define IMX477_CHIP_ID 0x0477u
+#define IMX477_CHIP_ID         0x0477u
 
 typedef struct {
 	alp_i2c_t *bus;

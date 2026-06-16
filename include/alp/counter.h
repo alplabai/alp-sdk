@@ -145,8 +145,10 @@ alp_status_t alp_counter_us_to_ticks(alp_counter_t *counter, uint32_t us, uint32
  *           the bridge in bounded time);
  *         ALP_ERR_IO on a backend failure.
  */
-alp_status_t alp_counter_set_alarm(alp_counter_t *counter, uint32_t ticks_from_now,
-                                   alp_counter_alarm_cb_t cb, void *user);
+alp_status_t alp_counter_set_alarm(alp_counter_t         *counter,
+                                   uint32_t               ticks_from_now,
+                                   alp_counter_alarm_cb_t cb,
+                                   void                  *user);
 
 /**
  * @brief Cancel a pending alarm.  No-op if no alarm is armed.

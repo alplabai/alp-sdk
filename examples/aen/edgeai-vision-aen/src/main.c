@@ -47,7 +47,7 @@ static lsm6dso_t        g_imu;
 static ssd1306_t        g_oled;
 static alp_button_led_t g_trigger;
 
-static int              stage_peripherals_init(void)
+static int stage_peripherals_init(void)
 {
 	printf("[edgeai] stage 1: peripherals\n");
 
@@ -77,11 +77,12 @@ static int              stage_peripherals_init(void)
      * EVK_PIN_LED_RED resolves to the RGB-red pad driven as a digital
      * GPIO (E1M_GPIO_PWM3, the e1m-spec "GPIO secondary"); the trigger
      * is the encoder push switch, EVK_PIN_ENCODER_SW (E1M_GPIO_IO4). */
-	s = alp_button_led_init(&g_trigger, &(alp_button_led_config_t){
-	                                        .button_pin_id     = EVK_PIN_ENCODER_SW,
-	                                        .led_pin_id        = EVK_PIN_LED_RED,
-	                                        .active_low_button = true,
-	                                    });
+	s = alp_button_led_init(&g_trigger,
+	                        &(alp_button_led_config_t){
+	                            .button_pin_id     = EVK_PIN_ENCODER_SW,
+	                            .led_pin_id        = EVK_PIN_LED_RED,
+	                            .active_low_button = true,
+	                        });
 	printf("[edgeai]   alp_button_led_init           %s\n",
 	       (s == ALP_OK) ? "ok" : "skip (no GPIOs)");
 
@@ -94,7 +95,7 @@ static int              stage_peripherals_init(void)
 
 static alp_camera_t *g_camera;
 
-static int           stage_camera_init(void)
+static int stage_camera_init(void)
 {
 	printf("[edgeai] stage 2: camera\n");
 
@@ -123,7 +124,7 @@ static int           stage_camera_init(void)
 
 static alp_inference_t *g_model;
 
-static int              stage_model_load(void)
+static int stage_model_load(void)
 {
 	printf("[edgeai] stage 3: model load\n");
 	/* The SDK exposes a unified inference surface via <alp/inference.h>.
@@ -150,7 +151,8 @@ static int              stage_model_load(void)
 		       (int)alp_last_error());
 	} else {
 		printf("[edgeai]   alp_inference_open(AUTO)      ok (%zu inputs / %zu outputs)\n",
-		       alp_inference_num_inputs(g_model), alp_inference_num_outputs(g_model));
+		       alp_inference_num_inputs(g_model),
+		       alp_inference_num_outputs(g_model));
 	}
 	return 0;
 }

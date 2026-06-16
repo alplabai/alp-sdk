@@ -34,14 +34,20 @@ typedef struct alp_usb_host_state {
 
 struct alp_usb_ops {
 	/* Device-side ops */
-	alp_status_t (*dev_open)(const alp_usb_device_config_t *cfg, alp_usb_dev_state_t *state,
-	                         alp_capabilities_t *caps_out);
+	alp_status_t (*dev_open)(const alp_usb_device_config_t *cfg,
+	                         alp_usb_dev_state_t           *state,
+	                         alp_capabilities_t            *caps_out);
 	alp_status_t (*dev_enable)(alp_usb_dev_state_t *state);
 	alp_status_t (*dev_disable)(alp_usb_dev_state_t *state);
-	alp_status_t (*dev_write)(alp_usb_dev_state_t *state, const uint8_t *data, size_t len,
-	                          uint32_t timeout_ms);
-	alp_status_t (*dev_read)(alp_usb_dev_state_t *state, uint8_t *data, size_t len, size_t *out_len,
-	                         uint32_t timeout_ms);
+	alp_status_t (*dev_write)(alp_usb_dev_state_t *state,
+	                          const uint8_t       *data,
+	                          size_t               len,
+	                          uint32_t             timeout_ms);
+	alp_status_t (*dev_read)(alp_usb_dev_state_t *state,
+	                         uint8_t             *data,
+	                         size_t               len,
+	                         size_t              *out_len,
+	                         uint32_t             timeout_ms);
 	void (*dev_close)(alp_usb_dev_state_t *state);
 
 	/* Host-side ops */

@@ -51,7 +51,7 @@
  * 2 KB pages, bank0 only.  Getting this wrong "succeeds" loudly:
  * page indexes silently resolve into bank0 and erase the wrong region
  * (caught on silicon as a PGERR on the first slot-B program). */
-#define OTA_FMC_BANK1_BASE 0x08040000u
+#define OTA_FMC_BANK1_BASE      0x08040000u
 #define OTA_FMC_PAGE_SIZE_DBANK 0x400u
 #define OTA_FMC_PAGE_SIZE_SBANK 0x800u
 
@@ -130,7 +130,7 @@ OTA_RAMFUNC static fmc_state_enum erase_one_page(uint32_t addr)
      * decode reports it ahead of READY and would wedge every later op
      * (silicon-caught 2026-06-04: one failed run poisoned the next
      * session's first erase). */
-	FMC_STAT          = OTA_FMC_STAT_ERR_MASK;
+	FMC_STAT = OTA_FMC_STAT_ERR_MASK;
 
 	fmc_state_enum st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
 	if (st != FMC_READY) {
@@ -178,7 +178,7 @@ bool ota_fmc_erase_range(uint32_t base, uint32_t len)
 
 OTA_RAMFUNC static fmc_state_enum program_one_dword(uint32_t addr, uint64_t dw)
 {
-	FMC_STAT          = OTA_FMC_STAT_ERR_MASK; /* stale errors are not busy */
+	FMC_STAT = OTA_FMC_STAT_ERR_MASK; /* stale errors are not busy */
 
 	fmc_state_enum st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
 	if (st != FMC_READY) {
@@ -189,7 +189,7 @@ OTA_RAMFUNC static fmc_state_enum program_one_dword(uint32_t addr, uint64_t dw)
 	__ISB();
 	REG32(addr + 4u) = (uint32_t)(dw >> 32);
 
-	st               = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
+	st = ota_fmc_wait_ready(FMC_TIMEOUT_COUNT);
 
 	FMC_CTL &= ~FMC_CTL_PG;
 	return st;

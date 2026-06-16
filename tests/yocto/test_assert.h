@@ -62,8 +62,8 @@ static int alp_test_fail_count = 0;
 
 #define ALP_TEST_SUMMARY()                                                                         \
 	do {                                                                                           \
-		fprintf(stdout, "alp_test: %d passed, %d failed\n", alp_test_pass_count,                   \
-		        alp_test_fail_count);                                                              \
+		fprintf(                                                                                   \
+		    stdout, "alp_test: %d passed, %d failed\n", alp_test_pass_count, alp_test_fail_count); \
 		return alp_test_fail_count == 0 ? 0 : 1;                                                   \
 	} while (0)
 

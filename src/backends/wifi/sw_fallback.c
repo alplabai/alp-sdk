@@ -39,8 +39,8 @@ static alp_status_t sw_open(alp_wifi_backend_state_t *st, alp_capabilities_t *ca
 	return ALP_OK;
 }
 
-static alp_status_t sw_connect(alp_wifi_backend_state_t *st, const alp_wifi_credentials_t *creds,
-                               uint32_t timeout_ms)
+static alp_status_t
+sw_connect(alp_wifi_backend_state_t *st, const alp_wifi_credentials_t *creds, uint32_t timeout_ms)
 {
 	(void)st;
 	(void)creds;
@@ -70,7 +70,8 @@ static const alp_wifi_ops_t _ops = {
 	.close      = sw_close,
 };
 
-ALP_BACKEND_REGISTER(wifi, sw_fallback,
+ALP_BACKEND_REGISTER(wifi,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

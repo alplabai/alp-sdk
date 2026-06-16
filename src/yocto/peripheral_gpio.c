@@ -91,7 +91,7 @@ struct alp_gpio {
 	void         *irq_user;
 };
 
-static struct alp_gpio  g_gpio_pool[ALP_SDK_YOCTO_MAX_GPIO_HANDLES];
+static struct alp_gpio g_gpio_pool[ALP_SDK_YOCTO_MAX_GPIO_HANDLES];
 
 static struct alp_gpio *pool_acquire(void)
 {
@@ -136,8 +136,8 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 	uint16_t chip_idx    = (uint16_t)ALP_GPIO_PIN_CHIP(pin_id);
 	uint16_t line_offset = (uint16_t)ALP_GPIO_PIN_LINE(pin_id);
 
-	char     chip_path[32];
-	int      n = snprintf(chip_path, sizeof(chip_path), "/dev/gpiochip%u", chip_idx);
+	char chip_path[32];
+	int  n = snprintf(chip_path, sizeof(chip_path), "/dev/gpiochip%u", chip_idx);
 	if (n < 0 || (size_t)n >= sizeof(chip_path)) {
 		alp_internal_set_last_error(ALP_ERR_INVAL);
 		return NULL;
@@ -383,8 +383,8 @@ static uint64_t edge_to_flags(alp_gpio_edge_t edge)
 	}
 }
 
-alp_status_t alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb,
-                                 void *user)
+alp_status_t
+alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, void *user)
 {
 	if (pin == NULL || !pin->in_use || cb == NULL) {
 		return ALP_ERR_INVAL;

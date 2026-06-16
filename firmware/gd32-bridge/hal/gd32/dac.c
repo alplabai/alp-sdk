@@ -36,7 +36,7 @@ _Static_assert(sizeof(dac_channels) / sizeof(dac_channels[0]) == DAC_CHANNEL_COU
  * moves to a buffered VREFINT source or a different rail.  Full-scale
  * code is 4095 for 12-bit alignment; code = (value_mv * 4095) /
  * VREF_mV with overflow clamped. */
-#define DAC_VREF_MV 1800u
+#define DAC_VREF_MV    1800u
 #define DAC_FULL_SCALE 4095u
 
 int bridge_hw_dac_set(uint8_t channel, uint16_t value_mv)
@@ -49,8 +49,8 @@ int bridge_hw_dac_set(uint8_t channel, uint16_t value_mv)
      * back the actual programmed value). */
 	uint32_t code = ((uint32_t)value_mv * DAC_FULL_SCALE) / DAC_VREF_MV;
 	if (code > DAC_FULL_SCALE) code = DAC_FULL_SCALE;
-	dac_data_set(dac_channels[channel].periph, dac_channels[channel].out, DAC_ALIGN_12B_R,
-	             (uint16_t)code);
+	dac_data_set(
+	    dac_channels[channel].periph, dac_channels[channel].out, DAC_ALIGN_12B_R, (uint16_t)code);
 	return BRIDGE_HW_OK;
 }
 

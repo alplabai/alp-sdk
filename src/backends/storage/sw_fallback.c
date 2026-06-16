@@ -31,8 +31,9 @@
 
 #include "storage_ops.h"
 
-static alp_status_t sw_open(const alp_storage_config_t *cfg, alp_storage_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t sw_open(const alp_storage_config_t  *cfg,
+                            alp_storage_backend_state_t *st,
+                            alp_capabilities_t          *caps_out)
 {
 	(void)cfg;
 	st->dev         = NULL;
@@ -50,8 +51,8 @@ static alp_status_t sw_get_info(alp_storage_backend_state_t *st, alp_storage_inf
 	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t sw_read(alp_storage_backend_state_t *st, uint64_t offset, void *data,
-                            size_t len)
+static alp_status_t
+sw_read(alp_storage_backend_state_t *st, uint64_t offset, void *data, size_t len)
 {
 	(void)st;
 	(void)offset;
@@ -60,8 +61,8 @@ static alp_status_t sw_read(alp_storage_backend_state_t *st, uint64_t offset, vo
 	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t sw_write(alp_storage_backend_state_t *st, uint64_t offset, const void *data,
-                             size_t len)
+static alp_status_t
+sw_write(alp_storage_backend_state_t *st, uint64_t offset, const void *data, size_t len)
 {
 	(void)st;
 	(void)offset;
@@ -103,7 +104,8 @@ static const alp_storage_ops_t _ops = {
 	.close                = NULL,
 };
 
-ALP_BACKEND_REGISTER(storage, sw_fallback,
+ALP_BACKEND_REGISTER(storage,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

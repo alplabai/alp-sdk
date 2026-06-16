@@ -26,7 +26,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_CAN_HANDLES 4
 #endif
 
-static struct alp_can  _pool[CONFIG_ALP_SDK_MAX_CAN_HANDLES];
+static struct alp_can _pool[CONFIG_ALP_SDK_MAX_CAN_HANDLES];
 
 static struct alp_can *_alloc(void)
 {
@@ -114,8 +114,11 @@ alp_status_t alp_can_send(alp_can_t *can, const alp_can_frame_t *frame, uint32_t
 	return can->state.ops->send(&can->state, frame, timeout_ms);
 }
 
-alp_status_t alp_can_add_filter(alp_can_t *can, const alp_can_filter_t *filter, alp_can_rx_cb_t cb,
-                                void *user, int32_t *filter_id_out)
+alp_status_t alp_can_add_filter(alp_can_t              *can,
+                                const alp_can_filter_t *filter,
+                                alp_can_rx_cb_t         cb,
+                                void                   *user,
+                                int32_t                *filter_id_out)
 {
 	if (can == NULL || !can->in_use) return ALP_ERR_NOT_READY;
 	if (filter == NULL || cb == NULL) return ALP_ERR_INVAL;

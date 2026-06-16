@@ -70,8 +70,8 @@
 
 /* Byte offsets within a reply frame: the status byte is the first
  * payload byte; reply DATA follows it. */
-#define CC3501E_REPLY_STATUS_OFF (ALP_CC3501E_HEADER_BYTES)    /* index 4 */
-#define CC3501E_REPLY_DATA_OFF (ALP_CC3501E_HEADER_BYTES + 1u) /* index 5 */
+#define CC3501E_REPLY_STATUS_OFF (ALP_CC3501E_HEADER_BYTES)      /* index 4 */
+#define CC3501E_REPLY_DATA_OFF   (ALP_CC3501E_HEADER_BYTES + 1u) /* index 5 */
 
 /* --------------------------------------------------------------- */
 /* Dispatcher                                                        */
@@ -99,8 +99,13 @@
  *         (per the header: v1 firmware rejects opcodes it does not
  *         implement with RESP_ERR_INVALID).
  */
-alp_cc3501e_resp_t protocol_dispatch(uint8_t cmd, uint8_t flags, const uint8_t *req, size_t req_len,
-                                     uint8_t *reply_data, size_t reply_cap, size_t *reply_data_len);
+alp_cc3501e_resp_t protocol_dispatch(uint8_t        cmd,
+                                     uint8_t        flags,
+                                     const uint8_t *req,
+                                     size_t         req_len,
+                                     uint8_t       *reply_data,
+                                     size_t         reply_cap,
+                                     size_t        *reply_data_len);
 
 /*
  * protocol_build_reply -- the transport-agnostic framing wrapper.
@@ -121,7 +126,9 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t cmd, uint8_t flags, const uint8_t *
  *
  * Returns the reply frame length in bytes (always >= header + 1).
  */
-size_t protocol_build_reply(const uint8_t *req_frame, size_t req_len, uint8_t *reply_frame,
-                            size_t reply_cap);
+size_t protocol_build_reply(const uint8_t *req_frame,
+                            size_t         req_len,
+                            uint8_t       *reply_frame,
+                            size_t         reply_cap);
 
 #endif /* CC3501E_BRIDGE_PROTOCOL_H */

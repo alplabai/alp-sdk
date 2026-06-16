@@ -102,11 +102,11 @@ extern "C" {
 
 /** Documented register offsets the typed helpers operate on.
  *  Customers can reach any other register via the raw R/W helpers. */
-#define CLK_5L35023B_REG_GENERAL_CTRL 0x00u  /**< Byte 0 */
-#define CLK_5L35023B_REG_DASHCODE_ID 0x01u   /**< Byte 1 */
-#define CLK_5L35023B_REG_OUTPUT_CTRL 0x1Du   /**< Byte 29: DIFF1/2 enable */
-#define CLK_5L35023B_REG_OE_DFC_CTRL 0x1Eu   /**< Byte 30: SE1/3 enable */
-#define CLK_5L35023B_REG_DIFF1_CTRL 0x22u    /**< Byte 34: DIFF1 mode + slew */
+#define CLK_5L35023B_REG_GENERAL_CTRL  0x00u /**< Byte 0 */
+#define CLK_5L35023B_REG_DASHCODE_ID   0x01u /**< Byte 1 */
+#define CLK_5L35023B_REG_OUTPUT_CTRL   0x1Du /**< Byte 29: DIFF1/2 enable */
+#define CLK_5L35023B_REG_OE_DFC_CTRL   0x1Eu /**< Byte 30: SE1/3 enable */
+#define CLK_5L35023B_REG_DIFF1_CTRL    0x22u /**< Byte 34: DIFF1 mode + slew */
 #define CLK_5L35023B_REG_SE1_DIV4_CTRL 0x24u /**< Byte 36: I2C_PDB (bit 7) */
 
 /** Decoded `I2C_addr[1:0]` strap from Byte 0x00 bits[6:5]. */
@@ -166,8 +166,8 @@ alp_status_t clk_5l35023b_write_reg(clk_5l35023b_t *ctx, uint8_t reg, uint8_t va
  * write_read with one register-address byte returns N consecutive
  * registers.
  */
-alp_status_t clk_5l35023b_register_dump(clk_5l35023b_t *ctx, uint8_t start_reg, uint8_t *out,
-                                        size_t count);
+alp_status_t
+clk_5l35023b_register_dump(clk_5l35023b_t *ctx, uint8_t start_reg, uint8_t *out, size_t count);
 
 /**
  * @brief Read the factory Dash-Code-ID (Byte 0x01).

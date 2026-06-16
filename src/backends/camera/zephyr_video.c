@@ -55,7 +55,8 @@
 
 #define ALP_CAM_DEV_OR_NULL(idx)                                                                   \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_camera, idx))),                                \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_camera, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_camera, idx)))),                               \
+	            (NULL))
 
 static const struct device *const _devs[] = {
 	ALP_CAM_DEV_OR_NULL(0),
@@ -81,7 +82,7 @@ typedef struct {
 #define CONFIG_ALP_SDK_MAX_CAMERA_HANDLES 2
 #endif
 
-static alp_z_video_state_t  _state_pool[CONFIG_ALP_SDK_MAX_CAMERA_HANDLES];
+static alp_z_video_state_t _state_pool[CONFIG_ALP_SDK_MAX_CAMERA_HANDLES];
 
 static alp_z_video_state_t *_alloc_state(void)
 {
@@ -143,8 +144,9 @@ static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
 	}
 }
 
-static alp_status_t z_open(const alp_camera_config_t *cfg, alp_camera_backend_state_t *state,
-                           alp_capabilities_t *caps_out)
+static alp_status_t z_open(const alp_camera_config_t  *cfg,
+                           alp_camera_backend_state_t *state,
+                           alp_capabilities_t         *caps_out)
 {
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
@@ -275,14 +277,14 @@ static alp_status_t z_stop(alp_camera_backend_state_t *state)
 	return _errno_to_alp(err);
 }
 
-static alp_status_t z_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out,
-                              uint32_t timeout_ms)
+static alp_status_t
+z_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t timeout_ms)
 {
 	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
 	if (st == NULL) return ALP_ERR_NOT_READY;
 	if (!st->streaming) return ALP_ERR_NOT_READY;
 
-	k_timeout_t          t   = (timeout_ms == UINT32_MAX) ? K_FOREVER : K_MSEC(timeout_ms);
+	k_timeout_t t = (timeout_ms == UINT32_MAX) ? K_FOREVER : K_MSEC(timeout_ms);
 
 	struct video_buffer *vb  = NULL;
 	int                  err = video_dequeue(st->dev, VIDEO_EP_OUT, &vb, t);
@@ -356,7 +358,8 @@ static const alp_camera_ops_t _ops = {
 	.close         = z_close,
 };
 
-ALP_BACKEND_REGISTER(camera, zephyr_video,
+ALP_BACKEND_REGISTER(camera,
+                     zephyr_video,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

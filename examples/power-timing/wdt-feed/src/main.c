@@ -48,10 +48,11 @@ int main(void)
      * peripherals retain state -- useful for soft-fault recovery)
      * and INTERRUPT_ONLY (fires an IRQ; you'd capture state in the
      * handler before manually triggering a reset). */
-	alp_wdt_t *wdt = alp_wdt_open(0, &(alp_wdt_config_t){
-	                                     .timeout_ms = WDT_TIMEOUT_MS,
-	                                     .on_timeout = ALP_WDT_RESET_SOC,
-	                                 });
+	alp_wdt_t *wdt = alp_wdt_open(0,
+	                              &(alp_wdt_config_t){
+	                                  .timeout_ms = WDT_TIMEOUT_MS,
+	                                  .on_timeout = ALP_WDT_RESET_SOC,
+	                              });
 	if (wdt == NULL) {
 		printf("[wdt] open failed: alp_last_error=%d "
 		       "(expected NOT_READY = -2 on native_sim)\n",

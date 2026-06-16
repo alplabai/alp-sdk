@@ -140,7 +140,8 @@ alp_status_t alp_renesas_camera_isp_3a_window_set(alp_camera_t                  
  */
 alp_status_t alp_renesas_camera_isp_gain_table_load(alp_camera_t                *camera,
                                                     alp_renesas_camera_channel_t channel,
-                                                    const uint16_t *table, uint16_t len);
+                                                    const uint16_t              *table,
+                                                    uint16_t                     len);
 
 /**
  * @brief Load the lens-shading-correction LUT.
@@ -163,8 +164,8 @@ alp_status_t alp_renesas_camera_isp_gain_table_load(alp_camera_t                
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC /
  *         @ref ALP_ERR_NOT_READY.
  */
-alp_status_t alp_renesas_camera_isp_lsc_lut_load(alp_camera_t *camera, const uint16_t *lut,
-                                                 uint16_t len);
+alp_status_t
+alp_renesas_camera_isp_lsc_lut_load(alp_camera_t *camera, const uint16_t *lut, uint16_t len);
 
 #ifdef __cplusplus
 }

@@ -38,11 +38,16 @@ typedef struct alp_display_backend_state {
 /** Vtable each display backend implements.  blit args mirror the
  *  public alp_display_blit signature in <alp/display.h> exactly. */
 struct alp_display_ops {
-	alp_status_t (*open)(const alp_display_config_t *cfg, alp_display_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
+	alp_status_t (*open)(const alp_display_config_t  *cfg,
+	                     alp_display_backend_state_t *state,
+	                     alp_capabilities_t          *caps_out);
 	alp_status_t (*get_caps)(alp_display_backend_state_t *state, alp_display_caps_t *out);
-	alp_status_t (*blit)(alp_display_backend_state_t *state, uint16_t x, uint16_t y, uint16_t w,
-	                     uint16_t h, const void *pixels);
+	alp_status_t (*blit)(alp_display_backend_state_t *state,
+	                     uint16_t                     x,
+	                     uint16_t                     y,
+	                     uint16_t                     w,
+	                     uint16_t                     h,
+	                     const void                  *pixels);
 	alp_status_t (*clear)(alp_display_backend_state_t *state);
 	void (*close)(alp_display_backend_state_t *state);
 };

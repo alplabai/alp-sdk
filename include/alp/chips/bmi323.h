@@ -43,7 +43,7 @@ extern "C" {
 #endif
 
 /** Default 7-bit I2C addresses (SDO strap selects). */
-#define BMI323_I2C_ADDR_LOW 0x68
+#define BMI323_I2C_ADDR_LOW  0x68
 #define BMI323_I2C_ADDR_HIGH 0x69
 
 /** CHIP_ID (register 0x00) value. */

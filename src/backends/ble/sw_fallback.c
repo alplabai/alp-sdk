@@ -67,8 +67,11 @@ static alp_status_t sw_gatt_register_service(alp_ble_radio_state_t       *st,
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_gatt_notify(alp_ble_radio_state_t *radio_st, alp_ble_conn_state_t *conn_st,
-                                   alp_ble_attr_handle_t handle, const uint8_t *payload, size_t len)
+static alp_status_t sw_gatt_notify(alp_ble_radio_state_t *radio_st,
+                                   alp_ble_conn_state_t  *conn_st,
+                                   alp_ble_attr_handle_t  handle,
+                                   const uint8_t         *payload,
+                                   size_t                 len)
 {
 	(void)radio_st;
 	(void)conn_st;
@@ -78,8 +81,8 @@ static alp_status_t sw_gatt_notify(alp_ble_radio_state_t *radio_st, alp_ble_conn
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_scan_start(alp_ble_radio_state_t *st, bool active, alp_ble_scan_cb_t cb,
-                                  void *user)
+static alp_status_t
+sw_scan_start(alp_ble_radio_state_t *st, bool active, alp_ble_scan_cb_t cb, void *user)
 {
 	(void)st;
 	(void)active;
@@ -94,8 +97,10 @@ static alp_status_t sw_scan_stop(alp_ble_radio_state_t *st)
 	return ALP_OK;
 }
 
-static alp_status_t sw_connect(alp_ble_radio_state_t *st, const alp_ble_addr_t *peer,
-                               uint32_t timeout_ms, alp_ble_conn_state_t *conn_st)
+static alp_status_t sw_connect(alp_ble_radio_state_t *st,
+                               const alp_ble_addr_t  *peer,
+                               uint32_t               timeout_ms,
+                               alp_ble_conn_state_t  *conn_st)
 {
 	(void)st;
 	(void)peer;
@@ -120,8 +125,12 @@ static alp_status_t sw_disconnect(alp_ble_conn_state_t *conn_st)
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_gatt_read(alp_ble_conn_state_t *conn_st, alp_ble_attr_handle_t handle,
-                                 uint8_t *out, size_t out_cap, size_t *out_len, uint32_t timeout_ms)
+static alp_status_t sw_gatt_read(alp_ble_conn_state_t *conn_st,
+                                 alp_ble_attr_handle_t handle,
+                                 uint8_t              *out,
+                                 size_t                out_cap,
+                                 size_t               *out_len,
+                                 uint32_t              timeout_ms)
 {
 	(void)conn_st;
 	(void)handle;
@@ -132,8 +141,11 @@ static alp_status_t sw_gatt_read(alp_ble_conn_state_t *conn_st, alp_ble_attr_han
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_gatt_write(alp_ble_conn_state_t *conn_st, alp_ble_attr_handle_t handle,
-                                  const uint8_t *data, size_t len, uint32_t timeout_ms)
+static alp_status_t sw_gatt_write(alp_ble_conn_state_t *conn_st,
+                                  alp_ble_attr_handle_t handle,
+                                  const uint8_t        *data,
+                                  size_t                len,
+                                  uint32_t              timeout_ms)
 {
 	(void)conn_st;
 	(void)handle;
@@ -160,7 +172,8 @@ static const alp_ble_ops_t _ops = {
 	.gatt_write            = sw_gatt_write,
 };
 
-ALP_BACKEND_REGISTER(ble, sw_fallback,
+ALP_BACKEND_REGISTER(ble,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

@@ -36,7 +36,7 @@ extern "C" {
 #endif
 
 /** Fixed panel geometry.  SSD1331 is exclusively 96 × 64. */
-#define SSD1331_WIDTH 96
+#define SSD1331_WIDTH  96
 #define SSD1331_HEIGHT 64
 
 /** Bytes per pixel in the framebuffer (RGB565 native). */
@@ -81,8 +81,8 @@ typedef struct {
  * @param fb     Pointer to the caller's framebuffer storage.
  * @param fb_len Length of @p fb in bytes.  Must be ≥ @ref SSD1331_FB_BYTES.
  */
-alp_status_t ssd1331_init(ssd1331_t *dev, alp_spi_t *spi, alp_gpio_t *dc, uint8_t *fb,
-                          size_t fb_len);
+alp_status_t
+ssd1331_init(ssd1331_t *dev, alp_spi_t *spi, alp_gpio_t *dc, uint8_t *fb, size_t fb_len);
 
 /** Set the panel display ON or OFF. */
 alp_status_t ssd1331_set_display_on(ssd1331_t *dev, bool on);

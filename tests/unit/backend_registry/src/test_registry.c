@@ -39,8 +39,8 @@ ZTEST(alp_registry, test_real_hw_picked_over_sw_on_matching_soc)
 	zassert_equal(rc, 0, "open failed: %d", rc);
 	zassert_not_null(h.backend);
 	/* Expect the realhw backend (priority 100) over sw (priority 0). */
-	zassert_equal(strcmp(h.backend->vendor, "alif"), 0, "expected alif backend, got %s",
-	              h.backend->vendor);
+	zassert_equal(
+	    strcmp(h.backend->vendor, "alif"), 0, "expected alif backend, got %s", h.backend->vendor);
 }
 
 ZTEST(alp_registry, test_probe_refines_caps_per_instance)
@@ -133,7 +133,8 @@ ZTEST(alp_registry, test_select_returns_null_for_unknown_silicon)
 
 /* Tier 1: higher priority wins regardless of vendor name. */
 ALP_BACKEND_DEFINE_CLASS(tb_prio);
-ALP_BACKEND_REGISTER(tb_prio, high,
+ALP_BACKEND_REGISTER(tb_prio,
+                     high,
                      {
                          .silicon_ref = "vendor:soc:t1",
                          .vendor      = "zenith", /* alphabetically last, still wins on priority */
@@ -142,7 +143,8 @@ ALP_BACKEND_REGISTER(tb_prio, high,
                          .ops         = NULL,
                          .probe       = NULL,
                      });
-ALP_BACKEND_REGISTER(tb_prio, low,
+ALP_BACKEND_REGISTER(tb_prio,
+                     low,
                      {
                          .silicon_ref = "vendor:soc:t1",
                          .vendor      = "alif", /* alphabetically first, loses on priority */
@@ -162,7 +164,8 @@ ZTEST(alp_registry, test_tiebreak_higher_priority_wins)
 
 /* Tier 2: at equal priority, exact silicon_ref match beats "*" wildcard. */
 ALP_BACKEND_DEFINE_CLASS(tb_exactwild);
-ALP_BACKEND_REGISTER(tb_exactwild, exact,
+ALP_BACKEND_REGISTER(tb_exactwild,
+                     exact,
                      {
                          .silicon_ref = "vendor:soc:t2",
                          .vendor      = "renesas", /* alphabetically after the wildcard's vendor */
@@ -172,7 +175,8 @@ ALP_BACKEND_REGISTER(tb_exactwild, exact,
                          .probe       = NULL,
                      });
 ALP_BACKEND_REGISTER(
-    tb_exactwild, wild,
+    tb_exactwild,
+    wild,
     {
         .silicon_ref = "*",
         .vendor      = "alif", /* alphabetically first -- proves tier-2 dominates tier-3 */
@@ -187,7 +191,8 @@ ZTEST(alp_registry, test_tiebreak_exact_beats_wildcard_at_equal_priority)
 	const alp_backend_t *be = alp_backend_select("tb_exactwild", "vendor:soc:t2");
 	zassert_not_null(be);
 	zassert_equal(be->priority, 100);
-	zassert_equal(strcmp(be->vendor, "renesas"), 0,
+	zassert_equal(strcmp(be->vendor, "renesas"),
+	              0,
 	              "exact should beat wildcard at equal priority "
 	              "even when wildcard has lexicographically-smaller "
 	              "vendor; got %s",
@@ -196,7 +201,8 @@ ZTEST(alp_registry, test_tiebreak_exact_beats_wildcard_at_equal_priority)
 
 /* Tier 3a: two exacts at equal priority -- alphabetic vendor wins. */
 ALP_BACKEND_DEFINE_CLASS(tb_twoexact);
-ALP_BACKEND_REGISTER(tb_twoexact, renesas,
+ALP_BACKEND_REGISTER(tb_twoexact,
+                     renesas,
                      {
                          .silicon_ref = "vendor:soc:t3a",
                          .vendor      = "renesas",
@@ -205,7 +211,8 @@ ALP_BACKEND_REGISTER(tb_twoexact, renesas,
                          .ops         = NULL,
                          .probe       = NULL,
                      });
-ALP_BACKEND_REGISTER(tb_twoexact, alif,
+ALP_BACKEND_REGISTER(tb_twoexact,
+                     alif,
                      {
                          .silicon_ref = "vendor:soc:t3a",
                          .vendor      = "alif",
@@ -225,7 +232,8 @@ ZTEST(alp_registry, test_tiebreak_two_exact_alphabetic_vendor_wins)
 
 /* Tier 3b: two wildcards at equal priority -- alphabetic vendor wins. */
 ALP_BACKEND_DEFINE_CLASS(tb_twowild);
-ALP_BACKEND_REGISTER(tb_twowild, renesas,
+ALP_BACKEND_REGISTER(tb_twowild,
+                     renesas,
                      {
                          .silicon_ref = "*",
                          .vendor      = "renesas",
@@ -234,7 +242,8 @@ ALP_BACKEND_REGISTER(tb_twowild, renesas,
                          .ops         = NULL,
                          .probe       = NULL,
                      });
-ALP_BACKEND_REGISTER(tb_twowild, alif,
+ALP_BACKEND_REGISTER(tb_twowild,
+                     alif,
                      {
                          .silicon_ref = "*",
                          .vendor      = "alif",
@@ -251,8 +260,10 @@ ZTEST(alp_registry, test_tiebreak_two_wildcards_alphabetic_vendor_wins)
 	const alp_backend_t *be = alp_backend_select("tb_twowild", "vendor:soc:anything");
 	zassert_not_null(be);
 	zassert_equal(be->priority, 100);
-	zassert_equal(strcmp(be->vendor, "alif"), 0,
-	              "expected alif (alphabetic among wildcards), got %s", be->vendor);
+	zassert_equal(strcmp(be->vendor, "alif"),
+	              0,
+	              "expected alif (alphabetic among wildcards), got %s",
+	              be->vendor);
 }
 
 ZTEST(alp_registry, test_tiebreak_zero_matching_backends_returns_null)

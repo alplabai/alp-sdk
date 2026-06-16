@@ -14,33 +14,33 @@
 #include "alp/chips/da9292.h"
 
 /* Register map (datasheet Table 12, page 34). */
-#define DA9292_REG_PMC_STATUS_00 0x00u
-#define DA9292_REG_PMC_STATUS_01 0x01u
-#define DA9292_REG_PMC_EVENT_00 0x02u
-#define DA9292_REG_PMC_EVENT_01 0x03u
-#define DA9292_REG_PMC_MASK_00 0x04u
-#define DA9292_REG_PMC_MASK_01 0x05u
-#define DA9292_REG_PMC_CTRL_00 0x06u
-#define DA9292_REG_PMC_CTRL_01 0x07u /* CHx_EN / CHx_VSEL / VSTEP / DIS_PD */
-#define DA9292_REG_PMC_CTRL_02 0x08u
-#define DA9292_REG_PMC_CTRL_03 0x09u
+#define DA9292_REG_PMC_STATUS_00   0x00u
+#define DA9292_REG_PMC_STATUS_01   0x01u
+#define DA9292_REG_PMC_EVENT_00    0x02u
+#define DA9292_REG_PMC_EVENT_01    0x03u
+#define DA9292_REG_PMC_MASK_00     0x04u
+#define DA9292_REG_PMC_MASK_01     0x05u
+#define DA9292_REG_PMC_CTRL_00     0x06u
+#define DA9292_REG_PMC_CTRL_01     0x07u /* CHx_EN / CHx_VSEL / VSTEP / DIS_PD */
+#define DA9292_REG_PMC_CTRL_02     0x08u
+#define DA9292_REG_PMC_CTRL_03     0x09u
 #define DA9292_REG_PMC_VOUT_CH1_00 0x0Au /* CH1 VSEL=0 setpoint (LO range) */
 #define DA9292_REG_PMC_VOUT_CH1_01 0x0Bu /* CH1 VSEL=1 retention */
 #define DA9292_REG_PMC_VOUT_CH2_00 0x0Cu /* CH2 VSEL=0 */
 #define DA9292_REG_PMC_VOUT_CH2_01 0x0Du /* CH2 VSEL=1 */
-#define DA9292_REG_PMC_DEV_ID 0x19u
-#define DA9292_REG_PMC_REV_ID 0x1Au
-#define DA9292_REG_PMC_CFG_REV 0x1Bu
+#define DA9292_REG_PMC_DEV_ID      0x19u
+#define DA9292_REG_PMC_REV_ID      0x1Au
+#define DA9292_REG_PMC_CFG_REV     0x1Bu
 
 /* PMC_CTRL_01 bit positions (datasheet Table 21, page 40-41). */
-#define DA9292_CTRL01_CH2_VSTEP (1u << 7)
-#define DA9292_CTRL01_CH1_VSTEP (1u << 6)
+#define DA9292_CTRL01_CH2_VSTEP  (1u << 7)
+#define DA9292_CTRL01_CH1_VSTEP  (1u << 6)
 #define DA9292_CTRL01_CH2_DIS_PD (1u << 5)
 #define DA9292_CTRL01_CH1_DIS_PD (1u << 4)
-#define DA9292_CTRL01_CH2_VSEL (1u << 3)
-#define DA9292_CTRL01_CH1_VSEL (1u << 2)
-#define DA9292_CTRL01_CH2_EN (1u << 1)
-#define DA9292_CTRL01_CH1_EN (1u << 0)
+#define DA9292_CTRL01_CH2_VSEL   (1u << 3)
+#define DA9292_CTRL01_CH1_VSEL   (1u << 2)
+#define DA9292_CTRL01_CH2_EN     (1u << 1)
+#define DA9292_CTRL01_CH1_EN     (1u << 0)
 
 /* PMC_STATUS_00 bit layout -- VERIFIED against DA9292 Datasheet
  * Rev 2.2 (R16DS0518EJ0220), Table 14 (p.36-37) on 2026-06-06:
@@ -61,30 +61,30 @@
  * TEMP_CRIT [1], VIN_UVLO [0]. */
 #define DA9292_STATUS01_TEMP_WARN (1u << 2)
 #define DA9292_STATUS01_TEMP_CRIT (1u << 1)
-#define DA9292_STATUS01_VIN_UVLO (1u << 0)
+#define DA9292_STATUS01_VIN_UVLO  (1u << 0)
 
 /* PMC_EVENT_00 / 01 bit layout per datasheet Tables 16-17.  Same
  * layout as STATUS but the access type is RWC1 (write-1-to-clear). */
-#define DA9292_EVENT00_CH2_OC (1u << 7)
-#define DA9292_EVENT00_CH1_OC (1u << 6)
-#define DA9292_EVENT00_CH2_OV (1u << 5)
-#define DA9292_EVENT00_CH1_OV (1u << 4)
-#define DA9292_EVENT00_CH2_UV (1u << 3)
-#define DA9292_EVENT00_CH1_UV (1u << 2)
-#define DA9292_EVENT00_CH2_PG (1u << 1)
-#define DA9292_EVENT00_CH1_PG (1u << 0)
+#define DA9292_EVENT00_CH2_OC    (1u << 7)
+#define DA9292_EVENT00_CH1_OC    (1u << 6)
+#define DA9292_EVENT00_CH2_OV    (1u << 5)
+#define DA9292_EVENT00_CH1_OV    (1u << 4)
+#define DA9292_EVENT00_CH2_UV    (1u << 3)
+#define DA9292_EVENT00_CH1_UV    (1u << 2)
+#define DA9292_EVENT00_CH2_PG    (1u << 1)
+#define DA9292_EVENT00_CH1_PG    (1u << 0)
 #define DA9292_EVENT01_TEMP_WARN (1u << 2)
 #define DA9292_EVENT01_TEMP_CRIT (1u << 1)
-#define DA9292_EVENT01_VIN_UVLO (1u << 0)
+#define DA9292_EVENT01_VIN_UVLO  (1u << 0)
 
 /* VSTEP=0 (5 mV step) encoding:
  *   register byte = 0x3C + (mV - 300) / 5
  *   minimum = 0x3C (0.300 V); maximum = 0xFF (1.275 V); 0x00..0x3B reserved.
  * Reset default is 0xA3 = 0.815 V. */
 #define DA9292_VSET_LO_BASE_BYTE 0x3Cu
-#define DA9292_VSET_LO_MIN_MV 300u
-#define DA9292_VSET_LO_MAX_MV 1275u
-#define DA9292_VSET_LO_STEP_MV 5u
+#define DA9292_VSET_LO_MIN_MV    300u
+#define DA9292_VSET_LO_MAX_MV    1275u
+#define DA9292_VSET_LO_STEP_MV   5u
 
 static uint8_t vout_reg_for(da9292_channel_t ch)
 {
@@ -124,12 +124,12 @@ alp_status_t da9292_init(da9292_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
 	alp_status_t s      = reg_read(ctx, DA9292_REG_PMC_DEV_ID, &dev_id);
 	if (s != ALP_OK) return ALP_ERR_NOT_READY;
 	if (dev_id == 0x00 || dev_id == 0xFF) return ALP_ERR_NOT_READY;
-	ctx->dev_id    = dev_id;
+	ctx->dev_id = dev_id;
 
 	uint8_t rev_id = 0;
 	s              = reg_read(ctx, DA9292_REG_PMC_REV_ID, &rev_id);
 	if (s != ALP_OK) return s;
-	ctx->rev_id      = rev_id;
+	ctx->rev_id = rev_id;
 
 	ctx->initialised = true;
 	return ALP_OK;

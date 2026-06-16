@@ -12,15 +12,15 @@
 #include "alp/peripheral.h"
 
 #define ST7789_CMD_SWRESET 0x01u
-#define ST7789_CMD_SLPOUT 0x11u
-#define ST7789_CMD_COLMOD 0x3Au /* COLour MODe; 0x05 = 16bpp */
-#define ST7789_CMD_MADCTL 0x36u
-#define ST7789_CMD_INVON 0x21u
-#define ST7789_CMD_NORON 0x13u
-#define ST7789_CMD_DISPON 0x29u
-#define ST7789_CMD_CASET 0x2Au
-#define ST7789_CMD_RASET 0x2Bu
-#define ST7789_CMD_RAMWR 0x2Cu
+#define ST7789_CMD_SLPOUT  0x11u
+#define ST7789_CMD_COLMOD  0x3Au /* COLour MODe; 0x05 = 16bpp */
+#define ST7789_CMD_MADCTL  0x36u
+#define ST7789_CMD_INVON   0x21u
+#define ST7789_CMD_NORON   0x13u
+#define ST7789_CMD_DISPON  0x29u
+#define ST7789_CMD_CASET   0x2Au
+#define ST7789_CMD_RASET   0x2Bu
+#define ST7789_CMD_RAMWR   0x2Cu
 
 static alp_status_t st7789_send(st7789_t *dev, bool is_cmd, const uint8_t *buf, size_t len)
 {
@@ -39,8 +39,12 @@ static alp_status_t st7789_data(st7789_t *dev, const uint8_t *buf, size_t len)
 	return st7789_send(dev, false, buf, len);
 }
 
-alp_status_t st7789_init(st7789_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gpio_t *reset,
-                         uint16_t width, uint16_t height)
+alp_status_t st7789_init(st7789_t   *dev,
+                         alp_spi_t  *spi,
+                         alp_gpio_t *dc,
+                         alp_gpio_t *reset,
+                         uint16_t    width,
+                         uint16_t    height)
 {
 	if (dev == NULL || spi == NULL || dc == NULL) return ALP_ERR_INVAL;
 	if (width == 0 || width > ST7789_MAX_WIDTH) return ALP_ERR_INVAL;

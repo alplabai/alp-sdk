@@ -24,10 +24,10 @@
 /* Register map (BST-BMI323-DS000)                                     */
 /* ------------------------------------------------------------------ */
 
-#define REG_CHIP_ID 0x00
-#define REG_ACC_CONF 0x20
-#define REG_GYR_CONF 0x21
-#define REG_TEMP_DATA 0x09  /* 16-bit signed; LSB first on this reg */
+#define REG_CHIP_ID    0x00
+#define REG_ACC_CONF   0x20
+#define REG_GYR_CONF   0x21
+#define REG_TEMP_DATA  0x09 /* 16-bit signed; LSB first on this reg */
 #define REG_ACC_DATA_X 0x03 /* X, Y, Z = 3 × int16, LSB first */
 #define REG_GYR_DATA_X 0x06
 
@@ -76,8 +76,8 @@ alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	dev->gyro_fs     = BMI323_GYRO_FS_2000_DPS;
 	dev->initialised = false;
 
-	uint8_t      id  = 0;
-	alp_status_t s   = bmi323_read_id(dev, &id);
+	uint8_t      id = 0;
+	alp_status_t s  = bmi323_read_id(dev, &id);
 	if (s != ALP_OK) return s;
 	if (id != BMI323_CHIP_ID) return ALP_ERR_IO;
 

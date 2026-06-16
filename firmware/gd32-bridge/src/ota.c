@@ -134,8 +134,8 @@ static bool meta_current(ota_meta_record_t *out, uint32_t *which_addr)
  * active slot's entry is rewritten (and only when `update_entry` -- a
  * ROLLBACK flips `active_slot` without touching the descriptors, so the
  * rolled-to slot keeps the len/CRC recorded when it was last written). */
-static bool meta_commit(uint8_t active_slot, bool update_entry, uint32_t fw_ver, uint32_t img_len,
-                        uint32_t img_crc)
+static bool meta_commit(
+    uint8_t active_slot, bool update_entry, uint32_t fw_ver, uint32_t img_len, uint32_t img_crc)
 {
 	ota_meta_record_t rec;
 	ota_meta_record_t cur;
@@ -171,8 +171,8 @@ static uint8_t active_slot_now(void)
 }
 
 /* ---- opcode handlers ------------------------------------------------ */
-static gd32_bridge_status_t h_begin(const uint8_t *req, size_t len, uint8_t *reply, size_t cap,
-                                    size_t *rlen)
+static gd32_bridge_status_t
+h_begin(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen)
 {
 	/* Host OTA_BEGIN req: size:u32, expected_crc32:u32
      * [, fw_major:u8, fw_minor:u8, fw_patch:u8  -- v0.7 additive form].
@@ -216,8 +216,8 @@ static gd32_bridge_status_t h_begin(const uint8_t *req, size_t len, uint8_t *rep
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t h_write(const uint8_t *req, size_t len, uint8_t *reply, size_t cap,
-                                    size_t *rlen)
+static gd32_bridge_status_t
+h_write(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen)
 {
 	/* Host OTA_WRITE_CHUNK req: offset:u32, len:u8, data[len].
      * Reply: received_bytes:u32.
@@ -320,8 +320,8 @@ static gd32_bridge_status_t h_commit(void)
 	if (s_state != OTA_ST_VERIFIED) {
 		return STATUS_NOT_READY;
 	}
-	if (!meta_commit(s_inactive, true, s_fw_version /* 0 = legacy BEGIN, unknown */, s_img_len,
-	                 s_img_crc)) {
+	if (!meta_commit(
+	        s_inactive, true, s_fw_version /* 0 = legacy BEGIN, unknown */, s_img_len, s_img_crc)) {
 		s_state = OTA_ST_ERROR;
 		s_err   = 6u;
 		return STATUS_IO;
@@ -378,9 +378,12 @@ static gd32_bridge_status_t h_get_state(uint8_t *reply, size_t cap, size_t *rlen
 	return STATUS_OK;
 }
 
-gd32_bridge_status_t ota_dispatch(uint8_t cmd, const uint8_t *req_payload, size_t req_payload_len,
-                                  uint8_t *reply_payload, size_t reply_payload_cap,
-                                  size_t *reply_payload_len)
+gd32_bridge_status_t ota_dispatch(uint8_t        cmd,
+                                  const uint8_t *req_payload,
+                                  size_t         req_payload_len,
+                                  uint8_t       *reply_payload,
+                                  size_t         reply_payload_cap,
+                                  size_t        *reply_payload_len)
 {
 	*reply_payload_len = 0u;
 	if (!ota_fmc_supported()) {
@@ -388,11 +391,11 @@ gd32_bridge_status_t ota_dispatch(uint8_t cmd, const uint8_t *req_payload, size_
 	}
 	switch (cmd) {
 	case CMD_OTA_BEGIN:
-		return h_begin(req_payload, req_payload_len, reply_payload, reply_payload_cap,
-		               reply_payload_len);
+		return h_begin(
+		    req_payload, req_payload_len, reply_payload, reply_payload_cap, reply_payload_len);
 	case CMD_OTA_WRITE_CHUNK:
-		return h_write(req_payload, req_payload_len, reply_payload, reply_payload_cap,
-		               reply_payload_len);
+		return h_write(
+		    req_payload, req_payload_len, reply_payload, reply_payload_cap, reply_payload_len);
 	case CMD_OTA_VERIFY:
 		return h_verify(reply_payload, reply_payload_cap, reply_payload_len);
 	case CMD_OTA_COMMIT:
@@ -412,9 +415,12 @@ gd32_bridge_status_t ota_dispatch(uint8_t cmd, const uint8_t *req_payload, size_
 
 #else /* !BRIDGE_OTA_PARTITIONED — OTA inert (safe default) */
 
-gd32_bridge_status_t ota_dispatch(uint8_t cmd, const uint8_t *req_payload, size_t req_payload_len,
-                                  uint8_t *reply_payload, size_t reply_payload_cap,
-                                  size_t *reply_payload_len)
+gd32_bridge_status_t ota_dispatch(uint8_t        cmd,
+                                  const uint8_t *req_payload,
+                                  size_t         req_payload_len,
+                                  uint8_t       *reply_payload,
+                                  size_t         reply_payload_cap,
+                                  size_t        *reply_payload_len)
 {
 	(void)cmd;
 	(void)req_payload;

@@ -49,8 +49,9 @@ static size_t bounded_len(const char *s, size_t cap)
 	return n;
 }
 
-alp_status_t ulog_entry_encode(const alp_update_log_entry_t *e, const uint8_t prev_hash[32],
-                               uint8_t out[ULOG_ENTRY_WIRE_LEN])
+alp_status_t ulog_entry_encode(const alp_update_log_entry_t *e,
+                               const uint8_t                 prev_hash[32],
+                               uint8_t                       out[ULOG_ENTRY_WIRE_LEN])
 {
 	if (e == NULL || prev_hash == NULL || out == NULL) return ALP_ERR_INVAL;
 	size_t vlen = bounded_len(e->fw_version, ALP_UPDATE_LOG_FWVER_MAX + 1);
@@ -67,8 +68,10 @@ alp_status_t ulog_entry_encode(const alp_update_log_entry_t *e, const uint8_t pr
 	return ALP_OK;
 }
 
-alp_status_t ulog_entry_decode(const uint8_t *buf, size_t len, alp_update_log_entry_t *e_out,
-                               uint8_t prev_hash_out[32])
+alp_status_t ulog_entry_decode(const uint8_t          *buf,
+                               size_t                  len,
+                               alp_update_log_entry_t *e_out,
+                               uint8_t                 prev_hash_out[32])
 {
 	if (buf == NULL || e_out == NULL) return ALP_ERR_INVAL;
 	if (len < ULOG_ENTRY_WIRE_LEN) return ALP_ERR_INVAL;
@@ -174,7 +177,8 @@ alp_status_t ulog_engine_append(const alp_secure_store_if      *store,
 
 alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
                                 const alp_monotonic_counter_if *ctr,
-                                alp_update_log_verdict_t *verdict_out, uint64_t *bad_seq_out)
+                                alp_update_log_verdict_t       *verdict_out,
+                                uint64_t                       *bad_seq_out)
 {
 	if (store == NULL || ctr == NULL || verdict_out == NULL) return ALP_ERR_INVAL;
 	if (bad_seq_out) *bad_seq_out = 0;
@@ -248,15 +252,16 @@ alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
 }
 
 alp_status_t ulog_engine_count(const alp_secure_store_if      *store,
-                               const alp_monotonic_counter_if *ctr, uint64_t *count_out)
+                               const alp_monotonic_counter_if *ctr,
+                               uint64_t                       *count_out)
 {
 	(void)store;
 	if (ctr == NULL || count_out == NULL) return ALP_ERR_INVAL;
 	return ctr->read(ctr->ctx, 0, count_out);
 }
 
-alp_status_t ulog_engine_get(const alp_secure_store_if *store, uint64_t seq,
-                             alp_update_log_entry_t *e_out)
+alp_status_t
+ulog_engine_get(const alp_secure_store_if *store, uint64_t seq, alp_update_log_entry_t *e_out)
 {
 	if (store == NULL || e_out == NULL) return ALP_ERR_INVAL;
 	char key[24];

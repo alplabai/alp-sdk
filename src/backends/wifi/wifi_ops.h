@@ -27,8 +27,9 @@ typedef struct alp_wifi_backend_state {
 
 struct alp_wifi_ops {
 	alp_status_t (*open)(alp_wifi_backend_state_t *state, alp_capabilities_t *caps_out);
-	alp_status_t (*connect)(alp_wifi_backend_state_t *state, const alp_wifi_credentials_t *creds,
-	                        uint32_t timeout_ms);
+	alp_status_t (*connect)(alp_wifi_backend_state_t     *state,
+	                        const alp_wifi_credentials_t *creds,
+	                        uint32_t                      timeout_ms);
 	alp_status_t (*disconnect)(alp_wifi_backend_state_t *state);
 	void (*close)(alp_wifi_backend_state_t *state);
 };

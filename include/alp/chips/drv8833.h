@@ -55,8 +55,12 @@ typedef struct {
  * @param nsleep  Open GPIO for nSLEEP (NULL if tied permanently high).
  * @return `ALP_OK` on success.
  */
-alp_status_t drv8833_init(drv8833_t *dev, alp_pwm_t *in1, alp_pwm_t *in2, alp_pwm_t *in3,
-                          alp_pwm_t *in4, alp_gpio_t *nsleep);
+alp_status_t drv8833_init(drv8833_t  *dev,
+                          alp_pwm_t  *in1,
+                          alp_pwm_t  *in2,
+                          alp_pwm_t  *in3,
+                          alp_pwm_t  *in4,
+                          alp_gpio_t *nsleep);
 
 /**
  * @brief Set channel-A pulse-width.

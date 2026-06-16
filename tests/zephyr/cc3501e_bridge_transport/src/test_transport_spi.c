@@ -79,7 +79,8 @@ ZTEST(cc3501e_bridge_transport, test_get_version_returns_protocol_version)
 	assert_reply_header(reply, ALP_CC3501E_CMD_GET_VERSION, 3u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "GET_VERSION -> RESP_OK");
 	const uint16_t version = (uint16_t)reply[5] | ((uint16_t)reply[6] << 8);
-	zassert_equal(version, (uint16_t)ALP_CC3501E_PROTOCOL_VERSION,
+	zassert_equal(version,
+	              (uint16_t)ALP_CC3501E_PROTOCOL_VERSION,
 	              "GET_VERSION returns the wire-protocol version (the host's compat gate)");
 }
 
@@ -111,7 +112,8 @@ ZTEST(cc3501e_bridge_transport, test_unknown_opcode_rejected)
 
 	zassert_equal(n, 5u, "unknown-opcode reply is header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_SCAN_START, 1u);
-	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID,
+	zassert_equal(reply[4],
+	              ALP_CC3501E_RESP_ERR_INVALID,
 	              "unimplemented opcode -> RESP_ERR_INVALID (header contract)");
 }
 

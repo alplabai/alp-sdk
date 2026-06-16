@@ -11,8 +11,8 @@
 
 #include "alp/chips/semtech_sx1262.h"
 
-alp_status_t semtech_sx1262_init(semtech_sx1262_t *dev, alp_spi_t *spi, alp_gpio_t *nreset,
-                                 alp_gpio_t *busy)
+alp_status_t
+semtech_sx1262_init(semtech_sx1262_t *dev, alp_spi_t *spi, alp_gpio_t *nreset, alp_gpio_t *busy)
 {
 	if (dev == NULL || spi == NULL) return ALP_ERR_INVAL;
 	memset(dev, 0, sizeof(*dev));

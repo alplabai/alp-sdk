@@ -169,7 +169,8 @@ static size_t bytes_per_frame(const alp_audio_config_t *cfg)
 
 #define ALP_PDM_DEV_OR_NULL(idx)                                                                   \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_pdm, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_pdm, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_pdm, idx)))),                                  \
+	            (NULL))
 
 static const struct device *const alp_pdm_devs[] = {
 	ALP_PDM_DEV_OR_NULL(0),
@@ -196,8 +197,8 @@ static void free_in_be(struct hw_in_be *be)
 /* DC-block: y[n] = x[n] - x[n-1] + alpha * y[n-1].  alpha = 0.995 in
  * Q15 (fixed point) so the multiply costs one >>15.  Operates in place
  * on signed 16-bit interleaved PCM. */
-static void dc_block_s16(int16_t *frames, size_t n_frames, uint8_t channels, int32_t *x_prev,
-                         int32_t *y_prev)
+static void
+dc_block_s16(int16_t *frames, size_t n_frames, uint8_t channels, int32_t *x_prev, int32_t *y_prev)
 {
 	const int32_t alpha_q15 = 32604; /* round(0.995 * 32768) */
 	for (size_t i = 0; i < n_frames; ++i) {
@@ -219,8 +220,9 @@ static void dc_block_s16(int16_t *frames, size_t n_frames, uint8_t channels, int
 /* Audio input ops                                                     */
 /* ================================================================== */
 
-static alp_status_t z_in_open(const alp_audio_config_t *cfg, alp_audio_in_backend_state_t *state,
-                              alp_capabilities_t *caps_out)
+static alp_status_t z_in_open(const alp_audio_config_t     *cfg,
+                              alp_audio_in_backend_state_t *state,
+                              alp_capabilities_t           *caps_out)
 {
 	(void)caps_out;
 
@@ -323,8 +325,11 @@ static alp_status_t z_in_stop(alp_audio_in_backend_state_t *state)
 #endif
 }
 
-static alp_status_t z_in_read(alp_audio_in_backend_state_t *state, void *buf, size_t frames,
-                              size_t *out_frames, uint32_t timeout_ms)
+static alp_status_t z_in_read(alp_audio_in_backend_state_t *state,
+                              void                         *buf,
+                              size_t                        frames,
+                              size_t                       *out_frames,
+                              uint32_t                      timeout_ms)
 {
 #if defined(CONFIG_ALP_SDK_AUDIO_IN)
 	struct hw_in_be *be = (struct hw_in_be *)state->be_data;
@@ -411,8 +416,9 @@ static void free_out_be(struct hw_out_be *be)
 
 #endif /* CONFIG_ALP_SDK_AUDIO_OUT */
 
-static alp_status_t z_out_open(const alp_audio_config_t *cfg, alp_audio_out_backend_state_t *state,
-                               alp_capabilities_t *caps_out)
+static alp_status_t z_out_open(const alp_audio_config_t      *cfg,
+                               alp_audio_out_backend_state_t *state,
+                               alp_capabilities_t            *caps_out)
 {
 	(void)caps_out;
 
@@ -424,7 +430,7 @@ static alp_status_t z_out_open(const alp_audio_config_t *cfg, alp_audio_out_back
 	struct hw_out_be *be = alloc_out_be();
 	if (be == NULL) return ALP_ERR_NOMEM;
 
-	be->volume_q8         = 0x0100; /* unity */
+	be->volume_q8 = 0x0100; /* unity */
 
 	alp_i2s_config_t icfg = {
 		.bus_id         = cfg->peripheral_id,
@@ -480,8 +486,11 @@ static alp_status_t z_out_stop(alp_audio_out_backend_state_t *state)
 #endif
 }
 
-static alp_status_t z_out_write(alp_audio_out_backend_state_t *state, const void *buf,
-                                size_t frames, size_t *out_frames, uint32_t timeout_ms)
+static alp_status_t z_out_write(alp_audio_out_backend_state_t *state,
+                                const void                    *buf,
+                                size_t                         frames,
+                                size_t                        *out_frames,
+                                uint32_t                       timeout_ms)
 {
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
@@ -589,7 +598,8 @@ static const alp_audio_ops_t _ops = {
 	.out_close      = z_out_close,
 };
 
-ALP_BACKEND_REGISTER(audio, zephyr_drv,
+ALP_BACKEND_REGISTER(audio,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

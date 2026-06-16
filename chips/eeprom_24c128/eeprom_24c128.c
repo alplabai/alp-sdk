@@ -18,7 +18,7 @@
  *  one write cycle and poll_for_ack returned ALP_ERR_TIMEOUT on every page write
  *  (the chip was still busy), so eeprom_24c128_write failed even though the data
  *  had been accepted -- validated on the E8 (I2C2). */
-#define EEPROM_WRITE_POLL_MAX 20
+#define EEPROM_WRITE_POLL_MAX     20
 #define EEPROM_WRITE_POLL_STEP_US 1000u
 
 static alp_status_t poll_for_ack(eeprom_24c128_t *ctx)
@@ -65,8 +65,8 @@ alp_status_t eeprom_24c128_read(eeprom_24c128_t *ctx, uint16_t offset, uint8_t *
 	return alp_i2c_write_read(ctx->bus, ctx->addr, addr_buf, sizeof(addr_buf), out, len);
 }
 
-alp_status_t eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data,
-                                 size_t len)
+alp_status_t
+eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, size_t len)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (data == NULL && len > 0) return ALP_ERR_INVAL;

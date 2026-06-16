@@ -401,8 +401,8 @@ alp_status_t gd32g553_gpio_write(gd32g553_t *ctx, uint32_t mask, uint32_t levels
  *  permanently high.  The firmware rounds to its hardware-achievable
  *  resolution; the caller can read back via @ref gd32g553_pwm_get to
  *  see what actually got programmed. */
-alp_status_t gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns,
-                              uint32_t duty_ns);
+alp_status_t
+gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t duty_ns);
 
 /** @brief Read back what a PWM channel's timer is ACTUALLY generating.
  *
@@ -414,8 +414,8 @@ alp_status_t gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_
  *      reported period too;
  *    - before the first set, a channel reports the boot default
  *      (65.536 ms period, 0 duty), not zeros. */
-alp_status_t gd32g553_pwm_get(gd32g553_t *ctx, uint8_t channel, uint32_t *period_ns,
-                              uint32_t *duty_ns);
+alp_status_t
+gd32g553_pwm_get(gd32g553_t *ctx, uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns);
 
 /** @brief Read @p samples ADC measurements from @p channel.
  *
@@ -551,9 +551,11 @@ typedef enum {
  *  @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
  *          ALP_ERR_NOSUPPORT (firmware HAL body not yet wired).
  */
-alp_status_t gd32g553_pwm_configure(gd32g553_t *ctx, uint8_t channel,
-                                    gd32g553_pwm_align_t align_mode, uint32_t dead_time_ns,
-                                    uint8_t break_cfg);
+alp_status_t gd32g553_pwm_configure(gd32g553_t          *ctx,
+                                    uint8_t              channel,
+                                    gd32g553_pwm_align_t align_mode,
+                                    uint32_t             dead_time_ns,
+                                    uint8_t              break_cfg);
 
 /** Sticky per-channel ADC tuning.  @ref gd32g553_adc_read honours
  *  the configured oversampling + sample-and-hold cycles + resolution
@@ -577,8 +579,11 @@ alp_status_t gd32g553_pwm_configure(gd32g553_t *ctx, uint8_t channel,
  *  @return ALP_OK / ALP_ERR_INVAL (bad resolution) / ALP_ERR_OUT_OF_RANGE /
  *          ALP_ERR_NOSUPPORT (firmware HAL body not yet wired).
  */
-alp_status_t gd32g553_adc_configure(gd32g553_t *ctx, uint8_t channel, uint16_t oversample_ratio,
-                                    uint16_t sample_cycles, uint8_t resolution_bits);
+alp_status_t gd32g553_adc_configure(gd32g553_t *ctx,
+                                    uint8_t     channel,
+                                    uint16_t    oversample_ratio,
+                                    uint16_t    sample_cycles,
+                                    uint8_t     resolution_bits);
 
 /** Start DMA-backed continuous ADC acquisition into the firmware's
  *  ring buffer.  Host drains samples via @ref gd32g553_adc_stream_read.
@@ -603,8 +608,10 @@ alp_status_t gd32g553_adc_configure(gd32g553_t *ctx, uint8_t channel, uint16_t o
  *                        0 returns @ref ALP_ERR_INVAL; above the cap
  *                        returns @ref ALP_ERR_OUT_OF_RANGE.
  */
-alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx, uint8_t stream_id, uint8_t channel,
-                                       uint32_t sample_rate_hz);
+alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx,
+                                       uint8_t     stream_id,
+                                       uint8_t     channel,
+                                       uint32_t    sample_rate_hz);
 
 /** Drain up to @p max_samples samples from the named stream's ring.
  *  Caller buffer must be at least @p max_samples entries.
@@ -622,8 +629,8 @@ alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx, uint8_t stream_id, uint8
  *          ALP_ERR_BUSY (firmware ring overran since last poll;
  *          host should poll faster).
  */
-alp_status_t gd32g553_adc_stream_read(gd32g553_t *ctx, uint8_t stream_id, uint8_t max_samples,
-                                      uint8_t *got_samples, uint16_t *mv);
+alp_status_t gd32g553_adc_stream_read(
+    gd32g553_t *ctx, uint8_t stream_id, uint8_t max_samples, uint8_t *got_samples, uint16_t *mv);
 
 /** Stop the named stream, free its DMA channel, flush the ring. */
 alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id);
@@ -710,9 +717,12 @@ typedef enum {
  *         wired) / ALP_ERR_OUT_OF_RANGE (input outside the function's
  *         domain, e.g. sqrt(negative) in Q31) / ALP_ERR_IO.
  */
-alp_status_t gd32g553_tmu_compute(gd32g553_t *ctx, gd32g553_tmu_function_t function,
-                                  gd32g553_tmu_format_t format, uint32_t in_a, uint32_t in_b,
-                                  uint32_t *result_out);
+alp_status_t gd32g553_tmu_compute(gd32g553_t             *ctx,
+                                  gd32g553_tmu_function_t function,
+                                  gd32g553_tmu_format_t   format,
+                                  uint32_t                in_a,
+                                  uint32_t                in_b,
+                                  uint32_t               *result_out);
 
 /* ------------------------------------------------------------------ */
 /* v0.5 (§2B.2 + §2B.3) -- advanced timer extras + power-mode set     */
@@ -758,8 +768,10 @@ alp_status_t gd32g553_pwm_capture_begin(gd32g553_t *ctx, uint8_t channel, uint8_
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
  */
-alp_status_t gd32g553_pwm_capture_read(gd32g553_t *ctx, uint8_t channel, uint32_t *period_ns,
-                                       uint32_t *pulse_ns);
+alp_status_t gd32g553_pwm_capture_read(gd32g553_t *ctx,
+                                       uint8_t     channel,
+                                       uint32_t   *period_ns,
+                                       uint32_t   *pulse_ns);
 
 /**
  * @brief Stop input-capture mode on a PWM channel.
@@ -829,8 +841,10 @@ alp_status_t gd32g553_timer_sync(gd32g553_t *ctx, uint8_t master, uint8_t slave,
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
  */
-alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx, uint8_t mode, uint32_t wake_bitmap,
-                                     uint32_t wake_after_ms);
+alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx,
+                                     uint8_t     mode,
+                                     uint32_t    wake_bitmap,
+                                     uint32_t    wake_after_ms);
 
 /* ------------------------------------------------------------------ */
 /* v0.5 (§2B wave-2) -- chunked DSP-chain upload                       */
@@ -914,9 +928,12 @@ alp_status_t gd32g553_adc_dsp_chain_open(gd32g553_t *ctx, uint8_t *chain_id_out)
  *         too large), @ref ALP_ERR_NOSUPPORT (firmware HAL absent),
  *         or a transport error.
  */
-alp_status_t gd32g553_adc_dsp_stage_push(gd32g553_t *ctx, uint8_t chain_id, uint8_t stage_index,
-                                         uint8_t kind, const uint8_t *stage_params,
-                                         uint16_t stage_params_len);
+alp_status_t gd32g553_adc_dsp_stage_push(gd32g553_t    *ctx,
+                                         uint8_t        chain_id,
+                                         uint8_t        stage_index,
+                                         uint8_t        kind,
+                                         const uint8_t *stage_params,
+                                         uint16_t       stage_params_len);
 
 /**
  * @brief Attach a fully-populated chain to a streaming ADC source.
@@ -1017,9 +1034,12 @@ typedef struct {
  * @return ALP_OK / ALP_ERR_NOSUPPORT (firmware lacks the bodies) /
  *         transport error.
  */
-alp_status_t gd32g553_ota_begin(gd32g553_t *ctx, uint32_t size_bytes, uint32_t expected_crc32,
-                                const gd32g553_version_t *fw_version, uint16_t *chunk_max_bytes,
-                                gd32g553_ota_slot_t *target_slot);
+alp_status_t gd32g553_ota_begin(gd32g553_t               *ctx,
+                                uint32_t                  size_bytes,
+                                uint32_t                  expected_crc32,
+                                const gd32g553_version_t *fw_version,
+                                uint16_t                 *chunk_max_bytes,
+                                gd32g553_ota_slot_t      *target_slot);
 
 /**
  * @brief Write one chunk of the payload at @p offset.
@@ -1045,8 +1065,11 @@ alp_status_t gd32g553_ota_begin(gd32g553_t *ctx, uint32_t size_bytes, uint32_t e
  *                        <= the `chunk_max_bytes` returned by BEGIN.
  * @param received_bytes  Out: running total the firmware has seen.
  */
-alp_status_t gd32g553_ota_write_chunk(gd32g553_t *ctx, uint32_t offset, const uint8_t *data,
-                                      size_t data_len, uint32_t *received_bytes);
+alp_status_t gd32g553_ota_write_chunk(gd32g553_t    *ctx,
+                                      uint32_t       offset,
+                                      const uint8_t *data,
+                                      size_t         data_len,
+                                      uint32_t      *received_bytes);
 
 /**
  * @brief Ask the bridge to re-compute the CRC32 over the staging

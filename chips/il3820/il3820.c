@@ -63,8 +63,8 @@ alp_status_t il3820_hw_reset(il3820_t *dev)
 	return ALP_OK;
 }
 
-alp_status_t il3820_init(il3820_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gpio_t *reset,
-                         alp_gpio_t *busy)
+alp_status_t
+il3820_init(il3820_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gpio_t *reset, alp_gpio_t *busy)
 {
 	if (dev == NULL || spi == NULL || dc == NULL) return ALP_ERR_INVAL;
 	memset(dev, 0, sizeof(*dev));

@@ -137,8 +137,8 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 		/* Reply header clocked out; now the reply payload (status + data
          * = reply_len - 4 bytes, always >= 1). */
 		phase = PH_REPLY_PAYLOAD;
-		arm_transfer(NULL, &reply_buf[ALP_CC3501E_HEADER_BYTES],
-		             reply_len - ALP_CC3501E_HEADER_BYTES);
+		arm_transfer(
+		    NULL, &reply_buf[ALP_CC3501E_HEADER_BYTES], reply_len - ALP_CC3501E_HEADER_BYTES);
 		break;
 
 	case PH_REPLY_PAYLOAD:
@@ -162,7 +162,7 @@ void bridge_transport_spi_hw_init(void)
 	params.frameFormat         = SPI_POL0_PHA0; /* mode 0, per the host driver / chip manifest */
 	params.dataSize            = 8;
 
-	spi                        = SPI_open(CONFIG_SPI_0, &params);
+	spi = SPI_open(CONFIG_SPI_0, &params);
 	if (spi == NULL) {
 		/* No console this early; the host's PING simply never completes
          * and bring-up code reports the dead link. */

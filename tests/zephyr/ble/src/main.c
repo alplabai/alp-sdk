@@ -19,8 +19,8 @@ ZTEST(alp_ble, test_open_no_controller_returns_null)
 {
 	alp_ble_t *b = alp_ble_open();
 	zassert_is_null(b, "alp_ble_open without BT must yield NULL");
-	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d",
-	              (int)alp_last_error());
+	zassert_equal(
+	    alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d", (int)alp_last_error());
 }
 
 ZTEST(alp_ble, test_advertise_null_handle_errors)

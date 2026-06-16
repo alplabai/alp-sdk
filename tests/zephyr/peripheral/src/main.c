@@ -335,9 +335,11 @@ ZTEST(alp_peripheral, test_adc_resolution_exceeds_soc_max)
 	    .reference       = ALP_ADC_REF_INTERNAL,
 	});
 	zassert_is_null(a);
-	zassert_equal(alp_last_error(), ALP_ERR_OUT_OF_RANGE,
+	zassert_equal(alp_last_error(),
+	              ALP_ERR_OUT_OF_RANGE,
 	              "expected OUT_OF_RANGE for 25-bit ADC on E3 (max=%d), got %d",
-	              ALP_SOC_ADC_MAX_RESOLUTION_BITS, (int)alp_last_error());
+	              ALP_SOC_ADC_MAX_RESOLUTION_BITS,
+	              (int)alp_last_error());
 }
 
 ZTEST(alp_peripheral, test_can_fd_on_soc_with_fd_support)
@@ -378,8 +380,8 @@ ZTEST(alp_peripheral, test_v2n_supervisor_pwm_open_not_ready_without_buses)
 	    .polarity   = ALP_PWM_POLARITY_NORMAL,
 	});
 	zassert_is_null(p);
-	zassert_equal(alp_last_error(), ALP_ERR_NOT_READY, "expected NOT_READY, got %d",
-	              (int)alp_last_error());
+	zassert_equal(
+	    alp_last_error(), ALP_ERR_NOT_READY, "expected NOT_READY, got %d", (int)alp_last_error());
 }
 
 ZTEST(alp_peripheral, test_v2n_supervisor_adc_open_not_ready_without_buses)
@@ -390,8 +392,8 @@ ZTEST(alp_peripheral, test_v2n_supervisor_adc_open_not_ready_without_buses)
 	    .reference       = ALP_ADC_REF_INTERNAL,
 	});
 	zassert_is_null(a);
-	zassert_equal(alp_last_error(), ALP_ERR_NOT_READY, "expected NOT_READY, got %d",
-	              (int)alp_last_error());
+	zassert_equal(
+	    alp_last_error(), ALP_ERR_NOT_READY, "expected NOT_READY, got %d", (int)alp_last_error());
 }
 
 ZTEST(alp_peripheral, test_v2n_supervisor_dac_open_not_ready_without_buses)
@@ -401,8 +403,8 @@ ZTEST(alp_peripheral, test_v2n_supervisor_dac_open_not_ready_without_buses)
 	    .initial_mv = 0u,
 	});
 	zassert_is_null(d);
-	zassert_equal(alp_last_error(), ALP_ERR_NOT_READY, "expected NOT_READY, got %d",
-	              (int)alp_last_error());
+	zassert_equal(
+	    alp_last_error(), ALP_ERR_NOT_READY, "expected NOT_READY, got %d", (int)alp_last_error());
 }
 
 ZTEST(alp_peripheral, test_v2n_supervisor_qenc_open_not_ready_without_buses)
@@ -446,8 +448,8 @@ ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_not_ready_without_buse
 	    .sample_rate_hz = 100000u,
 	});
 	zassert_is_null(s);
-	zassert_equal(alp_last_error(), ALP_ERR_NOT_READY, "expected NOT_READY, got %d",
-	              (int)alp_last_error());
+	zassert_equal(
+	    alp_last_error(), ALP_ERR_NOT_READY, "expected NOT_READY, got %d", (int)alp_last_error());
 }
 
 ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_channel_out_of_range)

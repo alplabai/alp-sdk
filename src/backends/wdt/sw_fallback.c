@@ -19,8 +19,10 @@
 
 #include "wdt_ops.h"
 
-static alp_status_t sw_open(uint32_t wdt_id, const alp_wdt_config_t *cfg,
-                            alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
+static alp_status_t sw_open(uint32_t                 wdt_id,
+                            const alp_wdt_config_t  *cfg,
+                            alp_wdt_backend_state_t *st,
+                            alp_capabilities_t      *caps_out)
 {
 	(void)cfg;
 	st->dev         = NULL;
@@ -49,7 +51,8 @@ static const alp_wdt_ops_t _ops = {
 	.close   = NULL,
 };
 
-ALP_BACKEND_REGISTER(wdt, sw_fallback,
+ALP_BACKEND_REGISTER(wdt,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

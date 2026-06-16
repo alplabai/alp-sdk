@@ -79,12 +79,12 @@ typedef enum {
 /** Wake-source bitmap.  OR together to enable multiple sources.
  *  Backends honour the subset their hardware supports; unsupported
  *  bits are silently ignored. */
-#define ALP_POWER_WAKE_NONE 0x00000000u
-#define ALP_POWER_WAKE_RTC 0x00000001u      /**< RTC alarm / periodic tick. */
-#define ALP_POWER_WAKE_GPIO 0x00000002u     /**< Configured GPIO IRQ line. */
-#define ALP_POWER_WAKE_UART_RX 0x00000004u  /**< UART RX activity. */
-#define ALP_POWER_WAKE_TIMER 0x00000008u    /**< Free-running timer match. */
-#define ALP_POWER_WAKE_USB 0x00000010u      /**< USB SOF / VBUS event. */
+#define ALP_POWER_WAKE_NONE     0x00000000u
+#define ALP_POWER_WAKE_RTC      0x00000001u /**< RTC alarm / periodic tick. */
+#define ALP_POWER_WAKE_GPIO     0x00000002u /**< Configured GPIO IRQ line. */
+#define ALP_POWER_WAKE_UART_RX  0x00000004u /**< UART RX activity. */
+#define ALP_POWER_WAKE_TIMER    0x00000008u /**< Free-running timer match. */
+#define ALP_POWER_WAKE_USB      0x00000010u /**< USB SOF / VBUS event. */
 #define ALP_POWER_WAKE_ETH_LINK 0x00000020u /**< Ethernet link-up / WoL packet. */
 
 /** Information returned by @ref alp_power_request_sleep about how the
@@ -165,8 +165,10 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_
  *         ALP_ERR_NOSUPPORT / ALP_ERR_IO (backend transport
  *         failure mid-cycle).
  */
-alp_status_t alp_power_request_sleep(alp_power_t *handle, alp_power_mode_t mode,
-                                     uint32_t wake_after_ms, alp_power_wake_info_t *info);
+alp_status_t alp_power_request_sleep(alp_power_t           *handle,
+                                     alp_power_mode_t       mode,
+                                     uint32_t               wake_after_ms,
+                                     alp_power_wake_info_t *info);
 
 /**
  * @brief Release the power-management handle.  NULL is a no-op.

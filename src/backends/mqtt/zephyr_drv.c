@@ -91,7 +91,7 @@ struct mqtt_be {
 	uint16_t                next_msg_id; /* monotonic, wraps past 0xFFFF */
 };
 
-static struct mqtt_be  g_mqtt_be_pool[CONFIG_ALP_SDK_MAX_MQTT_HANDLES];
+static struct mqtt_be g_mqtt_be_pool[CONFIG_ALP_SDK_MAX_MQTT_HANDLES];
 
 static struct mqtt_be *mqtt_be_acquire(void)
 {
@@ -137,8 +137,8 @@ static alp_status_t errno_to_alp(int err)
 /* Parse "mqtt(s)?://host[:port]" into host/port/tls.  Returns 0 on
  * success.  No URI-encoding handling -- broker addresses in v0.2 are
  * expected to be plain hostnames or IPs. */
-static int parse_broker_uri(const char *uri, char *host_buf, size_t host_buf_len,
-                            uint16_t *port_out, bool *tls_out)
+static int parse_broker_uri(
+    const char *uri, char *host_buf, size_t host_buf_len, uint16_t *port_out, bool *tls_out)
 {
 	if (uri == NULL) return -EINVAL;
 
@@ -155,7 +155,7 @@ static int parse_broker_uri(const char *uri, char *host_buf, size_t host_buf_len
 	}
 
 	/* Default port: 1883 for plain, 8883 for TLS. */
-	uint16_t    port  = tls ? 8883 : 1883;
+	uint16_t port = tls ? 8883 : 1883;
 
 	const char *colon = strrchr(cursor, ':');
 	const char *slash = strchr(cursor, '/');
@@ -176,8 +176,8 @@ static int parse_broker_uri(const char *uri, char *host_buf, size_t host_buf_len
 	memcpy(host_buf, cursor, host_len);
 	host_buf[host_len] = '\0';
 
-	*port_out          = port;
-	*tls_out           = tls;
+	*port_out = port;
+	*tls_out  = tls;
 	return 0;
 }
 
@@ -287,8 +287,8 @@ static int alp_mqtt_get_fd(struct mqtt_client *c)
 /* Ops                                                                 */
 /* ================================================================== */
 
-static alp_status_t z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
 	struct mqtt_be *be = mqtt_be_acquire();
@@ -356,8 +356,8 @@ static alp_status_t z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_
 	be->connected            = false;
 	be->next_msg_id          = 1;
 
-	st->be_data              = be;
-	caps_out->flags          = 0u;
+	st->be_data     = be;
+	caps_out->flags = 0u;
 	return ALP_OK;
 #else
 	(void)cfg;
@@ -405,8 +405,12 @@ static alp_status_t z_connect(alp_mqtt_backend_state_t *st, uint32_t timeout_ms)
 #endif
 }
 
-static alp_status_t z_publish(alp_mqtt_backend_state_t *st, const char *topic,
-                              const uint8_t *payload, size_t len, alp_mqtt_qos_t qos, bool retain)
+static alp_status_t z_publish(alp_mqtt_backend_state_t *st,
+                              const char               *topic,
+                              const uint8_t            *payload,
+                              size_t                    len,
+                              alp_mqtt_qos_t            qos,
+                              bool                      retain)
 {
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
 	struct mqtt_be *be = (struct mqtt_be *)st->be_data;
@@ -440,15 +444,18 @@ static alp_status_t z_publish(alp_mqtt_backend_state_t *st, const char *topic,
 #endif
 }
 
-static alp_status_t z_subscribe(alp_mqtt_backend_state_t *st, const char *topic_filter,
-                                alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user)
+static alp_status_t z_subscribe(alp_mqtt_backend_state_t *st,
+                                const char               *topic_filter,
+                                alp_mqtt_qos_t            qos,
+                                alp_mqtt_msg_cb_t         cb,
+                                void                     *user)
 {
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
 	struct mqtt_be *be = (struct mqtt_be *)st->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
 
-	be->msg_cb              = cb;
-	be->msg_user            = user;
+	be->msg_cb   = cb;
+	be->msg_user = user;
 
 	struct mqtt_topic topic = {
 		.topic.utf8 = (const uint8_t *)topic_filter,
@@ -527,7 +534,8 @@ static const alp_mqtt_ops_t _ops = {
 	.close     = z_close,
 };
 
-ALP_BACKEND_REGISTER(mqtt, zephyr_drv,
+ALP_BACKEND_REGISTER(mqtt,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

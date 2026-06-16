@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 #define SX1276_REG_VERSION 0x42u
-#define SX1276_VERSION 0x12u /**< Datasheet-reported silicon version. */
+#define SX1276_VERSION     0x12u /**< Datasheet-reported silicon version. */
 
 typedef struct {
 	alp_spi_t  *bus;

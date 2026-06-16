@@ -48,7 +48,7 @@ typedef struct gd32_bridge_state {
 #define CONFIG_ALP_SDK_ADC_HANDLE_POOL 8
 #endif
 
-static gd32_bridge_state_t  _state_pool[CONFIG_ALP_SDK_ADC_HANDLE_POOL];
+static gd32_bridge_state_t _state_pool[CONFIG_ALP_SDK_ADC_HANDLE_POOL];
 
 static gd32_bridge_state_t *_alloc_state(void)
 {
@@ -67,8 +67,8 @@ static void _free_state(gd32_bridge_state_t *s)
 	s->in_use = false;
 }
 
-static alp_status_t gd32_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st,
-                              alp_capabilities_t *caps_out)
+static alp_status_t
+gd32_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	/* E1M spec reserves 8 ADC channels; the bridge advertises
      * exactly that many in gd32-io-mcu-map.tsv. */
@@ -84,8 +84,11 @@ static alp_status_t gd32_open(const alp_adc_config_t *cfg, alp_adc_backend_state
 		return s;
 	}
 	if (cfg->oversampling_ratio != 0u || cfg->sample_cycles != 0u || cfg->resolution_bits != 0u) {
-		s = gd32g553_adc_configure(ctx, (uint8_t)cfg->channel_id, cfg->oversampling_ratio,
-		                           cfg->sample_cycles, cfg->resolution_bits);
+		s = gd32g553_adc_configure(ctx,
+		                           (uint8_t)cfg->channel_id,
+		                           cfg->oversampling_ratio,
+		                           cfg->sample_cycles,
+		                           cfg->resolution_bits);
 		if (s != ALP_OK) {
 			alp_z_v2n_supervisor_release();
 			return s;
@@ -99,10 +102,10 @@ static alp_status_t gd32_open(const alp_adc_config_t *cfg, alp_adc_backend_state
 	}
 	bs->channel_id = (uint8_t)cfg->channel_id;
 
-	st->be_data    = bs;
+	st->be_data = bs;
 	/* raw is mV; fs = 65535; reference_uv = 65535000 -> uv = mV*1000. */
-	st->reference_uv              = 65535000u;
-	st->resolution_bits           = 16u;
+	st->reference_uv    = 65535000u;
+	st->resolution_bits = 16u;
 
 	caps_out->max_resolution_bits = 12u; /* the SoC actually delivers 12-bit */
 	caps_out->max_sample_rate     = 0u;  /* not advertised at v0.7 */
@@ -112,10 +115,10 @@ static alp_status_t gd32_open(const alp_adc_config_t *cfg, alp_adc_backend_state
 
 static alp_status_t gd32_read_raw(alp_adc_backend_state_t *st, int32_t *raw_out)
 {
-	gd32_bridge_state_t *bs  = (gd32_bridge_state_t *)st->be_data;
+	gd32_bridge_state_t *bs = (gd32_bridge_state_t *)st->be_data;
 
-	gd32g553_t          *ctx = NULL;
-	alp_status_t         s   = alp_z_v2n_supervisor_acquire(&ctx);
+	gd32g553_t  *ctx = NULL;
+	alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
 	if (s != ALP_OK) {
 		return s;
 	}
@@ -143,7 +146,8 @@ static const alp_adc_ops_t gd32_ops = {
 	.close    = gd32_close,
 };
 
-ALP_BACKEND_REGISTER(adc, gd32_bridge,
+ALP_BACKEND_REGISTER(adc,
+                     gd32_bridge,
                      {
                          .silicon_ref = "renesas:rzv2n:n44",
                          .vendor      = "renesas", /* SoC vendor, not bridge chip */

@@ -33,8 +33,8 @@
 
 #include "gpio_ops.h"
 
-static alp_status_t sw_open(uint32_t pin_id, alp_gpio_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t
+sw_open(uint32_t pin_id, alp_gpio_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	(void)pin_id;
 	st->dev         = NULL;
@@ -44,8 +44,8 @@ static alp_status_t sw_open(uint32_t pin_id, alp_gpio_backend_state_t *st,
 	return ALP_OK;
 }
 
-static alp_status_t sw_configure(alp_gpio_backend_state_t *st, alp_gpio_dir_t dir,
-                                 alp_gpio_pull_t pull)
+static alp_status_t
+sw_configure(alp_gpio_backend_state_t *st, alp_gpio_dir_t dir, alp_gpio_pull_t pull)
 {
 	(void)st;
 	(void)dir;
@@ -67,8 +67,8 @@ static alp_status_t sw_read(alp_gpio_backend_state_t *st, bool *level)
 	return ALP_OK;
 }
 
-static alp_status_t sw_irq_enable(alp_gpio_backend_state_t *st, alp_gpio_edge_t edge,
-                                  alp_gpio_cb_t cb, void *user)
+static alp_status_t
+sw_irq_enable(alp_gpio_backend_state_t *st, alp_gpio_edge_t edge, alp_gpio_cb_t cb, void *user)
 {
 	(void)st;
 	(void)edge;
@@ -98,7 +98,8 @@ static const alp_gpio_ops_t _ops = {
 	.close       = sw_close,
 };
 
-ALP_BACKEND_REGISTER(gpio, sw_fallback,
+ALP_BACKEND_REGISTER(gpio,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

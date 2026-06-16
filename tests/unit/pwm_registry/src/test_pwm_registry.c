@@ -115,8 +115,8 @@ ZTEST(alp_pwm_registry, test_close_releases_handle)
 
 /* ---------- (f) sw_fallback round-trip + NOSUPPORT paths ------------------ */
 
-extern const alp_backend_t  __start_alp_backends_pwm[] __attribute__((weak));
-extern const alp_backend_t  __stop_alp_backends_pwm[] __attribute__((weak));
+extern const alp_backend_t __start_alp_backends_pwm[] __attribute__((weak));
+extern const alp_backend_t __stop_alp_backends_pwm[] __attribute__((weak));
 
 static const alp_pwm_ops_t *_find_sw_fallback_ops(void)
 {

@@ -30,8 +30,8 @@ alp_status_t ov7670_init(ov7670_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	if (i2c_addr == 0) return ALP_ERR_INVAL;
 
 	memset(dev, 0, sizeof(*dev));
-	dev->bus         = bus;
-	dev->addr        = i2c_addr;
+	dev->bus  = bus;
+	dev->addr = i2c_addr;
 
 	uint8_t      pid = 0, ver = 0;
 	alp_status_t s = ov7670_read_reg(dev, OV7670_REG_PID, &pid);

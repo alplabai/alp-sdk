@@ -56,13 +56,13 @@ extern "C" {
 
 /** Bank-select pseudo-register (selects DSP / SENSOR register pages). */
 #define OV2640_REG_BANK_SEL 0xFFu
-#define OV2640_BANK_DSP 0x00u
-#define OV2640_BANK_SENSOR 0x01u
+#define OV2640_BANK_DSP     0x00u
+#define OV2640_BANK_SENSOR  0x01u
 
 /** PIDH:PIDL on bank SENSOR = (0x26, 0x42) -- combined `OV2640_CHIP_ID`. */
 #define OV2640_REG_PIDH 0x0Au
 #define OV2640_REG_PIDL 0x0Bu
-#define OV2640_CHIP_ID 0x2642u
+#define OV2640_CHIP_ID  0x2642u
 
 /** Resolution presets the driver knows how to configure. */
 typedef enum {

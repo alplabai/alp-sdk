@@ -79,7 +79,7 @@ static viewer_state_t g_state;
 K_THREAD_STACK_DEFINE(infer_stack, 8192);
 static struct k_thread infer_thread;
 
-static void            infer_entry(void *p1, void *p2, void *p3)
+static void infer_entry(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1);
 	ARG_UNUSED(p2);
@@ -109,8 +109,16 @@ int main(void)
 
 	/* Spawn the inference thread.  Higher priority than main so
      * the model gets timely CPU even when LVGL is mid-blit. */
-	k_thread_create(&infer_thread, infer_stack, K_THREAD_STACK_SIZEOF(infer_stack), infer_entry,
-	                NULL, NULL, NULL, K_PRIO_PREEMPT(3), 0, K_NO_WAIT);
+	k_thread_create(&infer_thread,
+	                infer_stack,
+	                K_THREAD_STACK_SIZEOF(infer_stack),
+	                infer_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(3),
+	                0,
+	                K_NO_WAIT);
 	k_thread_name_set(&infer_thread, "infer_loop");
 
 	/* Render loop: 30 fps, sample the shared state once per

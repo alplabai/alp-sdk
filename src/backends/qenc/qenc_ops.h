@@ -31,8 +31,9 @@ typedef struct alp_qenc_backend_state {
 } alp_qenc_backend_state_t;
 
 struct alp_qenc_ops {
-	alp_status_t (*open)(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
+	alp_status_t (*open)(const alp_qenc_config_t  *cfg,
+	                     alp_qenc_backend_state_t *state,
+	                     alp_capabilities_t       *caps_out);
 	alp_status_t (*get_position)(alp_qenc_backend_state_t *state, int32_t *pos_out);
 	alp_status_t (*reset_position)(alp_qenc_backend_state_t *state);
 	void (*close)(alp_qenc_backend_state_t *state);

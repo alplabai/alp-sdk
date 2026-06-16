@@ -114,14 +114,19 @@ int main(void)
 		if (s != ALP_OK) {
 			printf("[gd32-bridge-ping] init/PING attempt %u failed: %d "
 			       "(GD32 not ready yet?) -- retrying in 200 ms\n",
-			       attempt, (int)s);
+			       attempt,
+			       (int)s);
 			attempt++;
 			k_msleep(200);
 		}
 	} while (s != ALP_OK);
 
-	printf("[gd32-bridge-ping] init OK after %u retr%s; firmware v%u.%u.%u\n", attempt,
-	       (attempt == 1u) ? "y" : "ies", ctx.version.major, ctx.version.minor, ctx.version.patch);
+	printf("[gd32-bridge-ping] init OK after %u retr%s; firmware v%u.%u.%u\n",
+	       attempt,
+	       (attempt == 1u) ? "y" : "ies",
+	       ctx.version.major,
+	       ctx.version.minor,
+	       ctx.version.patch);
 
 	/* Continuous SPI-path liveness PING -- refreshes the GD32's spi_rx_buf so
      * the link can be confirmed over SWD at any time, and proves the CM33 is
@@ -141,8 +146,12 @@ int main(void)
 		if ((i % 8u) == 0u) {
 			gd32g553_version_t v  = { 0 };
 			alp_status_t       vs = gd32g553_get_version(&ctx, &v);
-			printf("[gd32-bridge-ping] SPI get_version #%u -> %d (v%u.%u.%u)\n", i, (int)vs,
-			       v.major, v.minor, v.patch);
+			printf("[gd32-bridge-ping] SPI get_version #%u -> %d (v%u.%u.%u)\n",
+			       i,
+			       (int)vs,
+			       v.major,
+			       v.minor,
+			       v.patch);
 		}
 
 		k_msleep(500);

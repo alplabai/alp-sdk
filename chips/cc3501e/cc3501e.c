@@ -28,8 +28,8 @@
 #include "alp/chips/cc3501e.h"
 #include "alp/peripheral.h"
 
-static void encode_header(uint8_t *frame, alp_cc3501e_cmd_t cmd, uint8_t flags,
-                          uint16_t payload_len)
+static void
+encode_header(uint8_t *frame, alp_cc3501e_cmd_t cmd, uint8_t flags, uint16_t payload_len)
 {
 	frame[0] = (uint8_t)cmd;
 	frame[1] = flags;
@@ -122,9 +122,14 @@ static alp_status_t resp_to_status(uint8_t resp)
 	}
 }
 
-alp_status_t cc3501e_request(cc3501e_t *ctx, alp_cc3501e_cmd_t cmd, const uint8_t *tx_payload,
-                             size_t tx_len, uint8_t *rx_buf, size_t rx_cap, size_t *rx_len,
-                             uint32_t timeout_ms)
+alp_status_t cc3501e_request(cc3501e_t        *ctx,
+                             alp_cc3501e_cmd_t cmd,
+                             const uint8_t    *tx_payload,
+                             size_t            tx_len,
+                             uint8_t          *rx_buf,
+                             size_t            rx_cap,
+                             size_t           *rx_len,
+                             uint32_t          timeout_ms)
 {
 	(void)timeout_ms; /* Reserved for a future IRQ-driven wait (next HW rev). */
 	if (rx_len != NULL) *rx_len = 0;

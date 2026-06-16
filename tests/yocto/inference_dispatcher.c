@@ -32,7 +32,7 @@
  * dispatcher reach the backend selector before bailing. */
 static const uint8_t k_placeholder_model[16] = { 0xDE, 0xAD, 0xBE, 0xEF };
 
-static void          test_null_cfg_returns_null_and_stamps_invalid(void)
+static void test_null_cfg_returns_null_and_stamps_invalid(void)
 {
 	alp_inference_t *h = alp_inference_open(NULL);
 	ALP_ASSERT_NULL(h);

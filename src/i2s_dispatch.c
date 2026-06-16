@@ -26,7 +26,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_I2S_HANDLES 2
 #endif
 
-static struct alp_i2s  _pool[CONFIG_ALP_SDK_MAX_I2S_HANDLES];
+static struct alp_i2s _pool[CONFIG_ALP_SDK_MAX_I2S_HANDLES];
 
 static struct alp_i2s *_alloc(void)
 {
@@ -117,8 +117,8 @@ alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint
 	return i2s->state.ops->write(&i2s->state, block, bytes, timeout_ms);
 }
 
-alp_status_t alp_i2s_read(alp_i2s_t *i2s, void *block, size_t bytes, size_t *bytes_out,
-                          uint32_t timeout_ms)
+alp_status_t
+alp_i2s_read(alp_i2s_t *i2s, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms)
 {
 	if (i2s == NULL || !i2s->in_use) return ALP_ERR_NOT_READY;
 	if (block == NULL || bytes == 0u) return ALP_ERR_INVAL;

@@ -121,8 +121,8 @@ alp_status_t alp_audio_in_stop(alp_audio_in_t *in);
  * @param[in]  timeout_ms   Max wait for available frames.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
  */
-alp_status_t alp_audio_in_read(alp_audio_in_t *in, void *buf, size_t frames, size_t *out_frames,
-                               uint32_t timeout_ms);
+alp_status_t alp_audio_in_read(
+    alp_audio_in_t *in, void *buf, size_t frames, size_t *out_frames, uint32_t timeout_ms);
 
 /**
  * @brief Stop, free buffers, release handle.  NULL is a no-op.
@@ -189,8 +189,8 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
  * @param[in]  timeout_ms   Max wait for driver readiness.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
  */
-alp_status_t alp_audio_out_write(alp_audio_out_t *out, const void *buf, size_t frames,
-                                 size_t *out_frames, uint32_t timeout_ms);
+alp_status_t alp_audio_out_write(
+    alp_audio_out_t *out, const void *buf, size_t frames, size_t *out_frames, uint32_t timeout_ms);
 
 /**
  * @brief Adjust output volume.

@@ -11,8 +11,8 @@
 
 #include "alp/chips/tmc2209.h"
 
-#define TMC2209_SYNC_BYTE 0x05u
-#define TMC2209_READ_FLAG 0x00u
+#define TMC2209_SYNC_BYTE  0x05u
+#define TMC2209_READ_FLAG  0x00u
 #define TMC2209_WRITE_FLAG 0x80u
 
 /* Trinamic UART CRC-8/ATM (poly 0x07, init 0). */

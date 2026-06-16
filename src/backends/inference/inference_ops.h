@@ -50,14 +50,17 @@ typedef struct alp_inference_backend_state {
 
 /** Vtable each inference backend implements. */
 struct alp_inference_ops {
-	alp_status_t (*open)(const alp_inference_config_t *cfg, alp_inference_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
+	alp_status_t (*open)(const alp_inference_config_t  *cfg,
+	                     alp_inference_backend_state_t *state,
+	                     alp_capabilities_t            *caps_out);
 	size_t (*num_inputs)(alp_inference_backend_state_t *state);
 	size_t (*num_outputs)(alp_inference_backend_state_t *state);
-	alp_status_t (*get_input)(alp_inference_backend_state_t *state, size_t index,
-	                          alp_inference_tensor_t *out);
-	alp_status_t (*get_output)(alp_inference_backend_state_t *state, size_t index,
-	                           alp_inference_tensor_t *out);
+	alp_status_t (*get_input)(alp_inference_backend_state_t *state,
+	                          size_t                         index,
+	                          alp_inference_tensor_t        *out);
+	alp_status_t (*get_output)(alp_inference_backend_state_t *state,
+	                           size_t                         index,
+	                           alp_inference_tensor_t        *out);
 	alp_status_t (*invoke)(alp_inference_backend_state_t *state);
 	void (*close)(alp_inference_backend_state_t *state);
 };

@@ -122,7 +122,8 @@ static const alp_tmu_ops_t _ops = {
 	.hypot = sw_hypot,
 };
 
-ALP_BACKEND_REGISTER(tmu, sw_fallback,
+ALP_BACKEND_REGISTER(tmu,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

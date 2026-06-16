@@ -51,17 +51,17 @@
  * board shuffles the array the example follows the board. */
 #define V2N_GD32_SWDIO_PIN_ID 0u /* Renesas P70 on V2N */
 #define V2N_GD32_SWCLK_PIN_ID 1u /* Renesas P71 on V2N */
-#define V2N_GD32_NRST_PIN_ID 2u  /* Renesas P74 (open-drain) on V2N */
+#define V2N_GD32_NRST_PIN_ID  2u /* Renesas P74 (open-drain) on V2N */
 
 /* Write target: the top sector of the GD32G553's 512 KB flash.
  * 0x08080000 - 2048 = 0x0807F800 is the last sector start address. */
-#define WRITE_ADDR 0x0807F800u
+#define WRITE_ADDR  0x0807F800u
 #define WRITE_BYTES 64u
 
 static uint8_t pattern[WRITE_BYTES];
 static uint8_t scratch[WRITE_BYTES];
 
-static void    build_pattern(void)
+static void build_pattern(void)
 {
 	/* Repeating 0x10..0x4F ramp -- chosen so a single missed byte
      * stands out in the readback log. */
@@ -115,7 +115,8 @@ int main(void)
 		       (int)s);
 		goto deinit;
 	}
-	printf("[swd] connected -- IDCODE = 0x%08X (expected 0x%08X)\n", (unsigned)swd.idcode,
+	printf("[swd] connected -- IDCODE = 0x%08X (expected 0x%08X)\n",
+	       (unsigned)swd.idcode,
 	       (unsigned)GD32_SWD_EXPECTED_IDCODE);
 	if (swd.idcode != GD32_SWD_EXPECTED_IDCODE) {
 		printf("[swd] WARN: IDCODE mismatch -- this isn't a GD32G553?\n");
@@ -138,8 +139,10 @@ int main(void)
      * 2 KiB sector. */
 	s = gd32_swd_flash_erase(&swd, WRITE_ADDR, WRITE_BYTES);
 	if (s != ALP_OK) {
-		printf("[swd] gd32_swd_flash_erase(0x%08X, %u) -> %d\n", (unsigned)WRITE_ADDR,
-		       (unsigned)WRITE_BYTES, (int)s);
+		printf("[swd] gd32_swd_flash_erase(0x%08X, %u) -> %d\n",
+		       (unsigned)WRITE_ADDR,
+		       (unsigned)WRITE_BYTES,
+		       (int)s);
 		goto reset;
 	}
 

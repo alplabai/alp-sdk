@@ -23,8 +23,8 @@
 
 #include "dac_ops.h"
 
-static alp_status_t sw_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t
+sw_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	(void)cfg;
 	st->dev         = NULL;
@@ -55,7 +55,8 @@ static const alp_dac_ops_t sw_ops = {
 	.close    = NULL,
 };
 
-ALP_BACKEND_REGISTER(dac, sw_fallback,
+ALP_BACKEND_REGISTER(dac,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

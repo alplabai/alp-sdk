@@ -39,10 +39,13 @@ typedef struct alp_spi_backend_state {
 } alp_spi_backend_state_t;
 
 struct alp_spi_ops {
-	alp_status_t (*open)(const alp_spi_config_t *cfg, alp_spi_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
-	alp_status_t (*transceive)(alp_spi_backend_state_t *state, const uint8_t *tx, uint8_t *rx,
-	                           size_t len);
+	alp_status_t (*open)(const alp_spi_config_t  *cfg,
+	                     alp_spi_backend_state_t *state,
+	                     alp_capabilities_t      *caps_out);
+	alp_status_t (*transceive)(alp_spi_backend_state_t *state,
+	                           const uint8_t           *tx,
+	                           uint8_t                 *rx,
+	                           size_t                   len);
 	void (*close)(alp_spi_backend_state_t *state);
 };
 

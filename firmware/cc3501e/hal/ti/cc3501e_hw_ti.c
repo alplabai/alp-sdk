@@ -43,7 +43,7 @@ static bool sl_running;
  * staged + begun clocking the OK ack back to the host. */
 static volatile bool reset_pending;
 
-static int           ensure_simplelink_started(void)
+static int ensure_simplelink_started(void)
 {
 	if (sl_running) {
 		return CC3501E_HW_OK;

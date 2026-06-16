@@ -253,8 +253,8 @@ const alp_capabilities_t *alp_rpc_capabilities(const alp_rpc_channel_t *ch);
  *          - @ref ALP_ERR_NOMEM   per-channel subscribe table full
  *                                  (v0.6 cap: 8 entries)
  */
-alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb,
-                               void *user);
+alp_status_t
+alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb, void *user);
 
 /**
  * @brief Remove a prior @ref alp_rpc_subscribe registration.
@@ -294,8 +294,8 @@ alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method);
  *          - @ref ALP_ERR_NOSUPPORT backend doesn't implement send
  *                                    on this OS yet
  */
-alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload,
-                          size_t len);
+alp_status_t
+alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, size_t len);
 
 /**
  * @brief Synchronous request/response.
@@ -339,8 +339,13 @@ alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void 
  *       are serialised by the SDK; the second caller blocks until
  *       the first call returns or times out.
  */
-alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method, const void *req,
-                          size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms);
+alp_status_t alp_rpc_call(alp_rpc_channel_t *ch,
+                          const char        *method,
+                          const void        *req,
+                          size_t             req_len,
+                          void              *resp,
+                          size_t            *resp_len,
+                          uint32_t           timeout_ms);
 
 #ifdef __cplusplus
 } /* extern "C" */

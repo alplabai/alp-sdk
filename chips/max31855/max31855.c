@@ -20,8 +20,8 @@ alp_status_t max31855_init(max31855_t *dev, alp_spi_t *spi)
 	return ALP_OK;
 }
 
-alp_status_t max31855_read(max31855_t *dev, int32_t *tc_milli_c, int32_t *internal_milli_c,
-                           uint8_t *fault_flags)
+alp_status_t
+max31855_read(max31855_t *dev, int32_t *tc_milli_c, int32_t *internal_milli_c, uint8_t *fault_flags)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 

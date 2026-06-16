@@ -26,7 +26,7 @@ void bench_tmu_main(void);
 void bench_power_main(void);
 void bench_security_main(void);
 
-int  main(void)
+int main(void)
 {
 	fprintf(stdout, "# alp_bench -- Alp SDK microbenchmarks\n");
 	fprintf(stdout, "# %-38s %12s %14s\n", "case", "iters", "ns/iter");

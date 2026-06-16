@@ -11,7 +11,7 @@
 
 #include "alp/chips/bmp390.h"
 
-#define BMP390_REG_CMD 0x7Eu
+#define BMP390_REG_CMD        0x7Eu
 #define BMP390_CMD_SOFT_RESET 0xB6u
 
 alp_status_t bmp390_init(bmp390_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
@@ -19,8 +19,8 @@ alp_status_t bmp390_init(bmp390_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	if (dev == NULL || bus == NULL) return ALP_ERR_INVAL;
 	if (i2c_addr == 0) return ALP_ERR_INVAL;
 	memset(dev, 0, sizeof(*dev));
-	dev->bus         = bus;
-	dev->addr        = i2c_addr;
+	dev->bus  = bus;
+	dev->addr = i2c_addr;
 
 	uint8_t      reg = BMP390_REG_CHIP_ID;
 	uint8_t      id  = 0;

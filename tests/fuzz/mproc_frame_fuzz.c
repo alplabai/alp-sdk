@@ -63,7 +63,7 @@
  * MUST stay in sync; if the production decoder evolves, this reference
  * gets updated and the fuzz harness asserts the same outputs. */
 
-#define MPROC_FRAME_MAGIC 0x46504D41u /* 'A','M','P','F' LE */
+#define MPROC_FRAME_MAGIC      0x46504D41u /* 'A','M','P','F' LE */
 #define MPROC_FRAME_HEADER_LEN 12u
 
 typedef enum {
@@ -83,8 +83,11 @@ static uint32_t ref_le32(const uint8_t *p)
 /* Decode: parse the 12-byte header + bound-check the declared
  * payload_len against the available buffer.  On REF_OK, *seq +
  * *payload_ptr + *payload_len are populated. */
-static ref_status_t ref_decode(const uint8_t *buf, size_t buf_len, uint32_t *seq,
-                               const uint8_t **payload_ptr, uint32_t *payload_len)
+static ref_status_t ref_decode(const uint8_t  *buf,
+                               size_t          buf_len,
+                               uint32_t       *seq,
+                               const uint8_t **payload_ptr,
+                               uint32_t       *payload_len)
 {
 	if (buf == NULL || seq == NULL || payload_ptr == NULL || payload_len == NULL) {
 		return REF_ERR_INVAL;
@@ -135,11 +138,11 @@ static void ref_encode(uint8_t *out, uint32_t seq, const uint8_t *payload, uint3
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-	uint32_t           seq         = 0;
-	const uint8_t     *payload_ptr = NULL;
-	uint32_t           payload_len = 0;
+	uint32_t       seq         = 0;
+	const uint8_t *payload_ptr = NULL;
+	uint32_t       payload_len = 0;
 
-	const ref_status_t s           = ref_decode(data, size, &seq, &payload_ptr, &payload_len);
+	const ref_status_t s = ref_decode(data, size, &seq, &payload_ptr, &payload_len);
 	if (s != REF_OK) {
 		/* Any non-OK return MUST leave the in-caller state safe
          * (the caller drops the frame).  The harness has nothing
@@ -168,8 +171,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		uint32_t           seq2         = 0;
 		const uint8_t     *payload_ptr2 = NULL;
 		uint32_t           payload_len2 = 0;
-		const ref_status_t s2 = ref_decode(buf, MPROC_FRAME_HEADER_LEN + payload_len, &seq2,
-		                                   &payload_ptr2, &payload_len2);
+		const ref_status_t s2           = ref_decode(
+            buf, MPROC_FRAME_HEADER_LEN + payload_len, &seq2, &payload_ptr2, &payload_len2);
 		if (s2 != REF_OK) {
 			__builtin_trap();
 		}

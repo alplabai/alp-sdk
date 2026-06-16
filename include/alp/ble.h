@@ -124,9 +124,9 @@ alp_status_t alp_ble_advertise_start(alp_ble_t *ble, const alp_ble_adv_config_t 
 alp_status_t alp_ble_advertise_stop(alp_ble_t *ble);
 
 /** GATT characteristic property bits (BT-SIG values). */
-#define ALP_BLE_GATT_PROP_READ 0x02
-#define ALP_BLE_GATT_PROP_WRITE 0x08
-#define ALP_BLE_GATT_PROP_NOTIFY 0x10
+#define ALP_BLE_GATT_PROP_READ     0x02
+#define ALP_BLE_GATT_PROP_WRITE    0x08
+#define ALP_BLE_GATT_PROP_NOTIFY   0x10
 #define ALP_BLE_GATT_PROP_INDICATE 0x20
 
 /** GATT attribute handle (host-stack-assigned). */
@@ -160,8 +160,9 @@ typedef struct {
  *                          @c def->num_chars elements.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOMEM.
  */
-alp_status_t alp_ble_gatt_register_service(alp_ble_t *ble, const alp_ble_service_def_t *def,
-                                           alp_ble_attr_handle_t *handles_out);
+alp_status_t alp_ble_gatt_register_service(alp_ble_t                   *ble,
+                                           const alp_ble_service_def_t *def,
+                                           alp_ble_attr_handle_t       *handles_out);
 
 /**
  * @brief Push a notify (or indicate, if the char is configured for it)
@@ -176,8 +177,11 @@ alp_status_t alp_ble_gatt_register_service(alp_ble_t *ble, const alp_ble_service
  * @param[in] len       Payload length, ≤ ATT_MTU − 3.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
  */
-alp_status_t alp_ble_gatt_notify(alp_ble_t *ble, alp_ble_conn_t *conn, alp_ble_attr_handle_t handle,
-                                 const uint8_t *payload, size_t len);
+alp_status_t alp_ble_gatt_notify(alp_ble_t            *ble,
+                                 alp_ble_conn_t       *conn,
+                                 alp_ble_attr_handle_t handle,
+                                 const uint8_t        *payload,
+                                 size_t                len);
 
 /* ------------------------------------------------------------------ */
 /* Central role                                                        */
@@ -227,8 +231,10 @@ alp_status_t alp_ble_scan_stop(alp_ble_t *ble);
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO.
  */
-alp_status_t alp_ble_connect(alp_ble_t *ble, const alp_ble_addr_t *peer, uint32_t timeout_ms,
-                             alp_ble_conn_t **conn_out);
+alp_status_t alp_ble_connect(alp_ble_t            *ble,
+                             const alp_ble_addr_t *peer,
+                             uint32_t              timeout_ms,
+                             alp_ble_conn_t      **conn_out);
 
 /** @brief Tear down an active connection. */
 alp_status_t alp_ble_disconnect(alp_ble_conn_t *conn);
@@ -244,8 +250,12 @@ alp_status_t alp_ble_disconnect(alp_ble_conn_t *conn);
  * @param[in]  timeout_ms  Max wait.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT / ALP_ERR_IO.
  */
-alp_status_t alp_ble_gatt_read(alp_ble_conn_t *conn, alp_ble_attr_handle_t handle, uint8_t *out,
-                               size_t out_cap, size_t *out_len, uint32_t timeout_ms);
+alp_status_t alp_ble_gatt_read(alp_ble_conn_t       *conn,
+                               alp_ble_attr_handle_t handle,
+                               uint8_t              *out,
+                               size_t                out_cap,
+                               size_t               *out_len,
+                               uint32_t              timeout_ms);
 
 /**
  * @brief Synchronously write a characteristic by handle (with response).
@@ -257,8 +267,11 @@ alp_status_t alp_ble_gatt_read(alp_ble_conn_t *conn, alp_ble_attr_handle_t handl
  * @param[in] timeout_ms  Max wait.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT / ALP_ERR_IO.
  */
-alp_status_t alp_ble_gatt_write(alp_ble_conn_t *conn, alp_ble_attr_handle_t handle,
-                                const uint8_t *data, size_t len, uint32_t timeout_ms);
+alp_status_t alp_ble_gatt_write(alp_ble_conn_t       *conn,
+                                alp_ble_attr_handle_t handle,
+                                const uint8_t        *data,
+                                size_t                len,
+                                uint32_t              timeout_ms);
 
 /**
  * @brief Query the capabilities of an opened BLE radio handle.

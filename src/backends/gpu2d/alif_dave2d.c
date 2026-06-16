@@ -199,8 +199,12 @@ static alp_status_t dave2d_open(alp_gpu2d_backend_state_t *state, alp_capabiliti
 }
 
 static alp_status_t dave2d_fill_rect(alp_gpu2d_backend_state_t *state,
-                                     const alp_gpu2d_surface_t *dst, uint32_t x, uint32_t y,
-                                     uint32_t w, uint32_t h, uint32_t argb_color)
+                                     const alp_gpu2d_surface_t *dst,
+                                     uint32_t                   x,
+                                     uint32_t                   y,
+                                     uint32_t                   w,
+                                     uint32_t                   h,
+                                     uint32_t                   argb_color)
 {
 	d2_device   *dev = (d2_device *)state->be_data;
 	alp_status_t rc  = _bind_dst(dev, dst);
@@ -211,16 +215,25 @@ static alp_status_t dave2d_fill_rect(alp_gpu2d_backend_state_t *state,
      * engine writes it (docs/aen-accelerator-backends-design.md §1). */
 	d2_startframe(dev);
 	d2_setcolor(dev, 0, (d2_color)argb_color);
-	d2_renderbox(dev, (d2_point)(x << 4), (d2_point)(y << 4), (d2_width)(w << 4),
+	d2_renderbox(dev,
+	             (d2_point)(x << 4),
+	             (d2_point)(y << 4),
+	             (d2_width)(w << 4),
 	             (d2_width)(h << 4)); /* 16.4 fixed point */
 	d2_endframe(dev);
 	d2_flushframe(dev); /* submit-and-wait per the v0.5 API contract */
 	return ALP_OK;
 }
 
-static alp_status_t dave2d_blit(alp_gpu2d_backend_state_t *state, const alp_gpu2d_surface_t *src,
-                                uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst,
-                                uint32_t dx, uint32_t dy, uint32_t w, uint32_t h)
+static alp_status_t dave2d_blit(alp_gpu2d_backend_state_t *state,
+                                const alp_gpu2d_surface_t *src,
+                                uint32_t                   sx,
+                                uint32_t                   sy,
+                                const alp_gpu2d_surface_t *dst,
+                                uint32_t                   dx,
+                                uint32_t                   dy,
+                                uint32_t                   w,
+                                uint32_t                   h)
 {
 	d2_device   *dev = (d2_device *)state->be_data;
 	d2_u32       src_mode;
@@ -233,19 +246,33 @@ static alp_status_t dave2d_blit(alp_gpu2d_backend_state_t *state, const alp_gpu2
 		return rc;
 	}
 	d2_startframe(dev);
-	d2_setblitsrc(dev, src->base, _pitch_px(src), (d2_u32)src->width, (d2_u32)src->height,
-	              src_mode);
-	d2_blitcopy(dev, (d2_s32)w, (d2_s32)h, (d2_blitpos)sx, (d2_blitpos)sy, (d2_width)(w << 4),
-	            (d2_width)(h << 4), (d2_point)(dx << 4), (d2_point)(dy << 4), 0);
+	d2_setblitsrc(
+	    dev, src->base, _pitch_px(src), (d2_u32)src->width, (d2_u32)src->height, src_mode);
+	d2_blitcopy(dev,
+	            (d2_s32)w,
+	            (d2_s32)h,
+	            (d2_blitpos)sx,
+	            (d2_blitpos)sy,
+	            (d2_width)(w << 4),
+	            (d2_width)(h << 4),
+	            (d2_point)(dx << 4),
+	            (d2_point)(dy << 4),
+	            0);
 	d2_endframe(dev);
 	d2_flushframe(dev);
 	return ALP_OK;
 }
 
-static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state, const alp_gpu2d_surface_t *src,
-                                 uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst,
-                                 uint32_t dx, uint32_t dy, uint32_t w, uint32_t h,
-                                 alp_gpu2d_blend_mode_t mode)
+static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
+                                 const alp_gpu2d_surface_t *src,
+                                 uint32_t                   sx,
+                                 uint32_t                   sy,
+                                 const alp_gpu2d_surface_t *dst,
+                                 uint32_t                   dx,
+                                 uint32_t                   dy,
+                                 uint32_t                   w,
+                                 uint32_t                   h,
+                                 alp_gpu2d_blend_mode_t     mode)
 {
 	d2_device   *dev = (d2_device *)state->be_data;
 	d2_u32       src_bf, dst_bf, src_mode;
@@ -263,10 +290,18 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state, const alp_gpu
 	}
 	d2_startframe(dev);
 	d2_setblendmode(dev, src_bf, dst_bf);
-	d2_setblitsrc(dev, src->base, _pitch_px(src), (d2_u32)src->width, (d2_u32)src->height,
-	              src_mode);
-	d2_blitcopy(dev, (d2_s32)w, (d2_s32)h, (d2_blitpos)sx, (d2_blitpos)sy, (d2_width)(w << 4),
-	            (d2_width)(h << 4), (d2_point)(dx << 4), (d2_point)(dy << 4), d2_bf_usealpha);
+	d2_setblitsrc(
+	    dev, src->base, _pitch_px(src), (d2_u32)src->width, (d2_u32)src->height, src_mode);
+	d2_blitcopy(dev,
+	            (d2_s32)w,
+	            (d2_s32)h,
+	            (d2_blitpos)sx,
+	            (d2_blitpos)sy,
+	            (d2_width)(w << 4),
+	            (d2_width)(h << 4),
+	            (d2_point)(dx << 4),
+	            (d2_point)(dy << 4),
+	            d2_bf_usealpha);
 	d2_endframe(dev);
 	d2_flushframe(dev);
 	return ALP_OK;
@@ -296,7 +331,8 @@ static const alp_gpu2d_ops_t _ops = {
  * variants), priority 100 so the registry prefers it over the
  * wildcard sw_fallback (priority 0) on those parts.  Same multi-SKU
  * registration pattern as src/backends/inference/ethos_u_aen.cpp. */
-ALP_BACKEND_REGISTER(gpu2d, dave2d_e6,
+ALP_BACKEND_REGISTER(gpu2d,
+                     dave2d_e6,
                      {
                          .silicon_ref = "alif:ensemble:e6",
                          .vendor      = "alif",
@@ -306,7 +342,8 @@ ALP_BACKEND_REGISTER(gpu2d, dave2d_e6,
                          .probe       = NULL,
                      });
 
-ALP_BACKEND_REGISTER(gpu2d, dave2d_e7,
+ALP_BACKEND_REGISTER(gpu2d,
+                     dave2d_e7,
                      {
                          .silicon_ref = "alif:ensemble:e7",
                          .vendor      = "alif",
@@ -316,7 +353,8 @@ ALP_BACKEND_REGISTER(gpu2d, dave2d_e7,
                          .probe       = NULL,
                      });
 
-ALP_BACKEND_REGISTER(gpu2d, dave2d_e8,
+ALP_BACKEND_REGISTER(gpu2d,
+                     dave2d_e8,
                      {
                          .silicon_ref = "alif:ensemble:e8",
                          .vendor      = "alif",

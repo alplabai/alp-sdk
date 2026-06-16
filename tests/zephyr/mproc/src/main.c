@@ -140,7 +140,8 @@ ZTEST(alp_mproc, test_frame_encode_decode_roundtrip)
 	zassert_equal(seq, 42u);
 	zassert_equal(payload_len, sizeof(payload));
 	zassert_not_null(payload_out);
-	zassert_equal(memcmp(payload_out, payload, sizeof(payload)), 0,
+	zassert_equal(memcmp(payload_out, payload, sizeof(payload)),
+	              0,
 	              "payload bytes must round-trip unchanged");
 }
 
@@ -245,7 +246,8 @@ ZTEST(alp_mproc, test_shmem_open_resolves_name)
 	void  *base = NULL;
 	size_t size = 0;
 	zassert_equal(alp_shmem_view(s, &base, &size), ALP_OK);
-	zassert_equal((uintptr_t)base, (uintptr_t)DT_REG_ADDR(DT_ALIAS(alp_shmem0)),
+	zassert_equal((uintptr_t)base,
+	              (uintptr_t)DT_REG_ADDR(DT_ALIAS(alp_shmem0)),
 	              "base must match DT reg-address");
 	zassert_equal(size, DT_REG_SIZE(DT_ALIAS(alp_shmem0)), "size must match DT reg-size");
 

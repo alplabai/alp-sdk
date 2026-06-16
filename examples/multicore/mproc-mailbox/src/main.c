@@ -59,10 +59,10 @@
  * the orchestrator-emitted carve-out for AEN dual-core builds. */
 #define SHMEM_REGION_NAME "alp_shmem0"
 #define SHMEM_REGION_SIZE 512u
-#define MBOX_CHANNEL 0u
-#define REQUEST_OFFSET 0u
-#define RESPONSE_OFFSET 256u /* gap from request so the two never overlap */
-#define MAX_PAYLOAD 128u
+#define MBOX_CHANNEL      0u
+#define REQUEST_OFFSET    0u
+#define RESPONSE_OFFSET   256u /* gap from request so the two never overlap */
+#define MAX_PAYLOAD       128u
 
 static const char *PAYLOAD = "hello-from-HP";
 
@@ -98,7 +98,7 @@ int main(void)
 		.size      = SHMEM_REGION_SIZE,
 		.cacheable = false,
 	};
-	alp_shmem_t            *shmem    = alp_shmem_open(&shmem_cfg);
+	alp_shmem_t *shmem = alp_shmem_open(&shmem_cfg);
 
 	const alp_mbox_config_t mbox_cfg = {
 		.channel = MBOX_CHANNEL,

@@ -41,8 +41,8 @@ typedef struct {
 } quectel_bg77_t;
 
 /** @brief Bind context to caller-opened UART + GPIOs. */
-alp_status_t quectel_bg77_init(quectel_bg77_t *dev, alp_uart_t *port, alp_gpio_t *pwrkey,
-                               alp_gpio_t *reset);
+alp_status_t
+quectel_bg77_init(quectel_bg77_t *dev, alp_uart_t *port, alp_gpio_t *pwrkey, alp_gpio_t *reset);
 
 /** @brief Pulse PWRKEY for 500 ms.  Caller waits ~5 s after. */
 alp_status_t quectel_bg77_power_on(quectel_bg77_t *dev);
@@ -51,8 +51,8 @@ alp_status_t quectel_bg77_power_on(quectel_bg77_t *dev);
 alp_status_t quectel_bg77_send_cmd(quectel_bg77_t *dev, const char *at_cmd);
 
 /** @brief Read up to @p max bytes of UART response. */
-alp_status_t quectel_bg77_read_response(quectel_bg77_t *dev, uint8_t *buf, size_t max,
-                                        size_t *received_out, uint32_t timeout_ms);
+alp_status_t quectel_bg77_read_response(
+    quectel_bg77_t *dev, uint8_t *buf, size_t max, size_t *received_out, uint32_t timeout_ms);
 
 /** @brief Release driver context. */
 void quectel_bg77_deinit(quectel_bg77_t *dev);

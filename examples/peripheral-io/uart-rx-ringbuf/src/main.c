@@ -56,7 +56,7 @@
  * in the header comment above. */
 static uint8_t rx_backing[64];
 
-int            main(void)
+int main(void)
 {
 	printf("[ringbuf] open BOARD_UART_DEBUG @ 115200 8N1\n");
 
@@ -114,7 +114,9 @@ int            main(void)
 	uint8_t      scratch[32];
 	size_t       got = 0;
 	alp_status_t s   = alp_uart_rx_ringbuf_pop(rb, scratch, sizeof(scratch), &got);
-	printf("[ringbuf] pop -> status=%d got=%zu count_remaining=%zu\n", (int)s, got,
+	printf("[ringbuf] pop -> status=%d got=%zu count_remaining=%zu\n",
+	       (int)s,
+	       got,
 	       alp_uart_rx_ringbuf_count(rb));
 
 	/* Detach when the ringbuf is no longer needed.  Disables the

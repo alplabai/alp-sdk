@@ -147,8 +147,13 @@ alp_gpu2d_t *alp_gpu2d_open(void);
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
  *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *dst, uint32_t x,
-                                 uint32_t y, uint32_t w, uint32_t h, uint32_t argb_color);
+alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t               *handle,
+                                 const alp_gpu2d_surface_t *dst,
+                                 uint32_t                   x,
+                                 uint32_t                   y,
+                                 uint32_t                   w,
+                                 uint32_t                   h,
+                                 uint32_t                   argb_color);
 
 /**
  * @brief Copy a sub-rect from @p src into @p dst (no blend).
@@ -169,9 +174,15 @@ alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t *handle, const alp_gpu2d_surface_t 
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
  *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_gpu2d_blit(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src, uint32_t sx,
-                            uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy,
-                            uint32_t w, uint32_t h);
+alp_status_t alp_gpu2d_blit(alp_gpu2d_t               *handle,
+                            const alp_gpu2d_surface_t *src,
+                            uint32_t                   sx,
+                            uint32_t                   sy,
+                            const alp_gpu2d_surface_t *dst,
+                            uint32_t                   dx,
+                            uint32_t                   dy,
+                            uint32_t                   w,
+                            uint32_t                   h);
 
 /**
  * @brief Alpha-blend @p src onto @p dst using the chosen mode.
@@ -190,9 +201,16 @@ alp_status_t alp_gpu2d_blit(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src,
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
  *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_gpu2d_blend(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src, uint32_t sx,
-                             uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy,
-                             uint32_t w, uint32_t h, alp_gpu2d_blend_mode_t mode);
+alp_status_t alp_gpu2d_blend(alp_gpu2d_t               *handle,
+                             const alp_gpu2d_surface_t *src,
+                             uint32_t                   sx,
+                             uint32_t                   sy,
+                             const alp_gpu2d_surface_t *dst,
+                             uint32_t                   dx,
+                             uint32_t                   dy,
+                             uint32_t                   w,
+                             uint32_t                   h,
+                             alp_gpu2d_blend_mode_t     mode);
 
 /**
  * @brief Release the GPU2D handle.  NULL is a no-op.

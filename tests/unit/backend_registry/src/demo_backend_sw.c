@@ -21,7 +21,8 @@ static const demo_ops_t demo_sw_ops = {
 	.read = demo_sw_read,
 };
 
-ALP_BACKEND_REGISTER(demo, sw_fallback,
+ALP_BACKEND_REGISTER(demo,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw",

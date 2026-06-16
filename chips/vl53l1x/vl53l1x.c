@@ -30,8 +30,8 @@ alp_status_t vl53l1x_init(vl53l1x_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	if (dev == NULL || bus == NULL) return ALP_ERR_INVAL;
 	if (i2c_addr == 0) return ALP_ERR_INVAL;
 	memset(dev, 0, sizeof(*dev));
-	dev->bus        = bus;
-	dev->addr       = i2c_addr;
+	dev->bus  = bus;
+	dev->addr = i2c_addr;
 
 	uint8_t      id = 0;
 	alp_status_t s  = vl53l1x_read16(dev, VL53L1X_REG_IDENTIFICATION_MODEL_ID, &id);

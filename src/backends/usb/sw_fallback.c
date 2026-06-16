@@ -28,8 +28,9 @@
 
 /* ---------- Device-side ops ---------- */
 
-static alp_status_t sw_dev_open(const alp_usb_device_config_t *cfg, alp_usb_dev_state_t *st,
-                                alp_capabilities_t *caps_out)
+static alp_status_t sw_dev_open(const alp_usb_device_config_t *cfg,
+                                alp_usb_dev_state_t           *st,
+                                alp_capabilities_t            *caps_out)
 {
 	(void)cfg;
 	st->be_data     = NULL;
@@ -49,8 +50,8 @@ static alp_status_t sw_dev_disable(alp_usb_dev_state_t *st)
 	return ALP_OK;
 }
 
-static alp_status_t sw_dev_write(alp_usb_dev_state_t *st, const uint8_t *data, size_t len,
-                                 uint32_t timeout_ms)
+static alp_status_t
+sw_dev_write(alp_usb_dev_state_t *st, const uint8_t *data, size_t len, uint32_t timeout_ms)
 {
 	(void)st;
 	(void)data;
@@ -59,8 +60,8 @@ static alp_status_t sw_dev_write(alp_usb_dev_state_t *st, const uint8_t *data, s
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_dev_read(alp_usb_dev_state_t *st, uint8_t *data, size_t len, size_t *out_len,
-                                uint32_t timeout_ms)
+static alp_status_t sw_dev_read(
+    alp_usb_dev_state_t *st, uint8_t *data, size_t len, size_t *out_len, uint32_t timeout_ms)
 {
 	(void)st;
 	(void)data;
@@ -104,12 +105,12 @@ static void sw_host_close(alp_usb_host_state_t *st)
 /* ---------- Registration ---------- */
 
 static const alp_usb_ops_t _ops = {
-	.dev_open     = sw_dev_open,
-	.dev_enable   = sw_dev_enable,
-	.dev_disable  = sw_dev_disable,
-	.dev_write    = sw_dev_write,
-	.dev_read     = sw_dev_read,
-	.dev_close    = sw_dev_close,
+	.dev_open    = sw_dev_open,
+	.dev_enable  = sw_dev_enable,
+	.dev_disable = sw_dev_disable,
+	.dev_write   = sw_dev_write,
+	.dev_read    = sw_dev_read,
+	.dev_close   = sw_dev_close,
 
 	.host_open    = sw_host_open,
 	.host_enable  = sw_host_enable,
@@ -117,7 +118,8 @@ static const alp_usb_ops_t _ops = {
 	.host_close   = sw_host_close,
 };
 
-ALP_BACKEND_REGISTER(usb, sw_fallback,
+ALP_BACKEND_REGISTER(usb,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

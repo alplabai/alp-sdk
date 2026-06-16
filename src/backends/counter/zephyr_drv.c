@@ -22,7 +22,8 @@
 
 #define ALP_COUNTER_DEV_OR_NULL(idx)                                                               \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_counter, idx))),                               \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_counter, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_counter, idx)))),                              \
+	            (NULL))
 
 static const struct device *const _devs[] = {
 	ALP_COUNTER_DEV_OR_NULL(0),
@@ -48,8 +49,8 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
-static void _alarm_trampoline(const struct device *dev, uint8_t chan_id, uint32_t ticks,
-                              void *user_data)
+static void
+_alarm_trampoline(const struct device *dev, uint8_t chan_id, uint32_t ticks, void *user_data)
 {
 	(void)dev;
 	(void)chan_id;
@@ -58,8 +59,9 @@ static void _alarm_trampoline(const struct device *dev, uint8_t chan_id, uint32_
 	owner->state.alarm_cb(owner, ticks, owner->state.alarm_user);
 }
 
-static alp_status_t z_open(const alp_counter_config_t *cfg, alp_counter_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t z_open(const alp_counter_config_t  *cfg,
+                           alp_counter_backend_state_t *st,
+                           alp_capabilities_t          *caps_out)
 {
 	if (cfg->counter_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	const struct device *dev = _devs[cfg->counter_id];
@@ -95,8 +97,8 @@ static alp_status_t z_us_to_ticks(alp_counter_backend_state_t *st, uint32_t us, 
 	return ALP_OK;
 }
 
-static alp_status_t z_set_alarm(alp_counter_backend_state_t *st, uint32_t ticks_from_now,
-                                struct alp_counter *owner)
+static alp_status_t
+z_set_alarm(alp_counter_backend_state_t *st, uint32_t ticks_from_now, struct alp_counter *owner)
 {
 	const struct device     *dev  = (const struct device *)st->dev;
 	struct counter_alarm_cfg acfg = {
@@ -131,7 +133,8 @@ static const alp_counter_ops_t _ops = {
 	.close        = z_close,
 };
 
-ALP_BACKEND_REGISTER(counter, zephyr_drv,
+ALP_BACKEND_REGISTER(counter,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

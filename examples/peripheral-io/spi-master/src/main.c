@@ -76,7 +76,7 @@
  * etc.). */
 static const uint8_t TX_PATTERN[] = { 0xAA, 0x55, 0xDE, 0xAD };
 
-int                  main(void)
+int main(void)
 {
 	printf("[spi-master] open BOARD_SPI_ARDUINO @ 1 MHz mode 0\n");
 
@@ -131,8 +131,12 @@ int                  main(void)
      * command/response phase). */
 	uint8_t rx_buf[sizeof TX_PATTERN] = { 0 };
 	s = alp_spi_transceive(bus, TX_PATTERN, rx_buf, sizeof TX_PATTERN);
-	printf("[spi-master] transceive -> %d  rx={%02x %02x %02x %02x}\n", (int)s, rx_buf[0],
-	       rx_buf[1], rx_buf[2], rx_buf[3]);
+	printf("[spi-master] transceive -> %d  rx={%02x %02x %02x %02x}\n",
+	       (int)s,
+	       rx_buf[0],
+	       rx_buf[1],
+	       rx_buf[2],
+	       rx_buf[3]);
 
 	/* -------- 3.  Half-duplex read (RX only). --------
      *
@@ -144,8 +148,12 @@ int                  main(void)
      * already been clocked in. */
 	uint8_t in_buf[sizeof TX_PATTERN] = { 0 };
 	s                                 = alp_spi_read(bus, in_buf, sizeof in_buf);
-	printf("[spi-master] read -> %d  rx={%02x %02x %02x %02x}\n", (int)s, in_buf[0], in_buf[1],
-	       in_buf[2], in_buf[3]);
+	printf("[spi-master] read -> %d  rx={%02x %02x %02x %02x}\n",
+	       (int)s,
+	       in_buf[0],
+	       in_buf[1],
+	       in_buf[2],
+	       in_buf[3]);
 
 	/* Clean shutdown.  CS line returns to its idle state (high
      * for active-low CS); SCK + MOSI go to whatever the

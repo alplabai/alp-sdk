@@ -88,8 +88,10 @@ int main(void)
      * almost certainly is -- 16 GiB minimum on the production
      * BOM). */
 	const uint64_t capacity_bytes = (uint64_t)sector_size * (uint64_t)sector_count;
-	printf("[emmc] sector_size=%u  sector_count=%u  capacity=%u MiB\n", (unsigned)sector_size,
-	       (unsigned)sector_count, (unsigned)(capacity_bytes >> 20));
+	printf("[emmc] sector_size=%u  sector_count=%u  capacity=%u MiB\n",
+	       (unsigned)sector_size,
+	       (unsigned)sector_count,
+	       (unsigned)(capacity_bytes >> 20));
 
 	/* Allocate the read buffer in BSS.  sector_size on every
      * reasonable eMMC is 512 bytes; READ_BLOCKS = 16 gives 8 KiB,
@@ -118,7 +120,9 @@ int main(void)
              * factory-fresh one. */
 			const uint8_t sig0 = buf[510];
 			const uint8_t sig1 = buf[511];
-			printf("[emmc] MBR signature: %02X%02X (%s)\n", sig0, sig1,
+			printf("[emmc] MBR signature: %02X%02X (%s)\n",
+			       sig0,
+			       sig1,
 			       (sig0 == 0x55u && sig1 == 0xAAu) ? "valid" : "not standard MBR");
 			hex_dump_first_line(buf, sizeof buf);
 		}

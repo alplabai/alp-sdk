@@ -122,8 +122,8 @@ static alp_status_t try_init_locked(void)
 		return g_v2n.init_status;
 	}
 
-	const alp_status_t s = gd32g553_init(&g_v2n.ctx, g_v2n.spi, g_v2n.i2c,
-	                                     (uint8_t)CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_ADDR);
+	const alp_status_t s = gd32g553_init(
+	    &g_v2n.ctx, g_v2n.spi, g_v2n.i2c, (uint8_t)CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_ADDR);
 	if (s != ALP_OK) {
 		/* Tear the bus handles back down -- a failed handshake means
          * we won't issue further bridge calls, and leaving the buses

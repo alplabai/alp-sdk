@@ -37,7 +37,7 @@ extern "C" {
 #endif
 
 /** Default 7-bit I2C addresses (SDO pin selects). */
-#define BME280_I2C_ADDR_LOW 0x76  /**< SDO tied low. */
+#define BME280_I2C_ADDR_LOW  0x76 /**< SDO tied low. */
 #define BME280_I2C_ADDR_HIGH 0x77 /**< SDO tied high. */
 
 /** WHO_AM_I (CHIP_ID) register value the chip returns. */
@@ -145,10 +145,13 @@ alp_status_t bme280_read_id(bme280_t *dev, uint8_t *id_out);
  * mandates (humidity first, then a CTRL_MEAS write to latch hum + start
  * the conversion).  Mode is the low two bits of CTRL_MEAS.
  */
-alp_status_t bme280_set_sampling(bme280_t *dev, bme280_oversampling_t t_os,
-                                 bme280_oversampling_t p_os, bme280_oversampling_t h_os,
-                                 bme280_mode_t mode, bme280_standby_t standby,
-                                 bme280_filter_t filter);
+alp_status_t bme280_set_sampling(bme280_t             *dev,
+                                 bme280_oversampling_t t_os,
+                                 bme280_oversampling_t p_os,
+                                 bme280_oversampling_t h_os,
+                                 bme280_mode_t         mode,
+                                 bme280_standby_t      standby,
+                                 bme280_filter_t       filter);
 
 /** Read the raw 20/20/16-bit conversion result in one burst. */
 alp_status_t bme280_read_raw(bme280_t *dev, bme280_raw_t *out);

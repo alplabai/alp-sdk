@@ -65,8 +65,8 @@ static alp_status_t _errno_to_alp(int err)
  * The kernel RTC has no queryable capability surface beyond presence,
  * so caps stay 0.  Errors from open() map errno -> ALP_ERR_IO.
  */
-static alp_status_t y_open(uint32_t rtc_id, alp_rtc_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+y_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	char path[32];
 	int  n = snprintf(path, sizeof(path), "/dev/rtc%u", (unsigned)rtc_id);
@@ -80,7 +80,7 @@ static alp_status_t y_open(uint32_t rtc_id, alp_rtc_backend_state_t *st,
 		close(fd);
 		return ALP_ERR_NOMEM;
 	}
-	d->fd           = fd;
+	d->fd = fd;
 
 	st->dev         = NULL;
 	st->rtc_id      = rtc_id;
@@ -161,7 +161,8 @@ static const alp_rtc_ops_t _ops = {
 	.close    = y_close,
 };
 
-ALP_BACKEND_REGISTER(rtc, yocto_drv,
+ALP_BACKEND_REGISTER(rtc,
+                     yocto_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "linux",

@@ -61,8 +61,8 @@ alp_wifi_t *alp_wifi_open(void);
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO (auth failed) /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_wifi_connect(alp_wifi_t *w, const alp_wifi_credentials_t *creds,
-                              uint32_t timeout_ms);
+alp_status_t
+alp_wifi_connect(alp_wifi_t *w, const alp_wifi_credentials_t *creds, uint32_t timeout_ms);
 
 /**
  * @brief Drop the current association.  Safe to call when already disconnected.
@@ -129,8 +129,10 @@ typedef struct {
 
 typedef enum { ALP_MQTT_QOS_0 = 0, ALP_MQTT_QOS_1 = 1, ALP_MQTT_QOS_2 = 2 } alp_mqtt_qos_t;
 
-typedef void (*alp_mqtt_msg_cb_t)(const char *topic, const uint8_t *payload, size_t len,
-                                  void *user);
+typedef void (*alp_mqtt_msg_cb_t)(const char    *topic,
+                                  const uint8_t *payload,
+                                  size_t         len,
+                                  void          *user);
 
 /**
  * @brief Allocate an MQTT client against the broker URI in @p cfg.
@@ -172,8 +174,12 @@ alp_status_t alp_mqtt_connect(alp_mqtt_t *m, uint32_t timeout_ms);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (not connected) /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_mqtt_publish(alp_mqtt_t *m, const char *topic, const uint8_t *payload, size_t len,
-                              alp_mqtt_qos_t qos, bool retain);
+alp_status_t alp_mqtt_publish(alp_mqtt_t    *m,
+                              const char    *topic,
+                              const uint8_t *payload,
+                              size_t         len,
+                              alp_mqtt_qos_t qos,
+                              bool           retain);
 
 /**
  * @brief Subscribe to @p topic_filter and register a per-message callback.
@@ -189,8 +195,8 @@ alp_status_t alp_mqtt_publish(alp_mqtt_t *m, const char *topic, const uint8_t *p
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_mqtt_subscribe(alp_mqtt_t *m, const char *topic_filter, alp_mqtt_qos_t qos,
-                                alp_mqtt_msg_cb_t cb, void *user);
+alp_status_t alp_mqtt_subscribe(
+    alp_mqtt_t *m, const char *topic_filter, alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user);
 
 /**
  * @brief Drive the MQTT state machine for up to @p timeout_ms.

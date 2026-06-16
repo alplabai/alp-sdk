@@ -272,8 +272,8 @@ int main(void)
          * fine.  Including the tick number, the counter value
          * at the moment the alarm fired, and the new LED state
          * gives a complete event trace. */
-		printf("[timer] tick %u fired @ %u ticks, LED -> %d\n", tick_no, tick_value,
-		       (int)led_state);
+		printf(
+		    "[timer] tick %u fired @ %u ticks, LED -> %d\n", tick_no, tick_value, (int)led_state);
 	}
 
 	/* Clean teardown -- cancel any pending alarm, close the GPIO

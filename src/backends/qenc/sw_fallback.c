@@ -19,8 +19,8 @@
 
 #include "qenc_ops.h"
 
-static alp_status_t sw_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t
+sw_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	(void)cfg;
 	st->dev           = NULL;
@@ -51,7 +51,8 @@ static const alp_qenc_ops_t _ops = {
 	.close          = NULL,
 };
 
-ALP_BACKEND_REGISTER(qenc, sw_fallback,
+ALP_BACKEND_REGISTER(qenc,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

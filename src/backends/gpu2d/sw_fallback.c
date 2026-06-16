@@ -266,9 +266,13 @@ static alp_status_t sw_open(alp_gpu2d_backend_state_t *state, alp_capabilities_t
  * @param[in]  argb_color Fill colour in ARGB8888 (converted to dst fmt).
  * @return ALP_OK, or ALP_ERR_NOSUPPORT for an unknown format.
  */
-static alp_status_t sw_fill_rect(alp_gpu2d_backend_state_t *state, const alp_gpu2d_surface_t *dst,
-                                 uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                                 uint32_t argb_color)
+static alp_status_t sw_fill_rect(alp_gpu2d_backend_state_t *state,
+                                 const alp_gpu2d_surface_t *dst,
+                                 uint32_t                   x,
+                                 uint32_t                   y,
+                                 uint32_t                   w,
+                                 uint32_t                   h,
+                                 uint32_t                   argb_color)
 {
 	(void)state;
 	uint32_t bpp = _bpp(dst->format);
@@ -305,9 +309,15 @@ static alp_status_t sw_fill_rect(alp_gpu2d_backend_state_t *state, const alp_gpu
  * portable fallback does not reverse-iterate -- callers needing
  * overlap-safe moves should use distinct buffers).
  */
-static alp_status_t sw_blit(alp_gpu2d_backend_state_t *state, const alp_gpu2d_surface_t *src,
-                            uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx,
-                            uint32_t dy, uint32_t w, uint32_t h)
+static alp_status_t sw_blit(alp_gpu2d_backend_state_t *state,
+                            const alp_gpu2d_surface_t *src,
+                            uint32_t                   sx,
+                            uint32_t                   sy,
+                            const alp_gpu2d_surface_t *dst,
+                            uint32_t                   dx,
+                            uint32_t                   dy,
+                            uint32_t                   w,
+                            uint32_t                   h)
 {
 	(void)state;
 	uint32_t sbpp = _bpp(src->format);
@@ -350,9 +360,16 @@ static alp_status_t sw_blit(alp_gpu2d_backend_state_t *state, const alp_gpu2d_su
  * RGB565) the composited alpha is dropped on repack; when the src
  * format carries no alpha its alpha reads as opaque (see header).
  */
-static alp_status_t sw_blend(alp_gpu2d_backend_state_t *state, const alp_gpu2d_surface_t *src,
-                             uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx,
-                             uint32_t dy, uint32_t w, uint32_t h, alp_gpu2d_blend_mode_t mode)
+static alp_status_t sw_blend(alp_gpu2d_backend_state_t *state,
+                             const alp_gpu2d_surface_t *src,
+                             uint32_t                   sx,
+                             uint32_t                   sy,
+                             const alp_gpu2d_surface_t *dst,
+                             uint32_t                   dx,
+                             uint32_t                   dy,
+                             uint32_t                   w,
+                             uint32_t                   h,
+                             alp_gpu2d_blend_mode_t     mode)
 {
 	(void)state;
 	uint32_t sbpp = _bpp(src->format);
@@ -388,7 +405,8 @@ static const alp_gpu2d_ops_t _ops = {
 	.close     = NULL,
 };
 
-ALP_BACKEND_REGISTER(gpu2d, sw_fallback,
+ALP_BACKEND_REGISTER(gpu2d,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw",

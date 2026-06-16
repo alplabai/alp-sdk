@@ -110,24 +110,24 @@ struct alp_rpc_sub {
  * slot in alp_rpc_backend_state_t owns it; the dispatcher's
  * alp_rpc_channel_t pool owns the handle itself. */
 struct rpc_be {
-	char               name[ALP_RPC_METHOD_MAX_LEN];
-	uint32_t           src_ept;
-	uint32_t           dst_ept;
-	uint32_t           mbox_ch;
-	bool               cacheable;
+	char     name[ALP_RPC_METHOD_MAX_LEN];
+	uint32_t src_ept;
+	uint32_t dst_ept;
+	uint32_t mbox_ch;
+	bool     cacheable;
 
-	int                ept_fd;  /* /dev/rpmsgN */
-	int                ctrl_fd; /* /dev/rpmsg_ctrlN (kept for close) */
+	int ept_fd;  /* /dev/rpmsgN */
+	int ctrl_fd; /* /dev/rpmsg_ctrlN (kept for close) */
 
-	pthread_t          rx_thread;
-	atomic_int         rx_run;
-	int                rx_wake_pipe[2]; /* close-side notification */
+	pthread_t  rx_thread;
+	atomic_int rx_run;
+	int        rx_wake_pipe[2]; /* close-side notification */
 
 	pthread_mutex_t    tx_mutex;
 	pthread_mutex_t    sub_mutex;
 	struct alp_rpc_sub subs[ALP_RPC_SUBS_PER_CHANNEL];
 
-	uint8_t            tx_scratch[ALP_RPC_TX_FRAME_MAX];
+	uint8_t tx_scratch[ALP_RPC_TX_FRAME_MAX];
 
 	/* Synchronous-call slot.  Single-element by design -- tx_mutex
      * serialises alp_rpc_call invocations on this channel so only one
@@ -165,8 +165,8 @@ static bool method_valid(const char *m)
 	return n < ALP_RPC_METHOD_MAX_LEN;
 }
 
-static int frame_build(uint8_t *out, size_t cap, const char *method, const void *payload,
-                       size_t payload_len)
+static int
+frame_build(uint8_t *out, size_t cap, const char *method, const void *payload, size_t payload_len)
 {
 	size_t method_len = strnlen(method, ALP_RPC_METHOD_MAX_LEN);
 	if (method_len == ALP_RPC_METHOD_MAX_LEN) {
@@ -184,8 +184,8 @@ static int frame_build(uint8_t *out, size_t cap, const char *method, const void 
 	return (int)total;
 }
 
-static const char *frame_parse(const void *data, size_t len, const void **payload_out,
-                               size_t *payload_len_out)
+static const char *
+frame_parse(const void *data, size_t len, const void **payload_out, size_t *payload_len_out)
 {
 	if (data == NULL || len == 0) {
 		return NULL;
@@ -210,9 +210,9 @@ static void *rpc_rx_main(void *arg)
 	struct rpc_be *ch = (struct rpc_be *)arg;
 	uint8_t        buf[ALP_RPC_TX_FRAME_MAX];
 
-	struct pollfd  fds[2] = {
-		 { .fd = ch->ept_fd, .events = POLLIN },
-		 { .fd = ch->rx_wake_pipe[0], .events = POLLIN },
+	struct pollfd fds[2] = {
+		{ .fd = ch->ept_fd, .events = POLLIN },
+		{ .fd = ch->rx_wake_pipe[0], .events = POLLIN },
 	};
 
 	while (atomic_load(&ch->rx_run)) {
@@ -345,8 +345,8 @@ static int absolute_deadline(struct timespec *ts, uint32_t timeout_ms)
  * caps stay 0.  The OpenAMP / RPMsg calls are preserved verbatim from
  * the original direct-impl.
  */
-static alp_status_t y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (caps_out != NULL) caps_out->flags = 0u;
 	if (cfg == NULL || cfg->name == NULL || cfg->name[0] == '\0') {
@@ -392,8 +392,8 @@ static alp_status_t y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t 
 	eptinfo.dst = ch->dst_ept;
 
 	if (ioctl(ch->ctrl_fd, RPMSG_CREATE_EPT_IOCTL, &eptinfo) < 0) {
-		fprintf(stderr, "alp_rpc: RPMSG_CREATE_EPT_IOCTL(%s) failed: %s\n", ch->name,
-		        strerror(errno));
+		fprintf(
+		    stderr, "alp_rpc: RPMSG_CREATE_EPT_IOCTL(%s) failed: %s\n", ch->name, strerror(errno));
 		close(ch->ctrl_fd);
 		free(ch);
 		return ALP_ERR_NOT_READY;
@@ -449,8 +449,8 @@ static alp_status_t y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t 
  */
 static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *method);
 
-static alp_status_t y_subscribe(alp_rpc_backend_state_t *st, const char *method,
-                                alp_rpc_method_cb_t cb, void *user)
+static alp_status_t
+y_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t cb, void *user)
 {
 	struct rpc_be *ch = (struct rpc_be *)st->be_data;
 	if (ch == NULL) return ALP_ERR_NOT_READY;
@@ -533,8 +533,8 @@ static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
  * TX is serialised by the channel's tx_mutex.  A non-blocking write
  * that would block maps EAGAIN/EWOULDBLOCK -> ALP_ERR_BUSY.
  */
-static alp_status_t y_send(alp_rpc_backend_state_t *st, const char *method, const void *payload,
-                           size_t len)
+static alp_status_t
+y_send(alp_rpc_backend_state_t *st, const char *method, const void *payload, size_t len)
 {
 	struct rpc_be *ch = (struct rpc_be *)st->be_data;
 	if (ch == NULL) return ALP_ERR_NOT_READY;
@@ -568,8 +568,13 @@ static alp_status_t y_send(alp_rpc_backend_state_t *st, const char *method, cons
  * matching response, the timeout elapses, or the channel closes.
  * Concurrent calls on one channel are serialised by tx_mutex.
  */
-static alp_status_t y_call(alp_rpc_backend_state_t *st, const char *method, const void *req,
-                           size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms)
+static alp_status_t y_call(alp_rpc_backend_state_t *st,
+                           const char              *method,
+                           const void              *req,
+                           size_t                   req_len,
+                           void                    *resp,
+                           size_t                  *resp_len,
+                           uint32_t                 timeout_ms)
 {
 	struct rpc_be *ch = (struct rpc_be *)st->be_data;
 	if (ch == NULL) return ALP_ERR_NOT_READY;
@@ -717,8 +722,8 @@ static void y_close(alp_rpc_backend_state_t *st)
  * forces this backend still sees a clear runtime error. */
 
 /** @brief NOSUPPORT open() -- no OpenAMP user-space libraries linked. */
-static alp_status_t y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	(void)cfg;
 	(void)st;
@@ -727,8 +732,8 @@ static alp_status_t y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t 
 }
 
 /** @brief NOSUPPORT subscribe() -- no OpenAMP user-space libraries linked. */
-static alp_status_t y_subscribe(alp_rpc_backend_state_t *st, const char *method,
-                                alp_rpc_method_cb_t cb, void *user)
+static alp_status_t
+y_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t cb, void *user)
 {
 	(void)st;
 	(void)method;
@@ -746,8 +751,8 @@ static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
 }
 
 /** @brief NOSUPPORT send() -- no OpenAMP user-space libraries linked. */
-static alp_status_t y_send(alp_rpc_backend_state_t *st, const char *method, const void *payload,
-                           size_t len)
+static alp_status_t
+y_send(alp_rpc_backend_state_t *st, const char *method, const void *payload, size_t len)
 {
 	(void)st;
 	(void)method;
@@ -757,8 +762,13 @@ static alp_status_t y_send(alp_rpc_backend_state_t *st, const char *method, cons
 }
 
 /** @brief NOSUPPORT call() -- no OpenAMP user-space libraries linked. */
-static alp_status_t y_call(alp_rpc_backend_state_t *st, const char *method, const void *req,
-                           size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms)
+static alp_status_t y_call(alp_rpc_backend_state_t *st,
+                           const char              *method,
+                           const void              *req,
+                           size_t                   req_len,
+                           void                    *resp,
+                           size_t                  *resp_len,
+                           uint32_t                 timeout_ms)
 {
 	(void)st;
 	(void)method;
@@ -791,7 +801,8 @@ static const alp_rpc_ops_t _ops = {
 	.close       = y_close,
 };
 
-ALP_BACKEND_REGISTER(rpc, yocto_drv,
+ALP_BACKEND_REGISTER(rpc,
+                     yocto_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "linux",

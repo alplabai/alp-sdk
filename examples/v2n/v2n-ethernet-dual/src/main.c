@@ -80,9 +80,12 @@ static int mock_mdio_write(uint8_t phy_addr, uint8_t reg, uint16_t val, void *us
 /* Bring one PHY up + print its link state.                           */
 /* ----------------------------------------------------------------- */
 
-static void exercise_phy(const char *label, rtl8211fdi_t *ctx, uint8_t phy_addr,
-                         rtl8211fdi_mdio_read_t read, rtl8211fdi_mdio_write_t write,
-                         void *mdio_user)
+static void exercise_phy(const char             *label,
+                         rtl8211fdi_t           *ctx,
+                         uint8_t                 phy_addr,
+                         rtl8211fdi_mdio_read_t  read,
+                         rtl8211fdi_mdio_write_t write,
+                         void                   *mdio_user)
 {
 	printf("[%s] init  -> ", label);
 	alp_status_t s = rtl8211fdi_init(ctx, phy_addr, read, write, mdio_user);
@@ -113,8 +116,12 @@ static void exercise_phy(const char *label, rtl8211fdi_t *ctx, uint8_t phy_addr,
 	rtl8211fdi_speed_t speed;
 	bool               full_duplex;
 	s = rtl8211fdi_get_link(ctx, &up, &speed, &full_duplex);
-	printf("[%s] link  -> status=%d up=%d speed=%d full_duplex=%d\n", label, (int)s, (int)up,
-	       (int)speed, (int)full_duplex);
+	printf("[%s] link  -> status=%d up=%d speed=%d full_duplex=%d\n",
+	       label,
+	       (int)s,
+	       (int)up,
+	       (int)speed,
+	       (int)full_duplex);
 }
 
 int main(void)

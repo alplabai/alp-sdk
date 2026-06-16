@@ -75,8 +75,8 @@ typedef enum {
  *          @ref ALP_ERR_NOSUPPORT until the vendor pack body lands.
  *          @ref ALP_ERR_IO on hardware bus / key-load fault.
  */
-alp_status_t alp_alif_storage_secaes_key_provision(alp_storage_t *s, const uint8_t *key,
-                                                   uint8_t key_bytes);
+alp_status_t
+alp_alif_storage_secaes_key_provision(alp_storage_t *s, const uint8_t *key, uint8_t key_bytes);
 
 /**
  * @brief Read the SecAES engine status flags.

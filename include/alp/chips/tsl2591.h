@@ -34,15 +34,15 @@ extern "C" {
 
 #define TSL2591_I2C_ADDR 0x29u
 
-#define TSL2591_CMD_BIT 0xA0u
-#define TSL2591_REG_ENABLE 0x00u
-#define TSL2591_REG_ID 0x12u
+#define TSL2591_CMD_BIT       0xA0u
+#define TSL2591_REG_ENABLE    0x00u
+#define TSL2591_REG_ID        0x12u
 #define TSL2591_REG_C0DATA_LO 0x14u
 
 #define TSL2591_DEVICE_ID 0x50u
 
 #define TSL2591_ENABLE_POWER_ON 0x01u
-#define TSL2591_ENABLE_AEN 0x02u
+#define TSL2591_ENABLE_AEN      0x02u
 
 typedef struct {
 	alp_i2c_t *bus;

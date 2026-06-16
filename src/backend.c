@@ -49,7 +49,7 @@
 extern const alp_backend_class_range_t __start_alp_backend_classes[];
 extern const alp_backend_class_range_t __stop_alp_backend_classes[];
 
-static bool                            is_wildcard(const alp_backend_t *be)
+static bool is_wildcard(const alp_backend_t *be)
 {
 	return (be->silicon_ref != NULL && be->silicon_ref[0] == '*' && be->silicon_ref[1] == '\0');
 }
@@ -80,8 +80,8 @@ static bool candidate_beats_best(const alp_backend_t *cand, const alp_backend_t 
 	return strcmp(cand->vendor, best->vendor) < 0;
 }
 
-static const alp_backend_t *select_in_range(const alp_backend_t *start, const alp_backend_t *stop,
-                                            const char *silicon_ref)
+static const alp_backend_t *
+select_in_range(const alp_backend_t *start, const alp_backend_t *stop, const char *silicon_ref)
 {
 	const alp_backend_t *best = NULL;
 	for (const alp_backend_t *be = start; be < stop; ++be) {
@@ -107,7 +107,8 @@ const alp_backend_t *alp_backend_select(const char *class_name, const char *sili
 		return NULL;
 	}
 	for (const alp_backend_class_range_t *c = __start_alp_backend_classes;
-	     c < __stop_alp_backend_classes; ++c) {
+	     c < __stop_alp_backend_classes;
+	     ++c) {
 		if (strcmp(c->class_name, class_name) == 0) {
 			return select_in_range(c->start, c->stop, silicon_ref);
 		}
@@ -121,7 +122,8 @@ size_t alp_backend_count(const char *class_name)
 		return 0u;
 	}
 	for (const alp_backend_class_range_t *c = __start_alp_backend_classes;
-	     c < __stop_alp_backend_classes; ++c) {
+	     c < __stop_alp_backend_classes;
+	     ++c) {
 		if (strcmp(c->class_name, class_name) == 0) {
 			return (size_t)(c->stop - c->start);
 		}

@@ -199,14 +199,14 @@ static alp_status_t z_advertise_start(alp_ble_radio_state_t *st, const alp_ble_a
      * Size budget is 31 bytes total per BT spec; we trust the caller
      * not to exceed that for v0.3.  v0.3.x adds extended-advertising
      * support for larger payloads. */
-	struct bt_data       ad[3];
-	size_t               ad_len = 0;
+	struct bt_data ad[3];
+	size_t         ad_len = 0;
 
-	static const uint8_t flags  = BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR;
-	ad[ad_len++]                = (struct bt_data){
-		               .type     = BT_DATA_FLAGS,
-		               .data_len = 1,
-		               .data     = &flags,
+	static const uint8_t flags = BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR;
+	ad[ad_len++]               = (struct bt_data){
+		              .type     = BT_DATA_FLAGS,
+		              .data_len = 1,
+		              .data     = &flags,
 	};
 	if (cfg->name != NULL && cfg->name[0] != '\0') {
 		ad[ad_len++] = (struct bt_data){
@@ -272,8 +272,11 @@ static alp_status_t z_gatt_register_service(alp_ble_radio_state_t       *st,
 	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t z_gatt_notify(alp_ble_radio_state_t *radio_st, alp_ble_conn_state_t *conn_st,
-                                  alp_ble_attr_handle_t handle, const uint8_t *payload, size_t len)
+static alp_status_t z_gatt_notify(alp_ble_radio_state_t *radio_st,
+                                  alp_ble_conn_state_t  *conn_st,
+                                  alp_ble_attr_handle_t  handle,
+                                  const uint8_t         *payload,
+                                  size_t                 len)
 {
 	(void)radio_st;
 	(void)conn_st;
@@ -287,8 +290,8 @@ static alp_status_t z_gatt_notify(alp_ble_radio_state_t *radio_st, alp_ble_conn_
 	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t z_scan_start(alp_ble_radio_state_t *st, bool active, alp_ble_scan_cb_t cb,
-                                 void *user)
+static alp_status_t
+z_scan_start(alp_ble_radio_state_t *st, bool active, alp_ble_scan_cb_t cb, void *user)
 {
 #if defined(CONFIG_ALP_SDK_BLE)
 	struct ble_radio_be *be = (struct ble_radio_be *)st->be_data;
@@ -329,8 +332,10 @@ static alp_status_t z_scan_stop(alp_ble_radio_state_t *st)
 #endif
 }
 
-static alp_status_t z_connect(alp_ble_radio_state_t *st, const alp_ble_addr_t *peer,
-                              uint32_t timeout_ms, alp_ble_conn_state_t *conn_st)
+static alp_status_t z_connect(alp_ble_radio_state_t *st,
+                              const alp_ble_addr_t  *peer,
+                              uint32_t               timeout_ms,
+                              alp_ble_conn_state_t  *conn_st)
 {
 #if defined(CONFIG_ALP_SDK_BLE)
 	bt_addr_le_t addr = { 0 };
@@ -381,8 +386,12 @@ static alp_status_t z_disconnect(alp_ble_conn_state_t *conn_st)
 #endif
 }
 
-static alp_status_t z_gatt_read(alp_ble_conn_state_t *conn_st, alp_ble_attr_handle_t handle,
-                                uint8_t *out, size_t out_cap, size_t *out_len, uint32_t timeout_ms)
+static alp_status_t z_gatt_read(alp_ble_conn_state_t *conn_st,
+                                alp_ble_attr_handle_t handle,
+                                uint8_t              *out,
+                                size_t                out_cap,
+                                size_t               *out_len,
+                                uint32_t              timeout_ms)
 {
 	(void)conn_st;
 	(void)handle;
@@ -397,8 +406,11 @@ static alp_status_t z_gatt_read(alp_ble_conn_state_t *conn_st, alp_ble_attr_hand
 	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st, alp_ble_attr_handle_t handle,
-                                 const uint8_t *data, size_t len, uint32_t timeout_ms)
+static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
+                                 alp_ble_attr_handle_t handle,
+                                 const uint8_t        *data,
+                                 size_t                len,
+                                 uint32_t              timeout_ms)
 {
 	(void)conn_st;
 	(void)handle;
@@ -429,7 +441,8 @@ static const alp_ble_ops_t _ops = {
 	.gatt_write            = z_gatt_write,
 };
 
-ALP_BACKEND_REGISTER(ble, zephyr_drv,
+ALP_BACKEND_REGISTER(ble,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

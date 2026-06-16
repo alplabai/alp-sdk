@@ -58,7 +58,7 @@
 static struct k_mutex bridge_stream_lock;
 static uint8_t        bridge_streams_used;
 
-static int            bridge_stream_lock_init(void)
+static int bridge_stream_lock_init(void)
 {
 	k_mutex_init(&bridge_stream_lock);
 	return 0;
@@ -143,8 +143,8 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 		alp_z_set_last_error(s);
 		return NULL;
 	}
-	s = gd32g553_adc_stream_begin(ctx, (uint8_t)slot, (uint8_t)cfg->channel_id,
-	                              cfg->sample_rate_hz);
+	s = gd32g553_adc_stream_begin(
+	    ctx, (uint8_t)slot, (uint8_t)cfg->channel_id, cfg->sample_rate_hz);
 	alp_z_v2n_supervisor_release();
 
 	if (s != ALP_OK) {
@@ -194,8 +194,8 @@ alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream, uint16_t *mv, size_t 
 		                             : (uint8_t)cap;
 		uint8_t       got_this = 0u;
 
-		gd32g553_t   *ctx      = NULL;
-		alp_status_t  s        = alp_z_v2n_supervisor_acquire(&ctx);
+		gd32g553_t  *ctx = NULL;
+		alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
 		if (s != ALP_OK) return s;
 		s = gd32g553_adc_stream_read(ctx, stream->stream_id, want, &got_this, mv);
 		alp_z_v2n_supervisor_release();
@@ -254,7 +254,7 @@ struct alp_adc_filter {
 	alp_dsp_chain_t  *chain;
 };
 
-static struct alp_adc_filter  alp_adc_filter_pool[ALP_ADC_FILTER_POOL_SIZE];
+static struct alp_adc_filter alp_adc_filter_pool[ALP_ADC_FILTER_POOL_SIZE];
 
 static struct alp_adc_filter *alp_adc_filter_pool_acquire(void)
 {
@@ -434,7 +434,7 @@ struct alp_adc_spectrum {
 	int16_t              samples[ALP_DSP_MAX_FFT_POINTS];
 };
 
-static struct alp_adc_spectrum  alp_adc_spectrum_pool[ALP_ADC_SPECTRUM_POOL_SIZE];
+static struct alp_adc_spectrum alp_adc_spectrum_pool[ALP_ADC_SPECTRUM_POOL_SIZE];
 
 static struct alp_adc_spectrum *alp_adc_spectrum_pool_acquire(void)
 {
@@ -509,8 +509,8 @@ alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg)
 	return s;
 }
 
-alp_status_t alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap,
-                                        size_t *got)
+alp_status_t
+alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, size_t *got)
 {
 	if (got == NULL) return ALP_ERR_INVAL;
 	*got = 0u;
@@ -550,8 +550,8 @@ alp_status_t alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, s
 
 	/* Run the chain over the accumulated block. */
 	size_t       got_bins = 0u;
-	alp_status_t s = alp_dsp_chain_apply_bins(spec->chain, spec->samples, spec->fft_n_points, bins,
-	                                          cap, &got_bins);
+	alp_status_t s        = alp_dsp_chain_apply_bins(
+        spec->chain, spec->samples, spec->fft_n_points, bins, cap, &got_bins);
 	/* Reset the accumulator for the next non-overlapping block. */
 	spec->accumulated = 0u;
 	if (s != ALP_OK) return s;
@@ -593,8 +593,8 @@ alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg)
 	return NULL;
 }
 
-alp_status_t alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap,
-                                        size_t *got)
+alp_status_t
+alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, size_t *got)
 {
 	/* Mirror the bridge-path contract's pre-checks for diagnostic
      * fidelity on backends without HW dispatch. */

@@ -40,8 +40,8 @@
 
 #include "rpc_ops.h"
 
-static alp_status_t sw_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t
+sw_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	(void)cfg;
 	st->be_data     = NULL;
@@ -49,8 +49,8 @@ static alp_status_t sw_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t
 	return ALP_OK;
 }
 
-static alp_status_t sw_subscribe(alp_rpc_backend_state_t *st, const char *method,
-                                 alp_rpc_method_cb_t cb, void *user)
+static alp_status_t
+sw_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t cb, void *user)
 {
 	(void)st;
 	(void)method;
@@ -69,8 +69,8 @@ static alp_status_t sw_unsubscribe(alp_rpc_backend_state_t *st, const char *meth
 	return ALP_OK;
 }
 
-static alp_status_t sw_send(alp_rpc_backend_state_t *st, const char *method, const void *payload,
-                            size_t len)
+static alp_status_t
+sw_send(alp_rpc_backend_state_t *st, const char *method, const void *payload, size_t len)
 {
 	(void)st;
 	(void)method;
@@ -80,8 +80,13 @@ static alp_status_t sw_send(alp_rpc_backend_state_t *st, const char *method, con
 	return ALP_OK;
 }
 
-static alp_status_t sw_call(alp_rpc_backend_state_t *st, const char *method, const void *req,
-                            size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms)
+static alp_status_t sw_call(alp_rpc_backend_state_t *st,
+                            const char              *method,
+                            const void              *req,
+                            size_t                   req_len,
+                            void                    *resp,
+                            size_t                  *resp_len,
+                            uint32_t                 timeout_ms)
 {
 	(void)st;
 	(void)method;
@@ -114,7 +119,8 @@ static const alp_rpc_ops_t _ops = {
 	.close       = sw_close,
 };
 
-ALP_BACKEND_REGISTER(rpc, sw_fallback,
+ALP_BACKEND_REGISTER(rpc,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

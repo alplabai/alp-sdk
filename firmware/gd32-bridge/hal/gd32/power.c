@@ -44,20 +44,20 @@
  *            opcode; today the firmware rejects them so the host
  *            knows the request is moot.
  */
-#define POWER_WAKE_RTC 0x00000001u
-#define POWER_WAKE_GPIO 0x00000002u
-#define POWER_WAKE_UART_RX 0x00000004u
-#define POWER_WAKE_TIMER 0x00000008u
-#define POWER_WAKE_USB 0x00000010u
-#define POWER_WAKE_ETH_LINK 0x00000020u
+#define POWER_WAKE_RTC            0x00000001u
+#define POWER_WAKE_GPIO           0x00000002u
+#define POWER_WAKE_UART_RX        0x00000004u
+#define POWER_WAKE_TIMER          0x00000008u
+#define POWER_WAKE_USB            0x00000010u
+#define POWER_WAKE_ETH_LINK       0x00000020u
 #define POWER_WAKE_MASK_SUPPORTED (POWER_WAKE_RTC | POWER_WAKE_GPIO | POWER_WAKE_TIMER)
-#define POWER_WAKE_MASK_HW_GATED (POWER_WAKE_UART_RX | POWER_WAKE_USB | POWER_WAKE_ETH_LINK)
+#define POWER_WAKE_MASK_HW_GATED  (POWER_WAKE_UART_RX | POWER_WAKE_USB | POWER_WAKE_ETH_LINK)
 
 /* RTC wakeup timer LSB: with IRC32K (~32 kHz internal) clock and
  * the /16 divider, the timer ticks at 32000/16 = 2000 Hz -- 0.5 ms
  * per tick.  Max wake = 65535 / 2000 = 32.7 s.  Longer waits would
  * need the CKSPRE_2EXP16 mode which sits in a future commit. */
-#define POWER_WAKE_LSB_HZ 2000u
+#define POWER_WAKE_LSB_HZ       2000u
 #define POWER_WAKE_TIMER_MAX_MS (65535u * 1000u / POWER_WAKE_LSB_HZ)
 
 /* One-time RTC + LSI bring-up that arms the wakeup timer.  Idempotent

@@ -32,7 +32,7 @@ extern void alp_z_clear_last_error(void);
 #define CONFIG_ALP_SDK_MAX_DAC_HANDLES 2
 #endif
 
-static struct alp_dac  _pool[CONFIG_ALP_SDK_MAX_DAC_HANDLES];
+static struct alp_dac _pool[CONFIG_ALP_SDK_MAX_DAC_HANDLES];
 
 static struct alp_dac *_alloc(void)
 {

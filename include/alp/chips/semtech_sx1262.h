@@ -36,8 +36,8 @@ extern "C" {
 #endif
 
 #define SX1262_OPCODE_GET_STATUS 0xC0u
-#define SX1262_OPCODE_RESET 0x82u
-#define SX1262_OPCODE_WAKEUP 0xC0u
+#define SX1262_OPCODE_RESET      0x82u
+#define SX1262_OPCODE_WAKEUP     0xC0u
 
 typedef struct {
 	alp_spi_t  *bus;
@@ -47,8 +47,8 @@ typedef struct {
 } semtech_sx1262_t;
 
 /** @brief Bind context to caller-opened SPI + GPIO. */
-alp_status_t semtech_sx1262_init(semtech_sx1262_t *dev, alp_spi_t *spi, alp_gpio_t *nreset,
-                                 alp_gpio_t *busy);
+alp_status_t
+semtech_sx1262_init(semtech_sx1262_t *dev, alp_spi_t *spi, alp_gpio_t *nreset, alp_gpio_t *busy);
 
 /** @brief Pulse NRESET for at least 100 us. */
 alp_status_t semtech_sx1262_hw_reset(semtech_sx1262_t *dev);

@@ -124,10 +124,13 @@ typedef struct {
  * @param bt_dev_wake   Optional alp_gpio_t for BT_DEV_WAKE output;
  *                      NULL on V2N until the maintainer routes it.
  */
-alp_status_t murata_lbee5hy2fy_init(murata_lbee5hy2fy_t *ctx, murata_reg_set_t reg_set,
-                                    murata_reg_get_t reg_get, void *reg_user,
-                                    alp_gpio_t *bt_host_wake, alp_gpio_t *wl_host_wake,
-                                    alp_gpio_t *bt_dev_wake);
+alp_status_t murata_lbee5hy2fy_init(murata_lbee5hy2fy_t *ctx,
+                                    murata_reg_set_t     reg_set,
+                                    murata_reg_get_t     reg_get,
+                                    void                *reg_user,
+                                    alp_gpio_t          *bt_host_wake,
+                                    alp_gpio_t          *wl_host_wake,
+                                    alp_gpio_t          *bt_dev_wake);
 
 /** @brief Drive `BT_REG_ON` to the requested level. */
 alp_status_t murata_lbee5hy2fy_bt_power(murata_lbee5hy2fy_t *ctx, bool on);

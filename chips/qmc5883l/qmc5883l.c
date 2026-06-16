@@ -11,9 +11,9 @@
 #include "alp/chips/qmc5883l.h"
 
 #define QMC5883L_CTRL1_CONTINUOUS 0x01u
-#define QMC5883L_CTRL1_ODR_200HZ 0x0Cu
-#define QMC5883L_CTRL1_RNG_2G 0x00u
-#define QMC5883L_CTRL1_OSR_512 0x00u
+#define QMC5883L_CTRL1_ODR_200HZ  0x0Cu
+#define QMC5883L_CTRL1_RNG_2G     0x00u
+#define QMC5883L_CTRL1_OSR_512    0x00u
 
 static alp_status_t qmc5883l_write_reg(qmc5883l_t *dev, uint8_t reg, uint8_t val)
 {
@@ -32,7 +32,8 @@ alp_status_t qmc5883l_init(qmc5883l_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	/* Per QST app-note: write 0x01 to SET/RESET, then CTRL1 for run mode. */
 	alp_status_t s = qmc5883l_write_reg(dev, QMC5883L_REG_SET_RESET, 0x01);
 	if (s != ALP_OK) return s;
-	s = qmc5883l_write_reg(dev, QMC5883L_REG_CTRL1,
+	s = qmc5883l_write_reg(dev,
+	                       QMC5883L_REG_CTRL1,
 	                       QMC5883L_CTRL1_CONTINUOUS | QMC5883L_CTRL1_ODR_200HZ |
 	                           QMC5883L_CTRL1_RNG_2G | QMC5883L_CTRL1_OSR_512);
 	if (s != ALP_OK) return s;

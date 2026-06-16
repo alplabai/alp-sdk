@@ -46,8 +46,11 @@ static void put_le16(uint8_t *p, uint16_t v)
 /* PING (0x00): liveness probe.  Empty request, empty reply data --
  * the bare RESP_OK status the transport prepends is the "firmware is
  * alive" signal the host's first post-boot handshake waits for. */
-static alp_cc3501e_resp_t handle_ping(const uint8_t *req, size_t req_len, uint8_t *reply_data,
-                                      size_t reply_cap, size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ping(const uint8_t *req,
+                                      size_t         req_len,
+                                      uint8_t       *reply_data,
+                                      size_t         reply_cap,
+                                      size_t        *reply_data_len)
 {
 	(void)req;
 	(void)reply_data;
@@ -68,9 +71,11 @@ static alp_cc3501e_resp_t handle_ping(const uint8_t *req, size_t req_len, uint8_
  * GET_VERSION returns the release version is a documentation
  * discrepancy -- tracked in DESIGN.md; the release version is reported
  * separately via GET_DIAG_INFO.fw_version in v2 firmware.) */
-static alp_cc3501e_resp_t handle_get_version(const uint8_t *req, size_t req_len,
-                                             uint8_t *reply_data, size_t reply_cap,
-                                             size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_get_version(const uint8_t *req,
+                                             size_t         req_len,
+                                             uint8_t       *reply_data,
+                                             size_t         reply_cap,
+                                             size_t        *reply_data_len)
 {
 	(void)req;
 	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
@@ -83,8 +88,11 @@ static alp_cc3501e_resp_t handle_get_version(const uint8_t *req, size_t req_len,
 /* GET_MAC (0x03): the CC3501E's factory MAC (6 bytes, big-endian wire
  * order as TI stores it).  Read from the radio subsystem via the HAL;
  * the stub backend returns the documented all-zero placeholder. */
-static alp_cc3501e_resp_t handle_get_mac(const uint8_t *req, size_t req_len, uint8_t *reply_data,
-                                         size_t reply_cap, size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_get_mac(const uint8_t *req,
+                                         size_t         req_len,
+                                         uint8_t       *reply_data,
+                                         size_t         reply_cap,
+                                         size_t        *reply_data_len)
 {
 	(void)req;
 	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
@@ -101,8 +109,11 @@ static alp_cc3501e_resp_t handle_get_mac(const uint8_t *req, size_t req_len, uin
  * to the host (so the host sees the ack), then resets the chip -- which
  * the host detects as the firmware going quiet then re-PINGing alive.
  * On the stub backend the deferred reset is a no-op. */
-static alp_cc3501e_resp_t handle_reset(const uint8_t *req, size_t req_len, uint8_t *reply_data,
-                                       size_t reply_cap, size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_reset(const uint8_t *req,
+                                       size_t         req_len,
+                                       uint8_t       *reply_data,
+                                       size_t         reply_cap,
+                                       size_t        *reply_data_len)
 {
 	(void)req;
 	(void)reply_data;
@@ -122,8 +133,13 @@ typedef alp_cc3501e_resp_t (*cmd_handler_t)(const uint8_t *, size_t, uint8_t *, 
 /* Sparse switch on opcode -- keeps the table small without losing the
  * single-handler-table property.  v0.2+ feature groups slot in here as
  * their HAL bodies land. */
-alp_cc3501e_resp_t protocol_dispatch(uint8_t cmd, uint8_t flags, const uint8_t *req, size_t req_len,
-                                     uint8_t *reply_data, size_t reply_cap, size_t *reply_data_len)
+alp_cc3501e_resp_t protocol_dispatch(uint8_t        cmd,
+                                     uint8_t        flags,
+                                     const uint8_t *req,
+                                     size_t         req_len,
+                                     uint8_t       *reply_data,
+                                     size_t         reply_cap,
+                                     size_t        *reply_data_len)
 {
 	(void)flags; /* v0.1 has no request flag that alters dispatch. */
 	*reply_data_len = 0u;
@@ -155,8 +171,10 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t cmd, uint8_t flags, const uint8_t *
 /* Transport-agnostic framing                                        */
 /* --------------------------------------------------------------- */
 
-size_t protocol_build_reply(const uint8_t *req_frame, size_t req_len, uint8_t *reply_frame,
-                            size_t reply_cap)
+size_t protocol_build_reply(const uint8_t *req_frame,
+                            size_t         req_len,
+                            uint8_t       *reply_frame,
+                            size_t         reply_cap)
 {
 	/* The caller guarantees a full-size reply buffer; guard anyway. */
 	if (reply_cap < CC3501E_REPLY_DATA_OFF) {
@@ -174,9 +192,13 @@ size_t protocol_build_reply(const uint8_t *req_frame, size_t req_len, uint8_t *r
 		/* Captured byte count must match the declared payload exactly. */
 		if ((size_t)ALP_CC3501E_HEADER_BYTES + (size_t)payload_len == req_len) {
 			const uint8_t *req = (payload_len > 0u) ? &req_frame[ALP_CC3501E_HEADER_BYTES] : NULL;
-			status             = protocol_dispatch(cmd_echo, flags, req, payload_len,
-			                                       &reply_frame[CC3501E_REPLY_DATA_OFF],
-			                                       reply_cap - CC3501E_REPLY_DATA_OFF, &data_len);
+			status             = protocol_dispatch(cmd_echo,
+                                       flags,
+                                       req,
+                                       payload_len,
+                                       &reply_frame[CC3501E_REPLY_DATA_OFF],
+                                       reply_cap - CC3501E_REPLY_DATA_OFF,
+                                       &data_len);
 		}
 	}
 

@@ -104,7 +104,9 @@ typedef struct {
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO.
  */
-alp_status_t deepx_dxm1_init(deepx_dxm1_t *ctx, alp_gpio_t *m1_reset, pi3dbs12212_t *pcie_mux,
+alp_status_t deepx_dxm1_init(deepx_dxm1_t       *ctx,
+                             alp_gpio_t         *m1_reset,
+                             pi3dbs12212_t      *pcie_mux,
                              pi3dbs12212_state_t deepx_path);
 
 /** @brief Override the assumed reset-line polarity.  Default is active-high. */

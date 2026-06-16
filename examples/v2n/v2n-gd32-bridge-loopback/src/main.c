@@ -89,10 +89,10 @@ volatile uint32_t loopback_results[32] = { LOOPBACK_MAGIC, 0u };
 /* Named indices into the raw-forensics slots so the body reads cleanly
  * and the README's slot table has exactly one source of truth. */
 #define SLOT_DAC_RAW_BASE 12u /* [12..15] : the four DAC->ADC readings  */
-#define SLOT_CAP_PERIOD 16u   /* raw capture period_ns                 */
-#define SLOT_CAP_PULSE 17u    /* raw capture pulse_width_ns            */
-#define SLOT_QENC_POS1 18u    /* raw qenc pos1 (cast)                  */
-#define SLOT_QENC_POS2 19u    /* raw qenc pos2 (cast)                  */
+#define SLOT_CAP_PERIOD   16u /* raw capture period_ns                 */
+#define SLOT_CAP_PULSE    17u /* raw capture pulse_width_ns            */
+#define SLOT_QENC_POS1    18u /* raw qenc pos1 (cast)                  */
+#define SLOT_QENC_POS2    19u /* raw qenc pos2 (cast)                  */
 
 static gd32g553_t ctx;
 static unsigned   record_idx; /* cursor into loopback_results[4..11] */
@@ -143,7 +143,7 @@ static void record(alp_status_t s, bool value_ok)
  * array order is also the [12..15] raw-slot order. */
 static const uint16_t dac_setpoints_mv[4] = { 150u, 450u, 900u, 1350u };
 
-static void           t_dac_adc_loopback(void)
+static void t_dac_adc_loopback(void)
 {
 	/* Park the DAC at 0 first so we start every sweep from a known
      * floor (defends against a stale setpoint left by a prior aborted
@@ -159,7 +159,7 @@ static void           t_dac_adc_loopback(void)
          * cannot slip a rail-riding setpoint into the sweep. */
 		const uint16_t cmd = (mv > DAC_MAX_SAFE_MV) ? DAC_MAX_SAFE_MV : mv;
 
-		alp_status_t   s   = gd32g553_dac_set(&ctx, 0u /* DAC0 */, cmd);
+		alp_status_t s = gd32g553_dac_set(&ctx, 0u /* DAC0 */, cmd);
 
 		/* 3 ms settle: covers the 12-bit DAC's own settling plus the
          * jumper line's slew into the (lightly loaded) ADC pad. */

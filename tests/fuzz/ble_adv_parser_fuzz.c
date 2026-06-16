@@ -60,11 +60,11 @@
 /* BLE AD types we recognise.  An unknown type is NOT a parse error
  * -- the parser surfaces unknowns to the caller so the scan-callback
  * can decide.  We just record the type byte and skip the payload. */
-#define BT_AD_TYPE_FLAGS 0x01
+#define BT_AD_TYPE_FLAGS      0x01
 #define BT_AD_TYPE_NAME_SHORT 0x08
-#define BT_AD_TYPE_NAME_FULL 0x09
-#define BT_AD_TYPE_TX_POWER 0x0A
-#define BT_AD_TYPE_MFG_DATA 0xFF
+#define BT_AD_TYPE_NAME_FULL  0x09
+#define BT_AD_TYPE_TX_POWER   0x0A
+#define BT_AD_TYPE_MFG_DATA   0xFF
 
 typedef enum {
 	BLE_OK            = 0,
@@ -79,8 +79,8 @@ typedef int (*ble_ad_cb_t)(uint8_t type, const uint8_t *data, uint8_t data_len, 
 /* Enumerate AD structures in `buf[0..buf_len)`.  Calls `cb` once per
  * structure; bails on first error.  Returns BLE_OK if the entire
  * buffer was consumed cleanly. */
-static ble_status_t ble_parse_adv(const uint8_t *buf, size_t buf_len, ble_ad_cb_t cb,
-                                  void *userdata)
+static ble_status_t
+ble_parse_adv(const uint8_t *buf, size_t buf_len, ble_ad_cb_t cb, void *userdata)
 {
 	if (buf == NULL && buf_len > 0) {
 		return BLE_ERR_INVAL;

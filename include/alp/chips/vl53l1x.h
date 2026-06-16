@@ -37,7 +37,7 @@ extern "C" {
 #define VL53L1X_I2C_ADDR_DEFAULT 0x29u
 
 #define VL53L1X_REG_IDENTIFICATION_MODEL_ID 0x010Fu
-#define VL53L1X_MODEL_ID 0xEAu
+#define VL53L1X_MODEL_ID                    0xEAu
 
 typedef struct {
 	alp_i2c_t *bus;

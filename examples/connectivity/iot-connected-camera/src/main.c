@@ -33,7 +33,7 @@ static alp_i2c_t       *g_sensor_bus;
 static ssd1306_t        g_oled;
 static alp_button_led_t g_trigger;
 
-static int              stage_peripherals_init(void)
+static int stage_peripherals_init(void)
 {
 	printf("[iotcam] stage 1: peripherals\n");
 
@@ -55,11 +55,12 @@ static int              stage_peripherals_init(void)
      * has no plain GPIO LED, so the LED is the RGB-red pad (PWM3)
      * claimed as a digital GPIO (E1M_GPIO_PWM3, the E1M "GPIO
      * secondary"); the button is the encoder push switch (IO4). */
-	s = alp_button_led_init(&g_trigger, &(alp_button_led_config_t){
-	                                        .button_pin_id     = E1M_GPIO_IO4,
-	                                        .led_pin_id        = E1M_GPIO_PWM3,
-	                                        .active_low_button = true,
-	                                    });
+	s = alp_button_led_init(&g_trigger,
+	                        &(alp_button_led_config_t){
+	                            .button_pin_id     = E1M_GPIO_IO4,
+	                            .led_pin_id        = E1M_GPIO_PWM3,
+	                            .active_low_button = true,
+	                        });
 	printf("[iotcam]   alp_button_led_init           %s\n",
 	       (s == ALP_OK) ? "ok" : "skip (no GPIOs)");
 
@@ -72,7 +73,7 @@ static int              stage_peripherals_init(void)
 
 static alp_camera_t *g_camera;
 
-static int           stage_camera_init(void)
+static int stage_camera_init(void)
 {
 	printf("[iotcam] stage 2: camera\n");
 
@@ -116,7 +117,7 @@ static int stage_classifier_load(void)
 
 static alp_wifi_t *g_wifi;
 
-static int         stage_network_connect(void)
+static int stage_network_connect(void)
 {
 	printf("[iotcam] stage 4: network\n");
 	/* TODO(v0.3): on a real V2N + Zephyr build, the on-module
@@ -148,7 +149,7 @@ static int         stage_network_connect(void)
 
 static alp_mqtt_t *g_mqtt;
 
-static int         stage_mqtt_connect(void)
+static int stage_mqtt_connect(void)
 {
 	printf("[iotcam] stage 5: mqtt\n");
 	/* TODO(v0.3): wire MbedTLS for MQTT-over-TLS, load the CA from

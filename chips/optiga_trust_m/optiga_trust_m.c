@@ -34,9 +34,9 @@
 
 #include "alp/chips/optiga_trust_m.h"
 
-#define OPTIGA_REG_DATA 0x80u /* Data register (where APDUs flow) */
+#define OPTIGA_REG_DATA         0x80u /* Data register (where APDUs flow) */
 #define OPTIGA_REG_DATA_REG_LEN 0x81u
-#define OPTIGA_REG_I2C_STATE 0x82u
+#define OPTIGA_REG_I2C_STATE    0x82u
 
 alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
 {
@@ -58,9 +58,13 @@ alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t 
 	return ALP_OK;
 }
 
-alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx, const uint8_t *apdu, size_t apdu_len,
-                                      uint8_t *resp, size_t resp_cap, size_t *resp_len,
-                                      uint32_t timeout_ms)
+alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
+                                      const uint8_t    *apdu,
+                                      size_t            apdu_len,
+                                      uint8_t          *resp,
+                                      size_t            resp_cap,
+                                      size_t           *resp_len,
+                                      uint32_t          timeout_ms)
 {
 	(void)apdu;
 	(void)apdu_len;

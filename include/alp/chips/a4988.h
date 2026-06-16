@@ -53,8 +53,13 @@ typedef struct {
 } a4988_t;
 
 /** @brief Bind context to caller-opened PWM + GPIO handles. */
-alp_status_t a4988_init(a4988_t *dev, alp_pwm_t *step, alp_gpio_t *dir, alp_gpio_t *nenable,
-                        alp_gpio_t *ms1, alp_gpio_t *ms2, alp_gpio_t *ms3);
+alp_status_t a4988_init(a4988_t    *dev,
+                        alp_pwm_t  *step,
+                        alp_gpio_t *dir,
+                        alp_gpio_t *nenable,
+                        alp_gpio_t *ms1,
+                        alp_gpio_t *ms2,
+                        alp_gpio_t *ms3);
 
 /** @brief Apply a microstep mode by latching MS1/2/3 GPIOs. */
 alp_status_t a4988_set_microstep(a4988_t *dev, a4988_ustep_t mode);

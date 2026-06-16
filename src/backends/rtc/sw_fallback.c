@@ -30,8 +30,8 @@ static alp_rtc_time_t _cursor = {
 	.millisecond = 0,
 };
 
-static alp_status_t sw_open(uint32_t rtc_id, alp_rtc_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t
+sw_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	(void)rtc_id;
 	st->dev         = NULL;
@@ -63,7 +63,8 @@ static const alp_rtc_ops_t _ops = {
 	.close    = NULL,
 };
 
-ALP_BACKEND_REGISTER(rtc, sw_fallback,
+ALP_BACKEND_REGISTER(rtc,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

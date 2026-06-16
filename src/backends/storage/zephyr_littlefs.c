@@ -51,8 +51,8 @@ typedef struct lfs_state {
 #define CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL 2
 #endif
 
-static lfs_state_t  _lfs_pool[CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL];
-static bool         _lfs_in_use[CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL];
+static lfs_state_t _lfs_pool[CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL];
+static bool        _lfs_in_use[CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL];
 
 static lfs_state_t *_lfs_alloc(void)
 {
@@ -103,8 +103,9 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
-static alp_status_t lfs_open(const alp_storage_config_t *cfg, alp_storage_backend_state_t *st,
-                             alp_capabilities_t *caps_out)
+static alp_status_t lfs_open(const alp_storage_config_t  *cfg,
+                             alp_storage_backend_state_t *st,
+                             alp_capabilities_t          *caps_out)
 {
 	/* littlefs is layered on top of a flash partition -- only the
      * QSPI / OSPI / INTERNAL_FLASH kinds make sense here.  SD/MMC
@@ -151,8 +152,8 @@ static alp_status_t lfs_get_info(alp_storage_backend_state_t *st, alp_storage_in
 	return ALP_OK;
 }
 
-static alp_status_t lfs_read(alp_storage_backend_state_t *st, uint64_t offset, void *data,
-                             size_t len)
+static alp_status_t
+lfs_read(alp_storage_backend_state_t *st, uint64_t offset, void *data, size_t len)
 {
 	lfs_state_t *s = (lfs_state_t *)st->be_data;
 	if (s == NULL || !s->open) return ALP_ERR_NOT_READY;
@@ -164,8 +165,8 @@ static alp_status_t lfs_read(alp_storage_backend_state_t *st, uint64_t offset, v
 	return ALP_OK;
 }
 
-static alp_status_t lfs_write(alp_storage_backend_state_t *st, uint64_t offset, const void *data,
-                              size_t len)
+static alp_status_t
+lfs_write(alp_storage_backend_state_t *st, uint64_t offset, const void *data, size_t len)
 {
 	lfs_state_t *s = (lfs_state_t *)st->be_data;
 	if (s == NULL || !s->open) return ALP_ERR_NOT_READY;
@@ -235,7 +236,8 @@ static const alp_storage_ops_t _ops = {
 	.close                = lfs_close,
 };
 
-ALP_BACKEND_REGISTER(storage, zephyr_littlefs,
+ALP_BACKEND_REGISTER(storage,
+                     zephyr_littlefs,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

@@ -59,11 +59,11 @@ LOG_MODULE_REGISTER(audio_wake_word, LOG_LEVEL_INF);
  * (32 ms) for the inference cadence to align with a power-of-two
  * FFT length when the MFCC stage lands in v0.6.
  */
-#define SR_HZ 16000
-#define CHANNELS 1
+#define SR_HZ        16000
+#define CHANNELS     1
 #define BLOCK_FRAMES 512
-#define MFCC_FRAMES 32
-#define MFCC_COEFFS 13
+#define MFCC_FRAMES  32
+#define MFCC_COEFFS  13
 
 /* ── Wake-word inference window ────────────────────────────────
  *
@@ -72,7 +72,7 @@ LOG_MODULE_REGISTER(audio_wake_word, LOG_LEVEL_INF);
  * quantised -- fits comfortably in 64 KiB of arena.
  */
 #define WAKE_INFER_INTERVAL_MS 50
-#define WAKE_LOOP_ITERATIONS 8
+#define WAKE_LOOP_ITERATIONS   8
 
 /* ── Demo budget ───────────────────────────────────────────────
  *
@@ -176,7 +176,10 @@ static void infer_loop(void *p1, void *p2, void *p3)
          *    pipeline still exercises. */
 		if (g_state.mic_ok) {
 			size_t got = 0;
-			(void)alp_audio_in_read(g_state.mic, s_pcm, BLOCK_FRAMES, &got,
+			(void)alp_audio_in_read(g_state.mic,
+			                        s_pcm,
+			                        BLOCK_FRAMES,
+			                        &got,
 			                        /*timeout_ms=*/100);
 		} else {
 			memset(s_pcm, 0, sizeof(s_pcm));
@@ -265,8 +268,16 @@ int main(void)
      * core whenever they have something to do.  Between
      * inference windows the loop is k_sleep'd which drops the
      * idle thread to WFI on the M55 HE. */
-	k_thread_create(&infer_thread, infer_stack, K_THREAD_STACK_SIZEOF(infer_stack), infer_loop,
-	                NULL, NULL, NULL, K_PRIO_PREEMPT(10), 0, K_NO_WAIT);
+	k_thread_create(&infer_thread,
+	                infer_stack,
+	                K_THREAD_STACK_SIZEOF(infer_stack),
+	                infer_loop,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(10),
+	                0,
+	                K_NO_WAIT);
 	k_thread_name_set(&infer_thread, "wake_infer");
 
 	/* ── Wait for the loop to retire ───────────────────────

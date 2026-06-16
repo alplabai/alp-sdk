@@ -95,10 +95,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	const uint8_t *payload     = data + 1;
 	const size_t   payload_len = size - 1u;
 
-	uint8_t        reply_scratch[1u + (GD32_BRIDGE_ADC_MAX_SAMPLES * 2u)];
-	size_t         reply_len = 0u;
-	(void)protocol_dispatch(cmd, payload, payload_len, reply_scratch, sizeof reply_scratch,
-	                        &reply_len);
+	uint8_t reply_scratch[1u + (GD32_BRIDGE_ADC_MAX_SAMPLES * 2u)];
+	size_t  reply_len = 0u;
+	(void)protocol_dispatch(
+	    cmd, payload, payload_len, reply_scratch, sizeof reply_scratch, &reply_len);
 	/* Sanity: dispatcher must not claim more bytes than scratch had. */
 	if (reply_len > sizeof reply_scratch) abort();
 	return 0;

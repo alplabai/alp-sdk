@@ -71,7 +71,7 @@ struct alp_inference {
 	void                   *be_state;
 };
 
-static struct alp_inference  g_inference_pool[ALP_SDK_MAX_INFERENCE_HANDLES];
+static struct alp_inference g_inference_pool[ALP_SDK_MAX_INFERENCE_HANDLES];
 
 static struct alp_inference *pool_acquire(void)
 {
@@ -102,10 +102,10 @@ static void pool_release(struct alp_inference *h)
 alp_status_t alp_inference_deepx_open(struct alp_inference *h, const alp_inference_config_t *cfg);
 size_t       alp_inference_deepx_num_inputs(struct alp_inference *h);
 size_t       alp_inference_deepx_num_outputs(struct alp_inference *h);
-alp_status_t alp_inference_deepx_get_input(struct alp_inference *h, size_t index,
-                                           alp_inference_tensor_t *out);
-alp_status_t alp_inference_deepx_get_output(struct alp_inference *h, size_t index,
-                                            alp_inference_tensor_t *out);
+alp_status_t
+alp_inference_deepx_get_input(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
+alp_status_t
+alp_inference_deepx_get_output(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
 alp_status_t alp_inference_deepx_invoke(struct alp_inference *h);
 void         alp_inference_deepx_close(struct alp_inference *h);
 #endif
@@ -114,10 +114,10 @@ void         alp_inference_deepx_close(struct alp_inference *h);
 alp_status_t alp_inference_drpai_open(struct alp_inference *h, const alp_inference_config_t *cfg);
 size_t       alp_inference_drpai_num_inputs(struct alp_inference *h);
 size_t       alp_inference_drpai_num_outputs(struct alp_inference *h);
-alp_status_t alp_inference_drpai_get_input(struct alp_inference *h, size_t index,
-                                           alp_inference_tensor_t *out);
-alp_status_t alp_inference_drpai_get_output(struct alp_inference *h, size_t index,
-                                            alp_inference_tensor_t *out);
+alp_status_t
+alp_inference_drpai_get_input(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
+alp_status_t
+alp_inference_drpai_get_output(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
 alp_status_t alp_inference_drpai_invoke(struct alp_inference *h);
 void         alp_inference_drpai_close(struct alp_inference *h);
 #endif
@@ -183,7 +183,7 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 		alp_internal_set_last_error(ALP_ERR_NOMEM);
 		return NULL;
 	}
-	h->backend      = backend;
+	h->backend = backend;
 
 	alp_status_t rc = ALP_ERR_NOSUPPORT;
 	switch (backend) {
@@ -244,8 +244,8 @@ size_t alp_inference_num_outputs(alp_inference_t *inf)
 	}
 }
 
-alp_status_t alp_inference_get_input(alp_inference_t *inf, size_t index,
-                                     alp_inference_tensor_t *out)
+alp_status_t
+alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out)
 {
 	if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
 	if (out == NULL) return ALP_ERR_INVAL;
@@ -264,8 +264,8 @@ alp_status_t alp_inference_get_input(alp_inference_t *inf, size_t index,
 	}
 }
 
-alp_status_t alp_inference_get_output(alp_inference_t *inf, size_t index,
-                                      alp_inference_tensor_t *out)
+alp_status_t
+alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out)
 {
 	if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
 	if (out == NULL) return ALP_ERR_INVAL;

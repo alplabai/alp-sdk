@@ -121,8 +121,8 @@ ZTEST(alp_i2c_registry, test_close_releases_handle)
 
 /* ---------- (f) sw_fallback loopback round-trip --------------------------- */
 
-extern const alp_backend_t  __start_alp_backends_i2c[] __attribute__((weak));
-extern const alp_backend_t  __stop_alp_backends_i2c[] __attribute__((weak));
+extern const alp_backend_t __start_alp_backends_i2c[] __attribute__((weak));
+extern const alp_backend_t __stop_alp_backends_i2c[] __attribute__((weak));
 
 static const alp_i2c_ops_t *_find_sw_fallback_ops(void)
 {

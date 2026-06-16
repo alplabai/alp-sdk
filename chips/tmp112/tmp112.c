@@ -12,24 +12,24 @@
 
 #include "alp/chips/tmp112.h"
 
-#define TMP112_REG_TEMP 0x00u
-#define TMP112_REG_CONF 0x01u
-#define TMP112_REG_T_LOW 0x02u
+#define TMP112_REG_TEMP   0x00u
+#define TMP112_REG_CONF   0x01u
+#define TMP112_REG_T_LOW  0x02u
 #define TMP112_REG_T_HIGH 0x03u
 
 /* CONF bit fields (see datasheet table 9, big-endian on the wire). */
-#define TMP112_CONF_OS 0x8000u  /* One-shot                  */
-#define TMP112_CONF_R1 0x4000u  /* Resolution bit 1 (read only, always 1) */
-#define TMP112_CONF_R0 0x2000u  /* Resolution bit 0 (read only, always 1) */
-#define TMP112_CONF_F1 0x1000u  /* Fault queue 1             */
-#define TMP112_CONF_F0 0x0800u  /* Fault queue 0             */
+#define TMP112_CONF_OS  0x8000u /* One-shot                  */
+#define TMP112_CONF_R1  0x4000u /* Resolution bit 1 (read only, always 1) */
+#define TMP112_CONF_R0  0x2000u /* Resolution bit 0 (read only, always 1) */
+#define TMP112_CONF_F1  0x1000u /* Fault queue 1             */
+#define TMP112_CONF_F0  0x0800u /* Fault queue 0             */
 #define TMP112_CONF_POL 0x0400u /* Alert polarity            */
-#define TMP112_CONF_TM 0x0200u  /* Thermostat mode           */
-#define TMP112_CONF_SD 0x0100u  /* Shutdown                  */
+#define TMP112_CONF_TM  0x0200u /* Thermostat mode           */
+#define TMP112_CONF_SD  0x0100u /* Shutdown                  */
 #define TMP112_CONF_CR1 0x0080u /* Conversion rate bit 1     */
 #define TMP112_CONF_CR0 0x0040u /* Conversion rate bit 0     */
-#define TMP112_CONF_AL 0x0020u  /* Alert (read-only)         */
-#define TMP112_CONF_EM 0x0010u  /* Extended mode (13-bit)    */
+#define TMP112_CONF_AL  0x0020u /* Alert (read-only)         */
+#define TMP112_CONF_EM  0x0010u /* Extended mode (13-bit)    */
 
 /* Default CONF on power-on per datasheet: 0x60A0 (continuous, 4 Hz). */
 #define TMP112_CONF_DEFAULT 0x60A0u

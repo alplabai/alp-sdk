@@ -34,7 +34,8 @@
 
 #define ALP_I2S_DEV_OR_NULL(idx)                                                                   \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_i2s, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_i2s, idx)))), (NULL))
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_i2s, idx)))),                                  \
+	            (NULL))
 
 static const struct device *const _devs[] = {
 	ALP_I2S_DEV_OR_NULL(0),
@@ -56,7 +57,7 @@ typedef struct {
 	bool              in_use;
 } alp_z_i2s_side_t;
 
-static alp_z_i2s_side_t  _sides[CONFIG_ALP_SDK_MAX_I2S_HANDLES];
+static alp_z_i2s_side_t _sides[CONFIG_ALP_SDK_MAX_I2S_HANDLES];
 
 static alp_z_i2s_side_t *_alloc_side(void)
 {
@@ -129,8 +130,8 @@ static i2s_fmt_t _to_fmt(alp_i2s_format_t f)
 	}
 }
 
-static alp_status_t z_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	if (cfg->bus_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (cfg->bus_id >= ALP_SOC_I2S_COUNT) return ALP_ERR_OUT_OF_RANGE;
@@ -197,8 +198,8 @@ static alp_status_t z_stop(alp_i2s_backend_state_t *st)
 	return _errno_to_alp(i2s_trigger(dev, _to_dir(h->cfg.direction), I2S_TRIGGER_DRAIN));
 }
 
-static alp_status_t z_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes,
-                            uint32_t timeout_ms)
+static alp_status_t
+z_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t timeout_ms)
 {
 	alp_z_i2s_side_t    *s   = (alp_z_i2s_side_t *)st->be_data;
 	const struct device *dev = (const struct device *)st->dev;
@@ -218,8 +219,8 @@ static alp_status_t z_write(alp_i2s_backend_state_t *st, const void *block, size
 	return ALP_OK;
 }
 
-static alp_status_t z_read(alp_i2s_backend_state_t *st, void *block, size_t bytes,
-                           size_t *bytes_out, uint32_t timeout_ms)
+static alp_status_t z_read(
+    alp_i2s_backend_state_t *st, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms)
 {
 	(void)timeout_ms; /* upstream i2s_read has no per-call timeout */
 	alp_z_i2s_side_t    *s   = (alp_z_i2s_side_t *)st->be_data;
@@ -269,7 +270,8 @@ static const alp_i2s_ops_t _ops = {
 	.close = z_close,
 };
 
-ALP_BACKEND_REGISTER(i2s, zephyr_drv,
+ALP_BACKEND_REGISTER(i2s,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",

@@ -39,13 +39,18 @@ typedef struct alp_storage_backend_state {
 } alp_storage_backend_state_t;
 
 struct alp_storage_ops {
-	alp_status_t (*open)(const alp_storage_config_t *cfg, alp_storage_backend_state_t *state,
-	                     alp_capabilities_t *caps_out);
+	alp_status_t (*open)(const alp_storage_config_t  *cfg,
+	                     alp_storage_backend_state_t *state,
+	                     alp_capabilities_t          *caps_out);
 	alp_status_t (*get_info)(alp_storage_backend_state_t *state, alp_storage_info_t *info);
-	alp_status_t (*read)(alp_storage_backend_state_t *state, uint64_t offset, void *data,
-	                     size_t len);
-	alp_status_t (*write)(alp_storage_backend_state_t *state, uint64_t offset, const void *data,
-	                      size_t len);
+	alp_status_t (*read)(alp_storage_backend_state_t *state,
+	                     uint64_t                     offset,
+	                     void                        *data,
+	                     size_t                       len);
+	alp_status_t (*write)(alp_storage_backend_state_t *state,
+	                      uint64_t                     offset,
+	                      const void                  *data,
+	                      size_t                       len);
 	alp_status_t (*erase)(alp_storage_backend_state_t *state, uint64_t offset, uint64_t len);
 	alp_status_t (*sync)(alp_storage_backend_state_t *state);
 	alp_status_t (*configure_inline_aes)(alp_storage_backend_state_t    *state,

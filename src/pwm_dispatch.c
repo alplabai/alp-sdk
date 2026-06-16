@@ -30,7 +30,7 @@ extern void alp_z_clear_last_error(void);
 static struct alp_pwm         _pool[CONFIG_ALP_SDK_MAX_PWM_HANDLES];
 static struct alp_pwm_capture _cap_pool[CONFIG_ALP_SDK_MAX_PWM_HANDLES];
 
-static struct alp_pwm        *_alloc(void)
+static struct alp_pwm *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_PWM_HANDLES; ++i) {
 		if (!_pool[i].in_use) {
@@ -122,8 +122,10 @@ alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns)
 	return rc;
 }
 
-alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint32_t dead_time_ns,
-                               uint8_t break_cfg)
+alp_status_t alp_pwm_configure(alp_pwm_t      *pwm,
+                               alp_pwm_align_t align_mode,
+                               uint32_t        dead_time_ns,
+                               uint8_t         break_cfg)
 {
 	if (pwm == NULL || !pwm->in_use) return ALP_ERR_NOT_READY;
 	if ((unsigned)align_mode > (unsigned)ALP_PWM_ALIGN_CENTER_BOTH) {
@@ -207,8 +209,8 @@ alp_pwm_capture_t *alp_pwm_capture_open(const alp_pwm_capture_config_t *cfg)
 	return h;
 }
 
-alp_status_t alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_out,
-                                  uint32_t *pulse_ns_out)
+alp_status_t
+alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_out, uint32_t *pulse_ns_out)
 {
 	if (cap == NULL || !cap->in_use) return ALP_ERR_NOT_READY;
 	if (period_ns_out == NULL && pulse_ns_out == NULL) return ALP_ERR_INVAL;

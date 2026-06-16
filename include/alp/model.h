@@ -23,10 +23,10 @@
 extern "C" {
 #endif
 
-#define ALP_MODEL_MAGIC "ALPM"
+#define ALP_MODEL_MAGIC       "ALPM"
 #define ALP_MODEL_CONTAINER_V 1u
 #define ALP_MODEL_MAX_TARGETS 8u
-#define ALP_MODEL_STR_MAX 32u /* incl. NUL */
+#define ALP_MODEL_STR_MAX     32u /* incl. NUL */
 
 /** One compiled-blob target entry from the manifest. */
 typedef struct {

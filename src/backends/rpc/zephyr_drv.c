@@ -125,7 +125,7 @@ struct rpc_be {
 
 #if defined(CONFIG_ALP_SDK_RPC)
 
-static struct rpc_be  _be_pool[CONFIG_ALP_SDK_RPC_MAX_CHANNELS];
+static struct rpc_be _be_pool[CONFIG_ALP_SDK_RPC_MAX_CHANNELS];
 
 static struct rpc_be *_be_alloc(void)
 {
@@ -233,8 +233,8 @@ static struct rpc_sub *sub_alloc(struct rpc_be *be)
 /* Parse the on-wire frame: NUL-terminated method header followed by
  * the opaque payload.  Returns the method-name pointer + payload
  * window; NULL on malformed frames. */
-static const char *frame_parse(const void *data, size_t len, const void **payload_out,
-                               size_t *payload_len_out)
+static const char *
+frame_parse(const void *data, size_t len, const void **payload_out, size_t *payload_len_out)
 {
 	if (data == NULL || len == 0) {
 		return NULL;
@@ -253,8 +253,8 @@ static const char *frame_parse(const void *data, size_t len, const void **payloa
 	return bytes;
 }
 
-static int frame_build(uint8_t *out, size_t cap, const char *method, const void *payload,
-                       size_t payload_len)
+static int
+frame_build(uint8_t *out, size_t cap, const char *method, const void *payload, size_t payload_len)
 {
 	size_t method_len = bounded_strlen(method, ALP_RPC_METHOD_MAX_LEN);
 	if (method_len == ALP_RPC_METHOD_MAX_LEN) {
@@ -335,8 +335,8 @@ static void rpc_ept_recv(const void *data, size_t len, void *priv)
 /* Ops                                                                 */
 /* ================================================================== */
 
-static alp_status_t z_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	caps_out->flags = 0u;
 	if (cfg == NULL || cfg->name == NULL || cfg->name[0] == '\0') {
@@ -387,14 +387,17 @@ static alp_status_t z_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t 
 	be->ept_cfg.cb.received = rpc_ept_recv;
 	be->ept_cfg.priv        = be;
 
-	rc                      = ipc_service_register_endpoint(be->ipc_dev, &be->ept, &be->ept_cfg);
+	rc = ipc_service_register_endpoint(be->ipc_dev, &be->ept, &be->ept_cfg);
 	if (rc < 0) {
 		LOG_ERR("rpc: ipc_service_register_endpoint(%s) failed: %d", be->name, rc);
 		_be_free(be);
 		return errno_to_alp(rc);
 	}
 
-	LOG_INF("rpc: opened %s src=0x%x dst=0x%x mbox=%u", be->name, be->src_ept, be->dst_ept,
+	LOG_INF("rpc: opened %s src=0x%x dst=0x%x mbox=%u",
+	        be->name,
+	        be->src_ept,
+	        be->dst_ept,
 	        be->mbox_ch);
 	st->be_data = be;
 	return ALP_OK;
@@ -404,8 +407,8 @@ static alp_status_t z_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t 
 #endif
 }
 
-static alp_status_t z_subscribe(alp_rpc_backend_state_t *st, const char *method,
-                                alp_rpc_method_cb_t cb, void *user)
+static alp_status_t
+z_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t cb, void *user)
 {
 	if (!method_valid(method)) {
 		return ALP_ERR_INVAL;
@@ -435,7 +438,8 @@ static alp_status_t z_subscribe(alp_rpc_backend_state_t *st, const char *method,
 	if (sub == NULL) {
 		sub = sub_alloc(be);
 		if (sub == NULL) {
-			LOG_WRN("rpc: subscribe table full on %s (cap=%d)", be->name,
+			LOG_WRN("rpc: subscribe table full on %s (cap=%d)",
+			        be->name,
 			        CONFIG_ALP_SDK_RPC_SUBS_PER_CHANNEL);
 			return ALP_ERR_NOMEM;
 		}
@@ -480,8 +484,8 @@ static alp_status_t z_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
 #endif
 }
 
-static alp_status_t z_send(alp_rpc_backend_state_t *st, const char *method, const void *payload,
-                           size_t len)
+static alp_status_t
+z_send(alp_rpc_backend_state_t *st, const char *method, const void *payload, size_t len)
 {
 	if (!method_valid(method)) {
 		return ALP_ERR_INVAL;
@@ -513,8 +517,13 @@ static alp_status_t z_send(alp_rpc_backend_state_t *st, const char *method, cons
 #endif
 }
 
-static alp_status_t z_call(alp_rpc_backend_state_t *st, const char *method, const void *req,
-                           size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms)
+static alp_status_t z_call(alp_rpc_backend_state_t *st,
+                           const char              *method,
+                           const void              *req,
+                           size_t                   req_len,
+                           void                    *resp,
+                           size_t                  *resp_len,
+                           uint32_t                 timeout_ms)
 {
 	if (!method_valid(method)) {
 		return ALP_ERR_INVAL;
@@ -620,7 +629,8 @@ static const alp_rpc_ops_t _ops = {
 	.close       = z_close,
 };
 
-ALP_BACKEND_REGISTER(rpc, zephyr_drv,
+ALP_BACKEND_REGISTER(rpc,
+                     zephyr_drv,
                      {
                          .silicon_ref = "*",
                          .vendor      = "zephyr",
