@@ -1,0 +1,63 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On-silicon GPIO validation overlay for the E1M-AEN801 (Alif Ensemble E8,
+ * M55-HE), bench RAM-run via J-Link.
+ *
+ * Pin choice -- SAFE GPIO: gpio8 / pin 0 == SoC pad P8_0 (base 0x49008000).
+ *   Why safe on THIS bench batch:
+ *     - NOT the console (UART5 P3_4/P3_5), NOT a boot/strap, NOT the EEPROM bus
+ *       (I2C2 P5_6/P5_7), NOT the BRD_I2C LPI2C0 (P7_4/P7_5).
+ *     - P8_0's only non-GPIO alternate functions are OSPI1_SCLKN / AUDIO_CLK /
+ *       FAULT0 / LPCAM_D0 / SD_D0 / CDC_D0 / CAM_D0 -- the SoM's OSPI1 HyperRAM
+ *       (W958D8NB) is BOM-optional and NOT populated on this batch, and no
+ *       camera / SD / display is wired, so the pad is free and uncontended.
+ *     - We do NOT touch port 4 (P4_x AF1 = JTAG0 trace) so SWD/JTAG debug is
+ *       undisturbed.
+ *
+ * DesignWare gpio_dw register map for this node (PORT-A, derived because
+ * 0x49008000 & 0x3f == 0 -> dw_derive_port_from_base()==0):
+ *     DR  (SWPORTA_DR)  = 0x49008000   <- driven output level (bit 0)
+ *     DDR (SWPORTA_DDR) = 0x49008004   <- direction, 1=output (bit 0)
+ *     EXT_PORTA         = 0x49008050   <- read-back of pad level
+ *
+ * gpio_dw does NOT apply any pad mux, so we attach a pinctrl state that selects
+ * P8_0 -> GPIO (function 0) and main() applies it explicitly via
+ * pinctrl_apply_state() before configuring the pin.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		zephyr,flash = <&itcm>;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		alp-gpio0 = &gpio8;
+	};
+};
+
+&pinctrl {
+	/* Select P8_0 to its GPIO function (AF0).  No pull / no special pad
+	 * config bits: ALIF_PINMUX() leaves pad_config==0, the pad's default
+	 * push-pull output drive is used once the GPIO controller sets DDR. */
+	pinctrl_gpio8_p0: pinctrl_gpio8_p0 {
+		group0 {
+			pinmux = <PIN_P8_0__GPIO>;
+		};
+	};
+};
+
+&gpio8 {
+	status = "okay";
+	/* gpio_dw ignores these, but they make PINCTRL_DT_DEFINE(gpio8) +
+	 * pinctrl_apply_state() in main() resolve the P8_0->GPIO mux state. */
+	pinctrl-0 = <&pinctrl_gpio8_p0>;
+	pinctrl-names = "default";
+};

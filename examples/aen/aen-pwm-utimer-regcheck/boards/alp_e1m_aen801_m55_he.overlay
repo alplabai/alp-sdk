@@ -1,0 +1,49 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Bench overlay: enable UTIMER3 + its PWM child (pwm3) for the scopeless
+ * register-readback validation of pwm_alif_utimer.c on the E1M-AEN801 (M55-HE).
+ *
+ * pwm3 channel 0 = driver A = UT3_T0 (E1M PWM7 per the driver pad map).  We mux
+ * UT3_T0_C onto P10_6 so the driver's pinctrl_apply_state() in pwm_alif_init has
+ * a real pin group to apply (init returns the pinctrl error otherwise).  We do
+ * NOT observe the pin -- validation is by reading the UTIMER compare/period/
+ * control registers over J-Link mem32 (see the runPlan).
+ *
+ * RAM-RUN retarget (REQUIRED on this bench): the board normally XIP-runs from
+ * MRAM slot0 behind MCUboot; here we J-Link loadbin+run from ITCM, so retarget
+ * zephyr,flash to &itcm and drop the code-partition so the image links + runs
+ * from ITCM without programming MRAM.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/ {
+	chosen {
+		zephyr,flash = <&itcm>;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		alp-pwm0 = &pwm3;
+	};
+};
+
+&pinctrl {
+	pinctrl_pwm3: pinctrl_pwm3 {
+		group0 {
+			/* UT3_T0_C -> P10_6 (E1M PWM7, channel A / driver 0). */
+			pinmux = <PIN_P10_6__UT3_T0_C>;
+		};
+	};
+};
+
+&utimer3 {
+	status = "okay";
+
+	pwm3 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm3>;
+		pinctrl-names = "default";
+	};
+};
