@@ -1,0 +1,28 @@
+# EditorConfig — https://editorconfig.org
+# Alp SDK house style.  Native C is TAB-indented; render tabs at whatever width
+# reads best for you (the file stores tabs, not a fixed number of spaces).
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+
+# alp-sdk-native C/C++: tabs for indentation (matches .clang-format
+# UseTab: ForIndentation).  Vendored upstream trees (zephyr/**, vendors/**) keep
+# their own style and are not governed here.
+[*.{c,h,cpp,hpp,cc}]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+insert_final_newline = true
+
+[*.{yaml,yml,json}]
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+[Makefile]
+indent_style = tab

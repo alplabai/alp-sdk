@@ -1,0 +1,9 @@
+# Revisions to ignore in `git blame` — bulk, mechanical, whitespace-only
+# reformats that would otherwise bury authorship behind a single style commit.
+#
+# Enable locally:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub applies this file automatically in its blame view.)
+
+# style: reformat native C to tab indentation (alp-sdk house style)
+2fc8e0d3d717ade90a0ca9dd66296533593c8d82
