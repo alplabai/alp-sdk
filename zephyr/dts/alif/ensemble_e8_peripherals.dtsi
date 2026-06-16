@@ -706,10 +706,12 @@
 	 * block).  The upstream-encoding gate/offset/parent for the camera clocks
 	 * are a TRM/bench unknown and are NOT re-authored here -- a frequency-only
 	 * dummy clock (ALIF_CLK(2U), the ALIF_SPI_CLK precedent) is used so the
-	 * nodes are well-formed.  These nodes are status="disabled" AND the drivers
-	 * are gated OFF (ALP_VIDEO_ALIF_BROKEN, NOT YET PORTED to v4.4), so NO clock
-	 * is actually programmed.  Re-author the real camera clock IDs via
-	 * alif-ensemble-clocks-ext.h when the stack is bench-brought-up (task #21).
+	 * nodes are well-formed.  The drivers are now PORTED to the v4.4 video API
+	 * (the ALP_VIDEO_ALIF_BROKEN gate is retired), but these camera nodes stay
+	 * status="disabled" here -- a board overlay enables them -- and even then NO
+	 * real clock is programmed (the dummy clock above).  Re-author the real
+	 * camera clock IDs via alif-ensemble-clocks-ext.h when the stack is
+	 * bench-brought-up (task #21).
 	 *
 	 * NO pinctrl-0: the fork cam node references &pinctrl_cam8 (the 8-bit CPI
 	 * data pads), not defined in this tree; the driver applies pinctrl only IF
@@ -768,6 +770,26 @@
 		csi-vbp = <4>;
 		csi-vfp = <4>;
 		csi-vact = <560>;
+		status = "disabled";
+	};
+
+	/*
+	 * Alif Ensemble ISP-Pico (Verisilicon ISP Nano "Pico", compatible
+	 * "vsi,isp-pico"), driven by the vendored fork driver
+	 * zephyr/drivers/video/isp_pico.c.  reg base + IRQs transcribed VERBATIM
+	 * from the fork e4_e6_e8.dtsi (isp@49046000, IRQs 367 "isp" / 368
+	 * "mi-isp").  Tier-2 OPT-IN -- the driver links the hal_alif libisp
+	 * (Vivante) blob (CONFIG_VIDEO_ISP_VSI -> USE_ALIF_ISP_LIB) and is
+	 * default n.  Left status="disabled": enabling it needs the libisp
+	 * wrapper bumped (FLAGGED hal_alif version mismatch -- see the Kconfig)
+	 * + a camera -> isp -> sink media-controller graph (bench-unknown).
+	 * BENCH-UNVERIFIED.  Task #21.
+	 */
+	isp: isp@49046000 {
+		compatible = "vsi,isp-pico";
+		reg = <0x49046000 0x1000>;
+		interrupts = <367 3>, <368 3>;
+		interrupt-names = "isp", "mi-isp";
 		status = "disabled";
 	};
 };

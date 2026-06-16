@@ -14,21 +14,26 @@
  * bench-verified (task #21).  See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *
- * Vendored VERBATIM from the fork (the only edit beyond this provenance header
- * is this header itself).
- *
- * NOT-YET-PORTED to the upstream Zephyr v4.4 video API (gated OFF, see below):
- * the fork driver targets the OLDER Zephyr video API -- its video_driver_api
- * callbacks take `enum video_endpoint_id ep` (set_format/get_format/get_caps/
- * set_stream/set_ctrl), a type that upstream v4.4 REMOVED in the video-API
- * rework (v4.4 signatures are (dev, fmt) / (dev, caps) / (dev, enable, type) /
- * (dev, cid)).  Porting all three video drivers to the v4.4 API is a driver
- * rewrite, not a mechanical fix, and would break the "vendor ~verbatim" Tier-2
- * contract; it is deferred to the fork-repoint (task #21).  Consequently
- * CONFIG_VIDEO_ALIF_CAM is gated `depends on ALP_VIDEO_ALIF_BROKEN` (default n)
- * so the source is CARRIED in-tree (provenance + bindings + DT nodes staged)
- * but NOT compiled against the incompatible v4.4 API.  Flip the gate on once
- * the body is ported.  vendor-ext, BENCH-UNVERIFIED.
+ * Vendored from the fork, then PORTED to the upstream Zephyr v4.4 video API by
+ * Alp Lab AB.  The fork driver targeted the OLDER video API -- its
+ * video_driver_api callbacks took `enum video_endpoint_id ep`
+ * (set_format/get_format/get_caps/flush/enqueue/dequeue/set_signal) and a
+ * value-pointer ctrl API, which upstream v4.4 REMOVED.  The v4.4 deltas applied
+ * here (each marked "v4.4 video-API shim (Alp Lab AB)" at the call site):
+ *   - dropped the `enum video_endpoint_id ep` param + its VIDEO_EP_OUT/ALL
+ *     validation from set_format/get_format/get_caps/flush/enqueue/dequeue/
+ *     set_signal; the forwarding helpers (video_set_format/video_get_format/
+ *     video_get_caps) lose their `ep` arg;
+ *   - set_stream(dev, bool) gained an `enum video_buf_type type` param;
+ *     video_stream_start/_stop now take VIDEO_BUF_TYPE_OUTPUT;
+ *   - the value-pointer forwarding .set_ctrl/.get_ctrl callbacks are dropped
+ *     (the CPI owns no controls -- v4.4 controls are registry-owned and
+ *     addressed directly on the endpoint device);
+ *   - legacy Bayer/greyscale pixfmt names (BGGR8.. / Y6P / Y7P) are aliased in
+ *     the vendored <zephyr/drivers/video/video_alif.h>.
+ * The driver now COMPILES against v4.4 (the ALP_VIDEO_ALIF_BROKEN gate is
+ * retired).  vendor-ext, BENCH-UNVERIFIED, runtime capture HW-blocked on this
+ * batch (no sensor wired).
  *
  * The soc_memory_map.h include resolves via the hal_alif common/include dir
  * (gated on CONFIG_RTSS_HE/HP); the public CSI data-type + CPI-mode tables come
@@ -423,7 +428,7 @@ static void alif_cam_work_helper(const struct device *dev)
 					"Stopping Video Capture. If Re-queued, restart stream.");
 			data->curr_vid_buf = 0;
 			data->is_streaming = false;
-			video_stream_stop(config->endpoint_dev);
+			video_stream_stop(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
 			signal_status = VIDEO_BUF_DONE;
 			goto done;
 		}
@@ -458,8 +463,7 @@ static void alif_isr_cb_work(struct k_work *work)
 	alif_cam_work_helper(data->dev);
 }
 
-static int alif_cam_set_fmt(const struct device *dev, enum video_endpoint_id ep,
-		       struct video_format *fmt)
+static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 {
 	const struct video_cam_config *config = dev->config;
 	int bits_pp = pix_fmt_bpp(fmt->pixelformat);
@@ -468,11 +472,15 @@ static int alif_cam_set_fmt(const struct device *dev, enum video_endpoint_id ep,
 	int ret;
 
 	/*
-	 * Bail out when either the bits per pixel is zero (un-supported format)
-	 * or endpoint is neither VIDEO_EP_OUT nor VIDEO_EP_ALL.
+	 * Bail out when the bits per pixel is zero (un-supported format).
+	 *
+	 * v4.4 video-API shim (Alp Lab AB): the fork callback took an
+	 * `enum video_endpoint_id ep` (validated VIDEO_EP_OUT / VIDEO_EP_ALL);
+	 * v4.4 removed that type and the per-endpoint dispatch, so the param +
+	 * its validation branch are dropped.
 	 */
-	if (!bits_pp || !(ep == VIDEO_EP_OUT || ep == VIDEO_EP_ALL)) {
-		LOG_ERR("Bits-per-pixel - %d, endpoint- %d", bits_pp, ep);
+	if (!bits_pp) {
+		LOG_ERR("Bits-per-pixel - %d", bits_pp);
 		return -EINVAL;
 	}
 
@@ -485,7 +493,7 @@ static int alif_cam_set_fmt(const struct device *dev, enum video_endpoint_id ep,
 			    ((fmt->width & CAM_VIDEO_FCFG_DATA_MASK) << CAM_VIDEO_FCFG_DATA_SHIFT),
 		    regs + CAM_VIDEO_FCFG);
 
-	ret = video_set_format(config->endpoint_dev, ep, fmt);
+	ret = video_set_format(config->endpoint_dev, fmt);
 	if (ret) {
 		LOG_ERR("Failed to set sensor Format.");
 		return ret;
@@ -503,24 +511,26 @@ static int alif_cam_set_fmt(const struct device *dev, enum video_endpoint_id ep,
 	return 0;
 }
 
-static int alif_cam_get_fmt(const struct device *dev, enum video_endpoint_id ep,
-		       struct video_format *fmt)
+/* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
+ * param + its VIDEO_EP_OUT/ALL validation; forwarding helpers lose the `ep` arg.
+ */
+static int alif_cam_get_fmt(const struct device *dev, struct video_format *fmt)
 {
 	const struct video_cam_config *config = dev->config;
 	struct video_cam_data *data = dev->data;
 	int ret;
 
-	if (!fmt || (ep != VIDEO_EP_OUT && ep != VIDEO_EP_ALL)) {
+	if (!fmt) {
 		return -EINVAL;
 	}
 
-	ret = video_get_format(config->endpoint_dev, ep, fmt);
+	ret = video_get_format(config->endpoint_dev, fmt);
 	if (ret) {
 		LOG_ERR("Failed to get format from Video pipeline!");
 		return ret;
 	}
 
-	ret = alif_cam_set_fmt(dev, ep, fmt);
+	ret = alif_cam_set_fmt(dev, fmt);
 	if (ret) {
 		return ret;
 	}
@@ -577,7 +587,7 @@ static int alif_cam_stream_start(const struct device *dev)
 					   INTR_INFIFO_OVERRUN | INTR_STOP);
 
 	/* Start the MIPI CSI-2 IP in case the MIPI CSI is available. */
-	ret = video_stream_start(config->endpoint_dev);
+	ret = video_stream_start(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (ret) {
 		LOG_ERR("Failed to start streaming of Video pipeline!");
 		return -EIO;
@@ -604,7 +614,7 @@ static int alif_cam_stream_stop(const struct device *dev)
 		return 0;
 	}
 
-	ret = video_stream_stop(config->endpoint_dev);
+	ret = video_stream_stop(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (ret) {
 		LOG_ERR("Failed to stop streaming in Pipeline!");
 		return ret;
@@ -642,8 +652,14 @@ static int alif_cam_stream_stop(const struct device *dev)
 	return 0;
 }
 
-static int alif_cam_set_stream(const struct device *dev, bool enable)
+/* v4.4 video-API shim (Alp Lab AB): set_stream gained an `enum video_buf_type
+ * type` param (the CPI is an output-only capture device, so the value is
+ * unused); the legacy `bool`-only signature is gone.
+ */
+static int alif_cam_set_stream(const struct device *dev, bool enable, enum video_buf_type type)
 {
+	ARG_UNUSED(type);
+
 	if (enable) {
 		return alif_cam_stream_start(dev);
 	} else {
@@ -651,7 +667,10 @@ static int alif_cam_set_stream(const struct device *dev, bool enable)
 	}
 }
 
-static int alif_cam_flush(const struct device *dev, enum video_endpoint_id ep, bool cancel)
+/* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
+ * param.
+ */
+static int alif_cam_flush(const struct device *dev, bool cancel)
 {
 	struct video_cam_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
@@ -711,8 +730,10 @@ static int alif_cam_flush(const struct device *dev, enum video_endpoint_id ep, b
 	return 0;
 }
 
-static int alif_cam_enqueue(const struct device *dev, enum video_endpoint_id ep,
-		       struct video_buffer *buf)
+/* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
+ * param + its VIDEO_EP_OUT validation branch.
+ */
+static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 {
 	const struct video_cam_config *config = dev->config;
 	struct video_cam_data *data = dev->data;
@@ -724,10 +745,6 @@ static int alif_cam_enqueue(const struct device *dev, enum video_endpoint_id ep,
 			LOG_DBG("AXI Master interface of the IP is not enabled!");
 			return 0;
 		}
-	}
-
-	if (ep != VIDEO_EP_OUT) {
-		return -EINVAL;
 	}
 
 	/* Check if the video buffer is 8-byte aligned or not.*/
@@ -751,8 +768,11 @@ static int alif_cam_enqueue(const struct device *dev, enum video_endpoint_id ep,
 	return 0;
 }
 
-static int alif_cam_dequeue(const struct device *dev, enum video_endpoint_id ep,
-		       struct video_buffer **buf, k_timeout_t timeout)
+/* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
+ * param + its VIDEO_EP_OUT validation branch.
+ */
+static int alif_cam_dequeue(const struct device *dev, struct video_buffer **buf,
+		       k_timeout_t timeout)
 {
 	const struct video_cam_config *config = dev->config;
 	struct video_cam_data *data = dev->data;
@@ -762,10 +782,6 @@ static int alif_cam_dequeue(const struct device *dev, enum video_endpoint_id ep,
 			LOG_DBG("AXI Master interface of the IP is not enabled!");
 			return 0;
 		}
-	}
-
-	if (ep != VIDEO_EP_OUT) {
-		return -EINVAL;
 	}
 
 	*buf = k_fifo_get(&data->fifo_out, timeout);
@@ -778,45 +794,37 @@ static int alif_cam_dequeue(const struct device *dev, enum video_endpoint_id ep,
 	return 0;
 }
 
-static int alif_cam_set_ctrl(const struct device *dev, unsigned int cid, void *value)
-{
-	const struct video_cam_config *config = dev->config;
-	int ret = -ENOTSUP;
+/*
+ * v4.4 video-API shim (Alp Lab AB): the CPI controller owns NO controls of its
+ * own -- the fork bodies forwarded a raw `void *value` to the endpoint device
+ * via the OLD `video_set_ctrl(dev, cid, value)` / `video_get_ctrl(dev, cid,
+ * value)` helpers.  v4.4 reshaped those helpers to take a `struct video_control
+ * *` whose value is owned by the framework's per-device control registry
+ * (video_init_ctrl), so a value-less pass-through forwarder no longer fits the
+ * model.  Controls are addressed directly on the endpoint (sensor / CSI)
+ * device, so the CPI's forwarding .set_ctrl / .get_ctrl callbacks are dropped
+ * from the API table below.
+ */
 
-	ret = video_set_ctrl(config->endpoint_dev, cid, value);
-	if (ret) {
-		return -ENOTSUP;
-	}
-
-	return 0;
-}
-
-static int alif_cam_get_ctrl(const struct device *dev, unsigned int cid, void *value)
-{
-	const struct video_cam_config *config = dev->config;
-
-	return video_get_ctrl(config->endpoint_dev, cid, value);
-}
-
-static int alif_cam_get_caps(const struct device *dev, enum video_endpoint_id ep,
-			struct video_caps *caps)
+/* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
+ * param + its VIDEO_EP_OUT/ALL validation; get_caps forwards without `ep`.
+ */
+static int alif_cam_get_caps(const struct device *dev, struct video_caps *caps)
 {
 	const struct video_cam_config *config = dev->config;
 	int err = -ENODEV;
 
-	if (ep != VIDEO_EP_OUT && ep != VIDEO_EP_ALL) {
-		LOG_ERR("Invalid end-point, ep = %d", ep);
-		return -EINVAL;
-	}
-
-	err = video_get_caps(config->endpoint_dev, ep, caps);
+	err = video_get_caps(config->endpoint_dev, caps);
 	caps->min_vbuf_count = CPI_MIN_VBUF;
 
 	return err;
 }
 
 #ifdef CONFIG_POLL
-static int alif_cam_set_signal(const struct device *dev, enum video_endpoint_id ep,
+/* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
+ * param.
+ */
+static int alif_cam_set_signal(const struct device *dev,
 			  struct k_poll_signal *signal)
 {
 	struct video_cam_data *data = dev->data;
@@ -837,8 +845,6 @@ static DEVICE_API(video, cam_driver_api) = {
 	.flush = alif_cam_flush,
 	.enqueue = alif_cam_enqueue,
 	.dequeue = alif_cam_dequeue,
-	.set_ctrl = alif_cam_set_ctrl,
-	.get_ctrl = alif_cam_get_ctrl,
 	.get_caps = alif_cam_get_caps,
 #ifdef CONFIG_POLL
 	.set_signal = alif_cam_set_signal,

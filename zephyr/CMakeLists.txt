@@ -194,23 +194,31 @@ zephyr_library_sources_ifdef(CONFIG_DAC_ALIF
 # Alif Ensemble CAMERA CAPTURE path -- CPI controller (compatible "alif,cam"),
 # DesignWare MIPI CSI-2 bridge (compatible "snps,designware-csi"), DesignWare
 # MIPI D-PHY (compatible "snps,designware-dphy") + ON Semi ARX3A0 sensor
-# (compatible "onnn,arx3a0"), all vendored VERBATIM from the Apache-2.0
-# zephyr_alif fork.  Upstream Zephyr v4.4 + hal_alif ship NONE of these.  The
-# sources, bindings (zephyr/dts/bindings/{video,mipi-dphy}/) and DT nodes (E8
-# SoC overlay) are carried in-tree regardless of the build gate so they survive
-# a `west update`; the TUs themselves are gated on ALP_VIDEO_ALIF_BROKEN
-# (default n) because the fork video drivers implement the OLD
-# `enum video_endpoint_id`-based video API that upstream v4.4 removed, so they
-# DO NOT COMPILE against v4.4 without a body rewrite (deferred to the
-# fork-repoint, task #21).  The video drivers reuse upstream's private
-# drivers/video/video_common.c helpers + the public CSI tables vendored to
-# zephyr/include/zephyr/drivers/video/video_alif.h; soc_memory_map.h resolves
-# via the hal_alif common/include dir (CONFIG_RTSS_HE/HP).  Put the vendored
-# public include dir on the path so <zephyr/drivers/video/video_alif.h> and
-# <zephyr/drivers/mipi_dphy/dphy_dw.h> resolve.  ADR 0017 Tier-2 (INTERIM).
-if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_MIPI_CSI2_DW OR CONFIG_VIDEO_ARX3A0 OR CONFIG_MIPI_DPHY_DW)
+# (compatible "onnn,arx3a0"), all vendored from the Apache-2.0 zephyr_alif fork.
+# Upstream Zephyr v4.4 + hal_alif ship NONE of these.  The sources, bindings
+# (zephyr/dts/bindings/{video,mipi-dphy}/) and DT nodes (E8 SoC overlay) are
+# carried in-tree so they survive a `west update`; the TUs build in directly
+# when their DT node is enabled (the former ALP_VIDEO_ALIF_BROKEN gate is
+# RETIRED -- the video drivers are now PORTED to the v4.4 video API by Alp Lab
+# AB; see the per-driver provenance headers).  The video drivers reuse
+# upstream's private drivers/video/video_common.c helpers + the public CSI
+# tables vendored to zephyr/include/zephyr/drivers/video/video_alif.h;
+# soc_memory_map.h resolves via the hal_alif common/include dir
+# (CONFIG_RTSS_HE/HP).  Put the vendored public include dir on the path so
+# <zephyr/drivers/video/video_alif.h> and <zephyr/drivers/mipi_dphy/dphy_dw.h>
+# resolve.  ADR 0017 Tier-2 (INTERIM).  The ISP (isp_pico.c, compatible
+# "vsi,isp-pico") rides on the same v4.4 video API + the hal_alif libisp wrapper;
+# it is Tier-2 opt-in (CONFIG_ALP_SDK_CAMERA_ALIF_ISP, default n).
+if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_MIPI_CSI2_DW OR CONFIG_VIDEO_ARX3A0 OR CONFIG_MIPI_DPHY_DW OR CONFIG_VIDEO_ISP_VSI)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/video)
+    # video_alif.c / isp_pico.c use hal_alif's <soc_memory_map.h> (local_to_global
+    # for the CPI/ISP AXI buffer addresses).  hal_alif only puts its common/include
+    # dir on the path under CONFIG_RTSS_HE/HP (common/CMakeLists.txt); add it here
+    # explicitly so the CPI/ISP TUs resolve the header on any Ensemble RTSS build.
+    if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_ISP_VSI)
+        zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
+    endif()
 endif()
 zephyr_library_sources_ifdef(CONFIG_VIDEO_ALIF_CAM
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_alif.c)
@@ -220,6 +228,12 @@ zephyr_library_sources_ifdef(CONFIG_VIDEO_ARX3A0
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/arx3a0.c)
 zephyr_library_sources_ifdef(CONFIG_MIPI_DPHY_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mipi_dphy/dphy_dw.c)
+# Alif Ensemble ISP (Pico, compatible "vsi,isp-pico"), vendored from the
+# Apache-2.0 zephyr_alif fork + PORTED to the v4.4 video API by Alp Lab AB.  It
+# is a video m2m device that links the hal_alif libisp wrapper (the Vivante
+# blob, opt-in via USE_ALIF_ISP_LIB).  ADR 0017 Tier-2, opt-in (default n).
+zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/isp_pico.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
@@ -355,6 +369,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_video.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/v2n_n44_isp.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_ALIF_ISP
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/alif_isp_pico.c)
 
 # v0.2 peripheral wrappers — opt-in per-class so apps that don't use
 # a given Zephyr subsystem don't link the wrapper.  Each defaults on

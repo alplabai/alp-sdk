@@ -7,11 +7,13 @@
 #
 # Plain prj.conf app (no alp_project.py board.yaml emit): the driver Kconfigs
 # (CONFIG_VIDEO_ALIF_CAM et al., default y under DT_HAS_*_ENABLED) are sourced
-# under CONFIG_ALP_SDK, which prj.conf sets.  The driver TUs themselves stay
-# GATED OFF (CONFIG_ALP_VIDEO_ALIF_BROKEN=n): the fork video drivers are not yet
-# ported to the upstream v4.4 video API, so this app validates that the bindings
-# + DT nodes are STAGED and bind, NOT a live frame (capture is HW-blocked on
-# this batch -- no camera sensor wired).  See src/main.c.
+# under CONFIG_ALP_SDK, which prj.conf sets.  The driver TUs are now PORTED to
+# the upstream v4.4 video API (the former CONFIG_ALP_VIDEO_ALIF_BROKEN gate is
+# RETIRED), so they build in when their DT node is enabled.  The overlay enables
+# csi/dphy/arx3a0 (which instantiate on v4.4); cam compiles but stays disabled
+# (instantiation needs the fork-only global-base + a cam->csi graph -- task #21).
+# Live frame capture is HW-blocked on this batch (no camera sensor wired).
+# See src/main.c + the board overlay.
 
 cmake_minimum_required(VERSION 3.20)
 

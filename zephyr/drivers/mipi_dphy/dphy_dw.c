@@ -16,11 +16,11 @@
  * ==================================================================
  *
  * Vendored VERBATIM from the fork (only this provenance header is added).
- * Unlike the video drivers this driver does NOT touch the video API, so it is
- * not blocked by the v4.4 video-API rework; it is still gated
- * `depends on ALP_VIDEO_ALIF_BROKEN` because its sole consumer (the CSI driver)
- * is, and shipping it standalone would be dead code.  vendor-ext,
- * BENCH-UNVERIFIED.
+ * Unlike the video drivers this driver does NOT touch the video API, so it was
+ * never blocked by the v4.4 video-API rework; it compiles unchanged.  It is now
+ * built alongside the (ported) CSI driver -- the ALP_VIDEO_ALIF_BROKEN gate is
+ * retired across the whole stack.  Its sole consumer is video_csi_dw.c
+ * (dphy_dw_slave_setup).  vendor-ext, BENCH-UNVERIFIED.
  */
 #define DT_DRV_COMPAT snps_designware_dphy
 
