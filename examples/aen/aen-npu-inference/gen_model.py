@@ -40,6 +40,12 @@ def vela_compile(vela: str, accel: str, model: str, out_dir: str) -> str:
 	cmd = [
 		vela,
 		"--accelerator-config", accel,
+		# Sram_Only: the model + tensor arena both live in ONE region (SRAM0) on
+		# this board.  Vela's default (Dedicated_Sram) splits weights into a
+		# separate DRAM region the NPU then addresses -- which we do NOT have, so
+		# the NPU job fails (ethosu_invoke returns status 1, BENCH-CONFIRMED on E8).
+		# Single-region Sram_Only matches our SRAM0-only placement.
+		"--memory-mode", "Sram_Only",
 		"--output-dir", out_dir,
 		model,
 	]
