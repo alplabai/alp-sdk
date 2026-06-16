@@ -101,16 +101,18 @@ ZTEST(cc3501e_bridge_transport, test_get_mac_not_ready_on_stub)
 
 ZTEST(cc3501e_bridge_transport, test_unknown_opcode_rejected)
 {
-	/* A v1 opcode whose firmware body has not landed in v0.1 (Wi-Fi). */
-	const uint8_t scan[] = { ALP_CC3501E_CMD_WIFI_SCAN_START, 0x00u, 0x00u, 0x00u };
+	/* An opcode in the reserved vendor-extension range (>= 0x80) is never a
+	 * v1 command -> RESP_ERR_INVALID (the Wi-Fi/GPIO groups are now
+	 * implemented, so a real opcode no longer serves as the "unknown" probe). */
+	const uint8_t op[] = { ALP_CC3501E_CMD_RESERVED_VENDOR_BASE, 0x00u, 0x00u, 0x00u };
 	uint8_t       reply[32];
 
 	transport_spi_init();
-	transaction(scan, sizeof scan);
+	transaction(op, sizeof op);
 	size_t n = drain(reply, sizeof reply);
 
 	zassert_equal(n, 5u, "unknown-opcode reply is header + status");
-	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_SCAN_START, 1u);
+	assert_reply_header(reply, ALP_CC3501E_CMD_RESERVED_VENDOR_BASE, 1u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID,
 	              "unimplemented opcode -> RESP_ERR_INVALID (header contract)");
 }
@@ -236,6 +238,50 @@ ZTEST(cc3501e_bridge_transport, test_gpio_write_bad_len_invalid)
 	transaction(wr, sizeof wr);
 	(void)drain(reply, sizeof reply);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "wrong-length GPIO_WRITE -> INVALID");
+}
+
+/* Wi-Fi (v0.2): the stub HAL has no radio, so a well-formed request parses
+ * cleanly and maps to NOT_READY, while a malformed one is rejected at the
+ * protocol layer (INVALID) before reaching the HAL. */
+ZTEST(cc3501e_bridge_transport, test_wifi_scan_start_not_ready)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	const uint8_t s[] = { ALP_CC3501E_CMD_WIFI_SCAN_START, 0x00u, 0x00u, 0x00u };
+	transaction(s, sizeof s);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "scan reply = header + status");
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "no radio on stub -> NOT_READY");
+}
+
+ZTEST(cc3501e_bridge_transport, test_wifi_connect_sta_parses_then_not_ready)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	/* connect_t {ssid_len=4, psk_len=8, security=WPA2(1), rsvd} + "wifi" + "password";
+	 * payload_len = 4 (header) + 4 (ssid) + 8 (psk) = 16. */
+	const uint8_t req[] = { ALP_CC3501E_CMD_WIFI_CONNECT_STA, 0x00u, 16u, 0x00u,
+		                4u,  8u,  1u,  0u,
+		                'w', 'i', 'f', 'i',
+		                'p', 'a', 's', 's', 'w', 'o', 'r', 'd' };
+	transaction(req, sizeof req);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "connect reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_CONNECT_STA, 1u);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY,
+		      "well-formed connect parses, then NOT_READY (no radio)");
+}
+
+ZTEST(cc3501e_bridge_transport, test_wifi_connect_bad_len_invalid)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	/* connect_t says ssid_len=4 psk_len=8 (needs 16 payload) but only 8 sent. */
+	const uint8_t req[] = { ALP_CC3501E_CMD_WIFI_CONNECT_STA, 0x00u, 8u, 0x00u,
+		                4u, 8u, 1u, 0u, 'w', 'i', 'f', 'i' };
+	transaction(req, sizeof req);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "connect length mismatch -> INVALID");
 }
 
 ZTEST_SUITE(cc3501e_bridge_transport, NULL, NULL, NULL, NULL, NULL);

@@ -94,3 +94,62 @@ int cc3501e_hw_cam_enable(uint8_t which, uint8_t on)
 	stub_cam[which] = on ? 1u : 0u;
 	return CC3501E_HW_OK;
 }
+
+/* --------------------------------------------------------------- */
+/* Wi-Fi (v0.2) -- no radio on the host stub: report NOTIMPL so the  */
+/* protocol path stays exercisable (the handlers parse + validate,    */
+/* then map NOTIMPL -> RESP_ERR_NOT_READY).                           */
+/* --------------------------------------------------------------- */
+int cc3501e_hw_wifi_scan_start(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_scan_stop(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk,
+                                uint8_t psk_len, uint8_t security)
+{
+	(void)ssid;
+	(void)ssid_len;
+	(void)psk;
+	(void)psk_len;
+	(void)security;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_disconnect(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_ap_start(const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk,
+                             uint8_t psk_len, uint8_t security)
+{
+	(void)ssid;
+	(void)ssid_len;
+	(void)psk;
+	(void)psk_len;
+	(void)security;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_ap_stop(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_get_rssi(int8_t *rssi_dbm_out)
+{
+	if (rssi_dbm_out != 0) *rssi_dbm_out = 0;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4])
+{
+	(void)ip_out;
+	return CC3501E_HW_ERR_NOTIMPL;
+}

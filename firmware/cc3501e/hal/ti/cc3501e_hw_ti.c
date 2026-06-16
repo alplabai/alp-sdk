@@ -147,3 +147,67 @@ int cc3501e_hw_cam_enable(uint8_t which, uint8_t on)
 	(void)on;
 	return CC3501E_HW_ERR_NOTIMPL;
 }
+
+/* --------------------------------------------------------------- */
+/* Wi-Fi (v0.2) -- real CC35xx SimpleLink host integration.          */
+/*                                                                   */
+/* TODO(cc3501e v0.2): route to the CC35xx SimpleLink Wi-Fi host      */
+/* (source/ti/drivers/net/wifi/wifi_host_driver -- sl_Start/sl_Wlan* /*/
+/* sl_NetApp* / sl_NetCfgGet) once the host-API surface for this SDK  */
+/* is wired (the classic CC32xx <ti/drivers/net/wifi/simplelink.h>    */
+/* path moved in SDK 10.10; see hal/cc3501e_hw.h + DESIGN.md).  Until  */
+/* then report NOTIMPL (-> RESP_ERR_NOT_READY); the v0.1 image stays   */
+/* radio-stack-free and links against TI Drivers + driverlib alone. */
+int cc3501e_hw_wifi_scan_start(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_scan_stop(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk,
+                                uint8_t psk_len, uint8_t security)
+{
+	(void)ssid;
+	(void)ssid_len;
+	(void)psk;
+	(void)psk_len;
+	(void)security;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_disconnect(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_ap_start(const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk,
+                             uint8_t psk_len, uint8_t security)
+{
+	(void)ssid;
+	(void)ssid_len;
+	(void)psk;
+	(void)psk_len;
+	(void)security;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_ap_stop(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_get_rssi(int8_t *rssi_dbm_out)
+{
+	if (rssi_dbm_out != 0) *rssi_dbm_out = 0;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4])
+{
+	(void)ip_out;
+	return CC3501E_HW_ERR_NOTIMPL;
+}

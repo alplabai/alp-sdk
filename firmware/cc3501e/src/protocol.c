@@ -214,6 +214,132 @@ static alp_cc3501e_resp_t handle_cam_disable(const uint8_t *req, size_t req_len,
 }
 
 /* --------------------------------------------------------------- */
+/* Wi-Fi (0x10..0x1F)                                                */
+/* --------------------------------------------------------------- */
+
+static alp_cc3501e_resp_t handle_wifi_scan_start(const uint8_t *req, size_t req_len,
+                                                 uint8_t *reply_data, size_t reply_cap,
+                                                 size_t *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_wifi_scan_start());
+}
+
+static alp_cc3501e_resp_t handle_wifi_scan_stop(const uint8_t *req, size_t req_len,
+                                                uint8_t *reply_data, size_t reply_cap,
+                                                size_t *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_wifi_scan_stop());
+}
+
+/* WIFI_CONNECT_STA (0x12) / WIFI_AP_START (0x14): payload is an
+ * alp_cc3501e_wifi_connect_t header followed by the inline ssid[ssid_len]
+ * then psk[psk_len].  Validates the cumulative length exactly. */
+static alp_cc3501e_resp_t wifi_join(const uint8_t *req, size_t req_len, int ap)
+{
+	if (req_len < sizeof(alp_cc3501e_wifi_connect_t)) return ALP_CC3501E_RESP_ERR_INVALID;
+	const alp_cc3501e_wifi_connect_t *c = (const alp_cc3501e_wifi_connect_t *)req;
+	const size_t need =
+	    sizeof(alp_cc3501e_wifi_connect_t) + (size_t)c->ssid_len + (size_t)c->psk_len;
+	if (req_len != need) return ALP_CC3501E_RESP_ERR_INVALID;
+	const uint8_t *ssid = req + sizeof(alp_cc3501e_wifi_connect_t);
+	const uint8_t *psk  = ssid + c->ssid_len;
+	const int      rv =
+	    ap ? cc3501e_hw_wifi_ap_start(ssid, c->ssid_len, psk, c->psk_len, c->security)
+	       : cc3501e_hw_wifi_connect_sta(ssid, c->ssid_len, psk, c->psk_len, c->security);
+	return hw_to_resp(rv);
+}
+
+static alp_cc3501e_resp_t handle_wifi_connect_sta(const uint8_t *req, size_t req_len,
+                                                  uint8_t *reply_data, size_t reply_cap,
+                                                  size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	return wifi_join(req, req_len, 0);
+}
+
+static alp_cc3501e_resp_t handle_wifi_ap_start(const uint8_t *req, size_t req_len,
+                                               uint8_t *reply_data, size_t reply_cap,
+                                               size_t *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	return wifi_join(req, req_len, 1);
+}
+
+static alp_cc3501e_resp_t handle_wifi_disconnect(const uint8_t *req, size_t req_len,
+                                                 uint8_t *reply_data, size_t reply_cap,
+                                                 size_t *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_wifi_disconnect());
+}
+
+static alp_cc3501e_resp_t handle_wifi_ap_stop(const uint8_t *req, size_t req_len,
+                                              uint8_t *reply_data, size_t reply_cap,
+                                              size_t *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_wifi_ap_stop());
+}
+
+/* WIFI_GET_RSSI (0x16): reply data = signed RSSI in dBm (1 byte). */
+static alp_cc3501e_resp_t handle_wifi_get_rssi(const uint8_t *req, size_t req_len,
+                                               uint8_t *reply_data, size_t reply_cap,
+                                               size_t *reply_data_len)
+{
+	(void)req;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	if (reply_cap < 1u) return ALP_CC3501E_RESP_ERR_NO_MEM;
+	int8_t             rssi = 0;
+	alp_cc3501e_resp_t st   = hw_to_resp(cc3501e_hw_wifi_get_rssi(&rssi));
+	if (st == ALP_CC3501E_RESP_OK) {
+		reply_data[0]   = (uint8_t)rssi;
+		*reply_data_len = 1u;
+	}
+	return st;
+}
+
+/* WIFI_GET_IP (0x17): reply data = 4-byte IPv4 address. */
+static alp_cc3501e_resp_t handle_wifi_get_ip(const uint8_t *req, size_t req_len,
+                                             uint8_t *reply_data, size_t reply_cap,
+                                             size_t *reply_data_len)
+{
+	(void)req;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	if (reply_cap < 4u) return ALP_CC3501E_RESP_ERR_NO_MEM;
+	uint8_t            ip[4] = { 0 };
+	alp_cc3501e_resp_t st    = hw_to_resp(cc3501e_hw_wifi_get_ip(ip));
+	if (st == ALP_CC3501E_RESP_OK) {
+		memcpy(reply_data, ip, 4u);
+		*reply_data_len = 4u;
+	}
+	return st;
+}
+
+/* --------------------------------------------------------------- */
 /* Dispatch                                                          */
 /* --------------------------------------------------------------- */
 
@@ -260,6 +386,31 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t cmd, uint8_t flags, const uint8_t *
 		break;
 	case ALP_CC3501E_CMD_CAM_DISABLE:
 		h = handle_cam_disable;
+		break;
+	/* Wi-Fi (v0.2). */
+	case ALP_CC3501E_CMD_WIFI_SCAN_START:
+		h = handle_wifi_scan_start;
+		break;
+	case ALP_CC3501E_CMD_WIFI_SCAN_STOP:
+		h = handle_wifi_scan_stop;
+		break;
+	case ALP_CC3501E_CMD_WIFI_CONNECT_STA:
+		h = handle_wifi_connect_sta;
+		break;
+	case ALP_CC3501E_CMD_WIFI_DISCONNECT:
+		h = handle_wifi_disconnect;
+		break;
+	case ALP_CC3501E_CMD_WIFI_AP_START:
+		h = handle_wifi_ap_start;
+		break;
+	case ALP_CC3501E_CMD_WIFI_AP_STOP:
+		h = handle_wifi_ap_stop;
+		break;
+	case ALP_CC3501E_CMD_WIFI_GET_RSSI:
+		h = handle_wifi_get_rssi;
+		break;
+	case ALP_CC3501E_CMD_WIFI_GET_IP:
+		h = handle_wifi_get_ip;
 		break;
 	default:
 		/* Unknown, or a known v1 opcode whose firmware body has not

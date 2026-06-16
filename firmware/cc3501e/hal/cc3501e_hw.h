@@ -86,4 +86,24 @@ int cc3501e_hw_gpio_set_interrupt(uint8_t pad, uint8_t edge, uint8_t enabled);
  * (GPIO_1); @p on != 0 asserts the enable.  Default OFF at boot. */
 int cc3501e_hw_cam_enable(uint8_t which, uint8_t on);
 
+/* --------------------------------------------------------------- */
+/* Wi-Fi (v0.2)                                                      */
+/* --------------------------------------------------------------- */
+
+/* Route to TI's SimpleLink Wi-Fi host (sl_Wlan* / sl_NetApp*) in the ti
+ * backend; the stub + the silicon-free host build report NOTIMPL (->
+ * RESP_ERR_NOT_READY).  @p security: 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE
+ * (matches alp_cc3501e_wifi_connect_t.security).  ssid/psk are not NUL-
+ * terminated; the lengths are authoritative. */
+int cc3501e_hw_wifi_scan_start(void);
+int cc3501e_hw_wifi_scan_stop(void);
+int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk,
+                                uint8_t psk_len, uint8_t security);
+int cc3501e_hw_wifi_disconnect(void);
+int cc3501e_hw_wifi_ap_start(const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk,
+                             uint8_t psk_len, uint8_t security);
+int cc3501e_hw_wifi_ap_stop(void);
+int cc3501e_hw_wifi_get_rssi(int8_t *rssi_dbm_out);
+int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4]);
+
 #endif /* CC3501E_BRIDGE_HAL_CC3501E_HW_H */
