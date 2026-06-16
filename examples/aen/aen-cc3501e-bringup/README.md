@@ -71,21 +71,31 @@ Watch the carrier console (Alif **UART5**, P3_4/P3_5, 115200 8N1 — the E1M
 edge "UART0") for the `[cc3501e-bringup]` log. If the link wedges, cold-cycle
 via the bench PSU CH2.
 
-## Off-silicon (CI)
+## Builds verified (off-silicon)
 
-`twister` builds this for `native_sim/native/64` (`build_only`) against the
-emulated SPI controller + `alp,pin-array` in
-`boards/native_sim_native_64.overlay`.
+- **native_sim/native/64** (`twister`, `build_only`) — against the emulated
+  SPI controller + `alp,pin-array` in `boards/native_sim_native_64.overlay`.
+- **alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he** (real M55-HE ARM target,
+  Zephyr SDK) — produces a flashable `zephyr.elf` (~50 KB flash). This proves
+  the AEN overlay DT, the `spi_dw_alif` (`alif,dwc-ssi-spi`) binding, the SPI1
+  pinctrl macros, and the lpgpio enable all compile for silicon. The
+  `orphan section alp_backends_*` linker warnings are by design (the backend
+  registry uses C-identifier section names so GNU ld emits the
+  `__start_/__stop_` boundary symbols — see `include/alp/backend.h`).
 
 ## Bench-unverified notes
 
-The `boards/alp_e1m_aen801_m55_he.overlay` is a **bench artifact**, like the
-rest of the alp-sdk Alif peripheral layer. Confirm before the first flash:
+`boards/alp_e1m_aen801_m55_he.overlay` is a **bench artifact**, like the rest
+of the alp-sdk Alif peripheral layer. Resolved against
+`zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h`:
 
-- the **SPI1 pinctrl alt-function** macro names
-  (`PIN_P14_6__SPI1_SCLK` etc.) against
-  `zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h` + the AE822 TRM
-  pin-mux table — they may carry an `_A`/`_B`/`_C`/`_D` suffix;
-- the **SPI1 IRQ** (`138` follows spi0's `137`, but is transcribe-TBD);
-- that the FLEX LP-GPIO pads default to GPIO function (else add a pinctrl
-  group selecting it).
+- **SPI1 pinctrl** = alt-2 with the `_C` suffix
+  (`PIN_P14_6__SPI1_SCLK_C` / `_MOSI_C` / `_MISO_C`) — confirmed;
+- **LP-GPIO mux** = reset default (`PIN_P15_x__LPGPIO` = alt-0), so no pinctrl
+  group is needed for WIFI_EN / nRESET — confirmed.
+
+The one remaining genuine unknown (upstream Zephyr declares no SPI node, so it
+is not in the build tree):
+
+- the **SPI1 IRQ** (`138` follows spi0's `137`) — confirm against the AE822
+  TRM before relying on the interrupt-driven path on silicon.

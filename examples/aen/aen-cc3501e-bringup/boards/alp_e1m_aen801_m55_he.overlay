@@ -17,10 +17,13 @@
  * BENCH-UNVERIFIED.  Like the rest of the alp-sdk Alif peripheral layer
  * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi), the addresses/IRQs are
  * transcribed from the Apache-2.0 alifsemi/zephyr_alif fork + the AE822
- * TRM and have NOT been validated on silicon.  The single hard BENCH-TBD
- * is the SPI1 pinctrl alt-function suffix (see the pinctrl group) -- if a
- * macro name is wrong the build fails loudly, which is the intended
- * forcing function to confirm it against the TRM pin-mux table.
+ * TRM and have NOT been validated on silicon.  The SPI1 pinctrl macros are
+ * RESOLVED against zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h
+ * (SPI1 on P14_4/5/6 = alt-2, the `_C` suffix) and the LP-GPIO mux is the
+ * reset default (alt-0 = LPGPIO); the one remaining genuine unknown is the
+ * SPI1 IRQ number (upstream Zephyr declares no SPI node, so it is not in
+ * the build tree) -- confirm it against the AE822 TRM before relying on
+ * the interrupt-driven path on silicon.
  */
 
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
@@ -30,23 +33,18 @@
 	/*
 	 * SPI1 master on P14_6 (SCK) / P14_5 (MOSI) / P14_4 (MISO).
 	 *
-	 * BENCH-TBD: the alt-function suffix on each PIN_P14_x__SPI1_* macro is
-	 * unconfirmed -- the Alif pinctrl header may name these *_A/_B/_C/_D
-	 * (as it does for UART5_RX_A / I2C2_SCL_C elsewhere on this SoM).
-	 * Confirm the exact macro names against
-	 * zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h and the AE822 TRM
-	 * pin-mux table before the first flash; a wrong name is a build error,
-	 * not a silent mis-route.
-	 *
-	 * input-enable on MISO so the pad can sense the slave's drive (the same
-	 * read-enable requirement the I2C pads need on this SoC).
+	 * RESOLVED against alif-ensemble-pinctrl.h: the SPI1 functions on these
+	 * three pads are alt-2, named with the `_C` suffix
+	 * (PIN_P14_6__SPI1_SCLK_C = ALIF_PINMUX(14, 6, 2), etc.).  input-enable
+	 * on MISO so the pad can sense the slave's drive (the same read-enable
+	 * requirement the I2C pads need on this SoC).
 	 */
 	pinctrl_spi1: pinctrl_spi1 {
 		group0 {
-			pinmux = <PIN_P14_6__SPI1_SCLK>, <PIN_P14_5__SPI1_MOSI>;
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>;
 		};
 		group1 {
-			pinmux = <PIN_P14_4__SPI1_MISO>;
+			pinmux = <PIN_P14_4__SPI1_MISO_C>;
 			input-enable;
 		};
 	};
@@ -90,10 +88,9 @@
 /*
  * Enable the LP GPIO island so WIFI_EN (P15_5) and E_WIFI.NRST
  * (P15_1_FLEX) are drivable as outputs.  gpio_dw needs no clocks/pinctrl
- * on the controller; the pad->GPIO function for the FLEX pins is the
- * lpgpio default.  (BENCH-TBD: if a FLEX pad comes up muxed to an LP
- * peripheral instead of GPIO, add a pinctrl group selecting its GPIO
- * function.)
+ * on the controller, and the pad->GPIO mux needs no pinctrl group either:
+ * RESOLVED against alif-ensemble-pinctrl.h -- P15_1/P15_5 function 0 (the
+ * reset default) IS LPGPIO (PIN_P15_x__LPGPIO = ALIF_PINMUX(15, x, 0)).
  */
 &lpgpio {
 	status = "okay";
