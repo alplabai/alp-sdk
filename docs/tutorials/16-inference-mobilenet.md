@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-05-18 against slice-3b state. -->
+<!-- Last verified: 2026-06-17 against AEN801 (E8) bench state. -->
 
 # Tutorial 16: Inference on Ethos-U (MobileNet)
 
@@ -23,11 +23,12 @@ classification result, compare against the CPU reference.
 time).
 
 > **Note:** this tutorial walks the API + the build flow.  The
-> end-to-end run depends on HiL availability for the Ethos-U
-> path; the matching `docs/test-plan.md` row stays 🟡 until the
-> nightly-aen-hil runner exercises it.  The code path described
-> here is real + buildable today; what's gated is the silicon-
-> level verification.
+> Ethos-U inference path is bench-verified on real AEN801 (E8)
+> silicon: a TFLM + Ethos-U85 fixture runs to completion (RESULT
+> PASS, flashed via J-Link direct MRAM).  The full 224x224
+> MobileNet artefact in this tutorial is not yet HiL-exercised;
+> the matching `docs/test-plan.md` row stays 🟡 until the
+> nightly-aen-hil runner runs that model end-to-end.
 
 ---
 

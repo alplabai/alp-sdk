@@ -7,6 +7,55 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.8.0 candidate
 
+### Added — AEN801 (Alif Ensemble E8) bench bring-up: Flow D MRAM burn, Ethernet end-to-end, 15/17 peripheral apps PASS
+
+First full bench bring-up of the `E1M-AEN801` (Alif Ensemble E8, Cortex-M55-HE)
+on real silicon (alplab-gw).
+
+- **Flow D (J-Link direct MRAM flash) is the default burn path.**  J-Link's
+  built-in Alif MRAM loader activates with the **part-number device profile
+  `AE822FA0E5597LS0_M55_HE`** (not the generic Cortex-M55 profile), needs the
+  J-Link V9.46+ DLL (bench has V9.50) on a probe with matched V13 firmware, and
+  burns the signed ATOC over SWD in ~0.16 s, verifies, then re-runs the SE boot
+  ROM (`RSetType 2`, nRESET pin) so the app boots from MRAM.  Helper:
+  `bench-builds/flash-jlink.sh`.  SETOOLS over the SE-UART becomes the "Flow A"
+  fallback.  (The earlier blanket "J-Link cannot write MRAM on this part" was
+  true only for the *generic* profile; with the part profile J-Link **can** burn
+  Alif MRAM.  Probe gotcha: a version-mismatched probe forces a J-Link firmware
+  update on first connect that times out over a USB hub — use a direct root USB
+  port.)
+- **Ethernet works end-to-end (RESULT PASS).**  DHCP lease acquired
+  (e.g. `192.168.10.137`), confirmed server-side by the dnsmasq lease + ARP
+  REACHABLE.  Root cause of the long no-link: the GMAC DMA descriptor rings +
+  net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is not on
+  the GMAC DMA bus.  Fix: `zephyr,sram = &sram0` (global on-chip SRAM
+  @`0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n`.  The PHY power
+  (`E_PHY_PWRDWN` = P15_4 lpgpio), reset (`E_PHY_RESET` = P11_6 gpio11), and
+  `RCSR` bit7 `REF_CLK_SEL=1` were already correct; the earlier "PHY RX path /
+  ANLPAR=0 / scope the REF_CLK" diagnosis was a red herring (bad cable + DTCM
+  starvation).
+- **Generalizable lesson:** any DMA-master block on the E8 M55 (GMAC, Ethos-U
+  NPU, SDHC) needs its DMA-visible buffers in global SRAM0/SRAM1, never the
+  default DTCM.
+- **Peripheral matrix — 15/17 aen-\* apps PASS** (all flashed over Flow D and
+  booted on real E8): gpio (`gpio_dw`, full P8_0 pad path), uart3 (ns16550
+  loopback), pwm (UTIMER3 via pwm-leds), spi0 (DWC_ssi loopback), counter
+  (utimer0), i2c2+EEPROM (24C128 @`0x50`, 12 devices on the bus), wdt (CMSDK),
+  adc (`adc_alif` single-shot), dac (`dac_alif`, code holds), camera-stack
+  (cam/csi/dphy/arx3a0 nodes BIND + drivers v4.4-ported; cam instantiation
+  DT-blocked, live capture HW-blocked — no sensor), Ethos-U85 (ID `0x20007001`),
+  Ethos-U55-HE (ID `0x10104201`), NPU inference (TFLM + Ethos-U85, tiny fixture,
+  runs to completion), PDM mics (live varying PCM = real audio), and I2S TX
+  (i2s3 clocks the tone out with the 76.8 MHz audio clock).  **2 PARTIAL**, both
+  hardware-gated (not code/Flow-D bugs): qenc (driver reads clean but the count
+  is static until the encoder is physically spun) and sdcard (DWC SDHC inits but
+  the card is unreachable until the EVK SDIO 74LVC157 mux — EN=IO20/SEL=IO21,
+  both CC3501E-side — is routed with a card inserted).  Still-true caveats: an
+  audible I2S amp output pends the 74LVC157 mux (SEL=CC3501E GPIO13) + TAS2563
+  config; camera live capture pends a wired sensor; the i2s/pdm 76.8 MHz CGU
+  enable is still poked per-example (a Tier-1.5 clockctrl patch is the clean
+  follow-up).
+
 ### Added — cc3501e-bridge: embedded CC3501E Wi-Fi/BLE firmware (v0.1 bring-up) + selectable SPI/SDIO transport
 
 The TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on the E1M-AEN family now has
