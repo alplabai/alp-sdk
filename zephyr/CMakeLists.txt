@@ -168,6 +168,15 @@ zephyr_library_sources_ifdef(CONFIG_PWM_ALIF_UTIMER
 zephyr_library_sources_ifdef(CONFIG_COUNTER_ALIF_UTIMER
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/counter/counter_alif_utimer.c)
 
+# Synopsys DesignWare APB RTC counter (compatible "snps,dw-apb-rtc"), the E8
+# always-on LPRTC at lprtc@42000000.  A free-running 32-bit up-counter with one
+# compare/alarm channel -- a DIFFERENT IP from upstream's counter_dw_timer.c
+# (snps,dw-timers = DW APB Timers).  Driver + register header vendored Tier-2
+# from the Apache-2.0 zephyr_alif fork; binding under
+# zephyr/dts/bindings/counter/; node in the E8 SoC overlay.
+zephyr_library_sources_ifdef(CONFIG_COUNTER_RTC_SNPS_DW
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/counter/counter_dw_rtc.c)
+
 # Alif Ensemble ADC class driver (compatible "alif,adc"), vendored VERBATIM from
 # the Apache-2.0 zephyr_alif fork; hal_alif ships no ADC class driver, only the
 # analog_ctrl VREF helper library (drivers/analog), so the driver selects

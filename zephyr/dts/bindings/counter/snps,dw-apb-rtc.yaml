@@ -1,0 +1,44 @@
+# Copyright (c) 2023 Alif Semiconductor.
+# Copyright (c) 2026 Alp Lab AB
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Synopsys DesignWare APB RTC, used as a Zephyr counter-class device (a
+# free-running 32-bit up-counter with a single compare/alarm channel -- NOT a
+# calendar RTC).  Bound by the alp-sdk Tier-2 driver
+# zephyr/drivers/counter/counter_dw_rtc.c (compatible "snps,dw-apb-rtc"); on the
+# E8 SoM this models lprtc@42000000.
+#
+# Vendored VERBATIM from the Apache-2.0 alifsemi/zephyr_alif fork
+# (dts/bindings/counter/snps,dw-apb-rtc.yaml, commit da4a9034) -- upstream
+# Zephyr v4.4 ships no snps,dw-apb-rtc binding (its snps,dw-timers is a
+# different DW APB Timers IP).  vendor-ext, BENCH-UNVERIFIED.
+
+description: Synopsys DesignWare RTC counter node
+
+compatible: "snps,dw-apb-rtc"
+
+include: base.yaml
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  wrap-enable:
+    type: boolean
+    description: Wrap mode enable disable
+
+  prescaler:
+    type: int
+    description: prescaler load value
+
+  load-value:
+    type: int
+    description: counter load value
+
+  clock-frequency:
+    type: int
+    description: counter clock frequency
