@@ -60,14 +60,24 @@ The decisive symptom is **`ANLPAR=0x0000`** — the PHY receives **no** auto-neg
 from the switch (no link-partner ability), even with the cable connected. Auto-neg
 never completes and the link stays down.
 
-> **Most likely cause = the PHY ↔ RJ45 media path** (twisted-pair `TD±`/`RD±` →
-> magnetics → RJ45), NOT the SoC/driver side. `ANLPAR=0` with a live cable is the
-> classic signature of swapped/miswired TX/RX pairs, a polarity swap, wrong/absent
-> magnetics, or the cable in the wrong RJ45. **This routing is a SoM/EVK SCHEMATIC
-> detail and is NOT in the alp-sdk metadata** (which only carries the SoC↔PHY digital
-> pins, `alif-ethernet-phy.tsv`) — so it must be checked against the schematics:
-> compare the SoM edge Ethernet media pins to the EVK RJ45/magnetics wiring, and
-> check the switch port's link LED (off ⇒ the switch isn't seeing our PHY at all).
+Further isolation (with the cable connected):
+- **PHY→RJ45 wiring CONFIRMED CORRECT** (from the schematics): PHY `TD±`→`ETH0_DA±`
+  →`TRD1±` (transmit pair) and `RD±`→`ETH0_DB±`→`TRD2±` (receive pair), polarity
+  preserved — so it is **not** a wiring swap.
+- **MAC TX works** — internal-loopback run transmitted 291 bytes (`stats.bytes.sent`
+  rose). The MAC→RMII transmit side is good.
+- **RX side is the fault** — both the media RX (`ANLPAR=0`, no auto-neg from the
+  switch) and the PHY internal loopback failed to deliver received frames.
+
+> **Prime suspect: the PHY's RECEIVE data path / 50 MHz reference clock.** MDIO works
+> (it's MDC-clocked, independent), and the MAC transmits — but the PHY's PCS (which
+> needs the reference clock) isn't recovering RX in *either* the media path *or*
+> internal loopback. Scope the **PHY `REF_CLK` pin for a clean 50 MHz** (and the
+> PHY's crystal if it's the RMII master), plus the RX-side RMII pins (`RXD0`=P11_3,
+> `RXD1`=P1_1, `CRS_DV`=P6_7) and the switch port LED. The media wiring + the magnetics
+> RX winding (`TRD2`→RJ45 pins 3/6) are the other things to confirm on the EVK
+> schematic — this analog path is NOT in the alp-sdk metadata (only the SoC↔PHY
+> digital pins are).
 
 See [[project_pending_hw_configs]]. Run on the bench switch (dnsmasq,
 192.168.10.50–150); a `[eth] DHCP lease = …` line is the full-link PASS.

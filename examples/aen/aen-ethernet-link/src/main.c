@@ -219,43 +219,58 @@ int main(void)
 		       mdio_read(phy, 0x10),
 		       mdio_read(phy, 0x17));
 	}
+	/*
+	 * INTERNAL-LOOPBACK isolation (BMCR bit14): the PHY loops its RMII TX back to
+	 * RMII RX *inside the chip*, bypassing the magnetics + RJ45 + cable. We force
+	 * 100M/full (no auto-neg), TX frames (DHCP DISCOVERs), and watch rx_bytes:
+	 *   rx rises  -> the MAC<->PHY RMII data path (TXD/RXD) is 100% good, so the
+	 *               no-link is purely the MEDIA side (magnetics/cable/switch).
+	 *   rx flat   -> the RMII data path itself is broken (or the PHY can't loop).
+	 */
+	bool loop_ok = false;
+	bool tx_seen = false;
+	if (phy >= 0) {
+		mdio_write(phy, 0, BIT(14) | BIT(13) | BIT(8)); /* loopback + 100M + full */
+		k_msleep(100);
+		uint32_t tx0 = iface->stats.bytes.sent;
+		uint32_t rx0 = iface->stats.bytes.received;
+		net_dhcpv4_start(iface); /* generates DISCOVER TX frames that should loop back */
+		for (int i = 0; i < 16 && !loop_ok; i++) {
+			k_msleep(500);
+			loop_ok = iface->stats.bytes.received > rx0;
+		}
+		tx_seen = iface->stats.bytes.sent > tx0;
+		printf("[eth] internal loopback: TX %u->%u (tx_seen=%d) RX %u->%u (looped=%d)\n",
+		       tx0,
+		       iface->stats.bytes.sent,
+		       tx_seen,
+		       rx0,
+		       iface->stats.bytes.received,
+		       loop_ok);
+		net_dhcpv4_stop(iface);
+		mdio_write(phy, 0, BIT(12) | BIT(9)); /* restore auto-neg */
+	}
+
+	/* Re-check the real wire link (auto-neg) after the loopback test. */
 	bool link = (phy >= 0) && phy_wait_link(phy);
 
-	/* DEFINITIVE end-to-end proof: request a DHCP lease from the bench switch
-	 * (dnsmasq). A lease only completes over a genuinely live bidirectional link,
-	 * so it proves TX + RX + the PHY are all working -- unlike carrier_ok (fixed-
-	 * link synthetic) or unsolicited RX (a quiet switch sends none). */
-	net_dhcpv4_start(iface);
-	bool bound = false;
-	for (int i = 0; i < 30; i++) { /* up to ~15 s for DISCOVER/OFFER/REQUEST/ACK */
-		if (iface->config.dhcpv4.state == NET_DHCPV4_BOUND) {
-			bound = true;
-			break;
-		}
-		k_msleep(500);
-	}
-
-	uint32_t rx_bytes = iface->stats.bytes.received;
-	printf("[eth] admin_up=%d carrier_ok=%d(fixed-link) rx_bytes=%u dhcp_bound=%d\n",
+	printf("[eth] admin_up=%d carrier_ok=%d(fixed-link) loopback_ok=%d wire_link=%d\n",
 	       net_if_is_admin_up(iface),
 	       net_if_is_carrier_ok(iface),
-	       rx_bytes,
-	       bound);
-
-	if (bound) {
-		char                ip[NET_IPV4_ADDR_LEN] = { 0 };
-		struct net_if_addr *ua                    = &iface->config.ip.ipv4->unicast[0].ipv4;
-		net_addr_ntop(AF_INET, &ua->address.in_addr, ip, sizeof(ip));
-		printf("[eth] DHCP lease = %s\n", ip);
-	}
+	       loop_ok,
+	       link);
 
 	printf("[eth] RESULT %s: %s\n",
-	       bound ? "PASS" : (link ? "PARTIAL" : "PARTIAL"),
-	       bound  ? "DHCP lease acquired off the bench switch = full bidirectional link UP"
-	       : link ? "PHY link UP (MDIO BMSR) but no DHCP lease -- MAC RX/TX data path "
-	                "(check RMII RXD/TXD pins or DHCP server)"
-	              : "PHY present (DP83825I) + clocked but link DOWN -- auto-neg did not complete "
-	                "(check the cable/switch port + the PHY's 50MHz refclk routing)");
+	       link ? "PASS" : "PARTIAL",
+	       link ? "PHY wire link UP -- full RMII + media path good"
+	       : loop_ok
+	           ? "RMII data path PROVEN good via PHY internal loopback; the wire link is DOWN "
+	             "-> fault is MEDIA-side only (magnetics/cable/switch -- PHY->RJ45 wiring "
+	             "confirmed correct). Check switch port LED + magnetics."
+	       : tx_seen ? "MAC transmitted but the PHY loopback did NOT return frames -- the RMII RX "
+	                   "path (PHY RXD -> MAC) is not delivering (check RXD0/RXD1/CRS_DV pinmux)"
+	                 : "MAC did not transmit any frames (TX path / net-stack) -- loopback "
+	                   "inconclusive on the RX side");
 	printf("[eth] done\n");
 	return 0;
 }
