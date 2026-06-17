@@ -8,9 +8,14 @@
  * i2s_write / i2s_trigger) on DT_ALIAS(alp_i2s0) = &i2s3 (the SoM "I2S0_*" audio
  * signals route to I2S3_*_A on P9_3/4/5 -- per metadata from-alif.tsv).
  *
- * The example enables the 76.8 MHz audio reference at the CGU (the same fix that
- * made the PDM mics capture -- the upstream clockctrl never enables it) and clocks
- * a tone out on SCLK/WS/SDO.  On the EVK that signal reaches the two TAS2563
+ * The 76.8 MHz audio reference (CGU master) and the I2S bit-clock divider are now
+ * programmed by the Tier-1.5 clockctrl west-patch
+ * (zephyr/patches/zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch),
+ * NOT by this example: i2s_configure() -> the i2s_dw driver calls
+ * clock_control_on()/clock_control_set_rate(), and the patched clockctrl enables
+ * the CGU master source and divides it down to SCLK (the same master-source fix
+ * that made the PDM mics capture).  The controller then clocks a tone out on
+ * SCLK/WS/SDO.  On the EVK that signal reaches the two TAS2563
  * smart-amplifiers through a 74LVC157 2:1 mux: /E = Alif P7.1 (drivable) and the
  * SELECT = CC3501E GPIO13 (over the inter-chip SPI bridge, currently
  * firmware-gated). So this example validates the I2S controller + clock path; the
@@ -28,8 +33,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2s.h>
-#include <zephyr/sys/sys_io.h>
-#include <zephyr/sys/util.h>
 
 #define I2S_NODE       DT_ALIAS(alp_i2s0)
 #define SAMPLE_RATE_HZ 48000
@@ -88,13 +91,9 @@ int main(void)
 		.timeout        = TX_TIMEOUT_MS,
 	};
 
-	/* Enable the 76.8 MHz audio reference (HFOSCx2) at the CGU -- the I2S bit clock
-	 * is derived from it, and the upstream Alif clockctrl never enables this master
-	 * source (only per-peripheral gates). Without it the I2S does not truly clock
-	 * out (the same fix that made the PDM mics capture). CGU_CLK_ENA = CGU base
-	 * 0x1A602000 + 0x14, bit 24 = CLK76P8M (from the fork clock driver, not invented). */
-	sys_set_bits(0x1A602014U, BIT(24));
-
+	/* No raw clock poke here: the patched Tier-1.5 clockctrl enables the CGU
+	 * master 76.8 MHz source and programs the I2Sx_CTRL bit-clock divider inside
+	 * i2s_configure() (via clock_control_on()/set_rate()). */
 	int rc = i2s_configure(i2s, I2S_DIR_TX, &cfg);
 	printf("[i2s] i2s_configure(TX) -> %d\n", rc);
 	if (rc != 0) {
