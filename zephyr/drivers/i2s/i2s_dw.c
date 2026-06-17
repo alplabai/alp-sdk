@@ -90,13 +90,15 @@ static int32_t i2s_configure_clocksource(bool enable,
 
 		ret = clock_control_set_rate(i2s->clk_dev,
 				i2s->clkid, (clock_control_subsys_rate_t)sclk);
-		/* alp-sdk: the upstream Alif clockctrl implements only .on/.off/
-		 * .get_rate -- it has no .set_rate, so this returns -ENOSYS/-ENOTSUP.
-		 * Tolerate that (same lesson as the SPI/PDM clock bring-up): the I2S
-		 * bit-clock divider in CLKCTL_PER_SLV I2Sx_CTRL is then left at its
-		 * reset value rather than programmed from `sclk`, so the achieved SCLK
-		 * (and thus sample rate) is NOT guaranteed until the clockctrl gains a
-		 * real .set_rate for the I2S divider. BENCH-UNVERIFIED on exact rate. */
+		/* alp-sdk: on the Alif clockctrl the I2S bit-clock divider in
+		 * CLKCTL_PER_SLV I2Sx_CTRL is now programmed from `sclk` by the
+		 * clockctrl .set_rate (Tier-1.5 west-patch
+		 * zephyr/patches/zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch).
+		 * The divider field layout in that patch is BENCH-UNVERIFIED against the
+		 * DFP/TRM, so the achieved SCLK (and thus sample rate) is not yet bench-
+		 * confirmed. On native_sim / other SoCs whose clockctrl has no .set_rate
+		 * this still returns -ENOSYS/-ENOTSUP, which we tolerate (same lesson as
+		 * the SPI/PDM clock bring-up). */
 		if (ret != 0 && ret != -ENOSYS && ret != -ENOTSUP) {
 			LOG_ERR("Unable to set desired frequency : err:%d", ret);
 			return ret;

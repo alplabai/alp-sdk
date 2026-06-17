@@ -284,6 +284,26 @@ secure-boot verification — always write both consistent blobs.
 - **Generalizable: any DMA-master block needs its buffers in global SRAM.** On the
   E8 M55, any DMA-master block (GMAC, the Ethos-U NPU, the SDHC) needs its
   DMA-visible buffers in global **SRAM0/SRAM1**, never the default DTCM.
+- **Audio clocks (I2S bit clock + HP-PDM functional clock) are now in the Tier-1.5
+  clockctrl west-patch, not in example pokes.** The upstream Alif clock controller
+  (`drivers/clock_control/clock_control_alif.c`) only flips per-peripheral *gate*
+  bits — it never enables the audio *master* source, so the I2S and PDM examples
+  used to poke raw CGU / EXPMST0 addresses by hand. That is now folded into the
+  clockctrl, carried as
+  `zephyr/patches/zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch`
+  (`zephyr/patches.yml`, applied with `west patch apply`). On `clock_control_on()`
+  of an I2S or HP-PDM clock the patched driver now: (a) **GROUNDED, bench-proven** —
+  enables the CGU master **76.8 MHz / HFOSCx2** (`cgu_base + 0x14`, bit 24) and, for
+  the EXPMST0-domain HP PDM, the `EXPMST0_CTRL` **IPCLK_FORCE/PCLK_FORCE** bits
+  (`clkctl_per_slv_base + 0x00`, bits 31|30); and on `clock_control_set_rate()` it
+  programs (b) **BENCH-UNVERIFIED** the `I2Sx_CTRL` bit-clock divider
+  (`76.8 MHz / sclk` into the 10-bit `CKDIV` field) so `i2s_dw.c` stops getting
+  `-ENOSYS`. The (b) divider field layout is taken from the Alif `i2s_sync`
+  reference but is **not yet confirmed** against the DFP/TRM for the DesignWare
+  `i2s_dw` path — it is a separable hunk in the patch so the bench step can land
+  (a) and hold (b) if the achieved sample rate regresses. (The 76.8 MHz oscillator
+  itself is SE-managed, so the PDM may still need the `se_services`/MHU clock
+  request even with the CGU `CLK_ENA` bit set — see the PDM example's PARTIAL note.)
 
 ## 4. Troubleshooting
 
@@ -301,3 +321,5 @@ secure-boot verification — always write both consistent blobs.
 | `spi_transceive` returns `-116` (TX FIFO full, no SCLK) | SoC master-mode not set — `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`) per-instance master bit. The alp-sdk driver sets it in init (PR #162); if you forked the driver, replicate it. |
 | `spi_transceive` returns `-EINVAL` with no register programming | No `clock-frequency` for the BAUDR divider and the alif clock controller has no `get_rate`. Set `clock-frequency` on the SPI node (§3). |
 | Ethernet links but never gets a lease / no traffic | GMAC DMA descriptor rings + net_buf pool are in the M55 **DTCM** (`zephyr,sram = &dtcm`), off the DMA bus. Move them to global SRAM0: `zephyr,sram = &sram0` + `CONFIG_DCACHE=n` (§3). Applies to any DMA-master block (GMAC/NPU/SDHC). |
+| I2S TX never clocks out / PDM `dmic_read` → `-EAGAIN` (FIFO=0) | The CGU master **76.8 MHz** source and (for the HP PDM) the `EXPMST0_CTRL` IPCLK/PCLK force bits are not set. These are now enabled by the Tier-1.5 clockctrl west-patch (`west patch apply`; §3) on `clock_control_on()` — confirm the patch is applied. The 76.8 MHz oscillator itself is SE-managed, so the PDM may also need the `se_services`/MHU clock request even with the CGU bit set. |
+| I2S sample rate looks wrong (pitch off) | The `I2Sx_CTRL` `CKDIV` divider the clockctrl `.set_rate` programs is **BENCH-UNVERIFIED** (field layout from the Alif `i2s_sync` reference, not the DFP/TRM). Confirm the divider width/position + N-vs-(N-1) convention against the Alif DFP/TRM; the hunk is separable in the patch so it can be held. |

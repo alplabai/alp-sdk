@@ -22,8 +22,6 @@
 #include <zephyr/device.h>
 #include <zephyr/audio/dmic.h>
 #include <zephyr/drivers/pdm/pdm_alif.h>
-#include <zephyr/sys/sys_io.h>
-#include <zephyr/sys/util.h>
 
 #define PDM_NODE         DT_ALIAS(alp_pdm0)
 #define SAMPLE_RATE_HZ   16000
@@ -116,21 +114,12 @@ int main(void)
 		    },
 	};
 
-	/* Enable the 76.8 MHz audio reference (HFOSCx2) at the CGU. The upstream Alif
-	 * clockctrl alp-sdk consumes only sets per-peripheral gates; it never enables
-	 * this master source, so the PDM has no functional clock and never samples
-	 * (FIFO=0 -> dmic_read -EAGAIN). CGU_CLK_ENA = CGU base 0x1A602000 + 0x14; bit
-	 * 24 = CLK76P8M. Reg + bit from the fork clock_control_alif_ensemble.c GEN2
-	 * path (ALIF_CLK_ENA_CLK76P8M_BIT) -- NOT invented. */
-	sys_set_bits(0x1A602014U, BIT(24));
-
-	/* The HP PDM lives in the EXPMST0 (expansion-master-0) domain: its functional
-	 * IP clock only RUNS when EXPMST0_CTRL IPCLK_FORCE (bit31) + PCLK_FORCE (bit30)
-	 * are set (the bit8 per-peripheral gate alone does not). Reg 0x4902F000
-	 * (CLKCTL_PER_SLV + EXPMST0_CTRL) + the force bits are from the same fork
-	 * driver -- NOT invented. */
-	sys_set_bits(0x4902F000U, BIT(30) | BIT(31));
-
+	/* No raw clock pokes here: the patched Tier-1.5 clockctrl
+	 * (zephyr/patches/zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch)
+	 * enables the CGU master 76.8 MHz source AND the EXPMST0_CTRL IPCLK/PCLK force
+	 * bits the EXPMST0-domain HP PDM needs, inside clock_control_on() -- which the
+	 * alif_pdm driver calls during dmic_configure(). Without those the PDM has no
+	 * functional clock and never samples (FIFO=0 -> dmic_read -EAGAIN). */
 	int rc = dmic_configure(dmic, &cfg);
 	printf("[pdm] dmic_configure -> %d\n", rc);
 	if (rc != 0) {
@@ -181,9 +170,10 @@ int main(void)
 	       (got && varying) ? "PASS" : "PARTIAL",
 	       varying ? "varying PCM captured = live audio"
 	       : got   ? "non-zero but constant (check gain)"
-	               : "FIFO empty -- HP-PDM config register-verified (ch0,1,4,5 enabled, mode set, "
-	                 "EXPMST0 IPCLK/PCLK forced, clk gated); not sampling -> the 76.8MHz audio "
-	                 "source (SE-managed CLKEN_HFOSCx2) is not enabled. Needs the se_services/MHU "
+	               : "FIFO empty -- HP-PDM config register-verified (ch0,1,4,5 enabled, mode set; "
+	                 "the patched clockctrl forced EXPMST0 IPCLK/PCLK + set the CGU CLK_ENA bit); "
+	                 "not sampling -> the 76.8MHz audio source itself (HFOSCx2) is SE-managed: the "
+	                 "CGU CLK_ENA bit alone may not engage the oscillator. Needs the se_services/MHU "
 	                 "clock request to the SE (alp-sdk doesn't wire it yet).");
 	printf("[pdm] done\n");
 	return 0;

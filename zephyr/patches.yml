@@ -15,3 +15,29 @@ patches:
       for the slot vector address, but slot0 is in MRAM at 0x80000000 -> garbage
       jump -> reboot loop. Derive the slot base from the alif,mram controller reg.
       Bench-proven on E1M-AEN801 (E8): SES->MCUboot->slot0->app RESULT PASS.
+  - path: zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch
+    sha256sum: a49c980678b1d77cc510203272126a3b20a6948ea9d35f7ca4cfe9f52bfde69e
+    module: zephyr
+    author: Alp Lab AB
+    email: dev@alplab.example
+    date: 2026-06-17
+    upstreamable: true
+    comments: |
+      The upstream Alif clockctrl (drivers/clock_control/clock_control_alif.c)
+      only flips per-peripheral GATE bits -- it never enables the audio MASTER
+      source, so audio bring-up had to poke raw CGU / EXPMST0 addresses from the
+      example code. Fold both into the driver, derived from the config bases (no
+      hardcoded absolute addresses):
+        (a) GROUNDED, bench-proven: the .on path now enables the CGU master
+            76.8 MHz / HFOSCx2 (cgu_base + ALIF_CLK_ENA_REG 0x14, bit 24) for I2S
+            and HP-PDM clocks, and the EXPMST0_CTRL IPCLK_FORCE|PCLK_FORCE
+            (clkctl_per_slv_base + 0x00, bits 31|30) for the HP PDM. Offsets/bits
+            carried from the zephyr_alif fork soc_common.c GEN2 path.
+        (b) BENCH-UNVERIFIED: adds .set_rate that programs the I2Sx_CTRL bit-clock
+            divider (76.8 MHz / sclk into the 10-bit CKDIV field) so i2s_dw.c stops
+            getting -ENOSYS. The CKDIV field layout is from the Alif i2s_sync
+            reference header but is NOT confirmed against the DFP/TRM for the
+            DesignWare i2s_dw path -- it is a separable hunk so the bench step can
+            land the (a) enable and hold (b) if the divider regresses.
+      Drop both once an Alif upstream clockctrl carries the master-source enable
+      and a real I2S .set_rate.
