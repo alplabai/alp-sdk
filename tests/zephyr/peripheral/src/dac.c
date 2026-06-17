@@ -12,6 +12,7 @@
 
 #include "alp/dac.h" /* alp_dac_open / alp_dac_t / alp_dac_config_t */
 #include "alp/peripheral.h"
+#include "alp/soc_caps.h" /* ALP_SOC_DAC_COUNT */
 
 ZTEST(alp_peripheral, test_dac_null_cfg)
 {
@@ -21,14 +22,22 @@ ZTEST(alp_peripheral, test_dac_null_cfg)
 
 ZTEST(alp_peripheral, test_dac_out_of_range_channel)
 {
-	/* E1M_DAC_COUNT = 2; the wrapper's internal array sized to
-     * match.  Channel id 9 must reject. */
+	/* Channel id 9 is out of range for any E1M part (E1M_DAC_COUNT = 2). */
 	alp_dac_t *d = alp_dac_open(&(alp_dac_config_t){
 	    .channel_id = 9u,
 	    .initial_mv = 0u,
 	});
 	zassert_is_null(d);
+#if !defined(CONFIG_ALP_SOC_NONE) && (ALP_SOC_DAC_COUNT > 0)
+	/* A SoC that declares a real, finite DAC channel count rejects an
+	 * out-of-range channel up front with INVAL (the dac dispatch's
+	 * capability gate). */
 	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
+#endif
+	/* Under CONFIG_ALP_SOC_NONE the count is the accept-any UINT16_MAX
+	 * sentinel (gate is a no-op), and a no-DAC SoC has count 0: either
+	 * way the out-of-range channel just surfaces NULL via the backend
+	 * (NOT_READY / NOSUPPORT), already asserted by zassert_is_null above. */
 }
 
 ZTEST(alp_peripheral, test_dac_unresolved_channel_yields_not_ready)
