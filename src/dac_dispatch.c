@@ -59,6 +59,17 @@ alp_dac_t *alp_dac_open(const alp_dac_config_t *cfg)
 		return NULL;
 	}
 
+	/* SoC capability gate: reject an out-of-range channel before any
+	 * backend dispatch.  ALP_SOC_DAC_COUNT is 0 under CONFIG_ALP_SOC_NONE,
+	 * so this is skipped there and a valid-but-unresolved channel surfaces
+	 * NOT_READY from the backend open() instead (mirrors the ADC dispatch's
+	 * capability gate; the DAC registry migration in #33 dropped the old
+	 * wrapper-array channel bound this restores). */
+	if ((ALP_SOC_DAC_COUNT > 0) && (uint32_t)cfg->channel_id >= (uint32_t)ALP_SOC_DAC_COUNT) {
+		alp_z_set_last_error(ALP_ERR_INVAL);
+		return NULL;
+	}
+
 	const alp_backend_t *be = alp_backend_select("dac", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
