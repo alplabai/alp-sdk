@@ -584,7 +584,7 @@ manifest:
   projects:
     - name: alp-sdk
       url: https://github.com/alplabai/alp-sdk
-      revision: main           # pin to a release tag (v0.6.0 shipped 2026-06-06)
+      revision: main           # pin to a release tag — v0.7.0 is the latest
       path: modules/alp-sdk
 ```
 

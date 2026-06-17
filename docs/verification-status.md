@@ -17,7 +17,7 @@ verified in the Alp SDK as of today".  It complements:
 - `docs/test-plan.md` -- the HiL ledger that flips rows to ✅ as
   evidence lands.
 
-## Where v0.6 actually sits
+## Where v0.7 actually sits
 
 | Layer | Status | What "passes" today |
 |---|---|---|
