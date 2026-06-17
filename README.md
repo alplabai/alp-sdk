@@ -8,7 +8,7 @@
 [![Zephyr](https://img.shields.io/badge/Zephyr-v4.4.0-blue)](docs/zephyr-version-policy.md)
 
 > [!WARNING]
-> **Mostly pre-silicon (`v0.6`):** every chip driver, peripheral wrapper, and
+> **Mostly pre-silicon (`v0.7`):** every chip driver, peripheral wrapper, and
 > example builds clean and passes its CI tests on `native_sim`, but **most of
 > the SDK has not yet been verified on real hardware**.  The first
 > silicon-verified slice landed in v0.6 — the V2N GD32-bridge campaign
@@ -126,7 +126,7 @@ indexes the common ones with fixes.
 
 ## 30-second quick start
 
-A v0.6 project is **one declarative file** plus per-core app
+A v0.7 project is **one declarative file** plus per-core app
 directories.  Drop a `board.yaml` at your app root:
 
 ```yaml
@@ -256,7 +256,7 @@ by upstream `bitbake` / OE-core constraint.  Codified in
 
 ## Status
 
-**v0.6 ramp — paper-correct, pre-HIL** — recorded in
+**v0.7 ramp — paper-correct, pre-HIL** — recorded in
 [`metadata/sdk_version.yaml`](metadata/sdk_version.yaml).  Surface
 landed; runtime implementations fill in across point releases.  Code
 merged ≠ verified — every claim is tracked in
@@ -268,12 +268,7 @@ per-SoM accelerator wiring as *paper-correct only* until their
 test-plan rows flip to ✅.  The first silicon-verified rows landed
 in v0.6 — the V2N GD32-bridge campaign (see the v0.6.0 section of
 [`docs/test-plan.md`](docs/test-plan.md)) — and the V2N Yocto image
-boots the bench board.  The v0.8 candidate adds the first
-**E1M-AEN801 (Alif Ensemble E8)** silicon bring-up: Flow-D MRAM
-flash, Ethernet end-to-end, ~15 peripheral apps + real NPU inference
-from MRAM, all PASS on the bench (see
-[`docs/aen-bench-bringup.md`](docs/aen-bench-bringup.md)).  The rest
-of the AEN family + the E1M-X SKUs remain pre-HIL.  Per-driver
+boots the bench board; everything else remains pre-HIL.  Per-driver
 verification status is recorded in `metadata/chips/<name>.yaml`'s
 `verification:` block and as `@par Verification status: [UNTESTED]`
 Doxygen tags on public headers.  Customers shipping production
@@ -385,7 +380,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate.py      │
-  │ (v0.6)        │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
+  │ (v0.7)        │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
   │               │    │  alp model build  →  .alpmodel   (the model-compile front-end)         │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
@@ -515,7 +510,7 @@ manifest:
   projects:
     - name: alp-sdk
       url: https://github.com/alplabai/alp-sdk
-      revision: main        # pin to a tag (v0.6.0, etc.) once released; v0.6 is pre-release
+      revision: main        # pin to a release tag — v0.7.0 is the latest; `main` tracks the v0.8 candidate
       path: modules/lib/alp-sdk
 ```
 
@@ -546,7 +541,7 @@ cmake -B build -DALP_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 
-# Zephyr (heterogeneous slice, v0.6 pre-release flow)
+# Zephyr (heterogeneous slice, v0.7 flow)
 west init -m https://github.com/alplabai/alp-sdk --mr main alp-ws
 cd alp-ws && west update
 west alp-build examples/multicore/rpmsg-v2n
