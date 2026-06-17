@@ -351,6 +351,61 @@ config QDEC_ALIF
 	  silicon-validated.  ADR 0017 Tier-2 (INTERIM, task #21).
 	  Driver: zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c.
 
+config SDHC_DWC
+	bool "Alif Ensemble DesignWare SD Host Controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on SDHC
+	depends on DT_HAS_SNPS_DWC_SDHC_ENABLED
+	select SDHC_SUPPORTS_NATIVE_MODE
+	select EVENTS
+	help
+	  Synopsys DesignWare Core SD Host Controller driver (compatible
+	  "snps,dwc-sdhc"), vendored VERBATIM from the Apache-2.0 zephyr_alif fork
+	  (drivers/sdhc/sdhc_dwc.c + sdhc_dwc.h) -- upstream Zephyr v4.4 + hal_alif
+	  ship no DesignWare SDHC driver.  Implements the Zephyr SDHC API; the card's
+	  internal ADMA2/SDMA engine handles data transfers (no Alif system-DMA
+	  dependency).  Binding zephyr/dts/bindings/sdhc/snps,dwc-sdhc.yaml.
+
+	  The CPU<->bus DMA address translation (which would pull in the hal_alif
+	  soc_memory_map.h / itcm,dtcm `global_base` props -- the same dtsi gap the
+	  NPU work hit) is left OFF (CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE=n), so the
+	  driver uses identity addressing.  Enable + add the global_base props once a
+	  card is actually reachable and DMA transfers are validated.
+
+	  ADR 0017 Tier-2 (INTERIM, task #21).  Driver: zephyr/drivers/sdhc/sdhc_dwc.c.
+
+if SDHC_DWC
+
+config SDHC_BUFFER_ALIGNMENT
+	int "SDHC buffer alignment"
+	default 512
+
+config SDHC_DESCRIPTOR_SECTION
+	string "Linker section for SDHC DMA descriptors"
+	default ""
+
+config SDHC_DWC_SDMA
+	bool "Use SDMA mode"
+
+config SDHC_DWC_ADMA
+	bool "Use ADMA2 mode"
+	default y
+	depends on !SDHC_DWC_SDMA
+
+config SDHC_DWC_ADMA_MAX_DESC
+	int "SDHC DWC ADMA Maximum Descriptor count"
+	depends on SDHC_DWC_ADMA
+	default 32
+
+config SDHC_DWC_DMA_ADDR_TRANSLATE
+	bool "Enable CPU-to-bus DMA address translation"
+	help
+	  Pulls in the hal_alif soc_memory_map.h (needs itcm/dtcm `global_base`
+	  props absent from the alp-sdk E8 dtsi).  Leave disabled until a card is
+	  reachable and DMA is validated.
+
+endif # SDHC_DWC
+
 # hal_alif (drivers/CMakeLists.txt) gates its analog VREF library
 # (drivers/analog -> analog_ctrl.c) on CONFIG_USE_ALIF_HAL_ANALOG via
 # add_subdirectory_ifdef, but -- exactly like USE_ALIF_HAL_UTIMER above --
