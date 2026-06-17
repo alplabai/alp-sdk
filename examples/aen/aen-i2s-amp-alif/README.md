@@ -38,25 +38,28 @@ underrun/error).
 
 ## Status
 
-**Driver path PROVEN on E8 (RESULT PASS):** `i2s_configure(TX)` /
-`i2s_write` ×4 / `i2s_trigger(START)` / `i2s_trigger(DRAIN)` all return 0 — the
-I2S0 controller clocked the tone out.
+**Driver path executed on E8 (RESULT PARTIAL):** `i2s_configure(TX)` /
+`i2s_write` ×4 / `i2s_trigger(START)` / `i2s_trigger(DRAIN)` all return 0 on the
+`i2s0` demo instance. Two `clock_control` calls in `i2s_dw.c` are patched to
+tolerate `-ENOSYS` (our upstream clockctrl has only `.on`/`.off`/`.get_rate`).
 
-Two `clock_control` calls in `i2s_dw.c` are patched to tolerate `-ENOSYS`/
-`-ENOTSUP` (our upstream Alif clockctrl implements only `.on`/`.off`/`.get_rate`,
-no `.configure`/`.set_rate`).
-
-> **For AUDIBLE amp output (BENCH-PENDING), three HW/bridge items remain — none
-> are driver bugs:**
-> 1. **74LVC157 mux** (`<alp/boards/alp_e1m_evk.h>`): I2S0 reaches the TAS2563
->    amps through a 2:1 mux. `/E` (enable, active-low) = **IO8 → Alif P7.1** (drive
->    low); `S` (select) = **IO13 → CC3501E GPIO13** (low = amps), which is on the
->    CC3501E side and must be driven over the inter-chip SPI bridge
->    (`ALP_CC3501E_CMD_GPIO_WRITE`). This example does not toggle the mux.
-> 2. **I2S0 pad route (A vs B):** the SoC offers I2S0 on P1_6/P1_7/P3_0/P3_1 (**A**,
->    used here) or P4_1..P4_4 (**B**). Which the E1M-AEN801 SoM routes is not yet
->    declared in `metadata/e1m_modules/E1M-AEN801.yaml` — confirm against the
->    schematic ([[project_pending_hw_configs]], [[project_som_pad_map_lives_in_alp_sdk]]).
+> **IMPORTANT corrections (from the SoM pinout + the PDM investigation):**
+> 1. **This `i2s0` is a driver-build demo, NOT the EVK audio path.** Per
+>    `metadata/e1m_modules/aen/from-alif.tsv` the EVK audio I2S (`I2S0_*` labels) is
+>    physically wired to the SoC **`i2s3`** controller on **P9_2/P9_3/P9_4/P9_5**
+>    (`I2S3_SDI/SDO/SCLK/WS_A`) — not `i2s0`. A production audio app must target
+>    `i2s3@49017000` with those pads.
+> 2. **DRAIN returning 0 does NOT prove the bit clock ran.** The same 76.8 MHz audio
+>    clock the PDM needs (`CLKEN_HFOSCx2`) is **SE-managed and not requested** by
+>    alp-sdk (see the `aen-pdm-mic-alif` finding: a fully-configured PDM shows
+>    `FIFO=0` = no audio clock). So true clock-out here is **unverified** until the
+>    `se_services`/MHU SE clock request is wired up.
+> 3. **74LVC157 mux to the TAS2563 amps:** `/E` = IO8 → Alif P7.1 (drivable); `S` =
+>    IO13 → **CC3501E GPIO13**, over the inter-chip SPI bridge whose v0.1 firmware
+>    doesn't implement the GPIO-proxy opcode (same block as the SD card). Audible
+>    amp output needs that bridge + firmware.
+>
+> Legacy notes below (kept for reference):
 > 3. **Exact sample rate:** the bit-clock divider (`CLKCTL_PER_SLV` `I2S0_CTRL`) is
 >    not programmed because the upstream clockctrl has no `.set_rate` — the TX
 >    drains, but the achieved SCLK is unverified until the clockctrl gains a real

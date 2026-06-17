@@ -126,9 +126,11 @@ int main(void)
 
 	bool drained = (rc == 0) && (queued == BLOCKS_TO_SEND);
 	printf("[i2s] RESULT %s: %s\n",
-	       drained ? "PASS" : "PARTIAL",
-	       drained ? "I2S0 TX path clocked the tone out (driver proven; route mux + "
-	                 "confirm pads for audible amp output)"
+	       drained ? "PARTIAL" : "PARTIAL",
+	       drained ? "I2S driver path executed (configure/write/START/DRAIN all ok). NOTE: true "
+	                 "bit-clock-out is UNVERIFIED -- the 76.8MHz audio clock is SE-managed "
+	                 "(CLKEN_HFOSCx2, not requested); + the EVK audio I2S is i2s3/P9_x (SoM TSV) "
+	                 "behind the CC3501E mux, not this i2s0 demo instance"
 	               : "configured but TX did not drain cleanly (check clock/pinctrl)");
 	printf("[i2s] done\n");
 	return 0;

@@ -88,6 +88,17 @@
 	ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 8U, 1U, 0U, 1U, 9U,                \
 		     ALIF_PARENT_CLK_SYST_HCLK)
 
+/* HP PDM (pdm@4902d000, the main-domain PDM the E1M-AEN801 SoM routes its mics
+ * to -- from-alif.tsv): bit 8 of EXPMST0_CTRL (offset 0x0) in CLKCTL_PER_SLV,
+ * src-select at bit 9 (src=0 -> 76.8 MHz).  Re-authored from the fork 7-arg
+ * ALIF_CLK_CFG(CLKCTL_PER_SLV, EXPMST0_CTRL, 8U, 1U, 0U, 1U, 9U) into the
+ * upstream 8-arg encoding; parent_clk is a filler (the alif,alif-pdm driver only
+ * configure()/on()s, never get_rate()s). */
+#define ALIF_EXPMST0_CTRL_REG 0x00U /* CLKCTL_PER_SLV base 0x4902F000 */
+#define ALIF_PDM_76M8_CLK                                                      \
+	ALIF_CLK_CFG(CLKCTL_PER_SLV, EXPMST0_CTRL, 8U, 1U, 0U, 1U, 9U,         \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
 /* I2S0..I2S3 block clocks (DesignWare I2S, drivers/i2s/i2s_dw.c).  Re-authored
  * from the fork 7-arg ALIF_CLK_CFG(CLKCTL_PER_SLV, I2Sx_CTRL, 12U, 1U, 0U, 1U,
  * 16U) (alif_ensemble_clocks.h) into the upstream 8-arg encoding: gate bit 12 of

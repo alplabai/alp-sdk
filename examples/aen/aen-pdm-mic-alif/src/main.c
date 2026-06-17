@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * aen-pdm-mic-alif -- capture from the EVK's PDM microphones (4x MP34DT05) via the
- * Ensemble E8 LPPDM block + the vendored alif,alif-pdm DMIC driver, on the
- * E1M-AEN801 (M55-HE).  Drives the standard Zephyr DMIC API (dmic_configure /
- * dmic_trigger / dmic_read) on DT_ALIAS(alp_pdm0) = &lppdm.
+ * Ensemble E8 HP PDM block (pdm@4902d000) + the vendored alif,alif-pdm DMIC driver,
+ * on the E1M-AEN801 (M55-HE).  Drives the standard Zephyr DMIC API (dmic_configure
+ * / dmic_trigger / dmic_read) on DT_ALIAS(alp_pdm0) = &pdm.  The mics are wired to
+ * the HP PDM (per the SoM from-alif.tsv), NOT the LPPDM.
  *
  * PASS gate: the device is ready, dmic_configure + dmic_trigger(START) return 0,
  * and dmic_read returns blocks with non-zero, NON-CONSTANT samples (live acoustic
@@ -21,12 +22,18 @@
 #include <zephyr/device.h>
 #include <zephyr/audio/dmic.h>
 #include <zephyr/drivers/pdm/pdm_alif.h>
+#include <zephyr/sys/sys_io.h>
+#include <zephyr/sys/util.h>
 
 #define PDM_NODE         DT_ALIAS(alp_pdm0)
 #define SAMPLE_RATE_HZ   16000
 #define SAMPLE_BIT_WIDTH 16
-#define NUM_CHANNELS     4 /* LPPDM C0..C3 -> the 4 MP34DT05 mics */
-#define READ_TIMEOUT_MS  2000
+#define NUM_CHANNELS     4 /* HP PDM: D0->ch0/1, D2->ch4/5 = the 4 MP34DT05 mics */
+
+/* The E1M-AEN801 routes its mics to HP-PDM data lines D0 (channels 0,1) and D2
+ * (channels 4,5) -- see the board overlay / from-alif.tsv. */
+static const uint8_t mic_channels[NUM_CHANNELS] = { 0, 1, 4, 5 };
+#define READ_TIMEOUT_MS 2000
 /* 100 ms block: bytes = 2 * (rate/10) * channels */
 #define BLOCK_SIZE  (2u * (SAMPLE_RATE_HZ / 10u) * NUM_CHANNELS)
 #define BLOCK_COUNT 4
@@ -74,7 +81,7 @@ int main(void)
 {
 	const struct device *dmic = DEVICE_DT_GET(PDM_NODE);
 
-	printf("[pdm] open %s (LPPDM, %d ch @ %d Hz)\n", dmic->name, NUM_CHANNELS, SAMPLE_RATE_HZ);
+	printf("[pdm] open %s (HP PDM, %d ch @ %d Hz)\n", dmic->name, NUM_CHANNELS, SAMPLE_RATE_HZ);
 	if (!device_is_ready(dmic)) {
 		printf("[pdm] RESULT FAIL: device not ready\n[pdm] done\n");
 		return 0;
@@ -89,9 +96,9 @@ int main(void)
 	/* The alif_pdm driver takes req_chan_map_lo's low byte VERBATIM as the PDM
 	 * hardware channel-enable mask (dmic_alif_pdm_configure: channel_map =
 	 * req_chan_map_lo & 0xFF), NOT the dmic_build_channel_map() nibble encoding.
-	 * Enable HW channels 0..3 (data line D0 -> ch0/ch1 L/R, D1 -> ch2/ch3). */
+	 * Enable the mics' HW channels: D0 -> ch0/ch1, D2 -> ch4/ch5. */
 	uint32_t chan_map =
-	    PDM_MASK_CHANNEL_0 | PDM_MASK_CHANNEL_1 | PDM_MASK_CHANNEL_2 | PDM_MASK_CHANNEL_3;
+	    PDM_MASK_CHANNEL_0 | PDM_MASK_CHANNEL_1 | PDM_MASK_CHANNEL_4 | PDM_MASK_CHANNEL_5;
 	struct dmic_cfg cfg = {
 		.io =
 		    {
@@ -109,6 +116,15 @@ int main(void)
 		    },
 	};
 
+	/* The HP PDM lives in the EXPMST0 (expansion-master-0) domain: its functional
+	 * IP clock only RUNS when EXPMST0_CTRL IPCLK_FORCE (bit31) + PCLK_FORCE (bit30)
+	 * are set. The per-peripheral gate (EXPMST0_CTRL bit8, set by the driver's
+	 * clock_control_on) alone gates the source but does NOT start the IP clock, so
+	 * without this the block never samples (FIFO stays empty -> dmic_read -EAGAIN).
+	 * Reg 0x4902F000 (CLKCTL_PER_SLV + EXPMST0_CTRL) + the two force bits are from
+	 * the fork clock_control_alif_ensemble.c -- NOT invented. */
+	sys_set_bits(0x4902F000U, BIT(30) | BIT(31));
+
 	int rc = dmic_configure(dmic, &cfg);
 	printf("[pdm] dmic_configure -> %d\n", rc);
 	if (rc != 0) {
@@ -119,8 +135,8 @@ int main(void)
 	/* Configure each enabled channel's FIR/IIR/gain, then select a non-sleep
 	 * clock mode -- WITHOUT this the PDM block stays in MICROPHONE_SLEEP and the
 	 * FIFO never fills (every read would -EAGAIN). pdm_mode() is app-side API. */
-	for (uint8_t c = 0; c < NUM_CHANNELS; c++) {
-		pdm_config_channel(dmic, c);
+	for (int i = 0; i < NUM_CHANNELS; i++) {
+		pdm_config_channel(dmic, mic_channels[i]);
 	}
 	pdm_mode(dmic, PDM_MODE_STANDARD_VOICE_512_CLK_FRQ);
 	printf("[pdm] channels configured + clock mode = STANDARD_VOICE_512\n");
@@ -159,9 +175,10 @@ int main(void)
 	       (got && varying) ? "PASS" : "PARTIAL",
 	       varying ? "varying PCM captured = live audio"
 	       : got   ? "non-zero but constant (check gain)"
-	               : "FIFO empty -- SW path register-verified (clk gated on, ch0-3 enabled, "
-	                 "mode!=sleep); no mic bitstream on the DO/D1 pads -> confirm mic->LPPDM "
-	                 "pad routing (or HP pdm@4902d000)");
+	               : "FIFO empty -- HP-PDM config register-verified (ch0,1,4,5 enabled, mode set, "
+	                 "EXPMST0 IPCLK/PCLK forced, clk gated); not sampling -> the 76.8MHz audio "
+	                 "source (SE-managed CLKEN_HFOSCx2) is not enabled. Needs the se_services/MHU "
+	                 "clock request to the SE (alp-sdk doesn't wire it yet).");
 	printf("[pdm] done\n");
 	return 0;
 }
