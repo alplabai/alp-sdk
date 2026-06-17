@@ -648,8 +648,15 @@
 	 *
 	 * alif,reference-mv = DAC12 full-scale VREF in mV, consumed by the portable
 	 * backend's mv->code conversion (the E8 DAC12 full-scale is the DAC VREF, NOT
-	 * 3.3 V).  Defaulted to 900 (a DOCUMENTED PLACEHOLDER -- the exact VREF is a
-	 * TRM/bench unknown; see the binding).  BENCH-UNVERIFIED.
+	 * 3.3 V).  Set to 750: the dac_alif driver programs the DAC12 reference field
+	 * to DAC12_VREF_CONT = 0x4 (dac_alif.c CMP_COMP_REG2_DAC12_VREF_CONT =
+	 * (0x4U << 17), == hal_alif analog_ctrl.h:41 #define DAC12_VREF_CONT
+	 * (0x4U << 17)), and the analog_ctrl.h:31-40 DAC12 reference table reads
+	 * code 0x4 (100b) = 0.750 V.  So the mv->code divisor MUST be 750 to match
+	 * the reference the silicon is actually programmed to (the old 900 was a
+	 * wrong placeholder, not just unverified).  This is the REGISTER reference,
+	 * verified vs hal_alif; the ABSOLUTE on-pad mV (load/buffer/trim) is still a
+	 * TRM/bench unknown.  BENCH-UNVERIFIED (absolute pad mV).
 	 *
 	 * ADR 0017 Tier-2 (fork-driver copy; hal_alif has no DAC class driver) --
 	 * INTERIM, retires onto the fork once the nodes are repointed +
@@ -662,7 +669,7 @@
 		      <0x1A60A000 0x100>,
 		      <0x4902B000 0x100>;
 		reg-names = "dac_reg", "cmp_reg", "vbat_reg", "adc_vref";
-		alif,reference-mv = <900>;
+		alif,reference-mv = <750>; /* DAC12_VREF_CONT=0x4 -> 0.750 V (analog_ctrl.h:41) */
 		output_current = "DAC_1200UA_OUT_CUR";
 		capacitance = "DAC_8PF_CAPACITANCE";
 		status = "disabled";
@@ -675,7 +682,7 @@
 		      <0x1A60A000 0x100>,
 		      <0x4902B000 0x100>;
 		reg-names = "dac_reg", "cmp_reg", "vbat_reg", "adc_vref";
-		alif,reference-mv = <900>;
+		alif,reference-mv = <750>; /* DAC12_VREF_CONT=0x4 -> 0.750 V (analog_ctrl.h:41) */
 		output_current = "DAC_1200UA_OUT_CUR";
 		capacitance = "DAC_8PF_CAPACITANCE";
 		status = "disabled";

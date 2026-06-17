@@ -72,6 +72,18 @@
  * so we pass 0 in the sequence; this is for buffer sizing / reporting only. */
 #define ADC_RESOLUTION 12U
 
+/*
+ * ADC full-scale reference (mV) for the REPORTED raw->uV conversion.  The
+ * adc_alif driver fixes the ADC reference in hardware to ADC_VREF_CONT=0x10 with
+ * the reference divider OFF (ADC_VREF_BUF_RDIV_EN=0x0 -> RDIV=0 = 1.8 V), which
+ * matches hal_alif analog_ctrl.h:46/63.  So full-scale = 1.8 V = 1 800 000 uV
+ * over the 12-bit code span (2^12 = 4096 quanta).  This is the REGISTER
+ * reference; the absolute on-pad mV is a bench/TRM unknown, so the line is
+ * REPORTED, not gated.
+ */
+#define ADC_REFERENCE_UV 1800000U
+#define ADC_CODE_SPAN    (1U << ADC_RESOLUTION) /* 4096 */
+
 static inline uint32_t rd(uint32_t base, uint32_t off)
 {
 	return *(volatile uint32_t *)(base + off);
@@ -138,6 +150,23 @@ int main(void)
 	printk("raw sample : %d (0x%04x)  [analog pad on ch0 is a bench unknown]\n",
 	       (int)sample,
 	       (uint16_t)sample);
+
+	/*
+	 * REPORTED (not gated): the raw 12-bit code scaled to microvolts at the
+	 * driver-fixed 1.8 V reference (ADC_VREF_CONT=0x10, RDIV=0; analog_ctrl.h:
+	 * 46/63).  uV = raw * 1 800 000 / 4096.  The channel-0 pad is unrouted/open
+	 * on this batch (floats near VREF), so this is a REGISTER-derived value, not
+	 * a calibrated measurement -- absolute on-pad mV is a bench/TRM unknown.
+	 */
+	uint32_t meas_uv =
+	    ((uint32_t)(sample & (ADC_CODE_SPAN - 1U)) * ADC_REFERENCE_UV) / ADC_CODE_SPAN;
+
+	printk("REPORTED  measured = %u uV (raw %u * %u uV / %u; 1.8 V VREF, "
+	       "pad open)\n",
+	       meas_uv,
+	       (unsigned)(sample & (ADC_CODE_SPAN - 1U)),
+	       ADC_REFERENCE_UV,
+	       ADC_CODE_SPAN);
 
 	/*
 	 * Register readback.  After a completed single-shot the driver has cleared

@@ -41,6 +41,29 @@ io-channel-cells:
 
 properties:
 
+  alif,reference-mv:
+    type: int
+    default: 1800
+    description: |
+      ADC full-scale reference voltage, in millivolts.  SELF-DOCUMENTATION /
+      reporting only: the adc_alif driver does NOT read this property -- it fixes
+      the ADC reference in hardware.
+
+      The driver programs ADC_VREF_CONT = 0x10 with the reference divider OFF
+      (ADC_VREF_BUF_RDIV_EN = (0x0U << 16)):
+        adc_alif.c ADC_VREF_CONT        = (0x10U << 10)
+        adc_alif.c ADC_VREF_BUF_RDIV_EN = (0x0U << 16)
+      identical to hal_alif analog_ctrl.h:63 #define ADC_VREF_CONT (0x10U << 10)
+      and analog_ctrl.h:46 #define ADC_VREF_BUF_RDIV_EN (0x0U << 16).  Per the
+      analog_ctrl.h:43-46,60-63 tables, RDIV=0 selects Vref = 1.8 V and
+      ADC_VREF_CONT code 0x10 is the 1.8 V default (the ±100 mV trim midpoint).
+      So the 12-bit ADC full-scale is 1.8 V.
+
+      Register value verified vs hal_alif (analog_ctrl.h:46/63 / adc_alif.c);
+      the ABSOLUTE on-pad mV is bench-pending and is NOT claimed here.  A
+      consumer that wants to convert a raw code to millivolts can read this
+      property (e.g. uV = raw * 1800000 / 4096 for a 12-bit instance).
+
   sample-width:
     type: int
     default : 16
