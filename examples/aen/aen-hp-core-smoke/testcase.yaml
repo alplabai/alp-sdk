@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the M55-HP first-light smoke on the REAL HP board
+# target, BENCH-VERIFIED PASS on E8 2026-06-17: SES-booted as an M55_HP ATOC, the
+# HP core reached main() and ran an advancing SRAM0 liveness beacon (the second
+# M55's first light).
+#
+# This scenario compile-checks the HP image on the AEN801 M55-HP board (the only
+# alp-sdk app targeting the SECOND M55).  It is intentionally filtered OUT of the
+# native_sim PR gate: the only platform allowed is the HP board, which the
+# native_sim twister run never selects, so it adds a board-target build check
+# without slowing the gate.
+#
+# NOTE: the platform id below MUST match the board .yaml `identifier` exactly
+# (zephyr/boards/alp/e1m_aen801_m55_hp/..._rtss_hp.yaml) or twister silently
+# skips the scenario.
+
+sample:
+  name: aen-hp-core-smoke
+  description: |
+    M55-HP (RTSS-HP) first-light smoke for the E1M-AEN801 (Alif Ensemble E8): the
+    first alp-sdk image on the SECOND M55, SES-booted as an M55_HP ATOC
+    (loadAddress 0x50000000).  Proves the HP core runs by writing an advancing
+    liveness beacon to global SRAM0, read over the system AXI/HE debug AP.
+    BENCH-VERIFIED PASS on E8 (2026-06-17).
+
+tests:
+  alp_sdk.examples.aen.hp_core_smoke.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - rtss-hp
+    build_only: true   # the HP first-light run is a Flow-D ATOC flash, not a CI run.
