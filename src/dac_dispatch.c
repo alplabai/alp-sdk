@@ -65,8 +65,7 @@ alp_dac_t *alp_dac_open(const alp_dac_config_t *cfg)
 	 * NOT_READY from the backend open() instead (mirrors the ADC dispatch's
 	 * capability gate; the DAC registry migration in #33 dropped the old
 	 * wrapper-array channel bound this restores). */
-	if ((ALP_SOC_DAC_COUNT > 0) &&
-	    (uint32_t)cfg->channel_id >= (uint32_t)ALP_SOC_DAC_COUNT) {
+	if ((ALP_SOC_DAC_COUNT > 0) && (uint32_t)cfg->channel_id >= (uint32_t)ALP_SOC_DAC_COUNT) {
 		alp_z_set_last_error(ALP_ERR_INVAL);
 		return NULL;
 	}
