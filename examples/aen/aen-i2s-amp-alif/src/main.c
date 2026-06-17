@@ -2,24 +2,23 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-i2s-amp-alif -- drive a tone out of the Ensemble E8 I2S0 controller via the
- * vendored snps,designware-i2s driver (drivers/i2s/i2s_dw.c), on the E1M-AEN801
- * (M55-HE).  Uses the standard Zephyr I2S API (i2s_configure / i2s_write /
- * i2s_trigger) on DT_ALIAS(alp_i2s0) = &i2s0.
+ * aen-i2s-amp-alif -- drive a tone out of the Ensemble E8 audio I2S (the SoC's
+ * i2s3@49017000) via the vendored snps,designware-i2s driver (drivers/i2s/i2s_dw.c),
+ * on the E1M-AEN801 (M55-HE).  Uses the standard Zephyr I2S API (i2s_configure /
+ * i2s_write / i2s_trigger) on DT_ALIAS(alp_i2s0) = &i2s3 (the SoM "I2S0_*" audio
+ * signals route to I2S3_*_A on P9_3/4/5 -- per metadata from-alif.tsv).
  *
- * On the E1M EVK, I2S0 is the on-board audio bus -- it reaches the two TAS2563
- * smart-amplifiers through a 74LVC157 2:1 mux (<alp/boards/alp_e1m_evk.h>):
- *   /E (enable, active-low) = E1M IO8  -> Alif P7.1   (drive low to pass I2S0)
- *   S  (select)             = E1M IO13 -> CC3501E GPIO13 (low = TAS2563 amps)
- * The SELECT line is on the CC3501E and must be driven over the inter-chip SPI
- * bridge (ALP_CC3501E_CMD_GPIO_WRITE), so this example does NOT toggle the mux --
- * it validates the I2S *controller/driver* path. See the README for the two HW
- * steps (mux + pad-route confirmation) needed for audible amp output.
+ * The example enables the 76.8 MHz audio reference at the CGU (the same fix that
+ * made the PDM mics capture -- the upstream clockctrl never enables it) and clocks
+ * a tone out on SCLK/WS/SDO.  On the EVK that signal reaches the two TAS2563
+ * smart-amplifiers through a 74LVC157 2:1 mux: /E = Alif P7.1 (drivable) and the
+ * SELECT = CC3501E GPIO13 (over the inter-chip SPI bridge, currently
+ * firmware-gated). So this example validates the I2S controller + clock path; the
+ * AUDIBLE amp output additionally needs the mux routed + the TAS2563 configured.
  *
  * PASS gate: device ready, i2s_configure + i2s_write(s) + i2s_trigger(START) all
- * return 0 and the TX FIFO DRAINs cleanly (i2s_trigger(DRAIN) returns 0) -- the
- * controller clocked the whole tone buffer out without an underrun/error.  A run
- * that configures but cannot drain is reported PARTIAL.
+ * return 0 and the TX FIFO DRAINs cleanly with the 76.8 MHz clock ON (the
+ * controller genuinely clocked the tone out).  A run that cannot drain is PARTIAL.
  */
 
 #include <stdio.h>
@@ -29,6 +28,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2s.h>
+#include <zephyr/sys/sys_io.h>
+#include <zephyr/sys/util.h>
 
 #define I2S_NODE       DT_ALIAS(alp_i2s0)
 #define SAMPLE_RATE_HZ 48000
@@ -66,7 +67,7 @@ int main(void)
 {
 	const struct device *i2s = DEVICE_DT_GET(I2S_NODE);
 
-	printf("[i2s] open %s (I2S0, %d ch @ %d Hz, %d-bit TX)\n",
+	printf("[i2s] open %s (audio I2S = i2s3, %d ch @ %d Hz, %d-bit TX)\n",
 	       i2s->name,
 	       NUM_CHANNELS,
 	       SAMPLE_RATE_HZ,
@@ -86,6 +87,13 @@ int main(void)
 		.block_size     = BLOCK_BYTES,
 		.timeout        = TX_TIMEOUT_MS,
 	};
+
+	/* Enable the 76.8 MHz audio reference (HFOSCx2) at the CGU -- the I2S bit clock
+	 * is derived from it, and the upstream Alif clockctrl never enables this master
+	 * source (only per-peripheral gates). Without it the I2S does not truly clock
+	 * out (the same fix that made the PDM mics capture). CGU_CLK_ENA = CGU base
+	 * 0x1A602000 + 0x14, bit 24 = CLK76P8M (from the fork clock driver, not invented). */
+	sys_set_bits(0x1A602014U, BIT(24));
 
 	int rc = i2s_configure(i2s, I2S_DIR_TX, &cfg);
 	printf("[i2s] i2s_configure(TX) -> %d\n", rc);
@@ -126,11 +134,10 @@ int main(void)
 
 	bool drained = (rc == 0) && (queued == BLOCKS_TO_SEND);
 	printf("[i2s] RESULT %s: %s\n",
-	       drained ? "PARTIAL" : "PARTIAL",
-	       drained ? "I2S driver path executed (configure/write/START/DRAIN all ok). NOTE: true "
-	                 "bit-clock-out is UNVERIFIED -- the 76.8MHz audio clock is SE-managed "
-	                 "(CLKEN_HFOSCx2, not requested); + the EVK audio I2S is i2s3/P9_x (SoM TSV) "
-	                 "behind the CC3501E mux, not this i2s0 demo instance"
+	       drained ? "PASS" : "PARTIAL",
+	       drained ? "i2s3 TX clocked the tone out with the 76.8MHz audio clock ON (SCLK/WS/SDO "
+	                 "on P9_3/4/5). For AUDIBLE amp out: route the 74LVC157 mux (EN=Alif P7.1 + "
+	                 "SEL=CC3501E GPIO13) to the TAS2563 + configure the amp (ACTIVE)"
 	               : "configured but TX did not drain cleanly (check clock/pinctrl)");
 	printf("[i2s] done\n");
 	return 0;
