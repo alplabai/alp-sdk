@@ -4,35 +4,41 @@
  *
  * aen-camera-regcheck overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
  *
- * The CAMERA CAPTURE stack drivers are now PORTED to the v4.4 video API (the
- * former CONFIG_ALP_VIDEO_ALIF_BROKEN gate is RETIRED).  This overlay enables
- * the nodes whose drivers INSTANTIATE cleanly on v4.4:
- *   - dphy  (snps,designware-dphy  @ 0x49033000) -- the MIPI D-PHY
- *   - csi   (snps,designware-csi   @ 0x49033000) -- the MIPI CSI-2 bridge
- *   - arx3a0 (onnn,arx3a0, i2c2 @ 0x36)          -- the MIPI CSI-2 sensor
+ * The CAMERA CAPTURE stack drivers are PORTED to the v4.4 video API (the former
+ * CONFIG_ALP_VIDEO_ALIF_BROKEN gate is RETIRED).  This overlay enables the full
+ * pipe so every node BINDS on silicon:
+ *   - dphy   (snps,designware-dphy  @ 0x49033000) -- the MIPI D-PHY
+ *   - csi    (snps,designware-csi   @ 0x49033000) -- the MIPI CSI-2 bridge
+ *   - cam    (alif,cam              @ 0x49030000) -- the CPI capture controller
+ *   - arx3a0 (onnn,arx3a0, i2c2 @ 0x36)           -- the MIPI CSI-2 sensor
  *
- * The CPI controller (cam, alif,cam @ 0x49030000) is left status="disabled":
- * its driver TU COMPILES against v4.4, but INSTANTIATING it needs two DT facts
- * the upstream-Zephyr-derived alp-sdk board does NOT carry:
- *   1. an itcm/dtcm `global-base` property -- video_alif.c's AXI buffer path
- *      calls hal_alif local_to_global() (soc_memory_map.h), which reads
- *      DT_PROP(itcm/dtcm, global_base).  The fork board DTS carries it; upstream
- *      Zephyr's ensemble_rtss_he.dtsi does NOT (a hal_alif-over-upstream gap,
- *      mirroring the eth local_to_global path).  The SoC TCM global alias is NOT
- *      invented here (never-invent-values doctrine).
- *   2. a cam->csi media-controller endpoint graph (the CPI DEVICE_DT_GET's its
- *      remote endpoint), plus the bench-unknown CSI lane/clock wiring.
- * Both are bench/HW-staging facts, not v4.4-port facts; CAPTURE is HW-blocked on
- * this batch anyway (no sensor wired).  cam stays disabled until those land
- * (task #21).
+ * Two DT facts (formerly the cam-disable blockers) are now supplied:
+ *   1. itcm/dtcm `global_base` -- video_alif.c's AXI buffer path calls hal_alif
+ *      local_to_global() (soc_memory_map.h), which reads DT_PROP(itcm/dtcm,
+ *      global_base).  Upstream Zephyr's arm,itcm/arm,dtcm bindings have no such
+ *      prop, so re-`compatible` the nodes onto the alp-sdk alif,itcm/alif,dtcm
+ *      bindings (which declare global_base) and set the E8 RTSS-HE global views
+ *      (ITCM 0x58000000, DTCM 0x58800000), transcribed from the Apache-2.0
+ *      zephyr_alif fork ensemble_rtss_he.dtsi -- the same values the NPU + eth
+ *      local_to_global paths use.
+ *   2. the cam<->csi<->arx3a0 media-controller endpoint graph (the CPI
+ *      DEVICE_DT_GET's its remote endpoint).  The graph topology + the arx3a0
+ *      CSI-2 sensor params (2 data-lanes, clock-lane 0, 400 MHz link) follow the
+ *      standard Zephyr video-interfaces pattern + the fork arx3a0 sample;
+ *      re-authored here, not copied.
  *
- * The i2c2 bus the ARX3A0 hangs off is enabled too (its control plane).
+ * SCOPE: this proves the pipe BINDS (DT_HAS_*_ENABLED + device_is_ready).  LIVE
+ * CAPTURE stays HW-blocked on this batch (no sensor wired): the cam XVCLK pad-mux
+ * and the arx3a0 SoM I2C/reset/power routing are bench-unknown -- OMITTED, not
+ * invented.  arx3a0 device_is_ready() will be FALSE (no sensor answers on the
+ * bus); the app reports bind-vs-ready separately so that is still a RESULT PASS.
  */
 
+#include <zephyr/dt-bindings/video/video-interfaces.h>
+
 /*
- * RAM-run: the SoC `select` puts code in XIP; retarget ROM to ITCM so the image
- * links + runs from RAM (J-Link loadbin+go, no reset). PATH-REFERENCE form
- * (&itcm) -- the phandle-array form makes FLASH_SIZE=0 and overflows the link.
+ * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
+ * form makes FLASH_SIZE=0 and overflows the link).
  */
 / {
 	chosen {
@@ -41,18 +47,76 @@
 	};
 };
 
+/*
+ * global_base for local_to_global() -- E8 RTSS-HE global TCM aliases (fork
+ * ensemble_rtss_he.dtsi); same values as the NPU overlay.
+ */
+&itcm {
+	compatible = "alif,itcm";
+	global_base = <0x58000000>;
+};
+
+&dtcm {
+	compatible = "alif,dtcm";
+	global_base = <0x58800000>;
+};
+
 &dphy {
 	status = "okay";
 };
 
-/*
- * cam intentionally LEFT DISABLED -- driver ported to v4.4 + compiles, but
- * instantiation needs the fork-only itcm/dtcm `global-base` (absent upstream)
- * + a cam->csi endpoint graph.  See the header note above.  Task #21.
- */
-
 &csi {
 	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/* CSI-2 input from the arx3a0 sensor. */
+		port@1 {
+			reg = <1>;
+			csi2_ep_in1: endpoint {
+				bus-type = <VIDEO_BUS_TYPE_CSI2_DPHY>;
+				data-lanes = <1 2>;
+				clock-lane = <0>;
+				remote-endpoint-label = "arx3a0_csi2_ep_out1";
+			};
+		};
+
+		/* Parallel output to the CPI (cam) controller. */
+		port@2 {
+			reg = <2>;
+			csi2_ep_out: endpoint {
+				bus-type = <VIDEO_BUS_TYPE_PARALLEL>;
+				remote-endpoint-label = "cam_csi2_ep_in";
+			};
+		};
+	};
+};
+
+&cam {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/* Parallel input from the CSI-2 bridge. */
+		port@0 {
+			reg = <0>;
+			cam_csi2_ep_in: endpoint {
+				remote-endpoint-label = "csi2_ep_out";
+			};
+		};
+
+		/* Video-buffer (memory) output -- the application sink. */
+		port@1 {
+			reg = <1>;
+			cam_mem_ep_out: endpoint {
+				remote-endpoint-label = "application";
+			};
+		};
+	};
 };
 
 &i2c2 {
@@ -61,4 +125,14 @@
 
 &arx3a0 {
 	status = "okay";
+
+	port {
+		arx3a0_csi2_ep_out1: endpoint {
+			bus-type = <VIDEO_BUS_TYPE_CSI2_DPHY>;
+			data-lanes = <1 2>;
+			clock-lane = <0>;
+			link-frequencies = <400000000>;
+			remote-endpoint-label = "csi2_ep_in1";
+		};
+	};
 };
