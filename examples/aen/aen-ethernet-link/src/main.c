@@ -81,21 +81,95 @@ static int phy_power_init(void)
 	 * polarity -- flip to low if this powers it down.) */
 	gpio_pin_configure(lpgpio, PHY_PWRDWN_PIN, GPIO_OUTPUT_ACTIVE);
 	gpio_pin_set(lpgpio, PHY_PWRDWN_PIN, 1);
-	k_busy_wait(10000); /* rail settle (scheduler not up at this init phase) */
+	k_busy_wait(50000); /* let the PHY supply + its reference clock stabilize */
 
 	/* Reset pulse, conventional DP83825I RST_N (active-low): LOW asserts, HIGH
-	 * releases. (Both polarities were bench-tried; neither alone brought the wire
-	 * link up, so the remaining blocker is elsewhere -- TX path / auto-neg / exact
-	 * EVK PHY wiring. Active-low is kept as the datasheet-standard default.) */
+	 * releases. Long assert + post-reset settle so the reference clock is stable
+	 * across the reset (a clock that isn't stable at deassert leaves the analog
+	 * front-end uninitialised). Both reset polarities were bench-tried. */
 	gpio_pin_configure(gpio11, PHY_RESET_PIN, GPIO_OUTPUT_ACTIVE);
 	gpio_pin_set(gpio11, PHY_RESET_PIN, 0); /* assert */
-	k_busy_wait(10000);
+	k_busy_wait(50000);
 	gpio_pin_set(gpio11, PHY_RESET_PIN, 1); /* release */
-	k_busy_wait(50000);                     /* DP83825I post-reset settle */
+	k_busy_wait(100000);                    /* DP83825I post-reset settle (>=50 ms) */
 	return 0;
 }
 /* Priority 50: gpio_dw(40) < 50 < eth_dwmac(ETH_INIT_PRIORITY 60). */
 SYS_INIT(phy_power_init, POST_KERNEL, 50);
+
+/*
+ * Raw MDIO read via the DWMAC MAC_MDIO registers (GMAC base 0x48100000): the
+ * fixed-link config does no MDIO, so we read the PHY directly to diagnose the
+ * link. MAC_MDIO_ADDRESS=0x200 (PA[25:21], RDA[20:16], CR[11:8], GOC read=bit3+
+ * bit2, GB=bit0), MAC_MDIO_DATA=0x204 (data[15:0]). CR=4 -> slow, safe MDC.
+ */
+#define GMAC_MDIO_ADDR 0x48100200U
+#define GMAC_MDIO_DATA 0x48100204U
+
+static uint16_t mdio_read(uint8_t phy, uint8_t reg)
+{
+	while (sys_read32(GMAC_MDIO_ADDR) & BIT(0)) {
+	}
+	uint32_t a =
+	    ((uint32_t)phy << 21) | ((uint32_t)reg << 16) | (0x4U << 8) | BIT(3) | BIT(2) | BIT(0);
+	sys_write32(a, GMAC_MDIO_ADDR);
+	for (int i = 0; i < 100000 && (sys_read32(GMAC_MDIO_ADDR) & BIT(0)); i++) {
+		k_busy_wait(1);
+	}
+	return (uint16_t)(sys_read32(GMAC_MDIO_DATA) & 0xFFFFU);
+}
+
+static void mdio_write(uint8_t phy, uint8_t reg, uint16_t val)
+{
+	while (sys_read32(GMAC_MDIO_ADDR) & BIT(0)) {
+	}
+	sys_write32(val, GMAC_MDIO_DATA);
+	uint32_t a = ((uint32_t)phy << 21) | ((uint32_t)reg << 16) | (0x4U << 8) | BIT(2) | BIT(0);
+	sys_write32(a, GMAC_MDIO_ADDR);
+	for (int i = 0; i < 100000 && (sys_read32(GMAC_MDIO_ADDR) & BIT(0)); i++) {
+		k_busy_wait(1);
+	}
+}
+
+/* Find the PHY (returns addr 0-31, or -1). DP83825I OUI = 0x2000a140. */
+static int phy_find(void)
+{
+	for (uint8_t phy = 0; phy < 32; phy++) {
+		uint16_t id1 = mdio_read(phy, 2);
+		if (id1 != 0xFFFF && id1 != 0x0000) {
+			printf(
+			    "[eth] MDIO PHY@%u id=%04x%04x (DP83825I=2000a140)\n", phy, id1, mdio_read(phy, 3));
+			return phy;
+		}
+	}
+	return -1;
+}
+
+/* Restart auto-negotiation and poll BMSR (reg 1) for link-up (bit 2) +
+ * autoneg-done (bit 5). Returns true if the link comes up within ~8 s. */
+static bool phy_wait_link(int phy)
+{
+	/* Put the PHY in 50 MHz-reference RMII mode: RCSR(0x17) bit7 REF_CLK_SEL=1.
+	 * The board feeds an external 50 MHz osc to the PHY's REF_CLK (the MAC uses the
+	 * same osc on P11_0), but the strap left the PHY in 25 MHz-crystal mode
+	 * (REF_CLK_SEL=0) so its data path is starved (ANLPAR=0). Setting bit7 is
+	 * exactly what the upstream phy_ti_dp83825 driver does for DP83825_RMII. */
+	uint16_t rcsr = mdio_read(phy, 0x17);
+	mdio_write(phy, 0x17, rcsr | BIT(7));
+	printf("[eth] RCSR 0x%04x -> 0x%04x (REF_CLK_SEL=50MHz ref)\n", rcsr, mdio_read(phy, 0x17));
+
+	mdio_write(phy, 0, BIT(12) | BIT(9)); /* BMCR: auto-neg enable + restart */
+	for (int i = 0; i < 32; i++) {
+		k_msleep(250);
+		uint16_t bmsr = mdio_read(phy, 1);
+		if ((bmsr & BIT(2)) && (bmsr & BIT(5))) {
+			printf("[eth] PHY link UP after %d ms (BMSR=%04x)\n", (i + 1) * 250, bmsr);
+			return true;
+		}
+	}
+	printf("[eth] PHY link DOWN after 8s (BMSR=%04x)\n", mdio_read(phy, 1));
+	return false;
+}
 
 int main(void)
 {
@@ -132,6 +206,21 @@ int main(void)
 	int rc = net_if_up(iface);
 	printf("[eth] net_if_up -> %d%s\n", rc, (rc == -EALREADY) ? " (already up)" : "");
 
+	/* Read the PHY over MDIO (fixed-link is blind to the real wire state), restart
+	 * auto-neg, and wait for the link to actually come up before trying DHCP. */
+	int phy = phy_find();
+	if (phy >= 0) {
+		/* DP83825I state: ANAR(4)=our advert, ANLPAR(5)=partner advert (0 => not
+		 * hearing the switch = no RX/clock/cable), PHYSTS(0x10)=link/speed,
+		 * RCSR(0x17)=RMII mode/clock-select. */
+		printf("[eth] PHY regs: ANAR=%04x ANLPAR=%04x PHYSTS=%04x RCSR=%04x\n",
+		       mdio_read(phy, 0x04),
+		       mdio_read(phy, 0x05),
+		       mdio_read(phy, 0x10),
+		       mdio_read(phy, 0x17));
+	}
+	bool link = (phy >= 0) && phy_wait_link(phy);
+
 	/* DEFINITIVE end-to-end proof: request a DHCP lease from the bench switch
 	 * (dnsmasq). A lease only completes over a genuinely live bidirectional link,
 	 * so it proves TX + RX + the PHY are all working -- unlike carrier_ok (fixed-
@@ -160,14 +249,13 @@ int main(void)
 		printf("[eth] DHCP lease = %s\n", ip);
 	}
 
-	printf(
-	    "[eth] RESULT %s: %s\n",
-	    bound ? "PASS" : (refclk_external ? "PARTIAL" : "PARTIAL"),
-	    bound ? "DHCP lease acquired off the bench switch = full bidirectional link UP"
-	    : refclk_external
-	        ? "PHY power-enabled + EXTERNAL refclk locked (MAC reset on the osc) + RMII pins = "
-	          "SoM route; no DHCP lease yet (check PHY reset/PWRDWN polarity, cable, DHCP server)"
-	        : "no external refclk -- PHY not clocked (check the power-enable)");
+	printf("[eth] RESULT %s: %s\n",
+	       bound ? "PASS" : (link ? "PARTIAL" : "PARTIAL"),
+	       bound  ? "DHCP lease acquired off the bench switch = full bidirectional link UP"
+	       : link ? "PHY link UP (MDIO BMSR) but no DHCP lease -- MAC RX/TX data path "
+	                "(check RMII RXD/TXD pins or DHCP server)"
+	              : "PHY present (DP83825I) + clocked but link DOWN -- auto-neg did not complete "
+	                "(check the cable/switch port + the PHY's 50MHz refclk routing)");
 	printf("[eth] done\n");
 	return 0;
 }

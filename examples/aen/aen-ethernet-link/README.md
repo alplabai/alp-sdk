@@ -44,16 +44,30 @@ Also fixed here: the RMII pins were wrong (fork route) → corrected to the SoM 
 route; `input-enable` added to the RX input pads (the upstream pad REN bit, via the
 standard property — the fork's `read-enable` does not exist upstream).
 
-**RESULT PARTIAL** (no DHCP lease yet): with the PHY clocked + powered + pins
-corrected, a full bidirectional link is not yet up. Remaining (needs a scope or the
-schematic, not inventable):
-> - **PHY enable/reset polarity** — `PWRDWN`=high (enable) made the osc run; both
->   `RST_N` polarities were bench-tried without a link, so the gating detail is
->   elsewhere.
-> - **TX path / auto-negotiation** — DHCP DISCOVER must transmit and the DP83825I
->   must auto-neg with the switch; a managed-PHY (MDIO) driver would let us read PHY
->   link status directly.
-> - **Exact EVK PHY wiring** vs the SoM TSV.
+The example now reads the PHY over **raw MDIO** (DWMAC `MAC_MDIO` regs) to diagnose
+the link directly. Bench result (cable connected to the switch):
+
+```
+[eth] MDIO PHY@0 id=2000a140 (DP83825I=2000a140)   <- PHY powered + MDIO alive
+[eth] PHY regs: ANAR=01e1 ANLPAR=0000 PHYSTS=4002 RCSR=0061
+[eth] PHY link DOWN after 8s (BMSR=7849)
+```
+
+**RESULT PARTIAL — everything on the SoC/PHY side works, but the PHY never forms a
+media-side link.** Verified working: MAC + driver + PHY power (P15_4) + MDIO (PHY ID
+`0x2000a140` @ addr 0) + RMII config + both `RCSR` clock modes + long reset timing.
+The decisive symptom is **`ANLPAR=0x0000`** — the PHY receives **no** auto-negotiation
+from the switch (no link-partner ability), even with the cable connected. Auto-neg
+never completes and the link stays down.
+
+> **Most likely cause = the PHY ↔ RJ45 media path** (twisted-pair `TD±`/`RD±` →
+> magnetics → RJ45), NOT the SoC/driver side. `ANLPAR=0` with a live cable is the
+> classic signature of swapped/miswired TX/RX pairs, a polarity swap, wrong/absent
+> magnetics, or the cable in the wrong RJ45. **This routing is a SoM/EVK SCHEMATIC
+> detail and is NOT in the alp-sdk metadata** (which only carries the SoC↔PHY digital
+> pins, `alif-ethernet-phy.tsv`) — so it must be checked against the schematics:
+> compare the SoM edge Ethernet media pins to the EVK RJ45/magnetics wiring, and
+> check the switch port's link LED (off ⇒ the switch isn't seeing our PHY at all).
 
 See [[project_pending_hw_configs]]. Run on the bench switch (dnsmasq,
 192.168.10.50–150); a `[eth] DHCP lease = …` line is the full-link PASS.

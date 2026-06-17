@@ -34,17 +34,19 @@
 
 &pinctrl {
 	pinctrl_eth: pinctrl_eth {
-		/* RMII inputs (REFCLK + RX) -- input-enable sets the pad REN bit so the
-		 * RX/refclk input buffers sense. */
+		/* RMII inputs (REFCLK + RX) + MDIO (bidirectional, read during MDIO
+		 * transactions) -- input-enable sets the pad REN bit so they sense.
+		 * MDC/MDIO = P11_2/P11_1 (SoM TSV) let us read the PHY status registers. */
 		group0 {
 			pinmux = <PIN_P11_0__ETH_REFCLK_B>, <PIN_P11_3__ETH_RXD0_B>,
-				 <PIN_P1_1__ETH_RXD1_C>, <PIN_P6_7__ETH_CRS_DV_A>;
+				 <PIN_P1_1__ETH_RXD1_C>, <PIN_P6_7__ETH_CRS_DV_A>,
+				 <PIN_P11_1__ETH_MDIO_B>;
 			input-enable;
 		};
-		/* RMII outputs (TX). */
+		/* RMII outputs (TX) + MDC (MDIO clock). */
 		group1 {
 			pinmux = <PIN_P10_4__ETH_TXD0_B>, <PIN_P10_5__ETH_TXD1_B>,
-				 <PIN_P1_5__ETH_TXEN_C>;
+				 <PIN_P1_5__ETH_TXEN_C>, <PIN_P11_2__ETH_MDC_B>;
 		};
 	};
 };
