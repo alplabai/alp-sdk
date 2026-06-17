@@ -15,7 +15,9 @@ on:
       - 'README.md'
       - 'docs/**'
       - 'include/**'
+      - 'metadata/sdk_version.yaml'
       - 'scripts/check_doc_drift.py'
+      - 'scripts/check_version_doc_sync.py'
       - '.github/workflows/pr-doc-drift.yml'
   push:
     branches: [main]
@@ -23,6 +25,7 @@ on:
       - 'README.md'
       - 'docs/**'
       - 'include/**'
+      - 'metadata/sdk_version.yaml'
   workflow_dispatch:
 
 concurrency:
@@ -45,3 +48,6 @@ jobs:
 
       - name: Doc-drift check (dead symbols + docs index)
         run: python3 scripts/check_doc_drift.py
+
+      - name: Version-doc sync (README labels vs sdk_version.yaml)
+        run: python3 scripts/check_version_doc_sync.py

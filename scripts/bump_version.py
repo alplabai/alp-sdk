@@ -39,6 +39,9 @@ What this touches:
     metadata/sdk_version.yaml       -- the declared version.
     CHANGELOG.md                    -- slice [Unreleased] into the new version section.
     docs/abi/v<MAJOR.MINOR>-snapshot.json  -- regenerated.
+    README.md                       -- the current-state version labels (e.g.
+                                       "Mostly pre-silicon (`vX.Y`)", "vX.Y ramp");
+                                       enforced by scripts/check_version_doc_sync.py.
 
 What it does NOT touch:
 
@@ -61,6 +64,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SDK_VERSION_YAML = REPO / "metadata" / "sdk_version.yaml"
 CHANGELOG = REPO / "CHANGELOG.md"
+README = REPO / "README.md"
 ABI_DIR = REPO / "docs" / "abi"
 ABI_SNAPSHOT_TOOL = REPO / "scripts" / "abi_snapshot.py"
 
@@ -120,6 +124,36 @@ def _next_candidate(version: str) -> str:
     return f"{major}.{minor + 1}.0"
 
 
+def update_readme_version_labels(current: str, new_version: str, dry_run: bool) -> None:
+    """Bump the README's current-state version labels to the new MAJOR.MINOR.
+
+    Touches ONLY the anchored current-state labels (the same ones
+    scripts/check_version_doc_sync.py enforces) -- the historical "landed in
+    vX" / "from vX onward" references are correct and left untouched.  Keep
+    these substitutions in lockstep with that check's _ANCHORS.
+    """
+    old_mm = ".".join(current.split(".")[:2])
+    new_mm = ".".join(new_version.split(".")[:2])
+    if old_mm == new_mm:
+        return
+    text = README.read_text(encoding="utf-8")
+    subs = [
+        (rf"(Mostly pre-silicon \(`v){re.escape(old_mm)}(`\))", rf"\g<1>{new_mm}\g<2>"),
+        (rf"(\*\*v){re.escape(old_mm)}( ramp — paper-correct)", rf"\g<1>{new_mm}\g<2>"),
+    ]
+    total = 0
+    for pat, repl in subs:
+        text, n = re.subn(pat, repl, text)
+        total += n
+    if total == 0:
+        print(f"  skipped {README.relative_to(REPO)}: no current-state v{old_mm} labels found")
+        return
+    if not dry_run:
+        README.write_text(text, encoding="utf-8")
+    print(f"  updated {README.relative_to(REPO)}: {total} current-state label(s) "
+          f"v{old_mm} -> v{new_mm}")
+
+
 def regenerate_abi_snapshot(new_version: str, dry_run: bool) -> None:
     major, minor, _patch, _pre = parse_version(new_version)
     snapshot_path = ABI_DIR / f"v{major}.{minor}-snapshot.json"
@@ -151,6 +185,7 @@ def main() -> int:
     print()
     update_sdk_version_yaml(args.to, args.dry_run)
     slice_changelog(args.to, args.dry_run)
+    update_readme_version_labels(current, args.to, args.dry_run)
     regenerate_abi_snapshot(args.to, args.dry_run)
     print()
     print("Next steps:")
