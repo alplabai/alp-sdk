@@ -215,6 +215,16 @@ secure-boot verification — always write both consistent blobs.
 > from `app-package-map.txt` → `RSetType 2`/`r`/`g` → RAM-console read-back). It writes
 > the **single self-contained `AppTocPackage.bin`** (our ITCM-load-via-ATOC apps), not
 > the slot0-XIP two-blob variant above.
+>
+> **Two-blob (slot0-XIP) helper — validated 2026-06-17.** For an app linked into MRAM
+> slot0 (a real NPU model that overflows ITCM), `scripts/bench/aen/flash-jlink-mramxip.sh`
+> runs the two-blob flow (app → `0x80010000` + the signed ATOC → its parsed address). Two
+> facts the bench pinned down: the app entry's `mramAddress` is the **full** address
+> `0x80010000` (the `0x10000` *offset* gives SETOOLS `Invalid Global Address`), and the
+> image needs **`CONFIG_USE_DT_CODE_PARTITION=y`** so it links at the slot0 offset
+> (`0x8001xxxx` reset vector) instead of the MRAM base (`0x8000xxxx`, which faults). Proven
+> by `examples/aen/aen-npu-inference-person-mram` (the real `person_detect` MobileNet run
+> from MRAM → `RESULT PASS`).
 
 ## 3. Board HW requirements found on the bench
 
