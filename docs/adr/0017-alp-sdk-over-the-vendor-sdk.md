@@ -57,8 +57,10 @@ Every AEN peripheral falls into exactly one tier:
   **eth_dwmac platform glue** (upstream-shaped glue over the **upstream**
   `eth_dwmac` core via `dwmac_bus_init`/`dwmac_platform_init` — flavor *b*; the
   fork forked the DWMAC *core* itself, so consuming it would violate
-  one-upstream-base). Each Tier-1.5 driver ships clearly marked *interim* until
-  bench-verified on E8 silicon, then promotes to permanent.
+  one-upstream-base). Each Tier-1.5 driver shipped marked *interim* until
+  bench-verified on E8 silicon, then promotes to permanent; the UTIMER and
+  eth_dwmac-glue drivers are now **bench-verified PASS on E8** (2026-06-17) and
+  promoted.
 
 - **Tier 2 — vendor-SDK-consumed.** Alif-specific peripherals upstream lacks
   **and** for which a genuine vendor *driver* exists to consume: the Alif LPI2C1
@@ -90,18 +92,24 @@ Bench-verification on real E8 silicon remains the acceptance gate for every tier
     already Tier-1 `i2c_dw`. Retiring loses no capability; the on-module
     RTC/TMP112 reads go **Tier-3 (SE)** (tasks #16/#17). The one driver whose
     removal ADR 0017-as-written genuinely justified.
-  - **#149 eth glue — Tier-1.5, kept** (interim until E8 bench). Fork-consume is a
+  - **#149 eth glue — Tier-1.5, kept** (bench-verified PASS on E8, 2026-06-17 —
+    end-to-end Ethernet with a DHCP lease and ARP-reachable; the GMAC DMA
+    descriptor rings + net_buf pool must live in global SRAM0, not the DMA-invisible
+    M55 DTCM). Fork-consume is a
     trap (the fork forked the DWMAC *core*); retiring it is an **unconditional**
     silent Ethernet loss on the upstream-only build (upstream `Kconfig.dwmac`
     offers only an STM32-gated platform and an `MMU`-gated path — the M55 has an
     MPU, not an MMU — and `hal_alif` ships no GMAC library).
   - **#150 SPI (DWC-SSI) — Tier-2 interim → retire onto the fork.** A genuine
-    fork-driver copy (no `hal_alif` SSI library exists). Kept interim-marked now;
-    hard-deleted only once `spi0` is repointed to the fork compatible **and**
-    bench-verified — otherwise it is a silent SPI-master regression. A pure-Tier-1
+    fork-driver copy (no `hal_alif` SSI library exists). The in-tree driver is
+    **bench-verified PASS on E8** (2026-06-17, spi0 loopback), so it stays in place
+    pending the fork migration; it is hard-deleted only once `spi0` is repointed to
+    the fork compatible **and** that path is bench-verified — otherwise removing it
+    now is a silent SPI-master regression. A pure-Tier-1
     end-state is one small upstream patch away (set `SSI_IS_MST`, CTRLR0[31],
     under `CONFIG_SPI_DW_HSSI`); filed as a follow-up, non-blocking.
-  - **#151 UTIMER PWM/counter — merged as Tier-1.5** (interim, bench-pending).
+  - **#151 UTIMER PWM/counter — merged as Tier-1.5** (bench-verified PASS on E8,
+    2026-06-17 — PWM via UTIMER3 and the hardware counter via utimer0).
     Tier-2 is **infeasible**: the fork ships UTIMER bindings only (no `.c`), so
     there is nothing to migrate onto; retiring drops all AEN PWM (8 E1M pads) and
     the sole hardware counter to `NOSUPPORT` with no recovery (and AEN has no
@@ -115,14 +123,15 @@ Bench-verification on real E8 silicon remains the acceptance gate for every tier
   a HW library that actually covers the *data path*, verified per peripheral:
   - **NPU (task #19)** and **ISP (task #20)** are **Tier 1.5** — `hal_alif` ships
     real `ethos_u` and `isp` register libraries, so they follow the UTIMER pattern.
-  - **ADC/DAC (task #18) is NOT yet Tier 1.5 — it stays NOSUPPORT/blocked.**
+  - **ADC/DAC (task #18) is NOT Tier 1.5 — it is Tier 2 (fork-consumed).**
     `hal_alif`'s `analog` module (`analog_ctrl.{c,h}`) is only **analog
     reference/bias control** (VBAT rail, ADC vref buffer, DAC6/DAC12 vref scale) —
     a Tier-1.5 *helper* for the rails, but **not** the ADC sample/convert-FIFO or
-    DAC output convert path. That convert-path driver exists in **none** of
-    upstream, the `sdk-alif` fork, or `hal_alif` (verified 2026-06-15). So
-    `alp_adc`/`alp_dac` return `NOSUPPORT` until a driver source appears — do not
-    invent the convert registers from the TRM (per the pending-hw-configs policy).
+    DAC output convert path, so a Tier-1.5 driver over `hal_alif` is not possible.
+    The convert-path driver is the `sdk-alif` fork's `adc_alif`/`dac_alif` (Tier 2);
+    `alp_adc` is **bench-verified PASS on E8** (single-shot) and the `alp_dac` code
+    path holds (2026-06-17). Do not invent the convert registers from the TRM (per
+    the pending-hw-configs policy).
   Peripherals with a genuine fork *driver* and no Apache HW library are Tier 2;
   the manifest/board-id read is Tier 3.
 - **Pure-DesignWare stays.** Tier-1 nodes (`gpio_dw`, `i2c_dw`, …) are *not* vendor

@@ -5,27 +5,48 @@
   to be folded into docs/bring-up-aen.md (it cross-references that file's §-numbers).
 -->
 
-## Flashing + early bring-up — the three validated flows
+## Flashing + early bring-up — the validated flows
 
-There are **three** ways to get code onto, and observe code on, an E1M-AEN801
-(Alif Ensemble E8) module, depending on what you are doing. All three were
-confirmed on real silicon (2026-06-15):
+There are **four** ways to get code onto, and observe code on, an E1M-AEN801
+(Alif Ensemble E8) module, depending on what you are doing. All were
+confirmed on real silicon:
 
 | Flow | Use it for | Touches MRAM? | Tooling |
 |---|---|---|---|
-| **A. Production MRAM flash** | Shipping image; QA; re-keying | **Yes** | SETOOLS over the SE-UART (`west flash` = `alif_flash` runner) |
+| **D. J-Link direct MRAM flash** | Default burn path; QA; dev iteration | **Yes** | J-Link Alif MRAM loader over SWD (part-number device profile) |
+| **A. SETOOLS MRAM flash (fallback)** | Re-keying; bare-module recovery | **Yes** | SETOOLS over the SE-UART (`west flash` = `alif_flash` runner) |
 | **B. Console observation** | Watching app output during bring-up | No | RAM console over SWD, or SEGGER RTT |
 | **C. J-Link RAM-run** | Dev/debug iteration without burning MRAM | No | J-Link `loadbin` to ITCM + `go` |
 
-> A and B are independent of each other — you pick **A** to decide *what runs*
-> and **B** to decide *how you watch it*. On this bench the only USB serial port
-> is the FT232R wired to the **SE-UART** (used by flow A), so the application
-> console is not visible over USB — which is exactly why flow B exists. Flow C
-> is the fast inner loop that never writes flash.
+> D is now the default burn path on the bench; A is the fallback (re-keying,
+> recovery). A burn flow (D or A) decides *what runs* and **B** decides *how you
+> watch it*. On this bench the only USB serial port is the FT232R wired to the
+> **SE-UART** (used by flow A), so the application console is not visible over
+> USB — which is exactly why flow B exists. Flow C is the fast inner loop that
+> never writes flash.
 
 ---
 
-### Flow A — Production MRAM flash (SETOOLS over the SE-UART)
+### Flow D — J-Link direct MRAM flash (the default burn path)
+
+J-Link **can** burn the Alif MRAM directly over SWD: its built-in Alif MRAM
+loader activates when you select the **part-number device profile**
+`AE822FA0E5597LS0_M55_HE` (the *generic* `Cortex-M55` profile, used by flow C,
+does **not** expose the loader — which is why the old "J-Link cannot write
+MRAM" claim was only ever true for the generic profile). It burns the signed
+ATOC over SWD in ~0.16 s, verifies it, then a reset of type `nRESET` (RSetType
+2) re-runs the SE boot ROM so the app boots from MRAM.
+
+Requires **J-Link V9.46+ DLL** (the bench has V9.50) and a probe on matched
+J-Link **V13 firmware**. Helper: `bench-builds/flash-jlink.sh`.
+
+> **Probe firmware gotcha.** A version-mismatched probe forces a J-Link
+> firmware update on first connect. That update **times out over a USB hub** —
+> connect the probe to a **direct root USB port** for the firmware step.
+
+---
+
+### Flow A — SETOOLS MRAM flash, fallback (SETOOLS over the SE-UART)
 
 This is the Alif-native way an image enters MRAM. There is **no host-strap
 boot pin and no recovery jumper** on the E1M-AEN — SETOOLS puts the device into
@@ -192,7 +213,9 @@ Then read the result with flow B (mem8 of `ram_console_buf`).
 | `app-write-mram`: `Target did not respond` | SE-UART wiring or baud. Confirm **1.8 V** adapter, **crossed** TX/RX, **common GND**, port = the FT232R SE-UART, baud **57600** (E8). See [`aen-provisioning.md`](aen-provisioning.md) §2. |
 | `app-write-mram` sits at `Waiting for Target..[RESET Platform]` | Hard-maintenance — **power-cycle** the board so SETOOLS catches the SES boot-ISP window. A clean write ends `100% ... Done`. |
 | Image written but won't boot | ATOC built with the wrong **DEVICE** config for the part. Re-run `tools-config` for the part, or write an **app-only** ATOC keeping the factory DEVICE config. |
-| `west flash` tries to use J-Link / fails to flash | On the carrier board `west flash` must use the **`alif_flash`** runner (SETOOLS), not `jlink`. Confirm the SE-UART port; J-Link does **not** write MRAM on this part. |
+| `west flash` tries to use J-Link / fails to flash | On the carrier board `west flash` must use the **`alif_flash`** runner (SETOOLS, flow A); confirm the SE-UART port. (To burn over J-Link instead, use the **part-number device profile** — flow D — not the generic core profile.) |
+| J-Link won't write MRAM | You selected the **generic** `Cortex-M55` device (flow C); the MRAM loader only activates with the **part-number profile** `AE822FA0E5597LS0_M55_HE`. Also needs J-Link **V9.46+** DLL and matched V13 probe firmware (flow D). |
+| J-Link firmware update times out on connect | Mismatched probe firmware updates over a **USB hub** stall — connect the probe to a **direct root USB port**. |
 | No app output anywhere over USB | Expected on this bench — the only USB serial is the SE-UART; the HE app console (UART2 on DevKit / UART5 on E1M) isn't wired to USB. Use the **RAM console** (flow B) or **RTT**. |
 | RAM console reads as all-zeros / garbage | Wrong `ram_console_buf` address (re-resolve from `zephyr.map`), or the app never ran (check flow C `go`), or `CONFIG_UART_CONSOLE` left enabled (must be `n`). |
 | J-Link: `Could not connect to the target device` | You used the **Alif part-number** device. Switch to the generic `-device Cortex-M55`. |

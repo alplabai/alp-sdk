@@ -19,9 +19,25 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM at 0x50 reads back (64 B, `0xff` = blank/unprogrammed) once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
 | **PWM** (Tier-1.5) | ✅ PASS | pwm_set_cycles reg readback matches (CNTR_PTR/COMPARE/CTRL), shares the hal_alif UTIMER start-path the counter fix validated. |
 | **SPI** (`alif,dwc-ssi-spi`, Tier-2) | ✅ PASS *after a fix* | DWC-SSI stayed in slave mode → `spi_transceive` -116 (TX FIFO full, no SCLK). The Alif SoC gates master mode behind `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`), which upstream never sets. **PR #162** sets it in the driver. Re-validated: `rc=0`, internal-loopback `rx==tx`, CTRLR0=`0x80002007`. See §3. |
-| **Ethernet** (`alif,ethernet` / `eth_dwmac`, Tier-1.5) | ✅ PASS *after a fix* | GMAC reachable (HW v5.40) but the DMA reset stalled — no RMII 50 MHz ref-clock. **PR #162** programs the `ETH_CTRL` (`0x4903F080` bit4) source mux with an auto-detect (external pin → fall back to internal PLL). Re-validated: MAC reset completes, iface `admin_up=1`, MAC programmed. See §3. |
+| **Ethernet** (`alif,ethernet` / `eth_dwmac`, Tier-1.5) | ✅ PASS *after a fix* | Real cause of the long no-link: the GMAC DMA descriptor rings + net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** on the GMAC DMA bus. Fix: `zephyr,sram = &sram0` (global on-chip SRAM `0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n`. The PHY power (`E_PHY_PWRDWN` = P15_4), reset (`E_PHY_RESET` = P11_6), and RCSR bit7 `REF_CLK_SEL=1` were already correct. Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease + ARP `REACHABLE`). See §3. |
+| **UART3** (`ns16550`, Tier-1) | ✅ PASS | Internal loopback. |
+| **Counter** (`utimer0`, Tier-1.5) | ✅ PASS | UTIMER0 counter advances. |
+| **WDT** (CMSDK, Tier-1) | ✅ PASS | CMSDK watchdog. |
+| **ADC** (`adc_alif`, Tier-2) | ✅ PASS | Single-shot read. |
+| **DAC** (`dac_alif`, Tier-2) | ✅ PASS | Write path holds (code-side; analog output bench-unverified). |
+| **Camera stack** (`cam`/`csi`/`dphy`/`arx3a0`) | ✅ PASS *(bind)* | All four nodes BIND + the v4.4-ported drivers load; `cam` instantiation is DT-blocked and live capture is HW-blocked (no sensor wired). |
+| **Ethos-U85** (NPU) | ✅ PASS | ID `0x20007001`. |
+| **Ethos-U55-HE** (NPU) | ✅ PASS | ID `0x10104201`. |
+| **NPU inference** (TFLM + Ethos-U85) | ✅ PASS | Tiny fixture runs to completion. |
+| **PDM mics** | ✅ PASS | Live varying PCM = real audio. |
+| **I2S TX** (`i2s3`) | ✅ PASS | Clocks the tone out with the 76.8 MHz audio clock (audible amp output pends the 74LVC157 mux + TAS2563 config). |
+| **Quadrature encoder** (`qenc`) | 🟡 PARTIAL *(HW-gated)* | Driver reads clean; count is static until the encoder is physically spun. Not a code/Flow-D bug. |
+| **SD card** (DWC SDHC) | 🟡 PARTIAL *(HW-gated)* | SDHC inits but the card is unreachable until the EVK SDIO 74LVC157 mux (EN=IO20 / SEL=IO21, both CC3501E-side) is routed and a card is inserted. Not a code/Flow-D bug. |
 
-## 2. The three flashing / observation flows
+All 17 aen-* bench apps were flashed over flow D and booted on real E8: **15 PASS,
+2 PARTIAL** (both hardware-gated, not code/flow-D bugs).
+
+## 2. The four flashing / observation flows
 
 | Flow | Use it for | Touches MRAM? | Tooling |
 |---|---|---|---|
@@ -233,15 +249,20 @@ secure-boot verification — always write both consistent blobs.
   (PR #162). Customers need nothing — it's automatic for master instances. The
   SPI node also carries `clock-frequency` (BAUDR divider) since the clock
   controller doesn't report a rate.
-- **Ethernet needs the RMII 50 MHz reference clock selected.** The DWMAC DMA
-  soft-reset cannot complete without it. `ETH_CTRL` (`0x4903F080` bit 4) selects
-  the source: 0 = external REFCLK pin (P11_0 oscillator, production wiring),
-  1 = internal 50 MHz PLL. The driver auto-detects (PR #162): it tries external,
-  and if the reset can't complete (no oscillator populated) it falls back to the
-  internal PLL — so Ethernet comes up on any board population with no config.
-  **Bench note:** this reduced-population board has no working external RMII
-  oscillator, so auto-detect selects the internal PLL. Override with
-  `CONFIG_ETH_DWMAC_ALIF_RMII_REFCLK_{EXTERNAL,INTERNAL_PLL}` to pin a source.
+- **Ethernet DMA buffers must live in global SRAM0, not the M55 DTCM.** The long
+  no-link was traced to the GMAC DMA descriptor rings + net_buf pool sitting in
+  the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** reachable on the GMAC
+  DMA bus — so the MAC never saw valid descriptors. Fix: `zephyr,sram = &sram0`
+  (global on-chip SRAM `0x02000000`, where the CPU address equals the DMA address)
+  + `CONFIG_DCACHE=n`. The PHY power (`E_PHY_PWRDWN` = P15_4 lpgpio), PHY reset
+  (`E_PHY_RESET` = P11_6 gpio11), and the RCSR bit7 `REF_CLK_SEL=1` ref-clock
+  select were all already correct — the earlier "PHY RX path / `ANLPAR=0` / scope
+  the REF_CLK" diagnosis was a red herring (a bad cable plus the DTCM starvation).
+  Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease
+  + ARP `REACHABLE`).
+- **Generalizable: any DMA-master block needs its buffers in global SRAM.** On the
+  E8 M55, any DMA-master block (GMAC, the Ethos-U NPU, the SDHC) needs its
+  DMA-visible buffers in global **SRAM0/SRAM1**, never the default DTCM.
 
 ## 4. Troubleshooting
 
@@ -249,13 +270,13 @@ secure-boot verification — always write both consistent blobs.
 |---|---|
 | `app-write-mram`: `Target did not respond` | SE-UART wiring/baud — 1.8 V adapter, crossed TX/RX, common GND, port = the FT232R SE-UART, baud 57600. |
 | Image written but won't boot | ATOC built with the wrong **DEVICE** config — write an **app-only** ATOC keeping the factory DEVICE config. |
-| `west flash` tries to use J-Link | The carrier defaults to the **`alif_flash`** runner (SETOOLS/ISP). J-Link *can* burn MRAM (flow D) but only with the Alif J-Link device pack installed; without it, use `alif_flash`. |
+| `west flash` tries to use J-Link | The carrier defaults to the **`alif_flash`** runner (SETOOLS/ISP, now flow A / fallback). J-Link *does* burn MRAM (flow D) with the `AE822FA0E5597LS0_M55_HE` device profile — the loader is built into J-Link V9.46+, no separate pack. |
 | No app output over USB | Expected — only the SE-UART is on USB. Use the RAM console (flow B) or RTT. |
 | RAM console all-zeros | Read the **`ram_console_buf`** symbol (not `ram_console`); re-resolve from `zephyr.map`; ensure `CONFIG_UART_CONSOLE=n`. |
-| J-Link `Could not connect to the target device` (Alif part device) | For **read/attach/RAM-run** use the generic `-device Cortex-M55` (attaches to the live core). For **MRAM flash** (flow D) the Alif part device is required *and* needs the Alif J-Link device pack installed (§ Flow D) — absent on this bench. |
+| J-Link `Could not connect to the target device` (Alif part device) | For **read/attach/RAM-run** use the generic `-device Cortex-M55` (attaches to the live core). For **MRAM flash** (flow D) the `AE822FA0E5597LS0_M55_HE` part device is required — it unlocks the built-in MRAM loader (J-Link V9.46+ DLL, probe on matched V13 firmware); the AE822 profile won't connect on an old-firmware probe (§ Flow D). |
 | Link error `region FLASH overflowed` on a RAM-run app | The overlay used `zephyr,flash = <&itcm>` — use the path-reference form `&itcm` (else `FLASH_SIZE=0`). |
 | I2C2 probe times out (`-ETIMEDOUT`) | Bus stuck — pads not driving. Add the I2C pinctrl pad config (§3): `input-enable` + `bias-pull-down`; run at 100 kHz. |
 | I2C2 clean NACKs but no device ACKs | The pinctrl is missing **`input-enable`** (REN) so the controller can't sense SDA, or it used `bias-pull-up` (DSC=1) instead of `bias-pull-down` (DSC=2). Match Alif's reference (§3) — then the EEPROM ACKs at 0x50. |
 | `spi_transceive` returns `-116` (TX FIFO full, no SCLK) | SoC master-mode not set — `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`) per-instance master bit. The alp-sdk driver sets it in init (PR #162); if you forked the driver, replicate it. |
 | `spi_transceive` returns `-EINVAL` with no register programming | No `clock-frequency` for the BAUDR divider and the alif clock controller has no `get_rate`. Set `clock-frequency` on the SPI node (§3). |
-| Ethernet `unable to reset hardware` (then MPU fault) | No RMII 50 MHz ref-clock. The driver auto-selects the source (PR #162); if forced to `EXTERNAL` on a board without the oscillator populated, switch to `AUTO` or `INTERNAL_PLL`. |
+| Ethernet links but never gets a lease / no traffic | GMAC DMA descriptor rings + net_buf pool are in the M55 **DTCM** (`zephyr,sram = &dtcm`), off the DMA bus. Move them to global SRAM0: `zephyr,sram = &sram0` + `CONFIG_DCACHE=n` (§3). Applies to any DMA-master block (GMAC/NPU/SDHC). |
