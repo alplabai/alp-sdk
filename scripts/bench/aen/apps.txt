@@ -1,0 +1,21 @@
+# AEN801 (E8) bench apps flashed over Flow D, one build-dir name per line.
+# Lines starting with '#' and blank lines are ignored. The batch runner
+# (flash-all-flowd.sh) reads this file when no app names are given on argv.
+# Each name is a directory under $BENCH_ROOT/build/.
+aen-gpio-bench
+aen-uart-ns16550-loopback
+aen-pwm-utimer-pwmleds
+aen-spi-regcheck
+aen-counter-utimer-regcheck
+aen-i2c2-eeprom-regcheck
+aen-wdt-feed
+aen-adc-regcheck
+aen-dac-regcheck
+aen-qenc-readout
+aen-sdcard-readout
+aen-camera-regcheck
+aen-npu-ethosu-regcheck
+aen-npu-ethosu55-regcheck
+aen-npu-inference-alif
+aen-pdm-mic-alif
+aen-i2s-amp-alif
