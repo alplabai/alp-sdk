@@ -1,0 +1,54 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-analog-validate overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * DAC0 -> ADC loopback.  Enables:
+ *   - dac0   (12-bit DAC @ 0x49028000, alif,dac; output = E1M pad A16 = Alif
+ *             P2_2 = DAC_0 per metadata/e1m_modules/aen/from-alif.tsv).
+ *             Driver-fixed reference = 0.750 V (DAC12_VREF_CONT=0x4).
+ *   - adc12_0 (12-bit SAR @ 0x49020000, alif,adc).  Driver-fixed reference =
+ *             1.8 V (ADC_VREF_CONT=0x10, RDIV=0).
+ *
+ * Both nodes carry their reg / reg-names / config props from the SoC dtsi
+ * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi, transcribed VERBATIM from the
+ * Apache-2.0 zephyr_alif fork e1.dtsi); this overlay only flips them okay.
+ *
+ * BENCH JUMPER REQUIRED: a wire from the DAC0 pad (A16 / P2_2) to an ANA_S input
+ * pad routed to the chosen ADC instance.  The from-alif.tsv routes the analog
+ * sense pads as: A12=ANA_S6 A13=ANA_S4 A14=ANA_S2(P0_2) A15=ANA_S0(P0_0)
+ * B12=ANA_S7 B13=ANA_S5 B14=ANA_S3(P0_3) B15=ANA_S1(P0_1).
+ *
+ * TBD (bench unknown, do NOT invent): which ADC12 INSTANCE + CHANNEL INDEX each
+ * ANA_S pad lands on is an Alif TRM detail not present in the fetched fork
+ * source.  This overlay enables adc12_0 and the app reads channel 0 as a
+ * PLAUSIBLE DEFAULT (ANA_S0 = A15 = P0_0 is the lowest-numbered sense pad).  If
+ * the jumper/TRM map says otherwise, change the enabled instance below and the
+ * TEST_ADC_CHANNEL / ADC node-label in src/main.c to match.  See README.md.
+ */
+
+/*
+ * RAM-run: the SoC `select` puts code in XIP; retarget ROM to ITCM so the image
+ * links + runs from RAM (J-Link loadbin+go, no reset). PATH-REFERENCE form
+ * (&itcm) -- the phandle-array form makes FLASH_SIZE=0 and overflows the link.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&dac0 {
+	status = "okay";
+};
+
+/*
+ * TBD: adc12_0 is the plausible-default loopback receiver.  If the bench jumper
+ * lands the DAC0 pad on an ANA_S input owned by adc12_1 / adc12_2, enable that
+ * instance instead (and mirror ADC_NODE in src/main.c).
+ */
+&adc12_0 {
+	status = "okay";
+};

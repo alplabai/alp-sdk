@@ -67,6 +67,16 @@
 #define DAC_RESOLUTION 12U
 #define DAC_MAX_CODE   ((1U << DAC_RESOLUTION) - 1U) /* 0xFFF */
 
+/*
+ * Full-scale DAC reference (mV) from the DT `alif,reference-mv` prop.  The
+ * dac_alif driver fixes the DAC12 reference field to DAC12_VREF_CONT=0x4 =
+ * 0.750 V (analog_ctrl.h:41 + table) -- so the dtsi sets alif,reference-mv=750
+ * and this is the divisor for the REPORTED expected output.  Default 750 if the
+ * prop is ever dropped.  This is the REGISTER reference; the absolute on-pad mV
+ * is a bench unknown (unscoped pad), so the line below is REPORTED, not gated.
+ */
+#define DAC_REFERENCE_MV ((uint32_t)DT_PROP_OR(DAC_NODE, alif_reference_mv, 750))
+
 /* Mid-scale code: half of full-scale (0x800).  Driven through DAC_IN. */
 #define TEST_CODE (DAC_MAX_CODE / 2U + 1U) /* 0x800 */
 
@@ -128,6 +138,23 @@ int main(void)
 	       DAC_BASE + OFF_DAC_IN,
 	       dac_in,
 	       TEST_CODE);
+
+	/*
+	 * REPORTED (not gated): the expected ideal output for the written code at
+	 * the driver-fixed 0.750 V reference (DAC12_VREF_CONT=0x4, analog_ctrl.h:41).
+	 *   out_mv = code * reference_mv / full_scale_code
+	 * = TEST_CODE * 750 / 0xFFF.  The pad is unscoped on this batch, so this is a
+	 * REGISTER-derived prediction, not a measurement -- absolute on-pad mV is a
+	 * bench/TRM unknown.  The aen-analog-validate example does the loopback check.
+	 */
+	uint32_t exp_out_mv = ((uint32_t)(TEST_CODE & DAC_MAX_CODE) * DAC_REFERENCE_MV) / DAC_MAX_CODE;
+
+	printk("REPORTED  expected out = %u mV (code 0x%03x * %u mV VREF / 0x%03x; "
+	       "ideal, pad unscoped)\n",
+	       exp_out_mv,
+	       (unsigned)(TEST_CODE & DAC_MAX_CODE),
+	       DAC_REFERENCE_MV,
+	       DAC_MAX_CODE);
 
 	/*
 	 * PASS gate:

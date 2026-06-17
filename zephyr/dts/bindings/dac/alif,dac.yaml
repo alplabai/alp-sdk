@@ -48,19 +48,30 @@ properties:
 
   alif,reference-mv:
     type: int
-    default: 900
+    default: 750
     description: |
-      DAC12 full-scale reference voltage, in millivolts, used by the alp-sdk
-      portable DAC backend (src/backends/dac/zephyr_drv.c) to convert a
-      requested millivolt setpoint into a 12-bit code:
+      DAC12 full-scale reference voltage, in millivolts.  This property is the
+      mv->code DIVISOR used by the alp-sdk portable DAC backend
+      (src/backends/dac/zephyr_drv.c) to convert a requested millivolt setpoint
+      into a 12-bit code:
         code = mv * (2^12 - 1) / reference_mv
+      It does NOT program the silicon: the DAC reference is fixed in hardware by
+      the driver.
 
-      The Alif Ensemble DAC12 full-scale is the DAC VREF, NOT the 3.3 V supply
-      rail.  The default (900 mV) is a DOCUMENTED PLACEHOLDER pending TRM/bench
-      confirmation -- the auto-memory records the E8 DAC12 VREF as "~0.9 V,
-      selectable 0.5-0.833 V", which is NOT authoritative.  Override per board
-      once the exact VREF (and the analog_ctrl DAC12_VREF_CONT divider setting it
-      programs) is confirmed on the bench.  BENCH-UNVERIFIED.
+      The dac_alif driver programs the DAC12 reference field to DAC12_VREF_CONT
+      = 0x4 (dac_alif.c CMP_COMP_REG2_DAC12_VREF_CONT = (0x4U << 17), which is
+      identical to the hal_alif analog_ctrl.h:41 #define DAC12_VREF_CONT
+      (0x4U << 17)).  The DAC12 reference table in hal_alif analog_ctrl.h:31-40
+      reads code 0x4 (100b) = 0.750 V, so the divisor MUST be 750 for the
+      portable mv->code conversion to track the reference the silicon is
+      actually programmed to.  The Alif Ensemble DAC12 full-scale is the DAC
+      VREF, NOT the 3.3 V supply rail.
+
+      Register value verified vs hal_alif (analog_ctrl.h:41 / dac_alif.c); the
+      ABSOLUTE on-pad mV (output buffer, load, trim) is bench-pending and is NOT
+      claimed here.  Override per board only if a board reprograms
+      DAC12_VREF_CONT to a different code (0.500-0.833 V per the analog_ctrl.h
+      table).
 
   twoscomp_enabled:
     type: boolean
