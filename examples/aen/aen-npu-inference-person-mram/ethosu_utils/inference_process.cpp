@@ -118,8 +118,26 @@ bool InferenceProcess::runJob(InferenceJob &job)
 	}
 
 	/* Create the TFL micro interpreter */
-	tflite::MicroMutableOpResolver <1> resolver;
+	/*
+	 * alp-sdk: mixed NPU/CPU op-set. Upstream (Arm/sdk-alif) registered only
+	 * <1>+AddEthosU(), which assumes the whole graph offloads into the single
+	 * fused Ethos-U custom op (true for person_detect = 100% NPU). Vela-compiled
+	 * keyword_scrambled_8bit leaves CPU reference kernels at the NPU boundary, so
+	 * we must also register the builtins its subgraph uses: SVDF (not Vela-
+	 * supported, always CPU), FULLY_CONNECTED, SOFTMAX and QUANTIZE. Vela only
+	 * removes op types (folds them into the Ethos-U op), never adds them, so this
+	 * superset stays correct regardless of how Vela partitions the graph and is
+	 * harmless for person_detect (the extra AddX() registrations go unused). The
+	 * <6> slot count matches upstream TFLM keyword_benchmark_8bit.cc. DEQUANTIZE
+	 * is present in the model's operator_codes but unused by subgraph 0, so no
+	 * AddDequantize() is needed.
+	 */
+	tflite::MicroMutableOpResolver <6> resolver;
 	resolver.AddEthosU();
+	resolver.AddSvdf();
+	resolver.AddFullyConnected();
+	resolver.AddSoftmax();
+	resolver.AddQuantize();
 
 	tflite::MicroInterpreter interpreter(model, resolver, tensorArena, tensorArenaSize);
 

@@ -55,6 +55,23 @@ west build -p always \
 `aen-npu-inference-alif/README.md` for the full `-D` table and licensing
 (`ensemble_vela.ini` is Alif-proprietary, **alp-sdk-internal** only).
 
+### Mixed NPU/CPU models
+
+The `ethosu_utils` op-resolver registers `AddEthosU()` **plus** the common CPU
+reference kernels (`SVDF`/`FullyConnected`/`Softmax`/`Quantize`), so a model whose
+Vela partition leaves ops on the M55 (not just the single fused Ethos-U op) also
+runs — not only 100 %-NPU models. Set `AEN_NPU_INPUT_BYTES` to the model's input
+size when swapping. Bench-verified on E8 (2026-06-17) with the mixed
+keyword-spotting model (6 NPU / 9 CPU ops):
+
+```bash
+west build ... \
+  -DAEN_NPU_MODEL=${ZEPHYR_TFLITE_MICRO_MODULE_DIR}/tensorflow/lite/micro/models/keyword_scrambled_8bit.tflite \
+  -DAEN_NPU_MODEL_NAME=keyword_scrambled_u85 \
+  -DAEN_NPU_INPUT_BYTES=192   # [1,96] int16
+# -> RESULT PASS: runJob=OK out_bytes=8 (the SVDF/Softmax/Quantize run on the M55)
+```
+
 Sanity-check the link before flashing: `xxd -e -l 8 zephyr.bin` word 2 must read
 `0x8001xxxx` (slot0). `0x8000xxxx` means `CONFIG_USE_DT_CODE_PARTITION` is missing.
 

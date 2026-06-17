@@ -51,6 +51,13 @@ set(AEN_NPU_MODEL  "${ZEPHYR_TFLITE_MICRO_MODULE_DIR}/tensorflow/lite/micro/mode
 set(AEN_NPU_MODEL_NAME "person_detect_u85"
     CACHE STRING   "Embedded model identity string")
 
+# Input-tensor byte count the InferenceProcess job advertises -- MUST equal the
+# model's input-tensor size or runJob aborts with "Input tensor size mismatch".
+# person_detect [1,96,96,1] int8 = 9216; keyword_scrambled_8bit [1,96] int16 =
+# 192.  Override with -DAEN_NPU_INPUT_BYTES=<n> when swapping a model.
+set(AEN_NPU_INPUT_BYTES "9216"
+    CACHE STRING   "Model input-tensor size in bytes (per-model)")
+
 # ALIF PROPRIETARY Vela config -- NOT redistributed by alp-sdk.  Obtain it from
 # alp-sdk-internal and pass it via -DAEN_NPU_VELA_CONFIG=<path>/ensemble_vela.ini.
 # When unset, Vela uses its built-in system-config (does NOT match the bench).
@@ -132,3 +139,7 @@ target_sources(app PRIVATE
 	src/main.cpp
 	ethosu_utils/inference_process.cpp
 )
+
+# Make the per-model input size a real compile define so -DAEN_NPU_INPUT_BYTES
+# reaches main.cpp's input_sram[] + the job's input DataPtr size.
+target_compile_definitions(app PRIVATE AEN_NPU_INPUT_BYTES=${AEN_NPU_INPUT_BYTES})
