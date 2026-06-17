@@ -7,6 +7,7 @@ aen-uart-ns16550-loopback
 aen-pwm-utimer-pwmleds
 aen-spi-regcheck
 aen-counter-utimer-regcheck
+aen-counter-alarm-regcheck
 aen-i2c2-eeprom-regcheck
 aen-wdt-feed
 aen-adc-regcheck

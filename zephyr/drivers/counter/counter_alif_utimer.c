@@ -40,7 +40,9 @@
  *     START / STOP / CLK_ENABLE live.
  *   - The counter is a free-running 32-bit up-counter (reload = 0xFFFFFFFF);
  *     COMPARE-A drives the single Zephyr alarm channel (channel 0), whose match
- *     raises CHAN_INTERRUPT_COMPARE_A_BUF1 on the parent's "comp_capt_a" line.
+ *     raises CHAN_INTERRUPT_COMPARE_A_BUF1 on the parent's "comp_a_buf1" line
+ *     (bit2 -> IRQ line index 2; "comp_capt_a" is bit0/CAPTURE_A, a different
+ *     line -- see the irq_cfg note below).
  *
  * Clocking note: the fork's ALIF_UTIMER_CLK is a frequency-only dummy with no
  * gate register -- the Zephyr clock controller can neither gate nor report the
@@ -61,6 +63,7 @@
 #include <zephyr/drivers/counter.h>
 #include <zephyr/irq.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/sys_io.h>
 
 #include <zephyr/dt-bindings/timer/alif_utimer.h>
 
@@ -198,7 +201,30 @@ static int counter_alif_utimer_set_alarm(const struct device *dev, uint8_t chan_
 	data->alarm_cb   = acfg->callback;
 	data->alarm_user = acfg->user_data;
 
+	/*
+	 * The COMPARE-A *match interrupt* (CHAN_INTERRUPT_COMPARE_A_BUF1, bit2)
+	 * compares the counter against the COMPARE_A_BUF1 shadow register (0xD4),
+	 * NOT the COMPARE_A register (0xD0) that alif_utimer_set_compare_value()
+	 * writes.  Confirmed on E8 silicon by examples/aen/aen-counter-alarm-regcheck
+	 * (EXP-A: COMPARE_A only, BUF1=0 -> bit2 never latches even after the count
+	 * passes COMPARE_A; EXP-B: write COMPARE_A_BUF1 too -> bit2 latches).  The
+	 * original bring-up bug -- the alarm callback never fired (fired=0) -- was
+	 * exactly this: COMPARE_A was programmed but the BUF1 shadow stayed 0, so
+	 * the comparator only matched at the start-of-count CNTR==0 tick.
+	 *
+	 * hal_alif exposes no BUF1 setter (only alif_utimer_set_compare_value for
+	 * COMPARE_A), so write the documented register directly via its address
+	 * macro.  COMPARE_A is written too -- harmless, and it is the driver-output
+	 * compare the PWM sibling drives, so keeping the pair set mirrors the
+	 * bench-validated EXP-B configuration.
+	 *
+	 * Caveat (relative alarms): target = CNTR + ticks on a free-running 32-bit
+	 * up-counter, so a target already passed by the time the compare is enabled
+	 * is only matched after a full 2^32 wrap.  Choose ticks comfortably larger
+	 * than the arm latency at the real tick rate.
+	 */
 	alif_utimer_set_compare_value(base, UTIMER_DRIVER_A, target);
+	sys_write32(target, UTIMER_COMPARE_A_BUF1(base));
 	alif_utimer_enable_compare_match(base, UTIMER_DRIVER_A);
 	alif_utimer_enable_interrupt(base, CHAN_INTERRUPT_COMPARE_A_BUF1_BIT);
 
@@ -387,11 +413,20 @@ static DEVICE_API(counter, counter_alif_utimer_api) = {
 	static void counter_alif_utimer_irq_cfg_##inst(const struct device *dev)            \
 	{                                                                                   \
 		ARG_UNUSED(dev);                                                            \
-		/* comp_capt_a carries the COMPARE-A match used by the alarm path. */      \
-		IRQ_CONNECT(DT_IRQ_BY_NAME(DT_INST_PARENT(inst), comp_capt_a, irq),         \
-			    DT_IRQ_BY_NAME(DT_INST_PARENT(inst), comp_capt_a, priority),    \
+		/*                                                                          \
+		 * The UTIMER exposes 8 NVIC lines mapping 1:1 to the 8 CHAN_INTERRUPT     \
+		 * event bits (comp_capt_a..overflow == CAPTURE_A..OVER_FLOW).  The alarm  \
+		 * fires on CHAN_INTERRUPT_COMPARE_A_BUF1 (bit2), whose line is            \
+		 * "comp_a_buf1" -- NOT "comp_capt_a" (bit0, CAPTURE_A).  Connecting       \
+		 * comp_capt_a was the bring-up bug: the match latched bit2 but its NVIC   \
+		 * line (comp_a_buf1) was never enabled, so the ISR never ran (confirmed   \
+		 * on E8 by aen-counter-alarm-regcheck: bit2 latched + unmasked + ISER set \
+		 * yet ISPR(377)=0).                                                       \
+		 */                                                                         \
+		IRQ_CONNECT(DT_IRQ_BY_NAME(DT_INST_PARENT(inst), comp_a_buf1, irq),         \
+			    DT_IRQ_BY_NAME(DT_INST_PARENT(inst), comp_a_buf1, priority),    \
 			    counter_alif_utimer_isr, DEVICE_DT_INST_GET(inst), 0);          \
-		irq_enable(DT_IRQ_BY_NAME(DT_INST_PARENT(inst), comp_capt_a, irq));         \
+		irq_enable(DT_IRQ_BY_NAME(DT_INST_PARENT(inst), comp_a_buf1, irq));         \
 	}
 
 DT_INST_FOREACH_STATUS_OKAY(COUNTER_ALIF_UTIMER_INIT)
