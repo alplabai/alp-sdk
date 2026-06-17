@@ -60,6 +60,16 @@ console is not on USB — which is why flow B exists.
 > see § Flow D). Flow D is the day-to-day default now: a burn is ~0.16 s over SWD
 > with no SE-UART maintenance-window race / power-cycle dance.
 
+> **Runnable helpers.** The shell helpers that drive all four flows below
+> (build, Flow A `flash-run.sh`, Flow C `ram-run.sh`, Flow D `flash-jlink.sh` +
+> the `flash-all-flowd.sh` batch, plus `reread.sh`) are checked into
+> [`scripts/bench/aen/`](../scripts/bench/aen/) with host-specific values
+> (`SETOOLS_DIR`, `SE_UART`, the J-Link probe) sanitized into a sourced
+> `bench-env.sh`. See [`scripts/bench/aen/README.md`](../scripts/bench/aen/README.md)
+> for per-script usage and the env-var table. **The Alif SETOOLS are
+> license-gated and are not redistributed by alp-sdk** — obtain them from Alif
+> and `export SETOOLS_DIR=...` before running Flow A/D.
+
 ### Flow A — Production MRAM flash (SETOOLS, no strap/jumper)
 
 ```bash
@@ -210,11 +220,12 @@ secure-boot verification — always write both consistent blobs.
 > that is **normal** (the pin reset reboots the SE, the app is running, J-Link can't
 > re-halt the secure core); read a witness back over the generic device.
 >
-> Helper: `bench-builds/flash-jlink.sh <build-dir> [read-bytes]` runs this whole flow
-> (gen-toc → AE822 connect → loadbin/verify the package at its per-build start address
-> from `app-package-map.txt` → `RSetType 2`/`r`/`g` → RAM-console read-back). It writes
-> the **single self-contained `AppTocPackage.bin`** (our ITCM-load-via-ATOC apps), not
-> the slot0-XIP two-blob variant above.
+> Helper: `scripts/bench/aen/flash-jlink.sh <build-dir> [read-bytes]` runs this whole
+> flow (gen-toc → AE822 connect → loadbin/verify the package at its per-build start
+> address from `app-package-map.txt` → `RSetType 2`/`r`/`g` → RAM-console read-back). It
+> writes the **single self-contained `AppTocPackage.bin`** (our ITCM-load-via-ATOC apps),
+> not the slot0-XIP two-blob variant above. See
+> [`scripts/bench/aen/README.md`](../scripts/bench/aen/README.md) for all four flows.
 >
 > **Two-blob (slot0-XIP) helper — validated 2026-06-17.** For an app linked into MRAM
 > slot0 (a real NPU model that overflows ITCM), `scripts/bench/aen/flash-jlink-mramxip.sh`
