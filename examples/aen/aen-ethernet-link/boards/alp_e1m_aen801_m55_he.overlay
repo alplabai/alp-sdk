@@ -1,0 +1,55 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Ethernet (GMAC) bring-up overlay for the E1M-AEN801 (E8, M55-HE).
+ *
+ * The ethernet@48100000 node (eth_dwmac core + the alp-sdk alif,ethernet glue,
+ * fixed-link RMII PHY) already lives in zephyr/dts/alif/ensemble_e8_peripherals.dtsi
+ * as status="disabled"; this overlay enables it and supplies the RMII pin group +
+ * a real MAC address.
+ *
+ * RMII pads = the "B" route on P11_x (refclk into P11_0, matching the on-module
+ * 50 MHz oscillator), transcribed from the zephyr_alif fork's pinctrl_eth.
+ *
+ * BENCH-PENDING blockers (none are driver bugs) -- see [[project_pending_hw_configs]]:
+ *  - PHY power-enable: the on-module TI DP83825I needs a power-enable on a
+ *    CC3501E-side line (driven over the SPI bridge); unpowered = no carrier.
+ *  - RMII ref-clock source-select: ETH_CTRL_REG's ref-clk-source bit has no
+ *    upstream clock-driver programming path (do NOT invent it); whether silicon
+ *    needs it set before the MAC sees the P11_0 clock is unconfirmed.
+ *  - Pad read-enable: the RMII *input* pads (REFCLK/RXD/CRS_DV) want read-enable,
+ *    which is not in the upstream alif,pinctrl binding -- so the input buffers may
+ *    stay disabled (the systemic upstream-pinctrl gap shared with I2S/PDM/qenc).
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&pinctrl {
+	pinctrl_eth: pinctrl_eth {
+		/* RMII inputs: REFCLK / RXD0 / RXD1 / CRS_DV (read-enable, which the
+		 * input buffers need, is not in the upstream alif,pinctrl binding). */
+		group0 {
+			pinmux = <PIN_P11_0__ETH_REFCLK_B>, <PIN_P11_3__ETH_RXD0_B>,
+				 <PIN_P11_4__ETH_RXD1_B>, <PIN_P11_5__ETH_CRS_DV_B>;
+		};
+		/* RMII outputs: TXD0 / TXD1 / TX_EN. */
+		group1 {
+			pinmux = <PIN_P6_0__ETH_TXD0_A>, <PIN_P10_5__ETH_TXD1_B>,
+				 <PIN_P10_6__ETH_TXEN_B>;
+		};
+	};
+};
+
+&ethernet {
+	pinctrl-0 = <&pinctrl_eth>;
+	pinctrl-names = "default";
+	local-mac-address = [02 01 56 78 43 21];
+	status = "okay";
+};
