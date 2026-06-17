@@ -268,7 +268,12 @@ per-SoM accelerator wiring as *paper-correct only* until their
 test-plan rows flip to ✅.  The first silicon-verified rows landed
 in v0.6 — the V2N GD32-bridge campaign (see the v0.6.0 section of
 [`docs/test-plan.md`](docs/test-plan.md)) — and the V2N Yocto image
-boots the bench board; everything else remains pre-HIL.  Per-driver
+boots the bench board.  The v0.8 candidate adds the first
+**E1M-AEN801 (Alif Ensemble E8)** silicon bring-up: Flow-D MRAM
+flash, Ethernet end-to-end, ~15 peripheral apps + real NPU inference
+from MRAM, all PASS on the bench (see
+[`docs/aen-bench-bringup.md`](docs/aen-bench-bringup.md)).  The rest
+of the AEN family + the E1M-X SKUs remain pre-HIL.  Per-driver
 verification status is recorded in `metadata/chips/<name>.yaml`'s
 `verification:` block and as `@par Verification status: [UNTESTED]`
 Doxygen tags on public headers.  Customers shipping production
