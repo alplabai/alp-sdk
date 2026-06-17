@@ -511,6 +511,11 @@
 	 */
 	adc12_0: adc@49020000 {
 		compatible = "alif,adc";
+		/* adc-controller.yaml (via alif,adc.yaml) requires #io-channel-cells;
+		 * #address-cells/#size-cells enable the io-channels `channel@N` children. */
+		#address-cells = <1>;
+		#size-cells = <0>;
+		#io-channel-cells = <1>;
 		reg = <0x49020000 0x1000>,
 		      <0x49020000 0x100>,
 		      <0x49023000 0x100>,
@@ -538,6 +543,9 @@
 
 	adc12_1: adc@49021000 {
 		compatible = "alif,adc";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		#io-channel-cells = <1>;
 		reg = <0x49021000 0x1000>,
 		      <0x49020000 0x100>,
 		      <0x49023000 0x100>,
@@ -565,6 +573,9 @@
 
 	adc12_2: adc@49022000 {
 		compatible = "alif,adc";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		#io-channel-cells = <1>;
 		reg = <0x49022000 0x1000>,
 		      <0x49020000 0x100>,
 		      <0x49023000 0x100>,
@@ -592,6 +603,9 @@
 
 	adc24_0: adc@49027000 {
 		compatible = "alif,adc";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		#io-channel-cells = <1>;
 		reg = <0x49027000 0x1000>,
 		      <0x49020000 0x100>,
 		      <0x49023000 0x100>,
