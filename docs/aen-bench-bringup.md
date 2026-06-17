@@ -34,6 +34,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **I2S TX** (`i2s3`) | ✅ PASS | Clocks the tone out with the 76.8 MHz audio clock (audible amp output pends the 74LVC157 mux + TAS2563 config). |
 | **Quadrature encoder** (`qenc`) | 🟡 PARTIAL *(HW-gated)* | Driver reads clean; count is static until the encoder is physically spun. Not a code/Flow-D bug. |
 | **SD card** (DWC SDHC) | 🟡 PARTIAL *(HW-gated)* | SDHC inits but the card is unreachable until the EVK SDIO 74LVC157 mux (EN=IO20 / SEL=IO21, both CC3501E-side) is routed and a card is inserted. Not a code/Flow-D bug. |
+| **GPU2D** (`<alp/gpu2d.h>` sw_fallback) | ✅ PASS (RAM-run, 2026-06-17) | Portable 2D surface on the M55-HE via the priority-0 pure-C software fallback (the D/AVE 2D HW backend is opt-in + bench-unverified). `fill_rect` + clip, `blit`, and all four `blend` modes (REPLACE/SRC_OVER/ADDITIVE/MULTIPLY) produce **exact** expected pixels on silicon. Example: `examples/aen/aen-gpu2d-bench`. The D/AVE 2D hardware backend (`alif_dave2d.c`) is the separate bucket-C item. |
 
 All 17 aen-* bench apps were flashed over flow D and booted on real E8: **15 PASS,
 2 PARTIAL** (both hardware-gated, not code/flow-D bugs).

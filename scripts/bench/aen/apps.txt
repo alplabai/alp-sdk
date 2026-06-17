@@ -20,3 +20,4 @@ aen-npu-ethosu55-regcheck
 aen-npu-inference-alif
 aen-pdm-mic-alif
 aen-i2s-amp-alif
+aen-gpu2d-bench
