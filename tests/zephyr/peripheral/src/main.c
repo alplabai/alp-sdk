@@ -205,18 +205,25 @@ ZTEST(alp_peripheral, test_power_close_null_is_noop)
 }
 
 /* ------------------------------------------------------------------ */
-/* AEN audit top-five gaps -- NOSUPPORT-contract tests for the new    */
-/* portable surfaces (gpu2d, camera ISP, storage inline-AES).         */
-/* All three return NOSUPPORT on the active V2N test build (no on-die */
-/* 2D / ISP / SecAES blocks) but honour INVAL pre-checks first.       */
+/* AEN audit top-five gaps -- contract tests for the new portable      */
+/* surfaces (gpu2d, camera ISP, storage inline-AES).  camera ISP +     */
+/* storage AES return NOSUPPORT on the test build (no on-die ISP /     */
+/* SecAES blocks, no sw fallback) but honour INVAL pre-checks first;   */
+/* gpu2d now has a priority-0 software fallback (see below).           */
 /* ------------------------------------------------------------------ */
 
-ZTEST(alp_peripheral, test_gpu2d_open_returns_nosupport_no_vendor_hal)
+ZTEST(alp_peripheral, test_gpu2d_open_uses_sw_fallback)
 {
-	/* No vendor HAL wired -- open returns NULL with NOSUPPORT. */
+	/* The priority-0 gpu2d sw_fallback ("*" wildcard, vendor "sw") serves
+	 * the API on any SoC with no HW 2D backend wired -- the Alif D/AVE 2D
+	 * backend registers at priority 100 only under its bring-up Kconfig --
+	 * so open() SUCCEEDS with a valid handle rather than returning
+	 * NOSUPPORT.  This supersedes the pre-#138 no-vendor-HAL NOSUPPORT
+	 * contract: the sw fallback is the preferred backend. */
 	alp_gpu2d_t *g = alp_gpu2d_open();
-	zassert_is_null(g, NULL);
-	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, NULL);
+	zassert_not_null(g, NULL);
+	zassert_equal(alp_last_error(), ALP_OK, NULL);
+	alp_gpu2d_close(g);
 }
 
 ZTEST(alp_peripheral, test_gpu2d_fill_rect_null_handle_not_ready)
