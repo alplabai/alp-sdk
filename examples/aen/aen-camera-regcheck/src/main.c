@@ -30,20 +30,24 @@
  *     4. for any instantiated video DEVICE it exercises the portable v4.4 video
  *        API (video_get_caps + video_get_format) and reports the result.
  *
- *   The CPI controller (cam) compiles against v4.4 but is NOT instantiated on
- *   this board: its AXI buffer path needs the fork-only itcm/dtcm `global-base`
- *   DT property (absent upstream -- a hal_alif-over-upstream gap) plus a
- *   cam->csi media-controller endpoint graph.  Those are bench/HW-staging facts
- *   (not v4.4-port facts), so the cam node is left disabled (see the overlay).
+ *   The CPI controller (cam) is now INSTANTIATED too: the board overlay supplies
+ *   the two facts it needs -- the itcm/dtcm `global_base` (re-`compatible` onto
+ *   alif,itcm/alif,dtcm; the AXI buffer path's hal_alif local_to_global() reads
+ *   it) and the cam<->csi<->arx3a0 media-controller endpoint graph (the CPI
+ *   DEVICE_DT_GET's its remote endpoint).  Both are grounded in the fork
+ *   ensemble_rtss_he.dtsi + the standard Zephyr video-interfaces pattern.
  *
  * WHAT IS RUNTIME-BLOCKED ON THIS BATCH: actual frame CAPTURE.  No camera sensor
  * is wired on this hardware batch, and the ARX3A0 I2C routing / address /
- * reset+power GPIOs are bench unknowns (see the dtsi FLAGs).  This app NEVER
+ * reset+power GPIOs + the cam XVCLK pad-mux are bench unknowns (see the dtsi
+ * FLAGs + the overlay).  So arx3a0 device_is_ready() will be FALSE (nothing
+ * answers on the bus); the app reports bind-vs-ready separately and NEVER
  * attempts a capture -- it would have nothing to capture from.
  *
- * The PASS gate here is: the camera-capture stack is STAGED + the v4.4-ported
- * drivers BIND/INSTANTIATE -- every node binds to its expected compatible at its
- * expected reg base, and the CSI/D-PHY/sensor drivers instantiate on v4.4.
+ * The PASS gate here is BIND-based: the full camera-capture stack (cam/csi/dphy/
+ * arx3a0) binds to its expected compatible at its expected reg base on the v4.4
+ * video API, with the endpoint graph + global-base in place.  device_is_ready is
+ * reported but not gated (the no-sensor arx3a0 is expected-not-ready).
  */
 
 #include <stdbool.h>
@@ -74,11 +78,11 @@
 
 /*
  * Compile-time staging facts -- each is 1 iff the node exists, is enabled, and
- * binds to its expected compatible.  These are pure DT predicates: the cam node
- * is intentionally disabled (see the overlay), so CAM_COMPAT_OK asserts only
- * that the node binds to the right compatible, independent of its status.
+ * binds to its expected compatible.  These are pure DT predicates -- a bound
+ * node at the right compatible, independent of device_is_ready (the sensor's
+ * runtime readiness is reported separately, since no sensor is wired).
  */
-#define CAM_COMPAT_OK DT_NODE_HAS_COMPAT(CAM_NODE, alif_cam)
+#define CAM_BOUND (DT_NODE_HAS_STATUS(CAM_NODE, okay) && DT_NODE_HAS_COMPAT(CAM_NODE, alif_cam))
 #define CSI_BOUND                                                                                  \
 	(DT_NODE_HAS_STATUS(CSI_NODE, okay) && DT_NODE_HAS_COMPAT(CSI_NODE, snps_designware_csi))
 #define DPHY_BOUND                                                                                 \
@@ -132,12 +136,10 @@ int main(void)
 	uint32_t arx_addr  = (uint32_t)DT_REG_ADDR(ARX_NODE);
 
 	printk("cam   : %s\n", DT_NODE_FULL_NAME(CAM_NODE));
-	printk("        compat=alif,cam base=0x%08x (exp 0x%08x) status=%s\n",
+	printk("        bound=%d compat=alif,cam base=0x%08x (exp 0x%08x)\n",
+	       (int)CAM_BOUND,
 	       cam_base,
-	       CAM_BASE_EXPECTED,
-	       DT_NODE_HAS_STATUS(CAM_NODE, okay) ? "okay"
-	                                          : "disabled (v4.4-ported; instantiation"
-	                                            " DT-blocked: global-base + cam->csi graph)");
+	       CAM_BASE_EXPECTED);
 	printk("csi   : %s\n", DT_NODE_FULL_NAME(CSI_NODE));
 	printk("        bound=%d compat=snps,designware-csi base=0x%08x (exp 0x%08x)\n",
 	       (int)CSI_BOUND,
@@ -154,43 +156,42 @@ int main(void)
 	       arx_addr,
 	       ARX_ADDR_EXPECTED);
 
-	bool nodes_ok = CAM_COMPAT_OK && (cam_base == CAM_BASE_EXPECTED) && CSI_BOUND &&
+	bool nodes_ok = CAM_BOUND && (cam_base == CAM_BASE_EXPECTED) && CSI_BOUND &&
 	                (csi_base == CSI_BASE_EXPECTED) && DPHY_BOUND &&
 	                (dphy_base == DPHY_BASE_EXPECTED) && ARX_BOUND &&
 	                (arx_addr == ARX_ADDR_EXPECTED);
 
 	/*
-	 * Step 3+4: the v4.4-ported drivers that INSTANTIATE on this board (CSI
-	 * bridge + ARX3A0 sensor).  DEVICE_DT_GET_OR_NULL is NULL when the node is
-	 * disabled or the driver TU was not built, so this links cleanly either way.
-	 * The cam (CPI) controller is deliberately not instantiated here (its node
-	 * is disabled -- see the overlay), so it is reported, not probed.
+	 * Step 3+4: probe the v4.4-ported drivers on the instantiated nodes.
+	 * DEVICE_DT_GET_OR_NULL is NULL only if the node is disabled or the driver TU
+	 * was not built, so this links cleanly either way.  device_is_ready() is
+	 * reported per node: cam (CPI) + csi + dphy init off their own state, but the
+	 * arx3a0 sensor cannot be ready (no sensor wired on this batch) -- that is
+	 * expected and does NOT fail the bind-based PASS gate below.
 	 */
-	printk("cam   device : <not instantiated> (driver ported to v4.4 + compiles; node\n");
-	printk("               disabled pending fork-only itcm/dtcm global-base + cam->csi\n");
-	printk("               endpoint graph -- task #21; CAPTURE HW-blocked, no sensor)\n");
+	probe_video_dev("cam", DEVICE_DT_GET_OR_NULL(CAM_NODE));
 	probe_video_dev("csi", DEVICE_DT_GET_OR_NULL(CSI_NODE));
 	probe_video_dev("arx3a0", DEVICE_DT_GET_OR_NULL(ARX_NODE));
 
 	/*
-	 * PASS gate: the camera-capture stack is STAGED and the v4.4-ported drivers
-	 * bind/instantiate -- every node binds to its expected compatible at its
-	 * expected reg base, and the CSI/D-PHY/sensor drivers instantiate on the
-	 * v4.4 video API.  The cam (CPI) controller is reported separately (ported +
-	 * compiles, instantiation DT-blocked -- task #21).  Live frame CAPTURE is
-	 * HW-blocked on this batch (no camera sensor wired).
+	 * PASS gate: the full camera-capture stack BINDS -- every node (cam/csi/dphy/
+	 * arx3a0) binds to its expected compatible at its expected reg base on the
+	 * v4.4 video API, with the cam<->csi<->arx3a0 endpoint graph + the itcm/dtcm
+	 * global-base now in place (the former cam-disable blockers).  This is a
+	 * bind/instantiation check; device_is_ready is reported above but NOT gated
+	 * (the arx3a0 sensor cannot be ready -- no sensor wired).  Live frame CAPTURE
+	 * stays HW-blocked on this batch.
 	 */
 	if (nodes_ok) {
-		printk("RESULT PASS: camera-capture stack STAGED + v4.4-ported -- cam/csi/dphy/arx3a0 "
-		       "nodes bind to alif,cam/snps,designware-csi/snps,designware-dphy/onnn,arx3a0 "
-		       "at the fork reg bases; csi/dphy/arx3a0 drivers instantiate on the v4.4 video "
-		       "API; cam compiles, instantiation DT-blocked (task #21); live CAPTURE "
-		       "HW-blocked (no sensor wired)\n");
+		printk("RESULT PASS: camera-capture stack BINDS -- cam/csi/dphy/arx3a0 nodes bind to "
+		       "alif,cam/snps,designware-csi/snps,designware-dphy/onnn,arx3a0 at the fork reg "
+		       "bases on the v4.4 video API (cam<->csi<->arx3a0 endpoint graph + itcm/dtcm "
+		       "global-base in place); live CAPTURE HW-blocked (no sensor wired)\n");
 	} else {
 		printk("RESULT FAIL: camera-capture stack NOT fully staged "
 		       "(cam=%d csi=%d dphy=%d arx=%d -- a node is missing, disabled, or bound "
 		       "to the wrong compatible/reg base)\n",
-		       (int)(CAM_COMPAT_OK && cam_base == CAM_BASE_EXPECTED),
+		       (int)(CAM_BOUND && cam_base == CAM_BASE_EXPECTED),
 		       (int)(CSI_BOUND && csi_base == CSI_BASE_EXPECTED),
 		       (int)(DPHY_BOUND && dphy_base == DPHY_BASE_EXPECTED),
 		       (int)(ARX_BOUND && arx_addr == ARX_ADDR_EXPECTED));
