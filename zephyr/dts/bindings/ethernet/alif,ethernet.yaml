@@ -2,9 +2,10 @@
 # Copyright (C) 2025 Alif Semiconductor
 # SPDX-License-Identifier: Apache-2.0
 #
-# ADR 0017 Tier-1.5 (in-tree glue over the UPSTREAM eth_dwmac core) -- INTERIM,
-# BENCH-UNVERIFIED. Kept in-tree (not retired onto the fork: the fork forked the
-# DWMAC core; upstream ships no Ensemble path) until E8 bench. See docs/adr/0017.
+# ADR 0017 Tier-1.5 (in-tree glue over the UPSTREAM eth_dwmac core) --
+# BENCH-VERIFIED PASS on E8 (2026-06-17). Kept in-tree (not retired onto the
+# fork: the fork forked the DWMAC core; upstream ships no Ensemble path). See
+# docs/adr/0017.
 #
 # Synopsys DesignWare MAC (DWC-ETHERNET QoS, v4.x/5.x) as integrated on the
 # Alif Ensemble family -- the RMII MAC at 0x4810_0000. Drives the upstream
@@ -43,7 +44,10 @@
 #
 # Register offsets used by the glue (MAC_CONF, DMA_SYSBUS_MODE, MAC_MDIO_*) are
 # transcribed verbatim from eth_dwmac_priv.h; the node geometry (reg, IRQ,
-# clock id) is from the alifsemi/zephyr_alif fork DTS. NOT validated on silicon.
+# clock id) is from the alifsemi/zephyr_alif fork DTS. Validated on E8 silicon
+# (2026-06-17): the E1M-AEN801 (M55-HE) pulled a real DHCP lease end-to-end with
+# the descriptor rings + net_buf pool placed in global SRAM0 (zephyr,sram =
+# &sram0) and CONFIG_DCACHE=n.
 
 description: |
   Alif Ensemble Synopsys DesignWare Ethernet MAC (RMII).

@@ -56,6 +56,27 @@ on real silicon (alplab-gw).
   enable is still poked per-example (a Tier-1.5 clockctrl patch is the clean
   follow-up).
 
+### Changed — eth_dwmac Alif glue promoted INTERIM → BENCH-VERIFIED + build-only regression
+
+- The Tier-1.5 Alif Ensemble GMAC glue (`eth_dwmac_alif_ensemble.c`, the
+  `alif,ethernet` binding, and `CONFIG_ETH_DWMAC_ALIF`) is promoted from
+  **INTERIM / BENCH-UNVERIFIED** to **BENCH-VERIFIED PASS on E8 (2026-06-17)** —
+  status-only, no behaviour change.  The driver/binding/Kconfig now state the
+  proven result (DHCP lease + server-side REACHABLE) and document the
+  **DMA-buffer placement requirement**: descriptor rings + net_buf pool live in
+  global SRAM0 (`chosen zephyr,sram = &sram0`, CPU addr == DMA addr) with
+  `CONFIG_DCACHE=n`, **never** the M55 DTCM.  A `BUILD_ASSERT` in the driver now
+  rejects the silent cache-incoherent combination (DCACHE on with no nocache
+  region).  The AUTO RMII ref-clock note is corrected: the verified bench path is
+  the **EXTERNAL** 50 MHz oscillator; the internal-PLL fallback branch stays
+  bench-unverified.
+- New **build-only** twister regression `examples/aen/aen-ethernet-link/testcase.yaml`
+  (scenario `alp_sdk.examples.aen.ethernet_link.aen`) compile-checks the
+  `alif,ethernet` node + the glue wire-up + the SRAM0 DMA-placement overlay on the
+  `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` board target.  Intentionally
+  filtered out of the native_sim PR gate (no Ethernet HW in CI; the M55 has no
+  native_sim host) — end-to-end remains a bench flash, not a CI run.
+
 ### Added — cc3501e-bridge: embedded CC3501E Wi-Fi/BLE firmware (v0.1 bring-up) + selectable SPI/SDIO transport
 
 The TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on the E1M-AEN family now has
