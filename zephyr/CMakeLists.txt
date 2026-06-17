@@ -191,6 +191,56 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_DAC_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dac/dac_alif.c)
 
+# Alif Ensemble LPPDM / PDM mic-capture class driver (compatible "alif,alif-pdm"),
+# vendored VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/audio/alif_pdm.c).
+# Upstream Zephyr v4.4 + hal_alif ship no Alif PDM driver.  Pure CMSIS + Zephyr
+# clock_control/pinctrl (no hal_alif library, like flash_mram_alif); implements the
+# Zephyr DMIC API.  Binding zephyr/dts/bindings/audio/alif,alif-pdm.yaml + the
+# private header zephyr/include/zephyr/drivers/pdm/pdm_alif.h; node in the E8 SoC
+# overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_ALIF_PDM
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/audio/alif_pdm.c)
+if(CONFIG_ALIF_PDM)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+endif()
+
+# Alif Ensemble DesignWare I2S controller (compatible "snps,designware-i2s"),
+# vendored VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/i2s/i2s_dw.c)
+# + its private header i2s_dw.h.  Upstream Zephyr v4.4 + hal_alif ship no
+# DesignWare I2S driver.  Implements the standard Zephyr I2S API; FIFO/interrupt
+# driven (no DMA subsystem dependency -- see CONFIG_I2S_DW).  Binding
+# zephyr/dts/bindings/i2s/snps,designware-i2s.yaml; node in the app overlay.
+# ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_I2S_DW
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2s/i2s_dw.c)
+if(CONFIG_I2S_DW)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2s)
+endif()
+
+# Alif Ensemble UTIMER quadrature decoder (compatible "alif,utimer-qdec"),
+# vendored VERBATIM from the Apache-2.0 zephyr_alif fork
+# (drivers/sensor/qdec_alif/qdec_alif_utimer.c).  Upstream Zephyr v4.4 + hal_alif
+# ship no Alif QDEC driver.  Sensor-class (SENSOR_CHAN_ROTATION), built on the
+# hal_alif utimer helpers (USE_ALIF_HAL_UTIMER); binds the "alif,utimer-qdec"
+# child + reaches the "alif,utimer" parent via DT_INST_PARENT.  Binding
+# zephyr/dts/bindings/sensor/alif,utimer-qdec.yaml.  ADR 0017 Tier-2 (INTERIM).
+zephyr_library_sources_ifdef(CONFIG_QDEC_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c)
+
+# Alif Ensemble DesignWare SD Host Controller (compatible "snps,dwc-sdhc"),
+# vendored VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/sdhc/sdhc_dwc.c
+# + its private header sdhc_dwc.h).  Upstream Zephyr v4.4 + hal_alif ship no
+# DesignWare SDHC driver.  Standard Zephyr SDHC API; the card's internal
+# ADMA2/SDMA engine moves data (no Alif system-DMA dependency).  The optional
+# soc_memory_map.h include is gated behind CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE
+# (off), so identity addressing is used and the itcm/dtcm global_base dtsi gap is
+# avoided.  Binding zephyr/dts/bindings/sdhc/snps,dwc-sdhc.yaml.  ADR 0017 Tier-2.
+zephyr_library_sources_ifdef(CONFIG_SDHC_DWC
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/sdhc/sdhc_dwc.c)
+if(CONFIG_SDHC_DWC)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/sdhc)
+endif()
+
 # Alif Ensemble CAMERA CAPTURE path -- CPI controller (compatible "alif,cam"),
 # DesignWare MIPI CSI-2 bridge (compatible "snps,designware-csi"), DesignWare
 # MIPI D-PHY (compatible "snps,designware-dphy") + ON Semi ARX3A0 sensor

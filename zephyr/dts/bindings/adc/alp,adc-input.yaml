@@ -1,0 +1,20 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  alp-sdk analog-input consumer.  Carries a single `io-channels` phandle that the
+  portable ADC backend resolves via ADC_DT_SPEC_GET(DT_ALIAS(alp_adcN)) -- the
+  alias points at a node of this binding, whose io-channels selects the ADC
+  controller + input and whose channel@N config (gain/reference/vref-mv/...) the
+  Zephyr ADC API reads.  This is the alp-sdk convention for binding an
+  ALP_E1M_ADCn / EVK_ADC_* portable id to a concrete SoC ADC channel.
+
+compatible: "alp,adc-input"
+
+include: [base.yaml]
+
+properties:
+  io-channels:
+    type: phandle-array
+    required: true
+    description: ADC controller + input cell for this analog input.

@@ -332,6 +332,80 @@ config COUNTER_ALIF_UTIMER
 	  alp_counter surface via the alp-counter0 alias.  Not silicon-validated.
 	  Driver: zephyr/drivers/counter/counter_alif_utimer.c.
 
+config QDEC_ALIF
+	bool "Alif Ensemble UTIMER quadrature decoder (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on SENSOR
+	depends on DT_HAS_ALIF_UTIMER_QDEC_ENABLED
+	select PINCTRL
+	select USE_ALIF_HAL_UTIMER
+	help
+	  Zephyr sensor-class quadrature decoder for the Alif Ensemble UTIMER,
+	  vendored VERBATIM from the Apache-2.0 zephyr_alif fork
+	  (drivers/sensor/qdec_alif/qdec_alif_utimer.c) -- upstream Zephyr v4.4 +
+	  hal_alif ship no Alif QDEC driver.  Built on the hal_alif utimer helpers
+	  (USE_ALIF_HAL_UTIMER); binds the "alif,utimer-qdec" child node and reaches
+	  the parent "alif,utimer" (reg / timer-id / clocks) via DT_INST_PARENT,
+	  mirroring the sibling counter/PWM drivers.  Exposes SENSOR_CHAN_ROTATION,
+	  backing the portable alp_qenc surface via the alp-qenc0 alias.  Not
+	  silicon-validated.  ADR 0017 Tier-2 (INTERIM, task #21).
+	  Driver: zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c.
+
+config SDHC_DWC
+	bool "Alif Ensemble DesignWare SD Host Controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on SDHC
+	depends on DT_HAS_SNPS_DWC_SDHC_ENABLED
+	select SDHC_SUPPORTS_NATIVE_MODE
+	select EVENTS
+	help
+	  Synopsys DesignWare Core SD Host Controller driver (compatible
+	  "snps,dwc-sdhc"), vendored VERBATIM from the Apache-2.0 zephyr_alif fork
+	  (drivers/sdhc/sdhc_dwc.c + sdhc_dwc.h) -- upstream Zephyr v4.4 + hal_alif
+	  ship no DesignWare SDHC driver.  Implements the Zephyr SDHC API; the card's
+	  internal ADMA2/SDMA engine handles data transfers (no Alif system-DMA
+	  dependency).  Binding zephyr/dts/bindings/sdhc/snps,dwc-sdhc.yaml.
+
+	  The CPU<->bus DMA address translation (which would pull in the hal_alif
+	  soc_memory_map.h / itcm,dtcm `global_base` props -- the same dtsi gap the
+	  NPU work hit) is left OFF (CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE=n), so the
+	  driver uses identity addressing.  Enable + add the global_base props once a
+	  card is actually reachable and DMA transfers are validated.
+
+	  ADR 0017 Tier-2 (INTERIM, task #21).  Driver: zephyr/drivers/sdhc/sdhc_dwc.c.
+
+if SDHC_DWC
+
+config SDHC_BUFFER_ALIGNMENT
+	int "SDHC buffer alignment"
+	default 512
+
+config SDHC_DESCRIPTOR_SECTION
+	string "Linker section for SDHC DMA descriptors"
+	default ""
+
+config SDHC_DWC_SDMA
+	bool "Use SDMA mode"
+
+config SDHC_DWC_ADMA
+	bool "Use ADMA2 mode"
+	default y
+	depends on !SDHC_DWC_SDMA
+
+config SDHC_DWC_ADMA_MAX_DESC
+	int "SDHC DWC ADMA Maximum Descriptor count"
+	depends on SDHC_DWC_ADMA
+	default 32
+
+config SDHC_DWC_DMA_ADDR_TRANSLATE
+	bool "Enable CPU-to-bus DMA address translation"
+	help
+	  Pulls in the hal_alif soc_memory_map.h (needs itcm/dtcm `global_base`
+	  props absent from the alp-sdk E8 dtsi).  Leave disabled until a card is
+	  reachable and DMA is validated.
+
+endif # SDHC_DWC
+
 # hal_alif (drivers/CMakeLists.txt) gates its analog VREF library
 # (drivers/analog -> analog_ctrl.c) on CONFIG_USE_ALIF_HAL_ANALOG via
 # add_subdirectory_ifdef, but -- exactly like USE_ALIF_HAL_UTIMER above --
@@ -388,6 +462,61 @@ config DAC_ALIF
 	  driver): INTERIM.  Retires onto the opt-in sdk-alif fork once the dac nodes
 	  are repointed to the fork compatible AND bench-verified.  Task #21.
 	  Driver: zephyr/drivers/dac/dac_alif.c.
+
+config ALIF_PDM
+	bool "Alif Ensemble LPPDM PDM mic capture (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
+	default y
+	depends on AUDIO_DMIC
+	depends on DT_HAS_ALIF_ALIF_PDM_ENABLED
+	select PINCTRL
+	help
+	  Alif Ensemble LPPDM PDM-microphone class driver, vendored VERBATIM from the
+	  Apache-2.0 zephyr_alif fork (drivers/audio/alif_pdm.c).  Implements the Zephyr
+	  DMIC API over the alif,alif-pdm IP; pure CMSIS + Zephyr clock_control/pinctrl
+	  (no hal_alif library, like flash_mram_alif).  Binds the fork-native compatible
+	  "alif,alif-pdm" (no upstream Zephyr Alif PDM exists, so no collision).  The
+	  76.8 MHz block clock is gated via ALIF_LPPDM_76M8_CLK.  Not silicon-validated.
+
+	  ADR 0017 Tier-2 (a genuine fork-driver copy -- hal_alif ships no PDM class
+	  driver): INTERIM.  Retires onto the opt-in sdk-alif fork once bench-verified.
+	  Task #21.  Driver: zephyr/drivers/audio/alif_pdm.c.
+
+config I2S_DW
+	bool "Alif Ensemble DesignWare I2S (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
+	default y
+	depends on I2S
+	depends on DT_HAS_SNPS_DESIGNWARE_I2S_ENABLED
+	select PINCTRL
+	help
+	  Alif Ensemble DesignWare I2S controller driver (compatible
+	  "snps,designware-i2s"), vendored VERBATIM from the Apache-2.0 zephyr_alif
+	  fork (drivers/i2s/i2s_dw.c) -- upstream Zephyr v4.4 ships no DesignWare I2S
+	  driver and hal_alif ships none either.  Implements the standard Zephyr I2S
+	  API (i2s_configure / i2s_write / i2s_read / i2s_trigger), FIFO/interrupt
+	  driven (the dma_config struct fields are present but no dma_*() is called,
+	  so it runs without the Alif DMA subsystem).  The I2Sx block clock is gated
+	  via ALIF_I2Sx_76M8_CLK.
+
+	  alp-sdk patch vs the fork: i2s_dw.c tolerates -ENOSYS/-ENOTSUP from
+	  clock_control_set_rate() / _configure() (our upstream clockctrl has only
+	  .on/.off/.get_rate).  The bit-clock divider is therefore NOT programmed
+	  from the requested sample rate -- exact SCLK is BENCH-UNVERIFIED until the
+	  clockctrl gains a real .set_rate for the I2Sx_CTRL divider.
+
+	  ADR 0017 Tier-2 (a genuine fork-driver copy): INTERIM.  Retires onto the
+	  opt-in fork once bench-verified.  Task #21.  Driver: zephyr/drivers/i2s/i2s_dw.c.
+
+if I2S_DW
+
+config I2S_DW_RX_BLOCK_COUNT
+	int "I2S DesignWare RX queue length"
+	default 10
+
+config I2S_DW_TX_BLOCK_COUNT
+	int "I2S DesignWare TX queue length"
+	default 10
+
+endif # I2S_DW
 
 # ---------------------------------------------------------------------------
 # Alif Ensemble CAMERA CAPTURE path (CPI controller + DesignWare MIPI CSI-2

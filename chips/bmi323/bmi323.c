@@ -30,6 +30,10 @@
 #define REG_TEMP_DATA  0x09 /* 16-bit signed; LSB first on this reg */
 #define REG_ACC_DATA_X 0x03 /* X, Y, Z = 3 × int16, LSB first */
 #define REG_GYR_DATA_X 0x06
+#define REG_CMD        0x7E /* Command register. */
+
+#define BMI323_CMD_SOFT_RESET 0xDEAFu /* Soft-reset command (BST-BMI323-DS000). */
+#define BMI323_SOFT_RESET_MS  3u      /* >= t_soft_reset (~1.5 ms) before CHIP_ID is valid. */
 
 #define BMI323_DUMMY_BYTES 2 /* Read responses include 2 dummy bytes. */
 
@@ -76,8 +80,16 @@ alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	dev->gyro_fs     = BMI323_GYRO_FS_2000_DPS;
 	dev->initialised = false;
 
-	uint8_t      id = 0;
-	alp_status_t s  = bmi323_read_id(dev, &id);
+	/* Power-up / I2C-interface bring-up.  After POR the BMI323 returns 0x00 for
+	 * CHIP_ID until it is soft-reset (CMD <- 0xDEAF); the reset write is also the
+	 * first I2C transaction, which selects the I2C interface (the part auto-detects
+	 * SPI vs I2C from the first access).  Wait t_soft_reset before reading the ID. */
+	alp_status_t s = reg_write(dev, REG_CMD, BMI323_CMD_SOFT_RESET);
+	if (s != ALP_OK) return s;
+	alp_delay_ms(BMI323_SOFT_RESET_MS);
+
+	uint8_t id = 0;
+	s          = bmi323_read_id(dev, &id);
 	if (s != ALP_OK) return s;
 	if (id != BMI323_CHIP_ID) return ALP_ERR_IO;
 

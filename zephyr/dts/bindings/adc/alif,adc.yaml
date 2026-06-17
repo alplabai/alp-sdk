@@ -25,7 +25,19 @@ description: |
 
 compatible: "alif,adc"
 
-include: [base.yaml, pinctrl-device.yaml]
+# adc-controller.yaml (which itself includes base.yaml) adds #io-channel-cells,
+# #address-cells/#size-cells, and the standard `channel` child-binding so this
+# controller can be consumed via io-channels / ADC_DT_SPEC_GET (the portable alp
+# ADC backend path).  Additive: the existing controller props + the raw
+# adc_channel_setup() path used by aen-adc-regcheck are unaffected.
+include: [adc-controller.yaml, pinctrl-device.yaml]
+
+# Name the single io-channels cell so consumers can reference this controller as
+# `io-channels = <&adcN input>` (the node sets #io-channel-cells = <1>).  This is
+# the standard ADC cell layout; adc-controller.yaml supplies the #io-channel-cells
+# property but each controller binding names its own cells.
+io-channel-cells:
+  - input
 
 properties:
 

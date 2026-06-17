@@ -1,0 +1,43 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * CMSDK watchdog overlay for the E1M-AEN801 (E8, M55-HE).
+ *
+ * wdog0@40100000 (compatible arm,cmsdk-watchdog) is transcribed from the
+ * Apache-2.0 zephyr_alif fork (dts/arm/alif/ensemble RTSS-HE) -- the alp-sdk E8
+ * SoC dtsi doesn't carry it, so it is created here.  Driver = UPSTREAM Zephyr
+ * wdt_cmsdk_apb.c (Tier-1, NOT vendored).
+ *
+ * The driver reads its tick rate from the `clocks` phandle's `clock-frequency`
+ * property at build time (DT_INST_PROP_BY_PHANDLE(0, clocks, clock_frequency)),
+ * so we add a fixed-clock `rtss_he_clk` -- the same phandle the fork uses on the
+ * HE core.  Its frequency is a TRM PLACEHOLDER: reload = timeout_ms * freq_khz,
+ * so the API path is exact but the absolute timeout DURATION is unverified until
+ * the real RTSS-HE watchdog clock is confirmed. [[project_pending_hw_configs]]
+ */
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+	};
+	aliases {
+		alp-wdt0 = &wdog0;
+	};
+
+	rtss_he_clk: rtss_he_clk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <100000000>; /* PLACEHOLDER; confirm vs TRM */
+	};
+};
+
+&{/soc} {
+	wdog0: wdog0@40100000 {
+		compatible = "arm,cmsdk-watchdog";
+		reg = <0x40100000 0x1000>;
+		clocks = <&rtss_he_clk>;
+		status = "okay";
+	};
+};

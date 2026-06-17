@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: i2c-device-hub
+  description: |
+    Functional read-out of every populated device on the EVK
+    sensor/power I2C bus, each through its real chip driver
+    (IMU, barometer, 6x INA236 rail monitors, 2x TAS2563 amps,
+    EEPROM).  On native_sim there is no real bus, so every device
+    is reported absent and the run still completes cleanly -- this
+    is a silicon example; the value is in the on-bench RESULT line.
+
+tests:
+  alp_sdk.example.i2c_device_hub.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - i2c
+      - aen
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[devhub\\] done"

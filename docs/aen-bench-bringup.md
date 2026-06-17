@@ -25,13 +25,24 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 
 | Flow | Use it for | Touches MRAM? | Tooling |
 |---|---|---|---|
-| **A. Production MRAM flash** | shipping image, QA, re-keying | **Yes** | SETOOLS over the SE-UART (`west flash` = `alif_flash` runner) |
+| **A. Production MRAM flash (SETOOLS/ISP)** | shipping image, QA, re-keying | **Yes** | SETOOLS over the SE-UART (`west flash` = `alif_flash` runner) |
 | **B. Console observation** | watching app output during bring-up | No | RAM console over SWD, or SEGGER RTT |
 | **C. J-Link RAM-run** | dev/debug iteration without burning MRAM | No | J-Link `loadbin` to ITCM + `go` |
+| **D. J-Link MRAM flash** | fast MRAM burn from the SWD probe (no SE-UART) | **Yes** | J-Link + the **Alif J-Link device support pack** (see below) |
 
-A decides *what runs*; B decides *how you watch it*; C is the fast inner loop.
+A decides *what runs*; B decides *how you watch it*; C is the fast inner loop;
+D is the faster A (burns MRAM straight from the SWD probe).
 On this bench the only USB serial is the FT232R **SE-UART** (flow A), so the app
 console is not on USB — which is why flow B exists.
+
+> **Flows A and D both burn MRAM** — A drives the burn through the SE over the
+> SE-UART (ISP), D drives it through the SWD probe. The earlier blanket claim
+> "J-Link does not write MRAM on this part" was bench-specific, not a hardware
+> limit: J-Link *can* burn Alif MRAM with the part-number device profile (the MRAM
+> loader is built into J-Link V9.46+; no separate pack). **Both flow A and flow D
+> are now working on this bench** (flow D enabled 2026-06-17 after a probe swap —
+> see § Flow D). Flow D is the day-to-day default now: a burn is ~0.16 s over SWD
+> with no SE-UART maintenance-window race / power-cycle dance.
 
 ### Flow A — Production MRAM flash (SETOOLS, no strap/jumper)
 
@@ -95,6 +106,100 @@ J-Link> go                                    # core is already at our reset han
 > **Reset caveat:** a J-Link reset asserts **SYSRESETREQ**, which reboots the
 > **SES** (not just the M55). Prefer `loadbin`/`go`; don't `reset` mid-loop.
 
+### Flow D — J-Link MRAM flash (built-in Alif loader, no SE-UART)
+
+Burns MRAM directly from the SWD probe — **no SE-UART round-trip** — using the MRAM
+flash loader that is **built into J-Link V9.46+** itself (no extra pack to install).
+It is the fast equivalent of flow A and writes the **exact same two blobs to the exact
+same addresses** SETOOLS burns, so the SE re-verifies + boots the image identically (no
+re-signing, no keys).
+
+**The one thing that unlocks it: the `AE822FA0E5597LS0_M55_HE` device profile.** The
+loader only activates for the part-number device; with the generic `-device Cortex-M55`
+(what read/RAM-run use) there is no loader and `loadbin` to MRAM does nothing useful.
+That is the whole reason older notes said "J-Link doesn't write MRAM" — true for the
+generic profile, false for the part-number one.
+
+**The two blobs** (read the addresses from `app-write-mram`'s own `Burning:` line — they
+shift per build/config, don't hardcode):
+
+| Blob | Address | What it is |
+|---|---|---|
+| `zephyr_<app>_he.bin` | `0x80010000` | the app, linked at its slot0 `mramAddress` (`CONFIG_FLASH_LOAD_OFFSET=0x10000`) |
+| `AppTocPackage.bin` | e.g. `0x8057f5b0` | the signed ATOC the SE reads at boot (near the top of the partition) |
+
+> **Flow D needs the MRAM-XIP build, not the ITCM (flow C) build.** The app must link at
+> `0x80010000` — sanity-check `xxd -l 8 zephyr.bin`: word 1 (reset vector) must read
+> `…80012xxx`. `…80002xxx` means it linked at `0x80000000` and will fault on boot.
+
+```bash
+# 1. build (MRAM/slot0 link — board default chosen, NOT the flow-C &itcm overlay) + ATOC
+ninja -C <build>                                   # -> zephyr/zephyr.bin
+cp <build>/zephyr/zephyr.bin <setools>/build/images/zephyr_<app>_he.bin
+./app-gen-toc -f build/config/app-zephyr-he.json   # -> build/AppTocPackage.bin
+./app-write-mram -c /dev/ttyUSB0 -p .              # run once, read the "Burning:" addrs, Ctrl-C
+```
+
+```
+# 2. program from the Alif J-Link (JLinkExe on Linux / JLink.exe on Windows; same script)
+si SWD
+speed 4000
+device AE822FA0E5597LS0_M55_HE          # NOT generic Cortex-M55 — this unlocks the loader
+connect
+loadbin <app>.bin   0x80010000
+loadbin <apptoc>.bin 0x8057f5b0         # use the address from the "Burning:" line
+verifybin <app>.bin  0x80010000
+verifybin <apptoc>.bin 0x8057f5b0
+mem32 0x80010000 2                       # reset vector must read 80012xxx
+RSetType 2                               # nRESET PIN — mandatory (see below)
+r
+g
+exit
+```
+Invoke: `JLinkExe -CommanderScript <script>` (Linux) / `JLink.exe -CommandFile <script>`
+(Windows). On success J-Link prints `Program & Verify` + `Verify successful.` for both blobs and
+`mem32 0x80010000 = … 80012…`. The post-`r` "connect under reset / Attach to CPU failed"
+is **normal** — the pin reset re-booted the SE and the app is now running, so J-Link
+can't re-halt the secure core. Read back a witness with a second `mem32` connect (memory
+reads work while the CPU runs; register reads error out harmlessly).
+
+**Why `RSetType 2` (nRESET pin) is mandatory.** It re-runs the **SE boot ROM**
+(full-chip), which is what loads/verifies/boots the app from MRAM. A plain J-Link reset
+(`AIRCR.SYSRESETREQ`) only resets the M55, not the SE, so the new image wouldn't boot.
+The pin reset also re-enumerates the FT232R SE-UART (shared reset domain) — which is why
+you can't hold `app-write-mram` open across a reset, and why flow D sidesteps the SE-UART
+ISP-window race entirely.
+
+**Notes / limits:** J-Link can write **MRAM** but **not peripheral/secure registers**
+(those writes are firewalled). Writing only the app (without the matching ATOC) fails
+secure-boot verification — always write both consistent blobs.
+
+> **Verified state on *this* Linux bench (alplab-gw, 2026-06-17): flow D WORKS.** The
+> original probe (J-Link PLUS S/N 600107451, old firmware) could not connect with
+> `-device AE822FA0E5597LS0_M55_HE` — it only worked with the generic `-device
+> Cortex-M55` (reads/RAM-run). Swapping to a probe on **J-Link V13 firmware (May 2026,
+> matched to DLL V9.50; S/N 603000869)** fixed it: the AE822 profile now connects
+> (`Connecting to J-Link ...O.K.` → `Found Cortex-M55 r1p0`), the built-in MRAM loader
+> programs + verifies the ATOC over SWD (`Verify successful.`, ~0.16 s @ ~200 KB/s), and
+> `RSetType 2` (nRESET pin) re-runs the SE boot ROM so the app boots from MRAM. Bench
+> proof: flashed `aen-ethernet-link` over flow D → `RESULT PASS` + DHCP lease
+> `192.168.10.137` (server-side dnsmasq lease + ARP `REACHABLE` confirm).
+>
+> **Two gotchas that block the probe (both bit us):** (1) a version-mismatched probe
+> triggers a mandatory **J-Link firmware update on first connect**, and that update
+> **times out over a USB hub** (`Communication timed out - Can not execute firmware
+> update`) leaving the probe stuck (`Cannot connect to the probe/programmer`, enumerates
+> but no session) — plug the probe into a **direct root USB port**, not a hub, so the FW
+> update completes. (2) The post-burn `r`/`g` prints "core did not halt / reconnecting" —
+> that is **normal** (the pin reset reboots the SE, the app is running, J-Link can't
+> re-halt the secure core); read a witness back over the generic device.
+>
+> Helper: `bench-builds/flash-jlink.sh <build-dir> [read-bytes]` runs this whole flow
+> (gen-toc → AE822 connect → loadbin/verify the package at its per-build start address
+> from `app-package-map.txt` → `RSetType 2`/`r`/`g` → RAM-console read-back). It writes
+> the **single self-contained `AppTocPackage.bin`** (our ITCM-load-via-ATOC apps), not
+> the slot0-XIP two-blob variant above.
+
 ## 3. Board HW requirements found on the bench
 
 - **I2C2 pads need the right pinctrl config (NOT external pull-ups).** The
@@ -144,10 +249,10 @@ J-Link> go                                    # core is already at our reset han
 |---|---|
 | `app-write-mram`: `Target did not respond` | SE-UART wiring/baud — 1.8 V adapter, crossed TX/RX, common GND, port = the FT232R SE-UART, baud 57600. |
 | Image written but won't boot | ATOC built with the wrong **DEVICE** config — write an **app-only** ATOC keeping the factory DEVICE config. |
-| `west flash` tries to use J-Link | The carrier must use the **`alif_flash`** runner (SETOOLS); J-Link does **not** write MRAM on this part. |
+| `west flash` tries to use J-Link | The carrier defaults to the **`alif_flash`** runner (SETOOLS/ISP). J-Link *can* burn MRAM (flow D) but only with the Alif J-Link device pack installed; without it, use `alif_flash`. |
 | No app output over USB | Expected — only the SE-UART is on USB. Use the RAM console (flow B) or RTT. |
 | RAM console all-zeros | Read the **`ram_console_buf`** symbol (not `ram_console`); re-resolve from `zephyr.map`; ensure `CONFIG_UART_CONSOLE=n`. |
-| J-Link `Could not connect to the target device` | You used the Alif part-number device — switch to the generic `-device Cortex-M55`. |
+| J-Link `Could not connect to the target device` (Alif part device) | For **read/attach/RAM-run** use the generic `-device Cortex-M55` (attaches to the live core). For **MRAM flash** (flow D) the Alif part device is required *and* needs the Alif J-Link device pack installed (§ Flow D) — absent on this bench. |
 | Link error `region FLASH overflowed` on a RAM-run app | The overlay used `zephyr,flash = <&itcm>` — use the path-reference form `&itcm` (else `FLASH_SIZE=0`). |
 | I2C2 probe times out (`-ETIMEDOUT`) | Bus stuck — pads not driving. Add the I2C pinctrl pad config (§3): `input-enable` + `bias-pull-down`; run at 100 kHz. |
 | I2C2 clean NACKs but no device ACKs | The pinctrl is missing **`input-enable`** (REN) so the controller can't sense SDA, or it used `bias-pull-up` (DSC=1) instead of `bias-pull-down` (DSC=2). Match Alif's reference (§3) — then the EEPROM ACKs at 0x50. |

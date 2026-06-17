@@ -172,7 +172,18 @@ z_configure(alp_gpio_backend_state_t *st, alp_gpio_dir_t dir, alp_gpio_pull_t pu
 {
 	alp_z_gpio_side_t *s = (alp_z_gpio_side_t *)st->be_data;
 	if (s == NULL) return ALP_ERR_NOT_READY;
-	return _errno_to_alp(gpio_pin_configure_dt(&s->spec, _to_gpio_flags(dir, pull)));
+
+	int err = gpio_pin_configure_dt(&s->spec, _to_gpio_flags(dir, pull));
+	/* Some GPIO controllers (e.g. the DesignWare gpio_dw used on Alif Ensemble)
+	 * have no internal pull resistors -- the bias is a pad/pinctrl concern, not a
+	 * GPIO-controller feature -- so they reject GPIO_PULL_* with -ENOTSUP. Treat
+	 * the pull as best-effort: retry with the direction alone so the pin is still
+	 * configured + usable; the requested pull must then come from the pad bias
+	 * (pinctrl) or an external resistor, which is how those parts wire it anyway. */
+	if ((err == -ENOTSUP || err == -ENOSYS) && pull != ALP_GPIO_PULL_NONE) {
+		err = gpio_pin_configure_dt(&s->spec, _to_gpio_flags(dir, ALP_GPIO_PULL_NONE));
+	}
+	return _errno_to_alp(err);
 }
 
 static alp_status_t z_write(alp_gpio_backend_state_t *st, bool level)
