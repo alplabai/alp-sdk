@@ -15,6 +15,7 @@ aen-dac-regcheck
 aen-qenc-readout
 aen-sdcard-readout
 aen-camera-regcheck
+aen-isp-regcheck
 aen-npu-ethosu-regcheck
 aen-npu-ethosu55-regcheck
 aen-npu-inference-alif
@@ -22,3 +23,4 @@ aen-pdm-mic-alif
 aen-i2s-amp-alif
 aen-gpu2d-bench
 aen-rtc-regcheck
+aen-power-smoke
