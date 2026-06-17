@@ -29,6 +29,22 @@
 	chosen {
 		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
 		/delete-property/ zephyr,code-partition;
+		/*
+		 * Put SYSTEM RAM in the global on-chip SRAM0 (sram@2000000, 4 MiB,
+		 * @0x02000000 -- declared by the SoC dtsi, the same bank the NPU uses),
+		 * NOT the generated default `zephyr,sram = &dtcm`. The GMAC is a DMA bus
+		 * master: it fetches the descriptor rings and reads/writes the net_buf
+		 * packet pool over its own AXI master. The M55 DTCM (CPU-local alias
+		 * 0x20000000) is tightly-coupled and NOT on the GMAC DMA path, so rings +
+		 * buffers left in DTCM are invisible to the DMA -- no frames move in
+		 * EITHER direction (bench: SOM rx_bytes=0 AND the switch/server NIC RX=0).
+		 * SRAM0 is globally addressed (CPU addr == DMA addr), which is exactly
+		 * what the upstream DWMAC core needs (it hands the raw CPU pointer to the
+		 * DMA -- no local_to_global translation). With CONFIG_DCACHE=n (prj.conf)
+		 * the CPU and the DMA share a coherent view. This is the eth_dwmac glue's
+		 * documented Tier-1.5 placement gap (see eth_dwmac_alif_ensemble.c header).
+		 */
+		zephyr,sram = &sram0;
 	};
 };
 

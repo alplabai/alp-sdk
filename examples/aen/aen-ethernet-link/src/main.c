@@ -16,17 +16,26 @@
  *   2. reads back which ref-clock source the driver's AUTO probe locked.
  *   3. requests a DHCP lease as the definitive end-to-end link test.
  *
- * KEY RESULT (bench-validated): powering the PHY before the probe makes the AUTO
- * probe select the EXTERNAL 50 MHz oscillator (ETH_CTRL bit4: 1->0) -- i.e. the
- * "needs power enable" the bench called out IS this P15_4 enable, and the PHY is
- * now clocked. carrier_ok is fixed-link synthetic (no MDIO) and is NOT a link
- * proof; the DHCP lease is.
+ * RESULT PASS (bench-validated, both sides): the SOM pulls a real DHCP lease off
+ * the bench switch (e.g. 192.168.10.137) and is REACHABLE in the server's ARP
+ * table. Three things had to be right, in order:
+ *   1. PHY power before the probe -> the AUTO probe selects the EXTERNAL 50 MHz
+ *      oscillator (ETH_CTRL bit4: 1->0); the PHY is clocked. The "needs power
+ *      enable" the bench called out IS this P15_4 enable.
+ *   2. PHY RMII clock mode: RCSR bit7 REF_CLK_SEL=1 (50 MHz ref) -> media link up
+ *      (BMSR bit2, 0x786d). bit7=0 keeps it down (0x7849).
+ *   3. THE DECISIVE FIX -- DMA buffers off the DTCM. The board defaults
+ *      `zephyr,sram = &dtcm`, so the GMAC descriptor rings + net_buf pool sat in
+ *      the M55 DTCM, which is NOT on the GMAC DMA's bus -> zero frames moved
+ *      either way (SOM rx_bytes=0 AND server NIC RX=0) even with the link up. The
+ *      overlay moves system RAM to the global SRAM0 (`zephyr,sram = &sram0`,
+ *      @0x02000000, CPU addr == DMA addr) + CONFIG_DCACHE=n. See the overlay and
+ *      the eth_dwmac_alif_ensemble.c header (its documented Tier-1.5 gap).
  *
- * PASS gate: a DHCP lease is acquired (full bidirectional link). External refclk
- * locked but no lease = PARTIAL (the power-enable + clock are proven; a remaining
- * PHY-link detail -- TX path / auto-neg / exact PHY wiring or polarity -- is
- * pending). PHY GPIO polarity is the conventional DP83825I reading (PWRDWN enable
- * HIGH; RST_N active-low); both reset polarities were tried.
+ * PASS gate: a DHCP lease is acquired (full bidirectional link). carrier_ok is
+ * fixed-link synthetic (no managed PHY) and is NOT a link proof; the lease is.
+ * PHY GPIO polarity is the conventional DP83825I reading (PWRDWN enable HIGH;
+ * RST_N active-low).
  */
 
 #include <stdio.h>
@@ -149,11 +158,14 @@ static int phy_find(void)
  * autoneg-done (bit 5). Returns true if the link comes up within ~8 s. */
 static bool phy_wait_link(int phy)
 {
-	/* Put the PHY in 50 MHz-reference RMII mode: RCSR(0x17) bit7 REF_CLK_SEL=1.
-	 * The board feeds an external 50 MHz osc to the PHY's REF_CLK (the MAC uses the
-	 * same osc on P11_0), but the strap left the PHY in 25 MHz-crystal mode
-	 * (REF_CLK_SEL=0) so its data path is starved (ANLPAR=0). Setting bit7 is
-	 * exactly what the upstream phy_ti_dp83825 driver does for DP83825_RMII. */
+	/*
+	 * Put the PHY in 50 MHz-reference RMII mode: RCSR(0x17) bit7 REF_CLK_SEL=1
+	 * (== phy_ti_dp83825's DP83825_RMII). Bench-confirmed: with bit7=1 the PHY
+	 * forms a media link (BMSR bit2 set, 0x786d); with bit7=0 it does not
+	 * (0x7849) -- so this board feeds the PHY's REF_CLK an external 50 MHz, and
+	 * the PHY must be the RMII slave. (The data plane stalling separately turned
+	 * out to be a DMA-buffers-in-DTCM placement bug, not this clock mode.)
+	 */
 	uint16_t rcsr = mdio_read(phy, 0x17);
 	mdio_write(phy, 0x17, rcsr | BIT(7));
 	printf("[eth] RCSR 0x%04x -> 0x%04x (REF_CLK_SEL=50MHz ref)\n", rcsr, mdio_read(phy, 0x17));
@@ -163,11 +175,16 @@ static bool phy_wait_link(int phy)
 		k_msleep(250);
 		uint16_t bmsr = mdio_read(phy, 1);
 		if ((bmsr & BIT(2)) && (bmsr & BIT(5))) {
-			printf("[eth] PHY link UP after %d ms (BMSR=%04x)\n", (i + 1) * 250, bmsr);
+			printf("[eth] PHY link UP after %d ms (BMSR=%04x ANLPAR=%04x)\n",
+			       (i + 1) * 250,
+			       bmsr,
+			       mdio_read(phy, 0x05));
 			return true;
 		}
 	}
-	printf("[eth] PHY link DOWN after 8s (BMSR=%04x)\n", mdio_read(phy, 1));
+	printf("[eth] PHY link DOWN after 8s (BMSR=%04x ANLPAR=%04x)\n",
+	       mdio_read(phy, 1),
+	       mdio_read(phy, 0x05));
 	return false;
 }
 
@@ -219,58 +236,43 @@ int main(void)
 		       mdio_read(phy, 0x10),
 		       mdio_read(phy, 0x17));
 	}
-	/*
-	 * INTERNAL-LOOPBACK isolation (BMCR bit14): the PHY loops its RMII TX back to
-	 * RMII RX *inside the chip*, bypassing the magnetics + RJ45 + cable. We force
-	 * 100M/full (no auto-neg), TX frames (DHCP DISCOVERs), and watch rx_bytes:
-	 *   rx rises  -> the MAC<->PHY RMII data path (TXD/RXD) is 100% good, so the
-	 *               no-link is purely the MEDIA side (magnetics/cable/switch).
-	 *   rx flat   -> the RMII data path itself is broken (or the PHY can't loop).
-	 */
-	bool loop_ok = false;
-	bool tx_seen = false;
-	if (phy >= 0) {
-		mdio_write(phy, 0, BIT(14) | BIT(13) | BIT(8)); /* loopback + 100M + full */
-		k_msleep(100);
-		uint32_t tx0 = iface->stats.bytes.sent;
-		uint32_t rx0 = iface->stats.bytes.received;
-		net_dhcpv4_start(iface); /* generates DISCOVER TX frames that should loop back */
-		for (int i = 0; i < 16 && !loop_ok; i++) {
-			k_msleep(500);
-			loop_ok = iface->stats.bytes.received > rx0;
-		}
-		tx_seen = iface->stats.bytes.sent > tx0;
-		printf("[eth] internal loopback: TX %u->%u (tx_seen=%d) RX %u->%u (looped=%d)\n",
-		       tx0,
-		       iface->stats.bytes.sent,
-		       tx_seen,
-		       rx0,
-		       iface->stats.bytes.received,
-		       loop_ok);
-		net_dhcpv4_stop(iface);
-		mdio_write(phy, 0, BIT(12) | BIT(9)); /* restore auto-neg */
-	}
-
-	/* Re-check the real wire link (auto-neg) after the loopback test. */
+	/* Restart auto-neg and wait for the wire link to come up. */
 	bool link = (phy >= 0) && phy_wait_link(phy);
 
-	printf("[eth] admin_up=%d carrier_ok=%d(fixed-link) loopback_ok=%d wire_link=%d\n",
+	/* End-to-end proof: with the link up, pull a DHCP lease off the bench switch
+	 * (dnsmasq). A lease completes only over a genuinely live bidirectional link. */
+	bool bound = false;
+	if (link) {
+		net_dhcpv4_start(iface);
+		for (int i = 0; i < 30; i++) { /* up to ~15 s for DISCOVER/OFFER/REQUEST/ACK */
+			if (iface->config.dhcpv4.state == NET_DHCPV4_BOUND) {
+				bound = true;
+				break;
+			}
+			k_msleep(500);
+		}
+	}
+
+	printf("[eth] admin_up=%d carrier_ok=%d wire_link=%d rx_bytes=%u dhcp_bound=%d\n",
 	       net_if_is_admin_up(iface),
 	       net_if_is_carrier_ok(iface),
-	       loop_ok,
-	       link);
+	       link,
+	       iface->stats.bytes.received,
+	       bound);
+
+	if (bound) {
+		char                ip[NET_IPV4_ADDR_LEN] = { 0 };
+		struct net_if_addr *ua                    = &iface->config.ip.ipv4->unicast[0].ipv4;
+		net_addr_ntop(AF_INET, &ua->address.in_addr, ip, sizeof(ip));
+		printf("[eth] DHCP lease = %s\n", ip);
+	}
 
 	printf("[eth] RESULT %s: %s\n",
-	       link ? "PASS" : "PARTIAL",
-	       link ? "PHY wire link UP -- full RMII + media path good"
-	       : loop_ok
-	           ? "RMII data path PROVEN good via PHY internal loopback; the wire link is DOWN "
-	             "-> fault is MEDIA-side only (magnetics/cable/switch -- PHY->RJ45 wiring "
-	             "confirmed correct). Check switch port LED + magnetics."
-	       : tx_seen ? "MAC transmitted but the PHY loopback did NOT return frames -- the RMII RX "
-	                   "path (PHY RXD -> MAC) is not delivering (check RXD0/RXD1/CRS_DV pinmux)"
-	                 : "MAC did not transmit any frames (TX path / net-stack) -- loopback "
-	                   "inconclusive on the RX side");
+	       (link && bound) ? "PASS" : "PARTIAL",
+	       (link && bound) ? "wire link UP + DHCP lease acquired = Ethernet fully WORKING"
+	       : link          ? "PHY wire link UP (auto-neg complete) but no DHCP lease -- check the "
+	                         "DHCP server / IP path"
+	                       : "PHY link DOWN -- check cable / switch port / PHY reference clock");
 	printf("[eth] done\n");
 	return 0;
 }

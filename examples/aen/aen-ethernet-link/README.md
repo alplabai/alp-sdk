@@ -32,52 +32,55 @@ creates `gpio11` + `lpgpio` so main() can drive the PHY control pins.
 
 ## Status
 
-**Headline blocker RESOLVED + bench-validated:** the "Ethernet needs a power
-enable" the bench called out **is** the Alif `E_PHY_PWRDWN` = **P15_4** line (an
-**lpgpio** pin — *not* a CC3501E line as first assumed; confirmed against the SoM
-TSV). Driving it **before** the eth driver's RMII ref-clock AUTO probe flips the
-probe result from internal-PLL fallback to the **external 50 MHz oscillator**
-(`ETH_CTRL` bit 4: `1 → 0`, self-reported by the app + SWD-confirmed) — the PHY is
-now clocked and the MAC DMA-reset completes on the external osc.
-
-Also fixed here: the RMII pins were wrong (fork route) → corrected to the SoM TSV
-route; `input-enable` added to the RX input pads (the upstream pad REN bit, via the
-standard property — the fork's `read-enable` does not exist upstream).
-
-The example now reads the PHY over **raw MDIO** (DWMAC `MAC_MDIO` regs) to diagnose
-the link directly. Bench result (cable connected to the switch):
+**RESULT PASS — Ethernet works end-to-end on the E8 (bench-validated, both sides).**
 
 ```
-[eth] MDIO PHY@0 id=2000a140 (DP83825I=2000a140)   <- PHY powered + MDIO alive
-[eth] PHY regs: ANAR=01e1 ANLPAR=0000 PHYSTS=4002 RCSR=0061
-[eth] PHY link DOWN after 8s (BMSR=7849)
+[eth] RMII refclk source = EXTERNAL osc (PHY clocked -- power-enable worked) (ETH_CTRL bit4=0)
+[eth] MDIO PHY@0 id=2000a140 (DP83825I=2000a140)
+[eth] PHY link UP after 1750 ms (BMSR=786d ANLPAR=dde1)
+[eth] admin_up=1 carrier_ok=1 wire_link=1 rx_bytes=1268 dhcp_bound=1
+[eth] DHCP lease = 192.168.10.137
+[eth] RESULT PASS: wire link UP + DHCP lease acquired = Ethernet fully WORKING
 ```
+Confirmed on the **server** too: `dnsmasq` handed `192.168.10.137` to the SOM MAC
+`02:01:56:78:43:21`, the SOM shows `REACHABLE` in the switch-port host's ARP table,
+and the server NIC RX counter moved off 0 — the SOM is discoverable on the wire.
 
-**RESULT PARTIAL — everything on the SoC/PHY side works, but the PHY never forms a
-media-side link.** Verified working: MAC + driver + PHY power (P15_4) + MDIO (PHY ID
-`0x2000a140` @ addr 0) + RMII config + both `RCSR` clock modes + long reset timing.
-The decisive symptom is **`ANLPAR=0x0000`** — the PHY receives **no** auto-negotiation
-from the switch (no link-partner ability), even with the cable connected. Auto-neg
-never completes and the link stays down.
+### Three independent things had to be right
 
-Further isolation (with the cable connected):
-- **PHY→RJ45 wiring CONFIRMED CORRECT** (from the schematics): PHY `TD±`→`ETH0_DA±`
-  →`TRD1±` (transmit pair) and `RD±`→`ETH0_DB±`→`TRD2±` (receive pair), polarity
-  preserved — so it is **not** a wiring swap.
-- **MAC TX works** — internal-loopback run transmitted 291 bytes (`stats.bytes.sent`
-  rose). The MAC→RMII transmit side is good.
-- **RX side is the fault** — both the media RX (`ANLPAR=0`, no auto-neg from the
-  switch) and the PHY internal loopback failed to deliver received frames.
+1. **PHY power + clock — `E_PHY_PWRDWN` = P15_4 (lpgpio), `E_PHY_RESET` = P11_6
+   (gpio11).** These are **Alif** pins (per the SoM TSV), *not* CC3501E lines as the
+   first cut assumed. main() drives P15_4 high (enable) and pulses P11_6 (reset)
+   **early** (SYS_INIT pri 50, before the eth driver's RMII ref-clock AUTO probe).
+   Powering the PHY first makes the external 50 MHz appear, so the probe locks the
+   **external oscillator** (`ETH_CTRL` bit 4: `1 → 0`) instead of the internal-PLL
+   fallback. Self-reported by the app + SWD-confirmed.
+2. **RMII pins + clock mode.** RMII pads = the authoritative SoM TSV route (not the
+   fork reference route the first cut used), `input-enable` on the RX/REFCLK/MDIO
+   pads (the upstream pad REN bit, via the standard property). The PHY's `RCSR`
+   (0x17) bit 7 `REF_CLK_SEL` is set to **1** (50 MHz reference, DP83825 RMII mode):
+   bench-confirmed bit7=1 forms a media link (BMSR bit2, `0x786d`) and bit7=0 does
+   not (`0x7849`) — this board feeds the PHY an external 50 MHz, so the PHY is the
+   RMII slave.
+3. **DMA-buffer placement — the decisive fix.** The generated M55-HE board sets
+   `zephyr,sram = &dtcm`, so the GMAC's descriptor rings *and* the net_buf packet
+   pool landed in the M55 **DTCM** (CPU-local alias `0x20000000`). DTCM is
+   tightly-coupled and **not on the GMAC DMA's AXI path** — so the DMA fetched
+   garbage descriptors and wrote received frames nowhere. The MAC, MDIO, PHY power,
+   clock and even the media link all came up, but **no frame moved in either
+   direction** (`rx_bytes=0` on the SOM *and* `RX=0` on the server NIC). The overlay
+   now sets **`zephyr,sram = &sram0`** (the global on-chip SRAM @ `0x02000000`, the
+   same bank the NPU uses): globally addressed so CPU addr == DMA addr, which is what
+   the upstream DWMAC core needs (it hands the raw CPU pointer to the DMA, no
+   `local_to_global`). With `CONFIG_DCACHE=n` the CPU and DMA share a coherent view.
+   This closes the eth_dwmac glue's documented Tier-1.5 placement gap
+   (`eth_dwmac_alif_ensemble.c` header).
 
-> **Prime suspect: the PHY's RECEIVE data path / 50 MHz reference clock.** MDIO works
-> (it's MDC-clocked, independent), and the MAC transmits — but the PHY's PCS (which
-> needs the reference clock) isn't recovering RX in *either* the media path *or*
-> internal loopback. Scope the **PHY `REF_CLK` pin for a clean 50 MHz** (and the
-> PHY's crystal if it's the RMII master), plus the RX-side RMII pins (`RXD0`=P11_3,
-> `RXD1`=P1_1, `CRS_DV`=P6_7) and the switch port LED. The media wiring + the magnetics
-> RX winding (`TRD2`→RJ45 pins 3/6) are the other things to confirm on the EVK
-> schematic — this analog path is NOT in the alp-sdk metadata (only the SoC↔PHY
-> digital pins are).
+> The earlier PARTIAL write-up blamed the "PHY RX data path / REF_CLK" and the
+> `ANLPAR=0` symptom. That was a red herring caused by (a) a bad cable masking the
+> media link in the first round, and (b) the DTCM placement starving the data plane.
+> Once the buffers moved to SRAM0, `ANLPAR` populated (`0xdde1` = the switch's base
+> page) and DHCP completed on the first try. No scope was needed.
 
 See [[project_pending_hw_configs]]. Run on the bench switch (dnsmasq,
-192.168.10.50–150); a `[eth] DHCP lease = …` line is the full-link PASS.
+192.168.10.50–150); the `[eth] DHCP lease = …` line is the full-link PASS.
