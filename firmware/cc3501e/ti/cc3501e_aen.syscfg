@@ -54,12 +54,25 @@ system.getScript("kernel_config_release.syscfg.js");
 var SPI  = scripting.addModule("/ti/drivers/SPI");
 var spi0 = SPI.addInstance();
 spi0.$name                = "CONFIG_SPI_0";
-spi0.mode                 = "Three Pin";  /* CS-less 3-wire inter-chip link */
+/*
+ * BENCH FIX 2026-06-17: the CC35 SPI *peripheral* needs its CS (ss_in_n)
+ * asserted to shift + drive POCI. In "Three Pin" mode the driver still left a
+ * default CS0 on GPIO26 configured as a floating input -> slave never selected
+ * -> POCI high-Z (scope: flat ~1V), ping_ok=0. GPIO26 is ALSO the SoM's
+ * SDIO_MUX_EN (74LVC157 /E) so it can't be tied. Fix: route the CS to GPIO16,
+ * which the SoM already pulls LOW -> CS permanently asserted -> slave
+ * continuously selected, no extra wire. (CS is never toggled by the Alif host;
+ * the 3-wire deterministic-count framing is unchanged.)
+ */
+spi0.mode                 = "Four Pin CS Active Low";
 spi0.duplex               = "Full";       /* both data lines (RX requests + TX replies) */
-spi0.defaultTxBufferValue = "0xFF";       /* idle MISO pattern (matches the firmware seam) */
+spi0.defaultTxBufferValue = "0x5A";       /* BENCH DIAG 2026-06-17: recognizable idle MISO pattern so the
+                                           * Alif witness (reqhdr_rx) distinguishes "CC35 driving its idle"
+                                           * (0x5A5A5A5A) from "MISO not driven" (0xFFFFFFFF). REVERT to 0xFF. */
 
 /* Silicon-legal pads (see HARDWARE NOTE).  The pin resources live under the
  * instance's `spi` peripheral group; $assign uses the device pad names. */
 spi0.spi.sclkPin.$assign = "GPIO27";  /* <- Alif SCLK/P14_6 (correctly wired) */
 spi0.spi.picoPin.$assign = "GPIO29";  /* peripheral data IN  (needs Alif MOSI here -- HW cross) */
 spi0.spi.pociPin.$assign = "GPIO28";  /* peripheral data OUT (needs Alif MISO here -- HW cross) */
+spi0.spi.csnPin.$assign  = "GPIO16";  /* CS -> GPIO16 (only silicon-legal CS of the W_DISABLE pair; GPIO17 = resource conflict). Must be tied/pulled LOW to assert (see note above). */

@@ -89,6 +89,19 @@ LOG_MODULE_REGISTER(spi_dw_alif);
 #define ALIF_SSI_CTRL_MST_BIT(idx) BIT(idx)
 #define ALIF_SSI_CTRL_SS_VAL_BIT(idx) BIT((idx) + 8U)
 
+/*
+ * CLKCTL_PER_SLV EXPMST0_CTRL (offset 0x0 of the same block, AE822 HWRM
+ * §8.3.5.3.1).  Bit 31 IPCLK_FORCE forces the expansion-master peripheral
+ * FUNCTIONAL clocks on, bypassing clock gating.  The dtsi models ALIF_SPI_CLK
+ * as a frequency-only dummy (no gate reg), so nothing else enables the SSI
+ * functional clock -- on a COLD power-on the SSI clock stays gated off and the
+ * controller generates NO SCLK even though spi_transceive() returns success
+ * (it only appeared to work after a J-Link reset, which left the clock on from
+ * prior state).  Forcing IPCLK on at init makes SCLK generate on a cold boot.
+ */
+#define ALIF_CLKCTRL_PER_SLV_EXPMST0_CTRL 0x4902F000U
+#define ALIF_EXPMST0_IPCLK_FORCE BIT(31)
+
 static inline bool spi_dw_is_slave(struct spi_dw_data *spi)
 {
 	return (IS_ENABLED(CONFIG_SPI_SLAVE) &&
@@ -1052,6 +1065,14 @@ int spi_dw_init(const struct device *dev)
 			     ALIF_SSI_CTRL_MST_BIT(info->spi_idx) |
 			     ALIF_SSI_CTRL_SS_VAL_BIT(info->spi_idx));
 	}
+
+	/*
+	 * Force the expansion-master functional clocks on (bypass gating).  The
+	 * dummy ALIF_SPI_CLK never enables the SSI functional clock, so without
+	 * this the SSI generates no SCLK on a cold power-on (works only after a
+	 * J-Link reset that left the clock on).  Idempotent; affects all SSIs.
+	 */
+	sys_set_bits(ALIF_CLKCTRL_PER_SLV_EXPMST0_CTRL, ALIF_EXPMST0_IPCLK_FORCE);
 
 	info->config_func();
 
