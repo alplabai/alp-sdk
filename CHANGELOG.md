@@ -56,6 +56,51 @@ on real silicon (alplab-gw).
   enable is still poked per-example (a Tier-1.5 clockctrl patch is the clean
   follow-up).
 
+### Added — AEN801 (E8) bench STEP-2: real NPU model from MRAM, ADC/DAC analog, clockctrl Tier-1.5 patch, camera bind
+
+Builds on the bench bring-up above; all merged to `dev` (PRs #173–#181).
+
+- **Real NPU inference from MRAM (RESULT PASS).**  `examples/aen/aen-npu-inference-person-mram`
+  runs the real `person_detect` MobileNet (int8, ~263 KiB Vela'd for `ethos-u85-256`, 100 % NPU,
+  ~7.1 M MACs) on the Ethos-U85 with the model resident in **MRAM slot0** — it overflows the
+  256 KiB ITCM RAM-run, so it links into slot0 and boots via a new **MRAM-XIP two-blob Flow D**
+  helper (`scripts/bench/aen/flash-jlink-mramxip.sh`).  Two facts the bench pinned down:
+  `CONFIG_USE_DT_CODE_PARTITION=y` (slot0 link, reset vector `0x8001xxxx`) and the SETOOLS app
+  entry's `mramAddress` = the **full** address `0x80010000` (the offset gives `Invalid Global
+  Address`).  The matched-runtime fixture example `aen-npu-inference-alif` (the strong in-app
+  `ethosu_address_remap` + `ethosu_config_select` that fixed `ethosu_invoke=1`) landed alongside it.
+- **ADC/DAC analog — corrected VREF, bench-confirmed.**  The DAC `alif,reference-mv` was a *wrong*
+  placeholder (900 mV): the driver fixes the reference to **0.750 V** (`DAC12_VREF_CONT=0x4`) and
+  the ADC to **1.8 V** (`ADC_VREF_CONT=0x10`, RDIV=0), both grounded in hal_alif `analog_ctrl.h`
+  and confirmed on silicon (dac/adc regchecks PASS).  Repaired a latent build break — the four
+  `alif,adc` nodes lacked the `#io-channel-cells` that `adc-controller.yaml` requires, which broke
+  every app instantiating an ADC.  Added a DAC0→ADC loopback example (`aen-analog-validate`).
+- **Clockctrl Tier-1.5 west-patch.**  The per-example CGU-76.8 MHz / EXPMST0 audio-clock pokes are
+  folded into a `west patch` on the upstream `clock_control_alif.c` (`zephyr/patches.yml`), plus an
+  I2S `.set_rate` divider (BENCH-UNVERIFIED — exact field layout needs a scope).  pdm (live audio)
+  and i2s both still PASS on silicon with the example pokes removed.
+- **Camera CPI binds.**  The `cam` (`alif,cam`) node now instantiates + `device_is_ready` on E8: the
+  camera-regcheck overlay supplies the itcm/dtcm `global_base` and the cam↔csi↔arx3a0
+  media-controller endpoint graph.  Live capture stays HW-blocked (no sensor wired).
+- **Bench helpers checked in** at `scripts/bench/aen/` — sanitized build + Flow A/C/D (incl.
+  MRAM-XIP) flash + RAM-console-read helpers, host-specifics resolved via `bench-env.sh`.  SETOOLS
+  stays license-gated (not redistributed).
+
+### Changed — `dev` branch now CI-gated (twister + clang-format)
+
+`dev` now requires the two checks that run on every PR — `twister · native_sim/native/64` and
+`clang-format · diff-only` — matching `main`, now that the team has grown past a single maintainer.
+Gating it immediately surfaced two pre-existing native_sim failures (fixed below).
+
+### Fixed — pre-existing native_sim failures (DAC out-of-range, GPU2D test)
+
+- `alp_dac_open()` now rejects an out-of-range channel up front with `ALP_ERR_INVAL` — a portable
+  capability gate against `ALP_SOC_DAC_COUNT` (mirroring the ADC dispatch; a no-op under
+  `CONFIG_ALP_SOC_NONE`).  The DAC registry migration had dropped the wrapper's channel bound, so an
+  out-of-range channel surfaced `NOT_READY` instead.
+- The GPU2D "no vendor HAL → NOSUPPORT" test was stale since the priority-0 software fallback became
+  the *preferred* gpu2d backend; `alp_gpu2d_open()` now succeeds via the sw fallback (test updated).
+
 ### Changed — eth_dwmac Alif glue promoted INTERIM → BENCH-VERIFIED + build-only regression
 
 - The Tier-1.5 Alif Ensemble GMAC glue (`eth_dwmac_alif_ensemble.c`, the
