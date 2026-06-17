@@ -217,6 +217,16 @@ if(CONFIG_I2S_DW)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2s)
 endif()
 
+# Alif Ensemble UTIMER quadrature decoder (compatible "alif,utimer-qdec"),
+# vendored VERBATIM from the Apache-2.0 zephyr_alif fork
+# (drivers/sensor/qdec_alif/qdec_alif_utimer.c).  Upstream Zephyr v4.4 + hal_alif
+# ship no Alif QDEC driver.  Sensor-class (SENSOR_CHAN_ROTATION), built on the
+# hal_alif utimer helpers (USE_ALIF_HAL_UTIMER); binds the "alif,utimer-qdec"
+# child + reaches the "alif,utimer" parent via DT_INST_PARENT.  Binding
+# zephyr/dts/bindings/sensor/alif,utimer-qdec.yaml.  ADR 0017 Tier-2 (INTERIM).
+zephyr_library_sources_ifdef(CONFIG_QDEC_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c)
+
 # Alif Ensemble CAMERA CAPTURE path -- CPI controller (compatible "alif,cam"),
 # DesignWare MIPI CSI-2 bridge (compatible "snps,designware-csi"), DesignWare
 # MIPI D-PHY (compatible "snps,designware-dphy") + ON Semi ARX3A0 sensor

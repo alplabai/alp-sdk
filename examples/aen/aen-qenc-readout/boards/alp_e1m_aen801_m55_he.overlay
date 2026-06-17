@@ -1,0 +1,59 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Quadrature-decoder overlay for the E1M-AEN801 (E8, M55-HE).
+ *
+ * Adds an "alif,utimer-qdec" CHILD to the existing utimer0 parent
+ * (utimer@48001000, timer-id 0) in zephyr/dts/alif/ensemble_e8_peripherals.dtsi,
+ * and gives the parent a `clocks` phandle (the qdec driver reaches clk_dev/clkid
+ * via DT_CLOCKS_CTLR(DT_INST_PARENT) -- the dtsi utimer0 only carries
+ * clock-frequency, used by the counter driver). Driver:
+ * zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c (CONFIG_QDEC_ALIF).
+ *
+ * PADS / TIMER MAPPING -- TBD, see [[project_pending_hw_configs]]: the SoC exposes
+ * four dedicated quadrature blocks QEC0..QEC3 (header ensemble-e4-e6-e8-pinctrl.h):
+ *   QEC0 X=P3_0 (chan A) / Y=P3_1 (chan B) / Z=P3_2 (index)   <- used here
+ *   QEC1 P3_3/P3_4/P3_5 ; QEC2 P3_6/P3_7/P4_0 ; QEC3 P4_1/P4_2/P4_3
+ * This overlay pairs QEC0 with utimer0 (timer-id 0) as a documented default; the
+ * exact QECn->UTIMER-instance routing is a TRM detail and the encoder's wiring to
+ * the QEC0 pads is a schematic detail -- CONFIRM both before trusting the count.
+ * (Inputs also want the pad read-enable, which is not in the upstream
+ * alif,pinctrl binding; without it the count may stay static -> RESULT PARTIAL.)
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+	};
+	aliases {
+		alp-qenc0 = &utimer0_qdec;
+	};
+};
+
+&pinctrl {
+	pinctrl_qec0: pinctrl_qec0 {
+		group0 {
+			pinmux = <PIN_P3_0__QEC0_X_A>, <PIN_P3_1__QEC0_Y_A>;
+		};
+	};
+};
+
+&utimer0 {
+	clocks = <&clockctrl ALIF_UTIMER_CLK>;
+	status = "okay";
+
+	utimer0_qdec: qdec {
+		compatible = "alif,utimer-qdec";
+		counts-per-revolution = <1000>;
+		input-filter-enable;
+		filter-prescaler = <16>;
+		filter-taps = <1>;
+		pinctrl-0 = <&pinctrl_qec0>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
