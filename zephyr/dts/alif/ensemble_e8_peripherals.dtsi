@@ -251,6 +251,43 @@
 	};
 
 	/*
+	 * LPRTC -- the always-on Synopsys DesignWare APB RTC at lprtc@42000000.
+	 * Bound by the alp-sdk Tier-2 driver counter_dw_rtc.c (compatible
+	 * "snps,dw-apb-rtc") as a Zephyr COUNTER device: a free-running 32-bit
+	 * up-counter (CCVR) with ONE compare/alarm channel (CMR), clocked at
+	 * 32768 Hz from the VBAT-domain LF source.  This is NOT a calendar RTC --
+	 * it has no battery-backed date/time registers, so it does NOT satisfy the
+	 * alp_rtc_* calendar surface as-is (the alp on-silicon RTC backend binds
+	 * the Zephyr RTC *class* via the alp-rtc alias, which will not bind a
+	 * counter; a counter->calendar shim backend is still TBD).  Surfaced to
+	 * app code as an alp_counter via the alp-counter alias instead.
+	 *
+	 * reg/IRQ/clock transcribed VERBATIM from the Apache-2.0 zephyr_alif fork
+	 * e1.dtsi (rtc0: lprtc@42000000; reg 0x42000000/0x1000; IRQ 58; 32768 Hz;
+	 * prescaler 0; load-value 0).  The fork's ALIF_DEFAULT_IRQ_PRIORITY is
+	 * rendered here as the repo's literal priority 3 (as the rest of this
+	 * overlay does).
+	 *
+	 * CLOCK-GATE NOTE (BENCH-UNVERIFIED): the fork's SoC layer enables the
+	 * LPRTC clock from VBAT when this node is okay (soc_common.c writes
+	 * VBAT_LPRTC0_CLK_EN, 0x1A609010, iff rtc0 is okay).  alp-sdk builds
+	 * against upstream Zephyr v4.4, whose ensemble soc.c does NOT do this
+	 * write, and the driver does not write VBAT either -- so on this build path
+	 * the gate is enabled by no visible code.  Confirm on the E8 bench whether
+	 * the always-on VBAT domain already has it running (read CCVR; if it never
+	 * advances, the VBAT gate is the cause).  Tier-2, INTERIM, task #21.
+	 */
+	rtc0: lprtc@42000000 {
+		compatible = "snps,dw-apb-rtc";
+		reg = <0x42000000 0x1000>;
+		interrupts = <58 3>;
+		clock-frequency = <32768>;
+		prescaler = <0>;
+		load-value = <0>;
+		status = "disabled";
+	};
+
+	/*
 	 * UTIMER -- Alif Universal Timer.  The parent "alif,utimer" node is an
 	 * unbound container (reg = per-timer block 0x48001000+id*0x1000 + the shared
 	 * global block 0x48000000); a child binds the actual class driver:

@@ -346,6 +346,25 @@ config COUNTER_ALIF_UTIMER
 	  alp_counter surface via the alp-counter0 alias.  Not silicon-validated.
 	  Driver: zephyr/drivers/counter/counter_alif_utimer.c.
 
+config COUNTER_RTC_SNPS_DW
+	bool "Synopsys DesignWare APB RTC counter (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on COUNTER
+	depends on DT_HAS_SNPS_DW_APB_RTC_ENABLED
+	help
+	  Zephyr counter-class driver for the Synopsys DesignWare APB RTC
+	  (compatible "snps,dw-apb-rtc"), the E8 always-on LPRTC at
+	  lprtc@42000000 (IRQ 58, 32768 Hz).  A free-running 32-bit up-counter
+	  (CCVR) with ONE compare/alarm channel (CMR) -- NOT a calendar RTC, so it
+	  does NOT satisfy the alp_rtc_* calendar surface as-is (that needs a
+	  counter->calendar shim, still TBD; see the aen-rtc-regcheck README).
+	  Vendored Tier-2 from the Apache-2.0 zephyr_alif fork
+	  (drivers/counter/counter_dw_rtc.{c,h}); upstream Zephyr v4.4 ships no
+	  snps,dw-apb-rtc driver (counter_dw_timer.c is the DIFFERENT snps,dw-timers
+	  DW APB Timers IP).  Backs the portable alp_counter surface via the
+	  alp-counter alias.  Not silicon-validated.  Driver:
+	  zephyr/drivers/counter/counter_dw_rtc.c.
+
 config QDEC_ALIF
 	bool "Alif Ensemble UTIMER quadrature decoder (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
 	default y

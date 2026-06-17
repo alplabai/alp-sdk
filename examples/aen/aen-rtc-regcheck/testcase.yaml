@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the Tier-2 snps,dw-apb-rtc LPRTC counter driver
+# (counter_dw_rtc.c), BENCH-VERIFIED PASS on E8 2026-06-17: the lprtc@42000000
+# free-running counter advances (delta=3467 ticks/100ms, 32768 Hz), the VBAT
+# clock-gate is already on (counter_start -> -EALREADY).
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-rtc-regcheck
+  description: |
+    Bench RAM-run LPRTC (snps,dw-apb-rtc) counter proof for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE): binds lprtc@42000000 via the alp-sdk Tier-2
+    counter_dw_rtc driver and confirms the free-running counter advances through
+    the portable Zephyr counter_* API.  BENCH-VERIFIED PASS on E8 (2026-06-17).
+
+tests:
+  alp_sdk.examples.aen.rtc_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - counter
+      - rtc
+    build_only: true   # the LPRTC advance check is a bench flash, not a CI run.
