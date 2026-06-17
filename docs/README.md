@@ -50,6 +50,11 @@ into the topic-specific docs.
 ## Per-SoM bring-up
 
 - [bring-up-aen.md](bring-up-aen.md) — Alif Ensemble family.
+- [aen-bench-bringup.md](aen-bench-bringup.md) — E1M-AEN801 (E8)
+  on-silicon bench bring-up: Flow A/C/D flashing, the validated
+  peripheral matrix, and the NPU-from-MRAM path.
+- [aen-provisioning.md](aen-provisioning.md) — provisioning an
+  E1M-AEN SoM (SES → MCUboot → slot0 chain + the SoM-maker policy).
 - [bring-up-v2n.md](bring-up-v2n.md) — Renesas RZ/V2N.
 - [bring-up-v2n-m1.md](bring-up-v2n-m1.md) — V2N + DEEPX.
 - [bring-up-imx93.md](bring-up-imx93.md) — NXP i.MX 93.

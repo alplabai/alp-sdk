@@ -215,6 +215,11 @@ def find_index_gaps(root: pathlib.Path) -> list[str]:
     for md in sorted(docs.glob("*.md")):
         if md.name == "README.md":
             continue
+        # Leading-underscore files are section fragments folded into another
+        # doc (e.g. _aen-runbook-section.md -> bring-up-aen.md), not standalone
+        # index entries.
+        if md.name.startswith("_"):
+            continue
         if md.name not in linked:
             gaps.append(md.name)
     return gaps
