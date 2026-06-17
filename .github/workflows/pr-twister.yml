@@ -12,9 +12,9 @@ name: pr-twister
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 # Cancel in-flight runs on the same branch when a new commit lands.
